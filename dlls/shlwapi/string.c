@@ -445,11 +445,11 @@ int WINAPI StrCmpW(LPCWSTR lpszStr, LPCWSTR lpszComp)
 /*************************************************************************
  * StrCatW	[SHLWAPI.@]
  *
- * Concatanate two strings.
+ * Concatenate two strings.
  *
  * PARAMS
  *  lpszStr [O] Initial string
- *  lpszSrc [I] String to concatanate
+ *  lpszSrc [I] String to concatenate
  *
  * RETURNS
  *  lpszStr.
@@ -511,7 +511,7 @@ LPWSTR WINAPI StrCpyNW(LPWSTR lpszStr, LPCWSTR lpszSrc, int iLen)
  * Internal implementation of StrStrA/StrStrIA
  */
 static LPSTR SHLWAPI_StrStrHelperA(LPCSTR lpszStr, LPCSTR lpszSearch,
-                                   int (*pStrCmpFn)(LPCSTR,LPCSTR,size_t))
+                                   INT (WINAPI *pStrCmpFn)(LPCSTR,LPCSTR,INT))
 {
   size_t iLen;
 
@@ -545,7 +545,7 @@ LPSTR WINAPI StrStrA(LPCSTR lpszStr, LPCSTR lpszSearch)
 {
   TRACE("(%s,%s)\n", debugstr_a(lpszStr), debugstr_a(lpszSearch));
 
-  return SHLWAPI_StrStrHelperA(lpszStr, lpszSearch, strncmp);
+  return SHLWAPI_StrStrHelperA(lpszStr, lpszSearch, StrCmpNA);
 }
 
 /*************************************************************************
@@ -650,7 +650,7 @@ LPSTR WINAPI StrStrIA(LPCSTR lpszStr, LPCSTR lpszSearch)
 {
   TRACE("(%s,%s)\n", debugstr_a(lpszStr), debugstr_a(lpszSearch));
 
-  return SHLWAPI_StrStrHelperA(lpszStr, lpszSearch, strncasecmp);
+  return SHLWAPI_StrStrHelperA(lpszStr, lpszSearch, StrCmpNIA);
 }
 
 /*************************************************************************
@@ -911,7 +911,7 @@ LPSTR WINAPI StrDupA(LPCSTR lpszStr)
   TRACE("(%s)\n",debugstr_a(lpszStr));
 
   iLen = lpszStr ? strlen(lpszStr) + 1 : 1;
-  lpszRet = (LPSTR)LocalAlloc(LMEM_FIXED, iLen);
+  lpszRet = LocalAlloc(LMEM_FIXED, iLen);
 
   if (lpszRet)
   {
@@ -936,7 +936,7 @@ LPWSTR WINAPI StrDupW(LPCWSTR lpszStr)
   TRACE("(%s)\n",debugstr_w(lpszStr));
 
   iLen = (lpszStr ? strlenW(lpszStr) + 1 : 1) * sizeof(WCHAR);
-  lpszRet = (LPWSTR)LocalAlloc(LMEM_FIXED, iLen);
+  lpszRet = LocalAlloc(LMEM_FIXED, iLen);
 
   if (lpszRet)
   {
@@ -1342,7 +1342,7 @@ HRESULT WINAPI StrRetToBufA (LPSTRRET src, const ITEMIDLIST *pidl, LPSTR dest, U
 	    break;
 
 	  case STRRET_CSTR:
-	    lstrcpynA((LPSTR)dest, src->u.cStr, len);
+            lstrcpynA(dest, src->u.cStr, len);
 	    break;
 
 	  case STRRET_OFFSET:
@@ -1381,7 +1381,7 @@ HRESULT WINAPI StrRetToBufW (LPSTRRET src, const ITEMIDLIST *pidl, LPWSTR dest, 
 	switch (src->uType)
 	{
 	  case STRRET_WSTR:
-	    lstrcpynW((LPWSTR)dest, src->u.pOleStr, len);
+            lstrcpynW(dest, src->u.pOleStr, len);
 	    CoTaskMemFree(src->u.pOleStr);
 	    break;
 
@@ -2511,8 +2511,9 @@ INT WINAPI SHUnicodeToAnsiCP(UINT CodePage, LPCWSTR lpSrcStr, LPSTR lpDstStr,
       DWORD dwMode = 0;
       INT nWideCharCount = len - 1;
 
-      if (!ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &nWideCharCount, lpDstStr,
-                                          lpiLen))
+      if (ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr,
+                                        &nWideCharCount, lpDstStr,
+                                        lpiLen) == S_OK)
         return 0;
 
       if (nWideCharCount < len - 1)
@@ -2523,7 +2524,8 @@ INT WINAPI SHUnicodeToAnsiCP(UINT CodePage, LPCWSTR lpSrcStr, LPSTR lpDstStr,
 
         *lpiLen = 0;
 
-        if (ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &len, mem, lpiLen))
+        if (ConvertINetUnicodeToMultiByte(&dwMode, CodePage, lpSrcStr, &len,
+                                          mem, lpiLen) != S_OK)
         {
           SHTruncateString(mem, *lpiLen);
           lstrcpynA(lpDstStr, mem, *lpiLen + 1);

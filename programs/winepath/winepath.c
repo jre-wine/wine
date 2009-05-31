@@ -90,7 +90,7 @@ static int option(int shortopt, const WCHAR *longopt)
 /*
  * Parse command line options
  */
-static int parse_options(const WCHAR *argv[])
+static int parse_options(WCHAR *argv[])
 {
     static const WCHAR longW[] = { 'l','o','n','g',0 };
     static const WCHAR shortW[] = { 's','h','o','r','t',0 };
@@ -140,10 +140,10 @@ static int parse_options(const WCHAR *argv[])
 /*
  * Main function
  */
-int wmain(int argc, const WCHAR *argv[])
+int wmain(int argc, WCHAR *argv[])
 {
-    LPSTR (*wine_get_unix_file_name_ptr)(LPCWSTR) = NULL;
-    LPWSTR (*wine_get_dos_file_name_ptr)(LPCSTR) = NULL;
+    LPSTR (*CDECL wine_get_unix_file_name_ptr)(LPCWSTR) = NULL;
+    LPWSTR (*CDECL wine_get_dos_file_name_ptr)(LPCSTR) = NULL;
     WCHAR dos_pathW[MAX_PATH];
     char path[MAX_PATH];
     int outputformats;
@@ -155,7 +155,7 @@ int wmain(int argc, const WCHAR *argv[])
 
     if (outputformats & UNIXFORMAT) {
         wine_get_unix_file_name_ptr = (void*)
-            GetProcAddress(GetModuleHandle("KERNEL32"),
+            GetProcAddress(GetModuleHandleA("KERNEL32"),
                            "wine_get_unix_file_name");
         if (wine_get_unix_file_name_ptr == NULL) {
             fprintf(stderr, "%s: cannot get the address of "
@@ -166,7 +166,7 @@ int wmain(int argc, const WCHAR *argv[])
 
     if (outputformats & WINDOWSFORMAT) {
         wine_get_dos_file_name_ptr = (void*)
-            GetProcAddress(GetModuleHandle("KERNEL32"),
+            GetProcAddress(GetModuleHandleA("KERNEL32"),
                            "wine_get_dos_file_name");
         if (wine_get_dos_file_name_ptr == NULL) {
             fprintf(stderr, "%s: cannot get the address of "

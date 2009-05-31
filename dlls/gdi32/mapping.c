@@ -27,7 +27,7 @@
 #include "gdi_private.h"
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(gdi);
+WINE_DEFAULT_DEBUG_CHANNEL(dc);
 
 
 /***********************************************************************
@@ -58,25 +58,6 @@ static void MAPPING_FixIsotropic( DC * dc )
 
 
 /***********************************************************************
- *           DPtoLP    (GDI.67)
- */
-BOOL16 WINAPI DPtoLP16( HDC16 hdc, LPPOINT16 points, INT16 count )
-{
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (!dc) return FALSE;
-
-    while (count--)
-    {
-        points->x = MulDiv( points->x - dc->vportOrgX, dc->wndExtX, dc->vportExtX ) + dc->wndOrgX;
-        points->y = MulDiv( points->y - dc->vportOrgY, dc->wndExtY, dc->vportExtY ) + dc->wndOrgY;
-        points++;
-    }
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
  *           DPtoLP    (GDI32.@)
  */
 BOOL WINAPI DPtoLP( HDC hdc, LPPOINT points, INT count )
@@ -88,8 +69,8 @@ BOOL WINAPI DPtoLP( HDC hdc, LPPOINT points, INT count )
     {
         while (count--)
         {
-            FLOAT x = points->x;
-            FLOAT y = points->y;
+            double x = points->x;
+            double y = points->y;
             points->x = floor( x * dc->xformVport2World.eM11 +
                                y * dc->xformVport2World.eM21 +
                                dc->xformVport2World.eDx + 0.5 );
@@ -105,25 +86,6 @@ BOOL WINAPI DPtoLP( HDC hdc, LPPOINT points, INT count )
 
 
 /***********************************************************************
- *           LPtoDP    (GDI.99)
- */
-BOOL16 WINAPI LPtoDP16( HDC16 hdc, LPPOINT16 points, INT16 count )
-{
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (!dc) return FALSE;
-
-    while (count--)
-    {
-        points->x = MulDiv( points->x - dc->wndOrgX, dc->vportExtX, dc->wndExtX ) + dc->vportOrgX;
-        points->y = MulDiv( points->y - dc->wndOrgY, dc->vportExtY, dc->wndExtY ) + dc->vportOrgY;
-        points++;
-    }
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
-
-/***********************************************************************
  *           LPtoDP    (GDI32.@)
  */
 BOOL WINAPI LPtoDP( HDC hdc, LPPOINT points, INT count )
@@ -133,8 +95,8 @@ BOOL WINAPI LPtoDP( HDC hdc, LPPOINT points, INT count )
 
     while (count--)
     {
-        FLOAT x = points->x;
-        FLOAT y = points->y;
+        double x = points->x;
+        double y = points->y;
         points->x = floor( x * dc->xformWorld2Vport.eM11 +
                            y * dc->xformWorld2Vport.eM21 +
                            dc->xformWorld2Vport.eDx + 0.5 );

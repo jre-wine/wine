@@ -211,7 +211,7 @@ static void ODBC_ReplicateODBCInstToRegistry (SQLHENV hEnv)
             {
                 /* FIXME Do some proper handling of the SUCCESS_WITH_INFO */
                 dirn = SQL_FETCH_NEXT;
-                if (sizedesc == strlen(desc))
+                if (sizedesc == lstrlenA(desc))
                 {
                     HKEY hThis;
                     if ((reg_ret = RegQueryValueExA (hDrivers, desc, NULL,
@@ -339,7 +339,7 @@ static void ODBC_ReplicateODBCToRegistry (int is_user, SQLHENV hEnv)
         {
             /* FIXME Do some proper handling of the SUCCESS_WITH_INFO */
             dirn = SQL_FETCH_NEXT;
-            if (sizedsn == strlen(dsn) && sizedesc == strlen(desc))
+            if (sizedsn == lstrlenA(dsn) && sizedesc == lstrlenA(desc))
             {
                 HKEY hDSN;
                 if ((reg_ret = RegCreateKeyExA (hODBC, dsn, 0,
@@ -518,31 +518,23 @@ static BOOL ODBC_LoadDriverManager(void)
    TRACE("\n");
 
    gProxyHandle.bFunctionReady = FALSE;
-   gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
 
-   if (s!= NULL && strlen (s) >= sizeof(gProxyHandle.dmLibName))
-   {
-          ERR("Driver name too long (%s)\n",s);
-          return FALSE;
-   }
-   if (s == NULL || strlen(s) == 0)
-          s = "libodbc.so";
-   strcpy(gProxyHandle.dmLibName, s);
+#ifdef SONAME_LIBODBC
+   if (!s || !s[0]) s = SONAME_LIBODBC;
+#endif
+   if (!s || !s[0]) goto failed;
 
-   gProxyHandle.dmHandle = wine_dlopen(gProxyHandle.dmLibName, RTLD_LAZY | RTLD_GLOBAL, error, sizeof(error));
+   gProxyHandle.dmHandle = wine_dlopen(s, RTLD_LAZY | RTLD_GLOBAL, error, sizeof(error));
 
-   if (gProxyHandle.dmHandle == NULL)           /* fail to load unixODBC driver manager */
-   {
-           WARN("failed to open library %s: %s\n", gProxyHandle.dmLibName, error);
-           gProxyHandle.dmLibName[0] = '\0';
-           gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
-           return FALSE;
-   }
-   else
+   if (gProxyHandle.dmHandle != NULL)
    {
       gProxyHandle.nErrorType = ERROR_FREE;
       return TRUE;
    }
+failed:
+   WARN("failed to open library %s: %s\n", debugstr_a(s), error);
+   gProxyHandle.nErrorType = ERROR_LIBRARY_NOT_FOUND;
+   return FALSE;
 }
 
 
@@ -711,7 +703,7 @@ SQLRETURN WINAPI SQLAllocStmt(SQLHDBC ConnectionHandle, SQLHSTMT *StatementHandl
 SQLRETURN WINAPI SQLAllocHandleStd( SQLSMALLINT HandleType,
                                                          SQLHANDLE InputHandle, SQLHANDLE *OutputHandle)
 {
-        TRACE("ProxyODBC: SQLAllocHandelStd.\n");
+        TRACE("ProxyODBC: SQLAllocHandleStd.\n");
 
         if (!gProxyHandle.bFunctionReady || gProxyHandle.dmHandle == NULL)
         {
@@ -2163,9 +2155,9 @@ SQLRETURN WINAPI SQLColAttributesW(
             TRACE("    Attribute name : %s\n", debugstr_w(rgbDesc));
             TRACE("    Declared length: %d\n", *pcbDesc);
         */
-            if (*pcbDesc != strlenW(rgbDesc) * 2) {
+            if (*pcbDesc != lstrlenW(rgbDesc) * 2) {
                 TRACE("CHEAT: resetting name length for ADO\n");
-                *pcbDesc = strlenW(rgbDesc) * 2;
+                *pcbDesc = lstrlenW(rgbDesc) * 2;
             }
         }
         return iResult;
@@ -2339,9 +2331,9 @@ SQLRETURN WINAPI SQLColAttributeW (SQLHSTMT StatementHandle,
             TRACE("    Attribute name : %s\n", debugstr_w(rgbDesc));
             TRACE("    Declared length: %d\n", *pcbDesc);
         */
-            if (*StringLength != strlenW(CharacterAttribute) * 2) {
+            if (*StringLength != lstrlenW(CharacterAttribute) * 2) {
                 TRACE("CHEAT: resetting name length for ADO\n");
-                *StringLength = strlenW(CharacterAttribute) * 2;
+                *StringLength = lstrlenW(CharacterAttribute) * 2;
             }
         }
         return iResult;

@@ -39,6 +39,8 @@
 
 #include "config.h"
 #include "wine/port.h"
+#include "wine/debug.h"
+#include "wine/unicode.h"
 
 #include <windows.h>
 #include <shlwapi.h>
@@ -46,77 +48,118 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
-#include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winebrowser);
 
 typedef LPSTR (*wine_get_unix_file_name_t)(LPCWSTR unixname);
 
-/* try to launch an app from a comma separated string of app names */
-static int launch_app( char *candidates, const char *argv1 )
+static const WCHAR browser_key[] =
+    {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+     'W','i','n','e','B','r','o','w','s','e','r',0};
+
+static char *strdup_unixcp( const WCHAR *str )
 {
-    char *app;
+    char *ret;
+    int len = WideCharToMultiByte( CP_UNIXCP, 0, str, -1, NULL, 0, NULL, NULL );
+    if ((ret = HeapAlloc( GetProcessHeap(), 0, len )))
+        WideCharToMultiByte( CP_UNIXCP, 0, str, -1, ret, len, NULL, NULL );
+    return ret;
+}
+
+/* try to launch a unix app from a comma separated string of app names */
+static int launch_app( WCHAR *candidates, const WCHAR *argv1 )
+{
+    char *app, *applist, *cmdline;
     const char *argv_new[3];
 
-    app = strtok( candidates, "," );
+    if (!(applist = strdup_unixcp( candidates ))) return 1;
+    if (!(cmdline = strdup_unixcp( argv1 )))
+    {
+        HeapFree( GetProcessHeap(), 0, applist );
+        return 1;
+    }
+    app = strtok( applist, "," );
     while (app)
     {
-        argv_new[0] = app;
-        argv_new[1] = argv1;
-        argv_new[2] = NULL;
+        WINE_TRACE( "Considering: %s\n", wine_dbgstr_a(app) );
+        WINE_TRACE( "argv[1]: %s\n", wine_dbgstr_a(cmdline) );
 
-        WINE_TRACE( "Considering: %s\n", app );
-        WINE_TRACE( "argv[1]: %s\n", argv1 );
+        argv_new[0] = app;
+        argv_new[1] = cmdline;
+        argv_new[2] = NULL;
 
         spawnvp( _P_OVERLAY, app, argv_new );  /* only returns on error */
         app = strtok( NULL, "," );  /* grab the next app */
     }
-    fprintf( stderr, "winebrowser: could not find a suitable app to run\n" );
+    WINE_ERR( "could not find a suitable app to run\n" );
+
+    HeapFree( GetProcessHeap(), 0, applist );
+    HeapFree( GetProcessHeap(), 0, cmdline );
     return 1;
 }
 
-static int open_http_url( const char *url )
+static int open_http_url( const WCHAR *url )
 {
-    static const char *defaultbrowsers =
-        "xdg-open,firefox,konqueror,mozilla,netscape,galeon,opera,dillo";
-    char browsers[256];
+#ifdef __APPLE__
+    static const WCHAR defaultbrowsers[] =
+        { '/', 'u', 's', 'r', '/', 'b', 'i', 'n', '/', 'o', 'p', 'e', 'n', 0 };
+#else
+    static const WCHAR defaultbrowsers[] =
+        {'x','d','g','-','o','p','e','n',',','f','i','r','e','f','o','x',',',
+         'k','o','n','q','u','e','r','o','r',',','m','o','z','i','l','l','a',',',
+         'n','e','t','s','c','a','p','e',',','g','a','l','e','o','n',',',
+         'o','p','e','r','a',',','d','i','l','l','o',0};
+#endif
+    static const WCHAR browsersW[] =
+        {'B','r','o','w','s','e','r','s',0};
 
+    WCHAR browsers[256];
     DWORD length, type;
     HKEY key;
     LONG r;
 
     length = sizeof(browsers);
     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
-    if  (!(r = RegOpenKey( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", &key )))
+    if  (!(r = RegOpenKeyW( HKEY_CURRENT_USER, browser_key, &key )))
     {
-        r = RegQueryValueExA( key, "Browsers", 0, &type, (LPBYTE)browsers, &length );
+        r = RegQueryValueExW( key, browsersW, 0, &type, (LPBYTE)browsers, &length );
         RegCloseKey( key );
     }
     if (r != ERROR_SUCCESS)
-        strcpy( browsers, defaultbrowsers );
+        strcpyW( browsers, defaultbrowsers );
 
     return launch_app( browsers, url );
 }
 
-static int open_mailto_url( const char *url )
+static int open_mailto_url( const WCHAR *url )
 {
-    static const char *defaultmailers =
-        "xdg-email,mozilla-thunderbird,thunderbird,evolution";
-    char mailers[256];
+#ifdef __APPLE__
+    static const WCHAR defaultmailers[] =
+        { '/', 'u', 's', 'r', '/', 'b', 'i', 'n', '/', 'o', 'p', 'e', 'n', 0 };
+#else
+    static const WCHAR defaultmailers[] =
+        {'x','d','g','-','e','m','a','i','l',',',
+         'm','o','z','i','l','l','a','-','t','h','u','n','d','e','r','b','i','r','d',',',
+         't','h','u','n','d','e','r','b','i','r','d',',',
+         'e','v','o','l','u','t','i','o','n',0};
+#endif
+    static const WCHAR mailersW[] =
+        {'M','a','i','l','e','r','s',0};
 
+    WCHAR mailers[256];
     DWORD length, type;
     HKEY key;
     LONG r;
 
     length = sizeof(mailers);
     /* @@ Wine registry key: HKCU\Software\Wine\WineBrowser */
-    if (!(r = RegOpenKey( HKEY_CURRENT_USER, "Software\\Wine\\WineBrowser", &key )))
+    if (!(r = RegOpenKeyW( HKEY_CURRENT_USER, browser_key, &key )))
     {
-        r = RegQueryValueExA( key, "Mailers", 0, &type, (LPBYTE)mailers, &length );
+        r = RegQueryValueExW( key, mailersW, 0, &type, (LPBYTE)mailers, &length );
         RegCloseKey( key );
     }
     if (r != ERROR_SUCCESS)
-        strcpy( mailers, defaultmailers );
+        strcpyW( mailers, defaultmailers );
 
     return launch_app( mailers, url );
 }
@@ -125,7 +168,7 @@ static int open_mailto_url( const char *url )
  * DDE helper functions.
  */
 
-static char *ddeString = NULL;
+static WCHAR *ddeString = NULL;
 static HSZ hszTopic = 0, hszReturn = 0;
 static DWORD ddeInst = 0;
 
@@ -147,23 +190,35 @@ static HDDEDATA CALLBACK ddeCb(UINT uType, UINT uFmt, HCONV hConv,
             return (HDDEDATA)FALSE;
 
         case XTYP_EXECUTE:
+        {
+            char *buffer = NULL;
+
             if (!(size = DdeGetData(hData, NULL, 0, 0)))
                 WINE_ERR("DdeGetData returned zero size of execute string\n");
-            else if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, size)))
+            else if (!(buffer = HeapAlloc(GetProcessHeap(), 0, size)))
                 WINE_ERR("Out of memory\n");
-            else if (DdeGetData(hData, (LPBYTE)ddeString, size, 0) != size)
+            else if (DdeGetData(hData, (LPBYTE)buffer, size, 0) != size)
                 WINE_WARN("DdeGetData did not return %d bytes\n", size);
+            else
+            {
+                int len = MultiByteToWideChar(CP_ACP, 0, buffer, -1, NULL, 0);
+                if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+                    WINE_ERR("Out of memory\n");
+                else
+                    MultiByteToWideChar(CP_ACP, 0, buffer, -1, ddeString, len);
+            }
+            HeapFree(GetProcessHeap(), 0, buffer);
             DdeFreeDataHandle(hData);
             return (HDDEDATA)DDE_FACK;
-
+        }
         case XTYP_REQUEST:
             ret = -3; /* error */
-            if (!(size = DdeQueryString(ddeInst, hsz2, NULL, 0, CP_WINANSI)))
+            if (!(size = DdeQueryStringW(ddeInst, hsz2, NULL, 0, CP_WINUNICODE)))
                 WINE_ERR("DdeQueryString returned zero size of request string\n");
-            else if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, size+1)))
+            else if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, (size + 1) * sizeof(WCHAR))))
                 WINE_ERR("Out of memory\n");
-            else if (DdeQueryString(ddeInst, hsz2, ddeString, size+1, CP_WINANSI) != size)
-                WINE_WARN("DdeQueryString did not return %d bytes\n", size);
+            else if (DdeQueryStringW(ddeInst, hsz2, ddeString, size + 1, CP_WINUNICODE) != size)
+                WINE_WARN("DdeQueryString did not return %d characters\n", size);
             else
                 ret = -2; /* acknowledgment */
             return DdeCreateDataHandle(ddeInst, (LPBYTE)&ret, sizeof(ret), 0,
@@ -174,40 +229,39 @@ static HDDEDATA CALLBACK ddeCb(UINT uType, UINT uFmt, HCONV hConv,
     }
 }
 
-static char *get_url_from_dde(void)
+static WCHAR *get_url_from_dde(void)
 {
-    static const char szApplication[] = "IExplore";
-    static const char szTopic[] = "WWW_OpenURL";
-    static const char szReturn[] = "Return";
+    static const WCHAR szApplication[] = {'I','E','x','p','l','o','r','e',0};
+    static const WCHAR szTopic[] = {'W','W','W','_','O','p','e','n','U','R','L',0};
+    static const WCHAR szReturn[] = {'R','e','t','u','r','n',0};
 
     HSZ hszApplication = 0;
     UINT_PTR timer = 0;
     int rc;
-    char *ret = NULL;
+    WCHAR *ret = NULL;
 
-    rc = DdeInitializeA(&ddeInst, ddeCb, CBF_SKIP_ALLNOTIFICATIONS | CBF_FAIL_ADVISES |
-                        CBF_FAIL_POKES, 0);
+    rc = DdeInitializeW(&ddeInst, ddeCb, CBF_SKIP_ALLNOTIFICATIONS | CBF_FAIL_ADVISES | CBF_FAIL_POKES, 0);
     if (rc != DMLERR_NO_ERROR)
     {
         WINE_ERR("Unable to initialize DDE, DdeInitialize returned %d\n", rc);
         goto done;
     }
 
-    hszApplication = DdeCreateStringHandleA(ddeInst, szApplication, CP_WINANSI);
+    hszApplication = DdeCreateStringHandleW(ddeInst, szApplication, CP_WINUNICODE);
     if (!hszApplication)
     {
         WINE_ERR("Unable to initialize DDE, DdeCreateStringHandle failed\n");
         goto done;
     }
 
-    hszTopic = DdeCreateStringHandleA(ddeInst, szTopic, CP_WINANSI);
+    hszTopic = DdeCreateStringHandleW(ddeInst, szTopic, CP_WINUNICODE);
     if (!hszTopic)
     {
         WINE_ERR("Unable to initialize DDE, DdeCreateStringHandle failed\n");
         goto done;
     }
 
-    hszReturn = DdeCreateStringHandleA(ddeInst, szReturn, CP_WINANSI);
+    hszReturn = DdeCreateStringHandleW(ddeInst, szReturn, CP_WINUNICODE);
     if (!hszReturn)
     {
         WINE_ERR("Unable to initialize DDE, DdeCreateStringHandle failed\n");
@@ -230,19 +284,19 @@ static char *get_url_from_dde(void)
     while (!ddeString)
     {
         MSG msg;
-        if (!GetMessage(&msg, NULL, 0, 0)) break;
+        if (!GetMessageW(&msg, NULL, 0, 0)) break;
         if (msg.message == WM_TIMER) break;
-        DispatchMessage(&msg);
+        DispatchMessageW(&msg);
     }
 
     if (ddeString)
     {
         if (*ddeString == '"')
         {
-            char *endquote = strchr(ddeString+1, '"');
+            WCHAR *endquote = strchrW(ddeString + 1, '"');
             if (!endquote)
             {
-                WINE_ERR("Unabled to retrieve URL from string '%s'\n", ddeString);
+                WINE_ERR("Unable to retrieve URL from string %s\n", wine_dbgstr_w(ddeString));
                 goto done;
             }
             *endquote = 0;
@@ -266,35 +320,39 @@ done:
 }
 
 /*****************************************************************************
- * Main entry point. This is a console application so we have a main() not a
+ * Main entry point. This is a console application so we have a wmain() not a
  * winmain().
  */
-int main(int argc, char *argv[])
+int wmain(int argc, WCHAR *argv[])
 {
-    char *url = argv[1];
+    static const WCHAR nohomeW[] = {'-','n','o','h','o','m','e',0};
+    static const WCHAR mailtoW[] = {'m','a','i','l','t','o',':',0};
+    static const WCHAR fileW[] = {'f','i','l','e',':',0};
+
+    WCHAR *url = argv[1];
     wine_get_unix_file_name_t wine_get_unix_file_name_ptr;
     int ret = 1;
 
     /* DDE used only if -nohome is specified; avoids delay in printing usage info
      * when no parameters are passed */
-    if (url && !strcasecmp( url, "-nohome" ))
+    if (url && !strcmpiW( url, nohomeW ))
         url = argc > 2 ? argv[2] : get_url_from_dde();
 
     if (!url)
     {
-        fprintf( stderr, "Usage: winebrowser URL\n" );
+        WINE_ERR( "Usage: winebrowser URL\n" );
         goto done;
     }
 
     /* handle an RFC1738 file URL */
-    if (!strncasecmp( url, "file:", 5 ))
+    if (!strncmpiW( url, fileW, 5 ))
     {
-        char *p;
-        DWORD len = lstrlenA( url ) + 1;
+        WCHAR *p;
+        DWORD len = strlenW( url ) + 1;
 
-        if (UrlUnescapeA( url, NULL, &len, URL_UNESCAPE_INPLACE ) != S_OK)
+        if (UrlUnescapeW( url, NULL, &len, URL_UNESCAPE_INPLACE ) != S_OK)
         {
-            fprintf( stderr, "winebrowser: unescaping URL failed: %s\n", url );
+            WINE_ERR( "unescaping URL failed: %s\n", wine_dbgstr_w(url) );
             goto done;
         }
 
@@ -302,12 +360,12 @@ int main(int argc, char *argv[])
         p = url + 5;
         while (*p)
         {
-            if (isalpha( p[0] ) && (p[1] == ':' || p[1] == '|')) break;
+            if (isalphaW( p[0] ) && (p[1] == ':' || p[1] == '|')) break;
             p++;
         }
         if (!*p)
         {
-            fprintf( stderr, "winebrowser: no valid Windows path in: %s\n", url );
+            WINE_ERR( "no valid Windows path in: %s\n", wine_dbgstr_w(url) );
             goto done;
         }
 
@@ -323,7 +381,7 @@ int main(int argc, char *argv[])
 
     /* check if the argument is a local file */
     wine_get_unix_file_name_ptr = (wine_get_unix_file_name_t)
-        GetProcAddress( GetModuleHandle( "KERNEL32" ), "wine_get_unix_file_name" );
+        GetProcAddress( GetModuleHandleA( "KERNEL32" ), "wine_get_unix_file_name" );
 
     if (wine_get_unix_file_name_ptr == NULL)
     {
@@ -332,22 +390,26 @@ int main(int argc, char *argv[])
     else
     {
         char *unixpath;
-        WCHAR unixpathW[MAX_PATH];
-
-        MultiByteToWideChar( CP_UNIXCP, 0, url, -1, unixpathW, MAX_PATH );
-        if ((unixpath = wine_get_unix_file_name_ptr( unixpathW )))
+        if ((unixpath = wine_get_unix_file_name_ptr( url )))
         {
             struct stat dummy;
-
             if (stat( unixpath, &dummy ) >= 0)
             {
-                ret = open_http_url( unixpath );
+                int len;
+                WCHAR *unixpathW;
+
+                len = MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, NULL, 0 );
+                if ((unixpathW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+                    MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, unixpathW, len );
+
+                ret = open_http_url( unixpathW );
+                HeapFree( GetProcessHeap(), 0, unixpathW );
                 goto done;
             }
         }
     }
 
-    if (!strncasecmp( url, "mailto:", 7 ))
+    if (!strncmpiW( url, mailtoW, 7 ))
         ret = open_mailto_url( url );
     else
         /* let the browser decide how to handle the given url */

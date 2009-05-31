@@ -192,13 +192,13 @@ BOOL T1_download_glyph(PSDRV_PDEVICE *physDev, DOWNLOAD *pdl, DWORD index,
     TTPOLYCURVE *ppc;
     LOGFONTW lf;
     RECT rc;
-
-    char glyph_def_begin[] =
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
+    static const char glyph_def_begin[] =
       "/%s findfont dup\n"
       "/Private get begin\n"
       "/CharStrings get begin\n"
       "/%s %d RD\n";
-    char glyph_def_end[] =
+    static const char glyph_def_end[] =
       "ND\n"
       "end end\n";
 
@@ -221,15 +221,16 @@ BOOL T1_download_glyph(PSDRV_PDEVICE *physDev, DOWNLOAD *pdl, DWORD index,
     rc.top = t1->emsize;
     DPtoLP(physDev->hdc, (POINT*)&rc, 2);
     lf.lfHeight = -abs(rc.top - rc.bottom);
+    lf.lfWidth = 0;
     lf.lfOrientation = lf.lfEscapement = 0;
     unscaled_font = CreateFontIndirectW(&lf);
     old_font = SelectObject(physDev->hdc, unscaled_font);
     len = GetGlyphOutlineW(physDev->hdc, index, GGO_GLYPH_INDEX | GGO_BEZIER,
-			   &gm, 0, NULL, NULL);
+			   &gm, 0, NULL, &identity);
     if(len == GDI_ERROR) return FALSE;
     glyph_buf = HeapAlloc(GetProcessHeap(), 0, len);
     GetGlyphOutlineW(physDev->hdc, index, GGO_GLYPH_INDEX | GGO_BEZIER,
-		     &gm, len, glyph_buf, NULL);
+		     &gm, len, glyph_buf, &identity);
 
     SelectObject(physDev->hdc, old_font);
     DeleteObject(unscaled_font);

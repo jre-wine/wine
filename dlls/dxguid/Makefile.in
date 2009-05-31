@@ -2,11 +2,12 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = libdxguid.a
+MODULE    = dxguid
 
 C_SRCS = \
-	dx8guid.c \
-	dx9guid.c \
+	dx8guid.c  \
+	dx9guid.c  \
+	dx10guid.c \
 	dxguid.c
 
 @MAKE_IMPLIB_RULES@

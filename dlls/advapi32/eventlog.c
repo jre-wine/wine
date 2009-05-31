@@ -490,3 +490,26 @@ ULONG WINAPI RegisterTraceGuidsA( WMIDPREQUEST RequestAddress,
           debugstr_a(MofResourceName), RegistrationHandle);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
+
+/******************************************************************************
+ * TraceEvent [ADVAPI32.@]
+ */
+ULONG WINAPI TraceEvent( TRACEHANDLE SessionHandle, PEVENT_TRACE_HEADER EventTrace )
+{
+    FIXME("%s %p\n", wine_dbgstr_longlong(SessionHandle), EventTrace);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * UnregisterTraceGuids [ADVAPI32.@]
+ *
+ * See RegisterTraceGuids
+ *
+ * FIXME
+ *  Stub.
+ */
+ULONG WINAPI UnregisterTraceGuids( TRACEHANDLE RegistrationHandle )
+{
+    FIXME("%s: stub\n", wine_dbgstr_longlong(RegistrationHandle));
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}

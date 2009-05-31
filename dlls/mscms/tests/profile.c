@@ -31,8 +31,11 @@
 #include "wine/test.h"
 
 HMODULE hmscms;
+HMODULE huser32;
 
+static BOOL     (WINAPI *pAssociateColorProfileWithDeviceA)(PCSTR,PCSTR,PCSTR);
 static BOOL     (WINAPI *pCloseColorProfile)(HPROFILE);
+static BOOL     (WINAPI *pDisassociateColorProfileFromDeviceA)(PCSTR,PCSTR,PCSTR);
 static BOOL     (WINAPI *pGetColorDirectoryA)(PCHAR,PCHAR,PDWORD);
 static BOOL     (WINAPI *pGetColorDirectoryW)(PWCHAR,PWCHAR,PDWORD);
 static BOOL     (WINAPI *pGetColorProfileElement)(HPROFILE,TAGTYPE,DWORD,PDWORD,PVOID,PBOOL);
@@ -56,12 +59,16 @@ static BOOL     (WINAPI *pSetStandardColorSpaceProfileW)(PCWSTR,DWORD,PWSTR);
 static BOOL     (WINAPI *pUninstallColorProfileA)(PCSTR,PCSTR,BOOL);
 static BOOL     (WINAPI *pUninstallColorProfileW)(PCWSTR,PCWSTR,BOOL);
 
+static BOOL     (WINAPI *pEnumDisplayDevicesA)(LPCSTR,DWORD,PDISPLAY_DEVICE,DWORD);
+
 #define GETFUNCPTR(func) p##func = (void *)GetProcAddress( hmscms, #func ); \
     if (!p##func) return FALSE;
 
 static BOOL init_function_ptrs( void )
 {
+    GETFUNCPTR( AssociateColorProfileWithDeviceA )
     GETFUNCPTR( CloseColorProfile )
+    GETFUNCPTR( DisassociateColorProfileFromDeviceA )
     GETFUNCPTR( GetColorDirectoryA )
     GETFUNCPTR( GetColorDirectoryW )
     GETFUNCPTR( GetColorProfileElement )
@@ -85,6 +92,8 @@ static BOOL init_function_ptrs( void )
     GETFUNCPTR( UninstallColorProfileA )
     GETFUNCPTR( UninstallColorProfileW )
 
+    pEnumDisplayDevicesA = (void *)GetProcAddress( huser32, "EnumDisplayDevicesA" );
+
     return TRUE;
 }
 
@@ -94,10 +103,7 @@ static const WCHAR machineW[] = { 'd','u','m','m','y',0 };
 /*  To do any real functionality testing with this suite you need a copy of
  *  the freely distributable standard RGB color space profile. It comes
  *  standard with Windows, but on Wine you probably need to install it yourself
- *  in one of the locations mentioned below. Here's a link to the profile in
- *  a self extracting zip file:
- *
- *  http://download.microsoft.com/download/whistler/hwdev1/1.0/wxp/en-us/ColorProfile.exe
+ *  in one of the locations mentioned below.
  */
 
 /* Two common places to find the standard color space profile, relative
@@ -537,7 +543,7 @@ static HKEY reg_open_mscms_key(void)
     return ICM_key;
 }
 
-static void check_registry(void)
+static void check_registry(BOOL *has_space_rgb)
 {
     HKEY hkIcmKey;
     LONG res;
@@ -546,6 +552,7 @@ static void check_registry(void)
     char szData[MAX_PATH+1];
     DWORD dwNameLen, dwDataLen, dwType;
 
+    *has_space_rgb = FALSE;
     hkIcmKey = reg_open_mscms_key();
     if (!hkIcmKey)
     {
@@ -567,20 +574,27 @@ static void check_registry(void)
         dwNameLen = sizeof(szName);
         dwDataLen = sizeof(szData);
         res = RegEnumValueA( hkIcmKey, i, szName, &dwNameLen, NULL, &dwType, (LPBYTE)szData, &dwDataLen );
+        if (!strncmp(szName, "RGB", 3))
+            *has_space_rgb = TRUE;
         if (res != ERROR_SUCCESS) 
         {
             trace("RegEnumValueA() failed (%d), cannot enumerate profiles\n", res);
             break;
         }
-        ok( dwType == REG_SZ, "RegEnumValueA() returned unexpected value type (%d)\n", dwType );
-        if (dwType != REG_SZ) break;
-        trace(" found '%s' value containing '%s' (%d chars)\n", szName, szData, lstrlenA(szData));
+        ok( dwType == REG_SZ || dwType == REG_DWORD, "RegEnumValueA() returned unexpected value type (%d)\n", dwType );
+
+        if (dwType == REG_SZ)
+            trace(" found string value '%s' containing '%s' (%d chars)\n", szName, szData, lstrlenA(szData));
+        else if (dwType == REG_DWORD)
+            trace(" found DWORD value '%s' containing '%x'\n", szName, *(DWORD *)szData);
+        else
+            break;
     } 
 
     RegCloseKey( hkIcmKey );
 }
 
-static void test_GetStandardColorSpaceProfileA(void)
+static void test_GetStandardColorSpaceProfileA(BOOL has_space_rgb)
 {
     BOOL ret;
     DWORD size;
@@ -646,7 +660,7 @@ static void test_GetStandardColorSpaceProfileA(void)
 
     /* Functional checks */
 
-    if (standardprofile)
+    if (has_space_rgb)
     {
         size = sizeof(oldprofile);
 
@@ -674,7 +688,7 @@ static void test_GetStandardColorSpaceProfileA(void)
     }
 }
 
-static void test_GetStandardColorSpaceProfileW(void)
+static void test_GetStandardColorSpaceProfileW(BOOL has_space_rgb)
 {
     BOOL ret;
     DWORD size;
@@ -696,9 +710,12 @@ static void test_GetStandardColorSpaceProfileW(void)
     ret = pGetStandardColorSpaceProfileW(NULL, (DWORD)-1, newprofile, &sizeP);
     ok( !ret && GetLastError() == ERROR_FILE_NOT_FOUND, "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
 
-    SetLastError(0xfaceabee); /* 3th param, */
+    SetLastError(0xfaceabee); /* 3rd param, */
     ret = pGetStandardColorSpaceProfileW(NULL, SPACE_RGB, NULL, &sizeP);
-    ok( !ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
+    if (has_space_rgb)
+        ok( !ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER, "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
+    else
+        todo_wine ok( !ret && GetLastError() == ERROR_FILE_NOT_FOUND, "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
 
     SetLastError(0xfaceabee); /* 4th param, */
     ret = pGetStandardColorSpaceProfileW(NULL, SPACE_RGB, newprofile, NULL);
@@ -706,7 +723,11 @@ static void test_GetStandardColorSpaceProfileW(void)
 
     SetLastError(0xfaceabee); /* dereferenced 4th param. */
     ret = pGetStandardColorSpaceProfileW(NULL, SPACE_RGB, newprofile, &zero);
-    ok( !ret && (GetLastError() == ERROR_MORE_DATA || GetLastError() == ERROR_INSUFFICIENT_BUFFER), "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
+    if (has_space_rgb)
+        ok( !ret && (GetLastError() == ERROR_MORE_DATA || GetLastError() == ERROR_INSUFFICIENT_BUFFER), "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
+    else
+        todo_wine ok( !ret && GetLastError() == ERROR_FILE_NOT_FOUND, "GetStandardColorSpaceProfileW() returns %d (GLE=%d)\n", ret, GetLastError() );
+
 
     /* Several invalid parameter checks: */
 
@@ -729,7 +750,7 @@ static void test_GetStandardColorSpaceProfileW(void)
 
     /* Functional checks */
 
-    if (standardprofileW)
+    if (has_space_rgb)
     {
         size = sizeof(oldprofile);
 
@@ -788,11 +809,11 @@ static void test_EnumColorProfilesA(void)
     ret = pEnumColorProfilesA( NULL, &record, buffer, NULL, &number );
     ok( !ret, "EnumColorProfilesA() succeeded (%d)\n", GetLastError() );
 
+    ret = pEnumColorProfilesA( NULL, &record, buffer, &size, &number );
     if (standardprofile)
-    {
-        ret = pEnumColorProfilesA( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
-    }
+    else
+        todo_wine ok( ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
 
     size = 0;
 
@@ -801,13 +822,13 @@ static void test_EnumColorProfilesA(void)
 
     /* Functional checks */
 
+    size = total;
+    ret = pEnumColorProfilesA( NULL, &record, buffer, &size, &number );
     if (standardprofile)
-    {
-        size = total;
-
-        ret = pEnumColorProfilesA( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
-    }
+    else
+        todo_wine ok( ret, "EnumColorProfilesA() failed (%d)\n", GetLastError() );
+
     HeapFree( GetProcessHeap(), 0, buffer );
 }
 
@@ -842,26 +863,25 @@ static void test_EnumColorProfilesW(void)
     ret = pEnumColorProfilesW( NULL, &record, buffer, NULL, &number );
     ok( !ret, "EnumColorProfilesW() succeeded (%d)\n", GetLastError() );
 
+    ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
     if (standardprofileW)
-    {
-        ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
-    }
+    else
+        todo_wine ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
 
     size = 0;
-
     ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
     ok( !ret, "EnumColorProfilesW() succeeded (%d)\n", GetLastError() );
 
     /* Functional checks */
 
+    size = total;
+    ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
     if (standardprofileW)
-    {
-        size = total;
-
-        ret = pEnumColorProfilesW( NULL, &record, buffer, &size, &number );
         ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
-    }
+    else
+        todo_wine ok( ret, "EnumColorProfilesW() failed (%d)\n", GetLastError() );
+
     HeapFree( GetProcessHeap(), 0, buffer );
 }
 
@@ -1352,6 +1372,85 @@ static void test_UninstallColorProfileW(void)
     }
 }
 
+static void test_AssociateColorProfileWithDeviceA(void)
+{
+    BOOL ret;
+    char profile[MAX_PATH], basename[MAX_PATH];
+    DWORD error, size = sizeof(profile);
+    DISPLAY_DEVICE display;
+    BOOL res;
+    DISPLAY_DEVICE monitor;
+
+    if (testprofile && pEnumDisplayDevicesA)
+    {
+        display.cb = sizeof( DISPLAY_DEVICE );
+        res = pEnumDisplayDevicesA( NULL, 0, &display, 0 );
+        ok( res, "Can't get display info\n" );
+
+        monitor.cb = sizeof( DISPLAY_DEVICE );
+        res = pEnumDisplayDevicesA( display.DeviceName, 0, &monitor, 0 );
+        if (res)
+        {
+            SetLastError(0xdeadbeef);
+            ret = pAssociateColorProfileWithDeviceA( "machine", testprofile, NULL );
+            error = GetLastError();
+            ok( !ret, "AssociateColorProfileWithDevice() succeeded\n" );
+            ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", error );
+
+            SetLastError(0xdeadbeef);
+            ret = pAssociateColorProfileWithDeviceA( "machine", NULL, monitor.DeviceID );
+            error = GetLastError();
+            ok( !ret, "AssociateColorProfileWithDevice() succeeded\n" );
+            ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", error );
+
+            SetLastError(0xdeadbeef);
+            ret = pAssociateColorProfileWithDeviceA( "machine", testprofile, monitor.DeviceID );
+            error = GetLastError();
+            ok( !ret, "AssociateColorProfileWithDevice() succeeded\n" );
+            ok( error == ERROR_NOT_SUPPORTED, "expected ERROR_NOT_SUPPORTED, got %u\n", error );
+
+            ret = pInstallColorProfileA( NULL, testprofile );
+            ok( ret, "InstallColorProfileA() failed (%u)\n", GetLastError() );
+
+            ret = pGetColorDirectoryA( NULL, profile, &size );
+            ok( ret, "GetColorDirectoryA() failed (%d)\n", GetLastError() );
+
+            MSCMS_basenameA( testprofile, basename );
+            lstrcatA( profile, "\\" );
+            lstrcatA( profile, basename );
+
+            ret = pAssociateColorProfileWithDeviceA( NULL, profile, monitor.DeviceID );
+            ok( ret, "AssociateColorProfileWithDevice() failed (%u)\n", GetLastError() );
+
+            SetLastError(0xdeadbeef);
+            ret = pDisassociateColorProfileFromDeviceA( "machine", profile, NULL );
+            error = GetLastError();
+            ok( !ret, "DisassociateColorProfileFromDeviceA() succeeded\n" );
+            ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", error );
+
+            SetLastError(0xdeadbeef);
+            ret = pDisassociateColorProfileFromDeviceA( "machine", NULL, monitor.DeviceID );
+            error = GetLastError();
+            ok( !ret, "DisassociateColorProfileFromDeviceA() succeeded\n" );
+            ok( error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", error );
+
+            SetLastError(0xdeadbeef);
+            ret = pDisassociateColorProfileFromDeviceA( "machine", profile, monitor.DeviceID );
+            error = GetLastError();
+            ok( !ret, "DisassociateColorProfileFromDeviceA() succeeded\n" );
+            ok( error == ERROR_NOT_SUPPORTED, "expected ERROR_NOT_SUPPORTED, got %u\n", error );
+
+            ret = pDisassociateColorProfileFromDeviceA( NULL, profile, monitor.DeviceID );
+            ok( ret, "DisassociateColorProfileFromDeviceA() failed (%u)\n", GetLastError() );
+
+            ret = pUninstallColorProfileA( NULL, profile, TRUE );
+            ok( ret, "UninstallColorProfileA() failed (%d)\n", GetLastError() );
+        }
+        else
+            skip("Unable to obtain monitor name\n");
+    }
+}
+
 START_TEST(profile)
 {
     UINT len;
@@ -1359,14 +1458,23 @@ START_TEST(profile)
     char path[MAX_PATH], file[MAX_PATH];
     char profilefile1[MAX_PATH], profilefile2[MAX_PATH];
     WCHAR profilefile1W[MAX_PATH], profilefile2W[MAX_PATH];
+    BOOL has_space_rgb;
     WCHAR fileW[MAX_PATH];
     UINT ret;
 
     hmscms = LoadLibraryA( "mscms.dll" );
     if (!hmscms) return;
 
+    huser32 = LoadLibraryA( "user32.dll" );
+    if (!huser32)
+    {
+        FreeLibrary( hmscms );
+        return;
+    }
+
     if (!init_function_ptrs())
     {
+        FreeLibrary( huser32 );
         FreeLibrary( hmscms );
         return;
     }
@@ -1433,10 +1541,10 @@ START_TEST(profile)
     test_GetCountColorProfileElements();
 
     enum_registered_color_profiles();
-    check_registry();
+    check_registry(&has_space_rgb);
 
-    test_GetStandardColorSpaceProfileA();
-    test_GetStandardColorSpaceProfileW();
+    test_GetStandardColorSpaceProfileA(has_space_rgb);
+    test_GetStandardColorSpaceProfileW(has_space_rgb);
 
     test_EnumColorProfilesA();
     test_EnumColorProfilesW();
@@ -1455,9 +1563,12 @@ START_TEST(profile)
     test_UninstallColorProfileA();
     test_UninstallColorProfileW();
 
+    test_AssociateColorProfileWithDeviceA();
+
     /* Clean up */
     if (testprofile)
         DeleteFileA( testprofile );
     
+    FreeLibrary( huser32 );
     FreeLibrary( hmscms );
 }

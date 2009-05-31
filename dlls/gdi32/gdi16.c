@@ -119,6 +119,109 @@ static void logfont_16_to_W( const LOGFONT16 *font16, LPLOGFONTW font32 )
     font32->lfFaceName[LF_FACESIZE-1] = 0;
 }
 
+/* convert a LOGFONTW to a LOGFONT16 */
+static void logfont_W_to_16( const LOGFONTW* font32, LPLOGFONT16 font16 )
+{
+    font16->lfHeight = font32->lfHeight;
+    font16->lfWidth = font32->lfWidth;
+    font16->lfEscapement = font32->lfEscapement;
+    font16->lfOrientation = font32->lfOrientation;
+    font16->lfWeight = font32->lfWeight;
+    font16->lfItalic = font32->lfItalic;
+    font16->lfUnderline = font32->lfUnderline;
+    font16->lfStrikeOut = font32->lfStrikeOut;
+    font16->lfCharSet = font32->lfCharSet;
+    font16->lfOutPrecision = font32->lfOutPrecision;
+    font16->lfClipPrecision = font32->lfClipPrecision;
+    font16->lfQuality = font32->lfQuality;
+    font16->lfPitchAndFamily = font32->lfPitchAndFamily;
+    WideCharToMultiByte( CP_ACP, 0, font32->lfFaceName, -1, font16->lfFaceName, LF_FACESIZE, NULL, NULL );
+    font16->lfFaceName[LF_FACESIZE-1] = 0;
+}
+
+/* convert a ENUMLOGFONTEXW to a ENUMLOGFONTEX16 */
+static void enumlogfontex_W_to_16( const ENUMLOGFONTEXW *fontW,
+                                   LPENUMLOGFONTEX16 font16 )
+{
+    logfont_W_to_16( (const LOGFONTW *)fontW, (LPLOGFONT16)font16);
+
+    WideCharToMultiByte( CP_ACP, 0, fontW->elfFullName, -1,
+                         (LPSTR) font16->elfFullName, LF_FULLFACESIZE, NULL, NULL );
+    font16->elfFullName[LF_FULLFACESIZE-1] = '\0';
+    WideCharToMultiByte( CP_ACP, 0, fontW->elfStyle, -1,
+                         (LPSTR) font16->elfStyle, LF_FACESIZE, NULL, NULL );
+    font16->elfStyle[LF_FACESIZE-1] = '\0';
+    WideCharToMultiByte( CP_ACP, 0, fontW->elfScript, -1,
+                         (LPSTR) font16->elfScript, LF_FACESIZE, NULL, NULL );
+    font16->elfScript[LF_FACESIZE-1] = '\0';
+}
+
+/* convert a NEWTEXTMETRICEXW to a NEWTEXTMETRICEX16 */
+static void newtextmetricex_W_to_16( const NEWTEXTMETRICEXW *ptmW,
+                                     LPNEWTEXTMETRICEX16 ptm16 )
+{
+    ptm16->ntmTm.tmHeight = ptmW->ntmTm.tmHeight;
+    ptm16->ntmTm.tmAscent = ptmW->ntmTm.tmAscent;
+    ptm16->ntmTm.tmDescent = ptmW->ntmTm.tmDescent;
+    ptm16->ntmTm.tmInternalLeading = ptmW->ntmTm.tmInternalLeading;
+    ptm16->ntmTm.tmExternalLeading = ptmW->ntmTm.tmExternalLeading;
+    ptm16->ntmTm.tmAveCharWidth = ptmW->ntmTm.tmAveCharWidth;
+    ptm16->ntmTm.tmMaxCharWidth = ptmW->ntmTm.tmMaxCharWidth;
+    ptm16->ntmTm.tmWeight = ptmW->ntmTm.tmWeight;
+    ptm16->ntmTm.tmOverhang = ptmW->ntmTm.tmOverhang;
+    ptm16->ntmTm.tmDigitizedAspectX = ptmW->ntmTm.tmDigitizedAspectX;
+    ptm16->ntmTm.tmDigitizedAspectY = ptmW->ntmTm.tmDigitizedAspectY;
+    ptm16->ntmTm.tmFirstChar = ptmW->ntmTm.tmFirstChar > 255 ? 255 : ptmW->ntmTm.tmFirstChar;
+    ptm16->ntmTm.tmLastChar = ptmW->ntmTm.tmLastChar > 255 ? 255 : ptmW->ntmTm.tmLastChar;
+    ptm16->ntmTm.tmDefaultChar = ptmW->ntmTm.tmDefaultChar > 255 ? 255 : ptmW->ntmTm.tmDefaultChar;
+    ptm16->ntmTm.tmBreakChar = ptmW->ntmTm.tmBreakChar > 255 ? 255 : ptmW->ntmTm.tmBreakChar;
+    ptm16->ntmTm.tmItalic = ptmW->ntmTm.tmItalic;
+    ptm16->ntmTm.tmUnderlined = ptmW->ntmTm.tmUnderlined;
+    ptm16->ntmTm.tmStruckOut = ptmW->ntmTm.tmStruckOut;
+    ptm16->ntmTm.tmPitchAndFamily = ptmW->ntmTm.tmPitchAndFamily;
+    ptm16->ntmTm.tmCharSet = ptmW->ntmTm.tmCharSet;
+    ptm16->ntmTm.ntmFlags = ptmW->ntmTm.ntmFlags;
+    ptm16->ntmTm.ntmSizeEM = ptmW->ntmTm.ntmSizeEM;
+    ptm16->ntmTm.ntmCellHeight = ptmW->ntmTm.ntmCellHeight;
+    ptm16->ntmTm.ntmAvgWidth = ptmW->ntmTm.ntmAvgWidth;
+    ptm16->ntmFontSig = ptmW->ntmFontSig;
+}
+
+/*
+ * callback for EnumFontFamiliesEx16
+ * Note: plf is really an ENUMLOGFONTEXW, and ptm is a NEWTEXTMETRICEXW.
+ *       We have to use other types because of the FONTENUMPROCW definition.
+ */
+static INT CALLBACK enum_font_callback( const LOGFONTW *plf,
+                                        const TEXTMETRICW *ptm, DWORD fType,
+                                        LPARAM param )
+{
+    const struct callback16_info *info = (struct callback16_info *)param;
+    ENUMLOGFONTEX16 elfe16;
+    NEWTEXTMETRICEX16 ntm16;
+    SEGPTR segelfe16;
+    SEGPTR segntm16;
+    WORD args[7];
+    DWORD ret;
+
+    enumlogfontex_W_to_16((const ENUMLOGFONTEXW *)plf, &elfe16);
+    newtextmetricex_W_to_16((const NEWTEXTMETRICEXW *)ptm, &ntm16);
+    segelfe16 = MapLS( &elfe16 );
+    segntm16 = MapLS( &ntm16 );
+    args[6] = SELECTOROF(segelfe16);
+    args[5] = OFFSETOF(segelfe16);
+    args[4] = SELECTOROF(segntm16);
+    args[3] = OFFSETOF(segntm16);
+    args[2] = fType;
+    args[1] = HIWORD(info->param);
+    args[0] = LOWORD(info->param);
+
+    WOWCallback16Ex( (DWORD)info->proc, WCB16_PASCAL, sizeof(args), args, &ret );
+    UnMapLS( segelfe16 );
+    UnMapLS( segntm16 );
+    return LOWORD(ret);
+}
+
 
 /***********************************************************************
  *           SetBkColor    (GDI.1)
@@ -649,7 +752,7 @@ INT16 WINAPI Escape16( HDC16 hdc, INT16 escape, INT16 in_count, SEGPTR in_data, 
     case DRAWPATTERNRECT:
     {
         DRAWPATRECT pr;
-        DRAWPATRECT16 *pr16 = (DRAWPATRECT16*)MapSL(in_data);
+        DRAWPATRECT16 *pr16 = MapSL(in_data);
 
         pr.ptPosition.x = pr16->ptPosition.x;
         pr.ptPosition.y = pr16->ptPosition.y;
@@ -1027,6 +1130,16 @@ BOOL16 WINAPI DeleteObject16( HGDIOBJ16 obj )
 
 
 /***********************************************************************
+ *           EnumFonts      (GDI.70)
+ */
+INT16 WINAPI EnumFonts16( HDC16 hDC, LPCSTR lpName, FONTENUMPROC16 efproc,
+                          LPARAM lpData )
+{
+    return EnumFontFamilies16( hDC, lpName, efproc, lpData );
+}
+
+
+/***********************************************************************
  *           EnumObjects    (GDI.71)
  */
 INT16 WINAPI EnumObjects16( HDC16 hdc, INT16 obj, GOBJENUMPROC16 proc, LPARAM lParam )
@@ -1141,6 +1254,95 @@ INT16 WINAPI GetDeviceCaps16( HDC16 hdc, INT16 cap )
 INT16 WINAPI GetMapMode16( HDC16 hdc )
 {
     return GetMapMode( HDC_32(hdc) );
+}
+
+
+/***********************************************************************
+ *           GetObject    (GDI.82)
+ */
+INT16 WINAPI GetObject16( HGDIOBJ16 handle16, INT16 count, LPVOID buffer )
+{
+    HGDIOBJ handle = HGDIOBJ_32( handle16 );
+    switch( GetObjectType( handle ))
+    {
+    case OBJ_PEN:
+        if (buffer)
+        {
+            LOGPEN16 *pen16 = buffer;
+            LOGPEN pen;
+
+            if (count < sizeof(LOGPEN16)) return 0;
+            if (!GetObjectW( handle, sizeof(pen), &pen )) return 0;
+
+            pen16->lopnStyle   = pen.lopnStyle;
+            pen16->lopnColor   = pen.lopnColor;
+            pen16->lopnWidth.x = pen.lopnWidth.x;
+            pen16->lopnWidth.y = pen.lopnWidth.y;
+        }
+        return sizeof(LOGPEN16);
+
+    case OBJ_BRUSH:
+        if (buffer)
+        {
+            LOGBRUSH brush;
+            LOGBRUSH16 brush16;
+
+            if (!GetObjectW( handle, sizeof(brush), &brush )) return 0;
+            brush16.lbStyle = brush.lbStyle;
+            brush16.lbColor = brush.lbColor;
+            brush16.lbHatch = brush.lbHatch;
+            if (count > sizeof(brush16)) count = sizeof(brush16);
+            memcpy( buffer, &brush16, count );
+            return count;
+        }
+        return sizeof(LOGBRUSH16);
+
+    case OBJ_PAL:
+        return GetObjectW( handle, count, buffer );
+
+    case OBJ_FONT:
+        if (buffer)
+        {
+            LOGFONTW font;
+            LOGFONT16 font16;
+
+            if (!GetObjectW( handle, sizeof(font), &font )) return 0;
+            logfont_W_to_16( &font, &font16 );
+            if (count > sizeof(font16)) count = sizeof(font16);
+            memcpy( buffer, &font16, count );
+            return count;
+        }
+        return sizeof(LOGFONT16);
+
+    case OBJ_BITMAP:
+        {
+            DIBSECTION dib;
+            INT size;
+            BITMAP16 *bmp16 = buffer;
+
+            if (!(size = GetObjectW( handle, sizeof(dib), &dib ))) return 0;
+            if (size == sizeof(DIBSECTION) && count > sizeof(BITMAP16))
+            {
+                FIXME("not implemented for DIBs: count %d\n", count);
+                return 0;
+            }
+            else
+            {
+                if (count < sizeof(BITMAP16)) return 0;
+                bmp16->bmType       = dib.dsBm.bmType;
+                bmp16->bmWidth      = dib.dsBm.bmWidth;
+                bmp16->bmHeight     = dib.dsBm.bmHeight;
+                bmp16->bmWidthBytes = dib.dsBm.bmWidthBytes;
+                bmp16->bmPlanes     = dib.dsBm.bmPlanes;
+                bmp16->bmBitsPixel  = dib.dsBm.bmBitsPixel;
+                bmp16->bmBits       = 0;
+                return sizeof(BITMAP16);
+            }
+        }
+
+    default:
+        return 0;
+    }
 }
 
 
@@ -1343,6 +1545,15 @@ INT16 WINAPI OffsetRgn16( HRGN16 hrgn, INT16 x, INT16 y )
 BOOL16 WINAPI PtVisible16( HDC16 hdc, INT16 x, INT16 y )
 {
     return PtVisible( HDC_32(hdc), x, y );
+}
+
+
+/***********************************************************************
+ *           SelectVisRgn   (GDI.105)
+ */
+INT16 WINAPI SelectVisRgn16( HDC16 hdc, HRGN16 hrgn )
+{
+    return SelectVisRgn( HDC_32(hdc), HRGN_32(hrgn) );
 }
 
 
@@ -1559,10 +1770,19 @@ void WINAPI PlayMetaFileRecord16( HDC16 hdc, HANDLETABLE16 *ht, METARECORD *mr, 
     HANDLETABLE *ht32 = HeapAlloc( GetProcessHeap(), 0, handles * sizeof(*ht32) );
     unsigned int i;
 
-    for (i = 0; i < handles; i++) ht32->objectHandle[i] = (HGDIOBJ)(ULONG_PTR)ht->objectHandle[i];
+    for (i = 0; i < handles; i++) ht32->objectHandle[i] = HGDIOBJ_32(ht->objectHandle[i]);
     PlayMetaFileRecord( HDC_32(hdc), ht32, mr, handles );
-    for (i = 0; i < handles; i++) ht->objectHandle[i] = LOWORD(ht32->objectHandle[i]);
+    for (i = 0; i < handles; i++) ht->objectHandle[i] = HGDIOBJ_16(ht32->objectHandle[i]);
     HeapFree( GetProcessHeap(), 0, ht32 );
+}
+
+
+/***********************************************************************
+ *           SetHookFlags   (GDI.192)
+ */
+WORD WINAPI SetHookFlags16( HDC16 hdc, WORD flags )
+{
+    return SetHookFlags( HDC_32(hdc), flags );
 }
 
 
@@ -1677,7 +1897,7 @@ WORD WINAPI EngineGetCharWidth16(LPFONTINFO16 lpFontInfo, BYTE firstChar, BYTE l
 /***********************************************************************
  *		EngineSetFontContext (GDI.304)
  */
-WORD WINAPI EngineSetFontContext(LPFONTINFO16 lpFontInfo, WORD data)
+WORD WINAPI EngineSetFontContext16(LPFONTINFO16 lpFontInfo, WORD data)
 {
    FIXME("stub?\n");
    return 0;
@@ -1686,7 +1906,7 @@ WORD WINAPI EngineSetFontContext(LPFONTINFO16 lpFontInfo, WORD data)
 /***********************************************************************
  *		EngineGetGlyphBMP (GDI.305)
  */
-WORD WINAPI EngineGetGlyphBMP(WORD word, LPFONTINFO16 lpFontInfo, WORD w1, WORD w2,
+WORD WINAPI EngineGetGlyphBMP16(WORD word, LPFONTINFO16 lpFontInfo, WORD w1, WORD w2,
                               LPSTR string, DWORD dword, /*LPBITMAPMETRICS16*/ LPVOID metrics)
 {
     FIXME("stub?\n");
@@ -1697,7 +1917,7 @@ WORD WINAPI EngineGetGlyphBMP(WORD word, LPFONTINFO16 lpFontInfo, WORD w1, WORD 
 /***********************************************************************
  *		EngineMakeFontDir (GDI.306)
  */
-DWORD WINAPI EngineMakeFontDir(HDC16 hdc, LPFONTDIR16 fontdir, LPCSTR string)
+DWORD WINAPI EngineMakeFontDir16(HDC16 hdc, LPFONTDIR16 fontdir, LPCSTR string)
 {
     FIXME(" stub! (always fails)\n");
     return ~0UL; /* error */
@@ -1728,6 +1948,31 @@ BOOL16 WINAPI GetCharABCWidths16( HDC16 hdc, UINT16 firstChar, UINT16 lastChar, 
 
 
 /***********************************************************************
+ *           GetOutlineTextMetrics (GDI.308)
+ *
+ * Gets metrics for TrueType fonts.
+ *
+ * PARAMS
+ *    hdc    [In]  Handle of device context
+ *    cbData [In]  Size of metric data array
+ *    lpOTM  [Out] Address of metric data array
+ *
+ * RETURNS
+ *    Success: Non-zero or size of required buffer
+ *    Failure: 0
+ *
+ * NOTES
+ *    lpOTM should be LPOUTLINETEXTMETRIC
+ */
+UINT16 WINAPI GetOutlineTextMetrics16( HDC16 hdc, UINT16 cbData,
+                                       LPOUTLINETEXTMETRIC16 lpOTM )
+{
+    FIXME("(%04x,%04x,%p): stub\n", hdc,cbData,lpOTM);
+    return 0;
+}
+
+
+/***********************************************************************
  *           GetGlyphOutline    (GDI.309)
  */
 DWORD WINAPI GetGlyphOutline16( HDC16 hdc, UINT16 uChar, UINT16 fuFormat,
@@ -1738,12 +1983,15 @@ DWORD WINAPI GetGlyphOutline16( HDC16 hdc, UINT16 uChar, UINT16 fuFormat,
     GLYPHMETRICS gm32;
 
     ret = GetGlyphOutlineA( HDC_32(hdc), uChar, fuFormat, &gm32, cbBuffer, lpBuffer, lpmat2);
-    lpgm->gmBlackBoxX = gm32.gmBlackBoxX;
-    lpgm->gmBlackBoxY = gm32.gmBlackBoxY;
-    lpgm->gmptGlyphOrigin.x = gm32.gmptGlyphOrigin.x;
-    lpgm->gmptGlyphOrigin.y = gm32.gmptGlyphOrigin.y;
-    lpgm->gmCellIncX = gm32.gmCellIncX;
-    lpgm->gmCellIncY = gm32.gmCellIncY;
+    if (ret && ret != GDI_ERROR)
+    {
+        lpgm->gmBlackBoxX = gm32.gmBlackBoxX;
+        lpgm->gmBlackBoxY = gm32.gmBlackBoxY;
+        lpgm->gmptGlyphOrigin.x = gm32.gmptGlyphOrigin.x;
+        lpgm->gmptGlyphOrigin.y = gm32.gmptGlyphOrigin.y;
+        lpgm->gmCellIncX = gm32.gmCellIncX;
+        lpgm->gmCellIncY = gm32.gmCellIncY;
+    }
     return ret;
 }
 
@@ -1774,6 +2022,28 @@ DWORD WINAPI GetFontData16( HDC16 hdc, DWORD table, DWORD offset, LPVOID buffer,
 BOOL16 WINAPI GetRasterizerCaps16( LPRASTERIZER_STATUS lprs, UINT16 cbNumBytes )
 {
     return GetRasterizerCaps( lprs, cbNumBytes );
+}
+
+
+/***********************************************************************
+ *             EnumFontFamilies    (GDI.330)
+ */
+INT16 WINAPI EnumFontFamilies16( HDC16 hDC, LPCSTR lpFamily,
+                                 FONTENUMPROC16 efproc, LPARAM lpData )
+{
+    LOGFONT16 lf, *plf;
+
+    if (lpFamily)
+    {
+        if (!*lpFamily) return 1;
+        lstrcpynA( lf.lfFaceName, lpFamily, LF_FACESIZE );
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lf.lfPitchAndFamily = 0;
+        plf = &lf;
+    }
+    else plf = NULL;
+
+    return EnumFontFamiliesEx16( hDC, plf, efproc, lpData, 0 );
 }
 
 
@@ -2117,6 +2387,31 @@ BOOL16 WINAPI FastWindowFrame16( HDC16 hdc, const RECT16 *rect,
 
 
 /***********************************************************************
+ *           GdiInit2     (GDI.403)
+ *
+ * See "Undocumented Windows"
+ *
+ * PARAMS
+ *   h1 [I] GDI object
+ *   h2 [I] global data
+ */
+HANDLE16 WINAPI GdiInit216( HANDLE16 h1, HANDLE16 h2 )
+{
+    FIXME("(%04x, %04x), stub.\n", h1, h2);
+    if (h2 == 0xffff) return 0xffff; /* undefined return value */
+    return h1; /* FIXME: should be the memory handle of h1 */
+}
+
+
+/***********************************************************************
+ *           FinalGdiInit     (GDI.405)
+ */
+void WINAPI FinalGdiInit16( HBRUSH16 hPattern /* [in] fill pattern of desktop */ )
+{
+}
+
+
+/***********************************************************************
  *           CreateUserBitmap    (GDI.407)
  */
 HBITMAP16 WINAPI CreateUserBitmap16( INT16 width, INT16 height, UINT16 planes,
@@ -2305,11 +2600,77 @@ HRGN16 WINAPI CreatePolyPolygonRgn16( const POINT16 *points,
 
 
 /***********************************************************************
+ *           GdiSeeGdiDo   (GDI.452)
+ */
+DWORD WINAPI GdiSeeGdiDo16( WORD wReqType, WORD wParam1, WORD wParam2,
+                          WORD wParam3 )
+{
+    DWORD ret = ~0U;
+
+    switch (wReqType)
+    {
+    case 0x0001:  /* LocalAlloc */
+        WARN("LocalAlloc16(%x, %x): ignoring\n", wParam1, wParam3);
+        ret = 0;
+        break;
+    case 0x0002:  /* LocalFree */
+        WARN("LocalFree16(%x): ignoring\n", wParam1);
+        ret = 0;
+        break;
+    case 0x0003:  /* LocalCompact */
+        WARN("LocalCompact16(%x): ignoring\n", wParam3);
+        ret = 65000; /* lie about the amount of free space */
+        break;
+    case 0x0103:  /* LocalHeap */
+        WARN("LocalHeap16(): ignoring\n");
+        break;
+    default:
+        WARN("(wReqType=%04x): Unknown\n", wReqType);
+        break;
+    }
+    return ret;
+}
+
+
+/***********************************************************************
  *           SetObjectOwner    (GDI.461)
  */
 void WINAPI SetObjectOwner16( HGDIOBJ16 handle, HANDLE16 owner )
 {
     /* Nothing to do */
+}
+
+
+/***********************************************************************
+ *           IsGDIObject    (GDI.462)
+ *
+ * returns type of object if valid (W95 system programming secrets p. 264-5)
+ */
+BOOL16 WINAPI IsGDIObject16( HGDIOBJ16 handle16 )
+{
+    static const BYTE type_map[] =
+    {
+        0,  /* bad */
+        1,  /* OBJ_PEN */
+        2,  /* OBJ_BRUSH */
+        7,  /* OBJ_DC */
+        9,  /* OBJ_METADC */
+        4,  /* OBJ_PAL */
+        3,  /* OBJ_FONT */
+        5,  /* OBJ_BITMAP */
+        6,  /* OBJ_REGION */
+        10, /* OBJ_METAFILE */
+        7,  /* OBJ_MEMDC */
+        0,  /* OBJ_EXTPEN */
+        9,  /* OBJ_ENHMETADC */
+        12, /* OBJ_ENHMETAFILE */
+        0   /* OBJ_COLORSPACE */
+    };
+
+    UINT type = GetObjectType( HGDIOBJ_32( handle16 ));
+
+    if (type >= sizeof(type_map)/sizeof(type_map[0])) return 0;
+    return type_map[type];
 }
 
 
@@ -2611,6 +2972,16 @@ BOOL16 WINAPI ScaleWindowExtEx16( HDC16 hdc, INT16 xNum, INT16 xDenom,
 }
 
 
+/***********************************************************************
+ *           GetAspectRatioFilterEx  (GDI.486)
+ */
+BOOL16 WINAPI GetAspectRatioFilterEx16( HDC16 hdc, LPSIZE16 pAspectRatio )
+{
+    FIXME("(%04x, %p): -- Empty Stub !\n", hdc, pAspectRatio);
+    return FALSE;
+}
+
+
 /******************************************************************************
  *           PolyBezier  (GDI.502)
  */
@@ -2827,11 +3198,55 @@ DWORD WINAPI GetRegionData16( HRGN16 hrgn, DWORD count, LPRGNDATA rgndata )
 
 
 /***********************************************************************
+ *           GdiFreeResources   (GDI.609)
+ */
+WORD WINAPI GdiFreeResources16( DWORD reserve )
+{
+    return 90; /* lie about it, it shouldn't matter */
+}
+
+
+/***********************************************************************
+ *           GdiSignalProc32     (GDI.610)
+ */
+WORD WINAPI GdiSignalProc( UINT uCode, DWORD dwThreadOrProcessID,
+                           DWORD dwFlags, HMODULE16 hModule )
+{
+    return 0;
+}
+
+
+/***********************************************************************
  *           GetTextCharset   (GDI.612)
  */
 UINT16 WINAPI GetTextCharset16( HDC16 hdc )
 {
     return GetTextCharset( HDC_32(hdc) );
+}
+
+
+/***********************************************************************
+ *           EnumFontFamiliesEx (GDI.613)
+ */
+INT16 WINAPI EnumFontFamiliesEx16( HDC16 hdc, LPLOGFONT16 plf,
+                                   FONTENUMPROC16 proc, LPARAM lParam,
+                                   DWORD dwFlags)
+{
+    struct callback16_info info;
+    LOGFONTW lfW, *plfW;
+
+    info.proc  = (FARPROC16)proc;
+    info.param = lParam;
+
+    if (plf)
+    {
+        logfont_16_to_W(plf, &lfW);
+        plfW = &lfW;
+    }
+    else plfW = NULL;
+
+    return EnumFontFamiliesExW( HDC_32(hdc), plfW, enum_font_callback,
+                                (LPARAM)&info, dwFlags );
 }
 
 
@@ -2852,4 +3267,385 @@ DWORD WINAPI GetFontLanguageInfo16( HDC16 hdc )
 BOOL16 WINAPI SetLayout16( HDC16 hdc, DWORD layout )
 {
     return SetLayout( HDC_32(hdc), layout );
+}
+
+
+/***********************************************************************
+ *           SetSolidBrush   (GDI.604)
+ *
+ * Change the color of a solid brush.
+ *
+ * PARAMS
+ *  hBrush   [I] Brush to change the color of
+ *  newColor [I] New color for hBrush
+ *
+ * RETURNS
+ *  Success: TRUE. The color of hBrush is set to newColor.
+ *  Failure: FALSE.
+ *
+ * FIXME
+ *  This function is undocumented and untested. The implementation may
+ *  not be correct.
+ */
+BOOL16 WINAPI SetSolidBrush16(HBRUSH16 hBrush, COLORREF newColor )
+{
+    TRACE("(hBrush %04x, newColor %08x)\n", hBrush, newColor);
+
+    return BRUSH_SetSolid( HBRUSH_32(hBrush), newColor );
+}
+
+
+/***********************************************************************
+ *           Copy   (GDI.250)
+ */
+void WINAPI Copy16( LPVOID src, LPVOID dst, WORD size )
+{
+    memcpy( dst, src, size );
+}
+
+/***********************************************************************
+ *           RealizeDefaultPalette    (GDI.365)
+ */
+UINT16 WINAPI RealizeDefaultPalette16( HDC16 hdc )
+{
+    UINT16 ret = 0;
+    DC          *dc;
+
+    TRACE("%04x\n", hdc );
+
+    if (!(dc = get_dc_ptr( HDC_32(hdc) ))) return 0;
+
+    if (dc->funcs->pRealizeDefaultPalette) ret = dc->funcs->pRealizeDefaultPalette( dc->physDev );
+    release_dc_ptr( dc );
+    return ret;
+}
+
+/***********************************************************************
+ *           IsDCCurrentPalette   (GDI.412)
+ */
+BOOL16 WINAPI IsDCCurrentPalette16(HDC16 hDC)
+{
+    DC *dc = get_dc_ptr( HDC_32(hDC) );
+    if (dc)
+    {
+      BOOL bRet = dc->hPalette == hPrimaryPalette;
+      release_dc_ptr( dc );
+      return bRet;
+    }
+    return FALSE;
+}
+
+/*********************************************************************
+ *           SetMagicColors   (GDI.606)
+ */
+VOID WINAPI SetMagicColors16(HDC16 hDC, COLORREF color, UINT16 index)
+{
+    FIXME("(hDC %04x, color %04x, index %04x): stub\n", hDC, (int)color, index);
+
+}
+
+
+/***********************************************************************
+ *           DPtoLP    (GDI.67)
+ */
+BOOL16 WINAPI DPtoLP16( HDC16 hdc, LPPOINT16 points, INT16 count )
+{
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
+    if (!dc) return FALSE;
+
+    while (count--)
+    {
+        points->x = MulDiv( points->x - dc->vportOrgX, dc->wndExtX, dc->vportExtX ) + dc->wndOrgX;
+        points->y = MulDiv( points->y - dc->vportOrgY, dc->wndExtY, dc->vportExtY ) + dc->wndOrgY;
+        points++;
+    }
+    release_dc_ptr( dc );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           LPtoDP    (GDI.99)
+ */
+BOOL16 WINAPI LPtoDP16( HDC16 hdc, LPPOINT16 points, INT16 count )
+{
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
+    if (!dc) return FALSE;
+
+    while (count--)
+    {
+        points->x = MulDiv( points->x - dc->wndOrgX, dc->vportExtX, dc->wndExtX ) + dc->vportOrgX;
+        points->y = MulDiv( points->y - dc->wndOrgY, dc->vportExtY, dc->wndExtY ) + dc->vportOrgY;
+        points++;
+    }
+    release_dc_ptr( dc );
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *           GetDCState   (GDI.179)
+ */
+HDC16 WINAPI GetDCState16( HDC16 hdc )
+{
+    ERR( "no longer supported\n" );
+    return 0;
+}
+
+
+/***********************************************************************
+ *           SetDCState   (GDI.180)
+ */
+void WINAPI SetDCState16( HDC16 hdc, HDC16 hdcs )
+{
+    ERR( "no longer supported\n" );
+}
+
+/***********************************************************************
+ *           SetDCOrg   (GDI.117)
+ */
+DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
+{
+    DWORD prevOrg = 0;
+    HDC hdc = HDC_32( hdc16 );
+    DC *dc = get_dc_ptr( hdc );
+    if (!dc) return 0;
+    if (dc->funcs->pSetDCOrg) prevOrg = dc->funcs->pSetDCOrg( dc->physDev, x, y );
+    release_dc_ptr( dc );
+    return prevOrg;
+}
+
+
+/***********************************************************************
+ *		InquireVisRgn   (GDI.131)
+ */
+HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
+{
+    HRGN16 ret = 0;
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
+    if (dc)
+    {
+        ret = HRGN_16(dc->hVisRgn);
+        release_dc_ptr( dc );
+    }
+    return ret;
+}
+
+
+/***********************************************************************
+ *           OffsetVisRgn    (GDI.102)
+ */
+INT16 WINAPI OffsetVisRgn16( HDC16 hdc16, INT16 x, INT16 y )
+{
+    INT16 retval;
+    HDC hdc = HDC_32( hdc16 );
+    DC * dc = get_dc_ptr( hdc );
+
+    if (!dc) return ERROR;
+    TRACE("%p %d,%d\n", hdc, x, y );
+    update_dc( dc );
+    retval = OffsetRgn( dc->hVisRgn, x, y );
+    CLIPPING_UpdateGCRegion( dc );
+    release_dc_ptr( dc );
+    return retval;
+}
+
+
+/***********************************************************************
+ *           ExcludeVisRect   (GDI.73)
+ */
+INT16 WINAPI ExcludeVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, INT16 bottom )
+{
+    HRGN tempRgn;
+    INT16 ret;
+    POINT pt[2];
+    HDC hdc = HDC_32( hdc16 );
+    DC * dc = get_dc_ptr( hdc );
+    if (!dc) return ERROR;
+
+    pt[0].x = left;
+    pt[0].y = top;
+    pt[1].x = right;
+    pt[1].y = bottom;
+
+    LPtoDP( hdc, pt, 2 );
+
+    TRACE("%p %d,%d - %d,%d\n", hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
+
+    if (!(tempRgn = CreateRectRgn( pt[0].x, pt[0].y, pt[1].x, pt[1].y ))) ret = ERROR;
+    else
+    {
+        update_dc( dc );
+        ret = CombineRgn( dc->hVisRgn, dc->hVisRgn, tempRgn, RGN_DIFF );
+        DeleteObject( tempRgn );
+    }
+    if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
+    release_dc_ptr( dc );
+    return ret;
+}
+
+
+/***********************************************************************
+ *           IntersectVisRect   (GDI.98)
+ */
+INT16 WINAPI IntersectVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, INT16 bottom )
+{
+    HRGN tempRgn;
+    INT16 ret;
+    POINT pt[2];
+    HDC hdc = HDC_32( hdc16 );
+    DC * dc = get_dc_ptr( hdc );
+    if (!dc) return ERROR;
+
+    pt[0].x = left;
+    pt[0].y = top;
+    pt[1].x = right;
+    pt[1].y = bottom;
+
+    LPtoDP( hdc, pt, 2 );
+
+    TRACE("%p %d,%d - %d,%d\n", hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
+
+    if (!(tempRgn = CreateRectRgn( pt[0].x, pt[0].y, pt[1].x, pt[1].y ))) ret = ERROR;
+    else
+    {
+        update_dc( dc );
+        ret = CombineRgn( dc->hVisRgn, dc->hVisRgn, tempRgn, RGN_AND );
+        DeleteObject( tempRgn );
+    }
+    if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
+    release_dc_ptr( dc );
+    return ret;
+}
+
+
+/***********************************************************************
+ *           SaveVisRgn   (GDI.129)
+ */
+HRGN16 WINAPI SaveVisRgn16( HDC16 hdc16 )
+{
+    struct saved_visrgn *saved;
+    HDC hdc = HDC_32( hdc16 );
+    DC *dc = get_dc_ptr( hdc );
+
+    if (!dc) return 0;
+    TRACE("%p\n", hdc );
+
+    update_dc( dc );
+    if (!(saved = HeapAlloc( GetProcessHeap(), 0, sizeof(*saved) ))) goto error;
+    if (!(saved->hrgn = CreateRectRgn( 0, 0, 0, 0 ))) goto error;
+    CombineRgn( saved->hrgn, dc->hVisRgn, 0, RGN_COPY );
+    saved->next = dc->saved_visrgn;
+    dc->saved_visrgn = saved;
+    release_dc_ptr( dc );
+    return HRGN_16(saved->hrgn);
+
+error:
+    release_dc_ptr( dc );
+    HeapFree( GetProcessHeap(), 0, saved );
+    return 0;
+}
+
+
+/***********************************************************************
+ *           RestoreVisRgn   (GDI.130)
+ */
+INT16 WINAPI RestoreVisRgn16( HDC16 hdc16 )
+{
+    struct saved_visrgn *saved;
+    HDC hdc = HDC_32( hdc16 );
+    DC *dc = get_dc_ptr( hdc );
+    INT16 ret = ERROR;
+
+    if (!dc) return ERROR;
+
+    TRACE("%p\n", hdc );
+
+    if (!(saved = dc->saved_visrgn)) goto done;
+
+    ret = CombineRgn( dc->hVisRgn, saved->hrgn, 0, RGN_COPY );
+    dc->saved_visrgn = saved->next;
+    DeleteObject( saved->hrgn );
+    HeapFree( GetProcessHeap(), 0, saved );
+    CLIPPING_UpdateGCRegion( dc );
+ done:
+    release_dc_ptr( dc );
+    return ret;
+}
+
+
+/***********************************************************************
+ *		GetClipRgn (GDI.173)
+ */
+HRGN16 WINAPI GetClipRgn16( HDC16 hdc )
+{
+    HRGN16 ret = 0;
+    DC * dc = get_dc_ptr( HDC_32(hdc) );
+    if (dc)
+    {
+        ret = HRGN_16(dc->hClipRgn);
+        release_dc_ptr( dc );
+    }
+    return ret;
+}
+
+
+/***********************************************************************
+ *           MakeObjectPrivate    (GDI.463)
+ *
+ * What does that mean ?
+ * Some little docu can be found in "Undocumented Windows",
+ * but this is basically useless.
+ */
+void WINAPI MakeObjectPrivate16( HGDIOBJ16 handle16, BOOL16 private )
+{
+    FIXME( "stub: %x %u\n", handle16, private );
+}
+
+/***********************************************************************
+ *           CreateDIBSection    (GDI.489)
+ */
+HBITMAP16 WINAPI CreateDIBSection16 (HDC16 hdc, const BITMAPINFO *bmi, UINT16 usage,
+                                     SEGPTR *bits16, HANDLE section, DWORD offset)
+{
+    LPVOID bits32;
+    HBITMAP hbitmap;
+
+    hbitmap = CreateDIBSection( HDC_32(hdc), bmi, usage, &bits32, section, offset );
+    if (hbitmap)
+    {
+        BITMAPOBJ *bmp = GDI_GetObjPtr(hbitmap, OBJ_BITMAP);
+        if (bmp && bmp->dib && bits32)
+        {
+            const BITMAPINFOHEADER *bi = &bmi->bmiHeader;
+            LONG width, height;
+            WORD planes, bpp;
+            DWORD compr, size;
+            INT width_bytes;
+            WORD count, sel;
+            int i;
+
+            DIB_GetBitmapInfo(bi, &width, &height, &planes, &bpp, &compr, &size);
+
+            height = height >= 0 ? height : -height;
+            width_bytes = DIB_GetDIBWidthBytes(width, bpp);
+
+            if (!size || (compr != BI_RLE4 && compr != BI_RLE8)) size = width_bytes * height;
+
+            /* calculate number of sel's needed for size with 64K steps */
+            count = (size + 0xffff) / 0x10000;
+            sel = AllocSelectorArray16(count);
+
+            for (i = 0; i < count; i++)
+            {
+                SetSelectorBase(sel + (i << __AHSHIFT), (DWORD)bits32 + i * 0x10000);
+                SetSelectorLimit16(sel + (i << __AHSHIFT), size - 1); /* yep, limit is correct */
+                size -= 0x10000;
+            }
+            bmp->segptr_bits = MAKESEGPTR( sel, 0 );
+            if (bits16) *bits16 = bmp->segptr_bits;
+        }
+        if (bmp) GDI_ReleaseObj( hbitmap );
+    }
+    return HBITMAP_16(hbitmap);
 }

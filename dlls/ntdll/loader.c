@@ -24,6 +24,9 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#ifdef HAVE_SYS_MMAN_H
+# include <sys/mman.h>
+#endif
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
@@ -36,7 +39,6 @@
 
 #include "wine/exception.h"
 #include "wine/library.h"
-#include "wine/pthread.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/server.h"
@@ -52,8 +54,6 @@ WINE_DECLARE_DEBUG_CHANNEL(imports);
 /* we don't want to include winuser.h */
 #define RT_MANIFEST                         ((ULONG_PTR)24)
 #define ISOLATIONAWARE_MANIFEST_RESOURCE_ID ((ULONG_PTR)2)
-
-extern struct wine_pthread_functions pthread_functions;
 
 typedef DWORD (CALLBACK *DLLENTRYPROC)(HMODULE,DWORD,LPVOID);
 
@@ -169,24 +169,20 @@ static inline BOOL call_dll_entry_point( DLLENTRYPROC proc, void *module,
 #endif /* __i386__ */
 
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__x86_64__)
 /*************************************************************************
  *		stub_entry_point
  *
  * Entry point for stub functions.
  */
-static void stub_entry_point( const char *dll, const char *name, ... )
+static void stub_entry_point( const char *dll, const char *name, void *ret_addr )
 {
     EXCEPTION_RECORD rec;
 
     rec.ExceptionCode           = EXCEPTION_WINE_STUB;
     rec.ExceptionFlags          = EH_NONCONTINUABLE;
     rec.ExceptionRecord         = NULL;
-#ifdef __GNUC__
-    rec.ExceptionAddress        = __builtin_return_address(0);
-#else
-    rec.ExceptionAddress        = *((void **)&dll - 1);
-#endif
+    rec.ExceptionAddress        = ret_addr;
     rec.NumberParameters        = 2;
     rec.ExceptionInformation[0] = (ULONG_PTR)dll;
     rec.ExceptionInformation[1] = (ULONG_PTR)name;
@@ -195,17 +191,29 @@ static void stub_entry_point( const char *dll, const char *name, ... )
 
 
 #include "pshpack1.h"
+#ifdef __i386__
 struct stub
 {
-    BYTE        popl_eax;   /* popl %eax */
     BYTE        pushl1;     /* pushl $name */
     const char *name;
     BYTE        pushl2;     /* pushl $dll */
     const char *dll;
-    BYTE        pushl_eax;  /* pushl %eax */
-    BYTE        jmp;        /* jmp stub_entry_point */
+    BYTE        call;       /* call stub_entry_point */
     DWORD       entry;
 };
+#else
+struct stub
+{
+    BYTE movq_rdi[2];      /* movq $dll,%rdi */
+    const char *dll;
+    BYTE movq_rsi[2];      /* movq $name,%rsi */
+    const char *name;
+    BYTE movq_rsp_rdx[4];  /* movq (%rsp),%rdx */
+    BYTE movq_rax[2];      /* movq $entry, %rax */
+    const void* entry;
+    BYTE jmpq_rax[2];      /* jmp %rax */
+};
+#endif
 #include "poppack.h"
 
 /*************************************************************************
@@ -230,14 +238,30 @@ static ULONG_PTR allocate_stub( const char *dll, const char *name )
             return 0xdeadbeef;
     }
     stub = &stubs[nb_stubs++];
-    stub->popl_eax  = 0x58;  /* popl %eax */
+#ifdef __i386__
     stub->pushl1    = 0x68;  /* pushl $name */
     stub->name      = name;
     stub->pushl2    = 0x68;  /* pushl $dll */
     stub->dll       = dll;
-    stub->pushl_eax = 0x50;  /* pushl %eax */
-    stub->jmp       = 0xe9;  /* jmp stub_entry_point */
+    stub->call      = 0xe8;  /* call stub_entry_point */
     stub->entry     = (BYTE *)stub_entry_point - (BYTE *)(&stub->entry + 1);
+#else
+    stub->movq_rdi[0]     = 0x48;  /* movq $dll,%rdi */
+    stub->movq_rdi[1]     = 0xbf;
+    stub->dll             = dll;
+    stub->movq_rsi[0]     = 0x48;  /* movq $name,%rsi */
+    stub->movq_rsi[1]     = 0xbe;
+    stub->name            = name;
+    stub->movq_rsp_rdx[0] = 0x48;  /* movq (%rsp),%rdx */
+    stub->movq_rsp_rdx[1] = 0x8b;
+    stub->movq_rsp_rdx[2] = 0x14;
+    stub->movq_rsp_rdx[3] = 0x24;
+    stub->movq_rax[0]     = 0x48;  /* movq $entry, %rax */
+    stub->movq_rax[1]     = 0xb8;
+    stub->entry           = stub_entry_point;
+    stub->jmpq_rax[0]     = 0xff;  /* jmp %rax */
+    stub->jmpq_rax[1]     = 0xe0;
+#endif
     return (ULONG_PTR)stub;
 }
 
@@ -679,6 +703,44 @@ static NTSTATUS fixup_imports( WINE_MODREF *wm, LPCWSTR load_path )
 
 
 /*************************************************************************
+ *		is_dll_native_subsystem
+ *
+ * Check if dll is a proper native driver.
+ * Some dlls (corpol.dll from IE6 for instance) are incorrectly marked as native
+ * while being perfectly normal DLLs.  This heuristic should catch such breakages.
+ */
+static BOOL is_dll_native_subsystem( HMODULE module, const IMAGE_NT_HEADERS *nt, LPCWSTR filename )
+{
+    static const WCHAR ntdllW[]    = {'n','t','d','l','l','.','d','l','l',0};
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
+    const IMAGE_IMPORT_DESCRIPTOR *imports;
+    DWORD i, size;
+    WCHAR buffer[16];
+
+    if (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_NATIVE) return FALSE;
+    if (nt->OptionalHeader.SectionAlignment < getpagesize()) return TRUE;
+
+    if ((imports = RtlImageDirectoryEntryToData( module, TRUE,
+                                                 IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
+    {
+        for (i = 0; imports[i].Name; i++)
+        {
+            const char *name = get_rva( module, imports[i].Name );
+            DWORD len = strlen(name);
+            if (len * sizeof(WCHAR) >= sizeof(buffer)) continue;
+            ascii_to_unicode( buffer, name, len + 1 );
+            if (!strcmpiW( buffer, ntdllW ) || !strcmpiW( buffer, kernel32W ))
+            {
+                TRACE( "%s imports %s, assuming not native\n", debugstr_w(filename), debugstr_w(buffer) );
+                return FALSE;
+            }
+        }
+    }
+    return TRUE;
+}
+
+
+/*************************************************************************
  *		alloc_module
  *
  * Allocate a WINE_MODREF structure and add it to the process list
@@ -712,7 +774,7 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
     else p = wm->ldr.FullDllName.Buffer;
     RtlInitUnicodeString( &wm->ldr.BaseDllName, p );
 
-    if (nt->FileHeader.Characteristics & IMAGE_FILE_DLL)
+    if ((nt->FileHeader.Characteristics & IMAGE_FILE_DLL) && !is_dll_native_subsystem( hModule, nt, p ))
     {
         wm->ldr.Flags |= LDR_IMAGE_IS_DLL;
         if (nt->OptionalHeader.AddressOfEntryPoint)
@@ -858,7 +920,7 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
         {
             (*callback)( module, reason, NULL );
         }
-        __EXCEPT(NULL)
+        __EXCEPT_ALL
         {
             if (TRACE_ON(relay))
                 DPRINTF("%04x:exception in TLS callback (proc=%p,module=%p,reason=%s,reserved=0)\n",
@@ -876,18 +938,19 @@ static void call_tls_callbacks( HMODULE module, UINT reason )
 /*************************************************************************
  *              MODULE_InitDLL
  */
-static BOOL MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved )
+static NTSTATUS MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved )
 {
     WCHAR mod_name[32];
-    BOOL retv = TRUE;
+    NTSTATUS status = STATUS_SUCCESS;
     DLLENTRYPROC entry = wm->ldr.EntryPoint;
     void *module = wm->ldr.BaseAddress;
+    BOOL retv = TRUE;
 
     /* Skip calls for modules loaded with special load flags */
 
-    if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return TRUE;
+    if (wm->ldr.Flags & LDR_DONT_RESOLVE_REFS) return STATUS_SUCCESS;
     if (wm->ldr.TlsIndex != -1) call_tls_callbacks( wm->ldr.BaseAddress, reason );
-    if (!entry) return TRUE;
+    if (!entry) return STATUS_SUCCESS;
 
     if (TRACE_ON(relay))
     {
@@ -901,7 +964,20 @@ static BOOL MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved )
     else TRACE("(%p %s,%s,%p) - CALL\n", module, debugstr_w(wm->ldr.BaseDllName.Buffer),
                reason_names[reason], lpReserved );
 
-    retv = call_dll_entry_point( entry, module, reason, lpReserved );
+    __TRY
+    {
+        retv = call_dll_entry_point( entry, module, reason, lpReserved );
+        if (!retv)
+            status = STATUS_DLL_INIT_FAILED;
+    }
+    __EXCEPT_ALL
+    {
+        if (TRACE_ON(relay))
+            DPRINTF("%04x:exception in PE entry point (proc=%p,module=%p,reason=%s,res=%p)\n",
+                    GetCurrentThreadId(), entry, module, reason_names[reason], lpReserved );
+        status = GetExceptionCode();
+    }
+    __ENDTRY
 
     /* The state of the module list may have changed due to the call
        to the dll. We cannot assume that this module has not been
@@ -912,7 +988,7 @@ static BOOL MODULE_InitDLL( WINE_MODREF *wm, UINT reason, LPVOID lpReserved )
                 reason_names[reason], lpReserved, retv );
     else TRACE("(%p,%s,%p) - RETURN %d\n", module, reason_names[reason], lpReserved, retv );
 
-    return retv;
+    return status;
 }
 
 
@@ -979,16 +1055,14 @@ static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved )
     {
         WINE_MODREF *prev = current_modref;
         current_modref = wm;
-        if (MODULE_InitDLL( wm, DLL_PROCESS_ATTACH, lpReserved ))
-        {
+        status = MODULE_InitDLL( wm, DLL_PROCESS_ATTACH, lpReserved );
+        if (status == STATUS_SUCCESS)
             wm->ldr.Flags |= LDR_PROCESS_ATTACHED;
-        }
         else
         {
             /* point to the name so LdrInitializeThunk can print it */
             last_failed_modref = wm;
             WARN("Initialization of %s failed\n", debugstr_w(wm->ldr.BaseDllName.Buffer));
-            status = STATUS_DLL_INIT_FAILED;
         }
         current_modref = prev;
     }
@@ -1151,13 +1225,13 @@ NTSTATUS WINAPI LdrFindEntryForAddress(const void* addr, PLDR_MODULE* pmod)
     for (entry = mark->Flink; entry != mark; entry = entry->Flink)
     {
         mod = CONTAINING_RECORD(entry, LDR_MODULE, InMemoryOrderModuleList);
-        if ((const void *)mod->BaseAddress <= addr &&
+        if (mod->BaseAddress <= addr &&
             (const char *)addr < (char*)mod->BaseAddress + mod->SizeOfImage)
         {
             *pmod = mod;
             return STATUS_SUCCESS;
         }
-        if ((const void *)mod->BaseAddress > addr) break;
+        if (mod->BaseAddress > addr) break;
     }
     return STATUS_NO_MORE_ENTRIES;
 }
@@ -1232,11 +1306,18 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
  *
  * Check if a loaded native dll is a Wine fake dll.
  */
-static BOOL is_fake_dll( const void *base )
+static BOOL is_fake_dll( HANDLE handle )
 {
     static const char fakedll_signature[] = "Wine placeholder DLL";
-    const IMAGE_DOS_HEADER *dos = base;
+    char buffer[sizeof(IMAGE_DOS_HEADER) + sizeof(fakedll_signature)];
+    const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)buffer;
+    IO_STATUS_BLOCK io;
+    LARGE_INTEGER offset;
 
+    offset.QuadPart = 0;
+    if (NtReadFile( handle, 0, NULL, 0, &io, buffer, sizeof(buffer), &offset, NULL )) return FALSE;
+    if (io.Information < sizeof(buffer)) return FALSE;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;
     if (dos->e_lfanew >= sizeof(*dos) + sizeof(fakedll_signature) &&
         !memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) )) return TRUE;
     return FALSE;
@@ -1293,12 +1374,10 @@ static WCHAR *get_builtin_fullname( const WCHAR *path, const char *filename )
 static void load_builtin_callback( void *module, const char *filename )
 {
     static const WCHAR emptyW[1];
-    void *addr;
     IMAGE_NT_HEADERS *nt;
     WINE_MODREF *wm;
     WCHAR *fullname;
     const WCHAR *load_path;
-    SIZE_T size;
 
     if (!module)
     {
@@ -1311,10 +1390,10 @@ static void load_builtin_callback( void *module, const char *filename )
         builtin_load_info->status = STATUS_INVALID_IMAGE_FORMAT;
         return;
     }
-    addr = module;
-    size = nt->OptionalHeader.SizeOfImage;
-    NtAllocateVirtualMemory( NtCurrentProcess(), &addr, 0, &size,
-                             MEM_SYSTEM | MEM_IMAGE, PAGE_EXECUTE_WRITECOPY );
+    virtual_create_system_view( module, nt->OptionalHeader.SizeOfImage,
+                                VPROT_SYSTEM | VPROT_IMAGE | VPROT_COMMITTED |
+                                VPROT_READ | VPROT_WRITECOPY | VPROT_EXEC );
+
     /* create the MODREF */
 
     if (!(fullname = get_builtin_fullname( builtin_load_info->filename, filename )))
@@ -1365,11 +1444,11 @@ static void load_builtin_callback( void *module, const char *filename )
     SERVER_START_REQ( load_dll )
     {
         req->handle     = 0;
-        req->base       = module;
+        req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
         req->dbg_size   = nt->FileHeader.NumberOfSymbols;
-        req->name       = &wm->ldr.FullDllName.Buffer;
+        req->name       = wine_server_client_ptr( &wm->ldr.FullDllName.Buffer );
         wine_server_add_data( req, wm->ldr.FullDllName.Buffer, wm->ldr.FullDllName.Length );
         wine_server_call( req );
     }
@@ -1406,7 +1485,7 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
     size.QuadPart = 0;
 
     status = NtCreateSection( &mapping, STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ,
-                              &attr, &size, 0, SEC_IMAGE, file );
+                              &attr, &size, PAGE_READONLY, SEC_IMAGE, file );
     if (status != STATUS_SUCCESS) return status;
 
     module = NULL;
@@ -1414,13 +1493,6 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
                                  &module, 0, 0, &size, &len, ViewShare, 0, PAGE_READONLY );
     NtClose( mapping );
     if (status != STATUS_SUCCESS) return status;
-
-    if (is_fake_dll( module ))
-    {
-        TRACE( "%s is a fake dll, not loading it\n", debugstr_w(name) );
-        NtUnmapViewOfSection( NtCurrentProcess(), module );
-        return STATUS_DLL_NOT_FOUND;
-    }
 
     /* create the MODREF */
 
@@ -1453,12 +1525,12 @@ static NTSTATUS load_native_dll( LPCWSTR load_path, LPCWSTR name, HANDLE file,
 
     SERVER_START_REQ( load_dll )
     {
-        req->handle     = file;
-        req->base       = module;
+        req->handle     = wine_server_obj_handle( file );
+        req->base       = wine_server_client_ptr( module );
         req->size       = nt->OptionalHeader.SizeOfImage;
         req->dbg_offset = nt->FileHeader.PointerToSymbolTable;
         req->dbg_size   = nt->FileHeader.NumberOfSymbols;
-        req->name       = &wm->ldr.FullDllName.Buffer;
+        req->name       = wine_server_client_ptr( &wm->ldr.FullDllName.Buffer );
         wine_server_add_data( req, wm->ldr.FullDllName.Buffer, wm->ldr.FullDllName.Length );
         wine_server_call( req );
     }
@@ -1858,6 +1930,13 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
     main_exe = get_modref( NtCurrentTeb()->Peb->ImageBaseAddress );
     loadorder = get_load_order( main_exe ? main_exe->ldr.BaseDllName.Buffer : NULL, filename );
 
+    if (handle && is_fake_dll( handle ))
+    {
+        TRACE( "%s is a fake Wine dll\n", debugstr_w(filename) );
+        NtClose( handle );
+        handle = 0;
+    }
+
     switch(loadorder)
     {
     case LO_INVALID:
@@ -1888,7 +1967,7 @@ static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_
         if (nts != STATUS_SUCCESS)
             nts = load_builtin_dll( load_path, filename, 0, flags, pwm );
         if (nts == STATUS_SUCCESS && loadorder == LO_DEFAULT &&
-            !MODULE_InitDLL( *pwm, DLL_WINE_PREATTACH, NULL ))
+            (MODULE_InitDLL( *pwm, DLL_WINE_PREATTACH, NULL ) != STATUS_SUCCESS))
         {
             /* stub-only dll, try native */
             TRACE( "%s pre-attach returned FALSE, preferring native\n", debugstr_w(filename) );
@@ -2010,6 +2089,47 @@ NTSTATUS WINAPI LdrAddRefDll( ULONG flags, HMODULE module )
 
     RtlLeaveCriticalSection( &loader_section );
     return ret;
+}
+
+
+/***********************************************************************
+ *           LdrProcessRelocationBlock  (NTDLL.@)
+ *
+ * Apply relocations to a given page of a mapped PE image.
+ */
+IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count,
+                                                          USHORT *relocs, INT_PTR delta )
+{
+    while (count--)
+    {
+        USHORT offset = *relocs & 0xfff;
+        int type = *relocs >> 12;
+        switch(type)
+        {
+        case IMAGE_REL_BASED_ABSOLUTE:
+            break;
+#ifdef __i386__
+        case IMAGE_REL_BASED_HIGH:
+            *(short *)((char *)page + offset) += HIWORD(delta);
+            break;
+        case IMAGE_REL_BASED_LOW:
+            *(short *)((char *)page + offset) += LOWORD(delta);
+            break;
+        case IMAGE_REL_BASED_HIGHLOW:
+            *(int *)((char *)page + offset) += delta;
+            break;
+#elif defined(__x86_64__)
+        case IMAGE_REL_BASED_DIR64:
+            *(INT_PTR *)((char *)page + offset) += delta;
+            break;
+#endif
+        default:
+            FIXME("Unknown/unsupported fixup type %x.\n", type);
+            return NULL;
+        }
+        relocs++;
+    }
+    return (IMAGE_BASE_RELOCATION *)relocs;  /* return address of next block */
 }
 
 
@@ -2141,7 +2261,7 @@ static void free_modref( WINE_MODREF *wm )
 
     SERVER_START_REQ( unload_dll )
     {
-        req->base = wm->ldr.BaseAddress;
+        req->base = wine_server_client_ptr( wm->ldr.BaseAddress );
         wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -2294,6 +2414,31 @@ PIMAGE_NT_HEADERS WINAPI RtlImageNtHeader(HMODULE hModule)
 }
 
 
+/***********************************************************************
+ *           attach_process_dlls
+ *
+ * Initial attach to all the dlls loaded by the process.
+ */
+static NTSTATUS attach_process_dlls( void *wm )
+{
+    NTSTATUS status;
+
+    pthread_sigmask( SIG_UNBLOCK, &server_block_set, NULL );
+
+    RtlEnterCriticalSection( &loader_section );
+    if ((status = process_attach( wm, (LPVOID)1 )) != STATUS_SUCCESS)
+    {
+        if (last_failed_modref)
+            ERR( "%s failed to initialize, aborting\n",
+                 debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
+        return status;
+    }
+    attach_implicitly_loaded_dlls( (LPVOID)1 );
+    RtlLeaveCriticalSection( &loader_section );
+    return status;
+}
+
+
 /******************************************************************
  *		LdrInitializeThunk (NTDLL.@)
  *
@@ -2325,30 +2470,20 @@ void WINAPI LdrInitializeThunk( ULONG unknown1, ULONG unknown2, ULONG unknown3, 
     RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
 
-    status = server_init_process_done();
-    if (status != STATUS_SUCCESS) goto error;
-
-    RtlEnterCriticalSection( &loader_section );
+    if ((status = virtual_alloc_thread_stack( NtCurrentTeb(), 0, 0 )) != STATUS_SUCCESS) goto error;
+    if ((status = server_init_process_done()) != STATUS_SUCCESS) goto error;
 
     actctx_init();
     load_path = NtCurrentTeb()->Peb->ProcessParameters->DllPath.Buffer;
     if ((status = fixup_imports( wm, load_path )) != STATUS_SUCCESS) goto error;
     if ((status = alloc_process_tls()) != STATUS_SUCCESS) goto error;
     if ((status = alloc_thread_tls()) != STATUS_SUCCESS) goto error;
-
-    pthread_functions.sigprocmask( SIG_UNBLOCK, &server_block_set, NULL );
-
-    if ((status = process_attach( wm, (LPVOID)1 )) != STATUS_SUCCESS)
-    {
-        if (last_failed_modref)
-            ERR( "%s failed to initialize, aborting\n", debugstr_w(last_failed_modref->ldr.BaseDllName.Buffer) + 1 );
-        goto error;
-    }
-    attach_implicitly_loaded_dlls( (LPVOID)1 );
-
-    RtlLeaveCriticalSection( &loader_section );
-
     if (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) VIRTUAL_UseLargeAddressSpace();
+
+    status = wine_call_on_stack( attach_process_dlls, wm, NtCurrentTeb()->Tib.StackBase );
+    if (status != STATUS_SUCCESS) goto error;
+
+    virtual_clear_thread_stack();
     return;
 
 error:
@@ -2476,7 +2611,7 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
  *
  * Windows and system dir initialization once kernel32 has been loaded.
  */
-void __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
+void CDECL __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir )
 {
     PLIST_ENTRY mark, entry;
     LPWSTR buffer, p;
@@ -2516,7 +2651,7 @@ void __wine_process_init(void)
     WINE_MODREF *wm;
     NTSTATUS status;
     ANSI_STRING func_name;
-    void (* DECLSPEC_NORETURN init_func)(void);
+    void (* DECLSPEC_NORETURN CDECL init_func)(void);
     extern mode_t FILE_umask;
 
     main_exe_file = thread_init();
@@ -2533,6 +2668,9 @@ void __wine_process_init(void)
         MESSAGE( "wine: could not load kernel32.dll, status %x\n", status );
         exit(1);
     }
+    RtlInitAnsiString( &func_name, "UnhandledExceptionFilter" );
+    LdrGetProcedureAddress( wm->ldr.BaseAddress, &func_name, 0, (void **)&unhandled_exception_filter );
+
     RtlInitAnsiString( &func_name, "__wine_kernel_init" );
     if ((status = LdrGetProcedureAddress( wm->ldr.BaseAddress, &func_name,
                                           0, (void **)&init_func )) != STATUS_SUCCESS)

@@ -19,17 +19,50 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-%option nounput interactive 8bit prefix="dbg_"
+%option noinput nounput interactive 8bit prefix="dbg_"
 
 %{
+#include "config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+
+#ifndef HAVE_UNISTD_H
+#define YY_NO_UNISTD_H
+#endif
 
 #include "debugger.h"
 #include "dbg.tab.h"
 
 #undef YY_INPUT
+
+static char** local_lexemes /* = NULL */;
+static int next_lexeme /* = 0 */;
+static int alloc_lexeme /* = 0 */;
+
+char* lexeme_alloc_size(int size)
+{
+    assert(0 <= next_lexeme && next_lexeme < alloc_lexeme + 1);
+    if (next_lexeme >= alloc_lexeme)
+    {
+        alloc_lexeme += 32;
+        local_lexemes = dbg_heap_realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
+        assert(local_lexemes);
+    }
+    return local_lexemes[next_lexeme++] = HeapAlloc(GetProcessHeap(), 0, size + 1);
+}
+
+static char* lexeme_alloc(const char* lexeme)
+{
+    char*       ptr = lexeme_alloc_size(strlen(lexeme) + 1);
+    return strcpy(ptr, lexeme);
+}
+
+void lexeme_flush(void)
+{
+    while (--next_lexeme >= 0) HeapFree(GetProcessHeap(), 0, local_lexemes[next_lexeme]);
+    next_lexeme = 0;
+}
 
 static int read_input(const char* pfx, char* buf, int size)
 {
@@ -178,6 +211,7 @@ STRING     \"[^\n"]+\"
 <INITIAL>whatis|whati|what		{ BEGIN(NOCMD); return tWHATIS; }
 <INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(ASTRING_EXPECTED); return tRUN;}
 <INITIAL>detach|detac|deta|det   	{ BEGIN(NOCMD); return tDETACH; }
+<INITIAL>kill|kil|ki|k                  { BEGIN(NOCMD); return tKILL; }
 <INITIAL,NOPROCESS>maintenance|maint    { BEGIN(MAINT_CMD); return tMAINTENANCE; }
 <INITIAL>minidump|mdmp                  { BEGIN(PATH_EXPECTED); return tMINIDUMP; }
 <INITIAL>echo				{ BEGIN(ASTRING_EXPECTED); return tECHO; }
@@ -228,31 +262,3 @@ all                                     { return tALL; }
 #ifndef dbg_wrap
 int dbg_wrap(void) { return 1; }
 #endif
-
-static char** local_lexemes /* = NULL */;
-static int next_lexeme /* = 0 */;
-static int alloc_lexeme /* = 0 */;
-
-char* lexeme_alloc_size(int size)
-{
-    assert(0 <= next_lexeme && next_lexeme < alloc_lexeme + 1);
-    if (next_lexeme >= alloc_lexeme)
-    {
-        alloc_lexeme += 32;
-        local_lexemes = dbg_heap_realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
-        assert(local_lexemes);
-    }
-    return local_lexemes[next_lexeme++] = HeapAlloc(GetProcessHeap(), 0, size + 1);
-}
-
-char* lexeme_alloc(const char* lexeme)
-{
-    char*       ptr = lexeme_alloc_size(strlen(lexeme) + 1);
-    return strcpy(ptr, lexeme);
-}
-
-void lexeme_flush(void)
-{
-    while (--next_lexeme >= 0) HeapFree(GetProcessHeap(), 0, local_lexemes[next_lexeme]);
-    next_lexeme = 0;
-}

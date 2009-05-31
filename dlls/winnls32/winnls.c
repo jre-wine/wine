@@ -20,7 +20,7 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wine/winuser16.h"
+#include "winnls32.h"
 
 /***********************************************************************
  *		DllMain  (WINNLS.@)
@@ -39,26 +39,17 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 }
 
 /***********************************************************************
- *		WINNLSEnableIME (WINNLS.16)
+ *		WINNLSGetEnableStatus (WINNLS32.2)
  */
-BOOL WINAPI WINNLSEnableIME16(HWND16 hWnd, BOOL fEnable)
-{
-    /* fake return of previous status. is this what this function should do ? */
-    return !fEnable;
-}
-
-/***********************************************************************
- *		WINNLSGetEnableStatus (WINNLS.18)
- */
-BOOL WINAPI WINNLSGetEnableStatus16(HWND16 hWnd)
+BOOL WINAPI WINNLSGetEnableStatus(HWND hWnd)
 {
     return FALSE;
 }
 
 /***********************************************************************
- *		WINNLS32EnableIME (WINNLS32.1)
+ *		WINNLSEnableIME (WINNLS32.1)
  */
-BOOL WINAPI WINNLS32EnableIME(HWND hWnd, BOOL fEnable)
+BOOL WINAPI WINNLSEnableIME(HWND hWnd, BOOL fEnable)
 {
     /* fake return of previous status. is this what this function should do ? */
     return !fEnable;

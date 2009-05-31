@@ -52,13 +52,16 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
-#ifdef HAVE_VALGRIND_MEMCHECK_H
-#include <valgrind/memcheck.h>
-#endif
-
 WINE_DEFAULT_DEBUG_CHANNEL(process);
 WINE_DECLARE_DEBUG_CHANNEL(file);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
+
+#ifdef __APPLE__
+extern char **__wine_get_main_environment(void);
+#else
+extern char **__wine_main_environ;
+static char **__wine_get_main_environment(void) { return __wine_main_environ; }
+#endif
 
 typedef struct
 {
@@ -271,15 +274,16 @@ static BOOL find_exe_file( const WCHAR *name, WCHAR *buffer, int buflen, HANDLE 
  *
  * Build the Win32 environment from the Unix environment
  */
-static BOOL build_initial_environment( char **environ )
+static BOOL build_initial_environment(void)
 {
     SIZE_T size = 1;
     char **e;
     WCHAR *p, *endptr;
     void *ptr;
+    char **env = __wine_get_main_environment();
 
     /* Compute the total size of the Unix environment */
-    for (e = environ; *e; e++)
+    for (e = env; *e; e++)
     {
         if (is_special_env_var( *e )) continue;
         size += MultiByteToWideChar( CP_UNIXCP, 0, *e, -1, NULL, 0 );
@@ -296,7 +300,7 @@ static BOOL build_initial_environment( char **environ )
     endptr = p + size / sizeof(WCHAR);
 
     /* And fill it with the Unix environment */
-    for (e = environ; *e; e++)
+    for (e = env; *e; e++)
     {
         char *str = *e;
 
@@ -376,7 +380,7 @@ static void set_registry_variables( HANDLE hkey, ULONG type )
  * %SystemRoot% which are predefined. But Wine defines these in the
  * registry, so we need two passes.
  */
-static void set_registry_environment(void)
+static BOOL set_registry_environment(void)
 {
     static const WCHAR env_keyW[] = {'M','a','c','h','i','n','e','\\',
                                      'S','y','s','t','e','m','\\',
@@ -389,6 +393,7 @@ static void set_registry_environment(void)
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
     HANDLE hkey;
+    BOOL ret = FALSE;
 
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
@@ -404,10 +409,11 @@ static void set_registry_environment(void)
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
         NtClose( hkey );
+        ret = TRUE;
     }
 
     /* then the ones for the current user */
-    if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &attr.RootDirectory ) != STATUS_SUCCESS) return;
+    if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
     RtlInitUnicodeString( &nameW, envW );
     if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ) == STATUS_SUCCESS)
     {
@@ -416,7 +422,52 @@ static void set_registry_environment(void)
         NtClose( hkey );
     }
     NtClose( attr.RootDirectory );
+    return ret;
 }
+
+
+/***********************************************************************
+ *           get_reg_value
+ */
+static WCHAR *get_reg_value( HKEY hkey, const WCHAR *name )
+{
+    char buffer[1024 * sizeof(WCHAR) + sizeof(KEY_VALUE_PARTIAL_INFORMATION)];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    DWORD len, size = sizeof(buffer);
+    WCHAR *ret = NULL;
+    UNICODE_STRING nameW;
+
+    RtlInitUnicodeString( &nameW, name );
+    if (NtQueryValueKey( hkey, &nameW, KeyValuePartialInformation, buffer, size, &size ))
+        return NULL;
+
+    if (size <= FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data )) return NULL;
+    len = (size - FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data )) / sizeof(WCHAR);
+
+    if (info->Type == REG_EXPAND_SZ)
+    {
+        UNICODE_STRING value, expanded;
+
+        value.MaximumLength = len * sizeof(WCHAR);
+        value.Buffer = (WCHAR *)info->Data;
+        if (!value.Buffer[len - 1]) len--;  /* don't count terminating null if any */
+        value.Length = len * sizeof(WCHAR);
+        expanded.Length = expanded.MaximumLength = 1024 * sizeof(WCHAR);
+        if (!(expanded.Buffer = HeapAlloc( GetProcessHeap(), 0, expanded.MaximumLength ))) return NULL;
+        if (!RtlExpandEnvironmentStrings_U( NULL, &value, &expanded, NULL )) ret = expanded.Buffer;
+        else RtlFreeUnicodeString( &expanded );
+    }
+    else if (info->Type == REG_SZ)
+    {
+        if ((ret = HeapAlloc( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) )))
+        {
+            memcpy( ret, info->Data, len * sizeof(WCHAR) );
+            ret[len] = 0;
+        }
+    }
+    return ret;
+}
+
 
 /***********************************************************************
  *           set_additional_environment
@@ -425,16 +476,76 @@ static void set_registry_environment(void)
  */
 static void set_additional_environment(void)
 {
+    static const WCHAR profile_keyW[] = {'M','a','c','h','i','n','e','\\',
+                                         'S','o','f','t','w','a','r','e','\\',
+                                         'M','i','c','r','o','s','o','f','t','\\',
+                                         'W','i','n','d','o','w','s',' ','N','T','\\',
+                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                         'P','r','o','f','i','l','e','L','i','s','t',0};
+    static const WCHAR profiles_valueW[] = {'P','r','o','f','i','l','e','s','D','i','r','e','c','t','o','r','y',0};
+    static const WCHAR all_users_valueW[] = {'A','l','l','U','s','e','r','s','P','r','o','f','i','l','e','\0'};
     static const WCHAR usernameW[] = {'U','S','E','R','N','A','M','E',0};
+    static const WCHAR userprofileW[] = {'U','S','E','R','P','R','O','F','I','L','E',0};
+    static const WCHAR allusersW[] = {'A','L','L','U','S','E','R','S','P','R','O','F','I','L','E',0};
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW;
+    WCHAR *user_name = NULL, *profile_dir = NULL, *all_users_dir = NULL;
+    HANDLE hkey;
     const char *name = wine_get_user_name();
-    DWORD len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
+    DWORD len;
+
+    /* set the USERNAME variable */
+
+    len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
     if (len)
     {
-        LPWSTR nameW = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
-        MultiByteToWideChar( CP_UNIXCP, 0, name, -1, nameW, len );
-        SetEnvironmentVariableW( usernameW, nameW );
-        HeapFree( GetProcessHeap(), 0, nameW );
+        user_name = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
+        MultiByteToWideChar( CP_UNIXCP, 0, name, -1, user_name, len );
+        SetEnvironmentVariableW( usernameW, user_name );
     }
+    else WARN( "user name %s not convertible.\n", debugstr_a(name) );
+
+    /* set the USERPROFILE and ALLUSERSPROFILE variables */
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &nameW, profile_keyW );
+    if (!NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ))
+    {
+        profile_dir = get_reg_value( hkey, profiles_valueW );
+        all_users_dir = get_reg_value( hkey, all_users_valueW );
+        NtClose( hkey );
+    }
+
+    if (profile_dir)
+    {
+        WCHAR *value, *p;
+
+        if (all_users_dir) len = max( len, strlenW(all_users_dir) + 1 );
+        len += strlenW(profile_dir) + 1;
+        value = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
+        strcpyW( value, profile_dir );
+        p = value + strlenW(value);
+        if (p > value && p[-1] != '\\') *p++ = '\\';
+        if (user_name) {
+            strcpyW( p, user_name );
+            SetEnvironmentVariableW( userprofileW, value );
+        }
+        if (all_users_dir)
+        {
+            strcpyW( p, all_users_dir );
+            SetEnvironmentVariableW( allusersW, value );
+        }
+        HeapFree( GetProcessHeap(), 0, value );
+    }
+
+    HeapFree( GetProcessHeap(), 0, all_users_dir );
+    HeapFree( GetProcessHeap(), 0, profile_dir );
+    HeapFree( GetProcessHeap(), 0, user_name );
 }
 
 /***********************************************************************
@@ -484,6 +595,30 @@ static void set_library_wargv( char **argv )
     __wine_main_argc = argc;
     __wine_main_argv = argv;
     __wine_main_wargv = wargv;
+}
+
+
+/***********************************************************************
+ *              update_library_argv0
+ *
+ * Update the argv[0] global variable with the binary we have found.
+ */
+static void update_library_argv0( const WCHAR *argv0 )
+{
+    DWORD len = strlenW( argv0 );
+
+    if (len > strlenW( __wine_main_wargv[0] ))
+    {
+        __wine_main_wargv[0] = RtlAllocateHeap( GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR) );
+    }
+    strcpyW( __wine_main_wargv[0], argv0 );
+
+    len = WideCharToMultiByte( CP_ACP, 0, argv0, -1, NULL, 0, NULL, NULL );
+    if (len > strlen( __wine_main_argv[0] ) + 1)
+    {
+        __wine_main_argv[0] = RtlAllocateHeap( GetProcessHeap(), 0, len );
+    }
+    WideCharToMultiByte( CP_ACP, 0, argv0, -1, __wine_main_argv[0], len, NULL, NULL );
 }
 
 
@@ -686,11 +821,11 @@ done:
  */
 static void init_windows_dirs(void)
 {
-    extern void __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir );
+    extern void CDECL __wine_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir );
 
     static const WCHAR windirW[] = {'w','i','n','d','i','r',0};
     static const WCHAR winsysdirW[] = {'w','i','n','s','y','s','d','i','r',0};
-    static const WCHAR default_windirW[] = {'c',':','\\','w','i','n','d','o','w','s',0};
+    static const WCHAR default_windirW[] = {'C',':','\\','w','i','n','d','o','w','s',0};
     static const WCHAR default_sysdirW[] = {'\\','s','y','s','t','e','m','3','2',0};
 
     DWORD len;
@@ -719,12 +854,12 @@ static void init_windows_dirs(void)
         DIR_System = buffer;
     }
 
-    if (GetFileAttributesW( DIR_Windows ) == INVALID_FILE_ATTRIBUTES)
-        MESSAGE( "Warning: the specified Windows directory %s is not accessible.\n",
-                 debugstr_w(DIR_Windows) );
-    if (GetFileAttributesW( DIR_System ) == INVALID_FILE_ATTRIBUTES)
-        MESSAGE( "Warning: the specified System directory %s is not accessible.\n",
-                 debugstr_w(DIR_System) );
+    if (!CreateDirectoryW( DIR_Windows, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_Windows), GetLastError() );
+    if (!CreateDirectoryW( DIR_System, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_System), GetLastError() );
 
     TRACE_(file)( "WindowsDir = %s\n", debugstr_w(DIR_Windows) );
     TRACE_(file)( "SystemDir  = %s\n", debugstr_w(DIR_System) );
@@ -735,79 +870,46 @@ static void init_windows_dirs(void)
 
 
 /***********************************************************************
- *           process_init
+ *           start_wineboot
  *
- * Main process initialisation code
+ * Start the wineboot process if necessary. Return the event to wait on.
  */
-static BOOL process_init(void)
+static HANDLE start_wineboot(void)
 {
-    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2',0};
-    PEB *peb = NtCurrentTeb()->Peb;
-    RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
+    static const WCHAR wineboot_eventW[] = {'_','_','w','i','n','e','b','o','o','t','_','e','v','e','n','t',0};
+    HANDLE event;
 
-    PTHREAD_Init();
-
-    setbuf(stdout,NULL);
-    setbuf(stderr,NULL);
-
-    kernel32_handle = GetModuleHandleW(kernel32W);
-
-    LOCALE_Init();
-
-    if (!params->Environment)
+    if (!(event = CreateEventW( NULL, TRUE, FALSE, wineboot_eventW )))
     {
-        /* Copy the parent environment */
-        if (!build_initial_environment( __wine_main_environ )) return FALSE;
-
-        /* convert old configuration to new format */
-        convert_old_config();
-
-        set_registry_environment();
-        set_additional_environment();
+        ERR( "failed to create wineboot event, expect trouble\n" );
+        return 0;
     }
-
-    init_windows_dirs();
-    init_current_directory( &params->CurrentDirectory );
-
-    return TRUE;
-}
-
-
-/***********************************************************************
- *           init_stack
- *
- * Allocate the stack of new process.
- */
-static void *init_stack(void)
-{
-    void *base;
-    SIZE_T stack_size, page_size = getpagesize();
-    IMAGE_NT_HEADERS *nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress );
-
-    stack_size = max( nt->OptionalHeader.SizeOfStackReserve, nt->OptionalHeader.SizeOfStackCommit );
-    stack_size += page_size;  /* for the guard page */
-    stack_size = (stack_size + 0xffff) & ~0xffff;  /* round to 64K boundary */
-    if (stack_size < 1024 * 1024) stack_size = 1024 * 1024;  /* Xlib needs a large stack */
-
-    if (!(base = VirtualAlloc( NULL, stack_size, MEM_COMMIT, PAGE_READWRITE )))
+    if (GetLastError() != ERROR_ALREADY_EXISTS)  /* we created it */
     {
-        ERR( "failed to allocate main process stack\n" );
-        ExitProcess( 1 );
+        static const WCHAR command_line[] = {'\\','w','i','n','e','b','o','o','t','.','e','x','e',' ','-','-','i','n','i','t',0};
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        WCHAR cmdline[MAX_PATH + sizeof(command_line)/sizeof(WCHAR)];
+
+        memset( &si, 0, sizeof(si) );
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdInput  = 0;
+        si.hStdOutput = 0;
+        si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
+
+        GetSystemDirectoryW( cmdline, MAX_PATH );
+        lstrcatW( cmdline, command_line );
+        if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
+        {
+            TRACE( "started wineboot pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
+            CloseHandle( pi.hThread );
+            CloseHandle( pi.hProcess );
+
+        }
+        else ERR( "failed to start wineboot, err %u\n", GetLastError() );
     }
-
-    /* note: limit is lower than base since the stack grows down */
-    NtCurrentTeb()->DeallocationStack = base;
-    NtCurrentTeb()->Tib.StackBase     = (char *)base + stack_size;
-    NtCurrentTeb()->Tib.StackLimit    = (char *)base + page_size;
-
-#ifdef VALGRIND_STACK_REGISTER
-    /* no need to de-register the stack as it's the one of the main thread */
-    VALGRIND_STACK_REGISTER(NtCurrentTeb()->Tib.StackLimit, NtCurrentTeb()->Tib.StackBase);
-#endif
-
-    /* setup guard page */
-    VirtualProtect( base, page_size, PAGE_NOACCESS, NULL );
-    return NtCurrentTeb()->Tib.StackBase;
+    return event;
 }
 
 
@@ -824,11 +926,16 @@ static void start_process( void *arg )
         IMAGE_NT_HEADERS *nt;
         LPTHREAD_START_ROUTINE entry;
 
-        LdrInitializeThunk( 0, 0, 0, 0 );
-
         nt = RtlImageNtHeader( peb->ImageBaseAddress );
         entry = (LPTHREAD_START_ROUTINE)((char *)peb->ImageBaseAddress +
                                          nt->OptionalHeader.AddressOfEntryPoint);
+
+        if (!nt->OptionalHeader.AddressOfEntryPoint)
+        {
+            ERR( "%s doesn't have an entry point, it cannot be executed\n",
+                 debugstr_w(peb->ProcessParameters->ImagePathName.Buffer) );
+            ExitThread( 1 );
+        }
 
         if (TRACE_ON(relay))
             DPRINTF( "%04x:Starting process %s (entryproc=%p)\n", GetCurrentThreadId(),
@@ -853,6 +960,10 @@ static void start_process( void *arg )
  */
 static void set_process_name( int argc, char *argv[] )
 {
+#ifdef HAVE_SETPROCTITLE
+    setproctitle("-%s", argv[1]);
+#endif
+
 #ifdef HAVE_PRCTL
     int i, offset;
     char *p, *prctl_name = argv[1];
@@ -887,16 +998,41 @@ static void set_process_name( int argc, char *argv[] )
  *
  * Wine initialisation: load and start the main exe file.
  */
-void __wine_kernel_init(void)
+void CDECL __wine_kernel_init(void)
 {
+    static const WCHAR kernel32W[] = {'k','e','r','n','e','l','3','2',0};
     static const WCHAR dotW[] = {'.',0};
     static const WCHAR exeW[] = {'.','e','x','e',0};
 
     WCHAR *p, main_exe_name[MAX_PATH+1];
     PEB *peb = NtCurrentTeb()->Peb;
+    RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
+    HANDLE boot_event = 0;
+    BOOL got_environment = TRUE;
 
     /* Initialize everything */
-    if (!process_init()) exit(1);
+
+    setbuf(stdout,NULL);
+    setbuf(stderr,NULL);
+    kernel32_handle = GetModuleHandleW(kernel32W);
+
+    LOCALE_Init();
+
+    if (!params->Environment)
+    {
+        /* Copy the parent environment */
+        if (!build_initial_environment()) exit(1);
+
+        /* convert old configuration to new format */
+        convert_old_config();
+
+        got_environment = set_registry_environment();
+        set_additional_environment();
+    }
+
+    init_windows_dirs();
+    init_current_directory( &params->CurrentDirectory );
+
     set_process_name( __wine_main_argc, __wine_main_argv );
     set_library_wargv( __wine_main_argv );
 
@@ -912,7 +1048,9 @@ void __wine_kernel_init(void)
             MESSAGE( "wine: cannot find '%s'\n", __wine_main_argv[0] );
             ExitProcess( GetLastError() );
         }
+        update_library_argv0( main_exe_name );
         if (!build_command_line( __wine_main_wargv )) goto error;
+        boot_event = start_wineboot();
     }
 
     /* if there's no extension, append a dot to prevent LoadLibrary from appending .dll */
@@ -924,6 +1062,18 @@ void __wine_kernel_init(void)
 
     RtlInitUnicodeString( &NtCurrentTeb()->Peb->ProcessParameters->DllPath,
                           MODULE_get_dll_load_path(main_exe_name) );
+
+    if (boot_event)
+    {
+        if (WaitForSingleObject( boot_event, 30000 )) ERR( "boot event wait timed out\n" );
+        CloseHandle( boot_event );
+        /* if we didn't find environment section, try again now that wineboot has run */
+        if (!got_environment)
+        {
+            set_registry_environment();
+            set_additional_environment();
+        }
+    }
 
     if (!(peb->ImageBaseAddress = LoadLibraryExW( main_exe_name, 0, DONT_RESOLVE_DLL_REFERENCES )))
     {
@@ -938,14 +1088,26 @@ void __wine_kernel_init(void)
             if (!getenv("WINEPRELOADRESERVE")) exec_process( main_exe_name );
             /* if we get back here, it failed */
         }
-
+        else if (error == ERROR_MOD_NOT_FOUND)
+        {
+            if ((p = strrchrW( main_exe_name, '\\' ))) p++;
+            else p = main_exe_name;
+            if (!strcmpiW( p, winevdmW ) && __wine_main_argc > 3)
+            {
+                /* args 1 and 2 are --app-name full_path */
+                MESSAGE( "wine: could not run %s: 16-bit/DOS support missing\n",
+                         debugstr_w(__wine_main_wargv[3]) );
+                ExitProcess( ERROR_BAD_EXE_FORMAT );
+            }
+        }
         FormatMessageA( FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, 0, msg, sizeof(msg), NULL );
         MESSAGE( "wine: could not load %s: %s", debugstr_w(main_exe_name), msg );
         ExitProcess( error );
     }
 
+    LdrInitializeThunk( 0, 0, 0, 0 );
     /* switch to the new stack */
-    wine_switch_to_stack( start_process, NULL, init_stack() );
+    wine_switch_to_stack( start_process, NULL, NtCurrentTeb()->Tib.StackBase );
 
  error:
     ExitProcess( GetLastError() );
@@ -966,7 +1128,7 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
     int in_quotes,bcount,len;
 
     len = WideCharToMultiByte( CP_UNIXCP, 0, cmdlineW, -1, NULL, 0, NULL, NULL );
-    if (!(cmdline = malloc(len))) return NULL;
+    if (!(cmdline = HeapAlloc( GetProcessHeap(), 0, len ))) return NULL;
     WideCharToMultiByte( CP_UNIXCP, 0, cmdlineW, -1, cmdline, len, NULL, NULL );
 
     argc=reserved+1;
@@ -998,11 +1160,14 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
         }
         s++;
     }
-    argv=malloc(argc*sizeof(*argv));
-    if (!argv)
+    if (!(argv = HeapAlloc( GetProcessHeap(), 0, argc*sizeof(*argv) + len )))
+    {
+        HeapFree( GetProcessHeap(), 0, cmdline );
         return NULL;
+    }
 
-    arg=d=s=cmdline;
+    arg = d = s = (char *)(argv + argc);
+    memcpy( d, cmdline, len );
     bcount=0;
     in_quotes=0;
     argc=reserved;
@@ -1054,22 +1219,10 @@ static char **build_argv( const WCHAR *cmdlineW, int reserved )
     }
     argv[argc]=NULL;
 
+    HeapFree( GetProcessHeap(), 0, cmdline );
     return argv;
 }
 
-
-/***********************************************************************
- *           alloc_env_string
- *
- * Allocate an environment string; helper for build_envp
- */
-static char *alloc_env_string( const char *name, const char *value )
-{
-    char *ret = malloc( strlen(name) + strlen(value) + 1 );
-    strcpy( ret, name );
-    strcat( ret, value );
-    return ret;
-}
 
 /***********************************************************************
  *           build_envp
@@ -1078,41 +1231,66 @@ static char *alloc_env_string( const char *name, const char *value )
  */
 static char **build_envp( const WCHAR *envW )
 {
+    static const char * const unix_vars[] = { "PATH", "TEMP", "TMP", "HOME" };
+
     const WCHAR *end;
     char **envp;
     char *env, *p;
-    int count = 0, length;
+    int count = 1, length;
+    unsigned int i;
 
     for (end = envW; *end; count++) end += strlenW(end) + 1;
     end++;
     length = WideCharToMultiByte( CP_UNIXCP, 0, envW, end - envW, NULL, 0, NULL, NULL );
-    if (!(env = malloc( length ))) return NULL;
+    if (!(env = HeapAlloc( GetProcessHeap(), 0, length ))) return NULL;
     WideCharToMultiByte( CP_UNIXCP, 0, envW, end - envW, env, length, NULL, NULL );
 
-    count += 4;
+    for (p = env; *p; p += strlen(p) + 1)
+        if (is_special_env_var( p )) length += 4; /* prefix it with "WINE" */
 
-    if ((envp = malloc( count * sizeof(*envp) )))
+    for (i = 0; i < sizeof(unix_vars)/sizeof(unix_vars[0]); i++)
+    {
+        if (!(p = getenv(unix_vars[i]))) continue;
+        length += strlen(unix_vars[i]) + strlen(p) + 2;
+        count++;
+    }
+
+    if ((envp = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*envp) + length )))
     {
         char **envptr = envp;
+        char *dst = (char *)(envp + count);
 
         /* some variables must not be modified, so we get them directly from the unix env */
-        if ((p = getenv("PATH"))) *envptr++ = alloc_env_string( "PATH=", p );
-        if ((p = getenv("TEMP"))) *envptr++ = alloc_env_string( "TEMP=", p );
-        if ((p = getenv("TMP")))  *envptr++ = alloc_env_string( "TMP=", p );
-        if ((p = getenv("HOME"))) *envptr++ = alloc_env_string( "HOME=", p );
+        for (i = 0; i < sizeof(unix_vars)/sizeof(unix_vars[0]); i++)
+        {
+            if (!(p = getenv(unix_vars[i]))) continue;
+            *envptr++ = strcpy( dst, unix_vars[i] );
+            strcat( dst, "=" );
+            strcat( dst, p );
+            dst += strlen(dst) + 1;
+        }
+
         /* now put the Windows environment strings */
         for (p = env; *p; p += strlen(p) + 1)
         {
             if (*p == '=') continue;  /* skip drive curdirs, this crashes some unix apps */
             if (!strncmp( p, "WINEPRELOADRESERVE=", sizeof("WINEPRELOADRESERVE=")-1 )) continue;
+            if (!strncmp( p, "WINELOADERNOEXEC=", sizeof("WINELOADERNOEXEC=")-1 )) continue;
             if (!strncmp( p, "WINESERVERSOCKET=", sizeof("WINESERVERSOCKET=")-1 )) continue;
             if (is_special_env_var( p ))  /* prefix it with "WINE" */
-                *envptr++ = alloc_env_string( "WINE", p );
+            {
+                *envptr++ = strcpy( dst, "WINE" );
+                strcat( dst, p );
+            }
             else
-                *envptr++ = p;
+            {
+                *envptr++ = strcpy( dst, p );
+            }
+            dst += strlen(dst) + 1;
         }
         *envptr = 0;
     }
+    HeapFree( GetProcessHeap(), 0, env );
     return envp;
 }
 
@@ -1122,11 +1300,12 @@ static char **build_envp( const WCHAR *envW )
  *
  * Fork and exec a new Unix binary, checking for errors.
  */
-static int fork_and_exec( const char *filename, const WCHAR *cmdline,
-                          const WCHAR *env, const char *newdir, DWORD flags )
+static int fork_and_exec( const char *filename, const WCHAR *cmdline, const WCHAR *env,
+                          const char *newdir, DWORD flags, STARTUPINFOW *startup )
 {
-    int fd[2];
+    int fd[2], stdin_fd = -1, stdout_fd = -1;
     int pid, err;
+    char **argv, **envp;
 
     if (!env) env = GetEnvironmentStringsW();
 
@@ -1136,13 +1315,67 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline,
         return -1;
     }
     fcntl( fd[1], F_SETFD, 1 );  /* set close on exec */
+
+    if (!(flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS)))
+    {
+        HANDLE hstdin, hstdout;
+
+        if (startup->dwFlags & STARTF_USESTDHANDLES)
+        {
+            hstdin = startup->hStdInput;
+            hstdout = startup->hStdOutput;
+        }
+        else
+        {
+            hstdin = GetStdHandle(STD_INPUT_HANDLE);
+            hstdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        }
+
+        if (is_console_handle( hstdin ))
+            hstdin = wine_server_ptr_handle( console_handle_unmap( hstdin ));
+        if (is_console_handle( hstdout ))
+            hstdout = wine_server_ptr_handle( console_handle_unmap( hstdout ));
+        wine_server_handle_to_fd( hstdin, FILE_READ_DATA, &stdin_fd, NULL );
+        wine_server_handle_to_fd( hstdout, FILE_WRITE_DATA, &stdout_fd, NULL );
+    }
+
+    argv = build_argv( cmdline, 0 );
+    envp = build_envp( env );
+
     if (!(pid = fork()))  /* child */
     {
-        char **argv = build_argv( cmdline, 0 );
-        char **envp = build_envp( env );
         close( fd[0] );
 
-        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS)) setsid();
+        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
+        {
+            int pid;
+            if (!(pid = fork()))
+            {
+                int fd = open( "/dev/null", O_RDWR );
+                setsid();
+                /* close stdin and stdout */
+                if (fd != -1)
+                {
+                    dup2( fd, 0 );
+                    dup2( fd, 1 );
+                    close( fd );
+                }
+            }
+            else if (pid != -1) _exit(0);  /* parent */
+        }
+        else
+        {
+            if (stdin_fd != -1)
+            {
+                dup2( stdin_fd, 0 );
+                close( stdin_fd );
+            }
+            if (stdout_fd != -1)
+            {
+                dup2( stdout_fd, 1 );
+                close( stdout_fd );
+            }
+        }
 
         /* Reset signals that we previously set to SIG_IGN */
         signal( SIGPIPE, SIG_DFL );
@@ -1155,6 +1388,10 @@ static int fork_and_exec( const char *filename, const WCHAR *cmdline,
         write( fd[1], &err, sizeof(err) );
         _exit(1);
     }
+    HeapFree( GetProcessHeap(), 0, argv );
+    HeapFree( GetProcessHeap(), 0, envp );
+    if (stdin_fd != -1) close( stdin_fd );
+    if (stdout_fd != -1) close( stdout_fd );
     close( fd[1] );
     if ((pid != -1) && (read( fd[0], &err, sizeof(err) ) > 0))  /* exec failed */
     {
@@ -1262,11 +1499,12 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
                             void *res_start, void *res_end, int exec_only )
 {
     BOOL ret, success = FALSE;
-    HANDLE process_info;
+    HANDLE process_info, hstdin, hstdout;
     WCHAR *env_end;
     char *winedebug = NULL;
+    char **argv;
     RTL_USER_PROCESS_PARAMETERS *params;
-    int socketfd[2];
+    int socketfd[2], stdin_fd = -1, stdout_fd = -1;
     pid_t pid;
     int err;
 
@@ -1311,27 +1549,30 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
         req->inherit_all    = inherit;
         req->create_flags   = flags;
         req->socket_fd      = socketfd[1];
-        req->exe_file       = hFile;
+        req->exe_file       = wine_server_obj_handle( hFile );
         req->process_access = PROCESS_ALL_ACCESS;
         req->process_attr   = (psa && (psa->nLength >= sizeof(*psa)) && psa->bInheritHandle) ? OBJ_INHERIT : 0;
         req->thread_access  = THREAD_ALL_ACCESS;
         req->thread_attr    = (tsa && (tsa->nLength >= sizeof(*tsa)) && tsa->bInheritHandle) ? OBJ_INHERIT : 0;
-        req->hstdin         = params->hStdInput;
-        req->hstdout        = params->hStdOutput;
-        req->hstderr        = params->hStdError;
+        req->hstdin         = wine_server_obj_handle( params->hStdInput );
+        req->hstdout        = wine_server_obj_handle( params->hStdOutput );
+        req->hstderr        = wine_server_obj_handle( params->hStdError );
 
         if ((flags & (CREATE_NEW_CONSOLE | DETACHED_PROCESS)) != 0)
         {
             /* this is temporary (for console handles). We have no way to control that the handle is invalid in child process otherwise */
-            if (is_console_handle(req->hstdin))  req->hstdin  = INVALID_HANDLE_VALUE;
-            if (is_console_handle(req->hstdout)) req->hstdout = INVALID_HANDLE_VALUE;
-            if (is_console_handle(req->hstderr)) req->hstderr = INVALID_HANDLE_VALUE;
+            if (is_console_handle(params->hStdInput))  req->hstdin  = wine_server_obj_handle( INVALID_HANDLE_VALUE );
+            if (is_console_handle(params->hStdOutput)) req->hstdout = wine_server_obj_handle( INVALID_HANDLE_VALUE );
+            if (is_console_handle(params->hStdError))  req->hstderr = wine_server_obj_handle( INVALID_HANDLE_VALUE );
+            hstdin = hstdout = 0;
         }
         else
         {
-            if (is_console_handle(req->hstdin))  req->hstdin  = console_handle_unmap(req->hstdin);
-            if (is_console_handle(req->hstdout)) req->hstdout = console_handle_unmap(req->hstdout);
-            if (is_console_handle(req->hstderr)) req->hstderr = console_handle_unmap(req->hstderr);
+            if (is_console_handle(params->hStdInput))  req->hstdin  = console_handle_unmap(params->hStdInput);
+            if (is_console_handle(params->hStdOutput)) req->hstdout = console_handle_unmap(params->hStdOutput);
+            if (is_console_handle(params->hStdError))  req->hstderr = console_handle_unmap(params->hStdError);
+            hstdin  = wine_server_ptr_handle( req->hstdin );
+            hstdout = wine_server_ptr_handle( req->hstdout );
         }
 
         wine_server_add_data( req, params, params->Size );
@@ -1340,10 +1581,10 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
         {
             info->dwProcessId = (DWORD)reply->pid;
             info->dwThreadId  = (DWORD)reply->tid;
-            info->hProcess    = reply->phandle;
-            info->hThread     = reply->thandle;
+            info->hProcess    = wine_server_ptr_handle( reply->phandle );
+            info->hThread     = wine_server_ptr_handle( reply->thandle );
         }
-        process_info = reply->info;
+        process_info = wine_server_ptr_handle( reply->info );
     }
     SERVER_END_REQ;
 
@@ -1356,14 +1597,40 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
         return FALSE;
     }
 
+    if (hstdin) wine_server_handle_to_fd( hstdin, FILE_READ_DATA, &stdin_fd, NULL );
+    if (hstdout) wine_server_handle_to_fd( hstdout, FILE_WRITE_DATA, &stdout_fd, NULL );
+
     /* create the child process */
+    argv = build_argv( cmd_line, 1 );
 
     if (exec_only || !(pid = fork()))  /* child */
     {
         char preloader_reserve[64], socket_env[64];
-        char **argv = build_argv( cmd_line, 1 );
 
-        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS)) setsid();
+        if (flags & (CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE | DETACHED_PROCESS))
+        {
+            if (!(pid = fork()))
+            {
+                int fd = open( "/dev/null", O_RDWR );
+                setsid();
+                /* close stdin and stdout */
+                if (fd != -1)
+                {
+                    dup2( fd, 0 );
+                    dup2( fd, 1 );
+                    close( fd );
+                }
+            }
+            else if (pid != -1) _exit(0);  /* parent */
+        }
+        else
+        {
+            if (stdin_fd != -1) dup2( stdin_fd, 0 );
+            if (stdout_fd != -1) dup2( stdout_fd, 1 );
+        }
+
+        if (stdin_fd != -1) close( stdin_fd );
+        if (stdout_fd != -1) close( stdout_fd );
 
         /* Reset signals that we previously set to SIG_IGN */
         signal( SIGPIPE, SIG_DFL );
@@ -1384,7 +1651,10 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
 
     /* this is the parent */
 
+    if (stdin_fd != -1) close( stdin_fd );
+    if (stdout_fd != -1) close( stdout_fd );
     close( socketfd[0] );
+    HeapFree( GetProcessHeap(), 0, argv );
     HeapFree( GetProcessHeap(), 0, winedebug );
     if (pid == -1)
     {
@@ -1397,7 +1667,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     WaitForSingleObject( process_info, INFINITE );
     SERVER_START_REQ( get_new_process_info )
     {
-        req->info = process_info;
+        req->info = wine_server_obj_handle( process_info );
         wine_server_call( req );
         success = reply->success;
         err = reply->exit_code;
@@ -1737,7 +2007,7 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
 
             if ((unix_name = wine_get_unix_file_name( name )))
             {
-                retv = (fork_and_exec( unix_name, tidy_cmdline, envW, unixdir, flags ) != -1);
+                retv = (fork_and_exec( unix_name, tidy_cmdline, envW, unixdir, flags, startup_info ) != -1);
                 HeapFree( GetProcessHeap(), 0, unix_name );
             }
         }
@@ -1749,6 +2019,8 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
     if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
     if (envW != env) HeapFree( GetProcessHeap(), 0, envW );
     HeapFree( GetProcessHeap(), 0, unixdir );
+    if (retv)
+        TRACE( "started process pid %04x tid %04x\n", info->dwProcessId, info->dwThreadId );
     return retv;
 }
 
@@ -1941,7 +2213,6 @@ BOOL WINAPI TerminateProcess( HANDLE handle, DWORD exit_code )
     return !status;
 }
 
-
 /***********************************************************************
  *           ExitProcess   (KERNEL32.@)
  *
@@ -1953,6 +2224,26 @@ BOOL WINAPI TerminateProcess( HANDLE handle, DWORD exit_code )
  * RETURNS
  *  Nothing.
  */
+#ifdef __i386__
+__ASM_GLOBAL_FUNC( ExitProcess, /* Shrinker depend on this particular ExitProcess implementation */
+                   "pushl %ebp\n\t"
+                   ".byte 0x8B, 0xEC\n\t" /* movl %esp, %ebp */
+                   ".byte 0x6A, 0x00\n\t" /* pushl $0 */
+                   ".byte 0x68, 0x00, 0x00, 0x00, 0x00\n\t" /* pushl $0 - 4 bytes immediate */
+                   "pushl 8(%ebp)\n\t"
+                   "call " __ASM_NAME("process_ExitProcess") "\n\t"
+                   "leave\n\t"
+                   "ret $4" )
+
+void WINAPI process_ExitProcess( DWORD status )
+{
+    LdrShutdownProcess();
+    NtTerminateProcess(GetCurrentProcess(), status);
+    exit(status);
+}
+
+#else
+
 void WINAPI ExitProcess( DWORD status )
 {
     LdrShutdownProcess();
@@ -1960,6 +2251,7 @@ void WINAPI ExitProcess( DWORD status )
     exit(status);
 }
 
+#endif
 
 /***********************************************************************
  * GetExitCodeProcess           [KERNEL32.@]
@@ -2001,6 +2293,13 @@ UINT WINAPI SetErrorMode( UINT mode )
     return old;
 }
 
+/***********************************************************************
+ *           GetErrorMode   (KERNEL32.@)
+ */
+UINT WINAPI GetErrorMode( void )
+{
+    return process_error_mode;
+}
 
 /**********************************************************************
  * TlsAlloc             [KERNEL32.@]
@@ -2608,7 +2907,7 @@ BOOL WINAPI SetProcessAffinityMask( HANDLE hProcess, DWORD_PTR affmask )
 
     status = NtSetInformationProcess(hProcess, ProcessAffinityMask,
                                      &affmask, sizeof(DWORD_PTR));
-    if (!status)
+    if (status)
     {
         SetLastError( RtlNtStatusToDosError(status) );
         return FALSE;
@@ -2636,8 +2935,7 @@ BOOL WINAPI GetProcessAffinityMask( HANDLE hProcess,
         return FALSE;
     }
     if (lpProcessAffinityMask) *lpProcessAffinityMask = pbi.AffinityMask;
-    /* FIXME */
-    if (lpSystemAffinityMask)  *lpSystemAffinityMask = 1;
+    if (lpSystemAffinityMask)  *lpSystemAffinityMask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
     return TRUE;
 }
 
@@ -2645,19 +2943,55 @@ BOOL WINAPI GetProcessAffinityMask( HANDLE hProcess,
 /***********************************************************************
  *           GetProcessVersion    (KERNEL32.@)
  */
-DWORD WINAPI GetProcessVersion( DWORD processid )
+DWORD WINAPI GetProcessVersion( DWORD pid )
 {
-    IMAGE_NT_HEADERS *nt;
+    HANDLE process;
+    NTSTATUS status;
+    PROCESS_BASIC_INFORMATION pbi;
+    SIZE_T count;
+    PEB peb;
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS nt;
+    DWORD ver = 0;
 
-    if (processid && processid != GetCurrentProcessId())
+    if (!pid || pid == GetCurrentProcessId())
     {
-        FIXME("should use ReadProcessMemory\n");
+        IMAGE_NT_HEADERS *nt;
+
+        if ((nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress )))
+            return ((nt->OptionalHeader.MajorSubsystemVersion << 16) |
+                    nt->OptionalHeader.MinorSubsystemVersion);
         return 0;
     }
-    if ((nt = RtlImageNtHeader( NtCurrentTeb()->Peb->ImageBaseAddress )))
-        return ((nt->OptionalHeader.MajorSubsystemVersion << 16) |
-                nt->OptionalHeader.MinorSubsystemVersion);
-    return 0;
+
+    process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!process) return 0;
+
+    status = NtQueryInformationProcess(process, ProcessBasicInformation, &pbi, sizeof(pbi), NULL);
+    if (status) goto err;
+
+    status = NtReadVirtualMemory(process, pbi.PebBaseAddress, &peb, sizeof(peb), &count);
+    if (status || count != sizeof(peb)) goto err;
+
+    memset(&dos, 0, sizeof(dos));
+    status = NtReadVirtualMemory(process, peb.ImageBaseAddress, &dos, sizeof(dos), &count);
+    if (status || count != sizeof(dos)) goto err;
+    if (dos.e_magic != IMAGE_DOS_SIGNATURE) goto err;
+
+    memset(&nt, 0, sizeof(nt));
+    status = NtReadVirtualMemory(process, (char *)peb.ImageBaseAddress + dos.e_lfanew, &nt, sizeof(nt), &count);
+    if (status || count != sizeof(nt)) goto err;
+    if (nt.Signature != IMAGE_NT_SIGNATURE) goto err;
+
+    ver = MAKELONG(nt.OptionalHeader.MinorSubsystemVersion, nt.OptionalHeader.MajorSubsystemVersion);
+
+err:
+    CloseHandle(process);
+
+    if (status != STATUS_SUCCESS)
+        SetLastError(RtlNtStatusToDosError(status));
+
+    return ver;
 }
 
 
@@ -2809,6 +3143,62 @@ BOOL WINAPI GetProcessHandleCount(HANDLE hProcess, DWORD *cnt)
     return !status;
 }
 
+/******************************************************************
+ *		QueryFullProcessImageNameW (KERNEL32.@)
+ */
+BOOL WINAPI QueryFullProcessImageNameW(HANDLE hProcess, DWORD dwFlags, LPWSTR lpExeName, PDWORD pdwSize)
+{
+    BYTE buffer[sizeof(UNICODE_STRING) + MAX_PATH*sizeof(WCHAR)];  /* this buffer should be enough */
+    UNICODE_STRING *dynamic_buffer = NULL;
+    UNICODE_STRING nt_path;
+    UNICODE_STRING *result = NULL;
+    NTSTATUS status;
+    DWORD needed;
+
+    RtlInitUnicodeStringEx(&nt_path, NULL);
+    /* FIXME: On Windows, ProcessImageFileName return an NT path. We rely that it being a DOS path,
+     * as this is on Wine. */
+    status = NtQueryInformationProcess(hProcess, ProcessImageFileName, buffer,
+                                       sizeof(buffer) - sizeof(WCHAR), &needed);
+    if (status == STATUS_INFO_LENGTH_MISMATCH)
+    {
+        dynamic_buffer = HeapAlloc(GetProcessHeap(), 0, needed + sizeof(WCHAR));
+        status = NtQueryInformationProcess(hProcess, ProcessImageFileName, (LPBYTE)dynamic_buffer, needed, &needed);
+        result = dynamic_buffer;
+    }
+    else
+        result = (PUNICODE_STRING)buffer;
+
+    if (status) goto cleanup;
+
+    if (dwFlags & PROCESS_NAME_NATIVE)
+    {
+        result->Buffer[result->Length / sizeof(WCHAR)] = 0;
+        if (!RtlDosPathNameToNtPathName_U(result->Buffer, &nt_path, NULL, NULL))
+        {
+            status = STATUS_OBJECT_PATH_NOT_FOUND;
+            goto cleanup;
+        }
+        result = &nt_path;
+    }
+
+    if (result->Length/sizeof(WCHAR) + 1 > *pdwSize)
+    {
+        status = STATUS_BUFFER_TOO_SMALL;
+        goto cleanup;
+    }
+
+    *pdwSize = result->Length/sizeof(WCHAR);
+    memcpy( lpExeName, result->Buffer, result->Length );
+    lpExeName[*pdwSize] = 0;
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, dynamic_buffer);
+    RtlFreeUnicodeString(&nt_path);
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
 /***********************************************************************
  * ProcessIdToSessionId   (KERNEL32.@)
  * This function is available on Terminal Server 4SP4 and Windows 2000
@@ -2842,8 +3232,17 @@ DWORD WINAPI RegisterServiceProcess(DWORD dwProcessId, DWORD dwType)
  */
 BOOL WINAPI IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 {
-    FIXME("(%p %p) stub!\n", hProcess, Wow64Process);
-    *Wow64Process = FALSE;
+    ULONG pbi;
+    NTSTATUS status;
+
+    status = NtQueryInformationProcess( hProcess, ProcessWow64Information, &pbi, sizeof(pbi), NULL );
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError( status ) );
+        return FALSE;
+    }
+    *Wow64Process = (pbi != 0);
     return TRUE;
 }
 
@@ -2862,7 +3261,7 @@ BOOL WINAPI IsWow64Process(HANDLE hProcess, PBOOL Wow64Process)
 #undef GetCurrentProcess
 HANDLE WINAPI GetCurrentProcess(void)
 {
-    return (HANDLE)0xffffffff;
+    return (HANDLE)~(ULONG_PTR)0;
 }
 
 /***********************************************************************
@@ -2881,4 +3280,15 @@ BOOL WINAPI CmdBatNotification( BOOL bBatchRunning )
 {
     FIXME("%d\n", bBatchRunning);
     return FALSE;
+}
+
+
+/***********************************************************************
+ *           RegisterApplicationRestart       (KERNEL32.@)
+ */
+HRESULT WINAPI RegisterApplicationRestart(PCWSTR pwzCommandLine, DWORD dwFlags)
+{
+    FIXME("(%s,%d)\n", debugstr_w(pwzCommandLine), dwFlags);
+
+    return S_OK;
 }

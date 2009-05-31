@@ -39,6 +39,7 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
  * in one of the specific files.
  */
 #include "avifile_Cs.rc"
+#include "avifile_Da.rc"
 #include "avifile_De.rc"
 #include "avifile_En.rc"
 #include "avifile_Es.rc"
@@ -55,3 +56,5 @@ LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 #include "avifile_Si.rc"
 #include "avifile_Sv.rc"
 #include "avifile_Tr.rc"
+#include "avifile_Uk.rc"
+#include "avifile_Zh.rc"

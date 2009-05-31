@@ -56,12 +56,12 @@ BEGIN
 	  MENUITEM "Aktualisieren",		FCIDM_SHVIEW_REFRESH
 	  MENUITEM SEPARATOR
 	  MENUITEM "Einfügen",		FCIDM_SHVIEW_INSERT
-	  MENUITEM "Einfügen als Verweis",	FCIDM_SHVIEW_INSERTLINK
+	  MENUITEM "Einfügen als Verknüpfung",	FCIDM_SHVIEW_INSERTLINK
 	  MENUITEM SEPARATOR
 	  POPUP "Neu"
 	  BEGIN
 	    MENUITEM "Neues Ver&zeichnis",	FCIDM_SHVIEW_NEWFOLDER
-	    MENUITEM "Neuer Ver&weis",	FCIDM_SHVIEW_NEWLINK
+	    MENUITEM "Neue Ver&knüpfung",	FCIDM_SHVIEW_NEWLINK
 	    MENUITEM SEPARATOR
 	  END
 	  MENUITEM SEPARATOR
@@ -76,19 +76,41 @@ MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
-	  MENUITEM "&Select"		FCIDM_SHVIEW_OPEN
+	  MENUITEM "Aus&wählen"		FCIDM_SHVIEW_OPEN
 	  MENUITEM "E&rkunden",		FCIDM_SHVIEW_EXPLORE
-	  MENUITEM "&Öffnen",		FCIDM_SHVIEW_OPEN
+	  MENUITEM "&Öffnen"		FCIDM_SHVIEW_OPEN
 	  MENUITEM SEPARATOR
 	  MENUITEM "&Ausschneiden",		FCIDM_SHVIEW_CUT
 	  MENUITEM "&Kopieren",		FCIDM_SHVIEW_COPY
 	  MENUITEM SEPARATOR
-	  MENUITEM "Erstelle Ver&weis",	FCIDM_SHVIEW_CREATELINK
+	  MENUITEM "&Verknüpfung erzeugen",	FCIDM_SHVIEW_CREATELINK
 	  MENUITEM "&Löschen",		FCIDM_SHVIEW_DELETE
 	  MENUITEM "&Umbenennen",		FCIDM_SHVIEW_RENAME
 	  MENUITEM SEPARATOR
 	  MENUITEM "&Eigenschaften",	FCIDM_SHVIEW_PROPERTIES
 	END
+END
+
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Große Symbole", FCIDM_SHVIEW_BIGICON
+        MENUITEM "&Kleine Symbole", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&Liste", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "&Details", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+    END
 END
 
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
@@ -104,6 +126,24 @@ FONT 8, "MS Shell Dlg"
  	TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
 	WS_BORDER | WS_TABSTOP,
 	4, 40, 180, 120
+}
+
+SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+CAPTION "Verzeichnis auswählen"
+FONT 8, "MS Shell Dlg"
+{
+ LTEXT "", IDD_TITLE, 10, 8, 198, 24
+ LTEXT "", IDD_STATUS, 10, 25, 198, 12
+ LTEXT "Verzeichnis:", IDD_FOLDER, 10, 156, 40, 12
+ CONTROL "", IDD_TREEVIEW, "SysTreeView32",
+        TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+        WS_BORDER | WS_TABSTOP,
+        12, 38, 194, 105
+ EDITTEXT IDD_FOLDERTEXT, 46, 150, 160, 14, WS_BORDER | WS_GROUP | WS_TABSTOP
+ PUSHBUTTON "&Neues Verzeichnis erstellen", IDD_MAKENEWFOLDER, 12, 174, 95, 14, WS_GROUP | WS_TABSTOP
+ DEFPUSHBUTTON "OK", IDOK, 112, 174, 45, 14, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
+ PUSHBUTTON "Abbrechen", IDCANCEL, 161, 174, 45, 14, WS_GROUP | WS_TABSTOP
 }
 
 SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
@@ -125,11 +165,13 @@ CAPTION "Informationen über %s"
 FONT 10, "MS Shell Dlg"
 {
  DEFPUSHBUTTON "OK", IDOK, 153, 133, 50, 12, WS_TABSTOP
- LISTBOX 99, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
- ICON "", 1088, 10, 10, 14, 16
- LTEXT "", 100, 30, 10, 137, 10
- LTEXT "", 101, 30, 22, 137, 10
- LTEXT "WINE wurde für Sie gekeltert von:", 98, 8, 55, 137, 10
+ PUSHBUTTON "&Lizenz...", IDC_ABOUT_LICENSE, 153, 113, 50, 12, WS_TABSTOP
+ LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+ ICON "", stc1, 10, 10, 30, 30
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 40, 10, 137, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 40, 22, 137, 10
+ LTEXT "Wine Version %s", IDC_ABOUT_STATIC_TEXT3, 40, 34, 170, 10
+ LTEXT "Wine wurde für Sie gekeltert von:", IDC_ABOUT_WINE_TEXT, 8, 55, 137, 10
 }
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
@@ -146,7 +188,7 @@ FONT 8, "MS Shell Dlg"
  PUSHBUTTON "&Durchsuchen...", 12288, 170, 63, 50, 14, WS_TABSTOP
 }
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 {
         /* columns in the shellview */
 	IDS_SHV_COLUMN1		"Datei"
@@ -166,7 +208,8 @@ STRINGTABLE DISCARDABLE
         /* special folders */
 	IDS_DESKTOP		"Desktop"
 	IDS_MYCOMPUTER		"Arbeitsplatz"
-	IDS_RECYCLEBIN_FOLDER_NAME      "Müll"
+	IDS_RECYCLEBIN_FOLDER_NAME      "Papierkorb"
+	IDS_CONTROLPANEL	"Control Panel"
 
         /* context menus */
 	IDS_VIEW_LARGE		"&Große Symbole"
@@ -183,22 +226,21 @@ STRINGTABLE DISCARDABLE
 	IDS_DELETEITEM_TEXT "Sind Sie sich sicher, dass Sie '%1' löschen möchten?"
 	IDS_DELETEMULTIPLE_TEXT "Sind Sie sich sicher, dass Sie diese %1 Objekte löschen möchten?"
 	IDS_DELETESELECTED_TEXT "Sind Sie sich sicher, dass Sie die ausgewählten Objekte löschen möchten?"
-	IDS_TRASHITEM_TEXT "Sind Sie sich sicher, dass Sie '%1' in Müll verschieben möchten?"
-	IDS_TRASHFOLDER_TEXT "Sind Sie sich sicher, dass Sie '%1' und seinen Inhalt in den Müll verschieben möchten?"
-	IDS_TRASHMULTIPLE_TEXT "Sind Sie sich sicher, dass Sie diese %1 Dateien in den Müll verschieben möchten?"
-	IDS_CANTTRASH_TEXT "Das Objekt '%1' kann nicht in den Müll verschoben werden. Möchten Sie es stattdessen löschen?"
-	IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
+	IDS_TRASHITEM_TEXT "Sind Sie sich sicher, dass Sie '%1' in den Papierkorb verschieben möchten?"
+	IDS_TRASHFOLDER_TEXT "Sind Sie sich sicher, dass Sie '%1' und seinen Inhalt in den Papierkorb verschieben möchten?"
+	IDS_TRASHMULTIPLE_TEXT "Sind Sie sich sicher, dass Sie diese %1 Dateien in den Papierkorb verschieben möchten?"
+	IDS_CANTTRASH_TEXT "Das Objekt '%1' kann nicht in den Papierkorb verschoben werden.\n\n Möchten Sie es stattdessen löschen?"
+	IDS_OVERWRITEFILE_TEXT "Der Ordner enthält bereits eine Datei namens '%1'.\n\n Wollen Sie die Datei ersetzen?"
 	IDS_OVERWRITEFILE_CAPTION "Bestätigung: Datei überschreiben"
-	IDS_OVERWRITEFOLDER_TEXT "This folder already contains a folder named '%1'.\n\n"\
-	    "If the files in the destination folder have the same names as files in the\n"\
-	    "selected folder they will be replaced. Do you still want to move or copy\n"\
-	    "the folder?"
+	IDS_OVERWRITEFOLDER_TEXT "Im Verzeichnis befindet sich bereits ein Ordner namens '%1'.\n\n"\
+	"Wenn die Dateien im Zielordner die gleichen Namen haben, wie die im ausgewählten Ordner, werden sie ersetzt.\n\n\
+	Möchten sie trotzdem fortfahren?"
 
         /* message box strings */
         IDS_RESTART_TITLE       "Neustarten"
-        IDS_RESTART_PROMPT      "Möchten Sie, dass ein simulierter Windows Neustart durchgeführt wird ?"
-        IDS_SHUTDOWN_TITLE      "Anhalten"
-        IDS_SHUTDOWN_PROMPT     "Möchten Sie die aktuelle Wine Sitzung beenden ?"
+        IDS_RESTART_PROMPT      "Möchten Sie, dass ein simulierter Windows Neustart durchgeführt wird?"
+        IDS_SHUTDOWN_TITLE      "Beenden"
+        IDS_SHUTDOWN_PROMPT     "Möchten Sie die aktuelle Wine Sitzung beenden?"
 
         /* shell folder path default values */
 	IDS_PROGRAMS		"Startmenü\\Programme"
@@ -208,8 +250,8 @@ STRINGTABLE DISCARDABLE
 	IDS_RECENT		"Recent"
 	IDS_SENDTO		"SendTo"
 	IDS_STARTMENU		"Startmenü"
-	IDS_MYMUSIC		"Meine Musik"
-	IDS_MYVIDEO		"Meine Videos"
+	IDS_MYMUSIC		"Eigene Musik"
+	IDS_MYVIDEO		"Eigene Videos"
 	IDS_DESKTOPDIRECTORY	"Desktop"
 	IDS_NETHOOD		"Netzwerkumgebung"
 	IDS_TEMPLATES		"Vorlagen"
@@ -229,5 +271,29 @@ STRINGTABLE DISCARDABLE
 	IDS_COMMON_VIDEO	"Dokumente\\Eigene Videos"
 	IDS_CDBURN_AREA		"Lokale Einstellungen\\Anwendungsdaten\\Microsoft\\CD Burning"
 
-	IDS_NEWFOLDER		"New Folder"
+	IDS_NEWFOLDER		"Neuer Ordner"
+
+	IDS_CPANEL_TITLE	"Wine Control Panel"
+	IDS_CPANEL_NAME		"Name"
+	IDS_CPANEL_DESCRIPTION	"Description"
+}
+
+STRINGTABLE
+{
+IDS_LICENSE_CAPTION,            "Wine License"
+IDS_LICENSE,
+"Wine ist freie Software; Sie dürfen sie unter den Bedingungen \
+der GNU Lesser General Public License, welche von der \
+Free Software Foundation veröffentlicht wurde; weiter verteilen \
+und/oder modifizieren gemäß Version 2.1 der Lizenz, oder \
+(nach ihren Ermessen) jeder späteren Version.\n\n\
+Wine wird mit der Hoffnung verteilt das es sich als nützlich erweist. \
+Wine kommt aber OHNE JEGLICHE GARANTIE daher; sogar ohne einer \
+angedeuteten Garantie der MARKTGÄNGIGKEIT oder der EIGNUNG FÜR EINEN \
+BESTIMMTEN NUTZEN. Sehen Sie sich die GNU Lesser General Public License \
+an für mehr Details.\n\n\
+Sie sollten mit dieser Bibliothek auch eine Kopie der \
+GNU Lesser General Public License erhalten haben; wenn nicht schreiben \
+Sie der Free Software Foundation, \
+Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 }

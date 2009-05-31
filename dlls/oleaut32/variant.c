@@ -6,7 +6,7 @@
  * Copyright 2005 Daniel Remenak
  * Copyright 2006 Google (Benjamin Arai)
  *
- * The alorithm for conversion from Julian days to day/month/year is based on
+ * The algorithm for conversion from Julian days to day/month/year is based on
  * that devised by Henry Fliegel, as implemented in PostgreSQL, which is
  * Copyright 1994-7 Regents of the University of California
  *
@@ -40,6 +40,7 @@
 #include "wine/unicode.h"
 #include "winerror.h"
 #include "variant.h"
+#include "resource.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(variant);
@@ -608,8 +609,7 @@ HRESULT WINAPI VariantClear(VARIANTARG* pVarg)
       }
       else if (V_VT(pVarg) == VT_BSTR)
       {
-        if (V_BSTR(pVarg))
-          SysFreeString(V_BSTR(pVarg));
+        SysFreeString(V_BSTR(pVarg));
       }
       else if (V_VT(pVarg) == VT_RECORD)
       {
@@ -1108,7 +1108,7 @@ static HRESULT VARIANT_RollUdate(UDATE *lpUd)
     {
       lpUd->st.wMonth--; /* Previous month */
       if (lpUd->st.wMonth == 2 && IsLeapYear(lpUd->st.wYear))
-        lpUd->st.wDay = 29; /* Februaury has 29 days on leap years */
+        lpUd->st.wDay = 29; /* February has 29 days on leap years */
       else
         lpUd->st.wDay = days[lpUd->st.wMonth]; /* Last day of the month */
     }
@@ -1119,7 +1119,7 @@ static HRESULT VARIANT_RollUdate(UDATE *lpUd)
 
     /* Possibly need to roll the date forward */
     if (lpUd->st.wMonth == 2 && IsLeapYear(lpUd->st.wYear))
-      rollForward = lpUd->st.wDay - 29; /* Februaury has 29 days on leap years */
+      rollForward = lpUd->st.wDay - 29; /* February has 29 days on leap years */
     else
       rollForward = lpUd->st.wDay - days[lpUd->st.wMonth];
 
@@ -1191,7 +1191,7 @@ INT WINAPI DosDateTimeToVariantTime(USHORT wDosDate, USHORT wDosTime,
   ud.st.wSecond = DOS_SECOND(wDosTime);
   ud.st.wDayOfWeek = ud.st.wMilliseconds = 0;
 
-  return !VarDateFromUdate(&ud, 0, pDateOut);
+  return VarDateFromUdate(&ud, 0, pDateOut) == S_OK;
 }
 
 /**********************************************************************
@@ -1254,8 +1254,8 @@ INT WINAPI SystemTimeToVariantTime(LPSYSTEMTIME lpSt, double *pDateOut)
   if (lpSt->wMonth > 12)
     return FALSE;
 
-  memcpy(&ud.st, lpSt, sizeof(ud.st));
-  return !VarDateFromUdate(&ud, 0, pDateOut);
+  ud.st = *lpSt;
+  return VarDateFromUdate(&ud, 0, pDateOut) == S_OK;
 }
 
 /***********************************************************************
@@ -1280,7 +1280,7 @@ INT WINAPI VariantTimeToSystemTime(double dateIn, LPSYSTEMTIME lpSt)
   if (FAILED(VarUdateFromDate(dateIn, 0, &ud)))
     return FALSE;
 
-  memcpy(lpSt, &ud.st, sizeof(ud.st));
+  *lpSt = ud.st;
   return TRUE;
 }
 
@@ -1312,8 +1312,8 @@ HRESULT WINAPI VarDateFromUdateEx(UDATE *pUdateIn, LCID lcid, ULONG dwFlags, DAT
 
   if (lcid != MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT))
     FIXME("lcid possibly not handled, treating as en-us\n");
-      
-  memcpy(&ud, pUdateIn, sizeof(ud));
+
+  ud = *pUdateIn;
 
   if (dwFlags & VAR_VALIDDATE)
     WARN("Ignoring VAR_VALIDDATE\n");
@@ -1468,8 +1468,24 @@ HRESULT WINAPI VarUdateFromDate(DATE dateIn, ULONG dwFlags, UDATE *lpUdate)
 static void VARIANT_GetLocalisedNumberChars(VARIANT_NUMBER_CHARS *lpChars, LCID lcid, DWORD dwFlags)
 {
   static const VARIANT_NUMBER_CHARS defaultChars = { '-','+','.',',','$',0,'.',',' };
+  static CRITICAL_SECTION csLastChars = { NULL, -1, 0, 0, 0, 0 };
+  static VARIANT_NUMBER_CHARS lastChars;
+  static LCID lastLcid = -1;
+  static DWORD lastFlags = 0;
   LCTYPE lctype = dwFlags & LOCALE_NOUSEROVERRIDE;
   WCHAR buff[4];
+
+  /* To make caching thread-safe, a critical section is needed */
+  EnterCriticalSection(&csLastChars);
+
+  /* Asking for default locale entries is very expensive: It is a registry
+     server call. So cache one locally, as Microsoft does it too */
+  if(lcid == lastLcid && dwFlags == lastFlags)
+  {
+    memcpy(lpChars, &lastChars, sizeof(defaultChars));
+    LeaveCriticalSection(&csLastChars);
+    return;
+  }
 
   memcpy(lpChars, &defaultChars, sizeof(defaultChars));
   GET_NUMBER_TEXT(LOCALE_SNEGATIVESIGN, cNegativeSymbol);
@@ -1490,6 +1506,11 @@ static void VARIANT_GetLocalisedNumberChars(VARIANT_NUMBER_CHARS *lpChars, LCID 
   }
   TRACE("lcid 0x%x, cCurrencyLocal =%d,%d '%c','%c'\n", lcid, lpChars->cCurrencyLocal,
         lpChars->cCurrencyLocal2, lpChars->cCurrencyLocal, lpChars->cCurrencyLocal2);
+
+  memcpy(&lastChars, lpChars, sizeof(defaultChars));
+  lastLcid = lcid;
+  lastFlags = dwFlags;
+  LeaveCriticalSection(&csLastChars);
 }
 
 /* Number Parsing States */
@@ -1915,7 +1936,7 @@ HRESULT WINAPI VarParseNumFromStr(OLECHAR *lpszStr, LCID lcid, ULONG dwFlags,
  * NOTES
  *  - The smallest favoured type present in dwVtBits that can represent the
  *    number in pNumprs without losing precision is used.
- *  - Signed types are preferrred over unsigned types of the same size.
+ *  - Signed types are preferred over unsigned types of the same size.
  *  - Preferred types in order are: integer, float, double, currency then decimal.
  *  - Rounding (dropping of decimal points) occurs without error. See VarI8FromR8()
  *    for details of the rounding method.
@@ -1924,7 +1945,7 @@ HRESULT WINAPI VarParseNumFromStr(OLECHAR *lpszStr, LCID lcid, ULONG dwFlags,
  *    design?): If some other VTBIT's for integers are specified together
  *    with VTBIT_I8 and the number will fit only in a VT_I8 Windows will "cast"
  *    the number to the smallest requested integer truncating this way the
- *    number.  Wine dosn't implement this "feature" (yet?).
+ *    number.  Wine doesn't implement this "feature" (yet?).
  */
 HRESULT WINAPI VarNumFromParseNum(NUMPARSE *pNumprs, BYTE *rgbDig,
                                   ULONG dwVtBits, VARIANT *pVarDst)
@@ -2302,7 +2323,7 @@ HRESULT WINAPI VarNumFromParseNum(NUMPARSE *pNumprs, BYTE *rgbDig,
       whole = whole * dblMultipliers[10];
       multiplier10 -= 10;
     }
-    if (multiplier10)
+    if (multiplier10 && !bOverflow)
     {
       if (whole > dblMaximums[multiplier10])
       {
@@ -2313,9 +2334,10 @@ HRESULT WINAPI VarNumFromParseNum(NUMPARSE *pNumprs, BYTE *rgbDig,
         whole = whole * dblMultipliers[multiplier10];
     }
 
-    TRACE("Scaled double value is %16.16g\n", whole);
+    if (!bOverflow)
+        TRACE("Scaled double value is %16.16g\n", whole);
 
-    while (divisor10 > 10)
+    while (divisor10 > 10 && !bOverflow)
     {
       if (whole < dblMinimums[10] && whole != 0)
       {
@@ -2326,7 +2348,7 @@ HRESULT WINAPI VarNumFromParseNum(NUMPARSE *pNumprs, BYTE *rgbDig,
       whole = whole / dblMultipliers[10];
       divisor10 -= 10;
     }
-    if (divisor10)
+    if (divisor10 && !bOverflow)
     {
       if (whole < dblMinimums[divisor10] && whole != 0)
       {
@@ -2446,14 +2468,19 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
 {
     VARTYPE leftvt,rightvt,resultvt;
     HRESULT hres;
-    static const WCHAR str_true[] = {'T','r','u','e','\0'};
-    static const WCHAR str_false[] = {'F','a','l','s','e','\0'};
+    static WCHAR str_true[32];
+    static WCHAR str_false[32];
     static const WCHAR sz_empty[] = {'\0'};
     leftvt = V_VT(left);
     rightvt = V_VT(right);
 
     TRACE("(%p->(%s%s),%p->(%s%s),%p)\n", left, debugstr_VT(left),
           debugstr_VF(left), right, debugstr_VT(right), debugstr_VF(right), out);
+
+    if (!str_true[0]) {
+        VARIANT_GetLocalisedText(LOCALE_USER_DEFAULT, IDS_FALSE, str_false);
+        VARIANT_GetLocalisedText(LOCALE_USER_DEFAULT, IDS_TRUE, str_true);
+    }
 
     /* when both left and right are NULL the result is NULL */
     if (leftvt == VT_NULL && rightvt == VT_NULL)
@@ -2517,7 +2544,7 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
     else
         hres = DISP_E_BADVARTYPE;
 
-    /* if resutl type is not S_OK, then no need to go further */
+    /* if result type is not S_OK, then no need to go further */
     if (hres != S_OK)
     {
         V_VT(out) = resultvt;
@@ -2537,7 +2564,7 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
         {
             if (leftvt == VT_BOOL)
             {
-                /* Bools are handled as True/False strings instead of 0/-1 as in MSDN */
+                /* Bools are handled as localized True/False strings instead of 0/-1 as in MSDN */
                 V_VT(&bstrvar_left) = VT_BSTR;
                 if (V_BOOL(left) == TRUE)
                     V_BSTR(&bstrvar_left) = SysAllocString(str_true);
@@ -2577,7 +2604,7 @@ HRESULT WINAPI VarCat(LPVARIANT left, LPVARIANT right, LPVARIANT out)
         {
             if (rightvt == VT_BOOL)
             {
-                /* Bools are handled as True/False strings instead of 0/-1 as in MSDN */
+                /* Bools are handled as localized True/False strings instead of 0/-1 as in MSDN */
                 V_VT(&bstrvar_right) = VT_BSTR;
                 if (V_BOOL(right) == TRUE)
                     V_BSTR(&bstrvar_right) = SysAllocString(str_true);
@@ -2654,7 +2681,7 @@ static HRESULT _VarChangeTypeExWrap (VARIANTARG* pvargDest,
  *  left    [I] First variant
  *  right   [I] Second variant
  *  lcid    [I] LCID (locale identifier) for the comparison
- *  flags   [I] Flags to be used in the comparision:
+ *  flags   [I] Flags to be used in the comparison:
  *              NORM_IGNORECASE, NORM_IGNORENONSPACE, NORM_IGNORESYMBOLS,
  *              NORM_IGNOREWIDTH, NORM_IGNOREKANATYPE, NORM_IGNOREKASHIDA
  *
@@ -2666,8 +2693,8 @@ static HRESULT _VarChangeTypeExWrap (VARIANTARG* pvargDest,
  *  Failure:     An HRESULT error code indicating the error.
  *
  * NOTES
- *  Native VarCmp up to and including WinXP dosn't like as input variants
- *  I1, UI2, VT_UI4, UI8 and UINT. INT is accepted only as left variant.
+ *  Native VarCmp up to and including WinXP doesn't like I1, UI2, VT_UI4,
+ *  UI8 and UINT as input variants. INT is accepted only as left variant.
  *
  *  If both input variants are ERROR then VARCMP_EQ will be returned, else
  *  an ERROR variant will trigger an error.
@@ -2677,9 +2704,9 @@ static HRESULT _VarChangeTypeExWrap (VARIANTARG* pvargDest,
  *  is not an EMPTY variant. All four VT_RESERVED combinations have a
  *  different meaning:
  *   - BSTR and other: BSTR is always greater than the other variant.
- *   - BSTR|VT_RESERVED and other: a string comparision is performed.
+ *   - BSTR|VT_RESERVED and other: a string comparison is performed.
  *   - BSTR and other|VT_RESERVED: If the BSTR is a number a numeric
- *     comparision will take place else the BSTR is always greater.
+ *     comparison will take place else the BSTR is always greater.
  *   - BSTR|VT_RESERVED and other|VT_RESERVED: It seems that the other
  *     variant is ignored and the return value depends only on the sign
  *     of the BSTR if it is a number else the BSTR is always greater. A
@@ -2763,7 +2790,7 @@ HRESULT WINAPI VarCmp(LPVARIANT left, LPVARIANT right, LCID lcid, DWORD flags)
                 /* No VT_RESERVED set ==> BSTR always greater */
                 rc = VARCMP_GT;
             else if (breserv && !nreserv) {
-                /* BSTR has VT_RESERVED set. Do a string comparision */
+                /* BSTR has VT_RESERVED set. Do a string comparison */
                 rc = VariantChangeTypeEx(&rv,nonbv,lcid,0,VT_BSTR);
                 if (FAILED(rc))
                     return rc;
@@ -2780,7 +2807,7 @@ HRESULT WINAPI VarCmp(LPVARIANT left, LPVARIANT right, LCID lcid, DWORD flags)
                        the BSTR number */
                     rc = (V_R8(&lv) >= 0) ? VARCMP_GT : VARCMP_LT;
                 else
-                    /* Numeric comparision, will be handled below.
+                    /* Numeric comparison, will be handled below.
                        VARCMP_NULL used only to break out. */
                     rc = VARCMP_NULL;
             VariantClear(&lv);
@@ -3115,10 +3142,10 @@ VarAnd_Exit:
  *  Failure: An HRESULT error code indicating the error.
  *
  * NOTES
- *  Native VarAdd up to and including WinXP dosn't like as input variants
- *  I1, UI2, UI4, UI8, INT and UINT.
+ *  Native VarAdd up to and including WinXP doesn't like I1, UI2, UI4,
+ *  UI8, INT and UINT as input variants.
  *
- *  Native VarAdd dosn't check for NULL in/out pointers and crashes. We do the
+ *  Native VarAdd doesn't check for NULL in/out pointers and crashes. We do the
  *  same here.
  *
  * FIXME
@@ -3330,10 +3357,10 @@ end:
  *  Failure: An HRESULT error code indicating the error.
  *
  * NOTES
- *  Native VarMul up to and including WinXP dosn't like as input variants
- *  I1, UI2, UI4, UI8, INT and UINT. But it can multiply apples with oranges.
+ *  Native VarMul up to and including WinXP doesn't like I1, UI2, UI4,
+ *  UI8, INT and UINT as input variants. But it can multiply apples with oranges.
  *
- *  Native VarMul dosn't check for NULL in/out pointers and crashes. We do the
+ *  Native VarMul doesn't check for NULL in/out pointers and crashes. We do the
  *  same here.
  *
  * FIXME
@@ -5652,14 +5679,14 @@ HRESULT WINAPI VarPow(LPVARIANT left, LPVARIANT right, LPVARIANT result)
     }
 
     hr = VariantChangeType(&dl,left,0,resvt);
-    if (!SUCCEEDED(hr)) {
+    if (FAILED(hr)) {
         ERR("Could not change passed left argument to VT_R8, handle it differently.\n");
         hr = E_FAIL;
         goto end;
     }
 
     hr = VariantChangeType(&dr,right,0,resvt);
-    if (!SUCCEEDED(hr)) {
+    if (FAILED(hr)) {
         ERR("Could not change passed right argument to VT_R8, handle it differently.\n");
         hr = E_FAIL;
         goto end;

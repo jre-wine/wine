@@ -24,5 +24,9 @@
 
 #include <d3dx8math.h>
 #include <d3dx8core.h>
+/* FIXME: #include <d3dx8tex.h> */
+#include <d3dx8mesh.h>
+/* FIXME: #include <d3dx8shape.h> */
+/* FIXME: #include <d3dx8effect.h> */
 
 #endif

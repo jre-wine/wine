@@ -1,5 +1,5 @@
 101 stub -noname DoConnectoidsExist
-102 stub -noname GetDiskInfoA
+102 stdcall -noname GetDiskInfoA(ptr ptr ptr ptr)
 103 stub -noname PerformOperationOverUrlCacheA
 104 stub -noname HttpCheckDavComplianceA
 105 stub -noname HttpCheckDavComplianceW
@@ -9,7 +9,7 @@
 111 stub -noname ExportCookieFileW
 112 stub -noname IsProfilesEnabled
 116 stub -noname IsDomainlegalCookieDomainA
-117 stub -noname IsDomainLegalCookieDomainW
+117 stdcall -noname IsDomainLegalCookieDomainW(wstr wstr)
 118 stub -noname FindP3PPolicySymbol
 120 stub -noname MapResourceToPolicy
 121 stub -noname GetP3PPolicy
@@ -116,8 +116,8 @@
 @ stdcall InternetAutodial(long ptr)
 @ stub InternetAutodialCallback
 @ stdcall InternetAutodialHangup(long)
-@ stdcall InternetCanonicalizeUrlA(str str ptr long)
-@ stdcall InternetCanonicalizeUrlW(wstr wstr ptr long)
+@ stdcall InternetCanonicalizeUrlA(str ptr ptr long)
+@ stdcall InternetCanonicalizeUrlW(wstr ptr ptr long)
 @ stdcall InternetCheckConnectionA(ptr long long)
 @ stdcall InternetCheckConnectionW(ptr long long)
 @ stdcall InternetClearAllPerSiteCookieDecisions()
@@ -216,7 +216,7 @@
 @ stub PrivacyGetZonePreferenceW # (long long ptr ptr ptr)
 @ stub PrivacySetZonePreferenceW # (long long long wstr)
 @ stdcall ReadUrlCacheEntryStream(ptr long ptr ptr long)
-@ stub RegisterUrlCacheNotification
+@ stdcall RegisterUrlCacheNotification(ptr long long long long long)
 @ stdcall ResumeSuspendedDownload(long long)
 @ stdcall RetrieveUrlCacheEntryFileA(str ptr ptr long)
 @ stdcall RetrieveUrlCacheEntryFileW(wstr ptr ptr long)

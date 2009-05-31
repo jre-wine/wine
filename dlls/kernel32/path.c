@@ -1010,6 +1010,9 @@ BOOL WINAPI MoveFileWithProgressW( LPCWSTR source, LPCWSTR dest,
     if (!dest)
         return DeleteFileW( source );
 
+    if (flag & MOVEFILE_WRITE_THROUGH)
+        FIXME("MOVEFILE_WRITE_THROUGH unimplemented\n");
+
     /* check if we are allowed to rename the source */
 
     if (!RtlDosPathNameToNtPathName_U( source, &nt_name, NULL, NULL ))
@@ -1042,15 +1045,6 @@ BOOL WINAPI MoveFileWithProgressW( LPCWSTR source, LPCWSTR dest,
         goto error;
     }
 
-    if (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-    {
-        if (flag & MOVEFILE_REPLACE_EXISTING)  /* cannot replace directory */
-        {
-            SetLastError( ERROR_INVALID_PARAMETER );
-            goto error;
-        }
-    }
-
     /* we must have write access to the destination, and it must */
     /* not exist except if MOVEFILE_REPLACE_EXISTING is set */
 
@@ -1061,13 +1055,18 @@ BOOL WINAPI MoveFileWithProgressW( LPCWSTR source, LPCWSTR dest,
     }
     status = NtOpenFile( &dest_handle, GENERIC_READ | GENERIC_WRITE, &attr, &io, 0,
                          FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
-    if (status == STATUS_SUCCESS)
+    if (status == STATUS_SUCCESS)  /* destination exists */
     {
         NtClose( dest_handle );
         if (!(flag & MOVEFILE_REPLACE_EXISTING))
         {
             SetLastError( ERROR_ALREADY_EXISTS );
             RtlFreeUnicodeString( &nt_name );
+            goto error;
+        }
+        else if (info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) /* cannot replace directory */
+        {
+            SetLastError( ERROR_ACCESS_DENIED );
             goto error;
         }
     }
@@ -1191,6 +1190,32 @@ BOOL WINAPI MoveFileW( LPCWSTR source, LPCWSTR dest )
 BOOL WINAPI MoveFileA( LPCSTR source, LPCSTR dest )
 {
     return MoveFileExA( source, dest, MOVEFILE_COPY_ALLOWED );
+}
+
+
+/*************************************************************************
+ *           CreateHardLinkW   (KERNEL32.@)
+ */
+BOOL WINAPI CreateHardLinkW(LPCWSTR lpFileName, LPCWSTR lpExistingFileName,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes)
+{
+    FIXME("(%s, %s, %p): stub\n", debugstr_w(lpFileName),
+        debugstr_w(lpExistingFileName), lpSecurityAttributes);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+
+/*************************************************************************
+ *           CreateHardLinkA   (KERNEL32.@)
+ */
+BOOL WINAPI CreateHardLinkA(LPCSTR lpFileName, LPCSTR lpExistingFileName,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes)
+{
+    FIXME("(%s, %s, %p): stub\n", debugstr_a(lpFileName),
+        debugstr_a(lpExistingFileName), lpSecurityAttributes);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
 }
 
 
@@ -1514,6 +1539,26 @@ UINT WINAPI GetSystemWow64DirectoryA( LPSTR lpBuffer, UINT uSize )
     return 0;
 }
 
+/***********************************************************************
+ *           Wow64DisableWow64FsRedirection   (KERNEL32.@)
+ */
+BOOL WINAPI Wow64DisableWow64FsRedirection( PVOID *old_value )
+{
+    FIXME("%p\n", old_value);
+
+    if (old_value) *old_value = (void *)0xdeadbeef;
+    return TRUE;
+}
+
+/***********************************************************************
+ *           Wow64RevertWow64FsRedirection   (KERNEL32.@)
+ */
+BOOL WINAPI Wow64RevertWow64FsRedirection( PVOID old_value )
+{
+    FIXME("%p\n", old_value);
+    return TRUE;
+}
+
 
 /***********************************************************************
  *           NeedCurrentDirectoryForExePathW   (KERNEL32.@)
@@ -1558,7 +1603,7 @@ BOOL WINAPI NeedCurrentDirectoryForExePathA( LPCSTR name )
  * Return the full Unix file name for a given path.
  * Returned buffer must be freed by caller.
  */
-char *wine_get_unix_file_name( LPCWSTR dosW )
+char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
 {
     UNICODE_STRING nt_name;
     ANSI_STRING unix_name;
@@ -1582,7 +1627,7 @@ char *wine_get_unix_file_name( LPCWSTR dosW )
  * Return the full DOS file name for a given Unix path.
  * Returned buffer must be freed by caller.
  */
-WCHAR *wine_get_dos_file_name( LPCSTR str )
+WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
 {
     UNICODE_STRING nt_name;
     ANSI_STRING unix_name;

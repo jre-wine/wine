@@ -71,7 +71,7 @@ BOOL AddToEnumList(
     if (!iface || !pidl)
         return FALSE;
 
-	pNew = (LPENUMLIST)SHAlloc(sizeof(ENUMLIST));
+        pNew = SHAlloc(sizeof(ENUMLIST));
 	if(pNew)
 	{
 	  /*set the next pointer */
@@ -224,7 +224,7 @@ static HRESULT WINAPI IEnumIDList_fnQueryInterface(
 	{ *ppvObj = This;
 	}
 	else if(IsEqualIID(riid, &IID_IEnumIDList))  /*IEnumIDList*/
-	{    *ppvObj = (IEnumIDList*)This;
+	{    *ppvObj = This;
 	}
 
 	if(*ppvObj)

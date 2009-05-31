@@ -37,6 +37,7 @@
 #include "process.h"
 #include "user.h"
 #include "file.h"
+#include "security.h"
 #include "wine/unicode.h"
 
 
@@ -203,8 +204,7 @@ static WCHAR *build_desktop_name( const struct unicode_str *name,
 }
 
 /* retrieve a pointer to a desktop object */
-static inline struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle,
-                                               unsigned int access )
+struct desktop *get_desktop_obj( struct process *process, obj_handle_t handle, unsigned int access )
 {
     return (struct desktop *)get_handle_obj( process, handle, access, &desktop_ops );
 }
@@ -227,6 +227,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             desktop->flags = flags;
             desktop->winstation = (struct winstation *)grab_object( winstation );
             desktop->top_window = NULL;
+            desktop->msg_window = NULL;
             desktop->global_hooks = NULL;
             desktop->close_timeout = NULL;
             desktop->users = 0;
@@ -270,6 +271,7 @@ static void desktop_destroy( struct object *obj )
     struct desktop *desktop = (struct desktop *)obj;
 
     if (desktop->top_window) destroy_window( desktop->top_window );
+    if (desktop->msg_window) destroy_window( desktop->msg_window );
     if (desktop->global_hooks) release_object( desktop->global_hooks );
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );
@@ -309,17 +311,18 @@ void set_process_default_desktop( struct process *process, struct desktop *deskt
     LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
         if (!thread->desktop) thread->desktop = handle;
 
-    desktop->users++;
-    if (desktop->close_timeout)
+    if (!process->is_system)
     {
-        remove_timeout_user( desktop->close_timeout );
-        desktop->close_timeout = NULL;
+        desktop->users++;
+        if (desktop->close_timeout)
+        {
+            remove_timeout_user( desktop->close_timeout );
+            desktop->close_timeout = NULL;
+        }
+        if (old_desktop) old_desktop->users--;
     }
-    if (old_desktop)
-    {
-        old_desktop->users--;
-        release_object( old_desktop );
-    }
+
+    if (old_desktop) release_object( old_desktop );
 }
 
 /* connect a process to its window station */
@@ -509,7 +512,14 @@ DECL_HANDLER(open_desktop)
     struct unicode_str name;
 
     get_req_unicode_str( &name );
-    if ((winstation = get_process_winstation( current->process, 0 /* FIXME: access rights? */ )))
+
+    /* FIXME: check access rights */
+    if (!req->winsta)
+        winstation = get_process_winstation( current->process, 0 );
+    else
+        winstation = (struct winstation *)get_handle_obj( current->process, req->winsta, 0, &winstation_ops );
+
+    if (winstation)
     {
         struct unicode_str full_str;
         WCHAR *full_name;
@@ -630,16 +640,15 @@ DECL_HANDLER(set_user_object_info)
 /* enumerate window stations */
 DECL_HANDLER(enum_winstation)
 {
-    unsigned int index = req->index;
-    obj_handle_t handle;
-    struct object *obj;
+    unsigned int index = 0;
+    struct winstation *winsta;
 
-    while ((handle = enumerate_handles( current->process, &winstation_ops, &index )))
+    LIST_FOR_EACH_ENTRY( winsta, &winstation_list, struct winstation, entry )
     {
-        if (!(obj = get_handle_obj( current->process, handle, WINSTA_ENUMERATE, &winstation_ops )))
-            continue;
-        set_reply_data_obj_name( obj );
-        release_object( obj );
+        unsigned int access = WINSTA_ENUMERATE;
+        if (req->index > index++) continue;
+        if (!check_object_access( &winsta->obj, &access )) continue;
+        set_reply_data_obj_name( &winsta->obj );
         clear_error();
         reply->next = index;
         return;
@@ -653,27 +662,23 @@ DECL_HANDLER(enum_desktop)
 {
     struct winstation *winstation;
     struct desktop *desktop;
-    unsigned int index = req->index;
-    obj_handle_t handle;
+    unsigned int index = 0;
 
     if (!(winstation = (struct winstation *)get_handle_obj( current->process, req->winstation,
                                                             WINSTA_ENUMDESKTOPS, &winstation_ops )))
         return;
 
-    while ((handle = enumerate_handles( current->process, &desktop_ops, &index )))
+    LIST_FOR_EACH_ENTRY( desktop, &winstation->desktops, struct desktop, entry )
     {
-        if (!(desktop = get_desktop_obj( current->process, handle, DESKTOP_ENUMERATE )))
-            continue;
-
-        if (desktop->winstation == winstation)
-        {
-            set_reply_data_obj_name( &desktop->obj );
-            release_object( desktop );
-            clear_error();
-            reply->next = index;
-            return;
-        }
-        release_object( desktop );
+        unsigned int access = DESKTOP_ENUMERATE;
+        if (req->index > index++) continue;
+        if (!desktop->obj.name) continue;
+        if (!check_object_access( &desktop->obj, &access )) continue;
+        set_reply_data_obj_name( &desktop->obj );
+        release_object( winstation );
+        clear_error();
+        reply->next = index;
+        return;
     }
 
     release_object( winstation );

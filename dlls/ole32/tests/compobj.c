@@ -29,29 +29,29 @@
 #include "shlguid.h"
 #include "urlmon.h" /* for CLSID_FileProtocol */
 
+#include "initguid.h"
+#include "ctxtcall.h"
+
 #include "wine/test.h"
 
 /* functions that are not present on all versions of Windows */
 HRESULT (WINAPI * pCoInitializeEx)(LPVOID lpReserved, DWORD dwCoInit);
 HRESULT (WINAPI * pCoGetObjectContext)(REFIID riid, LPVOID *ppv);
+HRESULT (WINAPI * pCoSwitchCallContext)(IUnknown *pObject, IUnknown **ppOldObject);
+HRESULT (WINAPI * pCoGetTreatAsClass)(REFCLSID clsidOld, LPCLSID pClsidNew);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
 #define ok_more_than_one_lock() ok(cLocks > 0, "Number of locks should be > 0, but actually is %d\n", cLocks)
 #define ok_no_locks() ok(cLocks == 0, "Number of locks should be 0, but actually is %d\n", cLocks)
 
 static const CLSID CLSID_non_existent =   { 0x12345678, 0x1234, 0x1234, { 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0 } };
-static const CLSID CLSID_CDeviceMoniker = { 0x4315d437, 0x5b8c, 0x11d0, { 0xbd, 0x3b, 0x00, 0xa0, 0xc9, 0x11, 0xce, 0x86 } };
-static WCHAR devicedotone[] = {'d','e','v','i','c','e','.','1',0};
+static const CLSID CLSID_StdFont = { 0x0be35203, 0x8f91, 0x11ce, { 0x9d, 0xe3, 0x00, 0xaa, 0x00, 0x4b, 0xb8, 0x51 } };
+static WCHAR stdfont[] = {'S','t','d','F','o','n','t',0};
 static const WCHAR wszNonExistent[] = {'N','o','n','E','x','i','s','t','e','n','t',0};
-static WCHAR wszCLSID_CDeviceMoniker[] =
+static WCHAR wszCLSID_StdFont[] =
 {
-    '{',
-    '4','3','1','5','d','4','3','7','-',
-    '5','b','8','c','-',
-    '1','1','d','0','-',
-    'b','d','3','b','-',
-    '0','0','a','0','c','9','1','1','c','e','8','6',
-    '}',0
+    '{','0','b','e','3','5','2','0','3','-','8','f','9','1','-','1','1','c','e','-',
+    '9','d','e','3','-','0','0','a','a','0','0','4','b','b','8','5','1','}',0
 };
 
 static const IID IID_IWineTest =
@@ -90,7 +90,7 @@ static HRESULT WINAPI Test_IClassFactory_QueryInterface(
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IClassFactory))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         IClassFactory_AddRef(iface);
         return S_OK;
     }
@@ -143,11 +143,11 @@ static IClassFactory Test_ClassFactory = { &TestClassFactory_Vtbl };
 static void test_ProgIDFromCLSID(void)
 {
     LPWSTR progid;
-    HRESULT hr = ProgIDFromCLSID(&CLSID_CDeviceMoniker, &progid);
+    HRESULT hr = ProgIDFromCLSID(&CLSID_StdFont, &progid);
     ok(hr == S_OK, "ProgIDFromCLSID failed with error 0x%08x\n", hr);
     if (hr == S_OK)
     {
-        ok(!lstrcmpiW(progid, devicedotone), "Didn't get expected prog ID\n");
+        ok(!lstrcmpiW(progid, stdfont), "Didn't get expected prog ID\n");
         CoTaskMemFree(progid);
     }
 
@@ -156,20 +156,20 @@ static void test_ProgIDFromCLSID(void)
     ok(hr == REGDB_E_CLASSNOTREG, "ProgIDFromCLSID returned %08x\n", hr);
     ok(progid == NULL, "ProgIDFromCLSID returns with progid %p\n", progid);
 
-    hr = ProgIDFromCLSID(&CLSID_CDeviceMoniker, NULL);
+    hr = ProgIDFromCLSID(&CLSID_StdFont, NULL);
     ok(hr == E_INVALIDARG, "ProgIDFromCLSID should return E_INVALIDARG instead of 0x%08x\n", hr);
 }
 
 static void test_CLSIDFromProgID(void)
 {
     CLSID clsid;
-    HRESULT hr = CLSIDFromProgID(devicedotone, &clsid);
+    HRESULT hr = CLSIDFromProgID(stdfont, &clsid);
     ok(hr == S_OK, "CLSIDFromProgID failed with error 0x%08x\n", hr);
-    ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
+    ok(IsEqualCLSID(&clsid, &CLSID_StdFont), "clsid wasn't equal to CLSID_StdFont\n");
 
-    hr = CLSIDFromString(devicedotone, &clsid);
+    hr = CLSIDFromString(stdfont, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
-    ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
+    ok(IsEqualCLSID(&clsid, &CLSID_StdFont), "clsid wasn't equal to CLSID_StdFont\n");
 
     /* test some failure cases */
 
@@ -188,13 +188,34 @@ static void test_CLSIDFromProgID(void)
 static void test_CLSIDFromString(void)
 {
     CLSID clsid;
-    HRESULT hr = CLSIDFromString(wszCLSID_CDeviceMoniker, &clsid);
+    HRESULT hr = CLSIDFromString(wszCLSID_StdFont, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
-    ok(IsEqualCLSID(&clsid, &CLSID_CDeviceMoniker), "clsid wasn't equal to CLSID_CDeviceMoniker\n");
+    ok(IsEqualCLSID(&clsid, &CLSID_StdFont), "clsid wasn't equal to CLSID_StdFont\n");
 
     hr = CLSIDFromString(NULL, &clsid);
     ok_ole_success(hr, "CLSIDFromString");
     ok(IsEqualCLSID(&clsid, &CLSID_NULL), "clsid wasn't equal to CLSID_NULL\n");
+}
+
+static void test_StringFromGUID2(void)
+{
+  WCHAR str[50];
+  int len;
+  /* Test corner cases for buffer size */
+  len = StringFromGUID2(&CLSID_StdFont,str,50);
+  ok(len == 39, "len: %d (expected 39)\n", len);
+  ok(!lstrcmpiW(str, wszCLSID_StdFont),"string wasn't equal for CLSID_StdFont\n");
+
+  memset(str,0,sizeof str);
+  len = StringFromGUID2(&CLSID_StdFont,str,39);
+  ok(len == 39, "len: %d (expected 39)\n", len);
+  ok(!lstrcmpiW(str, wszCLSID_StdFont),"string wasn't equal for CLSID_StdFont\n");
+
+  len = StringFromGUID2(&CLSID_StdFont,str,38);
+  ok(len == 0, "len: %d (expected 0)\n", len);
+
+  len = StringFromGUID2(&CLSID_StdFont,str,30);
+  ok(len == 0, "len: %d (expected 0)\n", len);
 }
 
 static void test_CoCreateInstance(void)
@@ -208,7 +229,7 @@ static void test_CoCreateInstance(void)
     OleInitialize(NULL);
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
     ok_ole_success(hr, "CoCreateInstance");
-    IUnknown_Release(pUnk);
+    if(pUnk) IUnknown_Release(pUnk);
     OleUninitialize();
 
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
@@ -223,7 +244,9 @@ static void test_CoGetClassObject(void)
     ok(pUnk == NULL, "CoGetClassObject should have changed the passed in pointer to NULL, instead of %p\n", pUnk);
 
     hr = CoGetClassObject(&CLSID_MyComputer, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, NULL);
-    ok(hr == E_INVALIDARG, "CoGetClassObject should have returned E_INVALIDARG instead of 0x%08x\n", hr);
+    ok(hr == E_INVALIDARG ||
+       broken(hr == CO_E_NOTINITIALIZED), /* win9x */
+       "CoGetClassObject should have returned E_INVALIDARG instead of 0x%08x\n", hr);
 }
 
 static ATOM register_dummy_class(void)
@@ -265,7 +288,7 @@ static HRESULT WINAPI MessageFilter_QueryInterface(IMessageFilter *iface, REFIID
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IClassFactory))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         IMessageFilter_AddRef(iface);
         return S_OK;
     }
@@ -376,7 +399,7 @@ static HRESULT WINAPI Test_IUnknown_QueryInterface(
     if (IsEqualIID(riid, &IID_IUnknown) ||
         IsEqualIID(riid, &IID_IWineTest))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         IUnknown_AddRef(iface);
         return S_OK;
     }
@@ -491,7 +514,7 @@ static void test_CoRegisterPSClsid(void)
     hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
     ok_ole_success(hr, "CreateStreamOnHGlobal");
 
-    hr = CoMarshalInterface(stream, &IID_IWineTest, (IUnknown *)&Test_Unknown, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
+    hr = CoMarshalInterface(stream, &IID_IWineTest, &Test_Unknown, MSHCTX_INPROC, NULL, MSHLFLAGS_NORMAL);
     ok(hr == E_NOTIMPL, "CoMarshalInterface should have returned E_NOTIMPL instead of 0x%08x\n", hr);
     IStream_Release(stream);
 
@@ -869,7 +892,7 @@ static void test_registered_object_thread_affinity(void)
     ok(hr == S_OK, "CoGetClassObject on local server object registered in same "
        "thread should return S_OK instead of 0x%08x\n", hr);
 
-    thread = CreateThread(NULL, 0, revoke_class_object_thread, (LPVOID)cookie, 0, &tid);
+    thread = CreateThread(NULL, 0, revoke_class_object_thread, (LPVOID)(DWORD_PTR)cookie, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
     WaitForSingleObject(thread, INFINITE);
     GetExitCodeThread(thread, &exitcode);
@@ -913,17 +936,22 @@ static void test_CoFreeUnusedLibraries(void)
 
     ok(!is_module_loaded("urlmon.dll"), "urlmon.dll shouldn't be loaded\n");
 
-    hr = CoCreateInstance(&CLSID_FileProtocol, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
+    hr = CoCreateInstance(&CLSID_FileProtocol, NULL, CLSCTX_INPROC_SERVER, &IID_IInternetProtocol, (void **)&pUnk);
     if (hr == REGDB_E_CLASSNOTREG)
     {
         trace("IE not installed so can't run CoFreeUnusedLibraries test\n");
+        CoUninitialize();
         return;
     }
     ok_ole_success(hr, "CoCreateInstance");
 
     ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
 
-    IUnknown_Release(pUnk);
+    ok(pUnk != NULL ||
+       broken(pUnk == NULL), /* win9x */
+       "Expected a valid pointer\n");
+    if (pUnk)
+        IUnknown_Release(pUnk);
 
     ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
 
@@ -945,6 +973,7 @@ static void test_CoGetObjectContext(void)
     HRESULT hr;
     ULONG refs;
     IComThreadingInfo *pComThreadingInfo;
+    IContextCallback *pContextCallback;
     APTTYPE apttype;
     THDTYPE thdtype;
 
@@ -974,6 +1003,15 @@ static void test_CoGetObjectContext(void)
     refs = IComThreadingInfo_Release(pComThreadingInfo);
     ok(refs == 0, "pComThreadingInfo should have 0 refs instead of %d refs\n", refs);
 
+    hr = pCoGetObjectContext(&IID_IContextCallback, (void **)&pContextCallback);
+    ok_ole_success(hr, "CoGetObjectContext(ContextCallback)");
+
+    if (hr == S_OK)
+    {
+        refs = IContextCallback_Release(pContextCallback);
+        ok(refs == 0, "pContextCallback should have 0 refs instead of %d refs\n", refs);
+    }
+
     CoUninitialize();
 
     pCoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -992,13 +1030,161 @@ static void test_CoGetObjectContext(void)
     refs = IComThreadingInfo_Release(pComThreadingInfo);
     ok(refs == 0, "pComThreadingInfo should have 0 refs instead of %d refs\n", refs);
 
+    hr = pCoGetObjectContext(&IID_IContextCallback, (void **)&pContextCallback);
+    ok_ole_success(hr, "CoGetObjectContext(ContextCallback)");
+
+    if (hr == S_OK)
+    {
+        refs = IContextCallback_Release(pContextCallback);
+        ok(refs == 0, "pContextCallback should have 0 refs instead of %d refs\n", refs);
+    }
+
     CoUninitialize();
+}
+
+typedef struct {
+    const IUnknownVtbl *lpVtbl;
+    LONG refs;
+} Test_CallContext;
+
+static HRESULT WINAPI Test_CallContext_QueryInterface(
+    IUnknown *iface,
+    REFIID riid,
+    LPVOID *ppvObj)
+{
+    if (ppvObj == NULL) return E_POINTER;
+
+    if (IsEqualGUID(riid, &IID_IUnknown))
+    {
+        *ppvObj = iface;
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    *ppvObj = NULL;
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI Test_CallContext_AddRef(IUnknown *iface)
+{
+    Test_CallContext *This = (Test_CallContext*)iface;
+    return InterlockedIncrement(&This->refs);
+}
+
+static ULONG WINAPI Test_CallContext_Release(IUnknown *iface)
+{
+    Test_CallContext *This = (Test_CallContext*)iface;
+    ULONG refs = InterlockedDecrement(&This->refs);
+    if (!refs)
+        HeapFree(GetProcessHeap(), 0, This);
+    return refs;
+}
+
+static const IUnknownVtbl TestCallContext_Vtbl =
+{
+    Test_CallContext_QueryInterface,
+    Test_CallContext_AddRef,
+    Test_CallContext_Release
+};
+
+static void test_CoGetCallContext(void)
+{
+    HRESULT hr;
+    ULONG refs;
+    IUnknown *pUnk;
+    IUnknown *test_object;
+
+    if (!pCoSwitchCallContext)
+    {
+        skip("CoSwitchCallContext not present\n");
+        return;
+    }
+
+    CoInitialize(NULL);
+
+    test_object = HeapAlloc(GetProcessHeap(), 0, sizeof(Test_CallContext));
+    ((Test_CallContext*)test_object)->lpVtbl = &TestCallContext_Vtbl;
+    ((Test_CallContext*)test_object)->refs = 1;
+
+    hr = CoGetCallContext(&IID_IUnknown, (void**)&pUnk);
+    ok(hr == RPC_E_CALL_COMPLETE, "Expected RPC_E_CALL_COMPLETE, got 0x%08x\n", hr);
+
+    pUnk = (IUnknown*)0xdeadbeef;
+    hr = pCoSwitchCallContext(test_object, &pUnk);
+    ok_ole_success(hr, "CoSwitchCallContext");
+    ok(pUnk == NULL, "expected NULL, got %p\n", pUnk);
+    refs = IUnknown_AddRef(test_object);
+    ok(refs == 2, "Expected refcount 2, got %d\n", refs);
+    IUnknown_Release(test_object);
+
+    pUnk = (IUnknown*)0xdeadbeef;
+    hr = CoGetCallContext(&IID_IUnknown, (void**)&pUnk);
+    ok_ole_success(hr, "CoGetCallContext");
+    ok(pUnk == test_object, "expected %p, got %p\n", test_object, pUnk);
+    refs = IUnknown_AddRef(test_object);
+    ok(refs == 3, "Expected refcount 3, got %d\n", refs);
+    IUnknown_Release(test_object);
+    IUnknown_Release(pUnk);
+
+    pUnk = (IUnknown*)0xdeadbeef;
+    hr = pCoSwitchCallContext(NULL, &pUnk);
+    ok_ole_success(hr, "CoSwitchCallContext");
+    ok(pUnk == test_object, "expected %p, got %p\n", test_object, pUnk);
+    refs = IUnknown_AddRef(test_object);
+    ok(refs == 2, "Expected refcount 2, got %d\n", refs);
+    IUnknown_Release(test_object);
+
+    hr = CoGetCallContext(&IID_IUnknown, (void**)&pUnk);
+    ok(hr == RPC_E_CALL_COMPLETE, "Expected RPC_E_CALL_COMPLETE, got 0x%08x\n", hr);
+
+    IUnknown_Release(test_object);
+
+    CoUninitialize();
+}
+
+static void test_CoGetTreatAsClass(void)
+{
+    HRESULT hr;
+    CLSID out;
+    static GUID deadbeef = {0xdeadbeef,0xdead,0xbeef,{0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef}};
+
+    if (!pCoGetTreatAsClass)
+    {
+        win_skip("CoGetTreatAsClass not present\n");
+        return;
+    }
+    hr = pCoGetTreatAsClass(&deadbeef,&out);
+    ok (hr == S_FALSE, "expected S_FALSE got %x\n",hr);
+    ok (IsEqualGUID(&out,&deadbeef), "expected to get same clsid back\n");
+}
+
+static void test_CoInitializeEx(void)
+{
+    HRESULT hr;
+
+    hr = pCoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    ok(hr == S_OK, "CoInitializeEx failed with error 0x%08x\n", hr);
+
+    /* Calling OleInitialize for the first time should yield S_OK even with
+     * apartment already initialized by previous CoInitialize(Ex) calls. */
+    hr = OleInitialize(NULL);
+    todo_wine ok(hr == S_OK, "OleInitialize failed with error 0x%08x\n", hr);
+
+    /* Subsequent calls to OleInitialize should return S_FALSE */
+    hr = OleInitialize(NULL);
+    ok(hr == S_FALSE, "Expected S_FALSE, hr = 0x%08x\n", hr);
+
+    /* Cleanup */
+    CoUninitialize();
+    OleUninitialize();
 }
 
 START_TEST(compobj)
 {
     HMODULE hOle32 = GetModuleHandle("ole32");
     pCoGetObjectContext = (void*)GetProcAddress(hOle32, "CoGetObjectContext");
+    pCoSwitchCallContext = (void*)GetProcAddress(hOle32, "CoSwitchCallContext");
+    pCoGetTreatAsClass = (void*)GetProcAddress(hOle32,"CoGetTreatAsClass");
     if (!(pCoInitializeEx = (void*)GetProcAddress(hOle32, "CoInitializeEx")))
     {
         trace("You need DCOM95 installed to run this test\n");
@@ -1008,6 +1194,7 @@ START_TEST(compobj)
     test_ProgIDFromCLSID();
     test_CLSIDFromProgID();
     test_CLSIDFromString();
+    test_StringFromGUID2();
     test_CoCreateInstance();
     test_ole_menu();
     test_CoGetClassObject();
@@ -1022,4 +1209,7 @@ START_TEST(compobj)
     test_registered_object_thread_affinity();
     test_CoFreeUnusedLibraries();
     test_CoGetObjectContext();
+    test_CoGetCallContext();
+    test_CoGetTreatAsClass();
+    test_CoInitializeEx();
 }

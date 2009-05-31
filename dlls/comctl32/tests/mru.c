@@ -353,15 +353,15 @@ static void test_MRUListA(void)
 
         /* NULL buffer = get list size */
         iRet = pEnumMRUList(hMRU, 0, NULL, 0);
-        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+        ok(iRet == 3 || iRet == -1 /* Vista */, "EnumMRUList expected %d or -1, got %d\n", LIST_SIZE, iRet);
 
         /* negative item pos = get list size */
         iRet = pEnumMRUList(hMRU, -1, NULL, 0);
-        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+        ok(iRet == 3 || iRet == -1 /* Vista */, "EnumMRUList expected %d or -1, got %d\n", LIST_SIZE, iRet);
 
         /* negative item pos = get list size */
         iRet = pEnumMRUList(hMRU, -5, NULL, 0);
-        ok(iRet == 3, "EnumMRUList expected %d, got %d\n", LIST_SIZE, iRet);
+        ok(iRet == 3 || iRet == -1 /* Vista */, "EnumMRUList expected %d or -1, got %d\n", LIST_SIZE, iRet);
 
         /* negative item pos = get list size */
         iRet = pEnumMRUList(hMRU, -1, buffer, 255);
@@ -410,8 +410,7 @@ static void test_MRUListA(void)
         pFreeMRUList(hMRU);
     }
 
-    /* Free (NULL list) - Doesn't crash */
-    pFreeMRUList(NULL);
+    /* FreeMRUList(NULL) crashes on Win98 OSR0 */
 }
 
 START_TEST(mru)

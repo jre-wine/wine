@@ -435,14 +435,11 @@ static void CBCalcPlacement(
   if (lprEdit->right < lprEdit->left)
     lprEdit->right = lprEdit->left;
 
-  TRACE("\ttext\t= (%d,%d-%d,%d)\n",
-	lprEdit->left, lprEdit->top, lprEdit->right, lprEdit->bottom);
+  TRACE("\ttext\t= (%s)\n", wine_dbgstr_rect(lprEdit));
 
-  TRACE("\tbutton\t= (%d,%d-%d,%d)\n",
-	lprButton->left, lprButton->top, lprButton->right, lprButton->bottom);
+  TRACE("\tbutton\t= (%s)\n", wine_dbgstr_rect(lprButton));
 
-  TRACE("\tlbox\t= (%d,%d-%d,%d)\n",
-	lprLB->left, lprLB->top, lprLB->right, lprLB->bottom );
+  TRACE("\tlbox\t= (%s)\n", wine_dbgstr_rect(lprLB));
 }
 
 /***********************************************************************
@@ -485,20 +482,20 @@ static LRESULT COMBO_WindowPosChanging(
     /*
      * Resizing a combobox has another side effect, it resizes the dropped
      * rectangle as well. However, it does it only if the new height for the
-     * combobox is different from the height it should have. In other words,
+     * combobox is more than the height it should have. In other words,
      * if the application resizing the combobox only had the intention to resize
      * the actual control, for example, to do the layout of a dialog that is
      * resized, the height of the dropdown is not changed.
      */
-    if (posChanging->cy != newComboHeight)
+    if (posChanging->cy > newComboHeight)
     {
 	TRACE("posChanging->cy=%d, newComboHeight=%d, oldbot=%d, oldtop=%d\n",
 	      posChanging->cy, newComboHeight, lphc->droppedRect.bottom,
 	      lphc->droppedRect.top);
       lphc->droppedRect.bottom = lphc->droppedRect.top + posChanging->cy - newComboHeight;
 
-      posChanging->cy = newComboHeight;
     }
+    posChanging->cy = newComboHeight;
   }
 
   return 0;
@@ -887,16 +884,9 @@ static HBRUSH COMBO_PrepareColors(
   }
   else
   {
-    if (lphc->wState & CBF_EDIT)
-    {
+      /* FIXME: In which cases WM_CTLCOLORLISTBOX should be sent? */
       hBkgBrush = (HBRUSH)SendMessageW(lphc->owner, WM_CTLCOLOREDIT,
 				       (WPARAM)hDC, (LPARAM)lphc->self );
-    }
-    else
-    {
-      hBkgBrush = (HBRUSH)SendMessageW(lphc->owner, WM_CTLCOLORLISTBOX,
-				       (WPARAM)hDC, (LPARAM)lphc->self );
-    }
   }
 
   /*
@@ -1117,7 +1107,7 @@ static void CBDropDown( LPHEADCOMBO lphc )
       {
             if (nItems < 5)
                 nDroppedHeight = (nItems+1)*nIHeight;
-            else
+            else if (nDroppedHeight < 6*nIHeight)
                 nDroppedHeight = 6*nIHeight;
       }
    }
@@ -1155,7 +1145,7 @@ static void CBRollUp( LPHEADCOMBO lphc, BOOL ok, BOOL bButton )
    HWND	hWnd = lphc->self;
 
    TRACE("[%p]: sel ok? [%i] dropped? [%i]\n",
-	 lphc->self, (INT)ok, (INT)(lphc->wState & CBF_DROPPED));
+	 lphc->self, ok, (INT)(lphc->wState & CBF_DROPPED));
 
    CB_NOTIFY( lphc, (ok) ? CBN_SELENDOK : CBN_SELENDCANCEL );
 
@@ -1353,6 +1343,14 @@ static LRESULT COMBO_Command( LPHEADCOMBO lphc, WPARAM wParam, HWND hWnd )
 
                 TRACE("[%p]: lbox selection change [%x]\n", lphc->self, lphc->wState );
 
+                /* do not roll up if selection is being tracked
+                 * by arrow keys in the dropdown listbox */
+                if (!(lphc->wState & CBF_NOROLLUP))
+                {
+                    CBRollUp( lphc, (HIWORD(wParam) == LBN_SELCHANGE), TRUE );
+                }
+                else lphc->wState &= ~CBF_NOROLLUP;
+
 		CB_NOTIFY( lphc, CBN_SELCHANGE );
 
 		if( HIWORD(wParam) == LBN_SELCHANGE)
@@ -1366,17 +1364,11 @@ static LRESULT COMBO_Command( LPHEADCOMBO lphc, WPARAM wParam, HWND hWnd )
 		       SendMessageW(lphc->hWndEdit, EM_SETSEL, 0, (LPARAM)(-1));
 		   }
 		   else
+                   {
 		       InvalidateRect(lphc->self, &lphc->textRect, TRUE);
+                       UpdateWindow(lphc->self);
+                   }
 		}
-
-		/* do not roll up if selection is being tracked
-		 * by arrowkeys in the dropdown listbox */
-                if( ((lphc->wState & CBF_DROPPED) && !(lphc->wState & CBF_NOROLLUP)) )
-                {
-                   CBRollUp( lphc, (HIWORD(wParam) == LBN_SELCHANGE), TRUE );
-                }
-		else lphc->wState &= ~CBF_NOROLLUP;
-
                 break;
 
 	   case LBN_SETFOCUS:
@@ -1840,8 +1832,6 @@ static char *strdupA(LPCSTR str)
 
 /***********************************************************************
  *           ComboWndProc_common
- *
- * http://msdn.microsoft.com/library/default.asp?url=/library/en-us/shellcc/platform/commctls/comboboxes/comboboxes.asp
  */
 static LRESULT ComboWndProc_common( HWND hwnd, UINT message,
                                     WPARAM wParam, LPARAM lParam, BOOL unicode )

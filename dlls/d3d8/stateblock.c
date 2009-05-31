@@ -25,7 +25,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d8);
 
-/* NOTE: DirectX8 doesn't export a IDirect3DStateBlock8, the interface is used internally to keep d3d8 and d3d9 as simila as possible */
+/* NOTE: DirectX8 doesn't export an IDirect3DStateBlock8, the interface is used internally to keep d3d8 and d3d9 as similar as possible */
 /* IDirect3DStateBlock8 IUnknown parts follow: */
 static HRESULT WINAPI IDirect3DStateBlock8Impl_QueryInterface(IDirect3DStateBlock8 *iface, REFIID riid, LPVOID *ppobj) {
     IDirect3DStateBlock8Impl *This = (IDirect3DStateBlock8Impl *)iface;
@@ -58,7 +58,9 @@ static ULONG WINAPI IDirect3DStateBlock8Impl_Release(IDirect3DStateBlock8 *iface
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
     if (ref == 0) {
+        EnterCriticalSection(&d3d8_cs);
         IWineD3DStateBlock_Release(This->wineD3DStateBlock);
+        LeaveCriticalSection(&d3d8_cs);
         HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
@@ -67,20 +69,53 @@ static ULONG WINAPI IDirect3DStateBlock8Impl_Release(IDirect3DStateBlock8 *iface
 /* IDirect3DStateBlock8 Interface follow: */
 static HRESULT WINAPI IDirect3DStateBlock8Impl_GetDevice(IDirect3DStateBlock8 *iface, IDirect3DDevice8 **ppDevice) {
     IDirect3DStateBlock8Impl *This = (IDirect3DStateBlock8Impl *)iface;
-    TRACE("(%p) Relay\n", This); 
-    return IDirect3DResource8Impl_GetDevice((LPDIRECT3DRESOURCE8) This, ppDevice);
+    IWineD3DDevice *wined3d_device;
+    HRESULT hr;
+
+    TRACE("(%p) Relay\n", This);
+
+    EnterCriticalSection(&d3d8_cs);
+
+    hr = IWineD3DStateBlock_GetDevice(This->wineD3DStateBlock, &wined3d_device);
+    if (SUCCEEDED(hr))
+    {
+        IWineD3DDevice_GetParent(wined3d_device, (IUnknown **)ppDevice);
+        IWineD3DDevice_Release(wined3d_device);
+    }
+
+    LeaveCriticalSection(&d3d8_cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DStateBlock8Impl_Capture(IDirect3DStateBlock8 *iface) {
     IDirect3DStateBlock8Impl *This = (IDirect3DStateBlock8Impl *)iface;
-    TRACE("(%p) Relay\n", This); 
-    return IWineD3DStateBlock_Capture(This->wineD3DStateBlock);
+    HRESULT hr;
+
+    TRACE("(%p) Relay\n", This);
+
+    EnterCriticalSection(&d3d8_cs);
+
+    hr = IWineD3DStateBlock_Capture(This->wineD3DStateBlock);
+
+    LeaveCriticalSection(&d3d8_cs);
+
+    return hr;
 }
 
 static HRESULT WINAPI IDirect3DStateBlock8Impl_Apply(IDirect3DStateBlock8 *iface) {
     IDirect3DStateBlock8Impl *This = (IDirect3DStateBlock8Impl *)iface;
-    TRACE("(%p) Relay\n", This); 
-    return IWineD3DStateBlock_Apply(This->wineD3DStateBlock);
+    HRESULT hr;
+
+    TRACE("(%p) Relay\n", This);
+
+    EnterCriticalSection(&d3d8_cs);
+
+    hr = IWineD3DStateBlock_Apply(This->wineD3DStateBlock);
+
+    LeaveCriticalSection(&d3d8_cs);
+
+    return hr;
 }
 
 const IDirect3DStateBlock8Vtbl Direct3DStateBlock8_Vtbl =

@@ -51,13 +51,14 @@ static const WCHAR szEmpty[] = {0};
 static LPWSTR HH_LoadString(DWORD dwID)
 {
     LPWSTR string = NULL;
+    LPCWSTR stringresource;
     int iSize;
 
-    iSize = LoadStringW(hhctrl_hinstance, dwID, NULL, 0);
-    iSize += 2; /* some strings (tab text) needs double-null termination */
+    iSize = LoadStringW(hhctrl_hinstance, dwID, (LPWSTR)&stringresource, 0);
 
-    string = heap_alloc(iSize * sizeof(WCHAR));
-    LoadStringW(hhctrl_hinstance, dwID, string, iSize);
+    string = heap_alloc((iSize + 2) * sizeof(WCHAR)); /* some strings (tab text) needs double-null termination */
+    memcpy(string, stringresource, iSize*sizeof(WCHAR));
+    string[iSize] = 0;
 
     return string;
 }
@@ -88,9 +89,15 @@ BOOL NavigateToUrl(HHInfo *info, LPCWSTR surl)
     BOOL ret;
     HRESULT hres;
 
-    hres = navigate_url(info, surl);
-    if(SUCCEEDED(hres))
-        return TRUE;
+    static const WCHAR url_indicator[] = {':', '/', '/', 0};
+
+    TRACE("%s\n", debugstr_w(surl));
+
+    if (strstrW(surl, url_indicator)) {
+        hres = navigate_url(info, surl);
+        if(SUCCEEDED(hres))
+            return TRUE;
+    } /* look up in chm if it doesn't look like a full url */
 
     SetChmPath(&chm_path, info->pCHMInfo->szFile, surl);
     ret = NavigateToChm(info, chm_path.chm_file, chm_path.chm_index);
@@ -115,7 +122,7 @@ BOOL NavigateToChm(HHInfo *info, LPCWSTR file, LPCWSTR index)
     if (!info->web_browser)
         return FALSE;
 
-    if(!GetFullPathNameW(file, sizeof(full_path), full_path, NULL)) {
+    if(!GetFullPathNameW(file, sizeof(full_path)/sizeof(full_path[0]), full_path, NULL)) {
         WARN("GetFullPathName failed: %u\n", GetLastError());
         return FALSE;
     }
@@ -574,13 +581,13 @@ static BOOL HH_AddToolbar(HHInfo *pHHInfo)
     {
         LPWSTR szBuf = HH_LoadString(buttons[dwIndex].idCommand);
         DWORD dwLen = strlenW(szBuf);
-        szBuf[dwLen + 2] = 0; /* Double-null terminate */
+        szBuf[dwLen + 1] = 0; /* Double-null terminate */
 
         buttons[dwIndex].iString = (DWORD)SendMessageW(hToolbar, TB_ADDSTRINGW, 0, (LPARAM)szBuf);
         heap_free(szBuf);
     }
 
-    SendMessageW(hToolbar, TB_ADDBUTTONSW, dwNumButtons, (LPARAM)&buttons);
+    SendMessageW(hToolbar, TB_ADDBUTTONSW, dwNumButtons, (LPARAM)buttons);
     SendMessageW(hToolbar, TB_AUTOSIZE, 0, 0);
     ShowWindow(hToolbar, SW_SHOW);
 
@@ -818,7 +825,7 @@ static BOOL HH_CreateHelpWindow(HHInfo *info)
 
     /* Read in window parameters if available */
     if (info->WinType.fsValidMembers & HHWIN_PARAM_STYLES)
-        dwStyles = info->WinType.dwStyles;
+        dwStyles = info->WinType.dwStyles | WS_OVERLAPPEDWINDOW;
     else
         dwStyles = WS_OVERLAPPEDWINDOW | WS_VISIBLE |
                    WS_CLIPSIBLINGS | WS_CLIPCHILDREN;

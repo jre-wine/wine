@@ -61,6 +61,32 @@ static ULONG WINAPI OleObject_Release(IOleObject *iface)
     return IHTMLDocument2_Release(HTMLDOC(This));
 }
 
+static void update_hostinfo(HTMLDocument *This, DOCHOSTUIINFO *hostinfo)
+{
+    nsIScrollable *scrollable;
+    nsresult nsres;
+
+    if(!This->nscontainer)
+        return;
+
+    nsres = nsIWebBrowser_QueryInterface(This->nscontainer->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable, ScrollOrientation_Y,
+                (hostinfo->dwFlags & DOCHOSTUIFLAG_SCROLL_NO) ? Scrollbar_Never : Scrollbar_Always);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default Y scrollbar prefs: %08x\n", nsres);
+
+        nsres = nsIScrollable_SetDefaultScrollbarPreferences(scrollable, ScrollOrientation_X,
+                hostinfo->dwFlags & DOCHOSTUIFLAG_SCROLL_NO ? Scrollbar_Never : Scrollbar_Auto);
+        if(NS_FAILED(nsres))
+            ERR("Could not set default X scrollbar prefs: %08x\n", nsres);
+
+        nsIScrollable_Release(scrollable);
+    }else {
+        ERR("Could not get nsIScrollable: %08x\n", nsres);
+    }
+}
+
 static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite *pClientSite)
 {
     HTMLDocument *This = OLEOBJ_THIS(iface);
@@ -103,7 +129,8 @@ static HRESULT WINAPI OleObject_SetClientSite(IOleObject *iface, IOleClientSite 
             TRACE("hostinfo = {%u %08x %08x %s %s}\n",
                     hostinfo.cbSize, hostinfo.dwFlags, hostinfo.dwDoubleClick,
                     debugstr_w(hostinfo.pchHostCss), debugstr_w(hostinfo.pchHostNS));
-            memcpy(&This->hostinfo, &hostinfo, sizeof(DOCHOSTUIINFO));
+            update_hostinfo(This, &hostinfo);
+            This->hostinfo = hostinfo;
         }
 
         if(!This->has_key_path) {
@@ -285,7 +312,7 @@ static HRESULT WINAPI OleObject_DoVerb(IOleObject *iface, LONG iVerb, LPMSG lpms
         if(SUCCEEDED(hres)) {
             if(lprcPosRect) {
                 RECT rect; /* We need to pass rect as not const pointer */
-                memcpy(&rect, lprcPosRect, sizeof(RECT));
+                rect = *lprcPosRect;
                 IOleDocumentView_SetRect(DOCVIEW(This), &rect);
             }
             IOleDocumentView_Show(DOCVIEW(This), TRUE);
@@ -325,7 +352,7 @@ static HRESULT WINAPI OleObject_GetUserClassID(IOleObject *iface, CLSID *pClsid)
     if(!pClsid)
         return E_INVALIDARG;
 
-    memcpy(pClsid, &CLSID_HTMLDocument, sizeof(GUID));
+    *pClsid = CLSID_HTMLDocument;
     return S_OK;
 }
 

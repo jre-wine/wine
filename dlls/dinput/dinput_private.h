@@ -58,10 +58,11 @@ extern const struct dinput_device mouse_device;
 extern const struct dinput_device keyboard_device;
 extern const struct dinput_device joystick_linux_device;
 extern const struct dinput_device joystick_linuxinput_device;
-
-extern HINSTANCE DINPUT_instance;
+extern const struct dinput_device joystick_osx_device;
 
 extern void check_dinput_hooks(LPDIRECTINPUTDEVICE8A);
-typedef void (*DI_EVENT_PROC)(LPDIRECTINPUTDEVICE8A, WPARAM, LPARAM);
+typedef int (*DI_EVENT_PROC)(LPDIRECTINPUTDEVICE8A, WPARAM, LPARAM);
+
+extern void _dump_diactionformatA(LPDIACTIONFORMATA);
 
 #endif /* __WINE_DLLS_DINPUT_DINPUT_PRIVATE_H */

@@ -33,6 +33,8 @@
 #include <stdio.h>
 #include <sys/ucontext.h>
 
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "winnt.h"
@@ -43,6 +45,8 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+
+static pthread_key_t teb_key;
 
 #define HANDLER_DEF(name) void name( int __signal, struct siginfo *__siginfo, ucontext_t *__context )
 #define HANDLER_CONTEXT (__context)
@@ -149,13 +153,12 @@ static void restore_fpu( CONTEXT *context, ucontext_t *ucontext )
 
 
 /***********************************************************************
- *              get_cpu_context
- *
- * Get the context of the current thread.
+ *		RtlCaptureContext (NTDLL.@)
  */
-void get_cpu_context( CONTEXT *context )
+void WINAPI RtlCaptureContext( CONTEXT *context )
 {
     FIXME("not implemented\n");
+    memset( context, 0, sizeof(*context) );
 }
 
 
@@ -170,6 +173,195 @@ void set_cpu_context( const CONTEXT *context )
 }
 
 
+/***********************************************************************
+ *           copy_context
+ *
+ * Copy a register context according to the flags.
+ */
+void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
+{
+    flags &= ~CONTEXT_SPARC;  /* get rid of CPU id */
+    if (flags & CONTEXT_CONTROL)
+    {
+        to->psr = from->psr;
+        to->pc  = from->pc;
+        to->npc = from->npc;
+        to->y   = from->y;
+        to->wim = from->wim;
+        to->tbr = from->tbr;
+    }
+    if (flags & CONTEXT_INTEGER)
+    {
+        to->g0 = from->g0;
+        to->g1 = from->g1;
+        to->g2 = from->g2;
+        to->g3 = from->g3;
+        to->g4 = from->g4;
+        to->g5 = from->g5;
+        to->g6 = from->g6;
+        to->g7 = from->g7;
+        to->o0 = from->o0;
+        to->o1 = from->o1;
+        to->o2 = from->o2;
+        to->o3 = from->o3;
+        to->o4 = from->o4;
+        to->o5 = from->o5;
+        to->o6 = from->o6;
+        to->o7 = from->o7;
+        to->l0 = from->l0;
+        to->l1 = from->l1;
+        to->l2 = from->l2;
+        to->l3 = from->l3;
+        to->l4 = from->l4;
+        to->l5 = from->l5;
+        to->l6 = from->l6;
+        to->l7 = from->l7;
+        to->i0 = from->i0;
+        to->i1 = from->i1;
+        to->i2 = from->i2;
+        to->i3 = from->i3;
+        to->i4 = from->i4;
+        to->i5 = from->i5;
+        to->i6 = from->i6;
+        to->i7 = from->i7;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        /* FIXME */
+    }
+}
+
+
+/***********************************************************************
+ *           context_to_server
+ *
+ * Convert a register context to the server format.
+ */
+NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
+{
+    DWORD flags = from->ContextFlags & ~CONTEXT_SPARC;  /* get rid of CPU id */
+
+    memset( to, 0, sizeof(*to) );
+    to->cpu = CPU_SPARC;
+
+    if (flags & CONTEXT_CONTROL)
+    {
+        to->flags |= SERVER_CTX_CONTROL;
+        to->ctl.sparc_regs.psr = from->psr;
+        to->ctl.sparc_regs.pc  = from->pc;
+        to->ctl.sparc_regs.npc = from->npc;
+        to->ctl.sparc_regs.y   = from->y;
+        to->ctl.sparc_regs.wim = from->wim;
+        to->ctl.sparc_regs.tbr = from->tbr;
+    }
+    if (flags & CONTEXT_INTEGER)
+    {
+        to->flags |= SERVER_CTX_INTEGER;
+        to->integer.sparc_regs.g[0] = from->g0;
+        to->integer.sparc_regs.g[1] = from->g1;
+        to->integer.sparc_regs.g[2] = from->g2;
+        to->integer.sparc_regs.g[3] = from->g3;
+        to->integer.sparc_regs.g[4] = from->g4;
+        to->integer.sparc_regs.g[5] = from->g5;
+        to->integer.sparc_regs.g[6] = from->g6;
+        to->integer.sparc_regs.g[7] = from->g7;
+        to->integer.sparc_regs.o[0] = from->o0;
+        to->integer.sparc_regs.o[1] = from->o1;
+        to->integer.sparc_regs.o[2] = from->o2;
+        to->integer.sparc_regs.o[3] = from->o3;
+        to->integer.sparc_regs.o[4] = from->o4;
+        to->integer.sparc_regs.o[5] = from->o5;
+        to->integer.sparc_regs.o[6] = from->o6;
+        to->integer.sparc_regs.o[7] = from->o7;
+        to->integer.sparc_regs.l[0] = from->l0;
+        to->integer.sparc_regs.l[1] = from->l1;
+        to->integer.sparc_regs.l[2] = from->l2;
+        to->integer.sparc_regs.l[3] = from->l3;
+        to->integer.sparc_regs.l[4] = from->l4;
+        to->integer.sparc_regs.l[5] = from->l5;
+        to->integer.sparc_regs.l[6] = from->l6;
+        to->integer.sparc_regs.l[7] = from->l7;
+        to->integer.sparc_regs.i[0] = from->i0;
+        to->integer.sparc_regs.i[1] = from->i1;
+        to->integer.sparc_regs.i[2] = from->i2;
+        to->integer.sparc_regs.i[3] = from->i3;
+        to->integer.sparc_regs.i[4] = from->i4;
+        to->integer.sparc_regs.i[5] = from->i5;
+        to->integer.sparc_regs.i[6] = from->i6;
+        to->integer.sparc_regs.i[7] = from->i7;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        /* FIXME */
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           context_from_server
+ *
+ * Convert a register context from the server format.
+ */
+NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
+{
+    if (from->cpu != CPU_SPARC) return STATUS_INVALID_PARAMETER;
+
+    to->ContextFlags = CONTEXT_SPARC;
+    if (from->flags & SERVER_CTX_CONTROL)
+    {
+        to->ContextFlags |= CONTEXT_CONTROL;
+        to->psr = from->ctl.sparc_regs.psr;
+        to->pc  = from->ctl.sparc_regs.pc;
+        to->npc = from->ctl.sparc_regs.npc;
+        to->y   = from->ctl.sparc_regs.y;
+        to->wim = from->ctl.sparc_regs.wim;
+        to->tbr = from->ctl.sparc_regs.tbr;
+    }
+    if (from->flags & SERVER_CTX_INTEGER)
+    {
+        to->ContextFlags |= CONTEXT_INTEGER;
+        to->g0 = from->integer.sparc_regs.g[0];
+        to->g1 = from->integer.sparc_regs.g[1];
+        to->g2 = from->integer.sparc_regs.g[2];
+        to->g3 = from->integer.sparc_regs.g[3];
+        to->g4 = from->integer.sparc_regs.g[4];
+        to->g5 = from->integer.sparc_regs.g[5];
+        to->g6 = from->integer.sparc_regs.g[6];
+        to->g7 = from->integer.sparc_regs.g[7];
+        to->o0 = from->integer.sparc_regs.o[0];
+        to->o1 = from->integer.sparc_regs.o[1];
+        to->o2 = from->integer.sparc_regs.o[2];
+        to->o3 = from->integer.sparc_regs.o[3];
+        to->o4 = from->integer.sparc_regs.o[4];
+        to->o5 = from->integer.sparc_regs.o[5];
+        to->o6 = from->integer.sparc_regs.o[6];
+        to->o7 = from->integer.sparc_regs.o[7];
+        to->l0 = from->integer.sparc_regs.l[0];
+        to->l1 = from->integer.sparc_regs.l[1];
+        to->l2 = from->integer.sparc_regs.l[2];
+        to->l3 = from->integer.sparc_regs.l[3];
+        to->l4 = from->integer.sparc_regs.l[4];
+        to->l5 = from->integer.sparc_regs.l[5];
+        to->l6 = from->integer.sparc_regs.l[6];
+        to->l7 = from->integer.sparc_regs.l[7];
+        to->i0 = from->integer.sparc_regs.i[0];
+        to->i1 = from->integer.sparc_regs.i[1];
+        to->i2 = from->integer.sparc_regs.i[2];
+        to->i3 = from->integer.sparc_regs.i[3];
+        to->i4 = from->integer.sparc_regs.i[4];
+        to->i5 = from->integer.sparc_regs.i[5];
+        to->i6 = from->integer.sparc_regs.i[6];
+        to->i7 = from->integer.sparc_regs.i[7];
+    }
+    if (from->flags & SERVER_CTX_FLOATING_POINT)
+    {
+        /* FIXME */
+    }
+    return STATUS_SUCCESS;
+}
+
+
 /**********************************************************************
  *		segv_handler
  *
@@ -179,13 +371,15 @@ static void segv_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
+
+    rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
 
     /* we want the page-fault case to be fast */
     if ( info->si_code == SEGV_ACCERR )
-        if (VIRTUAL_HandleFault( (LPVOID)info->si_addr )) return;
+        if (!(rec.ExceptionCode = virtual_handle_fault( info->si_addr, 0 ))) return;
 
     save_context( &context, ucontext );
-    rec.ExceptionCode    = EXCEPTION_ACCESS_VIOLATION;
     rec.ExceptionRecord  = NULL;
     rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
     rec.ExceptionAddress = (LPVOID)context.pc;
@@ -193,7 +387,8 @@ static void segv_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     rec.ExceptionInformation[0] = 0;  /* FIXME: read/write access ? */
     rec.ExceptionInformation[1] = (ULONG_PTR)info->si_addr;
 
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, ucontext );
 }
 
@@ -206,6 +401,7 @@ static void bus_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, ucontext );
     rec.ExceptionRecord  = NULL;
@@ -218,7 +414,8 @@ static void bus_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     else
         rec.ExceptionCode = EXCEPTION_ACCESS_VIOLATION;
 
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, ucontext );
 }
 
@@ -231,6 +428,7 @@ static void ill_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     switch ( info->si_code )
     {
@@ -257,7 +455,8 @@ static void ill_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
     rec.ExceptionAddress = (LPVOID)context.pc;
     rec.NumberParameters = 0;
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, ucontext );
 }
 
@@ -271,6 +470,7 @@ static void trap_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     switch ( info->si_code )
     {
@@ -288,7 +488,8 @@ static void trap_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     rec.ExceptionRecord  = NULL;
     rec.ExceptionAddress = (LPVOID)context.pc;
     rec.NumberParameters = 0;
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, ucontext );
 }
 
@@ -302,6 +503,7 @@ static void fpe_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     switch ( info->si_code )
     {
@@ -338,7 +540,8 @@ static void fpe_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     rec.ExceptionRecord  = NULL;
     rec.ExceptionAddress = (LPVOID)context.pc;
     rec.NumberParameters = 0;
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, ucontext );
     restore_fpu( &context, ucontext );
 }
@@ -355,6 +558,7 @@ static void int_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
     {
         EXCEPTION_RECORD rec;
         CONTEXT context;
+        NTSTATUS status;
 
         save_context( &context, ucontext );
         rec.ExceptionCode    = CONTROL_C_EXIT;
@@ -362,7 +566,8 @@ static void int_handler( int signal, siginfo_t *info, ucontext_t *ucontext )
         rec.ExceptionRecord  = NULL;
         rec.ExceptionAddress = (LPVOID)context.pc;
         rec.NumberParameters = 0;
-        __regs_RtlRaiseException( &rec, &context );
+        status = raise_exception( &rec, &context, TRUE );
+        if (status) raise_status( status, &rec );
         restore_context( &context, ucontext );
     }
 }
@@ -376,6 +581,7 @@ static HANDLER_DEF(abrt_handler)
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, HANDLER_CONTEXT );
     rec.ExceptionCode    = EXCEPTION_WINE_ASSERTION;
@@ -383,7 +589,8 @@ static HANDLER_DEF(abrt_handler)
     rec.ExceptionRecord  = NULL;
     rec.ExceptionAddress = (LPVOID)context.pc;
     rec.NumberParameters = 0;
-    __regs_RtlRaiseException( &rec, &context ); /* Should never return.. */
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, HANDLER_CONTEXT );
 }
 
@@ -395,7 +602,7 @@ static HANDLER_DEF(abrt_handler)
  */
 static HANDLER_DEF(quit_handler)
 {
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -447,7 +654,7 @@ static int set_handler( int sig, void (*func)() )
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
  */
-int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
+int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
     if (sig > sizeof(handlers) / sizeof(handlers[0])) return -1;
     if (handlers[sig] != NULL) return -2;
@@ -457,9 +664,25 @@ int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
- *		SIGNAL_Init
+ *		signal_init_thread
  */
-BOOL SIGNAL_Init(void)
+void signal_init_thread( TEB *teb )
+{
+    static int init_done;
+
+    if (!init_done)
+    {
+        pthread_key_create( &teb_key, NULL );
+        init_done = 1;
+    }
+    pthread_setspecific( teb_key, teb );
+}
+
+
+/**********************************************************************
+ *		signal_init_process
+ */
+void signal_init_process(void)
 {
     if (set_handler( SIGINT,  (void (*)())int_handler  ) == -1) goto error;
     if (set_handler( SIGFPE,  (void (*)())fpe_handler  ) == -1) goto error;
@@ -476,11 +699,11 @@ BOOL SIGNAL_Init(void)
        this is correct, because that is what x86 does, or it is harmful 
        because it could obscure problems in user code */
     asm("ta 6"); /* 6 == ST_FIX_ALIGN defined in sys/trap.h */
-   return TRUE;
+    return;
 
  error:
     perror("sigaction");
-    return FALSE;
+    exit(1);
 }
 
 
@@ -490,6 +713,20 @@ BOOL SIGNAL_Init(void)
 void __wine_enter_vm86( CONTEXT *context )
 {
     MESSAGE("vm86 mode not supported on this platform\n");
+}
+
+/***********************************************************************
+ *		RtlRaiseException (NTDLL.@)
+ */
+void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
+{
+    CONTEXT context;
+    NTSTATUS status;
+
+    RtlCaptureContext( &context );
+    rec->ExceptionAddress = (void *)context.pc;
+    status = raise_exception( rec, &context, TRUE );
+    if (status) raise_status( status, rec );
 }
 
 /**********************************************************************
@@ -506,6 +743,14 @@ void WINAPI DbgBreakPoint(void)
 void WINAPI DbgUserBreakPoint(void)
 {
      kill(getpid(), SIGTRAP);
+}
+
+/**********************************************************************
+ *           NtCurrentTeb   (NTDLL.@)
+ */
+TEB * WINAPI NtCurrentTeb(void)
+{
+    return pthread_getspecific( teb_key );
 }
 
 #endif  /* __sparc__ */

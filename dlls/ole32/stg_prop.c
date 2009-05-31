@@ -25,11 +25,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * There's a decent overview of property set storage here:
- * http://msdn.microsoft.com/archive/en-us/dnarolegen/html/msdn_propset.asp
- * It's a little bit out of date, and more definitive references are given
- * below, but it gives the best "big picture" that I've found.
- *
  * TODO:
  * - I don't honor the maximum property set size.
  * - Certain bogus files could result in reading past the end of a buffer.
@@ -68,9 +63,7 @@ static inline StorageImpl *impl_from_IPropertySetStorage( IPropertySetStorage *i
     return (StorageImpl *)((char*)iface - FIELD_OFFSET(StorageImpl, base.pssVtbl));
 }
 
-/* These are documented in MSDN, e.g.
- * http://msdn.microsoft.com/library/en-us/stg/stg/property_set_header.asp
- * http://msdn.microsoft.com/library/library/en-us/stg/stg/section.asp
+/* These are documented in MSDN,
  * but they don't seem to be in any header file.
  */
 #define PROPSETHDR_BYTEORDER_MAGIC      0xfffe
@@ -87,9 +80,6 @@ static inline StorageImpl *impl_from_IPropertySetStorage( IPropertySetStorage *i
 #define CFTAG_FMTID     (-3L)
 #define CFTAG_NODATA      0L
 
-/* The format version (and what it implies) is described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/format_version.asp
- */
 typedef struct tagPROPERTYSETHEADER
 {
     WORD  wByteOrder; /* always 0xfffe */
@@ -200,7 +190,7 @@ static HRESULT WINAPI IPropertyStorage_fnQueryInterface(
         IsEqualGUID(&IID_IPropertyStorage, riid))
     {
         IPropertyStorage_AddRef(iface);
-        *ppvObject = (IPropertyStorage*)iface;
+        *ppvObject = iface;
         return S_OK;
     }
 
@@ -263,7 +253,7 @@ static PROPVARIANT *PropertyStorage_FindPropertyByName(
     if (This->codePage == CP_UNICODE)
     {
         if (dictionary_find(This->name_to_propid, name, (void **)&propid))
-            ret = PropertyStorage_FindProperty(This, (PROPID)propid);
+            ret = PropertyStorage_FindProperty(This, propid);
     }
     else
     {
@@ -275,7 +265,7 @@ static PROPVARIANT *PropertyStorage_FindPropertyByName(
         {
             if (dictionary_find(This->name_to_propid, ansiName,
              (void **)&propid))
-                ret = PropertyStorage_FindProperty(This, (PROPID)propid);
+                ret = PropertyStorage_FindProperty(This, propid);
             CoTaskMemFree(ansiName);
         }
     }
@@ -528,7 +518,7 @@ static HRESULT PropertyStorage_StoreNameWithId(PropertyStorage_impl *This,
 
     assert(srcName);
 
-    hr = PropertyStorage_StringCopy((LPCSTR)srcName, cp, &name, This->codePage);
+    hr = PropertyStorage_StringCopy(srcName, cp, &name, This->codePage);
     if (SUCCEEDED(hr))
     {
         if (This->codePage == CP_UNICODE)
@@ -897,7 +887,7 @@ static HRESULT WINAPI IPropertyStorage_fnSetClass(
         return E_INVALIDARG;
     if (!(This->grfMode & STGM_READWRITE))
         return STG_E_ACCESSDENIED;
-    memcpy(&This->clsid, clsid, sizeof(This->clsid));
+    This->clsid = *clsid;
     This->dirty = TRUE;
     if (This->grfFlags & PROPSETFLAG_UNBUFFERED)
         IPropertyStorage_Commit(iface, STGC_DEFAULT);
@@ -923,12 +913,12 @@ static HRESULT WINAPI IPropertyStorage_fnStat(
     hr = IStream_Stat(This->stm, &stat, STATFLAG_NONAME);
     if (SUCCEEDED(hr))
     {
-        memcpy(&statpsstg->fmtid, &This->fmtid, sizeof(statpsstg->fmtid));
-        memcpy(&statpsstg->clsid, &This->clsid, sizeof(statpsstg->clsid));
+        statpsstg->fmtid = This->fmtid;
+        statpsstg->clsid = This->clsid;
         statpsstg->grfFlags = This->grfFlags;
-        memcpy(&statpsstg->mtime, &stat.mtime, sizeof(statpsstg->mtime));
-        memcpy(&statpsstg->ctime, &stat.ctime, sizeof(statpsstg->ctime));
-        memcpy(&statpsstg->atime, &stat.atime, sizeof(statpsstg->atime));
+        statpsstg->mtime = stat.mtime;
+        statpsstg->ctime = stat.ctime;
+        statpsstg->atime = stat.atime;
         statpsstg->dwOSVersion = This->originatorOS;
     }
     return hr;
@@ -937,23 +927,23 @@ static HRESULT WINAPI IPropertyStorage_fnStat(
 static int PropertyStorage_PropNameCompare(const void *a, const void *b,
  void *extra)
 {
-    PropertyStorage_impl *This = (PropertyStorage_impl *)extra;
+    PropertyStorage_impl *This = extra;
 
     if (This->codePage == CP_UNICODE)
     {
         TRACE("(%s, %s)\n", debugstr_w(a), debugstr_w(b));
         if (This->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
-            return lstrcmpW((LPCWSTR)a, (LPCWSTR)b);
+            return lstrcmpW(a, b);
         else
-            return lstrcmpiW((LPCWSTR)a, (LPCWSTR)b);
+            return lstrcmpiW(a, b);
     }
     else
     {
         TRACE("(%s, %s)\n", debugstr_a(a), debugstr_a(b));
         if (This->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
-            return lstrcmpA((LPCSTR)a, (LPCSTR)b);
+            return lstrcmpA(a, b);
         else
-            return lstrcmpiA((LPCSTR)a, (LPCSTR)b);
+            return lstrcmpiA(a, b);
     }
 }
 
@@ -971,13 +961,13 @@ static int PropertyStorage_PropCompare(const void *a, const void *b,
 
 static void PropertyStorage_PropertyDestroy(void *k, void *d, void *extra)
 {
-    PropVariantClear((PROPVARIANT *)d);
+    PropVariantClear(d);
     HeapFree(GetProcessHeap(), 0, d);
 }
 
 #ifdef WORDS_BIGENDIAN
 /* Swaps each character in str to or from little endian; assumes the conversion
- * is symmetric, that is, that le16toh is equivalent to htole16.
+ * is symmetric, that is, that lendian16toh is equivalent to htole16.
  */
 static void PropertyStorage_ByteSwapString(LPWSTR str, size_t len)
 {
@@ -1059,7 +1049,7 @@ static HRESULT PropertyStorage_ReadProperty(PropertyStorage_impl *This,
         TRACE("Read char 0x%x ('%c')\n", prop->u.cVal, prop->u.cVal);
         break;
     case VT_UI1:
-        prop->u.bVal = *(const UCHAR *)data;
+        prop->u.bVal = *data;
         TRACE("Read byte 0x%x\n", prop->u.bVal);
         break;
     case VT_I2:
@@ -1073,7 +1063,7 @@ static HRESULT PropertyStorage_ReadProperty(PropertyStorage_impl *This,
     case VT_INT:
     case VT_I4:
         StorageUtl_ReadDWord(data, 0, (DWORD*)&prop->u.lVal);
-        TRACE("Read long %ld\n", prop->u.lVal);
+        TRACE("Read long %d\n", prop->u.lVal);
         break;
     case VT_UINT:
     case VT_UI4:
@@ -1319,7 +1309,7 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
         goto end;
     }
     This->format = hdr.wFormat;
-    memcpy(&This->clsid, &hdr.clsid, sizeof(This->clsid));
+    This->clsid = hdr.clsid;
     This->originatorOS = hdr.dwOSVer;
     if (PROPSETHDR_OSVER_KIND(hdr.dwOSVer) == PROPSETHDR_OSVER_KIND_MAC)
         WARN("File comes from a Mac, strings will probably be screwed up\n");
@@ -1421,9 +1411,7 @@ static HRESULT PropertyStorage_ReadFromStream(PropertyStorage_impl *This)
     }
     if (!This->codePage)
     {
-        /* default to Unicode unless told not to, as specified here:
-         * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
-         */
+        /* default to Unicode unless told not to, as specified on msdn */
         if (This->grfFlags & PROPSETFLAG_ANSI)
             This->codePage = GetACP();
         else
@@ -1498,8 +1486,8 @@ struct DictionaryClosure
 static BOOL PropertyStorage_DictionaryWriter(const void *key,
  const void *value, void *extra, void *closure)
 {
-    PropertyStorage_impl *This = (PropertyStorage_impl *)extra;
-    struct DictionaryClosure *c = (struct DictionaryClosure *)closure;
+    PropertyStorage_impl *This = extra;
+    struct DictionaryClosure *c = closure;
     DWORD propid;
     ULONG count;
 
@@ -1729,7 +1717,7 @@ static HRESULT PropertyStorage_WritePropertyToStream(PropertyStorage_impl *This,
         len = var->u.pclipdata->cbSize;
         StorageUtl_WriteDWord((LPBYTE)&cf_hdr[0], 0, len + 8);
         StorageUtl_WriteDWord((LPBYTE)&cf_hdr[1], 0, var->u.pclipdata->ulClipFmt);
-        hr = IStream_Write(This->stm, &cf_hdr, sizeof(cf_hdr), &count);
+        hr = IStream_Write(This->stm, cf_hdr, sizeof(cf_hdr), &count);
         if (FAILED(hr))
             goto end;
         hr = IStream_Write(This->stm, &var->u.pclipdata->pClipData, len, &count);
@@ -1768,8 +1756,8 @@ struct PropertyClosure
 static BOOL PropertyStorage_PropertiesWriter(const void *key, const void *value,
  void *extra, void *closure)
 {
-    PropertyStorage_impl *This = (PropertyStorage_impl *)extra;
-    struct PropertyClosure *c = (struct PropertyClosure *)closure;
+    PropertyStorage_impl *This = extra;
+    struct PropertyClosure *c = closure;
 
     assert(key);
     assert(value);
@@ -1981,7 +1969,7 @@ static HRESULT PropertyStorage_BaseConstruct(IStream *stm,
     InitializeCriticalSection(&(*pps)->cs);
     (*pps)->cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": PropertyStorage_impl.cs");
     (*pps)->stm = stm;
-    memcpy(&(*pps)->fmtid, rfmtid, sizeof((*pps)->fmtid));
+    (*pps)->fmtid = *rfmtid;
     (*pps)->grfMode = grfMode;
 
     hr = PropertyStorage_CreateDictionaries(*pps);
@@ -2037,9 +2025,7 @@ static HRESULT PropertyStorage_ConstructEmpty(IStream *stm,
         ps->grfFlags = grfFlags;
         if (ps->grfFlags & PROPSETFLAG_CASE_SENSITIVE)
             ps->format = 1;
-        /* default to Unicode unless told not to, as specified here:
-         * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
-         */
+        /* default to Unicode unless told not to, as specified on msdn */
         if (ps->grfFlags & PROPSETFLAG_ANSI)
             ps->codePage = GetACP();
         else
@@ -2328,7 +2314,7 @@ static HRESULT create_EnumSTATPROPSETSTG(
             statpss.atime = stat.atime;
             statpss.ctime = stat.ctime;
             statpss.grfFlags = stat.grfMode;
-            memcpy(&statpss.clsid, &stat.clsid, sizeof stat.clsid);
+            statpss.clsid = stat.clsid;
             enumx_add_element(enumx, &statpss);
         }
         CoTaskMemFree(stat.pwcsName);
@@ -2507,8 +2493,6 @@ static const WCHAR szDocSummaryInfo[] = { 5,'D','o','c','u','m','e','n','t',
  *
  * NOTES
  * str must be at least CCH_MAX_PROPSTG_NAME characters in length.
- * Based on the algorithm described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
  */
 HRESULT WINAPI FmtIdToPropStgName(const FMTID *rfmtid, LPOLESTR str)
 {
@@ -2574,10 +2558,6 @@ HRESULT WINAPI FmtIdToPropStgName(const FMTID *rfmtid, LPOLESTR str)
  * RETURNS
  *  E_INVALIDARG if rfmtid or str is NULL or if str can't be converted to
  *  a format ID, S_OK otherwise.
- *
- * NOTES
- * Based on the algorithm described here:
- * http://msdn.microsoft.com/library/en-us/stg/stg/names_in_istorage.asp
  */
 HRESULT WINAPI PropStgNameToFmtId(const LPOLESTR str, FMTID *rfmtid)
 {
@@ -2590,12 +2570,12 @@ HRESULT WINAPI PropStgNameToFmtId(const LPOLESTR str, FMTID *rfmtid)
 
     if (!lstrcmpiW(str, szDocSummaryInfo))
     {
-        memcpy(rfmtid, &FMTID_DocSummaryInformation, sizeof(*rfmtid));
+        *rfmtid = FMTID_DocSummaryInformation;
         hr = S_OK;
     }
     else if (!lstrcmpiW(str, szSummaryInfo))
     {
-        memcpy(rfmtid, &FMTID_SummaryInformation, sizeof(*rfmtid));
+        *rfmtid = FMTID_SummaryInformation;
         hr = S_OK;
     }
     else

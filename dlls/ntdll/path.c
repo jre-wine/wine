@@ -39,7 +39,6 @@
 #include "wine/unicode.h"
 #include "wine/debug.h"
 #include "wine/library.h"
-#include "thread.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
@@ -288,30 +287,24 @@ ULONG WINAPI RtlIsDosDeviceName_U( PCWSTR dos_name )
         if (!strcmpiW( dos_name, consoleW ))
             return MAKELONG( sizeof(conW), 4 * sizeof(WCHAR) );  /* 4 is length of \\.\ prefix */
         return 0;
+    case ABSOLUTE_DRIVE_PATH:
+    case RELATIVE_DRIVE_PATH:
+        start = dos_name + 2;  /* skip drive letter */
+        break;
     default:
+        start = dos_name;
         break;
     }
 
-    end = dos_name + strlenW(dos_name) - 1;
-    while (end >= dos_name && *end == ':') end--;  /* remove all trailing ':' */
-
     /* find start of file name */
-    for (start = end; start >= dos_name; start--)
-    {
-        if (IS_SEPARATOR(start[0])) break;
-        /* check for ':' but ignore if before extension (for things like NUL:.txt) */
-        if (start[0] == ':' && start[1] != '.') break;
-    }
-    start++;
+    for (p = start; *p; p++) if (IS_SEPARATOR(*p)) start = p + 1;
 
-    /* remove extension */
-    if ((p = strchrW( start, '.' )))
-    {
-        end = p - 1;
-        if (end >= dos_name && *end == ':') end--;  /* remove trailing ':' before extension */
-    }
+    /* truncate at extension and ':' */
+    for (end = start; *end; end++) if (*end == '.' || *end == ':') break;
+    end--;
+
     /* remove trailing spaces */
-    while (end >= dos_name && *end == ' ') end--;
+    while (end >= start && *end == ' ') end--;
 
     /* now we have a potential device name between start and end, check it */
     switch(end - start + 1)
@@ -429,7 +422,7 @@ BOOLEAN  WINAPI RtlDosPathNameToNtPathName_U(PCWSTR dos_path,
 /******************************************************************
  *		RtlDosSearchPath_U
  *
- * Searchs a file of name 'name' into a ';' separated list of paths
+ * Searches a file of name 'name' into a ';' separated list of paths
  * (stored in paths)
  * Doesn't seem to search elsewhere than the paths list
  * Stores the result in buffer (file_part will point to the position
@@ -597,7 +590,6 @@ static const WCHAR *skip_unc_prefix( const WCHAR *ptr )
 static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
 {
     ULONG                       reqsize = 0, mark = 0, dep = 0, deplen;
-    DOS_PATHNAME_TYPE           type;
     LPWSTR                      ins_str = NULL;
     LPCWSTR                     ptr;
     const UNICODE_STRING*       cd;
@@ -614,7 +606,7 @@ static ULONG get_full_path_helper(LPCWSTR name, LPWSTR buffer, ULONG size)
     else
         cd = &NtCurrentTeb()->Peb->ProcessParameters->CurrentDirectory.DosPath;
 
-    switch (type = RtlDetermineDosPathNameType_U(name))
+    switch (RtlDetermineDosPathNameType_U(name))
     {
     case UNC_PATH:              /* \\foo   */
         ptr = skip_unc_prefix( name );
@@ -1023,9 +1015,9 @@ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
 /******************************************************************
  *           wine_unix_to_nt_file_name  (NTDLL.@) Not a Windows API
  */
-NTSTATUS wine_unix_to_nt_file_name( const ANSI_STRING *name, UNICODE_STRING *nt )
+NTSTATUS CDECL wine_unix_to_nt_file_name( const ANSI_STRING *name, UNICODE_STRING *nt )
 {
-    static const WCHAR prefixW[] = {'\\','?','?','\\','a',':','\\'};
+    static const WCHAR prefixW[] = {'\\','?','?','\\','A',':','\\'};
     unsigned int lenW, lenA = name->Length;
     const char *path = name->Buffer;
     char *cwd;

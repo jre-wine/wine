@@ -42,7 +42,8 @@ enum Status{
     UnsupportedGdiplusVersion   = 17,
     GdiplusNotInitialized       = 18,
     PropertyNotFound            = 19,
-    PropertyNotSupported        = 20
+    PropertyNotSupported        = 20,
+    ProfileNotFound             = 21
 };
 
 
@@ -234,6 +235,12 @@ typedef struct Rect
     INT Width;
     INT Height;
 } Rect;
+
+typedef struct CharacterRange
+{
+    INT First;
+    INT Length;
+} CharacterRange;
 
 typedef enum Status Status;
 

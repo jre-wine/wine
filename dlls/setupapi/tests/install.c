@@ -28,7 +28,9 @@
 #include "winnls.h"
 #include "winuser.h"
 #include "winreg.h"
+#include "winsvc.h"
 #include "setupapi.h"
+#include "shlobj.h"
 
 #include "wine/test.h"
 
@@ -83,10 +85,9 @@ static const char *cmdline_inf = "[Version]\n"
     "[Add.Settings]\n"
     "HKCU,Software\\Wine\\setupapitest,,\n";
 
-static void ok_cmdline(LPCSTR section, int mode, LPCSTR path, BOOL expectsuccess)
+static void run_cmdline(LPCSTR section, int mode, LPCSTR path)
 {
     CHAR cmdline[MAX_PATH * 2];
-    LONG ret;
 
     sprintf(cmdline, "%s %d %s", section, mode, path);
     if (pInstallHinfSectionA) pInstallHinfSectionA(NULL, NULL, cmdline, 0);
@@ -96,6 +97,11 @@ static void ok_cmdline(LPCSTR section, int mode, LPCSTR path, BOOL expectsuccess
         MultiByteToWideChar(CP_ACP, 0, cmdline, -1, cmdlinew, MAX_PATH*2);
         pInstallHinfSectionW(NULL, NULL, cmdlinew, 0);
     }
+}
+
+static void ok_registry(BOOL expectsuccess)
+{
+    LONG ret;
 
     /* Functional tests for success of install and clean up */
     ret = RegDeleteKey(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest");
@@ -114,19 +120,350 @@ static void test_cmdline(void)
 
     create_inf_file(inffile, cmdline_inf);
     sprintf(path, "%s\\%s", CURR_DIR, inffile);
-    ok_cmdline("DefaultInstall", 128, path, TRUE);
+    run_cmdline("DefaultInstall", 128, path);
+    ok_registry(TRUE);
     ok(DeleteFile(inffile), "Expected source inf to exist, last error was %d\n", GetLastError());
 
     /* Test handling of spaces in path, unquoted and quoted */
     create_inf_file(infwithspaces, cmdline_inf);
 
     sprintf(path, "%s\\%s", CURR_DIR, infwithspaces);
-    ok_cmdline("DefaultInstall", 128, path, TRUE);
+    run_cmdline("DefaultInstall", 128, path);
+    ok_registry(TRUE);
 
     sprintf(path, "\"%s\\%s\"", CURR_DIR, infwithspaces);
-    ok_cmdline("DefaultInstall", 128, path, FALSE);
+    run_cmdline("DefaultInstall", 128, path);
+    ok_registry(FALSE);
 
     ok(DeleteFile(infwithspaces), "Expected source inf to exist, last error was %d\n", GetLastError());
+}
+
+static const char *cmdline_inf_reg = "[Version]\n"
+    "Signature=\"$Chicago$\"\n"
+    "[DefaultInstall]\n"
+    "DelReg=Del.Settings\n"
+    "[Del.Settings]\n"
+    "HKCU,Software\\Wine\\setupapitest\n";
+
+static void test_registry(void)
+{
+    HKEY key;
+    LONG res;
+    char path[MAX_PATH];
+
+    /* First create a registry structure we would like to be deleted */
+    ok(!RegCreateKeyA(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest\\setupapitest", &key),
+        "Expected RegCreateKeyA to succeed\n");
+
+    /* Doublecheck if the registry key is present */
+    ok(!RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest\\setupapitest", &key),
+        "Expected registry key to exist\n");
+
+    create_inf_file(inffile, cmdline_inf_reg);
+    sprintf(path, "%s\\%s", CURR_DIR, inffile);
+    run_cmdline("DefaultInstall", 128, path);
+
+    /* Check if the registry key is recursively deleted */
+    res = RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest", &key);
+    todo_wine
+    ok(res == ERROR_FILE_NOT_FOUND, "Didn't expect the registry key to exist\n");
+    /* Just in case */
+    if (res == ERROR_SUCCESS)
+    {
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest\\setupapitest");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\Wine\\setupapitest");
+    }
+    ok(DeleteFile(inffile), "Expected source inf to exist, last error was %d\n", GetLastError());
+}
+
+static void test_install_svc_from(void)
+{
+    char inf[2048];
+    char path[MAX_PATH];
+    HINF infhandle;
+    BOOL ret;
+    SC_HANDLE scm_handle, svc_handle;
+
+    /* Bail out if we are on win98 */
+    SetLastError(0xdeadbeef);
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+
+    if (!scm_handle && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        win_skip("OpenSCManagerA is not implemented, we are most likely on win9x\n");
+        return;
+    }
+    CloseServiceHandle(scm_handle);
+
+    /* Basic inf file to satisfy SetupOpenInfFileA */
+    strcpy(inf, "[Version]\nSignature=\"$Chicago$\"\n");
+    create_inf_file(inffile, inf);
+    sprintf(path, "%s\\%s", CURR_DIR, inffile);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+
+    /* Nothing but the Version section */
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_SECTION_NOT_FOUND,
+        "Expected ERROR_SECTION_NOT_FOUND, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Add the section */
+    strcat(inf, "[Winetest.Services]\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_SECTION_NOT_FOUND,
+        "Expected ERROR_SECTION_NOT_FOUND, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Add a reference */
+    strcat(inf, "AddService=Winetest,,Winetest.Service\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_BAD_SERVICE_INSTALLSECT,
+        "Expected ERROR_BAD_SERVICE_INSTALLSECT, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Add the section */
+    strcat(inf, "[Winetest.Service]\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_BAD_SERVICE_INSTALLSECT,
+        "Expected ERROR_BAD_SERVICE_INSTALLSECT, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Just the ServiceBinary */
+    strcat(inf, "ServiceBinary=%12%\\winetest.sys\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_BAD_SERVICE_INSTALLSECT,
+        "Expected ERROR_BAD_SERVICE_INSTALLSECT, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Add the ServiceType */
+    strcat(inf, "ServiceType=1\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_BAD_SERVICE_INSTALLSECT,
+        "Expected ERROR_BAD_SERVICE_INSTALLSECT, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* Add the StartType */
+    strcat(inf, "StartType=4\n");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_BAD_SERVICE_INSTALLSECT,
+        "Expected ERROR_BAD_SERVICE_INSTALLSECT, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    /* This should be it, the minimal entries to install a service */
+    strcat(inf, "ErrorControl=1");
+    create_inf_file(inffile, inf);
+    infhandle = SetupOpenInfFileA(path, NULL, INF_STYLE_WIN4, NULL);
+    SetLastError(0xdeadbeef);
+    ret = SetupInstallServicesFromInfSectionA(infhandle, "Winetest.Services", 0);
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+    {
+        skip("Not enough rights to install the service\n");
+        SetupCloseInfFile(infhandle);
+        DeleteFile(inffile);
+        return;
+    }
+    ok(ret, "Expected success\n");
+    ok(GetLastError() == ERROR_SUCCESS,
+        "Expected ERROR_SUCCESS, got %08x\n", GetLastError());
+    SetupCloseInfFile(infhandle);
+    DeleteFile(inffile);
+
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+
+    /* Open the service to see if it's really there */
+    svc_handle = OpenServiceA(scm_handle, "Winetest", DELETE);
+    ok(svc_handle != NULL, "Service was not created\n");
+
+    SetLastError(0xdeadbeef);
+    ret = DeleteService(svc_handle);
+    ok(ret, "Service could not be deleted : %d\n", GetLastError());
+
+    CloseServiceHandle(svc_handle);
+    CloseServiceHandle(scm_handle);
+
+    /* TODO: Test the Flags */
+}
+
+static void test_driver_install(void)
+{
+    HANDLE handle;
+    SC_HANDLE scm_handle, svc_handle;
+    BOOL ret;
+    char path[MAX_PATH], windir[MAX_PATH], driver[MAX_PATH];
+    DWORD attrs;
+    /* Minimal stuff needed */
+    static const char *inf =
+        "[Version]\n"
+        "Signature=\"$Chicago$\"\n"
+        "[DestinationDirs]\n"
+        "Winetest.DriverFiles=12\n"
+        "[DefaultInstall]\n"
+        "CopyFiles=Winetest.DriverFiles\n"
+        "[DefaultInstall.Services]\n"
+        "AddService=Winetest,,Winetest.Service\n"
+        "[Winetest.Service]\n"
+        "ServiceBinary=%12%\\winetest.sys\n"
+        "ServiceType=1\n"
+        "StartType=4\n"
+        "ErrorControl=1\n"
+        "[Winetest.DriverFiles]\n"
+        "winetest.sys";
+
+    /* Bail out if we are on win98 */
+    SetLastError(0xdeadbeef);
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+
+    if (!scm_handle && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
+    {
+        win_skip("OpenSCManagerA is not implemented, we are most likely on win9x\n");
+        return;
+    }
+    else if (!scm_handle && (GetLastError() == ERROR_ACCESS_DENIED))
+    {
+        skip("Not enough rights to install the service\n");
+        return;
+    }
+    CloseServiceHandle(scm_handle);
+
+    /* Place where we expect the driver to be installed */
+    GetWindowsDirectoryA(windir, MAX_PATH);
+    lstrcpyA(driver, windir);
+    lstrcatA(driver, "\\system32\\drivers\\winetest.sys");
+
+    /* Create a dummy driver file */
+    handle = CreateFileA("winetest.sys", GENERIC_WRITE, 0, NULL,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    CloseHandle(handle);
+
+    create_inf_file(inffile, inf);
+    sprintf(path, "%s\\%s", CURR_DIR, inffile);
+    run_cmdline("DefaultInstall", 128, path);
+
+    /* Driver should have been installed */
+    attrs = GetFileAttributes(driver);
+    ok(attrs != INVALID_FILE_ATTRIBUTES, "Expected driver to exist\n");
+
+    scm_handle = OpenSCManagerA(NULL, NULL, GENERIC_ALL);
+
+    /* Open the service to see if it's really there */
+    svc_handle = OpenServiceA(scm_handle, "Winetest", DELETE);
+    ok(svc_handle != NULL, "Service was not created\n");
+
+    SetLastError(0xdeadbeef);
+    ret = DeleteService(svc_handle);
+    ok(ret, "Service could not be deleted : %d\n", GetLastError());
+
+    CloseServiceHandle(svc_handle);
+    CloseServiceHandle(scm_handle);
+
+    /* File cleanup */
+    DeleteFile(inffile);
+    DeleteFile("winetest.sys");
+    DeleteFile(driver);
+}
+
+static void test_profile_items(void)
+{
+    char path[MAX_PATH], commonprogs[MAX_PATH];
+    HMODULE hShell32;
+    BOOL (WINAPI *pSHGetFolderPathA)(HWND hwnd, int nFolder, HANDLE hToken, DWORD dwFlags, LPSTR pszPath);
+
+    static const char *inf =
+        "[Version]\n"
+        "Signature=\"$Chicago$\"\n"
+        "[DefaultInstall]\n"
+        "ProfileItems=TestItem,TestItem2,TestGroup\n"
+        "[TestItem]\n"
+        "Name=TestItem\n"
+        "CmdLine=11,,notepad.exe\n"
+        "[TestItem2]\n"
+        "Name=TestItem2\n"
+        "CmdLine=11,,notepad.exe\n"
+        "SubDir=TestDir\n"
+        "[TestGroup]\n"
+        "Name=TestGroup,4\n"
+        ;
+
+    hShell32 = LoadLibraryA("shell32");
+    pSHGetFolderPathA = (void*)GetProcAddress(hShell32, "SHGetFolderPathA");
+    if (!pSHGetFolderPathA)
+    {
+        win_skip("SHGetFolderPathA is not available\n");
+        goto cleanup;
+    }
+
+    if (S_OK != pSHGetFolderPathA(NULL, CSIDL_COMMON_PROGRAMS, NULL, SHGFP_TYPE_CURRENT, commonprogs))
+    {
+        skip("No common program files directory exists\n");
+        goto cleanup;
+    }
+
+    create_inf_file(inffile, inf);
+    sprintf(path, "%s\\%s", CURR_DIR, inffile);
+    run_cmdline("DefaultInstall", 128, path);
+
+    snprintf(path, MAX_PATH, "%s\\TestItem.lnk", commonprogs);
+    if (INVALID_FILE_ATTRIBUTES == GetFileAttributes(path))
+    {
+        win_skip("ProfileItems not implemented on this system\n");
+    }
+    else
+    {
+        snprintf(path, MAX_PATH, "%s\\TestDir", commonprogs);
+        ok(INVALID_FILE_ATTRIBUTES != GetFileAttributes(path), "directory not created\n");
+        snprintf(path, MAX_PATH, "%s\\TestDir\\TestItem2.lnk", commonprogs);
+        ok(INVALID_FILE_ATTRIBUTES != GetFileAttributes(path), "link not created\n");
+        snprintf(path, MAX_PATH, "%s\\TestGroup", commonprogs);
+        ok(INVALID_FILE_ATTRIBUTES != GetFileAttributes(path), "group not created\n");
+    }
+
+    snprintf(path, MAX_PATH, "%s\\TestItem.lnk", commonprogs);
+    DeleteFile(path);
+    snprintf(path, MAX_PATH, "%s\\TestDir\\TestItem2.lnk", commonprogs);
+    DeleteFile(path);
+    snprintf(path, MAX_PATH, "%s\\TestItem2.lnk", commonprogs);
+    DeleteFile(path);
+    snprintf(path, MAX_PATH, "%s\\TestDir", commonprogs);
+    RemoveDirectory(path);
+    snprintf(path, MAX_PATH, "%s\\TestGroup", commonprogs);
+    RemoveDirectory(path);
+
+cleanup:
+    if (hShell32) FreeLibrary(hShell32);
+    DeleteFile(inffile);
 }
 
 START_TEST(install)
@@ -163,7 +500,7 @@ START_TEST(install)
         ok(DeleteFile(inffile), "Expected source inf to exist, last error was %d\n", GetLastError());
     }
     if (!pInstallHinfSectionW && !pInstallHinfSectionA)
-        skip("InstallHinfSectionA and InstallHinfSectionW are not available\n");
+        win_skip("InstallHinfSectionA and InstallHinfSectionW are not available\n");
     else
     {
         /* Set CBT hook to disallow MessageBox creation in current thread */
@@ -171,8 +508,15 @@ START_TEST(install)
         assert(hhook != 0);
 
         test_cmdline();
+        test_registry();
+        test_install_svc_from();
+        test_driver_install();
 
         UnhookWindowsHookEx(hhook);
+
+        /* We have to run this test after the CBT hook is disabled because
+            ProfileItems needs to create a window on Windows XP. */
+        test_profile_items();
     }
 
     SetCurrentDirectory(prev_path);

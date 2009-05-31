@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #define COBJMACROS
 
 #include <stdarg.h>
@@ -331,6 +334,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
             msi_free(deformated);
             break;
         case 51: /* Property set with formatted text. */
+            if (!source)
+                break;
+
             deformat_string(package,target,&deformated);
             rc = MSI_SetPropertyW(package,source,deformated);
             msi_free(deformated);
@@ -653,7 +659,7 @@ static UINT get_action_info( const GUID *guid, INT *type, MSIHANDLE *handle,
     return ERROR_SUCCESS;
 }
 
-static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
+static DWORD ACTION_CallDllFunction( const GUID *guid )
 {
     MsiCustomActionEntryPoint fn;
     MSIHANDLE hPackage, handle;
@@ -689,8 +695,6 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
             TRACE("calling %s\n", debugstr_w( function ) );
             handle_msi_break( function );
 
-            CoInitialize(NULL);
-
             __TRY
             {
                 r = fn( hPackage );
@@ -702,8 +706,6 @@ static DWORD WINAPI ACTION_CallDllFunction( const GUID *guid )
                 r = ERROR_SUCCESS;
             }
             __ENDTRY;
-
-            CoUninitialize();
 
             MsiCloseHandle( hPackage );
         }
@@ -738,7 +740,7 @@ static DWORD WINAPI DllThread( LPVOID arg )
     return rc;
 }
 
-static DWORD WINAPI ACTION_CAInstallPackage(const GUID *guid)
+static DWORD ACTION_CAInstallPackage(const GUID *guid)
 {
     msi_custom_action_info *info;
     UINT r = ERROR_FUNCTION_FAILED;
@@ -856,12 +858,6 @@ static UINT HANDLE_CustomType23(MSIPACKAGE *package, LPCWSTR source,
     MSI_GetPropertyW(package, cszSourceDir, package_path, &size);
     lstrcatW(package_path, backslash);
     lstrcatW(package_path, source);
-
-    if (GetFileAttributesW(package_path) == INVALID_FILE_ATTRIBUTES)
-    {
-        ERR("Source package does not exist: %s\n", debugstr_w(package_path));
-        return ERROR_FUNCTION_FAILED;
-    }
 
     TRACE("Installing package %s concurrently\n", debugstr_w(package_path));
 
@@ -1147,7 +1143,7 @@ static UINT HANDLE_CustomType34(MSIPACKAGE *package, LPCWSTR source,
     return wait_process_handle(package, type, info.hProcess, action);
 }
 
-static DWORD WINAPI ACTION_CallScript( const GUID *guid )
+static DWORD ACTION_CallScript( const GUID *guid )
 {
     msi_custom_action_info *info;
     MSIHANDLE hPackage;

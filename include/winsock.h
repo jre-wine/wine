@@ -41,7 +41,7 @@
  * This means select and all the related stuff is already defined and we
  * cannot override types and function prototypes.
  * All we can do is disable all these symbols so that they are not used
- * inadvertantly.
+ * inadvertently.
  */
 #  include <sys/types.h>
 #  undef FD_SETSIZE
@@ -79,17 +79,20 @@
 #  define fd_set unix_fd_set
 #  define timeval unix_timeval
 #  define select unix_select
+#  define socklen_t unix_socklen_t
 #  include <sys/types.h>
 #  include <time.h>
 #  include <stdlib.h>
 #  undef fd_set
 #  undef timeval
 #  undef select
+#  undef socklen_t
 #  undef FD_SETSIZE
 #  undef FD_CLR
 #  undef FD_SET
 #  undef FD_ZERO
 #  undef FD_ISSET
+#  undef _TIMEVAL_DEFINED
 
 #  define WS_DEFINE_SELECT
 # endif /* FD_CLR */
@@ -120,7 +123,7 @@ typedef unsigned long  WS_u_long;
 #else
 typedef unsigned int   WS_u_long;
 #endif
-#elif (defined(_MSC_VER) || defined(__MINGW_H) || defined(__WATCOMC__)) && !defined(_BSDTYPES_DEFINED)
+#elif (defined(_MSC_VER) || defined(__MINGW32__) || defined(__WATCOMC__)) && !defined(_BSDTYPES_DEFINED)
 /* MinGW doesn't define the u_xxx types */
 typedef unsigned char  u_char;
 typedef unsigned short u_short;
@@ -142,9 +145,6 @@ typedef unsigned int   u_long;
 #ifdef __cplusplus
 extern "C" {
 #endif /* defined(__cplusplus) */
-
-/* proper 4-byte packing */
-#include <pshpack4.h>
 
 /*
  * Address families
@@ -364,8 +364,13 @@ typedef struct WS(servent)
 {
     char* s_name;                  /* official service name */
     char** s_aliases;              /* alias list */
+#ifdef _WIN64
+    char* s_proto;                 /* protocol to use */
+    short s_port;                  /* port # */
+#else
     short s_port;                  /* port # */
     char* s_proto;                 /* protocol to use */
+#endif
 } SERVENT, *PSERVENT, *LPSERVENT;
 
 
@@ -395,7 +400,7 @@ typedef UINT_PTR SOCKET;
  * This is used instead of -1, since the
  * SOCKET type is unsigned.
  */
-#define INVALID_SOCKET             (~0)
+#define INVALID_SOCKET             (SOCKET)(~0)
 #define SOCKET_ERROR               (-1)
 
 typedef struct WS(sockaddr)
@@ -646,11 +651,19 @@ typedef struct WS(WSAData)
 {
     WORD                    wVersion;
     WORD                    wHighVersion;
+#ifdef _WIN64
+    WORD                    iMaxSockets;
+    WORD                    iMaxUdpDg;
+    char                   *lpVendorInfo;
+    char                    szDescription[WSADESCRIPTION_LEN+1];
+    char                    szSystemStatus[WSASYS_STATUS_LEN+1];
+#else
     char                    szDescription[WSADESCRIPTION_LEN+1];
     char                    szSystemStatus[WSASYS_STATUS_LEN+1];
     WORD                    iMaxSockets;
     WORD                    iMaxUdpDg;
     char                   *lpVendorInfo;
+#endif
 } WSADATA, *LPWSADATA;
 
 
@@ -791,6 +804,8 @@ typedef struct WS(WSAData)
 #define MSG_OOB                    0x0001
 #define MSG_PEEK                   0x0002
 #define MSG_DONTROUTE              0x0004
+#define MSG_WAITALL                0x0008
+#define MSG_INTERRUPT              0x0010
 #define MSG_PARTIAL                0x8000
 #define MSG_MAXIOVLEN              16
 #else /* USE_WS_PREFIX */
@@ -799,6 +814,8 @@ typedef struct WS(WSAData)
 #define WS_MSG_OOB                 0x0001
 #define WS_MSG_PEEK                0x0002
 #define WS_MSG_DONTROUTE           0x0004
+#define WS_MSG_WAITALL             0x0008
+#define WS_MSG_INTERRUPT           0x0010
 #define WS_MSG_PARTIAL             0x8000
 #define WS_MSG_MAXIOVLEN           16
 #endif /* USE_WS_PREFIX */
@@ -1045,9 +1062,6 @@ int WINAPI WS(shutdown)(SOCKET,int);
 SOCKET WINAPI WS(socket)(int,int,int);
 
 #endif /* !defined(__WINE_WINSOCK2__) || WS_API_PROTOTYPES */
-
-
-#include <poppack.h>
 
 #ifdef __cplusplus
 }

@@ -19,9 +19,10 @@
 @ stdcall CoInternetGetSession(long ptr long)
 @ stdcall CoInternetParseUrl(wstr long long wstr long ptr long)
 @ stdcall CoInternetQueryInfo(ptr long long ptr long ptr long)
+@ stdcall CoInternetSetFeatureEnabled(long long long)
 @ stub CompareSecurityIds
 @ stub CopyBindInfo
-@ stub CopyStgMedium
+@ stdcall CopyStgMedium(ptr ptr)
 @ stdcall CreateAsyncBindCtx(long ptr ptr ptr)
 @ stdcall CreateAsyncBindCtxEx(ptr long ptr ptr ptr long)
 @ stdcall CreateFormatEnumerator(long ptr ptr)
@@ -47,13 +48,13 @@
 @ stub HlinkGoForward
 @ stub HlinkNavigateMoniker
 @ stdcall HlinkNavigateString(ptr wstr)
-@ stub HlinkSimpleNavigateToMoniker
+@ stdcall HlinkSimpleNavigateToMoniker(ptr wstr wstr ptr ptr ptr long long)
 @ stdcall HlinkSimpleNavigateToString(wstr wstr wstr ptr ptr ptr long long)
 @ stdcall IsAsyncMoniker(ptr)
-@ stub IsLoggingEnabledA
-@ stub IsLoggingEnabledW
+@ stdcall IsLoggingEnabledA(str)
+@ stdcall IsLoggingEnabledW(wstr)
 @ stdcall IsValidURL(ptr wstr long)
-@ stdcall MkParseDisplayNameEx(ptr ptr ptr ptr) ole32.MkParseDisplayName
+@ stdcall MkParseDisplayNameEx(ptr wstr ptr ptr)
 @ stdcall ObtainUserAgentString(long str ptr)
 @ stub PrivateCoInstall
 @ stdcall RegisterBindStatusCallback(ptr ptr ptr long)

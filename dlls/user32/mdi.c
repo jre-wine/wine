@@ -28,7 +28,7 @@
  *
  *      When we have more than 9 opened windows, a "More Windows..."
  *      option appears in the "Windows" menu. Each child window has
- *      a WND* associated with it, accesible via the children list of
+ *      a WND* associated with it, accessible via the children list of
  *      the parent window. This WND* has a wIDmenu member, which reflects
  *      the position of the child in the window list. For example, with
  *      9 child windows, we could have the following pattern:
@@ -570,7 +570,8 @@ static LRESULT MDIDestroyChild( HWND client, MDICLIENTINFO *ci,
                 ci->hwndChildMaximized = 0;
                 MDI_UpdateFrameText(frame, client, TRUE, NULL);
             }
-            if (flagDestroy) ci->hwndActiveChild = 0;
+            if (flagDestroy)
+                MDI_ChildActivate(client, 0);
         }
     }
 
@@ -1256,7 +1257,7 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
         return 0;
 
       case WM_SIZE:
-        if( ci->hwndChildMaximized )
+        if( ci->hwndActiveChild && IsZoomed(ci->hwndActiveChild) )
 	{
 	    RECT	rect;
 
@@ -1264,10 +1265,9 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
 	    rect.top = 0;
 	    rect.right = LOWORD(lParam);
 	    rect.bottom = HIWORD(lParam);
-
-	    AdjustWindowRectEx( &rect, GetWindowLongA(ci->hwndChildMaximized, GWL_STYLE),
-                               0, GetWindowLongA(ci->hwndChildMaximized, GWL_EXSTYLE) );
-	    MoveWindow( ci->hwndChildMaximized, rect.left, rect.top,
+	    AdjustWindowRectEx(&rect, GetWindowLongA(ci->hwndActiveChild, GWL_STYLE),
+                               0, GetWindowLongA(ci->hwndActiveChild, GWL_EXSTYLE) );
+	    MoveWindow(ci->hwndActiveChild, rect.left, rect.top,
 			 rect.right - rect.left, rect.bottom - rect.top, 1);
 	}
 	else
@@ -1888,6 +1888,15 @@ CascadeWindows (HWND hwndParent, UINT wFlags, const RECT *lpRect,
 }
 
 
+/***********************************************************************
+ *		CascadeChildWindows (USER32.@)
+ */
+WORD WINAPI CascadeChildWindows( HWND parent, UINT flags )
+{
+    return CascadeWindows( parent, flags, NULL, 0, NULL );
+}
+
+
 /******************************************************************************
  *		TileWindows (USER32.@) Tiles MDI child windows
  *
@@ -1902,6 +1911,16 @@ TileWindows (HWND hwndParent, UINT wFlags, const RECT *lpRect,
     FIXME("(%p,0x%08x,...,%u,...): stub\n", hwndParent, wFlags, cKids);
     return 0;
 }
+
+
+/***********************************************************************
+ *		TileChildWindows (USER32.@)
+ */
+WORD WINAPI TileChildWindows( HWND parent, UINT flags )
+{
+    return TileWindows( parent, flags, NULL, 0, NULL );
+}
+
 
 /************************************************************************
  *              "More Windows..." functionality
@@ -2006,7 +2025,6 @@ static HWND MDI_MoreWindowsDialog(HWND hwnd)
     if (template == 0)
         return 0;
 
-    return (HWND) DialogBoxIndirectParamA(user32_module,
-                                          (const DLGTEMPLATE*) template,
-                                          hwnd, MDI_MoreWindowsDlgProc, (LPARAM) hwnd);
+    return (HWND) DialogBoxIndirectParamA(user32_module, template, hwnd,
+                                          MDI_MoreWindowsDlgProc, (LPARAM) hwnd);
 }

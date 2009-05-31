@@ -173,7 +173,7 @@ MSVCRT_wchar_t* CDECL _wstrdate(MSVCRT_wchar_t* date)
 {
   static const WCHAR format[] = { 'M','M','\'','/','\'','d','d','\'','/','\'','y','y',0 };
 
-  GetDateFormatW(LOCALE_NEUTRAL, 0, NULL, format, (LPWSTR)date, 9);
+  GetDateFormatW(LOCALE_NEUTRAL, 0, NULL, format, date, 9);
 
   return date;
 }
@@ -197,7 +197,7 @@ MSVCRT_wchar_t* CDECL _wstrtime(MSVCRT_wchar_t* time)
 {
   static const WCHAR format[] = { 'H','H','\'',':','\'','m','m','\'',':','\'','s','s',0 };
 
-  GetTimeFormatW(LOCALE_NEUTRAL, 0, NULL, format, (LPWSTR)time, 9);
+  GetTimeFormatW(LOCALE_NEUTRAL, 0, NULL, format, time, 9);
 
   return time;
 }
@@ -233,7 +233,7 @@ double CDECL MSVCRT_difftime(MSVCRT_time_t time1, MSVCRT_time_t time2)
 /*********************************************************************
  *		_ftime (MSVCRT.@)
  */
-void CDECL _ftime(struct MSVCRT__timeb *buf)
+void CDECL MSVCRT__ftime(struct MSVCRT__timeb *buf)
 {
   TIME_ZONE_INFORMATION tzinfo;
   FILETIME ft;
@@ -260,7 +260,7 @@ MSVCRT_time_t CDECL MSVCRT_time(MSVCRT_time_t* buf)
   MSVCRT_time_t curtime;
   struct MSVCRT__timeb tb;
 
-  _ftime(&tb);
+  MSVCRT__ftime(&tb);
 
   curtime = tb.time;
   return buf ? *buf = curtime : curtime;
@@ -340,7 +340,7 @@ void CDECL MSVCRT__tzset(void)
         struct tm *tmp;
         long zone_january, zone_july;
 
-        t = (time((time_t *)0) / seconds_in_year) * seconds_in_year;
+        t = (time(NULL) / seconds_in_year) * seconds_in_year;
         tmp = localtime(&t);
         zone_january = -tmp->tm_gmtoff;
         t += seconds_in_year / 2;
@@ -377,7 +377,7 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
     char *s, *fmt;
     MSVCRT_size_t len;
 
-    TRACE("%p %d %s %p\n", str, max, debugstr_w(format), mstm );
+    TRACE("%p %ld %s %p\n", str, max, debugstr_w(format), mstm );
 
     len = WideCharToMultiByte( CP_UNIXCP, 0, format, -1, NULL, 0, NULL, NULL );
     if (!(fmt = MSVCRT_malloc( len ))) return 0;
@@ -447,7 +447,10 @@ MSVCRT_wchar_t * CDECL MSVCRT__wasctime(const struct MSVCRT_tm *mstm)
  */
 char * CDECL MSVCRT_ctime(const MSVCRT_time_t *time)
 {
-    return MSVCRT_asctime( MSVCRT_localtime(time) );
+    struct MSVCRT_tm *t;
+    t = MSVCRT_localtime( time );
+    if (!t) return NULL;
+    return MSVCRT_asctime( t );
 }
 
 /*********************************************************************

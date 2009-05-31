@@ -24,12 +24,11 @@
 #include "windef.h"
 #include "winbase.h"
 #include "dplay.h"
-#include "dplaysp.h"
+#include "wine/dplaysp.h"
 #include "dplayx_messages.h"
 #include "dplay_global.h"
 
 void NS_SetLocalComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo );
-void NS_SetRemoteComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo );
 void NS_AddRemoteComputerAsNameServer( LPCVOID lpNSAddrHdr,
                                        DWORD dwHdrSize,
                                        LPCDPMSG_ENUMSESSIONSREPLY lpcMsg,

@@ -1,7 +1,7 @@
 /*
  * RPC definitions
  *
- * Copyright 2001-2002 Ove Kåven, TransGaming Technologies
+ * Copyright 2001-2002 Ove KÃ¥ven, TransGaming Technologies
  * Copyright 2004 Filip Navara
  *
  * This library is free software; you can redistribute it and/or
@@ -21,8 +21,6 @@
 
 #ifndef __WINE_RPC_DEFS_H
 #define __WINE_RPC_DEFS_H
-
-/* info from http://www.microsoft.com/msj/0398/dcomtextfigs.htm */
 
 typedef struct
 {
@@ -122,6 +120,14 @@ typedef struct
   } protocols[1];
 } RpcPktBindNAckHdr;
 
+/* undocumented packet sent during RPC over HTTP */
+typedef struct
+{
+  RpcPktCommonHdr common;
+  unsigned short flags;
+  unsigned short num_data_items;
+} RpcPktHttpHdr;
+
 /* Union representing all possible packet headers */
 typedef union
 {
@@ -132,6 +138,7 @@ typedef union
   RpcPktBindHdr bind;
   RpcPktBindAckHdr bind_ack;
   RpcPktBindNAckHdr bind_nack;
+  RpcPktHttpHdr http;
 } RpcPktHdr;
 
 typedef struct
@@ -176,6 +183,7 @@ typedef struct
 #define PKT_SHUTDOWN           17
 #define PKT_CO_CANCEL          18
 #define PKT_ORPHANED           19
+#define PKT_HTTP               20
 
 #define RESULT_ACCEPT               0
 #define RESULT_USER_REJECTION       1

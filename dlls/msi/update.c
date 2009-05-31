@@ -60,26 +60,56 @@ static UINT UPDATE_execute( struct tagMSIVIEW *view, MSIRECORD *record )
     MSIUPDATEVIEW *uv = (MSIUPDATEVIEW*)view;
     UINT i, r, col_count = 0, row_count = 0;
     MSIRECORD *values = NULL;
+    MSIRECORD *where = NULL;
     MSIVIEW *wv;
+    UINT cols_count, where_count;
+    column_info *col = uv->vals;
 
     TRACE("%p %p\n", uv, record );
 
+    /* extract the where markers from the record */
+    if (record)
+    {
+        r = MSI_RecordGetFieldCount(record);
+
+        for (i = 0; col; col = col->next)
+            i++;
+
+        cols_count = i;
+        where_count = r - i;
+
+        if (where_count > 0)
+        {
+            where = MSI_CreateRecord(where_count);
+
+            if (where)
+                for (i = 1; i <= where_count; i++)
+                    MSI_RecordCopyField(record, cols_count + i, where, i);
+        }
+    }
+
     wv = uv->wv;
     if( !wv )
-        return ERROR_FUNCTION_FAILED;
+    {
+        r = ERROR_FUNCTION_FAILED;
+        goto done;
+    }
 
-    r = wv->ops->execute( wv, 0 );
+    r = wv->ops->execute( wv, where );
     TRACE("tv execute returned %x\n", r);
     if( r )
-        return r;
+        goto done;
 
     r = wv->ops->get_dimensions( wv, &row_count, &col_count );
     if( r )
-        return r;
+        goto done;
 
     values = msi_query_merge_record( col_count, uv->vals, record );
     if (!values)
-        return ERROR_FUNCTION_FAILED;
+    {
+        r = ERROR_FUNCTION_FAILED;
+        goto done;
+    }
 
     for ( i=0; i<row_count; i++ )
     {
@@ -88,7 +118,9 @@ static UINT UPDATE_execute( struct tagMSIVIEW *view, MSIRECORD *record )
             break;
     }
 
-    msiobj_release( &values->hdr );
+done:
+    if ( where ) msiobj_release( &where->hdr );
+    if ( values ) msiobj_release( &values->hdr );
 
     return r;
 }
@@ -123,18 +155,18 @@ static UINT UPDATE_get_dimensions( struct tagMSIVIEW *view, UINT *rows, UINT *co
 }
 
 static UINT UPDATE_get_column_info( struct tagMSIVIEW *view,
-                UINT n, LPWSTR *name, UINT *type )
+                UINT n, LPWSTR *name, UINT *type, BOOL *temporary )
 {
     MSIUPDATEVIEW *uv = (MSIUPDATEVIEW*)view;
     MSIVIEW *wv;
 
-    TRACE("%p %d %p %p\n", uv, n, name, type );
+    TRACE("%p %d %p %p %p\n", uv, n, name, type, temporary );
 
     wv = uv->wv;
     if( !wv )
         return ERROR_FUNCTION_FAILED;
 
-    return wv->ops->get_column_info( wv, n, name, type );
+    return wv->ops->get_column_info( wv, n, name, type, temporary );
 }
 
 static UINT UPDATE_modify( struct tagMSIVIEW *view, MSIMODIFY eModifyMode,
@@ -186,6 +218,7 @@ static const MSIVIEWOPS update_ops =
     UPDATE_modify,
     UPDATE_delete,
     UPDATE_find_matching_rows,
+    NULL,
     NULL,
     NULL,
     NULL,

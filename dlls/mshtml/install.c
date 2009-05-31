@@ -93,7 +93,7 @@ static void set_registry(LPCSTR install_dir)
     WCHAR mshtml_key[100];
     LPWSTR gecko_path;
     HKEY hkey;
-    DWORD res, len, size;
+    DWORD res, len;
 
     static const WCHAR wszGeckoPath[] = {'G','e','c','k','o','P','a','t','h',0};
     static const WCHAR wszWineGecko[] = {'w','i','n','e','_','g','e','c','k','o',0};
@@ -113,14 +113,13 @@ static void set_registry(LPCSTR install_dir)
 
     len = MultiByteToWideChar(CP_ACP, 0, install_dir, -1, NULL, 0)-1;
     gecko_path = heap_alloc((len+1)*sizeof(WCHAR)+sizeof(wszWineGecko));
-    MultiByteToWideChar(CP_ACP, 0, install_dir, -1, gecko_path, (len+1)*sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, install_dir, -1, gecko_path, len+1);
 
     if (len && gecko_path[len-1] != '\\')
         gecko_path[len++] = '\\';
 
     memcpy(gecko_path+len, wszWineGecko, sizeof(wszWineGecko));
 
-    size = len*sizeof(WCHAR)+sizeof(wszWineGecko);
     res = RegSetValueExW(hkey, wszGeckoPath, 0, REG_SZ, (LPVOID)gecko_path,
                        len*sizeof(WCHAR)+sizeof(wszWineGecko));
     heap_free(gecko_path);
@@ -133,9 +132,9 @@ static BOOL install_cab(LPCWSTR file_name)
 {
     HMODULE advpack;
     char install_dir[MAX_PATH];
-    typeof(ExtractFilesA) *pExtractFilesA;
+    HRESULT (WINAPI *pExtractFilesA)(LPCSTR,LPCSTR,DWORD,LPCSTR,LPVOID,DWORD);
     LPSTR file_name_a;
-    DWORD res, len;
+    DWORD res;
     HRESULT hres;
 
     static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
@@ -158,13 +157,10 @@ static BOOL install_cab(LPCWSTR file_name)
     }
 
     advpack = LoadLibraryW(wszAdvpack);
-    pExtractFilesA = (typeof(ExtractFilesA)*)GetProcAddress(advpack, "ExtractFiles");
-
-    len = WideCharToMultiByte(CP_ACP, 0, file_name, -1, NULL, 0, NULL, NULL);
-    file_name_a = heap_alloc(len);
-    WideCharToMultiByte(CP_ACP, 0, file_name, -1, file_name_a, -1, NULL, NULL);
+    pExtractFilesA = (void *)GetProcAddress(advpack, "ExtractFiles");
 
     /* FIXME: Use unicode version (not yet implemented) */
+    file_name_a = heap_strdupWtoA(file_name);
     hres = pExtractFilesA(file_name_a, install_dir, 0, NULL, NULL, 0);
     FreeLibrary(advpack);
     heap_free(file_name_a);
@@ -197,18 +193,21 @@ static BOOL install_from_unix_file(const char *file_name)
 
     close(fd);
 
-    if(!wine_get_dos_file_name) {
+    if(!wine_get_dos_file_name)
         wine_get_dos_file_name = (void*)GetProcAddress(GetModuleHandleW(kernel32W), "wine_get_dos_file_name");
-        if(!wine_get_dos_file_name) {
-            ERR("Could not get wine_get_dos_file_name function.\n");
-            return FALSE;
-        }
-    }
 
-    dos_file_name = wine_get_dos_file_name(file_name);
-    if(!file_name) {
-        ERR("Could not get dos file name of %s\n", debugstr_a(file_name));
-        return FALSE;
+    if(wine_get_dos_file_name) { /* Wine UNIX mode */
+	dos_file_name = wine_get_dos_file_name(file_name);
+	if(!dos_file_name) {
+	    ERR("Could not get dos file name of %s\n", debugstr_a(file_name));
+	    return FALSE;
+	}
+    } else { /* Windows mode */
+	UINT res;
+	WARN("Could not get wine_get_dos_file_name function, calling install_cab directly.\n");
+	res = MultiByteToWideChar( CP_ACP, 0, file_name, -1, 0, 0);
+	dos_file_name = heap_alloc (res*sizeof(WCHAR));
+	MultiByteToWideChar( CP_ACP, 0, file_name, -1, dos_file_name, res);
     }
 
     ret = install_cab(dos_file_name);
@@ -236,8 +235,10 @@ static BOOL install_from_registered_dir(void)
         res = RegQueryValueExA(hkey, "GeckoCabDir", NULL, &type, (PBYTE)file_name, &size);
     }
     RegCloseKey(hkey);
-    if(res != ERROR_SUCCESS || type != REG_SZ)
+    if(res != ERROR_SUCCESS || type != REG_SZ) {
+        heap_free(file_name);
         return FALSE;
+    }
 
     strcat(file_name, GECKO_FILE_NAME);
 
@@ -385,10 +386,12 @@ static HRESULT WINAPI InstallCallback_OnDataAvailable(IBindStatusCallback *iface
     HRESULT hres;
 
     do {
+        DWORD written;
+
         size = 0;
         hres = IStream_Read(str, buf, sizeof(buf), &size);
         if(size)
-            WriteFile(tmp_file, buf, size, NULL, NULL);
+            WriteFile(tmp_file, buf, size, &written, NULL);
     }while(hres == S_OK);
 
     return S_OK;
@@ -422,6 +425,7 @@ static LPWSTR get_url(void)
     HKEY hkey;
     DWORD res, type;
     DWORD size = INTERNET_MAX_URL_LENGTH*sizeof(WCHAR);
+    DWORD returned_size;
     LPWSTR url;
 
     static const WCHAR wszGeckoUrl[] = {'G','e','c','k','o','U','r','l',0};
@@ -434,17 +438,18 @@ static LPWSTR get_url(void)
         return NULL;
 
     url = heap_alloc(size);
+    returned_size = size;
 
-    res = RegQueryValueExW(hkey, wszGeckoUrl, NULL, &type, (LPBYTE)url, &size);
+    res = RegQueryValueExW(hkey, wszGeckoUrl, NULL, &type, (LPBYTE)url, &returned_size);
     RegCloseKey(hkey);
     if(res != ERROR_SUCCESS || type != REG_SZ) {
         heap_free(url);
         return NULL;
     }
 
-    if(size > sizeof(httpW) && !memcmp(url, httpW, sizeof(httpW))) {
+    if(returned_size > sizeof(httpW) && !memcmp(url, httpW, sizeof(httpW))) {
         strcatW(url, v_formatW);
-        MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, url+strlenW(url), -1);
+        MultiByteToWideChar(CP_ACP, 0, GECKO_VERSION, -1, url+strlenW(url), size/sizeof(WCHAR)-strlenW(url));
     }
 
     TRACE("Got URL %s\n", debugstr_w(url));

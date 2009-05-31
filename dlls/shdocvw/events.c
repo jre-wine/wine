@@ -166,7 +166,7 @@ static HRESULT WINAPI ConnectionPoint_GetConnectionInterface(IConnectionPoint *i
 
     TRACE("(%p)->(%p)\n", This, pIID);
 
-    memcpy(pIID, &This->iid, sizeof(IID));
+    *pIID = This->iid;
     return S_OK;
 }
 
@@ -279,14 +279,14 @@ static void ConnectionPoint_Create(REFIID riid, ConnectionPoint **cp,
     ret->sinks_size = 0;
     ret->container = container;
 
-    memcpy(&ret->iid, riid, sizeof(IID));
+    ret->iid = *riid;
 
     *cp = ret;
 }
 
 static void ConnectionPoint_Destroy(ConnectionPoint *This)
 {
-    int i;
+    DWORD i;
 
     for(i=0; i<This->sinks_size; i++) {
         if(This->sinks[i])

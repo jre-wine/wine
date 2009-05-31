@@ -108,10 +108,11 @@ void  output_spec_symbol (const parsed_symbol *sym)
 
     if (sym->argc)
       fputc (' ', specfile);
-    fprintf (specfile, ") %s_%s", OUTPUT_UC_DLL_NAME, sym->function_name);
+    fputs (") ", specfile);
 
     if (sym->flags & SYM_THISCALL)
-      fputs (" # __thiscall", specfile);
+      fputs ("__thiscall_", specfile);
+    fprintf (specfile, "%s_%s", OUTPUT_UC_DLL_NAME, sym->function_name);
 
     fputc ('\n',specfile);
   }
@@ -138,13 +139,16 @@ static void output_spec_postamble (void)
  */
 void  output_header_preamble (void)
 {
+  if (!globals.do_code)
+      return;
+
   hfile = open_file (OUTPUT_DLL_NAME, "_dll.h", "w");
 
   atexit (output_header_postamble);
 
   fprintf (hfile,
            "/*\n * %s.dll\n *\n * Generated from %s.dll by winedump.\n *\n"
-           " * DO NOT SEND GENERATED DLLS FOR INCLUSION INTO WINE !\n * \n */"
+           " * DO NOT SEND GENERATED DLLS FOR INCLUSION INTO WINE !\n *\n */"
            "\n#ifndef __WINE_%s_DLL_H\n#define __WINE_%s_DLL_H\n\n"
            "#include \"windef.h\"\n#include \"wine/debug.h\"\n"
            "#include \"winbase.h\"\n#include \"winnt.h\"\n\n\n",
@@ -160,6 +164,9 @@ void  output_header_preamble (void)
  */
 void  output_header_symbol (const parsed_symbol *sym)
 {
+  if (!globals.do_code)
+      return;
+
   assert (hfile);
   assert (sym && sym->symbol);
 
@@ -210,10 +217,15 @@ void  output_c_preamble (void)
 
   fprintf (cfile,
            "/*\n * %s.dll\n *\n * Generated from %s by winedump.\n *\n"
-           " * DO NOT SUBMIT GENERATED DLLS FOR INCLUSION INTO WINE!\n * \n */"
-           "\n\n#include \"config.h\"\n#include \"%s_dll.h\"\n\n"
-           "WINE_DEFAULT_DEBUG_CHANNEL(%s);\n\n",
-           OUTPUT_DLL_NAME, globals.input_name, OUTPUT_DLL_NAME,
+           " * DO NOT SUBMIT GENERATED DLLS FOR INCLUSION INTO WINE!\n *\n */"
+           "\n\n#include \"config.h\"\n\n#include <stdarg.h>\n\n"
+           "#include \"windef.h\"\n#include \"winbase.h\"\n",
+           OUTPUT_DLL_NAME, globals.input_name);
+
+  if (globals.do_code)
+    fprintf (cfile, "#include \"%s_dll.h\"\n", OUTPUT_DLL_NAME);
+
+  fprintf (cfile,"#include \"wine/debug.h\"\n\nWINE_DEFAULT_DEBUG_CHANNEL(%s);\n\n",
            OUTPUT_DLL_NAME);
 
   if (globals.forward_dll)
@@ -221,50 +233,44 @@ void  output_c_preamble (void)
     if (VERBOSE)
       puts ("Creating a forwarding DLL");
 
-    fputs ("\nHMODULE hDLL=0;\t/* DLL to call */\n\n", cfile);
+    fputs ("\nHMODULE hDLL=0;    /* DLL to call */\n\n", cfile);
   }
-
-  fputs ("#ifdef __i386__\n#define GET_THIS(t,p) t p;\\\n__asm__ __volatile__"
-         " (\"movl %%ecx, %0\" : \"=m\" (p))\n#endif\n\n\n", cfile);
 
   fprintf (cfile,
            "BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID "
-           "lpvReserved)\n{\n\tTRACE(\"(0x%%p, %%d, %%p)\\n\",hinstDLL,"
-           "fdwReason,lpvReserved);\n\n\t"
-           "if (fdwReason == DLL_WINE_PREATTACH) return FALSE;\t"
-           "/* prefer native version */\n\n\t"
-           "if (fdwReason == DLL_PROCESS_ATTACH)\n\t{\n\t\t");
+           "lpvReserved)\n{\n"
+           "    TRACE(\"(0x%%p, %%d, %%p)\\n\", hinstDLL, fdwReason, lpvReserved);\n\n"
+           "    switch (fdwReason)\n"
+           "    {\n"
+           "        case DLL_WINE_PREATTACH:\n"
+           "            return FALSE;    /* prefer native version */\n"
+           "        case DLL_PROCESS_ATTACH:\n");
 
   if (globals.forward_dll)
-  {
     fprintf (cfile,
-             "hDLL = LoadLibraryA( \"%s\" );\n\t\t"
-             "TRACE(\":Forwarding DLL (%s) loaded (%%ld)\\n\",(LONG)hDLL);",
-             globals.forward_dll, globals.forward_dll);
-  }
+           "            DLL = LoadLibraryA(\"%s\");\n"
+           "            TRACE(\"Forwarding DLL (%s) loaded (%%p)\\n\", hDLL);\n",
+           globals.forward_dll, globals.forward_dll);
   else
-    fputs ("/* FIXME: Initialisation */", cfile);
+    fprintf (cfile,
+           "            DisableThreadLibraryCalls(hinstDLL);\n");
 
-  fputs ("\n\t}\n\telse if (fdwReason == DLL_PROCESS_DETACH)\n\t{\n\t\t",
-         cfile);
+  fprintf (cfile,
+           "            break;\n"
+           "        case DLL_PROCESS_DETACH:\n");
 
   if (globals.forward_dll)
-  {
     fprintf (cfile,
-             "FreeLibrary( hDLL );\n\t\tTRACE(\":Forwarding DLL (%s)"
-             " freed\\n\");", globals.forward_dll);
-  }
-  else
-    fputs ("/* FIXME: Cleanup */", cfile);
+           "            FreeLibrary(hDLL);\n"
+           "            TRACE(\"Forwarding DLL (%s) freed\\n\");\n",
+           globals.forward_dll);
 
-  fputs ("\n\t}\n\n\treturn TRUE;\n}\n\n\n", cfile);
+  fprintf (cfile,
+           "            break;\n"
+           "    }\n\n"
+           "    return TRUE;\n}\n");
 }
 
-
-#define CPP_END  if (sym->flags & SYM_THISCALL) \
-  fputs ("#endif\n", cfile); fputs ("\n\n", cfile)
-#define GET_THIS if (sym->flags & SYM_THISCALL) \
-  fprintf (cfile, "\tGET_THIS(%s,%s);\n", sym->arg_text[0],sym->arg_name[0])
 
 /*******************************************************************
  *         output_c_symbol
@@ -275,6 +281,7 @@ void  output_c_symbol (const parsed_symbol *sym)
 {
   unsigned int i, start = sym->flags & SYM_THISCALL ? 1 : 0;
   int is_void;
+  static int has_thiscall = 0;
 
   assert (cfile);
   assert (sym && sym->symbol);
@@ -289,10 +296,30 @@ void  output_c_symbol (const parsed_symbol *sym)
     return;
   }
 
-  if (sym->flags & SYM_THISCALL)
-    fputs ("#ifdef __i386__\n", cfile);
+  if (sym->flags & SYM_THISCALL && !has_thiscall)
+  {
+    fputs ("#ifdef __i386__  /* thiscall functions are i386-specific */\n\n"
+           "#define THISCALL(func) __thiscall_ ## func\n"
+           "#define THISCALL_NAME(func) __ASM_NAME(\"__thiscall_\" #func)\n"
+           "#define DEFINE_THISCALL_WRAPPER(func) \\\n"
+           "\textern void THISCALL(func)(); \\\n"
+           "\t__ASM_GLOBAL_FUNC(__thiscall_ ## func, \\\n"
+           "\t\t\t\"popl %eax\\n\\t\" \\\n"
+           "\t\t\t\"pushl %ecx\\n\\t\" \\\n"
+           "\t\t\t\"pushl %eax\\n\\t\" \\\n"
+           "\t\t\t\"jmp \" __ASM_NAME(#func) )\n"
+           "#else /* __i386__ */\n\n"
+           "#define THISCALL(func) func\n"
+           "#define THISCALL_NAME(func) __ASM_NAME(#func)\n"
+           "#define DEFINE_THISCALL_WRAPPER(func) /* nothing */\n\n"
+           "#endif /* __i386__ */\n\n", cfile);
+    has_thiscall = 1;
+  }
 
   output_c_banner(sym);
+
+  if (sym->flags & SYM_THISCALL)
+    fprintf(cfile, "DEFINE_THISCALL_WRAPPER(%s)\n", sym->function_name);
 
   if (!sym->function_name)
   {
@@ -300,7 +327,6 @@ void  output_c_symbol (const parsed_symbol *sym)
     fprintf (cfile, "#if 0\n__%s %s_%s()\n{\n\t/* %s in .spec */\n}\n#endif\n",
              symbol_get_call_convention(sym), OUTPUT_UC_DLL_NAME, sym->symbol,
              globals.forward_dll ? "@forward" : "@stub");
-    CPP_END;
     return;
   }
 
@@ -311,12 +337,10 @@ void  output_c_symbol (const parsed_symbol *sym)
 
   if (!globals.do_trace)
   {
-    GET_THIS;
     fputs ("\tFIXME(\":stub\\n\");\n", cfile);
     if (!is_void)
         fprintf (cfile, "\treturn (%s) 0;\n", sym->return_text);
     fputs ("}\n", cfile);
-    CPP_END;
     return;
   }
 
@@ -338,8 +362,6 @@ void  output_c_symbol (const parsed_symbol *sym)
 
     if (!is_void)
       fprintf (cfile, "\t%s retVal;\n", sym->return_text);
-
-    GET_THIS;
 
     fprintf (cfile, "\tpFunc=(void*)GetProcAddress(hDLL,\"%s\");\n",
              sym->symbol);
@@ -369,7 +391,6 @@ void  output_c_symbol (const parsed_symbol *sym)
     if (!is_void)
       fprintf (cfile, "\treturn (%s) 0;\n", sym->return_text);
     fputs ("}\n", cfile);
-    CPP_END;
     return;
   }
 
@@ -401,7 +422,6 @@ void  output_c_symbol (const parsed_symbol *sym)
     fputs (");\n", cfile);
 
   fputs ("}\n", cfile);
-  CPP_END;
 }
 
 

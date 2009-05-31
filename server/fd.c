@@ -44,7 +44,25 @@
 #include <sys/statvfs.h>
 #endif
 #ifdef HAVE_SYS_VFS_H
+/*
+ * Solaris defines its system list in sys/list.h.
+ * This need to be workaround it here.
+ */
+#define list SYSLIST
+#define list_next SYSLIST_NEXT
+#define list_prev SYSLIST_PREV
+#define list_head SYSLIST_HEAD
+#define list_tail SYSLIST_TAIL
+#define list_move_tail SYSLIST_MOVE_TAIL
+#define list_remove SYSLIST_REMOVE
 #include <sys/vfs.h>
+#undef list
+#undef list_next
+#undef list_prev
+#undef list_head
+#undef list_tail
+#undef list_move_tail
+#undef list_remove
 #endif
 #ifdef HAVE_SYS_PARAM_H
 #include <sys/param.h>
@@ -181,7 +199,7 @@ struct fd
     struct async_queue  *write_q;     /* async writers of this fd */
     struct async_queue  *wait_q;      /* other async waiters of this fd */
     struct completion   *completion;  /* completion object attached to this fd */
-    unsigned long        comp_key;    /* completion key to set in completion events */
+    apc_param_t          comp_key;    /* completion key to set in completion events */
 };
 
 static void fd_dump( struct object *obj, int verbose );
@@ -1564,7 +1582,7 @@ struct fd *open_fd( const char *name, int flags, mode_t *mode, unsigned int acce
         /* if we tried to open a directory for write access, retry read-only */
         if (errno != EISDIR ||
             !(access & FILE_UNIX_WRITE_ACCESS) ||
-            (fd->unix_fd = open( name, O_RDONLY | (flags & ~O_TRUNC), *mode )) == -1)
+            (fd->unix_fd = open( name, O_RDONLY | (flags & ~(O_TRUNC | O_CREAT | O_EXCL)), *mode )) == -1)
         {
             file_set_error();
             goto error;
@@ -1751,7 +1769,7 @@ void default_poll_event( struct fd *fd, int event )
     else if (!fd->inode) set_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
 }
 
-struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
+struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type )
 {
     struct async_queue *queue;
     struct async *async;
@@ -1812,7 +1830,7 @@ void default_fd_queue_async( struct fd *fd, const async_data_t *data, int type, 
 {
     struct async *async;
 
-    if ((async = fd_queue_async( fd, data, type, count )))
+    if ((async = fd_queue_async( fd, data, type )))
     {
         release_object( async );
         set_error( STATUS_PENDING );
@@ -1894,7 +1912,7 @@ static void unmount_device( struct fd *device_fd )
 
 /* default ioctl() routine */
 obj_handle_t default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                               const void *data, data_size_t size )
+                               int blocking, const void *data, data_size_t size )
 {
     switch(code)
     {
@@ -1922,10 +1940,16 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
     return fd;
 }
 
-void fd_assign_completion( struct fd *fd, struct completion **p_port, unsigned long *p_key )
+struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key )
 {
     *p_key = fd->comp_key;
-    *p_port = fd->completion ? (struct completion *)grab_object( fd->completion ) : NULL;
+    return fd->completion ? (struct completion *)grab_object( fd->completion ) : NULL;
+}
+
+void fd_copy_completion( struct fd *src, struct fd *dst )
+{
+    assert( !dst->completion );
+    dst->completion = fd_get_completion( src, &dst->comp_key );
 }
 
 /* flush a file buffers */
@@ -1979,11 +2003,11 @@ DECL_HANDLER(get_handle_fd)
         int unix_fd = get_unix_fd( fd );
         if (unix_fd != -1)
         {
-            send_client_fd( current->process, unix_fd, req->handle );
             reply->type = fd->fd_ops->get_fd_type( fd );
             reply->removable = is_fd_removable(fd);
             reply->options = fd->options;
             reply->access = get_handle_access( current->process, req->handle );
+            send_client_fd( current->process, unix_fd, req->handle );
         }
         release_object( fd );
     }
@@ -1993,11 +2017,11 @@ DECL_HANDLER(get_handle_fd)
 DECL_HANDLER(ioctl)
 {
     unsigned int access = (req->code >> 14) & (FILE_READ_DATA|FILE_WRITE_DATA);
-    struct fd *fd = get_handle_fd_obj( current->process, req->handle, access );
+    struct fd *fd = get_handle_fd_obj( current->process, req->async.handle, access );
 
     if (fd)
     {
-        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async,
+        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async, req->blocking,
                                          get_req_data(), get_req_data_size() );
         reply->options = fd->options;
         release_object( fd );
@@ -2023,7 +2047,7 @@ DECL_HANDLER(register_async)
         return;
     }
 
-    if ((fd = get_handle_fd_obj( current->process, req->handle, access )))
+    if ((fd = get_handle_fd_obj( current->process, req->async.handle, access )))
     {
         if (get_unix_fd( fd ) != -1) fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
         release_object( fd );

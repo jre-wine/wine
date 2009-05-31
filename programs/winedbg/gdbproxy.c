@@ -111,7 +111,12 @@ struct gdb_context
     unsigned long               wine_segs[3];   /* load addresses of the ELF wine exec segments (text, bss and data) */
 };
 
-static struct be_process_io be_process_gdbproxy_io;
+static struct be_process_io be_process_gdbproxy_io =
+{
+    NULL, /* we shouldn't use close_process() in gdbproxy */
+    ReadProcessMemory,
+    WriteProcessMemory
+};
 
 /* =============================================== *
  *       B A S I C   M A N I P U L A T I O N S     *
@@ -475,7 +480,10 @@ static BOOL handle_exception(struct gdb_context* gdbctx, EXCEPTION_DEBUG_INFO* e
 
 static	void	handle_debug_event(struct gdb_context* gdbctx, DEBUG_EVENT* de)
 {
-    char                buffer[256];
+    union {
+        char                bufferA[256];
+        WCHAR               buffer[256];
+    } u;
 
     dbg_curr_thread = dbg_get_thread(gdbctx->process, de->dwThreadId);
 
@@ -488,19 +496,20 @@ static	void	handle_debug_event(struct gdb_context* gdbctx, DEBUG_EVENT* de)
         memory_get_string_indirect(gdbctx->process,
                                    de->u.CreateProcessInfo.lpImageName,
                                    de->u.CreateProcessInfo.fUnicode,
-                                   buffer, sizeof(buffer));
-        dbg_set_process_name(gdbctx->process, buffer);
+                                   u.buffer, sizeof(u.buffer) / sizeof(WCHAR));
+        dbg_set_process_name(gdbctx->process, u.buffer);
 
         if (gdbctx->trace & GDBPXY_TRC_WIN32_EVENT)
             fprintf(stderr, "%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
                     de->dwProcessId, de->dwThreadId,
-                    buffer, de->u.CreateProcessInfo.lpImageName,
+                    dbg_W2A(u.buffer, -1),
+                    de->u.CreateProcessInfo.lpImageName,
                     de->u.CreateProcessInfo.lpStartAddress,
                     de->u.CreateProcessInfo.dwDebugInfoFileOffset,
                     de->u.CreateProcessInfo.nDebugInfoSize);
 
         /* de->u.CreateProcessInfo.lpStartAddress; */
-        if (!SymInitialize(gdbctx->process->handle, NULL, TRUE))
+        if (!dbg_init(gdbctx->process->handle, u.buffer, TRUE))
             fprintf(stderr, "Couldn't initiate DbgHelp\n");
 
         if (gdbctx->trace & GDBPXY_TRC_WIN32_EVENT)
@@ -519,23 +528,24 @@ static	void	handle_debug_event(struct gdb_context* gdbctx, DEBUG_EVENT* de)
         memory_get_string_indirect(gdbctx->process,
                                    de->u.LoadDll.lpImageName,
                                    de->u.LoadDll.fUnicode,
-                                   buffer, sizeof(buffer));
+                                   u.buffer, sizeof(u.buffer) / sizeof(WCHAR));
         if (gdbctx->trace & GDBPXY_TRC_WIN32_EVENT)
             fprintf(stderr, "%04x:%04x: loads DLL %s @%p (%u<%u>)\n",
                     de->dwProcessId, de->dwThreadId,
-                    buffer, de->u.LoadDll.lpBaseOfDll,
+                    dbg_W2A(u.buffer, -1),
+                    de->u.LoadDll.lpBaseOfDll,
                     de->u.LoadDll.dwDebugInfoFileOffset,
                     de->u.LoadDll.nDebugInfoSize);
-        SymLoadModule(gdbctx->process->handle, de->u.LoadDll.hFile, buffer, NULL,
-                      (unsigned long)de->u.LoadDll.lpBaseOfDll, 0);
+        dbg_load_module(gdbctx->process->handle, de->u.LoadDll.hFile, u.buffer,
+                        (DWORD_PTR)de->u.LoadDll.lpBaseOfDll, 0);
         break;
 
     case UNLOAD_DLL_DEBUG_EVENT:
         if (gdbctx->trace & GDBPXY_TRC_WIN32_EVENT)
             fprintf(stderr, "%08x:%08x: unload DLL @%p\n",
                     de->dwProcessId, de->dwThreadId, de->u.UnloadDll.lpBaseOfDll);
-        SymUnloadModule(gdbctx->process->handle, 
-                        (unsigned long)de->u.UnloadDll.lpBaseOfDll);
+        SymUnloadModule(gdbctx->process->handle,
+                        (DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
         break;
 
     case EXCEPTION_DEBUG_EVENT:
@@ -589,10 +599,10 @@ static	void	handle_debug_event(struct gdb_context* gdbctx, DEBUG_EVENT* de)
         assert(dbg_curr_thread);
         memory_get_string(gdbctx->process,
                           de->u.DebugString.lpDebugStringData, TRUE,
-                          de->u.DebugString.fUnicode, buffer, sizeof(buffer));
+                          de->u.DebugString.fUnicode, u.bufferA, sizeof(u.bufferA));
         if (gdbctx->trace & GDBPXY_TRC_WIN32_EVENT)
             fprintf(stderr, "%08x:%08x: output debug string (%s)\n",
-                    de->dwProcessId, de->dwThreadId, buffer);
+                    de->dwProcessId, de->dwThreadId, u.bufferA);
         break;
 
     case RIP_EVENT:
@@ -1385,6 +1395,33 @@ static enum packet_return packet_write_memory(struct gdb_context* gdbctx)
     return packet_ok; /* FIXME: error while writing ? */
 }
 
+static enum packet_return packet_read_register(struct gdb_context* gdbctx)
+{
+    unsigned            reg;
+    CONTEXT             ctx;
+    CONTEXT*            pctx = &gdbctx->context;
+
+    assert(gdbctx->in_trap);
+    reg = hex_to_int(gdbctx->in_packet, gdbctx->in_packet_len);
+    if (reg >= cpu_num_regs)
+    {
+        if (gdbctx->trace & GDBPXY_TRC_COMMAND_ERROR)
+            fprintf(stderr, "Register out of bounds %x\n", reg);
+        return packet_error;
+    }
+    if (dbg_curr_thread != gdbctx->other_thread && gdbctx->other_thread)
+    {
+        if (!fetch_context(gdbctx, gdbctx->other_thread->handle, pctx = &ctx))
+            return packet_error;
+    }
+    if (gdbctx->trace & GDBPXY_TRC_COMMAND)
+        fprintf(stderr, "Read register %x => %lx\n", reg, *cpu_register(pctx, reg));
+    packet_reply_open(gdbctx);
+    packet_reply_hex_to(gdbctx, cpu_register(pctx, reg), 4);
+    packet_reply_close(gdbctx);
+    return packet_done;
+}
+
 static enum packet_return packet_write_register(struct gdb_context* gdbctx)
 {
     unsigned            reg;
@@ -1739,6 +1776,12 @@ static enum packet_return packet_query(struct gdb_context* gdbctx)
     case 'S':
         if (strncmp(gdbctx->in_packet, "Symbol::", gdbctx->in_packet_len) == 0)
             return packet_ok;
+        if (strncmp(gdbctx->in_packet, "Supported", gdbctx->in_packet_len) == 0)
+        {
+            packet_reply_open(gdbctx);
+            packet_reply_close(gdbctx);
+            return packet_done;
+        }
         break;
     case 'T':
         if (gdbctx->in_packet_len > 15 &&
@@ -1931,7 +1974,7 @@ static struct packet_entry packet_entries[] =
         {'H', packet_thread},
         {'m', packet_read_memory},
         {'M', packet_write_memory},
-        /* {'p', packet_read_register}, doesn't seem needed */
+        {'p', packet_read_register},
         {'P', packet_write_register},
         {'q', packet_query},
         /* {'Q', packet_set}, */
@@ -2319,10 +2362,3 @@ int gdb_main(int argc, char* argv[])
 #endif
     return -1;
 }
-
-static struct be_process_io be_process_gdbproxy_io =
-{
-    NULL, /* we shouldn't use close_process() in gdbproxy */
-    ReadProcessMemory,
-    WriteProcessMemory
-};

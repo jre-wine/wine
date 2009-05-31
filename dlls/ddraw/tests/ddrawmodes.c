@@ -47,7 +47,7 @@ static void createwindow(void)
     wc.hInstance = GetModuleHandleA(0);
     wc.hIcon = LoadIconA(wc.hInstance, IDI_APPLICATION);
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
+    wc.hbrBackground = GetStockObject(BLACK_BRUSH);
     wc.lpszMenuName = NULL;
     wc.lpszClassName = "TestWindowClass";
     if(!RegisterClassA(&wc))
@@ -108,9 +108,26 @@ static void flushdisplaymodes(void)
 
 static HRESULT WINAPI enummodescallback(LPDDSURFACEDESC lpddsd, LPVOID lpContext)
 {
-    trace("Width = %i, Height = %i, Refresh Rate = %i\r\n",
+    trace("Width = %i, Height = %i, Refresh Rate = %i, Pitch = %i, flags =%02X\r\n",
         lpddsd->dwWidth, lpddsd->dwHeight,
-        U2(*lpddsd).dwRefreshRate);
+          U2(*lpddsd).dwRefreshRate, U1(*lpddsd).lPitch, lpddsd->dwFlags);
+
+    /* Check that the pitch is valid if applicable */
+    if(lpddsd->dwFlags & DDSD_PITCH)
+    {
+        ok(U1(*lpddsd).lPitch != 0, "EnumDisplayModes callback with bad pitch\n");
+    }
+
+    /* Check that frequency is valid if applicable
+     *
+     * This fails on some Windows drivers or Windows versions, so it isn't important
+     * apparently
+    if(lpddsd->dwFlags & DDSD_REFRESHRATE)
+    {
+        ok(U2(*lpddsd).dwRefreshRate != 0, "EnumDisplayModes callback with bad refresh rate\n");
+    }
+     */
+
     adddisplaymode(lpddsd);
 
     return DDENUMRET_OK;
@@ -267,13 +284,25 @@ static void testcooperativelevels_normal(void)
 
     /* Try creating a double buffered primary in normal mode */
     rc = IDirectDraw_CreateSurface(lpDD, &surfacedesc, &surface, NULL);
-    ok(rc == DDERR_NOEXCLUSIVEMODE, "IDirectDraw_CreateSurface returned %08x\n", rc);
-    ok(surface == NULL, "Returned surface pointer is %p\n", surface);
-    if(surface) IDirectDrawSurface_Release(surface);
+    if (rc == DDERR_UNSUPPORTEDMODE)
+        skip("Unsupported mode\n");
+    else
+    {
+        ok(rc == DDERR_NOEXCLUSIVEMODE, "IDirectDraw_CreateSurface returned %08x\n", rc);
+        ok(surface == NULL, "Returned surface pointer is %p\n", surface);
+    }
+    if(surface && surface != (IDirectDrawSurface *)0xdeadbeef) IDirectDrawSurface_Release(surface);
 
     /* Set the focus window */
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_SETFOCUSWINDOW);
+
+    if (rc == DDERR_INVALIDPARAMS)
+    {
+        win_skip("NT4/Win95 do not support cooperative levels DDSCL_SETDEVICEWINDOW and DDSCL_SETFOCUSWINDOW\n");
+        return;
+    }
+
     ok(rc==DD_OK,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
 
     /* Set the focus window a second time*/
@@ -357,10 +386,26 @@ static void testcooperativelevels_exclusive(void)
     /* Set the focus window. Should fail */
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_SETFOCUSWINDOW);
-    ok(rc==DDERR_HWNDALREADYSET,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
+    ok(rc==DDERR_HWNDALREADYSET ||
+       broken(rc==DDERR_INVALIDPARAMS) /* NT4/Win95 */,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
 
 
     /* All done */
+}
+
+static void testddraw3(void)
+{
+    const GUID My_IID_IDirectDraw3 = {
+        0x618f8ad4,
+        0x8b7a,
+        0x11d0,
+        { 0x8f,0xcc,0x0,0xc0,0x4f,0xd9,0x18,0x9d }
+    };
+    IDirectDraw3 *dd3;
+    HRESULT hr;
+    hr = IDirectDraw_QueryInterface(lpDD, &My_IID_IDirectDraw3, (void **) &dd3);
+    ok(hr == E_NOINTERFACE, "QueryInterface for IID_IDirectDraw3 returned 0x%08x, expected E_NOINTERFACE\n", hr);
+    if(SUCCEEDED(hr) && dd3) IDirectDraw3_Release(dd3);
 }
 
 START_TEST(ddrawmodes)
@@ -372,6 +417,7 @@ START_TEST(ddrawmodes)
     if (winetest_interactive)
         testdisplaymodes();
     flushdisplaymodes();
+    testddraw3();
     releasedirectdraw();
 
     createdirectdraw();

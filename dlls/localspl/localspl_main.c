@@ -1,7 +1,7 @@
 /*
- * Implementation of the Local Printmonitor
+ * Implementation of the Local Printprovider/ Printmonitor/ Prontprocessor
  *
- * Copyright 2006 Detlef Riekenberg
+ * Copyright 2006-2009 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,15 +25,12 @@
 
 #include "windef.h"
 #include "winbase.h"
-#include "wingdi.h"
-#include "winreg.h"
-#include "winspool.h"
-#include "ddk/winsplp.h"
 
 #include "wine/debug.h"
 #include "localspl_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(localspl);
+
 
 HINSTANCE LOCALSPL_hInstance = NULL;
 
@@ -52,39 +49,8 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         case DLL_PROCESS_ATTACH:
             DisableThreadLibraryCalls( hinstDLL );
             LOCALSPL_hInstance = hinstDLL;
+            setup_provider();
             break;
     }
-    return TRUE;
-}
-
-
-/*****************************************************
- * InitializePrintProvidor     (localspl.@)
- *
- * Initialize the Printprovider
- *
- * PARAMS
- *  pPrintProvidor    [I] Buffer to fill with a struct PRINTPROVIDOR
- *  cbPrintProvidor   [I] Size of Buffer in Bytes
- *  pFullRegistryPath [I] Registry-Path for the Printprovidor
- *
- * RETURNS
- *  Success: TRUE and pPrintProvidor filled
- *  Failure: FALSE
- *
- * NOTES
- *  The RegistryPath should be:
- *  "System\CurrentControlSet\Control\Print\Providers\<providername>",
- *  but this Parameter is ignored in "localspl.dll".
- *
- */
-
-BOOL WINAPI InitializePrintProvidor(LPPRINTPROVIDOR pPrintProvidor,
-                                    DWORD cbPrintProvidor, LPWSTR pFullRegistryPath)
-{
-
-    TRACE("(%p, %u, %s)\n", pPrintProvidor, cbPrintProvidor, debugstr_w(pFullRegistryPath));
-    ZeroMemory(pPrintProvidor, (cbPrintProvidor < sizeof(PRINTPROVIDOR)) ? cbPrintProvidor : sizeof(PRINTPROVIDOR));
-
     return TRUE;
 }

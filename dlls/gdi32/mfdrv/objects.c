@@ -95,8 +95,8 @@ static INT16 MFDRV_FindObject( PHYSDEV dev, HGDIOBJ obj )
 /******************************************************************
  *         MFDRV_DeleteObject
  */
-BOOL MFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
-{   
+BOOL CDECL MFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+{
     METARECORD mr;
     METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     INT16 index;
@@ -137,7 +137,7 @@ static BOOL MFDRV_SelectObject( PHYSDEV dev, INT16 index)
 /***********************************************************************
  *           MFDRV_SelectBitmap
  */
-HBITMAP MFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
+HBITMAP CDECL MFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
 {
     return 0;
 }
@@ -307,7 +307,7 @@ INT16 MFDRV_CreateBrushIndirect(PHYSDEV dev, HBRUSH hBrush )
 		  bmSize = DIB_GetDIBImageBytes(info->bmiHeader.biWidth,
 						info->bmiHeader.biHeight,
 						info->bmiHeader.biBitCount);
-	      biSize = DIB_BitmapInfoSize(info, LOWORD(logbrush.lbColor));
+	      biSize = bitmap_info_size(info, LOWORD(logbrush.lbColor));
 	      size = sizeof(METARECORD) + biSize + bmSize + 2;
 	      mr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
 	      if(!mr) goto done;
@@ -334,7 +334,7 @@ done:
 /***********************************************************************
  *           MFDRV_SelectBrush
  */
-HBRUSH MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush )
+HBRUSH CDECL MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush )
 {
     METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     INT16 index;
@@ -354,14 +354,32 @@ HBRUSH MFDRV_SelectBrush( PHYSDEV dev, HBRUSH hbrush )
  *         MFDRV_CreateFontIndirect
  */
 
-static UINT16 MFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont, LOGFONT16 *logfont)
+static UINT16 MFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont, LOGFONTW *logfont)
 {
     char buffer[sizeof(METARECORD) - 2 + sizeof(LOGFONT16)];
     METARECORD *mr = (METARECORD *)&buffer;
+    LOGFONT16 *font16;
 
     mr->rdSize = (sizeof(METARECORD) + sizeof(LOGFONT16) - 2) / 2;
     mr->rdFunction = META_CREATEFONTINDIRECT;
-    memcpy(&(mr->rdParm), logfont, sizeof(LOGFONT16));
+    font16 = (LOGFONT16 *)&mr->rdParm;
+
+    font16->lfHeight         = logfont->lfHeight;
+    font16->lfWidth          = logfont->lfWidth;
+    font16->lfEscapement     = logfont->lfEscapement;
+    font16->lfOrientation    = logfont->lfOrientation;
+    font16->lfWeight         = logfont->lfWeight;
+    font16->lfItalic         = logfont->lfItalic;
+    font16->lfUnderline      = logfont->lfUnderline;
+    font16->lfStrikeOut      = logfont->lfStrikeOut;
+    font16->lfCharSet        = logfont->lfCharSet;
+    font16->lfOutPrecision   = logfont->lfOutPrecision;
+    font16->lfClipPrecision  = logfont->lfClipPrecision;
+    font16->lfQuality        = logfont->lfQuality;
+    font16->lfPitchAndFamily = logfont->lfPitchAndFamily;
+    WideCharToMultiByte( CP_ACP, 0, logfont->lfFaceName, -1, font16->lfFaceName, LF_FACESIZE, NULL, NULL );
+    font16->lfFaceName[LF_FACESIZE-1] = 0;
+
     if (!(MFDRV_WriteRecord( dev, mr, mr->rdSize * 2)))
         return 0;
     return MFDRV_AddHandle( dev, hFont );
@@ -371,18 +389,18 @@ static UINT16 MFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont, LOGFONT16 *logf
 /***********************************************************************
  *           MFDRV_SelectFont
  */
-HFONT MFDRV_SelectFont( PHYSDEV dev, HFONT hfont, HANDLE gdiFont )
+HFONT CDECL MFDRV_SelectFont( PHYSDEV dev, HFONT hfont, HANDLE gdiFont )
 {
     METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
-    LOGFONT16 lf16;
+    LOGFONTW font;
     INT16 index;
 
     index = MFDRV_FindObject(dev, hfont);
     if( index < 0 )
     {
-        if (!GetObject16( HFONT_16(hfont), sizeof(lf16), &lf16 ))
+        if (!GetObjectW( hfont, sizeof(font), &font ))
             return HGDI_ERROR;
-        index = MFDRV_CreateFontIndirect(dev, hfont, &lf16);
+        index = MFDRV_CreateFontIndirect(dev, hfont, &font);
         if( index < 0 )
             return HGDI_ERROR;
         GDI_hdc_using_object(hfont, physDev->hdc);
@@ -410,7 +428,7 @@ static UINT16 MFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen, LOGPEN16 *logpen)
 /***********************************************************************
  *           MFDRV_SelectPen
  */
-HPEN MFDRV_SelectPen( PHYSDEV dev, HPEN hpen )
+HPEN CDECL MFDRV_SelectPen( PHYSDEV dev, HPEN hpen )
 {
     METAFILEDRV_PDEVICE *physDev = (METAFILEDRV_PDEVICE *)dev;
     LOGPEN16 logpen;
@@ -419,15 +437,24 @@ HPEN MFDRV_SelectPen( PHYSDEV dev, HPEN hpen )
     index = MFDRV_FindObject(dev, hpen);
     if( index < 0 )
     {
-        if (!GetObject16( HPEN_16(hpen), sizeof(logpen), &logpen ))
+        /* must be an extended pen */
+        INT size = GetObjectW( hpen, 0, NULL );
+
+        if (!size) return 0;
+
+        if (size == sizeof(LOGPEN))
         {
-            /* must be an extended pen */
-            EXTLOGPEN *elp;
-            INT size = GetObjectW( hpen, 0, NULL );
+            LOGPEN pen;
 
-            if (!size) return 0;
-
-            elp = HeapAlloc( GetProcessHeap(), 0, size );
+            GetObjectW( hpen, sizeof(pen), &pen );
+            logpen.lopnStyle   = pen.lopnStyle;
+            logpen.lopnWidth.x = pen.lopnWidth.x;
+            logpen.lopnWidth.y = pen.lopnWidth.y;
+            logpen.lopnColor   = pen.lopnColor;
+        }
+        else  /* must be an extended pen */
+        {
+            EXTLOGPEN *elp = HeapAlloc( GetProcessHeap(), 0, size );
 
             GetObjectW( hpen, size, elp );
             /* FIXME: add support for user style pens */
@@ -484,7 +511,7 @@ static BOOL MFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPalette, LOGPALETTE* logP
 /***********************************************************************
  *           MFDRV_SelectPalette
  */
-HPALETTE MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackground )
+HPALETTE CDECL MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackground )
 {
 #define PALVERSION 0x0300
 
@@ -493,7 +520,7 @@ HPALETTE MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackgro
     BOOL        creationSucceed;
     int         sizeofPalette;
 
-    GetObjectA(hPalette, sizeof(WORD), (LPSTR) &wNumEntries);
+    GetObjectA(hPalette, sizeof(WORD), &wNumEntries);
 
     if (wNumEntries == 0) return 0;
 
@@ -520,7 +547,7 @@ HPALETTE MFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPalette, BOOL bForceBackgro
 /***********************************************************************
  *           MFDRV_RealizePalette
  */
-UINT MFDRV_RealizePalette(PHYSDEV dev, HPALETTE hPalette, BOOL dummy)
+UINT CDECL MFDRV_RealizePalette(PHYSDEV dev, HPALETTE hPalette, BOOL dummy)
 {
     char buffer[sizeof(METARECORD) - sizeof(WORD)];
     METARECORD *mr = (METARECORD *)&buffer;

@@ -25,6 +25,7 @@
 #include "wingdi.h"
 #include "shlobj.h"
 #include "shresdef.h"
+#include "dlgs.h"
 
 #include "version.rc"
 
@@ -98,6 +99,18 @@ IDI_SHELL_MY_DOCUMENTS ICON mydocs.ico
 /* @makedep: mydocs.ico */
 IDI_SHELL_MY_NETWORK_PLACES ICON mydocs.ico
 
+/* @makedep: idb_tb_large.bmp */
+IDB_TB_LARGE_LIGHT BITMAP idb_tb_large.bmp
+
+/* @makedep: idb_tb_large.bmp */
+IDB_TB_LARGE_DARK BITMAP idb_tb_large.bmp
+
+/* @makedep: idb_tb_small.bmp */
+IDB_TB_SMALL_LIGHT BITMAP idb_tb_small.bmp
+
+/* @makedep: idb_tb_small.bmp */
+IDB_TB_SMALL_DARK BITMAP idb_tb_small.bmp
+
 /* @makedep: searching.avi */
 IDR_AVI_SEARCHING AVI searching.avi
 
@@ -129,7 +142,6 @@ IDR_AVI_FILEDELETE AVI searching.avi
  */
 #include "shell32_Bg.rc"
 #include "shell32_Ca.rc"
-#include "shell32_Cn.rc"
 #include "shell32_Cs.rc"
 #include "shell32_Da.rc"
 #include "shell32_De.rc"
@@ -142,10 +154,12 @@ IDR_AVI_FILEDELETE AVI searching.avi
 #include "shell32_It.rc"
 #include "shell32_Ja.rc"
 #include "shell32_Ko.rc"
+#include "shell32_Lt.rc"
 #include "shell32_Nl.rc"
 #include "shell32_No.rc"
 #include "shell32_Pl.rc"
 #include "shell32_Pt.rc"
+#include "shell32_Ro.rc"
 #include "shell32_Ru.rc"
 #include "shell32_Si.rc"
 #include "shell32_Sk.rc"

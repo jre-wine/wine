@@ -151,7 +151,7 @@ static HICON STATIC_SetIcon( HWND hwnd, HICON hicon, DWORD style )
     CURSORICONINFO * info;
 
     if ((style & SS_TYPEMASK) != SS_ICON) return 0;
-    info = hicon?(CURSORICONINFO *) GlobalLock16(HICON_16(hicon)):NULL;
+    info = hicon ? GlobalLock16(HICON_16(hicon)) : NULL;
     if (hicon && !info) {
         WARN("hicon != 0, but info == 0\n");
         return 0;
@@ -688,6 +688,9 @@ static void STATIC_PaintTextfn( HWND hwnd, HDC hdc, DWORD style )
         return;
     }
 
+    if (GetWindowLongW( hwnd, GWL_EXSTYLE ) & WS_EX_RIGHT)
+        wFormat = DT_RIGHT | (wFormat & ~(DT_LEFT | DT_CENTER));
+
     if (style & SS_NOPREFIX)
         wFormat |= DT_NOPREFIX;
 
@@ -706,7 +709,7 @@ static void STATIC_PaintTextfn( HWND hwnd, HDC hdc, DWORD style )
     }
 
     if ((hFont = (HFONT)GetWindowLongPtrW( hwnd, HFONT_GWL_OFFSET )))
-        hOldFont = (HFONT)SelectObject( hdc, hFont );
+        hOldFont = SelectObject( hdc, hFont );
 
     /* SS_SIMPLE controls: WM_CTLCOLORSTATIC is sent, but the returned
                            brush is not used */
@@ -802,7 +805,7 @@ static void STATIC_PaintIconfn( HWND hwnd, HDC hdc, DWORD style )
     GetClientRect( hwnd, &rc );
     hbrush = STATIC_SendWmCtlColorStatic(hwnd, hdc);
     hIcon = (HICON)GetWindowLongPtrW( hwnd, HICON_GWL_OFFSET );
-    info = hIcon ? (CURSORICONINFO *)GlobalLock16(HICON_16(hIcon)) : NULL;
+    info = hIcon ? GlobalLock16(HICON_16(hIcon)) : NULL;
     if (!hIcon || !info)
     {
         FillRect(hdc, &rc, hbrush);
@@ -870,12 +873,6 @@ static void STATIC_PaintBitmapfn(HWND hwnd, HDC hdc, DWORD style )
         }
         SelectObject(hMemDC, oldbitmap);
         DeleteDC(hMemDC);
-    }
-    else
-    {
-        RECT rcClient;
-        GetClientRect( hwnd, &rcClient );
-        FillRect( hdc, &rcClient, hbrush );
     }
 }
 

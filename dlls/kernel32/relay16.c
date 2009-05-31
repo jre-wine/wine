@@ -20,6 +20,8 @@
 #include "config.h"
 #include "wine/port.h"
 
+#ifdef __i386__
+
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,8 +39,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
-
-#ifdef __i386__
 
 static const WCHAR **debug_relay_excludelist;
 static const WCHAR **debug_relay_includelist;
@@ -277,7 +277,7 @@ static const CALLFROM16 *get_entry_point( STACK16FRAME *frame, LPSTR module, LPS
     /* Retrieve entry point call structure */
     p = MapSL( MAKESEGPTR( frame->module_cs, frame->callfrom_ip ) );
     /* p now points to lret, get the start of CALLFROM16 structure */
-    return (CALLFROM16 *)(p - (BYTE *)&((CALLFROM16 *)0)->ret);
+    return (CALLFROM16 *)(p - FIELD_OFFSET( CALLFROM16, ret ));
 }
 
 
@@ -568,26 +568,5 @@ int relay_call_from_16( void *entry_point, unsigned char *args16, CONTEXT86 *con
     }
     return ret_val;
 }
-
-#else /* __i386__ */
-
-/*
- * Stubs for the CallTo16/CallFrom16 routines on non-Intel architectures
- * (these will never be called but need to be present to satisfy the linker ...)
- */
-
-/***********************************************************************
- *		__wine_call_from_16_regs (KERNEL32.@)
- */
-void __wine_call_from_16_regs(void)
-{
-    assert( FALSE );
-}
-
-DWORD WINAPI CALL32_CBClient( FARPROC proc, LPWORD args, DWORD *esi )
-{ assert( FALSE ); }
-
-DWORD WINAPI CALL32_CBClientEx( FARPROC proc, LPWORD args, DWORD *esi, INT *nArgs )
-{ assert( FALSE ); }
 
 #endif  /* __i386__ */

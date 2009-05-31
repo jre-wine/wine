@@ -3,11 +3,13 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = ntoskrnl.exe
-IMPORTLIB = libntoskrnl.exe.$(IMPLIBEXT)
+IMPORTLIB = ntoskrnl.exe
 IMPORTS   = kernel32 ntdll
 
 C_SRCS = \
 	ntoskrnl.c
+
+RC_SRCS = ntoskrnl.rc
 
 @MAKE_DLL_RULES@
 

@@ -24,7 +24,7 @@
 # error You must include config.h to use this header
 #endif
 
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
@@ -33,10 +33,6 @@
 
 void X11DRV_XF86VM_Init(void);
 void X11DRV_XF86VM_Cleanup(void);
-void X11DRV_XF86VM_SetExclusiveMode(int lock);
 
-BOOL X11DRV_XF86VM_GetGammaRamp(LPDDGAMMARAMP ramp);
-BOOL X11DRV_XF86VM_SetGammaRamp(LPDDGAMMARAMP ramp);
-
-#endif /* HAVE_LIBXXF86VM */
+#endif /* SONAME_LIBXXF86VM */
 #endif /* __WINE_XVIDMODE_H */

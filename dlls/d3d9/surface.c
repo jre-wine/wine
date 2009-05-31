@@ -31,7 +31,7 @@ static HRESULT WINAPI IDirect3DSurface9Impl_QueryInterface(LPDIRECT3DSURFACE9 if
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IDirect3DResource9)
         || IsEqualGUID(riid, &IID_IDirect3DSurface9)) {
-        IUnknown_AddRef(iface);
+        IDirect3DSurface9_AddRef(iface);
         *ppobj = This;
         return S_OK;
     }
@@ -53,7 +53,7 @@ static ULONG WINAPI IDirect3DSurface9Impl_AddRef(LPDIRECT3DSURFACE9 iface) {
     } else {
         /* No container, handle our own refcounting */
         ULONG ref = InterlockedIncrement(&This->ref);
-        if(ref == 1 && This->parentDevice) IUnknown_AddRef(This->parentDevice);
+        if(ref == 1 && This->parentDevice) IDirect3DDevice9Ex_AddRef(This->parentDevice);
         TRACE("(%p) : AddRef from %d\n", This, ref - 1);
 
         return ref;
@@ -76,7 +76,7 @@ static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
         TRACE("(%p) : ReleaseRef to %d\n", This, ref);
 
         if (ref == 0) {
-            if (This->parentDevice) IUnknown_Release(This->parentDevice);
+            if (This->parentDevice) IDirect3DDevice9Ex_Release(This->parentDevice);
             if (!This->isImplicit) {
                 EnterCriticalSection(&d3d9_cs);
                 IWineD3DSurface_Release(This->wineD3DSurface);
@@ -92,11 +92,17 @@ static ULONG WINAPI IDirect3DSurface9Impl_Release(LPDIRECT3DSURFACE9 iface) {
 /* IDirect3DSurface9 IDirect3DResource9 Interface follow: */
 static HRESULT WINAPI IDirect3DSurface9Impl_GetDevice(LPDIRECT3DSURFACE9 iface, IDirect3DDevice9** ppDevice) {
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
+    IWineD3DDevice *wined3d_device;
     HRESULT hr;
     TRACE("(%p)->(%p)\n", This, ppDevice);
 
     EnterCriticalSection(&d3d9_cs);
-    hr = IDirect3DResource9Impl_GetDevice((LPDIRECT3DRESOURCE9) This, ppDevice);
+    hr = IWineD3DSurface_GetDevice(This->wineD3DSurface, &wined3d_device);
+    if (SUCCEEDED(hr))
+    {
+        IWineD3DDevice_GetParent(wined3d_device, (IUnknown **)ppDevice);
+        IWineD3DDevice_Release(wined3d_device);
+    }
     LeaveCriticalSection(&d3d9_cs);
     return hr;
 }
@@ -201,11 +207,12 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetDesc(LPDIRECT3DSURFACE9 iface, D3
     IDirect3DSurface9Impl *This = (IDirect3DSurface9Impl *)iface;
     WINED3DSURFACE_DESC    wined3ddesc;
     UINT                   tmpInt = -1;
+    WINED3DFORMAT format;
     HRESULT hr;
     TRACE("(%p) Relay\n", This);
 
     /* As d3d8 and d3d9 structures differ, pass in ptrs to where data needs to go */
-    wined3ddesc.Format              = (WINED3DFORMAT *)&pDesc->Format;
+    wined3ddesc.Format              = &format;
     wined3ddesc.Type                = (WINED3DRESOURCETYPE *)&pDesc->Type;
     wined3ddesc.Usage               = &pDesc->Usage;
     wined3ddesc.Pool                = (WINED3DPOOL *) &pDesc->Pool;
@@ -218,6 +225,9 @@ static HRESULT WINAPI IDirect3DSurface9Impl_GetDesc(LPDIRECT3DSURFACE9 iface, D3
     EnterCriticalSection(&d3d9_cs);
     hr = IWineD3DSurface_GetDesc(This->wineD3DSurface, &wined3ddesc);
     LeaveCriticalSection(&d3d9_cs);
+
+    if (SUCCEEDED(hr)) pDesc->Format = d3dformat_from_wined3dformat(format);
+
     return hr;
 }
 
@@ -241,7 +251,11 @@ static HRESULT WINAPI IDirect3DSurface9Impl_UnlockRect(LPDIRECT3DSURFACE9 iface)
     EnterCriticalSection(&d3d9_cs);
     hr = IWineD3DSurface_UnlockRect(This->wineD3DSurface);
     LeaveCriticalSection(&d3d9_cs);
-    return hr;
+    switch(hr)
+    {
+        case WINEDDERR_NOTLOCKED:       return D3DERR_INVALIDCALL;
+        default:                        return hr;
+    }
 }
 
 static HRESULT WINAPI IDirect3DSurface9Impl_GetDC(LPDIRECT3DSURFACE9 iface, HDC* phdc) {
@@ -263,7 +277,10 @@ static HRESULT WINAPI IDirect3DSurface9Impl_ReleaseDC(LPDIRECT3DSURFACE9 iface, 
     EnterCriticalSection(&d3d9_cs);
     hr = IWineD3DSurface_ReleaseDC(This->wineD3DSurface, hdc);
     LeaveCriticalSection(&d3d9_cs);
-    return hr;
+    switch(hr) {
+        case WINEDDERR_NODC:    return WINED3DERR_INVALIDCALL;
+        default:                return hr;
+    }
 }
 
 

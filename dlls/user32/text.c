@@ -179,7 +179,7 @@ static void TEXT_Ellipsify (HDC hdc, WCHAR *str, unsigned int max_len,
     if (modstr)
     {
         memcpy (modstr, str, *len_str * sizeof(WCHAR));
-        *(str+*len_str) = '\0';
+        modstr[*len_str] = '\0';
     }
 }
 
@@ -862,20 +862,8 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
    if (dtp) TRACE("Params: iTabLength=%d, iLeftMargin=%d, iRightMargin=%d\n",
           dtp->iTabLength, dtp->iLeftMargin, dtp->iRightMargin);
 
-    if (!str || count == 0) return 0;
-    if (count == -1)
-    {
-        count = strlenW(str);
-        if (count == 0)
-        {
-            if( flags & DT_CALCRECT)
-            {
-                rect->right = rect->left;
-                rect->bottom = rect->top;
-            }
-            return 0;
-        }
-    }
+    if (!str) return 0;
+
     strPtr = str;
 
     if (flags & DT_SINGLELINE)
@@ -887,10 +875,33 @@ INT WINAPI DrawTextExW( HDC hdc, LPWSTR str, INT i_count,
     else
 	lh = tm.tmHeight;
 
+    if (str[0] && count == 0)
+        return lh;
+
+    if (dtp && dtp->cbSize != sizeof(DRAWTEXTPARAMS))
+        return 0;
+
+    if (count == -1)
+    {
+        count = strlenW(str);
+        if (count == 0)
+        {
+            if( flags & DT_CALCRECT)
+            {
+                rect->right = rect->left;
+                if( flags & DT_SINGLELINE)
+                    rect->bottom = rect->top + lh;
+                else
+                    rect->bottom = rect->top;
+            }
+            return lh;
+        }
+    }
+
     if (dtp)
     {
-        lmargin = dtp->iLeftMargin * tm.tmAveCharWidth;
-        rmargin = dtp->iRightMargin * tm.tmAveCharWidth;
+        lmargin = dtp->iLeftMargin;
+        rmargin = dtp->iRightMargin;
         if (!(flags & (DT_CENTER | DT_RIGHT)))
             x += lmargin;
         dtp->uiLengthDrawn = 0;     /* This param RECEIVES number of chars processed */
@@ -1031,14 +1042,30 @@ INT WINAPI DrawTextExA( HDC hdc, LPSTR str, INT count,
    UINT cp;
 
    if (!count) return 0;
+   if (!str && count > 0) return 0;
    if( !str || ((count == -1) && !(count = strlen(str))))
    {
+        int lh;
+        TEXTMETRICA tm;
+
+        if (dtp && dtp->cbSize != sizeof(DRAWTEXTPARAMS))
+            return 0;
+
+        GetTextMetricsA(hdc, &tm);
+        if (flags & DT_EXTERNALLEADING)
+            lh = tm.tmHeight + tm.tmExternalLeading;
+        else
+            lh = tm.tmHeight;
+
         if( flags & DT_CALCRECT)
         {
             rect->right = rect->left;
-            rect->bottom = rect->top;
+            if( flags & DT_SINGLELINE)
+                rect->bottom = rect->top + lh;
+            else
+                rect->bottom = rect->top;
         }
-        return 0;
+        return lh;
    }
    cp = GdiGetCodePage( hdc );
    wcount = MultiByteToWideChar( cp, 0, str, count, NULL, 0 );
@@ -1081,6 +1108,7 @@ INT WINAPI DrawTextW( HDC hdc, LPCWSTR str, INT count, LPRECT rect, UINT flags )
     DRAWTEXTPARAMS dtp;
 
     memset (&dtp, 0, sizeof(dtp));
+    dtp.cbSize = sizeof(dtp);
     if (flags & DT_TABSTOP)
     {
         dtp.iTabLength = (flags >> 8) & 0xff;
@@ -1097,6 +1125,7 @@ INT WINAPI DrawTextA( HDC hdc, LPCSTR str, INT count, LPRECT rect, UINT flags )
     DRAWTEXTPARAMS dtp;
 
     memset (&dtp, 0, sizeof(dtp));
+    dtp.cbSize = sizeof(dtp);
     if (flags & DT_TABSTOP)
     {
         dtp.iTabLength = (flags >> 8) & 0xff;
@@ -1140,13 +1169,13 @@ static BOOL TEXT_GrayString(HDC hdc, HBRUSH hb, GRAYSTRINGPROC fn, LPARAM lp, IN
     if (!(memdc = CreateCompatibleDC(hdc))) return FALSE;
 
     hbm = CreateBitmap(cx, cy, 1, 1, NULL);
-    hbmsave = (HBITMAP)SelectObject(memdc, hbm);
+    hbmsave = SelectObject(memdc, hbm);
     hbsave = SelectObject( memdc, GetStockObject(BLACK_BRUSH) );
     PatBlt( memdc, 0, 0, cx, cy, PATCOPY );
     SelectObject( memdc, hbsave );
     SetTextColor(memdc, RGB(255, 255, 255));
     SetBkColor(memdc, RGB(0, 0, 0));
-    hfsave = (HFONT)SelectObject(memdc, GetCurrentObject(hdc, OBJ_FONT));
+    hfsave = SelectObject(memdc, GetCurrentObject(hdc, OBJ_FONT));
 
     retval = fn(memdc, lp, slen);
     SelectObject(memdc, hfsave);
@@ -1160,12 +1189,12 @@ static BOOL TEXT_GrayString(HDC hdc, HBRUSH hb, GRAYSTRINGPROC fn, LPARAM lp, IN
     if(retval || len != -1)
 #endif
     {
-        hbsave = (HBRUSH)SelectObject(memdc, SYSCOLOR_55AABrush);
+        hbsave = SelectObject(memdc, SYSCOLOR_55AABrush);
         PatBlt(memdc, 0, 0, cx, cy, 0x000A0329);
         SelectObject(memdc, hbsave);
     }
 
-    if(hb) hbsave = (HBRUSH)SelectObject(hdc, hb);
+    if(hb) hbsave = SelectObject(hdc, hb);
     fg = SetTextColor(hdc, RGB(0, 0, 0));
     bg = SetBkColor(hdc, RGB(255, 255, 255));
     BitBlt(hdc, x, y, cx, cy, memdc, 0, 0, 0x00E20746);

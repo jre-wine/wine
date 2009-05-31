@@ -89,7 +89,8 @@ typedef enum _sign_direction {
 } SignDirection;
 
 /* Allocates space for and initializes a new provider.  If fnTableA or fnTableW
- * is non-NULL, assumes the provider is built-in (and is thus already loaded.)
+ * is non-NULL, assumes the provider is built-in, and if moduleName is non-NULL,
+ * means must load the LSA/user mode functions tables from external SSP/AP module.
  * Otherwise moduleName must not be NULL.
  * Returns a pointer to the stored provider entry, for use adding packages.
  */
@@ -114,7 +115,6 @@ SecurePackage *SECUR32_findPackageA(PCSTR packageName);
 
 /* A few string helpers; will return NULL if str is NULL.  Free return with
  * HeapFree */
-PWSTR SECUR32_strdupW(PCWSTR str);
 PWSTR SECUR32_AllocWideFromMultiByte(PCSTR str);
 PSTR  SECUR32_AllocMultiByteFromWide(PCWSTR str);
 
@@ -122,6 +122,9 @@ PSTR  SECUR32_AllocMultiByteFromWide(PCWSTR str);
 void SECUR32_initSchannelSP(void);
 void SECUR32_initNegotiateSP(void);
 void SECUR32_initNTLMSP(void);
+
+/* Cleanup functions for built-in providers */
+void SECUR32_deinitSchannelSP(void);
 
 /* Functions from dispatcher.c used elsewhere in the code */
 SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,

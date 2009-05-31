@@ -68,6 +68,8 @@
 @ stdcall ConfigurePortA(str long str)
 @ stdcall ConfigurePortW(wstr long wstr)
 @ stdcall ConnectToPrinterDlg(long long)
+@ stub ConvertAnsiDevModeToUnicodeDevMode
+@ stub ConvertUnicodeDevModeToAnsiDevMode
 @ stub CreatePrinterIC
 @ stub DEVICECAPABILITIES
 @ stub DEVICEMODE
@@ -94,7 +96,7 @@
 @ stub DevQueryPrint
 @ stdcall DeviceCapabilities(str str long ptr ptr) DeviceCapabilitiesA
 @ stdcall DeviceCapabilitiesA(str str long ptr ptr)
-@ stdcall DeviceCapabilitiesW(wstr wstr long wstr ptr)
+@ stdcall DeviceCapabilitiesW(wstr wstr long ptr ptr)
 @ stub DeviceMode
 @ stub DocumentEvent
 @ stdcall DocumentPropertiesA(long long ptr ptr ptr long)
@@ -165,7 +167,7 @@
 @ stdcall SetPrinterDataW(long wstr long ptr long)
 @ stdcall SetPrinterW(long long ptr long)
 @ stub SpoolerDevQueryPrintW
-@ stub SpoolerInit
+@ stdcall SpoolerInit()
 @ stub SpoolerPrinterEvent
 @ stdcall StartDocDlgA(ptr ptr)
 @ stdcall StartDocDlgW(ptr ptr)

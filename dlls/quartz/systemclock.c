@@ -89,7 +89,7 @@ static void QUARTZ_InsertAviseEntryFromQueue(SystemClockImpl* This, SystemClockA
 #define ADVISE_ADD_PERIODIC    (WM_APP + 8)
 
 static DWORD WINAPI SystemClockAdviseThread(LPVOID lpParam) {
-  SystemClockImpl* This = (SystemClockImpl*) lpParam;
+  SystemClockImpl* This = lpParam;
   DWORD timeOut = INFINITE;
   DWORD tmpTimeOut;
   MSG msg;
@@ -113,7 +113,7 @@ static DWORD WINAPI SystemClockAdviseThread(LPVOID lpParam) {
     /** First SingleShots Advice: sorted list */
     for (it = This->pSingleShotAdvise; NULL != it && (it->rtBaseTime + it->rtIntervalTime) <= curTime; it = it->next) {
       /** send event ... */
-      SetEvent((HANDLE) it->hEvent);
+      SetEvent(it->hEvent);
       /** ... and Release it */
       QUARTZ_RemoveAviseEntryFromQueue(This, it);
       CoTaskMemFree(it);
@@ -125,7 +125,7 @@ static DWORD WINAPI SystemClockAdviseThread(LPVOID lpParam) {
       if (it->rtBaseTime <= curTime) {
 	DWORD nPeriods = (DWORD) ((curTime - it->rtBaseTime) / it->rtIntervalTime);
 	/** Release the semaphore ... */
-	ReleaseSemaphore((HANDLE) it->hEvent, nPeriods, NULL);
+	ReleaseSemaphore(it->hEvent, nPeriods, NULL);
 	/** ... and refresh time */
 	it->rtBaseTime += nPeriods * it->rtIntervalTime;
 	/*assert( it->rtBaseTime + it->rtIntervalTime < curTime );*/
@@ -260,7 +260,7 @@ static HRESULT WINAPI SystemClockImpl_AdviseTime(IReferenceClock* iface, REFEREN
   TRACE("(%p, 0x%s, 0x%s, %ld, %p)\n", This, wine_dbgstr_longlong(rtBaseTime),
       wine_dbgstr_longlong(rtStreamTime), hEvent, pdwAdviseCookie);
 
-  if ((HEVENT) 0 == hEvent) {
+  if (!hEvent) {
     return E_INVALIDARG;
   }
   if (0 >= rtBaseTime + rtStreamTime) {
@@ -296,7 +296,7 @@ static HRESULT WINAPI SystemClockImpl_AdvisePeriodic(IReferenceClock* iface, REF
   TRACE("(%p, 0x%s, 0x%s, %ld, %p)\n", This, wine_dbgstr_longlong(rtStartTime),
       wine_dbgstr_longlong(rtPeriodTime), hSemaphore, pdwAdviseCookie);
 
-  if ((HSEMAPHORE) 0 == hSemaphore) {
+  if (!hSemaphore) {
     return E_INVALIDARG;
   }
   if (0 >= rtStartTime || 0 >= rtPeriodTime) {

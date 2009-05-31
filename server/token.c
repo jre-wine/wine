@@ -90,7 +90,7 @@ struct token
     unsigned       primary;         /* is this a primary or impersonation token? */
     ACL           *default_dacl;    /* the default DACL to assign to objects created by this user */
     TOKEN_SOURCE   source;          /* source of the token */
-    SECURITY_IMPERSONATION_LEVEL impersonation_level; /* impersonation level this token is capable of if non-primary token */
+    int            impersonation_level; /* impersonation level this token is capable of if non-primary token */
 };
 
 struct privilege
@@ -421,7 +421,7 @@ static struct token *create_token( unsigned primary, const SID *user,
                                    const LUID_AND_ATTRIBUTES *privs, unsigned int priv_count,
                                    const ACL *default_dacl, TOKEN_SOURCE source,
                                    const luid_t *modified_id,
-                                   SECURITY_IMPERSONATION_LEVEL impersonation_level )
+                                   int impersonation_level )
 {
     struct token *token = alloc_object( &token_ops );
     if (token)
@@ -466,7 +466,7 @@ static struct token *create_token( unsigned primary, const SID *user,
             memcpy( &group->sid, groups[i].Sid, FIELD_OFFSET( SID, SubAuthority[((const SID *)groups[i].Sid)->SubAuthorityCount] ) );
             group->enabled = TRUE;
             group->def = TRUE;
-            group->logon = FALSE;
+            group->logon = (groups[i].Attributes & SE_GROUP_LOGON_ID) ? TRUE : FALSE;
             group->mandatory = (groups[i].Attributes & SE_GROUP_MANDATORY) ? TRUE : FALSE;
             group->owner = groups[i].Attributes & SE_GROUP_OWNER ? TRUE : FALSE;
             group->resource = FALSE;
@@ -506,7 +506,7 @@ static struct token *create_token( unsigned primary, const SID *user,
 }
 
 struct token *token_duplicate( struct token *src_token, unsigned primary,
-                               SECURITY_IMPERSONATION_LEVEL impersonation_level )
+                               int impersonation_level )
 {
     const luid_t *modified_id =
         primary || (impersonation_level == src_token->impersonation_level) ?
@@ -515,20 +515,19 @@ struct token *token_duplicate( struct token *src_token, unsigned primary,
     struct privilege *privilege;
     struct group *group;
 
-    if ((impersonation_level < SecurityAnonymous) ||
-        (impersonation_level > SecurityDelegation))
+    if (!primary &&
+        (impersonation_level < SecurityAnonymous ||
+         impersonation_level > SecurityDelegation ||
+         (!src_token->primary && (impersonation_level > src_token->impersonation_level))))
     {
         set_error( STATUS_BAD_IMPERSONATION_LEVEL );
         return NULL;
     }
 
-    if (primary || (impersonation_level <= src_token->impersonation_level))
-        token = create_token( primary, src_token->user, NULL, 0,
-                              NULL, 0, src_token->default_dacl,
-                              src_token->source, modified_id,
-                              impersonation_level );
-    else set_error( STATUS_BAD_IMPERSONATION_LEVEL );
-
+    token = create_token( primary, src_token->user, NULL, 0,
+                          NULL, 0, src_token->default_dacl,
+                          src_token->source, modified_id,
+                          impersonation_level );
     if (!token) return token;
 
     /* copy groups */
@@ -1013,7 +1012,7 @@ DECL_HANDLER(open_token)
         {
             if (thread->token)
             {
-                if (thread->token->impersonation_level <= SecurityAnonymous)
+                if (!thread->token->primary && thread->token->impersonation_level <= SecurityAnonymous)
                     set_error( STATUS_CANT_OPEN_ANONYMOUS );
                 else
                     reply->token = alloc_handle( current->process, thread->token,
@@ -1295,6 +1294,7 @@ DECL_HANDLER(get_token_groups)
                     if (group->owner) *attr_ptr |= SE_GROUP_OWNER;
                     if (group->deny_only) *attr_ptr |= SE_GROUP_USE_FOR_DENY_ONLY;
                     if (group->resource) *attr_ptr |= SE_GROUP_RESOURCE;
+                    if (group->logon) *attr_ptr |= SE_GROUP_LOGON_ID;
 
                     memcpy(sid_ptr, &group->sid, FIELD_OFFSET(SID, SubAuthority[group->sid.SubAuthorityCount]));
 
@@ -1340,6 +1340,52 @@ DECL_HANDLER(get_token_statistics)
         reply->impersonation_level = token->impersonation_level;
         reply->group_count = list_count( &token->groups );
         reply->privilege_count = list_count( &token->privileges );
+
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(get_token_default_dacl)
+{
+    struct token *token;
+
+    reply->acl_len = 0;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_QUERY,
+                                                 &token_ops )))
+    {
+        if (token->default_dacl)
+            reply->acl_len = token->default_dacl->AclSize;
+
+        if (reply->acl_len <= get_reply_max_size())
+        {
+            ACL *acl_reply = set_reply_data_size( reply->acl_len );
+            if (acl_reply)
+                memcpy( acl_reply, token->default_dacl, reply->acl_len );
+        }
+        else set_error( STATUS_BUFFER_TOO_SMALL );
+
+        release_object( token );
+    }
+}
+
+DECL_HANDLER(set_token_default_dacl)
+{
+    struct token *token;
+
+    if ((token = (struct token *)get_handle_obj( current->process, req->handle,
+                                                 TOKEN_ADJUST_DEFAULT,
+                                                 &token_ops )))
+    {
+        const ACL *acl = get_req_data();
+        unsigned int acl_size = get_req_data_size();
+
+        free( token->default_dacl );
+        token->default_dacl = NULL;
+
+        if (acl_size)
+            token->default_dacl = memdup( acl, acl_size );
 
         release_object( token );
     }

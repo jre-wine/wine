@@ -16,10 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
@@ -110,7 +107,7 @@ static HRESULT WINAPI ConnectionPoint_GetConnectionInterface(IConnectionPoint *i
     if(!pIID)
         return E_POINTER;
 
-    memcpy(pIID, This->iid, sizeof(IID));
+    *pIID = *This->iid;
     return S_OK;
 }
 
@@ -216,7 +213,7 @@ void ConnectionPoint_Init(ConnectionPoint *cp, ConnectionPointContainer *contain
 
 static void ConnectionPoint_Destroy(ConnectionPoint *This)
 {
-    int i;
+    DWORD i;
 
     for(i=0; i<This->sinks_size; i++) {
         if(This->sinks[i].unk)

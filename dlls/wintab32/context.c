@@ -114,7 +114,19 @@ static inline void DUMPPACKET(WTPACKET packet)
 
 static inline void DUMPCONTEXT(LOGCONTEXTW lc)
 {
-    TRACE("context: %s, %x, %x, %x, %x, %x, %x, %x%s, %x%s, %x%s, %x, %x, %i, %i, %i, %i ,%i, %i, %i, %i, %i,%i, %i, %i, %i, %i, %i, %i, %i, %i, %i, %i %i %i",
+    TRACE("Name: %s, Options: %x, Status: %x, Locks: %x, MsgBase: %x, "
+          "Device: %x, PktRate: %x, "
+          "%x%s, %x%s, %x%s, "
+          "BtnDnMask: %x, BtnUpMask: %x, "
+          "InOrgX: %i, InOrgY: %i, InOrgZ: %i, "
+          "InExtX: %i, InExtY: %i, InExtZ: %i, "
+          "OutOrgX: %i, OutOrgY: %i, OutOrgZ: %i, "
+          "OutExtX: %i, OutExtY: %i, OutExtZ: %i, "
+          "SensX: %i, SensY: %i, SensZ: %i, "
+          "SysMode: %i, "
+          "SysOrgX: %i, SysOrgY: %i, "
+          "SysExtX: %i, SysExtY: %i, "
+          "SysSensX: %i, SysSensY: %i\n",
           wine_dbgstr_w(lc.lcName), lc.lcOptions, lc.lcStatus, lc.lcLocks, lc.lcMsgBase,
           lc.lcDevice, lc.lcPktRate, lc.lcPktData, DUMPBITS(lc.lcPktData),
           lc.lcPktMode, DUMPBITS(lc.lcPktMode), lc.lcMoveMask,
@@ -157,28 +169,12 @@ int TABLET_PostTabletMessage(LPOPENCONTEXT newcontext, UINT msg, WPARAM wParam,
     return 0;
 }
 
-static inline DWORD ScaleForContext(DWORD In, DWORD InOrg, DWORD InExt, DWORD
-                                    OutOrg, DWORD OutExt)
+static inline DWORD ScaleForContext(DWORD In, LONG InOrg, LONG InExt, LONG OutOrg, LONG OutExt)
 {
     if (((InExt > 0 )&&(OutExt > 0)) || ((InExt<0) && (OutExt < 0)))
         return ((In - InOrg) * abs(OutExt) / abs(InExt)) + OutOrg;
     else
         return ((abs(InExt) - (In - InOrg))*abs(OutExt) / abs(InExt)) + OutOrg;
-}
-
-LPOPENCONTEXT FindOpenContext(HWND hwnd)
-{
-    LPOPENCONTEXT ptr;
-
-    EnterCriticalSection(&csTablet);
-    ptr = gOpenContexts;
-    while (ptr)
-    {
-        TRACE("Trying Context %p (%p %p)\n",ptr->handle,hwnd,ptr->hwndOwner);
-        if (ptr->hwndOwner == hwnd) break;
-    }
-    LeaveCriticalSection(&csTablet);
-    return ptr;
 }
 
 LPOPENCONTEXT AddPacketToContextQueue(LPWTPACKET packet, HWND hwnd)
@@ -219,6 +215,8 @@ LPOPENCONTEXT AddPacketToContextQueue(LPWTPACKET packet, HWND hwnd)
             /* flip the Y axis */
             if (ptr->context.lcOutExtY > 0)
                 packet->pkY = ptr->context.lcOutExtY - packet->pkY;
+            else if (ptr->context.lcOutExtY < 0)
+                packet->pkY = abs(ptr->context.lcOutExtY + packet->pkY);
 
             DUMPPACKET(*packet);
 
@@ -230,8 +228,7 @@ LPOPENCONTEXT AddPacketToContextQueue(LPWTPACKET packet, HWND hwnd)
             else
             {
                 TRACE("Placed in queue %p index %i\n",ptr->handle,tgt);
-                memcpy(&ptr->PacketQueue[tgt], packet, sizeof
-                        (WTPACKET));
+                ptr->PacketQueue[tgt] = *packet;
                 ptr->PacketsQueued++;
 
                 if (ptr->ActiveCursor != packet->pkCursor)
@@ -364,9 +361,11 @@ static VOID TABLET_BlankPacketData(LPOPENCONTEXT context, LPVOID lpPkt, INT n)
 }
 
 
-UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
+static UINT WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
 {
     UINT result;
+
+    TRACE("(%d, %d, %p, %d)\n", wCategory, nIndex, lpOutput, bUnicode);
     if (gLoaded == FALSE)
          LoadTablet();
 
@@ -409,7 +408,7 @@ UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
                 LOGCONTEXTWtoA(&buf, lpOutput);
         }
 
-        return bUnicode ? sizeof(LOGCONTEXTW) : sizeof(LOGCONTEXTA);
+        result = bUnicode ? sizeof(LOGCONTEXTW) : sizeof(LOGCONTEXTA);
     }
     else if (is_string_field(wCategory, nIndex) && !bUnicode)
     {
@@ -422,6 +421,7 @@ UINT WINAPI WTInfoT(UINT wCategory, UINT nIndex, LPVOID lpOutput, BOOL bUnicode)
     else
         result =  pWTInfoW(wCategory, nIndex, lpOutput);
 
+    TRACE("returns %d\n", result);
     return result;
 }
 
@@ -449,13 +449,12 @@ HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
 {
     LPOPENCONTEXT newcontext;
 
-    TRACE("(%p, %p, %u)\n", hWnd, lpLogCtx, fEnable);
+    TRACE("hWnd=%p, lpLogCtx=%p, fEnable=%u\n", hWnd, lpLogCtx, fEnable);
     DUMPCONTEXT(*lpLogCtx);
 
     newcontext = HeapAlloc(GetProcessHeap(), 0 , sizeof(OPENCONTEXT));
-    memcpy(&(newcontext->context),lpLogCtx,sizeof(LOGCONTEXTW));
+    newcontext->context = *lpLogCtx;
     newcontext->hwndOwner = hWnd;
-    newcontext->enabled = fEnable;
     newcontext->ActiveCursor = -1;
     newcontext->QueueSize = 10;
     newcontext->PacketsQueued = 0;
@@ -472,7 +471,17 @@ HCTX WINAPI WTOpenW(HWND hWnd, LPLOGCONTEXTW lpLogCtx, BOOL fEnable)
     TABLET_PostTabletMessage(newcontext, _WT_CTXOPEN(newcontext->context.lcMsgBase), (WPARAM)newcontext->handle,
                       newcontext->context.lcStatus, TRUE);
 
-    newcontext->context.lcStatus = CXS_ONTOP;
+    if (fEnable)
+    {
+        newcontext->enabled = TRUE;
+        /* TODO: Add to top of overlap order */
+        newcontext->context.lcStatus = CXS_ONTOP;
+    }
+    else
+    {
+        newcontext->enabled = FALSE;
+        newcontext->context.lcStatus = CXS_DISABLED;
+    }
 
     TABLET_PostTabletMessage(newcontext, _WT_CTXOVERLAP(newcontext->context.lcMsgBase),
                             (WPARAM)newcontext->handle,
@@ -627,15 +636,35 @@ BOOL WINAPI WTEnable(HCTX hCtx, BOOL fEnable)
 {
     LPOPENCONTEXT context;
 
-    TRACE("(%p, %u)\n", hCtx, fEnable);
+    TRACE("hCtx=%p, fEnable=%u\n", hCtx, fEnable);
 
-    if (!hCtx) return 0;
+    if (!hCtx) return FALSE;
 
     EnterCriticalSection(&csTablet);
     context = TABLET_FindOpenContext(hCtx);
-    if(!fEnable)
+    /* if we want to enable and it is not enabled then */
+    if(fEnable && !context->enabled)
+    {
+        context->enabled = TRUE;
+        /* TODO: Add to top of overlap order */
+        context->context.lcStatus = CXS_ONTOP;
+        TABLET_PostTabletMessage(context,
+            _WT_CTXOVERLAP(context->context.lcMsgBase),
+            (WPARAM)context->handle,
+            context->context.lcStatus, TRUE);
+    }
+    /* if we want to disable and it is not disabled then */
+    else if (!fEnable && context->enabled)
+    {
+        context->enabled = FALSE;
+        /* TODO: Remove from overlap order?? needs a test */
+        context->context.lcStatus = CXS_DISABLED;
         TABLET_FlushQueue(context);
-    context->enabled = fEnable;
+        TABLET_PostTabletMessage(context,
+            _WT_CTXOVERLAP(context->context.lcMsgBase),
+            (WPARAM)context->handle,
+            context->context.lcStatus, TRUE);
+    }
     LeaveCriticalSection(&csTablet);
 
     return TRUE;
@@ -643,10 +672,47 @@ BOOL WINAPI WTEnable(HCTX hCtx, BOOL fEnable)
 
 /***********************************************************************
  *		WTOverlap (WINTAB32.41)
+ *
+ *		Move context to top or bottom of overlap order
  */
 BOOL WINAPI WTOverlap(HCTX hCtx, BOOL fToTop)
 {
-    FIXME("(%p, %u): stub\n", hCtx, fToTop);
+    LPOPENCONTEXT context;
+
+    TRACE("hCtx=%p, fToTop=%u\n", hCtx, fToTop);
+
+    if (!hCtx) return FALSE;
+
+    EnterCriticalSection(&csTablet);
+    context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return FALSE;
+    }
+
+    /* if we want to send to top and it's not already there */
+    if (fToTop && context->context.lcStatus != CXS_ONTOP)
+    {
+        /* TODO: Move context to top of overlap order */
+        FIXME("Not moving context to top of overlap order\n");
+        context->context.lcStatus = CXS_ONTOP;
+        TABLET_PostTabletMessage(context,
+            _WT_CTXOVERLAP(context->context.lcMsgBase),
+            (WPARAM)context->handle,
+            context->context.lcStatus, TRUE);
+    }
+    else if (!fToTop)
+    {
+        /* TODO: Move context to bottom of overlap order */
+        FIXME("Not moving context to bottom of overlap order\n");
+        context->context.lcStatus = CXS_OBSCURED;
+        TABLET_PostTabletMessage(context,
+            _WT_CTXOVERLAP(context->context.lcMsgBase),
+            (WPARAM)context->handle,
+            context->context.lcStatus, TRUE);
+    }
+    LeaveCriticalSection(&csTablet);
 
     return TRUE;
 }
@@ -706,11 +772,27 @@ BOOL WINAPI WTGetW(HCTX hCtx, LPLOGCONTEXTW lpLogCtx)
  */
 BOOL WINAPI WTSetA(HCTX hCtx, LPLOGCONTEXTA lpLogCtx)
 {
-    FIXME("(%p, %p): stub\n", hCtx, lpLogCtx);
+    LPOPENCONTEXT context;
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    TRACE("hCtx=%p, lpLogCtx=%p\n", hCtx, lpLogCtx);
 
-    return FALSE;
+    if (!hCtx || !lpLogCtx) return FALSE;
+
+    /* TODO: if cur process not owner of hCtx only modify
+     * attribs not locked by owner */
+
+    EnterCriticalSection(&csTablet);
+    context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return FALSE;
+    }
+
+    LOGCONTEXTAtoW(lpLogCtx, &context->context);
+    LeaveCriticalSection(&csTablet);
+
+    return TRUE;
 }
 
 /***********************************************************************
@@ -718,11 +800,27 @@ BOOL WINAPI WTSetA(HCTX hCtx, LPLOGCONTEXTA lpLogCtx)
  */
 BOOL WINAPI WTSetW(HCTX hCtx, LPLOGCONTEXTW lpLogCtx)
 {
-    FIXME("(%p, %p): stub\n", hCtx, lpLogCtx);
+    LPOPENCONTEXT context;
 
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    TRACE("hCtx=%p, lpLogCtx=%p\n", hCtx, lpLogCtx);
 
-    return FALSE;
+    if (!hCtx || !lpLogCtx) return FALSE;
+
+    /* TODO: if cur process not hCtx owner only modify
+     * attribs not locked by owner */
+
+    EnterCriticalSection(&csTablet);
+    context = TABLET_FindOpenContext(hCtx);
+    if (!context)
+    {
+        LeaveCriticalSection(&csTablet);
+        return FALSE;
+    }
+
+    memmove(&context->context, lpLogCtx, sizeof(LOGCONTEXTW));
+    LeaveCriticalSection(&csTablet);
+
+    return TRUE;
 }
 
 /***********************************************************************

@@ -36,7 +36,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "thread.h"
 #include "kernel_private.h"
 
 #include "wine/exception.h"
@@ -362,7 +361,7 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
  *  FALSE, if the file is not an executable or if the function fails.
  *
  * NOTES
- *  The type of executable is a property that determines which subsytem an
+ *  The type of executable is a property that determines which subsystem an
  *  executable file runs under. lpBinaryType can be set to one of the following
  *  values:
  *   SCS_32BIT_BINARY: A Win32 based application
@@ -609,7 +608,10 @@ DWORD WINAPI GetModuleFileNameA(
     if ((len = GetModuleFileNameW( hModule, filenameW, size )))
     {
     	len = FILE_name_WtoA( filenameW, len, lpFileName, size );
-        if (len < size) lpFileName[len] = '\0';
+        if (len < size)
+            lpFileName[len] = '\0';
+        else
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
     }
     HeapFree( GetProcessHeap(), 0, filenameW );
     return len;
@@ -643,7 +645,10 @@ DWORD WINAPI GetModuleFileNameW( HMODULE hModule, LPWSTR lpFileName, DWORD size 
     {
         len = min(size, pldr->FullDllName.Length / sizeof(WCHAR));
         memcpy(lpFileName, pldr->FullDllName.Buffer, len * sizeof(WCHAR));
-        if (len < size) lpFileName[len] = '\0';
+        if (len < size)
+            lpFileName[len] = '\0';
+        else
+            SetLastError( ERROR_INSUFFICIENT_BUFFER );
     }
     else SetLastError( RtlNtStatusToDosError( nts ) );
 
@@ -916,6 +921,12 @@ HMODULE WINAPI LoadLibraryExW(LPCWSTR libnameW, HANDLE hfile, DWORD flags)
 {
     UNICODE_STRING      wstr;
     HMODULE             res;
+
+    if (hfile)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
 
     if (!libnameW)
     {

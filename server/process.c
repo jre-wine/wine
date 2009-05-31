@@ -53,7 +53,9 @@
 
 static struct list process_list = LIST_INIT(process_list);
 static int running_processes, user_processes;
-static struct event *user_process_event;  /* signaled when all user processes have exited */
+static struct event *shutdown_event;           /* signaled when shutdown starts */
+static struct timeout_user *shutdown_timeout;  /* timeout for server shutdown */
+static int shutdown_stage;  /* current stage in the shutdown process */
 
 /* process operations */
 
@@ -146,6 +148,8 @@ static unsigned int alloc_ptid_entries;     /* number of allocated entries */
 static unsigned int next_free_ptid;         /* next free entry */
 static unsigned int last_free_ptid;         /* last free entry */
 
+static void kill_all_processes(void);
+
 #define PTID_OFFSET 8  /* offset for first ptid value */
 
 /* allocate a new process or thread id */
@@ -227,17 +231,53 @@ static void set_process_startup_state( struct process *process, enum startup_sta
     }
 }
 
+/* callback for server shutdown */
+static void server_shutdown_timeout( void *arg )
+{
+    shutdown_timeout = NULL;
+    if (!running_processes)
+    {
+        close_master_socket( 0 );
+        return;
+    }
+    switch(++shutdown_stage)
+    {
+    case 1:  /* signal system processes to exit */
+        if (debug_level) fprintf( stderr, "wineserver: shutting down\n" );
+        if (shutdown_event) set_event( shutdown_event );
+        shutdown_timeout = add_timeout_user( 2 * -TICKS_PER_SEC, server_shutdown_timeout, NULL );
+        close_master_socket( 4 * -TICKS_PER_SEC );
+        break;
+    case 2:  /* now forcibly kill all processes (but still wait for SIGKILL timeouts) */
+        kill_all_processes();
+        break;
+    }
+}
+
+/* forced shutdown, used for wineserver -k */
+void shutdown_master_socket(void)
+{
+    kill_all_processes();
+    shutdown_stage = 2;
+    if (shutdown_timeout)
+    {
+        remove_timeout_user( shutdown_timeout );
+        shutdown_timeout = NULL;
+    }
+    close_master_socket( 2 * -TICKS_PER_SEC );  /* for SIGKILL timeouts */
+}
+
 /* final cleanup once we are sure a process is really dead */
 static void process_died( struct process *process )
 {
     if (debug_level) fprintf( stderr, "%04x: *process killed*\n", process->id );
     if (!process->is_system)
     {
-        if (!--user_processes && user_process_event)
-            set_event( user_process_event );
+        if (!--user_processes && !shutdown_stage && master_socket_timeout != TIMEOUT_INFINITE)
+            shutdown_timeout = add_timeout_user( master_socket_timeout, server_shutdown_timeout, NULL );
     }
     release_object( process );
-    if (!--running_processes) close_master_socket();
+    if (!--running_processes && shutdown_stage) close_master_socket( 0 );
 }
 
 /* callback for process sigkill timeout */
@@ -282,7 +322,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->exit_code       = STILL_ACTIVE;
     process->running_threads = 0;
     process->priority        = PROCESS_PRIOCLASS_NORMAL;
-    process->affinity        = 1;
+    process->affinity        = ~0;
     process->suspend         = 0;
     process->is_system       = 0;
     process->create_flags    = 0;
@@ -291,8 +331,8 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->startup_info    = NULL;
     process->idle_event      = NULL;
     process->queue           = NULL;
-    process->peb             = NULL;
-    process->ldt_copy        = NULL;
+    process->peb             = 0;
+    process->ldt_copy        = 0;
     process->winstation      = 0;
     process->desktop         = 0;
     process->token           = NULL;
@@ -304,7 +344,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
 
     process->start_time = current_time;
     process->end_time = 0;
-    list_add_head( &process_list, &process->entry );
+    list_add_tail( &process_list, &process->entry );
 
     if (!(process->id = process->group_id = alloc_ptid( process )))
     {
@@ -337,7 +377,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
         file_set_error();
         goto error;
     }
-    if (send_client_fd( process, request_pipe[1], 0 ) == -1)
+    if (send_client_fd( process, request_pipe[1], SERVER_PROTOCOL_VERSION ) == -1)
     {
         close( request_pipe[0] );
         close( request_pipe[1] );
@@ -353,7 +393,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
  error:
     if (process) release_object( process );
     /* if we failed to start our first process, close everything down */
-    if (!running_processes) close_master_socket();
+    if (!running_processes) close_master_socket( 0 );
     return NULL;
 }
 
@@ -419,18 +459,7 @@ static void process_poll_event( struct fd *fd, int event )
     struct process *process = get_fd_user( fd );
     assert( process->obj.ops == &process_ops );
 
-    if (event & (POLLERR | POLLHUP))
-    {
-        release_object( process->msg_fd );
-        process->msg_fd = NULL;
-        if (process->sigkill_timeout)  /* already waiting for it to die */
-        {
-            remove_timeout_user( process->sigkill_timeout );
-            process->sigkill_timeout = NULL;
-            process_died( process );
-        }
-        else kill_process( process, 0 );
-    }
+    if (event & (POLLERR | POLLHUP)) kill_process( process, 0 );
     else if (event & POLLIN) receive_fd( process );
 }
 
@@ -448,7 +477,7 @@ static void startup_info_dump( struct object *obj, int verbose )
     struct startup_info *info = (struct startup_info *)obj;
     assert( obj->ops == &startup_info_ops );
 
-    fprintf( stderr, "Startup info in=%p out=%p err=%p\n",
+    fprintf( stderr, "Startup info in=%04x out=%04x err=%04x\n",
              info->hstdin, info->hstdout, info->hstderr );
 }
 
@@ -476,7 +505,7 @@ struct process *get_process_from_handle( obj_handle_t handle, unsigned int acces
 }
 
 /* find a dll from its base address */
-static inline struct process_dll *find_process_dll( struct process *process, void *base )
+static inline struct process_dll *find_process_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll;
 
@@ -489,7 +518,8 @@ static inline struct process_dll *find_process_dll( struct process *process, voi
 
 /* add a dll to a process list */
 static struct process_dll *process_load_dll( struct process *process, struct file *file,
-                                             void *base, const WCHAR *filename, data_size_t name_len )
+                                             mod_handle_t base, const WCHAR *filename,
+                                             data_size_t name_len )
 {
     struct process_dll *dll;
 
@@ -518,7 +548,7 @@ static struct process_dll *process_load_dll( struct process *process, struct fil
 }
 
 /* remove a dll from a process list */
-static void process_unload_dll( struct process *process, void *base )
+static void process_unload_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll = find_process_dll( process, base );
 
@@ -528,7 +558,7 @@ static void process_unload_dll( struct process *process, void *base )
         free( dll->filename );
         list_remove( &dll->entry );
         free( dll );
-        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, base );
+        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, &base );
     }
     else set_error( STATUS_INVALID_PARAMETER );
 }
@@ -558,7 +588,7 @@ static void terminate_process( struct process *process, struct thread *skip, int
 }
 
 /* kill all processes */
-void kill_all_processes( struct process *skip, int exit_code )
+static void kill_all_processes(void)
 {
     for (;;)
     {
@@ -566,11 +596,10 @@ void kill_all_processes( struct process *skip, int exit_code )
 
         LIST_FOR_EACH_ENTRY( process, &process_list, struct process, entry )
         {
-            if (process == skip) continue;
             if (process->running_threads) break;
         }
         if (&process->entry == &process_list) break;  /* no process found */
-        terminate_process( process, NULL, exit_code );
+        terminate_process( process, NULL, 1 );
     }
 }
 
@@ -634,8 +663,11 @@ void add_process_thread( struct process *process, struct thread *thread )
         running_processes++;
         if (!process->is_system)
         {
-            if (!user_processes++ && user_process_event)
-                reset_event( user_process_event );
+            if (!user_processes++ && shutdown_timeout)
+            {
+                remove_timeout_user( shutdown_timeout );
+                shutdown_timeout = NULL;
+            }
         }
     }
     grab_object( thread );
@@ -694,6 +726,20 @@ void resume_process( struct process *process )
 /* kill a process on the spot */
 void kill_process( struct process *process, int violent_death )
 {
+    if (!violent_death && process->msg_fd)  /* normal termination on pipe close */
+    {
+        release_object( process->msg_fd );
+        process->msg_fd = NULL;
+    }
+
+    if (process->sigkill_timeout)  /* already waiting for it to die */
+    {
+        remove_timeout_user( process->sigkill_timeout );
+        process->sigkill_timeout = NULL;
+        process_died( process );
+        return;
+    }
+
     if (violent_death) terminate_process( process, NULL, 1 );
     else
     {
@@ -783,7 +829,7 @@ int set_process_debug_flag( struct process *process, int flag )
     char data = (flag != 0);
 
     /* BeingDebugged flag is the byte at offset 2 in the PEB */
-    return write_process_memory( process, (char *)process->peb + 2, 1, &data );
+    return write_process_memory( process, process->peb + 2, 1, &data );
 }
 
 /* take a snapshot of currently running processes */
@@ -816,30 +862,6 @@ struct process_snapshot *process_snap( int *count )
     return snapshot;
 }
 
-/* take a snapshot of the modules of a process */
-struct module_snapshot *module_snap( struct process *process, int *count )
-{
-    struct module_snapshot *snapshot, *ptr;
-    struct process_dll *dll;
-    int total = 0;
-
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry ) total++;
-    if (!(snapshot = mem_alloc( sizeof(*snapshot) * total ))) return NULL;
-
-    ptr = snapshot;
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry )
-    {
-        ptr->base     = dll->base;
-        ptr->size     = dll->size;
-        ptr->namelen  = dll->namelen;
-        ptr->filename = memdup( dll->filename, dll->namelen );
-        ptr++;
-    }
-    *count = total;
-    return snapshot;
-}
-
-
 /* create a new process */
 DECL_HANDLER(new_process)
 {
@@ -857,6 +879,12 @@ DECL_HANDLER(new_process)
     if (fcntl( socket_fd, F_SETFL, O_NONBLOCK ) == -1)
     {
         set_error( STATUS_INVALID_HANDLE );
+        close( socket_fd );
+        return;
+    }
+    if (shutdown_stage)
+    {
+        set_error( STATUS_SHUTDOWN_IN_PROGRESS );
         close( socket_fd );
         return;
     }
@@ -990,6 +1018,8 @@ DECL_HANDLER(init_process_done)
     list_remove( &dll->entry );
     list_add_head( &process->dlls, &dll->entry );
 
+    process->ldt_copy = req->ldt_copy;
+
     generate_startup_debug_events( process, req->entry );
     set_process_startup_state( process, STARTUP_DONE );
 
@@ -1050,11 +1080,7 @@ DECL_HANDLER(set_process_info)
     if ((process = get_process_from_handle( req->handle, PROCESS_SET_INFORMATION )))
     {
         if (req->mask & SET_PROCESS_INFO_PRIORITY) process->priority = req->priority;
-        if (req->mask & SET_PROCESS_INFO_AFFINITY)
-        {
-            if (req->affinity != 1) set_error( STATUS_INVALID_PARAMETER );
-            else process->affinity = req->affinity;
-        }
+        if (req->mask & SET_PROCESS_INFO_AFFINITY) process->affinity = req->affinity;
         release_object( process );
     }
 }
@@ -1142,7 +1168,7 @@ DECL_HANDLER(get_dll_info)
         if (dll)
         {
             reply->size = dll->size;
-            reply->entry_point = NULL; /* FIXME */
+            reply->entry_point = 0; /* FIXME */
             reply->filename_len = dll->namelen;
             if (dll->filename)
             {
@@ -1179,19 +1205,20 @@ DECL_HANDLER(make_process_system)
 {
     struct process *process = current->process;
 
-    if (!user_process_event)
+    if (!shutdown_event)
     {
-        if (!(user_process_event = create_event( NULL, NULL, 0, 1, 0, NULL ))) return;
-        make_object_static( (struct object *)user_process_event );
+        if (!(shutdown_event = create_event( NULL, NULL, 0, 1, 0, NULL ))) return;
+        make_object_static( (struct object *)shutdown_event );
     }
 
-    if (!(reply->event = alloc_handle( current->process, user_process_event, SYNCHRONIZE, 0 )))
+    if (!(reply->event = alloc_handle( current->process, shutdown_event, SYNCHRONIZE, 0 )))
         return;
 
     if (!process->is_system)
     {
         process->is_system = 1;
         close_process_desktop( process );
-        if (!--user_processes) set_event( user_process_event );
+        if (!--user_processes && !shutdown_stage && master_socket_timeout != TIMEOUT_INFINITE)
+            shutdown_timeout = add_timeout_user( master_socket_timeout, server_shutdown_timeout, NULL );
     }
 }

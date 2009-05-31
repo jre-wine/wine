@@ -2,13 +2,14 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = libwinecrt0.a
+MODULE    = winecrt0
 
 C_SRCS = \
 	delay_load.c \
 	dll_entry.c \
 	dll_main.c \
 	drv_entry.c \
+	exe16_entry.c \
 	exe_entry.c \
 	exe_main.c \
 	exe_wentry.c \

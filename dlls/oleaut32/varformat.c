@@ -1,6 +1,7 @@
 /*
  * Variant formatting functions
  *
+ * Copyright 2008 Damjan Jovanovic
  * Copyright 2003 Jon Griffiths
  *
  * This library is free software; you can redistribute it and/or
@@ -151,7 +152,7 @@ static const WCHAR szPercentZeroStar_d[] = { '%','0','*','d','\0' };
  * Common format definitions
  */
 
- /* Fomat types */
+ /* Format types */
 #define FMT_TYPE_UNKNOWN 0x0
 #define FMT_TYPE_GENERAL 0x1
 #define FMT_TYPE_NUMBER  0x2
@@ -284,7 +285,7 @@ typedef struct tagFMT_DATE_HEADER
 #define FMT_STR_COPY_SPACE  0x40 /* Copy len chars with space if no char */
 #define FMT_STR_COPY_SKIP   0x41 /* Copy len chars or skip if no char */
 /* Wine additions */
-#define FMT_WINE_HOURS_12   0x81 /* Hours using 12 hour clockhourCopy len chars or skip if no char */
+#define FMT_WINE_HOURS_12   0x81 /* Hours using 12 hour clock */
 
 /* Named Formats and their tokenised values */
 static const WCHAR szGeneralDate[] = { 'G','e','n','e','r','a','l',' ','D','a','t','e','\0' };
@@ -461,7 +462,7 @@ static inline const BYTE *VARIANT_GetNamedFormat(LPCWSTR lpszFormat)
   LPCNAMED_FORMAT fmt;
 
   key.name = lpszFormat;
-  fmt = (LPCNAMED_FORMAT)bsearch(&key, VARIANT_NamedFormats,
+  fmt = bsearch(&key, VARIANT_NamedFormats,
                                  sizeof(VARIANT_NamedFormats)/sizeof(NAMED_FORMAT),
                                  sizeof(NAMED_FORMAT), FormatCompareFn);
   return fmt ? fmt->format : NULL;
@@ -522,7 +523,6 @@ HRESULT WINAPI VarTokenizeFormatString(LPOLESTR lpszFormat, LPBYTE rgbTok,
   FMT_HEADER *header = (FMT_HEADER*)rgbTok;
   FMT_STRING_HEADER *str_header = (FMT_STRING_HEADER*)(rgbTok + sizeof(FMT_HEADER));
   FMT_NUMBER_HEADER *num_header = (FMT_NUMBER_HEADER*)str_header;
-  FMT_DATE_HEADER *date_header = (FMT_DATE_HEADER*)str_header;
   BYTE* pOut = rgbTok + sizeof(FMT_HEADER) + sizeof(FMT_STRING_HEADER);
   BYTE* pLastHours = NULL;
   BYTE fmt_number = 0;
@@ -591,7 +591,6 @@ HRESULT WINAPI VarTokenizeFormatString(LPOLESTR lpszFormat, LPBYTE rgbTok,
         header->starts[fmt_number] = pOut - rgbTok;
         str_header = (FMT_STRING_HEADER*)pOut;
         num_header = (FMT_NUMBER_HEADER*)pOut;
-        date_header = (FMT_DATE_HEADER*)pOut;
         memset(str_header, 0, sizeof(FMT_STRING_HEADER));
         pOut += sizeof(FMT_STRING_HEADER);
         fmt_state = 0;
@@ -967,7 +966,7 @@ HRESULT WINAPI VarTokenizeFormatString(LPOLESTR lpszFormat, LPBYTE rgbTok,
       }
       fmt_state &= ~FMT_STATE_OPEN_COPY;
     }
-    else if ((*pFormat == 'q' || *pFormat == 'q') && COULD_BE(FMT_TYPE_DATE))
+    else if ((*pFormat == 'q' || *pFormat == 'Q') && COULD_BE(FMT_TYPE_DATE))
     {
       /* Date formats: Quarter specifier
        * Other formats: Literal
@@ -1183,6 +1182,7 @@ HRESULT WINAPI VarTokenizeFormatString(LPOLESTR lpszFormat, LPBYTE rgbTok,
 /* Number formatting state flags */
 #define NUM_WROTE_DEC  0x01 /* Written the decimal separator */
 #define NUM_WRITE_ON   0x02 /* Started to write the number */
+#define NUM_WROTE_SIGN 0x04 /* Written the negative sign */
 
 /* Format a variant using a number format */
 static HRESULT VARIANT_FormatNumber(LPVARIANT pVarIn, LPOLESTR lpszFormat,
@@ -1193,6 +1193,7 @@ static HRESULT VARIANT_FormatNumber(LPVARIANT pVarIn, LPOLESTR lpszFormat,
   NUMPARSE np;
   int have_int, need_int = 0, have_frac, need_frac, exponent = 0, pad = 0;
   WCHAR buff[256], *pBuff = buff;
+  WCHAR thousandSeparator[32];
   VARIANT vString, vBool;
   DWORD dwState = 0;
   FMT_HEADER *header = (FMT_HEADER*)rgbTok;
@@ -1315,6 +1316,16 @@ static HRESULT VARIANT_FormatNumber(LPVARIANT pVarIn, LPOLESTR lpszFormat,
           have_int, need_int, have_frac, need_frac, pad, exponent);
   }
 
+  if (numHeader->flags & FMT_FLAG_THOUSANDS)
+  {
+    if (!GetLocaleInfoW(lcid, LOCALE_STHOUSAND, thousandSeparator,
+                        sizeof(thousandSeparator)/sizeof(WCHAR)))
+    {
+      thousandSeparator[0] = ',';
+      thousandSeparator[1] = 0;
+    }
+  }
+
   pToken = (const BYTE*)numHeader + sizeof(FMT_NUMBER_HEADER);
   prgbDig = rgbDig;
 
@@ -1322,6 +1333,7 @@ static HRESULT VARIANT_FormatNumber(LPVARIANT pVarIn, LPOLESTR lpszFormat,
   {
     WCHAR defaultChar = '?';
     DWORD boolFlag, localeValue = 0;
+    BOOL shouldAdvance = TRUE;
 
     if (pToken - rgbTok > header->size)
     {
@@ -1379,6 +1391,16 @@ VARIANT_FormatNumber_Bool:
       break;
 
     case FMT_NUM_DECIMAL:
+      if ((np.dwOutFlags & NUMPRS_NEG) && !(dwState & NUM_WROTE_SIGN) && !header->starts[1])
+      {
+        /* last chance for a negative sign in the .# case */
+        TRACE("write negative sign\n");
+        localeValue = LOCALE_SNEGATIVESIGN;
+        defaultChar = '-';
+        dwState |= NUM_WROTE_SIGN;
+        shouldAdvance = FALSE;
+        break;
+      }
       TRACE("write decimal separator\n");
       localeValue = LOCALE_SDECIMAL;
       defaultChar = '.';
@@ -1452,8 +1474,21 @@ VARIANT_FormatNumber_Bool:
       }
       else
       {
-        int count, count_max;
+        int count, count_max, position;
 
+        if ((np.dwOutFlags & NUMPRS_NEG) && !(dwState & NUM_WROTE_SIGN) && !header->starts[1])
+        {
+          TRACE("write negative sign\n");
+          localeValue = LOCALE_SNEGATIVESIGN;
+          defaultChar = '-';
+          dwState |= NUM_WROTE_SIGN;
+          shouldAdvance = FALSE;
+          break;
+        }
+
+        position = have_int + pad;
+        if (dwState & NUM_WRITE_ON)
+          position = max(position, need_int);
         need_int -= pToken[1];
         count_max = have_int + pad - need_int;
         if (count_max < 0)
@@ -1463,24 +1498,54 @@ VARIANT_FormatNumber_Bool:
           count = pToken[1] - count_max;
           TRACE("write %d leading zeros\n", count);
           while (count-- > 0)
+          {
             *pBuff++ = '0';
+            if ((numHeader->flags & FMT_FLAG_THOUSANDS) &&
+                position > 1 && (--position % 3) == 0)
+            {
+              int k;
+              TRACE("write thousand separator\n");
+              for (k = 0; thousandSeparator[k]; k++)
+                *pBuff++ = thousandSeparator[k];
+            }
+          }
         }
-        if (*pToken == FMT_NUM_COPY_ZERO || have_int > 1 || *prgbDig > 0)
+        if (*pToken == FMT_NUM_COPY_ZERO || have_int > 1 ||
+            (have_int > 0 && *prgbDig > 0))
         {
-          dwState |= NUM_WRITE_ON;
           count = min(count_max, have_int);
           count_max -= count;
           have_int -= count;
           TRACE("write %d whole number digits\n", count);
           while (count--)
+          {
+            dwState |= NUM_WRITE_ON;
             *pBuff++ = '0' + *prgbDig++;
+            if ((numHeader->flags & FMT_FLAG_THOUSANDS) &&
+                position > 1 && (--position % 3) == 0)
+            {
+              int k;
+              TRACE("write thousand separator\n");
+              for (k = 0; thousandSeparator[k]; k++)
+                *pBuff++ = thousandSeparator[k];
+            }
+          }
         }
         count = min(count_max, pad);
-        count_max -= count;
         pad -= count;
         TRACE("write %d whole trailing 0's\n", count);
         while (count--)
+        {
           *pBuff++ = '0';
+          if ((numHeader->flags & FMT_FLAG_THOUSANDS) &&
+              position > 1 && (--position % 3) == 0)
+          {
+            int k;
+            TRACE("write thousand separator\n");
+            for (k = 0; thousandSeparator[k]; k++)
+              *pBuff++ = thousandSeparator[k];
+          }
+        }
       }
       pToken++;
       break;
@@ -1505,7 +1570,8 @@ VARIANT_FormatNumber_Bool:
         *pBuff++ = defaultChar;
       }
     }
-    pToken++;
+    if (shouldAdvance)
+      pToken++;
   }
 
 VARIANT_FormatNumber_Exit:

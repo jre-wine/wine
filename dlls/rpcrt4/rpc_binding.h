@@ -1,7 +1,7 @@
 /*
  * RPC binding API
  *
- * Copyright 2001 Ove Kåven, TransGaming Technologies
+ * Copyright 2001 Ove KÃ¥ven, TransGaming Technologies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,9 +21,10 @@
 #ifndef __WINE_RPC_BINDING_H
 #define __WINE_RPC_BINDING_H
 
-#include "wine/rpcss_shared.h"
+#include "rpcndr.h"
 #include "security.h"
 #include "wine/list.h"
+#include "rpc_defs.h"
 
 
 typedef struct _RpcAuthInfo
@@ -40,6 +41,7 @@ typedef struct _RpcAuthInfo
   /* our copy of NT auth identity structure, if the authentication service
    * takes an NT auth identity */
   SEC_WINNT_AUTH_IDENTITY_W *nt_identity;
+  LPWSTR server_principal_name;
 } RpcAuthInfo;
 
 typedef struct _RpcQualityOfService
@@ -72,6 +74,8 @@ typedef struct _RpcConnection
   /* client-only */
   struct list conn_pool_entry;
   ULONG assoc_group_id; /* association group returned during binding */
+  RPC_ASYNC_STATE *async_state;
+  struct _RpcAssoc *assoc; /* association this connection is part of */
 
   /* server-only */
   /* The active interface bound to server. */
@@ -91,8 +95,10 @@ struct connection_ops {
   int (*write)(RpcConnection *conn, const void *buffer, unsigned int len);
   int (*close)(RpcConnection *conn);
   void (*cancel_call)(RpcConnection *conn);
+  int (*wait_for_incoming_data)(RpcConnection *conn);
   size_t (*get_top_of_tower)(unsigned char *tower_data, const char *networkaddr, const char *endpoint);
   RPC_STATUS (*parse_top_of_tower)(const unsigned char *tower_data, size_t tower_size, char **networkaddr, char **endpoint);
+  RPC_STATUS (*receive_fragment)(RpcConnection *conn, RpcPktHdr **Header, void **Payload);
 };
 
 /* don't know what MS's structure looks like */
@@ -136,19 +142,15 @@ RPC_STATUS RPCRT4_CreateConnection(RpcConnection** Connection, BOOL server, LPCS
 RPC_STATUS RPCRT4_DestroyConnection(RpcConnection* Connection);
 RPC_STATUS RPCRT4_OpenClientConnection(RpcConnection* Connection);
 RPC_STATUS RPCRT4_CloseConnection(RpcConnection* Connection);
-RPC_STATUS RPCRT4_SpawnConnection(RpcConnection** Connection, RpcConnection* OldConnection);
 
 RPC_STATUS RPCRT4_ResolveBinding(RpcBinding* Binding, LPCSTR Endpoint);
 RPC_STATUS RPCRT4_SetBindingObject(RpcBinding* Binding, const UUID* ObjectUuid);
 RPC_STATUS RPCRT4_MakeBinding(RpcBinding** Binding, RpcConnection* Connection);
-RPC_STATUS RPCRT4_ExportBinding(RpcBinding** Binding, RpcBinding* OldBinding);
-RPC_STATUS RPCRT4_DestroyBinding(RpcBinding* Binding);
+void       RPCRT4_AddRefBinding(RpcBinding* Binding);
+RPC_STATUS RPCRT4_ReleaseBinding(RpcBinding* Binding);
 RPC_STATUS RPCRT4_OpenBinding(RpcBinding* Binding, RpcConnection** Connection,
                               const RPC_SYNTAX_IDENTIFIER *TransferSyntax, const RPC_SYNTAX_IDENTIFIER *InterfaceId);
 RPC_STATUS RPCRT4_CloseBinding(RpcBinding* Binding, RpcConnection* Connection);
-BOOL RPCRT4_RPCSSOnDemandCall(PRPCSS_NP_MESSAGE msg, char *vardata_payload, PRPCSS_NP_REPLY reply);
-HANDLE RPCRT4_GetMasterMutex(void);
-HANDLE RPCRT4_RpcssNPConnect(void);
 
 static inline const char *rpcrt4_conn_get_name(const RpcConnection *Connection)
 {
@@ -189,5 +191,8 @@ RPC_STATUS RpcTransport_ParseTopOfTower(const unsigned char *tower_data, size_t 
 void RPCRT4_SetThreadCurrentConnection(RpcConnection *Connection);
 void RPCRT4_SetThreadCurrentCallHandle(RpcBinding *Binding);
 RpcBinding *RPCRT4_GetThreadCurrentCallHandle(void);
+void RPCRT4_PushThreadContextHandle(NDR_SCONTEXT SContext);
+void RPCRT4_RemoveThreadContextHandle(NDR_SCONTEXT SContext);
+NDR_SCONTEXT RPCRT4_PopThreadContextHandle(void);
 
 #endif

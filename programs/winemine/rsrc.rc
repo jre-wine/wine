@@ -25,12 +25,14 @@
 #include "resource.h"
 
 #include "Cs.rc"
+#include "Da.rc"
 #include "De.rc"
 #include "En.rc"
 #include "Es.rc"
 #include "Fi.rc"
 #include "Fr.rc"
 #include "It.rc"
+#include "Ja.rc"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"
@@ -40,6 +42,7 @@
 #include "Ru.rc"
 #include "Si.rc"
 #include "Tr.rc"
+#include "Zh.rc"
 
 LANGUAGE LANG_NEUTRAL,SUBLANG_NEUTRAL
 

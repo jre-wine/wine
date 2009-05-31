@@ -7,10 +7,10 @@
 @ stub CM_Add_Range
 @ stub CM_Add_Res_Des
 @ stub CM_Add_Res_Des_Ex
-@ stub CM_Connect_MachineA
+@ stdcall CM_Connect_MachineA(str ptr) setupapi.CM_Connect_MachineA
 @ stdcall CM_Connect_MachineW(wstr ptr) setupapi.CM_Connect_MachineW
-@ stub CM_Create_DevNodeA
-@ stub CM_Create_DevNodeW
+@ stdcall CM_Create_DevNodeA(ptr str long long) setupapi.CM_Create_DevNodeA
+@ stdcall CM_Create_DevNodeW(ptr wstr long long) setupapi.CM_Create_DevNodeW
 @ stub CM_Create_DevNode_ExA
 @ stub CM_Create_DevNode_ExW
 @ stub CM_Create_Range_List
@@ -61,7 +61,7 @@
 @ stub CM_Get_DevNode_Status
 @ stub CM_Get_DevNode_Status_Ex
 @ stdcall CM_Get_Device_IDA(ptr ptr long long) setupapi.CM_Get_Device_IDA
-@ stub CM_Get_Device_IDW
+@ stdcall CM_Get_Device_IDW(ptr ptr long long) setupapi.CM_Get_Device_IDW
 @ stub CM_Get_Device_ID_ExA
 @ stub CM_Get_Device_ID_ExW
 @ stdcall CM_Get_Device_ID_ListA(ptr ptr long long) setupapi.CM_Get_Device_ID_ListA
@@ -104,7 +104,7 @@
 @ stub CM_Get_Next_Log_Conf_Ex
 @ stub CM_Get_Next_Res_Des
 @ stub CM_Get_Next_Res_Des_Ex
-@ stub CM_Get_Parent
+@ stdcall CM_Get_Parent(ptr long long) setupapi.CM_Get_Parent
 @ stub CM_Get_Parent_Ex
 @ stub CM_Get_Res_Des_Data
 @ stub CM_Get_Res_Des_Data_Ex
@@ -117,8 +117,8 @@
 @ stub CM_Intersect_Range_List
 @ stub CM_Invert_Range_List
 @ stub CM_Is_Dock_Station_Present
-@ stub CM_Locate_DevNodeA
-@ stub CM_Locate_DevNodeW
+@ stdcall CM_Locate_DevNodeA(ptr str long) setupapi.CM_Locate_DevNodeA
+@ stdcall CM_Locate_DevNodeW(ptr wstr long) setupapi.CM_Locate_DevNodeW
 @ stub CM_Locate_DevNode_ExA
 @ stub CM_Locate_DevNode_ExW
 @ stub CM_Merge_Range_List

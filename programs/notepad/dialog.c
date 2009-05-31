@@ -182,8 +182,7 @@ BOOL DoCloseFile(void)
         /* prompt user to save changes */
         nResult = AlertFileNotSaved(Globals.szFileName);
         switch (nResult) {
-            case IDYES:     DIALOG_FileSave();
-                            break;
+            case IDYES:     return DIALOG_FileSave();
 
             case IDNO:      break;
 
@@ -249,13 +248,8 @@ void DoOpenFile(LPCWSTR szFileName)
     CloseHandle(hFile);
     pTemp[dwNumRead] = 0;
 
-    if (IsTextUnicode(pTemp, dwNumRead, NULL))
-    {
-	LPWSTR p = (LPWSTR)pTemp;
-	/* We need to strip BOM Unicode character, SetWindowTextW won't do it for us. */
-	if (*p == 0xFEFF || *p == 0xFFFE) p++;
-	SetWindowTextW(Globals.hEdit, p);
-    }
+    if((size -1) >= 2 && (BYTE)pTemp[0] == 0xff && (BYTE)pTemp[1] == 0xfe)
+	SetWindowTextW(Globals.hEdit, (LPWSTR)pTemp + 1);
     else
 	SetWindowTextA(Globals.hEdit, pTemp);
 
@@ -265,9 +259,7 @@ void DoOpenFile(LPCWSTR szFileName)
     SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
     SetFocus(Globals.hEdit);
     
-    /*  If the file starts with .LOG, add a time/date at the end and set cursor after
-     *  See http://support.microsoft.com/?kbid=260563
-     */
+    /*  If the file starts with .LOG, add a time/date at the end and set cursor after */
     if (GetWindowTextW(Globals.hEdit, log, sizeof(log)/sizeof(log[0])) && !lstrcmp(log, dotlog))
     {
 	static const WCHAR lfW[] = { '\r','\n',0 };
@@ -285,7 +277,7 @@ VOID DIALOG_FileNew(VOID)
 {
     static const WCHAR empty_strW[] = { 0 };
 
-    /* Close any files and promt to save changes */
+    /* Close any files and prompt to save changes */
     if (DoCloseFile()) {
         SetWindowText(Globals.hEdit, empty_strW);
         SendMessage(Globals.hEdit, EM_EMPTYUNDOBUFFER, 0, 0);
@@ -323,15 +315,16 @@ VOID DIALOG_FileOpen(VOID)
 }
 
 
-VOID DIALOG_FileSave(VOID)
+BOOL DIALOG_FileSave(VOID)
 {
     if (Globals.szFileName[0] == '\0')
-        DIALOG_FileSaveAs();
+        return DIALOG_FileSaveAs();
     else
         DoSaveFile();
+    return TRUE;
 }
 
-VOID DIALOG_FileSaveAs(VOID)
+BOOL DIALOG_FileSaveAs(VOID)
 {
     OPENFILENAME saveas;
     WCHAR szPath[MAX_PATH];
@@ -359,7 +352,9 @@ VOID DIALOG_FileSaveAs(VOID)
         SetFileName(szPath);
         UpdateWindowCaption();
         DoSaveFile();
+        return TRUE;
     }
+    return FALSE;
 }
 
 typedef struct {
@@ -767,27 +762,12 @@ VOID DIALOG_HelpHelp(VOID)
     WinHelp(Globals.hMainWnd, helpfileW, HELP_HELPONHELP, 0);
 }
 
-VOID DIALOG_HelpLicense(VOID)
+VOID DIALOG_HelpAboutNotepad(VOID)
 {
-    TCHAR cap[20], text[1024];
-    LoadString(Globals.hInstance, IDS_LICENSE, text, 1024);
-    LoadString(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
-    MessageBox(Globals.hMainWnd, text, cap, MB_ICONINFORMATION | MB_OK);
-}
-
-VOID DIALOG_HelpNoWarranty(VOID)
-{
-    TCHAR cap[20], text[1024];
-    LoadString(Globals.hInstance, IDS_WARRANTY, text, 1024);
-    LoadString(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
-    MessageBox(Globals.hMainWnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
-}
-
-VOID DIALOG_HelpAboutWine(VOID)
-{
-    static const WCHAR notepadW[] = { 'N','o','t','e','p','a','d','\n',0 };
+    static const WCHAR notepadW[] = { 'W','i','n','e',' ','N','o','t','e','p','a','d',0 };
     WCHAR szNotepad[MAX_STRING_LEN];
-    HICON icon = LoadIcon(Globals.hInstance, MAKEINTRESOURCE(IDI_NOTEPAD));
+    HICON icon = LoadImageW( Globals.hInstance, MAKEINTRESOURCE(IDI_NOTEPAD),
+                             IMAGE_ICON, 48, 48, LR_SHARED );
 
     LoadString(Globals.hInstance, STRING_NOTEPAD, szNotepad, SIZEOF(szNotepad));
     ShellAbout(Globals.hMainWnd, szNotepad, notepadW, icon);

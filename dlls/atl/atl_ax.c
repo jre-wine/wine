@@ -117,7 +117,7 @@ BOOL WINAPI AtlAxWinInit(void)
  */
 
 
-static ULONG WINAPI IOCS_AddRef(IOCS *This)
+static ULONG IOCS_AddRef(IOCS *This)
 {
     ULONG ref = InterlockedIncrement(&This->ref);
 
@@ -126,13 +126,13 @@ static ULONG WINAPI IOCS_AddRef(IOCS *This)
     return ref;
 }
 
-#define THIS2IOLECLIENTSITE(This) ((IOleClientSite*)&This->lpOleClientSiteVtbl)
-#define THIS2IOLECONTAINER(This) ((IOleContainer*)&This->lpOleContainerVtbl)
-#define THIS2IOLEINPLACESITEWINDOWLESS(This) ((IOleInPlaceSiteWindowless*)&This->lpOleInPlaceSiteWindowlessVtbl)
-#define THIS2IOLEINPLACEFRAME(This) ((IOleInPlaceFrame*)&This->lpOleInPlaceFrameVtbl)
-#define THIS2IOLECONTROLSITE(This) ((IOleControlSite*)&This->lpOleControlSiteVtbl)
+#define THIS2IOLECLIENTSITE(This) ((IOleClientSite*)&(This)->lpOleClientSiteVtbl)
+#define THIS2IOLECONTAINER(This)             (&(This)->lpOleContainerVtbl)
+#define THIS2IOLEINPLACESITEWINDOWLESS(This) (&(This)->lpOleInPlaceSiteWindowlessVtbl)
+#define THIS2IOLEINPLACEFRAME(This)          (&(This)->lpOleInPlaceFrameVtbl)
+#define THIS2IOLECONTROLSITE(This)           (&(This)->lpOleControlSiteVtbl)
 
-static HRESULT WINAPI IOCS_QueryInterface(IOCS *This, REFIID riid, void **ppv)
+static HRESULT IOCS_QueryInterface(IOCS *This, REFIID riid, void **ppv)
 {
     *ppv = NULL;
 
@@ -166,7 +166,7 @@ static HRESULT WINAPI IOCS_QueryInterface(IOCS *This, REFIID riid, void **ppv)
 }
 
 static HRESULT IOCS_Detach( IOCS *This );
-static ULONG WINAPI IOCS_Release(IOCS *This)
+static ULONG IOCS_Release(IOCS *This)
 {
     ULONG ref = InterlockedDecrement(&This->ref);
 
@@ -343,9 +343,9 @@ static HRESULT WINAPI OleInPlaceSiteWindowless_GetWindowContext(IOleInPlaceSiteW
     TRACE("(%p,%p,%p,%p,%p,%p)\n", This, ppFrame, ppDoc, lprcPosRect, lprcClipRect, lpFrameInfo);
 
     if ( lprcClipRect )
-        memcpy(lprcClipRect, &This->size, sizeof(RECT));
+        *lprcClipRect = This->size;
     if ( lprcPosRect )
-        memcpy(lprcPosRect, &This->size, sizeof(RECT));
+        *lprcPosRect = This->size;
 
     if ( ppFrame )
     {
@@ -752,7 +752,7 @@ static HRESULT IOCS_Detach( IOCS *This ) /* remove subclassing */
     if ( This->hWnd )
     {
         SetWindowLongPtrW( This->hWnd, GWLP_WNDPROC, (ULONG_PTR) This->OrigWndProc );
-        SetWindowLongPtrW( This->hWnd, GWLP_USERDATA, (LONG_PTR) NULL );
+        SetWindowLongPtrW( This->hWnd, GWLP_USERDATA, 0 );
         This->hWnd = NULL;
     }
     if ( This->control )
@@ -958,7 +958,7 @@ HRESULT WINAPI AtlAxCreateControlEx(LPCOLESTR lpszName, HWND hWnd,
     else {
         /* FIXME - check for MSHTML: prefix! */
         content = IsURL;
-        memcpy( &controlId, &CLSID_WebBrowser, sizeof(controlId) );
+        controlId = CLSID_WebBrowser;
     }
 
     hRes = CoCreateInstance( &controlId, 0, CLSCTX_ALL, &IID_IOleObject, 
@@ -1026,7 +1026,8 @@ HRESULT WINAPI AtlAxCreateControlEx(LPCOLESTR lpszName, HWND hWnd,
             IUnknown_AddRef( pUnkControl );
     }
 
-    IUnknown_Release( pUnkControl );
+    if ( pUnkControl )
+        IUnknown_Release( pUnkControl );
     if ( pContainer )
         IUnknown_Release( pContainer );
 
@@ -1243,7 +1244,7 @@ HWND WINAPI AtlAxCreateDialogW(HINSTANCE hInst, LPCWSTR name, HWND owner, DLGPRO
     hgl = LoadResource (hInst, hrsrc);
     if ( !hgl )
         return NULL;
-    ptr = (LPCDLGTEMPLATEW)LockResource ( hgl );
+    ptr = LockResource ( hgl );
     if (!ptr)
     {
         FreeResource( hgl );

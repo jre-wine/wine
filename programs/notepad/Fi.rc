@@ -28,6 +28,7 @@ MAIN_MENU MENU
   MENUITEM "&Avaa...\tCtrl+O",		CMD_OPEN
   MENUITEM "Ta&lleta\tCtrl+S",		CMD_SAVE
   MENUITEM "Talleta &nimell‰...",	CMD_SAVE_AS
+  MENUITEM SEPARATOR
   MENUITEM "T&ulosta...\tCtrl+P",		CMD_PRINT
   MENUITEM "&Sivun asetukset...",	CMD_PAGE_SETUP
   MENUITEM "&Kirjoittimen asetukset...",	CMD_PRINTER_SETUP
@@ -46,6 +47,7 @@ POPUP "&Muokkaa" {
   MENUITEM "&Aika/P‰iv‰m‰‰r‰\tF5",	CMD_TIME_DATE
   MENUITEM SEPARATOR
   MENUITEM "Ka&tkaise pitk‰ rivi",	CMD_WRAP
+  MENUITEM "&Font...",          CMD_FONT
  }
 POPUP "&Etsi" {
   MENUITEM "Etsi...",		CMD_SEARCH
@@ -56,11 +58,7 @@ POPUP "&Apua" {
   MENUITEM "&Etsi...",		CMD_HELP_SEARCH
   MENUITEM "Apua &Opastuksesta",	CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  POPUP "Inf&o" {
-   MENUITEM "&Lisenssi...",	CMD_LICENSE
-   MENUITEM "&EI TAKUUTA...",	CMD_NO_WARRANTY
-   MENUITEM "&Tietoja Wine:ista...",	CMD_ABOUT_WINE
-  }
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 

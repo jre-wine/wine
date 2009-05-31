@@ -118,8 +118,8 @@ void X11DRV_GDI_Finalize(void)
 /**********************************************************************
  *	     X11DRV_CreateDC
  */
-BOOL X11DRV_CreateDC( HDC hdc, X11DRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR device,
-                      LPCWSTR output, const DEVMODEW* initData )
+BOOL CDECL X11DRV_CreateDC( HDC hdc, X11DRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR device,
+                            LPCWSTR output, const DEVMODEW* initData )
 {
     X11DRV_PDEVICE *physDev;
 
@@ -165,7 +165,7 @@ BOOL X11DRV_CreateDC( HDC hdc, X11DRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR de
 /**********************************************************************
  *	     X11DRV_DeleteDC
  */
-BOOL X11DRV_DeleteDC( X11DRV_PDEVICE *physDev )
+BOOL CDECL X11DRV_DeleteDC( X11DRV_PDEVICE *physDev )
 {
     if(physDev->xrender)
       X11DRV_XRender_DeleteDC( physDev );
@@ -181,7 +181,7 @@ BOOL X11DRV_DeleteDC( X11DRV_PDEVICE *physDev )
 /***********************************************************************
  *           GetDeviceCaps    (X11DRV.@)
  */
-INT X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
+INT CDECL X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
 {
     switch(cap)
     {
@@ -251,8 +251,7 @@ INT X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
     case CAPS1:
         FIXME("(%p): CAPS1 is unimplemented, will return 0\n", physDev->hdc );
         /* please see wingdi.h for the possible bit-flag values that need
-           to be returned. also, see
-           http://msdn.microsoft.com/library/ddkdoc/win95ddk/graphcnt_1m0p.htm */
+           to be returned. */
         return 0;
     case SIZEPALETTE:
         return palette_size;
@@ -277,8 +276,8 @@ INT X11DRV_GetDeviceCaps( X11DRV_PDEVICE *physDev, INT cap )
 /**********************************************************************
  *           ExtEscape  (X11DRV.@)
  */
-INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID in_data,
-                      INT out_count, LPVOID out_data )
+INT CDECL X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID in_data,
+                            INT out_count, LPVOID out_data )
 {
     switch(escape)
     {
@@ -335,7 +334,7 @@ INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID
             case X11DRV_SET_DRAWABLE:
                 if (in_count >= sizeof(struct x11drv_escape_set_drawable))
                 {
-                    const struct x11drv_escape_set_drawable *data = (const struct x11drv_escape_set_drawable *)in_data;
+                    const struct x11drv_escape_set_drawable *data = in_data;
                     if(physDev->xrender) X11DRV_XRender_UpdateDrawable( physDev );
                     physDev->dc_rect = data->dc_rect;
                     physDev->drawable = data->drawable;
@@ -343,9 +342,13 @@ INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID
                     physDev->current_pf = pixelformat_from_fbconfig_id( data->fbconfig_id );
                     physDev->gl_drawable = data->gl_drawable;
                     physDev->pixmap = data->pixmap;
+                    physDev->gl_copy = data->gl_copy;
                     wine_tsx11_lock();
                     XSetSubwindowMode( gdi_display, physDev->gc, data->mode );
                     wine_tsx11_unlock();
+                    TRACE( "SET_DRAWABLE hdc %p drawable %lx gl_drawable %lx pf %u dc_rect %s drawable_rect %s\n",
+                           physDev->hdc, physDev->drawable, physDev->gl_drawable, physDev->current_pf,
+                           wine_dbgstr_rect(&physDev->dc_rect), wine_dbgstr_rect(&physDev->drawable_rect) );
                     return TRUE;
                 }
                 break;
@@ -408,19 +411,8 @@ INT X11DRV_ExtEscape( X11DRV_PDEVICE *physDev, INT escape, INT in_count, LPCVOID
                 }
                 break;
             case X11DRV_GET_DCE:
-                if (out_count >= sizeof(struct dce *))
-                {
-                    *(struct dce **)out_data = physDev->dce;
-                    return TRUE;
-                }
-                break;
             case X11DRV_SET_DCE:
-                if (in_count >= sizeof(struct x11drv_escape_set_dce))
-                {
-                    const struct x11drv_escape_set_dce *data = (const struct x11drv_escape_set_dce *)in_data;
-                    physDev->dce = data->dce;
-                    return TRUE;
-                }
+                FIXME( "%x escape no longer supported\n", *(const enum x11drv_escape_codes *)in_data );
                 break;
             case X11DRV_GET_GLX_DRAWABLE:
                 if (out_count >= sizeof(Drawable))

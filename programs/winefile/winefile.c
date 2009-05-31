@@ -33,6 +33,7 @@
 
 #include "winefile.h"
 #include "resource.h"
+#include "wine/unicode.h"
 
 #ifdef _NO_EXTENSIONS
 #undef _LEFT_FILES
@@ -196,26 +197,27 @@ static const TCHAR sQMarks[] = {'?','?','?','\0'};
 static const TCHAR sWINEFILEFRAME[] = {'W','F','S','_','F','r','a','m','e','\0'};
 static const TCHAR sWINEFILETREE[] = {'W','F','S','_','T','r','e','e','\0'};
 
-#ifdef _MSC_VER
-/* #define LONGLONGARG _T("I64") */
-static const TCHAR sLongHexFmt[] = {'%','I','6','4','X','\0'};
-static const TCHAR sLongNumFmt[] = {'%','I','6','4','d','\0'};
-#else
-/* #define LONGLONGARG _T("L") */
-static const TCHAR sLongHexFmt[] = {'%','L','X','\0'};
-static const TCHAR sLongNumFmt[] = {'%','L','d','\0'};
-#endif
+static void format_longlong(LPWSTR ret, ULONGLONG val)
+{
+    WCHAR buffer[65], *p = &buffer[64];
+
+    *p = 0;
+    do {
+        *(--p) = '0' + val % 10;
+	val /= 10;
+    } while (val);
+    lstrcpyW( ret, p );
+}
 
 
 /* load resource string */
-static LPTSTR load_string(LPTSTR buffer, UINT id)
+static LPTSTR load_string(LPTSTR buffer, DWORD size, UINT id)
 {
-	LoadString(Globals.hInstance, id, buffer, BUFFER_LEN);
-
+	LoadString(Globals.hInstance, id, buffer, size);
 	return buffer;
 }
 
-#define RS(b, i) load_string(b, i)
+#define RS(b, i) load_string(b, sizeof(b)/sizeof(b[0]), i)
 
 
 /* display error message for the specified WIN32 error code */
@@ -242,22 +244,6 @@ static void display_network_error(HWND hwnd)
 
 	if (WNetGetLastError(&error, msg, BUFFER_LEN, provider, BUFFER_LEN) == NO_ERROR)
 		MessageBox(hwnd, msg, RS(b2,IDS_WINEFILE), MB_OK);
-}
-
-static VOID WineLicense(HWND Wnd)
-{
-	WCHAR cap[20], text[1024];
-	LoadStringW(Globals.hInstance, IDS_LICENSE, text, 1024);
-	LoadStringW(Globals.hInstance, IDS_LICENSE_CAPTION, cap, 20);
-	MessageBoxW(Wnd, text, cap, MB_ICONINFORMATION | MB_OK);
-}
-
-static VOID WineWarranty(HWND Wnd)
-{
-	WCHAR cap[20], text[1024];
-	LoadStringW(Globals.hInstance, IDS_WARRANTY, text, 1024);
-	LoadStringW(Globals.hInstance, IDS_WARRANTY_CAPTION, cap, 20);
-	MessageBoxW(Wnd, text, cap, MB_ICONEXCLAMATION | MB_OK);
 }
 
 static inline BOOL get_check(HWND hwnd, INT id)
@@ -322,52 +308,6 @@ static inline void choose_font(HWND hwnd)
 
         ReleaseDC(hwnd, hdc);
 }
-
-#ifdef __WINE__
-
-#ifdef UNICODE
-
-/* call vswprintf() in msvcrt.dll */
-/*TODO: fix swprintf() in non-msvcrt mode, so that this dynamic linking function can be removed */
-static int msvcrt_swprintf(WCHAR* buffer, const WCHAR* fmt, ...)
-{
-	static int (__cdecl *pvswprintf)(WCHAR*, const WCHAR*, va_list) = NULL;
-	va_list ap;
-	int ret;
-
-	if (!pvswprintf) {
-		HMODULE hModMsvcrt = LoadLibraryA("msvcrt");
-		pvswprintf = (int(__cdecl*)(WCHAR*,const WCHAR*,va_list)) GetProcAddress(hModMsvcrt, "vswprintf");
-	}
-
-	va_start(ap, fmt);
-	ret = (*pvswprintf)(buffer, fmt, ap);
-	va_end(ap);
-
-	return ret;
-}
-
-static LPCWSTR my_wcsrchr(LPCWSTR str, WCHAR c)
-{
-	LPCWSTR p = str;
-
-	while(*p)
-		++p;
-
-	do {
-		if (--p < str)
-			return NULL;
-	} while(*p != c);
-
-	return p;
-}
-
-#define _tcsrchr my_wcsrchr
-#else	/* UNICODE */
-#define _tcsrchr strrchr
-#endif	/* UNICODE */
-
-#endif	/* __WINE__ */
 
 
 /* allocate and initialise a directory entry */
@@ -890,20 +830,14 @@ static LPITEMIDLIST get_path_pidl(LPTSTR path, HWND hwnd)
 static LPITEMIDLIST get_to_absolute_pidl(Entry* entry, HWND hwnd)
 {
 	if (entry->up && entry->up->etype==ET_SHELL) {
-		IShellFolder* folder = entry->up->folder;
-		WCHAR buffer[MAX_PATH];
+		LPITEMIDLIST idl = NULL;
 
-		HRESULT hr = path_from_pidlW(folder, entry->pidl, buffer, MAX_PATH);
-
-		if (SUCCEEDED(hr)) {
-			LPITEMIDLIST pidl;
-			ULONG len;
-
-			hr = IShellFolder_ParseDisplayName(Globals.iDesktop, hwnd, NULL, buffer, &len, &pidl, NULL);
-
-			if (SUCCEEDED(hr))
-				return pidl;
+		while (entry->up) {
+			idl = ILCombine(ILClone(entry->pidl), idl);
+			entry = entry->up;
 		}
+
+		return idl;
 	} else if (entry->etype == ET_WINDOWS) {
 		TCHAR path[MAX_PATH];
 
@@ -994,7 +928,7 @@ static Entry* read_tree_shell(Root* root, LPITEMIDLIST pidl, SORT_ORDER sortOrde
 		((LPITEMIDLIST)((LPBYTE)next_pidl+pidl->mkid.cb))->mkid.cb = 0;
 
 		hr = IShellFolder_BindToObject(folder, next_pidl, 0, &IID_IShellFolder, (void**)&child);
-		if (!SUCCEEDED(hr))
+		if (FAILED(hr))
 			break;
 
 		read_directory(entry, NULL, sortOrder, hwnd);
@@ -1100,7 +1034,7 @@ static void read_directory_shell(Entry* dir, HWND hwnd)
 			memset(pidls, 0, sizeof(pidls));
 
 			hr = IEnumIDList_Next(idlist, FETCH_ITEM_COUNT, pidls, &cnt);
-			if (!SUCCEEDED(hr))
+			if (FAILED(hr))
 				break;
 
 			if (hr == S_FALSE)
@@ -1118,7 +1052,7 @@ static void read_directory_shell(Entry* dir, HWND hwnd)
 				memset(&entry->data, 0, sizeof(WIN32_FIND_DATA));
 				entry->bhfi_valid = FALSE;
 
-				attribs = ~SFGAO_FILESYSTEM;	/*SFGAO_HASSUBFOLDER|SFGAO_FOLDER; SFGAO_FILESYSTEM sorgt dafür, daß "My Documents" anstatt von "Martin's Documents" angezeigt wird */
+				attribs = ~SFGAO_FILESYSTEM;	/*SFGAO_HASSUBFOLDER|SFGAO_FOLDER; SFGAO_FILESYSTEM sorgt dafÃ¼r, daÃŸ "My Documents" anstatt von "Martin's Documents" angezeigt wird */
 
 				hr = IShellFolder_GetAttributesOf(folder, 1, (LPCITEMIDLIST*)&pidls[n], &attribs);
 
@@ -1249,8 +1183,8 @@ static int compareExt(const void* arg1, const void* arg2)
 	name1 = fd1->cFileName;
 	name2 = fd2->cFileName;
 
-	ext1 = _tcsrchr(name1, '.');
-	ext2 = _tcsrchr(name2, '.');
+	ext1 = strrchrW(name1, '.');
+	ext2 = strrchrW(name2, '.');
 
 	if (ext1)
 		ext1++;
@@ -1436,9 +1370,9 @@ static Entry* read_tree(Root* root, LPCTSTR path, LPITEMIDLIST pidl, LPTSTR drv,
 		root->drive_type = DRIVE_UNKNOWN;
 		drv[0] = '\\';
 		drv[1] = '\0';
-		load_string(root->volname, IDS_DESKTOP);
+		load_string(root->volname, sizeof(root->volname)/sizeof(root->volname[0]), IDS_DESKTOP);
 		root->fs_flags = 0;
-		load_string(root->fs, IDS_SHELL);
+		load_string(root->fs, sizeof(root->fs)/sizeof(root->fs[0]), IDS_SHELL);
 
 		return read_tree_shell(root, pidl, sortOrder, hwnd);
 	}
@@ -1451,9 +1385,9 @@ static Entry* read_tree(Root* root, LPCTSTR path, LPITEMIDLIST pidl, LPTSTR drv,
 		root->drive_type = GetDriveType(path);
 
 		lstrcat(drv, sSlash);
-		load_string(root->volname, IDS_ROOT_FS);
+		load_string(root->volname, sizeof(root->volname)/sizeof(root->volname[0]), IDS_ROOT_FS);
 		root->fs_flags = 0;
-		load_string(root->fs, IDS_UNIXFS);
+		load_string(root->fs, sizeof(root->fs)/sizeof(root->fs[0]), IDS_UNIXFS);
 
 		lstrcpy(root->path, sSlash);
 
@@ -1538,7 +1472,7 @@ static ChildWnd* alloc_child_window(LPCTSTR path, LPITEMIDLIST pidl, HWND hwnd)
 
 #ifdef _SHELL_FOLDERS
 	if (root->entry.etype == ET_SHELL)
-		load_string(root->entry.data.cFileName, IDS_DESKTOP);
+		load_string(root->entry.data.cFileName, sizeof(root->entry.data.cFileName)/sizeof(root->entry.data.cFileName[0]), IDS_DESKTOP);
 	else
 #endif
 		wsprintf(root->entry.data.cFileName, RS(b1,IDS_TITLEFMT), drv, root->fs);
@@ -2062,7 +1996,6 @@ static INT_PTR CALLBACK PropertiesDialogDlgProc(HWND hwnd, UINT nmsg, WPARAM wpa
 			static const TCHAR sByteFmt[] = {'%','s',' ','B','y','t','e','s','\0'};
 			TCHAR b1[BUFFER_LEN], b2[BUFFER_LEN];
 			LPWIN32_FIND_DATA pWFD;
-			ULONGLONG size;
 
 			dlg = (struct PropertiesDialog*) lparam;
 			pWFD = (LPWIN32_FIND_DATA) &dlg->entry.data;
@@ -2074,8 +2007,7 @@ static INT_PTR CALLBACK PropertiesDialogDlgProc(HWND hwnd, UINT nmsg, WPARAM wpa
 			format_date(&pWFD->ftLastWriteTime, b1, COL_DATE|COL_TIME);
 			SetWindowText(GetDlgItem(hwnd, IDC_STATIC_PROP_LASTCHANGE), b1);
 
-			size = ((ULONGLONG)pWFD->nFileSizeHigh << 32) | pWFD->nFileSizeLow;
-			_stprintf(b1, sLongNumFmt, size);
+                        format_longlong( b1, ((ULONGLONG)pWFD->nFileSizeHigh << 32) | pWFD->nFileSizeLow );
 			wsprintf(b2, sByteFmt, b1);
 			SetWindowText(GetDlgItem(hwnd, IDC_STATIC_PROP_SIZE), b2);
 
@@ -2422,7 +2354,7 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 					if (DialogBoxParam(Globals.hInstance, MAKEINTRESOURCE(IDD_EXECUTE), hwnd, ExecuteDialogDlgProc, (LPARAM)&dlg) == IDOK) {
 						HINSTANCE hinst = ShellExecute(hwnd, NULL/*operation*/, dlg.cmd/*file*/, NULL/*parameters*/, NULL/*dir*/, dlg.cmdshow);
 
-						if ((int)hinst <= 32)
+						if (PtrToUlong(hinst) <= 32)
 							display_error(hwnd, GetLastError());
 					}
 					break;}
@@ -2509,25 +2441,11 @@ static LRESULT CALLBACK FrameWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 
 				/*TODO: There are even more menu items! */
 
-#ifndef _NO_EXTENSIONS
-#ifdef __WINE__
-				case ID_LICENSE:
-					WineLicense(Globals.hMainWnd);
-					break;
-
-				case ID_NO_WARRANTY:
-					WineWarranty(Globals.hMainWnd);
-					break;
-
-				case ID_ABOUT_WINE:
-					ShellAbout(hwnd, RS(b2,IDS_WINE), RS(b1,IDS_WINEFILE), 0);
-					break;
-#endif
-
 				case ID_ABOUT:
-					ShellAbout(hwnd, RS(b1,IDS_WINEFILE), NULL, 0);
+                                        ShellAbout(hwnd, RS(b1,IDS_WINEFILE), NULL,
+                                                   LoadImage( Globals.hInstance, MAKEINTRESOURCE(IDI_WINEFILE),
+                                                              IMAGE_ICON, 48, 48, LR_SHARED ));
 					break;
-#endif	/* _NO_EXTENSIONS */
 
 				default:
 					/*TODO: if (wParam >= PM_FIRST_LANGUAGE && wParam <= PM_LAST_LANGUAGE)
@@ -2628,13 +2546,13 @@ static void resize_tree(ChildWnd* child, int cx, int cy)
 
 #ifndef _NO_EXTENSIONS
 
-static HWND create_header(HWND parent, Pane* pane, int id)
+static HWND create_header(HWND parent, Pane* pane, UINT id)
 {
 	HD_ITEM hdi;
 	int idx;
 
 	HWND hwnd = CreateWindow(WC_HEADER, 0, WS_CHILD|WS_VISIBLE|HDS_HORZ|HDS_FULLDRAG/*TODO: |HDS_BUTTONS + sort orders*/,
-								0, 0, 0, 0, parent, (HMENU)id, Globals.hInstance, 0);
+                                 0, 0, 0, 0, parent, (HMENU)ULongToHandle(id), Globals.hInstance, 0);
 	if (!hwnd)
 		return 0;
 
@@ -2745,7 +2663,7 @@ static BOOL calc_widths(Pane* pane, BOOL anyway)
 	SendMessage(pane->hwnd, LB_SETHORIZONTALEXTENT, x, 0);
 
 	/* no change? */
-	if (!memcmp(orgWidths, pane->widths, sizeof(orgWidths)))
+	if (!anyway && !memcmp(orgWidths, pane->widths, sizeof(orgWidths)))
 		return FALSE;
 
 	/* don't move, if only collapsing an entry */
@@ -2814,7 +2732,7 @@ static void calc_single_width(Pane* pane, int col)
 
 	x = pane->positions[col] + cx;
 
-	for(; col<COLUMNS; ) {
+	for(; col<COLUMNS-1; ) {
 		pane->positions[++col] = x;
 		x += pane->widths[col];
 	}
@@ -2951,17 +2869,18 @@ static void format_bytes(LPTSTR buffer, LONGLONG bytes)
 	static const TCHAR sFmtGB[] = {'%', '.', '1', 'f', ' ', 'G', 'B', '\0'};
 	static const TCHAR sFmtMB[] = {'%', '.', '1', 'f', ' ', 'M', 'B', '\0'};
 	static const TCHAR sFmtkB[] = {'%', '.', '1', 'f', ' ', 'k', 'B', '\0'};
+	static const TCHAR sFmtB[]  = {'%', 'u', 0};
 
 	float fBytes = (float)bytes;
 
 	if (bytes >= 1073741824)	/* 1 GB */
-		_stprintf(buffer, sFmtGB, fBytes/1073741824.f+.5f);
+		sprintfW(buffer, sFmtGB, fBytes/1073741824.f+.5f);
 	else if (bytes >= 1048576)	/* 1 MB */
-		_stprintf(buffer, sFmtMB, fBytes/1048576.f+.5f);
+		sprintfW(buffer, sFmtMB, fBytes/1048576.f+.5f);
 	else if (bytes >= 1024)		/* 1 kB */
-		_stprintf(buffer, sFmtkB, fBytes/1024.f+.5f);
+		sprintfW(buffer, sFmtkB, fBytes/1024.f+.5f);
 	else
-		_stprintf(buffer, sLongNumFmt, bytes);
+		sprintfW(buffer, sFmtB, (DWORD)bytes);
 }
 
 static void set_space_status(void)
@@ -2982,7 +2901,7 @@ static void set_space_status(void)
 
 static WNDPROC g_orgTreeWndProc;
 
-static void create_tree_window(HWND parent, Pane* pane, int id, int id_header, LPCTSTR pattern, int filter_flags)
+static void create_tree_window(HWND parent, Pane* pane, UINT id, UINT id_header, LPCTSTR pattern, int filter_flags)
 {
 	static const TCHAR sListBox[] = {'L','i','s','t','B','o','x','\0'};
 
@@ -2990,8 +2909,8 @@ static void create_tree_window(HWND parent, Pane* pane, int id, int id_header, L
 	Entry* entry = pane->root;
 
 	pane->hwnd = CreateWindow(sListBox, sEmpty, WS_CHILD|WS_VISIBLE|WS_HSCROLL|WS_VSCROLL|
-								LBS_DISABLENOSCROLL|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_NOTIFY,
-								0, 0, 0, 0, parent, (HMENU)id, Globals.hInstance, 0);
+                                  LBS_DISABLENOSCROLL|LBS_NOINTEGRALHEIGHT|LBS_OWNERDRAWFIXED|LBS_NOTIFY,
+                                  0, 0, 0, 0, parent, (HMENU)ULongToHandle(id), Globals.hInstance, 0);
 
 	SetWindowLongPtr(pane->hwnd, GWLP_USERDATA, (LPARAM)pane);
 	g_orgTreeWndProc = (WNDPROC) SetWindowLongPtr(pane->hwnd, GWLP_WNDPROC, (LPARAM)TreeWndProc);
@@ -3185,7 +3104,7 @@ static BOOL is_registered_type(LPCTSTR ext)
 
 static enum FILE_TYPE get_file_type(LPCTSTR filename)
 {
-	LPCTSTR ext = _tcsrchr(filename, '.');
+	LPCTSTR ext = strrchrW(filename, '.');
 	if (!ext)
 		ext = sEmpty;
 
@@ -3398,11 +3317,7 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 		if (!(attrs&FILE_ATTRIBUTE_DIRECTORY))
 #endif
 		{
-			ULONGLONG size;
-
-                        size = ((ULONGLONG)entry->data.nFileSizeHigh << 32) | entry->data.nFileSizeLow;
-
-			_stprintf(buffer, sLongNumFmt, size);
+			format_longlong( buffer, ((ULONGLONG)entry->data.nFileSizeHigh << 32) | entry->data.nFileSizeLow );
 
 			if (calcWidthCol == -1)
 				output_number(pane, dis, col, buffer);
@@ -3441,10 +3356,15 @@ static void draw_item(Pane* pane, LPDRAWITEMSTRUCT dis, Entry* entry, int calcWi
 
 #ifndef _NO_EXTENSIONS
 	if (entry->bhfi_valid) {
-            ULONGLONG index = ((ULONGLONG)entry->bhfi.nFileIndexHigh << 32) | entry->bhfi.nFileIndexLow;
-
 		if (visible_cols & COL_INDEX) {
-			_stprintf(buffer, sLongHexFmt, index);
+                        static const TCHAR fmtlow[] = {'%','X',0};
+                        static const TCHAR fmthigh[] = {'%','X','%','0','8','X',0};
+
+                        if (entry->bhfi.nFileIndexHigh)
+                            wsprintf(buffer, fmthigh,
+                                     entry->bhfi.nFileIndexHigh, entry->bhfi.nFileIndexLow );
+                        else
+                            wsprintf(buffer, fmtlow, entry->bhfi.nFileIndexLow );
 
 			if (calcWidthCol == -1)
 				output_text(pane, dis, col, buffer, DT_RIGHT);
@@ -3861,8 +3781,15 @@ static void refresh_child(ChildWnd* child)
 	scan_entry(child, &child->root.entry, 0, child->hwnd);
 
 #ifdef _SHELL_FOLDERS
+
 	if (child->root.entry.etype == ET_SHELL)
-		entry = read_tree(&child->root, NULL, get_path_pidl(path,child->hwnd), drv, child->sortOrder, child->hwnd);
+	{
+		LPITEMIDLIST local_pidl = get_path_pidl(path,child->hwnd);
+		if (local_pidl)
+			entry = read_tree(&child->root, NULL, local_pidl , drv, child->sortOrder, child->hwnd);
+		else
+			entry = NULL;
+	}
 	else
 #endif
 		entry = read_tree(&child->root, path, NULL, drv, child->sortOrder, child->hwnd);
@@ -3908,7 +3835,7 @@ static void create_drive_bar(void)
 #endif
 #ifdef _SHELL_FOLDERS
 	/* insert shell namespace button */
-	load_string(b1, IDS_SHELL);
+	load_string(b1, sizeof(b1)/sizeof(b1[0]), IDS_SHELL);
 	b1[lstrlen(b1)+1] = '\0';
 	SendMessage(Globals.hdrivebar, TB_ADDSTRING, 0, (LPARAM)b1);
 
@@ -3966,7 +3893,7 @@ static BOOL launch_file(HWND hwnd, LPCTSTR cmd, UINT nCmdShow)
 {
 	HINSTANCE hinst = ShellExecute(hwnd, NULL/*operation*/, cmd, NULL/*parameters*/, NULL/*dir*/, nCmdShow);
 
-	if ((int)hinst <= 32) {
+	if (PtrToUlong(hinst) <= 32) {
 		display_error(hwnd, GetLastError());
 		return FALSE;
 	}
@@ -4491,7 +4418,7 @@ static LRESULT CALLBACK ChildWndProc(HWND hwnd, UINT nmsg, WPARAM wparam, LPARAM
 
 				case ID_FILE_DELETE: {
 					TCHAR path[BUFFER_LEN];
-					SHFILEOPSTRUCT shfo = {hwnd, FO_DELETE, path};
+                                        SHFILEOPSTRUCT shfo = {hwnd, FO_DELETE, path, NULL, FOF_ALLOWUNDO};
 
 					get_path(pane->cur, path);
 
@@ -4757,33 +4684,29 @@ static void InitInstance(HINSTANCE hinstance)
 	CoInitialize(NULL);
 	CoGetMalloc(MEMCTX_TASK, &Globals.iMalloc);
 	SHGetDesktopFolder(&Globals.iDesktop);
-#ifdef __WINE__
-	Globals.cfStrFName = RegisterClipboardFormatA(CFSTR_FILENAME);
-#else
 	Globals.cfStrFName = RegisterClipboardFormat(CFSTR_FILENAME);
-#endif
 #endif
 
 	/* load column strings */
 	col = 1;
 
-	load_string(g_pos_names[col++], IDS_COL_NAME);
-	load_string(g_pos_names[col++], IDS_COL_SIZE);
-	load_string(g_pos_names[col++], IDS_COL_CDATE);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_NAME);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_SIZE);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_CDATE);
 #ifndef _NO_EXTENSIONS
-	load_string(g_pos_names[col++], IDS_COL_ADATE);
-	load_string(g_pos_names[col++], IDS_COL_MDATE);
-	load_string(g_pos_names[col++], IDS_COL_IDX);
-	load_string(g_pos_names[col++], IDS_COL_LINKS);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_ADATE);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_MDATE);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_IDX);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_LINKS);
 #endif
-	load_string(g_pos_names[col++], IDS_COL_ATTR);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_ATTR);
 #ifndef _NO_EXTENSIONS
-	load_string(g_pos_names[col++], IDS_COL_SEC);
+	load_string(g_pos_names[col++], sizeof(g_pos_names[col])/sizeof(g_pos_names[col][0]), IDS_COL_SEC);
 #endif
 }
 
 
-static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
+static BOOL show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 {
 	static const TCHAR sMDICLIENT[] = {'M','D','I','C','L','I','E','N','T','\0'};
 
@@ -4795,7 +4718,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 	CLIENTCREATESTRUCT ccs;
 
 	if (Globals.hMainWnd)
-		return;
+		return TRUE;
 
 	opts = load_registry_settings();
 	hMenuFrame = LoadMenu(Globals.hInstance, MAKEINTRESOURCE(IDM_WINEFILE));
@@ -4810,7 +4733,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 
 
 	/* create main window */
-	Globals.hMainWnd = CreateWindowEx(0, (LPCTSTR)(int)Globals.hframeClass, RS(b1,IDS_WINE_FILE), WS_OVERLAPPEDWINDOW,
+	Globals.hMainWnd = CreateWindowEx(0, MAKEINTRESOURCE(Globals.hframeClass), RS(b1,IDS_WINE_FILE), WS_OVERLAPPEDWINDOW,
 					opts.start_x, opts.start_y, opts.width, opts.height,
 					hwndParent, Globals.hMenuFrame, Globals.hInstance, 0/*lpParam*/);
 
@@ -4873,8 +4796,10 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 	child->pos.rcNormalPosition.right = 320;
 	child->pos.rcNormalPosition.bottom = 280;
 
-	if (!create_child_window(child))
+	if (!create_child_window(child)) {
 		HeapFree(GetProcessHeap(), 0, child);
+		return FALSE;
+	}
 
 	SetWindowPlacement(child->hwnd, &child->pos);
 
@@ -4884,7 +4809,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 
 	UpdateWindow(Globals.hMainWnd);
 
-	if (path && path[0])
+	if (child->hwnd && path && path[0])
 	{
 		int index,count;
 		TCHAR drv[_MAX_DRIVE+1], dir[_MAX_DIR], name[_MAX_FNAME], ext[_MAX_EXT];
@@ -4912,6 +4837,7 @@ static void show_frame(HWND hwndParent, int cmdshow, LPCTSTR path)
 			}
 		}
 	}
+	return TRUE;
 }
 
 static void ExitInstance(void)
@@ -4965,7 +4891,11 @@ static int winefile_main(HINSTANCE hinstance, int cmdshow, LPCTSTR path)
   
 	InitInstance(hinstance);
 
-	show_frame(0, cmdshow, path);
+	if( !show_frame(0, cmdshow, path) )
+	{
+		ExitInstance();
+		return 1;
+	}
 
 	while(GetMessage(&msg, 0, 0, 0)) {
 		if (Globals.hmdiclient && TranslateMDISysAccel(Globals.hmdiclient, &msg))

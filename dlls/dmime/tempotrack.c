@@ -32,7 +32,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IUnknown_QueryInterface (LPUNKNOWN 
   TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
   
   if (IsEqualIID (riid, &IID_IUnknown)) {
-    *ppobj = (LPUNKNOWN)&This->UnknownVtbl;
+    *ppobj = &This->UnknownVtbl;
     IUnknown_AddRef (iface);
     return S_OK;
   } else if (IsEqualIID (riid, &IID_IDirectMusicTrack)
@@ -41,7 +41,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IUnknown_QueryInterface (LPUNKNOWN 
     IUnknown_AddRef (iface);
     return S_OK;
   } else if (IsEqualIID (riid, &IID_IPersistStream)) {
-    *ppobj = (LPPERSISTSTREAM)&This->PersistStreamVtbl;
+    *ppobj = &This->PersistStreamVtbl;
     IUnknown_AddRef (iface);
     return S_OK;
   }
@@ -117,7 +117,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_InitPlay (LPDIREC
     ERR(": no more memory\n");
     return E_OUTOFMEMORY;
   }
-  /** TODO real fill useful datas */
+  /** TODO real fill useful data */
   pState->dummy = 0;
   *ppStateData = pState;
   return S_OK;
@@ -142,7 +142,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_EndPlay (LPDIRECT
 static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_Play (LPDIRECTMUSICTRACK8 iface, void* pStateData, MUSIC_TIME mtStart, MUSIC_TIME mtEnd, MUSIC_TIME mtOffset, DWORD dwFlags, IDirectMusicPerformance* pPerf, IDirectMusicSegmentState* pSegSt, DWORD dwVirtualID)
 {
   ICOM_THIS_MULTI(IDirectMusicTempoTrack, TrackVtbl, iface);
-  FIXME("(%p, %p, %ld, %ld, %ld, %d, %p, %p, %d): stub\n", This, pStateData, mtStart, mtEnd, mtOffset, dwFlags, pPerf, pSegSt, dwVirtualID);
+  FIXME("(%p, %p, %d, %d, %d, %d, %p, %p, %d): stub\n", This, pStateData, mtStart, mtEnd, mtOffset, dwFlags, pPerf, pSegSt, dwVirtualID);
   /** should use IDirectMusicPerformance_SendPMsg here */
   return S_OK;
 }
@@ -155,7 +155,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_GetParam (LPDIREC
   LPDMUS_PRIVATE_TEMPO_ITEM pIt = NULL;
   DMUS_TEMPO_PARAM* prm = pParam;
 
-  FIXME("(%p, %s, %ld, %p, %p): almost stub\n", This, debugstr_dmguid(rguidType), mtTime, pmtNext, pParam);
+  FIXME("(%p, %s, %d, %p, %p): almost stub\n", This, debugstr_dmguid(rguidType), mtTime, pmtNext, pParam);
 
   if (NULL == pParam) {
     return E_POINTER;
@@ -198,7 +198,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_GetParam (LPDIREC
 
 static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_SetParam (LPDIRECTMUSICTRACK8 iface, REFGUID rguidType, MUSIC_TIME mtTime, void* pParam) {
 	ICOM_THIS_MULTI(IDirectMusicTempoTrack, TrackVtbl, iface);
-	FIXME("(%p, %s, %ld, %p): stub\n", This, debugstr_dmguid(rguidType), mtTime, pParam);
+	FIXME("(%p, %s, %d, %p): stub\n", This, debugstr_dmguid(rguidType), mtTime, pParam);
 	return S_OK;
 }
 
@@ -233,7 +233,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_RemoveNotificatio
 
 static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_Clone (LPDIRECTMUSICTRACK8 iface, MUSIC_TIME mtStart, MUSIC_TIME mtEnd, IDirectMusicTrack** ppTrack) {
   ICOM_THIS_MULTI(IDirectMusicTempoTrack, TrackVtbl, iface);
-  FIXME("(%p, %ld, %ld, %p): stub\n", This, mtStart, mtEnd, ppTrack);
+  FIXME("(%p, %d, %d, %p): stub\n", This, mtStart, mtEnd, ppTrack);
   return S_OK;
 }
 
@@ -266,7 +266,7 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_Compose (LPDIRECT
 
 static HRESULT WINAPI IDirectMusicTempoTrack_IDirectMusicTrack_Join (LPDIRECTMUSICTRACK8 iface, IDirectMusicTrack* pNewTrack, MUSIC_TIME mtJoin, IUnknown* pContext, DWORD dwTrackGroup, IDirectMusicTrack** ppResultTrack) {
   ICOM_THIS_MULTI(IDirectMusicTempoTrack, TrackVtbl, iface);
-  FIXME("(%p, %p, %ld, %p, %d, %p): stub\n", This, pNewTrack, mtJoin, pContext, dwTrackGroup, ppResultTrack);
+  FIXME("(%p, %p, %d, %p, %d, %p): stub\n", This, pNewTrack, mtJoin, pContext, dwTrackGroup, ppResultTrack);
   return S_OK;
 }
 
@@ -310,7 +310,7 @@ static ULONG WINAPI IDirectMusicTempoTrack_IPersistStream_Release (LPPERSISTSTRE
 static HRESULT WINAPI IDirectMusicTempoTrack_IPersistStream_GetClassID (LPPERSISTSTREAM iface, CLSID* pClassID) {
   ICOM_THIS_MULTI(IDirectMusicSegment8Impl, PersistStreamVtbl, iface);
   TRACE("(%p, %p)\n", This, pClassID);
-  memcpy(pClassID, &CLSID_DirectMusicTempoTrack, sizeof(CLSID));
+  *pClassID = CLSID_DirectMusicTempoTrack;
   return S_OK;
 }
 
@@ -345,14 +345,14 @@ static HRESULT WINAPI IDirectMusicTempoTrack_IPersistStream_Load (LPPERSISTSTREA
       IStream_Read (pStm, &item, sizeof(item), NULL);
       ++nItem;
       TRACE_(dmfile)("DMUS_IO_TEMPO_ITEM #%d\n", nItem);
-      TRACE_(dmfile)(" - lTime = %lu\n", item.lTime);
+      TRACE_(dmfile)(" - lTime = %u\n", item.lTime);
       TRACE_(dmfile)(" - dblTempo = %g\n", item.dblTempo);
       pNewItem = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(DMUS_PRIVATE_TEMPO_ITEM));
       if (NULL == pNewItem) {
 	ERR(": no more memory\n");
 	return  E_OUTOFMEMORY;
       }
-      memcpy(&pNewItem->item, &item, sizeof(DMUS_IO_TEMPO_ITEM));
+      pNewItem->item = item;
       list_add_tail (&This->Items, &pNewItem->entry);
       pNewItem = NULL;
       StreamCount += sizeof(item);
@@ -414,7 +414,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicTempoTrack (LPCGUID lpcGUID, LPVOID *ppob
   track->pDesc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DMUS_OBJECTDESC));
   DM_STRUCT_INIT(track->pDesc);
   track->pDesc->dwValidData |= DMUS_OBJ_CLASS;
-  memcpy (&track->pDesc->guidClass, &CLSID_DirectMusicTempoTrack, sizeof (CLSID));
+  track->pDesc->guidClass = CLSID_DirectMusicTempoTrack;
   track->ref = 0; /* will be inited by QueryInterface */
   track->enabled = TRUE;
   list_init (&track->Items);

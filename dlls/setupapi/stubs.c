@@ -28,6 +28,7 @@
 #include "winreg.h"
 #include "cfgmgr32.h"
 #include "setupapi.h"
+#include "winnls.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(setupapi);
 
@@ -51,12 +52,39 @@ DWORD WINAPI suErrorToIds16( WORD w1, WORD w2 )
 }
 
 /***********************************************************************
+ *              CM_Connect_MachineA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Connect_MachineA(PCSTR name, PHMACHINE machine)
+{
+  FIXME("(%s %p) stub\n", name, machine);
+  return CR_ACCESS_DENIED;
+}
+
+/***********************************************************************
  *		CM_Connect_MachineW  (SETUPAPI.@)
  */
 CONFIGRET WINAPI CM_Connect_MachineW(PCWSTR name, PHMACHINE machine)
 {
   FIXME("\n");
   return  CR_ACCESS_DENIED;
+}
+
+/***********************************************************************
+ *              CM_Create_DevNodeA  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Create_DevNodeA(PDEVINST pdnDevInst, DEVINSTID_A pDeviceID, DEVINST dnParent, ULONG ulFlags)
+{
+  FIXME("(%p %s 0x%08x 0x%08x) stub\n", pdnDevInst, pDeviceID, dnParent, ulFlags);
+  return CR_SUCCESS;
+}
+
+/***********************************************************************
+ *              CM_Create_DevNodeW  (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Create_DevNodeW(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, DEVINST dnParent, ULONG ulFlags)
+{
+  FIXME("(%p %s 0x%08x 0x%08x) stub\n", pdnDevInst, debugstr_w(pDeviceID), dnParent, ulFlags);
+  return CR_SUCCESS;
 }
 
 /***********************************************************************
@@ -67,17 +95,6 @@ CONFIGRET WINAPI CM_Disconnect_Machine(HMACHINE handle)
   FIXME("\n");
   return  CR_SUCCESS;
 
-}
-
-/***********************************************************************
- *		CM_Get_Device_IDA  (SETUPAPI.@)
- */
-CONFIGRET WINAPI CM_Get_Device_IDA( DEVINST dnDevInst, PSTR Buffer,
-                                   ULONG  BufferLen, ULONG  ulFlags)
-{
-    FIXME("%x, %p, %u %u\n",dnDevInst, Buffer, BufferLen, ulFlags);
-    Buffer[0] = 0;
-    return CR_SUCCESS;
 }
 
 /***********************************************************************
@@ -93,13 +110,12 @@ CONFIGRET WINAPI CM_Get_Device_ID_ListA(
 }
 
 /***********************************************************************
- *		CM_Get_Device_ID_Size  (SETUPAPI.@)
+ *              CM_Get_Parent (SETUPAPI.@)
  */
-CONFIGRET WINAPI CM_Get_Device_ID_Size( PULONG  pulLen, DEVINST dnDevInst,
-                                        ULONG  ulFlags)
+DWORD WINAPI CM_Get_Parent(PDEVINST pdnDevInst, DEVINST dnDevInst, ULONG ulFlags)
 {
-    FIXME("%p %x %u\n",pulLen, dnDevInst, ulFlags);
-    *pulLen = 1;
+    FIXME("%p 0x%08x 0x%08x stub\n", pdnDevInst, dnDevInst, ulFlags);
+    *pdnDevInst = dnDevInst;
     return CR_SUCCESS;
 }
 
@@ -210,4 +226,42 @@ BOOL WINAPI SetupDiGetINFClassW(PCWSTR inf, LPGUID class_guid, PWSTR class_name,
 {
     FIXME("%s %p %p %d %p\n", debugstr_w(inf), class_guid, class_name, size, required_size);
     return FALSE;
+}
+
+/***********************************************************************
+ *      SetupDiDestroyClassImageList (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiDestroyClassImageList(PSP_CLASSIMAGELIST_DATA ClassListImageData)
+{
+    FIXME("(%p) stub\n", ClassListImageData);
+    return TRUE;
+}
+
+/***********************************************************************
+ *      SetupDiGetClassImageList (SETUPAPI.@)
+ */
+BOOL WINAPI SetupDiGetClassImageList(PSP_CLASSIMAGELIST_DATA ClassImageListData)
+{
+    FIXME("(%p) stub\n", ClassImageListData);
+    return FALSE;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeA (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeA(PDEVINST pdnDevInst, DEVINSTID_A pDeviceID, ULONG ulFlags)
+{
+    FIXME("%p %s 0x%08x: stub\n", pdnDevInst, debugstr_a(pDeviceID), ulFlags);
+
+    return CR_FAILURE;
+}
+
+/***********************************************************************
+ *      CM_Locate_DevNodeW (SETUPAPI.@)
+ */
+CONFIGRET WINAPI CM_Locate_DevNodeW(PDEVINST pdnDevInst, DEVINSTID_W pDeviceID, ULONG ulFlags)
+{
+    FIXME("%p %s 0x%08x: stub\n", pdnDevInst, debugstr_w(pDeviceID), ulFlags);
+
+    return CR_FAILURE;
 }

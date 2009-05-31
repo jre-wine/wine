@@ -59,22 +59,28 @@ static void test_GetVersionEx(void)
     memset(&infoA,0,sizeof infoA);
     ret = GetVersionExA(&infoA);
     ok(!ret, "Expected GetVersionExA to fail\n");
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
+        GetLastError() == 0xdeadbeef /* Win9x */,
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        GetLastError());
 
     SetLastError(0xdeadbeef);
     infoA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA) / 2;
     ret = GetVersionExA(&infoA);
     ok(!ret, "Expected GetVersionExA to fail\n");
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
+        GetLastError() == 0xdeadbeef /* Win9x */,
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        GetLastError());
 
     SetLastError(0xdeadbeef);
     infoA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA) * 2;
     ret = GetVersionExA(&infoA);
     ok(!ret, "Expected GetVersionExA to fail\n");
-    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER,
-        "Expected ERROR_INSUFFICIENT_BUFFER, got %d\n", GetLastError());
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER ||
+        GetLastError() == 0xdeadbeef /* Win9x */,
+        "Expected ERROR_INSUFFICIENT_BUFFER or 0xdeadbeef (Win9x), got %d\n",
+        GetLastError());
 
     SetLastError(0xdeadbeef);
     infoA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
@@ -86,26 +92,32 @@ static void test_GetVersionEx(void)
     SetLastError(0xdeadbeef);
     infoExA.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEXA);
     ret = GetVersionExA((OSVERSIONINFOA *)&infoExA);
-    ok(ret, "Expected GetVersionExA to succeed\n");
+    ok(ret ||
+       broken(ret == 0), /* win95 */
+       "Expected GetVersionExA to succeed\n");
     ok(GetLastError() == 0xdeadbeef,
         "Expected 0xdeadbeef, got %d\n", GetLastError());
-
 }
 
-START_TEST(version)
+static void test_VerifyVersionInfo(void)
 {
     OSVERSIONINFOEX info = { sizeof(info) };
     BOOL ret;
-
-    init_function_pointers();
-
-    test_GetVersionEx();
+    DWORD servicepack;
 
     if(!pVerifyVersionInfoA || !pVerSetConditionMask)
     {
-        skip("Needed functions not available\n");
+        win_skip("Needed functions not available\n");
         return;
     }
+
+    /* Before we start doing some tests we should check what the version of
+     * the ServicePack is. Tests on a box with no ServicePack will fail otherwise.
+     */
+    GetVersionEx((OSVERSIONINFO *)&info);
+    servicepack = info.wServicePackMajor;
+    memset(&info, 0, sizeof(info));
+    info.dwOSVersionInfoSize = sizeof(info);
 
     ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION,
         pVerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
@@ -151,7 +163,15 @@ START_TEST(version)
     ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         pVerSetConditionMask(pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL),
             VER_MAJORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    if (servicepack == 0)
+    {
+        ok(!ret || broken(ret), /* win2k3 */
+           "VerifyVersionInfoA should have failed\n");
+        ok(GetLastError() == ERROR_OLD_WIN_VERSION,
+            "Expected ERROR_OLD_WIN_VERSION instead of %d\n", GetLastError());
+    }
+    else
+        ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
 
     GetVersionEx((OSVERSIONINFO *)&info);
     info.wServicePackMinor++;
@@ -160,17 +180,24 @@ START_TEST(version)
     ok(!ret && (GetLastError() == ERROR_OLD_WIN_VERSION),
         "VerifyVersionInfoA should have failed with ERROR_OLD_WIN_VERSION instead of %d\n", GetLastError());
 
-    GetVersionEx((OSVERSIONINFO *)&info);
-    info.wServicePackMajor--;
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    if (servicepack == 0)
+    {
+        skip("There is no ServicePack on this system\n");
+    }
+    else
+    {
+        GetVersionEx((OSVERSIONINFO *)&info);
+        info.wServicePackMajor--;
+        ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER));
+        ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
 
-    GetVersionEx((OSVERSIONINFO *)&info);
-    info.wServicePackMajor--;
-    ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
-        pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
-    ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+        GetVersionEx((OSVERSIONINFO *)&info);
+        info.wServicePackMajor--;
+        ret = pVerifyVersionInfoA(&info, VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
+            pVerSetConditionMask(0, VER_MINORVERSION, VER_GREATER_EQUAL));
+        ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+    }
 
     GetVersionEx((OSVERSIONINFO *)&info);
     info.wServicePackMajor++;
@@ -236,4 +263,12 @@ START_TEST(version)
     ret = pVerifyVersionInfoA(&info, VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR | VER_SERVICEPACKMINOR,
         pVerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL));
     ok(ret, "VerifyVersionInfoA failed with error %d\n", GetLastError());
+}
+
+START_TEST(version)
+{
+    init_function_pointers();
+
+    test_GetVersionEx();
+    test_VerifyVersionInfo();
 }

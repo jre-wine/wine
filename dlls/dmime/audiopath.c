@@ -31,19 +31,19 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IUnknown_QueryInterface (LPUNKNO
 	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
 
 	if (IsEqualIID (riid, &IID_IUnknown)) {
-		*ppobj = (LPVOID)&This->UnknownVtbl;
+		*ppobj = &This->UnknownVtbl;
 		IUnknown_AddRef (iface);
 		return S_OK;	
 	} else if (IsEqualIID (riid, &IID_IDirectMusicAudioPath)) {
-		*ppobj = (LPVOID)&This->AudioPathVtbl;
+		*ppobj = &This->AudioPathVtbl;
 		IUnknown_AddRef (iface);
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IDirectMusicObject)) {
-		*ppobj = (LPVOID)&This->ObjectVtbl;
+		*ppobj = &This->ObjectVtbl;
 		IUnknown_AddRef (iface);
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IPersistStream)) {
-		*ppobj = (LPVOID)&This->PersistStreamVtbl;
+		*ppobj = &This->PersistStreamVtbl;
 		IUnknown_AddRef (iface);
 		return S_OK;
 	}
@@ -206,9 +206,9 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_Activate (
   return S_OK;
 }
 
-static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_SetVolume (LPDIRECTMUSICAUDIOPATH iface, long lVolume, DWORD dwDuration) {
+static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicAudioPath_SetVolume (LPDIRECTMUSICAUDIOPATH iface, LONG lVolume, DWORD dwDuration) {
   ICOM_THIS_MULTI(IDirectMusicAudioPathImpl, AudioPathVtbl, iface);
-  FIXME("(%p, %li, %d): stub\n", This, lVolume, dwDuration);
+  FIXME("(%p, %i, %d): stub\n", This, lVolume, dwDuration);
   return S_OK;
 }
 
@@ -255,12 +255,12 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicObject_GetDescriptor
 static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicObject_SetDescriptor (LPDIRECTMUSICOBJECT iface, LPDMUS_OBJECTDESC pDesc) {
 	ICOM_THIS_MULTI(IDirectMusicAudioPathImpl, ObjectVtbl, iface);
 	TRACE("(%p, %p): setting descriptor:\n%s\n", This, pDesc, debugstr_DMUS_OBJECTDESC (pDesc));
-	
+
 	/* According to MSDN, we should copy only given values, not whole struct */	
 	if (pDesc->dwValidData & DMUS_OBJ_OBJECT)
-		memcpy (&This->pDesc->guidObject, &pDesc->guidObject, sizeof (pDesc->guidObject));
+		This->pDesc->guidObject = pDesc->guidObject;
 	if (pDesc->dwValidData & DMUS_OBJ_CLASS)
-		memcpy (&This->pDesc->guidClass, &pDesc->guidClass, sizeof (pDesc->guidClass));		
+		This->pDesc->guidClass = pDesc->guidClass;
 	if (pDesc->dwValidData & DMUS_OBJ_NAME)
 		lstrcpynW (This->pDesc->wszName, pDesc->wszName, DMUS_MAX_NAME);
 	if (pDesc->dwValidData & DMUS_OBJ_CATEGORY)
@@ -268,9 +268,9 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicObject_SetDescriptor
 	if (pDesc->dwValidData & DMUS_OBJ_FILENAME)
 		lstrcpynW (This->pDesc->wszFileName, pDesc->wszFileName, DMUS_MAX_FILENAME);
 	if (pDesc->dwValidData & DMUS_OBJ_VERSION)
-		memcpy (&This->pDesc->vVersion, &pDesc->vVersion, sizeof (pDesc->vVersion));				
+		This->pDesc->vVersion = pDesc->vVersion;
 	if (pDesc->dwValidData & DMUS_OBJ_DATE)
-		memcpy (&This->pDesc->ftDate, &pDesc->ftDate, sizeof (pDesc->ftDate));				
+		This->pDesc->ftDate = pDesc->ftDate;
 	if (pDesc->dwValidData & DMUS_OBJ_MEMORY) {
 		memcpy (&This->pDesc->llMemLength, &pDesc->llMemLength, sizeof (pDesc->llMemLength));				
 		memcpy (This->pDesc->pbMemData, pDesc->pbMemData, sizeof (pDesc->pbMemData));
@@ -293,11 +293,11 @@ static HRESULT WINAPI IDirectMusicAudioPathImpl_IDirectMusicObject_ParseDescript
 	LARGE_INTEGER liMove; /* used when skipping chunks */
 
 	TRACE("(%p, %p, %p)\n", This, pStream, pDesc);
-	
+
 	/* FIXME: should this be determined from stream? */
 	pDesc->dwValidData |= DMUS_OBJ_CLASS;
-	memcpy (&pDesc->guidClass, &CLSID_DirectMusicAudioPath, sizeof(CLSID));
-	
+	pDesc->guidClass = CLSID_DirectMusicAudioPath;
+
 	IStream_Read (pStream, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
 	TRACE_(dmfile)(": %s chunk (size = 0x%04x)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
 	switch (Chunk.fccID) {	
@@ -649,8 +649,8 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicAudioPathImpl (LPCGUID lpcGUID, LPVOID* p
 	obj->pDesc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DMUS_OBJECTDESC));
 	DM_STRUCT_INIT(obj->pDesc);
 	obj->pDesc->dwValidData |= DMUS_OBJ_CLASS;
-	memcpy (&obj->pDesc->guidClass, &CLSID_DirectMusicAudioPath, sizeof (CLSID));
+	obj->pDesc->guidClass = CLSID_DirectMusicAudioPath;
 	obj->ref = 0; /* will be inited by QueryInterface */
-	
+
 	return IDirectMusicAudioPathImpl_IUnknown_QueryInterface ((LPUNKNOWN)&obj->UnknownVtbl, lpcGUID, ppobj);
 }

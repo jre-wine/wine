@@ -30,6 +30,7 @@
 #include <winerror.h>
 
 
+#include "initguid.h"
 #include "rpc.h"
 #include "rpcdce.h"
 #include "rpcproxy.h"
@@ -47,7 +48,7 @@ static GUID IID_if4 = {0x1234567b, 1234, 5678, {12,34,56,78,90,0xab,0xcd,0xef}};
 static int my_alloc_called;
 static int my_free_called;
 
-static void * CALLBACK my_alloc(size_t size)
+static void * CALLBACK my_alloc(SIZE_T size)
 {
     my_alloc_called++;
     return NdrOleAllocate(size);
@@ -367,10 +368,10 @@ static const CInterfaceProxyVtbl *cstub_ProxyVtblList[] =
 
 static const CInterfaceStubVtbl *cstub_StubVtblList[] =
 {
-    (const CInterfaceStubVtbl *) &if1_stub_vtbl,
-    (const CInterfaceStubVtbl *) &if2_stub_vtbl,
-    (const CInterfaceStubVtbl *) &if3_stub_vtbl,
-    (const CInterfaceStubVtbl *) &if4_stub_vtbl,
+    &if1_stub_vtbl,
+    &if2_stub_vtbl,
+    &if3_stub_vtbl,
+    &if4_stub_vtbl,
     NULL
 };
 
@@ -431,8 +432,9 @@ static IPSFactoryBuffer *test_NdrDllGetClassObject(void)
 {
     IPSFactoryBuffer *ppsf = NULL;
     const CLSID PSDispatch = {0x20420, 0, 0, {0xc0, 0, 0, 0, 0, 0, 0, 0x46}};
+    const CLSID CLSID_Unknown = {0x45678, 0x1234, 0x6666, {0xff, 0x67, 0x45, 0x98, 0x76, 0x12, 0x34, 0x56}};
     HRESULT r;
-    HMODULE hmod = LoadLibraryA("rpcrt4.dll");
+    HMODULE hmod = GetModuleHandleA("rpcrt4.dll");
     void *CStd_QueryInterface = GetProcAddress(hmod, "CStdStubBuffer_QueryInterface");
     void *CStd_AddRef = GetProcAddress(hmod, "CStdStubBuffer_AddRef");
     void *CStd_Release = GetProcAddress(hmod, "NdrCStdStubBuffer_Release");
@@ -443,6 +445,11 @@ static IPSFactoryBuffer *test_NdrDllGetClassObject(void)
     void *CStd_CountRefs = GetProcAddress(hmod, "CStdStubBuffer_CountRefs");
     void *CStd_DebugServerQueryInterface = GetProcAddress(hmod, "CStdStubBuffer_DebugServerQueryInterface");
     void *CStd_DebugServerRelease = GetProcAddress(hmod, "CStdStubBuffer_DebugServerRelease");
+
+    r = NdrDllGetClassObject(&PSDispatch, &IID_IPSFactoryBuffer, (void**)&ppsf, proxy_file_list,
+                             &CLSID_Unknown, &PSFactoryBuffer);
+    ok(r == CLASS_E_CLASSNOTAVAILABLE, "NdrDllGetClassObject with unknown clsid should have returned CLASS_E_CLASSNOTAVAILABLE instead of 0x%x\n", r);
+    ok(ppsf == NULL, "NdrDllGetClassObject should have set ppsf to NULL on failure\n");
 
     r = NdrDllGetClassObject(&PSDispatch, &IID_IPSFactoryBuffer, (void**)&ppsf, proxy_file_list,
                          &PSDispatch, &PSFactoryBuffer);
@@ -517,6 +524,13 @@ static IPSFactoryBuffer *test_NdrDllGetClassObject(void)
 #undef VTBL_TEST_ZERO
 
     ok(PSFactoryBuffer.RefCount == 1, "ref count %d\n", PSFactoryBuffer.RefCount);
+    IPSFactoryBuffer_Release(ppsf);
+
+    r = NdrDllGetClassObject(&IID_if3, &IID_IPSFactoryBuffer, (void**)&ppsf, proxy_file_list,
+                             NULL, &PSFactoryBuffer);
+    ok(r == S_OK, "ret %08x\n", r);
+    ok(ppsf != NULL, "ppsf == NULL\n");
+
     return ppsf;
 }
 
@@ -605,13 +619,13 @@ static void test_CreateStub(IPSFactoryBuffer *ppsf)
     IUnknown *obj = (IUnknown*)&vtbl;
     IRpcStubBuffer *pstub = create_stub(ppsf, &IID_if1, obj, S_OK);
     CStdStubBuffer *cstd_stub = (CStdStubBuffer*)pstub;
-    const CInterfaceStubHeader *header = ((const CInterfaceStubHeader *)cstd_stub->lpVtbl) - 1;
+    const CInterfaceStubHeader *header = &CONTAINING_RECORD(cstd_stub->lpVtbl, const CInterfaceStubVtbl, Vtbl)->header;
 
     ok(IsEqualIID(header->piid, &IID_if1), "header iid differs\n");
     ok(cstd_stub->RefCount == 1, "ref count %d\n", cstd_stub->RefCount);
     /* 0xdeadbeef returned from create_stub_test_QI */
     ok(cstd_stub->pvServerObject == (void*)0xdeadbeef, "pvServerObject %p\n", cstd_stub->pvServerObject);
-    ok(cstd_stub->pPSFactory == ppsf, "pPSFactory %p\n", cstd_stub->pPSFactory);
+    ok(cstd_stub->pPSFactory != NULL, "pPSFactory was NULL\n");
 
     vtbl = &create_stub_test_fail_vtbl;
     pstub = create_stub(ppsf, &IID_if1, obj, E_NOINTERFACE);
@@ -924,6 +938,8 @@ static void test_delegating_Invoke(IPSFactoryBuffer *ppsf)
         ok(*(DWORD*)msg.Buffer == 0xabcdef, "buf[0] %08x\n", *(DWORD*)msg.Buffer);
         ok(*((DWORD*)msg.Buffer + 1) == S_OK, "buf[1] %08x\n", *((DWORD*)msg.Buffer + 1));
     }
+    /* free the buffer allocated by delegating_invoke_chan_get_buffer */
+    HeapFree(GetProcessHeap(), 0, msg.Buffer);
     IRpcStubBuffer_Release(pstub);
 }
 

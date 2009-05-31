@@ -23,13 +23,15 @@
 #include "config.h"
 #include "wine/port.h"
 
+#ifdef __i386__
+
 #include <stdarg.h>
 
 #include "windef.h"
 #include "winbase.h"
+#include "winternl.h"
 #include "wine/winuser16.h"
 #include "excpt.h"
-#include "thread.h"
 #include "wine/debug.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
@@ -643,10 +645,10 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
 
 	      if (outp)
 		/* FIXME: Check segment is readable.  */
-		(void)0;
+		;
 	      else
 		/* FIXME: Check segment is writable.  */
-		(void)0;
+		;
 
 	      if (repX)
               {
@@ -709,7 +711,7 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
                     idt[1].LimitLow = 0x100; /* FIXME */
                     idt[2].LimitLow = 0x11E; /* FIXME */
                     idt[3].LimitLow = 0x500; /* FIXME */
-                    store_reg( context, instr[1], (BYTE *)&idt + offset, long_op );
+                    store_reg( context, instr[1], (BYTE *)idt + offset, long_op );
                     context->Eip += prefixlen + len + 1;
                     return ExceptionContinueExecution;
                 }
@@ -851,16 +853,16 @@ DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context )
             return ExceptionContinueExecution;
 
         case 0xfa: /* cli */
-            NtCurrentTeb()->dpmi_vif = 0;
+            get_vm86_teb_info()->dpmi_vif = 0;
             context->Eip += prefixlen + 1;
             return ExceptionContinueExecution;
 
         case 0xfb: /* sti */
-            NtCurrentTeb()->dpmi_vif = 1;
+            get_vm86_teb_info()->dpmi_vif = 1;
             context->Eip += prefixlen + 1;
-            if (NtCurrentTeb()->vm86_pending)
+            if (get_vm86_teb_info()->vm86_pending)
             {
-                NtCurrentTeb()->vm86_pending = 0;
+                get_vm86_teb_info()->vm86_pending = 0;
                 rec->ExceptionCode = EXCEPTION_VM86_STI;
                 break; /* Handle the pending event. */
             }
@@ -895,7 +897,7 @@ LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs )
 /***********************************************************************
  *           INSTR_CallBuiltinHandler
  */
-void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum )
+static void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum )
 {
     if (!winedos.CallBuiltinHandler) load_winedos();
     if (winedos.CallBuiltinHandler) winedos.CallBuiltinHandler( context, intnum );
@@ -928,3 +930,5 @@ FARPROC16 WINAPI GetSetKernelDOSProc16( FARPROC16 DosProc )
     FIXME("(DosProc=%p): stub\n", DosProc);
     return NULL;
 }
+
+#endif  /* __i386__ */

@@ -39,12 +39,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(dc);
 
 static const WCHAR displayW[] = { 'd','i','s','p','l','a','y',0 };
 
-static BOOL DC_DeleteObject( HGDIOBJ handle, void *obj );
+static BOOL DC_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs dc_funcs =
 {
     NULL,             /* pSelectObject */
-    NULL,             /* pGetObject16 */
     NULL,             /* pGetObjectA */
     NULL,             /* pGetObjectW */
     NULL,             /* pUnrealizeObject */
@@ -54,13 +53,13 @@ static const struct gdi_obj_funcs dc_funcs =
 
 static inline DC *get_dc_obj( HDC hdc )
 {
-    DC *dc = GDI_GetObjPtr( hdc, MAGIC_DONTCARE );
+    DC *dc = GDI_GetObjPtr( hdc, 0 );
     if (!dc) return NULL;
 
-    if ((GDIMAGIC(dc->header.wMagic) != DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != MEMORY_DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != METAFILE_DC_MAGIC) &&
-        (GDIMAGIC(dc->header.wMagic) != ENHMETAFILE_DC_MAGIC))
+    if ((dc->header.type != OBJ_DC) &&
+        (dc->header.type != OBJ_MEMDC) &&
+        (dc->header.type != OBJ_METADC) &&
+        (dc->header.type != OBJ_ENHMETADC))
     {
         GDI_ReleaseObj( hdc );
         SetLastError( ERROR_INVALID_HANDLE );
@@ -75,12 +74,10 @@ static inline DC *get_dc_obj( HDC hdc )
  */
 DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
 {
-    HDC hdc;
     DC *dc;
 
-    if (!(dc = GDI_AllocObject( sizeof(*dc), magic, (HGDIOBJ*)&hdc, &dc_funcs ))) return NULL;
+    if (!(dc = HeapAlloc( GetProcessHeap(), 0, sizeof(*dc) ))) return NULL;
 
-    dc->hSelf               = hdc;
     dc->funcs               = funcs;
     dc->physDev             = NULL;
     dc->thread              = GetCurrentThreadId();
@@ -106,13 +103,14 @@ DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
     dc->hMetaRgn            = 0;
     dc->hMetaClipRgn        = 0;
     dc->hVisRgn             = 0;
-    dc->hPen                = GetStockObject( BLACK_PEN );
-    dc->hBrush              = GetStockObject( WHITE_BRUSH );
-    dc->hFont               = GetStockObject( SYSTEM_FONT );
+    dc->hPen                = GDI_inc_ref_count( GetStockObject( BLACK_PEN ));
+    dc->hBrush              = GDI_inc_ref_count( GetStockObject( WHITE_BRUSH ));
+    dc->hFont               = GDI_inc_ref_count( GetStockObject( SYSTEM_FONT ));
     dc->hBitmap             = 0;
     dc->hDevice             = 0;
     dc->hPalette            = GetStockObject( DEFAULT_PALETTE );
     dc->gdiFont             = 0;
+    dc->font_code_page      = CP_ACP;
     dc->ROPmode             = R2_COPYPEN;
     dc->polyFillMode        = ALTERNATE;
     dc->stretchBltMode      = BLACKONWHITE;
@@ -149,44 +147,15 @@ DC *alloc_dc_ptr( const DC_FUNCTIONS *funcs, WORD magic )
     dc->BoundsRect.bottom   = 0;
     dc->saved_visrgn        = NULL;
     PATH_InitGdiPath(&dc->path);
-    GDI_ReleaseObj( dc->hSelf );
+
+    if (!(dc->hSelf = alloc_gdi_handle( &dc->header, magic, &dc_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, dc );
+        dc = NULL;
+    }
     return dc;
 }
 
-
-
-/***********************************************************************
- *           DC_GetDCPtr
- */
-DC *DC_GetDCPtr( HDC hdc )
-{
-    DC *dc = get_dc_obj( hdc );
-    if (!dc) return NULL;
-
-    if (!InterlockedCompareExchange( &dc->refcount, 1, 0 ))
-    {
-        dc->thread = GetCurrentThreadId();
-    }
-    else if (dc->thread != GetCurrentThreadId())
-    {
-        GDI_ReleaseObj( hdc );
-        SetLastError( ERROR_ACCESS_DENIED );
-        return NULL;
-    }
-    else InterlockedIncrement( &dc->refcount );
-
-    return dc;
-}
-
-
-/***********************************************************************
- *           DC_ReleaseDCPtr
- */
-void DC_ReleaseDCPtr( DC *dc )
-{
-    release_dc_ptr( dc );
-    GDI_ReleaseObj( dc->hSelf );
-}
 
 
 /***********************************************************************
@@ -195,9 +164,13 @@ void DC_ReleaseDCPtr( DC *dc )
 BOOL free_dc_ptr( DC *dc )
 {
     assert( dc->refcount == 1 );
-    /* grab the gdi lock again */
-    if (!GDI_GetObjPtr( dc->hSelf, MAGIC_DONTCARE )) return FALSE;  /* shouldn't happen */
-    return GDI_FreeObject( dc->hSelf, dc );
+    if (free_gdi_handle( dc->hSelf ) != dc) return FALSE;  /* shouldn't happen */
+    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
+    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
+    if (dc->hMetaClipRgn) DeleteObject( dc->hMetaClipRgn );
+    if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
+    PATH_DestroyGdiPath( &dc->path );
+    return HeapFree( GetProcessHeap(), 0, dc );
 }
 
 
@@ -259,9 +232,8 @@ void update_dc( DC *dc )
 /***********************************************************************
  *           DC_DeleteObject
  */
-static BOOL DC_DeleteObject( HGDIOBJ handle, void *obj )
+static BOOL DC_DeleteObject( HGDIOBJ handle )
 {
-    GDI_ReleaseObj( handle );
     return DeleteDC( handle );
 }
 
@@ -292,7 +264,7 @@ void DC_InitDC( DC* dc )
  */
 static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
 {
-    FLOAT determinant;
+    double determinant;
 
     determinant = xformSrc->eM11*xformSrc->eM22 -
         xformSrc->eM12*xformSrc->eM21;
@@ -325,19 +297,19 @@ static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
 void DC_UpdateXforms( DC *dc )
 {
     XFORM xformWnd2Vport, oldworld2vport;
-    FLOAT scaleX, scaleY;
+    double scaleX, scaleY;
 
     /* Construct a transformation to do the window-to-viewport conversion */
-    scaleX = (FLOAT)dc->vportExtX / (FLOAT)dc->wndExtX;
-    scaleY = (FLOAT)dc->vportExtY / (FLOAT)dc->wndExtY;
+    scaleX = (double)dc->vportExtX / (double)dc->wndExtX;
+    scaleY = (double)dc->vportExtY / (double)dc->wndExtY;
     xformWnd2Vport.eM11 = scaleX;
     xformWnd2Vport.eM12 = 0.0;
     xformWnd2Vport.eM21 = 0.0;
     xformWnd2Vport.eM22 = scaleY;
-    xformWnd2Vport.eDx  = (FLOAT)dc->vportOrgX -
-        scaleX * (FLOAT)dc->wndOrgX;
-    xformWnd2Vport.eDy  = (FLOAT)dc->vportOrgY -
-        scaleY * (FLOAT)dc->wndOrgY;
+    xformWnd2Vport.eDx  = (double)dc->vportOrgX -
+        scaleX * (double)dc->wndOrgX;
+    xformWnd2Vport.eDy  = (double)dc->vportOrgY -
+        scaleY * (double)dc->wndOrgY;
 
     oldworld2vport = dc->xformWorld2Vport;
     /* Combine with the world transformation */
@@ -350,7 +322,8 @@ void DC_UpdateXforms( DC *dc )
 
     /* Reselect the font and pen back into the dc so that the size
        gets updated. */
-    if(memcmp(&oldworld2vport, &dc->xformWorld2Vport, sizeof(oldworld2vport)))
+    if (memcmp(&oldworld2vport, &dc->xformWorld2Vport, sizeof(oldworld2vport)) &&
+        !GdiIsMetaFileDC(dc->hSelf))
     {
         SelectObject(dc->hSelf, GetCurrentObject(dc->hSelf, OBJ_FONT));
         SelectObject(dc->hSelf, GetCurrentObject(dc->hSelf, OBJ_PEN));
@@ -359,20 +332,19 @@ void DC_UpdateXforms( DC *dc )
 
 
 /***********************************************************************
- *           GetDCState   (Not a Windows API)
+ *           save_dc_state
  */
-HDC WINAPI GetDCState( HDC hdc )
+INT save_dc_state( HDC hdc )
 {
     DC * newdc, * dc;
-    HGDIOBJ handle;
+    INT ret;
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
-    if (!(newdc = GDI_AllocObject( sizeof(DC), GDIMAGIC(dc->header.wMagic), &handle, &dc_funcs )))
+    if (!(newdc = HeapAlloc( GetProcessHeap(), 0, sizeof(*newdc ))))
     {
       release_dc_ptr( dc );
       return 0;
     }
-    TRACE("(%p): returning %p\n", hdc, handle );
 
     newdc->flags            = dc->flags | DC_SAVED;
     newdc->layout           = dc->layout;
@@ -415,13 +387,12 @@ HDC WINAPI GetDCState( HDC hdc )
     newdc->vportExtX        = dc->vportExtX;
     newdc->vportExtY        = dc->vportExtY;
     newdc->BoundsRect       = dc->BoundsRect;
+    newdc->gdiFont          = dc->gdiFont;
 
-    newdc->hSelf = (HDC)handle;
     newdc->thread    = GetCurrentThreadId();
     newdc->refcount  = 1;
     newdc->saveLevel = 0;
     newdc->saved_dc  = 0;
-    GDI_ReleaseObj( handle );
 
     PATH_InitGdiPath( &newdc->path );
 
@@ -429,6 +400,13 @@ HDC WINAPI GetDCState( HDC hdc )
     newdc->hookThunk  = NULL;
     newdc->hookProc   = 0;
     newdc->saved_visrgn = NULL;
+
+    if (!(newdc->hSelf = alloc_gdi_handle( &newdc->header, dc->header.type, &dc_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, newdc );
+        release_dc_ptr( dc );
+        return 0;
+    }
 
     /* Get/SetDCState() don't change hVisRgn field ("Undoc. Windows" p.559). */
 
@@ -448,39 +426,67 @@ HDC WINAPI GetDCState( HDC hdc )
     }
     /* don't bother recomputing hMetaClipRgn, we'll do that in SetDCState */
 
-    if(dc->gdiFont) {
-	newdc->gdiFont = dc->gdiFont;
-    } else
-        newdc->gdiFont = 0;
+    if (!PATH_AssignGdiPath( &newdc->path, &dc->path ))
+    {
+        release_dc_ptr( dc );
+        free_dc_ptr( newdc );
+	return 0;
+    }
 
+    newdc->saved_dc = dc->saved_dc;
+    dc->saved_dc = newdc->hSelf;
+    ret = ++dc->saveLevel;
     release_dc_ptr( newdc );
     release_dc_ptr( dc );
-    return handle;
+    return ret;
 }
 
 
 /***********************************************************************
- *           SetDCState   (Not a Windows API)
+ *           restore_dc_state
  */
-void WINAPI SetDCState( HDC hdc, HDC hdcs )
+BOOL restore_dc_state( HDC hdc, INT level )
 {
+    HDC hdcs, first_dcs;
     DC *dc, *dcs;
+    INT save_level;
 
-    if (!(dc = get_dc_ptr( hdc ))) return;
+    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+
+    /* find the state level to restore */
+
+    if (abs(level) > dc->saveLevel || level == 0)
+    {
+        release_dc_ptr( dc );
+        return FALSE;
+    }
+    if (level < 0) level = dc->saveLevel + level + 1;
+    first_dcs = dc->saved_dc;
+    for (hdcs = first_dcs, save_level = dc->saveLevel; save_level > level; save_level--)
+    {
+	if (!(dcs = get_dc_ptr( hdcs )))
+	{
+            release_dc_ptr( dc );
+            return FALSE;
+	}
+        hdcs = dcs->saved_dc;
+        release_dc_ptr( dcs );
+    }
+
+    /* restore the state */
+
     if (!(dcs = get_dc_ptr( hdcs )))
     {
         release_dc_ptr( dc );
-        return;
+        return FALSE;
     }
-    if (!(dcs->flags & DC_SAVED))
+    if (!PATH_AssignGdiPath( &dc->path, &dcs->path ))
     {
-        release_dc_ptr( dc );
         release_dc_ptr( dcs );
-        return;
+        release_dc_ptr( dc );
+        return FALSE;
     }
-    TRACE("%p %p\n", hdc, hdcs );
 
-    update_dc( dc );
     dc->flags            = dcs->flags & ~DC_SAVED;
     dc->layout           = dcs->layout;
     dc->hDevice          = dcs->hDevice;
@@ -548,26 +554,24 @@ void WINAPI SetDCState( HDC hdc, HDC hdcs )
     SetBkColor( hdc, dcs->backgroundColor);
     SetTextColor( hdc, dcs->textColor);
     GDISelectPalette( hdc, dcs->hPalette, FALSE );
-    release_dc_ptr( dc );
+
+    dc->saved_dc  = dcs->saved_dc;
+    dcs->saved_dc = 0;
+    dc->saveLevel = save_level - 1;
+
     release_dc_ptr( dcs );
-}
 
+    /* now destroy all the saved DCs */
 
-/***********************************************************************
- *           GetDCState   (GDI.179)
- */
-HDC16 WINAPI GetDCState16( HDC16 hdc )
-{
-    return HDC_16( GetDCState( HDC_32(hdc) ));
-}
-
-
-/***********************************************************************
- *           SetDCState   (GDI.180)
- */
-void WINAPI SetDCState16( HDC16 hdc, HDC16 hdcs )
-{
-    SetDCState( HDC_32(hdc), HDC_32(hdcs) );
+    while (first_dcs)
+    {
+	if (!(dcs = get_dc_ptr( first_dcs ))) break;
+        hdcs = dcs->saved_dc;
+        free_dc_ptr( dcs );
+        first_dcs = hdcs;
+    }
+    release_dc_ptr( dc );
+    return TRUE;
 }
 
 
@@ -576,48 +580,16 @@ void WINAPI SetDCState16( HDC16 hdc, HDC16 hdcs )
  */
 INT WINAPI SaveDC( HDC hdc )
 {
-    HDC hdcs;
-    DC * dc, * dcs;
+    DC * dc;
     INT ret;
 
-    dc = get_dc_ptr( hdc );
-    if (!dc) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if(dc->funcs->pSaveDC)
-    {
         ret = dc->funcs->pSaveDC( dc->physDev );
-        if(ret)
-            ret = ++dc->saveLevel;
-        release_dc_ptr( dc );
-        return ret;
-    }
+    else
+        ret = save_dc_state( hdc );
 
-    if (!(hdcs = GetDCState( hdc )))
-    {
-        release_dc_ptr( dc );
-        return 0;
-    }
-    dcs = get_dc_ptr( hdcs );
-
-    /* Copy path. The reason why path saving / restoring is in SaveDC/
-     * RestoreDC and not in GetDCState/SetDCState is that the ...DCState
-     * functions are only in Win16 (which doesn't have paths) and that
-     * SetDCState doesn't allow us to signal an error (which can happen
-     * when copying paths).
-     */
-    if (!PATH_AssignGdiPath( &dcs->path, &dc->path ))
-    {
-        release_dc_ptr( dc );
-        release_dc_ptr( dcs );
-	DeleteDC( hdcs );
-	return 0;
-    }
-
-    dcs->saved_dc = dc->saved_dc;
-    dc->saved_dc = hdcs;
-    TRACE("(%p): returning %d\n", hdc, dc->saveLevel+1 );
-    ret = ++dc->saveLevel;
-    release_dc_ptr( dcs );
     release_dc_ptr( dc );
     return ret;
 }
@@ -628,53 +600,18 @@ INT WINAPI SaveDC( HDC hdc )
  */
 BOOL WINAPI RestoreDC( HDC hdc, INT level )
 {
-    DC * dc, * dcs;
+    DC *dc;
     BOOL success;
 
     TRACE("%p %d\n", hdc, level );
     if (!(dc = get_dc_ptr( hdc ))) return FALSE;
-
-    if(abs(level) > dc->saveLevel || level == 0)
-    {
-        release_dc_ptr( dc );
-        return FALSE;
-    }
-
     update_dc( dc );
 
     if(dc->funcs->pRestoreDC)
-    {
         success = dc->funcs->pRestoreDC( dc->physDev, level );
-        if(level < 0) level = dc->saveLevel + level + 1;
-        if(success)
-            dc->saveLevel = level - 1;
-        release_dc_ptr( dc );
-        return success;
-    }
+    else
+        success = restore_dc_state( hdc, level );
 
-    if (level < 0) level = dc->saveLevel + level + 1;
-    success=TRUE;
-    while (dc->saveLevel >= level)
-    {
-        HDC hdcs = dc->saved_dc;
-	if (!(dcs = get_dc_ptr( hdcs )))
-	{
-            success = FALSE;
-            break;
-	}
-        dc->saved_dc = dcs->saved_dc;
-        dcs->saved_dc = 0;
-	if (--dc->saveLevel < level)
-	{
-	    SetDCState( hdc, hdcs );
-            if (!PATH_AssignGdiPath( &dc->path, &dcs->path ))
-		/* FIXME: This might not be quite right, since we're
-		 * returning FALSE but still destroying the saved DC state */
-	        success=FALSE;
-	}
-        release_dc_ptr( dcs );
-	DeleteDC( hdcs );
-    }
     release_dc_ptr( dc );
     return success;
 }
@@ -708,10 +645,10 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
         ERR( "no driver found for %s\n", debugstr_w(buf) );
         return 0;
     }
-    if (!(dc = alloc_dc_ptr( funcs, DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, OBJ_DC ))) goto error;
     hdc = dc->hSelf;
 
-    dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
     if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;
 
     TRACE("(driver=%s, device=%s, output=%s): returning %p\n",
@@ -732,7 +669,6 @@ HDC WINAPI CreateDCW( LPCWSTR driver, LPCWSTR device, LPCWSTR output,
     return hdc;
 
 error:
-    if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
     if (dc) free_dc_ptr( dc );
     DRIVER_release_driver( funcs );
     return 0;
@@ -820,14 +756,15 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
         release_dc_ptr( origDC );
         if (funcs) funcs = DRIVER_get_driver( funcs );
     }
+    else if (hdc) return 0;
 
     if (!funcs && !(funcs = DRIVER_load_driver( displayW ))) return 0;
 
-    if (!(dc = alloc_dc_ptr( funcs, MEMORY_DC_MAGIC ))) goto error;
+    if (!(dc = alloc_dc_ptr( funcs, OBJ_MEMDC ))) goto error;
 
     TRACE("(%p): returning %p\n", hdc, dc->hSelf );
 
-    dc->hBitmap = GetStockObject( DEFAULT_BITMAP );
+    dc->hBitmap = GDI_inc_ref_count( GetStockObject( DEFAULT_BITMAP ));
     if (!(dc->hVisRgn = CreateRectRgn( 0, 0, 1, 1 ))) goto error;   /* default bitmap is 1x1 */
 
     /* Copy the driver-specific physical device info into
@@ -848,7 +785,6 @@ HDC WINAPI CreateCompatibleDC( HDC hdc )
     return ret;
 
 error:
-    if (dc && dc->hVisRgn) DeleteObject( dc->hVisRgn );
     if (dc) free_dc_ptr( dc );
     DRIVER_release_driver( funcs );
     return 0;
@@ -889,11 +825,6 @@ BOOL WINAPI DeleteDC( HDC hdc )
         if (!(dcs = get_dc_ptr( hdcs ))) break;
         dc->saved_dc = dcs->saved_dc;
         dc->saveLevel--;
-        if (dcs->hClipRgn) DeleteObject( dcs->hClipRgn );
-        if (dcs->hMetaRgn) DeleteObject( dcs->hMetaRgn );
-        if (dcs->hMetaClipRgn) DeleteObject( dcs->hMetaClipRgn );
-        if (dcs->hVisRgn) DeleteObject( dcs->hVisRgn );
-        PATH_DestroyGdiPath(&dcs->path);
         free_dc_ptr( dcs );
     }
 
@@ -915,11 +846,6 @@ BOOL WINAPI DeleteDC( HDC hdc )
         HeapFree( GetProcessHeap(), 0, dc->saved_visrgn );
         dc->saved_visrgn = next;
     }
-    if (dc->hClipRgn) DeleteObject( dc->hClipRgn );
-    if (dc->hMetaRgn) DeleteObject( dc->hMetaRgn );
-    if (dc->hMetaClipRgn) DeleteObject( dc->hMetaClipRgn );
-    if (dc->hVisRgn) DeleteObject( dc->hVisRgn );
-    PATH_DestroyGdiPath(&dc->path);
 
     free_dc_ptr( dc );
     if (funcs) DRIVER_release_driver( funcs );  /* do that after releasing the GDI lock */
@@ -1134,21 +1060,6 @@ BOOL WINAPI GetDCOrgEx( HDC hDC, LPPOINT lpp )
 
 
 /***********************************************************************
- *           SetDCOrg   (GDI.117)
- */
-DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
-{
-    DWORD prevOrg = 0;
-    HDC hdc = HDC_32( hdc16 );
-    DC *dc = get_dc_ptr( hdc );
-    if (!dc) return 0;
-    if (dc->funcs->pSetDCOrg) prevOrg = dc->funcs->pSetDCOrg( dc->physDev, x, y );
-    release_dc_ptr( dc );
-    return prevOrg;
-}
-
-
-/***********************************************************************
  *		GetGraphicsMode (GDI32.@)
  */
 INT WINAPI GetGraphicsMode( HDC hdc )
@@ -1263,13 +1174,21 @@ BOOL WINAPI GetTransform( HDC hdc, DWORD unknown, LPXFORM xform )
 BOOL WINAPI SetWorldTransform( HDC hdc, const XFORM *xform )
 {
     BOOL ret = FALSE;
-    DC *dc = get_dc_ptr( hdc );
+    DC *dc;
 
+    if (!xform) return FALSE;
+
+    dc = get_dc_ptr( hdc );
     if (!dc) return FALSE;
-    if (!xform) goto done;
 
     /* Check that graphics mode is GM_ADVANCED */
     if (dc->GraphicsMode!=GM_ADVANCED) goto done;
+
+    TRACE("eM11 %f eM12 %f eM21 %f eM22 %f eDx %f eDy %f\n",
+        xform->eM11, xform->eM12, xform->eM21, xform->eM22, xform->eDx, xform->eDy);
+
+    /* The transform must conform to (eM11 * eM22 != eM12 * eM21) requirement */
+    if (xform->eM11 * xform->eM22 == xform->eM12 * xform->eM21) goto done;
 
     if (dc->funcs->pSetWorldTransform)
     {
@@ -1429,6 +1348,24 @@ BOOL WINAPI SetDCHook( HDC hdc, DCHOOKPROC hookProc, DWORD_PTR dwHookData )
 }
 
 
+/***********************************************************************
+ *           GetDCHook   (GDI32.@)
+ *
+ * Note: this doesn't exist in Win32, we add it here because user32 needs it.
+ */
+DWORD_PTR WINAPI GetDCHook( HDC hdc, DCHOOKPROC *proc )
+{
+    DC *dc = get_dc_ptr( hdc );
+    DWORD_PTR ret;
+
+    if (!dc) return 0;
+    if (proc) *proc = dc->hookThunk;
+    ret = dc->dwHookData;
+    release_dc_ptr( dc );
+    return ret;
+}
+
+
 /* relay function to call the 16-bit DC hook proc */
 static BOOL WINAPI call_dc_hook16( HDC hdc, WORD code, DWORD_PTR data, LPARAM lParam )
 {
@@ -1488,11 +1425,12 @@ DWORD WINAPI GetDCHook16( HDC16 hdc16, FARPROC16 *phookProc )
 
 
 /***********************************************************************
- *           SetHookFlags   (GDI.192)
+ *           SetHookFlags   (GDI32.@)
+ *
+ * Note: this doesn't exist in Win32, we add it here because user32 needs it.
  */
-WORD WINAPI SetHookFlags16(HDC16 hdc16, WORD flags)
+WORD WINAPI SetHookFlags( HDC hdc, WORD flags )
 {
-    HDC hdc = HDC_32( hdc16 );
     DC *dc = get_dc_obj( hdc );  /* not get_dc_ptr, this needs to work from any thread */
     LONG ret = 0;
 
@@ -1516,7 +1454,7 @@ WORD WINAPI SetHookFlags16(HDC16 hdc16, WORD flags)
  */
 INT WINAPI SetICMMode(HDC hdc, INT iEnableICM)
 {
-/*FIXME  Asuming that ICM is always off, and cannot be turned on */
+/*FIXME:  Assume that ICM is always off, and cannot be turned on */
     if (iEnableICM == ICM_OFF) return ICM_OFF;
     if (iEnableICM == ICM_ON) return 0;
     if (iEnableICM == ICM_QUERY) return ICM_OFF;
@@ -1979,38 +1917,6 @@ BOOL WINAPI GetWindowOrgEx( HDC hdc, LPPOINT pt )
     pt->y = dc->wndOrgY;
     release_dc_ptr( dc );
     return TRUE;
-}
-
-
-/***********************************************************************
- *		InquireVisRgn   (GDI.131)
- */
-HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
-{
-    HRGN16 ret = 0;
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (dc)
-    {
-        ret = HRGN_16(dc->hVisRgn);
-        release_dc_ptr( dc );
-    }
-    return ret;
-}
-
-
-/***********************************************************************
- *		GetClipRgn (GDI.173)
- */
-HRGN16 WINAPI GetClipRgn16( HDC16 hdc )
-{
-    HRGN16 ret = 0;
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (dc)
-    {
-        ret = HRGN_16(dc->hClipRgn);
-        release_dc_ptr( dc );
-    }
-    return ret;
 }
 
 

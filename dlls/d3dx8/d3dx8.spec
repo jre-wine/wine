@@ -68,6 +68,7 @@
 @ stdcall D3DXPlaneTransform(ptr ptr ptr)
 @ stdcall D3DXColorAdjustSaturation(ptr ptr long)
 @ stdcall D3DXColorAdjustContrast(ptr ptr long)
+@ stdcall D3DXFresnelTerm(long long)
 @ stdcall D3DXCreateMatrixStack(long ptr)
 @ stdcall D3DXCreateFont(ptr ptr ptr)
 @ stub D3DXCreateFontIndirect
@@ -91,8 +92,8 @@
 @ stub D3DXValidMesh
 @ stub D3DXGeneratePMesh
 @ stub D3DXSimplifyMesh
-@ stub D3DXComputeBoundingSphere
-@ stub D3DXComputeBoundingBox
+@ stdcall D3DXComputeBoundingSphere(ptr long long ptr ptr)
+@ stdcall D3DXComputeBoundingBox(ptr long long ptr ptr)
 @ stub D3DXComputeNormals
 @ stdcall D3DXCreateBuffer(long ptr)
 @ stub D3DXLoadMeshFromX
@@ -108,8 +109,9 @@
 @ stub D3DXFVFFromDeclarator
 @ stub D3DXWeldVertices
 @ stub D3DXIntersect
-@ stub D3DXSphereBoundProbe
-@ stub D3DXBoxBoundProbe
+@ cdecl D3DXIntersectTri(ptr ptr ptr ptr ptr ptr ptr ptr)
+@ stdcall D3DXSphereBoundProbe(ptr long ptr ptr)
+@ stdcall D3DXBoxBoundProbe(ptr ptr ptr ptr)
 @ stub D3DXCreatePolygon
 @ stub D3DXCreateBox
 @ stub D3DXCreateCylinder

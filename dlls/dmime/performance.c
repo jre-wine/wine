@@ -67,7 +67,7 @@ static DMUS_PMSGItem* ProceedMsg(IDirectMusicPerformance8Impl* This, DMUS_PMSGIt
 }
 
 static DWORD WINAPI ProcessMsgThread(LPVOID lpParam) {
-  IDirectMusicPerformance8Impl* This = (IDirectMusicPerformance8Impl*) lpParam;
+  IDirectMusicPerformance8Impl* This = lpParam;
   DWORD timeOut = INFINITE;
   MSG msg;
   HRESULT hr;
@@ -222,15 +222,9 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_Init (LPDIRECTMUSICPERFORMANC
 	  This->pDirectSound = pDirectSound;
 	  IDirectSound_AddRef(This->pDirectSound);
 	} else {
-	  HRESULT hr;
-	  hr = DirectSoundCreate8(NULL, (LPDIRECTSOUND8*) &This->pDirectSound, NULL);
+	  DirectSoundCreate8(NULL, (LPDIRECTSOUND8*) &This->pDirectSound, NULL);
 	  if (!This->pDirectSound) return DSERR_NODRIVER;
-	  
-	  /** 
-	   * as seen in msdn
-	   * 
-	   *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directX/htm/idirectmusicperformance8initaudio.asp
-	   */
+
 	  if (NULL != hWnd) {
 	    IDirectSound8_SetCooperativeLevel(This->pDirectSound, hWnd, DSSCL_PRIORITY);
 	  } else {
@@ -244,7 +238,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_Init (LPDIRECTMUSICPERFORMANC
 	  This->pDirectMusic = (IDirectMusic8*) *ppDirectMusic;
 	  IDirectMusic8_AddRef(This->pDirectMusic);
 	} else {
-	  /* app allows the performance to initialise itfself and needs a pointer to object*/
+	  /* app allows the performance to initialise itself and needs a pointer to object*/
           CoCreateInstance (&CLSID_DirectMusic, NULL, CLSCTX_INPROC_SERVER, &IID_IDirectMusic8, (void**)&This->pDirectMusic);
 	  if (ppDirectMusic) {
 	    *ppDirectMusic = (LPDIRECTMUSIC) This->pDirectMusic;
@@ -259,18 +253,20 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_PlaySegment (LPDIRECTMUSICPER
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
 	FIXME("(%p, %p, %d, 0x%s, %p): stub\n", This, pSegment, dwFlags,
 	    wine_dbgstr_longlong(i64StartTime), ppSegmentState);
+	if (ppSegmentState)
+	  return DMUSIC_CreateDirectMusicSegmentStateImpl(&IID_IDirectMusicSegmentState, (LPVOID*)ppSegmentState, NULL);
 	return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_Stop (LPDIRECTMUSICPERFORMANCE8 iface, IDirectMusicSegment* pSegment, IDirectMusicSegmentState* pSegmentState, MUSIC_TIME mtTime, DWORD dwFlags) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %p, %p, %ld, %d): stub\n", This, pSegment, pSegmentState, mtTime, dwFlags);
+	FIXME("(%p, %p, %p, %d, %d): stub\n", This, pSegment, pSegmentState, mtTime, dwFlags);
 	return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_GetSegmentState (LPDIRECTMUSICPERFORMANCE8 iface, IDirectMusicSegmentState** ppSegmentState, MUSIC_TIME mtTime) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p,%p, %ld): stub\n", This, ppSegmentState, mtTime);
+	FIXME("(%p,%p, %d): stub\n", This, ppSegmentState, mtTime);
 	return S_OK;
 }
 
@@ -363,7 +359,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_SendPMsg (LPDIRECTMUSICPERFOR
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_MusicToReferenceTime (LPDIRECTMUSICPERFORMANCE8 iface, MUSIC_TIME mtTime, REFERENCE_TIME* prtTime) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %ld, %p): stub\n", This, mtTime, prtTime);
+	FIXME("(%p, %d, %p): stub\n", This, mtTime, prtTime);
 	return S_OK;
 }
 
@@ -604,19 +600,19 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_DownloadInstrument (LPDIRECTM
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_Invalidate (LPDIRECTMUSICPERFORMANCE8 iface, MUSIC_TIME mtTime, DWORD dwFlags) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %ld, %d): stub\n", This, mtTime, dwFlags);
+	FIXME("(%p, %d, %d): stub\n", This, mtTime, dwFlags);
 	return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_GetParam (LPDIRECTMUSICPERFORMANCE8 iface, REFGUID rguidType, DWORD dwGroupBits, DWORD dwIndex, MUSIC_TIME mtTime, MUSIC_TIME* pmtNext, void* pParam) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %s, %d, %d, %ld, %p, %p): stub\n", This, debugstr_dmguid(rguidType), dwGroupBits, dwIndex, mtTime, pmtNext, pParam);
+	FIXME("(%p, %s, %d, %d, %d, %p, %p): stub\n", This, debugstr_dmguid(rguidType), dwGroupBits, dwIndex, mtTime, pmtNext, pParam);
 	return S_OK;
 }
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_SetParam (LPDIRECTMUSICPERFORMANCE8 iface, REFGUID rguidType, DWORD dwGroupBits, DWORD dwIndex, MUSIC_TIME mtTime, void* pParam) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %s, %d, %d, %ld, %p): stub\n", This, debugstr_dmguid(rguidType), dwGroupBits, dwIndex, mtTime, pParam);
+	FIXME("(%p, %s, %d, %d, %d, %p): stub\n", This, debugstr_dmguid(rguidType), dwGroupBits, dwIndex, mtTime, pParam);
 	return S_OK;
 }
 
@@ -626,13 +622,13 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_GetGlobalParam (LPDIRECTMUSIC
 	TRACE("(%p, %s, %p, %d): stub\n", This, debugstr_dmguid(rguidType), pParam, dwSize);
 	
 	if (IsEqualGUID (rguidType, &GUID_PerfAutoDownload))
-		memcpy(pParam, &This->fAutoDownload, sizeof(&This->fAutoDownload));
+		memcpy(pParam, &This->fAutoDownload, sizeof(This->fAutoDownload));
 	if (IsEqualGUID (rguidType, &GUID_PerfMasterGrooveLevel))
-		memcpy(pParam, &This->cMasterGrooveLevel, sizeof(&This->cMasterGrooveLevel));
+		memcpy(pParam, &This->cMasterGrooveLevel, sizeof(This->cMasterGrooveLevel));
 	if (IsEqualGUID (rguidType, &GUID_PerfMasterTempo))
-		memcpy(pParam, &This->fMasterTempo, sizeof(&This->fMasterTempo));
+		memcpy(pParam, &This->fMasterTempo, sizeof(This->fMasterTempo));
 	if (IsEqualGUID (rguidType, &GUID_PerfMasterVolume))
-		memcpy(pParam, &This->lMasterVolume, sizeof(&This->lMasterVolume));
+		memcpy(pParam, &This->lMasterVolume, sizeof(This->lMasterVolume));
 
 	return S_OK;
 }
@@ -721,7 +717,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_MusicToMIDI (LPDIRECTMUSICPER
 
 static HRESULT WINAPI IDirectMusicPerformance8Impl_TimeToRhythm (LPDIRECTMUSICPERFORMANCE8 iface, MUSIC_TIME mtTime, DMUS_TIMESIGNATURE* pTimeSig, WORD* pwMeasure, BYTE* pbBeat, BYTE* pbGrid, short* pnOffset) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
-	FIXME("(%p, %ld, %p, %p, %p, %p, %p): stub\n", This, mtTime, pTimeSig, pwMeasure, pbBeat, pbGrid, pnOffset);
+	FIXME("(%p, %d, %p, %p, %p, %p, %p): stub\n", This, mtTime, pTimeSig, pwMeasure, pbBeat, pbGrid, pnOffset);
 	return S_OK;
 }
 
@@ -763,19 +759,16 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_InitAudio (LPDIRECTMUSICPERFO
 	
 	IDirectMusicPerformance8Impl_Init(iface, ppDirectMusic, dsound, hWnd);
 
-	/* Init increases the ref count of the dsound object. Decremente it if the app don't want a pointer to the object. */
+	/* Init increases the ref count of the dsound object. Decrement it if the app doesn't want a pointer to the object. */
 	if (NULL == ppDirectSound) {
 	  IDirectSound_Release(This->pDirectSound);
 	}
 
 	/* as seen in msdn we need params init before audio path creation */
 	if (NULL != pParams) {
-	  memcpy(&This->pParams, pParams, sizeof(DMUS_AUDIOPARAMS));
+	  This->pParams = *pParams;
 	} else {
-	  /**
-	   * TODO, how can i fill the struct 
-	   * as seen at http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directX/htm/dmusaudioparams.asp
-	   */
+	  /* TODO, how can i fill the struct as seen on msdn */
 	  memset(&This->pParams, 0, sizeof(DMUS_AUDIOPARAMS));
 	  This->pParams.dwSize = sizeof(DMUS_AUDIOPARAMS);
 	  This->pParams.fInitNow = FALSE;
@@ -796,6 +789,8 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_PlaySegmentEx (LPDIRECTMUSICP
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
 	FIXME("(%p, %p, %p, %p, %d, 0x%s, %p, %p, %p): stub\n", This, pSource, pwzSegmentName,
 	    pTransition, dwFlags, wine_dbgstr_longlong(i64StartTime), ppSegmentState, pFrom, pAudioPath);
+	if (ppSegmentState)
+	  return DMUSIC_CreateDirectMusicSegmentStateImpl(&IID_IDirectMusicSegmentState, (LPVOID*)ppSegmentState, NULL);
 	return S_OK;
 }
 
@@ -834,9 +829,6 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_CreateAudioPath (LPDIRECTMUSI
 	return IDirectMusicAudioPath_Activate(*ppNewPath, fActivate);
 }
 
-/**
- * see  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/directx9_c/directX/htm/standardaudiopaths.asp
- */
 static HRESULT WINAPI IDirectMusicPerformance8Impl_CreateStandardAudioPath (LPDIRECTMUSICPERFORMANCE8 iface, DWORD dwType, DWORD dwPChannelCount, BOOL fActivate, IDirectMusicAudioPath** ppNewPath) {
 	IDirectMusicAudioPathImpl *default_path;
 	IDirectMusicAudioPath *pPath;
@@ -883,7 +875,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_CreateStandardAudioPath (LPDI
 	        desc.dwFlags |= DSBCAPS_CTRLFREQUENCY;
 		break;
 	case DMUS_APATH_SHARED_STEREOPLUSREVERB:
-	        /* normally we havet to create 2 buffers (one for music other for reverb) 
+	        /* normally we have to create 2 buffers (one for music other for reverb)
 		 * in this case. See msdn
                  */
 	case DMUS_APATH_DYNAMIC_STEREO:
@@ -963,7 +955,7 @@ static HRESULT WINAPI IDirectMusicPerformance8Impl_GetDefaultAudioPath (LPDIRECT
 static HRESULT WINAPI IDirectMusicPerformance8Impl_GetParamEx (LPDIRECTMUSICPERFORMANCE8 iface, REFGUID rguidType, DWORD dwTrackID, DWORD dwGroupBits, DWORD dwIndex, MUSIC_TIME mtTime, MUSIC_TIME* pmtNext, void* pParam) {
 	IDirectMusicPerformance8Impl *This = (IDirectMusicPerformance8Impl *)iface;
 
-	FIXME("(%p, %s, %d, %d, %d, %ld, %p, %p): stub\n", This, debugstr_dmguid(rguidType), dwTrackID, dwGroupBits, dwIndex, mtTime, pmtNext, pParam);
+	FIXME("(%p, %s, %d, %d, %d, %d, %p, %p): stub\n", This, debugstr_dmguid(rguidType), dwTrackID, dwGroupBits, dwIndex, mtTime, pmtNext, pParam);
 
 	return S_OK;
 }
@@ -1032,7 +1024,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicPerformanceImpl (LPCGUID lpcGUID, LPVOID 
 
 	obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicPerformance8Impl));
 	if (NULL == obj) 	{
-		*ppobj = (LPDIRECTMUSICPERFORMANCE8)NULL;
+		*ppobj = NULL;
 		return E_OUTOFMEMORY;
 	}
 	obj->lpVtbl = &DirectMusicPerformance8_Vtbl;
@@ -1043,9 +1035,6 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicPerformanceImpl (LPCGUID lpcGUID, LPVOID 
 	InitializeCriticalSection(&obj->safe);
 	obj->safe.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": IDirectMusicPerformance8Impl*->safe");
 
-	/**
-	 * @see http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/htm/latencyandbumpertime.asp
-	 */
 	obj->rtLatencyTime  = 100;  /* 100ms TO FIX */
 	obj->dwBumperLength =   50; /* 50ms default */
 	obj->dwPrepareTime  = 1000; /* 1000ms default */

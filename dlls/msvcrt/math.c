@@ -57,7 +57,12 @@ static MSVCRT_matherr_func MSVCRT_default_matherr_func = NULL;
 double CDECL MSVCRT_acos( double x )
 {
   if (x < -1.0 || x > 1.0 || !finite(x)) *MSVCRT__errno() = MSVCRT_EDOM;
-  return acos(x);
+  /* glibc implements acos() as the FPU equivalent of atan2(sqrt(1 - x ^ 2), x).
+   * asin() uses a similar construction. This is bad because as x gets nearer to
+   * 1 the error in the expression "1 - x^2" can get relatively large due to
+   * cancellation. The sqrt() makes things worse. A safer way to calculate
+   * acos() is to use atan2(sqrt((1 - x) * (1 + x)), x). */
+  return atan2(sqrt((1 - x) * (1 + x)), x);
 }
 
 /*********************************************************************
@@ -66,7 +71,7 @@ double CDECL MSVCRT_acos( double x )
 double CDECL MSVCRT_asin( double x )
 {
   if (x < -1.0 || x > 1.0 || !finite(x)) *MSVCRT__errno() = MSVCRT_EDOM;
-  return asin(x);
+  return atan2(x, sqrt((1 - x) * (1 + x)));
 }
 
 /*********************************************************************
@@ -352,29 +357,6 @@ double CDECL _CItanh(void)
   return MSVCRT_tanh(x);
 }
 
-#else /* defined(__GNUC__) && defined(__i386__) */
-
-/* The above cannot be called on non x86 platforms, stub them for linking */
-
-#define IX86_ONLY(func) double func(void) { return 0.0; }
-
-IX86_ONLY(_CIacos)
-IX86_ONLY(_CIasin)
-IX86_ONLY(_CIatan)
-IX86_ONLY(_CIatan2)
-IX86_ONLY(_CIcos)
-IX86_ONLY(_CIcosh)
-IX86_ONLY(_CIexp)
-IX86_ONLY(_CIfmod)
-IX86_ONLY(_CIlog)
-IX86_ONLY(_CIlog10)
-IX86_ONLY(_CIpow)
-IX86_ONLY(_CIsin)
-IX86_ONLY(_CIsinh)
-IX86_ONLY(_CIsqrt)
-IX86_ONLY(_CItan)
-IX86_ONLY(_CItanh)
-
 #endif /* defined(__GNUC__) && defined(__i386__) */
 
 /*********************************************************************
@@ -415,8 +397,8 @@ int CDECL _fpclass(double num)
 #ifdef FP_PNORM
   case FP_PNORM: return MSVCRT__FPCLASS_PN;
 #endif
+  default: return MSVCRT__FPCLASS_PN;
   }
-  return MSVCRT__FPCLASS_PN;
 #elif defined (fpclassify)
   switch (fpclassify( num ))
   {
@@ -854,16 +836,42 @@ double CDECL _nextafter(double num, double next)
  */
 char * CDECL _ecvt( double number, int ndigits, int *decpt, int *sign )
 {
+    int prec;
     thread_data_t *data = msvcrt_get_thread_data();
-    char *dec;
-
+    /* FIXME: check better for overflow (native supports over 300 chars's) */
+    ndigits = min( ndigits, 80 - 7); /* 7 : space for dec point, 1 for "e",
+                                      * 4 for exponent and one for
+                                      * terminating '\0' */
     if (!data->efcvt_buffer)
         data->efcvt_buffer = MSVCRT_malloc( 80 ); /* ought to be enough */
 
-    snprintf(data->efcvt_buffer, 80, "%.*e", ndigits /* FIXME wrong */, number);
-    *sign = (number < 0);
-    dec = strchr(data->efcvt_buffer, '.');
-    *decpt = (dec) ? dec - data->efcvt_buffer : -1;
+    if( number < 0) {
+        *sign = TRUE;
+        number = -number;
+    } else
+        *sign = FALSE;
+    /* handle cases with zero ndigits or less */
+    prec = ndigits;
+    if( prec < 1) prec = 2;
+    snprintf(data->efcvt_buffer, 80, "%.*le", prec - 1, number);
+    /* take the decimal "point away */
+    if( prec != 1)
+        strcpy( data->efcvt_buffer + 1, data->efcvt_buffer + 2);
+    /* take the exponential "e" out */
+    data->efcvt_buffer[ prec] = '\0';
+    /* read the exponent */
+    sscanf( data->efcvt_buffer + prec + 1, "%d", decpt);
+    (*decpt)++;
+    /* adjust for some border cases */
+    if( data->efcvt_buffer[0] == '0')/* value is zero */
+        *decpt = 0;
+    /* handle cases with zero ndigits or less */
+    if( ndigits < 1){
+        if( data->efcvt_buffer[ 0] >= '5')
+            (*decpt)++;
+        data->efcvt_buffer[ 0] = '\0';
+    }
+    TRACE("out=\"%s\"\n",data->efcvt_buffer);
     return data->efcvt_buffer;
 }
 
@@ -1184,17 +1192,6 @@ void _adj_fprem1(void)
  *    fdiv bug.
  */
 void _adj_fptan(void)
-{
-  TRACE("(): stub\n");
-}
-
-/***********************************************************************
- *		_adjust_fdiv (MSVCRT.@)
- * FIXME
- *    I _think_ this function should be a variable indicating whether
- *    Pentium fdiv bug safe code should be used.
- */
-void _adjust_fdiv(void)
 {
   TRACE("(): stub\n");
 }

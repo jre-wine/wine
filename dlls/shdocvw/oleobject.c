@@ -61,6 +61,8 @@ static LRESULT WINAPI shell_embedding_proc(HWND hwnd, UINT msg, WPARAM wParam, L
     switch(msg) {
     case WM_SIZE:
         return resize_window(This, LOWORD(lParam), HIWORD(lParam));
+    case WM_DOCHOSTTASK:
+        return process_dochost_task(&This->doc_host, lParam);
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -81,7 +83,7 @@ static void create_shell_embedding_hwnd(WebBrowser *This)
             CS_DBLCLKS,
             shell_embedding_proc,
             0, 0 /* native uses 8 */, NULL, NULL, NULL,
-            (HBRUSH)COLOR_WINDOWFRAME, NULL,
+            (HBRUSH)(COLOR_WINDOW + 1), NULL,
             wszShellEmbedding,
             NULL
         };
@@ -166,7 +168,11 @@ static HRESULT activate_ui(WebBrowser *This, IOleClientSite *active_site)
     static const WCHAR wszitem[] = {'i','t','e','m',0};
 
     if(This->inplace)
+    {
+        if(This->shell_embedding_hwnd)
+            ShowWindow(This->shell_embedding_hwnd, SW_SHOW);
         return S_OK;
+    }
 
     hres = activate_inplace(This, active_site);
     if(FAILED(hres))
@@ -421,8 +427,8 @@ static HRESULT WINAPI OleObject_DoVerb(IOleObject *iface, LONG iVerb, struct tag
         return activate_inplace(This, pActiveSite);
     case OLEIVERB_HIDE:
         TRACE("OLEIVERB_HIDE\n");
-        if(This->doc_host.hwnd)
-            ShowWindow(This->doc_host.hwnd, SW_HIDE);
+        if(This->shell_embedding_hwnd)
+            ShowWindow(This->shell_embedding_hwnd, SW_HIDE);
         return S_OK;
     default:
         FIXME("stub for %d\n", iVerb);
@@ -475,7 +481,7 @@ static HRESULT WINAPI OleObject_SetExtent(IOleObject *iface, DWORD dwDrawAspect,
     TRACE("(%p)->(%x %p)\n", This, dwDrawAspect, psizel);
 
     /* Tests show that dwDrawAspect is ignored */
-    memcpy(&This->extent, psizel, sizeof(SIZEL));
+    This->extent = *psizel;
     return S_OK;
 }
 
@@ -486,7 +492,7 @@ static HRESULT WINAPI OleObject_GetExtent(IOleObject *iface, DWORD dwDrawAspect,
     TRACE("(%p)->(%x, %p)\n", This, dwDrawAspect, psizel);
 
     /* Tests show that dwDrawAspect is ignored */
-    memcpy(psizel, &This->extent, sizeof(SIZEL));
+    *psizel = This->extent;
     return S_OK;
 }
 
@@ -625,10 +631,10 @@ static HRESULT WINAPI OleInPlaceObject_SetObjectRects(IOleInPlaceObject *iface,
 
     TRACE("(%p)->(%p %p)\n", This, lprcPosRect, lprcClipRect);
 
-    memcpy(&This->pos_rect, lprcPosRect, sizeof(RECT));
+    This->pos_rect = *lprcPosRect;
 
     if(lprcClipRect)
-        memcpy(&This->clip_rect, lprcClipRect, sizeof(RECT));
+        This->clip_rect = *lprcClipRect;
 
     if(This->shell_embedding_hwnd) {
         SetWindowPos(This->shell_embedding_hwnd, NULL,
@@ -712,6 +718,11 @@ static HRESULT WINAPI OleControl_OnAmbientPropertyChange(IOleControl *iface, DIS
     TRACE("(%p)->(%d)\n", This, dispID);
 
     switch(dispID) {
+    case DISPID_UNKNOWN:
+        /* Unknown means multiple properties changed, so check them all.
+         * BUT the Webbrowser OleControl object doesn't appear to do this.
+         */
+        return S_OK;
     case DISPID_AMBIENT_OFFLINEIFNOTCONNECTED:
         return on_offlineconnected_change(This);
     case DISPID_AMBIENT_SILENT:
@@ -857,9 +868,26 @@ static HRESULT WINAPI WBOleCommandTarget_QueryStatus(IOleCommandTarget *iface,
         const GUID *pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
 {
     WebBrowser *This = OLECMD_THIS(iface);
-    FIXME("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
+    IOleCommandTarget *cmdtrg;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
           pCmdText);
-    return E_NOTIMPL;
+
+    if(!This->doc_host.document)
+        return 0x80040104;
+
+    /* NOTE: There are probably some commands that we should handle here
+     * instead of forwarding to document object. */
+
+    hres = IUnknown_QueryInterface(This->doc_host.document, &IID_IOleCommandTarget, (void**)&cmdtrg);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IOleCommandTarget_QueryStatus(cmdtrg, pguidCmdGroup, cCmds, prgCmds, pCmdText);
+    IOleCommandTarget_Release(cmdtrg);
+
+    return hres;
 }
 
 static HRESULT WINAPI WBOleCommandTarget_Exec(IOleCommandTarget *iface,
@@ -884,6 +912,16 @@ static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
 
 void WebBrowser_OleObject_Init(WebBrowser *This)
 {
+    DWORD dpi_x;
+    DWORD dpi_y;
+    HDC hdc;
+
+    /* default aspect ratio is 96dpi / 96dpi */
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+
     This->lpOleObjectVtbl              = &OleObjectVtbl;
     This->lpOleInPlaceObjectVtbl       = &OleInPlaceObjectVtbl;
     This->lpOleControlVtbl             = &OleControlVtbl;
@@ -901,8 +939,9 @@ void WebBrowser_OleObject_Init(WebBrowser *This)
     memset(&This->clip_rect, 0, sizeof(RECT));
     memset(&This->frameinfo, 0, sizeof(OLEINPLACEFRAMEINFO));
 
-    This->extent.cx = 1323;
-    This->extent.cy = 529;
+    /* Default size is 50x20 pixels, in himetric units */
+    This->extent.cx = MulDiv( 50, 2540, dpi_x );
+    This->extent.cy = MulDiv( 20, 2540, dpi_y );
 }
 
 void WebBrowser_OleObject_Destroy(WebBrowser *This)

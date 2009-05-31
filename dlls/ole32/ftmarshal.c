@@ -46,8 +46,8 @@ typedef struct _FTMarshalImpl {
 	IUnknown *pUnkOuter;
 } FTMarshalImpl;
 
-#define _IFTMUnknown_(This)(IUnknown*)&(This->lpVtbl)
-#define _IFTMarshal_(This) (IMarshal*)&(This->lpvtblFTM)
+#define _IFTMUnknown_(This) ((IUnknown*)&(This)->lpVtbl)
+#define _IFTMarshal_(This)  (&(This)->lpvtblFTM)
 
 static inline FTMarshalImpl *impl_from_IMarshal( IMarshal *iface )
 {
@@ -141,9 +141,9 @@ FTMarshalImpl_GetUnmarshalClass (LPMARSHAL iface, REFIID riid, void *pv, DWORD d
     TRACE("(%s, %p, 0x%x, %p, 0x%x, %p)\n", debugstr_guid(riid), pv,
         dwDestContext, pvDestContext, mshlflags, pCid);
     if (dwDestContext == MSHCTX_INPROC || dwDestContext == MSHCTX_CROSSCTX)
-        memcpy(pCid, &CLSID_InProcFreeMarshaler, sizeof(CLSID_InProcFreeMarshaler));
+        *pCid = CLSID_InProcFreeMarshaler;
     else
-        memcpy(pCid, &CLSID_DfMarshal, sizeof(CLSID_InProcFreeMarshaler));
+        *pCid = CLSID_DfMarshal;
     return S_OK;
 }
 

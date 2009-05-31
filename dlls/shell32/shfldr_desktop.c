@@ -55,6 +55,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL (shell);
 
+/* Undocumented functions from shdocvw */
+extern HRESULT WINAPI IEParseDisplayNameWithBCW(DWORD codepage, LPCWSTR lpszDisplayName, LPBC pbc, LPITEMIDLIST *ppidl);
+
+
 /***********************************************************************
 *     Desktopfolder implementation
 */
@@ -181,6 +185,10 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
         *ppidl = pidlTemp;
         return S_OK;
     }
+    else if (strchrW(lpszDisplayName,':'))
+    {
+        return IEParseDisplayNameWithBCW(CP_ACP,lpszDisplayName,pbc,ppidl);
+    }
     else
     {
         /* it's a filesystem path on the desktop. Let a FSFolder parse it */
@@ -269,7 +277,7 @@ static BOOL CreateDesktopEnumList(IEnumIDList *list, DWORD dwFlags)
                     DWORD size;
                     LONG r;
 
-                    size = sizeof (iid);
+                    size = sizeof (iid) / sizeof (iid[0]);
                     r = RegEnumKeyExW(hkey, i, iid, &size, 0, NULL, NULL, NULL);
                     if (ERROR_SUCCESS == r)
                     {

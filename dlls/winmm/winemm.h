@@ -25,7 +25,7 @@
 #include "winbase.h"
 #include "mmddk.h"
 
-#define WINE_DEFAULT_WINMM_DRIVER     "alsa,oss,coreaudio"
+#define WINE_DEFAULT_WINMM_DRIVER     "alsa,oss,coreaudio,esd"
 #define WINE_DEFAULT_WINMM_MAPPER     "msacm32.drv"
 #define WINE_DEFAULT_WINMM_MIDI       "midimap.dll"
 
@@ -59,7 +59,7 @@ typedef struct tagWINE_DRIVER
 } WINE_DRIVER, *LPWINE_DRIVER;
 
 typedef	DWORD	(CALLBACK *WINEMM_msgFunc16)(UINT16, WORD, DWORD, DWORD, DWORD);
-typedef	DWORD	(CALLBACK *WINEMM_msgFunc32)(UINT  , UINT, DWORD, DWORD, DWORD);
+typedef	DWORD	(CALLBACK *WINEMM_msgFunc32)(UINT  , UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR);
 
 /* for each loaded driver and each known type of driver, this structure contains
  * the information needed to access it
@@ -141,7 +141,7 @@ typedef struct tagWINE_MCIDRIVER {
         LPWSTR			lpstrDeviceType;
         LPWSTR			lpstrAlias;
         HDRVR			hDriver;
-	DWORD			dwPrivate;
+        DWORD_PTR               dwPrivate;
         YIELDPROC		lpfnYieldProc;
         DWORD	                dwYieldData;
         BOOL			bIs32;
@@ -196,20 +196,15 @@ DWORD		MMDRV_Close(LPWINE_MLD mld, UINT wMsg);
 LPWINE_MLD	MMDRV_Get(HANDLE hndl, UINT type, BOOL bCanBeID);
 LPWINE_MLD	MMDRV_GetRelated(HANDLE hndl, UINT srcType, BOOL bSrcCanBeID, UINT dstTyped);
 DWORD           MMDRV_Message(LPWINE_MLD mld, UINT wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2, BOOL bFrom32);
-UINT		MMDRV_PhysicalFeatures(LPWINE_MLD mld, UINT uMsg, DWORD dwParam1, DWORD dwParam2);
+UINT		MMDRV_PhysicalFeatures(LPWINE_MLD mld, UINT uMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
 BOOL            MMDRV_Is32(unsigned int);
 void            MMDRV_InstallMap(unsigned int, MMDRV_MAPFUNC, MMDRV_UNMAPFUNC,
                                  MMDRV_MAPFUNC, MMDRV_UNMAPFUNC, LPDRVCALLBACK);
 
 WINE_MCIDRIVER* MCI_GetDriver(UINT16 uDevID);
-UINT		MCI_GetDriverFromString(LPCWSTR str);
-DWORD		MCI_WriteString(LPWSTR lpDstStr, DWORD dstSize, LPCWSTR lpSrcStr);
 const char* 	MCI_MessageToString(UINT wMsg);
-UINT	WINAPI	MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data);
 LRESULT		MCI_CleanUp(LRESULT dwRet, UINT wMsg, DWORD dwParam2);
 DWORD		MCI_SendCommand(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2, BOOL bFrom32);
-DWORD		MCI_SendCommandFrom32(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
-DWORD		MCI_SendCommandFrom16(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
 UINT		MCI_SetCommandTable(void *table, UINT uDevType);
 BOOL	        MCI_DeleteCommandTable(UINT uTbl, BOOL delete);
 LPWSTR          MCI_strdupAtoW(LPCSTR str);
@@ -240,7 +235,7 @@ LRESULT         MMIO_SendMessage(HMMIO hmmio, UINT uMessage, LPARAM lParam1,
 LPWINE_MMIO     MMIO_Get(HMMIO h);
 
 WORD            TIME_SetEventInternal(UINT wDelay, UINT wResol, LPTIMECALLBACK lpFunc,
-                                      DWORD dwUser, UINT wFlags);
+                                      DWORD_PTR dwUser, UINT wFlags);
 void		TIME_MMTimeStop(void);
 
 /* Global variables */

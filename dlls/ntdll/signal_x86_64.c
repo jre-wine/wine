@@ -40,6 +40,8 @@
 #endif
 
 #define NONAMELESSUNION
+#include "ntstatus.h"
+#define WIN32_NO_STATUS
 #include "windef.h"
 #include "winternl.h"
 #include "wine/library.h"
@@ -54,6 +56,9 @@ WINE_DEFAULT_DEBUG_CHANNEL(seh);
  * signal context platform-specific definitions
  */
 #ifdef linux
+
+#include <asm/prctl.h>
+extern int arch_prctl(int func, void *ptr);
 
 typedef struct ucontext SIGCONTEXT;
 
@@ -92,6 +97,53 @@ typedef struct ucontext SIGCONTEXT;
 #define FAULT_ADDRESS  (__siginfo->si_addr)
 
 #endif /* linux */
+
+#if defined(__NetBSD__)
+# include <sys/ucontext.h>
+# include <sys/types.h>
+# include <signal.h>
+
+typedef ucontext_t SIGCONTEXT;
+
+#define RAX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RAX])
+#define RBX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RBX])
+#define RCX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RCX])
+#define RDX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RDX])
+#define RSI_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RSI])
+#define RDI_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RDI])
+#define RBP_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RBP])
+#define R8_sig(context)     ((context)->uc_mcontext.__gregs[_REG_R8])
+#define R9_sig(context)     ((context)->uc_mcontext.__gregs[_REG_R9])
+#define R10_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R10])
+#define R11_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R11])
+#define R12_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R12])
+#define R13_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R13])
+#define R14_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R14])
+#define R15_sig(context)    ((context)->uc_mcontext.__gregs[_REG_R15])
+
+#define CS_sig(context)     ((context)->uc_mcontext.__gregs[_REG_CS])
+#define DS_sig(context)     ((context)->uc_mcontext.__gregs[_REG_DS])
+#define ES_sig(context)     ((context)->uc_mcontext.__gregs[_REG_ES])
+#define FS_sig(context)     ((context)->uc_mcontext.__gregs[_REG_FS])
+#define GS_sig(context)     ((context)->uc_mcontext.__gregs[_REG_GS])
+#define SS_sig(context)     ((context)->uc_mcontext.__gregs[_REG_SS])
+
+#define EFL_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RFL])
+
+#define RIP_sig(context)    (*((unsigned long*)&(context)->uc_mcontext.__gregs[_REG_RIP]))
+#define RSP_sig(context)    (*((unsigned long*)&(context)->uc_mcontext.__gregs[_REG_URSP]))
+
+#define TRAP_sig(context)   ((context)->uc_mcontext.__gregs[_REG_TRAPNO])
+#define ERROR_sig(context)  ((context)->uc_mcontext.__gregs[_REG_ERR])
+
+#define FAULT_CODE          (__siginfo->si_code)
+#define FAULT_ADDRESS       (__siginfo->si_addr)
+
+#define HANDLER_DEF(name) void name( int __signal, siginfo_t *__siginfo, SIGCONTEXT *__context )
+#define HANDLER_CONTEXT (__context)
+
+#define FPU_sig(context)   ((XMM_SAVE_AREA32 *)((context)->uc_mcontext.__fpregs))
+#endif /* __NetBSD__ */
 
 enum i386_trap_code
 {
@@ -137,6 +189,7 @@ static inline int dispatch_signal(unsigned int sig)
  */
 static void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext )
 {
+    context->ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS;
     context->Rax    = RAX_sig(sigcontext);
     context->Rcx    = RCX_sig(sigcontext);
     context->Rdx    = RDX_sig(sigcontext);
@@ -162,7 +215,11 @@ static void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext )
     context->SegEs  = 0;  /* FIXME */
     context->SegSs  = 0;  /* FIXME */
     context->MxCsr  = 0;  /* FIXME */
-    if (FPU_sig(sigcontext)) context->u.FltSave = *FPU_sig(sigcontext);
+    if (FPU_sig(sigcontext))
+    {
+        context->ContextFlags |= CONTEXT_FLOATING_POINT;
+        context->u.FltSave = *FPU_sig(sigcontext);
+    }
 }
 
 
@@ -199,14 +256,13 @@ static void restore_context( const CONTEXT *context, SIGCONTEXT *sigcontext )
 
 
 /***********************************************************************
- *              get_cpu_context
- *
- * Get the context of the current thread.
+ *		RtlCaptureContext (NTDLL.@)
  */
-void get_cpu_context( CONTEXT *context )
+void WINAPI __regs_RtlCaptureContext( CONTEXT *context, CONTEXT *regs )
 {
-    FIXME("not implemented\n");
+    *context = *regs;
 }
+DEFINE_REGS_ENTRYPOINT( RtlCaptureContext, 1 )
 
 
 /***********************************************************************
@@ -220,6 +276,199 @@ void set_cpu_context( const CONTEXT *context )
 }
 
 
+/***********************************************************************
+ *           copy_context
+ *
+ * Copy a register context according to the flags.
+ */
+void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags )
+{
+    flags &= ~CONTEXT_AMD64;  /* get rid of CPU id */
+    if (flags & CONTEXT_CONTROL)
+    {
+        to->Rbp    = from->Rbp;
+        to->Rip    = from->Rip;
+        to->Rsp    = from->Rsp;
+        to->SegCs  = from->SegCs;
+        to->SegSs  = from->SegSs;
+        to->EFlags = from->EFlags;
+        to->MxCsr  = from->MxCsr;
+    }
+    if (flags & CONTEXT_INTEGER)
+    {
+        to->Rax = from->Rax;
+        to->Rcx = from->Rcx;
+        to->Rdx = from->Rdx;
+        to->Rbx = from->Rbx;
+        to->Rsi = from->Rsi;
+        to->Rdi = from->Rdi;
+        to->R8  = from->R8;
+        to->R9  = from->R9;
+        to->R10 = from->R10;
+        to->R11 = from->R11;
+        to->R12 = from->R12;
+        to->R13 = from->R13;
+        to->R14 = from->R14;
+        to->R15 = from->R15;
+    }
+    if (flags & CONTEXT_SEGMENTS)
+    {
+        to->SegDs = from->SegDs;
+        to->SegEs = from->SegEs;
+        to->SegFs = from->SegFs;
+        to->SegGs = from->SegGs;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        to->u.FltSave = from->u.FltSave;
+    }
+    if (flags & CONTEXT_DEBUG_REGISTERS)
+    {
+        to->Dr0 = from->Dr0;
+        to->Dr1 = from->Dr1;
+        to->Dr2 = from->Dr2;
+        to->Dr3 = from->Dr3;
+        to->Dr6 = from->Dr6;
+        to->Dr7 = from->Dr7;
+    }
+}
+
+
+/***********************************************************************
+ *           context_to_server
+ *
+ * Convert a register context to the server format.
+ */
+NTSTATUS context_to_server( context_t *to, const CONTEXT *from )
+{
+    DWORD flags = from->ContextFlags & ~CONTEXT_AMD64;  /* get rid of CPU id */
+
+    memset( to, 0, sizeof(*to) );
+    to->cpu = CPU_x86_64;
+
+    if (flags & CONTEXT_CONTROL)
+    {
+        to->flags |= SERVER_CTX_CONTROL;
+        to->ctl.x86_64_regs.rbp   = from->Rbp;
+        to->ctl.x86_64_regs.rip   = from->Rip;
+        to->ctl.x86_64_regs.rsp   = from->Rsp;
+        to->ctl.x86_64_regs.cs    = from->SegCs;
+        to->ctl.x86_64_regs.ss    = from->SegSs;
+        to->ctl.x86_64_regs.flags = from->EFlags;
+        to->ctl.x86_64_regs.mxcsr = from->MxCsr;
+    }
+    if (flags & CONTEXT_INTEGER)
+    {
+        to->flags |= SERVER_CTX_INTEGER;
+        to->integer.x86_64_regs.rax = from->Rax;
+        to->integer.x86_64_regs.rcx = from->Rcx;
+        to->integer.x86_64_regs.rdx = from->Rdx;
+        to->integer.x86_64_regs.rbx = from->Rbx;
+        to->integer.x86_64_regs.rsi = from->Rsi;
+        to->integer.x86_64_regs.rdi = from->Rdi;
+        to->integer.x86_64_regs.r8  = from->R8;
+        to->integer.x86_64_regs.r9  = from->R9;
+        to->integer.x86_64_regs.r10 = from->R10;
+        to->integer.x86_64_regs.r11 = from->R11;
+        to->integer.x86_64_regs.r12 = from->R12;
+        to->integer.x86_64_regs.r13 = from->R13;
+        to->integer.x86_64_regs.r14 = from->R14;
+        to->integer.x86_64_regs.r15 = from->R15;
+    }
+    if (flags & CONTEXT_SEGMENTS)
+    {
+        to->flags |= SERVER_CTX_SEGMENTS;
+        to->seg.x86_64_regs.ds = from->SegDs;
+        to->seg.x86_64_regs.es = from->SegEs;
+        to->seg.x86_64_regs.fs = from->SegFs;
+        to->seg.x86_64_regs.gs = from->SegGs;
+    }
+    if (flags & CONTEXT_FLOATING_POINT)
+    {
+        to->flags |= SERVER_CTX_FLOATING_POINT;
+        memcpy( to->fp.x86_64_regs.fpregs, &from->u.FltSave, sizeof(to->fp.x86_64_regs.fpregs) );
+    }
+    if (flags & CONTEXT_DEBUG_REGISTERS)
+    {
+        to->flags |= SERVER_CTX_DEBUG_REGISTERS;
+        to->debug.x86_64_regs.dr0 = from->Dr0;
+        to->debug.x86_64_regs.dr1 = from->Dr1;
+        to->debug.x86_64_regs.dr2 = from->Dr2;
+        to->debug.x86_64_regs.dr3 = from->Dr3;
+        to->debug.x86_64_regs.dr6 = from->Dr6;
+        to->debug.x86_64_regs.dr7 = from->Dr7;
+    }
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           context_from_server
+ *
+ * Convert a register context from the server format.
+ */
+NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
+{
+    if (from->cpu != CPU_x86_64) return STATUS_INVALID_PARAMETER;
+
+    to->ContextFlags = CONTEXT_AMD64;
+    if (from->flags & SERVER_CTX_CONTROL)
+    {
+        to->ContextFlags |= CONTEXT_CONTROL;
+        to->Rbp    = from->ctl.x86_64_regs.rbp;
+        to->Rip    = from->ctl.x86_64_regs.rip;
+        to->Rsp    = from->ctl.x86_64_regs.rsp;
+        to->SegCs  = from->ctl.x86_64_regs.cs;
+        to->SegSs  = from->ctl.x86_64_regs.ss;
+        to->EFlags = from->ctl.x86_64_regs.flags;
+        to->MxCsr  = from->ctl.x86_64_regs.mxcsr;
+    }
+
+    if (from->flags & SERVER_CTX_INTEGER)
+    {
+        to->ContextFlags |= CONTEXT_INTEGER;
+        to->Rax = from->integer.x86_64_regs.rax;
+        to->Rcx = from->integer.x86_64_regs.rcx;
+        to->Rdx = from->integer.x86_64_regs.rdx;
+        to->Rbx = from->integer.x86_64_regs.rbx;
+        to->Rsi = from->integer.x86_64_regs.rsi;
+        to->Rdi = from->integer.x86_64_regs.rdi;
+        to->R8  = from->integer.x86_64_regs.r8;
+        to->R9  = from->integer.x86_64_regs.r9;
+        to->R10 = from->integer.x86_64_regs.r10;
+        to->R11 = from->integer.x86_64_regs.r11;
+        to->R12 = from->integer.x86_64_regs.r12;
+        to->R13 = from->integer.x86_64_regs.r13;
+        to->R14 = from->integer.x86_64_regs.r14;
+        to->R15 = from->integer.x86_64_regs.r15;
+    }
+    if (from->flags & SERVER_CTX_SEGMENTS)
+    {
+        to->ContextFlags |= CONTEXT_SEGMENTS;
+        to->SegDs = from->seg.x86_64_regs.ds;
+        to->SegEs = from->seg.x86_64_regs.es;
+        to->SegFs = from->seg.x86_64_regs.fs;
+        to->SegGs = from->seg.x86_64_regs.gs;
+    }
+    if (from->flags & SERVER_CTX_FLOATING_POINT)
+    {
+        to->ContextFlags |= CONTEXT_FLOATING_POINT;
+        memcpy( &to->u.FltSave, from->fp.x86_64_regs.fpregs, sizeof(from->fp.x86_64_regs.fpregs) );
+    }
+    if (from->flags & SERVER_CTX_DEBUG_REGISTERS)
+    {
+        to->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+        to->Dr0 = from->debug.x86_64_regs.dr0;
+        to->Dr1 = from->debug.x86_64_regs.dr1;
+        to->Dr2 = from->debug.x86_64_regs.dr2;
+        to->Dr3 = from->debug.x86_64_regs.dr3;
+        to->Dr6 = from->debug.x86_64_regs.dr6;
+        to->Dr7 = from->debug.x86_64_regs.dr7;
+    }
+    return STATUS_SUCCESS;
+}
+
+
 /**********************************************************************
  *		segv_handler
  *
@@ -229,6 +478,7 @@ static HANDLER_DEF(segv_handler)
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, HANDLER_CONTEXT );
 
@@ -263,6 +513,8 @@ static HANDLER_DEF(segv_handler)
         rec.NumberParameters = 2;
         rec.ExceptionInformation[0] = (ERROR_sig(HANDLER_CONTEXT) & 2) != 0;
         rec.ExceptionInformation[1] = (ULONG_PTR)FAULT_ADDRESS;
+        if (!(rec.ExceptionCode = virtual_handle_fault( FAULT_ADDRESS, rec.ExceptionInformation[0] )))
+            goto done;
 #endif
         break;
     case TRAP_x86_ALIGNFLT:  /* Alignment check exception */
@@ -281,7 +533,9 @@ static HANDLER_DEF(segv_handler)
         break;
     }
 
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
+done:
     restore_context( &context, HANDLER_CONTEXT );
 }
 
@@ -294,6 +548,7 @@ static HANDLER_DEF(trap_handler)
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, HANDLER_CONTEXT );
     rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
@@ -315,7 +570,8 @@ static HANDLER_DEF(trap_handler)
         break;
     }
 
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, HANDLER_CONTEXT );
 }
 
@@ -328,6 +584,7 @@ static HANDLER_DEF(fpe_handler)
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, HANDLER_CONTEXT );
     rec.ExceptionFlags   = EXCEPTION_CONTINUABLE;
@@ -364,7 +621,8 @@ static HANDLER_DEF(fpe_handler)
         break;
     }
 
-    __regs_RtlRaiseException( &rec, &context );
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, HANDLER_CONTEXT );
 }
 
@@ -379,6 +637,7 @@ static HANDLER_DEF(int_handler)
     {
         EXCEPTION_RECORD rec;
         CONTEXT context;
+        NTSTATUS status;
 
         save_context( &context, HANDLER_CONTEXT );
         rec.ExceptionCode    = CONTROL_C_EXIT;
@@ -386,7 +645,8 @@ static HANDLER_DEF(int_handler)
         rec.ExceptionRecord  = NULL;
         rec.ExceptionAddress = (LPVOID)context.Rip;
         rec.NumberParameters = 0;
-        __regs_RtlRaiseException( &rec, &context );
+        status = raise_exception( &rec, &context, TRUE );
+        if (status) raise_status( status, &rec );
         restore_context( &context, HANDLER_CONTEXT );
     }
 }
@@ -401,6 +661,7 @@ static HANDLER_DEF(abrt_handler)
 {
     EXCEPTION_RECORD rec;
     CONTEXT context;
+    NTSTATUS status;
 
     save_context( &context, HANDLER_CONTEXT );
     rec.ExceptionCode    = EXCEPTION_WINE_ASSERTION;
@@ -408,7 +669,8 @@ static HANDLER_DEF(abrt_handler)
     rec.ExceptionRecord  = NULL;
     rec.ExceptionAddress = (LPVOID)context.Rip;
     rec.NumberParameters = 0;
-    __regs_RtlRaiseException( &rec, &context ); /* Should never return.. */
+    status = raise_exception( &rec, &context, TRUE );
+    if (status) raise_status( status, &rec );
     restore_context( &context, HANDLER_CONTEXT );
 }
 
@@ -420,7 +682,7 @@ static HANDLER_DEF(abrt_handler)
  */
 static HANDLER_DEF(quit_handler)
 {
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -471,7 +733,7 @@ static int set_handler( int sig, void (*func)() )
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
  */
-int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
+int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 {
     if (sig > sizeof(handlers) / sizeof(handlers[0])) return -1;
     if (handlers[sig] != NULL) return -2;
@@ -481,9 +743,21 @@ int __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
- *		SIGNAL_Init
+ *		signal_init_thread
  */
-BOOL SIGNAL_Init(void)
+void signal_init_thread( TEB *teb )
+{
+#ifdef __linux__
+    arch_prctl( ARCH_SET_GS, teb );
+#else
+# error Please define setting %gs for your architecture
+#endif
+}
+
+/**********************************************************************
+ *		signal_init_process
+ */
+void signal_init_process(void)
 {
     if (set_handler( SIGINT,  (void (*)())int_handler ) == -1) goto error;
     if (set_handler( SIGFPE,  (void (*)())fpe_handler ) == -1) goto error;
@@ -498,12 +772,50 @@ BOOL SIGNAL_Init(void)
 #ifdef SIGTRAP
     if (set_handler( SIGTRAP, (void (*)())trap_handler ) == -1) goto error;
 #endif
-    return TRUE;
+    return;
 
  error:
     perror("sigaction");
-    return FALSE;
+    exit(1);
 }
+
+
+/**********************************************************************
+ *              RtlLookupFunctionEntry   (NTDLL.@)
+ */
+PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG64 pc, ULONG64 *base,
+                                                 UNWIND_HISTORY_TABLE *table )
+{
+    FIXME("stub\n");
+    return NULL;
+}
+
+
+/**********************************************************************
+ *              RtlVirtualUnwind   (NTDLL.@)
+ */
+PVOID WINAPI RtlVirtualUnwind ( ULONG type, ULONG64 base, ULONG64 pc,
+                                RUNTIME_FUNCTION *function, CONTEXT *context,
+                                PVOID *data, ULONG64 *frame,
+                                KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+{
+    FIXME("stub\n");
+    return NULL;
+}
+
+
+/***********************************************************************
+ *		RtlRaiseException (NTDLL.@)
+ */
+void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
+{
+    NTSTATUS status;
+
+    rec->ExceptionAddress = (void *)context->Rip;
+    status = raise_exception( rec, context, TRUE );
+    if (status != STATUS_SUCCESS) raise_status( status, rec );
+}
+DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 1 )
 
 
 /**********************************************************************

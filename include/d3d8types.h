@@ -170,7 +170,7 @@ typedef enum _D3DVSD_TOKENTYPE {
   D3DVSD_FORCE_DWORD       = 0x7FFFFFFF
 } D3DVSD_TOKENTYPE;
 
-/** input registers for vertes shaders functions */
+/** input registers for vertex shaders functions */
 /*
 #define D3DVSDE_POSITION      0
 #define D3DVSDE_BLENDWEIGHT   1
@@ -1130,6 +1130,8 @@ typedef struct _D3DPRESENT_PARAMETERS_ {
     UINT                    FullScreen_PresentationInterval;
 
 } D3DPRESENT_PARAMETERS;
+
+#define D3DPRESENTFLAG_LOCKABLE_BACKBUFFER  0x00000001
 
 typedef struct _D3DRANGE {
     UINT                Offset;

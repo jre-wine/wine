@@ -251,7 +251,7 @@ static BOOL BRUSH_SelectPatternBrush( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
 /***********************************************************************
  *           SelectBrush   (X11DRV.@)
  */
-HBRUSH X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
+HBRUSH CDECL X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
 {
     LOGBRUSH logbrush;
     HBITMAP hBitmap;
@@ -300,16 +300,16 @@ HBRUSH X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
 
       case BS_DIBPATTERN:
 	TRACE("BS_DIBPATTERN\n");
-	if ((bmpInfo = (BITMAPINFO *) GlobalLock16( (HGLOBAL16)logbrush.lbHatch )))
+        if ((bmpInfo = GlobalLock16( logbrush.lbHatch )))
 	{
-	    int size = X11DRV_DIB_BitmapInfoSize( bmpInfo, logbrush.lbColor );
+	    int size = bitmap_info_size( bmpInfo, logbrush.lbColor );
 	    hBitmap = CreateDIBitmap( physDev->hdc, &bmpInfo->bmiHeader,
                                         CBM_INIT, ((char *)bmpInfo) + size,
                                         bmpInfo,
                                         (WORD)logbrush.lbColor );
 	    BRUSH_SelectPatternBrush( physDev, hBitmap );
 	    DeleteObject( hBitmap );
-	    GlobalUnlock16( (HGLOBAL16)logbrush.lbHatch );
+            GlobalUnlock16( logbrush.lbHatch );
 	}
 
 	break;
@@ -321,7 +321,7 @@ HBRUSH X11DRV_SelectBrush( X11DRV_PDEVICE *physDev, HBRUSH hbrush )
 /***********************************************************************
  *           SetDCBrushColor (X11DRV.@)
  */
-COLORREF X11DRV_SetDCBrushColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
+COLORREF CDECL X11DRV_SetDCBrushColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
 {
     if (GetCurrentObject(physDev->hdc, OBJ_BRUSH) == GetStockObject( DC_BRUSH ))
         BRUSH_SelectSolidBrush( physDev, crColor );

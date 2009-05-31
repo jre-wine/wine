@@ -271,7 +271,9 @@ extern "C" {
 D3DXCOLOR* WINAPI D3DXColorAdjustContrast(D3DXCOLOR *pout, CONST D3DXCOLOR *pc, FLOAT s);
 D3DXCOLOR* WINAPI D3DXColorAdjustSaturation(D3DXCOLOR *pout, CONST D3DXCOLOR *pc, FLOAT s);
 
-D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, float scaling, D3DXVECTOR3 *rotationcenter, D3DXQUATERNION *rotation, D3DXVECTOR3 *translation);
+FLOAT WINAPI D3DXFresnelTerm(FLOAT costheta, FLOAT refractionindex);
+
+D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, FLOAT scaling, CONST D3DXVECTOR3 *rotationcenter, CONST D3DXQUATERNION *rotation, CONST D3DXVECTOR3 *translation);
 FLOAT WINAPI D3DXMatrixfDeterminant(CONST D3DXMATRIX *pm);
 D3DXMATRIX* WINAPI D3DXMatrixInverse(D3DXMATRIX *pout, FLOAT *pdeterminant, CONST D3DXMATRIX *pm);
 D3DXMATRIX* WINAPI D3DXMatrixLookAtLH(D3DXMATRIX *pout, CONST D3DXVECTOR3 *peye, CONST D3DXVECTOR3 *pat, CONST D3DXVECTOR3 *pup);
@@ -359,11 +361,11 @@ DECLARE_INTERFACE_(ID3DXMatrixStack, IUnknown)
     STDMETHOD(Pop)(THIS) PURE;
     STDMETHOD(Push)(THIS) PURE;
     STDMETHOD(LoadIdentity)(THIS) PURE;
-    STDMETHOD(LoadMatrix)(THIS_ CONST LPD3DXMATRIX) PURE;
-    STDMETHOD(MultMatrix)(THIS_ CONST LPD3DXMATRIX) PURE;
-    STDMETHOD(MultMatrixLocal)(THIS_ CONST LPD3DXMATRIX) PURE;
-    STDMETHOD(RotateAxis)(THIS_ CONST LPD3DXVECTOR3, FLOAT) PURE;
-    STDMETHOD(RotateAxisLocal)(THIS_ CONST LPD3DXVECTOR3, FLOAT) PURE;
+    STDMETHOD(LoadMatrix)(THIS_ CONST D3DXMATRIX *) PURE;
+    STDMETHOD(MultMatrix)(THIS_ CONST D3DXMATRIX *) PURE;
+    STDMETHOD(MultMatrixLocal)(THIS_ CONST D3DXMATRIX *) PURE;
+    STDMETHOD(RotateAxis)(THIS_ CONST D3DXVECTOR3 *, FLOAT) PURE;
+    STDMETHOD(RotateAxisLocal)(THIS_ CONST D3DXVECTOR3 *, FLOAT) PURE;
     STDMETHOD(RotateYawPitchRoll)(THIS_ FLOAT, FLOAT, FLOAT) PURE;
     STDMETHOD(RotateYawPitchRollLocal)(THIS_ FLOAT, FLOAT, FLOAT) PURE;
     STDMETHOD(Scale)(THIS_ FLOAT, FLOAT, FLOAT) PURE;
@@ -380,7 +382,7 @@ DECLARE_INTERFACE_(ID3DXMatrixStack, IUnknown)
 #define ID3DXMatrixStack_QueryInterface(p,a,b)            (p)->lpVtbl->QueryInterface(p,a,b)
 #define ID3DXMatrixStack_AddRef(p)                        (p)->lpVtbl->AddRef(p)
 #define ID3DXMatrixStack_Release(p)                       (p)->lpVtbl->Release(p)
-#define ID3DXMAtrixStack_Pop(p)                           (p)->lpVtbl->Pop(p)
+#define ID3DXMatrixStack_Pop(p)                           (p)->lpVtbl->Pop(p)
 #define ID3DXMatrixStack_Push(p)                          (p)->lpVtbl->Push(p)
 #define ID3DXMatrixStack_LoadIdentity(p)                  (p)->lpVtbl->LoadIdentity(p)
 #define ID3DXMatrixStack_LoadMatrix(p,a)                  (p)->lpVtbl->LoadMatrix(p,a)

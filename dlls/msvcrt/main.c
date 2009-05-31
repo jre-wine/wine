@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 #include "msvcrt.h"
-#include "msvcrt/mbctype.h"
 
 #include "wine/debug.h"
 
@@ -68,10 +67,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
   thread_data_t *tls;
 
-  TRACE("(%p, %s, %p) pid(%x), tid(%x), tls(%ld)\n",
+  TRACE("(%p, %s, %p) pid(%x), tid(%x), tls(%u)\n",
         hinstDLL, msvcrt_get_reason(fdwReason), lpvReserved,
         GetCurrentProcessId(), GetCurrentThreadId(),
-        (long)msvcrt_tls_index);
+        msvcrt_tls_index);
 
   switch (fdwReason)
   {
@@ -124,7 +123,7 @@ void CDECL MSVCRT_I10_OUTPUT(void)
 {
   /* FIXME: This is probably data, not a function */
   /* no it is a function. I10 is an Int of 10 bytes */
-  /* also known as 80 bit flotaing point (long double */
+  /* also known as 80 bit floating point (long double */
   /* for some compilers, not MSVC) */
 }
 

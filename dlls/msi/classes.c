@@ -178,7 +178,7 @@ static MSIPROGID *load_progid( MSIPACKAGE* package, MSIRECORD *row )
         while (parent->Parent && parent->Parent != parent)
             parent = parent->Parent;
 
-        /* FIXME: need to determing if we are really the CurVer */
+        /* FIXME: need to determine if we are really the CurVer */
 
         progid->CurVer = parent;
         parent->VersionInd = progid;
@@ -445,7 +445,7 @@ static MSIEXTENSION *load_extension( MSIPACKAGE* package, MSIRECORD *row )
 
 /*
  * While the extension table has 2 primary keys, this function is only looking
- * at the Extension key which is what is referenced as a forign key 
+ * at the Extension key which is what is referenced as a foreign key
  */
 static MSIEXTENSION *load_given_extension( MSIPACKAGE *package, LPCWSTR name )
 {
@@ -460,6 +460,9 @@ static MSIEXTENSION *load_given_extension( MSIPACKAGE *package, LPCWSTR name )
 
     if (!name)
         return NULL;
+
+    if (name[0] == '.')
+        name++;
 
     /* check for extensions already loaded */
     LIST_FOR_EACH_ENTRY( ext, &package->extensions, MSIEXTENSION, entry )
@@ -483,7 +486,7 @@ static MSIEXTENSION *load_given_extension( MSIPACKAGE *package, LPCWSTR name )
 
 static UINT iterate_load_verb(MSIRECORD *row, LPVOID param)
 {
-    MSIPACKAGE* package = (MSIPACKAGE*)param;
+    MSIPACKAGE* package = param;
     MSIVERB *verb;
     LPCWSTR buffer;
     MSIEXTENSION *extension;
@@ -512,7 +515,7 @@ static UINT iterate_load_verb(MSIRECORD *row, LPVOID param)
     buffer = MSI_RecordGetString(row,5);
     deformat_string(package,buffer,&verb->Argument);
 
-    /* assosiate the verb with the correct extension */
+    /* associate the verb with the correct extension */
     list_add_tail( &extension->verbs, &verb->entry );
     
     return ERROR_SUCCESS;
@@ -524,7 +527,7 @@ static UINT iterate_all_classes(MSIRECORD *rec, LPVOID param)
     LPCWSTR clsid;
     LPCWSTR context;
     LPCWSTR buffer;
-    MSIPACKAGE* package =(MSIPACKAGE*)param;
+    MSIPACKAGE* package = param;
     MSICLASS *cls;
     BOOL match = FALSE;
 
@@ -574,7 +577,7 @@ static UINT iterate_all_extensions(MSIRECORD *rec, LPVOID param)
     MSICOMPONENT *comp;
     LPCWSTR buffer;
     LPCWSTR extension;
-    MSIPACKAGE* package =(MSIPACKAGE*)param;
+    MSIPACKAGE* package = param;
     BOOL match = FALSE;
     MSIEXTENSION *ext;
 
@@ -619,7 +622,7 @@ static VOID load_all_extensions(MSIPACKAGE *package)
 static UINT iterate_all_progids(MSIRECORD *rec, LPVOID param)
 {
     LPCWSTR buffer;
-    MSIPACKAGE* package =(MSIPACKAGE*)param;
+    MSIPACKAGE* package = param;
 
     buffer = MSI_RecordGetString(rec,1);
     load_given_progid(package,buffer);
@@ -663,7 +666,7 @@ static VOID load_all_verbs(MSIPACKAGE *package)
 static UINT iterate_all_mimes(MSIRECORD *rec, LPVOID param)
 {
     LPCWSTR buffer;
-    MSIPACKAGE* package =(MSIPACKAGE*)param;
+    MSIPACKAGE* package = param;
 
     buffer = MSI_RecordGetString(rec,1);
     load_given_mime(package,buffer);
@@ -971,6 +974,8 @@ static LPCWSTR get_clsid_of_progid( const MSIPROGID *progid )
     {
         if (progid->Class)
             return progid->Class->clsid;
+        if (progid->Parent == progid)
+            break;
         progid = progid->Parent;
     }
     return NULL;
@@ -1252,7 +1257,7 @@ UINT ACTION_RegisterMIMEInfo(MSIPACKAGE *package)
         LPWSTR key;
 
         /* 
-         * check if the MIME is to be installed. Either as requesed by an
+         * check if the MIME is to be installed. Either as requested by an
          * extension or Class
          */
         mt->InstallMe = (mt->InstallMe ||

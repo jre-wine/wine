@@ -23,11 +23,19 @@
 
 #include "resource.h"
 
+#include "Da.rc"
 #include "De.rc"
 #include "En.rc"
 #include "Fr.rc"
+#include "Ja.rc"
 #include "Ko.rc"
+#include "Nl.rc"
 #include "No.rc"
+#include "Pl.rc"
+#include "Pt.rc"
+#include "Ru.rc"
+#include "Sv.rc"
+#include "Zh.rc"
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 

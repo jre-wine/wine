@@ -29,7 +29,6 @@
 #include "winternl.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
-#include "thread.h"
 #include "ntdll_misc.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(environ);
@@ -238,7 +237,6 @@ NTSTATUS WINAPI RtlSetEnvironmentVariable(PWSTR* penv, PUNICODE_STRING name,
         RtlDestroyEnvironment(env);
         if (!penv) NtCurrentTeb()->Peb->ProcessParameters->Environment = new_env;
         else *penv = new_env;
-        env = new_env;
     }
     else
     {

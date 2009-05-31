@@ -16,128 +16,292 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+/* UTF-8 */
+#pragma code_page(65001)
+
 LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
 
 MENU_001 MENU DISCARDABLE
 BEGIN
-	MENUITEM "ëÂÇ´Ç»±≤∫›(&G)",	FCIDM_SHVIEW_BIGICON
-	MENUITEM "è¨Ç≥Ç»±≤∫›(&M)",	FCIDM_SHVIEW_SMALLICON
-	MENUITEM "àÍóó(&L)",		FCIDM_SHVIEW_LISTVIEW
-	MENUITEM "è⁄ç◊(&D)",		FCIDM_SHVIEW_REPORTVIEW
+	MENUITEM "Â§ß„Åç„Å™„Ç¢„Ç§„Ç≥„É≥(&G)",	FCIDM_SHVIEW_BIGICON
+	MENUITEM "Â∞è„Åï„Å™„Ç¢„Ç§„Ç≥„É≥(&M)",	FCIDM_SHVIEW_SMALLICON
+	MENUITEM "‰∏ÄË¶ß(&L)",		FCIDM_SHVIEW_LISTVIEW
+	MENUITEM "Ë©≥Á¥∞(&D)",		FCIDM_SHVIEW_REPORTVIEW
 END
 
+/*
+ shellview background menu
+*/
 MENU_002 MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
-	  POPUP "ï\\é¶(&V)"
+	  POPUP "Ë°®Á§∫(&V)"
 	  BEGIN
-	    MENUITEM "ëÂÇ´Ç¢ÉAÉCÉRÉì(&G)",	FCIDM_SHVIEW_BIGICON
-	    MENUITEM "è¨Ç≥Ç¢ÉAÉCÉRÉì(&M)",	FCIDM_SHVIEW_SMALLICON
-	    MENUITEM "àÍóó(&L)",		FCIDM_SHVIEW_LISTVIEW
-	    MENUITEM "è⁄ç◊(&D)",	FCIDM_SHVIEW_REPORTVIEW
+	    MENUITEM "Â§ß„Åç„ÅÑ„Ç¢„Ç§„Ç≥„É≥(&G)",	FCIDM_SHVIEW_BIGICON
+	    MENUITEM "Â∞è„Åï„ÅÑ„Ç¢„Ç§„Ç≥„É≥(&M)",	FCIDM_SHVIEW_SMALLICON
+	    MENUITEM "‰∏ÄË¶ß(&L)",		FCIDM_SHVIEW_LISTVIEW
+	    MENUITEM "Ë©≥Á¥∞(&D)",	FCIDM_SHVIEW_REPORTVIEW
 	  END
 	  MENUITEM SEPARATOR
-	  POPUP "ÉAÉCÉRÉìÇÃêÆóÒ(&I)"
+	  POPUP "„Ç¢„Ç§„Ç≥„É≥„ÅÆÊï¥Âàó(&I)"
 	  BEGIN
-	    MENUITEM "ñºëOèá(&N)",	0x30	/* column 0 */
-	    MENUITEM "éÌóﬁèá(&T)",	0x32	/* column 2 */
-	    MENUITEM "ÉTÉCÉYèá(&S)",	0x31	/* ... */
-	    MENUITEM "ì˙ïtèá(&D)",	0x33
+	    MENUITEM "ÂêçÂâçÈ†Ü(&N)",	0x30	/* column 0 */
+	    MENUITEM "Á®ÆÈ°ûÈ†Ü(&T)",	0x32	/* column 2 */
+	    MENUITEM "„Çµ„Ç§„Ç∫È†Ü(&S)",	0x31	/* ... */
+	    MENUITEM "Êó•‰ªòÈ†Ü(&D)",	0x33
 	    MENUITEM SEPARATOR
-	    MENUITEM "ÉAÉCÉRÉìÇÃé©ìÆêÆóÒ(&A)",	FCIDM_SHVIEW_AUTOARRANGE
+	    MENUITEM "„Ç¢„Ç§„Ç≥„É≥„ÅÆËá™ÂãïÊï¥Âàó(&A)",	FCIDM_SHVIEW_AUTOARRANGE
 	  END
-	  MENUITEM "ìôä‘äuÇ…êÆóÒ",	FCIDM_SHVIEW_SNAPTOGRID
+	  MENUITEM "Á≠âÈñìÈöî„Å´Êï¥Âàó",	FCIDM_SHVIEW_SNAPTOGRID
 	  MENUITEM SEPARATOR
-	  MENUITEM "ì\\ÇËïtÇØ",		FCIDM_SHVIEW_INSERT
-	  MENUITEM "ÉVÉáÅ[ÉgÉJÉbÉgÇÃì\\ÇËïtÇØ",	FCIDM_SHVIEW_INSERTLINK
-	  POPUP "êVãKçÏê¨"
+	  MENUITEM "Êõ¥Êñ∞",		FCIDM_SHVIEW_REFRESH
+	  MENUITEM SEPARATOR
+	  MENUITEM "Ë≤º„Çä‰ªò„Åë",		FCIDM_SHVIEW_INSERT
+	  MENUITEM "„Ç∑„Éß„Éº„Éà„Ç´„ÉÉ„Éà„ÅÆË≤º„Çä‰ªò„Åë",	FCIDM_SHVIEW_INSERTLINK
+	  MENUITEM SEPARATOR
+	  POPUP "Êñ∞Ë¶è‰ΩúÊàê"
 	  BEGIN
-	    MENUITEM "êVãKÉtÉHÉãÉ_(&F)",	0x7053
-	    MENUITEM "êVãKÉVÉáÅ[ÉgÉJÉbÉg(&L)",	0x7052
+	    MENUITEM "Êñ∞Ë¶è„Éï„Ç©„É´„ÉÄ(&F)",	FCIDM_SHVIEW_NEWFOLDER
+	    MENUITEM "Êñ∞Ë¶è„Ç∑„Éß„Éº„Éà„Ç´„ÉÉ„Éà(&L)",	FCIDM_SHVIEW_NEWLINK
 	    MENUITEM SEPARATOR
 	  END
-	  MENUITEM "ÉvÉçÉpÉeÉB",		FCIDM_SHVIEW_PROPERTIES
+	  MENUITEM SEPARATOR
+	  MENUITEM "„Éó„É≠„Éë„ÉÜ„Ç£",	FCIDM_SHVIEW_PROPERTIES
 	END
 END
 
+/*
+ shellview item menu
+*/
 MENU_SHV_FILE MENU DISCARDABLE
 BEGIN
 	POPUP ""
 	BEGIN
-	  MENUITEM "&Select"		FCIDM_SHVIEW_OPEN
-	  MENUITEM "êÿÇËéÊÇË(&U)",		FCIDM_SHVIEW_CUT
-	  MENUITEM "ÉRÉsÅ[(&C)",	FCIDM_SHVIEW_COPY
+	  MENUITEM "ÈÅ∏Êäû(&S)"		FCIDM_SHVIEW_OPEN
+	  MENUITEM "E&xplore",		FCIDM_SHVIEW_EXPLORE
+	  MENUITEM "Èñã„Åè(&O)",		FCIDM_SHVIEW_OPEN
 	  MENUITEM SEPARATOR
-	  MENUITEM "ÉVÉáÅ[ÉgÉJÉbÉgÇÃçÏê¨(&L)",	0x7051
-	  MENUITEM "çÌèú(&D)",	FCIDM_SHVIEW_DELETE
-	  MENUITEM "ñºëOÇÃïœçX(&R)",	0x7050
+	  MENUITEM "Âàá„ÇäÂèñ„Çä(&U)",		FCIDM_SHVIEW_CUT
+	  MENUITEM "„Ç≥„Éî„Éº(&C)",		FCIDM_SHVIEW_COPY
 	  MENUITEM SEPARATOR
-	  MENUITEM "ÉvÉçÉpÉeÉB(&P)",	FCIDM_SHVIEW_PROPERTIES
+	  MENUITEM "„Ç∑„Éß„Éº„Éà„Ç´„ÉÉ„Éà„ÅÆ‰ΩúÊàê(&L)",	FCIDM_SHVIEW_CREATELINK
+	  MENUITEM "ÂâäÈô§(&D)",		FCIDM_SHVIEW_DELETE
+	  MENUITEM "ÂêçÂâç„ÅÆÂ§âÊõ¥(&R)",		FCIDM_SHVIEW_RENAME
+	  MENUITEM SEPARATOR
+	  MENUITEM "„Éó„É≠„Éë„ÉÜ„Ç£(&P)",	FCIDM_SHVIEW_PROPERTIES
 	END
 END
 
-/*
-	special folders
-*/
-STRINGTABLE DISCARDABLE
+MENU_CPANEL MENU
+BEGIN
+    POPUP "„Éï„Ç°„Ç§„É´(&F)"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "ÁµÇ‰∫Ü(&X)", IDM_CPANEL_EXIT
+    END
+
+    POPUP "Ë°®Á§∫(&V)"
+    BEGIN
+        MENUITEM "Â§ß„Åç„Å™„Ç¢„Ç§„Ç≥„É≥(&G)", FCIDM_SHVIEW_BIGICON
+        MENUITEM "Â∞è„Åï„Å™„Ç¢„Ç§„Ç≥„É≥(&M)", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "‰∏ÄË¶ß(&L)", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "Ë©≥Á¥∞(&D)", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "„Éò„É´„Éó(&H)"
+    BEGIN
+        MENUITEM "„Ç≥„É≥„Éà„É≠„Éº„É´ „Éë„Éç„É´„Å´„Å§„ÅÑ„Å¶(&A)...", IDM_CPANEL_ABOUT
+    END
+END
+
+SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+CAPTION "„Éï„Ç©„É´„ÉÄ„ÅÆÂèÇÁÖß"
+FONT 9, "MS Shell Dlg"
 {
-	IDS_DESKTOP		"√ﬁΩ∏ƒØÃﬂ"
-	IDS_MYCOMPUTER		"œ≤∫›Àﬂ≠∞¿"
+ DEFPUSHBUTTON "OK", 1, 80, 176, 50, 12, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
+ PUSHBUTTON "„Ç≠„É£„É≥„Çª„É´", 2, 134, 176, 50, 12, WS_GROUP | WS_TABSTOP
+ LTEXT "", IDD_TITLE, 4, 4, 180, 12
+ LTEXT "", IDD_STATUS, 4, 25, 180, 12
+ CONTROL "", IDD_TREEVIEW, "SysTreeView32",
+	TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+	WS_BORDER | WS_TABSTOP,
+	4, 40, 180, 120
 }
 
-/*
-	context menus
-*/
-STRINGTABLE DISCARDABLE
+SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+CAPTION "„Éï„Ç©„É´„ÉÄ„ÅÆÂèÇÁÖß"
+FONT 9, "MS Shell Dlg"
 {
-	IDS_VIEW_LARGE		"ëÂÇ´Ç¢ÉAÉCÉRÉì(&G)"
-	IDS_VIEW_SMALL		"è¨Ç≥Ç¢ÉAÉCÉRÉì(&M)"
-	IDS_VIEW_LIST		"àÍóó(&L)"
-	IDS_VIEW_DETAILS	"è⁄ç◊(&D)"
-	IDS_SELECT		"ëIë"
-	IDS_OPEN		"äJÇ≠"
+ LTEXT "", IDD_TITLE, 10, 8, 198, 24
+ LTEXT "", IDD_STATUS, 10, 25, 198, 12
+ LTEXT "„Éï„Ç©„É´„ÉÄ:", IDD_FOLDER, 10, 156, 40, 12
+ CONTROL "", IDD_TREEVIEW, "SysTreeView32",
+	TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+	WS_BORDER | WS_TABSTOP,
+	12, 38, 194, 105
+ EDITTEXT IDD_FOLDERTEXT, 46, 150, 160, 14, WS_BORDER | WS_GROUP | WS_TABSTOP
+ PUSHBUTTON "Êñ∞„Åó„ÅÑ„Éï„Ç©„É´„ÉÄ„ÅÆ‰ΩúÊàê(&M)", IDD_MAKENEWFOLDER, 12, 174, 70, 14, WS_GROUP | WS_TABSTOP
+ DEFPUSHBUTTON "OK", IDOK, 102, 174, 50, 14, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
+ PUSHBUTTON "„Ç≠„É£„É≥„Çª„É´", IDCANCEL, 156, 174, 50, 14, WS_GROUP | WS_TABSTOP
 }
 
-SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
+SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
-CAPTION "%s Ç…Ç¬Ç¢Çƒ"
+CAPTION "„É°„ÉÉ„Çª„Éº„Ç∏"
+FONT 9, "MS Shell Dlg"
+{
+    DEFPUSHBUTTON "„ÅØ„ÅÑ(&Y)", IDYES, 34, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "„Åô„Åπ„Å¶„ÅØ„ÅÑ(&A)", IDD_YESTOALL, 92, 69, 65, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "„ÅÑ„ÅÑ„Åà(&N)", IDNO, 162, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    PUSHBUTTON "„Ç≠„É£„É≥„Çª„É´(&C)", IDCANCEL, 220, 69, 53, 14, WS_GROUP | WS_TABSTOP
+    ICON "", IDD_ICON, 10, 10, 16, 16
+    LTEXT "", IDD_MESSAGE, 40, 10, 238, 52, 0
+}
+
+SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 220, 152
+STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
+CAPTION "%s „Å´„Å§„ÅÑ„Å¶"
 FONT 10, "MS Shell Dlg"
 {
- DEFPUSHBUTTON "OK", IDOK, 153, 133, 50, 12, WS_TABSTOP
- LISTBOX 99, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
- ICON "", 1088, 10, 10, 14, 16
- LTEXT "", 100, 30, 10, 137, 10
- LTEXT "", 101, 30, 22, 137, 10
- LTEXT "Wine was brought to you by:", 98, 8, 55, 137, 10
+ DEFPUSHBUTTON "OK", IDOK, 153, 133, 60, 12, WS_TABSTOP
+ PUSHBUTTON "Wine „É©„Ç§„Çª„É≥„Çπ(&L)...", IDC_ABOUT_LICENSE, 153, 113, 60, 12, WS_TABSTOP
+ LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+ ICON "", stc1, 10, 10, 30, 30
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 42, 10, 170, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 42, 22, 170, 10
+ LTEXT "Running on %s", IDC_ABOUT_STATIC_TEXT3, 42, 34, 170, 10
+ LTEXT "Wine was brought to you by:", IDC_ABOUT_WINE_TEXT, 8, 54, 204, 10
 }
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION ""
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 {
- ICON "", 12297, 7, 11, 18, 20, WS_VISIBLE
- LTEXT "Type the name of a program, folder, document, or Internet resource, and Wine will open it for you.", 12289, 36, 11, 182, 18
- LTEXT "&Open:", 12305, 7, 39, 24, 10
- CONTROL "", 12298, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
+ ICON "", IDC_RUNDLG_ICON, 7, 11, 18, 20, WS_VISIBLE
+ LTEXT "Type the name of a program, folder, document, or Internet resource, and Wine will open it for you.", IDC_RUNDLG_DESCRIPTION, 36, 11, 182, 18
+ LTEXT "&Open:", IDC_RUNDLG_LABEL, 7, 39, 24, 10
+ CONTROL "", IDC_RUNDLG_EDITPATH, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
  DEFPUSHBUTTON "OK", IDOK, 62, 63, 50, 14, WS_TABSTOP
- PUSHBUTTON "Cancel", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
- PUSHBUTTON "&Browse...", 12288, 170, 63, 50, 14, WS_TABSTOP
+ PUSHBUTTON "„Ç≠„É£„É≥„Çª„É´", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
+ PUSHBUTTON "ÂèÇÁÖß(&B)...", IDC_RUNDLG_BROWSE, 170, 63, 50, 14, WS_TABSTOP
 }
 
-/*	columns in the shellview	*/
-STRINGTABLE DISCARDABLE
-BEGIN
-	IDS_SHV_COLUMN1		"ñºëO"
-	IDS_SHV_COLUMN2		"ÉTÉCÉY"
-	IDS_SHV_COLUMN3		"ÉtÉ@ÉCÉãÇÃéÌóﬁ"
-	IDS_SHV_COLUMN4		"çXêVì˙éû"
-	IDS_SHV_COLUMN5		"ëÆê´"
-	IDS_SHV_COLUMN6		"çáåvÉTÉCÉY"
-	IDS_SHV_COLUMN7		"ãÛÇ´óeó "
-	IDS_SHV_COLUMN8		"Name" /*FIXME*/
-	IDS_SHV_COLUMN9		"Comments" /*FIXME*/
+STRINGTABLE
+{
+        /* columns in the shellview */
+	IDS_SHV_COLUMN1		"„Éï„Ç°„Ç§„É´"
+	IDS_SHV_COLUMN2		"„Çµ„Ç§„Ç∫"
+	IDS_SHV_COLUMN3		"„Éï„Ç°„Ç§„É´„ÅÆÁ®ÆÈ°û"
+	IDS_SHV_COLUMN4		"Êõ¥Êñ∞Êó•ÊôÇ"
+	IDS_SHV_COLUMN5		"Â±ûÊÄß"
+	IDS_SHV_COLUMN6		"ÂêàË®à„Çµ„Ç§„Ç∫"
+	IDS_SHV_COLUMN7		"Á©∫„ÅçÂÆπÈáè"
+	IDS_SHV_COLUMN8		"ÂêçÂâç"
+	IDS_SHV_COLUMN9		"Comments"
+	IDS_SHV_COLUMN10	"ÊâÄÊúâËÄÖ"
+	IDS_SHV_COLUMN11	"„Ç∞„É´„Éº„Éó"
+	IDS_SHV_COLUMN_DELFROM	"Original location"
+	IDS_SHV_COLUMN_DELDATE	"Date deleted"
+
+        /* special folders */
+	IDS_DESKTOP		"„Éá„Çπ„ÇØ„Éà„ÉÉ„Éó"
+	IDS_MYCOMPUTER		"„Éû„Ç§ „Ç≥„É≥„Éî„É•„Éº„Çø"
+	IDS_RECYCLEBIN_FOLDER_NAME      "„Åî„ÅøÁÆ±"
+	IDS_CONTROLPANEL	"„Ç≥„É≥„Éà„É≠„Éº„É´ „Éë„Éç„É´"
+
+        /* context menus */
+	IDS_VIEW_LARGE		"Â§ß„Åç„ÅÑ„Ç¢„Ç§„Ç≥„É≥(&G)"
+	IDS_VIEW_SMALL		"Â∞è„Åï„ÅÑ„Ç¢„Ç§„Ç≥„É≥(&M)"
+	IDS_VIEW_LIST		"‰∏ÄË¶ß(&L)"
+	IDS_VIEW_DETAILS	"Ë©≥Á¥∞(&D)"
+	IDS_SELECT		"ÈÅ∏Êäû"
+	IDS_OPEN		"Èñã„Åè"
+
+	IDS_CREATEFOLDER_DENIED "Unable to create new Folder: Permission denied."
+	IDS_CREATEFOLDER_CAPTION "Error during creation of a new folder"
+	IDS_DELETEITEM_CAPTION "Confirm file deletion"
+	IDS_DELETEFOLDER_CAPTION "Confirm folder deletion"
+	IDS_DELETEITEM_TEXT "Are you sure you want to delete '%1'?"
+	IDS_DELETEMULTIPLE_TEXT "Are you sure you want to delete these %1 items?"
+	IDS_DELETESELECTED_TEXT "Are you sure you want to delete the selected item(s)?"
+	IDS_TRASHITEM_TEXT "Are you sure that you want to send '%1' to the Trash?"
+	IDS_TRASHFOLDER_TEXT "Are you sure that you want to send '%1' and all its content to the Trash?"
+	IDS_TRASHMULTIPLE_TEXT "Are you sure that you want to send these %1 items to the Trash?"
+	IDS_CANTTRASH_TEXT "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
+	IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
+	IDS_OVERWRITEFILE_CAPTION "Confirm file overwrite"
+	IDS_OVERWRITEFOLDER_TEXT "This folder already contains a folder named '%1'.\n\n"\
+	    "If the files in the destination folder have the same names as files in the\n"\
+	    "selected folder they will be replaced. Do you still want to move or copy\n"\
+	    "the folder?"
+
+        /* message box strings */
+        IDS_RESTART_TITLE       "ÂÜçËµ∑Âãï"
+        IDS_RESTART_PROMPT      "Windows „ÅÆÂÜçËµ∑Âãï„Çí„Ç∑„Éü„É•„É¨„Éº„Éà„Åó„Åæ„Åô„Åã?"
+        IDS_SHUTDOWN_TITLE      "„Ç∑„É£„ÉÉ„Éà„ÉÄ„Ç¶„É≥"
+        IDS_SHUTDOWN_PROMPT     "Wine „Çª„ÉÉ„Ç∑„Éß„É≥„Çí„Ç∑„É£„ÉÉ„Éà„ÉÄ„Ç¶„É≥„Åó„Åæ„Åô„Åã?"
+
+        /* Run File dialog */
+        IDS_RUNDLG_ERROR           "Unable to display Run File dialog box (internal error)"
+        IDS_RUNDLG_BROWSE_ERROR    "Unable to display Browse dialog box (internal error)"
+        IDS_RUNDLG_BROWSE_CAPTION  "ÂèÇÁÖß"
+        IDS_RUNDLG_BROWSE_FILTER   "ÂÆüË°åÂèØËÉΩ„Éï„Ç°„Ç§„É´\0*.exe\0„Åô„Åπ„Å¶„ÅÆ„Éï„Ç°„Ç§„É´\0*.*\0\0"
+
+        /* shell folder path default values */
+	IDS_PROGRAMS                "Start Menu\\Programs"
+	IDS_PERSONAL                "My Documents"
+	IDS_FAVORITES               "Favorites"
+	IDS_STARTUP                 "Start Menu\\Programs\\StartUp"
+	IDS_RECENT                  "Recent"
+	IDS_SENDTO                  "SendTo"
+	IDS_STARTMENU               "Start Menu"
+	IDS_MYMUSIC                 "My Music"
+	IDS_MYVIDEO                 "My Videos"
+	IDS_DESKTOPDIRECTORY        "Desktop"
+	IDS_NETHOOD                 "NetHood"
+	IDS_TEMPLATES               "Templates"
+	IDS_APPDATA                 "Application Data"
+	IDS_PRINTHOOD               "PrintHood"
+	IDS_LOCAL_APPDATA           "Local Settings\\Application Data"
+	IDS_INTERNET_CACHE          "Local Settings\\Temporary Internet Files"
+	IDS_COOKIES                 "Cookies"
+	IDS_HISTORY                 "Local Settings\\History"
+	IDS_PROGRAM_FILES           "Program Files"
+	IDS_MYPICTURES              "My Pictures"
+	IDS_PROGRAM_FILES_COMMON    "Program Files\\Common Files"
+	IDS_COMMON_DOCUMENTS        "Documents"
+	IDS_ADMINTOOLS              "Start Menu\\Programs\\Administrative Tools"
+	IDS_COMMON_MUSIC            "Documents\\My Music"
+	IDS_COMMON_PICTURES         "Documents\\My Pictures"
+	IDS_COMMON_VIDEO            "Documents\\My Videos"
+	IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
 
 	IDS_NEWFOLDER		"New Folder"
-END
+
+	IDS_CPANEL_TITLE            "Wine Control Panel"
+	IDS_CPANEL_NAME             "Name"
+	IDS_CPANEL_DESCRIPTION      "Description"
+}
+
+STRINGTABLE
+{
+IDS_LICENSE_CAPTION,            "Wine „É©„Ç§„Çª„É≥„Çπ"
+IDS_LICENSE,
+"Wine is free software; you can redistribute it and/or \
+modify it under the terms of the GNU Lesser General Public \
+License as published by the Free Software Foundation; either \
+version 2.1 of the License, or (at your option) any later version.\n\n\
+Wine is distributed in the hope that it will be useful, \
+but WITHOUT ANY WARRANTY; without even the implied warranty of \
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
+Lesser General Public License for more details.\n\n\
+You should have received a copy of the GNU Lesser General Public \
+License along with Wine; if not, write to the Free Software \
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
+}
+
+#pragma code_page(default)

@@ -36,6 +36,7 @@
 #include <string.h>
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -78,11 +79,12 @@ static const struct dinput_device *dinput_devices[] =
     &mouse_device,
     &keyboard_device,
     &joystick_linuxinput_device,
-    &joystick_linux_device
+    &joystick_linux_device,
+    &joystick_osx_device
 };
 #define NB_DINPUT_DEVICES (sizeof(dinput_devices)/sizeof(dinput_devices[0]))
 
-HINSTANCE DINPUT_instance = NULL;
+static HINSTANCE DINPUT_instance = NULL;
 
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserv)
 {
@@ -113,7 +115,8 @@ HRESULT WINAPI DirectInputCreateEx(
 
     TRACE("(%p,%04x,%s,%p,%p)\n", hinst, dwVersion, debugstr_guid(riid), ppDI, punkOuter);
 
-    if (IsEqualGUID( &IID_IDirectInputA,  riid ) ||
+    if (IsEqualGUID( &IID_IUnknown,       riid ) ||
+        IsEqualGUID( &IID_IDirectInputA,  riid ) ||
         IsEqualGUID( &IID_IDirectInput2A, riid ) ||
         IsEqualGUID( &IID_IDirectInput7A, riid ) ||
         IsEqualGUID( &IID_IDirectInputW,  riid ) ||
@@ -200,7 +203,7 @@ static void _dump_EnumDevices_dwFlags(DWORD dwFlags) {
 	};
 	TRACE(" flags: ");
 	if (dwFlags == 0) {
-	    TRACE("DIEDFL_ALLDEVICES");
+	    TRACE("DIEDFL_ALLDEVICES\n");
 	    return;
 	}
 	for (i = 0; i < (sizeof(flags) / sizeof(flags[0])); i++)
@@ -208,6 +211,35 @@ static void _dump_EnumDevices_dwFlags(DWORD dwFlags) {
 		TRACE("%s ",flags[i].name);
     }
     TRACE("\n");
+}
+
+void _dump_diactionformatA(LPDIACTIONFORMATA lpdiActionFormat) {
+    unsigned int i;
+
+    FIXME("diaf.dwSize = %d\n", lpdiActionFormat->dwSize);
+    FIXME("diaf.dwActionSize = %d\n", lpdiActionFormat->dwActionSize);
+    FIXME("diaf.dwDataSize = %d\n", lpdiActionFormat->dwDataSize);
+    FIXME("diaf.dwNumActions = %d\n", lpdiActionFormat->dwNumActions);
+    FIXME("diaf.rgoAction = %p\n", lpdiActionFormat->rgoAction);
+    for (i=0;i<lpdiActionFormat->dwNumActions;i++) {
+        FIXME("diaf.rgoAction[%u]:\n", i);
+        FIXME("\tuAppData=%lx\n", lpdiActionFormat->rgoAction[i].uAppData);
+        FIXME("\tdwSemantics=%x\n", lpdiActionFormat->rgoAction[i].dwSemantics);
+        FIXME("\tdwFlags=%x\n", lpdiActionFormat->rgoAction[i].dwFlags);
+        FIXME("\tszActionName=%s\n", debugstr_a(lpdiActionFormat->rgoAction[i].u.lptszActionName));
+        FIXME("\tguidInstance=%s\n", debugstr_guid(&lpdiActionFormat->rgoAction[i].guidInstance));
+        FIXME("\tdwObjID=%x\n", lpdiActionFormat->rgoAction[i].dwObjID);
+        FIXME("\tdwHow=%x\n", lpdiActionFormat->rgoAction[i].dwHow);
+    }
+    FIXME("diaf.guidActionMap = %s\n", debugstr_guid(&lpdiActionFormat->guidActionMap));
+    FIXME("diaf.dwGenre = %d\n", lpdiActionFormat->dwGenre);
+    FIXME("diaf.dwBufferSize = %d\n", lpdiActionFormat->dwBufferSize);
+    FIXME("diaf.lAxisMin = %d\n", lpdiActionFormat->lAxisMin);
+    FIXME("diaf.lAxisMax = %d\n", lpdiActionFormat->lAxisMax);
+    FIXME("diaf.hInstString = %p\n", lpdiActionFormat->hInstString);
+    FIXME("diaf.ftTimeStamp ...\n");
+    FIXME("diaf.dwCRC = %x\n", lpdiActionFormat->dwCRC);
+    FIXME("diaf.tszActionMap = %s\n", debugstr_a(lpdiActionFormat->tszActionMap));
 }
 
 /******************************************************************************
@@ -219,8 +251,9 @@ static HRESULT WINAPI IDirectInputAImpl_EnumDevices(
 {
     IDirectInputImpl *This = (IDirectInputImpl *)iface;
     DIDEVICEINSTANCEA devInstance;
-    int i, j, r;
-    
+    unsigned int i;
+    int j, r;
+
     TRACE("(this=%p,0x%04x '%s',%p,%p,%04x)\n",
 	  This, dwDevType, _dump_DIDEVTYPE_value(dwDevType),
 	  lpCallback, pvRef, dwFlags);
@@ -230,7 +263,7 @@ static HRESULT WINAPI IDirectInputAImpl_EnumDevices(
         if (!dinput_devices[i]->enum_deviceA) continue;
         for (j = 0, r = -1; r != 0; j++) {
 	    devInstance.dwSize = sizeof(devInstance);
-	    TRACE("  - checking device %d ('%s')\n", i, dinput_devices[i]->name);
+	    TRACE("  - checking device %u ('%s')\n", i, dinput_devices[i]->name);
 	    if ((r = dinput_devices[i]->enum_deviceA(dwDevType, dwFlags, &devInstance, This->dwVersion, j))) {
 	        if (lpCallback(&devInstance,pvRef) == DIENUM_STOP)
 		    return 0;
@@ -249,8 +282,9 @@ static HRESULT WINAPI IDirectInputWImpl_EnumDevices(
 {
     IDirectInputImpl *This = impl_from_IDirectInput7W( iface );
     DIDEVICEINSTANCEW devInstance;
-    int i, j, r;
-    
+    unsigned int i;
+    int j, r;
+
     TRACE("(this=%p,0x%04x '%s',%p,%p,%04x)\n",
 	  This, dwDevType, _dump_DIDEVTYPE_value(dwDevType),
 	  lpCallback, pvRef, dwFlags);
@@ -260,7 +294,7 @@ static HRESULT WINAPI IDirectInputWImpl_EnumDevices(
         if (!dinput_devices[i]->enum_deviceW) continue;
         for (j = 0, r = -1; r != 0; j++) {
 	    devInstance.dwSize = sizeof(devInstance);
-	    TRACE("  - checking device %d ('%s')\n", i, dinput_devices[i]->name);
+	    TRACE("  - checking device %u ('%s')\n", i, dinput_devices[i]->name);
 	    if ((r = dinput_devices[i]->enum_deviceW(dwDevType, dwFlags, &devInstance, This->dwVersion, j))) {
 	        if (lpCallback(&devInstance,pvRef) == DIENUM_STOP)
 		    return 0;
@@ -387,8 +421,15 @@ static HRESULT WINAPI IDirectInputWImpl_Initialize(LPDIRECTINPUT7W iface, HINSTA
 static HRESULT WINAPI IDirectInputAImpl_GetDeviceStatus(LPDIRECTINPUT7A iface, REFGUID rguid)
 {
     IDirectInputImpl *This = (IDirectInputImpl *)iface;
+    HRESULT hr;
+    LPDIRECTINPUTDEVICEA device;
 
-    FIXME( "(%p)->(%s): stub\n", This, debugstr_guid(rguid) );
+    TRACE( "(%p)->(%s)\n", This, debugstr_guid(rguid) );
+
+    hr = IDirectInput_CreateDevice( iface, rguid, &device, NULL );
+    if (hr != DI_OK) return DI_NOTATTACHED;
+
+    IUnknown_Release( device );
 
     return DI_OK;
 }
@@ -441,7 +482,7 @@ static HRESULT WINAPI IDirectInput7AImpl_CreateDeviceEx(LPDIRECTINPUT7A iface, R
 {
   IDirectInputImpl *This = (IDirectInputImpl *)iface;
   HRESULT ret_value = DIERR_DEVICENOTREG;
-  int i;
+  unsigned int i;
 
   TRACE("(%p)->(%s, %s, %p, %p)\n", This, debugstr_guid(rguid), debugstr_guid(riid), pvOut, lpUnknownOuter);
 
@@ -464,6 +505,11 @@ static HRESULT WINAPI IDirectInput7AImpl_CreateDeviceEx(LPDIRECTINPUT7A iface, R
       ret_value = DIERR_NOINTERFACE;
   }
 
+  if (ret_value == DIERR_NOINTERFACE)
+  {
+    WARN("invalid device GUID %s\n", debugstr_guid(rguid));
+  }
+
   return ret_value;
 }
 
@@ -472,7 +518,7 @@ static HRESULT WINAPI IDirectInput7WImpl_CreateDeviceEx(LPDIRECTINPUT7W iface, R
 {
   IDirectInputImpl *This = impl_from_IDirectInput7W( iface );
   HRESULT ret_value = DIERR_DEVICENOTREG;
-  int i;
+  unsigned int i;
 
   TRACE("(%p)->(%s, %s, %p, %p)\n", This, debugstr_guid(rguid), debugstr_guid(riid), pvOut, lpUnknownOuter);
 
@@ -632,11 +678,22 @@ static HRESULT WINAPI IDirectInput8AImpl_EnumDevicesBySemantics(
       LPVOID pvRef, DWORD dwFlags
 )
 {
-      IDirectInputImpl *This = impl_from_IDirectInput8A( iface );
+    IDirectInputImpl *This = impl_from_IDirectInput8A( iface );
 
-      FIXME("(this=%p,%s,%p,%p,%p,%04x): stub\n", This, ptszUserName, lpdiActionFormat,
-            lpCallback, pvRef, dwFlags);
-      return 0;
+    FIXME("(this=%p,%s,%p,%p,%p,%04x): stub\n", This, ptszUserName, lpdiActionFormat,
+          lpCallback, pvRef, dwFlags);
+#define X(x) if (dwFlags & x) FIXME("\tdwFlags |= "#x"\n");
+	X(DIEDBSFL_ATTACHEDONLY)
+	X(DIEDBSFL_THISUSER)
+	X(DIEDBSFL_FORCEFEEDBACK)
+	X(DIEDBSFL_AVAILABLEDEVICES)
+	X(DIEDBSFL_MULTIMICEKEYBOARDS)
+	X(DIEDBSFL_NONGAMINGDEVICES)
+#undef X
+
+    _dump_diactionformatA(lpdiActionFormat);
+
+    return DI_OK;
 }
 
 static HRESULT WINAPI IDirectInput8WImpl_EnumDevicesBySemantics(
@@ -764,7 +821,8 @@ static HRESULT WINAPI DICF_CreateInstance(
 	IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
 
 	TRACE("(%p)->(%p,%s,%p)\n",This,pOuter,debugstr_guid(riid),ppobj);
-	if ( IsEqualGUID( &IID_IDirectInputA, riid ) ||
+        if ( IsEqualGUID( &IID_IUnknown, riid ) ||
+             IsEqualGUID( &IID_IDirectInputA, riid ) ||
 	     IsEqualGUID( &IID_IDirectInputW, riid ) ||
 	     IsEqualGUID( &IID_IDirectInput2A, riid ) ||
 	     IsEqualGUID( &IID_IDirectInput2W, riid ) ||
@@ -812,7 +870,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 {
     TRACE("(%s,%s,%p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     if ( IsEqualCLSID( &IID_IClassFactory, riid ) ) {
-    	*ppv = (LPVOID)&DINPUT_CF;
+        *ppv = &DINPUT_CF;
 	IClassFactory_AddRef((IClassFactory*)*ppv);
     return S_OK;
     }
@@ -828,6 +886,7 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 static LRESULT CALLBACK LL_hook_proc( int code, WPARAM wparam, LPARAM lparam )
 {
     IDirectInputImpl *dinput;
+    int skip = 0;
 
     if (code != HC_ACTION) return CallNextHookEx( 0, code, wparam, lparam );
 
@@ -841,13 +900,13 @@ static LRESULT CALLBACK LL_hook_proc( int code, WPARAM wparam, LPARAM lparam )
             if (dev->acquired && dev->event_proc)
             {
                 TRACE("calling %p->%p (%lx %lx)\n", dev, dev->event_proc, wparam, lparam);
-                dev->event_proc( (LPDIRECTINPUTDEVICE8A)dev, wparam, lparam );
+                skip |= dev->event_proc( (LPDIRECTINPUTDEVICE8A)dev, wparam, lparam );
             }
         LeaveCriticalSection( &dinput->crit );
     }
     LeaveCriticalSection( &dinput_hook_crit );
 
-    return CallNextHookEx( 0, code, wparam, lparam );
+    return skip ? 1 : CallNextHookEx( 0, code, wparam, lparam );
 }
 
 static LRESULT CALLBACK callwndproc_proc( int code, WPARAM wparam, LPARAM lparam )

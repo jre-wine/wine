@@ -54,6 +54,7 @@ static XRenderPictFormat *pict_formats[2];
 typedef struct
 {
     LOGFONTW lf;
+    XFORM    xform;
     SIZE     devsize;  /* size in device coords */
     DWORD    hash;
 } LFANDSIZE;
@@ -142,8 +143,10 @@ static CRITICAL_SECTION xrender_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 #ifdef WORDS_BIGENDIAN
 #define get_be_word(x) (x)
+#define NATIVE_BYTE_ORDER MSBFirst
 #else
 #define get_be_word(x) RtlUshortByteSwap(x)
+#define NATIVE_BYTE_ORDER LSBFirst
 #endif
 
 /***********************************************************************
@@ -266,8 +269,9 @@ static BOOL fontcmp(LFANDSIZE *p1, LFANDSIZE *p2)
 {
   if(p1->hash != p2->hash) return TRUE;
   if(memcmp(&p1->devsize, &p2->devsize, sizeof(p1->devsize))) return TRUE;
+  if(memcmp(&p1->xform, &p2->xform, sizeof(p1->xform))) return TRUE;
   if(memcmp(&p1->lf, &p2->lf, offsetof(LOGFONTW, lfFaceName))) return TRUE;
-  return strcmpW(p1->lf.lfFaceName, p2->lf.lfFaceName);
+  return strcmpiW(p1->lf.lfFaceName, p2->lf.lfFaceName);
 }
 
 #if 0
@@ -449,13 +453,45 @@ static BOOL get_gasp_flags(X11DRV_PDEVICE *physDev, WORD *flags)
     return TRUE;
 }
 
+static AA_Type get_antialias_type( X11DRV_PDEVICE *physDev, BOOL subpixel, BOOL hinter)
+{
+    AA_Type ret;
+    WORD flags;
+    UINT font_smoothing_type, font_smoothing_orientation;
+
+    if (X11DRV_XRender_Installed && subpixel &&
+        SystemParametersInfoW( SPI_GETFONTSMOOTHINGTYPE, 0, &font_smoothing_type, 0) &&
+        font_smoothing_type == FE_FONTSMOOTHINGCLEARTYPE)
+    {
+        if ( SystemParametersInfoW( SPI_GETFONTSMOOTHINGORIENTATION, 0,
+                                    &font_smoothing_orientation, 0) &&
+             font_smoothing_orientation == FE_FONTSMOOTHINGORIENTATIONBGR)
+        {
+            ret = AA_BGR;
+        }
+        else
+            ret = AA_RGB;
+        /*FIXME
+          If the monitor is in portrait mode, ClearType is disabled in the MS Windows (MSDN).
+          But, Wine's subpixel rendering can support the portrait mode.
+         */
+    }
+    else if (!hinter || !get_gasp_flags(physDev, &flags) || flags & GASP_DOGRAY)
+        ret = AA_Grey;
+    else
+        ret = AA_None;
+
+    return ret;
+}
+
 static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
 {
     int ret;
     int format;
     gsCacheEntry *entry;
-    WORD flags;
     static int hinter = -1;
+    static int subpixel = -1;
+    BOOL font_smoothing;
 
     if((ret = LookupEntry(plfsz)) != -1) return ret;
 
@@ -468,16 +504,36 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
 
     if(antialias && plfsz->lf.lfQuality != NONANTIALIASED_QUALITY)
     {
-        if(hinter == -1)
+        if(hinter == -1 || subpixel == -1)
         {
             RASTERIZER_STATUS status;
             GetRasterizerCaps(&status, sizeof(status));
             hinter = status.wFlags & WINE_TT_HINTER_ENABLED;
+            subpixel = status.wFlags & WINE_TT_SUBPIXEL_RENDERING_ENABLED;
         }
-        if(!hinter || !get_gasp_flags(physDev, &flags) || flags & GASP_DOGRAY)
-            entry->aa_default = AA_Grey;
-        else
-            entry->aa_default = AA_None;
+
+        switch (plfsz->lf.lfQuality)
+        {
+            case ANTIALIASED_QUALITY:
+                entry->aa_default = get_antialias_type( physDev, FALSE, hinter );
+                break;
+            case CLEARTYPE_QUALITY:
+            case CLEARTYPE_NATURAL_QUALITY:
+                entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                break;
+            case DEFAULT_QUALITY:
+            case DRAFT_QUALITY:
+            case PROOF_QUALITY:
+            default:
+                if ( SystemParametersInfoW( SPI_GETFONTSMOOTHING, 0, &font_smoothing, 0) &&
+                     font_smoothing)
+                {
+                    entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                }
+                else
+                    entry->aa_default = AA_None;
+                break;
+        }
     }
     else
         entry->aa_default = AA_None;
@@ -495,18 +551,24 @@ static void dec_ref_cache(int index)
 
 static void lfsz_calc_hash(LFANDSIZE *plfsz)
 {
-  DWORD hash = 0, *ptr;
+  DWORD hash = 0, *ptr, two_chars;
+  WORD *pwc;
   int i;
 
   hash ^= plfsz->devsize.cx;
   hash ^= plfsz->devsize.cy;
+  for(i = 0, ptr = (DWORD*)&plfsz->xform; i < sizeof(XFORM)/sizeof(DWORD); i++, ptr++)
+    hash ^= *ptr;
   for(i = 0, ptr = (DWORD*)&plfsz->lf; i < 7; i++, ptr++)
     hash ^= *ptr;
-  for(i = 0, ptr = (DWORD*)&plfsz->lf.lfFaceName; i < LF_FACESIZE/2; i++, ptr++) {
-    WCHAR *pwc = (WCHAR *)ptr;
+  for(i = 0, ptr = (DWORD*)plfsz->lf.lfFaceName; i < LF_FACESIZE/2; i++, ptr++) {
+    two_chars = *ptr;
+    pwc = (WCHAR *)&two_chars;
     if(!*pwc) break;
-    hash ^= *ptr;
+    *pwc = toupperW(*pwc);
     pwc++;
+    *pwc = toupperW(*pwc);
+    hash ^= two_chars;
     if(!*pwc) break;
   }
   plfsz->hash = hash;
@@ -538,8 +600,10 @@ BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
     TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
 	  lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
 	  lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
+    lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
     lfsz.devsize.cx = X11DRV_XWStoDS( physDev, lfsz.lf.lfWidth );
     lfsz.devsize.cy = X11DRV_YWStoDS( physDev, lfsz.lf.lfHeight );
+    GetWorldTransform( physDev->hdc, &lfsz.xform );
     lfsz_calc_hash(&lfsz);
 
     EnterCriticalSection(&xrender_cs);
@@ -610,11 +674,25 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     gsCacheEntryFormat *formatEntry;
     UINT ggo_format = GGO_GLYPH_INDEX;
     XRenderPictFormat pf;
+    unsigned long pf_mask;
     static const char zero[4];
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
 
     switch(format) {
     case AA_Grey:
 	ggo_format |= WINE_GGO_GRAY16_BITMAP;
+	break;
+    case AA_RGB:
+	ggo_format |= WINE_GGO_HRGB_BITMAP;
+	break;
+    case AA_BGR:
+	ggo_format |= WINE_GGO_HBGR_BITMAP;
+	break;
+    case AA_VRGB:
+	ggo_format |= WINE_GGO_VRGB_BITMAP;
+	break;
+    case AA_VBGR:
+	ggo_format |= WINE_GGO_VBGR_BITMAP;
 	break;
 
     default:
@@ -624,16 +702,13 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	break;
     }
 
-    buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL,
-			      NULL);
+    buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
     if(buflen == GDI_ERROR) {
         if(format != AA_None) {
             format = AA_None;
             entry->aa_default = AA_None;
-            ggo_format &= ~WINE_GGO_GRAY16_BITMAP;
-            ggo_format |= GGO_BITMAP;
-            buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL,
-                                      NULL);
+            ggo_format = GGO_GLYPH_INDEX | GGO_BITMAP;
+            buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
         }
         if(buflen == GDI_ERROR) {
             WARN("GetGlyphOutlineW failed\n");
@@ -689,36 +764,52 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     if(formatEntry->glyphset == 0 && X11DRV_XRender_Installed) {
         switch(format) {
 	case AA_Grey:
+	    pf_mask = PictFormatType | PictFormatDepth | PictFormatAlpha | PictFormatAlphaMask,
+	    pf.type = PictTypeDirect;
 	    pf.depth = 8;
+	    pf.direct.alpha = 0;
 	    pf.direct.alphaMask = 0xff;
 	    break;
+
+        case AA_RGB:
+        case AA_BGR:
+        case AA_VRGB:
+        case AA_VBGR:
+	    pf_mask = PictFormatType | PictFormatDepth | PictFormatRed | PictFormatRedMask |
+                      PictFormatGreen | PictFormatGreenMask | PictFormatBlue |
+                      PictFormatBlueMask | PictFormatAlpha | PictFormatAlphaMask;
+            pf.type             = PictTypeDirect;
+            pf.depth            = 32;
+            pf.direct.red       = 16;
+            pf.direct.redMask   = 0xff;
+            pf.direct.green     = 8;
+            pf.direct.greenMask = 0xff;
+            pf.direct.blue      = 0;
+            pf.direct.blueMask  = 0xff;
+            pf.direct.alpha     = 24;
+            pf.direct.alphaMask = 0xff;
+            break;
 
 	default:
 	    ERR("aa = %d - not implemented\n", format);
 	case AA_None:
+	    pf_mask = PictFormatType | PictFormatDepth | PictFormatAlpha | PictFormatAlphaMask,
+	    pf.type = PictTypeDirect;
 	    pf.depth = 1;
+	    pf.direct.alpha = 0;
 	    pf.direct.alphaMask = 1;
 	    break;
 	}
 
-	pf.type = PictTypeDirect;
-	pf.direct.alpha = 0;
-
 	wine_tsx11_lock();
-	formatEntry->font_format = pXRenderFindFormat(gdi_display,
-						PictFormatType |
-						PictFormatDepth |
-						PictFormatAlpha |
-						PictFormatAlphaMask,
-						&pf, 0);
-
+	formatEntry->font_format = pXRenderFindFormat(gdi_display, pf_mask, &pf, 0);
 	formatEntry->glyphset = pXRenderCreateGlyphSet(gdi_display, formatEntry->font_format);
 	wine_tsx11_unlock();
     }
 
 
     buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buflen);
-    GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, buflen, buf, NULL);
+    GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, buflen, buf, &identity);
     formatEntry->realized[glyph] = TRUE;
 
     TRACE("buflen = %d. Got metrics: %dx%d adv=%d,%d origin=%d,%d\n",
@@ -746,8 +837,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		for(j = 0; j < pitch * 8; j++) {
 	            strcat(output, (line[j / 8] & (1 << (7 - (j % 8)))) ? "#" : " ");
 		}
-		strcat(output, "\n");
-		TRACE(output);
+		TRACE("%s\n", output);
 	    }
 	} else {
 	    static const char blks[] = " .:;!o*#";
@@ -762,8 +852,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		    str[0] = blks[line[j] >> 5];
 		    strcat(output, str);
 		}
-		strcat(output, "\n");
-		TRACE(output);
+		TRACE("%s\n", output);
 	    }
 	}
     }
@@ -785,6 +874,12 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		*byte++ = c;
 	    }
 	}
+        else if ( format != AA_Grey &&
+                  ImageByteOrder (gdi_display) != NATIVE_BYTE_ORDER)
+        {
+            unsigned int i, *data = (unsigned int *)buf;
+            for (i = buflen / sizeof(int); i; i--, data++) *data = RtlUlongByteSwap(*data);
+        }
 	gid = glyph;
 
         /*
@@ -806,7 +901,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
         formatEntry->bitmaps[glyph] = buf;
     }
 
-    memcpy(&formatEntry->gis[glyph], &gi, sizeof(gi));
+    formatEntry->gis[glyph] = gi;
 
     return TRUE;
 }
@@ -995,7 +1090,7 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
     width = gi->width;
     height = gi->height;
 
-    maskLine = (unsigned char *) bitmap;
+    maskLine = bitmap;
     maskStride = (width + 3) & ~3;
 
     ExamineBitfield (image->red_mask, &r_shift, &r_len);
@@ -1050,7 +1145,7 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
 /*************************************************************
  *                 get_tile_pict
  *
- * Returns an appropiate Picture for tiling the text colour.
+ * Returns an appropriate Picture for tiling the text colour.
  * Call and use result within the xrender_cs
  */
 static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
@@ -1107,7 +1202,7 @@ static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
         col.green |= col.green << 8;
         col.blue = GetField(text_pixel, b_shift, b_len);
         col.blue |= col.blue << 8;
-        col.alpha = 0x0;
+        col.alpha = 0xffff;
 
         wine_tsx11_lock();
         pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
@@ -1485,9 +1580,9 @@ done_unlock:
 /******************************************************************************
  * AlphaBlend         (x11drv.@)
  */
-BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                       X11DRV_PDEVICE *devSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
-                       BLENDFUNCTION blendfn)
+BOOL CDECL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
+                             X11DRV_PDEVICE *devSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
+                             BLENDFUNCTION blendfn)
 {
     XRenderPictureAttributes pa;
     XRenderPictFormat *src_format;
@@ -1569,7 +1664,12 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
 
     if (!devSrc->bitmap || GetObjectW( devSrc->bitmap->hbitmap, sizeof(dib), &dib ) != sizeof(dib))
     {
-        FIXME("not a dibsection\n");
+        static BOOL out = FALSE;
+        if (!out)
+        {
+            FIXME("not a dibsection\n");
+            out = TRUE;
+        }
         return FALSE;
     }
 

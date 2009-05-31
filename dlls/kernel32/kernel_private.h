@@ -21,6 +21,8 @@
 #ifndef __WINE_KERNEL_PRIVATE_H
 #define __WINE_KERNEL_PRIVATE_H
 
+#include "wine/server.h"
+
 struct tagSYSLEVEL;
 
 struct kernel_thread_data
@@ -30,8 +32,7 @@ struct kernel_thread_data
     WORD                htask16;        /* Win16 task handle */
     DWORD               sys_count[4];   /* syslevel mutex entry counters */
     struct tagSYSLEVEL *sys_mutex[4];   /* syslevel mutex pointers */
-    void               *pthread_data;   /* private data for pthread emulation */
-    void               *pad[43];        /* change this if you add fields! */
+    void               *pad[44];        /* change this if you add fields! */
 };
 
 static inline struct kernel_thread_data *kernel_get_thread_data(void)
@@ -57,9 +58,9 @@ static inline HANDLE console_handle_map(HANDLE h)
 }
 
 /* map a kernel32 console handle onto a real wineserver handle */
-static inline HANDLE console_handle_unmap(HANDLE h)
+static inline obj_handle_t console_handle_unmap(HANDLE h)
 {
-    return h != INVALID_HANDLE_VALUE ? (HANDLE)((UINT_PTR)h ^ 3) : INVALID_HANDLE_VALUE;
+    return wine_server_obj_handle( h != INVALID_HANDLE_VALUE ? (HANDLE)((UINT_PTR)h ^ 3) : INVALID_HANDLE_VALUE );
 }
 
 extern HMODULE kernel32_handle;
@@ -71,8 +72,6 @@ extern HANDLE dos_handles[DOS_TABLE_SIZE];
 extern const WCHAR *DIR_Windows;
 extern const WCHAR *DIR_System;
 
-extern void PTHREAD_Init(void);
-
 extern VOID SYSLEVEL_CheckNotLevel( INT level );
 
 extern void FILE_SetDosError(void);
@@ -81,7 +80,6 @@ extern DWORD FILE_name_WtoA( LPCWSTR src, INT srclen, LPSTR dest, INT destlen );
 
 extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
 extern LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs );
-extern void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum );
 
 /* return values for MODULE_GetBinaryType */
 enum binary_type
@@ -144,5 +142,16 @@ extern struct winedos_exports
 
 /* returns directory handle for named objects */
 extern HANDLE get_BaseNamedObjects_handle(void);
+
+/* Register functions */
+
+#ifdef __i386__
+#define DEFINE_REGS_ENTRYPOINT( name, args ) \
+    __ASM_GLOBAL_FUNC( name, \
+                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
+                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
+                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
+                       "call " __ASM_NAME("__wine_call_from_32_regs"))
+#endif
 
 #endif

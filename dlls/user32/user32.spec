@@ -16,8 +16,8 @@
 @ stdcall BringWindowToTop(long)
 @ stdcall BroadcastSystemMessage(long ptr long long long) BroadcastSystemMessageA
 @ stdcall BroadcastSystemMessageA(long ptr long long long)
-# @ stub BroadcastSystemMessageExA
-# @ stub BroadcastSystemMessageExW
+@ stdcall BroadcastSystemMessageExA(long ptr long long long ptr)
+@ stdcall BroadcastSystemMessageExW(long ptr long long long ptr)
 @ stdcall BroadcastSystemMessageW(long ptr long long long)
 # @ stub BuildReasonArray
 @ stdcall CalcChildScroll(long long)
@@ -28,7 +28,7 @@
 @ stdcall CallNextHookEx(long long long long)
 @ stdcall CallWindowProcA(ptr long long long long)
 @ stdcall CallWindowProcW(ptr long long long long)
-@ stub CascadeChildWindows
+@ stdcall CascadeChildWindows(long long)
 @ stdcall CascadeWindows(long long ptr long ptr)
 @ stdcall ChangeClipboardChain(long long)
 @ stdcall ChangeDisplaySettingsA(ptr long)
@@ -37,6 +37,7 @@
 @ stdcall ChangeDisplaySettingsW(ptr long)
 @ stdcall ChangeMenuA(long long ptr long long)
 @ stdcall ChangeMenuW(long long ptr long long)
+@ stdcall ChangeWindowMessageFilter(long long)
 @ stdcall CharLowerA(str)
 @ stdcall CharLowerBuffA(str long)
 @ stdcall CharLowerBuffW(wstr long)
@@ -304,7 +305,7 @@
 @ stdcall GetKeyboardType(long)
 @ stdcall GetLastActivePopup(long)
 @ stdcall GetLastInputInfo(ptr)
-# @ stub GetLayeredWindowAttributes
+@ stdcall GetLayeredWindowAttributes(long ptr ptr ptr)
 # @ stub GetListBoxInfo
 @ stdcall GetMenu(long)
 @ stdcall GetMenuBarInfo(long long long ptr)
@@ -328,7 +329,7 @@
 @ stdcall GetMessageW(ptr long long long)
 @ stdcall GetMonitorInfoA(long ptr)
 @ stdcall GetMonitorInfoW(long ptr)
-# @ stub GetMouseMovePointsEx
+@ stdcall GetMouseMovePointsEx(long ptr ptr long long)
 @ stdcall GetNextDlgGroupItem(long long long)
 @ stdcall GetNextDlgTabItem(long long long)
 # @ stub GetNextQueueWindow
@@ -378,13 +379,13 @@
 @ stdcall GetWindowLongPtrA(long long)
 @ stdcall GetWindowLongPtrW(long long)
 @ stdcall GetWindowLongW(long long)
-# @ stub GetWindowModuleFileName
+@ stdcall GetWindowModuleFileName(long ptr long) GetWindowModuleFileNameA
 @ stdcall GetWindowModuleFileNameA(long ptr long)
 @ stdcall GetWindowModuleFileNameW(long ptr long)
 @ stdcall GetWindowPlacement(long ptr)
 @ stdcall GetWindowRect(long ptr)
 @ stdcall GetWindowRgn(long long)
-# @ stub GetWindowRgnBox
+@ stdcall GetWindowRgnBox(long ptr)
 @ stdcall GetWindowTextA(long ptr long)
 @ stdcall GetWindowTextLengthA(long)
 @ stdcall GetWindowTextLengthW(long)
@@ -475,7 +476,7 @@
 @ stdcall LockSetForegroundWindow (long)
 @ stub LockWindowStation
 @ stdcall LockWindowUpdate(long)
-@ stub LockWorkStation
+@ stdcall LockWorkStation()
 @ stdcall LookupIconIdFromDirectory(ptr long)
 @ stdcall LookupIconIdFromDirectoryEx(ptr long long long long)
 @ stub MBToWCSEx
@@ -563,7 +564,7 @@
 # @ stub RegisterMessagePumpHook
 @ stub RegisterNetworkCapabilities
 @ stdcall RegisterRawInputDevices(ptr long long)
-@ stub RegisterServicesProcess
+@ stdcall RegisterServicesProcess(long)
 @ stdcall RegisterShellHookWindow (long)
 @ stdcall RegisterSystemThread(long long)
 @ stdcall RegisterTasklist (long)
@@ -639,6 +640,7 @@
 @ stdcall SetMessageQueue(long)
 @ stdcall SetParent(long long)
 @ stdcall SetProcessDefaultLayout(long)
+@ stdcall SetProcessDPIAware()
 @ stdcall SetProcessWindowStation(long)
 @ stdcall SetProgmanWindow (long)
 @ stdcall SetPropA(long str long)
@@ -697,7 +699,7 @@
 @ stdcall SystemParametersInfoW(long long ptr long)
 @ stdcall TabbedTextOutA(long long long str long long ptr long)
 @ stdcall TabbedTextOutW(long long long wstr long long ptr long)
-@ stub TileChildWindows
+@ stdcall TileChildWindows(long long)
 @ stdcall TileWindows(long long ptr long ptr)
 @ stdcall ToAscii(long long ptr ptr long)
 @ stdcall ToAsciiEx(long long ptr ptr long long)
@@ -726,6 +728,7 @@
 # @ stub UnregisterMessagePumpHook
 # @ stub UnregisterUserApiHook
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
+@ stdcall UpdateLayeredWindowIndirect(long ptr)
 @ stub UpdatePerUserSystemParameters
 @ stdcall UpdateWindow(long)
 @ stdcall User32InitializeImmEntryTable(ptr)
@@ -787,9 +790,3 @@
 # Wine dll separation hacks, these will go away, don't use them
 #
 @ cdecl HOOK_CallHooks(long long long long long)
-@ cdecl USER_Unlock()
-@ cdecl WINPOS_ActivateOtherWindow(long)
-@ cdecl WINPOS_GetMinMaxInfo(long ptr ptr ptr ptr)
-@ cdecl WINPOS_ShowIconTitle(long long)
-@ cdecl WIN_GetPtr(long)
-@ cdecl WIN_SetStyle(long long long)

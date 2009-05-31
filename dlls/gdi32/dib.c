@@ -82,7 +82,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
  *           DIB_GetDIBWidthBytes
  *
  * Return the width of a DIB bitmap in bytes. DIB bitmap data is 32-bit aligned.
- * http://msdn.microsoft.com/library/default.asp?url=/library/en-us/gdi/bitmaps_87eb.asp
  */
 int DIB_GetDIBWidthBytes( int width, int depth )
 {
@@ -118,13 +117,13 @@ int DIB_GetDIBImageBytes( int width, int height, int depth )
 
 
 /***********************************************************************
- *           DIB_BitmapInfoSize
+ *           bitmap_info_size
  *
  * Return the size of the bitmap info structure including color table.
  */
-int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
+int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
-    int colors;
+    int colors, masks = 0;
 
     if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -139,7 +138,8 @@ int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
         if (colors > 256) colors = 256;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
-        return sizeof(BITMAPINFOHEADER) + colors *
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        return sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) + colors *
                ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -151,8 +151,8 @@ int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
  * Get the info from a bitmap header.
  * Return 0 for COREHEADER, 1 for INFOHEADER, -1 for error.
  */
-static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
-                              LONG *height, WORD *planes, WORD *bpp, DWORD *compr, DWORD *size )
+int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
+                       LONG *height, WORD *planes, WORD *bpp, DWORD *compr, DWORD *size )
 {
     if (header->biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -189,29 +189,29 @@ INT WINAPI StretchDIBits(HDC hdc, INT xDst, INT yDst, INT widthDst,
                        const BITMAPINFO *info, UINT wUsage, DWORD dwRop )
 {
     DC *dc;
+    INT ret;
 
     if (!bits || !info)
 	return 0;
 
-    if (!(dc = get_dc_ptr( hdc ))) return FALSE;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if(dc->funcs->pStretchDIBits)
     {
         update_dc( dc );
-        heightSrc = dc->funcs->pStretchDIBits(dc->physDev, xDst, yDst, widthDst,
-                                              heightDst, xSrc, ySrc, widthSrc,
-                                              heightSrc, bits, info, wUsage, dwRop);
+        ret = dc->funcs->pStretchDIBits(dc->physDev, xDst, yDst, widthDst,
+                                        heightDst, xSrc, ySrc, widthSrc,
+                                        heightSrc, bits, info, wUsage, dwRop);
         release_dc_ptr( dc );
     }
     else /* use StretchBlt */
     {
-        HBITMAP hBitmap, hOldBitmap;
-        HPALETTE hpal = NULL;
-        HDC hdcMem;
         LONG height;
         LONG width;
         WORD planes, bpp;
         DWORD compr, size;
+        HBITMAP hBitmap;
+        BOOL fastpath = FALSE;
 
         release_dc_ptr( dc );
 
@@ -227,53 +227,86 @@ INT WINAPI StretchDIBits(HDC hdc, INT xDst, INT yDst, INT widthDst,
             return 0;
         }
 
-	hdcMem = CreateCompatibleDC( hdc );
-        hBitmap = CreateCompatibleBitmap(hdc, width, height);
-        hOldBitmap = SelectObject( hdcMem, hBitmap );
-        if(wUsage == DIB_PAL_COLORS)
+        hBitmap = GetCurrentObject(hdc, OBJ_BITMAP);
+
+        if (xDst == 0 && yDst == 0 && xSrc == 0 && ySrc == 0 &&
+            widthDst == widthSrc && heightDst == heightSrc &&
+            info->bmiHeader.biCompression == BI_RGB &&
+            dwRop == SRCCOPY)
         {
-            hpal = GetCurrentObject(hdc, OBJ_PAL);
-            hpal = SelectPalette(hdcMem, hpal, FALSE);
+            BITMAPOBJ *bmp;
+            if ((bmp = GDI_GetObjPtr( hBitmap, OBJ_BITMAP )))
+            {
+                if (bmp->bitmap.bmBitsPixel == bpp &&
+                    bmp->bitmap.bmWidth == widthSrc &&
+                    bmp->bitmap.bmHeight == heightSrc &&
+                    bmp->bitmap.bmPlanes == planes)
+                    fastpath = TRUE;
+                GDI_ReleaseObj( hBitmap );
+            }
         }
 
-	if (info->bmiHeader.biCompression == BI_RLE4 ||
-	    info->bmiHeader.biCompression == BI_RLE8) {
-
-	   /* when RLE compression is used, there may be some gaps (ie the DIB doesn't
-	    * contain all the rectangle described in bmiHeader, but only part of it.
-	    * This mean that those undescribed pixels must be left untouched.
-	    * So, we first copy on a memory bitmap the current content of the
-	    * destination rectangle, blit the DIB bits on top of it - hence leaving
-	    * the gaps untouched -, and blitting the rectangle back.
-	    * This insure that gaps are untouched on the destination rectangle
-	    * Not doing so leads to trashed images (the gaps contain what was on the
-	    * memory bitmap => generally black or garbage)
-	    * Unfortunately, RLE DIBs without gaps will be slowed down. But this is
-	    * another speed vs correctness issue. Anyway, if speed is needed, then the
-	    * pStretchDIBits function shall be implemented.
-	    * ericP (2000/09/09)
-	    */
-
-            /* copy existing bitmap from destination dc */
-            StretchBlt( hdcMem, xSrc, abs(height) - heightSrc - ySrc,
-                        widthSrc, heightSrc, hdc, xDst, yDst, widthDst, heightDst,
-                        dwRop );
+        if (fastpath)
+        {
+            /* fast path */
+            TRACE("using fast path\n");
+            ret = SetDIBits( hdc, hBitmap, 0, height, bits, info, wUsage);
         }
+        else
+        {
+            /* slow path - need to use StretchBlt */
+            HBITMAP hOldBitmap;
+            HPALETTE hpal = NULL;
+            HDC hdcMem;
 
-        SetDIBits(hdcMem, hBitmap, 0, height, bits, info, wUsage);
+            hdcMem = CreateCompatibleDC( hdc );
+            hBitmap = CreateCompatibleBitmap(hdc, width, height);
+            hOldBitmap = SelectObject( hdcMem, hBitmap );
+            if(wUsage == DIB_PAL_COLORS)
+            {
+                hpal = GetCurrentObject(hdc, OBJ_PAL);
+                hpal = SelectPalette(hdcMem, hpal, FALSE);
+            }
 
-        /* Origin for DIBitmap may be bottom left (positive biHeight) or top
-           left (negative biHeight) */
-        StretchBlt( hdc, xDst, yDst, widthDst, heightDst,
-		    hdcMem, xSrc, abs(height) - heightSrc - ySrc,
-		    widthSrc, heightSrc, dwRop );
-        if(hpal)
-            SelectPalette(hdcMem, hpal, FALSE);
-	SelectObject( hdcMem, hOldBitmap );
-	DeleteDC( hdcMem );
-	DeleteObject( hBitmap );
+            if (info->bmiHeader.biCompression == BI_RLE4 ||
+	            info->bmiHeader.biCompression == BI_RLE8) {
+
+                /* when RLE compression is used, there may be some gaps (ie the DIB doesn't
+                 * contain all the rectangle described in bmiHeader, but only part of it.
+                 * This mean that those undescribed pixels must be left untouched.
+                 * So, we first copy on a memory bitmap the current content of the
+                 * destination rectangle, blit the DIB bits on top of it - hence leaving
+                 * the gaps untouched -, and blitting the rectangle back.
+                 * This insure that gaps are untouched on the destination rectangle
+                 * Not doing so leads to trashed images (the gaps contain what was on the
+                 * memory bitmap => generally black or garbage)
+                 * Unfortunately, RLE DIBs without gaps will be slowed down. But this is
+                 * another speed vs correctness issue. Anyway, if speed is needed, then the
+                 * pStretchDIBits function shall be implemented.
+                 * ericP (2000/09/09)
+                 */
+
+                /* copy existing bitmap from destination dc */
+                StretchBlt( hdcMem, xSrc, abs(height) - heightSrc - ySrc,
+                            widthSrc, heightSrc, hdc, xDst, yDst, widthDst, heightDst,
+                            dwRop );
+            }
+
+            ret = SetDIBits(hdcMem, hBitmap, 0, height, bits, info, wUsage);
+
+            /* Origin for DIBitmap may be bottom left (positive biHeight) or top
+               left (negative biHeight) */
+            if (ret) StretchBlt( hdc, xDst, yDst, widthDst, heightDst,
+                                 hdcMem, xSrc, abs(height) - heightSrc - ySrc,
+                                 widthSrc, heightSrc, dwRop );
+            if(hpal)
+                SelectPalette(hdcMem, hpal, FALSE);
+            SelectObject( hdcMem, hOldBitmap );
+            DeleteDC( hdcMem );
+            DeleteObject( hBitmap );
+        }
     }
-    return heightSrc;
+    return ret;
 }
 
 
@@ -311,7 +344,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
     update_dc( dc );
 
-    if (!(bitmap = GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
+    if (!(bitmap = GDI_GetObjPtr( hbitmap, OBJ_BITMAP )))
     {
         release_dc_ptr( dc );
         return 0;
@@ -376,9 +409,9 @@ UINT WINAPI SetDIBColorTable( HDC hdc, UINT startpos, UINT entries, CONST RGBQUA
     UINT result = 0;
     BITMAPOBJ * bitmap;
 
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    if ((bitmap = GDI_GetObjPtr( dc->hBitmap, BITMAP_MAGIC )))
+    if ((bitmap = GDI_GetObjPtr( dc->hBitmap, OBJ_BITMAP )))
     {
         /* Check if currently selected bitmap is a DIB */
         if (bitmap->color_table)
@@ -396,7 +429,7 @@ UINT WINAPI SetDIBColorTable( HDC hdc, UINT startpos, UINT entries, CONST RGBQUA
     if (dc->funcs->pSetDIBColorTable)
         dc->funcs->pSetDIBColorTable(dc->physDev, startpos, entries, colors);
 
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return result;
 }
 
@@ -409,13 +442,13 @@ UINT WINAPI GetDIBColorTable( HDC hdc, UINT startpos, UINT entries, RGBQUAD *col
     DC * dc;
     UINT result = 0;
 
-    if (!(dc = DC_GetDCPtr( hdc ))) return 0;
+    if (!(dc = get_dc_ptr( hdc ))) return 0;
 
     if (dc->funcs->pGetDIBColorTable)
         result = dc->funcs->pGetDIBColorTable(dc->physDev, startpos, entries, colors);
     else
     {
-        BITMAPOBJ *bitmap = GDI_GetObjPtr( dc->hBitmap, BITMAP_MAGIC );
+        BITMAPOBJ *bitmap = GDI_GetObjPtr( dc->hBitmap, OBJ_BITMAP );
         if (bitmap)
         {
             /* Check if currently selected bitmap is a DIB */
@@ -431,7 +464,7 @@ UINT WINAPI GetDIBColorTable( HDC hdc, UINT startpos, UINT entries, RGBQUAD *col
             GDI_ReleaseObj( dc->hBitmap );
         }
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return result;
 }
 
@@ -538,8 +571,6 @@ static const RGBTRIPLE DefLogPaletteTriples[20] = { /* Copy of Default Logical P
  * RETURNS
  *    Success: Number of scan lines copied from bitmap
  *    Failure: 0
- *
- * http://msdn.microsoft.com/library/default.asp?url=/library/en-us/gdi/bitmaps_87eb.asp
  */
 INT WINAPI GetDIBits(
     HDC hdc,         /* [in]  Handle to device context */
@@ -578,20 +609,65 @@ INT WINAPI GetDIBits(
         return 0;
     }
     update_dc( dc );
-    if (!(bmp = (BITMAPOBJ *)GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
+    if (!(bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP )))
     {
         release_dc_ptr( dc );
 	return 0;
     }
 
     colorPtr = (LPBYTE) info + (WORD) info->bmiHeader.biSize;
-    rgbTriples = (RGBTRIPLE *) colorPtr;
-    rgbQuads = (RGBQUAD *) colorPtr;
+    rgbTriples = colorPtr;
+    rgbQuads = colorPtr;
 
     /* Transfer color info */
 
-    if (bpp <= 8 && bpp > 0)
+    switch (bpp)
     {
+    case 0:  /* query bitmap info only */
+        if (core_header)
+        {
+            BITMAPCOREHEADER* coreheader = (BITMAPCOREHEADER*) info;
+            coreheader->bcWidth = bmp->bitmap.bmWidth;
+            coreheader->bcHeight = bmp->bitmap.bmHeight;
+            coreheader->bcPlanes = 1;
+            coreheader->bcBitCount = bmp->bitmap.bmBitsPixel;
+        }
+        else
+        {
+            info->bmiHeader.biWidth = bmp->bitmap.bmWidth;
+            info->bmiHeader.biHeight = bmp->bitmap.bmHeight;
+            info->bmiHeader.biPlanes = 1;
+            info->bmiHeader.biSizeImage =
+                DIB_GetDIBImageBytes( bmp->bitmap.bmWidth,
+                                      bmp->bitmap.bmHeight,
+                                      bmp->bitmap.bmBitsPixel );
+            info->bmiHeader.biCompression = (bmp->bitmap.bmBitsPixel > 8) ? BI_BITFIELDS : BI_RGB;
+            switch(bmp->bitmap.bmBitsPixel)
+            {
+            case 15:
+                info->bmiHeader.biBitCount = 16;
+                break;
+            case 24:
+                info->bmiHeader.biBitCount = 32;
+                break;
+            default:
+                info->bmiHeader.biBitCount = bmp->bitmap.bmBitsPixel;
+                break;
+            }
+            info->bmiHeader.biXPelsPerMeter = 0;
+            info->bmiHeader.biYPelsPerMeter = 0;
+            info->bmiHeader.biClrUsed = 0;
+            info->bmiHeader.biClrImportant = 0;
+
+            /* Windows 2000 doesn't touch the additional struct members if
+               it's a BITMAPV4HEADER or a BITMAPV5HEADER */
+        }
+        lines = abs(bmp->bitmap.bmHeight);
+        goto done;
+
+    case 1:
+    case 4:
+    case 8:
         if (!core_header) info->bmiHeader.biClrUsed = 0;
 
 	/* If the bitmap object already has a dib section at the
@@ -625,8 +701,14 @@ INT WINAPI GetDIBits(
             }
         }
         else {
-            if(bpp >= bmp->bitmap.bmBitsPixel) {
-                /* Generate the color map from the selected palette */
+            if (coloruse == DIB_PAL_COLORS) {
+                for (i = 0; i < (1 << bpp); i++)
+                    ((WORD *)colorPtr)[i] = (WORD)i;
+            }
+            else if(bpp > 1 && bpp == bmp->bitmap.bmBitsPixel) {
+                /* For color DDBs in native depth (mono DDBs always have
+                   a black/white palette):
+                   Generate the color map from the selected palette */
                 PALETTEENTRY palEntry[256];
 
                 memset( palEntry, 0, sizeof(palEntry) );
@@ -637,22 +719,19 @@ INT WINAPI GetDIBits(
                     return 0;
                 }
                 for (i = 0; i < (1 << bmp->bitmap.bmBitsPixel); i++) {
-                    if (coloruse == DIB_RGB_COLORS) {
-                        if (core_header)
-                        {
-                            rgbTriples[i].rgbtRed   = palEntry[i].peRed;
-                            rgbTriples[i].rgbtGreen = palEntry[i].peGreen;
-                            rgbTriples[i].rgbtBlue  = palEntry[i].peBlue;
-                        }
-                        else
-                        {
-                            rgbQuads[i].rgbRed      = palEntry[i].peRed;
-                            rgbQuads[i].rgbGreen    = palEntry[i].peGreen;
-                            rgbQuads[i].rgbBlue     = palEntry[i].peBlue;
-                            rgbQuads[i].rgbReserved = 0;
-                        }
+                    if (core_header)
+                    {
+                        rgbTriples[i].rgbtRed   = palEntry[i].peRed;
+                        rgbTriples[i].rgbtGreen = palEntry[i].peGreen;
+                        rgbTriples[i].rgbtBlue  = palEntry[i].peBlue;
                     }
-                    else ((WORD *)colorPtr)[i] = (WORD)i;
+                    else
+                    {
+                        rgbQuads[i].rgbRed      = palEntry[i].peRed;
+                        rgbQuads[i].rgbGreen    = palEntry[i].peGreen;
+                        rgbQuads[i].rgbBlue     = palEntry[i].peBlue;
+                        rgbQuads[i].rgbReserved = 0;
+                    }
                 }
             } else {
                 switch (bpp) {
@@ -728,6 +807,35 @@ INT WINAPI GetDIBits(
                 }
             }
         }
+        break;
+
+    case 15:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        {
+            ((PDWORD)info->bmiColors)[0] = 0x7c00;
+            ((PDWORD)info->bmiColors)[1] = 0x03e0;
+            ((PDWORD)info->bmiColors)[2] = 0x001f;
+        }
+        break;
+
+    case 16:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        {
+            ((PDWORD)info->bmiColors)[0] = 0xf800;
+            ((PDWORD)info->bmiColors)[1] = 0x07e0;
+            ((PDWORD)info->bmiColors)[2] = 0x001f;
+        }
+        break;
+
+    case 24:
+    case 32:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        {
+            ((PDWORD)info->bmiColors)[0] = 0xff0000;
+            ((PDWORD)info->bmiColors)[1] = 0x00ff00;
+            ((PDWORD)info->bmiColors)[2] = 0x0000ff;
+        }
+        break;
     }
 
     if (bits && lines)
@@ -832,7 +940,7 @@ INT WINAPI GetDIBits(
                                     *dstbits++ = (BYTE)(((val >> 2) & 0xf8) | ((val >> 7) & 0x07));
                                     *dstbits++ = (BYTE)(((val >> 7) & 0xf8) | ((val >> 12) & 0x07));
                                 }
-                                dstbits = (LPBYTE)(dbits+=dstwidthb);
+                                dstbits = dbits+=dstwidthb;
                                 srcbits = (LPWORD)(sbits+=srcwidthb);
                             }
                         }
@@ -848,7 +956,7 @@ INT WINAPI GetDIBits(
 
                     case 32: /* 32 bpp srcDIB -> 24 bpp dstDIB */
                         {
-                            LPBYTE srcbits = (LPBYTE)sbits;
+                            LPBYTE srcbits = sbits;
 
                             width = min(srcwidth, dstwidth);
                             for( y = 0; y < lines; y++) {
@@ -857,8 +965,8 @@ INT WINAPI GetDIBits(
                                     *dstbits++ = *srcbits++;
                                     *dstbits++ = *srcbits++;
                                 }
-                                dstbits=(LPBYTE)(dbits+=dstwidthb);
-                                srcbits = (LPBYTE)(sbits+=srcwidthb);
+                                dstbits = dbits+=dstwidthb;
+                                srcbits = sbits+=srcwidthb;
                             }
                         }
                         break;
@@ -951,84 +1059,21 @@ INT WINAPI GetDIBits(
             }
         }
     }
-    else
-    {
-	/* fill in struct members */
+    else lines = abs(height);
 
-        if (bpp == 0)
-        {
-            if (core_header)
-            {
-                BITMAPCOREHEADER* coreheader = (BITMAPCOREHEADER*) info;
-                coreheader->bcWidth = bmp->bitmap.bmWidth;
-                coreheader->bcHeight = bmp->bitmap.bmHeight;
-                coreheader->bcPlanes = 1;
-                coreheader->bcBitCount = bmp->bitmap.bmBitsPixel;
-            }
-            else
-            {
-                info->bmiHeader.biWidth = bmp->bitmap.bmWidth;
-                info->bmiHeader.biHeight = bmp->bitmap.bmHeight;
-                info->bmiHeader.biPlanes = 1;
-                info->bmiHeader.biSizeImage =
-                                 DIB_GetDIBImageBytes( bmp->bitmap.bmWidth,
-                                                       bmp->bitmap.bmHeight,
-                                                       bmp->bitmap.bmBitsPixel );
-                switch(bmp->bitmap.bmBitsPixel)
-                {
-                case 15:
-                    info->bmiHeader.biBitCount = 16;
-                    info->bmiHeader.biCompression = BI_RGB;
-                    break;
-                    
-                case 16:
-                    if (bits)
-                    {
-                        /* Add color only when bits is given, as per MSDN */
-                        ((PDWORD)info->bmiColors)[0] = 0xf800;
-                        ((PDWORD)info->bmiColors)[1] = 0x07e0;
-                        ((PDWORD)info->bmiColors)[2] = 0x001f;
-                    }
-                    info->bmiHeader.biBitCount = 16;
-                    info->bmiHeader.biCompression = BI_BITFIELDS;
-                    break;
-    
-                default:
-                    info->bmiHeader.biBitCount = bmp->bitmap.bmBitsPixel;
-                    info->bmiHeader.biCompression = BI_RGB;
-                    break;
-                }
-                info->bmiHeader.biXPelsPerMeter = 0;
-                info->bmiHeader.biYPelsPerMeter = 0;
-                info->bmiHeader.biClrUsed = 0;
-                info->bmiHeader.biClrImportant = 0;
-                
-                /* Windows 2000 doesn't touch the additional struct members if
-                   it's a BITMAPV4HEADER or a BITMAPV5HEADER */
-            }
-            lines = abs(bmp->bitmap.bmHeight);
-        }
-        else
-        {
-            /* The knowledge base article Q81498 ("DIBs and Their Uses") states that
-               if bits == NULL and bpp != 0, only biSizeImage and the color table are
-               filled in. */
-            if (!core_header)
-            {
-                /* FIXME: biSizeImage should be calculated according to the selected
-                          compression algorithm if biCompression != BI_RGB */
-                info->bmiHeader.biSizeImage = DIB_GetDIBImageBytes( width, height, bpp );
-            }
-            lines = abs(height);
-        }
-    }
-
+    /* The knowledge base article Q81498 ("DIBs and Their Uses") states that
+       if bits == NULL and bpp != 0, only biSizeImage and the color table are
+       filled in. */
     if (!core_header)
     {
+        /* FIXME: biSizeImage should be calculated according to the selected
+           compression algorithm if biCompression != BI_RGB */
+        info->bmiHeader.biSizeImage = DIB_GetDIBImageBytes( width, height, bpp );
         TRACE("biSizeImage = %d, ", info->bmiHeader.biSizeImage);
     }
     TRACE("biWidth = %d, biHeight = %d\n", width, height);
 
+done:
     release_dc_ptr( dc );
     GDI_ReleaseObj( hbitmap );
     return lines;
@@ -1073,76 +1118,34 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
 
     if (handle)
     {
-        if (init == CBM_INIT) SetDIBits( hdc, handle, 0, height, bits, data, coloruse );
+        if (init == CBM_INIT)
+        {
+            if (SetDIBits( hdc, handle, 0, height, bits, data, coloruse ) == 0)
+            {
+                DeleteObject( handle );
+                handle = 0;
+            }
+        }
 
-        else if (hdc && ((dc = DC_GetDCPtr( hdc )) != NULL) )
+        else if (hdc && ((dc = get_dc_ptr( hdc )) != NULL) )
         {
             if (!BITMAP_SetOwnerDC( handle, dc ))
             {
                 DeleteObject( handle );
                 handle = 0;
             }
-            DC_ReleaseDCPtr( dc );
+            release_dc_ptr( dc );
         }
     }
 
     return handle;
 }
 
-/***********************************************************************
- *           CreateDIBSection    (GDI.489)
- */
-HBITMAP16 WINAPI CreateDIBSection16 (HDC16 hdc, const BITMAPINFO *bmi, UINT16 usage,
-                                     SEGPTR *bits16, HANDLE section, DWORD offset)
-{
-    LPVOID bits32;
-    HBITMAP hbitmap;
-
-    hbitmap = CreateDIBSection( HDC_32(hdc), bmi, usage, &bits32, section, offset );
-    if (hbitmap)
-    {
-        BITMAPOBJ *bmp = (BITMAPOBJ *) GDI_GetObjPtr(hbitmap, BITMAP_MAGIC);
-        if (bmp && bmp->dib && bits32)
-        {
-            const BITMAPINFOHEADER *bi = &bmi->bmiHeader;
-            LONG width, height;
-            WORD planes, bpp;
-            DWORD compr, size;
-            INT width_bytes;
-            WORD count, sel;
-            int i;
-
-            DIB_GetBitmapInfo(bi, &width, &height, &planes, &bpp, &compr, &size);
-
-            height = height >= 0 ? height : -height;
-            width_bytes = DIB_GetDIBWidthBytes(width, bpp);
-
-            if (!size || (compr != BI_RLE4 && compr != BI_RLE8)) size = width_bytes * height;
-
-            /* calculate number of sel's needed for size with 64K steps */
-            count = (size + 0xffff) / 0x10000;
-            sel = AllocSelectorArray16(count);
-
-            for (i = 0; i < count; i++)
-            {
-                SetSelectorBase(sel + (i << __AHSHIFT), (DWORD)bits32 + i * 0x10000);
-                SetSelectorLimit16(sel + (i << __AHSHIFT), size - 1); /* yep, limit is correct */
-                size -= 0x10000;
-            }
-            bmp->segptr_bits = MAKESEGPTR( sel, 0 );
-            if (bits16) *bits16 = bmp->segptr_bits;
-        }
-        if (bmp) GDI_ReleaseObj( hbitmap );
-    }
-    return HBITMAP_16(hbitmap);
-}
-
-/* Copy/synthetize RGB palette from BITMAPINFO. Ripped from dlls/winex11.drv/dib.c */
+/* Copy/synthesize RGB palette from BITMAPINFO. Ripped from dlls/winex11.drv/dib.c */
 static void DIB_CopyColorTable( DC *dc, BITMAPOBJ *bmp, WORD coloruse, const BITMAPINFO *info )
 {
     RGBQUAD *colorTable;
-    unsigned int colors;
-    int i;
+    unsigned int colors, i;
     BOOL core_info = info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER);
 
     if (core_info)
@@ -1215,6 +1218,11 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
     WORD planes, bpp;
     DWORD compression, sizeImage;
     void *mapBits = NULL;
+
+    if(!bmi){
+        if(bits) *bits = NULL;
+        return NULL;
+    }
 
     if (((bitmap_type = DIB_GetBitmapInfo( &bmi->bmiHeader, &width, &height,
                                            &planes, &bpp, &compression, &sizeImage )) == -1))
@@ -1323,13 +1331,13 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
         bDesktopDC = TRUE;
     }
 
-    if (!(dc = DC_GetDCPtr( hdc ))) goto error;
+    if (!(dc = get_dc_ptr( hdc ))) goto error;
 
     /* create Device Dependent Bitmap and add DIB pointer */
     ret = CreateBitmap( dib->dsBm.bmWidth, dib->dsBm.bmHeight, 1,
                         (bpp == 1) ? 1 : GetDeviceCaps(hdc, BITSPIXEL), NULL );
 
-    if (ret && ((bmp = GDI_GetObjPtr(ret, BITMAP_MAGIC))))
+    if (ret && ((bmp = GDI_GetObjPtr(ret, OBJ_BITMAP))))
     {
         bmp->dib = dib;
         bmp->funcs = dc->funcs;
@@ -1347,7 +1355,7 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
         }
     }
 
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     if (bDesktopDC) DeleteDC( hdc );
     if (ret && bits) *bits = dib->dsBm.bmBits;
     return ret;

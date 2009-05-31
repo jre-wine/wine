@@ -178,7 +178,7 @@ static inline BOOL module_is_container(const IMAGEHLP_MODULE64* wmod_cntnr,
 
 static BOOL CALLBACK info_mod_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
 {
-    struct info_module* im = (struct info_module*)ctx;
+    struct info_module* im = ctx;
 
     if (im->num_used + 1 > im->num_alloc)
     {
@@ -501,7 +501,8 @@ void info_win32_threads(void)
 		    struct dbg_process*	p = dbg_get_process(entry.th32OwnerProcessID);
 
 		    dbg_printf("%08x%s %s\n",
-                               entry.th32OwnerProcessID, p ? " (D)" : "", p ? p->imageName : "");
+                               entry.th32OwnerProcessID, p ? " (D)" : "",
+                               p ? dbg_W2A(p->imageName, -1) : "");
 		    lastProcessId = entry.th32OwnerProcessID;
 		}
                 dbg_printf("\t%08x %4d%s\n",
@@ -584,7 +585,7 @@ void info_win32_segments(DWORD start, int length)
 
     for (i = start; i < start + length; i++)
     {
-        if (!GetThreadSelectorEntry(dbg_curr_thread->handle, (i << 3) | 7, &le))
+        if (!dbg_curr_process->process_io->get_selector(dbg_curr_thread->handle, (i << 3) | 7, &le))
             continue;
 
         if (le.HighWord.Bits.Type & 0x08)

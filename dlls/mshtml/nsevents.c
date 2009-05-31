@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 Jacek Caban for CodeWeavers
+ * Copyright 2007-2008 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,6 +31,7 @@
 #include "wine/unicode.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -129,6 +130,7 @@ static nsresult NSAPI handle_keypress(nsIDOMEventListener *iface,
 static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
+    nsIDOMHTMLElement *nsbody = NULL;
     task_t *task;
 
     TRACE("(%p)\n", This);
@@ -136,7 +138,8 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     if(!This->doc)
         return NS_OK;
 
-    setup_nswindow(This->doc->window);
+    update_nsdocument(This->doc);
+    connect_scripts(This->doc);
 
     if(This->editor_controller) {
         nsIController_Release(This->editor_controller);
@@ -158,6 +161,53 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
      */
     push_task(task);
 
+    if(!This->doc->nsdoc) {
+        ERR("NULL nsdoc\n");
+        return NS_ERROR_FAILURE;
+    }
+
+    nsIDOMHTMLDocument_GetBody(This->doc->nsdoc, &nsbody);
+    if(nsbody) {
+        fire_event(This->doc, EVENTID_LOAD, (nsIDOMNode*)nsbody);
+        nsIDOMHTMLElement_Release(nsbody);
+    }
+
+    return NS_OK;
+}
+
+static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *event)
+{
+    NSContainer *This = NSEVENTLIST_THIS(iface)->This;
+    const PRUnichar *type;
+    nsIDOMEventTarget *event_target;
+    nsIDOMNode *nsnode;
+    nsAString type_str;
+    eventid_t eid;
+    nsresult nsres;
+
+    nsAString_Init(&type_str, NULL);
+    nsIDOMEvent_GetType(event, &type_str);
+    nsAString_GetData(&type_str, &type);
+    eid = str_to_eid(type);
+    nsAString_Finish(&type_str);
+
+    nsres = nsIDOMEvent_GetTarget(event, &event_target);
+    if(NS_FAILED(nsres) || !event_target) {
+        ERR("GetEventTarget failed: %08x\n", nsres);
+        return NS_OK;
+    }
+
+    nsres = nsIDOMEventTarget_QueryInterface(event_target, &IID_nsIDOMNode, (void**)&nsnode);
+    nsIDOMEventTarget_Release(event_target);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMNode: %08x\n", nsres);
+        return NS_OK;
+    }
+
+    fire_event(This->doc, eid, nsnode);
+
+    nsIDOMNode_Release(nsnode);
+
     return NS_OK;
 }
 
@@ -169,12 +219,13 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
         nsDOMEventListener_AddRef, \
         nsDOMEventListener_Release, \
         handler, \
-    };
+    }
 
 static const nsIDOMEventListenerVtbl blur_vtbl =      EVENTLISTENER_VTBL(handle_blur);
 static const nsIDOMEventListenerVtbl focus_vtbl =     EVENTLISTENER_VTBL(handle_focus);
 static const nsIDOMEventListenerVtbl keypress_vtbl =  EVENTLISTENER_VTBL(handle_keypress);
 static const nsIDOMEventListenerVtbl load_vtbl =      EVENTLISTENER_VTBL(handle_load);
+static const nsIDOMEventListenerVtbl htmlevent_vtbl = EVENTLISTENER_VTBL(handle_htmlevent);
 
 static void init_event(nsIDOMEventTarget *target, const PRUnichar *type,
         nsIDOMEventListener *listener, BOOL capture)
@@ -197,6 +248,29 @@ static void init_listener(nsEventListener *This, NSContainer *container,
     This->This = container;
 }
 
+void add_nsevent_listener(NSContainer *container, LPCWSTR type)
+{
+    nsIDOMWindow *dom_window;
+    nsIDOMEventTarget *target;
+    nsresult nsres;
+
+    nsres = nsIWebBrowser_GetContentDOMWindow(container->webbrowser, &dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("GetContentDOMWindow failed: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIDOMWindow_QueryInterface(dom_window, &IID_nsIDOMEventTarget, (void**)&target);
+    nsIDOMWindow_Release(dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMEventTarget interface: %08x\n", nsres);
+        return;
+    }
+
+    init_event(target, type, NSEVENTLIST(&container->htmlevent_listener), TRUE);
+    nsIDOMEventTarget_Release(target);
+}
+
 void init_nsevents(NSContainer *This)
 {
     nsIDOMWindow *dom_window;
@@ -212,6 +286,7 @@ void init_nsevents(NSContainer *This)
     init_listener(&This->focus_listener,       This, &focus_vtbl);
     init_listener(&This->keypress_listener,    This, &keypress_vtbl);
     init_listener(&This->load_listener,        This, &load_vtbl);
+    init_listener(&This->htmlevent_listener,   This, &htmlevent_vtbl);
 
     nsres = nsIWebBrowser_GetContentDOMWindow(This->webbrowser, &dom_window);
     if(NS_FAILED(nsres)) {

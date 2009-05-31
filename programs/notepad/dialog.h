@@ -20,8 +20,8 @@
 
 VOID DIALOG_FileNew(VOID);
 VOID DIALOG_FileOpen(VOID);
-VOID DIALOG_FileSave(VOID);
-VOID DIALOG_FileSaveAs(VOID);
+BOOL DIALOG_FileSave(VOID);
+BOOL DIALOG_FileSaveAs(VOID);
 VOID DIALOG_FilePrint(VOID);
 VOID DIALOG_FilePageSetup(VOID);
 VOID DIALOG_FilePrinterSetup(VOID);
@@ -44,9 +44,7 @@ VOID DIALOG_SelectFont(VOID);
 VOID DIALOG_HelpContents(VOID);
 VOID DIALOG_HelpSearch(VOID);
 VOID DIALOG_HelpHelp(VOID);
-VOID DIALOG_HelpLicense(VOID);
-VOID DIALOG_HelpNoWarranty(VOID);
-VOID DIALOG_HelpAboutWine(VOID);
+VOID DIALOG_HelpAboutNotepad(VOID);
 
 VOID DIALOG_TimeDate(VOID);
 int DIALOG_StringMsgBox(HWND hParent, int formatId, LPCWSTR szString, DWORD dwFlags);

@@ -465,24 +465,6 @@ ULONG __cdecl NTDLL_strtoul( const char *nptr, char **endptr, int base )
 
 
 /*********************************************************************
- *                  atoi   (NTDLL.@)
- */
-int __cdecl NTDLL_atoi( const char *nptr )
-{
-    return atoi( nptr );
-}
-
-
-/*********************************************************************
- *                  atol   (NTDLL.@)
- */
-LONG __cdecl NTDLL_atol( const char *nptr )
-{
-    return atol( nptr );
-}
-
-
-/*********************************************************************
  *      _ultoa   (NTDLL.@)
  *
  * Convert an unsigned long integer to a string.
@@ -727,7 +709,7 @@ char * __cdecl _i64toa(
  *  - No check is made for value overflow, only the lower 64 bits are assigned.
  *  - If str is NULL it crashes, as the native function does.
  */
-LONGLONG __cdecl _atoi64( char *str )
+LONGLONG __cdecl _atoi64( const char *str )
 {
     ULONGLONG RunningTotal = 0;
     char bMinus = 0;
@@ -753,48 +735,20 @@ LONGLONG __cdecl _atoi64( char *str )
 
 
 /*********************************************************************
- *                  sprintf   (NTDLL.@)
+ *                  atoi   (NTDLL.@)
  */
-int __cdecl NTDLL_sprintf( char *str, const char *format, ... )
+int __cdecl NTDLL_atoi( const char *nptr )
 {
-    int ret;
-    va_list valist;
-    va_start( valist, format );
-    ret = vsprintf( str, format, valist );
-    va_end( valist );
-    return ret;
+    return _atoi64( nptr );
 }
 
 
 /*********************************************************************
- *                  vsprintf   (NTDLL.@)
+ *                  atol   (NTDLL.@)
  */
-int __cdecl NTDLL_vsprintf( char *str, const char *format, va_list args )
+LONG __cdecl NTDLL_atol( const char *nptr )
 {
-    return vsprintf( str, format, args );
-}
-
-
-/*********************************************************************
- *                  _snprintf   (NTDLL.@)
- */
-int __cdecl _snprintf( char *str, size_t len, const char *format, ... )
-{
-    int ret;
-    va_list valist;
-    va_start( valist, format );
-    ret = vsnprintf( str, len, format, valist );
-    va_end( valist );
-    return ret;
-}
-
-
-/*********************************************************************
- *                  _vsnprintf   (NTDLL.@)
- */
-int __cdecl _vsnprintf( char *str, size_t len, const char *format, va_list args )
-{
-    return vsnprintf( str, len, format, args );
+    return _atoi64( nptr );
 }
 
 

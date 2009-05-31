@@ -193,8 +193,14 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID fImpLoad)
         /* close all opened MCI drivers */
         MCI_SendCommand(MCI_ALL_DEVICE_ID, MCI_CLOSE, MCI_WAIT, 0L, TRUE);
         MMDRV_Exit();
-        /* now unload all remaining drivers... */
-        DRIVER_UnloadAll();
+        /* There's no guarantee the drivers haven't already been unloaded on
+         * process shutdown.
+         */
+        if (!fImpLoad)
+        {
+            /* now unload all remaining drivers... */
+            DRIVER_UnloadAll();
+        }
 
 	WINMM_DeleteIData();
 	break;
@@ -349,7 +355,7 @@ UINT  MIXER_Open(LPHMIXER lphMix, UINT uDeviceID, DWORD_PTR dwCallback,
 
     case CALLBACK_WINDOW:
         mod.dwInstance = dwCallback;
-        if (!IsWindow((HWND)dwCallback))
+        if (dwCallback && !IsWindow((HWND)dwCallback))
             return MMSYSERR_INVALPARAM;
         break;
     }
@@ -357,7 +363,7 @@ UINT  MIXER_Open(LPHMIXER lphMix, UINT uDeviceID, DWORD_PTR dwCallback,
     wmld = MMDRV_Alloc(sizeof(WINE_MIXER), MMDRV_MIXER, &hMix, &fdwOpen,
 		       &dwCallback, &dwInstance, bFrom32);
     wmld->uDeviceID = uDeviceID;
-    mod.hmx = (HMIXEROBJ)hMix;
+    mod.hmx = hMix;
 
     dwRet = MMDRV_Open(wmld, MXDM_OPEN, (DWORD)&mod, CALLBACK_FUNCTION);
 
@@ -453,12 +459,12 @@ UINT WINAPI mixerGetControlDetailsA(HMIXEROBJ hmix, LPMIXERCONTROLDETAILS lpmcdA
 
     switch (fdwDetails & MIXER_GETCONTROLDETAILSF_QUERYMASK) {
     case MIXER_GETCONTROLDETAILSF_VALUE:
-	/* can savely use A structure as it is, no string inside */
+	/* can safely use A structure as it is, no string inside */
 	ret = mixerGetControlDetailsW(hmix, lpmcdA, fdwDetails);
 	break;
     case MIXER_GETCONTROLDETAILSF_LISTTEXT:
 	{
-	    MIXERCONTROLDETAILS_LISTTEXTA *pDetailsA = (MIXERCONTROLDETAILS_LISTTEXTA *)lpmcdA->paDetails;
+            MIXERCONTROLDETAILS_LISTTEXTA *pDetailsA = lpmcdA->paDetails;
             MIXERCONTROLDETAILS_LISTTEXTW *pDetailsW;
 	    int size = max(1, lpmcdA->cChannels) * sizeof(MIXERCONTROLDETAILS_LISTTEXTW);
             unsigned int i;
@@ -646,27 +652,29 @@ UINT WINAPI mixerGetLineInfoA(HMIXEROBJ hmix, LPMIXERLINEA lpmliA,
 
     ret = mixerGetLineInfoW(hmix, &mliW, fdwInfo);
 
-    lpmliA->dwDestination = mliW.dwDestination;
-    lpmliA->dwSource = mliW.dwSource;
-    lpmliA->dwLineID = mliW.dwLineID;
-    lpmliA->fdwLine = mliW.fdwLine;
-    lpmliA->dwUser = mliW.dwUser;
-    lpmliA->dwComponentType = mliW.dwComponentType;
-    lpmliA->cChannels = mliW.cChannels;
-    lpmliA->cConnections = mliW.cConnections;
-    lpmliA->cControls = mliW.cControls;
-    WideCharToMultiByte( CP_ACP, 0, mliW.szShortName, -1, lpmliA->szShortName,
-                         sizeof(lpmliA->szShortName), NULL, NULL);
-    WideCharToMultiByte( CP_ACP, 0, mliW.szName, -1, lpmliA->szName,
-                         sizeof(lpmliA->szName), NULL, NULL );
-    lpmliA->Target.dwType = mliW.Target.dwType;
-    lpmliA->Target.dwDeviceID = mliW.Target.dwDeviceID;
-    lpmliA->Target.wMid = mliW.Target.wMid;
-    lpmliA->Target.wPid = mliW.Target.wPid;
-    lpmliA->Target.vDriverVersion = mliW.Target.vDriverVersion;
-    WideCharToMultiByte( CP_ACP, 0, mliW.Target.szPname, -1, lpmliA->Target.szPname,
-                         sizeof(lpmliA->Target.szPname), NULL, NULL );
-
+    if(ret == MMSYSERR_NOERROR)
+    {
+        lpmliA->dwDestination = mliW.dwDestination;
+        lpmliA->dwSource = mliW.dwSource;
+        lpmliA->dwLineID = mliW.dwLineID;
+        lpmliA->fdwLine = mliW.fdwLine;
+        lpmliA->dwUser = mliW.dwUser;
+        lpmliA->dwComponentType = mliW.dwComponentType;
+        lpmliA->cChannels = mliW.cChannels;
+        lpmliA->cConnections = mliW.cConnections;
+        lpmliA->cControls = mliW.cControls;
+        WideCharToMultiByte( CP_ACP, 0, mliW.szShortName, -1, lpmliA->szShortName,
+                             sizeof(lpmliA->szShortName), NULL, NULL);
+        WideCharToMultiByte( CP_ACP, 0, mliW.szName, -1, lpmliA->szName,
+                             sizeof(lpmliA->szName), NULL, NULL );
+        lpmliA->Target.dwType = mliW.Target.dwType;
+        lpmliA->Target.dwDeviceID = mliW.Target.dwDeviceID;
+        lpmliA->Target.wMid = mliW.Target.wMid;
+        lpmliA->Target.wPid = mliW.Target.wPid;
+        lpmliA->Target.vDriverVersion = mliW.Target.vDriverVersion;
+        WideCharToMultiByte( CP_ACP, 0, mliW.Target.szPname, -1, lpmliA->Target.szPname,
+                             sizeof(lpmliA->Target.szPname), NULL, NULL );
+    }
     return ret;
 }
 
@@ -887,7 +895,7 @@ UINT WINAPI midiOutGetErrorTextW(UINT uError, LPWSTR lpText, UINT uSize)
     if (lpText == NULL) ret = MMSYSERR_INVALPARAM;
     else if (uSize == 0) ret = MMSYSERR_NOERROR;
     else if (
-	       /* test has been removed 'coz MMSYSERR_BASE is 0, and gcc did emit
+	       /* test has been removed because MMSYSERR_BASE is 0, and gcc did emit
 		* a warning for the test was always true */
 	       (/*uError >= MMSYSERR_BASE && */ uError <= MMSYSERR_LASTERROR) ||
 	       (uError >= MIDIERR_BASE  && uError <= MIDIERR_LASTERROR)) {
@@ -918,7 +926,7 @@ static	LPWINE_MIDI	MIDI_OutAlloc(HMIDIOUT* lphMidiOut, DWORD_PTR* lpdwCallback,
 	*lphMidiOut = hMidiOut;
 
     if (lpwm) {
-	lpwm->mod.hMidi = (HMIDI) hMidiOut;
+        lpwm->mod.hMidi = hMidiOut;
 	lpwm->mod.dwCallback = *lpdwCallback;
 	lpwm->mod.dwInstance = *lpdwInstance;
 	lpwm->mod.dnDevNode = 0;
@@ -1245,7 +1253,7 @@ UINT MIDI_InOpen(HMIDIIN* lphMidiIn, UINT uDeviceID, DWORD_PTR dwCallback,
     if (lpwm == NULL)
 	return MMSYSERR_NOMEM;
 
-    lpwm->mod.hMidi = (HMIDI) hMidiIn;
+    lpwm->mod.hMidi = hMidiIn;
     lpwm->mod.dwCallback = dwCallback;
     lpwm->mod.dwInstance = dwInstance;
 
@@ -1433,6 +1441,24 @@ UINT WINAPI midiInMessage(HMIDIIN hMidiIn, UINT uMessage,
     return MMDRV_Message(wmld, uMessage, dwParam1, dwParam2, TRUE);
 }
 
+/**************************************************************************
+ * 				midiConnect			[WINMM.@]
+ */
+MMRESULT WINAPI midiConnect(HMIDI hMidi, HMIDIOUT hmo, LPVOID pReserved)
+{
+    FIXME("(%p, %p, %p): Stub\n", hMidi, hmo, pReserved);
+    return MMSYSERR_ERROR;
+}
+
+/**************************************************************************
+ * 				midiDisconnect			[WINMM.@]
+ */
+MMRESULT WINAPI midiDisconnect(HMIDI hMidi, HMIDIOUT hmo, LPVOID pReserved)
+{
+    FIXME("(%p, %p, %p): Stub\n", hMidi, hmo, pReserved);
+    return MMSYSERR_ERROR;
+}
+
 typedef struct WINE_MIDIStream {
     HMIDIOUT			hDevice;
     HANDLE			hThread;
@@ -1508,7 +1534,7 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	/* this is not quite what MS doc says... */
 	midiOutReset(lpMidiStrm->hDevice);
 	/* empty list of already submitted buffers */
-	for (lpMidiHdr = lpMidiStrm->lpMidiHdr; lpMidiHdr; lpMidiHdr = (LPMIDIHDR)lpMidiHdr->lpNext) {
+	for (lpMidiHdr = lpMidiStrm->lpMidiHdr; lpMidiHdr; lpMidiHdr = lpMidiHdr->lpNext) {
 	    lpMidiHdr->dwFlags |= MHDR_DONE;
 	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
 
@@ -1592,7 +1618,7 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	    break;
 	}
 
-	for (lpmh = &lpMidiStrm->lpMidiHdr; *lpmh; lpmh = (LPMIDIHDR*)&((*lpmh)->lpNext));
+	for (lpmh = &lpMidiStrm->lpMidiHdr; *lpmh; lpmh = &(*lpmh)->lpNext);
 	*lpmh = lpMidiHdr;
 	lpMidiHdr = (LPMIDIHDR)msg->lParam;
 	lpMidiHdr->lpNext = 0;
@@ -1720,7 +1746,7 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
 	    lpMidiHdr->dwFlags |= MHDR_DONE;
 	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
 
-	    lpMidiStrm->lpMidiHdr = (LPMIDIHDR)lpMidiHdr->lpNext;
+	    lpMidiStrm->lpMidiHdr = lpMidiHdr->lpNext;
 	    DriverCallback(lpwm->mod.dwCallback, lpMidiStrm->wFlags,
 			   (HDRVR)lpMidiStrm->hDevice, MM_MOM_DONE,
 			   lpwm->mod.dwInstance, (DWORD)lpMidiHdr, 0L);
@@ -1795,7 +1821,7 @@ MMRESULT MIDI_StreamOpen(HMIDISTRM* lphMidiStrm, LPUINT lpuDeviceID, DWORD cMidi
 	return MMSYSERR_NOMEM;
 
     lpMidiStrm->dwTempo = 500000;
-    lpMidiStrm->dwTimeDiv = 480; 	/* 480 is 120 quater notes per minute *//* FIXME ??*/
+    lpMidiStrm->dwTimeDiv = 480; 	/* 480 is 120 quarter notes per minute *//* FIXME ??*/
     lpMidiStrm->dwPositionMS = 0;
 
     mosm.dwStreamID = (DWORD)lpMidiStrm;
@@ -2070,7 +2096,7 @@ UINT WAVE_Open(HANDLE* lphndl, UINT uDeviceID, UINT uType,
     wod.dwInstance = dwInstance;
     wod.dnDevNode = 0L;
 
-    TRACE("cb=%08x\n", wod.dwCallback);
+    TRACE("cb=%08lx\n", wod.dwCallback);
 
     for (;;) {
         if (dwFlags & WAVE_MAPPED) {
@@ -2197,7 +2223,7 @@ UINT WINAPI waveOutGetErrorTextW(UINT uError, LPWSTR lpText, UINT uSize)
     if (lpText == NULL) ret = MMSYSERR_INVALPARAM;
     else if (uSize == 0) ret = MMSYSERR_NOERROR;
     else if (
-	       /* test has been removed 'coz MMSYSERR_BASE is 0, and gcc did emit
+	       /* test has been removed because MMSYSERR_BASE is 0, and gcc did emit
 		* a warning for the test was always true */
 	       (/*uError >= MMSYSERR_BASE && */ uError <= MMSYSERR_LASTERROR) ||
 	       (uError >= WAVERR_BASE  && uError <= WAVERR_LASTERROR)) {

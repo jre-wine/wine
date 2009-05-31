@@ -99,7 +99,7 @@ static HRESULT WINAPI ITS_IMonikerImpl_GetClassID(
     ITS_IMonikerImpl *This = (ITS_IMonikerImpl *)iface;
 
     TRACE("%p %p\n", This, pClassID);
-    memcpy( pClassID, &CLSID_ITStorage, sizeof (CLSID) );
+    *pClassID = CLSID_ITStorage;
     return S_OK;
 }
 
@@ -473,7 +473,7 @@ HRESULT ITS_IParseDisplayName_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     its->ref = 1;
 
     TRACE("-> %p\n", its);
-    *ppObj = (LPVOID) its;
+    *ppObj = its;
 
     ITSS_LockModule();
     return S_OK;

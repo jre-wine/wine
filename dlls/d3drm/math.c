@@ -19,20 +19,12 @@
 
 #define NONAMELESSUNION
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdarg.h>
-#include <assert.h>
 #include <math.h>
-
+#include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
 #include "d3drmdef.h"
-
-#include "wine/debug.h"
-
-WINE_DEFAULT_DEBUG_CHANNEL(d3drm);
 
 /* Create a RGB color from its components */
 D3DCOLOR WINAPI D3DRMCreateColorRGB(D3DVALUE red, D3DVALUE green, D3DVALUE blue)
@@ -85,12 +77,16 @@ D3DVALUE WINAPI D3DRMColorGetRed(D3DCOLOR color)
 /* Product of 2 quaternions */
 LPD3DRMQUATERNION WINAPI D3DRMQuaternionMultiply(LPD3DRMQUATERNION q, LPD3DRMQUATERNION a, LPD3DRMQUATERNION b)
 {
+    D3DRMQUATERNION temp;
     D3DVECTOR cross_product;
+
     D3DRMVectorCrossProduct(&cross_product, &a->v, &b->v);
-    q->s = a->s * b->s - D3DRMVectorDotProduct(&a->v, &b->v);
-    q->v.u1.x = a->s * b->v.u1.x + b->s * a->v.u1.x + cross_product.u1.x;
-    q->v.u2.y = a->s * b->v.u2.y + b->s * a->v.u2.y + cross_product.u2.y;
-    q->v.u3.z = a->s * b->v.u3.z + b->s * a->v.u3.z + cross_product.u3.z;
+    temp.s = a->s * b->s - D3DRMVectorDotProduct(&a->v, &b->v);
+    temp.v.u1.x = a->s * b->v.u1.x + b->s * a->v.u1.x + cross_product.u1.x;
+    temp.v.u2.y = a->s * b->v.u2.y + b->s * a->v.u2.y + cross_product.u2.y;
+    temp.v.u3.z = a->s * b->v.u3.z + b->s * a->v.u3.z + cross_product.u3.z;
+
+    *q = temp;
     return q;
 }
 
@@ -131,39 +127,65 @@ LPD3DRMQUATERNION WINAPI D3DRMQuaternionFromRotation(LPD3DRMQUATERNION q, LPD3DV
 /* Interpolation between two quaternions */
 LPD3DRMQUATERNION WINAPI D3DRMQuaternionSlerp(LPD3DRMQUATERNION q, LPD3DRMQUATERNION a, LPD3DRMQUATERNION b, D3DVALUE alpha)
 {
-    D3DVALUE epsilon=1.0;
-    D3DVECTOR sca1,sca2;
-    if (a->s * b->s + D3DRMVectorDotProduct(&a->v, &b->v) < 0.0) epsilon = -1.0;
-    q->s = (1.0 - alpha) * a->s + epsilon * alpha * b->s;
-    D3DRMVectorAdd(&q->v, D3DRMVectorScale(&sca1, &a->v, 1.0 - alpha),
-                   D3DRMVectorScale(&sca2, &b->v, epsilon * alpha));
+    D3DVALUE dot, epsilon, temp, theta, u;
+
+    dot = a->s * b->s + D3DRMVectorDotProduct(&a->v, &b->v);
+    epsilon = 1.0f;
+    temp = 1.0f - alpha;
+    u = alpha;
+    if (dot < 0.0)
+    {
+     epsilon = -1.0;
+     dot = -dot;
+    }
+    if( 1.0f - dot > 0.001f )
+    {
+        theta = acos(dot);
+        temp  = sin(theta * temp) / sin(theta);
+        u = sin(theta * alpha) / sin(theta);
+    }
+    q->s = temp * a->s + epsilon * u * b->s;
+    D3DRMVectorAdd(&q->v, D3DRMVectorScale(&a->v, &a->v, temp),
+                   D3DRMVectorScale(&b->v, &b->v, epsilon * u));
     return q;
 }
 
 /* Add Two Vectors */
 LPD3DVECTOR WINAPI D3DRMVectorAdd(LPD3DVECTOR d, LPD3DVECTOR s1, LPD3DVECTOR s2)
 {
-    d->u1.x=s1->u1.x + s2->u1.x;
-    d->u2.y=s1->u2.y + s2->u2.y;
-    d->u3.z=s1->u3.z + s2->u3.z;
+    D3DVECTOR temp;
+
+    temp.u1.x=s1->u1.x + s2->u1.x;
+    temp.u2.y=s1->u2.y + s2->u2.y;
+    temp.u3.z=s1->u3.z + s2->u3.z;
+
+    *d = temp;
     return d;
 }
 
 /* Subtract Two Vectors */
 LPD3DVECTOR WINAPI D3DRMVectorSubtract(LPD3DVECTOR d, LPD3DVECTOR s1, LPD3DVECTOR s2)
 {
-    d->u1.x=s1->u1.x - s2->u1.x;
-    d->u2.y=s1->u2.y - s2->u2.y;
-    d->u3.z=s1->u3.z - s2->u3.z;
+    D3DVECTOR temp;
+
+    temp.u1.x=s1->u1.x - s2->u1.x;
+    temp.u2.y=s1->u2.y - s2->u2.y;
+    temp.u3.z=s1->u3.z - s2->u3.z;
+
+    *d = temp;
     return d;
 }
 
 /* Cross Product of Two Vectors */
 LPD3DVECTOR WINAPI D3DRMVectorCrossProduct(LPD3DVECTOR d, LPD3DVECTOR s1, LPD3DVECTOR s2)
 {
-    d->u1.x=s1->u2.y * s2->u3.z - s1->u3.z * s2->u2.y;
-    d->u2.y=s1->u3.z * s2->u1.x - s1->u1.x * s2->u3.z;
-    d->u3.z=s1->u1.x * s2->u2.y - s1->u2.y * s2->u1.x;
+    D3DVECTOR temp;
+
+    temp.u1.x=s1->u2.y * s2->u3.z - s1->u3.z * s2->u2.y;
+    temp.u2.y=s1->u3.z * s2->u1.x - s1->u1.x * s2->u3.z;
+    temp.u3.z=s1->u1.x * s2->u2.y - s1->u2.y * s2->u1.x;
+
+    *d = temp;
     return d;
 }
 
@@ -213,35 +235,42 @@ LPD3DVECTOR WINAPI D3DRMVectorRandom(LPD3DVECTOR d)
 /* Reflection of a vector on a surface */
 LPD3DVECTOR WINAPI D3DRMVectorReflect(LPD3DVECTOR r, LPD3DVECTOR ray, LPD3DVECTOR norm)
 {
-    D3DVECTOR sca;
-    D3DRMVectorSubtract(r, D3DRMVectorScale(&sca, norm, 2.0*D3DRMVectorDotProduct(ray,norm)), ray);
+    D3DVECTOR sca, temp;
+    D3DRMVectorSubtract(&temp, D3DRMVectorScale(&sca, norm, 2.0*D3DRMVectorDotProduct(ray,norm)), ray);
+
+    *r = temp;
     return r;
 }
 
 /* Rotation of a vector */
 LPD3DVECTOR WINAPI D3DRMVectorRotate(LPD3DVECTOR r, LPD3DVECTOR v, LPD3DVECTOR axis, D3DVALUE theta)
 {
-    D3DRMQUATERNION quaternion,quaternion1, quaternion2, quaternion3, resultq;
-    D3DVECTOR NORM;
+    D3DRMQUATERNION quaternion1, quaternion2, quaternion3;
+    D3DVECTOR norm;
 
-    quaternion1.s = cos(theta*.5);
-    quaternion2.s = cos(theta*.5);
-    NORM = *D3DRMVectorNormalize(axis);
-    D3DRMVectorScale(&quaternion1.v, &NORM, sin(theta * .5));
-    D3DRMVectorScale(&quaternion2.v, &NORM, -sin(theta * .5));
+    quaternion1.s = cos(theta * 0.5f);
+    quaternion2.s = cos(theta * 0.5f);
+    norm = *D3DRMVectorNormalize(axis);
+    D3DRMVectorScale(&quaternion1.v, &norm, sin(theta * 0.5f));
+    D3DRMVectorScale(&quaternion2.v, &norm, -sin(theta * 0.5f));
     quaternion3.s = 0.0;
     quaternion3.v = *v;
-    D3DRMQuaternionMultiply(&quaternion, &quaternion1, &quaternion3);
-    D3DRMQuaternionMultiply(&resultq, &quaternion, &quaternion2);
-    *r = *D3DRMVectorNormalize(&resultq.v);
+    D3DRMQuaternionMultiply(&quaternion1, &quaternion1, &quaternion3);
+    D3DRMQuaternionMultiply(&quaternion1, &quaternion1, &quaternion2);
+
+    *r = *D3DRMVectorNormalize(&quaternion1.v);
     return r;
 }
 
 /* Scale a vector */
 LPD3DVECTOR WINAPI D3DRMVectorScale(LPD3DVECTOR d, LPD3DVECTOR s, D3DVALUE factor)
 {
-    d->u1.x=factor * s->u1.x;
-    d->u2.y=factor * s->u2.y;
-    d->u3.z=factor * s->u3.z;
+    D3DVECTOR temp;
+
+    temp.u1.x=factor * s->u1.x;
+    temp.u2.y=factor * s->u2.y;
+    temp.u3.z=factor * s->u3.z;
+
+    *d = temp;
     return d;
 }

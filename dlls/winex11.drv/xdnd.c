@@ -286,7 +286,7 @@ static void X11DRV_XDND_ResolveProperty(Display *display, Window xwin, Time tm,
             AnyPropertyType, &acttype, &actfmt, &icount, &bytesret, &data);
         wine_tsx11_unlock();
 
-        entries += X11DRV_XDND_MapFormat(types[i], data, icount * (actfmt / 8));
+        entries += X11DRV_XDND_MapFormat(types[i], data, get_property_size( actfmt, icount ));
         wine_tsx11_lock();
         XFree(data);
         wine_tsx11_unlock();
@@ -355,7 +355,7 @@ static int X11DRV_XDND_MapFormat(unsigned int property, unsigned char *data, int
  */
 static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len)
 {
-    char *uriList = (char*) data;
+    char *uriList = data;
     char *uri;
     WCHAR *path;
 
@@ -443,8 +443,8 @@ static int X11DRV_XDND_DeconstructTextPlain(int property, void* data, int len)
 {
     char* dostext;
 
-    /* Always suppply plain text */
-    X11DRV_XDND_UnixToDos(&dostext, (char*)data, len);
+    /* Always supply plain text */
+    X11DRV_XDND_UnixToDos(&dostext, data, len);
     X11DRV_XDND_InsertXDNDData(property, CF_TEXT, dostext, strlen(dostext));
 
     TRACE("CF_TEXT (%d): %s\n", CF_TEXT, dostext);
@@ -494,7 +494,7 @@ static void X11DRV_XDND_SendDropFiles(HWND hwnd)
 
     if (current != NULL)
     {
-        DROPFILES *lpDrop = (DROPFILES*) current->data;
+        DROPFILES *lpDrop = current->data;
 
         if (lpDrop)
         {

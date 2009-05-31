@@ -1,7 +1,7 @@
 /* -*- tab-width: 8; c-basic-offset: 4 -*- */
 
 /*
- * MMSYTEM low level drivers handling functions
+ * MMSYSTEM low level drivers handling functions
  *
  * Copyright 1999 Eric Pouech
  *
@@ -273,8 +273,8 @@ LPWINE_MLD	MMDRV_Alloc(UINT size, UINT type, LPHANDLE hndl, DWORD* dwFlags,
     if (llTypes[type].Callback)
     {
         *dwFlags = LOWORD(*dwFlags) | CALLBACK_FUNCTION;
-        *dwCallback = (DWORD)llTypes[type].Callback;
-        *dwInstance = (DWORD)mld; /* FIXME: wouldn't some 16 bit drivers only use the loword ? */
+        *dwCallback = (DWORD_PTR)llTypes[type].Callback;
+        *dwInstance = (DWORD_PTR)mld; /* FIXME: wouldn't some 16 bit drivers only use the loword ? */
     }
 
     return mld;
@@ -421,12 +421,12 @@ LPWINE_MLD	MMDRV_GetRelated(HANDLE hndl, UINT srcType,
 /**************************************************************************
  * 				MMDRV_PhysicalFeatures		[internal]
  */
-UINT	MMDRV_PhysicalFeatures(LPWINE_MLD mld, UINT uMsg, DWORD dwParam1,
-			       DWORD dwParam2)
+UINT	MMDRV_PhysicalFeatures(LPWINE_MLD mld, UINT uMsg,
+                               DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     WINE_MM_DRIVER*	lpDrv = &MMDrvs[mld->mmdIndex];
 
-    TRACE("(%p, %04x, %08x, %08x)\n", mld, uMsg, dwParam1, dwParam2);
+    TRACE("(%p, %04x, %08lx, %08lx)\n", mld, uMsg, dwParam1, dwParam2);
 
     /* all those function calls are undocumented */
     switch (uMsg) {
@@ -687,7 +687,7 @@ BOOL	MMDRV_Init(void)
         char *next = strchr(p, ',');
         if (next) *next++ = 0;
         sprintf( filename, "wine%s.drv", p );
-        ret |= MMDRV_Install( filename, filename, FALSE );
+        if ((ret = MMDRV_Install( filename, filename, FALSE ))) break;
         p = next;
     }
 
@@ -737,7 +737,7 @@ static  BOOL	MMDRV_ExitPerType(LPWINE_MM_DRIVER lpDrv, UINT type)
  */
 void    MMDRV_Exit(void)
 {
-    int i;
+    unsigned int i;
     TRACE("()\n");
 
     for (i = 0; i < sizeof(MM_MLDrvs) / sizeof(MM_MLDrvs[0]); i++)
@@ -753,7 +753,8 @@ void    MMDRV_Exit(void)
     }
 
     /* unload driver, in reverse order of loading */
-    for (i = sizeof(MMDrvs) / sizeof(MMDrvs[0]) - 1; i >= 0; i--)
+    i = sizeof(MMDrvs) / sizeof(MMDrvs[0]);
+    while (i-- > 0)
     {
         MMDRV_ExitPerType(&MMDrvs[i], MMDRV_AUX);
         MMDRV_ExitPerType(&MMDrvs[i], MMDRV_MIXER);
@@ -763,10 +764,16 @@ void    MMDRV_Exit(void)
         MMDRV_ExitPerType(&MMDrvs[i], MMDRV_WAVEOUT);
         CloseDriver(MMDrvs[i].hDriver, 0, 0);
     }
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_AUX].lpMlds - 1);
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIXER].lpMlds - 1);
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIDIIN].lpMlds - 1);
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIDIOUT].lpMlds - 1);
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_WAVEIN].lpMlds - 1);
-    HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_WAVEOUT].lpMlds - 1);
+    if (llTypes[MMDRV_AUX].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_AUX].lpMlds - 1);
+    if (llTypes[MMDRV_MIXER].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIXER].lpMlds - 1);
+    if (llTypes[MMDRV_MIDIIN].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIDIIN].lpMlds - 1);
+    if (llTypes[MMDRV_MIDIOUT].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_MIDIOUT].lpMlds - 1);
+    if (llTypes[MMDRV_WAVEIN].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_WAVEIN].lpMlds - 1);
+    if (llTypes[MMDRV_WAVEOUT].lpMlds)
+        HeapFree(GetProcessHeap(), 0, llTypes[MMDRV_WAVEOUT].lpMlds - 1);
 }

@@ -71,6 +71,7 @@ static void test_SnmpUtilOidToA(void)
     static AsnObjectIdentifier oid4 = { 258, ids2 };
     static AsnObjectIdentifier oid5 = { 1, ids3 };
     static const char expect0[] = "<null oid>";
+    static const char expect0_alt[] = "NUL";
     static const char expect1[] = "1.3.6.1.4.1.311";
     static const char expect2[] =
         "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
@@ -90,41 +91,58 @@ static void test_SnmpUtilOidToA(void)
         "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
         "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
         "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1";
+    static const char expect3_alt[] =
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1."
+        "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1";
     static const char expect4[] = "-1";
 
-    ret = SnmpUtilOidToA(NULL);
-    ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect0), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
-       ret, expect1);
+    /* This crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilOidToA(NULL);
+        ok(ret != NULL, "SnmpUtilOidToA failed\n");
+        ok(!strcmp(ret, expect0), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
+           ret, expect1);
+    }
 
     ret = SnmpUtilOidToA(&oid0);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect0), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect0) ||
+       broken(!strcmp(ret, expect0_alt)), /* Win98, WinMe, NT4 */
+       "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect0);
 
     ret = SnmpUtilOidToA(&oid1);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect1), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect1), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect1);
 
     ret = SnmpUtilOidToA(&oid2);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect2), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect2), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect2);
 
     ret = SnmpUtilOidToA(&oid3);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect3), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect3), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect3);
 
     ret = SnmpUtilOidToA(&oid4);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect3), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect3) ||
+       broken(!strcmp(ret, expect3_alt)), /* Win98, WinMe, NT4 */
+       "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect3);
 
     ret = SnmpUtilOidToA(&oid5);
     ok(ret != NULL, "SnmpUtilOidToA failed\n");
-    ok(!strcmp(ret, expect4), "SnmpUtilOidToA failed got \n%s\n expected \n%s\n",
+    ok(!strcmp(ret, expect4), "SnmpUtilOidToA failed got\n%s\n expected\n%s\n",
        ret, expect4);
 }
 
@@ -195,17 +213,44 @@ static void test_SnmpUtilOidCpyFree(void)
     static UINT ids[] = { 1, 3, 6, 1, 4, 1, 311 };
     static AsnObjectIdentifier dst, src = { sizeof(ids) / sizeof(ids[0]), ids };
 
-    ret = SnmpUtilOidCpy(NULL, NULL);
-    ok(!ret, "SnmpUtilOidCpy succeeded\n");
+    /* These crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilOidCpy(NULL, NULL);
+        ok(!ret, "SnmpUtilOidCpy succeeded\n");
 
-    memset(&dst, 1, sizeof(AsnObjectIdentifier));
-    ret = SnmpUtilOidCpy(&dst, NULL);
+        memset(&dst, 1, sizeof(AsnObjectIdentifier));
+        ret = SnmpUtilOidCpy(&dst, NULL);
+        ok(ret, "SnmpUtilOidCpy failed\n");
+        ok(dst.idLength == 0, "SnmpUtilOidCpy failed\n");
+        ok(dst.ids == NULL, "SnmpUtilOidCpy failed\n");
+
+        ret = SnmpUtilOidCpy(NULL, &src);
+        ok(!ret, "SnmpUtilOidCpy succeeded\n");
+    }
+
+    memset(&dst, 0, sizeof(AsnObjectIdentifier));
+    ret = SnmpUtilOidCpy(&dst, &src);
     ok(ret, "SnmpUtilOidCpy failed\n");
-    ok(dst.idLength == 0, "SnmpUtilOidCpy failed\n");
-    ok(dst.ids == NULL, "SnmpUtilOidCpy failed\n");
+    ok(src.idLength == dst.idLength, "SnmpUtilOidCpy failed\n");
+    ok(!memcmp(src.ids, dst.ids, dst.idLength * sizeof(UINT)), "SnmpUtilOidCpy failed\n");
+    SnmpUtilOidFree(&dst);
 
-    ret = SnmpUtilOidCpy(NULL, &src);
-    ok(!ret, "SnmpUtilOidCpy succeeded\n");
+    /* These crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilOidCpy(NULL, NULL);
+        ok(!ret, "SnmpUtilOidCpy succeeded\n");
+
+        memset(&dst, 1, sizeof(AsnObjectIdentifier));
+        ret = SnmpUtilOidCpy(&dst, NULL);
+        ok(ret, "SnmpUtilOidCpy failed\n");
+        ok(dst.idLength == 0, "SnmpUtilOidCpy failed\n");
+        ok(dst.ids == NULL, "SnmpUtilOidCpy failed\n");
+
+        ret = SnmpUtilOidCpy(NULL, &src);
+        ok(!ret, "SnmpUtilOidCpy succeeded\n");
+    }
 
     memset(&dst, 0, sizeof(AsnObjectIdentifier));
     ret = SnmpUtilOidCpy(&dst, &src);
@@ -213,7 +258,11 @@ static void test_SnmpUtilOidCpyFree(void)
     ok(src.idLength == dst.idLength, "SnmpUtilOidCpy failed\n");
     ok(!memcmp(src.ids, dst.ids, dst.idLength * sizeof(UINT)), "SnmpUtilOidCpy failed\n");
 
-    SnmpUtilOidFree(NULL);
+    /* This crashes under win98 */
+    if(0)
+    {
+        SnmpUtilOidFree(NULL);
+    }
     SnmpUtilOidFree(&dst);
     ok(dst.idLength == 0, "SnmpUtilOidFree failed\n");
     ok(dst.ids == NULL, "SnmpUtilOidFree failed\n");
@@ -281,7 +330,7 @@ static void test_SnmpUtilOctetsCmp(void)
     ok(ret == 1, "SnmpUtilOctetsCmp failed\n");
 
     ret = pSnmpUtilOctetsCmp(&octets1, &octets2);
-    ok(ret == -1, "SnmpUtilOctetsCmp failed\n");
+    ok(ret < 0, "SnmpUtilOctetsCmp failed\n");
 }
 
 static void test_SnmpUtilOidNCmp(void)
@@ -292,23 +341,27 @@ static void test_SnmpUtilOidNCmp(void)
     static AsnObjectIdentifier oid1 = { 4, ids1 };
     static AsnObjectIdentifier oid2 = { 4, ids2 };
 
-    ret = SnmpUtilOidNCmp(NULL, NULL, 0);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+    /* This crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilOidNCmp(NULL, NULL, 0);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
 
-    ret = SnmpUtilOidNCmp(NULL, NULL, 1);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+        ret = SnmpUtilOidNCmp(NULL, NULL, 1);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
 
-    ret = SnmpUtilOidNCmp(&oid1, NULL, 0);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+        ret = SnmpUtilOidNCmp(&oid1, NULL, 0);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
 
-    ret = SnmpUtilOidNCmp(&oid1, NULL, 1);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+        ret = SnmpUtilOidNCmp(&oid1, NULL, 1);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
 
-    ret = SnmpUtilOidNCmp(NULL, &oid2, 0);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+        ret = SnmpUtilOidNCmp(NULL, &oid2, 0);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
 
-    ret = SnmpUtilOidNCmp(NULL, &oid2, 1);
-    ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+        ret = SnmpUtilOidNCmp(NULL, &oid2, 1);
+        ok(!ret, "SnmpUtilOidNCmp succeeded\n");
+    }
 
     ret = SnmpUtilOidNCmp(&oid1, &oid1, 0);
     ok(!ret, "SnmpUtilOidNCmp failed\n");
@@ -317,10 +370,24 @@ static void test_SnmpUtilOidNCmp(void)
     ok(!ret, "SnmpUtilOidNCmp failed\n");
 
     ret = SnmpUtilOidNCmp(&oid1, &oid2, 4);
-    ok(ret == -1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret < 0, "SnmpUtilOidNCmp failed: %d\n", ret);
 
     ret = SnmpUtilOidNCmp(&oid2, &oid1, 4);
-    ok(ret == 1, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ok(ret > 0, "SnmpUtilOidNCmp failed: %d\n", ret);
+
+    oid1.idLength = 3;
+    memcpy(oid1.ids, oid2.ids, sizeof(UINT) * 4);
+    ret = SnmpUtilOidNCmp(&oid1, &oid1, 4);
+    ok(!ret, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ret = SnmpUtilOidNCmp(&oid2, &oid1, 4);
+    ok(ret > 0, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ret = SnmpUtilOidNCmp(&oid1, &oid2, 4);
+    ok(ret < 0, "SnmpUtilOidNCmp failed: %d\n", ret);
+
+    ret = SnmpUtilOidNCmp(&oid1, &oid2, 2);
+    ok(!ret, "SnmpUtilOidNCmp failed: %d\n", ret);
+    ret = SnmpUtilOidNCmp(&oid2, &oid1, 2);
+    ok(!ret, "SnmpUtilOidNCmp failed: %d\n", ret);
 }
 
 static void test_SnmpUtilOidCmp(void)
@@ -343,10 +410,10 @@ static void test_SnmpUtilOidCmp(void)
     }
 
     ret = SnmpUtilOidCmp(&oid2, &oid1);
-    ok(ret == 1, "SnmpUtilOidCmp failed\n");
+    ok(ret > 0, "SnmpUtilOidCmp failed\n");
 
     ret = SnmpUtilOidCmp(&oid1, &oid2);
-    ok(ret == -1, "SnmpUtilOidCmp failed\n");
+    ok(ret < 0, "SnmpUtilOidCmp failed\n");
 }
 
 static void test_SnmpUtilOidAppend(void)
@@ -365,14 +432,18 @@ static void test_SnmpUtilOidAppend(void)
     oid1.idLength = 3;
     oid1.ids = ids1;
 
-    ret = SnmpUtilOidAppend(NULL, NULL);
-    ok(!ret, "SnmpUtilOidAppend succeeded\n");
+    /* This crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilOidAppend(NULL, NULL);
+        ok(!ret, "SnmpUtilOidAppend succeeded\n");
 
-    ret = SnmpUtilOidAppend(&oid1, NULL);
-    ok(ret, "SnmpUtilOidAppend failed\n");
+        ret = SnmpUtilOidAppend(&oid1, NULL);
+        ok(ret, "SnmpUtilOidAppend failed\n");
 
-    ret = SnmpUtilOidAppend(NULL, &oid2);
-    ok(!ret, "SnmpUtilOidAppend succeeded\n");
+        ret = SnmpUtilOidAppend(NULL, &oid2);
+        ok(!ret, "SnmpUtilOidAppend succeeded\n");
+    }
 
     ret = SnmpUtilOidAppend(&oid1, &oid2);
     ok(ret, "SnmpUtilOidAppend failed\n");
@@ -389,19 +460,23 @@ static void test_SnmpUtilVarBindCpyFree(void)
     static UINT ids[] = { 1, 3, 6, 1, 4, 1, 311 };
     static SnmpVarBind dst, src = { { 7, ids }, { ASN_INTEGER, { 1 } } };
 
-    ret = SnmpUtilVarBindCpy(NULL, NULL);
-    ok(!ret, "SnmpUtilVarBindCpy succeeded\n");
+    /* This crashes under win98 */
+    if(0)
+    {
+        ret = SnmpUtilVarBindCpy(NULL, NULL);
+        ok(!ret, "SnmpUtilVarBindCpy succeeded\n");
 
-    memset(&dst, 0, sizeof(SnmpVarBind));
-    ret = SnmpUtilVarBindCpy(&dst, NULL);
-    ok(ret, "SnmpUtilVarBindCpy failed\n");
-    ok(dst.name.idLength == 0, "SnmpUtilVarBindCpy failed\n");
-    ok(dst.name.ids == NULL, "SnmpUtilVarBindCpy failed\n");
-    ok(dst.value.asnType == ASN_NULL, "SnmpUtilVarBindCpy failed\n");
-    ok(dst.value.asnValue.number == 0, "SnmpUtilVarBindCpy failed\n");
+        memset(&dst, 0, sizeof(SnmpVarBind));
+        ret = SnmpUtilVarBindCpy(&dst, NULL);
+        ok(ret, "SnmpUtilVarBindCpy failed\n");
+        ok(dst.name.idLength == 0, "SnmpUtilVarBindCpy failed\n");
+        ok(dst.name.ids == NULL, "SnmpUtilVarBindCpy failed\n");
+        ok(dst.value.asnType == ASN_NULL, "SnmpUtilVarBindCpy failed\n");
+        ok(dst.value.asnValue.number == 0, "SnmpUtilVarBindCpy failed\n");
 
-    ret = SnmpUtilVarBindCpy(NULL, &src);
-    ok(!ret, "SnmpUtilVarBindCpy succeeded\n");
+        ret = SnmpUtilVarBindCpy(NULL, &src);
+        ok(!ret, "SnmpUtilVarBindCpy succeeded\n");
+    }
 
     memset(&dst, 0, sizeof(SnmpVarBind));
     ret = SnmpUtilVarBindCpy(&dst, &src);
@@ -412,7 +487,11 @@ static void test_SnmpUtilVarBindCpyFree(void)
     ok(!memcmp(&src.value, &dst.value, sizeof(AsnObjectSyntax)),
        "SnmpUtilVarBindCpy failed\n");
 
-    SnmpUtilVarBindFree(NULL);
+    /* This crashes under win98 */
+    if(0)
+    {
+        SnmpUtilVarBindFree(NULL);
+    }
     SnmpUtilVarBindFree(&dst);
     ok(dst.name.idLength == 0, "SnmpUtilVarBindFree failed\n");
     ok(dst.name.ids == NULL, "SnmpUtilVarBindFree failed\n");
@@ -435,11 +514,15 @@ static void test_SnmpUtilVarBindListCpyFree(void)
     ok(!ret, "SnmpUtilVarBindListCpy succeeded\n");
     }
 
-    memset(&dst_list, 0xff, sizeof(SnmpVarBindList));
-    ret = SnmpUtilVarBindListCpy(&dst_list, NULL);
-    ok(ret, "SnmpUtilVarBindListCpy failed\n");
-    ok(dst_list.list == NULL, "SnmpUtilVarBindListCpy failed\n");
-    ok(dst_list.len == 0, "SnmpUtilVarBindListCpy failed\n");
+    /* This crashes under win98 */
+    if(0)
+    {
+        memset(&dst_list, 0xff, sizeof(SnmpVarBindList));
+        ret = SnmpUtilVarBindListCpy(&dst_list, NULL);
+        ok(ret, "SnmpUtilVarBindListCpy failed\n");
+        ok(dst_list.list == NULL, "SnmpUtilVarBindListCpy failed\n");
+        ok(dst_list.len == 0, "SnmpUtilVarBindListCpy failed\n");
+    }
 
     ret = SnmpUtilVarBindListCpy(&dst_list, &src_list);
     ok(ret, "SnmpUtilVarBindListCpy failed\n");
@@ -467,24 +550,24 @@ START_TEST(util)
     test_SnmpUtilOidToA();
 
     if (!pSnmpUtilAsnAnyCpy || !pSnmpUtilAsnAnyFree)
-        skip("SnmpUtilAsnAnyCpy and/or SnmpUtilAsnAnyFree not available\n");
+        win_skip("SnmpUtilAsnAnyCpy and/or SnmpUtilAsnAnyFree not available\n");
     else
         test_SnmpUtilAsnAnyCpyFree();
 
     if (!pSnmpUtilOctetsCpy || !pSnmpUtilOctetsFree)
-        skip("SnmpUtilOctetsCpy and/or SnmpUtilOctetsFree not available\n");
+        win_skip("SnmpUtilOctetsCpy and/or SnmpUtilOctetsFree not available\n");
     else
         test_SnmpUtilOctetsCpyFree();
 
     test_SnmpUtilOidCpyFree();
 
     if (!pSnmpUtilOctetsNCmp)
-        skip("SnmpUtilOctetsNCmp not available\n");
+        win_skip("SnmpUtilOctetsNCmp not available\n");
     else
         test_SnmpUtilOctetsNCmp();
 
     if (!pSnmpUtilOctetsCmp)
-        skip("SnmpUtilOctetsCmp not available\n");
+        win_skip("SnmpUtilOctetsCmp not available\n");
     else
         test_SnmpUtilOctetsCmp();
 

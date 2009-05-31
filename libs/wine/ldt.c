@@ -52,7 +52,7 @@ struct modify_ldt_s
     unsigned int  read_exec_only : 1;
     unsigned int  limit_in_pages : 1;
     unsigned int  seg_not_present : 1;
-    unsigned int  useable : 1;
+    unsigned int  usable : 1;
     unsigned int  garbage : 25;
 };
 
@@ -65,7 +65,7 @@ static inline void fill_modify_ldt_struct( struct modify_ldt_s *ptr, const LDT_E
     ptr->read_exec_only  = !(entry->HighWord.Bits.Type & 2);
     ptr->limit_in_pages  = entry->HighWord.Bits.Granularity;
     ptr->seg_not_present = !entry->HighWord.Bits.Pres;
-    ptr->useable         = entry->HighWord.Bits.Sys;
+    ptr->usable          = entry->HighWord.Bits.Sys;
     ptr->garbage         = 0;
 }
 
@@ -385,7 +385,7 @@ void wine_ldt_free_entries( unsigned short sel, int count )
 }
 
 
-#ifdef __i386__
+#if defined(__i386__) && !defined(__MINGW32__) && !defined(_MSC_VER)
 
 static int global_fs_sel = -1;  /* global selector for %fs shared among all threads */
 
@@ -477,8 +477,6 @@ void wine_ldt_free_fs( unsigned short sel )
 /***********************************************************************
  *           selector access functions
  */
-# ifndef _MSC_VER
-/* Nothing needs to be done for MS C, it will do with inline versions from the winnt.h */
 __ASM_GLOBAL_FUNC( wine_get_cs, "movw %cs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_ds, "movw %ds,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_es, "movw %es,%ax\n\tret" )
@@ -487,6 +485,5 @@ __ASM_GLOBAL_FUNC( wine_get_gs, "movw %gs,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_get_ss, "movw %ss,%ax\n\tret" )
 __ASM_GLOBAL_FUNC( wine_set_fs, "movl 4(%esp),%eax\n\tmovw %ax,%fs\n\tret" )
 __ASM_GLOBAL_FUNC( wine_set_gs, "movl 4(%esp),%eax\n\tmovw %ax,%gs\n\tret" )
-# endif /* defined(_MSC_VER) */
 
 #endif /* __i386__ */

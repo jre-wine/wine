@@ -311,7 +311,7 @@ static ULONG ShellLink_Release( IShellLinkImpl *This )
     if (This->pPidl)
         ILFree(This->pPidl);
 
-    LocalFree((HANDLE)This);
+    LocalFree(This);
 
     return 0;
 }
@@ -320,7 +320,7 @@ static HRESULT ShellLink_GetClassID( IShellLinkImpl *This, CLSID *pclsid )
 {
     TRACE("%p %p\n", This, pclsid);
 
-    memcpy( pclsid, &CLSID_ShellLink, sizeof (CLSID) );
+    *pclsid = CLSID_ShellLink;
     return S_OK;
 }
 
@@ -585,20 +585,20 @@ static HRESULT Stream_LoadString( IStream* stm, BOOL unicode, LPWSTR *pstr )
     /* convert to unicode if necessary */
     if( !unicode )
     {
-        count = MultiByteToWideChar( CP_ACP, 0, (LPSTR) temp, len, NULL, 0 );
+        count = MultiByteToWideChar( CP_ACP, 0, temp, len, NULL, 0 );
         str = HeapAlloc( GetProcessHeap(), 0, (count+1)*sizeof (WCHAR) );
         if( !str )
         {
             HeapFree( GetProcessHeap(), 0, temp );
             return E_OUTOFMEMORY;
         }
-        MultiByteToWideChar( CP_ACP, 0, (LPSTR) temp, len, str, count );
+        MultiByteToWideChar( CP_ACP, 0, temp, len, str, count );
         HeapFree( GetProcessHeap(), 0, temp );
     }
     else
     {
         count /= 2;
-        str = (LPWSTR) temp;
+        str = temp;
     }
     str[count] = 0;
 
@@ -637,7 +637,7 @@ static HRESULT Stream_ReadChunk( IStream* stm, LPVOID *data )
 
     TRACE("Read %d bytes\n",chunk->size);
 
-    *data = (LPVOID) chunk;
+    *data = chunk;
 
     return S_OK;
 }
@@ -686,7 +686,7 @@ static HRESULT Stream_LoadLocation( IStream *stm,
     char *p = NULL;
     LOCATION_INFO *loc;
     HRESULT r;
-    int n;
+    DWORD n;
 
     r = Stream_ReadChunk( stm, (LPVOID*) &p );
     if( FAILED(r) )
@@ -924,7 +924,14 @@ static HRESULT WINAPI IPersistStream_fnLoad(
 
     r = IStream_Read(stm, &zero, sizeof zero, &dwBytesRead);
     if( FAILED( r ) || zero || dwBytesRead != sizeof zero )
-        ERR("Last word was not zero\n");
+    {
+        /* Some lnk files have extra data blocks starting with a
+         * DATABLOCK_HEADER. For instance EXP_SPECIAL_FOLDER and an unknown
+         * one with a 0xa0000003 signature. However these don't seem to matter
+         * too much.
+         */
+        WARN("Last word was not zero\n");
+    }
 
     TRACE("OK\n");
 
@@ -1072,7 +1079,7 @@ static HRESULT WINAPI IPersistStream_fnSave(
     memset(&header, 0, sizeof(header));
     header.dwSize = sizeof(header);
     header.fStartup = This->iShowCmd;
-    memcpy(&header.MagicGuid, &CLSID_ShellLink, sizeof(header.MagicGuid) );
+    header.MagicGuid = CLSID_ShellLink;
 
     header.wHotKey = This->wHotKey;
     header.nIcon = This->iIcoNdx;
@@ -1301,7 +1308,7 @@ HRESULT WINAPI IShellLink_ConstructFromFile( IUnknown* pUnkOuter, REFIID riid,
                 hr = E_FAIL;
 
 	    if (SUCCEEDED(hr))
-		*ppv = (IUnknown*) psl;
+                *ppv = psl;
 
 	    IPersistFile_Release(ppf);
 	}
@@ -1532,7 +1539,7 @@ static HRESULT SHELL_PidlGeticonLocationA(IShellFolder* psf, LPCITEMIDLIST pidl,
     if (SUCCEEDED(hr)) {
 	IExtractIconA* pei;
 
-	hr = IShellFolder_GetUIObjectOf(psf, 0, 1, (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconA, NULL, (LPVOID*)&pei);
+	hr = IShellFolder_GetUIObjectOf(psf, 0, 1, &pidlLast, &IID_IExtractIconA, NULL, (LPVOID*)&pei);
 
 	if (SUCCEEDED(hr)) {
 	    hr = IExtractIconA_GetIconLocation(pei, 0, pszIconPath, MAX_PATH, piIcon, NULL);
@@ -1911,7 +1918,7 @@ static HRESULT SHELL_PidlGeticonLocationW(IShellFolder* psf, LPCITEMIDLIST pidl,
     if (SUCCEEDED(hr)) {
 	IExtractIconW* pei;
 
-	hr = IShellFolder_GetUIObjectOf(psf, 0, 1, (LPCITEMIDLIST*)&pidlLast, &IID_IExtractIconW, NULL, (LPVOID*)&pei);
+	hr = IShellFolder_GetUIObjectOf(psf, 0, 1, &pidlLast, &IID_IExtractIconW, NULL, (LPVOID*)&pei);
 
 	if (SUCCEEDED(hr)) {
 	    hr = IExtractIconW_GetIconLocation(pei, 0, pszIconPath, MAX_PATH, piIcon, NULL);
@@ -2522,7 +2529,7 @@ ShellLink_InvokeCommand( IContextMenu* iface, LPCMINVOKECOMMANDINFO lpici )
 
     if ( lpici->lpVerb != MAKEINTRESOURCEA(This->iIdOpen) )
     {
-        ERR("Unknown id %d != %d\n", (INT)lpici->lpVerb, This->iIdOpen );
+        ERR("Unknown id %p != %d\n", lpici->lpVerb, This->iIdOpen );
         return E_INVALIDARG;
     }
 

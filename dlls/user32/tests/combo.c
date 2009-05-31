@@ -162,6 +162,7 @@ static void test_setfont(DWORD style)
 static LRESULT (CALLBACK *old_parent_proc)(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
 static LPCSTR expected_edit_text;
 static LPCSTR expected_list_text;
+static BOOL selchange_fired;
 
 static LRESULT CALLBACK parent_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -187,6 +188,8 @@ static LRESULT CALLBACK parent_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPAR
                    edit, expected_edit_text);
                 ok(!strcmp(list, expected_list_text), "list: got %s, expected %s\n",
                    list, expected_list_text);
+
+                selchange_fired = TRUE;
             }
             break;
         }
@@ -213,17 +216,39 @@ static void test_selection(DWORD style, const char * const text[],
     idx = SendMessage(hCombo, CB_GETCURSEL, 0, 0);
     ok(idx == -1, "expected selection -1, got %d\n", idx);
 
+    /* keyboard navigation */
+
     expected_list_text = text[list[0]];
     expected_edit_text = text[edit[0]];
+    selchange_fired = FALSE;
     SendMessage(hCombo, WM_KEYDOWN, VK_DOWN, 0);
+    ok(selchange_fired, "CBN_SELCHANGE not sent!\n");
 
     expected_list_text = text[list[1]];
     expected_edit_text = text[edit[1]];
+    selchange_fired = FALSE;
     SendMessage(hCombo, WM_KEYDOWN, VK_DOWN, 0);
+    ok(selchange_fired, "CBN_SELCHANGE not sent!\n");
 
     expected_list_text = text[list[2]];
     expected_edit_text = text[edit[2]];
+    selchange_fired = FALSE;
     SendMessage(hCombo, WM_KEYDOWN, VK_UP, 0);
+    ok(selchange_fired, "CBN_SELCHANGE not sent!\n");
+
+    /* programmatic navigation */
+
+    expected_list_text = text[list[3]];
+    expected_edit_text = text[edit[3]];
+    selchange_fired = FALSE;
+    SendMessage(hCombo, CB_SETCURSEL, list[3], 0);
+    ok(!selchange_fired, "CBN_SELCHANGE sent!\n");
+
+    expected_list_text = text[list[4]];
+    expected_edit_text = text[edit[4]];
+    selchange_fired = FALSE;
+    SendMessage(hCombo, CB_SETCURSEL, list[4], 0);
+    ok(!selchange_fired, "CBN_SELCHANGE sent!\n");
 
     SetWindowLongPtr(hMainWnd, GWLP_WNDPROC, (ULONG_PTR)old_parent_proc);
     DestroyWindow(hCombo);
@@ -232,12 +257,144 @@ static void test_selection(DWORD style, const char * const text[],
 static void test_CBN_SELCHANGE(void)
 {
     static const char * const text[] = { "alpha", "beta", "" };
-    static const int sel_1[] = { 2, 0, 1 };
-    static const int sel_2[] = { 0, 1, 0 };
+    static const int sel_1[] = { 2, 0, 1, 0, 1 };
+    static const int sel_2[] = { 0, 1, 0, 0, 1 };
 
     test_selection(CBS_SIMPLE, text, sel_1, sel_2);
     test_selection(CBS_DROPDOWN, text, sel_1, sel_2);
     test_selection(CBS_DROPDOWNLIST, text, sel_2, sel_2);
+}
+
+static void test_WM_LBUTTONDOWN(void)
+{
+    HWND hCombo, hEdit, hList;
+    COMBOBOXINFO cbInfo;
+    UINT x, y, item_height;
+    LRESULT result;
+    int i, idx;
+    RECT rect;
+    CHAR buffer[3];
+    static const UINT choices[] = {8,9,10,11,12,14,16,18,20,22,24,26,28,36,48,72};
+    static const CHAR stringFormat[] = "%2d";
+    BOOL ret;
+    BOOL (WINAPI *pGetComboBoxInfo)(HWND, PCOMBOBOXINFO);
+
+    pGetComboBoxInfo = (void*)GetProcAddress(GetModuleHandleA("user32.dll"), "GetComboBoxInfo");
+    if (!pGetComboBoxInfo){
+        win_skip("GetComboBoxInfo is not available\n");
+        return;
+    }
+
+    hCombo = CreateWindow("ComboBox", "Combo", WS_VISIBLE|WS_CHILD|CBS_DROPDOWN,
+            0, 0, 200, 150, hMainWnd, (HMENU)COMBO_ID, NULL, 0);
+
+    for (i = 0; i < sizeof(choices)/sizeof(UINT); i++){
+        sprintf(buffer, stringFormat, choices[i]);
+        result = SendMessageA(hCombo, CB_ADDSTRING, 0, (LPARAM)buffer);
+        ok(result == i,
+           "Failed to add item %d\n", i);
+    }
+
+    cbInfo.cbSize = sizeof(COMBOBOXINFO);
+    SetLastError(0xdeadbeef);
+    ret = pGetComboBoxInfo(hCombo, &cbInfo);
+    ok(ret, "Failed to get combobox info structure. LastError=%d\n",
+       GetLastError());
+    hEdit = cbInfo.hwndItem;
+    hList = cbInfo.hwndList;
+
+    trace("hMainWnd=%p, hCombo=%p, hList=%p, hEdit=%p\n", hMainWnd, hCombo, hList, hEdit);
+    ok(GetFocus() == hMainWnd, "Focus not on Main Window, instead on %p\n", GetFocus());
+
+    /* Click on the button to drop down the list */
+    x = cbInfo.rcButton.left + (cbInfo.rcButton.right-cbInfo.rcButton.left)/2;
+    y = cbInfo.rcButton.top + (cbInfo.rcButton.bottom-cbInfo.rcButton.top)/2;
+    result = SendMessage(hCombo, WM_LBUTTONDOWN, 0, MAKELPARAM(x, y));
+    ok(result, "WM_LBUTTONDOWN was not processed. LastError=%d\n",
+       GetLastError());
+    ok(SendMessage(hCombo, CB_GETDROPPEDSTATE, 0, 0),
+       "The dropdown list should have appeared after clicking the button.\n");
+
+    ok(GetFocus() == hEdit,
+       "Focus not on ComboBox's Edit Control, instead on %p\n", GetFocus());
+    result = SendMessage(hCombo, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+    ok(result, "WM_LBUTTONUP was not processed. LastError=%d\n",
+       GetLastError());
+    ok(GetFocus() == hEdit,
+       "Focus not on ComboBox's Edit Control, instead on %p\n", GetFocus());
+
+    /* Click on the 5th item in the list */
+    item_height = SendMessage(hCombo, CB_GETITEMHEIGHT, 0, 0);
+    ok(GetClientRect(hList, &rect), "Failed to get list's client rect.\n");
+    x = rect.left + (rect.right-rect.left)/2;
+    y = item_height/2 + item_height*4;
+    result = SendMessage(hList, WM_LBUTTONDOWN, 0, MAKELPARAM(x, y));
+    ok(!result, "WM_LBUTTONDOWN was not processed. LastError=%d\n",
+       GetLastError());
+    ok(GetFocus() == hEdit,
+       "Focus not on ComboBox's Edit Control, instead on %p\n", GetFocus());
+
+    result = SendMessage(hList, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+    ok(!result, "WM_MOUSEMOVE was not processed. LastError=%d\n",
+       GetLastError());
+    ok(GetFocus() == hEdit,
+       "Focus not on ComboBox's Edit Control, instead on %p\n", GetFocus());
+    ok(SendMessage(hCombo, CB_GETDROPPEDSTATE, 0, 0),
+       "The dropdown list should still be visible.\n");
+
+    result = SendMessage(hList, WM_LBUTTONUP, 0, MAKELPARAM(x, y));
+    ok(!result, "WM_LBUTTONUP was not processed. LastError=%d\n",
+       GetLastError());
+    ok(GetFocus() == hEdit,
+       "Focus not on ComboBox's Edit Control, instead on %p\n", GetFocus());
+    ok(!SendMessage(hCombo, CB_GETDROPPEDSTATE, 0, 0),
+       "The dropdown list should have been rolled up.\n");
+    idx = SendMessage(hCombo, CB_GETCURSEL, 0, 0);
+    ok(idx, "Current Selection: expected %d, got %d\n", 4, idx);
+
+    DestroyWindow(hCombo);
+}
+
+static void test_changesize( DWORD style)
+{
+    HWND hCombo = build_combo(style);
+    RECT rc;
+    INT ddheight, clheight, ddwidth, clwidth;
+    /* get initial measurements */
+    GetClientRect( hCombo, &rc);
+    clheight = rc.bottom - rc.top;
+    clwidth = rc.right - rc.left;
+    SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&rc);
+    ddheight = rc.bottom - rc.top;
+    ddwidth = rc.right - rc.left;
+    /* use MoveWindow to move & resize the combo */
+    /* first make it slightly smaller */
+    MoveWindow( hCombo, 10, 10, clwidth - 2, clheight - 2, TRUE);
+    GetClientRect( hCombo, &rc);
+    ok( rc.right - rc.left == clwidth - 2, "clientrect witdh is %d vs %d\n",
+            rc.right - rc.left, clwidth - 2);
+    ok( rc.bottom - rc.top == clheight, "clientrect height is %d vs %d\n",
+                rc.bottom - rc.top, clheight);
+    SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&rc);
+    ok( rc.right - rc.left == clwidth - 2, "drop-down rect witdh is %d vs %d\n",
+            rc.right - rc.left, clwidth - 2);
+    ok( rc.bottom - rc.top == ddheight, "drop-down rect height is %d vs %d\n",
+            rc.bottom - rc.top, ddheight);
+    /* new cx, cy is slightly bigger than the initial values */
+    MoveWindow( hCombo, 10, 10, clwidth + 2, clheight + 2, TRUE);
+    GetClientRect( hCombo, &rc);
+    ok( rc.right - rc.left == clwidth + 2, "clientrect witdh is %d vs %d\n",
+            rc.right - rc.left, clwidth + 2);
+    ok( rc.bottom - rc.top == clheight, "clientrect height is %d vs %d\n",
+            rc.bottom - rc.top, clheight);
+    SendMessageA(hCombo, CB_GETDROPPEDCONTROLRECT, 0, (LPARAM)&rc);
+    ok( rc.right - rc.left == clwidth + 2, "drop-down rect witdh is %d vs %d\n",
+            rc.right - rc.left, clwidth + 2);
+    todo_wine {
+        ok( rc.bottom - rc.top == clheight + 2, "drop-down rect height is %d vs %d\n",
+                rc.bottom - rc.top, clheight + 2);
+    }
+    DestroyWindow(hCombo);
 }
 
 START_TEST(combo)
@@ -250,6 +407,9 @@ START_TEST(combo)
     test_setitemheight(CBS_DROPDOWN);
     test_setitemheight(CBS_DROPDOWNLIST);
     test_CBN_SELCHANGE();
+    test_WM_LBUTTONDOWN();
+    test_changesize(CBS_DROPDOWN);
+    test_changesize(CBS_DROPDOWNLIST);
 
     DestroyWindow(hMainWnd);
 }

@@ -54,7 +54,7 @@ static HRESULT WINAPI EnumFormatImpl_QueryInterface(IEnumFORMATETC *iface, REFII
 
     if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IEnumFORMATETC)) {
         IEnumFORMATETC_AddRef(iface);
-        *ppvObj = (LPVOID)This;
+        *ppvObj = This;
         return S_OK;
     }
     *ppvObj = NULL;
@@ -170,7 +170,7 @@ static HRESULT WINAPI DataObjectImpl_QueryInterface(IDataObject *iface, REFIID r
 
     if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDataObject)) {
         IDataObject_AddRef(iface);
-        *ppvObj = (LPVOID)This;
+        *ppvObj = This;
         return S_OK;
     }
     *ppvObj = NULL;
@@ -252,14 +252,14 @@ static HRESULT WINAPI DataObjectImpl_QueryGetData(IDataObject* iface, FORMATETC 
     return foundFormat?DV_E_FORMATETC:DV_E_TYMED;
 }
 
-static HRESULT WINAPI DataObjectImpl_GetCanonicalFormatEtc(IDataObject* iface, FORMATETC *pformatectIn,
+static HRESULT WINAPI DataObjectImpl_GetCanonicalFormatEtc(IDataObject* iface, FORMATETC *pformatetcIn,
                                                            FORMATETC *pformatetcOut)
 {
     DataObjectImpl *This = (DataObjectImpl*)iface;
-    TRACE("(%p)->(%p,%p)\n", This, pformatectIn, pformatetcOut);
+    TRACE("(%p)->(%p,%p)\n", This, pformatetcIn, pformatetcOut);
 
     if(pformatetcOut) {
-        memcpy(pformatetcOut, pformatectIn, sizeof(FORMATETC));
+        *pformatetcOut = *pformatetcIn;
         pformatetcOut->ptd = NULL;
     }
     return DATA_S_SAMEFORMATETC;
@@ -334,7 +334,7 @@ static HGLOBAL get_unicode_text(ME_TextEditor *editor, const CHARRANGE *lpchrg)
     pars = ME_CountParagraphsBetween(editor, lpchrg->cpMin, lpchrg->cpMax);
     len = lpchrg->cpMax-lpchrg->cpMin;
     ret = GlobalAlloc(GMEM_MOVEABLE, sizeof(WCHAR)*(len+pars+1));
-    data = (WCHAR *)GlobalLock(ret);
+    data = GlobalLock(ret);
     len = ME_GetTextW(editor, data, lpchrg->cpMin, len, TRUE);
     data[len] = 0;
     GlobalUnlock(ret);
@@ -359,7 +359,7 @@ static DWORD CALLBACK ME_AppendToHGLOBAL(DWORD_PTR dwCookie, LPBYTE lpBuff, LONG
         int nNewSize = (((nMaxSize+cb+1)|0x1FFFF)+1) & 0xFFFE0000;
         pData->hData = GlobalReAlloc(pData->hData, nNewSize, 0);
     }
-    pDest = (BYTE *)GlobalLock(pData->hData);
+    pDest = GlobalLock(pData->hData);
     memcpy(pDest + pData->nLength, lpBuff, cb);
     pData->nLength += cb;
     pDest[pData->nLength] = '\0';

@@ -4,7 +4,8 @@ dnl See ChangeLog file for detailed change history.
 
 m4_define(WINE_VERSION,regexp(m4_include(VERSION),[version \([-.0-9A-Za-z]+\)],[\1]))
 
-AC_PREREQ(2.53b)
+dnl autoconf versions before 2.59d don't handle multi-line subst variables correctly
+AC_PREREQ(2.59d)
 AC_INIT([Wine],[WINE_VERSION],[wine-devel@winehq.org])
 AC_CONFIG_SRCDIR(server/atom.c)
 AC_CONFIG_HEADERS(include/config.h)
@@ -14,41 +15,74 @@ dnl **** Command-line arguments ****
 
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
 AC_ARG_ENABLE(win64, AS_HELP_STRING([--enable-win64],[build a Win64 emulator on AMD64 (won't run Win32 binaries)]))
+AC_ARG_ENABLE(tests, AS_HELP_STRING([--disable-tests],[do not build the regression tests]))
+AC_ARG_ENABLE(maintainer-mode, AS_HELP_STRING([--enable-maintainer-mode],[enable maintainer-specific build rules]),
+                               ,[AC_SUBST([MAINTAINER_MODE],[\#])])
 
+AC_ARG_WITH(alsa,      AS_HELP_STRING([--without-alsa],[do not use the Alsa sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_sys_asoundlib_h=no; ac_cv_header_alsa_asoundlib_h=no; fi])
+AC_ARG_WITH(audioio,   AS_HELP_STRING([--without-audioio],[do not use the AudioIO sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_libaudioio_h=no; fi])
+AC_ARG_WITH(capi,      AS_HELP_STRING([--without-capi],[do not use CAPI (ISDN support)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_capi20_h=no; ac_cv_header_linux_capi_h=no; fi])
+AC_ARG_WITH(cms,       AS_HELP_STRING([--without-cms],[do not use CMS (color management support)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_lcms_h=no; ac_cv_header_lcms_lcms_h=no; fi])
+AC_ARG_WITH(coreaudio, AS_HELP_STRING([--without-coreaudio],[do not use the CoreAudio sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_CoreAudio_CoreAudio_h=no; fi])
+AC_ARG_WITH(cups,      AS_HELP_STRING([--without-cups],[do not use CUPS]))
+AC_ARG_WITH(curses,    AS_HELP_STRING([--without-curses],[do not use (n)curses]),
+            [if test "x$withval" = "xno"; then ac_cv_header_ncurses_h=no; ac_cv_header_curses_h=no; fi])
+AC_ARG_WITH(esd,       AS_HELP_STRING([--without-esd],[do not use the EsounD sound support]))
+AC_ARG_WITH(fontconfig,AS_HELP_STRING([--without-fontconfig],[do not use fontconfig]),
+            [if test "x$withval" = "xno"; then ac_cv_header_fontconfig_fontconfig_h=no; fi])
+AC_ARG_WITH(freetype,  AS_HELP_STRING([--without-freetype],[do not use the FreeType library]))
+AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Digital Camera support)]))
+AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
+            [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
+AC_ARG_WITH(gnutls,    AS_HELP_STRING([--without-gnutls],[do not use GnuTLS (schannel support)]))
+AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
+AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_jack_jack_h=no; fi])
+AC_ARG_WITH(jpeg,      AS_HELP_STRING([--without-jpeg],[do not use JPEG]),
+            [if test "x$withval" = "xno"; then ac_cv_header_jpeglib_h=no; fi])
+AC_ARG_WITH(ldap,      AS_HELP_STRING([--without-ldap],[do not use LDAP]),
+            [if test "x$withval" = "xno"; then ac_cv_header_ldap_h=no; ac_cv_header_lber_h=no; fi])
+AC_ARG_WITH(nas,       AS_HELP_STRING([--without-nas],[do not use the NAS sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_audio_audiolib_h=no; fi])
 AC_ARG_WITH(opengl,    AS_HELP_STRING([--without-opengl],[do not use OpenGL]))
-AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=<dir>],[use Wine tools from directory <dir>]))
+AC_ARG_WITH(openssl,   AS_HELP_STRING([--without-openssl],[do not use OpenSSL]),
+            [if test "x$withval" = "xno"; then ac_cv_header_openssl_err_h=no; ac_cv_header_openssl_ssl_h=no; fi])
+AC_ARG_WITH(oss,       AS_HELP_STRING([--without-oss],[do not use the OSS sound support]),
+            [if test "x$withval" = "xno"; then ac_cv_header_soundcard_h=no; ac_cv_header_sys_soundcard_h=no; ac_cv_header_machine_soundcard_h=no; fi])
+AC_ARG_WITH(png,       AS_HELP_STRING([--without-png],[do not use PNG]),
+            [if test "x$withval" = "xno"; then ac_cv_header_png_h=no; fi])
+AC_ARG_WITH(pthread,   AS_HELP_STRING([--without-pthread],[do not use the pthread library]),
+            [if test "x$withval" = "xno"; then ac_cv_header_pthread_h=no; fi])
+AC_ARG_WITH(sane,      AS_HELP_STRING([--without-sane],[do not use SANE (scanner support)]))
+AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xcomposite_h=no; fi])
+AC_ARG_WITH(xcursor,   AS_HELP_STRING([--without-xcursor],[do not use the Xcursor extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_Xcursor_Xcursor_h=no; fi])
+AC_ARG_WITH(xinerama,  AS_HELP_STRING([--without-xinerama],[do not use Xinerama (multi-monitor support)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xinerama_h=no; fi])
+AC_ARG_WITH(xinput,    AS_HELP_STRING([--without-xinput],[do not use the Xinput extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_XInput_h=no; fi])
+AC_ARG_WITH(xml,       AS_HELP_STRING([--without-xml],[do not use XML]))
+AC_ARG_WITH(xrandr,    AS_HELP_STRING([--without-xrandr],[do not use Xrandr (resolution changes)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xrandr_h=no; fi])
+AC_ARG_WITH(xrender,   AS_HELP_STRING([--without-xrender],[do not use the Xrender extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xrender_h=no; fi])
+AC_ARG_WITH(xshape,    AS_HELP_STRING([--without-xshape],[do not use the Xshape extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_shape_h=no; fi])
+AC_ARG_WITH(xshm,      AS_HELP_STRING([--without-xshm],[do not use XShm (shared memory extension)]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_XShm_h=no; fi])
+AC_ARG_WITH(xslt,      AS_HELP_STRING([--without-xslt],[do not use XSLT]))
+AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree video mode extension]),
+            [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; fi])
+
+AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
 
 AC_CANONICAL_HOST
-case $host in
-  x86_64*linux*)
-    if test "x$enable_win64" != "xyes"
-    then
-      test -n "$CC" || CC="gcc -m32"
-      test -n "$CXX"|| CXX="g++ -m32"
-      test -n "$LD" || LD="ld -m elf_i386"
-      test -n "$AS" || AS="as --32"
-      host_cpu="i386"
-    fi
-    ;;
-esac
-
-dnl enable_win16 defaults to yes on x86, to no on other CPUs
-case $host_cpu in
-  *i[[3456789]]86*)
-    if test "x$enable_win16" != "xno" 
-    then
-      enable_win16="yes"
-    fi
-    ;;
-esac
-   
-AC_SUBST(WIN16_FILES,"\$(WIN16_FILES)")
-AC_SUBST(WIN16_INSTALL,"\$(WIN16_INSTALL)")
-if test "x$enable_win16" != "xyes"
-then
-  WIN16_FILES=""
-  WIN16_INSTALL=""
-fi
 
 dnl check for out of tree build with unclean source tree
 case "$srcdir" in
@@ -67,6 +101,48 @@ AC_PROG_CXX
 dnl We can't use AC_PROG_CPP for winegcc, it uses by default $(CC) -E
 AC_CHECK_TOOL(CPPBIN,cpp,cpp)
 
+case $host in
+  x86_64*)
+    if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
+    then
+      CC="$CC -m32"
+      CXX="$CXX -m32"
+      AC_MSG_CHECKING([whether $CC works])
+      AC_LINK_IFELSE(AC_LANG_PROGRAM(),AC_MSG_RESULT([yes]),
+                     [AC_MSG_RESULT([no])
+                      AC_MSG_ERROR([Cannot build a 32-bit program, you need to install 32-bit development libraries.])])
+      LD="${LD:-ld} -m elf_i386"
+      AS="${AS:-as} --32"
+      host_cpu="i386"
+      notice_platform="32-bit "
+      AC_SUBST(TARGETFLAGS,"-m32")
+      enable_win16=${enable_win16:-yes}
+    else
+      AC_SUBST(TARGETFLAGS,"-m64")
+    fi
+    ;;
+  *-mingw32*|*-cygwin*)
+    enable_win16=${enable_win16:-no}
+    ;;
+  i[[3456789]]86*)
+    enable_win16=${enable_win16:-yes}
+    ;;
+esac
+
+dnl enable_win16 defaults to yes on x86, to no on other CPUs
+enable_win16=${enable_win16:-no}
+
+AC_SUBST(WIN16_FILES,"\$(WIN16_FILES)")
+AC_SUBST(WIN16_INSTALL,"\$(WIN16_INSTALL)")
+if test "x$enable_win16" != "xyes"
+then
+    WIN16_FILES=""
+    WIN16_INSTALL=""
+    enable_w32skrnl=${enable_w32skrnl:-no}
+    enable_winedos=${enable_winedos:-no}
+    enable_winevdm=${enable_winevdm:-no}
+fi
+
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
   [if test -z "$with_wine_tools"; then
      if test "$cross_compiling" = "yes"; then
@@ -83,8 +159,10 @@ AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
      AC_MSG_ERROR([could not find Wine tools in $with_wine_tools.])
    fi])
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
-
-AC_PATH_XTRA
+if test -n "$host_alias" -a "$host_alias" != "$build_alias"
+then
+    AC_SUBST(TARGETFLAGS,"-b $host_alias $TARGETFLAGS")
+fi
 
 dnl Check for flex
 AC_CHECK_PROGS(FLEX,flex,none)
@@ -101,8 +179,10 @@ then
 fi
 
 AC_CHECK_TOOLS(AS,[gas as],as)
-AC_CHECK_TOOL(LD,ld,ld)
-AC_CHECK_TOOL(AR,ar,ar)
+AC_CHECK_TOOLS(LD,[ld gld],ld)
+AC_CHECK_TOOLS(NM,[nm gnm],nm)
+AC_CHECK_TOOLS(AR,[ar gar],ar)
+AC_SUBST(ARFLAGS,rc)
 AC_PROG_RANLIB
 AC_CHECK_TOOL(STRIP,strip,strip)
 AC_CHECK_TOOL(WINDRES,windres,false)
@@ -130,6 +210,15 @@ AC_SUBST(LINTFLAGS)
 dnl Check for various programs
 AC_CHECK_PROGS(FONTFORGE, fontforge, false)
 AC_CHECK_PROGS(PKG_CONFIG, pkg-config, false)
+AC_CHECK_PROGS(RSVG, rsvg, false)
+AC_CHECK_PROGS(ICOTOOL, icotool, false)
+
+if test "${enable_maintainer_mode+set}" = set
+then
+  if test "$FONTFORGE" = "false"; then WINE_WARNING([fontforge is missing, fonts can't be rebuilt.]); fi
+  if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
+  if test "$ICOTOOL" = "false"; then WINE_WARNING([icotool is missing, icons can't be rebuilt.]); fi
+fi
 
 case $host_cpu in
   *i[[3456789]]86*)
@@ -143,15 +232,9 @@ dnl Check for -li386 for NetBSD and OpenBSD
 AC_CHECK_LIB(i386,i386_set_ldt)
 dnl Check for -lossaudio for NetBSD
 AC_CHECK_LIB(ossaudio,_oss_ioctl)
-dnl Check for -lpthread
-AC_CHECK_LIB(pthread,pthread_create,AC_SUBST(LIBPTHREAD,"-lpthread"))
 
 AC_SUBST(XLIB,"")
-AC_SUBST(XFILES,"")
-AC_SUBST(OPENGLFILES,"")
-AC_SUBST(GLU32FILES,"")
 AC_SUBST(OPENGL_LIBS,"")
-AC_SUBST(QUARTZFILES,"")
 
 dnl **** Check for header files ****
 
@@ -161,23 +244,28 @@ AC_CHECK_HEADERS(\
 	CoreAudio/CoreAudio.h \
 	DiskArbitration/DiskArbitration.h \
 	IOKit/IOKitLib.h \
+	IOKit/hid/IOHIDLib.h \
+	alias.h \
 	alsa/asoundlib.h \
 	arpa/inet.h \
 	arpa/nameser.h \
 	asm/types.h \
 	capi20.h \
-	cups/cups.h \
 	curses.h \
 	direct.h \
+	dirent.h \
 	dlfcn.h \
 	elf.h \
 	float.h \
 	fontconfig/fontconfig.h \
 	getopt.h \
+	grp.h \
 	ieeefp.h \
+	inet/mib2.h \
 	io.h \
 	jack/jack.h \
 	jpeglib.h \
+	kstat.h \
 	lber.h \
 	lcms.h \
 	lcms/lcms.h \
@@ -193,7 +281,10 @@ AC_CHECK_HEADERS(\
 	linux/major.h \
 	linux/param.h \
 	linux/serial.h \
+	linux/types.h \
 	linux/ucdrom.h \
+	mach-o/dyld_images.h \
+	mach-o/nlist.h \
 	mach/mach.h \
 	mach/machine.h \
 	machine/cpu.h \
@@ -221,6 +312,7 @@ AC_CHECK_HEADERS(\
 	soundcard.h \
 	stdint.h \
 	strings.h \
+	stropts.h \
 	sys/asoundlib.h \
 	sys/cdio.h \
 	sys/elf32.h \
@@ -233,7 +325,6 @@ AC_CHECK_HEADERS(\
 	sys/ipc.h \
 	sys/limits.h \
 	sys/link.h \
-	sys/lwp.h \
 	sys/mman.h \
 	sys/modem.h \
 	sys/msg.h \
@@ -241,8 +332,8 @@ AC_CHECK_HEADERS(\
 	sys/param.h \
 	sys/poll.h \
 	sys/prctl.h \
+	sys/protosw.h \
 	sys/ptrace.h \
-	sys/reg.h \
 	sys/resource.h \
 	sys/scsiio.h \
 	sys/shm.h \
@@ -254,54 +345,106 @@ AC_CHECK_HEADERS(\
 	sys/statvfs.h \
 	sys/strtio.h \
 	sys/syscall.h \
-	sys/sysctl.h \
+	sys/tihdr.h \
 	sys/time.h \
+	sys/timeout.h \
 	sys/times.h \
 	sys/uio.h \
 	sys/un.h \
+	sys/utsname.h \
 	sys/vm86.h \
 	sys/wait.h \
 	syscall.h \
 	termios.h \
 	unistd.h \
 	utime.h \
-	valgrind/memcheck.h
+	valgrind/memcheck.h \
+	valgrind/valgrind.h
 )
 AC_HEADER_STAT()
 
 dnl **** Checks for headers that depend on other ones ****
 
-AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/user.h sys/vfs.h],,,
+AC_CHECK_HEADERS([sys/mount.h sys/statfs.h sys/sysctl.h sys/user.h sys/vfs.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_PARAM_H
+     #ifdef HAVE_SYS_PARAM_H
      # include <sys/param.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/in_pcb.h netinet/ip_var.h net/if.h net/if_arp.h net/if_dl.h net/if_types.h net/route.h netipx/ipx.h],,,
-    [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+AC_CHECK_HEADERS(\
+	netinet/ip.h \
+	net/if.h \
+	net/if_arp.h \
+	net/if_dl.h \
+	net/if_types.h \
+	net/route.h \
+	netinet/if_ether.h \
+	netinet/if_inarp.h \
+	netinet/in_pcb.h \
+	netinet/ip_icmp.h \
+	netinet/ip_var.h \
+	netinet/udp.h \
+	netipx/ipx.h \
+,,,[#include <sys/types.h>
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_SYS_SOCKETVAR_H
+     #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_NET_ROUTE_H
+     # include <net/route.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_SYSTM_H
+     # include <netinet/in_systm.h>
+     #endif
+     #ifdef HAVE_NET_IF_H
+     # include <net/if.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_H
+     # include <netinet/ip.h>
      #endif])
 
-AC_CHECK_HEADERS([netinet/tcp_var.h],,,
+AC_CHECK_HEADERS([netinet/tcp_timer.h netinet/udp_var.h netinet/icmp_var.h netinet/tcp_var.h ],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_ALIAS_H
+     # include <alias.h>
+     #endif
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_SYS_SOCKETVAR_H
+     #ifdef HAVE_SYS_SOCKETVAR_H
      # include <sys/socketvar.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_SYS_TIMEOUT_H
+     # include <sys/timeout.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
+     #endif
+     #ifdef HAVE_NETINET_IN_SYSTM_H
+     # include <netinet/in_systm.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_H
+     # include <netinet/ip.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_VAR_H
+     # include <netinet/ip_var.h>
+     #endif
+     #ifdef HAVE_NETINET_IP_ICMP_H
+     # include <netinet/ip_icmp.h>
+     #endif
+     #ifdef HAVE_NETINET_UDP_H
+     # include <netinet/udp.h>
      #endif
      #ifdef HAVE_NETINET_TCP_H
      # include <netinet/tcp.h>
+     #endif
+     #ifdef HAVE_NETINET_TCP_TIMER_H
+     #include <netinet/tcp_timer.h>
      #endif])
 
 AC_CHECK_HEADERS([linux/ipx.h],,,
@@ -309,19 +452,22 @@ AC_CHECK_HEADERS([linux/ipx.h],,,
      #ifdef HAVE_ASM_TYPES_H
      # include <asm/types.h>
      #endif
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
+     #endif
+     #ifdef HAVE_LINUX_TYPES_H
+     # include <linux/types.h>
      #endif])
 
 AC_CHECK_HEADERS([resolv.h],,,
     [#include <sys/types.h>
-     #if HAVE_SYS_SOCKET_H
+     #ifdef HAVE_SYS_SOCKET_H
      # include <sys/socket.h>
      #endif
-     #if HAVE_NETINET_IN_H
+     #ifdef HAVE_NETINET_IN_H
      # include <netinet/in.h>
      #endif
-     #if HAVE_ARPA_NAMESER_H
+     #ifdef HAVE_ARPA_NAMESER_H
      # include <arpa/nameser.h>
      #endif])
 
@@ -329,7 +475,7 @@ AC_CHECK_HEADERS(ucontext.h,,,[#include <signal.h>])
 
 AC_CHECK_HEADERS([sys/thr.h],,,
 [#include <sys/types.h>
-#if HAVE_UCONTEXT_H
+#ifdef HAVE_UCONTEXT_H
 #include <ucontext.h>
 #endif])
 
@@ -374,9 +520,17 @@ case $host_os in
       LIBEXT="dll"
     fi
     IMPLIBEXT="a"
-    dnl We can't build 16-bit NE dlls
-    WIN16_FILES=""
-    WIN16_INSTALL=""
+    dnl Disable modules that can't be used on Windows
+    enable_iphlpapi=${enable_iphlpapi:-no}
+    enable_kernel32=${enable_kernel32:-no}
+    enable_msvcrt=${enable_msvcrt:-no}
+    enable_ntdll=${enable_ntdll:-no}
+    enable_ws2_32=${enable_ws2_32:-no}
+    enable_loader=${enable_loader:-no}
+    enable_server=${enable_server:-no}
+    dnl Disable dependencies that are not useful on Windows
+    with_x=${with_x:-no}
+    with_pthread=${with_pthread:-no}
     ;;
   darwin*|macosx*)
     DLLEXT=".so"
@@ -402,6 +556,13 @@ case $host_os in
         dnl CoreServices needed by AudioUnit
         AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
     fi
+    if test "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes"
+    then
+        ac_save_LIBS="$LIBS"
+        LIBS="$LIBS $IOKITLIB"
+        AC_CHECK_FUNCS(IOHIDManagerCreate)
+        LIBS="$ac_save_LIBS"
+    fi
     case $host_cpu in
       *powerpc*)
         LDDLLFLAGS="$LDDLLFLAGS -read_only_relocs warning"  dnl FIXME
@@ -411,7 +572,7 @@ case $host_os in
     if test "$ac_cv_header_Carbon_Carbon_h" = "yes"
     then
         AC_SUBST(CARBONLIB,"-framework Carbon")
-        QUARTZFILES='$(QUARTZFILES)'
+        enable_winequartz_drv=${enable_winequartz_drv:-yes}
     fi
     ;;
   *)
@@ -480,19 +641,10 @@ case $host_os in
         fi
       fi
     fi
-
-    dnl Check for cross compiler to build test programs
-    AC_SUBST(CROSSTEST,"")
-    if test "$cross_compiling" = "no"
-    then
-      WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
-      WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
-      WINE_CHECK_MINGW_PROG(CROSSWINDRES,windres,false)
-      WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
-      if test "$CROSSCC" != "false"; then CROSSTEST="\$(CROSSTEST)"; fi
-    fi
     ;;
 esac
+
+enable_winequartz_drv=${enable_winequartz_drv:-no}
 
 if test "$LIBEXT" = "a"; then
   AC_MSG_ERROR(
@@ -503,7 +655,31 @@ If you are using Linux, you will need a newer binutils.]
 )
 fi
 
+dnl Check for cross compiler to build test programs
+if test "$cross_compiling" = "no" -a "$LIBEXT" != "dll"
+then
+    WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
+    WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
+    WINE_CHECK_MINGW_PROG(CROSSWINDRES,windres,false)
+    WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
+    if test "$CROSSCC" != "false"
+    then
+        AC_SUBST(CROSSTEST,"\$(CROSSTEST)")
+    fi
+fi
+
+dnl **** Check for pthread ****
+
+if test "$ac_cv_header_pthread_h" = "yes"
+then
+    AC_CHECK_LIB(pthread,pthread_create,[AC_SUBST(LIBPTHREAD,"-lpthread")])
+fi
+WINE_ERROR_WITH(pthread,[test "x$LIBPTHREAD" = "x"],[pthread ${notice_platform}development files not found.
+Wine cannot support threads without libpthread.])
+
 dnl **** Check for X11 ****
+
+AC_PATH_XTRA
 
 if test "$have_x" = "yes"
 then
@@ -547,12 +723,16 @@ then
         then
             WINE_CHECK_SONAME(Xcursor,XcursorImageLoadCursor,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
         fi
+        WINE_NOTICE_WITH(xcursor,[test "x$ac_cv_lib_soname_Xcursor" = "x"],
+                         [libxcursor ${notice_platform}development files not found, the Xcursor extension won't be supported.])
 
         dnl *** Check for X input extension
         if test "$ac_cv_header_X11_extensions_XInput_h" = "yes"
         then
             WINE_CHECK_SONAME(Xi,XOpenDevice,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
         fi
+        WINE_NOTICE_WITH(xinput,[test "x$ac_cv_lib_soname_Xi" = "x"],
+                         [libxi ${notice_platform}development files not found, the Xinput extension won't be supported.])
 
         dnl *** Check for X Shm extension
         if test "$ac_cv_header_X11_extensions_XShm_h" = "yes"
@@ -561,8 +741,8 @@ then
               AC_DEFINE(HAVE_LIBXXSHM, 1, [Define if you have the X Shm extension]),,
               $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
         fi
-        WINE_NOTICE_IF([test "$ac_cv_lib_Xext_XShmQueryExtension" != "yes"],[XShm development files not found.
-Wine will be built without XShm support. (winex11.drv)])
+        WINE_NOTICE_WITH(xshm,[test "$ac_cv_lib_Xext_XShmQueryExtension" != "yes"],
+                         [XShm ${notice_platform}development files not found, X Shared Memory won't be supported.])
 
         dnl *** Check for X shape extension
         if test "$ac_cv_header_X11_extensions_shape_h" = "yes"
@@ -571,20 +751,16 @@ Wine will be built without XShm support. (winex11.drv)])
 	      AC_DEFINE(HAVE_LIBXSHAPE, 1, [Define if you have the X Shape extension]),,
 	      $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
         fi
-        WINE_NOTICE_IF([test "$ac_cv_lib_Xext_XShapeQueryExtension" != "yes"],[XShape development files not found.
-Wine will be built without XShape support. (winex11.drv)])
+        WINE_NOTICE_WITH(xshape,[test "$ac_cv_lib_Xext_XShapeQueryExtension" != "yes"],
+                         [XShape ${notice_platform}development files not found, XShape won't be supported.])
 
         dnl *** Check for XFree86 VMODE extension
         if test "$ac_cv_header_X11_extensions_xf86vmode_h" = "yes"
         then
-                AC_CHECK_LIB(Xxf86vm, XF86VidModeQueryExtension,
-                  [ AC_DEFINE(HAVE_LIBXXF86VM, 1, [Define if you have the Xxf86vm library])
-                     X_PRE_LIBS="$X_PRE_LIBS -lXxf86vm"
-                  ],,
-                  $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
+            WINE_CHECK_SONAME(Xxf86vm,XF86VidModeQueryExtension,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
         fi
-        WINE_NOTICE_IF([test "$ac_cv_lib_Xxf86vm_XF86VidModeQueryExtension" != "yes"],[Xxf86vm development files not found.
-Wine will be built without XF86 Vidmode support. (winex11.drv)])
+        WINE_NOTICE_WITH(xxf86vm,[test "x$ac_cv_lib_soname_Xxf86vm" = "x"],
+                         [libXxf86vm ${notice_platform}development files not found, XFree86 Vidmode won't be supported.])
 
         dnl *** Check for Transform functions in Xrender
         if test "$ac_cv_header_X11_extensions_Xrender_h" = "yes" -a "x$ac_cv_lib_soname_X11" != "x" -a "x$ac_cv_lib_soname_Xext" != "x"
@@ -596,8 +772,8 @@ Wine will be built without XF86 Vidmode support. (winex11.drv)])
                 [$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])],,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
 
         fi
-        WINE_NOTICE_IF([test "x$ac_cv_lib_soname_Xrender" = "x"],[XRender development files not found.
-Wine will be built without XRender support. (winex11.drv)])
+        WINE_WARNING_WITH(xrender,[test "x$ac_cv_lib_soname_Xrender" = "x"],
+                         [libxrender ${notice_platform}development files not found, XRender won't be supported.])
 
         dnl *** Check for X RandR extension
         if test "$ac_cv_header_X11_extensions_Xrandr_h" = "yes" -a "x$ac_cv_lib_soname_Xrender" != "x"
@@ -606,8 +782,8 @@ Wine will be built without XRender support. (winex11.drv)])
 #include <X11/extensions/Xrandr.h>]], [[static typeof(XRRSetScreenConfigAndRate) * func;]])],
                   [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
         fi
-        WINE_NOTICE_IF([test "x$ac_cv_lib_soname_Xrandr" = "x"],[XRandr development files not found.
-Wine will be built without XRandr support. (winex11.drv)])
+        WINE_NOTICE_WITH(xrandr,[test "x$ac_cv_lib_soname_Xrandr" = "x"],
+                         [libxrandr ${notice_platform}development files not found, XRandr won't be supported.])
 
         dnl *** Check for Xinerama extension
         if test "$ac_cv_header_X11_extensions_Xinerama_h" = "yes"
@@ -616,20 +792,27 @@ Wine will be built without XRandr support. (winex11.drv)])
 #include <X11/extensions/Xinerama.h>]], [[static typeof(XineramaQueryScreens) * func;]])],
                   [WINE_CHECK_SONAME(Xinerama,XineramaQueryScreens,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
         fi
-        WINE_NOTICE_IF([test "x$ac_cv_lib_soname_Xinerama" = "x"],[Xinerama development files not found.
-Wine will be built without Xinerama support. (winex11.drv)])
+        WINE_NOTICE_WITH(xinerama,[test "x$ac_cv_lib_soname_Xinerama" = "x"],
+                         [libxinerama ${notice_platform}development files not found, multi-monitor setups won't be supported.])
 
         dnl *** Check for X Composite extension
         if test "$ac_cv_header_X11_extensions_Xcomposite_h" = "yes"
         then
             WINE_CHECK_SONAME(Xcomposite,XCompositeRedirectWindow,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
         fi
-        WINE_NOTICE_IF([test "x$ac_cv_lib_soname_Xcomposite" = "x"],[XComposite development files not found.
-Wine will be built without XComposite support. (winex11.drv)])
+        WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_soname_Xcomposite" = "x"],
+                         [libxcomposite ${notice_platform}development files not found, Xcomposite won't be supported.])
+
+        dnl *** Check for XICCallback struct
+        AC_CHECK_MEMBERS([XICCallback.callback],,,
+[#ifdef HAVE_X11_XLIB_H
+#include <X11/Xlib.h>
+#endif])
 
     dnl *** End of X11/Xlib.h check
 
     dnl Check for the presence of OpenGL
+    opengl_msg=""
     if test "x$with_opengl" != "xno"
     then
 	AC_CHECK_HEADERS(GL/gl.h GL/glx.h GL/glext.h GL/glu.h,,,
@@ -649,38 +832,39 @@ Wine will be built without XComposite support. (winex11.drv)])
 		dnl Check for the presence of the library
 		WINE_CHECK_SONAME(GL,glXCreateContext,
 			     [OPENGL_LIBS="-lGL"
-                             OPENGLFILES='$(OPENGLFILES)'
                              AC_DEFINE(HAVE_OPENGL, 1, [Define if OpenGL is present on the system])],
                              [WINE_CHECK_SONAME(GL,glXCreateContext,
 				    [OPENGL_LIBS="-Xlinker -dylib_file -Xlinker /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib -lGL"
-	                            OPENGLFILES='$(OPENGLFILES)'
 	                            AC_DEFINE(HAVE_OPENGL, 1, [Define if OpenGL is present on the system])],
 				    [if test -f /usr/X11R6/lib/libGL.a
 	                            then
-		                        WINE_WARNING([/usr/X11R6/lib/libGL.a is present on your system.
-This probably prevents linking to OpenGL. Try deleting the file and restarting configure.])
+		                        opengl_msg="/usr/X11R6/lib/libGL.a is present on your system.
+This probably prevents linking to OpenGL. Try deleting the file and restarting configure."
 	                            else
-	                                WINE_WARNING([No OpenGL library found on this system.
-Wine will be built without OpenGL or Direct3D support.])
+	                                opengl_msg="No OpenGL library found on this system."
 	                            fi],
 				    $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
 			     $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
-
-	        dnl Check for GLU32 library.
-		AC_CHECK_LIB(GLU,gluLookAt,
-			     [OPENGL_LIBS="$OPENGL_LIBS -lGLU"
-			     GLU32FILES='$(GLU32FILES)']
-			     ,,
-			     $OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
+                 if test "$ac_cv_header_GL_glu_h" = "yes"
+                 then
+                    WINE_CHECK_SONAME(GLU,gluLookAt,,,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS])
+                 fi
+                 WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_soname_GLU" = "x"],
+                                 [libGLU ${notice_platform}development files not found, GLU won't be supported.])
              else
-                 WINE_WARNING([Old Mesa headers detected. Consider upgrading your Mesa libraries (http://www.mesa3d.org/).
-Wine will be built without OpenGL or Direct3D support.])
+                 opengl_msg="Old Mesa headers detected. Consider upgrading your Mesa libraries."
 	     fi
          else
-             WINE_WARNING([OpenGL development headers not found.
-Wine will be built without OpenGL or Direct3D support.])
+             opengl_msg="OpenGL development headers not found."
 	 fi
+         test -n "$opengl_msg" && enable_opengl32=${enable_opengl32:-no}
+         test "x$ac_cv_lib_soname_GLU" = "x" && enable_glu32=${enable_glu32:-no}
+    else
+         enable_opengl32=${enable_opengl32:-no}
+         enable_glu32=${enable_glu32:-no}
     fi
+    WINE_WARNING_WITH(opengl,[test -n "$opengl_msg"],[$opengl_msg
+OpenGL and Direct3D won't be supported.])
 
     dnl **** Check for NAS ****
     AC_SUBST(NASLIBS,"")
@@ -696,76 +880,87 @@ Wine will be built without OpenGL or Direct3D support.])
                        [-lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
 
     CPPFLAGS="$ac_save_CPPFLAGS"
-    XFILES='$(XFILES)'
 else
     XLIB=""
     X_CFLAGS=""
     X_LIBS=""
-    WINE_WARNING([X development files not found. Wine will be built
-without X support, which probably isn't what you want. You will need to install
-development packages of Xlib/Xfree86 at the very least.])
+    enable_winex11_drv=${enable_winex11_drv:-no}
+    enable_opengl32=${enable_opengl32:-no}
+    enable_glu32=${enable_glu32:-no}
 fi
+WINE_ERROR_WITH(x,[test "x$XLIB" = "x"],[X ${notice_platform}development files not found. Wine will be built
+without X support, which probably isn't what you want. You will need to install
+${notice_platform}development packages of Xlib/Xfree86 at the very least.])
 
 dnl **** Check for libxml2 ****
 
 AC_SUBST(XML2LIBS,"")
 AC_SUBST(XML2INCL,"")
-AC_SUBST(XSLTLIBS,"")
 AC_SUBST(XSLTINCL,"")
-ac_save_CPPFLAGS="$CPPFLAGS"
-if test "$PKG_CONFIG" != "false"
+if test "x$with_xml" != "xno"
 then
-    ac_xml_libs="`$PKG_CONFIG --libs libxml-2.0 2>/dev/null`"
-    ac_xml_cflags="`$PKG_CONFIG --cflags libxml-2.0 2>/dev/null`"
-else
-    ac_xml_libs="`xml2-config --libs 2>/dev/null`"
-    ac_xml_cflags="`xml2-config --cflags  2>/dev/null`"
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_xml_libs="`$PKG_CONFIG --libs libxml-2.0 2>/dev/null`"
+        ac_xml_cflags="`$PKG_CONFIG --cflags libxml-2.0 2>/dev/null`"
+    else
+        ac_xml_libs="`xml2-config --libs 2>/dev/null`"
+        ac_xml_cflags="`xml2-config --cflags  2>/dev/null`"
+    fi
+    CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
+    AC_CHECK_HEADERS(libxml/parser.h,
+            [AC_CHECK_LIB(xml2, xmlParseMemory,
+                [AC_DEFINE(HAVE_LIBXML2, 1, [Define if you have the libxml2 library])
+                 XML2LIBS="$ac_xml_libs"
+                 XML2INCL="$ac_xml_cflags"],,$ac_xml_libs)
+             AC_CHECK_LIB(xml2, xmlReadMemory,
+                [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
+             AC_CHECK_LIB(xml2, xmlNewDocPI,
+                [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
+        ])
+    CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-CPPFLAGS="$CPPFLAGS $ac_xml_cflags"
-AC_CHECK_HEADERS(libxml/parser.h,
-        [AC_CHECK_LIB(xml2, xmlParseMemory,
-            [AC_DEFINE(HAVE_LIBXML2, 1, [Define if you have the libxml2 library])
-             XML2LIBS="$ac_xml_libs"
-             XML2INCL="$ac_xml_cflags"],,$ac_xml_libs)
-         AC_CHECK_LIB(xml2, xmlReadMemory,
-            [AC_DEFINE(HAVE_XMLREADMEMORY,1,[Define if libxml2 has the xmlReadMemory function])],,$ac_xml_libs)
-         AC_CHECK_LIB(xml2, xmlNewDocPI,
-            [AC_DEFINE(HAVE_XMLNEWDOCPI,1,[Define if libxml2 has the xmlNewDocPI function])],,$ac_xml_libs)
-    ])
-CPPFLAGS="$ac_save_CPPFLAGS"
-WINE_NOTICE_IF([test "$ac_cv_lib_xml2_xmlParseMemory" != "yes"],[libxml2 development files not found.
-Wine will be built without XML support. (msxml.dll)])
+WINE_WARNING_WITH(xml,[test "$ac_cv_lib_xml2_xmlParseMemory" != "yes"],
+                 [libxml2 ${notice_platform}development files not found, XML won't be supported.])
 
-if test "$PKG_CONFIG" != "false"
+if test "x$with_xslt" != "xno"
 then
-    ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
-    ac_xslt_cflags="`$PKG_CONFIG --cflags libxslt 2>/dev/null`"
-else
-    ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
-    ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
-fi
-CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
-AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],
-        [AC_CHECK_LIB(xslt, xsltCompilePattern,
-            [AC_DEFINE(HAVE_LIBXSLT, 1, [Define if you have the libxslt library])
-             XSLTLIBS="$ac_xslt_libs"
-             XSLTINCL="$ac_xslt_cflags"],,$ac_xslt_libs)
-        ],,
-[#ifdef HAVE_LIBXSLT_PATTERN_H
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_xslt_libs="`$PKG_CONFIG --libs libxslt 2>/dev/null`"
+        ac_xslt_cflags="`$PKG_CONFIG --cflags libxslt 2>/dev/null`"
+    else
+        ac_xslt_libs="`xslt-config --libs 2>/dev/null`"
+        ac_xslt_cflags="`xslt-config --cflags 2>/dev/null`"
+    fi
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $ac_xslt_cflags"
+    AC_CHECK_HEADERS([libxslt/pattern.h libxslt/transform.h],,,
+    [#ifdef HAVE_LIBXSLT_PATTERN_H
 # include <libxslt/pattern.h>
 #endif])
-CPPFLAGS="$ac_save_CPPFLAGS"
-WINE_NOTICE_IF([test "$ac_cv_lib_xslt_xsltCompilePattern" != "yes"],[libxslt development files not found.
-Wine will be built without xslt support. (msxml.dll)])
+    CPPFLAGS="$ac_save_CPPFLAGS"
+    if test "$ac_cv_header_libxslt_transform_h" = "yes"
+    then
+        WINE_CHECK_SONAME(xslt,xsltCompilePattern,
+                         [XSLTINCL="$ac_xslt_cflags"],,[$ac_xslt_libs])
+    fi
+fi
+WINE_WARNING_WITH(xslt,[test "x$ac_cv_lib_soname_xslt" = "x"],
+                 [libxslt ${notice_platform}development files not found, xslt won't be supported.])
 
 dnl **** Check for libhal ****
 AC_SUBST(HALINCL,"")
-if test "$PKG_CONFIG" != "false"
+if test "x$with_hal" != "xno"
 then
     ac_save_CPPFLAGS="$CPPFLAGS"
-    ac_hal_libs="`$PKG_CONFIG --libs hal 2>/dev/null`"
-    ac_hal_cflags="`$PKG_CONFIG --cflags hal 2>/dev/null`"
-    CPPFLAGS="$CPPFLAGS $ac_hal_cflags"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_hal_libs="`$PKG_CONFIG --libs hal 2>/dev/null`"
+        ac_hal_cflags="`$PKG_CONFIG --cflags hal 2>/dev/null`"
+        CPPFLAGS="$CPPFLAGS $ac_hal_cflags"
+    fi
     AC_CHECK_HEADERS([dbus/dbus.h hal/libhal.h])
     if test "$ac_cv_header_dbus_dbus_h" = "yes" -a "$ac_cv_header_hal_libhal_h" = "yes"
     then
@@ -775,8 +970,27 @@ then
     fi
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_hal" = "x"],[libhal development files not found.
-Wine will be built without dynamic device support. (explorer.exe)])
+WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x"],
+                 [libhal ${notice_platform}development files not found, no dynamic device support.])
+
+dnl **** Check for libgnutls ****
+if test "x$with_gnutls" != "xno"
+then
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    if test "$PKG_CONFIG" != "false"
+    then
+        ac_gnutls_libs="`$PKG_CONFIG --libs gnutls 2>/dev/null`"
+        ac_gnutls_cflags="`$PKG_CONFIG --cflags gnutls 2>/dev/null`"
+        CPPFLAGS="$CPPFLAGS $ac_gnutls_cflags"
+    fi
+    AC_CHECK_HEADER(gnutls/gnutls.h,
+        [AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <gnutls/gnutls.h>]], [[typeof(gnutls_mac_get_key_size) *pfunc;]])],
+            [WINE_CHECK_SONAME(gnutls,gnutls_global_init,
+                [AC_SUBST(GNUTLSINCL,"$ac_gnutls_cflags")],,[$ac_gnutls_libs])])])
+    CPPFLAGS="$ac_save_CPPFLAGS"
+fi
+WINE_NOTICE_WITH(gnutls,[test "x$ac_cv_lib_soname_gnutls" = "x"],
+                 [libgnutls ${notice_platform}development files not found, no schannel support.])
 
 dnl **** Check which curses lib to use ***
 CURSESLIBS=""
@@ -791,58 +1005,72 @@ ac_save_LIBS="$LIBS"
 LIBS="$LIBS $CURSESLIBS"
 AC_CHECK_FUNCS(mousemask)
 LIBS="$ac_save_LIBS"
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_curses$ac_cv_lib_soname_ncurses" = "x"],[lib(n)curses development files not found.
-Wine will be built without (n)curses support. (wineconsole.exe)])
+WINE_NOTICE_WITH(curses,[test "x$ac_cv_lib_soname_curses$ac_cv_lib_soname_ncurses" = "x"],
+                 [lib(n)curses ${notice_platform}development files not found, curses won't be supported.])
 
 dnl **** Check for SANE ****
-AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
-if test "$sane_devel" != "no"
+if test "x$with_sane" != "xno"
 then
-    ac_sane_incl="`$sane_devel --cflags`"
     ac_save_CPPFLAGS="$CPPFLAGS"
-    CPPFLAGS="$CPPFLAGS $ac_sane_incl"
+    AC_CHECK_PROG(sane_devel,sane-config,sane-config,no)
+    if test "$sane_devel" != "no"
+    then
+        ac_sane_incl="`$sane_devel --cflags`"
+        ac_sane_libs="`$sane_devel --ldflags`"
+        CPPFLAGS="$CPPFLAGS $ac_sane_incl"
+    fi
     AC_CHECK_HEADER(sane/sane.h,
-        [WINE_CHECK_SONAME(sane,sane_init,[AC_SUBST(SANEINCL,"$ac_sane_incl")])])
+        [WINE_CHECK_SONAME(sane,sane_init,[AC_SUBST(SANEINCL,"$ac_sane_incl")],,[$ac_sane_libs])])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_sane" = "x"],[libsane development files not found.
-Wine will be built without scanner support. (sane.ds/twain_32.dll)])
+WINE_NOTICE_WITH(sane,[test "x$ac_cv_lib_soname_sane" = "x"],
+                 [libsane ${notice_platform}development files not found, scanners won't be supported.])
 
 dnl **** Check for libgphoto2 ****
-AC_CHECK_PROG(gphoto2_devel,gphoto2-config,gphoto2-config,no)
-AC_CHECK_PROG(gphoto2port_devel,gphoto2-port-config,gphoto2-port-config,no)
-if test "$gphoto2_devel" != "no" -a "$gphoto2port_devel" != "no"
+if test "x$with_gphoto" != "xno"
 then
-    ac_gphoto2_incl="`$gphoto2_devel --cflags` `$gphoto2port_devel --cflags`"
-    ac_gphoto2_libs=""
-    for i in `$gphoto2_devel --libs` `$gphoto2port_devel --libs`
-    do
-      case "$i" in
-        -L/usr/lib|-L/usr/lib64) ;;
-        -L*|-l*) ac_gphoto2_libs="$ac_gphoto2_libs $i";;
-      esac
-    done
     ac_save_CPPFLAGS="$CPPFLAGS"
-    CPPFLAGS="$CPPFLAGS $ac_gphoto2_incl"
+    AC_CHECK_PROG(gphoto2_devel,gphoto2-config,gphoto2-config,no)
+    AC_CHECK_PROG(gphoto2port_devel,gphoto2-port-config,gphoto2-port-config,no)
+    if test "$gphoto2_devel" != "no" -a "$gphoto2port_devel" != "no"
+    then
+        ac_gphoto2_incl="`$gphoto2_devel --cflags` `$gphoto2port_devel --cflags`"
+        ac_gphoto2_libs=""
+        for i in `$gphoto2_devel --libs` `$gphoto2port_devel --libs`
+        do
+            case "$i" in
+            -L/usr/lib|-L/usr/lib64) ;;
+            -L*|-l*) ac_gphoto2_libs="$ac_gphoto2_libs $i";;
+            esac
+        done
+        CPPFLAGS="$CPPFLAGS $ac_gphoto2_incl"
+    fi
+    ac_gphoto2_libs=${ac_gphoto2_libs:-"-lgphoto2"}
     AC_CHECK_HEADER(gphoto2-camera.h,
                     [AC_CHECK_LIB(gphoto2,gp_camera_new,
                                   [AC_DEFINE(HAVE_GPHOTO2, 1, [Define if we have libgphoto2 development environment])
                                    AC_SUBST(GPHOTO2LIBS,"$ac_gphoto2_libs")
                                    AC_SUBST(GPHOTO2INCL,"$ac_gphoto2_incl")],,
-                                  [$GPHOTO2LIBS])])
+                                  [$ac_gphoto2_libs])])
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_IF([test "$ac_cv_lib_gphoto2_gp_camera_new" != "yes"],[libgphoto2 development files not found.
-Wine will be built without Digital Camera support. (gphoto2.ds/twain_32.dll)])
+WINE_NOTICE_WITH(gphoto,[test "$ac_cv_lib_gphoto2_gp_camera_new" != "yes"],
+                 [libgphoto2 ${notice_platform}development files not found, digital cameras won't be supported.])
 
 
 dnl **** Check for resolver library ***
 AC_SUBST(RESOLVLIBS,"")
 if test "$ac_cv_header_resolv_h" = "yes"
 then
-    AC_CHECK_LIB(resolv, res_query,
+    ac_save_LIBS="$LIBS"
+    LIBS="$LIBS -lresolv"
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([[#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#include <resolv.h>]],[[res_init();]])],
         [AC_DEFINE(HAVE_RESOLV, 1, [Define if you have the resolver library and header])
          RESOLVLIBS="-lresolv"])
+    LIBS="$ac_save_LIBS"
 fi
 
 dnl **** Check for LittleCMS ***
@@ -853,39 +1081,19 @@ then
         [AC_DEFINE(HAVE_LCMS, 1, [Define if you have the LittleCMS development environment])
          LCMSLIBS="-llcms"])
 fi
-WINE_NOTICE_IF([test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],[liblcms development files not found.
-Wine will be built without Color Management support. (mscms.dll)])
-
-dnl **** Check for OpenLDAP ***
-AC_SUBST(LDAPLIBS,"")
-if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
-then
-    AC_CHECK_LIB(ldap_r, ldap_initialize,
-        [AC_CHECK_LIB(lber, ber_init,
-            [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])
-             LDAPLIBS="-lldap_r -llber"],,
-             [$LIBPTHREAD])],,
-             [$LIBPTHREAD])
-    WINE_CHECK_LIB_FUNCS(\
-	ldap_count_references \
-	ldap_first_reference \
-	ldap_next_reference \
-	ldap_parse_reference \
-	ldap_parse_sort_control \
-	ldap_parse_sortresponse_control \
-	ldap_parse_vlv_control \
-	ldap_parse_vlvresponse_control,
-        [$LDAPLIBS $LIBPTHREAD])
-fi
-WINE_NOTICE_IF([test "x$LDAPLIBS" = "x"],[libldap (OpenLDAP) development files not found.
-Wine will be built without LDAP support. (wldap32.dll)])
+WINE_NOTICE_WITH(cms,[test "$ac_cv_lib_lcms_cmsOpenProfileFromFile" != "yes"],
+                 [liblcms ${notice_platform}development files not found, Color Management won't be supported.])
 
 dnl **** Check for FreeType 2 ****
-AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],false)
-if test "$ft_devel" != "false"
+if test "x$with_freetype" != "xno"
 then
-    ac_freetype_libs=`$ft_devel --libs`
-    ac_freetype_incl=`$ft_devel --cflags`
+    AC_CHECK_PROGS(ft_devel,[freetype-config freetype2-config],no)
+    if test "$ft_devel" != "no"
+    then
+        ac_freetype_incl=`$ft_devel --cflags`
+        ac_freetype_libs=`$ft_devel --libs`
+    fi
+    ac_freetype_libs=${ac_freetype_libs:-"-lfreetype"}
     WINE_CHECK_SONAME(freetype,FT_Init_FreeType,[ft_lib=yes],[ft_lib=no],[$ac_freetype_libs])
     if test "$ft_lib" = "yes"
     then
@@ -902,9 +1110,10 @@ then
                          freetype/ftoutln.h \
                          freetype/ftwinfnt.h \
                          freetype/ftmodapi.h \
+                         freetype/ftlcdfil.h \
                          freetype/internal/sfnt.h,,,
-                         [#if HAVE_FT2BUILD_H
-                          #include <ft2build.h>
+                         [#ifdef HAVE_FT2BUILD_H
+                          # include <ft2build.h>
                           #endif])
 	AC_PREPROC_IFELSE([AC_LANG_SOURCE([[#include <ft2build.h>
                     #include <freetype/fttrigon.h>]])],[AC_DEFINE(HAVE_FREETYPE_FTTRIGON_H, 1,
@@ -925,19 +1134,8 @@ then
 	fi
     fi
 fi
-
-dnl Only build the fonts dir if we have both freetype and fontforge
-if test "$FONTFORGE" = "false"
-then
-    WINE_WARNING([FontForge is missing.
-Fonts will not be built. Dialog text may be invisible or unaligned.])
-elif test "x$FREETYPELIBS" = "x"
-then
-    WINE_WARNING([FreeType development files not found.
-Fonts will not be built. Dialog text may be invisible or unaligned.])
-else
-  AC_SUBST(FONTSSUBDIRS,"fonts")
-fi
+WINE_ERROR_WITH(freetype,[test "x$FREETYPELIBS" = "x"],[FreeType ${notice_platform}development files not found. Fonts will not be built.])
+test "x$FREETYPELIBS" = "x" && enable_fonts=${enable_fonts:-no}
 
 dnl **** Check for parport (currently Linux only) ****
 AC_CACHE_CHECK([for parport header/ppdev.h], ac_cv_c_ppdev,
@@ -948,39 +1146,6 @@ then
     AC_DEFINE(HAVE_PPDEV, 1, [Define if we can use ppdev.h for parallel port access])
 fi
 
-dnl **** Check for va_copy ****
-AC_CACHE_CHECK([for va_copy], ac_cv_c_va_copy,
- AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[va_list ap1, ap2; va_copy(ap1,ap2);]])],
-    [ac_cv_c_va_copy="yes"],[ac_cv_c_va_copy="no"])
- )
-if test "$ac_cv_c_va_copy" = "yes"
-then
-    AC_DEFINE(HAVE_VA_COPY, 1, [Define if we have va_copy])
-fi
-AC_CACHE_CHECK([for __va_copy], ac_cv_c___va_copy,
- AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[va_list ap1, ap2; __va_copy(ap1,ap2);]])],
-    [ac_cv_c___va_copy="yes"],[ac_cv_c___va_copy="no"])
- )
-if test "$ac_cv_c___va_copy" = "yes"
-then
-    AC_DEFINE(HAVE___VA_COPY, 1, [Define if we have __va_copy])
-fi
-
-dnl **** Check for sigsetjmp ****
-AC_CACHE_CHECK([for sigsetjmp], ac_cv_c_sigsetjmp,
- AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <setjmp.h>]], [[sigjmp_buf buf;
-    sigsetjmp( buf, 1 );
-    siglongjmp( buf, 1 );]])],[ac_cv_c_sigsetjmp="yes"],[ac_cv_c_sigsetjmp="no"])
- )
-if test "$ac_cv_c_sigsetjmp" = "yes"
-then
-    AC_DEFINE(HAVE_SIGSETJMP, 1, [Define to 1 if you have the sigsetjmp (and siglongjmp) function])
-fi
-
-dnl **** Check for pthread_rwlock_t ****
-AC_CHECK_TYPES([pthread_rwlock_t, pthread_rwlockattr_t],,,[#define _GNU_SOURCE
-#include <pthread.h>])
-
 dnl **** Check for pthread functions ****
 WINE_CHECK_LIB_FUNCS(\
         pthread_attr_get_np \
@@ -990,23 +1155,29 @@ WINE_CHECK_LIB_FUNCS(\
         [$LIBPTHREAD])
 
 dnl **** Check for EsounD ****
-AC_PATH_PROG(ESDCONFIG, esd-config)
-if test x$ESDCONFIG != x -a x$ESDCONFIG != x'"$ESDCONFIG"';
+if test "x$with_esd" != xno
 then
-    ESD_CFLAGS=""
-    for i in `$ESDCONFIG --cflags`
-    do
-      case "$i" in
-        -I*) ESD_CFLAGS="$ESD_CFLAGS $i";;
-      esac
-    done
-    ESD_LIBS=`$ESDCONFIG --libs`
     save_CFLAGS="$CFLAGS"
-    CFLAGS="$CFLAGS $ESD_CFLAGS"
-    AC_CHECK_LIB(esd,esd_open_sound,
-        [AC_SUBST(ESDLIBS, $ESD_LIBS)
-         AC_SUBST(ESDINCL, $ESD_CFLAGS)
-         AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])])
+    AC_PATH_PROG(ESDCONFIG, esd-config, no)
+    if test "x$ESDCONFIG" != "xno"
+    then
+        ac_esd_incl=""
+        for i in `$ESDCONFIG --cflags`
+        do
+            case "$i" in
+                -I*) ac_esd_incl="$ac_esd_incl $i";;
+            esac
+        done
+        ac_esd_libs=`$ESDCONFIG --libs`
+        CFLAGS="$CFLAGS $ac_esd_incl"
+    fi
+    ac_esd_libs=${ac_esd_libs:-"-lesd"}
+    AC_CHECK_HEADER(esd.h,
+        [AC_CHECK_LIB(esd,esd_open_sound,
+            [AC_SUBST(ESDINCL, "$ac_esd_incl")
+             AC_SUBST(ESDLIBS, "$ac_esd_libs")
+             AC_DEFINE(HAVE_ESD, 1, [Define if you have EsounD sound server])],,
+            [$ac_esd_libs])])
     CFLAGS="$save_CFLAGS"
 fi
 
@@ -1039,28 +1210,37 @@ if test "$ac_cv_header_capi20_h" = "yes" -a "$ac_cv_header_linux_capi_h" = "yes"
 then
     WINE_CHECK_SONAME(capi20,capi20_register)
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_capi20" = "x"],[libcapi20 development files not found.
-Wine will be built without ISDN support. (capi2032.dll)])
+WINE_NOTICE_WITH(capi,[test "x$ac_cv_lib_soname_capi20" = "x"],
+                 [libcapi20 ${notice_platform}development files not found, ISDN won't be supported.])
 
 dnl **** Check for cups ****
-if test "$ac_cv_header_cups_cups_h" = "yes"
+AC_SUBST(CUPSINCL,"")
+if test "x$with_cups" != "xno"
 then
-    WINE_CHECK_SONAME(cups,cupsGetDefault)
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    ac_cups_cflags=`cups-config --cflags 2>/dev/null`
+    ac_cups_libs=`cups-config --ldflags 2>/dev/null`
+    CPPFLAGS="$CPPFLAGS $ac_cups_cflags"
+    AC_CHECK_HEADERS(cups/cups.h,
+            [WINE_CHECK_SONAME(cups,cupsGetDefault,
+                       [CUPSINCL="$ac_cups_cflags"],,
+                       [$ac_cups_libs])])
+    CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_cups" = "x"],[libcups development files not found.
-Wine will be built without CUPS support.])
+WINE_NOTICE_WITH(cups,[test "x$ac_cv_lib_soname_cups" = "x"],
+                 [libcups ${notice_platform}development files not found, CUPS won't be supported.])
 
 dnl **** Check for jack ****
 if test "$ac_cv_header_jack_jack_h" = "yes"
 then
-    WINE_CHECK_SONAME(jack,jack_client_new)
+    WINE_CHECK_SONAME(jack,jack_client_new,,,,[[libjack-*[[0-9.]]*]])
 fi
 
 dnl **** Check for fontconfig ****
 if test "$ac_cv_header_fontconfig_fontconfig_h" = "yes"
 then
     WINE_CHECK_SONAME(fontconfig,FcInit)
-elif test -n "$X_CFLAGS"
+elif test -n "$X_CFLAGS" -a "x$with_fontconfig" != "xno"
 then
     dnl fontconfig is in the X directory on Mac OS X
     ac_save_CPPFLAGS="$CPPFLAGS"
@@ -1074,8 +1254,8 @@ then
         WINE_CHECK_SONAME(fontconfig,FcInit,,,[$X_LIBS])
     fi
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_fontconfig" = "x"],[fontconfig development files not found.
-Wine will be built without fontconfig support.])
+WINE_NOTICE_WITH(fontconfig,[test "x$ac_cv_lib_soname_fontconfig" = "x"],
+                 [fontconfig ${notice_platform}development files not found, fontconfig won't be supported.])
 
 dnl **** Check for SSL ****
 if test "$ac_cv_header_openssl_err_h" = "yes" -a "$ac_cv_header_openssl_ssl_h" = "yes"
@@ -1083,31 +1263,45 @@ then
     WINE_CHECK_SONAME(ssl,SSL_library_init)
     WINE_CHECK_SONAME(crypto,BIO_new_socket)
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_ssl" = "x"],[OpenSSL development files not found.
-Wine will be built without SSL support. (wininet.dll)])
+WINE_WARNING_WITH(openssl,[test "x$ac_cv_lib_soname_ssl" = "x" -o "x$ac_cv_lib_soname_crypto" = "x"],
+                 [OpenSSL ${notice_platform}development files not found, SSL won't be supported.])
 
 dnl **** Check for libjpeg ****
 if test "$ac_cv_header_jpeglib_h" = "yes"
 then
     WINE_CHECK_SONAME(jpeg,jpeg_start_decompress)
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_jpeg" = "x"],[libjpeg development files not found.
-Wine will be built without JPEG support. (oleaut32.dll)])
+WINE_WARNING_WITH(jpeg,[test "x$ac_cv_lib_soname_jpeg" = "x"],
+                 [libjpeg ${notice_platform}development files not found, JPEG won't be supported.])
 
 dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
-    WINE_CHECK_SONAME(png,png_create_read_struct,,,,[[libpng[[0-9]]*]])
+    WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm -lz,[[libpng[[0-9]]*]])
 fi
-WINE_NOTICE_IF([test "x$ac_cv_lib_soname_png" = "x"],[libpng development files not found.
-Wine will be built without PNG support. (oleaut32.dll)])
+WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
+                 [libpng ${notice_platform}development files not found, PNG won't be supported.])
+
+dnl **** Check for libkstat ****
+if test "$ac_cv_header_kstat_h" = "yes"
+then
+    AC_CHECK_LIB(kstat,kstat_open,
+                 [AC_DEFINE(HAVE_LIBKSTAT, 1, [Define to 1 if you have the `kstat' library (-lkstat).])
+                  AC_SUBST(LIBKSTAT,"-lkstat")])
+fi
+
+dnl **** Check for libodbc ****
+WINE_CHECK_SONAME(odbc,SQLConnect,,[AC_DEFINE_UNQUOTED(SONAME_LIBODBC,["libodbc.$LIBEXT"])])
 
 dnl **** Check for any sound system ****
-WINE_WARNING_IF([test "x$ALSALIBS$AUDIOIOLIBS$COREAUDIO$NASLIBS$ESD_LIBS$ac_cv_lib_soname_jack" = "x" -a \
-                 "$ac_cv_header_sys_soundcard_h" != "yes" -a \
-                 "$ac_cv_header_machine_soundcard_h" != "yes" -a \
-                 "$ac_cv_header_soundcard_h" != "yes"],
-[No sound system was found. Windows applications will be silent.])
+if test "x$ALSALIBS$AUDIOIOLIBS$COREAUDIO$NASLIBS$ESDLIBS$ac_cv_lib_soname_jack" = "x" -a \
+        "$ac_cv_header_sys_soundcard_h" != "yes" -a \
+        "$ac_cv_header_machine_soundcard_h" != "yes" -a \
+        "$ac_cv_header_soundcard_h" != "yes" -a \
+        "x$with_alsa$with_audioio$with_coreaudio$with_nas$with_esd$with_jack$with_oss" != xnonononononono
+then
+    WINE_WARNING([No sound system was found. Windows applications will be silent.])
+fi
 
 dnl **** Check for gcc specific options ****
 
@@ -1125,7 +1319,7 @@ then
   for(i=0; i<B; i++) Array[[i]] = i - 3;
   for(i=0; i<4 - 1; i++) L[[i]] = L[[i + 1]];
   L[[i]] = 4;
-  exit( Array[[1]] != -2 || L[[2]] != 3)]])],
+  return (Array[[1]] != -2 || L[[2]] != 3)]])],
     [ac_cv_c_gcc_strength_bug="no"],[ac_cv_c_gcc_strength_bug="yes"],[ac_cv_c_gcc_strength_bug="yes"]) )
   if test "$ac_cv_c_gcc_strength_bug" = "yes"
   then
@@ -1133,13 +1327,11 @@ then
   fi
 
   dnl Check for some compiler flags
-
-  WINE_TRY_CFLAGS([-fshort-wchar],
-                  [AC_DEFINE(CC_FLAG_SHORT_WCHAR, "-fshort-wchar",
-                             [Specifies the compiler flag that forces a short wchar_t])])
+  WINE_TRY_CFLAGS([-fno-builtin],[AC_SUBST(BUILTINFLAG,"-fno-builtin")])
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wwrite-strings])
+  WINE_TRY_CFLAGS([-Wtype-limits])
 
   dnl Check for noisy string.h
   saved_CFLAGS="$CFLAGS"
@@ -1150,17 +1342,6 @@ then
   if test "$ac_cv_c_string_h_warnings" = "no"
   then
     EXTRACFLAGS="$EXTRACFLAGS -Wpointer-arith"
-  fi
-
-  AC_SUBST(BUILTINFLAG,"")
-  saved_CFLAGS="$CFLAGS"
-  CFLAGS="$CFLAGS -Werror"
-  AC_CACHE_CHECK([for builtin wchar inlines], ac_cv_c_builtin_wchar_ctype,
-      AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[]], [[int iswlower(unsigned short);]])],[ac_cv_c_builtin_wchar_ctype=no],[ac_cv_c_builtin_wchar_ctype=yes]))
-  CFLAGS="$saved_CFLAGS"
-  if test "$ac_cv_c_builtin_wchar_ctype" = "yes"
-  then
-    BUILTINFLAG="-fno-builtin"
   fi
 fi
 
@@ -1213,12 +1394,6 @@ case $build_os in
     ;;
   darwin*|macosx*)
     ;;
-  linux*|solaris*)  dnl FIXME: What other platforms support $ORIGIN?
-    if test -z "$LDRPATH_LOCAL"
-    then
-      LDPATH="LD_LIBRARY_PATH=\"\$(TOOLSDIR)/libs/wine:\$\$LD_LIBRARY_PATH\""
-    fi
-    ;;
   *)
     LDPATH="LD_LIBRARY_PATH=\"\$(TOOLSDIR)/libs/wine:\$\$LD_LIBRARY_PATH\""
     ;;
@@ -1228,26 +1403,23 @@ dnl Mingw needs explicit msvcrt for linking libwine and winsock for wininet
 case $host_os in
   mingw32*)
     AC_SUBST(CRTLIBS,"-lmsvcrt")
-    AC_SUBST(SOCKETLIBS,"-lws2_32")
+    AC_SUBST(SOCKETLIBS,"-L\$(TOPOBJDIR)/dlls/ws2_32 -lws2_32")
     ;;
 esac
 
-AC_SUBST(MAIN_BINARY,"wine-pthread")  dnl Default value
 case $host_cpu in
   *i[[3456789]]86*)
     case $host_os in
       linux* | k*bsd*-gnu)
-        AC_SUBST(MAIN_BINARY,"wine-glibc")
-        AC_SUBST(EXTRA_BINARIES,"wine-kthread wine-pthread wine-preloader") ;;
-      freebsd*)
-        AC_SUBST(MAIN_BINARY,"wine-freebsd")
-        AC_SUBST(EXTRA_BINARIES,"wine-pthread") ;;
+        AC_SUBST(EXTRA_BINARIES,"wine-preloader") ;;
     esac
     ;;
 esac
 
 dnl **** Check for functions ****
 
+ac_save_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS $BUILTINFLAG"
 AC_CHECK_FUNCS(\
 	_pclose \
 	_popen \
@@ -1256,10 +1428,11 @@ AC_CHECK_FUNCS(\
 	_strdup \
 	_stricmp \
 	_strnicmp \
+	_strtoi64 \
+	_strtoui64 \
 	_vsnprintf \
 	asctime_r \
 	chsize \
-	clone \
 	dlopen \
 	epoll_create \
 	ffs \
@@ -1278,7 +1451,6 @@ AC_CHECK_FUNCS(\
 	gettid \
 	gettimeofday \
 	getuid \
-	inet_pton \
 	kqueue \
 	lstat \
 	memmove \
@@ -1289,10 +1461,11 @@ AC_CHECK_FUNCS(\
 	prctl \
 	pread \
 	pwrite \
+	readdir \
 	readlink \
-	rfork \
 	sched_yield \
 	select \
+	setproctitle \
 	setrlimit \
 	settimeofday \
 	sigaltstack \
@@ -1306,6 +1479,9 @@ AC_CHECK_FUNCS(\
 	strerror \
 	strncasecmp \
 	strtold \
+	strtoll \
+	strtoull \
+	symlink \
 	tcgetattr \
 	thr_kill2 \
 	timegm \
@@ -1314,6 +1490,7 @@ AC_CHECK_FUNCS(\
 	wait4 \
 	waitpid \
 )
+CFLAGS="$ac_save_CFLAGS"
 
 dnl Check for -ldl
 if test "$ac_cv_func_dlopen" = no
@@ -1346,16 +1523,79 @@ AC_CHECK_FUNCS(\
 	getprotobynumber \
 	getservbyport \
 	inet_network \
+	inet_ntop \
+	inet_pton \
 	sendmsg \
+	socketpair \
 )
+
+dnl **** Check for OpenLDAP ***
+AC_SUBST(LDAPLIBS,"")
+if test "$ac_cv_header_ldap_h" = "yes" -a "$ac_cv_header_lber_h" = "yes"
+then
+    AC_CHECK_TYPE(LDAPSortKey,
+        [AC_CHECK_LIB(ldap_r, ldap_initialize,
+            [AC_CHECK_LIB(lber, ber_init,
+                [AC_DEFINE(HAVE_LDAP, 1, [Define if you have the OpenLDAP development environment])
+                 LDAPLIBS="-lldap_r -llber"],,
+                 [$LIBPTHREAD])],,
+                 [$LIBPTHREAD])],,
+        [#include <ldap.h>])
+    WINE_CHECK_LIB_FUNCS(\
+	ldap_count_references \
+	ldap_first_reference \
+	ldap_next_reference \
+	ldap_parse_reference \
+	ldap_parse_sort_control \
+	ldap_parse_sortresponse_control \
+	ldap_parse_vlv_control \
+	ldap_parse_vlvresponse_control,
+        [$LDAPLIBS $LIBPTHREAD])
+fi
+WINE_NOTICE_WITH(ldap,[test "x$LDAPLIBS" = "x"],
+                 [libldap (OpenLDAP) ${notice_platform}development files not found, LDAP won't be supported.])
+
+AC_CACHE_CHECK([whether mkdir takes only one argument],
+   	wine_cv_one_arg_mkdir,
+	AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <sys/stat.h>]],[[mkdir("foo");]])],
+                          [wine_cv_one_arg_mkdir=yes],[wine_cv_one_arg_mkdir=no]))
+if test "$wine_cv_one_arg_mkdir" = "yes"
+then
+  AC_DEFINE(HAVE_ONE_ARG_MKDIR, 1, [Define if mkdir takes only one argument])
+fi
 
 dnl **** Check for types ****
 
 AC_C_CONST
 AC_C_INLINE
 AC_CHECK_TYPES([mode_t, off_t, pid_t, size_t, ssize_t, long long, fsblkcnt_t, fsfilcnt_t])
-AC_CHECK_TYPES([sigset_t],,,[#include <signal.h>])
+AC_CHECK_TYPES([sigset_t],,,[#include <sys/types.h>
+#include <signal.h>])
 AC_CHECK_TYPES([request_sense],,,[#include <linux/cdrom.h>])
+
+AC_CHECK_TYPES([struct xinpgen],,,
+[#include <sys/types.h>
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_NET_ROUTE_H
+#include <net/route.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IN_PCB_H
+#include <netinet/in_pcb.h>
+#endif])
 
 AC_CHECK_MEMBERS([struct ff_effect.direction],,,
 [#ifdef HAVE_LINUX_INPUT_H
@@ -1471,8 +1711,8 @@ AC_CHECK_MEMBERS([struct option.name],,,
 #include <getopt.h>
 #endif])
 
-dnl Check for stat.st_blocks
-AC_CHECK_MEMBERS([struct stat.st_blocks])
+dnl Check for stat.st_blocks and ns-resolved times
+AC_CHECK_MEMBERS([struct stat.st_blocks,struct stat.st_mtim,struct stat.st_ctim,struct stat.st_atim])
 
 dnl Check for sin6_scope_id
 AC_CHECK_MEMBERS([struct sockaddr_in6.sin6_scope_id],,,
@@ -1495,6 +1735,42 @@ AC_CHECK_MEMBERS([ns_msg._msg_ptr],,,
 # include <arpa/nameser.h>
 #endif])
 
+dnl Check for struct icmpstat.icps_outhist
+AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_ALIAS_H
+#include <alias.h>
+#endif
+#ifdef HAVE_SYS_SOCKET_H
+#include <sys/socket.h>
+#endif
+#ifdef HAVE_SYS_SOCKETVAR_H
+#include <sys/socketvar.h>
+#endif
+#ifdef HAVE_SYS_TIMEOUT_H
+#include <sys/timeout.h>
+#endif
+#ifdef HAVE_NETINET_IN_H
+#include <netinet/in.h>
+#endif
+#ifdef HAVE_NETINET_IN_SYSTM_H
+#include <netinet/in_systm.h>
+#endif
+#ifdef HAVE_NETINET_IP_H
+#include <netinet/ip.h>
+#endif
+#ifdef HAVE_NETINET_IP_VAR_H
+#include <netinet/ip_var.h>
+#endif
+#ifdef HAVE_NETINET_IP_ICMP_H
+#include <netinet/ip_icmp.h>
+#endif
+#ifdef HAVE_NETINET_ICMP_VAR
+#include <netinet/icmp_var.h>
+#endif])
+
 dnl Check for the external timezone variables timezone and daylight
 AC_CACHE_CHECK([for timezone variable], ac_cv_have_timezone,
                AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[timezone = 1]])],[ac_cv_have_timezone="yes"],[ac_cv_have_timezone="no"]))
@@ -1507,6 +1783,22 @@ AC_CACHE_CHECK([for daylight variable], ac_cv_have_daylight,
 if test "$ac_cv_have_daylight" = "yes"
 then
     AC_DEFINE(HAVE_DAYLIGHT, 1, [Define if you have the daylight variable])
+fi
+
+dnl Check for isinf
+AC_CACHE_CHECK([for isinf], ac_cv_have_isinf,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; int i=isinf(f)]])],[ac_cv_have_isinf="yes"],[ac_cv_have_isinf="no"]))
+if test "$ac_cv_have_isinf" = "yes"
+then
+    AC_DEFINE(HAVE_ISINF, 1, [Define to 1 if you have the `isinf' function.])
+fi
+
+dnl Check for isnan
+AC_CACHE_CHECK([for isnan], ac_cv_have_isnan,
+               AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <math.h>]], [[float f = 0.0; int i=isnan(f)]])],[ac_cv_have_isnan="yes"],[ac_cv_have_isnan="no"]))
+if test "$ac_cv_have_isnan" = "yes"
+then
+    AC_DEFINE(HAVE_ISNAN, 1, [Define to 1 if you have the `isnan' function.])
 fi
 
 dnl *** check for the need to define platform-specific symbols
@@ -1525,30 +1817,31 @@ esac
 
 dnl **** Generate output files ****
 
-dnl autoconf versions before 2.59d need backslashes to escape newlines in subst variables
-AC_SUBST(DEPENDENCIES,m4_if(m4_version_compare(m4_defn([m4_PACKAGE_VERSION]), [2.59d]), -1,
-["### Dependencies:\\
-\\
-.INIT: Makefile\\
-.BEGIN: Makefile\\
-Makefile: dummy\\
-	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)\\
-\\
-\$(OBJS): \$(IDL_GEN_HEADERS)\\
-\$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)\\
-\$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)\\
-\$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"],
-["### Dependencies:
+AC_SUBST(DEPENDENCIES,["### Dependencies:
 
 .INIT: Makefile
 .BEGIN: Makefile
+.MAKEFILEDEPS:
 Makefile: dummy
 	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
 
-\$(OBJS): \$(IDL_GEN_HEADERS)
+\$(OBJS) \$(C_SRCS16:.c=.o): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
+\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)
 \$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
-\$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"]))
+\$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"])
+
+AC_SUBST(ALL_MAKERULES,"")
+AC_SUBST(ALL_MAKEFILES,"")
+AC_SUBST(ALL_MAKEFILE_DEPENDS,["# Makefile dependencies"])
+
+AC_SUBST(ALL_TOP_DIRS,"")
+AC_SUBST(ALL_DLL_DIRS,"")
+AC_SUBST(ALL_IMPLIB_DIRS,"")
+AC_SUBST(ALL_TEST_DIRS,"")
+AC_SUBST(ALL_PROGRAM_DIRS,"")
+AC_SUBST(ALL_PROGRAM_INSTALL_DIRS,"")
+AC_SUBST(ALL_PROGRAM_BIN_INSTALL_DIRS,"")
 
 AH_TOP([#define __WINE_CONFIG_H])
 
@@ -1561,393 +1854,525 @@ WINE_CONFIG_EXTRA_DIR(dlls/user32/resources)
 WINE_CONFIG_EXTRA_DIR(dlls/wineps.drv/data)
 WINE_CONFIG_EXTRA_DIR(include/wine)
 
-MAKE_RULES=Make.rules
-AC_SUBST_FILE(MAKE_RULES)
+WINE_CONFIG_MAKERULES([Make.rules],[MAKE_RULES])
+WINE_CONFIG_MAKERULES([dlls/Makedll.rules],[MAKE_DLL_RULES],[Make.rules])
+WINE_CONFIG_MAKERULES([dlls/Makeimplib.rules],[MAKE_IMPLIB_RULES],[Make.rules])
+WINE_CONFIG_MAKERULES([dlls/Maketest.rules],[MAKE_TEST_RULES],[Make.rules])
+WINE_CONFIG_MAKERULES([programs/Makeprog.rules],[MAKE_PROG_RULES],[Make.rules])
 
-MAKE_DLL_RULES=dlls/Makedll.rules
-AC_SUBST_FILE(MAKE_DLL_RULES)
+WINE_CONFIG_MAKEFILE([Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([dlls/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/acledit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/aclui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/activeds/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/actxprxy/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/adsiid/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/advapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/advapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/advpack/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/advpack/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/amstream/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/amstream/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/appwiz.cpl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/atl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/authz/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/avicap32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/avifil32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/avifile.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/bcrypt/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/browseui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/browseui/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/cabinet/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cabinet/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/capi2032/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cards/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cfgmgr32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/clusapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/comcat/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/comcat/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/comctl32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/comctl32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/comdlg32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/comdlg32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/comm.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/compobj.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/compstui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/credui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/credui/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/crtdll/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/crypt32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/crypt32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/cryptdlg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cryptdll/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cryptnet/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cryptnet/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/cryptui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/cryptui/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/ctapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ctl3d.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ctl3d32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ctl3dv2.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/d3d10/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3d10/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3d10core/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3d10core/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3d8/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3d8/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3d9/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3d9/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3dim/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3drm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3drm/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3dx8/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx8/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_24/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_25/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_26/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_27/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_28/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_29/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_30/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_31/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_33/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_34/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_35/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_36/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_36/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_37/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_38/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_39/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_40/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dx9_41/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dxof/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/d3dxof/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dbghelp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dciman32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ddraw/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ddraw/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/ddrawex/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ddrawex/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/devenum/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dinput/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dinput/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dinput8/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dispdib.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/display.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/dmband/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmcompos/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmime/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmloader/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmscript/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmstyle/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmsynth/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmusic/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmusic32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dnsapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dnsapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dplay/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dplayx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dplayx/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dpnaddr/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dpnet/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dpnhpast/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dpnlobby/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dpwsockx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dsound/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dsound/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dssenh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dswave/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dwmapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxdiagn/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxerr8/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxerr9/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxgi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxgi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/dxguid/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/faultrep/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/fusion/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/fusion/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/gdi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/gdi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/gdiplus/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/gdiplus/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/glu32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/gphoto2.ds/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/gpkcsp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/hal/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/hhctrl.ocx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/hid/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/hlink/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/hlink/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/hnetcfg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/httpapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/iccvid/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/icmp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ifsmgr.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/imaadp32.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/imagehlp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/imm.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/imm32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/imm32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/inetcomm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/inetcomm/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/inetmib1/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/inetmib1/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/infosoft/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/infosoft/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/initpki/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/inkobj/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/inseng/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/iphlpapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/iphlpapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/itircl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/itss/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/itss/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/jscript/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/jscript/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/kernel32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/kernel32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/keyboard.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/loadperf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/localspl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/localspl/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/localui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/localui/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/lz32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/lz32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/lzexpand.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/mapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/mciavi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mcicda/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mciqtz32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mciseq/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mciwave/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/midimap/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mlang/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mlang/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/mmdevldr.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/monodebg.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/mountmgr.sys/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mouse.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/mpr/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mprapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msacm.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/msacm32.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msacm32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msacm32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msadp32.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mscat32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mscms/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mscms/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/mscoree/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msctf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msctf/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msdmo/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msftedit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msg711.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mshtml.tlb/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mshtml/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mshtml/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msimg32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msimtf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msisip/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msisys.ocx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msnet32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msrle32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mssign32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mssip32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mstask/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mstask/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msvcirt/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcr71/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcrt/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcrt/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msvcrt20/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcrt40/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcrtd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvcrtd/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msvfw32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msvfw32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/msvidc32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/mswsock/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msxml3/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/msxml3/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/nddeapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/netapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/netapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/newdev/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ntdll/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ntdll/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/ntdsapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ntdsapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/ntoskrnl.exe/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ntprint/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ntprint/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/objsel/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/odbc32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/odbccp32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/odbccp32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/ole2.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole2conv.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole2disp.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole2nls.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole2prox.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole2thk.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/ole32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ole32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/oleacc/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/oleacc/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/oleaut32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/oleaut32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/olecli.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/olecli32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/oledlg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/olepro32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/olesvr.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/olesvr32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/olethk32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/opengl32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/opengl32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/pdh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/pdh/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/pidgen/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/powrprof/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/printui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/propsys/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/psapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/psapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/pstorec/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/qcap/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/qedit/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/qedit/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/qmgr/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/qmgr/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/qmgrprxy/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/quartz/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/quartz/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/query/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/rasapi16.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/rasapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/rasapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/rasdlg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/resutils/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/riched20/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/riched20/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/riched32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/riched32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/rpcrt4/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/rpcrt4/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/rsabase/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/rsaenh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/rsaenh/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/sane.ds/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sccbase/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/schannel/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/schannel/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/secur32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/secur32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/security/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sensapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/serialui/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/serialui/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/setupapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/setupapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/sfc/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sfc_os/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shdoclc/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shdocvw/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shdocvw/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/shell.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/shell32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shell32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/shfolder/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shlwapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/shlwapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/slbcsp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/slc/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/snmpapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/snmpapi/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/softpub/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sound.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/spoolss/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/spoolss/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/stdole2.tlb/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/stdole32.tlb/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sti/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/storage.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/stress.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/strmiids/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/svrapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/sxs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/tapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/traffic/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/twain.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/twain_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/twain_32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/typelib.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/unicows/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/updspapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/url/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/urlmon/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/urlmon/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/user32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/user32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/userenv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/userenv/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/usp10/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/usp10/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/uuid/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/uxtheme/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/uxtheme/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/vdhcp.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/vdmdbg/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/version/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/version/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/vmm.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/vnbt.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/vnetbios.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/vtdapi.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/vwin32.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/w32skrnl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/w32sys.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/win32s16.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/win87em.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/winaspi.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/windebug.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/winealsa.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wineaudioio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winecoreaudio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winecrt0/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wined3d/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winedos/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wineesd.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winejack.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winejoystick.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winemp3.acm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winenas.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wineoss.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wineps.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winequartz.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winex11.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wing32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winhttp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winhttp/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/wininet/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wininet/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/winmm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winmm/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/winnls.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/winnls32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winscard/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winspool.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/winspool.drv/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/wintab.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/wintab32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wintrust/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wintrust/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/wldap32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wldap32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/wmi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wnaspi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wow32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ws2_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ws2_32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/wsock32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wtsapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wuapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xinput1_1/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xinput1_2/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xinput1_3/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xinput1_3/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/xinput9_1_0/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xmllite/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([documentation/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([fonts/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([include/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([libs/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([libs/port/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([libs/wine/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([libs/wpp/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([loader/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([programs/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([programs/cacls/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/clock/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/cmd/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/cmdlgtst/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
+WINE_CONFIG_MAKEFILE([programs/control/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/eject/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/expand/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/explorer/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/hh/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/icinfo/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/iexplore/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/lodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/msiexec/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/net/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/notepad/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/oleview/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/progman/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/reg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/regedit/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/regsvr32/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/rpcss/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/rundll32/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/secedit/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/services/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/spoolsv/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/start/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/svchost/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/taskmgr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/termsv/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/uninstaller/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/unlodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/view/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
+WINE_CONFIG_MAKEFILE([programs/wineboot/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winebrowser/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winecfg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/wineconsole/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winedbg/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winedevice/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winefile/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winemenubuilder/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winemine/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winepath/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winetest/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winevdm/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winhelp.exe16/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([programs/winhlp32/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/winoldap.mod16/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([programs/winver/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/wordpad/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/write/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/xcopy/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([server/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([tools/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
+WINE_CONFIG_MAKEFILE([tools/widl/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([tools/winebuild/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([tools/winedump/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([tools/winegcc/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([tools/wmc/Makefile],[Make.rules])
+WINE_CONFIG_MAKEFILE([tools/wrc/Makefile],[Make.rules])
 
-MAKE_IMPLIB_RULES=dlls/Makeimplib.rules
-AC_SUBST_FILE(MAKE_IMPLIB_RULES)
+dnl Build dependencies for test files compiled into winetest
 
-MAKE_TEST_RULES=dlls/Maketest.rules
-AC_SUBST_FILE(MAKE_TEST_RULES)
+AC_SUBST(ALL_WINETEST_DEPENDS,["# Test binaries"])
+for dir in $ALL_TEST_DIRS
+do
+    if test "$dir" != "\\"
+    then
+        testname=`expr $dir : '\(.*\)/tests'`_test.exe
+        ALL_WINETEST_DEPENDS="$ALL_WINETEST_DEPENDS
+$testname: \$(DLLDIR)/$dir/$testname\$(DLLEXT)
+	cp \$(DLLDIR)/$dir/$testname\$(DLLEXT) \$@ && \$(STRIP) \$@"
+    fi
+done
 
-MAKE_PROG_RULES=programs/Makeprog.rules
-AC_SUBST_FILE(MAKE_PROG_RULES)
-
-AC_CONFIG_FILES([Make.rules])
-AC_CONFIG_FILES([dlls/Makedll.rules])
-AC_CONFIG_FILES([dlls/Makeimplib.rules])
-AC_CONFIG_FILES([dlls/Maketest.rules])
-AC_CONFIG_FILES([programs/Makeprog.rules])
-AC_CONFIG_FILES([Makefile])
-AC_CONFIG_FILES([dlls/Makefile])
-AC_CONFIG_FILES([dlls/acledit/Makefile])
-AC_CONFIG_FILES([dlls/activeds/Makefile])
-AC_CONFIG_FILES([dlls/actxprxy/Makefile])
-AC_CONFIG_FILES([dlls/advapi32/Makefile])
-AC_CONFIG_FILES([dlls/advapi32/tests/Makefile])
-AC_CONFIG_FILES([dlls/advpack/Makefile])
-AC_CONFIG_FILES([dlls/advpack/tests/Makefile])
-AC_CONFIG_FILES([dlls/amstream/Makefile])
-AC_CONFIG_FILES([dlls/atl/Makefile])
-AC_CONFIG_FILES([dlls/avicap32/Makefile])
-AC_CONFIG_FILES([dlls/avifil32/Makefile])
-AC_CONFIG_FILES([dlls/browseui/Makefile])
-AC_CONFIG_FILES([dlls/browseui/tests/Makefile])
-AC_CONFIG_FILES([dlls/cabinet/Makefile])
-AC_CONFIG_FILES([dlls/cabinet/tests/Makefile])
-AC_CONFIG_FILES([dlls/capi2032/Makefile])
-AC_CONFIG_FILES([dlls/cards/Makefile])
-AC_CONFIG_FILES([dlls/cfgmgr32/Makefile])
-AC_CONFIG_FILES([dlls/clusapi/Makefile])
-AC_CONFIG_FILES([dlls/comcat/Makefile])
-AC_CONFIG_FILES([dlls/comcat/tests/Makefile])
-AC_CONFIG_FILES([dlls/comctl32/Makefile])
-AC_CONFIG_FILES([dlls/comctl32/tests/Makefile])
-AC_CONFIG_FILES([dlls/comdlg32/Makefile])
-AC_CONFIG_FILES([dlls/comdlg32/tests/Makefile])
-AC_CONFIG_FILES([dlls/compstui/Makefile])
-AC_CONFIG_FILES([dlls/credui/Makefile])
-AC_CONFIG_FILES([dlls/credui/tests/Makefile])
-AC_CONFIG_FILES([dlls/crtdll/Makefile])
-AC_CONFIG_FILES([dlls/crypt32/Makefile])
-AC_CONFIG_FILES([dlls/crypt32/tests/Makefile])
-AC_CONFIG_FILES([dlls/cryptdll/Makefile])
-AC_CONFIG_FILES([dlls/cryptnet/Makefile])
-AC_CONFIG_FILES([dlls/cryptnet/tests/Makefile])
-AC_CONFIG_FILES([dlls/ctapi32/Makefile])
-AC_CONFIG_FILES([dlls/ctl3d32/Makefile])
-AC_CONFIG_FILES([dlls/d3d10/Makefile])
-AC_CONFIG_FILES([dlls/d3d8/Makefile])
-AC_CONFIG_FILES([dlls/d3d8/tests/Makefile])
-AC_CONFIG_FILES([dlls/d3d9/Makefile])
-AC_CONFIG_FILES([dlls/d3d9/tests/Makefile])
-AC_CONFIG_FILES([dlls/d3dim/Makefile])
-AC_CONFIG_FILES([dlls/d3drm/Makefile])
-AC_CONFIG_FILES([dlls/d3drm/tests/Makefile])
-AC_CONFIG_FILES([dlls/d3dx8/Makefile])
-AC_CONFIG_FILES([dlls/d3dx8/tests/Makefile])
-AC_CONFIG_FILES([dlls/d3dxof/Makefile])
-AC_CONFIG_FILES([dlls/dbghelp/Makefile])
-AC_CONFIG_FILES([dlls/dciman32/Makefile])
-AC_CONFIG_FILES([dlls/ddraw/Makefile])
-AC_CONFIG_FILES([dlls/ddraw/tests/Makefile])
-AC_CONFIG_FILES([dlls/ddrawex/Makefile])
-AC_CONFIG_FILES([dlls/devenum/Makefile])
-AC_CONFIG_FILES([dlls/dinput/Makefile])
-AC_CONFIG_FILES([dlls/dinput/tests/Makefile])
-AC_CONFIG_FILES([dlls/dinput8/Makefile])
-AC_CONFIG_FILES([dlls/dmband/Makefile])
-AC_CONFIG_FILES([dlls/dmcompos/Makefile])
-AC_CONFIG_FILES([dlls/dmime/Makefile])
-AC_CONFIG_FILES([dlls/dmloader/Makefile])
-AC_CONFIG_FILES([dlls/dmscript/Makefile])
-AC_CONFIG_FILES([dlls/dmstyle/Makefile])
-AC_CONFIG_FILES([dlls/dmsynth/Makefile])
-AC_CONFIG_FILES([dlls/dmusic/Makefile])
-AC_CONFIG_FILES([dlls/dmusic32/Makefile])
-AC_CONFIG_FILES([dlls/dnsapi/Makefile])
-AC_CONFIG_FILES([dlls/dnsapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/dplay/Makefile])
-AC_CONFIG_FILES([dlls/dplayx/Makefile])
-AC_CONFIG_FILES([dlls/dplayx/tests/Makefile])
-AC_CONFIG_FILES([dlls/dpnaddr/Makefile])
-AC_CONFIG_FILES([dlls/dpnet/Makefile])
-AC_CONFIG_FILES([dlls/dpnhpast/Makefile])
-AC_CONFIG_FILES([dlls/dpnlobby/Makefile])
-AC_CONFIG_FILES([dlls/dsound/Makefile])
-AC_CONFIG_FILES([dlls/dsound/tests/Makefile])
-AC_CONFIG_FILES([dlls/dswave/Makefile])
-AC_CONFIG_FILES([dlls/dwmapi/Makefile])
-AC_CONFIG_FILES([dlls/dxdiagn/Makefile])
-AC_CONFIG_FILES([dlls/dxerr8/Makefile])
-AC_CONFIG_FILES([dlls/dxerr9/Makefile])
-AC_CONFIG_FILES([dlls/dxguid/Makefile])
-AC_CONFIG_FILES([dlls/faultrep/Makefile])
-AC_CONFIG_FILES([dlls/gdi32/Makefile])
-AC_CONFIG_FILES([dlls/gdi32/tests/Makefile])
-AC_CONFIG_FILES([dlls/gdiplus/Makefile])
-AC_CONFIG_FILES([dlls/gdiplus/tests/Makefile])
-AC_CONFIG_FILES([dlls/glu32/Makefile])
-AC_CONFIG_FILES([dlls/gphoto2.ds/Makefile])
-AC_CONFIG_FILES([dlls/hal/Makefile])
-AC_CONFIG_FILES([dlls/hhctrl.ocx/Makefile])
-AC_CONFIG_FILES([dlls/hid/Makefile])
-AC_CONFIG_FILES([dlls/hlink/Makefile])
-AC_CONFIG_FILES([dlls/hlink/tests/Makefile])
-AC_CONFIG_FILES([dlls/hnetcfg/Makefile])
-AC_CONFIG_FILES([dlls/iccvid/Makefile])
-AC_CONFIG_FILES([dlls/icmp/Makefile])
-AC_CONFIG_FILES([dlls/ifsmgr.vxd/Makefile])
-AC_CONFIG_FILES([dlls/imaadp32.acm/Makefile])
-AC_CONFIG_FILES([dlls/imagehlp/Makefile])
-AC_CONFIG_FILES([dlls/imm32/Makefile])
-AC_CONFIG_FILES([dlls/inetcomm/Makefile])
-AC_CONFIG_FILES([dlls/inetcomm/tests/Makefile])
-AC_CONFIG_FILES([dlls/infosoft/Makefile])
-AC_CONFIG_FILES([dlls/infosoft/tests/Makefile])
-AC_CONFIG_FILES([dlls/inkobj/Makefile])
-AC_CONFIG_FILES([dlls/inseng/Makefile])
-AC_CONFIG_FILES([dlls/iphlpapi/Makefile])
-AC_CONFIG_FILES([dlls/iphlpapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/itss/Makefile])
-AC_CONFIG_FILES([dlls/itss/tests/Makefile])
-AC_CONFIG_FILES([dlls/kernel32/Makefile])
-AC_CONFIG_FILES([dlls/kernel32/tests/Makefile])
-AC_CONFIG_FILES([dlls/localspl/Makefile])
-AC_CONFIG_FILES([dlls/localspl/tests/Makefile])
-AC_CONFIG_FILES([dlls/localui/Makefile])
-AC_CONFIG_FILES([dlls/localui/tests/Makefile])
-AC_CONFIG_FILES([dlls/lz32/Makefile])
-AC_CONFIG_FILES([dlls/lz32/tests/Makefile])
-AC_CONFIG_FILES([dlls/mapi32/Makefile])
-AC_CONFIG_FILES([dlls/mapi32/tests/Makefile])
-AC_CONFIG_FILES([dlls/mciavi32/Makefile])
-AC_CONFIG_FILES([dlls/mcicda/Makefile])
-AC_CONFIG_FILES([dlls/mciseq/Makefile])
-AC_CONFIG_FILES([dlls/mciwave/Makefile])
-AC_CONFIG_FILES([dlls/midimap/Makefile])
-AC_CONFIG_FILES([dlls/mlang/Makefile])
-AC_CONFIG_FILES([dlls/mlang/tests/Makefile])
-AC_CONFIG_FILES([dlls/mmdevldr.vxd/Makefile])
-AC_CONFIG_FILES([dlls/monodebg.vxd/Makefile])
-AC_CONFIG_FILES([dlls/mpr/Makefile])
-AC_CONFIG_FILES([dlls/mprapi/Makefile])
-AC_CONFIG_FILES([dlls/msacm32.drv/Makefile])
-AC_CONFIG_FILES([dlls/msacm32/Makefile])
-AC_CONFIG_FILES([dlls/msacm32/tests/Makefile])
-AC_CONFIG_FILES([dlls/msadp32.acm/Makefile])
-AC_CONFIG_FILES([dlls/mscat32/Makefile])
-AC_CONFIG_FILES([dlls/mscms/Makefile])
-AC_CONFIG_FILES([dlls/mscms/tests/Makefile])
-AC_CONFIG_FILES([dlls/mscoree/Makefile])
-AC_CONFIG_FILES([dlls/msdmo/Makefile])
-AC_CONFIG_FILES([dlls/msftedit/Makefile])
-AC_CONFIG_FILES([dlls/msg711.acm/Makefile])
-AC_CONFIG_FILES([dlls/mshtml.tlb/Makefile])
-AC_CONFIG_FILES([dlls/mshtml/Makefile])
-AC_CONFIG_FILES([dlls/mshtml/tests/Makefile])
-AC_CONFIG_FILES([dlls/msi/Makefile])
-AC_CONFIG_FILES([dlls/msi/tests/Makefile])
-AC_CONFIG_FILES([dlls/msimg32/Makefile])
-AC_CONFIG_FILES([dlls/msimtf/Makefile])
-AC_CONFIG_FILES([dlls/msisys.ocx/Makefile])
-AC_CONFIG_FILES([dlls/msnet32/Makefile])
-AC_CONFIG_FILES([dlls/msrle32/Makefile])
-AC_CONFIG_FILES([dlls/msvcirt/Makefile])
-AC_CONFIG_FILES([dlls/msvcrt/Makefile])
-AC_CONFIG_FILES([dlls/msvcrt/tests/Makefile])
-AC_CONFIG_FILES([dlls/msvcrt20/Makefile])
-AC_CONFIG_FILES([dlls/msvcrt40/Makefile])
-AC_CONFIG_FILES([dlls/msvcrtd/Makefile])
-AC_CONFIG_FILES([dlls/msvcrtd/tests/Makefile])
-AC_CONFIG_FILES([dlls/msvfw32/Makefile])
-AC_CONFIG_FILES([dlls/msvidc32/Makefile])
-AC_CONFIG_FILES([dlls/mswsock/Makefile])
-AC_CONFIG_FILES([dlls/msxml3/Makefile])
-AC_CONFIG_FILES([dlls/msxml3/tests/Makefile])
-AC_CONFIG_FILES([dlls/nddeapi/Makefile])
-AC_CONFIG_FILES([dlls/netapi32/Makefile])
-AC_CONFIG_FILES([dlls/netapi32/tests/Makefile])
-AC_CONFIG_FILES([dlls/newdev/Makefile])
-AC_CONFIG_FILES([dlls/ntdll/Makefile])
-AC_CONFIG_FILES([dlls/ntdll/tests/Makefile])
-AC_CONFIG_FILES([dlls/ntdsapi/Makefile])
-AC_CONFIG_FILES([dlls/ntoskrnl.exe/Makefile])
-AC_CONFIG_FILES([dlls/ntprint/Makefile])
-AC_CONFIG_FILES([dlls/ntprint/tests/Makefile])
-AC_CONFIG_FILES([dlls/objsel/Makefile])
-AC_CONFIG_FILES([dlls/odbc32/Makefile])
-AC_CONFIG_FILES([dlls/odbccp32/Makefile])
-AC_CONFIG_FILES([dlls/odbccp32/tests/Makefile])
-AC_CONFIG_FILES([dlls/ole32/Makefile])
-AC_CONFIG_FILES([dlls/ole32/tests/Makefile])
-AC_CONFIG_FILES([dlls/oleacc/Makefile])
-AC_CONFIG_FILES([dlls/oleaut32/Makefile])
-AC_CONFIG_FILES([dlls/oleaut32/tests/Makefile])
-AC_CONFIG_FILES([dlls/olecli32/Makefile])
-AC_CONFIG_FILES([dlls/oledlg/Makefile])
-AC_CONFIG_FILES([dlls/olepro32/Makefile])
-AC_CONFIG_FILES([dlls/olesvr32/Makefile])
-AC_CONFIG_FILES([dlls/olethk32/Makefile])
-AC_CONFIG_FILES([dlls/opengl32/Makefile])
-AC_CONFIG_FILES([dlls/opengl32/tests/Makefile])
-AC_CONFIG_FILES([dlls/pdh/Makefile])
-AC_CONFIG_FILES([dlls/pdh/tests/Makefile])
-AC_CONFIG_FILES([dlls/powrprof/Makefile])
-AC_CONFIG_FILES([dlls/printui/Makefile])
-AC_CONFIG_FILES([dlls/psapi/Makefile])
-AC_CONFIG_FILES([dlls/psapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/pstorec/Makefile])
-AC_CONFIG_FILES([dlls/qcap/Makefile])
-AC_CONFIG_FILES([dlls/qmgr/Makefile])
-AC_CONFIG_FILES([dlls/qmgrprxy/Makefile])
-AC_CONFIG_FILES([dlls/quartz/Makefile])
-AC_CONFIG_FILES([dlls/quartz/tests/Makefile])
-AC_CONFIG_FILES([dlls/query/Makefile])
-AC_CONFIG_FILES([dlls/rasapi32/Makefile])
-AC_CONFIG_FILES([dlls/resutils/Makefile])
-AC_CONFIG_FILES([dlls/riched20/Makefile])
-AC_CONFIG_FILES([dlls/riched20/tests/Makefile])
-AC_CONFIG_FILES([dlls/riched32/Makefile])
-AC_CONFIG_FILES([dlls/riched32/tests/Makefile])
-AC_CONFIG_FILES([dlls/rpcrt4/Makefile])
-AC_CONFIG_FILES([dlls/rpcrt4/tests/Makefile])
-AC_CONFIG_FILES([dlls/rsabase/Makefile])
-AC_CONFIG_FILES([dlls/rsabase/tests/Makefile])
-AC_CONFIG_FILES([dlls/rsaenh/Makefile])
-AC_CONFIG_FILES([dlls/rsaenh/tests/Makefile])
-AC_CONFIG_FILES([dlls/sane.ds/Makefile])
-AC_CONFIG_FILES([dlls/schannel/Makefile])
-AC_CONFIG_FILES([dlls/schannel/tests/Makefile])
-AC_CONFIG_FILES([dlls/secur32/Makefile])
-AC_CONFIG_FILES([dlls/secur32/tests/Makefile])
-AC_CONFIG_FILES([dlls/security/Makefile])
-AC_CONFIG_FILES([dlls/sensapi/Makefile])
-AC_CONFIG_FILES([dlls/serialui/Makefile])
-AC_CONFIG_FILES([dlls/serialui/tests/Makefile])
-AC_CONFIG_FILES([dlls/setupapi/Makefile])
-AC_CONFIG_FILES([dlls/setupapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/sfc/Makefile])
-AC_CONFIG_FILES([dlls/sfc_os/Makefile])
-AC_CONFIG_FILES([dlls/shdoclc/Makefile])
-AC_CONFIG_FILES([dlls/shdocvw/Makefile])
-AC_CONFIG_FILES([dlls/shdocvw/tests/Makefile])
-AC_CONFIG_FILES([dlls/shell32/Makefile])
-AC_CONFIG_FILES([dlls/shell32/tests/Makefile])
-AC_CONFIG_FILES([dlls/shfolder/Makefile])
-AC_CONFIG_FILES([dlls/shlwapi/Makefile])
-AC_CONFIG_FILES([dlls/shlwapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/snmpapi/Makefile])
-AC_CONFIG_FILES([dlls/snmpapi/tests/Makefile])
-AC_CONFIG_FILES([dlls/spoolss/Makefile])
-AC_CONFIG_FILES([dlls/spoolss/tests/Makefile])
-AC_CONFIG_FILES([dlls/stdole2.tlb/Makefile])
-AC_CONFIG_FILES([dlls/stdole32.tlb/Makefile])
-AC_CONFIG_FILES([dlls/sti/Makefile])
-AC_CONFIG_FILES([dlls/strmiids/Makefile])
-AC_CONFIG_FILES([dlls/svrapi/Makefile])
-AC_CONFIG_FILES([dlls/sxs/Makefile])
-AC_CONFIG_FILES([dlls/tapi32/Makefile])
-AC_CONFIG_FILES([dlls/twain_32/Makefile])
-AC_CONFIG_FILES([dlls/unicows/Makefile])
-AC_CONFIG_FILES([dlls/url/Makefile])
-AC_CONFIG_FILES([dlls/urlmon/Makefile])
-AC_CONFIG_FILES([dlls/urlmon/tests/Makefile])
-AC_CONFIG_FILES([dlls/user32/Makefile])
-AC_CONFIG_FILES([dlls/user32/tests/Makefile])
-AC_CONFIG_FILES([dlls/userenv/Makefile])
-AC_CONFIG_FILES([dlls/usp10/Makefile])
-AC_CONFIG_FILES([dlls/usp10/tests/Makefile])
-AC_CONFIG_FILES([dlls/uuid/Makefile])
-AC_CONFIG_FILES([dlls/uxtheme/Makefile])
-AC_CONFIG_FILES([dlls/uxtheme/tests/Makefile])
-AC_CONFIG_FILES([dlls/vdhcp.vxd/Makefile])
-AC_CONFIG_FILES([dlls/vdmdbg/Makefile])
-AC_CONFIG_FILES([dlls/version/Makefile])
-AC_CONFIG_FILES([dlls/version/tests/Makefile])
-AC_CONFIG_FILES([dlls/vmm.vxd/Makefile])
-AC_CONFIG_FILES([dlls/vnbt.vxd/Makefile])
-AC_CONFIG_FILES([dlls/vnetbios.vxd/Makefile])
-AC_CONFIG_FILES([dlls/vtdapi.vxd/Makefile])
-AC_CONFIG_FILES([dlls/vwin32.vxd/Makefile])
-AC_CONFIG_FILES([dlls/w32skrnl/Makefile])
-AC_CONFIG_FILES([dlls/winealsa.drv/Makefile])
-AC_CONFIG_FILES([dlls/wineaudioio.drv/Makefile])
-AC_CONFIG_FILES([dlls/winecoreaudio.drv/Makefile])
-AC_CONFIG_FILES([dlls/winecrt0/Makefile])
-AC_CONFIG_FILES([dlls/wined3d/Makefile])
-AC_CONFIG_FILES([dlls/winedos/Makefile])
-AC_CONFIG_FILES([dlls/wineesd.drv/Makefile])
-AC_CONFIG_FILES([dlls/winejack.drv/Makefile])
-AC_CONFIG_FILES([dlls/winejoystick.drv/Makefile])
-AC_CONFIG_FILES([dlls/winemp3.acm/Makefile])
-AC_CONFIG_FILES([dlls/winenas.drv/Makefile])
-AC_CONFIG_FILES([dlls/wineoss.drv/Makefile])
-AC_CONFIG_FILES([dlls/wineps.drv/Makefile])
-AC_CONFIG_FILES([dlls/winequartz.drv/Makefile])
-AC_CONFIG_FILES([dlls/winex11.drv/Makefile])
-AC_CONFIG_FILES([dlls/wing32/Makefile])
-AC_CONFIG_FILES([dlls/winhttp/Makefile])
-AC_CONFIG_FILES([dlls/wininet/Makefile])
-AC_CONFIG_FILES([dlls/wininet/tests/Makefile])
-AC_CONFIG_FILES([dlls/winmm/Makefile])
-AC_CONFIG_FILES([dlls/winmm/tests/Makefile])
-AC_CONFIG_FILES([dlls/winnls32/Makefile])
-AC_CONFIG_FILES([dlls/winscard/Makefile])
-AC_CONFIG_FILES([dlls/winspool.drv/Makefile])
-AC_CONFIG_FILES([dlls/winspool.drv/tests/Makefile])
-AC_CONFIG_FILES([dlls/wintab32/Makefile])
-AC_CONFIG_FILES([dlls/wintrust/Makefile])
-AC_CONFIG_FILES([dlls/wintrust/tests/Makefile])
-AC_CONFIG_FILES([dlls/wldap32/Makefile])
-AC_CONFIG_FILES([dlls/wnaspi32/Makefile])
-AC_CONFIG_FILES([dlls/wow32/Makefile])
-AC_CONFIG_FILES([dlls/ws2_32/Makefile])
-AC_CONFIG_FILES([dlls/ws2_32/tests/Makefile])
-AC_CONFIG_FILES([dlls/wsock32/Makefile])
-AC_CONFIG_FILES([dlls/wtsapi32/Makefile])
-AC_CONFIG_FILES([documentation/Makefile])
-AC_CONFIG_FILES([fonts/Makefile])
-AC_CONFIG_FILES([include/Makefile])
-AC_CONFIG_FILES([libs/Makefile])
-AC_CONFIG_FILES([libs/port/Makefile])
-AC_CONFIG_FILES([libs/wine/Makefile])
-AC_CONFIG_FILES([libs/wpp/Makefile])
-AC_CONFIG_FILES([loader/Makefile])
-AC_CONFIG_FILES([programs/Makefile])
-AC_CONFIG_FILES([programs/clock/Makefile])
-AC_CONFIG_FILES([programs/cmd/Makefile])
-AC_CONFIG_FILES([programs/cmdlgtst/Makefile])
-AC_CONFIG_FILES([programs/control/Makefile])
-AC_CONFIG_FILES([programs/eject/Makefile])
-AC_CONFIG_FILES([programs/expand/Makefile])
-AC_CONFIG_FILES([programs/explorer/Makefile])
-AC_CONFIG_FILES([programs/hh/Makefile])
-AC_CONFIG_FILES([programs/icinfo/Makefile])
-AC_CONFIG_FILES([programs/iexplore/Makefile])
-AC_CONFIG_FILES([programs/msiexec/Makefile])
-AC_CONFIG_FILES([programs/net/Makefile])
-AC_CONFIG_FILES([programs/notepad/Makefile])
-AC_CONFIG_FILES([programs/oleview/Makefile])
-AC_CONFIG_FILES([programs/progman/Makefile])
-AC_CONFIG_FILES([programs/regedit/Makefile])
-AC_CONFIG_FILES([programs/regsvr32/Makefile])
-AC_CONFIG_FILES([programs/rpcss/Makefile])
-AC_CONFIG_FILES([programs/rundll32/Makefile])
-AC_CONFIG_FILES([programs/spoolsv/Makefile])
-AC_CONFIG_FILES([programs/start/Makefile])
-AC_CONFIG_FILES([programs/svchost/Makefile])
-AC_CONFIG_FILES([programs/taskmgr/Makefile])
-AC_CONFIG_FILES([programs/uninstaller/Makefile])
-AC_CONFIG_FILES([programs/view/Makefile])
-AC_CONFIG_FILES([programs/wineboot/Makefile])
-AC_CONFIG_FILES([programs/winebrowser/Makefile])
-AC_CONFIG_FILES([programs/winecfg/Makefile])
-AC_CONFIG_FILES([programs/wineconsole/Makefile])
-AC_CONFIG_FILES([programs/winedbg/Makefile])
-AC_CONFIG_FILES([programs/winedevice/Makefile])
-AC_CONFIG_FILES([programs/winefile/Makefile])
-AC_CONFIG_FILES([programs/winemenubuilder/Makefile])
-AC_CONFIG_FILES([programs/winemine/Makefile])
-AC_CONFIG_FILES([programs/winepath/Makefile])
-AC_CONFIG_FILES([programs/winetest/Makefile])
-AC_CONFIG_FILES([programs/winevdm/Makefile])
-AC_CONFIG_FILES([programs/winhelp/Makefile])
-AC_CONFIG_FILES([programs/winver/Makefile])
-AC_CONFIG_FILES([programs/wordpad/Makefile])
-AC_CONFIG_FILES([programs/write/Makefile])
-AC_CONFIG_FILES([programs/xcopy/Makefile])
-AC_CONFIG_FILES([server/Makefile])
-AC_CONFIG_FILES([tools/Makefile])
-AC_CONFIG_FILES([tools/widl/Makefile])
-AC_CONFIG_FILES([tools/winebuild/Makefile])
-AC_CONFIG_FILES([tools/winedump/Makefile])
-AC_CONFIG_FILES([tools/winegcc/Makefile])
-AC_CONFIG_FILES([tools/wmc/Makefile])
-AC_CONFIG_FILES([tools/wrc/Makefile])
+dnl Don't install in bin dir for Windows build
+test -n "$DLLEXT" || ALL_PROGRAM_BIN_INSTALL_DIRS=""
 
 AC_OUTPUT
 
@@ -1958,9 +2383,9 @@ fi
 
 WINE_PRINT_MESSAGES
 
-echo
-echo "Configure finished.  Do '${ac_make} depend && ${ac_make}' to compile Wine."
-echo
+echo "
+$as_me: Finished.  Do '${ac_make} depend && ${ac_make}' to compile Wine.
+" >&AS_MESSAGE_FD
 
 dnl Local Variables:
 dnl comment-start: "dnl "

@@ -23,7 +23,9 @@
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+#ifndef _WIN64
 #include <pshpack1.h>
+#endif
 
 DECLARE_HANDLE(HDROP);
 
@@ -95,7 +97,7 @@ typedef struct _AppBarData
 	LPARAM	lParam;
 } APPBARDATA, *PAPPBARDATA;
 
-UINT    WINAPI SHAppBarMessage(DWORD,PAPPBARDATA);
+UINT_PTR WINAPI SHAppBarMessage(DWORD,PAPPBARDATA);
 
 /******************************************
  * SHGetFileInfo
@@ -510,6 +512,8 @@ DWORD       WINAPI DoEnvironmentSubstW(LPWSTR, UINT);
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
+#ifndef _WIN64
 #include <poppack.h>
+#endif
 
 #endif /* __WINE_SHELLAPI_H */

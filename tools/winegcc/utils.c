@@ -66,6 +66,13 @@ void *xrealloc(void* p, size_t size)
     return p2;
 }
 
+char *xstrdup( const char *str )
+{
+    char *res = strdup( str );
+    if (!res) error("Virtual memory exhausted.\n");
+    return res;
+}
+
 int strendswith(const char* str, const char* end)
 {
     int l = strlen(str);
@@ -307,13 +314,10 @@ void spawn(const strarray* prefix, const strarray* args, int ignore_errors)
             if (!(p = strrchr(argv[0], '/'))) p = argv[0];
             free( prog );
             prog = strmake("%s/%s", prefix->base[i], p);
-            if (stat(prog, &st) == 0)
+            if (stat(prog, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0111))
             {
-                if ((st.st_mode & S_IFREG) && (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)))
-                {
-                    argv[0] = prog;
-                    break;
-                }
+                argv[0] = prog;
+                break;
             }
         }
     }

@@ -4,13 +4,12 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = gdi32.dll
-IMPORTLIB = libgdi32.$(IMPLIBEXT)
+IMPORTLIB = gdi32
 IMPORTS   = advapi32 kernel32 ntdll
 EXTRAINCL = @FREETYPEINCL@ @FONTCONFIGINCL@
 EXTRALIBS = @CARBONLIB@
 
 SPEC_SRCS16 = \
-	dispdib.spec \
 	gdi.exe.spec \
 	wing.spec
 
@@ -50,11 +49,11 @@ C_SRCS = \
 	path.c \
 	pen.c \
 	printdrv.c \
+	printdrv16.c \
 	region.c
 
 C_SRCS16 = \
 	bidi16.c \
-	dispdib.c \
 	env.c \
 	gdi16.c \
 	metafile16.c \

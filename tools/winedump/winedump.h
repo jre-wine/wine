@@ -25,11 +25,6 @@
  *  All the cool functionality (prototyping, call tracing, forwarding)
  *  relies on Patrik Stridvall's 'function_grep.pl' script to work.
  *
- *  http://msdn.microsoft.com/library/periodic/period96/msj/S330.htm
- *  This article provides both a description and freely downloadable
- *  implementation, in source code form, of how to extract symbols
- *  from Win32 PE executables/DLLs.
- *
  *  http://www.kegel.com/mangle.html
  *  Gives information on the name mangling scheme used by MS compilers,
  *  used as the starting point for the code here. Contains a few
@@ -260,6 +255,8 @@ void            pdb_dump(void);
 int             codeview_dump_symbols(const void* root, unsigned long size);
 int             codeview_dump_types_from_offsets(const void* table, const DWORD* offsets, unsigned num_types);
 int             codeview_dump_types_from_block(const void* table, unsigned long len);
+void            codeview_dump_linetab(const char* linetab, DWORD size, BOOL pascal_str, const char* pfx);
+void            codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimage, DWORD strsize, const char* pfx);
 
 void            dump_stabs(const void* pv_stabs, unsigned szstabs, const char* stabstr, unsigned szstr);
 void		dump_codeview(unsigned long ptr, unsigned long len);

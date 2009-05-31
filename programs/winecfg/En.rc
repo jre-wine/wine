@@ -22,7 +22,7 @@
  *
  */
 
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
 
 IDR_WINECFG MENU DISCARDABLE
 BEGIN
@@ -39,8 +39,13 @@ BEGIN
     LTEXT           PACKAGE_STRING,IDC_STATIC,119,17,120,8
     CONTROL         IDB_WINE,IDC_STATIC,"Static",SS_BITMAP ,15,17,157,111
     LTEXT           "http://www.winehq.org/",IDC_STATIC,119,31,106,8
-    LTEXT           "This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
+    LTEXT           "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Windows Registration Information ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Owner:", IDC_STATIC, 22, 126, 40, 20
+    LTEXT           "Organization:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -62,33 +67,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Window Settings ",IDC_STATIC,8,4,244,184
+    GROUPBOX    " Window Settings ",IDC_STATIC,8,4,244,84
+    CONTROL     "Allow DirectX apps to stop the &mouse leaving their window",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    CONTROL     "Allow the window manager to &decorate the windows",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,32,230,8
+    CONTROL     "Allow the &window manager to control the windows",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,44,230,8
+    CONTROL     "&Emulate a virtual desktop",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,56,230,8
+    LTEXT       "Desktop &size:",IDC_DESKTOP_SIZE,15,70,44,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,109,70,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,64,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,117,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL         "Allow DirectX apps to stop the &mouse leaving their window",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,19,230,8
-    
-    CONTROL	        "Allow the &window manager to control the windows",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,40,230,8
-    LTEXT           "If windows are managed by your window manager, then they will have the standard borders, they will respect your virtual desktop and appear in your window list. \n\nIf the windows are unmanaged, they will be disconnected from your window manager. This will mean the windows do not integrate as closely with your desktop, but the emulation will be more accurate so it can help some programs to work better.",
-		           IDC_STATIC,19,51,225,80
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,95,244,49
+    LTEXT       "&Vertex Shader Support: ",IDC_STATIC,15,110,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,108,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Allow &Pixel Shader (if supported by hardware)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,126,230,10
 
-    CONTROL         "Emulate a virtual &desktop",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,128,230,10
-    LTEXT           "You can either choose to have all Windows applications confined to a single window acting as a virtual desktop, or to have them behave like your other applications.",
-                    IDC_STATIC,19,138,225,28
-    LTEXT           "Desktop &size:",IDC_DESKTOP_SIZE,15,168,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,109,168,8,8,WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,190,244,48
-
-    LTEXT           "&Vertex Shader Support: ",IDC_STATIC,15,203,80,32
-    COMBOBOX        IDC_D3D_VSHADER_MODE,100,201,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Allow &Pixel Shader (if supported by hardware)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,219,230,10
-    GROUPBOX        " Screen &Resolution ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Screen &Resolution ",IDC_STATIC,8,151,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,161,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,161,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "dpi",IDC_STATIC,235,163,10,8
+    LTEXT       "This is a sample text using 10 point Tahoma",IDC_RES_FONT_PREVIEW,15,181,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -103,7 +102,7 @@ BEGIN
     PUSHBUTTON      "&Add",IDC_DLLS_ADDDLL, 164,68,82,13,BS_DEFPUSHBUTTON 
     LTEXT           "Existing &overrides:",IDC_STATIC,16,86,100,8
     LISTBOX         IDC_DLLS_LIST,16,96,140,140,WS_BORDER | WS_TABSTOP | WS_VSCROLL
-    PUSHBUTTON      "&Edit",IDC_DLLS_EDITDLL,164,96,82,14
+    PUSHBUTTON      "&Edit...",IDC_DLLS_EDITDLL,164,96,82,14
     PUSHBUTTON      "&Remove",IDC_DLLS_REMOVEDLL,164,114,82,14 
 END
 
@@ -127,6 +126,7 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Drive &mappings ",IDC_STATIC,8,4,244,240
+    LTEXT           "Failed to connect to the mount manager, the drive configuration cannot be edited.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Add...",IDC_BUTTON_ADD,15,98,37,14
@@ -134,7 +134,7 @@ BEGIN
     PUSHBUTTON      "Auto&detect...",IDC_BUTTON_AUTODETECT,197,98,49,14
 
     /* editing drive details */
-    LTEXT           "&Path:",IDC_STATIC,15,123,20,9    
+    LTEXT           "&Path:",IDC_STATIC_PATH,15,123,20,9
     EDITTEXT        IDC_EDIT_PATH,41,120,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Browse...",IDC_BUTTON_BROWSE_PATH,206,120,40,13
     
@@ -197,18 +197,17 @@ BEGIN
     LTEXT           "Si&ze:",IDC_SYSPARAM_SIZE_TEXT,166,64,30,8,WS_DISABLED
     EDITTEXT        IDC_SYSPARAM_SIZE,166,74,23,13,ES_AUTOHSCROLL | WS_TABSTOP | WS_DISABLED
     CONTROL         "",IDC_SYSPARAM_SIZE_UD,UPDOWN_CLASS,UDS_SETBUDDYINT | WS_DISABLED,187,74,15,13
-    PUSHBUTTON      "&Font",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
-    GROUPBOX        " S&hell Folder ",IDC_STATIC,8,114,244,100
+    PUSHBUTTON      "&Font...",IDC_SYSPARAM_FONT,208,74,37,13,WS_DISABLED
+    GROUPBOX        " Fol&ders ",IDC_STATIC,8,114,244,100
     CONTROL         "Listview",IDC_LIST_SFPATHS,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
     CONTROL         "&Link to:",IDC_LINK_SFPATH,"Button",BS_AUTOCHECKBOX|WS_TABSTOP|WS_DISABLED,15,195,50,13
-    EDITTEXT         IDC_EDIT_SFPATH,65,195,145,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
-    PUSHBUTTON      "B&rowse",IDC_BROWSE_SFPATH,215,195,30,13,WS_DISABLED
+    EDITTEXT         IDC_EDIT_SFPATH,65,195,125,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
+    PUSHBUTTON      "B&rowse...",IDC_BROWSE_SFPATH,195,195,50,13,WS_DISABLED
 END
 
 STRINGTABLE DISCARDABLE
 BEGIN
-    IDS_WINE_VERSION        "CVS"
     IDS_TAB_APPLICATIONS    "Applications"
     IDS_TAB_DLLS            "Libraries"
     IDS_TAB_DRIVES          "Drives"
@@ -225,7 +224,7 @@ BEGIN
     IDS_THEMEFILE           "Theme files"
     IDS_THEMEFILE_SELECT    "Select a theme file"
     IDS_AUDIO_MISSING       "There is no audio driver currently specified in the registry.\n\nA recommended driver has been selected for you.\nYou can use this driver or select another driver if available.\n\nYou must click Apply for the selection to take effect."
-    IDS_SHELL_FOLDER        "Shell Folder"
+    IDS_SHELL_FOLDER        "Folder"
     IDS_LINKS_TO            "Links to"
 END
 
@@ -309,4 +308,19 @@ BEGIN
     IDC_SYSPARAMS_INACTIVE_TITLE    "Inactive Title Bar"
     IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Inactive Title Text"
     IDC_SYSPARAMS_MSGBOX_TEXT       "Message Box Text"
+    IDC_SYSPARAMS_APPWORKSPACE      "Application Workspace"
+    IDC_SYSPARAMS_WINDOW_FRAME      "Window Frame"
+    IDC_SYSPARAMS_ACTIVE_BORDER     "Active Border"
+    IDC_SYSPARAMS_INACTIVE_BORDER   "Inactive Border"
+    IDC_SYSPARAMS_BUTTON_SHADOW     "Controls Shadow"
+    IDC_SYSPARAMS_GRAY_TEXT         "Gray Text"
+    IDC_SYSPARAMS_BUTTON_HILIGHT    "Controls Highlight"
+    IDC_SYSPARAMS_BUTTON_DARK_SHADOW "Controls Dark Shadow"
+    IDC_SYSPARAMS_BUTTON_LIGHT      "Controls Light"
+    IDC_SYSPARAMS_BUTTON_ALTERNATE  "Controls Alternate Background"
+    IDC_SYSPARAMS_HOT_TRACKING      "Hot Tracked Item"
+    IDC_SYSPARAMS_ACTIVE_TITLE_GRADIENT "Active Title Bar Gradient"
+    IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT "Inactive Title Bar Gradient"
+    IDC_SYSPARAMS_MENU_HILIGHT      "Menu Highlight"
+    IDC_SYSPARAMS_MENUBAR           "Menu Bar"
 END

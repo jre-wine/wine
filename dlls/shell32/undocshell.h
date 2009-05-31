@@ -55,11 +55,6 @@ void WINAPI ILGlobalFree(LPITEMIDLIST pidl);
 LPITEMIDLIST WINAPI SHSimpleIDListFromPathA (LPCSTR lpszPath);
 LPITEMIDLIST WINAPI SHSimpleIDListFromPathW (LPCWSTR lpszPath);
 
-HRESULT WINAPI SHILCreateFromPathA (
-	LPCSTR path,
-	LPITEMIDLIST * ppidl,
-	DWORD *attributes);
-
 HRESULT WINAPI SHILCreateFromPathW (
 	LPCWSTR path,
 	LPITEMIDLIST * ppidl,
@@ -412,11 +407,7 @@ BOOL WINAPI PathMakeUniqueNameAW(
 	LPCVOID lpszPathName);
 
 
-BOOL WINAPI PathQualifyA(LPCSTR path);
-BOOL WINAPI PathQualifyW(LPCWSTR path);
-#define PathQualify WINELIB_NAME_AW(PathQualify)
 BOOL  WINAPI PathQualifyAW(LPCVOID path);
-
 
 BOOL WINAPI PathResolveAW(LPVOID lpszPath, LPCVOID *alpszPaths, DWORD dwFlags);
 

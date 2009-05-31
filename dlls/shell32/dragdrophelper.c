@@ -54,8 +54,8 @@ typedef struct {
 
 static const IDropTargetHelperVtbl vt_IDropTargetHelper;
 
-#define _IUnknown_(This) (IUnknown*)&(This->lpVtbl)
-#define _IDropTargetHelper_(This) (IDropTargetHelper*)&(This->lpVtbl)
+#define _IUnknown_(This)          ((IUnknown*)&(This)->lpVtbl)
+#define _IDropTargetHelper_(This) (&(This)->lpVtbl)
 
 /**************************************************************************
 *	IDropTargetHelper_Constructor
@@ -71,13 +71,13 @@ HRESULT WINAPI IDropTargetHelper_Constructor (IUnknown * pUnkOuter, REFIID riid,
     if (pUnkOuter)
 	return CLASS_E_NOAGGREGATION;
 
-    dth = (IDropTargetHelperImpl *) LocalAlloc (LMEM_ZEROINIT, sizeof (IDropTargetHelperImpl));
+    dth = LocalAlloc (LMEM_ZEROINIT, sizeof (IDropTargetHelperImpl));
     if (!dth) return E_OUTOFMEMORY;
 
     dth->ref = 0;
     dth->lpVtbl = &vt_IDropTargetHelper;
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (dth), riid, ppv))) {
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (dth), riid, ppv))) {
 	IUnknown_Release (_IUnknown_ (dth));
 	return E_NOINTERFACE;
     }
@@ -128,8 +128,8 @@ static ULONG WINAPI IDropTargetHelper_fnRelease (IDropTargetHelper * iface)
     TRACE ("(%p)->(count=%u)\n", This, refCount + 1);
 
     if (!refCount) {
-        TRACE("-- destroying (%p)\n", This);
-        LocalFree ((HLOCAL) This);
+        TRACE ("-- destroying (%p)\n", This);
+        LocalFree (This);
         return 0;
     }
     return refCount;

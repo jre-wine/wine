@@ -137,7 +137,7 @@ static BOOL UPDOWN_InBounds(const UPDOWN_INFO *infoPtr, int val)
 /***********************************************************************
  *           UPDOWN_OffsetVal
  * Change the current value by delta.
- * It returns TRUE is the value was changed successfuly, or FALSE
+ * It returns TRUE is the value was changed successfully, or FALSE
  * if the value was not changed, as it would go out of bounds.
  */
 static BOOL UPDOWN_OffsetVal(UPDOWN_INFO *infoPtr, int delta)
@@ -174,7 +174,7 @@ static BOOL UPDOWN_HasBuddyBorder(const UPDOWN_INFO *infoPtr)
  * rect     - will hold the rectangle
  * arrow    - FLAG_INCR to get the "increment" rect (up or right)
  *            FLAG_DECR to get the "decrement" rect (down or left)
- *            If both flags are pressent, the envelope is returned.
+ *            If both flags are present, the envelope is returned.
  */
 static void UPDOWN_GetArrowRect (const UPDOWN_INFO* infoPtr, RECT *rect, int arrow)
 {
@@ -470,6 +470,49 @@ static LRESULT UPDOWN_KeyPressed(UPDOWN_INFO *infoPtr, int key)
 }
 
 /***********************************************************************
+ * UPDOWN_SetRange
+ *
+ * Handle UDM_SETRANGE, UDM_SETRANGE32
+ *
+ * FIXME: handle Max == Min properly:
+ *        - arrows should be disabled (without WS_DISABLED set),
+ *          visually they can't be pressed and don't respond;
+ *        - all input messages should still pass in.
+ */
+static LRESULT UPDOWN_SetRange(UPDOWN_INFO *infoPtr, INT Max, INT Min)
+{
+    infoPtr->MaxVal = Max;
+    infoPtr->MinVal = Min;
+
+    TRACE("UpDown Ctrl new range(%d to %d), hwnd=%p\n",
+           infoPtr->MinVal, infoPtr->MaxVal, infoPtr->Self);
+
+    return 0;
+}
+
+/***********************************************************************
+ * UPDOWN_MouseWheel
+ *
+ * Handle mouse wheel scrolling
+ */
+static LRESULT UPDOWN_MouseWheel(UPDOWN_INFO *infoPtr, WPARAM wParam)
+{
+    int iWheelDelta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+
+    if (wParam & (MK_SHIFT | MK_CONTROL))
+        return 0;
+
+    if (iWheelDelta != 0)
+    {
+        UPDOWN_GetBuddyInt(infoPtr);
+        UPDOWN_DoAction(infoPtr, abs(iWheelDelta), iWheelDelta > 0 ? FLAG_INCR : FLAG_DECR);
+    }
+
+    return 1;
+}
+
+
+/***********************************************************************
  * UPDOWN_Buddy_SubclassProc used to handle messages sent to the buddy
  *                           control.
  */
@@ -485,6 +528,12 @@ UPDOWN_Buddy_SubclassProc(HWND  hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
         HWND upDownHwnd = GetPropW(hwnd, BUDDY_UPDOWN_HWND);
 
 	UPDOWN_KeyPressed(UPDOWN_GetInfoPtr(upDownHwnd), (int)wParam);
+	if ((wParam == VK_UP) || (wParam == VK_DOWN)) return 0;
+    }
+    else if (uMsg == WM_MOUSEWHEEL) {
+        HWND upDownHwnd = GetPropW(hwnd, BUDDY_UPDOWN_HWND);
+
+       UPDOWN_MouseWheel(UPDOWN_GetInfoPtr(upDownHwnd), (int)wParam);
     }
 
     return CallWindowProcW( superClassWndProc, hwnd, uMsg, wParam, lParam);
@@ -543,7 +592,7 @@ static HWND UPDOWN_SetBuddy (UPDOWN_INFO* infoPtr, HWND bud)
                good to break the window proc chain. */
             if (!GetPropW(bud, BUDDY_SUPERCLASS_WNDPROC)) {
                 baseWndProc = (WNDPROC)SetWindowLongPtrW(bud, GWLP_WNDPROC, (LPARAM)UPDOWN_Buddy_SubclassProc);
-                SetPropW(bud, BUDDY_SUPERCLASS_WNDPROC, (HANDLE)baseWndProc);
+                SetPropW(bud, BUDDY_SUPERCLASS_WNDPROC, baseWndProc);
             }
         }
 
@@ -627,7 +676,7 @@ static void UPDOWN_DoAction (UPDOWN_INFO *infoPtr, int delta, int action)
     ni.hdr.hwndFrom = infoPtr->Self;
     ni.hdr.idFrom   = GetWindowLongPtrW (infoPtr->Self, GWLP_ID);
     ni.hdr.code = UDN_DELTAPOS;
-    if (!SendMessageW(infoPtr->Notify, WM_NOTIFY, (WPARAM)ni.hdr.idFrom, (LPARAM)&ni)) {
+    if (!SendMessageW(infoPtr->Notify, WM_NOTIFY, ni.hdr.idFrom, (LPARAM)&ni)) {
         /* Parent said: OK to adjust */
 
         /* Now adjust value with (maybe new) delta */
@@ -790,7 +839,6 @@ static void UPDOWN_HandleMouseEvent (UPDOWN_INFO *infoPtr, UINT msg, INT x, INT 
 static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UPDOWN_INFO *infoPtr = UPDOWN_GetInfoPtr (hwnd);
-    int temp;
     static const WCHAR themeClass[] = {'S','p','i','n',0};
     HTHEME theme;
 
@@ -802,7 +850,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
     switch(message)
     {
         case WM_CREATE:
-            infoPtr = (UPDOWN_INFO*)Alloc (sizeof(UPDOWN_INFO));
+            infoPtr = Alloc (sizeof(UPDOWN_INFO));
 	    SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
 	    /* initialize the info struct */
@@ -876,6 +924,8 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 	   /* if initial timer, kill it and start the repeat timer */
   	   if(wParam == TIMER_AUTOREPEAT) {
+		int temp;
+
 		KillTimer(hwnd, TIMER_AUTOREPEAT);
 		/* if no accel info given, used default timer */
 		if(infoPtr->AccelCount==0 || infoPtr->AccelVect==0) {
@@ -890,6 +940,8 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 	    /* now, if the mouse is above us, do the thing...*/
 	    if(infoPtr->Flags & FLAG_MOUSEIN) {
+		int temp;
+
 		temp = infoPtr->AccelIndex == -1 ? 1 : infoPtr->AccelVect[infoPtr->AccelIndex].nInc;
 		UPDOWN_DoAction(infoPtr, temp, infoPtr->Flags & FLAG_ARROW);
 
@@ -929,6 +981,10 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 		UPDOWN_HandleMouseEvent (infoPtr, message, (SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam));
 	    break;
 
+        case WM_MOUSEWHEEL:
+            UPDOWN_MouseWheel(infoPtr, wParam);
+            break;
+
 	case WM_KEYDOWN:
 	    if((infoPtr->dwStyle & UDS_ARROWKEYS) && UPDOWN_IsEnabled(infoPtr))
 		return UPDOWN_KeyPressed(infoPtr, (int)wParam);
@@ -941,13 +997,16 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	case UDM_GETACCEL:
 	    if (wParam==0 && lParam==0) return infoPtr->AccelCount;
 	    if (wParam && lParam) {
-	        temp = min(infoPtr->AccelCount, wParam);
+		int temp = min(infoPtr->AccelCount, wParam);
 	        memcpy((void *)lParam, infoPtr->AccelVect, temp*sizeof(UDACCEL));
 	        return temp;
       	    }
 	    return 0;
 
 	case UDM_SETACCEL:
+	{
+	    unsigned temp;
+
 	    TRACE("UDM_SETACCEL\n");
 
 	    if(infoPtr->AccelVect) {
@@ -965,14 +1024,14 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
                 TRACE("%d: nSec %u nInc %u\n", temp, infoPtr->AccelVect[temp].nSec, infoPtr->AccelVect[temp].nInc);
 
     	    return TRUE;
-
+	}
 	case UDM_GETBASE:
 	    return infoPtr->Base;
 
 	case UDM_SETBASE:
 	    TRACE("UpDown Ctrl new base(%ld), hwnd=%p\n", wParam, hwnd);
 	    if (wParam==10 || wParam==16) {
-		temp = infoPtr->Base;
+		WPARAM temp = infoPtr->Base;
 		infoPtr->Base = wParam;
 		return temp;
 	    }
@@ -985,11 +1044,14 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    return (LRESULT)UPDOWN_SetBuddy (infoPtr, (HWND)wParam);
 
 	case UDM_GETPOS:
-	    temp = UPDOWN_GetBuddyInt (infoPtr);
+	{
+	    int temp = UPDOWN_GetBuddyInt (infoPtr);
 	    return MAKELONG(infoPtr->CurVal, temp ? 0 : 1);
-
+	}
 	case UDM_SETPOS:
-	    temp = (short)LOWORD(lParam);
+	{
+	    int temp = (short)LOWORD(lParam);
+
 	    TRACE("UpDown Ctrl new value(%d), hwnd=%p\n", temp, hwnd);
 	    if(!UPDOWN_InBounds(infoPtr, temp)) {
 		if(temp < infoPtr->MinVal) temp = infoPtr->MinVal;
@@ -999,17 +1061,16 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    infoPtr->CurVal = temp;
 	    UPDOWN_SetBuddyInt (infoPtr);
 	    return wParam;            /* return prev value */
-
+	}
 	case UDM_GETRANGE:
 	    return MAKELONG(infoPtr->MaxVal, infoPtr->MinVal);
 
 	case UDM_SETRANGE:
-                                                     /* we must have:     */
-	    infoPtr->MaxVal = (short)(lParam);       /* UD_MINVAL <= Max <= UD_MAXVAL */
-	    infoPtr->MinVal = (short)HIWORD(lParam); /* UD_MINVAL <= Min <= UD_MAXVAL */
-                                                     /* |Max-Min| <= UD_MAXVAL        */
-	    TRACE("UpDown Ctrl new range(%d to %d), hwnd=%p\n",
-		  infoPtr->MinVal, infoPtr->MaxVal, hwnd);
+	    /* we must have:
+	    UD_MINVAL <= Max <= UD_MAXVAL
+	    UD_MINVAL <= Min <= UD_MAXVAL
+	    |Max-Min| <= UD_MAXVAL */
+	    UPDOWN_SetRange(infoPtr, (short)lParam, (short)HIWORD(lParam));
 	    break;
 
 	case UDM_GETRANGE32:
@@ -1018,12 +1079,7 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    break;
 
 	case UDM_SETRANGE32:
-	    infoPtr->MinVal = (INT)wParam;
-	    infoPtr->MaxVal = (INT)lParam;
-	    if (infoPtr->MaxVal <= infoPtr->MinVal)
-		infoPtr->MaxVal = infoPtr->MinVal + 1;
-	    TRACE("UpDown Ctrl new range(%d to %d), hwnd=%p\n",
-		  infoPtr->MinVal, infoPtr->MaxVal, hwnd);
+	    UPDOWN_SetRange(infoPtr, (INT)lParam, (INT)wParam);
 	    break;
 
 	case UDM_GETPOS32:
@@ -1031,6 +1087,9 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    return infoPtr->CurVal;
 
 	case UDM_SETPOS32:
+	{
+	    int temp;
+
 	    if(!UPDOWN_InBounds(infoPtr, (int)lParam)) {
 		if((int)lParam < infoPtr->MinVal) lParam = infoPtr->MinVal;
 		if((int)lParam > infoPtr->MaxVal) lParam = infoPtr->MaxVal;
@@ -1039,19 +1098,20 @@ static LRESULT WINAPI UpDownWindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 	    infoPtr->CurVal = (int)lParam;  /* set the new value */
 	    UPDOWN_SetBuddyInt (infoPtr);
 	    return temp;                    /* return prev value */
-
+	}
 	case UDM_GETUNICODEFORMAT:
 	    /* we lie a bit here, we're always using Unicode internally */
 	    return infoPtr->UnicodeFormat;
 
 	case UDM_SETUNICODEFORMAT:
+	{
 	    /* do we really need to honour this flag? */
-	    temp = infoPtr->UnicodeFormat;
+	    int temp = infoPtr->UnicodeFormat;
 	    infoPtr->UnicodeFormat = (BOOL)wParam;
 	    return temp;
-
+	}
 	default:
-	    if ((message >= WM_USER) && (message < WM_APP))
+	    if ((message >= WM_USER) && (message < WM_APP) && !COMCTL32_IsReflectedMessage(message))
 		ERR("unknown msg %04x wp=%04lx lp=%08lx\n", message, wParam, lParam);
 	    return DefWindowProcW (hwnd, message, wParam, lParam);
     }

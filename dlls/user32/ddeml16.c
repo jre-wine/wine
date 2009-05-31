@@ -281,7 +281,7 @@ BOOL16 WINAPI DdeFreeDataHandle16(HDDEDATA hData)
  */
 BOOL16 WINAPI DdeKeepStringHandle16(DWORD idInst, HSZ hsz)
 {
-    return (BOOL)DdeKeepStringHandle(idInst, hsz);
+    return DdeKeepStringHandle(idInst, hsz);
 }
 
 /*****************************************************************
@@ -291,7 +291,7 @@ HDDEDATA WINAPI DdeClientTransaction16(LPVOID pData, DWORD cbData, HCONV hConv,
                                        HSZ hszItem, UINT16 wFmt, UINT16 wType,
                                        DWORD dwTimeout, LPDWORD pdwResult)
 {
-    return DdeClientTransaction((LPBYTE)pData, cbData, hConv, hszItem,
+    return DdeClientTransaction(pData, cbData, hConv, hszItem,
                                 wFmt, wType, dwTimeout, pdwResult);
 }
 

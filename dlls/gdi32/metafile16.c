@@ -244,7 +244,7 @@ BOOL16 WINAPI EnumMetaFile16( HDC16 hdc16, HMETAFILE16 hmf,
     SelectObject(hdc, hPen);
     SelectObject(hdc, hFont);
 
-    ht = (HANDLETABLE16 *)GlobalLock16(hHT);
+    ht = GlobalLock16(hHT);
 
     /* free objects in handle table */
     for(i = 0; i < mh->mtNoObjects; i++)
@@ -308,8 +308,6 @@ HMETAFILE16 WINAPI SetMetaFileBits16( HGLOBAL16 hMem )
 HMETAFILE16 WINAPI SetMetaFileBitsBetter16( HMETAFILE16 hMeta )
 {
     if( IsValidMetaFile16( hMeta ) )
-        return (HMETAFILE16)GlobalReAlloc16( hMeta, 0,
-			   GMEM_SHARE | GMEM_NODISCARD | GMEM_MODIFY);
-    return (HMETAFILE16)0;
+        return GlobalReAlloc16( hMeta, 0, GMEM_SHARE | GMEM_NODISCARD | GMEM_MODIFY);
+    return 0;
 }
-

@@ -279,7 +279,7 @@ static INT_PTR CALLBACK PSDRV_PaperDlgProc(HWND hwnd, UINT msg,
     di = (PSDRV_DLGINFO *)GetWindowLongPtrW(hwnd, DWLP_USER);
     switch(nmhdr->code) {
     case PSN_APPLY:
-      memcpy(di->pi->Devmode, di->dlgdm, sizeof(PSDRV_DEVMODEA));
+      *di->pi->Devmode = *di->dlgdm;
       SetWindowLongPtrW(hwnd, DWLP_MSGRESULT, PSNRET_NOERROR);
       return TRUE;
 
@@ -331,9 +331,9 @@ static int (WINAPI *pPropertySheet) (LPCPROPSHEETHEADERW);
  *
  * Just returns default devmode at the moment.  No use of initialization file.
  */
-INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
-			LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
-			LPSTR lpszProfile, DWORD dwMode)
+INT CDECL PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
+                              LPSTR lpszDevice, LPSTR lpszPort, LPDEVMODEA lpdmInput,
+                              LPSTR lpszProfile, DWORD dwMode)
 {
   PRINTERINFO *pi = PSDRV_FindPrinterInfo(lpszDevice);
   if(!pi) return -1;
@@ -370,7 +370,7 @@ INT PSDRV_ExtDeviceMode(LPSTR lpszDriver, HWND hwnd, LPDEVMODEA lpdmOutput,
     pPropertySheet = (void*)GetProcAddress(hinstComctl32, "PropertySheetW");
     memset(&psp,0,sizeof(psp));
     dlgdm = HeapAlloc( PSDRV_Heap, 0, sizeof(*dlgdm) );
-    memcpy(dlgdm, pi->Devmode, sizeof(*dlgdm));
+    *dlgdm = *pi->Devmode;
     di = HeapAlloc( PSDRV_Heap, 0, sizeof(*di) );
     di->pi = pi;
     di->dlgdm = dlgdm;
@@ -437,9 +437,8 @@ INT16 WINAPI PSDRV_ExtDeviceMode16(HWND16 hwnd, HANDLE16 hDriver,
  * Returns
  *      Result depends on the setting of fwCapability.  -1 indicates failure.
  */
-DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
-					WORD fwCapability, LPSTR lpszOutput,
-					LPDEVMODEA lpDevMode)
+DWORD CDECL PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszPort,
+                                     WORD fwCapability, LPSTR lpszOutput, LPDEVMODEA lpDevMode)
 {
   PRINTERINFO *pi;
   DEVMODEA *lpdm;
@@ -550,8 +549,8 @@ DWORD PSDRV_DeviceCapabilities(LPSTR lpszDriver, LPCSTR lpszDevice, LPCSTR lpszP
       LONG *lp = (LONG*)lpszOutput;
 
       if(lpszOutput != NULL) {
-	lp[0] = (LONG)pi->ppd->DefaultResolution;
-	lp[1] = (LONG)pi->ppd->DefaultResolution;
+	lp[0] = pi->ppd->DefaultResolution;
+	lp[1] = pi->ppd->DefaultResolution;
       }
       return 1;
     }

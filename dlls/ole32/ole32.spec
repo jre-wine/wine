@@ -22,8 +22,9 @@
 @ stdcall CoFreeUnusedLibraries()
 @ stdcall CoFreeUnusedLibrariesEx(long long)
 @ stdcall CoGetCallContext(ptr ptr)
-@ stub CoGetCallerTID
+@ stdcall CoGetCallerTID(ptr)
 @ stdcall CoGetClassObject(ptr long ptr ptr ptr)
+@ stdcall CoGetContextToken(ptr)
 @ stub CoGetCurrentLogicalThreadId
 @ stdcall CoGetCurrentProcess()
 @ stub CoGetInstanceFromFile      #@ stdcall (ptr ptr ptr long wstr long ptr) return 0,ERR_NOTIMPLEMENTED
@@ -56,6 +57,7 @@
 @ stub CoQueryReleaseObject
 @ stdcall CoRegisterChannelHook(ptr ptr)
 @ stdcall CoRegisterClassObject(ptr ptr long long ptr)
+@ stdcall CoRegisterInitializeSpy(ptr ptr)
 @ stdcall CoRegisterMallocSpy (ptr)
 @ stdcall CoRegisterMessageFilter(ptr ptr)
 @ stdcall CoRegisterPSClsid(ptr ptr)
@@ -66,11 +68,12 @@
 @ stdcall CoResumeClassObjects()
 @ stdcall CoRevertToSelf()
 @ stdcall CoRevokeClassObject(long)
+@ stdcall CoRevokeInitializeSpy(double)
 @ stdcall CoRevokeMallocSpy()
 @ stdcall CoSetProxyBlanket(ptr long long wstr long long ptr long)
 @ stdcall CoSetState(ptr)
 @ stdcall CoSuspendClassObjects()
-@ stub CoSwitchCallContext
+@ stdcall CoSwitchCallContext(ptr ptr)
 @ stdcall CoTaskMemAlloc(long)
 @ stdcall CoTaskMemFree(ptr)
 @ stdcall CoTaskMemRealloc(ptr long)
@@ -92,7 +95,7 @@
 @ stdcall CreateItemMoniker(wstr wstr ptr)
 @ stub CreateObjrefMoniker
 @ stdcall CreateOleAdviseHolder(ptr)
-@ stub CreatePointerMoniker       #@ stdcall (ptr ptr) return 0,ERR_NOTIMPLEMENTED
+@ stdcall CreatePointerMoniker(ptr ptr)
 @ stdcall CreateStreamOnHGlobal(ptr long ptr)
 @ stdcall DllDebugObjectRPCHook(long ptr)
 @ stdcall -private DllGetClassObject (ptr ptr ptr)
@@ -135,6 +138,10 @@
 @ stdcall HGLOBAL_UserMarshal(ptr ptr ptr)
 @ stdcall HGLOBAL_UserSize(ptr long ptr)
 @ stdcall HGLOBAL_UserUnmarshal(ptr ptr ptr)
+@ stdcall HICON_UserFree(ptr ptr)
+@ stdcall HICON_UserMarshal(ptr ptr ptr)
+@ stdcall HICON_UserSize(ptr long ptr)
+@ stdcall HICON_UserUnmarshal(ptr ptr ptr)
 @ stdcall HMENU_UserFree(ptr ptr)
 @ stdcall HMENU_UserMarshal(ptr ptr ptr)
 @ stdcall HMENU_UserSize(ptr long ptr)
@@ -176,7 +183,7 @@
 @ stub OleCreateEmbeddingHelper
 @ stub OleCreateEx
 @ stdcall OleCreateFromData(ptr ptr long ptr ptr ptr ptr)
-@ stub OleCreateFromDataEx
+@ stdcall OleCreateFromDataEx(ptr ptr long long long ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall OleCreateFromFile(ptr ptr ptr long ptr ptr ptr ptr)
 @ stub OleCreateFromFileEx
 @ stdcall OleCreateLink(ptr ptr long ptr ptr ptr ptr)

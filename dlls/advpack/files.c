@@ -514,7 +514,7 @@ HRESULT WINAPI DelNodeRunDLL32W(HWND hWnd, HINSTANCE hInst, LPWSTR cmdline, INT 
     return res;
 }
 
-/* The following defintions were copied from dlls/cabinet/cabinet.h */
+/* The following definitions were copied from dlls/cabinet/cabinet.h */
 
 /* SESSION Operation */
 #define EXTRACT_FILLFILELIST  0x00000001
@@ -564,9 +564,7 @@ static LPSTR convert_file_list(LPCSTR FileList, DWORD *dwNumFiles)
     dwLen = last - first + 3; /* room for double-null termination */
     szConvertedList = HeapAlloc(GetProcessHeap(), 0, dwLen);
     lstrcpynA(szConvertedList, first, dwLen - 1);
-
     szConvertedList[dwLen - 1] = '\0';
-    szConvertedList[dwLen] = '\0';
 
     /* empty list */
     if (!lstrlenA(szConvertedList))
@@ -629,7 +627,7 @@ static DWORD fill_file_list(SESSION *session, LPCSTR szCabName, LPCSTR szFileLis
     struct FILELIST *pNode;
 
     session->Operation |= EXTRACT_FILLFILELIST;
-    if (pExtract(session, szCabName))
+    if (pExtract(session, szCabName) != S_OK)
     {
         session->Operation &= ~EXTRACT_FILLFILELIST;
         return -1;
@@ -711,7 +709,7 @@ HRESULT WINAPI ExtractFilesA(LPCSTR CabName, LPCSTR ExpandDir, DWORD Flags,
     if (FileList)
     {
         szConvertedList = convert_file_list(FileList, &dwFileCount);
-        if (!szConvertedList || dwFileCount == -1)
+        if (!szConvertedList)
         {
             res = E_FAIL;
             goto done;
@@ -998,8 +996,8 @@ HRESULT WINAPI GetVersionFromFileExW(LPCWSTR lpszFilename, LPDWORD pdwMSVer,
     BOOL bFileCopied = FALSE;
     UINT uValueLen;
 
-    static WCHAR backslash[] = {'\\',0};
-    static WCHAR translation[] = {
+    static const WCHAR backslash[] = {'\\',0};
+    static const WCHAR translation[] = {
         '\\','V','a','r','F','i','l','e','I','n','f','o',
         '\\','T','r','a','n','s','l','a','t','i','o','n',0
     };

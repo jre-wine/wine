@@ -23,11 +23,10 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "ole2.h"
 #include "urlmon.h"
 #include "shlwapi.h"
-
-#include "initguid.h"
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -70,6 +69,7 @@ DEFINE_EXPECT(ReportResult);
 
 static HRESULT expect_hrResult;
 static IInternetProtocol *read_protocol = NULL;
+static DWORD bindf;
 
 static const WCHAR blank_url1[] = {'i','t','s',':',
     't','e','s','t','.','c','h','m',':',':','/','b','l','a','n','k','.','h','t','m','l',0};
@@ -244,6 +244,7 @@ static HRESULT WINAPI BindInfo_GetBindInfo(IInternetBindInfo *iface, DWORD *grfB
     ok(pbindinfo != NULL, "pbindinfo == NULL\n");
     ok(pbindinfo->cbSize == sizeof(BINDINFO), "wrong size of pbindinfo: %d\n", pbindinfo->cbSize);
 
+    *grfBINDF = bindf;
     return S_OK;
 }
 
@@ -301,7 +302,6 @@ static HRESULT _protocol_start(unsigned line, IInternetProtocol *protocol, LPCWS
     expect_hrResult = S_OK;
 
     hres = IInternetProtocol_Start(protocol, url, &protocol_sink, &bind_info, 0, 0);
-    ok_(__FILE__,line) (hres == S_OK, "Start failed: %08x\n", hres);
 
     if(FAILED(hres)) {
         SET_CALLED(GetBindInfo);
@@ -571,8 +571,10 @@ static void test_its_protocol(void)
     test_protocol = ITS_PROTOCOL;
 
     hres = CoGetClassObject(&CLSID_ITSProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void**)&unk);
-    ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
-    if(!SUCCEEDED(hres))
+    ok(hres == S_OK ||
+       broken(hres == REGDB_E_CLASSNOTREG), /* Some W95 and NT4 */
+       "CoGetClassObject failed: %08x\n", hres);
+    if(FAILED(hres))
         return;
 
     hres = IUnknown_QueryInterface(unk, &IID_IInternetProtocolInfo, (void**)&info);
@@ -610,6 +612,8 @@ static void test_its_protocol(void)
             test_protocol_url(factory, blank_url5, TRUE);
             test_protocol_url(factory, blank_url6, TRUE);
             test_protocol_url(factory, blank_url8, TRUE);
+            bindf = BINDF_FROMURLMON | BINDF_NEEDFILE;
+            test_protocol_url(factory, blank_url1, TRUE);
         }
 
         IClassFactory_Release(factory);
@@ -627,8 +631,10 @@ static void test_mk_protocol(void)
 
     hres = CoGetClassObject(&CLSID_MkProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory,
                             (void**)&cf);
-    ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
-    if(!SUCCEEDED(hres))
+    ok(hres == S_OK ||
+       broken(hres == REGDB_E_CLASSNOTREG), /* Some W95 and NT4 */
+       "CoGetClassObject failed: %08x\n", hres);
+    if(FAILED(hres))
         return;
 
     cache_file = cache_file1;

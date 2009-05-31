@@ -18,11 +18,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 
 STRINGTABLE DISCARDABLE
 {
 	IDS_NAME	"WINE-MS-RLE"
 	IDS_DESCRIPTION	"Wine MS-RLE 비디오 코덱"
-	IDS_ABOUT       "Wine MS-RLE video codec\nCopyright 2002 by Michael Gunnewig"
+	IDS_ABOUT       "Wine MS-RLE 비디오 코덱\nCopyright 2002 by Michael Gunnewig"
 }

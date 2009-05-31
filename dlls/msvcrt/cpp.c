@@ -131,7 +131,7 @@ static void dump_obj_locator( const rtti_object_locator *ptr )
 }
 
 /* Internal common ctor for exception */
-static void WINAPI EXCEPTION_ctor(exception *_this, const char** name)
+static void EXCEPTION_ctor(exception *_this, const char** name)
 {
   _this->vtable = &MSVCRT_exception_vtable;
   if (*name)
@@ -624,6 +624,22 @@ void * __stdcall MSVCRT_type_info_vector_dtor(type_info * _this, unsigned int fl
 
 /* vtables */
 
+#ifdef _WIN64
+
+#define __ASM_VTABLE(name,funcs) \
+    __asm__(".data\n" \
+            "\t.align 8\n" \
+            "\t.quad " __ASM_NAME(#name "_rtti") "\n" \
+            "\t.globl " __ASM_NAME("MSVCRT_" #name "_vtable") "\n" \
+            __ASM_NAME("MSVCRT_" #name "_vtable") ":\n" \
+            "\t.quad " THISCALL_NAME(MSVCRT_ ## name ## _vector_dtor) "\n" \
+            funcs "\n\t.text");
+
+#define __ASM_EXCEPTION_VTABLE(name) \
+    __ASM_VTABLE(name, "\t.quad " THISCALL_NAME(MSVCRT_what_exception) )
+
+#else
+
 #define __ASM_VTABLE(name,funcs) \
     __asm__(".data\n" \
             "\t.align 4\n" \
@@ -635,6 +651,8 @@ void * __stdcall MSVCRT_type_info_vector_dtor(type_info * _this, unsigned int fl
 
 #define __ASM_EXCEPTION_VTABLE(name) \
     __ASM_VTABLE(name, "\t.long " THISCALL_NAME(MSVCRT_what_exception) )
+
+#endif /* _WIN64 */
 
 #ifndef __GNUC__
 void __asm_dummy_vtables(void) {

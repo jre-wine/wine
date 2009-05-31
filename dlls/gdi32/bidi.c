@@ -367,7 +367,7 @@ static int resolveExplicit(int level, int dir, WORD *pcls, WORD *plevel, int cch
 enum states /* possible states */
 {
     xa,        /*  arabic letter */
-    xr,        /*  right leter */
+    xr,        /*  right letter */
     xl,        /*  left letter */
 
     ao,        /*  arabic lett. foll by ON */
@@ -454,7 +454,7 @@ static const int actionWeak[][10] =
 {
        /*  N,   L,   R,  AN,  EN,  AL, NSM,  CS,  ES,  ET */
 /*xa*/ { xxx, xxx, xxx, xxx, xxA, xxR, xxR, xxN, xxN, xxN }, /* arabic letter           */
-/*xr*/ { xxx, xxx, xxx, xxx, xxE, xxR, xxR, xxN, xxN, xIx }, /* right leter             */
+/*xr*/ { xxx, xxx, xxx, xxx, xxE, xxR, xxR, xxN, xxN, xIx }, /* right letter            */
 /*xl*/ { xxx, xxx, xxx, xxx, xxL, xxR, xxL, xxN, xxN, xIx }, /* left letter             */
 
 /*ao*/ { xxx, xxx, xxx, xxx, xxA, xxR, xxN, xxN, xxN, xxN }, /* arabic lett. foll by ON */
@@ -494,7 +494,7 @@ static int GetResolvedType(int action)
 
   States can be of two kinds:
      - Immediate Resolution State, where each input token
-       is resolved as soon as it is seen. These states havve
+       is resolved as soon as it is seen. These states have
        only single action codes (xxN) or the no-op (xxx)
        for static input tokens.
      - Deferred Resolution State, where input tokens either
@@ -1089,7 +1089,7 @@ BOOL BIDI_Reorder(
     if (WINE_GCPW_FORCE_RTL == (dwWineGCP_Flags&WINE_GCPW_DIR_MASK))
         baselevel = 1;
 
-    i = done = 0;
+    done = 0;
     while (done < uCount)
     {
         unsigned j;

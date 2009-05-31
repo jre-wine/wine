@@ -311,7 +311,7 @@ BOOL WINAPI HeapSetInformation( HANDLE heap, HEAP_INFORMATION_CLASS infoclass, P
 
 #define MAGIC_GLOBAL_USED 0x5342
 #define HANDLE_TO_INTERN(h)  ((PGLOBAL32_INTERN)(((char *)(h))-2))
-#define INTERN_TO_HANDLE(i)  ((HGLOBAL) &((i)->Pointer))
+#define INTERN_TO_HANDLE(i)  (&((i)->Pointer))
 #define POINTER_TO_HANDLE(p) (*(((const HGLOBAL *)(p))-2))
 #define ISHANDLE(h)          (((ULONG_PTR)(h)&2)!=0)
 #define ISPOINTER(h)         (((ULONG_PTR)(h)&2)==0)
@@ -955,7 +955,7 @@ HLOCAL WINAPI LocalAlloc(
                 UINT flags, /* [in] Allocation attributes */
                 SIZE_T size /* [in] Number of bytes to allocate */
 ) {
-    return (HLOCAL)GlobalAlloc( flags, size );
+    return GlobalAlloc( flags, size );
 }
 
 
@@ -984,7 +984,7 @@ SIZE_T WINAPI LocalCompact( UINT minfree )
 UINT WINAPI LocalFlags(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalFlags( (HGLOBAL)handle );
+    return GlobalFlags( handle );
 }
 
 
@@ -1004,7 +1004,7 @@ UINT WINAPI LocalFlags(
 HLOCAL WINAPI LocalFree(
                 HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return (HLOCAL)GlobalFree( (HGLOBAL)handle );
+    return GlobalFree( handle );
 }
 
 
@@ -1024,7 +1024,7 @@ HLOCAL WINAPI LocalFree(
 HLOCAL WINAPI LocalHandle(
                 LPCVOID ptr /* [in] Address of local memory block */
 ) {
-    return (HLOCAL)GlobalHandle( ptr );
+    return GlobalHandle( ptr );
 }
 
 
@@ -1044,7 +1044,7 @@ HLOCAL WINAPI LocalHandle(
 LPVOID WINAPI LocalLock(
               HLOCAL handle /* [in] Address of local memory object */
 ) {
-    return GlobalLock( (HGLOBAL)handle );
+    return GlobalLock( handle );
 }
 
 
@@ -1066,7 +1066,7 @@ HLOCAL WINAPI LocalReAlloc(
                 SIZE_T size,   /* [in] New size of block */
                 UINT flags     /* [in] How to reallocate object */
 ) {
-    return (HLOCAL)GlobalReAlloc( (HGLOBAL)handle, size, flags );
+    return GlobalReAlloc( handle, size, flags );
 }
 
 
@@ -1095,7 +1095,7 @@ SIZE_T WINAPI LocalShrink( HGLOBAL handle, UINT newsize )
 SIZE_T WINAPI LocalSize(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalSize( (HGLOBAL)handle );
+    return GlobalSize( handle );
 }
 
 
@@ -1115,82 +1115,9 @@ SIZE_T WINAPI LocalSize(
 BOOL WINAPI LocalUnlock(
               HLOCAL handle /* [in] Handle of memory object */
 ) {
-    return GlobalUnlock( (HGLOBAL)handle );
+    return GlobalUnlock( handle );
 }
 
-
-/**********************************************************************
- * 		AllocMappedBuffer	(KERNEL32.38)
- *
- * This is an undocumented KERNEL32 function that
- * SMapLS's a GlobalAlloc'ed buffer.
- *
- * RETURNS
- *       EDI register: pointer to buffer
- *
- * NOTES
- *       The buffer is preceded by 8 bytes:
- *        ...
- *       edi+0   buffer
- *       edi-4   SEGPTR to buffer
- *       edi-8   some magic Win95 needs for SUnMapLS
- *               (we use it for the memory handle)
- *
- *       The SEGPTR is used by the caller!
- */
-void WINAPI __regs_AllocMappedBuffer(
-              CONTEXT86 *context /* [in] EDI register: size of buffer to allocate */
-) {
-    HGLOBAL handle = GlobalAlloc(0, context->Edi + 8);
-    DWORD *buffer = (DWORD *)GlobalLock(handle);
-    DWORD ptr = 0;
-
-    if (buffer)
-        if (!(ptr = MapLS(buffer + 2)))
-        {
-            GlobalUnlock(handle);
-            GlobalFree(handle);
-        }
-
-    if (!ptr)
-        context->Eax = context->Edi = 0;
-    else
-    {
-        buffer[0] = (DWORD)handle;
-        buffer[1] = ptr;
-
-        context->Eax = ptr;
-        context->Edi = (DWORD)(buffer + 2);
-    }
-}
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0, 0 )
-#endif
-
-/**********************************************************************
- * 		FreeMappedBuffer	(KERNEL32.39)
- *
- * Free a buffer allocated by AllocMappedBuffer
- *
- * RETURNS
- *  Nothing.
- */
-void WINAPI __regs_FreeMappedBuffer(
-              CONTEXT86 *context /* [in] EDI register: pointer to buffer */
-) {
-    if (context->Edi)
-    {
-        DWORD *buffer = (DWORD *)context->Edi - 2;
-
-        UnMapLS(buffer[1]);
-
-        GlobalUnlock((HGLOBAL)buffer[0]);
-        GlobalFree((HGLOBAL)buffer[0]);
-    }
-}
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0, 0 )
-#endif
 
 /***********************************************************************
  *           GlobalMemoryStatusEx   (KERNEL32.@)
@@ -1206,7 +1133,7 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     SYSTEM_INFO si;
 #ifdef linux
     FILE *f;
-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__)
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__)
     unsigned long val;
     int mib[2];
     size_t size_sys;
@@ -1227,7 +1154,7 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     }
 
     if (time(NULL)==cache_lastchecked) {
-	memcpy(lpmemex,&cached_memstatus,sizeof(*lpmemex));
+	*lpmemex = cached_memstatus;
 	return TRUE;
     }
     cache_lastchecked = time(NULL);
@@ -1278,7 +1205,7 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
         }
         fclose( f );
     }
-#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__APPLE__)
+#elif defined(__FreeBSD__) || defined(__FreeBSD_kernel__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__APPLE__)
     mib[0] = CTL_HW;
     mib[1] = HW_PHYSMEM;
     size_sys = sizeof(val);
@@ -1347,7 +1274,7 @@ BOOL WINAPI GlobalMemoryStatusEx( LPMEMORYSTATUSEX lpmemex )
     */
     lpmemex->ullAvailExtendedVirtual = 0;
 
-    memcpy(&cached_memstatus,lpmemex,sizeof(*lpmemex));
+    cached_memstatus = *lpmemex;
 
     TRACE("<-- LPMEMORYSTATUSEX: dwLength %d, dwMemoryLoad %d, ullTotalPhys %s, ullAvailPhys %s,"
           " ullTotalPageFile %s, ullAvailPageFile %s, ullTotalVirtual %s, ullAvailVirtual %s\n",

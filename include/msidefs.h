@@ -201,6 +201,27 @@ enum msidbMoveFileOptions
     msidbMoveFileOptionsMove = 0x00000001,
 };
 
+enum msidbAssemblyAttributes
+{
+    msidbAssemblyAttributesURT = 0x00000000,
+    msidbAssemblyAttributesWin32 = 0x00000001,
+};
+
+enum msidbSumInfoSourceType
+{
+    msidbSumInfoSourceTypeSFN = 0x00000001,
+    msidbSumInfoSourceTypeCompressed = 0x00000002,
+    msidbSumInfoSourceTypeAdminImage = 0x00000004,
+    msidbSumInfoSourceTypeLUAPackage = 0x00000008,
+};
+
+enum msidbRemoveFileInstallMode
+{
+    msidbRemoveFileInstallModeOnInstall = 0x00000001,
+    msidbRemoveFileInstallModeOnRemove = 0x00000002,
+    msidbRemoveFileInstallModeOnBoth = 0x00000003,
+};
+
 /*
  * Windows SDK braindamage alert
  *

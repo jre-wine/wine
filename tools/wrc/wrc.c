@@ -1,6 +1,6 @@
 /*
  * Copyright 1994 Martin von Loewis
- * Copyrignt 1998 Bertho A. Stultiens (BS)
+ * Copyright 1998 Bertho A. Stultiens (BS)
  * Copyright 2003 Dimitrie O. Paun
  *
  * This library is free software; you can redistribute it and/or
@@ -114,7 +114,7 @@ int win32 = 1;
 
 /*
  * debuglevel == DEBUGLEVEL_NONE	Don't bother
- * debuglevel & DEBUGLEVEL_CHAT		Say whats done
+ * debuglevel & DEBUGLEVEL_CHAT		Say what's done
  * debuglevel & DEBUGLEVEL_DUMP		Dump internal structures
  * debuglevel & DEBUGLEVEL_TRACE	Create parser trace
  * debuglevel & DEBUGLEVEL_PPMSG	Preprocessor messages
@@ -462,7 +462,7 @@ int main(int argc,char *argv[])
                     FILE *output;
 
                     if (!(output = fopen( output_name, "w" )))
-                        error( "Could not open %s for writing\n", output_name );
+                        fatal_perror( "Could not open %s for writing", output_name );
                     ret = wpp_parse( input_name, output );
                     fclose( output );
                 }
@@ -487,7 +487,7 @@ int main(int argc,char *argv[])
 	chat("Starting parse\n");
 
 	if(!(parser_in = fopen(input_name, "rb")))
-		error("Could not open %s for input\n", input_name);
+            fatal_perror("Could not open %s for input", input_name);
 
 	ret = parser_parse();
 

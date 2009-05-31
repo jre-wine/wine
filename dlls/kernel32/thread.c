@@ -34,7 +34,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "thread.h"
+#include "winternl.h"
 #include "wine/winbase16.h"
 #include "wine/exception.h"
 #include "wine/library.h"
@@ -152,27 +152,8 @@ HANDLE WINAPI OpenThread( DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwTh
  */
 void WINAPI ExitThread( DWORD code ) /* [in] Exit code for this thread */
 {
-    BOOL last;
-    SERVER_START_REQ( terminate_thread )
-    {
-        /* send the exit code to the server */
-        req->handle    = GetCurrentThread();
-        req->exit_code = code;
-        wine_server_call( req );
-        last = reply->last;
-    }
-    SERVER_END_REQ;
-
-    if (last)
-    {
-        LdrShutdownProcess();
-        exit( code );
-    }
-    else
-    {
-        RtlFreeThreadActivationContextStack();
-        RtlExitUserThread( code );
-    }
+    RtlFreeThreadActivationContextStack();
+    RtlExitUserThread( code );
 }
 
 
@@ -378,7 +359,7 @@ BOOL WINAPI GetThreadPriorityBoost(
 /**********************************************************************
  * SetThreadPriorityBoost [KERNEL32.@]  Sets priority boost for thread.
  *
- * Priority boost is not implemented. Thsi function always returns
+ * Priority boost is not implemented. This function always returns
  * FALSE and sets last error to ERROR_CALL_NOT_IMPLEMENTED
  *
  * RETURNS
@@ -576,7 +557,7 @@ VOID WINAPI VWin32_BoostThreadStatic( DWORD threadId, INT boost )
 #undef GetCurrentThread
 HANDLE WINAPI GetCurrentThread(void)
 {
-    return (HANDLE)0xfffffffe;
+    return (HANDLE)~(ULONG_PTR)1;
 }
 
 

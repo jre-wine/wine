@@ -26,6 +26,7 @@
 
 #include "Bg.rc"
 #include "Cs.rc"
+#include "Da.rc"
 #include "De.rc"
 #include "En.rc"
 #include "Es.rc"
@@ -40,6 +41,10 @@
 #include "No.rc"
 #include "Pl.rc"
 #include "Pt.rc"
+#include "Ro.rc"
 #include "Ru.rc"
+#include "Si.rc"
+#include "Sk.rc"
 #include "Sv.rc"
 #include "Tr.rc"
+#include "Zh.rc"

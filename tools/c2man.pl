@@ -90,14 +90,15 @@ sub process_extra_comment($);
 sub process_spec_file($)
 {
   my $spec_name = shift;
-  my $dll_name  = $spec_name;
-  $dll_name =~ s/\..*//;       # Strip the file extension
+  my ($dll_name, $dll_ext)  = split(/\./, $spec_name);
+  $dll_ext = "dll" if ( $dll_ext eq "spec" );
   my $uc_dll_name  = uc $dll_name;
 
   my $spec_details =
   {
     NAME => $spec_name,
     DLL_NAME => $dll_name,
+    DLL_EXT => $dll_ext,
     NUM_EXPORTS => 0,
     NUM_STUBS => 0,
     NUM_FUNCS => 0,
@@ -227,6 +228,7 @@ sub process_source_file($)
     COMMENT_NAME => "",
     ALT_NAME => "",
     DLL_NAME => "",
+    DLL_EXT => "",
     ORDINAL => "",
     RETURNS => "",
     PROTOTYPE => [],
@@ -511,7 +513,7 @@ sub process_comment_text($)
       # Preferred capitalisations
       s/ wine| WINE/ Wine/g;
       s/ API | api / Api /g;
-      s/DLL|Dll/dll /g;
+      s/ DLL | Dll / dll /g;
       s/ URL | url / Url /g;
       s/WIN16|win16/Win16/g;
       s/WIN32|win32/Win32/g;
@@ -627,7 +629,7 @@ sub process_comment($)
 
   # When the function is exported twice we have the second name below the first
   # (you see this a lot in ntdll, but also in some other places).
-  my $first_line = $comment->{TEXT}[1];
+  my $first_line = ${$comment->{TEXT}}[1];
 
   if ( $first_line =~ /^(@|[A-Za-z0-9_]+) +(\(|\[)([A-Za-z0-9_]+)\.(([0-9]+)|@)(\)|\])$/ )
   {
@@ -642,14 +644,14 @@ sub process_comment($)
       my $alt_export = @{$spec_details->{EXPORTS}}[$alt_index];
       @$alt_export[4] |= $FLAG_DOCUMENTED;
       $spec_details->{NUM_DOCS}++;
-      $comment->{TEXT}[1] = "";
+      ${$comment->{TEXT}}[1] = "";
     }
   }
 
   if (@{$spec_details->{CURRENT_EXTRA}})
   {
     # We have an extra comment that might be related to this one
-    my $current_comment = $spec_details->{CURRENT_EXTRA}[0];
+    my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
     my $current_name = $current_comment->{COMMENT_NAME};
     if ($comment->{COMMENT_NAME} =~ /^$current_name/ && $comment->{COMMENT_NAME} ne $current_name)
     {
@@ -820,12 +822,12 @@ sub process_comment($)
 
   if ( $prototype =~ /(WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16)/ )
   {
-    $prototype =~ s/^(.*?) (WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16) (.*?)\( *(.*)/$4/;
+    $prototype =~ s/^(.*?)\s+(WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16)\s+(.*?)\(\s*(.*)/$4/;
     $comment->{RETURNS} = $1;
   }
   else
   {
-    $prototype =~ s/^(.*?)([A-Za-z0-9_]+)\( *(.*)/$3/;
+    $prototype =~ s/^(.*?)([A-Za-z0-9_]+)\s*\(\s*(.*)/$3/;
     $comment->{RETURNS} = $1;
   }
 
@@ -986,7 +988,7 @@ sub process_extra_comment($)
 
   if (@{$spec_details->{CURRENT_EXTRA}})
   {
-    my $current_comment = $spec_details->{CURRENT_EXTRA}[0];
+    my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
 
     if ($opt_verbose > 0)
     {
@@ -1072,7 +1074,7 @@ sub process_index_files()
       if (@{$spec_details->{CURRENT_EXTRA}})
       {
         # We have an unwritten extra comment, write it
-        my $current_comment = $spec_details->{CURRENT_EXTRA}[0];
+        my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
         process_extra_comment($current_comment);
         @{$spec_details->{CURRENT_EXTRA}} = ();
        }
@@ -1095,7 +1097,7 @@ sub output_spec($)
   my $comment =
   {
     FILE => $spec_details->{DLL_NAME},
-    COMMENT_NAME => $spec_details->{DLL_NAME}.".dll",
+    COMMENT_NAME => $spec_details->{DLL_NAME}.".".$spec_details->{DLL_EXT},
     ALT_NAME => $spec_details->{DLL_NAME},
     DLL_NAME => "",
     ORDINAL => "",
@@ -1468,7 +1470,7 @@ sub output_api_synopsis($)
   my $biggest_length = 0;
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
-    my $line = $comment->{PROTOTYPE}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     if ($line =~ /(.+?)([A-Za-z_][A-Za-z_0-9]*)$/)
     {
       my $length = length $1;
@@ -1482,19 +1484,19 @@ sub output_api_synopsis($)
   # Now pad the string with blanks
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
-    my $line = $comment->{PROTOTYPE}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     if ($line =~ /(.+?)([A-Za-z_][A-Za-z_0-9]*)$/)
     {
       my $pad_len = $biggest_length - length $1;
       my $padding = " " x ($pad_len);
-      $comment->{PROTOTYPE}[$i] = $1.$padding.$2;
+      ${$comment->{PROTOTYPE}}[$i] = $1.$padding.$2;
     }
   }
 
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
     # Format the parameter name
-    my $line = $comment->{PROTOTYPE}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     my $comma = ($i == @{$comment->{PROTOTYPE}}-1) ? "" : ",";
     $line =~ s/(.+?)([A-Za-z_][A-Za-z_0-9]*)$/  $fmt[0]$1$fmt[2]$2$fmt[3]$comma$fmt[1]/;
     print OUTPUT $line;

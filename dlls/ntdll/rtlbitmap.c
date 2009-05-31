@@ -170,7 +170,8 @@ VOID WINAPI RtlSetBits(PRTL_BITMAP lpBits, ULONG ulStart, ULONG ulCount)
   }
 
   /* Set remaining bits, if any */
-  *lpOut |= NTDLL_maskBits[ulCount & 0x7];
+  if (ulCount & 0x7)
+    *lpOut |= NTDLL_maskBits[ulCount & 0x7];
 }
 
 /*************************************************************************
@@ -554,9 +555,12 @@ ULONG WINAPI RtlNumberOfSetBits(PCRTL_BITMAP lpBits)
       lpOut++;
     }
 
-    bMasked = *lpOut & NTDLL_maskBits[ulRemainder];
-    ulSet += NTDLL_nibbleBitCount[bMasked >> 4];
-    ulSet += NTDLL_nibbleBitCount[bMasked & 0xf];
+    if (ulRemainder)
+    {
+      bMasked = *lpOut & NTDLL_maskBits[ulRemainder];
+      ulSet += NTDLL_nibbleBitCount[bMasked >> 4];
+      ulSet += NTDLL_nibbleBitCount[bMasked & 0xf];
+    }
   }
   return ulSet;
 }
@@ -948,9 +952,9 @@ ULONG WINAPI RtlFindLastBackwardRunClear(PCRTL_BITMAP lpBits, ULONG ulStart, PUL
  *
  * Internal implementation of RtlFindSetRuns/RtlFindClearRuns.
  */
-static ULONG WINAPI NTDLL_FindRuns(PCRTL_BITMAP lpBits, PRTL_BITMAP_RUN lpSeries,
-                                   ULONG ulCount, BOOLEAN bLongest,
-                                   ULONG (*fn)(PCRTL_BITMAP,ULONG,PULONG))
+static ULONG NTDLL_FindRuns(PCRTL_BITMAP lpBits, PRTL_BITMAP_RUN lpSeries,
+                            ULONG ulCount, BOOLEAN bLongest,
+                            ULONG (*fn)(PCRTL_BITMAP,ULONG,PULONG))
 {
   BOOL bNeedSort = ulCount > 1 ? TRUE : FALSE;
   ULONG ulPos = 0, ulRuns = 0;

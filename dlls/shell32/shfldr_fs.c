@@ -110,15 +110,15 @@ static inline IGenericSFImpl *impl_from_ISFHelper( ISFHelper *iface )
 /*
   converts This to an interface pointer
 */
-#define _IUnknown_(This)        (IUnknown*)&(This->lpVtbl)
-#define _IShellFolder_(This)    (IShellFolder*)&(This->lpvtblShellFolder)
-#define _IShellFolder2_(This)   (IShellFolder2*)&(This->lpvtblShellFolder)
-#define _IPersist_(This)        (IPersist*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder_(This)  (IPersistFolder*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder2_(This) (IPersistFolder2*)&(This->lpvtblPersistFolder3)
-#define _IPersistFolder3_(This) (IPersistFolder3*)&(This->lpvtblPersistFolder3)
-#define _IDropTarget_(This)     (IDropTarget*)&(This->lpvtblDropTarget)
-#define _ISFHelper_(This)       (ISFHelper*)&(This->lpvtblSFHelper)
+#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
+#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpvtblShellFolder)
+#define _IShellFolder2_(This)   ((IShellFolder2*)&(This)->lpvtblShellFolder)
+#define _IPersist_(This)        (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder_(This)  (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder2_(This) (&(This)->lpvtblPersistFolder3)
+#define _IPersistFolder3_(This) (&(This)->lpvtblPersistFolder3)
+#define _IDropTarget_(This)     (&(This)->lpvtblDropTarget)
+#define _ISFHelper_(This)       (&(This)->lpvtblSFHelper)
 
 /**************************************************************************
 * registers clipboardformat once
@@ -128,7 +128,7 @@ static void SF_RegisterClipFmt (IGenericSFImpl * This)
     TRACE ("(%p)\n", This);
 
     if (!This->cfShellIDList) {
-        This->cfShellIDList = RegisterClipboardFormatA (CFSTR_SHELLIDLIST);
+        This->cfShellIDList = RegisterClipboardFormatW (CFSTR_SHELLIDLISTW);
     }
 }
 
@@ -196,7 +196,7 @@ static ULONG WINAPI IUnknown_fnRelease (IUnknown * iface)
 
         SHFree (This->pidlRoot);
         SHFree (This->sPathTarget);
-        LocalFree ((HLOCAL) This);
+        LocalFree (This);
     }
     return refCount;
 }
@@ -235,7 +235,7 @@ IFSFolder_Constructor (IUnknown * pUnkOuter, REFIID riid, LPVOID * ppv)
 
     if (pUnkOuter && !IsEqualIID (riid, &IID_IUnknown))
         return CLASS_E_NOAGGREGATION;
-    sf = (IGenericSFImpl *) LocalAlloc (LMEM_ZEROINIT, sizeof (IGenericSFImpl));
+    sf = LocalAlloc (LMEM_ZEROINIT, sizeof (IGenericSFImpl));
     if (!sf)
         return E_OUTOFMEMORY;
 
@@ -248,7 +248,7 @@ IFSFolder_Constructor (IUnknown * pUnkOuter, REFIID riid, LPVOID * ppv)
     sf->pclsid = (CLSID *) & CLSID_ShellFSFolder;
     sf->pUnkOuter = pUnkOuter ? pUnkOuter : _IUnknown_ (sf);
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv))) {
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv))) {
         IUnknown_Release (_IUnknown_ (sf));
         return E_NOINTERFACE;
     }
@@ -324,7 +324,7 @@ LPITEMIDLIST SHELL32_CreatePidlFromBindCtx(IBindCtx *pbc, LPCWSTR path)
         return NULL;
 
     /* see if the caller bound File System Bind Data */
-    r = IBindCtx_GetObjectParam( pbc, (LPOLESTR) szfsbc, &param );
+    r = IBindCtx_GetObjectParam( pbc, szfsbc, &param );
     if (FAILED(r))
         return NULL;
 
@@ -588,7 +588,7 @@ IShellFolder_fnGetAttributesOf (IShellFolder2 * iface, UINT cidl,
         IShellFolder *psfParent = NULL;
         LPCITEMIDLIST rpidl = NULL;
 
-        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, (LPCITEMIDLIST*)&rpidl);
+        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, &rpidl);
         if(SUCCEEDED(hr)) {
             SHELL32_GetItemAttributes (psfParent, rpidl, rgfInOut);
             IShellFolder_Release(psfParent);
@@ -1155,9 +1155,9 @@ ISFHelper_fnAddFolder (ISFHelper * iface, HWND hwnd, LPCWSTR pwszName,
 
         /* Cannot Create folder because of permissions */
         LoadStringW (shell32_hInstance, IDS_CREATEFOLDER_DENIED, wszTempText,
-         sizeof (wszTempText));
+         sizeof (wszTempText)/sizeof (wszTempText[0]));
         LoadStringW (shell32_hInstance, IDS_CREATEFOLDER_CAPTION, wszCaption,
-         sizeof (wszCaption));
+         sizeof (wszCaption)/sizeof (wszCaption[0]));
         sprintfW (wszText, wszTempText, wszNewDir);
         MessageBoxW (hwnd, wszText, wszCaption, MB_OK | MB_ICONEXCLAMATION);
     }
@@ -1462,7 +1462,7 @@ IFSFldr_PersistFolder3_InitializeEx (IPersistFolder3 * iface,
     This->pidlRoot = ILClone (pidlRoot);
 
     /*
-     *  the target folder is spezified in csidl OR pidlTargetFolder OR
+     *  the target folder is specified in csidl OR pidlTargetFolder OR
      *  szTargetParsingName
      */
     if (ppfti) {

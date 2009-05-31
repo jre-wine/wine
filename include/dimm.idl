@@ -24,8 +24,6 @@ cpp_quote("#include <imm.h>")
 
 cpp_quote("#if 0")
 
-typedef WORD LANGID;
-
 typedef struct {
     LPSTR lpReading;
     LPSTR lpWord;
@@ -185,7 +183,8 @@ interface IEnumRegisterWordW : IUnknown
 [
     object,
     uuid(09b5eab0-f997-11d1-93d4-0060b067b86e),
-    pointer_default(unique)
+    pointer_default(unique),
+    local
 ]
 interface IEnumInputContext : IUnknown
 {
@@ -206,7 +205,8 @@ interface IEnumInputContext : IUnknown
 [
     object,
     uuid(08c0e040-62d1-11d1-9326-0060b067b86e),
-    pointer_default(unique)
+    pointer_default(unique),
+    local
 ]
 interface IActiveIMMApp : IUnknown
 {

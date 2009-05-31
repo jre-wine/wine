@@ -53,6 +53,7 @@ extern const struct builtin_class_descr ICONTITLE_builtin_class DECLSPEC_HIDDEN;
 extern const struct builtin_class_descr LISTBOX_builtin_class DECLSPEC_HIDDEN;
 extern const struct builtin_class_descr MDICLIENT_builtin_class DECLSPEC_HIDDEN;
 extern const struct builtin_class_descr MENU_builtin_class DECLSPEC_HIDDEN;
+extern const struct builtin_class_descr MESSAGE_builtin_class DECLSPEC_HIDDEN;
 extern const struct builtin_class_descr SCROLL_builtin_class DECLSPEC_HIDDEN;
 extern const struct builtin_class_descr STATIC_builtin_class DECLSPEC_HIDDEN;
 
@@ -63,7 +64,9 @@ struct tagCLASS;  /* opaque structure */
 struct tagWND;
 extern ATOM get_int_atom_value( LPCWSTR name ) DECLSPEC_HIDDEN;
 extern void CLASS_RegisterBuiltinClasses(void) DECLSPEC_HIDDEN;
-extern void CLASS_AddWindow( struct tagCLASS *class, struct tagWND *win, BOOL unicode ) DECLSPEC_HIDDEN;
+extern WNDPROC get_class_winproc( struct tagCLASS *class ) DECLSPEC_HIDDEN;
+extern struct dce *get_class_dce( struct tagCLASS *class ) DECLSPEC_HIDDEN;
+extern struct dce *set_class_dce( struct tagCLASS *class, struct dce *dce ) DECLSPEC_HIDDEN;
 extern void CLASS_FreeModuleClasses( HMODULE16 hModule ) DECLSPEC_HIDDEN;
 
 /* defwnd proc */
@@ -85,10 +88,11 @@ extern void MENU_TrackKbdMenuBar( HWND hwnd, UINT wParam, WCHAR wChar ) DECLSPEC
 extern UINT MENU_DrawMenuBar( HDC hDC, LPRECT lprect,
                                 HWND hwnd, BOOL suppress_draw ) DECLSPEC_HIDDEN;
 extern UINT MENU_FindSubMenu( HMENU *hmenu, HMENU hSubTarget ) DECLSPEC_HIDDEN;
+extern void MENU_EndMenu(HWND) DECLSPEC_HIDDEN;
 
 /* nonclient area */
 extern LRESULT NC_HandleNCPaint( HWND hwnd , HRGN clip) DECLSPEC_HIDDEN;
-extern LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam ) DECLSPEC_HIDDEN;
+extern LRESULT NC_HandleNCActivate( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCCalcSize( HWND hwnd, RECT *winRect ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCHitTest( HWND hwnd, POINT pt ) DECLSPEC_HIDDEN;
 extern LRESULT NC_HandleNCLButtonDown( HWND hwnd, WPARAM wParam, LPARAM lParam ) DECLSPEC_HIDDEN;
@@ -147,7 +151,7 @@ typedef struct
 extern BOOL COMBO_FlipListbox( LPHEADCOMBO, BOOL, BOOL ) DECLSPEC_HIDDEN;
 
 /* Dialog info structure */
-typedef struct
+typedef struct tagDIALOGINFO
 {
     HWND      hwndFocus;   /* Current control with focus */
     HFONT     hUserFont;   /* Dialog font */
@@ -161,9 +165,6 @@ typedef struct
 
 #define DF_END  0x0001
 #define DF_OWNERENABLED 0x0002
-
-/* offset of DIALOGINFO ptr in dialog extra bytes */
-#define DWLP_WINE_DIALOGINFO (DWLP_USER+sizeof(ULONG_PTR))
 
 extern DIALOGINFO *DIALOG_get_info( HWND hwnd, BOOL create ) DECLSPEC_HIDDEN;
 extern void DIALOG_EnableOwner( HWND hOwner ) DECLSPEC_HIDDEN;

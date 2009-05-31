@@ -312,12 +312,13 @@ MMRESULT WINAPI acmDriverDetailsW(HACMDRIVERID hadid, PACMDRIVERDETAILSW padd, D
 /***********************************************************************
  *           acmDriverEnum (MSACM32.@)
  */
-MMRESULT WINAPI acmDriverEnum(ACMDRIVERENUMCB fnCallback, DWORD dwInstance, DWORD fdwEnum)
+MMRESULT WINAPI acmDriverEnum(ACMDRIVERENUMCB fnCallback, DWORD_PTR dwInstance,
+                              DWORD fdwEnum)
 {
     PWINE_ACMDRIVERID	padid;
     DWORD		fdwSupport;
 
-    TRACE("(%p, %08x, %08x)\n", fnCallback, dwInstance, fdwEnum);
+    TRACE("(%p, %08lx, %08x)\n", fnCallback, dwInstance, fdwEnum);
 
     if (!fnCallback) {
         WARN("invalid parameter\n");
@@ -548,7 +549,7 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
         adod.pszAliasName = padid->pszDriverAlias;
         adod.dnDevNode = 0;
 
-        pad->hDrvr = OpenDriver(padid->pszDriverAlias, NULL, (DWORD)&adod);
+        pad->hDrvr = OpenDriver(padid->pszDriverAlias, NULL, (DWORD_PTR)&adod);
 
         HeapFree(MSACM_hHeap, 0, section_name);
         if (!pad->hDrvr)
@@ -573,7 +574,7 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
         adod.pszAliasName = NULL;
         adod.dnDevNode = 0;
 
-        pad->pLocalDrvrInst = MSACM_OpenLocalDriver(padid->pLocalDriver, (DWORD)&adod);
+        pad->pLocalDrvrInst = MSACM_OpenLocalDriver(padid->pLocalDriver, (DWORD_PTR)&adod);
         if (!pad->pLocalDrvrInst)
         {
             ret = adod.dwError;

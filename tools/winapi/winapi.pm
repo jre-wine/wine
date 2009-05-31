@@ -279,9 +279,10 @@ sub parse_spec_file($$) {
 	}
 
 	my $ordinal;
+	my $ARCHES="alpha|i386|powerpc|sparc|x86_64";
 	if(/^(\d+|@)\s+
 	   (pascal|stdcall|cdecl|varargs)\s+
-	   ((?:(?:-noname|-norelay|-i386|-ret16|-ret64|-register|-interrupt|-private)\s+)*)(\S+)\s*\(\s*(.*?)\s*\)\s*(\S*)$/x)
+	   ((?:(?:-arch=(?:$ARCHES)(?:,(?:$ARCHES))*|-noname|-norelay|-i386|-ret16|-ret64|-register|-interrupt|-private)\s+)*)(\S+)\s*\(\s*(.*?)\s*\)\s*(\S*)$/x)
 	{
 	    my $calling_convention = $2;
 	    my $flags = $3;
@@ -314,13 +315,7 @@ sub parse_spec_file($$) {
 	    if ($internal_name =~ /^(.*?)\.(.*?)$/) {
 		my $forward_module = lc($1);
 		my $forward_name = $2;
-
-		if (0) {
-		    $calling_convention .= " -forward";
-		} else {
-		    $calling_convention = "forward";
-		}
-
+		$calling_convention = "forward";
 		$$function_forward{$module}{$external_name} = [$forward_module, $forward_name];
 	    }
 
@@ -396,7 +391,7 @@ sub parse_spec_file($$) {
 		    }
 		}
 	    }
-	} elsif(/^(\d+|@)\s+stub(?:\s+(-noname|-norelay|-i386|-ret16|-ret64|-private))?\s+(\S+)$/) {
+	} elsif(/^(\d+|@)\s+stub(?:\s+(-arch=(?:$ARCHES)(?:,(?:$ARCHES))*|-noname|-norelay|-i386|-ret16|-ret64|-private))?\s+(\S+)$/) {
 	    $ordinal = $1;
 
 	    my $flags = $2;

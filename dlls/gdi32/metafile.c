@@ -31,7 +31,7 @@
  *
  * Memory-based metafiles are just stored as a continuous block of memory with
  * a METAHEADER at the head with METARECORDs appended to it.  mtType is
- * METAFILE_MEMORY (1).  Note this is indentical to the disk image of a
+ * METAFILE_MEMORY (1).  Note this is identical to the disk image of a
  * disk-based metafile - even mtType is METAFILE_MEMORY.
  * 16bit HMETAFILE16s are global handles to this block
  * 32bit HMETAFILEs are GDI handles METAFILEOBJs, which contains a ptr to
@@ -107,14 +107,13 @@ static int MF_AddHandle(HANDLETABLE *ht, UINT htlen, HGDIOBJ hobj)
  */
 HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh)
 {
-    HMETAFILE hmf = 0;
-    METAFILEOBJ *metaObj = GDI_AllocObject( sizeof(METAFILEOBJ), METAFILE_MAGIC,
-					    (HGDIOBJ *)&hmf, NULL );
-    if (metaObj)
-    {
-        metaObj->mh = mh;
-        GDI_ReleaseObj( hmf );
-    }
+    HMETAFILE hmf;
+    METAFILEOBJ *metaObj;
+
+    if (!(metaObj = HeapAlloc( GetProcessHeap(), 0, sizeof(*metaObj) ))) return 0;
+    metaObj->mh = mh;
+    if (!(hmf = alloc_gdi_handle( &metaObj->header, OBJ_METAFILE, NULL )))
+        HeapFree( GetProcessHeap(), 0, metaObj );
     return hmf;
 }
 
@@ -126,7 +125,7 @@ HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh)
 static METAHEADER *MF_GetMetaHeader( HMETAFILE hmf )
 {
     METAHEADER *ret = NULL;
-    METAFILEOBJ * metaObj = (METAFILEOBJ *)GDI_GetObjPtr( hmf, METAFILE_MAGIC );
+    METAFILEOBJ * metaObj = GDI_GetObjPtr( hmf, OBJ_METAFILE );
     if (metaObj)
     {
         ret = metaObj->mh;
@@ -164,11 +163,10 @@ static POINT *convert_points( UINT count, POINT16 *pt16 )
 
 BOOL WINAPI DeleteMetaFile( HMETAFILE hmf )
 {
-    METAFILEOBJ * metaObj = (METAFILEOBJ *)GDI_GetObjPtr( hmf, METAFILE_MAGIC );
+    METAFILEOBJ * metaObj = free_gdi_handle( hmf );
     if (!metaObj) return FALSE;
     HeapFree( GetProcessHeap(), 0, metaObj->mh );
-    GDI_FreeObject( hmf, metaObj );
-    return TRUE;
+    return HeapFree( GetProcessHeap(), 0, metaObj );
 }
 
 /******************************************************************
@@ -294,7 +292,7 @@ METAHEADER *MF_LoadDiskBasedMetaFile(METAHEADER *mh)
  *         MF_CreateMetaHeaderDisk
  *
  * Take a memory based METAHEADER and change it to a disk based METAHEADER
- * assosiated with filename.  Note: Trashes contents of old one.
+ * associated with filename.  Note: Trashes contents of old one.
  */
 METAHEADER *MF_CreateMetaHeaderDisk(METAHEADER *mh, LPCVOID filename, BOOL uni )
 {
@@ -396,6 +394,8 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
     HPEN hPen;
     HBRUSH hBrush;
     HFONT hFont;
+    HPALETTE hPal;
+    HRGN hRgn;
     BOOL loaded = FALSE;
 
     if (!mh) return FALSE;
@@ -405,10 +405,18 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
 	loaded = TRUE;
     }
 
-    /* save the current pen, brush and font */
+    /* save DC */
     hPen = GetCurrentObject(hdc, OBJ_PEN);
     hBrush = GetCurrentObject(hdc, OBJ_BRUSH);
     hFont = GetCurrentObject(hdc, OBJ_FONT);
+    hPal = GetCurrentObject(hdc, OBJ_PAL);
+
+    hRgn = CreateRectRgn(0, 0, 0, 0);
+    if (!GetClipRgn(hdc, hRgn))
+    {
+        DeleteObject(hRgn);
+        hRgn = 0;
+    }
 
     /* create the handle table */
     ht = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
@@ -427,13 +435,21 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
                   mr->rdSize,offset,mh->mtSize*2);
             break;
 	}
+
 	offset += mr->rdSize * 2;
+	if (mr->rdFunction == META_EOF) {
+	    TRACE("Got META_EOF so stopping\n");
+	    break;
+	}
 	PlayMetaFileRecord( hdc, ht, mr, mh->mtNoObjects );
     }
 
-    SelectObject(hdc, hBrush);
+    /* restore DC */
     SelectObject(hdc, hPen);
-    SelectObject(hdc, hFont);
+    SelectObject(hdc, hBrush);
+    SelectPalette(hdc, hPal, FALSE);
+    ExtSelectClipRgn(hdc, hRgn, RGN_COPY);
+    DeleteObject(hRgn);
 
     /* free objects in handle table */
     for(i = 0; i < mh->mtNoObjects; i++)
@@ -786,8 +802,8 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                       infohdr->biHeight,
                                       infohdr->biPlanes,
                                       infohdr->biBitCount,
-                                      (LPSTR)(mr->rdParm +
-                                      (sizeof(BITMAPINFOHEADER) / 2) + 4))));
+                                      mr->rdParm +
+                                      (sizeof(BITMAPINFOHEADER) / 2) + 4)));
             break;
 
         case BS_DIBPATTERN:
@@ -884,7 +900,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_STRETCHDIB:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[11]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, mr->rdParm[2] );
         StretchDIBits( hdc, (SHORT)mr->rdParm[10], (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8],
                        (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                        (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], bits, info,
@@ -895,7 +911,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_DIBSTRETCHBLT:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[10]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, DIB_RGB_COLORS );
         StretchDIBits( hdc, (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                        (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5], (SHORT)mr->rdParm[4],
                        (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2], bits, info,
@@ -910,7 +926,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                        mr->rdParm[11], /*Height*/
                                        mr->rdParm[13], /*Planes*/
                                        mr->rdParm[14], /*BitsPixel*/
-                                       (LPSTR)&mr->rdParm[15]);  /*bits*/
+                                       &mr->rdParm[15]); /*bits*/
         SelectObject(hdcSrc,hbitmap);
         StretchBlt(hdc, (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8],
                    (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6],
@@ -928,7 +944,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                         mr->rdParm[8]/*Height*/,
                                         mr->rdParm[10]/*Planes*/,
                                         mr->rdParm[11]/*BitsPixel*/,
-                                        (LPSTR)&mr->rdParm[12]/*bits*/);
+                                        &mr->rdParm[12]/*bits*/);
         SelectObject(hdcSrc,hbitmap);
         BitBlt(hdc,(SHORT)mr->rdParm[6],(SHORT)mr->rdParm[5],
                 (SHORT)mr->rdParm[4],(SHORT)mr->rdParm[3],
@@ -992,7 +1008,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
         if (mr->rdSize > 12) {
             LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[8]);
-            LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize(info, mr->rdParm[0]);
+            LPSTR bits = (LPSTR)info + bitmap_info_size(info, mr->rdParm[0]);
 
             StretchDIBits(hdc, (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                           (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2],
@@ -1022,7 +1038,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_SETDIBTODEV:
         {
             BITMAPINFO *info = (BITMAPINFO *) &(mr->rdParm[9]);
-            char *bits = (char *)info + DIB_BitmapInfoSize( info, mr->rdParm[0] );
+            char *bits = (char *)info + bitmap_info_size( info, mr->rdParm[0] );
             SetDIBitsToDevice(hdc, (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                               (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                               (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3],
@@ -1265,19 +1281,19 @@ static BOOL MF_Play_MetaExtTextOut(HDC hdc, METARECORD *mr)
     }
 
     if (mr->rdSize == len / 2)
-        dxx = NULL;                      /* determine if array present */
+        dxx = NULL;                      /* determine if array is present */
     else
         if (mr->rdSize == (len + s1 * sizeof(INT16)) / 2)
         {
             dxx = (LPINT16)(sot+(((s1+1)>>1)*2));
             dx = HeapAlloc( GetProcessHeap(), 0, s1*sizeof(INT));
-            if (dx) for (i = 0; i < s1; i++) dx[i] = (SHORT)dxx[i];
+            if (dx) for (i = 0; i < s1; i++) dx[i] = dxx[i];
         }
 	else {
             TRACE("%s  len: %d\n",  sot, mr->rdSize);
             WARN("Please report: ExtTextOut len=%d slen=%d rdSize=%d opt=%04x\n",
 		 len, s1, mr->rdSize, mr->rdParm[3]);
-	    dxx = NULL; /* should't happen -- but if, we continue with NULL */
+	    dxx = NULL; /* shouldn't happen -- but if, we continue with NULL */
 	}
     ExtTextOutA( hdc,
                  (SHORT)mr->rdParm[1],       /* X position */

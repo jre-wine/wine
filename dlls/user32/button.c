@@ -229,8 +229,8 @@ static void setup_clipping( HWND hwnd, HDC hdc )
 /***********************************************************************
  *           ButtonWndProc_common
  */
-static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
-                                           WPARAM wParam, LPARAM lParam, BOOL unicode )
+static LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg,
+                                    WPARAM wParam, LPARAM lParam, BOOL unicode )
 {
     RECT rect;
     POINT pt;
@@ -309,6 +309,7 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
 	{
 	    SendMessageW( hWnd, BM_SETSTATE, TRUE, 0 );
             set_button_state( hWnd, get_button_state( hWnd ) | BUTTON_BTNPRESSED );
+            SetCapture( hWnd );
 	}
 	break;
 
@@ -567,9 +568,8 @@ static LRESULT WINAPI ButtonWndProcA( HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 
 /**********************************************************************
  * Convert button styles to flags used by DrawText.
- * TODO: handle WS_EX_RIGHT extended style.
  */
-static UINT BUTTON_BStoDT(DWORD style)
+static UINT BUTTON_BStoDT( DWORD style, DWORD ex_style )
 {
    UINT dtStyle = DT_NOCLIP;  /* We use SelectClipRgn to limit output */
 
@@ -592,6 +592,8 @@ static UINT BUTTON_BStoDT(DWORD style)
          if (get_button_type(style) <= BS_DEFPUSHBUTTON) dtStyle |= DT_CENTER;
          /* all other flavours have left aligned text */
    }
+
+   if (ex_style & WS_EX_RIGHT) dtStyle = DT_RIGHT | (dtStyle & ~(DT_LEFT | DT_CENTER));
 
    /* DrawText ignores vertical alignment for multiline text,
     * but we use these flags to align label manually.
@@ -626,10 +628,11 @@ static UINT BUTTON_BStoDT(DWORD style)
 static UINT BUTTON_CalcLabelRect(HWND hwnd, HDC hdc, RECT *rc)
 {
    LONG style = GetWindowLongW( hwnd, GWL_STYLE );
+   LONG ex_style = GetWindowLongW( hwnd, GWL_EXSTYLE );
    WCHAR *text;
    ICONINFO    iconInfo;
    BITMAP      bm;
-   UINT        dtStyle = BUTTON_BStoDT(style);
+   UINT        dtStyle = BUTTON_BStoDT( style, ex_style );
    RECT        r = *rc;
    INT         n;
 
@@ -672,7 +675,7 @@ static UINT BUTTON_CalcLabelRect(HWND hwnd, HDC hdc, RECT *rc)
       empty_rect:
          rc->right = r.left;
          rc->bottom = r.top;
-         return (UINT)(LONG)-1;
+         return (UINT)-1;
    }
 
    /* Position label inside bounding rectangle according to
@@ -810,8 +813,8 @@ static void PB_Paint( HWND hwnd, HDC hDC, UINT action )
 
     setup_clipping( hwnd, hDC );
 
-    hOldPen = (HPEN)SelectObject(hDC, SYSCOLOR_GetPen(COLOR_WINDOWFRAME));
-    hOldBrush =(HBRUSH)SelectObject(hDC,GetSysColorBrush(COLOR_BTNFACE));
+    hOldPen = SelectObject(hDC, SYSCOLOR_GetPen(COLOR_WINDOWFRAME));
+    hOldBrush = SelectObject(hDC,GetSysColorBrush(COLOR_BTNFACE));
     oldBkMode = SetBkMode(hDC, TRANSPARENT);
 
     if (get_button_type(style) == BS_DEFPUSHBUTTON)
@@ -1063,7 +1066,7 @@ static void GB_Paint( HWND hwnd, HDC hDC, UINT action )
      * But Windows doesn't clip label's rect, so do I.
      */
 
-    /* There is 1-pixel marging at the left, right, and bottom */
+    /* There is 1-pixel margin at the left, right, and bottom */
     rc.left--; rc.right++; rc.bottom++;
     FillRect(hDC, &rc, hbr);
     rc.left++; rc.right--; rc.bottom--;

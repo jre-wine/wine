@@ -26,16 +26,13 @@
 #include "msvcrt.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
-#include "msvcrt/mbctype.h"
-#include "msvcrt/errno.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
-unsigned char MSVCRT_mbctype[257];
+unsigned char MSVCRT_mbctype[257] = { 0 };
 static int g_mbcp_is_multibyte = 0;
 
 int MSVCRT___mb_cur_max = 1;
-extern int MSVCRT___lc_collate_cp;
 
 /* It seems that the data about valid trail bytes is not available from kernel32
  * so we have to store is here. The format is the same as for lead bytes in CPINFO */
@@ -146,9 +143,9 @@ unsigned char* CDECL __p__mbctype(void)
 }
 
 /*********************************************************************
- *		__p___mb_cur_max(MSVCRT.@)
+ *		___mb_cur_max_func(MSVCRT.@)
  */
-int* CDECL __p___mb_cur_max(void)
+int* CDECL MSVCRT____mb_cur_max_func(void)
 {
   return &MSVCRT___mb_cur_max;
 }
@@ -191,7 +188,7 @@ int CDECL _setmbcp(int cp)
   if (!GetCPInfo(newcp, &cpi))
   {
     WARN("Codepage %d not found\n", newcp);
-    msvcrt_set_errno(MSVCRT_EINVAL);
+    *MSVCRT__errno() = MSVCRT_EINVAL;
     return -1;
   }
 
@@ -318,6 +315,42 @@ unsigned int CDECL _mbctoupper(unsigned int c)
       return c;
     }
     return toupper(c); /* ASCII CP or SB char */
+}
+
+/*********************************************************************
+ *		_mbcjistojms(MSVCRT.@)
+ *
+ *		Converts a jis character to sjis.
+ *		Based on description from
+ *		http://www.slayers.ne.jp/~oouchi/code/jistosjis.html
+ */
+unsigned int CDECL _mbcjistojms(unsigned int c)
+{
+  /* Conversion takes place only when codepage is 932.
+     In all other cases, c is returned unchanged */
+  if(MSVCRT___lc_codepage == 932)
+  {
+    if(HIBYTE(c) >= 0x21 && HIBYTE(c) <= 0x7e &&
+       LOBYTE(c) >= 0x21 && LOBYTE(c) <= 0x7e)
+    {
+      if(HIBYTE(c) % 2)
+        c += 0x1f;
+      else
+        c += 0x7d;
+
+      if(LOBYTE(c) > 0x7F)
+        c += 0x1;
+
+      c = (((HIBYTE(c) - 0x21)/2 + 0x81) << 8) | LOBYTE(c);
+
+      if(HIBYTE(c) > 0x9f)
+        c += 0x4000;
+    }
+    else
+      return 0; /* Codepage is 932, but c can't be converted */
+  }
+
+  return c;
 }
 
 /*********************************************************************
@@ -454,11 +487,11 @@ int CDECL _mbsnbcpy_s(unsigned char* dst, MSVCRT_size_t size, const unsigned cha
     MSVCRT_size_t pos = 0;
 
     if(!dst || size == 0)
-        return EINVAL;
+        return MSVCRT_EINVAL;
     if(!src)
     {
         dst[0] = '\0';
-        return EINVAL;
+        return MSVCRT_EINVAL;
     }
     if(!n)
         return 0;
@@ -471,7 +504,7 @@ int CDECL _mbsnbcpy_s(unsigned char* dst, MSVCRT_size_t size, const unsigned cha
             if(pos == size)
             {
                 dst[0] = '\0';
-                return ERANGE;
+                return MSVCRT_ERANGE;
             }
             is_lead = (!is_lead && _ismbblead(*src));
             n--;
@@ -489,7 +522,7 @@ int CDECL _mbsnbcpy_s(unsigned char* dst, MSVCRT_size_t size, const unsigned cha
             if(pos == size)
             {
                 dst[0] = '\0';
-                return ERANGE;
+                return MSVCRT_ERANGE;
             }
 
             if(!(*src)) break;
@@ -502,7 +535,7 @@ int CDECL _mbsnbcpy_s(unsigned char* dst, MSVCRT_size_t size, const unsigned cha
     else
     {
         dst[0] = '\0';
-        return ERANGE;
+        return MSVCRT_ERANGE;
     }
 
     return 0;

@@ -29,8 +29,15 @@ extern "C" {
 # define DWMAPI_(type) STDAPI_(type)
 #endif
 
+DECLARE_HANDLE(HTHUMBNAIL);
+
 DWMAPI DwmEnableComposition(UINT);
+DWMAPI DwmEnableMMCSS(BOOL);
+DWMAPI DwmExtendFrameIntoClientArea(HWND,const MARGINS*);
+DWMAPI DwmGetColorizationColor(DWORD*,BOOL);
 DWMAPI DwmIsCompositionEnabled(BOOL*);
+DWMAPI DwmSetWindowAttribute(HWND, DWORD, LPCVOID, DWORD);
+DWMAPI DwmUnregisterThumbnail(HTHUMBNAIL);
 
 #ifdef __cplusplus
 }

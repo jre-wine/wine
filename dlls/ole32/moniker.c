@@ -19,12 +19,10 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
- * TODO:
- * - IRunningObjectTable should work interprocess, but currently doesn't.
- *   Native (on Win2k at least) uses an undocumented RPC interface, IROT, to
- *   communicate with RPCSS which contains the table of marshalled data.
  */
+
+#include "config.h"
+#include "wine/port.h"
 
 #include <stdarg.h>
 #include <string.h>
@@ -50,19 +48,13 @@
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 /* see MSDN docs for IROTData::GetComparisonData, which states what this
- * constant is (http://msdn2.microsoft.com/en-us/library/ms693773.aspx) */
+ * constant is
+ */
 #define MAX_COMPARISON_DATA 2048
 
-static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *__eptr)
+static LONG WINAPI rpc_filter(EXCEPTION_POINTERS *eptr)
 {
-    switch (GetExceptionCode())
-    {
-    case EXCEPTION_ACCESS_VIOLATION:
-    case EXCEPTION_ILLEGAL_INSTRUCTION:
-        return EXCEPTION_CONTINUE_SEARCH;
-    default:
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
+    return I_RpcExceptionFilter(eptr->ExceptionRecord->ExceptionCode);
 }
 
 /* define the structure of the running object table elements */
@@ -101,7 +93,7 @@ typedef struct EnumMonikerImpl
 
 
 /* IEnumMoniker Local functions*/
-static HRESULT WINAPI EnumMonikerImpl_CreateEnumROTMoniker(InterfaceList *moniker_list,
+static HRESULT EnumMonikerImpl_CreateEnumROTMoniker(InterfaceList *moniker_list,
     ULONG pos, IEnumMoniker **ppenumMoniker);
 
 static IrotHandle get_irot_handle(void)
@@ -324,7 +316,7 @@ RunningObjectTableImpl_QueryInterface(IRunningObjectTable* iface,
 
     if (IsEqualIID(&IID_IUnknown, riid) ||
         IsEqualIID(&IID_IRunningObjectTable, riid))
-        *ppvObject = (IRunningObjectTable*)This;
+        *ppvObject = This;
 
     if ((*ppvObject)==0)
         return E_NOINTERFACE;
@@ -348,9 +340,9 @@ RunningObjectTableImpl_AddRef(IRunningObjectTable* iface)
 }
 
 /***********************************************************************
- *        RunningObjectTable_Initialize
+ *        RunningObjectTable_Destroy
  */
-static HRESULT WINAPI
+static HRESULT
 RunningObjectTableImpl_Destroy(void)
 {
     struct list *cursor, *cursor2;
@@ -422,7 +414,7 @@ RunningObjectTableImpl_Release(IRunningObjectTable* iface)
  * grfFlags       [in] Registration options 
  * punkObject     [in] the object being registered
  * pmkObjectName  [in] the moniker of the object being registered
- * pdwRegister    [in] the value identifying the registration
+ * pdwRegister    [out] the value identifying the registration
  */
 static HRESULT WINAPI
 RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
@@ -472,7 +464,7 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
             const void *pv = GlobalLock(hglobal);
             rot_entry->object = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(MInterfacePointer, abData[size]));
             rot_entry->object->ulCntData = size;
-            memcpy(&rot_entry->object->abData, pv, size);
+            memcpy(rot_entry->object->abData, pv, size);
             GlobalUnlock(hglobal);
         }
     }
@@ -538,7 +530,7 @@ RunningObjectTableImpl_Register(IRunningObjectTable* iface, DWORD grfFlags,
             const void *pv = GlobalLock(hglobal);
             moniker = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(InterfaceData, abData[size]));
             moniker->ulCntData = size;
-            memcpy(&moniker->abData, pv, size);
+            memcpy(moniker->abData, pv, size);
             GlobalUnlock(hglobal);
         }
     }
@@ -650,7 +642,7 @@ RunningObjectTableImpl_IsRunning( IRunningObjectTable* iface, IMoniker *pmkObjec
     LIST_FOR_EACH_ENTRY(rot_entry, &This->rot, const struct rot_entry, entry)
     {
         if ((rot_entry->moniker_data->ulCntData == moniker_data->ulCntData) &&
-            !memcmp(&moniker_data->abData, &rot_entry->moniker_data->abData, moniker_data->ulCntData))
+            !memcmp(moniker_data->abData, rot_entry->moniker_data->abData, moniker_data->ulCntData))
         {
             hr = S_OK;
             break;
@@ -722,7 +714,7 @@ RunningObjectTableImpl_GetObject( IRunningObjectTable* iface,
     LIST_FOR_EACH_ENTRY(rot_entry, &This->rot, struct rot_entry, entry)
     {
         if ((rot_entry->moniker_data->ulCntData == moniker_data->ulCntData) &&
-            !memcmp(&moniker_data->abData, &rot_entry->moniker_data->abData, moniker_data->ulCntData))
+            !memcmp(moniker_data->abData, rot_entry->moniker_data->abData, moniker_data->ulCntData))
         {
             IStream *pStream;
             hr = create_stream_on_mip_ro(rot_entry->object, &pStream);
@@ -868,7 +860,7 @@ RunningObjectTableImpl_GetTimeOfLastChange(IRunningObjectTable* iface,
     LIST_FOR_EACH_ENTRY(rot_entry, &This->rot, const struct rot_entry, entry)
     {
         if ((rot_entry->moniker_data->ulCntData == moniker_data->ulCntData) &&
-            !memcmp(&moniker_data->abData, &rot_entry->moniker_data->abData, moniker_data->ulCntData))
+            !memcmp(moniker_data->abData, rot_entry->moniker_data->abData, moniker_data->ulCntData))
         {
             *pfiletime = rot_entry->last_modified;
             hr = S_OK;
@@ -980,9 +972,9 @@ HRESULT WINAPI RunningObjectTableImpl_Initialize(void)
     /* initialize the virtual table function */
     runningObjectTableInstance->lpVtbl = &VT_RunningObjectTableImpl;
 
-    /* the initial reference is set to "1" ! because if set to "0" it will be not practis when */
-    /* the ROT referred many times not in the same time (all the objects in the ROT will  */
-    /* be removed every time the ROT is removed ) */
+    /* the initial reference is set to "1" so that it isn't destroyed after its
+     * first use until the process is destroyed, as the running object table is
+     * a process-wide cache of a global table */
     runningObjectTableInstance->ref = 1;
 
     list_init(&runningObjectTableInstance->rot);
@@ -1086,6 +1078,21 @@ static HRESULT get_moniker_for_progid_display_name(LPBC pbc,
         IParseDisplayName *pdn;
         hr = IMoniker_BindToObject(class_moniker, pbc, NULL,
                                    &IID_IParseDisplayName, (void **)&pdn);
+        /* fallback to using IClassFactory to get IParseDisplayName -
+         * adsldp.dll depends on this */
+        if (FAILED(hr))
+        {
+            IClassFactory *pcf;
+            hr = IMoniker_BindToObject(class_moniker, pbc, NULL,
+                                       &IID_IClassFactory, (void **)&pcf);
+            if (SUCCEEDED(hr))
+            {
+                hr = IClassFactory_CreateInstance(pcf, NULL,
+                                                  &IID_IParseDisplayName,
+                                                  (void **)&pdn);
+                IClassFactory_Release(pcf);
+            }
+        }
         IMoniker_Release(class_moniker);
         if (SUCCEEDED(hr))
         {
@@ -1204,9 +1211,9 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
 
         return res;
     }
-    /* if the file is not a storage object then attemps to match various bits in the file against a
-       pattern in the registry. this case is not frequently used ! so I present only the psodocode for
-       this case
+    /* If the file is not a storage object then attempt to match various bits in the file against a
+       pattern in the registry. This case is not frequently used, so I present only the pseudocode for
+       this case.
 
      for(i=0;i<nFileTypes;i++)
 
@@ -1233,7 +1240,7 @@ HRESULT WINAPI GetClassFile(LPCOLESTR filePathName,CLSID *pclsid)
     nbElm=FileMonikerImpl_DecomposePath(filePathName,&pathDec);
     absFile=pathDec[nbElm-1];
 
-    /* failed if the path represente a directory and not an absolute file name*/
+    /* failed if the path represents a directory and not an absolute file name*/
     if (!lstrcmpW(absFile, bkslashW))
         return MK_E_INVALIDEXTENSION;
 
@@ -1284,10 +1291,10 @@ static HRESULT WINAPI EnumMonikerImpl_QueryInterface(IEnumMoniker* iface,REFIID 
     *ppvObject = NULL;
 
     if (IsEqualIID(&IID_IUnknown, riid))
-        *ppvObject = (IEnumMoniker*)This;
+        *ppvObject = This;
     else
         if (IsEqualIID(&IID_IEnumMoniker, riid))
-            *ppvObject = (IEnumMoniker*)This;
+            *ppvObject = This;
 
     if ((*ppvObject)==NULL)
         return E_NOINTERFACE;
@@ -1337,7 +1344,7 @@ static ULONG   WINAPI EnumMonikerImpl_Release(IEnumMoniker* iface)
     return ref;
 }
 /***********************************************************************
- *        EnmumMoniker_Next
+ *        EnumMoniker_Next
  */
 static HRESULT   WINAPI EnumMonikerImpl_Next(IEnumMoniker* iface, ULONG celt, IMoniker** rgelt, ULONG * pceltFetched)
 {
@@ -1372,7 +1379,7 @@ static HRESULT   WINAPI EnumMonikerImpl_Next(IEnumMoniker* iface, ULONG celt, IM
 }
 
 /***********************************************************************
- *        EnmumMoniker_Skip
+ *        EnumMoniker_Skip
  */
 static HRESULT   WINAPI EnumMonikerImpl_Skip(IEnumMoniker* iface, ULONG celt)
 {
@@ -1389,7 +1396,7 @@ static HRESULT   WINAPI EnumMonikerImpl_Skip(IEnumMoniker* iface, ULONG celt)
 }
 
 /***********************************************************************
- *        EnmumMoniker_Reset
+ *        EnumMoniker_Reset
  */
 static HRESULT   WINAPI EnumMonikerImpl_Reset(IEnumMoniker* iface)
 {
@@ -1403,7 +1410,7 @@ static HRESULT   WINAPI EnumMonikerImpl_Reset(IEnumMoniker* iface)
 }
 
 /***********************************************************************
- *        EnmumMoniker_Clone
+ *        EnumMoniker_Clone
  */
 static HRESULT   WINAPI EnumMonikerImpl_Clone(IEnumMoniker* iface, IEnumMoniker ** ppenum)
 {
@@ -1456,7 +1463,7 @@ static const IEnumMonikerVtbl VT_EnumMonikerImpl =
  *        Used by EnumRunning to create the structure and EnumClone
  *	  to copy the structure
  */
-static HRESULT WINAPI EnumMonikerImpl_CreateEnumROTMoniker(InterfaceList *moniker_list,
+static HRESULT EnumMonikerImpl_CreateEnumROTMoniker(InterfaceList *moniker_list,
                                                  ULONG current_pos,
                                                  IEnumMoniker **ppenumMoniker)
 {
@@ -1653,7 +1660,7 @@ HRESULT MonikerMarshal_Create(IMoniker *inner, IUnknown **outer)
     return S_OK;
 }
 
-void * __RPC_USER MIDL_user_allocate(size_t size)
+void * __RPC_USER MIDL_user_allocate(SIZE_T size)
 {
     return HeapAlloc(GetProcessHeap(), 0, size);
 }

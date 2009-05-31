@@ -41,8 +41,13 @@ BEGIN
 /*
     LTEXT           "Эта библиотека является свободным программным обеспечением; вы можете распространять её и/или модифицировать согласно условиям лицензии GNU Lesser General Public License, опубликованной Free Software Foundation; версии 2.1 лицензии или (на ваше усмотрение) любой более поздней.",
 */
-    LTEXT           "This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
+    LTEXT           "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Регистрационная информация Windows ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Имя:", IDC_STATIC, 22, 126, 40, 20
+    LTEXT           "Организация:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -64,31 +69,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Настройки окна ",IDC_STATIC,8,4,244,180
+    GROUPBOX    " Настройки окна ",IDC_STATIC,8,4,244,84
+    CONTROL     "Разрешить приложению DirectX удерживать мышь в своём окне",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    CONTROL     "Разрешить менеджеру окон &декорировать окна",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,32,230,8
+    CONTROL     "Разрешить менеджеру окон управлять окнами Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,44,230,8
+    CONTROL     "Эмулировать виртуальный рабочий стол",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,56,230,8
+    LTEXT       "Размер рабочего стола:",IDC_DESKTOP_SIZE,15,70,84,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,149,70,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,104,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,157,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL	    "Разрешить приложению DirectX удерживать мышь в своём окне",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,235,8
-    CONTROL	    "Разрешить менеджеру окон управлять окнами Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,34,230,8
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,95,244,49
+    LTEXT       "Вершинные шейдеры: ",IDC_STATIC,15,110,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,108,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Включить Pixel Shader (если поддерживается оборудованием)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,126,230,10
 
-    LTEXT           "Если включить эмуляцию рабочего стола, то все окна будут отображаться в одном 'виртуальном экране' заданного размера. Иначе окна размещаются, как обычно, на стандартном рабочем столе.",
-                    IDC_STATIC,15,117,228,36
-    LTEXT           "Размер рабочего стола:",IDC_DESKTOP_SIZE,15,167,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,108,167,8,8,WS_DISABLED
-    CONTROL         "Эмулировать виртуальный рабочий стол",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,152,230,10
-
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,189,244,45
-
-    LTEXT	    "Вершинные шейдеры: ",IDC_STATIC,15,199,120,30
-    COMBOBOX	    IDC_D3D_VSHADER_MODE,120,197,125,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Включить Pixel Shader (если поддерживается оборудованием)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,216,230,10
-    GROUPBOX        " Разрешение экрана ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Разрешение экрана ",IDC_STATIC,8,151,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,161,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,161,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "dpi",IDC_STATIC,235,163,10,8
+    LTEXT       "This is a sample text using 10 point Tahoma",IDC_RES_FONT_PREVIEW,15,181,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -127,6 +128,7 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Настройка дисков ",IDC_STATIC,8,4,244,240
+    LTEXT           "Failed to connect to the mount manager, the drive configuration cannot be edited.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Добавить...",IDC_BUTTON_ADD,15,98,45,14
@@ -134,7 +136,7 @@ BEGIN
     PUSHBUTTON      "&Автоопределение...",IDC_BUTTON_AUTODETECT,165,98,80,14
 
     /* editing drive details */
-    LTEXT           "&Путь:",IDC_STATIC,15,123,20,9    
+    LTEXT           "&Путь:",IDC_STATIC_PATH,15,123,20,9
     EDITTEXT        IDC_EDIT_PATH,41,120,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Обзор...",IDC_BUTTON_BROWSE_PATH,206,120,40,13
     
@@ -203,12 +205,11 @@ BEGIN
                      LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,126,230,64
     CONTROL         "Направить в:",IDC_LINK_SFPATH,"Button",BS_AUTOCHECKBOX|WS_TABSTOP|WS_DISABLED,15,195,50,13
     EDITTEXT         IDC_EDIT_SFPATH,65,195,145,13,ES_AUTOHSCROLL|WS_TABSTOP|WS_DISABLED
-    PUSHBUTTON      "Выбрать",IDC_BROWSE_SFPATH,215,195,30,13,WS_DISABLED
+    PUSHBUTTON      "Обзор",IDC_BROWSE_SFPATH,215,195,30,13,WS_DISABLED
 END
 
 STRINGTABLE DISCARDABLE
 BEGIN
-    IDS_WINE_VERSION        "CVS"
     IDS_TAB_APPLICATIONS    "Приложения"
     IDS_TAB_DLLS            "Библиотеки"
     IDS_TAB_DRIVES          "Диски"
@@ -309,4 +310,19 @@ BEGIN
     IDC_SYSPARAMS_INACTIVE_TITLE    "Пассивное окно"
     IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Пассивное окно - текст"
     IDC_SYSPARAMS_MSGBOX_TEXT       "Окно сообщения - текст"
+    IDC_SYSPARAMS_APPWORKSPACE      "Содержимое окна MDI - фон"
+    IDC_SYSPARAMS_WINDOW_FRAME      "Окно - рамка"
+    IDC_SYSPARAMS_ACTIVE_BORDER     "Активное окно - рамка"
+    IDC_SYSPARAMS_INACTIVE_BORDER   "Пассивное окно - рамка"
+    IDC_SYSPARAMS_BUTTON_SHADOW     "Элементы управления - тень"
+    IDC_SYSPARAMS_GRAY_TEXT         "Недоступный элемент"
+    IDC_SYSPARAMS_BUTTON_HILIGHT    "Элементы управления - светлая рамка"
+    IDC_SYSPARAMS_BUTTON_DARK_SHADOW "Элементы управления - темная тень"
+    IDC_SYSPARAMS_BUTTON_LIGHT      "Элементы управления - свет"
+    IDC_SYSPARAMS_BUTTON_ALTERNATE  "Элементы управления - фон 2"
+    IDC_SYSPARAMS_HOT_TRACKING      "Ссылка, Подсветка"
+    IDC_SYSPARAMS_ACTIVE_TITLE_GRADIENT "Градиент активного окна"
+    IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT "Градиент пассивного окна"
+    IDC_SYSPARAMS_MENU_HILIGHT      "Плоское меню - подсветка"
+    IDC_SYSPARAMS_MENUBAR           "Плоское меню - фон"
 END

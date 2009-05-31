@@ -4,7 +4,7 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = comctl32.dll
-IMPORTLIB = libcomctl32.$(IMPLIBEXT)
+IMPORTLIB = comctl32
 IMPORTS   = user32 gdi32 advapi32 kernel32
 DELAYIMPORTS = winmm uxtheme
 
@@ -34,6 +34,7 @@ C_SRCS = \
 	string.c \
 	syslink.c \
 	tab.c \
+	theme_button.c \
 	theme_combo.c \
 	theme_dialog.c \
 	theme_edit.c \

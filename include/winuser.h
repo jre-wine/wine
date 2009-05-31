@@ -104,6 +104,13 @@ typedef struct tagUSEROBJECTFLAGS {
     DWORD dwFlags;
 } USEROBJECTFLAGS, *PUSEROBJECTFLAGS;
 
+typedef struct tagBSMINFO {
+    UINT  cbSize;
+    HDESK hdesk;
+    HWND  hwnd;
+    LUID  luid;
+} BSMINFO, *PBSMINFO;
+
 /* Window stations */
 #define WINSTA_ENUMDESKTOPS         0x0001
 #define WINSTA_READATTRIBUTES       0x0002
@@ -180,6 +187,17 @@ typedef struct tagMOUSEKEYS
     DWORD   dwReserved1;
     DWORD   dwReserved2;
 } MOUSEKEYS, *LPMOUSEKEYS;
+
+/* struct and defines for GetMouseMovePointsEx */
+#define GMMP_USE_DISPLAY_POINTS 1
+#define GMMP_USE_HIGH_RESOLUTION_POINTS 2
+
+typedef struct tagMOUSEMOVEPOINT {
+    int x;
+    int y;
+    DWORD time;
+    ULONG_PTR dwExtraInfo;
+} MOUSEMOVEPOINT,*PMOUSEMOVEPOINT,*LPMOUSEMOVEPOINT;
 
 /* flags for STICKYKEYS dwFlags field */
 #define SKF_AUDIBLEFEEDBACK 0x00000040
@@ -634,8 +652,7 @@ typedef struct tagWINDOWPLACEMENT
 #define MAKEINTRESOURCEA(i) (LPSTR)((ULONG_PTR)((WORD)(i)))
 #define MAKEINTRESOURCEW(i) (LPWSTR)((ULONG_PTR)((WORD)(i)))
 
-#ifdef __WINESRC__
-/* force using a cast when inside Wine */
+#ifdef WINE_NO_UNICODE_MACROS /* force using a cast */
 #define MAKEINTRESOURCE(i) ((ULONG_PTR)((WORD)(i)))
 #else
 #define MAKEINTRESOURCE WINELIB_NAME_AW(MAKEINTRESOURCE)
@@ -948,6 +965,8 @@ WINUSERAPI BOOL     WINAPI SetSysColors(INT,const INT*,const COLORREF*);
 #define EM_GETLIMITTEXT          0x00d5
 #define EM_POSFROMCHAR           0x00d6
 #define EM_CHARFROMPOS           0x00d7
+#define EM_SETIMESTATUS          0x00d8
+#define EM_GETIMESTATUS          0x00d9
 /* a name change since win95 */
 #define EM_SETLIMITTEXT          EM_LIMITTEXT
 
@@ -1149,6 +1168,7 @@ WINUSERAPI BOOL     WINAPI SetSysColors(INT,const INT*,const COLORREF*);
   /* Win32 4.0 messages */
 #define WM_COPYDATA		0x004a
 #define WM_CANCELJOURNAL	0x004b
+#define WM_KEYF1		0x004d
 #define WM_NOTIFY		0x004e
 #define WM_INPUTLANGCHANGEREQUEST       0x0050
 #define WM_INPUTLANGCHANGE              0x0051
@@ -1807,6 +1827,7 @@ typedef struct
 #define BSM_NETDRIVER            0x00000002
 #define BSM_INSTALLABLEDRIVERS   0x00000004
 #define BSM_APPLICATIONS         0x00000008
+#define BSM_ALLDESKTOPS          0x00000010
 
 #define BSF_QUERY                0x00000001
 #define BSF_IGNORECURRENTTASK    0x00000002
@@ -1820,6 +1841,7 @@ typedef struct
 #define BSF_RETURNHDESK          0x00000200
 #define BSF_LUID                 0x00000400
 
+#define BROADCAST_QUERY_DENY     0x424D5144
 
 /***** Window hooks *****/
 
@@ -2056,9 +2078,9 @@ typedef struct tagMSG
 #define POINTSTOPOINT(pt, pts) { (pt).x = (pts).x; (pt).y = (pts).y; }
 #define POINTTOPOINTS(pt)      (MAKELONG((short)((pt).x), (short)((pt).y)))
 
-#define MAKELPARAM(low,high)   ((LPARAM)MAKELONG(low,high))
-#define MAKEWPARAM(low,high)   ((WPARAM)MAKELONG(low,high))
-#define MAKELRESULT(low,high)  ((LRESULT)MAKELONG(low,high))
+#define MAKELPARAM(low,high)   ((LPARAM)(DWORD)MAKELONG(low,high))
+#define MAKEWPARAM(low,high)   ((WPARAM)(DWORD)MAKELONG(low,high))
+#define MAKELRESULT(low,high)  ((LRESULT)(DWORD)MAKELONG(low,high))
 
 /* Cursors / Icons */
 
@@ -2585,6 +2607,7 @@ typedef struct tagSCROLLBARINFO
 #define MB_YESNOCANCEL		0x00000003
 #define MB_YESNO		0x00000004
 #define MB_RETRYCANCEL		0x00000005
+#define MB_CANCELTRYCONTINUE	0x00000006
 #define MB_TYPEMASK		0x0000000F
 
 #define MB_ICONHAND		0x00000010
@@ -3217,9 +3240,6 @@ typedef struct tagMINIMIZEDMETRICS {
 #define WS_EX_OVERLAPPEDWINDOW (WS_EX_WINDOWEDGE|WS_EX_CLIENTEDGE)
 #define WS_EX_PALETTEWINDOW    (WS_EX_WINDOWEDGE|WS_EX_TOOLWINDOW|WS_EX_TOPMOST)
 
-/* WINE internal... */
-#define WS_EX_TRAYWINDOW	0x80000000L
-
 #endif /* NOWINSTYLES */
 
 /* Window scrolling */
@@ -3281,6 +3301,12 @@ typedef struct {
 /* SetLayeredWindowAttributes() flags */
 #define LWA_COLORKEY        0x00000001
 #define LWA_ALPHA           0x00000002
+
+/* UpdateLayeredWindow() flags */
+#define ULW_COLORKEY        0x00000001
+#define ULW_ALPHA           0x00000002
+#define ULW_OPAQUE          0x00000004
+#define ULW_EX_NORESIZE     0x00000008
 
   /* ShowWindow() codes */
 #define SW_HIDE             0
@@ -4312,6 +4338,9 @@ WINUSERAPI BOOL        WINAPI BringWindowToTop(HWND);
 WINUSERAPI LONG        WINAPI BroadcastSystemMessageA(DWORD,LPDWORD,UINT,WPARAM,LPARAM);
 WINUSERAPI LONG        WINAPI BroadcastSystemMessageW(DWORD,LPDWORD,UINT,WPARAM,LPARAM);
 #define                       BroadcastSystemMessage WINELIB_NAME_AW(BroadcastSystemMessage)
+WINUSERAPI LONG        WINAPI BroadcastSystemMessageExA(DWORD,LPDWORD,UINT,WPARAM,LPARAM,PBSMINFO);
+WINUSERAPI LONG        WINAPI BroadcastSystemMessageExW(DWORD,LPDWORD,UINT,WPARAM,LPARAM,PBSMINFO);
+#define                       BroadcastSystemMessageEx WINELIB_NAME_AW(BroadcastSystemMessageEx)
 WINUSERAPI void        WINAPI CalcChildScroll(HWND, INT);
 WINUSERAPI BOOL        WINAPI CallMsgFilterA(LPMSG,INT);
 WINUSERAPI BOOL        WINAPI CallMsgFilterW(LPMSG,INT);
@@ -4485,7 +4514,7 @@ WINUSERAPI BOOL        WINAPI EnableScrollBar(HWND,UINT,UINT);
 WINUSERAPI BOOL        WINAPI EnableWindow(HWND,BOOL);
 WINUSERAPI BOOL        WINAPI EndDeferWindowPos(HDWP);
 WINUSERAPI BOOL        WINAPI EndDialog(HWND,INT_PTR);
-WINUSERAPI VOID        WINAPI EndMenu(void);
+WINUSERAPI BOOL        WINAPI EndMenu(void);
 WINUSERAPI BOOL        WINAPI EndPaint(HWND,const PAINTSTRUCT*);
 WINUSERAPI BOOL        WINAPI EnumChildWindows(HWND,WNDENUMPROC,LPARAM);
 WINUSERAPI UINT        WINAPI EnumClipboardFormats(UINT);
@@ -4995,10 +5024,10 @@ WINUSERAPI LONG        WINAPI TabbedTextOutA(HDC,INT,INT,LPCSTR,INT,INT,const IN
 WINUSERAPI LONG        WINAPI TabbedTextOutW(HDC,INT,INT,LPCWSTR,INT,INT,const INT*,INT);
 #define                       TabbedTextOut WINELIB_NAME_AW(TabbedTextOut)
 WINUSERAPI WORD        WINAPI TileWindows (HWND,UINT,const RECT *,UINT,const HWND *);
-WINUSERAPI INT         WINAPI ToAscii(UINT,UINT,LPBYTE,LPWORD,UINT);
-WINUSERAPI INT         WINAPI ToAsciiEx(UINT,UINT,LPBYTE,LPWORD,UINT,HKL);
-WINUSERAPI INT         WINAPI ToUnicode(UINT,UINT,PBYTE,LPWSTR,int,UINT);
-WINUSERAPI INT         WINAPI ToUnicodeEx(UINT,UINT,LPBYTE,LPWSTR,int,UINT,HKL);
+WINUSERAPI INT         WINAPI ToAscii(UINT,UINT,const BYTE *,LPWORD,UINT);
+WINUSERAPI INT         WINAPI ToAsciiEx(UINT,UINT,const BYTE *,LPWORD,UINT,HKL);
+WINUSERAPI INT         WINAPI ToUnicode(UINT,UINT,const BYTE *,LPWSTR,int,UINT);
+WINUSERAPI INT         WINAPI ToUnicodeEx(UINT,UINT,const BYTE *,LPWSTR,int,UINT,HKL);
 WINUSERAPI BOOL        WINAPI TrackMouseEvent(LPTRACKMOUSEEVENT);
 WINUSERAPI BOOL        WINAPI TrackPopupMenu(HMENU,UINT,INT,INT,INT,HWND,const RECT*);
 WINUSERAPI BOOL        WINAPI TrackPopupMenuEx(HMENU,UINT,INT,INT,HWND,LPTPMPARAMS);
@@ -5039,8 +5068,8 @@ WINUSERAPI VOID        WINAPI mouse_event(DWORD,DWORD,DWORD,DWORD,ULONG_PTR);
 WINUSERAPI INT        WINAPIV wsprintfA(LPSTR,LPCSTR,...);
 WINUSERAPI INT        WINAPIV wsprintfW(LPWSTR,LPCWSTR,...);
 #define                       wsprintf WINELIB_NAME_AW(wsprintf)
-WINUSERAPI INT         WINAPI wvsprintfA(LPSTR,LPCSTR,va_list);
-WINUSERAPI INT         WINAPI wvsprintfW(LPWSTR,LPCWSTR,va_list);
+WINUSERAPI INT         WINAPI wvsprintfA(LPSTR,LPCSTR,__ms_va_list);
+WINUSERAPI INT         WINAPI wvsprintfW(LPWSTR,LPCWSTR,__ms_va_list);
 #define                       wvsprintf WINELIB_NAME_AW(wvsprintf)
 
 /* Undocumented functions */

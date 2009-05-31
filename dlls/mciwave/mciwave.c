@@ -323,7 +323,7 @@ static DWORD WAVE_mciCreateRIFFSkeleton(WINE_MCIWAVE* wmw)
    {
        wmw->lpWaveFormat = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*wmw->lpWaveFormat));
        if (!wmw->lpWaveFormat) return MMSYSERR_NOMEM;
-       memcpy(wmw->lpWaveFormat, &wmw->wfxRef, sizeof(wmw->wfxRef));
+       *wmw->lpWaveFormat = wmw->wfxRef;
    }
 
    /* we can only record PCM files... there is no way in the MCI API to specify
@@ -369,7 +369,7 @@ static DWORD create_tmp_file(HMMIO* hFile, LPWSTR* pszTmpFileName)
     szPrefix[2] = 'I';
     szPrefix[3] = '\0';
 
-    if (!GetTempPathW(sizeof(szTmpPath), szTmpPath)) {
+    if (!GetTempPathW(sizeof(szTmpPath)/sizeof(szTmpPath[0]), szTmpPath)) {
         WARN("can't retrieve temp path!\n");
         return MCIERR_FILE_NOT_FOUND;
     }
@@ -784,7 +784,7 @@ static DWORD WAVE_mciPlay(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_PLAY_PARMS lp
 
     /* go back to beginning of chunk plus the requested position */
     /* FIXME: I'm not sure this is correct, notably because some data linked to
-     * the decompression state machine will not be correcly initialized.
+     * the decompression state machine will not be correctly initialized.
      * try it this way (other way would be to decompress from 0 up to dwPosition
      * and to start sending to hWave when dwPosition is reached)
      */
@@ -1015,11 +1015,11 @@ static DWORD WAVE_mciRecord(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_RECORD_PARM
     wmw->dwPosition = WAVE_ALIGN_ON_BLOCK(wmw, wmw->dwPosition);
     wmw->ckWaveData.cksize = WAVE_ALIGN_ON_BLOCK(wmw, wmw->ckWaveData.cksize);
 
-    /* go back to beginning of chunk plus the requested position */
+    /* Go back to the beginning of the chunk plus the requested position */
     /* FIXME: I'm not sure this is correct, notably because some data linked to
-     * the decompression state machine will not be correcly initialized.
-     * try it this way (other way would be to decompress from 0 up to dwPosition
-     * and to start sending to hWave when dwPosition is reached)
+     * the decompression state machine will not be correctly initialized.
+     * Try it this way (other way would be to decompress from 0 up to dwPosition
+     * and to start sending to hWave when dwPosition is reached).
      */
     mmioSeek(wmw->hFile, wmw->ckWaveData.dwDataOffset + wmw->dwPosition, SEEK_SET); /* >= 0 */
 
@@ -1351,7 +1351,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	switch (lpParms->dwItem) {
 	case MCI_STATUS_CURRENT_TRACK:
 	    lpParms->dwReturn = 1;
-            TRACE("MCI_STATUS_CURRENT_TRACK => %u\n", lpParms->dwReturn);
+            TRACE("MCI_STATUS_CURRENT_TRACK => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_LENGTH:
 	    if (!wmw->hFile) {
@@ -1360,7 +1360,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	    }
 	    /* only one track in file is currently handled, so don't take care of MCI_TRACK flag */
 	    lpParms->dwReturn = WAVE_ConvertByteToTimeFormat(wmw, wmw->ckWaveData.cksize, &ret);
-            TRACE("MCI_STATUS_LENGTH => %u\n", lpParms->dwReturn);
+            TRACE("MCI_STATUS_LENGTH => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_MODE:
 	    TRACE("MCI_STATUS_MODE => %u\n", wmw->dwStatus);
@@ -1375,7 +1375,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	case MCI_STATUS_NUMBER_OF_TRACKS:
 	    /* only one track in file is currently handled, so don't take care of MCI_TRACK flag */
 	    lpParms->dwReturn = 1;
-            TRACE("MCI_STATUS_NUMBER_OF_TRACKS => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_STATUS_NUMBER_OF_TRACKS => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_POSITION:
 	    if (!wmw->hFile) {
@@ -1386,7 +1386,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	    lpParms->dwReturn = WAVE_ConvertByteToTimeFormat(wmw,
 							     (dwFlags & MCI_STATUS_START) ? 0 : wmw->dwPosition,
 							     &ret);
-            TRACE("MCI_STATUS_POSITION %s => %u\n",
+            TRACE("MCI_STATUS_POSITION %s => %lu\n",
 		  (dwFlags & MCI_STATUS_START) ? "start" : "current", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_READY:
@@ -1397,7 +1397,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 	    break;
 	case MCI_STATUS_TIME_FORMAT:
 	    lpParms->dwReturn = MAKEMCIRESOURCE(wmw->dwMciTimeFormat, MCI_FORMAT_RETURN_BASE + wmw->dwMciTimeFormat);
-            TRACE("MCI_STATUS_TIME_FORMAT => %u\n", lpParms->dwReturn);
+            TRACE("MCI_STATUS_TIME_FORMAT => %lu\n", lpParms->dwReturn);
 	    ret = MCI_RESOURCE_RETURNED;
 	    break;
 	case MCI_WAVE_INPUT:
@@ -1423,7 +1423,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->nAvgBytesPerSec;
-            TRACE("MCI_WAVE_STATUS_AVGBYTESPERSEC => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_STATUS_AVGBYTESPERSEC => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_WAVE_STATUS_BITSPERSAMPLE:
 	    if (!wmw->hFile) {
@@ -1431,7 +1431,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->wBitsPerSample;
-            TRACE("MCI_WAVE_STATUS_BITSPERSAMPLE => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_STATUS_BITSPERSAMPLE => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_WAVE_STATUS_BLOCKALIGN:
 	    if (!wmw->hFile) {
@@ -1439,7 +1439,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->nBlockAlign;
-            TRACE("MCI_WAVE_STATUS_BLOCKALIGN => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_STATUS_BLOCKALIGN => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_WAVE_STATUS_CHANNELS:
 	    if (!wmw->hFile) {
@@ -1447,7 +1447,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->nChannels;
-            TRACE("MCI_WAVE_STATUS_CHANNELS => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_STATUS_CHANNELS => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_WAVE_STATUS_FORMATTAG:
 	    if (!wmw->hFile) {
@@ -1455,7 +1455,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->wFormatTag;
-            TRACE("MCI_WAVE_FORMATTAG => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_FORMATTAG => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_WAVE_STATUS_LEVEL:
 	    TRACE("MCI_WAVE_STATUS_LEVEL !\n");
@@ -1467,7 +1467,7 @@ static DWORD WAVE_mciStatus(MCIDEVICEID wDevID, DWORD dwFlags, LPMCI_STATUS_PARM
 		return MCIERR_UNSUPPORTED_FUNCTION;
 	    }
 	    lpParms->dwReturn = wmw->lpWaveFormat->nSamplesPerSec;
-            TRACE("MCI_WAVE_STATUS_SAMPLESPERSEC => %u!\n", lpParms->dwReturn);
+            TRACE("MCI_WAVE_STATUS_SAMPLESPERSEC => %lu\n", lpParms->dwReturn);
 	    break;
 	default:
             WARN("unknown command %08X !\n", lpParms->dwItem);

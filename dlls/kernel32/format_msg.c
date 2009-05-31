@@ -39,7 +39,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(resource);
 
 
-/* Messages...used by FormatMessage (KERNEL32.something)
+/* Messages used by FormatMessage
  *
  * They can be specified either directly or using a message ID and
  * loading them from the resource.
@@ -135,7 +135,7 @@ DWORD WINAPI FormatMessageA(
 	DWORD	dwLanguageId,
 	LPSTR	lpBuffer,
 	DWORD	nSize,
-	va_list* _args )
+	__ms_va_list* _args )
 {
     LPDWORD args=(LPDWORD)_args;
     DWORD ret = 0;
@@ -165,8 +165,8 @@ DWORD WINAPI FormatMessageA(
     from = NULL;
     if (dwFlags & FORMAT_MESSAGE_FROM_STRING)
     {
-        from = HeapAlloc( GetProcessHeap(), 0, strlen((LPCSTR)lpSource)+1 );
-        strcpy( from, (LPCSTR)lpSource );
+        from = HeapAlloc( GetProcessHeap(), 0, strlen(lpSource) + 1 );
+        strcpy( from, lpSource );
     }
     else {
         from = NULL;
@@ -356,7 +356,7 @@ DWORD WINAPI FormatMessageW(
 	DWORD	dwLanguageId,
 	LPWSTR	lpBuffer,
 	DWORD	nSize,
-	va_list* _args )
+	__ms_va_list* _args )
 {
     LPDWORD args=(LPDWORD)_args;
 #if defined(__i386__) || defined(__sparc__)
@@ -384,9 +384,9 @@ DWORD WINAPI FormatMessageW(
         FIXME("line wrapping not supported.\n");
     from = NULL;
     if (dwFlags & FORMAT_MESSAGE_FROM_STRING) {
-        from = HeapAlloc( GetProcessHeap(), 0, (strlenW((LPCWSTR)lpSource) + 1) *
+        from = HeapAlloc( GetProcessHeap(), 0, (strlenW(lpSource) + 1) *
             sizeof(WCHAR) );
-        strcpyW( from, (LPCWSTR)lpSource );
+        strcpyW( from, lpSource );
     }
     else {
         from = NULL;

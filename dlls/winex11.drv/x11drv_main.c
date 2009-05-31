@@ -82,6 +82,7 @@ int use_xkb = 1;
 int use_take_focus = 1;
 int use_primary_selection = 0;
 int managed_mode = 1;
+int decorated_mode = 1;
 int private_color_map = 0;
 int primary_monitor = 0;
 int client_side_with_core = 1;
@@ -92,6 +93,7 @@ int copy_default_colors = 128;
 int alloc_system_colors = 256;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
+HMODULE x11drv_module = 0;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -113,6 +115,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
 {
     "CLIPBOARD",
     "COMPOUND_TEXT",
+    "INCR",
     "MULTIPLE",
     "SELECTION_DATA",
     "TARGETS",
@@ -123,12 +126,15 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "RAW_CAP_HEIGHT",
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
+    "WM_STATE",
     "WM_TAKE_FOCUS",
-    "KWM_DOCKWINDOW",
     "DndProtocol",
     "DndSelection",
+    "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
-    "_KDE_NET_WM_SYSTEM_TRAY_WINDOW_FOR",
+    "_NET_STARTUP_INFO_BEGIN",
+    "_NET_STARTUP_INFO",
+    "_NET_SUPPORTED",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
     "_NET_WM_MOVERESIZE",
@@ -138,12 +144,16 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_STATE",
     "_NET_WM_STATE_ABOVE",
     "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_STATE_MAXIMIZED_HORZ",
+    "_NET_WM_STATE_MAXIMIZED_VERT",
     "_NET_WM_STATE_SKIP_PAGER",
     "_NET_WM_STATE_SKIP_TASKBAR",
+    "_NET_WM_WINDOW_OPACITY",
     "_NET_WM_WINDOW_TYPE",
     "_NET_WM_WINDOW_TYPE_DIALOG",
     "_NET_WM_WINDOW_TYPE_NORMAL",
     "_NET_WM_WINDOW_TYPE_UTILITY",
+    "_NET_WORKAREA",
     "_XEMBED_INFO",
     "XdndAware",
     "XdndEnter",
@@ -263,7 +273,7 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
 /***********************************************************************
  *		wine_tsx11_lock   (X11DRV.@)
  */
-void wine_tsx11_lock(void)
+void CDECL wine_tsx11_lock(void)
 {
     EnterCriticalSection( &X11DRV_CritSection );
 }
@@ -271,9 +281,40 @@ void wine_tsx11_lock(void)
 /***********************************************************************
  *		wine_tsx11_unlock   (X11DRV.@)
  */
-void wine_tsx11_unlock(void)
+void CDECL wine_tsx11_unlock(void)
 {
     LeaveCriticalSection( &X11DRV_CritSection );
+}
+
+
+/***********************************************************************
+ *		depth_to_bpp
+ *
+ * Convert X11-reported depth to the BPP value that Windows apps expect to see.
+ */
+unsigned int depth_to_bpp( unsigned int depth )
+{
+    switch (depth)
+    {
+    case 1:
+    case 8:
+        return depth;
+    case 15:
+    case 16:
+        return 16;
+    case 24:
+        /* This is not necessarily right. X11 always has 24 bits per pixel, but it can run
+         * with 24 bit framebuffers and 32 bit framebuffers. It doesn't make any difference
+         * for windowing, but gl applications can get visuals with alpha channels. So we
+         * should check the framebuffer and/or opengl formats available to find out what the
+         * framebuffer actually does
+         */
+    case 32:
+        return 32;
+    default:
+        FIXME( "Unexpected X11 depth %d bpp, what to report to app?\n", depth );
+        return depth;
+    }
 }
 
 
@@ -325,6 +366,9 @@ static void setup_options(void)
 
     if (!get_config_key( hkey, appkey, "Managed", buffer, sizeof(buffer) ))
         managed_mode = IS_OPTION_TRUE( buffer[0] );
+
+    if (!get_config_key( hkey, appkey, "Decorated", buffer, sizeof(buffer) ))
+        decorated_mode = IS_OPTION_TRUE( buffer[0] );
 
     if (!get_config_key( hkey, appkey, "DXGrab", buffer, sizeof(buffer) ))
         dxgrab = IS_OPTION_TRUE( buffer[0] );
@@ -445,17 +489,12 @@ sym_not_found:
 static BOOL process_attach(void)
 {
     Display *display;
-    XVisualInfo *desktop_vi = NULL;
-    const char *env;
 
     setup_options();
 
     if ((thread_data_tls_index = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
 
     /* Open display */
-
-    if (!(env = getenv("XMODIFIERS")) || !*env)  /* try to avoid the Xlib XIM locking bug */
-        if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
 
     if (!(display = XOpenDisplay( NULL ))) return FALSE;
 
@@ -482,59 +521,16 @@ static BOOL process_attach(void)
         }
     }
     if (!screen_depth) screen_depth = DefaultDepthOfScreen( screen );
-
-    /* If OpenGL is available, change the default visual, etc as necessary */
-    if ((desktop_vi = X11DRV_setup_opengl_visual( display )))
-    {
-        visual       = desktop_vi->visual;
-        screen       = ScreenOfDisplay(display, desktop_vi->screen);
-        screen_depth = desktop_vi->depth;
-        XFree(desktop_vi);
-    }
-
-    switch(screen_depth) {
-        case 8:
-            screen_bpp = 8;
-            break;
-
-        case 15:
-            /* Out tests suggest that windows does not support 15 bpp color depth.
-             * X11 does, what should we do with these situations?
-             */
-            FIXME("The X server is running at 15 bpp color depth\n");
-            screen_bpp = 15;
-            break;
-
-        case 16:
-            screen_bpp = 16;
-            break;
-
-        case 24:
-            /* This is not necessarily right. X11 always has 24 bits per pixel, but it can run
-             * with 24 bit framebuffers and 32 bit framebuffers. It doesn't make any difference
-             * for windowing, but gl applications can get visuals with alpha channels. So we
-             * should check the framebuffer and/or opengl formats available to find out what the
-             * framebuffer actually does
-             */
-            screen_bpp = 32;
-            break;
-
-        default:
-            FIXME("Unexpected X11 depth %d bpp, what to report to app?\n", screen_depth);
-            screen_bpp = screen_depth;
-    }
+    screen_bpp = depth_to_bpp( screen_depth );
 
     XInternAtoms( display, (char **)atom_names, NB_XATOMS - FIRST_XATOM, False, X11DRV_Atoms );
 
     if (TRACE_ON(synchronous)) XSynchronize( display, True );
 
-    screen_width  = WidthOfScreen( screen );
-    screen_height = HeightOfScreen( screen );
-
-    xinerama_init();
+    xinerama_init( WidthOfScreen(screen), HeightOfScreen(screen) );
     X11DRV_Settings_Init();
 
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* initialize XVidMode */
     X11DRV_XF86VM_Init();
 #endif
@@ -546,9 +542,12 @@ static BOOL process_attach(void)
     X11DRV_XComposite_Init();
 #endif
 
-    X11DRV_ClipCursor( NULL );
-    X11DRV_InitKeyboard();
+#ifdef HAVE_XKB
+    if (use_xkb) use_xkb = XkbUseExtension( gdi_display, NULL, NULL );
+#endif
+    X11DRV_InitKeyboard( gdi_display );
     X11DRV_InitClipboard();
+    if (use_xim) use_xim = X11DRV_InitXIM( input_style );
 
     return TRUE;
 }
@@ -566,6 +565,7 @@ static void thread_detach(void)
         X11DRV_ResetSelectionOwner();
         wine_tsx11_lock();
         if (data->xim) XCloseIM( data->xim );
+        if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
         wine_tsx11_unlock();
         HeapFree( GetProcessHeap(), 0, data );
@@ -578,7 +578,7 @@ static void thread_detach(void)
  */
 static void process_detach(void)
 {
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* cleanup XVidMode */
     X11DRV_XF86VM_Cleanup();
 #endif
@@ -588,6 +588,7 @@ static void process_detach(void)
     /* cleanup GDI */
     X11DRV_GDI_Finalize();
 
+    IME_UnregisterClasses();
     DeleteCriticalSection( &X11DRV_CritSection );
     TlsFree( thread_data_tls_index );
 }
@@ -606,7 +607,7 @@ static void set_queue_display_fd( Display *display )
     }
     SERVER_START_REQ( set_queue_fd )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         ret = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -624,9 +625,11 @@ static void set_queue_display_fd( Display *display )
  */
 struct x11drv_thread_data *x11drv_init_thread_data(void)
 {
-    struct x11drv_thread_data *data;
+    struct x11drv_thread_data *data = x11drv_thread_data();
 
-    if (!(data = HeapAlloc( GetProcessHeap(), 0, sizeof(*data) )))
+    if (data) return data;
+
+    if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) )))
     {
         ERR( "could not create data\n" );
         ExitProcess(1);
@@ -643,36 +646,19 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     fcntl( ConnectionNumber(data->display), F_SETFD, 1 ); /* set close on exec flag */
 
 #ifdef HAVE_XKB
-    if (use_xkb)
-    {
-        use_xkb = XkbUseExtension( data->display, NULL, NULL );
-        if (use_xkb)
-        {
-            /* Hack: dummy call to XkbKeysymToModifiers to force initialisation of Xkb internals */
-            /* This works around an Xlib bug where it tries to get the display lock */
-            /* twice during XFilterEvents if Xkb hasn't been initialised yet. */
-            XkbKeysymToModifiers( data->display, 'A' );
-            XkbSetDetectableAutoRepeat( data->display, True, NULL );
-        }
-    }
+    if (use_xkb && XkbUseExtension( data->display, NULL, NULL ))
+        XkbSetDetectableAutoRepeat( data->display, True, NULL );
 #endif
 
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );
     wine_tsx11_unlock();
 
-    if (!use_xim)
-        data->xim = NULL;
-    else if (!(data->xim = X11DRV_SetupXIM( data->display, input_style )))
-        WARN("Input Method is not available\n");
-
     set_queue_display_fd( data->display );
-    data->process_event_count = 0;
-    data->cursor = None;
-    data->cursor_window = None;
-    data->grab_window = None;
-    data->last_focus = 0;
-    data->selection_wnd = 0;
     TlsSetValue( thread_data_tls_index, data );
+
+    if (use_xim) X11DRV_SetupXIM();
+    X11DRV_SetCursor( NULL );
+
     return data;
 }
 
@@ -687,6 +673,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
+        x11drv_module = hinst;
         ret = process_attach();
         break;
     case DLL_THREAD_DETACH:
@@ -704,7 +691,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
  *
  * Returns the active status of the screen saver
  */
-BOOL X11DRV_GetScreenSaveActive(void)
+BOOL CDECL X11DRV_GetScreenSaveActive(void)
 {
     int timeout, temp;
     wine_tsx11_lock();
@@ -718,7 +705,7 @@ BOOL X11DRV_GetScreenSaveActive(void)
  *
  * Activate/Deactivate the screen saver
  */
-void X11DRV_SetScreenSaveActive(BOOL bActivate)
+void CDECL X11DRV_SetScreenSaveActive(BOOL bActivate)
 {
     int timeout, interval, prefer_blanking, allow_exposures;
     static int last_timeout = 15 * 60;

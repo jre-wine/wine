@@ -67,11 +67,7 @@ int symt_cmp_addr(const void* p1, const void* p2)
     return cmp_addr(a1, a2);
 }
 
-static inline void re_append(char** mask, unsigned* len, char ch)
-{
-    *mask = HeapReAlloc(GetProcessHeap(), 0, *mask, ++(*len));
-    (*mask)[*len - 2] = ch;
-}
+#ifdef HAVE_REGEX_H
 
 /* transforms a dbghelp's regular expression into a POSIX one
  * Here are the valid dbghelp reg ex characters:
@@ -84,46 +80,137 @@ static inline void re_append(char** mask, unsigned* len, char ch)
  */
 static void compile_regex(const char* str, int numchar, regex_t* re, BOOL _case)
 {
-    char*       mask = HeapAlloc(GetProcessHeap(), 0, 1);
-    unsigned    len = 1;
+    char *mask, *p;
     BOOL        in_escape = FALSE;
     unsigned    flags = REG_NOSUB;
 
-    re_append(&mask, &len, '^');
+    if (numchar == -1) numchar = strlen( str );
+
+    p = mask = HeapAlloc( GetProcessHeap(), 0, 2 * numchar + 3 );
+    *p++ = '^';
 
     while (*str && numchar--)
     {
         /* FIXME: this shouldn't be valid on '-' */
         if (in_escape)
         {
-            re_append(&mask, &len, '\\');
-            re_append(&mask, &len, *str);
+            *p++ = '\\';
+            *p++ = *str;
             in_escape = FALSE;
         }
         else switch (*str)
         {
         case '\\': in_escape = TRUE; break;
-        case '*':  re_append(&mask, &len, '.'); re_append(&mask, &len, '*'); break;
-        case '?':  re_append(&mask, &len, '.'); break;
-        case '#':  re_append(&mask, &len, '*'); break;
+        case '*':  *p++ = '.'; *p++ = '*'; break;
+        case '?':  *p++ = '.'; break;
+        case '#':  *p++ = '*'; break;
         /* escape some valid characters in dbghelp reg exp:s */
-        case '$':  re_append(&mask, &len, '\\'); re_append(&mask, &len, '$'); break;
+        case '$':  *p++ = '\\'; *p++ = '$'; break;
         /* +, [, ], - are the same in dbghelp & POSIX, use them as any other char */
-        default:   re_append(&mask, &len, *str); break;
+        default:   *p++ = *str; break;
         }
         str++;
     }
     if (in_escape)
     {
-        re_append(&mask, &len, '\\');
-        re_append(&mask, &len, '\\');
+        *p++ = '\\';
+        *p++ = '\\';
     }
-    re_append(&mask, &len, '$');
-    mask[len - 1] = '\0';
+    *p++ = '$';
+    *p = 0;
     if (_case) flags |= REG_ICASE;
     if (regcomp(re, mask, flags)) FIXME("Couldn't compile %s\n", mask);
     HeapFree(GetProcessHeap(), 0, mask);
 }
+
+static BOOL compile_file_regex(regex_t* re, const char* srcfile)
+{
+    char *mask, *p;
+    BOOL ret;
+
+    if (!srcfile || !*srcfile) return regcomp(re, ".*", REG_NOSUB);
+
+    p = mask = HeapAlloc(GetProcessHeap(), 0, 5 * strlen(srcfile) + 4);
+    *p++ = '^';
+    while (*srcfile)
+    {
+        switch (*srcfile)
+        {
+        case '\\':
+        case '/':
+            *p++ = '[';
+            *p++ = '\\';
+            *p++ = '\\';
+            *p++ = '/';
+            *p++ = ']';
+            break;
+        case '.':
+            *p++ = '\\';
+            *p++ = '.';
+            break;
+        default:
+            *p++ = *srcfile;
+            break;
+        }
+        srcfile++;
+    }
+    *p++ = '$';
+    *p = 0;
+    ret = !regcomp(re, mask, REG_NOSUB);
+    HeapFree(GetProcessHeap(), 0, mask);
+    if (!ret)
+    {
+        FIXME("Couldn't compile %s\n", mask);
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    return ret;
+}
+
+static int match_regexp( const regex_t *re, const char *str )
+{
+    return !regexec( re, str, 0, NULL, 0 );
+}
+
+#else /* HAVE_REGEX_H */
+
+/* if we don't have regexp support, fall back to a simple string comparison */
+
+typedef struct
+{
+    char *str;
+    BOOL  icase;
+} regex_t;
+
+static void compile_regex(const char* str, int numchar, regex_t* re, BOOL _case)
+{
+    if (numchar == -1) numchar = strlen( str );
+
+    re->str = HeapAlloc( GetProcessHeap(), 0, numchar + 1 );
+    memcpy( re->str, str, numchar );
+    re->str[numchar] = 0;
+    re->icase = _case;
+}
+
+static BOOL compile_file_regex(regex_t* re, const char* srcfile)
+{
+    if (!srcfile || !*srcfile) re->str = NULL;
+    else compile_regex( srcfile, -1, re, FALSE );
+    return TRUE;
+}
+
+static int match_regexp( const regex_t *re, const char *str )
+{
+    if (!re->str) return 1;
+    if (re->icase) return !lstrcmpiA( re->str, str );
+    return !strcmp( re->str, str );
+}
+
+static void regfree( regex_t *re )
+{
+    HeapFree( GetProcessHeap(), 0, re->str );
+}
+
+#endif /* HAVE_REGEX_H */
 
 struct symt_compiland* symt_new_compiland(struct module* module, 
                                           unsigned long address, unsigned src_idx)
@@ -374,21 +461,21 @@ struct symt_block* symt_close_func_block(struct module* module,
         GET_ENTRY(block->container, struct symt_block, symt) : NULL;
 }
 
-struct symt_function_point* symt_add_function_point(struct module* module, 
-                                                    struct symt_function* func,
-                                                    enum SymTagEnum point, 
-                                                    const struct location* loc,
-                                                    const char* name)
+struct symt_hierarchy_point* symt_add_function_point(struct module* module,
+                                                     struct symt_function* func,
+                                                     enum SymTagEnum point,
+                                                     const struct location* loc,
+                                                     const char* name)
 {
-    struct symt_function_point* sym;
+    struct symt_hierarchy_point*sym;
     struct symt**               p;
 
     if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
     {
         sym->symt.tag = point;
-        sym->parent   = func;
+        sym->parent   = &func->symt;
         sym->loc      = *loc;
-        sym->name     = name ? pool_strdup(&module->pool, name) : NULL;
+        sym->hash_elt.name = name ? pool_strdup(&module->pool, name) : NULL;
         p = vector_add(&func->vchildren, &module->pool);
         *p = &sym->symt;
     }
@@ -468,6 +555,34 @@ struct symt_data* symt_new_constant(struct module* module,
         sym->container     = compiland ? &compiland->symt : NULL;
         sym->type          = type;
         sym->u.value       = *v;
+        if (compiland)
+        {
+            struct symt**       p;
+            p = vector_add(&compiland->vchildren, &module->pool);
+            *p = &sym->symt;
+        }
+    }
+    return sym;
+}
+
+struct symt_hierarchy_point* symt_new_label(struct module* module,
+                                            struct symt_compiland* compiland,
+                                            const char* name, unsigned long address)
+{
+    struct symt_hierarchy_point*        sym;
+
+    TRACE_(dbghelp_symt)("Adding global label value %s:%s\n",
+                         debugstr_w(module->module.ModuleName), name);
+
+    if ((sym = pool_alloc(&module->pool, sizeof(*sym))))
+    {
+        sym->symt.tag      = SymTagLabel;
+        sym->hash_elt.name = pool_strdup(&module->pool, name);
+        hash_table_add(&module->ht_symbols, &sym->hash_elt);
+        module->sortlist_valid = FALSE;
+        sym->loc.kind      = loc_absolute;
+        sym->loc.offset    = address;
+        sym->parent        = compiland ? &compiland->symt : NULL;
         if (compiland)
         {
             struct symt**       p;
@@ -589,8 +704,8 @@ static void symt_fill_sym_info(const struct module_pair* pair,
     if (sym_info->MaxNameLen)
     {
         if (sym->tag != SymTagPublicSymbol || !(dbghelp_options & SYMOPT_UNDNAME) ||
-            (sym_info->NameLen = UnDecorateSymbolName(name, sym_info->Name, 
-                                                      sym_info->MaxNameLen, UNDNAME_COMPLETE) == 0))
+            (sym_info->NameLen = UnDecorateSymbolName(name, sym_info->Name,
+                                                      sym_info->MaxNameLen, UNDNAME_NAME_ONLY) == 0))
         {
             sym_info->NameLen = min(strlen(name), sym_info->MaxNameLen - 1);
             memcpy(sym_info->Name, name, sym_info->NameLen);
@@ -634,8 +749,7 @@ static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
     while ((ptr = hash_table_iter_up(&hti)))
     {
         sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
-        if (sym->hash_elt.name &&
-            regexec(regex, sym->hash_elt.name, 0, NULL, 0) == 0)
+        if (sym->hash_elt.name && match_regexp(regex, sym->hash_elt.name))
         {
             se->sym_info->SizeOfStruct = sizeof(SYMBOL_INFO);
             se->sym_info->MaxNameLen = sizeof(se->buffer) - sizeof(SYMBOL_INFO);
@@ -687,6 +801,18 @@ static BOOL resort_symbols(struct module* module)
     return module->sortlist_valid = TRUE;
 }
 
+static void symt_get_length(struct symt* symt, ULONG64* size)
+{
+    DWORD       type_index;
+
+    if (symt_get_info(symt, TI_GET_LENGTH, size) && *size)
+        return;
+
+    if (symt_get_info(symt, TI_GET_TYPE, &type_index) &&
+        symt_get_info((struct symt*)type_index, TI_GET_LENGTH, size)) return;
+    *size = 0x1000; /* arbitrary value */
+}
+
 /* assume addr is in module */
 struct symt_ht* symt_find_nearest(struct module* module, DWORD addr)
 {
@@ -709,8 +835,7 @@ struct symt_ht* symt_find_nearest(struct module* module, DWORD addr)
     if (high)
     {
         symt_get_info(&module->addr_sorttab[high - 1]->symt, TI_GET_ADDRESS, &ref_addr);
-        if (!symt_get_info(&module->addr_sorttab[high - 1]->symt, TI_GET_LENGTH, &ref_size) || !ref_size)
-            ref_size = 0x1000; /* arbitrary value */
+        symt_get_length(&module->addr_sorttab[high - 1]->symt, &ref_size);
         if (addr >= ref_addr + ref_size) return NULL;
     }
     
@@ -744,8 +869,7 @@ struct symt_ht* symt_find_nearest(struct module* module, DWORD addr)
     /* finally check that we fit into the found symbol */
     symt_get_info(&module->addr_sorttab[low]->symt, TI_GET_ADDRESS, &ref_addr);
     if (addr < ref_addr) return NULL;
-    if (!symt_get_info(&module->addr_sorttab[high - 1]->symt, TI_GET_LENGTH, &ref_size) || !ref_size)
-        ref_size = 0x1000; /* arbitrary value */
+    symt_get_length(&module->addr_sorttab[low]->symt, &ref_size);
     if (addr >= ref_addr + ref_size) return NULL;
 
     return module->addr_sorttab[low];
@@ -757,7 +881,7 @@ static BOOL symt_enum_locals_helper(struct module_pair* pair,
 {
     struct symt*        lsym = NULL;
     DWORD               pc = pair->pcs->ctx_frame.InstructionOffset;
-    int                 i;
+    unsigned int        i;
 
     for (i=0; i<vector_length(v); i++)
     {
@@ -774,7 +898,7 @@ static BOOL symt_enum_locals_helper(struct module_pair* pair,
             }
             break;
         case SymTagData:
-            if (regexec(preg, symt_get_name(lsym), 0, NULL, 0) == 0)
+            if (match_regexp(preg, symt_get_name(lsym)))
             {
                 if (send_symbol(se, pair, func, lsym)) return FALSE;
             }
@@ -826,7 +950,7 @@ static BOOL symt_enum_locals(struct process* pcs, const char* mask,
 /******************************************************************
  *		copy_symbolW
  *
- * Helper for transforming an ANSI symbol info into an UNICODE one.
+ * Helper for transforming an ANSI symbol info into a UNICODE one.
  * Assume that MaxNameLen is the same for both version (A & W).
  */
 void copy_symbolW(SYMBOL_INFOW* siw, const SYMBOL_INFO* si)
@@ -878,22 +1002,22 @@ static BOOL sym_enum(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR Mask,
         {
             if (pair.requested->type == DMT_PE && module_get_debug(&pair))
             {
-                if (regexec(&mod_regex, pair.requested->module_name, 0, NULL, 0) == 0 &&
+                if (match_regexp(&mod_regex, pair.requested->module_name) &&
                     symt_enum_module(&pair, &sym_regex, se))
                     break;
             }
         }
         /* not found in PE modules, retry on the ELF ones
          */
-        if (!pair.requested && (dbghelp_options & SYMOPT_WINE_WITH_ELF_MODULES))
+        if (!pair.requested && (dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES))
         {
             for (pair.requested = pair.pcs->lmodules; pair.requested; pair.requested = pair.requested->next)
             {
-                if (pair.requested->type == DMT_ELF &&
+                if ((pair.requested->type == DMT_ELF || pair.requested->type == DMT_MACHO) &&
                     !module_get_containee(pair.pcs, pair.requested) &&
                     module_get_debug(&pair))
                 {
-                    if (regexec(&mod_regex, pair.requested->module_name, 0, NULL, 0) == 0 &&
+                    if (match_regexp(&mod_regex, pair.requested->module_name) &&
                         symt_enum_module(&pair, &sym_regex, se))
                     break;
                 }
@@ -1008,7 +1132,7 @@ struct sym_enumerate
 
 static BOOL CALLBACK sym_enumerate_cb(PSYMBOL_INFO syminfo, ULONG size, void* ctx)
 {
-    struct sym_enumerate*       se = (struct sym_enumerate*)ctx;
+    struct sym_enumerate*       se = ctx;
     return (se->cb)(syminfo->Name, syminfo->Address, syminfo->Size, se->ctx);
 }
 
@@ -1025,6 +1149,33 @@ BOOL WINAPI SymEnumerateSymbols(HANDLE hProcess, DWORD BaseOfDll,
     se.cb  = EnumSymbolsCallback;
     
     return SymEnumSymbols(hProcess, BaseOfDll, NULL, sym_enumerate_cb, &se);
+}
+
+struct sym_enumerate64
+{
+    void*                       ctx;
+    PSYM_ENUMSYMBOLS_CALLBACK64 cb;
+};
+
+static BOOL CALLBACK sym_enumerate_cb64(PSYMBOL_INFO syminfo, ULONG size, void* ctx)
+{
+    struct sym_enumerate64*     se = ctx;
+    return (se->cb)(syminfo->Name, syminfo->Address, syminfo->Size, se->ctx);
+}
+
+/***********************************************************************
+ *              SymEnumerateSymbols64 (DBGHELP.@)
+ */
+BOOL WINAPI SymEnumerateSymbols64(HANDLE hProcess, DWORD64 BaseOfDll,
+                                  PSYM_ENUMSYMBOLS_CALLBACK64 EnumSymbolsCallback,
+                                  PVOID UserContext)
+{
+    struct sym_enumerate64      se;
+
+    se.ctx = UserContext;
+    se.cb  = EnumSymbolsCallback;
+
+    return SymEnumSymbols(hProcess, BaseOfDll, NULL, sym_enumerate_cb64, &se);
 }
 
 /******************************************************************
@@ -1185,16 +1336,39 @@ BOOL WINAPI SymFromName(HANDLE hProcess, PCSTR Name, PSYMBOL_INFO Symbol)
     }
     /* not found in PE modules, retry on the ELF ones
      */
-    if (dbghelp_options & SYMOPT_WINE_WITH_ELF_MODULES)
+    if (dbghelp_options & SYMOPT_WINE_WITH_NATIVE_MODULES)
     {
         for (module = pcs->lmodules; module; module = module->next)
         {
-            if (module->type == DMT_ELF && !module_get_containee(pcs, module) &&
+            if ((module->type == DMT_ELF || module->type == DMT_MACHO) &&
+                !module_get_containee(pcs, module) &&
                 find_name(pcs, module, Name, Symbol))
                 return TRUE;
         }
     }
     return FALSE;
+}
+
+/***********************************************************************
+ *		SymGetSymFromName64 (DBGHELP.@)
+ */
+BOOL WINAPI SymGetSymFromName64(HANDLE hProcess, PCSTR Name, PIMAGEHLP_SYMBOL64 Symbol)
+{
+    char        buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME];
+    SYMBOL_INFO*si = (SYMBOL_INFO*)buffer;
+    size_t      len;
+
+    if (Symbol->SizeOfStruct < sizeof(*Symbol)) return FALSE;
+    si->SizeOfStruct = sizeof(*si);
+    si->MaxNameLen = MAX_SYM_NAME;
+    if (!SymFromName(hProcess, Name, si)) return FALSE;
+
+    Symbol->Address = si->Address;
+    Symbol->Size    = si->Size;
+    Symbol->Flags   = si->Flags;
+    len = min(Symbol->MaxNameLength, si->MaxNameLen);
+    lstrcpynA(Symbol->Name, si->Name, len);
+    return TRUE;
 }
 
 /***********************************************************************
@@ -1255,9 +1429,9 @@ BOOL symt_fill_func_line_info(const struct module* module, const struct symt_fun
 }
 
 /***********************************************************************
- *		SymGetSymNext (DBGHELP.@)
+ *		SymGetSymNext64 (DBGHELP.@)
  */
-BOOL WINAPI SymGetSymNext(HANDLE hProcess, PIMAGEHLP_SYMBOL Symbol)
+BOOL WINAPI SymGetSymNext64(HANDLE hProcess, PIMAGEHLP_SYMBOL64 Symbol)
 {
     /* algo:
      * get module from Symbol.Address
@@ -1271,9 +1445,28 @@ BOOL WINAPI SymGetSymNext(HANDLE hProcess, PIMAGEHLP_SYMBOL Symbol)
 }
 
 /***********************************************************************
+ *		SymGetSymNext (DBGHELP.@)
+ */
+BOOL WINAPI SymGetSymNext(HANDLE hProcess, PIMAGEHLP_SYMBOL Symbol)
+{
+    FIXME("(%p, %p): stub\n", hProcess, Symbol);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
+ *		SymGetSymPrev64 (DBGHELP.@)
+ */
+BOOL WINAPI SymGetSymPrev64(HANDLE hProcess, PIMAGEHLP_SYMBOL64 Symbol)
+{
+    FIXME("(%p, %p): stub\n", hProcess, Symbol);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/***********************************************************************
  *		SymGetSymPrev (DBGHELP.@)
  */
-
 BOOL WINAPI SymGetSymPrev(HANDLE hProcess, PIMAGEHLP_SYMBOL Symbol)
 {
     FIXME("(%p, %p): stub\n", hProcess, Symbol);
@@ -1408,7 +1601,7 @@ BOOL WINAPI SymGetLinePrev(HANDLE hProcess, PIMAGEHLP_LINE Line)
     if (!module_get_debug(&pair)) return FALSE;
 
     if (Line->Key == 0) return FALSE;
-    li = (struct line_info*)Line->Key;
+    li = Line->Key;
     /* things are a bit complicated because when we encounter a DLIT_SOURCEFILE
      * element we have to go back until we find the prev one to get the real
      * source file name for the DLIT_OFFSET element just before 
@@ -1458,7 +1651,7 @@ BOOL symt_get_func_line_next(const struct module* module, PIMAGEHLP_LINE line)
     struct line_info*   li;
 
     if (line->Key == 0) return FALSE;
-    li = (struct line_info*)line->Key;
+    li = line->Key;
     while (!li->is_last)
     {
         li++;
@@ -1533,7 +1726,15 @@ PVOID WINAPI SymFunctionTableAccess64(HANDLE hProcess, DWORD64 AddrBase)
  */
 BOOL WINAPI SymUnDName(PIMAGEHLP_SYMBOL sym, PSTR UnDecName, DWORD UnDecNameLength)
 {
-    TRACE("(%p %s %u)\n", sym, UnDecName, UnDecNameLength);
+    return UnDecorateSymbolName(sym->Name, UnDecName, UnDecNameLength,
+                                UNDNAME_COMPLETE) != 0;
+}
+
+/***********************************************************************
+ *		SymUnDName64 (DBGHELP.@)
+ */
+BOOL WINAPI SymUnDName64(PIMAGEHLP_SYMBOL64 sym, PSTR UnDecName, DWORD UnDecNameLength)
+{
     return UnDecorateSymbolName(sym->Name, UnDecName, UnDecNameLength,
                                 UNDNAME_COMPLETE) != 0;
 }
@@ -1580,7 +1781,7 @@ BOOL WINAPI SymMatchString(PCSTR string, PCSTR re, BOOL _case)
     TRACE("%s %s %c\n", string, re, _case ? 'Y' : 'N');
 
     compile_regex(re, -1, &preg, _case);
-    ret = regexec(&preg, string, 0, NULL, 0) == 0;
+    ret = match_regexp(&preg, string);
     regfree(&preg);
     return ret;
 }
@@ -1650,4 +1851,111 @@ BOOL WINAPI SymSearchW(HANDLE hProcess, ULONG64 BaseOfDll, DWORD Index,
     HeapFree(GetProcessHeap(), 0, maskA);
 
     return ret;
+}
+
+/******************************************************************
+ *		SymAddSymbol (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymAddSymbol(HANDLE hProcess, ULONG64 BaseOfDll, PCSTR name,
+                         DWORD64 addr, DWORD size, DWORD flags)
+{
+    WCHAR       nameW[MAX_SYM_NAME];
+
+    MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, sizeof(nameW) / sizeof(WCHAR));
+    return SymAddSymbolW(hProcess, BaseOfDll, nameW, addr, size, flags);
+}
+
+/******************************************************************
+ *		SymAddSymbolW (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymAddSymbolW(HANDLE hProcess, ULONG64 BaseOfDll, PCWSTR name,
+                          DWORD64 addr, DWORD size, DWORD flags)
+{
+    struct module_pair  pair;
+
+    TRACE("(%p %s %s %u)\n", hProcess, wine_dbgstr_w(name), wine_dbgstr_longlong(addr), size);
+
+    pair.pcs = process_find_by_handle(hProcess);
+    if (!pair.pcs) return FALSE;
+    pair.requested = module_find_by_addr(pair.pcs, BaseOfDll, DMT_UNKNOWN);
+    if (!module_get_debug(&pair)) return FALSE;
+
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/******************************************************************
+ *		SymSetScopeFromAddr (DBGHELP.@)
+ */
+BOOL WINAPI SymSetScopeFromAddr(HANDLE hProcess, ULONG64 addr)
+{
+    struct process*     pcs;
+
+    FIXME("(%p %s): stub\n", hProcess, wine_dbgstr_longlong(addr));
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+    return TRUE;
+}
+
+/******************************************************************
+ *		SymEnumLines (DBGHELP.@)
+ *
+ */
+BOOL WINAPI SymEnumLines(HANDLE hProcess, ULONG64 base, PCSTR compiland,
+                         PCSTR srcfile, PSYM_ENUMLINES_CALLBACK cb, PVOID user)
+{
+    struct module_pair          pair;
+    struct hash_table_iter      hti;
+    struct symt_ht*             sym;
+    regex_t                     re;
+    struct line_info*           dli;
+    void*                       ptr;
+    SRCCODEINFO                 sci;
+    const char*                 file;
+
+    if (!cb) return FALSE;
+    if (!(dbghelp_options & SYMOPT_LOAD_LINES)) return TRUE;
+
+    pair.pcs = process_find_by_handle(hProcess);
+    if (!pair.pcs) return FALSE;
+    if (compiland) FIXME("Unsupported yet (filtering on compiland %s)\n", compiland);
+    pair.requested = module_find_by_addr(pair.pcs, base, DMT_UNKNOWN);
+    if (!module_get_debug(&pair)) return FALSE;
+    if (!compile_file_regex(&re, srcfile)) return FALSE;
+
+    sci.SizeOfStruct = sizeof(sci);
+    sci.ModBase      = base;
+
+    hash_table_iter_init(&pair.effective->ht_symbols, &hti, NULL);
+    while ((ptr = hash_table_iter_up(&hti)))
+    {
+        unsigned int    i;
+
+        sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
+        if (sym->symt.tag != SymTagFunction) continue;
+
+        sci.FileName[0] = '\0';
+        for (i=0; i<vector_length(&((struct symt_function*)sym)->vlines); i++)
+        {
+            dli = vector_at(&((struct symt_function*)sym)->vlines, i);
+            if (dli->is_source_file)
+            {
+                file = source_get(pair.effective, dli->u.source_file);
+                if (!match_regexp(&re, file)) file = "";
+                strcpy(sci.FileName, file);
+            }
+            else if (sci.FileName[0])
+            {
+                sci.Key = dli;
+                sci.Obj[0] = '\0'; /* FIXME */
+                sci.LineNumber = dli->line_number;
+                sci.Address = dli->u.pc_offset;
+                if (!cb(&sci, user)) break;
+            }
+        }
+    }
+    regfree(&re);
+    return TRUE;
 }

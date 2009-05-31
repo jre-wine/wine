@@ -169,22 +169,23 @@ static char *next_dll_path( struct dll_path_context *context )
 
     switch(index)
     {
-    case 0:  /* try programs dir for .exe files */
-        if (!context->win16 && namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 ))
+    case 0:  /* try dlls dir with subdir prefix */
+        if (namelen > 4 && !memcmp( context->name + namelen - 4, ".dll", 4 )) namelen -= 4;
+        if (!context->win16) path = prepend( path, context->name, namelen );
+        path = prepend( path, "/dlls", sizeof("/dlls") - 1 );
+        path = prepend( path, build_dir, strlen(build_dir) );
+        return path;
+    case 1:  /* try programs dir with subdir prefix */
+        if (!context->win16)
         {
-            path = prepend( path, context->name, namelen - 4 );
+            if (namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 )) namelen -= 4;
+            path = prepend( path, context->name, namelen );
             path = prepend( path, "/programs", sizeof("/programs") - 1 );
             path = prepend( path, build_dir, strlen(build_dir) );
             return path;
         }
         context->index++;
         /* fall through */
-    case 1:  /* try dlls dir with subdir prefix */
-        if (namelen > 4 && !memcmp( context->name + namelen - 4, ".dll", 4 )) namelen -= 4;
-        if (!context->win16) path = prepend( path, context->name, namelen );
-        path = prepend( path, "/dlls", sizeof("/dlls") - 1 );
-        path = prepend( path, build_dir, strlen(build_dir) );
-        return path;
     default:
         index -= 2;
         if (index < nb_dll_paths)
@@ -277,7 +278,7 @@ static void fixup_imports( IMAGE_IMPORT_DESCRIPTOR *dir, BYTE *base, int delta )
         fixup_rva_dwords( &dir->u.OriginalFirstThunk, delta, 1 );
         fixup_rva_dwords( &dir->Name, delta, 1 );
         fixup_rva_dwords( &dir->FirstThunk, delta, 1 );
-        ptr = (UINT_PTR *)(base + dir->FirstThunk);
+        ptr = (UINT_PTR *)(base + (dir->u.OriginalFirstThunk ? dir->u.OriginalFirstThunk : dir->FirstThunk));
         while (*ptr)
         {
             if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
@@ -440,6 +441,18 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
 
 
 /***********************************************************************
+ *           __wine_get_main_environment
+ *
+ * Return an environment pointer to work around lack of environ variable.
+ * Only exported on Mac OS.
+ */
+char **__wine_get_main_environment(void)
+{
+    return environ;
+}
+
+
+/***********************************************************************
  *           __wine_dll_register
  *
  * Register a built-in DLL descriptor.
@@ -596,7 +609,18 @@ static void set_max_limit( int limit )
     if (!getrlimit( limit, &rlimit ))
     {
         rlimit.rlim_cur = rlimit.rlim_max;
-        setrlimit( limit, &rlimit );
+        if (setrlimit( limit, &rlimit ) != 0)
+        {
+#if defined(__APPLE__) && defined(RLIMIT_NOFILE) && defined(OPEN_MAX)
+            /* On Leopard, setrlimit(RLIMIT_NOFILE, ...) fails on attempts to set
+             * rlim_cur above OPEN_MAX (even if rlim_max > OPEN_MAX). */
+            if (limit == RLIMIT_NOFILE && rlimit.rlim_cur > OPEN_MAX)
+            {
+                rlimit.rlim_cur = OPEN_MAX;
+                setrlimit( limit, &rlimit );
+            }
+#endif
+        }
     }
 #endif
 }
@@ -626,7 +650,7 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     build_dll_path();
     __wine_main_argc = argc;
     __wine_main_argv = argv;
-    __wine_main_environ = environ;
+    __wine_main_environ = __wine_get_main_environment();
     mmap_init();
 
     for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))

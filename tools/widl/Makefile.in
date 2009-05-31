@@ -10,12 +10,14 @@ MODULE   = none
 
 C_SRCS = \
 	client.c \
+	expr.c \
 	hash.c \
 	header.c \
 	proxy.c \
 	server.c \
 	typegen.c \
 	typelib.c \
+	typetree.c \
 	utils.c \
 	widl.c \
 	write_msft.c
@@ -32,7 +34,7 @@ all: $(PROGRAMS) $(MANPAGES)
 widl$(EXEEXT): $(OBJS) $(LIBWPP)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBWPP) $(LIBPORT) $(LDFLAGS)
 
-install:: $(PROGRAMS) $(MANPAGES) $(INSTALLDIRS)
+install install-dev:: $(PROGRAMS) $(MANPAGES) $(INSTALLDIRS)
 	$(INSTALL_PROGRAM) widl$(EXEEXT) $(DESTDIR)$(bindir)/widl$(EXEEXT)
 	$(INSTALL_DATA) widl.man $(DESTDIR)$(mandir)/man$(prog_manext)/widl.$(prog_manext)
 

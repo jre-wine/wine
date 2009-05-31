@@ -1,7 +1,7 @@
 /*
  * NDR definitions
  *
- * Copyright 2001 Ove Kåven, TransGaming Technologies
+ * Copyright 2001 Ove KÃ¥ven, TransGaming Technologies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -61,5 +61,7 @@ extern const NDR_UNMARSHALL NdrUnmarshaller[];
 extern const NDR_BUFFERSIZE NdrBufferSizer[];
 extern const NDR_MEMORYSIZE NdrMemorySizer[];
 extern const NDR_FREE       NdrFreer[];
+
+ULONG ComplexStructSize(PMIDL_STUB_MESSAGE pStubMsg, PFORMAT_STRING pFormat);
 
 #endif  /* __WINE_NDR_MISC_H */

@@ -30,35 +30,28 @@
 
 static BOOL (WINAPI * pWintrustAddActionID)(GUID*, DWORD, CRYPT_REGISTER_ACTIONID*);
 static BOOL (WINAPI * pWintrustAddDefaultForUsage)(const CHAR*,CRYPT_PROVIDER_REGDEFUSAGE*);
-static BOOL (WINAPI * pWintrustRemoveActionID)(GUID*);
+static void (WINAPI * pWintrustGetRegPolicyFlags)(DWORD *);
 static BOOL (WINAPI * pWintrustLoadFunctionPointers)(GUID *, CRYPT_PROVIDER_FUNCTIONS *);
+static BOOL (WINAPI * pWintrustRemoveActionID)(GUID*);
+static BOOL (WINAPI * pWintrustSetRegPolicyFlags)(DWORD);
 
-static HMODULE hWintrust = 0;
+static void InitFunctionPtrs(void)
+{
+    HMODULE hWintrust = GetModuleHandleA("wintrust.dll");
 
 #define WINTRUST_GET_PROC(func) \
     p ## func = (void*)GetProcAddress(hWintrust, #func); \
-    if(!p ## func) { \
-      trace("GetProcAddress(%s) failed\n", #func); \
-      FreeLibrary(hWintrust); \
-      return FALSE; \
-    }
-
-static BOOL InitFunctionPtrs(void)
-{
-    hWintrust = LoadLibraryA("wintrust.dll");
-
-    if(!hWintrust)
-    {
-        trace("Could not load wintrust.dll\n");
-        return FALSE;
-    }
+    if(!p ## func) \
+      trace("GetProcAddress(%s) failed\n", #func);
 
     WINTRUST_GET_PROC(WintrustAddActionID)
     WINTRUST_GET_PROC(WintrustAddDefaultForUsage)
-    WINTRUST_GET_PROC(WintrustRemoveActionID)
+    WINTRUST_GET_PROC(WintrustGetRegPolicyFlags)
     WINTRUST_GET_PROC(WintrustLoadFunctionPointers)
+    WINTRUST_GET_PROC(WintrustRemoveActionID)
+    WINTRUST_GET_PROC(WintrustSetRegPolicyFlags)
 
-    return TRUE;
+#undef WINTRUST_GET_PROC
 }
 
 static void test_AddRem_ActionID(void)
@@ -70,6 +63,12 @@ static void test_AddRem_ActionID(void)
     CRYPT_TRUST_REG_ENTRY EmptyProvider = { 0, NULL, NULL };
     CRYPT_TRUST_REG_ENTRY DummyProvider = { sizeof(CRYPT_TRUST_REG_ENTRY), DummyDllW, DummyFunctionW };
     BOOL ret;
+
+    if (!pWintrustAddActionID || !pWintrustRemoveActionID)
+    {
+        win_skip("WintrustAddActionID and/or WintrustRemoveActionID are not available\n");
+        return;
+    }
 
     /* All NULL */
     SetLastError(0xdeadbeef);
@@ -121,8 +120,10 @@ static void test_AddRem_ActionID(void)
     SetLastError(0xdeadbeef);
     ret = pWintrustAddActionID(&ActionID, 0, &ActionIDFunctions);
     ok (ret, "Expected WintrustAddActionID to succeed.\n");
-    ok (GetLastError() == ERROR_INVALID_PARAMETER,
-        "Expected ERROR_INVALID_PARAMETER, got %u.\n", GetLastError());
+    ok (GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == ERROR_ACCESS_DENIED,
+        "Expected ERROR_INVALID_PARAMETER or ERROR_ACCESS_DENIED, got %u.\n",
+        GetLastError());
 
     /* All OK and all functions are correctly defined. The DLL and entrypoints
      * are not present.
@@ -140,8 +141,9 @@ static void test_AddRem_ActionID(void)
     SetLastError(0xdeadbeef);
     ret = pWintrustAddActionID(&ActionID, 0, &ActionIDFunctions);
     ok (ret, "Expected WintrustAddActionID to succeed.\n");
-    ok (GetLastError() == 0xdeadbeef,
-        "Expected 0xdeadbeef, got %u.\n", GetLastError());
+    ok (GetLastError() == 0xdeadbeef || GetLastError() == ERROR_ACCESS_DENIED,
+        "Expected 0xdeadbeef or ERROR_ACCESS_DENIED, got %u.\n",
+        GetLastError());
 
     SetLastError(0xdeadbeef);
     ret = pWintrustRemoveActionID(&ActionID);
@@ -166,13 +168,17 @@ static void test_AddRem_ActionID(void)
 static void test_AddDefaultForUsage(void)
 {
     BOOL ret;
-    LONG res;
     static GUID ActionID        = { 0xdeadbeef, 0xdead, 0xbeef, { 0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef }};
     static WCHAR DummyDllW[]    = {'d','e','a','d','b','e','e','f','.','d','l','l',0 };
     static CHAR DummyFunction[] = "dummyfunction";
     static const CHAR oid[]     = "1.2.3.4.5.6.7.8.9.10";
-    static const CHAR Usages[]  = "SOFTWARE\\Microsoft\\Cryptography\\Providers\\Trust\\Usages\\1.2.3.4.5.6.7.8.9.10";
     static CRYPT_PROVIDER_REGDEFUSAGE DefUsage;
+
+    if (!pWintrustAddDefaultForUsage)
+    {
+        win_skip("WintrustAddDefaultForUsage is not available\n");
+        return;
+    }
 
     /* All NULL */
     SetLastError(0xdeadbeef);
@@ -201,27 +207,6 @@ static void test_AddDefaultForUsage(void)
     ok (GetLastError() == ERROR_INVALID_PARAMETER,
         "Expected ERROR_INVALID_PARAMETER, got %u.\n", GetLastError());
 
-    /* Just the ActionID */
-    memset(&DefUsage, 0 , sizeof(CRYPT_PROVIDER_REGDEFUSAGE));
-    DefUsage.cbStruct = sizeof(CRYPT_PROVIDER_REGDEFUSAGE);
-    DefUsage.pgActionID = &ActionID;
-    SetLastError(0xdeadbeef);
-    ret = pWintrustAddDefaultForUsage(oid, &DefUsage);
-    ok ( ret, "Expected WintrustAddDefaultForUsage to succeed\n");
-    ok (GetLastError() == 0xdeadbeef,
-        "Last error should not have been changed: %u\n", GetLastError());
-   
-    /* No ActionID */
-    memset(&DefUsage, 0 , sizeof(CRYPT_PROVIDER_REGDEFUSAGE));
-    DefUsage.cbStruct = sizeof(CRYPT_PROVIDER_REGDEFUSAGE);
-    DefUsage.pwszDllName = DummyDllW;
-    DefUsage.pwszLoadCallbackDataFunctionName = DummyFunction;
-    DefUsage.pwszFreeCallbackDataFunctionName = DummyFunction;
-    ret = pWintrustAddDefaultForUsage(oid, &DefUsage);
-    ok (!ret, "Expected WintrustAddDefaultForUsage to fail.\n");
-    ok (GetLastError() == ERROR_INVALID_PARAMETER,
-        "Expected ERROR_INVALID_PARAMETER, got %u.\n", GetLastError());
-
     /* cbStruct set to 0 */
     memset(&DefUsage, 0 , sizeof(CRYPT_PROVIDER_REGDEFUSAGE));
     DefUsage.cbStruct = 0;
@@ -234,28 +219,6 @@ static void test_AddDefaultForUsage(void)
     ok (!ret, "Expected WintrustAddDefaultForUsage to fail.\n");
     ok (GetLastError() == ERROR_INVALID_PARAMETER,
         "Expected ERROR_INVALID_PARAMETER, got %u.\n", GetLastError());
-
-    /* All OK */
-    memset(&DefUsage, 0 , sizeof(CRYPT_PROVIDER_REGDEFUSAGE));
-    DefUsage.cbStruct = sizeof(CRYPT_PROVIDER_REGDEFUSAGE);
-    DefUsage.pgActionID = &ActionID;
-    DefUsage.pwszDllName = DummyDllW;
-    DefUsage.pwszLoadCallbackDataFunctionName = DummyFunction;
-    DefUsage.pwszFreeCallbackDataFunctionName = DummyFunction;
-    SetLastError(0xdeadbeef);
-    ret = pWintrustAddDefaultForUsage(oid, &DefUsage);
-    ok ( ret, "Expected WintrustAddDefaultForUsage to succeed\n");
-    ok (GetLastError() == 0xdeadbeef,
-        "Last error should not have been changed: %u\n", GetLastError());
-
-    /* There is no corresponding remove for WintrustAddDefaultForUsage
-     * so we delete the registry key manually.
-     */
-    if (ret)
-    {
-        res = RegDeleteKeyA(HKEY_LOCAL_MACHINE, Usages);
-        ok (res == ERROR_SUCCESS, "Key delete failed : 0x%08x\n", res);
-    }
 }
 
 static void test_LoadFunctionPointers(void)
@@ -264,6 +227,11 @@ static void test_LoadFunctionPointers(void)
     CRYPT_PROVIDER_FUNCTIONS funcs;
     GUID action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
 
+    if (!pWintrustLoadFunctionPointers)
+    {
+        win_skip("WintrustLoadFunctionPointers is not available\n");
+        return;
+    }
     SetLastError(0xdeadbeef);
     ret = pWintrustLoadFunctionPointers(NULL, NULL);
     ok(!ret && GetLastError() == 0xdeadbeef, "Expected failure\n");
@@ -273,8 +241,10 @@ static void test_LoadFunctionPointers(void)
 
     SetLastError(0xdeadbeef);
     ret = pWintrustLoadFunctionPointers(NULL, &funcs);
-    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
-        "Expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    ok(!ret, "WintrustLoadFunctionPointers succeeded\n");
+    ok(GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == 0xdeadbeef /* W2K and XP-SP1 */,
+        "Expected ERROR_INVALID_PARAMETER or 0xdeadbeef, got %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     funcs.cbStruct = 0;
@@ -301,19 +271,18 @@ static void test_RegPolicyFlags(void)
      "Software\\Microsoft\\Windows\\CurrentVersion\\Wintrust\\"
      "Trust Providers\\Software Publishing";
     static const CHAR State[] = "State";
-    void (WINAPI *pGetFlags)(DWORD *);
-    BOOL (WINAPI *pSetFlags)(DWORD);
     HKEY key;
     LONG r;
     DWORD flags1, flags2, flags3, size;
     BOOL ret;
 
-    pGetFlags = (void*)GetProcAddress(hWintrust, "WintrustGetRegPolicyFlags");
-    pSetFlags = (void*)GetProcAddress(hWintrust, "WintrustSetRegPolicyFlags");
-    if (!pGetFlags || !pSetFlags)
-        skip("Policy flags functions not present\n");
+    if (!pWintrustGetRegPolicyFlags || !pWintrustSetRegPolicyFlags)
+    {
+        win_skip("Policy flags functions not present\n");
+        return;
+    }
 
-    pGetFlags(&flags2);
+    pWintrustGetRegPolicyFlags(&flags2);
 
     r = RegOpenKeyExA(HKEY_CURRENT_USER, Software_Publishing, 0, KEY_ALL_ACCESS,
      &key);
@@ -321,31 +290,28 @@ static void test_RegPolicyFlags(void)
 
     size = sizeof(flags1);
     r = RegQueryValueExA(key, State, NULL, NULL, (LPBYTE)&flags1, &size);
-    ok(!r, "RegQueryValueEx failed: %d\n", r);
-
-    ok(flags1 == flags2, "Got %08x flags instead of %08x\n", flags1, flags2);
+    ok(!r || r == ERROR_FILE_NOT_FOUND, "RegQueryValueEx failed: %d\n", r);
+    if (!r)
+        ok(flags1 == flags2, "Got %08x flags instead of %08x\n", flags1, flags2);
 
     flags3 = flags2 | 1;
-    ret = pSetFlags(flags3);
-    ok(ret, "pSetFlags failed: %d\n", GetLastError());
+    ret = pWintrustSetRegPolicyFlags(flags3);
+    ok(ret, "WintrustSetRegPolicyFlags failed: %d\n", GetLastError());
     size = sizeof(flags1);
     r = RegQueryValueExA(key, State, NULL, NULL, (LPBYTE)&flags1, &size);
     ok(flags1 == flags3, "Got %08x flags instead of %08x\n", flags1, flags3);
 
-    pSetFlags(flags2);
+    pWintrustSetRegPolicyFlags(flags2);
 
     RegCloseKey(key);
 }
 
 START_TEST(register)
 {
-    if(!InitFunctionPtrs())
-        return;
+    InitFunctionPtrs();
 
     test_AddRem_ActionID();
     test_AddDefaultForUsage();
     test_LoadFunctionPointers();
     test_RegPolicyFlags();
-
-    FreeLibrary(hWintrust);
 }

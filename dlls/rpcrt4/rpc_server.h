@@ -1,7 +1,7 @@
 /*
  * RPC server API
  *
- * Copyright 2001 Ove Kåven, TransGaming Technologies
+ * Copyright 2001 Ove KÃ¥ven, TransGaming Technologies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -56,7 +56,7 @@ struct protseq_ops
      * new connection was established */
     int (*wait_for_new_connection)(RpcServerProtseq *protseq, unsigned int count, void *wait_array);
     /* opens the endpoint and optionally begins listening */
-    RPC_STATUS (*open_endpoint)(RpcServerProtseq *protseq, LPSTR endpoint);
+    RPC_STATUS (*open_endpoint)(RpcServerProtseq *protseq, const char *endpoint);
 };
 
 typedef struct _RpcServerInterface
@@ -73,9 +73,12 @@ typedef struct _RpcServerInterface
   /* set when unregistering interface to let the caller of
    * RpcServerUnregisterIf* know that all calls have finished */
   HANDLE CallsCompletedEvent;
+  BOOL Delete; /* delete when the last call finishes */
 } RpcServerInterface;
 
 void RPCRT4_new_client(RpcConnection* conn);
 const struct protseq_ops *rpcrt4_get_protseq_ops(const char *protseq);
+
+void RPCRT4_destroy_all_protseqs(void);
 
 #endif  /* __WINE_RPC_SERVER_H */

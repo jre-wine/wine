@@ -26,6 +26,10 @@
 #define ID_DWL_INSTALL      7602
 #define ID_DWL_STATUS       7603
 
+#define ID_PROMPT_DIALOG    7700
+#define ID_PROMPT_PROMPT    7701
+#define ID_PROMPT_EDIT      7702
+
 #define IDS_MESSAGE_BOX_TITLE  2213
 
 #define IDS_PRINT_HEADER_TEMPLATE  8403
@@ -52,6 +56,5 @@
 
 #define IDD_HYPERLINK           8000
 
-#define IDC_STATIC              9000
 #define IDC_URL                 9001
 #define IDC_TYPE                9002

@@ -1282,7 +1282,8 @@ ULONG DirectSoundDevice_Release(DirectSoundDevice * device)
 
         HeapFree(GetProcessHeap(), 0, device->tmp_buffer);
         HeapFree(GetProcessHeap(), 0, device->mix_buffer);
-        HeapFree(GetProcessHeap(), 0, device->buffer);
+        if (device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY)
+            HeapFree(GetProcessHeap(), 0, device->buffer);
         RtlDeleteResource(&device->buffer_list_lock);
         device->mixlock.DebugInfo->Spare[0] = 0;
         DeleteCriticalSection(&device->mixlock);
@@ -1470,7 +1471,7 @@ HRESULT DirectSoundDevice_Initialize(DirectSoundDevice ** ppDevice, LPCGUID lpcG
             device->drvcaps.dwFlags |= DSCAPS_EMULDRIVER;
         device->drvcaps.dwMinSecondarySampleRate = DSBFREQUENCY_MIN;
         device->drvcaps.dwMaxSecondarySampleRate = DSBFREQUENCY_MAX;
-        device->drvcaps.dwPrimaryBuffers = 1;
+        ZeroMemory(&device->volpan, sizeof(device->volpan));
     }
 
     hr = DSOUND_PrimaryCreate(device);
@@ -1560,7 +1561,7 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
            if (device->hwbuf)
                device->dsbd.dwFlags |= DSBCAPS_LOCHARDWARE;
            else device->dsbd.dwFlags |= DSBCAPS_LOCSOFTWARE;
-           hres = PrimaryBufferImpl_Create(device, (PrimaryBufferImpl**)&(device->primary), &(device->dsbd));
+           hres = PrimaryBufferImpl_Create(device, &(device->primary), &(device->dsbd));
            if (device->primary) {
                IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER8)(device->primary));
                *ppdsb = (LPDIRECTSOUNDBUFFER)(device->primary);
@@ -1585,13 +1586,17 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
         }
         if (pwfxe->Format.wFormatTag == WAVE_FORMAT_EXTENSIBLE)
         {
+            /* check if cbSize is at least 22 bytes */
             if (pwfxe->Format.cbSize < (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)))
             {
                 WARN("Too small a cbSize %u\n", pwfxe->Format.cbSize);
                 return DSERR_INVALIDPARAM;
             }
 
-            if (pwfxe->Format.cbSize > (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)))
+            /* cbSize should be 22 bytes, with one possible exception */
+            if (pwfxe->Format.cbSize > (sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX)) &&
+                !(IsEqualGUID(&pwfxe->SubFormat, &KSDATAFORMAT_SUBTYPE_PCM) &&
+                pwfxe->Format.cbSize == sizeof(WAVEFORMATEXTENSIBLE)))
             {
                 WARN("Too big a cbSize %u\n", pwfxe->Format.cbSize);
                 return DSERR_CONTROLUNAVAIL;
@@ -1628,12 +1633,12 @@ HRESULT DirectSoundDevice_CreateSoundBuffer(
             return DSERR_INVALIDPARAM;
         }
 
-        hres = IDirectSoundBufferImpl_Create(device, (IDirectSoundBufferImpl**)&dsb, dsbd);
+        hres = IDirectSoundBufferImpl_Create(device, &dsb, dsbd);
         if (dsb) {
             hres = SecondaryBufferImpl_Create(dsb, (SecondaryBufferImpl**)ppdsb);
             if (*ppdsb) {
                 dsb->secondary = (SecondaryBufferImpl*)*ppdsb;
-                IDirectSoundBuffer_AddRef((LPDIRECTSOUNDBUFFER)*ppdsb);
+                IDirectSoundBuffer_AddRef(*ppdsb);
             } else
                 WARN("SecondaryBufferImpl_Create failed\n");
         } else

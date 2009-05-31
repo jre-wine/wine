@@ -3,16 +3,10 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = comcat.dll
-IMPORTS   = ole32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid ole32 user32 advapi32 kernel32
 
 C_SRCS = \
-	comcat_main.c \
-	factory.c \
-	information.c \
-	manager.c \
-	register.c \
-	regsvr.c
+	comcat_main.c
 
 RC_SRCS = \
 	version.rc

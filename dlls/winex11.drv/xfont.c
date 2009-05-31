@@ -421,7 +421,7 @@ static UINT16   __lfCheckSum( const LOGFONT16 *plf )
 static UINT16   __genericCheckSum( const void *ptr, int size )
 {
    unsigned int checksum = 0;
-   const char *p = (const char *)ptr;
+   const char *p = ptr;
    while (size-- > 0)
      checksum ^= (checksum << 3) + (checksum >> 29) + *p++;
 
@@ -1015,7 +1015,7 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
        aLFD.charset_encoding = any;
        break;
 
-   case 255: /* no suffix - it ends eg "-ascii" */
+   case 255: /* no suffix - it ends, e.g., "-ascii" */
        aLFD.charset_encoding = NULL;
        break;
    }
@@ -1029,9 +1029,6 @@ static BOOL LFD_ComposeLFD( const fontObject* fo,
 
 /***********************************************************************
  *		X Font Resources
- *
- * font info		- http://www.microsoft.com/kb/articles/q65/1/23.htm
- * Windows font metrics	- http://www.microsoft.com/kb/articles/q32/6/67.htm
  */
 static void XFONT_GetLeading( const IFONTINFO16 *pFI, const XFontStruct* x_fs,
 			      INT16* pIL, INT16* pEL, const XFONTTRANS *XFT )
@@ -1369,7 +1366,6 @@ static void XFONT_WindowsNames(void)
     for( fr = fontList; fr ; fr = fr->next )
     {
 	fontResource* pfr;
-	char* 	      lpch;
 
 	if( fr->fr_flags & FR_NAMESET ) continue;     /* skip already assigned */
 
@@ -1380,7 +1376,6 @@ static void XFONT_WindowsNames(void)
 		    break;
 	    }
 
-	lpch = fr->lfFaceName;
 	snprintf( fr->lfFaceName, sizeof(fr->lfFaceName), "%s %s",
 					  /* prepend vendor name */
 					  (pfr==fr) ? "" : fr->resource->foundry,
@@ -1718,7 +1713,7 @@ static LPCSTR XFONT_UnAlias(char* font)
 	XFONT_InitialCapitals(font); /* to remove extra white space */
 
 	for( fa = aliasTable; fa; fa = fa->next )
-	    /* use case insensitive matching to handle eg "MS Sans Serif" */
+	    /* use case insensitive matching to handle, e.g., "MS Sans Serif" */
 	    if( !strcasecmp( fa->faAlias, font ) )
 	    {
 		TRACE("found alias '%s'->%s'\n", font, fa->faTypeFace );
@@ -2404,7 +2399,6 @@ static int XFONT_GetDefResolution( int log_pixels_x, int log_pixels_y )
  *      weight, italics, underlines, strikeouts
  *
  * NOTE: you can experiment with different penalty weights to see what happens.
- * http://premium.microsoft.com/msdn/library/techart/f365/f36b/f37b/d38b/sa8bf.htm
  */
 static UINT XFONT_Match( fontMatch* pfm )
 {
@@ -3100,7 +3094,7 @@ static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 	    pfo->lpPixmap = NULL;
 
 	    for ( i = 0; i < X11FONT_REFOBJS_MAX; i++ )
-		pfo->prefobjs[i] = (X_PHYSFONT)0xffffffff; /* invalid value */
+		pfo->prefobjs[i] = 0xffffffff; /* invalid value */
 
             /* special treatment for DBCS that needs multiple fonts */
             /* All member of pfo must be set correctly. */
@@ -3123,7 +3117,7 @@ static X_PHYSFONT XFONT_RealizeFont( LPLOGFONT16 plf,
 		    lfSub.lfCharSet = (BYTE)(charset_sub & 0xff);
 		    lfSub.lfFaceName[0] = '\0'; /* FIXME? */
 		    /* this font has sub font */
-		    if ( i == 0 ) pfo->prefobjs[0] = (X_PHYSFONT)0;
+                    if ( i == 0 ) pfo->prefobjs[0] = 0;
 		    pfo->prefobjs[i] =
 			XFONT_RealizeFont( &lfSub, &faceMatchedSub,
 					   TRUE, charset_sub,
@@ -3165,7 +3159,7 @@ END:
     *faceMatched = pfo->fi->df.dfFace;
     *pcharsetMatched = pfo->fi->internal_charset;
 
-    return (X_PHYSFONT)(X_PFONT_MAGIC | index);
+    return X_PFONT_MAGIC | index;
 }
 
 /***********************************************************************
@@ -3186,15 +3180,6 @@ XFontStruct* XFONT_GetFontStruct( X_PHYSFONT pFont )
     return NULL;
 }
 
-/***********************************************************************
- *           XFONT_GetFontInfo
- */
-LPIFONTINFO16 XFONT_GetFontInfo( X_PHYSFONT pFont )
-{
-    if( CHECK_PFONT(pFont) ) return &(__PFONT(pFont)->fi->df);
-    return NULL;
-}
-
 
 
 /* X11DRV Interface ****************************************************
@@ -3205,7 +3190,7 @@ LPIFONTINFO16 XFONT_GetFontInfo( X_PHYSFONT pFont )
 /***********************************************************************
  *           SelectFont   (X11DRV.@)
  */
-HFONT X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiFont )
+HFONT CDECL X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiFont )
 {
     LOGFONTW logfont;
     LOGFONT16 lf;
@@ -3298,16 +3283,25 @@ HFONT X11DRV_SelectFont( X11DRV_PDEVICE *physDev, HFONT hfont, HANDLE gdiFont )
  *
  *           X11DRV_EnumDeviceFonts
  */
-BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
-                             FONTENUMPROCW proc, LPARAM lp )
+BOOL CDECL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
+                                   FONTENUMPROCW proc, LPARAM lp )
 {
     ENUMLOGFONTEXW	lf;
     NEWTEXTMETRICEXW	tm;
     fontResource*	pfr = fontList;
     BOOL	  	b, bRet = 0;
+    LOGFONTW lfW;
 
     /* don't enumerate x11 fonts if we're using client side fonts */
     if (physDev->has_gdi_font) return FALSE;
+
+    if (!plf)
+    {
+        lfW.lfCharSet = DEFAULT_CHARSET;
+        lfW.lfPitchAndFamily = 0;
+        lfW.lfFaceName[0] = 0;
+        plf = &lfW;
+    }
 
     if( plf->lfFaceName[0] )
     {
@@ -3324,11 +3318,11 @@ BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
 		/* Note: XFONT_GetFontMetric() will have to
 		   release the crit section, font list will
 		   have to be retraversed on return */
-
 	        if(plf->lfCharSet == DEFAULT_CHARSET ||
 		   plf->lfCharSet == pfi->df.dfCharSet) {
-		    if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm,
-			       XFONT_GetFontMetric( pfi, &lf, &tm ), lp )) )
+		    UINT xfm = XFONT_GetFontMetric( pfi, &lf, &tm );
+
+		    if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )) )
 		        bRet = b;
 		    else break;
 		}
@@ -3340,8 +3334,9 @@ BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
 	{
             if(pfr->fi)
             {
-	        if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm,
-			   XFONT_GetFontMetric( pfr->fi, &lf, &tm ), lp )) )
+	        UINT xfm = XFONT_GetFontMetric( pfr->fi, &lf, &tm );
+
+	        if( (b = (*proc)( &lf.elfLogFont, (TEXTMETRICW *)&tm, xfm, lp )) )
 		    bRet = b;
 		else break;
             }
@@ -3353,7 +3348,7 @@ BOOL X11DRV_EnumDeviceFonts( X11DRV_PDEVICE *physDev, LPLOGFONTW plf,
 /***********************************************************************
  *           X11DRV_GetTextMetrics
  */
-BOOL X11DRV_GetTextMetrics(X11DRV_PDEVICE *physDev, TEXTMETRICW *metrics)
+BOOL CDECL X11DRV_GetTextMetrics(X11DRV_PDEVICE *physDev, TEXTMETRICW *metrics)
 {
     if( CHECK_PFONT(physDev->font) )
     {
@@ -3368,8 +3363,8 @@ BOOL X11DRV_GetTextMetrics(X11DRV_PDEVICE *physDev, TEXTMETRICW *metrics)
 /***********************************************************************
  *           X11DRV_GetCharWidth
  */
-BOOL X11DRV_GetCharWidth( X11DRV_PDEVICE *physDev, UINT firstChar, UINT lastChar,
-                            LPINT buffer )
+BOOL CDECL X11DRV_GetCharWidth( X11DRV_PDEVICE *physDev, UINT firstChar, UINT lastChar,
+                                  LPINT buffer )
 {
     fontObject* pfo = XFONT_GetFontObject( physDev->font );
 

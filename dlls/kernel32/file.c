@@ -3,6 +3,7 @@
  *
  * Copyright 1993 John Burton
  * Copyright 1996, 2004 Alexandre Julliard
+ * Copyright 2008 Jeff Zaroyko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,7 +46,6 @@
 #include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
-#include "thread.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
 
@@ -347,7 +347,7 @@ static void FILE_InitProcessDosHandles( void )
  */
 static void WINAPI FILE_ReadWriteApc(void* apc_user, PIO_STATUS_BLOCK io_status, ULONG reserved)
 {
-    LPOVERLAPPED_COMPLETION_ROUTINE  cr = (LPOVERLAPPED_COMPLETION_ROUTINE)apc_user;
+    LPOVERLAPPED_COMPLETION_ROUTINE  cr = apc_user;
 
     cr(RtlNtStatusToDosError(io_status->u.Status), io_status->Information, (LPOVERLAPPED)io_status);
 }
@@ -387,6 +387,30 @@ BOOL WINAPI ReadFileEx(HANDLE hFile, LPVOID buffer, DWORD bytesToRead,
         return FALSE;
     }
     return TRUE;
+}
+
+
+/***********************************************************************
+ *              ReadFileScatter                (KERNEL32.@)
+ */
+BOOL WINAPI ReadFileScatter( HANDLE file, FILE_SEGMENT_ELEMENT *segments, DWORD count,
+                             LPDWORD reserved, LPOVERLAPPED overlapped )
+{
+    PIO_STATUS_BLOCK io_status;
+    LARGE_INTEGER offset;
+    NTSTATUS status;
+
+    TRACE( "(%p %p %u %p)\n", file, segments, count, overlapped );
+
+    offset.u.LowPart = overlapped->u.s.Offset;
+    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    io_status = (PIO_STATUS_BLOCK)overlapped;
+    io_status->u.Status = STATUS_PENDING;
+    io_status->Information = 0;
+
+    status = NtReadFileScatter( file, NULL, NULL, NULL, io_status, segments, count, &offset, NULL );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
 }
 
 
@@ -479,6 +503,30 @@ BOOL WINAPI WriteFileEx(HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
 
 
 /***********************************************************************
+ *              WriteFileGather                (KERNEL32.@)
+ */
+BOOL WINAPI WriteFileGather( HANDLE file, FILE_SEGMENT_ELEMENT *segments, DWORD count,
+                             LPDWORD reserved, LPOVERLAPPED overlapped )
+{
+    PIO_STATUS_BLOCK io_status;
+    LARGE_INTEGER offset;
+    NTSTATUS status;
+
+    TRACE( "%p %p %u %p\n", file, segments, count, overlapped );
+
+    offset.u.LowPart = overlapped->u.s.Offset;
+    offset.u.HighPart = overlapped->u.s.OffsetHigh;
+    io_status = (PIO_STATUS_BLOCK)overlapped;
+    io_status->u.Status = STATUS_PENDING;
+    io_status->Information = 0;
+
+    status = NtWriteFileGather( file, NULL, NULL, NULL, io_status, segments, count, &offset, NULL );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+
+/***********************************************************************
  *             WriteFile               (KERNEL32.@)
  */
 BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
@@ -511,16 +559,6 @@ BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
 
     status = NtWriteFile(hFile, hEvent, NULL, cvalue, piosb,
                          buffer, bytesToWrite, poffset, NULL);
-
-    /* FIXME: NtWriteFile does not always cause page faults, generate them now */
-    if (status == STATUS_INVALID_USER_BUFFER && !IsBadReadPtr( buffer, bytesToWrite ))
-    {
-        status = NtWriteFile(hFile, hEvent, NULL, cvalue, piosb,
-                             buffer, bytesToWrite, poffset, NULL);
-        if (status != STATUS_INVALID_USER_BUFFER)
-            FIXME("Could not access memory (%p,%d) at first, now OK. Protected by DIBSection code?\n",
-                  buffer, bytesToWrite);
-    }
 
     if (status == STATUS_PENDING && !overlapped)
     {
@@ -565,12 +603,6 @@ BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
 
     TRACE( "(%p %p %p %x)\n", hFile, lpOverlapped, lpTransferred, bWait );
 
-    if ( lpOverlapped == NULL )
-    {
-        ERR("lpOverlapped was null\n");
-        return FALSE;
-    }
-
     status = lpOverlapped->Internal;
     if (status == STATUS_PENDING)
     {
@@ -586,7 +618,7 @@ BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
         status = lpOverlapped->Internal;
     }
 
-    if (lpTransferred) *lpTransferred = lpOverlapped->InternalHigh;
+    *lpTransferred = lpOverlapped->InternalHigh;
 
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
@@ -852,11 +884,11 @@ DWORD WINAPI GetFileSize( HANDLE hFile, LPDWORD filesizehigh )
  */
 BOOL WINAPI GetFileSizeEx( HANDLE hFile, PLARGE_INTEGER lpFileSize )
 {
-    FILE_END_OF_FILE_INFORMATION info;
+    FILE_STANDARD_INFORMATION info;
     IO_STATUS_BLOCK io;
     NTSTATUS status;
 
-    status = NtQueryInformationFile( hFile, &io, &info, sizeof(info), FileEndOfFileInformation );
+    status = NtQueryInformationFile( hFile, &io, &info, sizeof(info), FileStandardInformation );
     if (status == STATUS_SUCCESS)
     {
         *lpFileSize = info.EndOfFile;
@@ -1268,6 +1300,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
     IO_STATUS_BLOCK io;
     HANDLE ret;
     DWORD dosdev;
+    const WCHAR *vxd_name = NULL;
     static const WCHAR bkslashes_with_dotW[] = {'\\','\\','.','\\',0};
     static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
     static const WCHAR conoutW[] = {'C','O','N','O','U','T','$',0};
@@ -1323,19 +1356,9 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         {
             dosdev += MAKELONG( 0, 4*sizeof(WCHAR) );  /* adjust position to start of filename */
         }
-        else if (!(GetVersion() & 0x80000000))
+        else if (GetVersion() & 0x80000000)
         {
-            dosdev = 0;
-        }
-        else if (filename[4])
-        {
-            ret = VXD_Open( filename+4, access, sa );
-            goto done;
-        }
-        else
-        {
-            SetLastError( ERROR_INVALID_NAME );
-            return INVALID_HANDLE_VALUE;
+            vxd_name = filename + 4;
         }
     }
     else dosdev = RtlIsDosDeviceName_U( filename );
@@ -1386,6 +1409,8 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         options |= FILE_DELETE_ON_CLOSE;
         access |= DELETE;
     }
+    if (attributes & FILE_FLAG_NO_BUFFERING)
+        options |= FILE_NO_INTERMEDIATE_BUFFERING;
     if (!(attributes & FILE_FLAG_OVERLAPPED))
         options |= FILE_SYNCHRONOUS_IO_ALERT;
     if (attributes & FILE_FLAG_RANDOM_ACCESS)
@@ -1415,6 +1440,8 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
                            options, NULL, 0 );
     if (status)
     {
+        if (vxd_name && vxd_name[0] && (ret = VXD_Open( vxd_name, access, sa ))) goto done;
+
         WARN("Unable to create file %s (status %x)\n", debugstr_w(filename), status);
         ret = INVALID_HANDLE_VALUE;
 
@@ -1479,6 +1506,8 @@ BOOL WINAPI DeleteFileW( LPCWSTR path )
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
+    HANDLE hFile;
+    IO_STATUS_BLOCK io;
 
     TRACE("%s\n", debugstr_w(path) );
 
@@ -1495,7 +1524,12 @@ BOOL WINAPI DeleteFileW( LPCWSTR path )
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    status = NtDeleteFile(&attr);
+    status = NtCreateFile(&hFile, GENERIC_READ | GENERIC_WRITE | DELETE,
+			  &attr, &io, NULL, 0,
+			  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			  FILE_OPEN, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE, NULL, 0);
+    if (status == STATUS_SUCCESS) status = NtClose(hFile);
+
     RtlFreeUnicodeString( &nameW );
     if (status)
     {
@@ -1524,14 +1558,167 @@ BOOL WINAPI DeleteFileA( LPCSTR path )
  *           ReplaceFileW   (KERNEL32.@)
  *           ReplaceFile    (KERNEL32.@)
  */
-BOOL WINAPI ReplaceFileW(LPCWSTR lpReplacedFileName,LPCWSTR lpReplacementFileName,
+BOOL WINAPI ReplaceFileW(LPCWSTR lpReplacedFileName, LPCWSTR lpReplacementFileName,
                          LPCWSTR lpBackupFileName, DWORD dwReplaceFlags,
                          LPVOID lpExclude, LPVOID lpReserved)
 {
-    FIXME("(%s,%s,%s,%08x,%p,%p) stub\n",debugstr_w(lpReplacedFileName),debugstr_w(lpReplacementFileName),
-                                          debugstr_w(lpBackupFileName),dwReplaceFlags,lpExclude,lpReserved);
-    SetLastError(ERROR_UNABLE_TO_MOVE_REPLACEMENT);
-    return FALSE;
+    UNICODE_STRING nt_replaced_name, nt_replacement_name;
+    ANSI_STRING unix_replaced_name, unix_replacement_name, unix_backup_name;
+    HANDLE hReplaced = NULL, hReplacement = NULL, hBackup = NULL;
+    DWORD error = ERROR_SUCCESS;
+    UINT replaced_flags;
+    BOOL ret = FALSE;
+    NTSTATUS status;
+    IO_STATUS_BLOCK io;
+    OBJECT_ATTRIBUTES attr;
+
+    if (dwReplaceFlags)
+        FIXME("Ignoring flags %x\n", dwReplaceFlags);
+
+    /* First two arguments are mandatory */
+    if (!lpReplacedFileName || !lpReplacementFileName)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    unix_replaced_name.Buffer = NULL;
+    unix_replacement_name.Buffer = NULL;
+    unix_backup_name.Buffer = NULL;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.ObjectName = NULL;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    /* Open the "replaced" file for reading and writing */
+    if (!(RtlDosPathNameToNtPathName_U(lpReplacedFileName, &nt_replaced_name, NULL, NULL)))
+    {
+        error = ERROR_PATH_NOT_FOUND;
+        goto fail;
+    }
+    replaced_flags = lpBackupFileName ? FILE_OPEN : FILE_OPEN_IF;
+    attr.ObjectName = &nt_replaced_name;
+    status = NtOpenFile(&hReplaced, GENERIC_READ|GENERIC_WRITE|DELETE|SYNCHRONIZE,
+                        &attr, &io,
+                        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+                        FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE);
+    if (status == STATUS_SUCCESS)
+        status = wine_nt_to_unix_file_name(&nt_replaced_name, &unix_replaced_name, replaced_flags, FALSE);
+    RtlFreeUnicodeString(&nt_replaced_name);
+    if (status != STATUS_SUCCESS)
+    {
+        if (status == STATUS_OBJECT_NAME_NOT_FOUND)
+            error = ERROR_FILE_NOT_FOUND;
+        else
+            error = ERROR_UNABLE_TO_REMOVE_REPLACED;
+        goto fail;
+    }
+
+    /*
+     * Open the replacement file for reading, writing, and deleting
+     * (writing and deleting are needed when finished)
+     */
+    if (!(RtlDosPathNameToNtPathName_U(lpReplacementFileName, &nt_replacement_name, NULL, NULL)))
+    {
+        error = ERROR_PATH_NOT_FOUND;
+        goto fail;
+    }
+    attr.ObjectName = &nt_replacement_name;
+    status = NtOpenFile(&hReplacement,
+                        GENERIC_READ|GENERIC_WRITE|DELETE|WRITE_DAC|SYNCHRONIZE,
+                        &attr, &io, 0,
+                        FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE);
+    if (status == STATUS_SUCCESS)
+        status = wine_nt_to_unix_file_name(&nt_replacement_name, &unix_replacement_name, FILE_OPEN, FALSE);
+    RtlFreeUnicodeString(&nt_replacement_name);
+    if (status != STATUS_SUCCESS)
+    {
+        error = RtlNtStatusToDosError(status);
+        goto fail;
+    }
+
+    /* If the user wants a backup then that needs to be performed first */
+    if (lpBackupFileName)
+    {
+        UNICODE_STRING nt_backup_name;
+        FILE_BASIC_INFORMATION replaced_info;
+
+        /* Obtain the file attributes from the "replaced" file */
+        status = NtQueryInformationFile(hReplaced, &io, &replaced_info,
+                                        sizeof(replaced_info),
+                                        FileBasicInformation);
+        if (status != STATUS_SUCCESS)
+        {
+            error = RtlNtStatusToDosError(status);
+            goto fail;
+        }
+
+        if (!(RtlDosPathNameToNtPathName_U(lpBackupFileName, &nt_backup_name, NULL, NULL)))
+        {
+            error = ERROR_PATH_NOT_FOUND;
+            goto fail;
+        }
+        attr.ObjectName = &nt_backup_name;
+        /* Open the backup with permissions to write over it */
+        status = NtCreateFile(&hBackup, GENERIC_WRITE,
+                              &attr, &io, NULL, replaced_info.FileAttributes,
+                              FILE_SHARE_WRITE, FILE_OPEN_IF,
+                              FILE_SYNCHRONOUS_IO_NONALERT|FILE_NON_DIRECTORY_FILE,
+                              NULL, 0);
+        if (status == STATUS_SUCCESS)
+            status = wine_nt_to_unix_file_name(&nt_backup_name, &unix_backup_name, FILE_OPEN_IF, FALSE);
+        if (status != STATUS_SUCCESS)
+        {
+            error = RtlNtStatusToDosError(status);
+            goto fail;
+        }
+
+        /* If an existing backup exists then copy over it */
+        if (rename(unix_replaced_name.Buffer, unix_backup_name.Buffer) == -1)
+        {
+            error = ERROR_UNABLE_TO_REMOVE_REPLACED; /* is this correct? */
+            goto fail;
+        }
+    }
+
+    /*
+     * Now that the backup has been performed (if requested), copy the replacement
+     * into place
+     */
+    if (rename(unix_replacement_name.Buffer, unix_replaced_name.Buffer) == -1)
+    {
+        if (errno == EACCES)
+        {
+            /* Inappropriate permissions on "replaced", rename will fail */
+            error = ERROR_UNABLE_TO_REMOVE_REPLACED;
+            goto fail;
+        }
+        /* on failure we need to indicate whether a backup was made */
+        if (!lpBackupFileName)
+            error = ERROR_UNABLE_TO_MOVE_REPLACEMENT;
+        else
+            error = ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+        goto fail;
+    }
+    /* Success! */
+    ret = TRUE;
+
+    /* Perform resource cleanup */
+fail:
+    if (hBackup) CloseHandle(hBackup);
+    if (hReplaced) CloseHandle(hReplaced);
+    if (hReplacement) CloseHandle(hReplacement);
+    RtlFreeAnsiString(&unix_backup_name);
+    RtlFreeAnsiString(&unix_replacement_name);
+    RtlFreeAnsiString(&unix_replaced_name);
+
+    /* If there was an error, set the error code */
+    if(!ret)
+        SetLastError(error);
+    return ret;
 }
 
 
@@ -1542,10 +1729,37 @@ BOOL WINAPI ReplaceFileA(LPCSTR lpReplacedFileName,LPCSTR lpReplacementFileName,
                          LPCSTR lpBackupFileName, DWORD dwReplaceFlags,
                          LPVOID lpExclude, LPVOID lpReserved)
 {
-    FIXME("(%s,%s,%s,%08x,%p,%p) stub\n",lpReplacedFileName,lpReplacementFileName,
-                                          lpBackupFileName,dwReplaceFlags,lpExclude,lpReserved);
-    SetLastError(ERROR_UNABLE_TO_MOVE_REPLACEMENT);
-    return FALSE;
+    WCHAR *replacedW, *replacementW, *backupW = NULL;
+    BOOL ret;
+
+    /* This function only makes sense when the first two parameters are defined */
+    if (!lpReplacedFileName || !(replacedW = FILE_name_AtoW( lpReplacedFileName, TRUE )))
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (!lpReplacementFileName || !(replacementW = FILE_name_AtoW( lpReplacementFileName, TRUE )))
+    {
+        HeapFree( GetProcessHeap(), 0, replacedW );
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    /* The backup parameter, however, is optional */
+    if (lpBackupFileName)
+    {
+        if (!(backupW = FILE_name_AtoW( lpBackupFileName, TRUE )))
+        {
+            HeapFree( GetProcessHeap(), 0, replacedW );
+            HeapFree( GetProcessHeap(), 0, replacementW );
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+    }
+    ret = ReplaceFileW( replacedW, replacementW, backupW, dwReplaceFlags, lpExclude, lpReserved );
+    HeapFree( GetProcessHeap(), 0, replacedW );
+    HeapFree( GetProcessHeap(), 0, replacementW );
+    HeapFree( GetProcessHeap(), 0, backupW );
+    return ret;
 }
 
 
@@ -1739,7 +1953,7 @@ BOOL WINAPI FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *data )
         SetLastError( ERROR_INVALID_HANDLE );
         return ret;
     }
-    info = (FIND_FIRST_INFO *)handle;
+    info = handle;
     if (info->magic != FIND_FIRST_MAGIC)
     {
         SetLastError( ERROR_INVALID_HANDLE );
@@ -1823,7 +2037,7 @@ BOOL WINAPI FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *data )
  */
 BOOL WINAPI FindClose( HANDLE handle )
 {
-    FIND_FIRST_INFO *info = (FIND_FIRST_INFO *)handle;
+    FIND_FIRST_INFO *info = handle;
 
     if (!handle || handle == INVALID_HANDLE_VALUE)
     {
@@ -1891,7 +2105,7 @@ HANDLE WINAPI FindFirstFileExA( LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevel
     handle = FindFirstFileExW(nameW, fInfoLevelId, &dataW, fSearchOp, lpSearchFilter, dwAdditionalFlags);
     if (handle == INVALID_HANDLE_VALUE) return handle;
 
-    dataA = (WIN32_FIND_DATAA *) lpFindFileData;
+    dataA = lpFindFileData;
     dataA->dwFileAttributes = dataW.dwFileAttributes;
     dataA->ftCreationTime   = dataW.ftCreationTime;
     dataA->ftLastAccessTime = dataW.ftLastAccessTime;

@@ -26,18 +26,6 @@ LANGUAGE LANG_FRENCH, SUBLANG_NEUTRAL
  * Menu
  */
 
-IDC_REGEDIT MENU DISCARDABLE
-BEGIN
-    POPUP "&Fichier"
-    BEGIN
-        MENUITEM "&Quitter",                       ID_REGISTRY_EXIT
-    END
-    POPUP "Aid&e"
-    BEGIN
-        MENUITEM "À &propos",                  ID_HELP_ABOUT
-    END
-END
-
 IDR_REGEDIT_MENU MENU DISCARDABLE
 BEGIN
     POPUP "&Registres"
@@ -84,8 +72,8 @@ BEGIN
     END
     POPUP "&Signets"
     BEGIN
-        MENUITEM "&Ajouter aux signets",          ID_FAVORITES_ADDTOFAVORITES
-        MENUITEM "&Supprimer des signets",        ID_FAVORITES_REMOVEFAVORITE
+        MENUITEM "&Ajouter aux signets...",          ID_FAVORITES_ADDTOFAVORITES
+        MENUITEM "&Supprimer des signets...",        ID_FAVORITES_REMOVEFAVORITE
     END
     POPUP "Aid&e"
     BEGIN
@@ -120,6 +108,7 @@ BEGIN
         MENUITEM "&Supprimer\tDel",                ID_EDIT_DELETE
         MENUITEM "Ren&ommer\tF2",                  ID_EDIT_RENAME
         MENUITEM SEPARATOR
+        MENUITEM "&Exporter...",                   ID_EDIT_EXPORT
         MENUITEM "&Copier le nom de la clé",              ID_EDIT_COPYKEYNAME
         MENUITEM SEPARATOR
         MENUITEM "&Rechercher\tCtrl+F",               ID_EDIT_FIND, GRAYED
@@ -186,7 +175,7 @@ CAPTION "Modification de la chaîne"
 FONT 8, "MS Shell Dlg"
 BEGIN
     LTEXT           "Nom de la valeur :",IDC_STATIC,5,5,119,8
-    EDITTEXT        IDC_VALUE_NAME,5,15,200,12, WS_BORDER | WS_TABSTOP | WS_DISABLED
+    EDITTEXT        IDC_VALUE_NAME,5,15,200,12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | WS_DISABLED
     LTEXT           "Données de la valeur :",IDC_STATIC,5,30,119,8
     EDITTEXT        IDC_VALUE_DATA,5,40,200,12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL
     DEFPUSHBUTTON   "OK",IDOK,140,60,30,11,WS_GROUP
@@ -199,7 +188,7 @@ CAPTION "Modification de la valeur DWORD"
 FONT 8, "MS Shell Dlg"
 BEGIN
     LTEXT           "Nom de la valeur :",IDC_STATIC,5,5,119,8
-    EDITTEXT        IDC_VALUE_NAME,5,15,200,12, WS_BORDER | WS_TABSTOP | WS_DISABLED
+    EDITTEXT        IDC_VALUE_NAME,5,15,200,12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL | WS_DISABLED
     LTEXT           "Données de valeur :",IDC_STATIC,5,30,90,8
     EDITTEXT        IDC_VALUE_DATA,5,40,90,12, WS_BORDER | WS_TABSTOP
     GROUPBOX        "Base", IDC_DWORD_BASE, 120, 30, 85, 37, BS_GROUPBOX
@@ -249,8 +238,6 @@ END
 STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "Éditeur de registres"
-    IDC_REGEDIT             "REGEDIT"
-    IDC_REGEDIT_FRAME       "REGEDIT_FRAME"
 END
 
 STRINGTABLE DISCARDABLE
@@ -303,10 +290,11 @@ BEGIN
     IDS_ERROR		    "Erreur"
     IDS_BAD_KEY		    "Ne peut pas questionner la clé '%s'"
     IDS_BAD_VALUE           "Ne peut pas questionner la valeur '%s'"
-    IDS_UNSUPPORTED_TYPE    "Ne peut pas éditer des clés de ce type (%ld)"
-    IDS_TOO_BIG_VALUE       "La valeur est trop grande (%ld)"
+    IDS_UNSUPPORTED_TYPE    "Ne peut pas éditer des clés de ce type (%u)"
+    IDS_TOO_BIG_VALUE       "La valeur est trop grande (%u)"
     IDS_DELETE_BOX_TITLE    "Confirmez l'effacement de valeur"
     IDS_DELETE_BOX_TEXT     "Êtes vous sûr vous voulez supprimer la valeur '%s'?"
+    IDS_DELETE_BOX_TEXT_MULTIPLE "Êtes vous sûr vous voulez supprimer cette valeurs?"
     IDS_NEWKEY              "Nouvelle Clé #%d"
     IDS_NEWVALUE            "Nouvelle Valeur #%d"
     IDS_NOTFOUND            "Occurence de '%s' non trouvée"
@@ -338,19 +326,5 @@ END
 BEGIN
     "resource.h\0"
 END
-
-
-
-/*
- * String Table
- */
-
-/*
- *STRINGTABLE DISCARDABLE
- *BEGIN
- *    ID_HELP_HELPTOPICS      "Ouvre l'aide de l'éditeur de registres."
- *    ID_HELP_ABOUT           "Affiche de l'information sur le programme, le numéro de version et le copyright."
- *END
- */
 
 /*****************************************************************/

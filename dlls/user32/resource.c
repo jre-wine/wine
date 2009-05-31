@@ -24,6 +24,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
+#include "winternl.h"
 #include "winnls.h"
 #include "wine/winbase16.h"
 #include "wine/winuser16.h"
@@ -76,11 +77,9 @@ HACCEL WINAPI LoadAcceleratorsW(HINSTANCE instance,LPCWSTR lpTableName)
     DWORD size;
 
     if (HIWORD(lpTableName))
-        TRACE_(accel)("%p '%s'\n",
-                      (LPVOID)instance, (const char *)( lpTableName ) );
+        TRACE_(accel)("%p '%s'\n", instance, (const char *)( lpTableName ) );
     else
-        TRACE_(accel)("%p 0x%04x\n",
-                       (LPVOID)instance, LOWORD(lpTableName) );
+        TRACE_(accel)("%p 0x%04x\n", instance, LOWORD(lpTableName) );
 
     if (!(hRsrc = FindResourceW( instance, lpTableName, (LPWSTR)RT_ACCELERATOR )))
     {
@@ -155,7 +154,7 @@ INT WINAPI CopyAcceleratorTableW(HACCEL src, LPACCEL dst,
      as far as possible. */
   if((dst && (entries < 1)) || (src == NULL) || !accel) {
     WARN_(accel)("Application sent invalid parameters (%p %p %d).\n",
-	 (LPVOID)src, (LPVOID)dst, entries);
+         src, dst, entries);
     return 0;
   }
   xsize = GlobalSize16(HACCEL_16(src))/sizeof(ACCEL16);
@@ -367,6 +366,9 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
     TRACE("instance = %p, id = %04x, buffer = %p, length = %d\n",
           instance, resource_id, buffer, buflen);
 
+    if(buffer == NULL)
+        return 0;
+
     /* Use loword (incremented by 1) as resourceid */
     hrsrc = FindResourceW( instance, MAKEINTRESOURCEW((LOWORD(resource_id) >> 4) + 1),
                            (LPWSTR)RT_STRING );
@@ -381,14 +383,21 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
 
     TRACE("strlen = %d\n", (int)*p );
 
-    if (buffer == NULL) return *p;
+    /*if buflen == 0, then return a read-only pointer to the resource itself in buffer
+    it is assumed that buffer is actually a (LPWSTR *) */
+    if(buflen == 0)
+    {
+        *((LPWSTR *)buffer) = p + 1;
+        return *p;
+    }
+
     i = min(buflen - 1, *p);
     if (i > 0) {
 	memcpy(buffer, p + 1, i * sizeof (WCHAR));
-	buffer[i] = (WCHAR) 0;
+        buffer[i] = 0;
     } else {
 	if (buflen > 1) {
-	    buffer[0] = (WCHAR) 0;
+            buffer[0] = 0;
 	    return 0;
 	}
     }
@@ -400,32 +409,31 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
 /**********************************************************************
  *	LoadStringA	(USER32.@)
  */
-INT WINAPI LoadStringA( HINSTANCE instance, UINT resource_id,
-                            LPSTR buffer, INT buflen )
+INT WINAPI LoadStringA( HINSTANCE instance, UINT resource_id, LPSTR buffer, INT buflen )
 {
-    INT    retval;
-    LPWSTR wbuf;
+    HGLOBAL hmem;
+    HRSRC hrsrc;
+    DWORD retval = 0;
 
     TRACE("instance = %p, id = %04x, buffer = %p, length = %d\n",
           instance, resource_id, buffer, buflen);
 
-    if(buffer == NULL) /* asked size of string */
-	return LoadStringW(instance, resource_id, NULL, 0);
+    if (!buflen) return -1;
 
-    wbuf = HeapAlloc(GetProcessHeap(), 0, buflen * sizeof(WCHAR));
-    if(!wbuf)
-	return 0;
-
-    retval = LoadStringW(instance, resource_id, wbuf, buflen);
-    if(retval != 0)
+    /* Use loword (incremented by 1) as resourceid */
+    if ((hrsrc = FindResourceW( instance, MAKEINTRESOURCEW((LOWORD(resource_id) >> 4) + 1),
+                                (LPWSTR)RT_STRING )) &&
+        (hmem = LoadResource( instance, hrsrc )))
     {
-	retval = WideCharToMultiByte(CP_ACP, 0, wbuf, retval, buffer, buflen - 1, NULL, NULL);
-	buffer[retval] = 0;
-	TRACE("%s loaded !\n", debugstr_a(buffer));
-    }
-    else buffer[0] = 0;    /* no check of buflen here */
-    HeapFree( GetProcessHeap(), 0, wbuf );
+        const WCHAR *p = LockResource(hmem);
+        unsigned int id = resource_id & 0x000f;
 
+        while (id--) p += *p + 1;
+
+        RtlUnicodeToMultiByteN( buffer, buflen - 1, &retval, p + 1, *p * sizeof(WCHAR) );
+    }
+    buffer[retval] = 0;
+    TRACE("returning %s\n", debugstr_a(buffer));
     return retval;
 }
 
@@ -434,7 +442,13 @@ INT WINAPI LoadStringA( HINSTANCE instance, UINT resource_id,
  */
 DWORD WINAPI GetGuiResources( HANDLE hProcess, DWORD uiFlags )
 {
-    FIXME("(%p,%x): stub\n",hProcess,uiFlags);
+    static BOOL warn = TRUE;
+
+    if (warn) {
+        FIXME("(%p,%x): stub\n",hProcess,uiFlags);
+       warn = FALSE;
+    }
+
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
 }

@@ -17,7 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 
 MENU_001 MENU DISCARDABLE
 BEGIN
@@ -91,10 +91,33 @@ MENUITEM "속성(&P)",	FCIDM_SHVIEW_PROPERTIES
 END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "파일(&F)"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "나기기(&X)", IDM_CPANEL_EXIT
+    END
+
+    POPUP "보기(&V)"
+    BEGIN
+        MENUITEM "큰 아이콘(&G)", FCIDM_SHVIEW_BIGICON
+        MENUITEM "작은 아이콘(&M)", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "목록(&L)", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "자세히(&D)", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "도움말(&H)"
+    BEGIN
+        MENUITEM "제어판 정보(&A)...", IDM_CPANEL_ABOUT
+    END
+END
+
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "폴더 탐색"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 {
 DEFPUSHBUTTON "확인", 1, 80, 176, 50, 12, BS_DEFPUSHBUTTON | WS_GROUP | WS_TABSTOP
 PUSHBUTTON "취소", 2, 134, 176, 50, 12, WS_GROUP | WS_TABSTOP
@@ -108,9 +131,9 @@ WS_BORDER | WS_TABSTOP,
 
 
 SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "폴더 탐색"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 {
 LTEXT "", IDD_TITLE, 10, 8, 198, 24
 LTEXT "", IDD_STATUS, 10, 25, 198, 12
@@ -128,7 +151,7 @@ PUSHBUTTON "취소", IDCANCEL, 156, 174, 50, 14, WS_GROUP | WS_TABSTOP
 SHELL_YESTOALL_MSGBOX DIALOG 200, 100, 280, 90
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "메시지"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 {
 DEFPUSHBUTTON "예(&Y)", IDYES, 34, 69, 53, 14, WS_GROUP | WS_TABSTOP
 PUSHBUTTON "모두 예(&A)", IDD_YESTOALL, 92, 69, 65, 14, WS_GROUP | WS_TABSTOP
@@ -138,35 +161,38 @@ ICON "", IDD_ICON, 10, 10, 16, 16
 LTEXT "", IDD_MESSAGE, 40, 10, 238, 52, 0
 }
 
-
-SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
+SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 220, 152
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
-CAPTION "%s 정보"
+CAPTION " %s 정보"
 FONT 10, "MS Shell Dlg"
 {
-DEFPUSHBUTTON "확인", IDOK, 153, 133, 50, 12, WS_TABSTOP
-LISTBOX 99, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
-ICON "", 1088, 10, 10, 14, 16
-LTEXT "", 100, 30, 10, 137, 10
-LTEXT "", 101, 30, 22, 137, 10
-LTEXT "Wine은 당신을 위해 제공되었습니다.:", 98, 8, 55, 137, 10
+ DEFPUSHBUTTON "확인", IDOK, 153, 133, 60, 12, WS_TABSTOP
+ PUSHBUTTON "Wine 라이센스(&l)...", IDC_ABOUT_LICENSE, 153, 113, 60, 12, WS_TABSTOP
+ LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+ ICON "", stc1, 10, 10, 30, 30
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 42, 10, 170, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 42, 22, 170, 10
+ LTEXT "%s 실행중", IDC_ABOUT_STATIC_TEXT3, 42, 34, 170, 10
+ LTEXT "Wine was brought to you by:", IDC_ABOUT_WINE_TEXT, 8, 54, 204, 10
 }
+
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION ""
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 {
-ICON "", 12297, 7, 11, 18, 20, WS_VISIBLE
-LTEXT "풀그림,폴더,문서나 인터넷 자원, 그리고 Wine이 열 이름을 적어주세요.", 12289, 36, 11, 182, 18
-LTEXT "열기(&O):", 12305, 7, 39, 24, 10
-CONTROL "", 12298, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
-DEFPUSHBUTTON "확인", IDOK, 62, 63, 50, 14, WS_TABSTOP
-PUSHBUTTON "취소", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
-PUSHBUTTON "찾기(&B)...", 12288, 170, 63, 50, 14, WS_TABSTOP
+ ICON "", IDC_RUNDLG_ICON, 7, 11, 18, 20, WS_VISIBLE
+ LTEXT "풀그림,폴더,문서나 인터넷 자원, 그리고 Wine이 열  것의 이름을 적어주세요.", IDC_RUNDLG_DESCRIPTION, 36, 11, 182, 18
+ LTEXT "열기(&O):", IDC_RUNDLG_LABEL, 7, 39, 24, 10
+ CONTROL "", IDC_RUNDLG_EDITPATH, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
+ DEFPUSHBUTTON "확인", IDOK, 62, 63, 50, 14, WS_TABSTOP
+ PUSHBUTTON "취소", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
+ PUSHBUTTON "찾기(&B)...", IDC_RUNDLG_BROWSE, 170, 63, 50, 14, WS_TABSTOP
 }
 
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 {
 /* columns in the shellview */
 IDS_SHV_COLUMN1		"파일"
@@ -187,6 +213,7 @@ IDS_SHV_COLUMN_DELDATE	"지워진 날짜"
 IDS_DESKTOP		"데스크탑"
 IDS_MYCOMPUTER		"내 컴퓨터"
 IDS_RECYCLEBIN_FOLDER_NAME      "휴지통"
+IDS_CONTROLPANEL	"제어판"
 
 /* context menus */
 IDS_VIEW_LARGE		"큰 아이콘(&G)"
@@ -220,34 +247,61 @@ IDS_RESTART_PROMPT      "당신은 윈도우즈 재부팅을  재현하겠습니까?"
 IDS_SHUTDOWN_TITLE      "끄기"
 IDS_SHUTDOWN_PROMPT     "당신은  Wine 세션을 끄겠습니까?"
 
+/* Run File dialog */
+IDS_RUNDLG_ERROR           "파일 실행 대화 상자를 보여줄수 없습니다(내부 에러)"
+IDS_RUNDLG_BROWSE_ERROR    "찾기 대화 상자를 보여 줄 수 없습니다(내부 에러)"
+IDS_RUNDLG_BROWSE_CAPTION  "찾기"
+IDS_RUNDLG_BROWSE_FILTER   "실행 파일\0*.exe\0A모든 파일\0*.*\0\0"
+
 /* shell folder path default values */
-IDS_PROGRAMS                "Start Menu\\Programs"
-IDS_PERSONAL                "My Documents"
-IDS_FAVORITES               "Favorites"
-IDS_STARTUP                 "Start Menu\\Programs\\StartUp"
-IDS_RECENT                  "Recent"
-IDS_SENDTO                  "SendTo"
-IDS_STARTMENU               "Start Menu"
-IDS_MYMUSIC                 "My Music"
-IDS_MYVIDEO                 "My Video"
-IDS_DESKTOPDIRECTORY        "Desktop"
-IDS_NETHOOD                 "NetHood"
+IDS_PROGRAMS                "시작 메뉴\\프로그램"
+IDS_PERSONAL                "내 문서"
+IDS_FAVORITES               "즐겨찾기"
+IDS_STARTUP                 "시작 메뉴\\프로그램\\시작 프로그램"
+IDS_RECENT                  "최근 파일"
+IDS_SENDTO                  "보내기"
+IDS_STARTMENU               "시작 메뉴"
+IDS_MYMUSIC                 "내 음악"
+IDS_MYVIDEO                 "내 비디오"
+IDS_DESKTOPDIRECTORY        "데스크탑"
+IDS_NETHOOD                 "네트워크 환경"
 IDS_TEMPLATES               "Templates"
 IDS_APPDATA                 "Application Data"
-IDS_PRINTHOOD               "PrintHood"
+IDS_PRINTHOOD               "네트워크 환경"
 IDS_LOCAL_APPDATA           "Local Settings\\Application Data"
 IDS_INTERNET_CACHE          "Local Settings\\Temporary Internet Files"
 IDS_COOKIES                 "Cookies"
 IDS_HISTORY                 "Local Settings\\History"
 IDS_PROGRAM_FILES           "Program Files"
-IDS_MYPICTURES              "My Pictures"
+IDS_MYPICTURES              "내 그림"
 IDS_PROGRAM_FILES_COMMON    "Program Files\\Common Files"
-IDS_COMMON_DOCUMENTS        "Documents"
-IDS_ADMINTOOLS              "Start Menu\\Programs\\Administrative Tools"
-IDS_COMMON_MUSIC            "Documents\\My Music"
-IDS_COMMON_PICTURES         "Documents\\My Pictures"
-IDS_COMMON_VIDEO            "Documents\\My Video"
+IDS_COMMON_DOCUMENTS        "문서"
+IDS_ADMINTOOLS              "시작메뉴\\프로그램\\관리 도구"
+IDS_COMMON_MUSIC            "문서\\내 음악"
+IDS_COMMON_PICTURES         "문서\\내 그림"
+IDS_COMMON_VIDEO            "문서\\내 비디오"
 IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
 
-IDS_NEWFOLDER		"New Folder"
+IDS_NEWFOLDER		"새 폴더"
+
+IDS_CPANEL_TITLE            "Wine 제어판"
+IDS_CPANEL_NAME             "이름"
+IDS_CPANEL_DESCRIPTION      "설명"
+}
+
+STRINGTABLE
+{
+IDS_LICENSE_CAPTION,            "Wine 라이센스"
+IDS_LICENSE,
+"Wine is free software; you can redistribute it and/or \
+modify it under the terms of the GNU Lesser General Public \
+License as published by the Free Software Foundation; either \
+version 2.1 of the License, or (at your option) any later version.\n\n\
+Wine is distributed in the hope that it will be useful, \
+but WITHOUT ANY WARRANTY; without even the implied warranty of \
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
+Lesser General Public License for more details.\n\n\
+You should have received a copy of the GNU Lesser General Public \
+License along with Wine; if not, write to the Free Software \
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 }

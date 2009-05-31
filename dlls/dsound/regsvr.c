@@ -31,11 +31,12 @@
 #include "dsound.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 
-static typeof(RegDeleteTreeW) * pRegDeleteTreeW;
-static typeof(RegDeleteTreeA) * pRegDeleteTreeA;
+static LSTATUS (WINAPI *pRegDeleteTreeW)(HKEY,LPCWSTR);
+static LSTATUS (WINAPI *pRegDeleteTreeA)(HKEY,LPCSTR);
 
 /*
  * Near the bottom of this file are the exported DllRegisterServer and
@@ -160,7 +161,7 @@ static HRESULT register_interfaces(struct regsvr_interface const *list)
 				  KEY_READ | KEY_WRITE, NULL, &key, NULL);
 	    if (res != ERROR_SUCCESS) goto error_close_iid_key;
 
-	    wsprintfW(buf, fmt, list->num_methods);
+	    sprintfW(buf, fmt, list->num_methods);
 	    res = RegSetValueExW(key, NULL, 0, REG_SZ,
 				 (CONST BYTE*)buf,
 				 (lstrlenW(buf) + 1) * sizeof(WCHAR));
@@ -516,8 +517,8 @@ HRESULT WINAPI DllUnregisterServer(void)
 
     HMODULE advapi32 = GetModuleHandleA("advapi32");
     if (!advapi32) return E_FAIL;
-    pRegDeleteTreeA = (typeof(RegDeleteTreeA)*) GetProcAddress(advapi32, "RegDeleteTreeA");
-    pRegDeleteTreeW = (typeof(RegDeleteTreeW)*) GetProcAddress(advapi32, "RegDeleteTreeW");
+    pRegDeleteTreeA = (void *) GetProcAddress(advapi32, "RegDeleteTreeA");
+    pRegDeleteTreeW = (void *) GetProcAddress(advapi32, "RegDeleteTreeW");
     if (!pRegDeleteTreeA || !pRegDeleteTreeW) return E_FAIL;
 
     TRACE("\n");

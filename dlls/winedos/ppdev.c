@@ -139,7 +139,7 @@ char IO_pp_init(void)
 	      ERR("Is the ppdev module loaded?\n");
 	    continue;
 	  }
-	userbase = strtol(name,(char **)NULL, 16);
+        userbase = strtol(name, NULL, 16);
 	if ( errno == ERANGE)
 	  {
 	    WARN("Configuration: Invalid base %s for %s\n",name,buffer);
@@ -181,7 +181,7 @@ char IO_pp_init(void)
 	    ERR("Perhaps the device is already in use or nonexistent\n");
 	    continue;
 	  }
-	PPDeviceList[nports].devicename = malloc(sizeof(buffer)+1);
+	PPDeviceList[nports].devicename = HeapAlloc(GetProcessHeap(), 0, sizeof(buffer)+1);
 	if (!PPDeviceList[nports].devicename)
 	  {
 	    ERR("No (more) space for devicename\n");
@@ -193,7 +193,7 @@ char IO_pp_init(void)
 	PPDeviceList[nports].lastaccess=GetTickCount();
 	if (timeout)
 	  {
-	    PPDeviceList[nports].timeout = strtol(timeout,(char **)NULL, 10);
+            PPDeviceList[nports].timeout = strtol(timeout, NULL, 10);
 	    if (errno == ERANGE)
 	      {
 		WARN("Configuration: Invalid timeout %s in configuration for %s, Setting to 0\n",

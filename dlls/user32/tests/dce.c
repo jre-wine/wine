@@ -375,6 +375,22 @@ static void test_begin_paint(void)
         "clip box should have been reset %d,%d-%d,%d\n", rect.left, rect.top, rect.right, rect.bottom );
 }
 
+static void test_invisible_create(void)
+{
+    HWND hwnd_owndc = CreateWindowA("owndc_class", NULL, WS_OVERLAPPED,
+                                    0, 200, 100, 100,
+                                    0, 0, GetModuleHandleA(0), NULL );
+    HDC dc1, dc2;
+
+    dc1 = GetDC(hwnd_owndc);
+    dc2 = GetDC(hwnd_owndc);
+
+    ok(dc1 == dc2, "expected owndc dcs to match\n");
+
+    ReleaseDC(hwnd_owndc, dc2);
+    ReleaseDC(hwnd_owndc, dc1);
+    DestroyWindow(hwnd_owndc);
+}
 
 START_TEST(dce)
 {
@@ -386,7 +402,7 @@ START_TEST(dce)
     cls.cbWndExtra = 0;
     cls.hInstance = GetModuleHandleA(0);
     cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPSTR)IDC_ARROW);
+    cls.hCursor = LoadCursorA(0, IDC_ARROW);
     cls.hbrBackground = GetStockObject(WHITE_BRUSH);
     cls.lpszMenuName = NULL;
     cls.lpszClassName = "cache_class";
@@ -414,4 +430,5 @@ START_TEST(dce)
     test_parameters();
     test_dc_visrgn();
     test_begin_paint();
+    test_invisible_create();
 }

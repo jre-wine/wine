@@ -8,23 +8,23 @@
 @ stdcall CryptCATAdminReleaseCatalogContext(long long long)
 @ stdcall CryptCATAdminReleaseContext(long long)
 @ stdcall CryptCATAdminRemoveCatalog(ptr wstr long)
-@ stub CryptCATAdminResolveCatalogPath
-@ stub CryptCATCDFClose
+@ stdcall CryptCATAdminResolveCatalogPath(ptr wstr ptr long)
+@ stdcall CryptCATCDFClose(ptr)
 @ stub CryptCATCDFEnumAttributes
 @ stub CryptCATCDFEnumAttributesWithCDFTag
-@ stub CryptCATCDFEnumCatAttributes
+@ stdcall CryptCATCDFEnumCatAttributes(ptr ptr ptr)
 @ stub CryptCATCDFEnumMembers
 @ stub CryptCATCDFEnumMembersByCDFTag
-@ stub CryptCATCDFEnumMembersByCDFTagEx
-@ stub CryptCATCDFOpen
-@ stub CryptCATCatalogInfoFromContext
+@ stdcall CryptCATCDFEnumMembersByCDFTagEx(ptr wstr ptr ptr long ptr)
+@ stdcall CryptCATCDFOpen(wstr ptr)
+@ stdcall CryptCATCatalogInfoFromContext(ptr ptr long)
 @ stdcall CryptCATClose(long)
-@ stub CryptCATEnumerateAttr
-@ stub CryptCATEnumerateCatAttr
+@ stdcall CryptCATEnumerateAttr(ptr ptr ptr)
+@ stdcall CryptCATEnumerateCatAttr(ptr ptr)
 @ stdcall CryptCATEnumerateMember(long ptr)
-@ stub CryptCATGetAttrInfo
-@ stub CryptCATGetCatAttrInfo
-@ stub CryptCATGetMemberInfo
+@ stdcall CryptCATGetAttrInfo(ptr ptr wstr)
+@ stdcall CryptCATGetCatAttrInfo(ptr wstr )
+@ stdcall CryptCATGetMemberInfo(ptr wstr)
 @ stub CryptCATHandleFromStore
 @ stdcall CryptCATOpen(wstr long long long long)
 @ stub CryptCATPersistStore
@@ -55,7 +55,7 @@
 @ stub MsCatFreeHashTag
 @ stub OfficeCleanupPolicy
 @ stub OfficeInitializePolicy
-@ stub OpenPersonalTrustDBDialog
+@ stdcall OpenPersonalTrustDBDialog(ptr)
 @ stdcall SoftpubAuthenticode(ptr)
 @ stdcall SoftpubCheckCert(ptr long long long)
 @ stdcall SoftpubCleanup(ptr)
@@ -79,19 +79,19 @@
 @ stub WTHelperGetAgencyInfo
 @ stdcall WTHelperGetFileHandle(ptr)
 @ stdcall WTHelperGetFileName(ptr)
-@ stub WTHelperGetKnownUsages
+@ stdcall WTHelperGetKnownUsages(long ptr)
 @ stdcall WTHelperGetProvCertFromChain(ptr long)
-@ stub WTHelperGetProvPrivateDataFromChain
+@ stdcall WTHelperGetProvPrivateDataFromChain(ptr ptr)
 @ stdcall WTHelperGetProvSignerFromChain(ptr long long long)
 @ stub WTHelperIsInRootStore
 @ stub WTHelperOpenKnownStores
 @ stdcall WTHelperProvDataFromStateData(ptr)
-@ stub WVTAsn1CatMemberInfoDecode
-@ stub WVTAsn1CatMemberInfoEncode
-@ stub WVTAsn1CatNameValueDecode
-@ stub WVTAsn1CatNameValueEncode
-@ stub WVTAsn1SpcFinancialCriteriaInfoDecode
-@ stub WVTAsn1SpcFinancialCriteriaInfoEncode
+@ stdcall WVTAsn1CatMemberInfoDecode(long str ptr long long ptr ptr)
+@ stdcall WVTAsn1CatMemberInfoEncode(long str ptr ptr ptr)
+@ stdcall WVTAsn1CatNameValueDecode(long str ptr long long ptr ptr)
+@ stdcall WVTAsn1CatNameValueEncode(long str ptr ptr ptr)
+@ stdcall WVTAsn1SpcFinancialCriteriaInfoDecode(long str ptr long long ptr ptr)
+@ stdcall WVTAsn1SpcFinancialCriteriaInfoEncode(long str ptr ptr ptr)
 @ stdcall WVTAsn1SpcIndirectDataContentDecode(long str ptr long long ptr ptr)
 @ stdcall WVTAsn1SpcIndirectDataContentEncode(long str ptr ptr ptr)
 @ stdcall WVTAsn1SpcLinkDecode(long str ptr long long ptr ptr)
@@ -105,7 +105,7 @@
 @ stub WVTAsn1SpcSpAgencyInfoDecode
 @ stub WVTAsn1SpcSpAgencyInfoEncode
 @ stdcall WVTAsn1SpcSpOpusInfoDecode(long str ptr long long ptr ptr)
-@ stub WVTAsn1SpcSpOpusInfoEncode
+@ stdcall WVTAsn1SpcSpOpusInfoEncode(long str ptr ptr ptr)
 @ stub WVTAsn1SpcStatementTypeDecode
 @ stub WVTAsn1SpcStatementTypeEncode
 @ stdcall WinVerifyTrust(long ptr ptr)

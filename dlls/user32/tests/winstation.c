@@ -22,6 +22,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "winnls.h"
 
 #define DESKTOP_ALL_ACCESS 0x01ff
 
@@ -52,7 +53,7 @@ static void register_class(void)
     cls.cbWndExtra = 0;
     cls.hInstance = GetModuleHandleA(0);
     cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, (LPSTR)IDC_ARROW);
+    cls.hCursor = LoadCursorA(0, IDC_ARROW);
     cls.hbrBackground = GetStockObject(WHITE_BRUSH);
     cls.lpszMenuName = NULL;
     cls.lpszClassName = "WinStationClass";
@@ -121,7 +122,9 @@ static void test_handles(void)
 
     flags = 0;
     ok( GetHandleInformation( w1, &flags ), "GetHandleInformation failed\n" );
-    ok( !(flags & HANDLE_FLAG_PROTECT_FROM_CLOSE), "handle %p PROTECT_FROM_CLOSE set\n", w1 );
+    ok( !(flags & HANDLE_FLAG_PROTECT_FROM_CLOSE) ||
+        broken(flags & HANDLE_FLAG_PROTECT_FROM_CLOSE), /* set on nt4 */
+        "handle %p PROTECT_FROM_CLOSE set\n", w1 );
 
     ok( DuplicateHandle( GetCurrentProcess(), w1, GetCurrentProcess(), (PHANDLE)&w2, 0,
                          TRUE, DUPLICATE_SAME_ACCESS ), "DuplicateHandle failed\n" );
@@ -200,7 +203,11 @@ static void test_handles(void)
     ok( GetLastError() == ERROR_BUSY, "bad last error %d\n", GetLastError() );
 
     SetLastError( 0xdeadbeef );
-    ok( !CloseHandle(d1), "closing thread desktop handle failed\n" );
+    if (CloseHandle( d1 ))  /* succeeds on nt4 */
+    {
+        win_skip( "NT4 desktop handle management is completely different\n" );
+        return;
+    }
     ok( GetLastError() == ERROR_INVALID_HANDLE, "bad last error %d\n", GetLastError() );
 
     ok( DuplicateHandle( GetCurrentProcess(), d1, GetCurrentProcess(), (PHANDLE)&d2, 0,
@@ -219,6 +226,12 @@ static void test_handles(void)
     SetLastError( 0xdeadbeef );
     ok( !CloseWindowStation( (HWINSTA)d2 ), "CloseWindowStation succeeded on desktop\n" );
     ok( GetLastError() == ERROR_INVALID_HANDLE, "bad last error %d\n", GetLastError() );
+
+    SetLastError( 0xdeadbeef );
+    d3 = CreateDesktop( "foobar", NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
+    ok( d3 != 0, "create foobar desktop again failed\n" );
+    ok( GetLastError() == 0xdeadbeef, "bad last error %d\n", GetLastError() );
+    ok( CloseDesktop( d3 ), "CloseDesktop failed\n" );
 
     d3 = OpenDesktop( "foobar", 0, TRUE, DESKTOP_ALL_ACCESS );
     ok( d3 != 0, "open foobar desktop failed\n" );
@@ -242,6 +255,105 @@ static void test_handles(void)
     CloseHandle( hthread );
 }
 
+/* Enumeration tests */
+
+static BOOL CALLBACK window_station_callbackA(LPSTR winsta, LPARAM lp)
+{
+    trace("window_station_callbackA called with argument %s\n", winsta);
+    return lp;
+}
+
+static BOOL CALLBACK open_window_station_callbackA(LPSTR winsta, LPARAM lp)
+{
+    HWINSTA hwinsta;
+
+    trace("open_window_station_callbackA called with argument %s\n", winsta);
+    hwinsta = OpenWindowStationA(winsta, FALSE, WINSTA_ENUMERATE);
+    ok(hwinsta != NULL, "Could not open desktop %s!\n", winsta);
+    if (hwinsta)
+        CloseWindowStation(hwinsta);
+    return lp;
+}
+
+static void test_enumstations(void)
+{
+    BOOL ret;
+
+    if (0) /* Crashes instead */
+    {
+        SetLastError(0xbabefeed);
+        ret = EnumWindowStationsA(NULL, 0);
+        ok(!ret, "EnumWindowStationsA returned successfully!\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "LastError is set to %08x\n", GetLastError());
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = EnumWindowStationsA(open_window_station_callbackA, 0x12345);
+    ok(ret == 0x12345, "EnumWindowStationsA returned %x\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "LastError is set to %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumWindowStationsA(window_station_callbackA, 0);
+    ok(!ret, "EnumWindowStationsA returned %x\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "LastError is set to %08x\n", GetLastError());
+}
+
+static BOOL CALLBACK desktop_callbackA(LPSTR desktop, LPARAM lp)
+{
+    trace("desktop_callbackA called with argument %s\n", desktop);
+    return lp;
+}
+
+static BOOL CALLBACK open_desktop_callbackA(LPSTR desktop, LPARAM lp)
+{
+    HDESK hdesk;
+    static int once;
+
+    trace("open_desktop_callbackA called with argument %s\n", desktop);
+    /* Only try to open one desktop */
+    if (once++)
+        return lp;
+
+    hdesk = OpenDesktopA(desktop, 0, FALSE, DESKTOP_ENUMERATE);
+    ok(hdesk != NULL, "Could not open desktop %s!\n", desktop);
+    if (hdesk)
+        CloseDesktop(hdesk);
+    return lp;
+}
+
+static void test_enumdesktops(void)
+{
+    BOOL ret;
+
+    if (0)  /* Crashes instead */
+    {
+        SetLastError(0xbabefeed);
+        ret = EnumDesktopsA(GetProcessWindowStation(), NULL, 0);
+        ok(!ret, "EnumDesktopsA returned successfully!\n");
+        ok(GetLastError() == ERROR_INVALID_PARAMETER, "LastError is set to %08x\n", GetLastError());
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = EnumDesktopsA(NULL, desktop_callbackA, 0x12345);
+    ok(ret == 0x12345, "EnumDesktopsA returned %x\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "LastError is set to %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumDesktopsA(GetProcessWindowStation(), open_desktop_callbackA, 0x12345);
+    ok(ret == 0x12345, "EnumDesktopsA returned %x\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "LastError is set to %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumDesktopsA(INVALID_HANDLE_VALUE, desktop_callbackA, 0x12345);
+    ok(!ret, "EnumDesktopsA returned %x\n", ret);
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "LastError is set to %08x\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EnumDesktopsA(GetProcessWindowStation(), desktop_callbackA, 0);
+    ok(!ret, "EnumDesktopsA returned %x\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "LastError is set to %08x\n", GetLastError());
+}
+
 START_TEST(winstation)
 {
     /* Check whether this platform supports WindowStation calls */
@@ -254,5 +366,7 @@ START_TEST(winstation)
         return;
     }
 
+    test_enumstations();
+    test_enumdesktops();
     test_handles();
 }

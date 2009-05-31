@@ -28,9 +28,6 @@
  *  The compound file implementation of IStorage used for create
  *  and manage substorages and streams within a storage object
  *  residing in a compound file object.
- *
- * MSDN
- *  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/stg/stg/istorage_compound_file_implementation.asp
  */
 
 #include <assert.h>
@@ -124,7 +121,7 @@ typedef struct
     DWORD dwOleObjFileNameLength;
     DWORD dwMetaFileWidth;
     DWORD dwMetaFileHeight;
-    CHAR  strUnknown[8]; /* don't know what is this 8 byts information in OLE stream. */
+    CHAR  strUnknown[8]; /* don't know what this 8 byte information in OLE stream is. */
     DWORD dwDataLength;
     BYTE *pData;
 }OLECONVERT_OLESTREAM_DATA;
@@ -145,7 +142,7 @@ typedef struct
 }OLECONVERT_ISTORAGE_COMPOBJ;
 
 
-/* Ole Presention Stream structure */
+/* Ole Presentation Stream structure */
 /* Used for OleConvertIStorageToOLESTREAM and OleConvertOLESTREAMToIStorage */
 typedef struct
 {
@@ -266,7 +263,7 @@ static ULONG BLOCK_GetBigBlockOffset(ULONG index)
 }
 
 /************************************************************************
-** Storage32BaseImpl implementatiion
+** Storage32BaseImpl implementation
 */
 static HRESULT StorageImpl_ReadAt(StorageImpl* This,
   ULARGE_INTEGER offset,
@@ -317,11 +314,11 @@ static HRESULT WINAPI StorageBaseImpl_QueryInterface(
   if (IsEqualGUID(&IID_IUnknown, riid) ||
       IsEqualGUID(&IID_IStorage, riid))
   {
-    *ppvObject = (IStorage*)This;
+    *ppvObject = This;
   }
   else if (IsEqualGUID(&IID_IPropertySetStorage, riid))
   {
-    *ppvObject = (IStorage*)&This->pssVtbl;
+    *ppvObject = &This->pssVtbl;
   }
 
   /*
@@ -662,7 +659,7 @@ end:
  * Storage32BaseImpl_EnumElements (IStorage)
  *
  * This method will create an enumerator object that can be used to
- * retrieve informatino about all the properties in the storage object.
+ * retrieve information about all the properties in the storage object.
  *
  * See Windows documentation for more details on IStorage methods.
  */
@@ -915,7 +912,7 @@ static HRESULT WINAPI StorageBaseImpl_RenameElement(
      * Invoke Destroy to get rid of the ole property and automatically redo
      * the linking of its previous and next members...
      */
-    IStorage_DestroyElement((IStorage*)This->ancestorStorage, pwcsOldName);
+    IStorage_DestroyElement(iface, pwcsOldName);
 
   }
   else
@@ -1300,14 +1297,7 @@ static HRESULT WINAPI StorageImpl_CreateStorage(
   /*
    * Open it to get a pointer to return.
    */
-  hr = IStorage_OpenStorage(
-         iface,
-         (const OLECHAR*)pwcsName,
-         0,
-         grfMode,
-         0,
-         0,
-         ppstg);
+  hr = IStorage_OpenStorage(iface, pwcsName, 0, grfMode, 0, 0, ppstg);
 
   if( (hr != S_OK) || (*ppstg == NULL))
   {
@@ -1420,12 +1410,12 @@ static ULONG getFreeProperty(
  *
  * Internal Method
  *
- * Case insensitive comparaison of StgProperty.name by first considering
+ * Case insensitive comparison of StgProperty.name by first considering
  * their size.
  *
- * Returns <0 when newPrpoerty < currentProperty
- *         >0 when newPrpoerty > currentProperty
- *          0 when newPrpoerty == currentProperty
+ * Returns <0 when newProperty < currentProperty
+ *         >0 when newProperty > currentProperty
+ *          0 when newProperty == currentProperty
  */
 static LONG propertyNameCmp(
     const OLECHAR *newProperty,
@@ -1916,7 +1906,7 @@ static HRESULT WINAPI StorageImpl_Stat( IStorage* iface,
   StorageImpl* const This = (StorageImpl*)iface;
   HRESULT result = StorageBaseImpl_Stat( iface, pstatstg, grfStatFlag );
 
-  if ( !FAILED(result) && ((grfStatFlag & STATFLAG_NONAME) == 0) && This->pwcsName )
+  if ( SUCCEEDED(result) && ((grfStatFlag & STATFLAG_NONAME) == 0) && This->pwcsName )
   {
       CoTaskMemFree(pstatstg->pwcsName);
       pstatstg->pwcsName = CoTaskMemAlloc((lstrlenW(This->pwcsName)+1)*sizeof(WCHAR));
@@ -2004,9 +1994,7 @@ static HRESULT deleteStorageProperty(
     hr = IEnumSTATSTG_Next(elements, 1, &currentElement, NULL);
     if (hr==S_OK)
     {
-      destroyHr = StorageImpl_DestroyElement(
-                    (IStorage*)childStorage,
-                    (OLECHAR*)currentElement.pwcsName);
+      destroyHr = StorageImpl_DestroyElement(childStorage, currentElement.pwcsName);
 
       CoTaskMemFree(currentElement.pwcsName);
     }
@@ -2053,13 +2041,8 @@ static HRESULT deleteStreamProperty(
   size.u.HighPart = 0;
   size.u.LowPart = 0;
 
-  hr = StorageBaseImpl_OpenStream(
-         (IStorage*)parentStorage,
-         (OLECHAR*)propertyToDelete.name,
-         NULL,
-         STGM_WRITE | STGM_SHARE_EXCLUSIVE,
-         0,
-         &pis);
+  hr = StorageBaseImpl_OpenStream((IStorage*)parentStorage,
+        propertyToDelete.name, NULL, STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, &pis);
 
   if (hr!=S_OK)
   {
@@ -2112,7 +2095,6 @@ static HRESULT findPlaceholder(
   INT         typeOfRelation)
 {
   StgProperty storeProperty;
-  HRESULT     hr = S_OK;
   BOOL      res = TRUE;
 
   /*
@@ -2174,12 +2156,12 @@ static HRESULT findPlaceholder(
     }
   }
 
-  hr = StorageImpl_WriteProperty(
+  res = StorageImpl_WriteProperty(
          storage->base.ancestorStorage,
          storePropertyIndex,
          &storeProperty);
 
-  if(! hr)
+  if(!res)
   {
     return E_FAIL;
   }
@@ -2424,7 +2406,7 @@ static HRESULT StorageImpl_Construct(
    */
   This->base.lpVtbl = &Storage32Impl_Vtbl;
   This->base.pssVtbl = &IPropertySetStorage_Vtbl;
-  This->base.v_destructor = &StorageImpl_Destroy;
+  This->base.v_destructor = StorageImpl_Destroy;
   This->base.openFlags = (openFlags & ~STGM_CREATE);
 
   /*
@@ -3152,16 +3134,8 @@ static HRESULT StorageImpl_LoadFileHeader(
     /*
      * Make the bitwise arithmetic to get the size of the blocks in bytes.
      */
-    if ((1 << 2) == 4)
-    {
-      This->bigBlockSize   = 0x000000001 << (DWORD)This->bigBlockSizeBits;
-      This->smallBlockSize = 0x000000001 << (DWORD)This->smallBlockSizeBits;
-    }
-    else
-    {
-      This->bigBlockSize   = 0x000000001 >> (DWORD)This->bigBlockSizeBits;
-      This->smallBlockSize = 0x000000001 >> (DWORD)This->smallBlockSizeBits;
-    }
+    This->bigBlockSize   = 0x000000001 << (DWORD)This->bigBlockSizeBits;
+    This->smallBlockSize = 0x000000001 << (DWORD)This->smallBlockSizeBits;
 
     /*
      * Right now, the code is making some assumptions about the size of the
@@ -3498,7 +3472,7 @@ static BOOL StorageImpl_ReadDWordFromBigBlock(
   ulOffset.u.LowPart += offset;
 
   StorageImpl_ReadAt(This, ulOffset, &tmp, sizeof(DWORD), &read);
-  *value = le32toh(tmp);
+  *value = lendian32toh(tmp);
   return (read == sizeof(DWORD));
 }
 
@@ -3714,7 +3688,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_QueryInterface(
   if (IsEqualGUID(&IID_IUnknown, riid) ||
       IsEqualGUID(&IID_IEnumSTATSTG, riid))
   {
-    *ppvObject = (IEnumSTATSTG*)This;
+    *ppvObject = This;
     IEnumSTATSTG_AddRef((IEnumSTATSTG*)This);
     return S_OK;
   }
@@ -4052,9 +4026,7 @@ static ULONG IEnumSTATSTGImpl_FindProperty(
       currentSearchNode,
       currentProperty);
 
-    if ( propertyNameCmp(
-          (const OLECHAR*)currentProperty->name,
-          (const OLECHAR*)lpszPropName) == 0)
+    if (propertyNameCmp(currentProperty->name, lpszPropName) == 0)
       return currentSearchNode;
 
     /*
@@ -4249,7 +4221,7 @@ static StorageInternalImpl* StorageInternalImpl_Construct(
      * Initialize the virtual function table.
      */
     newStorage->base.lpVtbl = &Storage32InternalImpl_Vtbl;
-    newStorage->base.v_destructor = &StorageInternalImpl_Destroy;
+    newStorage->base.v_destructor = StorageInternalImpl_Destroy;
     newStorage->base.openFlags = (openFlags & ~STGM_CREATE);
 
     /*
@@ -4278,7 +4250,7 @@ void StorageUtl_ReadWord(const BYTE* buffer, ULONG offset, WORD* value)
   WORD tmp;
 
   memcpy(&tmp, buffer+offset, sizeof(WORD));
-  *value = le16toh(tmp);
+  *value = lendian16toh(tmp);
 }
 
 void StorageUtl_WriteWord(BYTE* buffer, ULONG offset, WORD value)
@@ -4292,7 +4264,7 @@ void StorageUtl_ReadDWord(const BYTE* buffer, ULONG offset, DWORD* value)
   DWORD tmp;
 
   memcpy(&tmp, buffer+offset, sizeof(DWORD));
-  *value = le32toh(tmp);
+  *value = lendian32toh(tmp);
 }
 
 void StorageUtl_WriteDWord(BYTE* buffer, ULONG offset, DWORD value)
@@ -4366,7 +4338,7 @@ void StorageUtl_CopyPropertyToSTATSTG(
     destination->pwcsName =
       CoTaskMemAlloc((lstrlenW(source->name)+1)*sizeof(WCHAR));
 
-    strcpyW((LPWSTR)destination->pwcsName, source->name);
+    strcpyW(destination->pwcsName, source->name);
   }
 
   switch (source->propertyType)
@@ -4655,7 +4627,7 @@ HRESULT BlockChainStream_WriteAt(BlockChainStream* This,
   }
 
   *bytesWritten   = 0;
-  bufferWalker = (const BYTE*)buffer;
+  bufferWalker = buffer;
 
   while ( (size > 0) && (blockIndex != BLOCK_END_OF_CHAIN) )
   {
@@ -5390,7 +5362,7 @@ HRESULT SmallBlockChainStream_WriteAt(
    * This is OK since we don't intend to modify that buffer.
    */
   *bytesWritten   = 0;
-  bufferWalker = (const BYTE*)buffer;
+  bufferWalker = buffer;
   while ( (size > 0) && (blockIndex != BLOCK_END_OF_CHAIN) )
   {
     /*
@@ -5749,13 +5721,16 @@ HRESULT WINAPI StgCreateDocfile(
   /*
    * Interpret the STGM value grfMode
    */
-  shareMode    = GetShareModeFromSTGM(grfMode);
+  shareMode    = FILE_SHARE_READ | FILE_SHARE_WRITE;
   accessMode   = GetAccessModeFromSTGM(grfMode);
 
   if (grfMode & STGM_DELETEONRELEASE)
     fileAttributes = FILE_FLAG_RANDOM_ACCESS | FILE_FLAG_DELETE_ON_CLOSE;
   else
     fileAttributes = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS;
+
+  if (STGM_SHARE_MODE(grfMode) && !(grfMode & STGM_SHARE_DENY_NONE))
+      FIXME("Storage share mode not implemented.\n");
 
   if (grfMode & STGM_TRANSACTED)
     FIXME("Transacted mode not implemented.\n");
@@ -5914,7 +5889,7 @@ HRESULT WINAPI StgOpenStorageEx(const WCHAR* pwcsName, DWORD grfMode, DWORD stgf
         return STG_E_INVALIDPARAMETER;
     }
 
-    return StgOpenStorage(pwcsName, NULL, grfMode, (SNB)NULL, 0, (IStorage **)ppObjectOpen); 
+    return StgOpenStorage(pwcsName, NULL, grfMode, NULL, 0, (IStorage **)ppObjectOpen);
 }
 
 
@@ -6300,6 +6275,9 @@ HRESULT WINAPI WriteClassStg(IStorage* pStg, REFCLSID rclsid)
   if(!pStg)
     return E_INVALIDARG;
 
+  if(!rclsid)
+    return STG_E_INVALIDPOINTER;
+
   hRes = IStorage_SetClass(pStg, rclsid);
 
   return hRes;
@@ -6354,13 +6332,13 @@ HRESULT  WINAPI OleLoadFromStream(IStream *pStm,REFIID iidInterface,void** ppvOb
     TRACE("(%p,%s,%p)\n",pStm,debugstr_guid(iidInterface),ppvObj);
 
     res=ReadClassStm(pStm,&clsid);
-    if (!SUCCEEDED(res))
+    if (FAILED(res))
 	return res;
     res=CoCreateInstance(&clsid,NULL,CLSCTX_INPROC_SERVER,iidInterface,ppvObj);
-    if (!SUCCEEDED(res))
+    if (FAILED(res))
 	return res;
     res=IUnknown_QueryInterface((IUnknown*)*ppvObj,&IID_IPersistStream,(LPVOID*)&xstm);
-    if (!SUCCEEDED(res)) {
+    if (FAILED(res)) {
 	IUnknown_Release((IUnknown*)*ppvObj);
 	return res;
     }
@@ -6587,7 +6565,7 @@ static DWORD GetCreationModeFromSTGM(DWORD stgm)
  * RETURNS
  *     Success:  S_OK
  *     Failure:  CONVERT10_E_OLESTREAM_GET for invalid Get
- *               CONVERT10_E_OLESTREAM_FMT if the OLEID is invalide
+ *               CONVERT10_E_OLESTREAM_FMT if the OLEID is invalid
  *
  * NOTES
  *     This function is used by OleConvertOLESTREAMToIStorage only.
@@ -6602,7 +6580,7 @@ static HRESULT OLECONVERT_LoadOLE10(LPOLESTREAM pOleStream, OLECONVERT_OLESTREAM
 	int max_try = 6;
 
 	pData->pData = NULL;
-	pData->pstrOleObjFileName = (CHAR *) NULL;
+	pData->pstrOleObjFileName = NULL;
 
 	for( nTryCnt=0;nTryCnt < max_try; nTryCnt++)
 	{
@@ -6625,7 +6603,7 @@ static HRESULT OLECONVERT_LoadOLE10(LPOLESTREAM pOleStream, OLECONVERT_OLESTREAM
 
 	if(hRes == S_OK)
 	{
-		/* Get the TypeID...more info needed for this field */
+		/* Get the TypeID... more info needed for this field */
 		dwSize = pOleStream->lpstbl->Get(pOleStream, (void *)&(pData->dwTypeID), sizeof(pData->dwTypeID));
 		if(dwSize != sizeof(pData->dwTypeID))
 		{
@@ -6648,7 +6626,7 @@ static HRESULT OLECONVERT_LoadOLE10(LPOLESTREAM pOleStream, OLECONVERT_OLESTREAM
 				if(pData->dwOleTypeNameLength > 0)
 				{
 					/* Get the OleTypeName */
-					dwSize = pOleStream->lpstbl->Get(pOleStream, (void *)pData->strOleTypeName, pData->dwOleTypeNameLength);
+					dwSize = pOleStream->lpstbl->Get(pOleStream, pData->strOleTypeName, pData->dwOleTypeNameLength);
 					if(dwSize != pData->dwOleTypeNameLength)
 					{
 						hRes = CONVERT10_E_OLESTREAM_GET;
@@ -6669,7 +6647,7 @@ static HRESULT OLECONVERT_LoadOLE10(LPOLESTREAM pOleStream, OLECONVERT_OLESTREAM
 					pData->pstrOleObjFileName = HeapAlloc(GetProcessHeap(), 0, pData->dwOleObjFileNameLength);
 					if(pData->pstrOleObjFileName)
 					{
-						dwSize = pOleStream->lpstbl->Get(pOleStream, (void *)(pData->pstrOleObjFileName),pData->dwOleObjFileNameLength);
+						dwSize = pOleStream->lpstbl->Get(pOleStream, pData->pstrOleObjFileName, pData->dwOleObjFileNameLength);
 						if(dwSize != pData->dwOleObjFileNameLength)
 						{
 							hRes = CONVERT10_E_OLESTREAM_GET;
@@ -6707,12 +6685,12 @@ static HRESULT OLECONVERT_LoadOLE10(LPOLESTREAM pOleStream, OLECONVERT_OLESTREAM
 				}
 			}
 
-			if(hRes == S_OK) /* I don't know what is this 8 byts information is we have to figure out */
+			if(hRes == S_OK) /* I don't know what this 8 byte information is. We have to figure out */
 			{
 				if(!bStrem1) /* if it is a second OLE stream data */
 				{
 					pData->dwDataLength -= 8;
-					dwSize = pOleStream->lpstbl->Get(pOleStream, (void *)(pData->strUnknown), sizeof(pData->strUnknown));
+					dwSize = pOleStream->lpstbl->Get(pOleStream, pData->strUnknown, sizeof(pData->strUnknown));
 					if(dwSize != sizeof(pData->strUnknown))
 					{
 						hRes = CONVERT10_E_OLESTREAM_GET;
@@ -6799,7 +6777,7 @@ static HRESULT OLECONVERT_SaveOLE10(OLECONVERT_OLESTREAM_DATA *pData, LPOLESTREA
             if(pData->dwOleTypeNameLength > 0)
             {
                 /* Set the OleTypeName */
-                dwSize = pOleStream->lpstbl->Put(pOleStream, (void *)  pData->strOleTypeName, pData->dwOleTypeNameLength);
+                dwSize = pOleStream->lpstbl->Put(pOleStream, pData->strOleTypeName, pData->dwOleTypeNameLength);
                 if(dwSize != pData->dwOleTypeNameLength)
                 {
                     hRes = CONVERT10_E_OLESTREAM_PUT;
@@ -7126,7 +7104,7 @@ HRESULT WINAPI WriteFmtUserTypeStg(
     TRACE("(%p,%x,%s)\n",pstg,cf,debugstr_w(lpszUserType));
 
     /* get the clipboard format name */
-    n = GetClipboardFormatNameW( cf, szwClipName, sizeof(szwClipName) );
+    n = GetClipboardFormatNameW( cf, szwClipName, sizeof(szwClipName)/sizeof(szwClipName[0]) );
     szwClipName[n]=0;
 
     TRACE("Clipboard name is %s\n", debugstr_w(szwClipName));
@@ -7250,8 +7228,8 @@ HRESULT OLECONVERT_CreateCompObjStream(LPSTORAGE pStorage, LPCSTR strOleTypeName
 
     /* Initialize the CompObj structure */
     memset(&IStorageCompObj, 0, sizeof(IStorageCompObj));
-    memcpy(&(IStorageCompObj.byUnknown1), pCompObjUnknown1, sizeof(pCompObjUnknown1));
-    memcpy(&(IStorageCompObj.byUnknown2), pCompObjUnknown2, sizeof(pCompObjUnknown2));
+    memcpy(IStorageCompObj.byUnknown1, pCompObjUnknown1, sizeof(pCompObjUnknown1));
+    memcpy(IStorageCompObj.byUnknown2, pCompObjUnknown2, sizeof(pCompObjUnknown2));
 
 
     /*  Create a CompObj stream if it doesn't exist */
@@ -7662,7 +7640,7 @@ static void OLECONVERT_GetOle20PresData(LPSTORAGE pStorage, OLECONVERT_OLESTREAM
  * Read info on MSDN
  *
  * TODO
- *      DVTARGETDEVICE paramenter is not handled
+ *      DVTARGETDEVICE parameter is not handled
  *      Still unsure of some mem fields for OLE 10 Stream
  *      Still some unknowns for the IStorage: "\002OlePres000", "\001CompObj",
  *      and "\001OLE" streams
@@ -7921,7 +7899,7 @@ HRESULT WINAPI ReadClassStm(IStream *pStm,CLSID *pclsid)
         return E_INVALIDARG;
 
     /* clear the output args */
-    memcpy(pclsid, &CLSID_NULL, sizeof(*pclsid));
+    *pclsid = CLSID_NULL;
 
     res = IStream_Read(pStm,(void*)pclsid,sizeof(CLSID),&nbByte);
 

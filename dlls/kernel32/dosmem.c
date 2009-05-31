@@ -92,7 +92,7 @@ BOOL load_winedos(void)
     if (hRunOnce == 0)
     {
 	HANDLE hEvent = CreateEventW( NULL, TRUE, FALSE, NULL );
-	if (InterlockedCompareExchangePointer( (PVOID)&hRunOnce, hEvent, 0 ) == 0)
+        if (InterlockedCompareExchangePointer( &hRunOnce, hEvent, 0 ) == 0)
 	{
             HMODULE hModule;
 
@@ -142,61 +142,14 @@ static LONG WINAPI dosmem_handler(EXCEPTION_POINTERS* except)
 {
     if (except->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION)
     {
-        DWORD   addr = except->ExceptionRecord->ExceptionInformation[1];
-        if (addr >= (ULONG_PTR)DOSMEM_dosmem + DOSMEM_protect &&
-            addr < (ULONG_PTR)DOSMEM_dosmem + DOSMEM_SIZE)
+        char *addr = (char *)except->ExceptionRecord->ExceptionInformation[1];
+        if (addr >= DOSMEM_dosmem + DOSMEM_protect && addr < DOSMEM_dosmem + DOSMEM_SIZE)
         {
             if (load_winedos()) return EXCEPTION_CONTINUE_EXECUTION;
         }
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
-
-/**********************************************************************
- *		setup_dos_mem
- *
- * Setup the first megabyte for DOS memory access
- */
-static char* setup_dos_mem(void)
-{
-    int sys_offset = 0;
-    int page_size = getpagesize();
-    void *addr = NULL;
-
-    if (wine_mmap_is_in_reserved_area( NULL, DOSMEM_SIZE ) != 1)
-    {
-        addr = wine_anon_mmap( (void *)page_size, DOSMEM_SIZE-page_size,
-                               PROT_READ | PROT_WRITE, 0 );
-        if (addr == (void *)page_size) addr = NULL; /* we got what we wanted */
-        else munmap( addr, DOSMEM_SIZE - page_size );
-    }
-
-    if (!addr)
-    {
-        /* now reserve from address 0 */
-        wine_anon_mmap( NULL, DOSMEM_SIZE, PROT_NONE, MAP_FIXED );
-
-        /* inform the memory manager that there is a mapping here, but don't commit yet */
-        VirtualAlloc( NULL, DOSMEM_SIZE, MEM_RESERVE | MEM_SYSTEM, PAGE_NOACCESS );
-        sys_offset = 0xf0000;
-        DOSMEM_protect = DOSMEM_64KB;
-    }
-    else
-    {
-        ERR("Cannot use first megabyte for DOS address space, please report\n" );
-        /* allocate the DOS area somewhere else */
-        addr = VirtualAlloc( NULL, DOSMEM_SIZE, MEM_RESERVE, PAGE_NOACCESS );
-        if (!addr)
-        {
-            ERR( "Cannot allocate DOS memory\n" );
-            ExitProcess(1);
-        }
-    }
-    DOSMEM_dosmem = addr;
-    RtlAddVectoredExceptionHandler(FALSE, dosmem_handler);
-    return (char*)addr + sys_offset;
-}
-
 
 /***********************************************************************
  *           DOSMEM_Init
@@ -206,8 +159,32 @@ static char* setup_dos_mem(void)
  */
 BOOL DOSMEM_Init(void)
 {
-    char*       sysmem = setup_dos_mem();
+    char *sysmem;
+    void *addr = (void *)1;
+    SIZE_T size = DOSMEM_SIZE - 1;
 
+    if (NtAllocateVirtualMemory( GetCurrentProcess(), &addr, 0, &size,
+                                 MEM_RESERVE | MEM_COMMIT, PAGE_NOACCESS ))
+    {
+        ERR( "Cannot allocate DOS memory\n" );
+        ExitProcess(1);
+    }
+
+    if (addr <= (void *)DOSMEM_64KB)
+    {
+        DOSMEM_dosmem = 0;
+        DOSMEM_protect = DOSMEM_64KB;
+        sysmem = (char *)0xf0000;  /* store sysmem in high addresses for now */
+    }
+    else
+    {
+        WARN( "First megabyte not available for DOS address space.\n" );
+        DOSMEM_dosmem = addr;
+        DOSMEM_protect = 0;
+        sysmem = DOSMEM_dosmem;
+    }
+
+    RtlAddVectoredExceptionHandler(FALSE, dosmem_handler);
     DOSMEM_0000H = GLOBAL_CreateBlock( GMEM_FIXED, sysmem,
                                        DOSMEM_64KB, 0, WINE_LDT_FLAGS_DATA );
     DOSMEM_BiosDataSeg = GLOBAL_CreateBlock( GMEM_FIXED, sysmem + 0x400,

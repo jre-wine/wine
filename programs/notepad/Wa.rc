@@ -31,6 +31,7 @@ MAIN_MENU MENU
   MENUITEM "&Drovî...\tCtrl+O",            CMD_OPEN
   MENUITEM "&Schaper\tCtrl+S",          CMD_SAVE
   MENUITEM "Schaper èt r&lomer...",     CMD_SAVE_AS
+  MENUITEM SEPARATOR
   MENUITEM "&Rexhe...\tCtrl+P",            CMD_PRINT
   MENUITEM "Arrandjmint del &Pådje...", CMD_PAGE_SETUP
   MENUITEM "&Apontiaedje del scrirece...",      CMD_PRINTER_SETUP
@@ -49,6 +50,7 @@ POPUP "&Candjî" {
   MENUITEM "&Eure/Date\tF5",    CMD_TIME_DATE
   MENUITEM SEPARATOR
   MENUITEM "Côper les ro&yes",  CMD_WRAP
+  MENUITEM "&Font...",          CMD_FONT
  }
 POPUP "C&werî" {
   MENUITEM "Cwerî...",          CMD_SEARCH
@@ -59,11 +61,7 @@ POPUP "&Aide" {
   MENUITEM "C&werî...",         CMD_HELP_SEARCH
   MENUITEM "&Aide so l' Aide",  CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  POPUP "&Informåcion" {
-   MENUITEM "&Licinse...",         CMD_LICENSE
-   MENUITEM "&NOLE WARANTEYE...",  CMD_NO_WARRANTY
-   MENUITEM "Å &dfait di Wine...", CMD_ABOUT_WINE
-  }
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -118,7 +116,7 @@ Do you want to create a new file ?"
 STRING_NOTSAVED,                                "Li fitchî '%s'\na candjî\n\n \
 El voloz schaper ?"
 STRING_NOTFOUND,                                        "'%s' pout nén esse trové."
-STRING_OUT_OF_MEMORY,                   "Li memwere est plinne. \n\
+STRING_OUT_OF_MEMORY,                   "Li memwere est plinne.\n\
 Cloyoz on programe ou pus po monter li memwere libe."
 
 }

@@ -52,9 +52,7 @@ void write_resfile(char *outname, resource_t *top)
 
 	fo = fopen(outname, "wb");
 	if(!fo)
-	{
-		error("Could not open %s\n", outname);
-	}
+            fatal_perror("Could not open %s", outname);
 
 	if(win32)
 	{
@@ -70,7 +68,7 @@ void write_resfile(char *outname, resource_t *top)
 		put_word(res, 0);		/* Memory options */
 		put_word(res, 0);		/* Language */
 		put_dword(res, 0);		/* Version */
-		put_dword(res, 0);		/* Charateristics */
+		put_dword(res, 0);		/* Characteristics */
 		ret = fwrite(res->data, 1, res->size, fo);
 		if(ret != res->size)
 		{
@@ -102,5 +100,6 @@ void write_resfile(char *outname, resource_t *top)
 			}
 		}
 	}
-	fclose(fo);
+	if (fclose(fo))
+            fatal_perror("Error writing %s", outname);
 }

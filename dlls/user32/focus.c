@@ -48,8 +48,9 @@ static HWND set_focus_window( HWND hwnd )
 
     SERVER_START_REQ( set_focus_window )
     {
-        req->handle = hwnd;
-        if ((ret = !wine_server_call_err( req ))) previous = reply->previous;
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+            previous = wine_server_ptr_handle( reply->previous );
     }
     SERVER_END_REQ;
     if (!ret) return 0;
@@ -99,8 +100,9 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
 
     SERVER_START_REQ( set_active_window )
     {
-        req->handle = hwnd;
-        if ((ret = !wine_server_call_err( req ))) previous = reply->previous;
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+            previous = wine_server_ptr_handle( reply->previous );
     }
     SERVER_END_REQ;
     if (!ret) return FALSE;
@@ -113,10 +115,6 @@ static BOOL set_active_window( HWND hwnd, HWND *prev, BOOL mouse, BOOL focus )
         if (SendMessageW( hwnd, WM_QUERYNEWPALETTE, 0, 0 ))
             SendMessageTimeoutW( HWND_BROADCAST, WM_PALETTEISCHANGING, (WPARAM)hwnd, 0,
                                  SMTO_ABORTIFHUNG, 2000, NULL );
-
-        if (!GetPropA( hwnd, "__wine_x11_managed" ))
-            SetWindowPos( hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE );
-
         if (!IsWindow(hwnd)) return FALSE;
     }
 
@@ -185,10 +183,10 @@ static BOOL set_foreground_window( HWND hwnd, BOOL mouse )
 
     SERVER_START_REQ( set_foreground_window )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         if ((ret = !wine_server_call_err( req )))
         {
-            previous = reply->previous;
+            previous = wine_server_ptr_handle( reply->previous );
             send_msg_old = reply->send_msg_old;
             send_msg_new = reply->send_msg_new;
         }
@@ -268,6 +266,7 @@ HWND WINAPI SetFocus( HWND hwnd )
             if (style & (WS_MINIMIZE | WS_DISABLED)) return 0;
             parent = GetAncestor( hwndTop, GA_PARENT );
             if (!parent || parent == GetDesktopWindow()) break;
+            if (parent == get_hwnd_message_parent()) return 0;
             hwndTop = parent;
         }
 
@@ -279,6 +278,9 @@ HWND WINAPI SetFocus( HWND hwnd )
         {
             if (!set_active_window( hwndTop, NULL, FALSE, FALSE )) return 0;
             if (!IsWindow( hwnd )) return 0;  /* Abort if window destroyed */
+
+            /* Do not change focus if the window is no longer active */
+            if (hwndTop != GetActiveWindow()) return 0;
         }
     }
     else /* NULL hwnd passed in */
@@ -314,7 +316,7 @@ HWND WINAPI GetActiveWindow(void)
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = reply->active;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->active );
     }
     SERVER_END_REQ;
     return ret;
@@ -331,7 +333,7 @@ HWND WINAPI GetFocus(void)
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = reply->focus;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->focus );
     }
     SERVER_END_REQ;
     return ret;
@@ -348,7 +350,7 @@ HWND WINAPI GetForegroundWindow(void)
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = 0;
-        if (!wine_server_call_err( req )) ret = reply->foreground;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->foreground );
     }
     SERVER_END_REQ;
     return ret;
@@ -388,8 +390,8 @@ BOOL WINAPI SetShellWindowEx(HWND hwndShell, HWND hwndListView)
     SERVER_START_REQ(set_global_windows)
     {
         req->flags          = SET_GLOBAL_SHELL_WINDOWS;
-        req->shell_window   = hwndShell;
-        req->shell_listview = hwndListView;
+        req->shell_window   = wine_server_user_handle( hwndShell );
+        req->shell_listview = wine_server_user_handle( hwndListView );
         ret = !wine_server_call_err(req);
     }
     SERVER_END_REQ;
@@ -418,7 +420,7 @@ HWND WINAPI GetShellWindow(void)
     {
         req->flags = 0;
         if (!wine_server_call_err(req))
-            hwndShell = reply->old_shell_window;
+            hwndShell = wine_server_ptr_handle( reply->old_shell_window );
     }
     SERVER_END_REQ;
 
@@ -434,7 +436,7 @@ HWND WINAPI SetProgmanWindow ( HWND hwnd )
     SERVER_START_REQ(set_global_windows)
     {
         req->flags          = SET_GLOBAL_PROGMAN_WINDOW;
-        req->progman_window = hwnd;
+        req->progman_window = wine_server_user_handle( hwnd );
         if (wine_server_call_err( req )) hwnd = 0;
     }
     SERVER_END_REQ;
@@ -452,7 +454,8 @@ HWND WINAPI GetProgmanWindow(void)
     SERVER_START_REQ(set_global_windows)
     {
         req->flags = 0;
-        if (!wine_server_call_err(req)) ret = reply->old_progman_window;
+        if (!wine_server_call_err(req))
+            ret = wine_server_ptr_handle( reply->old_progman_window );
     }
     SERVER_END_REQ;
     return ret;
@@ -470,7 +473,7 @@ HWND WINAPI SetTaskmanWindow ( HWND hwnd )
     SERVER_START_REQ(set_global_windows)
     {
         req->flags          = SET_GLOBAL_TASKMAN_WINDOW;
-        req->taskman_window = hwnd;
+        req->taskman_window = wine_server_user_handle( hwnd );
         if (wine_server_call_err( req )) hwnd = 0;
     }
     SERVER_END_REQ;
@@ -487,7 +490,8 @@ HWND WINAPI GetTaskmanWindow(void)
     SERVER_START_REQ(set_global_windows)
     {
         req->flags = 0;
-        if (!wine_server_call_err(req)) ret = reply->old_taskman_window;
+        if (!wine_server_call_err(req))
+            ret = wine_server_ptr_handle( reply->old_taskman_window );
     }
     SERVER_END_REQ;
     return ret;

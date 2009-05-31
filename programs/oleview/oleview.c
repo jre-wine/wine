@@ -25,15 +25,8 @@ static WCHAR wszRegEdit[] = { 'r','e','g','e','d','i','t','.','e','x','e','\0' }
 static WCHAR wszFormat[] = { '<','o','b','j','e','c','t','\n',' ',' ',' ',
     'c','l','a','s','s','i','d','=','\"','c','l','s','i','d',':','%','s','\"','\n',
     '>','\n','<','/','o','b','j','e','c','t','>','\0' };
-WCHAR wszFilter[] = { 'T','y','p','e','L','i','b',' ','F','i','l','e','s',' ',
-    '(','*','t','l','b',';','*','o','l','b',';','*','.','d','l','l',';',
-    '*','.','o','c','x',';','*','.','e','x','e',')','\0',
-    '*','.','t','l','b',';','*','.','o','l','b',';','*','.','d','l','l',';',
-    '*','.','o','c','x','*','.','e','x','e','\0',
-    'A','l','l',' ','F','i','l','e','s',' ','(','*','.','*',')','\0',
-    '*','.','*','\0','\0' };
 
-INT_PTR CALLBACK SysConfProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK SysConfProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     HKEY hKey;
     WCHAR buffer[MAX_LOAD_STRING];
@@ -105,7 +98,7 @@ INT_PTR CALLBACK SysConfProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return FALSE;
 }
 
-INT_PTR CALLBACK CreateInstOnProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static INT_PTR CALLBACK CreateInstOnProc(HWND hDlgWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     HWND hEdit;
 
@@ -291,9 +284,9 @@ static int MenuCommand(WPARAM wParam, HWND hWnd)
     {
         case IDM_ABOUT:
             LoadString(globals.hMainInst, IDS_ABOUT, wszAbout,
-                    sizeof(WCHAR[MAX_LOAD_STRING]));
+                    sizeof(wszAbout)/sizeof(wszAbout[0]));
             LoadString(globals.hMainInst, IDS_ABOUTVER, wszAboutVer,
-                    sizeof(WCHAR[MAX_LOAD_STRING]));
+                    sizeof(wszAboutVer)/sizeof(wszAboutVer[0]));
             ShellAbout(hWnd, wszAbout, wszAboutVer, NULL);
             break;
         case IDM_COPYCLSID:
@@ -408,8 +401,10 @@ static int MenuCommand(WPARAM wParam, HWND hWnd)
             OPENFILENAME ofn;
             static WCHAR wszTitle[MAX_LOAD_STRING];
             static WCHAR wszName[MAX_LOAD_STRING];
+            static WCHAR wszFilter[MAX_LOAD_STRING];
 
-            LoadString(globals.hMainInst, IDS_OPEN, wszTitle, sizeof(wszTitle));
+            LoadString(globals.hMainInst, IDS_OPEN, wszTitle, sizeof(wszTitle)/sizeof(wszTitle[0]));
+            LoadString(globals.hMainInst, IDS_OPEN_TYPELIB_FILTER, wszFilter, sizeof(wszFilter)/sizeof(wszFilter[0]));
             InitOpenFileName(hWnd, &ofn, wszFilter, wszTitle, wszName);
             if(GetOpenFileName(&ofn)) CreateTypeLibWindow(globals.hMainInst, wszName);
             break;
@@ -430,13 +425,13 @@ static void UpdateStatusBar(int itemID)
 {
     WCHAR info[MAX_LOAD_STRING];
 
-    if(!LoadString(globals.hMainInst, itemID, info, sizeof(WCHAR[MAX_LOAD_STRING])))
-        LoadString(globals.hMainInst, IDS_READY, info, sizeof(WCHAR[MAX_LOAD_STRING]));
+    if(!LoadString(globals.hMainInst, itemID, info, sizeof(info)/sizeof(info[0])))
+        LoadString(globals.hMainInst, IDS_READY, info, sizeof(info)/sizeof(info[0]));
 
     SendMessage(globals.hStatusBar, SB_SETTEXT, 0, (LPARAM)info);
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg,
+static LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg,
         WPARAM wParam, LPARAM lParam)
 {
     switch(uMsg)
@@ -480,7 +475,7 @@ static BOOL InitApplication(HINSTANCE hInst)
     WNDCLASS wc;
     WCHAR wszAppName[MAX_LOAD_STRING];
 
-    LoadString(hInst, IDS_APPNAME, wszAppName, sizeof(WCHAR[MAX_LOAD_STRING]));
+    LoadString(hInst, IDS_APPNAME, wszAppName, sizeof(wszAppName)/sizeof(wszAppName[0]));
 
     memset(&wc, 0, sizeof(WNDCLASS));
     wc.lpfnWndProc = WndProc;
@@ -512,15 +507,15 @@ static BOOL InitInstance(HINSTANCE hInst, int nCmdShow)
         {5, IDM_VIEW, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0}
     };
 
-    LoadString(hInst, IDS_APPNAME, wszAppName, sizeof(WCHAR[MAX_LOAD_STRING]));
-    LoadString(hInst, IDS_APPTITLE, wszTitle, sizeof(WCHAR[MAX_LOAD_STRING]));
+    LoadString(hInst, IDS_APPNAME, wszAppName, sizeof(wszAppName)/sizeof(wszAppName[0]));
+    LoadString(hInst, IDS_APPTITLE, wszTitle, sizeof(wszTitle)/sizeof(wszTitle[0]));
 
     hWnd = CreateWindow(wszAppName, wszTitle, WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, NULL, NULL, hInst, NULL);
     if(!hWnd) return FALSE;
 
     globals.hStatusBar = CreateStatusWindow(WS_VISIBLE|WS_CHILD,
-            (LPWSTR)wszTitle, hWnd, 0);
+            wszTitle, hWnd, 0);
 
     globals.hToolBar = CreateToolbarEx(hWnd, WS_CHILD|WS_VISIBLE, 0, 1, hInst,
             IDB_TOOLBAR, tB, 10, 16, 16, 16, 16, sizeof(TBBUTTON));
@@ -539,8 +534,7 @@ static BOOL InitInstance(HINSTANCE hInst, int nCmdShow)
     return TRUE;
 }
 
-int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst,
-                LPWSTR lpCmdLine, int nCmdShow)
+int APIENTRY WinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR lpCmdLine, int nCmdShow)
 {
     MSG msg;
     HANDLE hAccelTable;

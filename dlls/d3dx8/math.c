@@ -1,5 +1,6 @@
 /*
  * Copyright 2007 David Adam
+ * Copyright 2008 Jérôme Gardou
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,10 +17,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <stdarg.h>
-#include <assert.h>
 
 #define NONAMELESSUNION
 
@@ -30,7 +28,7 @@
 
 #include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(d3dx8);
+WINE_DEFAULT_DEBUG_CHANNEL(d3dx);
 
 static const ID3DXMatrixStackVtbl ID3DXMatrixStack_Vtbl;
 
@@ -57,11 +55,25 @@ D3DXCOLOR* WINAPI D3DXColorAdjustSaturation(D3DXCOLOR *pout, CONST D3DXCOLOR *pc
     return pout;
 }
 
+/*_________________Misc__________________________*/
+
+FLOAT WINAPI D3DXFresnelTerm(FLOAT costheta, FLOAT refractionindex)
+{
+    FLOAT a, d, g, result;
+
+    g = sqrt(refractionindex * refractionindex + costheta * costheta - 1.0f);
+    a = g + costheta;
+    d = g - costheta;
+    result = ( costheta * a - 1.0f ) * ( costheta * a - 1.0f ) / ( ( costheta * d + 1.0f ) * ( costheta * d + 1.0f ) ) + 1.0f;
+    result = result * 0.5f * d * d / ( a * a );
+    return result;
+}
+
 /*_________________D3DXMatrix____________________*/
 
-D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, float scaling, D3DXVECTOR3 *rotationcenter, D3DXQUATERNION *rotation, D3DXVECTOR3 *translation)
+D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, FLOAT scaling, CONST D3DXVECTOR3 *rotationcenter, CONST D3DXQUATERNION *rotation, CONST D3DXVECTOR3 *translation)
 {
-    D3DXMATRIX m1, m2, m3, m4, m5, p1, p2, p3;
+    D3DXMATRIX m1, m2, m3, m4, m5;
 
     D3DXMatrixScaling(&m1, scaling, scaling, scaling);
     if ( !rotationcenter )
@@ -90,10 +102,10 @@ D3DXMATRIX* WINAPI D3DXMatrixAffineTransformation(D3DXMATRIX *pout, float scalin
     {
      D3DXMatrixTranslation(&m5, translation->x, translation->y, translation->z);
     }
-    D3DXMatrixMultiply(&p1, &m1, &m2);
-    D3DXMatrixMultiply(&p2, &p1, &m3);
-    D3DXMatrixMultiply(&p3, &p2, &m4);
-    D3DXMatrixMultiply(pout, &p3, &m5);
+    D3DXMatrixMultiply(&m1, &m1, &m2);
+    D3DXMatrixMultiply(&m1, &m1, &m3);
+    D3DXMatrixMultiply(&m1, &m1, &m4);
+    D3DXMatrixMultiply(pout, &m1, &m5);
     return pout;
 }
 
@@ -105,7 +117,7 @@ FLOAT WINAPI D3DXMatrixfDeterminant(CONST D3DXMATRIX *pm)
     v1.x = pm->u.m[0][0]; v1.y = pm->u.m[1][0]; v1.z = pm->u.m[2][0]; v1.w = pm->u.m[3][0];
     v2.x = pm->u.m[0][1]; v2.y = pm->u.m[1][1]; v2.z = pm->u.m[2][1]; v2.w = pm->u.m[3][1];
     v3.x = pm->u.m[0][2]; v3.y = pm->u.m[1][2]; v3.z = pm->u.m[2][2]; v3.w = pm->u.m[3][2];
-    D3DXVec4Cross(&minor,&v1,&v2,&v3);
+    D3DXVec4Cross(&minor, &v1, &v2, &v3);
     det =  - (pm->u.m[0][3] * minor.x + pm->u.m[1][3] * minor.y + pm->u.m[2][3] * minor.z + pm->u.m[3][3] * minor.w);
     return det;
 }
@@ -113,8 +125,9 @@ FLOAT WINAPI D3DXMatrixfDeterminant(CONST D3DXMATRIX *pm)
 D3DXMATRIX* WINAPI D3DXMatrixInverse(D3DXMATRIX *pout, FLOAT *pdeterminant, CONST D3DXMATRIX *pm)
 {
     int a, i, j;
+    D3DXMATRIX out;
     D3DXVECTOR4 v, vec[3];
-    FLOAT cofactor, det;
+    FLOAT det;
 
     det = D3DXMatrixfDeterminant(pm);
     if ( !det ) return NULL;
@@ -134,19 +147,13 @@ D3DXMATRIX* WINAPI D3DXMatrixInverse(D3DXMATRIX *pout, FLOAT *pdeterminant, CONS
       }
      }
     D3DXVec4Cross(&v, &vec[0], &vec[1], &vec[2]);
-    for (j=0; j<4; j++)
-    {
-     switch(j)
-     {
-      case 0: cofactor = v.x; break;
-      case 1: cofactor = v.y; break;
-      case 2: cofactor = v.z; break;
-      case 3: cofactor = v.w; break;
-     }
-    pout->u.m[j][i] = pow(-1.0f, i) * cofactor / det;
-    }
+    out.u.m[0][i] = pow(-1.0f, i) * v.x / det;
+    out.u.m[1][i] = pow(-1.0f, i) * v.y / det;
+    out.u.m[2][i] = pow(-1.0f, i) * v.z / det;
+    out.u.m[3][i] = pow(-1.0f, i) * v.w / det;
    }
-    return pout;
+   *pout = out;
+   return pout;
 }
 
 D3DXMATRIX* WINAPI D3DXMatrixLookAtLH(D3DXMATRIX *pout, CONST D3DXVECTOR3 *peye, CONST D3DXVECTOR3 *pat, CONST D3DXVECTOR3 *pup)
@@ -209,24 +216,24 @@ D3DXMATRIX* WINAPI D3DXMatrixLookAtRH(D3DXMATRIX *pout, CONST D3DXVECTOR3 *peye,
 
 D3DXMATRIX* WINAPI D3DXMatrixMultiply(D3DXMATRIX *pout, CONST D3DXMATRIX *pm1, CONST D3DXMATRIX *pm2)
 {
+    D3DXMATRIX out;
     int i,j;
 
     for (i=0; i<4; i++)
     {
      for (j=0; j<4; j++)
      {
-      pout->u.m[i][j] = pm1->u.m[i][0] * pm2->u.m[0][j] + pm1->u.m[i][1] * pm2->u.m[1][j] + pm1->u.m[i][2] * pm2->u.m[2][j] + pm1->u.m[i][3] * pm2->u.m[3][j];
+      out.u.m[i][j] = pm1->u.m[i][0] * pm2->u.m[0][j] + pm1->u.m[i][1] * pm2->u.m[1][j] + pm1->u.m[i][2] * pm2->u.m[2][j] + pm1->u.m[i][3] * pm2->u.m[3][j];
      }
     }
+    *pout = out;
     return pout;
 }
 
 D3DXMATRIX* WINAPI D3DXMatrixMultiplyTranspose(D3DXMATRIX *pout, CONST D3DXMATRIX *pm1, CONST D3DXMATRIX *pm2)
 {
-    D3DXMATRIX temp;
-
-    D3DXMatrixMultiply(&temp, pm1, pm2);
-    D3DXMatrixTranspose(pout, &temp);
+    D3DXMatrixMultiply(pout, pm1, pm2);
+    D3DXMatrixTranspose(pout, pout);
     return pout;
 }
 
@@ -426,15 +433,15 @@ D3DXMATRIX* WINAPI D3DXMatrixRotationY(D3DXMATRIX *pout, FLOAT angle)
 
 D3DXMATRIX* WINAPI D3DXMatrixRotationYawPitchRoll(D3DXMATRIX *pout, FLOAT yaw, FLOAT pitch, FLOAT roll)
 {
-    D3DXMATRIX m, pout1, pout2, pout3;
+    D3DXMATRIX m;
 
-    D3DXMatrixIdentity(&pout3);
-    D3DXMatrixRotationZ(&m,roll);
-    D3DXMatrixMultiply(&pout2,&pout3,&m);
-    D3DXMatrixRotationX(&m,pitch);
-    D3DXMatrixMultiply(&pout1,&pout2,&m);
-    D3DXMatrixRotationY(&m,yaw);
-    D3DXMatrixMultiply(pout,&pout1,&m);
+    D3DXMatrixIdentity(pout);
+    D3DXMatrixRotationZ(&m, roll);
+    D3DXMatrixMultiply(pout, pout, &m);
+    D3DXMatrixRotationX(&m, pitch);
+    D3DXMatrixMultiply(pout, pout, &m);
+    D3DXMatrixRotationY(&m, yaw);
+    D3DXMatrixMultiply(pout, pout, &m);
     return pout;
 }
 D3DXMATRIX* WINAPI D3DXMatrixRotationZ(D3DXMATRIX *pout, FLOAT angle)
@@ -484,7 +491,7 @@ D3DXMATRIX* WINAPI D3DXMatrixShadow(D3DXMATRIX *pout, CONST D3DXVECTOR4 *plight,
 
 D3DXMATRIX* WINAPI D3DXMatrixTransformation(D3DXMATRIX *pout, CONST D3DXVECTOR3 *pscalingcenter, CONST D3DXQUATERNION *pscalingrotation, CONST D3DXVECTOR3 *pscaling, CONST D3DXVECTOR3 *protationcenter, CONST D3DXQUATERNION *protation, CONST D3DXVECTOR3 *ptranslation)
 {
-    D3DXMATRIX m1, m2, m3, m4, m5, m6, m7, p1, p2, p3, p4, p5;
+    D3DXMATRIX m1, m2, m3, m4, m5, m6, m7;
     D3DXQUATERNION prc;
     D3DXVECTOR3 psc, pt;
 
@@ -553,12 +560,12 @@ D3DXMATRIX* WINAPI D3DXMatrixTransformation(D3DXMATRIX *pout, CONST D3DXVECTOR3 
     }
     D3DXMatrixTranslation(&m5, psc.x - prc.x,  psc.y - prc.y,  psc.z - prc.z);
     D3DXMatrixTranslation(&m7, prc.x + pt.x, prc.y + pt.y, prc.z + pt.z);
-    D3DXMatrixMultiply(&p1, &m1, &m2);
-    D3DXMatrixMultiply(&p2, &p1, &m3);
-    D3DXMatrixMultiply(&p3, &p2, &m4);
-    D3DXMatrixMultiply(&p4, &p3, &m5);
-    D3DXMatrixMultiply(&p5, &p4, &m6);
-    D3DXMatrixMultiply(pout, &p5, &m7);
+    D3DXMatrixMultiply(&m1, &m1, &m2);
+    D3DXMatrixMultiply(&m1, &m1, &m3);
+    D3DXMatrixMultiply(&m1, &m1, &m4);
+    D3DXMatrixMultiply(&m1, &m1, &m5);
+    D3DXMatrixMultiply(&m1, &m1, &m6);
+    D3DXMatrixMultiply(pout, &m1, &m7);
     return pout;
 }
 
@@ -573,13 +580,14 @@ D3DXMATRIX* WINAPI D3DXMatrixTranslation(D3DXMATRIX *pout, FLOAT x, FLOAT y, FLO
 
 D3DXMATRIX* WINAPI D3DXMatrixTranspose(D3DXMATRIX *pout, CONST D3DXMATRIX *pm)
 {
+    CONST D3DXMATRIX m = *pm;
     int i,j;
 
     for (i=0; i<4; i++)
     {
      for (j=0; j<4; j++)
      {
-      pout->u.m[i][j] = pm->u.m[j][i];
+      pout->u.m[i][j] = m.u.m[j][i];
      }
     }
     return pout;
@@ -587,9 +595,13 @@ D3DXMATRIX* WINAPI D3DXMatrixTranspose(D3DXMATRIX *pout, CONST D3DXMATRIX *pm)
 
 /*_________________D3DXMatrixStack____________________*/
 
+static const unsigned int INITIAL_STACK_SIZE = 32;
+
 HRESULT WINAPI D3DXCreateMatrixStack(DWORD flags, LPD3DXMATRIXSTACK* ppstack)
 {
     ID3DXMatrixStackImpl* object;
+
+    TRACE("flags %#x, ppstack %p\n", flags, ppstack);
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ID3DXMatrixStackImpl));
     if ( object == NULL )
@@ -599,7 +611,21 @@ HRESULT WINAPI D3DXCreateMatrixStack(DWORD flags, LPD3DXMATRIXSTACK* ppstack)
     }
     object->lpVtbl = &ID3DXMatrixStack_Vtbl;
     object->ref = 1;
+
+    object->stack = HeapAlloc(GetProcessHeap(), 0, INITIAL_STACK_SIZE * sizeof(D3DXMATRIX));
+    if (!object->stack)
+    {
+        HeapFree(GetProcessHeap(), 0, object);
+        *ppstack = NULL;
+        return E_OUTOFMEMORY;
+    }
+
     object->current = 0;
+    object->stack_size = INITIAL_STACK_SIZE;
+    D3DXMatrixIdentity(&object->stack[0]);
+
+    TRACE("Created matrix stack %p\n", object);
+
     *ppstack = (LPD3DXMATRIXSTACK)object;
     return D3D_OK;
 }
@@ -630,7 +656,11 @@ static ULONG WINAPI ID3DXMatrixStackImpl_Release(ID3DXMatrixStack* iface)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
-    if ( !ref ) HeapFree(GetProcessHeap(), 0, This);
+    if (!ref)
+    {
+        HeapFree(GetProcessHeap(), 0, This->stack);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);
     return ref;
 }
@@ -638,105 +668,217 @@ static ULONG WINAPI ID3DXMatrixStackImpl_Release(ID3DXMatrixStack* iface)
 static D3DXMATRIX* WINAPI ID3DXMatrixStackImpl_GetTop(ID3DXMatrixStack *iface)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
-    return NULL;
+
+    TRACE("iface %p\n", iface);
+
+    return &This->stack[This->current];
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_LoadIdentity(ID3DXMatrixStack *iface)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixIdentity(&This->stack[This->current]);
+
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMatrixStackImpl_LoadMatrix(ID3DXMatrixStack *iface, LPD3DXMATRIX pm)
+static HRESULT WINAPI ID3DXMatrixStackImpl_LoadMatrix(ID3DXMatrixStack *iface, CONST D3DXMATRIX *pm)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (!pm) return D3DERR_INVALIDCALL;
+    This->stack[This->current] = *pm;
+
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMatrixStackImpl_MultMatrix(ID3DXMatrixStack *iface, LPD3DXMATRIX pm)
+static HRESULT WINAPI ID3DXMatrixStackImpl_MultMatrix(ID3DXMatrixStack *iface, CONST D3DXMATRIX *pm)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (!pm) return D3DERR_INVALIDCALL;
+    D3DXMatrixMultiply(&This->stack[This->current], &This->stack[This->current], pm);
+
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMatrixStackImpl_MultMatrixLocal(ID3DXMatrixStack *iface, LPD3DXMATRIX pm)
+static HRESULT WINAPI ID3DXMatrixStackImpl_MultMatrixLocal(ID3DXMatrixStack *iface, CONST D3DXMATRIX *pm)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (!pm) return D3DERR_INVALIDCALL;
+    D3DXMatrixMultiply(&This->stack[This->current], pm, &This->stack[This->current]);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_Pop(ID3DXMatrixStack *iface)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    /* Popping the last element on the stack returns D3D_OK, but does nothing. */
+    if (!This->current) return D3D_OK;
+
+    if (This->current <= This->stack_size / 4 && This->stack_size >= INITIAL_STACK_SIZE * 2)
+    {
+        unsigned int new_size;
+        D3DXMATRIX *new_stack;
+
+        new_size = This->stack_size / 2;
+        new_stack = HeapReAlloc(GetProcessHeap(), 0, This->stack, new_size * sizeof(D3DXMATRIX));
+        if (new_stack)
+        {
+            This->stack_size = new_size;
+            This->stack = new_stack;
+        }
+    }
+
+    --This->current;
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_Push(ID3DXMatrixStack *iface)
 {
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (This->current == This->stack_size - 1)
+    {
+        unsigned int new_size;
+        D3DXMATRIX *new_stack;
+
+        if (This->stack_size > UINT_MAX / 2) return E_OUTOFMEMORY;
+
+        new_size = This->stack_size * 2;
+        new_stack = HeapReAlloc(GetProcessHeap(), 0, This->stack, new_size * sizeof(D3DXMATRIX));
+        if (!new_stack) return E_OUTOFMEMORY;
+
+        This->stack_size = new_size;
+        This->stack = new_stack;
+    }
+
+    ++This->current;
+    This->stack[This->current] = This->stack[This->current - 1];
+
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMatrixStackImpl_RotateAxis(ID3DXMatrixStack *iface, LPD3DXVECTOR3 pv, FLOAT angle)
+static HRESULT WINAPI ID3DXMatrixStackImpl_RotateAxis(ID3DXMatrixStack *iface, CONST D3DXVECTOR3 *pv, FLOAT angle)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (!pv) return D3DERR_INVALIDCALL;
+    D3DXMatrixRotationAxis(&temp, pv, angle);
+    D3DXMatrixMultiply(&This->stack[This->current], &This->stack[This->current], &temp);
+
     return D3D_OK;
 }
 
-static HRESULT WINAPI ID3DXMatrixStackImpl_RotateAxisLocal(ID3DXMatrixStack *iface, LPD3DXVECTOR3 pv, FLOAT angle)
+static HRESULT WINAPI ID3DXMatrixStackImpl_RotateAxisLocal(ID3DXMatrixStack *iface, CONST D3DXVECTOR3 *pv, FLOAT angle)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    if (!pv) return D3DERR_INVALIDCALL;
+    D3DXMatrixRotationAxis(&temp, pv, angle);
+    D3DXMatrixMultiply(&This->stack[This->current], &temp, &This->stack[This->current]);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_RotateYawPitchRoll(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixRotationYawPitchRoll(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &This->stack[This->current], &temp);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_RotateYawPitchRollLocal(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixRotationYawPitchRoll(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &temp, &This->stack[This->current]);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_Scale(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixScaling(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &This->stack[This->current], &temp);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_ScaleLocal(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixScaling(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &temp, &This->stack[This->current]);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_Translate(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixTranslation(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &This->stack[This->current], &temp);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXMatrixStackImpl_TranslateLocal(ID3DXMatrixStack *iface, FLOAT x, FLOAT y, FLOAT z)
 {
+    D3DXMATRIX temp;
     ID3DXMatrixStackImpl *This = (ID3DXMatrixStackImpl *)iface;
-    FIXME("(%p) : stub\n",This);
+
+    TRACE("iface %p\n", iface);
+
+    D3DXMatrixTranslation(&temp, x, y, z);
+    D3DXMatrixMultiply(&This->stack[This->current], &temp,&This->stack[This->current]);
+
     return D3D_OK;
 }
 
@@ -809,32 +951,35 @@ D3DXVECTOR3* WINAPI D3DXPlaneIntersectLine(D3DXVECTOR3 *pout, CONST D3DXPLANE *p
 
 D3DXPLANE* WINAPI D3DXPlaneNormalize(D3DXPLANE *pout, CONST D3DXPLANE *pp)
 {
+    D3DXPLANE out;
     FLOAT norm;
 
     norm = sqrt(pp->a * pp->a + pp->b * pp->b + pp->c * pp->c);
     if ( norm )
     {
-     pout->a = pp->a / norm;
-     pout->b = pp->b / norm;
-     pout->c = pp->c / norm;
-     pout->d = pp->d / norm;
+     out.a = pp->a / norm;
+     out.b = pp->b / norm;
+     out.c = pp->c / norm;
+     out.d = pp->d / norm;
     }
     else
     {
-     pout->a = 0.0f;
-     pout->b = 0.0f;
-     pout->c = 0.0f;
-     pout->d = 0.0f;
+     out.a = 0.0f;
+     out.b = 0.0f;
+     out.c = 0.0f;
+     out.d = 0.0f;
     }
+    *pout = out;
     return pout;
 }
 
 D3DXPLANE* WINAPI D3DXPlaneTransform(D3DXPLANE *pout, CONST D3DXPLANE *pplane, CONST D3DXMATRIX *pm)
 {
-     pout->a = pm->u.m[0][0] * pplane->a + pm->u.m[1][0] * pplane->b + pm->u.m[2][0] * pplane->c + pm->u.m[3][0] * pplane->d;
-     pout->b = pm->u.m[0][1] * pplane->a + pm->u.m[1][1] * pplane->b + pm->u.m[2][1] * pplane->c + pm->u.m[3][1] * pplane->d;
-     pout->c = pm->u.m[0][2] * pplane->a + pm->u.m[1][2] * pplane->b + pm->u.m[2][2] * pplane->c + pm->u.m[3][2] * pplane->d;
-     pout->d = pm->u.m[0][3] * pplane->a + pm->u.m[1][3] * pplane->b + pm->u.m[2][3] * pplane->c + pm->u.m[3][3] * pplane->d;
+    CONST D3DXPLANE plane = *pplane;
+    pout->a = pm->u.m[0][0] * plane.a + pm->u.m[1][0] * plane.b + pm->u.m[2][0] * plane.c + pm->u.m[3][0] * plane.d;
+    pout->b = pm->u.m[0][1] * plane.a + pm->u.m[1][1] * plane.b + pm->u.m[2][1] * plane.c + pm->u.m[3][1] * plane.d;
+    pout->c = pm->u.m[0][2] * plane.a + pm->u.m[1][2] * plane.b + pm->u.m[2][2] * plane.c + pm->u.m[3][2] * plane.d;
+    pout->d = pm->u.m[0][3] * plane.a + pm->u.m[1][3] * plane.b + pm->u.m[2][3] * plane.c + pm->u.m[3][3] * plane.d;
     return pout;
 }
 
@@ -871,13 +1016,7 @@ D3DXQUATERNION* WINAPI D3DXQuaternionExp(D3DXQUATERNION *pout, CONST D3DXQUATERN
 
 D3DXQUATERNION* WINAPI D3DXQuaternionInverse(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
 {
-    D3DXQUATERNION temp;
     FLOAT norm;
-
-    temp.x = 0.0f;
-    temp.y = 0.0f;
-    temp.z = 0.0f;
-    temp.w = 0.0f;
 
     norm = D3DXQuaternionLengthSq(pq);
     if ( !norm )
@@ -889,11 +1028,10 @@ D3DXQUATERNION* WINAPI D3DXQuaternionInverse(D3DXQUATERNION *pout, CONST D3DXQUA
     }
     else
     {
-    D3DXQuaternionConjugate(&temp, pq);
-    pout->x = temp.x / norm;
-    pout->y = temp.y / norm;
-    pout->z = temp.z / norm;
-    pout->w = temp.w / norm;
+     pout->x = -pq->x / norm;
+     pout->y = -pq->y / norm;
+     pout->z = -pq->z / norm;
+     pout->w = pq->w / norm;
     }
     return pout;
 }
@@ -928,32 +1066,36 @@ D3DXQUATERNION* WINAPI D3DXQuaternionLn(D3DXQUATERNION *pout, CONST D3DXQUATERNI
 
 D3DXQUATERNION* WINAPI D3DXQuaternionMultiply(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2)
 {
-    pout->x = pq2->w * pq1->x + pq2->x * pq1->w + pq2->y * pq1->z - pq2->z * pq1->y;
-    pout->y = pq2->w * pq1->y - pq2->x * pq1->z + pq2->y * pq1->w + pq2->z * pq1->x;
-    pout->z = pq2->w * pq1->z + pq2->x * pq1->y - pq2->y * pq1->x + pq2->z * pq1->w;
-    pout->w = pq2->w * pq1->w - pq2->x * pq1->x - pq2->y * pq1->y - pq2->z * pq1->z;
+    D3DXQUATERNION out;
+    out.x = pq2->w * pq1->x + pq2->x * pq1->w + pq2->y * pq1->z - pq2->z * pq1->y;
+    out.y = pq2->w * pq1->y - pq2->x * pq1->z + pq2->y * pq1->w + pq2->z * pq1->x;
+    out.z = pq2->w * pq1->z + pq2->x * pq1->y - pq2->y * pq1->x + pq2->z * pq1->w;
+    out.w = pq2->w * pq1->w - pq2->x * pq1->x - pq2->y * pq1->y - pq2->z * pq1->z;
+    *pout = out;
     return pout;
 }
 
 D3DXQUATERNION* WINAPI D3DXQuaternionNormalize(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq)
 {
+    D3DXQUATERNION out;
     FLOAT norm;
 
     norm = D3DXQuaternionLength(pq);
     if ( !norm )
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
-     pout->z = 0.0f;
-     pout->w = 0.0f;
+     out.x = 0.0f;
+     out.y = 0.0f;
+     out.z = 0.0f;
+     out.w = 0.0f;
     }
     else
     {
-     pout->x = pq->x / norm;
-     pout->y = pq->y / norm;
-     pout->z = pq->z / norm;
-     pout->w = pq->w / norm;
+     out.x = pq->x / norm;
+     out.y = pq->y / norm;
+     out.z = pq->z / norm;
+     out.w = pq->w / norm;
     }
+    *pout=out;
     return pout;
 }
 
@@ -975,7 +1117,7 @@ D3DXQUATERNION* WINAPI D3DXQuaternionRotationMatrix(D3DXQUATERNION *pout, CONST 
     FLOAT maxdiag, S, trace;
 
     trace = pm->u.m[0][0] + pm->u.m[1][1] + pm->u.m[2][2] + 1.0f;
-    if ( trace > 0.0f)
+    if ( trace > 1.0f)
     {
      pout->x = ( pm->u.m[1][2] - pm->u.m[2][1] ) / ( 2.0f * sqrt(trace) );
      pout->y = ( pm->u.m[2][0] - pm->u.m[0][2] ) / ( 2.0f * sqrt(trace) );
@@ -1031,15 +1173,27 @@ D3DXQUATERNION* WINAPI D3DXQuaternionRotationYawPitchRoll(D3DXQUATERNION *pout, 
 
 D3DXQUATERNION* WINAPI D3DXQuaternionSlerp(D3DXQUATERNION *pout, CONST D3DXQUATERNION *pq1, CONST D3DXQUATERNION *pq2, FLOAT t)
 {
-    FLOAT dot, epsilon;
+    FLOAT dot, epsilon, temp, theta, u;
 
     epsilon = 1.0f;
+    temp = 1.0f - t;
+    u = t;
     dot = D3DXQuaternionDot(pq1, pq2);
-    if ( dot < 0.0f) epsilon = -1.0f;
-    pout->x = (1.0f - t) * pq1->x + epsilon * t * pq2->x;
-    pout->y = (1.0f - t) * pq1->y + epsilon * t * pq2->y;
-    pout->z = (1.0f - t) * pq1->z + epsilon * t * pq2->z;
-    pout->w = (1.0f - t) * pq1->w + epsilon * t * pq2->w;
+    if ( dot < 0.0f )
+    {
+        epsilon = -1.0f;
+        dot = -dot;
+    }
+    if( 1.0f - dot > 0.001f )
+    {
+        theta = acos(dot);
+        temp  = sin(theta * temp) / sin(theta);
+        u = sin(theta * u) / sin(theta);
+    }
+    pout->x = temp * pq1->x + epsilon * u * pq2->x;
+    pout->y = temp * pq1->y + epsilon * u * pq2->y;
+    pout->z = temp * pq1->z + epsilon * u * pq2->z;
+    pout->w = temp * pq1->w + epsilon * u * pq2->w;
     return pout;
 }
 
@@ -1104,19 +1258,21 @@ D3DXVECTOR2* WINAPI D3DXVec2Hermite(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv1, C
 
 D3DXVECTOR2* WINAPI D3DXVec2Normalize(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv)
 {
+    D3DXVECTOR2 out;
     FLOAT norm;
 
     norm = D3DXVec2Length(pv);
     if ( !norm )
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
+     out.x = 0.0f;
+     out.y = 0.0f;
     }
     else
     {
-     pout->x = pv->x / norm;
-     pout->y = pv->y / norm;
+     out.x = pv->x / norm;
+     out.y = pv->y / norm;
     }
+    *pout=out;
     return pout;
 }
 
@@ -1136,8 +1292,9 @@ D3DXVECTOR2* WINAPI D3DXVec2TransformCoord(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 
     norm = pm->u.m[0][3] * pv->x + pm->u.m[1][3] * pv->y + pm->u.m[3][3];
     if ( norm )
     {
-     pout->x = (pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y + pm->u.m[3][0]) / norm;
-     pout->y = (pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y + pm->u.m[3][1]) / norm;
+     CONST D3DXVECTOR2 v = *pv;
+     pout->x = (pm->u.m[0][0] * v.x + pm->u.m[1][0] * v.y + pm->u.m[3][0]) / norm;
+     pout->y = (pm->u.m[0][1] * v.x + pm->u.m[1][1] * v.y + pm->u.m[3][1]) / norm;
     }
     else
     {
@@ -1149,8 +1306,9 @@ D3DXVECTOR2* WINAPI D3DXVec2TransformCoord(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 
 
 D3DXVECTOR2* WINAPI D3DXVec2TransformNormal(D3DXVECTOR2 *pout, CONST D3DXVECTOR2 *pv, CONST D3DXMATRIX *pm)
 {
-    pout->x = pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y;
-    pout->y = pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y;
+    CONST D3DXVECTOR2 v = *pv;
+    pout->x = pm->u.m[0][0] * v.x + pm->u.m[1][0] * v.y;
+    pout->y = pm->u.m[0][1] * v.x + pm->u.m[1][1] * v.y;
     return pout;
 }
 
@@ -1189,35 +1347,38 @@ D3DXVECTOR3* WINAPI D3DXVec3Hermite(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv1, C
 
 D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv)
 {
+    D3DXVECTOR3 out;
     FLOAT norm;
 
     norm = D3DXVec3Length(pv);
     if ( !norm )
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
-     pout->z = 0.0f;
+     out.x = 0.0f;
+     out.y = 0.0f;
+     out.z = 0.0f;
     }
     else
     {
-     pout->x = pv->x / norm;
-     pout->y = pv->y / norm;
-     pout->z = pv->z / norm;
+     out.x = pv->x / norm;
+     out.y = pv->y / norm;
+     out.z = pv->z / norm;
     }
+    *pout = out;
     return pout;
 }
 
 D3DXVECTOR3* WINAPI D3DXVec3Project(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DVIEWPORT8 *pviewport, CONST D3DXMATRIX *pprojection, CONST D3DXMATRIX *pview, CONST D3DXMATRIX *pworld)
 {
-    D3DXMATRIX m1, m2;
-    D3DXVECTOR3 vec;
+    D3DXMATRIX m;
+    D3DXVECTOR3 out;
 
-    D3DXMatrixMultiply(&m1, pworld, pview);
-    D3DXMatrixMultiply(&m2, &m1, pprojection);
-    D3DXVec3TransformCoord(&vec, pv, &m2);
-    pout->x = pviewport->X +  ( 1.0f + vec.x ) * pviewport->Width / 2.0f;
-    pout->y = pviewport->Y +  ( 1.0f - vec.y ) * pviewport->Height / 2.0f;
-    pout->z = pviewport->MinZ + vec.z * ( pviewport->MaxZ - pviewport->MinZ );
+    D3DXMatrixMultiply(&m, pworld, pview);
+    D3DXMatrixMultiply(&m, &m, pprojection);
+    D3DXVec3TransformCoord(&out, pv, &m);
+    out.x = pviewport->X +  ( 1.0f + out.x ) * pviewport->Width / 2.0f;
+    out.y = pviewport->Y +  ( 1.0f - out.y ) * pviewport->Height / 2.0f;
+    out.z = pviewport->MinZ + out.z * ( pviewport->MaxZ - pviewport->MinZ );
+    *pout = out;
     return pout;
 }
 
@@ -1232,46 +1393,51 @@ D3DXVECTOR4* WINAPI D3DXVec3Transform(D3DXVECTOR4 *pout, CONST D3DXVECTOR3 *pv, 
 
 D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DXMATRIX *pm)
 {
+    D3DXVECTOR3 out;
     FLOAT norm;
 
     norm = pm->u.m[0][3] * pv->x + pm->u.m[1][3] * pv->y + pm->u.m[2][3] *pv->z + pm->u.m[3][3];
 
     if ( norm )
     {
-     pout->x = (pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y + pm->u.m[2][0] * pv->z + pm->u.m[3][0]) / norm;
-     pout->y = (pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y + pm->u.m[2][1] * pv->z + pm->u.m[3][1]) / norm;
-     pout->z = (pm->u.m[0][2] * pv->x + pm->u.m[1][2] * pv->y + pm->u.m[2][2] * pv->z + pm->u.m[3][2]) / norm;
+     CONST D3DXVECTOR3 v = *pv;
+     out.x = (pm->u.m[0][0] * v.x + pm->u.m[1][0] * v.y + pm->u.m[2][0] * v.z + pm->u.m[3][0]) / norm;
+     out.y = (pm->u.m[0][1] * v.x + pm->u.m[1][1] * v.y + pm->u.m[2][1] * v.z + pm->u.m[3][1]) / norm;
+     out.z = (pm->u.m[0][2] * v.x + pm->u.m[1][2] * v.y + pm->u.m[2][2] * v.z + pm->u.m[3][2]) / norm;
     }
     else
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
-     pout->z = 0.0f;
+     out.x = 0.0f;
+     out.y = 0.0f;
+     out.z = 0.0f;
     }
+    *pout = out;
     return pout;
 }
 
 D3DXVECTOR3* WINAPI D3DXVec3TransformNormal(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DXMATRIX *pm)
 {
-    pout->x = pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y + pm->u.m[2][0] * pv->z;
-    pout->y = pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y + pm->u.m[2][1] * pv->z;
-    pout->z = pm->u.m[0][2] * pv->x + pm->u.m[1][2] * pv->y + pm->u.m[2][2] * pv->z;
+    CONST D3DXVECTOR3 v = *pv;
+    pout->x = pm->u.m[0][0] * v.x + pm->u.m[1][0] * v.y + pm->u.m[2][0] * v.z;
+    pout->y = pm->u.m[0][1] * v.x + pm->u.m[1][1] * v.y + pm->u.m[2][1] * v.z;
+    pout->z = pm->u.m[0][2] * v.x + pm->u.m[1][2] * v.y + pm->u.m[2][2] * v.z;
     return pout;
 
 }
 
 D3DXVECTOR3* WINAPI D3DXVec3Unproject(D3DXVECTOR3 *pout, CONST D3DXVECTOR3 *pv, CONST D3DVIEWPORT8 *pviewport, CONST D3DXMATRIX *pprojection, CONST D3DXMATRIX *pview, CONST D3DXMATRIX *pworld)
 {
-    D3DXMATRIX m1, m2, m3;
-    D3DXVECTOR3 vec;
+    D3DXMATRIX m;
+    D3DXVECTOR3 out;
 
-    D3DXMatrixMultiply(&m1, pworld, pview);
-    D3DXMatrixMultiply(&m2, &m1, pprojection);
-    D3DXMatrixInverse(&m3, NULL, &m2);
-    vec.x = 2.0f * ( pv->x - pviewport->X ) / pviewport->Width - 1.0f;
-    vec.y = 1.0f - 2.0f * ( pv->y - pviewport->Y ) / pviewport->Height;
-    vec.z = ( pv->z - pviewport->MinZ) / ( pviewport->MaxZ - pviewport->MinZ );
-    D3DXVec3TransformCoord(pout, &vec, &m3);
+    D3DXMatrixMultiply(&m, pworld, pview);
+    D3DXMatrixMultiply(&m, &m, pprojection);
+    D3DXMatrixInverse(&m, NULL, &m);
+    out.x = 2.0f * ( pv->x - pviewport->X ) / pviewport->Width - 1.0f;
+    out.y = 1.0f - 2.0f * ( pv->y - pviewport->Y ) / pviewport->Height;
+    out.z = ( pv->z - pviewport->MinZ) / ( pviewport->MaxZ - pviewport->MinZ );
+    D3DXVec3TransformCoord(&out, &out, &m);
+    *pout = out;
     return pout;
 }
 
@@ -1297,10 +1463,12 @@ D3DXVECTOR4* WINAPI D3DXVec4CatmullRom(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv0
 
 D3DXVECTOR4* WINAPI D3DXVec4Cross(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv1, CONST D3DXVECTOR4 *pv2, CONST D3DXVECTOR4 *pv3)
 {
-    pout->x = pv1->y * (pv2->z * pv3->w - pv3->z * pv2->w) - pv1->z * (pv2->y * pv3->w - pv3->y * pv2->w) + pv1->w * (pv2->y * pv3->z - pv2->z *pv3->y);
-    pout->y = -(pv1->x * (pv2->z * pv3->w - pv3->z * pv2->w) - pv1->z * (pv2->x * pv3->w - pv3->x * pv2->w) + pv1->w * (pv2->x * pv3->z - pv3->x * pv2->z));
-    pout->z = pv1->x * (pv2->y * pv3->w - pv3->y * pv2->w) - pv1->y * (pv2->x *pv3->w - pv3->x * pv2->w) + pv1->w * (pv2->x * pv3->y - pv3->x * pv2->y);
-    pout->w = -(pv1->x * (pv2->y * pv3->z - pv3->y * pv2->z) - pv1->y * (pv2->x * pv3->z - pv3->x *pv2->z) + pv1->z * (pv2->x * pv3->y - pv3->x * pv2->y));
+    D3DXVECTOR4 out;
+    out.x = pv1->y * (pv2->z * pv3->w - pv3->z * pv2->w) - pv1->z * (pv2->y * pv3->w - pv3->y * pv2->w) + pv1->w * (pv2->y * pv3->z - pv2->z *pv3->y);
+    out.y = -(pv1->x * (pv2->z * pv3->w - pv3->z * pv2->w) - pv1->z * (pv2->x * pv3->w - pv3->x * pv2->w) + pv1->w * (pv2->x * pv3->z - pv3->x * pv2->z));
+    out.z = pv1->x * (pv2->y * pv3->w - pv3->y * pv2->w) - pv1->y * (pv2->x *pv3->w - pv3->x * pv2->w) + pv1->w * (pv2->x * pv3->y - pv3->x * pv2->y);
+    out.w = -(pv1->x * (pv2->y * pv3->z - pv3->y * pv2->z) - pv1->y * (pv2->x * pv3->z - pv3->x *pv2->z) + pv1->z * (pv2->x * pv3->y - pv3->x * pv2->y));
+    *pout = out;
     return pout;
 }
 
@@ -1322,31 +1490,35 @@ D3DXVECTOR4* WINAPI D3DXVec4Hermite(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv1, C
 
 D3DXVECTOR4* WINAPI D3DXVec4Normalize(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv)
 {
+    D3DXVECTOR4 out;
     FLOAT norm;
 
     norm = D3DXVec4Length(pv);
     if ( !norm )
     {
-     pout->x = 0.0f;
-     pout->y = 0.0f;
-     pout->z = 0.0f;
-     pout->w = 0.0f;
+     out.x = 0.0f;
+     out.y = 0.0f;
+     out.z = 0.0f;
+     out.w = 0.0f;
     }
     else
     {
-     pout->x = pv->x / norm;
-     pout->y = pv->y / norm;
-     pout->z = pv->z / norm;
-     pout->w = pv->w / norm;
+     out.x = pv->x / norm;
+     out.y = pv->y / norm;
+     out.z = pv->z / norm;
+     out.w = pv->w / norm;
     }
+    *pout = out;
     return pout;
 }
 
 D3DXVECTOR4* WINAPI D3DXVec4Transform(D3DXVECTOR4 *pout, CONST D3DXVECTOR4 *pv, CONST D3DXMATRIX *pm)
 {
-    pout->x = pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y + pm->u.m[2][0] * pv->z + pm->u.m[3][0] * pv->w;
-    pout->y = pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y + pm->u.m[2][1] * pv->z + pm->u.m[3][1] * pv->w;
-    pout->z = pm->u.m[0][2] * pv->x + pm->u.m[1][2] * pv->y + pm->u.m[2][2] * pv->z + pm->u.m[3][2] * pv->w;
-    pout->w = pm->u.m[0][3] * pv->x + pm->u.m[1][3] * pv->y + pm->u.m[2][3] * pv->z + pm->u.m[3][3] * pv->w;
+    D3DXVECTOR4 out;
+    out.x = pm->u.m[0][0] * pv->x + pm->u.m[1][0] * pv->y + pm->u.m[2][0] * pv->z + pm->u.m[3][0] * pv->w;
+    out.y = pm->u.m[0][1] * pv->x + pm->u.m[1][1] * pv->y + pm->u.m[2][1] * pv->z + pm->u.m[3][1] * pv->w;
+    out.z = pm->u.m[0][2] * pv->x + pm->u.m[1][2] * pv->y + pm->u.m[2][2] * pv->z + pm->u.m[3][2] * pv->w;
+    out.w = pm->u.m[0][3] * pv->x + pm->u.m[1][3] * pv->y + pm->u.m[2][3] * pv->z + pm->u.m[3][3] * pv->w;
+    *pout = out;
     return pout;
 }

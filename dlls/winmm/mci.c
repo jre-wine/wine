@@ -85,6 +85,8 @@ static const WCHAR wszSystemIni[] = {'s','y','s','t','e','m','.','i','n','i',0};
 
 static WINE_MCIDRIVER *MciDrivers;
 
+static UINT WINAPI MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data);
+
 /* dup a string and uppercase it */
 static inline LPWSTR str_dup_upper( LPCWSTR str )
 {
@@ -117,7 +119,7 @@ LPWINE_MCIDRIVER	MCI_GetDriver(UINT16 wDevID)
 /**************************************************************************
  * 				MCI_GetDriverFromString		[internal]
  */
-UINT	MCI_GetDriverFromString(LPCWSTR lpstrName)
+static UINT MCI_GetDriverFromString(LPCWSTR lpstrName)
 {
     LPWINE_MCIDRIVER	wmd;
     UINT		ret = 0;
@@ -873,7 +875,7 @@ static	DWORD	MCI_LoadMciDriver(LPCWSTR _strDevTyp, LPWINE_MCIDRIVER* lpwmd)
     wmd->CreatorThread = GetCurrentThreadId();
 
     EnterCriticalSection(&WINMM_cs);
-    /* wmd must be inserted in list before sending opening the driver, coz' it
+    /* wmd must be inserted in list before sending opening the driver, because it
      * may want to lookup at wDevID
      */
     wmd->lpNext = MciDrivers;
@@ -898,9 +900,7 @@ static	DWORD	MCI_LoadMciDriver(LPCWSTR _strDevTyp, LPWINE_MCIDRIVER* lpwmd)
 	if (strcmpiW(strDevTyp, wszAll) == 0) {
 	    dwRet = MCIERR_CANNOT_USE_ALL;
 	} else {
-	    FIXME("Couldn't load driver for type %s.\n"
-		  "If you don't have a windows installation accessible from Wine,\n"
-		  "you perhaps forgot to create a [mci] section in system.ini\n",
+	    FIXME("Couldn't load driver for type %s.\n",
 		  debugstr_w(strDevTyp));
 	    dwRet = MCIERR_DEVICE_NOT_INSTALLED;
 	}
@@ -929,6 +929,41 @@ errCleanUp:
     MCI_UnLoadMciDriver(wmd);
     HeapFree(GetProcessHeap(), 0, strDevTyp);
     *lpwmd = 0;
+    return dwRet;
+}
+
+/**************************************************************************
+ * 			MCI_SendCommandFrom32			[internal]
+ */
+static DWORD MCI_SendCommandFrom32(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
+{
+    DWORD		dwRet = MCIERR_INVALID_DEVICE_ID;
+    LPWINE_MCIDRIVER	wmd = MCI_GetDriver(wDevID);
+
+    if (wmd) {
+	if (wmd->bIs32) {
+	    dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
+	} else if (pFnMciMapMsg32WTo16) {
+	    WINMM_MapType	res;
+
+	    switch (res = pFnMciMapMsg32WTo16(wmd->wType, wMsg, dwParam1, &dwParam2)) {
+	    case WINMM_MAP_MSGERROR:
+		TRACE("Not handled yet (%s)\n", MCI_MessageToString(wMsg));
+		dwRet = MCIERR_DRIVER_INTERNAL;
+		break;
+	    case WINMM_MAP_NOMEM:
+		TRACE("Problem mapping msg=%s from 32a to 16\n", MCI_MessageToString(wMsg));
+		dwRet = MCIERR_OUT_OF_MEMORY;
+		break;
+	    case WINMM_MAP_OK:
+	    case WINMM_MAP_OKMEM:
+		dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
+		if (res == WINMM_MAP_OKMEM)
+		    pFnMciUnMapMsg32WTo16(wmd->wType, wMsg, dwParam1, dwParam2);
+		break;
+	    }
+	}
+    }
     return dwRet;
 }
 
@@ -1123,7 +1158,7 @@ static	DWORD	MCI_ParseOptArgs(LPDWORD data, int _offset, LPCWSTR lpCmd,
 		    }
 		    break;
 		case MCI_RECT:
-		    /* store rect in data (offset...offset+3) */
+		    /* store rect in data (offset..offset+3) */
 		    *dwFlags |= flg;
 		    if (!MCI_GetDWord(&(data[offset+0]), &args) ||
 			!MCI_GetDWord(&(data[offset+1]), &args) ||
@@ -1443,7 +1478,6 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 
 errCleanUp:
     HeapFree(GetProcessHeap(), 0, verb);
-    HeapFree(GetProcessHeap(), 0, devAlias);
     return dwRet;
 }
 
@@ -1504,7 +1538,7 @@ BOOL WINAPI mciExecute(LPCSTR lpstrCommand)
 /**************************************************************************
  *                    	mciLoadCommandResource  		[WINMM.@]
  *
- * Strangely, this function only exists as an UNICODE one.
+ * Strangely, this function only exists as a UNICODE one.
  */
 UINT WINAPI mciLoadCommandResource(HINSTANCE hInst, LPCWSTR resNameW, UINT type)
 {
@@ -1554,44 +1588,9 @@ BOOL WINAPI mciFreeCommandResource(UINT uTable)
 }
 
 /**************************************************************************
- * 			MCI_SendCommandFrom32			[internal]
- */
-DWORD MCI_SendCommandFrom32(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
-{
-    DWORD		dwRet = MCIERR_INVALID_DEVICE_ID;
-    LPWINE_MCIDRIVER	wmd = MCI_GetDriver(wDevID);
-
-    if (wmd) {
-	if (wmd->bIs32) {
-	    dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-	} else if (pFnMciMapMsg32WTo16) {
-	    WINMM_MapType	res;
-
-	    switch (res = pFnMciMapMsg32WTo16(wmd->wType, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_MSGERROR:
-		TRACE("Not handled yet (%s)\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_DRIVER_INTERNAL;
-		break;
-	    case WINMM_MAP_NOMEM:
-		TRACE("Problem mapping msg=%s from 32a to 16\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_OUT_OF_MEMORY;
-		break;
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-		if (res == WINMM_MAP_OKMEM)
-		    pFnMciUnMapMsg32WTo16(wmd->wType, wMsg, dwParam1, dwParam2);
-		break;
-	    }
-	}
-    }
-    return dwRet;
-}
-
-/**************************************************************************
  * 			MCI_SendCommandFrom16			[internal]
  */
-DWORD MCI_SendCommandFrom16(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
+static DWORD MCI_SendCommandFrom16(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     DWORD		dwRet = MCIERR_INVALID_DEVICE_ID;
     LPWINE_MCIDRIVER	wmd = MCI_GetDriver(wDevID);
@@ -1767,19 +1766,25 @@ static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms
     TRACE("(%04x, %08X, %p)\n", wDevID, dwParam, lpParms);
 
     if (wDevID == MCI_ALL_DEVICE_ID) {
-	LPWINE_MCIDRIVER	next;
-
-	EnterCriticalSection(&WINMM_cs);
 	/* FIXME: shall I notify once after all is done, or for
 	 * each of the open drivers ? if the latest, which notif
 	 * to return when only one fails ?
 	 */
-	for (wmd = MciDrivers; wmd; ) {
-	    next = wmd->lpNext;
-	    MCI_Close(wmd->wDeviceID, dwParam, lpParms);
-	    wmd = next;
+	while (MciDrivers) {
+            /* Retrieve the device ID under lock, but send the message without,
+             * the driver might be calling some winmm functions from another
+             * thread before being fully stopped.
+             */
+            EnterCriticalSection(&WINMM_cs);
+            if (!MciDrivers)
+            {
+                LeaveCriticalSection(&WINMM_cs);
+                break;
+            }
+            wDevID = MciDrivers->wDeviceID;
+            LeaveCriticalSection(&WINMM_cs);
+            MCI_Close(wDevID, dwParam, lpParms);
 	}
-	LeaveCriticalSection(&WINMM_cs);
 	return 0;
     }
 
@@ -1802,7 +1807,7 @@ static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms
 /**************************************************************************
  * 			MCI_WriteString				[internal]
  */
-DWORD	MCI_WriteString(LPWSTR lpDstStr, DWORD dstSize, LPCWSTR lpSrcStr)
+static DWORD MCI_WriteString(LPWSTR lpDstStr, DWORD dstSize, LPCWSTR lpSrcStr)
 {
     DWORD	ret = 0;
 
@@ -1896,7 +1901,7 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
 		if (RegQueryInfoKeyW( hKey, 0, 0, 0, &cnt, 
                                       0, 0, 0, 0, 0, 0, 0) == ERROR_SUCCESS && 
                     lpParms->dwNumber <= cnt) {
-    		    DWORD bufLen = sizeof(buf);
+		    DWORD bufLen = sizeof(buf)/sizeof(buf[0]);
 		    if (RegEnumKeyExW(hKey, lpParms->dwNumber - 1, 
                                       buf, &bufLen, 0, 0, 0, 0) == ERROR_SUCCESS)
                         s = buf;
@@ -2103,8 +2108,8 @@ LRESULT		MCI_CleanUp(LRESULT dwRet, UINT wMsg, DWORD dwParam2)
 	    {
 		LPMCI_STATUS_PARMS	lsp;
 
-		lsp = (LPMCI_STATUS_PARMS)(void*)dwParam2;
-		TRACE("Changing %08x to %08x\n", lsp->dwReturn, LOWORD(lsp->dwReturn));
+		lsp = (LPMCI_STATUS_PARMS)dwParam2;
+		TRACE("Changing %08lx to %08x\n", lsp->dwReturn, LOWORD(lsp->dwReturn));
 		lsp->dwReturn = LOWORD(lsp->dwReturn);
 	    }
 	    break;
@@ -2180,7 +2185,7 @@ BOOL WINAPI mciDriverNotify(HWND hWndCallBack, MCIDEVICEID wDevID, UINT wStatus)
 /**************************************************************************
  * 			mciGetDriverData			[WINMM.@]
  */
-DWORD WINAPI mciGetDriverData(MCIDEVICEID uDeviceID)
+DWORD_PTR WINAPI mciGetDriverData(MCIDEVICEID uDeviceID)
 {
     LPWINE_MCIDRIVER	wmd;
 
@@ -2199,11 +2204,11 @@ DWORD WINAPI mciGetDriverData(MCIDEVICEID uDeviceID)
 /**************************************************************************
  * 			mciSetDriverData			[WINMM.@]
  */
-BOOL WINAPI mciSetDriverData(MCIDEVICEID uDeviceID, DWORD data)
+BOOL WINAPI mciSetDriverData(MCIDEVICEID uDeviceID, DWORD_PTR data)
 {
     LPWINE_MCIDRIVER	wmd;
 
-    TRACE("(%04x, %08x)\n", uDeviceID, data);
+    TRACE("(%04x, %08lx)\n", uDeviceID, data);
 
     wmd = MCI_GetDriver(uDeviceID);
 
@@ -2298,7 +2303,7 @@ static void MyUserYield(void)
 /**************************************************************************
  * 				MCI_DefYieldProc	       	[internal]
  */
-UINT WINAPI MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data)
+static UINT WINAPI MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data)
 {
     INT16	ret;
 

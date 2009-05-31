@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 
 /*
  Menu
@@ -171,34 +171,20 @@ END
  Dialog
 */
 
-IDD_ABOUTBOX DIALOG DISCARDABLE  22, 17, 259, 210
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-CAPTION "작업 관리자 정보"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    CONTROL         "작업 관리자 v1.0\nCopyright (C) 1999 - 2001\nby Brian Palmer (brianp@reactos.org)",
-                    IDC_STATIC,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,53,28,
-                    122,26
-    DEFPUSHBUTTON   "확인",IDOK,183,189,44,14,WS_GROUP
-    ICON            IDI_TASKMANAGER,IDC_STATIC,19,30,20,20
-    EDITTEXT        IDC_LICENSE_EDIT,53,63,174,107,ES_MULTILINE |
-                    ES_READONLY | WS_VSCROLL
-END
-
 IDD_TASKMGR_DIALOG DIALOG DISCARDABLE  0, 0, 264, 246
 STYLE DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP |
     WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
     WS_THICKFRAME
 CAPTION "작업 관리자"
 MENU IDR_TASKMANAGER
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "Tab1",IDC_TAB,"SysTabControl32",WS_TABSTOP,3,3,257,228
 END
 
 IDD_APPLICATION_PAGE DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_APPLIST,"SysListView32",LVS_REPORT |
                     LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,233,177
@@ -209,7 +195,7 @@ END
 
 IDD_PROCESS_PAGE DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_PROCESSLIST,"SysListView32",LVS_REPORT |
                     LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_OWNERDATA |
@@ -222,7 +208,7 @@ END
 /*IDD_PERFORMANCE_PAGE DIALOGEX 0, 0, 247, 210*/
 IDD_PERFORMANCE_PAGE DIALOGEX DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     GROUPBOX        "CPU 사용",IDC_CPU_USAGE_FRAME,5,5,60,54,WS_TABSTOP, WS_EX_TRANSPARENT
     GROUPBOX        "MEM 사용",IDC_MEM_USAGE_FRAME,5,63,60,54,BS_LEFTTEXT, WS_EX_TRANSPARENT
@@ -281,7 +267,7 @@ END
 IDD_DEBUG_CHANNELS_DIALOG DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "디버그 채널"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_DEBUG_CHANNELS_LIST,"SysListView32",LVS_REPORT |
                     LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP |
@@ -292,7 +278,7 @@ END
 IDD_AFFINITY_DIALOG DIALOG DISCARDABLE  0, 0, 231, 154
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "프로세서 친화도"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     DEFPUSHBUTTON   "확인",IDOK,120,133,50,14
     PUSHBUTTON      "취소",IDCANCEL,174,133,50,14
@@ -367,7 +353,7 @@ END
 IDD_COLUMNS_DIALOG DIALOG DISCARDABLE  0, 0, 195, 199
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "세로줄 선택"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     DEFPUSHBUTTON   "확인",IDOK,84,178,50,14
     PUSHBUTTON      "취소",IDCANCEL,138,178,50,14
@@ -433,11 +419,12 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "작업 관리자"
     IDC_TASKMGR             "작엄 관리자"
+    IDS_RUNDLG_CAPTION      "새 작업 만들기"
 END
 
 STRINGTABLE DISCARDABLE
 BEGIN
-    ID_FILE_NEW             "새 풀그림 실행"
+    ID_FILE_NEW             "새 프로그램 실행"
     ID_OPTIONS_ALWAYSONTOP  "작업관리자는 최소화 되지 않는 한 다른 창 앞에 있게 됩니다"
     ID_OPTIONS_MINIMIZEONUSE
                             "작엄관리자는 전환 작업이 완료될 때 최소화됩니다"
@@ -496,5 +483,4 @@ BEGIN
     ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL
                             "작업을 보통보다 낮은 순위 클래스로 설정"
     ID_PROCESS_PAGE_SETPRIORITY_LOW "작업을 낮은 순위 클래스로 설정"
-    IDS_LICENSE             "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.\r\n\r\nThis program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more details.\r\n\r\nYou should have received a copy of the GNU Lesser General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 END

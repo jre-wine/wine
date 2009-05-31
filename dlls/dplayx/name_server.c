@@ -33,7 +33,7 @@
 
 #include "dplayx_global.h"
 #include "name_server.h"
-#include "dplaysp.h"
+#include "wine/dplaysp.h"
 #include "dplayx_messages.h"
 #include "dplayx_queue.h"
 
@@ -81,13 +81,6 @@ void NS_SetLocalComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo )
   lpNSCache lpCache = (lpNSCache)lpNSInfo;
 
   lpCache->bNsIsLocal = TRUE;
-}
-
-void NS_SetRemoteComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo )
-{
-  lpNSCache lpCache = (lpNSCache)lpNSInfo;
-
-  lpCache->bNsIsLocal = FALSE;
 }
 
 static DPQ_DECL_COMPARECB( cbUglyPig, GUID )
@@ -140,7 +133,7 @@ void NS_AddRemoteComputerAsNameServer( LPCVOID                      lpcNSAddrHdr
     return;
   }
 
-  CopyMemory( lpCacheNode->data, &lpcMsg->sd, sizeof( *lpCacheNode->data ) );
+  *lpCacheNode->data = lpcMsg->sd;
   len = WideCharToMultiByte( CP_ACP, 0, (LPCWSTR)(lpcMsg+1), -1, NULL, 0, NULL, NULL );
   if ((lpCacheNode->data->u1.lpszSessionNameA = HeapAlloc( GetProcessHeap(), 0, len )))
   {
@@ -169,7 +162,7 @@ LPVOID NS_GetNSAddr( LPVOID lpNSInfo )
   /* Ok. Cheat and don't search for the correct stuff just take the first.
    * FIXME: In the future how are we to know what is _THE_ enum we used?
    *        This is going to have to go into dplay somehow. Perhaps it
-   *        comes back with app server id for the join command! Oh...that
+   *        comes back with app server id for the join command! Oh... that
    *        must be it. That would make this method obsolete once that's
    *        in place.
    */
@@ -185,7 +178,7 @@ LPVOID NS_GetNSAddr( LPVOID lpNSInfo )
 /* Get the magic number associated with the Name Server */
 DWORD NS_GetNsMagic( LPVOID lpNSInfo )
 {
-  LPDWORD lpHdrInfo = (LPDWORD)NS_GetNSAddr( lpNSInfo );
+  LPDWORD lpHdrInfo = NS_GetNSAddr( lpNSInfo );
 
   return lpHdrInfo[1];
 }
@@ -240,7 +233,7 @@ HRESULT NS_SendSessionRequestBroadcast( LPCGUID lpcGuid,
   lpMsg->dwPasswordSize = 0; /* FIXME: If enumerating passwords..? */
   lpMsg->dwFlags        = dwFlags;
 
-  CopyMemory( &lpMsg->guidApplication, lpcGuid, sizeof( *lpcGuid ) );
+  lpMsg->guidApplication = *lpcGuid;
 
   return (lpSpData->lpCB->EnumSessions)( &data );
 }

@@ -29,7 +29,7 @@ IDR_TASKMANAGER MENU DISCARDABLE
 BEGIN
     POPUP "&Fil"
     BEGIN
-        MENUITEM "&Ny oppgave (Kjør . . .)",          ID_FILE_NEW
+        MENUITEM "&Ny oppgave (Kjør...)",          ID_FILE_NEW
         MENUITEM SEPARATOR
         MENUITEM "&Avslutt oppgavebehandleren",          ID_FILE_EXIT
     END
@@ -60,7 +60,7 @@ BEGIN
         MENUITEM "S&tore ikoner",                ID_VIEW_LARGE
         MENUITEM "S&må ikoner",                ID_VIEW_SMALL
         MENUITEM "&Detaljer",                    ID_VIEW_DETAILS, CHECKED
-        MENUITEM "&Velg kolonner . . .",          ID_VIEW_SELECTCOLUMNS
+        MENUITEM "&Velg kolonner...",          ID_VIEW_SELECTCOLUMNS
         POPUP "&Prosessorhistorikk"
         BEGIN
             MENUITEM "En graf, alle pr&osessorer",        ID_VIEW_CPUHISTORY_ONEGRAPHALL
@@ -101,7 +101,7 @@ IDR_APPLICATION_PAGE_CONTEXT1 MENU DISCARDABLE
 BEGIN
     POPUP "DUMMY"
     BEGIN
-        MENUITEM "&Ny oppgave (Kjør . . .)",          ID_FILE_NEW
+        MENUITEM "&Ny oppgave (Kjør...)",          ID_FILE_NEW
         MENUITEM SEPARATOR
         MENUITEM "&Store ikoner",                ID_VIEW_LARGE
         MENUITEM "S&må ikoner",                ID_VIEW_SMALL
@@ -162,28 +162,14 @@ BEGIN
             MENUITEM "&Lav",                        ID_PROCESS_PAGE_SETPRIORITY_LOW
 
         END
-        MENUITEM "&Angi slektskap . . .",            ID_PROCESS_PAGE_SETAFFINITY
-	MENUITEM "&Rediger feilsøkingskanaler . . .",	ID_PROCESS_PAGE_DEBUGCHANNELS
+        MENUITEM "&Angi slektskap...",            ID_PROCESS_PAGE_SETAFFINITY
+	MENUITEM "&Rediger feilsøkingskanaler...",	ID_PROCESS_PAGE_DEBUGCHANNELS
     END
 END
 
 /*
  Dialog
 */
-
-IDD_ABOUTBOX DIALOG DISCARDABLE  22, 17, 259, 210
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-CAPTION "Om Oppgavebehandler"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    CONTROL         "Oppgavebehandler 1.0\nKopirett 1999 - 2001 tilhører\nBrian Palmer (brianp@reactos.org)\nOversatt av\nAlexander N. Sørnes (alex@thehandofagony.com)",
-                    IDC_STATIC,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,53,20,
-                    200,50
-    DEFPUSHBUTTON   "OK",IDOK,183,189,44,14,WS_GROUP
-    ICON            IDI_TASKMANAGER,IDC_STATIC,19,30,20,20
-    EDITTEXT        IDC_LICENSE_EDIT,53,63,174,107,ES_MULTILINE |
-                    ES_READONLY | WS_VSCROLL
-END
 
 IDD_TASKMGR_DIALOG DIALOG DISCARDABLE  0, 0, 264, 246
 STYLE DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP |
@@ -202,7 +188,7 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_APPLIST,"SysListView32",LVS_REPORT |
                     LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,233,177
-    PUSHBUTTON      "&Ny oppgave . . .",IDC_NEWTASK,187,189,53,14
+    PUSHBUTTON      "&Ny oppgave...",IDC_NEWTASK,187,189,53,14
     PUSHBUTTON      "&Bytt til",IDC_SWITCHTO,131,189,53,14,WS_DISABLED
     PUSHBUTTON      "Avslutt oppgav&e",IDC_ENDTASK,75,189,53,14,WS_DISABLED
 END
@@ -433,6 +419,7 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "Oppgavebehandler"
     IDC_TASKMGR             "Oppgavebehandler"
+    IDS_RUNDLG_CAPTION      "Create New Task"
 END
 
 STRINGTABLE DISCARDABLE
@@ -496,5 +483,4 @@ BEGIN
     ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL
                             "Gir prosessen under normal prioritet"
     ID_PROCESS_PAGE_SETPRIORITY_LOW "Gir prosessen lav prioritet"
-    IDS_LICENSE             "Dette programmer er fri programvare; du kan redistribuere det i henhold til vilkårene i 'GNU Lesser General Public License', utgitt av 'the Free Software Foundation'; enten versjon 2.1 av lisensen, eller (hvis du ønsker) en nyere versjon.\r\n\r\nDette programmet distribueres med et håp om at det er nyttig, men UTEN ENHVER FORM FOR GARANTI; ikke engang garanti for HANDELSDYKTIGHET eller EGNETHET FOR ET SPESIELT FORMÅL. Se 'GNU Lesser General Public License' for detaljer.\r\n\r\nDu skal ha fått en kopi av 'GNU Lesser General Public License' sammen med programmet; hvis ikke, skriv til 'the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA'."
 END

@@ -161,7 +161,7 @@ ULONG CDECL WLDAP32_ber_first_element( BerElement *berelement, ULONG *len, CHAR 
  * Flatten a berelement structure into a berval structure.
  *
  * PARAMS
- *  berlement [I] Pointer to a berelement structure.
+ *  berelement [I] Pointer to a berelement structure.
  *  berval    [O] Pointer to a berval structure.
  *
  * RETURNS
@@ -187,7 +187,7 @@ INT CDECL WLDAP32_ber_flatten( BerElement *berelement, PBERVAL *berval )
  * Free a berelement structure.
  *
  * PARAMS
- *  berlement [I] Pointer to the berelement structure to be freed.
+ *  berelement [I] Pointer to the berelement structure to be freed.
  *  buf       [I] Flag.
  *
  * RETURNS
@@ -245,7 +245,7 @@ BerElement * CDECL WLDAP32_ber_init( BERVAL *berval )
  *  Failure: LBER_DEFAULT (no more data).
  *
  * NOTES
- *  len and cookie are intitialised by ber_first_element and should
+ *  len and cookie are initialized by ber_first_element and should
  *  be passed on in subsequent calls to ber_next_element.
  */
 ULONG CDECL WLDAP32_ber_next_element( BerElement *berelement, ULONG *len, CHAR *opaque )
@@ -325,12 +325,12 @@ ULONG CDECL WLDAP32_ber_skip_tag( BerElement *berelement, ULONG *len )
 INT CDECL WLDAP32_ber_printf( BerElement *berelement, PCHAR fmt, ... )
 {
 #ifdef HAVE_LDAP
-    va_list list;
+    __ms_va_list list;
     int ret = 0;
     char new_fmt[2];
 
     new_fmt[1] = 0;
-    va_start( list, fmt );
+    __ms_va_start( list, fmt );
     while (*fmt)
     {
         new_fmt[0] = *fmt++;
@@ -391,7 +391,7 @@ INT CDECL WLDAP32_ber_printf( BerElement *berelement, PCHAR fmt, ... )
         }
         if (ret == -1) break;
     }
-    va_end( list );
+    __ms_va_end( list );
     return ret;
 #else
     return LBER_ERROR;
@@ -420,12 +420,12 @@ INT CDECL WLDAP32_ber_printf( BerElement *berelement, PCHAR fmt, ... )
 INT CDECL WLDAP32_ber_scanf( BerElement *berelement, PCHAR fmt, ... )
 {
 #ifdef HAVE_LDAP
-    va_list list;
+    __ms_va_list list;
     int ret = 0;
     char new_fmt[2];
 
     new_fmt[1] = 0;
-    va_start( list, fmt );
+    __ms_va_start( list, fmt );
     while (*fmt)
     {
         new_fmt[0] = *fmt++;
@@ -491,7 +491,7 @@ INT CDECL WLDAP32_ber_scanf( BerElement *berelement, PCHAR fmt, ... )
         }
         if (ret == -1) break;
     }
-    va_end( list );
+    __ms_va_end( list );
     return ret;
 #else
     return LBER_ERROR;

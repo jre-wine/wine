@@ -125,7 +125,7 @@ void *Context_GetLinkedContext(void *context, size_t contextSize)
      contextSize);
 }
 
-PCONTEXT_PROPERTY_LIST Context_GetProperties(void *context, size_t contextSize)
+PCONTEXT_PROPERTY_LIST Context_GetProperties(const void *context, size_t contextSize)
 {
     PBASE_CONTEXT ptr = BASE_CONTEXT_FROM_CONTEXT(context, contextSize);
 
@@ -171,8 +171,9 @@ void Context_CopyProperties(const void *to, const void *from,
 {
     PCONTEXT_PROPERTY_LIST toProperties, fromProperties;
 
-    toProperties = Context_GetProperties((void *)to, contextSize);
-    fromProperties = Context_GetProperties((void *)from, contextSize);
+    toProperties = Context_GetProperties(to, contextSize);
+    fromProperties = Context_GetProperties(from, contextSize);
+    assert(toProperties && fromProperties);
     ContextPropertyList_Copy(toProperties, fromProperties);
 }
 
@@ -206,7 +207,7 @@ static inline struct list *ContextList_ContextToEntry(struct ContextList *list,
     struct list *ret;
 
     if (context)
-        ret = (struct list *)Context_GetExtra(context, list->contextSize);
+        ret = Context_GetExtra(context, list->contextSize);
     else
         ret = NULL;
     return ret;
@@ -287,7 +288,7 @@ void ContextList_Delete(struct ContextList *list, void *context)
     list->contextInterface->free(context);
 }
 
-void ContextList_Empty(struct ContextList *list)
+static void ContextList_Empty(struct ContextList *list)
 {
     struct list *entry, *next;
 

@@ -34,58 +34,59 @@ static BOOL (WINAPI *pCryptEnumOIDInfo)(DWORD,DWORD,void*,PFN_CRYPT_ENUM_OID_INF
 struct OIDToAlgID
 {
     LPCSTR oid;
+    LPCSTR altOid;
     DWORD algID;
 };
 
 static const struct OIDToAlgID oidToAlgID[] = {
- { szOID_RSA_RSA, CALG_RSA_KEYX },
- { szOID_RSA_MD2RSA, CALG_MD2 },
- { szOID_RSA_MD4RSA, CALG_MD4 },
- { szOID_RSA_MD5RSA, CALG_MD5 },
- { szOID_RSA_SHA1RSA, CALG_SHA },
- { szOID_RSA_DH, CALG_DH_SF },
- { szOID_RSA_SMIMEalgESDH, CALG_DH_EPHEM },
- { szOID_RSA_SMIMEalgCMS3DESwrap, CALG_3DES },
- { szOID_RSA_SMIMEalgCMSRC2wrap, CALG_RC2 },
- { szOID_RSA_MD2, CALG_MD2 },
- { szOID_RSA_MD4, CALG_MD4 },
- { szOID_RSA_MD5, CALG_MD5 },
- { szOID_RSA_RC2CBC, CALG_RC2 },
- { szOID_RSA_RC4, CALG_RC4 },
- { szOID_RSA_DES_EDE3_CBC, CALG_3DES },
- { szOID_ANSI_X942_DH, CALG_DH_SF },
- { szOID_X957_DSA, CALG_DSS_SIGN },
- { szOID_X957_SHA1DSA, CALG_SHA },
- { szOID_OIWSEC_md4RSA, CALG_MD4 },
- { szOID_OIWSEC_md5RSA, CALG_MD5 },
- { szOID_OIWSEC_md4RSA2, CALG_MD4 },
- { szOID_OIWSEC_desCBC, CALG_DES },
- { szOID_OIWSEC_dsa, CALG_DSS_SIGN },
- { szOID_OIWSEC_shaDSA, CALG_SHA },
- { szOID_OIWSEC_shaRSA, CALG_SHA },
- { szOID_OIWSEC_sha, CALG_SHA },
- { szOID_OIWSEC_rsaXchg, CALG_RSA_KEYX },
- { szOID_OIWSEC_sha1, CALG_SHA },
- { szOID_OIWSEC_dsaSHA1, CALG_SHA },
- { szOID_OIWSEC_sha1RSASign, CALG_SHA },
- { szOID_OIWDIR_md2RSA, CALG_MD2 },
- { szOID_INFOSEC_mosaicUpdatedSig, CALG_SHA },
- { szOID_INFOSEC_mosaicKMandUpdSig, CALG_DSS_SIGN },
+ { szOID_RSA_RSA, NULL, CALG_RSA_KEYX },
+ { szOID_RSA_MD2RSA, NULL, CALG_MD2 },
+ { szOID_RSA_MD4RSA, NULL, CALG_MD4 },
+ { szOID_RSA_MD5RSA, NULL, CALG_MD5 },
+ { szOID_RSA_SHA1RSA, NULL, CALG_SHA },
+ { szOID_RSA_DH, NULL, CALG_DH_SF },
+ { szOID_RSA_SMIMEalgESDH, NULL, CALG_DH_EPHEM },
+ { szOID_RSA_SMIMEalgCMS3DESwrap, NULL, CALG_3DES },
+ { szOID_RSA_SMIMEalgCMSRC2wrap, NULL, CALG_RC2 },
+ { szOID_RSA_MD2, NULL, CALG_MD2 },
+ { szOID_RSA_MD4, NULL, CALG_MD4 },
+ { szOID_RSA_MD5, NULL, CALG_MD5 },
+ { szOID_RSA_RC2CBC, NULL, CALG_RC2 },
+ { szOID_RSA_RC4, NULL, CALG_RC4 },
+ { szOID_RSA_DES_EDE3_CBC, NULL, CALG_3DES },
+ { szOID_ANSI_X942_DH, NULL, CALG_DH_SF },
+ { szOID_X957_DSA, NULL, CALG_DSS_SIGN },
+ { szOID_X957_SHA1DSA, NULL, CALG_SHA },
+ { szOID_OIWSEC_md4RSA, NULL, CALG_MD4 },
+ { szOID_OIWSEC_md5RSA, NULL, CALG_MD5 },
+ { szOID_OIWSEC_md4RSA2, NULL, CALG_MD4 },
+ { szOID_OIWSEC_desCBC, NULL, CALG_DES },
+ { szOID_OIWSEC_dsa, NULL, CALG_DSS_SIGN },
+ { szOID_OIWSEC_shaDSA, NULL, CALG_SHA },
+ { szOID_OIWSEC_shaRSA, NULL, CALG_SHA },
+ { szOID_OIWSEC_sha, NULL, CALG_SHA },
+ { szOID_OIWSEC_rsaXchg, NULL, CALG_RSA_KEYX },
+ { szOID_OIWSEC_sha1, NULL, CALG_SHA },
+ { szOID_OIWSEC_dsaSHA1, NULL, CALG_SHA },
+ { szOID_OIWSEC_sha1RSASign, NULL, CALG_SHA },
+ { szOID_OIWDIR_md2RSA, NULL, CALG_MD2 },
+ { szOID_INFOSEC_mosaicUpdatedSig, NULL, CALG_SHA },
+ { szOID_INFOSEC_mosaicKMandUpdSig, NULL, CALG_DSS_SIGN },
 };
 
 static const struct OIDToAlgID algIDToOID[] = {
- { szOID_RSA_RSA, CALG_RSA_KEYX },
- { szOID_RSA_SMIMEalgESDH, CALG_DH_EPHEM },
- { szOID_RSA_MD2, CALG_MD2 },
- { szOID_RSA_MD4, CALG_MD4 },
- { szOID_RSA_MD5, CALG_MD5 },
- { szOID_RSA_RC2CBC, CALG_RC2 },
- { szOID_RSA_RC4, CALG_RC4 },
- { szOID_RSA_DES_EDE3_CBC, CALG_3DES },
- { szOID_ANSI_X942_DH, CALG_DH_SF },
- { szOID_X957_DSA, CALG_DSS_SIGN },
- { szOID_OIWSEC_desCBC, CALG_DES },
- { szOID_OIWSEC_sha1, CALG_SHA },
+ { szOID_RSA_RSA, NULL, CALG_RSA_KEYX },
+ { szOID_RSA_SMIMEalgESDH, NULL, CALG_DH_EPHEM },
+ { szOID_RSA_MD2, NULL, CALG_MD2 },
+ { szOID_RSA_MD4, NULL, CALG_MD4 },
+ { szOID_RSA_MD5, NULL, CALG_MD5 },
+ { szOID_RSA_RC2CBC, NULL, CALG_RC2 },
+ { szOID_RSA_RC4, NULL, CALG_RC4 },
+ { szOID_RSA_DES_EDE3_CBC, NULL, CALG_3DES },
+ { szOID_ANSI_X942_DH, NULL, CALG_DH_SF },
+ { szOID_X957_DSA, szOID_OIWSEC_dsa /* some Win98 */, CALG_DSS_SIGN },
+ { szOID_OIWSEC_desCBC, NULL, CALG_DES },
+ { szOID_OIWSEC_sha1, NULL, CALG_SHA },
 };
 
 static const WCHAR bogusDll[] = { 'b','o','g','u','s','.','d','l','l',0 };
@@ -99,10 +100,14 @@ static void testOIDToAlgID(void)
     /* Test with a bogus one */
     SetLastError(0xdeadbeef);
     alg = CertOIDToAlgId("1.2.3");
-    ok(!alg && (GetLastError() == 0xdeadbeef ||
-     GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND),
-     "Expected ERROR_RESOURCE_NAME_NOT_FOUND or no error set, got %08x\n",
-     GetLastError());
+    ok(!alg, "Expected failure, got %d\n", alg);
+    ok(GetLastError() == 0xdeadbeef ||
+       GetLastError() == ERROR_RESOURCE_NAME_NOT_FOUND ||
+       GetLastError() == ERROR_INVALID_PARAMETER || /* Vista */
+       GetLastError() == ERROR_SUCCESS || /* win2k */
+       GetLastError() == ERROR_FILE_INVALID, /* another Vista */
+       "Expected ERROR_RESOURCE_NAME_NOT_FOUND, ERROR_INVALID_PARAMETER, "
+       "ERROR_SUCCESS or no error set, got %08x\n", GetLastError());
 
     for (i = 0; i < sizeof(oidToAlgID) / sizeof(oidToAlgID[0]); i++)
     {
@@ -130,8 +135,25 @@ static void testAlgIDToOID(void)
         oid = CertAlgIdToOID(algIDToOID[i].algID);
         /* Allow failure, not every version of Windows supports every algo */
         if (oid)
-            ok(!strcmp(oid, algIDToOID[i].oid), 
-             "Expected %s, got %s\n", algIDToOID[i].oid, oid);
+        {
+            if (strcmp(oid, algIDToOID[i].oid))
+            {
+                if (algIDToOID[i].altOid)
+                    ok(!strcmp(oid, algIDToOID[i].altOid),
+                     "Expected %s or %s, got %s\n", algIDToOID[i].oid,
+                     algIDToOID[i].altOid, oid);
+                else
+                {
+                    /* No need to rerun the test, we already know it failed. */
+                    ok(0, "Expected %s, got %s\n", algIDToOID[i].oid, oid);
+                }
+            }
+            else
+            {
+                /* No need to rerun the test, we already know it succeeded. */
+                ok(1, "Expected %s, got %s\n", algIDToOID[i].oid, oid);
+            }
+        }
     }
 }
 
@@ -198,7 +220,8 @@ static void test_oidFunctionSet(void)
 
         ret = CryptGetOIDFunctionAddress(set1, X509_ASN_ENCODING, X509_CERT, 0,
          &funcAddr, &hFuncAddr);
-        ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
+        ok((!ret && GetLastError() == ERROR_FILE_NOT_FOUND) ||
+         broken(ret) /* some Win98 */,
          "Expected ERROR_FILE_NOT_FOUND, got %08x\n", GetLastError());
     }
 }
@@ -250,8 +273,10 @@ static void test_installOIDFunctionAddress(void)
          */
         ret = CryptGetOIDFunctionAddress(set, X509_ASN_ENCODING, 0, 0,
          (void **)&funcAddr, &hFuncAddr);
-        ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
-         "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
+        ok(!ret && (GetLastError() == ERROR_FILE_NOT_FOUND ||
+         GetLastError() == E_INVALIDARG /* some Win98 */),
+         "Expected ERROR_FILE_NOT_FOUND or E_INVALIDARG, got %d\n",
+         GetLastError());
         ret = CryptGetOIDFunctionAddress(set, X509_ASN_ENCODING, X509_CERT, 0,
          (void **)&funcAddr, &hFuncAddr);
         ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
@@ -308,16 +333,32 @@ static void test_registerOIDFunction(void)
     ret = CryptUnregisterOIDFunction(X509_ASN_ENCODING, "bogus",
      "1.2.3.4.5.6.7.8.9.10");
     ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
-    /* This has no effect */
+    /* Unwanted Cryptography\OID\EncodingType 1\bogus\ will still be there */
+    ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE,
+     "SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 1\\bogus"),
+     "Could not delete bogus key\n");
+    /* Shouldn't have effect but registry keys are created */
     ret = CryptRegisterOIDFunction(PKCS_7_ASN_ENCODING, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %d\n", GetLastError());
-    /* Check with bogus encoding type: */
+    ret = CryptUnregisterOIDFunction(PKCS_7_ASN_ENCODING, "CryptDllEncodeObject",
+     "1.2.3.4.5.6.7.8.9.10");
+    ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
+    /* Check with bogus encoding type. Registry keys are still created */
     ret = CryptRegisterOIDFunction(0, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
     ok(ret, "CryptRegisterOIDFunction failed: %d\n", GetLastError());
+    ret = CryptUnregisterOIDFunction(0, "CryptDllEncodeObject",
+     "1.2.3.4.5.6.7.8.9.10");
+    ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
+    /* Unwanted Cryptography\OID\EncodingType 0\CryptDllEncodeObject\
+     * will still be there
+     */
+    ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE,
+     "SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 0\\CryptDllEncodeObject"),
+     "Could not delete CryptDllEncodeObject key\n");
     /* This is written with value 3 verbatim.  Thus, the encoding type isn't
-     * (for now) treated as a mask.
+     * (for now) treated as a mask. Registry keys are created.
      */
     ret = CryptRegisterOIDFunction(3, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10", bogusDll, NULL);
@@ -325,6 +366,15 @@ static void test_registerOIDFunction(void)
     ret = CryptUnregisterOIDFunction(3, "CryptDllEncodeObject",
      "1.2.3.4.5.6.7.8.9.10");
     ok(ret, "CryptUnregisterOIDFunction failed: %d\n", GetLastError());
+    /* Unwanted Cryptography\OID\EncodingType 3\CryptDllEncodeObject
+     * will still be there.
+     */
+    ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE,
+     "SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 3\\CryptDllEncodeObject"),
+     "Could not delete CryptDllEncodeObject key\n");
+    ok(!RegDeleteKeyA(HKEY_LOCAL_MACHINE,
+     "SOFTWARE\\Microsoft\\Cryptography\\OID\\EncodingType 3"),
+     "Could not delete 'EncodingType 3' key\n");
 }
 
 static void test_registerDefaultOIDFunction(void)
@@ -449,9 +499,13 @@ static void test_getDefaultOIDFunctionAddress(void)
      "Expected ERROR_FILE_NOT_FOUND, got %d\n", GetLastError());
 
     /* Even with a registered dll, this fails (since the dll doesn't exist) */
+    SetLastError(0xdeadbeef);
     ret = CryptRegisterDefaultOIDFunction(0, "CertDllOpenStoreProv", 0,
      bogusDll);
-    ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
+    if (!ret && GetLastError() == ERROR_ACCESS_DENIED)
+        skip("Need admin rights\n");
+    else
+        ok(ret, "CryptRegisterDefaultOIDFunction failed: %08x\n", GetLastError());
     ret = CryptGetDefaultOIDFunctionAddress(set, 0, NULL, 0, &funcAddr,
      &hFuncAddr);
     ok(!ret && GetLastError() == ERROR_FILE_NOT_FOUND,
@@ -477,7 +531,7 @@ static void test_enumOIDInfo(void)
 
     if (!pCryptEnumOIDInfo)
     {
-        skip("CryptEnumOIDInfo() is not available\n");
+        win_skip("CryptEnumOIDInfo() is not available\n");
         return;
     }
 

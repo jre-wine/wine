@@ -392,6 +392,7 @@ DECL_WINELIB_TYPE_AW(LOGCOLORSPACE)
 #define R2_MERGEPENNOT  14
 #define R2_MERGEPEN     15
 #define R2_WHITE        16
+#define R2_LAST         16
 
 #define MAKEROP4(fore,back) (DWORD)((((back)<<8)&0xFF000000)|(fore))
 
@@ -770,6 +771,8 @@ typedef struct tagXFORM
 #define PROOF_QUALITY          2
 #define NONANTIALIASED_QUALITY 3
 #define ANTIALIASED_QUALITY    4
+#define CLEARTYPE_QUALITY          5
+#define CLEARTYPE_NATURAL_QUALITY  6
 
   /* lfPitchAndFamily pitch values */
 #define DEFAULT_PITCH       0x00
@@ -1293,9 +1296,14 @@ typedef struct
 #define GGO_GRAY4_BITMAP    5
 #define GGO_GRAY8_BITMAP    6
 #define GGO_GLYPH_INDEX     0x80
+#define GGO_UNHINTED        0x100
 
 #ifdef __WINESRC__
-#define WINE_GGO_GRAY16_BITMAP 0x7f
+#define WINE_GGO_GRAY16_BITMAP 0x10
+#define WINE_GGO_HRGB_BITMAP   0x11
+#define WINE_GGO_HBGR_BITMAP   0x12
+#define WINE_GGO_VRGB_BITMAP   0x13
+#define WINE_GGO_VBGR_BITMAP   0x14
 #endif
 
 typedef struct
@@ -1422,6 +1430,7 @@ typedef struct
 #define TT_ENABLED          0x0002
 
 #ifdef __WINESRC__
+#define WINE_TT_SUBPIXEL_RENDERING_ENABLED 0x4000
 #define WINE_TT_HINTER_ENABLED 0x8000
 #endif
 
@@ -3251,8 +3260,8 @@ typedef struct _BLENDFUNCTION
 #define GRADIENT_FILL_TRIANGLE    0x00000002
 #define GRADIENT_FILL_OP_FLAG     0x000000ff
 
-#define GDI_ERROR                               (0xFFFFFFFFL)
-#define HGDI_ERROR                              ((HANDLE)0xFFFFFFFFL)
+#define GDI_ERROR                               (~0u)
+#define HGDI_ERROR                              ((HANDLE)~(ULONG_PTR)0)
 
 /* AddFontResourceEx flags */
 #define FR_PRIVATE  0x10
@@ -3722,8 +3731,28 @@ WINGDIAPI BOOL    WINAPI wglRealizeLayerPalette(HDC,INT,BOOL);
 WINGDIAPI INT     WINAPI wglSetLayerPaletteEntries(HDC,INT,INT,INT,const COLORREF *);
 WINGDIAPI BOOL    WINAPI wglShareLists(HGLRC,HGLRC);
 WINGDIAPI BOOL    WINAPI wglSwapLayerBuffers(HDC,UINT);
-WINGDIAPI BOOL    WINAPI wglUseFontBitmaps(HDC,DWORD,DWORD,DWORD);
-WINGDIAPI BOOL    WINAPI wglUseFontOutlines(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
+WINGDIAPI BOOL    WINAPI wglUseFontBitmapsA(HDC,DWORD,DWORD,DWORD);
+WINGDIAPI BOOL    WINAPI wglUseFontBitmapsW(HDC,DWORD,DWORD,DWORD);
+#define                  wglUseFontBitmaps WINELIB_NAME_AW(wglUseFontBitmaps)
+WINGDIAPI BOOL    WINAPI wglUseFontOutlinesA(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
+WINGDIAPI BOOL    WINAPI wglUseFontOutlinesW(HDC,DWORD,DWORD,DWORD,FLOAT,FLOAT,INT,LPGLYPHMETRICSFLOAT);
+#define                  wglUseFontOutlines WINELIB_NAME_AW(wglUseFontOutlines)
+
+#ifdef __WINESRC__
+/* the DC hook support is only exported on Win16, the 32-bit version is a Wine extension */
+
+#define DCHC_INVALIDVISRGN      0x0001
+#define DCHC_DELETEDC           0x0002
+#define DCHF_INVALIDATEVISRGN   0x0001
+#define DCHF_VALIDATEVISRGN     0x0002
+
+typedef BOOL (CALLBACK *DCHOOKPROC)(HDC,WORD,DWORD_PTR,LPARAM);
+
+WINGDIAPI DWORD_PTR WINAPI GetDCHook(HDC,DCHOOKPROC*);
+WINGDIAPI BOOL      WINAPI SetDCHook(HDC,DCHOOKPROC,DWORD_PTR);
+WINGDIAPI WORD      WINAPI SetHookFlags(HDC,WORD);
+WINGDIAPI INT       WINAPI SelectVisRgn(HDC,HRGN);
+#endif /* __WINESRC__ */
 
 #ifdef __cplusplus
 }

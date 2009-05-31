@@ -108,12 +108,16 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
 
         FIXME("Not all HH cases handled correctly\n");
 
+        if (!filename)
+            return NULL;
+
         index = strstrW(filename, delimW);
         if (index)
         {
             memcpy(chm_file, filename, (index-filename)*sizeof(WCHAR));
             chm_file[index-filename] = 0;
             filename = chm_file;
+            index += 2; /* advance beyond "::" for calling NavigateToChm() later */
         }
         else
         {
@@ -122,21 +126,26 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
         }
 
         info = CreateHelpViewer(filename);
+        if(!info)
+            return NULL;
 
-        if (info)
+        if(!index)
+            index = info->WinType.pszFile;
+
+        res = NavigateToChm(info, info->pCHMInfo->szFile, index);
+        if(!res)
         {
-            if (!index)
-                index = info->WinType.pszFile;
-            res = NavigateToChm(info, info->pCHMInfo->szFile, index);
-            if(!res)
-                ReleaseHelpViewer(info);
+            ReleaseHelpViewer(info);
+            return NULL;
         }
-
-        return NULL; /* FIXME */
+        return info->WinType.hwndHelp;
     }
     case HH_HELP_CONTEXT: {
         HHInfo *info;
         LPWSTR url;
+
+        if (!filename)
+            return NULL;
 
         info = CreateHelpViewer(filename);
         if(!info)
@@ -144,12 +153,14 @@ HWND WINAPI HtmlHelpW(HWND caller, LPCWSTR filename, UINT command, DWORD_PTR dat
 
         url = FindContextAlias(info->pCHMInfo, data);
         if(!url)
+        {
+            ReleaseHelpViewer(info);
             return NULL;
+        }
 
         NavigateToUrl(info, url);
         heap_free(url);
-
-        return NULL; /* FIXME */
+        return info->WinType.hwndHelp;
     }
     case HH_PRETRANSLATEMESSAGE: {
         static BOOL warned = FALSE;
@@ -238,11 +249,28 @@ HWND WINAPI HtmlHelpA(HWND caller, LPCSTR filename, UINT command, DWORD_PTR data
 int WINAPI doWinMain(HINSTANCE hInstance, LPSTR szCmdLine)
 {
     MSG msg;
+    int len, buflen;
+    WCHAR *filename;
+    char *endq = NULL;
 
     hh_process = TRUE;
 
     /* FIXME: Check szCmdLine for bad arguments */
-    HtmlHelpA(GetDesktopWindow(), szCmdLine, HH_DISPLAY_TOPIC, 0);
+    if (*szCmdLine == '\"')
+        endq = strchr(++szCmdLine, '\"');
+
+    if (endq)
+        len = endq - szCmdLine;
+    else
+        len = strlen(szCmdLine);
+    buflen = MultiByteToWideChar(CP_ACP, 0, szCmdLine, len, NULL, 0) + 1;
+    filename = heap_alloc(buflen * sizeof(WCHAR));
+    MultiByteToWideChar(CP_ACP, 0, szCmdLine, len, filename, buflen);
+    filename[buflen-1] = 0;
+
+    HtmlHelpW(GetDesktopWindow(), filename, HH_DISPLAY_TOPIC, 0);
+
+    heap_free(filename);
 
     while (GetMessageW(&msg, 0, 0, 0))
     {

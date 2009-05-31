@@ -22,7 +22,6 @@
 #include <X11/cursorfont.h>
 #include <X11/Xlib.h>
 
-#include "win.h"
 #include "x11drv.h"
 
 /* avoid conflict with field names in included win32 headers */
@@ -46,7 +45,7 @@ static const unsigned int heights[] = {200, 300, 384, 480, 600,  768,  864, 1024
 /* create the mode structures */
 static void make_modes(void)
 {
-    int i;
+    unsigned int i;
     /* original specified desktop size */
     X11DRV_Settings_AddOneMode(screen_width, screen_height, 0, 60);
     for (i=0; i<NUM_DESKTOP_MODES; i++)
@@ -66,41 +65,6 @@ static void make_modes(void)
         /* root window size (if different from desktop window) */
         X11DRV_Settings_AddOneMode(max_width, max_height, 0, 60);
     }
-}
-
-/***********************************************************************
- *		X11DRV_resize_desktop
- *
- * Reset the desktop window size and WM hints
- */
-static int X11DRV_resize_desktop( unsigned int width, unsigned int height )
-{
-    XSizeHints *size_hints;
-    Display *display = thread_display();
-    Window w = root_window;
-    /* set up */
-    wine_tsx11_lock();
-    size_hints  = XAllocSizeHints();
-    if (!size_hints)
-    {
-        ERR("Not enough memory for window manager hints.\n" );
-        wine_tsx11_unlock();
-        return 0;
-    }
-    size_hints->min_width = size_hints->max_width = width;
-    size_hints->min_height = size_hints->max_height = height;
-    size_hints->flags = PMinSize | PMaxSize | PSize;
-
-    /* do the work */
-    XSetWMNormalHints( display, w, size_hints );
-    XResizeWindow( display, w, width, height );
-
-    /* clean up */
-    XFree( size_hints );
-    XFlush( display );
-    wine_tsx11_unlock();
-    X11DRV_handle_desktop_resize( width, height );
-    return 1;
 }
 
 static int X11DRV_desktop_GetCurrentMode(void)
@@ -124,7 +88,7 @@ static LONG X11DRV_desktop_SetCurrentMode(int mode)
     if (dwBpp != dd_modes[mode].dwBPP)
     {
         FIXME("Cannot change screen BPP from %d to %d\n", dwBpp, dd_modes[mode].dwBPP);
-        /* Ignore the depth missmatch
+        /* Ignore the depth mismatch
          *
          * Some (older) applications require a specific bit depth, this will allow them
          * to run. X11drv performs a color depth conversion if needed.
@@ -143,11 +107,10 @@ static LONG X11DRV_desktop_SetCurrentMode(int mode)
 void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
 {
     root_window = win;
+    managed_mode = 0;  /* no managed windows in desktop mode */
     max_width = screen_width;
     max_height = screen_height;
-    screen_width  = width;
-    screen_height = height;
-    xinerama_init();
+    xinerama_init( width, height );
 
     /* initialize the available resolutions */
     dd_modes = X11DRV_Settings_SetHandlers("desktop", 
@@ -165,11 +128,11 @@ void X11DRV_init_desktop( Window win, unsigned int width, unsigned int height )
  *
  * Create the X11 desktop window for the desktop mode.
  */
-Window X11DRV_create_desktop( UINT width, UINT height )
+Window CDECL X11DRV_create_desktop( UINT width, UINT height )
 {
     XSetWindowAttributes win_attr;
     Window win;
-    Display *display = thread_display();
+    Display *display = thread_init_display();
 
     wine_tsx11_lock();
 
@@ -191,4 +154,71 @@ Window X11DRV_create_desktop( UINT width, UINT height )
     wine_tsx11_unlock();
     if (win != None) X11DRV_init_desktop( win, width, height );
     return win;
+}
+
+
+struct desktop_resize_data
+{
+    RECT  old_screen_rect;
+    RECT  old_virtual_rect;
+};
+
+static BOOL CALLBACK update_windows_on_desktop_resize( HWND hwnd, LPARAM lparam )
+{
+    struct x11drv_win_data *data;
+    Display *display = thread_display();
+    struct desktop_resize_data *resize_data = (struct desktop_resize_data *)lparam;
+    int mask = 0;
+
+    if (!(data = X11DRV_get_win_data( hwnd ))) return TRUE;
+
+    /* update the full screen state */
+    update_net_wm_states( display, data );
+
+    if (resize_data->old_virtual_rect.left != virtual_screen_rect.left) mask |= CWX;
+    if (resize_data->old_virtual_rect.top != virtual_screen_rect.top) mask |= CWY;
+    if (mask && data->whole_window)
+    {
+        XWindowChanges changes;
+
+        wine_tsx11_lock();
+        changes.x = data->whole_rect.left - virtual_screen_rect.left;
+        changes.y = data->whole_rect.top - virtual_screen_rect.top;
+        XReconfigureWMWindow( display, data->whole_window,
+                              DefaultScreen(display), mask, &changes );
+        wine_tsx11_unlock();
+    }
+    return TRUE;
+}
+
+
+/***********************************************************************
+ *		X11DRV_resize_desktop
+ */
+void X11DRV_resize_desktop( unsigned int width, unsigned int height )
+{
+    HWND hwnd = GetDesktopWindow();
+    struct desktop_resize_data resize_data;
+
+    SetRect( &resize_data.old_screen_rect, 0, 0, screen_width, screen_height );
+    resize_data.old_virtual_rect = virtual_screen_rect;
+
+    xinerama_init( width, height );
+
+    if (GetWindowThreadProcessId( hwnd, NULL ) != GetCurrentThreadId())
+    {
+        SendMessageW( hwnd, WM_X11DRV_RESIZE_DESKTOP, 0, MAKELPARAM( width, height ) );
+    }
+    else
+    {
+        TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+        SetWindowPos( hwnd, 0, virtual_screen_rect.left, virtual_screen_rect.top,
+                      virtual_screen_rect.right - virtual_screen_rect.left,
+                      virtual_screen_rect.bottom - virtual_screen_rect.top,
+                      SWP_NOZORDER | SWP_NOACTIVATE | SWP_DEFERERASE );
+        SendMessageTimeoutW( HWND_BROADCAST, WM_DISPLAYCHANGE, screen_bpp,
+                             MAKELPARAM( width, height ), SMTO_ABORTIFHUNG, 2000, NULL );
+    }
+
+    EnumWindows( update_windows_on_desktop_resize, (LPARAM)&resize_data );
 }

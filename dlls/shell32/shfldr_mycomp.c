@@ -75,13 +75,13 @@ static inline IGenericSFImpl *impl_from_IPersistFolder2( IPersistFolder2 *iface 
 /*
   converts This to an interface pointer
 */
-#define _IUnknown_(This)    (IUnknown*)&(This->lpVtbl)
-#define _IShellFolder_(This)    (IShellFolder*)&(This->lpVtbl)
-#define _IShellFolder2_(This)    (IShellFolder2*)&(This->lpVtbl)
+#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
+#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpVtbl)
+#define _IShellFolder2_(This)   (&(This)->lpVtbl)
 
-#define _IPersist_(This)    (IPersist*)&(This->lpVtblPersistFolder2)
-#define _IPersistFolder_(This)    (IPersistFolder*)&(This->lpVtblPersistFolder2)
-#define _IPersistFolder2_(This)    (IPersistFolder2*)&(This->lpVtblPersistFolder2)
+#define _IPersist_(This)        (&(This)->lpVtblPersistFolder2)
+#define _IPersistFolder_(This)  (&(This)->lpVtblPersistFolder2)
+#define _IPersistFolder2_(This) (&(This)->lpVtblPersistFolder2)
 
 /***********************************************************************
 *   IShellFolder [MyComputer] implementation
@@ -119,7 +119,7 @@ HRESULT WINAPI ISF_MyComputer_Constructor (IUnknown * pUnkOuter, REFIID riid, LP
     sf->lpVtblPersistFolder2 = &vt_PersistFolder2;
     sf->pidlRoot = _ILCreateMyComputer ();    /* my qualified pidl */
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
     {
         IUnknown_Release (_IUnknown_ (sf));
         return E_NOINTERFACE;
@@ -187,7 +187,7 @@ static ULONG WINAPI ISF_MyComputer_fnRelease (IShellFolder2 * iface)
     {
         TRACE ("-- destroying IShellFolder(%p)\n", This);
         SHFree (This->pidlRoot);
-        LocalFree ((HLOCAL) This);
+        LocalFree (This);
     }
     return refCount;
 }
@@ -252,6 +252,44 @@ static HRESULT WINAPI ISF_MyComputer_fnParseDisplayName (IShellFolder2 *iface,
     return hr;
 }
 
+/* retrieve a map of drives that should be displayed */
+static DWORD get_drive_map(void)
+{
+    static const WCHAR policiesW[] = {'S','o','f','t','w','a','r','e','\\',
+                                      'M','i','c','r','o','s','o','f','t','\\',
+                                      'W','i','n','d','o','w','s','\\',
+                                      'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                      'P','o','l','i','c','i','e','s','\\',
+                                      'E','x','p','l','o','r','e','r',0};
+    static const WCHAR nodrivesW[] = {'N','o','D','r','i','v','e','s',0};
+    static DWORD drive_mask, init_done;
+
+    if (!init_done)
+    {
+        DWORD type, size, data, mask = 0;
+        HKEY hkey;
+
+        if (!RegOpenKeyW( HKEY_LOCAL_MACHINE, policiesW, &hkey ))
+        {
+            size = sizeof(data);
+            if (!RegQueryValueExW( hkey, nodrivesW, NULL, &type, (LPBYTE)&data, &size ) && type == REG_DWORD)
+                mask |= data;
+            RegCloseKey( hkey );
+        }
+        if (!RegOpenKeyW( HKEY_CURRENT_USER, policiesW, &hkey ))
+        {
+            size = sizeof(data);
+            if (!RegQueryValueExW( hkey, nodrivesW, NULL, &type, (LPBYTE)&data, &size ) && type == REG_DWORD)
+                mask |= data;
+            RegCloseKey( hkey );
+        }
+        drive_mask = mask;
+        init_done = 1;
+    }
+
+    return GetLogicalDrives() & ~drive_mask;
+}
+
 /**************************************************************************
  *  CreateMyCompEnumList()
  */
@@ -271,7 +309,7 @@ static BOOL CreateMyCompEnumList(IEnumIDList *list, DWORD dwFlags)
     if (dwFlags & SHCONTF_FOLDERS)
     {
         WCHAR wszDriveName[] = {'A', ':', '\\', '\0'};
-        DWORD dwDrivemap = GetLogicalDrives();
+        DWORD dwDrivemap = get_drive_map();
         HKEY hkey;
         UINT i;
 
@@ -447,7 +485,7 @@ static HRESULT WINAPI ISF_MyComputer_fnGetAttributesOf (IShellFolder2 * iface,
         IShellFolder *psfParent = NULL;
         LPCITEMIDLIST rpidl = NULL;
 
-        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, (LPCITEMIDLIST*)&rpidl);
+        hr = SHBindToParent(This->pidlRoot, &IID_IShellFolder, (LPVOID*)&psfParent, &rpidl);
         if(SUCCEEDED(hr)) {
             SHELL32_GetItemAttributes (psfParent, rpidl, rgfInOut);
             IShellFolder_Release(psfParent);

@@ -24,6 +24,7 @@
 #include "wine/debug.h"
 
 #include "quartz_private.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
@@ -60,6 +61,7 @@ struct object_creation_info
 
 static const struct object_creation_info object_creation[] =
 {
+    { &CLSID_SeekingPassThru, SeekingPassThru_create },
     { &CLSID_FilterGraph, FilterGraph_create },
     { &CLSID_FilterGraphNoThread, FilterGraphNoThread_create },
     { &CLSID_FilterMapper, FilterMapper_create },
@@ -69,11 +71,14 @@ static const struct object_creation_info object_creation[] =
     { &CLSID_AviSplitter, AVISplitter_create },
     { &CLSID_MPEG1Splitter, MPEGSplitter_create },
     { &CLSID_VideoRenderer, VideoRenderer_create },
+    { &CLSID_NullRenderer, NullRenderer_create },
+    { &CLSID_VideoRendererDefault, VideoRendererDefault_create },
     { &CLSID_DSoundRender, DSoundRender_create },
+    { &CLSID_AudioRender, DSoundRender_create },
     { &CLSID_AVIDec, AVIDec_create },
-    { &CLSID_SystemClock, &QUARTZ_CreateSystemClock },
-    { &CLSID_ACMWrapper, &ACMWrapper_create },
-    { &CLSID_WAVEParser, &WAVEParser_create }
+    { &CLSID_SystemClock, QUARTZ_CreateSystemClock },
+    { &CLSID_ACMWrapper, ACMWrapper_create },
+    { &CLSID_WAVEParser, WAVEParser_create }
 };
 
 static HRESULT WINAPI
@@ -236,26 +241,6 @@ const char * qzdebugstr_guid( const GUID * id )
     return debugstr_guid(id);
 }
 
-/***********************************************************************
- *              qzdebugstr_State (internal)
- *
- * Gives a text version of the FILTER_STATE enumeration
- */
-const char * qzdebugstr_State(FILTER_STATE state)
-{
-    switch (state)
-    {
-    case State_Stopped:
-        return "State_Stopped";
-    case State_Running:
-        return "State_Running";
-    case State_Paused:
-        return "State_Paused";
-    default:
-        return "State_Unknown";
-    }
-}
-
 LONG WINAPI AmpFactorToDB(LONG ampfactor)
 {
     FIXME("(%d) Stub!\n", ampfactor);
@@ -276,7 +261,7 @@ LONG WINAPI DBToAmpFactor(LONG db)
  */
 DWORD WINAPI AMGetErrorTextA(HRESULT hr, LPSTR buffer, DWORD maxlen)
 {
-    int len;
+    unsigned int len;
     static const char format[] = "Error: 0x%x";
     char error[MAX_ERROR_TEXT_LEN];
 
@@ -284,7 +269,7 @@ DWORD WINAPI AMGetErrorTextA(HRESULT hr, LPSTR buffer, DWORD maxlen)
 
     if (!buffer) return 0;
     wsprintfA(error, format, hr);
-    if ((len = lstrlenA(error)) >= maxlen) return 0; 
+    if ((len = strlen(error)) >= maxlen) return 0;
     lstrcpyA(buffer, error);
     return len;
 }
@@ -294,7 +279,7 @@ DWORD WINAPI AMGetErrorTextA(HRESULT hr, LPSTR buffer, DWORD maxlen)
  */
 DWORD WINAPI AMGetErrorTextW(HRESULT hr, LPWSTR buffer, DWORD maxlen)
 {
-    int len;
+    unsigned int len;
     static const WCHAR format[] = {'E','r','r','o','r',':',' ','0','x','%','l','x',0};
     WCHAR error[MAX_ERROR_TEXT_LEN];
 
@@ -302,7 +287,7 @@ DWORD WINAPI AMGetErrorTextW(HRESULT hr, LPWSTR buffer, DWORD maxlen)
 
     if (!buffer) return 0;
     wsprintfW(error, format, hr);
-    if ((len = lstrlenW(error)) >= maxlen) return 0; 
+    if ((len = strlenW(error)) >= maxlen) return 0;
     lstrcpyW(buffer, error);
     return len;
 }

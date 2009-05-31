@@ -28,7 +28,7 @@ IDM_MENU MENU
         MENUITEM "&Lier au fichier...",    IDM_BIND
         MENUITEM "&Afficher la TypeLib...",    IDM_TYPELIB
         MENUITEM SEPARATOR
-        MENUITEM "&Configuration système",    IDM_SYSCONF
+        MENUITEM "&Configuration système...",    IDM_SYSCONF
         MENUITEM "&Exécuter l'éditeur de la base de registre",    IDM_REGEDIT
         MENUITEM SEPARATOR
         MENUITEM "&Quitter",    IDM_EXIT
@@ -46,7 +46,7 @@ IDM_MENU MENU
         MENUITEM "Afficher les informations sur le &type",    IDM_TYPEINFO, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Créer une &instance",    IDM_CREATEINST, GRAYED
-        MENUITEM "Créer une instance &sur",    IDM_CREATEINSTON, GRAYED
+        MENUITEM "Créer une instance &sur...",    IDM_CREATEINSTON, GRAYED
         MENUITEM "&Libérer l'instance",    IDM_RELEASEINST, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Copier le &CLSID dans le presse-papiers",    IDM_COPYCLSID, GRAYED
@@ -75,7 +75,7 @@ IDM_TYPELIB MENU
 {
     POPUP "&Fichier"
     {
-        MENUITEM "Enregistrer &sous",    IDM_SAVEAS
+        MENUITEM "Enregistrer &sous...",    IDM_SAVEAS
         MENUITEM "&Fermer",  IDM_CLOSE
     }
     POPUP "&Affichage"
@@ -96,6 +96,7 @@ STRINGTABLE
     IDS_ABOUTVER           "version 1.0"
     IDS_TYPELIBTITLE       "Visionneur d'ITypeLib"
     IDS_OPEN               "Ouvrir"
+    IDS_OPEN_TYPELIB_FILTER "TypeLib Files (*.tlb;*.olb;*.dll;*.ocx;*.exe)\0*.tlb;*.olb;*.dll;*.ocx;*.exe\0All Files (*.*)\0*.*\0\0"
 
     IDM_BIND,              "Lie à un fichier à l'aide d'un File Moniker"
     IDM_TYPELIB,           "Ouvre un fichier TypeLib et afficher son contenu"
@@ -151,7 +152,7 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Se connecter à une autre machine"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Nom de la &machine :", IDIGNORE, 5, 6, 190, 8
+    LTEXT   "Nom de la &machine :", -1, 5, 6, 190, 8
     EDITTEXT    IDC_MACHINE, 5, 16, 190, 12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL
     DEFPUSHBUTTON   "&OK", IDOK, 200, 5, 45, 14
     PUSHBUTTON  "&Annuler", IDCANCEL, 200, 22, 45, 14
@@ -162,10 +163,10 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Configuration système"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Paramètres système", IDIGNORE, 5, 6, 160, 8
+    LTEXT   "Paramètres système", -1, 5, 6, 160, 8
     CHECKBOX    "&Activer le COM distribué", IDC_ENABLEDCOM, 5, 20, 160, 10, WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX
     CHECKBOX    "Activer les connexions à &distance (seulement Win95)", IDC_ENABLEREMOTE, 5, 35, 160, 10, WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX
-    LTEXT   "Ces paramètres ne font que modifier les valeurs du registre.\nIls n'ont pas d'effet sur les performances de Wine.", IDIGNORE, 5, 50, 160, 40
+    LTEXT   "Ces paramètres ne font que modifier les valeurs du registre.\nIls n'ont pas d'effet sur les performances de Wine.", -1, 5, 50, 160, 40
     DEFPUSHBUTTON   "&OK", IDOK, 70, 80, 45, 14
     PUSHBUTTON  "&Annuler", IDCANCEL, 120, 80, 45, 14
 }
@@ -175,9 +176,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Visionneur d'interface par défaut"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Interface", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Interface", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "IID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "IID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Fermer", IDCANCEL, 230, 6, 45, 14
     PUSHBUTTON  "&Afficher les informations de type", IDC_VIEWTYPEINFO, 6, 31, 70, 14, WS_DISABLED
@@ -188,9 +189,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "IPersist Interface Viewer"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Nom de la classe :", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Nom de la classe :", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "CLSID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "CLSID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Fermer", IDCANCEL, 230, 6, 45, 14
 }
@@ -200,9 +201,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Visionneur d'interface IPersistStream"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Nom de la classe :", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Nom de la classe :", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "CLSID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "CLSID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Fermer", IDCANCEL, 230, 6, 45, 14
     PUSHBUTTON  "&IsDirty", IDC_ISDIRTY_BUTTON, 6, 31, 50, 14

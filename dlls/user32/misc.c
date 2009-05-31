@@ -344,6 +344,7 @@ struct monitor_enum_info
     UINT     max_area;
     UINT     min_distance;
     HMONITOR primary;
+    HMONITOR nearest;
     HMONITOR ret;
 };
 
@@ -376,7 +377,7 @@ static BOOL CALLBACK monitor_enum( HMONITOR monitor, HDC hdc, LPRECT rect, LPARA
         if (distance < info->min_distance)
         {
             info->min_distance = distance;
-            info->ret = monitor;
+            info->nearest = monitor;
         }
     }
     if (!info->primary)
@@ -403,9 +404,14 @@ HMONITOR WINAPI MonitorFromRect( LPRECT rect, DWORD flags )
     info.max_area     = 0;
     info.min_distance = ~0u;
     info.primary      = 0;
+    info.nearest      = 0;
     info.ret          = 0;
     if (!EnumDisplayMonitors( 0, NULL, monitor_enum, (LPARAM)&info )) return 0;
-    if (!info.ret && (flags & MONITOR_DEFAULTTOPRIMARY)) info.ret = info.primary;
+    if (!info.ret)
+    {
+        if (flags & MONITOR_DEFAULTTOPRIMARY) info.ret = info.primary;
+        else if (flags & MONITOR_DEFAULTTONEAREST) info.ret = info.nearest;
+    }
 
     TRACE( "%s flags %x returning %p\n", wine_dbgstr_rect(rect), flags, info.ret );
     return info.ret;
@@ -429,6 +435,8 @@ HMONITOR WINAPI MonitorFromWindow(HWND hWnd, DWORD dwFlags)
 {
     RECT rect;
     WINDOWPLACEMENT wp;
+
+    TRACE("(%p, 0x%08x)\n", hWnd, dwFlags);
 
     if (IsIconic(hWnd) && GetWindowPlacement(hWnd, &wp))
         return MonitorFromRect( &wp.rcNormalPosition, dwFlags );
@@ -469,7 +477,12 @@ BOOL WINAPI GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
  */
 BOOL WINAPI GetMonitorInfoW(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
 {
-    return USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
+    BOOL ret = USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
+    if (ret)
+        TRACE("flags %04x, monitor %s, work %s\n", lpMonitorInfo->dwFlags,
+              wine_dbgstr_rect(&lpMonitorInfo->rcMonitor),
+              wine_dbgstr_rect(&lpMonitorInfo->rcWork));
+    return ret;
 }
 
 /***********************************************************************
@@ -556,8 +569,9 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hnd, LPVOID notifyfilter, D
  */
 HDEVNOTIFY WINAPI RegisterDeviceNotificationW(HANDLE hRecepient, LPVOID pNotificationFilter, DWORD dwFlags)
 {
-    FIXME("(hwnd=%p, filter=%p,flags=0x%08x), STUB!\n", hRecepient,pNotificationFilter,dwFlags );
-    return 0;
+    FIXME("(hwnd=%p, filter=%p,flags=0x%08x),\n"
+          "\treturns a fake device notification handle!\n", hRecepient,pNotificationFilter,dwFlags );
+    return (HDEVNOTIFY) 0xcafeaffe;
 }
 
 /***********************************************************************

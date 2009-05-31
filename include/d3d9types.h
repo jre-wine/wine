@@ -128,7 +128,7 @@
 #define MAX_DEVICE_IDENTIFIER_STRING        512
 
 #define D3DFVF_RESERVED0           0x0001
-#define D3DFVF_POSITION_MASK       0x000E
+#define D3DFVF_POSITION_MASK       0x400E
 #define D3DFVF_XYZ                 0x0002
 #define D3DFVF_XYZRHW              0x0004
 #define D3DFVF_XYZB1               0x0006
@@ -201,6 +201,8 @@
 #define D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL 0x00000002 /* Discard Z buffer */
 #define D3DPRESENTFLAG_DEVICECLIP           0x00000004 /* Clip the window blited into the client area 2k + xp only */
 #define D3DPRESENTFLAG_VIDEO                0x00000010 /* backbuffer 'may' contain video data */
+#define D3DPRESENTFLAG_NOAUTOROTATE         0x00000020 /* d3d9ex, ignore display rotation */
+#define D3DPRESENTFLAG_UNPRUNEDMODE         0x00000040 /* d3d9ex, specify invalid display modes */
 
 #define D3DPRESENT_BACK_BUFFERS_MAX         3L
 #define D3DPRESENT_RATE_DEFAULT             0x00000000
@@ -225,15 +227,6 @@ typedef enum _D3DDECLUSAGE {
   D3DDECLUSAGE_DEPTH        = 12,      
   D3DDECLUSAGE_SAMPLE       = 13     
 } D3DDECLUSAGE;
-
-/* MSDN is quite confussing at this point...
-http://msdn.microsoft.com/archive/default.asp?url=/archive/en-us/directx9_c/directx/graphics/reference/d3d/constants/OTHER_D3D.asp
-says D3DMAX, and D3DMAXDECLUSAGE = D3DDECLUSAGE_DEPTH
-http://msdn.microsoft.com/library/default.asp?url=/archive/en-us/directx9_c_summer_03/directx/graphics/reference/d3d/constants/other_d3d.asp
-says MAXD3D, and D3DDECLUSAGE_SAMPLE
-
-So both are defined
-*/
 
 #define D3DMAXDECLUSAGE         D3DDECLUSAGE_SAMPLE
 #define D3DMAXDECLUSAGEINDEX    15
@@ -1137,21 +1130,9 @@ typedef enum _D3DTEXTURESTAGESTATETYPE {
     D3DTSS_BUMPENVMAT10          =  9,
     D3DTSS_BUMPENVMAT11          = 10,
     D3DTSS_TEXCOORDINDEX         = 11,
-#if 1 /* TODO: remove once samplerstates are implemented.  */
-    D3DTSS_ADDRESSU              = 13,
-    D3DTSS_ADDRESSV              = 14,
-    D3DTSS_BORDERCOLOR           = 15,
-    D3DTSS_MAGFILTER             = 16,
-    D3DTSS_MINFILTER             = 17,
-    D3DTSS_MIPFILTER             = 18,
-    D3DTSS_MIPMAPLODBIAS         = 19,
-    D3DTSS_MAXMIPLEVEL           = 20,
-    D3DTSS_MAXANISOTROPY         = 21,
-#endif
     D3DTSS_BUMPENVLSCALE         = 22,
     D3DTSS_BUMPENVLOFFSET        = 23,
     D3DTSS_TEXTURETRANSFORMFLAGS = 24,
-    D3DTSS_ADDRESSW              = 25,
     D3DTSS_COLORARG0             = 26,
     D3DTSS_ALPHAARG0             = 27,
     D3DTSS_RESULTARG             = 28,
@@ -1531,5 +1512,49 @@ typedef struct _D3DVOLUME_DESC {
     UINT                Height;
     UINT                Depth;
 } D3DVOLUME_DESC;
+
+/* Parts added with d3d9ex */
+#if !defined(D3D_DISABLE_9EX)
+typedef enum D3DSCANLINEORDERING
+{
+    D3DSCANLINEORDERING_UNKNOWN,
+    D3DSCANLINEORDERING_PROGRESSIVE,
+    D3DSCANLINEORDERING_INTERLACED,
+} D3DSCANLINEORDERING;
+
+
+typedef struct D3DDISPLAYMODEFILTER
+{
+    UINT                Size;
+    D3DFORMAT           Format;
+    D3DSCANLINEORDERING ScanLineOrdering;
+} D3DDISPLAYMODEFILTER;
+
+typedef struct D3DDISPLAYMODEEX
+{
+    UINT                Size;
+    UINT                Width;
+    UINT                Height;
+    UINT                RefreshRate;
+    D3DFORMAT           Format;
+    D3DSCANLINEORDERING ScanLineOrdering;
+} D3DDISPLAYMODEEX;
+
+typedef enum D3DDISPLAYROTATION
+{
+    D3DDISPLAYROTATION_IDENTITY = 1,
+    D3DDISPLAYROTATION_90,
+    D3DDISPLAYROTATION_180,
+    D3DDISPLAYROTATION_270
+} D3DDISPLAYROTATION;
+
+typedef enum _D3DCOMPOSERECTSOP{
+    D3DCOMPOSERECTS_COPY        = 1,
+    D3DCOMPOSERECTS_OR,
+    D3DCOMPOSERECTS_AND,
+    D3DCOMPOSERECTS_NEG,
+    D3DCOMPOSERECTS_FORCE_DWORD = 0x7fffffff
+} D3DCOMPOSERECTSOP;
+#endif /* D3D_DISABLE_9EX */
 
 #endif /* __WINE_D3D9TYPES_H */

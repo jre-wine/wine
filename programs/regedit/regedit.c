@@ -167,7 +167,7 @@ static BOOL PerformRegAction(REGEDIT_ACTION action, LPSTR s)
                         exit(1);
                     }
                 }
-                processRegLines(reg_file);
+                import_registry_file(reg_file);
                 if (realname)
                 {
                     HeapFree(GetProcessHeap(),0,realname);
@@ -186,12 +186,17 @@ static BOOL PerformRegAction(REGEDIT_ACTION action, LPSTR s)
                         getAppName());
                 fprintf(stderr,usage);
                 exit(1);
+            } else
+            {
+                WCHAR* reg_key_nameW = GetWideString(reg_key_name);
+                delete_registry_key(reg_key_nameW);
+                HeapFree(GetProcessHeap(), 0, reg_key_nameW);
             }
-            delete_registry_key(reg_key_name);
             break;
         }
     case ACTION_EXPORT: {
             CHAR filename[MAX_PATH];
+            WCHAR* filenameW;
 
             filename[0] = '\0';
             get_file_name(&s, filename);
@@ -201,14 +206,19 @@ static BOOL PerformRegAction(REGEDIT_ACTION action, LPSTR s)
                 exit(1);
             }
 
+            filenameW = GetWideString(filename);
             if (s[0]) {
                 CHAR reg_key_name[KEY_MAX_LEN];
+                WCHAR* reg_key_nameW;
 
                 get_file_name(&s, reg_key_name);
-                export_registry_key(filename, reg_key_name);
+                reg_key_nameW = GetWideString(reg_key_name);
+                export_registry_key(filenameW, reg_key_nameW, REG_FORMAT_4);
+                HeapFree(GetProcessHeap(), 0, reg_key_nameW);
             } else {
-                export_registry_key(filename, NULL);
+                export_registry_key(filenameW, NULL, REG_FORMAT_4);
             }
+            HeapFree(GetProcessHeap(), 0, filenameW);
             break;
         }
     default:

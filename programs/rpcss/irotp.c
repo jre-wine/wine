@@ -137,23 +137,13 @@ HRESULT IrotRegister(
         }
     }
 
-    if (hr == S_OK)
-    {
-        list_add_tail(&RunningObjectTable, &rot_entry->entry);
-        /* gives a registration identifier to the registered object*/
-        *cookie = rot_entry->cookie = InterlockedIncrement(&last_cookie);
-        *ctxt_handle = rot_entry;
-    }
-    else
-    {
-        rot_entry_release(rot_entry);
-        *cookie = existing_rot_entry->cookie;
-        InterlockedIncrement(&existing_rot_entry->refs);
-        *ctxt_handle = existing_rot_entry;
-    }
-
+    list_add_tail(&RunningObjectTable, &rot_entry->entry);
 
     LeaveCriticalSection(&csRunningObjectTable);
+
+    /* gives a registration identifier to the registered object*/
+    *cookie = rot_entry->cookie = InterlockedIncrement(&last_cookie);
+    *ctxt_handle = rot_entry;
 
     return hr;
 }
@@ -240,6 +230,8 @@ HRESULT IrotGetObject(
 
     WINE_TRACE("%p\n", moniker_data);
 
+    *cookie = 0;
+
     EnterCriticalSection(&csRunningObjectTable);
 
     LIST_FOR_EACH_ENTRY(rot_entry, &RunningObjectTable, const struct rot_entry, entry)
@@ -303,6 +295,8 @@ HRESULT IrotGetTimeOfLastChange(
     HRESULT hr = MK_E_UNAVAILABLE;
 
     WINE_TRACE("%p\n", moniker_data);
+
+    memset(time, 0, sizeof(*time));
 
     EnterCriticalSection(&csRunningObjectTable);
     LIST_FOR_EACH_ENTRY(rot_entry, &RunningObjectTable, const struct rot_entry, entry)
@@ -374,7 +368,7 @@ void __RPC_USER IrotContextHandle_rundown(IrotContextHandle ctxt_handle)
     rot_entry_release(rot_entry);
 }
 
-void * __RPC_USER MIDL_user_allocate(size_t size)
+void * __RPC_USER MIDL_user_allocate(SIZE_T size)
 {
     return HeapAlloc(GetProcessHeap(), 0, size);
 }

@@ -87,7 +87,7 @@
 @ stdcall ConvertStringSecurityDescriptorToSecurityDescriptorW(wstr long ptr ptr)
 @ stdcall ConvertStringSidToSidA(ptr ptr)
 @ stdcall ConvertStringSidToSidW(ptr ptr)
-# @ stub ConvertToAutoInheritPrivateObjectSecurity
+@ stdcall ConvertToAutoInheritPrivateObjectSecurity(ptr ptr ptr ptr long ptr)
 @ stdcall CopySid(long ptr ptr)
 # @ stub CreateCodeAuthzLevel
 @ stdcall CreatePrivateObjectSecurity(ptr ptr ptr long long ptr)
@@ -97,7 +97,7 @@
 # @ stub CreateProcessAsUserSecure
 @ stdcall CreateProcessAsUserW(long str str ptr ptr long long ptr str ptr ptr)
 @ stdcall CreateProcessWithLogonW(wstr wstr wstr long wstr wstr long ptr wstr ptr ptr)
-# @ stub CreateRestrictedToken
+@ stdcall CreateRestrictedToken(long long long ptr long ptr long ptr ptr)
 @ stdcall CreateServiceA(long ptr ptr long long long long ptr ptr ptr ptr ptr ptr)
 @ stdcall CreateServiceW (long ptr ptr long long long long ptr ptr ptr ptr ptr ptr)
 # @ stub CreateTraceInstanceId
@@ -107,7 +107,7 @@
 @ stdcall CredEnumerateA(str long ptr ptr)
 @ stdcall CredEnumerateW(wstr long ptr ptr)
 @ stdcall CredFree(ptr)
-# @ stub CredGetSessionTypes
+@ stdcall CredGetSessionTypes(long ptr)
 # @ stub CredGetTargetInfoA
 # @ stub CredGetTargetInfoW
 # @ stub CredIsMarshaledCredentialA
@@ -116,8 +116,8 @@
 # @ stub CredMarshalCredentialW
 @ stub CredProfileLoaded
 @ stdcall CredReadA(str long long ptr)
-# @ stub CredReadDomainCredentialsA
-# @ stub CredReadDomainCredentialsW
+@ stdcall CredReadDomainCredentialsA(ptr long ptr ptr)
+@ stdcall CredReadDomainCredentialsW(ptr long ptr ptr)
 @ stdcall CredReadW(wstr long long ptr)
 # @ stub CredRenameA
 # @ stub CredRenameW
@@ -230,8 +230,8 @@
 # @ stub GetAccessPermissionsForObjectW
 @ stdcall GetAce(ptr long ptr)
 @ stdcall GetAclInformation(ptr ptr long long)
-# @ stub GetAuditedPermissionsFromAclA
-# @ stub GetAuditedPermissionsFromAclW
+@ stdcall GetAuditedPermissionsFromAclA(ptr ptr ptr ptr)
+@ stdcall GetAuditedPermissionsFromAclW(ptr ptr ptr ptr)
 @ stdcall GetCurrentHwProfileA(ptr)
 @ stdcall GetCurrentHwProfileW(ptr)
 @ stdcall GetEffectiveRightsFromAclA(ptr ptr ptr)
@@ -272,7 +272,7 @@
 # @ stub GetSecurityDescriptorRMControl
 @ stdcall GetSecurityDescriptorSacl (ptr ptr ptr ptr)
 @ stdcall GetSecurityInfo (long long long ptr ptr ptr ptr ptr)
-# @ stub GetSecurityInfoExA
+@ stdcall GetSecurityInfoExA (long long long str str ptr ptr ptr ptr)
 @ stdcall GetSecurityInfoExW (long long long wstr wstr ptr ptr ptr ptr)
 @ stdcall GetServiceDisplayNameA(ptr str ptr ptr)
 @ stdcall GetServiceDisplayNameW(ptr wstr ptr ptr)
@@ -397,7 +397,7 @@
 @ stdcall LsaSetInformationPolicy(long long ptr)
 @ stub LsaSetInformationTrustedDomain
 # @ stub LsaSetQuotasForAccount
-@ stub LsaSetSecret
+@ stdcall LsaSetSecret(ptr ptr ptr)
 # @ stub LsaSetSecurityObject
 @ stub LsaSetSystemAccessAccount
 @ stdcall LsaSetTrustedDomainInfoByName(ptr ptr long ptr)
@@ -448,8 +448,8 @@
 # @ stub QueryAllTracesA
 # @ stub QueryAllTracesW
 # @ stub QueryRecoveryAgentsOnEncryptedFile
-# @ stub QueryServiceConfig2A
-# @ stub QueryServiceConfig2W
+@ stdcall QueryServiceConfig2A(long long ptr long ptr)
+@ stdcall QueryServiceConfig2W(long long ptr long ptr)
 @ stdcall QueryServiceConfigA(long ptr long ptr)
 @ stdcall QueryServiceConfigW(long ptr long ptr)
 @ stdcall QueryServiceLockStatusA(long ptr long ptr)
@@ -499,7 +499,7 @@
 @ stdcall RegOpenKeyExW(long wstr long long ptr)
 @ stdcall RegOpenKeyW(long wstr ptr)
 @ stdcall RegOpenUserClassesRoot(ptr long long ptr)
-@ stub RegOverridePredefKey
+@ stdcall RegOverridePredefKey(long long)
 @ stdcall RegQueryInfoKeyA(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RegQueryInfoKeyW(long ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 @ stdcall RegQueryMultipleValuesA(long ptr long ptr ptr)
@@ -540,7 +540,7 @@
 @ stdcall RevertToSelf()
 # @ stub SaferCloseLevel
 # @ stub SaferComputeTokenFromLevel
-# @ stub SaferCreateLevel
+@ stdcall SaferCreateLevel(long long long ptr ptr)
 # @ stub SaferGetLevelInformation
 # @ stub SaferGetPolicyInformation
 # @ stub SaferIdentifyLevel
@@ -635,18 +635,18 @@
 @ stdcall SystemFunction036(ptr long) # RtlGenRandom
 @ stdcall SystemFunction040(ptr long long) # RtlEncryptMemory
 @ stdcall SystemFunction041(ptr long long) # RtlDecryptMemory
-@ stub TraceEvent
+@ stdcall TraceEvent(double ptr)
 @ stub TraceEventInstance
 @ stub TraceMessage
 @ stub TraceMessageVa
 # @ stub TreeResetNamedSecurityInfoA
-# @ stub TreeResetNamedSecurityInfoW
+@ stdcall TreeResetNamedSecurityInfoW(wstr long long ptr ptr ptr ptr long ptr long ptr)
 # @ stub TrusteeAccessToObjectA
 # @ stub TrusteeAccessToObjectW
 # @ stub UninstallApplication
 @ stdcall UnlockServiceDatabase (ptr)
 # @ stub UnregisterIdleTask
-@ stub UnregisterTraceGuids
+@ stdcall UnregisterTraceGuids(double)
 @ stub UpdateTraceA
 @ stub UpdateTraceW
 @ stub WdmWmiServiceMain

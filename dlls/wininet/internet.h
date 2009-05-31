@@ -38,29 +38,13 @@
 # include <sys/types.h>
 # include <netinet/in.h>
 #endif
-#ifdef HAVE_OPENSSL_SSL_H
-#define DSA __ssl_DSA  /* avoid conflict with commctrl.h */
-#undef FAR
-/* avoid conflict with wincrypt.h */
-#undef PKCS7_SIGNER_INFO
-#undef X509_NAME
-#undef X509_CERT_PAIR
-# include <openssl/ssl.h>
-#undef FAR
-#define FAR do_not_use_this_in_wine
-#undef DSA
-#endif
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
 #endif
 
-#if defined(__MINGW32__) || defined (_MSC_VER)
-#include "winsock2.h"
-#ifndef MSG_WAITALL
-#define MSG_WAITALL 0
-#endif
-#else
+#if !defined(__MINGW32__) && !defined(_MSC_VER)
 #define closesocket close
+#define ioctlsocket ioctl
 #endif /* __MINGW32__ */
 
 /* used for netconnection.c stuff */
@@ -68,12 +52,10 @@ typedef struct
 {
     BOOL useSSL;
     int socketFD;
-#ifdef HAVE_OPENSSL_SSL_H
-    SSL *ssl_s;
+    void *ssl_s;
     char *peek_msg;
     char *peek_msg_mem;
     size_t peek_len;
-#endif
 } WININET_NETCONNECTION;
 
 static inline LPWSTR WININET_strdupW( LPCWSTR str )
@@ -133,22 +115,31 @@ typedef enum
 #define INET_OPENURL 0x0001
 #define INET_CALLBACKW 0x0002
 
-struct _WININETHANDLEHEADER;
 typedef struct _WININETHANDLEHEADER WININETHANDLEHEADER, *LPWININETHANDLEHEADER;
 
-typedef void (*WININET_object_function)( LPWININETHANDLEHEADER );
+typedef struct {
+    void (*Destroy)(WININETHANDLEHEADER*);
+    void (*CloseConnection)(WININETHANDLEHEADER*);
+    DWORD (*QueryOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD*,BOOL);
+    DWORD (*SetOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD);
+    DWORD (*ReadFile)(WININETHANDLEHEADER*,void*,DWORD,DWORD*);
+    DWORD (*ReadFileExA)(WININETHANDLEHEADER*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
+    DWORD (*ReadFileExW)(WININETHANDLEHEADER*,INTERNET_BUFFERSW*,DWORD,DWORD_PTR);
+    BOOL (*WriteFile)(WININETHANDLEHEADER*,const void*,DWORD,DWORD*);
+    DWORD (*QueryDataAvailable)(WININETHANDLEHEADER*,DWORD*,DWORD,DWORD_PTR);
+    DWORD (*FindNextFileW)(WININETHANDLEHEADER*,void*);
+} HANDLEHEADERVtbl;
 
 struct _WININETHANDLEHEADER
 {
     WH_TYPE htype;
+    const HANDLEHEADERVtbl *vtbl;
     HINTERNET hInternet;
     DWORD  dwFlags;
     DWORD_PTR dwContext;
     DWORD  dwError;
     DWORD  dwInternalFlags;
-    DWORD  dwRefCount;
-    WININET_object_function close_connection;
-    WININET_object_function destroy;
+    LONG   refs;
     INTERNET_STATUS_CALLBACK lpfnStatusCB;
     struct list entry;
     struct list children;
@@ -207,57 +198,17 @@ typedef struct
     LPWSTR lpszStatusText;
     DWORD dwContentLength; /* total number of bytes to be read */
     DWORD dwContentRead; /* bytes of the content read so far */
+    DWORD dwBytesToWrite;
+    DWORD dwBytesWritten;
     HTTPHEADERW *pCustHeaders;
     DWORD nCustHeaders;
+    HANDLE hCacheFile;
+    LPWSTR lpszCacheFile;
     struct HttpAuthInfo *pAuthInfo;
     struct HttpAuthInfo *pProxyAuthInfo;
 } WININETHTTPREQW, *LPWININETHTTPREQW;
 
 
-struct _WININETFTPSESSIONW;
-
-typedef struct
-{
-    WININETHANDLEHEADER hdr;
-    struct _WININETFTPSESSIONW *lpFtpSession;
-    BOOL session_deleted;
-    int nDataSocket;
-} WININETFTPFILE, *LPWININETFTPFILE;
-
-
-typedef struct _WININETFTPSESSIONW
-{
-    WININETHANDLEHEADER hdr;
-    WININETAPPINFOW *lpAppInfo;
-    int sndSocket;
-    int lstnSocket;
-    int pasvSocket; /* data socket connected by us in case of passive FTP */
-    LPWININETFTPFILE download_in_progress;
-    struct sockaddr_in socketAddress;
-    struct sockaddr_in lstnSocketAddress;
-    LPWSTR  lpszPassword;
-    LPWSTR  lpszUserName;
-} WININETFTPSESSIONW, *LPWININETFTPSESSIONW;
-
-
-typedef struct
-{
-    BOOL bIsDirectory;
-    LPWSTR lpszName;
-    DWORD nSize;
-    struct tm tmLastModified;
-    unsigned short permissions;
-} FILEPROPERTIESW, *LPFILEPROPERTIESW;
-
-
-typedef struct
-{
-    WININETHANDLEHEADER hdr;
-    WININETFTPSESSIONW *lpFtpSession;
-    DWORD index;
-    DWORD size;
-    LPFILEPROPERTIESW lpafp;
-} WININETFTPFINDNEXTW, *LPWININETFTPFINDNEXTW;
 
 struct WORKREQ_FTPPUTFILEW
 {
@@ -340,6 +291,12 @@ struct WORKREQ_HTTPSENDREQUESTW
     BOOL   bEndRequest;
 };
 
+struct WORKREQ_HTTPENDREQUESTW
+{
+    DWORD     dwFlags;
+    DWORD_PTR dwContext;
+};
+
 struct WORKREQ_SENDCALLBACK
 {
     DWORD_PTR dwContext;
@@ -363,6 +320,11 @@ struct WORKREQ_INTERNETREADFILEEXA
     LPINTERNET_BUFFERSA lpBuffersOut;
 };
 
+struct WORKREQ_INTERNETREADFILEEXW
+{
+    LPINTERNET_BUFFERSW lpBuffersOut;
+};
+
 typedef struct WORKREQ
 {
     void (*asyncproc)(struct WORKREQ*);
@@ -381,9 +343,11 @@ typedef struct WORKREQ
         struct WORKREQ_FTPRENAMEFILEW           FtpRenameFileW;
         struct WORKREQ_FTPFINDNEXTW             FtpFindNextW;
         struct WORKREQ_HTTPSENDREQUESTW         HttpSendRequestW;
+        struct WORKREQ_HTTPENDREQUESTW          HttpEndRequestW;
         struct WORKREQ_SENDCALLBACK             SendCallback;
-	struct WORKREQ_INTERNETOPENURLW         InternetOpenUrlW;
+        struct WORKREQ_INTERNETOPENURLW         InternetOpenUrlW;
         struct WORKREQ_INTERNETREADFILEEXA      InternetReadFileExA;
+        struct WORKREQ_INTERNETREADFILEEXW      InternetReadFileExW;
     } u;
 
 } WORKREQUEST, *LPWORKREQUEST;
@@ -393,6 +357,8 @@ LPWININETHANDLEHEADER WININET_GetObject( HINTERNET hinternet );
 LPWININETHANDLEHEADER WININET_AddRef( LPWININETHANDLEHEADER info );
 BOOL WININET_Release( LPWININETHANDLEHEADER info );
 BOOL WININET_FreeHandle( HINTERNET hinternet );
+
+DWORD INET_QueryOption(DWORD,void*,DWORD*,BOOL);
 
 time_t ConvertTimeString(LPCWSTR asctime);
 
@@ -414,28 +380,6 @@ DWORD INTERNET_GetLastError(void);
 BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest);
 LPSTR INTERNET_GetResponseBuffer(void);
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen);
-BOOL INTERNET_ReadFile(LPWININETHANDLEHEADER lpwh, LPVOID lpBuffer,
-                       DWORD dwNumOfBytesToRead, LPDWORD pdwNumOfBytesRead,
-                       BOOL bWait, BOOL bSendCompletionStatus);
-
-BOOLAPI FTP_FtpPutFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszLocalFile,
-    LPCWSTR lpszNewRemoteFile, DWORD dwFlags, DWORD_PTR dwContext);
-BOOLAPI FTP_FtpSetCurrentDirectoryW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszDirectory);
-BOOLAPI FTP_FtpCreateDirectoryW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszDirectory);
-INTERNETAPI HINTERNET WINAPI FTP_FtpFindFirstFileW(LPWININETFTPSESSIONW lpwfs,
-    LPCWSTR lpszSearchFile, LPWIN32_FIND_DATAW lpFindFileData, DWORD dwFlags, DWORD_PTR dwContext);
-BOOL WINAPI FTP_FindNextFileW(LPWININETFTPFINDNEXTW lpwh, LPVOID lpvFindData);
-BOOLAPI FTP_FtpGetCurrentDirectoryW(LPWININETFTPSESSIONW lpwfs, LPWSTR lpszCurrentDirectory,
-	LPDWORD lpdwCurrentDirectory);
-BOOL FTP_ConvertFileProp(LPFILEPROPERTIESW lpafp, LPWIN32_FIND_DATAW lpFindFileData);
-BOOL FTP_FtpRenameFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszSrc, LPCWSTR lpszDest);
-BOOL FTP_FtpRemoveDirectoryW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszDirectory);
-BOOL FTP_FtpDeleteFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszFileName);
-HINTERNET FTP_FtpOpenFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszFileName,
-	DWORD fdwAccess, DWORD dwFlags, DWORD_PTR dwContext);
-BOOLAPI FTP_FtpGetFileW(LPWININETFTPSESSIONW lpwfs, LPCWSTR lpszRemoteFile, LPCWSTR lpszNewFile,
-	BOOL fFailIfExists, DWORD dwLocalFlagsAttribute, DWORD dwInternetFlags,
-	DWORD_PTR dwContext);
 
 BOOLAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
 	DWORD dwHeaderLength, LPVOID lpOptional, DWORD dwOptionalLength,
@@ -444,7 +388,6 @@ INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
 	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
 	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
 	DWORD dwFlags, DWORD_PTR dwContext);
-BOOL HTTP_FinishedReading(LPWININETHTTPREQW lpwhr);
 
 VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
@@ -453,8 +396,6 @@ VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
 VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
                            DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                            DWORD dwStatusInfoLength);
-
-LPHTTPHEADERW HTTP_GetHeader(LPWININETHTTPREQW lpwhr, LPCWSTR header);
 
 BOOL NETCON_connected(WININET_NETCONNECTION *connection);
 BOOL NETCON_init(WININET_NETCONNECTION *connnection, BOOL useSSL);
@@ -471,7 +412,7 @@ BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int f
 BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available);
 BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPDWORD dwBuffer);
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection);
-BOOL NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);
+DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);
 
 extern void URLCacheContainers_CreateDefaults(void);
 extern void URLCacheContainers_DeleteAll(void);

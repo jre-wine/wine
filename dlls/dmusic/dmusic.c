@@ -91,7 +91,7 @@ static HRESULT WINAPI IDirectMusic8Impl_EnumPort(LPDIRECTMUSIC8 iface, DWORD dwI
 		TRACE("enumerating 'digital sound' ports\n");	
 		if (i == dwIndex)
 		{
-			DirectSoundEnumerateA((LPDSENUMCALLBACKA) register_waveport, (VOID*) pPortCaps);
+			DirectSoundEnumerateA(register_waveport, pPortCaps);
 			return S_OK;	
 		}
 	}
@@ -108,8 +108,16 @@ static HRESULT WINAPI IDirectMusic8Impl_EnumPort(LPDIRECTMUSIC8 iface, DWORD dwI
 
 static HRESULT WINAPI IDirectMusic8Impl_CreateMusicBuffer (LPDIRECTMUSIC8 iface, LPDMUS_BUFFERDESC pBufferDesc, LPDIRECTMUSICBUFFER** ppBuffer, LPUNKNOWN pUnkOuter) {
 	IDirectMusic8Impl *This = (IDirectMusic8Impl *)iface;
-	FIXME("(%p, %p, %p, %p): stub\n", This, pBufferDesc, ppBuffer, pUnkOuter);
-	return S_OK;
+
+	TRACE("(%p, %p, %p, %p)\n", This, pBufferDesc, ppBuffer, pUnkOuter);
+
+	if (pUnkOuter)
+		return CLASS_E_NOAGGREGATION;
+
+	if (!pBufferDesc || !ppBuffer)
+		return E_POINTER;
+
+	return DMUSIC_CreateDirectMusicBufferImpl(&IID_IDirectMusicBuffer, (LPVOID)ppBuffer, NULL);
 }
 
 static HRESULT WINAPI IDirectMusic8Impl_CreatePort (LPDIRECTMUSIC8 iface, REFCLSID rclsidPort, LPDMUS_PORTPARAMS pPortParams, LPDIRECTMUSICPORT* ppPort, LPUNKNOWN pUnkOuter) {
@@ -127,7 +135,7 @@ static HRESULT WINAPI IDirectMusic8Impl_CreatePort (LPDIRECTMUSIC8 iface, REFCLS
 		if (IsEqualCLSID (rclsidPort, &PortCaps.guidPort)) {
 			hr = DMUSIC_CreateDirectMusicPortImpl(&IID_IDirectMusicPort, (LPVOID*) &pNewPort, (LPUNKNOWN) This, pPortParams, &PortCaps);
 			if (FAILED(hr)) {
-			  *ppPort = (LPDIRECTMUSICPORT) NULL;
+                          *ppPort = NULL;
 			  return hr;
 			}
 			This->nrofports++;
@@ -230,23 +238,6 @@ static const IDirectMusic8Vtbl DirectMusic8_Vtbl = {
 	IDirectMusic8Impl_SetExternalMasterClock
 };
 
-/* helper stuff */
-void register_waveport (LPGUID lpGUID, LPCSTR lpszDesc, LPCSTR lpszDrvName, LPVOID lpContext) {
-	LPDMUS_PORTCAPS pPortCaps = (LPDMUS_PORTCAPS)lpContext;
-	
-	pPortCaps->dwSize = sizeof(DMUS_PORTCAPS);
-	pPortCaps->dwFlags = DMUS_PC_DLS | DMUS_PC_SOFTWARESYNTH | DMUS_PC_DIRECTSOUND | DMUS_PC_DLS2 | DMUS_PC_AUDIOPATH | DMUS_PC_WAVE;
-	pPortCaps->guidPort = *lpGUID;
-	pPortCaps->dwClass = DMUS_PC_OUTPUTCLASS;
-	pPortCaps->dwType = DMUS_PORT_WINMM_DRIVER;
-	pPortCaps->dwMemorySize = DMUS_PC_SYSTEMMEMORY;
-	pPortCaps->dwMaxChannelGroups = 2;
-	pPortCaps->dwMaxVoices = -1;
-	pPortCaps->dwMaxAudioChannels = -1;
-	pPortCaps->dwEffectFlags = DMUS_EFFECT_REVERB | DMUS_EFFECT_CHORUS | DMUS_EFFECT_DELAY;
-	MultiByteToWideChar (CP_ACP, 0, lpszDesc, -1, pPortCaps->wszDescription, sizeof(pPortCaps->wszDescription)/sizeof(WCHAR));
-}
-
 /* for ClassFactory */
 HRESULT WINAPI DMUSIC_CreateDirectMusicImpl (LPCGUID lpcGUID, LPVOID* ppobj, LPUNKNOWN pUnkOuter) {
 	IDirectMusic8Impl *dmusic;
@@ -255,7 +246,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicImpl (LPCGUID lpcGUID, LPVOID* ppobj, LPU
 
 	dmusic = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusic8Impl));
 	if (NULL == dmusic) {
-		*ppobj = (LPDIRECTMUSIC8) NULL;
+		*ppobj = NULL;
 		return E_OUTOFMEMORY;
 	}
 	dmusic->lpVtbl = &DirectMusic8_Vtbl;

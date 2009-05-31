@@ -158,7 +158,7 @@ static void test_message_from_string(void)
     ok(!strcmp("test", out),"failed out=[%s]\n",out);
     ok(r==4,"failed: r=%d\n",r);
 
-    /* %! prints an exclaimation */
+    /* %! prints an exclamation */
     r = doit(FORMAT_MESSAGE_FROM_STRING, "yah%!%0   ", 0,
         0, out, sizeof(out)/sizeof(CHAR));
     ok(!strcmp("yah!", out),"failed out=[%s]\n",out);
@@ -228,11 +228,19 @@ static void test_message_null_buffer(void)
     ret = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL, 0, 0, NULL, 0, NULL);
     error = GetLastError();
     ok(!ret, "FormatMessageA returned %u\n", ret);
-    ok(error == ERROR_NOT_ENOUGH_MEMORY, "last error %u\n", error);
+    ok(error == ERROR_NOT_ENOUGH_MEMORY ||
+       error == ERROR_INVALID_PARAMETER, /* win9x */
+       "last error %u\n", error);
 
     SetLastError(0xdeadbeef);
     ret = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL, 0, 0, NULL, 0, NULL);
     error = GetLastError();
+    if (!ret && error == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("FormatMessageW is not implemented\n");
+        return;
+    }
+
     ok(!ret, "FormatMessageW returned %u\n", ret);
     ok(error == ERROR_INVALID_PARAMETER, "last error %u\n", error);
 }

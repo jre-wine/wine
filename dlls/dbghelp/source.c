@@ -26,9 +26,6 @@
 
 #include "dbghelp_private.h"
 #include "wine/debug.h"
-#ifdef HAVE_REGEX_H
-# include <regex.h>
-#endif
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
@@ -151,70 +148,6 @@ BOOL WINAPI SymEnumSourceFiles(HANDLE hProcess, ULONG64 ModBase, PCSTR Mask,
         if (!cbSrcFiles(&sf, UserContext)) break;
     }
 
-    return TRUE;
-}
-
-/******************************************************************
- *		SymEnumLines (DBGHELP.@)
- *
- */
-BOOL WINAPI SymEnumLines(HANDLE hProcess, ULONG64 base, PCSTR compiland,
-                         PCSTR srcfile, PSYM_ENUMLINES_CALLBACK cb, PVOID user)
-{
-    struct module_pair          pair;
-    struct hash_table_iter      hti;
-    struct symt_ht*             sym;
-    regex_t                     re;
-    struct line_info*           dli;
-    void*                       ptr;
-    SRCCODEINFO                 sci;
-    const char*                 file;
-
-    if (!cb) return FALSE;
-    if (!(dbghelp_options & SYMOPT_LOAD_LINES)) return TRUE;
-    if (regcomp(&re, srcfile, REG_NOSUB))
-    {
-        FIXME("Couldn't compile %s\n", srcfile);
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-    pair.pcs = process_find_by_handle(hProcess);
-    if (!pair.pcs) return FALSE;
-    if (compiland) FIXME("Unsupported yet (filtering on compiland %s)\n", compiland);
-    pair.requested = module_find_by_addr(pair.pcs, base, DMT_UNKNOWN);
-    if (!module_get_debug(&pair)) return FALSE;
-
-    sci.SizeOfStruct = sizeof(sci);
-    sci.ModBase      = base;
-
-    hash_table_iter_init(&pair.effective->ht_symbols, &hti, NULL);
-    while ((ptr = hash_table_iter_up(&hti)))
-    {
-        int    i;
-
-        sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
-        if (sym->symt.tag != SymTagFunction) continue;
-
-        sci.FileName[0] = '\0';
-        for (i=0; i<vector_length(&((struct symt_function*)sym)->vlines); i++)
-        {
-            dli = vector_at(&((struct symt_function*)sym)->vlines, i);
-            if (dli->is_source_file)
-            {
-                file = source_get(pair.effective, dli->u.source_file);
-                if (regexec(&re, file, 0, NULL, 0) != 0) file = "";
-                strcpy(sci.FileName, file);
-            }
-            else if (sci.FileName[0])
-            {
-                sci.Key = dli;
-                sci.Obj[0] = '\0'; /* FIXME */
-                sci.LineNumber = dli->line_number;
-                sci.Address = dli->u.pc_offset;
-                if (!cb(&sci, user)) break;
-            }
-        }
-    }
     return TRUE;
 }
 

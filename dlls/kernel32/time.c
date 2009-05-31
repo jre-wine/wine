@@ -79,7 +79,7 @@ static inline int IsLeapYear(int Year)
  *
  * PARAMS
  *   date        [in] The local time to compare.
- *   compareDate [in] The daylight saving begin or end date.
+ *   compareDate [in] The daylight savings begin or end date.
  *
  * RETURNS
  *
@@ -147,7 +147,7 @@ static int TIME_DayLightCompareDate( const SYSTEMTIME *date,
  *      TIME_ZONE_ID_INVALID    An error occurred
  *      TIME_ZONE_ID_UNKNOWN    There are no transition time known
  *      TIME_ZONE_ID_STANDARD   Current time is standard time
- *      TIME_ZONE_ID_DAYLIGHT   Current time is dayligh saving time
+ *      TIME_ZONE_ID_DAYLIGHT   Current time is daylight savings time
  */
 static DWORD TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
     FILETIME *lpFileTime, BOOL islocal )
@@ -185,7 +185,7 @@ static DWORD TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
 
         FileTimeToSystemTime(lpFileTime, &SysTime);
         
-         /* check for daylight saving */
+         /* check for daylight savings */
         ret = TIME_DayLightCompareDate( &SysTime, &pTZinfo->StandardDate);
         if (ret == -2)
           return TIME_ZONE_ID_INVALID;
@@ -223,7 +223,7 @@ static DWORD TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
 /***********************************************************************
  *  TIME_TimeZoneID
  *
- *  Calculates whether daylight saving is on now.
+ *  Calculates whether daylight savings is on now.
  *
  *  PARAMS
  *      pTzi [in] Timezone info.
@@ -232,7 +232,7 @@ static DWORD TIME_CompTimeZoneID ( const TIME_ZONE_INFORMATION *pTZinfo,
  *      TIME_ZONE_ID_INVALID    An error occurred
  *      TIME_ZONE_ID_UNKNOWN    There are no transition time known
  *      TIME_ZONE_ID_STANDARD   Current time is standard time
- *      TIME_ZONE_ID_DAYLIGHT   Current time is dayligh saving time
+ *      TIME_ZONE_ID_DAYLIGHT   Current time is daylight savings time
  */
 static DWORD TIME_ZoneID( const TIME_ZONE_INFORMATION *pTzi )
 {
@@ -391,7 +391,7 @@ BOOL WINAPI SetSystemTimeAdjustment( DWORD dwTimeAdjustment, BOOL bTimeAdjustmen
  *  TIME_ZONE_ID_INVALID    An error occurred
  *  TIME_ZONE_ID_UNKNOWN    There are no transition time known
  *  TIME_ZONE_ID_STANDARD   Current time is standard time
- *  TIME_ZONE_ID_DAYLIGHT   Current time is dayligh saving time
+ *  TIME_ZONE_ID_DAYLIGHT   Current time is daylight savings time
  */
 DWORD WINAPI GetTimeZoneInformation( LPTIME_ZONE_INFORMATION tzinfo )
 {
@@ -453,7 +453,7 @@ BOOL WINAPI SystemTimeToTzSpecificLocalTime(
 
     if (lpTimeZoneInformation != NULL)
     {
-        memcpy(&tzinfo, lpTimeZoneInformation, sizeof(TIME_ZONE_INFORMATION));
+        tzinfo = *lpTimeZoneInformation;
     }
     else
     {
@@ -499,7 +499,7 @@ BOOL WINAPI TzSpecificLocalTimeToSystemTime(
 
     if (lpTimeZoneInformation != NULL)
     {
-        memcpy(&tzinfo, lpTimeZoneInformation, sizeof(TIME_ZONE_INFORMATION));
+        tzinfo = *lpTimeZoneInformation;
     }
     else
     {
@@ -651,16 +651,16 @@ int WINAPI GetCalendarInfoW(LCID Locale, CALID Calendar, CALTYPE CalType,
     switch (CalType & ~(CAL_NOUSEROVERRIDE|CAL_RETURN_NUMBER|CAL_USE_CP_ACP)) {
 	case CAL_ICALINTVALUE:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SCALNAME:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_IYEAROFFSETRANGE:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SERASTRING:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SSHORTDATE:
 	    return GetLocaleInfoW(Locale, LOCALE_SSHORTDATE, lpCalData, cchData);
 	case CAL_SLONGDATE:
@@ -750,8 +750,10 @@ int WINAPI GetCalendarInfoW(LCID Locale, CALID Calendar, CALTYPE CalType,
 	case CAL_ITWODIGITYEARMAX:
 	    if (lpValue) *lpValue = CALINFO_MAX_YEAR;
 	    break;
-	default: MESSAGE("Unknown caltype %d\n",CalType & 0xffff);
-		 return E_FAIL;
+	default:
+            FIXME("Unknown caltype %d\n",CalType & 0xffff);
+            SetLastError(ERROR_INVALID_FLAGS);
+            return 0;
     }
     return 0;
 }
@@ -943,13 +945,13 @@ VOID WINAPI GetSystemTime(LPSYSTEMTIME systime)
 /*********************************************************************
  *      GetDaylightFlag                                   (KERNEL32.@)
  *
- *  Specifies if daylight saving time is in operation.
+ *  Specifies if daylight savings time is in operation.
  *
  * NOTES
  *  This function is called from the Win98's control applet timedate.cpl.
  *
  * RETURNS
- *  TRUE if daylight saving time is in operation.
+ *  TRUE if daylight savings time is in operation.
  *  FALSE otherwise.
  */
 BOOL WINAPI GetDaylightFlag(void)
@@ -1010,4 +1012,24 @@ BOOL WINAPI FileTimeToDosDateTime( const FILETIME *ft, LPWORD fatdate,
         *fatdate = ((tm->tm_year - 80) << 9) + ((tm->tm_mon + 1) << 5)
                    + tm->tm_mday;
     return TRUE;
+}
+
+/*********************************************************************
+ *      GetSystemTimes                                  (KERNEL32.@)
+ *
+ * Retrieves system timing information
+ *
+ * PARAMS
+ *  lpIdleTime [O] Destination for idle time.
+ *  lpKernelTime [O] Destination for kernel time.
+ *  lpUserTime [O] Destination for user time.
+ *
+ * RETURNS
+ *  TRUE if success, FALSE otherwise.
+ */
+BOOL WINAPI GetSystemTimes(LPFILETIME lpIdleTime, LPFILETIME lpKernelTime, LPFILETIME lpUserTime)
+{
+    FIXME("(%p,%p,%p): Stub!\n", lpIdleTime, lpKernelTime, lpUserTime);
+
+    return FALSE;
 }

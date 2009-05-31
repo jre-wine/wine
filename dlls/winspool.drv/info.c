@@ -6,7 +6,7 @@
  * Copyright 1999 Klaas van Gend
  * Copyright 1999, 2000 Huw D M Davies
  * Copyright 2001 Marcus Meissner
- * Copyright 2005, 2006, 2007 Detlef Riekenberg
+ * Copyright 2005-2009 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -84,14 +84,6 @@ static CRITICAL_SECTION_DEBUG printer_handles_cs_debug =
 static CRITICAL_SECTION printer_handles_cs = { &printer_handles_cs_debug, -1, 0, 0, 0, 0 };
 
 /* ############################### */
-
-typedef struct {
-    WCHAR   src[MAX_PATH+MAX_PATH];
-    WCHAR   dst[MAX_PATH+MAX_PATH];
-    DWORD   srclen;
-    DWORD   dstlen;
-    DWORD   copyflags;
-} apd_data_t;
 
 typedef struct {
     struct list     entry;
@@ -195,10 +187,18 @@ static const WCHAR WinNT_CV_PortsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
                                         'P','o','r','t','s',0};
 
+static const WCHAR WinNT_CV_PrinterPortsW[] = { 'S','o','f','t','w','a','r','e','\\',
+                                                'M','i','c','r','o','s','o','f','t','\\',
+                                                'W','i','n','d','o','w','s',' ','N','T','\\',
+                                                'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                                'P','r','i','n','t','e','r','P','o','r','t','s',0};
+
 static const WCHAR DefaultEnvironmentW[] = {'W','i','n','e',0};
 static const WCHAR envname_win40W[] = {'W','i','n','d','o','w','s',' ','4','.','0',0};
+static const WCHAR envname_x64W[] =   {'W','i','n','d','o','w','s',' ','x','6','4',0};
 static const WCHAR envname_x86W[] =   {'W','i','n','d','o','w','s',' ','N','T',' ','x','8','6',0};
 static const WCHAR subdir_win40W[] = {'w','i','n','4','0',0};
+static const WCHAR subdir_x64W[] =   {'x','6','4',0};
 static const WCHAR subdir_x86W[] =   {'w','3','2','x','8','6',0};
 static const WCHAR Version0_RegPathW[] = {'\\','V','e','r','s','i','o','n','-','0',0};
 static const WCHAR Version0_SubdirW[] = {'\\','0',0};
@@ -224,6 +224,7 @@ static const WCHAR ManufacturerW[] = {'M','a','n','u','f','a','c','t','u','r','e
 static const WCHAR MonitorW[] = {'M','o','n','i','t','o','r',0};
 static const WCHAR MonitorUIW[] = {'M','o','n','i','t','o','r','U','I',0};
 static const WCHAR NameW[] = {'N','a','m','e',0};
+static const WCHAR ObjectGUIDW[] = {'O','b','j','e','c','t','G','U','I','D',0};
 static const WCHAR OEM_UrlW[] = {'O','E','M',' ','U','r','l',0};
 static const WCHAR ParametersW[] = {'P','a','r','a','m','e','t','e','r','s',0};
 static const WCHAR PortW[] = {'P','o','r','t',0};
@@ -232,6 +233,7 @@ static const WCHAR Previous_NamesW[] = {'P','r','e','v','i','o','u','s',' ','N',
 static const WCHAR Print_ProcessorW[] = {'P','r','i','n','t',' ','P','r','o','c','e','s','s','o','r',0};
 static const WCHAR Printer_DriverW[] = {'P','r','i','n','t','e','r',' ','D','r','i','v','e','r',0};
 static const WCHAR PrinterDriverDataW[] = {'P','r','i','n','t','e','r','D','r','i','v','e','r','D','a','t','a',0};
+static const WCHAR PrinterPortsW[] = {'P','r','i','n','t','e','r','P','o','r','t','s',0};
 static const WCHAR ProviderW[] = {'P','r','o','v','i','d','e','r',0};
 static const WCHAR Separator_FileW[] = {'S','e','p','a','r','a','t','o','r',' ','F','i','l','e',0};
 static const WCHAR Share_NameW[] = {'S','h','a','r','e',' ','N','a','m','e',0};
@@ -258,6 +260,19 @@ static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_
                                      sizeof(DRIVER_INFO_5W), sizeof(DRIVER_INFO_6W),
                                   0, sizeof(DRIVER_INFO_8W)};
 
+
+static const DWORD pi_sizeof[] = {0, sizeof(PRINTER_INFO_1W), sizeof(PRINTER_INFO_2W),
+                                     sizeof(PRINTER_INFO_3),  sizeof(PRINTER_INFO_4W),
+                                     sizeof(PRINTER_INFO_5W), sizeof(PRINTER_INFO_6),
+                                     sizeof(PRINTER_INFO_7W), sizeof(PRINTER_INFO_8W),
+                                     sizeof(PRINTER_INFO_9W)};
+
+static const printenv_t env_x64 = {envname_x64W, subdir_x64W, 3, Version3_RegPathW, Version3_SubdirW};
+static const printenv_t env_x86 = {envname_x86W, subdir_x86W, 3, Version3_RegPathW, Version3_SubdirW};
+static const printenv_t env_win40 = {envname_win40W, subdir_win40W, 0, Version0_RegPathW, Version0_SubdirW};
+
+static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_win40};
+
 /******************************************************************
  *  validate the user-supplied printing-environment [internal]
  *
@@ -276,13 +291,6 @@ static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_
 
 static const  printenv_t * validate_envW(LPCWSTR env)
 {
-    static const printenv_t env_x86 =   {envname_x86W, subdir_x86W,
-                                         3, Version3_RegPathW, Version3_SubdirW};
-    static const printenv_t env_win40 = {envname_win40W, subdir_win40W,
-                                         0, Version0_RegPathW, Version0_SubdirW};
-
-    static const printenv_t * const all_printenv[]={&env_x86, &env_win40};
-
     const printenv_t *result = NULL;
     unsigned int i;
 
@@ -353,67 +361,11 @@ static LPSTR strdupWtoA( LPCWSTR str )
 }
 
 /******************************************************************
- *  apd_copyfile [internal]
- *
- * Copy a file from the driverdirectory to the versioned directory
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE
- *
- */
-static BOOL apd_copyfile(LPWSTR filename, apd_data_t *apd)
-{
-    LPWSTR  ptr;
-    LPWSTR  srcname;
-    DWORD   res;
-
-    apd->src[apd->srclen] = '\0';
-    apd->dst[apd->dstlen] = '\0';
-
-    if (!filename || !filename[0]) {
-        /* nothing to copy */
-        return TRUE;
-    }
-
-    ptr = strrchrW(filename, '\\');
-    if (ptr) {
-        ptr++;
-    }
-    else
-    {
-        ptr = filename;
-    }
-
-    if (apd->copyflags & APD_COPY_FROM_DIRECTORY) {
-        /* we have an absolute Path */
-        srcname = filename;
-    }
-    else
-    {
-        srcname = apd->src;
-        lstrcatW(srcname, ptr);
-    }
-    lstrcatW(apd->dst, ptr);
-
-    TRACE("%s => %s\n", debugstr_w(filename), debugstr_w(apd->dst));
-
-    /* FIXME: handle APD_COPY_NEW_FILES */
-    res = CopyFileW(srcname, apd->dst, FALSE);
-    TRACE("got %u with %u\n", res, GetLastError());
-
-    /* FIXME: install of wineps.drv must be fixed, before we return the real result
-    return res;
-    */
-    return TRUE;
-}
-
-
-/******************************************************************
  * Return the number of bytes for an multi_sz string.
  * The result includes all \0s
  * (specifically the extra \0, that is needed as multi_sz terminator).
  */
+#if 0
 static int multi_sz_lenW(const WCHAR *str)
 {
     const WCHAR *ptr = str;
@@ -425,7 +377,7 @@ static int multi_sz_lenW(const WCHAR *str)
 
     return (ptr - str + 1) * sizeof(WCHAR);
 }
-
+#endif
 /* ################################ */
 
 static int multi_sz_lenA(const char *str)
@@ -505,6 +457,7 @@ static BOOL add_printer_driver(const char *name)
 }
 
 #ifdef SONAME_LIBCUPS
+static typeof(cupsFreeDests) *pcupsFreeDests;
 static typeof(cupsGetDests)  *pcupsGetDests;
 static typeof(cupsGetPPD)    *pcupsGetPPD;
 static typeof(cupsPrintFile) *pcupsPrintFile;
@@ -531,6 +484,7 @@ static BOOL CUPS_LoadPrinters(void)
     	p##x = wine_dlsym(cupshandle, #x, NULL,0);	\
 	if (!p##x) return FALSE;
 
+    DYNCUPS(cupsFreeDests);
     DYNCUPS(cupsGetPPD);
     DYNCUPS(cupsGetDests);
     DYNCUPS(cupsPrintFile);
@@ -545,16 +499,26 @@ static BOOL CUPS_LoadPrinters(void)
     nrofdests = pcupsGetDests(&dests);
     TRACE("Found %d CUPS %s:\n", nrofdests, (nrofdests == 1) ? "printer" : "printers");
     for (i=0;i<nrofdests;i++) {
-        port = HeapAlloc(GetProcessHeap(),0,strlen("LPR:")+strlen(dests[i].name)+1);
-        sprintf(port,"LPR:%s",dests[i].name);
-	devline=HeapAlloc(GetProcessHeap(),0,sizeof("WINEPS.DRV,")+strlen(port));
-	sprintf(devline,"WINEPS.DRV,%s",port);
-	WriteProfileStringA("devices",dests[i].name,devline);
+        /* FIXME: replace "LPR:" with "CUPS:". Fix printing output first */
+        port = HeapAlloc(GetProcessHeap(), 0, strlen("LPR:") + strlen(dests[i].name)+1);
+        sprintf(port,"LPR:%s", dests[i].name);
+        /* FIXME: remove extension. Fix gdi32/drivers and comdlg32/printdlg first */
+        devline = HeapAlloc(GetProcessHeap(), 0, sizeof("WINEPS.DRV,,15,45") + strlen(port));
+        sprintf(devline, "WINEPS.DRV,%s", port);
+        WriteProfileStringA("devices", dests[i].name, devline);
         if(RegCreateKeyW(HKEY_CURRENT_USER, user_printers_reg_key, &hkey) == ERROR_SUCCESS) {
             RegSetValueExA(hkey, dests[i].name, 0, REG_SZ, (LPBYTE)devline, strlen(devline) + 1);
             RegCloseKey(hkey);
         }
-	HeapFree(GetProcessHeap(),0,devline);
+
+        lstrcatA(devline, ",15,45");
+        WriteProfileStringA("PrinterPorts", dests[i].name, devline);
+        if(RegCreateKeyW(HKEY_CURRENT_USER, WinNT_CV_PrinterPortsW, &hkey) == ERROR_SUCCESS) {
+            RegSetValueExA(hkey, dests[i].name, 0, REG_SZ, (LPBYTE)devline, strlen(devline) + 1);
+            RegCloseKey(hkey);
+        }
+
+        HeapFree(GetProcessHeap(), 0, devline);
 
         TRACE("Printer %d: %s\n", i, dests[i].name);
         if(RegOpenKeyA(hkeyPrinters, dests[i].name, &hkeyPrinter) == ERROR_SUCCESS) {
@@ -601,6 +565,7 @@ static BOOL CUPS_LoadPrinters(void)
     }
     if (hadprinter & !haddefault)
         WINSPOOL_SetDefaultPrinter(dests[0].name, dests[0].name, TRUE);
+    pcupsFreeDests(nrofdests, dests);
     RegCloseKey(hkeyPrinters);
     return hadprinter;
 }
@@ -670,13 +635,22 @@ PRINTCAP_ParseEntry(const char *pent, BOOL isfirst) {
     port = HeapAlloc(GetProcessHeap(),0,strlen("LPR:")+strlen(name)+1);
     sprintf(port,"LPR:%s",name);
 
-    devline=HeapAlloc(GetProcessHeap(),0,sizeof("WINEPS.DRV,")+strlen(port));
-    sprintf(devline,"WINEPS.DRV,%s",port);
-    WriteProfileStringA("devices",devname,devline);
+    /* FIXME: remove extension. Fix gdi32/drivers and comdlg32/printdlg first */
+    devline = HeapAlloc(GetProcessHeap(), 0, sizeof("WINEPS.DRV,,15,45") + strlen(port));
+    sprintf(devline, "WINEPS.DRV,%s", port);
+    WriteProfileStringA("devices", devname, devline);
     if(RegCreateKeyW(HKEY_CURRENT_USER, user_printers_reg_key, &hkey) == ERROR_SUCCESS) {
         RegSetValueExA(hkey, devname, 0, REG_SZ, (LPBYTE)devline, strlen(devline) + 1);
         RegCloseKey(hkey);
     }
+
+    lstrcatA(devline, ",15,45");
+    WriteProfileStringA("PrinterPorts", devname, devline);
+    if(RegCreateKeyW(HKEY_CURRENT_USER, WinNT_CV_PrinterPortsW, &hkey) == ERROR_SUCCESS) {
+        RegSetValueExA(hkey, devname, 0, REG_SZ, (LPBYTE)devline, strlen(devline) + 1);
+        RegCloseKey(hkey);
+    }
+
     HeapFree(GetProcessHeap(),0,devline);
     
     if(RegCreateKeyW(HKEY_LOCAL_MACHINE, PrintersW, &hkeyPrinters) !=
@@ -790,98 +764,6 @@ static inline DWORD set_reg_szW(HKEY hkey, const WCHAR *keyname, const WCHAR *va
         return ERROR_FILE_NOT_FOUND;
 }
 
-/*****************************************************************************
- * enumerate the local monitors (INTERNAL)
- *
- * returns the needed size (in bytes) for pMonitors
- * and  *lpreturned is set to number of entries returned in pMonitors
- *
- */
-static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDWORD lpreturned)
-{
-    HKEY    hroot = NULL;
-    HKEY    hentry = NULL;
-    LPWSTR  ptr;
-    LPMONITOR_INFO_2W mi;
-    WCHAR   buffer[MAX_PATH];
-    WCHAR   dllname[MAX_PATH];
-    DWORD   dllsize;
-    DWORD   len;
-    DWORD   index = 0;
-    DWORD   needed = 0;
-    DWORD   numentries;
-    DWORD   entrysize;
-
-    entrysize = (level == 1) ? sizeof(MONITOR_INFO_1W) : sizeof(MONITOR_INFO_2W);
-
-    numentries = *lpreturned;       /* this is 0, when we scan the registry */
-    len = entrysize * numentries;
-    ptr = (LPWSTR) &pMonitors[len];
-
-    numentries = 0;
-    len = sizeof(buffer);
-    buffer[0] = '\0';
-
-    /* Windows creates the "Monitors"-Key on reboot / start "spooler" */
-    if (RegCreateKeyW(HKEY_LOCAL_MACHINE, MonitorsW, &hroot) == ERROR_SUCCESS) {
-        /* Scan all Monitor-Registry-Keys */
-        while (RegEnumKeyExW(hroot, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
-            TRACE("Monitor_%d: %s\n", numentries, debugstr_w(buffer));
-            dllsize = sizeof(dllname);
-            dllname[0] = '\0';
-
-            /* The Monitor must have a Driver-DLL */
-            if (RegOpenKeyExW(hroot, buffer, 0, KEY_READ, &hentry) == ERROR_SUCCESS) {
-                if (RegQueryValueExW(hentry, DriverW, NULL, NULL, (LPBYTE) dllname, &dllsize) == ERROR_SUCCESS) {
-                    /* We found a valid DLL for this Monitor. */
-                    TRACE("using Driver: %s\n", debugstr_w(dllname));
-                }
-                RegCloseKey(hentry);
-            }
-
-            /* Windows returns only Port-Monitors here, but to simplify our code,
-               we do no filtering for Language-Monitors */
-            if (dllname[0]) {
-                numentries++;
-                needed += entrysize;
-                needed += (len+1) * sizeof(WCHAR);  /* len is lstrlenW(monitorname) */
-                if (level > 1) {
-                    /* we install and return only monitors for "Windows NT x86" */
-                    needed += (lstrlenW(envname_x86W) +1) * sizeof(WCHAR);
-                    needed += dllsize;
-                }
-
-                /* required size is calculated. Now fill the user-buffer */
-                if (pMonitors && (cbBuf >= needed)){
-                    mi = (LPMONITOR_INFO_2W) pMonitors;
-                    pMonitors += entrysize;
-
-                    TRACE("%p: writing MONITOR_INFO_%dW #%d\n", mi, level, numentries);
-                    mi->pName = ptr;
-                    lstrcpyW(ptr, buffer);      /* Name of the Monitor */
-                    ptr += (len+1);               /* len is lstrlenW(monitorname) */
-                    if (level > 1) {
-                        mi->pEnvironment = ptr;
-                        lstrcpyW(ptr, envname_x86W); /* fixed to "Windows NT x86" */
-                        ptr += (lstrlenW(envname_x86W)+1);
-
-                        mi->pDLLName = ptr;
-                        lstrcpyW(ptr, dllname);         /* Name of the Driver-DLL */
-                        ptr += (dllsize / sizeof(WCHAR));
-                    }
-                }
-            }
-            index++;
-            len = sizeof(buffer);
-            buffer[0] = '\0';
-        }
-        RegCloseKey(hroot);
-    }
-    *lpreturned = numentries;
-    TRACE("need %d byte for %d entries\n", needed, numentries);
-    return needed;
-}
-
 /******************************************************************
  * monitor_unload [internal]
  *
@@ -903,26 +785,6 @@ static void monitor_unload(monitor_t * pm)
         HeapFree(GetProcessHeap(), 0, pm->name);
         HeapFree(GetProcessHeap(), 0, pm->dllname);
         HeapFree(GetProcessHeap(), 0, pm);
-    }
-    LeaveCriticalSection(&monitor_handles_cs);
-}
-
-/******************************************************************
- * monitor_unloadall [internal]
- *
- * release all printmonitors and unload them from memory, when needed 
- */
-
-static void monitor_unloadall(void)
-{
-    monitor_t * pm;
-    monitor_t * next;
-
-    EnterCriticalSection(&monitor_handles_cs);
-    /* iterate through the list, with safety against removal */
-    LIST_FOR_EACH_ENTRY_SAFE(pm, next, &monitor_handles, monitor_t, entry)
-    {
-        monitor_unload(pm);
     }
     LeaveCriticalSection(&monitor_handles_cs);
 }
@@ -1087,42 +949,6 @@ cleanup:
 }
 
 /******************************************************************
- * monitor_loadall [internal]
- *
- * Load all registered monitors
- *
- */
-static DWORD monitor_loadall(void)
-{
-    monitor_t * pm;
-    DWORD   registered = 0;
-    DWORD   loaded = 0;
-    HKEY    hmonitors;
-    WCHAR   buffer[MAX_PATH];
-    DWORD   id = 0;
-
-    if (RegOpenKeyW(HKEY_LOCAL_MACHINE, MonitorsW, &hmonitors) == ERROR_SUCCESS) {
-        RegQueryInfoKeyW(hmonitors, NULL, NULL, NULL, &registered, NULL, NULL,
-                        NULL, NULL, NULL, NULL, NULL);
-
-        TRACE("%d monitors registered\n", registered);
-
-        EnterCriticalSection(&monitor_handles_cs);
-        while (id < registered) {
-            buffer[0] = '\0';
-            RegEnumKeyW(hmonitors, id, buffer, MAX_PATH);
-            pm = monitor_load(buffer, NULL);
-            if (pm) loaded++;
-            id++;
-        }
-        LeaveCriticalSection(&monitor_handles_cs);
-        RegCloseKey(hmonitors);
-    }
-    TRACE("%d monitors loaded\n", loaded);
-    return loaded;
-}
-
-/******************************************************************
  * monitor_loadui [internal]
  *
  * load the userinterface-dll for a given portmonitor
@@ -1222,94 +1048,6 @@ static monitor_t * monitor_load_by_port(LPCWSTR portname)
     }
     HeapFree(GetProcessHeap(), 0, buffer);
     return pm;
-}
-
-/******************************************************************
- * enumerate the local Ports from all loaded monitors (internal)  
- *
- * returns the needed size (in bytes) for pPorts
- * and  *lpreturned is set to number of entries returned in pPorts
- *
- */
-static DWORD get_ports_from_all_monitors(DWORD level, LPBYTE pPorts, DWORD cbBuf, LPDWORD lpreturned)
-{
-    monitor_t * pm;
-    LPWSTR      ptr;
-    LPPORT_INFO_2W cache;
-    LPPORT_INFO_2W out;
-    LPBYTE  pi_buffer = NULL;
-    DWORD   pi_allocated = 0;
-    DWORD   pi_needed;
-    DWORD   pi_index;
-    DWORD   pi_returned;
-    DWORD   res;
-    DWORD   outindex = 0;
-    DWORD   needed;
-    DWORD   numentries;
-    DWORD   entrysize;
-
-
-    TRACE("(%d, %p, %d, %p)\n", level, pPorts, cbBuf, lpreturned);
-    entrysize = (level == 1) ? sizeof(PORT_INFO_1W) : sizeof(PORT_INFO_2W);
-
-    numentries = *lpreturned;       /* this is 0, when we scan the registry */
-    needed = entrysize * numentries;
-    ptr = (LPWSTR) &pPorts[needed];
-
-    numentries = 0;
-    needed = 0;
-
-    LIST_FOR_EACH_ENTRY(pm, &monitor_handles, monitor_t, entry)
-    {
-        if ((pm->monitor) && (pm->monitor->pfnEnumPorts)) {
-            pi_needed = 0;
-            pi_returned = 0;
-            res = pm->monitor->pfnEnumPorts(NULL, level, pi_buffer, pi_allocated, &pi_needed, &pi_returned);
-            if (!res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER)) {
-                /* Do not use HeapReAlloc (we do not need the old data in the buffer) */
-                HeapFree(GetProcessHeap(), 0, pi_buffer);
-                pi_buffer = HeapAlloc(GetProcessHeap(), 0, pi_needed);
-                pi_allocated = (pi_buffer) ? pi_needed : 0;
-                res = pm->monitor->pfnEnumPorts(NULL, level, pi_buffer, pi_allocated, &pi_needed, &pi_returned);
-            }
-            TRACE(  "(%s) got %d with %d (need %d byte for %d entries)\n",
-                    debugstr_w(pm->name), res, GetLastError(), pi_needed, pi_returned);
-
-            numentries += pi_returned;
-            needed += pi_needed;
-
-            /* fill the output-buffer (pPorts), if we have one */
-            if (pPorts && (cbBuf >= needed ) && pi_buffer) {
-                pi_index = 0;
-                while (pi_returned > pi_index) {
-                    cache = (LPPORT_INFO_2W) &pi_buffer[pi_index * entrysize];
-                    out = (LPPORT_INFO_2W) &pPorts[outindex * entrysize];
-                    out->pPortName = ptr;
-                    lstrcpyW(ptr, cache->pPortName);
-                    ptr += (lstrlenW(ptr)+1);
-                    if (level > 1) {
-                        out->pMonitorName = ptr;
-                        lstrcpyW(ptr,  cache->pMonitorName);
-                        ptr += (lstrlenW(ptr)+1);
-
-                        out->pDescription = ptr;
-                        lstrcpyW(ptr,  cache->pDescription);
-                        ptr += (lstrlenW(ptr)+1);
-                        out->fPortType = cache->fPortType;
-                        out->Reserved = cache->Reserved;
-                    }
-                    pi_index++;
-                    outindex++;
-                }
-            }
-        }
-    }
-    /* the temporary portinfo-buffer is no longer needed */
-    HeapFree(GetProcessHeap(), 0, pi_buffer);
-
-    *lpreturned = numentries;
-    TRACE("need %d byte for %d entries\n", needed, numentries);
-    return needed;
 }
 
 /******************************************************************
@@ -1756,37 +1494,258 @@ static LPDEVMODEW DEVMODEcpyAtoW(DEVMODEW *dmW, const DEVMODEA *dmA)
 }
 
 /***********************************************************
- *      DEVMODEdupWtoA
- * Creates an ascii copy of supplied devmode on heap
+ * DEVMODEdupWtoA
+ * Creates an ansi copy of supplied devmode
  */
-static LPDEVMODEA DEVMODEdupWtoA(HANDLE heap, const DEVMODEW *dmW)
+static LPDEVMODEA DEVMODEdupWtoA(const DEVMODEW *dmW)
 {
     LPDEVMODEA dmA;
     DWORD size;
-    BOOL Formname;
-    ptrdiff_t off_formname = (const char *)dmW->dmFormName - (const char *)dmW;
 
-    if(!dmW) return NULL;
-    Formname = (dmW->dmSize > off_formname);
-    size = dmW->dmSize - CCHDEVICENAME - (Formname ? CCHFORMNAME : 0);
-    dmA = HeapAlloc(heap, HEAP_ZERO_MEMORY, size + dmW->dmDriverExtra);
+    if (!dmW) return NULL;
+    size = dmW->dmSize - CCHDEVICENAME -
+                        ((dmW->dmSize > FIELD_OFFSET(DEVMODEW, dmFormName)) ? CCHFORMNAME : 0);
+
+    dmA = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size + dmW->dmDriverExtra);
+    if (!dmA) return NULL;
+
     WideCharToMultiByte(CP_ACP, 0, dmW->dmDeviceName, -1,
                         (LPSTR)dmA->dmDeviceName, CCHDEVICENAME, NULL, NULL);
-    if(!Formname) {
-      memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
-	     dmW->dmSize - CCHDEVICENAME * sizeof(WCHAR));
-    } else {
-      memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
-	     off_formname - CCHDEVICENAME * sizeof(WCHAR));
-      WideCharToMultiByte(CP_ACP, 0, dmW->dmFormName, -1,
-                          (LPSTR)dmA->dmFormName, CCHFORMNAME, NULL, NULL);
-      memcpy(&dmA->dmLogPixels, &dmW->dmLogPixels, dmW->dmSize -
-	     (off_formname + CCHFORMNAME * sizeof(WCHAR)));
+
+    if (FIELD_OFFSET(DEVMODEW, dmFormName) >= dmW->dmSize) {
+        memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
+               dmW->dmSize - FIELD_OFFSET(DEVMODEW, dmSpecVersion));
     }
+    else
+    {
+        memcpy(&dmA->dmSpecVersion, &dmW->dmSpecVersion,
+               FIELD_OFFSET(DEVMODEW, dmFormName) - FIELD_OFFSET(DEVMODEW, dmSpecVersion));
+        WideCharToMultiByte(CP_ACP, 0, dmW->dmFormName, -1,
+                            (LPSTR)dmA->dmFormName, CCHFORMNAME, NULL, NULL);
+
+        memcpy(&dmA->dmLogPixels, &dmW->dmLogPixels, dmW->dmSize - FIELD_OFFSET(DEVMODEW, dmLogPixels));
+    }
+
     dmA->dmSize = size;
-    memcpy((char *)dmA + dmA->dmSize, (const char *)dmW + dmW->dmSize,
-	   dmW->dmDriverExtra);
+    memcpy((char *)dmA + dmA->dmSize, (const char *)dmW + dmW->dmSize, dmW->dmDriverExtra);
     return dmA;
+}
+
+/******************************************************************
+ * convert_printerinfo_W_to_A [internal]
+ *
+ */
+static void convert_printerinfo_W_to_A(LPBYTE out, LPBYTE pPrintersW,
+                                       DWORD level, DWORD outlen, DWORD numentries)
+{
+    DWORD id = 0;
+    LPSTR ptr;
+    INT len;
+
+    TRACE("(%p, %p, %d, %u, %u)\n", out, pPrintersW, level, outlen, numentries);
+
+    len = pi_sizeof[level] * numentries;
+    ptr = (LPSTR) out + len;
+    outlen -= len;
+
+    /* copy the numbers of all PRINTER_INFO_* first */
+    memcpy(out, pPrintersW, len);
+
+    while (id < numentries) {
+        switch (level) {
+            case 1:
+                {
+                    PRINTER_INFO_1W * piW = (PRINTER_INFO_1W *) pPrintersW;
+                    PRINTER_INFO_1A * piA = (PRINTER_INFO_1A *) out;
+
+                    TRACE("(%u) #%u: %s\n", level, id, debugstr_w(piW->pName));
+                    if (piW->pDescription) {
+                        piA->pDescription = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pDescription, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pName) {
+                        piA->pName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pComment) {
+                        piA->pComment = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pComment, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    break;
+                }
+
+            case 2:
+                {
+                    PRINTER_INFO_2W * piW = (PRINTER_INFO_2W *) pPrintersW;
+                    PRINTER_INFO_2A * piA = (PRINTER_INFO_2A *) out;
+                    LPDEVMODEA dmA;
+
+                    TRACE("(%u) #%u: %s\n", level, id, debugstr_w(piW->pPrinterName));
+                    if (piW->pServerName) {
+                        piA->pServerName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pServerName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pPrinterName) {
+                        piA->pPrinterName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPrinterName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pShareName) {
+                        piA->pShareName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pShareName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pPortName) {
+                        piA->pPortName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPortName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pDriverName) {
+                        piA->pDriverName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pDriverName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pComment) {
+                        piA->pComment = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pComment, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pLocation) {
+                        piA->pLocation = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pLocation, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+
+                    dmA = DEVMODEdupWtoA(piW->pDevMode);
+                    if (dmA) {
+                        /* align DEVMODEA to a DWORD boundary */
+                        len = (4 - ( (DWORD_PTR) ptr & 3)) & 3;
+                        ptr += len;
+                        outlen -= len;
+
+                        piA->pDevMode = (LPDEVMODEA) ptr;
+                        len = dmA->dmSize + dmA->dmDriverExtra;
+                        memcpy(ptr, dmA, len);
+                        HeapFree(GetProcessHeap(), 0, dmA);
+
+                        ptr += len;
+                        outlen -= len;
+                    }
+
+                    if (piW->pSepFile) {
+                        piA->pSepFile = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pSepFile, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pPrintProcessor) {
+                        piA->pPrintProcessor = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPrintProcessor, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pDatatype) {
+                        piA->pDatatype = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pDatatype, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pParameters) {
+                        piA->pParameters = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pParameters, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pSecurityDescriptor) {
+                        piA->pSecurityDescriptor = NULL;
+                        FIXME("pSecurityDescriptor ignored: %s\n", debugstr_w(piW->pPrinterName));
+                    }
+                    break;
+                }
+
+            case 4:
+                {
+                    PRINTER_INFO_4W * piW = (PRINTER_INFO_4W *) pPrintersW;
+                    PRINTER_INFO_4A * piA = (PRINTER_INFO_4A *) out;
+
+                    TRACE("(%u) #%u: %s\n", level, id, debugstr_w(piW->pPrinterName));
+
+                    if (piW->pPrinterName) {
+                        piA->pPrinterName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPrinterName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pServerName) {
+                        piA->pServerName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pServerName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    break;
+                }
+
+            case 5:
+                {
+                    PRINTER_INFO_5W * piW = (PRINTER_INFO_5W *) pPrintersW;
+                    PRINTER_INFO_5A * piA = (PRINTER_INFO_5A *) out;
+
+                    TRACE("(%u) #%u: %s\n", level, id, debugstr_w(piW->pPrinterName));
+
+                    if (piW->pPrinterName) {
+                        piA->pPrinterName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPrinterName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    if (piW->pPortName) {
+                        piA->pPortName = ptr;
+                        len = WideCharToMultiByte(CP_ACP, 0, piW->pPortName, -1,
+                                                  ptr, outlen, NULL, NULL);
+                        ptr += len;
+                        outlen -= len;
+                    }
+                    break;
+                }
+
+            default:
+                FIXME("for level %u\n", level);
+        }
+        pPrintersW += pi_sizeof[level];
+        out += pi_sizeof[level];
+        id++;
+    }
 }
 
 /***********************************************************
@@ -1886,7 +1845,7 @@ INT WINAPI DeviceCapabilitiesW(LPCWSTR pDevice, LPCWSTR pPort,
 			       WORD fwCapability, LPWSTR pOutput,
 			       const DEVMODEW *pDevMode)
 {
-    LPDEVMODEA dmA = DEVMODEdupWtoA(GetProcessHeap(), pDevMode);
+    LPDEVMODEA dmA = DEVMODEdupWtoA(pDevMode);
     LPSTR pDeviceA = strdupWtoA(pDevice);
     LPSTR pPortA = strdupWtoA(pPort);
     INT ret;
@@ -1984,7 +1943,7 @@ LONG WINAPI DocumentPropertiesW(HWND hWnd, HANDLE hPrinter,
 {
 
     LPSTR pDeviceNameA = strdupWtoA(pDeviceName);
-    LPDEVMODEA pDevModeInputA = DEVMODEdupWtoA(GetProcessHeap(),pDevModeInput);
+    LPDEVMODEA pDevModeInputA = DEVMODEdupWtoA(pDevModeInput);
     LPDEVMODEA pDevModeOutputA = NULL;
     LONG ret;
 
@@ -2104,10 +2063,10 @@ BOOL WINAPI AddMonitorA(LPSTR pName, DWORD Level, LPBYTE pMonitors)
     MONITOR_INFO_2W mi2w;
 
     mi2a = (LPMONITOR_INFO_2A) pMonitors;
-    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_a(pName), Level, pMonitors, 
-            mi2a ? debugstr_a(mi2a->pName) : NULL,
-            mi2a ? debugstr_a(mi2a->pEnvironment) : NULL,
-            mi2a ? debugstr_a(mi2a->pDLLName) : NULL);
+    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_a(pName), Level, pMonitors,
+          debugstr_a(mi2a ? mi2a->pName : NULL),
+          debugstr_a(mi2a ? mi2a->pEnvironment : NULL),
+          debugstr_a(mi2a ? mi2a->pDLLName : NULL));
 
     if  (Level != 2) {
         SetLastError(ERROR_INVALID_LEVEL);
@@ -2172,18 +2131,15 @@ BOOL WINAPI AddMonitorA(LPSTR pName, DWORD Level, LPBYTE pMonitors)
  */
 BOOL WINAPI AddMonitorW(LPWSTR pName, DWORD Level, LPBYTE pMonitors)
 {
-    monitor_t * pm = NULL;
     LPMONITOR_INFO_2W mi2w;
-    HKEY    hroot = NULL;
-    HKEY    hentry = NULL;
-    DWORD   disposition;
-    BOOL    res = FALSE;
 
     mi2w = (LPMONITOR_INFO_2W) pMonitors;
-    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_w(pName), Level, pMonitors, 
-            mi2w ? debugstr_w(mi2w->pName) : NULL,
-            mi2w ? debugstr_w(mi2w->pEnvironment) : NULL,
-            mi2w ? debugstr_w(mi2w->pDLLName) : NULL);
+    TRACE("(%s, %d, %p) :  %s %s %s\n", debugstr_w(pName), Level, pMonitors,
+          debugstr_w(mi2w ? mi2w->pName : NULL),
+          debugstr_w(mi2w ? mi2w->pEnvironment : NULL),
+          debugstr_w(mi2w ? mi2w->pDLLName : NULL));
+
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
     if (Level != 2) {
         SetLastError(ERROR_INVALID_LEVEL);
@@ -2195,76 +2151,7 @@ BOOL WINAPI AddMonitorW(LPWSTR pName, DWORD Level, LPBYTE pMonitors)
         return FALSE;
     }
 
-    if (pName && (pName[0])) {
-        FIXME("for server %s not implemented\n", debugstr_w(pName));
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
-
-
-    if (!mi2w->pName || (! mi2w->pName[0])) {
-        WARN("pName not valid : %s\n", debugstr_w(mi2w->pName));
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-    if (!mi2w->pEnvironment || lstrcmpW(mi2w->pEnvironment, envname_x86W)) {
-        WARN("Environment %s requested (we support only %s)\n", 
-                debugstr_w(mi2w->pEnvironment), debugstr_w(envname_x86W));
-        SetLastError(ERROR_INVALID_ENVIRONMENT);
-        return FALSE;
-    }
-
-    if (!mi2w->pDLLName || (! mi2w->pDLLName[0])) {
-        WARN("pDLLName not valid : %s\n", debugstr_w(mi2w->pDLLName));
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    /* Load and initialize the monitor. SetLastError() is called on failure */
-    if ((pm = monitor_load(mi2w->pName, mi2w->pDLLName)) == NULL) {
-        return FALSE;
-    }
-    monitor_unload(pm);
-
-    if(RegCreateKeyW(HKEY_LOCAL_MACHINE, MonitorsW, &hroot) != ERROR_SUCCESS) {
-        ERR("unable to create key %s\n", debugstr_w(MonitorsW));
-        return FALSE;
-    }
-
-    if(RegCreateKeyExW( hroot, mi2w->pName, 0, NULL, REG_OPTION_NON_VOLATILE,
-                        KEY_WRITE | KEY_QUERY_VALUE, NULL, &hentry,
-                        &disposition) == ERROR_SUCCESS) {
-
-        /* Some installers set options for the port before calling AddMonitor.
-           We query the "Driver" entry to verify that the monitor is installed,
-           before we return an error.
-           When a user installs two print monitors at the same time with the
-           same name but with a different driver DLL and a task switch comes
-           between RegQueryValueExW and RegSetValueExW, a race condition
-           is possible but silently ignored. */
-
-        DWORD   namesize = 0;
-
-        if ((disposition == REG_OPENED_EXISTING_KEY) &&
-            (RegQueryValueExW(hentry, DriverW, NULL, NULL, NULL,
-                              &namesize) == ERROR_SUCCESS)) {
-            TRACE("monitor %s already exists\n", debugstr_w(mi2w->pName));
-            /* NT: ERROR_PRINT_MONITOR_ALREADY_INSTALLED (3006)
-               9x: ERROR_ALREADY_EXISTS (183) */
-            SetLastError(ERROR_PRINT_MONITOR_ALREADY_INSTALLED);
-        }
-        else
-        {
-               INT len;
-               len = (lstrlenW(mi2w->pDLLName) +1) * sizeof(WCHAR);
-               res = (RegSetValueExW(hentry, DriverW, 0,
-                      REG_SZ, (LPBYTE) mi2w->pDLLName, len) == ERROR_SUCCESS);
-        }
-        RegCloseKey(hentry);
-    }
-
-    RegCloseKey(hroot);
-    return (res);
+    return backend->fpAddMonitor(pName, Level, pMonitors);
 }
 
 /******************************************************************
@@ -2342,46 +2229,17 @@ BOOL WINAPI DeleteMonitorA (LPSTR pName, LPSTR pEnvironment, LPSTR pMonitorName)
  *  pEnvironment is ignored in Windows for the local Computer.
  *
  */
-
-BOOL WINAPI DeleteMonitorW (LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMonitorName)
+BOOL WINAPI DeleteMonitorW(LPWSTR pName, LPWSTR pEnvironment, LPWSTR pMonitorName)
 {
-    HKEY    hroot = NULL;
 
     TRACE("(%s, %s, %s)\n",debugstr_w(pName),debugstr_w(pEnvironment),
            debugstr_w(pMonitorName));
 
-    if (pName && (pName[0])) {
-        FIXME("for server %s not implemented\n", debugstr_w(pName));
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
-    /*  pEnvironment is ignored in Windows for the local Computer */
-
-    if (!pMonitorName || !pMonitorName[0]) {
-        WARN("pMonitorName %s is invalid\n", debugstr_w(pMonitorName));
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    if(RegCreateKeyW(HKEY_LOCAL_MACHINE, MonitorsW, &hroot) != ERROR_SUCCESS) {
-        ERR("unable to create key %s\n", debugstr_w(MonitorsW));
-        return FALSE;
-    }
-
-    if(RegDeleteTreeW(hroot, pMonitorName) == ERROR_SUCCESS) {
-        TRACE("monitor %s deleted\n", debugstr_w(pMonitorName));
-        RegCloseKey(hroot);
-        return TRUE;
-    }
-
-    WARN("monitor %s does not exist\n", debugstr_w(pMonitorName));
-    RegCloseKey(hroot);
-
-    /* NT: ERROR_UNKNOWN_PRINT_MONITOR (3000), 9x: ERROR_INVALID_PARAMETER (87) */
-    SetLastError(ERROR_UNKNOWN_PRINT_MONITOR);
-    return (FALSE);
+    return backend->fpDeleteMonitor(pName, pEnvironment, pMonitorName);
 }
+
 
 /******************************************************************
  *              DeletePortA        [WINSPOOL.@]
@@ -2474,7 +2332,7 @@ BOOL WINAPI DeletePortW (LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pPortName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);
@@ -2800,16 +2658,16 @@ static HKEY WINSPOOL_OpenDriverReg( LPCVOID pEnvironment, BOOL unicode)
 	  (unicode) ? debugstr_w(pEnvironment) : debugstr_a(pEnvironment), unicode);
 
     if (!pEnvironment || unicode) {
-        /* pEnvironment was NULL or an Unicode-String: use it direct */
+        /* pEnvironment was NULL or a Unicode-String: use it direct */
         env = validate_envW(pEnvironment);
     }
     else
     {
         /* pEnvironment was an ANSI-String: convert to unicode first */
         LPWSTR  buffer;
-        INT len = MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pEnvironment, -1, NULL, 0);
+        INT len = MultiByteToWideChar(CP_ACP, 0, pEnvironment, -1, NULL, 0);
         buffer = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
-        if (buffer) MultiByteToWideChar(CP_ACP, 0, (LPCSTR)pEnvironment, -1, buffer, len);
+        if (buffer) MultiByteToWideChar(CP_ACP, 0, pEnvironment, -1, buffer, len);
         env = validate_envW(buffer);
         HeapFree(GetProcessHeap(), 0, buffer);
     }
@@ -2947,7 +2805,7 @@ HANDLE WINAPI AddPrinterW(LPWSTR pName, DWORD Level, LPBYTE pPrinter)
        drivers */
     if (dmW)
     {
-        dmA = DEVMODEdupWtoA(GetProcessHeap(), dmW);
+        dmA = DEVMODEdupWtoA(dmW);
         RegSetValueExW(hkeyPrinter, default_devmodeW, 0, REG_BINARY,
                        (LPBYTE)dmA, dmA->dmSize + dmA->dmDriverExtra);
         HeapFree(GetProcessHeap(), 0, dmA);
@@ -3094,7 +2952,14 @@ BOOL WINAPI DeletePrinter(HANDLE hPrinter)
         RegCloseKey(hkeyPrinters);
     }
     WriteProfileStringW(devicesW, lpNameW, NULL);
+    WriteProfileStringW(PrinterPortsW, lpNameW, NULL);
+
     if(RegCreateKeyW(HKEY_CURRENT_USER, user_printers_reg_key, &hkey) == ERROR_SUCCESS) {
+        RegDeleteValueW(hkey, lpNameW);
+        RegCloseKey(hkey);
+    }
+
+    if(RegCreateKeyW(HKEY_CURRENT_USER, WinNT_CV_PrinterPortsW, &hkey) == ERROR_SUCCESS) {
         RegDeleteValueW(hkey, lpNameW);
         RegCloseKey(hkey);
     }
@@ -4060,6 +3925,78 @@ static BOOL WINSPOOL_GetPrinter_5(HKEY hkeyPrinter, PRINTER_INFO_5W *pi5,
     return space;
 }
 
+/*********************************************************************
+ *    WINSPOOL_GetPrinter_7
+ *
+ * Fills out a PRINTER_INFO_7 struct storing the strings in buf.
+ */
+static BOOL WINSPOOL_GetPrinter_7(HKEY hkeyPrinter, PRINTER_INFO_7W *pi7, LPBYTE buf,
+                                  DWORD cbBuf, LPDWORD pcbNeeded, BOOL unicode)
+{
+    DWORD size, left = cbBuf;
+    BOOL space = (cbBuf > 0);
+    LPBYTE ptr = buf;
+
+    *pcbNeeded = 0;
+
+    if (WINSPOOL_GetStringFromReg(hkeyPrinter, ObjectGUIDW, ptr, left, &size, unicode))
+    {
+        if (space && size <= left) {
+            pi7->pszObjectGUID = (LPWSTR)ptr;
+            ptr += size;
+            left -= size;
+        } else
+            space = FALSE;
+        *pcbNeeded += size;
+    }
+    if (pi7) {
+        /* We do not have a Directory Service */
+        pi7->dwAction = DSPRINT_UNPUBLISH;
+    }
+
+    if (!space && pi7) /* zero out pi7 if we can't completely fill buf */
+        memset(pi7, 0, sizeof(*pi7));
+
+    return space;
+}
+
+/*********************************************************************
+ *    WINSPOOL_GetPrinter_9
+ *
+ * Fills out a PRINTER_INFO_9A|W struct storing the strings in buf.
+ * The strings are either stored as unicode or ascii.
+ */
+static BOOL WINSPOOL_GetPrinter_9(HKEY hkeyPrinter, PRINTER_INFO_9W *pi9, LPBYTE buf,
+                                  DWORD cbBuf, LPDWORD pcbNeeded, BOOL unicode)
+{
+    DWORD size;
+    BOOL space = (cbBuf > 0);
+
+    *pcbNeeded = 0;
+
+    if(WINSPOOL_GetDevModeFromReg(hkeyPrinter, Default_DevModeW, buf, cbBuf, &size, unicode)) {
+        if(space && size <= cbBuf) {
+            pi9->pDevMode = (LPDEVMODEW)buf;
+        } else
+            space = FALSE;
+        *pcbNeeded += size;
+    }
+    else
+    {
+        WINSPOOL_GetDefaultDevMode(buf, cbBuf, &size, unicode);
+        if(space && size <= cbBuf) {
+            pi9->pDevMode = (LPDEVMODEW)buf;
+        } else
+            space = FALSE;
+        *pcbNeeded += size;
+    }
+
+    if(!space && pi9) /* zero out pi9 if we can't completely fill buf */
+        memset(pi9, 0, sizeof(*pi9));
+
+    return space;
+}
+
 /*****************************************************************************
  *          WINSPOOL_GetPrinter
  *
@@ -4155,6 +4092,64 @@ static BOOL WINSPOOL_GetPrinter(HANDLE hPrinter, DWORD Level, LPBYTE pPrinter,
 	needed += size;
 	break;
       }
+
+
+    case 6:
+      {
+        PRINTER_INFO_6 *pi6 = (PRINTER_INFO_6 *) pPrinter;
+
+        size = sizeof(PRINTER_INFO_6);
+        if (size <= cbBuf) {
+            /* FIXME: We do not update the status yet */
+            pi6->dwStatus = WINSPOOL_GetDWORDFromReg(hkeyPrinter, "Status");
+            ret = TRUE;
+        } else {
+            ret = FALSE;
+        }
+
+        needed += size;
+        break;
+      }
+
+    case 7:
+      {
+        PRINTER_INFO_7W *pi7 = (PRINTER_INFO_7W *) pPrinter;
+
+        size = sizeof(PRINTER_INFO_7W);
+        if (size <= cbBuf) {
+            ptr = pPrinter + size;
+            cbBuf -= size;
+            memset(pPrinter, 0, size);
+        } else {
+            pi7 = NULL;
+            cbBuf = 0;
+        }
+
+        ret = WINSPOOL_GetPrinter_7(hkeyPrinter, pi7, ptr, cbBuf, &needed, unicode);
+        needed += size;
+        break;
+      }
+
+
+    case 9:
+      {
+        PRINTER_INFO_9W *pi9 = (PRINTER_INFO_9W *)pPrinter;
+
+        size = sizeof(PRINTER_INFO_9W);
+        if(size <= cbBuf) {
+            ptr = pPrinter + size;
+            cbBuf -= size;
+            memset(pPrinter, 0, size);
+        } else {
+            pi9 = NULL;
+            cbBuf = 0;
+        }
+
+        ret = WINSPOOL_GetPrinter_9(hkeyPrinter, pi9, ptr, cbBuf, &needed, unicode);
+        needed += size;
+        break;
+      }
+
 
     default:
         FIXME("Unimplemented level %d\n", Level);
@@ -4414,23 +4409,35 @@ BOOL  WINAPI EnumPrintersW(
 }
 
 /******************************************************************
- *              EnumPrintersA        [WINSPOOL.@]
+ * EnumPrintersA    [WINSPOOL.@]
+ *
+ * See EnumPrintersW
  *
  */
-BOOL WINAPI EnumPrintersA(DWORD dwType, LPSTR lpszName,
-			  DWORD dwLevel, LPBYTE lpbPrinters,
-			  DWORD cbBuf, LPDWORD lpdwNeeded,
-			  LPDWORD lpdwReturned)
+BOOL WINAPI EnumPrintersA(DWORD flags, LPSTR pName, DWORD level, LPBYTE pPrinters,
+                          DWORD cbBuf, LPDWORD pcbNeeded, LPDWORD pcReturned)
 {
-    BOOL ret, unicode = FALSE;
-    UNICODE_STRING lpszNameW;
-    PWSTR pwstrNameW;
+    BOOL ret;
+    UNICODE_STRING pNameU;
+    LPWSTR pNameW;
+    LPBYTE pPrintersW;
 
-    pwstrNameW = asciitounicode(&lpszNameW,lpszName);
-    if(!cbBuf) unicode = TRUE; /* return a buffer that's big enough for the unicode version */
-    ret = WINSPOOL_EnumPrinters(dwType, pwstrNameW, dwLevel, lpbPrinters, cbBuf,
-				lpdwNeeded, lpdwReturned, unicode);
-    RtlFreeUnicodeString(&lpszNameW);
+    TRACE("(0x%x, %s, %u, %p, %d, %p, %p)\n", flags, debugstr_a(pName), level,
+                                              pPrinters, cbBuf, pcbNeeded, pcReturned);
+
+    pNameW = asciitounicode(&pNameU, pName);
+
+    /* Request a buffer with a size, that is big enough for EnumPrintersW.
+       MS Office need this */
+    pPrintersW = (pPrinters && cbBuf) ? HeapAlloc(GetProcessHeap(), 0, cbBuf) : NULL;
+
+    ret = EnumPrintersW(flags, pNameW, level, pPrintersW, cbBuf, pcbNeeded, pcReturned);
+
+    RtlFreeUnicodeString(&pNameU);
+    if (ret) {
+        convert_printerinfo_W_to_A(pPrinters, pPrintersW, level, *pcbNeeded, *pcReturned);
+    }
+    HeapFree(GetProcessHeap(), 0, pPrintersW);
     return ret;
 }
 
@@ -4844,57 +4851,25 @@ BOOL WINAPI GetPrinterDriverDirectoryW(LPWSTR pName, LPWSTR pEnvironment,
 				       DWORD Level, LPBYTE pDriverDirectory,
 				       DWORD cbBuf, LPDWORD pcbNeeded)
 {
-    DWORD needed;
-    const printenv_t * env;
-
     TRACE("(%s, %s, %d, %p, %d, %p)\n", debugstr_w(pName), 
           debugstr_w(pEnvironment), Level, pDriverDirectory, cbBuf, pcbNeeded);
-    if(pName != NULL && pName[0]) {
-        FIXME("pName unsupported: %s\n", debugstr_w(pName));
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
 
-    env = validate_envW(pEnvironment);
-    if(!env) return FALSE;  /* pEnvironment invalid or unsupported */
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
-    if(Level != 1) {
-        WARN("(Level: %d) is ignored in win9x\n", Level);
+    if (Level != 1) {
+        /* (Level != 1) is ignored in win9x */
         SetLastError(ERROR_INVALID_LEVEL);
         return FALSE;
     }
-
-    /* GetSystemDirectoryW returns number of WCHAR including the '\0' */
-    needed = GetSystemDirectoryW(NULL, 0);
-    /* add the Size for the Subdirectories */
-    needed += lstrlenW(spooldriversW);
-    needed += lstrlenW(env->subdir);
-    needed *= sizeof(WCHAR);  /* return-value is size in Bytes */
-
-    if(pcbNeeded)
-        *pcbNeeded = needed;
-    TRACE("required: 0x%x/%d\n", needed, needed);
-    if(needed > cbBuf) {
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        return FALSE;
-    }
-    if(pcbNeeded == NULL) {
-        WARN("(pcbNeeded == NULL) is ignored in win9x\n");
+    if (pcbNeeded == NULL) {
+        /* (pcbNeeded == NULL) is ignored in win9x */
         SetLastError(RPC_X_NULL_REF_POINTER);
         return FALSE;
     }
-    if(pDriverDirectory == NULL) {
-        /* ERROR_INVALID_USER_BUFFER is NT, ERROR_INVALID_PARAMETER is win9x */
-        SetLastError(ERROR_INVALID_USER_BUFFER);
-        return FALSE;
-    }
-    
-    GetSystemDirectoryW((LPWSTR) pDriverDirectory, cbBuf/sizeof(WCHAR));
-    /* add the Subdirectories */
-    lstrcatW((LPWSTR) pDriverDirectory, spooldriversW);
-    lstrcatW((LPWSTR) pDriverDirectory, env->subdir);
-    TRACE(" => %s\n", debugstr_w((LPWSTR) pDriverDirectory));
-    return TRUE;
+
+    return backend->fpGetPrinterDriverDirectory(pName, pEnvironment, Level,
+                                                pDriverDirectory, cbBuf, pcbNeeded);
+
 }
 
 
@@ -5191,7 +5166,7 @@ static BOOL WINSPOOL_EnumPrinterDrivers(LPWSTR pName, LPCWSTR pEnvironment,
             RegCloseKey(hkeyDrivers);
             return FALSE;
         }
-	(*pcbNeeded) += needed;
+        *pcbNeeded += needed;
     }
 
     RegCloseKey(hkeyDrivers);
@@ -5214,6 +5189,29 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
                                 LPBYTE pDriverInfo, DWORD cbBuf,
                                 LPDWORD pcbNeeded, LPDWORD pcReturned)
 {
+    static const WCHAR allW[] = {'a','l','l',0};
+
+    if (pEnvironment && !strcmpW(pEnvironment, allW))
+    {
+        BOOL ret;
+        DWORD i, needed, returned, bufsize = cbBuf;
+
+        for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+        {
+            needed = returned = 0;
+            ret = WINSPOOL_EnumPrinterDrivers(pName, all_printenv[i]->envname, Level,
+                                              pDriverInfo, bufsize, &needed, &returned, TRUE);
+            if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER) return FALSE;
+            else if (ret)
+            {
+                bufsize -= needed;
+                if (pDriverInfo) pDriverInfo += needed;
+                if (pcReturned) *pcReturned += returned;
+            }
+            if (pcbNeeded) *pcbNeeded += needed;
+        }
+        return ret;
+    }
     return WINSPOOL_EnumPrinterDrivers(pName, pEnvironment, Level, pDriverInfo,
                                        cbBuf, pcbNeeded, pcReturned, TRUE);
 }
@@ -5226,16 +5224,36 @@ BOOL WINAPI EnumPrinterDriversW(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
 BOOL WINAPI EnumPrinterDriversA(LPSTR pName, LPSTR pEnvironment, DWORD Level,
                                 LPBYTE pDriverInfo, DWORD cbBuf,
                                 LPDWORD pcbNeeded, LPDWORD pcReturned)
-{   BOOL ret;
+{
+    BOOL ret;
     UNICODE_STRING pNameW, pEnvironmentW;
     PWSTR pwstrNameW, pwstrEnvironmentW;
 
     pwstrNameW = asciitounicode(&pNameW, pName);
     pwstrEnvironmentW = asciitounicode(&pEnvironmentW, pEnvironment);
 
-    ret = WINSPOOL_EnumPrinterDrivers(pwstrNameW, pwstrEnvironmentW,
-                                      Level, pDriverInfo, cbBuf, pcbNeeded,
-                                      pcReturned, FALSE);
+    if (pEnvironment && !strcmp(pEnvironment, "all"))
+    {
+        DWORD i, needed, returned, bufsize = cbBuf;
+
+        for (i = 0; i < sizeof(all_printenv)/sizeof(all_printenv[0]); i++)
+        {
+            needed = returned = 0;
+            ret = WINSPOOL_EnumPrinterDrivers(pwstrNameW, all_printenv[i]->envname, Level,
+                                              pDriverInfo, bufsize, &needed, &returned, FALSE);
+            if (!ret && GetLastError() != ERROR_INSUFFICIENT_BUFFER) break;
+            else if (ret)
+            {
+                bufsize -= needed;
+                if (pDriverInfo) pDriverInfo += needed;
+                if (pcReturned) *pcReturned += returned;
+            }
+            if (pcbNeeded) *pcbNeeded += needed;
+        }
+    }
+    else ret = WINSPOOL_EnumPrinterDrivers(pwstrNameW, pwstrEnvironmentW,
+                                           Level, pDriverInfo, cbBuf, pcbNeeded,
+                                           pcReturned, FALSE);
     RtlFreeUnicodeString(&pNameW);
     RtlFreeUnicodeString(&pEnvironmentW);
 
@@ -5385,80 +5403,38 @@ cleanup:
  * Enumerate available Ports
  *
  * PARAMS
- *  name        [I] Servername or NULL (local Computer)
- *  level       [I] Structure-Level (1 or 2)
- *  buffer      [O] PTR to Buffer that receives the Result
- *  bufsize     [I] Size of Buffer at buffer
- *  bufneeded   [O] PTR to DWORD that receives the size in Bytes used / required for buffer
- *  bufreturned [O] PTR to DWORD that receives the number of Ports in buffer
+ *  pName      [I] Servername or NULL (local Computer)
+ *  Level      [I] Structure-Level (1 or 2)
+ *  pPorts     [O] PTR to Buffer that receives the Result
+ *  cbBuf      [I] Size of Buffer at pPorts
+ *  pcbNeeded  [O] PTR to DWORD that receives the size in Bytes used / required for pPorts
+ *  pcReturned [O] PTR to DWORD that receives the number of Ports in pPorts
  *
  * RETURNS
  *  Success: TRUE
- *  Failure: FALSE and in bufneeded the Bytes required for buffer, if bufsize is too small
+ *  Failure: FALSE and in pcbNeeded the Bytes required for pPorts, if cbBuf is too small
  *
  */
-
 BOOL WINAPI EnumPortsW(LPWSTR pName, DWORD Level, LPBYTE pPorts, DWORD cbBuf, LPDWORD pcbNeeded, LPDWORD pcReturned)
 {
-    DWORD   needed = 0;
-    DWORD   numentries = 0;
-    BOOL    res = FALSE;
 
     TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pPorts,
           cbBuf, pcbNeeded, pcReturned);
 
-    if (pName && (pName[0])) {
-        FIXME("not implemented for Server %s\n", debugstr_w(pName));
-        SetLastError(ERROR_ACCESS_DENIED);
-        goto emP_cleanup;
-    }
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
     /* Level is not checked in win9x */
     if (!Level || (Level > 2)) {
         WARN("level (%d) is ignored in win9x\n", Level);
         SetLastError(ERROR_INVALID_LEVEL);
-        goto emP_cleanup;
+        return FALSE;
     }
-    if (!pcbNeeded) {
+    if (!pcbNeeded || (!pPorts && (cbBuf > 0))) {
         SetLastError(RPC_X_NULL_REF_POINTER);
-        goto emP_cleanup;
+        return FALSE;
     }
 
-    EnterCriticalSection(&monitor_handles_cs);
-    monitor_loadall();
-
-    /* Scan all local Ports */
-    numentries = 0;
-    needed = get_ports_from_all_monitors(Level, NULL, 0, &numentries);
-
-    /* we calculated the needed buffersize. now do the error-checks */
-    if (cbBuf < needed) {
-        monitor_unloadall();
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        goto emP_cleanup_cs;
-    }
-    else if (!pPorts || !pcReturned) {
-        monitor_unloadall();
-        SetLastError(RPC_X_NULL_REF_POINTER);
-        goto emP_cleanup_cs;
-    }
-
-    /* Fill the Buffer */
-    needed = get_ports_from_all_monitors(Level, pPorts, cbBuf, &numentries);
-    res = TRUE;
-    monitor_unloadall();
-
-emP_cleanup_cs:
-    LeaveCriticalSection(&monitor_handles_cs);
-
-emP_cleanup:
-    if (pcbNeeded)  *pcbNeeded = needed;
-    if (pcReturned) *pcReturned = (res) ? numentries : 0;
-
-    TRACE("returning %d with %d (%d byte for %d of %d entries)\n", 
-            (res), GetLastError(), needed, (res)? numentries : 0, numentries);
-
-    return (res);
+    return backend->fpEnumPorts(pName, Level, pPorts, cbBuf, pcbNeeded, pcReturned);
 }
 
 /******************************************************************************
@@ -6243,7 +6219,7 @@ BOOL WINAPI AddPortW(LPWSTR pName, HWND hWnd, LPWSTR pMonitorName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pMonitorName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);
@@ -6428,17 +6404,9 @@ BOOL WINAPI AddPrinterConnectionW( LPWSTR pName )
  */
 BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD level, LPBYTE pDriverInfo, DWORD dwFileCopyFlags)
 {
-    const printenv_t *env;
-    apd_data_t apd;
-    DRIVER_INFO_8W di;
-    LPWSTR  ptr;
-    HKEY    hroot;
-    HKEY    hdrv;
-    DWORD   disposition;
-    DWORD   len;
-    LONG    lres;
-
     TRACE("(%s, %d, %p, 0x%x)\n", debugstr_w(pName), level, pDriverInfo, dwFileCopyFlags);
+
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
     if (level < 2 || level == 5 || level == 7 || level > 8) {
         SetLastError(ERROR_INVALID_LEVEL);
@@ -6450,141 +6418,7 @@ BOOL WINAPI AddPrinterDriverExW( LPWSTR pName, DWORD level, LPBYTE pDriverInfo, 
         return FALSE;
     }
 
-    if ((dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY) != APD_COPY_ALL_FILES) {
-        FIXME("Flags 0x%x ignored (Fallback to APD_COPY_ALL_FILES)\n", dwFileCopyFlags & ~APD_COPY_FROM_DIRECTORY);
-    }
-
-    ptr = get_servername_from_name(pName);
-    HeapFree(GetProcessHeap(), 0, ptr);
-    if (ptr) {
-        FIXME("not supported for server: %s\n", debugstr_w(pName));
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
-
-    /* we need to set all entries in the Registry, independent from the Level of
-       DRIVER_INFO, that the caller supplied */
-
-    ZeroMemory(&di, sizeof(di));
-    if (pDriverInfo && (level < (sizeof(di_sizeof) / sizeof(di_sizeof[0])))) {
-        memcpy(&di, pDriverInfo, di_sizeof[level]);
-    }
-
-    /* dump the most used infos */
-    TRACE("%p: .cVersion    : 0x%x/%d\n", pDriverInfo, di.cVersion, di.cVersion);
-    TRACE("%p: .pName       : %s\n", di.pName, debugstr_w(di.pName));
-    TRACE("%p: .pEnvironment: %s\n", di.pEnvironment, debugstr_w(di.pEnvironment));
-    TRACE("%p: .pDriverPath : %s\n", di.pDriverPath, debugstr_w(di.pDriverPath));
-    TRACE("%p: .pDataFile   : %s\n", di.pDataFile, debugstr_w(di.pDataFile));
-    TRACE("%p: .pConfigFile : %s\n", di.pConfigFile, debugstr_w(di.pConfigFile));
-    TRACE("%p: .pHelpFile   : %s\n", di.pHelpFile, debugstr_w(di.pHelpFile));
-    /* dump only the first of the additional Files */
-    TRACE("%p: .pDependentFiles: %s\n", di.pDependentFiles, debugstr_w(di.pDependentFiles));
-
-
-    /* check environment */
-    env = validate_envW(di.pEnvironment);
-    if (env == NULL) return FALSE;        /* ERROR_INVALID_ENVIRONMENT */
-
-    /* fill the copy-data / get the driverdir */
-    len = sizeof(apd.src) - sizeof(Version3_SubdirW) - sizeof(WCHAR);
-    if (!GetPrinterDriverDirectoryW(NULL, (LPWSTR) env->envname, 1,
-                                    (LPBYTE) apd.src, len, &len)) {
-        /* Should never Fail */
-        return FALSE;
-    }
-    memcpy(apd.dst, apd.src, len);
-    lstrcatW(apd.src, backslashW);
-    apd.srclen = lstrlenW(apd.src);
-    lstrcatW(apd.dst, env->versionsubdir);
-    lstrcatW(apd.dst, backslashW);
-    apd.dstlen = lstrlenW(apd.dst);
-    apd.copyflags = dwFileCopyFlags;
-    CreateDirectoryW(apd.src, NULL);
-    CreateDirectoryW(apd.dst, NULL);
-
-    /* Fill the Registry for the Driver */
-    hroot = WINSPOOL_OpenDriverReg(env->envname, TRUE);
-    if(!hroot) {
-        ERR("Can't create Drivers key\n");
-        return FALSE;
-    }
-
-    if ((lres = RegCreateKeyExW(hroot, di.pName, 0, NULL, REG_OPTION_NON_VOLATILE,
-                                KEY_WRITE | KEY_QUERY_VALUE, NULL,
-                                &hdrv, &disposition)) != ERROR_SUCCESS) {
-
-        ERR("can't create driver %s: %u\n", debugstr_w(di.pName), lres);
-        RegCloseKey(hroot);
-        SetLastError(lres);
-        return FALSE;
-    }
-    RegCloseKey(hroot);
-
-    if (disposition == REG_OPENED_EXISTING_KEY) {
-        TRACE("driver %s already installed\n", debugstr_w(di.pName));
-        RegCloseKey(hdrv);
-        SetLastError(ERROR_PRINTER_DRIVER_ALREADY_INSTALLED);
-        return FALSE;
-    }
-
-    /* Verified with the Adobe PS Driver, that w2k does not use di.Version */
-    RegSetValueExW(hdrv, VersionW, 0, REG_DWORD, (LPBYTE) &env->driverversion,
-                   sizeof(DWORD));
-
-    RegSetValueExW(hdrv, DriverW, 0, REG_SZ, (LPBYTE) di.pDriverPath,
-                   (lstrlenW(di.pDriverPath)+1)* sizeof(WCHAR));
-    apd_copyfile(di.pDriverPath, &apd);
-
-    RegSetValueExW(hdrv, Data_FileW, 0, REG_SZ, (LPBYTE) di.pDataFile,
-                   (lstrlenW(di.pDataFile)+1)* sizeof(WCHAR));
-    apd_copyfile(di.pDataFile, &apd);
-
-    RegSetValueExW(hdrv, Configuration_FileW, 0, REG_SZ, (LPBYTE) di.pConfigFile,
-                   (lstrlenW(di.pConfigFile)+1)* sizeof(WCHAR));
-    apd_copyfile(di.pConfigFile, &apd);
-
-    /* settings for level 3 */
-    RegSetValueExW(hdrv, Help_FileW, 0, REG_SZ, (LPBYTE) di.pHelpFile,
-                   di.pHelpFile ? (lstrlenW(di.pHelpFile)+1)* sizeof(WCHAR) : 0);
-    apd_copyfile(di.pHelpFile, &apd);
-
-
-    ptr = di.pDependentFiles;
-    RegSetValueExW(hdrv, Dependent_FilesW, 0, REG_MULTI_SZ, (LPBYTE) di.pDependentFiles,
-                   di.pDependentFiles ? multi_sz_lenW(di.pDependentFiles) : 0);
-    while ((ptr != NULL) && (ptr[0])) {
-        if (apd_copyfile(ptr, &apd)) {
-            ptr += lstrlenW(ptr) + 1;
-        }
-        else
-        {
-            WARN("Failed to copy %s\n", debugstr_w(ptr));
-            ptr = NULL;
-        }
-    }
-
-    /* The language-Monitor was already copied to "%SystemRoot%\system32" */
-    RegSetValueExW(hdrv, MonitorW, 0, REG_SZ, (LPBYTE) di.pMonitorName,
-                   di.pMonitorName ? (lstrlenW(di.pMonitorName)+1)* sizeof(WCHAR) : 0);
-
-    RegSetValueExW(hdrv, DatatypeW, 0, REG_SZ, (LPBYTE) di.pDefaultDataType,
-                   di.pDefaultDataType ? (lstrlenW(di.pDefaultDataType)+1)* sizeof(WCHAR) : 0);
-
-    /* settings for level 4 */
-    RegSetValueExW(hdrv, Previous_NamesW, 0, REG_MULTI_SZ, (LPBYTE) di.pszzPreviousNames,
-                   di.pszzPreviousNames ? multi_sz_lenW(di.pszzPreviousNames) : 0);
-
-    if (level > 5) FIXME("level %u for Driver %s is incomplete\n", level, debugstr_w(di.pName));
-
-
-    RegCloseKey(hdrv);
-    FIXME("### DrvDriverEvent(...,DRIVEREVENT_INITIALIZE) not implemented yet\n");
-
-
-    TRACE("=> TRUE with %u\n", GetLastError());
-    return TRUE;
-
+    return backend->fpAddPrinterDriverEx(pName, level, pDriverInfo, dwFileCopyFlags);
 }
 
 /******************************************************************************
@@ -6823,7 +6657,7 @@ BOOL WINAPI ConfigurePortW(LPWSTR pName, HWND hWnd, LPWSTR pPortName)
         else
         {
             FIXME("not implemented for %s (%p: %s => %p: %s)\n", debugstr_w(pPortName),
-                pm, pm ? debugstr_w(pm->dllname) : NULL, pui, pui ? debugstr_w(pui->dllname) : NULL);
+                  pm, debugstr_w(pm ? pm->dllname : NULL), pui, debugstr_w(pui ? pui->dllname : NULL));
 
             /* XP: ERROR_NOT_SUPPORTED, NT351,9x: ERROR_INVALID_PARAMETER */
             SetLastError(ERROR_NOT_SUPPORTED);
@@ -7160,67 +6994,42 @@ emA_cleanup:
  *  Success: TRUE
  *  Failure: FALSE and in pcbNeeded the Bytes required for buffer, if cbBuf is too small
  *
- * NOTES
- *  Windows reads the Registry once and cache the Results.
- *
- *|  Language-Monitors are also installed in the same Registry-Location but 
- *|  they are filtered in Windows (not returned by EnumMonitors).
- *|  We do no filtering to simplify our Code.
- *
  */
 BOOL WINAPI EnumMonitorsW(LPWSTR pName, DWORD Level, LPBYTE pMonitors,
                           DWORD cbBuf, LPDWORD pcbNeeded, LPDWORD pcReturned)
 {
-    DWORD   needed = 0;
-    DWORD   numentries = 0;
-    BOOL    res = FALSE;
 
     TRACE("(%s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), Level, pMonitors,
           cbBuf, pcbNeeded, pcReturned);
 
-    if (pName && (lstrlenW(pName))) {
-        FIXME("for Server %s not implemented\n", debugstr_w(pName));
-        SetLastError(ERROR_ACCESS_DENIED);
-        goto emW_cleanup;
-    }
+    if ((backend == NULL)  && !load_backend()) return FALSE;
 
-    /* Level is not checked in win9x */
-    if (!Level || (Level > 2)) {
-        WARN("level (%d) is ignored in win9x\n", Level);
-        SetLastError(ERROR_INVALID_LEVEL);
-        goto emW_cleanup;
-    }
-    if (!pcbNeeded) {
+    if (!pcbNeeded || !pcReturned || (!pMonitors && (cbBuf > 0))) {
         SetLastError(RPC_X_NULL_REF_POINTER);
-        goto emW_cleanup;
+        return FALSE;
     }
 
-    /* Scan all Monitor-Keys */
-    numentries = 0;
-    needed = get_local_monitors(Level, NULL, 0, &numentries);
+    return backend->fpEnumMonitors(pName, Level, pMonitors, cbBuf, pcbNeeded, pcReturned);
+}
 
-    /* we calculated the needed buffersize. now do the error-checks */
-    if (cbBuf < needed) {
-        SetLastError(ERROR_INSUFFICIENT_BUFFER);
-        goto emW_cleanup;
-    }
-    else if (!pMonitors || !pcReturned) {
-        SetLastError(RPC_X_NULL_REF_POINTER);
-        goto emW_cleanup;
-    }
+/******************************************************************************
+ * SpoolerInit (WINSPOOL.@)
+ *
+ * Initialize the Spooler
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE
+ *
+ * NOTES
+ *  The function fails on windows, when the spooler service is not running
+ *
+ */
+BOOL WINAPI SpoolerInit(void)
+{
 
-    /* fill the Buffer with the Monitor-Keys */
-    needed = get_local_monitors(Level, pMonitors, cbBuf, &numentries);
-    res = TRUE;
-
-emW_cleanup:
-    if (pcbNeeded)  *pcbNeeded = needed;
-    if (pcReturned) *pcReturned = numentries;
-
-    TRACE("returning %d with %d (%d byte for %d entries)\n", 
-            res, GetLastError(), needed, numentries);
-
-    return (res);
+    if ((backend == NULL)  && !load_backend()) return FALSE;
+    return TRUE;
 }
 
 /******************************************************************************
@@ -7626,6 +7435,7 @@ static BOOL schedule_lpr(LPCWSTR printer_name, LPCWSTR filename)
     char *unixname, *queue, *cmd;
     char fmt[] = "lpr -P%s %s";
     DWORD len;
+    int r;
 
     if(!(unixname = wine_get_unix_file_name(filename)))
         return FALSE;
@@ -7638,12 +7448,12 @@ static BOOL schedule_lpr(LPCWSTR printer_name, LPCWSTR filename)
     sprintf(cmd, fmt, queue, unixname);
 
     TRACE("printing with: %s\n", cmd);
-    system(cmd);
+    r = system(cmd);
 
     HeapFree(GetProcessHeap(), 0, cmd);
     HeapFree(GetProcessHeap(), 0, queue);
     HeapFree(GetProcessHeap(), 0, unixname);
-    return TRUE;
+    return (r == 0);
 }
 
 /*****************************************************************************
@@ -7654,24 +7464,24 @@ static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR docume
 #ifdef SONAME_LIBCUPS
     if(pcupsPrintFile)
     {
-        char *unixname, *queue, *doc_titleA;
+        char *unixname, *queue, *unix_doc_title;
         DWORD len;
         BOOL ret;
 
         if(!(unixname = wine_get_unix_file_name(filename)))
             return FALSE;
 
-        len = WideCharToMultiByte(CP_ACP, 0, printer_name, -1, NULL, 0, NULL, NULL);
+        len = WideCharToMultiByte(CP_UNIXCP, 0, printer_name, -1, NULL, 0, NULL, NULL);
         queue = HeapAlloc(GetProcessHeap(), 0, len);
-        WideCharToMultiByte(CP_ACP, 0, printer_name, -1, queue, len, NULL, NULL);
+        WideCharToMultiByte(CP_UNIXCP, 0, printer_name, -1, queue, len, NULL, NULL);
 
-        len = WideCharToMultiByte(CP_ACP, 0, document_title, -1, NULL, 0, NULL, NULL);
-        doc_titleA = HeapAlloc(GetProcessHeap(), 0, len);
-        WideCharToMultiByte(CP_ACP, 0, document_title, -1, doc_titleA, len, NULL, NULL);
+        len = WideCharToMultiByte(CP_UNIXCP, 0, document_title, -1, NULL, 0, NULL, NULL);
+        unix_doc_title = HeapAlloc(GetProcessHeap(), 0, len);
+        WideCharToMultiByte(CP_UNIXCP, 0, document_title, -1, unix_doc_title, len, NULL, NULL);
 
         TRACE("printing via cups\n");
-        ret = pcupsPrintFile(queue, unixname, doc_titleA, 0, NULL);
-        HeapFree(GetProcessHeap(), 0, doc_titleA);
+        ret = pcupsPrintFile(queue, unixname, unix_doc_title, 0, NULL);
+        HeapFree(GetProcessHeap(), 0, unix_doc_title);
         HeapFree(GetProcessHeap(), 0, queue);
         HeapFree(GetProcessHeap(), 0, unixname);
         return ret;
@@ -7683,7 +7493,7 @@ static BOOL schedule_cups(LPCWSTR printer_name, LPCWSTR filename, LPCWSTR docume
     }
 }
 
-INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+static INT_PTR CALLBACK file_dlg_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     LPWSTR filename;
 
@@ -7766,10 +7576,11 @@ static BOOL schedule_file(LPCWSTR filename)
 
     if(get_filename(&output))
     {
+        BOOL r;
         TRACE("copy to %s\n", debugstr_w(output));
-        CopyFileW(filename, output, FALSE);
+        r = CopyFileW(filename, output, FALSE);
         HeapFree(GetProcessHeap(), 0, output);
-        return TRUE;
+        return r;
     }
     return FALSE;
 }
@@ -7789,9 +7600,9 @@ static BOOL schedule_pipe(LPCWSTR cmd, LPCWSTR filename)
     if(!(unixname = wine_get_unix_file_name(filename)))
         return FALSE;
 
-    len = WideCharToMultiByte(CP_ACP, 0, cmd, -1, NULL, 0, NULL, NULL);
+    len = WideCharToMultiByte(CP_UNIXCP, 0, cmd, -1, NULL, 0, NULL, NULL);
     cmdA = HeapAlloc(GetProcessHeap(), 0, len);
-    WideCharToMultiByte(CP_ACP, 0, cmd, -1, cmdA, len, NULL, NULL);
+    WideCharToMultiByte(CP_UNIXCP, 0, cmd, -1, cmdA, len, NULL, NULL);
 
     TRACE("printing with: %s\n", cmdA);
 
@@ -7814,7 +7625,7 @@ static BOOL schedule_pipe(LPCWSTR cmd, LPCWSTR filename)
         signal(SIGPIPE, SIG_DFL);
         signal(SIGCHLD, SIG_DFL);
 
-        execl("/bin/sh", "/bin/sh", "-c", cmdA, (char*)0);
+        execl("/bin/sh", "/bin/sh", "-c", cmdA, NULL);
         _exit(1);
     }
 
@@ -7850,9 +7661,9 @@ static BOOL schedule_unixfile(LPCWSTR output, LPCWSTR filename)
     if(!(unixname = wine_get_unix_file_name(filename)))
         return FALSE;
 
-    len = WideCharToMultiByte(CP_ACP, 0, output, -1, NULL, 0, NULL, NULL);
+    len = WideCharToMultiByte(CP_UNIXCP, 0, output, -1, NULL, 0, NULL, NULL);
     outputA = HeapAlloc(GetProcessHeap(), 0, len);
-    WideCharToMultiByte(CP_ACP, 0, output, -1, outputA, len, NULL, NULL);
+    WideCharToMultiByte(CP_UNIXCP, 0, output, -1, outputA, len, NULL, NULL);
     
     out_fd = open(outputA, O_CREAT | O_TRUNC | O_WRONLY, 0666);
     in_fd = open(unixname, O_RDONLY);
@@ -7921,23 +7732,23 @@ BOOL WINAPI ScheduleJob( HANDLE hPrinter, DWORD dwJobID )
             }
             if(output[0] == '|')
             {
-                schedule_pipe(output + 1, job->filename);
+                ret = schedule_pipe(output + 1, job->filename);
             }
             else if(output[0])
             {
-                schedule_unixfile(output, job->filename);
+                ret = schedule_unixfile(output, job->filename);
             }
             else if(!strncmpW(pi5->pPortName, LPR_Port, strlenW(LPR_Port)))
             {
-                schedule_lpr(pi5->pPortName + strlenW(LPR_Port), job->filename);
+                ret = schedule_lpr(pi5->pPortName + strlenW(LPR_Port), job->filename);
             }
             else if(!strncmpW(pi5->pPortName, CUPS_Port, strlenW(CUPS_Port)))
             {
-                schedule_cups(pi5->pPortName + strlenW(CUPS_Port), job->filename, job->document_title);
+                ret = schedule_cups(pi5->pPortName + strlenW(CUPS_Port), job->filename, job->document_title);
             }
             else if(!strncmpW(pi5->pPortName, FILE_Port, strlenW(FILE_Port)))
             {
-                schedule_file(job->filename);
+                ret = schedule_file(job->filename);
             }
             else
             {
@@ -7951,7 +7762,6 @@ BOOL WINAPI ScheduleJob( HANDLE hPrinter, DWORD dwJobID )
         HeapFree(GetProcessHeap(), 0, job->document_title);
         HeapFree(GetProcessHeap(), 0, job->filename);
         HeapFree(GetProcessHeap(), 0, job);
-        ret = TRUE;
         break;
     }
 end:

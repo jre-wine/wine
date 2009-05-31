@@ -26,6 +26,9 @@
 #include <windef.h>
 #include <winbase.h>
 
+#ifdef __WINE_CONFIG_H
+#error config.h should not be used in Wine tests
+#endif
 #ifdef __WINE_WINE_LIBRARY_H
 #error wine/library.h should not be used in Wine tests
 #endif
@@ -37,10 +40,10 @@
 #endif
 
 #ifndef INVALID_FILE_ATTRIBUTES
-#define INVALID_FILE_ATTRIBUTES  ((DWORD)~0UL)
+#define INVALID_FILE_ATTRIBUTES  (~0u)
 #endif
 #ifndef INVALID_SET_FILE_POINTER
-#define INVALID_SET_FILE_POINTER ((DWORD)~0UL)
+#define INVALID_SET_FILE_POINTER (~0u)
 #endif
 
 /* debug level */
@@ -57,6 +60,7 @@ extern void winetest_start_todo( const char* platform );
 extern int winetest_loop_todo(void);
 extern void winetest_end_todo( const char* platform );
 extern int winetest_get_mainargs( char*** pargv );
+extern void winetest_wait_child_process( HANDLE process );
 
 #ifdef STANDALONE
 #define START_TEST(name) \
@@ -67,27 +71,35 @@ extern int winetest_get_mainargs( char*** pargv );
 #define START_TEST(name) void func_##name(void)
 #endif
 
+extern int broken( int condition );
+extern int winetest_vok( int condition, const char *msg, va_list ap );
+extern void winetest_vskip( const char *msg, va_list ap );
+
 #ifdef __GNUC__
 
 extern int winetest_ok( int condition, const char *msg, ... ) __attribute__((format (printf,2,3) ));
 extern void winetest_skip( const char *msg, ... ) __attribute__((format (printf,1,2)));
+extern void winetest_win_skip( const char *msg, ... ) __attribute__((format (printf,1,2)));
 extern void winetest_trace( const char *msg, ... ) __attribute__((format (printf,1,2)));
 
 #else /* __GNUC__ */
 
 extern int winetest_ok( int condition, const char *msg, ... );
 extern void winetest_skip( const char *msg, ... );
+extern void winetest_win_skip( const char *msg, ... );
 extern void winetest_trace( const char *msg, ... );
 
 #endif /* __GNUC__ */
 
-#define ok_(file, line)     (winetest_set_location(file, line), 0) ? 0 : winetest_ok
-#define skip_(file, line)  (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
-#define trace_(file, line)  (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
+#define ok_(file, line)       (winetest_set_location(file, line), 0) ? 0 : winetest_ok
+#define skip_(file, line)     (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
+#define win_skip_(file, line) (winetest_set_location(file, line), 0) ? (void)0 : winetest_win_skip
+#define trace_(file, line)    (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
 
-#define ok     ok_(__FILE__, __LINE__)
-#define skip   skip_(__FILE__, __LINE__)
-#define trace  trace_(__FILE__, __LINE__)
+#define ok       ok_(__FILE__, __LINE__)
+#define skip     skip_(__FILE__, __LINE__)
+#define win_skip win_skip_(__FILE__, __LINE__)
+#define trace    trace_(__FILE__, __LINE__)
 
 #define todo(platform) for (winetest_start_todo(platform); \
                             winetest_loop_todo(); \
@@ -223,6 +235,11 @@ void winetest_set_location( const char* file, int line )
     data->current_line=line;
 }
 
+int broken( int condition )
+{
+    return (strcmp(winetest_platform, "windows") == 0) && condition;
+}
+
 /*
  * Checks condition.
  * Parameters:
@@ -233,42 +250,39 @@ void winetest_set_location( const char* file, int line )
  * Return:
  *   0 if condition does not have the expected value, 1 otherwise
  */
-int winetest_ok( int condition, const char *msg, ... )
+int winetest_vok( int condition, const char *msg, va_list args )
 {
-    va_list valist;
     tls_data* data=get_tls_data();
 
     if (data->todo_level)
     {
         if (condition)
         {
-            fprintf( stdout, "%s:%d: Test succeeded inside todo block",
+            fprintf( stdout, "%s:%d: Test succeeded inside todo block: ",
                      data->current_file, data->current_line );
-            if (msg[0])
-            {
-                va_start(valist, msg);
-                fprintf(stdout,": ");
-                vfprintf(stdout, msg, valist);
-                va_end(valist);
-            }
+            vfprintf(stdout, msg, args);
             InterlockedIncrement(&todo_failures);
             return 0;
         }
-        else InterlockedIncrement(&todo_successes);
+        else
+        {
+            if (winetest_debug > 0)
+            {
+                fprintf( stdout, "%s:%d: Test marked todo: ",
+                         data->current_file, data->current_line );
+                vfprintf(stdout, msg, args);
+            }
+            InterlockedIncrement(&todo_successes);
+            return 1;
+        }
     }
     else
     {
         if (!condition)
         {
-            fprintf( stdout, "%s:%d: Test failed",
+            fprintf( stdout, "%s:%d: Test failed: ",
                      data->current_file, data->current_line );
-            if (msg[0])
-            {
-                va_start(valist, msg);
-                fprintf( stdout,": ");
-                vfprintf(stdout, msg, valist);
-                va_end(valist);
-            }
+            vfprintf(stdout, msg, args);
             InterlockedIncrement(&failures);
             return 0;
         }
@@ -278,9 +292,20 @@ int winetest_ok( int condition, const char *msg, ... )
                 fprintf( stdout, "%s:%d: Test succeeded\n",
                          data->current_file, data->current_line);
             InterlockedIncrement(&successes);
+            return 1;
         }
     }
-    return 1;
+}
+
+int winetest_ok( int condition, const char *msg, ... )
+{
+    va_list valist;
+    int rc;
+
+    va_start(valist, msg);
+    rc=winetest_vok(condition, msg, valist);
+    va_end(valist);
+    return rc;
 }
 
 void winetest_trace( const char *msg, ... )
@@ -290,23 +315,39 @@ void winetest_trace( const char *msg, ... )
 
     if (winetest_debug > 0)
     {
-        fprintf( stdout, "%s:%d:", data->current_file, data->current_line );
+        fprintf( stdout, "%s:%d: ", data->current_file, data->current_line );
         va_start(valist, msg);
         vfprintf(stdout, msg, valist);
         va_end(valist);
     }
 }
 
-void winetest_skip( const char *msg, ... )
+void winetest_vskip( const char *msg, va_list args )
 {
-    va_list valist;
     tls_data* data=get_tls_data();
 
     fprintf( stdout, "%s:%d: Tests skipped: ", data->current_file, data->current_line );
-    va_start(valist, msg);
-    vfprintf(stdout, msg, valist);
-    va_end(valist);
+    vfprintf(stdout, msg, args);
     skipped++;
+}
+
+void winetest_skip( const char *msg, ... )
+{
+    va_list valist;
+    va_start(valist, msg);
+    winetest_vskip(msg, valist);
+    va_end(valist);
+}
+
+void winetest_win_skip( const char *msg, ... )
+{
+    va_list valist;
+    va_start(valist, msg);
+    if (strcmp(winetest_platform, "windows") == 0)
+        winetest_vskip(msg, valist);
+    else
+        winetest_vok(0, msg, valist);
+    va_end(valist);
 }
 
 void winetest_start_todo( const char* platform )
@@ -338,6 +379,32 @@ int winetest_get_mainargs( char*** pargv )
 {
     *pargv = winetest_argv;
     return winetest_argc;
+}
+
+void winetest_wait_child_process( HANDLE process )
+{
+    DWORD exit_code = 1;
+
+    if (WaitForSingleObject( process, 30000 ))
+        fprintf( stdout, "%s: child process wait failed\n", current_test->name );
+    else
+        GetExitCodeProcess( process, &exit_code );
+
+    if (exit_code)
+    {
+        if (exit_code > 255)
+        {
+            fprintf( stdout, "%s: exception 0x%08x in child process\n", current_test->name, exit_code );
+            InterlockedIncrement( &failures );
+        }
+        else
+        {
+            fprintf( stdout, "%s: %u failures in child process\n",
+                     current_test->name, exit_code );
+            while (exit_code-- > 0)
+                InterlockedIncrement(&failures);
+        }
+    }
 }
 
 /* Find a test by name */
@@ -411,17 +478,18 @@ static void usage( const char *argv0 )
 /* main function */
 int main( int argc, char **argv )
 {
-    char *p;
+    char p[128];
 
     setvbuf (stdout, NULL, _IONBF, 0);
 
     winetest_argc = argc;
     winetest_argv = argv;
 
-    if ((p = getenv( "WINETEST_PLATFORM" ))) winetest_platform = strdup(p);
-    if ((p = getenv( "WINETEST_DEBUG" ))) winetest_debug = atoi(p);
-    if ((p = getenv( "WINETEST_INTERACTIVE" ))) winetest_interactive = atoi(p);
-    if ((p = getenv( "WINETEST_REPORT_SUCCESS"))) report_success = atoi(p);
+    if (GetEnvironmentVariableA( "WINETEST_PLATFORM", p, sizeof(p) )) winetest_platform = strdup(p);
+    if (GetEnvironmentVariableA( "WINETEST_DEBUG", p, sizeof(p) )) winetest_debug = atoi(p);
+    if (GetEnvironmentVariableA( "WINETEST_INTERACTIVE", p, sizeof(p) )) winetest_interactive = atoi(p);
+    if (GetEnvironmentVariableA( "WINETEST_REPORT_SUCCESS", p, sizeof(p) )) report_success = atoi(p);
+
     if (!argv[1])
     {
         if (winetest_testlist[0].name && !winetest_testlist[1].name)  /* only one test */

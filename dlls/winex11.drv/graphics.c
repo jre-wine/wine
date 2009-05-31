@@ -2,6 +2,7 @@
  * X11 graphics driver graphics functions
  *
  * Copyright 1993,1994 Alexandre Julliard
+ * Copyright 1998 Huw Davies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,6 +26,7 @@
 
 #include "config.h"
 
+#include <stdarg.h>
 #include <math.h>
 #ifdef HAVE_FLOAT_H
 # include <float.h>
@@ -35,9 +37,14 @@
 #endif
 #include <string.h>
 
+#include "windef.h"
+#include "winbase.h"
+#include "winreg.h"
+
 #include "x11drv.h"
 #include "x11font.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(graphics);
 
@@ -63,6 +70,104 @@ const int X11DRV_XROPfunction[16] =
     GXor,           /* R2_MERGEPEN */
     GXset           /* R2_WHITE */
 };
+
+
+/***********************************************************************
+ *           X11DRV_GetRegionData
+ *
+ * Calls GetRegionData on the given region and converts the rectangle
+ * array to XRectangle format. The returned buffer must be freed by
+ * caller using HeapFree(GetProcessHeap(),...).
+ * If hdc_lptodp is not 0, the rectangles are converted through LPtoDP.
+ */
+RGNDATA *X11DRV_GetRegionData( HRGN hrgn, HDC hdc_lptodp )
+{
+    RGNDATA *data;
+    DWORD size;
+    unsigned int i;
+    RECT *rect, tmp;
+    XRectangle *xrect;
+
+    if (!(size = GetRegionData( hrgn, 0, NULL ))) return NULL;
+    if (sizeof(XRectangle) > sizeof(RECT))
+    {
+        /* add extra size for XRectangle array */
+        int count = (size - sizeof(RGNDATAHEADER)) / sizeof(RECT);
+        size += count * (sizeof(XRectangle) - sizeof(RECT));
+    }
+    if (!(data = HeapAlloc( GetProcessHeap(), 0, size ))) return NULL;
+    if (!GetRegionData( hrgn, size, data ))
+    {
+        HeapFree( GetProcessHeap(), 0, data );
+        return NULL;
+    }
+
+    rect = (RECT *)data->Buffer;
+    xrect = (XRectangle *)data->Buffer;
+    if (hdc_lptodp)  /* map to device coordinates */
+    {
+        LPtoDP( hdc_lptodp, (POINT *)rect, data->rdh.nCount * 2 );
+        for (i = 0; i < data->rdh.nCount; i++)
+        {
+            if (rect[i].right < rect[i].left)
+            {
+                INT tmp = rect[i].right;
+                rect[i].right = rect[i].left;
+                rect[i].left = tmp;
+            }
+            if (rect[i].bottom < rect[i].top)
+            {
+                INT tmp = rect[i].bottom;
+                rect[i].bottom = rect[i].top;
+                rect[i].top = tmp;
+            }
+        }
+    }
+
+    if (sizeof(XRectangle) > sizeof(RECT))
+    {
+        int j;
+        /* need to start from the end */
+        for (j = data->rdh.nCount-1; j >= 0; j--)
+        {
+            tmp = rect[j];
+            xrect[j].x      = tmp.left;
+            xrect[j].y      = tmp.top;
+            xrect[j].width  = tmp.right - tmp.left;
+            xrect[j].height = tmp.bottom - tmp.top;
+        }
+    }
+    else
+    {
+        for (i = 0; i < data->rdh.nCount; i++)
+        {
+            tmp = rect[i];
+            xrect[i].x      = tmp.left;
+            xrect[i].y      = tmp.top;
+            xrect[i].width  = tmp.right - tmp.left;
+            xrect[i].height = tmp.bottom - tmp.top;
+        }
+    }
+    return data;
+}
+
+
+/***********************************************************************
+ *           X11DRV_SetDeviceClipping
+ */
+void CDECL X11DRV_SetDeviceClipping( X11DRV_PDEVICE *physDev, HRGN vis_rgn, HRGN clip_rgn )
+{
+    RGNDATA *data;
+
+    CombineRgn( physDev->region, vis_rgn, clip_rgn, clip_rgn ? RGN_AND : RGN_COPY );
+    if (!(data = X11DRV_GetRegionData( physDev->region, 0 ))) return;
+
+    wine_tsx11_lock();
+    XSetClipRectangles( gdi_display, physDev->gc, physDev->dc_rect.left, physDev->dc_rect.top,
+                        (XRectangle *)data->Buffer, data->rdh.nCount, YXBanded );
+    wine_tsx11_unlock();
+    HeapFree( GetProcessHeap(), 0, data );
+}
 
 
 /***********************************************************************
@@ -181,7 +286,7 @@ BOOL X11DRV_SetupGCForBrush( X11DRV_PDEVICE *physDev )
  * Setup physDev->gc for drawing operations using current pen.
  * Return FALSE if pen is PS_NULL, TRUE otherwise.
  */
-BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
+static BOOL X11DRV_SetupGCForPen( X11DRV_PDEVICE *physDev )
 {
     XGCValues val;
     UINT rop2 = GetROP2(physDev->hdc);
@@ -328,7 +433,7 @@ INT X11DRV_YWStoDS( X11DRV_PDEVICE *physDev, INT height )
 /***********************************************************************
  *           X11DRV_LineTo
  */
-BOOL
+BOOL CDECL
 X11DRV_LineTo( X11DRV_PDEVICE *physDev, INT x, INT y )
 {
     POINT pt[2];
@@ -524,7 +629,7 @@ X11DRV_DrawArc( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
 /***********************************************************************
  *           X11DRV_Arc
  */
-BOOL
+BOOL CDECL
 X11DRV_Arc( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
             INT xstart, INT ystart, INT xend, INT yend )
 {
@@ -536,7 +641,7 @@ X11DRV_Arc( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
 /***********************************************************************
  *           X11DRV_Pie
  */
-BOOL
+BOOL CDECL
 X11DRV_Pie( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
             INT xstart, INT ystart, INT xend, INT yend )
 {
@@ -547,7 +652,7 @@ X11DRV_Pie( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
 /***********************************************************************
  *           X11DRV_Chord
  */
-BOOL
+BOOL CDECL
 X11DRV_Chord( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
               INT xstart, INT ystart, INT xend, INT yend )
 {
@@ -559,7 +664,7 @@ X11DRV_Chord( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom,
 /***********************************************************************
  *           X11DRV_Ellipse
  */
-BOOL
+BOOL CDECL
 X11DRV_Ellipse( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom )
 {
     INT width, oldwidth;
@@ -623,7 +728,7 @@ X11DRV_Ellipse( X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT botto
 /***********************************************************************
  *           X11DRV_Rectangle
  */
-BOOL
+BOOL CDECL
 X11DRV_Rectangle(X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bottom)
 {
     INT width, oldwidth, oldjoinstyle;
@@ -696,7 +801,7 @@ X11DRV_Rectangle(X11DRV_PDEVICE *physDev, INT left, INT top, INT right, INT bott
 /***********************************************************************
  *           X11DRV_RoundRect
  */
-BOOL
+BOOL CDECL
 X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
                   INT bottom, INT ell_width, INT ell_height )
 {
@@ -906,7 +1011,7 @@ X11DRV_RoundRect( X11DRV_PDEVICE *physDev, INT left, INT top, INT right,
 /***********************************************************************
  *           X11DRV_SetPixel
  */
-COLORREF
+COLORREF CDECL
 X11DRV_SetPixel( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color )
 {
     unsigned long pixel;
@@ -938,7 +1043,7 @@ X11DRV_SetPixel( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color )
 /***********************************************************************
  *           X11DRV_GetPixel
  */
-COLORREF
+COLORREF CDECL
 X11DRV_GetPixel( X11DRV_PDEVICE *physDev, INT x, INT y )
 {
     static Pixmap pixmap = 0;
@@ -985,7 +1090,7 @@ X11DRV_GetPixel( X11DRV_PDEVICE *physDev, INT x, INT y )
 /***********************************************************************
  *           X11DRV_PaintRgn
  */
-BOOL
+BOOL CDECL
 X11DRV_PaintRgn( X11DRV_PDEVICE *physDev, HRGN hrgn )
 {
     if (X11DRV_SetupGCForBrush( physDev ))
@@ -1015,7 +1120,7 @@ X11DRV_PaintRgn( X11DRV_PDEVICE *physDev, HRGN hrgn )
 /**********************************************************************
  *          X11DRV_Polyline
  */
-BOOL
+BOOL CDECL
 X11DRV_Polyline( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
 {
     int i;
@@ -1052,7 +1157,7 @@ X11DRV_Polyline( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
 /**********************************************************************
  *          X11DRV_Polygon
  */
-BOOL
+BOOL CDECL
 X11DRV_Polygon( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
 {
     register int i;
@@ -1104,7 +1209,7 @@ X11DRV_Polygon( X11DRV_PDEVICE *physDev, const POINT* pt, INT count )
 /**********************************************************************
  *          X11DRV_PolyPolygon
  */
-BOOL
+BOOL CDECL
 X11DRV_PolyPolygon( X11DRV_PDEVICE *physDev, const POINT* pt, const INT* counts, UINT polygons)
 {
     HRGN hrgn;
@@ -1162,7 +1267,7 @@ X11DRV_PolyPolygon( X11DRV_PDEVICE *physDev, const POINT* pt, const INT* counts,
 /**********************************************************************
  *          X11DRV_PolyPolyline
  */
-BOOL
+BOOL CDECL
 X11DRV_PolyPolyline( X11DRV_PDEVICE *physDev, const POINT* pt, const DWORD* counts, DWORD polylines )
 {
     if (X11DRV_SetupGCForPen ( physDev ))
@@ -1281,7 +1386,7 @@ static int ExtFloodFillXGetImageErrorHandler( Display *dpy, XErrorEvent *event, 
 /**********************************************************************
  *          X11DRV_ExtFloodFill
  */
-BOOL
+BOOL CDECL
 X11DRV_ExtFloodFill( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color,
                      UINT fillType )
 {
@@ -1335,7 +1440,7 @@ X11DRV_ExtFloodFill( X11DRV_PDEVICE *physDev, INT x, INT y, COLORREF color,
 /**********************************************************************
  *          X11DRV_SetBkColor
  */
-COLORREF
+COLORREF CDECL
 X11DRV_SetBkColor( X11DRV_PDEVICE *physDev, COLORREF color )
 {
     physDev->backgroundPixel = X11DRV_PALETTE_ToPhysical( physDev, color );
@@ -1345,7 +1450,7 @@ X11DRV_SetBkColor( X11DRV_PDEVICE *physDev, COLORREF color )
 /**********************************************************************
  *          X11DRV_SetTextColor
  */
-COLORREF
+COLORREF CDECL
 X11DRV_SetTextColor( X11DRV_PDEVICE *physDev, COLORREF color )
 {
     physDev->textPixel = X11DRV_PALETTE_ToPhysical( physDev, color );
@@ -1355,7 +1460,7 @@ X11DRV_SetTextColor( X11DRV_PDEVICE *physDev, COLORREF color )
 /***********************************************************************
  *           GetDCOrgEx   (X11DRV.@)
  */
-BOOL X11DRV_GetDCOrgEx( X11DRV_PDEVICE *physDev, LPPOINT lpp )
+BOOL CDECL X11DRV_GetDCOrgEx( X11DRV_PDEVICE *physDev, LPPOINT lpp )
 {
     lpp->x = physDev->dc_rect.left + physDev->drawable_rect.left;
     lpp->y = physDev->dc_rect.top + physDev->drawable_rect.top;
@@ -1366,11 +1471,126 @@ BOOL X11DRV_GetDCOrgEx( X11DRV_PDEVICE *physDev, LPPOINT lpp )
 /***********************************************************************
  *           SetDCOrg   (X11DRV.@)
  */
-DWORD X11DRV_SetDCOrg( X11DRV_PDEVICE *physDev, INT x, INT y )
+DWORD CDECL X11DRV_SetDCOrg( X11DRV_PDEVICE *physDev, INT x, INT y )
 {
     DWORD ret = MAKELONG( physDev->dc_rect.left + physDev->drawable_rect.left,
                           physDev->dc_rect.top + physDev->drawable_rect.top );
     physDev->dc_rect.left = x - physDev->drawable_rect.left;
     physDev->dc_rect.top = y - physDev->drawable_rect.top;
     return ret;
+}
+
+static unsigned char *get_icm_profile( unsigned long *size )
+{
+    Atom type;
+    int format;
+    unsigned long count, remaining;
+    unsigned char *profile, *ret = NULL;
+
+    wine_tsx11_lock();
+    XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display),
+                        x11drv_atom(_ICC_PROFILE), 0, ~0UL, False, AnyPropertyType,
+                        &type, &format, &count, &remaining, &profile );
+    *size = get_property_size( format, count );
+    if (format && count)
+    {
+        if ((ret = HeapAlloc( GetProcessHeap(), 0, *size ))) memcpy( ret, profile, *size );
+        XFree( profile );
+    }
+    wine_tsx11_unlock();
+    return ret;
+}
+
+typedef struct
+{
+    unsigned int unknown[6];
+    unsigned int state[5];
+    unsigned int count[2];
+    unsigned char buffer[64];
+} sha_ctx;
+
+extern void WINAPI A_SHAInit( sha_ctx * );
+extern void WINAPI A_SHAUpdate( sha_ctx *, const unsigned char *, unsigned int );
+extern void WINAPI A_SHAFinal( sha_ctx *, unsigned char * );
+
+/***********************************************************************
+ *              GetICMProfile (X11DRV.@)
+ */
+BOOL CDECL X11DRV_GetICMProfile( X11DRV_PDEVICE *physDev, LPDWORD size, LPWSTR filename )
+{
+    static const WCHAR path[] =
+        {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s',
+         '\\','c','o','l','o','r','\\',0};
+    static const WCHAR srgb[] =
+        {'s','R','G','B',' ','C','o','l','o','r',' ','S','p','a','c','e',' ',
+         'P','r','o','f','i','l','e','.','i','c','m',0};
+    static const WCHAR mntr[] =
+        {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\',
+         'W','i','n','d','o','w','s',' ','N','T','\\','C','u','r','r','e','n','t',
+         'V','e','r','s','i','o','n','\\','I','C','M','\\','m','n','t','r',0};
+
+    HKEY hkey;
+    DWORD required, len;
+    WCHAR profile[MAX_PATH], fullname[2*MAX_PATH + sizeof(path)/sizeof(WCHAR)];
+    unsigned char *buffer;
+    unsigned long buflen;
+
+    if (!size) return FALSE;
+
+    GetSystemDirectoryW( fullname, MAX_PATH );
+    strcatW( fullname, path );
+
+    len = sizeof(profile)/sizeof(WCHAR);
+    if (!RegCreateKeyExW( HKEY_LOCAL_MACHINE, mntr, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL ) &&
+        !RegEnumValueW( hkey, 0, profile, &len, NULL, NULL, NULL, NULL )) /* FIXME handle multiple values */
+    {
+        strcatW( fullname, profile );
+        RegCloseKey( hkey );
+    }
+    else if ((buffer = get_icm_profile( &buflen )))
+    {
+        static const WCHAR fmt[] = {'%','0','2','x',0};
+        static const WCHAR icm[] = {'.','i','c','m',0};
+
+        unsigned char sha1sum[20];
+        unsigned int i;
+        sha_ctx ctx;
+        HANDLE file;
+
+        A_SHAInit( &ctx );
+        A_SHAUpdate( &ctx, buffer, buflen );
+        A_SHAFinal( &ctx, sha1sum );
+
+        for (i = 0; i < sizeof(sha1sum); i++) sprintfW( &profile[i * 2], fmt, sha1sum[i] );
+        memcpy( &profile[i * 2], icm, sizeof(icm) );
+
+        strcatW( fullname, profile );
+        file = CreateFileW( fullname, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, 0 );
+        if (file != INVALID_HANDLE_VALUE)
+        {
+            DWORD written;
+
+            if (!WriteFile( file, buffer, buflen, &written, NULL ) || written != buflen)
+                ERR( "Unable to write color profile\n" );
+            CloseHandle( file );
+        }
+        HeapFree( GetProcessHeap(), 0, buffer );
+    }
+    else strcatW( fullname, srgb );
+
+    required = strlenW( fullname ) + 1;
+    if (*size < required)
+    {
+        *size = required;
+        SetLastError( ERROR_INSUFFICIENT_BUFFER );
+        return FALSE;
+    }
+    if (filename)
+    {
+        strcpyW( filename, fullname );
+        if (GetFileAttributesW( filename ) == INVALID_FILE_ATTRIBUTES)
+            WARN( "color profile not found\n" );
+    }
+    *size = required;
+    return TRUE;
 }

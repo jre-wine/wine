@@ -43,8 +43,6 @@ static BOOL VCP_opened = FALSE;
 
 static VCPSTATUS vcp_status;
 
-static HINSTANCE SETUPAPI_hInstance;
-
 static WORD VCP_Callback( LPVOID obj, UINT16 msg, WPARAM16 wParam, LPARAM lParam, LPARAM lParamRef )
 {
     WORD args[8];
@@ -250,10 +248,10 @@ static RETERR16 VCP_VirtnodeCreate(const VCPFILESPEC *vfsSrc, const VCPFILESPEC 
     lpvn->cbSize = sizeof(VIRTNODE);
 
     if (vfsSrc)
-        memcpy(&lpvn->vfsSrc, vfsSrc, sizeof(VCPFILESPEC));
+        lpvn->vfsSrc = *vfsSrc;
 
     if (vfsDst)
-        memcpy(&lpvn->vfsDst, vfsDst, sizeof(VCPFILESPEC));
+        lpvn->vfsDst = *vfsDst;
 
     lpvn->fl = fl;
     lpvn->lParam = lParam;
@@ -308,13 +306,6 @@ RETERR16 WINAPI VcpOpen16(VIFPROC vifproc, LPARAM lparamMsgRef)
     VCP_Proc = (FARPROC16)vifproc;
     VCP_MsgRef = lparamMsgRef;
 
-    /* load SETUPAPI needed for dialog resources etc. */
-    SETUPAPI_hInstance = GetModuleHandleA("setupapi.dll");
-    if (!SETUPAPI_hInstance)
-    {
-	ERR("Could not load sibling setupapi.dll\n");
-	return ERR_VCP_NOMEM;
-    }
     VCP_opened = TRUE;
     return OK;
 }
@@ -539,7 +530,7 @@ RETERR16 WINAPI VcpClose16(WORD fl, LPCSTR lpszBackupDest)
 
     TRACE("(%04x, '%s')\n", fl, lpszBackupDest);
 
-    /* FIXME: needs to sort virtnodes in case VCPFL_INSPECIFIEDORDER
+    /* FIXME: needs to sort VIRTNODEs in case VCPFL_INSPECIFIEDORDER
      * is not set. This is done by VCP_Callback(VCPM_NODECOMPARE) */
 
     TRACE("#1\n");

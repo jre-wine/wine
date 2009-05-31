@@ -179,7 +179,7 @@ static const char * getIoctlCommand(int command)
 static const char * getControlType(DWORD dwControlType)
 {
     static char str[64];
-#define TYPE_TO_STR(x) case x: return #x;
+#define TYPE_TO_STR(x) case x: return #x
     switch (dwControlType) {
     TYPE_TO_STR(MIXERCONTROL_CONTROLTYPE_CUSTOM);
     TYPE_TO_STR(MIXERCONTROL_CONTROLTYPE_BOOLEANMETER);
@@ -625,7 +625,7 @@ static DWORD MIX_GetDevCaps(WORD wDevID, LPMIXERCAPSW lpCaps, DWORD dwSize)
     capsW.wPid = WINE_MIXER_PRODUCT_ID;
     capsW.vDriverVersion = WINE_MIXER_VERSION;
     if (!(name = mix->name)) name = WINE_MIXER_NAME;
-    MultiByteToWideChar(CP_ACP, 0, name, -1, capsW.szPname, sizeof(capsW.szPname) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_UNIXCP, 0, name, -1, capsW.szPname, sizeof(capsW.szPname) / sizeof(WCHAR));
     capsW.cDestinations = 2; /* speakers & record */
     capsW.fdwSupport = 0; /* No bits defined yet */
 
@@ -665,8 +665,8 @@ static	DWORD	MIX_GetLineInfoDst(struct mixer* mix, LPMIXERLINEW lpMl,
 	return MMSYSERR_ERROR;
     }
     lpMl->dwSource = 0xFFFFFFFF;
-    MultiByteToWideChar(CP_ACP, 0, MIX_Labels[j], -1, lpMl->szShortName, sizeof(lpMl->szShortName) / sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, MIX_Names[j],  -1, lpMl->szName,      sizeof(lpMl->szName) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_UNIXCP, 0, MIX_Labels[j], -1, lpMl->szShortName, sizeof(lpMl->szShortName) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_UNIXCP, 0, MIX_Names[j],  -1, lpMl->szName,      sizeof(lpMl->szName) / sizeof(WCHAR));
 
     /* we have all connections found in the MIX_DevMask */
     lpMl->cConnections = 0;
@@ -696,8 +696,8 @@ static	DWORD	MIX_GetLineInfoSrc(struct mixer* mix, LPMIXERLINEW lpMl,
 
     TRACE("(%p, %p, %d, %08x)\n", mix, lpMl, idx, dst);
 
-    MultiByteToWideChar(CP_ACP, 0, MIX_Labels[idx], -1, lpMl->szShortName, sizeof(lpMl->szShortName) / sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, MIX_Names[idx],  -1, lpMl->szName,      sizeof(lpMl->szName) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_UNIXCP, 0, MIX_Labels[idx], -1, lpMl->szShortName, sizeof(lpMl->szShortName) / sizeof(WCHAR));
+    MultiByteToWideChar(CP_UNIXCP, 0, MIX_Names[idx],  -1, lpMl->szName,      sizeof(lpMl->szName) / sizeof(WCHAR));
     lpMl->dwLineID = MAKELONG(dst, idx);
     lpMl->dwDestination = dst;
     lpMl->cConnections = 1;
@@ -787,8 +787,8 @@ static DWORD MIX_GetLineInfo(WORD wDevID, LPMIXERLINEW lpMl, DWORD fdwInfo)
     }
 
     if (lpMl->cbStruct != sizeof(*lpMl)) {
-        WARN("invalid parameter: lpMl->cbStruct = %d != %d\n",
-             lpMl->cbStruct, sizeof(*lpMl));
+        WARN("invalid parameter: lpMl->cbStruct = %d\n",
+             lpMl->cbStruct);
 	return MMSYSERR_INVALPARAM;
     }
 
@@ -929,7 +929,7 @@ static DWORD MIX_GetLineInfo(WORD wDevID, LPMIXERLINEW lpMl, DWORD fdwInfo)
         lpMl->Target.wPid = WINE_MIXER_PRODUCT_ID;
         lpMl->Target.vDriverVersion = WINE_MIXER_VERSION;
         if (!(name = mix->name)) name = WINE_MIXER_NAME;
-        MultiByteToWideChar(CP_ACP, 0, name, -1, lpMl->Target.szPname, sizeof(lpMl->Target.szPname) / sizeof(WCHAR));
+        MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpMl->Target.szPname, sizeof(lpMl->Target.szPname) / sizeof(WCHAR));
     }
 
     return ret;
@@ -963,14 +963,14 @@ static	DWORD	MIX_GetLineControls(WORD wDevID, LPMIXERLINECONTROLSW lpMlc,
     }
 
     if (lpMlc->cbStruct < sizeof(*lpMlc)) {
-        WARN("invalid parameter: lpMlc->cbStruct = %d < %d\n",
-             lpMlc->cbStruct, sizeof(*lpMlc));
+        WARN("invalid parameter: lpMlc->cbStruct = %d\n",
+             lpMlc->cbStruct);
 	return MMSYSERR_INVALPARAM;
     }
 
     if (lpMlc->cbmxctrl < sizeof(MIXERCONTROLW)) {
-        WARN("invalid parameter: lpMlc->cbmxctrl = %d < %d\n",
-             lpMlc->cbmxctrl, sizeof(MIXERCONTROLW));
+        WARN("invalid parameter: lpMlc->cbmxctrl = %d\n",
+             lpMlc->cbmxctrl);
 	return MMSYSERR_INVALPARAM;
     }
 
@@ -1098,8 +1098,8 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_UNSIGNED)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_UNSIGNED));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1107,7 +1107,7 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
                           getControlType(mix->ctrl[c].ctrl.dwControlType),
                           lpmcd->cChannels);
 
-                    mcdu = (LPMIXERCONTROLDETAILS_UNSIGNED)lpmcd->paDetails;
+                    mcdu = lpmcd->paDetails;
 
 		    /* return value is 00RL (4 bytes)... */
 		    if ((val = mix->volume[chnl]) == -1 &&
@@ -1145,8 +1145,8 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_BOOLEAN)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_BOOLEAN));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1155,7 +1155,7 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
                           lpmcd->cChannels);
 
 		    /* we mute both channels at the same time */
-		    mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)lpmcd->paDetails;
+                    mcdb = lpmcd->paDetails;
 		    mcdb->fValue = (mix->volume[chnl] != -1);
 		    TRACE("=> %s\n", mcdb->fValue ? "on" : "off");
 		}
@@ -1167,8 +1167,8 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_BOOLEAN)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_BOOLEAN));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1188,7 +1188,7 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 			int				i, j;
 
 			/* we mute both channels at the same time */
-			mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)lpmcd->paDetails;
+			mcdb = lpmcd->paDetails;
 
 			for (i = j = 0; j < SOUND_MIXER_NRDEVICES; j++)
 			{
@@ -1229,14 +1229,14 @@ static	DWORD	MIX_GetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 		LPMIXERCONTROLDETAILS_LISTTEXTW	mcdlt;
 		int i, j;
 
-		mcdlt = (LPMIXERCONTROLDETAILS_LISTTEXTW)lpmcd->paDetails;
+		mcdlt = lpmcd->paDetails;
 		for (i = j = 0; j < SOUND_MIXER_NRDEVICES; j++)
 		{
 		    if (WINE_CHN_SUPPORTS(mix->recMask, j))
 		    {
 			mcdlt[i].dwParam1 = MAKELONG(LINEID_RECORD, j);
 			mcdlt[i].dwParam2 = 0;
-			MultiByteToWideChar(CP_ACP, 0, MIX_Names[j], -1, 
+			MultiByteToWideChar(CP_UNIXCP, 0, MIX_Names[j], -1,
                                             mcdlt[i].szName, sizeof(mcdlt[i]) / sizeof(WCHAR));
 			i++;
 		    }
@@ -1299,8 +1299,8 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_UNSIGNED)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_UNSIGNED));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1308,7 +1308,7 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
                           getControlType(mix->ctrl[c].ctrl.dwControlType),
                           lpmcd->cChannels);
 
-                    mcdu = (LPMIXERCONTROLDETAILS_UNSIGNED)lpmcd->paDetails;
+                    mcdu = lpmcd->paDetails;
 		    /* val should contain 00RL */
 		    switch (lpmcd->cChannels)
 		    {
@@ -1351,8 +1351,8 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_BOOLEAN)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_BOOLEAN));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1360,7 +1360,7 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
                           getControlType(mix->ctrl[c].ctrl.dwControlType),
                           lpmcd->cChannels);
 
-		    mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)lpmcd->paDetails;
+                    mcdb = lpmcd->paDetails;
 		    if (mcdb->fValue)
 		    {
                         /* save the volume and then set it to 0 */
@@ -1395,8 +1395,8 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
 
                     if (lpmcd->cbDetails !=
                         sizeof(MIXERCONTROLDETAILS_BOOLEAN)) {
-                        WARN("invalid parameter: cbDetails != %d\n",
-                             sizeof(MIXERCONTROLDETAILS_BOOLEAN));
+                        WARN("invalid parameter: cbDetails = %d\n",
+                             lpmcd->cbDetails);
                         return MMSYSERR_INVALPARAM;
                     }
 
@@ -1405,7 +1405,7 @@ static	DWORD	MIX_SetControlDetails(WORD wDevID, LPMIXERCONTROLDETAILS lpmcd,
                           lpmcd->cChannels);
 
 		    /* we mute both channels at the same time */
-		    mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)lpmcd->paDetails;
+                    mcdb = lpmcd->paDetails;
 		    mask = 0;
 		    for (i = j = 0; j < SOUND_MIXER_NRDEVICES; j++)
 		    {
@@ -1524,11 +1524,11 @@ static	DWORD	MIX_GetNumDevs(void)
 /**************************************************************************
  * 				mxdMessage (WINEOSS.3)
  */
-DWORD WINAPI OSS_mxdMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_mxdMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
 #ifdef HAVE_OSS
-    TRACE("(%04X, %s, %08X, %08X, %08X);\n", wDevID, getMessage(wMsg),
+    TRACE("(%04X, %s, %08lX, %08lX, %08lX);\n", wDevID, getMessage(wMsg),
           dwUser, dwParam1, dwParam2);
 
     switch (wMsg)
@@ -1540,7 +1540,7 @@ DWORD WINAPI OSS_mxdMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
 	/* FIXME: Pretend this is supported */
 	return 0;
     case MXDM_GETDEVCAPS:
-	return MIX_GetDevCaps(wDevID, (LPMIXERCAPSW)dwParam1, dwParam2);
+        return MIX_GetDevCaps(wDevID, (LPMIXERCAPSW)dwParam1, dwParam2);
     case MXDM_GETLINEINFO:
 	return MIX_GetLineInfo(wDevID, (LPMIXERLINEW)dwParam1, dwParam2);
     case MXDM_GETNUMDEVS:
@@ -1561,7 +1561,7 @@ DWORD WINAPI OSS_mxdMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
 	return MMSYSERR_NOTSUPPORTED;
     }
 #else
-    TRACE("(%04X, %04X, %08X, %08X, %08X);\n", wDevID, wMsg,
+    TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n", wDevID, wMsg,
           dwUser, dwParam1, dwParam2);
 
     return MMSYSERR_NOTENABLED;

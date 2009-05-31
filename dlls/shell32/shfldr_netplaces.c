@@ -3,7 +3,7 @@
  *
  *	Copyright 1997			Marcus Meissner
  *	Copyright 1998, 1999, 2002	Juergen Schmied
- *	Copyright 2003                  Mike McCormack for Codeweavers
+ *	Copyright 2003                  Mike McCormack for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -43,6 +43,7 @@
 #include "shell32_main.h"
 #include "shresdef.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 #include "debughlp.h"
 #include "shfldr.h"
 
@@ -65,14 +66,14 @@ static const IShellFolder2Vtbl vt_ShellFolder2;
 static const IPersistFolder2Vtbl vt_NP_PersistFolder2;
 
 
-#define _IPersistFolder2_Offset ((int)(&(((IGenericSFImpl*)0)->lpVtblPersistFolder2)))
-#define _ICOM_THIS_From_IPersistFolder2(class, name) class* This = (class*)(((char*)name)-_IPersistFolder2_Offset);
+#define _ICOM_THIS_From_IPersistFolder2(class, name) class* This = \
+    (class*)(((char*)name) - FIELD_OFFSET(IGenericSFImpl, lpVtblPersistFolder2))
 
-#define _IUnknown_(This)	(IUnknown*)&(This->lpVtbl)
-#define _IShellFolder_(This)	(IShellFolder*)&(This->lpVtbl)
-#define _IPersistFolder2_(This)	(IPersistFolder2*)&(This->lpVtblPersistFolder2)
+#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
+#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpVtbl)
+#define _IPersistFolder2_(This) (&(This)->lpVtblPersistFolder2)
 
-static shvheader NetworkPlacesSFHeader[] = {
+static const shvheader NetworkPlacesSFHeader[] = {
     {IDS_SHV_COLUMN1, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 15},
     {IDS_SHV_COLUMN9, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_RIGHT, 10}
 };
@@ -93,7 +94,7 @@ HRESULT WINAPI ISF_NetworkPlaces_Constructor (IUnknown * pUnkOuter, REFIID riid,
     if (pUnkOuter)
         return CLASS_E_NOAGGREGATION;
 
-    sf = (IGenericSFImpl *) HeapAlloc ( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof (IGenericSFImpl));
+    sf = HeapAlloc (GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof (IGenericSFImpl));
     if (!sf)
         return E_OUTOFMEMORY;
 
@@ -102,7 +103,7 @@ HRESULT WINAPI ISF_NetworkPlaces_Constructor (IUnknown * pUnkOuter, REFIID riid,
     sf->lpVtblPersistFolder2 = &vt_NP_PersistFolder2;
     sf->pidlRoot = _ILCreateNetHood();	/* my qualified pidl */
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
     {
         IUnknown_Release (_IUnknown_ (sf));
         return E_NOINTERFACE;
@@ -181,17 +182,53 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnParseDisplayName (IShellFolder2 * ifac
                HWND hwndOwner, LPBC pbcReserved, LPOLESTR lpszDisplayName,
                DWORD * pchEaten, LPITEMIDLIST * ppidl, DWORD * pdwAttributes)
 {
+    static const WCHAR wszEntireNetwork[] = {'E','n','t','i','r','e','N','e','t','w','o','r','k'}; /* not nul-terminated */
     IGenericSFImpl *This = (IGenericSFImpl *)iface;
-
-    HRESULT hr = E_UNEXPECTED;
+    HRESULT hr = E_INVALIDARG;
+    LPCWSTR szNext = NULL;
+    WCHAR szElement[MAX_PATH];
+    LPITEMIDLIST pidlTemp = NULL;
+    int len;
 
     TRACE ("(%p)->(HWND=%p,%p,%p=%s,%p,pidl=%p,%p)\n", This,
             hwndOwner, pbcReserved, lpszDisplayName, debugstr_w (lpszDisplayName),
             pchEaten, ppidl, pdwAttributes);
 
-    *ppidl = 0;
-    if (pchEaten)
-        *pchEaten = 0;		/* strange but like the original */
+    *ppidl = NULL;
+
+    szNext = GetNextElementW (lpszDisplayName, szElement, MAX_PATH);
+    len = strlenW(szElement);
+    if (len == sizeof(wszEntireNetwork)/sizeof(wszEntireNetwork[0]) &&
+        !strncmpiW(szElement, wszEntireNetwork, sizeof(wszEntireNetwork)/sizeof(wszEntireNetwork[0])))
+    {
+        pidlTemp = _ILCreateEntireNetwork();
+        if (pidlTemp)
+            hr = S_OK;
+        else
+            hr = E_OUTOFMEMORY;
+    }
+    else
+        FIXME("not implemented for %s\n", debugstr_w(lpszDisplayName));
+
+    if (SUCCEEDED(hr) && pidlTemp)
+    {
+        if (szNext && *szNext)
+        {
+            hr = SHELL32_ParseNextElement(iface, hwndOwner, pbcReserved,
+                    &pidlTemp, (LPOLESTR) szNext, pchEaten, pdwAttributes);
+        }
+        else
+        {
+            if (pdwAttributes && *pdwAttributes)
+                hr = SHELL32_GetItemAttributes(_IShellFolder_ (This),
+                                               pidlTemp, pdwAttributes);
+        }
+    }
+
+    if (SUCCEEDED(hr))
+        *ppidl = pidlTemp;
+    else
+        ILFree(pidlTemp);
 
     TRACE ("(%p)->(-- ret=0x%08x)\n", This, hr);
 
@@ -272,31 +309,31 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnCreateViewObject (IShellFolder2 * ifac
     HRESULT hr = E_INVALIDARG;
 
     TRACE ("(%p)->(hwnd=%p,%s,%p)\n", This,
-            hwndOwner, shdebugstr_guid (riid), ppvOut);
+           hwndOwner, shdebugstr_guid (riid), ppvOut);
 
     if (!ppvOut)
         return hr;
 
-	*ppvOut = NULL;
+    *ppvOut = NULL;
 
-	if (IsEqualIID (riid, &IID_IDropTarget))
+    if (IsEqualIID (riid, &IID_IDropTarget))
     {
-	    WARN ("IDropTarget not implemented\n");
-	    hr = E_NOTIMPL;
-	}
+        WARN ("IDropTarget not implemented\n");
+        hr = E_NOTIMPL;
+    }
     else if (IsEqualIID (riid, &IID_IContextMenu))
     {
-	    WARN ("IContextMenu not implemented\n");
-	    hr = E_NOTIMPL;
-	}
+        WARN ("IContextMenu not implemented\n");
+        hr = E_NOTIMPL;
+    }
     else if (IsEqualIID (riid, &IID_IShellView))
     {
-	    pShellView = IShellView_Constructor ((IShellFolder *) iface);
-	    if (pShellView)
+        pShellView = IShellView_Constructor ((IShellFolder *) iface);
+        if (pShellView)
         {
             hr = IShellView_QueryInterface (pShellView, riid, ppvOut);
             IShellView_Release (pShellView);
-	    }
+        }
     }
     TRACE ("-- (%p)->(interface=%p)\n", This, ppvOut);
     return hr;
@@ -380,43 +417,43 @@ static HRESULT WINAPI ISF_NetworkPlaces_fnGetUIObjectOf (IShellFolder2 * iface,
     if (!ppvOut)
         return hr;
 
-	*ppvOut = NULL;
+    *ppvOut = NULL;
 
-	if (IsEqualIID (riid, &IID_IContextMenu) && (cidl >= 1))
+    if (IsEqualIID (riid, &IID_IContextMenu) && (cidl >= 1))
     {
-	    pObj = (LPUNKNOWN) ISvItemCm_Constructor ((IShellFolder *) iface, This->pidlRoot, apidl, cidl);
-	    hr = S_OK;
-	}
+        pObj = (LPUNKNOWN) ISvItemCm_Constructor ((IShellFolder *) iface, This->pidlRoot, apidl, cidl);
+        hr = S_OK;
+    }
     else if (IsEqualIID (riid, &IID_IDataObject) && (cidl >= 1))
     {
-	    pObj = (LPUNKNOWN) IDataObject_Constructor (hwndOwner, This->pidlRoot, apidl, cidl);
-	    hr = S_OK;
-	}
+        pObj = (LPUNKNOWN) IDataObject_Constructor (hwndOwner, This->pidlRoot, apidl, cidl);
+        hr = S_OK;
+    }
     else if (IsEqualIID (riid, &IID_IExtractIconA) && (cidl == 1))
     {
-	    pidl = ILCombine (This->pidlRoot, apidl[0]);
-	    pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
-	    SHFree (pidl);
-	    hr = S_OK;
-	}
+        pidl = ILCombine (This->pidlRoot, apidl[0]);
+        pObj = (LPUNKNOWN) IExtractIconA_Constructor (pidl);
+        SHFree (pidl);
+        hr = S_OK;
+    }
     else if (IsEqualIID (riid, &IID_IExtractIconW) && (cidl == 1))
     {
-	    pidl = ILCombine (This->pidlRoot, apidl[0]);
-	    pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
-	    SHFree (pidl);
-	    hr = S_OK;
-	}
+        pidl = ILCombine (This->pidlRoot, apidl[0]);
+        pObj = (LPUNKNOWN) IExtractIconW_Constructor (pidl);
+        SHFree (pidl);
+        hr = S_OK;
+    }
     else if (IsEqualIID (riid, &IID_IDropTarget) && (cidl >= 1))
     {
-	    hr = IShellFolder_QueryInterface (iface, &IID_IDropTarget, (LPVOID *) & pObj);
-	}
+        hr = IShellFolder_QueryInterface (iface, &IID_IDropTarget, (LPVOID *) & pObj);
+    }
     else
-	    hr = E_NOINTERFACE;
+        hr = E_NOINTERFACE;
 
-	if (SUCCEEDED(hr) && !pObj)
-	    hr = E_OUTOFMEMORY;
+    if (SUCCEEDED(hr) && !pObj)
+        hr = E_OUTOFMEMORY;
 
-	*ppvOut = pObj;
+    *ppvOut = pObj;
     TRACE ("(%p)->hr=0x%08x\n", This, hr);
     return hr;
 }

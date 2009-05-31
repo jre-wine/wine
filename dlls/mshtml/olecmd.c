@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 #include "shlguid.h"
 #include "mshtmdid.h"
@@ -56,7 +52,7 @@ void do_ns_command(NSContainer *This, const char *cmd, nsICommandParams *nsparam
         return;
     }
 
-    nsres = nsICommandManager_DoCommand(cmdmgr, cmd, nsparam, NULL);
+    nsres = nsICommandManager_DoCommand(cmdmgr, cmd, nsparam, This->doc->window->nswindow);
     if(NS_FAILED(nsres))
         ERR("DoCommand(%s) failed: %08x\n", debugstr_a(cmd), nsres);
 
@@ -629,7 +625,8 @@ static HRESULT exec_editmode(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
             call_set_active_object(This->ip_window, ACTOBJ(This));
 
         memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
-        IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
+        if (This->frame)
+            IOleInPlaceFrame_SetBorderSpace(This->frame, &rcBorderWidths);
     }
 
     return S_OK;

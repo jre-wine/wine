@@ -3,10 +3,9 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = msi.dll
-IMPORTLIB = libmsi.$(IMPLIBEXT)
-IMPORTS   = urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32 kernel32 ntdll
+IMPORTLIB = msi
+IMPORTS   = uuid urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32 kernel32 ntdll
 DELAYIMPORTS = odbccp32
-EXTRALIBS = -luuid
 
 C_SRCS = \
 	action.c \
@@ -20,6 +19,7 @@ C_SRCS = \
 	delete.c \
 	dialog.c \
 	distinct.c \
+	drop.c \
 	events.c \
 	files.c \
 	font.c \
@@ -29,6 +29,7 @@ C_SRCS = \
 	insert.c \
 	install.c \
 	join.c \
+	media.c \
 	msi.c \
 	msi_main.c \
 	msiquery.c \
@@ -40,6 +41,7 @@ C_SRCS = \
 	script.c \
 	select.c \
 	source.c \
+	storages.c \
 	streams.c \
 	string.c \
 	suminfo.c \

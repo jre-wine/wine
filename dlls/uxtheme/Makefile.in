@@ -3,11 +3,12 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = uxtheme.dll
-IMPORTLIB = libuxtheme.$(IMPLIBEXT)
+IMPORTLIB = uxtheme
 IMPORTS   = user32 gdi32 advapi32 kernel32
 DELAYIMPORTS = msimg32
 
 C_SRCS = \
+	buffer.c \
 	draw.c \
 	main.c \
 	metric.c \

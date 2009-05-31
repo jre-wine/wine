@@ -8,9 +8,6 @@
  * Copyright (C) 1998 Matthew Becker
  * Copyright (C) 1999 Sylvain St-Germain
  *
- * This file is concerned about handle management and interaction with the Wine server.
- * Registry file I/O is in misc/registry.c.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -44,12 +41,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(reg);
 
-/* allowed bits for access mask */
-#define KEY_ACCESS_MASK (KEY_ALL_ACCESS | MAXIMUM_ALLOWED)
-
 #define HKEY_SPECIAL_ROOT_FIRST   HKEY_CLASSES_ROOT
 #define HKEY_SPECIAL_ROOT_LAST    HKEY_DYN_DATA
-#define NB_SPECIAL_ROOT_KEYS      ((UINT)HKEY_SPECIAL_ROOT_LAST - (UINT)HKEY_SPECIAL_ROOT_FIRST + 1)
+#define NB_SPECIAL_ROOT_KEYS      ((UINT_PTR)HKEY_SPECIAL_ROOT_LAST - (UINT_PTR)HKEY_SPECIAL_ROOT_FIRST + 1)
 
 static HKEY special_root_keys[NB_SPECIAL_ROOT_KEYS];
 static BOOL hkcu_cache_disabled;
@@ -150,6 +144,32 @@ static inline HKEY get_special_root_hkey( HKEY hkey )
 
 
 /******************************************************************************
+ * RegOverridePredefKey   [ADVAPI32.@]
+ */
+LSTATUS WINAPI RegOverridePredefKey( HKEY hkey, HKEY override )
+{
+    HKEY old_key;
+    int idx;
+
+    if ((hkey < HKEY_SPECIAL_ROOT_FIRST) || (hkey > HKEY_SPECIAL_ROOT_LAST))
+        return ERROR_INVALID_PARAMETER;
+    idx = (UINT_PTR)hkey - (UINT_PTR)HKEY_SPECIAL_ROOT_FIRST;
+
+    if (override)
+    {
+        NTSTATUS status = NtDuplicateObject( GetCurrentProcess(), override,
+                                             GetCurrentProcess(), (HANDLE *)&override,
+                                             0, 0, DUPLICATE_SAME_ACCESS );
+        if (status) return RtlNtStatusToDosError( status );
+    }
+
+    old_key = InterlockedExchangePointer( (void **)&special_root_keys[idx], override );
+    if (old_key) NtClose( old_key );
+    return ERROR_SUCCESS;
+}
+
+
+/******************************************************************************
  * RegCreateKeyExW   [ADVAPI32.@]
  *
  * See RegCreateKeyExA.
@@ -162,7 +182,6 @@ LSTATUS WINAPI RegCreateKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, LPWSTR 
     UNICODE_STRING nameW, classW;
 
     if (reserved) return ERROR_INVALID_PARAMETER;
-    if (!(access & KEY_ACCESS_MASK) || (access & ~KEY_ACCESS_MASK)) return ERROR_ACCESS_DENIED;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     attr.Length = sizeof(attr);
@@ -217,7 +236,6 @@ LSTATUS WINAPI RegCreateKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, LPSTR cl
         access = KEY_ALL_ACCESS;  /* Win95 ignores the access mask */
         if (name && *name == '\\') name++; /* win9x,ME ignores one (and only one) beginning backslash */
     }
-    else if (!(access & KEY_ACCESS_MASK) || (access & ~KEY_ACCESS_MASK)) return ERROR_ACCESS_DENIED;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     attr.Length = sizeof(attr);
@@ -288,6 +306,9 @@ LSTATUS WINAPI RegOpenKeyExW( HKEY hkey, LPCWSTR name, DWORD reserved, REGSAM ac
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
 
+    /* NT+ allows beginning backslash for HKEY_CLASSES_ROOT */
+    if (hkey == HKEY_CLASSES_ROOT && name && *name == '\\') name++;
+
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
     attr.Length = sizeof(attr);
@@ -328,6 +349,11 @@ LSTATUS WINAPI RegOpenKeyExA( HKEY hkey, LPCSTR name, DWORD reserved, REGSAM acc
     NTSTATUS status;
 
     if (!is_version_nt()) access = KEY_ALL_ACCESS;  /* Win95 ignores the access mask */
+    else
+    {
+        /* NT+ allows beginning backslash for HKEY_CLASSES_ROOT */
+        if (hkey == HKEY_CLASSES_ROOT && name && *name == '\\') name++;
+    }
 
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 
@@ -444,8 +470,8 @@ LSTATUS WINAPI RegEnumKeyExW( HKEY hkey, DWORD index, LPWSTR name, LPDWORD name_
     KEY_NODE_INFORMATION *info = (KEY_NODE_INFORMATION *)buffer;
     DWORD total_size;
 
-    TRACE( "(%p,%d,%p,%p(%d),%p,%p,%p,%p)\n", hkey, index, name, name_len,
-           name_len ? *name_len : -1, reserved, class, class_len, ft );
+    TRACE( "(%p,%d,%p,%p(%u),%p,%p,%p,%p)\n", hkey, index, name, name_len,
+           name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
@@ -508,8 +534,8 @@ LSTATUS WINAPI RegEnumKeyExA( HKEY hkey, DWORD index, LPSTR name, LPDWORD name_l
     KEY_NODE_INFORMATION *info = (KEY_NODE_INFORMATION *)buffer;
     DWORD total_size;
 
-    TRACE( "(%p,%d,%p,%p(%d),%p,%p,%p,%p)\n", hkey, index, name, name_len,
-           name_len ? *name_len : -1, reserved, class, class_len, ft );
+    TRACE( "(%p,%d,%p,%p(%u),%p,%p,%p,%p)\n", hkey, index, name, name_len,
+           name_len ? *name_len : 0, reserved, class, class_len, ft );
 
     if (reserved) return ERROR_INVALID_PARAMETER;
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
@@ -1065,7 +1091,7 @@ LSTATUS WINAPI RegSetValueExA( HKEY hkey, LPCSTR name, DWORD reserved, DWORD typ
  *  lpSubKey [I] Name of a subkey of hKey.
  *  dwType   [I] Type of information to store.
  *  lpData   [I] String that contains the data to set for the default value.
- *  cbData   [I] Size of lpData.
+ *  cbData   [I] Ignored.
  *
  * RETURNS
  *  Success: ERROR_SUCCESS
@@ -1078,7 +1104,7 @@ LSTATUS WINAPI RegSetValueW( HKEY hkey, LPCWSTR name, DWORD type, LPCWSTR data, 
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_w(name), type, debugstr_w(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -1104,7 +1130,7 @@ LSTATUS WINAPI RegSetValueA( HKEY hkey, LPCSTR name, DWORD type, LPCSTR data, DW
 
     TRACE("(%p,%s,%d,%s,%d)\n", hkey, debugstr_a(name), type, debugstr_a(data), count );
 
-    if (type != REG_SZ) return ERROR_INVALID_PARAMETER;
+    if (type != REG_SZ || !data) return ERROR_INVALID_PARAMETER;
 
     if (name && name[0])  /* need to create the subkey */
     {
@@ -1417,8 +1443,8 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
 /******************************************************************************
  * RegGetValueW   [ADVAPI32.@]
  *
- * Retrieves the type and data for a value name associated with a key 
- * optionally expanding it's content and restricting it's type.
+ * Retrieves the type and data for a value name associated with a key,
+ * optionally expanding its content and restricting its type.
  *
  * PARAMS
  *  hKey      [I] Handle to an open key.
@@ -1427,18 +1453,21 @@ static VOID ADVAPI_ApplyRestrictions( DWORD dwFlags, DWORD dwType,
  *  dwFlags   [I] Flags restricting the value type to retrieve.
  *  pdwType   [O] Destination for the values type, may be NULL.
  *  pvData    [O] Destination for the values content, may be NULL.
- *  pcbData   [I/O] Size of pvData, updated with the size required to 
- *                  retrieve the whole content.
+ *  pcbData   [I/O] Size of pvData, updated with the size in bytes required to
+ *                  retrieve the whole content, including the trailing '\0'
+ *                  for strings.
  *
  * RETURNS
  *  Success: ERROR_SUCCESS
  *  Failure: nonzero error code from Winerror.h
  *
  * NOTES
- *  - Unless RRF_NOEXPAND is specified REG_EXPAND_SZ is automatically expanded
- *    and REG_SZ is retrieved instead.
+ *  - Unless RRF_NOEXPAND is specified, REG_EXPAND_SZ values are automatically
+ *    expanded and pdwType is set to REG_SZ instead.
  *  - Restrictions are applied after expanding, using RRF_RT_REG_EXPAND_SZ 
  *    without RRF_NOEXPAND is thus not allowed.
+ *    An exception is the case where RRF_RT_ANY is specified, because then
+ *    RRF_NOEXPAND is allowed.
  */
 LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
                           DWORD dwFlags, LPDWORD pdwType, PVOID pvData,
@@ -1454,7 +1483,8 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
 
     if (pvData && !pcbData)
         return ERROR_INVALID_PARAMETER;
-    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
+    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND) &&
+            ((dwFlags & RRF_RT_ANY) != RRF_RT_ANY))
         return ERROR_INVALID_PARAMETER;
 
     if (pszSubKey && pszSubKey[0])
@@ -1503,9 +1533,9 @@ LSTATUS WINAPI RegGetValueW( HKEY hKey, LPCWSTR pszSubKey, LPCWSTR pszValue,
             if (dwType == REG_EXPAND_SZ)
             {
                 cbData = ExpandEnvironmentStringsW(pvBuf, pvData,
-                                                   pcbData ? *pcbData : 0);
+                                                   pcbData ? *pcbData : 0) * sizeof(WCHAR);
                 dwType = REG_SZ;
-                if(pcbData && cbData > *pcbData)
+                if(pvData && pcbData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
             else if (pvData)
@@ -1549,7 +1579,8 @@ LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
 
     if (pvData && !pcbData)
         return ERROR_INVALID_PARAMETER;
-    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND))
+    if ((dwFlags & RRF_RT_REG_EXPAND_SZ) && !(dwFlags & RRF_NOEXPAND) &&
+            ((dwFlags & RRF_RT_ANY) != RRF_RT_ANY))
         return ERROR_INVALID_PARAMETER;
 
     if (pszSubKey && pszSubKey[0])
@@ -1600,7 +1631,7 @@ LSTATUS WINAPI RegGetValueA( HKEY hKey, LPCSTR pszSubKey, LPCSTR pszValue,
                 cbData = ExpandEnvironmentStringsA(pvBuf, pvData,
                                                    pcbData ? *pcbData : 0);
                 dwType = REG_SZ;
-                if(pcbData && cbData > *pcbData)
+                if(pvData && pcbData && cbData > *pcbData)
                     ret = ERROR_MORE_DATA;
             }
             else if (pvData)
@@ -2237,7 +2268,7 @@ LSTATUS WINAPI RegGetKeySecurity( HKEY hkey, SECURITY_INFORMATION SecurityInform
                                LPDWORD lpcbSecurityDescriptor )
 {
     TRACE("(%p,%d,%p,%d)\n",hkey,SecurityInformation,pSecurityDescriptor,
-          lpcbSecurityDescriptor?*lpcbSecurityDescriptor:0);
+          *lpcbSecurityDescriptor);
 
     if (!(hkey = get_special_root_hkey( hkey ))) return ERROR_INVALID_HANDLE;
 

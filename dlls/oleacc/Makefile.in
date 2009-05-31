@@ -3,11 +3,13 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = oleacc.dll
-IMPORTLIB = liboleacc.$(IMPLIBEXT)
-IMPORTS   = kernel32
+IMPORTLIB = oleacc
+IMPORTS   = user32 kernel32
 
 C_SRCS = \
 	main.c
+
+RC_SRCS = oleacc.rc
 
 @MAKE_DLL_RULES@
 

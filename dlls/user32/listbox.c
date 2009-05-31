@@ -43,6 +43,7 @@
 #include "wine/unicode.h"
 #include "user_private.h"
 #include "controls.h"
+#include "wine/exception.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(listbox);
@@ -581,9 +582,9 @@ static void LISTBOX_PaintItem( LB_DESCR *descr, HDC hdc, const RECT *rect,
         if (!IsWindowEnabled(descr->self)) dis.itemState |= ODS_DISABLED;
         dis.itemData     = item->data;
         dis.rcItem       = *rect;
-        TRACE("[%p]: drawitem %d (%s) action=%02x state=%02x rect=%d,%d-%d,%d\n",
+        TRACE("[%p]: drawitem %d (%s) action=%02x state=%02x rect=%s\n",
               descr->self, index, item ? debugstr_w(item->str) : "", action,
-              dis.itemState, rect->left, rect->top, rect->right, rect->bottom );
+              dis.itemState, wine_dbgstr_rect(rect) );
         SendMessageW(descr->owner, WM_DRAWITEM, dis.CtlID, (LPARAM)&dis);
     }
     else
@@ -601,9 +602,9 @@ static void LISTBOX_PaintItem( LB_DESCR *descr, HDC hdc, const RECT *rect,
             oldText = SetTextColor( hdc, GetSysColor(COLOR_HIGHLIGHTTEXT));
         }
 
-        TRACE("[%p]: painting %d (%s) action=%02x rect=%d,%d-%d,%d\n",
+        TRACE("[%p]: painting %d (%s) action=%02x rect=%s\n",
               descr->self, index, item ? debugstr_w(item->str) : "", action,
-              rect->left, rect->top, rect->right, rect->bottom );
+              wine_dbgstr_rect(rect) );
         if (!item)
             ExtTextOutW( hdc, rect->left + 1, rect->top,
                            ETO_OPAQUE | ETO_CLIPPED, rect, NULL, 0, NULL );
@@ -799,6 +800,8 @@ static BOOL LISTBOX_SetTabStops( LB_DESCR *descr, INT count, LPINT tabs, BOOL sh
  */
 static LRESULT LISTBOX_GetText( LB_DESCR *descr, INT index, LPWSTR buffer, BOOL unicode )
 {
+    DWORD len;
+
     if ((index < 0) || (index >= descr->nb_items))
     {
         SetLastError(ERROR_INVALID_INDEX);
@@ -808,7 +811,7 @@ static LRESULT LISTBOX_GetText( LB_DESCR *descr, INT index, LPWSTR buffer, BOOL 
     {
         if (!buffer)
         {
-            DWORD len = strlenW(descr->items[index].str);
+            len = strlenW(descr->items[index].str);
             if( unicode )
                 return len;
             return WideCharToMultiByte( CP_ACP, 0, descr->items[index].str, len,
@@ -817,20 +820,32 @@ static LRESULT LISTBOX_GetText( LB_DESCR *descr, INT index, LPWSTR buffer, BOOL 
 
 	TRACE("index %d (0x%04x) %s\n", index, index, debugstr_w(descr->items[index].str));
 
-        if(unicode)
+        __TRY  /* hide a Delphi bug that passes a read-only buffer */
         {
-            strcpyW( buffer, descr->items[index].str );
-            return strlenW(buffer);
+            if(unicode)
+            {
+                strcpyW( buffer, descr->items[index].str );
+                len = strlenW(buffer);
+            }
+            else
+            {
+                len = WideCharToMultiByte(CP_ACP, 0, descr->items[index].str, -1,
+                                          (LPSTR)buffer, 0x7FFFFFFF, NULL, NULL) - 1;
+            }
         }
-        else
+        __EXCEPT_PAGE_FAULT
         {
-            return WideCharToMultiByte(CP_ACP, 0, descr->items[index].str, -1, (LPSTR)buffer, 0x7FFFFFFF, NULL, NULL) - 1;
+            WARN( "got an invalid buffer (Delphi bug?)\n" );
+            SetLastError( ERROR_INVALID_PARAMETER );
+            return LB_ERR;
         }
+        __ENDTRY
     } else {
         if (buffer)
             *((LPDWORD)buffer)=*(LPDWORD)(&descr->items[index].data);
-        return sizeof(DWORD);
+        len = sizeof(DWORD);
     }
+    return len;
 }
 
 static inline INT LISTBOX_lstrcmpiW( LCID lcid, LPCWSTR str1, LPCWSTR str2 )
@@ -2442,7 +2457,7 @@ static LRESULT LISTBOX_HandleKeyDown( LB_DESCR *descr, DWORD key )
             LISTBOX_SetSelection( descr, caret, TRUE, FALSE);
         if (descr->style & LBS_NOTIFY)
         {
-            if( descr->lphc )
+            if (descr->lphc && IsWindowVisible( descr->self ))
             {
                 /* make sure that combo parent doesn't hide us */
                 descr->lphc->wState |= CBF_NOROLLUP;
@@ -2591,8 +2606,8 @@ static BOOL LISTBOX_Destroy( LB_DESCR *descr )
 /***********************************************************************
  *           ListBoxWndProc_common
  */
-static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
-                                             WPARAM wParam, LPARAM lParam, BOOL unicode )
+static LRESULT ListBoxWndProc_common( HWND hwnd, UINT msg,
+                                      WPARAM wParam, LPARAM lParam, BOOL unicode )
 {
     LB_DESCR *descr = (LB_DESCR *)GetWindowLongPtrW( hwnd, 0 );
     LPHEADCOMBO lphc = 0;
@@ -2605,9 +2620,9 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
         if (msg == WM_CREATE)
         {
 	    CREATESTRUCTW *lpcs = (CREATESTRUCTW *)lParam;
-	    if (lpcs->style & LBS_COMBOBOX) lphc = (LPHEADCOMBO)lpcs->lpCreateParams;
+            if (lpcs->style & LBS_COMBOBOX) lphc = lpcs->lpCreateParams;
             if (!LISTBOX_Create( hwnd, lphc )) return -1;
-            TRACE("creating wnd=%p descr=%x\n", hwnd, GetWindowLongPtrW( hwnd, 0 ) );
+            TRACE("creating hwnd %p descr %p\n", hwnd, (void *)GetWindowLongPtrW( hwnd, 0 ) );
             return 0;
         }
         /* Ignore all other messages before we get a WM_CREATE */
@@ -2643,6 +2658,8 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
             INT countW = MultiByteToWideChar(CP_ACP, 0, textA, -1, NULL, 0);
             if((textW = HeapAlloc(GetProcessHeap(), 0, countW * sizeof(WCHAR))))
                 MultiByteToWideChar(CP_ACP, 0, textA, -1, textW, countW);
+            else
+                return LB_ERRSPACE;
         }
         wParam = LISTBOX_FindStringPos( descr, textW, FALSE );
         ret = LISTBOX_InsertString( descr, wParam, textW );
@@ -2667,6 +2684,8 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
             INT countW = MultiByteToWideChar(CP_ACP, 0, textA, -1, NULL, 0);
             if((textW = HeapAlloc(GetProcessHeap(), 0, countW * sizeof(WCHAR))))
                 MultiByteToWideChar(CP_ACP, 0, textA, -1, textW, countW);
+            else
+                return LB_ERRSPACE;
         }
         ret = LISTBOX_InsertString( descr, wParam, textW );
         if(!unicode && HAS_STRINGS(descr))
@@ -2689,6 +2708,8 @@ static LRESULT WINAPI ListBoxWndProc_common( HWND hwnd, UINT msg,
             INT countW = MultiByteToWideChar(CP_ACP, 0, textA, -1, NULL, 0);
             if((textW = HeapAlloc(GetProcessHeap(), 0, countW * sizeof(WCHAR))))
                 MultiByteToWideChar(CP_ACP, 0, textA, -1, textW, countW);
+            else
+                return LB_ERRSPACE;
         }
         wParam = LISTBOX_FindFileStrPos( descr, textW );
         ret = LISTBOX_InsertString( descr, wParam, textW );

@@ -80,7 +80,7 @@ static HRESULT WINAPI ClassMoniker_QueryInterface(IMoniker* iface,REFIID riid,vo
         *ppvObject = iface;
     }
     else if (IsEqualIID(&IID_IROTData, riid))
-        *ppvObject = (IROTData*)&(This->lpVtblRotData);
+        *ppvObject = &This->lpVtblRotData;
     else if (IsEqualIID(&IID_IMarshal, riid))
     {
         HRESULT hr = S_OK;
@@ -116,7 +116,7 @@ static ULONG WINAPI ClassMoniker_AddRef(IMoniker* iface)
 /******************************************************************************
  *        ClassMoniker_Destroy (local function)
  *******************************************************************************/
-static HRESULT WINAPI ClassMoniker_Destroy(ClassMoniker* This)
+static HRESULT ClassMoniker_Destroy(ClassMoniker* This)
 {
     TRACE("(%p)\n",This);
 
@@ -627,9 +627,9 @@ static ULONG WINAPI ClassMonikerROTData_Release(IROTData* iface)
 }
 
 /******************************************************************************
- *        ClassMonikerIROTData_GetComparaisonData
+ *        ClassMonikerIROTData_GetComparisonData
  ******************************************************************************/
-static HRESULT WINAPI ClassMonikerROTData_GetComparaisonData(IROTData* iface,
+static HRESULT WINAPI ClassMonikerROTData_GetComparisonData(IROTData* iface,
                                                          BYTE* pbData,
                                                          ULONG cbMax,
                                                          ULONG* pcbData)
@@ -687,13 +687,13 @@ static const IROTDataVtbl ROTDataVtbl =
     ClassMonikerROTData_QueryInterface,
     ClassMonikerROTData_AddRef,
     ClassMonikerROTData_Release,
-    ClassMonikerROTData_GetComparaisonData
+    ClassMonikerROTData_GetComparisonData
 };
 
 /******************************************************************************
  *         ClassMoniker_Construct (local function)
  *******************************************************************************/
-static HRESULT WINAPI ClassMoniker_Construct(ClassMoniker* This, REFCLSID rclsid)
+static HRESULT ClassMoniker_Construct(ClassMoniker* This, REFCLSID rclsid)
 {
     TRACE("(%p,%s)\n",This,debugstr_guid(rclsid));
 

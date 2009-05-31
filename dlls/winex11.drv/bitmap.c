@@ -69,7 +69,7 @@ void X11DRV_BITMAP_Init(void)
 /***********************************************************************
  *           SelectBitmap   (X11DRV.@)
  */
-HBITMAP X11DRV_SelectBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
+HBITMAP CDECL X11DRV_SelectBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
 {
     X_PHYSBITMAP *physBitmap;
     BITMAP bitmap;
@@ -111,7 +111,7 @@ HBITMAP X11DRV_SelectBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap )
  *
  * Returns TRUE on success else FALSE
  */
-BOOL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBits )
+BOOL CDECL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBits )
 {
     X_PHYSBITMAP *physBitmap;
     BITMAP bitmap;
@@ -122,9 +122,7 @@ BOOL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBit
     if (bitmap.bmPlanes != 1) return FALSE;
 
     /* check if bpp is compatible with screen depth */
-    if (!((bitmap.bmBitsPixel == 1) ||
-          (bitmap.bmBitsPixel == screen_bpp) ||
-          (bitmap.bmBitsPixel == 16 && screen_bpp == 15)))    /* TODO: Confirm this    */
+    if (!((bitmap.bmBitsPixel == 1) || (bitmap.bmBitsPixel == screen_bpp)))
     {
         ERR("Trying to make bitmap with planes=%d, bpp=%d\n",
             bitmap.bmPlanes, bitmap.bmBitsPixel);
@@ -177,7 +175,7 @@ BOOL X11DRV_CreateBitmap( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, LPVOID bmBit
  *    Success: Number of bytes copied
  *    Failure: 0
  */
-LONG X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
+LONG CDECL X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
 {
     BITMAP bitmap;
     X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
@@ -300,7 +298,7 @@ LONG X11DRV_GetBitmapBits( HBITMAP hbitmap, void *buffer, LONG count )
  *    Success: Number of bytes used in setting the bitmap bits
  *    Failure: 0
  */
-LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
+LONG CDECL X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
 {
     BITMAP bitmap;
     X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
@@ -318,7 +316,7 @@ LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
     wine_tsx11_lock();
     image = XCreateImage( gdi_display, visual, physBitmap->pixmap_depth, ZPixmap, 0, NULL,
                           bitmap.bmWidth, height, 32, 0 );
-    if (!(image->data = malloc(image->bytes_per_line * height)))
+    if (!(image->data = HeapAlloc( GetProcessHeap(), 0, image->bytes_per_line * height )))
     {
         WARN("No memory to create image data.\n");
         XDestroyImage( image );
@@ -409,7 +407,9 @@ LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
     }
     XPutImage( gdi_display, physBitmap->pixmap, BITMAP_GC(physBitmap),
                image, 0, 0, 0, 0, bitmap.bmWidth, height );
-    XDestroyImage( image ); /* frees image->data too */
+    HeapFree( GetProcessHeap(), 0, image->data );
+    image->data = NULL;
+    XDestroyImage( image );
     wine_tsx11_unlock();
     return count;
 }
@@ -417,7 +417,7 @@ LONG X11DRV_SetBitmapBits( HBITMAP hbitmap, const void *bits, LONG count )
 /***********************************************************************
  *           DeleteBitmap   (X11DRV.@)
  */
-BOOL X11DRV_DeleteBitmap( HBITMAP hbitmap )
+BOOL CDECL X11DRV_DeleteBitmap( HBITMAP hbitmap )
 {
     X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
 

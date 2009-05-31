@@ -236,7 +236,9 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "EM_GETLIMITTEXT",          /* 0x00d5 */
     "EM_POSFROMCHAR",           /* 0x00d6 */
     "EM_CHARFROMPOS",           /* 0x00d7 */
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    "EM_SETIMESTATUS",          /* 0x00d8 */
+    "EM_GETIMESTATUS",          /* 0x00d9 */
+    NULL, NULL, NULL, NULL, NULL, NULL,
 
     /* 0x00E0 - Win32 Scrollbars */
     "SBM_SETPOS",               /* 0x00e0 */
@@ -592,7 +594,8 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "WM_PALETTEISCHANGING",
     "WM_PALETTECHANGED",
     "WM_HOTKEY",                /* 0x0312 */
-    NULL, NULL, NULL, NULL,
+    "WM_POPUPSYSTEMMENU",       /* 0x0313 */
+    NULL, NULL, NULL,
     "WM_PRINT",                 /* 0x0317 */
     "WM_PRINTCLIENT",           /* 0x0318 */
     "WM_APPCOMMAND",            /* 0x0319 */
@@ -1508,9 +1511,10 @@ static const USER_MSG toolbar_array[] = {
           USM(TB_GETSTRINGW            ,0),
           USM(TB_GETSTRINGA            ,0),
           USM(TB_UNKWN45D              ,8),
-          USM(TB_UNKWN45E              ,0),
-          USM(TB_UNKWN460              ,0),
-          USM(TB_UNKWN463              ,8),
+          USM(TB_SETHOTITEM2           ,0),
+          USM(TB_SETLISTGAP            ,0),
+          USM(TB_GETIMAGELISTCOUNT     ,0),
+          USM(TB_GETIDEALSIZE          ,8),
           USM(TB_UNKWN464              ,0),
           {0,0,0} };
 
@@ -1935,7 +1939,7 @@ static const SPY_NOTIFY spnfy_array[] = {
     SPNFY(RBN_DELETINGBAND,      NMREBAR),
     SPNFY(RBN_DELETEDBAND,       NMREBAR),
     SPNFY(RBN_CHILDSIZE,         NMREBARCHILDSIZE),
-    /* IP Adderss     0U-860U  to  0U-879U  */
+    /* IP address     0U-860U  to  0U-879U  */
     SPNFY(IPN_FIELDCHANGED,      NMHDR),
     /* Status bar     0U-880U  to  0U-899U  */
     SPNFY(SBN_SIMPLEMODECHANGE,  NMHDR),
@@ -2076,10 +2080,6 @@ const char *SPY_GetClassLongOffsetName( INT offset )
  */
 static void SPY_GetClassName( SPY_INSTANCE *sp_e )
 {
-    DWORD save_error;
-
-    /* save and restore error code over the next call */
-    save_error = GetLastError();
     /* special code to detect a property sheet dialog   */
     if ((GetClassLongW(sp_e->msg_hwnd, GCW_ATOM) == WC_DIALOG) &&
         (GetPropW(sp_e->msg_hwnd, PropSheetInfoStr))) {
@@ -2088,7 +2088,6 @@ static void SPY_GetClassName( SPY_INSTANCE *sp_e )
     else {
         GetClassNameW(sp_e->msg_hwnd, sp_e->wnd_class, sizeof(sp_e->wnd_class)/sizeof(WCHAR));
     }
-    SetLastError(save_error);
 }
 
 /***********************************************************************
@@ -2186,6 +2185,7 @@ static void SPY_GetWndName( SPY_INSTANCE *sp_e )
 const char *SPY_GetMsgName( UINT msg, HWND hWnd )
 {
     SPY_INSTANCE ext_sp_e;
+    DWORD save_error = GetLastError();
 
     ext_sp_e.msgnum = msg;
     ext_sp_e.msg_hwnd   = hWnd;
@@ -2193,6 +2193,7 @@ const char *SPY_GetMsgName( UINT msg, HWND hWnd )
     ext_sp_e.wParam = 0;
     ext_sp_e.wnd_class[0] = 0;
     SPY_GetMsgStuff(&ext_sp_e);
+    SetLastError( save_error );
     return wine_dbg_sprintf("%s", ext_sp_e.msg_name);
 }
 
@@ -2321,10 +2322,8 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
         case LVM_GETSUBITEMRECT:
             {
                 LPRECT rc = (LPRECT) sp_e->lParam;
-                if (rc) {
-                    TRACE("lParam rect (%d,%d)-(%d,%d)\n",
-                          rc->left, rc->top, rc->right, rc->bottom);
-                }
+                if (rc)
+                    TRACE("lParam rect (%s)\n", wine_dbgstr_rect(rc));
                 break;
             }
         case LVM_SETITEMPOSITION32:
@@ -2404,10 +2403,9 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                       lpdis->CtlType, lpdis->CtlID);
                 TRACE("itemID=0x%08x itemAction=0x%08x itemState=0x%08x\n",
                       lpdis->itemID, lpdis->itemAction, lpdis->itemState);
-                TRACE("hWnd=%p hDC=%p (%d,%d)-(%d,%d) itemData=0x%08lx\n",
-                      lpdis->hwndItem, lpdis->hDC, lpdis->rcItem.left,
-                      lpdis->rcItem.top, lpdis->rcItem.right,
-                      lpdis->rcItem.bottom, lpdis->itemData);
+                TRACE("hWnd=%p hDC=%p (%s) itemData=0x%08lx\n",
+                      lpdis->hwndItem, lpdis->hDC,
+                      wine_dbgstr_rect(&lpdis->rcItem), lpdis->itemData);
             }
             break;
         case WM_MEASUREITEM:
@@ -2463,8 +2461,7 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
         case WM_NCCALCSIZE:
             {
                 RECT *rc = (RECT *)sp_e->lParam;
-                TRACE("Rect (%d,%d)-(%d,%d)\n",
-                      rc->left, rc->top, rc->right, rc->bottom);
+                TRACE("Rect (%s)\n", wine_dbgstr_rect(rc));
             }
             break;
         case WM_NOTIFY:
@@ -2519,6 +2516,7 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
 {
     SPY_INSTANCE sp_e;
     int indent;
+    DWORD save_error = GetLastError();
 
     if (!TRACE_ON(message) || SPY_EXCLUDE(msg)) return;
 
@@ -2581,6 +2579,7 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
         break;
     }
     set_indent_level( indent + SPY_INDENT_UNIT );
+    SetLastError( save_error );
 }
 
 
@@ -2592,6 +2591,7 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
 {
     SPY_INSTANCE sp_e;
     int indent;
+    DWORD save_error = GetLastError();
 
     if (!TRACE_ON(message) || SPY_EXCLUDE(msg) ||
         (SPY_ExcludeDWP && (iFlag == SPY_RESULT_DEFWND16 || iFlag == SPY_RESULT_DEFWND)) )
@@ -2645,7 +2645,8 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
                         indent, "", hWnd, debugstr_w(sp_e.wnd_name), msg,
                         sp_e.msg_name );
         break;
-   }
+    }
+    SetLastError( save_error );
 }
 
 
@@ -2654,7 +2655,8 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
  */
 int SPY_Init(void)
 {
-    int i, j;
+    int i;
+    UINT j;
     char buffer[1024];
     const SPY_NOTIFY *p;
     const USER_MSG *q;
@@ -2701,7 +2703,7 @@ int SPY_Init(void)
     p = &spnfy_array[0];
     j = 0xffffffff;
     while (p->name) {
-        if ((UINT)p->value > (UINT)j) {
+        if (p->value > j) {
             ERR("Notify message array out of order\n");
             ERR("  between values [%08x] %s and [%08x] %s\n",
                 j, (p-1)->name, p->value, p->name);

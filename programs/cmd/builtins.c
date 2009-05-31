@@ -66,6 +66,60 @@ static const WCHAR parmY[] = {'/','Y','\0'};
 static const WCHAR parmNoY[] = {'/','-','Y','\0'};
 static const WCHAR nullW[] = {'\0'};
 
+/**************************************************************************
+ * WCMD_ask_confirm
+ *
+ * Issue a message and ask 'Are you sure (Y/N)', waiting on a valid
+ * answer.
+ *
+ * Returns True if Y (or A) answer is selected
+ *         If optionAll contains a pointer, ALL is allowed, and if answered
+ *                   set to TRUE
+ *
+ */
+static BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll) {
+
+    WCHAR  msgbuffer[MAXSTRING];
+    WCHAR  Ybuffer[MAXSTRING];
+    WCHAR  Nbuffer[MAXSTRING];
+    WCHAR  Abuffer[MAXSTRING];
+    WCHAR  answer[MAX_PATH] = {'\0'};
+    DWORD count = 0;
+
+    /* Load the translated 'Are you sure', plus valid answers */
+    LoadString (hinst, WCMD_CONFIRM, msgbuffer, sizeof(msgbuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_YES, Ybuffer, sizeof(Ybuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_NO,  Nbuffer, sizeof(Nbuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_ALL, Abuffer, sizeof(Abuffer)/sizeof(WCHAR));
+
+    /* Loop waiting on a Y or N */
+    while (answer[0] != Ybuffer[0] && answer[0] != Nbuffer[0]) {
+      static const WCHAR startBkt[] = {' ','(','\0'};
+      static const WCHAR endBkt[]   = {')','?','\0'};
+
+      WCMD_output_asis (message);
+      if (showSureText) {
+        WCMD_output_asis (msgbuffer);
+      }
+      WCMD_output_asis (startBkt);
+      WCMD_output_asis (Ybuffer);
+      WCMD_output_asis (fslashW);
+      WCMD_output_asis (Nbuffer);
+      if (optionAll) {
+          WCMD_output_asis (fslashW);
+          WCMD_output_asis (Abuffer);
+      }
+      WCMD_output_asis (endBkt);
+      WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer,
+                     sizeof(answer)/sizeof(WCHAR), &count, NULL);
+      answer[0] = toupperW(answer[0]);
+    }
+
+    /* Return the answer */
+    return ((answer[0] == Ybuffer[0]) ||
+            (optionAll && (answer[0] == Abuffer[0])));
+}
+
 /****************************************************************************
  * WCMD_clear_screen
  *
@@ -243,7 +297,7 @@ void WCMD_copy (void) {
  *
  * Create a directory.
  *
- * this works recursivly. so mkdir dir1\dir2\dir3 will create dir1 and dir2 if
+ * this works recursively. so mkdir dir1\dir2\dir3 will create dir1 and dir2 if
  * they do not already exist.
  */
 
@@ -452,7 +506,7 @@ BOOL WCMD_delete (WCHAR *command, BOOL expectDir) {
                     }
 
                     /* Now check result, keeping a running boolean about whether it
-                       matches all parsed attribues so far                         */
+                       matches all parsed attributes so far                         */
                     if (attribute && !negate) {
                         stillOK = stillOK;
                     } else if (!attribute && negate) {
@@ -998,13 +1052,15 @@ void WCMD_part_execute(CMD_LIST **cmdList, WCHAR *firstcmd, WCHAR *variable,
       /* execute all appropriate commands */
       curPosition = *cmdList;
 
-      WINE_TRACE("Processing cmdList(%p) - &(%d) bd(%d / %d)\n",
+      WINE_TRACE("Processing cmdList(%p) - delim(%d) bd(%d / %d)\n",
                  *cmdList,
-                 (*cmdList)->isAmphersand,
+                 (*cmdList)->prevDelim,
                  (*cmdList)->bracketDepth, myDepth);
 
-      /* Execute any appended to the statement with &&'s */
-      if ((*cmdList)->isAmphersand) {
+      /* Execute any statements appended to the line */
+      /* FIXME: Only if previous call worked for && or failed for || */
+      if ((*cmdList)->prevDelim == CMD_ONFAILURE ||
+          (*cmdList)->prevDelim != CMD_ONSUCCESS) {
         if (processThese) {
           WCMD_execute ((*cmdList)->command, (*cmdList)->redirects, variable,
                         value, cmdList);
@@ -1525,7 +1581,7 @@ void WCMD_rename (void) {
        part otherwise use supplied name. This supports:
           ren *.fred *.jim
           ren jim.* fred.* etc
-       However, windows has a more complex algorithum supporting eg
+       However, windows has a more complex algorithm supporting eg
           ?'s and *'s mid name                                         */
     dotSrc = strchrW(fd.cFileName, '.');
 
@@ -1821,7 +1877,7 @@ void WCMD_setshow_default (WCHAR *command) {
     }
     *pos = 0x00;
 
-    /* Search for approprate directory */
+    /* Search for appropriate directory */
     WINE_TRACE("Looking for directory '%s'\n", wine_dbgstr_w(string));
     hff = FindFirstFile (string, &fd);
     while (hff != INVALID_HANDLE_VALUE) {
@@ -1862,6 +1918,9 @@ void WCMD_setshow_default (WCHAR *command) {
       WCMD_print_error ();
       return;
     } else {
+
+      /* Save away the actual new directory, to store as current location */
+      GetCurrentDirectoryW (sizeof(string)/sizeof(WCHAR), string);
 
       /* Restore old directory if drive letter would change, and
            CD x:\directory /D (or pushd c:\directory) not supplied */
@@ -2130,7 +2189,7 @@ void WCMD_setshow_time (void) {
     GetLocalTime(&st);
     if (GetTimeFormat (LOCALE_USER_DEFAULT, 0, &st, NULL,
 		curtime, sizeof(curtime)/sizeof(WCHAR))) {
-      WCMD_output (WCMD_LoadMessage(WCMD_CURRENTDATE), curtime);
+      WCMD_output (WCMD_LoadMessage(WCMD_CURRENTTIME), curtime);
       if (strstrW (quals, parmT) == NULL) {
         WCMD_output (WCMD_LoadMessage(WCMD_NEWTIME));
         WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer,
@@ -2231,12 +2290,14 @@ void WCMD_type (WCHAR *command) {
         static const WCHAR fmt[] = {'\n','%','s','\n','\n','\0'};
         WCMD_output(fmt, thisArg);
       }
-      while (WCMD_ReadFile (h, buffer, sizeof(buffer)/sizeof(WCHAR), &count, NULL)) {
+      while (WCMD_ReadFile (h, buffer, sizeof(buffer)/sizeof(WCHAR) - 1, &count, NULL)) {
         if (count == 0) break;	/* ReadFile reports success on EOF! */
         buffer[count] = 0;
         WCMD_output_asis (buffer);
       }
       CloseHandle (h);
+      if (!writeHeaders)
+          WCMD_output_asis (newline);
     }
   }
 }
@@ -2272,12 +2333,13 @@ void WCMD_more (WCHAR *command) {
 
     /* Wine implements pipes via temporary files, and hence stdin is
        effectively reading from the file. This means the prompts for
-       more are satistied by the next line from the input (file). To
+       more are satisfied by the next line from the input (file). To
        avoid this, ensure stdin is to the console                    */
     HANDLE hstdin  = GetStdHandle(STD_INPUT_HANDLE);
     HANDLE hConIn = CreateFile(conInW, GENERIC_READ | GENERIC_WRITE,
                          FILE_SHARE_READ, NULL, OPEN_EXISTING,
                          FILE_ATTRIBUTE_NORMAL, 0);
+    WINE_TRACE("No parms - working probably in pipe mode\n");
     SetStdHandle(STD_INPUT_HANDLE, hConIn);
 
     /* Warning: No easy way of ending the stream (ctrl+z on windows) so
@@ -2302,6 +2364,7 @@ void WCMD_more (WCHAR *command) {
     BOOL needsPause = FALSE;
 
     /* Loop through all args */
+    WINE_TRACE("Parms supplied - working through each file\n");
     WCMD_enter_paged_mode(moreStrPage);
 
     while (argN) {
@@ -2475,59 +2538,6 @@ void WCMD_exit (CMD_LIST **cmdList) {
     }
 }
 
-/**************************************************************************
- * WCMD_ask_confirm
- *
- * Issue a message and ask 'Are you sure (Y/N)', waiting on a valid
- * answer.
- *
- * Returns True if Y (or A) answer is selected
- *         If optionAll contains a pointer, ALL is allowed, and if answered
- *                   set to TRUE
- *
- */
-BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll) {
-
-    WCHAR  msgbuffer[MAXSTRING];
-    WCHAR  Ybuffer[MAXSTRING];
-    WCHAR  Nbuffer[MAXSTRING];
-    WCHAR  Abuffer[MAXSTRING];
-    WCHAR  answer[MAX_PATH] = {'\0'};
-    DWORD count = 0;
-
-    /* Load the translated 'Are you sure', plus valid answers */
-    LoadString (hinst, WCMD_CONFIRM, msgbuffer, sizeof(msgbuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_YES, Ybuffer, sizeof(Ybuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_NO,  Nbuffer, sizeof(Nbuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_ALL, Abuffer, sizeof(Abuffer)/sizeof(WCHAR));
-
-    /* Loop waiting on a Y or N */
-    while (answer[0] != Ybuffer[0] && answer[0] != Nbuffer[0]) {
-      static const WCHAR startBkt[] = {' ','(','\0'};
-      static const WCHAR endBkt[]   = {')','?','\0'};
-
-      WCMD_output_asis (message);
-      if (showSureText) {
-        WCMD_output_asis (msgbuffer);
-      }
-      WCMD_output_asis (startBkt);
-      WCMD_output_asis (Ybuffer);
-      WCMD_output_asis (fslashW);
-      WCMD_output_asis (Nbuffer);
-      if (optionAll) {
-          WCMD_output_asis (fslashW);
-          WCMD_output_asis (Abuffer);
-      }
-      WCMD_output_asis (endBkt);
-      WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer,
-                     sizeof(answer)/sizeof(WCHAR), &count, NULL);
-      answer[0] = toupperW(answer[0]);
-    }
-
-    /* Return the answer */
-    return ((answer[0] == Ybuffer[0]) ||
-            (optionAll && (answer[0] == Abuffer[0])));
-}
 
 /*****************************************************************************
  * WCMD_assoc
@@ -2598,11 +2608,11 @@ void WCMD_assoc (WCHAR *command, BOOL assoc) {
                 WCMD_output_asis(keyValue);
               }
               WCMD_output_asis(newline);
+              RegCloseKey(readKey);
             }
           }
         }
       }
-      RegCloseKey(readKey);
 
     } else {
 

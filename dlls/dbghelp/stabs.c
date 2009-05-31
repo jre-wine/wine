@@ -30,6 +30,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -52,6 +53,10 @@
 #include <assert.h>
 #include <stdarg.h>
 
+#ifdef HAVE_MACH_O_NLIST_H
+# include <mach-o/nlist.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
@@ -62,8 +67,23 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 
+/* Masks for n_type field */
+#ifndef N_STAB
+#define N_STAB		0xe0
+#endif
+#ifndef N_TYPE
+#define N_TYPE		0x1e
+#endif
+#ifndef N_EXT
+#define N_EXT		0x01
+#endif
+
+/* Values for (n_type & N_TYPE) */
 #ifndef N_UNDF
 #define N_UNDF		0x00
+#endif
+#ifndef N_ABS
+#define N_ABS		0x02
 #endif
 
 #define N_GSYM		0x20
@@ -78,6 +98,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 #define N_SLINE		0x44
 #define N_ENSYM		0x4e
 #define N_SO		0x64
+#define N_OSO		0x66
 #define N_LSYM		0x80
 #define N_BINCL		0x82
 #define N_SOL		0x84
@@ -498,7 +519,7 @@ static int stabs_pts_read_range(struct ParseTypedefData* ptd, const char* typena
     PTS_ABORTIF(ptd, *ptd->ptr++ != ';');	/* ';' */
 
     /* basically, we don't use ref... in some cases, for example, float is declared
-     * as a derivated type of int... which won't help us... so we guess the types
+     * as a derived type of int... which won't help us... so we guess the types
      * from the various formats
      */
     if (lo.sign == 0 && hi.sign < 0)
@@ -793,9 +814,9 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
                                    struct symt** ret_dt)
 {
     int			idx;
-    long                sz = -1;
-    struct symt*        new_dt = NULL; /* newly created data type */
-    struct symt*        ref_dt;		   /* referenced data type (pointer...) */
+    long		sz = -1;
+    struct symt*	new_dt = NULL;     /* newly created data type */
+    struct symt*	ref_dt;		   /* referenced data type (pointer...) */
     long		filenr1, subnr1, tmp;
 
     /* things are a bit complicated because of the way the typedefs are stored inside
@@ -807,7 +828,7 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
     while (*ptd->ptr == '=')
     {
 	ptd->ptr++;
-	PTS_ABORTIF(ptd, new_dt != btNoType);
+	PTS_ABORTIF(ptd, new_dt != NULL);
 
 	/* first handle attribute if any */
 	switch (*ptd->ptr)      
@@ -856,7 +877,8 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
 	    new_dt = &symt_new_function_signature(ptd->module, ref_dt, -1)->symt;
 	    break;
 	case 'e':
-	    new_dt = &symt_new_enum(ptd->module, typename)->symt;
+            stabs_get_basic(ptd, 1 /* int */, &ref_dt);
+            new_dt = &symt_new_enum(ptd->module, typename, ref_dt)->symt;
 	    PTS_ABORTIF(ptd, stabs_pts_read_enum(ptd, (struct symt_enum*)new_dt) == -1);
 	    break;
 	case 's':
@@ -910,7 +932,8 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
 	    switch (tmp)
             {
 	    case 'e':
-                new_dt = &symt_new_enum(ptd->module, ptd->buf + idx)->symt;
+                stabs_get_basic(ptd, 1 /* int */, &ref_dt);
+                new_dt = &symt_new_enum(ptd->module, ptd->buf + idx, ref_dt)->symt;
                 break;
 	    case 's':
                 new_dt = &symt_new_udt(ptd->module, ptd->buf + idx, 0, UdtStruct)->symt;
@@ -1000,7 +1023,7 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
 
     *stabs_find_ref(filenr1, subnr1) = *ret_dt = new_dt;
 
-    TRACE("Adding (%ld,%ld) %s\n", filenr1, subnr1, typename);
+    TRACE("Adding (%ld,%ld) %s\n", filenr1, subnr1, debugstr_a(typename));
 
     return 0;
 }
@@ -1089,6 +1112,12 @@ static struct symt* stabs_parse_type(const char* stab)
     return *stabs_read_type_enum(&c);
 }
 
+enum pending_obj_kind
+{
+    PENDING_VAR,
+    PENDING_LINE,
+};
+
 struct pending_loc_var
 {
     char                name[256];
@@ -1097,44 +1126,94 @@ struct pending_loc_var
     struct location     loc;
 };
 
-struct pending_block
+struct pending_line
 {
-    struct pending_loc_var*     vars;
+    int                 source_idx;
+    int                 line_num;
+    unsigned long       offset;
+    unsigned long       load_offset;
+};
+
+struct pending_object
+{
+    enum pending_obj_kind               tag;
+    union {
+        struct pending_loc_var  var;
+        struct pending_line     line;
+    }                                   u;
+};
+
+struct pending_list
+{
+    struct pending_object*      objs;
     unsigned                    num;
     unsigned                    allocated;
 };
 
-static inline void pending_add(struct pending_block* pending, const char* name,
-                               enum DataKind dt, const struct location* loc)
+static inline void pending_make_room(struct pending_list* pending)
 {
     if (pending->num == pending->allocated)
     {
         pending->allocated += 8;
-        if (!pending->vars)
-            pending->vars = HeapAlloc(GetProcessHeap(), 0, 
-                                     pending->allocated * sizeof(pending->vars[0]));
+        if (!pending->objs)
+            pending->objs = HeapAlloc(GetProcessHeap(), 0,
+                                     pending->allocated * sizeof(pending->objs[0]));
         else    
-            pending->vars = HeapReAlloc(GetProcessHeap(), 0, pending->vars,
-                                       pending->allocated * sizeof(pending->vars[0]));
+            pending->objs = HeapReAlloc(GetProcessHeap(), 0, pending->objs,
+                                       pending->allocated * sizeof(pending->objs[0]));
     }
-    stab_strcpy(pending->vars[pending->num].name, 
-                sizeof(pending->vars[pending->num].name), name);
-    pending->vars[pending->num].type   = stabs_parse_type(name);
-    pending->vars[pending->num].kind   = dt;
-    pending->vars[pending->num].loc    = *loc;
+}
+
+static inline void pending_add_var(struct pending_list* pending, const char* name,
+                                   enum DataKind dt, const struct location* loc)
+{
+    pending_make_room(pending);
+    pending->objs[pending->num].tag = PENDING_VAR;
+    stab_strcpy(pending->objs[pending->num].u.var.name,
+                sizeof(pending->objs[pending->num].u.var.name), name);
+    pending->objs[pending->num].u.var.type  = stabs_parse_type(name);
+    pending->objs[pending->num].u.var.kind  = dt;
+    pending->objs[pending->num].u.var.loc   = *loc;
     pending->num++;
 }
 
-static void pending_flush(struct pending_block* pending, struct module* module, 
+static inline void pending_add_line(struct pending_list* pending, int source_idx,
+                                    int line_num, unsigned long offset,
+                                    unsigned long load_offset)
+{
+    pending_make_room(pending);
+    pending->objs[pending->num].tag = PENDING_LINE;
+    pending->objs[pending->num].u.line.source_idx   = source_idx;
+    pending->objs[pending->num].u.line.line_num     = line_num;
+    pending->objs[pending->num].u.line.offset       = offset;
+    pending->objs[pending->num].u.line.load_offset  = load_offset;
+    pending->num++;
+}
+
+static void pending_flush(struct pending_list* pending, struct module* module,
                           struct symt_function* func, struct symt_block* block)
 {
-    int i;
+    unsigned int i;
 
     for (i = 0; i < pending->num; i++)
     {
-        symt_add_func_local(module, func, 
-                            pending->vars[i].kind, &pending->vars[i].loc,
-                            block, pending->vars[i].type, pending->vars[i].name);
+        switch (pending->objs[i].tag)
+        {
+        case PENDING_VAR:
+            symt_add_func_local(module, func,
+                                pending->objs[i].u.var.kind, &pending->objs[i].u.var.loc,
+                                block, pending->objs[i].u.var.type, pending->objs[i].u.var.name);
+            break;
+        case PENDING_LINE:
+            if (module->type == DMT_MACHO)
+                pending->objs[i].u.line.offset -= func->address - pending->objs[i].u.line.load_offset;
+            symt_add_func_line(module, func, pending->objs[i].u.line.source_idx,
+                               pending->objs[i].u.line.line_num, pending->objs[i].u.line.offset);
+            break;
+        default:
+            ERR("Unknown pending object tag %u\n", (unsigned)pending->objs[i].tag);
+            break;
+        }
     }
     pending->num = 0;
 }
@@ -1145,7 +1224,7 @@ static void pending_flush(struct pending_block* pending, struct module* module,
  * Ends function creation: mainly:
  * - cleans up line number information
  * - tries to set up a debug-start tag (FIXME: heuristic to be enhanced)
- * - for stabs which have abolute address in them, initializes the size of the 
+ * - for stabs which have absolute address in them, initializes the size of the
  *   function (assuming that current function ends where next function starts)
  */
 static void stabs_finalize_function(struct module* module, struct symt_function* func,
@@ -1172,7 +1251,8 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
 
 BOOL stabs_parse(struct module* module, unsigned long load_offset, 
                  const void* pv_stab_ptr, int stablen,
-                 const char* strs, int strtablen)
+                 const char* strs, int strtablen,
+                 stabs_def_cb callback, void* user)
 {
     struct symt_function*       curr_func = NULL;
     struct symt_block*          block = NULL;
@@ -1190,16 +1270,19 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     unsigned                    incl[32];
     int                         incl_stk = -1;
     int                         source_idx = -1;
-    struct pending_block        pending;
+    struct pending_list         pending_block;
+    struct pending_list         pending_func;
     BOOL                        ret = TRUE;
     struct location             loc;
+    unsigned char               type;
 
     nstab = stablen / sizeof(struct stab_nlist);
     strs_end = strs + strtablen;
 
     memset(srcpath, 0, sizeof(srcpath));
     memset(stabs_basic, 0, sizeof(stabs_basic));
-    memset(&pending, 0, sizeof(pending));
+    memset(&pending_block, 0, sizeof(pending_block));
+    memset(&pending_func, 0, sizeof(pending_func));
 
     /*
      * Allocate a buffer into which we can build stab strings for cases
@@ -1240,8 +1323,13 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             ptr = stabbuff;
         }
 
+        if (stab_ptr->n_type & N_STAB)
+            type = stab_ptr->n_type;
+        else
+            type = (stab_ptr->n_type & N_TYPE);
+
         /* only symbol entries contain a typedef */
-        switch (stab_ptr->n_type)
+        switch (type)
         {
         case N_GSYM:
         case N_LCSYM:
@@ -1271,7 +1359,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             }
         }
 
-        switch (stab_ptr->n_type)
+        switch (type)
         {
         case N_GSYM:
             /*
@@ -1300,7 +1388,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             {
                 block = symt_open_func_block(module, curr_func, block,
                                              stab_ptr->n_value, 0);
-                pending_flush(&pending, module, curr_func, block);
+                pending_flush(&pending_block, module, curr_func, block);
             }
             break;
         case N_RBRAC:
@@ -1351,6 +1439,22 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 case 17:
                 case 18:
                 case 19: loc.reg = CV_REG_ST0 + stab_ptr->n_value - 12; break;
+                case 21:
+                case 22:
+                case 23:
+                case 24:
+                case 25:
+                case 26:
+                case 27:
+                case 28: loc.reg = CV_REG_XMM0 + stab_ptr->n_value - 21; break;
+                case 29:
+                case 30:
+                case 31:
+                case 32:
+                case 33:
+                case 34:
+                case 35:
+                case 36: loc.reg = CV_REG_MM0 + stab_ptr->n_value - 29; break;
                 default:
                     FIXME("Unknown register value (%lu)\n", stab_ptr->n_value);
                     loc.reg = CV_REG_NONE;
@@ -1368,7 +1472,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                                                           param_type);
                 }
                 else
-                    pending_add(&pending, ptr, DataIsLocal, &loc);
+                    pending_add_var(&pending_block, ptr, DataIsLocal, &loc);
             }
             break;
         case N_LSYM:
@@ -1376,19 +1480,24 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             loc.kind = loc_regrel;
             loc.reg = 0; /* FIXME */
             loc.offset = stab_ptr->n_value;
-            if (curr_func != NULL) pending_add(&pending, ptr, DataIsLocal, &loc);
+            if (curr_func != NULL) pending_add_var(&pending_block, ptr, DataIsLocal, &loc);
             break;
         case N_SLINE:
             /*
              * This is a line number.  These are always relative to the start
              * of the function (N_FUN), and this makes the lookup easier.
              */
+            assert(source_idx >= 0);
             if (curr_func != NULL)
             {
-                assert(source_idx >= 0);
+                unsigned long offset = stab_ptr->n_value;
+                if (module->type == DMT_MACHO)
+                    offset -= curr_func->address - load_offset;
                 symt_add_func_line(module, curr_func, source_idx, 
-                                   stab_ptr->n_desc, stab_ptr->n_value);
+                                   stab_ptr->n_desc, offset);
             }
+            else pending_add_line(&pending_func, source_idx, stab_ptr->n_desc,
+                                  stab_ptr->n_value, load_offset);
             break;
         case N_FUN:
             /*
@@ -1423,6 +1532,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 curr_func = symt_new_function(module, compiland, symname, 
                                               load_offset + stab_ptr->n_value, 0,
                                               &func_type->symt);
+                pending_flush(&pending_func, module, curr_func, NULL);
             }
             else
             {
@@ -1503,10 +1613,38 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             break;
         case N_BNSYM:
         case N_ENSYM:
+        case N_OSO:
             /* Always ignore these, they seem to be used only on Darwin. */
             break;
+        case N_ABS:
+#ifdef N_SECT
+        case N_SECT:
+#endif
+            /* FIXME: Other definition types (N_TEXT, N_DATA, N_BSS, ...)? */
+            if (callback)
+            {
+                BOOL is_public = (stab_ptr->n_type & N_EXT);
+                BOOL is_global = is_public;
+
+#ifdef N_PEXT
+                /* "private extern"; shared among compilation units in a shared
+                 * library, but not accessible from outside the library. */
+                if (stab_ptr->n_type & N_PEXT)
+                {
+                    is_public = FALSE;
+                    is_global = TRUE;
+                }
+#endif
+
+                if (*ptr == '_') ptr++;
+                stab_strcpy(symname, sizeof(symname), ptr);
+
+                callback(module, load_offset, symname, stab_ptr->n_value,
+                         is_public, is_global, stab_ptr->n_other, compiland, user);
+            }
+            break;
         default:
-            ERR("Unknown stab type 0x%02x\n", stab_ptr->n_type);
+            ERR("Unknown stab type 0x%02x\n", type);
             break;
         }
         stabbuff[0] = '\0';
@@ -1524,7 +1662,8 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
 done:
     HeapFree(GetProcessHeap(), 0, stabbuff);
     stabs_free_includes();
-    HeapFree(GetProcessHeap(), 0, pending.vars);
+    HeapFree(GetProcessHeap(), 0, pending_block.objs);
+    HeapFree(GetProcessHeap(), 0, pending_func.objs);
 
     return ret;
 }

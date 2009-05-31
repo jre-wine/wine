@@ -175,8 +175,8 @@ extern void sock_init(void);
 /* debugger functions */
 
 extern int set_process_debugger( struct process *process, struct thread *debugger );
-extern void generate_debug_event( struct thread *thread, int code, void *arg );
-extern void generate_startup_debug_events( struct process *process, void *entry );
+extern void generate_debug_event( struct thread *thread, int code, const void *arg );
+extern void generate_startup_debug_events( struct process *process, client_ptr_t entry );
 extern void debug_exit_thread( struct thread *thread );
 
 /* mapping functions */
@@ -197,8 +197,8 @@ extern void init_signals(void);
 
 /* atom functions */
 
-extern atom_t add_global_atom( struct winstation *winstation, const WCHAR *str, data_size_t len );
-extern atom_t find_global_atom( struct winstation *winstation, const WCHAR *str, data_size_t len );
+extern atom_t add_global_atom( struct winstation *winstation, const struct unicode_str *str );
+extern atom_t find_global_atom( struct winstation *winstation, const struct unicode_str *str );
 extern int grab_global_atom( struct winstation *winstation, atom_t atom );
 extern void release_global_atom( struct winstation *winstation, atom_t atom );
 

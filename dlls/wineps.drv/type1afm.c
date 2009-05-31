@@ -32,7 +32,9 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #include <errno.h>
 #include <ctype.h>
 #include <limits.h> 	    /* INT_MIN */
@@ -744,7 +746,7 @@ static BOOL ParseN(LPSTR sz, OLD_AFMMETRICS *metrics)
 static const OLD_AFMMETRICS badmetrics =
 {
     INT_MAX,	    	    	    	    	    /* C */
-    LONG_MAX,	    	    	    	    	    /* UV */
+    INT_MAX,	    	    	    	    	    /* UV */
     FLT_MAX,	    	    	    	    	    /* WX */
     NULL,   	    	    	    	    	    /* N */
     { FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX }, 	    /* B */
@@ -861,7 +863,7 @@ static VOID Unicodify(AFM *afm, OLD_AFMMETRICS *metrics)
 	{
 	    if (metrics[i].C >= 0x20 && metrics[i].C <= 0xff)
 	    {
-	    	metrics[i].UV = ((LONG)(metrics[i].C)) | 0xf000L;
+		metrics[i].UV = metrics[i].C | 0xf000L;
 	    }
 	    else
 	    {
@@ -1166,7 +1168,7 @@ static BOOL ReadAFMDir(LPCSTR dirname)
  *  Reads font metrics from Type 1 AFM font files in directories listed in the
  *  [afmdirs] section of the Wine configuration file.
  *
- *  If this function fails (returns FALSE), the dirver will fail to initialize
+ *  If this function fails (returns FALSE), the driver will fail to initialize
  *  and the driver heap will be destroyed, so it's not necessary to HeapFree
  *  everything in that event.
  *

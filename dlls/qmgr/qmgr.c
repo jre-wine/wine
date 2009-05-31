@@ -1,7 +1,7 @@
 /*
  * Queue Manager (BITS) core functions
  *
- * Copyright 2007 Google (Roy Shea)
+ * Copyright 2007, 2008 Google (Roy Shea, Dan Hipschman)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,24 +23,11 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(qmgr);
 
-/* Destructor for instances of background copy manager */
-static void BackgroundCopyManagerDestructor(BackgroundCopyManagerImpl *This)
-{
-    TRACE("%p\n", This);
-    HeapFree(GetProcessHeap(), 0, This);
-}
-
 /* Add a reference to the iface pointer */
 static ULONG WINAPI BITS_IBackgroundCopyManager_AddRef(
         IBackgroundCopyManager* iface)
 {
-    BackgroundCopyManagerImpl * This = (BackgroundCopyManagerImpl *)iface;
-    ULONG ref;
-
-    TRACE("\n");
-
-    ref = InterlockedIncrement(&This->ref);
-    return ref;
+    return 2;
 }
 
 /* Attempt to provide a new interface to interact with iface */
@@ -69,17 +56,7 @@ static HRESULT WINAPI BITS_IBackgroundCopyManager_QueryInterface(
 static ULONG WINAPI BITS_IBackgroundCopyManager_Release(
         IBackgroundCopyManager* iface)
 {
-    BackgroundCopyManagerImpl * This = (BackgroundCopyManagerImpl *)iface;
-    ULONG ref;
-
-    TRACE("\n");
-
-    ref = InterlockedDecrement(&This->ref);
-    if (ref == 0)
-    {
-        BackgroundCopyManagerDestructor(This);
-    }
-    return ref;
+    return 1;
 }
 
 /*** IBackgroundCopyManager interface methods ***/
@@ -91,8 +68,23 @@ static HRESULT WINAPI BITS_IBackgroundCopyManager_CreateJob(
         GUID *pJobId,
         IBackgroundCopyJob **ppJob)
 {
-    FIXME("Not implemented\n");
-    return E_NOTIMPL;
+    BackgroundCopyManagerImpl * This = (BackgroundCopyManagerImpl *) iface;
+    BackgroundCopyJobImpl *job;
+    HRESULT hres;
+    TRACE("\n");
+
+    hres = BackgroundCopyJobConstructor(DisplayName, Type, pJobId,
+                                        (LPVOID *) ppJob);
+    if (FAILED(hres))
+        return hres;
+
+    /* Add a reference to the job to job list */
+    IBackgroundCopyJob_AddRef(*ppJob);
+    job = (BackgroundCopyJobImpl *) *ppJob;
+    EnterCriticalSection(&This->cs);
+    list_add_head(&This->jobs, &job->entryFromQmgr);
+    LeaveCriticalSection(&This->cs);
+    return S_OK;
 }
 
 static HRESULT WINAPI BITS_IBackgroundCopyManager_GetJob(
@@ -109,8 +101,8 @@ static HRESULT WINAPI BITS_IBackgroundCopyManager_EnumJobs(
         DWORD dwFlags,
         IEnumBackgroundCopyJobs **ppEnum)
 {
-    FIXME("Not implemented\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+    return EnumBackgroundCopyJobsConstructor((LPVOID *) ppEnum, iface);
 }
 
 static HRESULT WINAPI BITS_IBackgroundCopyManager_GetErrorDescription(
@@ -135,22 +127,75 @@ static const IBackgroundCopyManagerVtbl BITS_IBackgroundCopyManager_Vtbl =
     BITS_IBackgroundCopyManager_GetErrorDescription
 };
 
+BackgroundCopyManagerImpl globalMgr = {
+    &BITS_IBackgroundCopyManager_Vtbl,
+    { NULL, -1, 0, 0, 0, 0 },
+    NULL,
+    LIST_INIT(globalMgr.jobs)
+};
+
 /* Constructor for instances of background copy manager */
 HRESULT BackgroundCopyManagerConstructor(IUnknown *pUnkOuter, LPVOID *ppObj)
 {
-    BackgroundCopyManagerImpl *This;
-
     TRACE("(%p,%p)\n", pUnkOuter, ppObj);
-
-    This = HeapAlloc(GetProcessHeap(), 0, sizeof(*This));
-    if (!This)
-    {
-        return E_OUTOFMEMORY;
-    }
-
-    This->lpVtbl = &BITS_IBackgroundCopyManager_Vtbl;
-    This->ref = 1;
-
-    *ppObj = &This->lpVtbl;
+    *ppObj = &globalMgr;
     return S_OK;
+}
+
+DWORD WINAPI fileTransfer(void *param)
+{
+    BackgroundCopyManagerImpl *qmgr = &globalMgr;
+    HANDLE events[2];
+
+    events[0] = stop_event;
+    events[1] = qmgr->jobEvent;
+
+    for (;;)
+    {
+        BackgroundCopyJobImpl *job, *jobCur;
+        BOOL haveJob = FALSE;
+
+        /* Check if it's the stop_event */
+        if (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0)
+        {
+            LIST_FOR_EACH_ENTRY_SAFE(job, jobCur, &qmgr->jobs, BackgroundCopyJobImpl, entryFromQmgr)
+            {
+                list_remove(&job->entryFromQmgr);
+                IBackgroundCopyJob_Release((IBackgroundCopyJob *) job);
+            }
+            return 0;
+        }
+
+        /* Note that other threads may add files to the job list, but only
+           this thread ever deletes them so we don't need to worry about jobs
+           magically disappearing from the list.  */
+        EnterCriticalSection(&qmgr->cs);
+
+        LIST_FOR_EACH_ENTRY_SAFE(job, jobCur, &qmgr->jobs, BackgroundCopyJobImpl, entryFromQmgr)
+        {
+            if (job->state == BG_JOB_STATE_ACKNOWLEDGED || job->state == BG_JOB_STATE_CANCELLED)
+            {
+                list_remove(&job->entryFromQmgr);
+                IBackgroundCopyJob_Release((IBackgroundCopyJob *) job);
+            }
+            else if (job->state == BG_JOB_STATE_QUEUED)
+            {
+                haveJob = TRUE;
+                break;
+            }
+            else if (job->state == BG_JOB_STATE_CONNECTING
+                     || job->state == BG_JOB_STATE_TRANSFERRING)
+            {
+                ERR("Invalid state for job %p: %d\n", job, job->state);
+            }
+        }
+
+        if (!haveJob)
+            ResetEvent(qmgr->jobEvent);
+
+        LeaveCriticalSection(&qmgr->cs);
+
+        if (haveJob)
+            processJob(job);
+    }
 }

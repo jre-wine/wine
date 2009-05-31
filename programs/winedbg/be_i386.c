@@ -40,7 +40,7 @@ static ADDRESS_MODE get_selector_type(HANDLE hThread, const CONTEXT* ctx, WORD s
     if (IS_VM86_MODE(ctx)) return AddrModeReal;
     /* null or system selector */
     if (!(sel & 4) || ((sel >> 3) < 17)) return AddrModeFlat;
-    if (GetThreadSelectorEntry(hThread, sel, &le))
+    if (dbg_curr_process->process_io->get_selector(hThread, sel, &le))
         return le.HighWord.Bits.Default_Big ? AddrMode1632 : AddrMode1616;
     /* selector doesn't exist */
     return -1;
@@ -59,7 +59,7 @@ static void* be_i386_linearize(HANDLE hThread, const ADDRESS64* addr)
             return (void*)(DWORD)addr->Offset;
         /* fall through */
     case AddrMode1616:
-        if (!GetThreadSelectorEntry(hThread, addr->Segment, &le)) return NULL;
+        if (!dbg_curr_process->process_io->get_selector(hThread, addr->Segment, &le)) return NULL;
         return (void*)((le.HighWord.Bits.BaseHi << 24) + 
                        (le.HighWord.Bits.BaseMid << 16) + le.BaseLow +
                        (DWORD)addr->Offset);
@@ -173,10 +173,11 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
     dbg_printf(")\n");
     
     /* Here are the rest of the registers */
-    dbg_printf(" FLES:%08x ", (unsigned int) ctx->FloatSave.ErrorSelector);
-    dbg_printf(" FLDO:%08x ", (unsigned int) ctx->FloatSave.DataOffset);
-    dbg_printf(" FLDS:%08x ", (unsigned int) ctx->FloatSave.DataSelector);
-    dbg_printf(" FLCNS:%08x \n", (unsigned int) ctx->FloatSave.Cr0NpxState);
+    dbg_printf(" FLES:%08x  FLDO:%08x  FLDS:%08x  FLCNS:%08x\n",
+               ctx->FloatSave.ErrorSelector,
+               ctx->FloatSave.DataOffset,
+               ctx->FloatSave.DataSelector,
+               ctx->FloatSave.Cr0NpxState);
 
     /* Now for the floating point registers */
     dbg_printf("Floating Point Registers:\n");
@@ -218,7 +219,7 @@ static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_re
     if (ctx->EFlags & 0x00000040) *pt-- = 'Z'; /* Zero Flag */
     if (ctx->EFlags & 0x00000080) *pt-- = 'S'; /* Sign Flag */
     if (ctx->EFlags & 0x00000100) *pt-- = 'T'; /* Trap/Trace Flag */
-    if (ctx->EFlags & 0x00000200) *pt-- = 'I'; /* Interupt Enable Flag */
+    if (ctx->EFlags & 0x00000200) *pt-- = 'I'; /* Interrupt Enable Flag */
     if (ctx->EFlags & 0x00000400) *pt-- = 'D'; /* Direction Indicator */
     if (ctx->EFlags & 0x00000800) *pt-- = 'O'; /* Overflow flags */
     if (ctx->EFlags & 0x00001000) *pt-- = '1'; /* I/O Privilege Level */
@@ -226,7 +227,7 @@ static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_re
     if (ctx->EFlags & 0x00004000) *pt-- = 'N'; /* Nested Task Flag */
     if (ctx->EFlags & 0x00008000) *pt-- = '-';
     if (ctx->EFlags & 0x00010000) *pt-- = 'R'; /* Resume Flag */
-    if (ctx->EFlags & 0x00020000) *pt-- = 'V'; /* Vritual Mode Flag */
+    if (ctx->EFlags & 0x00020000) *pt-- = 'V'; /* Virtual Mode Flag */
     if (ctx->EFlags & 0x00040000) *pt-- = 'a'; /* Alignment Check Flag */
     
     switch (get_selector_type(hThread, ctx, ctx->SegCs))

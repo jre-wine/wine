@@ -191,6 +191,7 @@ HCONV WINAPI DdeConnect(DWORD idInst, HSZ hszService, HSZ hszTopic,
     {
 	WARN("Done with INITIATE, but no Server window available\n");
 	pConv = NULL;
+	pInstance->lastError = DMLERR_NO_CONV_ESTABLISHED;
 	goto theEnd;
     }
     TRACE("Connected to Server window (%p)\n", pConv->hwndServer);
@@ -232,8 +233,8 @@ HCONV WINAPI DdeReconnect(HCONV hConv)
     {
 	BOOL	ret;
 
-	/* to reestablist a connection, we have to make sure that:
-	 * 1/ pConv is the converstation attached to the client window (it wouldn't be
+	/* to reestablish a connection, we have to make sure that:
+	 * 1/ pConv is the conversation attached to the client window (it wouldn't be
 	 *    if a call to DdeReconnect would have already been done...)
 	 *    FIXME: is this really an error ???
 	 * 2/ the pConv conversation had really been deconnected
@@ -319,7 +320,7 @@ static WDML_XACT*	WDML_ClientQueueAdvise(WDML_CONV* pConv, UINT wType, UINT wFmt
     /* FIXME: hMem is unfreed for now... should be deleted in server */
 
     /* pack DdeAdvise	*/
-    pDdeAdvise = (DDEADVISE*)GlobalLock(pXAct->hMem);
+    pDdeAdvise = GlobalLock(pXAct->hMem);
     pDdeAdvise->fAckReq   = (wType & XTYPF_ACKREQ) ? TRUE : FALSE;
     pDdeAdvise->fDeferUpd = (wType & XTYPF_NODATA) ? TRUE : FALSE;
     pDdeAdvise->cfFormat  = wFmt;
@@ -526,7 +527,7 @@ static WDML_QUEUE_STATE WDML_HandleRequestReply(WDML_CONV* pConv, MSG* msg, WDML
 	if (DdeCmpStringHandles(hsz, pXAct->hszItem) != 0)
 	    return WDML_QS_PASS;
 
-	pXAct->hDdeData = WDML_Global2DataHandle((HGLOBAL)uiLo, &wdh);
+	pXAct->hDdeData = WDML_Global2DataHandle(pConv, (HGLOBAL)uiLo, &wdh);
 	if (wdh.fRelease)
 	{
 	    GlobalFree((HGLOBAL)uiLo);
@@ -576,7 +577,7 @@ static	HGLOBAL	WDML_BuildExecuteCommand(WDML_CONV* pConv, LPCVOID pData, DWORD c
     {
 	if (clientUnicode)
 	{
-	    memSize = WideCharToMultiByte( CP_ACP, 0, pData, cbData, NULL, 0, NULL, NULL);
+	    memSize = WideCharToMultiByte( CP_ACP, 0, pData, cbData / sizeof(WCHAR), NULL, 0, NULL, NULL);
 	}
 	else
 	{
@@ -601,7 +602,7 @@ static	HGLOBAL	WDML_BuildExecuteCommand(WDML_CONV* pConv, LPCVOID pData, DWORD c
 	    {
 		if (clientUnicode)
 		{
-		    WideCharToMultiByte( CP_ACP, 0, pData, cbData, pDst, memSize, NULL, NULL);
+		    WideCharToMultiByte( CP_ACP, 0, pData, cbData / sizeof(WCHAR), pDst, memSize, NULL, NULL);
 		}
 		else
 		{
@@ -630,6 +631,15 @@ static WDML_XACT*	WDML_ClientQueueExecute(WDML_CONV* pConv, LPVOID pData, DWORD 
     WDML_XACT*	pXAct;
 
     TRACE("XTYP_EXECUTE transaction\n");
+
+    if (pData == NULL)
+    {
+        if (cbData == (DWORD)-1)
+            pConv->instance->lastError = DMLERR_INVALIDPARAMETER;
+        else
+            pConv->instance->lastError = DMLERR_MEMORY_ERROR;
+        return NULL;
+    }
 
     pXAct = WDML_AllocTransaction(pConv->instance, WM_DDE_EXECUTE, 0, 0);
     if (!pXAct)
@@ -717,14 +727,14 @@ static WDML_XACT*	WDML_ClientQueuePoke(WDML_CONV* pConv, LPVOID pData, DWORD cbD
 
     if (cbData == (DWORD)-1)
     {
-        hglobal = (HGLOBAL)pData;
-        dh = (DDE_DATAHANDLE_HEAD *)GlobalLock(hglobal);
+        hglobal = pData;
+        dh = GlobalLock(hglobal);
         cbData = GlobalSize(hglobal) - sizeof(DDE_DATAHANDLE_HEAD);
-        pData = (LPVOID)(dh + 1);
+        pData = dh + 1;
         GlobalUnlock(hglobal);
     }
 
-    pXAct->hMem = GlobalAlloc(GHND | GMEM_DDESHARE, sizeof(DDEPOKE) + cbData);
+    pXAct->hMem = GlobalAlloc(GHND | GMEM_DDESHARE, FIELD_OFFSET(DDEPOKE, Value[cbData]));
     ddePoke = GlobalLock(pXAct->hMem);
     if (!ddePoke)
     {
@@ -811,7 +821,7 @@ static WDML_QUEUE_STATE WDML_HandleTerminateReply(WDML_CONV* pConv, MSG* msg)
 	FIXME("hmmm shouldn't happen\n");
 	return WDML_QS_PASS;
     }
-    if (!pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS)
+    if (!(pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS))
     {
 	WDML_InvokeCallback(pConv->instance, XTYP_DISCONNECT, 0, (HCONV)pConv,
 			    0, 0, 0, 0, (pConv->wStatus & ST_ISSELF) ? 1 : 0);
@@ -840,7 +850,7 @@ static WDML_QUEUE_STATE WDML_HandleIncomingData(WDML_CONV* pConv, MSG* msg, HDDE
     UnpackDDElParam(WM_DDE_DATA, msg->lParam, &uiLo, &uiHi);
     hsz = WDML_MakeHszFromAtom(pConv->instance, uiHi);
 
-    hDdeDataIn = WDML_Global2DataHandle((HGLOBAL)uiLo, &wdh);
+    hDdeDataIn = WDML_Global2DataHandle(pConv, (HGLOBAL)uiLo, &wdh);
 
     /* billx:
      *  For hot link, data should be passed to its callback with
@@ -894,11 +904,6 @@ static WDML_QUEUE_STATE WDML_HandleIncomingTerminate(WDML_CONV* pConv, MSG* msg,
 	return WDML_QS_PASS;
 
     pConv->wStatus |= ST_TERMINATED;
-    if (!pConv->instance->CBFflags & CBF_SKIP_DISCONNECTS)
-    {
-	WDML_InvokeCallback(pConv->instance, XTYP_DISCONNECT, 0, (HCONV)pConv,
-			    0, 0, 0, 0, (pConv->wStatus & ST_ISSELF) ? 1 : 0);
-    }
     if (pConv->wStatus & ST_CONNECTED)
     {
 	/* don't care about result code (if server exists or not) */
@@ -921,6 +926,7 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
 
     if (pConv->transactions)
     {
+	if (ack) *ack = DDE_FNOTPROCESSED;
 	/* first check message against a pending transaction, if any */
 	switch (pXAct->ddeMsg)
 	{
@@ -988,7 +994,6 @@ static WDML_QUEUE_STATE WDML_HandleReply(WDML_CONV* pConv, MSG* msg, HDDEDATA* h
         case WM_DDE_ACK:
             /* This happens at end of DdeClientTransaction XTYP_EXECUTE
              * Without this assignment, DdeClientTransaction's return value is undefined
-             * See also http://support.microsoft.com/kb/102574
              */
             *hdd = (HDDEDATA)TRUE;
             if (ack)
@@ -1033,7 +1038,7 @@ static HDDEDATA WDML_SyncWaitTransactionReply(HCONV hConv, DWORD dwTimeout, cons
 
 	    while (PeekMessageW(&msg, 0, WM_DDE_FIRST, WM_DDE_LAST, PM_REMOVE))
 	    {
-                HDDEDATA hdd;
+                HDDEDATA hdd = NULL;
 
                 pConv = WDML_GetConv(hConv, FALSE);
                 if (pConv == NULL)
@@ -1153,8 +1158,10 @@ HDDEDATA WINAPI DdeClientTransaction(LPBYTE pData, DWORD cbData, HCONV hConv, HS
     switch (wType)
     {
     case XTYP_EXECUTE:
-        /* Windows simply ignores hszItem and wFmt in this case */
+    /* Windows simply ignores hszItem and wFmt in this case */
 	pXAct = WDML_ClientQueueExecute(pConv, pData, cbData);
+	if (pXAct == NULL)
+	    return 0;
 	break;
     case XTYP_POKE:
         if (!hszItem)
@@ -1325,8 +1332,6 @@ static LRESULT CALLBACK WDML_ClientProc(HWND hwnd, UINT iMsg, WPARAM wParam, LPA
 	    pConv->wStatus |= ST_ISLOCAL;
 	}
 
-	WDML_BroadcastDDEWindows(WDML_szEventClass, WM_WDML_CONNECT_CONFIRM, (WPARAM)hwnd, wParam);
-
 	GlobalDeleteAtom(uiLo);
 	GlobalDeleteAtom(uiHi);
 
@@ -1394,7 +1399,7 @@ BOOL WINAPI DdeDisconnect(HCONV hConv)
                     pConv->instance->lastError = DMLERR_POSTMSG_FAILED;
 
                 WDML_FreeTransaction(pConv->instance, pXAct, TRUE);
-                /* still have to destroy data assosiated with conversation */
+                /* still have to destroy data associated with conversation */
                 WDML_RemoveConv(pConv, WDML_CLIENT_SIDE);
             }
             else

@@ -37,13 +37,13 @@ WINE_DEFAULT_DEBUG_CHANNEL(crypt);
 
 static const WCHAR DllW[] = { 'D','l','l',0 };
 
-static void init_oid_info(HINSTANCE hinst);
+static void init_oid_info(void);
 static void free_function_sets(void);
 static void free_oid_info(void);
 
-void crypt_oid_init(HINSTANCE hinst)
+void crypt_oid_init(void)
 {
-    init_oid_info(hinst);
+    init_oid_info();
 }
 
 void crypt_oid_free(void)
@@ -76,6 +76,14 @@ struct OIDFunction
     CRYPT_OID_FUNC_ENTRY entry;
     struct list next;
 };
+
+static const WCHAR ROOT[] = {'R','O','O','T',0};
+static const WCHAR MY[] = {'M','Y',0};
+static const WCHAR CA[] = {'C','A',0};
+static const WCHAR ADDRESSBOOK[] = {'A','D','D','R','E','S','S','B','O','O','K',0};
+static const WCHAR TRUSTEDPUBLISHER[] = {'T','r','u','s','t','e','d','P','u','b','l','i','s','h','e','r',0};
+static const LPCWSTR LocalizedKeys[] = {ROOT,MY,CA,ADDRESSBOOK,TRUSTEDPUBLISHER};
+static WCHAR LocalizedNames[sizeof(LocalizedKeys)/sizeof(LocalizedKeys[0])][256];
 
 static void free_function_sets(void)
 {
@@ -115,7 +123,7 @@ HCRYPTOIDFUNCSET WINAPI CryptInitOIDFunctionSet(LPCSTR pszFuncName,
     {
         if (!strcasecmp(pszFuncName, cursor->name))
         {
-            ret = (HCRYPTOIDFUNCSET)cursor;
+            ret = cursor;
             break;
         }
     }
@@ -143,7 +151,7 @@ HCRYPTOIDFUNCSET WINAPI CryptInitOIDFunctionSet(LPCSTR pszFuncName,
     }
     LeaveCriticalSection(&funcSetCS);
 
-    return (HCRYPTOIDFUNCSET)ret;
+    return ret;
 }
 
 static char *CRYPT_GetKeyName(DWORD dwEncodingType, LPCSTR pszFuncName,
@@ -186,7 +194,7 @@ BOOL WINAPI CryptGetDefaultOIDDllList(HCRYPTOIDFUNCSET hFuncSet,
  DWORD dwEncodingType, LPWSTR pwszDllList, DWORD *pcchDllList)
 {
     BOOL ret = TRUE;
-    struct OIDFunctionSet *set = (struct OIDFunctionSet *)hFuncSet;
+    struct OIDFunctionSet *set = hFuncSet;
     char *keyName;
     HKEY key;
     long rc;
@@ -236,7 +244,7 @@ BOOL WINAPI CryptInstallOIDFunctionAddress(HMODULE hModule,
     TRACE("(%p, %d, %s, %d, %p, %08x)\n", hModule, dwEncodingType,
      debugstr_a(pszFuncName), cFuncEntry, rgFuncEntry, dwFlags);
 
-    set = (struct OIDFunctionSet *)CryptInitOIDFunctionSet(pszFuncName, 0);
+    set = CryptInitOIDFunctionSet(pszFuncName, 0);
     if (set)
     {
         DWORD i;
@@ -378,7 +386,7 @@ BOOL WINAPI CryptGetOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
  HCRYPTOIDFUNCADDR *phFuncAddr)
 {
     BOOL ret = FALSE;
-    struct OIDFunctionSet *set = (struct OIDFunctionSet *)hFuncSet;
+    struct OIDFunctionSet *set = hFuncSet;
 
     TRACE("(%p, %d, %s, %08x, %p, %p)\n", hFuncSet, dwEncodingType,
      debugstr_a(pszOID), dwFlags, ppvFuncAddr, phFuncAddr);
@@ -433,7 +441,7 @@ BOOL WINAPI CryptFreeOIDFunctionAddress(HCRYPTOIDFUNCADDR hFuncAddr,
      */
     if (hFuncAddr)
     {
-        struct FuncAddr *addr = (struct FuncAddr *)hFuncAddr;
+        struct FuncAddr *addr = hFuncAddr;
 
         CryptMemFree(addr->dllList);
         FreeLibrary(addr->lib);
@@ -466,7 +474,7 @@ BOOL WINAPI CryptGetDefaultOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
  DWORD dwEncodingType, LPCWSTR pwszDll, DWORD dwFlags, void **ppvFuncAddr,
  HCRYPTOIDFUNCADDR *phFuncAddr)
 {
-    struct OIDFunctionSet *set = (struct OIDFunctionSet *)hFuncSet;
+    struct OIDFunctionSet *set = hFuncSet;
     BOOL ret = FALSE;
 
     TRACE("(%p, %d, %s, %08x, %p, %p)\n", hFuncSet, dwEncodingType,
@@ -501,7 +509,7 @@ BOOL WINAPI CryptGetDefaultOIDFunctionAddress(HCRYPTOIDFUNCSET hFuncSet,
     }
     else
     {
-        struct FuncAddr *addr = (struct FuncAddr *)*phFuncAddr;
+        struct FuncAddr *addr = *phFuncAddr;
 
         if (!addr)
         {
@@ -931,7 +939,6 @@ BOOL WINAPI CryptRegisterDefaultOIDFunction(DWORD dwEncodingType,
 {
     HKEY key;
     LPWSTR dlls;
-    LPCWSTR existing;
     BOOL ret = FALSE;
 
     TRACE("(%x, %s, %d, %s)\n", dwEncodingType, debugstr_a(pszFuncName),
@@ -947,7 +954,7 @@ BOOL WINAPI CryptRegisterDefaultOIDFunction(DWORD dwEncodingType,
         return FALSE;
 
     dlls = CRYPT_GetDefaultOIDDlls(key);
-    if ((existing = CRYPT_FindStringInMultiString(dlls, pwszDll)))
+    if (CRYPT_FindStringInMultiString(dlls, pwszDll))
         SetLastError(ERROR_FILE_EXISTS);
     else
     {
@@ -987,12 +994,32 @@ BOOL WINAPI CryptUnregisterDefaultOIDFunction(DWORD dwEncodingType,
     return ret;
 }
 
+static void oid_init_localizednames(void)
+{
+    unsigned int i;
+
+    for(i = 0; i < sizeof(LocalizedKeys)/sizeof(LPCWSTR); i++)
+    {
+        LoadStringW(hInstance, IDS_LOCALIZEDNAME_ROOT+i, LocalizedNames[i], 256);
+    }
+}
+
 /********************************************************************
  *              CryptFindLocalizedName (CRYPT32.@)
  */
 LPCWSTR WINAPI CryptFindLocalizedName(LPCWSTR pwszCryptName)
 {
-    FIXME(" %s - stub\n",debugstr_w(pwszCryptName));
+    unsigned int i;
+
+    for(i = 0; i < sizeof(LocalizedKeys)/sizeof(LPCWSTR); i++)
+    {
+        if(!lstrcmpiW(LocalizedKeys[i], pwszCryptName))
+        {
+            return LocalizedNames[i];
+        }
+    }
+
+    FIXME("No name for: %s - stub\n",debugstr_w(pwszCryptName));
     return NULL;
 }
 
@@ -1341,10 +1368,11 @@ struct OIDInfo {
     struct list entry;
 };
 
-static void init_oid_info(HINSTANCE hinst)
+static void init_oid_info(void)
 {
     DWORD i;
 
+    oid_init_localizednames();
     for (i = 0; i < sizeof(oidInfoConstructors) /
      sizeof(oidInfoConstructors[0]); i++)
     {
@@ -1374,8 +1402,10 @@ static void init_oid_info(HINSTANCE hinst)
         }
         else
         {
-            int len = LoadStringW(hinst, (UINT_PTR)oidInfoConstructors[i].pwszName,
-             NULL, 0);
+            LPCWSTR stringresource;
+            int len = LoadStringW(hInstance,
+             (UINT_PTR)oidInfoConstructors[i].pwszName,
+             (LPWSTR)&stringresource, 0);
 
             if (len)
             {
@@ -1387,12 +1417,11 @@ static void init_oid_info(HINSTANCE hinst)
                     memset(info, 0, sizeof(*info));
                     info->info.cbSize = sizeof(CRYPT_OID_INFO);
                     info->info.pszOID = oidInfoConstructors[i].pszOID;
-                    info->info.pwszName =
-                     (LPWSTR)((LPBYTE)info + sizeof(struct OIDInfo));
+                    info->info.pwszName = (LPWSTR)(info + 1);
                     info->info.dwGroupId = oidInfoConstructors[i].dwGroupId;
                     info->info.u.Algid = oidInfoConstructors[i].Algid;
-                    LoadStringW(hinst, (UINT_PTR)oidInfoConstructors[i].pwszName,
-                     (LPWSTR)info->info.pwszName, len + 1);
+                    memcpy(info + 1, stringresource, len*sizeof(WCHAR));
+                    ((LPWSTR)(info + 1))[len] = 0;
                     if (oidInfoConstructors[i].blob)
                     {
                         info->info.ExtraInfo.cbData =
@@ -1475,11 +1504,11 @@ PCCRYPT_OID_INFO WINAPI CryptFindOIDInfo(DWORD dwKeyType, void *pvKey,
     {
         struct OIDInfo *info;
 
-        TRACE("CRYPT_OID_INFO_NAME_KEY: %s\n", debugstr_w((LPWSTR)pvKey));
+        TRACE("CRYPT_OID_INFO_NAME_KEY: %s\n", debugstr_w(pvKey));
         EnterCriticalSection(&oidInfoCS);
         LIST_FOR_EACH_ENTRY(info, &oidInfo, struct OIDInfo, entry)
         {
-            if (!lstrcmpW(info->info.pwszName, (LPWSTR)pvKey) &&
+            if (!lstrcmpW(info->info.pwszName, pvKey) &&
              (!dwGroupId || info->info.dwGroupId == dwGroupId))
             {
                 ret = &info->info;
@@ -1492,7 +1521,7 @@ PCCRYPT_OID_INFO WINAPI CryptFindOIDInfo(DWORD dwKeyType, void *pvKey,
     case CRYPT_OID_INFO_OID_KEY:
     {
         struct OIDInfo *info;
-        LPSTR oid = (LPSTR)pvKey;
+        LPSTR oid = pvKey;
 
         TRACE("CRYPT_OID_INFO_OID_KEY: %s\n", debugstr_a(oid));
         EnterCriticalSection(&oidInfoCS);

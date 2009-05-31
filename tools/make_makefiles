@@ -19,6 +19,8 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
 #
 
+use strict;
+
 # Make rules files
 my %makerules =
 (
@@ -34,19 +36,15 @@ my %bin_install =
 (
   "msiexec" => 1,
   "notepad" => 1,
-  "progman" => 1,
   "regedit" => 1,
   "regsvr32" => 1,
-  "uninstaller" => 1,
   "wineboot" => 1,
-  "winebrowser" => 1,
   "winecfg" => 1,
   "wineconsole" => 1,
   "winedbg" => 1,
   "winefile" => 1,
   "winemine" => 1,
   "winepath" => 1,
-  "winhelp" => 1,
 );
 
 # Programs that we don't want to install at all
@@ -57,18 +55,11 @@ my %dont_install =
   "winetest" => 1,
 );
 
-# Special dlls that can be switched on or off by configure
-my %special_dlls =
-(
-  "glu32"    => "GLU32FILES",
-  "opengl32" => "OPENGLFILES",
-  "winex11.drv" => "XFILES",
-  "winequartz.drv" => "QUARTZFILES"
-);
-
 # Default patterns for top-level .gitignore
 my @ignores = (
     "*.[oa]",
+    "*.ok",
+    "*.res",
     "*.so",
     "/autom4te.cache",
     "/config.cache",
@@ -78,8 +69,13 @@ my @ignores = (
     "/tags",
     "Makefile",
     "dlldata.c",
+    "dlls/*/*.def",
+    "dlls/*/tests/*crosstest.exe",
+    "dlls/*/tests/testlist.c",
     "include/config.h",
-    "include/stamp-h"
+    "include/stamp-h",
+    "programs/winetest/tests.rc",
+    "programs/winetest/*_test.exe",
 );
 
 # Source files and their resulting target to ignore
@@ -88,8 +84,6 @@ my @ignore_srcs = (
     [ 'BISON_SRCS',   '\.y',   '.tab.h' ],
     [ 'LEX_SRCS',     '\.l',   '.yy.c' ],
     [ 'MC_SRCS',      '\.mc',  '.mc.rc' ],
-    [ 'RC_SRCS',      '\.rc',  '.res' ],
-    [ 'RC_SRCS16',    '\.rc',  '.res' ],
     [ 'IDL_TLB_SRCS', '\.idl', '.tlb' ],
     [ 'IDL_H_SRCS',   '\.idl', '.h' ],
     [ 'IDL_C_SRCS',   '\.idl', '.h' ],
@@ -102,33 +96,13 @@ my @ignore_srcs = (
     [ 'IDL_S_SRCS',   '\.idl', '_s.c' ],
 );
 
-my %private_headers = (
-    "thread.h" => 1,
-    "win.h" => 1,
-    "wine/irot.idl" => 1,
-    "wine/list.h" => 1,
-    "wine/mmsystem16.h" => 1,
-    "wine/mscvpdb.h" => 1,
-    "wine/port.h" => 1,
-    "wine/pthread.h" => 1,
-    "wine/rpcfc.h" => 1,
-    "wine/rpcss_shared.h" => 1,
-    "wine/server.h" => 1,
-    "wine/server_protocol.h" => 1,
-    "wine/test.h" => 1,
-    "wine/wgl.h" => 1,
-    "wine/winaspi.h" => 1,
-    "wine/winbase16.h" => 1,
-    "wine/windef16.h" => 1,
-    "wine/wined3d_caps.h" => 1,
-    "wine/wined3d_gl.h" => 1,
-    "wine/wined3d_interface.h" => 1,
-    "wine/wined3d_types.h" => 1,
-    "wine/wingdi16.h" => 1,
-    "wine/winnet16.h" => 1,
-    "wine/winsock16.h" => 1,
-    "wine/winuser16.h" => 1,
-    "wine/wpp.h" => 1
+my %exported_wine_headers = (
+    "wine/debug.h" => 1,
+    "wine/exception.h" => 1,
+    "wine/library.h" => 1,
+    "wine/unicode.h" => 1,
+    "wine/itss.idl" => 1,
+    "wine/svcctl.idl" => 1,
 );
 
 my %private_idl_headers = (
@@ -138,7 +112,10 @@ my %private_idl_headers = (
     "dbprop.idl" => 1,
     "dbs.idl" => 1,
     "devenum.idl" => 1,
-    "dyngraph.idl" => 1
+    "dyngraph.idl" => 1,
+    "vmrender.idl" => 1,
+    "wine/wined3d.idl" => 1,
+    "wine/winedxgi.idl" => 1,
 );
 
 my (@makefiles, %makefiles);
@@ -227,15 +204,10 @@ sub parse_makefile($)
             $make{$1} = $2;
             next;
         }
-        if (/^(BISON_SRCS|LEX_SRCS|IDL_[CHIPS]_SRCS|IDL_TLB_SRCS|IMPLIB_SRCS|MC_SRCS|RC_SRCS|RC_SRCS16|RC_BINARIES|SPEC_SRCS16|MANPAGES|PROGRAMS)\s*=\s*(.*)/)
+        if (/^(BISON_SRCS|LEX_SRCS|IDL_[CHIPS]_SRCS|IDL_TLB_SRCS|IMPLIB_SRCS|MC_SRCS|RC_SRCS|RC_SRCS16|RC_BINARIES|SPEC_SRCS16|EXTRA_OBJS16|MANPAGES|PROGRAMS)\s*=\s*(.*)/)
         {
             my @list = split(/\s+/, $2);
             $make{$1} = \@list;
-            next;
-        }
-        if (/^\#\s*MKDLL_SKIP/ || /^\#\s*MKPROG_SKIP/)
-        {
-            $make{"=skip"} = 1;
             next;
         }
     }
@@ -246,94 +218,46 @@ sub parse_makefile($)
 ################################################################
 # update the makefile list in configure.ac
 
-sub update_makerules(@)
-{
-}
-
-
-################################################################
-# update the tests list in programs/winetest/Makefile.in and programs/winetest/winetest.rc
-
-sub update_winetest(@)
-{
-    my (@tests, @lines);
-
-    foreach my $file (@_)
-    {
-        if ($file =~ /^dlls\/(.*)\/tests\/Makefile/) { push @tests, $1; }
-    }
-    push @lines, "TESTBINS =";
-    push @lines, map { " \\\n\t" . $_ . "_test.exe"; } sort @tests;
-    push @lines, "\n\n";
-
-    foreach my $test (sort @tests)
-    {
-        push @lines, "${test}_test.exe: \$(DLLDIR)/$test/tests/${test}_test.exe\$(DLLEXT)\n";
-        push @lines, "\tcp \$(DLLDIR)/$test/tests/${test}_test.exe\$(DLLEXT) \$\@ && \$(STRIP) \$\@\n";
-    }
-    push @lines, "\n# Special rules\n";
-
-    replace_in_file( "programs/winetest/Makefile.in", '^TESTBINS\s*=', '^# Special rules', @lines );
-
-    replace_in_file( "programs/winetest/winetest.rc", ' TESTRES ', undef,
-                     map { $_ . "_test.exe TESTRES \"" . $_ . "_test.exe\"\n"; } sort @tests );
-
-    # return a list of test exe files for .gitignore
-    return map { "programs/winetest/" . $_ . "_test.exe"; } sort @tests;
-}
-
-
-################################################################
-# update the makefile list in configure.ac and Makefile.in
-
 sub update_makefiles(@)
 {
-    my (@targets, @depends, @lines);
+    my (@lines);
 
     foreach my $var (sort { $makerules{$a} cmp $makerules{$b}; } keys %makerules)
     {
-        push @lines, "$var=$makerules{$var}\n";
-        push @lines, "AC_SUBST_FILE($var)\n\n";
-    }
-
-    foreach my $var ((sort values %makerules), (sort @_))
-    {
-        push @lines, "AC_CONFIG_FILES([$var])\n";
-    }
-
-    push @lines, "\nAC_OUTPUT\n";
-    replace_in_file( "configure.ac", '^MAKE_RULES', '^AC_OUTPUT$', @lines);
-
-    foreach my $file (sort values %makerules)
-    {
-        push @targets, $file;
+        my $file = $makerules{$var};
         my %make = %{$makefiles{$file}};
-        if (!defined($make{"=rules"})) { push @depends, "$file: $file.in"; }
-        else { push @depends, "$file: $file.in Make.rules"; }
+        my $rules = $make{"=rules"} ? ",[$make{\"=rules\"}]" : "";
+        push @lines, "WINE_CONFIG_MAKERULES([$file],[$var]$rules)\n";
     }
+    push @lines, "\n";
 
     foreach my $file (sort @_)
     {
-        push @targets, $file unless $file eq "Makefile";
-        my %makefile = %{$makefiles{$file}};
-        my $dep = $makefile{"=rules"};
-        push @depends, "$file: $file.in $dep";
+        my %make = %{$makefiles{$file}};
+        my $rules = $make{"=rules"};
+        my $args = "";
+        if ($rules eq $makerules{"MAKE_DLL_RULES"})
+        {
+            $args = ",[dlls],[ALL_DLL_DIRS]";
+            $args .= ",[enable_win16]" if $make{"MODULE"} =~ /(16|\.vxd)$/;
+        }
+        elsif ($rules eq $makerules{"MAKE_IMPLIB_RULES"}) { $args = ",[dlls],[ALL_IMPLIB_DIRS]"; }
+        elsif ($rules eq $makerules{"MAKE_TEST_RULES"}) { $args = ",[dlls],[ALL_TEST_DIRS],[enable_tests]"; }
+        elsif ($rules eq $makerules{"MAKE_PROG_RULES"})
+        {
+            (my $name = $file) =~ s/^programs\/(.*)\/Makefile/$1/;
+            $args = ",[programs],[ALL_PROGRAM_DIRS";
+            $args .= ",ALL_PROGRAM_INSTALL_DIRS" unless $dont_install{$name};
+            $args .= ",ALL_PROGRAM_BIN_INSTALL_DIRS" if $bin_install{$name};
+            $args .= "]";
+            $args .= ",[enable_win16]" if $make{"MODULE"} =~ /16$/;
+        }
+        elsif ($file =~ /^[^\/]*\/Makefile$/) { $args = ",[],[ALL_TOP_DIRS]"; }
+        push @lines, "WINE_CONFIG_MAKEFILE([$file],[$rules]$args)\n";
     }
 
-
-    @lines = ();
-    push @lines, "ALL_MAKEFILES = \\\n\t";
-    push @lines, join (" \\\n\t", @targets ), "\n\n";
-    push @lines, "Makefile \$(ALL_MAKEFILES): config.status\n";
-    push @lines, "\t\@./config.status \$\@\n";
-    push @lines, ".INIT: Makefile\n";
-    push @lines, ".BEGIN: Makefile\n\n";
-    push @lines, "\$(RECURSE_TARGETS) \$(MAKEDEP): \$(ALL_MAKEFILES)\n\n";
-    push @lines, "distclean::\n";
-    push @lines, "\t\$(RM) Makefile \$(ALL_MAKEFILES)\n\n";
-    push @lines, join ("\n", @depends ), "\n";
-
-    replace_in_file( "Makefile.in", '^ALL_MAKEFILES\s*=', undef, @lines );
+    push @lines, "\ndnl Build dependencies for test files compiled into winetest\n";
+    replace_in_file( "configure.ac", '^WINE_CONFIG_MAKERULES', '^dnl Build dependencies for test files compiled into winetest$', @lines);
 }
 
 
@@ -355,7 +279,6 @@ sub update_ignores(@)
             next unless defined $makefile{$pattern[0]};
             push @list, map { (my $ret = $_) =~ s/$pattern[1]$/$pattern[2]/; $ret; } @{$makefile{$pattern[0]}};
         }
-        push @list, @{$makefile{"RC_BINARIES"}} if defined $makefile{"RC_BINARIES"};
         foreach my $f (@list)
         {
             push @ignores, $makefile{"=dir"} . $f unless $f =~ /\$\(.*\)/;  # skip make variables
@@ -369,33 +292,23 @@ sub update_ignores(@)
 
 sub update_dlls(@)
 {
-    my (%directories, %testdirs, %importlibs, %static_implibs, %staticlib_dirs, %altnames);
+    my (%directories, %importlibs, %static_implibs, %staticlib_dirs, %altnames);
     my $text = "";
     my @ignores = ();
 
     foreach my $make (@_)
     {
         my %makefile = %{$makefiles{$make}};
-        next if defined $makefile{"=skip"};
-
-        if ($make =~ /dlls\/(.*)\/tests\/Makefile/)
-        {
-            $testdirs{$1} = "$1/tests";
-            (my $crosstest = $makefile{"TESTDLL"}) =~ s/\.dll$//;
-            push @ignores, $makefile{"=dir"} . $crosstest . "_crosstest.exe";
-            push @ignores, $makefile{"=dir"} . "testlist.c";
-            push @ignores, $makefile{"=dir"} . "*.ok";
-            next;
-        }
+        next if ($makefile{"=rules"} eq $makerules{"MAKE_TEST_RULES"});
 
         next unless defined $makefile{"MODULE"};
         my $module = $makefile{"MODULE"};
         (my $dir = $makefile{"=dir"}) =~ s/^dlls\/(.*)\//$1/;
 
-        if ($module =~ /^lib.*\.a$/)
+        if ($makefile{"=rules"} eq $makerules{"MAKE_IMPLIB_RULES"})
         {
             $staticlib_dirs{$module} = $dir;
-            die "invalid module $module in dir $staticlib_dirs{$module}\n" if "lib$staticlib_dirs{$module}.a" ne $module;
+            die "invalid module $module in dir $staticlib_dirs{$module}\n" if "$staticlib_dirs{$module}" ne $module;
         }
         else
         {
@@ -407,7 +320,7 @@ sub update_dlls(@)
 
         if (defined $makefile{"IMPORTLIB"})
         {
-            if ($makefile{"IMPORTLIB"} =~ /^([a-zA-Z0-9_.]+)\.\$\(IMPLIBEXT\)/)
+            if ($makefile{"IMPORTLIB"} =~ /^([a-zA-Z0-9_.]+)/)
             {
                 $importlibs{$module} = $1;
             }
@@ -424,46 +337,14 @@ sub update_dlls(@)
             my @list = map { $_ =~ s/\.spec$//; $_ .= ".dll" unless $_ =~ /\./; $_; } @{$makefile{"SPEC_SRCS16"}};
             $altnames{$module} = \@list;
         }
+        if (defined $makefile{"EXTRA_OBJS16"})
+        {
+            foreach my $obj (@{$makefile{"EXTRA_OBJS16"}})
+            {
+                if ($obj =~ /^(.*\.(exe|mod))\.o/) { push @{$altnames{$module}}, $1; }
+            }
+        }
     }
-
-    # output special dlls configure definitions
-
-    $text .= "# special configure-dependent targets\n\n";
-    my %specials = ();
-    foreach my $mod (sort keys %special_dlls)
-    {
-        $specials{$special_dlls{$mod}} .= " " . $mod;
-    }
-    foreach my $i (sort keys %specials)
-    {
-        $text .= $i . " =" . $specials{$i} . "\n";
-    }
-    $text .= "EXTRADIRS =";
-    foreach my $i (sort keys %specials) { $text .= sprintf " \@%s\@", $i; }
-    $text .= "\n\n";
-
-    # output the subdirs list
-
-    $text .= "# Subdir list\n\n";
-    $text .= "BASEDIRS =";
-    foreach my $dir (sort values %directories)
-    {
-        next if defined($special_dlls{$dir});  # skip special dlls
-        $text .= " \\\n\t" . $dir;
-    }
-
-    $text .= "\n\nIMPLIBSUBDIRS = \\\n\t";
-    $text .=  join " \\\n\t", sort values %staticlib_dirs;
-
-    $text .= "\n\nTESTSUBDIRS = \\\n\t";
-    $text .= join " \\\n\t", sort values %testdirs;
-
-    $text .=  "\n\nSUBDIRS = \\\n\t";
-    $text .= join " \\\n\t", "\$(BASEDIRS)", "\$(IMPLIBSUBDIRS)", "\$(TESTSUBDIRS)", sort keys %special_dlls;
-
-    $text .= "\n\nBUILDSUBDIRS   = \$(BASEDIRS) \$(EXTRADIRS) \$(TESTSUBDIRS)\n";
-    $text .= "INSTALLSUBDIRS = \$(BASEDIRS) \$(EXTRADIRS) \$(IMPLIBSUBDIRS)\n";
-    $text .= "DOCSUBDIRS     = \$(BASEDIRS) \$(EXTRADIRS)\n";
 
     # output the list of 16-bit files
 
@@ -476,7 +357,7 @@ sub update_dlls(@)
             push @targets16, $i . "16";
         }
     }
-    $text .= "\n# 16-bit dlls\n\n";
+    $text .= "# 16-bit dlls\n\n";
     $text .= "WIN16_FILES = \\\n";
     $text .=  "\t" . join( " \\\n\t", sort @targets16 ) . "\n\n";
     $text .= "\@MAKE_RULES\@\n\n";
@@ -506,31 +387,40 @@ sub update_dlls(@)
     {
         my $dir = $directories{$mod};
         my $lib = $importlibs{$mod};
-        if ($lib ne "lib" . $dir) { push @lib_symlinks, $mod; }
+        if ($lib ne $dir) { push @lib_symlinks, $mod; }
     }
     $text .= "IMPORT_SYMLINKS =";
     foreach my $mod (sort @lib_symlinks)
     {
-        $text .= sprintf " \\\n\t%s.\$(IMPLIBEXT)", $importlibs{$mod};
+        $text .= sprintf " \\\n\tlib%s.\$(IMPLIBEXT)", $importlibs{$mod};
     }
 
     $text .= "\n\nIMPORT_LIBS = \\\n\t\$(IMPORT_SYMLINKS)";
     foreach my $mod (sort keys %staticlib_dirs)
     {
-        $text .= sprintf " \\\n\t%s/%s", $staticlib_dirs{$mod}, $mod;
+        $text .= sprintf " \\\n\t%s/lib%s.a", $staticlib_dirs{$mod}, $mod;
     }
     foreach my $mod (sort keys %importlibs)
     {
-        my $dir = $directories{$mod};
-        my $def = $mod;
-        $def =~ s/\.(dll|drv)$//;
-        $text .= sprintf " \\\n\t%s/lib%s.\$(IMPLIBEXT)", $dir, $def;
+        $text .= " \\\n\t$directories{$mod}/lib$importlibs{$mod}.\$(IMPLIBEXT)";
         next unless defined $static_implibs{$mod};
-        $text .= sprintf " \\\n\t%s/lib%s.\$(STATIC_IMPLIBEXT)", $dir, $def
+        $text .= " \\\n\t$directories{$mod}/lib$importlibs{$mod}.\$(STATIC_IMPLIBEXT)";
+    }
+    $text .= "\n\nCROSS_IMPLIBS =";
+    foreach my $mod (sort @lib_symlinks)
+    {
+        $text .= sprintf " \\\n\tlib%s.a", $importlibs{$mod};
+    }
+    foreach my $mod (sort keys %importlibs)
+    {
+        next if defined $static_implibs{$mod};
+        $text .= " \\\n\t$directories{$mod}/lib$importlibs{$mod}.a";
     }
     $text .= "\n\n";
+    $text .= "\$(TESTSUBDIRS:%=%/__crosstest__): \$(CROSS_IMPLIBS)\n\n";
     $text .= "implib: \$(IMPORT_LIBS)\n\n";
-    $text .= ".PHONY: implib\n\n";
+    $text .= "testsubdirs: \$(TESTSUBDIRS)\n\n";
+    $text .= ".PHONY: implib testsubdirs\n\n";
 
     foreach my $mod (sort keys %importlibs)
     {
@@ -538,18 +428,28 @@ sub update_dlls(@)
         my $lib = $importlibs{$mod};
         my $spec = $mod;
         $spec =~ s/\.dll$//;
-        $text .= sprintf "%s/%s.\$(IMPLIBEXT): %s/%s.spec \$(WINEBUILD)\n", $dir, $lib, $dir, $spec;
-        $text .= sprintf "\t\@cd %s && \$(MAKE) %s.\$(IMPLIBEXT)\n\n", $dir, $lib;
-        next unless $static_implibs{$mod};
-        $text .= sprintf "%s/%s.\$(STATIC_IMPLIBEXT): dummy\n", $dir, $lib, $dir, $spec;
-        $text .= sprintf "\t\@cd %s && \$(MAKE) %s.\$(STATIC_IMPLIBEXT)\n\n", $dir, $lib;
+        if (defined($static_implibs{$mod}))
+        {
+            $text .= sprintf "%s/lib%s.def: %s/%s.spec \$(WINEBUILD)\n", $dir, $lib, $dir, $spec;
+            $text .= sprintf "\t\@cd %s && \$(MAKE) lib%s.def\n\n", $dir, $lib;
+            $text .= sprintf "%s/lib%s.\$(STATIC_IMPLIBEXT): dummy\n", $dir, $lib, $dir, $spec;
+            $text .= sprintf "\t\@cd %s && \$(MAKE) lib%s.\$(STATIC_IMPLIBEXT)\n\n", $dir, $lib;
+        }
+        else
+        {
+            $text .= sprintf "%s/lib%s.def %s/lib%s.a: %s/%s.spec \$(WINEBUILD)\n",
+                             $dir, $lib, $dir, $lib, $dir, $spec;
+            $text .= sprintf "\t\@cd %s && \$(MAKE) `basename \$\@`\n\n", $dir;
+        }
     }
     foreach my $mod (sort @lib_symlinks)
     {
         my $dir = $directories{$mod};
-        my $lib = $importlibs{$mod} . ".\$(IMPLIBEXT)";
-        $text .= sprintf "%s: %s/%s\n", $lib, $dir, $lib;
-        $text .= sprintf "\t\$(RM) \$@ && \$(LN_S) %s/%s \$@\n\n", $dir, $lib;
+        my $lib = "lib" . $importlibs{$mod};
+        $text .= sprintf "%s.a: %s/%s.a\n", $lib, $dir, $lib;
+        $text .= sprintf "\t\$(RM) \$@ && \$(LN_S) %s/%s.a \$@\n\n", $dir, $lib;
+        $text .= sprintf "%s.def: %s/%s.def\n", $lib, $dir, $lib;
+        $text .= sprintf "\t\$(RM) \$@ && \$(LN_S) %s/%s.def \$@\n\n", $dir, $lib;
     }
 
     $text .= "\$(BUILDSUBDIRS): \$(IMPORT_LIBS)\n";
@@ -561,12 +461,12 @@ sub update_dlls(@)
 
     foreach my $mod (sort keys %staticlib_dirs)
     {
-        $text .= sprintf "%s/%s: %s\n", $staticlib_dirs{$mod}, $mod, $staticlib_dirs{$mod};
+        $text .= sprintf "%s/lib%s.a: %s\n", $staticlib_dirs{$mod}, $mod, $staticlib_dirs{$mod};
     }
     $text .= "\n# Misc rules\n";
 
     replace_in_file( "dlls/Makefile.in",
-                     '^# special configure-dependent targets',
+                     '^# 16-bit dlls',
                      '^# Misc rules',
                      $text );
 
@@ -574,55 +474,13 @@ sub update_dlls(@)
 
     foreach my $mod (sort @lib_symlinks)
     {
-        push @ignores, "dlls/$importlibs{$mod}.def";
+        push @ignores, "dlls/lib$importlibs{$mod}.def";
     }
     foreach my $mod (sort keys %directories)
     {
         next unless defined $altnames{$mod};
         push @ignores, map { "dlls/" . $_ . "16"; } @{$altnames{$mod}};
     }
-    foreach my $mod (sort keys %importlibs)
-    {
-        my $dir = $directories{$mod};
-        my $def = $mod;
-        $def =~ s/\.(dll|drv)$//;
-        push @ignores, "dlls/$dir/lib$def.def";
-    }
-
-    return @ignores;
-}
-
-
-################################################################
-# update programs/Makefile.in
-
-sub update_progs(@)
-{
-    my (@subdirs, @install_subdirs, @install_progs);
-
-    my @ignores = ();
-
-    foreach my $make (@_)
-    {
-        my %makefile = %{$makefiles{$make}};
-        my $module = $makefile{"MODULE"};
-        (my $dir = $make) =~ s/^programs\/(.*)\/Makefile$/$1/;
-        die "Invalid module $module in $make" unless "$dir.exe" eq $module;
-        next if defined $makefile{"=skip"};
-        push @subdirs, $dir;
-        push @ignores, "programs/$dir/$dir";
-        push @install_subdirs, $dir unless $dont_install{$dir};
-        push @install_progs, $dir if $bin_install{$dir};
-    }
-
-    replace_in_file( "programs/Makefile.in", '^SUBDIRS\s*=', '^INSTALLDIRS',
-                     "SUBDIRS = \\\n\t",
-                     join( " \\\n\t", @subdirs ),
-                     "\n\n# Sub-directories to run make install into\nINSTALLSUBDIRS = \\\n\t",
-                     join( " \\\n\t", @install_subdirs ),
-                     "\n\n# Programs to install in bin directory\nINSTALLPROGS = \\\n\t",
-                     join( " \\\n\t", @install_progs ),
-                     "\n\nINSTALLDIRS = \$(DESTDIR)\$(bindir)\n" );
 
     return @ignores;
 }
@@ -634,28 +492,38 @@ sub update_progs(@)
 sub update_includes()
 {
     return unless -d ".git";
-    my (@h_srcs, @idl_srcs, @tlb_srcs, %subdirs);
+    my (@h_srcs, @private_idl_srcs, @public_idl_srcs, @tlb_srcs, %subdirs);
     my @includes = map { s/^include\///; $_; } split /\0/, `git ls-files -c -z include`;
     foreach my $incl (@includes)
     {
         if ($incl =~ /(.*)\//) { $subdirs{$1} = 1; }
-        next if ($private_headers{$incl});
+        next if ($incl =~ /\.in$/);
+        if ($incl =~ /^wine\// && !$exported_wine_headers{$incl})
+        {
+            if ($private_idl_headers{$incl}) { push @private_idl_srcs, $incl; }
+            next;
+        }
         if ($incl =~ /stdole2\.idl$/) { push @tlb_srcs, $incl; }
         elsif ($private_idl_headers{$incl}) { push @h_srcs, $incl; }
         elsif ($incl =~ /\.h$/) { push @h_srcs, $incl; }
+        elsif ($incl =~ /\.rh$/) { push @h_srcs, $incl; }
         elsif ($incl =~ /\.inl$/) { push @h_srcs, $incl; }
-        elsif ($incl =~ /\.idl$/) { push @idl_srcs, $incl; }
+        elsif ($incl =~ /\.idl$/) { push @public_idl_srcs, $incl; }
+        else { die "unknown file $incl in include dir"; }
     }
-    replace_in_file( "include/Makefile.in", '^IDL_H_SRCS\s*=', '^INSTALLDIRS',
-                     "IDL_H_SRCS = \\\n\t",
-                     join( " \\\n\t", sort @idl_srcs ),
+    replace_in_file( "include/Makefile.in", '^PRIVATE_IDL_H_SRCS\s*=', '^INSTALLDIRS',
+                     "PRIVATE_IDL_H_SRCS = \\\n\t",
+                     join( " \\\n\t", sort @private_idl_srcs ),
+                     "\n\nPUBLIC_IDL_H_SRCS = \\\n\t",
+                     join( " \\\n\t", sort @public_idl_srcs ),
                      "\n\nIDL_TLB_SRCS = \\\n\t",
                      join( " \\\n\t", sort @tlb_srcs ),
-                     "\n\nSRCDIR_INCLUDES = \\\n\t\$(IDL_TLB_SRCS) \\\n\t\$(IDL_H_SRCS) \\\n\t",
+                     "\n\nSRCDIR_INCLUDES = \\\n\t\$(IDL_TLB_SRCS) \\\n\t\$(PUBLIC_IDL_H_SRCS) \\\n\t",
                      join( " \\\n\t", sort @h_srcs ),
                      "\n\nEXTRASUBDIRS = ",
                      join( " ", sort keys %subdirs ),
                      "\n\nINSTALLDIRS = \\\n" );
+    return map { s/(.*)\.idl$/include\/$1.h/; $_; } @public_idl_srcs, @private_idl_srcs;
 }
 
 
@@ -702,8 +570,6 @@ else
     @makefiles = map { s/^\.\/(.*)\.in/$1/; $_; } split(/\s/,`find . -name Makefile.in -print`);
 }
 
-update_includes();
-
 foreach my $file (sort values %makerules, @makefiles)
 {
     my %make = parse_makefile( $file );
@@ -711,8 +577,7 @@ foreach my $file (sort values %makerules, @makefiles)
 }
 
 update_makefiles( @makefiles );
+push @ignores, update_includes();
 push @ignores, update_ignores( @makefiles );
-push @ignores, update_winetest( @makefiles );
 push @ignores, update_dlls( sort grep /^dlls\//, @makefiles );
-push @ignores, update_progs( sort grep /^programs\/.*\/Makefile$/, @makefiles );
 update_gitignore( @ignores );

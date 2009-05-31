@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -28,6 +29,9 @@
 #include "toolhelp.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(module);
 
 /**************************************************************************
  *		DllEntryPoint   (KERNEL.669)
@@ -129,4 +133,22 @@ HANDLE WINAPI CreateThread16( SECURITY_ATTRIBUTES *sa, DWORD stack,
     args->proc = start;
     args->param = param;
     return CreateThread( sa, stack, start_thread16, args, flags, id );
+}
+
+/***********************************************************************
+ *           _DebugOutput                    (KERNEL.328)
+ */
+void WINAPIV _DebugOutput( WORD flags, LPCSTR spec, VA_LIST16 valist )
+{
+    char caller[101];
+
+    /* Decode caller address */
+    if (!GetModuleName16( GetExePtr(CURRENT_STACK16->cs), caller, sizeof(caller) ))
+        sprintf( caller, "%04X:%04X", CURRENT_STACK16->cs, CURRENT_STACK16->ip );
+
+    /* FIXME: cannot use wvsnprintf16 from kernel */
+    /* wvsnprintf16( temp, sizeof(temp), spec, valist ); */
+
+    /* Output */
+    FIXME("%s %04x %s\n", caller, flags, debugstr_a(spec) );
 }

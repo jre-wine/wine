@@ -77,7 +77,7 @@ static UINT JOIN_fetch_int( struct tagMSIVIEW *view, UINT row, UINT col, UINT *v
             break;
         }
 
-        prev_rows = table->rows;
+        prev_rows *= table->rows;
         cols += table->columns;
     }
 
@@ -108,7 +108,7 @@ static UINT JOIN_fetch_stream( struct tagMSIVIEW *view, UINT row, UINT col, IStr
             break;
         }
 
-        prev_rows = table->rows;
+        prev_rows *= table->rows;
         cols += table->columns;
     }
 
@@ -194,13 +194,13 @@ static UINT JOIN_get_dimensions( struct tagMSIVIEW *view, UINT *rows, UINT *cols
 }
 
 static UINT JOIN_get_column_info( struct tagMSIVIEW *view,
-                UINT n, LPWSTR *name, UINT *type )
+                UINT n, LPWSTR *name, UINT *type, BOOL *temporary )
 {
     MSIJOINVIEW *jv = (MSIJOINVIEW*)view;
     JOINTABLE *table;
     UINT cols = 0;
 
-    TRACE("%p %d %p %p\n", jv, n, name, type );
+    TRACE("%p %d %p %p %p\n", jv, n, name, type, temporary );
 
     if (n == 0 || n > jv->columns)
         return ERROR_FUNCTION_FAILED;
@@ -208,7 +208,8 @@ static UINT JOIN_get_column_info( struct tagMSIVIEW *view,
     LIST_FOR_EACH_ENTRY(table, &jv->tables, JOINTABLE, entry)
     {
         if (n <= cols + table->columns)
-            return table->view->ops->get_column_info(table->view, n - cols, name, type);
+            return table->view->ops->get_column_info(table->view, n - cols,
+                                                     name, type, temporary);
 
         cols += table->columns;
     }
@@ -306,6 +307,7 @@ static const MSIVIEWOPS join_ops =
     NULL,
     NULL,
     JOIN_sort,
+    NULL,
 };
 
 UINT JOIN_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR tables )
@@ -341,7 +343,8 @@ UINT JOIN_CreateView( MSIDATABASE *db, MSIVIEW **view, LPWSTR tables )
         r = TABLE_CreateView( db, tables, &table->view );
         if( r != ERROR_SUCCESS )
         {
-            ERR("can't create table\n");
+            WARN("can't create table: %s\n", debugstr_w(tables));
+            r = ERROR_BAD_QUERY_SYNTAX;
             goto end;
         }
 

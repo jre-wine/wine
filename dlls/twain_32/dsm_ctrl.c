@@ -84,11 +84,12 @@ twain_add_onedriver(const char *dsname) {
 		if (i < nrdevices)
 			break;
 		if (nrdevices)
-			devices = realloc(devices, sizeof(devices[0])*(nrdevices+1));
+			devices = HeapReAlloc(GetProcessHeap(), 0, devices, sizeof(devices[0])*(nrdevices+1));
 		else
-			devices = malloc(sizeof(devices[0]));
-		devices[nrdevices].modname = strdup(dsname);
-		memcpy (&devices[nrdevices].identity, &sourceId, sizeof(sourceId));
+			devices = HeapAlloc(GetProcessHeap(), 0, sizeof(devices[0]));
+		if ((devices[nrdevices].modname = HeapAlloc(GetProcessHeap(), 0, strlen(dsname) + 1)))
+			lstrcpyA(devices[nrdevices].modname, dsname);
+		devices[nrdevices].identity = sourceId;
 		nrdevices++;
 		DSM_sourceId++;
 	} while (1);
@@ -102,8 +103,8 @@ twain_autodetect(void) {
 	if (detectionrun) return;
 	detectionrun = 1;
 
-	twain_add_onedriver("gphoto2.ds");
 	twain_add_onedriver("sane.ds");
+	twain_add_onedriver("gphoto2.ds");
 #if 0
 	twain_add_onedriver("c:\\windows\\Twain_32\\Largan\\sp503a.ds");
 	twain_add_onedriver("c:\\windows\\Twain_32\\vivicam10\\vivicam10.ds");
@@ -155,7 +156,8 @@ TW_UINT16 TWAIN_IdentityGetDefault (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 	twain_autodetect();
 	if (!nrdevices)
 		return TWRC_FAILURE;
-	memcpy (pSourceIdentity, &devices[0].identity, sizeof(TW_IDENTITY));
+	*pSourceIdentity = devices[0].identity;
+	DSM_twCC = TWCC_SUCCESS;
 	return TWRC_SUCCESS;
 }
 
@@ -168,11 +170,11 @@ TW_UINT16 TWAIN_IdentityGetFirst (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 	twain_autodetect();
 	if (!nrdevices) {
 		TRACE ("no entries found.\n");
-		DSM_twCC = TWCC_SUCCESS;
-		return TWRC_ENDOFLIST;
+		DSM_twCC = TWCC_NODS;
+		return TWRC_FAILURE;
 	}
 	DSM_currentDevice = 0;
-	memcpy (pSourceIdentity, &devices[DSM_currentDevice++].identity, sizeof(TW_IDENTITY));
+	*pSourceIdentity = devices[DSM_currentDevice++].identity;
 	return TWRC_SUCCESS;
 }
 
@@ -186,7 +188,7 @@ TW_UINT16 TWAIN_IdentityGetNext (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 		DSM_twCC = TWCC_SUCCESS;
 		return TWRC_ENDOFLIST;
 	}
-	memcpy (pSourceIdentity, &devices[DSM_currentDevice++].identity, sizeof(TW_IDENTITY));
+	*pSourceIdentity = devices[DSM_currentDevice++].identity;
 	return TWRC_SUCCESS;
 }
 
@@ -202,7 +204,7 @@ TW_UINT16 TWAIN_OpenDS (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 	TRACE("DG_CONTROL/DAT_IDENTITY/MSG_OPENDS\n");
         TRACE("pIdentity is %s\n", pIdentity->ProductName);
 	if (DSM_currentState != 3) {
-		FIXME("seq errror\n");
+		FIXME("seq error\n");
 		DSM_twCC = TWCC_SEQERROR;
 		return TWRC_FAILURE;
 	}
@@ -263,7 +265,7 @@ TW_UINT16 TWAIN_UserSelect (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 		DSM_twCC = TWCC_OPERATIONERROR;
 		return TWRC_FAILURE;
 	}
-	memcpy (selected, &devices[0].identity, sizeof(TW_IDENTITY));
+	*selected = devices[0].identity;
 	DSM_twCC = TWCC_SUCCESS;
 	return TWRC_SUCCESS;
 }

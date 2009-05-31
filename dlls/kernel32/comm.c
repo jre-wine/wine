@@ -477,8 +477,10 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 	COMMTIMEOUTS timeouts;
 	BOOL result;
 	LPCWSTR ptr = devid;
-	
+
 	TRACE("(%s,%p,%p)\n",debugstr_w(devid),lpdcb,lptimeouts);
+
+	memset(&timeouts, 0, sizeof timeouts);
 
 	/* Set DCBlength. (Windows NT does not do this, but 9x does) */
 	lpdcb->DCBlength = sizeof(DCB);
@@ -486,8 +488,8 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 	/* Make a copy of the original data structures to work with since if
 	   if there is an error in the device control string the originals
 	   should not be modified (except possibly DCBlength) */
-	memcpy(&dcb, lpdcb, sizeof(DCB));
-	if(lptimeouts) memcpy(&timeouts, lptimeouts, sizeof(COMMTIMEOUTS));
+	dcb = *lpdcb;
+	if(lptimeouts) timeouts = *lptimeouts;
 
 	ptr = COMM_ParseStart(ptr);
 
@@ -500,8 +502,8 @@ BOOL WINAPI BuildCommDCBAndTimeoutsW(
 
 	if(result)
 	{
-		memcpy(lpdcb, &dcb, sizeof(DCB));
-		if(lptimeouts) memcpy(lptimeouts, &timeouts, sizeof(COMMTIMEOUTS));
+		*lpdcb = dcb;
+		if(lptimeouts) *lptimeouts = timeouts;
 		return TRUE;
 	}
 	else
@@ -549,7 +551,8 @@ BOOL WINAPI BuildCommDCBW(
  */
 BOOL WINAPI SetCommBreak(HANDLE handle)
 {
-    return DeviceIoControl(handle, IOCTL_SERIAL_SET_BREAK_ON, NULL, 0, NULL, 0, NULL, NULL);
+    DWORD dwBytesReturned;
+    return DeviceIoControl(handle, IOCTL_SERIAL_SET_BREAK_ON, NULL, 0, NULL, 0, &dwBytesReturned, NULL);
 }
 
 /*****************************************************************************
@@ -571,7 +574,8 @@ BOOL WINAPI SetCommBreak(HANDLE handle)
  */
 BOOL WINAPI ClearCommBreak(HANDLE handle)
 {
-    return DeviceIoControl(handle, IOCTL_SERIAL_SET_BREAK_OFF, NULL, 0, NULL, 0, NULL, NULL);
+    DWORD dwBytesReturned;
+    return DeviceIoControl(handle, IOCTL_SERIAL_SET_BREAK_OFF, NULL, 0, NULL, 0, &dwBytesReturned, NULL);
 }
 
 /*****************************************************************************
@@ -593,6 +597,7 @@ BOOL WINAPI ClearCommBreak(HANDLE handle)
 BOOL WINAPI EscapeCommFunction(HANDLE handle, UINT func)
 {
     DWORD       ioc;
+    DWORD dwBytesReturned;
 
     switch (func)
     {
@@ -610,7 +615,7 @@ BOOL WINAPI EscapeCommFunction(HANDLE handle, UINT func)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    return DeviceIoControl(handle, ioc, NULL, 0, NULL, 0, NULL, NULL);
+    return DeviceIoControl(handle, ioc, NULL, 0, NULL, 0, &dwBytesReturned, NULL);
 }
 
 /********************************************************************
@@ -630,8 +635,9 @@ BOOL WINAPI EscapeCommFunction(HANDLE handle, UINT func)
  */
 BOOL WINAPI PurgeComm(HANDLE handle, DWORD flags)
 {
+    DWORD dwBytesReturned;
     return DeviceIoControl(handle, IOCTL_SERIAL_PURGE, &flags, sizeof(flags),
-                           NULL, 0, NULL, NULL);
+                           NULL, 0, &dwBytesReturned, NULL);
 }
 
 /*****************************************************************************
@@ -652,9 +658,10 @@ BOOL WINAPI PurgeComm(HANDLE handle, DWORD flags)
 BOOL WINAPI ClearCommError(HANDLE handle, LPDWORD errors, LPCOMSTAT lpStat)
 {
     SERIAL_STATUS       ss;
+    DWORD dwBytesReturned;
 
     if (!DeviceIoControl(handle, IOCTL_SERIAL_GET_COMMSTATUS, NULL, 0,
-                         &ss, sizeof(ss), NULL, NULL))
+                         &ss, sizeof(ss), &dwBytesReturned, NULL))
         return FALSE;
 
     if (errors)
@@ -706,11 +713,12 @@ BOOL WINAPI ClearCommError(HANDLE handle, LPDWORD errors, LPCOMSTAT lpStat)
 BOOL WINAPI SetupComm(HANDLE handle, DWORD insize, DWORD outsize)
 {
     SERIAL_QUEUE_SIZE   sqs;
+    DWORD dwBytesReturned;
 
     sqs.InSize = insize;
     sqs.OutSize = outsize;
     return DeviceIoControl(handle, IOCTL_SERIAL_SET_QUEUE_SIZE,
-                           &sqs, sizeof(sqs), NULL, 0, NULL, NULL);
+                           &sqs, sizeof(sqs), NULL, 0, &dwBytesReturned, NULL);
 }
 
 /*****************************************************************************
@@ -730,9 +738,10 @@ BOOL WINAPI SetupComm(HANDLE handle, DWORD insize, DWORD outsize)
  */
 BOOL WINAPI GetCommMask(HANDLE handle, LPDWORD evtmask)
 {
+    DWORD dwBytesReturned;
     TRACE("handle %p, mask %p\n", handle, evtmask);
     return DeviceIoControl(handle, IOCTL_SERIAL_GET_WAIT_MASK,
-                           NULL, 0, evtmask, sizeof(*evtmask), NULL, NULL);
+                           NULL, 0, evtmask, sizeof(*evtmask), &dwBytesReturned, NULL);
 }
 
 /*****************************************************************************
@@ -753,9 +762,10 @@ BOOL WINAPI GetCommMask(HANDLE handle, LPDWORD evtmask)
  */
 BOOL WINAPI SetCommMask(HANDLE handle, DWORD evtmask)
 {
+    DWORD dwBytesReturned;
     TRACE("handle %p, mask %x\n", handle, evtmask);
     return DeviceIoControl(handle, IOCTL_SERIAL_SET_WAIT_MASK,
-                           &evtmask, sizeof(evtmask), NULL, 0, NULL, NULL);
+                           &evtmask, sizeof(evtmask), NULL, 0, &dwBytesReturned, NULL);
 }
 
 static void dump_dcb(const DCB* lpdcb)
@@ -777,7 +787,7 @@ static void dump_dcb(const DCB* lpdcb)
  *	SetCommState    (KERNEL32.@)
  *
  *  Re-initializes all hardware and control settings of a communications device,
- *  with values from a device control block without effecting the input and output
+ *  with values from a device control block without affecting the input and output
  *  queues.
  *
  * PARAMS
@@ -787,7 +797,7 @@ static void dump_dcb(const DCB* lpdcb)
  *
  * RETURNS
  *
- *  True on success, false on failure eg if the XonChar is equal to the XoffChar.
+ *  True on success, false on failure, e.g., if the XonChar is equal to the XoffChar.
  */
 BOOL WINAPI SetCommState( HANDLE handle, LPDCB lpdcb)
 {
@@ -795,6 +805,7 @@ BOOL WINAPI SetCommState( HANDLE handle, LPDCB lpdcb)
     SERIAL_LINE_CONTROL        slc;
     SERIAL_HANDFLOW            shf;
     SERIAL_CHARS               sc;
+    DWORD dwBytesReturned;
 
     if (lpdcb == NULL)
     {
@@ -822,7 +833,7 @@ BOOL WINAPI SetCommState( HANDLE handle, LPDCB lpdcb)
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
-    switch (lpdcb->fDtrControl)
+    switch (lpdcb->fRtsControl)
     {
     case RTS_CONTROL_DISABLE:                                                  break;
     case RTS_CONTROL_ENABLE:      shf.FlowReplace |= SERIAL_RTS_CONTROL;       break;
@@ -856,13 +867,13 @@ BOOL WINAPI SetCommState( HANDLE handle, LPDCB lpdcb)
      * so flow control does not interfere.
      */
     return (DeviceIoControl(handle, IOCTL_SERIAL_SET_BAUD_RATE,
-                            &sbr, sizeof(sbr), NULL, 0, NULL, NULL) &&
+                            &sbr, sizeof(sbr), NULL, 0, &dwBytesReturned, NULL) &&
             DeviceIoControl(handle, IOCTL_SERIAL_SET_LINE_CONTROL,
-                            &slc, sizeof(slc), NULL, 0, NULL, NULL) &&
+                            &slc, sizeof(slc), NULL, 0, &dwBytesReturned, NULL) &&
             DeviceIoControl(handle, IOCTL_SERIAL_SET_HANDFLOW,
-                            &shf, sizeof(shf), NULL, 0, NULL, NULL) &&
+                            &shf, sizeof(shf), NULL, 0, &dwBytesReturned, NULL) &&
             DeviceIoControl(handle, IOCTL_SERIAL_SET_CHARS,
-                            &sc, sizeof(sc), NULL, 0, NULL, NULL));
+                            &sc, sizeof(sc), NULL, 0, &dwBytesReturned, NULL));
 }
 
 
@@ -889,6 +900,7 @@ BOOL WINAPI GetCommState(HANDLE handle, LPDCB lpdcb)
     SERIAL_LINE_CONTROL slc;
     SERIAL_HANDFLOW     shf;
     SERIAL_CHARS        sc;
+    DWORD dwBytesReturned;
 
     TRACE("handle %p, ptr %p\n", handle, lpdcb);
 
@@ -899,13 +911,13 @@ BOOL WINAPI GetCommState(HANDLE handle, LPDCB lpdcb)
     }
     
     if (!DeviceIoControl(handle, IOCTL_SERIAL_GET_BAUD_RATE,
-                         NULL, 0, &sbr, sizeof(sbr), NULL, NULL) ||
+                         NULL, 0, &sbr, sizeof(sbr), &dwBytesReturned, NULL) ||
         !DeviceIoControl(handle, IOCTL_SERIAL_GET_LINE_CONTROL,
-                         NULL, 0, &slc, sizeof(slc), NULL, NULL) ||
+                         NULL, 0, &slc, sizeof(slc), &dwBytesReturned, NULL) ||
         !DeviceIoControl(handle, IOCTL_SERIAL_GET_HANDFLOW,
-                         NULL, 0, &shf, sizeof(shf), NULL, NULL) ||
+                         NULL, 0, &shf, sizeof(shf), &dwBytesReturned, NULL) ||
         !DeviceIoControl(handle, IOCTL_SERIAL_GET_CHARS,
-                         NULL, 0, &sc, sizeof(sc), NULL, NULL))
+                         NULL, 0, &sc, sizeof(sc), &dwBytesReturned, NULL))
         return FALSE;
 
     memset(lpdcb, 0, sizeof(*lpdcb));
@@ -978,8 +990,9 @@ BOOL WINAPI GetCommState(HANDLE handle, LPDCB lpdcb)
  */
 BOOL WINAPI TransmitCommChar(HANDLE hComm, CHAR chTransmit)
 {
+    DWORD dwBytesReturned;
     return DeviceIoControl(hComm, IOCTL_SERIAL_IMMEDIATE_CHAR,
-                           &chTransmit, sizeof(chTransmit), NULL, 0, NULL, NULL);
+                           &chTransmit, sizeof(chTransmit), NULL, 0, &dwBytesReturned, NULL);
 }
 
 
@@ -1000,6 +1013,7 @@ BOOL WINAPI TransmitCommChar(HANDLE hComm, CHAR chTransmit)
 BOOL WINAPI GetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
 {
     SERIAL_TIMEOUTS     st;
+    DWORD dwBytesReturned;
 
     TRACE("(%p, %p)\n", hComm, lptimeouts);
     if (!lptimeouts)
@@ -1008,7 +1022,7 @@ BOOL WINAPI GetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
         return FALSE;
     }
     if (!DeviceIoControl(hComm, IOCTL_SERIAL_GET_TIMEOUTS,
-                         NULL, 0, &st, sizeof(st), NULL, NULL))
+                         NULL, 0, &st, sizeof(st), &dwBytesReturned, NULL))
         return FALSE;
     lptimeouts->ReadIntervalTimeout         = st.ReadIntervalTimeout;
     lptimeouts->ReadTotalTimeoutMultiplier  = st.ReadTotalTimeoutMultiplier;
@@ -1041,6 +1055,7 @@ BOOL WINAPI GetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
 BOOL WINAPI SetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
 {
     SERIAL_TIMEOUTS     st;
+    DWORD dwBytesReturned;
 
     TRACE("(%p, %p)\n", hComm, lptimeouts);
 
@@ -1056,7 +1071,7 @@ BOOL WINAPI SetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
     st.WriteTotalTimeoutConstant   = lptimeouts->WriteTotalTimeoutConstant;
  
     return DeviceIoControl(hComm, IOCTL_SERIAL_SET_TIMEOUTS,
-                           &st, sizeof(st), NULL, 0, NULL, NULL);
+                           &st, sizeof(st), NULL, 0, &dwBytesReturned, NULL);
 }
 
 /***********************************************************************
@@ -1076,8 +1091,9 @@ BOOL WINAPI SetCommTimeouts(HANDLE hComm, LPCOMMTIMEOUTS lptimeouts)
  */
 BOOL WINAPI GetCommModemStatus(HANDLE hFile, LPDWORD lpModemStat)
 {
+    DWORD dwBytesReturned;
     return DeviceIoControl(hFile, IOCTL_SERIAL_GET_MODEMSTATUS,
-                           NULL, 0, lpModemStat, sizeof(DWORD), NULL, NULL);
+                           NULL, 0, lpModemStat, sizeof(DWORD), &dwBytesReturned, NULL);
 }
 
 /***********************************************************************

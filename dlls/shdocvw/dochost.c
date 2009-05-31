@@ -25,17 +25,32 @@ WINE_DEFAULT_DEBUG_CHANNEL(shdocvw);
 
 static ATOM doc_view_atom = 0;
 
+void push_dochost_task(DocHost *This, task_header_t *task, task_proc_t proc, BOOL send)
+{
+    task->proc = proc;
+
+    /* FIXME: Don't use lParam */
+    if(send)
+        SendMessageW(This->frame_hwnd, WM_DOCHOSTTASK, 0, (LPARAM)task);
+    else
+        PostMessageW(This->frame_hwnd, WM_DOCHOSTTASK, 0, (LPARAM)task);
+}
+
+LRESULT process_dochost_task(DocHost *This, LPARAM lparam)
+{
+    task_header_t *task = (task_header_t*)lparam;
+
+    task->proc(This, task);
+
+    heap_free(task);
+    return 0;
+}
+
 static void navigate_complete(DocHost *This)
 {
-    IDispatch *disp = NULL;
     DISPPARAMS dispparams;
     VARIANTARG params[2];
     VARIANT url;
-    HRESULT hres;
-
-    hres = IUnknown_QueryInterface(This->document, &IID_IDispatch, (void**)&disp);
-    if(FAILED(hres))
-        FIXME("Could not get IDispatch interface\n");
 
     dispparams.cArgs = 2;
     dispparams.cNamedArgs = 0;
@@ -46,7 +61,7 @@ static void navigate_complete(DocHost *This)
     V_BYREF(params) = &url;
 
     V_VT(params+1) = VT_DISPATCH;
-    V_DISPATCH(params+1) = disp;
+    V_DISPATCH(params+1) = This->disp;
 
     V_VT(&url) = VT_BSTR;
     V_BSTR(&url) = SysAllocString(This->url);
@@ -55,11 +70,10 @@ static void navigate_complete(DocHost *This)
     call_sink(This->cps.wbe2, DISPID_DOCUMENTCOMPLETE, &dispparams);
 
     SysFreeString(V_BSTR(&url));
-    if(disp)
-        IDispatch_Release(disp);
+    This->busy = VARIANT_FALSE;
 }
 
-static LRESULT navigate2(DocHost *This)
+void object_available(DocHost *This)
 {
     IHlinkTarget *hlink;
     HRESULT hres;
@@ -68,25 +82,25 @@ static LRESULT navigate2(DocHost *This)
 
     if(!This->document) {
         WARN("document == NULL\n");
-        return 0;
+        return;
     }
 
     hres = IUnknown_QueryInterface(This->document, &IID_IHlinkTarget, (void**)&hlink);
     if(FAILED(hres)) {
         FIXME("Could not get IHlinkTarget interface\n");
-        return 0;
+        return;
     }
 
     hres = IHlinkTarget_Navigate(hlink, 0, NULL);
     IHlinkTarget_Release(hlink);
     if(FAILED(hres)) {
         FIXME("Navigate failed\n");
-        return 0;
+        return;
     }
 
     navigate_complete(This);
 
-    return 0;
+    return;
 }
 
 static LRESULT resize_document(DocHost *This, LONG width, LONG height)
@@ -117,8 +131,6 @@ static LRESULT WINAPI doc_view_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     switch(msg) {
     case WM_SIZE:
         return resize_document(This, LOWORD(lParam), HIWORD(lParam));
-    case WB_WM_NAVIGATE2:
-        return navigate2(This);
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -137,7 +149,7 @@ void create_doc_view_hwnd(DocHost *This)
             CS_PARENTDC,
             doc_view_proc,
             0, 0 /* native uses 4*/, NULL, NULL, NULL,
-            (HBRUSH)COLOR_WINDOWFRAME, NULL,
+            (HBRUSH)(COLOR_WINDOW + 1), NULL,
             wszShell_DocObject_View,
             NULL
         };

@@ -76,7 +76,7 @@ static void add_section( struct dll_info *info, const char *name, DWORD size, DW
     IMAGE_SECTION_HEADER *sec = (IMAGE_SECTION_HEADER *)(info->nt + 1);
 
     sec += info->nt->FileHeader.NumberOfSections;
-    memcpy( (char *)sec->Name, name, min( strlen(name), sizeof(sec->Name)) );
+    memcpy( sec->Name, name, min( strlen(name), sizeof(sec->Name)) );
     sec->Misc.VirtualSize = ALIGN( size, section_alignment );
     sec->VirtualAddress   = info->mem_pos;
     sec->SizeOfRawData    = size;
@@ -193,7 +193,7 @@ static BOOL build_fake_dll( HANDLE file, HMODULE module )
     memcpy( dos + 1, fakedll_signature, sizeof(fakedll_signature) );
 
     nt = info.nt = (IMAGE_NT_HEADERS *)(buffer + lfanew);
-    src_nt = RtlImageNtHeader( module );
+    if (module) src_nt = RtlImageNtHeader( module );
     /* some fields are copied from the source dll */
 #define SET(field,def) nt->field = src_nt ? src_nt->field : def
     SET( FileHeader.Machine, IMAGE_FILE_MACHINE_I386 );
@@ -276,6 +276,27 @@ static BOOL is_fake_dll( HANDLE h )
     return !memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) );
 }
 
+/* create directories leading to a given file */
+static void create_directories( const WCHAR *name )
+{
+    WCHAR *path, *p;
+
+    /* create the directory/directories */
+    path = HeapAlloc(GetProcessHeap(), 0, (strlenW(name) + 1)*sizeof(WCHAR));
+    strcpyW(path, name);
+
+    p = strchrW(path, '\\');
+    while (p != NULL)
+    {
+        *p = 0;
+        if (!CreateDirectoryW(path, NULL))
+            TRACE("Couldn't create directory %s - error: %d\n", wine_dbgstr_w(path), GetLastError());
+        *p = '\\';
+        p = strchrW(p+1, '\\');
+    }
+    HeapFree(GetProcessHeap(), 0, path);
+}
+
 /***********************************************************************
  *            create_fake_dll
  */
@@ -284,6 +305,13 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
     HANDLE h;
     HMODULE module;
     BOOL ret;
+
+    /* check for empty name which means to only create the directory */
+    if (name[strlenW(name) - 1] == '\\')
+    {
+        create_directories( name );
+        return TRUE;
+    }
 
     /* first check for an existing file */
     h = CreateFileW( name, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL );
@@ -301,27 +329,7 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
     }
     else
     {
-        if (GetLastError() == ERROR_PATH_NOT_FOUND)
-        {
-            WCHAR *path;
-            WCHAR *pathel;
-
-            /* create the directory/directories */
-            path = HeapAlloc(GetProcessHeap(), 0, (strlenW(name) + 1)*sizeof(WCHAR));
-            strcpyW(path, name);
-
-            pathel = strchrW(path, '\\');
-            while (pathel != NULL)
-            {
-                *pathel = 0;
-                if (!CreateDirectoryW(path, NULL))
-                    TRACE("Couldn't create directory %s - error: %d\n", wine_dbgstr_w(path), GetLastError());
-                *pathel = '\\';
-                pathel = strchrW(pathel+1, '\\');
-            }
-
-            HeapFree(GetProcessHeap(), 0, path);
-        }
+        if (GetLastError() == ERROR_PATH_NOT_FOUND) create_directories( name );
 
         h = CreateFileW( name, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL );
         if (h == INVALID_HANDLE_VALUE)

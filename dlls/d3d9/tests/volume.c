@@ -22,7 +22,7 @@
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -43,8 +43,11 @@ static IDirect3DDevice9 *init_d3d9(HMODULE d3d9_handle)
     if (!d3d9_create) return NULL;
 
     d3d9_ptr = d3d9_create(D3D_SDK_VERSION);
-    ok(d3d9_ptr != NULL, "Failed to create IDirect3D9 object\n");
-    if (!d3d9_ptr) return NULL;
+    if (!d3d9_ptr)
+    {
+        skip("could not create D3D9\n");
+        return NULL;
+    }
 
     ZeroMemory(&present_parameters, sizeof(present_parameters));
     present_parameters.Windowed = TRUE;
@@ -122,6 +125,7 @@ START_TEST(volume)
 {
     HMODULE d3d9_handle;
     IDirect3DDevice9 *device_ptr;
+    ULONG refcount;
     D3DCAPS9 caps;
 
     memset(&caps, 0, sizeof(caps));
@@ -142,4 +146,7 @@ START_TEST(volume)
     }
 
     test_volume_get_container(device_ptr);
+
+    refcount = IDirect3DDevice9_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

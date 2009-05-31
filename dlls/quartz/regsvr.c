@@ -26,6 +26,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
 #include "winuser.h"
 #include "winreg.h"
 #include "winerror.h"
@@ -35,6 +36,7 @@
 #include "strmif.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(quartz);
 
@@ -214,7 +216,7 @@ static HRESULT register_interfaces(struct regsvr_interface const *list)
 				  KEY_READ | KEY_WRITE, NULL, &key, NULL);
 	    if (res != ERROR_SUCCESS) goto error_close_iid_key;
 
-	    wsprintfW(buf, fmt, list->num_methods);
+	    sprintfW(buf, fmt, list->num_methods);
 	    res = RegSetValueExW(key, NULL, 0, REG_SZ,
 				 (CONST BYTE*)buf,
 				 (lstrlenW(buf) + 1) * sizeof(WCHAR));
@@ -855,11 +857,29 @@ static struct regsvr_coclass const coclass_list[] = {
 	"quartz.dll",
 	"Both"
     },
+    {   &CLSID_AudioRender,
+	"Wave Audio Renderer",
+	NULL,
+	"quartz.dll",
+	"Both"
+    },
+    {   &CLSID_NullRenderer,
+        "Null Renderer",
+        NULL,
+        "quartz.dll",
+        "Both"
+    },
     {   &CLSID_VideoRenderer,
 	"Video Renderer",
 	NULL,
 	"quartz.dll",
 	"Both"
+    },
+    {   &CLSID_VideoRendererDefault,
+        "Default Video Renderer",
+        NULL,
+        "quartz.dll",
+        "Both"
     },
     {   &CLSID_ACMWrapper,
 	"ACM wrapper",
@@ -962,7 +982,7 @@ static struct regsvr_mediatype_parsing const mediatype_parsing_list[] = {
     {	&MEDIATYPE_Stream,
 	&MEDIASUBTYPE_MPEG1Audio,
 	{   "0, 2, FFE0, FFE0",
-	    "0, 10, FFFFFFFF000000000000, 494433030080808080",
+            "0, 10, FFFFFF00000080808080, 494433000000000000",
 	    NULL }
     },
     {	&MEDIATYPE_Stream,
@@ -1063,6 +1083,18 @@ static struct regsvr_filter const filter_list[] = {
             { 0xFFFFFFFF },
         }
     },
+    {   &CLSID_NullRenderer,
+        &CLSID_LegacyAmFilterCategory,
+        {'N','u','l','l',' ','R','e','n','d','e','r','e','r',0},
+        0x200000,
+        {   {   REG_PINFLAG_B_RENDERER,
+                {   { &MEDIATYPE_NULL, &GUID_NULL },
+                    { NULL }
+                },
+            },
+            { 0xFFFFFFFF },
+        }
+    },
     {   &CLSID_VideoRenderer,
 	&CLSID_LegacyAmFilterCategory,
 	{'V','i','d','e','o',' ','R','e','n','d','e','r','e','r',0},
@@ -1074,6 +1106,44 @@ static struct regsvr_filter const filter_list[] = {
 	    },
 	    { 0xFFFFFFFF },
 	}
+    },
+    {   &CLSID_VideoRendererDefault,
+        &CLSID_LegacyAmFilterCategory,
+        {'V','i','d','e','o',' ','R','e','n','d','e','r','e','r',0},
+        0x800000,
+        {   {   REG_PINFLAG_B_RENDERER,
+                {   { &MEDIATYPE_Video, &GUID_NULL },
+                    { NULL }
+                },
+            },
+            { 0xFFFFFFFF },
+        }
+    },
+    {   &CLSID_DSoundRender,
+        &CLSID_LegacyAmFilterCategory,
+        {'A','u','d','i','o',' ','R','e','n','d','e','r','e','r',0},
+        0x800000,
+        {   {   REG_PINFLAG_B_RENDERER,
+                {   { &MEDIATYPE_Audio, &MEDIASUBTYPE_PCM },
+/*                  { &MEDIATYPE_Audio, &MEDIASUBTYPE_IEEE_FLOAT }, */
+                    { NULL }
+                },
+            },
+            { 0xFFFFFFFF },
+        }
+    },
+    {   &CLSID_AudioRender,
+        &CLSID_LegacyAmFilterCategory,
+        {'A','u','d','i','o',' ','R','e','n','d','e','r','e','r',0},
+        0x800000,
+        {   {   REG_PINFLAG_B_RENDERER,
+                {   { &MEDIATYPE_Audio, &MEDIASUBTYPE_PCM },
+/*                  { &MEDIATYPE_Audio, &MEDIASUBTYPE_IEEE_FLOAT }, */
+                    { NULL }
+                },
+            },
+            { 0xFFFFFFFF },
+        }
     },
     {   &CLSID_AVIDec,
 	&CLSID_LegacyAmFilterCategory,

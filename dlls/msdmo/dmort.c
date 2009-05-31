@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003 Michael Günnewig
+ * Copyright (C) 2003 Michael GÃ¼nnewig
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -168,9 +168,9 @@ HRESULT WINAPI MoCopyMediaType(DMO_MEDIA_TYPE* pdst,
     if (!pdst || !psrc)
         return E_POINTER;
 
-    memcpy(&pdst->majortype,  &psrc->majortype,  sizeof(psrc->majortype));
-    memcpy(&pdst->subtype,    &psrc->subtype,    sizeof(psrc->subtype));
-    memcpy(&pdst->formattype, &psrc->formattype, sizeof(psrc->formattype));
+    pdst->majortype = psrc->majortype;
+    pdst->subtype = psrc->subtype;
+    pdst->formattype = psrc->formattype;
 
     pdst->bFixedSizeSamples    = psrc->bFixedSizeSamples;
     pdst->bTemporalCompression = psrc->bTemporalCompression;

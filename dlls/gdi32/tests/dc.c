@@ -185,7 +185,7 @@ static void test_GdiConvertToDevmodeW(void)
     pGdiConvertToDevmodeW = (void *)GetProcAddress(GetModuleHandleA("gdi32.dll"), "GdiConvertToDevmodeW");
     if (!pGdiConvertToDevmodeW)
     {
-        skip("GdiConvertToDevmodeW is not available on this platform\n");
+        win_skip("GdiConvertToDevmodeW is not available on this platform\n");
         return;
     }
 
@@ -202,16 +202,14 @@ static void test_GdiConvertToDevmodeW(void)
     dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmFields) + sizeof(dmA.dmFields);
     dmW = pGdiConvertToDevmodeW(&dmA);
     ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmFields) + sizeof(dmW->dmFields),
-       "expected %04x, got %04x\n",
-        FIELD_OFFSET(DEVMODEW, dmFields) + sizeof(dmW->dmFields), dmW->dmSize);
+       "wrong size %u\n", dmW->dmSize);
     HeapFree(GetProcessHeap(), 0, dmW);
 
     dmA.dmICMMethod = DMICMMETHOD_NONE;
     dmA.dmSize = FIELD_OFFSET(DEVMODEA, dmICMMethod) + sizeof(dmA.dmICMMethod);
     dmW = pGdiConvertToDevmodeW(&dmA);
     ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmICMMethod) + sizeof(dmW->dmICMMethod),
-       "expected %04x, got %04x\n",
-        FIELD_OFFSET(DEVMODEW, dmICMMethod) + sizeof(dmW->dmICMMethod), dmW->dmSize);
+       "wrong size %u\n", dmW->dmSize);
     ok(dmW->dmICMMethod == DMICMMETHOD_NONE,
        "expected DMICMMETHOD_NONE, got %u\n", dmW->dmICMMethod);
     HeapFree(GetProcessHeap(), 0, dmW);
@@ -219,8 +217,7 @@ static void test_GdiConvertToDevmodeW(void)
     dmA.dmSize = 1024;
     dmW = pGdiConvertToDevmodeW(&dmA);
     ok(dmW->dmSize == FIELD_OFFSET(DEVMODEW, dmPanningHeight) + sizeof(dmW->dmPanningHeight),
-       "expected %04x, got %04x\n",
-        FIELD_OFFSET(DEVMODEW, dmPanningHeight) + sizeof(dmW->dmPanningHeight), dmW->dmSize);
+       "wrong size %u\n", dmW->dmSize);
     HeapFree(GetProcessHeap(), 0, dmW);
 
     SetLastError(0xdeadbeef);
@@ -237,9 +234,29 @@ static void test_GdiConvertToDevmodeW(void)
     HeapFree(GetProcessHeap(), 0, dmW);
 }
 
+static void test_CreateCompatibleDC(void)
+{
+    BOOL bRet;
+    HDC hDC;
+    HDC hNewDC;
+
+    /* Create a DC compatible with the screen */
+    hDC = CreateCompatibleDC(NULL);
+    ok(hDC != NULL, "CreateCompatibleDC returned %p\n", hDC);
+
+    /* Delete this DC, this should succeed */
+    bRet = DeleteDC(hDC);
+    ok(bRet == TRUE, "DeleteDC returned %u\n", bRet);
+
+    /* Try to create a DC compatible to the deleted DC. This has to fail */
+    hNewDC = CreateCompatibleDC(hDC);
+    ok(hNewDC == NULL, "CreateCompatibleDC returned %p\n", hNewDC);
+}
+
 START_TEST(dc)
 {
     test_savedc();
     test_savedc_2();
     test_GdiConvertToDevmodeW();
+    test_CreateCompatibleDC();
 }

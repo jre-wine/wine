@@ -42,6 +42,8 @@
 #define IDC_EDIT  4000
 #define IDC_ABOUT 4001
 
+#define IDS_BUILD_ID 1
+
 /* Resource types */
 
 #define TESTRES   1000
@@ -49,9 +51,4 @@
 
 /* String resources */
 
-#define WINE_BUILD 10000
 #define BUILD_INFO 10001
-#define TESTS_URL  10002
-
-/* Revision info strings start from this index: */
-#define REV_INFO 30000

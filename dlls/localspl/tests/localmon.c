@@ -1347,7 +1347,7 @@ static void test_XcvOpenPort(void)
 #define GET_MONITOR_FUNC(name) \
             if(numentries > 0) { \
                 numentries--; \
-                p##name = (void *) pm->Monitor.pfn##name ;  \
+                p##name = pm->Monitor.pfn##name ;  \
             }
 
 
@@ -1356,6 +1356,7 @@ START_TEST(localmon)
     DWORD   numentries;
     DWORD   res;
 
+    LoadLibraryA("winspool.drv");
     /* This DLL does not exist on Win9x */
     hdll = LoadLibraryA("localspl.dll");
     if (!hdll) {

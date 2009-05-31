@@ -44,7 +44,7 @@ struct property
 {
     unsigned short type;     /* property type (see below) */
     atom_t         atom;     /* property atom */
-    obj_handle_t   handle;   /* property handle (user-defined storage) */
+    lparam_t       data;     /* property data (user-defined storage) */
 };
 
 enum property_type
@@ -76,10 +76,14 @@ struct window
     unsigned int     style;           /* window style */
     unsigned int     ex_style;        /* window extended style */
     unsigned int     id;              /* window id */
-    void*            instance;        /* creator instance */
+    mod_handle_t     instance;        /* creator instance */
     unsigned int     is_unicode : 1;  /* ANSI or unicode */
     unsigned int     is_linked : 1;   /* is it linked into the parent z-order list? */
-    unsigned long    user_data;       /* user-specific data */
+    unsigned int     is_layered : 1;  /* has layered info been set? */
+    unsigned int     color_key;       /* color key for a layered window */
+    unsigned int     alpha;           /* alpha value for a layered window */
+    unsigned int     layered_flags;   /* flags for a layered window */
+    lparam_t         user_data;       /* user-specific data */
     WCHAR           *text;            /* window caption text */
     unsigned int     paint_flags;     /* various painting flags */
     int              prop_inuse;      /* number of in-use window properties */
@@ -258,7 +262,7 @@ static int add_handle_to_array( struct user_handle_array *array, user_handle_t h
 }
 
 /* set a window property */
-static void set_property( struct window *win, atom_t atom, obj_handle_t handle, enum property_type type )
+static void set_property( struct window *win, atom_t atom, lparam_t data, enum property_type type )
 {
     int i, free = -1;
     struct property *new_props;
@@ -274,7 +278,7 @@ static void set_property( struct window *win, atom_t atom, obj_handle_t handle, 
         if (win->properties[i].atom == atom)
         {
             win->properties[i].type = type;
-            win->properties[i].handle = handle;
+            win->properties[i].data = data;
             return;
         }
     }
@@ -299,13 +303,13 @@ static void set_property( struct window *win, atom_t atom, obj_handle_t handle, 
         }
         free = win->prop_inuse++;
     }
-    win->properties[free].atom   = atom;
-    win->properties[free].type   = type;
-    win->properties[free].handle = handle;
+    win->properties[free].atom = atom;
+    win->properties[free].type = type;
+    win->properties[free].data = data;
 }
 
 /* remove a window property */
-static obj_handle_t remove_property( struct window *win, atom_t atom )
+static lparam_t remove_property( struct window *win, atom_t atom )
 {
     int i;
 
@@ -316,7 +320,7 @@ static obj_handle_t remove_property( struct window *win, atom_t atom )
         {
             release_global_atom( NULL, atom );
             win->properties[i].type = PROP_TYPE_FREE;
-            return win->properties[i].handle;
+            return win->properties[i].data;
         }
     }
     /* FIXME: last error? */
@@ -324,14 +328,14 @@ static obj_handle_t remove_property( struct window *win, atom_t atom )
 }
 
 /* find a window property */
-static obj_handle_t get_property( struct window *win, atom_t atom )
+static lparam_t get_property( struct window *win, atom_t atom )
 {
     int i;
 
     for (i = 0; i < win->prop_inuse; i++)
     {
         if (win->properties[i].type == PROP_TYPE_FREE) continue;
-        if (win->properties[i].atom == atom) return win->properties[i].handle;
+        if (win->properties[i].atom == atom) return win->properties[i].data;
     }
     /* FIXME: last error? */
     return 0;
@@ -393,8 +397,10 @@ void destroy_window( struct window *win )
     list_remove( &win->entry );
     if (is_desktop_window(win))
     {
-        assert( win->desktop->top_window == win );
-        win->desktop->top_window = NULL;
+        struct desktop *desktop = win->desktop;
+        assert( desktop->top_window == win || desktop->msg_window == win );
+        if (desktop->top_window == win) desktop->top_window = NULL;
+        else desktop->msg_window = NULL;
     }
     detach_window_thread( win );
     if (win->win_region) free_region( win->win_region );
@@ -422,10 +428,11 @@ void close_desktop_window( struct desktop *desktop )
 
 /* create a new window structure (note: the window is not linked in the window tree) */
 static struct window *create_window( struct window *parent, struct window *owner,
-                                     atom_t atom, void *instance )
+                                     atom_t atom, mod_handle_t instance )
 {
+    static const rectangle_t empty_rect;
     int extra_bytes;
-    struct window *win;
+    struct window *win = NULL;
     struct desktop *desktop;
     struct window_class *class;
 
@@ -435,6 +442,27 @@ static struct window *create_window( struct window *parent, struct window *owner
     {
         release_object( desktop );
         return NULL;
+    }
+
+    if (!parent)  /* null parent is only allowed for desktop or HWND_MESSAGE top window */
+    {
+        if (is_desktop_class( class ))
+            parent = desktop->top_window;  /* use existing desktop if any */
+        else if (is_hwnd_message_class( class ))
+            /* use desktop window if message window is already created */
+            parent = desktop->msg_window ? desktop->top_window : NULL;
+        else if (!(parent = desktop->top_window))  /* must already have a desktop then */
+        {
+            set_error( STATUS_ACCESS_DENIED );
+            goto failed;
+        }
+    }
+
+    /* parent must be on the same desktop */
+    if (parent && parent->desktop != desktop)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        goto failed;
     }
 
     if (!(win = mem_alloc( sizeof(*win) + extra_bytes - 1 ))) goto failed;
@@ -452,9 +480,10 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->style          = 0;
     win->ex_style       = 0;
     win->id             = 0;
-    win->instance       = NULL;
+    win->instance       = 0;
     win->is_unicode     = 1;
     win->is_linked      = 0;
+    win->is_layered     = 0;
     win->user_data      = 0;
     win->text           = NULL;
     win->paint_flags    = 0;
@@ -462,23 +491,10 @@ static struct window *create_window( struct window *parent, struct window *owner
     win->prop_alloc     = 0;
     win->properties     = NULL;
     win->nb_extra_bytes = extra_bytes;
+    win->window_rect = win->visible_rect = win->client_rect = empty_rect;
     memset( win->extra_bytes, 0, extra_bytes );
     list_init( &win->children );
     list_init( &win->unlinked );
-
-    /* parent must be on the same desktop */
-    if (parent && parent->desktop != desktop)
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        goto failed;
-    }
-
-    /* if no parent, class must be the desktop */
-    if (!parent && !is_desktop_class( class ))
-    {
-        set_error( STATUS_ACCESS_DENIED );
-        goto failed;
-    }
 
     /* if parent belongs to a different thread and the window isn't */
     /* top-level, attach the two threads */
@@ -496,9 +512,17 @@ static struct window *create_window( struct window *parent, struct window *owner
     else
     {
         list_init( &win->entry );
-        assert( !desktop->top_window );
-        desktop->top_window = win;
-        set_process_default_desktop( current->process, desktop, current->desktop );
+        if (is_desktop_class( class ))
+        {
+            assert( !desktop->top_window );
+            desktop->top_window = win;
+            set_process_default_desktop( current->process, desktop, current->desktop );
+        }
+        else
+        {
+            assert( !desktop->msg_window );
+            desktop->msg_window = win;
+        }
     }
 
     current->desktop_users++;
@@ -530,21 +554,13 @@ void destroy_thread_windows( struct thread *thread )
 }
 
 /* get the desktop window */
-static struct window *get_desktop_window( struct thread *thread, int create )
+static struct window *get_desktop_window( struct thread *thread )
 {
     struct window *top_window;
     struct desktop *desktop = get_thread_desktop( thread, 0 );
 
     if (!desktop) return NULL;
-
-    if (!(top_window = desktop->top_window) && create)
-    {
-        if ((top_window = create_window( NULL, NULL, DESKTOP_ATOM, 0 )))
-        {
-            detach_window_thread( top_window );
-            top_window->style  = WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
-        }
-    }
+    top_window = desktop->top_window;
     release_object( desktop );
     return top_window;
 }
@@ -593,7 +609,7 @@ static inline void inc_window_paint_count( struct window *win, int incr )
 /* check if window and all its ancestors are visible */
 static int is_visible( const struct window *win )
 {
-    while (win && win->parent)
+    while (win)
     {
         if (!(win->style & WS_VISIBLE)) return 0;
         win = win->parent;
@@ -626,6 +642,29 @@ static inline int is_point_in_window( struct window *win, int x, int y )
         !point_in_region( win->win_region, x - win->window_rect.left, y - win->window_rect.top ))
         return 0;  /* not in window region */
     return 1;
+}
+
+/* fill an array with the handles of the children of a specified window */
+static unsigned int get_children_windows( struct window *parent, atom_t atom, thread_id_t tid,
+                                          user_handle_t *handles, unsigned int max_count )
+{
+    struct window *ptr;
+    unsigned int count = 0;
+
+    if (!parent) return 0;
+
+    LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
+    {
+        if (atom && get_class_atom(ptr->class) != atom) continue;
+        if (tid && get_thread_id(ptr->thread) != tid) continue;
+        if (handles)
+        {
+            if (count >= max_count) break;
+            handles[count] = ptr->handle;
+        }
+        count++;
+    }
+    return count;
 }
 
 /* find child of 'parent' that contains the given point (in parent-relative coords) */
@@ -767,7 +806,7 @@ static struct window *find_child_to_repaint( struct window *parent, struct threa
 /* find a window that needs to receive a WM_PAINT; also clear its internal paint flag */
 user_handle_t find_window_to_repaint( user_handle_t parent, struct thread *thread )
 {
-    struct window *ptr, *win, *top_window = get_desktop_window( thread, 0 );
+    struct window *ptr, *win, *top_window = get_desktop_window( thread );
 
     if (!top_window) return 0;
 
@@ -871,6 +910,16 @@ static inline int intersect_rect( rectangle_t *dst, const rectangle_t *src1, con
     dst->right  = min( src1->right, src2->right );
     dst->bottom = min( src1->bottom, src2->bottom );
     return (dst->left < dst->right && dst->top < dst->bottom);
+}
+
+
+/* offset the coordinates of a rectangle */
+static inline void offset_rect( rectangle_t *rect, int offset_x, int offset_y )
+{
+    rect->left   += offset_x;
+    rect->top    += offset_y;
+    rect->right  += offset_x;
+    rect->bottom += offset_y;
 }
 
 
@@ -988,27 +1037,63 @@ struct window_class* get_window_class( user_handle_t window )
     return win->class;
 }
 
+/* determine the window visible rectangle, i.e. window or client rect cropped by parent rects */
+/* the returned rectangle is in window coordinates; return 0 if rectangle is empty */
+static int get_window_visible_rect( struct window *win, rectangle_t *rect, int frame )
+{
+    int offset_x = 0, offset_y = 0;
+
+    if (!(win->style & WS_VISIBLE)) return 0;
+
+    *rect = frame ? win->window_rect : win->client_rect;
+    if (!is_desktop_window(win))
+    {
+        offset_x = win->window_rect.left;
+        offset_y = win->window_rect.top;
+    }
+
+    while (win->parent)
+    {
+        win = win->parent;
+        if (!(win->style & WS_VISIBLE) || win->style & WS_MINIMIZE) return 0;
+        if (!is_desktop_window(win))
+        {
+            offset_x += win->client_rect.left;
+            offset_y += win->client_rect.top;
+            offset_rect( rect, win->client_rect.left, win->client_rect.top );
+        }
+        if (!intersect_rect( rect, rect, &win->client_rect )) return 0;
+        if (!intersect_rect( rect, rect, &win->window_rect )) return 0;
+    }
+    offset_rect( rect, -offset_x, -offset_y );
+    return 1;
+}
+
 /* return a copy of the specified region cropped to the window client or frame rectangle, */
 /* and converted from client to window coordinates. Helper for (in)validate_window. */
 static struct region *crop_region_to_win_rect( struct window *win, struct region *region, int frame )
 {
-    struct region *tmp = create_empty_region();
+    rectangle_t rect;
+    struct region *tmp;
 
-    if (!tmp) return NULL;
+    if (!get_window_visible_rect( win, &rect, frame )) return NULL;
+    if (!(tmp = create_empty_region())) return NULL;
+    set_region_rect( tmp, &rect );
 
-    /* get bounding rect in client coords */
-    if (frame) set_region_rect( tmp, &win->window_rect );
-    else set_region_client_rect( tmp, win );
-    if (!is_desktop_window(win))
-        offset_region( tmp, -win->client_rect.left, -win->client_rect.top );
+    if (region)
+    {
+        /* map it to client coords */
+        offset_region( tmp, win->window_rect.left - win->client_rect.left,
+                       win->window_rect.top - win->client_rect.top );
 
-    /* intersect specified region with bounding rect */
-    if (region && !intersect_region( tmp, region, tmp )) goto done;
-    if (is_region_empty( tmp )) goto done;
+        /* intersect specified region with bounding rect */
+        if (!intersect_region( tmp, region, tmp )) goto done;
+        if (is_region_empty( tmp )) goto done;
 
-    /* map it to window coords */
-    offset_region( tmp, win->client_rect.left - win->window_rect.left,
-                   win->client_rect.top - win->window_rect.top );
+        /* map it back to window coords */
+        offset_region( tmp, win->client_rect.left - win->window_rect.left,
+                       win->client_rect.top - win->window_rect.top );
+    }
     return tmp;
 
 done:
@@ -1050,6 +1135,45 @@ static int add_update_region( struct window *win, struct region *region )
     }
     set_update_region( win, region );
     return 1;
+}
+
+
+/* crop the update region of children to the specified rectangle, in client coords */
+static void crop_children_update_region( struct window *win, rectangle_t *rect )
+{
+    struct window *child;
+    struct region *tmp;
+    rectangle_t child_rect;
+
+    LIST_FOR_EACH_ENTRY( child, &win->children, struct window, entry )
+    {
+        if (!(child->style & WS_VISIBLE)) continue;
+        if (!rect)  /* crop everything out */
+        {
+            crop_children_update_region( child, NULL );
+            set_update_region( child, NULL );
+            continue;
+        }
+
+        /* nothing to do if child is completely inside rect */
+        if (child->window_rect.left >= rect->left &&
+            child->window_rect.top >= rect->top &&
+            child->window_rect.right <= rect->right &&
+            child->window_rect.bottom <= rect->bottom) continue;
+
+        /* map to child client coords and crop grand-children */
+        child_rect = *rect;
+        offset_rect( &child_rect, -child->client_rect.left, -child->client_rect.top );
+        crop_children_update_region( child, &child_rect );
+
+        /* now crop the child itself */
+        if (!child->update_region) continue;
+        if (!(tmp = create_empty_region())) continue;
+        set_region_rect( tmp, rect );
+        offset_region( tmp, -child->window_rect.left, -child->window_rect.top );
+        if (intersect_region( tmp, child->update_region, tmp )) set_update_region( child, tmp );
+        else free_region( tmp );
+    }
 }
 
 
@@ -1361,7 +1485,6 @@ static unsigned int get_window_update_flags( struct window *win, struct window *
 static struct region *expose_window( struct window *win, const rectangle_t *old_window_rect,
                                      struct region *old_vis_rgn )
 {
-    struct window *parent = win;
     struct region *new_vis_rgn, *exposed_rgn;
 
     if (!(new_vis_rgn = get_visible_region( win, DCX_WINDOW ))) return NULL;
@@ -1381,23 +1504,23 @@ static struct region *expose_window( struct window *win, const rectangle_t *old_
         }
     }
 
-    /* make it relative to the old window pos for subtracting */
-    offset_region( new_vis_rgn, win->window_rect.left - old_window_rect->left,
-                   win->window_rect.top - old_window_rect->top  );
-
-    if (subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ) && !is_region_empty( new_vis_rgn ))
+    if (win->parent)
     {
-        /* make it relative to new client rect again */
-        int offset_x = old_window_rect->left - win->client_rect.left;
-        int offset_y = old_window_rect->top - win->client_rect.top;
-        if (win->parent && !is_desktop_window(win->parent))
+        /* make it relative to the old window pos for subtracting */
+        offset_region( new_vis_rgn, win->window_rect.left - old_window_rect->left,
+                       win->window_rect.top - old_window_rect->top  );
+
+        if ((win->parent->style & WS_CLIPCHILDREN) ?
+            subtract_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ) :
+            xor_region( new_vis_rgn, old_vis_rgn, new_vis_rgn ))
         {
-            offset_x += win->client_rect.left;
-            offset_y += win->client_rect.top;
-            parent = win->parent;
+            if (!is_region_empty( new_vis_rgn ))
+            {
+                /* make it relative to parent */
+                offset_region( new_vis_rgn, old_window_rect->left, old_window_rect->top );
+                redraw_window( win->parent, new_vis_rgn, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
+            }
         }
-        offset_region( new_vis_rgn, offset_x, offset_y );
-        redraw_window( parent, new_vis_rgn, 0, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN );
     }
     free_region( new_vis_rgn );
     return exposed_rgn;
@@ -1414,6 +1537,7 @@ static void set_window_pos( struct window *win, struct window *previous,
     const rectangle_t old_window_rect = win->window_rect;
     const rectangle_t old_visible_rect = win->visible_rect;
     const rectangle_t old_client_rect = win->client_rect;
+    rectangle_t rect;
     int client_changed, frame_changed;
     int visible = (win->style & WS_VISIBLE) || (swp_flags & SWP_SHOWWINDOW);
 
@@ -1448,22 +1572,33 @@ static void set_window_pos( struct window *win, struct window *previous,
 
     /* crop update region to the new window rect */
 
-    if (win->update_region &&
-        (window_rect->right - window_rect->left < old_window_rect.right - old_window_rect.left ||
-         window_rect->bottom - window_rect->top < old_window_rect.bottom - old_window_rect.top))
+    if (win->update_region)
     {
-        struct region *tmp = create_empty_region();
-        if (tmp)
+        if (get_window_visible_rect( win, &rect, 1 ))
         {
-            set_region_rect( tmp, window_rect );
-            if (!is_desktop_window(win))
-                offset_region( tmp, -window_rect->left, -window_rect->top );
-            if (intersect_region( tmp, win->update_region, tmp ))
-                set_update_region( win, tmp );
-            else
-                free_region( tmp );
+            struct region *tmp = create_empty_region();
+            if (tmp)
+            {
+                set_region_rect( tmp, &rect );
+                if (intersect_region( tmp, win->update_region, tmp ))
+                    set_update_region( win, tmp );
+                else
+                    free_region( tmp );
+            }
         }
+        else set_update_region( win, NULL ); /* visible rect is empty */
     }
+
+    /* crop children regions to the new window rect */
+
+    if (get_window_visible_rect( win, &rect, 0 ))
+    {
+        /* map to client coords */
+        offset_rect( &rect, win->window_rect.left - win->client_rect.left,
+                     win->window_rect.top - win->client_rect.top );
+        crop_children_update_region( win, &rect );
+    }
+    else crop_children_update_region( win, NULL );
 
     if (swp_flags & SWP_NOREDRAW) goto done;  /* do not repaint anything */
 
@@ -1491,34 +1626,38 @@ static void set_window_pos( struct window *win, struct window *previous,
         client_changed = (client_rect->left   - old_client_rect.left   != x_offset ||
                           client_rect->right  - old_client_rect.right  != x_offset ||
                           client_rect->top    - old_client_rect.top    != y_offset ||
-                          client_rect->bottom - old_client_rect.bottom != y_offset);
+                          client_rect->bottom - old_client_rect.bottom != y_offset ||
+                          !valid_rects ||
+                          memcmp( &valid_rects[0], client_rect, sizeof(*client_rect) ));
     }
 
     if (frame_changed || client_changed)
     {
-        struct region *tmp = create_empty_region();
+        struct region *win_rgn = old_vis_rgn;  /* reuse previous region */
 
-        if (tmp)
+        set_region_rect( win_rgn, window_rect );
+        if (valid_rects)
         {
             /* subtract the valid portion of client rect from the total region */
-            if (!client_changed)
-                set_region_rect( tmp, client_rect );
-            else if (valid_rects)
-                set_region_rect( tmp, &valid_rects[0] );
-
-            set_region_rect( old_vis_rgn, window_rect );
-            if (!subtract_region( tmp, old_vis_rgn, tmp )) free_region( tmp );
-            else
+            struct region *tmp = create_empty_region();
+            if (tmp)
             {
-                if (!is_desktop_window(win))
-                    offset_region( tmp, -client_rect->left, -client_rect->top );
-                if (exposed_rgn)
-                {
-                    union_region( exposed_rgn, exposed_rgn, tmp );
-                    free_region( tmp );
-                }
-                else exposed_rgn = tmp;
+                set_region_rect( tmp, &valid_rects[0] );
+                if (subtract_region( tmp, win_rgn, tmp )) win_rgn = tmp;
+                else free_region( tmp );
             }
+        }
+        if (!is_desktop_window(win))
+            offset_region( win_rgn, -client_rect->left, -client_rect->top );
+        if (exposed_rgn)
+        {
+            union_region( exposed_rgn, exposed_rgn, win_rgn );
+            if (win_rgn != old_vis_rgn) free_region( win_rgn );
+        }
+        else
+        {
+            exposed_rgn = win_rgn;
+            if (win_rgn == old_vis_rgn) old_vis_rgn = NULL;
         }
     }
 
@@ -1526,7 +1665,7 @@ static void set_window_pos( struct window *win, struct window *previous,
         redraw_window( win, exposed_rgn, 1, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN );
 
 done:
-    free_region( old_vis_rgn );
+    if (old_vis_rgn) free_region( old_vis_rgn );
     if (exposed_rgn) free_region( exposed_rgn );
     clear_error();  /* we ignore out of memory errors once the new rects have been set */
 }
@@ -1560,19 +1699,18 @@ static void set_window_region( struct window *win, struct region *region, int re
 /* create a window */
 DECL_HANDLER(create_window)
 {
-    struct window *win, *parent, *owner = NULL;
+    struct window *win, *parent = NULL, *owner = NULL;
+    struct unicode_str cls_name;
     atom_t atom;
 
     reply->handle = 0;
-
-    if (!req->parent) parent = get_desktop_window( current, 0 );
-    else if (!(parent = get_window( req->parent ))) return;
+    if (req->parent && !(parent = get_window( req->parent ))) return;
 
     if (req->owner)
     {
         if (!(owner = get_window( req->owner ))) return;
         if (is_desktop_window(owner)) owner = NULL;
-        else if (!is_desktop_window(parent))
+        else if (parent && !is_desktop_window(parent))
         {
             /* an owned window must be created as top-level */
             set_error( STATUS_ACCESS_DENIED );
@@ -1582,10 +1720,8 @@ DECL_HANDLER(create_window)
             while (!is_desktop_window(owner->parent)) owner = owner->parent;
     }
 
-    if (get_req_data_size())
-        atom = find_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
-    else
-        atom = req->atom;
+    get_req_unicode_str( &cls_name );
+    atom = cls_name.len ? find_global_atom( NULL, &cls_name ) : req->atom;
 
     if (!(win = create_window( parent, owner, atom, req->instance ))) return;
 
@@ -1632,9 +1768,34 @@ DECL_HANDLER(destroy_window)
 /* retrieve the desktop window for the current thread */
 DECL_HANDLER(get_desktop_window)
 {
-    struct window *win = get_desktop_window( current, req->force );
+    struct desktop *desktop = get_thread_desktop( current, 0 );
 
-    if (win) reply->handle = win->handle;
+    if (!desktop) return;
+
+    if (!desktop->top_window && req->force)  /* create it */
+    {
+        if ((desktop->top_window = create_window( NULL, NULL, DESKTOP_ATOM, 0 )))
+        {
+            detach_window_thread( desktop->top_window );
+            desktop->top_window->style  = WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+        }
+    }
+
+    if (!desktop->msg_window && req->force)  /* create it */
+    {
+        static const WCHAR messageW[] = {'M','e','s','s','a','g','e'};
+        static const struct unicode_str name = { messageW, sizeof(messageW) };
+        atom_t atom = add_global_atom( NULL, &name );
+        if (atom && (desktop->msg_window = create_window( NULL, NULL, atom, 0 )))
+        {
+            detach_window_thread( desktop->msg_window );
+            desktop->msg_window->style = WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+        }
+    }
+
+    reply->top_window = desktop->top_window ? desktop->top_window->handle : 0;
+    reply->msg_window = desktop->msg_window ? desktop->msg_window->handle : 0;
+    release_object( desktop );
 }
 
 
@@ -1717,6 +1878,7 @@ DECL_HANDLER(set_window_info)
         /* WS_EX_TOPMOST can only be changed for unlinked windows */
         if (!win->is_linked) win->ex_style = req->ex_style;
         else win->ex_style = (req->ex_style & ~WS_EX_TOPMOST) | (win->ex_style & WS_EX_TOPMOST);
+        if (!(win->ex_style & WS_EX_LAYERED)) win->is_layered = 0;
     }
     if (req->flags & SET_WIN_ID) win->id = req->id;
     if (req->flags & SET_WIN_INSTANCE) win->instance = req->instance;
@@ -1753,40 +1915,51 @@ DECL_HANDLER(get_window_parents)
 /* get a list of the window children */
 DECL_HANDLER(get_window_children)
 {
-    struct window *ptr, *parent = get_window( req->parent );
-    int total = 0;
+    struct window *parent = NULL;
+    unsigned int total;
     user_handle_t *data;
     data_size_t len;
+    struct unicode_str cls_name;
     atom_t atom = req->atom;
+    struct desktop *desktop = NULL;
 
-    if (get_req_data_size())
+    get_req_unicode_str( &cls_name );
+    if (cls_name.len && !(atom = find_global_atom( NULL, &cls_name ))) return;
+
+    if (req->desktop)
     {
-        atom = find_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
-        if (!atom) return;
+        if (!(desktop = get_desktop_obj( current->process, req->desktop, DESKTOP_ENUMERATE ))) return;
+        parent = desktop->top_window;
+    }
+    else
+    {
+        if (req->parent && !(parent = get_window( req->parent ))) return;
+        if (!parent && !(desktop = get_thread_desktop( current, 0 ))) return;
     }
 
     if (parent)
-    {
-        LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
-        {
-            if (atom && get_class_atom(ptr->class) != atom) continue;
-            if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
-            total++;
-        }
-    }
+        total = get_children_windows( parent, atom, req->tid, NULL, 0 );
+    else
+        total = get_children_windows( desktop->top_window, atom, req->tid, NULL, 0 ) +
+                get_children_windows( desktop->msg_window, atom, req->tid, NULL, 0 );
+
     reply->count = total;
     len = min( get_reply_max_size(), total * sizeof(user_handle_t) );
     if (len && ((data = set_reply_data_size( len ))))
     {
-        LIST_FOR_EACH_ENTRY( ptr, &parent->children, struct window, entry )
+        if (parent) get_children_windows( parent, atom, req->tid, data, len / sizeof(user_handle_t) );
+        else
         {
-            if (len < sizeof(*data)) break;
-            if (atom && get_class_atom(ptr->class) != atom) continue;
-            if (req->tid && get_thread_id(ptr->thread) != req->tid) continue;
-            *data++ = ptr->handle;
-            len -= sizeof(*data);
+            total = get_children_windows( desktop->top_window, atom, req->tid,
+                                          data, len / sizeof(user_handle_t) );
+            data += total;
+            len -= total * sizeof(user_handle_t);
+            if (len >= sizeof(user_handle_t))
+                get_children_windows( desktop->msg_window, atom, req->tid,
+                                      data, len / sizeof(user_handle_t) );
         }
     }
+    if (desktop) release_object( desktop );
 }
 
 
@@ -1858,7 +2031,7 @@ DECL_HANDLER(set_window_pos)
 
     if (!(flags & SWP_NOZORDER))
     {
-        switch ((int)(unsigned long)req->previous)
+        switch ((int)req->previous)
         {
         case 0:   /* HWND_TOP */
             previous = WINPTR_TOP;
@@ -1997,7 +2170,7 @@ DECL_HANDLER(get_visible_region)
         if (data) set_reply_data_ptr( data, reply->total_size );
     }
     reply->top_win  = top->handle;
-    reply->top_rect = top->visible_rect;
+    reply->top_rect = (top == win && (req->flags & DCX_WINDOW)) ? top->visible_rect : top->client_rect;
 
     if (!is_desktop_window(win))
     {
@@ -2174,34 +2347,36 @@ DECL_HANDLER(redraw_window)
 /* set a window property */
 DECL_HANDLER(set_window_property)
 {
+    struct unicode_str name;
     struct window *win = get_window( req->window );
 
     if (!win) return;
 
-    if (get_req_data_size())
+    get_req_unicode_str( &name );
+    if (name.len)
     {
-        atom_t atom = add_global_atom( NULL, get_req_data(), get_req_data_size() / sizeof(WCHAR) );
+        atom_t atom = add_global_atom( NULL, &name );
         if (atom)
         {
-            set_property( win, atom, req->handle, PROP_TYPE_STRING );
+            set_property( win, atom, req->data, PROP_TYPE_STRING );
             release_global_atom( NULL, atom );
         }
     }
-    else set_property( win, req->atom, req->handle, PROP_TYPE_ATOM );
+    else set_property( win, req->atom, req->data, PROP_TYPE_ATOM );
 }
 
 
 /* remove a window property */
 DECL_HANDLER(remove_window_property)
 {
+    struct unicode_str name;
     struct window *win = get_window( req->window );
 
+    get_req_unicode_str( &name );
     if (win)
     {
-        atom_t atom = req->atom;
-        if (get_req_data_size()) atom = find_global_atom( NULL, get_req_data(),
-                                                          get_req_data_size() / sizeof(WCHAR) );
-        if (atom) reply->handle = remove_property( win, atom );
+        atom_t atom = name.len ? find_global_atom( NULL, &name ) : req->atom;
+        if (atom) reply->data = remove_property( win, atom );
     }
 }
 
@@ -2209,14 +2384,14 @@ DECL_HANDLER(remove_window_property)
 /* get a window property */
 DECL_HANDLER(get_window_property)
 {
+    struct unicode_str name;
     struct window *win = get_window( req->window );
 
+    get_req_unicode_str( &name );
     if (win)
     {
-        atom_t atom = req->atom;
-        if (get_req_data_size()) atom = find_global_atom( NULL, get_req_data(),
-                                                          get_req_data_size() / sizeof(WCHAR) );
-        if (atom) reply->handle = get_property( win, atom );
+        atom_t atom = name.len ? find_global_atom( NULL, &name ) : req->atom;
+        if (atom) reply->data = get_property( win, atom );
     }
 }
 
@@ -2243,7 +2418,7 @@ DECL_HANDLER(get_window_properties)
         if (win->properties[i].type == PROP_TYPE_FREE) continue;
         data->atom   = win->properties[i].atom;
         data->string = (win->properties[i].type == PROP_TYPE_STRING);
-        data->handle = win->properties[i].handle;
+        data->data   = win->properties[i].data;
         data++;
         count--;
     }
@@ -2298,4 +2473,40 @@ DECL_HANDLER(set_global_windows)
     shell_listview = new_shell_listview;
     progman_window = new_progman_window;
     taskman_window = new_taskman_window;
+}
+
+/* retrieve layered info for a window */
+DECL_HANDLER(get_window_layered_info)
+{
+    struct window *win = get_window( req->handle );
+
+    if (!win) return;
+
+    if (win->is_layered)
+    {
+        reply->color_key = win->color_key;
+        reply->alpha     = win->alpha;
+        reply->flags     = win->layered_flags;
+    }
+    else set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
+}
+
+
+/* set layered info for a window */
+DECL_HANDLER(set_window_layered_info)
+{
+    struct window *win = get_window( req->handle );
+
+    if (!win) return;
+
+    if (win->ex_style & WS_EX_LAYERED)
+    {
+        if (req->flags & LWA_ALPHA) win->alpha = req->alpha;
+        else if (!win->is_layered) win->alpha = 0;  /* alpha init value is 0 */
+
+        win->color_key     = req->color_key;
+        win->layered_flags = req->flags;
+        win->is_layered    = 1;
+    }
+    else set_win32_error( ERROR_INVALID_WINDOW_HANDLE );
 }

@@ -369,7 +369,7 @@ static DWORD MCIAVI_mciPlay_async(WINE_MCIAVI *wma, DWORD dwFlags, LPMCI_PLAY_PA
 
     data->wDevID = wma->wDevID;
     data->flags = dwFlags;
-    memcpy(&data->params, lpParams, sizeof(MCI_PLAY_PARMS));
+    data->params = *lpParams;
 
     if (!(handle = CreateThread(NULL, 0, MCIAVI_mciPlay_thread, data, 0, NULL)))
     {
@@ -506,8 +506,7 @@ static	DWORD	MCIAVI_mciPlay(UINT wDevID, DWORD dwFlags, LPMCI_PLAY_PARMS lpParms
 	    delta = GetTickCount() - tc;
 
             LeaveCriticalSection(&wma->cs);
-            ret = MsgWaitForMultipleObjectsEx(2, events,
-                (delta >= frameTime) ? 0 : frameTime - delta, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            ret = WaitForMultipleObjects(2, events, FALSE, (delta >= frameTime) ? 0 : frameTime - delta);
             EnterCriticalSection(&wma->cs);
 
             if (ret == WAIT_OBJECT_0 || wma->dwStatus != MCI_MODE_PLAY) break;
@@ -520,8 +519,7 @@ static	DWORD	MCIAVI_mciPlay(UINT wDevID, DWORD dwFlags, LPMCI_PLAY_PARMS lpParms
             delta = 0;
 
         LeaveCriticalSection(&wma->cs);
-        ret = MsgWaitForMultipleObjectsEx(1, &wma->hStopEvent, delta,
-                                          QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        ret = WaitForMultipleObjects(1, &wma->hStopEvent, FALSE, delta);
         EnterCriticalSection(&wma->cs);
         if (ret == WAIT_OBJECT_0) break;
 

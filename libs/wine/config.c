@@ -209,10 +209,8 @@ static void init_paths(void)
             fatal_error( "invalid directory %s in WINEPREFIX: not an absolute path\n", prefix );
         if (stat( config_dir, &st ) == -1)
         {
-            if (errno != ENOENT)
-                fatal_perror( "cannot open %s as specified in WINEPREFIX", config_dir );
-            fatal_error( "the '%s' directory specified in WINEPREFIX doesn't exist.\n"
-                         "You may want to create it by running 'wineprefixcreate'.\n", config_dir );
+            if (errno == ENOENT) return;  /* will be created later on */
+            fatal_perror( "cannot open %s as specified in WINEPREFIX", config_dir );
         }
     }
     else
@@ -407,10 +405,23 @@ const char *wine_get_user_name(void)
     return user_name;
 }
 
+/* return the standard version string */
+const char *wine_get_version(void)
+{
+    return PACKAGE_VERSION;
+}
+
+/* return the build id string */
+const char *wine_get_build_id(void)
+{
+    extern const char wine_build[];
+    return wine_build;
+}
+
 /* exec a binary using the preloader if requested; helper for wine_exec_wine_binary */
 static void preloader_exec( char **argv, int use_preloader )
 {
-#ifdef linux
+#if defined(linux) && defined(__i386__)
     if (use_preloader)
     {
         static const char preloader[] = "wine-preloader";

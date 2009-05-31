@@ -93,7 +93,7 @@ static HRESULT report_result(IInternetProtocolSink *sink, HRESULT hres, DWORD dw
 
 static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
         IInternetProtocolSink *pOIProtSink, IInternetBindInfo *pOIBindInfo,
-        DWORD grfPI, DWORD dwReserved)
+        DWORD grfPI, HANDLE_PTR dwReserved)
 {
     MkProtocol *This = PROTOCOL_THIS(iface);
     IParseDisplayName *pdn;
@@ -106,9 +106,9 @@ static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     CLSID clsid;
     HRESULT hres;
 
-    static const WCHAR wszMK[] = {'m','k',':'};
+    static const WCHAR wszMK[] = {'m','k',':','@'};
 
-    TRACE("(%p)->(%s %p %p %08x %d)\n", This, debugstr_w(szUrl), pOIProtSink,
+    TRACE("(%p)->(%s %p %p %08x %lx)\n", This, debugstr_w(szUrl), pOIProtSink,
             pOIBindInfo, grfPI, dwReserved);
 
     if(strncmpiW(szUrl, wszMK, sizeof(wszMK)/sizeof(WCHAR)))
@@ -124,7 +124,6 @@ static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
 
     ReleaseBindInfo(&bindinfo);
 
-    IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_DIRECTBIND, NULL);
     IInternetProtocolSink_ReportProgress(pOIProtSink, BINDSTATUS_SENDINGREQUEST, NULL);
 
     hres = FindMimeFromData(NULL, szUrl, NULL, 0, NULL, 0, &mime, 0);
@@ -134,10 +133,6 @@ static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     }
 
     ptr2 = szUrl + sizeof(wszMK)/sizeof(WCHAR);
-    if(*ptr2 != '@')
-        return report_result(pOIProtSink, INET_E_RESOURCE_NOT_FOUND, ERROR_INVALID_PARAMETER);
-    ptr2++;
-
     ptr = strchrW(ptr2, ':');
     if(!ptr)
         return report_result(pOIProtSink, INET_E_RESOURCE_NOT_FOUND, ERROR_INVALID_PARAMETER);

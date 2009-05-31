@@ -32,8 +32,7 @@
 #include "winreg.h"
 #include "winternl.h"
 
-/* FIXME!!! this test checks only mappings, defined by MSDN:
- * http://support.microsoft.com/default.aspx?scid=KB;EN-US;q113996&
+/* FIXME!!! this test checks only mappings, defined by MSDN
  * It is necessary to add other mappings and to test them up to Windows XP.
  *
  * Some Windows platforms don't know about all the mappings, and in such
@@ -58,7 +57,10 @@ static int prepare_test(void)
     ntdll = LoadLibraryA("ntdll.dll");
     pRtlNtStatusToDosError = (void*)GetProcAddress(ntdll, "RtlNtStatusToDosError");
     if (!pRtlNtStatusToDosError)
+    {
+        win_skip("RtlNtStatusToDosError is not available\n");
         return 0;
+    }
 
     argc = winetest_get_mainargs(&argv);
     strict=(argc >= 3 && strcmp(argv[2],"strict")==0);
@@ -187,7 +189,7 @@ static void run_error_tests(void)
     cmp(STATUS_HANDLE_NOT_CLOSABLE,              ERROR_INVALID_HANDLE);
     cmp(STATUS_NOT_COMMITTED,                    ERROR_INVALID_ADDRESS);
     cmp(STATUS_PARTIAL_COPY,                     ERROR_PARTIAL_COPY);
-    cmp(STATUS_LPC_REPLY_LOST,                   ERROR_INTERNAL_ERROR);
+    cmp3(STATUS_LPC_REPLY_LOST,                  ERROR_INTERNAL_ERROR, ERROR_CONNECTION_ABORTED);
     cmp(STATUS_INVALID_PARAMETER,                ERROR_INVALID_PARAMETER);
     cmp(STATUS_INVALID_PARAMETER_1,              ERROR_INVALID_PARAMETER);
     cmp(STATUS_INVALID_PARAMETER_2,              ERROR_INVALID_PARAMETER);
@@ -245,11 +247,11 @@ static void run_error_tests(void)
     cmp2(STATUS_PKINIT_FAILURE,                  ERROR_PKINIT_FAILURE);
     cmp2(STATUS_SMARTCARD_SUBSYSTEM_FAILURE,     ERROR_SMARTCARD_SUBSYSTEM_FAILURE);
     cmp2(STATUS_DOWNGRADE_DETECTED,              ERROR_DOWNGRADE_DETECTED);
-    cmp3(STATUS_SMARTCARD_CERT_REVOKED,          SEC_E_SMARTCARD_CERT_REVOKED, 1266); /* FIXME: real name? */
-    cmp3(STATUS_ISSUING_CA_UNTRUSTED,            SEC_E_ISSUING_CA_UNTRUSTED, 1267); /* FIXME: real name? */
-    cmp3(STATUS_REVOCATION_OFFLINE_C,            SEC_E_REVOCATION_OFFLINE_C, 1268); /* FIXME: real name? */
-    cmp3(STATUS_PKINIT_CLIENT_FAILURE,           SEC_E_PKINIT_CLIENT_FAILURE, 1269); /* FIXME: real name? */
-    cmp3(STATUS_SMARTCARD_CERT_EXPIRED,          SEC_E_SMARTCARD_CERT_EXPIRED, 1270); /* FIXME: real name? */
+    cmp4(STATUS_SMARTCARD_CERT_REVOKED,          SEC_E_SMARTCARD_CERT_REVOKED, 1266); /* FIXME: real name? */
+    cmp4(STATUS_ISSUING_CA_UNTRUSTED,            SEC_E_ISSUING_CA_UNTRUSTED, 1267); /* FIXME: real name? */
+    cmp4(STATUS_REVOCATION_OFFLINE_C,            SEC_E_REVOCATION_OFFLINE_C, 1268); /* FIXME: real name? */
+    cmp4(STATUS_PKINIT_CLIENT_FAILURE,           SEC_E_PKINIT_CLIENT_FAILURE, 1269); /* FIXME: real name? */
+    cmp4(STATUS_SMARTCARD_CERT_EXPIRED,          SEC_E_SMARTCARD_CERT_EXPIRED, 1270); /* FIXME: real name? */
     cmp2(STATUS_NO_KERB_KEY,                     SEC_E_NO_KERB_KEY);
     cmp2(STATUS_CURRENT_DOMAIN_NOT_ALLOWED,      ERROR_CURRENT_DOMAIN_NOT_ALLOWED);
     cmp2(STATUS_SMARTCARD_WRONG_PIN,             SCARD_W_WRONG_CHV);
@@ -736,8 +738,8 @@ static void run_error_tests(void)
     cmp(STATUS_LOGIN_WKSTA_RESTRICTION,          ERROR_LOGIN_WKSTA_RESTRICTION);
     cmp(STATUS_LICENSE_QUOTA_EXCEEDED,           ERROR_LICENSE_QUOTA_EXCEEDED);
     cmp(STATUS_RESOURCE_NOT_OWNED,               ERROR_NOT_OWNER);
-    cmp(STATUS_DUPLICATE_OBJECTID,               STATUS_DUPLICATE_OBJECTID);
-    cmp(STATUS_OBJECTID_EXISTS,                  STATUS_OBJECTID_EXISTS);
+    cmp3(STATUS_DUPLICATE_OBJECTID,              STATUS_DUPLICATE_OBJECTID, ERROR_OBJECT_ALREADY_EXISTS);
+    cmp3(STATUS_OBJECTID_EXISTS,                 STATUS_OBJECTID_EXISTS, ERROR_OBJECT_ALREADY_EXISTS);
     cmp2(STATUS_OBJECTID_NOT_FOUND,              ERROR_FILE_NOT_FOUND);
     cmp2(STATUS_MFT_TOO_FRAGMENTED,              ERROR_DISK_TOO_FRAGMENTED);
     cmp(SEC_E_INSUFFICIENT_MEMORY,               ERROR_NO_SYSTEM_RESOURCES);

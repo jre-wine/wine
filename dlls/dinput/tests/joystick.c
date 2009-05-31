@@ -18,6 +18,7 @@
 
 #define DIRECTINPUT_VERSION 0x0700
 
+#define COBJMACROS
 #include <windows.h>
 
 #include <math.h>
@@ -28,8 +29,6 @@
 #include "windef.h"
 #include "wingdi.h"
 #include "dinput.h"
-#include "dxerr8.h"
-#include "dinput_test.h"
 
 #define numObjects(x) (sizeof(x) / sizeof(x[0]))
 
@@ -85,12 +84,18 @@ typedef struct tagJoystickInfo
     DWORD dZone;
 } JoystickInfo;
 
+static int get_refcount(IUnknown *object)
+{
+    IUnknown_AddRef( object );
+    return IUnknown_Release( object );
+}
+
 static BOOL CALLBACK EnumAxes(
     const DIDEVICEOBJECTINSTANCE* pdidoi,
     VOID* pContext)
 {
     HRESULT hr;
-    JoystickInfo * info = (JoystickInfo *)pContext;
+    JoystickInfo * info = pContext;
 
     if (IsEqualIID(&pdidoi->guidType, &GUID_XAxis) ||
         IsEqualIID(&pdidoi->guidType, &GUID_YAxis) ||
@@ -114,7 +119,7 @@ static BOOL CALLBACK EnumAxes(
         dipdw.diph.dwObj        = pdidoi->dwType;
 
         hr = IDirectInputDevice_GetProperty(info->pJoystick, DIPROP_RANGE, &diprg.diph);
-        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
         ok(info->lMin == diprg.lMin && info->lMax == diprg.lMax, "Min/Max range invalid: "
            "expected %d..%d got %d..%d\n", info->lMin, info->lMax, diprg.lMin, diprg.lMax);
 
@@ -123,21 +128,21 @@ static BOOL CALLBACK EnumAxes(
 
         hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_RANGE, NULL);
         ok(hr==E_INVALIDARG,"IDirectInputDevice_SetProperty() should have returned "
-           "E_INVALIDARG, returned: %s\n", DXGetErrorString8(hr));
+           "E_INVALIDARG, returned: %08x\n", hr);
 
         hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_RANGE, &diprg.diph);
-        ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %08x\n", hr);
 
         /* dead zone */
         hr = IDirectInputDevice_GetProperty(info->pJoystick, DIPROP_DEADZONE, &dipdw.diph);
-        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(SUCCEEDED(hr), "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
         ok(info->dZone == dipdw.dwData, "deadzone invalid: expected %d got %d\n",
            info->dZone, dipdw.dwData);
 
         dipdw.dwData = 123;
 
         hr = IDirectInputDevice_SetProperty(info->pJoystick, DIPROP_DEADZONE, &dipdw.diph);
-        ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %s\n", DXGetErrorString8(hr));
+        ok(hr==DI_OK,"IDirectInputDevice_SetProperty() failed: %08x\n", hr);
 
         info->axis++;
     } else if (IsEqualIID(&pdidoi->guidType, &GUID_POV))
@@ -165,7 +170,7 @@ static BOOL CALLBACK EnumJoysticks(
     LPVOID pvRef)
 {
     HRESULT hr;
-    UserData * data = (UserData *)pvRef;
+    UserData * data = pvRef;
     LPDIRECTINPUTDEVICE pJoystick;
     DIDATAFORMAT format;
     DIDEVCAPS caps;
@@ -182,20 +187,19 @@ static BOOL CALLBACK EnumJoysticks(
  
     hr = IDirectInput_CreateDevice(data->pDI, &lpddi->guidInstance, NULL, NULL);
     ok(hr==E_POINTER,"IDirectInput_CreateDevice() should have returned "
-       "E_POINTER, returned: %s\n", DXGetErrorString8(hr));
+       "E_POINTER, returned: %08x\n", hr);
 
     hr = IDirectInput_CreateDevice(data->pDI, NULL, &pJoystick, NULL);
     ok(hr==E_POINTER,"IDirectInput_CreateDevice() should have returned "
-       "E_POINTER, returned: %s\n", DXGetErrorString8(hr));
+       "E_POINTER, returned: %08x\n", hr);
 
     hr = IDirectInput_CreateDevice(data->pDI, NULL, NULL, NULL);
     ok(hr==E_POINTER,"IDirectInput_CreateDevice() should have returned "
-       "E_POINTER, returned: %s\n", DXGetErrorString8(hr));
+       "E_POINTER, returned: %08x\n", hr);
 
     hr = IDirectInput_CreateDevice(data->pDI, &lpddi->guidInstance,
                                    &pJoystick, NULL);
-    ok(hr==DI_OK,"IDirectInput_CreateDevice() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInput_CreateDevice() failed: %08x\n", hr);
     if (hr!=DI_OK)
         goto DONE;
 
@@ -203,65 +207,57 @@ static BOOL CALLBACK EnumJoysticks(
 
     hr = IDirectInputDevice_SetDataFormat(pJoystick, NULL);
     ok(hr==E_POINTER,"IDirectInputDevice_SetDataFormat() should have returned "
-       "E_POINTER, returned: %s\n", DXGetErrorString8(hr));
+       "E_POINTER, returned: %08x\n", hr);
 
     ZeroMemory(&format, sizeof(format));
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &format);
     ok(hr==DIERR_INVALIDPARAM,"IDirectInputDevice_SetDataFormat() should have "
-       "returned DIERR_INVALIDPARAM, returned: %s\n", DXGetErrorString8(hr));
+       "returned DIERR_INVALIDPARAM, returned: %08x\n", hr);
 
     /* try the default formats */
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystick);
-    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystick2);
-    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
 
     /* try an alternate format */
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystickTest);
-    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystick2);
-    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
     if (hr != DI_OK)
         goto RELEASE;
 
     for (i=0; i<16; i++)
     {
         hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, NULL, i);
-        ok(hr == SetCoop_null_window[i], "SetCooperativeLevel(NULL, %d): %s\n", i, DXGetErrorString8(hr));
+        ok(hr == SetCoop_null_window[i], "SetCooperativeLevel(NULL, %d): %08x\n", i, hr);
     }
     for (i=0; i<16; i++)
     {
         hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, hWnd, i);
-        ok(hr == SetCoop_real_window[i], "SetCooperativeLevel(hwnd, %d): %s\n", i, DXGetErrorString8(hr));
+        ok(hr == SetCoop_real_window[i], "SetCooperativeLevel(hwnd, %d): %08x\n", i, hr);
     }
 
     hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, hWnd,
                                                 DISCL_NONEXCLUSIVE | DISCL_BACKGROUND);
-    ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %08x\n", hr);
 
     /* get capabilities */
     hr = IDirectInputDevice_GetCapabilities(pJoystick, NULL);
     ok(hr==E_POINTER,"IDirectInputDevice_GetCapabilities() "
-       "should have returned E_POINTER, returned: %s\n",
-       DXGetErrorString8(hr));
+       "should have returned E_POINTER, returned: %08x\n", hr);
 
     ZeroMemory(&caps, sizeof(caps));
     hr = IDirectInputDevice_GetCapabilities(pJoystick, &caps);
     ok(hr==DIERR_INVALIDPARAM,"IDirectInputDevice_GetCapabilities() "
-       "should have returned DIERR_INVALIDPARAM, returned: %s\n",
-       DXGetErrorString8(hr));
+       "should have returned DIERR_INVALIDPARAM, returned: %08x\n", hr);
 
     caps.dwSize = sizeof(caps);
     hr = IDirectInputDevice_GetCapabilities(pJoystick, &caps);
-    ok(hr==DI_OK,"IDirectInputDevice_GetCapabilities() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_GetCapabilities() failed: %08x\n", hr);
 
     ZeroMemory(&info, sizeof(info));
     info.pJoystick = pJoystick;
@@ -270,59 +266,302 @@ static BOOL CALLBACK EnumJoysticks(
     info.lMin = 0;
     info.lMax = 0xffff;
     /* enumerate objects */
-    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
-    ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %s\n",
-       DXGetErrorString8(hr));
+    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, &info, DIDFT_ALL);
+    ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %08x\n", hr);
 
-    ok(caps.dwAxes == info.axis, "Number of enumerated axes doesn't match capabilities\n");
-    ok(caps.dwButtons == info.button, "Number of enumerated buttons doesn't match capabilities\n");
-    ok(caps.dwPOVs == info.pov, "Number of enumerated POVs doesn't match capabilities\n");
+    ok(caps.dwAxes == info.axis, "Number of enumerated axes (%d) doesn't match capabilities (%d)\n", info.axis, caps.dwAxes);
+    ok(caps.dwButtons == info.button, "Number of enumerated buttons (%d) doesn't match capabilities (%d)\n", info.button, caps.dwButtons);
+    ok(caps.dwPOVs == info.pov, "Number of enumerated POVs (%d) doesn't match capabilities (%d)\n", info.pov, caps.dwPOVs);
 
     /* Set format and check limits again */
     hr = IDirectInputDevice_SetDataFormat(pJoystick, &c_dfDIJoystick2);
-    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %s\n", DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_SetDataFormat() failed: %08x\n", hr);
     info.lMin = -2000;
     info.lMax = +2000;
     info.dZone= 123;
-    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, (VOID*)&info, DIDFT_ALL);
-    ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %s\n", DXGetErrorString8(hr));
+    hr = IDirectInputDevice_EnumObjects(pJoystick, EnumAxes, &info, DIDFT_ALL);
+    ok(hr==DI_OK,"IDirectInputDevice_EnumObjects() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, 0);
     ok(hr==E_POINTER, "IDirectInputDevice_GetDeviceInfo() "
-       "should have returned E_POINTER, returned: %s\n",
-       DXGetErrorString8(hr));
+       "should have returned E_POINTER, returned: %08x\n", hr);
 
     ZeroMemory(&inst, sizeof(inst));
     ZeroMemory(&inst3, sizeof(inst3));
 
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, &inst);
     ok(hr==DIERR_INVALIDPARAM, "IDirectInputDevice_GetDeviceInfo() "
-       "should have returned DIERR_INVALIDPARAM, returned: %s\n",
-       DXGetErrorString8(hr));
+       "should have returned DIERR_INVALIDPARAM, returned: %08x\n", hr);
 
     inst.dwSize = sizeof(inst);
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, &inst);
-    ok(hr==DI_OK,"IDirectInputDevice_GetDeviceInfo() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_GetDeviceInfo() failed: %08x\n", hr);
 
     inst3.dwSize = sizeof(inst3);
     hr = IDirectInputDevice_GetDeviceInfo(pJoystick, (LPDIDEVICEINSTANCE)&inst3);
-    ok(hr==DI_OK,"IDirectInputDevice_GetDeviceInfo() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_GetDeviceInfo() failed: %08x\n", hr);
 
     hr = IDirectInputDevice_Unacquire(pJoystick);
-    ok(hr == S_FALSE, "IDirectInputDevice_Unacquire() should have returned S_FALSE, got: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr == S_FALSE, "IDirectInputDevice_Unacquire() should have returned S_FALSE, got: %08x\n", hr);
 
     hr = IDirectInputDevice_Acquire(pJoystick);
-    ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
     if (hr != DI_OK)
         goto RELEASE;
 
     hr = IDirectInputDevice_Acquire(pJoystick);
-    ok(hr == S_FALSE, "IDirectInputDevice_Acquire() should have returned S_FALSE, got: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr == S_FALSE, "IDirectInputDevice_Acquire() should have returned S_FALSE, got: %08x\n", hr);
+
+    if (info.pov < 4)
+    {
+        hr = IDirectInputDevice_GetDeviceState(pJoystick, sizeof(DIJOYSTATE2), &js);
+        ok(hr == DI_OK, "IDirectInputDevice_GetDeviceState() failed: %08x\n", hr);
+        ok(js.rgdwPOV[3] == -1, "Default for unassigned POV should be -1 not: %d\n", js.rgdwPOV[3]);
+    }
+
+    if (caps.dwFlags & DIDC_FORCEFEEDBACK)
+    {
+        DWORD axes[2] = {DIJOFS_X, DIJOFS_Y};
+        LONG  direction[2] = {0, 0};
+        DICONSTANTFORCE force = {0};
+        DIEFFECT eff;
+        LPDIRECTINPUTEFFECT effect = NULL;
+        LONG cnt1, cnt2;
+        HWND real_hWnd;
+        HINSTANCE hInstance = GetModuleHandle(NULL);
+        DIPROPDWORD dip_gain_set, dip_gain_get;
+
+        trace("Testing force-feedback\n");
+        memset(&eff, 0, sizeof(eff));
+        eff.dwSize                = sizeof(eff);
+        eff.dwFlags               = DIEFF_CARTESIAN | DIEFF_OBJECTOFFSETS;
+        eff.dwDuration            = INFINITE;
+        eff.dwGain                = DI_FFNOMINALMAX;
+        eff.dwTriggerButton       = DIEB_NOTRIGGER;
+        eff.cAxes                 = sizeof(axes) / sizeof(axes[0]);
+        eff.rgdwAxes              = axes;
+        eff.rglDirection          = direction;
+        eff.cbTypeSpecificParams  = sizeof(force);
+        eff.lpvTypeSpecificParams = &force;
+
+        /* Sending effects to joystick requires
+         * calling IDirectInputEffect_Initialize, which requires
+         * having exclusive access to the device, which requires
+         * - not having acquired the joystick when calling
+         *   IDirectInputDevice_SetCooperativeLevel
+         * - a visible window
+         */
+        real_hWnd = CreateWindowEx(0, "EDIT", "Test text", 0, 10, 10, 300,
+                                   300, NULL, NULL, hInstance, NULL);
+        ok(real_hWnd!=0,"CreateWindowEx failed: %p\n", real_hWnd);
+        ShowWindow(real_hWnd, SW_SHOW);
+        hr = IDirectInputDevice_Unacquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+        hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, real_hWnd,
+                                                    DISCL_EXCLUSIVE | DISCL_FOREGROUND);
+        ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %08x\n", hr);
+        hr = IDirectInputDevice_Acquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+
+        cnt1 = get_refcount((IUnknown*)pJoystick);
+
+        hr = IDirectInputDevice2_CreateEffect((LPDIRECTINPUTDEVICE2)pJoystick, &GUID_ConstantForce,
+                                              &eff, &effect, NULL);
+        ok(hr == DI_OK, "IDirectInputDevice_CreateEffect() failed: %08x\n", hr);
+        cnt2 = get_refcount((IUnknown*)pJoystick);
+        ok(cnt1 == cnt2, "Ref count is wrong %d != %d\n", cnt1, cnt2);
+
+        if (effect)
+        {
+            DWORD effect_status;
+            struct DIPROPDWORD diprop_word;
+
+            hr = IDirectInputEffect_Initialize(effect, hInstance, data->version,
+                                               &GUID_ConstantForce);
+            ok(hr==DI_OK,"IDirectInputEffect_Initialize failed: %08x\n", hr);
+            hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_AXES | DIEP_DIRECTION |
+                                                  DIEP_TYPESPECIFICPARAMS);
+            ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            if (hr==DI_OK) {
+                /* Test that upload, unacquire, acquire still permits updating
+                 * uploaded effect. */
+                hr = IDirectInputDevice_Unacquire(pJoystick);
+                ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+                hr = IDirectInputDevice_Acquire(pJoystick);
+                ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+                hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_GAIN);
+                ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            }
+
+            /* Check effect status.
+             * State: initialy stopped
+             * start
+             * State: started
+             * unacquire, acquire, download
+             * State: stopped
+             * start
+             * State: started
+             *
+             * Shows that:
+             * - effects are stopped after Unacquire + Acquire
+             * - effects are preserved (Download + Start doesn't complain
+             *   about incomplete effect)
+             */
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            ok(effect_status==0,"IDirectInputEffect_GetEffectStatus() reported effect as started\n");
+            hr = IDirectInputEffect_SetParameters(effect, &eff, DIEP_START);
+            ok(hr==DI_OK,"IDirectInputEffect_SetParameters failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            todo_wine ok(effect_status!=0,"IDirectInputEffect_GetEffectStatus() reported effect as stopped\n");
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            hr = IDirectInputEffect_Download(effect);
+            ok(hr==DI_OK,"IDirectInputEffect_Download() failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            ok(effect_status==0,"IDirectInputEffect_GetEffectStatus() reported effect as started\n");
+            hr = IDirectInputEffect_Start(effect, 1, 0);
+            ok(hr==DI_OK,"IDirectInputEffect_Start() failed: %08x\n", hr);
+            hr = IDirectInputEffect_GetEffectStatus(effect, &effect_status);
+            ok(hr==DI_OK,"IDirectInputEffect_GetEffectStatus() failed: %08x\n", hr);
+            todo_wine ok(effect_status!=0,"IDirectInputEffect_GetEffectStatus() reported effect as stopped\n");
+
+            /* Check autocenter status
+             * State: initialy stopped
+             * enable
+             * State: enabled
+             * acquire
+             * State: enabled
+             * unacquire
+             * State: enabled
+             *
+             * IDirectInputDevice2_SetProperty(DIPROP_AUTOCENTER) can only be
+             * executed when devide is released.
+             *
+             * If Executed interactively, user can feel that autocenter is
+             * only disabled when joystick is acquired.
+             */
+            diprop_word.diph.dwSize = sizeof(diprop_word);
+            diprop_word.diph.dwHeaderSize = sizeof(diprop_word.diph);
+            diprop_word.diph.dwObj = 0;
+            diprop_word.diph.dwHow = DIPH_DEVICE;
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_ON,"IDirectInputDevice2_GetProperty() reported autocenter as disabled\n");
+            diprop_word.dwData = DIPROPAUTOCENTER_OFF;
+            hr = IDirectInputDevice2_SetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            if (winetest_interactive) {
+                trace("Acquiring in 2s, autocenter will be disabled.\n");
+                Sleep(2000);
+            }
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            if (winetest_interactive)
+                trace("Acquired.\n");
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            if (winetest_interactive) {
+                trace("Releasing in 2s, autocenter will be re-enabled.\n");
+                Sleep(2000);
+            }
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+            if (winetest_interactive)
+                trace("Released\n");
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+            ok(hr==DI_OK,"IDirectInputDevice2_GetProperty() failed: %08x\n", hr);
+            ok(diprop_word.dwData==DIPROPAUTOCENTER_OFF,"IDirectInputDevice2_GetProperty() reported autocenter as enabled\n");
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            hr = IDirectInputDevice2_GetProperty(pJoystick, DIPROP_AUTOCENTER, &diprop_word.diph);
+
+            /* Device gain (DIPROP_FFGAIN).
+             * From MSDN:
+             *  0..10000 range, otherwise DIERR_INVALIDPARAM.
+             *  Can be changed even if device is acquired.
+             * Difference found by tests:
+             *  <0 is refused, >10000 is accepted
+             */
+            dip_gain_set.diph.dwSize       = sizeof(DIPROPDWORD);
+            dip_gain_set.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+            dip_gain_set.diph.dwObj        = 0;
+            dip_gain_set.diph.dwHow        = DIPH_DEVICE;
+            dip_gain_set.dwData            = 10000;
+            dip_gain_get.diph.dwSize       = sizeof(DIPROPDWORD);
+            dip_gain_get.diph.dwHeaderSize = sizeof(DIPROPHEADER);
+            dip_gain_get.diph.dwObj        = 0;
+            dip_gain_get.diph.dwHow        = DIPH_DEVICE;
+            dip_gain_get.dwData            = 0;
+
+            /* Test device is acquisition (non)impact. */
+            hr = IDirectInputDevice_Unacquire(pJoystick);
+            ok(hr == DI_OK, "IDirectInputDevice_Unacquire() should have returned S_FALSE, got: %08x\n", hr);
+            dip_gain_set.dwData = 1;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice_GetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_get.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
+            ok(dip_gain_get.dwData==dip_gain_set.dwData, "Gain not udated: %i\n", dip_gain_get.dwData);
+            hr = IDirectInputDevice_Acquire(pJoystick);
+            ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+            dip_gain_set.dwData = 2;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice_GetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_get.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
+            ok(dip_gain_get.dwData==dip_gain_set.dwData, "Gain not udated: %i\n", dip_gain_get.dwData);
+            /* Test range and internal clamping. */
+            dip_gain_set.dwData = -1;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            todo_wine ok(hr==DIERR_INVALIDPARAM, "IDirectInputDevice_SetProperty() should have returned %08x: %08x\n", DIERR_INVALIDPARAM, hr);
+            dip_gain_set.dwData = 0;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice_GetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_get.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
+            ok(dip_gain_get.dwData==dip_gain_set.dwData, "Gain not updated: %i\n", dip_gain_get.dwData);
+            dip_gain_set.dwData = 10000;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice_GetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_get.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
+            ok(dip_gain_get.dwData==dip_gain_set.dwData, "Gain not updated: %i\n", dip_gain_get.dwData);
+            /* WARNING: This call succeeds, on the contrary of what is stated on MSDN. */
+            dip_gain_set.dwData = 10001;
+            hr = IDirectInputDevice_SetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_set.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_SetProperty() failed: %08x\n", hr);
+            hr = IDirectInputDevice_GetProperty(pJoystick, DIPROP_FFGAIN, &dip_gain_get.diph);
+            ok(hr==DI_OK, "IDirectInputDevice_GetProperty() failed: %08x\n", hr);
+            ok(dip_gain_get.dwData==dip_gain_set.dwData, "Gain not updated: %i\n", dip_gain_get.dwData);
+
+            ref = IUnknown_Release(effect);
+            ok(ref == 0, "IDirectInputDevice_Release() reference count = %d\n", ref);
+        }
+        cnt1 = get_refcount((IUnknown*)pJoystick);
+        ok(cnt1 == cnt2, "Ref count is wrong %d != %d\n", cnt1, cnt2);
+
+        /* Before destroying the window, release joystick to revert to
+         * non-exclusive, background cooperative level. */
+        hr = IDirectInputDevice_Unacquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
+        hr = IDirectInputDevice_SetCooperativeLevel(pJoystick, hWnd,
+                                                    DISCL_NONEXCLUSIVE | DISCL_BACKGROUND);
+        ok(hr==DI_OK,"IDirectInputDevice_SetCooperativeLevel() failed: %08x\n", hr);
+        DestroyWindow (real_hWnd);
+        hr = IDirectInputDevice_Acquire(pJoystick);
+        ok(hr==DI_OK,"IDirectInputDevice_Acquire() failed: %08x\n", hr);
+    }
 
     if (winetest_interactive) {
         trace("You have 30 seconds to test all axes, sliders, POVs and buttons\n");
@@ -334,8 +573,7 @@ static BOOL CALLBACK EnumJoysticks(
     oldstate[0]='\0';
     for (i = 0; i < count; i++) {
         hr = IDirectInputDevice_GetDeviceState(pJoystick, sizeof(DIJOYSTATE2), &js);
-        ok(hr==DI_OK,"IDirectInputDevice_GetDeviceState() failed: %s\n",
-           DXGetErrorString8(hr));
+        ok(hr==DI_OK,"IDirectInputDevice_GetDeviceState() failed: %08x\n", hr);
         if (hr != DI_OK)
             break;
         sprintf(curstate, "X%5d Y%5d Z%5d Rx%5d Ry%5d Rz%5d "
@@ -350,7 +588,7 @@ static BOOL CALLBACK EnumJoysticks(
               js.rgbButtons[9]>>7, js.rgbButtons[10]>>7, js.rgbButtons[11]>>7);
         if (strcmp(oldstate, curstate) != 0)
         {
-            trace(curstate);
+            trace("%s\n", curstate);
             strcpy(oldstate, curstate);
         }
         Sleep(100);
@@ -358,8 +596,7 @@ static BOOL CALLBACK EnumJoysticks(
     trace("\n");
 
     hr = IDirectInputDevice_Unacquire(pJoystick);
-    ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %s\n",
-       DXGetErrorString8(hr));
+    ok(hr==DI_OK,"IDirectInputDevice_Unacquire() failed: %08x\n", hr);
 
 RELEASE:
     ref = IDirectInputDevice_Release(pJoystick);
@@ -379,15 +616,14 @@ static void joystick_tests(DWORD version)
     trace("-- Testing Direct Input Version 0x%04x --\n", version);
     hr = DirectInputCreate(hInstance, version, &pDI, NULL);
     ok(hr==DI_OK||hr==DIERR_OLDDIRECTINPUTVERSION,
-       "DirectInputCreate() failed: %s\n", DXGetErrorString8(hr));
+       "DirectInputCreate() failed: %08x\n", hr);
     if (hr==DI_OK && pDI!=0) {
         UserData data;
         data.pDI = pDI;
         data.version = version;
         hr = IDirectInput_EnumDevices(pDI, DIDEVTYPE_JOYSTICK, EnumJoysticks,
                                       &data, DIEDFL_ALLDEVICES);
-        ok(hr==DI_OK,"IDirectInput_EnumDevices() failed: %s\n",
-           DXGetErrorString8(hr));
+        ok(hr==DI_OK,"IDirectInput_EnumDevices() failed: %08x\n", hr);
         ref = IDirectInput_Release(pDI);
         ok(ref==0,"IDirectInput_Release() reference count = %d\n", ref);
     } else if (hr==DIERR_OLDDIRECTINPUTVERSION)
@@ -397,8 +633,6 @@ static void joystick_tests(DWORD version)
 START_TEST(joystick)
 {
     CoInitialize(NULL);
-
-    trace("DLL Version: %s\n", get_file_version("dinput.dll"));
 
     joystick_tests(0x0700);
     joystick_tests(0x0500);

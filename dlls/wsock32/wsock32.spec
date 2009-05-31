@@ -62,8 +62,8 @@
 1108 stdcall s_perror(str)
 1109 stdcall GetAddressByNameA(long ptr str ptr long ptr ptr ptr ptr ptr)
 1110 stdcall GetAddressByNameW(long ptr wstr ptr long ptr ptr ptr ptr ptr)
-1111 stdcall EnumProtocolsA(ptr ptr ptr) ws2_32.WSAEnumProtocolsA
-1112 stdcall EnumProtocolsW(ptr ptr ptr) ws2_32.WSAEnumProtocolsW
+1111 stdcall EnumProtocolsA(ptr ptr ptr)
+1112 stdcall EnumProtocolsW(ptr ptr ptr)
 1113 stdcall GetTypeByNameA(str ptr)
 1114 stdcall GetTypeByNameW(wstr ptr)
 #1115 stub GetNameByTypeA
@@ -73,6 +73,6 @@
 1119 stdcall GetServiceA(long ptr ptr long ptr ptr ptr)
 1120 stdcall GetServiceW(long ptr ptr long ptr ptr ptr)
 #1130 stub NPLoadNameSpaces
-1140 stub TransmitFile
+1140 stdcall TransmitFile(long ptr long long ptr long) mswsock.TransmitFile
 1141 stdcall AcceptEx(long long ptr long long long ptr ptr) mswsock.AcceptEx
 1142 stdcall GetAcceptExSockaddrs(ptr long long long ptr ptr ptr ptr) mswsock.GetAcceptExSockaddrs

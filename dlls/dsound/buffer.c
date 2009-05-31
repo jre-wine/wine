@@ -117,11 +117,8 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(
         } else if (howmuch > 0) {
 	    /* Make an internal copy of the caller-supplied array.
 	     * Replace the existing copy if one is already present. */
-	    if (This->dsb->notifies)
-		    This->dsb->notifies = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-			This->dsb->notifies, howmuch * sizeof(DSBPOSITIONNOTIFY));
-	    else
-		    This->dsb->notifies = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+	    HeapFree(GetProcessHeap(), 0, This->dsb->notifies);
+	    This->dsb->notifies = HeapAlloc(GetProcessHeap(), 0,
 			howmuch * sizeof(DSBPOSITIONNOTIFY));
 
 	    if (This->dsb->notifies == NULL) {
@@ -154,7 +151,7 @@ static HRESULT IDirectSoundNotifyImpl_Create(
     IDirectSoundNotifyImpl * dsn;
     TRACE("(%p,%p)\n",dsb,pdsn);
 
-    dsn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(dsn));
+    dsn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dsn));
 
     if (dsn == NULL) {
         WARN("out of memory\n");
@@ -296,7 +293,7 @@ static HRESULT WINAPI IDirectSoundBufferImpl_SetFrequency(
 		This->freqAdjust = ((DWORD64)This->freq << DSOUND_FREQSHIFT) / This->device->pwfx->nSamplesPerSec;
 		This->nAvgBytesPerSec = freq * This->pwfx->nBlockAlign;
 		DSOUND_RecalcFormat(This);
-		DSOUND_MixToTemporary(This, 0, This->buflen);
+		DSOUND_MixToTemporary(This, 0, This->buflen, FALSE);
 	}
 
 	RtlReleaseResource(&This->lock);
@@ -383,17 +380,9 @@ static ULONG WINAPI IDirectSoundBufferImpl_Release(LPDIRECTSOUNDBUFFER8 iface)
 	DirectSoundDevice_RemoveBuffer(This->device, This);
 	RtlDeleteResource(&This->lock);
 
-	if (This->hwbuf) {
+	if (This->hwbuf)
 		IDsDriverBuffer_Release(This->hwbuf);
-		if (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY) {
-			This->buffer->ref--;
-			list_remove(&This->entry);
-			if (This->buffer->ref==0) {
-				HeapFree(GetProcessHeap(),0,This->buffer->memory);
-				HeapFree(GetProcessHeap(),0,This->buffer);
-			}
-		}
-	} else {
+	if (!This->hwbuf || (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY)) {
 		This->buffer->ref--;
 		list_remove(&This->entry);
 		if (This->buffer->ref==0) {
@@ -465,11 +454,13 @@ static HRESULT WINAPI IDirectSoundBufferImpl_GetStatus(
 	}
 
 	*status = 0;
+	RtlAcquireResourceShared(&This->lock, TRUE);
 	if ((This->state == STATE_STARTING) || (This->state == STATE_PLAYING)) {
 		*status |= DSBSTATUS_PLAYING;
 		if (This->playflags & DSBPLAY_LOOPING)
 			*status |= DSBSTATUS_LOOPING;
 	}
+	RtlReleaseResource(&This->lock);
 
 	TRACE("status=%x\n", *status);
 	return DS_OK;
@@ -529,6 +520,9 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(
 		flags,
 		GetTickCount()
 	);
+
+        if (!audiobytes1)
+            return DSERR_INVALIDPARAM;
 
         /* when this flag is set, writecursor is meaningless and must be calculated */
 	if (flags & DSBLOCK_FROMWRITECURSOR) {
@@ -733,9 +727,14 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Unlock(
 		{
 			RtlAcquireResourceShared(&iter->lock, TRUE);
 			if (x1)
-				DSOUND_MixToTemporary(iter, (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory, x1);
+                        {
+			    if(x1 + (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory > iter->buflen)
+			      hres = DSERR_INVALIDPARAM;
+			    else
+			      DSOUND_MixToTemporary(iter, (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory, x1, FALSE);
+                        }
 			if (x2)
-				DSOUND_MixToTemporary(iter, 0, x2);
+				DSOUND_MixToTemporary(iter, 0, x2, FALSE);
 			RtlReleaseResource(&iter->lock);
 		}
 		RtlReleaseResource(&This->device->buffer_list_lock);
@@ -1223,7 +1222,7 @@ HRESULT IDirectSoundBufferImpl_Duplicate(
     dsb->secondary = NULL;
     dsb->tmp_buffer = NULL;
     DSOUND_RecalcFormat(dsb);
-    DSOUND_MixToTemporary(dsb, 0, dsb->buflen);
+    DSOUND_MixToTemporary(dsb, 0, dsb->buflen, FALSE);
 
     /* variable sized struct so calculate size based on format */
     size = sizeof(WAVEFORMATEX) + pdsb->pwfx->cbSize;

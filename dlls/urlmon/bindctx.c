@@ -511,7 +511,8 @@ HRESULT WINAPI RegisterBindStatusCallback(IBindCtx *pbc, IBindStatusCallback *pb
     hres = IBindCtx_RegisterObjectParam(pbc, BSCBHolder, (IUnknown*)bsc);
     IBindStatusCallback_Release(bsc);
     if(FAILED(hres)) {
-        IBindStatusCallback_Release(prev);
+        if(prev)
+            IBindStatusCallback_Release(prev);
         return hres;
     }
 
@@ -705,13 +706,13 @@ static HRESULT WINAPI AsyncBindCtx_GetObjectParam(IBindCtx* iface, LPOLESTR pszk
     return IBindCtx_GetObjectParam(This->bindctx, pszkey, punk);
 }
 
-static HRESULT WINAPI AsyncBindCtx_RevokeObjectParam(IBindCtx *iface, LPOLESTR ppenum)
+static HRESULT WINAPI AsyncBindCtx_RevokeObjectParam(IBindCtx *iface, LPOLESTR pszkey)
 {
     AsyncBindCtx *This = BINDCTX_THIS(iface);
 
-    TRACE("(%p)->(%p)\n", This, ppenum);
+    TRACE("(%p)->(%s)\n", This, debugstr_w(pszkey));
 
-    return IBindCtx_RevokeObjectParam(This->bindctx, ppenum);
+    return IBindCtx_RevokeObjectParam(This->bindctx, pszkey);
 }
 
 static HRESULT WINAPI AsyncBindCtx_EnumObjectParam(IBindCtx *iface, IEnumString **pszkey)
@@ -820,9 +821,14 @@ HRESULT WINAPI CreateAsyncBindCtxEx(IBindCtx *ibind, DWORD options,
     if(reserved)
         WARN("reserved=%d\n", reserved);
 
-    hres = CreateBindCtx(0, &bindctx);
-    if(FAILED(hres))
-        return hres;
+    if(ibind) {
+        IBindCtx_AddRef(ibind);
+        bindctx = ibind;
+    }else {
+        hres = CreateBindCtx(0, &bindctx);
+        if(FAILED(hres))
+            return hres;
+    }
 
     ret = heap_alloc(sizeof(AsyncBindCtx));
 

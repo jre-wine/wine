@@ -24,10 +24,13 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winnls.h"
+#include "winioctl.h"
 #include "winnetwk.h"
 #include "npapi.h"
 #include "winreg.h"
 #include "winuser.h"
+#define WINE_MOUNTMGR_EXTENSIONS
+#include "ddk/mountmgr.h"
 #include "wine/debug.h"
 #include "wine/unicode.h"
 #include "mprres.h"
@@ -279,16 +282,18 @@ void wnetInit(HINSTANCE hInstDll)
                     {
                         PWSTR ptrPrev;
                         int entireNetworkLen;
+                        LPCWSTR stringresource;
 
                         entireNetworkLen = LoadStringW(hInstDll,
-                         IDS_ENTIRENETWORK, NULL, 0);
+                         IDS_ENTIRENETWORK, (LPWSTR)&stringresource, 0);
                         providerTable->entireNetwork = HeapAlloc(
                          GetProcessHeap(), 0, (entireNetworkLen + 1) *
                          sizeof(WCHAR));
                         if (providerTable->entireNetwork)
-                            LoadStringW(hInstDll, IDS_ENTIRENETWORK,
-                             providerTable->entireNetwork,
-                             entireNetworkLen + 1);
+                        {
+                            memcpy(providerTable->entireNetwork, stringresource, entireNetworkLen*sizeof(WCHAR));
+                            providerTable->entireNetwork[entireNetworkLen] = 0;
+                        }
                         providerTable->numAllocated = numToAllocate;
                         for (ptr = providers; ptr; )
                         {
@@ -355,7 +360,7 @@ static LPNETRESOURCEW _copyNetResourceForEnumW(LPNETRESOURCEW lpNet)
         {
             size_t len;
 
-            memcpy(ret, lpNet, sizeof(ret));
+            *ret = *lpNet;
             ret->lpLocalName = ret->lpComment = ret->lpProvider = NULL;
             if (lpNet->lpRemoteName)
             {
@@ -744,8 +749,7 @@ DWORD WINAPI WNetOpenEnumW( DWORD dwScope, DWORD dwType, DWORD dwUsage,
                                  dwScope, dwType, dwUsage, lpNet, &handle);
                                 if (ret == WN_SUCCESS)
                                 {
-                                    *lphEnum =
-                                     (HANDLE)_createProviderEnumerator(
+                                    *lphEnum = _createProviderEnumerator(
                                      dwScope, dwType, dwUsage, index, handle);
                                     ret = *lphEnum ? WN_SUCCESS :
                                      WN_OUT_OF_MEMORY;
@@ -759,7 +763,7 @@ DWORD WINAPI WNetOpenEnumW( DWORD dwScope, DWORD dwType, DWORD dwUsage,
                     }
                     else if (lpNet->lpRemoteName)
                     {
-                        *lphEnum = (HANDLE)_createGlobalEnumeratorW(dwScope,
+                        *lphEnum = _createGlobalEnumeratorW(dwScope,
                          dwType, dwUsage, lpNet);
                         ret = *lphEnum ? WN_SUCCESS : WN_OUT_OF_MEMORY;
                     }
@@ -771,13 +775,13 @@ DWORD WINAPI WNetOpenEnumW( DWORD dwScope, DWORD dwType, DWORD dwUsage,
                             /* comment matches the "Entire Network", enumerate
                              * global scope of every provider
                              */
-                            *lphEnum = (HANDLE)_createGlobalEnumeratorW(dwScope,
+                            *lphEnum = _createGlobalEnumeratorW(dwScope,
                              dwType, dwUsage, lpNet);
                         }
                         else
                         {
                             /* this is the same as not having passed lpNet */
-                            *lphEnum = (HANDLE)_createGlobalEnumeratorW(dwScope,
+                            *lphEnum = _createGlobalEnumeratorW(dwScope,
                              dwType, dwUsage, NULL);
                         }
                         ret = *lphEnum ? WN_SUCCESS : WN_OUT_OF_MEMORY;
@@ -785,19 +789,18 @@ DWORD WINAPI WNetOpenEnumW( DWORD dwScope, DWORD dwType, DWORD dwUsage,
                 }
                 else
                 {
-                    *lphEnum = (HANDLE)_createGlobalEnumeratorW(dwScope, dwType,
+                    *lphEnum = _createGlobalEnumeratorW(dwScope, dwType,
                      dwUsage, lpNet);
                     ret = *lphEnum ? WN_SUCCESS : WN_OUT_OF_MEMORY;
                 }
                 break;
             case RESOURCE_CONTEXT:
-                *lphEnum = (HANDLE)_createContextEnumerator(dwScope, dwType,
-                 dwUsage);
+                *lphEnum = _createContextEnumerator(dwScope, dwType, dwUsage);
                 ret = *lphEnum ? WN_SUCCESS : WN_OUT_OF_MEMORY;
                 break;
             case RESOURCE_REMEMBERED:
             case RESOURCE_CONNECTED:
-                *lphEnum = (HANDLE)_createNullEnumerator();
+                *lphEnum = _createNullEnumerator();
                 ret = *lphEnum ? WN_SUCCESS : WN_OUT_OF_MEMORY;
                 break;
             default:
@@ -851,8 +854,8 @@ DWORD WINAPI WNetEnumResourceA( HANDLE hEnum, LPDWORD lpcCount,
                  * size is the appropriate usage of this function, so
                  * hopefully it won't be an issue.
                  */
-                ret = _thunkNetResourceArrayWToA((LPNETRESOURCEW)localBuffer,
-                 &localCount, lpBuffer, lpBufferSize);
+                ret = _thunkNetResourceArrayWToA(localBuffer, &localCount,
+                 lpBuffer, lpBufferSize);
                 *lpcCount = localCount;
             }
             HeapFree(GetProcessHeap(), 0, localBuffer);
@@ -921,8 +924,7 @@ static DWORD _enumerateProvidersW(PWNetEnumerator enumerator, LPDWORD lpcCount,
             }
         }
         strNext = (LPWSTR)((LPBYTE)lpBuffer + count * sizeof(NETRESOURCEW));
-        for (i = 0, resource = (LPNETRESOURCEW)lpBuffer; i < count;
-         i++, resource++)
+        for (i = 0, resource = lpBuffer; i < count; i++, resource++)
         {
             resource->dwScope = RESOURCE_GLOBALNET;
             resource->dwType = RESOURCETYPE_ANY;
@@ -1134,7 +1136,7 @@ static DWORD _enumerateContextW(PWNetEnumerator enumerator, LPDWORD lpcCount,
     }
     else
     {
-        LPNETRESOURCEW lpNet = (LPNETRESOURCEW)lpBuffer;
+        LPNETRESOURCEW lpNet = lpBuffer;
 
         lpNet->dwScope = RESOURCE_GLOBALNET;
         lpNet->dwType = enumerator->dwType;
@@ -1310,6 +1312,7 @@ DWORD WINAPI WNetGetResourceInformationA( LPNETRESOURCEA lpNetResource,
         ret = _thunkNetResourceArrayAToW(lpNetResource, &count, lpNetResourceW, &size);
         if (ret == WN_MORE_DATA)
         {
+            HeapFree(GetProcessHeap(), 0, lpNetResourceW);
             lpNetResourceW = HeapAlloc(GetProcessHeap(), 0, size);
             if (lpNetResourceW)
                 ret = _thunkNetResourceArrayAToW(lpNetResource,
@@ -1341,6 +1344,7 @@ DWORD WINAPI WNetGetResourceInformationA( LPNETRESOURCEA lpNetResource,
                 {
                     ret = _thunkNetResourceArrayWToA(lpBufferW,
                             &count, lpBuffer, cbBuffer);
+                    HeapFree(GetProcessHeap(), 0, lpNetResourceW);
                     lpNetResourceW = lpBufferW;
                     size = sizeof(NETRESOURCEA);
                     size += WideCharToMultiByte(CP_ACP, 0, lpNetResourceW->lpRemoteName,
@@ -1414,7 +1418,7 @@ DWORD WINAPI WNetGetResourceInformationW( LPNETRESOURCEW lpNetResource,
 
     if (!(lpBuffer))
         ret = WN_OUT_OF_MEMORY;
-    else
+    else if (providerTable != NULL)
     {
         /* FIXME: For function value of a variable is indifferent, it does
          * search of all providers in a network.
@@ -1746,6 +1750,52 @@ DWORD WINAPI WNetGetConnectionA( LPCSTR lpLocalName,
     return ret;
 }
 
+/* find the network connection for a given drive; helper for WNetGetConnection */
+static DWORD get_drive_connection( WCHAR letter, LPWSTR remote, LPDWORD size )
+{
+    char buffer[1024];
+    struct mountmgr_unix_drive *data = (struct mountmgr_unix_drive *)buffer;
+    HANDLE mgr;
+    DWORD ret = WN_NOT_CONNECTED;
+
+    if ((mgr = CreateFileW( MOUNTMGR_DOS_DEVICE_NAME, GENERIC_READ|GENERIC_WRITE,
+                            FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                            0, 0 )) == INVALID_HANDLE_VALUE)
+    {
+        ERR( "failed to open mount manager err %u\n", GetLastError() );
+        return ret;
+    }
+    memset( data, 0, sizeof(*data) );
+    data->letter = letter;
+    if (DeviceIoControl( mgr, IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE, data, sizeof(*data),
+                         data, sizeof(buffer), NULL, NULL ))
+    {
+        char *p, *mount_point = buffer + data->mount_point_offset;
+        DWORD len;
+
+        if (data->mount_point_offset && !strncmp( mount_point, "unc/", 4 ))
+        {
+            mount_point += 2;
+            mount_point[0] = '\\';
+            for (p = mount_point; *p; p++) if (*p == '/') *p = '\\';
+
+            len = MultiByteToWideChar( CP_UNIXCP, 0, mount_point, -1, NULL, 0 );
+            if (len > *size)
+            {
+                *size = len;
+                ret = WN_MORE_DATA;
+            }
+            else
+            {
+                *size = MultiByteToWideChar( CP_UNIXCP, 0, mount_point, -1, remote, *size);
+                ret = WN_SUCCESS;
+            }
+        }
+    }
+    CloseHandle( mgr );
+    return ret;
+}
+
 /**************************************************************************
  * WNetGetConnectionW [MPR.@]
  *
@@ -1774,31 +1824,8 @@ DWORD WINAPI WNetGetConnectionW( LPCWSTR lpLocalName,
             switch(GetDriveTypeW(lpLocalName))
             {
             case DRIVE_REMOTE:
-            {
-                static const WCHAR unc[] = { 'u','n','c','\\' };
-                WCHAR rremote[MAX_PATH], *remote = rremote;
-                if (!QueryDosDeviceW( lpLocalName, remote, MAX_PATH )) remote[0] = 0;
-                else if (!strncmpW(remote, unc, 4))
-                {
-                    remote += 2;
-                    remote[0] = '\\';
-                }
-                else if (remote[0] != '\\' || remote[1] != '\\')
-                    FIXME("Don't know how to convert %s to an unc\n", debugstr_w(remote));
-
-                if (strlenW(remote) + 1 > *lpBufferSize)
-                {
-                    *lpBufferSize = strlenW(remote) + 1;
-                    ret = WN_MORE_DATA;
-                }
-                else
-                {
-                    strcpyW( lpRemoteName, remote );
-                    *lpBufferSize = strlenW(lpRemoteName) + 1;
-                    ret = WN_SUCCESS;
-                }
+                ret = get_drive_connection( lpLocalName[0], lpRemoteName, lpBufferSize );
                 break;
-            }
             case DRIVE_REMOVABLE:
             case DRIVE_FIXED:
             case DRIVE_CDROM:
@@ -1857,7 +1884,7 @@ DWORD WINAPI WNetGetUniversalNameA ( LPCSTR lpLocalPath, DWORD dwInfoLevel,
     {
     case UNIVERSAL_NAME_INFO_LEVEL:
     {
-        LPUNIVERSAL_NAME_INFOA info = (LPUNIVERSAL_NAME_INFOA)lpBuffer;
+        LPUNIVERSAL_NAME_INFOA info = lpBuffer;
 
         size = sizeof(*info) + lstrlenA(lpLocalPath) + 1;
         if (*lpBufferSize < size)
@@ -1899,7 +1926,7 @@ DWORD WINAPI WNetGetUniversalNameW ( LPCWSTR lpLocalPath, DWORD dwInfoLevel,
     {
     case UNIVERSAL_NAME_INFO_LEVEL:
     {
-        LPUNIVERSAL_NAME_INFOW info = (LPUNIVERSAL_NAME_INFOW)lpBuffer;
+        LPUNIVERSAL_NAME_INFOW info = lpBuffer;
 
         size = sizeof(*info) + (lstrlenW(lpLocalPath) + 1) * sizeof(WCHAR);
         if (*lpBufferSize < size)
@@ -2117,7 +2144,7 @@ DWORD WINAPI WNetGetNetworkInformationW( LPCWSTR lpProvider,
                  providerTable->table[providerIndex].dwSpecVersion;
                 lpNetInfoStruct->dwStatus = NO_ERROR;
                 lpNetInfoStruct->dwCharacteristics = 0;
-                lpNetInfoStruct->dwHandle = (ULONG_PTR)NULL;
+                lpNetInfoStruct->dwHandle = 0;
                 lpNetInfoStruct->wNetType =
                  HIWORD(providerTable->table[providerIndex].dwNetType);
                 lpNetInfoStruct->dwPrinters = -1;

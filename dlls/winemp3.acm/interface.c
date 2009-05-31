@@ -16,12 +16,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
 #include <stdlib.h>
+#include <stdarg.h>
 #include <stdio.h>
 
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 #include "mpg123.h"
 #include "mpglib.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(mpeg3);
 
 BOOL InitMP3(struct mpstr *mp)
 {
@@ -48,31 +54,35 @@ BOOL InitMP3(struct mpstr *mp)
 	return !0;
 }
 
-void ExitMP3(struct mpstr *mp)
+void ClearMP3Buffer(struct mpstr *mp)
 {
 	struct buf *b,*bn;
 
 	b = mp->tail;
 	while(b) {
-		free(b->pnt);
+		HeapFree(GetProcessHeap(), 0, b->pnt);
 		bn = b->next;
-		free(b);
+		HeapFree(GetProcessHeap(), 0, b);
 		b = bn;
 	}
+	mp->tail = NULL;
+	mp->head = NULL;
+	mp->bsize = 0;
 }
 
 static struct buf *addbuf(struct mpstr *mp,const unsigned char *buf,int size)
 {
 	struct buf *nbuf;
 
-	nbuf = malloc( sizeof(struct buf) );
+	nbuf = HeapAlloc(GetProcessHeap(), 0, sizeof(struct buf));
 	if(!nbuf) {
-		fprintf(stderr,"Out of memory!\n");
+		WARN("Out of memory!\n");
 		return NULL;
 	}
-	nbuf->pnt = malloc(size);
+	nbuf->pnt = HeapAlloc(GetProcessHeap(), 0, size);
 	if(!nbuf->pnt) {
-		free(nbuf);
+		HeapFree(GetProcessHeap(), 0, nbuf);
+		WARN("Out of memory!\n");
 		return NULL;
 	}
 	nbuf->size = size;
@@ -105,8 +115,8 @@ static void remove_buf(struct mpstr *mp)
     mp->tail = mp->head = NULL;
   }
 
-  free(buf->pnt);
-  free(buf);
+  HeapFree(GetProcessHeap(), 0, buf->pnt);
+  HeapFree(GetProcessHeap(), 0, buf);
 
 }
 
@@ -151,7 +161,7 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
 	int len;
 
 	if(osize < 4608) {
-		fprintf(stderr,"To less out space\n");
+		ERR("Output buffer too small\n");
 		return MP3_ERR;
 	}
 
@@ -163,12 +173,19 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
 
 	/* First decode header */
 	if(mp->framesize == 0) {
+		int ret;
 		if(mp->bsize < 4) {
 			return MP3_NEED_MORE;
 		}
 		read_head(mp);
-		if (decode_header(&mp->fr,mp->header) == 0) {
-			return MP3_ERR;
+		while (!(ret = decode_header(&mp->fr,mp->header)) && mp->bsize)
+		{
+			mp->header = mp->header << 8;
+			mp->header |= read_buf_byte(mp);
+		}
+
+		if (!ret) {
+			return MP3_NEED_MORE;
 		}
 		mp->framesize = mp->fr.framesize;
 	}
@@ -204,13 +221,13 @@ int decodeMP3(struct mpstr *mp,const unsigned char *in,int isize,unsigned char *
            getbits(16);
         switch(mp->fr.lay) {
           case 1:
-	    do_layer1(&mp->fr,(unsigned char *) out,done);
+	    do_layer1(&mp->fr,out,done);
             break;
           case 2:
-	    do_layer2(&mp->fr,(unsigned char *) out,done);
+	    do_layer2(&mp->fr,out,done);
             break;
           case 3:
-	    do_layer3(&mp->fr,(unsigned char *) out,done);
+	    do_layer3(&mp->fr,out,done);
             break;
         }
 
@@ -224,7 +241,8 @@ int set_pointer(struct mpstr *mp, long backstep)
 {
   unsigned char *bsbufold;
   if(mp->fsizeold < 0 && backstep > 0) {
-    fprintf(stderr,"Can't step back %ld!\n",backstep);
+    /* This is not a bug if we just did seeking, the first frame is dropped then */
+    WARN("Can't step back %ld!\n",backstep);
     return MP3_ERR;
   }
   bsbufold = mp->bsspace[mp->bsnum] + 512;

@@ -35,8 +35,8 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
-#include "wine/exception.h"
 #include "ntdll_misc.h"
+#include "wine/exception.h"
 #include "wine/library.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -66,8 +66,8 @@ static BOOLEAN copy_acl(DWORD nDestinationAclLength, PACL pDestinationAcl, PACL 
 
     if (!pSourceAcl || !RtlValidAcl(pSourceAcl))
         return FALSE;
-        
-    size = ((ACL *)pSourceAcl)->AclSize;
+
+    size = pSourceAcl->AclSize;
     if (nDestinationAclLength < size)
         return FALSE;
 
@@ -117,7 +117,7 @@ static NTSTATUS add_access_ace(PACL pAcl, DWORD dwAceRevision, DWORD dwAceFlags,
 
     /* skip past ACE->Mask */
     pSidStart = pAccessMask + 1;
-    RtlCopySid(dwLengthSid, (PSID)pSidStart, pSid);
+    RtlCopySid(dwLengthSid, pSidStart, pSid);
 
     pAcl->AclRevision = max(pAcl->AclRevision, dwAceRevision);
     pAcl->AceCount++;
@@ -158,7 +158,7 @@ NTSTATUS WINAPI RtlAllocateAndInitializeSid (
     tmp_sid->Revision = SID_REVISION;
 
     if (pIdentifierAuthority)
-        memcpy(&tmp_sid->IdentifierAuthority, pIdentifierAuthority, sizeof(SID_IDENTIFIER_AUTHORITY));
+        tmp_sid->IdentifierAuthority = *pIdentifierAuthority;
     tmp_sid->SubAuthorityCount = nSubAuthorityCount;
 
     switch( nSubAuthorityCount )
@@ -302,7 +302,7 @@ BOOL WINAPI RtlInitializeSid(
 	pisid->Revision = SID_REVISION;
 	pisid->SubAuthorityCount = nSubAuthorityCount;
 	if (pIdentifierAuthority)
-	  memcpy(&pisid->IdentifierAuthority, pIdentifierAuthority, sizeof (SID_IDENTIFIER_AUTHORITY));
+	  pisid->IdentifierAuthority = *pIdentifierAuthority;
 
 	for (i = 0; i < nSubAuthorityCount; i++)
 	  *RtlSubAuthoritySid(pSid, i) = 0;
@@ -451,8 +451,8 @@ NTSTATUS WINAPI RtlCreateSecurityDescriptor(
  */
 NTSTATUS WINAPI RtlCopySecurityDescriptor(PSECURITY_DESCRIPTOR pSourceSD, PSECURITY_DESCRIPTOR pDestinationSD)
 {
-    SECURITY_DESCRIPTOR *srcSD = (SECURITY_DESCRIPTOR *)pSourceSD;
-    SECURITY_DESCRIPTOR *destSD = (SECURITY_DESCRIPTOR *)pDestinationSD;
+    SECURITY_DESCRIPTOR *srcSD = pSourceSD;
+    SECURITY_DESCRIPTOR *destSD = pDestinationSD;
     PSID Owner, Group;
     PACL Dacl, Sacl;
     BOOLEAN defaulted, present;
@@ -618,7 +618,12 @@ NTSTATUS WINAPI RtlGetDaclSecurityDescriptor(
 	    *pDacl = lpsd->Dacl;
 
 	  *lpbDaclDefaulted = (( SE_DACL_DEFAULTED & lpsd->Control ) ? 1 : 0);
-	}
+        }
+        else
+        {
+            *pDacl = NULL;
+            *lpbDaclDefaulted = 0;
+        }
 
 	return STATUS_SUCCESS;
 }
@@ -1052,8 +1057,24 @@ NTSTATUS WINAPI RtlSetControlSecurityDescriptor(
     SECURITY_DESCRIPTOR_CONTROL ControlBitsOfInterest,
     SECURITY_DESCRIPTOR_CONTROL ControlBitsToSet)
 {
-    FIXME("(%p 0x%08x 0x%08x): stub\n", SecurityDescriptor, ControlBitsOfInterest,
-          ControlBitsToSet);
+    SECURITY_DESCRIPTOR_CONTROL const immutable
+       = SE_OWNER_DEFAULTED  | SE_GROUP_DEFAULTED
+       | SE_DACL_PRESENT     | SE_DACL_DEFAULTED
+       | SE_SACL_PRESENT     | SE_SACL_DEFAULTED
+       | SE_RM_CONTROL_VALID | SE_SELF_RELATIVE
+       ;
+
+    SECURITY_DESCRIPTOR *lpsd = SecurityDescriptor;
+
+    TRACE("(%p 0x%04x 0x%04x)\n", SecurityDescriptor,
+          ControlBitsOfInterest, ControlBitsToSet);
+
+    if ((ControlBitsOfInterest | ControlBitsToSet) & immutable)
+        return STATUS_INVALID_PARAMETER;
+
+    lpsd->Control |=  (ControlBitsOfInterest &  ControlBitsToSet);
+    lpsd->Control &= ~(ControlBitsOfInterest & ~ControlBitsToSet);
+
     return STATUS_SUCCESS;
 }
 
@@ -1156,7 +1177,7 @@ NTSTATUS WINAPI RtlAddAce(
 	}
 	if ((BYTE *)targetace + acelen > (BYTE *)acl + acl->AclSize) /* too much aces */
 		return STATUS_INVALID_PARAMETER;
-	memcpy((LPBYTE)targetace,acestart,acelen);
+	memcpy(targetace,acestart,acelen);
 	acl->AceCount+=nrofaces;
 	return STATUS_SUCCESS;
 }
@@ -1341,14 +1362,14 @@ NTSTATUS WINAPI RtlGetAce(PACL pAcl,DWORD dwAceIndex,LPVOID *pAce )
 
 	TRACE("(%p,%d,%p)\n",pAcl,dwAceIndex,pAce);
 
-	if (dwAceIndex > pAcl->AceCount)
+	if (dwAceIndex >= pAcl->AceCount)
 		return STATUS_INVALID_PARAMETER;
 
 	ace = (PACE_HEADER)(pAcl + 1);
 	for (;dwAceIndex;dwAceIndex--)
 		ace = (PACE_HEADER)(((BYTE*)ace)+ace->AceSize);
 
-	*pAce = (LPVOID) ace;
+	*pAce = ace;
 
 	return STATUS_SUCCESS;
 }
@@ -1541,6 +1562,9 @@ NtAccessCheck(
         SecurityDescriptor, ClientToken, DesiredAccess, GenericMapping,
         PrivilegeSet, ReturnLength, GrantedAccess, AccessStatus);
 
+    if (!PrivilegeSet || !ReturnLength)
+        return STATUS_ACCESS_VIOLATION;
+
     SERVER_START_REQ( access_check )
     {
         struct security_descriptor sd;
@@ -1552,7 +1576,7 @@ NtAccessCheck(
         DWORD revision;
         SECURITY_DESCRIPTOR_CONTROL control;
 
-        req->handle = ClientToken;
+        req->handle = wine_server_obj_handle( ClientToken );
         req->desired_access = DesiredAccess;
         req->mapping_read = GenericMapping->GenericRead;
         req->mapping_write = GenericMapping->GenericWrite;
@@ -1577,7 +1601,7 @@ NtAccessCheck(
         wine_server_add_data( req, sacl, sd.sacl_len );
         wine_server_add_data( req, dacl, sd.dacl_len );
 
-        wine_server_set_reply( req, &PrivilegeSet->Privilege, *ReturnLength - FIELD_OFFSET( PRIVILEGE_SET, Privilege ) );
+        wine_server_set_reply( req, PrivilegeSet->Privilege, *ReturnLength - FIELD_OFFSET( PRIVILEGE_SET, Privilege ) );
 
         status = wine_server_call( req );
 
@@ -1665,7 +1689,7 @@ NTSTATUS WINAPI NtSetSecurityObject(HANDLE Handle,
 
     SERVER_START_REQ( set_security_object )
     {
-        req->handle = Handle;
+        req->handle = wine_server_obj_handle( Handle );
         req->security_info = SecurityInformation;
 
         wine_server_add_data( req, &sd, sizeof(sd) );
@@ -1696,7 +1720,7 @@ NTSTATUS WINAPI RtlConvertSidToUnicodeString(
     static const WCHAR formatW[] = {'-','%','u',0};
     WCHAR buffer[2 + 10 + 10 + 10 * SID_MAX_SUB_AUTHORITIES];
     WCHAR *p = buffer;
-    const SID *sid = (const SID *)pSid;
+    const SID *sid = pSid;
     DWORD i, len;
 
     *p++ = 'S';
@@ -1741,7 +1765,7 @@ NTSTATUS WINAPI RtlQueryInformationAcl(
     {
         case AclRevisionInformation:
         {
-            PACL_REVISION_INFORMATION paclrev = (PACL_REVISION_INFORMATION) pAclInformation;
+            PACL_REVISION_INFORMATION paclrev = pAclInformation;
 
             if (nAclInformationLength < sizeof(ACL_REVISION_INFORMATION))
                 status = STATUS_INVALID_PARAMETER;
@@ -1753,7 +1777,7 @@ NTSTATUS WINAPI RtlQueryInformationAcl(
 
         case AclSizeInformation:
         {
-            PACL_SIZE_INFORMATION paclsize = (PACL_SIZE_INFORMATION) pAclInformation;
+            PACL_SIZE_INFORMATION paclsize = pAclInformation;
 
             if (nAclInformationLength < sizeof(ACL_SIZE_INFORMATION))
                 status = STATUS_INVALID_PARAMETER;

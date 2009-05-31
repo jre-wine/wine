@@ -12,30 +12,26 @@
 DLLFLAGS    = @DLLFLAGS@
 DEFS        = $(EXTRADEFS)
 ALL_LIBS    = $(DELAYIMPORTS:%=-l%) $(IMPORTS:%=-l%) $(EXTRALIBS) $(LIBPORT) $(LDFLAGS) $(LIBS)
-BASEMODULE  = $(MODULE:.exe=)
 RUNTESTFLAGS= -q -P wine -T $(TOPOBJDIR)
 INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(dlldir) $(DESTDIR)$(mandir)/man$(prog_manext)
 
 @MAKE_RULES@
 
-all: $(MODULE)$(DLLEXT) $(BASEMODULE)$(EXEEXT)
+all: $(MODULE)$(DLLEXT)
 
 # Rules for .so main module
 
 $(MODULE).so: $(OBJS) $(RC_SRCS:.rc=.res) Makefile.in
-	$(WINEGCC) -B$(TOOLSDIR)/tools/winebuild $(APPMODE) $(OBJS) $(RC_SRCS:.rc=.res) -o $@ $(ALL_LIBS) $(DELAYIMPORTS:%=-Wb,-d%)
-
-$(BASEMODULE): $(WINEWRAPPER)
-	$(RM) $@ && $(LN_S) $(WINEWRAPPER) $@
+	$(WINEGCC) $(APPMODE) $(OBJS) $(RC_SRCS:.rc=.res) -o $@ $(ALL_LIBS) $(DELAYIMPORTS:%=-Wb,-d%)
 
 # Rules for .exe main module
 
 $(MODULE): $(OBJS) $(RCOBJS) Makefile.in
-	$(CC) $(APPMODE) $(OBJS) $(RCOBJS) -o $@ $(LIBWINE) $(ALL_LIBS)
+	$(CC) $(APPMODE) $(OBJS) $(RCOBJS) -o $@ -L$(DLLDIR) $(IMPORTS:%=-L$(DLLDIR)/%) $(DELAYIMPORTS:%=-L$(DLLDIR)/%) $(LIBWINE) $(ALL_LIBS)
 
 # Rules for testing
 
-check test:: $(SUBDIRS:%=%/__test__)
+check test:: $(SUBDIRS:%=%/__test__) dummy
 
 $(TESTRESULTS): $(MODULE)$(DLLEXT)
 
@@ -55,9 +51,9 @@ uninstall_prog.so: dummy
 uninstall_prog: dummy
 	$(RM) $(DESTDIR)$(bindir)/$(MODULE)
 
-install:: install_prog$(DLLEXT)
+install install-lib:: install_prog$(DLLEXT)
 
 uninstall:: uninstall_prog$(DLLEXT)
 
 clean::
-	$(RM) $(BASEMODULE) $(MODULE)
+	$(RM) $(MODULE)

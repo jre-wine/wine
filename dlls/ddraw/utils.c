@@ -4,7 +4,7 @@
  * Copyright (c) 1997-2000 Marcus Meissner
  * Copyright (c) 1998 Lionel Ulmer
  * Copyright (c) 2000 TransGaming Technologies Inc.
- * Copyright (c) 2006 Stefan Dösinger
+ * Copyright (c) 2006 Stefan DÃ¶singer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -30,6 +30,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 
+static void DDRAW_dump_pixelformat(const DDPIXELFORMAT *pf);
 
 /*****************************************************************************
  * PixelFormat_WineD3DtoDD
@@ -153,7 +154,7 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
             DDPixelFormat->u4.dwBBitMask = 0x00;
             break;
 
-        case WINED3DFMT_A8:
+        case WINED3DFMT_A8_UNORM:
             DDPixelFormat->dwFlags = DDPF_ALPHA;
             DDPixelFormat->dwFourCC = 0;
             DDPixelFormat->u1.dwAlphaBitDepth = 8;
@@ -185,14 +186,14 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
 
         /* How are Z buffer bit depth and Stencil buffer bit depth related?
          */
-        case WINED3DFMT_D16:
+        case WINED3DFMT_D16_UNORM:
             DDPixelFormat->dwFlags = DDPF_ZBUFFER;
             DDPixelFormat->dwFourCC = 0;
             DDPixelFormat->u1.dwZBufferBitDepth = 16;
             DDPixelFormat->u2.dwStencilBitDepth = 0;
             DDPixelFormat->u3.dwZBitMask = 0x0000FFFF;
             DDPixelFormat->u4.dwStencilBitMask = 0x0;
-            DDPixelFormat->u5.dwRGBZBitMask = 0x0000FFFF;
+            DDPixelFormat->u5.dwRGBZBitMask = 0x00000000;
             break;
 
         case WINED3DFMT_D32:
@@ -202,17 +203,17 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
             DDPixelFormat->u2.dwStencilBitDepth = 0;
             DDPixelFormat->u3.dwZBitMask = 0xFFFFFFFF;
             DDPixelFormat->u4.dwStencilBitMask = 0x0;
-            DDPixelFormat->u5.dwRGBZBitMask = 0xFFFFFFFF;
+            DDPixelFormat->u5.dwRGBZBitMask = 0x00000000;
             break;
 
         case WINED3DFMT_D24X4S4:
             DDPixelFormat->dwFlags = DDPF_ZBUFFER | DDPF_STENCILBUFFER;
             DDPixelFormat->dwFourCC = 0;
             /* Should I set dwZBufferBitDepth to 32 here? */
-            DDPixelFormat->u1.dwZBufferBitDepth = 24;
+            DDPixelFormat->u1.dwZBufferBitDepth = 32;
             DDPixelFormat->u2.dwStencilBitDepth = 4;
-            DDPixelFormat->u3.dwZBitMask = 0x0;
-            DDPixelFormat->u4.dwStencilBitMask = 0x0;
+            DDPixelFormat->u3.dwZBitMask = 0x00FFFFFF;
+            DDPixelFormat->u4.dwStencilBitMask = 0x0F000000;
             DDPixelFormat->u5.dwRGBAlphaBitMask = 0x0;
             break;
 
@@ -220,36 +221,46 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
             DDPixelFormat->dwFlags = DDPF_ZBUFFER | DDPF_STENCILBUFFER;
             DDPixelFormat->dwFourCC = 0;
             /* Should I set dwZBufferBitDepth to 32 here? */
-            DDPixelFormat->u1.dwZBufferBitDepth = 24;
+            DDPixelFormat->u1.dwZBufferBitDepth = 32;
             DDPixelFormat->u2.dwStencilBitDepth = 8;
-            DDPixelFormat->u3.dwZBitMask = 0x0;
-            DDPixelFormat->u4.dwStencilBitMask = 0x0;
+            DDPixelFormat->u3.dwZBitMask = 0x00FFFFFFFF;
+            DDPixelFormat->u4.dwStencilBitMask = 0xFF000000;
             DDPixelFormat->u5.dwRGBAlphaBitMask = 0x0;
             break;
 
         case WINED3DFMT_D24X8:
             DDPixelFormat->dwFlags = DDPF_ZBUFFER;
             DDPixelFormat->dwFourCC = 0;
-            DDPixelFormat->u1.dwZBufferBitDepth = 24;
-            DDPixelFormat->u2.dwStencilBitDepth = 8;
-            DDPixelFormat->u3.dwZBitMask = 0x0;
-            DDPixelFormat->u4.dwStencilBitMask = 0x0;
+            DDPixelFormat->u1.dwZBufferBitDepth = 32;
+            DDPixelFormat->u2.dwStencilBitDepth = 0;
+            DDPixelFormat->u3.dwZBitMask = 0x00FFFFFFFF;
+            DDPixelFormat->u4.dwStencilBitMask = 0x00000000;
             DDPixelFormat->u5.dwRGBAlphaBitMask = 0x0;
 
             break;
         case WINED3DFMT_D15S1:
             DDPixelFormat->dwFlags = DDPF_ZBUFFER | DDPF_STENCILBUFFER;
             DDPixelFormat->dwFourCC = 0;
-            /* Should I set dwZBufferBitDepth to 16 here? */
-            DDPixelFormat->u1.dwZBufferBitDepth = 15;
+            DDPixelFormat->u1.dwZBufferBitDepth = 16;
             DDPixelFormat->u2.dwStencilBitDepth = 1;
-            DDPixelFormat->u3.dwZBitMask = 0x0;
-            DDPixelFormat->u4.dwStencilBitMask = 0x0;
+            DDPixelFormat->u3.dwZBitMask = 0x7fff;
+            DDPixelFormat->u4.dwStencilBitMask = 0x8000;
             DDPixelFormat->u5.dwRGBAlphaBitMask = 0x0;
             break;
 
         case WINED3DFMT_UYVY:
         case WINED3DFMT_YUY2:
+            DDPixelFormat->u1.dwYUVBitCount = 16;
+            DDPixelFormat->dwFlags = DDPF_FOURCC;
+            DDPixelFormat->dwFourCC = WineD3DFormat;
+            break;
+
+        case WINED3DFMT_YV12:
+            DDPixelFormat->u1.dwYUVBitCount = 12;
+            DDPixelFormat->dwFlags = DDPF_FOURCC;
+            DDPixelFormat->dwFourCC = WineD3DFormat;
+            break;
+
         case WINED3DFMT_DXT1:
         case WINED3DFMT_DXT2:
         case WINED3DFMT_DXT3:
@@ -294,7 +305,7 @@ PixelFormat_WineD3DtoDD(DDPIXELFORMAT *DDPixelFormat,
             break;
 
         /* Bump mapping */
-        case WINED3DFMT_V8U8:
+        case WINED3DFMT_R8G8_SNORM:
             DDPixelFormat->dwFlags = DDPF_BUMPDUDV;
             DDPixelFormat->dwFourCC = 0;
             DDPixelFormat->u1.dwBumpBitCount = 16;
@@ -436,7 +447,7 @@ PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
             case 4:
                 ERR("Unsupported Alpha-Only bit depth 0x%x\n", DDPixelFormat->u1.dwAlphaBitDepth);
             case 8:
-                return WINED3DFMT_A8;
+                return WINED3DFMT_A8_UNORM;
 
             default:
                 ERR("Invalid AlphaBitDepth in Alpha-Only Pixelformat\n");
@@ -494,19 +505,20 @@ PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
             switch(DDPixelFormat->u1.dwZBufferBitDepth)
             {
                 case 8:
-                    ERR("8 Bits Z+Stencil buffer pixelformat is not supported. Returning WINED3DFMT_UNKNOWN\n");
+                    FIXME("8 Bits Z+Stencil buffer pixelformat is not supported. Returning WINED3DFMT_UNKNOWN\n");
                     return WINED3DFMT_UNKNOWN;
 
                 case 15:
+                    FIXME("15 bit depth buffer not handled yet, assuming 16 bit\n");
                 case 16:
                     if(DDPixelFormat->u2.dwStencilBitDepth == 1)
                         return WINED3DFMT_D15S1;
 
-                    ERR("Don't know how to handle a 16 bit Z buffer with %d bit stencil buffer pixelformat\n", DDPixelFormat->u2.dwStencilBitDepth);
+                    FIXME("Don't know how to handle a 16 bit Z buffer with %d bit stencil buffer pixelformat\n", DDPixelFormat->u2.dwStencilBitDepth);
                     return WINED3DFMT_UNKNOWN;
 
                 case 24:
-                    ERR("Don't know how to handle a 24 bit depth buffer with stencil bits\n");
+                    FIXME("Don't know how to handle a 24 bit depth buffer with stencil bits\n");
                     return WINED3DFMT_D24S8;
 
                 case 32:
@@ -526,16 +538,21 @@ PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
             {
                 case 8:
                     ERR("8 Bit Z buffers are not supported. Trying a 16 Bit one\n");
-                    return WINED3DFMT_D16;
+                    return WINED3DFMT_D16_UNORM;
 
                 case 16:
-                    return WINED3DFMT_D16;
+                    return WINED3DFMT_D16_UNORM;
 
                 case 24:
-                    return WINED3DFMT_D24X8;
-
+                    FIXME("24 Bit depth buffer, treating like a 32 bit one\n");
                 case 32:
-                    return WINED3DFMT_D32;
+                    if(DDPixelFormat->u3.dwZBitMask == 0x00FFFFFF) {
+                        return WINED3DFMT_D24X8;
+                    } else if(DDPixelFormat->u3.dwZBitMask == 0xFFFFFFFF) {
+                        return WINED3DFMT_D32;
+                    }
+                    FIXME("Unhandled 32 bit depth buffer bitmasks, returning WINED3DFMT_D24X8\n");
+                    return WINED3DFMT_D24X8; /* That's most likely to make games happy */
 
                 default:
                     ERR("Unsupported Z buffer depth %d\n", DDPixelFormat->u1.dwZBufferBitDepth);
@@ -552,6 +569,10 @@ PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
         if(DDPixelFormat->dwFourCC == MAKEFOURCC('Y', 'U', 'Y', '2'))
         {
             return WINED3DFMT_YUY2;
+        }
+        if(DDPixelFormat->dwFourCC == MAKEFOURCC('Y', 'V', '1', '2'))
+        {
+            return WINED3DFMT_YV12;
         }
         if(DDPixelFormat->dwFourCC == MAKEFOURCC('D', 'X', 'T', '1'))
         {
@@ -590,7 +611,7 @@ PixelFormat_DD2WineD3D(const DDPIXELFORMAT *DDPixelFormat)
             (DDPixelFormat->u3.dwBumpDvBitMask        == 0x0000ff00) &&
             (DDPixelFormat->u4.dwBumpLuminanceBitMask == 0x00000000) )
         {
-            return WINED3DFMT_V8U8;
+            return WINED3DFMT_R8G8_SNORM;
         }
         else if ( (DDPixelFormat->u1.dwBumpBitCount         == 16        ) &&
                   (DDPixelFormat->u2.dwBumpDuBitMask        == 0x0000001f) &&
@@ -635,7 +656,7 @@ static void DDRAW_dump_flags_nolf(DWORD flags, const flag_info* names,
     for (i=0; i < num_names; i++)
         if ((flags & names[i].val) ||      /* standard flag value */
             ((!flags) && (!names[i].val))) /* zero value only */
-            TRACE("%s\n", names[i].name);
+            TRACE("%s ", names[i].name);
 }
 
 static void DDRAW_dump_flags(DWORD flags, const flag_info* names, size_t num_names)
@@ -704,7 +725,7 @@ void DDRAW_dump_DDSCAPS2(const DDSCAPS2 *in)
     DDRAW_dump_flags(in->dwCaps2, flags2, sizeof(flags2)/sizeof(flags2[0]));
 }
 
-void
+static void
 DDRAW_dump_DDSCAPS(const DDSCAPS *in)
 {
     DDSCAPS2 in_bis;
@@ -759,7 +780,7 @@ DDRAW_dump_members(DWORD flags,
     }
 }
 
-void
+static void
 DDRAW_dump_pixelformat(const DDPIXELFORMAT *pf)
 {
     TRACE("( ");
@@ -882,7 +903,7 @@ DWORD
 get_flexible_vertex_size(DWORD d3dvtVertexType)
 {
     DWORD size = 0;
-    int i;
+    DWORD i;
 
     if (d3dvtVertexType & D3DFVF_NORMAL) size += 3 * sizeof(D3DVALUE);
     if (d3dvtVertexType & D3DFVF_DIFFUSE) size += sizeof(DWORD);
@@ -1161,6 +1182,31 @@ multiply_matrix(D3DMATRIX *dest,
     memcpy(dest, &temp, 16 * sizeof(D3DVALUE));
 }
 
+void multiply_matrix_D3D_way(D3DMATRIX* result, const D3DMATRIX *m1, const D3DMATRIX *m2)
+{
+    D3DMATRIX temp;
+
+    temp._11 = m1->_11 * m2->_11 + m1->_12 * m2->_21 + m1->_13 * m2->_31 + m1->_14 * m2->_41;
+    temp._12 = m1->_11 * m2->_12 + m1->_12 * m2->_22 + m1->_13 * m2->_32 + m1->_14 * m2->_42;
+    temp._13 = m1->_11 * m2->_13 + m1->_12 * m2->_23 + m1->_13 * m2->_33 + m1->_14 * m2->_43;
+    temp._14 = m1->_11 * m2->_14 + m1->_12 * m2->_24 + m1->_13 * m2->_34 + m1->_14 * m2->_44;
+    temp._21 = m1->_21 * m2->_11 + m1->_22 * m2->_21 + m1->_23 * m2->_31 + m1->_24 * m2->_41;
+    temp._22 = m1->_21 * m2->_12 + m1->_22 * m2->_22 + m1->_23 * m2->_32 + m1->_24 * m2->_42;
+    temp._23 = m1->_21 * m2->_13 + m1->_22 * m2->_23 + m1->_23 * m2->_33 + m1->_24 * m2->_43;
+    temp._24 = m1->_21 * m2->_14 + m1->_22 * m2->_24 + m1->_23 * m2->_34 + m1->_24 * m2->_44;
+    temp._31 = m1->_31 * m2->_11 + m1->_32 * m2->_21 + m1->_33 * m2->_31 + m1->_34 * m2->_41;
+    temp._32 = m1->_31 * m2->_12 + m1->_32 * m2->_22 + m1->_33 * m2->_32 + m1->_34 * m2->_42;
+    temp._33 = m1->_31 * m2->_13 + m1->_32 * m2->_23 + m1->_33 * m2->_33 + m1->_34 * m2->_43;
+    temp._34 = m1->_31 * m2->_14 + m1->_32 * m2->_24 + m1->_33 * m2->_34 + m1->_34 * m2->_44;
+    temp._41 = m1->_41 * m2->_11 + m1->_42 * m2->_21 + m1->_43 * m2->_31 + m1->_44 * m2->_41;
+    temp._42 = m1->_41 * m2->_12 + m1->_42 * m2->_22 + m1->_43 * m2->_32 + m1->_44 * m2->_42;
+    temp._43 = m1->_41 * m2->_13 + m1->_42 * m2->_23 + m1->_43 * m2->_33 + m1->_44 * m2->_43;
+    temp._44 = m1->_41 * m2->_14 + m1->_42 * m2->_24 + m1->_43 * m2->_34 + m1->_44 * m2->_44;
+
+    *result = temp;
+
+    return;
+}
 
 HRESULT
 hr_ddraw_from_wined3d(HRESULT hr)

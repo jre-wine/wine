@@ -1,5 +1,5 @@
 /*
- * Copyright 2001, Ove Kåven, TransGaming Technologies Inc.
+ * Copyright 2001, Ove KÃ¥ven, TransGaming Technologies Inc.
  * Copyright 2002 Greg Turner
  *
  * This library is free software; you can redistribute it and/or
@@ -35,103 +35,92 @@
  *     these, also implement net.exe, at least for "net start" and
  *     "net stop" (should be pretty easy I guess, assuming the rest
  *     of the services API infrastructure works.
- * 
- *   o Is supposed to use RPC, not random kludges, to map endpoints.
- *
- *   o Probably name services should be implemented here as well.
- *
- *   o Wine's named pipes (in general) may not interoperate with those of 
- *     Windows yet (?)
  *
  *   o There is a looming problem regarding listening on privileged
  *     ports.  We will need to be able to coexist with SAMBA, and be able
  *     to function without running winelib code as root.  This may
  *     take some doing, including significant reconceptualization of the
  *     role of rpcss.exe in wine.
- *
- *   o Who knows?  Whatever rpcss does, we ought to at
- *     least think about doing... but what /does/ it do?
  */
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <limits.h>
 #include <assert.h>
 
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
-#include "rpcss.h"
+#include "windef.h"
+#include "winbase.h"
 #include "winnt.h"
 #include "irot.h"
+#include "epm.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
-static HANDLE master_mutex;
 static HANDLE exit_event;
 
-extern HANDLE __wine_make_process_system(void);
-
-HANDLE RPCSS_GetMasterMutex(void)
-{
-  return master_mutex;
-}
-
-static BOOL RPCSS_work(HANDLE exit_event)
-{
-  return RPCSS_NPDoWork(exit_event);
-}
+extern HANDLE CDECL __wine_make_process_system(void);
 
 static BOOL RPCSS_Initialize(void)
 {
   static unsigned short irot_protseq[] = IROT_PROTSEQ;
   static unsigned short irot_endpoint[] = IROT_ENDPOINT;
+  static unsigned short epm_protseq[] = {'n','c','a','c','n','_','n','p',0};
+  static unsigned short epm_endpoint[] = {'\\','p','i','p','e','\\','e','p','m','a','p','p','e','r',0};
+  static unsigned short epm_protseq_lrpc[] = {'n','c','a','l','r','p','c',0};
+  static unsigned short epm_endpoint_lrpc[] = {'e','p','m','a','p','p','e','r',0};
   RPC_STATUS status;
 
   WINE_TRACE("\n");
 
-  exit_event = __wine_make_process_system();
-
-  master_mutex = CreateMutexA( NULL, FALSE, RPCSS_MASTER_MUTEX_NAME);
-  if (!master_mutex) {
-    WINE_ERR("Failed to create master mutex\n");
+  status = RpcServerRegisterIf(epm_v3_0_s_ifspec, NULL, NULL);
+  if (status != RPC_S_OK)
+    return status;
+  status = RpcServerRegisterIf(Irot_v0_2_s_ifspec, NULL, NULL);
+  if (status != RPC_S_OK)
+  {
+    RpcServerUnregisterIf(epm_v3_0_s_ifspec, NULL, FALSE);
     return FALSE;
   }
 
-  if (!RPCSS_BecomePipeServer()) {
-    WINE_WARN("Server already running: exiting.\n");
+  status = RpcServerUseProtseqEpW(epm_protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
+                                  epm_endpoint, NULL);
+  if (status != RPC_S_OK)
+    goto fail;
 
-    CloseHandle(master_mutex);
-    master_mutex = NULL;
-
-    return FALSE;
-  }
+  status = RpcServerUseProtseqEpW(epm_protseq_lrpc, RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
+                                  epm_endpoint_lrpc, NULL);
+  if (status != RPC_S_OK)
+      goto fail;
 
   status = RpcServerUseProtseqEpW(irot_protseq, RPC_C_PROTSEQ_MAX_REQS_DEFAULT,
                                   irot_endpoint, NULL);
-  if (status == RPC_S_OK)
-      status = RpcServerRegisterIf(Irot_v0_2_s_ifspec, NULL, NULL);
-  if (status == RPC_S_OK)
-      status = RpcServerListen(1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE);
-  else
-      RpcServerUnregisterIf(Irot_v0_2_s_ifspec, NULL, FALSE);
+  if (status != RPC_S_OK)
+    goto fail;
 
-  return status == RPC_S_OK;
+  status = RpcServerListen(1, RPC_C_LISTEN_MAX_CALLS_DEFAULT, TRUE);
+  if (status != RPC_S_OK)
+    goto fail;
+
+  exit_event = __wine_make_process_system();
+
+  return TRUE;
+
+fail:
+  RpcServerUnregisterIf(epm_v3_0_s_ifspec, NULL, FALSE);
+  RpcServerUnregisterIf(Irot_v0_2_s_ifspec, NULL, FALSE);
+  return FALSE;
 }
 
 /* returns false if we discover at the last moment that we
    aren't ready to terminate */
 static BOOL RPCSS_Shutdown(void)
 {
-  if (!RPCSS_UnBecomePipeServer())
-    return FALSE;
-   
-  if (!CloseHandle(master_mutex))
-    WINE_WARN("Failed to release master mutex\n");
-
-  master_mutex = NULL;
-
   RpcMgmtStopServerListening(NULL);
+  RpcServerUnregisterIf(epm_v3_0_s_ifspec, NULL, TRUE);
   RpcServerUnregisterIf(Irot_v0_2_s_ifspec, NULL, TRUE);
 
   CloseHandle(exit_event);
@@ -139,24 +128,16 @@ static BOOL RPCSS_Shutdown(void)
   return TRUE;
 }
 
-static void RPCSS_MainLoop(void)
-{
-  WINE_TRACE("\n");
-
-  while ( RPCSS_work(exit_event) )
-      ;
-}
-
 int main( int argc, char **argv )
 {
   /* 
    * We are invoked as a standard executable; we act in a
-   * "lazy" manner.  We open up our pipe, and hang around until we all
-   * user processes exit, and then silently terminate.
+   * "lazy" manner.  We register our interfaces and endpoints, and hang around
+   * until we all user processes exit, and then silently terminate.
    */
 
   if (RPCSS_Initialize()) {
-    RPCSS_MainLoop();
+    WaitForSingleObject(exit_event, INFINITE);
     RPCSS_Shutdown();
   }
 

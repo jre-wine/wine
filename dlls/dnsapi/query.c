@@ -561,7 +561,7 @@ exit:
  */
 static DNS_STATUS dns_set_serverlist( const IP4_ARRAY *addrs )
 {
-    unsigned int i;
+    int i;
 
     if (addrs->AddrCount > MAXNS) 
     {
@@ -579,7 +579,8 @@ static DNS_STATUS dns_set_serverlist( const IP4_ARRAY *addrs )
 
 static DNS_STATUS dns_get_serverlist( PIP4_ARRAY addrs, PDWORD len )
 {
-    unsigned int i, size;
+    unsigned int size;
+    int i;
 
     size = sizeof(IP4_ARRAY) + sizeof(IP4_ADDRESS) * (_res.nscount - 1);
     if (!addrs || *len < size)
@@ -772,7 +773,7 @@ static DNS_STATUS dns_get_hostname_a( COMPUTER_NAME_FORMAT format,
                                       PSTR buffer, PDWORD len )
 {
     char name[256];
-    DWORD size = sizeof(name);
+    DWORD size = sizeof(name)/sizeof(name[0]);
 
     if (!GetComputerNameExA( format, name, &size ))
         return DNS_ERROR_NAME_DOES_NOT_EXIST;
@@ -791,7 +792,7 @@ static DNS_STATUS dns_get_hostname_w( COMPUTER_NAME_FORMAT format,
                                       PWSTR buffer, PDWORD len )
 {
     WCHAR name[256];
-    DWORD size = sizeof(name);
+    DWORD size = sizeof(name)/sizeof(name[0]);
 
     if (!GetComputerNameExW( format, name, &size ))
         return DNS_ERROR_NAME_DOES_NOT_EXIST;

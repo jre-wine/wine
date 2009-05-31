@@ -55,7 +55,7 @@ typedef struct tagWINE_TIMERENTRY {
     UINT                        wDelay;
     UINT                        wResol;
     LPTIMECALLBACK              lpFunc; /* can be lots of things */
-    DWORD                       dwUser;
+    DWORD_PTR                   dwUser;
     UINT16                      wFlags;
     UINT16                      wTimerID;
     DWORD                       dwTriggerTime;
@@ -116,6 +116,7 @@ static inline void link_timer( WINE_TIMERENTRY *timer )
 #define MMSYSTIME_MININTERVAL (1)
 #define MMSYSTIME_MAXINTERVAL (65535)
 
+#ifdef HAVE_POLL
 
 /**************************************************************************
  *           TIME_MMSysTimeCallback
@@ -163,14 +164,14 @@ static int TIME_MMSysTimeCallback(void)
         switch(timer->wFlags & (TIME_CALLBACK_EVENT_SET|TIME_CALLBACK_EVENT_PULSE))
         {
         case TIME_CALLBACK_EVENT_SET:
-            SetEvent((HANDLE)timer->lpFunc);
+            SetEvent(timer->lpFunc);
             break;
         case TIME_CALLBACK_EVENT_PULSE:
-            PulseEvent((HANDLE)timer->lpFunc);
+            PulseEvent(timer->lpFunc);
             break;
         case TIME_CALLBACK_FUNCTION:
             {
-                DWORD user = timer->dwUser;
+                DWORD_PTR user = timer->dwUser;
                 UINT16 id = timer->wTimerID;
                 UINT16 flags = timer->wFlags;
                 LPTIMECALLBACK func = timer->lpFunc;
@@ -179,7 +180,7 @@ static int TIME_MMSysTimeCallback(void)
                 LeaveCriticalSection(&WINMM_cs);
 
                 if (flags & WINE_TIMER_IS32) func(id, 0, user, 0, 0);
-                else if (pFnCallMMDrvFunc16) pFnCallMMDrvFunc16((DWORD)func, id, 0, user, 0, 0);
+                else if (pFnCallMMDrvFunc16) pFnCallMMDrvFunc16((DWORD_PTR)func, id, 0, user, 0, 0);
 
                 EnterCriticalSection(&WINMM_cs);
                 if (flags & TIME_KILL_SYNCHRONOUS) LeaveCriticalSection(&TIME_cbcrst);
@@ -254,6 +255,15 @@ static void TIME_MMTimeStart(void)
     }
 }
 
+#else  /* HAVE_POLL */
+
+static void TIME_MMTimeStart(void)
+{
+    FIXME( "not starting system thread\n" );
+}
+
+#endif  /* HAVE_POLL */
+
 /**************************************************************************
  * 				TIME_MMTimeStop
  */
@@ -294,14 +304,14 @@ MMRESULT WINAPI timeGetSystemTime(LPMMTIME lpTime, UINT wSize)
  * 				TIME_SetEventInternal	[internal]
  */
 WORD	TIME_SetEventInternal(UINT wDelay, UINT wResol,
-                              LPTIMECALLBACK lpFunc, DWORD dwUser, UINT wFlags)
+                              LPTIMECALLBACK lpFunc, DWORD_PTR dwUser, UINT wFlags)
 {
     WORD 		wNewID = 0;
     LPWINE_TIMERENTRY	lpNewTimer;
     LPWINE_TIMERENTRY	lpTimer;
     const char c = 'c';
 
-    TRACE("(%u, %u, %p, %08X, %04X);\n", wDelay, wResol, lpFunc, dwUser, wFlags);
+    TRACE("(%u, %u, %p, %08lX, %04X);\n", wDelay, wResol, lpFunc, dwUser, wFlags);
 
     if (wDelay < MMSYSTIME_MININTERVAL || wDelay > MMSYSTIME_MAXINTERVAL)
 	return 0;

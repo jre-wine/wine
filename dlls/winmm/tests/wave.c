@@ -37,6 +37,39 @@
 
 #include "winmm_test.h"
 
+static void test_multiple_waveopens(void)
+{
+    HWAVEOUT handle1, handle2;
+    MMRESULT ret;
+    WAVEFORMATEX wfx;
+
+    wfx.wFormatTag = WAVE_FORMAT_PCM;
+    wfx.nChannels = 1;
+    wfx.nSamplesPerSec = 11025;
+    wfx.nBlockAlign = 1;
+    wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+    wfx.wBitsPerSample = 8;
+    wfx.cbSize = 0;
+
+    ret = waveOutOpen(&handle1, 0, &wfx, 0, 0, 0);
+    if (ret != MMSYSERR_NOERROR)
+    {
+        skip("Could not do the duplicate waveopen test\n");
+        return;
+    }
+
+    ret = waveOutOpen(&handle2, 0, &wfx, 0, 0, 0);
+    /* In windows this is most likely allowed, in wine an application can use the waveout
+     * interface, but so can directsound.. this causes problems if directsound goes active
+     */
+    todo_wine ok(ret == MMSYSERR_NOERROR || broken(ret == MMSYSERR_ALLOCATED), /* winME */
+                 "waveOutOpen returns: %x\n", ret);
+    if (ret == MMSYSERR_NOERROR)
+        waveOutClose(handle2);
+
+    waveOutClose(handle1);
+}
+
 /*
  * Note that in most of this test we may get MMSYSERR_BADDEVICEID errors
  * at about any time if the user starts another application that uses the
@@ -535,7 +568,8 @@ static DWORD WINAPI callback_thread(LPVOID lpParameter)
 {
     MSG msg;
 
-    SetEvent((HANDLE)lpParameter);
+    PeekMessageW( &msg, 0, 0, 0, PM_NOREMOVE );  /* make sure the thread has a message queue */
+    SetEvent(lpParameter);
 
     while (GetMessage(&msg, 0, 0, 0)) {
         UINT message = msg.message;
@@ -544,9 +578,9 @@ static DWORD WINAPI callback_thread(LPVOID lpParameter)
             message == WOM_CLOSE || message == WM_USER || message == WM_APP,
             "GetMessage returned unexpected message: %u\n", message);
         if (message == WOM_OPEN || message == WOM_DONE || message == WOM_CLOSE)
-            SetEvent((HANDLE)lpParameter);
+            SetEvent(lpParameter);
         else if (message == WM_APP) {
-            SetEvent((HANDLE)lpParameter);
+            SetEvent(lpParameter);
             return 0;
         }
     }
@@ -570,9 +604,9 @@ static void wave_out_test_deviceOut(int device, double duration,
     DWORD nSamplesPerSec = pwfx->nSamplesPerSec;
     BOOL has_volume = pcaps->dwSupport & WAVECAPS_VOLUME ? TRUE : FALSE;
     double paused = 0.0;
-    double actual;
-    DWORD callback = 0;
-    DWORD callback_instance = 0;
+    DWORD actual;
+    DWORD_PTR callback = 0;
+    DWORD_PTR callback_instance = 0;
     HANDLE thread = 0;
     DWORD thread_id;
     char * buffer;
@@ -586,16 +620,16 @@ static void wave_out_test_deviceOut(int device, double duration,
         return;
 
     if ((flags & CALLBACK_TYPEMASK) == CALLBACK_EVENT) {
-        callback = (DWORD)hevent;
+        callback = (DWORD_PTR)hevent;
         callback_instance = 0;
     } else if ((flags & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION) {
-        callback = (DWORD)callback_func;
-        callback_instance = (DWORD)hevent;
+        callback = (DWORD_PTR)callback_func;
+        callback_instance = (DWORD_PTR)hevent;
     } else if ((flags & CALLBACK_TYPEMASK) == CALLBACK_THREAD) {
         thread = CreateThread(NULL, 0, callback_thread, hevent, 0, &thread_id);
         if (thread) {
             /* make sure thread is running */
-            WaitForSingleObject(hevent,INFINITE);
+            WaitForSingleObject(hevent,10000);
             callback = thread_id;
             callback_instance = 0;
         } else {
@@ -647,7 +681,7 @@ static void wave_out_test_deviceOut(int device, double duration,
     if (rc!=MMSYSERR_NOERROR)
         goto EXIT;
 
-    WaitForSingleObject(hevent,INFINITE);
+    WaitForSingleObject(hevent,10000);
 
     ok(pwfx->nChannels==nChannels &&
        pwfx->wBitsPerSample==wBitsPerSample &&
@@ -667,6 +701,7 @@ static void wave_out_test_deviceOut(int device, double duration,
     ok(rc==MMSYSERR_INVALPARAM,"waveOutGetVolume(%s,0) expected "
        "MMSYSERR_INVALPARAM, got %s\n", dev_name(device),wave_out_error(rc));
     rc=waveOutGetVolume(wout,&volume);
+    if (rc == MMSYSERR_NOTSUPPORTED) has_volume = FALSE;
     ok(has_volume ? rc==MMSYSERR_NOERROR : rc==MMSYSERR_NOTSUPPORTED,
        "waveOutGetVolume(%s): rc=%s\n",dev_name(device),wave_out_error(rc));
 
@@ -752,19 +787,17 @@ static void wave_out_test_deviceOut(int device, double duration,
                     ok(rc==MMSYSERR_NOERROR,"waveOutWrite(%s, header[%d]): rc=%s\n",
                        dev_name(device),(i+1)%headers,wave_out_error(rc));
                 }
-                WaitForSingleObject(hevent,INFINITE);
+                WaitForSingleObject(hevent,10000);
             }
         }
 
-        /* Check the sound duration was between -2% and +10% of the expected value */
+        /* Check the sound duration was at least 90% of the expected value */
         end=GetTickCount();
-        actual = (end - start) / 1000.0;
-        if (winetest_debug > 1)
-            trace("sound duration=%g ms\n",1000*actual);
-        ok((actual > (0.97 * (duration+paused))) &&
-           (actual < (1.1 * (duration+paused))),
-           "The sound played for %g ms instead of %g ms\n",
-           1000*actual,1000*(duration+paused));
+        actual = end - start;
+        trace("sound duration=%u ms\n",actual);
+        ok(actual > 900 * (duration+paused),
+           "The sound played for %u ms instead of %g ms\n",
+           actual,1000*(duration+paused));
         for (i = 0; i < headers; i++) {
             ok(frags[i].dwFlags=(WHDR_DONE|WHDR_PREPARED),
                "WHDR_DONE WHDR_PREPARED expected, got %s\n",
@@ -784,17 +817,17 @@ static void wave_out_test_deviceOut(int device, double duration,
     rc=waveOutClose(wout);
     ok(rc==MMSYSERR_NOERROR,"waveOutClose(%s): rc=%s\n",dev_name(device),
        wave_out_error(rc));
-    WaitForSingleObject(hevent,INFINITE);
+    WaitForSingleObject(hevent,10000);
 EXIT:
     if ((flags & CALLBACK_TYPEMASK) == CALLBACK_THREAD) {
         PostThreadMessage(thread_id, WM_APP, 0, 0);
-        WaitForSingleObject(hevent,INFINITE);
+        WaitForSingleObject(hevent,10000);
     }
     CloseHandle(hevent);
     HeapFree(GetProcessHeap(), 0, frags);
 }
 
-static void wave_out_test_device(int device)
+static void wave_out_test_device(UINT_PTR device)
 {
     WAVEOUTCAPSA capsA;
     WAVEOUTCAPSW capsW;
@@ -853,14 +886,15 @@ static void wave_out_test_device(int device)
     }
 
     rc=waveOutGetDevCapsA(device,&capsA,4);
-    ok(rc==MMSYSERR_NOERROR,
-       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR expected, got %s\n",
-       dev_name(device),wave_out_error(rc));
+    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_INVALPARAM,
+       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR or MMSYSERR_INVALPARAM "
+       "expected, got %s\n", dev_name(device),wave_out_error(rc));
 
     rc=waveOutGetDevCapsW(device,&capsW,4);
-    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED,
-       "waveOutGetDevCapsW(%s): MMSYSERR_NOERROR or MMSYSERR_NOTSUPPORTED "
-       "expected, got %s\n",dev_name(device),wave_out_error(rc));
+    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED ||
+       rc==MMSYSERR_INVALPARAM, /* Vista, W2K8 */
+       "waveOutGetDevCapsW(%s): unexpected return value %s\n",
+       dev_name(device),wave_out_error(rc));
 
     nameA=NULL;
     rc=waveOutMessage((HWAVEOUT)device, DRV_QUERYDEVICEINTERFACESIZE,
@@ -884,8 +918,16 @@ static void wave_out_test_device(int device)
         HeapFree(GetProcessHeap(), 0, nameW);
     }
     else if (rc==MMSYSERR_NOTSUPPORTED) {
-        nameA=strdup("not supported");
+        nameA=HeapAlloc(GetProcessHeap(), 0, sizeof("not supported"));
+        strcpy(nameA, "not supported");
     }
+
+    rc=waveOutGetDevCapsA(device,&capsA,sizeof(capsA));
+    ok(rc==MMSYSERR_NOERROR,
+       "waveOutGetDevCapsA(%s): MMSYSERR_NOERROR expected, got %s\n",
+       dev_name(device),wave_out_error(rc));
+    if (rc!=MMSYSERR_NOERROR)
+        return;
 
     trace("  %s: \"%s\" (%s) %d.%d (%d:%d)\n",dev_name(device),capsA.szPname,
           (nameA?nameA:"failed"),capsA.vDriverVersion >> 8,
@@ -1419,5 +1461,6 @@ static void wave_out_tests(void)
 
 START_TEST(wave)
 {
+    test_multiple_waveopens();
     wave_out_tests();
 }

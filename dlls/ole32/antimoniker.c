@@ -80,7 +80,7 @@ AntiMonikerImpl_QueryInterface(IMoniker* iface,REFIID riid,void** ppvObject)
         IsEqualIID(&IID_IMoniker, riid))
         *ppvObject = iface;
     else if (IsEqualIID(&IID_IROTData, riid))
-        *ppvObject = (IROTData*)&(This->lpvtbl2);
+        *ppvObject = &This->lpvtbl2;
     else if (IsEqualIID(&IID_IMarshal, riid))
     {
         HRESULT hr = S_OK;
@@ -215,7 +215,7 @@ AntiMonikerImpl_GetSizeMax(IMoniker* iface, ULARGE_INTEGER* pcbSize)
     if (!pcbSize)
         return E_POINTER;
 
-    /* for more details see AntiMonikerImpl_Save coments */
+    /* for more details see AntiMonikerImpl_Save comments */
 
     /*
      * Normally the sizemax must be sizeof DWORD, but
@@ -532,7 +532,7 @@ static ULONG WINAPI AntiMonikerROTDataImpl_Release(IROTData* iface)
 }
 
 /******************************************************************************
- *        AntiMonikerIROTData_GetComparaisonData
+ *        AntiMonikerIROTData_GetComparisonData
  ******************************************************************************/
 static HRESULT WINAPI
 AntiMonikerROTDataImpl_GetComparisonData(IROTData* iface, BYTE* pbData,
@@ -600,7 +600,7 @@ static HRESULT AntiMonikerImpl_Construct(AntiMonikerImpl* This)
 
     TRACE("(%p)\n",This);
 
-    /* Initialize the virtual fgunction table. */
+    /* Initialize the virtual function table. */
     This->lpvtbl1      = &VT_AntiMonikerImpl;
     This->lpvtbl2      = &VT_ROTDataImpl;
     This->ref          = 0;

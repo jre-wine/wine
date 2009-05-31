@@ -272,7 +272,7 @@ done:
  */
 void WINAPI __regs_VxDCall( DWORD service, CONTEXT86 *context )
 {
-    int i;
+    unsigned int i;
     VxDCallProc proc = NULL;
 
     RtlEnterCriticalSection( &vxd_section );
@@ -297,7 +297,7 @@ void WINAPI __regs_VxDCall( DWORD service, CONTEXT86 *context )
     }
 }
 #ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( VxDCall, 4, 4 )
+DEFINE_REGS_ENTRYPOINT( VxDCall, 1 )
 #endif
 
 
@@ -339,12 +339,11 @@ BOOL WINAPI DeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode,
 
     /* Check if this is a user defined control code for a VxD */
 
-    if( HIWORD( dwIoControlCode ) == 0 )
+    if (HIWORD( dwIoControlCode ) == 0 && (GetVersion() & 0x80000000))
     {
         DeviceIoProc proc = get_vxd_proc( hDevice );
         if (proc) return proc( dwIoControlCode, lpvInBuffer, cbInBuffer,
                                lpvOutBuffer, cbOutBuffer, lpcbBytesReturned, lpOverlapped );
-        return FALSE;
     }
 
     /* Not a VxD, let ntdll handle it */

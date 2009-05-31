@@ -74,6 +74,10 @@ typedef struct CHMInfo
     IStream *strings_stream;
     char **strings;
     DWORD strings_size;
+
+    WCHAR *defTopic;
+    WCHAR *defTitle;
+    WCHAR *defToc;
 } CHMInfo;
 
 #define TAB_CONTENTS   0
@@ -137,22 +141,22 @@ BOOL NavigateToChm(HHInfo*,LPCWSTR,LPCWSTR);
 
 /* memory allocation functions */
 
-static inline void *heap_alloc(size_t len)
+static inline void * __WINE_ALLOC_SIZE(1) heap_alloc(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), 0, len);
 }
 
-static inline void *heap_alloc_zero(size_t len)
+static inline void * __WINE_ALLOC_SIZE(1) heap_alloc_zero(size_t len)
 {
     return HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, len);
 }
 
-static inline void *heap_realloc(void *mem, size_t len)
+static inline void * __WINE_ALLOC_SIZE(2) heap_realloc(void *mem, size_t len)
 {
     return HeapReAlloc(GetProcessHeap(), 0, mem, len);
 }
 
-static inline void *heap_realloc_zero(void *mem, size_t len)
+static inline void * __WINE_ALLOC_SIZE(2) heap_realloc_zero(void *mem, size_t len)
 {
     return HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, mem, len);
 }
@@ -177,7 +181,7 @@ static inline LPWSTR strdupW(LPCWSTR str)
     return ret;
 }
 
-static inline LPWSTR strdupAtoW(LPCSTR str)
+static inline LPWSTR strdupnAtoW(LPCSTR str, LONG lenA)
 {
     LPWSTR ret;
     DWORD len;
@@ -185,12 +189,27 @@ static inline LPWSTR strdupAtoW(LPCSTR str)
     if(!str)
         return NULL;
 
-    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+    if (lenA > 0)
+    {
+        /* find length of string */
+        LPCSTR eos = memchr(str, 0, lenA);
+	if (eos) lenA = eos - str;
+    }
+
+    len = MultiByteToWideChar(CP_ACP, 0, str, lenA, NULL, 0)+1; /* +1 for null pad */
     ret = heap_alloc(len*sizeof(WCHAR));
-    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    MultiByteToWideChar(CP_ACP, 0, str, lenA, ret, len);
+    ret[len-1] = 0;
 
     return ret;
 }
+
+static inline LPWSTR strdupAtoW(LPCSTR str)
+{
+    return strdupnAtoW(str, -1);
+}
+
+
 
 extern HINSTANCE hhctrl_hinstance;
 extern BOOL hh_process;

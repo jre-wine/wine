@@ -4,15 +4,16 @@
  * Used by taskmgr.rc
  *
  */
-#define IDD_TASKMGR_DIALOG              102
-#define IDD_ABOUTBOX                    103
 #define IDS_APP_TITLE                   103
+#define IDC_TASKMGR                     109
+#define IDS_RUNDLG_CAPTION              110
+
+#define IDD_TASKMGR_DIALOG              102
 #define IDM_ABOUT                       104
 #define IDM_EXIT                        105
 #define IDD_APPLICATION_PAGE            106
 #define IDI_TASKMGR                     107
 #define IDI_SMALL                       108
-#define IDC_TASKMGR                     109
 #define IDR_MAINFRAME                   128
 #define IDR_TASKMANAGER                 130
 #define IDD_PROCESS_PAGE                133
@@ -65,7 +66,6 @@
 #define IDC_CPU10                       1029
 #define IDC_PAGEFAULTS                  1029
 #define IDC_COMMIT_CHARGE_LIMIT         1029
-#define IDC_LICENSE_EDIT                1029
 #define IDC_CPU11                       1030
 #define IDC_USEROBJECTS                 1030
 #define IDC_COMMIT_CHARGE_PEAK          1030
@@ -182,7 +182,6 @@
 #define ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL 32813
 #define ID_PROCESS_PAGE_SETPRIORITY_LOW 32814
 #define ID_PROCESS_PAGE_DEBUGCHANNELS   32815
-#define IDS_LICENSE                     32816
 #define IDC_STATIC                      -1
 
 /*

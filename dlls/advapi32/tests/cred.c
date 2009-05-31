@@ -30,12 +30,16 @@
 static BOOL (WINAPI *pCredDeleteA)(LPCSTR,DWORD,DWORD);
 static BOOL (WINAPI *pCredEnumerateA)(LPCSTR,DWORD,DWORD *,PCREDENTIALA **);
 static VOID (WINAPI *pCredFree)(PVOID);
+static BOOL (WINAPI *pCredGetSessionTypes)(DWORD,LPDWORD);
 static BOOL (WINAPI *pCredReadA)(LPCSTR,DWORD,DWORD,PCREDENTIALA *);
 static BOOL (WINAPI *pCredRenameA)(LPCSTR,LPCSTR,DWORD,DWORD);
 static BOOL (WINAPI *pCredWriteA)(PCREDENTIALA,DWORD);
+static BOOL (WINAPI *pCredReadDomainCredentialsA)(PCREDENTIAL_TARGET_INFORMATIONA,DWORD,DWORD*,PCREDENTIALA**);
+
 
 #define TEST_TARGET_NAME  "credtest.winehq.org"
 #define TEST_TARGET_NAME2 "credtest2.winehq.org"
+static const WCHAR TEST_PASSWORD[] = {'p','4','$','$','w','0','r','d','!',0};
 
 static void test_CredReadA(void)
 {
@@ -50,8 +54,8 @@ static void test_CredReadA(void)
 
     SetLastError(0xdeadbeef);
     ret = pCredReadA(TEST_TARGET_NAME, CRED_TYPE_GENERIC, 0xdeadbeef, &cred);
-    ok(!ret && GetLastError() == ERROR_INVALID_FLAGS,
-        "CredReadA should have failed with ERROR_INVALID_FLAGS instead of %d\n",
+    ok(!ret && ( GetLastError() == ERROR_INVALID_FLAGS || GetLastError() == ERROR_INVALID_PARAMETER ),
+        "CredReadA should have failed with ERROR_INVALID_FLAGS or ERROR_INVALID_PARAMETER instead of %d\n",
         GetLastError());
 
     SetLastError(0xdeadbeef);
@@ -95,8 +99,19 @@ static void test_CredWriteA(void)
 
     SetLastError(0xdeadbeef);
     ret = pCredWriteA(&new_cred, 0);
-    ok(!ret && GetLastError() == ERROR_BAD_USERNAME,
-        "CredWrite with username without domain should return ERROR_BAD_USERNAME not %d\n", GetLastError());
+    if (ret)
+    {
+        /* Vista */
+        ok(GetLastError() == ERROR_IO_PENDING,
+           "Expected ERROR_IO_PENDING, got %d\n", GetLastError());
+    }
+    else
+    {
+        ok(GetLastError() == ERROR_BAD_USERNAME ||
+           GetLastError() == ERROR_NO_SUCH_LOGON_SESSION, /* Vista */
+           "CredWrite with username without domain should return ERROR_BAD_USERNAME"
+           "or ERROR_NO_SUCH_LOGON_SESSION not %d\n", GetLastError());
+    }
 
     new_cred.UserName = NULL;
     SetLastError(0xdeadbeef);
@@ -118,9 +133,87 @@ static void test_CredDeleteA(void)
 
     SetLastError(0xdeadbeef);
     ret = pCredDeleteA(TEST_TARGET_NAME, CRED_TYPE_GENERIC, 0xdeadbeef);
-    ok(!ret && GetLastError() == ERROR_INVALID_FLAGS,
-        "CredDeleteA should have failed with ERROR_INVALID_FLAGS instead of %d\n",
+    ok(!ret && ( GetLastError() == ERROR_INVALID_FLAGS || GetLastError() == ERROR_INVALID_PARAMETER /* Vista */ ),
+        "CredDeleteA should have failed with ERROR_INVALID_FLAGS or ERROR_INVALID_PARAMETER instead of %d\n",
         GetLastError());
+}
+
+static void test_CredReadDomainCredentialsA(void)
+{
+    BOOL ret;
+    char target_name[] = "no_such_target";
+    CREDENTIAL_TARGET_INFORMATIONA info = {target_name, NULL, target_name, NULL, NULL, NULL, NULL, 0, 0, NULL};
+    DWORD count;
+    PCREDENTIAL* creds;
+
+    if (!pCredReadDomainCredentialsA)
+    {
+        win_skip("CredReadDomainCredentialsA() is not implemented\n");
+        return;
+    }
+
+    /* these two tests would crash on both native and Wine. Implementations
+     * does not check for NULL output pointers and try to zero them out early */
+#if 0
+    ok(!pCredReadDomainCredentialsA(&info, 0, NULL, &creds) &&
+            GetLastError() == ERROR_INVALID_PARAMETER, "!\n");
+    ok(!pCredReadDomainCredentialsA(&info, 0, &count, NULL) &&
+            GetLastError() == ERROR_INVALID_PARAMETER, "!\n");
+#endif
+
+    SetLastError(0xdeadbeef);
+    ret = pCredReadDomainCredentialsA(NULL, 0, &count, &creds);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+        "CredReadDomainCredentialsA should have failed with ERROR_INVALID_PARAMETER instead of %d\n",
+        GetLastError());
+
+    SetLastError(0xdeadbeef);
+    creds = (void*)0x12345;
+    count = 2;
+    ret = pCredReadDomainCredentialsA(&info, 0, &count, &creds);
+    ok(!ret && GetLastError() == ERROR_NOT_FOUND,
+        "CredReadDomainCredentialsA should have failed with ERROR_NOT_FOUND instead of %d\n",
+        GetLastError());
+    ok(count ==0 && creds == NULL, "CredReadDomainCredentialsA must not return any result\n");
+
+    info.TargetName = NULL;
+
+    SetLastError(0xdeadbeef);
+    ret = pCredReadDomainCredentialsA(&info, 0, &count, &creds);
+    ok(!ret, "CredReadDomainCredentialsA should have failed\n");
+    ok(GetLastError() == ERROR_NOT_FOUND ||
+        GetLastError() == ERROR_INVALID_PARAMETER, /* Vista, W2K8 */
+        "Expected ERROR_NOT_FOUND or ERROR_INVALID_PARAMETER instead of %d\n",
+        GetLastError());
+
+    info.DnsServerName = NULL;
+
+    SetLastError(0xdeadbeef);
+    ret = pCredReadDomainCredentialsA(&info, 0, &count, &creds);
+    ok(!ret, "CredReadDomainCredentialsA should have failed\n");
+    ok(GetLastError() == ERROR_NOT_FOUND ||
+        GetLastError() == ERROR_INVALID_PARAMETER, /* Vista, W2K8 */
+        "Expected ERROR_NOT_FOUND or ERROR_INVALID_PARAMETER instead of %d\n",
+        GetLastError());
+}
+
+static void check_blob(int line, DWORD cred_type, PCREDENTIALA cred)
+{
+    if (cred_type == CRED_TYPE_DOMAIN_PASSWORD)
+    {
+        todo_wine
+        ok_(__FILE__, line)(cred->CredentialBlobSize == 0, "expected CredentialBlobSize of 0 but got %d\n", cred->CredentialBlobSize);
+        todo_wine
+        ok_(__FILE__, line)(!cred->CredentialBlob, "expected NULL credentials but got %p\n", cred->CredentialBlob);
+    }
+    else
+    {
+        DWORD size=sizeof(TEST_PASSWORD);
+        ok_(__FILE__, line)(cred->CredentialBlobSize == size, "expected CredentialBlobSize of %u but got %u\n", size, cred->CredentialBlobSize);
+        ok_(__FILE__, line)(cred->CredentialBlob != NULL, "CredentialBlob should be present\n");
+        if (cred->CredentialBlob)
+            ok_(__FILE__, line)(!memcmp(cred->CredentialBlob, TEST_PASSWORD, size), "wrong CredentialBlob\n");
+    }
 }
 
 static void test_generic(void)
@@ -130,15 +223,14 @@ static void test_generic(void)
     PCREDENTIALA *creds;
     CREDENTIALA new_cred;
     PCREDENTIALA cred;
-    static const WCHAR password[] = {'p','4','$','$','w','0','r','d','!',0};
     BOOL found = FALSE;
 
     new_cred.Flags = 0;
     new_cred.Type = CRED_TYPE_GENERIC;
     new_cred.TargetName = (char *)TEST_TARGET_NAME;
     new_cred.Comment = (char *)"Comment";
-    new_cred.CredentialBlobSize = sizeof(password);
-    new_cred.CredentialBlob = (LPBYTE)password;
+    new_cred.CredentialBlobSize = sizeof(TEST_PASSWORD);
+    new_cred.CredentialBlob = (LPBYTE)TEST_PASSWORD;
     new_cred.Persist = CRED_PERSIST_ENTERPRISE;
     new_cred.AttributeCount = 0;
     new_cred.Attributes = NULL;
@@ -146,7 +238,13 @@ static void test_generic(void)
     new_cred.UserName = (char *)"winetest";
 
     ret = pCredWriteA(&new_cred, 0);
-    ok(ret, "CredWriteA failed with error %d\n", GetLastError());
+    ok(ret || broken(GetLastError() == ERROR_NO_SUCH_LOGON_SESSION),
+       "CredWriteA failed with error %d\n", GetLastError());
+    if (!ret)
+    {
+        skip("couldn't write generic credentials, skipping tests\n");
+        return;
+    }
 
     ret = pCredEnumerateA(NULL, 0, &count, &creds);
     ok(ret, "CredEnumerateA failed with error %d\n", GetLastError());
@@ -155,13 +253,12 @@ static void test_generic(void)
     {
         if (!strcmp(creds[i]->TargetName, TEST_TARGET_NAME))
         {
-            ok(creds[i]->Type == CRED_TYPE_GENERIC, "expected creds[%d]->Type CRED_TYPE_GENERIC but got %d\n", i, creds[i]->Type);
+            ok(creds[i]->Type == CRED_TYPE_GENERIC ||
+               creds[i]->Type == CRED_TYPE_DOMAIN_PASSWORD, /* Vista */
+               "expected creds[%d]->Type CRED_TYPE_GENERIC or CRED_TYPE_DOMAIN_PASSWORD but got %d\n", i, creds[i]->Type);
             ok(!creds[i]->Flags, "expected creds[%d]->Flags 0 but got 0x%x\n", i, creds[i]->Flags);
             ok(!strcmp(creds[i]->Comment, "Comment"), "expected creds[%d]->Comment \"Comment\" but got \"%s\"\n", i, creds[i]->Comment);
-            ok(creds[i]->CredentialBlobSize == sizeof(password), "wrong CredentialBlobSize %d\n", creds[i]->CredentialBlobSize);
-            ok(creds[i]->CredentialBlob != NULL, "CredentialBlob should be present\n");
-            if (creds[i]->CredentialBlob)
-                ok(!memcmp(creds[i]->CredentialBlob, password, sizeof(password)), "credentials don't match\n");
+            check_blob(__LINE__, creds[i]->Type, creds[i]);
             ok(creds[i]->Persist, "expected creds[%d]->Persist CRED_PERSIST_ENTERPRISE but got %d\n", i, creds[i]->Persist);
             ok(!strcmp(creds[i]->UserName, "winetest"), "expected creds[%d]->UserName \"winetest\" but got \"%s\"\n", i, creds[i]->UserName);
             found = TRUE;
@@ -178,28 +275,33 @@ static void test_generic(void)
     ok(ret, "CredDeleteA failed with error %d\n", GetLastError());
 }
 
-static void test_domain_password(void)
+static void test_domain_password(DWORD cred_type)
 {
     BOOL ret;
     DWORD count, i;
     PCREDENTIALA *creds;
     CREDENTIALA new_cred;
     PCREDENTIALA cred;
-    static const WCHAR password[] = {'p','4','$','$','w','0','r','d','!',0};
     BOOL found = FALSE;
 
     new_cred.Flags = 0;
-    new_cred.Type = CRED_TYPE_DOMAIN_PASSWORD;
+    new_cred.Type = cred_type;
     new_cred.TargetName = (char *)TEST_TARGET_NAME;
     new_cred.Comment = (char *)"Comment";
-    new_cred.CredentialBlobSize = sizeof(password);
-    new_cred.CredentialBlob = (LPBYTE)password;
+    new_cred.CredentialBlobSize = sizeof(TEST_PASSWORD);
+    new_cred.CredentialBlob = (LPBYTE)TEST_PASSWORD;
     new_cred.Persist = CRED_PERSIST_ENTERPRISE;
     new_cred.AttributeCount = 0;
     new_cred.Attributes = NULL;
     new_cred.TargetAlias = NULL;
     new_cred.UserName = (char *)"test\\winetest";
     ret = pCredWriteA(&new_cred, 0);
+    if (!ret && GetLastError() == ERROR_NO_SUCH_LOGON_SESSION)
+    {
+        skip("CRED_TYPE_DOMAIN_PASSWORD credentials are not supported "
+             "or are disabled. Skipping\n");
+        return;
+    }
     ok(ret, "CredWriteA failed with error %d\n", GetLastError());
 
     ret = pCredEnumerateA(NULL, 0, &count, &creds);
@@ -209,13 +311,10 @@ static void test_domain_password(void)
     {
         if (!strcmp(creds[i]->TargetName, TEST_TARGET_NAME))
         {
-            ok(creds[i]->Type == CRED_TYPE_DOMAIN_PASSWORD, "expected creds[%d]->Type CRED_TYPE_DOMAIN_PASSWORD but got %d\n", i, creds[i]->Type);
+            ok(creds[i]->Type == cred_type, "expected creds[%d]->Type CRED_TYPE_DOMAIN_PASSWORD but got %d\n", i, creds[i]->Type);
             ok(!creds[i]->Flags, "expected creds[%d]->Flags 0 but got 0x%x\n", i, creds[i]->Flags);
             ok(!strcmp(creds[i]->Comment, "Comment"), "expected creds[%d]->Comment \"Comment\" but got \"%s\"\n", i, creds[i]->Comment);
-            todo_wine
-            ok(creds[i]->CredentialBlobSize == 0, "expected CredentialBlobSize of 0 but got %d\n", creds[i]->CredentialBlobSize);
-            todo_wine
-            ok(!creds[i]->CredentialBlob, "expected NULL credentials but got %p\n", creds[i]->CredentialBlob);
+            check_blob(__LINE__, cred_type, creds[i]);
             ok(creds[i]->Persist, "expected creds[%d]->Persist CRED_PERSIST_ENTERPRISE but got %d\n", i, creds[i]->Persist);
             ok(!strcmp(creds[i]->UserName, "test\\winetest"), "expected creds[%d]->UserName \"winetest\" but got \"%s\"\n", i, creds[i]->UserName);
             found = TRUE;
@@ -224,40 +323,72 @@ static void test_domain_password(void)
     pCredFree(creds);
     ok(found, "credentials not found\n");
 
-    ret = pCredReadA(TEST_TARGET_NAME, CRED_TYPE_DOMAIN_PASSWORD, 0, &cred);
+    ret = pCredReadA(TEST_TARGET_NAME, cred_type, 0, &cred);
     ok(ret, "CredReadA failed with error %d\n", GetLastError());
-    todo_wine
-    ok(cred->CredentialBlobSize == 0, "expected CredentialBlobSize of 0 but got %d\n", cred->CredentialBlobSize);
-    todo_wine
-    ok(!cred->CredentialBlob, "expected NULL credentials but got %p\n", cred->CredentialBlob);
-    pCredFree(cred);
+    if (ret)  /* don't check the values of cred, if CredReadA failed. */
+    {
+        check_blob(__LINE__, cred_type, cred);
+        pCredFree(cred);
+    }
 
-    ret = pCredDeleteA(TEST_TARGET_NAME, CRED_TYPE_DOMAIN_PASSWORD, 0);
+    ret = pCredDeleteA(TEST_TARGET_NAME, cred_type, 0);
     ok(ret, "CredDeleteA failed with error %d\n", GetLastError());
 }
 
 START_TEST(cred)
 {
+    DWORD persists[CRED_TYPE_MAXIMUM];
+
     pCredEnumerateA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredEnumerateA");
     pCredFree = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredFree");
+    pCredGetSessionTypes = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredGetSessionTypes");
     pCredWriteA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredWriteA");
     pCredDeleteA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredDeleteA");
     pCredReadA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredReadA");
     pCredRenameA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredRenameA");
+    pCredReadDomainCredentialsA = (void *)GetProcAddress(GetModuleHandle("advapi32.dll"), "CredReadDomainCredentialsA");
 
     if (!pCredEnumerateA || !pCredFree || !pCredWriteA || !pCredDeleteA ||
         !pCredReadA)
     {
-        skip("credentials functions not present in advapi32.dll\n");
+        win_skip("credentials functions not present in advapi32.dll\n");
         return;
     }
+
+    if (pCredGetSessionTypes)
+    {
+        BOOL ret;
+        DWORD i;
+        ret = pCredGetSessionTypes(CRED_TYPE_MAXIMUM, persists);
+        ok(ret, "CredGetSessionTypes failed with error %d\n", GetLastError());
+        ok(persists[0] == CRED_PERSIST_NONE, "persists[0] = %u instead of CRED_PERSIST_NONE\n", persists[0]);
+        for (i=0; i < CRED_TYPE_MAXIMUM; i++)
+            ok(persists[i] <= CRED_PERSIST_ENTERPRISE, "bad value for persists[%u]: %u\n", i, persists[i]);
+    }
+    else
+        memset(persists, CRED_PERSIST_ENTERPRISE, sizeof(persists));
 
     test_CredReadA();
     test_CredWriteA();
     test_CredDeleteA();
 
+    test_CredReadDomainCredentialsA();
+
     trace("generic:\n");
-    test_generic();
-    trace("domain password:\n");
-    test_domain_password();
+    if (persists[CRED_TYPE_GENERIC] == CRED_PERSIST_NONE)
+        skip("CRED_TYPE_GENERIC credentials are not supported or are disabled. Skipping\n");
+    else
+        test_generic();
+
+        trace("domain password:\n");
+    if (persists[CRED_TYPE_DOMAIN_PASSWORD] == CRED_PERSIST_NONE)
+        skip("CRED_TYPE_DOMAIN_PASSWORD credentials are not supported or are disabled. Skipping\n");
+    else
+        test_domain_password(CRED_TYPE_DOMAIN_PASSWORD);
+
+    trace("domain visible password:\n");
+    if (persists[CRED_TYPE_DOMAIN_VISIBLE_PASSWORD] == CRED_PERSIST_NONE)
+        skip("CRED_TYPE_DOMAIN_VISIBLE_PASSWORD credentials are not supported or are disabled. Skipping\n");
+    else
+        test_domain_password(CRED_TYPE_DOMAIN_VISIBLE_PASSWORD);
 }

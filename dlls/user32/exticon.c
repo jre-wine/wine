@@ -194,7 +194,6 @@ static BYTE * ICO_LoadIcon( LPBYTE peimage, LPicoICONDIRENTRY lpiIDE, ULONG *uSi
  *                      ICO_GetIconDirectory
  *
  * Reads .ico file and build phony ICONDIR struct
- * see http://www.microsoft.com/win32dev/ui/icons.htm
  */
 #define HEADER_SIZE		(sizeof(CURSORICONDIR) - sizeof (CURSORICONDIRENTRY))
 #define HEADER_SIZE_FILE	(sizeof(icoICONDIR) - sizeof (icoICONDIRENTRY))
@@ -224,7 +223,7 @@ static BYTE * ICO_GetIconDirectory( LPBYTE peimage, LPicoICONDIR* lplpiID, ULONG
 	  /* copy the entries */
 	  for( i=0; i < lpcid->idCount; i++ )
 	  {
-	    memcpy((void*)&(lpID->idEntries[i]),(void*)&(lpcid->idEntries[i]), sizeof(CURSORICONDIRENTRY) - 2);
+            memcpy(&lpID->idEntries[i], &lpcid->idEntries[i], sizeof(CURSORICONDIRENTRY) - 2);
 	    lpID->idEntries[i].wResId = i;
 	  }
 
@@ -260,7 +259,7 @@ static BOOL CALLBACK extract_icons_callback(HMODULE hModule, LPCWSTR pwszType, L
     LONG_PTR lParam) 
 {
     struct extract_icons_state *pState = (struct extract_icons_state *)lParam;
-    INT idCurrent = (INT)pwszName;
+    INT idCurrent = LOWORD(pwszName);
 
     /* If the handle array pointer is NULL, we just count the number of icons in the module. */
     if (!pState->pahIcon) {
@@ -486,10 +485,10 @@ static UINT ICO_ExtractIconExW(
 
 	        if (pCIDir)
                 {
-	          RetPtr[icon] = (HICON)CreateIconFromResourceEx(pCIDir, uSize, TRUE, 0x00030000,
+	          RetPtr[icon] = CreateIconFromResourceEx(pCIDir, uSize, TRUE, 0x00030000,
                                                                  cx1, cy1, flags);
                   if (cx2 && cy2)
-                      RetPtr[++icon] = (HICON)CreateIconFromResourceEx(pCIDir, uSize, TRUE, 0x00030000,
+                      RetPtr[++icon] = CreateIconFromResourceEx(pCIDir, uSize, TRUE, 0x00030000,
                                                                        cx2, cy2, flags);
                 }
 	        else
@@ -674,11 +673,9 @@ static UINT ICO_ExtractIconExW(
 	      RetPtr[i]=0;
 	      continue;
 	    }
-	    RetPtr[i] = (HICON) CreateIconFromResourceEx(idata,idataent->Size,TRUE,0x00030000,
-                                                         cx1, cy1, flags);
+	    RetPtr[i] = CreateIconFromResourceEx(idata, idataent->Size, TRUE, 0x00030000, cx1, cy1, flags);
             if (cx2 && cy2)
-                RetPtr[++i] = (HICON) CreateIconFromResourceEx(idata,idataent->Size,TRUE,0x00030000,
-                                                               cx2, cy2, flags);
+                RetPtr[++i] = CreateIconFromResourceEx(idata, idataent->Size, TRUE, 0x00030000, cx2, cy2, flags);
 	  }
 	  ret = i;	/* return number of retrieved icons */
 	}			/* if(sig == IMAGE_NT_SIGNATURE) */
@@ -779,7 +776,7 @@ UINT WINAPI PrivateExtractIconExW (
 	  cxsmicon = GetSystemMetrics(SM_CXSMICON);
 	  cysmicon = GetSystemMetrics(SM_CYSMICON);
 
-	  ret = ICO_ExtractIconExW(lpwstrFile, (HICON*) &hIcon, nIndex, 2, cxicon | (cxsmicon<<16),
+          ret = ICO_ExtractIconExW(lpwstrFile, hIcon, nIndex, 2, cxicon | (cxsmicon<<16),
 	                           cyicon | (cysmicon<<16), NULL, LR_DEFAULTCOLOR);
 	  *phIconLarge = hIcon[0];
 	  *phIconSmall = hIcon[1];

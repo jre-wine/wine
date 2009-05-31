@@ -73,7 +73,7 @@ HANDLE get_BaseNamedObjects_handle(void)
         InitializeObjectAttributes(&attr, &str, 0, 0, NULL);
         NtOpenDirectoryObject(&dir, DIRECTORY_CREATE_OBJECT|DIRECTORY_TRAVERSE,
                               &attr);
-        if (InterlockedCompareExchangePointer( (PVOID)&handle, dir, 0 ) != 0)
+        if (InterlockedCompareExchangePointer( &handle, dir, 0 ) != 0)
         {
             /* someone beat us here... */
             CloseHandle( dir );
@@ -249,9 +249,18 @@ BOOL WINAPI RegisterWaitForSingleObject(PHANDLE phNewWaitObject, HANDLE hObject,
                 WAITORTIMERCALLBACK Callback, PVOID Context,
                 ULONG dwMilliseconds, ULONG dwFlags)
 {
-    FIXME("%p %p %p %p %d %d\n",
+    NTSTATUS status;
+
+    TRACE("%p %p %p %p %d %d\n",
           phNewWaitObject,hObject,Callback,Context,dwMilliseconds,dwFlags);
-    return FALSE;
+
+    status = RtlRegisterWait( phNewWaitObject, hObject, Callback, Context, dwMilliseconds, dwFlags );
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /***********************************************************************
@@ -261,9 +270,19 @@ HANDLE WINAPI RegisterWaitForSingleObjectEx( HANDLE hObject,
                 WAITORTIMERCALLBACK Callback, PVOID Context,
                 ULONG dwMilliseconds, ULONG dwFlags ) 
 {
-    FIXME("%p %p %p %d %d\n",
+    NTSTATUS status;
+    HANDLE hNewWaitObject;
+
+    TRACE("%p %p %p %d %d\n",
           hObject,Callback,Context,dwMilliseconds,dwFlags);
-    return 0;
+
+    status = RtlRegisterWait( &hNewWaitObject, hObject, Callback, Context, dwMilliseconds, dwFlags );
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return NULL;
+    }
+    return hNewWaitObject;
 }
 
 /***********************************************************************
@@ -271,8 +290,17 @@ HANDLE WINAPI RegisterWaitForSingleObjectEx( HANDLE hObject,
  */
 BOOL WINAPI UnregisterWait( HANDLE WaitHandle ) 
 {
-    FIXME("%p\n",WaitHandle);
-    return FALSE;
+    NTSTATUS status;
+
+    TRACE("%p\n",WaitHandle);
+
+    status = RtlDeregisterWait( WaitHandle );
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /***********************************************************************
@@ -280,8 +308,13 @@ BOOL WINAPI UnregisterWait( HANDLE WaitHandle )
  */
 BOOL WINAPI UnregisterWaitEx( HANDLE WaitHandle, HANDLE CompletionEvent ) 
 {
-    FIXME("%p %p\n",WaitHandle, CompletionEvent);
-    return FALSE;
+    NTSTATUS status;
+
+    TRACE("%p %p\n",WaitHandle, CompletionEvent);
+
+    status = RtlDeregisterWaitEx( WaitHandle, CompletionEvent );
+    if (status != STATUS_SUCCESS) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
 }
 
 /***********************************************************************
@@ -322,8 +355,7 @@ DWORD WINAPI SignalObjectAndWait( HANDLE hObjectToSignal, HANDLE hObjectToWaitOn
  */
 void WINAPI InitializeCriticalSection( CRITICAL_SECTION *crit )
 {
-    NTSTATUS ret = RtlInitializeCriticalSection( crit );
-    if (ret) RtlRaiseStatus( ret );
+    InitializeCriticalSectionEx( crit, 0, 0 );
 }
 
 /***********************************************************************
@@ -344,7 +376,29 @@ void WINAPI InitializeCriticalSection( CRITICAL_SECTION *crit )
  */
 BOOL WINAPI InitializeCriticalSectionAndSpinCount( CRITICAL_SECTION *crit, DWORD spincount )
 {
-    NTSTATUS ret = RtlInitializeCriticalSectionAndSpinCount( crit, spincount );
+    return InitializeCriticalSectionEx( crit, spincount, 0 );
+}
+
+/***********************************************************************
+ *           InitializeCriticalSectionEx   (KERNEL32.@)
+ *
+ * Initialise a critical section with a spin count and flags.
+ *
+ * PARAMS
+ *  crit      [O] Critical section to initialise.
+ *  spincount [I] Number of times to spin upon contention.
+ *  flags     [I] CRITICAL_SECTION_ flags from winbase.h.
+ *
+ * RETURNS
+ *  Success: TRUE.
+ *  Failure: Nothing. If the function fails an exception is raised.
+ *
+ * NOTES
+ *  spincount is ignored on uni-processor systems.
+ */
+BOOL WINAPI InitializeCriticalSectionEx( CRITICAL_SECTION *crit, DWORD spincount, DWORD flags )
+{
+    NTSTATUS ret = RtlInitializeCriticalSectionEx( crit, spincount, flags );
     if (ret) RtlRaiseStatus( ret );
     return !ret;
 }
@@ -404,16 +458,11 @@ void WINAPI UninitializeCriticalSection( CRITICAL_SECTION *crit )
 HANDLE WINAPI CreateEventA( SECURITY_ATTRIBUTES *sa, BOOL manual_reset,
                             BOOL initial_state, LPCSTR name )
 {
-    WCHAR buffer[MAX_PATH];
+    DWORD flags = 0;
 
-    if (!name) return CreateEventW( sa, manual_reset, initial_state, NULL );
-
-    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
-    {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
-        return 0;
-    }
-    return CreateEventW( sa, manual_reset, initial_state, buffer );
+    if (manual_reset) flags |= CREATE_EVENT_MANUAL_RESET;
+    if (initial_state) flags |= CREATE_EVENT_INITIAL_SET;
+    return CreateEventExA( sa, name, flags, EVENT_ALL_ACCESS );
 }
 
 
@@ -422,6 +471,37 @@ HANDLE WINAPI CreateEventA( SECURITY_ATTRIBUTES *sa, BOOL manual_reset,
  */
 HANDLE WINAPI CreateEventW( SECURITY_ATTRIBUTES *sa, BOOL manual_reset,
                             BOOL initial_state, LPCWSTR name )
+{
+    DWORD flags = 0;
+
+    if (manual_reset) flags |= CREATE_EVENT_MANUAL_RESET;
+    if (initial_state) flags |= CREATE_EVENT_INITIAL_SET;
+    return CreateEventExW( sa, name, flags, EVENT_ALL_ACCESS );
+}
+
+
+/***********************************************************************
+ *           CreateEventExA    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateEventExA( SECURITY_ATTRIBUTES *sa, LPCSTR name, DWORD flags, DWORD access )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return CreateEventExW( sa, NULL, flags, access );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return CreateEventExW( sa, buffer, flags, access );
+}
+
+
+/***********************************************************************
+ *           CreateEventExW    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateEventExW( SECURITY_ATTRIBUTES *sa, LPCWSTR name, DWORD flags, DWORD access )
 {
     HANDLE ret;
     UNICODE_STRING nameW;
@@ -441,8 +521,7 @@ HANDLE WINAPI CreateEventW( SECURITY_ATTRIBUTES *sa, BOOL manual_reset,
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+    attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -452,7 +531,8 @@ HANDLE WINAPI CreateEventW( SECURITY_ATTRIBUTES *sa, BOOL manual_reset,
         attr.RootDirectory = get_BaseNamedObjects_handle();
     }
 
-    status = NtCreateEvent( &ret, EVENT_ALL_ACCESS, &attr, manual_reset, initial_state );
+    status = NtCreateEvent( &ret, access, &attr, (flags & CREATE_EVENT_MANUAL_RESET) != 0,
+                            (flags & CREATE_EVENT_INITIAL_SET) != 0 );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else
@@ -503,7 +583,7 @@ HANDLE WINAPI OpenEventW( DWORD access, BOOL inherit, LPCWSTR name )
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    attr.Attributes               = inherit ? OBJ_INHERIT : 0;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -615,16 +695,7 @@ VOID WINAPI VWin32_EventSet(HANDLE event)
  */
 HANDLE WINAPI CreateMutexA( SECURITY_ATTRIBUTES *sa, BOOL owner, LPCSTR name )
 {
-    WCHAR buffer[MAX_PATH];
-
-    if (!name) return CreateMutexW( sa, owner, NULL );
-
-    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
-    {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
-        return 0;
-    }
-    return CreateMutexW( sa, owner, buffer );
+    return CreateMutexExA( sa, name, owner ? CREATE_MUTEX_INITIAL_OWNER : 0, MUTEX_ALL_ACCESS );
 }
 
 
@@ -632,6 +703,33 @@ HANDLE WINAPI CreateMutexA( SECURITY_ATTRIBUTES *sa, BOOL owner, LPCSTR name )
  *           CreateMutexW   (KERNEL32.@)
  */
 HANDLE WINAPI CreateMutexW( SECURITY_ATTRIBUTES *sa, BOOL owner, LPCWSTR name )
+{
+    return CreateMutexExW( sa, name, owner ? CREATE_MUTEX_INITIAL_OWNER : 0, MUTEX_ALL_ACCESS );
+}
+
+
+/***********************************************************************
+ *           CreateMutexExA   (KERNEL32.@)
+ */
+HANDLE WINAPI CreateMutexExA( SECURITY_ATTRIBUTES *sa, LPCSTR name, DWORD flags, DWORD access )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return CreateMutexExW( sa, NULL, flags, access );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return CreateMutexExW( sa, buffer, flags, access );
+}
+
+
+/***********************************************************************
+ *           CreateMutexExW   (KERNEL32.@)
+ */
+HANDLE WINAPI CreateMutexExW( SECURITY_ATTRIBUTES *sa, LPCWSTR name, DWORD flags, DWORD access )
 {
     HANDLE ret;
     UNICODE_STRING nameW;
@@ -641,8 +739,7 @@ HANDLE WINAPI CreateMutexW( SECURITY_ATTRIBUTES *sa, BOOL owner, LPCWSTR name )
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+    attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -652,7 +749,7 @@ HANDLE WINAPI CreateMutexW( SECURITY_ATTRIBUTES *sa, BOOL owner, LPCWSTR name )
         attr.RootDirectory = get_BaseNamedObjects_handle();
     }
 
-    status = NtCreateMutant( &ret, MUTEX_ALL_ACCESS, &attr, owner );
+    status = NtCreateMutant( &ret, access, &attr, (flags & CREATE_MUTEX_INITIAL_OWNER) != 0 );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else
@@ -694,7 +791,7 @@ HANDLE WINAPI OpenMutexW( DWORD access, BOOL inherit, LPCWSTR name )
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    attr.Attributes               = inherit ? OBJ_INHERIT : 0;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -741,16 +838,7 @@ BOOL WINAPI ReleaseMutex( HANDLE handle )
  */
 HANDLE WINAPI CreateSemaphoreA( SECURITY_ATTRIBUTES *sa, LONG initial, LONG max, LPCSTR name )
 {
-    WCHAR buffer[MAX_PATH];
-
-    if (!name) return CreateSemaphoreW( sa, initial, max, NULL );
-
-    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
-    {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
-        return 0;
-    }
-    return CreateSemaphoreW( sa, initial, max, buffer );
+    return CreateSemaphoreExA( sa, initial, max, name, 0, SEMAPHORE_ALL_ACCESS );
 }
 
 
@@ -760,6 +848,35 @@ HANDLE WINAPI CreateSemaphoreA( SECURITY_ATTRIBUTES *sa, LONG initial, LONG max,
 HANDLE WINAPI CreateSemaphoreW( SECURITY_ATTRIBUTES *sa, LONG initial,
                                 LONG max, LPCWSTR name )
 {
+    return CreateSemaphoreExW( sa, initial, max, name, 0, SEMAPHORE_ALL_ACCESS );
+}
+
+
+/***********************************************************************
+ *           CreateSemaphoreExA   (KERNEL32.@)
+ */
+HANDLE WINAPI CreateSemaphoreExA( SECURITY_ATTRIBUTES *sa, LONG initial, LONG max, LPCSTR name,
+                                  DWORD flags, DWORD access )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return CreateSemaphoreExW( sa, initial, max, NULL, flags, access );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return CreateSemaphoreExW( sa, initial, max, buffer, flags, access );
+}
+
+
+/***********************************************************************
+ *           CreateSemaphoreExW   (KERNEL32.@)
+ */
+HANDLE WINAPI CreateSemaphoreExW( SECURITY_ATTRIBUTES *sa, LONG initial, LONG max, LPCWSTR name,
+                                  DWORD flags, DWORD access )
+{
     HANDLE ret;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
@@ -768,8 +885,7 @@ HANDLE WINAPI CreateSemaphoreW( SECURITY_ATTRIBUTES *sa, LONG initial,
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+    attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -779,7 +895,7 @@ HANDLE WINAPI CreateSemaphoreW( SECURITY_ATTRIBUTES *sa, LONG initial,
         attr.RootDirectory = get_BaseNamedObjects_handle();
     }
 
-    status = NtCreateSemaphore( &ret, SEMAPHORE_ALL_ACCESS, &attr, initial, max );
+    status = NtCreateSemaphore( &ret, access, &attr, initial, max );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else
@@ -821,7 +937,7 @@ HANDLE WINAPI OpenSemaphoreW( DWORD access, BOOL inherit, LPCWSTR name )
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    attr.Attributes               = inherit ? OBJ_INHERIT : 0;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -853,43 +969,23 @@ BOOL WINAPI ReleaseSemaphore( HANDLE handle, LONG count, LONG *previous )
 
 
 /*
- * Timers
+ * Jobs
  */
 
-
-/***********************************************************************
- *           CreateWaitableTimerA    (KERNEL32.@)
+/******************************************************************************
+ *		CreateJobObjectW (KERNEL32.@)
  */
-HANDLE WINAPI CreateWaitableTimerA( SECURITY_ATTRIBUTES *sa, BOOL manual, LPCSTR name )
+HANDLE WINAPI CreateJobObjectW( LPSECURITY_ATTRIBUTES sa, LPCWSTR name )
 {
-    WCHAR buffer[MAX_PATH];
-
-    if (!name) return CreateWaitableTimerW( sa, manual, NULL );
-
-    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
-    {
-        SetLastError( ERROR_FILENAME_EXCED_RANGE );
-        return 0;
-    }
-    return CreateWaitableTimerW( sa, manual, buffer );
-}
-
-
-/***********************************************************************
- *           CreateWaitableTimerW    (KERNEL32.@)
- */
-HANDLE WINAPI CreateWaitableTimerW( SECURITY_ATTRIBUTES *sa, BOOL manual, LPCWSTR name )
-{
-    HANDLE handle;
-    NTSTATUS status;
+    HANDLE ret = 0;
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
 
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+    attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
     attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -899,8 +995,210 @@ HANDLE WINAPI CreateWaitableTimerW( SECURITY_ATTRIBUTES *sa, BOOL manual, LPCWST
         attr.RootDirectory = get_BaseNamedObjects_handle();
     }
 
-    status = NtCreateTimer(&handle, TIMER_ALL_ACCESS, &attr,
-                           manual ? NotificationTimer : SynchronizationTimer);
+    status = NtCreateJobObject( &ret, JOB_OBJECT_ALL_ACCESS, &attr );
+    if (status == STATUS_OBJECT_NAME_EXISTS)
+        SetLastError( ERROR_ALREADY_EXISTS );
+    else
+        SetLastError( RtlNtStatusToDosError(status) );
+    return ret;
+}
+
+/******************************************************************************
+ *		CreateJobObjectA (KERNEL32.@)
+ */
+HANDLE WINAPI CreateJobObjectA( LPSECURITY_ATTRIBUTES attr, LPCSTR name )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return CreateJobObjectW( attr, NULL );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return CreateJobObjectW( attr, buffer );
+}
+
+/******************************************************************************
+ *		OpenJobObjectW (KERNEL32.@)
+ */
+HANDLE WINAPI OpenJobObjectW( DWORD access, BOOL inherit, LPCWSTR name )
+{
+    HANDLE ret;
+    UNICODE_STRING nameW;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+
+    attr.Length                   = sizeof(attr);
+    attr.RootDirectory            = 0;
+    attr.ObjectName               = NULL;
+    attr.Attributes               = inherit ? OBJ_INHERIT : 0;
+    attr.SecurityDescriptor       = NULL;
+    attr.SecurityQualityOfService = NULL;
+    if (name)
+    {
+        RtlInitUnicodeString( &nameW, name );
+        attr.ObjectName = &nameW;
+        attr.RootDirectory = get_BaseNamedObjects_handle();
+    }
+
+    status = NtOpenJobObject( &ret, access, &attr );
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return 0;
+    }
+    return ret;
+}
+
+/******************************************************************************
+ *		OpenJobObjectA (KERNEL32.@)
+ */
+HANDLE WINAPI OpenJobObjectA( DWORD access, BOOL inherit, LPCSTR name )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return OpenJobObjectW( access, inherit, NULL );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return OpenJobObjectW( access, inherit, buffer );
+}
+
+/******************************************************************************
+ *		TerminateJobObject (KERNEL32.@)
+ */
+BOOL WINAPI TerminateJobObject( HANDLE job, UINT exit_code )
+{
+    NTSTATUS status = NtTerminateJobObject( job, exit_code );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+/******************************************************************************
+ *		QueryInformationJobObject (KERNEL32.@)
+ */
+BOOL WINAPI QueryInformationJobObject( HANDLE job, JOBOBJECTINFOCLASS class, LPVOID info,
+                                       DWORD len, DWORD *ret_len )
+{
+    NTSTATUS status = NtQueryInformationJobObject( job, class, info, len, ret_len );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+/******************************************************************************
+ *		SetInformationJobObject (KERNEL32.@)
+ */
+BOOL WINAPI SetInformationJobObject( HANDLE job, JOBOBJECTINFOCLASS class, LPVOID info, DWORD len )
+{
+    NTSTATUS status = NtSetInformationJobObject( job, class, info, len );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+/******************************************************************************
+ *		AssignProcessToJobObject (KERNEL32.@)
+ */
+BOOL WINAPI AssignProcessToJobObject( HANDLE job, HANDLE process )
+{
+    NTSTATUS status = NtAssignProcessToJobObject( job, process );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+/******************************************************************************
+ *		IsProcessInJob (KERNEL32.@)
+ */
+BOOL WINAPI IsProcessInJob( HANDLE process, HANDLE job, PBOOL result )
+{
+    NTSTATUS status = NtIsProcessInJob( job, process );
+    switch(status)
+    {
+    case STATUS_PROCESS_IN_JOB:
+        *result = TRUE;
+        return TRUE;
+    case STATUS_PROCESS_NOT_IN_JOB:
+        *result = FALSE;
+        return TRUE;
+    default:
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+}
+
+
+/*
+ * Timers
+ */
+
+
+/***********************************************************************
+ *           CreateWaitableTimerA    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateWaitableTimerA( SECURITY_ATTRIBUTES *sa, BOOL manual, LPCSTR name )
+{
+    return CreateWaitableTimerExA( sa, name, manual ? CREATE_WAITABLE_TIMER_MANUAL_RESET : 0,
+                                   TIMER_ALL_ACCESS );
+}
+
+
+/***********************************************************************
+ *           CreateWaitableTimerW    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateWaitableTimerW( SECURITY_ATTRIBUTES *sa, BOOL manual, LPCWSTR name )
+{
+    return CreateWaitableTimerExW( sa, name, manual ? CREATE_WAITABLE_TIMER_MANUAL_RESET : 0,
+                                   TIMER_ALL_ACCESS );
+}
+
+
+/***********************************************************************
+ *           CreateWaitableTimerExA    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateWaitableTimerExA( SECURITY_ATTRIBUTES *sa, LPCSTR name, DWORD flags, DWORD access )
+{
+    WCHAR buffer[MAX_PATH];
+
+    if (!name) return CreateWaitableTimerExW( sa, NULL, flags, access );
+
+    if (!MultiByteToWideChar( CP_ACP, 0, name, -1, buffer, MAX_PATH ))
+    {
+        SetLastError( ERROR_FILENAME_EXCED_RANGE );
+        return 0;
+    }
+    return CreateWaitableTimerExW( sa, buffer, flags, access );
+}
+
+
+/***********************************************************************
+ *           CreateWaitableTimerExW    (KERNEL32.@)
+ */
+HANDLE WINAPI CreateWaitableTimerExW( SECURITY_ATTRIBUTES *sa, LPCWSTR name, DWORD flags, DWORD access )
+{
+    HANDLE handle;
+    NTSTATUS status;
+    UNICODE_STRING nameW;
+    OBJECT_ATTRIBUTES attr;
+
+    attr.Length                   = sizeof(attr);
+    attr.RootDirectory            = 0;
+    attr.ObjectName               = NULL;
+    attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+    attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
+    attr.SecurityQualityOfService = NULL;
+    if (name)
+    {
+        RtlInitUnicodeString( &nameW, name );
+        attr.ObjectName = &nameW;
+        attr.RootDirectory = get_BaseNamedObjects_handle();
+    }
+
+    status = NtCreateTimer( &handle, access, &attr,
+                 (flags & CREATE_WAITABLE_TIMER_MANUAL_RESET) ? NotificationTimer : SynchronizationTimer );
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else
@@ -942,7 +1240,7 @@ HANDLE WINAPI OpenWaitableTimerW( DWORD access, BOOL inherit, LPCWSTR name )
     attr.Length                   = sizeof(attr);
     attr.RootDirectory            = 0;
     attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    attr.Attributes               = inherit ? OBJ_INHERIT : 0;
     attr.SecurityDescriptor       = NULL;
     attr.SecurityQualityOfService = NULL;
     if (name)
@@ -1002,9 +1300,16 @@ BOOL WINAPI CancelWaitableTimer( HANDLE handle )
  */
 HANDLE WINAPI CreateTimerQueue(void)
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return NULL;
+    HANDLE q;
+    NTSTATUS status = RtlCreateTimerQueue(&q);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return NULL;
+    }
+
+    return q;
 }
 
 
@@ -1013,9 +1318,23 @@ HANDLE WINAPI CreateTimerQueue(void)
  */
 BOOL WINAPI DeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
 {
-    FIXME("(%p, %p): stub\n", TimerQueue, CompletionEvent);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
+    NTSTATUS status = RtlDeleteTimerQueueEx(TimerQueue, CompletionEvent);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           DeleteTimerQueue  (KERNEL32.@)
+ */
+BOOL WINAPI DeleteTimerQueue(HANDLE TimerQueue)
+{
+    return DeleteTimerQueueEx(TimerQueue, NULL);
 }
 
 /***********************************************************************
@@ -1026,17 +1345,43 @@ BOOL WINAPI DeleteTimerQueueEx(HANDLE TimerQueue, HANDLE CompletionEvent)
  * expires, the callback function is called.
  *
  * RETURNS
- *   nonzero on success or zero on faillure
- *
- * BUGS
- *   Unimplemented
+ *   nonzero on success or zero on failure
  */
 BOOL WINAPI CreateTimerQueueTimer( PHANDLE phNewTimer, HANDLE TimerQueue,
                                    WAITORTIMERCALLBACK Callback, PVOID Parameter,
                                    DWORD DueTime, DWORD Period, ULONG Flags )
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    NTSTATUS status = RtlCreateTimer(phNewTimer, TimerQueue, Callback,
+                                     Parameter, DueTime, Period, Flags);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/***********************************************************************
+ *           ChangeTimerQueueTimer  (KERNEL32.@)
+ *
+ * Changes the times at which the timer expires.
+ *
+ * RETURNS
+ *   nonzero on success or zero on failure
+ */
+BOOL WINAPI ChangeTimerQueueTimer( HANDLE TimerQueue, HANDLE Timer,
+                                   ULONG DueTime, ULONG Period )
+{
+    NTSTATUS status = RtlUpdateTimer(TimerQueue, Timer, DueTime, Period);
+
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -1046,16 +1391,17 @@ BOOL WINAPI CreateTimerQueueTimer( PHANDLE phNewTimer, HANDLE TimerQueue,
  * Cancels a timer-queue timer.
  *
  * RETURNS
- *   nonzero on success or zero on faillure
- *
- * BUGS
- *   Unimplemented
+ *   nonzero on success or zero on failure
  */
 BOOL WINAPI DeleteTimerQueueTimer( HANDLE TimerQueue, HANDLE Timer,
                                    HANDLE CompletionEvent )
 {
-    FIXME("stub\n");
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    NTSTATUS status = RtlDeleteTimer(TimerQueue, Timer, CompletionEvent);
+    if (status != STATUS_SUCCESS)
+    {
+        SetLastError( RtlNtStatusToDosError(status) );
+        return FALSE;
+    }
     return TRUE;
 }
 
@@ -1257,7 +1603,7 @@ BOOL WINAPI WaitNamedPipeW (LPCWSTR name, DWORD nTimeOut)
 
     if (nt_name.Length >= MAX_PATH * sizeof(WCHAR) ||
         nt_name.Length < sizeof(leadin) ||
-        strncmpiW( nt_name.Buffer, leadin, sizeof(leadin)/sizeof(WCHAR) != 0))
+        strncmpiW( nt_name.Buffer, leadin, sizeof(leadin)/sizeof(WCHAR)) != 0)
     {
         RtlFreeUnicodeString( &nt_name );
         SetLastError( ERROR_PATH_NOT_FOUND );
@@ -1884,7 +2230,8 @@ BOOL WINAPI GetQueuedCompletionStatus( HANDLE CompletionPort, LPDWORD lpNumberOf
         return TRUE;
     }
 
-    SetLastError( RtlNtStatusToDosError(status) );
+    if (status == STATUS_TIMEOUT) SetLastError( WAIT_TIMEOUT );
+    else SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
 }
 
@@ -1920,55 +2267,6 @@ BOOL WINAPI BindIoCompletionCallback( HANDLE FileHandle, LPOVERLAPPED_COMPLETION
     if (status == STATUS_SUCCESS) return TRUE;
     SetLastError( RtlNtStatusToDosError(status) );
     return FALSE;
-}
-
-/******************************************************************************
- *		CreateJobObjectW (KERNEL32.@)
- */
-HANDLE WINAPI CreateJobObjectW( LPSECURITY_ATTRIBUTES attr, LPCWSTR name )
-{
-    FIXME("%p %s\n", attr, debugstr_w(name) );
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
-}
-
-/******************************************************************************
- *		CreateJobObjectA (KERNEL32.@)
- */
-HANDLE WINAPI CreateJobObjectA( LPSECURITY_ATTRIBUTES attr, LPCSTR name )
-{
-    LPWSTR str = NULL;
-    UINT len;
-    HANDLE r;
-
-    TRACE("%p %s\n", attr, debugstr_a(name) );
-
-    if( name )
-    {
-        len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
-        str = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
-        if( !str )
-        {
-            SetLastError( ERROR_OUTOFMEMORY );
-            return 0;
-        }
-        len = MultiByteToWideChar( CP_ACP, 0, name, -1, str, len );
-    }
-
-    r = CreateJobObjectW( attr, str );
-
-    HeapFree( GetProcessHeap(), 0, str );
-
-    return r;
-}
-
-/******************************************************************************
- *		AssignProcessToJobObject (KERNEL32.@)
- */
-BOOL WINAPI AssignProcessToJobObject( HANDLE hJob, HANDLE hProcess )
-{
-    FIXME("%p %p\n", hJob, hProcess);
-    return TRUE;
 }
 
 #ifdef __i386__
@@ -2024,94 +2322,5 @@ __ASM_GLOBAL_FUNC(InterlockedDecrement,
                   "lock; xaddl %eax,(%edx)\n\t"
                   "decl %eax\n\t"
                   "ret $4")
-
-#else  /* __i386__ */
-
-/***********************************************************************
- *		InterlockedCompareExchange (KERNEL32.@)
- *
- * Atomically swap one value with another.
- *
- * PARAMS
- *  dest    [I/O] The value to replace
- *  xchq    [I]   The value to be swapped
- *  compare [I]   The value to compare to dest
- *
- * RETURNS
- *  The resulting value of dest.
- *
- * NOTES
- *  dest is updated only if it is equal to compare, otherwise no swap is done.
- */
-LONG WINAPI InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
-{
-    return interlocked_cmpxchg( (int *)dest, xchg, compare );
-}
-
-/***********************************************************************
- *		InterlockedExchange (KERNEL32.@)
- *
- * Atomically swap one value with another.
- *
- * PARAMS
- *  dest [I/O] The value to replace
- *  val  [I]   The value to be swapped
- *
- * RETURNS
- *  The resulting value of dest.
- */
-LONG WINAPI InterlockedExchange( LONG volatile *dest, LONG val )
-{
-    return interlocked_xchg( (int *)dest, val );
-}
-
-/***********************************************************************
- *		InterlockedExchangeAdd (KERNEL32.@)
- *
- * Atomically add one value to another.
- *
- * PARAMS
- *  dest [I/O] The value to add to
- *  incr [I]   The value to be added
- *
- * RETURNS
- *  The resulting value of dest.
- */
-LONG WINAPI InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
-{
-    return interlocked_xchg_add( (int *)dest, incr );
-}
-
-/***********************************************************************
- *		InterlockedIncrement (KERNEL32.@)
- *
- * Atomically increment a value.
- *
- * PARAMS
- *  dest [I/O] The value to increment
- *
- * RETURNS
- *  The resulting value of dest.
- */
-LONG WINAPI InterlockedIncrement( LONG volatile *dest )
-{
-    return interlocked_xchg_add( (int *)dest, 1 ) + 1;
-}
-
-/***********************************************************************
- *		InterlockedDecrement (KERNEL32.@)
- *
- * Atomically decrement a value.
- *
- * PARAMS
- *  dest [I/O] The value to decrement
- *
- * RETURNS
- *  The resulting value of dest.
- */
-LONG WINAPI InterlockedDecrement( LONG volatile *dest )
-{
-    return interlocked_xchg_add( (int *)dest, -1 ) - 1;
-}
 
 #endif  /* __i386__ */

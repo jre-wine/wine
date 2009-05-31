@@ -372,6 +372,7 @@ BOOL WINAPI SetPixelFormat( HDC hdc, INT iPixelFormat,
 
     if (!dc) return 0;
 
+    update_dc( dc );
     if (!dc->funcs->pSetPixelFormat) FIXME(" :stub\n");
     else bRet = dc->funcs->pSetPixelFormat(dc->physDev,iPixelFormat,ppfd);
 
@@ -433,6 +434,7 @@ INT WINAPI DescribePixelFormat( HDC hdc, INT iPixelFormat, UINT nBytes,
 
     if (!dc) return 0;
 
+    update_dc( dc );
     if (!dc->funcs->pDescribePixelFormat)
     {
         FIXME(" :stub\n");
@@ -1005,7 +1007,7 @@ BOOL WINAPI LineDDA(INT nXStart, INT nYStart, INT nXEnd, INT nYEnd,
     if (dx > dy)  /* line is "more horizontal" */
     {
         err = 2*dy - dx; erradd = 2*dy - 2*dx;
-        for(cnt = 0;cnt <= dx; cnt++)
+        for(cnt = 0;cnt < dx; cnt++)
         {
             callback(nXStart,nYStart,lParam);
             if (err > 0)
@@ -1020,7 +1022,7 @@ BOOL WINAPI LineDDA(INT nXStart, INT nYStart, INT nXEnd, INT nYEnd,
     else   /* line is "more vertical" */
     {
         err = 2*dx - dy; erradd = 2*dx - 2*dy;
-        for(cnt = 0;cnt <= dy; cnt++)
+        for(cnt = 0;cnt < dy; cnt++)
         {
             callback(nXStart,nYStart,lParam);
             if (err > 0)
@@ -1041,7 +1043,7 @@ BOOL WINAPI LineDDA(INT nXStart, INT nYStart, INT nXEnd, INT nYEnd,
  *   *Very* simple bezier drawing code,
  *
  *   It uses a recursive algorithm to divide the curve in a series
- *   of straight line segements. Not ideal but for me sufficient.
+ *   of straight line segments. Not ideal but sufficient for me.
  *   If you are in need for something better look for some incremental
  *   algorithm.
  *
@@ -1085,7 +1087,7 @@ BOOL WINAPI LineDDA(INT nXStart, INT nYStart, INT nXEnd, INT nYEnd,
 *       Points[0] and Points[3] are begin and endpoint
 *       Points[1] and Points[2] are control points
 *       level is the recursion depth
-*       returns true if the recusion can be terminated
+*       returns true if the recursion can be terminated
 */
 static BOOL BezierCheck( int level, POINT *Points)
 {
@@ -1200,10 +1202,10 @@ static void GDI_InternalBezier( POINT *Points, POINT **PtsOut, INT *dwOut,
  *
  *  RETURNS
  *
- *  Ptr to an array of POINTs that contain the lines that approximinate the
+ *  Ptr to an array of POINTs that contain the lines that approximate the
  *  Beziers.  The array is allocated on the process heap and it is the caller's
  *  responsibility to HeapFree it. [this is not a particularly nice interface
- *  but since we can't know in advance how many points will generate, the
+ *  but since we can't know in advance how many points we will generate, the
  *  alternative would be to call the function twice, once to determine the size
  *  and a second time to do the work - I decided this was too much of a pain].
  */
@@ -1241,8 +1243,8 @@ BOOL WINAPI GdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
 {
   unsigned int i;
 
-  TRACE("vert_array:0x%08lx nvert:%d grad_array:0x%08lx ngrad:%d\n",
-        (long)vert_array, nvert, (long)grad_array, ngrad);
+  TRACE("vert_array:%p nvert:%d grad_array:%p ngrad:%d\n",
+        vert_array, nvert, grad_array, ngrad);
 
   switch(mode) 
     {

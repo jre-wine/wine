@@ -16,17 +16,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
-#include <stdio.h>
 
 #define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "ole2.h"
 
 #include "wine/debug.h"
@@ -154,23 +150,16 @@ static HRESULT WINAPI HTMLSelectionObject_createRange(IHTMLSelectionObject *ifac
 
         nsISelection_GetRangeCount(This->nsselection, &nsrange_cnt);
         if(!nsrange_cnt) {
-            nsIDOMDocument *nsdoc;
-            nsIDOMHTMLDocument *nshtmldoc;
             nsIDOMHTMLElement *nsbody = NULL;
 
             TRACE("nsrange_cnt = 0\n");
 
-            nsres = nsIWebNavigation_GetDocument(This->doc->nscontainer->navigation, &nsdoc);
-            if(NS_FAILED(nsres) || !nsdoc) {
-                ERR("GetDocument failed: %08x\n", nsres);
-                return E_FAIL;
+            if(!This->doc->nsdoc) {
+                WARN("nsdoc is NULL\n");
+                return E_UNEXPECTED;
             }
 
-            nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMHTMLDocument, (void**)&nshtmldoc);
-            nsIDOMDocument_Release(nsdoc);
-
-            nsres = nsIDOMHTMLDocument_GetBody(nshtmldoc, &nsbody);
-            nsIDOMHTMLDocument_Release(nshtmldoc);
+            nsres = nsIDOMHTMLDocument_GetBody(This->doc->nsdoc, &nsbody);
             if(NS_FAILED(nsres) || !nsbody) {
                 ERR("Could not get body: %08x\n", nsres);
                 return E_FAIL;

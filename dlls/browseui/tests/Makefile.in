@@ -4,7 +4,6 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = browseui.dll
 IMPORTS   = ole32 kernel32
-EXTRALIBS = -luuid
 
 CTESTS = \
 	autocomplete.c

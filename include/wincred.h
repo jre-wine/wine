@@ -98,6 +98,37 @@ typedef struct _CREDENTIALW
 DECL_WINELIB_TYPE_AW(CREDENTIAL)
 DECL_WINELIB_TYPE_AW(PCREDENTIAL)
 
+typedef struct _CREDENTIAL_TARGET_INFORMATIONA
+{
+    LPSTR TargetName;
+    LPSTR NetbiosServerName;
+    LPSTR DnsServerName;
+    LPSTR NetbiosDomainName;
+    LPSTR DnsDomainName;
+    LPSTR DnsTreeName;
+    LPSTR PackageName;
+    DWORD Flags;
+    DWORD CredTypeCount;
+    LPDWORD CredTypes;
+} CREDENTIAL_TARGET_INFORMATIONA, *PCREDENTIAL_TARGET_INFORMATIONA;
+
+typedef struct _CREDENTIAL_TARGET_INFORMATIONW
+{
+    LPWSTR TargetName;
+    LPWSTR NetbiosServerName;
+    LPWSTR DnsServerName;
+    LPWSTR NetbiosDomainName;
+    LPWSTR DnsDomainName;
+    LPWSTR DnsTreeName;
+    LPWSTR PackageName;
+    DWORD Flags;
+    DWORD CredTypeCount;
+    LPDWORD CredTypes;
+} CREDENTIAL_TARGET_INFORMATIONW, *PCREDENTIAL_TARGET_INFORMATIONW;
+
+DECL_WINELIB_TYPE_AW(CREDENTIAL_TARGET_INFORMATION)
+DECL_WINELIB_TYPE_AW(PCREDENTIAL_TARGET_INFORMATION)
+
 typedef struct _CREDUI_INFOA
 {
     DWORD cbSize;
@@ -147,13 +178,20 @@ DECL_WINELIB_TYPE_AW(PCREDUI_INFO)
 #define CRED_TYPE_DOMAIN_PASSWORD                   2
 #define CRED_TYPE_DOMAIN_CERTIFICATE                3
 #define CRED_TYPE_DOMAIN_VISIBLE_PASSWORD           4
-#define CRED_TYPE_MAXIMUM                           5
+#define CRED_TYPE_GENERIC_CERTIFICATE               5
+#define CRED_TYPE_MAXIMUM                           6
+#define CRED_TYPE_MAXIMUM_EX                        (CRED_TYPE_MAXIMUM+1000)
 
 /* values for CREDENTIAL::Persist */
 #define CRED_PERSIST_NONE                           0
 #define CRED_PERSIST_SESSION                        1
 #define CRED_PERSIST_LOCAL_MACHINE                  2
 #define CRED_PERSIST_ENTERPRISE                     3
+
+/* values for CREDENTIAL_TARGET_INFORMATION::Flags */
+#define CRED_TI_SERVER_FORMAT_UNKNOWN               1
+#define CRED_TI_DOMAIN_FORMAT_UNKNOWN               2
+#define CRED_TI_ONLY_PASSWORD_REQUIRED              4
 
 #define CREDUI_FLAGS_INCORRECT_PASSWORD             0x00000001
 #define CREDUI_FLAGS_DO_NOT_PERSIST                 0x00000002
@@ -183,9 +221,13 @@ WINADVAPI BOOL  WINAPI CredEnumerateA(LPCSTR,DWORD,DWORD *,PCREDENTIALA **);
 WINADVAPI BOOL  WINAPI CredEnumerateW(LPCWSTR,DWORD,DWORD *,PCREDENTIALW **);
 #define                CredEnumerate WINELIB_NAME_AW(CredEnumerate)
 WINADVAPI VOID  WINAPI CredFree(PVOID);
+WINADVAPI BOOL  WINAPI CredGetSessionTypes(DWORD,LPDWORD);
 WINADVAPI BOOL  WINAPI CredReadA(LPCSTR,DWORD,DWORD,PCREDENTIALA *);
 WINADVAPI BOOL  WINAPI CredReadW(LPCWSTR,DWORD,DWORD,PCREDENTIALW *);
 #define                CredRead WINELIB_NAME_AW(CredRead)
+WINADVAPI BOOL  WINAPI CredReadDomainCredentialsA(PCREDENTIAL_TARGET_INFORMATIONA,DWORD,DWORD *,PCREDENTIALA **);
+WINADVAPI BOOL  WINAPI CredReadDomainCredentialsW(PCREDENTIAL_TARGET_INFORMATIONW,DWORD,DWORD *,PCREDENTIALW **);
+#define                CredReadDomainCredentials WINELIB_NAME_AW(CredReadDomainCredentials)
 WINADVAPI BOOL  WINAPI CredRenameA(LPCSTR,LPCSTR,DWORD,DWORD);
 WINADVAPI BOOL  WINAPI CredRenameW(LPCWSTR,LPCWSTR,DWORD,DWORD);
 #define                CredRename WINELIB_NAME_AW(CredRename)

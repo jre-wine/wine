@@ -28,7 +28,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wine/wingdi16.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -43,17 +42,16 @@ typedef struct
 
 
 static HGDIOBJ PEN_SelectObject( HGDIOBJ handle, HDC hdc );
-static INT PEN_GetObject16( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-static INT PEN_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
+static INT PEN_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
+static BOOL PEN_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs pen_funcs =
 {
     PEN_SelectObject,  /* pSelectObject */
-    PEN_GetObject16,   /* pGetObject16 */
     PEN_GetObject,     /* pGetObjectA */
     PEN_GetObject,     /* pGetObjectW */
     NULL,              /* pUnrealizeObject */
-    GDI_FreeObject     /* pDeleteObject */
+    PEN_DeleteObject   /* pDeleteObject */
 };
 
 
@@ -83,8 +81,14 @@ HPEN WINAPI CreatePenIndirect( const LOGPEN * pen )
     PENOBJ * penPtr;
     HPEN hpen;
 
-    if (!(penPtr = GDI_AllocObject( sizeof(PENOBJ), PEN_MAGIC, (HGDIOBJ *)&hpen,
-				    &pen_funcs ))) return 0;
+    if (pen->lopnStyle == PS_NULL)
+    {
+        hpen = GetStockObject(NULL_PEN);
+        if (hpen) return hpen;
+    }
+
+    if (!(penPtr = HeapAlloc( GetProcessHeap(), 0, sizeof(*penPtr) ))) return 0;
+
     if (pen->lopnStyle == PS_USERSTYLE || pen->lopnStyle == PS_ALTERNATE)
         penPtr->logpen.elpPenStyle = PS_SOLID;
     else
@@ -104,7 +108,8 @@ HPEN WINAPI CreatePenIndirect( const LOGPEN * pen )
     penPtr->logpen.elpNumEntries = 0;
     penPtr->logpen.elpStyleEntry[0] = 0;
 
-    GDI_ReleaseObj( hpen );
+    if (!(hpen = alloc_gdi_handle( &penPtr->header, OBJ_PEN, &pen_funcs )))
+        HeapFree( GetProcessHeap(), 0, penPtr );
     return hpen;
 }
 
@@ -185,7 +190,7 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
     }
     else
     {
-        /* PS_INSIDEFRAME is applicable only for gemetric pens */
+        /* PS_INSIDEFRAME is applicable only for geometric pens */
         if ((style & PS_STYLE_MASK) == PS_INSIDEFRAME || width != 1)
         {
             SetLastError(ERROR_INVALID_PARAMETER);
@@ -193,10 +198,8 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
         }
     }
 
-    if (!(penPtr = GDI_AllocObject( sizeof(PENOBJ) +
-                                    style_count * sizeof(DWORD) - sizeof(penPtr->logpen.elpStyleEntry),
-                                    EXT_PEN_MAGIC, (HGDIOBJ *)&hpen,
-				    &pen_funcs ))) return 0;
+    if (!(penPtr = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(PENOBJ,logpen.elpStyleEntry[style_count]))))
+        return 0;
 
     penPtr->logpen.elpPenStyle = style;
     penPtr->logpen.elpWidth = abs(width);
@@ -205,12 +208,11 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
     penPtr->logpen.elpHatch = brush->lbHatch;
     penPtr->logpen.elpNumEntries = style_count;
     memcpy(penPtr->logpen.elpStyleEntry, style_bits, style_count * sizeof(DWORD));
-    
-    GDI_ReleaseObj( hpen );
 
+    if (!(hpen = alloc_gdi_handle( &penPtr->header, OBJ_EXTPEN, &pen_funcs )))
+        HeapFree( GetProcessHeap(), 0, penPtr );
     return hpen;
 }
-
 
 /***********************************************************************
  *           PEN_SelectObject
@@ -218,93 +220,93 @@ HPEN WINAPI ExtCreatePen( DWORD style, DWORD width,
 static HGDIOBJ PEN_SelectObject( HGDIOBJ handle, HDC hdc )
 {
     HGDIOBJ ret = 0;
-    DC *dc = DC_GetDCPtr( hdc );
+    DC *dc = get_dc_ptr( hdc );
 
-    if (!dc) return 0;
+    if (!dc)
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return 0;
+    }
 
-    if (dc->funcs->pSelectPen) handle = dc->funcs->pSelectPen( dc->physDev, handle );
-    if (handle)
+    if (!GDI_inc_ref_count( handle ))
+    {
+        release_dc_ptr( dc );
+        return 0;
+    }
+
+    if (dc->funcs->pSelectPen && !dc->funcs->pSelectPen( dc->physDev, handle ))
+    {
+        GDI_dec_ref_count( handle );
+    }
+    else
     {
         ret = dc->hPen;
         dc->hPen = handle;
-        GDI_inc_ref_count( handle );
         GDI_dec_ref_count( ret );
     }
-    DC_ReleaseDCPtr( dc );
+    release_dc_ptr( dc );
     return ret;
 }
 
 
 /***********************************************************************
- *           PEN_GetObject16
+ *           PEN_DeleteObject
  */
-static INT PEN_GetObject16( HGDIOBJ handle, void *obj, INT count, LPVOID buffer )
+static BOOL PEN_DeleteObject( HGDIOBJ handle )
 {
-    PENOBJ *pen = obj;
-    LOGPEN16 *logpen;
+    PENOBJ *pen = free_gdi_handle( handle );
 
-    if (!buffer) return sizeof(LOGPEN16);
-
-    if (count < sizeof(LOGPEN16)) return 0;
-
-    logpen = buffer;
-    logpen->lopnStyle = pen->logpen.elpPenStyle;
-    logpen->lopnColor = pen->logpen.elpColor;
-    logpen->lopnWidth.x = pen->logpen.elpWidth;
-    logpen->lopnWidth.y = 0;
-
-    return sizeof(LOGPEN16);
+    if (!pen) return FALSE;
+    return HeapFree( GetProcessHeap(), 0, pen );
 }
 
 
 /***********************************************************************
  *           PEN_GetObject
  */
-static INT PEN_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer )
+static INT PEN_GetObject( HGDIOBJ handle, INT count, LPVOID buffer )
 {
-    PENOBJ *pen = obj;
+    PENOBJ *pen = GDI_GetObjPtr( handle, 0 );
+    INT ret = 0;
 
-    switch (GDIMAGIC(pen->header.wMagic))
+    if (!pen) return 0;
+
+    switch (pen->header.type)
     {
-    case PEN_MAGIC:
+    case OBJ_PEN:
     {
         LOGPEN *lp;
 
-        if (!buffer) return sizeof(LOGPEN);
-
-        if (count < sizeof(LOGPEN)) return 0;
-
-        if ((pen->logpen.elpPenStyle & PS_STYLE_MASK) == PS_NULL &&
-            count == sizeof(EXTLOGPEN))
+        if (!buffer) ret = sizeof(LOGPEN);
+        else if (count < sizeof(LOGPEN)) ret = 0;
+        else if ((pen->logpen.elpPenStyle & PS_STYLE_MASK) == PS_NULL && count == sizeof(EXTLOGPEN))
         {
             EXTLOGPEN *elp = buffer;
-            memcpy(elp, &pen->logpen, sizeof(EXTLOGPEN));
+            *elp = pen->logpen;
             elp->elpWidth = 0;
-            return sizeof(EXTLOGPEN);
+            ret = sizeof(EXTLOGPEN);
         }
-
-        lp = buffer;
-        lp->lopnStyle = pen->logpen.elpPenStyle;
-        lp->lopnColor = pen->logpen.elpColor;
-        lp->lopnWidth.x = pen->logpen.elpWidth;
-        lp->lopnWidth.y = 0;
-        return sizeof(LOGPEN);
-    }
-
-    case EXT_PEN_MAGIC:
-    {
-        INT size = sizeof(EXTLOGPEN) + pen->logpen.elpNumEntries * sizeof(DWORD) - sizeof(pen->logpen.elpStyleEntry);
-
-        if (!buffer) return size;
-
-        if (count < size) return 0;
-        memcpy(buffer, &pen->logpen, size);
-        return size;
-    }
-
-    default:
+        else
+        {
+            lp = buffer;
+            lp->lopnStyle = pen->logpen.elpPenStyle;
+            lp->lopnColor = pen->logpen.elpColor;
+            lp->lopnWidth.x = pen->logpen.elpWidth;
+            lp->lopnWidth.y = 0;
+            ret = sizeof(LOGPEN);
+        }
         break;
     }
-    assert(0);
-    return 0;
+
+    case OBJ_EXTPEN:
+        ret = sizeof(EXTLOGPEN) + pen->logpen.elpNumEntries * sizeof(DWORD) - sizeof(pen->logpen.elpStyleEntry);
+        if (buffer)
+        {
+            if (count < ret) ret = 0;
+            else memcpy(buffer, &pen->logpen, ret);
+        }
+        break;
+    }
+    GDI_ReleaseObj( handle );
+    return ret;
 }

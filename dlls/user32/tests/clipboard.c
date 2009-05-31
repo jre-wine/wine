@@ -21,6 +21,7 @@
 #include "wine/test.h"
 #include "winbase.h"
 #include "winerror.h"
+#include "wingdi.h"
 #include "winuser.h"
 
 static BOOL is_win9x = FALSE;
@@ -66,8 +67,9 @@ static void test_ClipboardOwner(void)
     ok(OpenClipboard(hWnd1), "OpenClipboard failed\n");
 
     SetLastError(0xdeadbeef);
-    ok(!OpenClipboard(hWnd2) && GetLastError() == 0xdeadbeef,
-       "OpenClipboard should fail without setting last error value\n");
+    ok(!OpenClipboard(hWnd2) &&
+       (GetLastError() == 0xdeadbeef || GetLastError() == ERROR_ACCESS_DENIED),
+       "OpenClipboard should fail without setting last error value, or with ERROR_ACCESS_DENIED, got error %d\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     ok(!GetClipboardOwner() && GetLastError() == 0xdeadbeef, "clipboard should still be not owned\n");
@@ -76,8 +78,9 @@ static void test_ClipboardOwner(void)
     ok(GetClipboardOwner() == hWnd1, "clipboard should be owned by %p, not by %p\n", hWnd1, GetClipboardOwner());
 
     SetLastError(0xdeadbeef);
-    ok(!OpenClipboard(hWnd2) && GetLastError() == 0xdeadbeef,
-       "OpenClipboard should fail without setting last error value\n");
+    ok(!OpenClipboard(hWnd2) &&
+       (GetLastError() == 0xdeadbeef || GetLastError() == ERROR_ACCESS_DENIED),
+       "OpenClipboard should fail without setting last error valuei, or with ERROR_ACCESS_DENIED, got error %d\n", GetLastError());
 
     ret = CloseClipboard();
     ok( ret, "CloseClipboard error %d\n", GetLastError());
@@ -188,6 +191,77 @@ todo_wine
     test_last_error(ERROR_CLIPBOARD_NOT_OPEN);
 }
 
+static HGLOBAL create_text(void)
+{
+    HGLOBAL h = GlobalAlloc(GMEM_DDESHARE|GMEM_MOVEABLE, 5);
+    char *p = GlobalLock(h);
+    strcpy(p, "test");
+    GlobalUnlock(h);
+    return h;
+}
+
+static HENHMETAFILE create_emf(void)
+{
+    const RECT rect = {0, 0, 100, 100};
+    HDC hdc = CreateEnhMetaFileA(NULL, NULL, &rect, "HENHMETAFILE Ole Clipboard Test\0Test\0\0");
+    ExtTextOutA(hdc, 0, 0, ETO_OPAQUE, &rect, "Test String", strlen("Test String"), NULL);
+    return CloseEnhMetaFile(hdc);
+}
+
+static void test_synthesized(void)
+{
+    HGLOBAL h, htext;
+    HENHMETAFILE emf;
+    BOOL r;
+    UINT cf;
+
+    htext = create_text();
+    emf = create_emf();
+
+    r = OpenClipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    r = EmptyClipboard();
+    ok(r, "gle %d\n", GetLastError());
+    h = SetClipboardData(CF_TEXT, htext);
+    ok(h == htext, "got %p\n", h);
+    h = SetClipboardData(CF_ENHMETAFILE, emf);
+    ok(h == emf, "got %p\n", h);
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    r = OpenClipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    cf = EnumClipboardFormats(0);
+    ok(cf == CF_TEXT, "cf %08x\n", cf);
+
+    cf = EnumClipboardFormats(cf);
+    ok(cf == CF_ENHMETAFILE, "cf %08x\n", cf);
+
+    cf = EnumClipboardFormats(cf);
+    todo_wine ok(cf == CF_LOCALE, "cf %08x\n", cf);
+    if(cf == CF_LOCALE)
+        cf = EnumClipboardFormats(cf);
+    ok(cf == CF_OEMTEXT, "cf %08x\n", cf);
+
+    cf = EnumClipboardFormats(cf);
+    ok(cf == CF_UNICODETEXT ||
+       broken(cf == CF_METAFILEPICT), /* win9x and winME has no CF_UNICODETEXT */
+       "cf %08x\n", cf);
+
+    if(cf == CF_UNICODETEXT)
+        cf = EnumClipboardFormats(cf);
+    ok(cf == CF_METAFILEPICT, "cf %08x\n", cf);
+
+    cf = EnumClipboardFormats(cf);
+    ok(cf == 0, "cf %08x\n", cf);
+
+    r = EmptyClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+}
+
 START_TEST(clipboard)
 {
     SetLastError(0xdeadbeef);
@@ -196,4 +270,5 @@ START_TEST(clipboard)
 
     test_RegisterClipboardFormatA();
     test_ClipboardOwner();
+    test_synthesized();
 }

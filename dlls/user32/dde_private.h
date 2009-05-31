@@ -143,7 +143,7 @@ typedef struct tagWDML_CONV
 /* DDE_LINK struct defines hot, warm, and cold links */
 typedef struct tagWDML_LINK {
     struct tagWDML_LINK*	next;		/* to link all the active links */
-    HCONV			hConv;		/* to get back to the converstaion */
+    HCONV			hConv;		/* to get back to the conversation */
     UINT			transactionType;/* 0 for no link */
     HSZ				hszItem;	/* item targetted for (hot/warm) link */
     UINT			uFmt;		/* format for data */
@@ -232,7 +232,7 @@ extern	void		WDML_FreeTransaction(WDML_INSTANCE* pInstance, WDML_XACT* pXAct, BO
 extern	WDML_XACT*	WDML_FindTransaction(WDML_CONV* pConv, DWORD tid) DECLSPEC_HIDDEN;
 extern	HGLOBAL		WDML_DataHandle2Global(HDDEDATA hDdeData, BOOL fResponse, BOOL fRelease,
 					       BOOL fDeferUpd, BOOL dAckReq) DECLSPEC_HIDDEN;
-extern	HDDEDATA	WDML_Global2DataHandle(HGLOBAL hMem, WINE_DDEHEAD* da) DECLSPEC_HIDDEN;
+extern	HDDEDATA	WDML_Global2DataHandle(WDML_CONV* pConv, HGLOBAL hMem, WINE_DDEHEAD* da) DECLSPEC_HIDDEN;
 extern  BOOL            WDML_IsAppOwned(HDDEDATA hDdeData) DECLSPEC_HIDDEN;
 extern	WDML_INSTANCE*	WDML_GetInstance(DWORD InstId) DECLSPEC_HIDDEN;
 extern	WDML_INSTANCE*	WDML_GetInstanceFromWnd(HWND hWnd) DECLSPEC_HIDDEN;

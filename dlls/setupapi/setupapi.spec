@@ -18,10 +18,10 @@
 @ stub CM_Add_Range
 @ stub CM_Add_Res_Des
 @ stub CM_Add_Res_Des_Ex
-@ stub CM_Connect_MachineA
+@ stdcall CM_Connect_MachineA(str ptr)
 @ stdcall CM_Connect_MachineW(wstr ptr)
-@ stub CM_Create_DevNodeA
-@ stub CM_Create_DevNodeW
+@ stdcall CM_Create_DevNodeA(ptr str long long)
+@ stdcall CM_Create_DevNodeW(ptr wstr long long)
 @ stub CM_Create_DevNode_ExA
 @ stub CM_Create_DevNode_ExW
 @ stub CM_Create_Range_List
@@ -72,7 +72,7 @@
 @ stub CM_Get_DevNode_Status
 @ stub CM_Get_DevNode_Status_Ex
 @ stdcall CM_Get_Device_IDA(ptr ptr long long)
-@ stub CM_Get_Device_IDW
+@ stdcall CM_Get_Device_IDW(ptr ptr long long)
 @ stub CM_Get_Device_ID_ExA
 @ stub CM_Get_Device_ID_ExW
 @ stdcall CM_Get_Device_ID_ListA(ptr ptr long long)
@@ -115,7 +115,7 @@
 @ stub CM_Get_Next_Log_Conf_Ex
 @ stub CM_Get_Next_Res_Des
 @ stub CM_Get_Next_Res_Des_Ex
-@ stub CM_Get_Parent
+@ stdcall CM_Get_Parent(ptr long long)
 @ stub CM_Get_Parent_Ex
 @ stub CM_Get_Res_Des_Data
 @ stub CM_Get_Res_Des_Data_Ex
@@ -128,8 +128,8 @@
 @ stub CM_Intersect_Range_List
 @ stub CM_Invert_Range_List
 @ stub CM_Is_Dock_Station_Present
-@ stub CM_Locate_DevNodeA
-@ stub CM_Locate_DevNodeW
+@ stdcall CM_Locate_DevNodeA(ptr str long)
+@ stdcall CM_Locate_DevNodeW(ptr wstr long)
 @ stub CM_Locate_DevNode_ExA
 @ stub CM_Locate_DevNode_ExW
 @ stub CM_Merge_Range_List
@@ -144,6 +144,10 @@
 @ stub CM_Open_Class_Key_ExW
 @ stub CM_Open_DevNode_Key
 @ stub CM_Open_DevNode_Key_Ex
+@ stub CM_Query_And_Remove_SubTreeA
+@ stub CM_Query_And_Remove_SubTreeW
+@ stub CM_Query_And_Remove_SubTree_ExA
+@ stub CM_Query_And_Remove_SubTree_ExW
 @ stub CM_Query_Arbitrator_Free_Data
 @ stub CM_Query_Arbitrator_Free_Data_Ex
 @ stub CM_Query_Arbitrator_Free_Size
@@ -297,7 +301,7 @@
 @ stub SetupDiDeleteDeviceInterfaceData
 @ stdcall SetupDiDeleteDeviceInterfaceRegKey(ptr ptr long)
 @ stub SetupDiDeleteDeviceRegKey
-@ stub SetupDiDestroyClassImageList
+@ stdcall SetupDiDestroyClassImageList(ptr)
 @ stdcall SetupDiDestroyDeviceInfoList(long)
 @ stub SetupDiDestroyDriverInfoList
 @ stub SetupDiDrawMiniIcon
@@ -319,7 +323,7 @@
 @ stdcall SetupDiGetClassDevsExW(ptr wstr ptr long ptr wstr ptr)
 @ stdcall SetupDiGetClassDevsW(ptr ptr long long)
 @ stub SetupDiGetClassImageIndex
-@ stub SetupDiGetClassImageList
+@ stdcall SetupDiGetClassImageList(ptr)
 @ stub SetupDiGetClassImageListExA
 @ stub SetupDiGetClassImageListExW
 @ stub SetupDiGetClassInstallParamsA
@@ -389,6 +393,8 @@
 @ stub SetupDiUnremoveDevice
 @ stub SetupDuplicateDiskSpaceListA
 @ stub SetupDuplicateDiskSpaceListW
+@ stdcall SetupEnumInfSectionsA(long long ptr long ptr)
+@ stdcall SetupEnumInfSectionsW(long long ptr long ptr)
 @ stdcall SetupFindFirstLineA(long str str ptr)
 @ stdcall SetupFindFirstLineW(long wstr wstr ptr)
 @ stdcall SetupFindNextLine(ptr ptr)
@@ -434,10 +440,10 @@
 @ stdcall SetupInitDefaultQueueCallbackEx(long long long long ptr)
 @ stdcall SetupInitializeFileLogA (str long)
 @ stdcall SetupInitializeFileLogW (wstr long)
-@ stub SetupInstallFileA
-@ stub SetupInstallFileExA
-@ stub SetupInstallFileExW
-@ stub SetupInstallFileW
+@ stdcall SetupInstallFileA(ptr ptr str str str long ptr ptr)
+@ stdcall SetupInstallFileExA(ptr ptr str str str long ptr ptr ptr)
+@ stdcall SetupInstallFileExW(ptr ptr wstr wstr wstr long ptr ptr ptr)
+@ stdcall SetupInstallFileW(ptr ptr wstr wstr wstr long ptr ptr)
 @ stdcall SetupInstallFilesFromInfSectionA(long long long str str long)
 @ stdcall SetupInstallFilesFromInfSectionW(long long long wstr wstr long)
 @ stdcall SetupInstallFromInfSectionA(long long str long long str long ptr ptr long ptr)
@@ -459,8 +465,8 @@
 @ stdcall SetupOpenInfFileW(wstr wstr long ptr)
 @ stdcall SetupOpenLog(long)
 @ stdcall SetupOpenMasterInf()
-@ stub SetupPromptForDiskA
-@ stub SetupPromptForDiskW
+@ stdcall SetupPromptForDiskA(ptr str str str str str long ptr long ptr)
+@ stdcall SetupPromptForDiskW(ptr wstr wstr wstr wstr wstr long ptr long ptr)
 @ stdcall SetupPromptReboot(ptr ptr long)
 @ stub SetupQueryDrivesInDiskSpaceListA
 @ stub SetupQueryDrivesInDiskSpaceListW
@@ -531,7 +537,7 @@
 @ stdcall StringTableInitialize()
 @ stdcall StringTableInitializeEx(long long)
 @ stdcall StringTableLookUpString(ptr wstr long)
-@ stdcall StringTableLookUpStringEx(ptr wstr long ptr ptr)
+@ stdcall StringTableLookUpStringEx(ptr wstr long ptr long)
 @ stdcall StringTableSetExtraData(ptr long ptr long)
 @ stdcall StringTableStringFromId(ptr long)
 @ stdcall StringTableStringFromIdEx(ptr long ptr ptr)
@@ -554,6 +560,8 @@
 @ stub pSetupGetVersionDatum
 @ stub pSetupGuidFromString
 @ stub pSetupIsGuidNull
+@ stdcall pSetupInstallCatalog(wstr wstr ptr)
+@ stdcall pSetupIsUserAdmin() IsUserAdmin
 @ stub pSetupMakeSurePathExists
 @ stdcall pSetupSetGlobalFlags(long)
 @ stdcall pSetupSetQueueFlags(ptr long)
@@ -570,4 +578,5 @@
 @ stdcall pSetupStringTableLookUpString(ptr wstr long) StringTableLookUpString
 @ stdcall pSetupStringTableLookUpStringEx(ptr wstr long ptr ptr) StringTableLookUpStringEx
 @ stdcall pSetupStringTableSetExtraData(ptr long ptr long) StringTableSetExtraData
+@ stub pSetupVerifyCatalogFile
 @ stub pSetupVerifyQueuedCatalogs

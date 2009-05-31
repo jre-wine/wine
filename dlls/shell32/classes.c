@@ -54,7 +54,7 @@ BOOL HCR_MapTypeToValueW(LPCWSTR szExtension, LPWSTR szFileType, LONG len, BOOL 
 	HKEY	hkey;
 	WCHAR	szTemp[MAX_EXTENSION_LENGTH + 2];
 
-	TRACE("%s %p\n", debugstr_w(szExtension), debugstr_w(szFileType));
+	TRACE("%s %p\n", debugstr_w(szExtension), szFileType);
 
     /* added because we do not want to have double dots */
     if (szExtension[0] == '.')
@@ -187,7 +187,7 @@ BOOL HCR_GetExecuteCommandW( HKEY hkeyClass, LPCWSTR szClass, LPCWSTR szVerb, LP
             return FALSE;
         ret = FALSE;
 
-        if (HCR_GetDefaultVerbW(hkeyClass, szVerb, sTempVerb, sizeof(sTempVerb)))
+        if (HCR_GetDefaultVerbW(hkeyClass, szVerb, sTempVerb, sizeof(sTempVerb)/sizeof(sTempVerb[0])))
         {
             WCHAR sTemp[MAX_PATH];
             lstrcpyW(sTemp, swShell);
@@ -313,20 +313,6 @@ BOOL HCR_GetDefaultIconA(LPCSTR szClass, LPSTR szDest, DWORD len, int* picon_idx
 	return ret;
 }
 
-BOOL HCR_GetDefaultIconFromGUIDW(REFIID riid, LPWSTR szDest, DWORD len, int* picon_idx)
-{
-	HKEY	hkey;
-	BOOL	ret = FALSE;
-
-	if (HCR_RegOpenClassIDKey(riid, &hkey))
-	{
-	  ret = HCR_RegGetDefaultIconW(hkey, szDest, len, picon_idx);
-	  RegCloseKey(hkey);
-	}
-	TRACE("-- %s %i\n", debugstr_w(szDest), *picon_idx);
-	return ret;
-}
-
 /***************************************************************************************
 *	HCR_GetClassName	[internal]
 *
@@ -438,7 +424,11 @@ BOOL HCR_GetFolderAttributes(LPCITEMIDLIST pidlFolder, LPDWORD pdwAttributes)
     TRACE("(pidlFolder=%p, pdwAttributes=%p)\n", pidlFolder, pdwAttributes);
        
     if (!_ILIsPidlSimple(pidlFolder)) { 
-        ERR("HCR_GetFolderAttributes should be called for simple PIDL's only!\n");    
+        static int firstHit = 1;
+        if (firstHit) {
+            ERR("HCR_GetFolderAttributes should be called for simple PIDL's only!\n");
+            firstHit = 0;
+        }
         return FALSE;
     }
     

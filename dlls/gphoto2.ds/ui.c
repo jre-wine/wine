@@ -39,8 +39,8 @@
 #include "wine/debug.h"
 #include "resource.h"
 
-LPCSTR settings_key = "Software\\Wine\\Gphoto2";
-LPCSTR settings_value = "SkipUI";
+static const char settings_key[] = "Software\\Wine\\Gphoto2";
+static const char settings_value[] = "SkipUI";
 static BOOL disable_dialog;
 static HBITMAP static_bitmap;
 
@@ -114,7 +114,6 @@ static void PopulateListView(HWND List)
 static void PopulateImageList(HIMAGELIST *iList, HWND list)
 {
 	struct gphoto2_file *file;
-	INT rc;
 	HWND 	progress_dialog;
 
 	progress_dialog =
@@ -134,7 +133,7 @@ static void PopulateImageList(HIMAGELIST *iList, HWND list)
 #else
 			bitmap = 0;
 #endif
-			GetObjectA(bitmap,sizeof(BITMAP),(LPVOID)&bmpInfo);
+			GetObjectA(bitmap,sizeof(BITMAP),&bmpInfo);
 
 			if (*iList == 0)
 			{
@@ -143,8 +142,8 @@ static void PopulateImageList(HIMAGELIST *iList, HWND list)
 
 				SendMessageW(list, LVM_SETICONSPACING, 0,
 						MAKELONG(bmpInfo.bmWidth+6, bmpInfo.bmHeight+15) ); }
-			
-			rc = ImageList_Add(*iList, bitmap, 0);
+
+			ImageList_Add(*iList, bitmap, 0);
 
 			DeleteObject(static_bitmap);
 			static_bitmap = bitmap;
@@ -275,12 +274,12 @@ static INT_PTR CALLBACK ProgressProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 	    return FALSE;
 }   
 
-HWND TransferringDialogBox(HWND dialog, DWORD progress)
+HWND TransferringDialogBox(HWND dialog, LONG progress)
 {
 	if (!dialog)
 		dialog = CreateDialogW(GPHOTO2_instance,
 				(LPWSTR)MAKEINTRESOURCE(IDD_DIALOG1), NULL, ProgressProc);
-		                
+
 	if (progress == -1)
 	{
 		EndDialog(dialog,0);

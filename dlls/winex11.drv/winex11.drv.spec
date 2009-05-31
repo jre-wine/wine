@@ -22,6 +22,7 @@
 @ cdecl GetDIBits(ptr long long long ptr ptr long) X11DRV_GetDIBits
 @ cdecl GetDeviceCaps(ptr long) X11DRV_GetDeviceCaps
 @ cdecl GetDeviceGammaRamp(ptr ptr) X11DRV_GetDeviceGammaRamp
+@ cdecl GetICMProfile(ptr ptr ptr) X11DRV_GetICMProfile
 @ cdecl GetNearestColor(ptr long) X11DRV_GetNearestColor
 @ cdecl GetPixel(ptr long long) X11DRV_GetPixel
 @ cdecl GetPixelFormat(ptr) X11DRV_GetPixelFormat
@@ -68,7 +69,6 @@
 @ cdecl GetAsyncKeyState(long) X11DRV_GetAsyncKeyState
 @ cdecl GetKeyNameText(long ptr long) X11DRV_GetKeyNameText
 @ cdecl GetKeyboardLayout(long) X11DRV_GetKeyboardLayout
-@ cdecl GetKeyboardLayoutList(long ptr) X11DRV_GetKeyboardLayoutList
 @ cdecl GetKeyboardLayoutName(ptr) X11DRV_GetKeyboardLayoutName
 @ cdecl LoadKeyboardLayout(wstr long) X11DRV_LoadKeyboardLayout
 @ cdecl MapVirtualKeyEx(long long long) X11DRV_MapVirtualKeyEx
@@ -89,31 +89,33 @@
 @ cdecl AcquireClipboard(long) X11DRV_AcquireClipboard
 @ cdecl CountClipboardFormats() X11DRV_CountClipboardFormats
 @ cdecl CreateDesktopWindow(long) X11DRV_CreateDesktopWindow
-@ cdecl CreateWindow(long ptr long) X11DRV_CreateWindow
+@ cdecl CreateWindow(long) X11DRV_CreateWindow
 @ cdecl DestroyWindow(long) X11DRV_DestroyWindow
 @ cdecl EmptyClipboard(long) X11DRV_EmptyClipboard
 @ cdecl EndClipboardUpdate() X11DRV_EndClipboardUpdate
 @ cdecl EnumClipboardFormats(long) X11DRV_EnumClipboardFormats
 @ cdecl GetClipboardData(long ptr ptr) X11DRV_GetClipboardData
 @ cdecl GetClipboardFormatName(long ptr long) X11DRV_GetClipboardFormatName
-@ cdecl GetDCEx(long long long) X11DRV_GetDCEx
+@ cdecl GetDC(long long long ptr ptr long) X11DRV_GetDC
 @ cdecl IsClipboardFormatAvailable(long) X11DRV_IsClipboardFormatAvailable
 @ cdecl MsgWaitForMultipleObjectsEx(long ptr long long long) X11DRV_MsgWaitForMultipleObjectsEx
 @ cdecl RegisterClipboardFormat(wstr) X11DRV_RegisterClipboardFormat
-@ cdecl ReleaseDC(long long long) X11DRV_ReleaseDC
+@ cdecl ReleaseDC(long long) X11DRV_ReleaseDC
 @ cdecl ScrollDC(long long long ptr ptr long ptr) X11DRV_ScrollDC
 @ cdecl SetClipboardData(long long long long) X11DRV_SetClipboardData
+@ cdecl SetCapture(long long) X11DRV_SetCapture
 @ cdecl SetFocus(long) X11DRV_SetFocus
+@ cdecl SetLayeredWindowAttributes(long long long long) X11DRV_SetLayeredWindowAttributes
 @ cdecl SetParent(long long long) X11DRV_SetParent
 @ cdecl SetWindowIcon(long long long) X11DRV_SetWindowIcon
-@ cdecl SetWindowPos(long long ptr ptr long ptr) X11DRV_SetWindowPos
 @ cdecl SetWindowRgn(long long long) X11DRV_SetWindowRgn
-@ cdecl SetWindowStyle(ptr long) X11DRV_SetWindowStyle
+@ cdecl SetWindowStyle(ptr long ptr) X11DRV_SetWindowStyle
 @ cdecl SetWindowText(long wstr) X11DRV_SetWindowText
-@ cdecl ShowWindow(long long) X11DRV_ShowWindow
-@ cdecl SysCommandSizeMove(long long) X11DRV_SysCommandSizeMove
-@ cdecl WindowFromDC(long) X11DRV_WindowFromDC
+@ cdecl ShowWindow(long long ptr long) X11DRV_ShowWindow
+@ cdecl SysCommand(long long long) X11DRV_SysCommand
 @ cdecl WindowMessage(long long long long) X11DRV_WindowMessage
+@ cdecl WindowPosChanging(long long long ptr ptr ptr) X11DRV_WindowPosChanging
+@ cdecl WindowPosChanged(long long long ptr ptr ptr ptr) X11DRV_WindowPosChanged
 
 # WinTab32
 @ cdecl AttachEventQueueToTablet(long) X11DRV_AttachEventQueueToTablet
@@ -128,8 +130,8 @@
 # Desktop
 @ cdecl wine_create_desktop(long long) X11DRV_create_desktop
 
-# XIM
-@ cdecl ForceXIMReset(long) X11DRV_ForceXIMReset
+# System tray
+@ cdecl wine_notify_icon(long ptr)
 
 # OpenGL
 @ cdecl wglCopyContext(long long long) X11DRV_wglCopyContext
@@ -139,6 +141,25 @@
 @ cdecl wglGetPbufferDCARB(ptr ptr) X11DRV_wglGetPbufferDCARB
 @ cdecl wglMakeContextCurrentARB(ptr ptr long) X11DRV_wglMakeContextCurrentARB
 @ cdecl wglMakeCurrent(ptr long) X11DRV_wglMakeCurrent
+@ cdecl wglSetPixelFormatWINE(ptr long ptr) X11DRV_wglSetPixelFormatWINE
 @ cdecl wglShareLists(long long) X11DRV_wglShareLists
 @ cdecl wglUseFontBitmapsA(ptr long long long) X11DRV_wglUseFontBitmapsA
 @ cdecl wglUseFontBitmapsW(ptr long long long) X11DRV_wglUseFontBitmapsW
+
+#IME Interface
+@ stdcall ImeInquire(ptr wstr wstr)
+@ stdcall ImeConfigure(long long long ptr)
+@ stdcall ImeDestroy(long)
+@ stdcall ImeEscape(long long ptr)
+@ stdcall ImeSelect(long long)
+@ stdcall ImeSetActiveContext(long long)
+@ stdcall ImeToAsciiEx(long long ptr ptr long long)
+@ stdcall NotifyIME(long long long long)
+@ stdcall ImeRegisterWord(wstr long wstr)
+@ stdcall ImeUnregisterWord(wstr long wstr)
+@ stdcall ImeEnumRegisterWord(ptr wstr long wstr ptr)
+@ stdcall ImeSetCompositionString(long long ptr long ptr long)
+@ stdcall ImeConversionList(long wstr ptr long long)
+@ stdcall ImeProcessKey(long long long ptr)
+@ stdcall ImeGetRegisterWordStyle(long ptr)
+@ stdcall ImeGetImeMenuItems(long long long ptr ptr long)

@@ -367,7 +367,8 @@ DWORD WINAPI VerInstallFileA(
     LPCSTR pdest;
     char	destfn[260],tmpfn[260],srcfn[260];
     HFILE	hfsrc,hfdst;
-    DWORD	attr,ret,xret,tmplast;
+    DWORD	attr,xret,tmplast;
+    LONG	ret;
     LPBYTE	buf1,buf2;
     OFSTRUCT	ofs;
 
@@ -419,30 +420,31 @@ DWORD WINAPI VerInstallFileA(
 	}
 	ret = LZCopy(hfsrc,hfdst);
 	_lclose(hfdst);
-	if (((LONG)ret) < 0) {
+	if (ret < 0) {
 	    /* translate LZ errors into VIF_xxx */
 	    switch (ret) {
 	    case LZERROR_BADINHANDLE:
 	    case LZERROR_READ:
 	    case LZERROR_BADVALUE:
 	    case LZERROR_UNKNOWNALG:
-		ret = VIF_CANNOTREADSRC;
+		xret = VIF_CANNOTREADSRC;
 		break;
 	    case LZERROR_BADOUTHANDLE:
 	    case LZERROR_WRITE:
-		ret = VIF_OUTOFSPACE;
+		xret = VIF_OUTOFSPACE;
 		break;
 	    case LZERROR_GLOBALLOC:
 	    case LZERROR_GLOBLOCK:
-		ret = VIF_OUTOFMEMORY;
+		xret = VIF_OUTOFMEMORY;
 		break;
 	    default: /* unknown error, should not happen */
-		ret = 0;
+		FIXME("Unknown LZCopy error %d, ignoring.\n", ret);
+		xret = 0;
 		break;
 	    }
-	    if (ret) {
+	    if (xret) {
 		LZClose(hfsrc);
-		return ret;
+		return xret;
 	    }
 	}
     }
@@ -533,7 +535,7 @@ DWORD WINAPI VerInstallFileW(
 	LPCWSTR destdir,LPCWSTR curdir,LPWSTR tmpfile,PUINT tmpfilelen )
 {
     LPSTR wsrcf = NULL, wsrcd = NULL, wdestf = NULL, wdestd = NULL, wtmpf = NULL, wcurd = NULL;
-    DWORD ret;
+    DWORD ret = 0;
     UINT len;
 
     if (srcfilename)
@@ -541,34 +543,50 @@ DWORD WINAPI VerInstallFileW(
         len = WideCharToMultiByte( CP_ACP, 0, srcfilename, -1, NULL, 0, NULL, NULL );
         if ((wsrcf = HeapAlloc( GetProcessHeap(), 0, len )))
             WideCharToMultiByte( CP_ACP, 0, srcfilename, -1, wsrcf, len, NULL, NULL );
+        else
+            ret = VIF_OUTOFMEMORY;
     }
-    if (srcdir)
+    if (srcdir && !ret)
     {
         len = WideCharToMultiByte( CP_ACP, 0, srcdir, -1, NULL, 0, NULL, NULL );
         if ((wsrcd = HeapAlloc( GetProcessHeap(), 0, len )))
             WideCharToMultiByte( CP_ACP, 0, srcdir, -1, wsrcd, len, NULL, NULL );
+        else
+            ret = VIF_OUTOFMEMORY;
     }
-    if (destfilename)
+    if (destfilename && !ret)
     {
         len = WideCharToMultiByte( CP_ACP, 0, destfilename, -1, NULL, 0, NULL, NULL );
         if ((wdestf = HeapAlloc( GetProcessHeap(), 0, len )))
             WideCharToMultiByte( CP_ACP, 0, destfilename, -1, wdestf, len, NULL, NULL );
+        else
+            ret = VIF_OUTOFMEMORY;
     }
-    if (destdir)
+    if (destdir && !ret)
     {
         len = WideCharToMultiByte( CP_ACP, 0, destdir, -1, NULL, 0, NULL, NULL );
         if ((wdestd = HeapAlloc( GetProcessHeap(), 0, len )))
             WideCharToMultiByte( CP_ACP, 0, destdir, -1, wdestd, len, NULL, NULL );
+        else
+            ret = VIF_OUTOFMEMORY;
     }
-    if (curdir)
+    if (curdir && !ret)
     {
         len = WideCharToMultiByte( CP_ACP, 0, curdir, -1, NULL, 0, NULL, NULL );
         if ((wcurd = HeapAlloc( GetProcessHeap(), 0, len )))
             WideCharToMultiByte( CP_ACP, 0, curdir, -1, wcurd, len, NULL, NULL );
+        else
+            ret = VIF_OUTOFMEMORY;
     }
-    len = *tmpfilelen * sizeof(WCHAR);
-    wtmpf = HeapAlloc( GetProcessHeap(), 0, len );
-    ret = VerInstallFileA(flags,wsrcf,wdestf,wsrcd,wdestd,wcurd,wtmpf,&len);
+    if (!ret)
+    {
+        len = *tmpfilelen * sizeof(WCHAR);
+        wtmpf = HeapAlloc( GetProcessHeap(), 0, len );
+        if (!wtmpf)
+            ret = VIF_OUTOFMEMORY;
+    }
+    if (!ret)
+        ret = VerInstallFileA(flags,wsrcf,wdestf,wsrcd,wdestd,wcurd,wtmpf,&len);
     if (!ret)
         *tmpfilelen = MultiByteToWideChar( CP_ACP, 0, wtmpf, -1, tmpfile, *tmpfilelen );
     else if (ret & VIF_BUFFTOOSMALL)

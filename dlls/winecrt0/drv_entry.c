@@ -27,11 +27,11 @@
 struct _DRIVER_OBJECT;
 extern NTSTATUS WINAPI DriverEntry( struct _DRIVER_OBJECT *obj, UNICODE_STRING *path );
 
-NTSTATUS DECLSPEC_HIDDEN __wine_spec_drv_entry( struct _DRIVER_OBJECT *obj, UNICODE_STRING *path )
+NTSTATUS DECLSPEC_HIDDEN WINAPI __wine_spec_drv_entry( struct _DRIVER_OBJECT *obj, UNICODE_STRING *path )
 {
     BOOL needs_init = (__wine_spec_init_state != CONSTRUCTORS_DONE);
 
-    if (needs_init) _init( __wine_main_argc, __wine_main_argv, __wine_main_environ );
+    if (needs_init) _init( __wine_main_argc, __wine_main_argv, NULL );
     return DriverEntry( obj, path );
     /* there is no detach routine so we can't call destructors */
 }

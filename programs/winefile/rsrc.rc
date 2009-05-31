@@ -56,12 +56,14 @@ IDB_IMAGES BITMAP DISCARDABLE images.bmp
 /* include localised resources */
 
 #include "Cs.rc"
+#include "Da.rc"
 #include "De.rc"
 #include "En.rc"
 #include "Es.rc"
 #include "Fr.rc"
 #include "Hu.rc"
 #include "It.rc"
+#include "Ja.rc"
 #include "Ko.rc"
 #include "Nl.rc"
 #include "No.rc"

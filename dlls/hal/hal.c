@@ -31,7 +31,7 @@
 #include "windef.h"
 #include "winternl.h"
 #include "excpt.h"
-#include "ddk/wdm.h"
+#include "ddk/ntddk.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
@@ -54,6 +54,26 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 
 
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExAcquireFastMutex )
+VOID WINAPI __regs_ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExReleaseFastMutex )
+VOID WINAPI __regs_ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( KfAcquireSpinLock )
 KIRQL WINAPI __regs_KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
 #else
@@ -62,7 +82,7 @@ KIRQL WINAPI KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
 {
     FIXME( "(%p) stub!\n", SpinLock );
 
-    return (KIRQL)0;
+    return 0;
 }
 
 
@@ -86,7 +106,7 @@ KIRQL WINAPI KfRaiseIrql(KIRQL NewIrql)
 {
     FIXME( "(%u) stub!\n", NewIrql );
 
-    return (KIRQL)0;
+    return 0;
 }
 
 
@@ -98,4 +118,11 @@ VOID WINAPI KfReleaseSpinLock(PKSPIN_LOCK SpinLock, KIRQL NewIrql)
 #endif
 {
     FIXME( "(%p %u) stub!\n", SpinLock, NewIrql );
+}
+
+ULONG WINAPI HalGetBusData(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG SlotNumber, PVOID Buffer, ULONG Length)
+{
+    FIXME("(%u %u %u %p %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Length);
+    /* Claim that there is no such bus */
+    return 0;
 }

@@ -118,7 +118,7 @@ static const char OLEDD_DRAGTRACKERCLASS[] = "WineDragDropTracker32";
 static struct list targetListHead = LIST_INIT(targetListHead);
 
 /******************************************************************************
- * These are the prototypes of miscelaneous utility methods
+ * These are the prototypes of miscellaneous utility methods
  */
 static void OLEUTL_ReadRegistryDWORDValue(HKEY regKey, DWORD* pdwValue);
 
@@ -161,7 +161,6 @@ static DWORD OLEDD_GetButtonState(void);
 
 
 /******************************************************************************
- *		OleBuildVersion	[OLE2.1]
  *		OleBuildVersion [OLE32.@]
  */
 DWORD WINAPI OleBuildVersion(void)
@@ -171,7 +170,6 @@ DWORD WINAPI OleBuildVersion(void)
 }
 
 /***********************************************************************
- *           OleInitialize       (OLE2.2)
  *           OleInitialize       (OLE32.@)
  */
 HRESULT WINAPI OleInitialize(LPVOID reserved)
@@ -228,7 +226,6 @@ HRESULT WINAPI OleInitialize(LPVOID reserved)
 }
 
 /******************************************************************************
- *		OleUninitialize	[OLE2.3]
  *		OleUninitialize	[OLE32.@]
  */
 void WINAPI OleUninitialize(void)
@@ -500,15 +497,10 @@ HRESULT WINAPI DoDragDrop (
   trackerInfo.curTargetHWND     = 0;
   trackerInfo.curDragTarget     = 0;
 
-  hwndTrackWindow = CreateWindowA(OLEDD_DRAGTRACKERCLASS,
-				    "TrackerWindow",
-				    WS_POPUP,
-				    CW_USEDEFAULT, CW_USEDEFAULT,
-				    CW_USEDEFAULT, CW_USEDEFAULT,
-				    0,
-				    0,
-				    0,
-				    (LPVOID)&trackerInfo);
+  hwndTrackWindow = CreateWindowA(OLEDD_DRAGTRACKERCLASS, "TrackerWindow",
+                                  WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
+                                  CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0,
+                                  &trackerInfo);
 
   if (hwndTrackWindow!=0)
   {
@@ -1299,7 +1291,7 @@ static OleMenuHookItem * OLEMenu_IsHookInstalled( DWORD tid )
  */
 static BOOL OLEMenu_FindMainMenuIndex( HMENU hMainMenu, HMENU hPopupMenu, UINT *pnPos )
 {
-  UINT i, nItems;
+  INT i, nItems;
 
   nItems = GetMenuItemCount( hMainMenu );
 
@@ -1400,12 +1392,12 @@ static LRESULT CALLBACK OLEMenu_CallWndProc(INT code, WPARAM wParam, LPARAM lPar
    * If the window has an OLEMenu property we may need to dispatch
    * the menu message to its active objects window instead. */
 
-  hOleMenu = (HOLEMENU)GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
+  hOleMenu = GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
   if ( !hOleMenu )
     goto NEXTHOOK;
 
   /* Get the menu descriptor */
-  pOleMenuDescriptor = (OleMenuDescriptor *) GlobalLock( hOleMenu );
+  pOleMenuDescriptor = GlobalLock( hOleMenu );
   if ( !pOleMenuDescriptor ) /* Bad descriptor! */
     goto NEXTHOOK;
 
@@ -1505,7 +1497,7 @@ static LRESULT CALLBACK OLEMenu_GetMsgProc(INT code, WPARAM wParam, LPARAM lPara
    * If the window has an OLEMenu property we may need to dispatch
    * the menu message to its active objects window instead. */
 
-  hOleMenu = (HOLEMENU)GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
+  hOleMenu = GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
   if ( !hOleMenu )
     goto NEXTHOOK;
 
@@ -1524,7 +1516,7 @@ static LRESULT CALLBACK OLEMenu_GetMsgProc(INT code, WPARAM wParam, LPARAM lPara
   }
 
   /* Get the menu descriptor */
-  pOleMenuDescriptor = (OleMenuDescriptor *) GlobalLock( hOleMenu );
+  pOleMenuDescriptor = GlobalLock( hOleMenu );
   if ( !pOleMenuDescriptor ) /* Bad descriptor! */
     goto NEXTHOOK;
 
@@ -1579,7 +1571,7 @@ HOLEMENU WINAPI OleCreateMenuDescriptor(
                                 sizeof(OleMenuDescriptor) ) ) )
   return 0;
 
-  pOleMenuDescriptor = (OleMenuDescriptor *) GlobalLock( hOleMenu );
+  pOleMenuDescriptor = GlobalLock( hOleMenu );
   if ( !pOleMenuDescriptor )
     return 0;
 
@@ -1664,7 +1656,7 @@ HRESULT WINAPI OleSetMenuDescriptor(
   return E_FAIL;
 
     /* Get the menu descriptor */
-    pOleMenuDescriptor = (OleMenuDescriptor *) GlobalLock( hOleMenu );
+    pOleMenuDescriptor = GlobalLock( hOleMenu );
     if ( !pOleMenuDescriptor )
       return E_UNEXPECTED;
 
@@ -1963,7 +1955,7 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
     {
       LPCREATESTRUCTA createStruct = (LPCREATESTRUCTA)lParam;
 
-      SetWindowLongA(hwnd, 0, (LONG)createStruct->lpCreateParams);
+      SetWindowLongPtrA(hwnd, 0, (LONG_PTR)createStruct->lpCreateParams);
       SetTimer(hwnd, DRAG_TIMER_ID, 50, NULL);
 
       break;
@@ -1971,7 +1963,7 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
     case WM_TIMER:
     case WM_MOUSEMOVE:
     {
-      OLEDD_TrackMouseMove((TrackerWindowInfo*)GetWindowLongA(hwnd, 0));
+      OLEDD_TrackMouseMove((TrackerWindowInfo*)GetWindowLongPtrA(hwnd, 0));
       break;
     }
     case WM_LBUTTONUP:
@@ -1981,7 +1973,7 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
     case WM_MBUTTONDOWN:
     case WM_RBUTTONDOWN:
     {
-      OLEDD_TrackStateChange((TrackerWindowInfo*)GetWindowLongA(hwnd, 0));
+      OLEDD_TrackStateChange((TrackerWindowInfo*)GetWindowLongPtrA(hwnd, 0));
       break;
     }
     case WM_DESTROY:
@@ -2119,19 +2111,19 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
   {
     if (*trackerInfo->pdwEffect & DROPEFFECT_MOVE)
     {
-      SetCursor(LoadCursorA(OLE32_hInstance, MAKEINTRESOURCEA(1)));
+      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(1)));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_COPY)
     {
-      SetCursor(LoadCursorA(OLE32_hInstance, MAKEINTRESOURCEA(2)));
+      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(2)));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_LINK)
     {
-      SetCursor(LoadCursorA(OLE32_hInstance, MAKEINTRESOURCEA(3)));
+      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(3)));
     }
     else
     {
-      SetCursor(LoadCursorA(OLE32_hInstance, MAKEINTRESOURCEA(0)));
+      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(0)));
     }
   }
 }
@@ -2599,7 +2591,7 @@ BSTR WINAPI PropSysAllocString(LPCOLESTR str)
     stringBuffer = (WCHAR*)newBuffer;
     stringBuffer[len] = '\0';
 
-    return (LPWSTR)stringBuffer;
+    return stringBuffer;
 }
 
 /***********************************************************************
@@ -2647,6 +2639,7 @@ static inline HRESULT PROPVARIANT_ValidateType(VARTYPE vt)
     case VT_BSTR:
     case VT_ERROR:
     case VT_BOOL:
+    case VT_DECIMAL:
     case VT_UI1:
     case VT_UI2:
     case VT_UI4:
@@ -2717,6 +2710,7 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
     case VT_DATE:
     case VT_ERROR:
     case VT_BOOL:
+    case VT_DECIMAL:
     case VT_UI1:
     case VT_UI2:
     case VT_UI4:
@@ -2734,7 +2728,7 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
     case VT_CLSID:
     case VT_LPSTR:
     case VT_LPWSTR:
-        /* pick an arbitary typed pointer - we don't care about the type
+        /* pick an arbitrary typed pointer - we don't care about the type
          * as we are just freeing it */
         CoTaskMemFree(pvar->u.puuid);
         break;
@@ -2781,7 +2775,7 @@ HRESULT WINAPI PropVariantClear(PROPVARIANT * pvar) /* [in/out] */
             }
             if (pvar->vt & ~VT_VECTOR)
             {
-                /* pick an arbitary VT_VECTOR structure - they all have the same
+                /* pick an arbitrary VT_VECTOR structure - they all have the same
                  * memory layout */
                 CoTaskMemFree(pvar->u.capropvar.pElems);
             }
@@ -2804,17 +2798,34 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
     ULONG len;
     HRESULT hr;
 
-    TRACE("(%p, %p)\n", pvarDest, pvarSrc);
+    TRACE("(%p, %p vt %04x)\n", pvarDest, pvarSrc, pvarSrc->vt);
 
     hr = PROPVARIANT_ValidateType(pvarSrc->vt);
     if (FAILED(hr))
         return hr;
 
     /* this will deal with most cases */
-    CopyMemory(pvarDest, pvarSrc, sizeof(*pvarDest));
+    *pvarDest = *pvarSrc;
 
     switch(pvarSrc->vt)
     {
+    case VT_EMPTY:
+    case VT_NULL:
+    case VT_I1:
+    case VT_UI1:
+    case VT_I2:
+    case VT_UI2:
+    case VT_BOOL:
+    case VT_DECIMAL:
+    case VT_I4:
+    case VT_UI4:
+    case VT_R4:
+    case VT_ERROR:
+    case VT_I8:
+    case VT_UI8:
+    case VT_R8:
+    case VT_CY:
+    case VT_DATE:
     case VT_FILETIME:
         break;
     case VT_STREAM:
@@ -2825,7 +2836,7 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
         break;
     case VT_CLSID:
         pvarDest->u.puuid = CoTaskMemAlloc(sizeof(CLSID));
-        CopyMemory(pvarDest->u.puuid, pvarSrc->u.puuid, sizeof(CLSID));
+        *pvarDest->u.puuid = *pvarSrc->u.puuid;
         break;
     case VT_LPSTR:
         len = strlen(pvarSrc->u.pszVal);
@@ -2885,11 +2896,11 @@ HRESULT WINAPI PropVariantCopy(PROPVARIANT *pvarDest,      /* [out] */
             case VT_FILETIME: elemSize = sizeof(pvarSrc->u.filetime); break;
             case VT_CLSID:    elemSize = sizeof(*pvarSrc->u.puuid); break;
             case VT_CF:       elemSize = sizeof(*pvarSrc->u.pclipdata); break;
-            case VT_BSTR:     elemSize = sizeof(*pvarSrc->u.bstrVal); break;
-            case VT_LPSTR:    elemSize = sizeof(*pvarSrc->u.pszVal); break;
-            case VT_LPWSTR:   elemSize = sizeof(*pvarSrc->u.pwszVal); break;
+            case VT_BSTR:     elemSize = sizeof(pvarSrc->u.bstrVal); break;
+            case VT_LPSTR:    elemSize = sizeof(pvarSrc->u.pszVal); break;
+            case VT_LPWSTR:   elemSize = sizeof(pvarSrc->u.pwszVal); break;
+            case VT_VARIANT:  elemSize = sizeof(*pvarSrc->u.pvarVal); break;
 
-            case VT_VARIANT:
             default:
                 FIXME("Invalid element type: %ul\n", pvarSrc->vt & ~VT_VECTOR);
                 return E_INVALIDARG;

@@ -24,10 +24,10 @@
 @ stub DwmDefWindowProc
 @ stub DwmDetachMilContent
 @ stub DwmEnableBlurBehindWindow
-@ stub DwmEnableMMCSS
-@ stub DwmExtendFrameIntoClientArea
-@ stub DwmFlush
-@ stub DwmGetColorizationColor
+@ stdcall DwmEnableMMCSS(long)
+@ stdcall DwmExtendFrameIntoClientArea(long ptr)
+@ stdcall DwmFlush()
+@ stdcall DwmGetColorizationColor(ptr long)
 @ stub DwmGetCompositionTimingInfo
 @ stub DwmGetGraphicsStreamClient
 @ stub DwmGetGraphicsStreamTransformHint
@@ -39,6 +39,6 @@
 @ stub DwmRegisterThumbnail
 @ stub DwmSetDxFrameDuration
 @ stub DwmSetPresentParameters
-@ stub DwmSetWindowAttribute
-@ stub DwmUnregisterThumbnail
+@ stdcall DwmSetWindowAttribute(long long ptr long)
+@ stdcall DwmUnregisterThumbnail(long)
 @ stub DwmUpdateThumbnailProperties

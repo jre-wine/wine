@@ -207,14 +207,13 @@ static int DSDB_CreateMMAP(IDsDriverBufferImpl* pdbi)
     snd_pcm_sw_params_set_start_threshold(pcm, sw_params, 0);
     snd_pcm_sw_params_get_boundary(sw_params, &boundary);
     snd_pcm_sw_params_set_stop_threshold(pcm, sw_params, boundary);
-    snd_pcm_sw_params_set_silence_threshold(pcm, sw_params, INT_MAX);
+    snd_pcm_sw_params_set_silence_threshold(pcm, sw_params, boundary);
     snd_pcm_sw_params_set_silence_size(pcm, sw_params, 0);
     snd_pcm_sw_params_set_avail_min(pcm, sw_params, 0);
-    snd_pcm_sw_params_set_xrun_mode(pcm, sw_params, SND_PCM_XRUN_NONE);
     err = snd_pcm_sw_params(pcm, sw_params);
 
     avail = snd_pcm_avail_update(pcm);
-    if (avail < 0)
+    if ((snd_pcm_sframes_t)avail < 0)
     {
         ERR("No buffer is available: %s.\n", snd_strerror(avail));
         return DSERR_GENERIC;
@@ -330,6 +329,8 @@ static HRESULT WINAPI IDsDriverBufferImpl_Lock(PIDSDRIVERBUFFER iface,
         TRACE("Hit mmap_pos, locking data!\n");
         snd_pcm_mmap_begin(This->pcm, &areas, &This->mmap_pos, &putin);
     }
+    else
+        WARN("mmap_pos (%lu) != writepos (%lu) not locking data!\n", This->mmap_pos, writepos);
 
     LeaveCriticalSection(&This->pcm_crst);
     /* **** */
@@ -548,7 +549,15 @@ static HRESULT WINAPI IDsDriverBufferImpl_GetPosition(PIDSDRIVERBUFFER iface,
     }
     if (state == SND_PCM_STATE_RUNNING)
     {
-        snd_pcm_uframes_t used = This->mmap_buflen_frames - snd_pcm_avail_update(This->pcm);
+        snd_pcm_sframes_t used = This->mmap_buflen_frames - snd_pcm_avail_update(This->pcm);
+
+        if (used < 0)
+        {
+            This->mmap_pos += -used;
+            snd_pcm_forward(This->pcm, -used);
+            This->mmap_pos %= This->mmap_buflen_frames;
+            used = 0;
+        }
 
         if (This->mmap_pos > used)
             hw_pptr = This->mmap_pos - used;
@@ -661,7 +670,7 @@ static HRESULT WINAPI IDsDriverImpl_GetDriverDesc(PIDSDRIVER iface, PDSDRIVERDES
 {
     IDsDriverImpl *This = (IDsDriverImpl *)iface;
     TRACE("(%p,%p)\n",iface,pDesc);
-    memcpy(pDesc, &(WOutDev[This->wDevID].ds_desc), sizeof(DSDRIVERDESC));
+    *pDesc			= WOutDev[This->wDevID].ds_desc;
     pDesc->dwFlags		= DSDDESC_DONTNEEDSECONDARYLOCK | DSDDESC_DONTNEEDWRITELEAD;
     pDesc->dnDevNode		= WOutDev[This->wDevID].waveDesc.dnDevNode;
     pDesc->wVxdId		= 0;
@@ -730,7 +739,7 @@ static HRESULT WINAPI IDsDriverImpl_GetCaps(PIDSDRIVER iface, PDSDRIVERCAPS pCap
 {
     IDsDriverImpl *This = (IDsDriverImpl *)iface;
     TRACE("(%p,%p)\n",iface,pCaps);
-    memcpy(pCaps, &(WOutDev[This->wDevID].ds_caps), sizeof(DSDRIVERCAPS));
+    *pCaps = WOutDev[This->wDevID].ds_caps;
     return DS_OK;
 }
 
@@ -844,7 +853,7 @@ DWORD wodDsCreate(UINT wDevID, PIDSDRIVER* drv)
 
 DWORD wodDsDesc(UINT wDevID, PDSDRIVERDESC desc)
 {
-    memcpy(desc, &(WOutDev[wDevID].ds_desc), sizeof(DSDRIVERDESC));
+    *desc = WOutDev[wDevID].ds_desc;
     return MMSYSERR_NOERROR;
 }
 

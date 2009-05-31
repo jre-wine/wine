@@ -28,18 +28,18 @@
 @ stub Exfi386InterlockedExchangeUlong
 @ stub Exfi386InterlockedIncrementLong
 @ stub HalExamineMBR
-@ stdcall InterlockedCompareExchange(ptr long long) kernel32.InterlockedCompareExchange
-@ stdcall InterlockedDecrement(ptr) kernel32.InterlockedDecrement
-@ stdcall InterlockedExchange(ptr long) kernel32.InterlockedExchange
-@ stdcall InterlockedExchangeAdd(ptr long ) kernel32.InterlockedExchangeAdd
-@ stdcall InterlockedIncrement(ptr) kernel32.InterlockedIncrement
+@ stdcall -norelay InterlockedCompareExchange(ptr long long) NTOSKRNL_InterlockedCompareExchange
+@ stdcall -norelay InterlockedDecrement(ptr) NTOSKRNL_InterlockedDecrement
+@ stdcall -norelay InterlockedExchange(ptr long) NTOSKRNL_InterlockedExchange
+@ stdcall -norelay InterlockedExchangeAdd(ptr long) NTOSKRNL_InterlockedExchangeAdd
+@ stdcall -norelay InterlockedIncrement(ptr) NTOSKRNL_InterlockedIncrement
 @ stdcall InterlockedPopEntrySList(ptr) kernel32.InterlockedPopEntrySList
 @ stdcall InterlockedPushEntrySList(ptr ptr) kernel32.InterlockedPushEntrySList
 @ stub IoAssignDriveLetters
 @ stub IoReadPartitionTable
 @ stub IoSetPartitionInformation
 @ stub IoWritePartitionTable
-@ stub IofCallDriver
+@ stdcall -norelay IofCallDriver(ptr ptr)
 @ stdcall -norelay IofCompleteRequest(ptr long)
 @ stub KeAcquireInStackQueuedSpinLockAtDpcLevel
 @ stub KeReleaseInStackQueuedSpinLockFromDpcLevel
@@ -48,7 +48,7 @@
 @ stub KefReleaseSpinLockFromDpcLevel
 @ stub KiAcquireSpinLock
 @ stub KiReleaseSpinLock
-@ stub ObfDereferenceObject
+@ stdcall -norelay ObfDereferenceObject(ptr)
 @ stub ObfReferenceObject
 @ stub RtlPrefetchMemoryNonTemporal
 @ cdecl -i386 -norelay RtlUlongByteSwap() ntdll.RtlUlongByteSwap
@@ -309,18 +309,18 @@
 @ stub IoAdapterObjectType
 @ stub IoAllocateAdapterChannel
 @ stub IoAllocateController
-@ stub IoAllocateDriverObjectExtension
+@ stdcall IoAllocateDriverObjectExtension(ptr ptr long ptr)
 @ stub IoAllocateErrorLogEntry
-@ stub IoAllocateIrp
+@ stdcall IoAllocateIrp(long long)
 @ stdcall IoAllocateMdl(ptr long long long ptr)
 @ stdcall IoAllocateWorkItem(ptr)
 @ stub IoAssignResources
 @ stub IoAttachDevice
 @ stub IoAttachDeviceByPointer
-@ stub IoAttachDeviceToDeviceStack
+@ stdcall IoAttachDeviceToDeviceStack(ptr ptr)
 @ stub IoAttachDeviceToDeviceStackSafe
 @ stub IoBuildAsynchronousFsdRequest
-@ stub IoBuildDeviceIoControlRequest
+@ stdcall IoBuildDeviceIoControlRequest(long ptr ptr long ptr long long ptr ptr)
 @ stub IoBuildPartialMdl
 @ stub IoBuildSynchronousFsdRequest
 @ stub IoCallDriver
@@ -355,7 +355,7 @@
 @ stub IoDeleteController
 @ stdcall IoDeleteDevice(ptr)
 @ stdcall IoDeleteDriver(ptr)
-@ stub IoDeleteSymbolicLink
+@ stdcall IoDeleteSymbolicLink(ptr)
 @ stub IoDetachDevice
 @ stub IoDeviceHandlerObjectSize
 @ stub IoDeviceHandlerObjectType
@@ -370,34 +370,34 @@
 @ stub IoForwardIrpSynchronously
 @ stub IoFreeController
 @ stub IoFreeErrorLogEntry
-@ stub IoFreeIrp
+@ stdcall IoFreeIrp(ptr)
 @ stub IoFreeMdl
 @ stub IoFreeWorkItem
 @ stub IoGetAttachedDevice
 @ stub IoGetAttachedDeviceReference
 @ stub IoGetBaseFileSystemDeviceObject
 @ stub IoGetBootDiskInformation
-@ stub IoGetConfigurationInformation
+@ stdcall IoGetConfigurationInformation()
 @ stub IoGetCurrentProcess
 @ stub IoGetDeviceAttachmentBaseRef
 @ stub IoGetDeviceInterfaceAlias
 @ stub IoGetDeviceInterfaces
-@ stub IoGetDeviceObjectPointer
+@ stdcall IoGetDeviceObjectPointer(ptr long ptr ptr)
 @ stub IoGetDeviceProperty
 @ stub IoGetDeviceToVerify
 @ stub IoGetDiskDeviceObject
 @ stub IoGetDmaAdapter
-@ stub IoGetDriverObjectExtension
+@ stdcall IoGetDriverObjectExtension(ptr ptr)
 @ stub IoGetFileObjectGenericMapping
 @ stub IoGetInitialStack
 @ stub IoGetLowerDeviceObject
-@ stub IoGetRelatedDeviceObject
+@ stdcall IoGetRelatedDeviceObject(ptr)
 @ stub IoGetRequestorProcess
 @ stub IoGetRequestorProcessId
 @ stub IoGetRequestorSessionId
 @ stub IoGetStackLimits
 @ stub IoGetTopLevelIrp
-@ stub IoInitializeIrp
+@ stdcall IoInitializeIrp(ptr long long)
 @ stub IoInitializeRemoveLockEx
 @ stub IoInitializeTimer
 @ stub IoInvalidateDeviceRelations
@@ -426,12 +426,12 @@
 @ stub IoReadTransferCount
 @ stub IoRegisterBootDriverReinitialization
 @ stub IoRegisterDeviceInterface
-@ stub IoRegisterDriverReinitialization
+@ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
 @ stub IoRegisterFileSystem
 @ stub IoRegisterFsRegistrationChange
 @ stub IoRegisterLastChanceShutdownNotification
 @ stub IoRegisterPlugPlayNotification
-@ stub IoRegisterShutdownNotification
+@ stdcall IoRegisterShutdownNotification(ptr)
 @ stub IoReleaseCancelSpinLock
 @ stub IoReleaseRemoveLockAndWaitEx
 @ stub IoReleaseRemoveLockEx
@@ -546,15 +546,15 @@
 @ stub KeInitializeApc
 @ stub KeInitializeDeviceQueue
 @ stub KeInitializeDpc
-@ stub KeInitializeEvent
+@ stdcall KeInitializeEvent(ptr long long)
 @ stub KeInitializeInterrupt
 @ stub KeInitializeMutant
 @ stub KeInitializeMutex
 @ stub KeInitializeQueue
 @ stub KeInitializeSemaphore
-@ stub KeInitializeSpinLock
+@ stdcall KeInitializeSpinLock(ptr)
 @ stdcall KeInitializeTimer(ptr)
-@ stub KeInitializeTimerEx
+@ stdcall KeInitializeTimerEx(ptr long)
 @ stub KeInsertByKeyDeviceQueue
 @ stub KeInsertDeviceQueue
 @ stub KeInsertHeadQueue
@@ -569,8 +569,8 @@
 @ stub KeProfileInterrupt
 @ stub KeProfileInterruptWithSource
 @ stub KePulseEvent
-@ stub KeQueryActiveProcessors
-@ stub KeQueryInterruptTime
+@ stdcall KeQueryActiveProcessors()
+@ stdcall KeQueryInterruptTime()
 @ stub KeQueryPriorityThread
 @ stub KeQueryRuntimeThread
 @ stdcall KeQuerySystemTime(ptr)
@@ -675,11 +675,11 @@
 @ stub MmFreePagesFromMdl
 @ stub MmGetPhysicalAddress
 @ stub MmGetPhysicalMemoryRanges
-@ stub MmGetSystemRoutineAddress
+@ stdcall MmGetSystemRoutineAddress(ptr)
 @ stub MmGetVirtualForPhysical
 @ stub MmGrowKernelStack
 @ stub MmHighestUserAddress
-@ stub MmIsAddressValid
+@ stdcall MmIsAddressValid(ptr)
 @ stub MmIsDriverVerifying
 @ stub MmIsNonPagedSystemAddressValid
 @ stub MmIsRecursiveIoFault
@@ -700,15 +700,15 @@
 @ stub MmMapViewOfSection
 @ stub MmMarkPhysicalMemoryAsBad
 @ stub MmMarkPhysicalMemoryAsGood
-@ stub MmPageEntireDriver
+@ stdcall MmPageEntireDriver(ptr)
 @ stub MmPrefetchPages
 @ stub MmProbeAndLockPages
 @ stub MmProbeAndLockProcessPages
 @ stub MmProbeAndLockSelectedPages
 @ stub MmProtectMdlSystemAddress
-@ stub MmQuerySystemSize
+@ stdcall MmQuerySystemSize()
 @ stub MmRemovePhysicalMemory
-@ stub MmResetDriverPaging
+@ stdcall MmResetDriverPaging(ptr)
 @ stub MmSectionObjectType
 @ stub MmSecureVirtualMemory
 @ stub MmSetAddressRangeModified
@@ -809,7 +809,7 @@
 @ stub ObOpenObjectByPointer
 @ stub ObQueryNameString
 @ stub ObQueryObjectAuditingByHandle
-@ stub ObReferenceObjectByHandle
+@ stdcall ObReferenceObjectByHandle(long long ptr long ptr ptr)
 @ stub ObReferenceObjectByName
 @ stub ObReferenceObjectByPointer
 @ stub ObReferenceSecurityDescriptor
@@ -908,7 +908,7 @@
 @ stub PsRevertToSelf
 @ stub PsSetContextThread
 @ stdcall PsSetCreateProcessNotifyRoutine(ptr long)
-@ stub PsSetCreateThreadNotifyRoutine
+@ stdcall PsSetCreateThreadNotifyRoutine(ptr)
 @ stub PsSetJobUIRestrictionsClass
 @ stub PsSetLegoNotifyRoutine
 @ stub PsSetLoadImageNotifyRoutine
@@ -1316,7 +1316,7 @@
 @ stub ZwIsProcessInJob
 @ stdcall ZwLoadDriver(ptr) ntdll.ZwLoadDriver
 @ stdcall ZwLoadKey(ptr ptr) ntdll.ZwLoadKey
-@ stub ZwMakeTemporaryObject
+@ stdcall ZwMakeTemporaryObject(long) ntdll.ZwMakeTemporaryObject
 @ stdcall ZwMapViewOfSection(long long ptr long long ptr ptr long long long) ntdll.ZwMapViewOfSection
 @ stdcall ZwNotifyChangeKey(long long ptr ptr ptr long long ptr long long) ntdll.ZwNotifyChangeKey
 @ stdcall ZwOpenDirectoryObject(long long long) ntdll.ZwOpenDirectoryObject

@@ -104,9 +104,12 @@ static void test_conversions(void)
 
     memset(&ft,0,sizeof ft);
 
+    SetLastError(0xdeadbeef);
     SETUP_EARLY(st)
     ok (!SystemTimeToFileTime(&st, &ft), "Conversion succeeded EARLY\n");
-    ok (GetLastError() == ERROR_INVALID_PARAMETER, "EARLY should be INVALID\n");
+    ok (GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == 0xdeadbeef, /* win9x */
+        "EARLY should be INVALID\n");
 
     SETUP_ZEROTIME(st)
     ok (SystemTimeToFileTime(&st, &ft), "Conversion failed ZERO_TIME\n");
@@ -207,7 +210,9 @@ static LONG get_tz_bias(const TIME_ZONE_INFORMATION *tzinfo, DWORD tz_id)
     switch (tz_id)
     {
     case TIME_ZONE_ID_DAYLIGHT:
-        return tzinfo->DaylightBias;
+        if (memcmp(&tzinfo->StandardDate, &tzinfo->DaylightDate, sizeof(tzinfo->DaylightDate)) != 0)
+            return tzinfo->DaylightBias;
+        /* fall through */
 
     case TIME_ZONE_ID_STANDARD:
         return tzinfo->StandardBias;
@@ -289,7 +294,7 @@ static void test_GetTimeZoneInformation(void)
 
     if (!pSystemTimeToTzSpecificLocalTime)
     {
-        skip("SystemTimeToTzSpecificLocalTime not present\n");
+        win_skip("SystemTimeToTzSpecificLocalTime not available\n");
         return;
     }
 
@@ -298,6 +303,12 @@ static void test_GetTimeZoneInformation(void)
     utc = st;
     SetLastError(0xdeadbeef);
     res = pSystemTimeToTzSpecificLocalTime(&tzinfo, &utc, &current);
+    if (!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("SystemTimeToTzSpecificLocalTime is not implemented\n");
+        return;
+    }
+
     ok(res, "SystemTimeToTzSpecificLocalTime error %u\n", GetLastError());
     s_time = system_time_to_minutes(&current);
 
@@ -414,7 +425,7 @@ static void test_TzSpecificLocalTimeToSystemTime(void)
 
     if (!pTzSpecificLocalTimeToSystemTime || !pSystemTimeToTzSpecificLocalTime)
     {
-        skip("TzSpecificLocalTimeToSystemTime or SystemTimeToTzSpecificLocalTime not present\n");
+        win_skip("TzSpecificLocalTimeToSystemTime or SystemTimeToTzSpecificLocalTime not available\n");
         return;
     }
 

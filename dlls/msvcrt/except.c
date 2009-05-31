@@ -18,11 +18,6 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
- * NOTES:
- *
- * See http://www.microsoft.com/msj/0197/exception/exception.htm,
- * but don't believe all of it.
- *
  * FIXME: Incomplete support for nested exceptions/try block cleanup.
  */
 
@@ -38,7 +33,6 @@
 #include "msvcrt.h"
 #include "excpt.h"
 #include "wincon.h"
-#include "msvcrt/float.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
@@ -102,6 +96,9 @@ static inline int call_unwind_func( int (*func)(void), void *ebp )
 
 #endif
 
+
+#ifdef __i386__
+
 static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
                                    EXCEPTION_REGISTRATION_RECORD* frame,
                                    PCONTEXT context,
@@ -117,7 +114,7 @@ static DWORD MSVCRT_nested_handler(PEXCEPTION_RECORD rec,
 /*********************************************************************
  *		_EH_prolog (MSVCRT.@)
  */
-#ifdef __i386__
+
 /* Provided for VC++ binary compatibility only */
 __ASM_GLOBAL_FUNC(_EH_prolog,
                   "pushl $-1\n\t"
@@ -225,10 +222,10 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
 
     while (trylevel != TRYLEVEL_END)
     {
+      TRACE( "level %d prev %d filter %p\n", trylevel, pScopeTable[trylevel].previousTryLevel,
+             pScopeTable[trylevel].lpfnFilter );
       if (pScopeTable[trylevel].lpfnFilter)
       {
-        TRACE("filter = %p\n", pScopeTable[trylevel].lpfnFilter);
-
         retval = call_filter( pScopeTable[trylevel].lpfnFilter, &exceptPtrs, &frame->_ebp );
 
         TRACE("filter returned %s\n", retval == EXCEPTION_CONTINUE_EXECUTION ?
@@ -247,17 +244,17 @@ int CDECL _except_handler3(PEXCEPTION_RECORD rec,
           /* Set our trylevel to the enclosing block, and call the __finally
            * code, which won't return
            */
-          frame->trylevel = pScopeTable->previousTryLevel;
+          frame->trylevel = pScopeTable[trylevel].previousTryLevel;
           TRACE("__finally block %p\n",pScopeTable[trylevel].lpfnHandler);
           call_finally_block(pScopeTable[trylevel].lpfnHandler, &frame->_ebp);
           ERR("Returned from __finally block - expect crash!\n");
        }
       }
-      trylevel = pScopeTable->previousTryLevel;
+      trylevel = pScopeTable[trylevel].previousTryLevel;
     }
   }
 #else
-  FIXME("exception %lx flags=%lx at %p handler=%p %p %p stub\n",
+  FIXME("exception %x flags=%x at %p handler=%p %p %p stub\n",
         rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
         frame->handler, context, dispatcher);
 #endif
@@ -438,13 +435,13 @@ static const struct
     NTSTATUS status;
     int signal;
 } float_exception_map[] = {
- { EXCEPTION_FLT_DENORMAL_OPERAND, _FPE_DENORMAL },
- { EXCEPTION_FLT_DIVIDE_BY_ZERO, _FPE_ZERODIVIDE },
- { EXCEPTION_FLT_INEXACT_RESULT, _FPE_INEXACT },
- { EXCEPTION_FLT_INVALID_OPERATION, _FPE_INVALID },
- { EXCEPTION_FLT_OVERFLOW, _FPE_OVERFLOW },
- { EXCEPTION_FLT_STACK_CHECK, _FPE_STACKOVERFLOW },
- { EXCEPTION_FLT_UNDERFLOW, _FPE_UNDERFLOW },
+ { EXCEPTION_FLT_DENORMAL_OPERAND, MSVCRT__FPE_DENORMAL },
+ { EXCEPTION_FLT_DIVIDE_BY_ZERO, MSVCRT__FPE_ZERODIVIDE },
+ { EXCEPTION_FLT_INEXACT_RESULT, MSVCRT__FPE_INEXACT },
+ { EXCEPTION_FLT_INVALID_OPERATION, MSVCRT__FPE_INVALID },
+ { EXCEPTION_FLT_OVERFLOW, MSVCRT__FPE_OVERFLOW },
+ { EXCEPTION_FLT_STACK_CHECK, MSVCRT__FPE_STACKOVERFLOW },
+ { EXCEPTION_FLT_UNDERFLOW, MSVCRT__FPE_UNDERFLOW },
 };
 
 static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
@@ -468,8 +465,7 @@ static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
             ret = EXCEPTION_CONTINUE_EXECUTION;
         }
         break;
-    /* According to
-     * http://msdn.microsoft.com/library/en-us/vclib/html/_CRT_signal.asp
+    /* According to msdn,
      * the FPE signal handler takes as a second argument the type of
      * floating point exception.
      */
@@ -484,7 +480,8 @@ static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
         {
             if (handler != MSVCRT_SIG_IGN)
             {
-                int i, float_signal = _FPE_INVALID;
+                unsigned int i;
+                int float_signal = MSVCRT__FPE_INVALID;
 
                 sighandlers[MSVCRT_SIGFPE] = MSVCRT_SIG_DFL;
                 for (i = 0; i < sizeof(float_exception_map) /
@@ -503,6 +500,7 @@ static LONG WINAPI msvcrt_exception_filter(struct _EXCEPTION_POINTERS *except)
         }
         break;
     case EXCEPTION_ILLEGAL_INSTRUCTION:
+    case EXCEPTION_PRIV_INSTRUCTION:
         if ((handler = sighandlers[MSVCRT_SIGILL]) != MSVCRT_SIG_DFL)
         {
             if (handler != MSVCRT_SIG_IGN)
@@ -531,8 +529,6 @@ void msvcrt_free_signals(void)
 
 /*********************************************************************
  *		signal (MSVCRT.@)
- * MS signal handling is described here:
- * http://msdn.microsoft.com/library/en-us/vclib/html/_CRT_signal.asp
  * Some signals may never be generated except through an explicit call to
  * raise.
  */
@@ -587,7 +583,7 @@ int CDECL MSVCRT_raise(int sig)
         {
             sighandlers[sig] = MSVCRT_SIG_DFL;
             if (sig == MSVCRT_SIGFPE)
-                ((float_handler)handler)(sig, _FPE_EXPLICITGEN);
+                ((float_handler)handler)(sig, MSVCRT__FPE_EXPLICITGEN);
             else
                 handler(sig);
         }

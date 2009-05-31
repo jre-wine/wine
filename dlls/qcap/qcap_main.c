@@ -30,6 +30,7 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
 #include "winerror.h"
 #include "objbase.h"
 #include "uuids.h"
@@ -264,7 +265,7 @@ static HRESULT WINAPI DSCF_CreateInstance(LPCLASSFACTORY iface, LPUNKNOWN pOuter
     if (!punk)
     {
         /* No object created, update error if it isn't done already and return */
-        if (!FAILED(hres))
+        if (SUCCEEDED(hres))
             hres = E_OUTOFMEMORY;
     return hres;
     }

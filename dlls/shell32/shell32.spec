@@ -34,7 +34,7 @@
   35 stdcall -noname PathRemoveFileSpec(ptr) PathRemoveFileSpecAW
   36 stdcall -noname PathAppend(ptr ptr) PathAppendAW
   37 stdcall -noname PathCombine(ptr ptr ptr) PathCombineAW
-  38 stdcall -noname PathStripPath(ptr)PathStripPathAW
+  38 stdcall -noname PathStripPath(ptr) PathStripPathAW
   39 stdcall -noname PathIsUNC(ptr) PathIsUNCAW
   40 stdcall -noname PathIsRelative(ptr) PathIsRelativeAW
   41 stdcall -noname IsLFNDriveA(str)
@@ -42,20 +42,21 @@
   43 stdcall -noname PathIsExe(ptr) PathIsExeAW
   45 stdcall -noname PathFileExists(ptr) PathFileExistsAW
   46 stdcall -noname PathMatchSpec(ptr ptr) PathMatchSpecAW
-  47 stdcall -noname PathMakeUniqueName(ptr long ptr ptr ptr)PathMakeUniqueNameAW
+  47 stdcall -noname PathMakeUniqueName(ptr long ptr ptr ptr) PathMakeUniqueNameAW
   48 stdcall -noname PathSetDlgItemPath(long long ptr) PathSetDlgItemPathAW
   49 stdcall -noname PathQualify(ptr) PathQualifyAW
   50 stdcall -noname PathStripToRoot(ptr) PathStripToRootAW
   51 stdcall PathResolve(str long long) PathResolveAW
   52 stdcall -noname PathGetArgs(str) PathGetArgsAW
   53 stdcall DoEnvironmentSubst(long long) DoEnvironmentSubstAW
+  54 stub LogoffWindowsDialog
   55 stdcall -noname PathQuoteSpaces(ptr) PathQuoteSpacesAW
   56 stdcall -noname PathUnquoteSpaces(str) PathUnquoteSpacesAW
   57 stdcall -noname PathGetDriveNumber(str) PathGetDriveNumberAW
   58 stdcall -noname ParseField(str long ptr long) ParseFieldAW
   59 stdcall -noname RestartDialog(long wstr long)
   60 stdcall -noname ExitWindowsDialog(long)
-  61 stdcall -noname RunFileDlg(long long long str str long)
+  61 stdcall -noname RunFileDlg(long long long str str long) RunFileDlgAW
   62 stdcall -noname PickIconDlg(long long long long)
   63 stdcall -noname GetFileNameFromBrowse(long long long long str str str)
   64 stdcall -noname DriveType(long)
@@ -230,6 +231,7 @@
  523 stdcall -noname SHFreeShared(long long)
  524 stdcall -noname RealDriveType(long long)
  525 stub RealDriveTypeFlags
+ 526 stdcall SHFlushSFCache()
 
  640 stdcall -noname NTSHChangeNotifyRegister(long long long long long long)
  641 stdcall -noname NTSHChangeNotifyDeregister(long)
@@ -251,7 +253,10 @@
  660 stdcall -noname FileIconInit(long)
  680 stdcall -noname IsUserAdmin()
 
+ 704 stdcall -noname GUIDFromStringW(wstr ptr)
+
  714 stdcall @(ptr) SHELL32_714 # PathIsTemporaryW
+ 727 stdcall SHGetImageList(long ptr ptr)
  730 stdcall -noname RestartDialogEx(long wstr long long)
 
 1217 stub FOOBAR1217   # no joke! This is the real name!!
@@ -324,6 +329,7 @@
 @ stdcall SHCreateDirectoryExA(long str ptr)
 @ stdcall SHCreateDirectoryExW(long wstr ptr)
 @ stub SHCreateProcessAsUserW
+@ stdcall SHCreateShellItem(ptr ptr ptr ptr)
 @ stdcall SHEmptyRecycleBinA(long str long)
 @ stdcall SHEmptyRecycleBinW(long wstr long)
 @ stub SHExtractIconsW
@@ -343,10 +349,12 @@
 @ stdcall SHGetFileInfoW(ptr long ptr long long)
 @ stdcall SHGetFolderLocation(long long long long ptr)
 @ stdcall SHGetFolderPathA(long long long long ptr)
+@ stdcall SHGetFolderPathAndSubDirA(long long long long str ptr)
+@ stdcall SHGetFolderPathAndSubDirW(long long long long wstr ptr)
 @ stdcall SHGetFolderPathW(long long long long ptr)
 @ stub SHGetFreeDiskSpace
-@ stub SHGetIconOverlayIndexA
-@ stub SHGetIconOverlayIndexW
+@ stdcall SHGetIconOverlayIndexA(str long)
+@ stdcall SHGetIconOverlayIndexW(wstr long)
 @ stdcall SHGetInstanceExplorer(long)
 @ stdcall SHGetMalloc(ptr)
 @ stdcall SHGetNewLinkInfo(str str ptr long long) SHGetNewLinkInfoA
@@ -430,4 +438,4 @@
 @ stdcall StrStrIA(str str) shlwapi.StrStrIA
 @ stdcall StrStrIW(wstr wstr) shlwapi.StrStrIW
 @ stdcall StrStrW(wstr wstr) shlwapi.StrStrW
-@ stub WOWShellExecute
+@ stdcall WOWShellExecute(long str str str str long ptr)

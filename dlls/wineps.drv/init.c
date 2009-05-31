@@ -37,7 +37,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
-#include "wownt32.h"
 #include "winreg.h"
 #include "psdrv.h"
 #include "winspool.h"
@@ -297,8 +296,8 @@ static LPDEVMODEA DEVMODEdupWtoA(HANDLE heap, const DEVMODEW *dmW)
 /**********************************************************************
  *	     PSDRV_CreateDC
  */
-BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR device,
-                     LPCWSTR output, const DEVMODEW* initData )
+BOOL CDECL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR device,
+                           LPCWSTR output, const DEVMODEW* initData )
 {
     PSDRV_PDEVICE *physDev;
     PRINTERINFO *pi;
@@ -353,7 +352,7 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
 	return FALSE;
     }
 
-    memcpy( physDev->Devmode, pi->Devmode, sizeof(PSDRV_DEVMODEA) );
+    *physDev->Devmode = *pi->Devmode;
 
     physDev->logPixelsX = physDev->pi->ppd->DefaultResolution;
     physDev->logPixelsY = physDev->pi->ppd->DefaultResolution;
@@ -382,7 +381,7 @@ BOOL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWSTR devi
 /**********************************************************************
  *	     PSDRV_DeleteDC
  */
-BOOL PSDRV_DeleteDC( PSDRV_PDEVICE *physDev )
+BOOL CDECL PSDRV_DeleteDC( PSDRV_PDEVICE *physDev )
 {
     TRACE("\n");
 
@@ -397,7 +396,7 @@ BOOL PSDRV_DeleteDC( PSDRV_PDEVICE *physDev )
 /**********************************************************************
  *	     ResetDC   (WINEPS.@)
  */
-HDC PSDRV_ResetDC( PSDRV_PDEVICE *physDev, const DEVMODEW *lpInitData )
+HDC CDECL PSDRV_ResetDC( PSDRV_PDEVICE *physDev, const DEVMODEW *lpInitData )
 {
     if(lpInitData) {
         HRGN hrgn;
@@ -406,7 +405,7 @@ HDC PSDRV_ResetDC( PSDRV_PDEVICE *physDev, const DEVMODEW *lpInitData )
         HeapFree(PSDRV_Heap, 0, devmodeA);
         PSDRV_UpdateDevCaps(physDev);
         hrgn = CreateRectRgn(0, 0, physDev->horzRes, physDev->vertRes);
-        SelectVisRgn16(HDC_16(physDev->hdc), HRGN_16(hrgn));
+        SelectVisRgn( physDev->hdc, hrgn );
         DeleteObject(hrgn);
     }
     return physDev->hdc;
@@ -415,7 +414,7 @@ HDC PSDRV_ResetDC( PSDRV_PDEVICE *physDev, const DEVMODEW *lpInitData )
 /***********************************************************************
  *           GetDeviceCaps    (WINEPS.@)
  */
-INT PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
+INT CDECL PSDRV_GetDeviceCaps( PSDRV_PDEVICE *physDev, INT cap )
 {
     switch(cap)
     {
@@ -539,7 +538,6 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
     char* ppdFileName = NULL;
     HKEY hkey;
     BOOL using_default_devmode = FALSE;
-    static CHAR paper_size[] = "Paper Size";
 
     TRACE("'%s'\n", name);
 
@@ -567,7 +565,7 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
         pi->Devmode = HeapAlloc( PSDRV_Heap, 0, sizeof(DefaultDevmode) );
 	if (pi->Devmode == NULL)
 	    goto cleanup;
-	memcpy(pi->Devmode, &DefaultDevmode, sizeof(DefaultDevmode) );
+	*pi->Devmode = DefaultDevmode;
 	lstrcpynA((LPSTR)pi->Devmode->dmPublic.dmDeviceName,name,CCHDEVICENAME);
 	using_default_devmode = TRUE;
 
@@ -607,12 +605,11 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
     }
 #endif
     if (!ppdFileName) {
-        static CHAR ppd_file[] = "PPD File";
-
-        res = GetPrinterDataA(hPrinter, ppd_file, NULL, NULL, 0, &needed);
+        res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "PPD File", NULL, NULL, 0, &needed);
         if ((res==ERROR_SUCCESS) || (res==ERROR_MORE_DATA)) {
             ppdFileName=HeapAlloc(PSDRV_Heap, 0, needed);
-            res = GetPrinterDataA(hPrinter, ppd_file, &ppdType, (LPBYTE)ppdFileName, needed, &needed);
+            res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "PPD File", &ppdType,
+                                    (LPBYTE)ppdFileName, needed, &needed);
         }
     }
     /* Look for a ppd file for this printer in the config file.
@@ -707,8 +704,8 @@ PRINTERINFO *PSDRV_FindPrinterInfo(LPCSTR name)
      *	the Devmode structure, but Wine doesn't currently provide a convenient
      *	way to configure printers.
      */
-    res = GetPrinterDataA (hPrinter, paper_size, NULL, (LPBYTE) &dwPaperSize,
-	    sizeof (DWORD), &needed);
+    res = GetPrinterDataExA(hPrinter, "PrinterDriverData", "Paper Size", NULL,
+                            (LPBYTE)&dwPaperSize, sizeof(DWORD), &needed);
     if (res == ERROR_SUCCESS)
 	pi->Devmode->dmPublic.u1.s1.dmPaperSize = (SHORT) dwPaperSize;
     else if (res == ERROR_FILE_NOT_FOUND)

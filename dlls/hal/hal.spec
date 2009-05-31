@@ -1,5 +1,5 @@
-@ stub ExAcquireFastMutex
-@ stub ExReleaseFastMutex
+@ stdcall -norelay ExAcquireFastMutex(ptr)
+@ stdcall -norelay ExReleaseFastMutex(ptr)
 @ stub ExTryToAcquireFastMutex
 @ stub HalClearSoftwareInterrupt
 @ stub HalRequestSoftwareInterrupt
@@ -15,7 +15,7 @@
 @ stub KeTryToAcquireQueuedSpinLockRaiseToSynch
 @ stdcall -norelay KfAcquireSpinLock(ptr)
 @ stdcall -norelay KfLowerIrql(long)
-@ stdcall -norelay KfRaiseIrql()
+@ stdcall -norelay KfRaiseIrql(long)
 @ stdcall -norelay KfReleaseSpinLock(ptr long)
 @ stub HalAcquireDisplayOwnership
 @ stub HalAdjustResourceList
@@ -33,7 +33,7 @@
 @ stub HalFlushCommonBuffer
 @ stub HalFreeCommonBuffer
 @ stub HalGetAdapter
-@ stub HalGetBusData
+@ stdcall HalGetBusData(long long long ptr long)
 @ stub HalGetBusDataByOffset
 @ stub HalGetEnvironmentVariable
 @ stub HalGetInterruptVector

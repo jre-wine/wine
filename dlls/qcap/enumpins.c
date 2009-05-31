@@ -56,7 +56,7 @@ HRESULT IEnumPinsImpl_Construct(const ENUMPINDETAILS * pDetails, IEnumPins ** pp
     pEnumPins->lpVtbl = &IEnumPinsImpl_Vtbl;
     pEnumPins->refCount = 1;
     pEnumPins->uIndex = 0;
-    CopyMemory(&pEnumPins->enumPinDetails, pDetails, sizeof(ENUMPINDETAILS));
+    pEnumPins->enumPinDetails = *pDetails;
     *ppEnum = (IEnumPins *)(&pEnumPins->lpVtbl);
     ObjectRefCount(TRUE);
     return S_OK;
@@ -69,9 +69,9 @@ static HRESULT WINAPI IEnumPinsImpl_QueryInterface(IEnumPins * iface, REFIID rii
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
     else if (IsEqualIID(riid, &IID_IEnumPins))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
 
     if (*ppv)
     {

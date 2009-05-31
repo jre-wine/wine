@@ -31,6 +31,7 @@
 #include "main.h"
 #include "dialog.h"
 #include "notepad_res.h"
+#include "wine/unicode.h"
 
 NOTEPAD_GLOBALS Globals;
 static ATOM aFINDMSGSTRING;
@@ -107,7 +108,7 @@ DWORD get_dpi(void)
  *
  *           NOTEPAD_SaveSettingToRegistry
  *
- *  Save settring to registry HKCU\Software\Microsoft\Notepad.
+ *  Save setting to registry HKCU\Software\Microsoft\Notepad.
  */
 static VOID NOTEPAD_SaveSettingToRegistry(void)
 {
@@ -118,8 +119,11 @@ static VOID NOTEPAD_SaveSettingToRegistry(void)
                 REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hkey, &disp) == ERROR_SUCCESS)
     {
         DWORD data;
+        WINDOWPLACEMENT wndpl;
 
-        GetWindowRect(Globals.hMainWnd, &main_rect);
+        wndpl.length = sizeof(WINDOWPLACEMENT);
+        GetWindowPlacement(Globals.hMainWnd, &wndpl);
+        main_rect = wndpl.rcNormalPosition;
 
 #define SET_NOTEPAD_REG(hkey, value_name, value_data) do { DWORD data = (DWORD)(value_data); RegSetValueEx(hkey, value_name, 0, REG_DWORD, (LPBYTE)&data, sizeof(DWORD)); }while(0)
         SET_NOTEPAD_REG(hkey, value_fWrap,            Globals.bWrapLongLines);
@@ -297,9 +301,7 @@ static int NOTEPAD_MenuCommand(WPARAM wParam)
     case CMD_HELP_CONTENTS:    DIALOG_HelpContents(); break;
     case CMD_HELP_SEARCH:      DIALOG_HelpSearch(); break;
     case CMD_HELP_ON_HELP:     DIALOG_HelpHelp(); break;
-    case CMD_LICENSE:          DIALOG_HelpLicense(); break;
-    case CMD_NO_WARRANTY:      DIALOG_HelpNoWarranty(); break;
-    case CMD_ABOUT_WINE:       DIALOG_HelpAboutWine(); break;
+    case CMD_HELP_ABOUT_NOTEPAD: DIALOG_HelpAboutNotepad(); break;
 
     default:
 	break;
@@ -573,8 +575,13 @@ static void HandleCommandLine(LPWSTR cmdline)
 
         if (cmdline[0] == '"')
         {
+            WCHAR* wc;
             cmdline++;
-            cmdline[lstrlen(cmdline) - 1] = 0;
+            wc=cmdline;
+            /* Note: Double-quotes are not allowed in Windows filenames */
+            while (*wc && *wc != '"') wc++;
+            /* On Windows notepad ignores further arguments too */
+            *wc = 0;
         }
 
         if (FileExists(cmdline))
@@ -587,7 +594,7 @@ static void HandleCommandLine(LPWSTR cmdline)
             static const WCHAR txtW[] = { '.','t','x','t',0 };
 
             /* try to find file with ".txt" extension */
-            if (!lstrcmp(txtW, cmdline + lstrlen(cmdline) - lstrlen(txtW)))
+            if (strchrW(PathFindFileNameW(cmdline), '.'))
             {
                 file_exists = FALSE;
                 file_name = cmdline;

@@ -118,7 +118,12 @@ static void test_GetDiskFreeSpaceA(void)
             else
             {
                 ok(ret ||
-                   (!ret && (GetLastError() == ERROR_NOT_READY || GetLastError() == ERROR_INVALID_DRIVE)),
+                   GetLastError() == ERROR_NOT_READY ||
+                   GetLastError() == ERROR_INVALID_FUNCTION ||
+                   GetLastError() == ERROR_INVALID_DRIVE ||
+                   GetLastError() == ERROR_PATH_NOT_FOUND ||
+                   GetLastError() == ERROR_REQUEST_ABORTED ||
+                   GetLastError() == ERROR_UNRECOGNIZED_VOLUME,
                    "GetDiskFreeSpaceA(%s): ret=%d GetLastError=%d\n",
                    drive, ret, GetLastError());
                 if( GetVersion() & 0x80000000)
@@ -126,13 +131,18 @@ static void test_GetDiskFreeSpaceA(void)
                     ok( total_clusters <= 65535,
                             "total clusters is %d > 65535\n", total_clusters);
                 else if (pGetDiskFreeSpaceExA) {
-                    /* NT, 2k, XP : GetDiskFreeSpace shoud be accurate */
+                    /* NT, 2k, XP : GetDiskFreeSpace should be accurate */
                     ULARGE_INTEGER totEx, tot, d;
 
                     tot.QuadPart = sectors_per_cluster;
                     tot.QuadPart = (tot.QuadPart * bytes_per_sector) * total_clusters;
                     ret = pGetDiskFreeSpaceExA( drive, &d, &totEx, NULL);
-                    ok( ret || (!ret && ERROR_NOT_READY == GetLastError()),
+                    ok( ret ||
+                        GetLastError() == ERROR_NOT_READY ||
+                        GetLastError() == ERROR_INVALID_FUNCTION ||
+                        GetLastError() == ERROR_PATH_NOT_FOUND ||
+                        GetLastError() == ERROR_REQUEST_ABORTED ||
+                        GetLastError() == ERROR_UNRECOGNIZED_VOLUME,
                         "GetDiskFreeSpaceExA( %s ) failed. GetLastError=%d\n", drive, GetLastError());
                     ok( bytes_per_sector == 0 || /* empty cd rom drive */
                         totEx.QuadPart <= tot.QuadPart,
@@ -188,7 +198,12 @@ static void test_GetDiskFreeSpaceW(void)
                    "GetDiskFreeSpaceW(%c): ret=%d GetLastError=%d\n",
                    drive[0], ret, GetLastError());
             else
-                ok(ret || GetLastError() == ERROR_NOT_READY,
+                ok( ret ||
+                    GetLastError() == ERROR_NOT_READY ||
+                    GetLastError() == ERROR_INVALID_FUNCTION ||
+                    GetLastError() == ERROR_PATH_NOT_FOUND ||
+                    GetLastError() == ERROR_REQUEST_ABORTED ||
+                    GetLastError() == ERROR_UNRECOGNIZED_VOLUME,
                    "GetDiskFreeSpaceW(%c): ret=%d GetLastError=%d\n",
                    drive[0], ret, GetLastError());
         }

@@ -50,6 +50,9 @@ static int* (*pmemcmp)(void *, const void *, size_t n);
 static int (*pstrcpy_s)(char *dst, size_t len, const char *src);
 static int (*pstrcat_s)(char *dst, size_t len, const char *src);
 static int (*p_mbsnbcpy_s)(unsigned char * dst, size_t size, const unsigned char * src, size_t count);
+static int (*p_wcscpy_s)(wchar_t *wcDest, size_t size, const wchar_t *wcSrc);
+static int *p__mb_cur_max;
+static unsigned char *p_mbctype;
 
 #define SETNOFAIL(x,y) x = (void*)GetProcAddress(hMsvcrt,y)
 #define SET(x,y) SETNOFAIL(x,y); ok(x != NULL, "Export '%s' not found\n", y)
@@ -110,14 +113,14 @@ static void test_codepage(int cp)
 
     ok(_setmbcp(cp) == 0, "Couldn't set mbcp\n");
 
-    prev = _mbctype[0];
+    prev = p_mbctype[0];
     printf("static int result_cp_%d_mbctype[] = { ", cp);
     for (i = 1; i < 257; i++)
     {
-        if (_mbctype[i] != prev)
+        if (p_mbctype[i] != prev)
         {
             printf("0x%x,%d, ", prev, count);
-            prev = _mbctype[i];
+            prev = p_mbctype[i];
             count = 1;
         }
         else
@@ -125,8 +128,6 @@ static void test_codepage(int cp)
     }
     printf("0x%x,%d };\n", prev, count);
 }
-
-#define test_codepage_todo(cp, todo) test_codepage(cp)
 
 #else
 
@@ -140,10 +141,7 @@ static int result_cp_949_mbctype[] = { 0x0,66, 0x18,26, 0x8,6, 0x28,26, 0x8,6, 0
 static int result_cp_950_mbctype[] = { 0x0,65, 0x8,1, 0x18,26, 0x8,6, 0x28,26, 0x8,4,
   0x0,2, 0x4,32, 0xc,94, 0,1 };
 
-static int todo_none[] = { -2 };
-static int todo_cp_932[] = { 254, -2 };
-
-void test_cp_table(int cp, int *result, int *todo)
+static void test_cp_table(int cp, int *result)
 {
     int i;
     int count = 0;
@@ -157,25 +155,18 @@ void test_cp_table(int cp, int *result, int *todo)
             count = result[1];
             result += 2;
         }
-	if (i == *todo + 1)
-	{
-            todo_wine ok(_mbctype[i] == curr, "CP%d: Mismatch in ctype for character %d - %d instead of %d\n", cp, i-1, _mbctype[i], curr);
-            todo++;
-	}
-	else
-            ok(_mbctype[i] == curr, "CP%d: Mismatch in ctype for character %d - %d instead of %d\n", cp, i-1, _mbctype[i], curr);
+        ok(p_mbctype[i] == curr, "CP%d: Mismatch in ctype for character %d - %d instead of %d\n", cp, i-1, p_mbctype[i], curr);
         count--;
     }
 }
 
-#define test_codepage(num) test_cp_table(num, result_cp_##num##_mbctype, todo_none);
-#define test_codepage_todo(num, todo) test_cp_table(num, result_cp_##num##_mbctype, todo);
+#define test_codepage(num) test_cp_table(num, result_cp_##num##_mbctype);
 
 #endif
 
 static void test_mbcp(void)
 {
-    int mb_orig_max = __mb_cur_max;
+    int mb_orig_max = *p__mb_cur_max;
     int curr_mbcp = _getmbcp();
     unsigned char *mbstring = (unsigned char *)"\xb0\xb1\xb2 \xb3\xb4 \xb5"; /* incorrect string */
     unsigned char *mbstring2 = (unsigned char *)"\xb0\xb1\xb2\xb3Q\xb4\xb5"; /* correct string */
@@ -189,26 +180,26 @@ static void test_mbcp(void)
      * between versions of Windows. Also Windows 9x seems to ignore the codepage and always uses
      * CP1252 (or the ACP?) so we test only a few ASCII characters */
     _setmbcp(1252);
-    expect_eq(_mbctype[10], 0, char, "%x");
-    expect_eq(_mbctype[50], 0, char, "%x");
-    expect_eq(_mbctype[66], _SBUP, char, "%x");
-    expect_eq(_mbctype[100], _SBLOW, char, "%x");
-    expect_eq(_mbctype[128], 0, char, "%x");
+    expect_eq(p_mbctype[10], 0, char, "%x");
+    expect_eq(p_mbctype[50], 0, char, "%x");
+    expect_eq(p_mbctype[66], _SBUP, char, "%x");
+    expect_eq(p_mbctype[100], _SBLOW, char, "%x");
+    expect_eq(p_mbctype[128], 0, char, "%x");
     _setmbcp(1250);
-    expect_eq(_mbctype[10], 0, char, "%x");
-    expect_eq(_mbctype[50], 0, char, "%x");
-    expect_eq(_mbctype[66], _SBUP, char, "%x");
-    expect_eq(_mbctype[100], _SBLOW, char, "%x");
-    expect_eq(_mbctype[128], 0, char, "%x");
+    expect_eq(p_mbctype[10], 0, char, "%x");
+    expect_eq(p_mbctype[50], 0, char, "%x");
+    expect_eq(p_mbctype[66], _SBUP, char, "%x");
+    expect_eq(p_mbctype[100], _SBLOW, char, "%x");
+    expect_eq(p_mbctype[128], 0, char, "%x");
 
     /* double byte code pages */
-    test_codepage_todo(932, todo_cp_932);
+    test_codepage(932);
     test_codepage(936);
     test_codepage(949);
     test_codepage(950);
 
     _setmbcp(936);
-    ok(__mb_cur_max == mb_orig_max, "__mb_cur_max shouldn't be updated (is %d != %d)\n", __mb_cur_max, mb_orig_max);
+    ok(*p__mb_cur_max == mb_orig_max, "__mb_cur_max shouldn't be updated (is %d != %d)\n", *p__mb_cur_max, mb_orig_max);
     ok(_ismbblead('\354'), "\354 should be a lead byte\n");
     ok(_ismbblead(' ') == FALSE, "' ' should not be a lead byte\n");
     ok(_ismbblead(0x1234b0), "0x1234b0 should not be a lead byte\n");
@@ -345,7 +336,7 @@ static void test_mbcp(void)
      * we hope the current locale to be SBCS because setlocale(LC_ALL, ".1252") seems not to work yet
      * (as of Wine 0.9.43)
      */
-    if (__mb_cur_max == 1)
+    if (*p__mb_cur_max == 1)
     {
         expect_eq(mblen((char *)mbstring, 3), 1, int, "%x");
         expect_eq(_mbstrlen((char *)mbstring2), 7, int, "%d");
@@ -562,6 +553,116 @@ static void test__mbsnbcpy_s(void)
        dest[0], dest[1], dest[2], dest[3], dest[4], dest[5], dest[6], dest[7]);
 }
 
+static void test_wcscpy_s(void)
+{
+    static const WCHAR szLongText[] = { 'T','h','i','s','A','L','o','n','g','s','t','r','i','n','g',0 };
+    static WCHAR szDest[18];
+    static WCHAR szDestShort[8];
+    int ret;
+
+    if(!p_wcscpy_s)
+    {
+        skip("wcscpy_s not found\n");
+        return;
+    }
+
+    /* Test NULL Dest */
+    ret = p_wcscpy_s(NULL, 18, szLongText);
+    ok(ret == EINVAL, "p_wcscpy_s expect EINVAL got %d\n", ret);
+
+    /* Test NULL Source */
+    szDest[0] = 'A';
+    ret = p_wcscpy_s(szDest, 18, NULL);
+    ok(ret == EINVAL, "expected EINVAL got %d\n", ret);
+    ok(szDest[0] == 0, "szDest[0] not 0\n");
+
+    /* Test invalid size */
+    szDest[0] = 'A';
+    ret = p_wcscpy_s(szDest, 0, szLongText);
+    /* Later versions changed the return value for this case to EINVAL,
+     * and don't modify the result if the dest size is 0.
+     */
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(szDest[0] == 0 || ret == EINVAL, "szDest[0] not 0\n");
+
+    /* Copy same buffer size */
+    ret = p_wcscpy_s(szDest, 18, szLongText);
+    ok(ret == 0, "expected 0 got %d\n", ret);
+    ok(lstrcmpW(szDest, szLongText) == 0, "szDest != szLongText\n");
+
+    /* Copy smaller buffer size */
+    szDest[0] = 'A';
+    ret = p_wcscpy_s(szDestShort, 8, szLongText);
+    ok(ret == ERANGE || ret == EINVAL, "expected ERANGE/EINVAL got %d\n", ret);
+    ok(szDestShort[0] == 0, "szDestShort[0] not 0\n");
+}
+
+static void test_mbcjisjms(void)
+{
+    /* List of value-pairs to test. The test assumes the last pair to be {0, ..} */
+    unsigned int jisjms[][2] = { {0x2020, 0}, {0x2021, 0}, {0x2120, 0}, {0x2121, 0x8140},
+                                 {0x7f7f, 0}, {0x7f7e, 0}, {0x7e7f, 0}, {0x7e7e, 0xeffc},
+                                 {0x2121FFFF, 0}, {0x2223, 0x81a1}, {0x237e, 0x829e}, {0, 0}};
+    unsigned int ret, exp, i;
+
+    i = 0;
+    do
+    {
+        ret = _mbcjistojms(jisjms[i][0]);
+
+        if(_getmbcp() == 932)   /* Japanese codepage? */
+            exp = jisjms[i][1];
+        else
+            exp = jisjms[i][0]; /* If not, no conversion */
+
+        ok(ret == exp, "Expected 0x%x, got 0x%x\n", exp, ret);
+    } while(jisjms[i++][0] != 0);
+}
+
+static const struct {
+    const char* string;
+    const char* delimiter;
+    int exp_offsetret1; /* returned offset from string after first call to strtok()
+                           -1 means NULL  */
+    int exp_offsetret2; /* returned offset from string after second call to strtok()
+                           -1 means NULL  */
+    int exp_offsetret3; /* returned offset from string after third call to strtok()
+                           -1 means NULL  */
+} testcases_strtok[] = {
+    { "red cabernet", " ", 0, 4, -1 },
+    { "sparkling white riesling", " ", 0, 10, 16 },
+    { " pale cream sherry", "e ", 1, 6, 9 },
+    /* end mark */
+    { 0}
+};
+
+static void test_strtok(void)
+{
+    int i;
+    char *strret;
+    char teststr[100];
+    for( i = 0; testcases_strtok[i].string; i++){
+        strcpy( teststr, testcases_strtok[i].string);
+        strret = strtok( teststr, testcases_strtok[i].delimiter);
+        ok( (int)(strret - teststr) ==  testcases_strtok[i].exp_offsetret1 ||
+                (!strret && testcases_strtok[i].exp_offsetret1 == -1),
+                "string (%p) \'%s\' return %p\n",
+                teststr, testcases_strtok[i].string, strret);
+        if( !strret) continue;
+        strret = strtok( NULL, testcases_strtok[i].delimiter);
+        ok( (int)(strret - teststr) ==  testcases_strtok[i].exp_offsetret2 ||
+                (!strret && testcases_strtok[i].exp_offsetret2 == -1),
+                "second call string (%p) \'%s\' return %p\n",
+                teststr, testcases_strtok[i].string, strret);
+        if( !strret) continue;
+        strret = strtok( NULL, testcases_strtok[i].delimiter);
+        ok( (int)(strret - teststr) ==  testcases_strtok[i].exp_offsetret3 ||
+                (!strret && testcases_strtok[i].exp_offsetret3 == -1),
+                "third call string (%p) \'%s\' return %p\n",
+                teststr, testcases_strtok[i].string, strret);
+    }
+}
+
 START_TEST(string)
 {
     char mem[100];
@@ -574,9 +675,12 @@ START_TEST(string)
     ok(hMsvcrt != 0, "GetModuleHandleA failed\n");
     SET(pmemcpy,"memcpy");
     SET(pmemcmp,"memcmp");
-    SET(pstrcpy_s,"strcpy_s");
-    SET(pstrcat_s,"strcat_s");
-    SET(p_mbsnbcpy_s,"_mbsnbcpy_s");
+    SET(p_mbctype,"_mbctype");
+    SET(p__mb_cur_max,"__mb_cur_max");
+    pstrcpy_s = (void *)GetProcAddress( hMsvcrt,"strcpy_s" );
+    pstrcat_s = (void *)GetProcAddress( hMsvcrt,"strcat_s" );
+    p_mbsnbcpy_s = (void *)GetProcAddress( hMsvcrt,"_mbsnbcpy_s" );
+    p_wcscpy_s = (void *)GetProcAddress( hMsvcrt,"wcscpy_s" );
 
     /* MSVCRT memcpy behaves like memmove for overlapping moves,
        MFC42 CString::Insert seems to rely on that behaviour */
@@ -599,4 +703,7 @@ START_TEST(string)
     test_strcpy_s();
     test_strcat_s();
     test__mbsnbcpy_s();
+    test_mbcjisjms();
+    test_strtok();
+    test_wcscpy_s();
 }

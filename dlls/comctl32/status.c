@@ -31,7 +31,7 @@
  * TODO:
  * 	-- CCS_BOTTOM (default)
  * 	-- CCS_LEFT
- * 	-- CCS_NODEVIDER
+ * 	-- CCS_NODIVIDER
  * 	-- CCS_NOMOVEX
  * 	-- CCS_NOMOVEY
  * 	-- CCS_NOPARENTALIGN
@@ -72,13 +72,13 @@ typedef struct
     HWND              Notify;
     WORD              numParts;
     UINT              height;
+    UINT              minHeight;        /* at least MIN_PANE_HEIGHT, can be increased by SB_SETMINHEIGHT */
     BOOL              simple;
     HWND              hwndToolTip;
     HFONT             hFont;
     HFONT             hDefaultFont;
     COLORREF          clrBk;		/* background color */
-    BOOL              bUnicode;		/* unicode flag */
-    BOOL              NtfUnicode;	/* notify format */
+    BOOL              bUnicode;         /* notify format. TRUE if notifies in Unicode */
     STATUSWINDOWPART  part0;		/* simple window */
     STATUSWINDOWPART* parts;
     INT               horizontalBorder;
@@ -101,10 +101,43 @@ static const WCHAR themeClass[] = { 'S','t','a','t','u','s',0 };
 /* prototype */
 static void
 STATUSBAR_SetPartBounds (STATUS_INFO *infoPtr);
+static LRESULT
+STATUSBAR_NotifyFormat (STATUS_INFO *infoPtr, HWND from, INT cmd);
 
 static inline LPCSTR debugstr_t(LPCWSTR text, BOOL isW)
 {
   return isW ? debugstr_w(text) : debugstr_a((LPCSTR)text);
+}
+
+static UINT
+STATUSBAR_ComputeHeight(STATUS_INFO *infoPtr)
+{
+    HTHEME theme;
+    UINT height;
+    TEXTMETRICW tm;
+    int margin;
+
+    COMCTL32_GetFontMetrics(infoPtr->hFont ? infoPtr->hFont : infoPtr->hDefaultFont, &tm);
+    margin = (tm.tmInternalLeading ? tm.tmInternalLeading : 2);
+    height = max(tm.tmHeight + margin + 2*GetSystemMetrics(SM_CYBORDER), infoPtr->minHeight) + infoPtr->verticalBorder;
+
+    if ((theme = GetWindowTheme(infoPtr->Self)))
+    {
+        /* Determine bar height from theme such that the content area is
+         * textHeight pixels large */
+        HDC hdc = GetDC(infoPtr->Self);
+        RECT r;
+        memset (&r, 0, sizeof (r));
+        r.bottom = max(infoPtr->minHeight, tm.tmHeight);
+        if (SUCCEEDED(GetThemeBackgroundExtent(theme, hdc, SP_PANE, 0, &r, &r)))
+        {
+            height = r.bottom - r.top;
+        }
+        ReleaseDC(infoPtr->Self, hdc);
+    }
+
+    TRACE("    textHeight=%d+%d, final height=%d\n", tm.tmHeight, tm.tmInternalLeading, height);
+    return height;
 }
 
 static void
@@ -114,8 +147,8 @@ STATUSBAR_DrawSizeGrip (HTHEME theme, HDC hdc, LPRECT lpRect)
     POINT pt;
     INT i;
 
-    TRACE("draw size grip %d,%d - %d,%d\n", lpRect->left, lpRect->top, lpRect->right, lpRect->bottom);
-    
+    TRACE("draw size grip %s\n", wine_dbgstr_rect(lpRect));
+
     if (theme)
     {
         RECT gripperRect;
@@ -175,7 +208,7 @@ STATUSBAR_DrawPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART 
     HTHEME theme = GetWindowTheme (infoPtr->Self);
     int themePart = SP_PANE;
 
-    TRACE("part bound %d,%d - %d,%d\n", r.left, r.top, r.right, r.bottom);
+    TRACE("part bound %s\n", wine_dbgstr_rect(&r));
     if (part->style & SBT_POPOUT)
         border = BDR_RAISEDOUTER;
     else if (part->style & SBT_NOBORDERS)
@@ -218,14 +251,14 @@ static void
 STATUSBAR_RefreshPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPART *part, int itemID)
 {
     HBRUSH hbrBk;
-    HFONT  hOldFont;
     HTHEME theme;
 
     TRACE("item %d\n", itemID);
-    if (!IsWindowVisible (infoPtr->Self))
-        return;
 
     if (part->bound.right < part->bound.left) return;
+
+    if (!RectVisible(hdc, &part->bound))
+        return;
 
     if ((theme = GetWindowTheme (infoPtr->Self)))
     {
@@ -244,18 +277,7 @@ STATUSBAR_RefreshPart (const STATUS_INFO *infoPtr, HDC hdc, const STATUSWINDOWPA
                 DeleteObject (hbrBk);
     }
 
-    hOldFont = SelectObject (hdc, infoPtr->hFont ? infoPtr->hFont : infoPtr->hDefaultFont);
-
-	STATUSBAR_DrawPart (infoPtr, hdc, part, itemID);
-
-    SelectObject (hdc, hOldFont);
-
-    if (GetWindowLongW (infoPtr->Self, GWL_STYLE) & SBARS_SIZEGRIP) {
-        RECT rect;
-
-	GetClientRect (infoPtr->Self, &rect);
-	STATUSBAR_DrawSizeGrip (theme, hdc, &rect);
-    }
+    STATUSBAR_DrawPart (infoPtr, hdc, part, itemID);
 }
 
 
@@ -333,7 +355,7 @@ STATUSBAR_SetPartBounds (STATUS_INFO *infoPtr)
 
     /* get our window size */
     GetClientRect (infoPtr->Self, &rect);
-    TRACE("client wnd size is %d,%d - %d,%d\n", rect.left, rect.top, rect.right, rect.bottom);
+    TRACE("client wnd size is %s\n", wine_dbgstr_rect(&rect));
 
     rect.left += infoPtr->horizontalBorder;
     rect.top += infoPtr->verticalBorder;
@@ -626,40 +648,11 @@ STATUSBAR_SetIcon (STATUS_INFO *infoPtr, INT nPart, HICON hIcon)
 static BOOL
 STATUSBAR_SetMinHeight (STATUS_INFO *infoPtr, INT height)
 {
-
-    TRACE("(height=%d)\n", height);
-    if (IsWindowVisible (infoPtr->Self)) {
-	INT  width, x, y;
-	RECT parent_rect;
-        HTHEME theme;
-
-	infoPtr->height = height + infoPtr->verticalBorder;
-        
-        if ((theme = GetWindowTheme (infoPtr->Self)))
-        {
-            /* Determine bar height from theme such that the content area is
-             * 'height' pixels large */
-            HDC hdc = GetDC (infoPtr->Self);
-            RECT r;
-            memset (&r, 0, sizeof (r));
-            r.bottom = height;
-            if (SUCCEEDED(GetThemeBackgroundExtent (theme, hdc, SP_PANE, 0, &r, &r)))
-            {
-                infoPtr->height = r.bottom - r.top;
-            }
-            ReleaseDC (infoPtr->Self, hdc);
-        }
-        
-        if (GetClientRect (infoPtr->Notify, &parent_rect))
-        {
-            width = parent_rect.right - parent_rect.left;
-            x = parent_rect.left;
-            y = parent_rect.bottom - infoPtr->height;
-            MoveWindow (infoPtr->Self, x, y, width, infoPtr->height, TRUE);
-            STATUSBAR_SetPartBounds (infoPtr);
-        }
-    }
-
+    DWORD ysize = GetSystemMetrics(SM_CYSIZE);
+    if (ysize & 1) ysize--;
+    infoPtr->minHeight = max(height, ysize);
+    infoPtr->height = STATUSBAR_ComputeHeight(infoPtr);
+    /* like native, don't resize the control */
     return TRUE;
 }
 
@@ -668,7 +661,7 @@ static BOOL
 STATUSBAR_SetParts (STATUS_INFO *infoPtr, INT count, LPINT parts)
 {
     STATUSWINDOWPART *tmp;
-    int	i, oldNumParts;
+    UINT i, oldNumParts;
 
     TRACE("(%d,%p)\n", count, parts);
 
@@ -700,7 +693,7 @@ STATUSBAR_SetParts (STATUS_INFO *infoPtr, INT count, LPINT parts)
 	infoPtr->parts[i].x = parts[i];
 
     if (infoPtr->hwndToolTip) {
-	INT nTipCount, i;
+	UINT nTipCount;
 	TTTOOLINFOW ti;
 
 	ZeroMemory (&ti, sizeof(TTTOOLINFOW));
@@ -766,11 +759,10 @@ STATUSBAR_SetTextT (STATUS_INFO *infoPtr, INT nPart, WORD style,
     if (style & SBT_OWNERDRAW) {
         if (!(oldStyle & SBT_OWNERDRAW))
             Free (part->text);
-        else if (part->text == text)
-            return TRUE;
         part->text = (LPWSTR)text;
     } else {
 	LPWSTR ntext;
+	WCHAR  *idx;
 
 	if (text && !isW) {
 	    LPCSTR atxt = (LPCSTR)text;
@@ -783,6 +775,16 @@ STATUSBAR_SetTextT (STATUS_INFO *infoPtr, INT nPart, WORD style,
 	    if (!ntext) return FALSE;
 	    strcpyW (ntext, text);
 	} else ntext = 0;
+
+	/* replace nonprintable characters with spaces */
+	if (ntext) {
+	    idx = ntext;
+	    while (*idx) {
+	        if(!isprintW(*idx))
+	            *idx = ' ';
+	        idx++;
+	    }
+	}
 
 	/* check if text is unchanged -> no need to redraw */
 	if (text) {
@@ -912,11 +914,10 @@ STATUSBAR_WMCreate (HWND hwnd, const CREATESTRUCTA *lpCreate)
     NONCLIENTMETRICSW nclm;
     DWORD dwStyle;
     RECT rect;
-    int	i, width, len, textHeight = 0;
-    HDC	hdc;
+    int	len;
 
     TRACE("\n");
-    infoPtr = (STATUS_INFO*)Alloc (sizeof(STATUS_INFO));
+    infoPtr = Alloc (sizeof(STATUS_INFO));
     if (!infoPtr) goto create_fail;
     SetWindowLongPtrW (hwnd, 0, (DWORD_PTR)infoPtr);
 
@@ -930,18 +931,17 @@ STATUSBAR_WMCreate (HWND hwnd, const CREATESTRUCTA *lpCreate)
     infoPtr->horizontalBorder = HORZ_BORDER;
     infoPtr->verticalBorder = VERT_BORDER;
     infoPtr->horizontalGap = HORZ_GAP;
+    infoPtr->minHeight = GetSystemMetrics(SM_CYSIZE);
+    if (infoPtr->minHeight & 1) infoPtr->minHeight--;
 
-    i = SendMessageW(infoPtr->Notify, WM_NOTIFYFORMAT, (WPARAM)hwnd, NF_QUERY);
-    infoPtr->NtfUnicode = (i == NFR_UNICODE);
-
-    GetClientRect (hwnd, &rect);
-    InvalidateRect (hwnd, &rect, 0);
-    UpdateWindow(hwnd);
+    STATUSBAR_NotifyFormat(infoPtr, infoPtr->Notify, NF_REQUERY);
 
     ZeroMemory (&nclm, sizeof(nclm));
     nclm.cbSize = sizeof(nclm);
     SystemParametersInfoW (SPI_GETNONCLIENTMETRICS, nclm.cbSize, &nclm, 0);
     infoPtr->hDefaultFont = CreateFontIndirectW (&nclm.lfStatusFont);
+
+    GetClientRect (hwnd, &rect);
 
     /* initialize simple case */
     infoPtr->part0.bound = rect;
@@ -961,48 +961,19 @@ STATUSBAR_WMCreate (HWND hwnd, const CREATESTRUCTA *lpCreate)
     
     OpenThemeData (hwnd, themeClass);
 
-    if (IsWindowUnicode (hwnd)) {
-	infoPtr->bUnicode = TRUE;
-	if (lpCreate->lpszName &&
-	    (len = strlenW ((LPCWSTR)lpCreate->lpszName))) {
-	    infoPtr->parts[0].text = Alloc ((len + 1)*sizeof(WCHAR));
-	    if (!infoPtr->parts[0].text) goto create_fail;
-	    strcpyW (infoPtr->parts[0].text, (LPCWSTR)lpCreate->lpszName);
-	}
-    }
-    else {
-	if (lpCreate->lpszName &&
-	    (len = strlen((LPCSTR)lpCreate->lpszName))) {
-            DWORD lenW = MultiByteToWideChar( CP_ACP, 0, (LPCSTR)lpCreate->lpszName, -1, NULL, 0 );
-	    infoPtr->parts[0].text = Alloc (lenW*sizeof(WCHAR));
-	    if (!infoPtr->parts[0].text) goto create_fail;
-            MultiByteToWideChar( CP_ACP, 0, (LPCSTR)lpCreate->lpszName, -1,
-                                 infoPtr->parts[0].text, lenW );
-	}
+    if (lpCreate->lpszName && (len = strlenW ((LPCWSTR)lpCreate->lpszName)))
+    {
+        infoPtr->parts[0].text = Alloc ((len + 1)*sizeof(WCHAR));
+        if (!infoPtr->parts[0].text) goto create_fail;
+        strcpyW (infoPtr->parts[0].text, (LPCWSTR)lpCreate->lpszName);
     }
 
     dwStyle = GetWindowLongW (hwnd, GWL_STYLE);
     /* native seems to clear WS_BORDER, too */
     dwStyle &= ~WS_BORDER;
-
-    /* statusbars on managed windows should not have SIZEGRIP style */
-    if ((dwStyle & SBARS_SIZEGRIP) && lpCreate->hwndParent &&
-        GetPropA( lpCreate->hwndParent, "__wine_x11_managed" ))
-        dwStyle &= ~SBARS_SIZEGRIP;
-
     SetWindowLongW (hwnd, GWL_STYLE, dwStyle);
 
-    if ((hdc = GetDC (hwnd))) {
-	TEXTMETRICW tm;
-	HFONT hOldFont;
-
-	hOldFont = SelectObject (hdc, infoPtr->hDefaultFont);
-	GetTextMetricsW (hdc, &tm);
-	textHeight = tm.tmHeight;
-	SelectObject (hdc, hOldFont);
-	ReleaseDC (hwnd, hdc);
-    }
-    TRACE("    textHeight=%d\n", textHeight);
+    infoPtr->height = STATUSBAR_ComputeHeight(infoPtr);
 
     if (dwStyle & SBT_TOOLTIPS) {
 	infoPtr->hwndToolTip =
@@ -1019,35 +990,8 @@ STATUSBAR_WMCreate (HWND hwnd, const CREATESTRUCTA *lpCreate)
 	    nmttc.hdr.code = NM_TOOLTIPSCREATED;
 	    nmttc.hwndToolTips = infoPtr->hwndToolTip;
 
-	    SendMessageW (lpCreate->hwndParent, WM_NOTIFY,
-			    (WPARAM)nmttc.hdr.idFrom, (LPARAM)&nmttc);
+	    SendMessageW (lpCreate->hwndParent, WM_NOTIFY, nmttc.hdr.idFrom, (LPARAM)&nmttc);
 	}
-    }
-
-    if (!(dwStyle & CCS_NORESIZE)) { /* don't resize wnd if it doesn't want it ! */
-        HTHEME theme;
-        GetClientRect (infoPtr->Notify, &rect);
-        width = rect.right - rect.left;
-        infoPtr->height = textHeight + 4 + infoPtr->verticalBorder;
-        
-        if ((theme = GetWindowTheme (hwnd)))
-        {
-            /* Determine bar height from theme such that the content area is
-             * textHeight pixels large */
-            HDC hdc = GetDC (hwnd);
-            RECT r;
-            memset (&r, 0, sizeof (r));
-            r.bottom = textHeight;
-            if (SUCCEEDED(GetThemeBackgroundExtent (theme, hdc, SP_PANE, 0, &r, &r)))
-            {
-                infoPtr->height = r.bottom - r.top;
-            }
-            ReleaseDC (hwnd, hdc);
-        }
-    
-        SetWindowPos(hwnd, 0, lpCreate->x, lpCreate->y - 1,
-			width, infoPtr->height, SWP_NOZORDER);
-        STATUSBAR_SetPartBounds (infoPtr);
     }
 
     return 0;
@@ -1069,17 +1013,11 @@ STATUSBAR_WMGetText (const STATUS_INFO *infoPtr, INT size, LPWSTR buf)
     TRACE("\n");
     if (!(infoPtr->parts[0].text))
         return 0;
-    if (infoPtr->bUnicode)
-        len = strlenW (infoPtr->parts[0].text);
-    else
-        len = WideCharToMultiByte( CP_ACP, 0, infoPtr->parts[0].text, -1, NULL, 0, NULL, NULL )-1;
+
+    len = strlenW (infoPtr->parts[0].text);
 
     if (size > len) {
-	if (infoPtr->bUnicode)
-	    strcpyW (buf, infoPtr->parts[0].text);
-	else
-            WideCharToMultiByte( CP_ACP, 0, infoPtr->parts[0].text, -1,
-                                 (LPSTR)buf, len+1, NULL, NULL );
+        strcpyW (buf, infoPtr->parts[0].text);
 	return len;
     }
 
@@ -1131,6 +1069,9 @@ STATUSBAR_WMSetFont (STATUS_INFO *infoPtr, HFONT font, BOOL redraw)
 {
     infoPtr->hFont = font;
     TRACE("%p\n", infoPtr->hFont);
+
+    infoPtr->height = STATUSBAR_ComputeHeight(infoPtr);
+    SendMessageW(infoPtr->Self, WM_SIZE, 0, 0);  /* update size */
     if (redraw)
         InvalidateRect(infoPtr->Self, NULL, FALSE);
 
@@ -1152,20 +1093,11 @@ STATUSBAR_WMSetText (const STATUS_INFO *infoPtr, LPCSTR text)
     /* duplicate string */
     Free (part->text);
     part->text = 0;
-    if (infoPtr->bUnicode) {
-	if (text && (len = strlenW((LPCWSTR)text))) {
-	    part->text = Alloc ((len+1)*sizeof(WCHAR));
-	    if (!part->text) return FALSE;
-	    strcpyW (part->text, (LPCWSTR)text);
-	}
-    }
-    else {
-	if (text && (len = lstrlenA(text))) {
-            DWORD lenW = MultiByteToWideChar( CP_ACP, 0, text, -1, NULL, 0 );
-            part->text = Alloc (lenW*sizeof(WCHAR));
-	    if (!part->text) return FALSE;
-            MultiByteToWideChar( CP_ACP, 0, text, -1, part->text, lenW );
-	}
+
+    if (text && (len = strlenW((LPCWSTR)text))) {
+        part->text = Alloc ((len+1)*sizeof(WCHAR));
+        if (!part->text) return FALSE;
+        strcpyW (part->text, (LPCWSTR)text);
     }
 
     InvalidateRect(infoPtr->Self, &part->bound, FALSE);
@@ -1218,9 +1150,9 @@ STATUSBAR_NotifyFormat (STATUS_INFO *infoPtr, HWND from, INT cmd)
 {
     if (cmd == NF_REQUERY) {
 	INT i = SendMessageW(from, WM_NOTIFYFORMAT, (WPARAM)infoPtr->Self, NF_QUERY);
-	infoPtr->NtfUnicode = (i == NFR_UNICODE);
+	infoPtr->bUnicode = (i == NFR_UNICODE);
     }
-    return infoPtr->NtfUnicode ? NFR_UNICODE : NFR_ANSI;
+    return infoPtr->bUnicode ? NFR_UNICODE : NFR_ANSI;
 }
 
 
@@ -1385,7 +1317,7 @@ StatusWindowProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return theme_changed (infoPtr);
 
 	default:
-	    if ((msg >= WM_USER) && (msg < WM_APP))
+	    if ((msg >= WM_USER) && (msg < WM_APP) && !COMCTL32_IsReflectedMessage(msg))
 		ERR("unknown msg %04x wp=%04lx lp=%08lx\n",
 		     msg, wParam, lParam);
 	    return DefWindowProcW (hwnd, msg, wParam, lParam);

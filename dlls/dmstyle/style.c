@@ -37,23 +37,23 @@ static HRESULT WINAPI IDirectMusicStyle8Impl_IUnknown_QueryInterface (LPUNKNOWN 
 	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
 	
 	if (IsEqualIID (riid, &IID_IUnknown)) {
-		*ppobj = (LPVOID)&This->UnknownVtbl;
+		*ppobj = &This->UnknownVtbl;
 		IDirectMusicStyle8Impl_IUnknown_AddRef ((LPUNKNOWN)&This->UnknownVtbl);
 		return S_OK;	
 	} else if (IsEqualIID (riid, &IID_IDirectMusicStyle)) {
-		*ppobj = (LPVOID)&This->StyleVtbl;
+		*ppobj = &This->StyleVtbl;
 		IDirectMusicStyle8Impl_IDirectMusicStyle8_AddRef ((LPDIRECTMUSICSTYLE8)&This->StyleVtbl);
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IDirectMusicStyle8)) {
-		*ppobj = (LPVOID)&This->StyleVtbl;
+		*ppobj = &This->StyleVtbl;
 		IDirectMusicStyle8Impl_IDirectMusicStyle8_AddRef ((LPDIRECTMUSICSTYLE8)&This->StyleVtbl);
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IDirectMusicObject)) {
-		*ppobj = (LPVOID)&This->ObjectVtbl;
+		*ppobj = &This->ObjectVtbl;
 		IDirectMusicStyle8Impl_IDirectMusicObject_AddRef ((LPDIRECTMUSICOBJECT)&This->ObjectVtbl);		
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IPersistStream)) {
-		*ppobj = (LPVOID)&This->PersistStreamVtbl;
+		*ppobj = &This->PersistStreamVtbl;
 		IDirectMusicStyle8Impl_IPersistStream_AddRef ((LPPERSISTSTREAM)&This->PersistStreamVtbl);		
 		return S_OK;
 	}
@@ -228,12 +228,12 @@ static HRESULT WINAPI IDirectMusicStyle8Impl_IDirectMusicObject_GetDescriptor (L
 static HRESULT WINAPI IDirectMusicStyle8Impl_IDirectMusicObject_SetDescriptor (LPDIRECTMUSICOBJECT iface, LPDMUS_OBJECTDESC pDesc) {
 	ICOM_THIS_MULTI(IDirectMusicStyle8Impl, ObjectVtbl, iface);
 	TRACE("(%p, %p): setting descriptor:\n%s\n", This, pDesc, debugstr_DMUS_OBJECTDESC (pDesc));
-	
+
 	/* According to MSDN, we should copy only given values, not whole struct */	
 	if (pDesc->dwValidData & DMUS_OBJ_OBJECT)
-		memcpy (&This->pDesc->guidObject, &pDesc->guidObject, sizeof (pDesc->guidObject));
+		This->pDesc->guidObject = pDesc->guidObject;
 	if (pDesc->dwValidData & DMUS_OBJ_CLASS)
-		memcpy (&This->pDesc->guidClass, &pDesc->guidClass, sizeof (pDesc->guidClass));		
+		This->pDesc->guidClass = pDesc->guidClass;
 	if (pDesc->dwValidData & DMUS_OBJ_NAME)
 		lstrcpynW (This->pDesc->wszName, pDesc->wszName, DMUS_MAX_NAME);
 	if (pDesc->dwValidData & DMUS_OBJ_CATEGORY)
@@ -241,9 +241,9 @@ static HRESULT WINAPI IDirectMusicStyle8Impl_IDirectMusicObject_SetDescriptor (L
 	if (pDesc->dwValidData & DMUS_OBJ_FILENAME)
 		lstrcpynW (This->pDesc->wszFileName, pDesc->wszFileName, DMUS_MAX_FILENAME);
 	if (pDesc->dwValidData & DMUS_OBJ_VERSION)
-		memcpy (&This->pDesc->vVersion, &pDesc->vVersion, sizeof (pDesc->vVersion));				
+		This->pDesc->vVersion = pDesc->vVersion;
 	if (pDesc->dwValidData & DMUS_OBJ_DATE)
-		memcpy (&This->pDesc->ftDate, &pDesc->ftDate, sizeof (pDesc->ftDate));				
+		This->pDesc->ftDate = pDesc->ftDate;
 	if (pDesc->dwValidData & DMUS_OBJ_MEMORY) {
 		memcpy (&This->pDesc->llMemLength, &pDesc->llMemLength, sizeof (pDesc->llMemLength));				
 		memcpy (This->pDesc->pbMemData, pDesc->pbMemData, sizeof (pDesc->pbMemData));
@@ -266,11 +266,11 @@ static HRESULT WINAPI IDirectMusicStyle8Impl_IDirectMusicObject_ParseDescriptor 
 	LARGE_INTEGER liMove; /* used when skipping chunks */
 
 	TRACE("(%p, %p, %p)\n", This, pStream, pDesc);
-	
+
 	/* FIXME: should this be determined from stream? */
 	pDesc->dwValidData |= DMUS_OBJ_CLASS;
-	memcpy (&pDesc->guidClass, &CLSID_DirectMusicStyle, sizeof(CLSID));
-	
+	pDesc->guidClass = CLSID_DirectMusicStyle;
+
 	IStream_Read (pStream, &Chunk, sizeof(FOURCC)+sizeof(DWORD), NULL);
 	TRACE_(dmfile)(": %s chunk (size = 0x%04x)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
 	switch (Chunk.fccID) {	
@@ -435,7 +435,7 @@ static ULONG WINAPI IDirectMusicStyle8Impl_IPersistStream_Release (LPPERSISTSTRE
 static HRESULT WINAPI IDirectMusicStyle8Impl_IPersistStream_GetClassID (LPPERSISTSTREAM iface, CLSID* pClassID) {
   ICOM_THIS_MULTI(IDirectMusicStyle8Impl, PersistStreamVtbl, iface);
   TRACE("(%p, %p)\n", This, pClassID);
-  memcpy(pClassID, &CLSID_DirectMusicStyle, sizeof(CLSID));
+  *pClassID = CLSID_DirectMusicStyle;
   return S_OK;
 }
 
@@ -500,9 +500,9 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParsePartRefList (LPPERSIST
     case DMUS_FOURCC_PARTREF_CHUNK: {
       TRACE_(dmfile)(": PartRef chunk\n");
       pNewItem = HeapAlloc (GetProcessHeap (), HEAP_ZERO_MEMORY, sizeof(DMUS_PRIVATE_STYLE_PARTREF_ITEM));
-      if (NULL == pNewItem) {
+      if (!pNewItem) {
 	ERR(": no more memory\n");
-	return  E_OUTOFMEMORY;
+	return E_OUTOFMEMORY;
       }
       hr = IStream_Read (pStm, &pNewItem->part_ref, sizeof(DMUS_IO_PARTREF), NULL);
       /*TRACE_(dmfile)(" - sizeof %lu\n",  sizeof(DMUS_IO_PARTREF));*/
@@ -523,6 +523,10 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParsePartRefList (LPPERSIST
 	  ListCount[1] += sizeof(FOURCC) + sizeof(DWORD) + Chunk.dwSize;
           TRACE_(dmfile)(": %s chunk (size = %d)", debugstr_fourcc (Chunk.fccID), Chunk.dwSize);
 	  
+          if (!pNewItem) {
+	    ERR(": pNewItem not yet allocated, chunk order bad?\n");
+	    return E_OUTOFMEMORY;
+          }
 	  hr = IDirectMusicUtils_IPersistStream_ParseUNFOGeneric(&Chunk, pStm, &pNewItem->desc);
 	  if (FAILED(hr)) return hr;
 	  
@@ -735,7 +739,7 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParsePatternList (LPPERSIST
       IStream_Read (pStm, &pNewMotif->pattern, Chunk.dwSize, NULL);
       /** TODO trace pattern */
 
-      /** reset all datas, as a new pattern begin */
+      /** reset all data, as a new pattern begin */
       DM_STRUCT_INIT(&pNewMotif->desc);
       list_init (&pNewMotif->Items);
       break;
@@ -750,14 +754,14 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParsePatternList (LPPERSIST
       break;
     }
     case DMUS_FOURCC_MOTIFSETTINGS_CHUNK: {
-      TRACE_(dmfile)(": MotifSettigns chunk (skipping for now)\n");
+      TRACE_(dmfile)(": MotifSettings chunk (skipping for now)\n");
       IStream_Read (pStm, &pNewMotif->settings, Chunk.dwSize, NULL);
       /** TODO trace settings */
       break;
     }
     case FOURCC_RIFF: {
       /**
-       * sould be embededs Bands into pattern
+       * should be embedded Bands into pattern
        */
       IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
       TRACE_(dmfile)(": RIFF chunk of type %s", debugstr_fourcc(Chunk.fccID));
@@ -785,7 +789,7 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParsePatternList (LPPERSIST
 	pNewMotif->pBand = pBand;
 	IDirectMusicBand_AddRef(pBand);
 
-	IDirectMusicTrack_Release(pBand); pBand = NULL;  /* now we can release at as it inserted */
+	IDirectMusicTrack_Release(pBand); pBand = NULL;  /* now we can release it as it's inserted */
 	
 	/** now safe move the cursor */
 	liMove.QuadPart = ListSize[1];
@@ -897,7 +901,7 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParseStyleForm (LPPERSISTST
       }   
       case FOURCC_RIFF: {
 	/**
-	 * sould be embededs Bands into style
+	 * should be embedded Bands into style
 	 */
 	IStream_Read (pStm, &Chunk.fccID, sizeof(FOURCC), NULL);
 	TRACE_(dmfile)(": RIFF chunk of type %s", debugstr_fourcc(Chunk.fccID));
@@ -932,9 +936,9 @@ static HRESULT IDirectMusicStyle8Impl_IPersistStream_ParseStyleForm (LPPERSISTST
 	  IDirectMusicBand_AddRef(pBand);
 	  list_add_tail (&This->Bands, &pNewBand->entry);
 
-	  IDirectMusicTrack_Release(pBand); pBand = NULL;  /* now we can release at as it inserted */
+	  IDirectMusicTrack_Release(pBand); pBand = NULL;  /* now we can release it as it's inserted */
 	
-	  /** now safe move the cursor */
+	  /** now safely move the cursor */
 	  liMove.QuadPart = ListSize[0];
 	  IStream_Seek (pStm, liMove, STREAM_SEEK_CUR, NULL);
 	  
@@ -1097,7 +1101,7 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicStyleImpl (LPCGUID lpcGUID, LPVOID* ppobj
   obj->pDesc = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DMUS_OBJECTDESC));
   DM_STRUCT_INIT(obj->pDesc);
   obj->pDesc->dwValidData |= DMUS_OBJ_CLASS;
-  memcpy (&obj->pDesc->guidClass, &CLSID_DirectMusicStyle, sizeof (CLSID));
+  obj->pDesc->guidClass = CLSID_DirectMusicStyle;
   obj->ref = 0; /* will be inited by QueryInterface */
   list_init (&obj->Bands);
   list_init (&obj->Motifs);

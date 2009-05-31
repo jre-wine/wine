@@ -412,7 +412,7 @@ BOOL16 WINAPI LocalInit16( HANDLE16 selector, WORD start, WORD end )
 
     if (TRACE_ON(local))
     {
-        /* If TRACE_ON(heap) is set, the global heap blocks are */
+        /* If TRACE_ON(local) is set, the global heap blocks are */
         /* cleared before use, so we can test for double initialization. */
         if (LOCAL_GetHeap(selector))
         {
@@ -572,7 +572,7 @@ static HLOCAL16 LOCAL_FreeArena( WORD ds, WORD arena )
 {
     char *ptr = MapSL( MAKESEGPTR( ds, 0 ) );
     LOCALHEAPINFO *pInfo;
-    LOCALARENA *pArena, *pPrev, *pNext;
+    LOCALARENA *pArena, *pPrev;
 
     TRACE("%04x ds=%04x\n", arena, ds );
     if (!(pInfo = LOCAL_GetHeap( ds ))) return arena;
@@ -590,7 +590,6 @@ static HLOCAL16 LOCAL_FreeArena( WORD ds, WORD arena )
       /* Check if we can merge with the previous block */
 
     pPrev = ARENA_PTR( ptr, pArena->prev & ~3 );
-    pNext = ARENA_PTR( ptr, pArena->next );
     if ((pPrev->prev & 3) == LOCAL_ARENA_FREE)
     {
         arena  = pArena->prev & ~3;
@@ -1860,7 +1859,7 @@ HANDLE WINAPI Local32Init16( WORD segment, DWORD tableSize,
         HeapFree( GetProcessHeap(), 0, oldBase );
     }
 
-    return (HANDLE)header;
+    return header;
 }
 
 /***********************************************************************
@@ -1958,7 +1957,7 @@ static VOID Local32_FromHandle( LOCAL32HEADER *header, INT16 type,
  */
 DWORD WINAPI Local32Alloc16( HANDLE heap, DWORD size, INT16 type, DWORD flags )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
     DWORD addr;
@@ -2037,7 +2036,7 @@ DWORD WINAPI Local32Alloc16( HANDLE heap, DWORD size, INT16 type, DWORD flags )
 DWORD WINAPI Local32ReAlloc16( HANDLE heap, DWORD addr, INT16 type,
                              DWORD size, DWORD flags )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
 
@@ -2070,7 +2069,7 @@ DWORD WINAPI Local32ReAlloc16( HANDLE heap, DWORD addr, INT16 type,
  */
 BOOL WINAPI Local32Free16( HANDLE heap, DWORD addr, INT16 type )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
 
@@ -2116,7 +2115,7 @@ BOOL WINAPI Local32Free16( HANDLE heap, DWORD addr, INT16 type )
  */
 DWORD WINAPI Local32Translate16( HANDLE heap, DWORD addr, INT16 type1, INT16 type2 )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
 
@@ -2132,7 +2131,7 @@ DWORD WINAPI Local32Translate16( HANDLE heap, DWORD addr, INT16 type1, INT16 typ
  */
 DWORD WINAPI Local32Size16( HANDLE heap, DWORD addr, INT16 type )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
 
@@ -2147,7 +2146,7 @@ DWORD WINAPI Local32Size16( HANDLE heap, DWORD addr, INT16 type )
  */
 BOOL WINAPI Local32ValidHandle16( HANDLE heap, WORD addr )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     LPDWORD handle;
     LPBYTE ptr;
 
@@ -2160,7 +2159,7 @@ BOOL WINAPI Local32ValidHandle16( HANDLE heap, WORD addr )
  */
 WORD WINAPI Local32GetSegment16( HANDLE heap )
 {
-    LOCAL32HEADER *header = (LOCAL32HEADER *)heap;
+    LOCAL32HEADER *header = heap;
     return header->segment;
 }
 

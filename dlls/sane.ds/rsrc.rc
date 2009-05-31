@@ -25,6 +25,7 @@
 
 #include "resource.h"
 
+#include "sane_Da.rc"
 #include "sane_De.rc"
 #include "sane_En.rc"
 #include "sane_Es.rc"
@@ -34,4 +35,9 @@
 #include "sane_Nl.rc"
 #include "sane_No.rc"
 #include "sane_Pl.rc"
+#include "sane_Pt.rc"
+#include "sane_Ro.rc"
+#include "sane_Ru.rc"
+#include "sane_Si.rc"
 #include "sane_Sv.rc"
+#include "sane_Zh.rc"

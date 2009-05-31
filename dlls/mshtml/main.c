@@ -20,8 +20,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "config.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 
@@ -30,12 +28,12 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
-#include "winnls.h"
 #include "winreg.h"
 #include "ole2.h"
 #include "advpub.h"
 #include "shlwapi.h"
 #include "optary.h"
+#include "shlguid.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -46,51 +44,9 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 HINSTANCE hInst;
-LONG module_ref = 0;
 DWORD mshtml_tls = 0;
 
 static HINSTANCE shdoclc = NULL;
-
-static ITypeLib *typelib;
-static ITypeInfo *typeinfos[LAST_tid];
-
-static REFIID tid_ids[] = {
-    &IID_IHTMLWindow2
-};
-
-HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
-{
-    HRESULT hres;
-
-    if(!typelib) {
-        ITypeLib *tl;
-
-        hres = LoadRegTypeLib(&LIBID_MSHTML, 4, 0, LOCALE_SYSTEM_DEFAULT, &tl);
-        if(FAILED(hres)) {
-            ERR("LoadRegTypeLib failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
-            ITypeLib_Release(tl);
-    }
-
-    if(!typeinfos[tid]) {
-        ITypeInfo *typeinfo;
-
-        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &typeinfo);
-        if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), typeinfo, NULL))
-            ITypeInfo_Release(typeinfo);
-    }
-
-    *typeinfo = typeinfos[tid];
-    return S_OK;
-}
 
 static void thread_detach(void)
 {
@@ -109,16 +65,7 @@ static void thread_detach(void)
 static void process_detach(void)
 {
     close_gecko();
-
-    if(typelib) {
-        unsigned i;
-
-        for(i=0; i < sizeof(typeinfos)/sizeof(*typeinfos); i++)
-            if(typeinfos[i])
-                ITypeInfo_Release(typeinfos[i]);
-
-        ITypeLib_Release(typelib);
-    }
+    release_typelib();
 
     if(shdoclc)
         FreeLibrary(shdoclc);
@@ -193,7 +140,6 @@ static ULONG WINAPI ClassFactory_Release(IClassFactory *iface)
 
     if(!ref) {
         heap_free(This);
-        UNLOCK_MODULE();
     }
 
     return ref;
@@ -210,11 +156,7 @@ static HRESULT WINAPI ClassFactory_LockServer(IClassFactory *iface, BOOL dolock)
 {
     TRACE("(%p)->(%x)\n", iface, dolock);
 
-    if(dolock)
-        LOCK_MODULE();
-    else
-        UNLOCK_MODULE();
-
+    /* We never unload the DLL. See DllCanUnloadNow(). */
     return S_OK;
 }
 
@@ -236,9 +178,7 @@ static HRESULT ClassFactory_Create(REFIID riid, void **ppv, CreateInstanceFunc f
     ret->fnCreateInstance = fnCreateInstance;
 
     hres = IClassFactory_QueryInterface((IClassFactory*)ret, riid, ppv);
-    if(SUCCEEDED(hres)) {
-        LOCK_MODULE();
-    }else {
+    if(FAILED(hres)) {
         heap_free(ret);
         *ppv = NULL;
     }
@@ -282,8 +222,9 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
  */
 HRESULT WINAPI DllCanUnloadNow(void)
 {
-    TRACE("() ref=%d\n", module_ref);
-    return module_ref ? S_FALSE : S_OK;
+    TRACE("()\n");
+    /* The cost of keeping this DLL in memory is small. */
+    return S_FALSE;
 }
 
 /***********************************************************************
@@ -326,15 +267,12 @@ HRESULT WINAPI ShowHTMLDialog(HWND hwndParent, IMoniker *pMk, VARIANT *pvarArgIn
     return E_NOTIMPL;
 }
 
-DEFINE_GUID(CLSID_CAnchorBrowsePropertyPage, 0x3050F3BB, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CBackgroundPropertyPage, 0x3050F232, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CCDAnchorPropertyPage, 0x3050F1FC, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CCDGenericPropertyPage, 0x3050F17F, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
-DEFINE_GUID(CLSID_CDocBrowsePropertyPage, 0x3050F3B4, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CDwnBindInfo, 0x3050F3C2, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CHiFiUses, 0x5AAF51B3, 0xB1F0, 0x11D1, 0xB6,0xAB, 0x00,0xA0,0xC9,0x08,0x33,0xE9);
 DEFINE_GUID(CLSID_CHtmlComponentConstructor, 0x3050F4F8, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
-DEFINE_GUID(CLSID_CImageBrowsePropertyPage, 0x3050F3B3, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CInlineStylePropertyPage, 0x3050F296, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
 DEFINE_GUID(CLSID_CPeerHandler, 0x5AAF51B2, 0xB1F0, 0x11D1, 0xB6,0xAB, 0x00,0xA0,0xC9,0x08,0x33,0xE9);
 DEFINE_GUID(CLSID_CRecalcEngine, 0x3050F499, 0x98B5, 0x11CF, 0xBB,0x82, 0x00,0xAA,0x00,0xBD,0xCE,0x0B);
@@ -369,11 +307,11 @@ static HRESULT register_server(BOOL do_register)
 {
     HRESULT hres;
     HMODULE hAdvpack;
-    typeof(RegInstallA) *pRegInstall;
+    HRESULT (WINAPI *pRegInstall)(HMODULE hm, LPCSTR pszSection, const STRTABLEA* pstTable);
     STRTABLEA strtable;
     STRENTRYA pse[35];
     static CLSID const *clsids[35];
-    int i = 0;
+    unsigned int i = 0;
 
     static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
 
@@ -427,7 +365,7 @@ static HRESULT register_server(BOOL do_register)
     strtable.pse = pse;
 
     hAdvpack = LoadLibraryW(wszAdvpack);
-    pRegInstall = (typeof(RegInstallA)*)GetProcAddress(hAdvpack, "RegInstall");
+    pRegInstall = (void *)GetProcAddress(hAdvpack, "RegInstall");
 
     hres = pRegInstall(hInst, do_register ? "RegisterDll" : "UnregisterDll", &strtable);
 
@@ -477,4 +415,26 @@ HRESULT WINAPI DllRegisterServer(void)
 HRESULT WINAPI DllUnregisterServer(void)
 {
     return register_server(FALSE);
+}
+
+const char *debugstr_variant(const VARIANT *v)
+{
+    switch(V_VT(v)) {
+    case VT_EMPTY:
+        return wine_dbg_sprintf("{VT_EMPTY}");
+    case VT_NULL:
+        return wine_dbg_sprintf("{VT_NULL}");
+    case VT_I4:
+        return wine_dbg_sprintf("{VT_I4: %d}", V_I4(v));
+    case VT_R8:
+        return wine_dbg_sprintf("{VT_R8: %lf}", V_R8(v));
+    case VT_BSTR:
+        return wine_dbg_sprintf("{VT_BSTR: %s}", debugstr_w(V_BSTR(v)));
+    case VT_DISPATCH:
+        return wine_dbg_sprintf("{VT_DISPATCH: %p}", V_DISPATCH(v));
+    case VT_BOOL:
+        return wine_dbg_sprintf("{VT_BOOL: %x}", V_BOOL(v));
+    default:
+        return wine_dbg_sprintf("{vt %d}", V_VT(v));
+    }
 }

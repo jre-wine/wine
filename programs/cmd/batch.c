@@ -58,7 +58,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
   BATCH_CONTEXT *prev_context;
 
   if (startLabel == NULL) {
-    for(i=0; (i<((sizeof(extension_batch) * sizeof(WCHAR))/WCMD_BATCH_EXT_SIZE)) &&
+    for(i=0; (i<sizeof(extension_batch)/(WCMD_BATCH_EXT_SIZE * sizeof(WCHAR))) &&
              (h == INVALID_HANDLE_VALUE); i++) {
       strcpyW (string, file);
       CharLower (string);
@@ -70,9 +70,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
       strcpyW (string, file);
       CharLower (string);
       if (strstrW (string, extension_exe) == NULL) strcatW (string, extension_exe);
-      h = CreateFile (string, GENERIC_READ, FILE_SHARE_READ,
-                      NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-      if (h != INVALID_HANDLE_VALUE) {
+      if (GetFileAttributes (string) != INVALID_FILE_ATTRIBUTES) {
         WCMD_run_program (command, 0);
       } else {
         SetLastError (ERROR_FILE_NOT_FOUND);
@@ -91,7 +89,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
  */
 
   prev_context = context;
-  context = (BATCH_CONTEXT *)LocalAlloc (LMEM_FIXED, sizeof (BATCH_CONTEXT));
+  context = LocalAlloc (LMEM_FIXED, sizeof (BATCH_CONTEXT));
   context -> h = h;
   context -> command = command;
   memset(context -> shift_count, 0x00, sizeof(context -> shift_count));
@@ -124,7 +122,7 @@ void WCMD_batch (WCHAR *file, WCHAR *command, int called, WCHAR *startLabel, HAN
  *	to the caller's caller.
  */
 
-  LocalFree ((HANDLE)context);
+  LocalFree (context);
   if ((prev_context != NULL) && (!called)) {
     prev_context -> skip_rest = TRUE;
     context = prev_context;
@@ -189,7 +187,7 @@ WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **where) {
           param[0] = '\0';
           i++;
         } else {
-          s++; /* Skip delimter */
+          s++; /* Skip delimiter */
         }
         p = param;
     }
@@ -425,7 +423,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValu
     memcpy(env, start, (end-start) * sizeof(WCHAR));
     env[(end-start)] = 0x00;
 
-    /* If env var not found, return emptry string */
+    /* If env var not found, return empty string */
     if ((GetEnvironmentVariable(env, fullpath, MAX_PATH) == 0) ||
         (SearchPath(fullpath, outputparam, NULL,
                     MAX_PATH, outputparam, NULL) == 0)) {
@@ -508,7 +506,8 @@ void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValu
     if (memchrW(firstModifier, 's', modifierLen) != NULL) {
       if (finaloutput[0] != 0x00) strcatW(finaloutput, space);
       /* Don't flag as doneModifier - %~s on its own is processed later */
-      GetShortPathName(outputparam, outputparam, sizeof(outputparam));
+      GetShortPathName(outputparam, outputparam,
+                       sizeof(outputparam)/sizeof(outputparam[0]));
     }
 
     /* 5. Handle 'f' : Fully qualified path (File doesn't have to exist) */
