@@ -19,6 +19,7 @@
  */
 
 #define COBJMACROS
+#define NONAMELESSUNION
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -116,6 +117,8 @@ static HRESULT WINAPI EnumFormatImpl_Next(IEnumFORMATETC *iface, ULONG celt,
 {
     EnumFormatImpl *This = (EnumFormatImpl*)iface;
     ULONG count, i;
+
+    trace("next: count %d cur %d\n", celt, This->cur);
 
     if(!rgelt)
         return E_INVALIDARG;
@@ -255,7 +258,7 @@ static HRESULT WINAPI DataObjectImpl_GetData(IDataObject* iface, FORMATETC *pfor
                     IStream_AddRef(This->stm);
                     U(*pmedium).pstm = This->stm;
                 }
-                else if(pformatetc->cfFormat == cf_storage)
+                else if(pformatetc->cfFormat == cf_storage || pformatetc->cfFormat == cf_another)
                 {
                     pmedium->tymed = TYMED_ISTORAGE;
                     IStorage_AddRef(This->stg);
@@ -386,12 +389,12 @@ static HRESULT DataObjectImpl_CreateText(LPCSTR text, LPDATAOBJECT *lplpdataobj)
 
 const char *cmpl_stm_data = "complex stream";
 const char *cmpl_text_data = "complex text";
+const WCHAR device_name[] = {'m','y','d','e','v',0};
 
 static HRESULT DataObjectImpl_CreateComplex(LPDATAOBJECT *lplpdataobj)
 {
     DataObjectImpl *obj;
     ILockBytes *lbs;
-    static const WCHAR devname[] = {'m','y','d','e','v',0};
     DEVMODEW dm;
 
     obj = HeapAlloc(GetProcessHeap(), 0, sizeof(DataObjectImpl));
@@ -417,15 +420,15 @@ static HRESULT DataObjectImpl_CreateComplex(LPDATAOBJECT *lplpdataobj)
     memset(&dm, 0, sizeof(dm));
     dm.dmSize = sizeof(dm);
     dm.dmDriverExtra = 0;
-    lstrcpyW(dm.dmDeviceName, devname);
-    obj->fmtetc[3].ptd = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(devname) + dm.dmSize + dm.dmDriverExtra);
-    obj->fmtetc[3].ptd->tdSize = FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(devname) + dm.dmSize + dm.dmDriverExtra;
+    lstrcpyW(dm.dmDeviceName, device_name);
+    obj->fmtetc[3].ptd = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(device_name) + dm.dmSize + dm.dmDriverExtra);
+    obj->fmtetc[3].ptd->tdSize = FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(device_name) + dm.dmSize + dm.dmDriverExtra;
     obj->fmtetc[3].ptd->tdDriverNameOffset = FIELD_OFFSET(DVTARGETDEVICE, tdData);
     obj->fmtetc[3].ptd->tdDeviceNameOffset = 0;
     obj->fmtetc[3].ptd->tdPortNameOffset   = 0;
-    obj->fmtetc[3].ptd->tdExtDevmodeOffset = obj->fmtetc[3].ptd->tdDriverNameOffset + sizeof(devname);
-    lstrcpyW((WCHAR*)obj->fmtetc[3].ptd->tdData, devname);
-    memcpy(obj->fmtetc[3].ptd->tdData + sizeof(devname), &dm, dm.dmSize + dm.dmDriverExtra);
+    obj->fmtetc[3].ptd->tdExtDevmodeOffset = obj->fmtetc[3].ptd->tdDriverNameOffset + sizeof(device_name);
+    lstrcpyW((WCHAR*)obj->fmtetc[3].ptd->tdData, device_name);
+    memcpy(obj->fmtetc[3].ptd->tdData + sizeof(device_name), &dm, dm.dmSize + dm.dmDriverExtra);
 
     InitFormatEtc(obj->fmtetc[4], cf_global, TYMED_HGLOBAL);
     InitFormatEtc(obj->fmtetc[5], cf_another, TYMED_HGLOBAL);
@@ -564,7 +567,7 @@ static void test_enum_fmtetc(IDataObject *src)
         ok(src != NULL, "shouldn't be here\n");
         hr = IEnumFORMATETC_Next(src_enum, 1, &src_fmt, NULL);
         ok(hr == S_OK, "%d: got %08x\n", count, hr);
-        trace("%d: cf %04x aspect %x tymed %x\n", count, fmt.cfFormat, fmt.dwAspect, fmt.tymed);
+        trace("%d: %s\n", count, dump_fmtetc(&fmt));
         ok(fmt.cfFormat == src_fmt.cfFormat, "%d: %04x %04x\n", count, fmt.cfFormat, src_fmt.cfFormat);
         ok(fmt.dwAspect == src_fmt.dwAspect, "%d: %08x %08x\n", count, fmt.dwAspect, src_fmt.dwAspect);
         ok(fmt.lindex == src_fmt.lindex, "%d: %08x %08x\n", count, fmt.lindex, src_fmt.lindex);
@@ -583,15 +586,60 @@ static void test_enum_fmtetc(IDataObject *src)
     if(src)
     {
         hr = IEnumFORMATETC_Next(src_enum, 1, &src_fmt, NULL);
-        ok(hr == S_FALSE, "%d: got %08x\n", count, hr);
+        ok(hr == S_FALSE ||
+           broken(hr == S_OK && count == 5), /* win9x and winme don't enumerate duplicated cf's */
+           "%d: got %08x\n", count, hr);
         IEnumFORMATETC_Release(src_enum);
     }
 
     hr = IEnumFORMATETC_Reset(enum_fmt);
     ok(hr == S_OK, "got %08x\n", hr);
 
+    if(src) /* Exercise the enumerator a bit */
+    {
+        IEnumFORMATETC *clone;
+        FORMATETC third_fmt;
+
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &third_fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &third_fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &third_fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+
+        hr = IEnumFORMATETC_Reset(enum_fmt);
+        ok(hr == S_OK, "got %08x\n", hr);
+        hr = IEnumFORMATETC_Skip(enum_fmt, 2);
+        ok(hr == S_OK, "got %08x\n", hr);
+
+        hr = IEnumFORMATETC_Clone(enum_fmt, &clone);
+        ok(hr == S_OK, "got %08x\n", hr);
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+        ok(fmt.cfFormat == third_fmt.cfFormat, "formats don't match\n");
+        hr = IEnumFORMATETC_Next(clone, 1, &fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+        ok(fmt.cfFormat == third_fmt.cfFormat, "formats don't match\n");
+        IEnumFORMATETC_Release(clone);
+    }
+
     IEnumFORMATETC_Release(enum_fmt);
     IDataObject_Release(data);
+}
+
+static void test_no_cf_dataobject(void)
+{
+    UINT cf_dataobject = RegisterClipboardFormatA("DataObject");
+    UINT cf_ole_priv_data = RegisterClipboardFormatA("Ole Private Data");
+    HANDLE h;
+    OpenClipboard(NULL);
+
+    h = GetClipboardData(cf_dataobject);
+    ok(!h, "got %p\n", h);
+    h = GetClipboardData(cf_ole_priv_data);
+    ok(!h, "got %p\n", h);
+
+    CloseClipboard();
 }
 
 static void test_cf_dataobject(IDataObject *data)
@@ -698,7 +746,12 @@ static void test_cf_dataobject(IDataObject *data)
                     ok(priv->res2 == 1, "got %08x\n", priv->res2);
                     ok(priv->count == count, "got %08x expected %08x\n", priv->count, count);
                     ok(priv->res3[0] == 0, "got %08x\n", priv->res3[0]);
-                    ok(priv->res3[1] == 0, "got %08x\n", priv->res3[1]);
+
+                    /* win64 sets the lsb */
+                    if(sizeof(fmt_ptr->fmt.ptd) == 8)
+                        todo_wine ok(priv->res3[1] == 1, "got %08x\n", priv->res3[1]);
+                    else
+                        ok(priv->res3[1] == 0, "got %08x\n", priv->res3[1]);
 
                     GlobalUnlock(h);
                     IEnumFORMATETC_Release(enum_fmt);
@@ -716,8 +769,10 @@ static void test_cf_dataobject(IDataObject *data)
             ok(DataObjectImpl_GetDataHere_calls == 1, "got %d\n", DataObjectImpl_GetDataHere_calls);
             ptr = GlobalLock(h);
             size = GlobalSize(h);
-            ok(size == strlen(cmpl_stm_data), "expected %d got %d\n", lstrlenA(cmpl_stm_data), size);
-            ok(!memcmp(ptr, cmpl_stm_data, size), "mismatch\n");
+            ok(size == strlen(cmpl_stm_data) ||
+               broken(size > strlen(cmpl_stm_data)), /* win9x, winme */
+               "expected %d got %d\n", lstrlenA(cmpl_stm_data), size);
+            ok(!memcmp(ptr, cmpl_stm_data, strlen(cmpl_stm_data)), "mismatch\n");
             GlobalUnlock(h);
         }
         else if(cf == cf_global)
@@ -731,8 +786,10 @@ static void test_cf_dataobject(IDataObject *data)
             ok(DataObjectImpl_GetDataHere_calls == 0, "got %d\n", DataObjectImpl_GetDataHere_calls);
             ptr = GlobalLock(h);
             size = GlobalSize(h);
-            ok(size == strlen(cmpl_text_data) + 1, "expected %d got %d\n", lstrlenA(cmpl_text_data) + 1, size);
-            ok(!memcmp(ptr, cmpl_text_data, size), "mismatch\n");
+            ok(size == strlen(cmpl_text_data) + 1 ||
+               broken(size > strlen(cmpl_text_data) + 1), /* win9x, winme */
+               "expected %d got %d\n", lstrlenA(cmpl_text_data) + 1, size);
+            ok(!memcmp(ptr, cmpl_text_data, strlen(cmpl_text_data) + 1), "mismatch\n");
             GlobalUnlock(h);
         }
     } while(cf);
@@ -850,6 +907,7 @@ static void test_set_clipboard(void)
 
     ok(OleSetClipboard(NULL) == S_OK, "failed to clear clipboard, hr = 0x%08x\n", hr);
 
+    test_no_cf_dataobject();
     test_enum_fmtetc(NULL);
 
     ref = IDataObject_Release(data1);
@@ -862,8 +920,451 @@ static void test_set_clipboard(void)
     OleUninitialize();
 }
 
+static inline ULONG count_refs(IDataObject *d)
+{
+    IDataObject_AddRef(d);
+    return IDataObject_Release(d);
+}
+
+static void test_consumer_refs(void)
+{
+    HRESULT hr;
+    IDataObject *src, *src2, *get1, *get2, *get3;
+    ULONG refs, old_refs;
+    FORMATETC fmt;
+    STGMEDIUM med;
+
+    InitFormatEtc(fmt, CF_TEXT, TYMED_HGLOBAL);
+
+    OleInitialize(NULL);
+
+    /* First show that each clipboard state results in
+       a different data object */
+
+    hr = DataObjectImpl_CreateText("data1", &src);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = DataObjectImpl_CreateText("data2", &src2);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleSetClipboard(src);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleGetClipboard(&get1);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleGetClipboard(&get2);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    ok(get1 == get2 ||
+       broken(get1 != get2), /* win9x, winme & nt4 */
+       "data objects differ\n");
+    refs = IDataObject_Release(get2);
+    ok(refs == (get1 == get2 ? 1 : 0), "got %d\n", refs);
+
+    OleFlushClipboard();
+
+    DataObjectImpl_GetData_calls = 0;
+    hr = IDataObject_GetData(get1, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(DataObjectImpl_GetData_calls == 0, "GetData called\n");
+    ReleaseStgMedium(&med);
+
+    hr = OleGetClipboard(&get2);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    ok(get1 != get2, "data objects match\n");
+
+    OleSetClipboard(NULL);
+
+    hr = OleGetClipboard(&get3);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    ok(get1 != get3, "data objects match\n");
+    ok(get2 != get3, "data objects match\n");
+
+    IDataObject_Release(get3);
+    IDataObject_Release(get2);
+    IDataObject_Release(get1);
+
+    /* Now call GetData before the flush and show that this
+       takes a ref on our src data obj. */
+
+    hr = OleSetClipboard(src);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    old_refs = count_refs(src);
+
+    hr = OleGetClipboard(&get1);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    refs = count_refs(src);
+    ok(refs == old_refs, "%d %d\n", refs, old_refs);
+
+    DataObjectImpl_GetData_calls = 0;
+    hr = IDataObject_GetData(get1, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(DataObjectImpl_GetData_calls == 1, "GetData not called\n");
+    ReleaseStgMedium(&med);
+    refs = count_refs(src);
+    ok(refs == old_refs + 1, "%d %d\n", refs, old_refs);
+
+    OleFlushClipboard();
+
+    DataObjectImpl_GetData_calls = 0;
+    hr = IDataObject_GetData(get1, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(DataObjectImpl_GetData_calls == 1, "GetData not called\n");
+    ReleaseStgMedium(&med);
+
+    refs = count_refs(src);
+    ok(refs == 2, "%d\n", refs);
+
+    IDataObject_Release(get1);
+
+    refs = count_refs(src);
+    ok(refs == 1, "%d\n", refs);
+
+    /* Now set a second src object before the call to GetData
+       and show that GetData calls that second src. */
+
+    hr = OleSetClipboard(src);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    old_refs = count_refs(src);
+
+    hr = OleGetClipboard(&get1);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    refs = count_refs(src);
+    ok(refs == old_refs, "%d %d\n", refs, old_refs);
+
+    hr = OleSetClipboard(src2);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    old_refs = count_refs(src2);
+
+    DataObjectImpl_GetData_calls = 0;
+    hr = IDataObject_GetData(get1, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(DataObjectImpl_GetData_calls == 1, "GetData not called\n");
+    ReleaseStgMedium(&med);
+
+    refs = count_refs(src);
+    ok(refs == 1, "%d\n", refs);
+    refs = count_refs(src2);
+    ok(refs == old_refs + 1, "%d %d\n", refs, old_refs);
+
+    OleSetClipboard(NULL);
+
+    refs = count_refs(src2);
+    ok(refs == 2, "%d\n", refs);
+
+    IDataObject_Release(get1);
+
+    IDataObject_Release(src2);
+    IDataObject_Release(src);
+
+    OleUninitialize();
+}
+
+static void test_flushed_getdata(void)
+{
+    HRESULT hr;
+    IDataObject *src, *get;
+    FORMATETC fmt;
+    STGMEDIUM med;
+    STATSTG stat;
+    DEVMODEW dm;
+
+    OleInitialize(NULL);
+
+    hr = DataObjectImpl_CreateComplex(&src);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleSetClipboard(src);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleFlushClipboard();
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = OleGetClipboard(&get);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    /* global format -> global & stream */
+
+    InitFormatEtc(fmt, CF_TEXT, TYMED_HGLOBAL);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, CF_TEXT, TYMED_ISTREAM);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTREAM, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, CF_TEXT, TYMED_ISTORAGE);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == E_FAIL, "got %08x\n", hr);
+
+    InitFormatEtc(fmt, CF_TEXT, 0xffff);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    /* stream format -> global & stream */
+
+    InitFormatEtc(fmt, cf_stream, TYMED_ISTREAM);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTREAM, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_stream, TYMED_ISTORAGE);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == E_FAIL, "got %08x\n", hr);
+
+    InitFormatEtc(fmt, cf_stream, TYMED_HGLOBAL);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_stream, 0xffff);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTREAM, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    /* storage format -> global, stream & storage */
+
+    InitFormatEtc(fmt, cf_storage, TYMED_ISTORAGE);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTORAGE, "got %x\n", med.tymed);
+    hr = IStorage_Stat(med.u.pstg, &stat, STATFLAG_NONAME);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(stat.grfMode == (STGM_SHARE_EXCLUSIVE | STGM_READWRITE), "got %08x\n", stat.grfMode);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_storage, TYMED_ISTREAM);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTREAM, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_storage, TYMED_HGLOBAL);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_storage, TYMED_HGLOBAL | TYMED_ISTREAM);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_HGLOBAL, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_storage, 0xffff);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTORAGE, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    /* complex format with target device */
+
+    InitFormatEtc(fmt, cf_another, 0xffff);
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == DV_E_FORMATETC ||
+       broken(hr == S_OK), /* win9x, winme & nt4 */
+       "got %08x\n", hr);
+    if(hr == S_OK) ReleaseStgMedium(&med);
+
+    InitFormatEtc(fmt, cf_another, 0xffff);
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    dm.dmDriverExtra = 0;
+    lstrcpyW(dm.dmDeviceName, device_name);
+    fmt.ptd = HeapAlloc(GetProcessHeap(), 0, FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(device_name) + dm.dmSize + dm.dmDriverExtra);
+    fmt.ptd->tdSize = FIELD_OFFSET(DVTARGETDEVICE, tdData) + sizeof(device_name) + dm.dmSize + dm.dmDriverExtra;
+    fmt.ptd->tdDriverNameOffset = FIELD_OFFSET(DVTARGETDEVICE, tdData);
+    fmt.ptd->tdDeviceNameOffset = 0;
+    fmt.ptd->tdPortNameOffset   = 0;
+    fmt.ptd->tdExtDevmodeOffset = fmt.ptd->tdDriverNameOffset + sizeof(device_name);
+    lstrcpyW((WCHAR*)fmt.ptd->tdData, device_name);
+    memcpy(fmt.ptd->tdData + sizeof(device_name), &dm, dm.dmSize + dm.dmDriverExtra);
+
+    hr = IDataObject_GetData(get, &fmt, &med);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(med.tymed == TYMED_ISTORAGE, "got %x\n", med.tymed);
+    ReleaseStgMedium(&med);
+
+    HeapFree(GetProcessHeap(), 0, fmt.ptd);
+
+
+    IDataObject_Release(get);
+    IDataObject_Release(src);
+    OleUninitialize();
+}
+
+static HGLOBAL create_text(void)
+{
+    HGLOBAL h = GlobalAlloc(GMEM_DDESHARE|GMEM_MOVEABLE, 5);
+    char *p = GlobalLock(h);
+    strcpy(p, "test");
+    GlobalUnlock(h);
+    return h;
+}
+
+static HENHMETAFILE create_emf(void)
+{
+    const RECT rect = {0, 0, 100, 100};
+    HDC hdc = CreateEnhMetaFileA(NULL, NULL, &rect, "HENHMETAFILE Ole Clipboard Test\0Test\0\0");
+    ExtTextOutA(hdc, 0, 0, ETO_OPAQUE, &rect, "Test String", strlen("Test String"), NULL);
+    return CloseEnhMetaFile(hdc);
+}
+
+static void test_nonole_clipboard(void)
+{
+    HRESULT hr;
+    BOOL r;
+    IDataObject *get;
+    IEnumFORMATETC *enum_fmt;
+    FORMATETC fmt;
+    HGLOBAL h, hblob, htext;
+    HENHMETAFILE emf;
+
+    r = OpenClipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    r = EmptyClipboard();
+    ok(r, "gle %d\n", GetLastError());
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    OleInitialize(NULL);
+
+    /* empty clipboard */
+    hr = OleGetClipboard(&get);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IDataObject_EnumFormatEtc(get, DATADIR_GET, &enum_fmt);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+    IEnumFORMATETC_Release(enum_fmt);
+
+    IDataObject_Release(get);
+
+    /* set a user defined clipboard type */
+
+    htext = create_text();
+    hblob = GlobalAlloc(GMEM_DDESHARE|GMEM_MOVEABLE|GMEM_ZEROINIT, 10);
+    emf = create_emf();
+
+    r = OpenClipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    h = SetClipboardData(CF_TEXT, htext);
+    ok(h == htext, "got %p\n", h);
+    h = SetClipboardData(cf_onemore, hblob);
+    ok(h == hblob, "got %p\n", h);
+    h = SetClipboardData(CF_ENHMETAFILE, emf);
+    ok(h == emf, "got %p\n", h);
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    hr = OleGetClipboard(&get);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IDataObject_EnumFormatEtc(get, DATADIR_GET, &enum_fmt);
+    ok(hr == S_OK, "got %08x\n", hr);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(fmt.cfFormat == CF_TEXT, "cf %04x\n", fmt.cfFormat);
+    ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+    ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+    ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+    ok(fmt.tymed == (TYMED_ISTREAM | TYMED_HGLOBAL), "tymed %x\n", fmt.tymed);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(fmt.cfFormat == cf_onemore, "cf %04x\n", fmt.cfFormat);
+    ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+    ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+    ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+    ok(fmt.tymed == (TYMED_ISTREAM | TYMED_HGLOBAL), "tymed %x\n", fmt.tymed);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(fmt.cfFormat == CF_ENHMETAFILE, "cf %04x\n", fmt.cfFormat);
+    ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+    ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+    ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+    ok(fmt.tymed == TYMED_ENHMF, "tymed %x\n", fmt.tymed);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_OK, "got %08x\n", hr); /* User32 adds some synthesised formats */
+
+    todo_wine ok(fmt.cfFormat == CF_LOCALE, "cf %04x\n", fmt.cfFormat);
+    if(fmt.cfFormat == CF_LOCALE)
+    {
+        ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+        ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+        ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+        ok(fmt.tymed == (TYMED_ISTREAM | TYMED_HGLOBAL), "tymed %x\n", fmt.tymed);
+
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+    }
+
+    ok(fmt.cfFormat == CF_OEMTEXT, "cf %04x\n", fmt.cfFormat);
+    ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+    ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+    ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+    ok(fmt.tymed == (TYMED_ISTREAM | TYMED_HGLOBAL), "tymed %x\n", fmt.tymed);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_OK, "got %08x\n", hr);
+    ok(fmt.cfFormat == CF_UNICODETEXT ||
+       broken(fmt.cfFormat == CF_METAFILEPICT), /* win9x and winme don't have CF_UNICODETEXT */
+       "cf %04x\n", fmt.cfFormat);
+    if(fmt.cfFormat == CF_UNICODETEXT)
+    {
+        ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+        ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+        ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+        ok(fmt.tymed == (TYMED_ISTREAM | TYMED_HGLOBAL), "tymed %x\n", fmt.tymed);
+
+        hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+        ok(hr == S_OK, "got %08x\n", hr);
+    }
+    ok(fmt.cfFormat == CF_METAFILEPICT, "cf %04x\n", fmt.cfFormat);
+    ok(fmt.ptd == NULL, "ptd %p\n", fmt.ptd);
+    ok(fmt.dwAspect == DVASPECT_CONTENT, "aspect %x\n", fmt.dwAspect);
+    ok(fmt.lindex == -1, "lindex %d\n", fmt.lindex);
+    ok(fmt.tymed == TYMED_MFPICT, "tymed %x\n", fmt.tymed);
+
+    hr = IEnumFORMATETC_Next(enum_fmt, 1, &fmt, NULL);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+    IEnumFORMATETC_Release(enum_fmt);
+
+    IDataObject_Release(get);
+
+    r = OpenClipboard(NULL);
+    ok(r, "gle %d\n", GetLastError());
+    r = EmptyClipboard();
+    ok(r, "gle %d\n", GetLastError());
+    r = CloseClipboard();
+    ok(r, "gle %d\n", GetLastError());
+
+    OleUninitialize();
+}
 
 START_TEST(clipboard)
 {
     test_set_clipboard();
+    test_consumer_refs();
+    test_flushed_getdata();
+    test_nonole_clipboard();
 }

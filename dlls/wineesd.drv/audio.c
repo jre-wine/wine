@@ -935,7 +935,7 @@ static	void	wodPlayer_Reset(WINE_WAVEOUT* wwo, BOOL reset)
     } else {
         if (wwo->lpLoopPtr) {
             /* complicated case, not handled yet (could imply modifying the loop counter */
-            FIXME("Pausing while in loop isn't correctly handled yet, except strange results\n");
+            FIXME("Pausing while in loop isn't correctly handled yet, expect strange results\n");
             wwo->lpPlayPtr = wwo->lpLoopPtr;
             wwo->dwPartialOffset = 0;
             wwo->dwWrittenTotal = wwo->dwPlayedTotal; /* this is wrong !!! */
@@ -1192,7 +1192,7 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     }
     else
     {
-        WARN("esd_open_sound() failed");
+        WARN("esd_open_sound() failed\n");
         /* just do a rough guess at the latency and continue anyway */
         wwo->dwLatency = 1000 * (2 * ESD_BUF_SIZE) / out_rate;
     }

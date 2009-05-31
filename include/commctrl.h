@@ -3147,6 +3147,7 @@ static const WCHAR WC_LISTVIEWW[] = { 'S','y','s',
 #define LVM_SETITEMTEXT         WINELIB_NAME_AW(LVM_SETITEMTEXT)
 #define LVM_SETITEMCOUNT        (LVM_FIRST+47)
 #define LVM_SORTITEMS           (LVM_FIRST+48)
+#define LVM_SORTITEMSEX         (LVM_FIRST+81)
 #define LVM_SETITEMPOSITION32   (LVM_FIRST+49)
 #define LVM_GETSELECTEDCOUNT    (LVM_FIRST+50)
 #define LVM_GETITEMSPACING      (LVM_FIRST+51)
@@ -3714,7 +3715,7 @@ typedef struct NMLVSCROLL
 { LVITEMA _LVi; _LVi.state = data; _LVi.stateMask = dataMask;\
   SNDMSGA(hwnd, LVM_SETITEMSTATE, (WPARAM)(UINT)i, (LPARAM) (LPLVITEMA)&_LVi);}
 #define ListView_GetItemState(hwnd,i,mask) \
-    (BOOL)SNDMSGA((hwnd),LVM_GETITEMSTATE,(WPARAM)(UINT)(i),(LPARAM)(UINT)(mask))
+    (UINT)SNDMSGA((hwnd),LVM_GETITEMSTATE,(WPARAM)(UINT)(i),(LPARAM)(UINT)(mask))
 #define ListView_GetCountPerPage(hwnd) \
     (BOOL)SNDMSGW((hwnd),LVM_GETCOUNTPERPAGE,0,0L)
 #define ListView_GetImageList(hwnd,iImageList) \
@@ -3742,6 +3743,8 @@ typedef struct NMLVSCROLL
     (HWND)SNDMSGA((hwnd), LVM_GETEDITCONTROL, 0, 0)
 #define ListView_GetTextColor(hwnd)  \
     (COLORREF)SNDMSGA((hwnd), LVM_GETTEXTCOLOR, 0, 0)
+#define ListView_GetTextBkColor(hwnd) \
+    (COLORREF)SNDMSGA((hwnd), LVM_GETTEXTBKCOLOR, 0, 0)
 #define ListView_GetBkColor(hwnd)  \
     (COLORREF)SNDMSGA((hwnd), LVM_GETBKCOLOR, 0, 0)
 #define ListView_GetItemA(hwnd,pitem) \
@@ -3772,6 +3775,9 @@ typedef struct NMLVSCROLL
 
 #define ListView_SortItems(hwndLV,_pfnCompare,_lPrm) \
     (BOOL)SNDMSGA((hwndLV),LVM_SORTITEMS,(WPARAM)(LPARAM)_lPrm,(LPARAM)(PFNLVCOMPARE)_pfnCompare)
+#define ListView_SortItemsEx(hwndLV, _pfnCompare, _lPrm) \
+  (BOOL)SNDMSGA((hwndLV), LVM_SORTITEMSEX, (WPARAM)(LPARAM)(_lPrm), (LPARAM)(PFNLVCOMPARE)(_pfnCompare))
+
 #define ListView_SetItemPosition(hwndLV, i, x, y) \
     (BOOL)SNDMSGA((hwndLV),LVM_SETITEMPOSITION,(WPARAM)(INT)(i),MAKELPARAM((x),(y)))
 #define ListView_GetSelectedCount(hwndLV) \

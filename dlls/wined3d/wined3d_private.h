@@ -167,7 +167,6 @@ void hash_table_remove(struct hash_table_t *table, void *key);
 #define MAX_COMBINED_SAMPLERS   (MAX_FRAGMENT_SAMPLERS + MAX_VERTEX_SAMPLERS)
 #define MAX_ACTIVE_LIGHTS       8
 #define MAX_CLIPPLANES          WINED3DMAXUSERCLIPPLANES
-#define MAX_LEVELS              256
 
 #define MAX_CONST_I 16
 #define MAX_CONST_B 16
@@ -444,6 +443,13 @@ typedef struct SHADER_OPCODE
     DWORD max_version;
 } SHADER_OPCODE;
 
+struct wined3d_shader_context
+{
+    IWineD3DBaseShader *shader;
+    const struct shader_reg_maps *reg_maps;
+    SHADER_BUFFER *buffer;
+};
+
 struct wined3d_shader_dst_param
 {
     WINED3DSHADER_PARAM_REGISTER_TYPE register_type;
@@ -451,25 +457,29 @@ struct wined3d_shader_dst_param
     DWORD write_mask;
     DWORD modifiers;
     DWORD shift;
-    BOOL has_rel_addr;
-    DWORD token;
-    DWORD addr_token;
+    const struct wined3d_shader_src_param *rel_addr;
+};
+
+struct wined3d_shader_src_param
+{
+    WINED3DSHADER_PARAM_REGISTER_TYPE register_type;
+    UINT register_idx;
+    DWORD swizzle;
+    DWORD modifiers;
+    const struct wined3d_shader_src_param *rel_addr;
 };
 
 struct wined3d_shader_instruction
 {
-    IWineD3DBaseShader *shader;
-    const shader_reg_maps *reg_maps;
+    const struct wined3d_shader_context *ctx;
     enum WINED3D_SHADER_INSTRUCTION_HANDLER handler_idx;
     DWORD flags;
     BOOL coissue;
     DWORD predicate;
-    DWORD src[4];
-    DWORD src_addr[4];
-    SHADER_BUFFER *buffer;
     UINT dst_count;
     const struct wined3d_shader_dst_param *dst;
     UINT src_count;
+    const struct wined3d_shader_src_param *src;
 };
 
 struct wined3d_shader_semantic
@@ -538,8 +548,8 @@ struct ps_compile_args {
     /* Projected textures(ps 1.0-1.3) */
     /* Texture types(2D, Cube, 3D) in ps 1.x */
     BOOL                        srgb_correction;
-    WORD                        texrect_fixup;
-    /* Bitmap for texture rect coord fixups (16 samplers max currently).
+    WORD                        np2_fixup;
+    /* Bitmap for NP2 texcoord fixups (16 samplers max currently).
        D3D9 has a limit of 16 samplers and the fixup is superfluous
        in D3D10 (unconditional NP2 support mandatory). */
 };
@@ -623,8 +633,7 @@ extern int num_lock;
 
 /* DirectX Device Limits */
 /* --------------------- */
-#define MAX_LEVELS  256  /* Maximum number of mipmap levels. Guessed at 256 */
-
+#define MAX_MIP_LEVELS 32  /* Maximum number of mipmap levels. */
 #define MAX_STREAMS  16  /* Maximum possible streams - used for fixed size arrays
                             See MaxStreams in MSDN under GetDeviceCaps */
 #define HIGHEST_TRANSFORMSTATE WINED3DTS_WORLDMATRIX(255) /* Highest value in WINED3DTRANSFORMSTATETYPE */
@@ -1508,7 +1517,7 @@ typedef struct IWineD3DTextureImpl
     IWineD3DBaseTextureClass  baseTexture;
 
     /* IWineD3DTexture */
-    IWineD3DSurface          *surfaces[MAX_LEVELS];
+    IWineD3DSurface          *surfaces[MAX_MIP_LEVELS];
     UINT                      target;
     BOOL                      cond_np2;
 
@@ -1527,7 +1536,7 @@ typedef struct IWineD3DCubeTextureImpl
     IWineD3DBaseTextureClass  baseTexture;
 
     /* IWineD3DCubeTexture */
-    IWineD3DSurface          *surfaces[6][MAX_LEVELS];
+    IWineD3DSurface          *surfaces[6][MAX_MIP_LEVELS];
 } IWineD3DCubeTextureImpl;
 
 extern const IWineD3DCubeTextureVtbl IWineD3DCubeTexture_Vtbl;
@@ -1573,7 +1582,7 @@ typedef struct IWineD3DVolumeTextureImpl
     IWineD3DBaseTextureClass  baseTexture;
 
     /* IWineD3DVolumeTexture */
-    IWineD3DVolume           *volumes[MAX_LEVELS];
+    IWineD3DVolume           *volumes[MAX_MIP_LEVELS];
 } IWineD3DVolumeTextureImpl;
 
 extern const IWineD3DVolumeTextureVtbl IWineD3DVolumeTexture_Vtbl;
@@ -2242,10 +2251,6 @@ typedef struct local_constant {
     DWORD value[4];
 } local_constant;
 
-/* Undocumented opcode controls */
-#define INST_CONTROLS_SHIFT 16
-#define INST_CONTROLS_MASK 0x00ff0000
-
 typedef enum COMPARISON_TYPE {
     COMPARISON_GT = 1,
     COMPARISON_EQ = 2,
@@ -2288,8 +2293,6 @@ extern int shader_addline(
     SHADER_BUFFER* buffer,
     const char* fmt, ...) PRINTF_ATTR(2,3);
 int shader_vaddline(SHADER_BUFFER *buffer, const char *fmt, va_list args);
-
-const SHADER_OPCODE *shader_get_opcode(const SHADER_OPCODE *shader_ins, DWORD shader_version, DWORD code);
 
 /* Vertex shader utility functions */
 extern BOOL vshader_get_input(
@@ -2356,25 +2359,12 @@ void shader_trace_init(const DWORD *byte_code, const SHADER_OPCODE *opcode_table
 extern void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER *buffer,
         const shader_reg_maps *reg_maps, const DWORD *pFunction);
 
-static inline int shader_get_regtype(const DWORD param) {
-    return (((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT) |
-            ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2));
-}
-
-static inline int shader_get_writemask(const DWORD param) {
-    return param & WINED3DSP_WRITEMASK_ALL;
-}
-
 static inline BOOL shader_is_pshader_version(DWORD token) {
     return 0xFFFF0000 == (token & 0xFFFF0000);
 }
 
 static inline BOOL shader_is_vshader_version(DWORD token) {
     return 0xFFFE0000 == (token & 0xFFFF0000);
-}
-
-static inline BOOL shader_is_comment(DWORD token) {
-    return WINED3DSIO_COMMENT == (token & WINED3DSI_OPCODE_MASK);
 }
 
 static inline BOOL shader_is_scalar(WINED3DSHADER_PARAM_REGISTER_TYPE register_type, UINT register_idx)

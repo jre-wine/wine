@@ -1176,14 +1176,16 @@ static void test_AccessCheck(void)
 static void test_token_attr(void)
 {
     HANDLE Token, ImpersonationToken;
-    DWORD Size;
+    DWORD Size, Size2;
     TOKEN_PRIVILEGES *Privileges;
     TOKEN_GROUPS *Groups;
     TOKEN_USER *User;
+    TOKEN_DEFAULT_DACL *Dacl;
     BOOL ret;
     DWORD i, GLE;
     LPSTR SidString;
     SECURITY_IMPERSONATION_LEVEL ImpersonationLevel;
+    ACL *acl;
 
     /* cygwin-like use case */
     SetLastError(0xdeadbeef);
@@ -1214,7 +1216,7 @@ static void test_token_attr(void)
     }
 
     SetLastError(0xdeadbeef);
-    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY|TOKEN_DUPLICATE, &Token);
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &Token);
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
 
     /* groups */
@@ -1283,6 +1285,49 @@ static void test_token_attr(void)
     ok(ImpersonationLevel == SecurityAnonymous, "ImpersonationLevel should have been SecurityAnonymous instead of %d\n", ImpersonationLevel);
 
     CloseHandle(ImpersonationToken);
+
+    /* default dacl */
+    ret = GetTokenInformation(Token, TokenDefaultDacl, NULL, 0, &Size);
+    ok(!ret && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
+        "GetTokenInformation(TokenDefaultDacl) failed with error %u\n", GetLastError());
+
+    Dacl = HeapAlloc(GetProcessHeap(), 0, Size);
+    ret = GetTokenInformation(Token, TokenDefaultDacl, Dacl, Size, &Size);
+    ok(ret, "GetTokenInformation(TokenDefaultDacl) failed with error %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = SetTokenInformation(Token, TokenDefaultDacl, NULL, 0);
+    GLE = GetLastError();
+    ok(!ret, "SetTokenInformation(TokenDefaultDacl) succeeded\n");
+    ok(GLE == ERROR_BAD_LENGTH, "expected ERROR_BAD_LENGTH got %u\n", GLE);
+
+    SetLastError(0xdeadbeef);
+    ret = SetTokenInformation(Token, TokenDefaultDacl, NULL, Size);
+    GLE = GetLastError();
+    ok(!ret, "SetTokenInformation(TokenDefaultDacl) succeeded\n");
+    ok(GLE == ERROR_NOACCESS, "expected ERROR_NOACCESS got %u\n", GLE);
+
+    acl = Dacl->DefaultDacl;
+    Dacl->DefaultDacl = NULL;
+
+    ret = SetTokenInformation(Token, TokenDefaultDacl, Dacl, Size);
+    ok(ret, "SetTokenInformation(TokenDefaultDacl) succeeded\n");
+
+    Size2 = 0;
+    Dacl->DefaultDacl = (ACL *)0xdeadbeef;
+    ret = GetTokenInformation(Token, TokenDefaultDacl, Dacl, Size, &Size2);
+    ok(ret, "GetTokenInformation(TokenDefaultDacl) failed with error %u\n", GetLastError());
+    ok(Dacl->DefaultDacl == NULL, "expected NULL, got %p\n", Dacl->DefaultDacl);
+    ok(Size2 == sizeof(TOKEN_DEFAULT_DACL), "got %u expected sizeof(TOKEN_DEFAULT_DACL)\n", Size2);
+
+    Dacl->DefaultDacl = acl;
+    ret = SetTokenInformation(Token, TokenDefaultDacl, Dacl, Size);
+    ok(ret, "SetTokenInformation(TokenDefaultDacl) failed with error %u\n", GetLastError());
+
+    ret = GetTokenInformation(Token, TokenDefaultDacl, Dacl, Size, &Size2);
+    ok(ret, "GetTokenInformation(TokenDefaultDacl) failed with error %u\n", GetLastError());
+
+    HeapFree(GetProcessHeap(), 0, Dacl);
     CloseHandle(Token);
 }
 
@@ -1354,7 +1399,9 @@ struct well_known_sid_value
 static void test_CreateWellKnownSid(void)
 {
     SID_IDENTIFIER_AUTHORITY ident = { SECURITY_NT_AUTHORITY };
-    PSID domainsid;
+    PSID domainsid, sid;
+    DWORD size, error;
+    BOOL ret;
     int i;
 
     if (!pCreateWellKnownSid)
@@ -1362,6 +1409,25 @@ static void test_CreateWellKnownSid(void)
         win_skip("CreateWellKnownSid not available\n");
         return;
     }
+
+    size = 0;
+    SetLastError(0xdeadbeef);
+    ret = pCreateWellKnownSid(WinInteractiveSid, NULL, NULL, &size);
+    error = GetLastError();
+    ok(!ret, "CreateWellKnownSid succeeded\n");
+    ok(error == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %u\n", error);
+    ok(size, "expected size > 0\n");
+
+    SetLastError(0xdeadbeef);
+    ret = pCreateWellKnownSid(WinInteractiveSid, NULL, NULL, &size);
+    error = GetLastError();
+    ok(!ret, "CreateWellKnownSid succeeded\n");
+    ok(error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %u\n", error);
+
+    sid = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = pCreateWellKnownSid(WinInteractiveSid, NULL, sid, &size);
+    ok(ret, "CreateWellKnownSid failed %u\n", GetLastError());
+    HeapFree(GetProcessHeap(), 0, sid);
 
     /* a domain sid usually have three subauthorities but we test that CreateWellKnownSid doesn't check it */
     AllocateAndInitializeSid(&ident, 6, SECURITY_NT_NON_UNIQUE, 12, 23, 34, 45, 56, 0, 0, &domainsid);

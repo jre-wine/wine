@@ -1331,7 +1331,7 @@ TOOLBAR_WrapToolbar( HWND hwnd, DWORD dwStyle )
         /* horizontal separators are treated as buttons for width    */
 	else if ((btnPtr[i].fsStyle & BTNS_SEP) &&
             !(infoPtr->dwStyle & CCS_VERT))
-	    cx = SEPARATOR_WIDTH;
+            cx = (btnPtr[i].iBitmap > 0) ? btnPtr[i].iBitmap : SEPARATOR_WIDTH;
 	else
 	    cx = infoPtr->nButtonWidth;
 
@@ -1683,11 +1683,12 @@ TOOLBAR_LayoutToolbar(HWND hwnd)
 
 	if (btnPtr->fsStyle & BTNS_SEP) {
 	    if (infoPtr->dwStyle & CCS_VERT) {
-                cy = SEPARATOR_WIDTH;
-                cx = (btnPtr->cx > 0) ? btnPtr->cx : infoPtr->nButtonWidth;
+                cy = (btnPtr->iBitmap > 0) ? btnPtr->iBitmap : SEPARATOR_WIDTH;
+                cx = (btnPtr->cx > 0) ? btnPtr->cx : infoPtr->nWidth;
 	    }
 	    else
-                cx = (btnPtr->cx > 0) ? btnPtr->cx : SEPARATOR_WIDTH;
+                cx = (btnPtr->cx > 0) ? btnPtr->cx :
+                    (btnPtr->iBitmap > 0) ? btnPtr->iBitmap : SEPARATOR_WIDTH;
 	}
 	else
 	{
@@ -1831,15 +1832,11 @@ TOOLBAR_InternalInsertButtonsT(TOOLBAR_INFO *infoPtr, INT iIndex, UINT nAddButto
     for (iButton = 0; iButton < nAddButtons; iButton++) {
         TBUTTON_INFO *btnPtr = &infoPtr->buttons[iIndex + iButton];
 
-        TOOLBAR_DumpTBButton(lpTbb, fUnicode);
+        TOOLBAR_DumpTBButton(lpTbb + iButton, fUnicode);
 
         ZeroMemory(btnPtr, sizeof(*btnPtr));
 
-        /* When inserting separator, iBitmap controls it's size */
-        if (lpTbb[iButton].fsStyle & BTNS_SEP) {
-            btnPtr->cx        = lpTbb[iButton].iBitmap;
-        } else
-            btnPtr->iBitmap   = lpTbb[iButton].iBitmap;
+        btnPtr->iBitmap   = lpTbb[iButton].iBitmap;
         btnPtr->idCommand = lpTbb[iButton].idCommand;
         btnPtr->fsState   = lpTbb[iButton].fsState;
         btnPtr->fsStyle   = lpTbb[iButton].fsStyle;
@@ -4534,7 +4531,7 @@ TOOLBAR_SetButtonSize (HWND hwnd, LPARAM lParam)
      * 22 high. Demonstarted in ControlSpy Toolbar. GLA 3/02
      */
     if (cx == 0) cx = 24;
-    if (cy == 0) cx = 22;
+    if (cy == 0) cy = 22;
     
     cx = max(cx, infoPtr->szPadding.cx + infoPtr->nBitmapWidth);
     cy = max(cy, infoPtr->szPadding.cy + infoPtr->nBitmapHeight);
@@ -4780,6 +4777,8 @@ TOOLBAR_SetImageList (HWND hwnd, WPARAM wParam, LPARAM lParam)
     HIMAGELIST himlTemp;
     HIMAGELIST himl = (HIMAGELIST)lParam;
     INT oldButtonWidth = infoPtr->nButtonWidth;
+    INT oldBitmapWidth = infoPtr->nBitmapWidth;
+    INT oldBitmapHeight = infoPtr->nBitmapHeight;
     INT i, id = 0;
 
     if (infoPtr->iVersion >= 5)
@@ -4798,9 +4797,12 @@ TOOLBAR_SetImageList (HWND hwnd, WPARAM wParam, LPARAM lParam)
         infoPtr->nBitmapWidth = 1;
         infoPtr->nBitmapHeight = 1;
     }
-    TOOLBAR_CalcToolbar(hwnd);
-    if (infoPtr->nButtonWidth < oldButtonWidth)
-        TOOLBAR_SetButtonSize(hwnd, MAKELONG(oldButtonWidth, infoPtr->nButtonHeight));
+    if ((oldBitmapWidth != infoPtr->nBitmapWidth) || (oldBitmapHeight != infoPtr->nBitmapHeight))
+    {
+        TOOLBAR_CalcToolbar(hwnd);
+        if (infoPtr->nButtonWidth < oldButtonWidth)
+            TOOLBAR_SetButtonSize(hwnd, MAKELONG(oldButtonWidth, infoPtr->nButtonHeight));
+    }
 
     TRACE("hwnd %p, new himl=%p, id = %d, count=%d, bitmap w=%d, h=%d\n",
 	  hwnd, infoPtr->himlDef, id, infoPtr->nNumBitmaps,

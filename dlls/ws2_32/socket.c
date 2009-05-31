@@ -2382,7 +2382,7 @@ INT WINAPI WSAIoctl(SOCKET s,
 int WINAPI WS_ioctlsocket(SOCKET s, LONG cmd, WS_u_long *argp)
 {
     int fd;
-    long newcmd  = cmd;
+    LONG newcmd  = cmd;
 
     TRACE("socket %04lx, cmd %08x, ptr %p\n", s, cmd, argp);
     /* broken apps like defcon pass the argp value directly instead of a pointer to it */
@@ -4805,7 +4805,7 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
     p = strchr( buffer, ':' );
     if (!((SOCKADDR_IN *)sockaddr)->sin_port) *p = 0;
 
-    size = strlen( buffer );
+    size = strlen( buffer ) + 1;
 
     if (*lenstr <  size)
     {
@@ -4814,6 +4814,7 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
         return SOCKET_ERROR;
     }
 
+    *lenstr = size;
     strcpy( string, buffer );
     return 0;
 }
@@ -4867,7 +4868,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
     p = strchrW( buffer, ':' );
     if (!((SOCKADDR_IN *)sockaddr)->sin_port) *p = 0;
 
-    size = strlenW( buffer );
+    size = strlenW( buffer ) + 1;
 
     if (*lenstr <  size)
     {
@@ -4875,6 +4876,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
         return SOCKET_ERROR;
     }
 
+    *lenstr = size;
     lstrcpyW( string, buffer );
     return 0;
 }

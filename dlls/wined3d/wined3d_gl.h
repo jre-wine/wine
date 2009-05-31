@@ -3908,6 +3908,7 @@ typedef struct _WineD3D_GL_Info {
   UINT   vidmem;
   DWORD  driver_version;
   DWORD  driver_version_hipart;
+  CHAR   driver_description[255];
   CHAR   gl_renderer[255];
   /**
    * CAPS Constants
@@ -3950,6 +3951,7 @@ typedef struct _WineD3D_GL_Info {
 
   BOOL arb_vs_offset_limit;
   BOOL set_texcoord_w;
+  DWORD reserved_glsl_constants;
 
   BOOL supported[OPENGL_SUPPORTED_EXT_END + 1];
 
@@ -3961,5 +3963,11 @@ typedef struct _WineD3D_GL_Info {
   struct GlPixelFormatDesc *gl_formats;
 } WineD3D_GL_Info;
 #undef USE_GL_FUNC
+
+struct driver_quirk {
+    BOOL        (*match)(const WineD3D_GL_Info *gl_info);
+    void        (*apply)(WineD3D_GL_Info *gl_info);
+    const char  *description;
+};
 
 #endif /* __WINE_WINED3D_GL */

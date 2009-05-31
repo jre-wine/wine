@@ -379,6 +379,8 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
         return DIERR_DEVICENOTREG;
     }
 
+    newDevice->generic.guidInstance = DInput_Wine_Joystick_GUID;
+    newDevice->generic.guidInstance.Data3 = index;
     newDevice->generic.guidProduct = DInput_Wine_Joystick_GUID;
     newDevice->generic.joy_polldev = joy_polldev;
 
@@ -460,11 +462,6 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     }
     newDevice->generic.base.data_format.wine_df = df;
 
-    /* create default properties */
-    newDevice->generic.props = HeapAlloc(GetProcessHeap(),0,c_dfDIJoystick2.dwNumObjs*sizeof(ObjProps));
-    if (newDevice->generic.props == 0)
-        goto FAILED;
-
     /* initialize default properties */
     for (i = 0; i < c_dfDIJoystick2.dwNumObjs; i++) {
         newDevice->generic.props[i].lDevMin = -32767;
@@ -508,7 +505,6 @@ FAILED1:
     release_DataFormat(&newDevice->generic.base.data_format);
     HeapFree(GetProcessHeap(),0,newDevice->axis_map);
     HeapFree(GetProcessHeap(),0,newDevice->generic.name);
-    HeapFree(GetProcessHeap(),0,newDevice->generic.props);
     HeapFree(GetProcessHeap(),0,newDevice);
     *pdev = 0;
 
@@ -609,7 +605,7 @@ static HRESULT WINAPI JoystickLinuxAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
 
     TRACE("(%p)\n",This);
 
-    res = JoystickAGenericImpl_Acquire(iface);
+    res = IDirectInputDevice2AImpl_Acquire(iface);
     if (res != DI_OK)
         return res;
 
@@ -620,7 +616,7 @@ static HRESULT WINAPI JoystickLinuxAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
         This->joyfd=open(This->dev,O_RDONLY);
         if (This->joyfd==-1) {
             ERR("open(%s) failed: %s\n", This->dev, strerror(errno));
-            JoystickAGenericImpl_Unacquire(iface);
+            IDirectInputDevice2AImpl_Unacquire(iface);
             return DIERR_NOTFOUND;
         }
     }
@@ -638,7 +634,7 @@ static HRESULT WINAPI JoystickLinuxAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
 
     TRACE("(%p)\n",This);
 
-    res = JoystickAGenericImpl_Unacquire(iface);
+    res = IDirectInputDevice2AImpl_Unacquire(iface);
 
     if (res != DI_OK)
         return res;

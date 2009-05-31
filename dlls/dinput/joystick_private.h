@@ -1,5 +1,5 @@
 /*
- * Copyright 2009, Aric Stewart, Codeweavers
+ * Copyright 2009, Aric Stewart, CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,8 @@
 #include "dinput_private.h"
 #include "device_private.h"
 
+/* Number of objects in the default data format */
+#define MAX_PROPS 164
 struct JoystickGenericImpl;
 
 typedef void joy_polldev_handler(struct JoystickGenericImpl *This);
@@ -37,10 +39,11 @@ typedef struct JoystickGenericImpl
 {
     struct IDirectInputDevice2AImpl base;
 
-    ObjProps    *props;
+    ObjProps    props[MAX_PROPS];
     DIDEVCAPS   devcaps;
     DIJOYSTATE2 js;     /* wine data */
     GUID        guidProduct;
+    GUID        guidInstance;
     char        *name;
 
     joy_polldev_handler *joy_polldev;
@@ -77,9 +80,5 @@ HRESULT WINAPI JoystickAGenericImpl_Poll(LPDIRECTINPUTDEVICE8A iface);
 
 HRESULT WINAPI JoystickAGenericImpl_GetDeviceState( LPDIRECTINPUTDEVICE8A iface,
     DWORD len, LPVOID ptr);
-
-HRESULT WINAPI JoystickAGenericImpl_Acquire(LPDIRECTINPUTDEVICE8A iface);
-
-HRESULT WINAPI JoystickAGenericImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface);
 
 #endif /* __WINE_DLLS_DINPUT_JOYSTICK_PRIVATE_H */

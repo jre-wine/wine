@@ -205,7 +205,7 @@ static int find_osx_devices(void)
     tIOReturn = IOHIDManagerOpen( gIOHIDManagerRef, 0L);
     if ( kIOReturnSuccess != tIOReturn )
     {
-        ERR("Couldn't open IOHIDManager.");
+        ERR("Couldn't open IOHIDManager.\n");
         return 0;
     }
 
@@ -650,6 +650,8 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
 
     newDevice->id = index;
 
+    newDevice->generic.guidInstance = DInput_Wine_OsX_Joystick_GUID;
+    newDevice->generic.guidInstance.Data3 = index;
     newDevice->generic.guidProduct = DInput_Wine_OsX_Joystick_GUID;
     newDevice->generic.joy_polldev = poll_osx_device_state;
 
@@ -722,11 +724,6 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     }
     newDevice->generic.base.data_format.wine_df = df;
 
-    /* create default properties */
-    newDevice->generic.props = HeapAlloc(GetProcessHeap(),0,c_dfDIJoystick2.dwNumObjs*sizeof(ObjProps));
-    if (newDevice->generic.props == 0)
-        goto FAILED;
-
     /* initialize default properties */
     get_osx_device_elements_props(newDevice);
 
@@ -759,7 +756,6 @@ FAILED:
     HeapFree(GetProcessHeap(), 0, df);
     release_DataFormat(&newDevice->generic.base.data_format);
     HeapFree(GetProcessHeap(),0,newDevice->generic.name);
-    HeapFree(GetProcessHeap(),0,newDevice->generic.props);
     HeapFree(GetProcessHeap(),0,newDevice);
     *pdev = 0;
 
@@ -863,8 +859,8 @@ static const IDirectInputDevice8AVtbl JoystickAvt =
     IDirectInputDevice2AImpl_EnumObjects,
     JoystickAGenericImpl_GetProperty,
     JoystickAGenericImpl_SetProperty,
-    JoystickAGenericImpl_Acquire,
-    JoystickAGenericImpl_Unacquire,
+    IDirectInputDevice2AImpl_Acquire,
+    IDirectInputDevice2AImpl_Unacquire,
     JoystickAGenericImpl_GetDeviceState,
     IDirectInputDevice2AImpl_GetDeviceData,
     IDirectInputDevice2AImpl_SetDataFormat,
@@ -905,8 +901,8 @@ static const IDirectInputDevice8WVtbl JoystickWvt =
     IDirectInputDevice2WImpl_EnumObjects,
     XCAST(GetProperty)JoystickAGenericImpl_GetProperty,
     XCAST(SetProperty)JoystickAGenericImpl_SetProperty,
-    XCAST(Acquire)JoystickAGenericImpl_Acquire,
-    XCAST(Unacquire)JoystickAGenericImpl_Unacquire,
+    XCAST(Acquire)IDirectInputDevice2AImpl_Acquire,
+    XCAST(Unacquire)IDirectInputDevice2AImpl_Unacquire,
     XCAST(GetDeviceState)JoystickAGenericImpl_GetDeviceState,
     XCAST(GetDeviceData)IDirectInputDevice2AImpl_GetDeviceData,
     XCAST(SetDataFormat)IDirectInputDevice2AImpl_SetDataFormat,

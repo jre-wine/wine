@@ -1296,6 +1296,7 @@ static void test_WSAAddressToStringA(void)
     ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
 
     ok( !strcmp( address, expect1 ), "Expected: %s, got: %s\n", expect1, address );
+    ok( len == sizeof( expect1 ), "Got size %d\n", len);
 
     len = sizeof(address);
 
@@ -1329,6 +1330,7 @@ static void test_WSAAddressToStringA(void)
     ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
 
     ok( !strcmp( address, expect4 ), "Expected: %s, got: %s\n", expect4, address );
+    ok( len == sizeof( expect4 ), "Got size %d\n", len);
 }
 
 static void test_WSAAddressToStringW(void)
@@ -1367,6 +1369,7 @@ static void test_WSAAddressToStringW(void)
     ok( !ret, "WSAAddressToStringW() failed unexpectedly: %d\n", WSAGetLastError() );
 
     ok( !lstrcmpW( address, expect1 ), "Expected different address string\n" );
+    ok( len == sizeof( expect1 )/sizeof( WCHAR ), "Got size %d\n", len);
 
     len = sizeof(address);
 
@@ -1400,6 +1403,7 @@ static void test_WSAAddressToStringW(void)
     ok( !ret, "WSAAddressToStringW() failed unexpectedly: %d\n", WSAGetLastError() );
 
     ok( !lstrcmpW( address, expect4 ), "Expected different address string\n" );
+    ok( len == sizeof( expect4 )/sizeof( WCHAR ), "Got size %d\n", len);
 }
 
 static void test_WSAStringToAddressA(void)
@@ -1996,8 +2000,8 @@ static void test_ioctlsocket(void)
 {
     SOCKET sock;
     int ret;
-    long cmds[] = {FIONBIO, FIONREAD, SIOCATMARK};
-    int i;
+    static const LONG cmds[] = {FIONBIO, FIONREAD, SIOCATMARK};
+    UINT i;
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     ok(sock != INVALID_SOCKET, "Creating the socket failed: %d\n", WSAGetLastError());
@@ -2007,7 +2011,7 @@ static void test_ioctlsocket(void)
         return;
     }
 
-    for(i = 0; i < sizeof(cmds)/sizeof(long); i++)
+    for(i = 0; i < sizeof(cmds)/sizeof(cmds[0]); i++)
     {
         /* broken apps like defcon pass the argp value directly instead of a pointer to it */
         ret = ioctlsocket(sock, cmds[i], (u_long *)1);

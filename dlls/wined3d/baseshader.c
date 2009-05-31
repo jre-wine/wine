@@ -7,6 +7,7 @@
  * Copyright 2005 Oliver Stieber
  * Copyright 2006 Ivan Gyurdiev
  * Copyright 2007-2008 Stefan Dösinger for CodeWeavers
+ * Copyright 2009 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,7 +32,179 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
+/* DCL usage masks */
+#define WINED3DSP_DCL_USAGE_SHIFT               0
+#define WINED3DSP_DCL_USAGE_MASK                (0xf << WINED3DSP_DCL_USAGE_SHIFT)
+#define WINED3DSP_DCL_USAGEINDEX_SHIFT          16
+#define WINED3DSP_DCL_USAGEINDEX_MASK           (0xf << WINED3DSP_DCL_USAGEINDEX_SHIFT)
+
+/* Opcode-related masks */
+#define WINED3DSI_OPCODE_MASK                   0x0000ffff
+
+#define WINED3D_OPCODESPECIFICCONTROL_SHIFT     16
+#define WINED3D_OPCODESPECIFICCONTROL_MASK      (0xff << WINED3D_OPCODESPECIFICCONTROL_SHIFT)
+
+#define WINED3DSI_INSTLENGTH_SHIFT              24
+#define WINED3DSI_INSTLENGTH_MASK               (0xf << WINED3DSI_INSTLENGTH_SHIFT)
+
+#define WINED3DSI_COISSUE                       (1 << 30)
+
+#define WINED3DSI_COMMENTSIZE_SHIFT             16
+#define WINED3DSI_COMMENTSIZE_MASK              (0x7fff << WINED3DSI_COMMENTSIZE_SHIFT)
+
+#define WINED3DSHADER_INSTRUCTION_PREDICATED    (1 << 28)
+
+/* Register number mask */
+#define WINED3DSP_REGNUM_MASK                   0x000007ff
+
+/* Register type masks  */
+#define WINED3DSP_REGTYPE_SHIFT                 28
+#define WINED3DSP_REGTYPE_MASK                  (0x7 << WINED3DSP_REGTYPE_SHIFT)
+#define WINED3DSP_REGTYPE_SHIFT2                8
+#define WINED3DSP_REGTYPE_MASK2                 (0x18 << WINED3DSP_REGTYPE_SHIFT2)
+
+/* Relative addressing mask */
+#define WINED3DSHADER_ADDRESSMODE_SHIFT         13
+#define WINED3DSHADER_ADDRESSMODE_MASK          (1 << WINED3DSHADER_ADDRESSMODE_SHIFT)
+
+/* Destination modifier mask */
+#define WINED3DSP_DSTMOD_SHIFT                  20
+#define WINED3DSP_DSTMOD_MASK                   (0xf << WINED3DSP_DSTMOD_SHIFT)
+
+/* Destination shift mask */
+#define WINED3DSP_DSTSHIFT_SHIFT                24
+#define WINED3DSP_DSTSHIFT_MASK                 (0xf << WINED3DSP_DSTSHIFT_SHIFT)
+
+/* Swizzle mask */
+#define WINED3DSP_SWIZZLE_SHIFT                 16
+#define WINED3DSP_SWIZZLE_MASK                  (0xff << WINED3DSP_SWIZZLE_SHIFT)
+
+/* Source modifier mask */
+#define WINED3DSP_SRCMOD_SHIFT                  24
+#define WINED3DSP_SRCMOD_MASK                   (0xf << WINED3DSP_SRCMOD_SHIFT)
+
+typedef enum _WINED3DSHADER_ADDRESSMODE_TYPE
+{
+  WINED3DSHADER_ADDRMODE_ABSOLUTE = 0 << WINED3DSHADER_ADDRESSMODE_SHIFT,
+  WINED3DSHADER_ADDRMODE_RELATIVE = 1 << WINED3DSHADER_ADDRESSMODE_SHIFT,
+  WINED3DSHADER_ADDRMODE_FORCE_DWORD = 0x7fffffff,
+} WINED3DSHADER_ADDRESSMODE_TYPE;
+
 static void shader_dump_param(const DWORD param, const DWORD addr_token, int input, DWORD shader_version);
+
+/* Read a parameter opcode from the input stream,
+ * and possibly a relative addressing token.
+ * Return the number of tokens read */
+static int shader_get_param(const DWORD *ptr, DWORD shader_version, DWORD *token, DWORD *addr_token)
+{
+    UINT count = 1;
+
+    *token = *ptr;
+
+    /* PS >= 3.0 have relative addressing (with token)
+     * VS >= 2.0 have relative addressing (with token)
+     * VS >= 1.0 < 2.0 have relative addressing (without token)
+     * The version check below should work in general */
+    if (*ptr & WINED3DSHADER_ADDRMODE_RELATIVE)
+    {
+        if (WINED3DSHADER_VERSION_MAJOR(shader_version) < 2)
+        {
+            *addr_token = (1 << 31)
+                    | ((WINED3DSPR_ADDR << WINED3DSP_REGTYPE_SHIFT2) & WINED3DSP_REGTYPE_MASK2)
+                    | ((WINED3DSPR_ADDR << WINED3DSP_REGTYPE_SHIFT) & WINED3DSP_REGTYPE_MASK)
+                    | (WINED3DSP_NOSWIZZLE << WINED3DSP_SWIZZLE_SHIFT);
+        }
+        else
+        {
+            *addr_token = *(ptr + 1);
+            ++count;
+        }
+    }
+
+    return count;
+}
+
+static const SHADER_OPCODE *shader_get_opcode(const SHADER_OPCODE *opcode_table, DWORD shader_version, DWORD code)
+{
+    DWORD i = 0;
+
+    /** TODO: use dichotomic search */
+    while (opcode_table[i].name)
+    {
+        if ((code & WINED3DSI_OPCODE_MASK) == opcode_table[i].opcode
+                && shader_version >= opcode_table[i].min_version
+                && (!opcode_table[i].max_version || shader_version <= opcode_table[i].max_version))
+        {
+            return &opcode_table[i];
+        }
+        ++i;
+    }
+
+    FIXME("Unsupported opcode %#x(%d) masked %#x, shader version %#x\n",
+            code, code, code & WINED3DSI_OPCODE_MASK, shader_version);
+
+    return NULL;
+}
+
+/* Return the number of parameters to skip for an opcode */
+static inline int shader_skip_opcode(const SHADER_OPCODE *opcode_info, DWORD opcode_token, DWORD shader_version)
+{
+   /* Shaders >= 2.0 may contain address tokens, but fortunately they
+    * have a useful length mask - use it here. Shaders 1.0 contain no such tokens */
+    return (WINED3DSHADER_VERSION_MAJOR(shader_version) >= 2)
+            ? ((opcode_token & WINED3DSI_INSTLENGTH_MASK) >> WINED3DSI_INSTLENGTH_SHIFT) : opcode_info->num_params;
+}
+
+/* Read the parameters of an unrecognized opcode from the input stream
+ * Return the number of tokens read.
+ *
+ * Note: This function assumes source or destination token format.
+ * It will not work with specially-formatted tokens like DEF or DCL,
+ * but hopefully those would be recognized */
+static int shader_skip_unrecognized(const DWORD *ptr, DWORD shader_version)
+{
+    int tokens_read = 0;
+    int i = 0;
+
+    /* TODO: Think of a good name for 0x80000000 and replace it with a constant */
+    while (*ptr & 0x80000000)
+    {
+        DWORD token, addr_token = 0;
+        tokens_read += shader_get_param(ptr, shader_version, &token, &addr_token);
+        ptr += tokens_read;
+
+        FIXME("Unrecognized opcode param: token=0x%08x addr_token=0x%08x name=", token, addr_token);
+        shader_dump_param(token, addr_token, i, shader_version);
+        FIXME("\n");
+        ++i;
+    }
+    return tokens_read;
+}
+
+static void shader_sm1_read_opcode(const DWORD **ptr, struct wined3d_shader_instruction *ins, UINT *param_size,
+        const SHADER_OPCODE *opcode_table, DWORD shader_version)
+{
+    const SHADER_OPCODE *opcode_info;
+    DWORD opcode_token;
+
+    opcode_token = *(*ptr)++;
+    opcode_info = shader_get_opcode(opcode_table, shader_version, opcode_token);
+    if (!opcode_info)
+    {
+        FIXME("Unrecognized opcode: token=0x%08x\n", opcode_token);
+        ins->handler_idx = WINED3DSIH_TABLE_SIZE;
+        *param_size = shader_skip_unrecognized(*ptr, shader_version);
+        return;
+    }
+
+    ins->handler_idx = opcode_info->handler_idx;
+    ins->flags = (opcode_token & WINED3D_OPCODESPECIFICCONTROL_MASK) >> WINED3D_OPCODESPECIFICCONTROL_SHIFT;
+    ins->coissue = opcode_token & WINED3DSI_COISSUE;
+    ins->predicate = opcode_token & WINED3DSHADER_INSTRUCTION_PREDICATED;
+    ins->dst_count = opcode_info->dst_token ? 1 : 0;
+    ins->src_count = opcode_info->num_params - opcode_info->dst_token;
+    *param_size = shader_skip_opcode(opcode_info, opcode_token, shader_version);
+}
 
 static inline BOOL shader_is_version_token(DWORD token) {
     return shader_is_pshader_version(token) ||
@@ -104,80 +277,20 @@ void shader_init(struct IWineD3DBaseShaderClass *shader,
     list_init(&shader->linked_programs);
 }
 
-const SHADER_OPCODE *shader_get_opcode(const SHADER_OPCODE *opcode_table, DWORD shader_version, DWORD code)
+static inline WINED3DSHADER_PARAM_REGISTER_TYPE shader_get_regtype(DWORD param)
 {
-    DWORD i = 0;
-
-    /** TODO: use dichotomic search */
-    while (opcode_table[i].name)
-    {
-        if ((code & WINED3DSI_OPCODE_MASK) == opcode_table[i].opcode
-                && shader_version >= opcode_table[i].min_version
-                && (!opcode_table[i].max_version || shader_version <= opcode_table[i].max_version))
-        {
-            return &opcode_table[i];
-        }
-        ++i;
-    }
-
-    FIXME("Unsupported opcode %#x(%d) masked %#x, shader version %#x\n",
-            code, code, code & WINED3DSI_OPCODE_MASK, shader_version);
-
-    return NULL;
+    return ((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT)
+            | ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2);
 }
 
-/* Read a parameter opcode from the input stream,
- * and possibly a relative addressing token.
- * Return the number of tokens read */
-static int shader_get_param(const DWORD *pToken, DWORD shader_version, DWORD *param, DWORD *addr_token)
+static inline DWORD shader_get_writemask(DWORD param)
 {
-    /* PS >= 3.0 have relative addressing (with token)
-     * VS >= 2.0 have relative addressing (with token)
-     * VS >= 1.0 < 2.0 have relative addressing (without token)
-     * The version check below should work in general */
-
-    char rel_token = WINED3DSHADER_VERSION_MAJOR(shader_version) >= 2 &&
-        ((*pToken & WINED3DSHADER_ADDRESSMODE_MASK) == WINED3DSHADER_ADDRMODE_RELATIVE);
-
-    *param = *pToken;
-    *addr_token = rel_token? *(pToken + 1): 0;
-    return rel_token? 2:1;
+    return param & WINED3DSP_WRITEMASK_ALL;
 }
 
-/* Return the number of parameters to skip for an opcode */
-static inline int shader_skip_opcode(const SHADER_OPCODE *curOpcode, DWORD opcode_token, DWORD shader_version)
+static inline BOOL shader_is_comment(DWORD token)
 {
-   /* Shaders >= 2.0 may contain address tokens, but fortunately they
-    * have a useful length mask - use it here. Shaders 1.0 contain no such tokens */
-    return (WINED3DSHADER_VERSION_MAJOR(shader_version) >= 2)
-            ? ((opcode_token & WINED3DSI_INSTLENGTH_MASK) >> WINED3DSI_INSTLENGTH_SHIFT) : curOpcode->num_params;
-}
-
-/* Read the parameters of an unrecognized opcode from the input stream
- * Return the number of tokens read. 
- * 
- * Note: This function assumes source or destination token format.
- * It will not work with specially-formatted tokens like DEF or DCL, 
- * but hopefully those would be recognized */
-static int shader_skip_unrecognized(const DWORD *pToken, DWORD shader_version)
-{
-    int tokens_read = 0;
-    int i = 0;
-
-    /* TODO: Think of a good name for 0x80000000 and replace it with a constant */
-    while (*pToken & 0x80000000) {
-
-        DWORD param, addr_token;
-        tokens_read += shader_get_param(pToken, shader_version, &param, &addr_token);
-        pToken += tokens_read;
-
-        FIXME("Unrecognized opcode param: token=0x%08x "
-            "addr_token=0x%08x name=", param, addr_token);
-        shader_dump_param(param, addr_token, i, shader_version);
-        FIXME("\n");
-        ++i;
-    }
-    return tokens_read;
+    return WINED3DSIO_COMMENT == (token & WINED3DSI_OPCODE_MASK);
 }
 
 /* Convert floating point offset relative
@@ -212,17 +325,27 @@ static void shader_delete_constant_list(struct list* clist) {
     list_init(clist);
 }
 
-static void shader_parse_dst_param(DWORD param, DWORD addr_param, struct wined3d_shader_dst_param *dst)
+static void shader_parse_dst_param(DWORD param, const struct wined3d_shader_src_param *rel_addr,
+        struct wined3d_shader_dst_param *dst)
 {
     dst->register_type = ((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT)
             | ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2);
     dst->register_idx = param & WINED3DSP_REGNUM_MASK;
     dst->write_mask = param & WINED3DSP_WRITEMASK_ALL;
-    dst->modifiers = param & WINED3DSP_DSTMOD_MASK;
+    dst->modifiers = (param & WINED3DSP_DSTMOD_MASK) >> WINED3DSP_DSTMOD_SHIFT;
     dst->shift = (param & WINED3DSP_DSTSHIFT_MASK) >> WINED3DSP_DSTSHIFT_SHIFT;
-    dst->has_rel_addr = param & WINED3DSHADER_ADDRMODE_RELATIVE;
-    dst->token = param;
-    dst->addr_token = addr_param;
+    dst->rel_addr = rel_addr;
+}
+
+static void shader_parse_src_param(DWORD param, const struct wined3d_shader_src_param *rel_addr,
+        struct wined3d_shader_src_param *src)
+{
+    src->register_type = ((param & WINED3DSP_REGTYPE_MASK) >> WINED3DSP_REGTYPE_SHIFT)
+            | ((param & WINED3DSP_REGTYPE_MASK2) >> WINED3DSP_REGTYPE_SHIFT2);
+    src->register_idx = param & WINED3DSP_REGNUM_MASK;
+    src->swizzle = (param & WINED3DSP_SWIZZLE_MASK) >> WINED3DSP_SWIZZLE_SHIFT;
+    src->modifiers = (param & WINED3DSP_SRCMOD_MASK) >> WINED3DSP_SRCMOD_SHIFT;
+    src->rel_addr = rel_addr;
 }
 
 /* Note that this does not count the loop register
@@ -261,8 +384,8 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
     pshader = shader_is_pshader_version(shader_version);
 
     while (WINED3DVS_END() != *pToken) {
-        CONST SHADER_OPCODE* curOpcode;
-        DWORD opcode_token;
+        struct wined3d_shader_instruction ins;
+        UINT param_size;
 
         /* Skip comments */
         if (shader_is_comment(*pToken))
@@ -274,17 +397,19 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
         }
 
         /* Fetch opcode */
-        opcode_token = *pToken++;
-        curOpcode = shader_get_opcode(shader_ins, shader_version, opcode_token);
+        shader_sm1_read_opcode(&pToken, &ins, &param_size, shader_ins, shader_version);
 
         /* Unhandled opcode, and its parameters */
-        if (NULL == curOpcode) {
-           while (*pToken & 0x80000000)
-               ++pToken;
+        if (ins.handler_idx == WINED3DSIH_TABLE_SIZE)
+        {
+            TRACE("Skipping unrecognized instruction.\n");
+            pToken += param_size;
+            continue;
+        }
 
         /* Handle declarations */
-        } else if (WINED3DSIO_DCL == curOpcode->opcode) {
-
+        if (ins.handler_idx == WINED3DSIH_DCL)
+        {
             DWORD usage = *pToken++;
             DWORD param = *pToken++;
             DWORD regtype = shader_get_regtype(param);
@@ -302,7 +427,7 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
                 semantics_in[regnum].usage = (usage & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
                 semantics_in[regnum].usage_idx =
                         (usage & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
-                shader_parse_dst_param(param, 0, &semantics_in[regnum].reg);
+                shader_parse_dst_param(param, NULL, &semantics_in[regnum].reg);
 
             /* Vshader: mark 3.0 output registers used, save token */
             } else if (WINED3DSPR_OUTPUT == regtype) {
@@ -310,7 +435,7 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
                 semantics_out[regnum].usage = (usage & WINED3DSP_DCL_USAGE_MASK) >> WINED3DSP_DCL_USAGE_SHIFT;
                 semantics_out[regnum].usage_idx =
                         (usage & WINED3DSP_DCL_USAGEINDEX_MASK) >> WINED3DSP_DCL_USAGEINDEX_SHIFT;
-                shader_parse_dst_param(param, 0, &semantics_out[regnum].reg);
+                shader_parse_dst_param(param, NULL, &semantics_out[regnum].reg);
 
                 if (usage & (WINED3DDECLUSAGE_FOG << WINED3DSP_DCL_USAGE_SHIFT))
                     reg_maps->fog = 1;
@@ -318,9 +443,9 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
             /* Save sampler usage token */
             } else if (WINED3DSPR_SAMPLER == regtype)
                 reg_maps->samplers[regnum] = usage;
-
-        } else if (WINED3DSIO_DEF == curOpcode->opcode) {
-
+        }
+        else if (ins.handler_idx == WINED3DSIH_DEF)
+        {
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
@@ -341,65 +466,70 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
             }
 
             list_add_head(&This->baseShader.constantsF, &lconst->entry);
-            pToken += curOpcode->num_params;
-
-        } else if (WINED3DSIO_DEFI == curOpcode->opcode) {
-
+            pToken += param_size;
+        }
+        else if (ins.handler_idx == WINED3DSIH_DEFI)
+        {
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
             memcpy(lconst->value, pToken + 1, 4 * sizeof(DWORD));
             list_add_head(&This->baseShader.constantsI, &lconst->entry);
-            pToken += curOpcode->num_params;
-
-        } else if (WINED3DSIO_DEFB == curOpcode->opcode) {
-
+            pToken += param_size;
+        }
+        else if (ins.handler_idx == WINED3DSIH_DEFB)
+        {
             local_constant* lconst = HeapAlloc(GetProcessHeap(), 0, sizeof(local_constant));
             if (!lconst) return E_OUTOFMEMORY;
             lconst->idx = *pToken & WINED3DSP_REGNUM_MASK;
             memcpy(lconst->value, pToken + 1, 1 * sizeof(DWORD));
             list_add_head(&This->baseShader.constantsB, &lconst->entry);
-            pToken += curOpcode->num_params;
-
+            pToken += param_size;
+        }
         /* If there's a loop in the shader */
-        } else if (WINED3DSIO_LOOP == curOpcode->opcode ||
-                   WINED3DSIO_REP == curOpcode->opcode) {
+        else if (ins.handler_idx == WINED3DSIH_LOOP
+                || ins.handler_idx == WINED3DSIH_REP)
+        {
             cur_loop_depth++;
             if(cur_loop_depth > max_loop_depth)
                 max_loop_depth = cur_loop_depth;
-            pToken += curOpcode->num_params;
+            pToken += param_size;
 
             /* Rep and Loop always use an integer constant for the control parameters */
             This->baseShader.uses_int_consts = TRUE;
-        } else if (WINED3DSIO_ENDLOOP == curOpcode->opcode ||
-                   WINED3DSIO_ENDREP == curOpcode->opcode) {
+        }
+        else if (ins.handler_idx == WINED3DSIH_ENDLOOP
+                || ins.handler_idx == WINED3DSIH_ENDREP)
+        {
             cur_loop_depth--;
-
+        }
         /* For subroutine prototypes */
-        } else if (WINED3DSIO_LABEL == curOpcode->opcode) {
+        else if (ins.handler_idx == WINED3DSIH_LABEL)
+        {
 
             DWORD snum = *pToken & WINED3DSP_REGNUM_MASK; 
             reg_maps->labels[snum] = 1;
-            pToken += curOpcode->num_params;
-
+            pToken += param_size;
+        }
         /* Set texture, address, temporary registers */
-        } else {
+        else
+        {
             int i, limit;
 
             /* Declare 1.X samplers implicitly, based on the destination reg. number */
             if (WINED3DSHADER_VERSION_MAJOR(shader_version) == 1
                     && pshader /* Filter different instructions with the same enum values in VS */
-                    && (WINED3DSIO_TEX == curOpcode->opcode
-                        || WINED3DSIO_TEXBEM == curOpcode->opcode
-                        || WINED3DSIO_TEXBEML == curOpcode->opcode
-                        || WINED3DSIO_TEXDP3TEX == curOpcode->opcode
-                        || WINED3DSIO_TEXM3x2TEX == curOpcode->opcode
-                        || WINED3DSIO_TEXM3x3SPEC == curOpcode->opcode
-                        || WINED3DSIO_TEXM3x3TEX == curOpcode->opcode
-                        || WINED3DSIO_TEXM3x3VSPEC == curOpcode->opcode
-                        || WINED3DSIO_TEXREG2AR == curOpcode->opcode
-                        || WINED3DSIO_TEXREG2GB == curOpcode->opcode
-                        || WINED3DSIO_TEXREG2RGB == curOpcode->opcode))
+                    && (ins.handler_idx == WINED3DSIH_TEX
+                        || ins.handler_idx == WINED3DSIH_TEXBEM
+                        || ins.handler_idx == WINED3DSIH_TEXBEML
+                        || ins.handler_idx == WINED3DSIH_TEXDP3TEX
+                        || ins.handler_idx == WINED3DSIH_TEXM3x2TEX
+                        || ins.handler_idx == WINED3DSIH_TEXM3x3SPEC
+                        || ins.handler_idx == WINED3DSIH_TEXM3x3TEX
+                        || ins.handler_idx == WINED3DSIH_TEXM3x3VSPEC
+                        || ins.handler_idx == WINED3DSIH_TEXREG2AR
+                        || ins.handler_idx == WINED3DSIH_TEXREG2GB
+                        || ins.handler_idx == WINED3DSIH_TEXREG2RGB))
             {
                 /* Fake sampler usage, only set reserved bit and ttype */
                 DWORD sampler_code = *pToken & WINED3DSP_REGNUM_MASK;
@@ -408,20 +538,27 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
                 reg_maps->samplers[sampler_code] = (0x1 << 31) | WINED3DSTT_2D;
 
                 /* texbem is only valid with < 1.4 pixel shaders */
-                if(WINED3DSIO_TEXBEM  == curOpcode->opcode ||
-                    WINED3DSIO_TEXBEML == curOpcode->opcode) {
+                if (ins.handler_idx == WINED3DSIH_TEXBEM
+                        || ins.handler_idx == WINED3DSIH_TEXBEML)
+                {
                     reg_maps->bumpmat[sampler_code] = TRUE;
-                    if(WINED3DSIO_TEXBEML == curOpcode->opcode) {
+                    if (ins.handler_idx == WINED3DSIH_TEXBEML)
+                    {
                         reg_maps->luminanceparams[sampler_code] = TRUE;
                     }
                 }
             }
-            if(WINED3DSIO_NRM  == curOpcode->opcode) {
+            if (ins.handler_idx == WINED3DSIH_NRM)
+            {
                 reg_maps->usesnrm = 1;
-            } else if(WINED3DSIO_BEM == curOpcode->opcode && pshader) {
+            }
+            else if (pshader && ins.handler_idx == WINED3DSIH_BEM)
+            {
                 DWORD regnum = *pToken & WINED3DSP_REGNUM_MASK;
                 reg_maps->bumpmat[regnum] = TRUE;
-            } else if(WINED3DSIO_DSY  == curOpcode->opcode) {
+            }
+            else if (ins.handler_idx == WINED3DSIH_DSY)
+            {
                 reg_maps->usesdsy = 1;
             }
 
@@ -432,8 +569,7 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, struct shader_reg_m
              * okay, since we'll catch any address registers when 
              * they are initialized (required by spec) */
 
-            limit = (opcode_token & WINED3DSHADER_INSTRUCTION_PREDICATED)?
-                curOpcode->num_params + 1: curOpcode->num_params;
+            limit = ins.dst_count + ins.src_count + (ins.predicate ? 1 : 0);
 
             for (i = 0; i < limit; ++i) {
 
@@ -756,7 +892,7 @@ static void shader_dump_param(const DWORD param, const DWORD addr_token, int inp
                 case WINED3DSPSM_ABSNEG:  TRACE(")"); break;
                 case WINED3DSPSM_ABS:     TRACE(")"); break;
                 default:
-                    TRACE("_unknown_modifier(%#x)", modifier >> WINED3DSP_SRCMOD_SHIFT);
+                    TRACE("_unknown_modifier(%#x)", modifier);
             }
         }
 
@@ -764,7 +900,8 @@ static void shader_dump_param(const DWORD param, const DWORD addr_token, int inp
         * swizzle bits fields:
         *  RRGGBBAA
         */
-        if ((WINED3DVS_NOSWIZZLE >> WINED3DVS_SWIZZLE_SHIFT) != swizzle) {
+        if (swizzle != WINED3DSP_NOSWIZZLE)
+        {
             if (swizzle_x == swizzle_y &&
                 swizzle_x == swizzle_z &&
                 swizzle_x == swizzle_w) {
@@ -790,30 +927,35 @@ void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER* buffer,
     const SHADER_OPCODE *opcode_table = This->baseShader.shader_ins;
     const SHADER_HANDLER *handler_table = device->shader_backend->shader_instruction_handler_table;
     DWORD shader_version = reg_maps->shader_version;
+    struct wined3d_shader_src_param src_rel_addr[4];
+    struct wined3d_shader_src_param src_param[4];
+    struct wined3d_shader_src_param dst_rel_addr;
     struct wined3d_shader_dst_param dst_param;
     struct wined3d_shader_instruction ins;
+    struct wined3d_shader_context ctx;
     const DWORD *pToken = pFunction;
-    const SHADER_OPCODE *curOpcode;
     SHADER_HANDLER hw_fct;
     DWORD i;
 
     /* Initialize current parsing state */
-    ins.shader = iface;
-    ins.buffer = buffer;
-    ins.reg_maps = reg_maps;
+    ctx.shader = iface;
+    ctx.reg_maps = reg_maps;
+    ctx.buffer = buffer;
+
+    ins.ctx = &ctx;
     ins.dst = &dst_param;
+    ins.src = src_param;
     This->baseShader.parse_state.current_row = 0;
+
+    if (!shader_is_version_token(*pToken++))
+    {
+        ERR("First token is not a version token, invalid shader.\n");
+        return;
+    }
 
     while (WINED3DPS_END() != *pToken)
     {
-        DWORD opcode_token;
-
-        /* Skip version token */
-        if (shader_is_version_token(*pToken))
-        {
-            ++pToken;
-            continue;
-        }
+        UINT param_size;
 
         /* Skip comment tokens */
         if (shader_is_comment(*pToken))
@@ -824,65 +966,74 @@ void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER* buffer,
         }
 
         /* Read opcode */
-        opcode_token = *pToken++;
-        curOpcode = shader_get_opcode(opcode_table, shader_version, opcode_token);
+        shader_sm1_read_opcode(&pToken, &ins, &param_size, opcode_table, shader_version);
 
         /* Unknown opcode and its parameters */
-        if (!curOpcode)
+        if (ins.handler_idx == WINED3DSIH_TABLE_SIZE)
         {
-            FIXME("Unrecognized opcode: token=0x%08x\n", opcode_token);
-            pToken += shader_skip_unrecognized(pToken, shader_version);
+            TRACE("Skipping unrecognized instruction.\n");
+            pToken += param_size;
             continue;
         }
 
         /* Nothing to do */
-        if (WINED3DSIO_DCL == curOpcode->opcode
-                || WINED3DSIO_NOP == curOpcode->opcode
-                || WINED3DSIO_DEF == curOpcode->opcode
-                || WINED3DSIO_DEFI == curOpcode->opcode
-                || WINED3DSIO_DEFB == curOpcode->opcode
-                || WINED3DSIO_PHASE == curOpcode->opcode
-                || WINED3DSIO_RET == curOpcode->opcode)
+        if (ins.handler_idx == WINED3DSIH_DCL
+                || ins.handler_idx == WINED3DSIH_NOP
+                || ins.handler_idx == WINED3DSIH_DEF
+                || ins.handler_idx == WINED3DSIH_DEFI
+                || ins.handler_idx == WINED3DSIH_DEFB
+                || ins.handler_idx == WINED3DSIH_PHASE
+                || ins.handler_idx == WINED3DSIH_RET)
         {
-            pToken += shader_skip_opcode(curOpcode, opcode_token, shader_version);
+            pToken += param_size;
             continue;
         }
 
         /* Select handler */
-        hw_fct = handler_table[curOpcode->handler_idx];
+        hw_fct = handler_table[ins.handler_idx];
 
         /* Unhandled opcode */
         if (!hw_fct)
         {
-            FIXME("Can't handle opcode %s in hwShader\n", curOpcode->name);
-            pToken += shader_skip_opcode(curOpcode, opcode_token, shader_version);
+            FIXME("Backend can't handle opcode %#x\n", ins.handler_idx);
+            pToken += param_size;
             continue;
         }
 
-        ins.handler_idx = curOpcode->handler_idx;
-        ins.flags = opcode_token & WINED3D_OPCODESPECIFICCONTROL_MASK;
-        ins.coissue = opcode_token & WINED3DSI_COISSUE;
-
         /* Destination token */
-        ins.dst_count = curOpcode->dst_token ? 1 : 0;
         if (ins.dst_count)
         {
-            DWORD param, addr_param = 0;
+            DWORD param, addr_param;
             pToken += shader_get_param(pToken, shader_version, &param, &addr_param);
-            shader_parse_dst_param(param, addr_param, &dst_param);
+
+            if (param & WINED3DSHADER_ADDRMODE_RELATIVE)
+            {
+                shader_parse_src_param(addr_param, NULL, &dst_rel_addr);
+                shader_parse_dst_param(param, &dst_rel_addr, &dst_param);
+            }
+            else
+            {
+                shader_parse_dst_param(param, NULL, &dst_param);
+            }
         }
 
         /* Predication token */
-        if (opcode_token & WINED3DSHADER_INSTRUCTION_PREDICATED) ins.predicate = *pToken++;
+        if (ins.predicate) ins.predicate = *pToken++;
 
         /* Other source tokens */
-        ins.src_count = curOpcode->num_params - curOpcode->dst_token;
         for (i = 0; i < ins.src_count; ++i)
         {
-            DWORD param, addr_token = 0;
-            pToken += shader_get_param(pToken, shader_version, &param, &addr_token);
-            ins.src[i] = param;
-            ins.src_addr[i] = addr_token;
+            DWORD param, addr_param;
+            pToken += shader_get_param(pToken, shader_version, &param, &addr_param);
+            if (param & WINED3DSHADER_ADDRMODE_RELATIVE)
+            {
+                shader_parse_src_param(addr_param, NULL, &src_rel_addr[i]);
+                shader_parse_src_param(param, &src_rel_addr[i], &src_param[i]);
+            }
+            else
+            {
+                shader_parse_src_param(param, NULL, &src_param[i]);
+            }
         }
 
         /* Call appropriate function for output target */
@@ -917,7 +1068,7 @@ static void shader_dump_ins_modifiers(const DWORD output)
 
     mmask &= ~(WINED3DSPDM_SATURATE | WINED3DSPDM_PARTIALPRECISION | WINED3DSPDM_MSAMPCENTROID);
     if (mmask)
-        FIXME("_unrecognized_modifier(%#x)", mmask >> WINED3DSP_DSTMOD_SHIFT);
+        FIXME("_unrecognized_modifier(%#x)", mmask);
 }
 
 void shader_trace_init(const DWORD *pFunction, const SHADER_OPCODE *opcode_table)
@@ -1001,7 +1152,7 @@ void shader_trace_init(const DWORD *pFunction, const SHADER_OPCODE *opcode_table
             }
             else
             {
-                DWORD param, addr_token;
+                DWORD param, addr_token = 0;
                 int tokens_read;
 
                 /* Print out predication source token first - it follows
@@ -1023,7 +1174,7 @@ void shader_trace_init(const DWORD *pFunction, const SHADER_OPCODE *opcode_table
                 if (curOpcode->opcode == WINED3DSIO_IFC
                         || curOpcode->opcode == WINED3DSIO_BREAKC)
                 {
-                    DWORD op = (opcode_token & INST_CONTROLS_MASK) >> INST_CONTROLS_SHIFT;
+                    DWORD op = (opcode_token & WINED3D_OPCODESPECIFICCONTROL_MASK) >> WINED3D_OPCODESPECIFICCONTROL_SHIFT;
 
                     switch (op)
                     {
@@ -1038,7 +1189,7 @@ void shader_trace_init(const DWORD *pFunction, const SHADER_OPCODE *opcode_table
                 }
                 else if (curOpcode->opcode == WINED3DSIO_TEX
                         && shader_version >= WINED3DPS_VERSION(2,0)
-                        && (opcode_token & WINED3DSI_TEXLD_PROJECT))
+                        && (opcode_token & (WINED3DSI_TEXLD_PROJECT << WINED3D_OPCODESPECIFICCONTROL_SHIFT)))
                 {
                     TRACE("p");
                 }

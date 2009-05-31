@@ -147,8 +147,10 @@ static void test_ParseDisplayName(void)
     ok(SUCCEEDED(hr), "DesktopFolder->ParseDisplayName failed. hr = %08x.\n", hr);
     if (FAILED(hr)) goto finished;
 
-    ok(pILFindLastID(newPIDL)->mkid.abID[0] == 0x31, "Last pidl should be of type "
-       "PT_FOLDER, but is: %02x\n", pILFindLastID(newPIDL)->mkid.abID[0]);
+    ok(pILFindLastID(newPIDL)->mkid.abID[0] == 0x31 ||
+       pILFindLastID(newPIDL)->mkid.abID[0] == 0xb1, /* Win98 */
+       "Last pidl should be of type PT_FOLDER or PT_IESPECIAL2, but is: %02x\n",
+       pILFindLastID(newPIDL)->mkid.abID[0]);
     IMalloc_Free(ppM, newPIDL);
     
 finished:
@@ -263,13 +265,17 @@ static void test_EnumObjects(IShellFolder *iFolder)
         hr = IShellFolder_GetAttributesOf(iFolder, 1, (LPCITEMIDLIST*)(idlArr + i), &flags);
         flags &= SFGAO_testfor;
         ok(hr == S_OK, "GetAttributesOf returns %08x\n", hr);
-        ok(flags == (attrs[i]), "GetAttributesOf[%i] got %08x, expected %08x\n", i, flags, attrs[i]);
+        ok(flags == (attrs[i]) ||
+           flags == (attrs[i] & ~SFGAO_FILESYSANCESTOR), /* Win9x, NT4 */
+           "GetAttributesOf[%i] got %08x, expected %08x\n", i, flags, attrs[i]);
 
         flags = SFGAO_testfor;
         hr = IShellFolder_GetAttributesOf(iFolder, 1, (LPCITEMIDLIST*)(idlArr + i), &flags);
         flags &= SFGAO_testfor;
         ok(hr == S_OK, "GetAttributesOf returns %08x\n", hr);
-        ok(flags == attrs[i], "GetAttributesOf[%i] got %08x, expected %08x\n", i, flags, attrs[i]);
+        ok(flags == attrs[i] ||
+           flags == (attrs[i] & ~SFGAO_FILESYSANCESTOR), /* Win9x, NT4 */
+           "GetAttributesOf[%i] got %08x, expected %08x\n", i, flags, attrs[i]);
     }
 
     for (i=0;i<5;i++)
@@ -609,7 +615,8 @@ static void test_CallForAttributes(void)
     
     hr = IShellFolder_ParseDisplayName(psfDesktop, NULL, NULL, wszMyDocuments, NULL, 
                                        &pidlMyDocuments, NULL);
-    ok (SUCCEEDED(hr), 
+    ok (SUCCEEDED(hr) ||
+        broken(hr == E_INVALIDARG), /* Win95, NT4 */
         "Desktop's ParseDisplayName failed to parse MyDocuments's CLSID! hr = %08x\n", hr);
     if (FAILED(hr)) {
         IShellFolder_Release(psfDesktop);
@@ -1494,7 +1501,8 @@ static void test_ITEMIDLIST_format(void) {
                     pFileStructA->uFileTime == pFileStructW->uTime2,
                     "Last write time should match last access time!\n");
 
-                ok (!lstrcmpW(wszFile[i], pFileStructW->wszName),
+                ok (!lstrcmpW(wszFile[i], pFileStructW->wszName) ||
+                    !lstrcmpW(wszFile[i], (WCHAR *)(pFileStructW->abFooBar2 + 22)), /* Vista */
                     "The filename should be stored in unicode at this position!\n");
             }
         }

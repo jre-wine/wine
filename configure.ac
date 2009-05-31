@@ -325,7 +325,6 @@ AC_CHECK_HEADERS(\
 	sys/ipc.h \
 	sys/limits.h \
 	sys/link.h \
-	sys/lwp.h \
 	sys/mman.h \
 	sys/modem.h \
 	sys/msg.h \
@@ -335,7 +334,6 @@ AC_CHECK_HEADERS(\
 	sys/prctl.h \
 	sys/protosw.h \
 	sys/ptrace.h \
-	sys/reg.h \
 	sys/resource.h \
 	sys/scsiio.h \
 	sys/shm.h \
@@ -1867,6 +1865,7 @@ WINE_CONFIG_MAKEFILE([dlls/advapi32/tests/Makefile],[dlls/Maketest.rules],[dlls]
 WINE_CONFIG_MAKEFILE([dlls/advpack/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/advpack/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/amstream/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/amstream/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/appwiz.cpl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/atl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/authz/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2281,6 +2280,7 @@ WINE_CONFIG_MAKEFILE([dlls/xinput1_2/Makefile],[dlls/Makedll.rules],[dlls],[ALL_
 WINE_CONFIG_MAKEFILE([dlls/xinput1_3/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/xinput1_3/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/xinput9_1_0/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/xmllite/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([documentation/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
 WINE_CONFIG_MAKEFILE([fonts/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
 WINE_CONFIG_MAKEFILE([include/Makefile],[Make.rules],[],[ALL_TOP_DIRS])
@@ -2318,6 +2318,7 @@ WINE_CONFIG_MAKEFILE([programs/spoolsv/Makefile],[programs/Makeprog.rules],[prog
 WINE_CONFIG_MAKEFILE([programs/start/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/svchost/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/taskmgr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([programs/termsv/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/uninstaller/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/unlodctr/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS,ALL_PROGRAM_INSTALL_DIRS])
 WINE_CONFIG_MAKEFILE([programs/view/Makefile],[programs/Makeprog.rules],[programs],[ALL_PROGRAM_DIRS])

@@ -214,7 +214,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_Initialize(IAMMultiMediaStream* if
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
     HRESULT hr = S_OK;
 
-    FIXME("(%p/%p)->(%x,%x,%p) partial stub!\n", This, iface, (DWORD)StreamType, dwFlags, pFilterGraph);
+    TRACE("(%p/%p)->(%x,%x,%p)\n", This, iface, (DWORD)StreamType, dwFlags, pFilterGraph);
 
     if (pFilterGraph)
     {
@@ -347,6 +347,14 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_OpenFile(IAMMultiMediaStream* ifac
     {
         IEnumPins_Release(EnumPins);
         goto end;
+    }
+
+    /* If Initialize was not called before, we do it here */
+    if (!This->pFilterGraph)
+    {
+        ret = IAMMultiMediaStream_Initialize(iface, STREAMTYPE_READ, 0, NULL);
+        if (FAILED(ret))
+            goto end;
     }
 
     ret = IFilterGraph_QueryInterface(This->pFilterGraph, &IID_IGraphBuilder, (void**)&This->GraphBuilder);
