@@ -29,6 +29,7 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 CC=gcc
 LIBDIR=lib
+LIBDIRS=$(LIBDIR)
 
 IA32_CC := $(CC)
 IA32_CFLAGS := $(CFLAGS)
@@ -45,11 +46,13 @@ ifeq ($(DEB_HOST_GNU_CPU),x86_64)
 
 IA32_LIBS = /emul/ia32-linux
 IA32_LDFLAGS += -L$(CURDIR)/lib32
-#IA32_LIBDIR = lib32
+IA32_LIBDIR = lib32
 
 # Not ready yet: build Win64 version
 #BUILDS = build32 build64
+#LIBDIRS = $(IA32_LIBDIR) $(AMD64_LIBDIR)
 BUILDS = build32
+LIBDIRS = $(IA32_LIBDIR)
 
 else # !x86_64
 
@@ -203,6 +206,7 @@ install-arch32-stamp: build-arch32-stamp
 	$(MAKE) -C build32/programs install prefix=`pwd`/debian/tmp/usr
 	install build32/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
+	sed "s,usr/lib/wine,usr/$(IA32_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
 
 	touch install-arch32-stamp
 
@@ -225,6 +229,7 @@ install-arch64-stamp: build-arch64-stamp
 	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
+	sed "s,usr/lib/wine,usr/$(AMD64_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
 
 	touch install-arch64-stamp
 
@@ -233,8 +238,6 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	dh_testdir
 	dh_testroot
 
-	mkdir -p debian/tmp/usr/bin
-	install -m 755 debian/winelauncher debian/tmp/usr/bin/wine
 	# MIME and binfmt databases
 	mkdir -p debian/tmp/usr/share/{mime-info,binfmts}
 	cp debian/mime-info.mime	debian/tmp/usr/share/mime-info/wine.mime
@@ -275,7 +278,7 @@ binary-arch: install-arch-stamp
 	bash debian/doclink.sh libwine
 
 	# prepare <packagename>.install files
-	bash debian/prep-install.sh
+	bash debian/prep-install.sh "$(LIBDIRS)"
 
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
@@ -286,7 +289,7 @@ binary-arch: install-arch-stamp
 	#rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
-	bash debian/split.sh libwine usr/lib/wine
+	bash debian/split.sh libwine $(patsubst %,usr/%/wine,$(LIBDIRS))
 
 	dh_installdocs -plibwine
 	dh_installchangelogs -plibwine
