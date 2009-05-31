@@ -1,8 +1,18 @@
-wine (1.1.20-1) UNRELEASED; urgency=low
+wine (1.1.20-1) experimental; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.20, released Apr 24, 2009.
+    - Show a dialog on application crashes.
+    - Much improved OLE copy/paste support.
+    - Various listview improvements.
+    - More Direct3D code cleanups.
+    - Various bug fixes.
+  * Killed the libwine-twain transitional package.
+  * Renamed remaining debian/*.install files to debian/*.install-common.
+  * Installed termsv.exe.so into wine-bin.
+  * On amd64, winelib is now installed into /usr/lib32 instead of
+    /usr/lib. (This *is* an upload to experimental, after all...)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sun, 31 May 2009 21:00:29 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 01 Jun 2009 00:30:23 +0200
 
 wine (1.1.19-1) experimental; urgency=low
 
