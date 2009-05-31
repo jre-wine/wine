@@ -231,15 +231,6 @@ Description: Windows API implementation - scanner module
  This package contains a TWAIN interface that allows Windows applications
  to communicate with scanners supported by SANE.
 
-Package: libwine-twain
-Section: libs
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: libwine-sane
-Suggests: libwine-gphoto2
-Description: Windows API implementation - empty transitional package
- This is a transitional package to help migrate to the new libwine-sane
- and libwine-gphoto2 packages. It can safely be removed.
-
 Package: wine-utils
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: ${shlibs:Depends}, wine-bin (= ${binary:Version})
