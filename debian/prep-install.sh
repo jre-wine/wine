@@ -1,12 +1,15 @@
 #!/bin/bash
-LIBDIRS="$1"
+SUFFIX="$1"
+LIBDIRS="$2"
 
 function expand_common
 {
-  sed "s,/usr/lib,/usr/$1," debian/$package.install-common > debian/$package.install
+  sed "s,/usr/lib,/usr/$1," debian/$package.install-common | \
+  sed "s,usr/share/doc/$package,&$SUFFIX," \
+   > debian/$package$SUFFIX.install
   shift
   while [ -n "$1" ]; do
-    sed -n "s,/usr/lib,/usr/$1,p" debian/$package.install-common >> debian/$package.install
+    sed -n "s,/usr/lib,/usr/$1,p" debian/$package.install-common >> debian/$package$SUFFIX.install
     shift
   done
 }
@@ -19,12 +22,12 @@ function expand_platform
     return
   fi
   for bin in $(sed "s,/usr/lib,/usr/$1," debian/$package.install-platform); do
-    [ ! -f $bin ] || echo $bin >> debian/$package.install
+    [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.install
   done
   shift
   while [ -n "$1" ]; do
     for bin in $(sed -n "s,/usr/lib,/usr/$1,p" debian/$package.install-platform); do
-      [ ! -f $bin ] || echo $bin >> debian/$package.install
+      [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.install
     done
     shift
   done

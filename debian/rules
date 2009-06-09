@@ -27,6 +27,8 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
+#VERSUFFIX=-unstable
+
 CC=gcc
 LIBDIR=lib
 LIBDIRS=$(LIBDIR)
@@ -62,8 +64,12 @@ endif # x86_64
 
 LOADERS = wine-kthread wine-pthread wine-preloader
 
+control-stamp: debian/control.in
+	bash debian/prep-control.sh "$(VERSUFFIX)"
+	touch control-stamp
+
 configure-ia32: configure-ia32-stamp
-configure-ia32-stamp:
+configure-ia32-stamp: control-stamp
 	dh_testdir
 ifneq (,$(IA32_LIBS))
 	mkdir lib32 || true
@@ -72,7 +78,7 @@ endif
 	touch configure-ia32-stamp
 
 configure-arch32: configure-arch32-stamp
-configure-arch32-stamp: configure-ia32-stamp
+configure-arch32-stamp: configure-ia32-stamp control-stamp
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build32 || true
@@ -94,7 +100,7 @@ endif
 	touch configure-arch32-stamp
 
 configure-arch64: configure-arch64-stamp
-configure-arch64-stamp: configure-ia32-stamp
+configure-arch64-stamp: configure-ia32-stamp control-stamp
 	dh_testdir
 ifeq (,$(DEB_SAVEBUILD))
 	mkdir build64 || true
@@ -116,7 +122,7 @@ endif
 	touch configure-arch64-stamp
 
 build-indep: build-indep-stamp
-build-indep-stamp:
+build-indep-stamp: control-stamp
 	dh_testdir
 
 	touch build-indep-stamp
@@ -128,7 +134,7 @@ build-arch32-stamp: configure-arch32-stamp
 ifeq (,$(DEB_SAVEBUILD))
 	$(MAKE) -C build32 depend
 	# build wine & tools
-	$(MAKE) -C build32
+	$(MAKE) -C build32 $(BUILDOPTS)
 	# build winelib programs
 	$(MAKE) -C build32/programs
 endif
@@ -142,7 +148,7 @@ build-arch64-stamp: configure-arch64-stamp
 ifeq (,$(DEB_SAVEBUILD))
 	$(MAKE) -C build64 depend
 	# build wine & tools
-	$(MAKE) -C build64
+	$(MAKE) -C build64 $(BUILDOPTS)
 	# build winelib programs
 	$(MAKE) -C build64/programs
 endif
@@ -152,7 +158,7 @@ endif
 build-arch: $(patsubst build%,build-arch%,$(BUILDS))
 build: build-indep build-arch
 
-clean-arch32:
+clean-arch32: control-stamp
 	dh_testdir
 	rm -f install-arch32-stamp build-arch32-stamp configure-arch32-stamp
 #	-$(MAKE) -C build32 distclean
@@ -162,7 +168,7 @@ else
 	mv build32 /tmp || true
 endif
 
-clean-arch64:
+clean-arch64: control-stamp
 	dh_testdir
 	rm -f install-arch64-stamp build-arch64-stamp configure-arch64-stamp
 #	-$(MAKE) -C build64 distclean
@@ -175,10 +181,11 @@ endif
 clean: clean-arch32 clean-arch64
 	dh_testdir
 	dh_testroot
-	bash debian/clean-install.sh
-	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp
+	bash debian/clean-install.sh "$(VERSUFFIX)"
+	rm -f install-arch-stamp build-indep-stamp configure-ia32-stamp control-stamp
 	rm -rf lib32
 	dh_clean
+	# can't rm debian/control here because it'd break dpkg-buildpackage.
 
 install-indep: build-indep
 	dh_testdir
@@ -275,24 +282,24 @@ binary-arch: install-arch-stamp
 	dh_installdirs -s
 
 	# create usr/share/doc symlinks
-	bash debian/doclink.sh libwine
+	bash debian/doclink.sh libwine$(VERSUFFIX)
 
 	# prepare <packagename>.install files
-	bash debian/prep-install.sh "$(LIBDIRS)"
+	bash debian/prep-install.sh "$(VERSUFFIX)" "$(LIBDIRS)"
 
 	# distribute files into debian/<packagename>
 	# according to the <packagename>.install files
 	dh_install -s --list-missing
 
 	# patch marlett.ttf due to fontforge bug #458234
-	#mensis -script debian/marlett.mensis debian/libwine/usr/share/wine/fonts/marlett.ttf
-	#rm -f debian/libwine/usr/share/wine/fonts/marlett.ttf~
+	#mensis -script debian/marlett.mensis debian/libwine$(VERSUFFIX)/usr/share/wine/fonts/marlett.ttf
+	#rm -f debian/libwine$(VERSUFFIX)/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
-	bash debian/split.sh libwine $(patsubst %,usr/%/wine,$(LIBDIRS))
+	bash debian/split.sh "$(VERSUFFIX)" libwine $(patsubst %,usr/%/wine,$(LIBDIRS))
 
-	dh_installdocs -plibwine
-	dh_installchangelogs -plibwine
+	dh_installdocs -plibwine$(VERSUFFIX)
+	dh_installchangelogs -plibwine$(VERSUFFIX)
 
 	dh_installman -s
 #	dh_installmenu -s
@@ -305,14 +312,14 @@ binary-arch: install-arch-stamp
 	# so objcopy barfs on several Wine binaries.
 	# I'll just have to exclude them here, I guess.
 	# (They're pretty small ones anyway...)
-	dh_strip -s --dbg-package=libwine-dbg \
+	dh_strip -s --dbg-package=libwine-dbg$(VERSUFFIX) \
 	 -Xwine-kthread -Xwine-pthread -Xwine-preloader
 
 	# We don't need symbols for the build tools...
-	rm -rf debian/libwine-dbg/usr/lib/debug/usr/bin
+	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
 	# debhelper 6 has dh_lintian, but I don't want to depend on it yet...
-	install -D -m 644 debian/libwine.lintian-overrides debian/libwine/usr/share/lintian/overrides/libwine
+	install -D -m 644 debian/libwine.lintian-overrides debian/libwine$(VERSUFFIX)/usr/share/lintian/overrides/libwine$(VERSUFFIX)
 
 	dh_desktop -s
 
@@ -320,11 +327,11 @@ binary-arch: install-arch-stamp
 	dh_fixperms -s
 
 	# tight libwine dependencies for packages built here
-	dh_makeshlibs -plibwine -n -V "libwine (= $(VERSION))"
+	dh_makeshlibs -plibwine$(VERSUFFIX) -n -V "libwine$(VERSUFFIX) (= $(VERSION))"
 
-	bash debian/gendeps.sh $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine -ldebian/libwine/usr/lib
-	bash debian/cleandeps.sh
+	bash debian/gendeps.sh "$(VERSUFFIX)" $(patsubst build%,%,$(BUILDS))
+	dh_shlibdeps -s -Llibwine$(VERSUFFIX) -ldebian/libwine$(VERSUFFIX)/usr/lib
+	bash debian/cleandeps.sh "$(VERSUFFIX)"
 
 	# relaxed libwine dependencies for everyone else
 	dh_makeshlibs -s
