@@ -220,7 +220,7 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
             {
                 WARN("loadBaseVertexIndex is < 0 (%d), not using vbos\n", This->stateBlock->loadBaseVertexIndex);
                 buffer_object = 0;
-                data = ((struct wined3d_buffer *)This->stateBlock->streamSource[element->input_slot])->resource.allocatedMemory;
+                data = buffer_get_sysmem((struct wined3d_buffer *)This->stateBlock->streamSource[element->input_slot]);
                 if ((UINT_PTR)data < -This->stateBlock->loadBaseVertexIndex * stride)
                 {
                     FIXME("System memory vertex data load offset is negative!\n");
@@ -2344,7 +2344,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexShader(IWineD3DDevice *ifac
 
     object->lpVtbl = &IWineD3DVertexShader_Vtbl;
     object->parent = parent;
-    shader_init(&object->baseShader, iface, IWineD3DVertexShaderImpl_shader_ins);
+    shader_init(&object->baseShader, iface);
     list_add_head(&This->shaders, &object->baseShader.shader_list_entry);
     *ppVertexShader = (IWineD3DVertexShader *)object;
 
@@ -2383,7 +2383,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreatePixelShader(IWineD3DDevice *iface
 
     object->lpVtbl = &IWineD3DPixelShader_Vtbl;
     object->parent = parent;
-    shader_init(&object->baseShader, iface, IWineD3DPixelShaderImpl_shader_ins);
+    shader_init(&object->baseShader, iface);
     list_add_head(&This->shaders, &object->baseShader.shader_list_entry);
     *ppPixelShader = (IWineD3DPixelShader *)object;
 
@@ -4208,12 +4208,13 @@ static void device_map_fixed_function_samplers(IWineD3DDeviceImpl *This) {
 }
 
 static void device_map_psamplers(IWineD3DDeviceImpl *This) {
-    const DWORD *sampler_tokens =
-            ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.reg_maps.samplers;
+    const WINED3DSAMPLER_TEXTURE_TYPE *sampler_type =
+            ((IWineD3DPixelShaderImpl *)This->stateBlock->pixelShader)->baseShader.reg_maps.sampler_type;
     unsigned int i;
 
     for (i = 0; i < MAX_FRAGMENT_SAMPLERS; ++i) {
-        if (sampler_tokens[i] && This->texUnitMap[i] != i) {
+        if (sampler_type[i] && This->texUnitMap[i] != i)
+        {
             device_map_stage(This, i, i);
             IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(i));
             if (i < MAX_TEXTURES) {
@@ -4250,9 +4251,9 @@ static BOOL device_unit_free_for_vs(IWineD3DDeviceImpl *This, const DWORD *pshad
 }
 
 static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
-    const DWORD *vshader_sampler_tokens =
-            ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.reg_maps.samplers;
-    const DWORD *pshader_sampler_tokens = NULL;
+    const WINED3DSAMPLER_TEXTURE_TYPE *vshader_sampler_type =
+            ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.reg_maps.sampler_type;
+    const WINED3DSAMPLER_TEXTURE_TYPE *pshader_sampler_type = NULL;
     int start = GL_LIMITS(combined_samplers) - 1;
     int i;
 
@@ -4261,12 +4262,13 @@ static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
 
         /* Note that we only care if a sampler is sampled or not, not the sampler's specific type.
          * Otherwise we'd need to call shader_update_samplers() here for 1.x pixelshaders. */
-        pshader_sampler_tokens = pshader->baseShader.reg_maps.samplers;
+        pshader_sampler_type = pshader->baseShader.reg_maps.sampler_type;
     }
 
     for (i = 0; i < MAX_VERTEX_SAMPLERS; ++i) {
         int vsampler_idx = i + MAX_FRAGMENT_SAMPLERS;
-        if (vshader_sampler_tokens[i]) {
+        if (vshader_sampler_type[i])
+        {
             if (This->texUnitMap[vsampler_idx] != WINED3D_UNMAPPED_STAGE)
             {
                 /* Already mapped somewhere */
@@ -4274,7 +4276,8 @@ static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
             }
 
             while (start >= 0) {
-                if (device_unit_free_for_vs(This, pshader_sampler_tokens, vshader_sampler_tokens, start)) {
+                if (device_unit_free_for_vs(This, pshader_sampler_type, vshader_sampler_type, start))
+                {
                     device_map_stage(This, vsampler_idx, start);
                     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(vsampler_idx));
 
@@ -4531,27 +4534,7 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
     ENTER_GL();
 
     if (dest->resource.allocatedMemory == NULL) {
-        /* This may happen if we do direct locking into a vbo. Unlikely,
-         * but theoretically possible(ddraw processvertices test)
-         */
-        dest->resource.allocatedMemory = HeapAlloc(GetProcessHeap(), 0, dest->resource.size);
-        if(!dest->resource.allocatedMemory) {
-            LEAVE_GL();
-            ERR("Out of memory\n");
-            return E_OUTOFMEMORY;
-        }
-        if (dest->buffer_object)
-        {
-            const void *src;
-            GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, dest->buffer_object));
-            checkGLcall("glBindBufferARB");
-            src = GL_EXTCALL(glMapBufferARB(GL_ARRAY_BUFFER_ARB, GL_READ_ONLY_ARB));
-            if(src) {
-                memcpy(dest->resource.allocatedMemory, src, dest->resource.size);
-            }
-            GL_EXTCALL(glUnmapBufferARB(GL_ARRAY_BUFFER_ARB));
-            checkGLcall("glUnmapBufferARB");
-        }
+        buffer_get_sysmem(dest);
     }
 
     /* Get a pointer into the destination vbo(create one if none exists) and

@@ -26,9 +26,10 @@
 #include "wine/test.h"
 #include "msg.h"
 
-#define PARENT_SEQ_INDEX    0
-#define LISTVIEW_SEQ_INDEX  1
-#define NUM_MSG_SEQUENCES   2
+#define PARENT_SEQ_INDEX       0
+#define PARENT_FULL_SEQ_INDEX  1
+#define LISTVIEW_SEQ_INDEX     2
+#define NUM_MSG_SEQUENCES      3
 
 #define LISTVIEW_ID 0
 #define HEADER_ID   1
@@ -158,6 +159,15 @@ static const struct message listview_getorderarray_seq[] = {
     { 0 }
 };
 
+static const struct message empty_seq[] = {
+    { 0 }
+};
+
+static const struct message forward_erasebkgnd_parent_seq[] = {
+    { WM_ERASEBKGND, sent },
+    { 0 }
+};
+
 struct subclass_info
 {
     WNDPROC oldproc;
@@ -168,6 +178,12 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
+
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    if (defwndproc_counter) msg.flags |= defwinproc;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
 
     /* log system messages, except for painting */
     if (message < WM_USER &&
@@ -181,13 +197,9 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     {
         trace("parent: %p, %04x, %08lx, %08lx\n", hwnd, message, wParam, lParam);
 
-        msg.message = message;
-        msg.flags = sent|wparam|lparam;
-        if (defwndproc_counter) msg.flags |= defwinproc;
-        msg.wParam = wParam;
-        msg.lParam = lParam;
         add_message(sequences, PARENT_SEQ_INDEX, &msg);
     }
+    add_message(sequences, PARENT_FULL_SEQ_INDEX, &msg);
 
     defwndproc_counter++;
     ret = DefWindowProcA(hwnd, message, wParam, lParam);
@@ -801,6 +813,20 @@ static void test_items(void)
     ok(r != 0, "ret %d\n", r);
     todo_wine ok(item.state == LVIS_DROPHILITED, "got state %x, expected %x\n", item.state, LVIS_DROPHILITED);
 
+    /* some notnull but meaningless masks */
+    memset (&item, 0, sizeof(item));
+    item.mask = LVIF_NORECOMPUTE;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+    memset (&item, 0, sizeof(item));
+    item.mask = LVIF_DI_SETITEM;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    ok(r != 0, "ret %d\n", r);
+
     DestroyWindow(hwnd);
 }
 
@@ -1002,12 +1028,20 @@ static void test_create(void)
     /* setting LVS_EX_HEADERDRAGDROP creates header */
     hList = CreateWindow("SysListView32", "Test", LVS_REPORT, 0, 0, 100, 100, NULL, NULL,
                           GetModuleHandle(NULL), 0);
+    hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
     ok(!IsWindow(hHeader), "Header shouldn't be created\n");
     ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
     SendMessage(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_HEADERDRAGDROP);
     hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
     ok(IsWindow(hHeader), "Header should be created\n");
     ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
+    DestroyWindow(hList);
+
+    /* not report style accepts LVS_EX_HEADERDRAGDROP too */
+    hList = create_custom_listview_control(0);
+    SendMessage(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_HEADERDRAGDROP);
+    r = SendMessage(hList, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+    ok(r & LVS_EX_HEADERDRAGDROP, "Expected LVS_EX_HEADERDRAGDROP to be set\n");
     DestroyWindow(hList);
 
     /* requesting header info with LVM_GETSUBITEMRECT doesn't create it */
@@ -1032,6 +1066,9 @@ static void test_create(void)
 static void test_redraw(void)
 {
     HWND hwnd, hwndheader;
+    HDC hdc;
+    BOOL res;
+    DWORD r;
 
     hwnd = create_listview_control(0);
     hwndheader = subclass_header(hwnd);
@@ -1044,6 +1081,51 @@ static void test_redraw(void)
     ok_sequence(sequences, LISTVIEW_SEQ_INDEX, redraw_listview_seq, "redraw listview", FALSE);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    /* forward WM_ERASEBKGND to parent on CLR_NONE background color */
+    /* 1. Without backbuffer */
+    res = ListView_SetBkColor(hwnd, CLR_NONE);
+    expect(TRUE, res);
+
+    hdc = GetWindowDC(hwndparent);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessageA(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    ok(r != 0, "Expected not zero result\n");
+    ok_sequence(sequences, PARENT_FULL_SEQ_INDEX, forward_erasebkgnd_parent_seq,
+                "forward WM_ERASEBKGND on CLR_NONE", FALSE);
+
+    res = ListView_SetBkColor(hwnd, CLR_DEFAULT);
+    expect(TRUE, res);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessageA(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    ok(r != 0, "Expected not zero result\n");
+    ok_sequence(sequences, PARENT_FULL_SEQ_INDEX, empty_seq,
+                "don't forward WM_ERASEBKGND on non-CLR_NONE", FALSE);
+
+    /* 2. With backbuffer */
+    SendMessageA(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_DOUBLEBUFFER,
+                                                     LVS_EX_DOUBLEBUFFER);
+    res = ListView_SetBkColor(hwnd, CLR_NONE);
+    expect(TRUE, res);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessageA(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    ok(r != 0, "Expected not zero result\n");
+    ok_sequence(sequences, PARENT_FULL_SEQ_INDEX, forward_erasebkgnd_parent_seq,
+                "forward WM_ERASEBKGND on CLR_NONE", FALSE);
+
+    res = ListView_SetBkColor(hwnd, CLR_DEFAULT);
+    expect(TRUE, res);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessageA(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    todo_wine ok(r != 0, "Expected not zero result\n");
+    ok_sequence(sequences, PARENT_FULL_SEQ_INDEX, empty_seq,
+                "don't forward WM_ERASEBKGND on non-CLR_NONE", FALSE);
+
+    ReleaseDC(hwndparent, hdc);
 
     DestroyWindow(hwnd);
 }
@@ -1611,7 +1693,7 @@ static void test_sorting(void)
     LVITEMA item = {0};
     DWORD r;
     LONG_PTR style;
-    static CHAR names[][4] = {"A", "B", "C", "D"};
+    static CHAR names[][5] = {"A", "B", "C", "D", "0"};
     CHAR buff[10];
 
     hwnd = create_listview_control(0);
@@ -1726,19 +1808,56 @@ static void test_sorting(void)
     item.cchTextMax = sizeof(buff);
     r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
     expect(TRUE, r);
-    todo_wine ok(lstrcmp(buff, names[1]) == 0, "Expected '%s', got '%s'\n", names[1], buff);
+    ok(lstrcmp(buff, names[1]) == 0, "Expected '%s', got '%s'\n", names[1], buff);
 
     item.iItem = 1;
     r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
     expect(TRUE, r);
-    todo_wine ok(lstrcmp(buff, names[2]) == 0, "Expected '%s', got '%s'\n", names[2], buff);
+    ok(lstrcmp(buff, names[2]) == 0, "Expected '%s', got '%s'\n", names[2], buff);
 
     item.iItem = 2;
     r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
     expect(TRUE, r);
-    todo_wine ok(lstrcmp(buff, names[0]) == 0, "Expected '%s', got '%s'\n", names[0], buff);
+    ok(lstrcmp(buff, names[0]) == 0, "Expected '%s', got '%s'\n", names[0], buff);
 
     item.iItem = 3;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    expect(TRUE, r);
+    ok(lstrcmp(buff, names[3]) == 0, "Expected '%s', got '%s'\n", names[3], buff);
+
+    /* corner case - item should be placed at first position */
+    item.mask = LVIF_TEXT;
+    item.iItem = 4;
+    item.iSubItem = 0;
+    item.pszText = names[4];
+    r = SendMessage(hwnd, LVM_INSERTITEM, 0, (LPARAM) &item);
+    expect(0, r);
+
+    item.iItem = 0;
+    item.pszText = buff;
+    item.cchTextMax = sizeof(buff);
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    expect(TRUE, r);
+    ok(lstrcmp(buff, names[4]) == 0, "Expected '%s', got '%s'\n", names[4], buff);
+
+    item.iItem = 1;
+    item.pszText = buff;
+    item.cchTextMax = sizeof(buff);
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    expect(TRUE, r);
+    ok(lstrcmp(buff, names[1]) == 0, "Expected '%s', got '%s'\n", names[1], buff);
+
+    item.iItem = 2;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    expect(TRUE, r);
+    ok(lstrcmp(buff, names[2]) == 0, "Expected '%s', got '%s'\n", names[2], buff);
+
+    item.iItem = 3;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
+    expect(TRUE, r);
+    ok(lstrcmp(buff, names[0]) == 0, "Expected '%s', got '%s'\n", names[0], buff);
+
+    item.iItem = 4;
     r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM) &item);
     expect(TRUE, r);
     ok(lstrcmp(buff, names[3]) == 0, "Expected '%s', got '%s'\n", names[3], buff);
@@ -1835,6 +1954,120 @@ static void test_ownerdata(void)
     DestroyWindow(hwnd);
 }
 
+static void test_norecompute(void)
+{
+    static CHAR testA[] = "test";
+    CHAR buff[10];
+    LVITEMA item;
+    HWND hwnd;
+    DWORD res;
+
+    /* self containing control */
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    memset(&item, 0, sizeof(item));
+    item.mask = LVIF_TEXT | LVIF_STATE;
+    item.iItem = 0;
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    item.pszText   = testA;
+    res = SendMessageA(hwnd, LVM_INSERTITEM, 0, (LPARAM)&item);
+    expect(0, res);
+    /* retrieve with LVIF_NORECOMPUTE */
+    item.mask  = LVIF_TEXT | LVIF_NORECOMPUTE;
+    item.iItem = 0;
+    item.pszText    = buff;
+    item.cchTextMax = sizeof(buff)/sizeof(CHAR);
+    res = SendMessageA(hwnd, LVM_GETITEM, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    ok(lstrcmp(buff, testA) == 0, "Expected (%s), got (%s)\n", testA, buff);
+
+    item.mask = LVIF_TEXT;
+    item.iItem = 1;
+    item.pszText = LPSTR_TEXTCALLBACK;
+    res = SendMessageA(hwnd, LVM_INSERTITEM, 0, (LPARAM)&item);
+    expect(1, res);
+
+    item.mask  = LVIF_TEXT | LVIF_NORECOMPUTE;
+    item.iItem = 1;
+    item.pszText    = buff;
+    item.cchTextMax = sizeof(buff)/sizeof(CHAR);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    res = SendMessageA(hwnd, LVM_GETITEM, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    ok(item.pszText == LPSTR_TEXTCALLBACK, "Expected (%p), got (%p)\n",
+       LPSTR_TEXTCALLBACK, (VOID*)item.pszText);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq, "retrieve with LVIF_NORECOMPUTE seq", FALSE);
+
+    DestroyWindow(hwnd);
+
+    /* LVS_OWNERDATA */
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    item.mask = LVIF_STATE;
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    item.iItem = 0;
+    res = SendMessageA(hwnd, LVM_INSERTITEM, 0, (LPARAM)&item);
+    expect(0, res);
+
+    item.mask  = LVIF_TEXT | LVIF_NORECOMPUTE;
+    item.iItem = 0;
+    item.pszText    = buff;
+    item.cchTextMax = sizeof(buff)/sizeof(CHAR);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    res = SendMessageA(hwnd, LVM_GETITEM, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    ok(item.pszText == LPSTR_TEXTCALLBACK, "Expected (%p), got (%p)\n",
+       LPSTR_TEXTCALLBACK, (VOID*)item.pszText);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq, "retrieve with LVIF_NORECOMPUTE seq 2", FALSE);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_nosortheader(void)
+{
+    HWND hwnd, header;
+    LONG_PTR style;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    header = (HWND)SendMessageA(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "header expected\n");
+
+    style = GetWindowLongPtr(header, GWL_STYLE);
+    ok(style & HDS_BUTTONS, "expected header to have HDS_BUTTONS\n");
+
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    SetWindowLongPtr(hwnd, GWL_STYLE, style | LVS_NOSORTHEADER);
+    /* HDS_BUTTONS retained */
+    style = GetWindowLongPtr(header, GWL_STYLE);
+    ok(style & HDS_BUTTONS, "expected header to retain HDS_BUTTONS\n");
+
+    DestroyWindow(hwnd);
+
+    /* create with LVS_NOSORTHEADER */
+    hwnd = create_listview_control(LVS_NOSORTHEADER);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    header = (HWND)SendMessageA(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "header expected\n");
+
+    style = GetWindowLongPtr(header, GWL_STYLE);
+    ok(!(style & HDS_BUTTONS), "expected header to have no HDS_BUTTONS\n");
+
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    SetWindowLongPtr(hwnd, GWL_STYLE, style & ~LVS_NOSORTHEADER);
+    /* not changed here */
+    style = GetWindowLongPtr(header, GWL_STYLE);
+    ok(!(style & HDS_BUTTONS), "expected header to have no HDS_BUTTONS\n");
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -1875,4 +2108,6 @@ START_TEST(listview)
     test_subitem_rect();
     test_sorting();
     test_ownerdata();
+    test_norecompute();
+    test_nosortheader();
 }

@@ -298,7 +298,7 @@
 @ stub ExtractIconResInfoA
 @ stub ExtractIconResInfoW
 @ stdcall ExtractIconW(long wstr long)
-@ stub ExtractVersionResource16W
+@ stdcall ExtractVersionResource16W(wstr long)
 @ stub FindExeDlgProc
 @ stdcall FindExecutableA(str str ptr)
 @ stdcall FindExecutableW(wstr wstr ptr)
@@ -373,6 +373,7 @@
 @ stdcall SHIsFileAvailableOffline(wstr ptr)
 @ stdcall SHLoadInProc(long)
 @ stdcall SHLoadNonloadedIconOverlayIdentifiers()
+@ stdcall SHParseDisplayName(wstr ptr ptr long ptr)
 @ stdcall SHPathPrepareForWriteA(long ptr str long)
 @ stdcall SHPathPrepareForWriteW(long ptr wstr long)
 @ stdcall SHQueryRecycleBinA(str ptr)

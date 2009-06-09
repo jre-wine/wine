@@ -55,6 +55,10 @@
         ok ( cond tmp, msg, GetCurrentThreadId(), err); \
    } while (0);
 
+/* Function pointers */
+static void   (WINAPI  *pFreeAddrInfoW)(PADDRINFOW) = 0;
+static int    (WINAPI  *pGetAddrInfoW)(LPCWSTR,LPCWSTR,const ADDRINFOW *,PADDRINFOW *) = 0;
+static PCSTR  (WINAPI  *pInetNtop)(INT,LPVOID,LPSTR,ULONG) = 0;
 
 /**************** Structs and typedefs ***************/
 
@@ -832,12 +836,48 @@ out:
     client_stop ();
 }
 
+/* Tests for WSAStartup */
+
+/* This should fail. WSAStartup should be called before any network function is used. */
+static void test_WithoutWSAStartup(void)
+{
+    LPVOID ptr;
+
+    WSASetLastError(0xdeadbeef);
+    ptr = gethostbyname("localhost");
+
+    todo_wine ok(ptr == NULL, "gethostbyname() succeeded unexpectedly: %d\n", WSAGetLastError());
+    todo_wine ok(WSAGetLastError() == WSANOTINITIALISED, "gethostbyname() failed with unexpected error: %d\n",
+                WSAGetLastError());
+}
+
+static void test_WithWSAStartup(void)
+{
+    WSADATA data;
+    WORD version = MAKEWORD( 2, 2 );
+    INT res;
+    LPVOID ptr;
+
+    res = WSAStartup( version, &data );
+    ok(res == 0, "WSAStartup() failed unexpectedly: %d\n", res);
+
+    ptr = gethostbyname("localhost");
+    ok(ptr != NULL, "gethostbyname() failed unexpectedly: %d\n", WSAGetLastError());
+
+    WSACleanup();
+}
+
 /**************** Main program utility functions ***************/
 
 static void Init (void)
 {
     WORD ver = MAKEWORD (2, 2);
     WSADATA data;
+    HMODULE hws2_32 = GetModuleHandle("ws2_32.dll");
+
+    pFreeAddrInfoW = (void *)GetProcAddress(hws2_32, "FreeAddrInfoW");
+    pGetAddrInfoW = (void *)GetProcAddress(hws2_32, "GetAddrInfoW");
+    pInetNtop = (void *)GetProcAddress(hws2_32, "inet_ntop");
 
     ok ( WSAStartup ( ver, &data ) == 0, "WSAStartup failed\n" );
     tls = TlsAlloc();
@@ -1263,6 +1303,7 @@ static void test_WSASocket(void)
 
 static void test_WSAAddressToStringA(void)
 {
+    SOCKET v6 = INVALID_SOCKET;
     INT ret;
     DWORD len;
     int GLE;
@@ -1273,6 +1314,19 @@ static void test_WSAAddressToStringA(void)
     CHAR expect2[] = "255.255.255.255";
     CHAR expect3[] = "0.0.0.0:65535";
     CHAR expect4[] = "255.255.255.255:65535";
+
+    SOCKADDR_IN6 sockaddr6;
+    CHAR address6[54]; /* 32 digits + 7':' + '[' + '%" + 5 digits + ']:' + 5 digits + '\0' */
+
+    CHAR addr6_1[] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01};
+    CHAR addr6_2[] = {0x20,0xab,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01};
+    CHAR addr6_3[] = {0x20,0xab,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x20,0x01};
+
+    CHAR expect6_1[] = "::1";
+    CHAR expect6_2[] = "20ab::1";
+    CHAR expect6_3[] = "[20ab::2001]:33274";
+    CHAR expect6_3_2[] = "[20ab::2001%4660]:33274";
+    CHAR expect6_3_3[] = "20ab::2001%4660";
 
     len = 0;
 
@@ -1331,6 +1385,91 @@ static void test_WSAAddressToStringA(void)
 
     ok( !strcmp( address, expect4 ), "Expected: %s, got: %s\n", expect4, address );
     ok( len == sizeof( expect4 ), "Got size %d\n", len);
+
+    /*check to see it IPv6 is available */
+    v6 = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
+    if (v6 == INVALID_SOCKET) {
+        skip("Could not create IPv6 socket (LastError: %d; %d expected if IPv6 not available).\n",
+            WSAGetLastError(), WSAEAFNOSUPPORT);
+        goto end;
+    }
+    /* Test a short IPv6 address */
+    len = sizeof(address6);
+
+    sockaddr6.sin6_family = AF_INET6;
+    sockaddr6.sin6_port = 0x0000;
+    sockaddr6.sin6_scope_id = 0;
+    memcpy (sockaddr6.sin6_addr.s6_addr, addr6_1, sizeof(addr6_1));
+
+    ret = WSAAddressToStringA( (SOCKADDR*)&sockaddr6, sizeof(sockaddr6), NULL, address6, &len );
+    ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
+    ok( !strcmp( address6, expect6_1 ), "Expected: %s, got: %s\n", expect6_1, address6 );
+    ok( len == sizeof(expect6_1), "Got size %d\n", len);
+
+    /* Test a longer IPv6 address */
+    len = sizeof(address6);
+
+    sockaddr6.sin6_family = AF_INET6;
+    sockaddr6.sin6_port = 0x0000;
+    sockaddr6.sin6_scope_id = 0;
+    memcpy (sockaddr6.sin6_addr.s6_addr, addr6_2, sizeof(addr6_2));
+
+    ret = WSAAddressToStringA( (SOCKADDR*)&sockaddr6, sizeof(sockaddr6), NULL, address6, &len );
+    ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
+    ok( !strcmp( address6, expect6_2 ), "Expected: %s, got: %s\n", expect6_2, address6 );
+    ok( len == sizeof(expect6_2), "Got size %d\n", len);
+
+    /* Test IPv6 address and port number */
+    len = sizeof(address6);
+
+    sockaddr6.sin6_family = AF_INET6;
+    sockaddr6.sin6_port = 0xfa81;
+    sockaddr6.sin6_scope_id = 0;
+    memcpy (sockaddr6.sin6_addr.s6_addr, addr6_3, sizeof(addr6_3));
+
+    ret = WSAAddressToStringA( (SOCKADDR*)&sockaddr6, sizeof(sockaddr6), NULL, address6, &len );
+    ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
+  todo_wine
+  {
+    ok( !strcmp( address6, expect6_3 ), "Expected: %s, got: %s\n", expect6_3, address6 );
+    ok( len == sizeof(expect6_3), "Got size %d\n", len);
+  }
+
+    /* Test IPv6 address, port number and scope_id */
+    len = sizeof(address6);
+
+    sockaddr6.sin6_family = AF_INET6;
+    sockaddr6.sin6_port = 0xfa81;
+    sockaddr6.sin6_scope_id = 0x1234;
+    memcpy (sockaddr6.sin6_addr.s6_addr, addr6_3, sizeof(addr6_3));
+
+    ret = WSAAddressToStringA( (SOCKADDR*)&sockaddr6, sizeof(sockaddr6), NULL, address6, &len );
+    ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
+  todo_wine
+  {
+    ok( !strcmp( address6, expect6_3_2 ), "Expected: %s, got: %s\n", expect6_3_2, address6 );
+    ok( len == sizeof(expect6_3_2), "Got size %d\n", len);
+  }
+
+    /* Test IPv6 address and scope_id */
+    len = sizeof(address6);
+
+    sockaddr6.sin6_family = AF_INET6;
+    sockaddr6.sin6_port = 0x0000;
+    sockaddr6.sin6_scope_id = 0x1234;
+    memcpy (sockaddr6.sin6_addr.s6_addr, addr6_3, sizeof(addr6_3));
+
+    ret = WSAAddressToStringA( (SOCKADDR*)&sockaddr6, sizeof(sockaddr6), NULL, address6, &len );
+    ok( !ret, "WSAAddressToStringA() failed unexpectedly: %d\n", WSAGetLastError() );
+  todo_wine
+  {
+    ok( !strcmp( address6, expect6_3_3 ), "Expected: %s, got: %s\n", expect6_3_3, address6 );
+    ok( len == sizeof(expect6_3_3), "Got size %d\n", len);
+  }
+
+end:
+    if (v6 != INVALID_SOCKET)
+        closesocket(v6);
 }
 
 static void test_WSAAddressToStringW(void)
@@ -1996,6 +2135,64 @@ static void test_inet_addr(void)
     ok(addr == INADDR_NONE, "inet_addr succeeded unexpectedly\n");
 }
 
+static void test_addr_to_print(void)
+{
+    char dst[16];
+    char dst6[64];
+    const char * pdst;
+    struct in_addr in;
+    struct in6_addr in6;
+
+    u_long addr0_Num = 0x00000000;
+    PCSTR addr0_Str = "0.0.0.0";
+    u_long addr1_Num = 0x20201015;
+    PCSTR addr1_Str = "21.16.32.32";
+    u_char addr2_Num[16] = {0,0,0,0,0,0,0,0,0,0,0xff,0xfe,0xcC,0x98,0xbd,0x74};
+    PCSTR addr2_Str = "::fffe:cc98:bd74";
+    u_char addr3_Num[16] = {0x20,0x30,0xa4,0xb1};
+    PCSTR addr3_Str = "2030:a4b1::";
+
+    in.s_addr = addr0_Num;
+
+    pdst = inet_ntoa(*((struct in_addr*)&in.s_addr));
+    ok(pdst != NULL, "inet_ntoa failed %s\n", dst);
+    ok(!strcmp(pdst, addr0_Str),"Address %s != %s\n", pdst, addr0_Str);
+
+    /* Test that inet_ntoa and inet_ntop return the same value */
+    in.S_un.S_addr = addr1_Num;
+    pdst = inet_ntoa(*((struct in_addr*)&in.s_addr));
+    ok(pdst != NULL, "inet_ntoa failed %s\n", dst);
+    ok(!strcmp(pdst, addr1_Str),"Address %s != %s\n", pdst, addr1_Str);
+
+    /* InetNtop became available in Vista and Win2008 */
+    if (!pInetNtop)
+    {
+        win_skip("InetNtop not present, not executing tests\n");
+        return;
+    }
+
+    pdst = pInetNtop(AF_INET,(void*)&in.s_addr, dst, sizeof(dst));
+    ok(pdst != NULL, "InetNtop failed %s\n", dst);
+    ok(!strcmp(pdst, addr1_Str),"Address %s != %s\n", pdst, addr1_Str);
+
+    /* Test invalid parm conditions */
+    pdst = pInetNtop(1, (void*)&in.s_addr, dst, sizeof(dst));
+    ok(pdst == NULL, "The pointer should not be returned (%p)\n", pdst);
+    ok(WSAGetLastError() == WSAEAFNOSUPPORT, "Should be WSAEAFNOSUPPORT\n");
+
+    /* Test an zero prefixed IPV6 address */
+    memcpy(in6.u.Byte, addr2_Num, sizeof(addr2_Num));
+    pdst = pInetNtop(AF_INET6,(void*)&in6.s6_addr, dst6, sizeof(dst6));
+    ok(pdst != NULL, "InetNtop failed %s\n", dst6);
+    ok(!strcmp(pdst, addr2_Str),"Address %s != %s\n", pdst, addr2_Str);
+
+    /* Test an zero suffixed IPV6 address */
+    memcpy(in6.s6_addr, addr3_Num, sizeof(addr3_Num));
+    pdst = pInetNtop(AF_INET6,(void*)&in6.s6_addr, dst6, sizeof(dst6));
+    ok(pdst != NULL, "InetNtop failed %s\n", dst6);
+    ok(!strcmp(pdst, addr3_Str),"Address %s != %s\n", pdst, addr3_Str);
+}
+
 static void test_ioctlsocket(void)
 {
     SOCKET sock;
@@ -2310,11 +2507,49 @@ static void test_WSASendTo(void)
             "a successful call to WSASendTo()\n");
 }
 
+static void test_GetAddrInfoW(void)
+{
+    static const WCHAR port[] = {'8','0',0};
+    static const WCHAR localhost[] = {'l','o','c','a','l','h','o','s','t',0};
+
+    int ret;
+    ADDRINFOW *result, hint;
+
+    if (!pGetAddrInfoW || !pFreeAddrInfoW)
+    {
+        win_skip("GetAddrInfoW and/or FreeAddrInfoW not present\n");
+        return;
+    }
+
+    memset(&hint, 0, sizeof(ADDRINFOW));
+
+    ret = pGetAddrInfoW(NULL, NULL, NULL, &result);
+    ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+
+    ret = pGetAddrInfoW(localhost, NULL, NULL, &result);
+    ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    pFreeAddrInfoW(result);
+
+    ret = pGetAddrInfoW(localhost, port, NULL, &result);
+    ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    pFreeAddrInfoW(result);
+
+    ret = pGetAddrInfoW(localhost, port, &hint, &result);
+    ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    pFreeAddrInfoW(result);
+}
+
 /**************** Main program  ***************/
 
 START_TEST( sock )
 {
     int i;
+
+/* Leave these tests at the beginning. They depend on WSAStartup not having been
+ * called, which is done by Init() below. */
+    test_WithoutWSAStartup();
+    test_WithWSAStartup();
+
     Init();
 
     test_set_getsockopt();
@@ -2343,6 +2578,7 @@ START_TEST( sock )
     test_accept();
     test_getsockname();
     test_inet_addr();
+    test_addr_to_print();
     test_ioctlsocket();
     test_dns();
     test_gethostbyname_hack();
@@ -2353,6 +2589,7 @@ START_TEST( sock )
     test_WSASendTo();
 
     test_ipv6only();
+    test_GetAddrInfoW();
 
     Exit();
 }

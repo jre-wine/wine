@@ -177,9 +177,9 @@ static void test_UnregisterCategory(void)
 {
     HRESULT hr;
     hr = ITfCategoryMgr_UnregisterCategory(g_cm, &CLSID_FakeService, &GUID_TFCAT_TIP_KEYBOARD, &CLSID_FakeService);
-    todo_wine ok(SUCCEEDED(hr),"ITfCategoryMgr_UnregisterCategory failed\n");
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_UnregisterCategory failed\n");
     hr = ITfCategoryMgr_UnregisterCategory(g_cm, &CLSID_FakeService, &GUID_TFCAT_DISPLAYATTRIBUTEPROVIDER, &CLSID_FakeService);
-    todo_wine ok(SUCCEEDED(hr),"ITfCategoryMgr_UnregisterCategory failed\n");
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_UnregisterCategory failed\n");
 }
 
 static void test_FindClosestCategory(void)
@@ -409,28 +409,28 @@ static void test_KeystrokeMgr(void)
     todo_wine ok(test_KEV_OnSetFocus == SINK_FIRED, "KeyEventSink_OnSetFocus not fired as expected\n");
 
     hr =ITfKeystrokeMgr_PreserveKey(keymgr, 0, &CLSID_PreservedKey, &tfpk, NULL, 0);
-    todo_wine ok(hr==E_INVALIDARG,"ITfKeystrokeMgr_PreserveKey inproperly succeeded\n");
+    ok(hr==E_INVALIDARG,"ITfKeystrokeMgr_PreserveKey inproperly succeeded\n");
 
     hr =ITfKeystrokeMgr_PreserveKey(keymgr, tid, &CLSID_PreservedKey, &tfpk, NULL, 0);
-    todo_wine ok(SUCCEEDED(hr),"ITfKeystrokeMgr_PreserveKey failed\n");
+    ok(SUCCEEDED(hr),"ITfKeystrokeMgr_PreserveKey failed\n");
 
     hr =ITfKeystrokeMgr_PreserveKey(keymgr, tid, &CLSID_PreservedKey, &tfpk, NULL, 0);
-    todo_wine ok(hr == TF_E_ALREADY_EXISTS,"ITfKeystrokeMgr_PreserveKey inproperly succeeded \n");
+    ok(hr == TF_E_ALREADY_EXISTS,"ITfKeystrokeMgr_PreserveKey inproperly succeeded\n");
 
     preserved = FALSE;
     hr = ITfKeystrokeMgr_IsPreservedKey(keymgr, &CLSID_PreservedKey, &tfpk, &preserved);
-    todo_wine ok(hr == S_OK, "ITfKeystrokeMgr_IsPreservedKey failed\n");
-    if (hr == S_OK) todo_wine ok(preserved == TRUE,"misreporting preserved key\n");
+    ok(hr == S_OK, "ITfKeystrokeMgr_IsPreservedKey failed\n");
+    if (hr == S_OK) ok(preserved == TRUE,"misreporting preserved key\n");
 
     hr = ITfKeystrokeMgr_UnpreserveKey(keymgr, &CLSID_PreservedKey,&tfpk);
-    todo_wine ok(SUCCEEDED(hr),"ITfKeystrokeMgr_UnpreserveKey failed\n");
+    ok(SUCCEEDED(hr),"ITfKeystrokeMgr_UnpreserveKey failed\n");
 
     hr = ITfKeystrokeMgr_IsPreservedKey(keymgr, &CLSID_PreservedKey, &tfpk, &preserved);
-    todo_wine ok(hr == S_FALSE, "ITfKeystrokeMgr_IsPreservedKey failed\n");
-    if (hr == S_FALSE) todo_wine ok(preserved == FALSE,"misreporting preserved key\n");
+    ok(hr == S_FALSE, "ITfKeystrokeMgr_IsPreservedKey failed\n");
+    if (hr == S_FALSE) ok(preserved == FALSE,"misreporting preserved key\n");
 
     hr = ITfKeystrokeMgr_UnpreserveKey(keymgr, &CLSID_PreservedKey,&tfpk);
-    todo_wine ok(hr==CONNECT_E_NOCONNECTION,"ITfKeystrokeMgr_UnpreserveKey inproperly succeeded\n");
+    ok(hr==CONNECT_E_NOCONNECTION,"ITfKeystrokeMgr_UnpreserveKey inproperly succeeded\n");
 
     hr = ITfKeystrokeMgr_UnadviseKeyEventSink(keymgr,tid);
     todo_wine ok(SUCCEEDED(hr),"ITfKeystrokeMgr_UnadviseKeyEventSink failed\n");
@@ -444,10 +444,10 @@ static void test_Activate(void)
     HRESULT hr;
 
     hr = ITfInputProcessorProfiles_ActivateLanguageProfile(g_ipp,&CLSID_FakeService,gLangid,&CLSID_FakeService);
-    todo_wine ok(SUCCEEDED(hr),"Failed to Activate text service\n");
+    ok(SUCCEEDED(hr),"Failed to Activate text service\n");
 }
 
-static int inline check_context_refcount(ITfContext *iface)
+static inline int check_context_refcount(ITfContext *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
@@ -461,10 +461,23 @@ static void test_startSession(void)
     ITfDocumentMgr *dmtest;
     ITfContext *cxt,*cxt2,*cxt3,*cxtTest;
     ITextStoreACP *ts;
+    TfClientId cid2 = 0;
+
+    hr = ITfThreadMgr_Deactivate(g_tm);
+    ok(hr == E_UNEXPECTED,"Deactivate should have failed with E_UNEXPECTED\n");
 
     test_ShouldActivate = TRUE;
-    ITfThreadMgr_Activate(g_tm,&cid);
-    todo_wine ok(cid != tid,"TextService id mistakenly matches Client id\n");
+    hr  = ITfThreadMgr_Activate(g_tm,&cid);
+    ok(SUCCEEDED(hr),"Failed to Activate\n");
+    ok(cid != tid,"TextService id mistakenly matches Client id\n");
+
+    test_ShouldActivate = FALSE;
+    hr = ITfThreadMgr_Activate(g_tm,&cid2);
+    ok(SUCCEEDED(hr),"Failed to Activate\n");
+    ok (cid == cid2, "Second activate client ID does not match\n");
+
+    hr = ITfThreadMgr_Deactivate(g_tm);
+    ok(SUCCEEDED(hr),"Failed to Deactivate\n");
 
     hr = ITfThreadMgr_CreateDocumentMgr(g_tm,&g_dm);
     ok(SUCCEEDED(hr),"CreateDocumentMgr failed\n");
@@ -600,13 +613,84 @@ static void test_startSession(void)
 
 static void test_endSession(void)
 {
+    HRESULT hr;
     test_ShouldDeactivate = TRUE;
     test_CurrentFocus = NULL;
     test_PrevFocus = g_dm;
     test_OnSetFocus  = SINK_EXPECTED;
-    ITfThreadMgr_Deactivate(g_tm);
+    hr = ITfThreadMgr_Deactivate(g_tm);
+    ok(SUCCEEDED(hr),"Failed to Deactivate\n");
     ok(test_OnSetFocus == SINK_FIRED, "OnSetFocus sink not called\n");
     test_OnSetFocus  = SINK_UNEXPECTED;
+}
+
+static void test_TfGuidAtom(void)
+{
+    GUID gtest,g1;
+    HRESULT hr;
+    TfGuidAtom atom1,atom2;
+    BOOL equal;
+
+    CoCreateGuid(&gtest);
+
+    /* msdn reports this should return E_INVALIDARG.  However my test show it crashing (winxp)*/
+    /*
+    hr = ITfCategoryMgr_RegisterGUID(g_cm,&gtest,NULL);
+    ok(hr==E_INVALIDARG,"ITfCategoryMgr_RegisterGUID should have failed\n");
+    */
+    hr = ITfCategoryMgr_RegisterGUID(g_cm,&gtest,&atom1);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_RegisterGUID failed\n");
+    hr = ITfCategoryMgr_RegisterGUID(g_cm,&gtest,&atom2);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_RegisterGUID failed\n");
+    ok(atom1 == atom2,"atoms do not match\n");
+    hr = ITfCategoryMgr_GetGUID(g_cm,atom2,NULL);
+    ok(hr==E_INVALIDARG,"ITfCategoryMgr_GetGUID should have failed\n");
+    hr = ITfCategoryMgr_GetGUID(g_cm,atom2,&g1);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_GetGUID failed\n");
+    ok(IsEqualGUID(&g1,&gtest),"guids do not match\n");
+    hr = ITfCategoryMgr_IsEqualTfGuidAtom(g_cm,atom1,&gtest,NULL);
+    ok(hr==E_INVALIDARG,"ITfCategoryMgr_IsEqualTfGuidAtom should have failed\n");
+    hr = ITfCategoryMgr_IsEqualTfGuidAtom(g_cm,atom1,&gtest,&equal);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_IsEqualTfGuidAtom failed\n");
+    ok(equal == TRUE,"Equal value invalid\n");
+
+    /* show that cid and tid TfClientIds are also TfGuidAtoms */
+    hr = ITfCategoryMgr_IsEqualTfGuidAtom(g_cm,tid,&CLSID_FakeService,&equal);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_IsEqualTfGuidAtom failed\n");
+    ok(equal == TRUE,"Equal value invalid\n");
+    hr = ITfCategoryMgr_GetGUID(g_cm,cid,&g1);
+    ok(SUCCEEDED(hr),"ITfCategoryMgr_GetGUID failed\n");
+    ok(!IsEqualGUID(&g1,&GUID_NULL),"guid should not be NULL\n");
+}
+
+static void test_ClientId(void)
+{
+    ITfClientId *pcid;
+    TfClientId id1,id2;
+    HRESULT hr;
+    GUID g2;
+
+    hr = ITfThreadMgr_QueryInterface(g_tm, &IID_ITfClientId, (LPVOID*)&pcid);
+    ok(SUCCEEDED(hr),"Unable to aquire ITfClientId interface\n");
+
+    CoCreateGuid(&g2);
+
+    hr = ITfClientId_GetClientId(pcid,&GUID_NULL,&id1);
+    ok(SUCCEEDED(hr),"GetClientId failed\n");
+    hr = ITfClientId_GetClientId(pcid,&GUID_NULL,&id2);
+    ok(SUCCEEDED(hr),"GetClientId failed\n");
+    ok(id1==id2,"Id's for GUID_NULL do not match\n");
+    hr = ITfClientId_GetClientId(pcid,&CLSID_FakeService,&id2);
+    ok(SUCCEEDED(hr),"GetClientId failed\n");
+    ok(id2!=id1,"Id matches GUID_NULL\n");
+    ok(id2==tid,"Id for CLSID_FakeService not matching tid\n");
+    ok(id2!=cid,"Id for CLSID_FakeService matching cid\n");
+    hr = ITfClientId_GetClientId(pcid,&g2,&id2);
+    ok(SUCCEEDED(hr),"GetClientId failed\n");
+    ok(id2!=id1,"Id matches GUID_NULL\n");
+    ok(id2!=tid,"Id for random guid matching tid\n");
+    ok(id2!=cid,"Id for random guid matching cid\n");
+    ITfClientId_Release(pcid);
 }
 
 START_TEST(inputprocessor)
@@ -620,6 +704,8 @@ START_TEST(inputprocessor)
         test_ThreadMgrAdviseSinks();
         test_Activate();
         test_startSession();
+        test_TfGuidAtom();
+        test_ClientId();
         test_KeystrokeMgr();
         test_endSession();
         test_EnumLanguageProfiles();

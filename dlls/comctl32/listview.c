@@ -36,8 +36,6 @@
  *   -- EN_KILLFOCUS should be handled in WM_COMMAND
  *   -- WM_CREATE: create the icon and small icon image lists at this point only if
  *      the LVS_SHAREIMAGELISTS style is not specified.
- *   -- WM_ERASEBKGND: forward this message to the parent window if the bkgnd
- *      color is CLR_NONE.
  *   -- WM_WINDOWPOSCHANGED: arrange the list items if the current view is icon
  *      or small icon and the LVS_AUTOARRANGE style is specified.
  *   -- WM_TIMER
@@ -63,8 +61,9 @@
  *   -- LISTVIEW_GetNextItem needs to be rewritten. It is currently
  *      linear in the number of items in the list, and this is
  *      unacceptable for large lists.
- *   -- in sorted mode, LISTVIEW_InsertItemT sorts the array,
- *      instead of inserting in the right spot
+ *   -- if list is sorted by item text LISTVIEW_InsertItemT could use
+ *      binary search to calculate item index (e.g. DPA_Search()).
+ *      This requires sorted state to be reliably tracked in item modifiers.
  *   -- we should keep an ordered array of coordinates in iconic mode
  *      this would allow to frame items (iterator_frameditems),
  *      and find nearest item (LVFI_NEARESTXY) a lot more efficiently
@@ -72,7 +71,6 @@
  * Flags
  *   -- LVIF_COLUMNS
  *   -- LVIF_GROUPID
- *   -- LVIF_NORECOMPUTE
  *
  * States
  *   -- LVIS_ACTIVATING (not currently supported by comctl32.dll version 6.0)
@@ -143,7 +141,6 @@
  *   -- ListView_GetHoverTime, ListView_SetHoverTime
  *   -- ListView_GetISearchString
  *   -- ListView_GetNumberOfWorkAreas
- *   -- ListView_GetOrigin
  *   -- ListView_GetUnicodeFormat, ListView_SetUnicodeFormat
  *   -- ListView_GetWorkAreas, ListView_SetWorkAreas
  *
@@ -309,6 +306,8 @@ typedef struct tagLISTVIEW_INFO
   INT nMeasureItemHeight;
   INT xTrackLine;               /* The x coefficient of the track line or -1 if none */
   DELAYED_ITEM_EDIT itemEdit;   /* Pointer to this structure will be the timer ID */
+
+  DWORD iVersion; /* CCM_[G,S]ETVERSION */
 } LISTVIEW_INFO;
 
 /*
@@ -1411,6 +1410,13 @@ static inline BOOL LISTVIEW_GetItemW(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpL
     return LISTVIEW_GetItemT(infoPtr, lpLVItem, TRUE);
 }
 
+/* used to handle collapse main item column case */
+static inline BOOL LISTVIEW_DrawFocusRect(const LISTVIEW_INFO *infoPtr, HDC hdc)
+{
+    return (infoPtr->rcFocus.left < infoPtr->rcFocus.right) ?
+            DrawFocusRect(hdc, &infoPtr->rcFocus) : FALSE;
+}
+
 /* Listview invalidation functions: use _only_ these functions to invalidate */
 
 static inline BOOL is_redrawing(const LISTVIEW_INFO *infoPtr)
@@ -1861,7 +1867,7 @@ static void LISTVIEW_ShowFocusRect(const LISTVIEW_INFO *infoPtr, BOOL fShow)
     }
     else
     {
-	DrawFocusRect(hdc, &infoPtr->rcFocus);
+	LISTVIEW_DrawFocusRect(infoPtr, hdc);
     }
 done:
     ReleaseDC(infoPtr->hwndSelf, hdc);
@@ -4148,10 +4154,11 @@ static void LISTVIEW_RefreshReportGrid(LISTVIEW_INFO *infoPtr, HDC hdc)
     INT rgntype;
     INT y, itemheight;
     HPEN hPen, hOldPen;
-    RECT rcClip, rcItem;
+    RECT rcClip, rcItem = {0};
     POINT Origin;
     RANGE colRange;
     ITERATOR j;
+    BOOL rmost = FALSE;
 
     TRACE("()\n");
 
@@ -4173,7 +4180,12 @@ static void LISTVIEW_RefreshReportGrid(LISTVIEW_INFO *infoPtr, HDC hdc)
         LISTVIEW_GetHeaderRect(infoPtr, colRange.upper - 1, &rcItem);
         if (rcItem.left + Origin.x < rcClip.right) break;
     }
-    iterator_rangeitems(&j, colRange);
+    /* is right most vertical line visible? */
+    if (DPA_GetPtrCount(infoPtr->hdpaColumns) > 0)
+    {
+        LISTVIEW_GetHeaderRect(infoPtr, DPA_GetPtrCount(infoPtr->hdpaColumns) - 1, &rcItem);
+        rmost = (rcItem.right + Origin.x < rcClip.right);
+    }
 
     if ((hPen = CreatePen( PS_SOLID, 1, comctl32_color.clr3dFace )))
     {
@@ -4194,11 +4206,17 @@ static void LISTVIEW_RefreshReportGrid(LISTVIEW_INFO *infoPtr, HDC hdc)
             LineTo (hdc, rcItem.left, rcItem.bottom);
         }
         iterator_destroy(&j);
+        /* draw rightmost grid line if visible */
+        if (rmost)
+        {
+            MoveToEx (hdc, rcItem.right, rcItem.top, NULL);
+            LineTo (hdc, rcItem.right, rcItem.bottom);
+        }
 
         /* draw the horizontial lines for the rows */
         itemheight =  LISTVIEW_CalculateItemHeight(infoPtr);
-        rcItem.left = infoPtr->rcList.left + Origin.x;
-        rcItem.right = infoPtr->rcList.right + Origin.x;
+        rcItem.left   = infoPtr->rcList.left;
+        rcItem.right  = infoPtr->rcList.right;
         rcItem.bottom = rcItem.top = Origin.y - 1;
         MoveToEx(hdc, rcItem.left, rcItem.top, NULL);
         LineTo(hdc, rcItem.right, rcItem.top);
@@ -4358,15 +4376,14 @@ static void LISTVIEW_Refresh(LISTVIEW_INFO *infoPtr, HDC hdc, const RECT *prcEra
 
 	/* if we have a focus rect, draw it */
 	if (infoPtr->bFocus)
-	    DrawFocusRect(hdc, &infoPtr->rcFocus);
+	    LISTVIEW_DrawFocusRect(infoPtr, hdc);
     }
     iterator_destroy(&i);
     
 enddraw:
     /* For LVS_EX_GRIDLINES go and draw lines */
     /*  This includes the case where there were *no* items */
-    if ((infoPtr->dwStyle & LVS_TYPEMASK) == LVS_REPORT &&
-        infoPtr->dwLvExStyle & LVS_EX_GRIDLINES)
+    if ((uView == LVS_REPORT) && infoPtr->dwLvExStyle & LVS_EX_GRIDLINES)
         LISTVIEW_RefreshReportGrid(infoPtr, hdc);
 
     if (cdmode & CDRF_NOTIFYPOSTPAINT)
@@ -5550,6 +5567,8 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	/* apparently, we should not callback for lParam in LVS_OWNERDATA */
 	if ((lpLVItem->mask & ~(LVIF_STATE | LVIF_PARAM)) || infoPtr->uCallbackMask)
 	{
+	    UINT mask = lpLVItem->mask;
+
 	    /* NOTE: copy only fields which we _know_ are initialized, some apps
 	     *       depend on the uninitialized fields being 0 */
 	    dispInfo.item.mask = lpLVItem->mask & ~LVIF_PARAM;
@@ -5557,34 +5576,49 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	    dispInfo.item.iSubItem = isubitem;
 	    if (lpLVItem->mask & LVIF_TEXT)
 	    {
-		dispInfo.item.pszText = lpLVItem->pszText;
-		dispInfo.item.cchTextMax = lpLVItem->cchTextMax;		
+		if (lpLVItem->mask & LVIF_NORECOMPUTE)
+		    /* reset mask */
+		    dispInfo.item.mask &= ~(LVIF_TEXT | LVIF_NORECOMPUTE);
+		else
+		{
+		    dispInfo.item.pszText = lpLVItem->pszText;
+		    dispInfo.item.cchTextMax = lpLVItem->cchTextMax;
+		}
 	    }
 	    if (lpLVItem->mask & LVIF_STATE)
 	        dispInfo.item.stateMask = lpLVItem->stateMask & infoPtr->uCallbackMask;
-	    notify_dispinfoT(infoPtr, LVN_GETDISPINFOW, &dispInfo, isW);
-	    dispInfo.item.stateMask = lpLVItem->stateMask;
-	    if (lpLVItem->mask & (LVIF_GROUPID|LVIF_COLUMNS))
+	    /* could be zeroed on LVIF_NORECOMPUTE case */
+	    if (dispInfo.item.mask != 0)
 	    {
-	        /* full size structure expected - _WIN32IE >= 0x560 */
-	        *lpLVItem = dispInfo.item;
+	        notify_dispinfoT(infoPtr, LVN_GETDISPINFOW, &dispInfo, isW);
+	        dispInfo.item.stateMask = lpLVItem->stateMask;
+	        if (lpLVItem->mask & (LVIF_GROUPID|LVIF_COLUMNS))
+	        {
+	            /* full size structure expected - _WIN32IE >= 0x560 */
+	            *lpLVItem = dispInfo.item;
+	        }
+	        else if (lpLVItem->mask & LVIF_INDENT)
+	        {
+	            /* indent member expected - _WIN32IE >= 0x300 */
+	            memcpy(lpLVItem, &dispInfo.item, offsetof( LVITEMW, iGroupId ));
+	        }
+	        else
+	        {
+	            /* minimal structure expected */
+	            memcpy(lpLVItem, &dispInfo.item, offsetof( LVITEMW, iIndent ));
+	        }
+	        lpLVItem->mask = mask;
+	        TRACE("   getdispinfo(1):lpLVItem=%s\n", debuglvitem_t(lpLVItem, isW));
 	    }
-	    else if (lpLVItem->mask & LVIF_INDENT)
-	    {
-	        /* indent member expected - _WIN32IE >= 0x300 */
-	        memcpy(lpLVItem, &dispInfo.item, offsetof( LVITEMW, iGroupId ));
-	    }
-	    else
-	    {
-	        /* minimal structure expected */
-	        memcpy(lpLVItem, &dispInfo.item, offsetof( LVITEMW, iIndent ));
-	    }
-	    TRACE("   getdispinfo(1):lpLVItem=%s\n", debuglvitem_t(lpLVItem, isW));
 	}
 	
 	/* make sure lParam is zeroed out */
 	if (lpLVItem->mask & LVIF_PARAM) lpLVItem->lParam = 0;
-	
+
+	/* callback marked pointer required here */
+	if ((lpLVItem->mask & LVIF_TEXT) && (lpLVItem->mask & LVIF_NORECOMPUTE))
+	    lpLVItem->pszText = LPSTR_TEXTCALLBACKW;
+
 	/* we store only a little state, so if we're not asked, we're done */
 	if (!(lpLVItem->mask & LVIF_STATE) || isubitem) return TRUE;
 
@@ -5641,7 +5675,8 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     }
 
     /* Apps depend on calling back for text if it is NULL or LPSTR_TEXTCALLBACKW */
-    if ((lpLVItem->mask & LVIF_TEXT) && !is_textW(pItemHdr->pszText))
+    if ((lpLVItem->mask & LVIF_TEXT) && !(lpLVItem->mask & LVIF_NORECOMPUTE) &&
+        !is_textW(pItemHdr->pszText))
     {
 	dispInfo.item.mask |= LVIF_TEXT;
 	dispInfo.item.pszText = lpLVItem->pszText;
@@ -5688,7 +5723,8 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     }
     else if (lpLVItem->mask & LVIF_TEXT)
     {
-	if (isW) lpLVItem->pszText = pItemHdr->pszText;
+	/* if LVN_GETDISPINFO's disabled with LVIF_NORECOMPUTE return callback placeholder */
+	if (isW || !is_textW(pItemHdr->pszText)) lpLVItem->pszText = pItemHdr->pszText;
 	else textcpynT(lpLVItem->pszText, isW, pItemHdr->pszText, TRUE, lpLVItem->cchTextMax);
     }
 
@@ -5764,7 +5800,12 @@ static BOOL LISTVIEW_GetItemExtT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVIte
     pszText = lpLVItem->pszText;
     bResult = LISTVIEW_GetItemT(infoPtr, lpLVItem, isW);
     if (bResult && lpLVItem->pszText != pszText)
-	textcpynT(pszText, isW, lpLVItem->pszText, isW, lpLVItem->cchTextMax);
+    {
+	if (lpLVItem->pszText != LPSTR_TEXTCALLBACKW)
+	    textcpynT(pszText, isW, lpLVItem->pszText, isW, lpLVItem->cchTextMax);
+	else
+	    pszText = LPSTR_TEXTCALLBACKW;
+    }
     lpLVItem->pszText = pszText;
 
     return bResult;
@@ -6191,7 +6232,7 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         while (nItem >= 0)
         {
           nItem--;
-          if ((ListView_GetItemState(infoPtr->hwndSelf, nItem, uMask) & uMask) == uMask)
+          if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
         }
       }
@@ -6211,10 +6252,10 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         }
         lvFindInfo.flags = LVFI_NEARESTXY;
         lvFindInfo.vkDirection = VK_UP;
-        SendMessageW( infoPtr->hwndSelf, LVM_GETITEMPOSITION, nItem, (LPARAM)&lvFindInfo.pt );
-        while ((nItem = ListView_FindItemW(infoPtr->hwndSelf, nItem, &lvFindInfo)) != -1)
+        LISTVIEW_GetItemPosition(infoPtr, nItem, &lvFindInfo.pt);
+        while ((nItem = LISTVIEW_FindItemW(infoPtr, nItem, &lvFindInfo)) != -1)
         {
-          if ((ListView_GetItemState(infoPtr->hwndSelf, nItem, uMask) & uMask) == uMask)
+          if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
         }
       }
@@ -6246,8 +6287,8 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         }
         lvFindInfo.flags = LVFI_NEARESTXY;
         lvFindInfo.vkDirection = VK_DOWN;
-        SendMessageW( infoPtr->hwndSelf, LVM_GETITEMPOSITION, nItem, (LPARAM)&lvFindInfo.pt );
-        while ((nItem = ListView_FindItemW(infoPtr->hwndSelf, nItem, &lvFindInfo)) != -1)
+        LISTVIEW_GetItemPosition(infoPtr, nItem, &lvFindInfo.pt);
+        while ((nItem = LISTVIEW_FindItemW(infoPtr, nItem, &lvFindInfo)) != -1)
         {
           if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
@@ -6282,10 +6323,10 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         }
         lvFindInfo.flags = LVFI_NEARESTXY;
         lvFindInfo.vkDirection = VK_LEFT;
-        SendMessageW( infoPtr->hwndSelf, LVM_GETITEMPOSITION, nItem, (LPARAM)&lvFindInfo.pt );
-        while ((nItem = ListView_FindItemW(infoPtr->hwndSelf, nItem, &lvFindInfo)) != -1)
+        LISTVIEW_GetItemPosition(infoPtr, nItem, &lvFindInfo.pt);
+        while ((nItem = LISTVIEW_FindItemW(infoPtr, nItem, &lvFindInfo)) != -1)
         {
-          if ((ListView_GetItemState(infoPtr->hwndSelf, nItem, uMask) & uMask) == uMask)
+          if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
         }
       }
@@ -6298,7 +6339,7 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         while (nItem + nCountPerColumn < infoPtr->nItemCount)
         {
           nItem += nCountPerColumn;
-          if ((ListView_GetItemState(infoPtr->hwndSelf, nItem, uMask) & uMask) == uMask)
+          if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
         }
       }
@@ -6318,8 +6359,8 @@ static INT LISTVIEW_GetNextItem(const LISTVIEW_INFO *infoPtr, INT nItem, UINT uF
         }
         lvFindInfo.flags = LVFI_NEARESTXY;
         lvFindInfo.vkDirection = VK_RIGHT;
-        SendMessageW( infoPtr->hwndSelf, LVM_GETITEMPOSITION, nItem, (LPARAM)&lvFindInfo.pt );
-        while ((nItem = ListView_FindItemW(infoPtr->hwndSelf, nItem, &lvFindInfo)) != -1)
+        LISTVIEW_GetItemPosition(infoPtr, nItem, &lvFindInfo.pt);
+        while ((nItem = LISTVIEW_FindItemW(infoPtr, nItem, &lvFindInfo)) != -1)
         {
           if ((LISTVIEW_GetItemState(infoPtr, nItem, uMask) & uMask) == uMask)
             return nItem;
@@ -6550,33 +6591,6 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
     return lpht->iItem = iItem;
 }
 
-
-/* LISTVIEW_InsertCompare:  callback routine for comparing pszText members of the LV_ITEMS
-   in a LISTVIEW on insert.  Passed to DPA_Sort in LISTVIEW_InsertItem.
-   This function should only be used for inserting items into a sorted list (LVM_INSERTITEM)
-   and not during the processing of a LVM_SORTITEMS message. Applications should provide
-   their own sort proc. when sending LVM_SORTITEMS.
-*/
-/* Platform SDK:
-    (remarks on LVITEM: LVM_INSERTITEM will insert the new item in the proper sort postion...
-        if:
-          LVS_SORTXXX must be specified,
-          LVS_OWNERDRAW is not set,
-          <item>.pszText is not LPSTR_TEXTCALLBACK.
-
-    (LVS_SORT* flags): "For the LVS_SORTASCENDING... styles, item indices
-    are sorted based on item text..."
-*/
-static INT WINAPI LISTVIEW_InsertCompare(  LPVOID first, LPVOID second,  LPARAM lParam)
-{
-    ITEM_INFO* lv_first = DPA_GetPtr( first, 0 );
-    ITEM_INFO* lv_second = DPA_GetPtr( second, 0 );
-    INT cmpv = textcmpWT(lv_first->hdr.pszText, lv_second->hdr.pszText, TRUE); 
-
-    /* if we're sorting descending, negate the return value */
-    return (((const LISTVIEW_INFO *)lParam)->dwStyle & LVS_SORTDESCENDING) ? -cmpv : cmpv;
-}
-
 /***
  * DESCRIPTION:
  * Inserts a new item in the listview control.
@@ -6621,7 +6635,29 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
 
     if (lpLVItem->iItem < 0 && !is_sorted) return -1;
 
-    nItem = is_sorted ? infoPtr->nItemCount : min(lpLVItem->iItem, infoPtr->nItemCount);
+    /* calculate new item index */
+    if (is_sorted)
+    {
+        HDPA hItem;
+        ITEM_INFO *item_s;
+        INT i = 0, cmpv;
+
+        while (i < infoPtr->nItemCount)
+        {
+            hItem  = DPA_GetPtr( infoPtr->hdpaItems, i);
+            item_s = (ITEM_INFO*)DPA_GetPtr(hItem, 0);
+
+            cmpv = textcmpWT(item_s->hdr.pszText, lpLVItem->pszText, TRUE);
+            if (infoPtr->dwStyle & LVS_SORTDESCENDING) cmpv *= -1;
+
+            if (cmpv >= 0) break;
+            i++;
+        }
+        nItem = i;
+    }
+    else
+        nItem = min(lpLVItem->iItem, infoPtr->nItemCount);
+
     TRACE(" inserting at %d, sorted=%d, count=%d, iItem=%d\n", nItem, is_sorted, infoPtr->nItemCount, lpLVItem->iItem);
     nItem = DPA_InsertPtr( infoPtr->hdpaItems, nItem, hdpaSubItems );
     if (nItem == -1) goto fail;
@@ -6655,14 +6691,6 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
         item.state |= INDEXTOSTATEIMAGEMASK(1);
     }
     if (!set_main_item(infoPtr, &item, TRUE, isW, &has_changed)) goto undo;
-
-    /* if we're sorted, sort the list, and update the index */
-    if (is_sorted)
-    {
-	DPA_Sort( infoPtr->hdpaItems, LISTVIEW_InsertCompare, (LPARAM)infoPtr );
-	nItem = DPA_GetPtrIndex( infoPtr->hdpaItems, hdpaSubItems );
-	assert(nItem != -1);
-    }
 
     /* make room for the position, if we are in the right mode */
     if ((uView == LVS_SMALLICON) || (uView == LVS_ICON))
@@ -7813,7 +7841,7 @@ static BOOL LISTVIEW_SetTextColor (LISTVIEW_INFO *infoPtr, COLORREF clrText)
 
 /***
  * DESCRIPTION:
- * Determines which listview item is located at the specified position.
+ * Sets new ToolTip window to ListView control.
  *
  * PARAMETER(S):
  * [I] infoPtr        : valid pointer to the listview structure
@@ -8125,6 +8153,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
   infoPtr->nMeasureItemHeight = 0;
   infoPtr->xTrackLine = -1;  /* no track line */
   infoPtr->itemEdit.fEnabled = FALSE;
+  infoPtr->iVersion = COMCTL32_VERSION;
 
   /* get default font (icon title) */
   SystemParametersInfoW(SPI_GETICONTITLELOGFONT, 0, &logFont, 0);
@@ -8258,6 +8287,9 @@ static inline BOOL LISTVIEW_EraseBkgnd(const LISTVIEW_INFO *infoPtr, HDC hdc)
     TRACE("(hdc=%p)\n", hdc);
 
     if (!GetClipBox(hdc, &rc)) return FALSE;
+
+    if (infoPtr->clrBk == CLR_NONE)
+        return SendMessageW(infoPtr->hwndNotify, WM_ERASEBKGND, (WPARAM)hdc, 0);
 
     /* for double buffered controls we need to do this during refresh */
     if (infoPtr->dwLvExStyle & LVS_EX_DOUBLEBUFFER) return FALSE;
@@ -8594,19 +8626,19 @@ static LRESULT LISTVIEW_KeyDown(LISTVIEW_INFO *infoPtr, INT nVirtualKey, LONG lK
     break;
 
   case VK_LEFT:
-    nItem = ListView_GetNextItem(infoPtr->hwndSelf, infoPtr->nFocusedItem, LVNI_TOLEFT);
+    nItem = LISTVIEW_GetNextItem(infoPtr, infoPtr->nFocusedItem, LVNI_TOLEFT);
     break;
 
   case VK_UP:
-    nItem = ListView_GetNextItem(infoPtr->hwndSelf, infoPtr->nFocusedItem, LVNI_ABOVE);
+    nItem = LISTVIEW_GetNextItem(infoPtr, infoPtr->nFocusedItem, LVNI_ABOVE);
     break;
 
   case VK_RIGHT:
-    nItem = ListView_GetNextItem(infoPtr->hwndSelf, infoPtr->nFocusedItem, LVNI_TORIGHT);
+    nItem = LISTVIEW_GetNextItem(infoPtr, infoPtr->nFocusedItem, LVNI_TORIGHT);
     break;
 
   case VK_DOWN:
-    nItem = ListView_GetNextItem(infoPtr->hwndSelf, infoPtr->nFocusedItem, LVNI_BELOW);
+    nItem = LISTVIEW_GetNextItem(infoPtr, infoPtr->nFocusedItem, LVNI_BELOW);
     break;
 
   case VK_PRIOR:
@@ -9049,8 +9081,20 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 		    }
 
 		    /* when shrinking the last column clear the now unused field */
-		    if (lpnmh->iItem == DPA_GetPtrCount(infoPtr->hdpaColumns) - 1 && dx < 0)
+		    if (lpnmh->iItem == DPA_GetPtrCount(infoPtr->hdpaColumns) - 1)
+		    {
+		        RECT right;
+
 		        rcCol.right -= dx;
+
+		        /* deal with right from rightmost column area */
+		        right.left = rcCol.right;
+		        right.top  = rcCol.top;
+		        right.bottom = rcCol.bottom;
+		        right.right = infoPtr->rcList.right;
+
+		        LISTVIEW_InvalidateRect(infoPtr, &right);
+		    }
 
 		    LISTVIEW_InvalidateRect(infoPtr, &rcCol);
 		}
@@ -9587,9 +9631,6 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
           wStyleType, lpss->styleOld, lpss->styleNew);
 
     if (wStyleType != GWL_STYLE) return 0;
-  
-    /* FIXME: if LVS_NOSORTHEADER changed, update header */
-    /*        or LVS_SORT{AS,DES}CENDING */
 
     infoPtr->dwStyle = lpss->styleNew;
 
@@ -9735,6 +9776,47 @@ static LRESULT LISTVIEW_ShowWindow(LISTVIEW_INFO *infoPtr, BOOL bShown, INT iSta
   }
 
   return 0;
+}
+
+/***
+ * DESCRIPTION:
+ * Processes CCM_GETVERSION messages.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ *
+ * RETURN:
+ * Current version
+ */
+static inline LRESULT LISTVIEW_GetVersion(LISTVIEW_INFO *infoPtr)
+{
+  return infoPtr->iVersion;
+}
+
+/***
+ * DESCRIPTION:
+ * Processes CCM_SETVERSION messages.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr  : valid pointer to the listview structure
+ * [I] iVersion : version to be set
+ *
+ * RETURN:
+ * -1 when requested version is greater than DLL version;
+ * previous version otherwise
+ */
+static LRESULT LISTVIEW_SetVersion(LISTVIEW_INFO *infoPtr, DWORD iVersion)
+{
+  INT iOldVersion = infoPtr->iVersion;
+
+  if (iVersion > COMCTL32_VERSION)
+    return -1;
+
+  infoPtr->iVersion = iVersion;
+
+  TRACE("new version %d\n", iVersion);
+
+  return iOldVersion;
 }
 
 /***
@@ -10105,6 +10187,12 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case LVM_UPDATE:
     return LISTVIEW_Update(infoPtr, (INT)wParam);
+
+  case CCM_GETVERSION:
+    return LISTVIEW_GetVersion(infoPtr);
+
+  case CCM_SETVERSION:
+    return LISTVIEW_SetVersion(infoPtr, wParam);
 
   case WM_CHAR:
     return LISTVIEW_ProcessLetterKeys( infoPtr, wParam, lParam );

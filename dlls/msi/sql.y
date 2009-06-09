@@ -359,15 +359,15 @@ data_type:
         }
   | TK_LONGCHAR
         {
-            $$ = 2;
+            $$ = MSITYPE_STRING | 0x400;
         }
   | TK_SHORT
         {
-            $$ = 2;
+            $$ = 2 | 0x400;
         }
   | TK_INT
         {
-            $$ = 2;
+            $$ = 2 | 0x400;
         }
   | TK_LONG
         {

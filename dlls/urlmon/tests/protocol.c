@@ -599,7 +599,9 @@ static HRESULT WINAPI ProtocolSink_ReportData(IInternetProtocolSink *iface, DWOR
         ok(ulProgress == ulProgressMax, "ulProgress (%d) != ulProgressMax (%d)\n",
            ulProgress, ulProgressMax);
         ok(ulProgressMax == 13, "ulProgressMax=%d, expected 13\n", ulProgressMax);
-        ok(grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION),
+        /* BSCF_SKIPDRAINDATAFORFILEURLS added in IE8 */
+        ok((grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION)) ||
+           (grfBSCF == (BSCF_FIRSTDATANOTIFICATION | BSCF_LASTDATANOTIFICATION | BSCF_SKIPDRAINDATAFORFILEURLS)),
                 "grcfBSCF = %08x\n", grfBSCF);
     }else if(!binding_test && (tested_protocol == HTTP_TEST || tested_protocol == HTTPS_TEST || tested_protocol == FTP_TEST)) {
         if(!(grfBSCF & BSCF_LASTDATANOTIFICATION) || (grfBSCF & BSCF_DATAFULLYAVAILABLE))
@@ -671,7 +673,9 @@ static HRESULT WINAPI ProtocolSink_ReportResult(IInternetProtocolSink *iface, HR
     if(SUCCEEDED(hrResult) || tested_protocol == FTP_TEST)
         ok(dwError == ERROR_SUCCESS, "dwError = %d, expected ERROR_SUCCESS\n", dwError);
     else
-        ok(dwError != ERROR_SUCCESS, "dwError == ERROR_SUCCESS\n");
+        ok(dwError != ERROR_SUCCESS ||
+           broken(tested_protocol == MK_TEST), /* Win9x, WinME and NT4 */
+           "dwError == ERROR_SUCCESS\n");
     ok(!szResult, "szResult != NULL\n");
 
     return S_OK;

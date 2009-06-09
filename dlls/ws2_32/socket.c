@@ -3583,13 +3583,149 @@ outofmem:
 #endif
 }
 
+static struct WS_addrinfoW *addrinfo_AtoW(const struct WS_addrinfo *ai)
+{
+    struct WS_addrinfoW *ret;
+
+    if (!(ret = HeapAlloc(GetProcessHeap(), 0, sizeof(struct WS_addrinfoW)))) return NULL;
+    ret->ai_flags     = ai->ai_flags;
+    ret->ai_family    = ai->ai_family;
+    ret->ai_socktype  = ai->ai_socktype;
+    ret->ai_protocol  = ai->ai_protocol;
+    ret->ai_addrlen   = ai->ai_addrlen;
+    ret->ai_canonname = NULL;
+    ret->ai_addr      = NULL;
+    ret->ai_next      = NULL;
+    if (ai->ai_canonname)
+    {
+        int len = MultiByteToWideChar(CP_ACP, 0, ai->ai_canonname, -1, NULL, 0);
+        if (!(ret->ai_canonname = HeapAlloc(GetProcessHeap(), 0, len)))
+        {
+            HeapFree(GetProcessHeap(), 0, ret);
+            return NULL;
+        }
+        MultiByteToWideChar(CP_ACP, 0, ai->ai_canonname, -1, ret->ai_canonname, len);
+    }
+    if (ai->ai_addr)
+    {
+        if (!(ret->ai_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(struct WS_sockaddr))))
+        {
+            HeapFree(GetProcessHeap(), 0, ret->ai_canonname);
+            HeapFree(GetProcessHeap(), 0, ret);
+            return NULL;
+        }
+        memcpy(ret->ai_addr, ai->ai_addr, sizeof(struct WS_sockaddr));
+    }
+    return ret;
+}
+
+static struct WS_addrinfoW *addrinfo_list_AtoW(const struct WS_addrinfo *info)
+{
+    struct WS_addrinfoW *ret, *infoW;
+
+    if (!(ret = infoW = addrinfo_AtoW(info))) return NULL;
+    while (info->ai_next)
+    {
+        if (!(infoW->ai_next = addrinfo_AtoW(info->ai_next)))
+        {
+            FreeAddrInfoW(ret);
+            return NULL;
+        }
+        infoW = infoW->ai_next;
+        info = info->ai_next;
+    }
+    return ret;
+}
+
+static struct WS_addrinfo *addrinfo_WtoA(const struct WS_addrinfoW *ai)
+{
+    struct WS_addrinfo *ret;
+
+    if (!(ret = HeapAlloc(GetProcessHeap(), 0, sizeof(struct WS_addrinfo)))) return NULL;
+    ret->ai_flags     = ai->ai_flags;
+    ret->ai_family    = ai->ai_family;
+    ret->ai_socktype  = ai->ai_socktype;
+    ret->ai_protocol  = ai->ai_protocol;
+    ret->ai_addrlen   = ai->ai_addrlen;
+    ret->ai_canonname = NULL;
+    ret->ai_addr      = NULL;
+    ret->ai_next      = NULL;
+    if (ai->ai_canonname)
+    {
+        int len = WideCharToMultiByte(CP_ACP, 0, ai->ai_canonname, -1, NULL, 0, NULL, NULL);
+        if (!(ret->ai_canonname = HeapAlloc(GetProcessHeap(), 0, len)))
+        {
+            HeapFree(GetProcessHeap(), 0, ret);
+            return NULL;
+        }
+        WideCharToMultiByte(CP_ACP, 0, ai->ai_canonname, -1, ret->ai_canonname, len, NULL, NULL);
+    }
+    if (ai->ai_addr)
+    {
+        if (!(ret->ai_addr = HeapAlloc(GetProcessHeap(), 0, sizeof(struct WS_sockaddr))))
+        {
+            HeapFree(GetProcessHeap(), 0, ret->ai_canonname);
+            HeapFree(GetProcessHeap(), 0, ret);
+            return NULL;
+        }
+        memcpy(ret->ai_addr, ai->ai_addr, sizeof(struct WS_sockaddr));
+    }
+    return ret;
+}
+
 /***********************************************************************
  *		GetAddrInfoW		(WS2_32.@)
  */
 int WINAPI GetAddrInfoW(LPCWSTR nodename, LPCWSTR servname, const ADDRINFOW *hints, PADDRINFOW *res)
 {
-    FIXME("empty stub!\n");
-    return EAI_FAIL;
+    int ret, len;
+    char *nodenameA, *servnameA = NULL;
+    struct WS_addrinfo *resA, *hintsA = NULL;
+
+    len = WideCharToMultiByte(CP_ACP, 0, nodename, -1, NULL, 0, NULL, NULL);
+    if (!(nodenameA = HeapAlloc(GetProcessHeap(), 0, len))) return EAI_MEMORY;
+    WideCharToMultiByte(CP_ACP, 0, nodename, -1, nodenameA, len, NULL, NULL);
+
+    if (servname)
+    {
+        len = WideCharToMultiByte(CP_ACP, 0, servname, -1, NULL, 0, NULL, NULL);
+        if (!(servnameA = HeapAlloc(GetProcessHeap(), 0, len)))
+        {
+            HeapFree(GetProcessHeap(), 0, nodenameA);
+            return EAI_MEMORY;
+        }
+        WideCharToMultiByte(CP_ACP, 0, servname, -1, servnameA, len, NULL, NULL);
+    }
+
+    if (hints) hintsA = addrinfo_WtoA(hints);
+    ret = WS_getaddrinfo(nodenameA, servnameA, hintsA, &resA);
+    WS_freeaddrinfo(hintsA);
+
+    if (!ret)
+    {
+        *res = addrinfo_list_AtoW(resA);
+        WS_freeaddrinfo(resA);
+    }
+
+    HeapFree(GetProcessHeap(), 0, nodenameA);
+    HeapFree(GetProcessHeap(), 0, servnameA);
+    return ret;
+}
+
+/***********************************************************************
+ *      FreeAddrInfoW        (WS2_32.@)
+ */
+void WINAPI FreeAddrInfoW(PADDRINFOW ai)
+{
+    while (ai)
+    {
+        ADDRINFOW *next;
+        HeapFree(GetProcessHeap(), 0, ai->ai_canonname);
+        HeapFree(GetProcessHeap(), 0, ai->ai_addr);
+        next = ai->ai_next;
+        HeapFree(GetProcessHeap(), 0, ai);
+        ai = next;
+    }
 }
 
 int WINAPI WS_getnameinfo(const SOCKADDR *sa, WS_socklen_t salen, PCHAR host,
@@ -4559,19 +4695,21 @@ int WINAPI WSARemoveServiceClass(LPGUID info)
 /***********************************************************************
  *              inet_ntop                      (WS2_32.@)
  */
-PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, size_t len )
+PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, SIZE_T len )
 {
 #ifdef HAVE_INET_NTOP
-    union generic_unix_sockaddr unix_addr;
+    struct WS_in6_addr *in6;
+    struct WS_in_addr  *in;
 
+    TRACE("family %d, addr (%p), buffer (%p), len %ld\n", family, addr, buffer, len);
     switch (family)
     {
     case WS_AF_INET:
-        ws_sockaddr_ws2u( addr, sizeof(struct WS_sockaddr_in), &unix_addr );
-        return inet_ntop( AF_INET, &unix_addr, buffer, len );
+        in = addr;
+        return inet_ntop( AF_INET, &in->WS_s_addr, buffer, len );
     case WS_AF_INET6:
-        ws_sockaddr_ws2u( addr, sizeof(struct WS_sockaddr_in6), &unix_addr );
-        return inet_ntop( AF_INET6, &unix_addr, buffer, len );
+        in6 = addr;
+        return inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len );
     }
 #else
     FIXME( "not supported on this platform\n" );
@@ -4784,7 +4922,7 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
                                 LPDWORD lenstr )
 {
     DWORD size;
-    CHAR buffer[22]; /* 12 digits + 3 dots + ':' + 5 digits + '\0' */
+    CHAR buffer[54]; /* 32 digits + 7':' + '[' + '%" + 5 digits + ']:' + 5 digits + '\0' */
     CHAR *p;
 
     TRACE( "(%p, %d, %p, %p, %p)\n", sockaddr, len, info, string, lenstr );
@@ -4793,17 +4931,36 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
     if (!string || !lenstr) return SOCKET_ERROR;
 
     /* sin_family is guaranteed to be the first u_short */
-    if (((SOCKADDR_IN *)sockaddr)->sin_family != AF_INET) return SOCKET_ERROR;
+    switch(((SOCKADDR_IN *)sockaddr)->sin_family)
+    {
+    case WS_AF_INET:
+        sprintf( buffer, "%u.%u.%u.%u:%u",
+               (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 24 & 0xff),
+               (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 16 & 0xff),
+               (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 8 & 0xff),
+               (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) & 0xff),
+               ntohs( ((SOCKADDR_IN *)sockaddr)->sin_port ) );
 
-    sprintf( buffer, "%u.%u.%u.%u:%u",
-             (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 24 & 0xff),
-             (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 16 & 0xff),
-             (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) >> 8 & 0xff),
-             (unsigned int)(ntohl( ((SOCKADDR_IN *)sockaddr)->sin_addr.WS_s_addr ) & 0xff),
-             ntohs( ((SOCKADDR_IN *)sockaddr)->sin_port ) );
+        p = strchr( buffer, ':' );
+        if (!((SOCKADDR_IN *)sockaddr)->sin_port) *p = 0;
+        break;
 
-    p = strchr( buffer, ':' );
-    if (!((SOCKADDR_IN *)sockaddr)->sin_port) *p = 0;
+    case WS_AF_INET6:
+    {
+        struct WS_sockaddr_in6 *sockaddr6 = (LPSOCKADDR_IN6) sockaddr;
+
+        if (!WS_inet_ntop(WS_AF_INET6, &sockaddr6->sin6_addr, buffer, sizeof(buffer)))
+        {
+            WSASetLastError(WSAEINVAL);
+            return SOCKET_ERROR;
+        }
+        break;
+    }
+
+    default:
+        WSASetLastError(WSAEINVAL);
+        return SOCKET_ERROR;
+    }
 
     size = strlen( buffer ) + 1;
 

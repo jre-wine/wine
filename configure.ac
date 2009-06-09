@@ -102,6 +102,27 @@ dnl We can't use AC_PROG_CPP for winegcc, it uses by default $(CC) -E
 AC_CHECK_TOOL(CPPBIN,cpp,cpp)
 
 case $host in
+  *-darwin*)
+    if test "x$enable_win64" == "xyes"
+    then
+      CC="$CC -m64"
+      CXX="$CXX -m64"
+      LD="${LD:-ld} -arch x86_64"
+      AS="${AS:-as} -arch x86_64"
+      host_cpu="x86_64"
+      notice_platform="64-bit "
+      AC_SUBST(TARGETFLAGS,"-m64")
+    else
+      CC="$CC -m32"
+      CXX="$CXX -m32"
+      LD="${LD:-ld} -arch i386"
+      AS="${AS:-as} -arch i386"
+      host_cpu="i386"
+      notice_platform="32-bit "
+      AC_SUBST(TARGETFLAGS,"-m32")
+      enable_win16=${enable_win16:-yes}
+    fi
+    ;;
   x86_64*)
     if test "x$enable_win64" != "xyes" -a "$cross_compiling" != "yes"
     then
@@ -1941,6 +1962,7 @@ WINE_CONFIG_MAKEFILE([dlls/d3dxof/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL
 WINE_CONFIG_MAKEFILE([dlls/d3dxof/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/dbghelp/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dciman32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/ddeml.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/ddraw/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/ddraw/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/ddrawex/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2199,6 +2221,7 @@ WINE_CONFIG_MAKEFILE([dlls/stress.dll16/Makefile],[dlls/Makedll.rules],[dlls],[A
 WINE_CONFIG_MAKEFILE([dlls/strmiids/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/svrapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/sxs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/t2embed/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/tapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/traffic/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/twain.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
@@ -2230,6 +2253,7 @@ WINE_CONFIG_MAKEFILE([dlls/vtdapi.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL
 WINE_CONFIG_MAKEFILE([dlls/vwin32.vxd/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/w32skrnl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/w32sys.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/wbemprox/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/win32s16.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/win87em.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/winaspi.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
