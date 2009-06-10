@@ -1,6 +1,7 @@
 #!/bin/sh
 set -e
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
+distribution=`dpkg-parsechangelog|sed -n 's/Distribution: \(.*\)/\1/p'`
 # see if the version in the changelog is tagged (already built)
 obj_type="`git-cat-file -t "wine-$version" 2>/dev/null`" || true
 if [ -n "$obj_type" ]
@@ -13,7 +14,11 @@ else
   last_version=`dpkg-parsechangelog -o1 -c1|sed -n 's/Version: \(.*\)/\1/p'`
 fi
 # build changelog
+if [ "$distribution" = "UNRELEASED" ]; then
+  sed -i "1,6d" debian/changelog # delete dummy entry (6 lines)
+fi
 git-dch --release --auto --full --meta \
+ --new-version "$version" \
  --debian-tag="wine-$last_version" \
  --git-log="--first-parent"
 # commit changelog
