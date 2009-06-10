@@ -1,8 +1,16 @@
-wine-unstable (1.1.23-1) UNRELEASED; urgency=low
+wine-unstable (1.1.23-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.23, released Jun 5, 2009.
+    - Support for registering MIME types with the Linux desktop.
+    - FBO mode is now the default for Direct3D.
+    - Support for COM proxy delegation.
+    - Improved support for the Mingw cross-compile.
+    - Proper fullscreen mode for the virtual desktop.
+    - Various bug fixes.
+  * Add "-unstable" suffix to package names for the Wine development
+    branch, and upload to sid.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Wed, 10 Jun 2009 19:04:10 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Wed, 10 Jun 2009 21:15:48 +0200
 
 wine (1.1.22-1) experimental; urgency=low
 
