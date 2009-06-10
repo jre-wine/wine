@@ -27,7 +27,7 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
-#VERSUFFIX=-unstable
+VERSUFFIX=-unstable
 
 CC=gcc
 LIBDIR=lib
