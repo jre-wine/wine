@@ -76,7 +76,7 @@ typedef struct wine_glextension {
 
 struct WineGLInfo {
     const char *glVersion;
-    const char *glExtensions;
+    char *glExtensions;
 
     int glxVersion[2];
 
@@ -274,12 +274,13 @@ MAKE_FUNCPTR(glFinish)
 MAKE_FUNCPTR(glFlush)
 #undef MAKE_FUNCPTR
 
+static BOOL infoInitialized = FALSE;
 static BOOL X11DRV_WineGL_InitOpenglInfo(void)
 {
-    static BOOL infoInitialized = FALSE;
 
     int screen = DefaultScreen(gdi_display);
     Window win = RootWindow(gdi_display, screen);
+    const char* str;
     Visual *visual;
     XVisualInfo template;
     XVisualInfo *vis;
@@ -318,7 +319,9 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     }
 
     WineGLInfo.glVersion = (const char *) pglGetString(GL_VERSION);
-    WineGLInfo.glExtensions = strdup((const char *) pglGetString(GL_EXTENSIONS));
+    str = (const char *) pglGetString(GL_EXTENSIONS);
+    WineGLInfo.glExtensions = HeapAlloc(GetProcessHeap(), 0, strlen(str)+1);
+    strcpy(WineGLInfo.glExtensions, str);
 
     /* Get the common GLX version supported by GLX client and server ( major/minor) */
     pglXQueryVersion(gdi_display, &WineGLInfo.glxVersion[0], &WineGLInfo.glxVersion[1]);
@@ -350,6 +353,12 @@ static BOOL X11DRV_WineGL_InitOpenglInfo(void)
     }
     wine_tsx11_unlock();
     return TRUE;
+}
+
+void X11DRV_OpenGL_Cleanup(void)
+{
+    HeapFree(GetProcessHeap(), 0, WineGLInfo.glExtensions);
+    infoInitialized = FALSE;
 }
 
 static BOOL has_opengl(void)
@@ -3625,6 +3634,10 @@ XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
 }
 
 #else  /* no OpenGL includes */
+
+void X11DRV_OpenGL_Cleanup(void)
+{
+}
 
 static inline void opengl_error(void)
 {

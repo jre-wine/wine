@@ -2,6 +2,7 @@
  * Unit test suite for MLANG APIs.
  *
  * Copyright 2004 Dmitry Timoshkov
+ * Copyright 2009 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -48,6 +49,57 @@ static HRESULT (WINAPI *pConvertINetMultiByteToUnicode)(LPDWORD, DWORD, LPCSTR,
                                                         LPINT, LPWSTR, LPINT);
 static HRESULT (WINAPI *pConvertINetUnicodeToMultiByte)(LPDWORD, DWORD, LPCWSTR,
                                                         LPINT, LPSTR, LPINT);
+typedef struct lcid_tag_table {
+    LPCSTR rfc1766;
+    LCID lcid;
+    HRESULT hr;
+} lcid_table_entry;
+
+/* en, ar and zh use SUBLANG_NEUTRAL for the rfc1766 name without the country
+   all others suppress the country with SUBLANG_DEFAULT.
+   For 3 letter language codes, the rfc1766 is to small for the country */
+
+static const lcid_table_entry  lcid_table[] = {
+    {"e",     -1,       E_FAIL},
+    {"",      -1,       E_FAIL},
+    {"-",     -1,       E_FAIL},
+    {"e-",    -1,       E_FAIL},
+
+    {"ar",    1,        S_OK},
+    {"zh",    4,        S_OK},
+
+    {"de",    0x0407,   S_OK},
+    {"de-ch", 0x0807,   S_OK},
+    {"de-at", 0x0c07,   S_OK},
+    {"de-lu", 0x1007,   S_OK},
+    {"de-li", 0x1407,   S_OK},
+
+    {"en",    9,        S_OK},
+    {"en-gb", 0x809,    S_OK},
+    {"en-GB", 0x809,    S_OK},
+    {"EN-GB", 0x809,    S_OK},
+    {"en-US", 0x409,    S_OK},
+    {"en-us", 0x409,    S_OK},
+
+    {"fr",    0x040c,   S_OK},
+    {"fr-be", 0x080c,   S_OK},
+    {"fr-ca", 0x0c0c,   S_OK},
+    {"fr-ch", 0x100c,   S_OK},
+    {"fr-lu", 0x140c,   S_OK},
+    {"fr-mc", 0x180c,   S_OK},
+
+    {"it",    0x0410,   S_OK},
+    {"it-ch", 0x0810,   S_OK},
+
+    {"nl",    0x0413,   S_OK},
+    {"nl-be", 0x0813,   S_OK},
+    {"pl",    0x0415,   S_OK},
+    {"ru",    0x0419,   S_OK},
+
+    {"kok",   0x0457,   S_OK}
+
+};
+
 
 static BOOL init_function_ptrs(void)
 {
@@ -382,7 +434,8 @@ static void test_EnumCodePages(IMultiLanguage2 *iML2, DWORD flags)
 	if (TranslateCharsetInfo((DWORD *)(INT_PTR)cpinfo[i].uiFamilyCodePage, &csi, TCI_SRCCODEPAGE))
 	    ok(cpinfo[i].bGDICharset == csi.ciCharset, "%d != %d\n", cpinfo[i].bGDICharset, csi.ciCharset);
 	else
-	    trace("TranslateCharsetInfo failed for cp %u\n", cpinfo[i].uiFamilyCodePage);
+            if (winetest_debug > 1)
+                trace("TranslateCharsetInfo failed for cp %u\n", cpinfo[i].uiFamilyCodePage);
 
 #ifdef DUMP_CP_INFO
         trace("%u: codepage %u family %u\n", i, cpinfo[i].uiCodePage, cpinfo[i].uiFamilyCodePage);
@@ -410,7 +463,8 @@ static void test_EnumCodePages(IMultiLanguage2 *iML2, DWORD flags)
             }
 	}
 	else
-	    trace("IsValidCodePage failed for cp %u\n", cpinfo[i].uiCodePage);
+            if (winetest_debug > 1)
+                trace("IsValidCodePage failed for cp %u\n", cpinfo[i].uiCodePage);
 
     if (memcmp(cpinfo[i].wszWebCharset,feffW,sizeof(WCHAR)*11)==0)
         skip("Legacy windows bug returning invalid charset of unicodeFEFF\n");
@@ -832,36 +886,34 @@ static void test_rfc1766(IMultiLanguage2 *iML2)
 
 static void test_GetLcidFromRfc1766(IMultiLanguage2 *iML2)
 {
+    WCHAR rfc1766W[MAX_RFC1766_NAME + 1];
     LCID lcid;
     HRESULT ret;
+    DWORD i;
 
-    static WCHAR e[] = { 'e',0 };
     static WCHAR en[] = { 'e','n',0 };
-    static WCHAR empty[] = { 0 };
-    static WCHAR dash[] = { '-',0 };
-    static WCHAR e_dash[] = { 'e','-',0 };
-    static WCHAR en_gb[] = { 'e','n','-','g','b',0 };
-    static WCHAR en_us[] = { 'e','n','-','u','s',0 };
     static WCHAR en_them[] = { 'e','n','-','t','h','e','m',0 };
     static WCHAR english[] = { 'e','n','g','l','i','s','h',0 };
+
+
+    for(i = 0; i < sizeof(lcid_table) / sizeof(lcid_table[0]); i++) {
+        lcid = -1;
+        MultiByteToWideChar(CP_ACP, 0, lcid_table[i].rfc1766, -1, rfc1766W, MAX_RFC1766_NAME);
+        ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, rfc1766W);
+
+        ok(ret == lcid_table[i].hr,
+            "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, ret, lcid_table[i].hr);
+
+        ok(lcid == lcid_table[i].lcid,
+            "#%02d: got LCID 0x%x (expected 0x%x)\n", i, lcid, lcid_table[i].lcid);
+    }
+
 
     ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, NULL, en);
     ok(ret == E_INVALIDARG, "GetLcidFromRfc1766 returned: %08x\n", ret);
 
     ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, NULL);
     ok(ret == E_INVALIDARG, "GetLcidFromRfc1766 returned: %08x\n", ret);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, e);
-    ok(ret == E_FAIL, "GetLcidFromRfc1766 returned: %08x\n", ret);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, empty);
-    ok(ret == E_FAIL, "GetLcidFromRfc1766 returned: %08x\n", ret);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, dash);
-    ok(ret == E_FAIL, "GetLcidFromRfc1766 returned: %08x\n", ret);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, e_dash);
-    ok(ret == E_FAIL, "GetLcidFromRfc1766 returned: %08x\n", ret);
 
     ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, en_them);
     ok((ret == E_FAIL || ret == S_FALSE), "GetLcidFromRfc1766 returned: %08x\n", ret);
@@ -887,44 +939,115 @@ static void test_GetLcidFromRfc1766(IMultiLanguage2 *iML2)
         ok_w2("Expected \"%s\",  got \"%s\"n", en, rfcstr);
     }
 
-    lcid = 0;
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, en);
-    ok(ret == S_OK, "GetLcidFromRfc1766 returned: %08x\n", ret);
-    ok(lcid == 9, "got wrong lcid: %04x\n", lcid);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, en_gb);
-    ok(ret == S_OK, "GetLcidFromRfc1766 returned: %08x\n", ret);
-    ok(lcid == 0x809, "got wrong lcid: %04x\n", lcid);
-
-    ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, en_us);
-    ok(ret == S_OK, "GetLcidFromRfc1766 returned: %08x\n", ret);
-    ok(lcid == 0x409, "got wrong lcid: %04x\n", lcid);
 }
+
+static void test_Rfc1766ToLcid(void)
+{
+    LCID lcid;
+    HRESULT ret;
+    DWORD i;
+
+    for(i = 0; i < sizeof(lcid_table) / sizeof(lcid_table[0]); i++) {
+        lcid = -1;
+        ret = Rfc1766ToLcidA(&lcid, lcid_table[i].rfc1766);
+
+        ok(ret == lcid_table[i].hr,
+            "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, ret, lcid_table[i].hr);
+
+
+        ok(lcid == lcid_table[i].lcid,
+            "#%02d: got LCID 0x%x (expected 0x%x)\n", i, lcid, lcid_table[i].lcid);
+
+    }
+
+    ret = Rfc1766ToLcidA(&lcid, NULL);
+    ok(ret == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", ret);
+
+    ret = Rfc1766ToLcidA(NULL, "en");
+    ok(ret == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", ret);
+
+}
+
 
 static void test_GetRfc1766FromLcid(IMultiLanguage2 *iML2)
 {
+    CHAR expected[MAX_RFC1766_NAME];
+    CHAR buffer[MAX_RFC1766_NAME + 1];
+    DWORD i;
     HRESULT hr;
     BSTR rfcstr;
-    LCID lcid;
 
-    static WCHAR kok[] = {'k','o','k',0};
+    for(i = 0; i < sizeof(lcid_table) / sizeof(lcid_table[0]); i++) {
+        buffer[0] = '\0';
 
-    hr = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, kok);
-    /*
-     * S_FALSE happens when 'kok' instead matches to a different Rfc1766 name
-     * for example 'ko' so it is not a failure but does not give us what 
-     * we are looking for
-     */
-    if (hr != S_FALSE)
-    {
-        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+        rfcstr = NULL;
+        hr = IMultiLanguage2_GetRfc1766FromLcid(iML2, lcid_table[i].lcid, &rfcstr);
+        ok(hr == lcid_table[i].hr,
+            "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, hr, lcid_table[i].hr);
 
-        hr = IMultiLanguage2_GetRfc1766FromLcid(iML2, lcid, &rfcstr);
-        ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
-        ok_w2("Expected \"%s\",  got \"%s\"n", kok, rfcstr);
+        if (hr != S_OK)
+            continue;   /* no result-string created */
+
+        WideCharToMultiByte(CP_ACP, 0, rfcstr, -1, buffer, sizeof(buffer), NULL, NULL);
+        LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, lcid_table[i].rfc1766,
+                    lstrlenA(lcid_table[i].rfc1766) + 1, expected, MAX_RFC1766_NAME);
+
+        ok(!lstrcmpA(buffer, expected),
+            "#%02d: got '%s' (expected '%s')\n", i, buffer, expected);
+
         SysFreeString(rfcstr);
     }
+
+    hr = IMultiLanguage2_GetRfc1766FromLcid(iML2, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US), NULL);
+    ok(hr == E_INVALIDARG, "got 0x%x (expected E_INVALIDARG)\n", hr);
+}
+
+static void test_LcidToRfc1766(void)
+{
+    CHAR expected[MAX_RFC1766_NAME];
+    CHAR buffer[MAX_RFC1766_NAME * 2];
+    HRESULT hr;
+    DWORD i;
+
+    for(i = 0; i < sizeof(lcid_table) / sizeof(lcid_table[0]); i++) {
+
+        memset(buffer, '#', sizeof(buffer)-1);
+        buffer[sizeof(buffer)-1] = '\0';
+
+        hr = LcidToRfc1766A(lcid_table[i].lcid, buffer, MAX_RFC1766_NAME);
+
+        ok(hr == lcid_table[i].hr,
+            "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, hr, lcid_table[i].hr);
+
+        if (hr != S_OK)
+            continue;
+
+        LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, lcid_table[i].rfc1766,
+                    lstrlenA(lcid_table[i].rfc1766) + 1, expected, MAX_RFC1766_NAME);
+
+        ok(!lstrcmpA(buffer, expected),
+            "#%02d: got '%s' (expected '%s')\n", i, buffer, expected);
+
+    }
+
+    memset(buffer, '#', sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+    hr = LcidToRfc1766A(-1, buffer, MAX_RFC1766_NAME);
+    ok(hr == E_FAIL, "got 0x%08x and '%s' (expected E_FAIL)\n", hr, buffer);
+
+    hr = LcidToRfc1766A(LANG_ENGLISH, NULL, MAX_RFC1766_NAME);
+    ok(hr == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", hr);
+
+    memset(buffer, '#', sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+    hr = LcidToRfc1766A(LANG_ENGLISH, buffer, -1);
+    ok(hr == E_INVALIDARG, "got 0x%08x and '%s' (expected E_INVALIDARG)\n", hr, buffer);
+
+    memset(buffer, '#', sizeof(buffer)-1);
+    buffer[sizeof(buffer)-1] = '\0';
+    hr = LcidToRfc1766A(LANG_ENGLISH, buffer, 0);
+    ok(hr == E_INVALIDARG, "got 0x%08x and '%s' (expected E_INVALIDARG)\n", hr, buffer);
+
 }
 
 static void test_IMultiLanguage2_ConvertStringFromUnicode(IMultiLanguage2 *iML2)
@@ -1488,6 +1611,9 @@ START_TEST(mlang)
         return;
 
     CoInitialize(NULL);
+    test_Rfc1766ToLcid();
+    test_LcidToRfc1766();
+
     ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IMultiLanguage2, (void **)&iML2);
     if (ret != S_OK || !iML2) return;

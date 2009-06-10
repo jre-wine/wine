@@ -41,6 +41,7 @@
 #include "wine/wined3d.h"
 #include "wined3d_gl.h"
 #include "wine/list.h"
+#include "wine/rbtree.h"
 
 /* Texture format fixups */
 
@@ -126,36 +127,9 @@ static inline enum yuv_fixup get_yuv_fixup(struct color_fixup_desc fixup)
     return yuv_fixup;
 }
 
-/* Hash table functions */
-typedef unsigned int (hash_function_t)(const void *key);
-typedef BOOL (compare_function_t)(const void *keya, const void *keyb);
-
-struct hash_table_entry_t {
-    void *key;
-    void *value;
-    unsigned int hash;
-    struct list entry;
-};
-
-struct hash_table_t {
-    hash_function_t *hash_function;
-    compare_function_t *compare_function;
-    struct list *buckets;
-    unsigned int bucket_count;
-    struct hash_table_entry_t *entries;
-    unsigned int entry_count;
-    struct list free_entries;
-    unsigned int count;
-    unsigned int grow_size;
-    unsigned int shrink_size;
-};
-
-struct hash_table_t *hash_table_create(hash_function_t *hash_function, compare_function_t *compare_function);
-void hash_table_destroy(struct hash_table_t *table, void (*free_value)(void *value, void *cb), void *cb);
-void hash_table_for_each_entry(struct hash_table_t *table, void (*callback)(void *value, void *context), void *context);
-void *hash_table_get(const struct hash_table_t *table, const void *key);
-void hash_table_put(struct hash_table_t *table, void *key, void *value);
-void hash_table_remove(struct hash_table_t *table, void *key);
+void *wined3d_rb_alloc(size_t size);
+void *wined3d_rb_realloc(void *ptr, size_t size);
+void wined3d_rb_free(void *ptr);
 
 /* Device caps */
 #define MAX_PALETTES            65536
@@ -621,18 +595,18 @@ typedef struct shader_reg_maps
     char texcoord[MAX_REG_TEXCRD];          /* pixel < 3.0 */
     char temporary[MAX_REG_TEMP];           /* pixel, vertex */
     char address[MAX_REG_ADDR];             /* vertex */
-    char packed_input[MAX_REG_INPUT];       /* pshader >= 3.0 */
-    char packed_output[MAX_REG_OUTPUT];     /* vertex >= 3.0 */
-    char attributes[MAX_ATTRIBS];           /* vertex */
     char labels[MAX_LABELS];                /* pixel, vertex */
     DWORD *constf;                          /* pixel, vertex */
     DWORD texcoord_mask[MAX_REG_TEXCRD];    /* vertex < 3.0 */
+    WORD input_registers;                   /* max(MAX_REG_INPUT, MAX_ATTRIBS), 16 */
+    WORD output_registers;                  /* MAX_REG_OUTPUT, 12 */
     WORD integer_constants;                 /* MAX_CONST_I, 16 */
     WORD boolean_constants;                 /* MAX_CONST_B, 16 */
+    WORD local_bool_consts;                 /* MAX_CONST_B, 16 */
 
     WINED3DSAMPLER_TEXTURE_TYPE sampler_type[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
     BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
-    char usesnrm, vpos, usesdsy, usestexldd, usesmova;
+    char usesnrm, vpos, usesdsx, usesdsy, usestexldd, usesmova;
     char usesrelconstF;
 
     /* Whether or not loops are used in this shader, and nesting depth */
@@ -694,6 +668,12 @@ struct wined3d_shader_semantic
     UINT usage_idx;
     WINED3DSAMPLER_TEXTURE_TYPE sampler_type;
     struct wined3d_shader_dst_param reg;
+};
+
+struct wined3d_shader_attribute
+{
+    WINED3DDECLUSAGE usage;
+    UINT usage_idx;
 };
 
 struct wined3d_shader_frontend
@@ -792,7 +772,7 @@ struct vs_compile_args {
 };
 
 typedef struct {
-    const SHADER_HANDLER *shader_instruction_handler_table;
+    void (*shader_handle_instruction)(const struct wined3d_shader_instruction *);
     void (*shader_select)(IWineD3DDevice *iface, BOOL usePS, BOOL useVS);
     void (*shader_select_depth_blt)(IWineD3DDevice *iface, enum tex_types tex_type);
     void (*shader_deselect_depth_blt)(IWineD3DDevice *iface);
@@ -804,10 +784,6 @@ typedef struct {
     HRESULT (*shader_alloc_private)(IWineD3DDevice *iface);
     void (*shader_free_private)(IWineD3DDevice *iface);
     BOOL (*shader_dirtifyable_constants)(IWineD3DDevice *iface);
-    GLuint (*shader_generate_pshader)(IWineD3DPixelShader *iface,
-            SHADER_BUFFER *buffer, const struct ps_compile_args *args);
-    GLuint (*shader_generate_vshader)(IWineD3DVertexShader *iface,
-            SHADER_BUFFER *buffer, const struct vs_compile_args *args);
     void (*shader_get_caps)(WINED3DDEVTYPE devtype, const WineD3D_GL_Info *gl_info, struct shader_caps *caps);
     BOOL (*shader_color_fixup_supported)(struct color_fixup_desc fixup);
     void (*shader_add_instruction_modifiers)(const struct wined3d_shader_instruction *ins);
@@ -1229,6 +1205,7 @@ struct WineD3DContext {
     GLint                   gl_fog_source;
     GLfloat                 fog_coord_value;
     GLfloat                 color[4], fogstart, fogend, fogcolor[4];
+    GLuint                  dummy_arbfp_prog;
 };
 
 typedef enum ContextUsage {
@@ -1381,15 +1358,16 @@ struct ffp_frag_settings {
 
 struct ffp_frag_desc
 {
+    struct wine_rb_entry entry;
     struct ffp_frag_settings    settings;
 };
 
+extern const struct wine_rb_functions wined3d_ffp_frag_program_rb_functions;
+
 void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_settings *settings, BOOL ignore_textype);
-const struct ffp_frag_desc *find_ffp_frag_shader(const struct hash_table_t *fragment_shaders,
+const struct ffp_frag_desc *find_ffp_frag_shader(const struct wine_rb_tree *fragment_shaders,
         const struct ffp_frag_settings *settings);
-void add_ffp_frag_shader(struct hash_table_t *shaders, struct ffp_frag_desc *desc);
-BOOL ffp_frag_program_key_compare(const void *keya, const void *keyb);
-unsigned int ffp_frag_program_key_hash(const void *key);
+void add_ffp_frag_shader(struct wine_rb_tree *shaders, struct ffp_frag_desc *desc);
 
 /*****************************************************************************
  * IWineD3D implementation structure
@@ -1575,6 +1553,8 @@ struct IWineD3DDeviceImpl
 
 extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl;
 
+void device_resource_add(IWineD3DDeviceImpl *This, IWineD3DResource *resource);
+void device_resource_released(IWineD3DDeviceImpl *This, IWineD3DResource *resource);
 void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         BOOL use_vshader, struct wined3d_stream_info *stream_info, BOOL *fixup);
 void device_stream_info_from_strided(IWineD3DDeviceImpl *This,
@@ -1645,7 +1625,7 @@ HRESULT resource_get_parent(IWineD3DResource *iface, IUnknown **parent);
 DWORD resource_get_priority(IWineD3DResource *iface);
 HRESULT resource_get_private_data(IWineD3DResource *iface, REFGUID guid,
         void *data, DWORD *data_size);
-HRESULT resource_init(struct IWineD3DResourceClass *resource, WINED3DRESOURCETYPE resource_type,
+HRESULT resource_init(IWineD3DResource *iface, WINED3DRESOURCETYPE resource_type,
         IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct GlPixelFormatDesc *format_desc,
         WINED3DPOOL pool, IUnknown *parent);
 WINED3DRESOURCETYPE resource_get_type(IWineD3DResource *iface);
@@ -1707,9 +1687,6 @@ typedef struct IWineD3DBaseTextureClass
     void                    (*internal_preload)(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
 } IWineD3DBaseTextureClass;
 
-void texture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
-void cubetexture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
-void volumetexture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb);
 void surface_internal_preload(IWineD3DSurface *iface, enum WINED3DSRGB srgb);
 
 typedef struct IWineD3DBaseTextureImpl
@@ -1731,7 +1708,9 @@ WINED3DTEXTUREFILTERTYPE basetexture_get_autogen_filter_type(IWineD3DBaseTexture
 BOOL basetexture_get_dirty(IWineD3DBaseTexture *iface);
 DWORD basetexture_get_level_count(IWineD3DBaseTexture *iface);
 DWORD basetexture_get_lod(IWineD3DBaseTexture *iface);
-void basetexture_init(struct IWineD3DBaseTextureClass *texture, UINT levels, DWORD usage);
+HRESULT basetexture_init(IWineD3DBaseTextureImpl *texture, UINT levels, WINED3DRESOURCETYPE resource_type,
+        IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct GlPixelFormatDesc *format_desc,
+        WINED3DPOOL pool, IUnknown *parent);
 HRESULT basetexture_set_autogen_filter_type(IWineD3DBaseTexture *iface, WINED3DTEXTUREFILTERTYPE filter_type);
 BOOL basetexture_set_dirty(IWineD3DBaseTexture *iface, BOOL dirty);
 DWORD basetexture_set_lod(IWineD3DBaseTexture *iface, DWORD new_lod);
@@ -1760,6 +1739,9 @@ typedef struct IWineD3DTextureImpl
 
 extern const IWineD3DTextureVtbl IWineD3DTexture_Vtbl;
 
+HRESULT texture_init(IWineD3DTextureImpl *texture, UINT width, UINT height, UINT levels,
+        IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format, WINED3DPOOL pool, IUnknown *parent);
+
 /*****************************************************************************
  * IWineD3DCubeTexture implementation structure (extends IWineD3DBaseTextureImpl)
  */
@@ -1775,6 +1757,9 @@ typedef struct IWineD3DCubeTextureImpl
 } IWineD3DCubeTextureImpl;
 
 extern const IWineD3DCubeTextureVtbl IWineD3DCubeTexture_Vtbl;
+
+HRESULT cubetexture_init(IWineD3DCubeTextureImpl *texture, UINT edge_length, UINT levels,
+        IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format, WINED3DPOOL pool, IUnknown *parent);
 
 typedef struct _WINED3DVOLUMET_DESC
 {
@@ -1821,6 +1806,9 @@ typedef struct IWineD3DVolumeTextureImpl
 } IWineD3DVolumeTextureImpl;
 
 extern const IWineD3DVolumeTextureVtbl IWineD3DVolumeTexture_Vtbl;
+
+HRESULT volumetexture_init(IWineD3DVolumeTextureImpl *texture, UINT width, UINT height, UINT depth, UINT levels,
+        IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format, WINED3DPOOL pool, IUnknown *parent);
 
 typedef struct _WINED3DSURFACET_DESC
 {
@@ -2578,9 +2566,11 @@ void shader_dump_dst_param(const struct wined3d_shader_dst_param *param,
 void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER *buffer,
         const shader_reg_maps *reg_maps, const DWORD *pFunction, void *backend_ctx);
 HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3d_shader_frontend *fe,
-        struct shader_reg_maps *reg_maps, struct wined3d_shader_semantic *semantics_in,
-        struct wined3d_shader_semantic *semantics_out, const DWORD *byte_code, DWORD constf_size);
+        struct shader_reg_maps *reg_maps, struct wined3d_shader_attribute *attributes,
+        struct wined3d_shader_signature_element *input_signature,
+        struct wined3d_shader_signature_element *output_signature, const DWORD *byte_code, DWORD constf_size);
 void shader_init(struct IWineD3DBaseShaderClass *shader, IWineD3DDevice *device);
+BOOL shader_match_semantic(const char *semantic_name, WINED3DDECLUSAGE usage);
 const struct wined3d_shader_frontend *shader_select_frontend(DWORD version_token);
 void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe_data, const DWORD *pFunction);
 
@@ -2649,12 +2639,6 @@ static inline BOOL shader_constant_is_local(IWineD3DBaseShaderImpl* This, DWORD 
 /*****************************************************************************
  * IDirect3DVertexShader implementation structures
  */
-
-struct vs_compiled_shader {
-    struct vs_compile_args      args;
-    GLuint                      prgId;
-};
-
 typedef struct IWineD3DVertexShaderImpl {
     /* IUnknown parts*/   
     const IWineD3DVertexShaderVtbl *lpVtbl;
@@ -2668,33 +2652,24 @@ typedef struct IWineD3DVertexShaderImpl {
     DWORD                       usage;
 
     /* The GL shader */
-    struct vs_compiled_shader   *gl_shaders;
-    UINT                        num_gl_shaders, shader_array_size;
+    void                        *backend_priv;
 
     /* Vertex shader input and output semantics */
-    struct wined3d_shader_semantic semantics_in[MAX_ATTRIBS];
-    struct wined3d_shader_semantic semantics_out[MAX_REG_OUTPUT];
+    struct wined3d_shader_attribute attributes[MAX_ATTRIBS];
+    struct wined3d_shader_signature_element output_signature[MAX_REG_OUTPUT];
 
     UINT                       min_rel_offset, max_rel_offset;
     UINT                       rel_offset;
 
     UINT                       recompile_count;
-
-    const struct vs_compile_args    *cur_args;
 } IWineD3DVertexShaderImpl;
 extern const IWineD3DVertexShaderVtbl IWineD3DVertexShader_Vtbl;
 
 void find_vs_compile_args(IWineD3DVertexShaderImpl *shader, IWineD3DStateBlockImpl *stateblock, struct vs_compile_args *args);
-GLuint find_gl_vshader(IWineD3DVertexShaderImpl *shader, const struct vs_compile_args *args);
 
 /*****************************************************************************
  * IDirect3DPixelShader implementation structure
  */
-struct ps_compiled_shader {
-    struct ps_compile_args      args;
-    GLuint                      prgId;
-};
-
 typedef struct IWineD3DPixelShaderImpl {
     /* IUnknown parts */
     const IWineD3DPixelShaderVtbl *lpVtbl;
@@ -2706,14 +2681,13 @@ typedef struct IWineD3DPixelShaderImpl {
     IUnknown                   *parent;
 
     /* Pixel shader input semantics */
-    struct wined3d_shader_semantic semantics_in[MAX_REG_INPUT];
+    struct wined3d_shader_signature_element input_signature[MAX_REG_INPUT];
     DWORD                 input_reg_map[MAX_REG_INPUT];
     BOOL                  input_reg_used[MAX_REG_INPUT];
     int                         declared_in_count;
 
     /* The GL shader */
-    struct ps_compiled_shader   *gl_shaders;
-    UINT                        num_gl_shaders, shader_array_size;
+    void                        *backend_priv;
 
     /* Some information about the shader behavior */
     struct stb_const_desc       bumpenvmatconst[MAX_TEXTURES];
@@ -2721,11 +2695,13 @@ typedef struct IWineD3DPixelShaderImpl {
     struct stb_const_desc       luminanceconst[MAX_TEXTURES];
     char                        vpos_uniform;
 
-    const struct ps_compile_args *cur_args;
+    BOOL                        color0_mov;
+    DWORD                       color0_reg;
+
 } IWineD3DPixelShaderImpl;
 
 extern const IWineD3DPixelShaderVtbl IWineD3DPixelShader_Vtbl;
-GLuint find_gl_pshader(IWineD3DPixelShaderImpl *shader, const struct ps_compile_args *args);
+void pixelshader_update_samplers(struct shader_reg_maps *reg_maps, IWineD3DBaseTexture * const *textures);
 void find_ps_compile_args(IWineD3DPixelShaderImpl *shader, IWineD3DStateBlockImpl *stateblock, struct ps_compile_args *args);
 
 /* sRGB correction constants */
@@ -2773,6 +2749,7 @@ extern WINED3DFORMAT pixelformat_for_depth(DWORD depth);
 #define WINED3DFMT_FLAG_STENCIL                  0x8
 #define WINED3DFMT_FLAG_RENDERTARGET             0x10
 #define WINED3DFMT_FLAG_FOURCC                   0x20
+#define WINED3DFMT_FLAG_FBO_ATTACHABLE           0x40
 
 struct GlPixelFormatDesc
 {

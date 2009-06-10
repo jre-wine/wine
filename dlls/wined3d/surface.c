@@ -34,10 +34,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 #define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
-static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey);
-static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert);
-static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
-
 static void surface_force_reload(IWineD3DSurface *iface)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
@@ -525,6 +521,17 @@ void surface_add_dirty_rect(IWineD3DSurface *iface, const RECT *dirty_rect)
         IWineD3DBaseTexture_SetDirty(baseTexture, TRUE);
         IWineD3DBaseTexture_Release(baseTexture);
     }
+}
+
+static inline BOOL surface_can_stretch_rect(IWineD3DSurfaceImpl *src, IWineD3DSurfaceImpl *dst)
+{
+    return ((src->resource.format_desc->Flags & WINED3DFMT_FLAG_FBO_ATTACHABLE)
+            || (src->resource.usage & WINED3DUSAGE_RENDERTARGET))
+            && ((dst->resource.format_desc->Flags & WINED3DFMT_FLAG_FBO_ATTACHABLE)
+            || (dst->resource.usage & WINED3DUSAGE_RENDERTARGET))
+            && (src->resource.format_desc->format == dst->resource.format_desc->format
+            || (is_identity_fixup(src->resource.format_desc->color_fixup)
+            && is_identity_fixup(dst->resource.format_desc->color_fixup)));
 }
 
 static ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface)
@@ -1819,6 +1826,86 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
     return WINED3D_OK;
 }
 
+static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey)
+{
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    IWineD3DPaletteImpl *pal = This->palette;
+    BOOL index_in_alpha = FALSE;
+    unsigned int i;
+
+    /* Old games like StarCraft, C&C, Red Alert and others use P8 render targets.
+     * Reading back the RGB output each lockrect (each frame as they lock the whole screen)
+     * is slow. Further RGB->P8 conversion is not possible because palettes can have
+     * duplicate entries. Store the color key in the unused alpha component to speed the
+     * download up and to make conversion unneeded. */
+    index_in_alpha = primary_render_target_is_p8(device);
+
+    if (!pal)
+    {
+        UINT dxVersion = ((IWineD3DImpl *)device->wineD3D)->dxVersion;
+
+        /* In DirectDraw the palette is a property of the surface, there are no such things as device palettes. */
+        if (dxVersion <= 7)
+        {
+            ERR("This code should never get entered for DirectDraw!, expect problems\n");
+            if (index_in_alpha)
+            {
+                /* Guarantees that memory representation remains correct after sysmem<->texture transfers even if
+                 * there's no palette at this time. */
+                for (i = 0; i < 256; i++) table[i][3] = i;
+            }
+        }
+        else
+        {
+            /* Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
+             * alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
+             * capability flag is present (wine does advertise this capability) */
+            for (i = 0; i < 256; ++i)
+            {
+                table[i][0] = device->palettes[device->currentPalette][i].peRed;
+                table[i][1] = device->palettes[device->currentPalette][i].peGreen;
+                table[i][2] = device->palettes[device->currentPalette][i].peBlue;
+                table[i][3] = device->palettes[device->currentPalette][i].peFlags;
+            }
+        }
+    }
+    else
+    {
+        TRACE("Using surface palette %p\n", pal);
+        /* Get the surface's palette */
+        for (i = 0; i < 256; ++i)
+        {
+            table[i][0] = pal->palents[i].peRed;
+            table[i][1] = pal->palents[i].peGreen;
+            table[i][2] = pal->palents[i].peBlue;
+
+            /* When index_in_alpha is set the palette index is stored in the
+             * alpha component. In case of a readback we can then read
+             * GL_ALPHA. Color keying is handled in BltOverride using a
+             * GL_ALPHA_TEST using GL_NOT_EQUAL. In case of index_in_alpha the
+             * color key itself is passed to glAlphaFunc in other cases the
+             * alpha component of pixels that should be masked away is set to 0. */
+            if (index_in_alpha)
+            {
+                table[i][3] = i;
+            }
+            else if (colorkey && (i >= This->SrcBltCKey.dwColorSpaceLowValue)
+                    && (i <= This->SrcBltCKey.dwColorSpaceHighValue))
+            {
+                table[i][3] = 0x00;
+            }
+            else if(pal->Flags & WINEDDPCAPS_ALPHA)
+            {
+                table[i][3] = pal->palents[i].peFlags;
+            }
+            else
+            {
+                table[i][3] = 0xFF;
+            }
+        }
+    }
+}
+
 static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UINT width,
         UINT height, UINT outpitch, CONVERT_TYPES convert, IWineD3DSurfaceImpl *This)
 {
@@ -2188,65 +2275,6 @@ static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UI
             ERR("Unsupported conversation type %d\n", convert);
     }
     return WINED3D_OK;
-}
-
-static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4], BOOL colorkey) {
-    IWineD3DPaletteImpl* pal = This->palette;
-    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-    BOOL index_in_alpha = FALSE;
-    int dxVersion = ( (IWineD3DImpl *) device->wineD3D)->dxVersion;
-    unsigned int i;
-
-    /* Old games like StarCraft, C&C, Red Alert and others use P8 render targets.
-    * Reading back the RGB output each lockrect (each frame as they lock the whole screen)
-    * is slow. Further RGB->P8 conversion is not possible because palettes can have
-    * duplicate entries. Store the color key in the unused alpha component to speed the
-    * download up and to make conversion unneeded. */
-    index_in_alpha = primary_render_target_is_p8(device);
-
-    if (pal == NULL) {
-        /* In DirectDraw the palette is a property of the surface, there are no such things as device palettes. */
-        if(dxVersion <= 7) {
-            ERR("This code should never get entered for DirectDraw!, expect problems\n");
-            if(index_in_alpha) {
-                /* Guarantees that memory representation remains correct after sysmem<->texture transfers even if
-                   there's no palette at this time. */
-                for (i = 0; i < 256; i++) table[i][3] = i;
-            }
-        } else {
-            /*  Direct3D >= 8 palette usage style: P8 textures use device palettes, palette entry format is A8R8G8B8,
-                alpha is stored in peFlags and may be used by the app if D3DPTEXTURECAPS_ALPHAPALETTE device
-                capability flag is present (wine does advertise this capability) */
-            for (i = 0; i < 256; i++) {
-                table[i][0] = device->palettes[device->currentPalette][i].peRed;
-                table[i][1] = device->palettes[device->currentPalette][i].peGreen;
-                table[i][2] = device->palettes[device->currentPalette][i].peBlue;
-                table[i][3] = device->palettes[device->currentPalette][i].peFlags;
-            }
-        }
-    } else {
-        TRACE("Using surface palette %p\n", pal);
-        /* Get the surface's palette */
-        for (i = 0; i < 256; i++) {
-            table[i][0] = pal->palents[i].peRed;
-            table[i][1] = pal->palents[i].peGreen;
-            table[i][2] = pal->palents[i].peBlue;
-
-            /* When index_in_alpha is the palette index is stored in the alpha component. In case of a readback
-               we can then read GL_ALPHA. Color keying is handled in BltOverride using a GL_ALPHA_TEST using GL_NOT_EQUAL.
-               In case of index_in_alpha the color key itself is passed to glAlphaFunc in other cases the alpha component
-               of pixels that should be masked away is set to 0. */
-            if(index_in_alpha) {
-                table[i][3] = i;
-            } else if(colorkey && (i >= This->SrcBltCKey.dwColorSpaceLowValue) &&  (i <= This->SrcBltCKey.dwColorSpaceHighValue)) {
-                table[i][3] = 0x00;
-            } else if(pal->Flags & WINEDDPCAPS_ALPHA) {
-                table[i][3] = pal->palents[i].peFlags;
-            } else {
-                table[i][3] = 0xFF;
-            }
-        }
-    }
 }
 
 /* This function is used in case of 8bit paletted textures to upload the palette.
@@ -3391,7 +3419,9 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, const 
          * FBO support, so it doesn't really make sense to try and make it work with different offscreen rendering
          * backends.
          */
-        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT)) {
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT)
+                && surface_can_stretch_rect(Src, This))
+        {
             stretch_rect_fbo((IWineD3DDevice *)myDevice, SrcSurface, &srect,
                     (IWineD3DSurface *)This, &rect, Filter, upsideDown);
         } else if((!stretchx) || rect.x2 - rect.x1 > Src->currentDesc.Width ||
@@ -3453,8 +3483,10 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, const 
             Src->palette = This->palette;
         }
 
-        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT) &&
-            (Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE)) == 0) {
+        if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && GL_SUPPORT(EXT_FRAMEBUFFER_BLIT)
+                && !(Flags & (WINEDDBLT_KEYSRC | WINEDDBLT_KEYSRCOVERRIDE))
+                && surface_can_stretch_rect(Src, This))
+        {
             TRACE("Using stretch_rect_fbo\n");
             /* The source is always a texture, but never the currently active render target, and the texture
              * contents are never upside down

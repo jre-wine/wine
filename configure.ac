@@ -199,14 +199,10 @@ then
   AC_MSG_ERROR([no suitable bison found. Please install the 'bison' package.])
 fi
 
-AC_CHECK_TOOLS(AS,[gas as],as)
-AC_CHECK_TOOLS(LD,[ld gld],ld)
-AC_CHECK_TOOLS(NM,[nm gnm],nm)
 AC_CHECK_TOOLS(AR,[ar gar],ar)
 AC_SUBST(ARFLAGS,rc)
 AC_PROG_RANLIB
 AC_CHECK_TOOL(STRIP,strip,strip)
-AC_CHECK_TOOL(WINDRES,windres,false)
 AC_PROG_LN_S
 WINE_PROG_LN
 AC_PROG_EGREP
@@ -278,6 +274,7 @@ AC_CHECK_HEADERS(\
 	dlfcn.h \
 	elf.h \
 	float.h \
+	fnmatch.h \
 	fontconfig/fontconfig.h \
 	getopt.h \
 	grp.h \
@@ -380,7 +377,8 @@ AC_CHECK_HEADERS(\
 	unistd.h \
 	utime.h \
 	valgrind/memcheck.h \
-	valgrind/valgrind.h
+	valgrind/valgrind.h \
+	zlib.h
 )
 AC_HEADER_STAT()
 
@@ -674,11 +672,11 @@ if test "$cross_compiling" = "no" -a "$LIBEXT" != "dll"
 then
     WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
     WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
-    WINE_CHECK_MINGW_PROG(CROSSWINDRES,windres,false)
     WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
     if test "$CROSSCC" != "false"
     then
         AC_SUBST(CROSSTEST,"\$(CROSSTEST)")
+        AC_SUBST(CROSSTARGETFLAGS,"-b `expr $CROSSCC : '\(.*\)-gcc'`")
     fi
 fi
 
@@ -1168,6 +1166,13 @@ WINE_CHECK_LIB_FUNCS(\
         pthread_get_stacksize_np,
         [$LIBPTHREAD])
 
+dnl **** Check for zlib ****
+if test "$ac_cv_header_zlib_h" = "yes"
+then
+    AC_CHECK_LIB(z,inflate,[AC_DEFINE(HAVE_ZLIB,1,[Define to 1 if you have the `z' library (-lz).])
+                            AC_SUBST(ZLIB,"-lz")])
+fi
+
 dnl **** Check for EsounD ****
 if test "x$with_esd" != xno
 then
@@ -1292,6 +1297,19 @@ dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
     WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm -lz,[[libpng[[0-9]]*]])
+elif test -n "$X_CFLAGS" -a "x$with_png" != "xno"
+then
+    dnl libpng is in the X directory on Mac OS X
+    ac_save_CPPFLAGS="$CPPFLAGS"
+    CPPFLAGS="$CPPFLAGS $X_CFLAGS"
+    $as_unset ac_cv_header_png_h
+    AC_CHECK_HEADERS([png.h])
+    CPPFLAGS="$ac_save_CPPFLAGS"
+    if test "$ac_cv_header_png_h" = "yes"
+    then
+        AC_SUBST(PNGINCL,"$X_CFLAGS")
+        WINE_CHECK_SONAME(png,png_create_read_struct,,,[$X_LIBS -lm -lz],[[libpng[[0-9]]*]])
+    fi
 fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
                  [libpng ${notice_platform}development files not found, PNG won't be supported.])
@@ -1451,6 +1469,7 @@ AC_CHECK_FUNCS(\
 	epoll_create \
 	ffs \
 	finite \
+	fnmatch \
 	fork \
 	fpclass \
 	fstatfs \

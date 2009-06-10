@@ -33,6 +33,9 @@ DEFINE_GUID( test_stg_cls, 0x88888888, 0x0425, 0x0000, 0,0,0,0,0,0,0,0);
 
 #define ok_ole_success(hr, func) ok(hr == S_OK, func " failed with error 0x%08x\n", hr)
 
+static CHAR filenameA[MAX_PATH];
+static WCHAR filename[MAX_PATH];
+
 static void test_hglobal_storage_stat(void)
 {
     ILockBytes *ilb = NULL;
@@ -67,16 +70,10 @@ static void test_hglobal_storage_stat(void)
 
 static void test_create_storage_modes(void)
 {
-   static const WCHAR szPrefix[] = { 's','t','g',0 };
-   static const WCHAR szDot[] = { '.',0 };
-   WCHAR filename[MAX_PATH];
    IStorage *stg = NULL;
    HRESULT r;
 
-   if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-      return;
-
-   DeleteFileW(filename);
+   DeleteFileA(filenameA);
 
    /* test with some invalid parameters */
    r = StgCreateDocfile( NULL, 0, 0, &stg);
@@ -144,7 +141,7 @@ static void test_create_storage_modes(void)
    ok(r==STG_E_INVALIDFLAG, "StgCreateDocfile wrong error\n");
    r = StgCreateDocfile( filename, STGM_TRANSACTED | STGM_SHARE_DENY_WRITE | STGM_READ, 0, &stg);
    ok(r==STG_E_INVALIDFLAG, "StgCreateDocfile wrong error\n");
-   ok(DeleteFileW(filename), "failed to delete file\n");
+   ok(DeleteFileA(filenameA), "failed to delete file\n");
 
    r = StgCreateDocfile( filename, STGM_SHARE_EXCLUSIVE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
    ok(r==S_OK, "StgCreateDocfile failed\n");
@@ -161,13 +158,13 @@ static void test_create_storage_modes(void)
    ok(r==S_OK, "StgCreateDocfile failed\n");
    r = IStorage_Release(stg);
    ok(r == 0, "storage not released\n");
-   ok(DeleteFileW(filename), "failed to delete file\n");
+   ok(DeleteFileA(filenameA), "failed to delete file\n");
 
    r = StgCreateDocfile( filename, STGM_CREATE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
    ok(r==S_OK, "StgCreateDocfile failed\n");
    r = IStorage_Release(stg);
    ok(r == 0, "storage not released\n");
-   ok(DeleteFileW(filename), "failed to delete file\n");
+   ok(DeleteFileA(filenameA), "failed to delete file\n");
 
    /* test the way excel uses StgCreateDocFile */
    r = StgCreateDocfile( filename, STGM_TRANSACTED|STGM_CREATE|STGM_SHARE_DENY_WRITE|STGM_READWRITE, 0, &stg);
@@ -176,7 +173,7 @@ static void test_create_storage_modes(void)
    {
       r = IStorage_Release(stg);
       ok(r == 0, "storage not released\n");
-      ok(DeleteFileW(filename), "failed to delete file\n");
+      ok(DeleteFileA(filenameA), "failed to delete file\n");
    }
 
    /* and the way windows media uses it ... */
@@ -186,7 +183,7 @@ static void test_create_storage_modes(void)
    {
       r = IStorage_Release(stg);
       ok(r == 0, "storage not released\n");
-      ok(DeleteFileW(filename), "failed to delete file\n");
+      ok(DeleteFileA(filenameA), "failed to delete file\n");
    }
 
    /* looks like we need STGM_TRANSACTED or STGM_CREATE */
@@ -196,7 +193,7 @@ static void test_create_storage_modes(void)
    {
       r = IStorage_Release(stg);
       ok(r == 0, "storage not released\n");
-      ok(DeleteFileW(filename), "failed to delete file\n");
+      ok(DeleteFileA(filenameA), "failed to delete file\n");
    }
 
    r = StgCreateDocfile( filename, STGM_TRANSACTED|STGM_CREATE|STGM_SHARE_DENY_WRITE|STGM_WRITE, 0, &stg);
@@ -205,7 +202,7 @@ static void test_create_storage_modes(void)
    {
       r = IStorage_Release(stg);
       ok(r == 0, "storage not released\n");
-      ok(DeleteFileW(filename), "failed to delete file\n");
+      ok(DeleteFileA(filenameA), "failed to delete file\n");
    }
 
    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stg);
@@ -214,7 +211,7 @@ static void test_create_storage_modes(void)
    {
       r = IStorage_Release(stg);
       ok(r == 0, "storage not released\n");
-      ok(DeleteFileW(filename), "failed to delete file\n");
+      ok(DeleteFileA(filenameA), "failed to delete file\n");
    }
 
    /* test the way msi uses StgCreateDocfile */
@@ -222,19 +219,16 @@ static void test_create_storage_modes(void)
    ok(r==S_OK, "StgCreateDocFile failed\n");
    r = IStorage_Release(stg);
    ok(r == 0, "storage not released\n");
-   ok(DeleteFileW(filename), "failed to delete file\n");
+   ok(DeleteFileA(filenameA), "failed to delete file\n");
 }
 
 static void test_storage_stream(void)
 {
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    static const WCHAR szDot[] = { '.',0 };
     static const WCHAR longname[] = {
         'a','a','a','a','a','a','a','a','a','a','a','a','a','a','a','a',
         'a','a','a','a','a','a','a','a','a','a','a','a','a','a','a','a',0
     };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL;
     HRESULT r;
     IStream *stm = NULL;
@@ -244,10 +238,7 @@ static void test_storage_stream(void)
     ULARGE_INTEGER p;
     unsigned char buffer[0x100];
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
     ok(r==S_OK, "StgCreateDocfile failed\n");
@@ -345,15 +336,15 @@ static void test_storage_stream(void)
 
     r = IStorage_Release(stg);
     ok(r == 0, "wrong ref count\n");
-    r = DeleteFileW(filename);
+    r = DeleteFileA(filenameA);
     ok(r, "file should exist\n");
 }
 
-static BOOL touch_file(LPCWSTR filename)
+static BOOL touch_file(LPCSTR filename)
 {
     HANDLE file;
 
-    file = CreateFileW(filename, GENERIC_READ|GENERIC_WRITE, 0, NULL, 
+    file = CreateFileA(filename, GENERIC_READ|GENERIC_WRITE, 0, NULL,
                 CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file==INVALID_HANDLE_VALUE)
         return FALSE;
@@ -361,12 +352,12 @@ static BOOL touch_file(LPCWSTR filename)
     return TRUE;
 }
 
-static BOOL is_zero_length(LPCWSTR filename)
+static BOOL is_zero_length(LPCSTR filename)
 {
     HANDLE file;
     DWORD len;
 
-    file = CreateFileW(filename, GENERIC_READ, 0, NULL, 
+    file = CreateFileA(filename, GENERIC_READ, 0, NULL,
                 OPEN_EXISTING, 0, NULL);
     if (file==INVALID_HANDLE_VALUE)
         return FALSE;
@@ -375,11 +366,11 @@ static BOOL is_zero_length(LPCWSTR filename)
     return len == 0;
 }
 
-static BOOL is_existing_file(LPCWSTR filename)
+static BOOL is_existing_file(LPCSTR filename)
 {
     HANDLE file;
 
-    file = CreateFileW(filename, GENERIC_READ, 0, NULL,
+    file = CreateFileA(filename, GENERIC_READ, 0, NULL,
                        OPEN_EXISTING, 0, NULL);
     if (file==INVALID_HANDLE_VALUE)
         return FALSE;
@@ -389,20 +380,14 @@ static BOOL is_existing_file(LPCWSTR filename)
 
 static void test_open_storage(void)
 {
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
     static const WCHAR szNonExist[] = { 'n','o','n','e','x','i','s','t',0 };
-    static const WCHAR szDot[] = { '.',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL, *stg2 = NULL;
     HRESULT r;
     DWORD stgm;
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
     /* try opening a zero length file - it should stay zero length */
-    DeleteFileW(filename);
-    touch_file(filename);
+    DeleteFileA(filenameA);
+    touch_file(filenameA);
     stgm = STGM_NOSCRATCH | STGM_TRANSACTED | STGM_SHARE_DENY_WRITE | STGM_READWRITE;
     r = StgOpenStorage( filename, NULL, stgm, NULL, 0, &stg);
     ok(r==STG_E_FILEALREADYEXISTS, "StgOpenStorage didn't fail\n");
@@ -410,17 +395,17 @@ static void test_open_storage(void)
     stgm = STGM_SHARE_EXCLUSIVE | STGM_READWRITE;
     r = StgOpenStorage( filename, NULL, stgm, NULL, 0, &stg);
     ok(r==STG_E_FILEALREADYEXISTS, "StgOpenStorage didn't fail\n");
-    ok(is_zero_length(filename), "file length changed\n");
+    ok(is_zero_length(filenameA), "file length changed\n");
 
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* try opening a nonexistent file - it should not create it */
     stgm = STGM_DIRECT | STGM_SHARE_EXCLUSIVE | STGM_READWRITE;
     r = StgOpenStorage( filename, NULL, stgm, NULL, 0, &stg);
     ok(r!=S_OK, "StgOpenStorage failed: 0x%08x\n", r);
     if (r==S_OK) IStorage_Release(stg);
-    ok(!is_existing_file(filename), "StgOpenStorage should not create a file\n");
-    DeleteFileW(filename);
+    ok(!is_existing_file(filenameA), "StgOpenStorage should not create a file\n");
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
@@ -558,24 +543,18 @@ static void test_open_storage(void)
     r = StgOpenStorage( filename, NULL, STGM_NOSNAPSHOT | STGM_PRIORITY, NULL, 0, &stg);
     ok(r == STG_E_INVALIDFLAG, "should fail\n");
 
-    r = DeleteFileW(filename);
+    r = DeleteFileA(filenameA);
     ok(r, "file didn't exist\n");
 }
 
 static void test_storage_suminfo(void)
 {
-    static const WCHAR szDot[] = { '.',0 };
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL;
     IPropertySetStorage *propset = NULL;
     IPropertyStorage *ps = NULL;
     HRESULT r;
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | 
@@ -673,14 +652,11 @@ static void test_storage_suminfo(void)
     r = IStorage_Release(stg);
     ok(r == 0, "ref count wrong\n");
 
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 }
 
 static void test_storage_refcount(void)
 {
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    static const WCHAR szDot[] = { '.',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL;
     IStorage *stgprio = NULL;
     HRESULT r;
@@ -691,10 +667,7 @@ static void test_storage_refcount(void)
     STATSTG stat;
     char buffer[10];
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | 
@@ -774,7 +747,7 @@ static void test_storage_refcount(void)
 
         r = IStorage_Stat( stg2, &statstg, STATFLAG_DEFAULT );
         ok(r == S_OK, "Stat should have succeded instead of returning 0x%08x\n", r);
-        ok(!lstrcmpW(statstg.pwcsName, stgname),
+        ok(!memcmp(statstg.pwcsName, stgname, sizeof(stgname)),
             "Statstg pwcsName should have been the name the storage was created with\n");
         ok(statstg.type == STGTY_STORAGE, "Statstg type should have been STGTY_STORAGE instead of %d\n", statstg.type);
         ok(U(statstg.cbSize).LowPart == 0, "Statstg cbSize.LowPart should have been 0 instead of %d\n", U(statstg.cbSize).LowPart);
@@ -800,22 +773,16 @@ static void test_storage_refcount(void)
     }
     IStorage_Release(stgprio);
 
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 }
 
 static void test_writeclassstg(void)
 {
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    static const WCHAR szDot[] = { '.',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL;
     HRESULT r;
     CLSID temp_cls;
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
@@ -850,14 +817,11 @@ static void test_writeclassstg(void)
     r = IStorage_Release( stg );
     ok (r == 0, "storage not released\n");
 
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 }
 
 static void test_streamenum(void)
 {
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    static const WCHAR szDot[] = { '.',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL;
     HRESULT r;
     IStream *stm = NULL;
@@ -866,10 +830,7 @@ static void test_streamenum(void)
     IEnumSTATSTG *ee = NULL;
     ULONG count;
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
@@ -928,24 +889,18 @@ static void test_streamenum(void)
     r = IStorage_Release( stg );
     ok (r == 0, "storage not released\n");
 
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 }
 
 static void test_transact(void)
 {
-    static const WCHAR szPrefix[] = { 's','t','g',0 };
-    static const WCHAR szDot[] = { '.',0 };
-    WCHAR filename[MAX_PATH];
     IStorage *stg = NULL, *stg2 = NULL;
     HRESULT r;
     IStream *stm = NULL;
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
     static const WCHAR stmname2[] = { 'F','O','O',0 };
 
-    if(!GetTempFileNameW(szDot, szPrefix, 0, filename))
-        return;
-
-    DeleteFileW(filename);
+    DeleteFileA(filenameA);
 
     /* create the file */
     r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | 
@@ -1016,7 +971,7 @@ static void test_transact(void)
 
     IStorage_Release(stg);
 
-    r = DeleteFileW(filename);
+    r = DeleteFileA(filenameA);
     ok( r == TRUE, "deleted file\n");
 }
 
@@ -1267,8 +1222,202 @@ static void test_access(void)
     DeleteFileA("winetest");
 }
 
+static void test_readonly(void)
+{
+    IStorage *stg, *stg2, *stg3;
+    IStream *stream;
+    HRESULT hr;
+    static const WCHAR fileW[] = {'w','i','n','e','t','e','s','t',0};
+    static const WCHAR storageW[] = {'s','t','o','r','a','g','e',0};
+    static const WCHAR streamW[] = {'s','t','r','e','a','m',0};
+
+    hr = StgCreateDocfile( fileW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stg);
+    ok(hr == S_OK, "should succeed, res=%x\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IStorage_CreateStorage( stg, storageW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stg2 );
+        ok(hr == S_OK, "should succeed, res=%x\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            hr = IStorage_CreateStream( stg2, streamW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stream );
+            ok(hr == S_OK, "should succeed, res=%x\n", hr);
+            if (SUCCEEDED(hr))
+                IStream_Release(stream);
+            IStorage_Release(stg2);
+        }
+        IStorage_Release(stg);
+    }
+
+    /* re-open read only */
+    hr = StgOpenStorage( fileW, NULL, STGM_TRANSACTED | STGM_SHARE_DENY_NONE | STGM_READ, NULL, 0, &stg);
+    ok(hr == S_OK, "should succeed, res=%x\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IStorage_OpenStorage( stg, storageW, NULL, STGM_SHARE_EXCLUSIVE | STGM_READ, NULL, 0, &stg2 );
+        ok(hr == S_OK, "should succeed, res=%x\n", hr);
+        if (SUCCEEDED(hr))
+        {
+            /* CreateStream on read-only storage, name exists */
+            hr = IStorage_CreateStream( stg2, streamW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READ, 0, 0, &stream );
+            ok(hr == STG_E_ACCESSDENIED, "should fail, res=%x\n", hr);
+            if (SUCCEEDED(hr))
+                IStream_Release(stream);
+
+            /* CreateStream on read-only storage, name does not exist */
+            hr = IStorage_CreateStream( stg2, storageW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READ, 0, 0, &stream );
+            ok(hr == STG_E_ACCESSDENIED, "should fail, res=%x\n", hr);
+            if (SUCCEEDED(hr))
+                IStream_Release(stream);
+
+            /* CreateStorage on read-only storage, name exists */
+            hr = IStorage_CreateStorage( stg2, streamW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READ, 0, 0, &stg3 );
+            ok(hr == STG_E_FILEALREADYEXISTS, "should fail, res=%x\n", hr);
+            if (SUCCEEDED(hr))
+                IStream_Release(stg3);
+
+            /* CreateStorage on read-only storage, name does not exist */
+            hr = IStorage_CreateStorage( stg2, storageW, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READ, 0, 0, &stg3 );
+            ok(hr == STG_E_ACCESSDENIED, "should fail, res=%x\n", hr);
+            if (SUCCEEDED(hr))
+                IStream_Release(stg3);
+
+            /* DestroyElement on read-only storage, name exists */
+            hr = IStorage_DestroyElement( stg2, streamW );
+            ok(hr == STG_E_ACCESSDENIED, "should fail, res=%x\n", hr);
+
+            /* DestroyElement on read-only storage, name does not exist */
+            hr = IStorage_DestroyElement( stg2, storageW );
+            ok(hr == STG_E_ACCESSDENIED, "should fail, res=%x\n", hr);
+
+            IStorage_Release(stg2);
+        }
+
+        IStorage_Release(stg);
+    }
+
+    DeleteFileA("winetest");
+}
+
+static void test_simple(void)
+{
+    /* Tests for STGM_SIMPLE mode */
+
+    IStorage *stg;
+    HRESULT r;
+    IStream *stm;
+    static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stmname2[] = { 'S','m','a','l','l',0 };
+    LARGE_INTEGER pos;
+    ULARGE_INTEGER upos;
+    DWORD count;
+    STATSTG stat;
+
+    DeleteFileA(filenameA);
+
+    r = StgCreateDocfile( filename, STGM_SIMPLE | STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stg);
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStorage_CreateStream(stg, stmname, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm);
+    ok(r == STG_E_INVALIDFLAG, "got %08x\n", r);
+    r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm);
+    ok(r == S_OK, "got %08x\n", r);
+
+    upos.QuadPart = 6000;
+    r = IStream_SetSize(stm, upos);
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStream_Write(stm, "foo", 3, &count);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(count == 3, "got %d\n", count);
+
+    pos.QuadPart = 0;
+    r = IStream_Seek(stm, pos, STREAM_SEEK_CUR, &upos);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(upos.QuadPart == 3, "got %d\n", upos.u.LowPart);
+
+    r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
+    ok(r == S_OK ||
+       broken(r == STG_E_INVALIDFUNCTION), /* NT4 and below */
+       "got %08x\n", r);
+    if (r == S_OK)
+        ok(stat.cbSize.QuadPart == 3, "got %d\n", stat.cbSize.u.LowPart);
+
+    pos.QuadPart = 1;
+    r = IStream_Seek(stm, pos, STREAM_SEEK_SET, &upos);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(upos.QuadPart == 1, "got %d\n", upos.u.LowPart);
+
+    r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
+    ok(r == S_OK ||
+       broken(r == STG_E_INVALIDFUNCTION), /* NT4 and below */
+       "got %08x\n", r);
+    if (r == S_OK)
+        ok(stat.cbSize.QuadPart == 1, "got %d\n", stat.cbSize.u.LowPart);
+
+    IStream_Release(stm);
+
+    r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm);
+    ok(r == S_OK, "got %08x\n", r);
+
+    upos.QuadPart = 100;
+    r = IStream_SetSize(stm, upos);
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStream_Write(stm, "foo", 3, &count);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(count == 3, "got %d\n", count);
+
+    IStream_Release(stm);
+
+    IStorage_Commit(stg, STGC_DEFAULT);
+    IStorage_Release(stg);
+
+    r = StgOpenStorage( filename, NULL, STGM_SIMPLE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, NULL, 0, &stg);
+    if (r == STG_E_INVALIDFLAG)
+    {
+        win_skip("Flag combination is not supported on NT4 and below\n");
+        DeleteFileA(filenameA);
+        return;
+    }
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stm);
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(stat.cbSize.QuadPart == 6000, "got %d\n", stat.cbSize.u.LowPart);
+
+    IStream_Release(stm);
+
+    r = IStorage_OpenStream(stg, stmname2, NULL, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stm);
+    ok(r == S_OK, "got %08x\n", r);
+
+    r = IStream_Stat(stm, &stat, STATFLAG_NONAME);
+    ok(r == S_OK, "got %08x\n", r);
+    ok(stat.cbSize.QuadPart == 4096, "got %d\n", stat.cbSize.u.LowPart);
+
+    IStream_Release(stm);
+
+
+    IStorage_Release(stg);
+
+    DeleteFileA(filenameA);
+}
+
 START_TEST(storage32)
 {
+    CHAR temp[MAX_PATH];
+
+    GetTempPathA(MAX_PATH, temp);
+    if(!GetTempFileNameA(temp, "stg", 0, filenameA))
+    {
+        win_skip("Could not create temp file, %u\n", GetLastError());
+        return;
+    }
+    MultiByteToWideChar(CP_ACP, 0, filenameA, -1, filename, MAX_PATH);
+    DeleteFileA(filenameA);
+
     test_hglobal_storage_stat();
     test_create_storage_modes();
     test_storage_stream();
@@ -1280,4 +1429,6 @@ START_TEST(storage32)
     test_ReadClassStm();
     test_access();
     test_writeclassstg();
+    test_readonly();
+    test_simple();
 }

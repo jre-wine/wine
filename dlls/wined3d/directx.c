@@ -63,6 +63,7 @@ static const struct {
 
     /* ARB */
     {"GL_ARB_color_buffer_float",           ARB_COLOR_BUFFER_FLOAT,         0                           },
+    {"GL_ARB_depth_texture",                ARB_DEPTH_TEXTURE,              0                           },
     {"GL_ARB_draw_buffers",                 ARB_DRAW_BUFFERS,               0                           },
     {"GL_ARB_fragment_program",             ARB_FRAGMENT_PROGRAM,           0                           },
     {"GL_ARB_fragment_shader",              ARB_FRAGMENT_SHADER,            0                           },
@@ -103,6 +104,7 @@ static const struct {
     {"GL_EXT_framebuffer_blit",             EXT_FRAMEBUFFER_BLIT,           0                           },
     {"GL_EXT_framebuffer_multisample",      EXT_FRAMEBUFFER_MULTISAMPLE,    0                           },
     {"GL_EXT_framebuffer_object",           EXT_FRAMEBUFFER_OBJECT,         0                           },
+    {"GL_EXT_packed_depth_stencil",         EXT_PACKED_DEPTH_STENCIL,       0                           },
     {"GL_EXT_paletted_texture",             EXT_PALETTED_TEXTURE,           0                           },
     {"GL_EXT_point_parameters",             EXT_POINT_PARAMETERS,           0                           },
     {"GL_EXT_secondary_color",              EXT_SECONDARY_COLOR,            0                           },
@@ -754,6 +756,8 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
     if (NULL == GL_Extensions) {
         ERR("   GL_Extensions returns NULL\n");
     } else {
+        gl_info->supported[WINED3D_GL_EXT_NONE] = TRUE;
+
         while (*GL_Extensions != 0x00) {
             const char *Start;
             char        ThisExtn[256];
@@ -901,7 +905,7 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                  * So this is just a check to check that our assumption holds true. If not, write a warning
                  * and reduce the number of vertex samplers or probably disable vertex texture fetch.
                  */
-                if(gl_info->max_vertex_samplers &&
+                if(gl_info->max_vertex_samplers && gl_info->max_combined_samplers < 12 &&
                    MAX_TEXTURES + gl_info->max_vertex_samplers > gl_info->max_combined_samplers) {
                     FIXME("OpenGL implementation supports %u vertex samplers and %u total samplers\n",
                           gl_info->max_vertex_samplers, gl_info->max_combined_samplers);
@@ -1737,7 +1741,7 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterIdentifier(IWineD3D *iface, UINT Ad
         strcpy(pIdentifier->Description, This->adapters[Adapter].description);
 
     /* Note dx8 doesn't supply a DeviceName */
-    if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY"); /* FIXME: May depend on desktop? */
+    if (NULL != pIdentifier->DeviceName) strcpy(pIdentifier->DeviceName, "\\\\.\\DISPLAY1"); /* FIXME: May depend on desktop? */
     pIdentifier->DriverVersion->u.HighPart = This->adapters[Adapter].gl_info.driver_version_hipart;
     pIdentifier->DriverVersion->u.LowPart = This->adapters[Adapter].gl_info.driver_version;
     *(pIdentifier->VendorId) = This->adapters[Adapter].gl_info.gl_vendor;
@@ -1915,7 +1919,10 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
 
     /* TODO: handle Windowed, add more quality levels */
 
-    if (WINED3DMULTISAMPLE_NONE == MultiSampleType) return WINED3D_OK;
+    if (WINED3DMULTISAMPLE_NONE == MultiSampleType) {
+        if(pQualityLevels) *pQualityLevels = 1;
+        return WINED3D_OK;
+    }
 
     /* By default multisampling is disabled right now as it causes issues
      * on some Nvidia driver versions and it doesn't work well in combination

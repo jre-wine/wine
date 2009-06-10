@@ -39,11 +39,15 @@ GpStatus WINGDIPAPI GdipSetAdjustableArrowCapMiddleInset(GpAdjustableArrowCap*,R
 GpStatus WINGDIPAPI GdipSetAdjustableArrowCapWidth(GpAdjustableArrowCap*,REAL);
 
 /* Bitmap */
+GpStatus WINGDIPAPI GdipBitmapApplyEffect(GpBitmap*,CGpEffect*,RECT*,BOOL,VOID**,INT*);
+GpStatus WINGDIPAPI GdipBitmapCreateApplyEffect(GpBitmap**,INT,CGpEffect*,RECT*,RECT*,GpBitmap**,BOOL,VOID**,INT*);
 GpStatus WINGDIPAPI GdipBitmapGetPixel(GpBitmap*,INT,INT,ARGB*);
 GpStatus WINGDIPAPI GdipBitmapLockBits(GpBitmap*,GDIPCONST GpRect*,UINT,
     PixelFormat,BitmapData*);
 GpStatus WINGDIPAPI GdipBitmapSetPixel(GpBitmap*,INT,INT,ARGB);
 GpStatus WINGDIPAPI GdipBitmapUnlockBits(GpBitmap*,BitmapData*);
+GpStatus WINGDIPAPI GdipCloneBitmapArea(REAL,REAL,REAL,REAL,PixelFormat,GpBitmap*,GpBitmap**);
+GpStatus WINGDIPAPI GdipCloneBitmapAreaI(INT,INT,INT,INT,PixelFormat,GpBitmap*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromFile(GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromFileICM(GDIPCONST WCHAR*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromGdiDib(GDIPCONST BITMAPINFO*,VOID*,GpBitmap**);
@@ -55,6 +59,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT,INT,INT,PixelFormat,BYTE*,
     GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromStream(IStream*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromStreamICM(IStream*,GpBitmap**);
+GpStatus WINGDIPAPI GdipCreateHICONFromBitmap(GpBitmap*,HICON*);
+GpStatus WINGDIPAPI GdipDeleteEffect(CGpEffect*);
 
 /* Brush */
 GpStatus WINGDIPAPI GdipCloneBrush(GpBrush*,GpBrush**);
@@ -118,6 +124,10 @@ GpStatus WINGDIPAPI GdipIsStyleAvailable(GDIPCONST GpFontFamily *, INT, BOOL*);
 
 /* Graphics */
 GpStatus WINGDIPAPI GdipFlush(GpGraphics*, GpFlushIntention);
+GpStatus WINGDIPAPI GdipBeginContainer(GpGraphics*,GDIPCONST GpRectF*,GDIPCONST GpRectF*,GpUnit,GraphicsContainer*);
+GpStatus WINGDIPAPI GdipBeginContainer2(GpGraphics*,GraphicsContainer*);
+GpStatus WINGDIPAPI GdipBeginContainerI(GpGraphics*,GDIPCONST GpRect*,GDIPCONST GpRect*,GpUnit,GraphicsContainer*);
+GpStatus WINGDIPAPI GdipComment(GpGraphics*,UINT,GDIPCONST BYTE*);
 GpStatus WINGDIPAPI GdipCreateFromHDC(HDC,GpGraphics**);
 GpStatus WINGDIPAPI GdipCreateFromHDC2(HDC,HANDLE,GpGraphics**);
 GpStatus WINGDIPAPI GdipCreateFromHWND(HWND,GpGraphics**);
@@ -141,6 +151,10 @@ GpStatus WINGDIPAPI GdipDrawEllipse(GpGraphics*,GpPen*,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipDrawEllipseI(GpGraphics*,GpPen*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipDrawImage(GpGraphics*,GpImage*,REAL,REAL);
 GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics*,GpImage*,INT,INT);
+GpStatus WINGDIPAPI GdipDrawImagePointRect(GpGraphics*,GpImage*,REAL,REAL,REAL,REAL,REAL,REAL,GpUnit);
+GpStatus WINGDIPAPI GdipDrawImagePointRectI(GpGraphics*,GpImage*,INT,INT,INT,INT,INT,INT,GpUnit);
+GpStatus WINGDIPAPI GdipDrawImagePoints(GpGraphics*,GpImage*,GDIPCONST GpPointF*,INT);
+GpStatus WINGDIPAPI GdipDrawImagePointsI(GpGraphics*,GpImage*,GDIPCONST GpPoint*,INT);
 GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics*,GpImage*,
     GDIPCONST GpPointF*,INT,REAL,REAL,REAL,REAL,GpUnit,
     GDIPCONST GpImageAttributes*,DrawImageAbort,VOID*);
@@ -281,6 +295,8 @@ GpStatus WINGDIPAPI GdipAddPathRectangle(GpPath*,REAL,REAL,REAL,REAL);
 GpStatus WINGDIPAPI GdipAddPathRectangleI(GpPath*,INT,INT,INT,INT);
 GpStatus WINGDIPAPI GdipAddPathRectangles(GpPath*,GDIPCONST GpRectF*,INT);
 GpStatus WINGDIPAPI GdipAddPathRectanglesI(GpPath*,GDIPCONST GpRect*,INT);
+GpStatus WINGDIPAPI GdipAddPathString(GpPath*,GDIPCONST WCHAR*,INT,GDIPCONST GpFontFamily*,INT,REAL,GDIPCONST RectF*,GDIPCONST GpStringFormat*);
+GpStatus WINGDIPAPI GdipAddPathStringI(GpPath*,GDIPCONST WCHAR*,INT,GDIPCONST GpFontFamily*,INT,REAL,GDIPCONST Rect*,GDIPCONST GpStringFormat*);
 GpStatus WINGDIPAPI GdipClearPathMarkers(GpPath*);
 GpStatus WINGDIPAPI GdipClonePath(GpPath*,GpPath**);
 GpStatus WINGDIPAPI GdipClosePathFigure(GpPath*);
@@ -317,6 +333,7 @@ GpStatus WINGDIPAPI GdipTransformPath(GpPath*,GpMatrix*);
 GpStatus WINGDIPAPI GdipCloneImage(GpImage*, GpImage**);
 GpStatus WINGDIPAPI GdipCloneImageAttributes(GDIPCONST GpImageAttributes*,GpImageAttributes**);
 GpStatus WINGDIPAPI GdipDisposeImage(GpImage*);
+GpStatus WINGDIPAPI GdipEmfToWmfBits(HENHMETAFILE,UINT,LPBYTE,INT,INT);
 GpStatus WINGDIPAPI GdipFindFirstImageItem(GpImage*,ImageItemData*);
 GpStatus WINGDIPAPI GdipFindNextImageItem(GpImage*,ImageItemData*);
 GpStatus WINGDIPAPI GdipGetAllPropertyItems(GpImage*,UINT,UINT,PropertyItem*);
@@ -424,6 +441,8 @@ GpStatus WINGDIPAPI GdipCreateMetafileFromWmf(HMETAFILE,BOOL,
     GDIPCONST WmfPlaceableFileHeader*,GpMetafile**);
 GpStatus WINGDIPAPI GdipCreateMetafileFromWmfFile(GDIPCONST WCHAR*, GDIPCONST WmfPlaceableFileHeader*,
     GpMetafile**);
+GpStatus WINGDIPAPI GdipCreateMetafileFromFile(GDIPCONST WCHAR*,GpMetafile**);
+GpStatus WINGDIPAPI GdipCreateMetafileFromStream(IStream*,GpMetafile**);
 GpStatus WINGDIPAPI GdipSetMetafileDownLevelRasterizationLimit(GpMetafile*,UINT);
 
 /* MetafileHeader */

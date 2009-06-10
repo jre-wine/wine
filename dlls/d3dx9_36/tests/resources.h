@@ -1,7 +1,5 @@
 /*
- * Clock resources
- *
- * Copyright 1998 Marcel Baur <mbaur@g26.ethz.ch>
+ * Copyright 2009 Tony Wasserka
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,32 +16,11 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include <windef.h>
-#include <winuser.h>
+#ifndef __WINE_D3DX9_36_TEST_RESOURCES_H
+#define __WINE_D3DX9_36_TEST_RESOURCES_H
 
-#include "clock_res.h"
+#define IDB_BITMAP_1x1       10
+#define IDD_BITMAPDATA_1x1   11
+#define IDS_STRING           12
 
-#include "Cs.rc"
-#include "Da.rc"
-#include "De.rc"
-#include "En.rc"
-#include "Eo.rc"
-#include "Es.rc"
-#include "Fi.rc"
-#include "Fr.rc"
-#include "Hu.rc"
-#include "It.rc"
-#include "Ja.rc"
-#include "Ko.rc"
-#include "Nl.rc"
-#include "No.rc"
-#include "Pl.rc"
-#include "Pt.rc"
-#include "Ru.rc"
-#include "Si.rc"
-#include "Sk.rc"
-#include "Sv.rc"
-#include "Th.rc"
-#include "Tr.rc"
-#include "Wa.rc"
-#include "Zh.rc"
+#endif  /* __WINE_D3DX9_36_TEST_RESOURCES_H */

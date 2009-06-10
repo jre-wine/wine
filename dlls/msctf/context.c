@@ -61,7 +61,7 @@ typedef struct tagContext {
     /* const ITfContextCompositionVtbl *ContextCompositionVtbl; */
     /* const ITfContextOwnerCompositionServicesVtbl *ContextOwnerCompositionServicesVtbl; */
     /* const ITfContextOwnerServicesVtbl *ContextOwnerServicesVtbl; */
-    /* const ITfInsertAtSelectionVtbl *InsertAtSelectionVtbl; */
+    const ITfInsertAtSelectionVtbl *InsertAtSelectionVtbl;
     /* const ITfMouseTrackerVtbl *MouseTrackerVtbl; */
     /* const ITfQueryEmbeddedVtbl *QueryEmbeddedVtbl; */
     /* const ITfSourceSingleVtbl *SourceSingleVtbl; */
@@ -70,6 +70,7 @@ typedef struct tagContext {
 
     TfClientId tidOwner;
     TfEditCookie defaultCookie;
+    TS_STATUS documentStatus;
 
     ITextStoreACP   *pITextStoreACP;
     ITfContextOwnerCompositionSink *pITfContextOwnerCompositionSink;
@@ -105,6 +106,11 @@ static HRESULT TextStoreACPSink_Constructor(ITextStoreACPSink **ppOut, Context *
 static inline Context *impl_from_ITfSourceVtbl(ITfSource *iface)
 {
     return (Context *)((char *)iface - FIELD_OFFSET(Context,SourceVtbl));
+}
+
+static inline Context *impl_from_ITfInsertAtSelectionVtbl(ITfInsertAtSelection*iface)
+{
+    return (Context *)((char *)iface - FIELD_OFFSET(Context,InsertAtSelectionVtbl));
 }
 
 static void free_sink(ContextSink *sink)
@@ -185,6 +191,10 @@ static HRESULT WINAPI Context_QueryInterface(ITfContext *iface, REFIID iid, LPVO
     {
         *ppvOut = &This->SourceVtbl;
     }
+    else if (IsEqualIID(iid, &IID_ITfInsertAtSelection))
+    {
+        *ppvOut = &This->InsertAtSelectionVtbl;
+    }
 
     if (*ppvOut)
     {
@@ -223,7 +233,6 @@ static HRESULT WINAPI Context_RequestEditSession (ITfContext *iface,
     HRESULT hr;
     Context *This = (Context *)iface;
     DWORD  dwLockFlags = 0x0;
-    TS_STATUS status;
 
     TRACE("(%p) %i %p %x %p\n",This, tid, pes, dwFlags, phrSession);
 
@@ -248,10 +257,10 @@ static HRESULT WINAPI Context_RequestEditSession (ITfContext *iface,
     else if (dwFlags & TF_ES_READ)
         dwLockFlags |= TS_LF_READ;
 
-    /* TODO: cache this */
-    ITextStoreACP_GetStatus(This->pITextStoreACP, &status);
+    if (!This->documentStatus.dwDynamicFlags)
+        ITextStoreACP_GetStatus(This->pITextStoreACP, &This->documentStatus);
 
-    if (((dwFlags & TF_ES_READWRITE) == TF_ES_READWRITE) && (status.dwDynamicFlags & TS_SD_READONLY))
+    if (((dwFlags & TF_ES_READWRITE) == TF_ES_READWRITE) && (This->documentStatus.dwDynamicFlags & TS_SD_READONLY))
     {
         *phrSession = TS_E_READONLY;
         return S_OK;
@@ -262,7 +271,6 @@ static HRESULT WINAPI Context_RequestEditSession (ITfContext *iface,
         *phrSession = E_FAIL;
         return E_INVALIDARG;
     }
-
 
     hr = ITextStoreACP_RequestLock(This->pITextStoreACP, dwLockFlags, phrSession);
 
@@ -341,9 +349,39 @@ static HRESULT WINAPI Context_GetSelection (ITfContext *iface,
 static HRESULT WINAPI Context_SetSelection (ITfContext *iface,
         TfEditCookie ec, ULONG ulCount, const TF_SELECTION *pSelection)
 {
+    TS_SELECTION_ACP *acp;
     Context *This = (Context *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    INT i;
+    HRESULT hr;
+
+    TRACE("(%p) %i %i %p\n",This,ec,ulCount,pSelection);
+
+    if (!This->pITextStoreACP)
+    {
+        FIXME("Context does not have a ITextStoreACP\n");
+        return E_NOTIMPL;
+    }
+
+    if (get_Cookie_magic(ec)!=COOKIE_MAGIC_EDITCOOKIE)
+        return TF_E_NOLOCK;
+
+    acp = HeapAlloc(GetProcessHeap(), 0, sizeof(TS_SELECTION_ACP) * ulCount);
+    if (!acp)
+        return E_OUTOFMEMORY;
+
+    for (i = 0; i < ulCount; i++)
+        if (FAILED(TF_SELECTION_to_TS_SELECTION_ACP(&pSelection[i], &acp[i])))
+        {
+            TRACE("Selection Conversion Failed\n");
+            HeapFree(GetProcessHeap(), 0 , acp);
+            return E_FAIL;
+        }
+
+    hr = ITextStoreACP_SetSelection(This->pITextStoreACP, ulCount, acp);
+
+    HeapFree(GetProcessHeap(), 0, acp);
+
+    return hr;
 }
 
 static HRESULT WINAPI Context_GetStart (ITfContext *iface,
@@ -579,6 +617,82 @@ static const ITfSourceVtbl Context_SourceVtbl =
     ContextSource_UnadviseSink,
 };
 
+/*****************************************************
+ * ITfInsertAtSelection functions
+ *****************************************************/
+static HRESULT WINAPI InsertAtSelection_QueryInterface(ITfInsertAtSelection *iface, REFIID iid, LPVOID *ppvOut)
+{
+    Context *This = impl_from_ITfInsertAtSelectionVtbl(iface);
+    return Context_QueryInterface((ITfContext *)This, iid, *ppvOut);
+}
+
+static ULONG WINAPI InsertAtSelection_AddRef(ITfInsertAtSelection *iface)
+{
+    Context *This = impl_from_ITfInsertAtSelectionVtbl(iface);
+    return Context_AddRef((ITfContext *)This);
+}
+
+static ULONG WINAPI InsertAtSelection_Release(ITfInsertAtSelection *iface)
+{
+    Context *This = impl_from_ITfInsertAtSelectionVtbl(iface);
+    return Context_Release((ITfContext *)This);
+}
+
+static WINAPI HRESULT InsertAtSelection_InsertTextAtSelection(
+        ITfInsertAtSelection *iface, TfEditCookie ec, DWORD dwFlags,
+        const WCHAR *pchText, LONG cch, ITfRange **ppRange)
+{
+    Context *This = impl_from_ITfInsertAtSelectionVtbl(iface);
+    EditCookie *cookie;
+    LONG acpStart, acpEnd;
+    TS_TEXTCHANGE change;
+    HRESULT hr;
+
+    TRACE("(%p) %i %x %s %p\n",This, ec, dwFlags, debugstr_wn(pchText,cch), ppRange);
+
+    if (!This->connected)
+        return TF_E_DISCONNECTED;
+
+    if (get_Cookie_magic(ec)!=COOKIE_MAGIC_EDITCOOKIE)
+        return TF_E_NOLOCK;
+
+    cookie = get_Cookie_data(ec);
+
+    if ((cookie->lockType & TS_LF_READWRITE) != TS_LF_READWRITE )
+        return TS_E_READONLY;
+
+    if (!This->pITextStoreACP)
+    {
+        FIXME("Context does not have a ITextStoreACP\n");
+        return E_NOTIMPL;
+    }
+
+    hr = ITextStoreACP_InsertTextAtSelection(This->pITextStoreACP, dwFlags, pchText, cch, &acpStart, &acpEnd, &change);
+    if (SUCCEEDED(hr))
+        Range_Constructor((ITfContext*)This, This->pITextStoreACP, cookie->lockType, change.acpStart, change.acpNewEnd, ppRange);
+
+    return hr;
+}
+
+static WINAPI HRESULT InsertAtSelection_InsertEmbeddedAtSelection(
+        ITfInsertAtSelection *iface, TfEditCookie ec, DWORD dwFlags,
+        IDataObject *pDataObject, ITfRange **ppRange)
+{
+    Context *This = impl_from_ITfInsertAtSelectionVtbl(iface);
+    FIXME("STUB:(%p)\n",This);
+    return E_NOTIMPL;
+}
+
+static const ITfInsertAtSelectionVtbl Context_InsertAtSelectionVtbl =
+{
+    InsertAtSelection_QueryInterface,
+    InsertAtSelection_AddRef,
+    InsertAtSelection_Release,
+
+    InsertAtSelection_InsertTextAtSelection,
+    InsertAtSelection_InsertEmbeddedAtSelection,
+};
+
 HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **ppOut, TfEditCookie *pecTextStore)
 {
     Context *This;
@@ -599,6 +713,7 @@ HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **pp
 
     This->ContextVtbl= &Context_ContextVtbl;
     This->SourceVtbl = &Context_SourceVtbl;
+    This->InsertAtSelectionVtbl = &Context_InsertAtSelectionVtbl;
     This->refCount = 1;
     This->tidOwner = tidOwner;
     This->connected = FALSE;
@@ -739,8 +854,28 @@ static HRESULT WINAPI TextStoreACPSink_OnStatusChange(ITextStoreACPSink *iface,
         DWORD dwFlags)
 {
     TextStoreACPSink *This = (TextStoreACPSink *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    HRESULT hr, hrSession;
+
+    TRACE("(%p) %x\n",This, dwFlags);
+
+    if (!This->pContext)
+    {
+        ERR("No context?\n");
+        return E_FAIL;
+    }
+
+    if (!This->pContext->pITextStoreACP)
+    {
+        FIXME("Context does not have a ITextStoreACP\n");
+        return E_NOTIMPL;
+    }
+
+    hr = ITextStoreACP_RequestLock(This->pContext->pITextStoreACP, TS_LF_READ, &hrSession);
+
+    if(SUCCEEDED(hr) && SUCCEEDED(hrSession))
+        This->pContext->documentStatus.dwDynamicFlags = dwFlags;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI TextStoreACPSink_OnAttrsChange(ITextStoreACPSink *iface,
@@ -761,10 +896,16 @@ static HRESULT WINAPI TextStoreACPSink_OnLockGranted(ITextStoreACPSink *iface,
 
     TRACE("(%p) %x\n",This, dwLockFlags);
 
-    if (!This->pContext || !This->pContext->currentEditSession)
+    if (!This->pContext)
     {
-        ERR("OnLockGranted called on a context without a current edit session\n");
+        ERR("OnLockGranted called without a context\n");
         return E_FAIL;
+    }
+
+    if (!This->pContext->currentEditSession)
+    {
+        FIXME("OnLockGranted called for something other than an EditSession\n");
+        return S_OK;
     }
 
     cookie = HeapAlloc(GetProcessHeap(),0,sizeof(EditCookie));

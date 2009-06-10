@@ -23,8 +23,14 @@
 #include <stdarg.h>
 
 #define COBJMACROS
+#include "winbase.h"
 #include "wingdi.h"
+#include "winuser.h"
 #include "d3dx9.h"
+
+/* for internal use */
+HRESULT map_view_of_file(LPCWSTR filename, LPVOID *buffer, DWORD *length);
+HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, LPVOID *buffer, DWORD *length);
 
 
 /* ID3DXFont */

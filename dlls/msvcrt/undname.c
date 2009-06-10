@@ -113,7 +113,7 @@ struct datatype_t
  * where we use a poor-man allocator. It's fast, and since all
  * allocation is pool, memory management is easy (esp. freeing).
  */
-static void*    und_alloc(struct parsed_symbol* sym, size_t len)
+static void*    und_alloc(struct parsed_symbol* sym, unsigned int len)
 {
     void*       ptr;
 
@@ -233,11 +233,11 @@ static char* str_array_get_ref(struct array* cref, unsigned idx)
  */
 static char* str_printf(struct parsed_symbol* sym, const char* format, ...)
 {
-    va_list     args;
-    size_t      len = 1, i, sz;
-    char*       tmp;
-    char*       p;
-    char*       t;
+    va_list      args;
+    unsigned int len = 1, i, sz;
+    char*        tmp;
+    char*        p;
+    char*        t;
 
     va_start(args, format);
     for (i = 0; format[i]; i++)
@@ -319,7 +319,7 @@ static const char* get_number(struct parsed_symbol* sym)
     }
     else if (*sym->current >= 'A' && *sym->current <= 'P')
     {
-        long    ret = 0;
+        int ret = 0;
 
         while (*sym->current >= 'A' && *sym->current <= 'P')
         {
@@ -329,7 +329,7 @@ static const char* get_number(struct parsed_symbol* sym)
         if (*sym->current != '@') return NULL;
 
         ptr = und_alloc(sym, 17);
-        sprintf(ptr, "%s%ld", sgn ? "-" : "", ret);
+        sprintf(ptr, "%s%d", sgn ? "-" : "", ret);
         sym->current++;
     }
     else return NULL;
@@ -587,9 +587,9 @@ static BOOL get_class(struct parsed_symbol* sym)
  */
 static char* get_class_string(struct parsed_symbol* sym, int start)
 {
-    int         i;
-    size_t      len, sz;
-    char*       ret;
+    int          i;
+    unsigned int len, sz;
+    char*        ret;
     struct array *a = &sym->stack;
 
     for (len = 0, i = start; i < a->num; i++)

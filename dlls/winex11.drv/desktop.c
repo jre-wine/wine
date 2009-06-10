@@ -42,6 +42,9 @@ static const unsigned int widths[]  = {320, 400, 512, 640, 800, 1024, 1152, 1280
 static const unsigned int heights[] = {200, 300, 384, 480, 600,  768,  864, 1024, 1050, 1200};
 #define NUM_DESKTOP_MODES (sizeof(widths) / sizeof(widths[0]))
 
+#define _NET_WM_STATE_REMOVE 0
+#define _NET_WM_STATE_ADD 1
+
 /* create the mode structures */
 static void make_modes(void)
 {
@@ -134,6 +137,8 @@ Window CDECL X11DRV_create_desktop( UINT width, UINT height )
     Window win;
     Display *display = thread_init_display();
 
+    TRACE( "%u x %u\n", width, height );
+
     wine_tsx11_lock();
 
     /* Create window */
@@ -150,6 +155,13 @@ Window CDECL X11DRV_create_desktop( UINT width, UINT height )
     win = XCreateWindow( display, DefaultRootWindow(display),
                          0, 0, width, height, 0, screen_depth, InputOutput, visual,
                          CWEventMask | CWCursor | CWColormap, &win_attr );
+    if (win != None && width == screen_width && height == screen_height)
+    {
+        TRACE("setting desktop to fullscreen\n");
+        XChangeProperty( display, win, x11drv_atom(_NET_WM_STATE), XA_ATOM, 32,
+            PropModeReplace, (unsigned char*)&x11drv_atom(_NET_WM_STATE_FULLSCREEN),
+            1);
+    }
     XFlush( display );
     wine_tsx11_unlock();
     if (win != None) X11DRV_init_desktop( win, width, height );
@@ -191,6 +203,35 @@ static BOOL CALLBACK update_windows_on_desktop_resize( HWND hwnd, LPARAM lparam 
     return TRUE;
 }
 
+static void update_desktop_fullscreen( unsigned int width, unsigned int height)
+{
+    Display *display = thread_display();
+    XEvent xev;
+
+    if (!display || root_window != DefaultRootWindow( display )) return;
+
+    xev.xclient.type = ClientMessage;
+    xev.xclient.window = root_window;
+    xev.xclient.message_type = x11drv_atom(_NET_WM_STATE);
+    xev.xclient.serial = 0;
+    xev.xclient.display = display;
+    xev.xclient.send_event = True;
+    xev.xclient.format = 32;
+    if (width == max_width && height == max_height)
+        xev.xclient.data.l[0] = _NET_WM_STATE_ADD;
+    else
+        xev.xclient.data.l[0] = _NET_WM_STATE_REMOVE;
+    xev.xclient.data.l[1] = x11drv_atom(_NET_WM_STATE_FULLSCREEN);
+    xev.xclient.data.l[2] = 0;
+    xev.xclient.data.l[3] = 1;
+
+    TRACE("action=%li\n", xev.xclient.data.l[0]);
+
+    wine_tsx11_lock();
+    XSendEvent( display, DefaultRootWindow(display), False,
+                SubstructureRedirectMask | SubstructureNotifyMask, &xev );
+    wine_tsx11_unlock();
+}
 
 /***********************************************************************
  *		X11DRV_resize_desktop
@@ -212,6 +253,7 @@ void X11DRV_resize_desktop( unsigned int width, unsigned int height )
     else
     {
         TRACE( "desktop %p change to (%dx%d)\n", hwnd, width, height );
+        update_desktop_fullscreen( width, height );
         SetWindowPos( hwnd, 0, virtual_screen_rect.left, virtual_screen_rect.top,
                       virtual_screen_rect.right - virtual_screen_rect.left,
                       virtual_screen_rect.bottom - virtual_screen_rect.top,

@@ -885,7 +885,7 @@ static const struct message WmShowVisiblePopupSeq_3[] = {
     { EVENT_OBJECT_FOCUS, winevent_hook|wparam|lparam, OBJID_CLIENT, 0 },
     { WM_SETFOCUS, sent|defwinproc },
     { WM_GETTEXT, sent|optional },
-    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE },
+    { WM_WINDOWPOSCHANGED, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE, 0, SWP_SHOWWINDOW },
     { 0 }
 };
 /* CreateWindow (for child window, not initially visible) */
@@ -1123,6 +1123,13 @@ static const struct message WmDestroyChildSeq[] = {
     { WM_DESTROY, sent|optional }, /* some other (IME?) window */
     { WM_NCDESTROY, sent|optional }, /* some other (IME?) window */
     { WM_NCDESTROY, sent },
+    { 0 }
+};
+/* visible child window destroyed by thread exit */
+static const struct message WmExitThreadSeq[] = {
+    { WM_NCDESTROY, sent },  /* actually in grandchild */
+    { WM_PAINT, sent|parent },
+    { WM_ERASEBKGND, sent|parent|beginpaint },
     { 0 }
 };
 /* DestroyWindow for a visible child window with invisible parent */
@@ -3965,7 +3972,6 @@ static void test_hv_scroll_1(HWND hwnd, INT ctl, DWORD clear, DWORD set, INT min
 
     xmin = 0xdeadbeef;
     xmax = 0xdeadbeef;
-    trace("Ignore GetScrollRange error below if you are on Win9x\n");
     ret = GetScrollRange(hwnd, ctl, &xmin, &xmax);
     ok( ret, "GetScrollRange(%d) error %d\n", ctl, GetLastError());
     ok_sequence(WmEmptySeq, "GetScrollRange(SB_HORZ/SB_VERT) empty sequence", FALSE);
@@ -6309,7 +6315,9 @@ static void test_paint_messages(void)
 struct wnd_event
 {
     HWND hwnd;
-    HANDLE event;
+    HANDLE grand_child;
+    HANDLE start_event;
+    HANDLE stop_event;
 };
 
 static DWORD WINAPI thread_proc(void *param)
@@ -6321,7 +6329,7 @@ static DWORD WINAPI thread_proc(void *param)
                                       100, 100, 200, 200, 0, 0, 0, NULL);
     ok(wnd_event->hwnd != 0, "Failed to create overlapped window\n");
 
-    SetEvent(wnd_event->event);
+    SetEvent(wnd_event->start_event);
 
     while (GetMessage(&msg, 0, 0, 0))
     {
@@ -6331,6 +6339,54 @@ static DWORD WINAPI thread_proc(void *param)
 
     ok(IsWindow(wnd_event->hwnd), "window should still exist\n");
 
+    return 0;
+}
+
+static DWORD CALLBACK create_grand_child_thread( void *param )
+{
+    struct wnd_event *wnd_event = param;
+    HWND hchild;
+    MSG msg;
+
+    hchild = CreateWindowExA(0, "TestWindowClass", "Test child",
+                             WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, wnd_event->hwnd, 0, 0, NULL);
+    ok (hchild != 0, "Failed to create child window\n");
+    flush_events();
+    flush_sequence();
+    SetEvent( wnd_event->start_event );
+
+    for (;;)
+    {
+        MsgWaitForMultipleObjects(0, NULL, FALSE, 1000, QS_ALLINPUT);
+        if (!IsWindow( hchild )) break;  /* will be destroyed when parent thread exits */
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    }
+    return 0;
+}
+
+static DWORD CALLBACK create_child_thread( void *param )
+{
+    struct wnd_event *wnd_event = param;
+    struct wnd_event child_event;
+    DWORD ret, tid;
+    MSG msg;
+
+    child_event.hwnd = CreateWindowExA(0, "TestWindowClass", "Test child",
+                             WS_CHILD | WS_VISIBLE, 0, 0, 10, 10, wnd_event->hwnd, 0, 0, NULL);
+    ok (child_event.hwnd != 0, "Failed to create child window\n");
+    SetFocus( child_event.hwnd );
+    flush_events();
+    flush_sequence();
+    child_event.start_event = wnd_event->start_event;
+    wnd_event->grand_child = CreateThread(NULL, 0, create_grand_child_thread, &child_event, 0, &tid);
+    for (;;)
+    {
+        DWORD ret = MsgWaitForMultipleObjects(1, &child_event.start_event, FALSE, 1000, QS_SENDMESSAGE);
+        if (ret != 1) break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    }
+    ret = WaitForSingleObject( wnd_event->stop_event, 5000 );
+    ok( !ret, "WaitForSingleObject failed %x\n", ret );
     return 0;
 }
 
@@ -6345,8 +6401,8 @@ static void test_interthread_messages(void)
     struct wnd_event wnd_event;
     BOOL ret;
 
-    wnd_event.event = CreateEventW(NULL, 0, 0, NULL);
-    if (!wnd_event.event)
+    wnd_event.start_event = CreateEventW(NULL, 0, 0, NULL);
+    if (!wnd_event.start_event)
     {
         win_skip("skipping interthread message test under win9x\n");
         return;
@@ -6355,9 +6411,9 @@ static void test_interthread_messages(void)
     hThread = CreateThread(NULL, 0, thread_proc, &wnd_event, 0, &tid);
     ok(hThread != NULL, "CreateThread failed, error %d\n", GetLastError());
 
-    ok(WaitForSingleObject(wnd_event.event, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
+    ok(WaitForSingleObject(wnd_event.start_event, INFINITE) == WAIT_OBJECT_0, "WaitForSingleObject failed\n");
 
-    CloseHandle(wnd_event.event);
+    CloseHandle(wnd_event.start_event);
 
     SetLastError(0xdeadbeef);
     ok(!DestroyWindow(wnd_event.hwnd), "DestroyWindow succeded\n");
@@ -6401,6 +6457,38 @@ static void test_interthread_messages(void)
     CloseHandle(hThread);
 
     ok(!IsWindow(wnd_event.hwnd), "window should be destroyed on thread exit\n");
+
+    wnd_event.hwnd = CreateWindowExA(0, "TestParentClass", "Test parent", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                              100, 100, 200, 200, 0, 0, 0, NULL);
+    ok (wnd_event.hwnd != 0, "Failed to create parent window\n");
+    flush_sequence();
+    log_all_parent_messages++;
+    wnd_event.start_event = CreateEventA( NULL, TRUE, FALSE, NULL );
+    wnd_event.stop_event = CreateEventA( NULL, TRUE, FALSE, NULL );
+    hThread = CreateThread( NULL, 0, create_child_thread, &wnd_event, 0, &tid );
+    for (;;)
+    {
+        ret = MsgWaitForMultipleObjects(1, &wnd_event.start_event, FALSE, 1000, QS_SENDMESSAGE);
+        if (ret != 1) break;
+        while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) DispatchMessage(&msg);
+    }
+    ok( !ret, "MsgWaitForMultipleObjects failed %x\n", ret );
+    /* now wait for the thread without processing messages; this shouldn't deadlock */
+    SetEvent( wnd_event.stop_event );
+    ret = WaitForSingleObject( hThread, 5000 );
+    ok( !ret, "WaitForSingleObject failed %x\n", ret );
+    CloseHandle( hThread );
+
+    ret = WaitForSingleObject( wnd_event.grand_child, 5000 );
+    ok( !ret, "WaitForSingleObject failed %x\n", ret );
+    CloseHandle( wnd_event.grand_child );
+
+    CloseHandle( wnd_event.start_event );
+    CloseHandle( wnd_event.stop_event );
+    flush_events();
+    ok_sequence(WmExitThreadSeq, "destroy child on thread exit", FALSE);
+    log_all_parent_messages--;
+    DestroyWindow( wnd_event.hwnd );
 }
 
 
@@ -10133,7 +10221,7 @@ static const struct message WmShowMaximized_2[] = {
 };
 static const struct message WmShowMaximized_3[] = {
     { HCBT_MINMAX, hook|lparam, 0, SW_SHOWMAXIMIZED },
-    { WM_GETMINMAXINFO, sent },
+    { WM_GETMINMAXINFO, sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam, SWP_FRAMECHANGED|SWP_STATECHANGED, 0, SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE|SWP_NOSIZE|SWP_NOMOVE },
     { HCBT_ACTIVATE, hook|optional }, /* win2000 doesn't send it */
     { WM_WINDOWPOSCHANGING, sent|wparam|optional, SWP_NOSIZE|SWP_NOMOVE }, /* win2000 doesn't send it */
@@ -11072,7 +11160,9 @@ static void check_lb_state_dbg(HWND listbox, int count, int cur_sel,
     ret = CallWindowProcA(listbox_orig_proc, listbox, LB_GETCURSEL, 0, 0);
     ok_(__FILE__, line)(ret == cur_sel, "expected cur sel %d, got %ld\n", cur_sel, ret);
     ret = CallWindowProcA(listbox_orig_proc, listbox, LB_GETCARETINDEX, 0, 0);
-    ok_(__FILE__, line)(ret == caret_index, "expected caret index %d, got %ld\n", caret_index, ret);
+    ok_(__FILE__, line)(ret == caret_index ||
+                        broken(cur_sel == -1 && caret_index == 0 && ret == -1),  /* nt4 */
+                        "expected caret index %d, got %ld\n", caret_index, ret);
     ret = CallWindowProcA(listbox_orig_proc, listbox, LB_GETTOPINDEX, 0, 0);
     ok_(__FILE__, line)(ret == top_index, "expected top index %d, got %ld\n", top_index, ret);
 }

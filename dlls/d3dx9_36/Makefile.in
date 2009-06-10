@@ -12,7 +12,9 @@ C_SRCS = \
 	math.c \
 	mesh.c \
 	shader.c \
-	sprite.c
+	sprite.c \
+	surface.c \
+	util.c
 
 RC_SRCS = version.rc
 

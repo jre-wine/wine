@@ -141,6 +141,16 @@ static void msvcrt_stat64_to_stati64(const struct MSVCRT__stat64 *buf64, struct 
     buf->st_ctime = buf64->st_ctime;
 }
 
+static void time_to_filetime( MSVCRT___time64_t time, FILETIME *ft )
+{
+    /* 1601 to 1970 is 369 years plus 89 leap days */
+    static const __int64 secs_1601_to_1970 = ((369 * 365 + 89) * (__int64)86400);
+
+    __int64 ticks = (time + secs_1601_to_1970) * 10000000;
+    ft->dwHighDateTime = ticks >> 32;
+    ft->dwLowDateTime = ticks;
+}
+
 static inline BOOL msvcrt_is_valid_fd(int fd)
 {
   return fd >= 0 && fd < MSVCRT_fdend && (MSVCRT_fdesc[fd].wxflag & WX_OPEN);
@@ -914,7 +924,7 @@ int CDECL MSVCRT__locking(int fd, int mode, LONG nbytes)
 /*********************************************************************
  *		fseek (MSVCRT.@)
  */
-int CDECL MSVCRT_fseek(MSVCRT_FILE* file, long offset, int whence)
+int CDECL MSVCRT_fseek(MSVCRT_FILE* file, MSVCRT_long offset, int whence)
 {
   /* Flush output if needed */
   if(file->_flag & MSVCRT__IOWRT)
@@ -946,13 +956,13 @@ int CDECL MSVCRT_fseek(MSVCRT_FILE* file, long offset, int whence)
 /*********************************************************************
  *		_chsize (MSVCRT.@)
  */
-int CDECL _chsize(int fd, long size)
+int CDECL _chsize(int fd, MSVCRT_long size)
 {
     LONG cur, pos;
     HANDLE handle;
     BOOL ret = FALSE;
 
-    TRACE("(fd=%d, size=%ld)\n", fd, size);
+    TRACE("(fd=%d, size=%d)\n", fd, size);
 
     LOCK_FILES();
 
@@ -1213,27 +1223,22 @@ int CDECL MSVCRT__fstat(int fd, struct MSVCRT__stat* buf)
 }
 
 /*********************************************************************
- *		_futime (MSVCRT.@)
+ *		_futime64 (MSVCRT.@)
  */
-int CDECL _futime(int fd, struct MSVCRT__utimbuf *t)
+int CDECL _futime64(int fd, struct MSVCRT___utimbuf64 *t)
 {
   HANDLE hand = msvcrt_fdtoh(fd);
   FILETIME at, wt;
 
   if (!t)
   {
-    MSVCRT_time_t currTime;
-    MSVCRT_time(&currTime);
-    RtlSecondsSince1970ToTime(currTime, (LARGE_INTEGER *)&at);
-    wt = at;
+      time_to_filetime( MSVCRT__time64(NULL), &at );
+      wt = at;
   }
   else
   {
-    RtlSecondsSince1970ToTime(t->actime, (LARGE_INTEGER *)&at);
-    if (t->actime == t->modtime)
-      wt = at;
-    else
-      RtlSecondsSince1970ToTime(t->modtime, (LARGE_INTEGER *)&wt);
+      time_to_filetime( t->actime, &at );
+      time_to_filetime( t->modtime, &wt );
   }
 
   if (!SetFileTime(hand, NULL, &at, &wt))
@@ -1243,6 +1248,32 @@ int CDECL _futime(int fd, struct MSVCRT__utimbuf *t)
   }
   return 0;
 }
+
+/*********************************************************************
+ *		_futime32 (MSVCRT.@)
+ */
+int CDECL _futime32(int fd, struct MSVCRT___utimbuf32 *t)
+{
+    struct MSVCRT___utimbuf64 t64;
+    t64.actime = t->actime;
+    t64.modtime = t->modtime;
+    return _futime64( fd, &t64 );
+}
+
+/*********************************************************************
+ *		_futime (MSVCRT.@)
+ */
+#ifdef _WIN64
+int CDECL _futime(int fd, struct MSVCRT___utimbuf64 *t)
+{
+    return _futime64( fd, t );
+}
+#else
+int CDECL _futime(int fd, struct MSVCRT___utimbuf32 *t)
+{
+    return _futime32( fd, t );
+}
+#endif
 
 /*********************************************************************
  *		_get_osfhandle (MSVCRT.@)
@@ -1807,7 +1838,7 @@ int CDECL _setmode(int fd,int mode)
 /*********************************************************************
  *		_stat64 (MSVCRT.@)
  */
-int CDECL MSVCRT__stat64(const char* path, struct MSVCRT__stat64 * buf)
+int CDECL MSVCRT_stat64(const char* path, struct MSVCRT__stat64 * buf)
 {
   DWORD dw;
   WIN32_FILE_ATTRIBUTE_DATA hfi;
@@ -1864,21 +1895,21 @@ int CDECL MSVCRT__stat64(const char* path, struct MSVCRT__stat64 * buf)
   buf->st_atime = dw;
   RtlTimeToSecondsSince1970((LARGE_INTEGER *)&hfi.ftLastWriteTime, &dw);
   buf->st_mtime = buf->st_ctime = dw;
-  TRACE("%d %d 0x%08lx%08lx %ld %ld %ld\n", buf->st_mode,buf->st_nlink,
-        (long)(buf->st_size >> 32),(long)buf->st_size,
-        (long)buf->st_atime,(long)buf->st_mtime,(long)buf->st_ctime);
+  TRACE("%d %d 0x%08x%08x %d %d %d\n", buf->st_mode,buf->st_nlink,
+        (int)(buf->st_size >> 32),(int)buf->st_size,
+        (int)buf->st_atime,(int)buf->st_mtime,(int)buf->st_ctime);
   return 0;
 }
 
 /*********************************************************************
  *		_stati64 (MSVCRT.@)
  */
-int CDECL MSVCRT__stati64(const char* path, struct MSVCRT__stati64 * buf)
+int CDECL MSVCRT_stati64(const char* path, struct MSVCRT__stati64 * buf)
 {
   int ret;
   struct MSVCRT__stat64 buf64;
 
-  ret = MSVCRT__stat64(path, &buf64);
+  ret = MSVCRT_stat64(path, &buf64);
   if (!ret)
     msvcrt_stat64_to_stati64(&buf64, buf);
   return ret;
@@ -1887,11 +1918,11 @@ int CDECL MSVCRT__stati64(const char* path, struct MSVCRT__stati64 * buf)
 /*********************************************************************
  *		_stat (MSVCRT.@)
  */
-int CDECL MSVCRT__stat(const char* path, struct MSVCRT__stat * buf)
+int CDECL MSVCRT_stat(const char* path, struct MSVCRT__stat * buf)
 { int ret;
   struct MSVCRT__stat64 buf64;
 
-  ret = MSVCRT__stat64( path, &buf64);
+  ret = MSVCRT_stat64( path, &buf64);
   if (!ret)
       msvcrt_stat64_to_stat(&buf64, buf);
   return ret;
@@ -1953,9 +1984,9 @@ int CDECL MSVCRT__wstat64(const MSVCRT_wchar_t* path, struct MSVCRT__stat64 * bu
   buf->st_atime = dw;
   RtlTimeToSecondsSince1970((LARGE_INTEGER *)&hfi.ftLastWriteTime, &dw);
   buf->st_mtime = buf->st_ctime = dw;
-  TRACE("%d %d 0x%08lx%08lx %ld %ld %ld\n", buf->st_mode,buf->st_nlink,
-        (long)(buf->st_size >> 32),(long)buf->st_size,
-        (long)buf->st_atime,(long)buf->st_mtime,(long)buf->st_ctime);
+  TRACE("%d %d 0x%08x%08x %d %d %d\n", buf->st_mode,buf->st_nlink,
+        (int)(buf->st_size >> 32),(int)buf->st_size,
+        (int)buf->st_atime,(int)buf->st_mtime,(int)buf->st_ctime);
   return 0;
 }
 
@@ -1989,7 +2020,7 @@ int CDECL MSVCRT__wstat(const MSVCRT_wchar_t* path, struct MSVCRT__stat * buf)
 /*********************************************************************
  *		_tell (MSVCRT.@)
  */
-long CDECL _tell(int fd)
+MSVCRT_long CDECL _tell(int fd)
 {
   return MSVCRT__lseek(fd, 0, SEEK_CUR);
 }
@@ -2053,15 +2084,15 @@ int CDECL MSVCRT__umask(int umask)
 }
 
 /*********************************************************************
- *		_utime (MSVCRT.@)
+ *		_utime64 (MSVCRT.@)
  */
-int CDECL _utime(const char* path, struct MSVCRT__utimbuf *t)
+int CDECL _utime64(const char* path, struct MSVCRT___utimbuf64 *t)
 {
   int fd = MSVCRT__open(path, MSVCRT__O_WRONLY | MSVCRT__O_BINARY);
 
   if (fd > 0)
   {
-    int retVal = _futime(fd, t);
+    int retVal = _futime64(fd, t);
     MSVCRT__close(fd);
     return retVal;
   }
@@ -2069,20 +2100,72 @@ int CDECL _utime(const char* path, struct MSVCRT__utimbuf *t)
 }
 
 /*********************************************************************
- *		_wutime (MSVCRT.@)
+ *		_utime32 (MSVCRT.@)
  */
-int CDECL _wutime(const MSVCRT_wchar_t* path, struct MSVCRT__utimbuf *t)
+int CDECL _utime32(const char* path, struct MSVCRT___utimbuf32 *t)
+{
+    struct MSVCRT___utimbuf64 t64;
+    t64.actime = t->actime;
+    t64.modtime = t->modtime;
+    return _utime64( path, &t64 );
+}
+
+/*********************************************************************
+ *		_utime (MSVCRT.@)
+ */
+#ifdef _WIN64
+int CDECL _utime(const char* path, struct MSVCRT___utimbuf64 *t)
+{
+    return _utime64( path, t );
+}
+#else
+int CDECL _utime(const char* path, struct MSVCRT___utimbuf32 *t)
+{
+    return _utime32( path, t );
+}
+#endif
+
+/*********************************************************************
+ *		_wutime64 (MSVCRT.@)
+ */
+int CDECL _wutime64(const MSVCRT_wchar_t* path, struct MSVCRT___utimbuf64 *t)
 {
   int fd = _wopen(path, MSVCRT__O_WRONLY | MSVCRT__O_BINARY);
 
   if (fd > 0)
   {
-    int retVal = _futime(fd, t);
+    int retVal = _futime64(fd, t);
     MSVCRT__close(fd);
     return retVal;
   }
   return -1;
 }
+
+/*********************************************************************
+ *		_wutime32 (MSVCRT.@)
+ */
+int CDECL _wutime32(const MSVCRT_wchar_t* path, struct MSVCRT___utimbuf32 *t)
+{
+    struct MSVCRT___utimbuf64 t64;
+    t64.actime = t->actime;
+    t64.modtime = t->modtime;
+    return _wutime64( path, &t64 );
+}
+
+/*********************************************************************
+ *		_wutime (MSVCRT.@)
+ */
+#ifdef _WIN64
+int CDECL _wutime(const MSVCRT_wchar_t* path, struct MSVCRT___utimbuf64 *t)
+{
+    return _wutime64( path, t );
+}
+#else
+int CDECL _wutime(const MSVCRT_wchar_t* path, struct MSVCRT___utimbuf32 *t)
+{
+    return _wutime32( path, t );
+}
+#endif
 
 /*********************************************************************
  *		_write (MSVCRT.@)
@@ -2789,7 +2872,7 @@ LONG CDECL MSVCRT_ftell(MSVCRT_FILE* file)
 {
   /* TODO: just call fgetpos and return lower half of result */
   int off=0;
-  long pos;
+  MSVCRT_long pos;
   pos = _tell(file->_file);
   if(pos == -1) return -1;
   if(file->_bufsiz)  {
@@ -2842,7 +2925,7 @@ int CDECL MSVCRT_fgetpos(MSVCRT_FILE* file, MSVCRT_fpos_t *pos)
  */
 int CDECL MSVCRT_fputs(const char *s, MSVCRT_FILE* file)
 {
-    size_t i, len = strlen(s);
+    MSVCRT_size_t i, len = strlen(s);
     if (!(MSVCRT_fdesc[file->_file].wxflag & WX_TEXT))
       return MSVCRT_fwrite(s,sizeof(*s),len,file) == len ? 0 : MSVCRT_EOF;
     for (i=0; i<len; i++)
@@ -2856,7 +2939,7 @@ int CDECL MSVCRT_fputs(const char *s, MSVCRT_FILE* file)
  */
 int CDECL MSVCRT_fputws(const MSVCRT_wchar_t *s, MSVCRT_FILE* file)
 {
-    size_t i, len = strlenW(s);
+    MSVCRT_size_t i, len = strlenW(s);
     if (!(MSVCRT_fdesc[file->_file].wxflag & WX_TEXT))
       return MSVCRT_fwrite(s,sizeof(*s),len,file) == len ? 0 : MSVCRT_EOF;
     for (i=0; i<len; i++)
@@ -2944,7 +3027,7 @@ int CDECL MSVCRT_putchar(int c)
  */
 int CDECL MSVCRT_puts(const char *s)
 {
-    size_t len = strlen(s);
+    MSVCRT_size_t len = strlen(s);
     if (MSVCRT_fwrite(s,sizeof(*s),len,MSVCRT_stdout) != len) return MSVCRT_EOF;
     return MSVCRT_fwrite("\n",1,1,MSVCRT_stdout) == 1 ? 0 : MSVCRT_EOF;
 }
@@ -2955,7 +3038,7 @@ int CDECL MSVCRT_puts(const char *s)
 int CDECL _putws(const MSVCRT_wchar_t *s)
 {
     static const MSVCRT_wchar_t nl = '\n';
-    size_t len = strlenW(s);
+    MSVCRT_size_t len = strlenW(s);
     if (MSVCRT_fwrite(s,sizeof(*s),len,MSVCRT_stdout) != len) return MSVCRT_EOF;
     return MSVCRT_fwrite(&nl,sizeof(nl),1,MSVCRT_stdout) == 1 ? 0 : MSVCRT_EOF;
 }

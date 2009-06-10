@@ -1897,6 +1897,15 @@ typedef void (WINE_GLAPI * PGLFNGLBLITFRAMEBUFFEREXTPROC) (GLint srcX0, GLint sr
 #endif
 typedef void (WINE_GLAPI * PGLFNRENDERBUFFERSTORAGEMULTISAMPLEEXTPROC)(GLenum target, GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height);
 
+/* GL_EXT_packed_depth_stencil */
+#ifndef GL_EXT_packed_depth_stencil
+#define GL_EXT_packed_depth_stencil 1
+#define GL_DEPTH_STENCIL_EXT                0x84f9
+#define GL_UNSIGNED_INT_24_8_EXT            0x84fa
+#define GL_DEPTH24_STENCIL8_EXT             0x88f0
+#define GL_TEXTURE_STENCIL_SIZE_EXT         0x88f1
+#endif
+
 /* GL_EXT_secondary_color */
 #ifndef GL_EXT_secondary_color
 #define GL_EXT_secondary_color 1
@@ -3381,8 +3390,10 @@ typedef enum _GL_PSVersion {
 
 /* OpenGL Supported Extensions (ARB and EXT) */
 typedef enum _GL_SupportedExt {
+  WINED3D_GL_EXT_NONE,
   /* ARB */
   ARB_COLOR_BUFFER_FLOAT,
+  ARB_DEPTH_TEXTURE,
   ARB_DRAW_BUFFERS,
   ARB_FRAGMENT_PROGRAM,
   ARB_FRAGMENT_SHADER,
@@ -3422,6 +3433,7 @@ typedef enum _GL_SupportedExt {
   EXT_FRAMEBUFFER_OBJECT,
   EXT_FRAMEBUFFER_BLIT,
   EXT_FRAMEBUFFER_MULTISAMPLE,
+  EXT_PACKED_DEPTH_STENCIL,
   EXT_PALETTED_TEXTURE,
   EXT_PIXEL_BUFFER_OBJECT,
   EXT_POINT_PARAMETERS,
@@ -3488,7 +3500,7 @@ typedef enum _GL_SupportedExt {
   WGL_ARB_PIXEL_FORMAT,
   WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,
 
-  OPENGL_SUPPORTED_EXT_END
+  WINED3D_GL_EXT_COUNT,
 } GL_SupportedExt;
 
 
@@ -3973,7 +3985,7 @@ typedef struct _WineD3D_GL_Info {
   DWORD reserved_glsl_constants;
   BOOL glsl_clip_varying;
 
-  BOOL supported[OPENGL_SUPPORTED_EXT_END + 1];
+  BOOL supported[WINED3D_GL_EXT_COUNT];
 
   /** OpenGL EXT and ARB functions ptr */
   GL_EXT_FUNCS_GEN

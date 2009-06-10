@@ -185,6 +185,17 @@ static const struct message single_getdispinfo_parent_seq[] = {
     { 0 }
 };
 
+static const struct message getitemposition_seq1[] = {
+    { LVM_GETITEMPOSITION, sent|id, 0, 0, LISTVIEW_ID },
+    { 0 }
+};
+
+static const struct message getitemposition_seq2[] = {
+    { LVM_GETITEMPOSITION, sent|id, 0, 0, LISTVIEW_ID },
+    { HDM_GETITEMRECT, sent|id, 0, 0, HEADER_ID },
+    { 0 }
+};
+
 struct subclass_info
 {
     WNDPROC oldproc;
@@ -218,6 +229,10 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
         add_message(sequences, PARENT_SEQ_INDEX, &msg);
     }
     add_message(sequences, PARENT_FULL_SEQ_INDEX, &msg);
+
+    /* always accept new item text */
+    if (message == WM_NOTIFY && lParam && ((NMHDR*)lParam)->code == LVN_ENDLABELEDIT)
+        return TRUE;
 
     defwndproc_counter++;
     ret = DefWindowProcA(hwnd, message, wParam, lParam);
@@ -1734,7 +1749,7 @@ todo_wine
     item.stateMask = LVIS_SELECTED;
     r = SendMessage(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
     expect(TRUE, r);
-    ListView_SetSelectionMark(hwnd, -1);
+    SendMessage(hwnd, LVM_SETSELECTIONMARK, 0, -1);
 
     item.stateMask = LVIS_SELECTED;
     item.state     = LVIS_SELECTED;
@@ -1815,6 +1830,35 @@ todo_wine
     expect(450, rect.right);
 todo_wine
     expect(3, rect.top);
+
+    /* item LVS_REPORT padding isn't applied to subitems */
+    insert_item(hwnd, 0);
+
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 1;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r != 0, "Expected not-null LRESULT\n");
+    expect(100, rect.left);
+    expect(250, rect.right);
+
+    rect.left = LVIR_ICON;
+    rect.top  = 1;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r != 0, "Expected not-null LRESULT\n");
+    /* no icon attached - zero width rectangle, with no left padding */
+    expect(100, rect.left);
+    expect(100, rect.right);
+
+    rect.left = LVIR_LABEL;
+    rect.top  = 1;
+    rect.right = rect.bottom = 0;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r != 0, "Expected not-null LRESULT\n");
+    /* same as full LVIR_BOUNDS */
+    expect(100, rect.left);
+    expect(250, rect.right);
 
     DestroyWindow(hwnd);
 
@@ -2182,6 +2226,35 @@ static void test_ownerdata(void)
                 "ownerdata getitem selected state 2", FALSE);
 
     DestroyWindow(hwnd);
+
+    /* LVS_SORTASCENDING/LVS_SORTDESCENDING aren't compatible with LVS_OWNERDATA */
+    hwnd = create_listview_control(LVS_OWNERDATA | LVS_SORTASCENDING);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_OWNERDATA, "Expected LVS_OWNERDATA\n");
+    ok(style & LVS_SORTASCENDING, "Expected LVS_SORTASCENDING to be set\n");
+    SetWindowLongPtrA(hwnd, GWL_STYLE, style & ~LVS_SORTASCENDING);
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(!(style & LVS_SORTASCENDING), "Expected LVS_SORTASCENDING not set\n");
+    DestroyWindow(hwnd);
+    /* apparently it's allowed to switch these style on after creation */
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_OWNERDATA, "Expected LVS_OWNERDATA\n");
+    SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_SORTASCENDING);
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_SORTASCENDING, "Expected LVS_SORTASCENDING to be set\n");
+    DestroyWindow(hwnd);
+
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_OWNERDATA, "Expected LVS_OWNERDATA\n");
+    SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_SORTDESCENDING);
+    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+    ok(style & LVS_SORTDESCENDING, "Expected LVS_SORTDESCENDING to be set\n");
+    DestroyWindow(hwnd);
 }
 
 static void test_norecompute(void)
@@ -2389,13 +2462,17 @@ static void test_hittest(void)
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, TRUE, TRUE, TRUE, __LINE__);
-    /* try with icons */
+    /* try with icons, state icons index is 1 based so at least 2 bitmaps needed */
     himl = ImageList_Create(16, 16, 0, 4, 4);
     ok(himl != NULL, "failed to create imagelist\n");
     hbmp = CreateBitmap(16, 16, 1, 1, NULL);
     ok(hbmp != NULL, "failed to create bitmap\n");
     r = ImageList_Add(himl, hbmp, 0);
     ok(r == 0, "should be zero\n");
+    hbmp = CreateBitmap(16, 16, 1, 1, NULL);
+    ok(hbmp != NULL, "failed to create bitmap\n");
+    r = ImageList_Add(himl, hbmp, 0);
+    ok(r == 1, "should be one\n");
 
     r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)himl);
     ok(r == 0, "should return zero\n");
@@ -2407,10 +2484,24 @@ static void test_hittest(void)
     r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
     expect(TRUE, r);
     /* on state icon */
-    x = pos.x + 8; /* outside column */
+    x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, TRUE, __LINE__);
-    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
+
+    /* state icons indices are 1 based, check with valid index */
+    item.mask = LVIF_STATE;
+    item.state = INDEXTOSTATEIMAGEMASK(1);
+    item.stateMask = LVIS_STATEIMAGEMASK;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+    /* on state icon */
+    x = pos.x + 8;
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
 
     himl2 = (HIMAGELIST)SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)NULL);
     ok(himl2 == himl, "should return handle\n");
@@ -2418,10 +2509,453 @@ static void test_hittest(void)
     r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)himl);
     ok(r == 0, "should return zero\n");
     /* on item icon */
-    x = pos.x + 8; /* outside column */
+    x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMICON, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_getviewrect(void)
+{
+    HWND hwnd;
+    DWORD r;
+    RECT rect;
+    LVITEMA item;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* empty */
+    r = SendMessage(hwnd, LVM_GETVIEWRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+
+    insert_column(hwnd, 0);
+    insert_column(hwnd, 1);
+
+    memset(&item, 0, sizeof(item));
+    item.iItem = 0;
+    item.iSubItem = 0;
+    SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
+
+    r = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 0, MAKELPARAM(100, 0));
+    expect(TRUE, r);
+    r = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 1, MAKELPARAM(120, 0));
+    expect(TRUE, r);
+
+    rect.left = rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETVIEWRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* left is set to (2e31-1) - XP SP2 */
+    expect(0, rect.right);
+    expect(0, rect.top);
+    expect(0, rect.bottom);
+
+    /* switch to LVS_ICON */
+    SetWindowLong(hwnd, GWL_STYLE, GetWindowLong(hwnd, GWL_STYLE) & ~LVS_REPORT);
+
+    rect.left = rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETVIEWRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    expect(0, rect.left);
+    expect(0, rect.top);
+    /* precise value differs for 2k, XP and Vista */
+    ok(rect.bottom > 0, "Expected positive bottom value, got %d\n", rect.bottom);
+    ok(rect.right  > 0, "Expected positive right value, got %d\n", rect.right);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_getitemposition(void)
+{
+    HWND hwnd, header;
+    DWORD r;
+    POINT pt;
+    RECT rect;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = subclass_header(hwnd);
+
+    /* LVS_REPORT, single item, no columns added */
+    insert_item(hwnd, 0);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    pt.x = pt.y = -1;
+    r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pt);
+    expect(TRUE, r);
+    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, getitemposition_seq1, "get item position 1", FALSE);
+
+    /* LVS_REPORT, single item, single column */
+    insert_column(hwnd, 0);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    pt.x = pt.y = -1;
+    r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pt);
+    expect(TRUE, r);
+    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, getitemposition_seq2, "get item position 2", TRUE);
+
+    memset(&rect, 0, sizeof(rect));
+    SendMessage(header, HDM_GETITEMRECT, 0, (LPARAM)&rect);
+    /* some padding? */
+    expect(2, pt.x);
+    /* offset by header height */
+    expect(rect.bottom - rect.top, pt.y);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_columnscreation(void)
+{
+    HWND hwnd, header;
+    DWORD r;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    insert_item(hwnd, 0);
+
+    /* headers columns aren't created automatically */
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "Expected header handle\n");
+    r = SendMessage(header, HDM_GETITEMCOUNT, 0, 0);
+    expect(0, r);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_getitemrect(void)
+{
+    HWND hwnd;
+    HIMAGELIST himl;
+    HBITMAP hbm;
+    RECT rect;
+    DWORD r;
+    LVITEMA item;
+    LVCOLUMNA col;
+    INT order[2];
+    POINT pt;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* empty item */
+    memset(&item, 0, sizeof(item));
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
+    expect(0, r);
+
+    rect.left = LVIR_BOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+
+    /* zero width rectangle with no padding */
+    expect(0, rect.left);
+    todo_wine expect(0, rect.right);
+
+    insert_column(hwnd, 0);
+    insert_column(hwnd, 1);
+
+    col.mask = LVCF_WIDTH;
+    col.cx   = 50;
+    r = SendMessage(hwnd, LVM_SETCOLUMN, 0, (LPARAM)&col);
+    expect(TRUE, r);
+
+    col.mask = LVCF_WIDTH;
+    col.cx   = 100;
+    r = SendMessage(hwnd, LVM_SETCOLUMN, 1, (LPARAM)&col);
+    expect(TRUE, r);
+
+    rect.left = LVIR_BOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+
+    /* still no left padding */
+    expect(0, rect.left);
+    expect(150, rect.right);
+
+    rect.left = LVIR_SELECTBOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding */
+    expect(2, rect.left);
+
+    rect.left = LVIR_LABEL;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding, column width */
+    expect(2, rect.left);
+    expect(50, rect.right);
+
+    /* no icons attached */
+    rect.left = LVIR_ICON;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding */
+    expect(2, rect.left);
+    expect(2, rect.right);
+
+    /* change order */
+    order[0] = 1; order[1] = 0;
+    r = SendMessage(hwnd, LVM_SETCOLUMNORDERARRAY, 2, (LPARAM)&order);
+    expect(TRUE, r);
+    pt.x = -1;
+    r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pt);
+    expect(TRUE, r);
+    /* 1 indexed column width + padding */
+    todo_wine expect(102, pt.x);
+    /* rect is at zero too */
+    rect.left = LVIR_BOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    expect(0, rect.left);
+    /* just width sum */
+    expect(150, rect.right);
+
+    rect.left = LVIR_SELECTBOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* column width + padding */
+    todo_wine expect(102, rect.left);
+
+    /* back to initial order */
+    order[0] = 0; order[1] = 1;
+    r = SendMessage(hwnd, LVM_SETCOLUMNORDERARRAY, 2, (LPARAM)&order);
+    expect(TRUE, r);
+
+    /* state icons */
+    himl = ImageList_Create(16, 16, 0, 2, 2);
+    ok(himl != NULL, "failed to create imagelist\n");
+    hbm = CreateBitmap(16, 16, 1, 1, NULL);
+    ok(hbm != NULL, "failed to create bitmap\n");
+    r = ImageList_Add(himl, hbm, 0);
+    ok(r == 0, "should be zero\n");
+    hbm = CreateBitmap(16, 16, 1, 1, NULL);
+    ok(hbm != NULL, "failed to create bitmap\n");
+    r = ImageList_Add(himl, hbm, 0);
+    ok(r == 1, "should be one\n");
+
+    r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)himl);
+    ok(r == 0, "should return zero\n");
+
+    item.mask = LVIF_STATE;
+    item.state = INDEXTOSTATEIMAGEMASK(1);
+    item.stateMask = LVIS_STATEIMAGEMASK;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    /* icon bounds */
+    rect.left = LVIR_ICON;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + stateicon width */
+    expect(18, rect.left);
+    expect(18, rect.right);
+    /* label bounds */
+    rect.left = LVIR_LABEL;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + stateicon width -> column width */
+    expect(18, rect.left);
+    expect(50, rect.right);
+
+    r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)NULL);
+    ok(r != 0, "should return current list handle\n");
+
+    r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)himl);
+    ok(r == 0, "should return zero\n");
+
+    item.mask = LVIF_STATE | LVIF_IMAGE;
+    item.iImage = 1;
+    item.state = 0;
+    item.stateMask = ~0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    /* icon bounds */
+    rect.left = LVIR_ICON;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding, icon width */
+    expect(2, rect.left);
+    expect(18, rect.right);
+    /* label bounds */
+    rect.left = LVIR_LABEL;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + icon width -> column width */
+    expect(18, rect.left);
+    expect(50, rect.right);
+
+    /* select bounds */
+    rect.left = LVIR_SELECTBOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding, column width */
+    expect(2, rect.left);
+    todo_wine expect(50, rect.right);
+
+    /* try with indentation */
+    item.mask = LVIF_INDENT;
+    item.iIndent = 1;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    /* bounds */
+    rect.left = LVIR_BOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + 1 icon width, column width */
+    expect(0, rect.left);
+    expect(150, rect.right);
+
+    /* select bounds */
+    rect.left = LVIR_SELECTBOUNDS;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + 1 icon width, column width */
+    expect(2 + 16, rect.left);
+    todo_wine expect(50, rect.right);
+
+    /* label bounds */
+    rect.left = LVIR_LABEL;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + 2 icon widths, column width */
+    expect(2 + 16*2, rect.left);
+    expect(50, rect.right);
+
+    /* icon bounds */
+    rect.left = LVIR_ICON;
+    rect.right = rect.top = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
+    /* padding + 1 icon width indentation, icon width */
+    expect(2 + 16, rect.left);
+    expect(34, rect.right);
+
+
+    DestroyWindow(hwnd);
+}
+
+static void test_editbox(void)
+{
+    HWND hwnd, hwndedit, hwndedit2;
+    LVITEMA item;
+    DWORD r;
+    static CHAR testitemA[]  = "testitem";
+    static CHAR testitem1A[] = "testitem1";
+    static CHAR buffer[10];
+
+    hwnd = create_listview_control(LVS_EDITLABELS);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    insert_column(hwnd, 0);
+
+    memset(&item, 0, sizeof(item));
+    item.mask = LVIF_TEXT;
+    item.pszText = testitemA;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
+    expect(0, r);
+
+    /* setting focus is necessary */
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+
+    /* modify initial string */
+    r = SendMessage(hwndedit, WM_SETTEXT, 0, (LPARAM)testitem1A);
+    expect(TRUE, r);
+    /* return focus to listview */
+    SetFocus(hwnd);
+
+    memset(&item, 0, sizeof(item));
+    item.mask = LVIF_TEXT;
+    item.pszText = buffer;
+    item.cchTextMax = 10;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    ok(strcmp(buffer, testitem1A) == 0, "Expected item text to change\n");
+
+    /* send LVM_EDITLABEL on already created edit */
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    /* focus will be set to edit */
+    ok(GetFocus() == hwndedit, "Expected Edit window to be focused\n");
+    hwndedit2 = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit2), "Expected Edit window to be created\n");
+
+    /* creating label disabled when control isn't focused */
+    SetFocus(0);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    todo_wine ok(hwndedit == NULL, "Expected Edit window not to be created\n");
+
+    /* check EN_KILLFOCUS handling */
+    memset(&item, 0, sizeof(item));
+    item.pszText = testitemA;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEMTEXTA, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    /* modify edit and notify control that it lost focus */
+    r = SendMessage(hwndedit, WM_SETTEXT, 0, (LPARAM)testitem1A);
+    expect(TRUE, r);
+    r = SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)hwndedit);
+    expect(0, r);
+    memset(&item, 0, sizeof(item));
+    item.pszText = buffer;
+    item.cchTextMax = 10;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMTEXTA, 0, (LPARAM)&item);
+    expect(lstrlen(item.pszText), r);
+    ok(strcmp(buffer, testitem1A) == 0, "Expected item text to change\n");
+    /* end edit without saving */
+    r = SendMessage(hwndedit, WM_KEYDOWN, VK_ESCAPE, 0);
+    expect(0, r);
+    memset(&item, 0, sizeof(item));
+    item.pszText = buffer;
+    item.cchTextMax = 10;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_GETITEMTEXTA, 0, (LPARAM)&item);
+    expect(lstrlen(item.pszText), r);
+    ok(strcmp(buffer, testitem1A) == 0, "Expected item text to change\n");
 
     DestroyWindow(hwnd);
 }
@@ -2463,6 +2997,7 @@ START_TEST(listview)
     test_columns();
     test_getorigin();
     test_multiselect();
+    test_getitemrect();
     test_subitem_rect();
     test_sorting();
     test_ownerdata();
@@ -2470,6 +3005,10 @@ START_TEST(listview)
     test_nosortheader();
     test_setredraw();
     test_hittest();
+    test_getviewrect();
+    test_getitemposition();
+    test_columnscreation();
+    test_editbox();
 
     DestroyWindow(hwndparent);
 }

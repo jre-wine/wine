@@ -127,7 +127,7 @@ static void determine_pointer_marshalling_style(void)
     NdrPointerMarshall(&StubMsg, (unsigned char*)&ch, fmtstr_up_char);
     ok(StubMsg.Buffer == StubMsg.BufferStart + 5, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
 
-    use_pointer_ids = (*(unsigned int *)StubMsg.BufferStart != (unsigned int)&ch);
+    use_pointer_ids = (*(unsigned int *)StubMsg.BufferStart != (UINT_PTR)&ch);
     trace("Pointer marshalling using %s\n", use_pointer_ids ? "pointer ids" : "pointer value");
 
     HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
@@ -138,7 +138,7 @@ static void test_ndr_simple_type(void)
     RPC_MESSAGE RpcMessage;
     MIDL_STUB_MESSAGE StubMsg;
     MIDL_STUB_DESC StubDesc;
-    long l, l2 = 0;
+    LONG l, l2 = 0;
 
     StubDesc = Object_StubDesc;
     StubDesc.pFormatTypes = NULL;
@@ -154,28 +154,27 @@ static void test_ndr_simple_type(void)
     l = 0xcafebabe;
     NdrSimpleTypeMarshall(&StubMsg, (unsigned char*)&l, 8 /* FC_LONG */);
     ok(StubMsg.Buffer == StubMsg.BufferStart + 4, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
-    ok(*(long*)StubMsg.BufferStart == l, "%ld\n", *(long*)StubMsg.BufferStart);
+    ok(*(LONG*)StubMsg.BufferStart == l, "%d\n", *(LONG*)StubMsg.BufferStart);
 
     StubMsg.Buffer = StubMsg.BufferStart + 1;
     NdrSimpleTypeMarshall(&StubMsg, (unsigned char*)&l, 8 /* FC_LONG */);
     ok(StubMsg.Buffer == StubMsg.BufferStart + 8, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
-    ok(*(long*)(StubMsg.BufferStart + 4) == l, "%ld\n", *(long*)StubMsg.BufferStart);
+    ok(*(LONG*)(StubMsg.BufferStart + 4) == l, "%d\n", *(LONG*)StubMsg.BufferStart);
 
     StubMsg.Buffer = StubMsg.BufferStart + 1;
     NdrSimpleTypeUnmarshall(&StubMsg, (unsigned char*)&l2, 8 /* FC_LONG */);
     ok(StubMsg.Buffer == StubMsg.BufferStart + 8, "%p %p\n", StubMsg.Buffer, StubMsg.BufferStart);
-    ok(l2 == l, "%ld\n", l2);
+    ok(l2 == l, "%d\n", l2);
 
     HeapFree(GetProcessHeap(), 0, StubMsg.BufferStart);
 }
 
 static void test_pointer_marshal(const unsigned char *formattypes,
-                                 void *memsrc,
-                                 long srcsize,
+                                 void *memsrc, DWORD srcsize,
                                  const void *wiredata,
                                  ULONG wiredatalen,
                                  int(*cmp)(const void*,const void*,size_t),
-                                 long num_additional_allocs,
+                                 int num_additional_allocs,
                                  const char *msgpfx)
 {
     RPC_MESSAGE RpcMessage;
@@ -218,9 +217,6 @@ static void test_pointer_marshal(const unsigned char *formattypes,
     StubMsg.Buffer = StubMsg.BufferStart;
     StubMsg.MemorySize = 0;
 
-    if (0)
-    {
-    /* NdrPointerMemorySize crashes under Wine */
     size = NdrPointerMemorySize( &StubMsg, formattypes );
     ok(size == StubMsg.MemorySize, "%s: mem size %u size %u\n", msgpfx, StubMsg.MemorySize, size);
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p len %d\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart, wiredatalen);
@@ -248,7 +244,6 @@ static void test_pointer_marshal(const unsigned char *formattypes,
         ok(size == srcsize + 4 + (srcsize == 8 ? 8 : 4), "%s: mem size %u\n", msgpfx, size);
     else
         ok(size == srcsize + (srcsize == 8 ? 8 : 4), "%s: mem size %u\n", msgpfx, size);
-    }
 
     size = srcsize;
     if(formattypes[1] & 0x10) size += 4;
@@ -302,21 +297,24 @@ todo_wine {
         NdrPointerFree(&StubMsg, mem, formattypes);
  
         /* again pass address of NULL ptr, but pretend we're a server */
-        mem = NULL;
-        StubMsg.Buffer = StubMsg.BufferStart;
-        StubMsg.IsClient = 0;
-        ptr = NdrPointerUnmarshall( &StubMsg, &mem, formattypes, 0 );
-        ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
-        if (formattypes[2] == 0xd /* FC_ENUM16 */)
-            ok(mem != StubMsg.BufferStart + wiredatalen - srcsize, "%s: mem points to buffer %p %p\n", msgpfx, mem, StubMsg.BufferStart);
-        else
-            ok(mem == StubMsg.BufferStart + wiredatalen - srcsize, "%s: mem doesn't point to buffer %p %p\n", msgpfx, mem, StubMsg.BufferStart);
-        ok(!cmp(mem, memsrc, size), "%s: incorrectly unmarshaled\n", msgpfx);
-        ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p len %d\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart, wiredatalen);
-        ok(StubMsg.MemorySize == 0, "%s: memorysize %d\n", msgpfx, StubMsg.MemorySize);
-        if (formattypes[2] != 0xd /* FC_ENUM16 */) {
-            ok(my_alloc_called == num_additional_allocs, "%s: my_alloc got called %d times\n", msgpfx, my_alloc_called);
-            my_alloc_called = 0;
+        if (0)  /* crashes on Win9x and NT4 */
+        {
+            mem = NULL;
+            StubMsg.Buffer = StubMsg.BufferStart;
+            StubMsg.IsClient = 0;
+            ptr = NdrPointerUnmarshall( &StubMsg, &mem, formattypes, 0 );
+            ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
+            if (formattypes[2] == 0xd /* FC_ENUM16 */)
+                ok(mem != StubMsg.BufferStart + wiredatalen - srcsize, "%s: mem points to buffer %p %p\n", msgpfx, mem, StubMsg.BufferStart);
+            else
+                ok(mem == StubMsg.BufferStart + wiredatalen - srcsize, "%s: mem doesn't point to buffer %p %p\n", msgpfx, mem, StubMsg.BufferStart);
+            ok(!cmp(mem, memsrc, size), "%s: incorrectly unmarshaled\n", msgpfx);
+            ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p len %d\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart, wiredatalen);
+            ok(StubMsg.MemorySize == 0, "%s: memorysize %d\n", msgpfx, StubMsg.MemorySize);
+            if (formattypes[2] != 0xd /* FC_ENUM16 */) {
+                ok(my_alloc_called == num_additional_allocs, "%s: my_alloc got called %d times\n", msgpfx, my_alloc_called);
+                my_alloc_called = 0;
+            }
         }
     }
     HeapFree(GetProcessHeap(), 0, mem_orig);
@@ -336,7 +334,7 @@ static void test_simple_types(void)
     unsigned char *ch_ptr;
     unsigned short s;
     unsigned int i;
-    unsigned long l;
+    ULONG l;
     ULONGLONG ll;
     float f;
     double d;
@@ -461,7 +459,7 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)ch_ptr;
+        *(unsigned int *)wiredata = (UINT_PTR)ch_ptr;
     wiredata[4] = ch;
  
     test_pointer_marshal(fmtstr_up_char, ch_ptr, 1, wiredata, 5, NULL, 0, "up_char");
@@ -478,7 +476,7 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&s;
+        *(unsigned int *)wiredata = (UINT_PTR)&s;
     *(unsigned short*)(wiredata + 4) = s;
 
     test_pointer_marshal(fmtstr_up_wchar, &s, 2, wiredata, 6, NULL, 0, "up_wchar");
@@ -489,16 +487,16 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&i;
+        *(unsigned int *)wiredata = (UINT_PTR)&i;
     *(unsigned short*)(wiredata + 4) = i;
-    test_pointer_marshal(fmtstr_up_enum16, &i, 2, wiredata, 6, NULL, 0, "up_enum16");
+    test_pointer_marshal(fmtstr_up_enum16, &i, 4, wiredata, 6, NULL, 0, "up_enum16");
 
     l = 0xcafebabe;
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&l;
-    *(unsigned long*)(wiredata + 4) = l;
+        *(unsigned int *)wiredata = (UINT_PTR)&l;
+    *(ULONG*)(wiredata + 4) = l;
 
     test_pointer_marshal(fmtstr_up_long, &l, 4, wiredata, 8, NULL, 0, "up_long");
     test_pointer_marshal(fmtstr_up_ulong, &l, 4, wiredata, 8, NULL, 0,  "up_ulong");
@@ -509,8 +507,8 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&ll;
-    *(unsigned int **)(wiredata + 4) = 0;
+        *(unsigned int *)wiredata = (UINT_PTR)&ll;
+    *(unsigned int *)(wiredata + 4) = 0;
     *(ULONGLONG*)(wiredata + 8) = ll;
     test_pointer_marshal(fmtstr_up_longlong, &ll, 8, wiredata, 16, NULL, 0, "up_longlong");
 
@@ -518,7 +516,7 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&f;
+        *(unsigned int *)wiredata = (UINT_PTR)&f;
     *(float*)(wiredata + 4) = f;
     test_pointer_marshal(fmtstr_up_float, &f, 4, wiredata, 8, NULL, 0, "up_float");
 
@@ -526,7 +524,7 @@ static void test_simple_types(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&d;
+        *(unsigned int *)wiredata = (UINT_PTR)&d;
     *(unsigned int *)(wiredata + 4) = 0;
     *(double*)(wiredata + 8) = d;
     test_pointer_marshal(fmtstr_up_double, &d, 8, wiredata, 16, NULL, 0,  "up_double");
@@ -690,12 +688,11 @@ static void test_nontrivial_pointer_types(void)
 }
 
 static void test_simple_struct_marshal(const unsigned char *formattypes,
-                                       void *memsrc,
-                                       long srcsize,
+                                       void *memsrc, DWORD srcsize,
                                        const void *wiredata,
                                        ULONG wiredatalen,
                                        int(*cmp)(const void*,const void*,size_t),
-                                       long num_additional_allocs,
+                                       int num_additional_allocs,
                                        const char *msgpfx)
 {
     RPC_MESSAGE RpcMessage;
@@ -724,9 +721,6 @@ static void test_simple_struct_marshal(const unsigned char *formattypes,
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart);
     ok(!memcmp(StubMsg.BufferStart, wiredata, wiredatalen), "%s: incorrectly marshaled %08x %08x %08x\n", msgpfx, *(DWORD*)StubMsg.BufferStart,*((DWORD*)StubMsg.BufferStart+1),*((DWORD*)StubMsg.BufferStart+2));
 
-    if (0)
-    {
-    /* FIXME: Causes Wine to crash */
     StubMsg.Buffer = StubMsg.BufferStart;
     StubMsg.MemorySize = 0;
     size = NdrSimpleStructMemorySize( &StubMsg, formattypes );
@@ -736,12 +730,9 @@ static void test_simple_struct_marshal(const unsigned char *formattypes,
 
     StubMsg.Buffer = StubMsg.BufferStart;
     size = NdrSimpleStructMemorySize( &StubMsg, formattypes );
-todo_wine {
     ok(size == StubMsg.MemorySize, "%s: size != MemorySize\n", msgpfx);
-}
     ok(StubMsg.MemorySize == ((srcsize + 3) & ~3) + srcsize, "%s: mem size %u\n", msgpfx, size);
     ok(StubMsg.Buffer - StubMsg.BufferStart == wiredatalen, "%s: Buffer %p Start %p\n", msgpfx, StubMsg.Buffer, StubMsg.BufferStart);
-    }
     size = srcsize;
     /*** Unmarshalling first with must_alloc false ***/
 
@@ -772,16 +763,19 @@ todo_wine {
        Passing a NULL ptr while we're a client && !must_alloc
        crashes on Windows, so we won't do that. */
 
-    mem = NULL;
-    StubMsg.IsClient = 0;
-    StubMsg.Buffer = StubMsg.BufferStart;
-    ptr = NdrSimpleStructUnmarshall( &StubMsg, &mem, formattypes, 0 );
-    ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
-    ok(mem == StubMsg.BufferStart, "%s: mem not equal buffer\n", msgpfx);
-    ok(!cmp(mem, memsrc, srcsize), "%s: incorrectly unmarshaled\n", msgpfx);
-    ok(my_alloc_called == num_additional_allocs, "%s: my_alloc got called %d times\n", msgpfx, my_alloc_called);
-    my_alloc_called = 0;
-    ok(StubMsg.MemorySize == 0, "%s: memorysize touched in unmarshal\n", msgpfx);
+    if (0)  /* crashes on Win9x and NT4 */
+    {
+        mem = NULL;
+        StubMsg.IsClient = 0;
+        StubMsg.Buffer = StubMsg.BufferStart;
+        ptr = NdrSimpleStructUnmarshall( &StubMsg, &mem, formattypes, FALSE );
+        ok(ptr == NULL, "%s: ret %p\n", msgpfx, ptr);
+        ok(mem == StubMsg.BufferStart, "%s: mem not equal buffer\n", msgpfx);
+        ok(!cmp(mem, memsrc, srcsize), "%s: incorrectly unmarshaled\n", msgpfx);
+        ok(my_alloc_called == num_additional_allocs, "%s: my_alloc got called %d times\n", msgpfx, my_alloc_called);
+        my_alloc_called = 0;
+        ok(StubMsg.MemorySize == 0, "%s: memorysize touched in unmarshal\n", msgpfx);
+    }
 
     /*** now must_alloc is true ***/
 
@@ -839,8 +833,8 @@ todo_wine {
 
 typedef struct
 {
-    long l1;
-    long *pl1;
+    LONG l1;
+    LONG *pl1;
     char *pc1;
 } ps1_t;
 
@@ -876,8 +870,8 @@ static int ps1_cmp(const void *s1, const void *s2, size_t num)
 static void test_simple_struct(void)
 {
     unsigned char wiredata[28];
-    unsigned long wiredatalen;
-    long l;
+    ULONG wiredatalen;
+    LONG l;
     char c;
     ps1_t ps1;
 
@@ -899,7 +893,7 @@ static void test_simple_struct(void)
     struct {
         short s;
         char c;
-        long l1, l2;
+        LONG l1, l2;
         LONGLONG ll;
     } s1;
 
@@ -951,13 +945,9 @@ static void test_simple_struct(void)
     if (use_pointer_ids)
         *(unsigned int *)wiredata = 0x20000;
     else
-        *(unsigned int *)wiredata = (unsigned int)&s1;
+        *(unsigned int *)wiredata = (UINT_PTR)&s1;
     memcpy(wiredata + 4, &s1, wiredatalen);
-    if (0)
-    {
-    /* one of the unmarshallings crashes Wine */
     test_pointer_marshal(fmtstr_simple_struct, &s1, 24, wiredata, 28, NULL, 0, "struct");
-    }
 
     /* zero the entire structure, including the hole */
     memset(&ps1, 0, sizeof(ps1));
@@ -976,22 +966,22 @@ static void test_simple_struct(void)
     }
     else
     {
-	*(unsigned int *)(wiredata + 8) = (unsigned int)&l;
-	*(unsigned int *)(wiredata + 12) = (unsigned int)&c;
+	*(unsigned int *)(wiredata + 8) = (UINT_PTR)&l;
+	*(unsigned int *)(wiredata + 12) = (UINT_PTR)&c;
     }
     memcpy(wiredata + 16, &l, 4);
     memcpy(wiredata + 20, &c, 1);
 
     test_simple_struct_marshal(fmtstr_pointer_struct + 4, &ps1, 17, wiredata + 4, 17, ps1_cmp, 2, "pointer_struct");
     if (use_pointer_ids)
-        *(unsigned int *)wiredata = 0x20000;
-    else
-        *(unsigned int *)wiredata = (unsigned int)&ps1;
-    if (0)
     {
-    /* one of the unmarshallings crashes Wine */
-    test_pointer_marshal(fmtstr_pointer_struct, &ps1, 17, wiredata, 21, ps1_cmp, 2, "pointer_struct");
+        *(unsigned int *)wiredata = 0x20000;
+	*(unsigned int *)(wiredata + 8) = 0x20004;
+	*(unsigned int *)(wiredata + 12) = 0x20008;
     }
+    else
+        *(unsigned int *)wiredata = (UINT_PTR)&ps1;
+    test_pointer_marshal(fmtstr_pointer_struct, &ps1, 17, wiredata, 21, ps1_cmp, 2, "pointer_struct");
 }
 
 static void test_fullpointer_xlat(void)
@@ -1120,95 +1110,84 @@ static void test_fullpointer_xlat(void)
     NdrFullPointerXlatFree(pXlatTables);
 }
 
-static void test_client_init(void)
+/* verify stub data that is identical between client and server */
+static void test_common_stub_data( const char *prefix, const MIDL_STUB_MESSAGE *stubMsg )
 {
-    MIDL_STUB_MESSAGE stubMsg;
-    RPC_MESSAGE rpcMsg;
+    void *unset_ptr;
 
-    memset(&rpcMsg, 0xcc, sizeof(rpcMsg));
-    memset(&stubMsg, 0xcc, sizeof(stubMsg));
+    memset(&unset_ptr, 0xcc, sizeof(unset_ptr));
 
-    NdrClientInitializeNew(&rpcMsg, &stubMsg, &Object_StubDesc, 1);
+#define TEST_ZERO(field, fmt) ok(stubMsg->field == 0, "%s: " #field " should have been set to zero instead of " fmt "\n", prefix, stubMsg->field)
+#define TEST_POINTER_UNSET(field) ok(stubMsg->field == unset_ptr, "%s: " #field " should have been unset instead of %p\n", prefix, stubMsg->field)
+#define TEST_ULONG_UNSET(field) ok(stubMsg->field == 0xcccccccc, "%s: " #field " should have been unset instead of 0x%x\n", prefix, stubMsg->field)
+#define TEST_ULONG_PTR_UNSET(field) ok(stubMsg->field == (ULONG_PTR)unset_ptr, "%s: " #field " should have been unset instead of 0x%lx\n", prefix, stubMsg->field)
 
-#define TEST_POINTER_UNSET(field) ok(rpcMsg.field == (void *)0xcccccccc, #field " should have been unset instead of %p\n", rpcMsg.field)
-
-    ok(rpcMsg.Handle == NULL, "rpcMsg.Handle should have been NULL instead of %p\n", rpcMsg.Handle);
-    TEST_POINTER_UNSET(Buffer);
-    ok(rpcMsg.BufferLength == 0xcccccccc, "rpcMsg.BufferLength should have been unset instead of %d\n", rpcMsg.BufferLength);
-    ok(rpcMsg.ProcNum == 0x8001, "rpcMsg.ProcNum should have been 0x8001 instead of 0x%x\n", rpcMsg.ProcNum);
-    TEST_POINTER_UNSET(TransferSyntax);
-    ok(rpcMsg.RpcInterfaceInformation == Object_StubDesc.RpcInterfaceInformation,
-        "rpcMsg.RpcInterfaceInformation should have been %p instead of %p\n",
-        Object_StubDesc.RpcInterfaceInformation, rpcMsg.RpcInterfaceInformation);
-    /* Note: ReservedForRuntime not tested */
-    TEST_POINTER_UNSET(ManagerEpv);
-    TEST_POINTER_UNSET(ImportContext);
-    ok(rpcMsg.RpcFlags == 0, "rpcMsg.RpcFlags should have been 0 instead of 0x%x\n", rpcMsg.RpcFlags);
-#undef TEST_POINTER_UNSET
-
-#define TEST_ZERO(field, fmt) ok(stubMsg.field == 0, #field " should have been set to zero instead of " fmt "\n", stubMsg.field)
-#define TEST_POINTER_UNSET(field) ok(stubMsg.field == (void *)0xcccccccc, #field " should have been unset instead of %p\n", stubMsg.field)
-#define TEST_ULONG_UNSET(field) ok(stubMsg.field == 0xcccccccc, #field " should have been unset instead of 0x%x\n", stubMsg.field)
-#define TEST_ULONG_PTR_UNSET(field) ok(stubMsg.field == 0xcccccccc, #field " should have been unset instead of 0x%lx\n", stubMsg.field)
-
-    ok(stubMsg.RpcMsg == &rpcMsg, "stubMsg.RpcMsg should have been %p instead of %p\n", &rpcMsg, stubMsg.RpcMsg);
-    TEST_POINTER_UNSET(Buffer);
-    TEST_ZERO(BufferStart, "%p");
-    TEST_ZERO(BufferEnd, "%p");
     TEST_POINTER_UNSET(BufferMark);
-    TEST_ZERO(BufferLength, "%d");
     TEST_ULONG_UNSET(MemorySize);
     TEST_POINTER_UNSET(Memory);
-    ok(stubMsg.IsClient == 1, "stubMsg.IsClient should have been 1 instead of %u\n", stubMsg.IsClient);
-    TEST_ZERO(ReuseBuffer, "%d");
     TEST_ZERO(pAllocAllNodesContext, "%p");
-    ok(stubMsg.pPointerQueueState == 0 ||
-       broken(stubMsg.pPointerQueueState == (void *)0xcccccccc), /* win2k */
-       "stubMsg.pPointerQueueState should have been unset instead of %p\n", stubMsg.pPointerQueueState);
+    ok(stubMsg->pPointerQueueState == 0 ||
+       broken(stubMsg->pPointerQueueState == unset_ptr), /* win2k */
+       "%s: pPointerQueueState should have been unset instead of %p\n",
+       prefix, stubMsg->pPointerQueueState);
     TEST_ZERO(IgnoreEmbeddedPointers, "%d");
     TEST_ZERO(PointerBufferMark, "%p");
-    TEST_ZERO(CorrDespIncrement, "%d");
-    TEST_ZERO(uFlags, "%d");
+    ok( stubMsg->uFlags == 0 ||
+        broken(stubMsg->uFlags == 0xcc), /* win9x */
+        "%s: uFlags should have been set to zero instead of 0x%x\n", prefix, stubMsg->uFlags );
     /* FIXME: UniquePtrCount */
     TEST_ULONG_PTR_UNSET(MaxCount);
     TEST_ULONG_UNSET(Offset);
     TEST_ULONG_UNSET(ActualCount);
-    ok(stubMsg.pfnAllocate == my_alloc, "stubMsg.pfnAllocate should have been %p instead of %p\n", my_alloc, stubMsg.pfnAllocate);
-    ok(stubMsg.pfnFree == my_free, "stubMsg.pfnFree should have been %p instead of %p\n", my_free, stubMsg.pfnFree);
+    ok(stubMsg->pfnAllocate == my_alloc, "%s: pfnAllocate should have been %p instead of %p\n",
+       prefix, my_alloc, stubMsg->pfnAllocate);
+    ok(stubMsg->pfnFree == my_free, "%s: pfnFree should have been %p instead of %p\n",
+       prefix, my_free, stubMsg->pfnFree);
     TEST_ZERO(StackTop, "%p");
     TEST_POINTER_UNSET(pPresentedType);
     TEST_POINTER_UNSET(pTransmitType);
     TEST_POINTER_UNSET(SavedHandle);
-    ok(stubMsg.StubDesc == &Object_StubDesc, "stubMsg.StubDesc should have been %p instead of %p\n", &Object_StubDesc, stubMsg.StubDesc);
-    TEST_POINTER_UNSET(FullPtrXlatTables);
+    ok(stubMsg->StubDesc == &Object_StubDesc, "%s: StubDesc should have been %p instead of %p\n",
+       prefix, &Object_StubDesc, stubMsg->StubDesc);
     TEST_ZERO(FullPtrRefId, "%d");
-    TEST_ZERO(PointerLength, "%d");
+    ok( stubMsg->PointerLength == 0 ||
+        broken(stubMsg->PointerLength == 1), /* win9x, nt4 */
+        "%s: pAsyncMsg should have been set to zero instead of %d\n", prefix, stubMsg->PointerLength );
     TEST_ZERO(fInDontFree, "%d");
     TEST_ZERO(fDontCallFreeInst, "%d");
-    ok(stubMsg.fInOnlyParam == 0 ||
-       stubMsg.fInOnlyParam == -1, /* Vista */
-       "fInOnlyParam should have been set to 0 or -1 instead of %d\n", stubMsg.fInOnlyParam);
-    TEST_ZERO(fHasReturn, "%d");
+    ok(stubMsg->fInOnlyParam == 0 ||
+       stubMsg->fInOnlyParam == -1, /* Vista */
+       "%s: fInOnlyParam should have been set to 0 or -1 instead of %d\n", prefix, stubMsg->fInOnlyParam);
+    ok( stubMsg->fHasReturn == 0 ||
+        broken(stubMsg->fHasReturn == -1), /* win9x, nt4 */
+        "%s: fHasReturn should have been set to zero instead of %d\n", prefix, stubMsg->fHasReturn );
     TEST_ZERO(fHasExtensions, "%d");
     TEST_ZERO(fHasNewCorrDesc, "%d");
-    TEST_ZERO(fIsIn, "%d");
-    ok(stubMsg.fIsOut == 0 ||
-       stubMsg.fIsOut == -1, /* XP-SP3 */
-       "fIsOut should have been set to 0 or -1 instead of %d\n", stubMsg.fIsOut);
+    ok(stubMsg->fIsIn == 0 ||
+       broken(stubMsg->fIsIn == -1), /* win9x, nt4 */
+       "%s: fIsIn should have been set to 0 instead of %d\n", prefix, stubMsg->fIsIn);
+    ok(stubMsg->fIsOut == 0 ||
+       stubMsg->fIsOut == -1, /* XP-SP3 */
+       "%s: fIsOut should have been set to 0 or -1 instead of %d\n", prefix, stubMsg->fIsOut);
     TEST_ZERO(fIsOicf, "%d");
-    trace("NdrClientInitializeNew: fBufferValid = %d\n", stubMsg.fBufferValid);
-    ok(stubMsg.fHasMemoryValidateCallback == 0 ||
-       stubMsg.fHasMemoryValidateCallback == -1, /* XP-SP3 */
-       "fHasMemoryValidateCallback should have been set to 0 or -1 instead of %d\n", stubMsg.fHasMemoryValidateCallback);
-    ok(stubMsg.fInFree == 0 ||
-       stubMsg.fInFree == -1, /* XP-SP3 */
-       "fInFree should have been set to 0 or -1 instead of %d\n", stubMsg.fInFree);
+    ok(stubMsg->fBufferValid == 0,
+       "%s: fBufferValid should have been set to 0 instead of %d\n", prefix, stubMsg->fBufferValid);
+    ok(stubMsg->fHasMemoryValidateCallback == 0 ||
+       stubMsg->fHasMemoryValidateCallback == -1, /* XP-SP3 */
+       "%s: fHasMemoryValidateCallback should have been set to 0 or -1 instead of %d\n",
+       prefix, stubMsg->fHasMemoryValidateCallback);
+    ok(stubMsg->fInFree == 0 ||
+       stubMsg->fInFree == -1, /* XP-SP3 */
+       "%s: fInFree should have been set to 0 or -1 instead of %d\n", prefix, stubMsg->fInFree);
     TEST_ZERO(fNeedMCCP, "%d");
-    ok(stubMsg.fUnused == 0 ||
-       stubMsg.fUnused == -2, /* Vista */
-       "fUnused should have been set to 0 or -2 instead of %d\n", stubMsg.fUnused);
-    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xffffcccc instead of 0x%x\n", stubMsg.fUnused2);
-    ok(stubMsg.dwDestContext == MSHCTX_DIFFERENTMACHINE, "stubMsg.dwDestContext should have been MSHCTX_DIFFERENTMACHINE instead of %d\n", stubMsg.dwDestContext);
+    ok(stubMsg->fUnused == 0 ||
+       stubMsg->fUnused == -2, /* Vista */
+       "%s: fUnused should have been set to 0 or -2 instead of %d\n", prefix, stubMsg->fUnused);
+    ok(stubMsg->fUnused2 == 0xffffcccc, "%s: fUnused2 should have been 0xffffcccc instead of 0x%x\n",
+       prefix, stubMsg->fUnused2);
+    ok(stubMsg->dwDestContext == MSHCTX_DIFFERENTMACHINE,
+       "%s: dwDestContext should have been MSHCTX_DIFFERENTMACHINE instead of %d\n",
+       prefix, stubMsg->dwDestContext);
     TEST_ZERO(pvDestContext, "%p");
     TEST_POINTER_UNSET(SavedContextHandles);
     TEST_ULONG_UNSET(ParamNumber);
@@ -1220,25 +1199,77 @@ static void test_client_init(void)
     TEST_POINTER_UNSET(pArgQueue);
     TEST_ZERO(dwStubPhase, "%d");
     /* FIXME: where does this value come from? */
-    trace("LowStackMark is %p\n", stubMsg.LowStackMark);
-    TEST_ZERO(pAsyncMsg, "%p");
-    TEST_ZERO(pCorrInfo, "%p");
-    TEST_ZERO(pCorrMemory, "%p");
-    TEST_ZERO(pMemoryList, "%p");
+    trace("%s: LowStackMark is %p\n", prefix, stubMsg->LowStackMark);
+    ok( stubMsg->pAsyncMsg == 0 || broken(stubMsg->pAsyncMsg == unset_ptr), /* win9x, nt4 */
+        "%s: pAsyncMsg should have been set to zero instead of %p\n", prefix, stubMsg->pAsyncMsg );
+    ok( stubMsg->pCorrInfo == 0 || broken(stubMsg->pCorrInfo == unset_ptr), /* win9x, nt4 */
+        "%s: pCorrInfo should have been set to zero instead of %p\n", prefix, stubMsg->pCorrInfo );
+    ok( stubMsg->pCorrMemory == 0 || broken(stubMsg->pCorrMemory == unset_ptr), /* win9x, nt4 */
+        "%s: pCorrMemory should have been set to zero instead of %p\n", prefix, stubMsg->pCorrMemory );
+    ok( stubMsg->pMemoryList == 0 || broken(stubMsg->pMemoryList == unset_ptr), /* win9x, nt4 */
+        "%s: pMemoryList should have been set to zero instead of %p\n", prefix, stubMsg->pMemoryList );
     TEST_POINTER_UNSET(pCSInfo);
     TEST_POINTER_UNSET(ConformanceMark);
     TEST_POINTER_UNSET(VarianceMark);
-    ok(stubMsg.Unused == 0xcccccccc, "Unused should have be unset instead of 0x%lx\n", stubMsg.Unused);
+    ok(stubMsg->Unused == (ULONG_PTR)unset_ptr, "%s: Unused should have be unset instead of 0x%lx\n",
+       prefix, stubMsg->Unused);
     TEST_POINTER_UNSET(pContext);
     TEST_POINTER_UNSET(ContextHandleHash);
     TEST_POINTER_UNSET(pUserMarshalList);
     TEST_ULONG_PTR_UNSET(Reserved51_3);
     TEST_ULONG_PTR_UNSET(Reserved51_4);
     TEST_ULONG_PTR_UNSET(Reserved51_5);
+
+#undef TEST_ULONG_PTR_UNSET
 #undef TEST_ULONG_UNSET
 #undef TEST_POINTER_UNSET
 #undef TEST_ZERO
+}
 
+static void test_client_init(void)
+{
+    MIDL_STUB_MESSAGE stubMsg;
+    RPC_MESSAGE rpcMsg;
+    void *unset_ptr;
+
+    memset(&rpcMsg, 0xcc, sizeof(rpcMsg));
+    memset(&stubMsg, 0xcc, sizeof(stubMsg));
+    memset(&unset_ptr, 0xcc, sizeof(unset_ptr));
+
+    NdrClientInitializeNew(&rpcMsg, &stubMsg, &Object_StubDesc, 1);
+
+    test_common_stub_data( "NdrClientInitializeNew", &stubMsg );
+
+    ok(stubMsg.RpcMsg == &rpcMsg, "stubMsg.RpcMsg should have been %p instead of %p\n", &rpcMsg, stubMsg.RpcMsg);
+    ok(rpcMsg.Handle == NULL, "rpcMsg.Handle should have been NULL instead of %p\n", rpcMsg.Handle);
+    ok(rpcMsg.Buffer == unset_ptr, "rpcMsg.Buffer should have been unset instead of %p\n",
+       rpcMsg.Buffer);
+    ok(rpcMsg.BufferLength == 0xcccccccc, "rpcMsg.BufferLength should have been unset instead of %d\n", rpcMsg.BufferLength);
+    ok(rpcMsg.ProcNum == 0x8001, "rpcMsg.ProcNum should have been 0x8001 instead of 0x%x\n", rpcMsg.ProcNum);
+    ok(rpcMsg.TransferSyntax == unset_ptr, "rpcMsg.TransferSyntax should have been unset instead of %p\n", rpcMsg.TransferSyntax);
+    ok(rpcMsg.RpcInterfaceInformation == Object_StubDesc.RpcInterfaceInformation,
+        "rpcMsg.RpcInterfaceInformation should have been %p instead of %p\n",
+        Object_StubDesc.RpcInterfaceInformation, rpcMsg.RpcInterfaceInformation);
+    /* Note: ReservedForRuntime not tested */
+    ok(rpcMsg.ManagerEpv == unset_ptr, "rpcMsg.ManagerEpv should have been unset instead of %p\n", rpcMsg.ManagerEpv);
+    ok(rpcMsg.ImportContext == unset_ptr, "rpcMsg.ImportContext should have been unset instead of %p\n", rpcMsg.ImportContext);
+    ok(rpcMsg.RpcFlags == 0, "rpcMsg.RpcFlags should have been 0 instead of 0x%x\n", rpcMsg.RpcFlags);
+
+    ok(stubMsg.Buffer == unset_ptr, "stubMsg.Buffer should have been unset instead of %p\n",
+       stubMsg.Buffer);
+    ok(stubMsg.BufferStart == NULL, "stubMsg.BufferStart should have been NULL instead of %p\n",
+       stubMsg.BufferStart);
+    ok(stubMsg.BufferEnd == NULL, "stubMsg.BufferEnd should have been NULL instead of %p\n",
+       stubMsg.BufferEnd);
+    ok(stubMsg.BufferLength == 0, "stubMsg.BufferLength should have been 0 instead of %u\n",
+       stubMsg.BufferLength);
+    ok(stubMsg.IsClient == 1, "stubMsg.IsClient should have been 1 instead of %u\n", stubMsg.IsClient);
+    ok(stubMsg.ReuseBuffer == 0, "stubMsg.ReuseBuffer should have been 0 instead of %d\n",
+       stubMsg.ReuseBuffer);
+    ok(stubMsg.CorrDespIncrement == 0, "stubMsg.CorrDespIncrement should have been 0 instead of %d\n",
+       stubMsg.CorrDespIncrement);
+    ok(stubMsg.FullPtrXlatTables == unset_ptr, "stubMsg.FullPtrXlatTables should have been unset instead of %p\n",
+       stubMsg.FullPtrXlatTables);
 }
 
 static void test_server_init(void)
@@ -1258,104 +1289,22 @@ static void test_server_init(void)
     ret = NdrServerInitializeNew(&rpcMsg, &stubMsg, &Object_StubDesc);
     ok(ret == NULL, "NdrServerInitializeNew should have returned NULL instead of %p\n", ret);
 
-#define TEST_ZERO(field, fmt) ok(stubMsg.field == 0, #field " should have been set to zero instead of " fmt "\n", stubMsg.field)
-#define TEST_POINTER_UNSET(field) ok(stubMsg.field == (void *)0xcccccccc, #field " should have been unset instead of %p\n", stubMsg.field)
-#define TEST_ULONG_UNSET(field) ok(stubMsg.field == 0xcccccccc, #field " should have been unset instead of 0x%x\n", stubMsg.field)
-#define TEST_ULONG_PTR_UNSET(field) ok(stubMsg.field == 0xcccccccc, #field " should have been unset instead of 0x%lx\n", stubMsg.field)
+    test_common_stub_data( "NdrServerInitializeNew", &stubMsg );
 
     ok(stubMsg.RpcMsg == &rpcMsg, "stubMsg.RpcMsg should have been %p instead of %p\n", &rpcMsg, stubMsg.RpcMsg);
     ok(stubMsg.Buffer == buffer, "stubMsg.Buffer should have been %p instead of %p\n", buffer, stubMsg.Buffer);
     ok(stubMsg.BufferStart == buffer, "stubMsg.BufferStart should have been %p instead of %p\n", buffer, stubMsg.BufferStart);
     ok(stubMsg.BufferEnd == buffer + sizeof(buffer), "stubMsg.BufferEnd should have been %p instead of %p\n", buffer + sizeof(buffer), stubMsg.BufferEnd);
-    TEST_POINTER_UNSET(BufferMark);
 todo_wine
-    TEST_ZERO(BufferLength, "%d");
-    TEST_ULONG_UNSET(MemorySize);
-    TEST_POINTER_UNSET(Memory);
+    ok(stubMsg.BufferLength == 0, "stubMsg.BufferLength should have been 0 instead of %u\n", stubMsg.BufferLength);
     ok(stubMsg.IsClient == 0, "stubMsg.IsClient should have been 0 instead of %u\n", stubMsg.IsClient);
     ok(stubMsg.ReuseBuffer == 0 ||
        broken(stubMsg.ReuseBuffer == 1), /* win2k */
        "stubMsg.ReuseBuffer should have been set to zero instead of %d\n", stubMsg.ReuseBuffer);
-    TEST_ZERO(pAllocAllNodesContext, "%p");
-    ok(stubMsg.pPointerQueueState == 0 ||
-       broken(stubMsg.pPointerQueueState == (void *)0xcccccccc), /* win2k */
-       "stubMsg.pPointerQueueState should have been unset instead of %p\n", stubMsg.pPointerQueueState);
-    TEST_ZERO(IgnoreEmbeddedPointers, "%d");
-    TEST_ZERO(PointerBufferMark, "%p");
     ok(stubMsg.CorrDespIncrement == 0xcc ||
        stubMsg.CorrDespIncrement == 0,
        "CorrDespIncrement should have been unset instead of 0x%x\n", stubMsg.CorrDespIncrement);
-    TEST_ZERO(uFlags, "%d");
-    /* FIXME: UniquePtrCount */
-    TEST_ULONG_PTR_UNSET(MaxCount);
-    TEST_ULONG_UNSET(Offset);
-    TEST_ULONG_UNSET(ActualCount);
-    ok(stubMsg.pfnAllocate == my_alloc, "stubMsg.pfnAllocate should have been %p instead of %p\n", my_alloc, stubMsg.pfnAllocate);
-    ok(stubMsg.pfnFree == my_free, "stubMsg.pfnFree should have been %p instead of %p\n", my_free, stubMsg.pfnFree);
-    TEST_ZERO(StackTop, "%p");
-    TEST_POINTER_UNSET(pPresentedType);
-    TEST_POINTER_UNSET(pTransmitType);
-    TEST_POINTER_UNSET(SavedHandle);
-    ok(stubMsg.StubDesc == &Object_StubDesc, "stubMsg.StubDesc should have been %p instead of %p\n", &Object_StubDesc, stubMsg.StubDesc);
-    TEST_ZERO(FullPtrXlatTables, "%p");
-    TEST_ZERO(FullPtrRefId, "%d");
-    TEST_ZERO(PointerLength, "%d");
-    TEST_ZERO(fInDontFree, "%d");
-    TEST_ZERO(fDontCallFreeInst, "%d");
-    ok(stubMsg.fInOnlyParam == 0 ||
-       stubMsg.fInOnlyParam == -1, /* Vista */
-       "fInOnlyParam should have been set to 0 or -1 instead of %d\n", stubMsg.fInOnlyParam);
-    TEST_ZERO(fHasReturn, "%d");
-    TEST_ZERO(fHasExtensions, "%d");
-    TEST_ZERO(fHasNewCorrDesc, "%d");
-    TEST_ZERO(fIsIn, "%d");
-    ok(stubMsg.fIsOut == 0 ||
-       stubMsg.fIsOut == -1, /* XP-SP3 */
-       "fIsOut should have been set to 0 or -1 instead of %d\n", stubMsg.fIsOut);
-    TEST_ZERO(fIsOicf, "%d");
-    trace("NdrServerInitializeNew: fBufferValid = %d\n", stubMsg.fBufferValid);
-    ok(stubMsg.fHasMemoryValidateCallback == 0 ||
-       stubMsg.fHasMemoryValidateCallback == -1, /* XP-SP3 */
-       "fHasMemoryValidateCallback should have been set to 0 or -1 instead of %d\n", stubMsg.fHasMemoryValidateCallback);
-    ok(stubMsg.fInFree == 0 ||
-       stubMsg.fInFree == -1, /* XP-SP3 */
-       "fInFree should have been set to 0 or -1 instead of %d\n", stubMsg.fInFree);
-    TEST_ZERO(fNeedMCCP, "%d");
-    ok(stubMsg.fUnused == 0 ||
-       stubMsg.fUnused == -2, /* Vista */
-       "fUnused should have been set to 0 or -2 instead of %d\n", stubMsg.fUnused);
-    ok(stubMsg.fUnused2 == 0xffffcccc, "stubMsg.fUnused2 should have been 0xffffcccc instead of 0x%x\n", stubMsg.fUnused2);
-    ok(stubMsg.dwDestContext == MSHCTX_DIFFERENTMACHINE, "stubMsg.dwDestContext should have been MSHCTX_DIFFERENTMACHINE instead of %d\n", stubMsg.dwDestContext);
-    TEST_ZERO(pvDestContext, "%p");
-    TEST_POINTER_UNSET(SavedContextHandles);
-    TEST_ULONG_UNSET(ParamNumber);
-    TEST_ZERO(pRpcChannelBuffer, "%p");
-    TEST_ZERO(pArrayInfo, "%p");
-    TEST_POINTER_UNSET(SizePtrCountArray);
-    TEST_POINTER_UNSET(SizePtrOffsetArray);
-    TEST_POINTER_UNSET(SizePtrLengthArray);
-    TEST_POINTER_UNSET(pArgQueue);
-    TEST_ZERO(dwStubPhase, "%d");
-    /* FIXME: where does this value come from? */
-    trace("LowStackMark is %p\n", stubMsg.LowStackMark);
-    TEST_ZERO(pAsyncMsg, "%p");
-    TEST_ZERO(pCorrInfo, "%p");
-    TEST_ZERO(pCorrMemory, "%p");
-    TEST_ZERO(pMemoryList, "%p");
-    TEST_POINTER_UNSET(pCSInfo);
-    TEST_POINTER_UNSET(ConformanceMark);
-    TEST_POINTER_UNSET(VarianceMark);
-    ok(stubMsg.Unused == 0xcccccccc, "Unused should have be unset instead of 0x%lx\n", stubMsg.Unused);
-    TEST_POINTER_UNSET(pContext);
-    TEST_POINTER_UNSET(ContextHandleHash);
-    TEST_POINTER_UNSET(pUserMarshalList);
-    TEST_ULONG_PTR_UNSET(Reserved51_3);
-    TEST_ULONG_PTR_UNSET(Reserved51_4);
-    TEST_ULONG_PTR_UNSET(Reserved51_5);
-#undef TEST_ULONG_UNSET
-#undef TEST_POINTER_UNSET
-#undef TEST_ZERO
-
+    ok(stubMsg.FullPtrXlatTables == 0, "stubMsg.BufferLength should have been 0 instead of %p\n", stubMsg.FullPtrXlatTables);
 }
 
 static void test_ndr_allocate(void)
@@ -1364,12 +1313,6 @@ static void test_ndr_allocate(void)
     MIDL_STUB_MESSAGE StubMsg;
     MIDL_STUB_DESC StubDesc;
     void *p1, *p2;
-    struct tag_mem_list_v1_t
-    {
-        DWORD magic;
-        void *ptr;
-        struct tag_mem_list_v1_t *next;
-    } *mem_list_v1;
     struct tag_mem_list_v2_t
     {
         DWORD magic;
@@ -1382,7 +1325,6 @@ static void test_ndr_allocate(void)
     StubDesc = Object_StubDesc;
     NdrClientInitializeNew(&RpcMessage, &StubMsg, &StubDesc, 0);
 
-    ok(StubMsg.pMemoryList == NULL, "memlist %p\n", StubMsg.pMemoryList);
     my_alloc_called = my_free_called = 0;
     p1 = NdrAllocate(&StubMsg, 10);
     p2 = NdrAllocate(&StubMsg, 24);
@@ -1409,21 +1351,7 @@ static void test_ndr_allocate(void)
                 ok(mem_list_v2->next == NULL, "next %p\n", mem_list_v2->next);
             }
         }
-        else
-        {
-            trace("v1 mem list format\n");
-            mem_list_v1 = StubMsg.pMemoryList;
-            ok(mem_list_v1->magic == magic_MEML, "magic %08x\n", mem_list_v1->magic);
-            ok(mem_list_v1->ptr == p2, "ptr != p2\n");
-            ok(mem_list_v1->next != NULL, "next NULL\n");
-            mem_list_v1 = mem_list_v1->next;
-            if(mem_list_v1)
-            {
-                ok(mem_list_v1->magic == magic_MEML, "magic %08x\n", mem_list_v1->magic);
-                ok(mem_list_v1->ptr == p1, "ptr != p1\n");
-                ok(mem_list_v1->next == NULL, "next %p\n", mem_list_v1->next);
-            }
-        }
+        else win_skip("v1 mem list format\n");
     }
     /* NdrFree isn't exported so we can't test free'ing */
 }
@@ -1516,7 +1444,8 @@ static void test_conformant_array(void)
     mem = NULL;
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrConformantArrayUnmarshall( &StubMsg, &mem, fmtstr_conf_array, 0);
-    ok(mem == StubMsg.BufferStart + 4, "mem not pointing at buffer\n");
+    ok(mem == StubMsg.BufferStart + 4 || broken(!mem),  /* win9x, nt4 */
+       "mem not pointing at buffer %p/%p\n", mem, StubMsg.BufferStart + 4);
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
     my_alloc_called = 0;
     mem = NULL;
@@ -1565,6 +1494,7 @@ static void test_conformant_string(void)
     StubDesc = Object_StubDesc;
     StubDesc.pFormatTypes = fmtstr_conf_str;
 
+    memset( &StubMsg, 0, sizeof(StubMsg) );  /* needed on win9x and nt4 */
     NdrClientInitializeNew(
                            &RpcMessage,
                            &StubMsg,
@@ -1625,7 +1555,8 @@ todo_wine {
     mem = NULL;
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrPointerUnmarshall( &StubMsg, &mem, fmtstr_conf_str, 0);
-    ok(mem == StubMsg.BufferStart + 12, "mem not pointing at buffer\n");
+    ok(mem == StubMsg.BufferStart + 12 || broken(!mem), /* win9x, nt4 */
+       "mem not pointing at buffer %p/%p\n", mem, StubMsg.BufferStart + 12 );
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 
     my_alloc_called = 0;
@@ -1633,7 +1564,8 @@ todo_wine {
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrPointerUnmarshall( &StubMsg, &mem, fmtstr_conf_str, 1);
 todo_wine {
-    ok(mem == StubMsg.BufferStart + 12, "mem not pointing at buffer\n");
+    ok(mem == StubMsg.BufferStart + 12 || broken(!mem), /* win9x, nt4 */
+       "mem not pointing at buffer %p/%p\n", mem, StubMsg.BufferStart + 12 );
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 }
 
@@ -1641,7 +1573,8 @@ todo_wine {
     mem = mem_orig;
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrPointerUnmarshall( &StubMsg, &mem, fmtstr_conf_str, 0);
-    ok(mem == StubMsg.BufferStart + 12, "mem not pointing at buffer\n");
+    ok(mem == StubMsg.BufferStart + 12 || broken(!mem), /* win9x, nt4 */
+       "mem not pointing at buffer %p/%p\n", mem, StubMsg.BufferStart + 12 );
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 
     my_alloc_called = 0;
@@ -1649,7 +1582,8 @@ todo_wine {
     StubMsg.Buffer = StubMsg.BufferStart;
     NdrPointerUnmarshall( &StubMsg, &mem, fmtstr_conf_str, 1);
 todo_wine {
-    ok(mem == StubMsg.BufferStart + 12, "mem not pointing at buffer\n");
+    ok(mem == StubMsg.BufferStart + 12 || broken(!mem), /* win9x, nt4 */
+       "mem not pointing at buffer %p/%p\n", mem, StubMsg.BufferStart + 12 );
     ok(my_alloc_called == 0, "alloc called %d\n", my_alloc_called);
 }
 

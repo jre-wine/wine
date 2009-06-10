@@ -16,7 +16,7 @@ BASEMODULE  = $(MODULE:%.dll=%)
 MAINSPEC    = $(BASEMODULE).spec
 SPEC_DEF    = $(BASEMODULE).def
 WIN16_FILES = $(SPEC_SRCS16:.spec=.spec.o) $(C_SRCS16:.c=.o) $(EXTRA_OBJS16)
-ALL_OBJS    = @WIN16_FILES@ $(OBJS) $(RC_SRCS:.rc=.res)
+ALL_OBJS    = @WIN16_FILES@ $(OBJS)
 ALL_LIBS    = $(LIBPORT) $(EXTRALIBS) $(LDFLAGS) $(LIBS)
 IMPLIB_OBJS = $(IMPLIB_SRCS:.c=.o)
 IMPORTLIBFILE = $(IMPORTLIB:%=lib%.@IMPLIBEXT@)
@@ -28,15 +28,8 @@ all: $(MODULE)$(DLLEXT) $(SUBDIRS)
 
 @MAKE_RULES@
 
-# Rules for .so files
-
-$(MODULE).so: $(MAINSPEC) $(ALL_OBJS) Makefile.in
+$(MODULE) $(MODULE).so: $(MAINSPEC) $(ALL_OBJS) Makefile.in
 	$(WINEGCC) -shared $(SRCDIR)/$(MAINSPEC) $(ALL_OBJS) $(EXTRADLLFLAGS) -o $@ $(DELAYIMPORTS:%=-l%) $(IMPORTS:%=-l%) $(DELAYIMPORTS:%=-Wb,-d%) $(ALL_LIBS)
-
-# Rules for .dll files
-
-$(MODULE): $(RCOBJS) $(OBJS) $(SPEC_DEF) Makefile.in
-	$(DLLWRAP) -k --def $(SPEC_DEF) -o $@ $(RCOBJS) $(OBJS) $(DLL_LDPATH) $(DELAYIMPORTS:%=-l%) $(IMPORTS:%=-l%) $(LIBWINE) $(ALL_LIBS)
 
 # Rules for import libraries
 

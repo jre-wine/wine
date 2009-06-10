@@ -305,7 +305,7 @@
 @ stdcall NtSaveKey(long long)
 # @ stub NtSaveKeyEx
 # @ stub NtSaveMergedKeys
-@ stub NtSecureConnectPort
+@ stdcall NtSecureConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr ptr)
 # @ stub NtSetBootEntryOrder
 # @ stub NtSetBootOptions
 @ stdcall NtSetContextThread(long ptr)
@@ -553,7 +553,7 @@
 @ stub RtlEnumerateGenericTable
 # @ stub RtlEnumerateGenericTableAvl
 # @ stub RtlEnumerateGenericTableLikeADirectory
-@ stub RtlEnumerateGenericTableWithoutSplaying
+@ stdcall RtlEnumerateGenericTableWithoutSplaying(ptr ptr)
 # @ stub RtlEnumerateGenericTableWithoutSplayingAvl
 @ stub RtlEnumerateProperties
 @ stdcall RtlEqualComputerName(ptr ptr)
@@ -1152,7 +1152,7 @@
 @ stdcall ZwSaveKey(long long) NtSaveKey
 # @ stub ZwSaveKeyEx
 # @ stub ZwSaveMergedKeys
-# @ stub ZwSecureConnectPort
+@ stdcall ZwSecureConnectPort(ptr ptr ptr ptr ptr ptr ptr ptr ptr) NtSecureConnectPort
 # @ stub ZwSetBootEntryOrder
 # @ stub ZwSetBootOptions
 @ stdcall ZwSetContextThread(long ptr) NtSetContextThread

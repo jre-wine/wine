@@ -2618,7 +2618,7 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
 #endif
         /* Special case: X turns shift-tab into ISO_Left_Tab. */
         /* Here we change it back. */
-        if (keysym == XK_ISO_Left_Tab)
+        if (keysym == XK_ISO_Left_Tab && !(e.state & ControlMask))
         {
             bufW[0] = 0x09;
             ret = 1;
@@ -2679,7 +2679,8 @@ INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState
         if (e.state & ControlMask)
         {
             if (((keysym>=33) && (keysym < 'A')) ||
-                ((keysym > 'Z') && (keysym < 'a')))
+                ((keysym > 'Z') && (keysym < 'a')) ||
+                (keysym == XK_Tab))
             {
                 lpChar[0] = 0;
                 ret = 0;
