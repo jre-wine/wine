@@ -53,9 +53,6 @@ typedef struct
     BOOL useSSL;
     int socketFD;
     void *ssl_s;
-    char *peek_msg;
-    char *peek_msg_mem;
-    size_t peek_len;
 } WININET_NETCONNECTION;
 
 static inline LPWSTR WININET_strdupW( LPCWSTR str )
@@ -206,6 +203,10 @@ typedef struct
     LPWSTR lpszCacheFile;
     struct HttpAuthInfo *pAuthInfo;
     struct HttpAuthInfo *pProxyAuthInfo;
+    BOOL  read_chunked;   /* are we reading in chunked mode? */
+    DWORD read_pos;       /* current read position in read_buf */
+    DWORD read_size;      /* valid data size in read_buf */
+    char  read_buf[4096]; /* buffer for already read but not returned data */
 } WININETHTTPREQW, *LPWININETHTTPREQW;
 
 
@@ -410,7 +411,6 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
 BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */);
 BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available);
-BOOL NETCON_getNextLine(WININET_NETCONNECTION *connection, LPSTR lpszBuffer, LPDWORD dwBuffer);
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection);
 DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);
 

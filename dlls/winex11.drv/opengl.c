@@ -100,6 +100,7 @@ typedef struct wine_glpixelformat {
     int         fmt_id;
     int         render_type;
     BOOL        offscreenOnly;
+    DWORD       dwFlags; /* We store some PFD_* flags in here for emulated bitmap formats */
 } WineGLPixelFormat;
 
 typedef struct wine_glcontext {
@@ -612,8 +613,6 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
   int drawattrib = 0;
   int nvfloatattrib = GLX_DONT_CARE;
   int pixelattrib = 0;
-  int supportgdi = -1;
-  int doublebuf = -1;
 
   /* The list of WGL attributes is allowed to be NULL. We don't return here for NULL
    * because we need to do fixups for GLX_DRAWABLE_TYPE/GLX_RENDER_TYPE/GLX_FLOAT_COMPONENTS_NV. */
@@ -665,7 +664,6 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       pop = iWGLAttr[++cur];
       PUSH2(oGLXAttr, GLX_DOUBLEBUFFER, pop);
       TRACE("pAttr[%d] = GLX_DOUBLEBUFFER: %d\n", cur, pop);
-      doublebuf = pop;
       break;
     case WGL_STEREO_ARB:
       pop = iWGLAttr[++cur];
@@ -689,19 +687,15 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       break;
 
     case WGL_SUPPORT_GDI_ARB:
+      /* This flag is set in a WineGLPixelFormat */
       pop = iWGLAttr[++cur];
-      PUSH2(oGLXAttr, GLX_X_RENDERABLE, pop);
       TRACE("pAttr[%d] = WGL_SUPPORT_GDI_ARB: %d\n", cur, pop);
-      supportgdi = pop;
       break;
 
     case WGL_DRAW_TO_BITMAP_ARB:
+      /* This flag is set in a WineGLPixelFormat */
       pop = iWGLAttr[++cur];
       TRACE("pAttr[%d] = WGL_DRAW_TO_BITMAP_ARB: %d\n", cur, pop);
-      /* GLX_DRAWABLE_TYPE flags need to be OR'd together. See below. */
-      if (pop) {
-        drawattrib |= GLX_PIXMAP_BIT;
-      }
       break;
 
     case WGL_DRAW_TO_WINDOW_ARB:
@@ -723,10 +717,21 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
       break;
 
     case WGL_ACCELERATION_ARB:
+      /* This flag is set in a WineGLPixelFormat */
+      pop = iWGLAttr[++cur];
+      TRACE("pAttr[%d] = WGL_ACCELERATION_ARB: %d\n", cur, pop);
+      break;
+
     case WGL_SUPPORT_OPENGL_ARB:
       pop = iWGLAttr[++cur];
       /** nothing to do, if we are here, supposing support Accelerated OpenGL */
       TRACE("pAttr[%d] = WGL_SUPPORT_OPENGL_ARB: %d\n", cur, pop);
+      break;
+
+    case WGL_SWAP_METHOD_ARB:
+      pop = iWGLAttr[++cur];
+      /* For now we ignore this and just return SWAP_EXCHANGE */
+      TRACE("pAttr[%d] = WGL_SWAP_METHOD_ARB: %#x\n", cur, pop);
       break;
 
     case WGL_PBUFFER_LARGEST_ARB:
@@ -803,15 +808,6 @@ static int ConvertAttribWGLtoGLX(const int* iWGLAttr, int* oGLXAttr, Wine_GLPBuf
     ++cur;
   }
 
-  if(supportgdi > 0) {
-    if(doublebuf > 0) {
-      WARN("Attempting double-buffered gdi format\n");
-      return -1;
-    }
-    if(doublebuf < 0)
-      PUSH2(oGLXAttr, GLX_DOUBLEBUFFER, False);
-  }
-
   /* Apply the OR'd drawable type bitmask now EVEN when WGL_DRAW_TO* is unset.
    * It is needed in all cases because GLX_DRAWABLE_TYPE default to GLX_WINDOW_BIT. */
   PUSH2(oGLXAttr, GLX_DRAWABLE_TYPE, drawattrib);
@@ -854,12 +850,24 @@ static int get_render_type_from_fbconfig(Display *display, GLXFBConfig fbconfig)
     return render_type;
 }
 
+/* Check whether a fbconfig is suitable for Windows-style bitmap rendering */
+static BOOL check_fbconfig_bitmap_capability(Display *display, GLXFBConfig fbconfig)
+{
+    int dbuf, value;
+    pglXGetFBConfigAttrib(display, fbconfig, GLX_DOUBLEBUFFER, &dbuf);
+    pglXGetFBConfigAttrib(gdi_display, fbconfig, GLX_DRAWABLE_TYPE, &value);
+
+    /* Windows only supports bitmap rendering on single buffered formats, further the fbconfig needs to have
+     * the GLX_PIXMAP_BIT set. */
+    return !dbuf && (value & GLX_PIXMAP_BIT);
+}
+
 static WineGLPixelFormat *get_formats(Display *display, int *size_ret, int *onscreen_size_ret)
 {
     static WineGLPixelFormat *list;
     static int size, onscreen_size;
 
-    int fmt_id, nCfgs, i, run;
+    int fmt_id, nCfgs, i, run, bmp_formats;
     GLXFBConfig* cfgs;
     XVisualInfo *visinfo;
 
@@ -874,7 +882,21 @@ static WineGLPixelFormat *get_formats(Display *display, int *size_ret, int *onsc
         return NULL;
     }
 
-    list = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, nCfgs*sizeof(WineGLPixelFormat));
+    /* Bitmap rendering on Windows implies the use of the Microsoft GDI software renderer.
+     * Further most GLX drivers only offer pixmap rendering using indirect rendering (except for modern drivers which support 'AIGLX' / composite).
+     * Indirect rendering can indicate software rendering (on Nvidia it is hw accelerated)
+     * Since bitmap rendering implies the use of software rendering we can safely use indirect rendering for bitmaps.
+     *
+     * Below we count the number of formats which are suitable for bitmap rendering. Windows restricts bitmap rendering to single buffered formats.
+     */
+    for(i=0, bmp_formats=0; i<nCfgs; i++)
+    {
+        if(check_fbconfig_bitmap_capability(display, cfgs[i]))
+            bmp_formats++;
+    }
+    TRACE("Found %d bitmap capable fbconfigs\n", bmp_formats);
+
+    list = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (nCfgs + bmp_formats)*sizeof(WineGLPixelFormat));
 
     /* Fill the pixel format list. Put onscreen formats at the top and offscreen ones at the bottom.
      * Do this as GLX doesn't guarantee that the list is sorted */
@@ -904,8 +926,24 @@ static WineGLPixelFormat *get_formats(Display *display, int *size_ret, int *onsc
                 list[size].fmt_id = fmt_id;
                 list[size].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
                 list[size].offscreenOnly = FALSE;
+                list[size].dwFlags = 0;
                 size++;
                 onscreen_size++;
+
+                /* Clone a format if it is bitmap capable for indirect rendering to bitmaps */
+                if(check_fbconfig_bitmap_capability(display, cfgs[i]))
+                {
+                    TRACE("Found bitmap capable format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", fmt_id, size+1, i);
+                    list[size].iPixelFormat = size+1; /* The index starts at 1 */
+                    list[size].fbconfig = cfgs[i];
+                    list[size].fmt_id = fmt_id;
+                    list[size].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
+                    list[size].offscreenOnly = FALSE;
+                    list[size].dwFlags = PFD_DRAW_TO_BITMAP | PFD_SUPPORT_GDI | PFD_GENERIC_FORMAT;
+                    size++;
+                    onscreen_size++;
+                }
+
                 XFree(visinfo);
             } else if(run && !visinfo) {
                 TRACE("Found offscreen format FBCONFIG_ID 0x%x corresponding to iPixelFormat %d at GLX index %d\n", fmt_id, size+1, i);
@@ -914,6 +952,7 @@ static WineGLPixelFormat *get_formats(Display *display, int *size_ret, int *onsc
                 list[size].fmt_id = fmt_id;
                 list[size].render_type = get_render_type_from_fbconfig(display, cfgs[i]);
                 list[size].offscreenOnly = TRUE;
+                list[size].dwFlags = 0;
                 size++;
             }
         }
@@ -961,7 +1000,7 @@ static WineGLPixelFormat* ConvertPixelFormatWGLtoGLX(Display *display, int iPixe
 }
 
 /* Search our internal pixelformat list for the WGL format corresponding to the given fbconfig */
-static WineGLPixelFormat* ConvertPixelFormatGLXtoWGL(Display *display, int fmt_id)
+static WineGLPixelFormat* ConvertPixelFormatGLXtoWGL(Display *display, int fmt_id, DWORD dwFlags)
 {
     WineGLPixelFormat *list;
     int i, size;
@@ -969,7 +1008,9 @@ static WineGLPixelFormat* ConvertPixelFormatGLXtoWGL(Display *display, int fmt_i
     if (!(list = get_formats(display, &size, NULL ))) return NULL;
 
     for(i=0; i<size; i++) {
-        if(list[i].fmt_id == fmt_id) {
+        /* A GLX format can appear multiple times in the pixel format list due to fake formats for bitmap rendering.
+         * Fake formats might get selected when the user passes the proper flags using the dwFlags parameter. */
+        if( (list[i].fmt_id == fmt_id) && ((list[i].dwFlags & dwFlags) == dwFlags) ) {
             TRACE("Returning iPixelFormat %d for fmt_id 0x%x\n", list[i].iPixelFormat, fmt_id);
             return &list[i];
         }
@@ -984,7 +1025,7 @@ int pixelformat_from_fbconfig_id(XID fbconfig_id)
 
     if (!fbconfig_id) return 0;
 
-    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id);
+    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id, 0 /* no flags */);
     if(fmt)
         return fmt->iPixelFormat;
     /* This will happen on hwnds without a pixel format set; it's ok */
@@ -1022,13 +1063,17 @@ static inline void sync_context(Wine_GLContext *context)
 }
 
 
-static GLXContext create_glxcontext(Display *display, Wine_GLContext *context, GLXContext shareList, BOOL direct)
+static GLXContext create_glxcontext(Display *display, Wine_GLContext *context, GLXContext shareList)
 {
     GLXContext ctx;
+
+    /* We use indirect rendering for rendering to bitmaps. See get_formats for a comment about this. */
+    BOOL indirect = (context->fmt->dwFlags & PFD_DRAW_TO_BITMAP) ? FALSE : TRUE;
+
     if(context->vis)
-        ctx = pglXCreateContext(gdi_display, context->vis, shareList, direct);
+        ctx = pglXCreateContext(gdi_display, context->vis, shareList, indirect);
     else /* Create a GLX Context for a pbuffer */
-        ctx = pglXCreateNewContext(gdi_display, context->fmt->fbconfig, context->fmt->render_type, shareList, direct);
+        ctx = pglXCreateNewContext(gdi_display, context->fmt->fbconfig, context->fmt->render_type, shareList, TRUE);
 
     return ctx;
 }
@@ -1107,6 +1152,14 @@ int CDECL X11DRV_ChoosePixelFormat(X11DRV_PDEVICE *physDev,
         if (ppfd->iPixelType != iPixelType)
         {
             TRACE("pixel type mismatch for iPixelFormat=%d\n", i+1);
+            continue;
+        }
+
+        /* Only use bitmap capable for formats for bitmap rendering.
+         * See get_formats for more info. */
+        if( (ppfd->dwFlags & PFD_DRAW_TO_BITMAP) != (fmt->dwFlags & PFD_DRAW_TO_BITMAP))
+        {
+            TRACE("PFD_DRAW_TO_BITMAP mismatch for iPixelFormat=%d\n", i+1);
             continue;
         }
 
@@ -1347,19 +1400,22 @@ int CDECL X11DRV_DescribePixelFormat(X11DRV_PDEVICE *physDev,
 
   wine_tsx11_lock();
 
-  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_X_RENDERABLE, &value);
-  if(value)
-      ppfd->dwFlags |= PFD_SUPPORT_GDI;
-
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &value);
   if(value & GLX_WINDOW_BIT)
       ppfd->dwFlags |= PFD_DRAW_TO_WINDOW;
-  if(value & GLX_PIXMAP_BIT)
-      ppfd->dwFlags |= PFD_DRAW_TO_BITMAP;
 
-  pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_CONFIG_CAVEAT, &value);
-  if(value == GLX_SLOW_CONFIG)
-      ppfd->dwFlags |= PFD_GENERIC_ACCELERATED;
+  /* On Windows bitmap rendering is only offered using the GDI Software renderer. We reserve some formats (see get_formats for more info)
+   * for bitmap rendering since we require indirect rendering for this. Further pixel format logs of a GeforceFX, Geforce8800GT, Radeon HD3400 and a
+   * Radeon 9000 indicated that all bitmap formats have PFD_SUPPORT_GDI. Except for 2 formats on the Radeon 9000 none of the hw accelerated formats
+   * offered the GDI bit either. */
+  ppfd->dwFlags |= fmt->dwFlags & (PFD_DRAW_TO_BITMAP | PFD_SUPPORT_GDI);
+
+  /* PFD_GENERIC_FORMAT - gdi software rendering
+   * PFD_GENERIC_ACCELERATED - some parts are accelerated by a display driver (MCD e.g. 3dfx minigl)
+   * none set - full hardware accelerated by a ICD
+   *
+   * We only set PFD_GENERIC_FORMAT on bitmap formats (see get_formats) as that's what ATI and Nvidia Windows drivers do  */
+  ppfd->dwFlags |= fmt->dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED);
 
   pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &value);
   if (value) {
@@ -1600,15 +1656,13 @@ BOOL CDECL X11DRV_wglCopyContext(HGLRC hglrcSrc, HGLRC hglrcDst, UINT mask) {
         }
 
         if (!src->ctx) {
-            DWORD type = GetObjectType(src->hdc);
             wine_tsx11_lock();
-            src->ctx = create_glxcontext(gdi_display, src, NULL, type == OBJ_MEMDC ? False : True);
+            src->ctx = create_glxcontext(gdi_display, src, NULL);
             TRACE(" created a delayed OpenGL context (%p)\n", src->ctx);
         }
         else if (!dst->ctx) {
-            DWORD type = GetObjectType(dst->hdc);
             wine_tsx11_lock();
-            dst->ctx = create_glxcontext(gdi_display, dst, NULL, type == OBJ_MEMDC ? False : True);
+            dst->ctx = create_glxcontext(gdi_display, dst, NULL);
             TRACE(" created a delayed OpenGL context (%p)\n", dst->ctx);
         }
     }
@@ -1787,7 +1841,7 @@ BOOL CDECL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
              * We are certain that the drawable and context are compatible as we only allow compatible formats.
              */
             TRACE(" Creating GLX Context\n");
-            ctx->ctx = create_glxcontext(gdi_display, ctx, NULL, type == OBJ_MEMDC ? False : True);
+            ctx->ctx = create_glxcontext(gdi_display, ctx, NULL);
             TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
         }
         TRACE(" make current for dis %p, drawable %p, ctx %p\n", gdi_display, (void*) drawable, ctx->ctx);
@@ -1821,7 +1875,6 @@ BOOL CDECL X11DRV_wglMakeCurrent(X11DRV_PDEVICE *physDev, HGLRC hglrc) {
 BOOL CDECL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEVICE* pReadDev, HGLRC hglrc)
 {
     BOOL ret;
-    int indirect = (GetObjectType(pDrawDev->hdc) == OBJ_MEMDC);
 
     TRACE("(%p,%p,%p)\n", pDrawDev, pReadDev, hglrc);
 
@@ -1840,7 +1893,7 @@ BOOL CDECL X11DRV_wglMakeContextCurrentARB(X11DRV_PDEVICE* pDrawDev, X11DRV_PDEV
             Drawable d_read = get_glxdrawable(pReadDev);
 
             if (ctx->ctx == NULL) {
-                ctx->ctx = create_glxcontext(gdi_display, ctx, NULL, !indirect);
+                ctx->ctx = create_glxcontext(gdi_display, ctx, NULL);
                 TRACE(" created a delayed OpenGL context (%p)\n", ctx->ctx);
             }
             ctx->hdc = pDrawDev->hdc;
@@ -1875,20 +1928,22 @@ BOOL CDECL X11DRV_wglShareLists(HGLRC hglrc1, HGLRC hglrc2) {
         ERR("Could not share display lists, context already created !\n");
         return FALSE;
     } else {
+        if(org && dest && (GetObjectType(org->hdc) == OBJ_MEMDC) ^ (GetObjectType(dest->hdc) == OBJ_MEMDC)) {
+            WARN("Attempting to share a context between a direct and indirect rendering context, expect issues!\n");
+        }
+
         if (org->ctx == NULL) {
-            int indirect = (GetObjectType(org->hdc) == OBJ_MEMDC);
             wine_tsx11_lock();
             describeContext(org);
 
-            org->ctx = create_glxcontext(gdi_display, org, NULL, !indirect);
+            org->ctx = create_glxcontext(gdi_display, org, NULL);
             wine_tsx11_unlock();
             TRACE(" created a delayed OpenGL context (%p) for Wine context %p\n", org->ctx, org);
         }
         if (NULL != dest) {
-            int indirect = (GetObjectType(dest->hdc) == OBJ_MEMDC);
             wine_tsx11_lock();
             describeContext(dest);
-            dest->ctx = create_glxcontext(gdi_display, dest, org->ctx, !indirect);
+            dest->ctx = create_glxcontext(gdi_display, dest, org->ctx);
             wine_tsx11_unlock();
             TRACE(" created a delayed OpenGL context (%p) for Wine context %p sharing lists with OpenGL ctx %p\n", dest->ctx, dest, org->ctx);
             return TRUE;
@@ -2618,6 +2673,8 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
     WineGLPixelFormat *fmt;
     UINT pfmt_it = 0;
     int run;
+    int i;
+    DWORD dwFlags = 0;
 
     TRACE("(%p, %p, %p, %d, %p, %p): hackish\n", hdc, piAttribIList, pfAttribFList, nMaxFormats, piFormats, nNumFormats);
     if (NULL != pfAttribFList) {
@@ -2630,6 +2687,38 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
         return GL_FALSE;
     }
     PUSH1(attribs, None);
+
+    /* There is no 1:1 mapping between GLX and WGL formats because we duplicate some GLX formats for bitmap rendering (see get_formats).
+     * Flags like PFD_SUPPORT_GDI, PFD_DRAW_TO_BITMAP and others are a property of the WineGLPixelFormat. We don't query these attributes
+     * using glXChooseFBConfig but we filter the result of glXChooseFBConfig later on by passing a dwFlags to 'ConvertPixelFormatGLXtoWGL'. */
+    for(i=0; piAttribIList[i] != 0; i+=2)
+    {
+        switch(piAttribIList[i])
+        {
+            case WGL_DRAW_TO_BITMAP_ARB:
+                if(piAttribIList[i+1])
+                    dwFlags |= PFD_DRAW_TO_BITMAP;
+                break;
+            case WGL_ACCELERATION_ARB:
+                switch(piAttribIList[i+1])
+                {
+                    case WGL_NO_ACCELERATION_ARB:
+                        dwFlags |= PFD_GENERIC_FORMAT;
+                        break;
+                    case WGL_GENERIC_ACCELERATION_ARB:
+                        dwFlags |= PFD_GENERIC_ACCELERATED;
+                        break;
+                    case WGL_FULL_ACCELERATION_ARB:
+                        /* Nothing to do */
+                        break;
+                }
+                break;
+            case WGL_SUPPORT_GDI_ARB:
+                if(piAttribIList[i+1])
+                    dwFlags |= PFD_SUPPORT_GDI;
+                break;
+        }
+    }
 
     /* Search for FB configurations matching the requirements in attribs */
     wine_tsx11_lock();
@@ -2652,7 +2741,7 @@ static GLboolean WINAPI X11DRV_wglChoosePixelFormatARB(HDC hdc, const int *piAtt
             }
 
             /* Search for the format in our list of compatible formats */
-            fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fmt_id);
+            fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fmt_id, dwFlags);
             if(!fmt)
                 continue;
 
@@ -2721,16 +2810,12 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
             case WGL_ACCELERATION_ARB:
                 curGLXAttr = GLX_CONFIG_CAVEAT;
                 if (!fmt) goto pix_error;
-                hTest = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, curGLXAttr, &tmp);
-                if (hTest) goto get_error;
-                switch (tmp) {
-                    case GLX_NONE: piValues[i] = WGL_FULL_ACCELERATION_ARB; break;
-                    case GLX_SLOW_CONFIG: piValues[i] = WGL_GENERIC_ACCELERATION_ARB; break;
-                    case GLX_NON_CONFORMANT_CONFIG: piValues[i] = WGL_FULL_ACCELERATION_ARB; break;
-                    default:
-                        ERR("unexpected Config Caveat(%x)\n", tmp);
-                        piValues[i] = WGL_NO_ACCELERATION_ARB;
-                }
+                if(fmt->dwFlags & PFD_GENERIC_FORMAT)
+                    piValues[i] = WGL_NO_ACCELERATION_ARB;
+                else if(fmt->dwFlags & PFD_GENERIC_ACCELERATED)
+                    piValues[i] = WGL_GENERIC_ACCELERATION_ARB;
+                else
+                    piValues[i] = WGL_FULL_ACCELERATION_ARB;
                 continue;
 
             case WGL_TRANSPARENT_ARB:
@@ -2820,28 +2905,33 @@ static GLboolean WINAPI X11DRV_wglGetPixelFormatAttribivARB(HDC hdc, int iPixelF
 
             case WGL_SUPPORT_GDI_ARB:
                 if (!fmt) goto pix_error;
-                hTest = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DOUBLEBUFFER, &tmp);
-                if (hTest) goto get_error;
-                if(tmp) {
-                    piValues[i] = GL_FALSE;
-                    continue;
-                }
-                curGLXAttr = GLX_X_RENDERABLE;
-                break;
+                piValues[i] = (fmt->dwFlags & PFD_SUPPORT_GDI) ? TRUE : FALSE;
+                continue;
+
+            case WGL_DRAW_TO_BITMAP_ARB:
+                if (!fmt) goto pix_error;
+                piValues[i] = (fmt->dwFlags & PFD_DRAW_TO_BITMAP) ? TRUE : FALSE;
+                continue;
 
             case WGL_DRAW_TO_WINDOW_ARB:
-            case WGL_DRAW_TO_BITMAP_ARB:
             case WGL_DRAW_TO_PBUFFER_ARB:
                 if (!fmt) goto pix_error;
                 hTest = pglXGetFBConfigAttrib(gdi_display, fmt->fbconfig, GLX_DRAWABLE_TYPE, &tmp);
                 if (hTest) goto get_error;
                 if((curWGLAttr == WGL_DRAW_TO_WINDOW_ARB && (tmp&GLX_WINDOW_BIT)) ||
-                   (curWGLAttr == WGL_DRAW_TO_BITMAP_ARB && (tmp&GLX_PIXMAP_BIT)) ||
                    (curWGLAttr == WGL_DRAW_TO_PBUFFER_ARB && (tmp&GLX_PBUFFER_BIT)))
                     piValues[i] = GL_TRUE;
                 else
                     piValues[i] = GL_FALSE;
                 continue;
+
+            case WGL_SWAP_METHOD_ARB:
+                /* For now return SWAP_EXCHANGE_ARB which is the best type of buffer switch available.
+                 * Later on we can also use GLX_OML_swap_method on drivers which support this. At this
+                 * point only ATI offers this.
+                 */
+                piValues[i] = WGL_SWAP_EXCHANGE_ARB;
+                break;
 
             case WGL_PBUFFER_LARGEST_ARB:
                 curGLXAttr = GLX_LARGEST_PBUFFER;
@@ -3524,7 +3614,7 @@ XVisualInfo *visual_from_fbconfig_id( XID fbconfig_id )
     WineGLPixelFormat *fmt;
     XVisualInfo *ret;
 
-    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id);
+    fmt = ConvertPixelFormatGLXtoWGL(gdi_display, fbconfig_id, 0 /* no flags */);
     if(fmt == NULL)
         return NULL;
 

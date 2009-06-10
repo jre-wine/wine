@@ -632,7 +632,7 @@ typedef struct shader_reg_maps
 
     WINED3DSAMPLER_TEXTURE_TYPE sampler_type[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
     BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
-    char usesnrm, vpos, usesdsy, usestexldd;
+    char usesnrm, vpos, usesdsy, usestexldd, usesmova;
     char usesrelconstF;
 
     /* Whether or not loops are used in this shader, and nesting depth */
@@ -648,6 +648,7 @@ struct wined3d_shader_context
     IWineD3DBaseShader *shader;
     const struct shader_reg_maps *reg_maps;
     SHADER_BUFFER *buffer;
+    void *backend_data;
 };
 
 struct wined3d_shader_register
@@ -697,7 +698,7 @@ struct wined3d_shader_semantic
 
 struct wined3d_shader_frontend
 {
-    void *(*shader_init)(const DWORD *ptr);
+    void *(*shader_init)(const DWORD *ptr, const struct wined3d_shader_signature *output_signature);
     void (*shader_free)(void *data);
     void (*shader_read_header)(void *data, const DWORD **ptr, struct wined3d_shader_version *shader_version);
     void (*shader_read_opcode)(void *data, const DWORD **ptr, struct wined3d_shader_instruction *ins, UINT *param_size);
@@ -730,6 +731,8 @@ struct shader_caps {
     DWORD               MaxPShaderInstructionsExecuted;
     DWORD               MaxVertexShader30InstructionSlots;
     DWORD               MaxPixelShader30InstructionSlots;
+
+    BOOL                VSClipping;
 };
 
 enum tex_types
@@ -1167,6 +1170,8 @@ enum fogsource {
     FOGSOURCE_COORD,
 };
 
+#define WINED3D_MAX_FBO_ENTRIES 64
+
 /* The new context manager that should deal with onscreen and offscreen rendering */
 struct WineD3DContext {
     /* State dirtification
@@ -1214,6 +1219,7 @@ struct WineD3DContext {
     GLint                   aux_buffers;
 
     /* FBOs */
+    UINT                    fbo_entry_count;
     struct list             fbo_list;
     struct fbo_entry        *current_fbo;
     GLuint                  src_fbo;
@@ -1458,6 +1464,7 @@ struct IWineD3DDeviceImpl
 
     unsigned int max_ffp_textures, max_ffp_texture_stages;
     DWORD d3d_vshader_constantF, d3d_pshader_constantF; /* Advertised d3d caps, not GL ones */
+    DWORD vs_clipping;
 
     WORD view_ident : 1;                /* true iff view matrix is identity */
     WORD untransformed : 1;
@@ -1652,8 +1659,6 @@ HRESULT resource_set_private_data(IWineD3DResource *iface, REFGUID guid,
 /*****************************************************************************
  * IWineD3DBaseTexture D3D- > openGL state map lookups
  */
-#define WINED3DFUNC_NOTSUPPORTED  -2
-#define WINED3DFUNC_UNIMPLEMENTED -1
 
 typedef enum winetexturestates {
     WINED3DTEXSTA_ADDRESSU       = 0,
@@ -2461,7 +2466,6 @@ void state_fogstartend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
 void state_fog_fragpart(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context);
 
 void surface_add_dirty_rect(IWineD3DSurface *iface, const RECT *dirty_rect);
-void surface_force_reload(IWineD3DSurface *iface);
 GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain);
 void surface_load_ds_location(IWineD3DSurface *iface, DWORD location);
 void surface_modify_ds_location(IWineD3DSurface *iface, DWORD location);
@@ -2572,7 +2576,7 @@ void shader_dump_src_param(const struct wined3d_shader_src_param *param,
 void shader_dump_dst_param(const struct wined3d_shader_dst_param *param,
         const struct wined3d_shader_version *shader_version);
 void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER *buffer,
-        const shader_reg_maps *reg_maps, const DWORD *pFunction);
+        const shader_reg_maps *reg_maps, const DWORD *pFunction, void *backend_ctx);
 HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3d_shader_frontend *fe,
         struct shader_reg_maps *reg_maps, struct wined3d_shader_semantic *semantics_in,
         struct wined3d_shader_semantic *semantics_out, const DWORD *byte_code, DWORD constf_size);
@@ -2815,4 +2819,8 @@ static inline BOOL use_ps(IWineD3DStateBlockImpl *stateblock)
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED3DRECT *src_rect,
         IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect, const WINED3DTEXTUREFILTERTYPE filter, BOOL flip);
+
+/* The WNDCLASS-Name for the fake window which we use to retrieve the GL capabilities */
+#define WINED3D_OPENGL_WINDOW_CLASS_NAME "WineD3D_OpenGL"
+
 #endif

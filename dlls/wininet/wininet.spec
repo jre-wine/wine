@@ -1,5 +1,5 @@
 101 stub -noname DoConnectoidsExist
-102 stdcall -noname GetDiskInfoA(ptr ptr ptr ptr)
+102 stdcall -noname GetDiskInfoA(str ptr ptr ptr)
 103 stub -noname PerformOperationOverUrlCacheA
 104 stub -noname HttpCheckDavComplianceA
 105 stub -noname HttpCheckDavComplianceW
@@ -109,7 +109,7 @@
 @ stdcall HttpSendRequestExA(long ptr ptr long long)
 @ stdcall HttpSendRequestExW(long ptr ptr long long)
 @ stdcall HttpSendRequestW(ptr wstr long ptr long)
-@ stub IncrementUrlCacheHeaderData
+@ stdcall IncrementUrlCacheHeaderData(long ptr)
 @ stub InternetAlgIdToStringA
 @ stub InternetAlgIdToStringW
 @ stdcall InternetAttemptConnect(long)

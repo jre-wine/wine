@@ -597,9 +597,10 @@ struct REG_TYPE {
 static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSubCont) {
   HRESULT hr = S_OK;
   static const WCHAR szName[] = {'s','z','N','a','m','e',0};
+  static const WCHAR szVersionW[] = {'s','z','V','e','r','s','i','o','n',0};
   static const WCHAR szCatName[] = {'s','z','C','a','t','N','a','m','e',0};
-  static const WCHAR szClsidCat[] = {'s','z','C','l','s','i','d','C','a','t',0};
-  static const WCHAR szClsidFilter[] = {'s','z','C','l','s','i','d','F','i','l','t','e','r',0};
+  static const WCHAR ClsidCatW[] = {'C','l','s','i','d','C','a','t',0};
+  static const WCHAR ClsidFilterW[] = {'C','l','s','i','d','F','i','l','t','e','r',0};
   static const WCHAR dwInputs[] = {'d','w','I','n','p','u','t','s',0};
   static const WCHAR dwOutputs[] = {'d','w','O','u','t','p','u','t','s',0};
   static const WCHAR dwMerit[] = {'d','w','M','e','r','i','t',0};
@@ -612,7 +613,11 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
   static const WCHAR wszClsidName[] = {'C','L','S','I','D',0};
   static const WCHAR wszFriendlyName[] = {'F','r','i','e','n','d','l','y','N','a','m','e',0};  
   static const WCHAR wszFilterDataName[] = {'F','i','l','t','e','r','D','a','t','a',0};
-  /*static const WCHAR wszMeritName[] = {'M','e','r','i','t',0};*/
+
+  static const WCHAR szVersionFormat[] = {'v','%','d',0};
+  static const WCHAR szIdFormat[] = {'%','d',0};
+  int i = 0;
+
 
   ICreateDevEnum* pCreateDevEnum = NULL;
   IEnumMoniker* pEmCat = NULL;
@@ -672,27 +677,38 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
 	    DWORD it;
 	    DWORD dwNOutputs = 0;
 	    DWORD dwNInputs = 0;
+            WCHAR bufferW[10];
+            IDxDiagContainer *pDShowSubCont = NULL;
 
-            add_prop_str(pSubCont, szCatName, wszCatName);
-            add_prop_str(pSubCont, szClsidCat, wszCatClsid);
+            snprintfW(bufferW, sizeof(bufferW)/sizeof(bufferW[0]), szIdFormat, i);
+            if (FAILED(DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDShowSubCont)) ||
+                FAILED(IDxDiagContainerImpl_AddChildContainer(pSubCont, bufferW, pDShowSubCont)))
+            {
+              IPropertyBag_Release(pPropFilterBag);
+              if (pDShowSubCont) IUnknown_Release(pDShowSubCont);
+              continue;
+            }
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszFriendlyName, &v, 0);
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szName, &v);
+	    hr = IDxDiagContainerImpl_AddProp(pDShowSubCont, szName, &v);
             TRACE("\tName:%s\n", debugstr_w(V_BSTR(&v)));
 	    VariantClear(&v);
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszClsidName, &v, 0);
             TRACE("\tClsid:%s\n", debugstr_w(V_BSTR(&v)));
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szClsidFilter, &v);
+	    hr = IDxDiagContainerImpl_AddProp(pDShowSubCont, ClsidFilterW, &v);
 	    VariantClear(&v);
+
+            add_prop_str(pDShowSubCont, szCatName, wszCatName);
+            add_prop_str(pDShowSubCont, ClsidCatW, wszCatClsid);
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszFilterDataName, &v, NULL);
 	    hr = SafeArrayAccessData(V_UNION(&v, parray), (LPVOID*) &pData);	    
 	    prrf = (struct REG_RF*) pData;
 	    pCurrent = pData;
 
-            add_prop_ui4(pSubCont, szName, prrf->dwVersion);
-            add_prop_ui4(pSubCont, dwMerit, prrf->dwMerit);
+            snprintfW(bufferW, sizeof(bufferW)/sizeof(bufferW[0]), szVersionFormat, prrf->dwVersion);
+            add_prop_str(pDShowSubCont, szVersionW, bufferW);
 
 	    pCurrent += sizeof(struct REG_RF);
 	    for (it = 0; it < prrf->dwPins; ++it) {
@@ -716,11 +732,13 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
 	      }
 	    }
 
-            add_prop_ui4(pSubCont, dwInputs,  dwNInputs);
-            add_prop_ui4(pSubCont, dwOutputs, dwNOutputs);
+            add_prop_ui4(pDShowSubCont, dwInputs,  dwNInputs);
+            add_prop_ui4(pDShowSubCont, dwOutputs, dwNOutputs);
+            add_prop_ui4(pDShowSubCont, dwMerit, prrf->dwMerit);
 
 	    SafeArrayUnaccessData(V_UNION(&v, parray));
 	    VariantClear(&v);
+            i++;
 	  }
 	  IPropertyBag_Release(pPropFilterBag); pPropFilterBag = NULL;
 	}

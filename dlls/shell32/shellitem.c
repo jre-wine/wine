@@ -105,6 +105,48 @@ static ULONG WINAPI ShellItem_Release(IShellItem *iface)
     return ref;
 }
 
+static HRESULT ShellItem_get_parent_pidl(ShellItem *This, LPITEMIDLIST *parent_pidl)
+{
+    *parent_pidl = ILClone(This->pidl);
+    if (*parent_pidl)
+    {
+        if (ILRemoveLastID(*parent_pidl))
+            return S_OK;
+        else
+        {
+            ILFree(*parent_pidl);
+            *parent_pidl = NULL;
+            return E_INVALIDARG;
+        }
+    }
+    else
+    {
+        *parent_pidl = NULL;
+        return E_OUTOFMEMORY;
+    }
+}
+
+static HRESULT ShellItem_get_parent_shellfolder(ShellItem *This, IShellFolder **ppsf)
+{
+    LPITEMIDLIST parent_pidl;
+    IShellFolder *desktop;
+    HRESULT ret;
+
+    ret = ShellItem_get_parent_pidl(This, &parent_pidl);
+    if (SUCCEEDED(ret))
+    {
+        ret = SHGetDesktopFolder(&desktop);
+        if (SUCCEEDED(ret))
+        {
+            ret = IShellFolder_BindToObject(desktop, parent_pidl, NULL, &IID_IShellFolder, (void**)ppsf);
+            IShellFolder_Release(desktop);
+        }
+        ILFree(parent_pidl);
+    }
+
+    return ret;
+}
+
 static HRESULT WINAPI ShellItem_BindToHandler(IShellItem *iface, IBindCtx *pbc,
     REFGUID rbhid, REFIID riid, void **ppvOut)
 {
@@ -117,11 +159,20 @@ static HRESULT WINAPI ShellItem_BindToHandler(IShellItem *iface, IBindCtx *pbc,
 
 static HRESULT WINAPI ShellItem_GetParent(IShellItem *iface, IShellItem **ppsi)
 {
-    FIXME("(%p,%p)\n", iface, ppsi);
+    ShellItem *This = (ShellItem*)iface;
+    LPITEMIDLIST parent_pidl;
+    HRESULT ret;
 
-    *ppsi = NULL;
+    TRACE("(%p,%p)\n", iface, ppsi);
 
-    return E_NOTIMPL;
+    ret = ShellItem_get_parent_pidl(This, &parent_pidl);
+    if (SUCCEEDED(ret))
+    {
+        ret = SHCreateShellItem(NULL, NULL, parent_pidl, ppsi);
+        ILFree(parent_pidl);
+    }
+
+    return ret;
 }
 
 static HRESULT WINAPI ShellItem_GetDisplayName(IShellItem *iface, SIGDN sigdnName,
@@ -137,11 +188,23 @@ static HRESULT WINAPI ShellItem_GetDisplayName(IShellItem *iface, SIGDN sigdnNam
 static HRESULT WINAPI ShellItem_GetAttributes(IShellItem *iface, SFGAOF sfgaoMask,
     SFGAOF *psfgaoAttribs)
 {
-    FIXME("(%p,%x,%p)\n", iface, sfgaoMask, psfgaoAttribs);
+    ShellItem *This = (ShellItem*)iface;
+    IShellFolder *parent_folder;
+    LPITEMIDLIST child_pidl;
+    HRESULT ret;
 
-    *psfgaoAttribs = 0;
+    TRACE("(%p,%x,%p)\n", iface, sfgaoMask, psfgaoAttribs);
 
-    return E_NOTIMPL;
+    ret = ShellItem_get_parent_shellfolder(This, &parent_folder);
+    if (SUCCEEDED(ret))
+    {
+        child_pidl = ILFindLastID(This->pidl);
+        *psfgaoAttribs = sfgaoMask;
+        ret = IShellFolder_GetAttributesOf(parent_folder, 1, (LPCITEMIDLIST*)&child_pidl, psfgaoAttribs);
+        IShellFolder_Release(parent_folder);
+    }
+
+    return ret;
 }
 
 static HRESULT WINAPI ShellItem_Compare(IShellItem *iface, IShellItem *oth,
@@ -276,16 +339,45 @@ HRESULT WINAPI SHCreateShellItem(LPCITEMIDLIST pidlParent,
 
     TRACE("(%p,%p,%p,%p)\n", pidlParent, psfParent, pidl, ppsi);
 
-    if (!pidlParent && !psfParent && pidl)
+    if (!pidl)
     {
-        new_pidl = ILClone(pidl);
+        return E_INVALIDARG;
+    }
+    else if (pidlParent || psfParent)
+    {
+        LPITEMIDLIST temp_parent=NULL;
+        if (!pidlParent)
+        {
+            IPersistFolder2* ppf2Parent;
+
+            if (!SUCCEEDED(IPersistFolder2_QueryInterface(psfParent, &IID_IPersistFolder2, (void**)&ppf2Parent)))
+            {
+                FIXME("couldn't get IPersistFolder2 interface of parent\n");
+                return E_NOINTERFACE;
+            }
+
+            if (!SUCCEEDED(IPersistFolder2_GetCurFolder(ppf2Parent, &temp_parent)))
+            {
+                FIXME("couldn't get parent PIDL\n");
+                IPersistFolder2_Release(ppf2Parent);
+                return E_NOINTERFACE;
+            }
+
+            pidlParent = temp_parent;
+            IPersistFolder2_Release(ppf2Parent);
+        }
+
+        new_pidl = ILCombine(pidlParent, pidl);
+        ILFree(temp_parent);
+
         if (!new_pidl)
             return E_OUTOFMEMORY;
     }
     else
     {
-        FIXME("(%p,%p,%p) not implemented\n", pidlParent, psfParent, pidl);
-        return E_NOINTERFACE;
+        new_pidl = ILClone(pidl);
+        if (!new_pidl)
+            return E_OUTOFMEMORY;
     }
 
     ret = IShellItem_Constructor(NULL, &IID_IShellItem, (void**)&This);

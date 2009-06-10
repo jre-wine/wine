@@ -1368,32 +1368,6 @@ NTSTATUS virtual_create_system_view( void *base, SIZE_T size, DWORD vprot )
 
 
 /***********************************************************************
- *           virtual_free_system_view
- */
-SIZE_T virtual_free_system_view( PVOID *addr_ptr )
-{
-    FILE_VIEW *view;
-    sigset_t sigset;
-    SIZE_T size = 0;
-    char *base = ROUND_ADDR( *addr_ptr, page_mask );
-
-    server_enter_uninterrupted_section( &csVirtual, &sigset );
-    if ((view = VIRTUAL_FindView( base, 0 )))
-    {
-        TRACE( "freeing %p-%p\n", view->base, (char *)view->base + view->size );
-        /* return the values that the caller should use to unmap the area */
-        *addr_ptr = view->base;
-        /* make sure we don't munmap anything from a reserved area */
-        if (!wine_mmap_is_in_reserved_area( view->base, view->size )) size = view->size;
-        view->protect |= VPROT_SYSTEM;
-        delete_view( view );
-    }
-    server_leave_uninterrupted_section( &csVirtual, &sigset );
-    return size;
-}
-
-
-/***********************************************************************
  *           virtual_alloc_thread_stack
  */
 NTSTATUS virtual_alloc_thread_stack( TEB *teb, SIZE_T reserve_size, SIZE_T commit_size )
@@ -2314,18 +2288,18 @@ NTSTATUS WINAPI NtMapViewOfSection( HANDLE handle, HANDLE process, PVOID *addr_p
     switch(protect)
     {
     case PAGE_NOACCESS:
-        access = SECTION_QUERY;
+        access = 0;
         break;
     case PAGE_READWRITE:
     case PAGE_EXECUTE_READWRITE:
-        access = SECTION_QUERY | SECTION_MAP_WRITE;
+        access = SECTION_MAP_WRITE;
         break;
     case PAGE_READONLY:
     case PAGE_WRITECOPY:
     case PAGE_EXECUTE:
     case PAGE_EXECUTE_READ:
     case PAGE_EXECUTE_WRITECOPY:
-        access = SECTION_QUERY | SECTION_MAP_READ;
+        access = SECTION_MAP_READ;
         break;
     default:
         return STATUS_INVALID_PARAMETER;

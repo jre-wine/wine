@@ -449,6 +449,8 @@ static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_form
     GLuint tex, fb;
     GLenum status;
 
+    ENTER_GL();
+
     while(glGetError());
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -463,6 +465,8 @@ static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_form
     glDeleteTextures(1, &tex);
 
     checkGLcall("Framebuffer format check");
+
+    LEAVE_GL();
 
     return status == GL_FRAMEBUFFER_COMPLETE_EXT;
 }
@@ -1512,6 +1516,7 @@ BOOL is_invalid_op(IWineD3DDeviceImpl *This, int stage, WINED3DTEXTUREOP op, DWO
 }
 
 /* Setup this textures matrix according to the texture flags*/
+/* GL locking is done by the caller (state handler) */
 void set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords, BOOL transformed,
         WINED3DFORMAT vtx_fmt, BOOL ffp_proj_control)
 {
@@ -2380,6 +2385,7 @@ void add_ffp_frag_shader(struct hash_table_t *shaders, struct ffp_frag_desc *des
  * Requires the caller to activate the correct unit before
  */
 #define GLINFO_LOCATION stateblock->wineD3DDevice->adapter->gl_info
+/* GL locking is done by the caller (state handler) */
 void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     if(stateblock->textures[stage]) {
         switch (IWineD3DBaseTexture_GetTextureDimensions(stateblock->textures[stage])) {
@@ -2453,6 +2459,7 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
     }
 }
 
+/* GL locking is done by the caller (state handler) */
 void sampler_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD sampler = state - STATE_SAMPLER(0);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[sampler];

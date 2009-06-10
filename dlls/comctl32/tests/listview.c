@@ -168,6 +168,23 @@ static const struct message forward_erasebkgnd_parent_seq[] = {
     { 0 }
 };
 
+static const struct message ownderdata_select_focus_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_GETDISPINFOA },
+    { 0 }
+};
+
+static const struct message textcallback_set_again_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED  },
+    { 0 }
+};
+
+static const struct message single_getdispinfo_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_GETDISPINFOA },
+    { 0 }
+};
+
 struct subclass_info
 {
     WNDPROC oldproc;
@@ -184,6 +201,7 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     if (defwndproc_counter) msg.flags |= defwinproc;
     msg.wParam = wParam;
     msg.lParam = lParam;
+    if (message == WM_NOTIFY && lParam) msg.id = ((NMHDR*)lParam)->code;
 
     /* log system messages, except for painting */
     if (message < WM_USER &&
@@ -369,6 +387,89 @@ static HWND subclass_header(HWND hwndListview)
     return hwnd;
 }
 
+/* Performs a single LVM_HITTEST test */
+static void test_lvm_hittest(HWND hwnd, INT x, INT y, INT item, UINT flags,
+                             BOOL todo_item, BOOL todo_flags, int line)
+{
+    LVHITTESTINFO lpht;
+    DWORD ret;
+
+    lpht.pt.x = x;
+    lpht.pt.y = y;
+    lpht.iSubItem = 10;
+
+    trace("hittesting pt=(%d,%d)\n", lpht.pt.x, lpht.pt.y);
+    ret = SendMessage(hwnd, LVM_HITTEST, 0, (LPARAM)&lpht);
+
+    if (todo_item)
+    {
+        todo_wine
+        {
+            ok_(__FILE__, line)(ret == item, "Expected %d item, got %d\n", item, ret);
+            ok_(__FILE__, line)(lpht.iItem == item, "Expected %d item, got %d\n", item, lpht.iItem);
+            ok_(__FILE__, line)(lpht.iSubItem == 10, "Expected subitem not overwrited\n");
+        }
+    }
+    else
+    {
+        ok_(__FILE__, line)(ret == item, "Expected %d item, got %d\n", item, ret);
+        ok_(__FILE__, line)(lpht.iItem == item, "Expected %d item, got %d\n", item, lpht.iItem);
+        ok_(__FILE__, line)(lpht.iSubItem == 10, "Expected subitem not overwrited\n");
+    }
+
+    if (todo_flags)
+    {
+        todo_wine
+            ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
+    }
+    else
+        ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
+}
+
+/* Performs a single LVM_SUBITEMHITTEST test */
+static void test_lvm_subitemhittest(HWND hwnd, INT x, INT y, INT item, INT subitem, UINT flags,
+                                    BOOL todo_item, BOOL todo_subitem, BOOL todo_flags, int line)
+{
+    LVHITTESTINFO lpht;
+    DWORD ret;
+
+    lpht.pt.x = x;
+    lpht.pt.y = y;
+
+    trace("subhittesting pt=(%d,%d)\n", lpht.pt.x, lpht.pt.y);
+    ret = SendMessage(hwnd, LVM_SUBITEMHITTEST, 0, (LPARAM)&lpht);
+
+    if (todo_item)
+    {
+        todo_wine
+        {
+            ok_(__FILE__, line)(ret == item, "Expected %d item, got %d\n", item, ret);
+            ok_(__FILE__, line)(lpht.iItem == item, "Expected %d item, got %d\n", item, lpht.iItem);
+        }
+    }
+    else
+    {
+        ok_(__FILE__, line)(ret == item, "Expected %d item, got %d\n", item, ret);
+        ok_(__FILE__, line)(lpht.iItem == item, "Expected %d item, got %d\n", item, lpht.iItem);
+    }
+
+    if (todo_subitem)
+    {
+        todo_wine
+            ok_(__FILE__, line)(lpht.iSubItem == subitem, "Expected subitem %d, got %d\n", subitem, lpht.iSubItem);
+    }
+    else
+        ok_(__FILE__, line)(lpht.iSubItem == subitem, "Expected subitem %d, got %d\n", subitem, lpht.iSubItem);
+
+    if (todo_flags)
+    {
+        todo_wine
+            ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
+    }
+    else
+        ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
+}
+
 static void test_images(void)
 {
     HWND hwnd;
@@ -392,7 +493,9 @@ static void test_images(void)
                 10, 10, 100, 200, hwndparent, NULL, NULL, NULL);
     ok(hwnd != NULL, "failed to create listview window\n");
 
-    r = SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, 0x940);
+    r = SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0,
+                    LVS_EX_UNDERLINEHOT | LVS_EX_FLATSB | LVS_EX_ONECLICKACTIVATE);
+
     ok(r == 0, "should return zero\n");
 
     r = SendMessage(hwnd, LVM_SETIMAGELIST, 0, (LPARAM)himl);
@@ -826,6 +929,26 @@ static void test_items(void)
     item.iSubItem = 0;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
     ok(r != 0, "ret %d\n", r);
+
+    /* set text to callback value already having it */
+    r = SendMessage(hwnd, LVM_DELETEALLITEMS, 0, 0);
+    expect(TRUE, r);
+    memset (&item, 0, sizeof (item));
+    item.mask  = LVIF_TEXT;
+    item.pszText = LPSTR_TEXTCALLBACK;
+    item.iItem = 0;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM) &item);
+    ok(r == 0, "ret %d\n", r);
+    memset (&item, 0, sizeof (item));
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    item.pszText = LPSTR_TEXTCALLBACK;
+    r = SendMessage(hwnd, LVM_SETITEMTEXT, 0 , (LPARAM) &item);
+    expect(TRUE, r);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, textcallback_set_again_parent_seq,
+                "check callback text comparison rule", TRUE);
 
     DestroyWindow(hwnd);
 }
@@ -1496,6 +1619,7 @@ static void test_multiselect(void)
     BYTE kstate[256];
     select_task task;
     LONG_PTR style;
+    LVITEMA item;
 
     static struct t_select_task task_list[] = {
         { "using VK_DOWN", 0, VK_DOWN, -1, -1 },
@@ -1604,6 +1728,36 @@ todo_wine
     r = SendMessage(hwnd, LVM_GETSELECTIONMARK, 0, 0);
 todo_wine
     expect(-1, r);
+
+    /* try to select all on LVS_SINGLESEL */
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_SELECTED;
+    r = SendMessage(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, r);
+    ListView_SetSelectionMark(hwnd, -1);
+
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    r = SendMessage(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(FALSE, r);
+
+    r = ListView_GetSelectedCount(hwnd);
+    expect(0, r);
+    r = ListView_GetSelectionMark(hwnd);
+    expect(-1, r);
+
+    /* try to deselect all on LVS_SINGLESEL */
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    r = SendMessage(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    item.stateMask = LVIS_SELECTED;
+    item.state     = 0;
+    r = SendMessage(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, r);
+    r = ListView_GetSelectedCount(hwnd);
+    expect(0, r);
 
     DestroyWindow(hwnd);
 }
@@ -1952,6 +2106,82 @@ static void test_ownerdata(void)
     res = SendMessageA(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
     expect(FALSE, res);
     DestroyWindow(hwnd);
+
+    /* check notifications after focused/selected changed */
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 1, 0);
+    ok(res != 0, "Expected LVM_SETITEMCOUNT to succeed\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownderdata_select_focus_parent_seq,
+                "ownerdata select notification", TRUE);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = LVIS_FOCUSED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownderdata_select_focus_parent_seq,
+                "ownerdata focus notification", TRUE);
+    DestroyWindow(hwnd);
+
+    /* check notifications on LVM_GETITEM */
+    /* zero callback mask */
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 1, 0);
+    ok(res != 0, "Expected LVM_SETITEMCOUNT to succeed\n");
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_SELECTED;
+    item.mask      = LVIF_STATE;
+    res = SendMessageA(hwnd, LVM_GETITEMA, 0, (LPARAM)&item);
+    expect(TRUE, res);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "ownerdata getitem selected state 1", FALSE);
+
+    /* non zero callback mask but not we asking for */
+    res = SendMessageA(hwnd, LVM_SETCALLBACKMASK, LVIS_OVERLAYMASK, 0);
+    expect(TRUE, res);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_SELECTED;
+    item.mask      = LVIF_STATE;
+    res = SendMessageA(hwnd, LVM_GETITEMA, 0, (LPARAM)&item);
+    expect(TRUE, res);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "ownerdata getitem selected state 2", FALSE);
+
+    /* LVIS_OVERLAYMASK callback mask, asking for index */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    memset(&item, 0, sizeof(item));
+    item.stateMask = LVIS_OVERLAYMASK;
+    item.mask      = LVIF_STATE;
+    res = SendMessageA(hwnd, LVM_GETITEMA, 0, (LPARAM)&item);
+    expect(TRUE, res);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, single_getdispinfo_parent_seq,
+                "ownerdata getitem selected state 2", FALSE);
+
+    DestroyWindow(hwnd);
 }
 
 static void test_norecompute(void)
@@ -2068,6 +2298,134 @@ static void test_nosortheader(void)
     DestroyWindow(hwnd);
 }
 
+static void test_setredraw(void)
+{
+    HWND hwnd;
+    DWORD_PTR style;
+    DWORD ret;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* Passing WM_SETREDRAW to DefWinProc removes WS_VISIBLE.
+       ListView seems to handle it internally without DefWinProc */
+
+    /* default value first */
+    ret = SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
+    expect(0, ret);
+    /* disable */
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    ok(style & WS_VISIBLE, "Expected WS_VISIBLE to be set\n");
+    ret = SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+    expect(0, ret);
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    ok(style & WS_VISIBLE, "Expected WS_VISIBLE to be set\n");
+
+    DestroyWindow(hwnd);
+}
+
+static void test_hittest(void)
+{
+    HWND hwnd;
+    DWORD r;
+    RECT bounds;
+    LVITEMA item;
+    static CHAR text[] = "1234567890ABCDEFGHIJKLMNOPQRST";
+    POINT pos;
+    INT x, y;
+    HIMAGELIST himl, himl2;
+    HBITMAP hbmp;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* LVS_REPORT with a single subitem (2 columns) */
+    insert_column(hwnd, 0);
+    insert_column(hwnd, 1);
+    insert_item(hwnd, 0);
+
+    item.iSubItem = 0;
+    /* the only purpose of that line is to be as long as a half item rect */
+    item.pszText  = text;
+    r = SendMessage(hwnd, LVM_SETITEMTEXT, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    r = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 0, MAKELPARAM(100, 0));
+    expect(TRUE, r);
+    r = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 1, MAKELPARAM(100, 0));
+    expect(TRUE, r);
+
+    memset(&bounds, 0, sizeof(bounds));
+    bounds.left = LVIR_BOUNDS;
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&bounds);
+    ok(bounds.bottom - bounds.top > 0, "Expected non zero item height\n");
+    ok(bounds.right - bounds.left > 0, "Expected non zero item width\n");
+    r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pos);
+    expect(TRUE, r);
+
+    /* LVS_EX_FULLROWSELECT not set, no icons attached */
+    x = pos.x + 50; /* column half width */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMLABEL, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    x = pos.x + 150; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, TRUE, TRUE, TRUE, __LINE__);
+    /* parent client area is 100x100 by default */
+    MoveWindow(hwnd, 0, 0, 300, 100, FALSE);
+    x = pos.x + 150; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    /* the same with LVS_EX_FULLROWSELECT */
+    SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT);
+    x = pos.x + 150; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEM, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    MoveWindow(hwnd, 0, 0, 100, 100, FALSE);
+    x = pos.x + 150; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, TRUE, TRUE, TRUE, __LINE__);
+    /* try with icons */
+    himl = ImageList_Create(16, 16, 0, 4, 4);
+    ok(himl != NULL, "failed to create imagelist\n");
+    hbmp = CreateBitmap(16, 16, 1, 1, NULL);
+    ok(hbmp != NULL, "failed to create bitmap\n");
+    r = ImageList_Add(himl, hbmp, 0);
+    ok(r == 0, "should be zero\n");
+
+    r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)himl);
+    ok(r == 0, "should return zero\n");
+
+    item.mask = LVIF_IMAGE;
+    item.iImage = 0;
+    item.iItem = 0;
+    item.iSubItem = 0;
+    r = SendMessage(hwnd, LVM_SETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+    /* on state icon */
+    x = pos.x + 8; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, TRUE, __LINE__);
+
+    himl2 = (HIMAGELIST)SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)NULL);
+    ok(himl2 == himl, "should return handle\n");
+
+    r = SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_SMALL, (LPARAM)himl);
+    ok(r == 0, "should return zero\n");
+    /* on item icon */
+    x = pos.x + 8; /* outside column */
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMICON, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -2110,4 +2468,8 @@ START_TEST(listview)
     test_ownerdata();
     test_norecompute();
     test_nosortheader();
+    test_setredraw();
+    test_hittest();
+
+    DestroyWindow(hwndparent);
 }

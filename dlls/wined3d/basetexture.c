@@ -288,6 +288,7 @@ HRESULT basetexture_bind(IWineD3DBaseTexture *iface, BOOL srgb, BOOL *set_surfac
     return hr;
 }
 
+/* GL locking is done by the caller */
 static inline void apply_wrap(const GLint textureDimensions, const DWORD state, const GLint type,
                               BOOL cond_np2) {
     GLint wrapParm;
@@ -313,6 +314,7 @@ static inline void apply_wrap(const GLint textureDimensions, const DWORD state, 
     }
 }
 
+/* GL locking is done by the caller (state handler) */
 void basetexture_apply_state_changes(IWineD3DBaseTexture *iface,
         const DWORD textureStates[WINED3D_HIGHEST_TEXTURE_STATE + 1],
         const DWORD samplerStates[WINED3D_HIGHEST_SAMPLER_STATE + 1])
@@ -322,13 +324,15 @@ void basetexture_apply_state_changes(IWineD3DBaseTexture *iface,
     GLint textureDimensions = IWineD3DBaseTexture_GetTextureDimensions(iface);
     BOOL cond_np2 = IWineD3DBaseTexture_IsCondNP2(iface);
 
+    TRACE("iface %p, textureStates %p, samplerStates %p\n", iface, textureStates, samplerStates);
+
     if(This->baseTexture.is_srgb) {
         states = This->baseTexture.srgbstates;
     } else {
         states = This->baseTexture.states;
     }
 
-    /* ApplyStateChanges relies on the correct texture being bound and loaded. */
+    /* This function relies on the correct texture being bound and loaded. */
 
     if(samplerStates[WINED3DSAMP_ADDRESSU]      != states[WINED3DTEXSTA_ADDRESSU]) {
         state = samplerStates[WINED3DSAMP_ADDRESSU];

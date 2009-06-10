@@ -243,8 +243,9 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_GetFunction(IWineD3DVertexShader*
  * shader is first used. The reason for this is that we need the vertex
  * declaration the shader will be used with in order to determine if
  * the data in a register is of type D3DCOLOR, and needs swizzling. */
-static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader *iface, CONST DWORD *pFunction) {
-
+static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader *iface,
+        const DWORD *pFunction, const struct wined3d_shader_signature *output_signature)
+{
     IWineD3DVertexShaderImpl *This =(IWineD3DVertexShaderImpl *)iface;
     IWineD3DDeviceImpl *deviceImpl = (IWineD3DDeviceImpl *) This->baseShader.device;
     const struct wined3d_shader_frontend *fe;
@@ -260,7 +261,7 @@ static HRESULT WINAPI IWineD3DVertexShaderImpl_SetFunction(IWineD3DVertexShader 
         return WINED3DERR_INVALIDCALL;
     }
     This->baseShader.frontend = fe;
-    This->baseShader.frontend_data = fe->shader_init(pFunction);
+    This->baseShader.frontend_data = fe->shader_init(pFunction, output_signature);
     if (!This->baseShader.frontend_data)
     {
         FIXME("Failed to initialize frontend.\n");
@@ -350,6 +351,7 @@ static HRESULT WINAPI IWIneD3DVertexShaderImpl_SetLocalConstantsF(IWineD3DVertex
     return WINED3D_OK;
 }
 
+/* GL locking is done by the caller */
 static GLuint vertexshader_compile(IWineD3DVertexShaderImpl *This, const struct vs_compile_args *args) {
     IWineD3DDeviceImpl *deviceImpl = (IWineD3DDeviceImpl *) This->baseShader.device;
     SHADER_BUFFER buffer;
@@ -394,6 +396,7 @@ static inline BOOL vs_args_equal(const struct vs_compile_args *stored, const str
     return stored->fog_src == new->fog_src;
 }
 
+/* GL locking is done by the caller */
 GLuint find_gl_vshader(IWineD3DVertexShaderImpl *shader, const struct vs_compile_args *args)
 {
     UINT i;

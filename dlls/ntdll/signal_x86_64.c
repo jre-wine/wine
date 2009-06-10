@@ -40,6 +40,7 @@
 #endif
 
 #define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "windef.h"
@@ -50,6 +51,40 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(seh);
+
+struct _DISPATCHER_CONTEXT;
+
+typedef LONG (WINAPI *PC_LANGUAGE_EXCEPTION_HANDLER)( EXCEPTION_POINTERS *ptrs, ULONG64 frame );
+typedef EXCEPTION_DISPOSITION (WINAPI *PEXCEPTION_ROUTINE)( EXCEPTION_RECORD *rec,
+                                                            ULONG64 frame,
+                                                            CONTEXT *context,
+                                                            struct _DISPATCHER_CONTEXT *dispatch );
+
+typedef struct _DISPATCHER_CONTEXT
+{
+    ULONG64               ControlPc;
+    ULONG64               ImageBase;
+    PRUNTIME_FUNCTION     FunctionEntry;
+    ULONG64               EstablisherFrame;
+    ULONG64               TargetIp;
+    PCONTEXT              ContextRecord;
+    PEXCEPTION_ROUTINE    LanguageHandler;
+    PVOID                 HandlerData;
+    PUNWIND_HISTORY_TABLE HistoryTable;
+    ULONG                 ScopeIndex;
+} DISPATCHER_CONTEXT, *PDISPATCHER_CONTEXT;
+
+typedef struct _SCOPE_TABLE
+{
+    ULONG Count;
+    struct
+    {
+        ULONG BeginAddress;
+        ULONG EndAddress;
+        ULONG HandlerAddress;
+        ULONG JumpTarget;
+    } ScopeRecord[1];
+} SCOPE_TABLE, *PSCOPE_TABLE;
 
 
 /***********************************************************************
@@ -156,6 +191,162 @@ enum i386_trap_code
 typedef int (*wine_signal_handler)(unsigned int sig);
 
 static wine_signal_handler handlers[256];
+
+/* definitions for unwind tables */
+
+union handler_data
+{
+    RUNTIME_FUNCTION chain;
+    ULONG handler;
+};
+
+struct opcode
+{
+    BYTE offset;
+    BYTE code : 4;
+    BYTE info : 4;
+};
+
+struct UNWIND_INFO
+{
+    BYTE version : 3;
+    BYTE flags : 5;
+    BYTE prolog;
+    BYTE count;
+    BYTE frame_reg : 4;
+    BYTE frame_offset : 4;
+    struct opcode opcodes[1];  /* info->count entries */
+    /* followed by handler_data */
+};
+
+#define UWOP_PUSH_NONVOL     0
+#define UWOP_ALLOC_LARGE     1
+#define UWOP_ALLOC_SMALL     2
+#define UWOP_SET_FPREG       3
+#define UWOP_SAVE_NONVOL     4
+#define UWOP_SAVE_NONVOL_FAR 5
+#define UWOP_SAVE_XMM128     8
+#define UWOP_SAVE_XMM128_FAR 9
+#define UWOP_PUSH_MACHFRAME  10
+
+static void dump_unwind_info( ULONG64 base, RUNTIME_FUNCTION *function )
+{
+    static const char * const reg_names[16] =
+        { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+          "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15" };
+
+    union handler_data *handler_data;
+    struct UNWIND_INFO *info;
+    unsigned int i, count;
+
+    TRACE( "**** func %x-%x\n", function->BeginAddress, function->EndAddress );
+    for (;;)
+    {
+        if (function->UnwindData & 1)
+        {
+            RUNTIME_FUNCTION *next = (RUNTIME_FUNCTION *)((char *)base + (function->UnwindData & ~1));
+            TRACE( "unwind info for function %p-%p chained to function %p-%p\n",
+                   (char *)base + function->BeginAddress, (char *)base + function->EndAddress,
+                   (char *)base + next->BeginAddress, (char *)base + next->EndAddress );
+            function = next;
+            continue;
+        }
+        info = (struct UNWIND_INFO *)((char *)base + function->UnwindData);
+
+        TRACE( "unwind info at %p flags %x prolog 0x%x bytes function %p-%p\n",
+               info, info->flags, info->prolog,
+               (char *)base + function->BeginAddress, (char *)base + function->EndAddress );
+
+        if (info->frame_reg)
+            TRACE( "    frame register %s offset 0x%x(%%rsp)\n",
+                   reg_names[info->frame_reg], info->frame_offset * 16 );
+
+        for (i = 0; i < info->count; i++)
+        {
+            TRACE( "    0x%x: ", info->opcodes[i].offset );
+            switch (info->opcodes[i].code)
+            {
+            case UWOP_PUSH_NONVOL:
+                TRACE( "pushq %%%s\n", reg_names[info->opcodes[i].info] );
+                break;
+            case UWOP_ALLOC_LARGE:
+                if (info->opcodes[i].info)
+                {
+                    count = *(DWORD *)&info->opcodes[i+1];
+                    i += 2;
+                }
+                else
+                {
+                    count = *(USHORT *)&info->opcodes[i+1] * 8;
+                    i++;
+                }
+                TRACE( "subq $0x%x,%%rsp\n", count );
+                break;
+            case UWOP_ALLOC_SMALL:
+                count = (info->opcodes[i].info + 1) * 8;
+                TRACE( "subq $0x%x,%%rsp\n", count );
+                break;
+            case UWOP_SET_FPREG:
+                TRACE( "leaq 0x%x(%%rsp),%s\n",
+                     info->frame_offset * 16, reg_names[info->frame_reg] );
+                break;
+            case UWOP_SAVE_NONVOL:
+                count = *(USHORT *)&info->opcodes[i+1] * 8;
+                TRACE( "movq %%%s,0x%x(%%rsp)\n", reg_names[info->opcodes[i].info], count );
+                i++;
+                break;
+            case UWOP_SAVE_NONVOL_FAR:
+                count = *(DWORD *)&info->opcodes[i+1];
+                TRACE( "movq %%%s,0x%x(%%rsp)\n", reg_names[info->opcodes[i].info], count );
+                i += 2;
+                break;
+            case UWOP_SAVE_XMM128:
+                count = *(USHORT *)&info->opcodes[i+1] * 16;
+                TRACE( "movaps %%xmm%u,0x%x(%%rsp)\n", info->opcodes[i].info, count );
+                i++;
+                break;
+            case UWOP_SAVE_XMM128_FAR:
+                count = *(DWORD *)&info->opcodes[i+1];
+                TRACE( "movaps %%xmm%u,0x%x(%%rsp)\n", info->opcodes[i].info, count );
+                i += 2;
+                break;
+            case UWOP_PUSH_MACHFRAME:
+                TRACE( "PUSH_MACHFRAME %u\n", info->opcodes[i].info );
+                break;
+            default:
+                FIXME( "unknown code %u\n", info->opcodes[i].code );
+                break;
+            }
+        }
+
+        handler_data = (union handler_data *)&info->opcodes[(info->count + 1) & ~1];
+        if (info->flags & UNW_FLAG_CHAININFO)
+        {
+            TRACE( "    chained to function %p-%p\n",
+                   (char *)base + handler_data->chain.BeginAddress,
+                   (char *)base + handler_data->chain.EndAddress );
+            function = &handler_data->chain;
+            continue;
+        }
+        if (info->flags & (UNW_FLAG_EHANDLER | UNW_FLAG_UHANDLER))
+            TRACE( "    handler %p data at %p\n",
+                   (char *)base + handler_data->handler, &handler_data->handler + 1 );
+        break;
+    }
+}
+
+static void dump_scope_table( ULONG64 base, const SCOPE_TABLE *table )
+{
+    unsigned int i;
+
+    TRACE( "scope table at %p\n", table );
+    for (i = 0; i < table->Count; i++)
+        TRACE( "  %u: %lx-%lx handler %lx target %lx\n", i,
+               base + table->ScopeRecord[i].BeginAddress,
+               base + table->ScopeRecord[i].EndAddress,
+               base + table->ScopeRecord[i].HandlerAddress,
+               base + table->ScopeRecord[i].JumpTarget );
+}
 
 /***********************************************************************
  *           dispatch_signal
@@ -476,19 +667,121 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
 
 
 /**********************************************************************
+ *           find_function_info
+ */
+static RUNTIME_FUNCTION *find_function_info( ULONG64 pc, HMODULE module,
+                                             RUNTIME_FUNCTION *func, ULONG size )
+{
+    int min = 0;
+    int max = size/sizeof(*func) - 1;
+
+    while (min <= max)
+    {
+        int pos = (min + max) / 2;
+        if ((char *)pc < (char *)module + func[pos].BeginAddress) max = pos - 1;
+        else if ((char *)pc >= (char *)module + func[pos].EndAddress) min = pos + 1;
+        else
+        {
+            func += pos;
+            while (func->UnwindData & 1)  /* follow chained entry */
+                func = (RUNTIME_FUNCTION *)((char *)module + (func->UnwindData & ~1));
+            return func;
+        }
+    }
+    return NULL;
+}
+
+/**********************************************************************
  *           call_stack_handlers
  *
  * Call the stack handlers chain.
  */
-static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *context )
+static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_context )
 {
     EXCEPTION_POINTERS ptrs;
+    UNWIND_HISTORY_TABLE table;
+    ULONG64 frame;
+    RUNTIME_FUNCTION *dir, *info;
+    PEXCEPTION_ROUTINE handler;
+    DISPATCHER_CONTEXT dispatch;
+    CONTEXT context, new_context;
+    LDR_MODULE *module;
+    DWORD size;
 
-    FIXME( "not implemented on x86_64\n" );
+    context = *orig_context;
+    for (;;)
+    {
+        /* FIXME: should use the history table to make things faster */
+
+        if (LdrFindEntryForAddress( (void *)context.Rip, &module ))
+        {
+            ERR( "no module found for rip %p, can't dispatch exception\n", (void *)context.Rip );
+            break;
+        }
+        if (!(dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
+                                                  IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
+        {
+            ERR( "module %s doesn't contain exception data, can't dispatch exception\n",
+                 debugstr_w(module->BaseDllName.Buffer) );
+            break;
+        }
+        if (!(info = find_function_info( context.Rip, module->BaseAddress, dir, size )))
+        {
+            /* leaf function */
+            context.Rip = *(ULONG64 *)context.Rsp;
+            context.Rsp += sizeof(ULONG64);
+            continue;
+        }
+
+        new_context = context;
+
+        handler = RtlVirtualUnwind( UNW_FLAG_EHANDLER, (ULONG64)module->BaseAddress, context.Rip,
+                                    info, &new_context, &dispatch.HandlerData, &frame, NULL );
+
+        if ((frame & 7) ||
+            frame < (ULONG64)NtCurrentTeb()->Tib.StackLimit ||
+            frame >= (ULONG64)NtCurrentTeb()->Tib.StackBase)
+        {
+            ERR( "invalid frame %lx\n", frame );
+            rec->ExceptionFlags |= EH_STACK_INVALID;
+            break;
+        }
+
+        if (handler)
+        {
+            dispatch.ControlPc        = context.Rip;
+            dispatch.ImageBase        = (ULONG64)module->BaseAddress;
+            dispatch.FunctionEntry    = info;
+            dispatch.EstablisherFrame = frame;
+            dispatch.TargetIp         = 0; /* FIXME */
+            dispatch.ContextRecord    = &context;
+            dispatch.LanguageHandler  = handler;
+            dispatch.HistoryTable     = &table;
+            dispatch.ScopeIndex       = 0; /* FIXME */
+
+            TRACE( "calling handler %p (rec=%p, frame=%lx context=%p, dispatch=%p)\n",
+                   handler, rec, frame, &context, &dispatch );
+
+            switch( handler( rec, frame, &context, &dispatch ))
+            {
+            case ExceptionContinueExecution:
+                if (rec->ExceptionFlags & EH_NONCONTINUABLE) return STATUS_NONCONTINUABLE_EXCEPTION;
+                *orig_context = context;
+                return STATUS_SUCCESS;
+            case ExceptionContinueSearch:
+                break;
+            case ExceptionNestedException:
+                break;
+            default:
+                return STATUS_INVALID_DISPOSITION;
+            }
+        }
+        context = new_context;
+    }
 
     /* hack: call unhandled exception filter directly */
     ptrs.ExceptionRecord = rec;
-    ptrs.ContextRecord = context;
+    ptrs.ContextRecord = orig_context;
     unhandled_exception_filter( &ptrs );
     return STATUS_UNHANDLED_EXCEPTION;
 }
@@ -510,7 +803,7 @@ static NTSTATUS raise_exception( EXCEPTION_RECORD *rec, CONTEXT *context, BOOL f
         TRACE( "code=%x flags=%x addr=%p ip=%lx tid=%04x\n",
                rec->ExceptionCode, rec->ExceptionFlags, rec->ExceptionAddress,
                context->Rip, GetCurrentThreadId() );
-        for (c = 0; c < rec->NumberParameters; c++)
+        for (c = 0; c < min( EXCEPTION_MAXIMUM_PARAMETERS, rec->NumberParameters ); c++)
             TRACE( " info[%d]=%08lx\n", c, rec->ExceptionInformation[c] );
         if (rec->ExceptionCode == EXCEPTION_WINE_STUB)
         {
@@ -875,53 +1168,468 @@ void signal_init_process(void)
 /**********************************************************************
  *              RtlLookupFunctionEntry   (NTDLL.@)
  */
-PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG64 pc, ULONG64 *base,
-                                                 UNWIND_HISTORY_TABLE *table )
+PRUNTIME_FUNCTION WINAPI RtlLookupFunctionEntry( ULONG64 pc, ULONG64 *base, UNWIND_HISTORY_TABLE *table )
 {
-    FIXME("stub\n");
-    return NULL;
+    LDR_MODULE *module;
+    RUNTIME_FUNCTION *func;
+    ULONG size;
+
+    /* FIXME: should use the history table to make things faster */
+
+    if (LdrFindEntryForAddress( (void *)pc, &module ))
+    {
+        WARN( "module not found for %lx\n", pc );
+        return NULL;
+    }
+    if (!(func = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
+                                               IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
+    {
+        WARN( "no exception table found in module %p pc %lx\n", module->BaseAddress, pc );
+        return NULL;
+    }
+    func = find_function_info( pc, module->BaseAddress, func, size );
+    if (func) *base = (ULONG64)module->BaseAddress;
+    return func;
 }
 
+static ULONG64 get_int_reg( CONTEXT *context, int reg )
+{
+    return *(&context->Rax + reg);
+}
+
+static void set_int_reg( CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr, int reg, ULONG64 val )
+{
+    *(&context->Rax + reg) = val;
+    if (ctx_ptr) ctx_ptr->u2.IntegerContext[reg] = &context->Rax + reg;
+}
+
+static void set_float_reg( CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr, int reg, M128A val )
+{
+    *(&context->u.s.Xmm0 + reg) = val;
+    if (ctx_ptr) ctx_ptr->u1.FloatingContext[reg] = &context->u.s.Xmm0 + reg;
+}
+
+static int get_opcode_size( struct opcode op )
+{
+    switch (op.code)
+    {
+    case UWOP_ALLOC_LARGE:
+        return 2 + (op.info != 0);
+    case UWOP_SAVE_NONVOL:
+    case UWOP_SAVE_XMM128:
+        return 2;
+    case UWOP_SAVE_NONVOL_FAR:
+    case UWOP_SAVE_XMM128_FAR:
+        return 3;
+    default:
+        return 1;
+    }
+}
+
+static BOOL is_inside_epilog( BYTE *pc )
+{
+    /* add or lea must be the first instruction, and it must have a rex.W prefix */
+    if ((pc[0] & 0xf8) == 0x48)
+    {
+        switch (pc[1])
+        {
+        case 0x81: /* add $nnnn,%rsp */
+            if (pc[0] == 0x48 && pc[2] == 0xc4)
+            {
+                pc += 7;
+                break;
+            }
+            return FALSE;
+        case 0x83: /* add $n,%rsp */
+            if (pc[0] == 0x48 && pc[2] == 0xc4)
+            {
+                pc += 4;
+                break;
+            }
+            return FALSE;
+        case 0x8d: /* lea n(reg),%rsp */
+            if (pc[0] & 0x06) return FALSE;  /* rex.RX must be cleared */
+            if (((pc[2] >> 3) & 7) != 4) return FALSE;  /* dest reg mus be %rsp */
+            if ((pc[2] & 7) == 4) return FALSE;  /* no SIB byte allowed */
+            if ((pc[2] >> 6) == 1)  /* 8-bit offset */
+            {
+                pc += 4;
+                break;
+            }
+            if ((pc[2] >> 6) == 2)  /* 32-bit offset */
+            {
+                pc += 7;
+                break;
+            }
+            return FALSE;
+        }
+    }
+
+    /* now check for various pop instructions */
+
+    for (;;)
+    {
+        BYTE rex = 0;
+
+        if ((*pc & 0xf0) == 0x40) rex = *pc++ & 0x0f;  /* rex prefix */
+
+        switch (*pc)
+        {
+        case 0x58: /* pop %rax/%r8 */
+        case 0x59: /* pop %rcx/%r9 */
+        case 0x5a: /* pop %rdx/%r10 */
+        case 0x5b: /* pop %rbx/%r11 */
+        case 0x5c: /* pop %rsp/%r12 */
+        case 0x5d: /* pop %rbp/%r13 */
+        case 0x5e: /* pop %rsi/%r14 */
+        case 0x5f: /* pop %rdi/%r15 */
+            pc++;
+            continue;
+        case 0xc2: /* ret $nn */
+        case 0xc3: /* ret */
+            return TRUE;
+        /* FIXME: add various jump instructions */
+        }
+        return FALSE;
+    }
+}
+
+/* execute a function epilog, which must have been validated with is_inside_epilog() */
+static void interpret_epilog( BYTE *pc, CONTEXT *context, KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+{
+    for (;;)
+    {
+        BYTE rex = 0;
+
+        if ((*pc & 0xf0) == 0x40) rex = *pc++ & 0x0f;  /* rex prefix */
+
+        switch (*pc)
+        {
+        case 0x58: /* pop %rax/r8 */
+        case 0x59: /* pop %rcx/r9 */
+        case 0x5a: /* pop %rdx/r10 */
+        case 0x5b: /* pop %rbx/r11 */
+        case 0x5c: /* pop %rsp/r12 */
+        case 0x5d: /* pop %rbp/r13 */
+        case 0x5e: /* pop %rsi/r14 */
+        case 0x5f: /* pop %rdi/r15 */
+            set_int_reg( context, ctx_ptr, *pc - 0x58 + (rex & 1) * 8, *(ULONG64 *)context->Rsp );
+            context->Rsp += sizeof(ULONG64);
+            pc++;
+            continue;
+        case 0x81: /* add $nnnn,%rsp */
+            context->Rsp += *(LONG *)(pc + 2);
+            pc += 2 + sizeof(LONG);
+            continue;
+        case 0x83: /* add $n,%rsp */
+            context->Rsp += (signed char)pc[2];
+            pc += 3;
+            continue;
+        case 0x8d:
+            if ((pc[1] >> 6) == 1)  /* lea n(reg),%rsp */
+            {
+                context->Rsp = get_int_reg( context, (pc[1] & 7) + (rex & 1) * 8 ) + (signed char)pc[2];
+                pc += 3;
+            }
+            else  /* lea nnnn(reg),%rsp */
+            {
+                context->Rsp = get_int_reg( context, (pc[1] & 7) + (rex & 1) * 8 ) + *(LONG *)(pc + 2);
+                pc += 2 + sizeof(LONG);
+            }
+            continue;
+        case 0xc2: /* ret $nn */
+            context->Rip = *(ULONG64 *)context->Rsp;
+            context->Rsp += sizeof(ULONG64) + *(WORD *)(pc + 1);
+            return;
+        case 0xc3: /* ret */
+            context->Rip = *(ULONG64 *)context->Rsp;
+            context->Rsp += sizeof(ULONG64);
+            return;
+        /* FIXME: add various jump instructions */
+        }
+        return;
+    }
+}
 
 /**********************************************************************
  *              RtlVirtualUnwind   (NTDLL.@)
  */
-PVOID WINAPI RtlVirtualUnwind ( ULONG type, ULONG64 base, ULONG64 pc,
-                                RUNTIME_FUNCTION *function, CONTEXT *context,
-                                PVOID *data, ULONG64 *frame,
-                                KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
+PVOID WINAPI RtlVirtualUnwind( ULONG type, ULONG64 base, ULONG64 pc,
+                               RUNTIME_FUNCTION *function, CONTEXT *context,
+                               PVOID *data, ULONG64 *frame_ret,
+                               KNONVOLATILE_CONTEXT_POINTERS *ctx_ptr )
 {
-    FIXME("stub\n");
-    return NULL;
+    union handler_data *handler_data;
+    ULONG64 frame, off;
+    struct UNWIND_INFO *info;
+    unsigned int i, prolog_offset;
+
+    TRACE( "type %x rip %lx rsp %lx\n", type, pc, context->Rsp );
+    if (TRACE_ON(seh)) dump_unwind_info( base, function );
+
+    frame = *frame_ret = context->Rsp;
+    for (;;)
+    {
+        info = (struct UNWIND_INFO *)((char *)base + function->UnwindData);
+        handler_data = (union handler_data *)&info->opcodes[(info->count + 1) & ~1];
+
+        if (info->version != 1)
+        {
+            FIXME( "unknown unwind info version %u at %p\n", info->version, info );
+            return NULL;
+        }
+
+        if (info->frame_reg)
+            frame = get_int_reg( context, info->frame_reg ) - info->frame_offset * 16;
+
+        /* check if in prolog */
+        if (pc >= base + function->BeginAddress && pc < base + function->BeginAddress + info->prolog)
+        {
+            prolog_offset = pc - base - function->BeginAddress;
+        }
+        else
+        {
+            prolog_offset = ~0;
+            if (is_inside_epilog( (BYTE *)pc ))
+            {
+                interpret_epilog( (BYTE *)pc, context, ctx_ptr );
+                *frame_ret = frame;
+                return NULL;
+            }
+        }
+
+        for (i = 0; i < info->count; i += get_opcode_size(info->opcodes[i]))
+        {
+            if (prolog_offset < info->opcodes[i].offset) continue; /* skip it */
+
+            switch (info->opcodes[i].code)
+            {
+            case UWOP_PUSH_NONVOL:  /* pushq %reg */
+                set_int_reg( context, ctx_ptr, info->opcodes[i].info, *(ULONG64 *)context->Rsp );
+                context->Rsp += sizeof(ULONG64);
+                break;
+            case UWOP_ALLOC_LARGE:  /* subq $nn,%rsp */
+                if (info->opcodes[i].info) context->Rsp += *(DWORD *)&info->opcodes[i+1];
+                else context->Rsp += *(USHORT *)&info->opcodes[i+1] * 8;
+                break;
+            case UWOP_ALLOC_SMALL:  /* subq $n,%rsp */
+                context->Rsp += (info->opcodes[i].info + 1) * 8;
+                break;
+            case UWOP_SET_FPREG:  /* leaq nn(%rsp),%framereg */
+                context->Rsp = *frame_ret = frame;
+                break;
+            case UWOP_SAVE_NONVOL:  /* movq %reg,n(%rsp) */
+                off = frame + *(USHORT *)&info->opcodes[i+1] * 8;
+                set_int_reg( context, ctx_ptr, info->opcodes[i].info, *(ULONG64 *)off );
+                break;
+            case UWOP_SAVE_NONVOL_FAR:  /* movq %reg,nn(%rsp) */
+                off = frame + *(DWORD *)&info->opcodes[i+1];
+                set_int_reg( context, ctx_ptr, info->opcodes[i].info, *(ULONG64 *)off );
+                break;
+            case UWOP_SAVE_XMM128:  /* movaps %xmmreg,n(%rsp) */
+                off = frame + *(USHORT *)&info->opcodes[i+1] * 16;
+                set_float_reg( context, ctx_ptr, info->opcodes[i].info, *(M128A *)off );
+                break;
+            case UWOP_SAVE_XMM128_FAR:  /* movaps %xmmreg,nn(%rsp) */
+                off = frame + *(DWORD *)&info->opcodes[i+1];
+                set_float_reg( context, ctx_ptr, info->opcodes[i].info, *(M128A *)off );
+                break;
+            case UWOP_PUSH_MACHFRAME:
+                FIXME( "PUSH_MACHFRAME %u\n", info->opcodes[i].info );
+                break;
+            default:
+                FIXME( "unknown code %u\n", info->opcodes[i].code );
+                break;
+            }
+        }
+
+        if (!(info->flags & UNW_FLAG_CHAININFO)) break;
+        function = &handler_data->chain;  /* restart with the chained info */
+    }
+
+    /* now pop return address */
+    context->Rip = *(ULONG64 *)context->Rsp;
+    context->Rsp += sizeof(ULONG64);
+
+    if (!(info->flags & type)) return NULL;  /* no matching handler */
+    if (prolog_offset != ~0) return NULL;  /* inside prolog */
+
+    *data = &handler_data->handler + 1;
+    return (char *)base + handler_data->handler;
 }
 
 
 /*******************************************************************
- *		RtlUnwind (NTDLL.@)
+ *		RtlUnwindEx (NTDLL.@)
  */
-void WINAPI __regs_RtlUnwind( EXCEPTION_REGISTRATION_RECORD* pEndFrame, PVOID targetIp,
-                              PEXCEPTION_RECORD pRecord, PVOID retval, CONTEXT *context )
+void WINAPI RtlUnwindEx( ULONG64 end_frame, ULONG64 target_ip, EXCEPTION_RECORD *rec,
+                         ULONG64 retval, CONTEXT *context, UNWIND_HISTORY_TABLE *table )
 {
     EXCEPTION_RECORD record;
+    ULONG64 frame;
+    RUNTIME_FUNCTION *dir, *info;
+    PEXCEPTION_ROUTINE handler;
+    DISPATCHER_CONTEXT dispatch;
+    CONTEXT new_context;
+    LDR_MODULE *module;
+    DWORD size;
 
     /* build an exception record, if we do not have one */
-    if (!pRecord)
+    if (!rec)
     {
         record.ExceptionCode    = STATUS_UNWIND;
         record.ExceptionFlags   = 0;
         record.ExceptionRecord  = NULL;
         record.ExceptionAddress = (void *)context->Rip;
         record.NumberParameters = 0;
-        pRecord = &record;
+        rec = &record;
     }
 
-    pRecord->ExceptionFlags |= EH_UNWINDING | (pEndFrame ? 0 : EH_EXIT_UNWIND);
+    rec->ExceptionFlags |= EH_UNWINDING | (end_frame ? 0 : EH_EXIT_UNWIND);
 
-    FIXME( "code=%x flags=%x not implemented on x86_64\n",
-           pRecord->ExceptionCode, pRecord->ExceptionFlags );
-    NtTerminateProcess( GetCurrentProcess(), 1 );
+    FIXME( "code=%x flags=%x end_frame=%lx target_ip=%lx\n",
+           rec->ExceptionCode, rec->ExceptionFlags, end_frame, target_ip );
+
+    frame = context->Rsp;
+    while (frame != end_frame)
+    {
+        /* FIXME: should use the history table to make things faster */
+
+        if (LdrFindEntryForAddress( (void *)context->Rip, &module ))
+        {
+            ERR( "no module found for rip %p, can't unwind exception\n", (void *)context->Rip );
+            raise_status( STATUS_BAD_FUNCTION_TABLE, rec );
+        }
+        if (!(dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
+                                                  IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
+        {
+            ERR( "module %s doesn't contain exception data, can't unwind exception\n",
+                 debugstr_w(module->BaseDllName.Buffer) );
+            raise_status( STATUS_BAD_FUNCTION_TABLE, rec );
+        }
+        if (!(info = find_function_info( context->Rip, module->BaseAddress, dir, size )))
+        {
+            /* leaf function */
+            context->Rip = *(ULONG64 *)context->Rsp;
+            context->Rsp += sizeof(ULONG64);
+            continue;
+        }
+
+        new_context = *context;
+
+        handler = RtlVirtualUnwind( UNW_FLAG_UHANDLER, (ULONG64)module->BaseAddress, context->Rip,
+                                    info, &new_context, &dispatch.HandlerData, &frame, NULL );
+
+        if ((frame & 7) ||
+            frame < (ULONG64)NtCurrentTeb()->Tib.StackLimit ||
+            frame >= (ULONG64)NtCurrentTeb()->Tib.StackBase)
+        {
+            ERR( "invalid frame %lx\n", frame );
+            raise_status( STATUS_BAD_STACK, rec );
+        }
+
+        if (end_frame && (frame > end_frame))
+        {
+            ERR( "invalid frame %lx/%lx\n", frame, end_frame );
+            raise_status( STATUS_INVALID_UNWIND_TARGET, rec );
+        }
+
+        if (handler)
+        {
+            dispatch.ControlPc        = context->Rip;
+            dispatch.ImageBase        = (ULONG64)module->BaseAddress;
+            dispatch.FunctionEntry    = info;
+            dispatch.EstablisherFrame = frame;
+            dispatch.TargetIp         = target_ip;
+            dispatch.ContextRecord    = context;
+            dispatch.LanguageHandler  = handler;
+            dispatch.HistoryTable     = table;
+            dispatch.ScopeIndex       = 0; /* FIXME */
+
+            TRACE( "calling handler %p (rec=%p, frame=%lx context=%p, dispatch=%p)\n",
+                   handler, rec, frame, context, &dispatch );
+
+            switch( handler( rec, frame, context, &dispatch ))
+            {
+            case ExceptionContinueSearch:
+                break;
+            case ExceptionCollidedUnwind:
+                FIXME( "ExceptionCollidedUnwind not supported yet\n" );
+                break;
+            default:
+                raise_status( STATUS_INVALID_DISPOSITION, rec );
+                break;
+            }
+        }
+        *context = new_context;
+    }
+    context->Rax = retval;
+    context->Rip = target_ip;
+    TRACE( "returning to %lx stack %lx\n", context->Rip, context->Rsp );
+    set_cpu_context( context );
+}
+
+
+/*******************************************************************
+ *		RtlUnwind (NTDLL.@)
+ */
+void WINAPI __regs_RtlUnwind( ULONG64 frame, ULONG64 target_ip, EXCEPTION_RECORD *rec,
+                              ULONG64 retval, CONTEXT *context )
+{
+    RtlUnwindEx( frame, target_ip, rec, retval, context, NULL );
 }
 DEFINE_REGS_ENTRYPOINT( RtlUnwind, 4 )
+
+
+/*******************************************************************
+ *		__C_specific_handler (NTDLL.@)
+ */
+EXCEPTION_DISPOSITION WINAPI __C_specific_handler( EXCEPTION_RECORD *rec,
+                                                   ULONG64 frame,
+                                                   CONTEXT *context,
+                                                   struct _DISPATCHER_CONTEXT *dispatch )
+{
+    SCOPE_TABLE *table = dispatch->HandlerData;
+    ULONG i;
+
+    TRACE( "%p %lx %p %p\n", rec, frame, context, dispatch );
+    if (TRACE_ON(seh)) dump_scope_table( dispatch->ImageBase, table );
+
+    if (rec->ExceptionFlags & (EH_UNWINDING | EH_EXIT_UNWIND))  /* FIXME */
+        return ExceptionContinueSearch;
+
+    for (i = 0; i < table->Count; i++)
+    {
+        if (context->Rip >= dispatch->ImageBase + table->ScopeRecord[i].BeginAddress &&
+            context->Rip < dispatch->ImageBase + table->ScopeRecord[i].EndAddress)
+        {
+            if (!table->ScopeRecord[i].JumpTarget) continue;
+            if (table->ScopeRecord[i].HandlerAddress != EXCEPTION_EXECUTE_HANDLER)
+            {
+                EXCEPTION_POINTERS ptrs;
+                PC_LANGUAGE_EXCEPTION_HANDLER filter;
+
+                filter = (PC_LANGUAGE_EXCEPTION_HANDLER)(dispatch->ImageBase + table->ScopeRecord[i].HandlerAddress);
+                ptrs.ExceptionRecord = rec;
+                ptrs.ContextRecord = context;
+                TRACE( "calling filter %p ptrs %p frame %lx\n", filter, &ptrs, frame );
+                switch (filter( &ptrs, frame ))
+                {
+                case EXCEPTION_EXECUTE_HANDLER:
+                    break;
+                case EXCEPTION_CONTINUE_SEARCH:
+                    continue;
+                case EXCEPTION_CONTINUE_EXECUTION:
+                    return ExceptionContinueExecution;
+                }
+            }
+            TRACE( "unwinding to target %lx\n", dispatch->ImageBase + table->ScopeRecord[i].JumpTarget );
+            RtlUnwindEx( frame, dispatch->ImageBase + table->ScopeRecord[i].JumpTarget,
+                         rec, 0, context, dispatch->HistoryTable );
+        }
+    }
+    return ExceptionContinueSearch;
+}
 
 
 /*******************************************************************

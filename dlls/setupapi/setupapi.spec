@@ -95,8 +95,8 @@
 @ stub CM_Get_Device_Interface_List_ExW
 @ stub CM_Get_Device_Interface_List_SizeA
 @ stub CM_Get_Device_Interface_List_SizeW
-@ stub CM_Get_Device_Interface_List_Size_ExA
-@ stub CM_Get_Device_Interface_List_Size_ExW
+@ stdcall CM_Get_Device_Interface_List_Size_ExA(ptr ptr str long ptr)
+@ stdcall CM_Get_Device_Interface_List_Size_ExW(ptr ptr wstr long ptr)
 @ stub CM_Get_First_Log_Conf
 @ stub CM_Get_First_Log_Conf_Ex
 @ stub CM_Get_Global_State
@@ -130,8 +130,8 @@
 @ stub CM_Is_Dock_Station_Present
 @ stdcall CM_Locate_DevNodeA(ptr str long)
 @ stdcall CM_Locate_DevNodeW(ptr wstr long)
-@ stub CM_Locate_DevNode_ExA
-@ stub CM_Locate_DevNode_ExW
+@ stdcall CM_Locate_DevNode_ExA(ptr str long long)
+@ stdcall CM_Locate_DevNode_ExW(ptr wstr long long)
 @ stub CM_Merge_Range_List
 @ stub CM_Modify_Res_Des
 @ stub CM_Modify_Res_Des_Ex
@@ -526,6 +526,8 @@
 @ stdcall SetupSetSourceListW(long ptr long)
 @ stdcall SetupTermDefaultQueueCallback(ptr)
 @ stdcall SetupTerminateFileLog(long)
+@ stdcall SetupUninstallOEMInfA(str long ptr)
+@ stdcall SetupUninstallOEMInfW(wstr long ptr)
 @ stub ShouldDeviceBeExcluded
 @ stdcall StampFileSecurity(wstr ptr)
 @ stdcall StringTableAddString(ptr wstr long)

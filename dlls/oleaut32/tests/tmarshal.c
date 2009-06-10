@@ -56,7 +56,11 @@ static char *get_tmp_space( int size )
     int idx;
 
     idx = ++pos % (sizeof(list)/sizeof(list[0]));
-    if ((ret = realloc( list[idx], size ))) list[idx] = ret;
+    if (list[idx])
+        ret = HeapReAlloc( GetProcessHeap(), 0, list[idx], size );
+    else
+        ret = HeapAlloc( GetProcessHeap(), 0, size );
+    if (ret) list[idx] = ret;
     return ret;
 }
 
@@ -1352,7 +1356,7 @@ static void test_DispCallFunc(void)
     V_VT(&varref) = VT_ERROR;
     V_ERROR(&varref) = DISP_E_PARAMNOTFOUND;
     VariantInit(&varresult);
-    hr = DispCallFunc(pWidget, 36, CC_STDCALL, VT_UI4, 4, rgvt, rgpvarg, &varresult);
+    hr = DispCallFunc(pWidget, 9*sizeof(void*), CC_STDCALL, VT_UI4, 4, rgvt, rgpvarg, &varresult);
     ok_ole_success(hr, DispCallFunc);
     VariantClear(&varresult);
     VariantClear(&vararg[1]);
@@ -1401,7 +1405,8 @@ START_TEST(tmarshal)
     test_DispCallFunc();
     test_StaticWidget();
 
-    hr = UnRegisterTypeLib(&LIBID_TestTypelib, 1, 0, LOCALE_NEUTRAL, 1);
+    hr = UnRegisterTypeLib(&LIBID_TestTypelib, 1, 0, LOCALE_NEUTRAL,
+                           sizeof(void*) == 8 ? SYS_WIN64 : SYS_WIN32);
     ok_ole_success(hr, UnRegisterTypeLib);
 
     CoUninitialize();

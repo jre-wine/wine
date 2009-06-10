@@ -3080,6 +3080,13 @@ typedef void (WINE_GLAPI *PGLFNSETFRAGMENTSHADERCONSTANTATI) (GLuint dst, const 
 #define GL_COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT          0x8DBE
 #endif
 
+/* GL_NV_vertex_program2_option */
+#ifndef GL_NV_vertex_program2_option
+#define GL_NV_vertex_program2_option
+#define GL_MAX_PROGRAM_EXEC_INSTRUCTIONS_NV               0x88F4
+#define GL_MAX_PROGRAM_CALL_DEPTH_NV                      0x88F5
+#endif
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -3302,6 +3309,7 @@ typedef enum _GL_Cards {
   CARD_ATI_RADEON_HD2600          = 0x9581,
   CARD_ATI_RADEON_HD2900          = 0x9400,
   CARD_ATI_RADEON_HD3200          = 0x9620,
+  CARD_ATI_RADEON_HD4800          = 0x944c,
 
   CARD_NVIDIA_RIVA_128            = 0x0018,
   CARD_NVIDIA_RIVA_TNT            = 0x0020,
@@ -3449,7 +3457,9 @@ typedef enum _GL_SupportedExt {
   NV_VERTEX_PROGRAM,
   NV_VERTEX_PROGRAM1_1,
   NV_VERTEX_PROGRAM2,
+  NV_VERTEX_PROGRAM2_OPTION,
   NV_VERTEX_PROGRAM3,
+  NV_FRAGMENT_PROGRAM_OPTION,
   NV_FENCE,
   NV_DEPTH_CLAMP,
   NV_LIGHT_MAX_EXPONENT,
@@ -3961,6 +3971,7 @@ typedef struct _WineD3D_GL_Info {
   BOOL arb_vs_offset_limit;
   BOOL set_texcoord_w;
   DWORD reserved_glsl_constants;
+  BOOL glsl_clip_varying;
 
   BOOL supported[OPENGL_SUPPORTED_EXT_END + 1];
 

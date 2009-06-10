@@ -210,15 +210,10 @@ static HANDLE open_exe_file( const WCHAR *name )
     {
         WCHAR buffer[MAX_PATH];
         /* file doesn't exist, check for builtin */
-        if (!contains_path( name )) goto error;
-        if (!get_builtin_path( name, NULL, buffer, sizeof(buffer) )) goto error;
-        handle = 0;
+        if (contains_path( name ) && get_builtin_path( name, NULL, buffer, sizeof(buffer) ))
+            handle = 0;
     }
     return handle;
-
- error:
-    SetLastError( ERROR_FILE_NOT_FOUND );
-    return INVALID_HANDLE_VALUE;
 }
 
 
@@ -1787,12 +1782,6 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
         return ret;
     }
 
-    if (!cmdline)
-    {
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return NULL;
-    }
-
     /* first check for a quoted file name */
 
     if ((cmdline[0] == '"') && ((p = strchrW( cmdline + 1, '"' ))))
@@ -1835,6 +1824,7 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
         sprintfW( ret, quotesW, name );
         strcatW( ret, p );
     }
+    else if (!ret) SetLastError( ERROR_FILE_NOT_FOUND );
 
  done:
     HeapFree( GetProcessHeap(), 0, name );

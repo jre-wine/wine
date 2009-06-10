@@ -204,8 +204,9 @@ static void pshader_set_limits(IWineD3DPixelShaderImpl *This)
     }
 }
 
-static HRESULT WINAPI IWineD3DPixelShaderImpl_SetFunction(IWineD3DPixelShader *iface, CONST DWORD *pFunction) {
-
+static HRESULT WINAPI IWineD3DPixelShaderImpl_SetFunction(IWineD3DPixelShader *iface,
+        const DWORD *pFunction, const struct wined3d_shader_signature *output_signature)
+{
     IWineD3DPixelShaderImpl *This =(IWineD3DPixelShaderImpl *)iface;
     unsigned int i, highest_reg_used = 0, num_regs_used = 0;
     shader_reg_maps *reg_maps = &This->baseShader.reg_maps;
@@ -221,7 +222,7 @@ static HRESULT WINAPI IWineD3DPixelShaderImpl_SetFunction(IWineD3DPixelShader *i
         return WINED3DERR_INVALIDCALL;
     }
     This->baseShader.frontend = fe;
-    This->baseShader.frontend_data = fe->shader_init(pFunction);
+    This->baseShader.frontend_data = fe->shader_init(pFunction, output_signature);
     if (!This->baseShader.frontend_data)
     {
         FIXME("Failed to initialize frontend.\n");
@@ -337,6 +338,7 @@ static void pixelshader_update_samplers(struct shader_reg_maps *reg_maps, IWineD
     }
 }
 
+/* GL locking is done by the caller */
 static GLuint pixelshader_compile(IWineD3DPixelShaderImpl *This, const struct ps_compile_args *args)
 {
     CONST DWORD *function = This->baseShader.function;
@@ -439,6 +441,7 @@ void find_ps_compile_args(IWineD3DPixelShaderImpl *shader, IWineD3DStateBlockImp
     }
 }
 
+/* GL locking is done by the caller */
 GLuint find_gl_pshader(IWineD3DPixelShaderImpl *shader, const struct ps_compile_args *args)
 {
     UINT i;

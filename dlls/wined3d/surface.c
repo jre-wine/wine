@@ -38,7 +38,7 @@ static void d3dfmt_p8_init_palette(IWineD3DSurfaceImpl *This, BYTE table[256][4]
 static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES convert);
 static void surface_remove_pbo(IWineD3DSurfaceImpl *This);
 
-void surface_force_reload(IWineD3DSurface *iface)
+static void surface_force_reload(IWineD3DSurface *iface)
 {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
 
@@ -426,6 +426,7 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal,
 /* In D3D the depth stencil dimensions have to be greater than or equal to the
  * render target dimensions. With FBOs, the dimensions have to be an exact match. */
 /* TODO: We should synchronize the renderbuffer's content with the texture's content. */
+/* GL locking is done by the caller */
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface, unsigned int width, unsigned int height) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     renderbuffer_entry_t *entry;
@@ -2263,13 +2264,17 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
     if(GL_SUPPORT(EXT_PALETTED_TEXTURE))
     {
         TRACE("Using GL_EXT_PALETTED_TEXTURE for 8-bit paletted texture support\n");
+        ENTER_GL();
         GL_EXTCALL(glColorTableEXT(This->glDescription.target,GL_RGBA,256,GL_RGBA,GL_UNSIGNED_BYTE, table));
+        LEAVE_GL();
     }
     else
     {
         /* Let a fragment shader do the color conversion by uploading the palette to a 1D texture.
          * The 8bit pixel data will be used as an index in this palette texture to retrieve the final color. */
         TRACE("Using fragment shaders for emulating 8-bit paletted texture support\n");
+
+        ENTER_GL();
 
         /* Create the fragment program if we don't have it */
         if(!device->paletteConversionShader)
@@ -2310,6 +2315,8 @@ static void d3dfmt_p8_upload_palette(IWineD3DSurface *iface, CONVERT_TYPES conve
 
         /* Rebind the texture because it isn't bound anymore */
         glBindTexture(This->glDescription.target, This->glDescription.textureName);
+
+        LEAVE_GL();
     }
 }
 
@@ -4073,6 +4080,7 @@ static void surface_get_depth_blt_info(GLenum target, GLsizei w, GLsizei h, stru
     }
 }
 
+/* GL locking is done by the caller */
 static void surface_depth_blt(IWineD3DSurfaceImpl *This, GLuint texture, GLsizei w, GLsizei h, GLenum target)
 {
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
@@ -4847,13 +4855,16 @@ static void ffp_blit_free(IWineD3DDevice *iface) { }
 static HRESULT ffp_blit_set(IWineD3DDevice *iface, const struct GlPixelFormatDesc *format_desc,
         GLenum textype, UINT width, UINT height)
 {
+    ENTER_GL();
     glEnable(textype);
     checkGLcall("glEnable(textype)");
+    LEAVE_GL();
     return WINED3D_OK;
 }
 
 static void ffp_blit_unset(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) iface;
+    ENTER_GL();
     glDisable(GL_TEXTURE_2D);
     checkGLcall("glDisable(GL_TEXTURE_2D)");
     if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
@@ -4864,6 +4875,7 @@ static void ffp_blit_unset(IWineD3DDevice *iface) {
         glDisable(GL_TEXTURE_RECTANGLE_ARB);
         checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
     }
+    LEAVE_GL();
 }
 
 static BOOL ffp_blit_color_fixup_supported(struct color_fixup_desc fixup)

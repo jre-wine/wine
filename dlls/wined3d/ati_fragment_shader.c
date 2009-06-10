@@ -28,6 +28,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
+/* GL locking for state handlers is done by the caller. */
+
 /* Some private defines, Constant associations, etc.
  * Env bump matrix and per stage constant should be independent,
  * a stage that bump maps can't read the per state constant
@@ -1043,6 +1045,7 @@ static const struct StateEntryTemplate atifs_fragmentstate_template[] = {
 };
 
 static void atifs_enable(IWineD3DDevice *iface, BOOL enable) {
+    ENTER_GL();
     if(enable) {
         glEnable(GL_FRAGMENT_SHADER_ATI);
         checkGLcall("glEnable(GL_FRAGMENT_SHADER_ATI)");
@@ -1050,6 +1053,7 @@ static void atifs_enable(IWineD3DDevice *iface, BOOL enable) {
         glDisable(GL_FRAGMENT_SHADER_ATI);
         checkGLcall("glDisable(GL_FRAGMENT_SHADER_ATI)");
     }
+    LEAVE_GL();
 }
 
 static void atifs_get_caps(WINED3DDEVTYPE devtype, const WineD3D_GL_Info *gl_info, struct fragment_caps *caps)

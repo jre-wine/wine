@@ -51,6 +51,7 @@ static BOOL (WINAPI *pwglMakeContextCurrentARB)(HDC hdraw, HDC hread, HGLRC hglr
 static HDC (WINAPI *pwglGetCurrentReadDCARB)();
 
 /* WGL_ARB_pixel_format */
+#define WGL_ACCELERATION_ARB 0x2003
 #define WGL_COLOR_BITS_ARB 0x2014
 #define WGL_RED_BITS_ARB   0x2015
 #define WGL_GREEN_BITS_ARB 0x2017
@@ -58,6 +59,9 @@ static HDC (WINAPI *pwglGetCurrentReadDCARB)();
 #define WGL_ALPHA_BITS_ARB 0x201B
 #define WGL_SUPPORT_GDI_ARB   0x200F
 #define WGL_DOUBLE_BUFFER_ARB 0x2011
+#define WGL_NO_ACCELERATION_ARB        0x2025
+#define WGL_GENERIC_ACCELERATION_ARB   0x2026
+#define WGL_FULL_ACCELERATION_ARB      0x2027
 
 static BOOL (WINAPI *pwglChoosePixelFormatARB)(HDC, const int *, const FLOAT *, UINT, int *, UINT *);
 static BOOL (WINAPI *pwglGetPixelFormatAttribivARB)(HDC, int, int, UINT, const int *, int *);
@@ -285,6 +289,59 @@ static void test_setpixelformat(HDC winhdc)
     }
 }
 
+static void test_sharelists(HDC winhdc)
+{
+    HGLRC hglrc1, hglrc2, hglrc3;
+    int res;
+
+    hglrc1 = wglCreateContext(winhdc);
+    res = wglShareLists(0, 0);
+    ok(res == FALSE, "Sharing display lists for no contexts passed!\n");
+
+    /* Test 1: Create a context and just share lists without doing anything special */
+    hglrc2 = wglCreateContext(winhdc);
+    if(hglrc2)
+    {
+        res = wglShareLists(hglrc1, hglrc2);
+        ok(res, "Sharing of display lists failed\n");
+        wglDeleteContext(hglrc2);
+    }
+
+    /* Test 2: Share display lists with a 'destination' context which has been made current */
+    hglrc2 = wglCreateContext(winhdc);
+    if(hglrc2)
+    {
+        res = wglMakeCurrent(winhdc, hglrc2);
+        ok(res, "Make current failed\n");
+        res = wglShareLists(hglrc1, hglrc2);
+        todo_wine ok(res, "Sharing display lists with a destination context which has been made current passed\n");
+        wglMakeCurrent(0, 0);
+        wglDeleteContext(hglrc2);
+    }
+
+    /* Test 3: Share display lists with a context which already shares display lists with another context.
+     * According to MSDN the second paramater can't share any display lists but some buggy drivers might allow it */
+    hglrc3 = wglCreateContext(winhdc);
+    if(hglrc3)
+    {
+        res = wglShareLists(hglrc3, hglrc1);
+        ok(res == FALSE, "Sharing of display lists failed for a context which already shared lists before\n");
+        wglDeleteContext(hglrc3);
+    }
+
+    /* Test 4: Share display lists with a 'source' context which has been made current */
+    hglrc2 = wglCreateContext(winhdc);
+    if(hglrc2)
+    {
+        res = wglMakeCurrent(winhdc, hglrc1);
+        ok(res, "Make current failed\n");
+        res = wglShareLists(hglrc1, hglrc2);
+        ok(res, "Sharing display lists with a source context which has been made current passed\n");
+        wglMakeCurrent(0, 0);
+        wglDeleteContext(hglrc2);
+    }
+}
+
 static void test_makecurrent(HDC winhdc)
 {
     BOOL ret;
@@ -360,6 +417,49 @@ static void test_gdi_dbuf(HDC hdc)
             continue;
 
         ok(!(iAttribRet[0] && iAttribRet[1]), "GDI support and double buffering on pixel format %d\n", iPixelFormat);
+    }
+}
+
+static void test_acceleration(HDC hdc)
+{
+    const int iAttribList[] = { WGL_ACCELERATION_ARB };
+    int iAttribRet[sizeof(iAttribList)/sizeof(iAttribList[0])];
+    unsigned int nFormats;
+    int iPixelFormat;
+    int res;
+    PIXELFORMATDESCRIPTOR pfd;
+
+    if (!pwglGetPixelFormatAttribivARB)
+    {
+        win_skip("wglGetPixelFormatAttribivARB is not available\n");
+        return;
+    }
+
+    nFormats = DescribePixelFormat(hdc, 0, 0, NULL);
+    for(iPixelFormat = 1; iPixelFormat <= nFormats; iPixelFormat++)
+    {
+        res = pwglGetPixelFormatAttribivARB(hdc, iPixelFormat, 0,
+                  sizeof(iAttribList)/sizeof(iAttribList[0]), iAttribList,
+                  iAttribRet);
+        ok(res!=FALSE, "wglGetPixelFormatAttribivARB failed for pixel format %d\n", iPixelFormat);
+        if(res == FALSE)
+            continue;
+
+        memset(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
+        DescribePixelFormat(hdc, iPixelFormat, sizeof(PIXELFORMATDESCRIPTOR), &pfd);
+
+        switch(iAttribRet[0])
+        {
+            case WGL_NO_ACCELERATION_ARB:
+                ok( (pfd.dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED)) == PFD_GENERIC_FORMAT , "Expected only PFD_GENERIC_FORMAT to be set for WGL_NO_ACCELERATION_ARB!: iPixelFormat=%d, dwFlags=%x!\n", iPixelFormat, pfd.dwFlags);
+                break;
+            case WGL_GENERIC_ACCELERATION_ARB:
+                ok( (pfd.dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED)) == (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED), "Expected both PFD_GENERIC_FORMAT and PFD_GENERIC_ACCELERATION to be set for WGL_GENERIC_ACCELERATION_ARB: iPixelFormat=%d, dwFlags=%x!\n", iPixelFormat, pfd.dwFlags);
+                break;
+            case WGL_FULL_ACCELERATION_ARB:
+                ok( (pfd.dwFlags & (PFD_GENERIC_FORMAT | PFD_GENERIC_ACCELERATED)) == 0, "Expected no PFD_GENERIC_FORMAT/_ACCELERATION to be set for WGL_FULL_ACCELERATION_ARB: iPixelFormat=%d, dwFlags=%x!\n", iPixelFormat, pfd.dwFlags);
+                break;
+        }
     }
 }
 
@@ -601,8 +701,10 @@ START_TEST(opengl)
 
         test_makecurrent(hdc);
         test_setpixelformat(hdc);
+        test_sharelists(hdc);
         test_colorbits(hdc);
         test_gdi_dbuf(hdc);
+        test_acceleration(hdc);
 
         wgl_extensions = pwglGetExtensionsStringARB(hdc);
         if(wgl_extensions == NULL) skip("Skipping opengl32 tests because this OpenGL implementation doesn't support WGL extensions!\n");

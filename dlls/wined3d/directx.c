@@ -140,7 +140,9 @@ static const struct {
     {"GL_NV_vertex_program",                NV_VERTEX_PROGRAM,              0                           },
     {"GL_NV_vertex_program1_1",             NV_VERTEX_PROGRAM1_1,           0                           },
     {"GL_NV_vertex_program2",               NV_VERTEX_PROGRAM2,             0                           },
+    {"GL_NV_vertex_program2_option",        NV_VERTEX_PROGRAM2_OPTION,      0                           },
     {"GL_NV_vertex_program3",               NV_VERTEX_PROGRAM3,             0                           },
+    {"GL_NV_fragment_program_option",       NV_FRAGMENT_PROGRAM_OPTION,     0                           },
     {"GL_NV_depth_clamp",                   NV_DEPTH_CLAMP,                 0                           },
     {"GL_NV_light_max_exponent",            NV_LIGHT_MAX_EXPONENT,          0                           },
 
@@ -268,7 +270,7 @@ static BOOL WineD3D_CreateFakeGLContext(void) {
         wined3d_fake_gl_context_foreign = FALSE;
 
         /* We need a fake window as a hdc retrieved using GetDC(0) can't be used for much GL purposes */
-        wined3d_fake_gl_context_hwnd = CreateWindowA("WineD3D_OpenGL", "WineD3D fake window", WS_OVERLAPPEDWINDOW,        10, 10, 10, 10, NULL, NULL, NULL, NULL);
+        wined3d_fake_gl_context_hwnd = CreateWindowA(WINED3D_OPENGL_WINDOW_CLASS_NAME, "WineD3D fake window", WS_OVERLAPPEDWINDOW, 10, 10, 10, 10, NULL, NULL, NULL, NULL);
         if(!wined3d_fake_gl_context_hwnd) {
             ERR("HWND creation failed!\n");
             goto fail;
@@ -453,6 +455,7 @@ static void select_shader_max_constants(
  * IWineD3D parts follows
  **********************************************************/
 
+/* GL locking is done by the caller */
 static inline BOOL test_arb_vs_offset_limit(const WineD3D_GL_Info *gl_info)
 {
     GLuint prog;
@@ -1271,10 +1274,20 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             break;
         case VENDOR_ATI:
             if(WINE_D3D9_CAPABLE(gl_info)) {
+                /* Radeon R7xx HD4800 - highend */
+                if (strstr(gl_info->gl_renderer, "HD 4800") ||
+                    strstr(gl_info->gl_renderer, "HD 4830") ||
+                    strstr(gl_info->gl_renderer, "HD 4850") ||
+                    strstr(gl_info->gl_renderer, "HD 4870") ||
+                    strstr(gl_info->gl_renderer, "HD 4890"))
+                {
+                    gl_info->gl_card = CARD_ATI_RADEON_HD4800;
+                    vidmem = 512; /* HD4800 cards use 512-1024MB */
+                }
                 /* Radeon R6xx HD2900/HD3800 - highend */
-                if (strstr(gl_info->gl_renderer, "HD 2900") ||
-                    strstr(gl_info->gl_renderer, "HD 3870") ||
-                    strstr(gl_info->gl_renderer, "HD 3850"))
+                else if (strstr(gl_info->gl_renderer, "HD 2900") ||
+                         strstr(gl_info->gl_renderer, "HD 3870") ||
+                         strstr(gl_info->gl_renderer, "HD 3850"))
                 {
                     gl_info->gl_card = CARD_ATI_RADEON_HD2900;
                     vidmem = 512; /* HD2900/HD3800 uses 256-1024MB */
@@ -3788,6 +3801,7 @@ static HRESULT WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter,
     object->shader_backend->shader_get_caps(DeviceType, &adapter->gl_info, &shader_caps);
     object->d3d_vshader_constantF = shader_caps.MaxVertexShaderConst;
     object->d3d_pshader_constantF = shader_caps.MaxPixelShaderConst;
+    object->vs_clipping = shader_caps.VSClipping;
 
     memset(&ffp_caps, 0, sizeof(ffp_caps));
     frag_pipeline = select_fragment_implementation(adapter, DeviceType);
@@ -3907,6 +3921,8 @@ static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
         return;
     }
 
+    ENTER_GL();
+
     while(glGetError());
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
@@ -3933,6 +3949,8 @@ static void test_pbo_functionality(WineD3D_GL_Info *gl_info) {
     glDeleteTextures(1, &texture);
     GL_EXTCALL(glDeleteBuffersARB(1, &pbo));
     checkGLcall("PBO test cleanup\n");
+
+    LEAVE_GL();
 
     if(memcmp(check, pattern, sizeof(check)) != 0) {
         WARN_(d3d_caps)("PBO test failed, read back data doesn't match original\n");
@@ -4003,6 +4021,7 @@ static const struct driver_version_information driver_version_table[] = {
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2300,         "ATI Mobility Radeon HD 2300",      6,  14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2600,         "ATI Mobility Radeon HD 2600",      6,  14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2900,         "ATI Radeon HD 2900 XT",            6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD4800,         "ATI Radeon HD 4800 Series",        6,  14, 10, 6764    },
 
     /* TODO: Add information about legacy ATI hardware, Intel and other cards */
 };
@@ -4040,6 +4059,18 @@ static BOOL match_fglrx(const WineD3D_GL_Info *gl_info) {
     if(match_apple(gl_info)) return FALSE;
     if(strstr(gl_info->gl_renderer, "DRI")) return FALSE; /* Filter out Mesa DRI drivers */
     return TRUE;
+}
+
+static BOOL match_dx10_capable(const WineD3D_GL_Info *gl_info) {
+    /* DX9 cards support 40 single float varyings in hardware, most drivers report 32. ATI misreports
+     * 44 varyings. So assume that if we have more than 44 varyings we have a dx10 card.
+     * This detection is for the gl_ClipPos varying quirk. If a d3d9 card really supports more than 44
+     * varyings and we subtract one in dx9 shaders its not going to hurt us because the dx9 limit is
+     * hardcoded
+     *
+     * dx10 cards usually have 64 varyings
+     */
+    return gl_info->max_glsl_varyings > 44;
 }
 
 static void quirk_arb_constants(WineD3D_GL_Info *gl_info) {
@@ -4145,6 +4176,10 @@ static void quirk_texcoord_w(WineD3D_GL_Info *gl_info) {
     gl_info->set_texcoord_w = TRUE;
 }
 
+static void quirk_clip_varying(WineD3D_GL_Info *gl_info) {
+    gl_info->glsl_clip_varying = TRUE;
+}
+
 struct driver_quirk quirk_table[] = {
     {
         match_ati_r300_to_500,
@@ -4182,6 +4217,11 @@ struct driver_quirk quirk_table[] = {
         match_fglrx,
         quirk_one_point_sprite,
         "Fglrx point sprite crash workaround"
+    },
+    {
+        match_dx10_capable,
+        quirk_clip_varying,
+        "Reserved varying for gl_ClipPos"
     }
 };
 

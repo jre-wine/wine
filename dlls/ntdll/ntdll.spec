@@ -888,6 +888,7 @@
 @ stdcall RtlUnlockHeap(long)
 # @ stub RtlUnlockMemoryStreamRegion
 @ stdcall -register RtlUnwind(ptr ptr ptr ptr)
+@ stdcall -arch=x86_64 RtlUnwindEx(long long ptr long ptr)
 @ stdcall RtlUpcaseUnicodeChar(long)
 @ stdcall RtlUpcaseUnicodeString(ptr ptr long)
 @ stdcall RtlUpcaseUnicodeStringToAnsiString(ptr ptr long)
@@ -1230,6 +1231,7 @@
 @ cdecl -private _CIpow() NTDLL__CIpow
 # @ stub _CIsin
 # @ stub _CIsqrt
+@ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr)
 # @ stub __isascii
 # @ stub __iscsym
 # @ stub __iscsymf
