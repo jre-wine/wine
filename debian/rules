@@ -313,7 +313,7 @@ binary-arch: install-arch-stamp
 	# I'll just have to exclude them here, I guess.
 	# (They're pretty small ones anyway...)
 	dh_strip -s --dbg-package=libwine-dbg$(VERSUFFIX) \
-	 -Xwine-kthread -Xwine-pthread -Xwine-preloader
+	 -Xwine-kthread -Xwine-pthread -Xwine-preloader -Xwine.bin
 
 	# We don't need symbols for the build tools...
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
