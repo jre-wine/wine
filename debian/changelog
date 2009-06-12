@@ -9,8 +9,12 @@ wine-unstable (1.1.23-1) unstable; urgency=low
     - Various bug fixes.
   * Add "-unstable" suffix to package names for the Wine development
     branch, and upload to sid.
+  * Fix up package names of dependencies when adding a suffix. For now,
+    also add conflicts with the corresponding suffixless packages.
+  * Fix cleanup after building a package with a suffix and extra
+    dependencies.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Wed, 10 Jun 2009 21:15:48 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 12 Jun 2009 15:53:05 +0200
 
 wine (1.1.22-1) experimental; urgency=low
 
