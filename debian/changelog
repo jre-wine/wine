@@ -1,3 +1,16 @@
+wine (1.0.1-2) unstable; urgency=low
+
+  * Merged upstream's adjustment for FT_MulFix change in freetype 2.3.8
+    and later (commit de251e1c62651d8160b340a4fb9d0f9834a8e538).
+    (Closes: #527645)
+  * Added build-dependency alternative libjack-dev. (Closes: #527440)
+  * Changed "git-cat-file" to "git cat-file" in debian/maint/build-final.
+  * Changed section of libwine-dbg to the new "debug" section.
+  * Removed fontforge from Build-Depends (upstream ships pre-built fonts
+    in the tarball, to work around fontforge bugs).
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 12 Jun 2009 18:58:45 +0200
+
 wine (1.0.1-1) unstable; urgency=low
 
   * New upstream release 1.0.1, released Oct 17, 2008.
