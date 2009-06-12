@@ -3,7 +3,7 @@ set -e
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
 distribution=`dpkg-parsechangelog|sed -n 's/Distribution: \(.*\)/\1/p'`
 # see if the version in the changelog is tagged (already built)
-obj_type="`git-cat-file -t "wine-$version" 2>/dev/null`" || true
+obj_type="`git cat-file -t "wine-$version" 2>/dev/null`" || true
 if [ -n "$obj_type" ]
 then
   # it is, so only grab changes since then
