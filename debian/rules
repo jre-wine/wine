@@ -89,10 +89,10 @@ ifeq (,$(DEB_SAVEBUILD))
 	../configure --disable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
-	--bindir=\$${prefix}/bin \
-	--libdir=\$${prefix}/$(IA32_LIBDIR) \
-	--mandir=\$${prefix}/share/man \
-	--infodir=\$${prefix}/share/info
+	--bindir=/usr/bin \
+	--libdir=/usr/$(IA32_LIBDIR) \
+	--mandir=/usr/share/man \
+	--infodir=/usr/share/info
 else
 	mv /tmp/build32 .
 endif
@@ -111,10 +111,10 @@ ifeq (,$(DEB_SAVEBUILD))
 	../configure --enable-win64 $(CONFIGOPTS) \
 	--prefix=/usr \
 	--sysconfdir=/etc \
-	--bindir=\$${prefix}/bin \
-	--libdir=\$${prefix}/$(AMD64_LIBDIR) \
-	--mandir=\$${prefix}/share/man \
-	--infodir=\$${prefix}/share/info
+	--bindir=/usr/bin \
+	--libdir=/usr/$(AMD64_LIBDIR) \
+	--mandir=/usr/share/man \
+	--infodir=/usr/share/info
 else
 	mv /tmp/build64 .
 endif
@@ -198,7 +198,7 @@ install-arch32-stamp: build-arch32-stamp
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build32 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/$(IA32_LIBDIR)
+	$(MAKE) -C build32 install DESTDIR=$(CURDIR)/debian/tmp
 	# move the real binaries into /usr/$(IA32_LIBDIR)/wine
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/$(IA32_LIBDIR)/wine/wine.bin
 	for ldr in $(LOADERS); do \
@@ -207,10 +207,10 @@ install-arch32-stamp: build-arch32-stamp
 	done
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/$(IA32_LIBDIR)/wine/wineserver
 	# install manpages
-	$(MAKE) -C build32/documentation install-man prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build32/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
-	$(MAKE) -C build32/programs install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build32/programs install DESTDIR=$(CURDIR)/debian/tmp
 	install build32/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,usr/$(IA32_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
@@ -225,15 +225,15 @@ install-arch64-stamp: build-arch64-stamp
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build64 install prefix=`pwd`/debian/tmp/usr libdir=`pwd`/debian/tmp/usr/$(AMD64_LIBDIR)
+	$(MAKE) -C build64 install DESTDIR=$(CURDIR)/debian/tmp/usr
 	# move the real binaries into /usr/$(AMD64_LIBDIR)/wine
 	mv debian/tmp/usr/bin/wine debian/tmp/usr/$(AMD64_LIBDIR)/wine/wine.bin
 	mv debian/tmp/usr/bin/wineserver debian/tmp/usr/$(AMD64_LIBDIR)/wine/wineserver
 	# install manpages
-	$(MAKE) -C build64/documentation install-man prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build64/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
-	$(MAKE) -C build64/programs install prefix=`pwd`/debian/tmp/usr
+	$(MAKE) -C build64/programs install DESTDIR=$(CURDIR)/debian/tmp
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,usr/$(AMD64_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
