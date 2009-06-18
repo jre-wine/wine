@@ -16,11 +16,12 @@ fi
 # build changelog
 if [ "$distribution" = "UNRELEASED" ]; then
   sed -i "1,6d" debian/changelog # delete dummy entry (6 lines)
+  version_arg="--new-version=\"$version\""
 fi
 git-dch --release --auto --full --meta \
- --new-version "$version" \
  --debian-tag="wine-$last_version" \
- --git-log="--first-parent"
+ --git-log="--first-parent" \
+ $version_arg
 # commit changelog
 version=`dpkg-parsechangelog|sed -n 's/Version: \(.*\)/\1/p'`
 git add debian/changelog
