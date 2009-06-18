@@ -1,3 +1,17 @@
+wine-unstable (1.1.23-2) unstable; urgency=low
+
+  * On amd64, install into /emul/ia32-linux/usr/lib instead of into
+    /usr/lib32. While they both refer to the same place, the relative
+    paths inferred by the Wine build process work much better when
+    they're deduced from the true path, rather than from symlinks.
+  * Removed obsolete configure option --enable-opengl.
+  * Changed "git-cat-file" to "git cat-file" in debian/maint/build-final.
+  * Fixed git-dch workaround in debian/maint/build-final to work with
+    package updates that aren't new upstream releases.
+  * Exclude wine.bin from stripping, so that this will compile on lenny.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 19 Jun 2009 01:20:14 +0200
+
 wine-unstable (1.1.23-1) unstable; urgency=low
 
   * New upstream release 1.1.23, released Jun 5, 2009.
