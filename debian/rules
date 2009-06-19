@@ -46,9 +46,13 @@ AMD64_LIBDIR := $(LIBDIR)
 
 ifeq ($(DEB_HOST_GNU_CPU),x86_64)
 
-IA32_LIBS = /emul/ia32-linux
+IA32_LIBS := /emul/ia32-linux
 IA32_LDFLAGS += -L$(CURDIR)/lib32
-IA32_LIBDIR = emul/ia32-linux/usr/lib
+IA32_LIBDIR := usr/lib32
+IA32_LIBDIR_LINK := $(shell readlink /$(IA32_LIBDIR))
+ifneq (,$(IA32_LIBDIR_LINK))
+IA32_LIBDIR := $(patsubst /%,%,$(IA32_LIBDIR_LINK))
+endif
 
 # Not ready yet: build Win64 version
 #BUILDS = build32 build64
