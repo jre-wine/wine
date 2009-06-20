@@ -18,8 +18,21 @@ else
   filename="$origfilename"
 fi
 
+case "$upstream_version" in
+  1.0.*)
+    package=wine
+    ;;
+  1.1.*)
+    package=wine-unstable
+    ;;
+  *)
+    echo "Unknown version series: $upstream_version"
+    exit 1
+    ;;
+esac
+
 # craft the .orig.tar.gz for the Debian source package
-debfilename="`dirname "$origfilename"`/wine_$upstream_version.orig.tar.gz"
+debfilename="`dirname "$origfilename"`/${package}_$upstream_version.orig.tar.gz"
 if [ "$filename" != "$origfilename" ] && [ "$origfilename" != "$debfilename" ]
 then
   # kill .orig.tar.bz2, we won't use it
