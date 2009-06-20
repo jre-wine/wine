@@ -22,6 +22,7 @@
 #include "winuser.h"
 #include "cryptres.h"
 
+#include "cryptdlg_De.rc"
 #include "cryptdlg_En.rc"
 #include "cryptdlg_Fr.rc"
 #include "cryptdlg_Ko.rc"

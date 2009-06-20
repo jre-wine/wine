@@ -29,7 +29,8 @@
 #define PARENT_SEQ_INDEX       0
 #define PARENT_FULL_SEQ_INDEX  1
 #define LISTVIEW_SEQ_INDEX     2
-#define NUM_MSG_SEQUENCES      3
+#define EDITBOX_SEQ_INDEX      3
+#define NUM_MSG_SEQUENCES      4
 
 #define LISTVIEW_ID 0
 #define HEADER_ID   1
@@ -38,7 +39,53 @@
 #define expect2(expected1, expected2, got1, got2) ok(expected1 == got1 && expected2 == got2, \
        "expected (%d,%d), got (%d,%d)\n", expected1, expected2, got1, got2)
 
-HWND hwndparent;
+#ifdef __i386__
+#define ARCH "x86"
+#elif defined __x86_64__
+#define ARCH "amd64"
+#else
+#define ARCH "none"
+#endif
+
+static const CHAR manifest_name[] = "cc6.manifest";
+
+static const CHAR manifest[] =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
+    "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
+    "  <assemblyIdentity\n"
+    "      type=\"win32\"\n"
+    "      name=\"Wine.ComCtl32.Tests\"\n"
+    "      version=\"1.0.0.0\"\n"
+    "      processorArchitecture=\"" ARCH "\"\n"
+    "  />\n"
+    "<description>Wine comctl32 test suite</description>\n"
+    "<dependency>\n"
+    "  <dependentAssembly>\n"
+    "    <assemblyIdentity\n"
+    "        type=\"win32\"\n"
+    "        name=\"microsoft.windows.common-controls\"\n"
+    "        version=\"6.0.0.0\"\n"
+    "        processorArchitecture=\"" ARCH "\"\n"
+    "        publicKeyToken=\"6595b64144ccf1df\"\n"
+    "        language=\"*\"\n"
+    "    />\n"
+    "</dependentAssembly>\n"
+    "</dependency>\n"
+    "</assembly>\n";
+
+static const WCHAR testparentclassW[] =
+    {'L','i','s','t','v','i','e','w',' ','t','e','s','t',' ','p','a','r','e','n','t','W', 0};
+
+HWND hwndparent, hwndparentW;
+/* prevents edit box creation, LVN_BEGINLABELEDIT return value */
+BOOL blockEdit;
+/* format reported to control:
+   -1 falls to defproc, anything else returned */
+INT  notifyFormat;
+/* indicates we're running < 5.80 version */
+BOOL g_is_below_5;
+
+static HWND subclass_editbox(HWND hwndListview);
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
@@ -196,6 +243,19 @@ static const struct message getitemposition_seq2[] = {
     { 0 }
 };
 
+static const struct message editbox_create_pos[] = {
+    /* sequence sent after LVN_BEGINLABELEDIT */
+    { WM_WINDOWPOSCHANGING, sent },
+    { WM_NCCALCSIZE, sent },
+    { WM_WINDOWPOSCHANGED, sent },
+    { WM_MOVE, sent|defwinproc },
+    { WM_SIZE, sent|defwinproc },
+    /* the rest is todo */
+    { WM_WINDOWPOSCHANGING, sent },
+    { WM_WINDOWPOSCHANGED, sent },
+    { 0 }
+};
+
 struct subclass_info
 {
     WNDPROC oldproc;
@@ -230,9 +290,32 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     }
     add_message(sequences, PARENT_FULL_SEQ_INDEX, &msg);
 
-    /* always accept new item text */
-    if (message == WM_NOTIFY && lParam && ((NMHDR*)lParam)->code == LVN_ENDLABELEDIT)
-        return TRUE;
+    switch (message)
+    {
+      case WM_NOTIFY:
+      {
+          switch (((NMHDR*)lParam)->code)
+          {
+          case LVN_BEGINLABELEDIT:
+              /* subclass edit box */
+              if (!blockEdit)
+                  subclass_editbox(((NMHDR*)lParam)->hwndFrom);
+
+              return blockEdit;
+
+          case LVN_ENDLABELEDIT:
+              /* always accept new item text */
+              return TRUE;
+          }
+          break;
+      }
+      case WM_NOTIFYFORMAT:
+      {
+          /* force to return format */
+          if (lParam == NF_QUERY && notifyFormat != -1) return notifyFormat;
+          break;
+      }
+    }
 
     defwndproc_counter++;
     ret = DefWindowProcA(hwnd, message, wParam, lParam);
@@ -241,34 +324,64 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
     return ret;
 }
 
-static BOOL register_parent_wnd_class(void)
+static BOOL register_parent_wnd_class(BOOL Unicode)
 {
-    WNDCLASSA cls;
+    WNDCLASSA clsA;
+    WNDCLASSW clsW;
 
-    cls.style = 0;
-    cls.lpfnWndProc = parent_wnd_proc;
-    cls.cbClsExtra = 0;
-    cls.cbWndExtra = 0;
-    cls.hInstance = GetModuleHandleA(NULL);
-    cls.hIcon = 0;
-    cls.hCursor = LoadCursorA(0, IDC_ARROW);
-    cls.hbrBackground = GetStockObject(WHITE_BRUSH);
-    cls.lpszMenuName = NULL;
-    cls.lpszClassName = "Listview test parent class";
-    return RegisterClassA(&cls);
+    if (Unicode)
+    {
+        clsW.style = 0;
+        clsW.lpfnWndProc = parent_wnd_proc;
+        clsW.cbClsExtra = 0;
+        clsW.cbWndExtra = 0;
+        clsW.hInstance = GetModuleHandleW(NULL);
+        clsW.hIcon = 0;
+        clsW.hCursor = LoadCursorA(0, IDC_ARROW);
+        clsW.hbrBackground = GetStockObject(WHITE_BRUSH);
+        clsW.lpszMenuName = NULL;
+        clsW.lpszClassName = testparentclassW;
+    }
+    else
+    {
+        clsA.style = 0;
+        clsA.lpfnWndProc = parent_wnd_proc;
+        clsA.cbClsExtra = 0;
+        clsA.cbWndExtra = 0;
+        clsA.hInstance = GetModuleHandleA(NULL);
+        clsA.hIcon = 0;
+        clsA.hCursor = LoadCursorA(0, IDC_ARROW);
+        clsA.hbrBackground = GetStockObject(WHITE_BRUSH);
+        clsA.lpszMenuName = NULL;
+        clsA.lpszClassName = "Listview test parent class";
+    }
+
+    return Unicode ? RegisterClassW(&clsW) : RegisterClassA(&clsA);
 }
 
-static HWND create_parent_window(void)
+static HWND create_parent_window(BOOL Unicode)
 {
-    if (!register_parent_wnd_class())
+    static const WCHAR nameW[] = {'t','e','s','t','p','a','r','e','n','t','n','a','m','e','W'};
+
+    if (!register_parent_wnd_class(Unicode))
         return NULL;
 
-    return CreateWindowEx(0, "Listview test parent class",
-                          "Listview test parent window",
-                          WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
-                          WS_MAXIMIZEBOX | WS_VISIBLE,
-                          0, 0, 100, 100,
-                          GetDesktopWindow(), NULL, GetModuleHandleA(NULL), NULL);
+    blockEdit = FALSE;
+    notifyFormat = -1;
+
+    if (Unicode)
+        return CreateWindowExW(0, testparentclassW, nameW,
+                               WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+                               WS_MAXIMIZEBOX | WS_VISIBLE,
+                               0, 0, 100, 100,
+                               GetDesktopWindow(), NULL, GetModuleHandleW(NULL), NULL);
+    else
+        return CreateWindowExA(0, "Listview test parent class",
+                               "Listview test parent window",
+                               WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
+                               WS_MAXIMIZEBOX | WS_VISIBLE,
+                               0, 0, 100, 100,
+                               GetDesktopWindow(), NULL, GetModuleHandleA(NULL), NULL);
 }
 
 static LRESULT WINAPI listview_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -328,6 +441,38 @@ static HWND create_listview_control(DWORD style)
     info->oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
                                             (LONG_PTR)listview_subclass_proc);
     SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)info);
+
+    return hwnd;
+}
+
+/* unicode listview window with specified parent */
+static HWND create_listview_controlW(DWORD style, HWND parent)
+{
+    struct subclass_info *info;
+    HWND hwnd;
+    RECT rect;
+    static const WCHAR nameW[] = {'f','o','o',0};
+
+    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
+    if (!info)
+        return NULL;
+
+    GetClientRect(parent, &rect);
+    hwnd = CreateWindowExW(0, WC_LISTVIEWW, nameW,
+                           WS_CHILD | WS_BORDER | WS_VISIBLE | LVS_REPORT | style,
+                           0, 0, rect.right, rect.bottom,
+                           parent, NULL, GetModuleHandleW(NULL), NULL);
+    ok(hwnd != NULL, "gle=%d\n", GetLastError());
+
+    if (!hwnd)
+    {
+        HeapFree(GetProcessHeap(), 0, info);
+        return NULL;
+    }
+
+    info->oldproc = (WNDPROC)SetWindowLongPtrW(hwnd, GWLP_WNDPROC,
+                                            (LONG_PTR)listview_subclass_proc);
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)info);
 
     return hwnd;
 }
@@ -397,6 +542,52 @@ static HWND subclass_header(HWND hwndListview)
     hwnd = ListView_GetHeader(hwndListview);
     info->oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
                                             (LONG_PTR)header_subclass_proc);
+    SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)info);
+
+    return hwnd;
+}
+
+static LRESULT WINAPI editbox_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    static LONG defwndproc_counter = 0;
+    LRESULT ret;
+    struct message msg;
+
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    if (defwndproc_counter) msg.flags |= defwinproc;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+
+    /* all we need is sizing */
+    if (message == WM_WINDOWPOSCHANGING ||
+        message == WM_NCCALCSIZE ||
+        message == WM_WINDOWPOSCHANGED ||
+        message == WM_MOVE ||
+        message == WM_SIZE)
+    {
+        add_message(sequences, EDITBOX_SEQ_INDEX, &msg);
+    }
+
+    defwndproc_counter++;
+    ret = CallWindowProcA(info->oldproc, hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+    return ret;
+}
+
+static HWND subclass_editbox(HWND hwndListview)
+{
+    struct subclass_info *info;
+    HWND hwnd;
+
+    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
+    if (!info)
+        return NULL;
+
+    hwnd = (HWND)SendMessage(hwndListview, LVM_GETEDITCONTROL, 0, 0);
+    info->oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
+                                            (LONG_PTR)editbox_subclass_proc);
     SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)info);
 
     return hwnd;
@@ -963,7 +1154,7 @@ static void test_items(void)
     expect(TRUE, r);
 
     ok_sequence(sequences, PARENT_SEQ_INDEX, textcallback_set_again_parent_seq,
-                "check callback text comparison rule", TRUE);
+                "check callback text comparison rule", FALSE);
 
     DestroyWindow(hwnd);
 }
@@ -1415,6 +1606,11 @@ static void test_item_count(void)
 
     HWND hwnd;
     DWORD r;
+    HDC hdc;
+    HFONT hOldFont;
+    TEXTMETRICA tm;
+    RECT rect;
+    INT height;
 
     LVITEM item0;
     LVITEM item1;
@@ -1425,6 +1621,19 @@ static void test_item_count(void)
 
     hwnd = create_listview_control(0);
     ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* resize in dpiaware manner to fit all 3 items added */
+    hdc = GetDC(0);
+    hOldFont = SelectObject(hdc, GetStockObject(SYSTEM_FONT));
+    GetTextMetricsA(hdc, &tm);
+    /* 2 extra pixels for bounds and header border */
+    height = tm.tmHeight + 2;
+    SelectObject(hdc, hOldFont);
+    ReleaseDC(0, hdc);
+
+    GetWindowRect(hwnd, &rect);
+    /* 3 items + 1 header + 1 to be sure */
+    MoveWindow(hwnd, 0, 0, rect.right - rect.left, 5 * height, FALSE);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -2071,21 +2280,28 @@ static void test_ownerdata(void)
     LVITEMA item;
 
     /* it isn't possible to set LVS_OWNERDATA after creation */
-    hwnd = create_listview_control(0);
-    ok(hwnd != NULL, "failed to create a listview window\n");
-    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-    ok(!(style & LVS_OWNERDATA) && style, "LVS_OWNERDATA isn't expected\n");
+    if (g_is_below_5)
+    {
+        win_skip("set LVS_OWNERDATA after creation leads to crash on < 5.80\n");
+    }
+    else
+    {
+        hwnd = create_listview_control(0);
+        ok(hwnd != NULL, "failed to create a listview window\n");
+        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        ok(!(style & LVS_OWNERDATA) && style, "LVS_OWNERDATA isn't expected\n");
 
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+        flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_OWNERDATA);
-    ok(ret == style, "Expected set GWL_STYLE to succeed\n");
-    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
+        ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style | LVS_OWNERDATA);
+        ok(ret == style, "Expected set GWL_STYLE to succeed\n");
+        ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
                 "try to switch to LVS_OWNERDATA seq", FALSE);
 
-    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-    ok(!(style & LVS_OWNERDATA), "LVS_OWNERDATA isn't expected\n");
-    DestroyWindow(hwnd);
+        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        ok(!(style & LVS_OWNERDATA), "LVS_OWNERDATA isn't expected\n");
+        DestroyWindow(hwnd);
+    }
 
     /* try to set LVS_OWNERDATA after creation just having it */
     hwnd = create_listview_control(LVS_OWNERDATA);
@@ -2102,20 +2318,27 @@ static void test_ownerdata(void)
     DestroyWindow(hwnd);
 
     /* try to remove LVS_OWNERDATA after creation just having it */
-    hwnd = create_listview_control(LVS_OWNERDATA);
-    ok(hwnd != NULL, "failed to create a listview window\n");
-    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-    ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
+    if (g_is_below_5)
+    {
+        win_skip("remove LVS_OWNERDATA after creation leads to crash on < 5.80\n");
+    }
+    else
+    {
+        hwnd = create_listview_control(LVS_OWNERDATA);
+        ok(hwnd != NULL, "failed to create a listview window\n");
+        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
 
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+        flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style & ~LVS_OWNERDATA);
-    ok(ret == style, "Expected set GWL_STYLE to succeed\n");
-    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
+        ret = SetWindowLongPtrA(hwnd, GWL_STYLE, style & ~LVS_OWNERDATA);
+        ok(ret == style, "Expected set GWL_STYLE to succeed\n");
+        ok_sequence(sequences, LISTVIEW_SEQ_INDEX, listview_ownerdata_switchto_seq,
                 "try to switch to LVS_OWNERDATA seq", FALSE);
-    style = GetWindowLongPtrA(hwnd, GWL_STYLE);
-    ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
-    DestroyWindow(hwnd);
+        style = GetWindowLongPtrA(hwnd, GWL_STYLE);
+        ok(style & LVS_OWNERDATA, "LVS_OWNERDATA is expected\n");
+        DestroyWindow(hwnd);
+    }
 
     /* try select an item */
     hwnd = create_listview_control(LVS_OWNERDATA);
@@ -2656,7 +2879,7 @@ static void test_getitemrect(void)
 
     /* zero width rectangle with no padding */
     expect(0, rect.left);
-    todo_wine expect(0, rect.right);
+    expect(0, rect.right);
 
     insert_column(hwnd, 0);
     insert_column(hwnd, 1);
@@ -2957,6 +3180,357 @@ static void test_editbox(void)
     expect(lstrlen(item.pszText), r);
     ok(strcmp(buffer, testitem1A) == 0, "Expected item text to change\n");
 
+    /* LVM_EDITLABEL with -1 destroys current edit */
+    hwndedit = (HWND)SendMessage(hwnd, LVM_GETEDITCONTROL, 0, 0);
+    ok(hwndedit == NULL, "Expected Edit window not to be created\n");
+    /* no edit present */
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, -1, 0);
+    ok(hwndedit == NULL, "Expected Edit window not to be created\n");
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    /* edit present */
+    ok(GetFocus() == hwndedit, "Expected Edit to be focused\n");
+    hwndedit2 = (HWND)SendMessage(hwnd, LVM_EDITLABEL, -1, 0);
+    ok(hwndedit2 == NULL, "Expected Edit window not to be created\n");
+    ok(!IsWindow(hwndedit), "Expected Edit window to be destroyed\n");
+    ok(GetFocus() == hwnd, "Expected List to be focused\n");
+    /* check another negative value */
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    ok(GetFocus() == hwndedit, "Expected Edit to be focused\n");
+    hwndedit2 = (HWND)SendMessage(hwnd, LVM_EDITLABEL, -2, 0);
+    ok(hwndedit2 == NULL, "Expected Edit window not to be created\n");
+    ok(!IsWindow(hwndedit), "Expected Edit window to be destroyed\n");
+    ok(GetFocus() == hwnd, "Expected List to be focused\n");
+    /* and value greater then max item index */
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    ok(GetFocus() == hwndedit, "Expected Edit to be focused\n");
+    r = SendMessage(hwnd, LVM_GETITEMCOUNT, 0, 0);
+    hwndedit2 = (HWND)SendMessage(hwnd, LVM_EDITLABEL, r, 0);
+    ok(hwndedit2 == NULL, "Expected Edit window not to be created\n");
+    ok(!IsWindow(hwndedit), "Expected Edit window to be destroyed\n");
+    ok(GetFocus() == hwnd, "Expected List to be focused\n");
+
+    /* messaging tests */
+    SetFocus(hwnd);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    blockEdit = FALSE;
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
+    /* testing only sizing messages */
+    ok_sequence(sequences, EDITBOX_SEQ_INDEX, editbox_create_pos,
+                "edit box create - sizing", TRUE);
+
+    DestroyWindow(hwnd);
+}
+
+static void test_notifyformat(void)
+{
+    HWND hwnd, header;
+    DWORD r;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* CCM_GETUNICODEFORMAT == LVM_GETUNICODEFORMAT,
+       CCM_SETUNICODEFORMAT == LVM_SETUNICODEFORMAT */
+    r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_QUERY);
+    /* set */
+    r = SendMessage(hwnd, LVM_SETUNICODEFORMAT, 1, 0);
+    expect(0, r);
+    r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    if (r == 1)
+    {
+        r = SendMessage(hwnd, LVM_SETUNICODEFORMAT, 0, 0);
+        expect(1, r);
+        r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+        expect(0, r);
+    }
+    else
+    {
+        win_skip("LVM_GETUNICODEFORMAT is unsupported\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    DestroyWindow(hwnd);
+
+    /* test failure in parent WM_NOTIFYFORMAT  */
+    notifyFormat = 0;
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_QUERY);
+    ok(r != 0, "Expected valid format\n");
+
+    notifyFormat = NFR_UNICODE;
+    r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_REQUERY);
+    expect(NFR_UNICODE, r);
+    r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+
+    notifyFormat = NFR_ANSI;
+    r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_REQUERY);
+    expect(NFR_ANSI, r);
+    r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+
+    DestroyWindow(hwnd);
+
+    /* try different unicode window combination and defaults */
+    if (!GetModuleHandleW(NULL))
+    {
+        win_skip("Additional notify format tests are incompatible with Win9x\n");
+        return;
+    }
+
+    hwndparentW = create_parent_window(TRUE);
+    ok(IsWindow(hwndparentW), "Unicode parent creation failed\n");
+    if (!IsWindow(hwndparentW))  return;
+
+    notifyFormat = -1;
+    hwnd = create_listview_controlW(0, hwndparentW);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessageW(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    DestroyWindow(hwnd);
+    /* recieving error code defaulting to ansi */
+    notifyFormat = 0;
+    hwnd = create_listview_controlW(0, hwndparentW);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessageW(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    DestroyWindow(hwnd);
+    /* recieving ansi code from unicode window, use it */
+    notifyFormat = NFR_ANSI;
+    hwnd = create_listview_controlW(0, hwndparentW);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessageW(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    DestroyWindow(hwnd);
+    /* unicode listview with ansi parent window */
+    notifyFormat = -1;
+    hwnd = create_listview_controlW(0, hwndparent);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessageW(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    DestroyWindow(hwnd);
+    /* unicode listview with ansi parent window, return error code */
+    notifyFormat = 0;
+    hwnd = create_listview_controlW(0, hwndparent);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    header = (HWND)SendMessage(hwnd, LVM_GETHEADER, 0, 0);
+    ok(IsWindow(header), "expected header to be created\n");
+    r = SendMessageW(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
+    expect(0, r);
+    r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
+    expect(1, r);
+    DestroyWindow(hwnd);
+
+    DestroyWindow(hwndparentW);
+}
+
+static void test_indentation(void)
+{
+    HWND hwnd;
+    LVITEMA item;
+    DWORD r;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    memset(&item, 0, sizeof(item));
+    item.mask = LVIF_INDENT;
+    item.iItem = 0;
+    item.iIndent = I_INDENTCALLBACK;
+    r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
+    expect(0, r);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    item.iItem = 0;
+    item.mask = LVIF_INDENT;
+    r = SendMessage(hwnd, LVM_GETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, single_getdispinfo_parent_seq,
+                "get indent dispinfo", FALSE);
+
+    DestroyWindow(hwnd);
+}
+
+static INT CALLBACK DummyCompareEx(LPARAM first, LPARAM second, LPARAM param)
+{
+    return 0;
+}
+
+static BOOL is_below_comctl_5(void)
+{
+    HWND hwnd;
+    BOOL ret;
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    insert_item(hwnd, 0);
+
+    ret = SendMessage(hwnd, LVM_SORTITEMSEX, 0, (LPARAM)&DummyCompareEx);
+
+    DestroyWindow(hwnd);
+
+    return !ret;
+}
+
+static BOOL load_v6_module(ULONG_PTR *pcookie)
+{
+    HANDLE hKernel32;
+    HANDLE (WINAPI *pCreateActCtxA)(ACTCTXA*);
+    BOOL (WINAPI *pActivateActCtx)(HANDLE, ULONG_PTR*);
+
+    ACTCTXA ctx;
+    HANDLE hCtx;
+    BOOL ret;
+    HANDLE file;
+    DWORD written;
+
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    pCreateActCtxA = (void*)GetProcAddress(hKernel32, "CreateActCtxA");
+    pActivateActCtx = (void*)GetProcAddress(hKernel32, "ActivateActCtx");
+    if (!(pCreateActCtxA && pActivateActCtx))
+    {
+        win_skip("Activation contexts unsupported. No version 6 tests possible.\n");
+        return FALSE;
+    }
+
+    /* create manifest */
+    file = CreateFileA( manifest_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        ret = (WriteFile( file, manifest, sizeof(manifest)-1, &written, NULL ) &&
+               written == sizeof(manifest)-1);
+        CloseHandle( file );
+        if (!ret)
+        {
+            DeleteFileA( manifest_name );
+            skip("Failed to fill manifest file. Skipping comctl32 V6 tests.\n");
+            return FALSE;
+        }
+        else
+            trace("created %s\n", manifest_name);
+    }
+    else
+    {
+        skip("Failed to create manifest file. Skipping comctl32 V6 tests.\n");
+        return FALSE;
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cbSize = sizeof(ctx);
+    ctx.lpSource = manifest_name;
+
+    hCtx = pCreateActCtxA(&ctx);
+    ok(hCtx != 0, "Expected context handle\n");
+
+    ret = pActivateActCtx(hCtx, pcookie);
+    expect(TRUE, ret);
+
+    if (!ret)
+    {
+        win_skip("A problem during context activation occured.\n");
+        DeleteFileA(manifest_name);
+    }
+
+    return ret;
+}
+
+static void unload_v6_module(ULONG_PTR cookie)
+{
+    HANDLE hKernel32;
+    BOOL (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
+
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    pDeactivateActCtx = (void*)GetProcAddress(hKernel32, "DeactivateActCtx");
+    if (!pDeactivateActCtx)
+    {
+        win_skip("Activation contexts unsupported\n");
+        return;
+    }
+
+    pDeactivateActCtx(0, cookie);
+
+    DeleteFileA(manifest_name);
+}
+
+static void test_get_set_view(void)
+{
+    HWND hwnd;
+    DWORD ret;
+    DWORD_PTR style;
+
+    /* test style->view mapping */
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    ret = SendMessage(hwnd, LVM_GETVIEW, 0, 0);
+    expect(LV_VIEW_DETAILS, ret);
+
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    /* LVS_ICON == 0 */
+    SetWindowLongPtr(hwnd, GWL_STYLE, style & ~LVS_REPORT);
+    ret = SendMessage(hwnd, LVM_GETVIEW, 0, 0);
+    expect(LV_VIEW_ICON, ret);
+
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    SetWindowLongPtr(hwnd, GWL_STYLE, style | LVS_SMALLICON);
+    ret = SendMessage(hwnd, LVM_GETVIEW, 0, 0);
+    expect(LV_VIEW_SMALLICON, ret);
+
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    SetWindowLongPtr(hwnd, GWL_STYLE, (style & ~LVS_SMALLICON) | LVS_LIST);
+    ret = SendMessage(hwnd, LVM_GETVIEW, 0, 0);
+    expect(LV_VIEW_LIST, ret);
+
+    /* switching view doesn't touch window style */
+    ret = SendMessage(hwnd, LVM_SETVIEW, LV_VIEW_DETAILS, 0);
+    expect(1, ret);
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    ok(style & LVS_LIST, "Expected style to be preserved\n");
+    ret = SendMessage(hwnd, LVM_SETVIEW, LV_VIEW_ICON, 0);
+    expect(1, ret);
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    ok(style & LVS_LIST, "Expected style to be preserved\n");
+    ret = SendMessage(hwnd, LVM_SETVIEW, LV_VIEW_SMALLICON, 0);
+    expect(1, ret);
+    style = GetWindowLongPtr(hwnd, GWL_STYLE);
+    ok(style & LVS_LIST, "Expected style to be preserved\n");
+
     DestroyWindow(hwnd);
 }
 
@@ -2964,6 +3538,8 @@ START_TEST(listview)
 {
     HMODULE hComctl32;
     BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
+
+    ULONG_PTR ctx_cookie;
 
     hComctl32 = GetModuleHandleA("comctl32.dll");
     pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
@@ -2980,9 +3556,11 @@ START_TEST(listview)
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
-    hwndparent = create_parent_window();
+    hwndparent = create_parent_window(FALSE);
     ok_sequence(sequences, PARENT_SEQ_INDEX, create_parent_wnd_seq, "create parent window", TRUE);
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    g_is_below_5 = is_below_comctl_5();
 
     test_images();
     test_checkboxes();
@@ -3009,6 +3587,19 @@ START_TEST(listview)
     test_getitemposition();
     test_columnscreation();
     test_editbox();
+    test_notifyformat();
+    test_indentation();
+
+    if (!load_v6_module(&ctx_cookie))
+    {
+        DestroyWindow(hwndparent);
+        return;
+    }
+
+    /* comctl32 version 6 tests start here */
+    test_get_set_view();
+
+    unload_v6_module(ctx_cookie);
 
     DestroyWindow(hwndparent);
 }

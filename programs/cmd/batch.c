@@ -366,7 +366,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValu
     WINE_TRACE("Looking backwards for parameter id: %s / %s\n",
                wine_dbgstr_w(lastModifier), wine_dbgstr_w(forVariable));
 
-    if (!justFors && context && (*lastModifier >= '0' || *lastModifier <= '9')) {
+    if (!justFors && context && (*lastModifier >= '0' && *lastModifier <= '9')) {
       /* Its a valid parameter identifier - OK */
       break;
 
@@ -571,10 +571,7 @@ void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValu
   if (!doneModifier) strcpyW(finaloutput, outputparam);
 
   /* Finish by inserting the replacement into the string */
-  pos = WCMD_strdupW(lastModifier+1);
-  strcpyW(*start, finaloutput);
-  strcatW(*start, pos);
-  free(pos);
+  WCMD_strsubstW(*start, lastModifier+1, finaloutput, -1);
 }
 
 /*******************************************************************

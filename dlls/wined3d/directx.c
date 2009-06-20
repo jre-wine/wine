@@ -63,6 +63,7 @@ static const struct {
 
     /* ARB */
     {"GL_ARB_color_buffer_float",           ARB_COLOR_BUFFER_FLOAT,         0                           },
+    {"GL_ARB_depth_buffer_float",           ARB_DEPTH_BUFFER_FLOAT,         0                           },
     {"GL_ARB_depth_texture",                ARB_DEPTH_TEXTURE,              0                           },
     {"GL_ARB_draw_buffers",                 ARB_DRAW_BUFFERS,               0                           },
     {"GL_ARB_fragment_program",             ARB_FRAGMENT_PROGRAM,           0                           },
@@ -614,21 +615,15 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             major = minor = 0;
             gl_string_cursor = strchr(gl_string, '-');
             if (gl_string_cursor) {
-                int error = 0;
                 gl_string_cursor++;
 
                 /* Check if version number is of the form x.y.z */
-                if (*gl_string_cursor > '9' && *gl_string_cursor < '0')
-                    error = 1;
-                if (!error && *(gl_string_cursor+2) > '9' && *(gl_string_cursor+2) < '0')
-                    error = 1;
-                if (!error && *(gl_string_cursor+4) > '9' && *(gl_string_cursor+4) < '0')
-                    error = 1;
-                if (!error && *(gl_string_cursor+1) != '.' && *(gl_string_cursor+3) != '.')
-                    error = 1;
-
-                /* Mark version number as malformed */
-                if (error)
+                if ( *gl_string_cursor < '0' || *gl_string_cursor > '9'
+                     || *(gl_string_cursor+1) != '.'
+                     || *(gl_string_cursor+2) < '0' || *(gl_string_cursor+2) > '9'
+                     || *(gl_string_cursor+3) != '.'
+                     || *(gl_string_cursor+4) < '0' || *(gl_string_cursor+4) > '9' )
+                    /* Mark version number as malformed */
                     gl_string_cursor = 0;
             }
 
@@ -1036,8 +1031,8 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
 
     /* We can only use ORM_FBO when the hardware supports it. */
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO && !gl_info->supported[EXT_FRAMEBUFFER_OBJECT]) {
-        WARN_(d3d_caps)("GL_EXT_framebuffer_object not supported, falling back to PBuffer offscreen rendering mode.\n");
-        wined3d_settings.offscreen_rendering_mode = ORM_PBUFFER;
+        WARN_(d3d_caps)("GL_EXT_framebuffer_object not supported, falling back to backbuffer offscreen rendering mode.\n");
+        wined3d_settings.offscreen_rendering_mode = ORM_BACKBUFFER;
     }
 
     /* MRTs are currently only supported when FBOs are used. */
@@ -1277,16 +1272,43 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
             }
             break;
         case VENDOR_ATI:
+            /* See http://developer.amd.com/drivers/pc_vendor_id/Pages/default.aspx
+             *
+             * beware: renderer string do not match exact card model,
+             * eg HD 4800 is returned for multiple card, even for RV790 based one
+             */
             if(WINE_D3D9_CAPABLE(gl_info)) {
                 /* Radeon R7xx HD4800 - highend */
-                if (strstr(gl_info->gl_renderer, "HD 4800") ||
-                    strstr(gl_info->gl_renderer, "HD 4830") ||
-                    strstr(gl_info->gl_renderer, "HD 4850") ||
-                    strstr(gl_info->gl_renderer, "HD 4870") ||
-                    strstr(gl_info->gl_renderer, "HD 4890"))
+                if (strstr(gl_info->gl_renderer, "HD 4800") || /* Radeon RV7xx HD48xx generic renderer string */
+                    strstr(gl_info->gl_renderer, "HD 4830") || /* Radeon RV770 */
+                    strstr(gl_info->gl_renderer, "HD 4850") || /* Radeon RV770 */
+                    strstr(gl_info->gl_renderer, "HD 4870") || /* Radeon RV770 */
+                    strstr(gl_info->gl_renderer, "HD 4890"))   /* Radeon RV790 */
                 {
                     gl_info->gl_card = CARD_ATI_RADEON_HD4800;
-                    vidmem = 512; /* HD4800 cards use 512-1024MB */
+                    vidmem = 512; /* note: HD4890 cards use 1024MB */
+                }
+                /* Radeon R740 HD4700 - midend */
+                else if (strstr(gl_info->gl_renderer, "HD 4700") || /* Radeon RV770 */
+                         strstr(gl_info->gl_renderer, "HD 4770"))   /* Radeon RV740 */
+                {
+                    gl_info->gl_card = CARD_ATI_RADEON_HD4700;
+                    vidmem = 512;
+                }
+                /* Radeon R730 HD4600 - midend */
+                else if (strstr(gl_info->gl_renderer, "HD 4600") || /* Radeon RV730 */
+                         strstr(gl_info->gl_renderer, "HD 4650") || /* Radeon RV730 */
+                         strstr(gl_info->gl_renderer, "HD 4670"))   /* Radeon RV730 */
+                {
+                    gl_info->gl_card = CARD_ATI_RADEON_HD4600;
+                    vidmem = 512;
+                }
+                /* Radeon R710 HD4500/HD4350 - lowend */
+                else if (strstr(gl_info->gl_renderer, "HD 4350") || /* Radeon RV710 */
+                         strstr(gl_info->gl_renderer, "HD 4550"))   /* Radeon RV710 */
+                {
+                    gl_info->gl_card = CARD_ATI_RADEON_HD4350;
+                    vidmem = 256;
                 }
                 /* Radeon R6xx HD2900/HD3800 - highend */
                 else if (strstr(gl_info->gl_renderer, "HD 2900") ||
@@ -1310,7 +1332,8 @@ static BOOL IWineD3DImpl_FillGLCaps(WineD3D_GL_Info *gl_info) {
                          strstr(gl_info->gl_renderer, "HD 2400") ||
                          strstr(gl_info->gl_renderer, "HD 3470") ||
                          strstr(gl_info->gl_renderer, "HD 3450") ||
-                         strstr(gl_info->gl_renderer, "HD 3430"))
+                         strstr(gl_info->gl_renderer, "HD 3430") ||
+                         strstr(gl_info->gl_renderer, "HD 3400"))
                 {
                     gl_info->gl_card = CARD_ATI_RADEON_HD2300;
                     vidmem = 128; /* HD2300 uses at least 128MB, HD2400 uses 256MB */
@@ -4028,6 +4051,9 @@ static const struct driver_version_information driver_version_table[] = {
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2300,         "ATI Mobility Radeon HD 2300",      6,  14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2600,         "ATI Mobility Radeon HD 2600",      6,  14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD2900,         "ATI Radeon HD 2900 XT",            6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD4350,         "ATI Radeon HD 4350",               6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD4600,         "ATI Radeon HD 4600 Series",        6,  14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD4700,         "ATI Radeon HD 4700 Series",        6,  14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD4800,         "ATI Radeon HD 4800 Series",        6,  14, 10, 6764    },
 
     /* TODO: Add information about legacy ATI hardware, Intel and other cards */

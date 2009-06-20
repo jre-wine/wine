@@ -889,168 +889,44 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateStateBlock(IWineD3DDevice* iface,
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface,
-        UINT Width, UINT Height, WINED3DFORMAT Format, BOOL Lockable, BOOL Discard, UINT Level,
-        IWineD3DSurface **ppSurface, WINED3DRESOURCETYPE Type, DWORD Usage, WINED3DPOOL Pool,
-        WINED3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, WINED3DSURFTYPE Impl, IUnknown *parent)
+static HRESULT WINAPI IWineD3DDeviceImpl_CreateSurface(IWineD3DDevice *iface, UINT Width, UINT Height,
+        WINED3DFORMAT Format, BOOL Lockable, BOOL Discard, UINT Level, IWineD3DSurface **ppSurface,
+        DWORD Usage, WINED3DPOOL Pool, WINED3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality,
+        WINED3DSURFTYPE Impl, IUnknown *parent)
 {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSurfaceImpl *object; /*NOTE: impl ref allowed since this is a create function */
-    unsigned int Size       = 1;
-    const struct GlPixelFormatDesc *glDesc = getFormatDescEntry(Format, &GLINFO_LOCATION);
-    UINT mul_4w, mul_4h;
+    IWineD3DSurfaceImpl *object;
     HRESULT hr;
 
     TRACE("(%p) Create surface\n",This);
 
-    if(MultisampleQuality > 0) {
-        FIXME("MultisampleQuality set to %d, substituting 0\n", MultisampleQuality);
-        MultisampleQuality=0;
+    if (Impl == SURFACE_OPENGL && !This->adapter)
+    {
+        ERR("OpenGL surfaces are not available without OpenGL.\n");
+        return WINED3DERR_NOTAVAILABLE;
     }
 
-    /** FIXME: Check that the format is supported
-    *    by the device.
-      *******************************/
-
-    /** DXTn mipmaps use the same number of 'levels' down to eg. 8x1, but since
-     *  it is based around 4x4 pixel blocks it requires padding, so allocate enough
-     *  space!
-      *********************************/
-    mul_4w = (Width + 3) & ~3;
-    mul_4h = (Height + 3) & ~3;
-    if (WINED3DFMT_UNKNOWN == Format) {
-        Size = 0;
-    } else if (Format == WINED3DFMT_DXT1) {
-        /* DXT1 is half byte per pixel */
-        Size = (mul_4w * glDesc->byte_count * mul_4h) >> 1;
-
-    } else if (Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3 ||
-               Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5 ||
-               Format == WINED3DFMT_ATI2N) {
-        Size = (mul_4w * glDesc->byte_count * mul_4h);
-    } else {
-       /* The pitch is a multiple of 4 bytes */
-        Size = ((Width * glDesc->byte_count) + This->surface_alignment - 1) & ~(This->surface_alignment - 1);
-        Size *= Height;
-    }
-
-    if(glDesc->heightscale != 0.0) Size *= glDesc->heightscale;
-
-    /** Create and initialise the surface resource **/
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
     if (!object)
     {
-        ERR("Out of memory\n");
+        ERR("Failed to allocate surface memory.\n");
         *ppSurface = NULL;
         return WINED3DERR_OUTOFVIDEOMEMORY;
     }
 
-    /* Look at the implementation and set the correct Vtable */
-    switch(Impl)
-    {
-        case SURFACE_OPENGL:
-            /* Check if a 3D adapter is available when creating gl surfaces */
-            if (!This->adapter)
-            {
-                ERR("OpenGL surfaces are not available without opengl\n");
-                HeapFree(GetProcessHeap(), 0, object);
-                return WINED3DERR_NOTAVAILABLE;
-            }
-            object->lpVtbl = &IWineD3DSurface_Vtbl;
-            break;
-
-        case SURFACE_GDI:
-            object->lpVtbl = &IWineGDISurface_Vtbl;
-            break;
-
-        default:
-            /* To be sure to catch this */
-            ERR("Unknown requested surface implementation %d!\n", Impl);
-            HeapFree(GetProcessHeap(), 0, object);
-            return WINED3DERR_INVALIDCALL;
-    }
-
-    hr = resource_init((IWineD3DResource *)object, WINED3DRTYPE_SURFACE, This, Size, Usage, glDesc, Pool, parent);
+    hr = surface_init(object, Impl, This->surface_alignment, Width, Height, Level, Lockable,
+            Discard, MultiSample, MultisampleQuality, This, Usage, Format, Pool, parent);
     if (FAILED(hr))
     {
-        WARN("Failed to initialize resource, returning %#x\n", hr);
+        WARN("Failed to initialize surface, returning %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
         *ppSurface = NULL;
         return hr;
     }
 
-    TRACE("(%p) : Created resource %p\n", This, object);
+    TRACE("(%p) : Created surface %p\n", This, object);
 
     *ppSurface = (IWineD3DSurface *)object;
-
-    /* "Standalone" surface */
-    IWineD3DSurface_SetContainer((IWineD3DSurface *)object, NULL);
-
-    object->currentDesc.Width      = Width;
-    object->currentDesc.Height     = Height;
-    object->currentDesc.MultiSampleType    = MultiSample;
-    object->currentDesc.MultiSampleQuality = MultisampleQuality;
-    object->glDescription.level            = Level;
-    list_init(&object->overlays);
-
-    /* Flags */
-    object->Flags      = SFLAG_NORMCOORD; /* Default to normalized coords */
-    object->Flags     |= Discard ? SFLAG_DISCARD : 0;
-    object->Flags     |= (WINED3DFMT_D16_LOCKABLE == Format) ? SFLAG_LOCKABLE : 0;
-    object->Flags     |= Lockable ? SFLAG_LOCKABLE : 0;
-
-    TRACE("Pool %d %d %d %d\n",Pool, WINED3DPOOL_DEFAULT, WINED3DPOOL_MANAGED, WINED3DPOOL_SYSTEMMEM);
-
-    /** Quick lockable sanity check TODO: remove this after surfaces, usage and lockability have been debugged properly
-    * this function is too deep to need to care about things like this.
-    * Levels need to be checked too, and possibly Type since they all affect what can be done.
-    * ****************************************/
-    switch(Pool) {
-    case WINED3DPOOL_SCRATCH:
-        if(!Lockable)
-            FIXME("Create surface called with a pool of SCRATCH and a Lockable of FALSE "
-                "which are mutually exclusive, setting lockable to TRUE\n");
-                Lockable = TRUE;
-    break;
-    case WINED3DPOOL_SYSTEMMEM:
-        if(!Lockable) FIXME("Create surface called with a pool of SYSTEMMEM and a Lockable of FALSE, "
-                                    "this is acceptable but unexpected (I can't know how the surface can be usable!)\n");
-    case WINED3DPOOL_MANAGED:
-        if(Usage == WINED3DUSAGE_DYNAMIC) FIXME("Create surface called with a pool of MANAGED and a "
-                                                "Usage of DYNAMIC which are mutually exclusive, not doing "
-                                                "anything just telling you.\n");
-    break;
-    case WINED3DPOOL_DEFAULT: /*TODO: Create offscreen plain can cause this check to fail..., find out if it should */
-        if(!(Usage & WINED3DUSAGE_DYNAMIC) && !(Usage & WINED3DUSAGE_RENDERTARGET)
-           && !(Usage && WINED3DUSAGE_DEPTHSTENCIL ) && Lockable)
-            WARN("Creating a surface with a POOL of DEFAULT with Lockable true, that doesn't specify DYNAMIC usage.\n");
-    break;
-    default:
-        FIXME("(%p) Unknown pool %d\n", This, Pool);
-    break;
-    };
-
-    if (Usage & WINED3DUSAGE_RENDERTARGET && Pool != WINED3DPOOL_DEFAULT) {
-        FIXME("Trying to create a render target that isn't in the default pool\n");
-    }
-
-    /* mark the texture as dirty so that it gets loaded first time around*/
-    surface_add_dirty_rect(*ppSurface, NULL);
-    TRACE("(%p) : w(%d) h(%d) fmt(%d,%s) lockable(%d) surf@%p, surfmem@%p, %d bytes\n",
-           This, Width, Height, Format, debug_d3dformat(Format),
-           (WINED3DFMT_D16_LOCKABLE == Format), *ppSurface, object->resource.allocatedMemory, object->resource.size);
-
-    list_init(&object->renderbuffers);
-
-    /* Call the private setup routine */
-    hr = IWineD3DSurface_PrivateSetup((IWineD3DSurface *)object);
-    if (FAILED(hr))
-    {
-        ERR("Private setup failed, returning %#x\n", hr);
-        IWineD3DSurface_Release(*ppSurface);
-        *ppSurface = NULL;
-        return hr;
-    }
 
     return hr;
 }
@@ -2116,9 +1992,8 @@ static void IWineD3DDeviceImpl_LoadLogo(IWineD3DDeviceImpl *This, const char *fi
         bm.bmHeight = 32;
     }
 
-    hr = IWineD3DDevice_CreateSurface((IWineD3DDevice *) This, bm.bmWidth, bm.bmHeight, WINED3DFMT_R5G6B5,
-                                      TRUE, FALSE, 0, &This->logo_surface, WINED3DRTYPE_SURFACE, 0,
-                                      WINED3DPOOL_DEFAULT, WINED3DMULTISAMPLE_NONE, 0, SURFACE_OPENGL, NULL);
+    hr = IWineD3DDevice_CreateSurface((IWineD3DDevice *) This, bm.bmWidth, bm.bmHeight, WINED3DFMT_R5G6B5, TRUE,
+            FALSE, 0, &This->logo_surface, 0, WINED3DPOOL_DEFAULT, WINED3DMULTISAMPLE_NONE, 0, SURFACE_OPENGL, NULL);
     if(FAILED(hr)) {
         ERR("Wine logo requested, but failed to create surface\n");
         goto out;
@@ -3071,9 +2946,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetLightEnable(IWineD3DDevice *iface, D
     UINT Hi = LIGHTMAP_HASHFUNC(Index);
     struct list *e;
     TRACE("(%p) : Idx(%d), enable? %d\n", This, Index, Enable);
-
-    /* Tests show true = 128...not clear why */
-    Enable = Enable? 128: 0;
 
     LIST_FOR_EACH(e, &This->updateStateBlock->lightMap[Hi]) {
         lightInfo = LIST_ENTRY(e, PLIGHTINFOEL, entry);
@@ -5873,21 +5745,19 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     WINED3DSURFACE_DESC  winedesc;
 
     TRACE("(%p) : Source (%p)  Rect (%p) Destination (%p) Point(%p)\n", This, pSourceSurface, pSourceRect, pDestinationSurface, pDestPoint);
-    memset(&winedesc, 0, sizeof(winedesc));
-    winedesc.Width  = &srcSurfaceWidth;
-    winedesc.Height = &srcSurfaceHeight;
-    winedesc.Pool   = &srcPool;
-    winedesc.Format = &srcFormat;
 
     IWineD3DSurface_GetDesc(pSourceSurface, &winedesc);
-
-    winedesc.Width  = &destSurfaceWidth;
-    winedesc.Height = &destSurfaceHeight;
-    winedesc.Pool   = &destPool;
-    winedesc.Format = &destFormat;
-    winedesc.Size   = &destSize;
+    srcSurfaceWidth = winedesc.width;
+    srcSurfaceHeight = winedesc.height;
+    srcPool = winedesc.pool;
+    srcFormat = winedesc.format;
 
     IWineD3DSurface_GetDesc(pDestinationSurface, &winedesc);
+    destSurfaceWidth = winedesc.width;
+    destSurfaceHeight = winedesc.height;
+    destPool = winedesc.pool;
+    destFormat = winedesc.format;
+    destSize = winedesc.size;
 
     if(srcPool != WINED3DPOOL_SYSTEMMEM  || destPool != WINED3DPOOL_DEFAULT){
         WARN("source %p must be SYSTEMMEM and dest %p must be DEFAULT, returning WINED3DERR_INVALIDCALL\n", pSourceSurface, pDestinationSurface);
@@ -5982,27 +5852,25 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     } else { /* Full width, so just write out the whole texture */
         const unsigned char* data = ((const unsigned char *)IWineD3DSurface_GetData(pSourceSurface)) + offset;
 
-        if (WINED3DFMT_DXT1 == destFormat ||
-            WINED3DFMT_DXT2 == destFormat ||
-            WINED3DFMT_DXT3 == destFormat ||
-            WINED3DFMT_DXT4 == destFormat ||
-            WINED3DFMT_DXT5 == destFormat) {
-            if (GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
-                if (destSurfaceHeight != srcHeight || destSurfaceWidth != srcWidth) {
-                    /* FIXME: The easy way to do this is to lock the destination, and copy the bits across */
-                    FIXME("Updating part of a compressed texture is not supported at the moment\n");
-                } if (destFormat != srcFormat) {
-                    FIXME("Updating mixed format compressed texture is not curretly support\n");
-                } else {
-                    GL_EXTCALL(glCompressedTexImage2DARB(glDescription->target, glDescription->level,
-                            dst_format_desc->glInternal, srcWidth, srcHeight, 0, destSize, data));
-                }
-            } else {
-                FIXME("Attempting to update a DXT compressed texture without hardware support\n");
+        if (dst_format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
+        {
+            if (destSurfaceHeight != srcHeight || destSurfaceWidth != srcWidth)
+            {
+                /* FIXME: The easy way to do this is to lock the destination, and copy the bits across. */
+                FIXME("Updating part of a compressed texture is not supported.\n");
             }
-
-
-        } else {
+            if (destFormat != srcFormat)
+            {
+                FIXME("Updating mixed format compressed textures is not supported.\n");
+            }
+            else
+            {
+                GL_EXTCALL(glCompressedTexImage2DARB(glDescription->target, glDescription->level,
+                        dst_format_desc->glInternal, srcWidth, srcHeight, 0, destSize, data));
+            }
+        }
+        else
+        {
             glTexSubImage2D(glDescription->target, glDescription->level, destLeft, destTop,
                     srcWidth, srcHeight, dst_format_desc->glFormat, dst_format_desc->glType, data);
         }
@@ -6176,8 +6044,7 @@ static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface,
         ENTER_GL();
         context_bind_fbo(iface, GL_FRAMEBUFFER_EXT, &This->activeContext->dst_fbo);
         context_attach_surface_fbo(This, GL_FRAMEBUFFER_EXT, 0, surface);
-        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
-        checkGLcall("glFramebufferRenderbufferEXT");
+        context_attach_depth_stencil_fbo(This, GL_FRAMEBUFFER_EXT, NULL, FALSE);
     }
 
     if (rect) {
@@ -6562,11 +6429,16 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
 
     /* Attach src surface to src fbo */
     src_swapchain = get_swapchain(src_surface);
+    dst_swapchain = get_swapchain(dst_surface);
+
+    if (src_swapchain) ActivateContext(This, src_surface, CTXUSAGE_RESOURCELOAD);
+    else if (dst_swapchain) ActivateContext(This, dst_surface, CTXUSAGE_RESOURCELOAD);
+    else ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
     if (src_swapchain) {
         GLenum buffer = surface_get_gl_buffer(src_surface, src_swapchain);
 
         TRACE("Source surface %p is onscreen\n", src_surface);
-        ActivateContext(This, src_surface, CTXUSAGE_RESOURCELOAD);
         /* Make sure the drawable is up to date. In the offscreen case
          * attach_surface_fbo() implicitly takes care of this. */
         IWineD3DSurface_LoadLocation(src_surface, SFLAG_INDRAWABLE, NULL);
@@ -6596,18 +6468,15 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
         context_attach_surface_fbo(This, GL_READ_FRAMEBUFFER_EXT, 0, src_surface);
         glReadBuffer(GL_COLOR_ATTACHMENT0_EXT);
         checkGLcall("glReadBuffer()");
-        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_READ_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
-        checkGLcall("glFramebufferRenderbufferEXT");
+        context_attach_depth_stencil_fbo(This, GL_READ_FRAMEBUFFER_EXT, NULL, FALSE);
     }
     LEAVE_GL();
 
     /* Attach dst surface to dst fbo */
-    dst_swapchain = get_swapchain(dst_surface);
     if (dst_swapchain) {
         GLenum buffer = surface_get_gl_buffer(dst_surface, dst_swapchain);
 
         TRACE("Destination surface %p is onscreen\n", dst_surface);
-        ActivateContext(This, dst_surface, CTXUSAGE_RESOURCELOAD);
         /* Make sure the drawable is up to date. In the offscreen case
          * attach_surface_fbo() implicitly takes care of this. */
         IWineD3DSurface_LoadLocation(dst_surface, SFLAG_INDRAWABLE, NULL);
@@ -6634,18 +6503,12 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, WINED
     } else {
         TRACE("Destination surface %p is offscreen\n", dst_surface);
 
-        /* No src or dst swapchain? Make sure some context is active(multithreading) */
-        if(!src_swapchain) {
-            ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-        }
-
         ENTER_GL();
         context_bind_fbo(iface, GL_DRAW_FRAMEBUFFER_EXT, &This->activeContext->dst_fbo);
         context_attach_surface_fbo(This, GL_DRAW_FRAMEBUFFER_EXT, 0, dst_surface);
         glDrawBuffer(GL_COLOR_ATTACHMENT0_EXT);
         checkGLcall("glDrawBuffer()");
-        GL_EXTCALL(glFramebufferRenderbufferEXT(GL_DRAW_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, 0));
-        checkGLcall("glFramebufferRenderbufferEXT");
+        context_attach_depth_stencil_fbo(This, GL_DRAW_FRAMEBUFFER_EXT, NULL, FALSE);
     }
     glDisable(GL_SCISSOR_TEST);
     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE));
@@ -6993,14 +6856,21 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_TestCooperativeLevel(IWineD3DDevice* 
     return WINED3DERR_DRIVERINTERNALERROR;
 }
 
+static HRESULT WINAPI evict_managed_resource(IWineD3DResource *resource, void *data) {
+    TRACE("checking resource %p for eviction\n", resource);
+    if(((IWineD3DResourceImpl *) resource)->resource.pool == WINED3DPOOL_MANAGED) {
+        TRACE("Evicting %p\n", resource);
+        IWineD3DResource_UnLoad(resource);
+    }
+    IWineD3DResource_Release(resource);
+    return S_OK;
+}
 
 static HRESULT  WINAPI  IWineD3DDeviceImpl_EvictManagedResources(IWineD3DDevice* iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    /** FIXME: Resource tracking needs to be done,
-    * The closes we can do to this is set the priorities of all managed textures low
-    * and then reset them.
-     ***********************************************************/
-    FIXME("(%p) : stub\n", This);
+    TRACE("(%p)\n", This);
+
+    IWineD3DDevice_EnumResources(iface, evict_managed_resource, NULL);
     return WINED3D_OK;
 }
 

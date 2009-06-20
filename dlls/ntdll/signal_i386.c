@@ -2264,20 +2264,58 @@ void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
 DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 1 )
 
 
+/* wrapper for apps that don't declare the thread function correctly */
+extern void DECLSPEC_NORETURN call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg );
+__ASM_GLOBAL_FUNC(call_thread_func,
+                  "pushl %ebp\n\t"
+                  "movl %esp,%ebp\n\t"
+                  "subl $4,%esp\n\t"
+                  "pushl 12(%ebp)\n\t"
+                  "call *8(%ebp)\n\t"
+                  "leal -4(%ebp),%esp\n\t"
+                  "pushl %eax\n\t"
+                  "call " __ASM_NAME("exit_thread") "\n\t"
+                  "int $3" )
+
+/***********************************************************************
+ *           call_thread_entry_point
+ */
+void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
+{
+    __TRY
+    {
+        call_thread_func( entry, arg );
+    }
+    __EXCEPT(unhandled_exception_filter)
+    {
+        NtTerminateThread( GetCurrentThread(), GetExceptionCode() );
+    }
+    __ENDTRY
+    abort();  /* should not be reached */
+}
+
+/***********************************************************************
+ *           RtlExitUserThread  (NTDLL.@)
+ */
+void WINAPI RtlExitUserThread( ULONG status )
+{
+    exit_thread( status );
+}
+
 /**********************************************************************
  *		DbgBreakPoint   (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( DbgBreakPoint, "int $3; ret")
+__ASM_STDCALL_FUNC( DbgBreakPoint, 0, "int $3; ret")
 
 /**********************************************************************
  *		DbgUserBreakPoint   (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( DbgUserBreakPoint, "int $3; ret")
+__ASM_STDCALL_FUNC( DbgUserBreakPoint, 0, "int $3; ret")
 
 /**********************************************************************
  *           NtCurrentTeb   (NTDLL.@)
  */
-__ASM_GLOBAL_FUNC( NtCurrentTeb, ".byte 0x64\n\tmovl 0x18,%eax\n\tret" )
+__ASM_STDCALL_FUNC( NtCurrentTeb, 0, ".byte 0x64\n\tmovl 0x18,%eax\n\tret" )
 
 
 /**********************************************************************

@@ -91,14 +91,14 @@ static const struct StaticPixelFormatDesc formats[] =
     {WINED3DFMT_A8_UNORM,           0x000000ff, 0x0,        0x0,        0x0,        1,      0,      0,      FALSE},
     {WINED3DFMT_A8R3G3B2,           0x0000ff00, 0x000000e0, 0x0000001c, 0x00000003, 2,      0,      0,      FALSE},
     {WINED3DFMT_X4R4G4B4,           0x0,        0x00000f00, 0x000000f0, 0x0000000f, 2,      0,      0,      FALSE},
-    {WINED3DFMT_R10G10B10A2_UNORM,  0xb0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
-    {WINED3DFMT_R10G10B10A2_UINT,   0xb0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
-    {WINED3DFMT_R10G10B10A2_SNORM,  0xb0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
+    {WINED3DFMT_R10G10B10A2_UNORM,  0xc0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
+    {WINED3DFMT_R10G10B10A2_UINT,   0xc0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
+    {WINED3DFMT_R10G10B10A2_SNORM,  0xc0000000, 0x000003ff, 0x000ffc00, 0x3ff00000, 4,      0,      0,      FALSE},
     {WINED3DFMT_R8G8B8A8_UNORM,     0xff000000, 0x000000ff, 0x0000ff00, 0x00ff0000, 4,      0,      0,      FALSE},
     {WINED3DFMT_R8G8B8A8_UINT,      0xff000000, 0x000000ff, 0x0000ff00, 0x00ff0000, 4,      0,      0,      FALSE},
     {WINED3DFMT_X8B8G8R8,           0x0,        0x000000ff, 0x0000ff00, 0x00ff0000, 4,      0,      0,      FALSE},
     {WINED3DFMT_R16G16_UNORM,       0x0,        0x0000ffff, 0xffff0000, 0x0,        4,      0,      0,      FALSE},
-    {WINED3DFMT_A2R10G10B10,        0xb0000000, 0x3ff00000, 0x000ffc00, 0x000003ff, 4,      0,      0,      FALSE},
+    {WINED3DFMT_A2R10G10B10,        0xc0000000, 0x3ff00000, 0x000ffc00, 0x000003ff, 4,      0,      0,      FALSE},
     {WINED3DFMT_R16G16B16A16_UNORM, 0x1,        0x0000ffff, 0xffff0000, 0x0,        8,      0,      0,      FALSE},
     /* Luminance */
     {WINED3DFMT_L8,                 0x0,        0x0,        0x0,        0x0,        1,      0,      0,      FALSE},
@@ -132,6 +132,24 @@ static const struct StaticPixelFormatDesc formats[] =
     {WINED3DFMT_ATI2N,              0x0,        0x0,        0x0,        0x0,        1,      0,      0,      TRUE },
     {WINED3DFMT_NVHU,               0x0,        0x0,        0x0,        0x0,        2,      0,      0,      TRUE },
     {WINED3DFMT_NVHS,               0x0,        0x0,        0x0,        0x0,        2,      0,      0,      TRUE },
+};
+
+struct wined3d_format_compression_info
+{
+    WINED3DFORMAT format;
+    UINT block_width;
+    UINT block_height;
+    UINT block_byte_count;
+};
+
+static const struct wined3d_format_compression_info format_compression_info[] =
+{
+    {WINED3DFMT_DXT1,   4,  4,  8},
+    {WINED3DFMT_DXT2,   4,  4,  16},
+    {WINED3DFMT_DXT3,   4,  4,  16},
+    {WINED3DFMT_DXT4,   4,  4,  16},
+    {WINED3DFMT_DXT5,   4,  4,  16},
+    {WINED3DFMT_ATI2N,  4,  4,  16},
 };
 
 struct wined3d_format_vertex_info
@@ -446,18 +464,14 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_LUMINANCE,           GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
-    {WINED3DFMT_D32F_LOCKABLE,      GL_DEPTH_COMPONENT32_ARB,         GL_DEPTH_COMPONENT32_ARB,               0,
+    {WINED3DFMT_D32F_LOCKABLE,      GL_DEPTH_COMPONENT32F,            GL_DEPTH_COMPONENT32F,                  0,
             GL_DEPTH_COMPONENT,     GL_FLOAT,
             WINED3DFMT_FLAG_DEPTH,
-            ARB_DEPTH_TEXTURE},
-    {WINED3DFMT_D24FS8,             GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
-            GL_DEPTH_COMPONENT,     GL_FLOAT,
-            WINED3DFMT_FLAG_DEPTH,
-            ARB_DEPTH_TEXTURE},
-    {WINED3DFMT_D24FS8,             GL_DEPTH24_STENCIL8_EXT,          GL_DEPTH24_STENCIL8_EXT,                0,
-            GL_DEPTH_STENCIL_EXT,   GL_UNSIGNED_INT_24_8_EXT,
+            ARB_DEPTH_BUFFER_FLOAT},
+    {WINED3DFMT_D24FS8,             GL_DEPTH32F_STENCIL8,             GL_DEPTH32F_STENCIL8,                   0,
+            GL_DEPTH_STENCIL_EXT,   GL_FLOAT_32_UNSIGNED_INT_24_8_REV,
             WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
-            EXT_PACKED_DEPTH_STENCIL},
+            ARB_DEPTH_BUFFER_FLOAT},
     /* Vendor-specific formats */
     {WINED3DFMT_ATI2N,              GL_COMPRESSED_LUMINANCE_ALPHA_3DC_ATI, GL_COMPRESSED_LUMINANCE_ALPHA_3DC_ATI, 0,
             GL_LUMINANCE_ALPHA,     GL_UNSIGNED_BYTE,
@@ -515,12 +529,38 @@ static BOOL init_format_base_info(WineD3D_GL_Info *gl_info)
     return TRUE;
 }
 
+static BOOL init_format_compression_info(WineD3D_GL_Info *gl_info)
+{
+    unsigned int i;
+
+    for (i = 0; i < (sizeof(format_compression_info) / sizeof(*format_compression_info)); ++i)
+    {
+        struct GlPixelFormatDesc *format_desc;
+        int fmt_idx = getFmtIdx(format_compression_info[i].format);
+
+        if (fmt_idx == -1)
+        {
+            ERR("Format %s (%#x) not found.\n",
+                    debug_d3dformat(format_compression_info[i].format), format_compression_info[i].format);
+            return FALSE;
+        }
+
+        format_desc = &gl_info->gl_formats[fmt_idx];
+        format_desc->block_width = format_compression_info[i].block_width;
+        format_desc->block_height = format_compression_info[i].block_height;
+        format_desc->block_byte_count = format_compression_info[i].block_byte_count;
+        format_desc->Flags |= WINED3DFMT_FLAG_COMPRESSED;
+    }
+
+    return TRUE;
+}
+
 #define GLINFO_LOCATION (*gl_info)
 
 static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_format, GLenum format, GLenum type)
 {
-    GLuint tex, fb;
     GLenum status;
+    GLuint tex;
 
     ENTER_GL();
 
@@ -531,12 +571,9 @@ static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_form
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    GL_EXTCALL(glGenFramebuffersEXT(1, &fb));
-    GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fb));
     GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, tex, 0));
 
     status = GL_EXTCALL(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
-    GL_EXTCALL(glDeleteFramebuffersEXT(1, &fb));
     glDeleteTextures(1, &tex);
 
     checkGLcall("Framebuffer format check");
@@ -549,6 +586,13 @@ static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_form
 static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
 {
     unsigned int i;
+    GLuint fbo;
+
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+    {
+        GL_EXTCALL(glGenFramebuffersEXT(1, &fbo));
+        GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo));
+    }
 
     for (i = 0; i < sizeof(formats) / sizeof(*formats); ++i)
     {
@@ -556,15 +600,31 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
 
         if (!desc->glInternal) continue;
 
+        if (desc->Flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))
+        {
+            TRACE("Skipping format %s because it's a depth/stencil format.\n",
+                    debug_d3dformat(desc->format));
+            continue;
+        }
+
+        if (desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
+        {
+            TRACE("Skipping format %s because it's a compressed format.\n",
+                    debug_d3dformat(desc->format));
+            continue;
+        }
+
         if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
         {
+            TRACE("Checking if format %s is supported as FBO color attachment...\n", debug_d3dformat(desc->format));
+
             /* Check if the default internal format is supported as a frame buffer target, otherwise
              * fall back to the render target internal.
              *
              * Try to stick to the standard format if possible, this limits precision differences. */
             if (check_fbo_compat(gl_info, desc->glInternal, desc->glFormat, desc->glType))
             {
-                TRACE("Format %s is supported as fbo target\n", debug_d3dformat(desc->format));
+                TRACE("Format %s is supported as FBO color attachment\n", debug_d3dformat(desc->format));
                 desc->Flags |= WINED3DFMT_FLAG_FBO_ATTACHABLE;
                 desc->rtInternal = desc->glInternal;
             }
@@ -574,15 +634,19 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
                 {
                     if (desc->Flags & WINED3DFMT_FLAG_RENDERTARGET)
                     {
-                        FIXME("Internal format of %s not supported as FBO target, and no fallback specified.\n",
-                                debug_d3dformat(desc->format));
+                        FIXME("Format %s with rendertarget flag is not supported as FBO color attachment,"
+                                " and no fallback specified.\n", debug_d3dformat(desc->format));
                         desc->Flags &= ~WINED3DFMT_FLAG_RENDERTARGET;
+                    }
+                    else
+                    {
+                        TRACE("Format %s is not supported as FBO color attachment.\n", debug_d3dformat(desc->format));
                     }
                     desc->rtInternal = desc->glInternal;
                 }
                 else
                 {
-                    TRACE("Internal format of %s not supported as FBO target, using render target internal instead.\n",
+                    TRACE("Format %s is not supported as FBO color attachment, using rtInternal format as fallback.\n",
                             debug_d3dformat(desc->format));
                 }
             }
@@ -591,6 +655,11 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
         {
             desc->rtInternal = desc->glInternal;
         }
+    }
+
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+    {
+        GL_EXTCALL(glDeleteFramebuffersEXT(1, &fbo));
     }
 }
 
@@ -776,29 +845,33 @@ static BOOL init_format_vertex_info(WineD3D_GL_Info *gl_info)
 
 BOOL initPixelFormatsNoGL(WineD3D_GL_Info *gl_info)
 {
-    return init_format_base_info(gl_info);
+    if (!init_format_base_info(gl_info)) return FALSE;
+
+    if (!init_format_compression_info(gl_info))
+    {
+        HeapFree(GetProcessHeap(), 0, gl_info->gl_formats);
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
 {
     if (!init_format_base_info(gl_info)) return FALSE;
 
-    if (!init_format_texture_info(gl_info))
-    {
-        HeapFree(GetProcessHeap(), 0, gl_info->gl_formats);
-        return FALSE;
-    }
-
-    if (!init_format_vertex_info(gl_info))
-    {
-        HeapFree(GetProcessHeap(), 0, gl_info->gl_formats);
-        return FALSE;
-    }
+    if (!init_format_compression_info(gl_info)) goto fail;
+    if (!init_format_texture_info(gl_info)) goto fail;
+    if (!init_format_vertex_info(gl_info)) goto fail;
 
     apply_format_fixups(gl_info);
     init_format_fbo_compat_info(gl_info);
 
     return TRUE;
+
+fail:
+    HeapFree(GetProcessHeap(), 0, gl_info->gl_formats);
+    return FALSE;
 }
 
 #undef GLINFO_LOCATION

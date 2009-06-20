@@ -29,15 +29,18 @@
 
 extern DWORD tlsIndex;
 extern TfClientId processId;
+extern ITfCompartmentMgr *globalCompartmentMgr;
 
 extern HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
 extern HRESULT DocumentMgr_Constructor(ITfThreadMgrEventSink*, ITfDocumentMgr **ppOut);
-extern HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **ppOut, TfEditCookie *pecTextStore);
+extern HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfDocumentMgr *mgr, ITfContext **ppOut, TfEditCookie *pecTextStore);
 extern HRESULT InputProcessorProfiles_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
 extern HRESULT CategoryMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut);
 extern HRESULT Range_Constructor(ITfContext *context, ITextStoreACP *textstore, DWORD lockType, DWORD anchorStart, DWORD anchorEnd, ITfRange **ppOut);
+extern HRESULT CompartmentMgr_Constructor(IUnknown *pUnkOuter, REFIID riid, IUnknown **ppOut);
+extern HRESULT CompartmentMgr_Destructor(ITfCompartmentMgr *This);
 
-extern HRESULT Context_Initialize(ITfContext *cxt);
+extern HRESULT Context_Initialize(ITfContext *cxt, ITfDocumentMgr *manager);
 extern HRESULT Context_Uninitialize(ITfContext *cxt);
 extern HRESULT TF_SELECTION_to_TS_SELECTION_ACP(const TF_SELECTION *tf, TS_SELECTION_ACP *tsAcp);
 

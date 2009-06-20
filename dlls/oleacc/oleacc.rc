@@ -21,8 +21,10 @@
 #include "windef.h"
 #include "oleacc.h"
 
+#include "oleacc_De.rc"
 #include "oleacc_En.rc"
 #include "oleacc_Fr.rc"
 #include "oleacc_Ko.rc"
+#include "oleacc_Lt.rc"
 #include "oleacc_Nl.rc"
 #include "oleacc_Pl.rc"

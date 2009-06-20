@@ -49,7 +49,7 @@
 @ stub KiAcquireSpinLock
 @ stub KiReleaseSpinLock
 @ stdcall -norelay ObfDereferenceObject(ptr)
-@ stub ObfReferenceObject
+@ stdcall ObfReferenceObject(ptr)
 @ stub RtlPrefetchMemoryNonTemporal
 @ cdecl -i386 -norelay RtlUlongByteSwap() ntdll.RtlUlongByteSwap
 @ cdecl -ret64 RtlUlonglongByteSwap(double) ntdll.RtlUlonglongByteSwap
@@ -139,10 +139,10 @@
 @ stub ExGetExclusiveWaiterCount
 @ stub ExGetPreviousMode
 @ stub ExGetSharedWaiterCount
-@ stub ExInitializeNPagedLookasideList
+@ stdcall ExInitializeNPagedLookasideList(ptr ptr ptr long long long long)
 @ stub ExInitializePagedLookasideList
-@ stub ExInitializeResourceLite
-@ stub ExInitializeZone
+@ stdcall ExInitializeResourceLite(ptr)
+@ stdcall ExInitializeZone(ptr long ptr long)
 @ stub ExInterlockedAddLargeInteger
 @ stub ExInterlockedAddUlong
 @ stub ExInterlockedDecrementLong
@@ -271,7 +271,7 @@
 @ stub FsRtlPrivateLock
 @ stub FsRtlProcessFileLock
 @ stub FsRtlRegisterFileSystemFilterCallbacks
-@ stub FsRtlRegisterUncProvider
+@ stdcall FsRtlRegisterUncProvider(ptr ptr long)
 @ stub FsRtlReleaseFile
 @ stub FsRtlRemoveLargeMcbEntry
 @ stub FsRtlRemoveMcbEntry
@@ -399,7 +399,7 @@
 @ stub IoGetTopLevelIrp
 @ stdcall IoInitializeIrp(ptr long long)
 @ stub IoInitializeRemoveLockEx
-@ stub IoInitializeTimer
+@ stdcall IoInitializeTimer(ptr ptr ptr)
 @ stub IoInvalidateDeviceRelations
 @ stub IoInvalidateDeviceState
 @ stub IoIsFileOriginRemote
@@ -427,7 +427,7 @@
 @ stub IoRegisterBootDriverReinitialization
 @ stub IoRegisterDeviceInterface
 @ stdcall IoRegisterDriverReinitialization(ptr ptr ptr)
-@ stub IoRegisterFileSystem
+@ stdcall IoRegisterFileSystem(ptr)
 @ stub IoRegisterFsRegistrationChange
 @ stub IoRegisterLastChanceShutdownNotification
 @ stub IoRegisterPlugPlayNotification
@@ -461,13 +461,13 @@
 @ stub IoStartNextPacket
 @ stub IoStartNextPacketByKey
 @ stub IoStartPacket
-@ stub IoStartTimer
+@ stdcall IoStartTimer(ptr)
 @ stub IoStatisticsLock
 @ stub IoStopTimer
 @ stub IoSynchronousInvalidateDeviceRelations
 @ stub IoSynchronousPageWrite
 @ stub IoThreadToProcess
-@ stub IoUnregisterFileSystem
+@ stdcall IoUnregisterFileSystem(ptr)
 @ stub IoUnregisterFsRegistrationChange
 @ stub IoUnregisterPlugPlayNotification
 @ stub IoUnregisterShutdownNotification
@@ -549,7 +549,7 @@
 @ stdcall KeInitializeEvent(ptr long long)
 @ stub KeInitializeInterrupt
 @ stub KeInitializeMutant
-@ stub KeInitializeMutex
+@ stdcall KeInitializeMutex(ptr long)
 @ stub KeInitializeQueue
 @ stub KeInitializeSemaphore
 @ stdcall KeInitializeSpinLock(ptr)
@@ -629,7 +629,7 @@
 @ stub KeUserModeCallback
 @ stub KeWaitForMultipleObjects
 @ stub KeWaitForMutexObject
-@ stub KeWaitForSingleObject
+@ stdcall KeWaitForSingleObject(ptr long long long ptr)
 @ stub KiBugCheckData
 @ stub KiCoprocessorError
 @ stub KiDeliverApc
@@ -919,7 +919,7 @@
 @ stub PsSetProcessWindowStation
 @ stub PsSetThreadHardErrorsAreDisabled
 @ stub PsSetThreadWin32Thread
-@ stub PsTerminateSystemThread
+@ stdcall PsTerminateSystemThread(long)
 @ stub PsThreadType
 @ stub READ_REGISTER_BUFFER_UCHAR
 @ stub READ_REGISTER_BUFFER_ULONG

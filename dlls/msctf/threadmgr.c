@@ -78,6 +78,9 @@ typedef struct tagACLMulti {
     /* const ITfSourceSingleVtbl *SourceSingleVtbl; */
     LONG refCount;
 
+    /* Aggregation */
+    ITfCompartmentMgr  *CompartmentMgr;
+
     const ITfThreadMgrEventSinkVtbl *ThreadMgrEventSinkVtbl; /* internal */
 
     ITfDocumentMgr *focus;
@@ -183,6 +186,8 @@ static void ThreadMgr_Destructor(ThreadMgr *This)
         HeapFree(GetProcessHeap(),0,key);
     }
 
+    CompartmentMgr_Destructor(This->CompartmentMgr);
+
     HeapFree(GetProcessHeap(),0,This);
 }
 
@@ -210,6 +215,10 @@ static HRESULT WINAPI ThreadMgr_QueryInterface(ITfThreadMgr *iface, REFIID iid, 
     else if (IsEqualIID(iid, &IID_ITfClientId))
     {
         *ppvOut = &This->ClientIdVtbl;
+    }
+    else if (IsEqualIID(iid, &IID_ITfCompartmentMgr))
+    {
+        *ppvOut = This->CompartmentMgr;
     }
 
     if (*ppvOut)
@@ -356,9 +365,12 @@ ITfDocumentMgr *pdimNew, ITfDocumentMgr **ppdimPrev)
 
 static HRESULT WINAPI ThreadMgr_IsThreadFocus( ITfThreadMgr* iface, BOOL *pfThreadFocus)
 {
+    HWND focus;
     ThreadMgr *This = (ThreadMgr *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    TRACE("(%p) %p\n",This,pfThreadFocus);
+    focus = GetFocus();
+    *pfThreadFocus = (focus == NULL);
+    return S_OK;
 }
 
 static HRESULT WINAPI ThreadMgr_GetFunctionProvider( ITfThreadMgr* iface, REFCLSID clsid,
@@ -381,8 +393,22 @@ static HRESULT WINAPI ThreadMgr_GetGlobalCompartment( ITfThreadMgr* iface,
 ITfCompartmentMgr **ppCompMgr)
 {
     ThreadMgr *This = (ThreadMgr *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    HRESULT hr;
+    TRACE("(%p) %p\n",This, ppCompMgr);
+
+    if (!ppCompMgr)
+        return E_INVALIDARG;
+
+    if (!globalCompartmentMgr)
+    {
+        hr = CompartmentMgr_Constructor(NULL,&IID_ITfCompartmentMgr,(IUnknown**)&globalCompartmentMgr);
+        if (FAILED(hr))
+            return hr;
+    }
+
+    ITfCompartmentMgr_AddRef(globalCompartmentMgr);
+    *ppCompMgr = globalCompartmentMgr;
+    return S_OK;
 }
 
 static const ITfThreadMgrVtbl ThreadMgr_ThreadMgrVtbl =
@@ -1053,6 +1079,8 @@ HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
     This->ThreadMgrEventSinkVtbl = &ThreadMgr_ThreadMgrEventSinkVtbl;
     This->refCount = 1;
     TlsSetValue(tlsIndex,This);
+
+    CompartmentMgr_Constructor((IUnknown*)This, &IID_IUnknown, (IUnknown**)&This->CompartmentMgr);
 
     list_init(&This->CurrentPreservedKeys);
 

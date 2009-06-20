@@ -774,8 +774,7 @@ struct sVertexT {
 static void fog_test(IDirect3DDevice9 *device)
 {
     HRESULT hr;
-    DWORD color;
-    BYTE r, g, b;
+    D3DCOLOR color;
     float start = 0.0f, end = 1.0f;
     D3DCAPS9 caps;
     int i;
@@ -909,13 +908,13 @@ static void fog_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 160, 360);
     ok(color == 0x00FF0000, "Untransformed vertex with no table or vertex fog has color %08x\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with linear vertex fog has color %08x\n", color);
+    ok(color_match(color, 0x0000ff00, 1), "Untransformed vertex with linear vertex fog has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
     if(caps.RasterCaps & D3DPRASTERCAPS_FOGTABLE)
     {
         color = getPixelColor(device, 480, 360);
-        ok(color == 0x0000FF00 || color == 0x0000FE00, "Transformed vertex with linear table fog has color %08x\n", color);
+        ok(color_match(color, 0x0000ff00, 1), "Transformed vertex with linear table fog has color %08x\n", color);
     }
     else
     {
@@ -979,9 +978,9 @@ static void fog_test(IDirect3DDevice9 *device)
     }
     IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     color = getPixelColor(device, 160, 360);
-    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with vertex fog and z = 0.1 has color %08x\n", color);
+    ok(color_match(color, 0x0000ff00, 1), "Untransformed vertex with vertex fog and z = 0.1 has color %08x\n", color);
     color = getPixelColor(device, 160, 120);
-    ok(color == 0x0000FF00 || color == 0x0000FE00, "Untransformed vertex with vertex fog and z = 1.0 has color %08x\n", color);
+    ok(color_match(color, 0x0000ff00, 1), "Untransformed vertex with vertex fog and z = 1.0 has color %08x\n", color);
     color = getPixelColor(device, 480, 120);
     ok(color == 0x00FFFF00, "Transformed vertex with linear vertex fog has color %08x\n", color);
 
@@ -1026,21 +1025,16 @@ static void fog_test(IDirect3DDevice9 *device)
         }
         IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
         color = getPixelColor(device, 160, 360);
-        ok(color == 0x0000FF00 || color == 0x0000FE00, "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00 or 0x0000fe00\n", mode, color);
+        ok(color_match(color, 0x0000ff00, 1),
+                "Reversed %s fog: z=0.1 has color 0x%08x, expected 0x0000ff00 or 0x0000fe00\n", mode, color);
 
         color = getPixelColor(device, 160, 120);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff);
-        ok(r == 0x00 && g >= 0x29 && g <= 0x2d && b >= 0xd2 && b <= 0xd6,
-           "Reversed %s fog: z=0.7 has color 0x%08x\n", mode, color);
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0x2b, 0xd4), 2),
+                "Reversed %s fog: z=0.7 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 120);
-        r = (color & 0x00ff0000) >> 16;
-        g = (color & 0x0000ff00) >>  8;
-        b = (color & 0x000000ff);
-        ok(r == 0x00 && g >= 0xa8 && g <= 0xac && b >= 0x53 && b <= 0x57,
-           "Reversed %s fog: z=0.4 has color 0x%08x\n", mode, color);
+        ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x00, 0xaa, 0x55), 2),
+                "Reversed %s fog: z=0.4 has color 0x%08x\n", mode, color);
 
         color = getPixelColor(device, 480, 360);
         ok(color == 0x000000ff, "Reversed %s fog: z=0.9 has color 0x%08x, expected 0x000000ff\n", mode, color);
@@ -5594,12 +5588,25 @@ static void vshader_version_varying_test(IDirect3DDevice9 *device) {
     color = getPixelColor(device, 160, 120);
     ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x1a, 0x34, 0x67), 1),
        "vs_3_0 returned color 0x%08x, expected 0x00193366\n", color);
+    /* Accept two ways of oFog handling:
+     *
+     * oFog is supposed to be a scalar. The pixel shader declares a vec4 oFog input and reads all components.
+     * The vertex shader writes oFog without a writemask. There are two ways windows drivers deal with this:
+     *
+     * 1) Keep oFog a scalar, and assign v4 = {oFog, 0, 0, 0}. oFog = 0x33, so the result color is 004d0067.
+     *    This happens with software vertex processing and on Intel cards
+     *
+     * 2) Make oFog a vec4, and assign v4 = {oFog.x, oFog.y, oFog.z, oFog.w}. This way the result color is
+     *    0x004d339a. This happens on Nvidia Geforce 6+ cards
+     */
     color = getPixelColor(device, 160, 360);
-    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1),
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1) ||
+       color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x33, 0x9a), 1),
        "vs_1_1 returned color 0x%08x, expected 0x004c0066\n", color);
     color = getPixelColor(device, 480, 360);
-    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1),
-       "vs_2_0 returned color 0x%08x, expected 0x004c0066\n", color);
+    ok(color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x00, 0x67), 1) ||
+       color_match(color, D3DCOLOR_ARGB(0x00, 0x4d, 0x33, 0x9a), 1),
+       "vs_2_0 returned color 0x%08x, expected 0x004d0067 or 0x004d33a0\n", color);
 
     /* cleanup */
     hr = IDirect3DDevice9_SetPixelShader(device, NULL);
@@ -6666,7 +6673,7 @@ static void fog_srgbwrite_test(IDirect3DDevice9 *device)
         1.0,    1.0,    0.1
     };
     HRESULT hr;
-    DWORD color;
+    D3DCOLOR color;
 
     IDirect3DDevice9_GetDirect3D(device, &d3d);
     /* Ask for srgb writing on D3DRTYPE_TEXTURE. Some Windows drivers do not report it on surfaces.
@@ -6734,8 +6741,8 @@ static void fog_srgbwrite_test(IDirect3DDevice9 *device)
     hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
     color = getPixelColor(device, 160, 360);
-    ok(color == 0x00808080 || color == 0x007f7f7f || color == 0x00818181,
-       "Fog with D3DRS_SRGBWRITEENABLE returned color 0x%08x, expected 0x00808080\n", color);
+    ok(color_match(color, 0x00808080, 1),
+            "Fog with D3DRS_SRGBWRITEENABLE returned color 0x%08x, expected 0x00808080\n", color);
 }
 
 static void alpha_test(IDirect3DDevice9 *device)

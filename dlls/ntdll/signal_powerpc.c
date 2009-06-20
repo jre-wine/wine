@@ -1086,6 +1086,31 @@ void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
     if (status) raise_status( status, rec );
 }
 
+/***********************************************************************
+ *           call_thread_entry_point
+ */
+void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg )
+{
+    __TRY
+    {
+        exit_thread( entry( arg ));
+    }
+    __EXCEPT(unhandled_exception_filter)
+    {
+        NtTerminateThread( GetCurrentThread(), GetExceptionCode() );
+    }
+    __ENDTRY
+    abort();  /* should not be reached */
+}
+
+/***********************************************************************
+ *           RtlExitUserThread  (NTDLL.@)
+ */
+void WINAPI RtlExitUserThread( ULONG status )
+{
+    exit_thread( status );
+}
+
 /**********************************************************************
  *              DbgBreakPoint   (NTDLL.@)
  */

@@ -2215,13 +2215,13 @@ BOOL WINAPI TerminateProcess( HANDLE handle, DWORD exit_code )
  *  Nothing.
  */
 #ifdef __i386__
-__ASM_GLOBAL_FUNC( ExitProcess, /* Shrinker depend on this particular ExitProcess implementation */
+__ASM_STDCALL_FUNC( ExitProcess, 4, /* Shrinker depend on this particular ExitProcess implementation */
                    "pushl %ebp\n\t"
                    ".byte 0x8B, 0xEC\n\t" /* movl %esp, %ebp */
                    ".byte 0x6A, 0x00\n\t" /* pushl $0 */
                    ".byte 0x68, 0x00, 0x00, 0x00, 0x00\n\t" /* pushl $0 - 4 bytes immediate */
                    "pushl 8(%ebp)\n\t"
-                   "call " __ASM_NAME("process_ExitProcess") "\n\t"
+                   "call " __ASM_NAME("process_ExitProcess") __ASM_STDCALL(4) "\n\t"
                    "leave\n\t"
                    "ret $4" )
 
@@ -3131,6 +3131,27 @@ BOOL WINAPI GetProcessHandleCount(HANDLE hProcess, DWORD *cnt)
                                        cnt, sizeof(*cnt), NULL);
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
+}
+
+/******************************************************************
+ *		QueryFullProcessImageNameA (KERNEL32.@)
+ */
+BOOL WINAPI QueryFullProcessImageNameA(HANDLE hProcess, DWORD dwFlags, LPSTR lpExeName, PDWORD pdwSize)
+{
+    BOOL retval;
+    DWORD pdwSizeW = *pdwSize;
+    LPWSTR lpExeNameW = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, *pdwSize * sizeof(WCHAR));
+
+    retval = QueryFullProcessImageNameW(hProcess, dwFlags, lpExeNameW, &pdwSizeW);
+
+    if(retval)
+        retval = (0 != WideCharToMultiByte(CP_ACP, 0, lpExeNameW, -1,
+                               lpExeName, *pdwSize, NULL, NULL));
+    if(retval)
+        *pdwSize = strlen(lpExeName);
+
+    HeapFree(GetProcessHeap(), 0, lpExeNameW);
+    return retval;
 }
 
 /******************************************************************

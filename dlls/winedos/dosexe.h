@@ -363,7 +363,6 @@ extern DWORD WINAPI DOSVM_Loop( HANDLE hThread );
 extern void WINAPI DOSVM_QueueEvent( INT irq, INT priority, DOSRELAY relay, LPVOID data );
 extern void WINAPI DOSVM_PIC_ioport_out( WORD port, BYTE val );
 extern void WINAPI DOSVM_SetTimer( UINT ticks );
-extern UINT WINAPI DOSVM_GetTimer( void );
 
 /* devices.c */
 extern void DOSDEV_InstallDOSDevices(void);
@@ -450,7 +449,6 @@ extern void WINAPI DOSVM_Int31Handler(CONTEXT86*);
 extern void WINAPI DOSVM_RawModeSwitchHandler(CONTEXT86*);
 extern BOOL DOSVM_IsDos32(void);
 extern FARPROC16 WINAPI DPMI_AllocInternalRMCB(RMCBPROC);
-extern void WINAPI DPMI_FreeInternalRMCB(FARPROC16);
 extern int DPMI_CallRMProc(CONTEXT86*,LPWORD,int,int);
 extern BOOL DOSVM_CheckWrappers(CONTEXT86*);
 

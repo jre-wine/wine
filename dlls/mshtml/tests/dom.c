@@ -58,13 +58,9 @@ static const char cond_comment_str[] =
     "<!--[if gte IE 4]> <br> <![endif]-->"
     "</body></html>";
 
-static const WCHAR noneW[] = {'N','o','n','e',0};
-
 static WCHAR characterW[] = {'c','h','a','r','a','c','t','e','r',0};
 static WCHAR texteditW[] = {'t','e','x','t','e','d','i','t',0};
 static WCHAR wordW[] = {'w','o','r','d',0};
-
-static const WCHAR text_javascriptW[] = {'t','e','x','t','/','j','a','v','a','s','c','r','i','p','t',0};
 
 typedef enum {
     ET_NONE,
@@ -374,9 +370,9 @@ static const char *dbgstr_guid(REFIID riid)
 
 static int strcmp_wa(LPCWSTR strw, const char *stra)
 {
-    WCHAR buf[512];
-    MultiByteToWideChar(CP_ACP, 0, stra, -1, buf, sizeof(buf)/sizeof(WCHAR));
-    return lstrcmpW(strw, buf);
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
 }
 
 static BSTR a2bstr(const char *str)
@@ -2957,7 +2953,8 @@ static void test_default_style(IHTMLStyle *style)
 
     hres = IHTMLStyle_get_margin(style, &str);
     ok(hres == S_OK, "get_margin failed: %08x\n", hres);
-    ok(strcmp_wa(str, "1"), "margin = %s\n", dbgstr_w(str));
+    todo_wine
+    ok(!strcmp_wa(str, "1px"), "margin = %s\n", dbgstr_w(str));
 
     hres = IHTMLStyle_put_margin(style, NULL);
     ok(hres == S_OK, "put_margin failed: %08x\n", hres);
@@ -3637,7 +3634,7 @@ static void test_default_selection(IHTMLDocument2 *doc)
 
     hres = IHTMLSelectionObject_get_type(selection, &str);
     ok(hres == S_OK, "get_type failed: %08x\n", hres);
-    ok(!lstrcmpW(str, noneW), "type = %s\n", dbgstr_w(str));
+    ok(!strcmp_wa(str, "None"), "type = %s\n", dbgstr_w(str));
     SysFreeString(str);
 
     hres = IHTMLSelectionObject_createRange(selection, &disp);
@@ -3660,7 +3657,6 @@ static void test_default_body(IHTMLBodyElement *body)
     VARIANT v;
     WCHAR sBodyText[] = {'#','F','F','0','0','0','0',0};
     WCHAR sTextInvalid[] = {'I','n','v','a','l','i','d',0};
-    WCHAR sResInvalid[] = {'#','0','0','a','0','d','0',0};
 
     bstr = (void*)0xdeadbeef;
     hres = IHTMLBodyElement_get_background(body, &bstr);
@@ -3687,12 +3683,13 @@ static void test_default_body(IHTMLBodyElement *body)
     V_BSTR(&v) = SysAllocString(sTextInvalid);
     hres = IHTMLBodyElement_put_text(body, v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+    VariantClear(&v);
 
     V_VT(&v) = VT_NULL;
     hres = IHTMLBodyElement_get_text(body, &v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
-    ok(!lstrcmpW(sResInvalid, V_BSTR(&v)), "bstr != sResInvalid\n");
+    ok(!strcmp_wa(V_BSTR(&v), "#00a0d0"), "v != '#00a0d0'\n");
     VariantClear(&v);
 
     /* get_text - Valid Text */
@@ -3700,19 +3697,19 @@ static void test_default_body(IHTMLBodyElement *body)
     V_BSTR(&v) = SysAllocString(sBodyText);
     hres = IHTMLBodyElement_put_text(body, v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
+    VariantClear(&v);
 
     V_VT(&v) = VT_NULL;
     hres = IHTMLBodyElement_get_text(body, &v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
-    ok(lstrcmpW(bstr, V_BSTR(&v)), "bstr != V_BSTR(&v)\n");
+    ok(!strcmp_wa(V_BSTR(&v), "#ff0000"), "v != '#ff0000'\n");
     VariantClear(&v);
 }
 
 static void test_body_funs(IHTMLBodyElement *body)
 {
     static WCHAR sRed[] = {'r','e','d',0};
-    static WCHAR sRedbg[] = {'#','f','f','0','0','0','0',0};
     VARIANT vbg;
     VARIANT vDefaultbg;
     HRESULT hres;
@@ -3730,7 +3727,7 @@ static void test_body_funs(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_get_bgColor(body, &vbg);
     ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
     ok(V_VT(&vDefaultbg) == VT_BSTR, "V_VT(&vDefaultbg) != VT_BSTR\n");
-    ok(!lstrcmpW(V_BSTR(&vbg), sRedbg), "Unexpected type %s\n", dbgstr_w(V_BSTR(&vbg)));
+    ok(!strcmp_wa(V_BSTR(&vbg), "#ff0000"), "Unexpected bgcolor %s\n", dbgstr_w(V_BSTR(&vbg)));
     VariantClear(&vbg);
 
     /* Restore Originial */
@@ -4316,7 +4313,7 @@ static void test_elems(IHTMLDocument2 *doc)
 
             hres = IHTMLScriptElement_get_type(script, &type);
             ok(hres == S_OK, "get_type failed: %08x\n", hres);
-            ok(!lstrcmpW(type, text_javascriptW), "Unexpected type %s\n", dbgstr_w(type));
+            ok(!strcmp_wa(type, "text/javascript"), "Unexpected type %s\n", dbgstr_w(type));
             SysFreeString(type);
 
             /* test defer */
@@ -4730,12 +4727,10 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
         BSTR state;
         HRESULT hres;
 
-        static const WCHAR completeW[] = {'c','o','m','p','l','e','t','e',0};
-
         hres = IHTMLDocument2_get_readyState(notif_doc, &state);
         ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
 
-        if(!lstrcmpW(state, completeW))
+        if(!strcmp_wa(state, "complete"))
             doc_complete = TRUE;
 
         SysFreeString(state);
@@ -4874,7 +4869,7 @@ static void gecko_installer_workaround(BOOL disable)
 }
 
 /* Check if Internet Explorer is configured to run in "Enhanced Security Configuration" (aka hardened mode) */
-/* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/misc.c */
+/* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/sec_mgr.c */
 static BOOL is_ie_hardened(void)
 {
     HKEY zone_map;

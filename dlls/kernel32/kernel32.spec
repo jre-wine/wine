@@ -865,7 +865,7 @@
 @ stdcall QueryDepthSList(ptr) ntdll.RtlQueryDepthSList
 @ stdcall QueryDosDeviceA(str ptr long)
 @ stdcall QueryDosDeviceW(wstr ptr long)
-@ stub QueryFullProcessImageNameA
+@ stdcall QueryFullProcessImageNameA(ptr long ptr ptr)
 @ stdcall QueryFullProcessImageNameW(ptr long ptr ptr)
 @ stdcall QueryInformationJobObject(long long ptr long ptr)
 # @ stub QueryMemoryResourceNotification
@@ -928,6 +928,7 @@
 @ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
 @ stdcall RtlUnwind(ptr ptr ptr long) ntdll.RtlUnwind
+@ stdcall -arch=x86_64 RtlUnwindEx(long long ptr long ptr) ntdll.RtlUnwindEx
 @ stdcall -arch=x86_64 RtlVirtualUnwind(long long long ptr ptr ptr ptr ptr) ntdll.RtlVirtualUnwind
 @ stdcall RtlZeroMemory(ptr long) ntdll.RtlZeroMemory
 @ stdcall -i386 -norelay SMapLS()

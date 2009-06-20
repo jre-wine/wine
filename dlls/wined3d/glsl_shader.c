@@ -657,20 +657,21 @@ static void shader_glsl_load_constants(
         /* Upload the environment bump map matrix if needed. The needsbumpmat member specifies the texture stage to load the matrix from.
          * It can't be 0 for a valid texbem instruction.
          */
-        for(i = 0; i < ((IWineD3DPixelShaderImpl *) pshader)->numbumpenvmatconsts; i++) {
-            IWineD3DPixelShaderImpl *ps = (IWineD3DPixelShaderImpl *) pshader;
-            int stage = ps->luminanceconst[i].texunit;
+        for(i = 0; i < MAX_TEXTURES; i++) {
+            const float *data;
 
-            const float *data = (const float *)&stateBlock->textureState[(int)ps->bumpenvmatconst[i].texunit][WINED3DTSS_BUMPENVMAT00];
+            if(prog->bumpenvmat_location[i] == -1) continue;
+
+            data = (const float *)&stateBlock->textureState[i][WINED3DTSS_BUMPENVMAT00];
             GL_EXTCALL(glUniformMatrix2fvARB(prog->bumpenvmat_location[i], 1, 0, data));
             checkGLcall("glUniformMatrix2fvARB");
 
             /* texbeml needs the luminance scale and offset too. If texbeml is used, needsbumpmat
              * is set too, so we can check that in the needsbumpmat check
              */
-            if(ps->baseShader.reg_maps.luminanceparams[stage]) {
-                const GLfloat *scale = (const GLfloat *)&stateBlock->textureState[stage][WINED3DTSS_BUMPENVLSCALE];
-                const GLfloat *offset = (const GLfloat *)&stateBlock->textureState[stage][WINED3DTSS_BUMPENVLOFFSET];
+            if(prog->luminancescale_location[i] != -1) {
+                const GLfloat *scale = (const GLfloat *)&stateBlock->textureState[i][WINED3DTSS_BUMPENVLSCALE];
+                const GLfloat *offset = (const GLfloat *)&stateBlock->textureState[i][WINED3DTSS_BUMPENVLOFFSET];
 
                 GL_EXTCALL(glUniform1fvARB(prog->luminancescale_location[i], 1, scale));
                 checkGLcall("glUniform1fvARB");
@@ -864,28 +865,20 @@ static void shader_generate_glsl_declarations(IWineD3DBaseShader *iface, const s
             shader_addline(buffer, "void order_ps_input();\n");
         }
     } else {
-        IWineD3DPixelShaderImpl *ps_impl = (IWineD3DPixelShaderImpl *) This;
-
-        ps_impl->numbumpenvmatconsts = 0;
         for(i = 0; i < (sizeof(reg_maps->bumpmat) / sizeof(reg_maps->bumpmat[0])); i++) {
             if(!reg_maps->bumpmat[i]) {
                 continue;
             }
 
-            ps_impl->bumpenvmatconst[(int) ps_impl->numbumpenvmatconsts].texunit = i;
             shader_addline(buffer, "uniform mat2 bumpenvmat%d;\n", i);
 
             if(reg_maps->luminanceparams) {
-                ps_impl->luminanceconst[(int) ps_impl->numbumpenvmatconsts].texunit = i;
                 shader_addline(buffer, "uniform float luminancescale%d;\n", i);
                 shader_addline(buffer, "uniform float luminanceoffset%d;\n", i);
                 extra_constants_needed++;
-            } else {
-                ps_impl->luminanceconst[(int) ps_impl->numbumpenvmatconsts].texunit = -1;
             }
 
             extra_constants_needed++;
-            ps_impl->numbumpenvmatconsts++;
         }
 
         if(ps_args->srgb_correction) {
@@ -3430,7 +3423,8 @@ static void handle_ps3_input(SHADER_BUFFER *buffer, const WineD3D_GL_Info *gl_in
      * input varyings are assigned above, if the optimizer works properly.
      */
     for(i = 0; i < in_count + 2; i++) {
-        if(set[i] != WINED3DSP_WRITEMASK_ALL) {
+        if (set[i] && set[i] != WINED3DSP_WRITEMASK_ALL)
+        {
             unsigned int size = 0;
             memset(reg_mask, 0, sizeof(reg_mask));
             if(!(set[i] & WINED3DSP_WRITEMASK_0)) {
@@ -3952,22 +3946,12 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     GLhandleARB reorder_shader_id          = 0;
     unsigned int i;
     char glsl_name[8];
-    GLhandleARB vshader_id, pshader_id;
     struct ps_compile_args ps_compile_args;
     struct vs_compile_args vs_compile_args;
 
-    if(use_vs) {
-        find_vs_compile_args((IWineD3DVertexShaderImpl*)This->stateBlock->vertexShader, This->stateBlock, &vs_compile_args);
-    } else {
-        /* FIXME: Do we really have to spend CPU cycles to generate a few zeroed bytes? */
-        memset(&vs_compile_args, 0, sizeof(vs_compile_args));
-    }
-    if(use_ps) {
-        find_ps_compile_args((IWineD3DPixelShaderImpl*)This->stateBlock->pixelShader, This->stateBlock, &ps_compile_args);
-    } else {
-        /* FIXME: Do we really have to spend CPU cycles to generate a few zeroed bytes? */
-        memset(&ps_compile_args, 0, sizeof(ps_compile_args));
-    }
+    if (vshader) find_vs_compile_args((IWineD3DVertexShaderImpl *)vshader, This->stateBlock, &vs_compile_args);
+    if (pshader) find_ps_compile_args((IWineD3DPixelShaderImpl *)pshader, This->stateBlock, &ps_compile_args);
+
     entry = get_glsl_program_entry(priv, vshader, pshader, &vs_compile_args, &ps_compile_args);
     if (entry) {
         priv->glsl_program = entry;
@@ -3992,14 +3976,10 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     /* Set the current program */
     priv->glsl_program = entry;
 
-    if(use_vs) {
-        vshader_id = find_glsl_vshader((IWineD3DVertexShaderImpl *) vshader, &vs_compile_args);
-    } else {
-        vshader_id = 0;
-    }
-
     /* Attach GLSL vshader */
-    if (vshader_id) {
+    if (vshader)
+    {
+        GLhandleARB vshader_id = find_glsl_vshader((IWineD3DVertexShaderImpl *)vshader, &vs_compile_args);
         WORD map = ((IWineD3DBaseShaderImpl *)vshader)->baseShader.reg_maps.input_registers;
         char tmp_name[10];
 
@@ -4037,14 +4017,10 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
         list_add_head(&((IWineD3DBaseShaderImpl *)vshader)->baseShader.linked_programs, &entry->vshader_entry);
     }
 
-    if(use_ps) {
-        pshader_id = find_glsl_pshader((IWineD3DPixelShaderImpl *) pshader, &ps_compile_args);
-    } else {
-        pshader_id = 0;
-    }
-
     /* Attach GLSL pshader */
-    if (pshader_id) {
+    if (pshader)
+    {
+        GLhandleARB pshader_id = find_glsl_pshader((IWineD3DPixelShaderImpl *)pshader, &ps_compile_args);
         TRACE("Attaching GLSL shader object %u to program %u\n", pshader_id, programId);
         GL_EXTCALL(glAttachObjectARB(programId, pshader_id));
         checkGLcall("glAttachObjectARB");
@@ -4077,26 +4053,25 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     }
 
     if(pshader) {
-        for(i = 0; i < ((IWineD3DPixelShaderImpl*)pshader)->numbumpenvmatconsts; i++) {
-            char name[32];
-            sprintf(name, "bumpenvmat%d", ((IWineD3DPixelShaderImpl*)pshader)->bumpenvmatconst[i].texunit);
+        char name[32];
+        WORD map;
+
+        for(i = 0; i < MAX_TEXTURES; i++) {
+            sprintf(name, "bumpenvmat%u", i);
             entry->bumpenvmat_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
-            sprintf(name, "luminancescale%d", ((IWineD3DPixelShaderImpl*)pshader)->luminanceconst[i].texunit);
+            sprintf(name, "luminancescale%u", i);
             entry->luminancescale_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
-            sprintf(name, "luminanceoffset%d", ((IWineD3DPixelShaderImpl*)pshader)->luminanceconst[i].texunit);
+            sprintf(name, "luminanceoffset%u", i);
             entry->luminanceoffset_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
         }
-    }
 
-    if (use_ps && ps_compile_args.np2_fixup) {
-        char name[32];
-        for (i = 0; i < MAX_FRAGMENT_SAMPLERS; ++i) {
-            if (ps_compile_args.np2_fixup & (1 << i)) {
-                sprintf(name, "PsamplerNP2Fixup%u", i);
-                entry->np2Fixup_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
-            } else {
-                entry->np2Fixup_location[i] = -1;
-            }
+        map = ps_compile_args.np2_fixup;
+        for (i = 0; map; map >>= 1, ++i)
+        {
+            if (!(map & 1)) continue;
+
+            sprintf(name, "PsamplerNP2Fixup%u", i);
+            entry->np2Fixup_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
         }
     }
 
@@ -4126,14 +4101,8 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
      * fixed function fragment processing setups. So once the program is linked these samplers
      * won't change.
      */
-    if(vshader_id) {
-        /* Load vertex shader samplers */
-        shader_glsl_load_vsamplers(gl_info, This->texUnitMap, programId);
-    }
-    if(pshader_id) {
-        /* Load pixel shader samplers */
-        shader_glsl_load_psamplers(gl_info, This->texUnitMap, programId);
-    }
+    if (vshader) shader_glsl_load_vsamplers(gl_info, This->texUnitMap, programId);
+    if (pshader) shader_glsl_load_psamplers(gl_info, This->texUnitMap, programId);
 
     /* If the local constants do not have to be loaded with the environment constants,
      * load them now to have them hardcoded in the GLSL program. This saves some CPU cycles
@@ -4399,11 +4368,10 @@ static int glsl_program_key_compare(const void *key, const struct wine_rb_entry 
     if (k->pshader > prog->pshader) return 1;
     else if (k->pshader < prog->pshader) return -1;
 
-    cmp = memcmp(&k->vs_args, &prog->vs_args, sizeof(prog->vs_args));
-    if (cmp) return cmp;
+    if (k->vshader && (cmp = memcmp(&k->vs_args, &prog->vs_args, sizeof(prog->vs_args)))) return cmp;
+    if (k->pshader && (cmp = memcmp(&k->ps_args, &prog->ps_args, sizeof(prog->ps_args)))) return cmp;
 
-    cmp = memcmp(&k->ps_args, &prog->ps_args, sizeof(prog->ps_args));
-    return cmp;
+    return 0;
 }
 
 static BOOL constant_heap_init(struct constant_heap *heap, unsigned int constant_count)

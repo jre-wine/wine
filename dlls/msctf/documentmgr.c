@@ -45,6 +45,9 @@ typedef struct tagDocumentMgr {
     const ITfSourceVtbl *SourceVtbl;
     LONG refCount;
 
+    /* Aggregation */
+    ITfCompartmentMgr  *CompartmentMgr;
+
     ITfContext*  contextStack[2]; /* limit of 2 contexts */
     ITfThreadMgrEventSink* ThreadMgrSink;
 } DocumentMgr;
@@ -61,6 +64,7 @@ static void DocumentMgr_Destructor(DocumentMgr *This)
         ITfContext_Release(This->contextStack[0]);
     if (This->contextStack[1])
         ITfContext_Release(This->contextStack[1]);
+    CompartmentMgr_Destructor(This->CompartmentMgr);
     HeapFree(GetProcessHeap(),0,This);
 }
 
@@ -76,6 +80,10 @@ static HRESULT WINAPI DocumentMgr_QueryInterface(ITfDocumentMgr *iface, REFIID i
     else if (IsEqualIID(iid, &IID_ITfSource))
     {
         *ppvOut = &This->SourceVtbl;
+    }
+    else if (IsEqualIID(iid, &IID_ITfCompartmentMgr))
+    {
+        *ppvOut = This->CompartmentMgr;
     }
 
     if (*ppvOut)
@@ -115,7 +123,7 @@ static HRESULT WINAPI DocumentMgr_CreateContext(ITfDocumentMgr *iface,
 {
     DocumentMgr *This = (DocumentMgr *)iface;
     TRACE("(%p) 0x%x 0x%x %p %p %p\n",This,tidOwner,dwFlags,punk,ppic,pecTextStore);
-    return Context_Constructor(tidOwner, punk, ppic, pecTextStore);
+    return Context_Constructor(tidOwner, punk, iface, ppic, pecTextStore);
 }
 
 static HRESULT WINAPI DocumentMgr_Push(ITfDocumentMgr *iface, ITfContext *pic)
@@ -138,7 +146,7 @@ static HRESULT WINAPI DocumentMgr_Push(ITfDocumentMgr *iface, ITfContext *pic)
     This->contextStack[0] = check;
 
     ITfThreadMgrEventSink_OnPushContext(This->ThreadMgrSink,check);
-    Context_Initialize(check);
+    Context_Initialize(check, iface);
 
     return S_OK;
 }
@@ -302,6 +310,8 @@ HRESULT DocumentMgr_Constructor(ITfThreadMgrEventSink *ThreadMgrSink, ITfDocumen
     This->SourceVtbl = &DocumentMgr_SourceVtbl;
     This->refCount = 1;
     This->ThreadMgrSink = ThreadMgrSink;
+
+    CompartmentMgr_Constructor((IUnknown*)This, &IID_IUnknown, (IUnknown**)&This->CompartmentMgr);
 
     TRACE("returning %p\n", This);
     *ppOut = (ITfDocumentMgr*)This;

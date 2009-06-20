@@ -287,6 +287,7 @@ static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct sh
 
         case WINED3DSPR_MISCTYPE:
             if (pshader && reg->idx == 0) reg_maps->vpos = 1;
+            if (pshader && reg->idx == 1) reg_maps->usesfacing = 1;
             break;
 
         case WINED3DSPR_CONST:
@@ -530,6 +531,7 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
             pToken += 4;
 
             list_add_head(&This->baseShader.constantsI, &lconst->entry);
+            reg_maps->local_int_consts |= (1 << dst.reg.idx);
         }
         else if (ins.handler_idx == WINED3DSIH_DEFB)
         {
@@ -690,6 +692,10 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
             else if(ins.handler_idx == WINED3DSIH_TEXLDD)
             {
                 reg_maps->usestexldd = 1;
+            }
+            else if(ins.handler_idx == WINED3DSIH_TEXLDL)
+            {
+                reg_maps->usestexldl = 1;
             }
             else if(ins.handler_idx == WINED3DSIH_MOVA)
             {

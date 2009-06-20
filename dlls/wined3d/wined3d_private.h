@@ -205,6 +205,28 @@ static inline float float_16_to_32(const unsigned short *in) {
     }
 }
 
+static inline float float_24_to_32(DWORD in)
+{
+    const float sgn = in & 0x800000 ? -1.0f : 1.0f;
+    const unsigned short e = (in & 0x780000) >> 19;
+    const unsigned short m = in & 0x7ffff;
+
+    if (e == 0)
+    {
+        if (m == 0) return sgn * 0.0f; /* +0.0 or -0.0 */
+        else return sgn * pow(2, -6.0f) * ((float)m / 524288.0f);
+    }
+    else if (e < 15)
+    {
+        return sgn * pow(2, (float)e - 7.0f) * (1.0f + ((float)m / 524288.0f));
+    }
+    else
+    {
+        if (m == 0) return sgn / 0.0; /* +INF / -INF */
+        else return 0.0 / 0.0; /* NAN */
+    }
+}
+
 /**
  * Settings 
  */
@@ -602,18 +624,26 @@ typedef struct shader_reg_maps
     WORD output_registers;                  /* MAX_REG_OUTPUT, 12 */
     WORD integer_constants;                 /* MAX_CONST_I, 16 */
     WORD boolean_constants;                 /* MAX_CONST_B, 16 */
+    WORD local_int_consts;                  /* MAX_CONST_I, 16 */
     WORD local_bool_consts;                 /* MAX_CONST_B, 16 */
 
     WINED3DSAMPLER_TEXTURE_TYPE sampler_type[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
     BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
-    char usesnrm, vpos, usesdsx, usesdsy, usestexldd, usesmova;
-    char usesrelconstF;
+
+    unsigned usesnrm        : 1;
+    unsigned vpos           : 1;
+    unsigned usesdsx        : 1;
+    unsigned usesdsy        : 1;
+    unsigned usestexldd     : 1;
+    unsigned usesmova       : 1;
+    unsigned usesfacing     : 1;
+    unsigned usesrelconstF  : 1;
+    unsigned fog            : 1;
+    unsigned usestexldl     : 1;
+    unsigned padding        : 6;
 
     /* Whether or not loops are used in this shader, and nesting depth */
     unsigned loop_depth;
-
-    /* Whether or not this shader uses fog */
-    char fog;
 
 } shader_reg_maps;
 
@@ -732,11 +762,6 @@ enum vertexprocessing_mode {
 };
 
 #define WINED3D_CONST_NUM_UNUSED ~0U
-
-struct stb_const_desc {
-    unsigned char           texunit;
-    UINT                    const_num;
-};
 
 enum fogmode {
     FOG_OFF,
@@ -1925,6 +1950,13 @@ struct IWineD3DSurfaceImpl
 extern const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl;
 extern const IWineD3DSurfaceVtbl IWineGDISurface_Vtbl;
 
+UINT surface_calculate_size(const struct GlPixelFormatDesc *format_desc, UINT alignment, UINT width, UINT height);
+void surface_gdi_cleanup(IWineD3DSurfaceImpl *This);
+HRESULT surface_init(IWineD3DSurfaceImpl *surface, WINED3DSURFTYPE surface_type, UINT alignment,
+        UINT width, UINT height, UINT level, BOOL lockable, BOOL discard, WINED3DMULTISAMPLE_TYPE multisample_type,
+        UINT multisample_quality, IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format,
+        WINED3DPOOL pool, IUnknown *parent);
+
 /* Predeclare the shared Surface functions */
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_QueryInterface(IWineD3DSurface *iface, REFIID riid, LPVOID *ppobj);
 ULONG WINAPI IWineD3DBaseSurfaceImpl_AddRef(IWineD3DSurface *iface);
@@ -2051,6 +2083,9 @@ typedef enum {
     CONVERT_G16R16,
     CONVERT_R16G16F,
     CONVERT_R32G32F,
+    CONVERT_D15S1,
+    CONVERT_D24X4S4,
+    CONVERT_D24FS8,
 } CONVERT_TYPES;
 
 HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing, GLenum *format, GLenum *internal, GLenum *type, CONVERT_TYPES *convert, int *target_bpp, BOOL srgb_mode);
@@ -2690,9 +2725,6 @@ typedef struct IWineD3DPixelShaderImpl {
     void                        *backend_priv;
 
     /* Some information about the shader behavior */
-    struct stb_const_desc       bumpenvmatconst[MAX_TEXTURES];
-    unsigned char               numbumpenvmatconsts;
-    struct stb_const_desc       luminanceconst[MAX_TEXTURES];
     char                        vpos_uniform;
 
     BOOL                        color0_mov;
@@ -2750,6 +2782,7 @@ extern WINED3DFORMAT pixelformat_for_depth(DWORD depth);
 #define WINED3DFMT_FLAG_RENDERTARGET             0x10
 #define WINED3DFMT_FLAG_FOURCC                   0x20
 #define WINED3DFMT_FLAG_FBO_ATTACHABLE           0x40
+#define WINED3DFMT_FLAG_COMPRESSED               0x80
 
 struct GlPixelFormatDesc
 {
@@ -2761,6 +2794,10 @@ struct GlPixelFormatDesc
     UINT byte_count;
     WORD depth_size;
     WORD stencil_size;
+
+    UINT block_width;
+    UINT block_height;
+    UINT block_byte_count;
 
     enum wined3d_ffp_emit_idx emit_idx;
     GLint component_count;

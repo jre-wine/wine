@@ -50,7 +50,19 @@
  * shared location for an "All Users" entry then do so.  As a suggestion the
  * shared menu Wine base could be writable to the wine group, or a wineadm 
  * group.
- * 
+ *  Clean up fd.o menu icons and .directory files when the menu is deleted
+ * in Windows.
+ *  Generate icons for file open handlers to go into the "Open with..."
+ * list. What does Windows use, the default icon for the .EXE file? It's
+ * not in the registry.
+ *  Associate applications under HKCR\Applications to open any MIME type
+ * (by associating with application/octet-stream, or how?).
+ *  Clean up fd.o MIME types when they are deleted in Windows, their icons
+ * too. Very hard - once we associate them with fd.o, we can't tell whether
+ * they are ours or not, and the extension <-> MIME type mapping isn't
+ * one-to-one either.
+ *  Wine's HKCR is broken - it doesn't merge HKCU\Software\Classes, so apps
+ * that write associations there won't associate (#17019).
  */
 
 #include "config.h"
@@ -798,13 +810,23 @@ static char *extract_icon( LPCWSTR path, int index, BOOL bWait )
     return xpm_path;
 }
 
-static BOOL write_desktop_entry(const char *location, const char *linkname, const char *path,
-                                const char *args, const char *descr, const char *workdir,
-                                const char *icon)
+static HKEY open_menus_reg_key(void)
+{
+    static const WCHAR Software_Wine_FileOpenAssociationsW[] = {
+        'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\','M','e','n','u','F','i','l','e','s',0};
+    HKEY assocKey;
+    if (RegCreateKeyW(HKEY_CURRENT_USER, Software_Wine_FileOpenAssociationsW, &assocKey) == ERROR_SUCCESS)
+        return assocKey;
+    return NULL;
+}
+
+static BOOL write_desktop_entry(const char *unix_link, const char *location, const char *linkname,
+                                const char *path, const char *args, const char *descr,
+                                const char *workdir, const char *icon)
 {
     FILE *file;
 
-    WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_a(location),
+    WINE_TRACE("(%s,%s,%s,%s,%s,%s,%s,%s)\n", wine_dbgstr_a(unix_link), wine_dbgstr_a(location),
                wine_dbgstr_a(linkname), wine_dbgstr_a(path), wine_dbgstr_a(args),
                wine_dbgstr_a(descr), wine_dbgstr_a(workdir), wine_dbgstr_a(icon));
 
@@ -826,6 +848,19 @@ static BOOL write_desktop_entry(const char *location, const char *linkname, cons
         fprintf(file, "Icon=%s\n", icon);
 
     fclose(file);
+
+    if (unix_link)
+    {
+        HKEY hkey = open_menus_reg_key();
+        if (hkey)
+        {
+            RegSetValueExA(hkey, location, 0, REG_SZ, (BYTE*) unix_link, lstrlenA(unix_link) + 1);
+            RegCloseKey(hkey);
+        }
+        else
+            return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -856,7 +891,7 @@ static BOOL write_directory_entry(const char *directory, const char *location)
     return TRUE;
 }
 
-static BOOL write_menu_file(const char *filename)
+static BOOL write_menu_file(const char *unix_link, const char *filename)
 {
     char *tempfilename;
     FILE *tempfile = NULL;
@@ -947,12 +982,21 @@ end:
     if (!ret && tempfilename)
         remove(tempfilename);
     free(tempfilename);
+    if (ret)
+    {
+        HKEY hkey = open_menus_reg_key();
+        if (hkey)
+        {
+            RegSetValueExA(hkey, menuPath, 0, REG_SZ, (BYTE*) unix_link, lstrlenA(unix_link) + 1);
+            RegCloseKey(hkey);
+        }
+    }
     HeapFree(GetProcessHeap(), 0, name);
     HeapFree(GetProcessHeap(), 0, menuPath);
     return ret;
 }
 
-static BOOL write_menu_entry(const char *link, const char *path, const char *args,
+static BOOL write_menu_entry(const char *unix_link, const char *link, const char *path, const char *args,
                              const char *descr, const char *workdir, const char *icon)
 {
     const char *linkname;
@@ -961,9 +1005,9 @@ static BOOL write_menu_entry(const char *link, const char *path, const char *arg
     char *filename = NULL;
     BOOL ret = TRUE;
 
-    WINE_TRACE("(%s, %s, %s, %s, %s, %s)\n", wine_dbgstr_a(link), wine_dbgstr_a(path),
-               wine_dbgstr_a(args), wine_dbgstr_a(descr), wine_dbgstr_a(workdir),
-               wine_dbgstr_a(icon));
+    WINE_TRACE("(%s, %s, %s, %s, %s, %s, %s)\n", wine_dbgstr_a(unix_link), wine_dbgstr_a(link),
+               wine_dbgstr_a(path), wine_dbgstr_a(args), wine_dbgstr_a(descr),
+               wine_dbgstr_a(workdir), wine_dbgstr_a(icon));
 
     linkname = strrchr(link, '/');
     if (linkname == NULL)
@@ -987,7 +1031,7 @@ static BOOL write_menu_entry(const char *link, const char *path, const char *arg
         goto end;
     }
     *desktopDir = '/';
-    if (!write_desktop_entry(desktopPath, linkname, path, args, descr, workdir, icon))
+    if (!write_desktop_entry(unix_link, desktopPath, linkname, path, args, descr, workdir, icon))
     {
         WINE_WARN("couldn't make desktop entry %s\n", wine_dbgstr_a(desktopPath));
         ret = FALSE;
@@ -995,7 +1039,7 @@ static BOOL write_menu_entry(const char *link, const char *path, const char *arg
     }
 
     filename = heap_printf("wine/%s.desktop", link);
-    if (!filename || !write_menu_file(filename))
+    if (!filename || !write_menu_file(unix_link, filename))
     {
         WINE_WARN("couldn't make menu file %s\n", wine_dbgstr_a(filename));
         ret = FALSE;
@@ -1287,6 +1331,25 @@ static char* wchars_to_utf8_chars(LPCWSTR string)
     return ret;
 }
 
+static char *slashes_to_minuses(const char *string)
+{
+    int i;
+    char *ret = HeapAlloc(GetProcessHeap(), 0, lstrlenA(string) + 1);
+    if (ret)
+    {
+        for (i = 0; string[i]; i++)
+        {
+            if (string[i] == '/')
+                ret[i] = '-';
+            else
+                ret[i] = string[i];
+        }
+        ret[i] = 0;
+        return ret;
+    }
+    return NULL;
+}
+
 static BOOL next_line(FILE *file, char **line, int *size)
 {
     int pos = 0;
@@ -1525,6 +1588,7 @@ static CHAR* reg_get_valA(HKEY key, LPCSTR subkey, LPCSTR name)
             if (RegGetValueA(key, subkey, name, RRF_RT_REG_SZ, NULL, ret, &size) == ERROR_SUCCESS)
                 return ret;
         }
+        HeapFree(GetProcessHeap(), 0, ret);
     }
     return NULL;
 }
@@ -1540,6 +1604,7 @@ static WCHAR* reg_get_valW(HKEY key, LPCWSTR subkey, LPCWSTR name)
             if (RegGetValueW(key, subkey, name, RRF_RT_REG_SZ, NULL, ret, &size) == ERROR_SUCCESS)
                 return ret;
         }
+        HeapFree(GetProcessHeap(), 0, ret);
     }
     return NULL;
 }
@@ -1812,6 +1877,8 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             WCHAR *commandW = NULL;
             WCHAR *friendlyDocNameW = NULL;
             char *friendlyDocNameA = NULL;
+            WCHAR *iconW = NULL;
+            char *iconA = NULL;
             WCHAR *contentTypeW = NULL;
             char *mimeTypeA = NULL;
             WCHAR *friendlyAppNameW = NULL;
@@ -1837,6 +1904,19 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                 }
             }
 
+            iconW = assoc_query(ASSOCSTR_DEFAULTICON, extensionW, NULL);
+            if (iconW)
+            {
+                WCHAR *comma = strrchrW(iconW, ',');
+                int index = 0;
+                if (comma)
+                {
+                    *comma = 0;
+                    index = atoiW(comma + 1);
+                }
+                iconA = extract_icon(iconW, index, FALSE);
+            }
+
             contentTypeW = assoc_query(ASSOCSTR_CONTENTTYPE, extensionW, NULL);
 
             if (!freedesktop_mime_type_for_extension(nativeMimeTypes, extensionA, extensionW, &mimeTypeA))
@@ -1851,6 +1931,25 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
 
                 if (mimeTypeA != NULL)
                 {
+                    /* Gnome seems to ignore the <icon> tag in MIME packages,
+                     * and the default name is more intuitive anyway.
+                     */
+                    if (iconA)
+                    {
+                        char *flattened_mime = slashes_to_minuses(mimeTypeA);
+                        if (flattened_mime)
+                        {
+                            char *dstIconPath = heap_printf("%s/icons/%s%s", xdg_data_dir,
+                                                            flattened_mime, strrchr(iconA, '.'));
+                            if (dstIconPath)
+                            {
+                                rename(iconA, dstIconPath);
+                                HeapFree(GetProcessHeap(), 0, dstIconPath);
+                            }
+                            HeapFree(GetProcessHeap(), 0, flattened_mime);
+                        }
+                    }
+
                     write_freedesktop_mime_type_entry(packages_dir, extensionA, mimeTypeA, friendlyDocNameA);
                     hasChanged = TRUE;
                 }
@@ -1918,6 +2017,8 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             HeapFree(GetProcessHeap(), 0, commandW);
             HeapFree(GetProcessHeap(), 0, friendlyDocNameW);
             HeapFree(GetProcessHeap(), 0, friendlyDocNameA);
+            HeapFree(GetProcessHeap(), 0, iconW);
+            HeapFree(GetProcessHeap(), 0, iconA);
             HeapFree(GetProcessHeap(), 0, contentTypeW);
             HeapFree(GetProcessHeap(), 0, mimeTypeA);
             HeapFree(GetProcessHeap(), 0, friendlyAppNameW);
@@ -1946,6 +2047,7 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
     int iIconId = 0, r = -1;
     DWORD csidl = -1;
     HANDLE hsem = NULL;
+    char *unix_link = NULL;
 
     if ( !link )
     {
@@ -2008,6 +2110,13 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
         }
         WINE_ERR("failed to extract icon from %s\n",
                  wine_dbgstr_w( szIconPath[0] ? szIconPath : szPath ));
+    }
+
+    unix_link = wine_get_unix_file_name(link);
+    if (unix_link == NULL)
+    {
+        WINE_WARN("couldn't find unix path of %s\n", wine_dbgstr_w(link));
+        goto cleanup;
     }
 
     /* check the path */
@@ -2077,12 +2186,12 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
         location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
-            r = !write_desktop_entry(location, lastEntry, escaped_path, escaped_args, escaped_description, work_dir, icon_name);
+            r = !write_desktop_entry(NULL, location, lastEntry, escaped_path, escaped_args, escaped_description, work_dir, icon_name);
             HeapFree(GetProcessHeap(), 0, location);
         }
     }
     else
-        r = !write_menu_entry(link_name, escaped_path, escaped_args, escaped_description, work_dir, icon_name);
+        r = !write_menu_entry(unix_link, link_name, escaped_path, escaped_args, escaped_description, work_dir, icon_name);
 
     ReleaseSemaphore( hsem, 1, NULL );
 
@@ -2094,6 +2203,7 @@ cleanup:
     HeapFree( GetProcessHeap(), 0, escaped_args );
     HeapFree( GetProcessHeap(), 0, escaped_path );
     HeapFree( GetProcessHeap(), 0, escaped_description );
+    HeapFree( GetProcessHeap(), 0, unix_link);
 
     if (r && !bWait)
         WINE_ERR("failed to build the menu\n" );
@@ -2111,6 +2221,7 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
     HANDLE hSem = NULL;
     BOOL ret = TRUE;
     int r = -1;
+    char *unix_link = NULL;
 
     if ( !link )
     {
@@ -2139,6 +2250,13 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
     }
     WINE_TRACE("path       : %s\n", wine_dbgstr_w(urlPath));
 
+    unix_link = wine_get_unix_file_name(link);
+    if (unix_link == NULL)
+    {
+        WINE_WARN("couldn't find unix path of %s\n", wine_dbgstr_w(link));
+        goto cleanup;
+    }
+
     escaped_urlPath = escape(urlPath);
 
     hSem = CreateSemaphoreA( NULL, 1, 1, "winemenubuilder_semaphore");
@@ -2159,12 +2277,12 @@ static BOOL InvokeShellLinkerForURL( IUniformResourceLocatorW *url, LPCWSTR link
         location = heap_printf("%s/%s.desktop", xdg_desktop_dir, lastEntry);
         if (location)
         {
-            r = !write_desktop_entry(location, lastEntry, "winebrowser", escaped_urlPath, NULL, NULL, NULL);
+            r = !write_desktop_entry(NULL, location, lastEntry, "winebrowser", escaped_urlPath, NULL, NULL, NULL);
             HeapFree(GetProcessHeap(), 0, location);
         }
     }
     else
-        r = !write_menu_entry(link_name, "winebrowser", escaped_urlPath, NULL, NULL, NULL);
+        r = !write_menu_entry(unix_link, link_name, "winebrowser", escaped_urlPath, NULL, NULL, NULL);
     ret = (r != 0);
     ReleaseSemaphore(hSem, 1, NULL);
 
@@ -2174,6 +2292,7 @@ cleanup:
     HeapFree(GetProcessHeap(), 0, link_name);
     CoTaskMemFree( urlPath );
     HeapFree(GetProcessHeap(), 0, escaped_urlPath);
+    HeapFree(GetProcessHeap(), 0, unix_link);
     return ret;
 }
 
@@ -2440,6 +2559,62 @@ end:
     HeapFree(GetProcessHeap(), 0, applications_dir);
 }
 
+static void cleanup_menus(void)
+{
+    HKEY hkey;
+
+    hkey = open_menus_reg_key();
+    if (hkey)
+    {
+        int i;
+        LSTATUS lret = ERROR_SUCCESS;
+        for (i = 0; lret == ERROR_SUCCESS; )
+        {
+            char *value = NULL;
+            char *data = NULL;
+            DWORD valueSize = 4096;
+            DWORD dataSize = 4096;
+            while (1)
+            {
+                lret = ERROR_OUTOFMEMORY;
+                value = HeapAlloc(GetProcessHeap(), 0, valueSize);
+                if (value == NULL)
+                    break;
+                data = HeapAlloc(GetProcessHeap(), 0, dataSize);
+                if (data == NULL)
+                    break;
+                lret = RegEnumValueA(hkey, i, value, &valueSize, NULL, NULL, (BYTE*)data, &dataSize);
+                if (lret == ERROR_SUCCESS || lret != ERROR_MORE_DATA)
+                    break;
+                valueSize *= 2;
+                dataSize *= 2;
+                HeapFree(GetProcessHeap(), 0, value);
+                HeapFree(GetProcessHeap(), 0, data);
+                value = data = NULL;
+            }
+            if (lret == ERROR_SUCCESS)
+            {
+                struct stat filestats;
+                if (stat(data, &filestats) < 0 && errno == ENOENT)
+                {
+                    WINE_TRACE("removing menu related file %s\n", value);
+                    remove(value);
+                    RegDeleteValueA(hkey, value);
+                }
+                else
+                    i++;
+            }
+            else if (lret != ERROR_NO_MORE_ITEMS)
+                WINE_WARN("error %d reading registry\n", lret);
+            HeapFree(GetProcessHeap(), 0, value);
+            HeapFree(GetProcessHeap(), 0, data);
+        }
+        RegCloseKey(hkey);
+    }
+    else
+        WINE_ERR("error opening registry key, menu cleanup failed\n");
+}
+
 static CHAR *next_token( LPSTR *p )
 {
     LPSTR token = NULL, t = *p;
@@ -2539,6 +2714,11 @@ int PASCAL WinMain (HINSTANCE hInstance, HINSTANCE prev, LPSTR cmdline, int show
         if( !lstrcmpA( token, "-a" ) )
         {
             RefreshFileTypeAssociations();
+            break;
+        }
+        if( !lstrcmpA( token, "-r" ) )
+        {
+            cleanup_menus();
             break;
         }
         if( !lstrcmpA( token, "-w" ) )

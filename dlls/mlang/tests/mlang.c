@@ -22,6 +22,7 @@
 #define COBJMACROS
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -53,6 +54,8 @@ typedef struct lcid_tag_table {
     LPCSTR rfc1766;
     LCID lcid;
     HRESULT hr;
+    LCID broken_lcid;
+    LPCSTR broken_rfc;
 } lcid_table_entry;
 
 /* en, ar and zh use SUBLANG_NEUTRAL for the rfc1766 name without the country
@@ -86,7 +89,7 @@ static const lcid_table_entry  lcid_table[] = {
     {"fr-ca", 0x0c0c,   S_OK},
     {"fr-ch", 0x100c,   S_OK},
     {"fr-lu", 0x140c,   S_OK},
-    {"fr-mc", 0x180c,   S_OK},
+    {"fr-mc", 0x180c,   S_OK, 0x040c, "fr"},
 
     {"it",    0x0410,   S_OK},
     {"it-ch", 0x0810,   S_OK},
@@ -96,10 +99,132 @@ static const lcid_table_entry  lcid_table[] = {
     {"pl",    0x0415,   S_OK},
     {"ru",    0x0419,   S_OK},
 
-    {"kok",   0x0457,   S_OK}
+    {"kok",   0x0457,   S_OK, 0x0412, "x-kok"}
 
 };
 
+#define TODO_NAME 1
+
+typedef struct info_table_tag {
+    LCID lcid;
+    LANGID lang;
+    DWORD todo;
+    LPCSTR rfc1766;
+    LPCWSTR localename;
+    LPCWSTR broken_name;
+} info_table_entry;
+
+static const WCHAR de_en[] =   {'E','n','g','l','i','s','c','h',0};
+static const WCHAR de_enca[] = {'E','n','g','l','i','s','c','h',' ',
+                                '(','K','a','n','a','d','a',')',0};
+static const WCHAR de_engb[] = {'E','n','g','l','i','s','c','h',' ',
+                                '(','G','r','o',0xDF,'b','r','i','t','a','n','n','i','e','n',')',0};
+static const WCHAR de_engb2[] ={'E','n','g','l','i','s','c','h',' ',
+                                '(','V','e','r','e','i','n','i','g','t','e','s',' ',
+                                'K',0xF6,'n','i','g','r','e','i','c',0};
+static const WCHAR de_enus[] = {'E','n','g','l','i','s','c','h',' ',
+                                '(','U','S','A',')',0};
+static const WCHAR de_de[] =   {'D','e','u','t','s','c','h',' ',
+                                '(','D','e','u','t','s','c','h','l','a','n','d',')',0};
+static const WCHAR de_deat[] = {'D','e','u','t','s','c','h',' ',
+                                '(',0xD6,'s','t','e','r','r','e','i','c','h',')',0};
+static const WCHAR de_dech[] = {'D','e','u','t','s','c','h',' ',
+                                '(','S','c','h','w','e','i','z',')',0};
+
+static const WCHAR en_en[] =   {'E','n','g','l','i','s','h',0};
+static const WCHAR en_enca[] = {'E','n','g','l','i','s','h',' ',
+                                '(','C','a','n','a','d','a',')',0};
+static const WCHAR en_engb[] = {'E','n','g','l','i','s','h',' ',
+                                '(','U','n','i','t','e','d',' ','K','i','n','g','d','o','m',')',0};
+static const WCHAR en_enus[] = {'E','n','g','l','i','s','h',' ',
+                                '(','U','n','i','t','e','d',' ','S','t','a','t','e','s',')',0};
+static const WCHAR en_de[] =   {'G','e','r','m','a','n',' ',
+                                '(','G','e','r','m','a','n','y',')',0};
+static const WCHAR en_deat[] = {'G','e','r','m','a','n',' ',
+                                '(','A','u','s','t','r','i','a',')',0};
+static const WCHAR en_dech[] = {'G','e','r','m','a','n',' ',
+                                '(','S','w','i','t','z','e','r','l','a','n','d',')',0};
+
+static const WCHAR fr_en[] =   {'A','n','g','l','a','i','s',0};
+static const WCHAR fr_enca[] = {'A','n','g','l','a','i','s',' ',
+                                '(','C','a','n','a','d','a',')',0};
+static const WCHAR fr_engb[] = {'A','n','g','l','a','i','s',' ',
+                                '(','R','o','y','a','u','m','e','-','U','n','i',')',0};
+static const WCHAR fr_enus[] = {'A','n','g','l','a','i','s',' ',
+                                '(',0xC9, 't','a','t','s','-','U','n','i','s',')',0};
+static const WCHAR fr_enus2[] ={'A','n','g','l','a','i','s',' ',
+                                '(','U','.','S','.',')',0};
+static const WCHAR fr_de[] =   {'A','l','l','e','m','a','n','d',' ',
+                                '(','A','l','l','e','m','a','g','n','e',')',0};
+static const WCHAR fr_de2[] =  {'A','l','l','e','m','a','n','d',' ',
+                                '(','S','t','a','n','d','a','r','d',')',0};
+static const WCHAR fr_deat[] = {'A','l','l','e','m','a','n','d',' ',
+                                '(','A','u','t','r','i','c','h','e',')',0};
+static const WCHAR fr_dech[] = {'A','l','l','e','m','a','n','d',' ',
+                                '(','S','u','i','s','s','e',')',0};
+
+static const info_table_entry  info_table[] = {
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),        MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "en", en_en},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),        MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "en-us", en_enus},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_UK),     MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "en-gb", en_engb},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),     MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "en-us", en_enus},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_CAN),    MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "en-ca", en_enca},
+
+    {MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),         MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "de", en_de},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN),          MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "de", en_de},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_SWISS),    MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "de-ch", en_dech},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_AUSTRIAN), MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),
+         0, "de-at", en_deat},
+
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),        MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "en", de_en},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),        MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "en-us", de_enus},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_UK),     MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "en-gb", de_engb, de_engb2},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),     MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "en-us", de_enus},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_CAN),    MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "en-ca", de_enca},
+
+    {MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),         MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "de", de_de},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN),          MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "de",de_de},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_SWISS),    MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "de-ch", de_dech},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_AUSTRIAN), MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),
+         TODO_NAME, "de-at", de_deat},
+
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_NEUTRAL),        MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "en", fr_en},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),        MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "en-us", fr_enus, fr_enus2},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_UK),     MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "en-gb", fr_engb},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),     MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "en-us", fr_enus, fr_enus2},
+    {MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_CAN),    MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "en-ca", fr_enca},
+
+    {MAKELANGID(LANG_GERMAN, SUBLANG_DEFAULT),         MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "de", fr_de, fr_de2},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN),          MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "de", fr_de, fr_de2},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_SWISS),    MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "de-ch", fr_dech},
+    {MAKELANGID(LANG_GERMAN, SUBLANG_GERMAN_AUSTRIAN), MAKELANGID(LANG_FRENCH, SUBLANG_DEFAULT),
+         TODO_NAME, "de-at", fr_deat}
+
+};
 
 static BOOL init_function_ptrs(void)
 {
@@ -129,6 +254,66 @@ static BOOL init_function_ptrs(void)
         WideCharToMultiByte(CP_ACP, 0, (szString2), -1, string2, 256, NULL, NULL); \
         ok(0, (format), string1, string2); \
     }
+
+/* lstrcmpW is not supported on Win9x! */
+static int mylstrcmpW(const WCHAR* str1, const WCHAR* str2)
+{
+    if (!str2) return 1;
+    while (*str1 && *str1==*str2) {
+        str1++;
+        str2++;
+    }
+    return *str1-*str2;
+}
+
+/* lstrcpyW is not supported on Win95 */
+static void mylstrcpyW(WCHAR* str1, const WCHAR* str2)
+{
+    while (str2 && *str2) {
+        *str1 = *str2;
+        str1++;
+        str2++;
+    }
+    *str1 = '\0';
+}
+
+#define DEBUGSTR_W_MAXLEN 64
+
+static CHAR * debugstr_w(const WCHAR * strW)
+{
+    static CHAR buffers[DEBUGSTR_W_MAXLEN * 2];
+    static DWORD pos = 0;
+    CHAR * strA;
+    DWORD len = DEBUGSTR_W_MAXLEN - 4;
+
+    strA = &buffers[pos];
+
+    *strA++ = 'L';
+    *strA++ = '"';
+
+    while (*strW && (len > 4)) {
+        if ((*strW < ' ') || (*strW > 126)) {
+            sprintf(strA, "\\%04x", *strW);
+            strA +=5;
+            len -=5;
+        }
+        else
+        {
+            *strA++ = *strW;
+            len--;
+        }
+        strW++;
+    }
+    *strA++ = '"';
+    *strA = '\0';
+
+    strA = &buffers[pos];
+    pos += DEBUGSTR_W_MAXLEN;
+    if (pos >= sizeof(buffers)) pos = 0;
+
+    return strA;
+
+}
 
 static void test_multibyte_to_unicode_translations(IMultiLanguage2 *iML2)
 {
@@ -901,10 +1086,13 @@ static void test_GetLcidFromRfc1766(IMultiLanguage2 *iML2)
         MultiByteToWideChar(CP_ACP, 0, lcid_table[i].rfc1766, -1, rfc1766W, MAX_RFC1766_NAME);
         ret = IMultiLanguage2_GetLcidFromRfc1766(iML2, &lcid, rfc1766W);
 
-        ok(ret == lcid_table[i].hr,
+        /* IE <6.0 guess 0x412 (ko) from "kok" */
+        ok((ret == lcid_table[i].hr) ||
+            broken(lcid_table[i].broken_lcid && (ret == S_FALSE)),
             "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, ret, lcid_table[i].hr);
 
-        ok(lcid == lcid_table[i].lcid,
+        ok((lcid == lcid_table[i].lcid) ||
+            broken(lcid == lcid_table[i].broken_lcid),   /* IE <6.0 */
             "#%02d: got LCID 0x%x (expected 0x%x)\n", i, lcid, lcid_table[i].lcid);
     }
 
@@ -951,11 +1139,13 @@ static void test_Rfc1766ToLcid(void)
         lcid = -1;
         ret = Rfc1766ToLcidA(&lcid, lcid_table[i].rfc1766);
 
-        ok(ret == lcid_table[i].hr,
+        /* IE <6.0 guess 0x412 (ko) from "kok" */
+        ok( (ret == lcid_table[i].hr) ||
+            broken(lcid_table[i].broken_lcid && (ret == S_FALSE)),
             "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, ret, lcid_table[i].hr);
 
-
-        ok(lcid == lcid_table[i].lcid,
+        ok( (lcid == lcid_table[i].lcid) ||
+            broken(lcid == lcid_table[i].broken_lcid),  /* IE <6.0 */
             "#%02d: got LCID 0x%x (expected 0x%x)\n", i, lcid, lcid_table[i].lcid);
 
     }
@@ -968,6 +1158,20 @@ static void test_Rfc1766ToLcid(void)
 
 }
 
+static void test_GetNumberOfCodePageInfo(IMultiLanguage2 *iML2)
+{
+    HRESULT hr;
+    UINT value;
+
+    value = 0xdeadbeef;
+    hr = IMultiLanguage2_GetNumberOfCodePageInfo(iML2, &value);
+    ok( (hr == S_OK) && value,
+        "got 0x%x with %d (expected S_OK with '!= 0')\n", hr, value);
+
+    hr = IMultiLanguage2_GetNumberOfCodePageInfo(iML2, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%x (expected E_INVALIDARG)\n", hr);
+
+}
 
 static void test_GetRfc1766FromLcid(IMultiLanguage2 *iML2)
 {
@@ -992,7 +1196,9 @@ static void test_GetRfc1766FromLcid(IMultiLanguage2 *iML2)
         LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, lcid_table[i].rfc1766,
                     lstrlenA(lcid_table[i].rfc1766) + 1, expected, MAX_RFC1766_NAME);
 
-        ok(!lstrcmpA(buffer, expected),
+        /* IE <6.0 return "x-kok" for LCID 0x457 ("kok") */
+        ok( (!lstrcmpA(buffer, expected)) ||
+            broken(!lstrcmpA(buffer, lcid_table[i].broken_rfc)),
             "#%02d: got '%s' (expected '%s')\n", i, buffer, expected);
 
         SysFreeString(rfcstr);
@@ -1016,7 +1222,9 @@ static void test_LcidToRfc1766(void)
 
         hr = LcidToRfc1766A(lcid_table[i].lcid, buffer, MAX_RFC1766_NAME);
 
-        ok(hr == lcid_table[i].hr,
+        /* IE <5.0 does not recognize 0x180c (fr-mc) and 0x457 (kok) */
+        ok( (hr == lcid_table[i].hr) ||
+            broken(lcid_table[i].broken_lcid && (hr == E_FAIL)),
             "#%02d: HRESULT 0x%x (expected 0x%x)\n", i, hr, lcid_table[i].hr);
 
         if (hr != S_OK)
@@ -1025,7 +1233,10 @@ static void test_LcidToRfc1766(void)
         LCMapStringA(LOCALE_USER_DEFAULT, LCMAP_LOWERCASE, lcid_table[i].rfc1766,
                     lstrlenA(lcid_table[i].rfc1766) + 1, expected, MAX_RFC1766_NAME);
 
-        ok(!lstrcmpA(buffer, expected),
+        /* IE <6.0 return "x-kok" for LCID 0x457 ("kok") */
+        /* IE <5.0 return "fr" for LCID 0x180c ("fr-mc") */
+        ok( (!lstrcmpA(buffer, expected)) ||
+            broken(!lstrcmpA(buffer, lcid_table[i].broken_rfc)),
             "#%02d: got '%s' (expected '%s')\n", i, buffer, expected);
 
     }
@@ -1048,6 +1259,65 @@ static void test_LcidToRfc1766(void)
     hr = LcidToRfc1766A(LANG_ENGLISH, buffer, 0);
     ok(hr == E_INVALIDARG, "got 0x%08x and '%s' (expected E_INVALIDARG)\n", hr, buffer);
 
+}
+
+static void test_GetRfc1766Info(IMultiLanguage2 *iML2)
+{
+    WCHAR short_broken_name[MAX_LOCALE_NAME];
+    CHAR rfc1766A[MAX_RFC1766_NAME + 1];
+    BYTE buffer[sizeof(RFC1766INFO) + 4];
+    PRFC1766INFO prfc = (RFC1766INFO *) buffer;
+    HRESULT ret;
+    DWORD i;
+
+    for(i = 0; i < sizeof(info_table) / sizeof(info_table[0]); i++) {
+        memset(buffer, 'x', sizeof(RFC1766INFO) + 2);
+        buffer[sizeof(buffer) -1] = 0;
+        buffer[sizeof(buffer) -2] = 0;
+
+        ret = IMultiLanguage2_GetRfc1766Info(iML2, info_table[i].lcid, info_table[i].lang, prfc);
+        WideCharToMultiByte(CP_ACP, 0, prfc->wszRfc1766, -1, rfc1766A, MAX_RFC1766_NAME, NULL, NULL);
+        ok(ret == S_OK, "#%02d: got 0x%x (expected S_OK)\n", i, ret);
+        ok(prfc->lcid == info_table[i].lcid,
+            "#%02d: got 0x%04x (expected 0x%04x)\n", i, prfc->lcid, info_table[i].lcid);
+
+        ok(!lstrcmpA(rfc1766A, info_table[i].rfc1766),
+            "#%02d: got '%s' (expected '%s')\n", i, rfc1766A, info_table[i].rfc1766);
+
+        /* Some IE versions truncate an oversized name one character to short */
+        mylstrcpyW(short_broken_name, info_table[i].broken_name);
+        short_broken_name[MAX_LOCALE_NAME - 2] = '\0';
+
+        if (info_table[i].todo & TODO_NAME) {
+            todo_wine
+            ok( (!mylstrcmpW(prfc->wszLocaleName, info_table[i].localename)) ||
+                broken(!mylstrcmpW(prfc->wszLocaleName, info_table[i].broken_name)) || /* IE < 6.0 */
+                broken(!mylstrcmpW(prfc->wszLocaleName, short_broken_name)),
+                "#%02d: got %s (expected %s)\n", i,
+                debugstr_w(prfc->wszLocaleName), debugstr_w(info_table[i].localename));
+        }
+        else
+            ok( (!mylstrcmpW(prfc->wszLocaleName, info_table[i].localename)) ||
+                broken(!mylstrcmpW(prfc->wszLocaleName, info_table[i].broken_name)) || /* IE < 6.0 */
+                broken(!mylstrcmpW(prfc->wszLocaleName, short_broken_name)),
+                "#%02d: got %s (expected %s)\n", i,
+                debugstr_w(prfc->wszLocaleName), debugstr_w(info_table[i].localename));
+
+    }
+
+    /* SUBLANG_NEUTRAL only allowed for english, arabic, chinese */
+    ret = IMultiLanguage2_GetRfc1766Info(iML2, MAKELANGID(LANG_GERMAN, SUBLANG_NEUTRAL), LANG_ENGLISH, prfc);
+    ok(ret == E_FAIL, "got 0x%x (expected E_FAIL)\n", ret);
+
+    ret = IMultiLanguage2_GetRfc1766Info(iML2, MAKELANGID(LANG_ITALIAN, SUBLANG_NEUTRAL), LANG_ENGLISH, prfc);
+    ok(ret == E_FAIL, "got 0x%x (expected E_FAIL)\n", ret);
+
+    /* NULL not allowed */
+    ret = IMultiLanguage2_GetRfc1766Info(iML2, 0, LANG_ENGLISH, prfc);
+    ok(ret == E_FAIL, "got 0x%x (expected E_FAIL)\n", ret);
+
+    ret = IMultiLanguage2_GetRfc1766Info(iML2, LANG_ENGLISH, LANG_ENGLISH, NULL);
+    ok(ret == E_INVALIDARG, "got 0x%x (expected E_INVALIDARG)\n", ret);
 }
 
 static void test_IMultiLanguage2_ConvertStringFromUnicode(IMultiLanguage2 *iML2)
@@ -1602,6 +1872,7 @@ static void test_GetScriptFontInfo(IMLangFontLink2 *font_link)
 
 START_TEST(mlang)
 {
+    IMultiLanguage  *iML = NULL;
     IMultiLanguage2 *iML2 = NULL;
     IMLangFontLink  *iMLFL = NULL;
     IMLangFontLink2 *iMLFL2 = NULL;
@@ -1614,6 +1885,21 @@ START_TEST(mlang)
     test_Rfc1766ToLcid();
     test_LcidToRfc1766();
 
+    test_ConvertINetUnicodeToMultiByte();
+    test_JapaneseConversion();
+
+
+    trace("IMultiLanguage\n");
+    ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
+                           &IID_IMultiLanguage, (void **)&iML);
+    if (ret != S_OK || !iML) return;
+
+    test_GetNumberOfCodePageInfo((IMultiLanguage2 *)iML);
+    IMultiLanguage_Release(iML);
+
+
+    /* IMultiLanguage2 (IE5.0 and above) */
+    trace("IMultiLanguage2\n");
     ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IMultiLanguage2, (void **)&iML2);
     if (ret != S_OK || !iML2) return;
@@ -1621,6 +1907,8 @@ START_TEST(mlang)
     test_rfc1766(iML2);
     test_GetLcidFromRfc1766(iML2);
     test_GetRfc1766FromLcid(iML2);
+    test_GetRfc1766Info(iML2);
+    test_GetNumberOfCodePageInfo(iML2);
 
     test_EnumCodePages(iML2, 0);
     test_EnumCodePages(iML2, MIMECONTF_MIME_LATEST);
@@ -1644,10 +1932,8 @@ START_TEST(mlang)
 
     IMultiLanguage2_Release(iML2);
 
-    test_ConvertINetUnicodeToMultiByte();
 
-    test_JapaneseConversion();
-
+    /* IMLangFontLink */
     ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IMLangFontLink, (void **)&iMLFL);
     if (ret != S_OK || !iMLFL) return;
@@ -1655,6 +1941,7 @@ START_TEST(mlang)
     IMLangFontLink_Test(iMLFL);
     IMLangFontLink_Release(iMLFL);
 
+    /* IMLangFontLink2 */
     ret = CoCreateInstance(&CLSID_CMultiLanguage, NULL, CLSCTX_INPROC_SERVER,
                            &IID_IMLangFontLink2, (void **)&iMLFL2);
     if (ret != S_OK || !iMLFL2) return;

@@ -32,7 +32,212 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
+
+#define GLINFO_LOCATION (*gl_info)
+
+static void surface_cleanup(IWineD3DSurfaceImpl *This)
+{
+    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    const WineD3D_GL_Info *gl_info = &device->adapter->gl_info;
+    renderbuffer_entry_t *entry, *entry2;
+
+    TRACE("(%p) : Cleaning up.\n", This);
+
+    /* Need a context to destroy the texture. Use the currently active render
+     * target, but only if the primary render target exists. Otherwise
+     * lastActiveRenderTarget is garbage. When destroying the primary render
+     * target, Uninit3D() will activate a context before doing anything. */
+    if (device->render_targets && device->render_targets[0])
+    {
+        ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+    }
+
+    ENTER_GL();
+
+    if (This->glDescription.textureName)
+    {
+        /* Release the OpenGL texture. */
+        TRACE("Deleting texture %u.\n", This->glDescription.textureName);
+        glDeleteTextures(1, &This->glDescription.textureName);
+    }
+
+    if (This->Flags & SFLAG_PBO)
+    {
+        /* Delete the PBO. */
+        GL_EXTCALL(glDeleteBuffersARB(1, &This->pbo));
+    }
+
+    LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry)
+    {
+        GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
+        HeapFree(GetProcessHeap(), 0, entry);
+    }
+
+    LEAVE_GL();
+
+    if (This->Flags & SFLAG_DIBSECTION)
+    {
+        /* Release the DC. */
+        SelectObject(This->hDC, This->dib.holdbitmap);
+        DeleteDC(This->hDC);
+        /* Release the DIB section. */
+        DeleteObject(This->dib.DIBsection);
+        This->dib.bitmap_data = NULL;
+        This->resource.allocatedMemory = NULL;
+    }
+
+    if (This->Flags & SFLAG_USERPTR) IWineD3DSurface_SetMem((IWineD3DSurface *)This, NULL);
+    if (This->overlay_dest) list_remove(&This->overlay_entry);
+
+    HeapFree(GetProcessHeap(), 0, This->palette9);
+
+    resource_cleanup((IWineD3DResource *)This);
+}
+
+UINT surface_calculate_size(const struct GlPixelFormatDesc *format_desc, UINT alignment, UINT width, UINT height)
+{
+    UINT size;
+
+    if (format_desc->format == WINED3DFMT_UNKNOWN)
+    {
+        size = 0;
+    }
+    else if (format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
+    {
+        UINT row_block_count = (width + format_desc->block_width - 1) / format_desc->block_width;
+        UINT row_count = (height + format_desc->block_height - 1) / format_desc->block_height;
+        size = row_count * row_block_count * format_desc->block_byte_count;
+    }
+    else
+    {
+        /* The pitch is a multiple of 4 bytes. */
+        size = height * (((width * format_desc->byte_count) + alignment - 1) & ~(alignment - 1));
+    }
+
+    if (format_desc->heightscale != 0.0) size *= format_desc->heightscale;
+
+    return size;
+}
+
+HRESULT surface_init(IWineD3DSurfaceImpl *surface, WINED3DSURFTYPE surface_type, UINT alignment,
+        UINT width, UINT height, UINT level, BOOL lockable, BOOL discard, WINED3DMULTISAMPLE_TYPE multisample_type,
+        UINT multisample_quality, IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format,
+        WINED3DPOOL pool, IUnknown *parent)
+{
+    const WineD3D_GL_Info *gl_info = &device->adapter->gl_info;
+    const struct GlPixelFormatDesc *format_desc = getFormatDescEntry(format, &GLINFO_LOCATION);
+    void (*cleanup)(IWineD3DSurfaceImpl *This);
+    unsigned int resource_size;
+    HRESULT hr;
+
+    if (multisample_quality > 0)
+    {
+        FIXME("multisample_quality set to %u, substituting 0\n", multisample_quality);
+        multisample_quality = 0;
+    }
+
+    /* FIXME: Check that the format is supported by the device. */
+
+    resource_size = surface_calculate_size(format_desc, alignment, width, height);
+
+    /* Look at the implementation and set the correct Vtable. */
+    switch (surface_type)
+    {
+        case SURFACE_OPENGL:
+            surface->lpVtbl = &IWineD3DSurface_Vtbl;
+            cleanup = surface_cleanup;
+            break;
+
+        case SURFACE_GDI:
+            surface->lpVtbl = &IWineGDISurface_Vtbl;
+            cleanup = surface_gdi_cleanup;
+            break;
+
+        default:
+            ERR("Requested unknown surface implementation %#x.\n", surface_type);
+            return WINED3DERR_INVALIDCALL;
+    }
+
+    hr = resource_init((IWineD3DResource *)surface, WINED3DRTYPE_SURFACE,
+            device, resource_size, usage, format_desc, pool, parent);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize resource, returning %#x.\n", hr);
+        return hr;
+    }
+
+    /* "Standalone" surface. */
+    IWineD3DSurface_SetContainer((IWineD3DSurface *)surface, NULL);
+
+    surface->currentDesc.Width = width;
+    surface->currentDesc.Height = height;
+    surface->currentDesc.MultiSampleType = multisample_type;
+    surface->currentDesc.MultiSampleQuality = multisample_quality;
+    surface->glDescription.level = level;
+    list_init(&surface->overlays);
+
+    /* Flags */
+    surface->Flags = SFLAG_NORMCOORD; /* Default to normalized coords. */
+    if (discard) surface->Flags |= SFLAG_DISCARD;
+    if (lockable || format == WINED3DFMT_D16_LOCKABLE) surface->Flags |= SFLAG_LOCKABLE;
+
+    /* Quick lockable sanity check.
+     * TODO: remove this after surfaces, usage and lockability have been debugged properly
+     * this function is too deep to need to care about things like this.
+     * Levels need to be checked too, since they all affect what can be done. */
+    switch (pool)
+    {
+        case WINED3DPOOL_SCRATCH:
+            if(!lockable)
+            {
+                FIXME("Called with a pool of SCRATCH and a lockable of FALSE "
+                        "which are mutually exclusive, setting lockable to TRUE.\n");
+                lockable = TRUE;
+            }
+            break;
+
+        case WINED3DPOOL_SYSTEMMEM:
+            if (!lockable)
+                FIXME("Called with a pool of SYSTEMMEM and a lockable of FALSE, this is acceptable but unexpected.\n");
+            break;
+
+        case WINED3DPOOL_MANAGED:
+            if (usage & WINED3DUSAGE_DYNAMIC)
+                FIXME("Called with a pool of MANAGED and a usage of DYNAMIC which are mutually exclusive.\n");
+            break;
+
+        case WINED3DPOOL_DEFAULT:
+            if (lockable && !(usage & (WINED3DUSAGE_DYNAMIC | WINED3DUSAGE_RENDERTARGET | WINED3DUSAGE_DEPTHSTENCIL)))
+                WARN("Creating a lockable surface with a POOL of DEFAULT, that doesn't specify DYNAMIC usage.\n");
+            break;
+
+        default:
+            FIXME("Unknown pool %#x.\n", pool);
+            break;
+    };
+
+    if (usage & WINED3DUSAGE_RENDERTARGET && pool != WINED3DPOOL_DEFAULT)
+    {
+        FIXME("Trying to create a render target that isn't in the default pool.\n");
+    }
+
+    /* Mark the texture as dirty so that it gets loaded first time around. */
+    surface_add_dirty_rect((IWineD3DSurface *)surface, NULL);
+    list_init(&surface->renderbuffers);
+
+    TRACE("surface %p, memory %p, size %u\n", surface, surface->resource.allocatedMemory, surface->resource.size);
+
+    /* Call the private setup routine */
+    hr = IWineD3DSurface_PrivateSetup((IWineD3DSurface *)surface);
+    if (FAILED(hr))
+    {
+        ERR("Private setup failed, returning %#x\n", hr);
+        cleanup(surface);
+        return hr;
+    }
+
+    return hr;
+}
 
 static void surface_force_reload(IWineD3DSurface *iface)
 {
@@ -132,6 +337,10 @@ static BOOL primary_render_target_is_p8(IWineD3DDeviceImpl *device)
     return FALSE;
 }
 
+#undef GLINFO_LOCATION
+
+#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
+
 /* This call just downloads data, the caller is responsible for activating the
  * right context and binding the correct texture. */
 static void surface_download_data(IWineD3DSurfaceImpl *This) {
@@ -146,29 +355,28 @@ static void surface_download_data(IWineD3DSurfaceImpl *This) {
 
     ENTER_GL();
 
-    if (format_desc->format == WINED3DFMT_DXT1 || format_desc->format == WINED3DFMT_DXT2
-            || format_desc->format == WINED3DFMT_DXT3 || format_desc->format == WINED3DFMT_DXT4
-            || format_desc->format == WINED3DFMT_DXT5 || format_desc->format == WINED3DFMT_ATI2N)
+    if (format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
     {
-        if (!GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) { /* We can assume this as the texture would not have been created otherwise */
-            FIXME("(%p) : Attempting to lock a compressed texture when texture compression isn't supported by opengl\n", This);
-        } else {
-            TRACE("(%p) : Calling glGetCompressedTexImageARB level %d, format %#x, type %#x, data %p\n",
-                    This, This->glDescription.level, format_desc->glFormat, format_desc->glType,
-                    This->resource.allocatedMemory);
+        TRACE("(%p) : Calling glGetCompressedTexImageARB level %d, format %#x, type %#x, data %p.\n",
+                This, This->glDescription.level, format_desc->glFormat, format_desc->glType,
+                This->resource.allocatedMemory);
 
-            if(This->Flags & SFLAG_PBO) {
-                GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, This->pbo));
-                checkGLcall("glBindBufferARB");
-                GL_EXTCALL(glGetCompressedTexImageARB(This->glDescription.target, This->glDescription.level, NULL));
-                checkGLcall("glGetCompressedTexImageARB()");
-                GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
-                checkGLcall("glBindBufferARB");
-            } else {
-                GL_EXTCALL(glGetCompressedTexImageARB(This->glDescription.target, This->glDescription.level, This->resource.allocatedMemory));
-                checkGLcall("glGetCompressedTexImageARB()");
-            }
+        if (This->Flags & SFLAG_PBO)
+        {
+            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, This->pbo));
+            checkGLcall("glBindBufferARB");
+            GL_EXTCALL(glGetCompressedTexImageARB(This->glDescription.target, This->glDescription.level, NULL));
+            checkGLcall("glGetCompressedTexImageARB()");
+            GL_EXTCALL(glBindBufferARB(GL_PIXEL_PACK_BUFFER_ARB, 0));
+            checkGLcall("glBindBufferARB");
         }
+        else
+        {
+            GL_EXTCALL(glGetCompressedTexImageARB(This->glDescription.target,
+                    This->glDescription.level, This->resource.allocatedMemory));
+            checkGLcall("glGetCompressedTexImageARB()");
+        }
+
         LEAVE_GL();
     } else {
         void *mem;
@@ -293,39 +501,43 @@ static void surface_upload_data(IWineD3DSurfaceImpl *This, GLenum internal, GLsi
 
     if (format_desc->heightscale != 1.0 && format_desc->heightscale != 0.0) height *= format_desc->heightscale;
 
-    if (format_desc->format == WINED3DFMT_DXT1 || format_desc->format == WINED3DFMT_DXT2
-            || format_desc->format == WINED3DFMT_DXT3 || format_desc->format == WINED3DFMT_DXT4
-            || format_desc->format == WINED3DFMT_DXT5 || format_desc->format == WINED3DFMT_ATI2N)
+    if (format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
     {
-        if (!GL_SUPPORT(EXT_TEXTURE_COMPRESSION_S3TC)) {
-            FIXME("Using DXT1/3/5 without advertized support\n");
-        } else {
-            /* glCompressedTexSubImage2D for uploading and glTexImage2D for allocating does not work well on some drivers(r200 dri, MacOS ATI driver)
-             * glCompressedTexImage2D does not accept NULL pointers. So for compressed textures surface_allocate_surface does nothing, and this
-             * function uses glCompressedTexImage2D instead of the SubImage call
-             */
-            TRACE("(%p) : Calling glCompressedTexSubImage2D w %d, h %d, data %p\n", This, width, height, data);
-            ENTER_GL();
+        /* glCompressedTexSubImage2D() for uploading and glTexImage2D() for
+         * allocating does not work well on some drivers (r200 dri, MacOS ATI
+         * driver). glCompressedTexImage2D() does not accept NULL pointers. So
+         * for compressed textures surface_allocate_surface() does nothing,
+         * and this function uses glCompressedTexImage2D() instead of
+         * glCompressedTexSubImage2D(). */
+        TRACE("(%p) : Calling glCompressedTexImage2DARB w %u, h %u, data %p.\n", This, width, height, data);
 
-            if(This->Flags & SFLAG_PBO) {
-                GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, This->pbo));
-                checkGLcall("glBindBufferARB");
-                TRACE("(%p) pbo: %#x, data: %p\n", This, This->pbo, data);
+        ENTER_GL();
 
-                GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level, internal,
-                        width, height, 0 /* border */, This->resource.size, NULL));
-                checkGLcall("glCompressedTexSubImage2D");
+        if (This->Flags & SFLAG_PBO)
+        {
+            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, This->pbo));
+            checkGLcall("glBindBufferARB");
 
-                GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-                checkGLcall("glBindBufferARB");
-            } else {
-                GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level, internal,
-                        width, height, 0 /* border */, This->resource.size, data));
-                checkGLcall("glCompressedTexSubImage2D");
-            }
-            LEAVE_GL();
+            TRACE("(%p) pbo: %#x, data: %p.\n", This, This->pbo, data);
+
+            GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level,
+                    internal, width, height, 0 /* border */, This->resource.size, NULL));
+            checkGLcall("glCompressedTexImage2DARB");
+
+            GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+            checkGLcall("glBindBufferARB");
         }
-    } else {
+        else
+        {
+            GL_EXTCALL(glCompressedTexImage2DARB(This->glDescription.target, This->glDescription.level,
+                    internal, width, height, 0 /* border */, This->resource.size, data));
+            checkGLcall("glCompressedTexSubImage2D");
+        }
+
+        LEAVE_GL();
+    }
+    else
+    {
         TRACE("(%p) : Calling glTexSubImage2D w %d,  h %d, data, %p\n", This, width, height, data);
         ENTER_GL();
 
@@ -362,9 +574,7 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, GLenum internal,
             This, This->glDescription.target, This->glDescription.level, debug_d3dformat(format_desc->format),
             internal, width, height, format, type);
 
-    if (format_desc->format == WINED3DFMT_DXT1 || format_desc->format == WINED3DFMT_DXT2
-            || format_desc->format == WINED3DFMT_DXT3 || format_desc->format == WINED3DFMT_DXT4
-            || format_desc->format == WINED3DFMT_DXT5 || format_desc->format == WINED3DFMT_ATI2N)
+    if (format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
     {
         /* glCompressedTexImage2D does not accept NULL pointers, so we cannot allocate a compressed texture without uploading data */
         TRACE("Not allocating compressed surfaces, surface_upload_data will specify them\n");
@@ -539,59 +749,15 @@ static ULONG WINAPI IWineD3DSurfaceImpl_Release(IWineD3DSurface *iface)
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->resource.ref);
     TRACE("(%p) : Releasing from %d\n", This, ref + 1);
-    if (ref == 0) {
-        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
-        renderbuffer_entry_t *entry, *entry2;
-        TRACE("(%p) : cleaning up\n", This);
 
-        /* Need a context to destroy the texture. Use the currently active render target, but only if
-         * the primary render target exists. Otherwise lastActiveRenderTarget is garbage, see above.
-         * When destroying the primary rt, Uninit3D will activate a context before doing anything
-         */
-        if(device->render_targets && device->render_targets[0]) {
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
-        }
+    if (!ref)
+    {
+        surface_cleanup(This);
 
-        ENTER_GL();
-        if (This->glDescription.textureName != 0) { /* release the openGL texture.. */
-            TRACE("Deleting texture %d\n", This->glDescription.textureName);
-            glDeleteTextures(1, &This->glDescription.textureName);
-        }
-
-        if(This->Flags & SFLAG_PBO) {
-            /* Delete the PBO */
-            GL_EXTCALL(glDeleteBuffersARB(1, &This->pbo));
-        }
-
-        LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &This->renderbuffers, renderbuffer_entry_t, entry) {
-            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &entry->id));
-            HeapFree(GetProcessHeap(), 0, entry);
-        }
-        LEAVE_GL();
-
-        if(This->Flags & SFLAG_DIBSECTION) {
-            /* Release the DC */
-            SelectObject(This->hDC, This->dib.holdbitmap);
-            DeleteDC(This->hDC);
-            /* Release the DIB section */
-            DeleteObject(This->dib.DIBsection);
-            This->dib.bitmap_data = NULL;
-            This->resource.allocatedMemory = NULL;
-        }
-        if(This->Flags & SFLAG_USERPTR) IWineD3DSurface_SetMem(iface, NULL);
-
-        HeapFree(GetProcessHeap(), 0, This->palette9);
-
-        resource_cleanup((IWineD3DResource *)iface);
-
-        if(This->overlay_dest) {
-            list_remove(&This->overlay_entry);
-        }
-
-        TRACE("(%p) Released\n", This);
+        TRACE("(%p) Released.\n", This);
         HeapFree(GetProcessHeap(), 0, This);
-
     }
+
     return ref;
 }
 
@@ -726,6 +892,8 @@ static void WINAPI IWineD3DSurfaceImpl_UnLoad(IWineD3DSurface *iface) {
         ENTER_GL();
         glDeleteTextures(1, &This->glDescription.textureName);
         This->glDescription.textureName = 0;
+        glDeleteTextures(1, &This->glDescription.srgbTextureName);
+        This->glDescription.srgbTextureName = 0;
         LEAVE_GL();
     } else {
         IWineD3DBaseTexture_Release(texture);
@@ -1128,6 +1296,7 @@ static void surface_prepare_system_memory(IWineD3DSurfaceImpl *This) {
 static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
     IWineD3DDeviceImpl  *myDevice = This->resource.wineD3DDevice;
+    const RECT *pass_rect = pRect;
 
     TRACE("(%p) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
 
@@ -1160,72 +1329,19 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
         goto lock_end;
     }
 
-    /* Now download the surface content from opengl
-     * Use the render target readback if the surface is on a swapchain(=onscreen render target) or the current primary target
-     * Offscreen targets which are not active at the moment or are higher targets(FBOs) can be locked with the texture path
-     */
-    if ((This->Flags & SFLAG_SWAPCHAIN) || iface == myDevice->render_targets[0])
+    /* IWineD3DSurface_LoadLocation() does not check if the rectangle specifies
+     * the full surface. Most callers don't need that, so do it here. */
+    if (pRect && pRect->top == 0 && pRect->left == 0
+            && pRect->right == This->currentDesc.Width
+            && pRect->bottom == This->currentDesc.Height)
     {
-        const RECT *pass_rect = pRect;
+        pass_rect = NULL;
+    }
 
-        /* IWineD3DSurface_LoadLocation does not check if the rectangle specifies the full surfaces
-         * because most caller functions do not need that. So do that here
-         */
-        if(pRect &&
-           pRect->top    == 0 &&
-           pRect->left   == 0 &&
-           pRect->right  == This->currentDesc.Width &&
-           pRect->bottom == This->currentDesc.Height) {
-            pass_rect = NULL;
-        }
-
-        switch(wined3d_settings.rendertargetlock_mode) {
-            case RTL_TEXDRAW:
-            case RTL_TEXTEX:
-                FIXME("Reading from render target with a texture isn't implemented yet, falling back to framebuffer reading\n");
-#if 0
-                /* Disabled for now. LoadLocation prefers the texture over the drawable as the source. So if we copy to the
-                 * texture first, then to sysmem, we'll avoid glReadPixels and use glCopyTexImage and glGetTexImage2D instead.
-                 * This may be faster on some cards
-                 */
-                IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL /* No partial texture copy yet */);
-#endif
-                /* drop through */
-
-            case RTL_AUTO:
-            case RTL_READDRAW:
-            case RTL_READTEX:
-                IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, pass_rect);
-                break;
-
-            case RTL_DISABLE:
-                break;
-        }
-    } else if(iface == myDevice->stencilBufferTarget) {
-        /** the depth stencil in openGL has a format of GL_FLOAT
-         * which should be good for WINED3DFMT_D16_LOCKABLE
-         * and WINED3DFMT_D16
-         * it is unclear what format the stencil buffer is in except.
-         * 'Each index is converted to fixed point...
-         * If GL_MAP_STENCIL is GL_TRUE, indices are replaced by their
-         * mappings in the table GL_PIXEL_MAP_S_TO_S.
-         * glReadPixels(This->lockedRect.left,
-         *             This->lockedRect.bottom - j - 1,
-         *             This->lockedRect.right - This->lockedRect.left,
-         *             1,
-         *             GL_DEPTH_COMPONENT,
-         *             type,
-         *             (char *)pLockedRect->pBits + (pLockedRect->Pitch * (j-This->lockedRect.top)));
-         *
-         * Depth Stencil surfaces which are not the current depth stencil target should have their data in a
-         * gl texture(next path), or in local memory(early return because of set SFLAG_INSYSMEM above). If
-         * none of that is the case the problem is not in this function :-)
-         ********************************************/
-        FIXME("Depth stencil locking not supported yet\n");
-    } else {
-        /* This path is for normal surfaces, offscreen render targets and everything else that is in a gl texture */
-        TRACE("locking an ordinary surface\n");
-        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, NULL /* no partial locking for textures yet */);
+    if (!(wined3d_settings.rendertargetlock_mode == RTL_DISABLE
+            && ((This->Flags & SFLAG_SWAPCHAIN) || iface == myDevice->render_targets[0])))
+    {
+        IWineD3DSurface_LoadLocation(iface, SFLAG_INSYSMEM, pass_rect);
     }
 
 lock_end:
@@ -1432,7 +1548,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_UnlockRect(IWineD3DSurface *iface) {
         switch(wined3d_settings.rendertargetlock_mode) {
             case RTL_READTEX:
             case RTL_TEXTEX:
-                ActivateContext(myDevice, iface, CTXUSAGE_BLIT);
                 IWineD3DSurface_LoadLocation(iface, SFLAG_INTEXTURE, NULL /* partial texture loading not supported yet */);
                 /* drop through */
 
@@ -1670,7 +1785,6 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             }
             else if(!GL_SUPPORT(EXT_PALETTED_TEXTURE) && GL_SUPPORT(ARB_FRAGMENT_PROGRAM)) {
                 *format = GL_ALPHA;
-                *internal = GL_RGBA;
                 *type = GL_UNSIGNED_BYTE;
                 *target_bpp = 1;
             }
@@ -1692,7 +1806,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             if (colorkey_active) {
                 *convert = CONVERT_CK_565;
                 *format = GL_RGBA;
-                *internal = GL_RGBA;
+                *internal = GL_RGB5_A1;
                 *type = GL_UNSIGNED_SHORT_5_5_5_1;
             }
             break;
@@ -1701,7 +1815,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             if (colorkey_active) {
                 *convert = CONVERT_CK_5551;
                 *format = GL_BGRA;
-                *internal = GL_RGBA;
+                *internal = GL_RGB5_A1;
                 *type = GL_UNSIGNED_SHORT_1_5_5_5_REV;
             }
             break;
@@ -1710,7 +1824,7 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             if (colorkey_active) {
                 *convert = CONVERT_CK_RGB24;
                 *format = GL_RGBA;
-                *internal = GL_RGBA;
+                *internal = GL_RGBA8;
                 *type = GL_UNSIGNED_INT_8_8_8_8;
                 *target_bpp = 4;
             }
@@ -1720,16 +1834,15 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
             if (colorkey_active) {
                 *convert = CONVERT_RGB32_888;
                 *format = GL_RGBA;
-                *internal = GL_RGBA;
+                *internal = GL_RGBA8;
                 *type = GL_UNSIGNED_INT_8_8_8_8;
             }
             break;
 
         case WINED3DFMT_R8G8_SNORM:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER3)) break;
+            if (GL_SUPPORT(NV_TEXTURE_SHADER)) break;
             *convert = CONVERT_V8U8;
             *format = GL_BGR;
-            *internal = GL_RGB8;
             *type = GL_UNSIGNED_BYTE;
             *target_bpp = 3;
             break;
@@ -1743,7 +1856,6 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                 /* Load it into unsigned R5G6B5, swap L and V channels, and revert that in the shader */
                 *target_bpp = 2;
                 *format = GL_RGB;
-                *internal = GL_RGB5;
                 *type = GL_UNSIGNED_SHORT_5_6_5;
             }
             break;
@@ -1760,25 +1872,22 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                  */
             } else {
                 *format = GL_BGRA;
-                *internal = GL_RGB8;
                 *type = GL_UNSIGNED_INT_8_8_8_8_REV;
             }
             break;
 
         case WINED3DFMT_R8G8B8A8_SNORM:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER3)) break;
+            if (GL_SUPPORT(NV_TEXTURE_SHADER)) break;
             *convert = CONVERT_Q8W8V8U8;
             *format = GL_BGRA;
-            *internal = GL_RGBA8;
             *type = GL_UNSIGNED_BYTE;
             *target_bpp = 4;
             break;
 
         case WINED3DFMT_R16G16_SNORM:
-            if(GL_SUPPORT(NV_TEXTURE_SHADER3)) break;
+            if (GL_SUPPORT(NV_TEXTURE_SHADER)) break;
             *convert = CONVERT_V16U16;
             *format = GL_BGR;
-            *internal = GL_RGB16_EXT;
             *type = GL_UNSIGNED_SHORT;
             *target_bpp = 6;
             break;
@@ -1790,7 +1899,6 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
              */
             *convert = CONVERT_A4L4;
             *format = GL_LUMINANCE_ALPHA;
-            *internal = GL_LUMINANCE4_ALPHA4;
             *type = GL_UNSIGNED_BYTE;
             *target_bpp = 2;
             break;
@@ -1798,7 +1906,6 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
         case WINED3DFMT_R16G16_UNORM:
             *convert = CONVERT_G16R16;
             *format = GL_RGB;
-            *internal = GL_RGB16_EXT;
             *type = GL_UNSIGNED_SHORT;
             *target_bpp = 6;
             break;
@@ -1806,7 +1913,6 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
         case WINED3DFMT_R16G16_FLOAT:
             *convert = CONVERT_R16G16F;
             *format = GL_RGB;
-            *internal = GL_RGB16F_ARB;
             *type = GL_HALF_FLOAT_ARB;
             *target_bpp = 6;
             break;
@@ -1814,9 +1920,31 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
         case WINED3DFMT_R32G32_FLOAT:
             *convert = CONVERT_R32G32F;
             *format = GL_RGB;
-            *internal = GL_RGB32F_ARB;
             *type = GL_FLOAT;
             *target_bpp = 12;
+            break;
+
+        case WINED3DFMT_D15S1:
+            if (GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+            {
+                *convert = CONVERT_D15S1;
+                *target_bpp = 4;
+            }
+            break;
+
+        case WINED3DFMT_D24X4S4:
+            if (GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+            {
+                *convert = CONVERT_D24X4S4;
+            }
+            break;
+
+        case WINED3DFMT_D24FS8:
+            if (GL_SUPPORT(ARB_DEPTH_BUFFER_FLOAT))
+            {
+                *convert = CONVERT_D24FS8;
+                *target_bpp = 8;
+            }
             break;
 
         default:
@@ -2271,8 +2399,67 @@ static HRESULT d3dfmt_convert_surface(const BYTE *src, BYTE *dst, UINT pitch, UI
             break;
         }
 
+        case CONVERT_D15S1:
+        {
+            unsigned int x, y;
+
+            for (y = 0; y < height; ++y)
+            {
+                const WORD *source = (const WORD *)(src + y * pitch);
+                DWORD *dest = (DWORD *)(dst + y * outpitch);
+
+                for (x = 0; x < width; ++x)
+                {
+                    /* The depth data is normalized, so needs to be scaled,
+                     * the stencil data isn't.  Scale depth data by
+                     *      (2^24-1)/(2^15-1) ~~ (2^9 + 2^-6). */
+                    WORD d15 = source[x] >> 1;
+                    DWORD d24 = (d15 << 9) + (d15 >> 6);
+                    dest[x] = (d24 << 8) | (source[x] & 0x1);
+                }
+            }
+            break;
+        }
+
+        case CONVERT_D24X4S4:
+        {
+            unsigned int x, y;
+
+            for (y = 0; y < height; ++y)
+            {
+                const DWORD *source = (const DWORD *)(src + y * pitch);
+                DWORD *dest = (DWORD *)(dst + y * outpitch);
+
+                for (x = 0; x < width; ++x)
+                {
+                    /* Just need to clear out the X4 part. */
+                    dest[x] = source[x] & ~0xf0;
+                }
+            }
+            break;
+        }
+
+        case CONVERT_D24FS8:
+        {
+            unsigned int x, y;
+
+            for (y = 0; y < height; ++y)
+            {
+                const DWORD *source = (const DWORD *)(src + y * pitch);
+                float *dest_f = (float *)(dst + y * outpitch);
+                DWORD *dest_s = (DWORD *)(dst + y * outpitch);
+
+                for (x = 0; x < width; ++x)
+                {
+                    dest_f[x * 2] = float_24_to_32((source[x] & 0xffffff00) >> 8);
+                    dest_s[x * 2 + 1] = source[x] & 0xff;
+                }
+            }
+            break;
+        }
+
         default:
-            ERR("Unsupported conversation type %d\n", convert);
+            ERR("Unsupported conversion type %#x.\n", convert);
     }
     return WINED3D_OK;
 }
@@ -2488,7 +2675,7 @@ static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL 
             ERR("Mipmap surface has a glTexture bound to it!\n");
         }
 
-        glBindTexture(This->glDescription.target, This->glDescription.textureName);
+        glBindTexture(This->glDescription.target, *name);
         checkGLcall("glBindTexture");
 
         LEAVE_GL();
@@ -3550,6 +3737,20 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, const 
             rect.y1 += This->currentDesc.Height - h; rect.y2 += This->currentDesc.Height - h;
         }
 
+        if (!is_identity_fixup(This->resource.format_desc->color_fixup))
+        {
+            FIXME("Destination format %s has a fixup, this is not supported.\n",
+                    debug_d3dformat(This->resource.format_desc->format));
+            dump_color_fixup_desc(This->resource.format_desc->color_fixup);
+        }
+
+        if (!myDevice->blitter->color_fixup_supported(Src->resource.format_desc->color_fixup))
+        {
+            FIXME("Source format %s has an unsupported fixup:\n",
+                    debug_d3dformat(Src->resource.format_desc->format));
+            dump_color_fixup_desc(Src->resource.format_desc->color_fixup);
+        }
+
         myDevice->blitter->set_shader((IWineD3DDevice *) myDevice, Src->resource.format_desc,
                 Src->glDescription.target, Src->pow2Width, Src->pow2Height);
 
@@ -3947,11 +4148,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_PrivateSetup(IWineD3DSurface *iface) {
     This->pow2Height = pow2Height;
 
     if (pow2Width > This->currentDesc.Width || pow2Height > This->currentDesc.Height) {
-        WINED3DFORMAT Format = This->resource.format_desc->format;
         /** TODO: add support for non power two compressed textures **/
-        if (Format == WINED3DFMT_DXT1 || Format == WINED3DFMT_DXT2 || Format == WINED3DFMT_DXT3
-            || Format == WINED3DFMT_DXT4 || Format == WINED3DFMT_DXT5
-            || Format == WINED3DFMT_ATI2N)
+        if (This->resource.format_desc->Flags & WINED3DFMT_FLAG_COMPRESSED)
         {
             FIXME("(%p) Compressed non-power-two textures are not supported w(%d) h(%d)\n",
                   This, This->currentDesc.Width, This->currentDesc.Height);
@@ -4597,6 +4795,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
 
             surface_download_data(This);
         } else {
+            /* Note: It might be faster to download into a texture first. */
             read_from_framebuffer(This, rect,
                                   This->resource.allocatedMemory,
                                   IWineD3DSurface_GetPitch(iface));

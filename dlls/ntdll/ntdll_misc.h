@@ -48,6 +48,7 @@ extern void set_cpu_context( const CONTEXT *context );
 extern void copy_context( CONTEXT *to, const CONTEXT *from, DWORD flags );
 extern NTSTATUS context_to_server( context_t *to, const CONTEXT *from );
 extern NTSTATUS context_from_server( CONTEXT *to, const context_t *from );
+extern void call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg ) DECLSPEC_NORETURN;
 
 /* debug helpers */
 extern LPCSTR debugstr_us( const UNICODE_STRING *str );
@@ -77,6 +78,7 @@ extern size_t server_init_thread( void *entry_point );
 extern void DECLSPEC_NORETURN server_protocol_error( const char *err, ... );
 extern void DECLSPEC_NORETURN server_protocol_perror( const char *err );
 extern void DECLSPEC_NORETURN abort_thread( int status );
+extern void DECLSPEC_NORETURN exit_thread( int status );
 extern sigset_t server_block_set;
 extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
 extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );

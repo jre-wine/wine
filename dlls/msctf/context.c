@@ -68,9 +68,13 @@ typedef struct tagContext {
     LONG refCount;
     BOOL connected;
 
+    /* Aggregation */
+    ITfCompartmentMgr  *CompartmentMgr;
+
     TfClientId tidOwner;
     TfEditCookie defaultCookie;
     TS_STATUS documentStatus;
+    ITfDocumentMgr *manager;
 
     ITextStoreACP   *pITextStoreACP;
     ITfContextOwnerCompositionSink *pITfContextOwnerCompositionSink;
@@ -175,6 +179,7 @@ static void Context_Destructor(Context *This)
         free_sink(sink);
     }
 
+    CompartmentMgr_Destructor(This->CompartmentMgr);
     HeapFree(GetProcessHeap(),0,This);
 }
 
@@ -194,6 +199,10 @@ static HRESULT WINAPI Context_QueryInterface(ITfContext *iface, REFIID iid, LPVO
     else if (IsEqualIID(iid, &IID_ITfInsertAtSelection))
     {
         *ppvOut = &This->InsertAtSelectionVtbl;
+    }
+    else if (IsEqualIID(iid, &IID_ITfCompartmentMgr))
+    {
+        *ppvOut = This->CompartmentMgr;
     }
 
     if (*ppvOut)
@@ -498,8 +507,15 @@ static HRESULT WINAPI Context_GetDocumentMgr (ITfContext *iface,
         ITfDocumentMgr **ppDm)
 {
     Context *This = (Context *)iface;
-    FIXME("STUB:(%p)\n",This);
-    return E_NOTIMPL;
+    TRACE("(%p) %p\n",This,ppDm);
+
+    if (!ppDm)
+        return E_INVALIDARG;
+
+    *ppDm = This->manager;
+    if (!This->manager)
+        return S_FALSE;
+    return S_OK;
 }
 
 static HRESULT WINAPI Context_CreateRangeBackup (ITfContext *iface,
@@ -693,7 +709,7 @@ static const ITfInsertAtSelectionVtbl Context_InsertAtSelectionVtbl =
     InsertAtSelection_InsertEmbeddedAtSelection,
 };
 
-HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **ppOut, TfEditCookie *pecTextStore)
+HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfDocumentMgr *mgr, ITfContext **ppOut, TfEditCookie *pecTextStore)
 {
     Context *This;
     EditCookie *cookie;
@@ -717,6 +733,9 @@ HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **pp
     This->refCount = 1;
     This->tidOwner = tidOwner;
     This->connected = FALSE;
+    This->manager = mgr;
+
+    CompartmentMgr_Constructor((IUnknown*)This, &IID_IUnknown, (IUnknown**)&This->CompartmentMgr);
 
     cookie->lockType = TF_ES_READ;
     cookie->pOwningContext = This;
@@ -748,7 +767,7 @@ HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfContext **pp
     return S_OK;
 }
 
-HRESULT Context_Initialize(ITfContext *iface)
+HRESULT Context_Initialize(ITfContext *iface, ITfDocumentMgr *manager)
 {
     Context *This = (Context *)iface;
 
@@ -759,6 +778,7 @@ HRESULT Context_Initialize(ITfContext *iface)
                             (IUnknown*)This->pITextStoreACPSink, TS_AS_ALL_SINKS);
     }
     This->connected = TRUE;
+    This->manager = manager;
     return S_OK;
 }
 
@@ -773,6 +793,7 @@ HRESULT Context_Uninitialize(ITfContext *iface)
             This->pITextStoreACPSink = NULL;
     }
     This->connected = FALSE;
+    This->manager = NULL;
     return S_OK;
 }
 

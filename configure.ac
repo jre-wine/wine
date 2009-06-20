@@ -139,6 +139,14 @@ case $host in
       AC_SUBST(TARGETFLAGS,"-m32")
       enable_win16=${enable_win16:-yes}
     else
+      if test "x${GCC}" = "xyes"
+      then
+        AC_MSG_CHECKING([whether $CC supports __builtin_ms_va_list])
+        AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <stdarg.h>]], [[void func(__builtin_ms_va_list *args);]])],
+                          [AC_MSG_RESULT([yes])],
+                          [AC_MSG_RESULT([no])
+                           AC_MSG_ERROR([You need gcc >= 4.4 to build Wine as 64-bit.])])
+      fi
       AC_SUBST(TARGETFLAGS,"-m64")
     fi
     ;;
@@ -301,7 +309,6 @@ AC_CHECK_HEADERS(\
 	linux/serial.h \
 	linux/types.h \
 	linux/ucdrom.h \
-	mach-o/dyld_images.h \
 	mach-o/nlist.h \
 	mach/mach.h \
 	mach/machine.h \
@@ -328,6 +335,7 @@ AC_CHECK_HEADERS(\
 	scsi/scsi_ioctl.h \
 	scsi/sg.h \
 	soundcard.h \
+	stdbool.h \
 	stdint.h \
 	strings.h \
 	stropts.h \
@@ -476,6 +484,14 @@ AC_CHECK_HEADERS([linux/ipx.h],,,
      #endif
      #ifdef HAVE_LINUX_TYPES_H
      # include <linux/types.h>
+     #endif])
+
+AC_CHECK_HEADERS([mach-o/dyld_images.h],,,
+    [#ifdef HAVE_STDBOOL_H
+     # include <stdbool.h>
+     #endif
+     #ifdef HAVE_STDINT_H
+     # include <stdint.h>
      #endif])
 
 AC_CHECK_HEADERS([resolv.h],,,
@@ -983,7 +999,7 @@ then
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
 WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x"],
-                 [libhal ${notice_platform}development files not found, no dynamic device support.])
+                 [libhal/libdbus ${notice_platform}development files not found, no dynamic device support.])
 
 dnl **** Check for libgnutls ****
 if test "x$with_gnutls" != "xno"
@@ -1377,6 +1393,45 @@ then
   fi
 fi
 
+dnl **** Check for underscore on external symbols ****
+
+AC_CACHE_CHECK([whether external symbols need an underscore prefix], ac_cv_c_extern_prefix,
+    WINE_TRY_ASM_LINK([".globl _ac_test\n_ac_test:\t.long 0"],
+                      [extern int ac_test;],
+                      [if (ac_test) return 1],
+                      ac_cv_c_extern_prefix="yes",ac_cv_c_extern_prefix="no"))
+
+case $host_cpu in
+  *i[[3456789]]86*)
+    AC_CACHE_CHECK([whether external symbols need stdcall decoration], ac_cv_c_stdcall_suffix,
+        WINE_TRY_ASM_LINK(["jmp _ac_test@4"],
+[#ifndef _MSC_VER
+#define __stdcall __attribute__((__stdcall__))
+#endif
+int __stdcall ac_test(int i) { return i; }],
+                          [if (ac_test(1)) return 1],
+                          ac_cv_c_stdcall_suffix="yes",ac_cv_c_stdcall_suffix="no")) ;;
+  *) ac_cv_c_stdcall_suffix="no" ;;
+esac
+
+AH_TEMPLATE(__ASM_NAME,[Define to a macro to generate an assembly name from a C symbol])
+if test "$ac_cv_c_extern_prefix" = "yes"
+then
+    AC_DEFINE([__ASM_NAME(name)], ["_" name])
+    asm_name_prefix="_"
+else
+    AC_DEFINE([__ASM_NAME(name)], [name])
+    asm_name_prefix=""
+fi
+
+AH_TEMPLATE(__ASM_STDCALL,[Define to a macro to generate an stdcall suffix])
+if test "$ac_cv_c_stdcall_suffix" = "yes"
+then
+    AC_DEFINE([__ASM_STDCALL(args)],["@" #args])
+else
+    AC_DEFINE([__ASM_STDCALL(args)],[""])
+fi
+
 dnl **** Check how to define a function in assembly code ****
 
 AC_CACHE_CHECK([how to define a function in assembly code], ac_cv_asm_func_def,
@@ -1392,30 +1447,56 @@ AC_CACHE_CHECK([how to define a function in assembly code], ac_cv_asm_func_def,
 AH_TEMPLATE(__ASM_FUNC,[Define to a macro to generate an assembly function directive])
 case "$ac_cv_asm_func_def" in
   ".def")
-     AC_DEFINE([__ASM_FUNC(name)], [".def " __ASM_NAME(name) "; .scl 2; .type 32; .endef"]) ;;
+     AC_DEFINE([__ASM_FUNC(name)], [".def " __ASM_NAME(name) "; .scl 2; .type 32; .endef"])
+     asm_func_header=".def $asm_name_prefix\" #name suffix \"; .scl 2; .type 32; .endef" ;;
   ".type @function")
-     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",@function"]) ;;
+     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",@function"])
+     asm_func_header=".type $asm_name_prefix\" #name suffix \",@function" ;;
   ".type 2")
-     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",2"]) ;;
+     AC_DEFINE([__ASM_FUNC(name)], [".type " __ASM_NAME(name) ",2"])
+     asm_func_header=".type $asm_name_prefix\" #name suffix \",2" ;;
   *)
-     AC_DEFINE([__ASM_FUNC(name)], [""]) ;;
+     AC_DEFINE([__ASM_FUNC(name)], [""])
+     asm_func_header="" ;;
 esac
 
-dnl **** Check for underscore on external symbols ****
+AC_CACHE_CHECK([whether asm() works outside of functions], ac_cv_c_asm_outside_funcs,
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[asm(".text\n\t.long 0");]],)],
+                      ac_cv_c_asm_outside_funcs="yes",ac_cv_c_asm_outside_funcs="no"))
 
-AC_CACHE_CHECK([whether external symbols need an underscore prefix], ac_cv_c_extern_prefix,
-    WINE_TRY_ASM_LINK([".globl _ac_test\n_ac_test:\t.long 0"],
-                      [extern int ac_test;],
-                      [if (ac_test) return 1],
-                      ac_cv_c_extern_prefix="yes",ac_cv_c_extern_prefix="no"))
+AC_CACHE_CHECK([whether .previous is supported in assembly code], ac_cv_c_dot_previous,
+    WINE_TRY_ASM_LINK([".text\nac_test:\t.long 0\n\t.previous"],,,
+                      ac_cv_c_dot_previous="yes",ac_cv_c_dot_previous="no"))
 
-AH_TEMPLATE(__ASM_NAME,[Define to a macro to generate an assembly name from a C symbol])
-if test "$ac_cv_c_extern_prefix" = "yes"
+AC_CACHE_CHECK([whether CFI directives are supported in assembly code], ac_cv_c_cfi_support,
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[asm(".text\nac_test:\t.cfi_startproc\n\t.long 0\n\t.cfi_endproc");]])],
+                      ac_cv_c_cfi_support="yes",ac_cv_c_cfi_support="no"))
+
+asm_func_header=".globl $asm_name_prefix\" #name suffix \"\\n\\t$asm_func_header\\n$asm_name_prefix\" #name suffix \":\\n\\t"
+asm_func_trailer=""
+if test "$ac_cv_c_dot_previous" = "yes"
 then
-  AC_DEFINE([__ASM_NAME(name)], ["_" name])
-else
-  AC_DEFINE([__ASM_NAME(name)], [name])
+   asm_func_trailer="\\n\\t.previous"
 fi
+if test "$ac_cv_c_cfi_support" = "yes"
+then
+   asm_func_header="$asm_func_header.cfi_startproc\\n\\t"
+   asm_func_trailer="\\n\\t.cfi_endproc$asm_func_trailer"
+fi
+
+asm_func_code="$asm_func_header\" code \"$asm_func_trailer"
+
+AH_TEMPLATE(__ASM_DEFINE_FUNC,[Define to a macro to define an assembly function])
+if test "$ac_cv_c_asm_outside_funcs" = "yes"
+then
+    AC_DEFINE_UNQUOTED([__ASM_DEFINE_FUNC(name,suffix,code)],[asm(".text\n\t.align 4\n\t$asm_func_code");])
+else
+    AC_DEFINE_UNQUOTED([__ASM_DEFINE_FUNC(name,suffix,code)],[void __asm_dummy_##name(void) { asm(".text\n\t.align 4\n\t$asm_func_code"); }])
+fi
+AC_DEFINE([__ASM_GLOBAL_FUNC(name,code)],[__ASM_DEFINE_FUNC(name,"",code)],
+          [Define to a macro to generate an assembly function with C calling convention])
+AC_DEFINE([__ASM_STDCALL_FUNC(name,args,code)],[__ASM_DEFINE_FUNC(name,__ASM_STDCALL(args),code)],
+          [Define to a macro to generate an assembly function with stdcall calling convention])
 
 dnl **** Platform-specific checks ****
 
@@ -2278,6 +2359,7 @@ WINE_CONFIG_MAKEFILE([dlls/win32s16.dll16/Makefile],[dlls/Makedll.rules],[dlls],
 WINE_CONFIG_MAKEFILE([dlls/win87em.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/winaspi.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/windebug.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/windowscodecs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winealsa.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wineaudioio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winecoreaudio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
