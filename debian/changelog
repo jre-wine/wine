@@ -1,8 +1,20 @@
-wine-unstable (1.1.24-1) UNRELEASED; urgency=low
+wine-unstable (1.1.24-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.24, released Jun 19, 2009.
+    - Support for freedesktop file associations.
+    - Support for exception handling on 64-bit.
+    - Improved ARB shaders.
+    - Fixes for the FBO mode.
+    - Many listview improvements.
+    - Various bug fixes.
+  * Check at build time whether /usr/lib32 is a symlink (and what it
+    symlinks to). It should then be a matter of a quick rebuild in the
+    appropriate build environment to get packages that work both before
+    and after the transition.
+  * Name the upstream tarball properly in debian/maint/import (with
+    -unstable for the 1.1.* series).
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 20 Jun 2009 21:25:42 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 21 Jun 2009 19:30:18 +0200
 
 wine-unstable (1.1.23-2) unstable; urgency=low
 
