@@ -59,6 +59,9 @@ endif
 #LIBDIRS = $(IA32_LIBDIR) $(AMD64_LIBDIR)
 BUILDS = build32
 LIBDIRS = $(IA32_LIBDIR)
+#BUILDS =
+#LIBDIRS =
+#TRANSPREFIX = ia32-
 
 else # !x86_64
 
@@ -69,7 +72,11 @@ endif # x86_64
 LOADERS = wine-kthread wine-pthread wine-preloader
 
 control-stamp: debian/control.in
+ifneq (,$(BUILDS))
 	bash debian/prep-control.sh "$(VERSUFFIX)"
+else
+	bash debian/prep-control-transit.sh "$(TRANSPREFIX)" "$(VERSUFFIX)"
+endif
 	touch control-stamp
 
 configure-ia32: configure-ia32-stamp
@@ -279,6 +286,7 @@ binary-indep: build-indep install-indep
 	dh_builddeb -i
 
 # Build architecture-dependent files here.
+ifneq (,$(BUILDS))
 binary-arch: install-arch-stamp
 	dh_testdir
 	dh_testroot
@@ -345,6 +353,29 @@ binary-arch: install-arch-stamp
 	dh_gencontrol -s
 	dh_md5sums -s
 	dh_builddeb -s
+else
+binary-arch: control-stamp
+	# Create dummy (transition) packages. The control-stamp rule
+	# will make them depend on the desired packages.
+	dh_testdir
+	dh_testroot
+	# create installation directories
+	dh_installdirs -s
+
+	bash debian/doclink.sh libwine$(VERSUFFIX)
+
+	dh_installdocs -plibwine$(VERSUFFIX)
+	dh_installchangelogs -plibwine$(VERSUFFIX)
+
+	dh_compress -s
+	dh_fixperms -s
+
+	dh_installdeb -s
+
+	dh_gencontrol -s
+	dh_md5sums -s
+	dh_builddeb -s
+endif
 
 binary: binary-arch binary-indep
 
