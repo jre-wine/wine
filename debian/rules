@@ -348,6 +348,10 @@ binary-arch: install-arch-stamp
 	# relaxed libwine dependencies for everyone else
 	dh_makeshlibs -s
 
+ifeq (usr/lib32,$(IA32_LIBDIR))
+	echo "misc:Pre-Depends=libc6-i386 (>= 2.9-18)" >> debian/libwine$(VERSUFFIX).substvars
+endif
+
 	dh_installdeb -s
 
 	dh_gencontrol -s
