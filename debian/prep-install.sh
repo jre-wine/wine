@@ -39,5 +39,14 @@ for inst in debian/*.install-common; do
   expand_platform $LIBDIRS
 done
 
+for ext in links mime config preinst postinst prerm postrm docs manpages; do
+  for inst in debian/*.${ext}-common; do
+    if [ -f "$inst" ]; then
+      package="$(basename "$inst" .${ext}-common)"
+      cat debian/$package.${ext}-common > debian/$package$SUFFIX.${ext}
+    fi
+  done
+done
+
 # return success
 true
