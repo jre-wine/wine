@@ -36,14 +36,14 @@ if [ "$ARCH" = "amd64" ]; then
 
 # http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=430845
 if grep -q "^hosts:.*mdns4_minimal \[NOTFOUND=return\]" /etc/nsswitch.conf && \
-   [ ! -e /emul/ia32-linux/lib/libnss_mdns4.so.2 ]; then
+   [ ! -e /usr/lib32/libnss_mdns4.so.2 ]; then
  $XMESSAGE -center \
  -title "Wine Warning" \
  "
  It appears that libnss-mdns is installed on your system,
  but lib32nss-mdns is not. Please note that Wine will not be
  able to access the Internet unless you either install
- lib32nss-mdns, or uninstall libnss-mdns.
+ lib32nss-mdns (or ia32-libnss-mdns), or uninstall libnss-mdns.
  " 2>/dev/null
  notify=$?
  if [ $notify -eq 1 ] ; then
@@ -51,7 +51,7 @@ if grep -q "^hosts:.*mdns4_minimal \[NOTFOUND=return\]" /etc/nsswitch.conf && \
   echo "It appears that libnss-mdns is installed on your system,"
   echo "but lib32nss-mdns is not. Please note that Wine will not be"
   echo "able to access the Internet unless you either install"
-  echo "lib32nss-mdns, or uninstall libnss-mdns."
+  echo "lib32nss-mdns (or ia32-libnss-mdns), or uninstall libnss-mdns."
   echo -n "(okay) "
   read confirm
  fi
