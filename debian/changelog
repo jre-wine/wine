@@ -1,8 +1,38 @@
-wine-unstable (1.1.25-1) UNRELEASED; urgency=low
+wine-unstable (1.1.25-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.25, released Jul 3, 2009.
+    - A ton of translation updates.
+    - Support for various Unicode file encodings in Notepad.
+    - Improved memory management, especially for OpenGL.
+    - Desktop menus now cleaned up automatically.
+    - Beginnings of a windowscodecs DLL implementation.
+    - Various bug fixes.
+  * Split out yet another binary package, libwine-bin, which now
+    contains everything wine-bin used to ship in /usr/lib/wine.
+  * Moved all winelib programs in wine-utils to libwine-bin and wine-bin.
+    Moved all development utilities in wine-utils to libwine-dev.
+    Moved all remaining utilities in wine-utils to wine-bin.
+    Deleted the wine-utils package.
+  * Now build with multiarch library paths. Hence, instead of /usr/lib
+    on i386 and /usr/lib32 on amd64, Wine's 32-bit libraries are now in
+    /usr/lib/i486-linux-gnu for both. Although full multiarch isn't here
+    yet, this should also make Wine work better with ia32-apt-get.
+  * If installing into /usr/lib32 (on an amd64 system), and it is not a
+    symlink on the build system, force the resulting binaries to pre-
+    depend on libc6-i386 2.9.18. Closes: #535204.
+  * Updated winelauncher for the new realities in the amd64 world. Any
+    other fallout from the ia32-libs transitions is out of my control.
+    (Closes: #535097)
+  * Added code to generate transition packages for amd64 in the event
+    that ia32-apt-get completely replaces ia32-libs. Not enabled yet,
+    though, since right now, it looks like such a replacement may not
+    actually happen.
+  * Removed versioned dependency on ia32-libs.
+  * In the scripts for preprocessing debhelper files to add package
+    suffixes, also handle maintainer scripts and documentation.
+  * Updated year in debian/copyright.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 11 Jul 2009 18:42:19 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 11 Jul 2009 19:21:11 +0200
 
 wine-unstable (1.1.24-1) unstable; urgency=low
 
