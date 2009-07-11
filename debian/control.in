@@ -242,3 +242,4 @@ Description: Windows API implementation - scanner module
  .
  This package contains a TWAIN interface that allows Windows applications
  to communicate with scanners supported by SANE.
+
