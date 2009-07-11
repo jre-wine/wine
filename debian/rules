@@ -83,6 +83,9 @@ endif # x86_64
 
 LOADERS = wine-kthread wine-pthread wine-preloader
 
+empty:=
+space:=$(empty) $(empty)
+
 control-stamp: debian/control.in
 ifneq (,$(BUILDS))
 	bash debian/prep-control.sh "$(VERSUFFIX)"
@@ -354,7 +357,7 @@ binary-arch: install-arch-stamp
 	dh_makeshlibs -plibwine$(VERSUFFIX) -n -V "libwine$(VERSUFFIX) (= $(VERSION))"
 
 	bash debian/gendeps.sh "$(VERSUFFIX)" $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine$(VERSUFFIX) -ldebian/libwine$(VERSUFFIX)/usr/lib
+	dh_shlibdeps -s -Llibwine$(VERSUFFIX) -l$(subst $(space),:,$(patsubst %,$(CURDIR)/debian/libwine$(VERSUFFIX)/%,$(LIBDIRS)))
 	bash debian/cleandeps.sh "$(VERSUFFIX)"
 
 	# relaxed libwine dependencies for everyone else
