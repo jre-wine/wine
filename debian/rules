@@ -21,6 +21,7 @@ CONFIGOPTS = --with-x --disable-tests
 
 DEB_HOST_GNU_SYSTEM	?= $(shell dpkg-architecture -qDEB_HOST_GNU_SYSTEM)
 DEB_HOST_GNU_CPU	?= $(shell dpkg-architecture -qDEB_HOST_GNU_CPU)
+DEB_HOST_GNU_TYPE	?= $(shell dpkg-architecture -qDEB_HOST_GNU_TYPE)
 
 DEBIAN_VERSION := $(shell cat /etc/debian_version)
 VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
@@ -29,8 +30,15 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 VERSUFFIX=-unstable
 
+# for backports, maybe make this conditional on debian version compiled for
+MULTIARCH=y
+
 CC=gcc
+ifneq (,$(MULTIARCH))
+LIBDIR=usr/lib/$(DEB_HOST_GNU_TYPE)
+else
 LIBDIR=usr/lib
+endif
 LIBDIRS=$(LIBDIR)
 
 IA32_CC := $(CC)
@@ -48,10 +56,14 @@ ifeq ($(DEB_HOST_GNU_CPU),x86_64)
 
 IA32_LIBS := /emul/ia32-linux
 IA32_LDFLAGS += -L$(CURDIR)/lib32
+ifneq (,$(MULTIARCH))
+IA32_LIBDIR := usr/lib/i486-$(DEB_HOST_GNU_SYSTEM)
+else
 IA32_LIBDIR := usr/lib32
 IA32_LIBDIR_LINK := $(shell readlink /$(IA32_LIBDIR))
 ifneq (,$(IA32_LIBDIR_LINK))
 IA32_LIBDIR := $(patsubst /%,%,$(IA32_LIBDIR_LINK))
+endif
 endif
 
 # Not ready yet: build Win64 version
@@ -348,8 +360,10 @@ binary-arch: install-arch-stamp
 	# relaxed libwine dependencies for everyone else
 	dh_makeshlibs -s
 
+ifneq (,$(findstring build32,$(BUILDS)))
 ifeq (usr/lib32,$(IA32_LIBDIR))
 	echo "misc:Pre-Depends=libc6-i386 (>= 2.9-18)" >> debian/libwine$(VERSUFFIX).substvars
+endif
 endif
 
 	dh_installdeb -s
