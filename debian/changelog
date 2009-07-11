@@ -13,6 +13,7 @@ wine-unstable (1.1.25-1) unstable; urgency=low
     Moved all development utilities in wine-utils to libwine-dev.
     Moved all remaining utilities in wine-utils to wine-bin.
     Deleted the wine-utils package.
+  * Removed wine-utils from README.Debian.
   * Now build with multiarch library paths. Hence, instead of /usr/lib
     on i386 and /usr/lib32 on amd64, Wine's 32-bit libraries are now in
     /usr/lib/i486-linux-gnu for both. Although full multiarch isn't here
@@ -32,7 +33,7 @@ wine-unstable (1.1.25-1) unstable; urgency=low
     suffixes, also handle maintainer scripts and documentation.
   * Updated year in debian/copyright.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 11 Jul 2009 19:21:11 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 11 Jul 2009 20:51:19 +0200
 
 wine-unstable (1.1.24-1) unstable; urgency=low
 
