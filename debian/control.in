@@ -36,7 +36,7 @@ Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
 
 Package: wine
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: wine-bin (= ${binary:Version}), wine-utils (= ${binary:Version}),
+Depends: wine-bin (= ${binary:Version}),
  libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
  libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version})
@@ -53,7 +53,7 @@ Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powe
 Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib
 Suggests: libwine-print, libwine-gl
 Conflicts: binfmt-support (<< 1.1.2)
-Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.0-rc4-1), wine (<< 0.9.35)
+Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1), wine (<< 0.9.35)
 Description: Windows API implementation - binary loader
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -76,8 +76,7 @@ Package: libwine-dev
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Section: libdevel
 Depends: libwine (= ${binary:Version}), libc6-dev, libc6-dev-i386 [amd64 kfreebsd-amd64]
-Replaces: libwine (<< 0.0.20010216)
-Recommends: wine-utils
+Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1)
 Suggests: wine-doc
 Description: Windows API implementation - development files
  Wine is a free MS-Windows API implementation.
@@ -112,7 +111,7 @@ Package: libwine-bin
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Depends: ${shlibs:Depends}
-Replaces: wine-bin (<< 1.1.25-1)
+Replaces: wine-bin (<< 1.1.25-1), wine-utils (<< 1.1.25-1)
 Description: Windows API implementation - system services
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
@@ -243,16 +242,3 @@ Description: Windows API implementation - scanner module
  .
  This package contains a TWAIN interface that allows Windows applications
  to communicate with scanners supported by SANE.
-
-Package: wine-utils
-Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${shlibs:Depends}, wine-bin (= ${binary:Version})
-Replaces: libwine-dev (<< 0.0.20010216)
-Description: Windows API implementation - utilities
- Wine is a free MS-Windows API implementation.
- This is still a work in progress and many applications may still not work.
- .
- This package provides many of the Wine utilities, both 
- for compiling source using winelib and for running Wine. This
- package is not strictly necessary.
-
