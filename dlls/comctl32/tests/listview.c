@@ -89,28 +89,11 @@ static HWND subclass_editbox(HWND hwndListview);
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
-static const struct message create_parent_wnd_seq[] = {
-    { WM_GETMINMAXINFO,     sent },
-    { WM_NCCREATE,          sent },
-    { WM_NCCALCSIZE,        sent|wparam, 0 },
-    { WM_CREATE,            sent },
-    { WM_SHOWWINDOW,        sent|wparam, 1 },
-    { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
-    { WM_QUERYNEWPALETTE,   sent|optional },
-    { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
-    { WM_WINDOWPOSCHANGED,  sent|optional },
-    { WM_NCCALCSIZE,        sent|wparam|optional, 1 },
-    { WM_ACTIVATEAPP,       sent|wparam, 1 },
-    { WM_NCACTIVATE,        sent|wparam, 1 },
-    { WM_ACTIVATE,          sent|wparam, 1 },
-    { WM_IME_SETCONTEXT,    sent|wparam|defwinproc|optional, 1 },
-    { WM_IME_NOTIFY,        sent|defwinproc|optional },
-    { WM_SETFOCUS,          sent|wparam|defwinproc, 0 },
-    /* Win9x adds SWP_NOZORDER below */
-    { WM_WINDOWPOSCHANGED,  sent, /*|wparam, SWP_SHOWWINDOW|SWP_NOSIZE|SWP_NOMOVE|SWP_NOCLIENTSIZE|SWP_NOCLIENTMOVE*/ },
-    { WM_NCCALCSIZE,        sent|wparam|optional, 1 },
-    { WM_SIZE,              sent },
-    { WM_MOVE,              sent },
+static const struct message create_ownerdrawfixed_parent_seq[] = {
+    { WM_NOTIFYFORMAT, sent },
+    { WM_QUERYUISTATE, sent|optional }, /* Win2K and higher */
+    { WM_MEASUREITEM, sent },
+    { WM_PARENTNOTIFY, sent },
     { 0 }
 };
 
@@ -1362,7 +1345,9 @@ static void test_create(void)
     ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
     SendMessage(hList, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_HEADERDRAGDROP);
     hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
-    ok(IsWindow(hHeader), "Header should be created\n");
+    ok(IsWindow(hHeader) ||
+       broken(!IsWindow(hHeader)), /* 4.7x common controls */
+       "Header should be created\n");
     ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
     DestroyWindow(hList);
 
@@ -1389,6 +1374,13 @@ static void test_create(void)
     ok(!IsWindow(hHeader), "Header shouldn't be created\n");
     ok(NULL == GetDlgItem(hList, 0), "NULL dialog item expected\n");
 
+    DestroyWindow(hList);
+
+    /* WM_MEASUREITEM should be sent when created with LVS_OWNERDRAWFIXED */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    hList = create_listview_control(LVS_OWNERDRAWFIXED);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, create_ownerdrawfixed_parent_seq,
+                "created with LVS_OWNERDRAWFIXED|LVS_REPORT - parent seq", FALSE);
     DestroyWindow(hList);
 }
 
@@ -2667,7 +2659,16 @@ static void test_hittest(void)
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
-    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, TRUE, TRUE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    /* outside possible client rectangle (to right) */
+    x = pos.x + 500;
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
+    /* subitem returned with -1 item too */
+    x = pos.x + 150;
+    y = -10;
+    test_lvm_subitemhittest(hwnd, x, y, -1, 1, LVHT_NOWHERE, FALSE, FALSE, TRUE, __LINE__);
     /* parent client area is 100x100 by default */
     MoveWindow(hwnd, 0, 0, 300, 100, FALSE);
     x = pos.x + 150; /* outside column */
@@ -2684,7 +2685,12 @@ static void test_hittest(void)
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
-    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, TRUE, TRUE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    /* outside possible client rectangle (to right) */
+    x = pos.x + 500;
+    y = pos.y + (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* try with icons, state icons index is 1 based so at least 2 bitmaps needed */
     himl = ImageList_Create(16, 16, 0, 4, 4);
     ok(himl != NULL, "failed to create imagelist\n");
@@ -3036,7 +3042,7 @@ static void test_getitemrect(void)
     expect(TRUE, r);
     /* padding, column width */
     expect(2, rect.left);
-    todo_wine expect(50, rect.right);
+    expect(50, rect.right);
 
     /* try with indentation */
     item.mask = LVIF_INDENT;
@@ -3062,7 +3068,7 @@ static void test_getitemrect(void)
     expect(TRUE, r);
     /* padding + 1 icon width, column width */
     expect(2 + 16, rect.left);
-    todo_wine expect(50, rect.right);
+    expect(50, rect.right);
 
     /* label bounds */
     rect.left = LVIR_LABEL;
@@ -3202,7 +3208,7 @@ static void test_editbox(void)
     ok(hwndedit2 == NULL, "Expected Edit window not to be created\n");
     ok(!IsWindow(hwndedit), "Expected Edit window to be destroyed\n");
     ok(GetFocus() == hwnd, "Expected List to be focused\n");
-    /* and value greater then max item index */
+    /* and value greater than max item index */
     hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
     ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
     ok(GetFocus() == hwndedit, "Expected Edit to be focused\n");
@@ -3310,7 +3316,7 @@ static void test_notifyformat(void)
     r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
     expect(1, r);
     DestroyWindow(hwnd);
-    /* recieving error code defaulting to ansi */
+    /* receiving error code defaulting to ansi */
     notifyFormat = 0;
     hwnd = create_listview_controlW(0, hwndparentW);
     ok(hwnd != NULL, "failed to create a listview window\n");
@@ -3321,7 +3327,7 @@ static void test_notifyformat(void)
     r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
     expect(1, r);
     DestroyWindow(hwnd);
-    /* recieving ansi code from unicode window, use it */
+    /* receiving ansi code from unicode window, use it */
     notifyFormat = NFR_ANSI;
     hwnd = create_listview_controlW(0, hwndparentW);
     ok(hwnd != NULL, "failed to create a listview window\n");
@@ -3408,6 +3414,24 @@ static BOOL is_below_comctl_5(void)
     return !ret;
 }
 
+static void unload_v6_module(ULONG_PTR cookie)
+{
+    HANDLE hKernel32;
+    BOOL (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
+
+    hKernel32 = GetModuleHandleA("kernel32.dll");
+    pDeactivateActCtx = (void*)GetProcAddress(hKernel32, "DeactivateActCtx");
+    if (!pDeactivateActCtx)
+    {
+        win_skip("Activation contexts unsupported\n");
+        return;
+    }
+
+    pDeactivateActCtx(0, cookie);
+
+    DeleteFileA(manifest_name);
+}
+
 static BOOL load_v6_module(ULONG_PTR *pcookie)
 {
     HANDLE hKernel32;
@@ -3419,6 +3443,7 @@ static BOOL load_v6_module(ULONG_PTR *pcookie)
     BOOL ret;
     HANDLE file;
     DWORD written;
+    HWND hwnd;
 
     hKernel32 = GetModuleHandleA("kernel32.dll");
     pCreateActCtxA = (void*)GetProcAddress(hKernel32, "CreateActCtxA");
@@ -3463,29 +3488,28 @@ static BOOL load_v6_module(ULONG_PTR *pcookie)
 
     if (!ret)
     {
-        win_skip("A problem during context activation occured.\n");
+        win_skip("A problem during context activation occurred.\n");
         DeleteFileA(manifest_name);
     }
 
-    return ret;
-}
-
-static void unload_v6_module(ULONG_PTR cookie)
-{
-    HANDLE hKernel32;
-    BOOL (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
-
-    hKernel32 = GetModuleHandleA("kernel32.dll");
-    pDeactivateActCtx = (void*)GetProcAddress(hKernel32, "DeactivateActCtx");
-    if (!pDeactivateActCtx)
+    else
     {
-        win_skip("Activation contexts unsupported\n");
-        return;
+        /* this is a XP SP3 failure workaround */
+        hwnd = CreateWindowExA(0, WC_LISTVIEW, "foo",
+                               WS_CHILD | WS_BORDER | WS_VISIBLE | LVS_REPORT,
+                               0, 0, 100, 100,
+                               hwndparent, NULL, GetModuleHandleA(NULL), NULL);
+        if (!IsWindow(hwnd))
+        {
+            win_skip("FIXME: failed to create ListView window.\n");
+            unload_v6_module(*pcookie);
+            return FALSE;
+        }
+        else
+            DestroyWindow(hwnd);
     }
 
-    pDeactivateActCtx(0, cookie);
-
-    DeleteFileA(manifest_name);
+    return ret;
 }
 
 static void test_get_set_view(void)
@@ -3534,6 +3558,109 @@ static void test_get_set_view(void)
     DestroyWindow(hwnd);
 }
 
+static void test_canceleditlabel(void)
+{
+    HWND hwnd, hwndedit;
+    DWORD ret;
+    CHAR buff[10];
+    LVITEMA itema;
+    static CHAR test[] = "test";
+    static const CHAR test1[] = "test1";
+
+    hwnd = create_listview_control(LVS_EDITLABELS);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    insert_item(hwnd, 0);
+
+    /* try without edit created */
+    ret = SendMessage(hwnd, LVM_CANCELEDITLABEL, 0, 0);
+    expect(TRUE, ret);
+
+    /* cancel without data change */
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected edit control to be created\n");
+    ret = SendMessage(hwnd, LVM_CANCELEDITLABEL, 0, 0);
+    expect(TRUE, ret);
+    ok(!IsWindow(hwndedit), "Expected edit control to be destroyed\n");
+
+    /* cancel after data change */
+    memset(&itema, 0, sizeof(itema));
+    itema.pszText = test;
+    ret = SendMessage(hwnd, LVM_SETITEMTEXT, 0, (LPARAM)&itema);
+    expect(TRUE, ret);
+    SetFocus(hwnd);
+    hwndedit = (HWND)SendMessage(hwnd, LVM_EDITLABEL, 0, 0);
+    ok(IsWindow(hwndedit), "Expected edit control to be created\n");
+    ret = SetWindowText(hwndedit, test1);
+    ok(ret != 0, "Expected edit text to change\n");
+    ret = SendMessage(hwnd, LVM_CANCELEDITLABEL, 0, 0);
+    expect(TRUE, ret);
+    ok(!IsWindow(hwndedit), "Expected edit control to be destroyed\n");
+    memset(&itema, 0, sizeof(itema));
+    itema.pszText = buff;
+    itema.cchTextMax = sizeof(buff)/sizeof(CHAR);
+    ret = SendMessage(hwnd, LVM_GETITEMTEXT, 0, (LPARAM)&itema);
+    expect(5, ret);
+    ok(strcmp(buff, test1) == 0, "Expected label text not to change\n");
+
+    DestroyWindow(hwnd);
+}
+
+static void test_mapidindex(void)
+{
+    HWND hwnd;
+    DWORD ret;
+
+    /* LVM_MAPINDEXTOID unsupported with LVS_OWNERDATA */
+    hwnd = create_listview_control(LVS_OWNERDATA);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    insert_item(hwnd, 0);
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 0, 0);
+    expect(-1, ret);
+    DestroyWindow(hwnd);
+
+    hwnd = create_listview_control(0);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+
+    /* LVM_MAPINDEXTOID with invalid index */
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 0, 0);
+    expect(-1, ret);
+
+    insert_item(hwnd, 0);
+    insert_item(hwnd, 1);
+
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, -1, 0);
+    expect(-1, ret);
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 2, 0);
+    expect(-1, ret);
+
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 0, 0);
+    expect(0, ret);
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 1, 0);
+    expect(1, ret);
+    /* remove 0 indexed item, id retained */
+    SendMessage(hwnd, LVM_DELETEITEM, 0, 0);
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 0, 0);
+    expect(1, ret);
+    /* new id starts from previous value */
+    insert_item(hwnd, 1);
+    ret = SendMessage(hwnd, LVM_MAPINDEXTOID, 1, 0);
+    expect(2, ret);
+
+    /* get index by id */
+    ret = SendMessage(hwnd, LVM_MAPIDTOINDEX, -1, 0);
+    expect(-1, ret);
+    ret = SendMessage(hwnd, LVM_MAPIDTOINDEX, 0, 0);
+    expect(-1, ret);
+    ret = SendMessage(hwnd, LVM_MAPIDTOINDEX, 1, 0);
+    expect(0, ret);
+    ret = SendMessage(hwnd, LVM_MAPIDTOINDEX, 2, 0);
+    expect(1, ret);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -3555,9 +3682,7 @@ START_TEST(listview)
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    flush_sequences(sequences, NUM_MSG_SEQUENCES);
     hwndparent = create_parent_window(FALSE);
-    ok_sequence(sequences, PARENT_SEQ_INDEX, create_parent_wnd_seq, "create parent window", TRUE);
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
     g_is_below_5 = is_below_comctl_5();
@@ -3598,6 +3723,8 @@ START_TEST(listview)
 
     /* comctl32 version 6 tests start here */
     test_get_set_view();
+    test_canceleditlabel();
+    test_mapidindex();
 
     unload_v6_module(ctx_cookie);
 

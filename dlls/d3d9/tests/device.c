@@ -130,9 +130,13 @@ static void test_mipmap_levels(void)
     check_mipmap_levels(pDevice, 1, 256, 9);
     check_mipmap_levels(pDevice, 1, 1, 1);
 
-    cleanup:
-    if (pD3d)     IUnknown_Release( pD3d );
-    if (pDevice)  IUnknown_Release( pDevice );
+cleanup:
+    if (pDevice)
+    {
+        UINT refcount = IUnknown_Release( pDevice );
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IUnknown_Release( pD3d );
     DestroyWindow( hwnd );
 }
 
@@ -186,8 +190,12 @@ static void test_checkdevicemultisampletype(void)
     ok(qualityLevels == 1,"qualitylevel is not 1 but %d\n",qualityLevels);
 
 cleanup:
-    if (pD3d)     IUnknown_Release( pD3d );
-    if (pDevice)  IUnknown_Release( pDevice );
+    if (pDevice)
+    {
+        UINT refcount = IUnknown_Release( pDevice );
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IUnknown_Release( pD3d );
     DestroyWindow( hwnd );
 }
 
@@ -326,12 +334,16 @@ static void test_swapchain(void)
     ok(swapchainX == NULL, "The swapchain pointer is %p\n", swapchainX);
     if(swapchainX && swapchainX != (void *) 0xdeadbeef ) IDirect3DSwapChain9_Release(swapchainX);
 
-    cleanup:
+cleanup:
     if(swapchain1) IDirect3DSwapChain9_Release(swapchain1);
     if(swapchain2) IDirect3DSwapChain9_Release(swapchain2);
     if(swapchain3) IDirect3DSwapChain9_Release(swapchain3);
-    if(pDevice) IDirect3DDevice9_Release(pDevice);
-    if(pD3d) IDirect3DDevice9_Release(pD3d);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
     DestroyWindow( hwnd );
 }
 
@@ -760,8 +772,12 @@ static void test_cursor(void)
     ok(info.hCursor == cur, "The cursor handle is %p\n", info.hCursor); /* unchanged */
 
 cleanup:
-    if(pDevice) IDirect3D9_Release(pDevice);
-    if(pD3d) IDirect3D9_Release(pD3d);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
     DestroyWindow( hwnd );
 }
 
@@ -1145,8 +1161,12 @@ static void test_reset(void)
 
 cleanup:
     HeapFree(GetProcessHeap(), 0, modes);
-    if(pD3d) IDirect3D9_Release(pD3d);
-    if(pDevice) IDirect3D9_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
 }
 
 /* Test adapter display modes */
@@ -1389,8 +1409,12 @@ cleanup:
     if(pSurface1) IDirect3DSurface9_Release(pSurface1);
     if(pSurface2) IDirect3DSurface9_Release(pSurface2);
     if(pSurface3) IDirect3DSurface9_Release(pSurface3);
-    if(pD3d) IDirect3D9_Release(pD3d);
-    if(pDevice) IDirect3D9_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -1456,8 +1480,12 @@ static void test_limits(void)
      */
 cleanup:
     if(pTexture) IDirect3DTexture9_Release(pTexture);
-    if(pD3d) IDirect3D9_Release(pD3d);
-    if(pDevice) IDirect3D9_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3D9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -1615,8 +1643,12 @@ static void test_depthstenciltest(void)
 
 cleanup:
     if(pDepthStencil) IDirect3DSurface9_Release(pDepthStencil);
-    if(pD3d) IDirect3D9_Release(pD3d);
-    if(pDevice) IDirect3D9_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3D9_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D9_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -1739,8 +1771,12 @@ static void test_draw_indexed(void)
     IDirect3DVertexDeclaration9_Release(vertex_declaration);
 
 cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
     if (d3d9) IDirect3D9_Release(d3d9);
-    if (device) IDirect3DDevice9_Release(device);
     if (hwnd) DestroyWindow(hwnd);
 }
 
@@ -1828,9 +1864,14 @@ static void test_null_stream(void)
     IDirect3DDevice9_SetVertexDeclaration(device, NULL);
 
 cleanup:
+    if (buffer) IDirect3DVertexBuffer9_Release(buffer);
     if(decl) IDirect3DVertexDeclaration9_Release(decl);
     if(shader) IDirect3DVertexShader9_Release(shader);
-    if(device) IDirect3DDevice9_Release(device);
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
     if(d3d9) IDirect3D9_Release(d3d9);
 }
 
@@ -1900,8 +1941,13 @@ static void test_vertex_buffer_alignment(void)
         }
     }
 
-    cleanup:
-    if(d3d9) IDirect3D9_Release(d3d9);
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (d3d9) IDirect3D9_Release(d3d9);
 }
 
 static void test_lights(void)
@@ -1962,8 +2008,12 @@ static void test_lights(void)
         ok(hr == D3D_OK, "Disabling light %u failed with %08x\n", i, hr);
     }
 
-    cleanup:
-    if(device) IDirect3DDevice9_Release(device);
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
     if(d3d9) IDirect3D9_Release(d3d9);
 }
 
@@ -2036,9 +2086,13 @@ static void test_set_stream_source(void)
     hr = IDirect3DDevice9_SetStreamSource(device, 0, NULL, 0, 0);
     ok(hr == D3D_OK, "Failed to set the stream source, offset 4, hr = %08x\n", hr);
 
-    if(pVertexBuffer) IDirect3DDevice9_Release(pVertexBuffer);
 cleanup:
-    if(device) IDirect3DDevice9_Release(device);
+    if (pVertexBuffer) IDirect3DVertexBuffer9_Release(pVertexBuffer);
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice9_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
     if(d3d9) IDirect3D9_Release(d3d9);
 }
 
@@ -2258,6 +2312,70 @@ err_out:
     return;
 }
 
+static void test_multi_device(void)
+{
+    IDirect3DDevice9 *device1 = NULL, *device2 = NULL;
+    D3DPRESENT_PARAMETERS present_parameters;
+    HWND hwnd1 = NULL, hwnd2 = NULL;
+    IDirect3D9 *d3d9;
+    ULONG refcount;
+    HRESULT hr;
+
+    d3d9 = pDirect3DCreate9(D3D_SDK_VERSION);
+    ok(d3d9 != NULL, "Failed to create a d3d9 object.\n");
+    if (!d3d9) goto fail;
+
+    hwnd1 = CreateWindow("static", "d3d9_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    ok(hwnd1 != NULL, "Failed to create a window.\n");
+    if (!hwnd1) goto fail;
+
+    memset(&present_parameters, 0, sizeof(present_parameters));
+    present_parameters.Windowed = TRUE;
+    present_parameters.hDeviceWindow = hwnd1;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+
+    hr = IDirect3D9_CreateDevice(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd1,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device1);
+    ok(SUCCEEDED(hr), "Failed to create a device, hr %#x\n", hr);
+    IDirect3D9_Release(d3d9);
+    d3d9 = NULL;
+    if (FAILED(hr)) goto fail;
+
+    d3d9 = pDirect3DCreate9(D3D_SDK_VERSION);
+    ok(d3d9 != NULL, "Failed to create a d3d9 object.\n");
+    if (!d3d9) goto fail;
+
+    hwnd2 = CreateWindow("static", "d3d9_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    ok(hwnd2 != NULL, "Failed to create a window.\n");
+    if (!hwnd2) goto fail;
+
+    memset(&present_parameters, 0, sizeof(present_parameters));
+    present_parameters.Windowed = TRUE;
+    present_parameters.hDeviceWindow = hwnd2;
+    present_parameters.SwapEffect = D3DSWAPEFFECT_DISCARD;
+
+    hr = IDirect3D9_CreateDevice(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd2,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device2);
+    ok(SUCCEEDED(hr), "Failed to create a device, hr %#x\n", hr);
+    IDirect3D9_Release(d3d9);
+    d3d9 = NULL;
+    if (FAILED(hr)) goto fail;
+
+fail:
+    if (d3d9) IDirect3D9_Release(d3d9);
+    if (device1)
+    {
+        refcount = IDirect3DDevice9_Release(device1);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (device2)
+    {
+        refcount = IDirect3DDevice9_Release(device2);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (hwnd1) DestroyWindow(hwnd1);
+    if (hwnd2) DestroyWindow(hwnd2);
+}
 
 START_TEST(device)
 {
@@ -2280,6 +2398,7 @@ START_TEST(device)
         }
         IDirect3D9_Release(d3d9);
 
+        test_multi_device();
         test_display_formats();
         test_display_modes();
         test_swapchain();

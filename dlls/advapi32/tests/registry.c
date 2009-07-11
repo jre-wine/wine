@@ -959,6 +959,12 @@ static void test_reg_open_key(void)
     ret = RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Wine\\Test", NULL);
     ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", ret);
 
+    ret = RegOpenKeyA(HKEY_CURRENT_USER, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", ret);
+
+    ret = RegOpenKeyA(NULL, NULL, NULL);
+    ok(ret == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER, got %d\n", ret);
+
     /*  beginning backslash character */
     ret = RegOpenKeyA(HKEY_CURRENT_USER, "\\Software\\Wine\\Test", &hkResult);
        ok(ret == ERROR_BAD_PATHNAME || /* NT/2k/XP */

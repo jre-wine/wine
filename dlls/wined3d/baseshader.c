@@ -138,11 +138,6 @@ const struct wined3d_shader_frontend *shader_select_frontend(DWORD version_token
     }
 }
 
-static inline BOOL shader_is_version_token(DWORD token) {
-    return shader_is_pshader_version(token) ||
-           shader_is_vshader_version(token);
-}
-
 void shader_buffer_init(struct SHADER_BUFFER *buffer)
 {
     buffer->buffer = HeapAlloc(GetProcessHeap(), 0, SHADER_PGMSIZE);
@@ -246,12 +241,12 @@ static inline void set_bitmap_bit(DWORD *bitmap, DWORD bit)
 }
 
 static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct shader_reg_maps *reg_maps,
-        const struct wined3d_shader_register *reg, BOOL pshader)
+        const struct wined3d_shader_register *reg, enum wined3d_shader_type shader_type)
 {
     switch (reg->type)
     {
         case WINED3DSPR_TEXTURE: /* WINED3DSPR_ADDR */
-            if (pshader) reg_maps->texcoord[reg->idx] = 1;
+            if (shader_type == WINED3D_SHADER_TYPE_PIXEL) reg_maps->texcoord[reg->idx] = 1;
             else reg_maps->address[reg->idx] = 1;
             break;
 
@@ -260,8 +255,7 @@ static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct sh
             break;
 
         case WINED3DSPR_INPUT:
-            if (!pshader) reg_maps->input_registers |= 1 << reg->idx;
-            else
+            if (shader_type == WINED3D_SHADER_TYPE_PIXEL)
             {
                 if (reg->rel_addr)
                 {
@@ -279,6 +273,7 @@ static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct sh
                     ((IWineD3DPixelShaderImpl *)This)->input_reg_used[reg->idx] = TRUE;
                 }
             }
+            else reg_maps->input_registers |= 1 << reg->idx;
             break;
 
         case WINED3DSPR_RASTOUT:
@@ -286,14 +281,17 @@ static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct sh
             break;
 
         case WINED3DSPR_MISCTYPE:
-            if (pshader && reg->idx == 0) reg_maps->vpos = 1;
-            if (pshader && reg->idx == 1) reg_maps->usesfacing = 1;
+            if (shader_type == WINED3D_SHADER_TYPE_PIXEL)
+            {
+                if (reg->idx == 0) reg_maps->vpos = 1;
+                else if (reg->idx == 1) reg_maps->usesfacing = 1;
+            }
             break;
 
         case WINED3DSPR_CONST:
             if (reg->rel_addr)
             {
-                if (!pshader)
+                if (shader_type != WINED3D_SHADER_TYPE_PIXEL)
                 {
                     if (reg->idx <= ((IWineD3DVertexShaderImpl *)This)->min_rel_offset)
                         ((IWineD3DVertexShaderImpl *)This)->min_rel_offset = reg->idx;
@@ -314,6 +312,10 @@ static void shader_record_register_usage(IWineD3DBaseShaderImpl *This, struct sh
 
         case WINED3DSPR_CONSTBOOL:
             reg_maps->boolean_constants |= (1 << reg->idx);
+            break;
+
+        case WINED3DSPR_COLOROUT:
+            reg_maps->highest_render_target = max(reg_maps->highest_render_target, reg->idx);
             break;
 
         default:
@@ -400,7 +402,6 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
     struct wined3d_shader_version shader_version;
     unsigned int cur_loop_depth = 0, max_loop_depth = 0;
     const DWORD* pToken = byte_code;
-    char pshader;
 
     /* There are some minor differences between pixel and vertex shaders */
 
@@ -415,7 +416,6 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
 
     fe->shader_read_header(fe_data, &pToken, &shader_version);
     reg_maps->shader_version = shader_version;
-    pshader = shader_is_pshader_version(shader_version.type);
 
     reg_maps->constf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
                                  sizeof(*reg_maps->constf) * ((constf_size + 31) / 32));
@@ -501,7 +501,7 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
             pToken += 4;
 
             /* In pixel shader 1.X shaders, the constants are clamped between [-1;1] */
-            if (shader_version.major == 1 && pshader)
+            if (shader_version.major == 1 && shader_version.type == WINED3D_SHADER_TYPE_PIXEL)
             {
                 float *value = (float *) lconst->value;
                 if(value[0] < -1.0) value[0] = -1.0;
@@ -606,26 +606,39 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
 
                 fe->shader_read_dst_param(fe_data, &pToken, &dst_param, &dst_rel_addr);
 
+                shader_record_register_usage(This, reg_maps, &dst_param.reg, shader_version.type);
+
                 /* WINED3DSPR_TEXCRDOUT is the same as WINED3DSPR_OUTPUT. _OUTPUT can be > MAX_REG_TEXCRD and
                  * is used in >= 3.0 shaders. Filter 3.0 shaders to prevent overflows, and also filter pixel
                  * shaders because TECRDOUT isn't used in them, but future register types might cause issues */
-                if (!pshader && shader_version.major < 3 && dst_param.reg.type == WINED3DSPR_TEXCRDOUT)
+                if (shader_version.type == WINED3D_SHADER_TYPE_VERTEX && shader_version.major < 3
+                        && dst_param.reg.type == WINED3DSPR_TEXCRDOUT)
                 {
-                    reg_maps->texcoord_mask[dst_param.reg.type] |= dst_param.write_mask;
+                    reg_maps->texcoord_mask[dst_param.reg.idx] |= dst_param.write_mask;
                 }
-                else
+
+                if (shader_version.type == WINED3D_SHADER_TYPE_PIXEL
+                        && dst_param.reg.type == WINED3DSPR_COLOROUT && dst_param.reg.idx == 0)
                 {
-                    if(pshader && dst_param.reg.type == WINED3DSPR_COLOROUT && dst_param.reg.idx == 0)
+                    /* Many 2.0 and 3.0 pixel shaders end with a MOV from a temp register to
+                     * COLOROUT 0. If we know this in advance, the ARB shader backend can skip
+                     * the mov and perform the sRGB write correction from the source register.
+                     *
+                     * However, if the mov is only partial, we can't do this, and if the write
+                     * comes from an instruction other than MOV it is hard to do as well. If
+                     * COLOROUT 0 is overwritten partially later, the marker is dropped again. */
+                    IWineD3DPixelShaderImpl *ps = (IWineD3DPixelShaderImpl *)This;
+
+                    ps->color0_mov = FALSE;
+                    if (ins.handler_idx == WINED3DSIH_MOV)
                     {
-                        IWineD3DPixelShaderImpl *ps = (IWineD3DPixelShaderImpl *) This;
-                        ps->color0_mov = FALSE;
+                        /* Used later when the source register is read. */
+                        color0_mov = TRUE;
                     }
-                    shader_record_register_usage(This, reg_maps, &dst_param.reg, pshader);
                 }
 
                 /* Declare 1.X samplers implicitly, based on the destination reg. number */
                 if (shader_version.major == 1
-                        && pshader /* Filter different instructions with the same enum values in VS */
                         && (ins.handler_idx == WINED3DSIH_TEX
                             || ins.handler_idx == WINED3DSIH_TEXBEM
                             || ins.handler_idx == WINED3DSIH_TEXBEML
@@ -655,25 +668,9 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
                         }
                     }
                 }
-                else if (pshader && ins.handler_idx == WINED3DSIH_BEM)
+                else if (ins.handler_idx == WINED3DSIH_BEM)
                 {
                     reg_maps->bumpmat[dst_param.reg.idx] = TRUE;
-                }
-                else if(pshader && ins.handler_idx == WINED3DSIH_MOV)
-                {
-                    /* Many 2.0 and 3.0 pixel shaders end with a MOV from a temp register to
-                     * COLOROUT 0. If we know this in advance, the ARB shader backend can skip
-                     * the mov and perform the sRGB write correction from the source register.
-                     *
-                     * However, if the mov is only partial, we can't do this, and if the write
-                     * comes from an instruction other than MOV it is hard to do as well. If
-                     * COLOROUT 0 is overwritten partially later, the marker is dropped again
-                     */
-                    if(dst_param.reg.type == WINED3DSPR_COLOROUT && dst_param.reg.idx == 0)
-                    {
-                        /* Used later when the source register is read */
-                        color0_mov = TRUE;
-                    }
                 }
             }
 
@@ -701,6 +698,14 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
             {
                 reg_maps->usesmova = 1;
             }
+            else if(ins.handler_idx == WINED3DSIH_IFC)
+            {
+                reg_maps->usesifc = 1;
+            }
+            else if(ins.handler_idx == WINED3DSIH_CALL)
+            {
+                reg_maps->usescall = 1;
+            }
 
             limit = ins.src_count + (ins.predicate ? 1 : 0);
             for (i = 0; i < limit; ++i)
@@ -711,11 +716,11 @@ HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3
                 fe->shader_read_src_param(fe_data, &pToken, &src_param, &src_rel_addr);
                 count = get_instr_extra_regcount(ins.handler_idx, i);
 
-                shader_record_register_usage(This, reg_maps, &src_param.reg, pshader);
+                shader_record_register_usage(This, reg_maps, &src_param.reg, shader_version.type);
                 while (count)
                 {
                     ++src_param.reg.idx;
-                    shader_record_register_usage(This, reg_maps, &src_param.reg, pshader);
+                    shader_record_register_usage(This, reg_maps, &src_param.reg, shader_version.type);
                     --count;
                 }
 
@@ -1081,8 +1086,7 @@ void shader_generate_main(IWineD3DBaseShader *iface, SHADER_BUFFER *buffer,
                 || ins.handler_idx == WINED3DSIH_DEF
                 || ins.handler_idx == WINED3DSIH_DEFI
                 || ins.handler_idx == WINED3DSIH_DEFB
-                || ins.handler_idx == WINED3DSIH_PHASE
-                || ins.handler_idx == WINED3DSIH_RET)
+                || ins.handler_idx == WINED3DSIH_PHASE)
         {
             pToken += param_size;
             continue;
@@ -1134,14 +1138,34 @@ void shader_trace_init(const struct wined3d_shader_frontend *fe, void *fe_data, 
 {
     struct wined3d_shader_version shader_version;
     const DWORD* pToken = pFunction;
+    const char *type_prefix;
     DWORD i;
 
     TRACE("Parsing %p\n", pFunction);
 
     fe->shader_read_header(fe_data, &pToken, &shader_version);
 
-    TRACE("%s_%u_%u\n", shader_is_pshader_version(shader_version.type) ? "ps": "vs",
-            shader_version.major, shader_version.minor);
+    switch (shader_version.type)
+    {
+        case WINED3D_SHADER_TYPE_VERTEX:
+            type_prefix = "vs";
+            break;
+
+        case WINED3D_SHADER_TYPE_GEOMETRY:
+            type_prefix = "gs";
+            break;
+
+        case WINED3D_SHADER_TYPE_PIXEL:
+            type_prefix = "ps";
+            break;
+
+        default:
+            FIXME("Unhandled shader type %#x.\n", shader_version.type);
+            type_prefix = "unknown";
+            break;
+    }
+
+    TRACE("%s_%u_%u\n", type_prefix, shader_version.major, shader_version.minor);
 
     while (!fe->shader_is_end(fe_data, &pToken))
     {

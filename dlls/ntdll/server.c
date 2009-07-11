@@ -73,6 +73,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 #define SCM_RIGHTS 1
 #endif
 
+#ifndef MSG_CMSG_CLOEXEC
+#define MSG_CMSG_CLOEXEC 0
+#endif
+
 #define SOCKETNAME "socket"        /* name of the socket file */
 #define LOCKNAME   "lock"          /* name of the lock file */
 
@@ -408,12 +412,12 @@ static int receive_fd( obj_handle_t *handle )
 
     for (;;)
     {
-        if ((ret = recvmsg( fd_socket, &msghdr, 0 )) > 0)
+        if ((ret = recvmsg( fd_socket, &msghdr, MSG_CMSG_CLOEXEC )) > 0)
         {
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
             fd = cmsg.fd;
 #endif
-            if (fd != -1) fcntl( fd, F_SETFD, 1 ); /* set close on exec flag */
+            if (fd != -1) fcntl( fd, F_SETFD, FD_CLOEXEC ); /* in case MSG_CMSG_CLOEXEC is not supported */
             return fd;
         }
         if (!ret) break;
@@ -655,6 +659,32 @@ int CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *uni
 void CDECL wine_server_release_fd( HANDLE handle, int unix_fd )
 {
     close( unix_fd );
+}
+
+
+/***********************************************************************
+ *           server_pipe
+ *
+ * Create a pipe for communicating with the server.
+ */
+int server_pipe( int fd[2] )
+{
+    int ret;
+#ifdef HAVE_PIPE2
+    static int have_pipe2 = 1;
+
+    if (have_pipe2)
+    {
+        if (!(ret = pipe2( fd, O_CLOEXEC ))) return ret;
+        if (errno == ENOSYS || errno == EINVAL) have_pipe2 = 0;  /* don't try again */
+    }
+#endif
+    if (!(ret = pipe( fd )))
+    {
+        fcntl( fd[0], F_SETFD, FD_CLOEXEC );
+        fcntl( fd[1], F_SETFD, FD_CLOEXEC );
+    }
+    return ret;
 }
 
 
@@ -1025,17 +1055,12 @@ size_t server_init_thread( void *entry_point )
     sigaction( SIGCHLD, &sig_act, NULL );
 
     /* create the server->client communication pipes */
-    if (pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );
-    if (pipe( ntdll_get_thread_data()->wait_fd ) == -1) server_protocol_perror( "pipe" );
+    if (server_pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );
+    if (server_pipe( ntdll_get_thread_data()->wait_fd ) == -1) server_protocol_perror( "pipe" );
     wine_server_send_fd( reply_pipe[1] );
     wine_server_send_fd( ntdll_get_thread_data()->wait_fd[1] );
     ntdll_get_thread_data()->reply_fd = reply_pipe[0];
     close( reply_pipe[1] );
-
-    /* set close on exec flag */
-    fcntl( ntdll_get_thread_data()->reply_fd, F_SETFD, 1 );
-    fcntl( ntdll_get_thread_data()->wait_fd[0], F_SETFD, 1 );
-    fcntl( ntdll_get_thread_data()->wait_fd[1], F_SETFD, 1 );
 
     SERVER_START_REQ( init_thread )
     {

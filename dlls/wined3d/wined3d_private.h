@@ -43,6 +43,11 @@
 #include "wine/list.h"
 #include "wine/rbtree.h"
 
+/* Driver quirks */
+#define WINED3D_QUIRK_ARB_VS_OFFSET_LIMIT       0x00000001
+#define WINED3D_QUIRK_SET_TEXCOORD_W            0x00000002
+#define WINED3D_QUIRK_GLSL_CLIP_VARYING         0x00000004
+
 /* Texture format fixups */
 
 enum fixup_channel_source
@@ -640,10 +645,13 @@ typedef struct shader_reg_maps
     unsigned usesrelconstF  : 1;
     unsigned fog            : 1;
     unsigned usestexldl     : 1;
-    unsigned padding        : 6;
+    unsigned usesifc        : 1;
+    unsigned usescall       : 1;
+    unsigned padding        : 4;
 
     /* Whether or not loops are used in this shader, and nesting depth */
     unsigned loop_depth;
+    unsigned highest_render_target;
 
 } shader_reg_maps;
 
@@ -1248,6 +1256,7 @@ void context_resource_released(IWineD3DDevice *iface, IWineD3DResource *resource
 void context_bind_fbo(IWineD3DDevice *iface, GLenum target, GLuint *fbo);
 void context_attach_depth_stencil_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer);
 void context_attach_surface_fbo(IWineD3DDeviceImpl *This, GLenum fbo_target, DWORD idx, IWineD3DSurface *surface);
+void context_set_last_device(IWineD3DDeviceImpl *device);
 
 void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain);
 HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain);
@@ -1377,8 +1386,9 @@ struct texture_stage_op
 struct ffp_frag_settings {
     struct texture_stage_op     op[MAX_TEXTURES];
     enum fogmode fog;
-    /* Use an int instead of a char to get dword alignment */
-    unsigned int sRGB_write;
+    /* Use shorts instead of chars to get dword alignment */
+    unsigned short sRGB_write;
+    unsigned short emul_clipplanes;
 };
 
 struct ffp_frag_desc
@@ -2705,6 +2715,24 @@ void find_vs_compile_args(IWineD3DVertexShaderImpl *shader, IWineD3DStateBlockIm
 /*****************************************************************************
  * IDirect3DPixelShader implementation structure
  */
+
+/* Using additional shader constants (uniforms in GLSL / program environment
+ * or local parameters in ARB) is costly:
+ * ARB only knows float4 parameters and GLSL compiler are not really smart
+ * when it comes to efficiently pack float2 uniforms, so no space is wasted
+ * (in fact most compilers map a float2 to a full float4 uniform).
+ *
+ * For NP2 texcoord fixup we only need 2 floats (width and height) for each
+ * 2D texture used in the shader. We therefore pack fixup info for 2 textures
+ * into a single shader constant (uniform / program parameter).
+ *
+ * This structure is shared between the GLSL and the ARB backend.*/
+struct ps_np2fixup_info {
+    unsigned char     idx[MAX_FRAGMENT_SAMPLERS]; /* indices to the real constant */
+    WORD              active; /* bitfield indicating if we can apply the fixup */
+    WORD              num_consts;
+};
+
 typedef struct IWineD3DPixelShaderImpl {
     /* IUnknown parts */
     const IWineD3DPixelShaderVtbl *lpVtbl;

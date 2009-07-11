@@ -59,6 +59,7 @@ struct expr_eval_routine
     const expr_t *expr;
 };
 
+static unsigned int field_memsize(const type_t *type, unsigned int *offset);
 static unsigned int fields_memsize(const var_list_t *fields, unsigned int *align);
 static unsigned int write_struct_tfs(FILE *file, type_t *type, const char *name, unsigned int *tfsoff);
 static int write_embedded_types(FILE *file, const attr_list_t *attrs, type_t *type,
@@ -978,14 +979,13 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
 
         if (fields) LIST_FOR_EACH_ENTRY( var, fields, const var_t, entry )
         {
-            unsigned int align = 0;
-            /* FIXME: take alignment into account */
+            unsigned int size = field_memsize( var->type, &offset );
             if (var->name && !strcmp(var->name, subexpr->u.sval))
             {
                 correlation_variable = var->type;
                 break;
             }
-            offset += type_memsize(var->type, &align);
+            offset += size;
         }
         if (!correlation_variable)
             error("write_conf_or_var_desc: couldn't find variable %s in structure\n",
@@ -1081,9 +1081,18 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
     return 4;
 }
 
+/* return size and start offset of a data field based on current offset */
+static unsigned int field_memsize(const type_t *type, unsigned int *offset)
+{
+    unsigned int align = 0;
+    unsigned int size = type_memsize( type, &align );
+
+    *offset = ROUND_SIZE( *offset, align );
+    return size;
+}
+
 static unsigned int fields_memsize(const var_list_t *fields, unsigned int *align)
 {
-    int have_align = FALSE;
     unsigned int size = 0;
     const var_t *v;
 
@@ -1092,11 +1101,7 @@ static unsigned int fields_memsize(const var_list_t *fields, unsigned int *align
     {
         unsigned int falign = 0;
         unsigned int fsize = type_memsize(v->type, &falign);
-        if (!have_align)
-        {
-            *align = falign;
-            have_align = TRUE;
-        }
+        if (*align < falign) *align = falign;
         size = ROUND_SIZE(size, falign);
         size += fsize;
     }
@@ -1128,7 +1133,7 @@ static unsigned int union_memsize(const var_list_t *fields, unsigned int *pmaxa)
 int get_padding(const var_list_t *fields)
 {
     unsigned short offset = 0;
-    int salign = -1;
+    unsigned int salign = 1;
     const var_t *f;
 
     if (!fields)
@@ -1139,8 +1144,7 @@ int get_padding(const var_list_t *fields)
         type_t *ft = f->type;
         unsigned int align = 0;
         unsigned int size = type_memsize(ft, &align);
-        if (salign == -1)
-            salign = align;
+        if (align > salign) salign = align;
         offset = ROUND_SIZE(offset, align);
         offset += size;
     }
@@ -1190,12 +1194,9 @@ unsigned int type_memsize(const type_t *t, unsigned int *align)
     case TYPE_ENUM:
         switch (get_enum_fc(t))
         {
+        case RPC_FC_ENUM16:
         case RPC_FC_ENUM32:
             size = 4;
-            if (size > *align) *align = size;
-            break;
-        case RPC_FC_ENUM16:
-            size = 2;
             if (size > *align) *align = size;
             break;
         default:
@@ -1517,12 +1518,15 @@ static void write_descriptors(FILE *file, type_t *type, unsigned int *tfsoff)
 
     if (fs) LIST_FOR_EACH_ENTRY(f, fs, var_t, entry)
     {
-        unsigned int align = 0;
         type_t *ft = f->type;
+        unsigned int size = field_memsize( ft, &offset );
         if (type_get_type(ft) == TYPE_UNION && is_attr(f->attrs, ATTR_SWITCHIS))
         {
+            short reloff;
             unsigned int absoff = ft->typestring_offset;
-            short reloff = absoff - (*tfsoff + 6);
+            if (is_attr(ft->attrs, ATTR_SWITCHTYPE))
+                absoff += 8; /* we already have a corr descr, skip it */
+            reloff = absoff - (*tfsoff + 6);
             print_file(file, 0, "/* %d */\n", *tfsoff);
             print_file(file, 2, "0x%x,\t/* FC_NON_ENCAPSULATED_UNION */\n", RPC_FC_NON_ENCAPSULATED_UNION);
             print_file(file, 2, "0x%x,\t/* FIXME: always FC_LONG */\n", RPC_FC_LONG);
@@ -1532,9 +1536,7 @@ static void write_descriptors(FILE *file, type_t *type, unsigned int *tfsoff)
                        reloff, reloff, absoff);
             *tfsoff += 8;
         }
-
-        /* FIXME: take alignment into account */
-        offset += type_memsize(ft, &align);
+        offset += size;
     }
 }
 
@@ -2199,7 +2201,7 @@ static void write_struct_members(FILE *file, const type_t *type,
 {
     const var_t *field;
     unsigned short offset = 0;
-    int salign = -1;
+    unsigned int salign = 1;
     int padding;
     var_list_t *fields = type_struct_get_fields(type);
 
@@ -2210,8 +2212,7 @@ static void write_struct_members(FILE *file, const type_t *type,
         {
             unsigned int align = 0;
             unsigned int size = type_memsize(ft, &align);
-            if (salign == -1)
-                salign = align;
+            if (salign < align) salign = align;
             if ((align - 1) & offset)
             {
                 unsigned char fc = 0;
@@ -2509,6 +2510,7 @@ static unsigned int write_union_tfs(FILE *file, type_t *type, unsigned int *tfso
         *tfsoff += write_conf_or_var_desc(file, NULL, *tfsoff, st, &dummy_expr );
         print_file(file, 2, "NdrFcShort(0x2),\t/* Offset= 2 (%u) */\n", *tfsoff + 2);
         *tfsoff += 2;
+        print_file(file, 0, "/* %u */\n", *tfsoff);
     }
 
     print_file(file, 2, "NdrFcShort(0x%hx),\t/* %d */\n", size, size);

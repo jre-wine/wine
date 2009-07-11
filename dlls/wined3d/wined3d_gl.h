@@ -3988,6 +3988,7 @@ typedef struct _WineD3D_GL_Info {
   unsigned vs_arb_max_instructions;
   unsigned vs_arb_max_temps;
   unsigned ps_arb_constantsF;
+  unsigned ps_arb_max_local_constants;
   unsigned ps_arb_max_instructions;
   unsigned ps_arb_max_temps;
   unsigned vs_glsl_constantsF;
@@ -4000,10 +4001,9 @@ typedef struct _WineD3D_GL_Info {
   GL_VSVersion vs_nv_version;
   GL_VSVersion vs_ati_version;
 
-  BOOL arb_vs_offset_limit;
-  BOOL set_texcoord_w;
   DWORD reserved_glsl_constants;
-  BOOL glsl_clip_varying;
+
+  DWORD quirks;
 
   BOOL supported[WINED3D_GL_EXT_COUNT];
 
@@ -4015,11 +4015,5 @@ typedef struct _WineD3D_GL_Info {
   struct GlPixelFormatDesc *gl_formats;
 } WineD3D_GL_Info;
 #undef USE_GL_FUNC
-
-struct driver_quirk {
-    BOOL        (*match)(const WineD3D_GL_Info *gl_info);
-    void        (*apply)(WineD3D_GL_Info *gl_info);
-    const char  *description;
-};
 
 #endif /* __WINE_WINED3D_GL */

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -53,6 +55,7 @@ POPUP "&Urejanje" {
 POPUP "&Iskanje" {
   MENUITEM "&Najdi ...\tCtrl+F",   CMD_SEARCH
   MENUITEM "Najdi na&slednje\tF3",  CMD_SEARCH_NEXT
+  MENUITEM "&Zamenjaj ...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Pomoč" {
   MENUITEM "&Teme pomoči",         CMD_HELP_CONTENTS
@@ -118,5 +121,3 @@ STRING_OUT_OF_MEMORY,                   "Za dokončanje operacije je na voljo pr
 pomnilnika.\nZaprite enega ali več programov in poskusite znova."
 
 }
-
-#pragma code_page(default)

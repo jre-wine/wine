@@ -34,16 +34,14 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 #define VB_MAXDECLCHANGES     100     /* After that number we stop converting */
 #define VB_RESETDECLCHANGE    1000    /* Reset the changecount after that number of draws */
 
+/* Context activation is done by the caller. */
 static void buffer_create_buffer_object(struct wined3d_buffer *This)
 {
     GLenum error, gl_usage;
-    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
 
     TRACE("Creating an OpenGL vertex buffer object for IWineD3DVertexBuffer %p Usage(%s)\n",
             This, debug_d3dusage(This->resource.usage));
 
-    /* Make sure that a context is there. Needed in a multithreaded environment. Otherwise this call is a nop */
-    ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
     ENTER_GL();
 
     /* Make sure that the gl error is cleared. Do not use checkGLcall
@@ -457,6 +455,7 @@ static BOOL buffer_find_decl(struct wined3d_buffer *This)
     return ret;
 }
 
+/* Context activation is done by the caller. */
 static void buffer_check_buffer_object_size(struct wined3d_buffer *This)
 {
     UINT size = This->conversion_stride ?
@@ -506,29 +505,18 @@ static inline void fixup_d3dcolor(DWORD *dst_color)
 
 static inline void fixup_transformed_pos(float *p)
 {
-    float x, y, z, w;
-
-    /* rhw conversion like in drawStridedSlow */
-    if (p[3] == 1.0 || ((p[3] < eps) && (p[3] > -eps)))
+    /* rhw conversion like in position_float4(). */
+    if (p[3] != 1.0 && p[3] != 0.0)
     {
-        x = p[0];
-        y = p[1];
-        z = p[2];
-        w = 1.0;
+        float w = 1.0 / p[3];
+        p[0] *= w;
+        p[1] *= w;
+        p[2] *= w;
+        p[3] = w;
     }
-    else
-    {
-        w = 1.0 / p[3];
-        x = p[0] * w;
-        y = p[1] * w;
-        z = p[2] * w;
-    }
-    p[0] = x;
-    p[1] = y;
-    p[2] = z;
-    p[3] = w;
 }
 
+/* Context activation is done by the caller. */
 const BYTE *buffer_get_memory(IWineD3DBuffer *iface, UINT offset, GLuint *buffer_object)
 {
     struct wined3d_buffer *This = (struct wined3d_buffer *)iface;
@@ -588,6 +576,7 @@ static ULONG STDMETHODCALLTYPE buffer_AddRef(IWineD3DBuffer *iface)
     return refcount;
 }
 
+/* Context activation is done by the caller. */
 const BYTE *buffer_get_sysmem(struct wined3d_buffer *This)
 {
     /* AllocatedMemory exists if the buffer is double buffered or has no buffer object at all */
@@ -701,6 +690,8 @@ static void STDMETHODCALLTYPE buffer_PreLoad(IWineD3DBuffer *iface)
 
     TRACE("iface %p\n", iface);
 
+    ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
     if (!This->buffer_object)
     {
         /* TODO: Make converting independent from VBOs */
@@ -736,7 +727,7 @@ static void STDMETHODCALLTYPE buffer_PreLoad(IWineD3DBuffer *iface)
         if (This->conversion_count > VB_MAXDECLCHANGES)
         {
             FIXME("Too many declaration changes, stopping converting\n");
-            ActivateContext(device, device->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
             ENTER_GL();
             GL_EXTCALL(glDeleteBuffersARB(1, &This->buffer_object));
             checkGLcall("glDeleteBuffersARB");

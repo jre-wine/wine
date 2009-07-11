@@ -29,7 +29,6 @@
 #include "wine/port.h"
 #include "wined3d_private.h"
 
-#include <assert.h>
 #include <stdio.h>
 
 /* Use the d3d_surface debug channel to have one channel for all surfaces */
@@ -200,7 +199,10 @@ IWineGDISurfaceImpl_UnlockRect(IWineD3DSurface *iface)
     /* Tell the swapchain to update the screen */
     if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain)))
     {
-        x11_copy_to_screen(swapchain, &This->lockedRect);
+        if(iface == swapchain->frontBuffer)
+        {
+            x11_copy_to_screen(swapchain, &This->lockedRect);
+        }
         IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     }
 
@@ -491,7 +493,10 @@ static HRESULT WINAPI IWineGDISurfaceImpl_RealizePalette(IWineD3DSurface *iface)
     /* Tell the swapchain to update the screen */
     if (SUCCEEDED(IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapchain)))
     {
-        x11_copy_to_screen(swapchain, NULL);
+        if(iface == swapchain->frontBuffer)
+        {
+            x11_copy_to_screen(swapchain, NULL);
+        }
         IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     }
 

@@ -85,6 +85,7 @@ extern void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset
 extern int server_remove_fd_from_cache( HANDLE handle );
 extern int server_get_unix_fd( HANDLE handle, unsigned int access, int *unix_fd,
                                int *needs_close, enum server_fd_type *type, unsigned int *options );
+extern int server_pipe( int fd[2] );
 
 /* security descriptors */
 NTSTATUS NTDLL_create_struct_sd(PSECURITY_DESCRIPTOR nt_sd, struct security_descriptor **server_sd,
@@ -150,7 +151,7 @@ extern NTSTATUS virtual_handle_fault( LPCVOID addr, DWORD err );
 extern BOOL virtual_check_buffer_for_read( const void *ptr, SIZE_T size );
 extern BOOL virtual_check_buffer_for_write( void *ptr, SIZE_T size );
 extern void VIRTUAL_SetForceExec( BOOL enable );
-extern void VIRTUAL_UseLargeAddressSpace(void);
+extern void virtual_release_address_space( BOOL free_high_mem );
 extern struct _KUSER_SHARED_DATA *user_shared_data;
 
 /* completion */

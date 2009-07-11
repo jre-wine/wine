@@ -67,6 +67,36 @@ int symt_cmp_addr(const void* p1, const void* p2)
     return cmp_addr(a1, a2);
 }
 
+static BOOL symt_grow_sorttab(struct module* module, unsigned sz)
+{
+    struct symt_ht**    new;
+
+    if (module->addr_sorttab)
+        new = HeapReAlloc(GetProcessHeap(), 0, module->addr_sorttab,
+                          sz * sizeof(struct symt_ht*));
+    else
+        new = HeapAlloc(GetProcessHeap(), 0, sz * sizeof(struct symt_ht*));
+    if (!new) return FALSE;
+    module->addr_sorttab = new;
+    return TRUE;
+}
+
+static void symt_add_module_ht(struct module* module, struct symt_ht* ht)
+{
+    ULONG64             addr;
+
+    hash_table_add(&module->ht_symbols, &ht->hash_elt);
+    /* Don't store in sorttab a symbol without address, they are of
+     * no use here (e.g. constant values)
+     */
+    if (symt_get_info(&ht->symt, TI_GET_ADDRESS, &addr) &&
+        symt_grow_sorttab(module, module->num_symbols + 1))
+    {
+        module->addr_sorttab[module->num_symbols++] = ht;
+        module->sortlist_valid = FALSE;
+    }
+}
+
 #ifdef HAVE_REGEX_H
 
 /* transforms a dbghelp's regular expression into a POSIX one
@@ -247,13 +277,12 @@ struct symt_public* symt_new_public(struct module* module,
     {
         sym->symt.tag      = SymTagPublicSymbol;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->container     = compiland ? &compiland->symt : NULL;
         sym->address       = address;
         sym->size          = size;
         sym->in_code       = in_code;
         sym->is_function   = is_func;
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             p = vector_add(&compiland->vchildren, &module->pool);
@@ -279,8 +308,6 @@ struct symt_data* symt_new_global_variable(struct module* module,
     {
         sym->symt.tag      = SymTagData;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->kind          = is_static ? DataIsFileStatic : DataIsGlobal;
         sym->container     = compiland ? &compiland->symt : NULL;
         sym->type          = type;
@@ -292,6 +319,7 @@ struct symt_data* symt_new_global_variable(struct module* module,
                       debugstr_w(module->module.ModuleName), name,
                       wine_dbgstr_longlong(tsz), size);
         }
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             p = vector_add(&compiland->vchildren, &module->pool);
@@ -318,14 +346,13 @@ struct symt_function* symt_new_function(struct module* module,
     {
         sym->symt.tag  = SymTagFunction;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->container = &compiland->symt;
         sym->address   = addr;
         sym->type      = sig_type;
         sym->size      = size;
         vector_init(&sym->vlines,  sizeof(struct line_info), 64);
         vector_init(&sym->vchildren, sizeof(struct symt*), 8);
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             p = vector_add(&compiland->vchildren, &module->pool);
@@ -519,12 +546,11 @@ struct symt_thunk* symt_new_thunk(struct module* module,
     {
         sym->symt.tag  = SymTagThunk;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->container = &compiland->symt;
         sym->address   = addr;
         sym->size      = size;
         sym->ordinal   = ord;
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             struct symt**       p;
@@ -549,12 +575,11 @@ struct symt_data* symt_new_constant(struct module* module,
     {
         sym->symt.tag      = SymTagData;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->kind          = DataIsConstant;
         sym->container     = compiland ? &compiland->symt : NULL;
         sym->type          = type;
         sym->u.value       = *v;
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             struct symt**       p;
@@ -578,11 +603,10 @@ struct symt_hierarchy_point* symt_new_label(struct module* module,
     {
         sym->symt.tag      = SymTagLabel;
         sym->hash_elt.name = pool_strdup(&module->pool, name);
-        hash_table_add(&module->ht_symbols, &sym->hash_elt);
-        module->sortlist_valid = FALSE;
         sym->loc.kind      = loc_absolute;
         sym->loc.offset    = address;
         sym->parent        = compiland ? &compiland->symt : NULL;
+        symt_add_module_ht(module, (struct symt_ht*)sym);
         if (compiland)
         {
             struct symt**       p;
@@ -759,6 +783,26 @@ static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
     return FALSE;
 }
 
+static inline unsigned where_to_insert(const struct module* module, unsigned high, struct symt_ht* elt)
+{
+    unsigned    low = 0, mid = high / 2;
+    ULONG64     addr;
+
+    if (!high) return 0;
+    symt_get_info(&elt->symt, TI_GET_ADDRESS, &addr);
+    do
+    {
+        switch (cmp_sorttab_addr(module, mid, addr))
+        {
+        case 0: return mid;
+        case -1: low = mid + 1; break;
+        case 1: high = mid; break;
+        }
+        mid = low + (high - low) / 2;
+    } while (low < high);
+    return mid;
+}
+
 /***********************************************************************
  *              resort_symbols
  *
@@ -766,38 +810,32 @@ static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
  */
 static BOOL resort_symbols(struct module* module)
 {
-    void*                       ptr;
-    struct symt_ht*             sym;
-    struct hash_table_iter      hti;
-    ULONG64                     addr;
-
-    if (!(module->module.NumSyms = module->ht_symbols.num_elts))
+    if (!(module->module.NumSyms = module->num_symbols))
         return FALSE;
-    
-    if (module->addr_sorttab)
-        module->addr_sorttab = HeapReAlloc(GetProcessHeap(), 0,
-                                           module->addr_sorttab, 
-                                           module->module.NumSyms * sizeof(struct symt_ht*));
-    else
-        module->addr_sorttab = HeapAlloc(GetProcessHeap(), 0,
-                                         module->module.NumSyms * sizeof(struct symt_ht*));
-    if (!module->addr_sorttab) return FALSE;
 
-    module->num_sorttab = 0;
-    hash_table_iter_init(&module->ht_symbols, &hti, NULL);
-    while ((ptr = hash_table_iter_up(&hti)))
+    /* FIXME: what's the optimal value here ??? */
+    if (module->num_sorttab && module->num_symbols <= module->num_sorttab + 30)
     {
-        sym = GET_ENTRY(ptr, struct symt_ht, hash_elt);
-        assert(sym);
-        /* Don't store in sorttab symbol without address, they are of
-         * no use here (e.g. constant values)
-         * As the number of those symbols is very couple (a couple per module)
-         * we don't bother for the unused spots at the end of addr_sorttab
-         */
-        if (symt_get_info(&sym->symt, TI_GET_ADDRESS, &addr))
-            module->addr_sorttab[module->num_sorttab++] = sym;
+        int     i, delta, ins_idx = module->num_sorttab, prev_ins_idx;
+        struct symt_ht* tmp[30];
+
+        delta = module->num_symbols - module->num_sorttab;
+        memcpy(tmp, &module->addr_sorttab[module->num_sorttab], delta * sizeof(struct symt_ht*));
+        qsort(tmp, delta, sizeof(struct symt_ht*), symt_cmp_addr);
+
+        for (i = delta - 1; i >= 0; i--)
+        {
+            prev_ins_idx = ins_idx;
+            ins_idx = where_to_insert(module, prev_ins_idx = ins_idx, tmp[i]);
+            memmove(&module->addr_sorttab[ins_idx + i + 1],
+                    &module->addr_sorttab[ins_idx],
+                    (prev_ins_idx - ins_idx) * sizeof(struct symt_ht*));
+            module->addr_sorttab[ins_idx + i] = tmp[i];
+        }
     }
-    qsort(module->addr_sorttab, module->num_sorttab, sizeof(struct symt_ht*), symt_cmp_addr);
+    else
+        qsort(module->addr_sorttab, module->num_symbols, sizeof(struct symt_ht*), symt_cmp_addr);
+    module->num_sorttab = module->num_symbols;
     return module->sortlist_valid = TRUE;
 }
 

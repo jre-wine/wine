@@ -1492,10 +1492,7 @@ static void HTTPREQ_Destroy(WININETHANDLEHEADER *hdr)
     if(lpwhr->hCacheFile)
         CloseHandle(lpwhr->hCacheFile);
 
-    if(lpwhr->lpszCacheFile) {
-        DeleteFileW(lpwhr->lpszCacheFile); /* FIXME */
-        HeapFree(GetProcessHeap(), 0, lpwhr->lpszCacheFile);
-    }
+    HeapFree(GetProcessHeap(), 0, lpwhr->lpszCacheFile);
 
     DeleteCriticalSection( &lpwhr->read_section );
     WININET_Release(&lpwhr->lpHttpSession->hdr);
@@ -1587,6 +1584,23 @@ static DWORD HTTPREQ_QueryOption(WININETHANDLEHEADER *hdr, DWORD option, void *b
     WININETHTTPREQW *req = (WININETHTTPREQW*)hdr;
 
     switch(option) {
+    case INTERNET_OPTION_SECURITY_FLAGS:
+    {
+        LPWININETHTTPSESSIONW lpwhs;
+        lpwhs = req->lpHttpSession;
+
+        if (*size < sizeof(ULONG))
+            return ERROR_INSUFFICIENT_BUFFER;
+
+        *size = sizeof(DWORD);
+        if (lpwhs->hdr.dwFlags & INTERNET_FLAG_SECURE)
+            *(DWORD*)buffer = SECURITY_FLAG_SECURE;
+        else
+            *(DWORD*)buffer = 0;
+        FIXME("Semi-STUB INTERNET_OPTION_SECURITY_FLAGS: %x\n",*(DWORD*)buffer);
+        return ERROR_SUCCESS;
+    }
+
     case INTERNET_OPTION_HANDLE_TYPE:
         TRACE("INTERNET_OPTION_HANDLE_TYPE\n");
 
@@ -4203,13 +4217,13 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
     DWORD buflen = MAX_REPLY_LEN;
     BOOL bSuccess = FALSE;
     INT  rc = 0;
-    static const WCHAR szHundred[] = {'1','0','0',0};
     char bufferA[MAX_REPLY_LEN];
-    LPWSTR status_code, status_text;
+    LPWSTR status_code = NULL, status_text = NULL;
     DWORD cchMaxRawHeaders = 1024;
     LPWSTR lpszRawHeaders = HeapAlloc(GetProcessHeap(), 0, (cchMaxRawHeaders+1)*sizeof(WCHAR));
     LPWSTR temp;
     DWORD cchRawHeaders = 0;
+    BOOL codeHundred = FALSE;
 
     TRACE("-->\n");
 
@@ -4220,6 +4234,7 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
         goto lend;
 
     do {
+        static const WCHAR szHundred[] = {'1','0','0',0};
         /*
          * We should first receive 'HTTP/1.x nnn OK' where nnn is the status code.
          */
@@ -4228,23 +4243,32 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
             goto lend;
         rc += buflen;
         MultiByteToWideChar( CP_ACP, 0, bufferA, buflen, buffer, MAX_REPLY_LEN );
+        /* check is this a status code line? */
+        if (!strncmpW(buffer, g_szHttp1_0, 4))
+        {
+            /* split the version from the status code */
+            status_code = strchrW( buffer, ' ' );
+            if( !status_code )
+                goto lend;
+            *status_code++=0;
 
-        /* split the version from the status code */
-        status_code = strchrW( buffer, ' ' );
-        if( !status_code )
-            goto lend;
-        *status_code++=0;
+            /* split the status code from the status text */
+            status_text = strchrW( status_code, ' ' );
+            if( !status_text )
+                goto lend;
+            *status_text++=0;
 
-        /* split the status code from the status text */
-        status_text = strchrW( status_code, ' ' );
-        if( !status_text )
-            goto lend;
-        *status_text++=0;
+            TRACE("version [%s] status code [%s] status text [%s]\n",
+               debugstr_w(buffer), debugstr_w(status_code), debugstr_w(status_text) );
 
-        TRACE("version [%s] status code [%s] status text [%s]\n",
-           debugstr_w(buffer), debugstr_w(status_code), debugstr_w(status_text) );
-
-    } while (!strcmpW(status_code, szHundred)); /* ignore "100 Continue" responses */
+            codeHundred = (!strcmpW(status_code, szHundred));
+        }
+        else if (!codeHundred)
+        {
+            FIXME("Non status line at head of response (%s)\n",debugstr_w(buffer));
+            continue;
+        }
+    } while (codeHundred);
 
     /* Add status code */
     HTTP_ProcessHeader(lpwhr, szStatus, status_code,
@@ -4312,6 +4336,19 @@ static INT HTTP_GetResponseHeaders(LPWININETHTTPREQW lpwhr, BOOL clear)
 	       break;
 	}
     }while(1);
+
+    /* make sure the response header is terminated with an empty line.  Some apps really
+       truly care about that empty line being there for some reason.  Just add it to the
+       header. */
+    if (cchRawHeaders + strlenW(szCrLf) > cchMaxRawHeaders)
+    {
+        cchMaxRawHeaders = cchRawHeaders + strlenW(szCrLf);
+        temp = HeapReAlloc(GetProcessHeap(), 0, lpszRawHeaders, (cchMaxRawHeaders + 1) * sizeof(WCHAR));
+        if (temp == NULL) goto lend;
+        lpszRawHeaders = temp;
+    }
+
+    memcpy(&lpszRawHeaders[cchRawHeaders], szCrLf, sizeof(szCrLf));
 
     HeapFree(GetProcessHeap(), 0, lpwhr->lpszRawHeaders);
     lpwhr->lpszRawHeaders = lpszRawHeaders;

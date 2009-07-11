@@ -403,7 +403,7 @@ HKLM,%CurrentVersion%,"RegisteredOwner",2,""
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"DiskSpinDownMax",,"3600"
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"DiskSpinDownMin",,"3"
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"LastID",,"5"
-HKLM,%CurrentVersion%\Run,"winemenubuilder",2,"winemenubuilder -a"
+HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"winemenubuilder -a -r"
 HKLM,%CurrentVersion%\Setup,"BootDir",,"%30%"
 HKLM,%CurrentVersion%\Setup,"SharedDir",,"%25%"
 HKLM,%CurrentVersion%\Uninstall,,,""
@@ -2427,6 +2427,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,rsaenh.dll,1
 11,,shdocvw.dll,1
 11,,urlmon.dll,1
+11,,windowscodecs.dll,1
 11,,wintrust.dll,1
 11,,wuapi.dll,1
 

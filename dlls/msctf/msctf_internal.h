@@ -26,6 +26,7 @@
 #define COOKIE_MAGIC_GUIDATOM 0x0030
 #define COOKIE_MAGIC_IPPSINK 0x0040
 #define COOKIE_MAGIC_EDITCOOKIE 0x0050
+#define COOKIE_MAGIC_COMPARTMENTSINK 0x0060
 
 extern DWORD tlsIndex;
 extern TfClientId processId;
@@ -62,4 +63,5 @@ extern HRESULT get_textservice_sink(TfClientId tid, REFCLSID iid, IUnknown** sin
 extern HRESULT set_textservice_sink(TfClientId tid, REFCLSID iid, IUnknown* sink);
 
 extern const WCHAR szwSystemTIPKey[];
+extern const WCHAR szwSystemCTFKey[];
 #endif /* __WINE_MSCTF_I_H */

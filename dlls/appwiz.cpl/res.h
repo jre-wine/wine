@@ -19,6 +19,10 @@
 *
 */
 
+#include <windef.h>
+#include <winuser.h>
+#include <commctrl.h>
+
 /* Dialogs */
 
 #define IDD_MAIN               1
@@ -53,3 +57,4 @@
 #define IDS_COLUMN_NAME        6
 #define IDS_COLUMN_PUBLISHER   7
 #define IDS_COLUMN_VERSION     8
+#define IDS_INSTALL_FILTER     9

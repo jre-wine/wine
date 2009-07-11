@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "resource.h"
 #include "debugger.h"
 #include "wingdi.h"
 #include "winuser.h"
@@ -27,6 +26,7 @@
 #include "wine/debug.h"
 #include "wine/unicode.h"
 
+#include "resource.h"
 
 #define MAX_PROGRAM_NAME_LENGTH 80
 
@@ -153,6 +153,8 @@ static INT_PTR WINAPI DlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 BOOL display_crash_dialog(void)
 {
+    static const WCHAR winedeviceW[] = {'w','i','n','e','d','e','v','i','c','e','.','e','x','e',0};
+
     INT_PTR result;
     /* dbg_curr_process->handle is not set */
     HANDLE hProcess;
@@ -163,6 +165,7 @@ BOOL display_crash_dialog(void)
     hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, dbg_curr_pid);
     g_ProgramName = get_program_name(hProcess);
     CloseHandle(hProcess);
+    if (!strcmpW( g_ProgramName, winedeviceW )) return TRUE;
     result = DialogBoxW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(IDD_CRASH_DLG), NULL, DlgProc);
     if (result == ID_DEBUG) {
         AllocConsole();

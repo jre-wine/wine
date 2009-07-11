@@ -296,6 +296,7 @@ static LONG_PTR WINAPI resize_template_hook(HWND dlg, UINT msg, WPARAM wParam, L
 {
     static RECT initrc, rc;
     static int index, count;
+    static int gotSWP_bottom, gotShowWindow;
     HWND parent = GetParent( dlg);
     int resize;
     switch( msg)
@@ -306,6 +307,7 @@ static LONG_PTR WINAPI resize_template_hook(HWND dlg, UINT msg, WPARAM wParam, L
 
             index = ((OPENFILENAME*)lParam)->lCustData;
             count = 0;
+            gotSWP_bottom = gotShowWindow = 0;
             /* test style */
             style = GetWindowLong( parent, GWL_STYLE);
             if( resize_testcases[index].flags & OFN_ENABLESIZING)
@@ -372,6 +374,23 @@ static LONG_PTR WINAPI resize_template_hook(HWND dlg, UINT msg, WPARAM wParam, L
             count++;
         }
         break;
+        case WM_WINDOWPOSCHANGING:
+        {
+            WINDOWPOS *pwp = (WINDOWPOS *)lParam;
+            if(  !index && pwp->hwndInsertAfter == HWND_BOTTOM){
+                gotSWP_bottom = 1;
+                ok( gotShowWindow == 0, "The WM_WINDOWPOSCHANGING message came after a WM_SHOWWINDOW message\n");
+            }
+        }
+        break;
+        case WM_SHOWWINDOW:
+        {
+            if(  !index){
+                gotShowWindow = 1;
+                ok( gotSWP_bottom == 1, "No WM_WINDOWPOSCHANGING message came before a WM_SHOWWINDOW message\n");
+            }
+        }
+        break;
     }
     return 0;
 }
@@ -399,10 +418,122 @@ static void test_resize(void)
     }
 }
 
+/* test cases for control message IDOK */
+/* Show case for bug #19079 */
+static struct {
+    int  retval;        /* return code of the message handler */
+    BOOL setmsgresult;  /* set the result in the DWLP_MSGRESULT */
+    BOOL usemsgokstr;   /* use the FILEOKSTRING message instead of WM_NOTIFY:CDN_FILEOK */
+    BOOL do_subclass;   /* subclass the dialog hook procedure */
+    BOOL expclose;      /* is the dialog expected to close ? */
+    BOOL actclose;      /* has the dialog actually closed ? */
+} ok_testcases[] = {
+    { 0,        FALSE,  FALSE,  FALSE,  TRUE},
+    { 0,         TRUE,  FALSE,  FALSE,  TRUE},
+    { 0,        FALSE,  FALSE,   TRUE,  TRUE},
+    { 0,         TRUE,  FALSE,   TRUE,  TRUE},
+    { 1,        FALSE,  FALSE,  FALSE,  TRUE},
+    { 1,         TRUE,  FALSE,  FALSE, FALSE},
+    { 1,        FALSE,  FALSE,   TRUE, FALSE},
+    { 1,         TRUE,  FALSE,   TRUE, FALSE},
+    /* FILEOKSTRING tests */
+    { 1,         TRUE,   TRUE,  FALSE, FALSE},
+    { 1,        FALSE,   TRUE,   TRUE, FALSE},
+    /* mark the end */
+    { -1 }
+};
+
+/* test_ok_wndproc can be used as hook procedure or a subclass
+ * window proc for the file dialog */
+static LONG_PTR WINAPI test_ok_wndproc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    HWND parent = GetParent( dlg);
+    static int index;
+    static UINT msgFILEOKSTRING;
+    if (msg == WM_INITDIALOG)
+    {
+        index = ((OPENFILENAME*)lParam)->lCustData;
+        ok_testcases[index].actclose = TRUE;
+        msgFILEOKSTRING = RegisterWindowMessageA( FILEOKSTRING);
+    }
+    if( msg == WM_NOTIFY) {
+        if(((LPNMHDR)lParam)->code == CDN_FOLDERCHANGE) {
+            SetTimer( dlg, 0, 100, 0);
+            PostMessage( parent, WM_COMMAND, IDOK, 0);
+            return FALSE;
+        } else if(((LPNMHDR)lParam)->code == CDN_FILEOK) {
+            if( ok_testcases[index].usemsgokstr)
+                return FALSE;
+            if( ok_testcases[index].setmsgresult)
+                SetWindowLongPtrA( dlg, DWLP_MSGRESULT, ok_testcases[index].retval);
+            return ok_testcases[index].retval;
+        }
+    }
+    if( msg == msgFILEOKSTRING) {
+        if( !ok_testcases[index].usemsgokstr)
+            return FALSE;
+        if( ok_testcases[index].setmsgresult)
+            SetWindowLongPtrA( dlg, DWLP_MSGRESULT, ok_testcases[index].retval);
+        return ok_testcases[index].retval;
+    }
+    if( msg == WM_TIMER) {
+        /* the dialog did not close automatically */
+        ok_testcases[index].actclose = FALSE;
+        KillTimer( dlg, 0);
+        PostMessage( parent, WM_COMMAND, IDCANCEL, 0);
+        return FALSE;
+    }
+    if( ok_testcases[index].do_subclass)
+        return DefWindowProc( dlg, msg, wParam, lParam);
+    return FALSE;
+}
+
+static LONG_PTR WINAPI ok_template_hook(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_SETFONT)
+        SetWindowLongPtrA( dlg, GWLP_WNDPROC, (LONG_PTR) test_ok_wndproc);
+    return FALSE;
+}
+
+static void test_ok(void)
+{
+    OPENFILENAME ofn = { sizeof(OPENFILENAME)};
+    char filename[1024] = {0};
+    char tmpfilename[ MAX_PATH];
+    int i;
+    DWORD ret;
+
+    if (!GetTempFileNameA(".", "tmp", 0, tmpfilename)) {
+        skip("Failed to create a temporary file name\n");
+        return;
+    }
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = 1024;
+    ofn.hInstance = GetModuleHandle(NULL);
+    ofn.lpTemplateName = "template1";
+    ofn.Flags =  OFN_ENABLEHOOK | OFN_EXPLORER| OFN_ENABLETEMPLATE ;
+    for( i = 0; ok_testcases[i].retval != -1; i++) {
+        strcpy( filename, tmpfilename);
+        ofn.lCustData = i;
+        ofn.lpfnHook = ok_testcases[i].do_subclass
+            ? (LPOFNHOOKPROC) ok_template_hook
+            : (LPOFNHOOKPROC) test_ok_wndproc;
+        ret = GetOpenFileNameA(&ofn);
+        ok( ok_testcases[i].expclose == ok_testcases[i].actclose,
+                "testid %d: Open File dialog should %shave closed.\n", i,
+                ok_testcases[i].expclose ? "" : "NOT ");
+        ok(ret == ok_testcases[i].expclose, "testid %d: GetOpenFileName returned %#x\n", i, ret);
+        ret = CommDlgExtendedError();
+        ok(!ret, "CommDlgExtendedError returned %#x\n", ret);
+    }
+    ok( DeleteFileA( tmpfilename), "Failed to delete temporary file\n");
+}
+
 START_TEST(filedlg)
 {
     test_DialogCancel();
     test_create_view_window2();
     test_create_view_template();
     test_resize();
+    test_ok();
 }

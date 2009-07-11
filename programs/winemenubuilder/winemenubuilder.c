@@ -739,7 +739,7 @@ static BOOL create_directories(char *directory)
 }
 
 /* extract an icon from an exe or icon file; helper for IPersistFile_fnSave */
-static char *extract_icon( LPCWSTR path, int index, BOOL bWait )
+static char *extract_icon( LPCWSTR path, int index, const char *destFilename, BOOL bWait )
 {
     unsigned short crc;
     char *iconsdir = NULL, *ico_path = NULL, *ico_name, *xpm_path = NULL;
@@ -785,18 +785,35 @@ static char *extract_icon( LPCWSTR path, int index, BOOL bWait )
     crc=crc16(ico_path);
 
     /* Try to treat the source file as an exe */
-    xpm_path=HeapAlloc(GetProcessHeap(), 0, strlen(iconsdir)+1+4+1+strlen(ico_name)+1+12+1+3);
-    sprintf(xpm_path,"%s/%04x_%s.%d.png",iconsdir,crc,ico_name,index);
+    if (destFilename)
+        xpm_path=HeapAlloc(GetProcessHeap(),0,strlen(iconsdir)+1+strlen(destFilename)+1+3);
+    else
+        xpm_path=HeapAlloc(GetProcessHeap(), 0, strlen(iconsdir)+1+4+1+strlen(ico_name)+1+12+1+3);
+    if (xpm_path == NULL)
+    {
+        WINE_ERR("could not extract icon %s, out of memory\n", wine_dbgstr_a(ico_name));
+        return NULL;
+    }
+    if (destFilename)
+        sprintf(xpm_path,"%s/%s.png",iconsdir,destFilename);
+    else
+        sprintf(xpm_path,"%s/%04x_%s.%d.png",iconsdir,crc,ico_name,index);
     if (ExtractFromEXEDLL( path, index, xpm_path ))
         goto end;
 
     /* Must be something else, ignore the index in that case */
-    sprintf(xpm_path,"%s/%04x_%s.png",iconsdir,crc,ico_name);
+    if (destFilename)
+        sprintf(xpm_path,"%s/%s.png",iconsdir,destFilename);
+    else
+        sprintf(xpm_path,"%s/%04x_%s.png",iconsdir,crc,ico_name);
     if (ExtractFromICO( path, xpm_path))
         goto end;
     if (!bWait)
     {
-        sprintf(xpm_path,"%s/%04x_%s.xpm",iconsdir,crc,ico_name);
+        if (destFilename)
+            sprintf(xpm_path,"%s/%s.xpm",iconsdir,destFilename);
+        else
+            sprintf(xpm_path,"%s/%04x_%s.xpm",iconsdir,crc,ico_name);
         if (create_default_icon( xpm_path, ico_path ))
             goto end;
     }
@@ -906,10 +923,10 @@ static BOOL write_menu_file(const char *unix_link, const char *filename)
 
     while (1)
     {
-        tempfilename = tempnam(xdg_config_dir, "_wine");
+        tempfilename = heap_printf("%s/wine-menu-XXXXXX", xdg_config_dir);
         if (tempfilename)
         {
-            int tempfd = open(tempfilename, O_EXCL | O_CREAT | O_WRONLY, 0666);
+            int tempfd = mkstemps(tempfilename, 0);
             if (tempfd >= 0)
             {
                 tempfile = fdopen(tempfd, "w");
@@ -920,10 +937,10 @@ static BOOL write_menu_file(const char *unix_link, const char *filename)
             }
             else if (errno == EEXIST)
             {
-                free(tempfilename);
+                HeapFree(GetProcessHeap(), 0, tempfilename);
                 continue;
             }
-            free(tempfilename);
+            HeapFree(GetProcessHeap(), 0, tempfilename);
         }
         return FALSE;
     }
@@ -981,7 +998,7 @@ end:
         ret = (rename(tempfilename, menuPath) == 0);
     if (!ret && tempfilename)
         remove(tempfilename);
-    free(tempfilename);
+    HeapFree(GetProcessHeap(), 0, tempfilename);
     if (ret)
     {
         HKEY hkey = open_menus_reg_key();
@@ -1692,6 +1709,7 @@ static void update_association(LPCWSTR extension, LPCSTR mimeType, LPCWSTR progI
 
 static BOOL cleanup_associations(void)
 {
+    static const WCHAR openW[] = {'o','p','e','n',0};
     HKEY assocKey;
     BOOL hasChanged = FALSE;
     if ((assocKey = open_associations_reg_key()))
@@ -1729,7 +1747,7 @@ static BOOL cleanup_associations(void)
                     done = TRUE;
                     goto end;
                 }
-                command = assoc_query(ASSOCSTR_COMMAND, extensionW, NULL);
+                command = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
                 if (command == NULL)
                 {
                     char *desktopFile = reg_get_valA(assocKey, extensionA, "DesktopFile");
@@ -1841,6 +1859,7 @@ static BOOL write_freedesktop_association_entry(const char *desktopPath, const c
 
 static BOOL generate_associations(const char *xdg_data_home, const char *packages_dir, const char *applications_dir)
 {
+    static const WCHAR openW[] = {'o','p','e','n',0};
     struct list *nativeMimeTypes = NULL;
     LSTATUS ret = 0;
     int i;
@@ -1905,17 +1924,6 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
             }
 
             iconW = assoc_query(ASSOCSTR_DEFAULTICON, extensionW, NULL);
-            if (iconW)
-            {
-                WCHAR *comma = strrchrW(iconW, ',');
-                int index = 0;
-                if (comma)
-                {
-                    *comma = 0;
-                    index = atoiW(comma + 1);
-                }
-                iconA = extract_icon(iconW, index, FALSE);
-            }
 
             contentTypeW = assoc_query(ASSOCSTR_CONTENTTYPE, extensionW, NULL);
 
@@ -1934,18 +1942,19 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                     /* Gnome seems to ignore the <icon> tag in MIME packages,
                      * and the default name is more intuitive anyway.
                      */
-                    if (iconA)
+                    if (iconW)
                     {
                         char *flattened_mime = slashes_to_minuses(mimeTypeA);
                         if (flattened_mime)
                         {
-                            char *dstIconPath = heap_printf("%s/icons/%s%s", xdg_data_dir,
-                                                            flattened_mime, strrchr(iconA, '.'));
-                            if (dstIconPath)
+                            int index = 0;
+                            WCHAR *comma = strrchrW(iconW, ',');
+                            if (comma)
                             {
-                                rename(iconA, dstIconPath);
-                                HeapFree(GetProcessHeap(), 0, dstIconPath);
+                                *comma = 0;
+                                index = atoiW(comma + 1);
                             }
+                            iconA = extract_icon(iconW, index, flattened_mime, FALSE);
                             HeapFree(GetProcessHeap(), 0, flattened_mime);
                         }
                     }
@@ -1960,7 +1969,7 @@ static BOOL generate_associations(const char *xdg_data_home, const char *package
                 }
             }
 
-            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, NULL);
+            commandW = assoc_query(ASSOCSTR_COMMAND, extensionW, openW);
             if (commandW == NULL)
                 /* no command => no application is associated */
                 goto end;
@@ -2096,9 +2105,9 @@ static BOOL InvokeShellLinker( IShellLinkW *sl, LPCWSTR link, BOOL bWait )
 
     /* extract the icon */
     if( szIconPath[0] )
-        icon_name = extract_icon( szIconPath , iIconId, bWait );
+        icon_name = extract_icon( szIconPath , iIconId, NULL, bWait );
     else
-        icon_name = extract_icon( szPath, iIconId, bWait );
+        icon_name = extract_icon( szPath, iIconId, NULL, bWait );
 
     /* fail - try once again after parent process exit */
     if( !icon_name )
@@ -2523,29 +2532,16 @@ static void RefreshFileTypeAssociations(void)
     hasChanged |= cleanup_associations();
     if (hasChanged)
     {
-        char *command = heap_printf("update-mime-database %s", mime_dir);
-        if (command)
-        {
-            system(command);
-            HeapFree(GetProcessHeap(), 0, command);
-        }
-        else
-        {
-            WINE_ERR("out of memory\n");
-            goto end;
-        }
+        const char *argv[3];
 
-        command = heap_printf("update-desktop-database %s/applications", xdg_data_dir);
-        if (command)
-        {
-            system(command);
-            HeapFree(GetProcessHeap(), 0, command);
-        }
-        else
-        {
-            WINE_ERR("out of memory\n");
-            goto end;
-        }
+        argv[0] = "update-mime-database";
+        argv[1] = mime_dir;
+        argv[2] = NULL;
+        spawnvp( _P_NOWAIT, argv[0], argv );
+
+        argv[0] = "update-desktop-database";
+        argv[1] = applications_dir;
+        spawnvp( _P_NOWAIT, argv[0], argv );
     }
 
 end:
@@ -2714,12 +2710,12 @@ int PASCAL WinMain (HINSTANCE hInstance, HINSTANCE prev, LPSTR cmdline, int show
         if( !lstrcmpA( token, "-a" ) )
         {
             RefreshFileTypeAssociations();
-            break;
+            continue;
         }
         if( !lstrcmpA( token, "-r" ) )
         {
             cleanup_menus();
-            break;
+            continue;
         }
         if( !lstrcmpA( token, "-w" ) )
             bWait = TRUE;

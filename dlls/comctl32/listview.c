@@ -106,7 +106,6 @@
  *   -- LVN_BEGINRDRAG
  *
  * Messages:
- *   -- LVM_CANCELEDITLABEL
  *   -- LVM_ENABLEGROUPVIEW
  *   -- LVM_GETBKIMAGE, LVM_SETBKIMAGE
  *   -- LVM_GETGROUPINFO, LVM_SETGROUPINFO
@@ -125,7 +124,6 @@
  *   -- LVM_INSERTGROUPSORTED
  *   -- LVM_INSERTMARKHITTEST
  *   -- LVM_ISGROUPVIEWENABLED
- *   -- LVM_MAPIDTOINDEX, LVM_MAPINDEXTOID
  *   -- LVM_MOVEGROUP
  *   -- LVM_MOVEITEMTOGROUP
  *   -- LVM_SETINFOTIP
@@ -195,13 +193,22 @@ typedef struct tagSUBITEM_INFO
   INT iSubItem;
 } SUBITEM_INFO;
 
+typedef struct tagITEM_ID ITEM_ID;
+
 typedef struct tagITEM_INFO
 {
   ITEMHDR hdr;
   UINT state;
   LPARAM lParam;
   INT iIndent;
+  ITEM_ID *id;
 } ITEM_INFO;
+
+struct tagITEM_ID
+{
+  UINT id;   /* item id */
+  HDPA item; /* link to item data */
+};
 
 typedef struct tagRANGE
 {
@@ -279,6 +286,7 @@ typedef struct tagLISTVIEW_INFO
   DWORD uView;			/* current view available through LVM_[G,S]ETVIEW */
   INT nItemCount;		/* the number of items in the list */
   HDPA hdpaItems;               /* array ITEM_INFO pointers */
+  HDPA hdpaItemIds;             /* array of ITEM_ID pointers */
   HDPA hdpaPosX;		/* maintains the (X, Y) coordinates of the */
   HDPA hdpaPosY;		/* items in LVS_ICON, and LVS_SMALLICON modes */
   HDPA hdpaColumns;		/* array of COLUMN_INFO pointers */
@@ -352,6 +360,8 @@ typedef struct tagLISTVIEW_INFO
 
 /* default label width for items in list and small icon display modes */
 #define DEFAULT_LABEL_WIDTH 40
+/* maximum select rectangle width for empty text item in LV_VIEW_DETAILS */
+#define MAX_EMPTYTEXT_SELECT_WIDTH 80
 
 /* default column width for items in list display mode */
 #define DEFAULT_COLUMN_WIDTH 128
@@ -419,6 +429,7 @@ static BOOL LISTVIEW_EnsureVisible(LISTVIEW_INFO *, INT, BOOL);
 static HWND CreateEditLabelT(LISTVIEW_INFO *, LPCWSTR, DWORD, BOOL);
 static HIMAGELIST LISTVIEW_SetImageList(LISTVIEW_INFO *, INT, HIMAGELIST);
 static INT LISTVIEW_HitTest(const LISTVIEW_INFO *, LPLVHITTESTINFO, BOOL, BOOL);
+static BOOL LISTVIEW_EndEditLabelT(LISTVIEW_INFO *, BOOL, BOOL);
 
 /******** Text handling functions *************************************/
 
@@ -750,6 +761,7 @@ static LRESULT notify_forward_header(const LISTVIEW_INFO *infoPtr, const NMHEADE
         /* convert item text */
         if (lpnmh->pitem->mask & HDI_TEXT)
         {
+            hditema.pszText = NULL;
             Str_SetPtrWtoA(&hditema.pszText, lpnmh->pitem->pszText);
             text = hditema.pszText;
         }
@@ -759,6 +771,7 @@ static LRESULT notify_forward_header(const LISTVIEW_INFO *infoPtr, const NMHEADE
         {
             hditema.pvFilter = &textfilter;
             textfilter = *(HD_TEXTFILTERA*)(lpnmh->pitem->pvFilter);
+            textfilter.pszText = NULL;
             Str_SetPtrWtoA(&textfilter.pszText, ((HD_TEXTFILTERW*)lpnmh->pitem->pvFilter)->pszText);
             filter = textfilter.pszText;
         }
@@ -1016,6 +1029,25 @@ static void prepaint_setup (const LISTVIEW_INFO *infoPtr, HDC hdc, NMLVCUSTOMDRA
 static inline DWORD notify_postpaint (const LISTVIEW_INFO *infoPtr, NMLVCUSTOMDRAW *lpnmlvcd)
 {
     return notify_customdraw(infoPtr, CDDS_POSTPAINT, lpnmlvcd);
+}
+
+/* returns TRUE when repaint needed, FALSE otherwise */
+static BOOL notify_measureitem(LISTVIEW_INFO *infoPtr)
+{
+    MEASUREITEMSTRUCT mis;
+    mis.CtlType = ODT_LISTVIEW;
+    mis.CtlID = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
+    mis.itemID = -1;
+    mis.itemWidth = 0;
+    mis.itemData = 0;
+    mis.itemHeight= infoPtr->nItemHeight;
+    SendMessageW(infoPtr->hwndNotify, WM_MEASUREITEM, mis.CtlID, (LPARAM)&mis);
+    if (infoPtr->nItemHeight != max(mis.itemHeight, 1))
+    {
+        infoPtr->nMeasureItemHeight = infoPtr->nItemHeight = max(mis.itemHeight, 1);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /******** Item iterator functions **********************************/
@@ -1428,6 +1460,19 @@ static inline void map_style_view(LISTVIEW_INFO *infoPtr)
     case LVS_LIST:
         infoPtr->uView = LV_VIEW_LIST;
     }
+}
+
+/* computes next item id value */
+static DWORD get_next_itemid(const LISTVIEW_INFO *infoPtr)
+{
+    INT count = DPA_GetPtrCount(infoPtr->hdpaItemIds);
+
+    if (count > 0)
+    {
+        ITEM_ID *lpID = DPA_GetPtr(infoPtr->hdpaItemIds, count - 1);
+        return lpID->id + 1;
+    }
+    return 0;
 }
 
 /******** Internal API functions ************************************/
@@ -2192,7 +2237,9 @@ static void LISTVIEW_GetItemMetrics(const LISTVIEW_INFO *infoPtr, const LVITEMW 
 	    
     	    DrawTextW (hdc, lpLVItem->pszText, -1, &rcText, uFormat | DT_CALCRECT);
 
-	    labelSize.cx = min(rcText.right - rcText.left + TRAILING_LABEL_PADDING, infoPtr->nItemWidth);
+	    if (rcText.right != rcText.left)
+	        labelSize.cx = min(rcText.right - rcText.left + TRAILING_LABEL_PADDING, infoPtr->nItemWidth);
+
 	    labelSize.cy = rcText.bottom - rcText.top;
 
     	    SelectObject(hdc, hOldFont);
@@ -2245,7 +2292,11 @@ calc_label:
 	    SelectBox.left = Icon.left;
 	    SelectBox.top = Box.top;
 	    SelectBox.bottom = Box.bottom;
-	    SelectBox.right = min(Label.left + labelSize.cx, Label.right);
+
+	    if (labelSize.cx)
+	        SelectBox.right = min(Label.left + labelSize.cx, Label.right);
+	    else
+	        SelectBox.right = min(Label.left + MAX_EMPTYTEXT_SELECT_WIDTH, Label.right);
 	}
 	else
 	{
@@ -2310,6 +2361,76 @@ static void LISTVIEW_GetItemBox(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT 
         OffsetRect(lprcBox, Position.x + Origin.x, Position.y + Origin.y);
 }
 
+/* LISTVIEW_MapIdToIndex helper */
+static INT CALLBACK MapIdSearchCompare(LPVOID p1, LPVOID p2, LPARAM lParam)
+{
+    ITEM_ID *id1 = (ITEM_ID*)p1;
+    ITEM_ID *id2 = (ITEM_ID*)p2;
+
+    if (id1->id == id2->id) return 0;
+
+    return (id1->id < id2->id) ? -1 : 1;
+}
+
+/***
+ * DESCRIPTION:
+ * Returns the item index for id specified.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ * [I] iID : item id to get index for
+ *
+ * RETURN:
+ * Item index, or -1 on failure.
+ */
+static INT LISTVIEW_MapIdToIndex(const LISTVIEW_INFO *infoPtr, UINT iID)
+{
+    ITEM_ID ID;
+    INT index;
+
+    TRACE("iID=%d\n", iID);
+
+    if (infoPtr->dwStyle & LVS_OWNERDATA) return -1;
+    if (infoPtr->nItemCount == 0) return -1;
+
+    ID.id = iID;
+    index = DPA_Search(infoPtr->hdpaItemIds, &ID, -1, &MapIdSearchCompare, 0, DPAS_SORTED);
+
+    if (index != -1)
+    {
+        ITEM_ID *lpID = DPA_GetPtr(infoPtr->hdpaItemIds, index);
+        return DPA_GetPtrIndex(infoPtr->hdpaItems, lpID->item);
+    }
+
+    return -1;
+}
+
+/***
+ * DESCRIPTION:
+ * Returns the item id for index given.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ * [I] iItem : item index to get id for
+ *
+ * RETURN:
+ * Item id.
+ */
+static DWORD LISTVIEW_MapIndexToId(const LISTVIEW_INFO *infoPtr, INT iItem)
+{
+    ITEM_INFO *lpItem;
+    HDPA hdpaSubItems;
+
+    TRACE("iItem=%d\n", iItem);
+
+    if (infoPtr->dwStyle & LVS_OWNERDATA) return -1;
+    if (iItem < 0 || iItem >= infoPtr->nItemCount) return -1;
+
+    hdpaSubItems = DPA_GetPtr(infoPtr->hdpaItems, iItem);
+    lpItem = DPA_GetPtr(hdpaSubItems, 0);
+
+    return lpItem->id->id;
+}
 
 /***
  * DESCRIPTION:
@@ -4591,6 +4712,26 @@ static DWORD LISTVIEW_ApproximateViewRect(const LISTVIEW_INFO *infoPtr, INT nIte
   return dwViewRect;
 }
 
+/***
+ * DESCRIPTION:
+ * Cancel edit label with saving item text.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ *
+ * RETURN:
+ * Always returns TRUE.
+ */
+static LRESULT LISTVIEW_CancelEditLabel(LISTVIEW_INFO *infoPtr)
+{
+    /* handle value will be lost after LISTVIEW_EndEditLabelT */
+    HWND edit = infoPtr->hwndEdit;
+
+    LISTVIEW_EndEditLabelT(infoPtr, TRUE, IsWindowUnicode(infoPtr->hwndEdit));
+    SendMessageW(edit, WM_CLOSE, 0, 0);
+
+    return TRUE;
+}
 
 /***
  * DESCRIPTION:
@@ -4968,9 +5109,18 @@ static BOOL LISTVIEW_DeleteItem(LISTVIEW_INFO *infoPtr, INT nItem)
     {
         HDPA hdpaSubItems;
 	ITEMHDR *hdrItem;
+	ITEM_INFO *lpItem;
+	ITEM_ID *lpID;
 	INT i;
 
 	hdpaSubItems = DPA_DeletePtr(infoPtr->hdpaItems, nItem);
+	lpItem = DPA_GetPtr(hdpaSubItems, 0);
+
+	/* free id struct */
+	i = DPA_GetPtrIndex(infoPtr->hdpaItemIds, lpItem->id);
+	lpID = DPA_GetPtr(infoPtr->hdpaItemIds, i);
+	DPA_DeletePtr(infoPtr->hdpaItemIds, i);
+	Free(lpID);
 	for (i = 0; i < DPA_GetPtrCount(hdpaSubItems); i++)
     	{
             hdrItem = DPA_GetPtr(hdpaSubItems, i);
@@ -6656,55 +6806,42 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
     lpht->iItem = -1;
     if (subitem) lpht->iSubItem = 0;
 
-    if (infoPtr->rcList.left > lpht->pt.x)
-	lpht->flags |= LVHT_TOLEFT;
-    else if (infoPtr->rcList.right < lpht->pt.x)
-	lpht->flags |= LVHT_TORIGHT;
+    LISTVIEW_GetOrigin(infoPtr, &Origin);
+
+    /* set whole list relation flags */
+    if (subitem && infoPtr->uView == LV_VIEW_DETAILS)
+    {
+        /* LVM_SUBITEMHITTEST checks left bound of possible client area */
+        if (infoPtr->rcList.left > lpht->pt.x && Origin.x < lpht->pt.x)
+	    lpht->flags |= LVHT_TOLEFT;
+    }
+    else
+    {
+	if (infoPtr->rcList.left > lpht->pt.x)
+	    lpht->flags |= LVHT_TOLEFT;
+	else if (infoPtr->rcList.right < lpht->pt.x)
+	    lpht->flags |= LVHT_TORIGHT;
+    }
     
     if (infoPtr->rcList.top > lpht->pt.y)
 	lpht->flags |= LVHT_ABOVE;
     else if (infoPtr->rcList.bottom < lpht->pt.y)
 	lpht->flags |= LVHT_BELOW;
 
-    TRACE("lpht->flags=0x%x\n", lpht->flags);
-    if (lpht->flags) return -1;
-
-    lpht->flags |= LVHT_NOWHERE;
-
-    LISTVIEW_GetOrigin(infoPtr, &Origin);
-   
-    /* first deal with the large items */
-    rcSearch.left = lpht->pt.x;
-    rcSearch.top = lpht->pt.y;
-    rcSearch.right = rcSearch.left + 1;
-    rcSearch.bottom = rcSearch.top + 1;
-    
-    iterator_frameditems(&i, infoPtr, &rcSearch);
-    iterator_next(&i); /* go to first item in the sequence */
-    iItem = i.nItem;
-    iterator_destroy(&i);
-   
-    TRACE("lpht->iItem=%d\n", iItem); 
-    if (iItem == -1) return -1;
-
+    /* even if item is invalid try to find subitem */
     if (infoPtr->uView == LV_VIEW_DETAILS && subitem)
     {
-	RECT  bounds, *pRect;
+	RECT *pRect;
 	INT j;
 
-	/* for top/bottom only */
-	bounds.left = LVIR_BOUNDS;
-	LISTVIEW_GetItemRect(infoPtr, iItem, &bounds);
 	opt.x = lpht->pt.x - Origin.x;
-	opt.y = lpht->pt.y;
 
+	lpht->iSubItem = -1;
 	for (j = 0; j < DPA_GetPtrCount(infoPtr->hdpaColumns); j++)
 	{
 	    pRect = &LISTVIEW_GetColumnInfo(infoPtr, j)->rcHeader;
-	    bounds.left  = pRect->left;
-	    bounds.right = pRect->right;
 
-	    if (PtInRect(&bounds, opt))
+	    if ((opt.x >= pRect->left) && (opt.x < pRect->right))
 	    {
 		lpht->iSubItem = j;
 		break;
@@ -6712,6 +6849,25 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
 	}
 	TRACE("lpht->iSubItem=%d\n", lpht->iSubItem);
     }
+
+    TRACE("lpht->flags=0x%x\n", lpht->flags);
+    if (lpht->flags) return -1;
+
+    lpht->flags |= LVHT_NOWHERE;
+
+    /* first deal with the large items */
+    rcSearch.left = lpht->pt.x;
+    rcSearch.top = lpht->pt.y;
+    rcSearch.right = rcSearch.left + 1;
+    rcSearch.bottom = rcSearch.top + 1;
+
+    iterator_frameditems(&i, infoPtr, &rcSearch);
+    iterator_next(&i); /* go to first item in the sequence */
+    iItem = i.nItem;
+    iterator_destroy(&i);
+
+    TRACE("lpht->iItem=%d\n", iItem);
+    if (iItem == -1) return -1;
 
     lvItem.mask = LVIF_STATE | LVIF_TEXT;
     if (infoPtr->uView == LV_VIEW_DETAILS) lvItem.mask |= LVIF_INDENT;
@@ -6795,6 +6951,7 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
     HDPA hdpaSubItems;
     NMLISTVIEW nmlv;
     ITEM_INFO *lpItem;
+    ITEM_ID *lpID;
     BOOL is_sorted, has_changed;
     LVITEMW item;
     HWND hwndSelf = infoPtr->hwndSelf;
@@ -6813,6 +6970,13 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
     /* insert item in listview control data structure */
     if ( !(hdpaSubItems = DPA_Create(8)) ) goto fail;
     if ( !DPA_SetPtr(hdpaSubItems, 0, lpItem) ) assert (FALSE);
+
+    /* link with id struct */
+    if (!(lpID = Alloc(sizeof(ITEM_ID)))) goto fail;
+    lpItem->id = lpID;
+    lpID->item = hdpaSubItems;
+    lpID->id = get_next_itemid(infoPtr);
+    if ( DPA_InsertPtr(infoPtr->hdpaItemIds, infoPtr->nItemCount, lpID) == -1) goto fail;
 
     is_sorted = (infoPtr->dwStyle & (LVS_SORTASCENDING | LVS_SORTDESCENDING)) &&
 	        !(infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && (LPSTR_TEXTCALLBACKW != lpLVItem->pszText);
@@ -6922,6 +7086,44 @@ fail:
     DPA_Destroy (hdpaSubItems);
     Free (lpItem);
     return -1;
+}
+
+/***
+ * DESCRIPTION:
+ * Checks item visibility.
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ * [I] nFirst : item index to check for
+ *
+ * RETURN:
+ *   Item visible : TRUE
+ *   Item invisible or failure : FALSE
+ */
+static BOOL LISTVIEW_IsItemVisible(const LISTVIEW_INFO *infoPtr, INT nItem)
+{
+    POINT Origin, Position;
+    RECT rcItem;
+    HDC hdc;
+    BOOL ret;
+
+    TRACE("nItem=%d\n", nItem);
+
+    if (nItem < 0 || nItem >= DPA_GetPtrCount(infoPtr->hdpaItems)) return FALSE;
+
+    LISTVIEW_GetOrigin(infoPtr, &Origin);
+    LISTVIEW_GetItemOrigin(infoPtr, nItem, &Position);
+    rcItem.left = Position.x + Origin.x;
+    rcItem.top  = Position.y + Origin.y;
+    rcItem.right  = rcItem.left + infoPtr->nItemWidth;
+    rcItem.bottom = rcItem.top + infoPtr->nItemHeight;
+
+    hdc = GetDC(infoPtr->hwndSelf);
+    if (!hdc) return FALSE;
+    ret = RectVisible(hdc, &rcItem);
+    ReleaseDC(infoPtr->hwndSelf, hdc);
+
+    return ret;
 }
 
 /***
@@ -8425,6 +8627,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
   /* allocate memory for the data structure */
   if (!(infoPtr->selectionRanges = ranges_create(10))) goto fail;
   if (!(infoPtr->hdpaItems = DPA_Create(10))) goto fail;
+  if (!(infoPtr->hdpaItemIds = DPA_Create(10))) goto fail;
   if (!(infoPtr->hdpaPosX  = DPA_Create(10))) goto fail;
   if (!(infoPtr->hdpaPosY  = DPA_Create(10))) goto fail;
   if (!(infoPtr->hdpaColumns = DPA_Create(10))) goto fail;
@@ -8434,6 +8637,7 @@ fail:
     DestroyWindow(infoPtr->hwndHeader);
     ranges_destroy(infoPtr->selectionRanges);
     DPA_Destroy(infoPtr->hdpaItems);
+    DPA_Destroy(infoPtr->hdpaItemIds);
     DPA_Destroy(infoPtr->hdpaPosX);
     DPA_Destroy(infoPtr->hdpaPosY);
     DPA_Destroy(infoPtr->hdpaColumns);
@@ -8485,6 +8689,8 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
       ShowWindow(infoPtr->hwndHeader, SW_SHOWNORMAL);
     }
     LISTVIEW_UpdateScroll(infoPtr);
+    /* send WM_MEASUREITEM notification */
+    if (infoPtr->dwStyle & LVS_OWNERDRAWFIXED) notify_measureitem(infoPtr);
   }
 
   OpenThemeData(hwnd, themeClass);
@@ -9206,6 +9412,7 @@ static LRESULT LISTVIEW_NCDestroy(LISTVIEW_INFO *infoPtr)
 
   /* destroy data structure */
   DPA_Destroy(infoPtr->hdpaItems);
+  DPA_Destroy(infoPtr->hdpaItemIds);
   DPA_Destroy(infoPtr->hdpaPosX);
   DPA_Destroy(infoPtr->hdpaPosY);
   DPA_Destroy(infoPtr->hdpaColumns);
@@ -10113,7 +10320,8 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
   case LVM_ARRANGE:
     return LISTVIEW_Arrange(infoPtr, (INT)wParam);
 
-/* case LVM_CANCELEDITLABEL: */
+  case LVM_CANCELEDITLABEL:
+    return LISTVIEW_CancelEditLabel(infoPtr);
 
   case LVM_CREATEDRAGIMAGE:
     return (LRESULT)LISTVIEW_CreateDragImage(infoPtr, (INT)wParam, (LPPOINT)lParam);
@@ -10319,9 +10527,14 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   /* case LVM_ISGROUPVIEWENABLED: */
 
-  /* case LVM_MAPIDTOINDEX: */
+  case LVM_ISITEMVISIBLE:
+    return LISTVIEW_IsItemVisible(infoPtr, (INT)wParam);
 
-  /* case LVM_MAPINDEXTOID: */
+  case LVM_MAPIDTOINDEX:
+    return LISTVIEW_MapIdToIndex(infoPtr, (UINT)wParam);
+
+  case LVM_MAPINDEXTOID:
+    return LISTVIEW_MapIndexToId(infoPtr, (INT)wParam);
 
   /* case LVM_MOVEGROUP: */
 
@@ -10600,16 +10813,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
       if ((infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && (infoPtr->uView == LV_VIEW_DETAILS))
       {
-          MEASUREITEMSTRUCT mis;
-          mis.CtlType = ODT_LISTVIEW;
-          mis.CtlID = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
-          mis.itemID = -1;
-          mis.itemWidth = 0;
-          mis.itemData = 0;
-          mis.itemHeight= infoPtr->nItemHeight;
-          SendMessageW(infoPtr->hwndNotify, WM_MEASUREITEM, mis.CtlID, (LPARAM)&mis);
-          if (infoPtr->nItemHeight != max(mis.itemHeight, 1))
-              infoPtr->nMeasureItemHeight = infoPtr->nItemHeight = max(mis.itemHeight, 1);
+          if (notify_measureitem(infoPtr)) LISTVIEW_InvalidateList(infoPtr);
       }
 
 	  LISTVIEW_UpdateSize(infoPtr);
@@ -10734,11 +10938,7 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
 	}
 	case EN_KILLFOCUS:
 	{
-	    /* handle value will be lost after LISTVIEW_EndEditLabelT */
-	    HWND edit = infoPtr->hwndEdit;
-
-	    LISTVIEW_EndEditLabelT(infoPtr, TRUE, IsWindowUnicode(infoPtr->hwndEdit));
-	    SendMessageW(edit, WM_CLOSE, 0, 0);
+	    LISTVIEW_CancelEditLabel(infoPtr);
 	}
 
 	default:

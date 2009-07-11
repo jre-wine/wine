@@ -347,6 +347,7 @@ AC_CHECK_HEADERS(\
 	sys/event.h \
 	sys/exec_elf.h \
 	sys/filio.h \
+	sys/inotify.h \
 	sys/ioctl.h \
 	sys/ipc.h \
 	sys/limits.h \
@@ -580,7 +581,7 @@ case $host_os in
     AC_SUBST(SECURITYLIB,"-framework Security -framework CoreFoundation")
     AC_SUBST(COREFOUNDATIONLIB,"-framework CoreFoundation")
     AC_SUBST(IOKITLIB,"-framework IOKit -framework CoreFoundation")
-    AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-segaddr,WINE_DOS,0x00000000,-segaddr,WINE_SHARED_HEAP,0x7f000000"])
+    AC_SUBST(LDEXECFLAGS,["-image_base 0x7bf00000 -Wl,-segaddr,WINE_DOS,0x00000000,-segaddr,WINE_SHAREDHEAP,0x7f000000"])
     if test "$ac_cv_header_DiskArbitration_DiskArbitration_h" = "yes"
     then
         dnl DiskArbitration API is not public on Darwin < 8.0, use it only if header found
@@ -608,6 +609,23 @@ case $host_os in
     then
         AC_SUBST(CARBONLIB,"-framework Carbon")
         enable_winequartz_drv=${enable_winequartz_drv:-yes}
+    fi
+    dnl Check for Xcode 3.x broken 16-bit support
+    if test "x$enable_win16" = "xyes"
+    then
+        AC_MSG_CHECKING([whether 16-bit code can be built correctly])
+        AC_RUN_IFELSE(AC_LANG_PROGRAM([[asm(".text\n"
+                                            "bad:\tnop;nop\n"
+                                            "good:\tnop;nop\n\t"
+                                            ".globl _testfunc\n"
+                                            "_testfunc:\tcallw good");
+                                        extern void testfunc();]],
+                                      [[unsigned short *p = (unsigned short *)testfunc;
+                                        return p[[0]] != 0xe866 || p[[1]] != 0xfffa]]),
+                                      AC_MSG_RESULT(yes),
+                                      [AC_MSG_RESULT(no)
+                                       AC_MSG_ERROR([Xcode 3.x cannot build 16-bit code correctly. Use --disable-win16 if you don't need 16-bit support.])],
+                                       AC_MSG_RESULT([[cross-compiling, assuming yes]]))
     fi
     ;;
   *)
@@ -692,7 +710,20 @@ then
     if test "$CROSSCC" != "false"
     then
         AC_SUBST(CROSSTEST,"\$(CROSSTEST)")
-        AC_SUBST(CROSSTARGETFLAGS,"-b `expr $CROSSCC : '\(.*\)-gcc'`")
+        set x $CROSSCC
+        shift
+        target=""
+        while test $# -ge 1
+        do
+            case "$1" in
+              *-gcc) target=`expr "$1" : '\(.*\)-gcc'` ;;
+            esac
+            shift
+        done
+        if test -n "$target"
+        then
+            AC_SUBST(CROSSTARGETFLAGS,"-b $target")
+        fi
     fi
 fi
 
@@ -843,7 +874,7 @@ then
     opengl_msg=""
     if test "x$with_opengl" != "xno"
     then
-	AC_CHECK_HEADERS(GL/gl.h GL/glx.h GL/glext.h GL/glu.h,,,
+	AC_CHECK_HEADERS(GL/gl.h GL/glx.h GL/glu.h,,,
 [#ifdef HAVE_GL_GLX_H
 # include <GL/glx.h>
 #endif])
@@ -1132,7 +1163,6 @@ then
                          freetype/ftglyph.h \
                          freetype/fttypes.h \
                          freetype/tttables.h \
-                         freetype/ftnames.h \
                          freetype/ftsnames.h \
                          freetype/ttnameid.h \
                          freetype/ftoutln.h \
@@ -1482,6 +1512,9 @@ if test "$ac_cv_c_cfi_support" = "yes"
 then
    asm_func_header="$asm_func_header.cfi_startproc\\n\\t"
    asm_func_trailer="\\n\\t.cfi_endproc$asm_func_trailer"
+   AC_DEFINE([__ASM_CFI(str)],[str],[Define to a macro to output a .cfi assembly pseudo-op])
+else
+   AC_DEFINE([__ASM_CFI(str)],[""])
 fi
 
 asm_func_code="$asm_func_header\" code \"$asm_func_trailer"
@@ -1570,6 +1603,7 @@ AC_CHECK_FUNCS(\
 	memmove \
 	mmap \
 	pclose \
+	pipe2 \
 	poll \
 	popen \
 	prctl \
@@ -2092,6 +2126,7 @@ WINE_CONFIG_MAKEFILE([dlls/dpnet/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_
 WINE_CONFIG_MAKEFILE([dlls/dpnhpast/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dpnlobby/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dpwsockx/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/drmclien/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dsound/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dsound/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/dssenh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2283,6 +2318,7 @@ WINE_CONFIG_MAKEFILE([dlls/rpcrt4/tests/Makefile],[dlls/Maketest.rules],[dlls],[
 WINE_CONFIG_MAKEFILE([dlls/rsabase/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/rsaenh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/rsaenh/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/rtutils/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/sane.ds/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/sccbase/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/schannel/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2360,6 +2396,7 @@ WINE_CONFIG_MAKEFILE([dlls/win87em.dll16/Makefile],[dlls/Makedll.rules],[dlls],[
 WINE_CONFIG_MAKEFILE([dlls/winaspi.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/windebug.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/windowscodecs/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/windowscodecs/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/winealsa.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wineaudioio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winecoreaudio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])

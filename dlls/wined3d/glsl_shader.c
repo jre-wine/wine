@@ -103,7 +103,7 @@ struct glsl_shader_prog_link {
     GLint                       vuniformI_locations[MAX_CONST_I];
     GLint                       puniformI_locations[MAX_CONST_I];
     GLint                       posFixup_location;
-    GLint                       np2Fixup_location[MAX_FRAGMENT_SAMPLERS];
+    GLint                       np2Fixup_location;
     GLint                       bumpenvmat_location[MAX_TEXTURES];
     GLint                       luminancescale_location[MAX_TEXTURES];
     GLint                       luminanceoffset_location[MAX_TEXTURES];
@@ -114,6 +114,7 @@ struct glsl_shader_prog_link {
     struct vs_compile_args      vs_args;
     struct ps_compile_args      ps_args;
     UINT                        constant_version;
+    const struct ps_np2fixup_info *np2Fixup_info;
 };
 
 typedef struct {
@@ -126,11 +127,13 @@ typedef struct {
 struct shader_glsl_ctx_priv {
     const struct vs_compile_args    *cur_vs_args;
     const struct ps_compile_args    *cur_ps_args;
+    struct ps_np2fixup_info         *cur_np2fixup_info;
 };
 
 struct glsl_ps_compiled_shader
 {
     struct ps_compile_args          args;
+    struct ps_np2fixup_info         np2fixup;
     GLhandleARB                     prgId;
 };
 
@@ -189,10 +192,8 @@ static void print_glsl_info_log(const WineD3D_GL_Info *gl_info, GLhandleARB obj)
         "Vertex shader(s) linked, no fragment shader(s) defined. \n ",      /* fglrx, with \n */
         "Vertex shader(s) linked, no fragment shader(s) defined.",          /* fglrx, no \n   */
         "Fragment shader was successfully compiled to run on hardware.\n"
-        "WARNING: 0:2: extension 'GL_ARB_draw_buffers' is not supported",
         "Fragment shader(s) linked, no vertex shader(s) defined.",          /* fglrx, no \n   */
         "Fragment shader(s) linked, no vertex shader(s) defined. \n ",      /* fglrx, with \n */
-        "WARNING: 0:2: extension 'GL_ARB_draw_buffers' is not supported\n"  /* MacOS ati      */
     };
 
     if (!TRACE_ON(d3d_shader) && !FIXME_ON(d3d_shader)) return;
@@ -571,24 +572,31 @@ static void shader_glsl_load_np2fixup_constants(
         return;
     }
 
-    if (prog->ps_args.np2_fixup) {
-        UINT i;
-        UINT fixup = prog->ps_args.np2_fixup;
+    if (prog->ps_args.np2_fixup && -1 != prog->np2Fixup_location) {
         const WineD3D_GL_Info* gl_info = &deviceImpl->adapter->gl_info;
         const IWineD3DStateBlockImpl* stateBlock = (const IWineD3DStateBlockImpl*) deviceImpl->stateBlock;
+        UINT i;
+        UINT fixup = prog->ps_args.np2_fixup;
+        GLfloat np2fixup_constants[4 * MAX_FRAGMENT_SAMPLERS];
 
         for (i = 0; fixup; fixup >>= 1, ++i) {
-            if (-1 != prog->np2Fixup_location[i]) {
-                const IWineD3DBaseTextureImpl* const tex = (const IWineD3DBaseTextureImpl*) stateBlock->textures[i];
-                if (!tex) {
-                    FIXME("Nonexistent texture is flagged for NP2 texcoord fixup\n");
-                    continue;
-                } else {
-                    const float tex_dim[2] = {tex->baseTexture.pow2Matrix[0], tex->baseTexture.pow2Matrix[5]};
-                    GL_EXTCALL(glUniform2fvARB(prog->np2Fixup_location[i], 1, tex_dim));
-                }
+            const unsigned char idx = prog->np2Fixup_info->idx[i];
+            const IWineD3DBaseTextureImpl* const tex = (const IWineD3DBaseTextureImpl*) stateBlock->textures[i];
+            GLfloat* tex_dim = &np2fixup_constants[(idx >> 1) * 4];
+
+            if (!tex) {
+                FIXME("Nonexistent texture is flagged for NP2 texcoord fixup\n");
+                continue;
+            }
+
+            if (idx % 2) {
+                tex_dim[2] = tex->baseTexture.pow2Matrix[0]; tex_dim[3] = tex->baseTexture.pow2Matrix[5];
+            } else {
+                tex_dim[0] = tex->baseTexture.pow2Matrix[0]; tex_dim[1] = tex->baseTexture.pow2Matrix[5];
             }
         }
+
+        GL_EXTCALL(glUniform4fvARB(prog->np2Fixup_location, prog->np2Fixup_info->num_consts, np2fixup_constants));
     }
 }
 
@@ -768,17 +776,18 @@ static int vec4_varyings(DWORD shader_major, const WineD3D_GL_Info *gl_info)
     if(shader_major > 3) return ret;
 
     /* 3.0 shaders may need an extra varying for the clip coord on some cards(mostly dx10 ones) */
-    if(gl_info->glsl_clip_varying) ret -= 1;
+    if (gl_info->quirks & WINED3D_QUIRK_GLSL_CLIP_VARYING) ret -= 1;
     return ret;
 }
 
 /** Generate the variable & register declarations for the GLSL output target */
 static void shader_generate_glsl_declarations(IWineD3DBaseShader *iface, const shader_reg_maps *reg_maps,
         SHADER_BUFFER *buffer, const WineD3D_GL_Info *gl_info,
-        const struct ps_compile_args *ps_args)
+        struct shader_glsl_ctx_priv *ctx_priv)
 {
     IWineD3DBaseShaderImpl* This = (IWineD3DBaseShaderImpl*) iface;
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) This->baseShader.device;
+    const struct ps_compile_args *ps_args = ctx_priv->cur_ps_args;
     unsigned int i, extra_constants_needed = 0;
     const local_constant *lconst;
 
@@ -921,15 +930,6 @@ static void shader_generate_glsl_declarations(IWineD3DBaseShader *iface, const s
                     } else {
                         shader_addline(buffer, "uniform sampler2D %csampler%u;\n", prefix, i);
                     }
-
-                    if (pshader && ps_args->np2_fixup & (1 << i))
-                    {
-                        /* NP2/RECT textures in OpenGL use texcoords in the range [0,width]x[0,height]
-                         * while D3D has them in the (normalized) [0,1]x[0,1] range.
-                         * samplerNP2Fixup stores texture dimensions and is updated through
-                         * shader_glsl_load_np2fixup_constants when the sampler changes. */
-                        shader_addline(buffer, "uniform vec2 %csamplerNP2Fixup%u;\n", prefix, i);
-                    }
                     break;
                 case WINED3DSTT_CUBE:
                     shader_addline(buffer, "uniform samplerCube %csampler%u;\n", prefix, i);
@@ -944,7 +944,38 @@ static void shader_generate_glsl_declarations(IWineD3DBaseShader *iface, const s
             }
         }
     }
-    
+
+    /* Declare uniforms for NP2 texcoord fixup:
+     * This is NOT done inside the loop that declares the texture samplers since the NP2 fixup code
+     * is currently only used for the GeforceFX series and when forcing the ARB_npot extension off.
+     * Modern cards just skip the code anyway, so put it inside a seperate loop. */
+    if (pshader && ps_args->np2_fixup) {
+
+        struct ps_np2fixup_info* const fixup = ctx_priv->cur_np2fixup_info;
+        UINT cur = 0;
+
+        /* NP2/RECT textures in OpenGL use texcoords in the range [0,width]x[0,height]
+         * while D3D has them in the (normalized) [0,1]x[0,1] range.
+         * samplerNP2Fixup stores texture dimensions and is updated through
+         * shader_glsl_load_np2fixup_constants when the sampler changes. */
+
+        for (i = 0; i < This->baseShader.limits.sampler; ++i) {
+            if (reg_maps->sampler_type[i]) {
+                if (!(ps_args->np2_fixup & (1 << i))) continue;
+
+                if (WINED3DSTT_2D != reg_maps->sampler_type[i]) {
+                    FIXME("Non-2D texture is flagged for NP2 texcoord fixup.\n");
+                    continue;
+                }
+
+                fixup->idx[i] = cur++;
+            }
+        }
+
+        fixup->num_consts = (cur + 1) >> 1;
+        shader_addline(buffer, "uniform vec4 %csamplerNP2Fixup[%u];\n", prefix, fixup->num_consts);
+    }
+
     /* Declare address variables */
     for (i = 0; i < This->baseShader.limits.address; i++) {
         if (reg_maps->address[i])
@@ -1258,9 +1289,7 @@ static void shader_glsl_get_register_name(const struct wined3d_shader_register *
             if (reg->idx >= GL_LIMITS(buffers))
                 WARN("Write to render target %u, only %d supported\n", reg->idx, GL_LIMITS(buffers));
 
-            if (GL_SUPPORT(ARB_DRAW_BUFFERS)) sprintf(register_name, "gl_FragData[%u]", reg->idx);
-            /* On older cards with GLSL support like the GeforceFX there's only one buffer. */
-            else sprintf(register_name, "gl_FragColor");
+            sprintf(register_name, "gl_FragData[%u]", reg->idx);
             break;
 
         case WINED3DSPR_RASTOUT:
@@ -1680,7 +1709,7 @@ static void PRINTF_ATTR(8, 9) shader_glsl_gen_sample_code(const struct wined3d_s
 
     if (shader_is_pshader_version(ins->ctx->reg_maps->shader_version.type))
     {
-        struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
+        const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
         fixup = priv->cur_ps_args->color_fixup[sampler];
         sampler_base = "Psampler";
 
@@ -1708,7 +1737,11 @@ static void PRINTF_ATTR(8, 9) shader_glsl_gen_sample_code(const struct wined3d_s
         shader_addline(ins->ctx->buffer, ", %s)%s);\n", bias, dst_swizzle);
     } else {
         if (np2_fixup) {
-            shader_addline(ins->ctx->buffer, " * PsamplerNP2Fixup%u)%s);\n", sampler, dst_swizzle);
+            const struct shader_glsl_ctx_priv *priv = ins->ctx->backend_data;
+            const unsigned char idx = priv->cur_np2fixup_info->idx[sampler];
+
+            shader_addline(ins->ctx->buffer, " * PsamplerNP2Fixup[%u].%s)%s);\n", idx >> 1,
+                           (idx % 2) ? "zw" : "xy", dst_swizzle);
         } else if(dx && dy) {
             shader_addline(ins->ctx->buffer, ", %s, %s)%s);\n", dx, dy, dst_swizzle);
         } else {
@@ -2567,6 +2600,13 @@ static void shader_glsl_callnz(const struct wined3d_shader_instruction *ins)
 
     shader_glsl_add_src_param(ins, &ins->src[1], WINED3DSP_WRITEMASK_0, &src1_param);
     shader_addline(ins->ctx->buffer, "if (%s) subroutine%u();\n", src1_param.param_str, ins->src[0].reg.idx);
+}
+
+static void shader_glsl_ret(const struct wined3d_shader_instruction *ins)
+{
+    /* No-op. The closing } is written when a new function is started, and at the end of the shader. This
+     * function only suppresses the unhandled instruction warning
+     */
 }
 
 /*********************************************
@@ -3489,8 +3529,9 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
          * Take care about the texcoord .w fixup though if we're using the fixed function fragment pipeline
          */
         device = (IWineD3DDeviceImpl *) vs->baseShader.device;
-        if((GLINFO_LOCATION).set_texcoord_w && ps_major == 0 && vs_major > 0 &&
-            !device->frag_pipe->ffp_proj_control) {
+        if (((GLINFO_LOCATION).quirks & WINED3D_QUIRK_SET_TEXCOORD_W)
+                && ps_major == 0 && vs_major > 0 && !device->frag_pipe->ffp_proj_control)
+        {
             shader_addline(&buffer, "void order_ps_input() {\n");
             for(i = 0; i < min(8, MAX_REG_TEXCRD); i++) {
                 if(vs->baseShader.reg_maps.texcoord_mask[i] != 0 &&
@@ -3535,7 +3576,8 @@ static GLhandleARB generate_param_reorder_function(IWineD3DVertexShader *vertexs
             {
                 if (semantic_idx < 8)
                 {
-                    if (!(GLINFO_LOCATION).set_texcoord_w || ps_major > 0) write_mask |= WINED3DSP_WRITEMASK_3;
+                    if (!((GLINFO_LOCATION).quirks & WINED3D_QUIRK_SET_TEXCOORD_W) || ps_major > 0)
+                        write_mask |= WINED3DSP_WRITEMASK_3;
 
                     shader_addline(&buffer, "gl_TexCoord[%u]%s = OUT[%u]%s;\n",
                             semantic_idx, reg_mask, i, reg_mask);
@@ -3631,7 +3673,7 @@ static void hardcode_local_constants(IWineD3DBaseShaderImpl *shader, const WineD
 
 /* GL locking is done by the caller */
 static GLuint shader_glsl_generate_pshader(IWineD3DPixelShaderImpl *This,
-        SHADER_BUFFER *buffer, const struct ps_compile_args *args)
+        SHADER_BUFFER *buffer, const struct ps_compile_args *args, struct ps_np2fixup_info *np2fixup_info)
 {
     const struct shader_reg_maps *reg_maps = &This->baseShader.reg_maps;
     CONST DWORD *function = This->baseShader.function;
@@ -3644,12 +3686,10 @@ static GLuint shader_glsl_generate_pshader(IWineD3DPixelShaderImpl *This,
 
     memset(&priv_ctx, 0, sizeof(priv_ctx));
     priv_ctx.cur_ps_args = args;
+    priv_ctx.cur_np2fixup_info = np2fixup_info;
 
     shader_addline(buffer, "#version 120\n");
 
-    if (GL_SUPPORT(ARB_DRAW_BUFFERS)) {
-        shader_addline(buffer, "#extension GL_ARB_draw_buffers : enable\n");
-    }
     if(GL_SUPPORT(ARB_SHADER_TEXTURE_LOD) && reg_maps->usestexldd) {
         shader_addline(buffer, "#extension GL_ARB_shader_texture_lod : enable\n");
     }
@@ -3661,7 +3701,7 @@ static GLuint shader_glsl_generate_pshader(IWineD3DPixelShaderImpl *This,
     }
 
     /* Base Declarations */
-    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION, args);
+    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION, &priv_ctx);
 
     /* Pack 3.0 inputs */
     if (reg_maps->shader_version.major >= 3 && args->vp_mode != vertexshader)
@@ -3676,17 +3716,10 @@ static GLuint shader_glsl_generate_pshader(IWineD3DPixelShaderImpl *This,
     if (reg_maps->shader_version.major < 2)
     {
         /* Some older cards like GeforceFX ones don't support multiple buffers, so also not gl_FragData */
-        if(GL_SUPPORT(ARB_DRAW_BUFFERS))
-            shader_addline(buffer, "gl_FragData[0] = R0;\n");
-        else
-            shader_addline(buffer, "gl_FragColor = R0;\n");
+        shader_addline(buffer, "gl_FragData[0] = R0;\n");
     }
 
-    if(GL_SUPPORT(ARB_DRAW_BUFFERS)) {
-        fragcolor = "gl_FragData[0]";
-    } else {
-        fragcolor = "gl_FragColor";
-    }
+    fragcolor = "gl_FragData[0]";
     if(args->srgb_correction) {
         shader_addline(buffer, "tmp0.xyz = pow(%s.xyz, vec3(%f, %f, %f)) * vec3(%f, %f, %f) - vec3(%f, %f, %f);\n",
                         fragcolor, srgb_pow, srgb_pow, srgb_pow, srgb_mul_high, srgb_mul_high, srgb_mul_high,
@@ -3757,7 +3790,7 @@ static GLuint shader_glsl_generate_vshader(IWineD3DVertexShaderImpl *This,
     priv_ctx.cur_vs_args = args;
 
     /* Base Declarations */
-    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION, NULL);
+    shader_generate_glsl_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION, &priv_ctx);
 
     /* Base Shader Body */
     shader_generate_main((IWineD3DBaseShader*)This, buffer, reg_maps, function, &priv_ctx);
@@ -3806,13 +3839,15 @@ static GLuint shader_glsl_generate_vshader(IWineD3DVertexShaderImpl *This,
     return shader_obj;
 }
 
-static GLhandleARB find_glsl_pshader(IWineD3DPixelShaderImpl *shader, const struct ps_compile_args *args)
+static GLhandleARB find_glsl_pshader(IWineD3DPixelShaderImpl *shader, const struct ps_compile_args *args,
+                                     const struct ps_np2fixup_info **np2fixup_info)
 {
     UINT i;
     DWORD new_size;
     struct glsl_ps_compiled_shader *new_array;
+    struct glsl_pshader_private    *shader_data;
+    struct ps_np2fixup_info        *np2fixup = NULL;
     SHADER_BUFFER buffer;
-    struct glsl_pshader_private *shader_data;
     GLhandleARB ret;
 
     if(!shader->backend_priv) {
@@ -3826,6 +3861,7 @@ static GLhandleARB find_glsl_pshader(IWineD3DPixelShaderImpl *shader, const stru
      */
     for(i = 0; i < shader_data->num_gl_shaders; i++) {
         if(memcmp(&shader_data->gl_shaders[i].args, args, sizeof(*args)) == 0) {
+            if(args->np2_fixup) *np2fixup_info = &shader_data->gl_shaders[i].np2fixup;
             return shader_data->gl_shaders[i].prgId;
         }
     }
@@ -3852,13 +3888,17 @@ static GLhandleARB find_glsl_pshader(IWineD3DPixelShaderImpl *shader, const stru
 
     shader_data->gl_shaders[shader_data->num_gl_shaders].args = *args;
 
+    memset(&shader_data->gl_shaders[shader_data->num_gl_shaders].np2fixup, 0, sizeof(struct ps_np2fixup_info));
+    if (args->np2_fixup) np2fixup = &shader_data->gl_shaders[shader_data->num_gl_shaders].np2fixup;
+
     pixelshader_update_samplers(&shader->baseShader.reg_maps,
             ((IWineD3DDeviceImpl *)shader->baseShader.device)->stateBlock->textures);
 
     shader_buffer_init(&buffer);
-    ret = shader_glsl_generate_pshader(shader, &buffer, args);
+    ret = shader_glsl_generate_pshader(shader, &buffer, args, np2fixup);
     shader_buffer_free(&buffer);
     shader_data->gl_shaders[shader_data->num_gl_shaders++].prgId = ret;
+    *np2fixup_info = np2fixup;
 
     return ret;
 }
@@ -3970,6 +4010,7 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     entry->vs_args = vs_compile_args;
     entry->ps_args = ps_compile_args;
     entry->constant_version = 0;
+    entry->np2Fixup_info = NULL;
     /* Add the hash table entry */
     add_glsl_program_entry(priv, entry);
 
@@ -4020,7 +4061,8 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
     /* Attach GLSL pshader */
     if (pshader)
     {
-        GLhandleARB pshader_id = find_glsl_pshader((IWineD3DPixelShaderImpl *)pshader, &ps_compile_args);
+        GLhandleARB pshader_id = find_glsl_pshader((IWineD3DPixelShaderImpl *)pshader, &ps_compile_args,
+                                                   &entry->np2Fixup_info);
         TRACE("Attaching GLSL shader object %u to program %u\n", pshader_id, programId);
         GL_EXTCALL(glAttachObjectARB(programId, pshader_id));
         checkGLcall("glAttachObjectARB");
@@ -4054,7 +4096,6 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
 
     if(pshader) {
         char name[32];
-        WORD map;
 
         for(i = 0; i < MAX_TEXTURES; i++) {
             sprintf(name, "bumpenvmat%u", i);
@@ -4065,13 +4106,12 @@ static void set_glsl_shader_program(IWineD3DDevice *iface, BOOL use_ps, BOOL use
             entry->luminanceoffset_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
         }
 
-        map = ps_compile_args.np2_fixup;
-        for (i = 0; map; map >>= 1, ++i)
-        {
-            if (!(map & 1)) continue;
-
-            sprintf(name, "PsamplerNP2Fixup%u", i);
-            entry->np2Fixup_location[i] = GL_EXTCALL(glGetUniformLocationARB(programId, name));
+        if (ps_compile_args.np2_fixup) {
+            if (entry->np2Fixup_info) {
+                entry->np2Fixup_location = GL_EXTCALL(glGetUniformLocationARB(programId, "PsamplerNP2Fixup"));
+            } else {
+                FIXME("NP2 texcoord fixup needed for this pixelshader, but no fixup uniform found.\n");
+            }
         }
     }
 
@@ -4219,6 +4259,13 @@ static void shader_glsl_select(IWineD3DDevice *iface, BOOL usePS, BOOL useVS) {
     if (program_id) TRACE("Using GLSL program %u\n", program_id);
     GL_EXTCALL(glUseProgramObjectARB(program_id));
     checkGLcall("glUseProgramObjectARB");
+
+    /* In case that NP2 texcoord fixup data is found for the selected program, trigger a reload of the
+     * constants. This has to be done because it can't be guaranteed that sampler() (from state.c) is
+     * called between selecting the shader and using it, which results in wrong fixup for some frames. */
+    if (priv->glsl_program && priv->glsl_program->np2Fixup_info) {
+        This->shader_backend->shader_load_np2fixup_constants(iface, usePS, useVS);
+    }
 }
 
 /* GL locking is done by the caller */
@@ -4453,6 +4500,7 @@ static HRESULT shader_glsl_alloc(IWineD3DDevice *iface) {
     return WINED3D_OK;
 }
 
+/* Context activation is done by the caller. */
 static void shader_glsl_free(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     const WineD3D_GL_Info *gl_info = &This->adapter->gl_info;
@@ -4610,7 +4658,7 @@ static const SHADER_HANDLER shader_glsl_instruction_handler_table[WINED3DSIH_TAB
     /* WINED3DSIH_POW           */ shader_glsl_pow,
     /* WINED3DSIH_RCP           */ shader_glsl_rcp,
     /* WINED3DSIH_REP           */ shader_glsl_rep,
-    /* WINED3DSIH_RET           */ NULL,
+    /* WINED3DSIH_RET           */ shader_glsl_ret,
     /* WINED3DSIH_RSQ           */ shader_glsl_rsq,
     /* WINED3DSIH_SETP          */ NULL,
     /* WINED3DSIH_SGE           */ shader_glsl_compare,

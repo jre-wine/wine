@@ -1147,34 +1147,186 @@ UINT WINAPI GetMetaFileBitsEx( HMETAFILE hmf, UINT nSize, LPVOID buf )
     return mfSize;
 }
 
+#include <pshpack2.h>
+typedef struct
+{
+    DWORD magic;   /* WMFC */
+    WORD unk04;    /* 1 */
+    WORD unk06;    /* 0 */
+    WORD unk08;    /* 0 */
+    WORD unk0a;    /* 1 */
+    WORD checksum;
+    DWORD unk0e;   /* 0 */
+    DWORD num_chunks;
+    DWORD chunk_size;
+    DWORD remaining_size;
+    DWORD emf_size;
+    BYTE *emf_data;
+} mf_comment_chunk;
+#include <poppack.h>
+
+static const DWORD wmfc_magic = 0x43464d57;
+
+/******************************************************************
+ *         add_mf_comment
+ *
+ * Helper for GetWinMetaFileBits
+ *
+ * Add the MFCOMMENT record[s] which is essentially a copy
+ * of the original emf.
+ */
+static BOOL add_mf_comment(HDC hdc, HENHMETAFILE emf)
+{
+    DWORD size = GetEnhMetaFileBits(emf, 0, NULL), i;
+    BYTE *bits, *chunk_data;
+    mf_comment_chunk *chunk = NULL;
+    BOOL ret = FALSE;
+    static const DWORD max_chunk_size = 0x2000;
+
+    if(!size) return FALSE;
+    chunk_data = bits = HeapAlloc(GetProcessHeap(), 0, size);
+    if(!bits) return FALSE;
+    if(!GetEnhMetaFileBits(emf, size, bits)) goto end;
+
+    chunk = HeapAlloc(GetProcessHeap(), 0, max_chunk_size + FIELD_OFFSET(mf_comment_chunk, emf_data));
+    if(!chunk) goto end;
+
+    chunk->magic = wmfc_magic;
+    chunk->unk04 = 1;
+    chunk->unk06 = 0;
+    chunk->unk08 = 0;
+    chunk->unk0a = 1;
+    chunk->checksum = 0; /* We fixup the first chunk's checksum before returning from GetWinMetaFileBits */
+    chunk->unk0e = 0;
+    chunk->num_chunks = (size + max_chunk_size - 1) / max_chunk_size;
+    chunk->chunk_size = max_chunk_size;
+    chunk->remaining_size = size;
+    chunk->emf_size = size;
+
+    for(i = 0; i < chunk->num_chunks; i++)
+    {
+        if(i == chunk->num_chunks - 1) /* last chunk */
+            chunk->chunk_size = chunk->remaining_size;
+
+        chunk->remaining_size -= chunk->chunk_size;
+        memcpy(&chunk->emf_data, chunk_data, chunk->chunk_size);
+        chunk_data += chunk->chunk_size;
+
+        if(!Escape(hdc, MFCOMMENT, chunk->chunk_size + FIELD_OFFSET(mf_comment_chunk, emf_data), (char*)chunk, NULL))
+            goto end;
+    }
+    ret = TRUE;
+end:
+    HeapFree(GetProcessHeap(), 0, chunk);
+    HeapFree(GetProcessHeap(), 0, bits);
+    return ret;
+}
+
+/******************************************************************
+ *         set_window
+ *
+ * Helper for GetWinMetaFileBits
+ *
+ * Add the SetWindowOrg and SetWindowExt records
+ */
+static BOOL set_window(HDC hdc, HENHMETAFILE emf, HDC ref_dc, INT map_mode)
+{
+    ENHMETAHEADER header;
+    INT horz_res, vert_res, horz_size, vert_size;
+    POINT pt;
+
+    if(!GetEnhMetaFileHeader(emf, sizeof(header), &header)) return FALSE;
+
+    horz_res = GetDeviceCaps(ref_dc, HORZRES);
+    vert_res = GetDeviceCaps(ref_dc, VERTRES);
+    horz_size = GetDeviceCaps(ref_dc, HORZSIZE);
+    vert_size = GetDeviceCaps(ref_dc, VERTSIZE);
+
+    switch(map_mode)
+    {
+    case MM_TEXT:
+    case MM_ISOTROPIC:
+    case MM_ANISOTROPIC:
+        pt.y = MulDiv(header.rclFrame.top, vert_res, vert_size * 100);
+        pt.x = MulDiv(header.rclFrame.left, horz_res, horz_size * 100);
+        break;
+    case MM_LOMETRIC:
+        pt.y = MulDiv(-header.rclFrame.top, 1, 10) + 1;
+        pt.x = MulDiv( header.rclFrame.left, 1, 10);
+        break;
+    case MM_HIMETRIC:
+        pt.y = -header.rclFrame.top + 1;
+        pt.x = header.rclFrame.left;
+        break;
+    case MM_LOENGLISH:
+        pt.y = MulDiv(-header.rclFrame.top, 10, 254) + 1;
+        pt.x = MulDiv( header.rclFrame.left, 10, 254);
+        break;
+    case MM_HIENGLISH:
+        pt.y = MulDiv(-header.rclFrame.top, 100, 254) + 1;
+        pt.x = MulDiv( header.rclFrame.left, 100, 254);
+        break;
+    case MM_TWIPS:
+        pt.y = MulDiv(-header.rclFrame.top, 72 * 20, 2540) + 1;
+        pt.x = MulDiv( header.rclFrame.left, 72 * 20, 2540);
+        break;
+    default:
+        WARN("Unknown map mode %d\n", map_mode);
+        return FALSE;
+    }
+    SetWindowOrgEx(hdc, pt.x, pt.y, NULL);
+
+    pt.x = MulDiv(header.rclFrame.right - header.rclFrame.left, horz_res, horz_size * 100);
+    pt.y = MulDiv(header.rclFrame.bottom - header.rclFrame.top, vert_res, vert_size * 100);
+    SetWindowExtEx(hdc, pt.x, pt.y, NULL);
+    return TRUE;
+}
+
 /******************************************************************
  *         GetWinMetaFileBits [GDI32.@]
  */
 UINT WINAPI GetWinMetaFileBits(HENHMETAFILE hemf,
                                 UINT cbBuffer, LPBYTE lpbBuffer,
-                                INT fnMapMode, HDC hdcRef)
+                                INT map_mode, HDC hdcRef)
 {
     HDC hdcmf;
     HMETAFILE hmf;
-    UINT ret;
+    UINT ret, full_size;
     RECT rc;
-    INT oldMapMode;
 
     GetClipBox(hdcRef, &rc);
-    oldMapMode = SetMapMode(hdcRef, fnMapMode);
 
     TRACE("(%p,%d,%p,%d,%p) rc=%s\n", hemf, cbBuffer, lpbBuffer,
-        fnMapMode, hdcRef, wine_dbgstr_rect(&rc));
+          map_mode, hdcRef, wine_dbgstr_rect(&rc));
 
-    hdcmf = CreateMetaFileA(NULL);
+    hdcmf = CreateMetaFileW(NULL);
+
+    add_mf_comment(hdcmf, hemf);
+    SetMapMode(hdcmf, map_mode);
+    if(!set_window(hdcmf, hemf, hdcRef, map_mode))
+        goto error;
+
     PlayEnhMetaFile(hdcmf, hemf, &rc);
     hmf = CloseMetaFile(hdcmf);
+    full_size = GetMetaFileBitsEx(hmf, 0, NULL);
     ret = GetMetaFileBitsEx(hmf, cbBuffer, lpbBuffer);
     DeleteMetaFile(hmf);
 
-    SetMapMode(hdcRef, oldMapMode);
+    if(ret && ret == full_size && lpbBuffer) /* fixup checksum, but only if retrieving all of the bits */
+    {
+        WORD checksum = 0;
+        METARECORD *comment_rec = (METARECORD*)(lpbBuffer + sizeof(METAHEADER));
+        UINT i;
 
+        for(i = 0; i < full_size / 2; i++)
+            checksum += ((WORD*)lpbBuffer)[i];
+        comment_rec->rdParm[8] = ~checksum + 1;
+    }
     return ret;
+
+error:
+    DeleteMetaFile(CloseMetaFile(hdcmf));
+    return 0;
 }
 
 /******************************************************************

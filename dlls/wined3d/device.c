@@ -166,6 +166,7 @@ static BOOL fixed_get_input(BYTE usage, BYTE usage_idx, unsigned int *regnum)
     return TRUE;
 }
 
+/* Context activation is done by the caller. */
 void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         BOOL use_vshader, struct wined3d_stream_info *stream_info, BOOL *fixup)
 {
@@ -2023,6 +2024,7 @@ static void IWineD3DDeviceImpl_LoadLogo(IWineD3DDeviceImpl *This, const char *fi
     return;
 }
 
+/* Context activation is done by the caller. */
 static void create_dummy_textures(IWineD3DDeviceImpl *This) {
     unsigned int i;
     /* Under DirectX you can have texture stage operations even if no texture is
@@ -2129,7 +2131,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface,
         }
     }
 
-    /* Setup the implicit swapchain */
+    /* Setup the implicit swapchain. This also initializes a context. */
     TRACE("Creating implicit swapchain\n");
     hr = IWineD3DDeviceParent_CreateSwapChain(This->device_parent,
             pPresentationParameters, (IWineD3DSwapChain **)&swapchain);
@@ -4034,6 +4036,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_GetPixelShaderConstantF(
     return WINED3D_OK;
 }
 
+/* Context activation is done by the caller. */
 #define copy_and_next(dest, src, size) memcpy(dest, src, size); dest += (size)
 static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIndex, DWORD dwCount,
         const struct wined3d_stream_info *stream_info, struct wined3d_buffer *dest, DWORD dwFlags,
@@ -6348,6 +6351,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetFrontBackBuffers(IWineD3DDevice *ifa
         /* What to do about the context here in the case of multithreading? Not sure.
          * This function is called by IDirect3D7::CreateDevice so in theory its initialization code
          */
+        WARN("No active context?\n");
+
         ENTER_GL();
         if(!Swapchain->backBuffer[0]) {
             /* GL was told to draw to the front buffer at creation,
@@ -6708,6 +6713,9 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                 for(i = 0; i < height; i++)
                     memcpy(&mem[width * bpp * i], &bits[rect.Pitch * i], width * bpp);
                 IWineD3DSurface_UnlockRect(pCursorBitmap);
+
+                ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+
                 ENTER_GL();
 
                 if(GL_SUPPORT(APPLE_CLIENT_STORAGE)) {
@@ -6970,6 +6978,8 @@ void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain_
     IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) swapchain_iface;
     UINT i;
     IWineD3DBaseShaderImpl *shader;
+
+    ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
 
     IWineD3DDevice_EnumResources(iface, reset_unload_resources, NULL);
     LIST_FOR_EACH_ENTRY(shader, &This->shaders, IWineD3DBaseShaderImpl, baseShader.shader_list_entry) {
@@ -7325,39 +7335,8 @@ void device_resource_released(IWineD3DDeviceImpl *This, IWineD3DResource *resour
         case WINED3DRTYPE_SURFACE: {
             unsigned int i;
 
-            /* Cleanup any FBO attachments if d3d is enabled */
-            if(This->d3d_initialized) {
-                if((IWineD3DSurface *)resource == This->lastActiveRenderTarget) {
-                    IWineD3DSwapChainImpl *swapchain = This->swapchains ? (IWineD3DSwapChainImpl *) This->swapchains[0] : NULL;
-
-                    TRACE("Last active render target destroyed\n");
-                    /* Find a replacement surface for the currently active back buffer. The context manager does not do NULL
-                     * checks, so switch to a valid target as long as the currently set surface is still valid. Use the
-                     * surface of the implicit swpchain. If that is the same as the destroyed surface the device is destroyed
-                     * and the lastActiveRenderTarget member shouldn't matter
-                     */
-                    if(swapchain) {
-                        if(swapchain->backBuffer && swapchain->backBuffer[0] != (IWineD3DSurface *)resource) {
-                            TRACE("Activating primary back buffer\n");
-                            ActivateContext(This, swapchain->backBuffer[0], CTXUSAGE_RESOURCELOAD);
-                        } else if(!swapchain->backBuffer && swapchain->frontBuffer != (IWineD3DSurface *)resource) {
-                            /* Single buffering environment */
-                            TRACE("Activating primary front buffer\n");
-                            ActivateContext(This, swapchain->frontBuffer, CTXUSAGE_RESOURCELOAD);
-                        } else {
-                            TRACE("Device is being destroyed, setting lastActiveRenderTarget = 0xdeadbabe\n");
-                            /* Implicit render target destroyed, that means the device is being destroyed
-                             * whatever we set here, it shouldn't matter
-                             */
-                            This->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadbabe;
-                        }
-                    } else {
-                        /* May happen during ddraw uninitialization */
-                        TRACE("Render target set, but swapchain does not exist!\n");
-                        This->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadcafe;
-                    }
-                }
-
+            if (This->d3d_initialized)
+            {
                 for (i = 0; i < GL_LIMITS(buffers); ++i) {
                     if (This->render_targets[i] == (IWineD3DSurface *)resource) {
                         This->render_targets[i] = NULL;

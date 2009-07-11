@@ -1423,7 +1423,7 @@ GpStatus WINGDIPAPI GdipDrawCurveI(GpGraphics *graphics, GpPen *pen,
 
     TRACE("(%p, %p, %p, %d)\n", graphics, pen, points, count);
 
-    if(!points || count <= 0)
+    if(!points)
         return InvalidParameter;
 
     pointsF = GdipAlloc(sizeof(GpPointF)*count);
@@ -1514,7 +1514,7 @@ GpStatus WINGDIPAPI GdipDrawCurve2I(GpGraphics *graphics, GpPen *pen,
 
     TRACE("(%p, %p, %p, %d, %.2f)\n", graphics, pen, points, count, tension);
 
-    if(!points || count <= 0)
+    if(!points)
         return InvalidParameter;
 
     pointsF = GdipAlloc(sizeof(GpPointF)*count);
@@ -1530,6 +1530,36 @@ GpStatus WINGDIPAPI GdipDrawCurve2I(GpGraphics *graphics, GpPen *pen,
     GdipFree(pointsF);
 
     return ret;
+}
+
+GpStatus WINGDIPAPI GdipDrawCurve3(GpGraphics *graphics, GpPen *pen,
+    GDIPCONST GpPointF *points, INT count, INT offset, INT numberOfSegments,
+    REAL tension)
+{
+    TRACE("(%p, %p, %p, %d, %d, %d, %.2f)\n", graphics, pen, points, count, offset, numberOfSegments, tension);
+
+    if(offset >= count || numberOfSegments > count - offset - 1 || numberOfSegments <= 0){
+        return InvalidParameter;
+    }
+
+    return GdipDrawCurve2(graphics, pen, points + offset, numberOfSegments + 1, tension);
+}
+
+GpStatus WINGDIPAPI GdipDrawCurve3I(GpGraphics *graphics, GpPen *pen,
+    GDIPCONST GpPoint *points, INT count, INT offset, INT numberOfSegments,
+    REAL tension)
+{
+    TRACE("(%p, %p, %p, %d, %d, %d, %.2f)\n", graphics, pen, points, count, offset, numberOfSegments, tension);
+
+    if(count < 0){
+        return OutOfMemory;
+    }
+
+    if(offset >= count || numberOfSegments > count - offset - 1 || numberOfSegments <= 0){
+        return InvalidParameter;
+    }
+
+    return GdipDrawCurve2I(graphics, pen, points + offset, numberOfSegments + 1, tension);
 }
 
 GpStatus WINGDIPAPI GdipDrawEllipse(GpGraphics *graphics, GpPen *pen, REAL x,
@@ -2098,6 +2128,8 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
     INT sum = 0, height = 0, offsety = 0, fit, fitcpy, save_state, i, j, lret, nwidth,
         nheight;
     SIZE size;
+    POINT drawbase;
+    UINT drawflags;
     RECT drawcoord;
 
     TRACE("(%p, %s, %i, %p, %s, %p, %p)\n", graphics, debugstr_wn(string, length),
@@ -2207,17 +2239,35 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
 
     length = j;
 
+    if (!format || format->align == StringAlignmentNear)
+    {
+        drawbase.x = corners[0].x;
+        drawbase.y = corners[0].y;
+        drawflags = DT_NOCLIP | DT_EXPANDTABS;
+    }
+    else if (format->align == StringAlignmentCenter)
+    {
+        drawbase.x = (corners[0].x + corners[1].x)/2;
+        drawbase.y = (corners[0].y + corners[1].y)/2;
+        drawflags = DT_NOCLIP | DT_EXPANDTABS | DT_CENTER;
+    }
+    else /* (format->align == StringAlignmentFar) */
+    {
+        drawbase.x = corners[1].x;
+        drawbase.y = corners[1].y;
+        drawflags = DT_NOCLIP | DT_EXPANDTABS | DT_RIGHT;
+    }
+
     while(sum < length){
-        drawcoord.left = corners[0].x + roundr(ang_sin * (REAL) height);
-        drawcoord.top = corners[0].y + roundr(ang_cos * (REAL) height);
+        drawcoord.left = drawcoord.right = drawbase.x + roundr(ang_sin * (REAL) height);
+        drawcoord.top = drawcoord.bottom = drawbase.y + roundr(ang_cos * (REAL) height);
 
         GetTextExtentExPointW(graphics->hdc, stringdup + sum, length - sum,
                               nwidth, &fit, NULL, &size);
         fitcpy = fit;
 
         if(fit == 0){
-            DrawTextW(graphics->hdc, stringdup + sum, 1, &drawcoord, DT_NOCLIP |
-                      DT_EXPANDTABS);
+            DrawTextW(graphics->hdc, stringdup + sum, 1, &drawcoord, drawflags);
             break;
         }
 
@@ -2246,7 +2296,7 @@ GpStatus WINGDIPAPI GdipDrawString(GpGraphics *graphics, GDIPCONST WCHAR *string
                 }
         }
         DrawTextW(graphics->hdc, stringdup + sum, min(length - sum, fit),
-                  &drawcoord, DT_NOCLIP | DT_EXPANDTABS);
+                  &drawcoord, drawflags);
 
         sum += fit + (lret < fitcpy ? 1 : 0);
         height += size.cy;
@@ -3876,5 +3926,14 @@ GpStatus WINGDIPAPI GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT16 
                                          GDIPCONST GpMatrix *matrix )
 {
     FIXME("(%p %p %d %p %p %p %d %p): stub\n", graphics, text, length, font, brush, positions, flags, matrix);
+    return NotImplemented;
+}
+
+/*****************************************************************************
+ * GdipIsVisibleRegionPointI [GDIPLUS.@]
+ */
+GpStatus WINGDIPAPI GdipIsVisibleRegionPointI(GpRegion *region, INT x, INT y, GpGraphics *graphics, BOOL *result)
+{
+    FIXME("(%p %d %d %p %p): stub\n", region, x, y, graphics, result);
     return NotImplemented;
 }

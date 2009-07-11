@@ -19,6 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <windef.h>
+#include <winuser.h>
+
 #define MAIN_MENU               0x201
 #define DIALOG_PAGESETUP        0x202
 #define ID_ACCEL                0x203
@@ -81,3 +84,12 @@
 
 #define STRING_NOTFOUND 0x17B
 #define STRING_OUT_OF_MEMORY 0x17C
+
+#define STRING_UNICODE_LE      0x180
+#define STRING_UNICODE_BE      0x181
+
+#define STRING_LOSS_OF_UNICODE_CHARACTERS 0x182
+
+/* Open/Save As dialog template */
+#define IDD_OFN_TEMPLATE       0x190
+#define IDC_OFN_ENCCOMBO       0x191

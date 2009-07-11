@@ -36,6 +36,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
  */
 static IWineD3DDeviceImpl *last_device;
 
+void context_set_last_device(IWineD3DDeviceImpl *device)
+{
+    last_device = device;
+}
+
 /* FBO helper functions */
 
 /* GL locking is done by the caller */
@@ -426,6 +431,57 @@ void context_resource_released(IWineD3DDevice *iface, IWineD3DResource *resource
     {
         case WINED3DRTYPE_SURFACE:
         {
+            if ((IWineD3DSurface *)resource == This->lastActiveRenderTarget)
+            {
+                IWineD3DSwapChainImpl *swapchain;
+
+                TRACE("Last active render target destroyed.\n");
+
+                /* Find a replacement surface for the currently active back
+                 * buffer. The context manager does not do NULL checks, so
+                 * switch to a valid target as long as the currently set
+                 * surface is still valid. Use the surface of the implicit
+                 * swpchain. If that is the same as the destroyed surface the
+                 * device is destroyed and the lastActiveRenderTarget member
+                 * shouldn't matter. */
+                swapchain = This->swapchains ? (IWineD3DSwapChainImpl *)This->swapchains[0] : NULL;
+                if (swapchain)
+                {
+                    if (swapchain->backBuffer && swapchain->backBuffer[0] != (IWineD3DSurface *)resource)
+                    {
+                        TRACE("Activating primary back buffer.\n");
+                        ActivateContext(This, swapchain->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+                    }
+                    else if (!swapchain->backBuffer && swapchain->frontBuffer != (IWineD3DSurface *)resource)
+                    {
+                        /* Single buffering environment */
+                        TRACE("Activating primary front buffer.\n");
+
+                        ActivateContext(This, swapchain->frontBuffer, CTXUSAGE_RESOURCELOAD);
+                    }
+                    else
+                    {
+                        /* Implicit render target destroyed, that means the
+                         * device is being destroyed whatever we set here, it
+                         * shouldn't matter. */
+                        TRACE("Device is being destroyed, setting lastActiveRenderTarget to 0xdeadbabe.\n");
+
+                        This->lastActiveRenderTarget = (IWineD3DSurface *) 0xdeadbabe;
+                    }
+                }
+                else
+                {
+                    WARN("Render target set, but swapchain does not exist!\n");
+
+                    /* May happen during ddraw uninitialization. */
+                    This->lastActiveRenderTarget = (IWineD3DSurface *)0xdeadcafe;
+                }
+            }
+            else if (This->d3d_initialized)
+            {
+                ActivateContext(This, This->lastActiveRenderTarget, CTXUSAGE_RESOURCELOAD);
+            }
+
             for (i = 0; i < This->numContexts; ++i)
             {
                 WineD3DContext *context = This->contexts[i];
@@ -1022,9 +1078,12 @@ WineD3DContext *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *tar
      * but enable it for the first context we create, and reenable it on the old context
      */
     if(oldDrawable && oldCtx) {
-        pwglMakeCurrent(oldDrawable, oldCtx);
+        if (!pwglMakeCurrent(oldDrawable, oldCtx))
+        {
+            ERR("Failed to make previous GL context %p current.\n", oldCtx);
+        }
     } else {
-        last_device = This;
+        context_set_last_device(This);
     }
     This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
 
@@ -1107,30 +1166,38 @@ static void RemoveContextFromArray(IWineD3DDeviceImpl *This, WineD3DContext *con
  *****************************************************************************/
 void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     struct fbo_entry *entry, *entry2;
+    BOOL has_glctx;
 
     TRACE("Destroying ctx %p\n", context);
 
     /* The correct GL context needs to be active to cleanup the GL resources below */
-    if(pwglGetCurrentContext() != context->glCtx){
-        pwglMakeCurrent(context->hdc, context->glCtx);
-        last_device = NULL;
-    }
+    has_glctx = pwglMakeCurrent(context->hdc, context->glCtx);
+    context_set_last_device(NULL);
+
+    if (!has_glctx) WARN("Failed to activate context. Window already destroyed?\n");
 
     ENTER_GL();
 
     LIST_FOR_EACH_ENTRY_SAFE(entry, entry2, &context->fbo_list, struct fbo_entry, entry) {
+        if (!has_glctx) entry->id = 0;
         context_destroy_fbo_entry(This, context, entry);
     }
-    if (context->src_fbo) {
-        TRACE("Destroy src FBO %d\n", context->src_fbo);
-        context_destroy_fbo(This, &context->src_fbo);
-    }
-    if (context->dst_fbo) {
-        TRACE("Destroy dst FBO %d\n", context->dst_fbo);
-        context_destroy_fbo(This, &context->dst_fbo);
-    }
-    if(context->dummy_arbfp_prog) {
-        GL_EXTCALL(glDeleteProgramsARB(1, &context->dummy_arbfp_prog));
+    if (has_glctx)
+    {
+        if (context->src_fbo)
+        {
+            TRACE("Destroy src FBO %d\n", context->src_fbo);
+            context_destroy_fbo(This, &context->src_fbo);
+        }
+        if (context->dst_fbo)
+        {
+            TRACE("Destroy dst FBO %d\n", context->dst_fbo);
+            context_destroy_fbo(This, &context->dst_fbo);
+        }
+        if (context->dummy_arbfp_prog)
+        {
+            GL_EXTCALL(glDeleteProgramsARB(1, &context->dummy_arbfp_prog));
+        }
     }
 
     LEAVE_GL();
@@ -1142,7 +1209,11 @@ void DestroyContext(IWineD3DDeviceImpl *This, WineD3DContext *context) {
     }
 
     /* Cleanup the GL context */
-    pwglMakeCurrent(NULL, NULL);
+    if (!pwglMakeCurrent(NULL, NULL))
+    {
+        ERR("Failed to disable GL context.\n");
+    }
+
     if(context->isPBuffer) {
         GL_EXTCALL(wglReleasePbufferDCARB(context->pbuffer, context->hdc));
         GL_EXTCALL(wglDestroyPbufferARB(context->pbuffer));
@@ -1184,6 +1255,7 @@ static inline void set_blit_dimension(UINT width, UINT height) {
  *  height: render target height
  *
  *****************************************************************************/
+/* Context activation is done by the caller. */
 static inline void SetupForBlit(IWineD3DDeviceImpl *This, WineD3DContext *context, UINT width, UINT height) {
     int i, sampler;
     const struct StateEntry *StateTable = This->StateTable;
@@ -1579,6 +1651,7 @@ static inline WineD3DContext *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurf
     return context;
 }
 
+/* Context activation is done by the caller. */
 static void apply_draw_buffer(IWineD3DDeviceImpl *This, IWineD3DSurface *target, BOOL blit)
 {
     IWineD3DSwapChain *swapchain;
@@ -1682,7 +1755,7 @@ void ActivateContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, ContextU
                    sizeof(*This->activeContext->pshader_const_dirty) * GL_LIMITS(pshader_constantsF));
         }
         This->activeContext = context;
-        last_device = This;
+        context_set_last_device(This);
     }
 
     switch (usage) {

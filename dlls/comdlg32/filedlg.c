@@ -789,11 +789,7 @@ static HWND CreateTemplateDialog(FileOpenDlgInfos *fodInfos, HWND hwnd)
           hChildDlg = CreateDialogIndirectParamA(hinst, template, hwnd,
               IsHooked(fodInfos) ? (DLGPROC)fodInfos->ofnInfos->lpfnHook : FileOpenDlgProcUserTemplate,
               (LPARAM)fodInfos->ofnInfos);
-      if(hChildDlg)
-      {
-        ShowWindow(hChildDlg,SW_SHOW);
-        return hChildDlg;
-      }
+      return hChildDlg;
     }
     else if( IsHooked(fodInfos))
     {
@@ -1051,6 +1047,13 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam, LPARAM lParam)
                     0, 0,
                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
         }
+        else if( GetDlgCtrlID( ctrl) == IDC_SHELLSTATIC)
+        {
+            DeferWindowPos( hdwp, ctrl, NULL, 0, 0,
+                    rc.right - rc.left + chgx,
+                    rc.bottom - rc.top + chgy,
+                    SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+        }
         else if( rc.top > rcview.bottom)
         {
             /* if it was below the shell view
@@ -1145,6 +1148,9 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 
          FILEDLG95_ResizeControls(hwnd, wParam, lParam);
       	 FILEDLG95_FillControls(hwnd, wParam, lParam);
+
+         if( fodInfos->DlgInfos.hwndCustomDlg)
+             ShowWindow( fodInfos->DlgInfos.hwndCustomDlg, SW_SHOW);
 
          if(fodInfos->ofnInfos->Flags & OFN_EXPLORER)
              SendCustomDlgNotificationMessage(hwnd,CDN_INITDONE);
@@ -1760,19 +1766,19 @@ static BOOL FILEDLG95_SendFileOK( HWND hwnd, FileOpenDlgInfos *fodInfos )
         /* First send CDN_FILEOK as MSDN doc says */
         if(fodInfos->ofnInfos->Flags & OFN_EXPLORER)
             retval = SendCustomDlgNotificationMessage(hwnd,CDN_FILEOK);
-        if (GetWindowLongPtrW(fodInfos->DlgInfos.hwndCustomDlg, DWLP_MSGRESULT))
+        if( retval)
         {
             TRACE("canceled\n");
-            return (retval == 0);
+            return FALSE;
         }
 
         /* fodInfos->ofnInfos points to an ASCII or UNICODE structure as appropriate */
         retval = SendMessageW(fodInfos->DlgInfos.hwndCustomDlg,
                               fodInfos->HookMsg.fileokstring, 0, (LPARAM)fodInfos->ofnInfos);
-        if (GetWindowLongPtrW(fodInfos->DlgInfos.hwndCustomDlg, DWLP_MSGRESULT))
+        if( retval)
         {
             TRACE("canceled\n");
-            return (retval == 0);
+            return FALSE;
         }
     }
     return TRUE;

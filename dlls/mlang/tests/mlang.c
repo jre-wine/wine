@@ -50,6 +50,9 @@ static HRESULT (WINAPI *pConvertINetMultiByteToUnicode)(LPDWORD, DWORD, LPCSTR,
                                                         LPINT, LPWSTR, LPINT);
 static HRESULT (WINAPI *pConvertINetUnicodeToMultiByte)(LPDWORD, DWORD, LPCWSTR,
                                                         LPINT, LPSTR, LPINT);
+static HRESULT (WINAPI *pRfc1766ToLcidA)(LCID *, LPCSTR);
+static HRESULT (WINAPI *pLcidToRfc1766A)(LCID, LPSTR, INT);
+
 typedef struct lcid_tag_table {
     LPCSTR rfc1766;
     LCID lcid;
@@ -60,7 +63,7 @@ typedef struct lcid_tag_table {
 
 /* en, ar and zh use SUBLANG_NEUTRAL for the rfc1766 name without the country
    all others suppress the country with SUBLANG_DEFAULT.
-   For 3 letter language codes, the rfc1766 is to small for the country */
+   For 3 letter language codes, the rfc1766 is too small for the country */
 
 static const lcid_table_entry  lcid_table[] = {
     {"e",     -1,       E_FAIL},
@@ -239,6 +242,8 @@ static BOOL init_function_ptrs(void)
 
     pConvertINetMultiByteToUnicode = (void *)GetProcAddress(hMlang, "ConvertINetMultiByteToUnicode");
     pConvertINetUnicodeToMultiByte = (void *)GetProcAddress(hMlang, "ConvertINetUnicodeToMultiByte");
+    pRfc1766ToLcidA = (void *)GetProcAddress(hMlang, "Rfc1766ToLcidA");
+    pLcidToRfc1766A = (void *)GetProcAddress(hMlang, "LcidToRfc1766A");
 
     pGetCPInfoExA = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetCPInfoExA");
 
@@ -1137,7 +1142,7 @@ static void test_Rfc1766ToLcid(void)
 
     for(i = 0; i < sizeof(lcid_table) / sizeof(lcid_table[0]); i++) {
         lcid = -1;
-        ret = Rfc1766ToLcidA(&lcid, lcid_table[i].rfc1766);
+        ret = pRfc1766ToLcidA(&lcid, lcid_table[i].rfc1766);
 
         /* IE <6.0 guess 0x412 (ko) from "kok" */
         ok( (ret == lcid_table[i].hr) ||
@@ -1147,15 +1152,13 @@ static void test_Rfc1766ToLcid(void)
         ok( (lcid == lcid_table[i].lcid) ||
             broken(lcid == lcid_table[i].broken_lcid),  /* IE <6.0 */
             "#%02d: got LCID 0x%x (expected 0x%x)\n", i, lcid, lcid_table[i].lcid);
-
     }
 
-    ret = Rfc1766ToLcidA(&lcid, NULL);
+    ret = pRfc1766ToLcidA(&lcid, NULL);
     ok(ret == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", ret);
 
-    ret = Rfc1766ToLcidA(NULL, "en");
+    ret = pRfc1766ToLcidA(NULL, "en");
     ok(ret == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", ret);
-
 }
 
 static void test_GetNumberOfCodePageInfo(IMultiLanguage2 *iML2)
@@ -1220,7 +1223,7 @@ static void test_LcidToRfc1766(void)
         memset(buffer, '#', sizeof(buffer)-1);
         buffer[sizeof(buffer)-1] = '\0';
 
-        hr = LcidToRfc1766A(lcid_table[i].lcid, buffer, MAX_RFC1766_NAME);
+        hr = pLcidToRfc1766A(lcid_table[i].lcid, buffer, MAX_RFC1766_NAME);
 
         /* IE <5.0 does not recognize 0x180c (fr-mc) and 0x457 (kok) */
         ok( (hr == lcid_table[i].hr) ||
@@ -1243,22 +1246,21 @@ static void test_LcidToRfc1766(void)
 
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
-    hr = LcidToRfc1766A(-1, buffer, MAX_RFC1766_NAME);
+    hr = pLcidToRfc1766A(-1, buffer, MAX_RFC1766_NAME);
     ok(hr == E_FAIL, "got 0x%08x and '%s' (expected E_FAIL)\n", hr, buffer);
 
-    hr = LcidToRfc1766A(LANG_ENGLISH, NULL, MAX_RFC1766_NAME);
+    hr = pLcidToRfc1766A(LANG_ENGLISH, NULL, MAX_RFC1766_NAME);
     ok(hr == E_INVALIDARG, "got 0x%08x (expected E_INVALIDARG)\n", hr);
 
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
-    hr = LcidToRfc1766A(LANG_ENGLISH, buffer, -1);
+    hr = pLcidToRfc1766A(LANG_ENGLISH, buffer, -1);
     ok(hr == E_INVALIDARG, "got 0x%08x and '%s' (expected E_INVALIDARG)\n", hr, buffer);
 
     memset(buffer, '#', sizeof(buffer)-1);
     buffer[sizeof(buffer)-1] = '\0';
-    hr = LcidToRfc1766A(LANG_ENGLISH, buffer, 0);
+    hr = pLcidToRfc1766A(LANG_ENGLISH, buffer, 0);
     ok(hr == E_INVALIDARG, "got 0x%08x and '%s' (expected E_INVALIDARG)\n", hr, buffer);
-
 }
 
 static void test_GetRfc1766Info(IMultiLanguage2 *iML2)
@@ -1839,23 +1841,23 @@ static void test_GetScriptFontInfo(IMLangFontLink2 *font_link)
     SCRIPTFONTINFO sfi[1];
 
     nfonts = 0;
-    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, 0, &nfonts, NULL);
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidAsciiLatin, 0, &nfonts, NULL);
     ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
     ok(nfonts, "unexpected result\n");
 
     nfonts = 0;
-    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, NULL);
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidAsciiLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, NULL);
     ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
     ok(nfonts, "unexpected result\n");
 
     nfonts = 0;
-    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, NULL);
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidAsciiLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, NULL);
     ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
     ok(nfonts, "unexpected result\n");
 
     nfonts = 1;
     memset(sfi, 0, sizeof(sfi));
-    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, sfi);
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidAsciiLatin, SCRIPTCONTF_FIXED_FONT, &nfonts, sfi);
     ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
     ok(nfonts == 1, "got %u, expected 1\n", nfonts);
     ok(sfi[0].scripts != 0, "unexpected result\n");
@@ -1863,11 +1865,127 @@ static void test_GetScriptFontInfo(IMLangFontLink2 *font_link)
 
     nfonts = 1;
     memset(sfi, 0, sizeof(sfi));
-    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, sfi);
+    hr = IMLangFontLink2_GetScriptFontInfo(font_link, sidAsciiLatin, SCRIPTCONTF_PROPORTIONAL_FONT, &nfonts, sfi);
     ok(hr == S_OK, "GetScriptFontInfo failed %u\n", GetLastError());
     ok(nfonts == 1, "got %u, expected 1\n", nfonts);
     ok(sfi[0].scripts != 0, "unexpected result\n");
     ok(sfi[0].wszFont[0], "unexpected result\n");
+}
+
+static void test_CodePageToScriptID(IMLangFontLink2 *font_link)
+{
+    HRESULT hr;
+    UINT i;
+    SCRIPT_ID sid;
+    static const struct
+    {
+        UINT cp;
+        SCRIPT_ID sid;
+        HRESULT hr;
+    }
+    cp_sid[] =
+    {
+        {874,  sidThai},
+        {932,  sidKana},
+        {936,  sidHan},
+        {949,  sidHangul},
+        {950,  sidBopomofo},
+        {1250, sidAsciiLatin},
+        {1251, sidCyrillic},
+        {1252, sidAsciiLatin},
+        {1253, sidGreek},
+        {1254, sidAsciiLatin},
+        {1255, sidHebrew},
+        {1256, sidArabic},
+        {1257, sidAsciiLatin},
+        {1258, sidAsciiLatin},
+        {CP_UNICODE, 0, E_FAIL}
+    };
+
+    for (i = 0; i < sizeof(cp_sid)/sizeof(cp_sid[0]); i++)
+    {
+        hr = IMLangFontLink2_CodePageToScriptID(font_link, cp_sid[i].cp, &sid);
+        ok(hr == cp_sid[i].hr, "%u CodePageToScriptID failed 0x%08x %u\n", i, hr, GetLastError());
+        if (SUCCEEDED(hr))
+        {
+            ok(sid == cp_sid[i].sid,
+               "%u got sid %u for codepage %u, expected %u\n", i, sid, cp_sid[i].cp, cp_sid[i].sid);
+        }
+    }
+}
+
+static void test_GetFontUnicodeRanges(IMLangFontLink2 *font_link)
+{
+    HRESULT hr;
+    UINT count;
+    HFONT hfont, old_hfont;
+    LOGFONTA lf;
+    HDC hdc;
+    UNICODERANGE *ur;
+
+    hdc = CreateCompatibleDC(0);
+    memset(&lf, 0, sizeof(lf));
+    lstrcpyA(lf.lfFaceName, "Arial");
+    hfont = CreateFontIndirectA(&lf);
+    old_hfont = SelectObject(hdc, hfont);
+
+    count = 0;
+    hr = IMLangFontLink2_GetFontUnicodeRanges(font_link, NULL, &count, NULL);
+    ok(hr == E_FAIL, "expected E_FAIL, got 0x%08x\n", hr);
+
+    hr = IMLangFontLink2_GetFontUnicodeRanges(font_link, hdc, NULL, NULL);
+    ok(hr == E_INVALIDARG, "expected E_FAIL, got 0x%08x\n", hr);
+
+    count = 0;
+    hr = IMLangFontLink2_GetFontUnicodeRanges(font_link, hdc, &count, NULL);
+    ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
+    ok(count, "expected count > 0\n");
+
+    ur = HeapAlloc(GetProcessHeap(), 0, sizeof(*ur) * count);
+
+    hr = IMLangFontLink2_GetFontUnicodeRanges(font_link, hdc, &count, ur);
+    ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
+
+    count--;
+    hr = IMLangFontLink2_GetFontUnicodeRanges(font_link, hdc, &count, ur);
+    ok(hr == S_OK, "expected S_OK, got 0x%08x\n", hr);
+
+    HeapFree(GetProcessHeap(), 0, ur);
+
+    SelectObject(hdc, old_hfont);
+    DeleteObject(hfont);
+    DeleteDC(hdc);
+}
+
+static void test_IsCodePageInstallable(IMultiLanguage2 *ml2)
+{
+    UINT i;
+    HRESULT hr;
+
+    SetLastError(0xdeadbeef);
+    lstrcmpW(NULL, NULL);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        /* This corruption leads (sometimes) to test failures in oleaut32 but also
+         * to the inability to use the Regional Settings.
+         * This only seems to be an issue with Win98 and IE6 (mlang version 6.0.2800.1106).
+         *
+         * A reboot restores the codepages again.
+         */
+        win_skip("IsCodePageInstallable could mess up the codepages on Win98\n");
+        return;
+    }
+
+    for (i = 0; i < 0xffff; i++)
+    {
+        hr = IMultiLanguage2_IsCodePageInstallable(ml2, i);
+
+        /* it would be better to use IMultiLanguage2_ValidateCodePageEx here but that brings
+         * up an installation dialog on some platforms, even when specifying CPIOD_PEEK.
+         */
+        if (IsValidCodePage(i))
+            ok(hr == S_OK, "code page %u is valid but not installable 0x%08x\n", i, hr);
+    }
 }
 
 START_TEST(mlang)
@@ -1930,6 +2048,8 @@ START_TEST(mlang)
     test_multibyte_to_unicode_translations(iML2);
     test_IMultiLanguage2_ConvertStringFromUnicode(iML2);
 
+    test_IsCodePageInstallable(iML2);
+
     IMultiLanguage2_Release(iML2);
 
 
@@ -1947,6 +2067,8 @@ START_TEST(mlang)
     if (ret != S_OK || !iMLFL2) return;
 
     test_GetScriptFontInfo(iMLFL2);
+    test_GetFontUnicodeRanges(iMLFL2);
+    test_CodePageToScriptID(iMLFL2);
     IMLangFontLink2_Release(iMLFL2);
 
     CoUninitialize();

@@ -22,15 +22,22 @@ C_SRCS = \
 	info.c \
 	memory.c \
 	source.c \
-	symbol.c \
 	stack.c \
+	symbol.c \
 	tgt_active.c \
 	tgt_minidump.c \
 	tgt_module.c \
 	types.c \
 	winedbg.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	rsrc_De.rc \
+	rsrc_En.rc \
+	rsrc_Fr.rc \
+	rsrc_Ko.rc \
+	rsrc_Lt.rc \
+	rsrc_Nl.rc \
+	rsrc_Ru.rc
 
 LEX_SRCS   = debug.l
 BISON_SRCS = dbg.y

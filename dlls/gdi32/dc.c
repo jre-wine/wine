@@ -252,6 +252,7 @@ void DC_InitDC( DC* dc )
     SelectObject( dc->hSelf, dc->hBrush );
     SelectObject( dc->hSelf, dc->hFont );
     CLIPPING_UpdateGCRegion( dc );
+    SetVirtualResolution( dc->hSelf, 0, 0, 0, 0 );
 }
 
 
@@ -283,6 +284,20 @@ static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
     return TRUE;
 }
 
+/* Construct a transformation to do the window-to-viewport conversion */
+static void construct_window_to_viewport(DC *dc, XFORM *xform)
+{
+    double scaleX, scaleY;
+    scaleX = (double)dc->vportExtX / (double)dc->wndExtX;
+    scaleY = (double)dc->vportExtY / (double)dc->wndExtY;
+
+    xform->eM11 = scaleX;
+    xform->eM12 = 0.0;
+    xform->eM21 = 0.0;
+    xform->eM22 = scaleY;
+    xform->eDx  = (double)dc->vportOrgX - scaleX * (double)dc->wndOrgX;
+    xform->eDy  = (double)dc->vportOrgY - scaleY * (double)dc->wndOrgY;
+}
 
 /***********************************************************************
  *           DC_UpdateXforms
@@ -297,19 +312,8 @@ static BOOL DC_InvertXform( const XFORM *xformSrc, XFORM *xformDest )
 void DC_UpdateXforms( DC *dc )
 {
     XFORM xformWnd2Vport, oldworld2vport;
-    double scaleX, scaleY;
 
-    /* Construct a transformation to do the window-to-viewport conversion */
-    scaleX = (double)dc->vportExtX / (double)dc->wndExtX;
-    scaleY = (double)dc->vportExtY / (double)dc->wndExtY;
-    xformWnd2Vport.eM11 = scaleX;
-    xformWnd2Vport.eM12 = 0.0;
-    xformWnd2Vport.eM21 = 0.0;
-    xformWnd2Vport.eM22 = scaleY;
-    xformWnd2Vport.eDx  = (double)dc->vportOrgX -
-        scaleX * (double)dc->wndOrgX;
-    xformWnd2Vport.eDy  = (double)dc->vportOrgY -
-        scaleY * (double)dc->wndOrgY;
+    construct_window_to_viewport(dc, &xformWnd2Vport);
 
     oldworld2vport = dc->xformWorld2Vport;
     /* Combine with the world transformation */
@@ -386,6 +390,8 @@ INT save_dc_state( HDC hdc )
     newdc->vportOrgY        = dc->vportOrgY;
     newdc->vportExtX        = dc->vportExtX;
     newdc->vportExtY        = dc->vportExtY;
+    newdc->virtual_res      = dc->virtual_res;
+    newdc->virtual_size     = dc->virtual_size;
     newdc->BoundsRect       = dc->BoundsRect;
     newdc->gdiFont          = dc->gdiFont;
 
@@ -524,6 +530,8 @@ BOOL restore_dc_state( HDC hdc, INT level )
     dc->vportOrgY        = dcs->vportOrgY;
     dc->vportExtX        = dcs->vportExtX;
     dc->vportExtY        = dcs->vportExtY;
+    dc->virtual_res      = dcs->virtual_res;
+    dc->virtual_size     = dcs->virtual_size;
 
     if (dcs->hClipRgn)
     {
@@ -1159,12 +1167,52 @@ BOOL WINAPI GetWorldTransform( HDC hdc, LPXFORM xform )
 
 /***********************************************************************
  *           GetTransform    (GDI32.@)
+ *
+ * Undocumented
+ *
+ * Returns one of the co-ordinate space transforms
+ *
+ * PARAMS
+ *    hdc   [I] Device context.
+ *    which [I] Which xform to return:
+ *                  0x203 World -> Page transform (that set by SetWorldTransform).
+ *                  0x304 Page -> Device transform (the mapping mode transform).
+ *                  0x204 World -> Device transform (the combination of the above two).
+ *                  0x402 Device -> World transform (the inversion of the above).
+ *    xform [O] The xform.
+ *
  */
-BOOL WINAPI GetTransform( HDC hdc, DWORD unknown, LPXFORM xform )
+BOOL WINAPI GetTransform( HDC hdc, DWORD which, XFORM *xform )
 {
-    if (unknown == 0x0203) return GetWorldTransform( hdc, xform );
-    FIXME("stub: don't know what to do for code %x\n", unknown );
-    return FALSE;
+    BOOL ret = TRUE;
+    DC *dc = get_dc_ptr( hdc );
+    if (!dc) return FALSE;
+
+    switch(which)
+    {
+    case 0x203:
+        *xform = dc->xformWorld2Wnd;
+        break;
+
+    case 0x304:
+        construct_window_to_viewport(dc, xform);
+        break;
+
+    case 0x204:
+        *xform = dc->xformWorld2Vport;
+        break;
+
+    case 0x402:
+        *xform = dc->xformVport2World;
+        break;
+
+    default:
+        FIXME("Unknown code %x\n", which);
+        ret = FALSE;
+    }
+
+    release_dc_ptr( dc );
+    return ret;
 }
 
 
@@ -2101,17 +2149,6 @@ BOOL WINAPI CancelDC(HDC hdc)
 {
     FIXME("stub\n");
     return TRUE;
-}
-
-/***********************************************************************
- *           SetVirtualResolution   (GDI32.@)
- *
- * Undocumented on msdn.  Called when PowerPoint XP saves a file.
- */
-DWORD WINAPI SetVirtualResolution(HDC hdc, DWORD dw2, DWORD dw3, DWORD dw4, DWORD dw5)
-{
-    FIXME("(%p %08x %08x %08x %08x): stub!\n", hdc, dw2, dw3, dw4, dw5);
-    return FALSE;
 }
 
 /*******************************************************************

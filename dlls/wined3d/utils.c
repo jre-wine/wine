@@ -353,7 +353,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_RGBA,                GL_UNSIGNED_INT_8_8_8_8_REV,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
-    {WINED3DFMT_R16G16_UNORM,       GL_RGB16_EXT,                     GL_RGB16_EXT,                           0,
+    {WINED3DFMT_R16G16_UNORM,       GL_RGB16_EXT,                     GL_RGB16_EXT,                           GL_RGBA16_EXT,
             GL_RGB,                 GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
@@ -557,32 +557,131 @@ static BOOL init_format_compression_info(WineD3D_GL_Info *gl_info)
 
 #define GLINFO_LOCATION (*gl_info)
 
-static BOOL check_fbo_compat(const WineD3D_GL_Info *gl_info, GLint internal_format, GLenum format, GLenum type)
+/* Context activation is done by the caller. */
+static void check_fbo_compat(const WineD3D_GL_Info *gl_info, struct GlPixelFormatDesc *format_desc)
 {
+    /* Check if the default internal format is supported as a frame buffer
+     * target, otherwise fall back to the render target internal.
+     *
+     * Try to stick to the standard format if possible, this limits precision differences. */
     GLenum status;
     GLuint tex;
 
     ENTER_GL();
 
     while(glGetError());
+    glDisable(GL_BLEND);
+
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, internal_format, 16, 16, 0, format, type, NULL);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, format_desc->glInternal, 16, 16, 0,
+            format_desc->glFormat, format_desc->glType, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, tex, 0));
 
     status = GL_EXTCALL(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
-    glDeleteTextures(1, &tex);
-
     checkGLcall("Framebuffer format check");
 
-    LEAVE_GL();
+    if (status == GL_FRAMEBUFFER_COMPLETE_EXT)
+    {
+        TRACE("Format %s is supported as FBO color attachment\n", debug_d3dformat(format_desc->format));
+        format_desc->Flags |= WINED3DFMT_FLAG_FBO_ATTACHABLE;
+        format_desc->rtInternal = format_desc->glInternal;
+    }
+    else
+    {
+        if (!format_desc->rtInternal)
+        {
+            if (format_desc->Flags & WINED3DFMT_FLAG_RENDERTARGET)
+            {
+                FIXME("Format %s with rendertarget flag is not supported as FBO color attachment,"
+                        " and no fallback specified.\n", debug_d3dformat(format_desc->format));
+                format_desc->Flags &= ~WINED3DFMT_FLAG_RENDERTARGET;
+            }
+            else
+            {
+                TRACE("Format %s is not supported as FBO color attachment.\n", debug_d3dformat(format_desc->format));
+            }
+            format_desc->rtInternal = format_desc->glInternal;
+        }
+        else
+        {
+            TRACE("Format %s is not supported as FBO color attachment, trying rtInternal format as fallback.\n",
+                    debug_d3dformat(format_desc->format));
 
-    return status == GL_FRAMEBUFFER_COMPLETE_EXT;
+            while(glGetError());
+
+            GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, 0, 0));
+
+            glTexImage2D(GL_TEXTURE_2D, 0, format_desc->rtInternal, 16, 16, 0,
+                    format_desc->glFormat, format_desc->glType, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+            GL_EXTCALL(glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, tex, 0));
+
+            status = GL_EXTCALL(glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT));
+            checkGLcall("Framebuffer format check");
+
+            if (status == GL_FRAMEBUFFER_COMPLETE_EXT)
+            {
+                TRACE("Format %s rtInternal format is supported as FBO color attachment\n",
+                        debug_d3dformat(format_desc->format));
+            }
+            else
+            {
+                FIXME("Format %s rtInternal format is not supported as FBO color attachment.\n",
+                        debug_d3dformat(format_desc->format));
+                format_desc->Flags &= ~WINED3DFMT_FLAG_RENDERTARGET;
+            }
+        }
+    }
+
+    if (status == GL_FRAMEBUFFER_COMPLETE_EXT && format_desc->Flags & WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING)
+    {
+        GLuint rb;
+
+        if (GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+        {
+            GL_EXTCALL(glGenRenderbuffersEXT(1, &rb));
+            GL_EXTCALL(glBindRenderbufferEXT(GL_RENDERBUFFER_EXT, rb));
+            GL_EXTCALL(glRenderbufferStorageEXT(GL_RENDERBUFFER_EXT, GL_DEPTH24_STENCIL8_EXT, 16, 16));
+            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT,
+                    GL_RENDERBUFFER_EXT, rb));
+            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_STENCIL_ATTACHMENT_EXT,
+                    GL_RENDERBUFFER_EXT, rb));
+            checkGLcall("RB attachment");
+        }
+
+        glEnable(GL_BLEND);
+        glClear(GL_COLOR_BUFFER_BIT);
+        if (glGetError() == GL_INVALID_FRAMEBUFFER_OPERATION_EXT)
+        {
+            while(glGetError());
+            TRACE("Format doesn't support post-pixelshader blending.\n");
+            format_desc->Flags &= ~WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING;
+        }
+
+        if (GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+        {
+            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT,
+                    GL_RENDERBUFFER_EXT, 0));
+            GL_EXTCALL(glFramebufferRenderbufferEXT(GL_FRAMEBUFFER_EXT, GL_STENCIL_ATTACHMENT_EXT,
+                    GL_RENDERBUFFER_EXT, 0));
+            GL_EXTCALL(glDeleteRenderbuffersEXT(1, &rb));
+            checkGLcall("RB cleanup");
+        }
+    }
+
+    glDeleteTextures(1, &tex);
+
+    LEAVE_GL();
 }
 
+/* Context activation is done by the caller. */
 static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
 {
     unsigned int i;
@@ -590,8 +689,12 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
+        ENTER_GL();
+
         GL_EXTCALL(glGenFramebuffersEXT(1, &fbo));
         GL_EXTCALL(glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo));
+
+        LEAVE_GL();
     }
 
     for (i = 0; i < sizeof(formats) / sizeof(*formats); ++i)
@@ -617,39 +720,7 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
         if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
         {
             TRACE("Checking if format %s is supported as FBO color attachment...\n", debug_d3dformat(desc->format));
-
-            /* Check if the default internal format is supported as a frame buffer target, otherwise
-             * fall back to the render target internal.
-             *
-             * Try to stick to the standard format if possible, this limits precision differences. */
-            if (check_fbo_compat(gl_info, desc->glInternal, desc->glFormat, desc->glType))
-            {
-                TRACE("Format %s is supported as FBO color attachment\n", debug_d3dformat(desc->format));
-                desc->Flags |= WINED3DFMT_FLAG_FBO_ATTACHABLE;
-                desc->rtInternal = desc->glInternal;
-            }
-            else
-            {
-                if (!desc->rtInternal)
-                {
-                    if (desc->Flags & WINED3DFMT_FLAG_RENDERTARGET)
-                    {
-                        FIXME("Format %s with rendertarget flag is not supported as FBO color attachment,"
-                                " and no fallback specified.\n", debug_d3dformat(desc->format));
-                        desc->Flags &= ~WINED3DFMT_FLAG_RENDERTARGET;
-                    }
-                    else
-                    {
-                        TRACE("Format %s is not supported as FBO color attachment.\n", debug_d3dformat(desc->format));
-                    }
-                    desc->rtInternal = desc->glInternal;
-                }
-                else
-                {
-                    TRACE("Format %s is not supported as FBO color attachment, using rtInternal format as fallback.\n",
-                            debug_d3dformat(desc->format));
-                }
-            }
+            check_fbo_compat(gl_info, desc);
         }
         else
         {
@@ -659,7 +730,11 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
+        ENTER_GL();
+
         GL_EXTCALL(glDeleteFramebuffersEXT(1, &fbo));
+
+        LEAVE_GL();
     }
 }
 
@@ -856,6 +931,7 @@ BOOL initPixelFormatsNoGL(WineD3D_GL_Info *gl_info)
     return TRUE;
 }
 
+/* Context activation is done by the caller. */
 BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
 {
     if (!init_format_base_info(gl_info)) return FALSE;
@@ -2091,6 +2167,7 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
     unsigned int i;
     DWORD ttff;
     DWORD cop, aop, carg0, carg1, carg2, aarg0, aarg1, aarg2;
+    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
 
     for(i = 0; i < GL_LIMITS(texture_stages); i++) {
         IWineD3DBaseTextureImpl *texture;
@@ -2144,8 +2221,7 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
         carg2 = (args[cop] & ARG2) ? stateblock->textureState[i][WINED3DTSS_COLORARG2] : ARG_UNUSED;
         carg0 = (args[cop] & ARG0) ? stateblock->textureState[i][WINED3DTSS_COLORARG0] : ARG_UNUSED;
 
-        if(is_invalid_op(stateblock->wineD3DDevice, i, cop,
-                         carg1, carg2, carg0)) {
+        if(is_invalid_op(device, i, cop, carg1, carg2, carg0)) {
             carg0 = ARG_UNUSED;
             carg2 = ARG_UNUSED;
             carg1 = WINED3DTA_CURRENT;
@@ -2204,8 +2280,7 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
             }
         }
 
-        if(is_invalid_op(stateblock->wineD3DDevice, i, aop,
-           aarg1, aarg2, aarg0)) {
+        if(is_invalid_op(device, i, aop, aarg1, aarg2, aarg0)) {
                aarg0 = ARG_UNUSED;
                aarg2 = ARG_UNUSED;
                aarg1 = WINED3DTA_CURRENT;
@@ -2283,6 +2358,14 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
         settings->sRGB_write = 1;
     } else {
         settings->sRGB_write = 0;
+    }
+    if(device->vs_clipping || !use_vs(stateblock)) {
+        /* No need to emulate clipplanes if GL supports native vertex shader clipping or if
+         * the fixed function vertex pipeline is used(which always supports clipplanes)
+         */
+        settings->emul_clipplanes = 0;
+    } else {
+        settings->emul_clipplanes = 1;
     }
 }
 #undef GLINFO_LOCATION

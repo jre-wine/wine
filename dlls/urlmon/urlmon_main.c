@@ -139,6 +139,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
             FreeLibrary(hCabinet);
         hCabinet = NULL;
         init_session(FALSE);
+        free_session();
         free_tls_list();
         URLMON_hInstance = 0;
 	break;
@@ -359,42 +360,6 @@ HRESULT WINAPI DllRegisterServerEx(void)
     FIXME("(void): stub\n");
 
     return E_FAIL;
-}
-
-/**************************************************************************
- *                 UrlMkSetSessionOption (URLMON.@)
- */
-HRESULT WINAPI UrlMkSetSessionOption(DWORD dwOption, LPVOID pBuffer, DWORD dwBufferLength,
- 					DWORD Reserved)
-{
-    FIXME("(%#x, %p, %#x): stub\n", dwOption, pBuffer, dwBufferLength);
-
-    return S_OK;
-}
-
-static const CHAR Agent[] = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)";
-
-/**************************************************************************
- *                 ObtainUserAgentString (URLMON.@)
- */
-HRESULT WINAPI ObtainUserAgentString(DWORD dwOption, LPSTR pcszUAOut, DWORD *cbSize)
-{
-    FIXME("(%d, %p, %p): stub\n", dwOption, pcszUAOut, cbSize);
-
-    if (pcszUAOut == NULL || cbSize == NULL)
-        return E_INVALIDARG;
-
-    if (*cbSize < sizeof(Agent))
-    {
-        *cbSize = sizeof(Agent);
-        return E_OUTOFMEMORY;
-    }
-
-    if (sizeof(Agent) < *cbSize)
-        *cbSize = sizeof(Agent);
-    lstrcpynA(pcszUAOut, Agent, *cbSize);
-
-    return S_OK;
 }
 
 /**************************************************************************

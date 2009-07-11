@@ -1,5 +1,6 @@
 /*
  * Copyright 2005-2006 Jacek Caban for CodeWeavers
+ * Copyright 2009 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -281,7 +282,75 @@ static void test_polices(void)
     IInternetZoneManager_Release(zonemgr);
 }
 
-static void test_ZoneManager(void)
+static void test_CreateZoneEnumerator(void)
+{
+    IInternetZoneManager *zonemgr = NULL;
+    HRESULT hr;
+    DWORD dwEnum;
+    DWORD dwEnum2;
+    DWORD dwCount;
+    DWORD dwCount2;
+
+    hr = CoInternetCreateZoneManager(NULL, &zonemgr, 0);
+    ok(hr == S_OK, "CoInternetCreateZoneManager result: 0x%x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    dwEnum=0xdeadbeef;
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum, NULL, 0);
+    ok((hr == E_INVALIDARG) && (dwEnum == 0xdeadbeef),
+        "got 0x%x with 0x%x (expected E_INVALIDARG with 0xdeadbeef)\n", hr, dwEnum);
+
+    dwCount=0xdeadbeef;
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, NULL, &dwCount, 0);
+    ok((hr == E_INVALIDARG) && (dwCount == 0xdeadbeef),
+        "got 0x%x and 0x%x (expected E_INVALIDARG and 0xdeadbeef)\n", hr, dwCount);
+
+    dwEnum=0xdeadbeef;
+    dwCount=0xdeadbeef;
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum, &dwCount, 0xffffffff);
+    ok((hr == E_INVALIDARG) && (dwEnum == 0xdeadbeef) && (dwCount == 0xdeadbeef),
+        "got 0x%x with 0x%x and 0x%x (expected E_INVALIDARG with 0xdeadbeef and 0xdeadbeef)\n",
+        hr, dwEnum, dwCount);
+
+    dwEnum=0xdeadbeef;
+    dwCount=0xdeadbeef;
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum, &dwCount, 1);
+    ok((hr == E_INVALIDARG) && (dwEnum == 0xdeadbeef) && (dwCount == 0xdeadbeef),
+        "got 0x%x with 0x%x and 0x%x (expected E_INVALIDARG with 0xdeadbeef and 0xdeadbeef)\n",
+        hr, dwEnum, dwCount);
+
+    dwEnum=0xdeadbeef;
+    dwCount=0xdeadbeef;
+    /* Normal use */
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum, &dwCount, 0);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+
+    if (SUCCEEDED(hr)) {
+        dwEnum2=0xdeadbeef;
+        dwCount2=0xdeadbeef;
+        hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum2, &dwCount2, 0);
+        ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+        if (SUCCEEDED(hr)) {
+            /* native urlmon has an incrementing counter for dwEnum */
+            hr = IInternetZoneManager_DestroyZoneEnumerator(zonemgr, dwEnum2);
+            ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+        }
+
+        hr = IInternetZoneManager_DestroyZoneEnumerator(zonemgr, dwEnum);
+        ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+
+        /* Destroy the Enumerator twice is detected and handled in native urlmon */
+        hr = IInternetZoneManager_DestroyZoneEnumerator(zonemgr, dwEnum);
+        ok((hr == E_INVALIDARG), "got 0x%x (expected E_INVALIDARG)\n", hr);
+    }
+
+    /* ::Release succeed also, when a ::DestroyZoneEnumerator is missing */
+    hr = IInternetZoneManager_Release(zonemgr);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+}
+
+static void test_GetZoneActionPolicy(void)
 {
     IInternetZoneManager *zonemgr = NULL;
     BYTE buf[32];
@@ -321,6 +390,108 @@ static void test_ZoneManager(void)
     IInternetZoneManager_Release(zonemgr);
 }
 
+static void test_GetZoneAt(void)
+{
+    IInternetZoneManager *zonemgr = NULL;
+    HRESULT hr;
+    DWORD dwEnum;
+    DWORD dwCount;
+    DWORD dwZone;
+    DWORD i;
+
+    hr = CoInternetCreateZoneManager(NULL, &zonemgr, 0);
+    ok(hr == S_OK, "CoInternetCreateZoneManager result: 0x%x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    hr = IInternetZoneManager_CreateZoneEnumerator(zonemgr, &dwEnum, &dwCount, 0);
+    if (FAILED(hr))
+        goto cleanup;
+
+    if (0) {
+        /* this crashes with native urlmon */
+        hr = IInternetZoneManager_GetZoneAt(zonemgr, dwEnum, 0, NULL);
+    }
+
+    dwZone = 0xdeadbeef;
+    hr = IInternetZoneManager_GetZoneAt(zonemgr, 0xdeadbeef, 0, &dwZone);
+    ok(hr == E_INVALIDARG,
+        "got 0x%x with 0x%x (expected E_INVALIDARG)\n", hr, dwZone);
+
+    for (i = 0; i < dwCount; i++)
+    {
+        dwZone = 0xdeadbeef;
+        hr = IInternetZoneManager_GetZoneAt(zonemgr, dwEnum, i, &dwZone);
+        ok(hr == S_OK, "#%d: got x%x with %d (expected S_OK)\n", i, hr, dwZone);
+    }
+
+    dwZone = 0xdeadbeef;
+    /* MSDN (index .. must be .. less than or equal to) is wrong */
+    hr = IInternetZoneManager_GetZoneAt(zonemgr, dwEnum, dwCount, &dwZone);
+    ok(hr == E_INVALIDARG,
+        "got 0x%x with 0x%x (expected E_INVALIDARG)\n", hr, dwZone);
+
+    hr = IInternetZoneManager_DestroyZoneEnumerator(zonemgr, dwEnum);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+
+cleanup:
+    hr = IInternetZoneManager_Release(zonemgr);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+}
+
+static void test_GetZoneAttributes(void)
+{
+    IInternetZoneManager *zonemgr = NULL;
+    CHAR buffer [sizeof(ZONEATTRIBUTES) + 32];
+    ZONEATTRIBUTES* pZA = (ZONEATTRIBUTES*) buffer;
+    HRESULT hr;
+    DWORD i;
+
+    hr = CoInternetCreateZoneManager(NULL, &zonemgr, 0);
+    ok(hr == S_OK, "CoInternetCreateZoneManager result: 0x%x\n", hr);
+    if (FAILED(hr))
+        return;
+
+    /* native urlmon has Zone "0" upto Zone "4" since IE4 */
+    for (i = 0; i < 5; i++) {
+        memset(buffer, -1, sizeof(buffer));
+        hr = IInternetZoneManager_GetZoneAttributes(zonemgr, i, pZA);
+        ok(hr == S_OK, "#%d: got 0x%x (expected S_OK)\n", i, hr);
+    }
+
+    /* IE8 no longer set cbSize */
+    memset(buffer, -1, sizeof(buffer));
+    pZA->cbSize = 0;
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, 0, pZA);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+    ok((pZA->cbSize == 0) || (pZA->cbSize == sizeof(ZONEATTRIBUTES)),
+        "got cbSize = %d (expected 0)\n", pZA->cbSize);
+
+    memset(buffer, -1, sizeof(buffer));
+    pZA->cbSize = 64;
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, 0, pZA);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+    ok((pZA->cbSize == 64) || (pZA->cbSize == sizeof(ZONEATTRIBUTES)),
+        "got cbSize = %d (expected 64)\n", pZA->cbSize);
+
+    memset(buffer, -1, sizeof(buffer));
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, 0, pZA);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+    ok((pZA->cbSize == 0xffffffff) || (pZA->cbSize == sizeof(ZONEATTRIBUTES)),
+        "got cbSize = 0x%x (expected 0xffffffff)\n", pZA->cbSize);
+
+    /* IE8 no longer fail on invalid zones */
+    memset(buffer, -1, sizeof(buffer));
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, 0xdeadbeef, pZA);
+    ok(hr == S_OK || (hr == E_FAIL),
+        "got 0x%x (expected S_OK or E_FAIL)\n", hr);
+
+    hr = IInternetZoneManager_GetZoneAttributes(zonemgr, 0, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%x (expected E_INVALIDARG)\n", hr);
+
+    hr = IInternetZoneManager_Release(zonemgr);
+    ok(hr == S_OK, "got 0x%x (expected S_OK)\n", hr);
+}
 
 
 START_TEST(sec_mgr)
@@ -329,7 +500,10 @@ START_TEST(sec_mgr)
 
     test_SecurityManager();
     test_polices();
-    test_ZoneManager();
+    test_CreateZoneEnumerator();
+    test_GetZoneActionPolicy();
+    test_GetZoneAt();
+    test_GetZoneAttributes();
 
     OleUninitialize();
 }

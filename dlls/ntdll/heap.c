@@ -91,6 +91,8 @@ typedef struct
 #define LARGE_ALIGNMENT        16  /* large blocks have stricter alignment */
 #define ARENA_OFFSET           (ALIGNMENT - sizeof(ARENA_INUSE))
 
+C_ASSERT( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
+
 #define ROUND_SIZE(size)       ((((size) + ALIGNMENT - 1) & ~(ALIGNMENT-1)) + ARENA_OFFSET)
 
 #define QUIET                  1           /* Suppress messages  */
@@ -123,6 +125,7 @@ typedef struct tagSUBHEAP
 {
     void               *base;       /* Base address of the sub-heap memory block */
     SIZE_T              size;       /* Size of the whole sub-heap */
+    SIZE_T              min_commit; /* Minimum committed size */
     SIZE_T              commitSize; /* Committed size of the sub-heap */
     struct list         entry;      /* Entry in sub-heap list */
     struct tagHEAP     *heap;       /* Main heap structure */
@@ -144,7 +147,7 @@ typedef struct tagHEAP
     SIZE_T           grow_size;     /* Size of next subheap for growing heap */
     DWORD            magic;         /* Magic number */
     RTL_CRITICAL_SECTION critSection; /* Critical section for serialization */
-    FREE_LIST_ENTRY  freeList[HEAP_NB_FREE_LISTS] DECLSPEC_ALIGN(8);  /* Free lists */
+    FREE_LIST_ENTRY *freeList;      /* Free lists */
 } HEAP;
 
 #define HEAP_MAGIC       ((DWORD)('H' | ('E'<<8) | ('A'<<16) | ('P'<<24)))
@@ -488,6 +491,7 @@ static inline BOOL HEAP_Decommit( SUBHEAP *subheap, void *ptr )
 
     /* round to next block and add one full block */
     size = ((size + COMMIT_MASK) & ~COMMIT_MASK) + COMMIT_MASK + 1;
+    size = max( size, subheap->min_commit );
     if (size >= subheap->commitSize) return TRUE;
     decommit_size = subheap->commitSize - size;
     addr = (char *)subheap->base + size;
@@ -643,7 +647,7 @@ static void *allocate_large_block( HEAP *heap, DWORD flags, SIZE_T size )
     LPVOID address = NULL;
 
     if (block_size < size) return NULL;  /* overflow */
-    if (NtAllocateVirtualMemory( NtCurrentProcess(), &address, 0,
+    if (NtAllocateVirtualMemory( NtCurrentProcess(), &address, 5,
                                  &block_size, MEM_COMMIT, get_protection_type( flags ) ))
     {
         WARN("Could not allocate block for %08lx bytes\n", size );
@@ -797,6 +801,7 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         subheap->base       = address;
         subheap->heap       = heap;
         subheap->size       = totalSize;
+        subheap->min_commit = 0x10000;
         subheap->commitSize = commitSize;
         subheap->magic      = SUBHEAP_MAGIC;
         subheap->headerSize = ROUND_SIZE( sizeof(SUBHEAP) );
@@ -817,6 +822,7 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
         subheap->base       = address;
         subheap->heap       = heap;
         subheap->size       = totalSize;
+        subheap->min_commit = commitSize;
         subheap->commitSize = commitSize;
         subheap->magic      = SUBHEAP_MAGIC;
         subheap->headerSize = ROUND_SIZE( sizeof(HEAP) );
@@ -824,6 +830,8 @@ static SUBHEAP *HEAP_CreateSubHeap( HEAP *heap, LPVOID address, DWORD flags,
 
         /* Build the free lists */
 
+        heap->freeList = (FREE_LIST_ENTRY *)((char *)heap + subheap->headerSize);
+        subheap->headerSize += HEAP_NB_FREE_LISTS * sizeof(FREE_LIST_ENTRY);
         list_init( &heap->freeList[0].arena.entry );
         for (i = 0, pEntry = heap->freeList; i < HEAP_NB_FREE_LISTS; i++, pEntry++)
         {
@@ -919,11 +927,18 @@ static ARENA_FREE *HEAP_FindFreeBlock( HEAP *heap, SIZE_T size,
     total_size = size + ROUND_SIZE(sizeof(SUBHEAP)) + sizeof(ARENA_INUSE) + sizeof(ARENA_FREE);
     if (total_size < size) return NULL;  /* overflow */
 
-    if (!(subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
-                                        max( heap->grow_size, total_size ) )))
-        return NULL;
-
-    if (heap->grow_size < 128 * 1024 * 1024) heap->grow_size *= 2;
+    if ((subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
+                                       max( heap->grow_size, total_size ) )))
+    {
+        if (heap->grow_size < 128 * 1024 * 1024) heap->grow_size *= 2;
+    }
+    else while (!subheap)  /* shrink the grow size again if we are running out of space */
+    {
+        if (heap->grow_size <= total_size || heap->grow_size <= 4 * 1024 * 1024) return NULL;
+        heap->grow_size /= 2;
+        subheap = HEAP_CreateSubHeap( heap, NULL, heap->flags, total_size,
+                                      max( heap->grow_size, total_size ) );
+    }
 
     TRACE("created new sub-heap %p of %08lx bytes for heap %p\n",
           subheap, subheap->size, heap );
@@ -1261,9 +1276,6 @@ HANDLE WINAPI RtlCreateHeap( ULONG flags, PVOID addr, SIZE_T totalSize, SIZE_T c
     {
         processHeap = subheap->heap;  /* assume the first heap we create is the process main heap */
         list_init( &processHeap->entry );
-        /* make sure structure alignment is correct */
-        assert( (ULONG_PTR)processHeap->freeList % ALIGNMENT == ARENA_OFFSET );
-        assert( sizeof(ARENA_LARGE) % LARGE_ALIGNMENT == 0 );
     }
 
     return subheap->heap;

@@ -484,6 +484,8 @@ static const WCHAR PROGRESS_CLASSW[] = { 'm','s','c','t','l','s','_',
 #define PBM_GETPOS          (WM_USER+8)
 #define PBM_SETBARCOLOR     (WM_USER+9)
 #define PBM_SETMARQUEE      (WM_USER+10)
+#define PBM_GETBKCOLOR      (WM_USER+14)
+#define PBM_GETBARCOLOR     (WM_USER+15)
 #define PBM_SETBKCOLOR      CCM_SETBKCOLOR
 
 #define PBS_SMOOTH          0x01
@@ -1986,6 +1988,9 @@ typedef struct tagREBARBANDINFOA
     UINT    cxIdeal;
     LPARAM    lParam;
     UINT    cxHeader;
+    /* _WIN32_WINNT >= 0x0600 */
+    RECT    rcChevronLocation;
+    UINT    uChevronState;
 } REBARBANDINFOA, *LPREBARBANDINFOA;
 
 typedef REBARBANDINFOA const *LPCREBARBANDINFOA;
@@ -2012,6 +2017,9 @@ typedef struct tagREBARBANDINFOW
     UINT    cxIdeal;
     LPARAM    lParam;
     UINT    cxHeader;
+    /* _WIN32_WINNT >= 0x0600 */
+    RECT    rcChevronLocation;
+    UINT    uChevronState;
 } REBARBANDINFOW, *LPREBARBANDINFOW;
 
 typedef REBARBANDINFOW const *LPCREBARBANDINFOW;
@@ -2023,6 +2031,9 @@ typedef REBARBANDINFOW const *LPCREBARBANDINFOW;
 #define REBARBANDINFOA_V3_SIZE CCSIZEOF_STRUCT(REBARBANDINFOA, wID)
 #define REBARBANDINFOW_V3_SIZE CCSIZEOF_STRUCT(REBARBANDINFOW, wID)
 #define REBARBANDINFO_V3_SIZE  CCSIZEOF_STRUCT(WINELIB_NAME_AW(REBARBANDINFO), wID)
+#define REBARBANDINFOA_V6_SIZE CCSIZEOF_STRUCT(REBARBANDINFOA, cxHeader)
+#define REBARBANDINFOW_V6_SIZE CCSIZEOF_STRUCT(REBARBANDINFOW, cxHeader)
+#define REBARBANDINFO_V6_SIZE  CCSIZEOF_STRUCT(WINELIB_NAME_AW(REBARBANDINFO), cxHeader)
 
 typedef struct tagNMREBARCHILDSIZE
 {
@@ -3252,6 +3263,7 @@ static const WCHAR WC_LISTVIEWW[] = { 'S','y','s',
 #define LVM_CANCELEDITLABEL     (LVM_FIRST + 179)
 #define LVM_MAPINDEXTOID        (LVM_FIRST + 180)
 #define LVM_MAPIDTOINDEX        (LVM_FIRST + 181)
+#define LVM_ISITEMVISIBLE       (LVM_FIRST + 182)
 
 #define LVN_FIRST               (0U-100U)
 #define LVN_LAST                (0U-199U)

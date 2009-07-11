@@ -188,6 +188,7 @@ IMPORT_LIBS = \
 	riched20/libriched20.$(IMPLIBEXT) \
 	rpcrt4/librpcrt4.$(IMPLIBEXT) \
 	rsaenh/librsaenh.$(IMPLIBEXT) \
+	rtutils/librtutils.$(IMPLIBEXT) \
 	secur32/libsecur32.$(IMPLIBEXT) \
 	sensapi/libsensapi.$(IMPLIBEXT) \
 	serialui/libserialui.$(IMPLIBEXT) \
@@ -212,6 +213,7 @@ IMPORT_LIBS = \
 	uxtheme/libuxtheme.$(IMPLIBEXT) \
 	vdmdbg/libvdmdbg.$(IMPLIBEXT) \
 	version/libversion.$(IMPLIBEXT) \
+	windowscodecs/libwindowscodecs.$(IMPLIBEXT) \
 	wined3d/libwined3d.$(IMPLIBEXT) \
 	winhttp/libwinhttp.$(IMPLIBEXT) \
 	wininet/libwininet.$(IMPLIBEXT) \
@@ -331,6 +333,7 @@ CROSS_IMPLIBS = \
 	riched20/libriched20.a \
 	rpcrt4/librpcrt4.a \
 	rsaenh/librsaenh.a \
+	rtutils/librtutils.a \
 	secur32/libsecur32.a \
 	sensapi/libsensapi.a \
 	serialui/libserialui.a \
@@ -355,6 +358,7 @@ CROSS_IMPLIBS = \
 	uxtheme/libuxtheme.a \
 	vdmdbg/libvdmdbg.a \
 	version/libversion.a \
+	windowscodecs/libwindowscodecs.a \
 	wined3d/libwined3d.a \
 	winhttp/libwinhttp.a \
 	wininet/libwininet.a \
@@ -680,6 +684,9 @@ rpcrt4/librpcrt4.def rpcrt4/librpcrt4.a: rpcrt4/rpcrt4.spec $(WINEBUILD)
 rsaenh/librsaenh.def rsaenh/librsaenh.a: rsaenh/rsaenh.spec $(WINEBUILD)
 	@cd rsaenh && $(MAKE) `basename $@`
 
+rtutils/librtutils.def rtutils/librtutils.a: rtutils/rtutils.spec $(WINEBUILD)
+	@cd rtutils && $(MAKE) `basename $@`
+
 secur32/libsecur32.def secur32/libsecur32.a: secur32/secur32.spec $(WINEBUILD)
 	@cd secur32 && $(MAKE) `basename $@`
 
@@ -751,6 +758,9 @@ vdmdbg/libvdmdbg.def vdmdbg/libvdmdbg.a: vdmdbg/vdmdbg.spec $(WINEBUILD)
 
 version/libversion.def version/libversion.a: version/version.spec $(WINEBUILD)
 	@cd version && $(MAKE) `basename $@`
+
+windowscodecs/libwindowscodecs.def windowscodecs/libwindowscodecs.a: windowscodecs/windowscodecs.spec $(WINEBUILD)
+	@cd windowscodecs && $(MAKE) `basename $@`
 
 wined3d/libwined3d.def wined3d/libwined3d.a: wined3d/wined3d.spec $(WINEBUILD)
 	@cd wined3d && $(MAKE) `basename $@`

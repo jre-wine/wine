@@ -7,11 +7,28 @@ IMPORTLIB = msvfw32
 IMPORTS   = winmm version comctl32 user32 gdi32 advapi32 kernel32 ntdll
 
 C_SRCS = \
+	drawdib.c \
 	mciwnd.c \
-	msvideo_main.c \
-	drawdib.c
+	msvideo_main.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	msvfw32_Da.rc \
+	msvfw32_De.rc \
+	msvfw32_En.rc \
+	msvfw32_Es.rc \
+	msvfw32_Fr.rc \
+	msvfw32_Hu.rc \
+	msvfw32_Ko.rc \
+	msvfw32_Lt.rc \
+	msvfw32_Nl.rc \
+	msvfw32_No.rc \
+	msvfw32_Pl.rc \
+	msvfw32_Pt.rc \
+	msvfw32_Ru.rc \
+	msvfw32_Si.rc \
+	msvfw32_Sv.rc \
+	msvfw32_Tr.rc \
+	msvfw32_Zh.rc
 
 @MAKE_DLL_RULES@
 

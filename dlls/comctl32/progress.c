@@ -27,6 +27,16 @@
  * the specification mentioned above.
  * If you discover missing features, or bugs, please note them below.
  *
+ * TODO:
+ *
+ * Messages:
+ *    -- PBM_GETSTEP
+ *    -- PBM_SETSTATE
+ *    -- PBM_GETSTATE
+ *
+ * Styles:
+ *    -- PBS_SMOOTHREVERSE
+ *
  */
 
 #include <stdarg.h>
@@ -703,10 +713,16 @@ static LRESULT WINAPI ProgressWindowProc(HWND hwnd, UINT message,
 	InvalidateRect(hwnd, NULL, TRUE);
 	return 0;
 
+    case PBM_GETBARCOLOR:
+	return infoPtr->ColorBar;
+
     case PBM_SETBKCOLOR:
         infoPtr->ColorBk = (COLORREF)lParam;
 	InvalidateRect(hwnd, NULL, TRUE);
 	return 0;
+
+    case PBM_GETBKCOLOR:
+	return infoPtr->ColorBk;
 
     case PBM_SETMARQUEE:
 	if(wParam != 0)
