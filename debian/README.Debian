@@ -6,6 +6,7 @@ Wine is now split up into the following packages:
 wine            (metapackage, depends on everything you probably need)
 wine-bin        (core binaries and configuration)
 libwine         (core libraries)
+libwine-bin     (core services and utilities)
 libwine-print   (printing modules)
 libwine-sane    (scanner access module)
 libwine-gphoto2 (camera access module)

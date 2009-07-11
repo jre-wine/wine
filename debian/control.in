@@ -50,7 +50,7 @@ Description: Windows API implementation - standard suite
 
 Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
-Depends: ${shlibs:Depends}, x11-utils | xbase-clients (>= 4.0) | xcontrib
+Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib
 Suggests: libwine-print, libwine-gl
 Conflicts: binfmt-support (<< 1.1.2)
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.0-rc4-1), wine (<< 0.9.35)
@@ -96,7 +96,7 @@ Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
  This is still a work in progress and many applications may still not work.
  .
- This package provides the library that implements the windows API.
+ This package provides the library that implements the Windows API.
 
 Package: libwine-alsa
 Section: libs
@@ -107,6 +107,18 @@ Description: Windows API implementation - ALSA sound module
  This is still a work in progress and many applications may still not work.
  .
  This package contains an ALSA sound driver.
+
+Package: libwine-bin
+Section: libs
+Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Depends: ${shlibs:Depends}
+Replaces: wine-bin (<< 1.1.25-1)
+Description: Windows API implementation - system services
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package provides system services and utilities needed to use many
+ Windows applications.
 
 Package: libwine-capi
 Section: libs
