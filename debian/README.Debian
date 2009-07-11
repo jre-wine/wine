@@ -21,7 +21,6 @@ libwine-cms     (color management module)
 libwine-ldap    (LDAP module)
 libwine-dev     (Winelib development headers and tools)
 libwine-dbg     (debugging symbols)
-wine-utils      (extra binaries)
 wine-doc        (documentation in HTML and DocBook format)
 
 The reason for this split is that Wine has a lot of dependencies
