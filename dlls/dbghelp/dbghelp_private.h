@@ -338,6 +338,7 @@ struct module
     int                         sortlist_valid;
     unsigned                    num_sorttab;    /* number of symbols with addresses */
     unsigned                    num_symbols;
+    unsigned                    sorttab_size;
     struct symt_ht**            addr_sorttab;
     struct hash_table           ht_symbols;
     void                        (*loc_compute)(struct process* pcs,
@@ -558,7 +559,7 @@ extern struct symt_function*
                                       unsigned long addr, unsigned long size,
                                       struct symt* type);
 extern BOOL         symt_normalize_function(struct module* module, 
-                                            struct symt_function* func);
+                                            const struct symt_function* func);
 extern void         symt_add_func_line(struct module* module,
                                        struct symt_function* func, 
                                        unsigned source_idx, int line_num, 
@@ -576,7 +577,7 @@ extern struct symt_block*
                                          unsigned pc, unsigned len);
 extern struct symt_block*
                     symt_close_func_block(struct module* module, 
-                                          struct symt_function* func,
+                                          const struct symt_function* func,
                                           struct symt_block* block, unsigned pc);
 extern struct symt_hierarchy_point*
                     symt_add_function_point(struct module* module, 

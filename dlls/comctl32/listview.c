@@ -4120,6 +4120,45 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
     if (nSubItem && infoPtr->uView == LV_VIEW_DETAILS && (infoPtr->dwLvExStyle & LVS_EX_FULLROWSELECT))
 	nmlvcd.clrTextBk = CLR_NONE;
 
+    /* FIXME: temporary hack */
+    rcSelect.left = rcLabel.left;
+
+    /* draw the selection background, if we're drawing the main item */
+    if (nSubItem == 0)
+    {
+        /* in icon mode, the label rect is really what we want to draw the
+         * background for */
+        if (infoPtr->uView == LV_VIEW_ICON)
+	    rcSelect = rcLabel;
+
+	if (infoPtr->uView == LV_VIEW_DETAILS && (infoPtr->dwLvExStyle & LVS_EX_FULLROWSELECT))
+	{
+	    /* we have to update left focus bound too if item isn't in leftmost column
+	       and reduce right box bound */
+	    if (DPA_GetPtrCount(infoPtr->hdpaColumns) > 0)
+	    {
+		INT leftmost;
+
+	        if ((leftmost = SendMessageW(infoPtr->hwndHeader, HDM_ORDERTOINDEX, 0, 0)))
+	        {
+		    INT Originx = pos.x - LISTVIEW_GetColumnInfo(infoPtr, 0)->rcHeader.left;
+		    INT index = SendMessageW(infoPtr->hwndHeader, HDM_ORDERTOINDEX,
+				DPA_GetPtrCount(infoPtr->hdpaColumns) - 1, 0);
+
+		    rcBox.right   = LISTVIEW_GetColumnInfo(infoPtr, index)->rcHeader.right + Originx;
+		    rcSelect.left = LISTVIEW_GetColumnInfo(infoPtr, leftmost)->rcHeader.left + Originx;
+	        }
+	    }
+
+	    rcSelect.right = rcBox.right;
+	}
+
+	if (nmlvcd.clrTextBk != CLR_NONE)
+	    ExtTextOutW(hdc, rcSelect.left, rcSelect.top, ETO_OPAQUE, &rcSelect, NULL, 0, NULL);
+	/* store new focus rectangle */
+	if (infoPtr->nFocusedItem == nItem) infoPtr->rcFocus = rcSelect;
+    }
+
     /* state icons */
     if (infoPtr->himlState && STATEIMAGEINDEX(lvItem.state) && (nSubItem == 0))
     {
@@ -4144,26 +4183,6 @@ static BOOL LISTVIEW_DrawItem(LISTVIEW_INFO *infoPtr, HDC hdc, INT nItem, INT nS
 
     /* Don't bother painting item being edited */
     if (infoPtr->hwndEdit && nItem == infoPtr->nEditLabelItem && nSubItem == 0) goto postpaint;
-
-    /* FIXME: temporary hack */
-    rcSelect.left = rcLabel.left;
-
-    /* draw the selection background, if we're drawing the main item */
-    if (nSubItem == 0)
-    {
-        /* in icon mode, the label rect is really what we want to draw the
-         * background for */
-        if (infoPtr->uView == LV_VIEW_ICON)
-	    rcSelect = rcLabel;
-
-	if (infoPtr->uView == LV_VIEW_DETAILS && (infoPtr->dwLvExStyle & LVS_EX_FULLROWSELECT))
-	    rcSelect.right = rcBox.right;
-
-    	if (nmlvcd.clrTextBk != CLR_NONE) 
-            ExtTextOutW(hdc, rcSelect.left, rcSelect.top, ETO_OPAQUE, &rcSelect, 0, 0, 0);
-	/* store new focus rectangle */
-	if (infoPtr->nFocusedItem == nItem) infoPtr->rcFocus = rcSelect;
-    }
    
     /* figure out the text drawing flags */
     uFormat = (infoPtr->uView == LV_VIEW_ICON ? (lprcFocus ? LV_FL_DT_FLAGS : LV_ML_DT_FLAGS) : LV_SL_DT_FLAGS);
@@ -6814,6 +6833,14 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
         /* LVM_SUBITEMHITTEST checks left bound of possible client area */
         if (infoPtr->rcList.left > lpht->pt.x && Origin.x < lpht->pt.x)
 	    lpht->flags |= LVHT_TOLEFT;
+
+	if (lpht->pt.y < infoPtr->rcList.top && lpht->pt.y >= 0)
+	    opt.y = lpht->pt.y + infoPtr->rcList.top;
+	else
+	    opt.y = lpht->pt.y;
+
+	if (infoPtr->rcList.bottom < opt.y)
+	    lpht->flags |= LVHT_BELOW;
     }
     else
     {
@@ -6821,12 +6848,12 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
 	    lpht->flags |= LVHT_TOLEFT;
 	else if (infoPtr->rcList.right < lpht->pt.x)
 	    lpht->flags |= LVHT_TORIGHT;
+
+	if (infoPtr->rcList.top > lpht->pt.y)
+	    lpht->flags |= LVHT_ABOVE;
+	else if (infoPtr->rcList.bottom < lpht->pt.y)
+	    lpht->flags |= LVHT_BELOW;
     }
-    
-    if (infoPtr->rcList.top > lpht->pt.y)
-	lpht->flags |= LVHT_ABOVE;
-    else if (infoPtr->rcList.bottom < lpht->pt.y)
-	lpht->flags |= LVHT_BELOW;
 
     /* even if item is invalid try to find subitem */
     if (infoPtr->uView == LV_VIEW_DETAILS && subitem)
@@ -6883,8 +6910,12 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
     LISTVIEW_GetItemMetrics(infoPtr, &lvItem, &rcBox, NULL, &rcIcon, &rcState, &rcLabel);
     LISTVIEW_GetItemOrigin(infoPtr, iItem, &Position);
     opt.x = lpht->pt.x - Position.x - Origin.x;
-    opt.y = lpht->pt.y - Position.y - Origin.y;
-    
+
+    if (lpht->pt.y < infoPtr->rcList.top && lpht->pt.y >= 0)
+	opt.y = lpht->pt.y - Position.y - Origin.y + infoPtr->rcList.top;
+    else
+	opt.y = lpht->pt.y - Position.y - Origin.y;
+
     if (infoPtr->uView == LV_VIEW_DETAILS)
     {
 	rcBounds = rcBox;

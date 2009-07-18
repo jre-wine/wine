@@ -59,6 +59,7 @@ struct dump_context
     /* module information */
     struct dump_module*                 modules;
     unsigned                            num_modules;
+    unsigned                            alloc_modules;
     /* exception information */
     /* output information */
     MINIDUMP_TYPE                       type;
@@ -66,6 +67,7 @@ struct dump_context
     RVA                                 rva;
     struct dump_memory*                 mem;
     unsigned                            num_mem;
+    unsigned                            alloc_mem;
     /* callback information */
     MINIDUMP_CALLBACK_INFORMATION*      cb;
 };
@@ -253,23 +255,34 @@ static BOOL add_module(struct dump_context* dc, const WCHAR* name,
                        BOOL is_elf)
 {
     if (!dc->modules)
+    {
+        dc->alloc_modules = 32;
         dc->modules = HeapAlloc(GetProcessHeap(), 0,
-                                ++dc->num_modules * sizeof(*dc->modules));
+                                dc->alloc_modules * sizeof(*dc->modules));
+    }
     else
+    {
+        dc->alloc_modules *= 2;
         dc->modules = HeapReAlloc(GetProcessHeap(), 0, dc->modules,
-                                  ++dc->num_modules * sizeof(*dc->modules));
-    if (!dc->modules) return FALSE;
+                                  dc->alloc_modules * sizeof(*dc->modules));
+    }
+    if (!dc->modules)
+    {
+        dc->alloc_modules = dc->num_modules = 0;
+        return FALSE;
+    }
     if (is_elf ||
         !GetModuleFileNameExW(dc->hProcess, (HMODULE)base,
-                              dc->modules[dc->num_modules - 1].name,
-                              sizeof(dc->modules[dc->num_modules - 1].name) / sizeof(WCHAR)))
-        lstrcpynW(dc->modules[dc->num_modules - 1].name, name,
-                  sizeof(dc->modules[dc->num_modules - 1].name) / sizeof(WCHAR));
-    dc->modules[dc->num_modules - 1].base = base;
-    dc->modules[dc->num_modules - 1].size = size;
-    dc->modules[dc->num_modules - 1].timestamp = timestamp;
-    dc->modules[dc->num_modules - 1].checksum = checksum;
-    dc->modules[dc->num_modules - 1].is_elf = is_elf;
+                              dc->modules[dc->num_modules].name,
+                              sizeof(dc->modules[dc->num_modules].name) / sizeof(WCHAR)))
+        lstrcpynW(dc->modules[dc->num_modules].name, name,
+                  sizeof(dc->modules[dc->num_modules].name) / sizeof(WCHAR));
+    dc->modules[dc->num_modules].base = base;
+    dc->modules[dc->num_modules].size = size;
+    dc->modules[dc->num_modules].timestamp = timestamp;
+    dc->modules[dc->num_modules].checksum = checksum;
+    dc->modules[dc->num_modules].is_elf = is_elf;
+    dc->num_modules++;
 
     return TRUE;
 }
@@ -382,17 +395,24 @@ static void fetch_module_versioninfo(LPCWSTR filename, VS_FIXEDFILEINFO* ffi)
 static void add_memory_block(struct dump_context* dc, ULONG64 base, ULONG size, ULONG rva)
 {
     if (dc->mem)
-        dc->mem = HeapReAlloc(GetProcessHeap(), 0, dc->mem, 
-                              ++dc->num_mem * sizeof(*dc->mem));
+    {
+        dc->alloc_mem *= 2;
+        dc->mem = HeapReAlloc(GetProcessHeap(), 0, dc->mem,
+                              dc->alloc_mem * sizeof(*dc->mem));
+    }
     else
-        dc->mem = HeapAlloc(GetProcessHeap(), 0, ++dc->num_mem * sizeof(*dc->mem));
+    {
+        dc->alloc_mem = 32;
+        dc->mem = HeapAlloc(GetProcessHeap(), 0, dc->alloc_mem * sizeof(*dc->mem));
+    }
     if (dc->mem)
     {
-        dc->mem[dc->num_mem - 1].base = base;
-        dc->mem[dc->num_mem - 1].size = size;
-        dc->mem[dc->num_mem - 1].rva  = rva;
+        dc->mem[dc->num_mem].base = base;
+        dc->mem[dc->num_mem].size = size;
+        dc->mem[dc->num_mem].rva  = rva;
+        dc->num_mem++;
     }
-    else dc->num_mem = 0;
+    else dc->num_mem = dc->alloc_mem = 0;
 }
 
 /******************************************************************
@@ -414,7 +434,7 @@ static void writeat(struct dump_context* dc, RVA rva, const void* data, unsigned
  * writes a new chunk of data to the minidump, increasing the current
  * rva in dc
  */
-static void append(struct dump_context* dc, void* data, unsigned size)
+static void append(struct dump_context* dc, const void* data, unsigned size)
 {
     writeat(dc, dc->rva, data, size);
     dc->rva += size;
@@ -867,10 +887,12 @@ BOOL WINAPI MiniDumpWriteDump(HANDLE hProcess, DWORD pid, HANDLE hFile,
     dc.pid = pid;
     dc.modules = NULL;
     dc.num_modules = 0;
+    dc.alloc_modules = 0;
     dc.cb = CallbackParam;
     dc.type = DumpType;
     dc.mem = NULL;
     dc.num_mem = 0;
+    dc.alloc_mem = 0;
     dc.rva = 0;
 
     if (!fetch_processes_info(&dc)) return FALSE;

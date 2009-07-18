@@ -1971,7 +1971,7 @@ AC_SUBST(DEPENDENCIES,["### Dependencies:
 .BEGIN: Makefile
 .MAKEFILEDEPS:
 Makefile: dummy
-	-\$(MAKEDEP) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
+	-\$(MAKEDEP) \$(MAKEDEPFLAGS) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
 
 \$(OBJS) \$(C_SRCS16:.c=.o): \$(IDL_GEN_HEADERS)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
@@ -2071,8 +2071,6 @@ WINE_CONFIG_MAKEFILE([dlls/d3d9/tests/Makefile],[dlls/Maketest.rules],[dlls],[AL
 WINE_CONFIG_MAKEFILE([dlls/d3dim/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3drm/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3drm/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
-WINE_CONFIG_MAKEFILE([dlls/d3dx8/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
-WINE_CONFIG_MAKEFILE([dlls/d3dx8/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_24/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_25/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/d3dx9_26/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2431,6 +2429,7 @@ WINE_CONFIG_MAKEFILE([dlls/wintrust/tests/Makefile],[dlls/Maketest.rules],[dlls]
 WINE_CONFIG_MAKEFILE([dlls/wldap32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wldap32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/wmi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/wmiutils/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wnaspi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wow32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/ws2_32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2520,10 +2519,14 @@ for dir in $ALL_TEST_DIRS
 do
     if test "$dir" != "\\"
     then
-        testname=`expr $dir : '\(.*\)/tests'`_test.exe
+        testname=`expr $dir : '\(.*\)/tests'`_test
         ALL_WINETEST_DEPENDS="$ALL_WINETEST_DEPENDS
-$testname: \$(DLLDIR)/$dir/$testname\$(DLLEXT)
-	cp \$(DLLDIR)/$dir/$testname\$(DLLEXT) \$@ && \$(STRIP) \$@"
+
+$testname.exe: \$(DLLDIR)/$dir/$testname.exe\$(DLLEXT)
+	cp \$(DLLDIR)/$dir/$testname.exe\$(DLLEXT) \$@ && \$(STRIP) \$@
+$testname.rc:
+	echo \"$testname.exe TESTRES \\\"$testname.exe\\\"\" >\$@ || (\$(RM) \$@ && false)
+$testname.res: $testname.rc $testname.exe"
     fi
 done
 

@@ -60,6 +60,22 @@ ok(tmp === "abc", "encodeURI('abc') = " + tmp);
 
 tmp = "" + new Object();
 ok(tmp === "[object Object]", "'' + new Object() = " + tmp);
+(tmp = new Array).f = Object.prototype.toString;
+ok(tmp.f() === "[object Array]", "tmp.f() = " + tmp.f());
+(tmp = new Boolean).f = Object.prototype.toString;
+ok(tmp.f() === "[object Boolean]", "tmp.f() = " + tmp.f());
+(tmp = new Date).f = Object.prototype.toString;
+ok(tmp.f() === "[object Date]", "tmp.f() = " + tmp.f());
+(tmp = function() {}).f = Object.prototype.toString;
+ok(tmp.f() === "[object Function]", "tmp.f() = " + tmp.f());
+Math.f = Object.prototype.toString;
+ok(Math.f() === "[object Math]", "tmp.f() = " + tmp.f());
+(tmp = new Number).f = Object.prototype.toString;
+ok(tmp.f() === "[object Number]", "tmp.f() = " + tmp.f());
+(tmp = new RegExp("")).f = Object.prototype.toString;
+ok(tmp.f() === "[object RegExp]", "tmp.f() = " + tmp.f());
+(tmp = new String).f = Object.prototype.toString;
+ok(tmp.f() === "[object String]", "tmp.f() = " + tmp.f());
 
 ok("".length === 0, "\"\".length = " + "".length);
 ok(getVT("".length) == "VT_I4", "\"\".length = " + "".length);
@@ -269,6 +285,19 @@ ok(tmp === "TEST", "''.toUpperCase() = " + tmp);
 tmp = "tEsT".toUpperCase(3);
 ok(tmp === "TEST", "''.toUpperCase(3) = " + tmp);
 
+tmp = "".anchor();
+ok(tmp === "<A NAME=\"undefined\"></A>", "''.anchor() = " + tmp);
+tmp = "".anchor(3);
+ok(tmp === "<A NAME=\"3\"></A>", "''.anchor(3) = " + tmp);
+tmp = "".anchor("red");
+ok(tmp === "<A NAME=\"red\"></A>", "''.anchor('red') = " + tmp);
+tmp = "test".anchor();
+ok(tmp === "<A NAME=\"undefined\">test</A>", "'test'.anchor() = " + tmp);
+tmp = "test".anchor(3);
+ok(tmp === "<A NAME=\"3\">test</A>", "'test'.anchor(3) = " + tmp);
+tmp = "test".anchor("green");
+ok(tmp === "<A NAME=\"green\">test</A>", "'test'.anchor('green') = " + tmp);
+
 tmp = "".big();
 ok(tmp === "<BIG></BIG>", "''.big() = " + tmp);
 tmp = "".big(3);
@@ -305,6 +334,35 @@ ok(tmp === "<TT>test</TT>", "'test'.fixed() = " + tmp);
 tmp = "test".fixed(3);
 ok(tmp === "<TT>test</TT>", "'test'.fixed(3) = " + tmp);
 
+tmp = "".fontcolor();
+ok(tmp === "<FONT COLOR=\"undefined\"></FONT>", "''.fontcolor() = " + tmp);
+tmp = "".fontcolor(3);
+ok(tmp === "<FONT COLOR=\"3\"></FONT>", "''.fontcolor(3) = " + tmp);
+tmp = "".fontcolor("red");
+ok(tmp === "<FONT COLOR=\"red\"></FONT>", "''.fontcolor('red') = " + tmp);
+tmp = "test".fontcolor();
+ok(tmp === "<FONT COLOR=\"undefined\">test</FONT>", "'test'.fontcolor() = " + tmp);
+tmp = "test".fontcolor(3);
+ok(tmp === "<FONT COLOR=\"3\">test</FONT>", "'test'.fontcolor(3) = " + tmp);
+tmp = "test".fontcolor("green");
+ok(tmp === "<FONT COLOR=\"green\">test</FONT>", "'test'.fontcolor('green') = " + tmp);
+
+tmp = "".fontsize();
+ok(tmp === "<FONT SIZE=\"undefined\"></FONT>", "''.fontsize() = " + tmp);
+tmp = "".fontsize(3);
+ok(tmp === "<FONT SIZE=\"3\"></FONT>", "''.fontsize(3) = " + tmp);
+tmp = "".fontsize("red");
+ok(tmp === "<FONT SIZE=\"red\"></FONT>", "''.fontsize('red') = " + tmp);
+tmp = "test".fontsize();
+ok(tmp === "<FONT SIZE=\"undefined\">test</FONT>", "'test'.fontsize() = " + tmp);
+tmp = "test".fontsize(3);
+ok(tmp === "<FONT SIZE=\"3\">test</FONT>", "'test'.fontsize(3) = " + tmp);
+tmp = "test".fontsize("green");
+ok(tmp === "<FONT SIZE=\"green\">test</FONT>", "'test'.fontsize('green') = " + tmp);
+
+tmp = ("".fontcolor()).fontsize();
+ok(tmp === "<FONT SIZE=\"undefined\"><FONT COLOR=\"undefined\"></FONT></FONT>", "(''.fontcolor()).fontsize() = " + tmp);
+
 tmp = "".italics();
 ok(tmp === "<I></I>", "''.italics() = " + tmp);
 tmp = "".italics(3);
@@ -313,6 +371,19 @@ tmp = "test".italics();
 ok(tmp === "<I>test</I>", "'test'.italics() = " + tmp);
 tmp = "test".italics(3);
 ok(tmp === "<I>test</I>", "'test'.italics(3) = " + tmp);
+
+tmp = "".link();
+ok(tmp === "<A HREF=\"undefined\"></A>", "''.link() = " + tmp);
+tmp = "".link(3);
+ok(tmp === "<A HREF=\"3\"></A>", "''.link(3) = " + tmp);
+tmp = "".link("red");
+ok(tmp === "<A HREF=\"red\"></A>", "''.link('red') = " + tmp);
+tmp = "test".link();
+ok(tmp === "<A HREF=\"undefined\">test</A>", "'test'.link() = " + tmp);
+tmp = "test".link(3);
+ok(tmp === "<A HREF=\"3\">test</A>", "'test'.link(3) = " + tmp);
+tmp = "test".link("green");
+ok(tmp === "<A HREF=\"green\">test</A>", "'test'.link('green') = " + tmp);
 
 tmp = "".small();
 ok(tmp === "<SMALL></SMALL>", "''.small() = " + tmp);
@@ -349,6 +420,13 @@ tmp = "test".sup();
 ok(tmp === "<SUP>test</SUP>", "'test'.sup() = " + tmp);
 tmp = "test".sup(3);
 ok(tmp === "<SUP>test</SUP>", "'test'.sup(3) = " + tmp);
+
+ok(String.fromCharCode() === "", "String.fromCharCode() = " + String.fromCharCode());
+ok(String.fromCharCode(65,"66",67) === "ABC", "String.fromCharCode(65,'66',67) = " + String.fromCharCode(65,"66",67));
+ok(String.fromCharCode(1024*64+65, -1024*64+65) === "AA",
+        "String.fromCharCode(1024*64+65, -1024*64+65) = " + String.fromCharCode(1024*64+65, -1024*64+65));
+ok(String.fromCharCode(65, NaN, undefined).length === 3,
+        "String.fromCharCode(65, NaN, undefined).length = " + String.fromCharCode(65, NaN, undefined).length);
 
 var arr = new Array();
 ok(typeof(arr) === "object", "arr () is not object");
@@ -439,6 +517,19 @@ ok(arr.sort() === arr, "arr.sort() !== arr");
 for(var i=0; i < arr.length; i++)
     ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
 
+arr = ["1", "2", "3"];
+arr.length = 1;
+ok(arr.length === 1, "arr.length = " + arr.length);
+arr.length = 3;
+ok(arr.length === 3, "arr.length = " + arr.length);
+ok(arr.toString() === "1,,", "arr.toString() = " + arr.toString());
+
+arr = Array("a","b","c");
+ok(arr.toString() === "a,b,c", "arr.toString() = " + arr.toString());
+
+ok(arr.valueOf === Object.prototype.valueOf, "arr.valueOf !== Object.prototype.valueOf");
+ok(arr === arr.valueOf(), "arr !== arr.valueOf");
+
 var num = new Number(6);
 arr = [0,1,2];
 tmp = arr.concat(3, [4,5], num);
@@ -455,6 +546,23 @@ arr = [1,];
 tmp = arr.concat([2]);
 ok(tmp.length === 3, "tmp.length = " + tmp.length);
 ok(tmp[1] === undefined, "tmp[1] = " + tmp[1]);
+
+arr = [1,false,'a',null,undefined,'a'];
+ok(arr.slice(0,6).toString() === "1,false,a,,,a", "arr.slice(0,6).toString() = " + arr.slice(0,6));
+ok(arr.slice(0,6).length === 6, "arr.slice(0,6).length = " + arr.slice(0,6).length);
+ok(arr.slice().toString() === "1,false,a,,,a", "arr.slice().toString() = " + arr.slice());
+ok(arr.slice("abc").toString() === "1,false,a,,,a", "arr.slice(\"abc\").toString() = " + arr.slice("abc"));
+ok(arr.slice(3,8).toString() === ",,a", "arr.slice(3,8).toString() = " + arr.slice(3,8));
+ok(arr.slice(3,8).length === 3, "arr.slice(3,8).length = " + arr.slice(3,8).length);
+ok(arr.slice(1).toString() === "false,a,,,a", "arr.slice(1).toString() = " + arr.slice(1));
+ok(arr.slice(-2).toString() === ",a", "arr.slice(-2).toString() = " + arr.slice(-2));
+ok(arr.slice(3,1).toString() === "", "arr.slice(3,1).toString() = " + arr.slice(3,1));
+tmp = arr.slice(0,6);
+for(var i=0; i < arr.length; i++)
+    ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
+arr[12] = 2;
+ok(arr.slice(5).toString() === "a,,,,,,,2", "arr.slice(5).toString() = " + arr.slice(5).toString());
+ok(arr.slice(5).length === 8, "arr.slice(5).length = " + arr.slice(5).length);
 
 var num = new Number(2);
 ok(num.toString() === "2", "num(2).toString !== 2");
@@ -473,6 +581,51 @@ tmp = (new Number()).valueOf();
 ok(tmp === 0, "(new Number()).valueOf = " + tmp);
 tmp = Number.prototype.valueOf();
 ok(tmp === 0, "Number.prototype.valueOf = " + tmp);
+
+function equals(val, base) {
+    var i;
+    var num = 0;
+    var str = val.toString(base);
+
+    for(i=0; i<str.length; i++) {
+        if(str.substring(i, i+1) == '(') break;
+        if(str.substring(i, i+1) == '.') break;
+        num = num*base + parseInt(str.substring(i, i+1));
+    }
+
+    if(str.substring(i, i+1) == '.') {
+        var mult = base;
+        for(i++; i<str.length; i++) {
+            if(str.substring(i, i+1) == '(') break;
+            num += parseInt(str.substring(i, i+1))/mult;
+            mult *= base;
+        }
+    }
+
+    if(str.substring(i, i+1) == '(') {
+        exp = parseInt(str.substring(i+2));
+        num *= Math.pow(base, exp);
+    }
+
+    ok(num>val-val/1000 && num<val+val/1000, "equals: num = " + num);
+}
+
+ok((10).toString(11) === "a", "(10).toString(11) = " + (10).toString(11));
+ok((213213433).toString(17) === "8e2ddcb", "(213213433).toString(17) = " + (213213433).toString(17));
+ok((-3254343).toString(33) === "-2oicf", "(-3254343).toString(33) = " + (-3254343).toString(33));
+ok((NaN).toString(12) === "NaN", "(NaN).toString(11) = " + (NaN).toString(11));
+ok((Infinity).toString(13) === "Infinity", "(Infinity).toString(11) = " + (Infinity).toString(11));
+for(i=2; i<10; i++) {
+    equals(1.123, i);
+    equals(2305843009200000000, i);
+    equals(5.123, i);
+    equals(21711, i);
+    equals(1024*1024*1024*1024*1024*1024*1.9999, i);
+    equals(748382, i);
+    equals(0.6, i);
+    equals(4.65661287308e-10, i);
+    ok((0).toString(i) === "0", "(0).toString("+i+") = " + (0).toString(i));
+}
 
 tmp = Math.min(1);
 ok(tmp === 1, "Math.min(1) = " + tmp);
@@ -914,16 +1067,18 @@ ok(isNaN(tmp), "Math.tan(-Infinity) is not NaN");
 var func = function  (a) {
         var a = 1;
         if(a) return;
-    }.toString();
+    };
 ok(func.toString() === "function  (a) {\n        var a = 1;\n        if(a) return;\n    }",
    "func.toString() = " + func.toString());
 ok("" + func === "function  (a) {\n        var a = 1;\n        if(a) return;\n    }",
    "'' + func.toString() = " + func);
 
+ok(func.valueOf === Object.prototype.valueOf, "func.valueOf !== Object.prototype.valueOf");
+ok(func === func.valueOf(), "func !== func.valueOf()");
+
 function testFuncToString(x,y) {
     return x+y;
 }
-
 ok(testFuncToString.toString() === "function testFuncToString(x,y) {\n    return x+y;\n}",
    "testFuncToString.toString() = " + testFuncToString.toString());
 ok("" + testFuncToString === "function testFuncToString(x,y) {\n    return x+y;\n}",
@@ -940,6 +1095,8 @@ date = new Date(8.64e15+1);
 ok(isNaN(0+date.getTime()), "date.getTime() is not NaN");
 date = new Date(Infinity);
 ok(isNaN(0+date.getTime()), "date.getTime() is not NaN");
+date = new Date("3 July 2009 22:28:00 UTC+0100");
+ok(date.getTime() === 1246656480000, "date.getTime() = " + date.getTime());
 date = new Date(1984, 11, 29, 13, 51, 24, 120);
 ok(date.getFullYear() === 1984, "date.getFullYear() = " + date.getFullYear());
 ok(date.getMonth() === 11, "date.getMonth() = " + date.getMonth());
@@ -1021,6 +1178,24 @@ date.setUTCMonth(22, 37);
 ok(date.getTime() === 60987050010, "date.getTime() = " + date.getTime());
 date.setUTCFullYear(83, 21, 321);
 ok(date.getTime() === -59464984149990, "date.getTime() = " + date.getTime());
+ok(Math.abs(date) === 59464984149990, "Math.abs(date) = " + Math.abs(date));
+ok(getVT(date+1) === "VT_BSTR", "getVT(date+1) = " + getVT(date+1));
+
+ok(isNaN(Date.parse()), "Date.parse() is not NaN");
+ok(isNaN(Date.parse("")), "Date.parse(\"\") is not NaN");
+ok(isNaN(Date.parse("Jan Jan 20 2009")), "Date.parse(\"Jan Jan 20 2009\") is not NaN");
+ok(Date.parse("Jan 20 2009 UTC") === 1232409600000, "Date.parse(\"Jan 20 2009 UTC\") = " + Date.parse("Jan 20 2009 UTC"));
+ok(Date.parse("Jan 20 2009 GMT") === 1232409600000, "Date.parse(\"Jan 20 2009 GMT\") = " + Date.parse("Jan 20 2009 GMT"));
+ok(Date.parse("Jan 20 2009 UTC-0") === 1232409600000, "Date.parse(\"Jan 20 2009 UTC-0\") = " + Date.parse("Jan 20 2009 UTC-0"));
+ok(Date.parse("Jan 20 2009 UTC+0000") === 1232409600000, "Date.parse(\"Jan 20 2009 UTC+0000\") = " + Date.parse("Jan 20 2009 UTC+0000"));
+ok(Date.parse("Ju 13 79 UTC") === 300672000000, "Date.parse(\"Ju 13 79 UTC\") = " + Date.parse("Ju 13 79 UTC"));
+ok(Date.parse("12Au91 UTC") === 681955200000, "Date.parse(\"12Au91 UTC\") = " + Date.parse("12Au91 UTC"));
+ok(Date.parse("7/02/17 UTC") === -1656806400000, "Date.parse(\"7/02/17 UTC\") = " + Date.parse("7/02/17 UTC"));
+ok(Date.parse("Se001   70 12:31:17 UTC") === 21040277000, "Date.parse(\"Se001   70 12:31:17 UTC\") = " + Date.parse("Se001   70 12:31:17 UTC"));
+ok(Date.parse("February 31   UTC, 2000 12:31:17 PM") === 952000277000,
+        "Date.parse(\"February 31   UTC, 2000 12:31:17 PM\") = " + Date.parse("February 31   UTC, 2000 12:31:17 PM"));
+ok(Date.parse("71 11:32AM Dec 12 UTC BC ") === -64346358480000, "Date.parse(\"71 11:32AM Dec 12 UTC BC \") = " + Date.parse("71 11:32AM Dec 12 UTC BC "));
+ok(Date.parse("23/71/2000 11::32::UTC") === 1010662320000, "Date.parse(\"23/71/2000 11::32::UTC\") = " + Date.parse("23/71/2000 11::32::UTC"));
 
 ok(typeof(Math.PI) === "number", "typeof(Math.PI) = " + typeof(Math.PI));
 ok(Math.floor(Math.PI*100) === 314, "Math.PI = " + Math.PI);
@@ -1061,5 +1236,12 @@ ok(typeof(Math.SQRT1_2) === "number", "typeof(Math.SQRT1_2) = " + typeof(Math.SQ
 ok(Math.floor(Math.SQRT1_2*100) === 70, "Math.SQRT1_2 = " + Math.SQRT1_2);
 Math.SQRT1_2 = "test";
 ok(Math.floor(Math.SQRT1_2*100) === 70, "modified Math.SQRT1_2 = " + Math.SQRT1_2);
+
+var bool = new Boolean();
+ok(bool.toString() === "false", "bool.toString() = " + bool.toString());
+var bool = new Boolean("false");
+ok(bool.toString() === "true", "bool.toString() = " + bool.toString());
+ok(bool.valueOf() === Boolean(1), "bool.valueOf() = " + bool.valueOf());
+ok(bool.toLocaleString() === bool.toString(), "bool.toLocaleString() = " + bool.toLocaleString());
 
 reportSuccess();

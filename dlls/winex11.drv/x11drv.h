@@ -144,11 +144,10 @@ typedef struct
 } X11DRV_PDEVICE;
 
 
-  /* GCs used for B&W and color bitmap operations */
-extern GC BITMAP_monoGC, BITMAP_colorGC;
 extern X_PHYSBITMAP BITMAP_stock_phys_bitmap;  /* phys bitmap for the default stock bitmap */
 
-#define BITMAP_GC(physBitmap) (((physBitmap)->pixmap_depth == 1) ? BITMAP_monoGC : BITMAP_colorGC)
+/* Retrieve the GC used for bitmap operations */
+extern GC get_bitmap_gc(int depth);
 
 /* Wine driver X11 functions */
 
@@ -268,6 +267,13 @@ extern void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE*);
 extern BOOL X11DRV_XRender_ExtTextOut(X11DRV_PDEVICE *physDev, INT x, INT y, UINT flags,
 				      const RECT *lprect, LPCWSTR wstr,
 				      UINT count, const INT *lpDx);
+BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
+                                      Pixmap pixmap, GC gc,
+                                      INT xSrc, INT ySrc,
+                                      INT widthSrc, INT heightSrc,
+                                      INT xDst, INT yDst,
+                                      INT widthDst, INT heightDst,
+                                      RECT *visRectSrc, RECT *visRectDst);
 extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);
 
 extern Drawable get_glxdrawable(X11DRV_PDEVICE *physDev);

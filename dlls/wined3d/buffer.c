@@ -506,9 +506,9 @@ static inline void fixup_d3dcolor(DWORD *dst_color)
 static inline void fixup_transformed_pos(float *p)
 {
     /* rhw conversion like in position_float4(). */
-    if (p[3] != 1.0 && p[3] != 0.0)
+    if (p[3] != 1.0f && p[3] != 0.0f)
     {
-        float w = 1.0 / p[3];
+        float w = 1.0f / p[3];
         p[0] *= w;
         p[1] *= w;
         p[2] *= w;
@@ -577,7 +577,7 @@ static ULONG STDMETHODCALLTYPE buffer_AddRef(IWineD3DBuffer *iface)
 }
 
 /* Context activation is done by the caller. */
-const BYTE *buffer_get_sysmem(struct wined3d_buffer *This)
+BYTE *buffer_get_sysmem(struct wined3d_buffer *This)
 {
     /* AllocatedMemory exists if the buffer is double buffered or has no buffer object at all */
     if(This->resource.allocatedMemory) return This->resource.allocatedMemory;

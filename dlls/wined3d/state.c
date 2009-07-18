@@ -510,7 +510,7 @@ static void state_alpha(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3D
 
     if(stateblock->renderState[WINED3DRS_COLORKEYENABLE] && enable_ckey) {
         glParm = GL_NOTEQUAL;
-        ref = 0.0;
+        ref = 0.0f;
     } else {
         ref = ((float) stateblock->renderState[WINED3DRS_ALPHAREF]) / 255.0f;
         glParm = CompareFunc(stateblock->renderState[WINED3DRS_ALPHAFUNC]);
@@ -935,13 +935,13 @@ void state_fogstartend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
 
     switch(context->fog_source) {
         case FOGSOURCE_VS:
-            fogstart = 1.0;
-            fogend = 0.0;
+            fogstart = 1.0f;
+            fogend = 0.0f;
             break;
 
         case FOGSOURCE_COORD:
-            fogstart = 255.0;
-            fogend = 0.0;
+            fogstart = 255.0f;
+            fogend = 0.0f;
             break;
 
         case FOGSOURCE_FFP:
@@ -951,8 +951,8 @@ void state_fogstartend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
             fogend = tmpvalue.f;
             /* In GL, fogstart == fogend disables fog, in D3D everything's fogged.*/
             if(fogstart == fogend) {
-                fogstart = -1.0 / 0.0;
-                fogend = 0.0;
+                fogstart = -1.0f / 0.0f;
+                fogend = 0.0f;
             }
             break;
 
@@ -961,8 +961,8 @@ void state_fogstartend(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DC
              * Still this is needed to make the compiler happy
              */
             ERR("Unexpected fog coordinate source\n");
-            fogstart = 0.0;
-            fogend = 0.0;
+            fogstart = 0.0f;
+            fogend = 0.0f;
     }
 
     glFogf(GL_FOG_START, fogstart);
@@ -1335,11 +1335,13 @@ static void state_psizemin_w(DWORD state, IWineD3DStateBlockImpl *stateblock, Wi
     } tmpvalue;
 
     tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MIN];
-    if(tmpvalue.f != 1.0) {
+    if (tmpvalue.f != 1.0f)
+    {
         FIXME("WINED3DRS_POINTSIZE_MIN not supported on this opengl, value is %f\n", tmpvalue.f);
     }
     tmpvalue.d = stateblock->renderState[WINED3DRS_POINTSIZE_MAX];
-    if(tmpvalue.f != 64.0) {
+    if (tmpvalue.f != 64.0f)
+    {
         FIXME("WINED3DRS_POINTSIZE_MAX not supported on this opengl, value is %f\n", tmpvalue.f);
     }
 
@@ -3103,10 +3105,10 @@ static void loadTexCoords(IWineD3DStateBlockImpl *stateblock, const struct wined
 static void tex_coordindex(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
     DWORD stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
     DWORD mapped_stage = stateblock->wineD3DDevice->texUnitMap[stage];
-    static const GLfloat s_plane[] = { 1.0, 0.0, 0.0, 0.0 };
-    static const GLfloat t_plane[] = { 0.0, 1.0, 0.0, 0.0 };
-    static const GLfloat r_plane[] = { 0.0, 0.0, 1.0, 0.0 };
-    static const GLfloat q_plane[] = { 0.0, 0.0, 0.0, 1.0 };
+    static const GLfloat s_plane[] = { 1.0f, 0.0f, 0.0f, 0.0f };
+    static const GLfloat t_plane[] = { 0.0f, 1.0f, 0.0f, 0.0f };
+    static const GLfloat r_plane[] = { 0.0f, 0.0f, 1.0f, 0.0f };
+    static const GLfloat q_plane[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
     if (mapped_stage == WINED3D_UNMAPPED_STAGE)
     {
@@ -3508,7 +3510,7 @@ static void clipplane(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DCo
         glPushMatrix();
         glLoadIdentity();
         if(stateblock->wineD3DDevice->render_offscreen) {
-            glScalef(1.0, -1.0, 1.0);
+            glScalef(1.0f, -1.0f, 1.0f);
         }
     }
 
@@ -3742,12 +3744,12 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
         checkGLcall("glOrtho");
 
         /* Window Coord 0 is the middle of the first pixel, so translate by 1/2 pixels */
-        glTranslatef(0.5, 0.5, 0);
-        checkGLcall("glTranslatef(0.5, 0.5, 0)");
+        glTranslatef(0.5f, 0.5f, 0.0f);
+        checkGLcall("glTranslatef(0.5f, 0.5f, 0.0f)");
         /* D3D texture coordinates are flipped compared to OpenGL ones, so
          * render everything upside down when rendering offscreen. */
         if (stateblock->wineD3DDevice->render_offscreen) {
-            glScalef(1.0, -1.0, 1.0);
+            glScalef(1.0f, -1.0f, 1.0f);
             checkGLcall("glScalef");
         }
     } else {
@@ -3791,13 +3793,13 @@ static void transform_projection(DWORD state, IWineD3DStateBlockImpl *stateblock
         if (stateblock->wineD3DDevice->render_offscreen) {
             /* D3D texture coordinates are flipped compared to OpenGL ones, so
              * render everything upside down when rendering offscreen. */
-            glTranslatef(1.0 / stateblock->viewport.Width, 1.0 / stateblock->viewport.Height, -1.0);
-            checkGLcall("glTranslatef(1.0 / width, 1.0 / height, -1.0)");
-            glScalef(1.0, -1.0, 2.0);
+            glTranslatef(1.0f / stateblock->viewport.Width, 1.0f / stateblock->viewport.Height, -1.0f);
+            checkGLcall("glTranslatef(1.0f / width, 1.0f / height, -1.0f)");
+            glScalef(1.0f, -1.0f, 2.0f);
         } else {
-            glTranslatef(1.0 / stateblock->viewport.Width, -1.0 / stateblock->viewport.Height, -1.0);
-            checkGLcall("glTranslatef(1.0 / width, -1.0 / height, -1.0)");
-            glScalef(1.0, 1.0, 2.0);
+            glTranslatef(1.0f / stateblock->viewport.Width, -1.0f / stateblock->viewport.Height, -1.0f);
+            checkGLcall("glTranslatef(1.0f / width, -1.0f / height, -1.0f)");
+            glScalef(1.0f, 1.0f, 2.0f);
         }
         checkGLcall("glScalef");
 
@@ -4197,15 +4199,45 @@ static void loadVertexData(IWineD3DStateBlockImpl *stateblock, const struct wine
         VTRACE(("glSecondaryColorPointer(4, GL_UNSIGNED_BYTE, %d, %p)\n", e->stride, e->data));
 
         if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
+            GLenum type = e->format_desc->gl_vtx_type;
+            GLint format = e->format_desc->gl_vtx_format;
+
             if (curVBO != e->buffer_object)
             {
                 GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, e->buffer_object));
                 checkGLcall("glBindBufferARB");
                 curVBO = e->buffer_object;
             }
-            GL_EXTCALL(glSecondaryColorPointerEXT)(e->format_desc->gl_vtx_format, e->format_desc->gl_vtx_type,
-                    e->stride, e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
-            checkGLcall("glSecondaryColorPointerEXT(4, GL_UNSIGNED_BYTE, ...)");
+
+            if(format != 4 || (GLINFO_LOCATION.quirks & WINED3D_QUIRK_ALLOWS_SPECULAR_ALPHA))
+            {
+                /* Usually specular colors only allow 3 components, since they have no alpha. In D3D, the specular alpha
+                 * contains the fog coordinate, which is passed to GL with GL_EXT_fog_coord. However, the fixed function
+                 * vertex pipeline can pass the specular alpha through, and pixel shaders can read it. So it GL accepts
+                 * 4 component secondary colors use it
+                 */
+                GL_EXTCALL(glSecondaryColorPointerEXT)(format, type,
+                        e->stride, e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
+                checkGLcall("glSecondaryColorPointerEXT(format, type, ...)");
+            }
+            else
+            {
+                switch(type)
+                {
+                    case GL_UNSIGNED_BYTE:
+                        GL_EXTCALL(glSecondaryColorPointerEXT)(3, GL_UNSIGNED_BYTE,
+                                e->stride, e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
+                        checkGLcall("glSecondaryColorPointerEXT(3, GL_UNSIGNED_BYTE, ...)");
+                        break;
+
+                    default:
+                        FIXME("Add 4 component specular color pointers for type %x\n", type);
+                        /* Make sure that the right color component is dropped */
+                        GL_EXTCALL(glSecondaryColorPointerEXT)(3, type,
+                                e->stride, e->data + stateblock->loadBaseVertexIndex * e->stride + offset[e->stream_idx]);
+                        checkGLcall("glSecondaryColorPointerEXT(3, type, ...)");
+                }
+            }
             glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT);
             checkGLcall("glEnableClientState(GL_SECONDARY_COLOR_ARRAY_EXT)");
         } else {
@@ -4368,7 +4400,7 @@ static void vertexdeclaration(DWORD state, IWineD3DStateBlockImpl *stateblock, W
          * TODO: Move to the viewport state
          */
         if (useVertexShaderFunction) {
-            device->posFixup[1] = device->render_offscreen ? -1.0 : 1.0;
+            device->posFixup[1] = device->render_offscreen ? -1.0f : 1.0f;
             device->posFixup[3] = -device->posFixup[1] / stateblock->viewport.Height;
         }
     }
@@ -4511,7 +4543,7 @@ static void viewport_miscpart(DWORD state, IWineD3DStateBlockImpl *stateblock, W
 }
 
 static void viewport_vertexpart(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContext *context) {
-    stateblock->wineD3DDevice->posFixup[2] = 1.0 / stateblock->viewport.Width;
+    stateblock->wineD3DDevice->posFixup[2] = 1.0f / stateblock->viewport.Width;
     stateblock->wineD3DDevice->posFixup[3] = -stateblock->wineD3DDevice->posFixup[1] / stateblock->viewport.Height;
     if(!isStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION))) {
         transform_projection(STATE_TRANSFORM(WINED3DTS_PROJECTION), stateblock, context);
@@ -4530,7 +4562,7 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
         checkGLcall("glDisable(GL_LIGHT0 + Index)");
     } else {
         float quad_att;
-        float colRGBA[] = {0.0, 0.0, 0.0, 0.0};
+        float colRGBA[] = {0.0f, 0.0f, 0.0f, 0.0f};
 
         /* Light settings are affected by the model view in OpenGL, the View transform in direct3d*/
         glMatrixMode(GL_MODELVIEW);
@@ -4562,9 +4594,9 @@ static void light(DWORD state, IWineD3DStateBlockImpl *stateblock, WineD3DContex
         checkGLcall("glLightfv");
 
         if ((lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range) >= FLT_MIN) {
-            quad_att = 1.4/(lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range);
+            quad_att = 1.4f/(lightInfo->OriginalParms.Range *lightInfo->OriginalParms.Range);
         } else {
-            quad_att = 0; /*  0 or  MAX?  (0 seems to be ok) */
+            quad_att = 0.0f; /*  0 or  MAX?  (0 seems to be ok) */
         }
 
         /* Do not assign attenuation values for lights that do not use them. D3D apps are free to pass any junk,
@@ -5360,7 +5392,8 @@ static const struct StateEntryTemplate ffp_fragmentstate_template[] = {
 /* Context activation is done by the caller. */
 static void ffp_enable(IWineD3DDevice *iface, BOOL enable) { }
 
-static void ffp_fragment_get_caps(WINED3DDEVTYPE devtype, const WineD3D_GL_Info *gl_info, struct fragment_caps *pCaps)
+static void ffp_fragment_get_caps(WINED3DDEVTYPE devtype,
+        const struct wined3d_gl_info *gl_info, struct fragment_caps *pCaps)
 {
     pCaps->TextureOpCaps =  WINED3DTEXOPCAPS_ADD         |
                             WINED3DTEXOPCAPS_ADDSIGNED   |
@@ -5447,7 +5480,7 @@ static void multistate_apply_3(DWORD state, IWineD3DStateBlockImpl *stateblock, 
 }
 
 HRESULT compile_state_table(struct StateEntry *StateTable, APPLYSTATEFUNC **dev_multistate_funcs,
-        const WineD3D_GL_Info *gl_info, const struct StateEntryTemplate *vertex,
+        const struct wined3d_gl_info *gl_info, const struct StateEntryTemplate *vertex,
         const struct fragment_pipeline *fragment, const struct StateEntryTemplate *misc)
 {
     unsigned int i, type, handlers;

@@ -31,17 +31,17 @@
 /* TRACE helper functions */
 const char *debug_d3d10_driver_type(D3D10_DRIVER_TYPE driver_type);
 
-enum d3d10_effect_variable_type
+enum d3d10_effect_object_type
 {
-    D3D10_EVT_VERTEXSHADER = 6,
-    D3D10_EVT_PIXELSHADER = 7,
-    D3D10_EVT_GEOMETRYSHADER = 8,
+    D3D10_EOT_VERTEXSHADER = 6,
+    D3D10_EOT_PIXELSHADER = 7,
+    D3D10_EOT_GEOMETRYSHADER = 8,
 };
 
-struct d3d10_effect_variable
+struct d3d10_effect_object
 {
     struct d3d10_effect_pass *pass;
-    enum d3d10_effect_variable_type type;
+    enum d3d10_effect_object_type type;
     DWORD idx_offset;
     void *data;
 };
@@ -58,6 +58,23 @@ struct d3d10_effect_shader_variable
     } shader;
 };
 
+/* ID3D10EffectVariable */
+struct d3d10_effect_variable
+{
+    const struct ID3D10EffectVariableVtbl *vtbl;
+
+    char *name;
+    DWORD buffer_offset;
+};
+
+struct d3d10_effect_local_buffer
+{
+    char *name;
+    DWORD data_size;
+    DWORD variable_count;
+    struct d3d10_effect_variable *variables;
+};
+
 /* ID3D10EffectPass */
 struct d3d10_effect_pass
 {
@@ -66,8 +83,8 @@ struct d3d10_effect_pass
     struct d3d10_effect_technique *technique;
     char *name;
     DWORD start;
-    DWORD variable_count;
-    struct d3d10_effect_variable *variables;
+    DWORD object_count;
+    struct d3d10_effect_object *objects;
 };
 
 /* ID3D10EffectTechnique */
@@ -77,7 +94,6 @@ struct d3d10_effect_technique
 
     struct d3d10_effect *effect;
     char *name;
-    DWORD start;
     DWORD pass_count;
     struct d3d10_effect_pass *passes;
 };
@@ -91,7 +107,7 @@ struct d3d10_effect
 
     ID3D10Device *device;
     DWORD version;
-    DWORD localbuffers_count;
+    DWORD local_buffer_count;
     DWORD localobjects_count;
     DWORD sharedbuffers_count;
     DWORD sharedobjects_count;
@@ -101,6 +117,8 @@ struct d3d10_effect
     DWORD blendstate_count;
     DWORD rasterizerstate_count;
     DWORD samplerstate_count;
+
+    struct d3d10_effect_local_buffer *local_buffers;
     struct d3d10_effect_technique *techniques;
 };
 

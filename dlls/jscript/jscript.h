@@ -68,6 +68,7 @@ typedef enum {
     JSCLASS_ARRAY,
     JSCLASS_BOOLEAN,
     JSCLASS_DATE,
+    JSCLASS_ERROR,
     JSCLASS_FUNCTION,
     JSCLASS_GLOBAL,
     JSCLASS_MATH,
@@ -123,6 +124,7 @@ DispatchEx *iface_to_jsdisp(IUnknown*);
 
 HRESULT disp_call(IDispatch*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_call_value(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
+HRESULT jsdisp_call(DispatchEx*,DISPID,LCID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT disp_propget(IDispatch*,DISPID,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT disp_propput(IDispatch*,DISPID,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_propget(DispatchEx*,DISPID,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
@@ -131,6 +133,7 @@ HRESULT jsdisp_propput_idx(DispatchEx*,DWORD,LCID,VARIANT*,jsexcept_t*,IServiceP
 HRESULT jsdisp_propget_name(DispatchEx*,LPCWSTR,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_propget_idx(DispatchEx*,DWORD,LCID,VARIANT*,jsexcept_t*,IServiceProvider*);
 HRESULT jsdisp_get_id(DispatchEx*,const WCHAR*,DWORD,DISPID*);
+HRESULT jsdisp_delete_idx(DispatchEx*,DWORD);
 
 HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const builtin_info_t*,DWORD,
         DispatchEx*,DispatchEx**);
@@ -145,7 +148,13 @@ HRESULT create_string(script_ctx_t*,const WCHAR*,DWORD,DispatchEx**);
 HRESULT create_bool(script_ctx_t*,VARIANT_BOOL,DispatchEx**);
 HRESULT create_number(script_ctx_t*,VARIANT*,DispatchEx**);
 
-HRESULT to_primitive(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*);
+typedef enum {
+    NO_HINT,
+    HINT_STRING,
+    HINT_NUMBER
+} hint_t;
+
+HRESULT to_primitive(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*, hint_t);
 HRESULT to_boolean(VARIANT*,VARIANT_BOOL*);
 HRESULT to_number(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*);
 HRESULT to_integer(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*);
@@ -193,13 +202,14 @@ static inline void script_addref(script_ctx_t *ctx)
 }
 
 HRESULT init_global(script_ctx_t*);
-HRESULT init_function_constr(script_ctx_t*);
+HRESULT init_function_constr(script_ctx_t*,DispatchEx*);
+HRESULT create_object_prototype(script_ctx_t*,DispatchEx**);
 
 HRESULT create_array_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_bool_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_date_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_number_constr(script_ctx_t*,DispatchEx**);
-HRESULT create_object_constr(script_ctx_t*,DispatchEx**);
+HRESULT create_object_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_regexp_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_string_constr(script_ctx_t*,DispatchEx**);
 

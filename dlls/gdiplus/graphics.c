@@ -38,6 +38,7 @@
 #include "gdiplus.h"
 #include "gdiplus_private.h"
 #include "wine/debug.h"
+#include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
@@ -941,6 +942,104 @@ GpStatus trace_path(GpGraphics *graphics, GpPath *path)
     return result;
 }
 
+typedef struct _GraphicsContainerItem {
+    struct list entry;
+    GraphicsContainer contid;
+
+    SmoothingMode smoothing;
+    CompositingQuality compqual;
+    InterpolationMode interpolation;
+    CompositingMode compmode;
+    TextRenderingHint texthint;
+    REAL scale;
+    GpUnit unit;
+    PixelOffsetMode pixeloffset;
+    UINT textcontrast;
+    GpMatrix* worldtrans;
+    GpRegion* clip;
+} GraphicsContainerItem;
+
+static GpStatus init_container(GraphicsContainerItem** container,
+        GDIPCONST GpGraphics* graphics){
+    GpStatus sts;
+
+    *container = GdipAlloc(sizeof(GraphicsContainerItem));
+    if(!(*container))
+        return OutOfMemory;
+
+    (*container)->contid = graphics->contid + 1;
+
+    (*container)->smoothing = graphics->smoothing;
+    (*container)->compqual = graphics->compqual;
+    (*container)->interpolation = graphics->interpolation;
+    (*container)->compmode = graphics->compmode;
+    (*container)->texthint = graphics->texthint;
+    (*container)->scale = graphics->scale;
+    (*container)->unit = graphics->unit;
+    (*container)->textcontrast = graphics->textcontrast;
+    (*container)->pixeloffset = graphics->pixeloffset;
+
+    sts = GdipCloneMatrix(graphics->worldtrans, &(*container)->worldtrans);
+    if(sts != Ok){
+        GdipFree(*container);
+        *container = NULL;
+        return sts;
+    }
+
+    sts = GdipCloneRegion(graphics->clip, &(*container)->clip);
+    if(sts != Ok){
+        GdipDeleteMatrix((*container)->worldtrans);
+        GdipFree(*container);
+        *container = NULL;
+        return sts;
+    }
+
+    return Ok;
+}
+
+static void delete_container(GraphicsContainerItem* container){
+    GdipDeleteMatrix(container->worldtrans);
+    GdipDeleteRegion(container->clip);
+    GdipFree(container);
+}
+
+static GpStatus restore_container(GpGraphics* graphics,
+        GDIPCONST GraphicsContainerItem* container){
+    GpStatus sts;
+    GpMatrix *newTrans;
+    GpRegion *newClip;
+
+    sts = GdipCloneMatrix(container->worldtrans, &newTrans);
+    if(sts != Ok)
+        return sts;
+
+    sts = GdipCloneRegion(container->clip, &newClip);
+    if(sts != Ok){
+        GdipDeleteMatrix(newTrans);
+        return sts;
+    }
+
+    GdipDeleteMatrix(graphics->worldtrans);
+    graphics->worldtrans = newTrans;
+
+    GdipDeleteRegion(graphics->clip);
+    graphics->clip = newClip;
+
+    graphics->contid = container->contid - 1;
+
+    graphics->smoothing = container->smoothing;
+    graphics->compqual = container->compqual;
+    graphics->interpolation = container->interpolation;
+    graphics->compmode = container->compmode;
+    graphics->texthint = container->texthint;
+    graphics->scale = container->scale;
+    graphics->unit = container->unit;
+    graphics->textcontrast = container->textcontrast;
+    graphics->pixeloffset = container->pixeloffset;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipCreateFromHDC(HDC hdc, GpGraphics **graphics)
 {
     TRACE("(%p, %p)\n", hdc, graphics);
@@ -991,6 +1090,8 @@ GpStatus WINGDIPAPI GdipCreateFromHDC2(HDC hdc, HANDLE hDevice, GpGraphics **gra
     (*graphics)->scale = 1.0;
     (*graphics)->busy = FALSE;
     (*graphics)->textcontrast = 4;
+    list_init(&(*graphics)->containers);
+    (*graphics)->contid = 0;
 
     return Ok;
 }
@@ -1155,6 +1256,7 @@ GpStatus WINGDIPAPI GdipCreateStreamOnFile(GDIPCONST WCHAR * filename,
 
 GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
 {
+    GraphicsContainerItem *cont, *next;
     TRACE("(%p)\n", graphics);
 
     if(!graphics) return InvalidParameter;
@@ -1162,6 +1264,11 @@ GpStatus WINGDIPAPI GdipDeleteGraphics(GpGraphics *graphics)
 
     if(graphics->owndc)
         ReleaseDC(graphics->hwnd, graphics->hdc);
+
+    LIST_FOR_EACH_ENTRY_SAFE(cont, next, &graphics->containers, GraphicsContainerItem, entry){
+        list_remove(&cont->entry);
+        delete_container(cont);
+    }
 
     GdipDeleteRegion(graphics->clip);
     GdipDeleteMatrix(graphics->worldtrans);
@@ -2405,12 +2512,14 @@ GpStatus WINGDIPAPI GdipFillEllipse(GpGraphics *graphics, GpBrush *brush, REAL x
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, brush->gdibrush);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
 
     transform_and_round_points(graphics, pti, ptf, 2);
 
+    BeginPath(graphics->hdc);
     Ellipse(graphics->hdc, pti[0].x, pti[0].y, pti[1].x, pti[1].y);
+    EndPath(graphics->hdc);
+
+    brush_fill_path(graphics, brush);
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -2477,10 +2586,12 @@ GpStatus WINGDIPAPI GdipFillPie(GpGraphics *graphics, GpBrush *brush, REAL x,
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, brush->gdibrush);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
 
+    BeginPath(graphics->hdc);
     draw_pie(graphics, x, y, width, height, startAngle, sweepAngle);
+    EndPath(graphics->hdc);
+
+    brush_fill_path(graphics, brush);
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -2523,13 +2634,16 @@ GpStatus WINGDIPAPI GdipFillPolygon(GpGraphics *graphics, GpBrush *brush,
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, brush->gdibrush);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
     SetPolyFillMode(graphics->hdc, (fillMode == FillModeAlternate ? ALTERNATE
                                                                   : WINDING));
 
     transform_and_round_points(graphics, pti, ptf, count);
+
+    BeginPath(graphics->hdc);
     Polygon(graphics->hdc, pti, count);
+    EndPath(graphics->hdc);
+
+    brush_fill_path(graphics, brush);
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -2570,13 +2684,16 @@ GpStatus WINGDIPAPI GdipFillPolygonI(GpGraphics *graphics, GpBrush *brush,
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, brush->gdibrush);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
     SetPolyFillMode(graphics->hdc, (fillMode == FillModeAlternate ? ALTERNATE
                                                                   : WINDING));
 
     transform_and_round_points(graphics, pti, ptf, count);
+
+    BeginPath(graphics->hdc);
     Polygon(graphics->hdc, pti, count);
+    EndPath(graphics->hdc);
+
+    brush_fill_path(graphics, brush);
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -2669,12 +2786,14 @@ GpStatus WINGDIPAPI GdipFillRectangleI(GpGraphics *graphics, GpBrush *brush,
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, brush->gdibrush);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
 
     transform_and_round_points(graphics, pti, ptf, 4);
 
+    BeginPath(graphics->hdc);
     Polygon(graphics->hdc, pti, 4);
+    EndPath(graphics->hdc);
+
+    brush_fill_path(graphics, brush);
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -2738,6 +2857,7 @@ GpStatus WINGDIPAPI GdipFillRegion(GpGraphics* graphics, GpBrush* brush,
     INT save_state;
     GpStatus status;
     HRGN hrgn;
+    RECT rc;
 
     TRACE("(%p, %p, %p)\n", graphics, brush, region);
 
@@ -2753,9 +2873,17 @@ GpStatus WINGDIPAPI GdipFillRegion(GpGraphics* graphics, GpBrush* brush,
 
     save_state = SaveDC(graphics->hdc);
     EndPath(graphics->hdc);
-    SelectObject(graphics->hdc, GetStockObject(NULL_PEN));
 
-    FillRgn(graphics->hdc, hrgn, brush->gdibrush);
+    ExtSelectClipRgn(graphics->hdc, hrgn, RGN_AND);
+
+    if (GetClipBox(graphics->hdc, &rc) != NULLREGION)
+    {
+        BeginPath(graphics->hdc);
+        Rectangle(graphics->hdc, rc.left, rc.top, rc.right, rc.bottom);
+        EndPath(graphics->hdc);
+
+        brush_fill_path(graphics, brush);
+    }
 
     RestoreDC(graphics->hdc, save_state);
 
@@ -3215,15 +3343,7 @@ GpStatus WINGDIPAPI GdipResetWorldTransform(GpGraphics *graphics)
 
 GpStatus WINGDIPAPI GdipRestoreGraphics(GpGraphics *graphics, GraphicsState state)
 {
-    static int calls;
-
-    if(!graphics)
-        return InvalidParameter;
-
-    if(!(calls++))
-        FIXME("graphics state not implemented\n");
-
-    return Ok;
+    return GdipEndContainer(graphics, state);
 }
 
 GpStatus WINGDIPAPI GdipRotateWorldTransform(GpGraphics *graphics, REAL angle,
@@ -3242,26 +3362,27 @@ GpStatus WINGDIPAPI GdipRotateWorldTransform(GpGraphics *graphics, REAL angle,
 
 GpStatus WINGDIPAPI GdipSaveGraphics(GpGraphics *graphics, GraphicsState *state)
 {
-    static int calls;
-
-    if(!graphics || !state)
-        return InvalidParameter;
-
-    if(!(calls++))
-        FIXME("graphics state not implemented\n");
-
-    *state = 0xdeadbeef;
-    return Ok;
+    return GdipBeginContainer2(graphics, state);
 }
 
-GpStatus WINGDIPAPI GdipBeginContainer2(GpGraphics *graphics, GraphicsContainer *state)
+GpStatus WINGDIPAPI GdipBeginContainer2(GpGraphics *graphics,
+        GraphicsContainer *state)
 {
-    FIXME("(%p, %p)\n", graphics, state);
+    GraphicsContainerItem *container;
+    GpStatus sts;
+
+    TRACE("(%p, %p)\n", graphics, state);
 
     if(!graphics || !state)
         return InvalidParameter;
 
-    *state = 0xdeadbeef;
+    sts = init_container(&container, graphics);
+    if(sts != Ok)
+        return sts;
+
+    list_add_head(&graphics->containers, &container->entry);
+    *state = graphics->contid = container->contid;
+
     return Ok;
 }
 
@@ -3283,12 +3404,39 @@ GpStatus WINGDIPAPI GdipComment(GpGraphics *graphics, UINT sizeData, GDIPCONST B
     return NotImplemented;
 }
 
-GpStatus WINGDIPAPI GdipEndContainer(GpGraphics *graphics, GraphicsState state)
+GpStatus WINGDIPAPI GdipEndContainer(GpGraphics *graphics, GraphicsContainer state)
 {
-    FIXME("(%p, 0x%x)\n", graphics, state);
+    GpStatus sts;
+    GraphicsContainerItem *container, *container2;
 
-    if(!graphics || !state)
+    TRACE("(%p, %x)\n", graphics, state);
+
+    if(!graphics)
         return InvalidParameter;
+
+    LIST_FOR_EACH_ENTRY(container, &graphics->containers, GraphicsContainerItem, entry){
+        if(container->contid == state)
+            break;
+    }
+
+    /* did not find a matching container */
+    if(&container->entry == &graphics->containers)
+        return Ok;
+
+    sts = restore_container(graphics, container);
+    if(sts != Ok)
+        return sts;
+
+    /* remove all of the containers on top of the found container */
+    LIST_FOR_EACH_ENTRY_SAFE(container, container2, &graphics->containers, GraphicsContainerItem, entry){
+        if(container->contid == state)
+            break;
+        list_remove(&container->entry);
+        delete_container(container);
+    }
+
+    list_remove(&container->entry);
+    delete_container(container);
 
     return Ok;
 }

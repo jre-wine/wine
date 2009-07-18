@@ -110,7 +110,7 @@ typedef struct
     LPWSTR password;
     INTERNET_PORT hostport;
     INTERNET_PORT serverport;
-    struct sockaddr_in sockaddr;
+    struct sockaddr_storage sockaddr;
 } connect_t;
 
 typedef struct
@@ -211,15 +211,17 @@ BOOL netconn_get_next_line( netconn_t *, char *, DWORD * );
 BOOL netconn_init( netconn_t *, BOOL );
 BOOL netconn_query_data_available( netconn_t *, DWORD * );
 BOOL netconn_recv( netconn_t *, void *, size_t, int, int * );
-BOOL netconn_resolve( WCHAR *, INTERNET_PORT, struct sockaddr_in * );
+BOOL netconn_resolve( WCHAR *, INTERNET_PORT, struct sockaddr *, socklen_t * );
 BOOL netconn_secure_connect( netconn_t * );
 BOOL netconn_send( netconn_t *, const void *, size_t, int, int * );
+DWORD netconn_set_timeout( netconn_t *, BOOL, int );
 const void *netconn_get_certificate( netconn_t * );
 
 BOOL set_cookies( request_t *, const WCHAR * );
 BOOL add_cookie_headers( request_t * );
 BOOL add_request_headers( request_t *, LPCWSTR, DWORD, DWORD );
 void delete_domain( domain_t * );
+BOOL set_server_for_hostname( connect_t *connect, LPCWSTR server, INTERNET_PORT port );
 
 static inline void *heap_alloc( SIZE_T size )
 {

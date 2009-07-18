@@ -2,15 +2,13 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = d3dx8.dll
-IMPORTLIB = d3dx8
-IMPORTS   = dxguid uuid kernel32
+MODULE    = wmiutils.dll
+IMPORTS   = oleaut32 ole32 advapi32 kernel32
 
 C_SRCS = \
-	core.c \
-	d3dx8_main.c \
-	math.c \
-	mesh.c
+	main.c \
+	regsvr.c \
+	statuscode.c
 
 @MAKE_DLL_RULES@
 

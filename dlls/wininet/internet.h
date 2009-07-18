@@ -55,28 +55,49 @@ typedef struct
     void *ssl_s;
 } WININET_NETCONNECTION;
 
-static inline LPWSTR WININET_strdupW( LPCWSTR str )
+static inline LPWSTR heap_strdupW(LPCWSTR str)
 {
-    LPWSTR ret = HeapAlloc( GetProcessHeap(), 0, (strlenW(str) + 1)*sizeof(WCHAR) );
-    if (ret) strcpyW( ret, str );
+    LPWSTR ret = NULL;
+
+    if(str) {
+        DWORD size;
+
+        size = (strlenW(str)+1)*sizeof(WCHAR);
+        ret = HeapAlloc(GetProcessHeap(), 0, size);
+        if(ret)
+            memcpy(ret, str, size);
+    }
+
     return ret;
 }
 
-static inline LPWSTR WININET_strdup_AtoW( LPCSTR str )
+static inline WCHAR *heap_strdupAtoW(const char *str)
 {
-    int len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0);
-    LPWSTR ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
-    if (ret)
-        MultiByteToWideChar( CP_ACP, 0, str, -1, ret, len);
+    LPWSTR ret = NULL;
+
+    if(str) {
+        DWORD len;
+
+        len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+        ret = HeapAlloc(GetProcessHeap(), 0, len*sizeof(WCHAR));
+        if(ret)
+            MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    }
+
     return ret;
 }
 
-static inline LPSTR WININET_strdup_WtoA( LPCWSTR str )
+static inline char *heap_strdupWtoA(LPCWSTR str)
 {
-    int len = WideCharToMultiByte( CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
-    LPSTR ret = HeapAlloc( GetProcessHeap(), 0, len );
-    if (ret)
-        WideCharToMultiByte( CP_ACP, 0, str, -1, ret, len, NULL, NULL);
+    char *ret = NULL;
+
+    if(str) {
+        DWORD size = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, NULL, NULL);
+        ret = HeapAlloc(GetProcessHeap(), 0, size);
+        if(ret)
+            WideCharToMultiByte(CP_ACP, 0, str, -1, ret, size, NULL, NULL);
+    }
+
     return ret;
 }
 
@@ -112,25 +133,25 @@ typedef enum
 #define INET_OPENURL 0x0001
 #define INET_CALLBACKW 0x0002
 
-typedef struct _WININETHANDLEHEADER WININETHANDLEHEADER, *LPWININETHANDLEHEADER;
+typedef struct _object_header_t object_header_t;
 
 typedef struct {
-    void (*Destroy)(WININETHANDLEHEADER*);
-    void (*CloseConnection)(WININETHANDLEHEADER*);
-    DWORD (*QueryOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD*,BOOL);
-    DWORD (*SetOption)(WININETHANDLEHEADER*,DWORD,void*,DWORD);
-    DWORD (*ReadFile)(WININETHANDLEHEADER*,void*,DWORD,DWORD*);
-    DWORD (*ReadFileExA)(WININETHANDLEHEADER*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
-    DWORD (*ReadFileExW)(WININETHANDLEHEADER*,INTERNET_BUFFERSW*,DWORD,DWORD_PTR);
-    BOOL (*WriteFile)(WININETHANDLEHEADER*,const void*,DWORD,DWORD*);
-    DWORD (*QueryDataAvailable)(WININETHANDLEHEADER*,DWORD*,DWORD,DWORD_PTR);
-    DWORD (*FindNextFileW)(WININETHANDLEHEADER*,void*);
-} HANDLEHEADERVtbl;
+    void (*Destroy)(object_header_t*);
+    void (*CloseConnection)(object_header_t*);
+    DWORD (*QueryOption)(object_header_t*,DWORD,void*,DWORD*,BOOL);
+    DWORD (*SetOption)(object_header_t*,DWORD,void*,DWORD);
+    DWORD (*ReadFile)(object_header_t*,void*,DWORD,DWORD*);
+    DWORD (*ReadFileExA)(object_header_t*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
+    DWORD (*ReadFileExW)(object_header_t*,INTERNET_BUFFERSW*,DWORD,DWORD_PTR);
+    BOOL (*WriteFile)(object_header_t*,const void*,DWORD,DWORD*);
+    DWORD (*QueryDataAvailable)(object_header_t*,DWORD*,DWORD,DWORD_PTR);
+    DWORD (*FindNextFileW)(object_header_t*,void*);
+} object_vtbl_t;
 
-struct _WININETHANDLEHEADER
+struct _object_header_t
 {
     WH_TYPE htype;
-    const HANDLEHEADERVtbl *vtbl;
+    const object_vtbl_t *vtbl;
     HINTERNET hInternet;
     DWORD  dwFlags;
     DWORD_PTR dwContext;
@@ -145,28 +166,29 @@ struct _WININETHANDLEHEADER
 
 typedef struct
 {
-    WININETHANDLEHEADER hdr;
+    object_header_t hdr;
     LPWSTR  lpszAgent;
     LPWSTR  lpszProxy;
     LPWSTR  lpszProxyBypass;
     LPWSTR  lpszProxyUsername;
     LPWSTR  lpszProxyPassword;
     DWORD   dwAccessType;
-} WININETAPPINFOW, *LPWININETAPPINFOW;
+} appinfo_t;
 
 
 typedef struct
 {
-    WININETHANDLEHEADER hdr;
-    WININETAPPINFOW *lpAppInfo;
+    object_header_t hdr;
+    appinfo_t *lpAppInfo;
     LPWSTR  lpszHostName; /* the final destination of the request */
     LPWSTR  lpszServerName; /* the name of the server we directly connect to */
     LPWSTR  lpszUserName;
     LPWSTR  lpszPassword;
     INTERNET_PORT nHostPort; /* the final destination port of the request */
     INTERNET_PORT nServerPort; /* the port of the server we directly connect to */
-    struct sockaddr_in socketAddress;
-} WININETHTTPSESSIONW, *LPWININETHTTPSESSIONW;
+    struct sockaddr_storage socketAddress;
+    socklen_t sa_len;
+} http_session_t;
 
 #define HDR_ISREQUEST		0x0001
 #define HDR_COMMADELIMITED	0x0002
@@ -187,8 +209,8 @@ typedef struct gzip_stream_t gzip_stream_t;
 
 typedef struct
 {
-    WININETHANDLEHEADER hdr;
-    WININETHTTPSESSIONW *lpHttpSession;
+    object_header_t hdr;
+    http_session_t *lpHttpSession;
     LPWSTR lpszPath;
     LPWSTR lpszVerb;
     LPWSTR lpszRawHeaders;
@@ -214,7 +236,7 @@ typedef struct
 
     BOOL decoding;
     gzip_stream_t *gzip_stream;
-} WININETHTTPREQW, *LPWININETHTTPREQW;
+} http_request_t;
 
 
 
@@ -336,7 +358,7 @@ struct WORKREQ_INTERNETREADFILEEXW
 typedef struct WORKREQ
 {
     void (*asyncproc)(struct WORKREQ*);
-    WININETHANDLEHEADER *hdr;
+    object_header_t *hdr;
 
     union {
         struct WORKREQ_FTPPUTFILEW              FtpPutFileW;
@@ -360,28 +382,28 @@ typedef struct WORKREQ
 
 } WORKREQUEST, *LPWORKREQUEST;
 
-HINTERNET WININET_AllocHandle( LPWININETHANDLEHEADER info );
-LPWININETHANDLEHEADER WININET_GetObject( HINTERNET hinternet );
-LPWININETHANDLEHEADER WININET_AddRef( LPWININETHANDLEHEADER info );
-BOOL WININET_Release( LPWININETHANDLEHEADER info );
+HINTERNET WININET_AllocHandle( object_header_t *info );
+object_header_t *WININET_GetObject( HINTERNET hinternet );
+object_header_t *WININET_AddRef( object_header_t *info );
+BOOL WININET_Release( object_header_t *info );
 BOOL WININET_FreeHandle( HINTERNET hinternet );
 
 DWORD INET_QueryOption(DWORD,void*,DWORD*,BOOL);
 
 time_t ConvertTimeString(LPCWSTR asctime);
 
-HINTERNET FTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
+HINTERNET FTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
 	INTERNET_PORT nServerPort, LPCWSTR lpszUserName,
 	LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
 	DWORD dwInternalFlags);
 
-HINTERNET HTTP_Connect(LPWININETAPPINFOW hIC, LPCWSTR lpszServerName,
+HINTERNET HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
 	INTERNET_PORT nServerPort, LPCWSTR lpszUserName,
 	LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
 	DWORD dwInternalFlags);
 
 BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
-	struct sockaddr_in *psa);
+	struct sockaddr *psa, socklen_t *sa_len);
 
 void INTERNET_SetLastError(DWORD dwError);
 DWORD INTERNET_GetLastError(void);
@@ -389,19 +411,19 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest);
 LPSTR INTERNET_GetResponseBuffer(void);
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen);
 
-BOOLAPI HTTP_HttpSendRequestW(LPWININETHTTPREQW lpwhr, LPCWSTR lpszHeaders,
+BOOLAPI HTTP_HttpSendRequestW(http_request_t *req, LPCWSTR lpszHeaders,
 	DWORD dwHeaderLength, LPVOID lpOptional, DWORD dwOptionalLength,
 	DWORD dwContentLength, BOOL bEndRequest);
-INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(LPWININETHTTPSESSIONW lpwhs,
+INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(http_session_t *session,
 	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
 	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
 	DWORD dwFlags, DWORD_PTR dwContext);
 
-VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
+VOID SendAsyncCallback(object_header_t *hdr, DWORD_PTR dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                        DWORD dwStatusInfoLength);
 
-VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
+VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
                            DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                            DWORD dwStatusInfoLength);
 

@@ -41,26 +41,26 @@ static inline unsigned short float_32_to_16(const float *in)
     unsigned short ret;
 
     /* Deal with special numbers */
-    if(*in == 0.0) return 0x0000;
+    if (*in == 0.0f) return 0x0000;
     if(isnan(*in)) return 0x7C01;
-    if(isinf(*in)) return (*in < 0.0 ? 0xFC00 : 0x7c00);
+    if (isinf(*in)) return (*in < 0.0f ? 0xFC00 : 0x7c00);
 
     if(tmp < pow(2, 10)) {
         do
         {
-            tmp = tmp * 2.0;
+            tmp = tmp * 2.0f;
             exp--;
         }while(tmp < pow(2, 10));
     } else if(tmp >= pow(2, 11)) {
         do
         {
-            tmp /= 2.0;
+            tmp /= 2.0f;
             exp++;
         }while(tmp >= pow(2, 11));
     }
 
     mantissa = (unsigned int) tmp;
-    if(tmp - mantissa >= 0.5) mantissa++; /* round to nearest, away from zero */
+    if(tmp - mantissa >= 0.5f) mantissa++; /* round to nearest, away from zero */
 
     exp += 10;  /* Normalize the mantissa */
     exp += 15;  /* Exponent is encoded with excess 15 */
@@ -78,7 +78,7 @@ static inline unsigned short float_32_to_16(const float *in)
         ret = (exp << 10) | (mantissa & 0x3ff);
     }
 
-    ret |= ((*in < 0.0 ? 1 : 0) << 15); /* Add the sign */
+    ret |= ((*in < 0.0f ? 1 : 0) << 15); /* Add the sign */
     return ret;
 }
 
@@ -724,6 +724,25 @@ static void convert_r5g6b5_x8r8g8b8(const BYTE *src, BYTE *dst,
     }
 }
 
+static void convert_a8r8g8b8_x8r8g8b8(const BYTE *src, BYTE *dst,
+        DWORD pitch_in, DWORD pitch_out, unsigned int w, unsigned int h)
+{
+    unsigned int x, y;
+
+    TRACE("Converting %ux%u pixels, pitches %u %u\n", w, h, pitch_in, pitch_out);
+
+    for (y = 0; y < h; ++y)
+    {
+        const DWORD *src_line = (const DWORD *)(src + y * pitch_in);
+        DWORD *dst_line = (DWORD *)(dst + y * pitch_out);
+
+        for (x = 0; x < w; ++x)
+        {
+            dst_line[x] = 0xff000000 | (src_line[x] & 0xffffff);
+        }
+    }
+}
+
 struct d3dfmt_convertor_desc {
     WINED3DFORMAT from, to;
     void (*convert)(const BYTE *src, BYTE *dst, DWORD pitch_in, DWORD pitch_out, unsigned int w, unsigned int h);
@@ -733,6 +752,7 @@ static const struct d3dfmt_convertor_desc convertors[] =
 {
     {WINED3DFMT_R32_FLOAT,  WINED3DFMT_R16_FLOAT,   convert_r32_float_r16_float},
     {WINED3DFMT_R5G6B5,     WINED3DFMT_X8R8G8B8,    convert_r5g6b5_x8r8g8b8},
+    {WINED3DFMT_A8R8G8B8,   WINED3DFMT_X8R8G8B8,    convert_a8r8g8b8_x8r8g8b8},
 };
 
 static inline const struct d3dfmt_convertor_desc *find_convertor(WINED3DFORMAT from, WINED3DFORMAT to)

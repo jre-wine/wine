@@ -189,8 +189,102 @@ static HRESULT WINAPI BmpFrameDecode_GetResolution(IWICBitmapFrameDecode *iface,
 static HRESULT WINAPI BmpFrameDecode_CopyPalette(IWICBitmapFrameDecode *iface,
     IWICPalette *pIPalette)
 {
-    FIXME("(%p,%p): stub\n", iface, pIPalette);
-    return E_NOTIMPL;
+    HRESULT hr;
+    BmpFrameDecode *This = (BmpFrameDecode*)iface;
+    int count;
+    WICColor *wiccolors=NULL;
+    RGBTRIPLE *bgrcolors=NULL;
+
+    TRACE("(%p,%p)\n", iface, pIPalette);
+
+    if (This->bih.bV5Size == sizeof(BITMAPCOREHEADER))
+    {
+        BITMAPCOREHEADER *bch = (BITMAPCOREHEADER*)&This->bih;
+        if (bch->bcBitCount <= 8)
+        {
+            /* 2**n colors in BGR format after the header */
+            ULONG tablesize, bytesread;
+            LARGE_INTEGER offset;
+            int i;
+
+            count = 1 << bch->bcBitCount;
+            wiccolors = HeapAlloc(GetProcessHeap(), 0, sizeof(WICColor) * count);
+            tablesize = sizeof(RGBTRIPLE) * count;
+            bgrcolors = HeapAlloc(GetProcessHeap(), 0, tablesize);
+            if (!wiccolors || !bgrcolors)
+            {
+                hr = E_OUTOFMEMORY;
+                goto end;
+            }
+
+            offset.QuadPart = sizeof(BITMAPFILEHEADER)+sizeof(BITMAPCOREHEADER);
+            hr = IStream_Seek(This->stream, offset, STREAM_SEEK_SET, NULL);
+            if (FAILED(hr)) goto end;
+
+            hr = IStream_Read(This->stream, bgrcolors, tablesize, &bytesread);
+            if (FAILED(hr)) goto end;
+            if (bytesread != tablesize) {
+                hr = E_FAIL;
+                goto end;
+            }
+
+            for (i=0; i<count; i++)
+            {
+                wiccolors[i] = 0xff000000|
+                               (bgrcolors[i].rgbtRed<<16)|
+                               (bgrcolors[i].rgbtGreen<<8)|
+                               bgrcolors[i].rgbtBlue;
+            }
+        }
+        else
+        {
+            return WINCODEC_ERR_PALETTEUNAVAILABLE;
+        }
+    }
+    else
+    {
+        if (This->bih.bV5BitCount <= 8)
+        {
+            ULONG tablesize, bytesread;
+            LARGE_INTEGER offset;
+            int i;
+
+            if (This->bih.bV5ClrUsed == 0)
+                count = 1 << This->bih.bV5BitCount;
+            else
+                count = This->bih.bV5ClrUsed;
+
+            tablesize = sizeof(WICColor) * count;
+            wiccolors = HeapAlloc(GetProcessHeap(), 0, tablesize);
+            if (!wiccolors) return E_OUTOFMEMORY;
+
+            offset.QuadPart = sizeof(BITMAPFILEHEADER) + This->bih.bV5Size;
+            hr = IStream_Seek(This->stream, offset, STREAM_SEEK_SET, NULL);
+            if (FAILED(hr)) goto end;
+
+            hr = IStream_Read(This->stream, wiccolors, tablesize, &bytesread);
+            if (FAILED(hr)) goto end;
+            if (bytesread != tablesize) {
+                hr = E_FAIL;
+                goto end;
+            }
+
+            /* convert from BGR to BGRA by setting alpha to 100% */
+            for (i=0; i<count; i++)
+                wiccolors[i] |= 0xff000000;
+        }
+        else
+        {
+            return WINCODEC_ERR_PALETTEUNAVAILABLE;
+        }
+    }
+
+    hr = IWICPalette_InitializeCustom(pIPalette, wiccolors, count);
+
+end:
+    HeapFree(GetProcessHeap(), 0, wiccolors);
+    HeapFree(GetProcessHeap(), 0, bgrcolors);
+    return hr;
 }
 
 static HRESULT WINAPI BmpFrameDecode_CopyPixels(IWICBitmapFrameDecode *iface,
@@ -218,22 +312,22 @@ static HRESULT WINAPI BmpFrameDecode_CopyPixels(IWICBitmapFrameDecode *iface,
 static HRESULT WINAPI BmpFrameDecode_GetMetadataQueryReader(IWICBitmapFrameDecode *iface,
     IWICMetadataQueryReader **ppIMetadataQueryReader)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIMetadataQueryReader);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIMetadataQueryReader);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI BmpFrameDecode_GetColorContexts(IWICBitmapFrameDecode *iface,
     UINT cCount, IWICColorContext **ppIColorContexts, UINT *pcActualCount)
 {
-    FIXME("(%p,%u,%p,%p): stub\n", iface, cCount, ppIColorContexts, pcActualCount);
-    return E_NOTIMPL;
+    TRACE("(%p,%u,%p,%p)\n", iface, cCount, ppIColorContexts, pcActualCount);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI BmpFrameDecode_GetThumbnail(IWICBitmapFrameDecode *iface,
     IWICBitmapSource **ppIThumbnail)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIThumbnail);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIThumbnail);
+    return WINCODEC_ERR_CODECNOTHUMBNAIL;
 }
 
 static HRESULT BmpFrameDecode_ReadUncompressed(BmpFrameDecode* This)
@@ -287,6 +381,233 @@ static HRESULT BmpFrameDecode_ReadUncompressed(BmpFrameDecode* This)
     return S_OK;
 
 fail:
+    HeapFree(GetProcessHeap(), 0, This->imagedata);
+    This->imagedata = NULL;
+    if (SUCCEEDED(hr)) hr = E_FAIL;
+    return hr;
+}
+
+static HRESULT BmpFrameDecode_ReadRLE8(BmpFrameDecode* This)
+{
+    UINT bytesperrow;
+    UINT width, height;
+    BYTE *rledata, *cursor, *rledataend;
+    UINT rlesize, datasize, palettesize;
+    DWORD palette[256];
+    UINT x, y;
+    DWORD *bgrdata;
+    HRESULT hr;
+    LARGE_INTEGER offbits;
+    ULONG bytesread;
+
+    width = This->bih.bV5Width;
+    height = abs(This->bih.bV5Height);
+    bytesperrow = width * 4;
+    datasize = bytesperrow * height;
+    rlesize = This->bih.bV5SizeImage;
+    if (This->bih.bV5ClrUsed && This->bih.bV5ClrUsed < 256)
+        palettesize = 4 * This->bih.bV5ClrUsed;
+    else
+        palettesize = 4 * 256;
+
+    rledata = HeapAlloc(GetProcessHeap(), 0, rlesize);
+    This->imagedata = HeapAlloc(GetProcessHeap(), 0, datasize);
+    if (!This->imagedata || !rledata)
+    {
+        hr = E_OUTOFMEMORY;
+        goto fail;
+    }
+
+    /* read palette */
+    offbits.QuadPart = sizeof(BITMAPFILEHEADER) + This->bih.bV5Size;
+    hr = IStream_Seek(This->stream, offbits, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr)) goto fail;
+
+    hr = IStream_Read(This->stream, palette, palettesize, &bytesread);
+    if (FAILED(hr) || bytesread != palettesize) goto fail;
+
+    /* read RLE data */
+    offbits.QuadPart = This->bfh.bfOffBits;
+    hr = IStream_Seek(This->stream, offbits, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr)) goto fail;
+
+    hr = IStream_Read(This->stream, rledata, rlesize, &bytesread);
+    if (FAILED(hr) || bytesread != rlesize) goto fail;
+
+    /* decode RLE */
+    bgrdata = (DWORD*)This->imagedata;
+    x = 0;
+    y = 0;
+    rledataend = rledata + rlesize;
+    cursor = rledata;
+    while (cursor < rledataend && y < height)
+    {
+        BYTE length = *cursor++;
+        if (length == 0)
+        {
+            /* escape code */
+            BYTE escape = *cursor++;
+            switch(escape)
+            {
+            case 0: /* end of line */
+                x = 0;
+                y++;
+                break;
+            case 1: /* end of bitmap */
+                goto end;
+            case 2: /* delta */
+                if (cursor < rledataend)
+                {
+                    x += *cursor++;
+                    y += *cursor++;
+                }
+                break;
+            default: /* absolute mode */
+                length = escape;
+                while (cursor < rledataend && length-- && x < width)
+                    bgrdata[y*width + x++] = palette[*cursor++];
+                if (escape & 1) cursor++; /* skip pad byte */
+            }
+        }
+        else
+        {
+            DWORD color = palette[*cursor++];
+            while (length-- && x < width)
+                bgrdata[y*width + x++] = color;
+        }
+    }
+
+end:
+    HeapFree(GetProcessHeap(), 0, rledata);
+
+    This->imagedatastart = This->imagedata + (height-1) * bytesperrow;
+    This->stride = -bytesperrow;
+
+    return S_OK;
+
+fail:
+    HeapFree(GetProcessHeap(), 0, rledata);
+    HeapFree(GetProcessHeap(), 0, This->imagedata);
+    This->imagedata = NULL;
+    if (SUCCEEDED(hr)) hr = E_FAIL;
+    return hr;
+}
+
+static HRESULT BmpFrameDecode_ReadRLE4(BmpFrameDecode* This)
+{
+    UINT bytesperrow;
+    UINT width, height;
+    BYTE *rledata, *cursor, *rledataend;
+    UINT rlesize, datasize, palettesize;
+    DWORD palette[16];
+    UINT x, y;
+    DWORD *bgrdata;
+    HRESULT hr;
+    LARGE_INTEGER offbits;
+    ULONG bytesread;
+
+    width = This->bih.bV5Width;
+    height = abs(This->bih.bV5Height);
+    bytesperrow = width * 4;
+    datasize = bytesperrow * height;
+    rlesize = This->bih.bV5SizeImage;
+    if (This->bih.bV5ClrUsed && This->bih.bV5ClrUsed < 16)
+        palettesize = 4 * This->bih.bV5ClrUsed;
+    else
+        palettesize = 4 * 16;
+
+    rledata = HeapAlloc(GetProcessHeap(), 0, rlesize);
+    This->imagedata = HeapAlloc(GetProcessHeap(), 0, datasize);
+    if (!This->imagedata || !rledata)
+    {
+        hr = E_OUTOFMEMORY;
+        goto fail;
+    }
+
+    /* read palette */
+    offbits.QuadPart = sizeof(BITMAPFILEHEADER) + This->bih.bV5Size;
+    hr = IStream_Seek(This->stream, offbits, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr)) goto fail;
+
+    hr = IStream_Read(This->stream, palette, palettesize, &bytesread);
+    if (FAILED(hr) || bytesread != palettesize) goto fail;
+
+    /* read RLE data */
+    offbits.QuadPart = This->bfh.bfOffBits;
+    hr = IStream_Seek(This->stream, offbits, STREAM_SEEK_SET, NULL);
+    if (FAILED(hr)) goto fail;
+
+    hr = IStream_Read(This->stream, rledata, rlesize, &bytesread);
+    if (FAILED(hr) || bytesread != rlesize) goto fail;
+
+    /* decode RLE */
+    bgrdata = (DWORD*)This->imagedata;
+    x = 0;
+    y = 0;
+    rledataend = rledata + rlesize;
+    cursor = rledata;
+    while (cursor < rledataend && y < height)
+    {
+        BYTE length = *cursor++;
+        if (length == 0)
+        {
+            /* escape code */
+            BYTE escape = *cursor++;
+            switch(escape)
+            {
+            case 0: /* end of line */
+                x = 0;
+                y++;
+                break;
+            case 1: /* end of bitmap */
+                goto end;
+            case 2: /* delta */
+                if (cursor < rledataend)
+                {
+                    x += *cursor++;
+                    y += *cursor++;
+                }
+                break;
+            default: /* absolute mode */
+                length = escape;
+                while (cursor < rledataend && length-- && x < width)
+                {
+                    BYTE colors = *cursor++;
+                    bgrdata[y*width + x++] = palette[colors>>4];
+                    if (length-- && x < width)
+                        bgrdata[y*width + x++] = palette[colors&0xf];
+                    else
+                        break;
+                }
+                if ((cursor - rledata) & 1) cursor++; /* skip pad byte */
+            }
+        }
+        else
+        {
+            BYTE colors = *cursor++;
+            DWORD color1 = palette[colors>>4];
+            DWORD color2 = palette[colors&0xf];
+            while (length-- && x < width)
+            {
+                bgrdata[y*width + x++] = color1;
+                if (length-- && x < width)
+                    bgrdata[y*width + x++] = color2;
+                else
+                    break;
+            }
+        }
+    }
+
+end:
+    HeapFree(GetProcessHeap(), 0, rledata);
+
+    This->imagedatastart = This->imagedata + (height-1) * bytesperrow;
+    This->stride = -bytesperrow;
+
+    return S_OK;
+
+fail:
+    HeapFree(GetProcessHeap(), 0, rledata);
     HeapFree(GetProcessHeap(), 0, This->imagedata);
     This->imagedata = NULL;
     if (SUCCEEDED(hr)) hr = E_FAIL;
@@ -422,6 +743,16 @@ static HRESULT BmpDecoder_ReadHeaders(BmpDecoder* This, IStream *stream)
                 FIXME("unsupported bit depth %i for uncompressed RGB\n", This->bih.bV5BitCount);
             }
             break;
+        case BI_RLE8:
+            This->bitsperpixel = 32;
+            This->read_data_func = BmpFrameDecode_ReadRLE8;
+            This->pixelformat = &GUID_WICPixelFormat32bppBGR;
+            break;
+        case BI_RLE4:
+            This->bitsperpixel = 32;
+            This->read_data_func = BmpFrameDecode_ReadRLE4;
+            This->pixelformat = &GUID_WICPixelFormat32bppBGR;
+            break;
         default:
             This->bitsperpixel = 0;
             This->read_data_func = BmpFrameDecode_ReadUnsupported;
@@ -536,36 +867,37 @@ static HRESULT WINAPI BmpDecoder_GetDecoderInfo(IWICBitmapDecoder *iface,
 static HRESULT WINAPI BmpDecoder_CopyPalette(IWICBitmapDecoder *iface,
     IWICPalette *pIPalette)
 {
-    FIXME("(%p,%p): stub\n", iface, pIPalette);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, pIPalette);
+
+    return WINCODEC_ERR_PALETTEUNAVAILABLE;
 }
 
 static HRESULT WINAPI BmpDecoder_GetMetadataQueryReader(IWICBitmapDecoder *iface,
     IWICMetadataQueryReader **ppIMetadataQueryReader)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIMetadataQueryReader);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIMetadataQueryReader);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI BmpDecoder_GetPreview(IWICBitmapDecoder *iface,
     IWICBitmapSource **ppIBitmapSource)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIBitmapSource);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIBitmapSource);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI BmpDecoder_GetColorContexts(IWICBitmapDecoder *iface,
     UINT cCount, IWICColorContext **ppIColorContexts, UINT *pcActualCount)
 {
-    FIXME("(%p,%u,%p,%p): stub\n", iface, cCount, ppIColorContexts, pcActualCount);
-    return E_NOTIMPL;
+    TRACE("(%p,%u,%p,%p)\n", iface, cCount, ppIColorContexts, pcActualCount);
+    return WINCODEC_ERR_UNSUPPORTEDOPERATION;
 }
 
 static HRESULT WINAPI BmpDecoder_GetThumbnail(IWICBitmapDecoder *iface,
     IWICBitmapSource **ppIThumbnail)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIThumbnail);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIThumbnail);
+    return WINCODEC_ERR_CODECNOTHUMBNAIL;
 }
 
 static HRESULT WINAPI BmpDecoder_GetFrameCount(IWICBitmapDecoder *iface,

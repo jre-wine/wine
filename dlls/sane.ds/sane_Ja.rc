@@ -1,7 +1,7 @@
 /*
- * Direct3D X 8 main file
+ * Japanese resources for Twain
  *
- * Copyright (C) 2002 Raphael Junqueira
+ * Copyright 2009 CodeWeavers, Aric Stewart
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,28 +16,30 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
- *
  */
 
-#include <stdarg.h>
+#include "resource.h"
 
-#include "windef.h"
-#include "winbase.h"
+/* UTF-8 */
+#pragma code_page(65001)
 
-/***********************************************************************
- * DllMain.
- */
-BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
+LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
+
+IDD_DIALOG1 DIALOG DISCARDABLE 0, 0, 186, 46
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | DS_CENTER | DS_SETFOREGROUND
+CAPTION "スキャン中"
+FONT 9, "MS Shell Dlg"
+BEGIN
+    LTEXT  "スキャン中... しばらくお待ちください",IDC_STATIC,5,19,176,8, SS_CENTER
+END
+
+STRINGTABLE DISCARDABLE
 {
-    switch(reason)
-    {
-    case DLL_WINE_PREATTACH:
-        return FALSE; /* prefer native version */
-    case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(inst);
-        break;
-    case DLL_PROCESS_DETACH:
-        break;
-    }
-    return TRUE;
+ 0 ""
+ 1 "px"
+ 2 "b"
+ 3 "mm"
+ 4 "dpi"
+ 5 "%"
+ 6 "ns"
 }

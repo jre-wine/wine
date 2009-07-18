@@ -422,7 +422,10 @@ void ME_RTFCharAttrHook(RTF_Info *info)
       else if (info->rtfParam != rtfNoParam)
       {
         RTFColor *c = RTFGetColor(info, info->rtfParam);
-        fmt.crTextColor = (c->rtfCBlue<<16)|(c->rtfCGreen<<8)|(c->rtfCRed);
+        if (c && c->rtfCBlue >= 0)
+          fmt.crTextColor = (c->rtfCBlue<<16)|(c->rtfCGreen<<8)|(c->rtfCRed);
+        else
+          fmt.dwEffects = CFE_AUTOBACKCOLOR;
       }
       break;
     case rtfForeColor:
@@ -433,10 +436,11 @@ void ME_RTFCharAttrHook(RTF_Info *info)
       else if (info->rtfParam != rtfNoParam)
       {
         RTFColor *c = RTFGetColor(info, info->rtfParam);
-        if (c)
+        if (c && c->rtfCBlue >= 0)
           fmt.crTextColor = (c->rtfCBlue<<16)|(c->rtfCGreen<<8)|(c->rtfCRed);
-        else
-          fmt.crTextColor = 0;
+        else {
+          fmt.dwEffects = CFE_AUTOCOLOR;
+        }
       }
       break;
     case rtfFontNum:
@@ -3194,7 +3198,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     /* If we detect ascii rtf at the start of the string,
      * we know it isn't unicode. */
     bRtf = (lParam && (!strncmp((char *)lParam, "{\\rtf", 5) ||
-                         !strncmp((char *)lParam, "{\\urtf}", 6)));
+                         !strncmp((char *)lParam, "{\\urtf", 6)));
     bUnicode = !bRtf && pStruct->codepage == 1200;
 
     TRACE("EM_SETTEXTEX - %s, flags %d, cp %d\n",
@@ -3463,7 +3467,8 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     if (lParam)
     {
       TRACE("WM_SETTEXT lParam==%lx\n",lParam);
-      if (!unicode && !strncmp((char *)lParam, "{\\rtf", 5))
+      if (!strncmp((char *)lParam, "{\\rtf", 5) ||
+          !strncmp((char *)lParam, "{\\urtf", 6))
       {
         /* Undocumented: WM_SETTEXT supports RTF text */
         ME_StreamInRTFString(editor, 0, (char *)lParam);
@@ -3841,23 +3846,29 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case WM_CREATE:
   {
-    SCROLLINFO si;
+    INT max;
 
     ME_SetDefaultFormatRect(editor);
 
-    si.cbSize = sizeof(si);
-    si.fMask = SIF_PAGE | SIF_RANGE;
+    max = (editor->styleFlags & ES_DISABLENOSCROLL) ? 1 : 0;
+    if (~editor->styleFlags & ES_DISABLENOSCROLL || editor->styleFlags & WS_VSCROLL)
+      ITextHost_TxSetScrollRange(editor->texthost, SB_VERT, 0, max, TRUE);
+
+    if (~editor->styleFlags & ES_DISABLENOSCROLL || editor->styleFlags & WS_HSCROLL)
+      ITextHost_TxSetScrollRange(editor->texthost, SB_HORZ, 0, max, TRUE);
+
     if (editor->styleFlags & ES_DISABLENOSCROLL)
-      si.fMask |= SIF_DISABLENOSCROLL;
-    si.nMax = (si.fMask & SIF_DISABLENOSCROLL) ? 1 : 0;
-    si.nMin = 0;
-    si.nPage = 0;
-    if (editor->hWnd) {
-      SetScrollInfo(editor->hWnd, SB_VERT, &si, TRUE);
-      SetScrollInfo(editor->hWnd, SB_HORZ, &si, TRUE);
-    } else {
-      ITextHost_TxSetScrollRange(editor->texthost, SB_VERT, si.nMin, si.nMax, TRUE);
-      ITextHost_TxSetScrollRange(editor->texthost, SB_HORZ, si.nMin, si.nMax, TRUE);
+    {
+      if (editor->styleFlags & WS_VSCROLL)
+      {
+        ITextHost_TxEnableScrollBar(editor->texthost, SB_VERT, ESB_DISABLE_BOTH);
+        ITextHost_TxShowScrollBar(editor->texthost, SB_VERT, TRUE);
+      }
+      if (editor->styleFlags & WS_HSCROLL)
+      {
+        ITextHost_TxEnableScrollBar(editor->texthost, SB_HORZ, ESB_DISABLE_BOTH);
+        ITextHost_TxShowScrollBar(editor->texthost, SB_HORZ, TRUE);
+      }
     }
 
     ME_CommitUndo(editor);

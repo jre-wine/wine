@@ -72,7 +72,7 @@ LANGUAGE LANG_ITALIAN, SUBLANG_NEUTRAL
 }
 
 STRINGTABLE DISCARDABLE
-LANGUAGE LANG_PORTUGUESE, SUBLANG_PORTUGUESE_BRAZILIAN
+LANGUAGE LANG_PORTUGUESE, SUBLANG_NEUTRAL
 {
 	7  "DirectSound padrão"
 	8  "DirectSound: %s"
@@ -169,4 +169,13 @@ LANGUAGE LANG_LITHUANIAN, SUBLANG_NEUTRAL
 	8  "DirectSound: %s"
 	9  "Numatytasis WaveOut įrenginys"
 	10 "Numatytasis MidiOut įrenginys"
+}
+
+STRINGTABLE DISCARDABLE
+LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
+{
+	7  "デフォルト DirectSound"
+	8  "DirectSound: %s"
+	9  "デフォルト WaveOut デバイス"
+	10 "デフォルト MidiOut デバイス"
 }

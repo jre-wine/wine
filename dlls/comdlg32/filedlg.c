@@ -172,6 +172,7 @@ typedef struct tagFD32_PRIVATE
 
 const char FileOpenDlgInfosStr[] = "FileOpenDlgInfos"; /* windows property description string */
 static const char LookInInfosStr[] = "LookInInfos"; /* LOOKIN combo box property */
+static SIZE MemDialogSize = { 0, 0}; /* keep size of the (resizable) dialog */
 
 /***********************************************************************
  * Prototypes
@@ -1019,6 +1020,8 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam, LPARAM lParam)
     if( !(fodInfos->ofnInfos->Flags & OFN_ENABLESIZING)) return FALSE;
     /* get the new dialog rectangle */
     GetWindowRect( hwnd, &rc);
+    TRACE("Size from %d,%d to %d,%d\n", fodInfos->sizedlg.cx, fodInfos->sizedlg.cy,
+            rc.right -rc.left, rc.bottom -rc.top);
     /* not initialized yet */
     if( (fodInfos->sizedlg.cx == 0 && fodInfos->sizedlg.cy == 0) ||
         ((fodInfos->sizedlg.cx == rc.right -rc.left) && /* no change */
@@ -1039,6 +1042,7 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam, LPARAM lParam)
     /* change position and sizes of the controls */
     for( ctrl = GetWindow( hwnd, GW_CHILD); ctrl ; ctrl = GetWindow( ctrl, GW_HWNDNEXT))
     {
+        int ctrlid = GetDlgCtrlID( ctrl);
         GetWindowRect( ctrl, &rc);
         MapWindowPoints( NULL, hwnd, (LPPOINT) &rc, 2);
         if( ctrl == fodInfos->DlgInfos.hwndGrip)
@@ -1047,36 +1051,73 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam, LPARAM lParam)
                     0, 0,
                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
         }
-        else if( GetDlgCtrlID( ctrl) == IDC_SHELLSTATIC)
-        {
-            DeferWindowPos( hdwp, ctrl, NULL, 0, 0,
-                    rc.right - rc.left + chgx,
-                    rc.bottom - rc.top + chgy,
-                    SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
-        }
         else if( rc.top > rcview.bottom)
         {
             /* if it was below the shell view
              * move to bottom */
-            DeferWindowPos( hdwp, ctrl, NULL, rc.left, rc.top + chgy,
-                    rc.right - rc.left, rc.bottom - rc.top,
-                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+            switch( ctrlid)
+            {
+                /* file name box and file types combo change also width */
+                case edt1:
+                case cmb1:
+                    DeferWindowPos( hdwp, ctrl, NULL, rc.left, rc.top + chgy,
+                            rc.right - rc.left + chgx, rc.bottom - rc.top,
+                            SWP_NOACTIVATE | SWP_NOZORDER);
+                    break;
+                    /* then these buttons must move out of the way */
+                case IDOK:
+                case IDCANCEL:
+                case pshHelp:
+                    DeferWindowPos( hdwp, ctrl, NULL, rc.left + chgx, rc.top + chgy,
+                            0, 0,
+                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+                    break;
+                default:
+                DeferWindowPos( hdwp, ctrl, NULL, rc.left, rc.top + chgy,
+                        0, 0,
+                        SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+            }
         }
         else if( rc.left > rcview.right)
         {
             /* if it was to the right of the shell view
              * move to right */
             DeferWindowPos( hdwp, ctrl, NULL, rc.left + chgx, rc.top,
-                    rc.right - rc.left, rc.bottom - rc.top,
+                    0, 0,
                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+        }
+        else
+            /* special cases */
+        {
+            switch( ctrlid)
+            {
+#if 0 /* this is Win2k, Win XP. Vista and Higher don't move/size these controls */
+                case IDC_LOOKIN:
+                    DeferWindowPos( hdwp, ctrl, NULL, 0, 0,
+                            rc.right - rc.left + chgx, rc.bottom - rc.top,
+                            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+                    break;
+                case IDC_TOOLBARSTATIC:
+                case IDC_TOOLBAR:
+                    DeferWindowPos( hdwp, ctrl, NULL, rc.left + chgx, rc.top,
+                            0, 0,
+                            SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+                    break;
+#endif
+                /* not resized in windows. Since wine uses this invisible control
+                 * to size the browser view it needs to be resized */
+                case IDC_SHELLSTATIC:
+                    DeferWindowPos( hdwp, ctrl, NULL, 0, 0,
+                            rc.right - rc.left + chgx,
+                            rc.bottom - rc.top + chgy,
+                            SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
+                    break;
+            }
         }
     }
     if(fodInfos->DlgInfos.hwndCustomDlg &&
         (fodInfos->ofnInfos->Flags & (OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE)))
     {
-        GetClientRect(hwnd, &rc);
-        DeferWindowPos( hdwp,fodInfos->DlgInfos.hwndCustomDlg, NULL,
-            0, 0, rc.right, rc.bottom, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
         for( ctrl = GetWindow( fodInfos->DlgInfos.hwndCustomDlg, GW_CHILD);
                 ctrl ; ctrl = GetWindow( ctrl, GW_HWNDNEXT))
         {
@@ -1099,6 +1140,11 @@ static LRESULT FILEDLG95_OnWMSize(HWND hwnd, WPARAM wParam, LPARAM lParam)
                         SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
             }
         }
+        /* size the custom dialog at the end: some applications do some
+         * control re-arranging at this point */
+        GetClientRect(hwnd, &rc);
+        DeferWindowPos( hdwp,fodInfos->DlgInfos.hwndCustomDlg, NULL,
+            0, 0, rc.right, rc.bottom, SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
     }
     EndDeferWindowPos( hdwp);
     /* should not be needed */
@@ -1152,13 +1198,14 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
          if( fodInfos->DlgInfos.hwndCustomDlg)
              ShowWindow( fodInfos->DlgInfos.hwndCustomDlg, SW_SHOW);
 
-         if(fodInfos->ofnInfos->Flags & OFN_EXPLORER)
+         if(fodInfos->ofnInfos->Flags & OFN_EXPLORER) {
              SendCustomDlgNotificationMessage(hwnd,CDN_INITDONE);
+             SendCustomDlgNotificationMessage(hwnd,CDN_FOLDERCHANGE);
+         }
 
          if (fodInfos->ofnInfos->Flags & OFN_ENABLESIZING)
          {
              GetWindowRect( hwnd, &rc);
-             /* FIXME: should remember sizes of last invocation */
              fodInfos->sizedlg.cx = rc.right - rc.left;
              fodInfos->sizedlg.cy = rc.bottom - rc.top;
              fodInfos->initial_size.x = fodInfos->sizedlg.cx;
@@ -1167,13 +1214,16 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
              SetWindowPos( fodInfos->DlgInfos.hwndGrip, NULL,
                      rc.right - gripx, rc.bottom - gripy,
                      0, 0, SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER);
+             /* resize the dialog to the previous invocation */
+             if( MemDialogSize.cx && MemDialogSize.cy)
+                 SetWindowPos( hwnd, NULL,
+                         0, 0, MemDialogSize.cx, MemDialogSize.cy,
+                         SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOZORDER);
          }
 
          if(fodInfos->ofnInfos->Flags & OFN_EXPLORER)
-         {
-             SendCustomDlgNotificationMessage(hwnd,CDN_FOLDERCHANGE);
              SendCustomDlgNotificationMessage(hwnd,CDN_SELCHANGE);
-         }
+
          return 0;
        }
     case WM_SIZE:
@@ -1197,9 +1247,13 @@ INT_PTR CALLBACK FileOpenDlgProc95(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
       return FILEDLG95_OnWMGetIShellBrowser(hwnd);
 
     case WM_DESTROY:
-      RemovePropA(hwnd, FileOpenDlgInfosStr);
-      return FALSE;
-
+      {
+          FileOpenDlgInfos * fodInfos = GetPropA(hwnd,FileOpenDlgInfosStr);
+          if (fodInfos && fodInfos->ofnInfos->Flags & OFN_ENABLESIZING)
+              MemDialogSize = fodInfos->sizedlg;
+          RemovePropA(hwnd, FileOpenDlgInfosStr);
+          return FALSE;
+      }
     case WM_NOTIFY:
     {
 	LPNMHDR lpnmh = (LPNMHDR)lParam;

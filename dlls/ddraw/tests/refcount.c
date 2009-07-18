@@ -237,7 +237,17 @@ static void test_iface_refcnt(void)
     ok(ref == 1, "IDirectDraw reference count is %ld\n", ref);
 
     hr = IDirectDraw7_QueryInterface(DDraw7, &IID_IDirect3D7, (void **) &D3D7);
-    ok(hr == DD_OK, "IDirectDraw7_QueryInterface returned %08x\n", hr);
+    ok(hr == DD_OK || hr == E_NOINTERFACE, /* win64 */
+       "IDirectDraw7_QueryInterface returned %08x\n", hr);
+    if (FAILED(hr))
+    {
+        IDirectDraw7_Release(DDraw7);
+        IDirectDraw4_Release(DDraw4);
+        IDirectDraw2_Release(DDraw2);
+        IDirectDraw_Release(DDraw1);
+        skip( "no IDirect3D7 support\n" );
+        return;
+    }
 
     /* Apparently IDirectDrawX and IDirect3DX are linked together */
     ref = getRefcount( (IUnknown *) D3D7);
@@ -348,6 +358,14 @@ static void test_d3d_ifaces(void)
     ok(ref == 1, "IDirectDraw reference count is %ld\n", ref);
 
     hr = IDirectDraw_QueryInterface(DDraw1, &IID_IDirect3D, (void **) &D3D1);
+    if (hr == E_NOINTERFACE)  /* win64 */
+    {
+        IDirectDraw4_Release(DDraw4);
+        IDirectDraw2_Release(DDraw2);
+        IDirectDraw_Release(DDraw1);
+        skip( "no IDirect3D support\n" );
+        return;
+    }
     ok(hr == DD_OK, "IDirectDraw_QueryInterface returned %08x\n", hr);
     ref = getRefcount( (IUnknown *) DDraw4);
     ok(ref == 1, "IDirectDraw4 reference count is %ld\n", ref);

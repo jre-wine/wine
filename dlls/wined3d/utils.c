@@ -500,7 +500,7 @@ static inline int getFmtIdx(WINED3DFORMAT fmt) {
     return -1;
 }
 
-static BOOL init_format_base_info(WineD3D_GL_Info *gl_info)
+static BOOL init_format_base_info(struct wined3d_gl_info *gl_info)
 {
     UINT format_count = sizeof(formats) / sizeof(*formats);
     UINT i;
@@ -529,7 +529,7 @@ static BOOL init_format_base_info(WineD3D_GL_Info *gl_info)
     return TRUE;
 }
 
-static BOOL init_format_compression_info(WineD3D_GL_Info *gl_info)
+static BOOL init_format_compression_info(struct wined3d_gl_info *gl_info)
 {
     unsigned int i;
 
@@ -558,7 +558,7 @@ static BOOL init_format_compression_info(WineD3D_GL_Info *gl_info)
 #define GLINFO_LOCATION (*gl_info)
 
 /* Context activation is done by the caller. */
-static void check_fbo_compat(const WineD3D_GL_Info *gl_info, struct GlPixelFormatDesc *format_desc)
+static void check_fbo_compat(const struct wined3d_gl_info *gl_info, struct GlPixelFormatDesc *format_desc)
 {
     /* Check if the default internal format is supported as a frame buffer
      * target, otherwise fall back to the render target internal.
@@ -682,7 +682,7 @@ static void check_fbo_compat(const WineD3D_GL_Info *gl_info, struct GlPixelForma
 }
 
 /* Context activation is done by the caller. */
-static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
+static void init_format_fbo_compat_info(struct wined3d_gl_info *gl_info)
 {
     unsigned int i;
     GLuint fbo;
@@ -738,7 +738,7 @@ static void init_format_fbo_compat_info(WineD3D_GL_Info *gl_info)
     }
 }
 
-static BOOL init_format_texture_info(WineD3D_GL_Info *gl_info)
+static BOOL init_format_texture_info(struct wined3d_gl_info *gl_info)
 {
     unsigned int i;
 
@@ -764,13 +764,13 @@ static BOOL init_format_texture_info(WineD3D_GL_Info *gl_info)
         desc->glType = gl_formats_template[i].glType;
         desc->color_fixup = COLOR_FIXUP_IDENTITY;
         desc->Flags |= gl_formats_template[i].Flags;
-        desc->heightscale = 1.0;
+        desc->heightscale = 1.0f;
     }
 
     return TRUE;
 }
 
-static void apply_format_fixups(WineD3D_GL_Info *gl_info)
+static void apply_format_fixups(struct wined3d_gl_info *gl_info)
 {
     int idx;
 
@@ -869,7 +869,7 @@ static void apply_format_fixups(WineD3D_GL_Info *gl_info)
     }
 
     idx = getFmtIdx(WINED3DFMT_YV12);
-    gl_info->gl_formats[idx].heightscale = 1.5;
+    gl_info->gl_formats[idx].heightscale = 1.5f;
     gl_info->gl_formats[idx].color_fixup = create_yuv_fixup_desc(YUV_FIXUP_YV12);
 
     if (GL_SUPPORT(EXT_VERTEX_ARRAY_BGRA))
@@ -890,7 +890,7 @@ static void apply_format_fixups(WineD3D_GL_Info *gl_info)
     }
 }
 
-static BOOL init_format_vertex_info(WineD3D_GL_Info *gl_info)
+static BOOL init_format_vertex_info(struct wined3d_gl_info *gl_info)
 {
     unsigned int i;
 
@@ -918,7 +918,7 @@ static BOOL init_format_vertex_info(WineD3D_GL_Info *gl_info)
     return TRUE;
 }
 
-BOOL initPixelFormatsNoGL(WineD3D_GL_Info *gl_info)
+BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info)
 {
     if (!init_format_base_info(gl_info)) return FALSE;
 
@@ -932,7 +932,7 @@ BOOL initPixelFormatsNoGL(WineD3D_GL_Info *gl_info)
 }
 
 /* Context activation is done by the caller. */
-BOOL initPixelFormats(WineD3D_GL_Info *gl_info)
+BOOL initPixelFormats(struct wined3d_gl_info *gl_info)
 {
     if (!init_format_base_info(gl_info)) return FALSE;
 
@@ -954,7 +954,7 @@ fail:
 
 #define GLINFO_LOCATION This->adapter->gl_info
 
-const struct GlPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, const WineD3D_GL_Info *gl_info)
+const struct GlPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, const struct wined3d_gl_info *gl_info)
 {
     int idx = getFmtIdx(fmt);
 
@@ -2029,7 +2029,8 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
     /* No oversized texture? This is easy */
     if(!(This->Flags & SFLAG_OVERSIZE)) {
         /* Which rect from the texture do I need? */
-        if(This->glDescription.target == GL_TEXTURE_RECTANGLE_ARB) {
+        if (This->texture_target == GL_TEXTURE_RECTANGLE_ARB)
+        {
             glTexCoord[0] = (float) Rect->left;
             glTexCoord[2] = (float) Rect->top;
             glTexCoord[1] = (float) Rect->right;

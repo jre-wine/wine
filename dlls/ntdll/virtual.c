@@ -156,7 +156,7 @@ static const char *VIRTUAL_GetProtStr( BYTE prot )
 {
     static char buffer[6];
     buffer[0] = (prot & VPROT_COMMITTED) ? 'c' : '-';
-    buffer[1] = (prot & VPROT_GUARD) ? 'g' : '-';
+    buffer[1] = (prot & VPROT_GUARD) ? 'g' : ((prot & VPROT_WRITEWATCH) ? 'H' : '-');
     buffer[2] = (prot & VPROT_READ) ? 'r' : '-';
     buffer[3] = (prot & VPROT_WRITECOPY) ? 'W' : ((prot & VPROT_WRITE) ? 'w' : '-');
     buffer[4] = (prot & VPROT_EXEC) ? 'x' : '-';
@@ -1787,7 +1787,7 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
 
     /* Compute the alloc type flags */
 
-    if (!(type & (MEM_COMMIT | MEM_RESERVE)) ||
+    if (!(type & (MEM_COMMIT | MEM_RESERVE | MEM_RESET)) ||
         (type & ~(MEM_COMMIT | MEM_RESERVE | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_RESET)))
     {
         WARN("called with wrong alloc type flags (%08x) !\n", type);
@@ -1803,6 +1803,11 @@ NTSTATUS WINAPI NtAllocateVirtualMemory( HANDLE process, PVOID *ret, ULONG zero_
         if (type & MEM_WRITE_WATCH) vprot |= VPROT_WRITEWATCH;
         status = map_view( &view, base, size, mask, type & MEM_TOP_DOWN, vprot );
         if (status == STATUS_SUCCESS) base = view->base;
+    }
+    else if (type & MEM_RESET)
+    {
+        if (!(view = VIRTUAL_FindView( base, size ))) status = STATUS_NOT_MAPPED_VIEW;
+        else madvise( base, size, MADV_DONTNEED );
     }
     else  /* commit the pages */
     {

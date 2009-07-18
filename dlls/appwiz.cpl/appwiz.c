@@ -56,6 +56,7 @@ typedef struct APPINFO {
 
     LPWSTR title;
     LPWSTR path;
+    LPWSTR path_modify;
 
     LPWSTR icon;
     int iconIdx;
@@ -72,6 +73,9 @@ typedef struct APPINFO {
 static struct APPINFO *AppInfo = NULL;
 static HINSTANCE hInst;
 
+static WCHAR btnRemove[MAX_STRING_LEN];
+static WCHAR btnModifyRemove[MAX_STRING_LEN];
+
 static const WCHAR openW[] = {'o','p','e','n',0};
 
 /* names of registry keys */
@@ -85,6 +89,8 @@ static const WCHAR ContactW[] = {'C','o','n','t','a','c','t',0};
 static const WCHAR HelpLinkW[] = {'H','e','l','p','L','i','n','k',0};
 static const WCHAR HelpTelephoneW[] = {'H','e','l','p','T','e','l','e','p','h',
     'o','n','e',0};
+static const WCHAR ModifyPathW[] = {'M','o','d','i','f','y','P','a','t','h',0};
+static const WCHAR NoModifyW[] = {'N','o','M','o','d','i','f','y',0};
 static const WCHAR ReadmeW[] = {'R','e','a','d','m','e',0};
 static const WCHAR URLUpdateInfoW[] = {'U','R','L','U','p','d','a','t','e','I',
     'n','f','o',0};
@@ -129,6 +135,7 @@ static void FreeAppInfo(APPINFO *info)
 
         HeapFree(GetProcessHeap(), 0, info->title);
         HeapFree(GetProcessHeap(), 0, info->path);
+        HeapFree(GetProcessHeap(), 0, info->path_modify);
         HeapFree(GetProcessHeap(), 0, info->icon);
         HeapFree(GetProcessHeap(), 0, info->publisher);
         HeapFree(GetProcessHeap(), 0, info->version);
@@ -149,6 +156,7 @@ static BOOL ReadApplicationsFromRegistry(HKEY root)
     HKEY hkeyUninst, hkeyApp;
     int i, id = 0;
     DWORD sizeOfSubKeyName, displen, uninstlen;
+    DWORD dwNoModify, dwType;
     WCHAR subKeyName[256];
     WCHAR key_app[MAX_STRING_LEN];
     WCHAR *p;
@@ -273,6 +281,34 @@ static BOOL ReadApplicationsFromRegistry(HKEY root)
                     &displen);
             }
 
+            /* Check if NoModify is set */
+            dwType = REG_DWORD;
+            dwNoModify = 0;
+            displen = sizeof(DWORD);
+
+            if (RegQueryValueExW(hkeyApp, NoModifyW, NULL, &dwType, (LPBYTE)&dwNoModify, &displen)
+                != ERROR_SUCCESS)
+            {
+                dwNoModify = 0;
+            }
+
+            /* Some installers incorrectly create a REG_SZ instead of a REG_DWORD - check for
+               ASCII 49, which equals 1 */
+            if (dwType == REG_SZ)
+                dwNoModify = (dwNoModify == 49) ? 1 : 0;
+
+            /* Fetch the modify path */
+            if ((dwNoModify == 0) && (RegQueryValueExW(hkeyApp, ModifyPathW, 0, 0, NULL, &displen)
+                == ERROR_SUCCESS))
+            {
+                iter->path_modify = HeapAlloc(GetProcessHeap(), 0, displen);
+
+                if (!iter->path_modify)
+                    goto err;
+
+                RegQueryValueExW(hkeyApp, ModifyPathW, 0, 0, (LPBYTE)iter->path_modify, &displen);
+            }
+
             /* registry key */
             iter->regroot = root;
             lstrcpyW(iter->regkey, subKeyName);
@@ -368,10 +404,42 @@ static inline void EmptyList(void)
  */
 static void UpdateButtons(HWND hWnd)
 {
-    BOOL sel = SendMessageW(GetDlgItem(hWnd, IDL_PROGRAMS), LVM_GETSELECTEDCOUNT, 0, 0) != 0;
+    APPINFO *iter;
+    LVITEMW lvItem;
+    DWORD selitem = SendDlgItemMessageW(hWnd, IDL_PROGRAMS, LVM_GETNEXTITEM, -1,
+       LVNI_FOCUSED | LVNI_SELECTED);
+    BOOL enable_modify = FALSE;
 
-    EnableWindow(GetDlgItem(hWnd, IDC_ADDREMOVE), sel);
-    EnableWindow(GetDlgItem(hWnd, IDC_SUPPORT_INFO), sel);
+    if (selitem != -1)
+    {
+        lvItem.iItem = selitem;
+        lvItem.mask = LVIF_PARAM;
+
+        if (SendDlgItemMessageW(hWnd, IDL_PROGRAMS, LVM_GETITEMW, 0, (LPARAM) &lvItem))
+        {
+            for (iter = AppInfo; iter; iter = iter->next)
+            {
+                if (iter->id == lvItem.lParam)
+                {
+                    /* Decide whether to display Modify/Remove as one button or two */
+                    enable_modify = (iter->path_modify != NULL);
+
+                    /* Update title as appropriate */
+                    if (iter->path_modify == NULL)
+                        SetWindowTextW(GetDlgItem(hWnd, IDC_ADDREMOVE), btnModifyRemove);
+                    else
+                        SetWindowTextW(GetDlgItem(hWnd, IDC_ADDREMOVE), btnRemove);
+
+                    break;
+                }
+            }
+        }
+    }
+
+    /* Enable/disable other buttons if necessary */
+    EnableWindow(GetDlgItem(hWnd, IDC_ADDREMOVE), (selitem != -1));
+    EnableWindow(GetDlgItem(hWnd, IDC_SUPPORT_INFO), (selitem != -1));
+    EnableWindow(GetDlgItem(hWnd, IDC_MODIFY), enable_modify);
 }
 
 /******************************************************************************
@@ -421,8 +489,9 @@ static void InstallProgram(HWND hWnd)
  * Name       : UninstallProgram
  * Description: Executes the specified program's installer.
  * Parameters : id      - the internal ID of the installer to remove
+ * Parameters : button  - ID of button pressed (Modify or Remove)
  */
-static void UninstallProgram(int id)
+static void UninstallProgram(int id, DWORD button)
 {
     APPINFO *iter;
     STARTUPINFOW si;
@@ -445,8 +514,9 @@ static void UninstallProgram(int id)
             memset(&si, 0, sizeof(STARTUPINFOW));
             si.cb = sizeof(STARTUPINFOW);
             si.wShowWindow = SW_NORMAL;
-            res = CreateProcessW(NULL, iter->path, NULL, NULL, FALSE, 0, NULL,
-                NULL, &si, &info);
+
+            res = CreateProcessW(NULL, (button == IDC_MODIFY) ? iter->path_modify : iter->path,
+                NULL, NULL, FALSE, 0, NULL, NULL, &si, &info);
 
             if (res)
             {
@@ -788,6 +858,7 @@ static BOOL CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                     break;
 
                 case IDC_ADDREMOVE:
+                case IDC_MODIFY:
                     selitem = SendDlgItemMessageW(hWnd, IDL_PROGRAMS,
                         LVM_GETNEXTITEM, -1, LVNI_FOCUSED|LVNI_SELECTED);
 
@@ -798,7 +869,7 @@ static BOOL CALLBACK MainDlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 
                         if (SendDlgItemMessageW(hWnd, IDL_PROGRAMS, LVM_GETITEMW,
                           0, (LPARAM) &lvItem))
-                            UninstallProgram(lvItem.lParam);
+                            UninstallProgram(lvItem.lParam, LOWORD(wParam));
                     }
 
                     hImageList = ResetApplicationList(FALSE, hWnd, hImageList);
@@ -842,6 +913,8 @@ static void StartApplet(HWND hWnd)
     /* Load the strings we will use */
     LoadStringW(hInst, IDS_TAB1_TITLE, tab_title, sizeof(tab_title) / sizeof(tab_title[0]));
     LoadStringW(hInst, IDS_CPL_TITLE, app_title, sizeof(app_title) / sizeof(app_title[0]));
+    LoadStringW(hInst, IDS_REMOVE, btnRemove, sizeof(btnRemove) / sizeof(btnRemove[0]));
+    LoadStringW(hInst, IDS_MODIFY_REMOVE, btnModifyRemove, sizeof(btnModifyRemove) / sizeof(btnModifyRemove[0]));
 
     /* Fill out the PROPSHEETPAGE */
     psp.dwSize = sizeof (PROPSHEETPAGEW);

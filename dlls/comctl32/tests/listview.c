@@ -201,6 +201,7 @@ static const struct message forward_erasebkgnd_parent_seq[] = {
 static const struct message ownderdata_select_focus_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
     { WM_NOTIFY, sent|id, 0, 0, LVN_GETDISPINFOA },
+    { WM_NOTIFY, sent|id|optional, 0, 0, LVN_GETDISPINFOA }, /* version 4.7x */
     { 0 }
 };
 
@@ -236,6 +237,12 @@ static const struct message editbox_create_pos[] = {
     /* the rest is todo */
     { WM_WINDOWPOSCHANGING, sent },
     { WM_WINDOWPOSCHANGED, sent },
+    { 0 }
+};
+
+static const struct message scroll_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_BEGINSCROLL },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ENDSCROLL },
     { 0 }
 };
 
@@ -289,6 +296,15 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
           case LVN_ENDLABELEDIT:
               /* always accept new item text */
               return TRUE;
+          case LVN_BEGINSCROLL:
+          case LVN_ENDSCROLL:
+              {
+              NMLVSCROLL *pScroll = (NMLVSCROLL*)lParam;
+
+              trace("LVN_%sSCROLL: (%d,%d)\n", pScroll->hdr.code == LVN_BEGINSCROLL ?
+                                               "BEGIN" : "END", pScroll->dx, pScroll->dy);
+              }
+              break;
           }
           break;
       }
@@ -2660,20 +2676,29 @@ static void test_hittest(void)
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* outside possible client rectangle (to right) */
     x = pos.x + 500;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* subitem returned with -1 item too */
     x = pos.x + 150;
     y = -10;
-    test_lvm_subitemhittest(hwnd, x, y, -1, 1, LVHT_NOWHERE, FALSE, FALSE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, -1, 1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* parent client area is 100x100 by default */
     MoveWindow(hwnd, 0, 0, 300, 100, FALSE);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* the same with LVS_EX_FULLROWSELECT */
     SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT);
@@ -2681,15 +2706,23 @@ static void test_hittest(void)
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEM, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     MoveWindow(hwnd, 0, 0, 100, 100, FALSE);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* outside possible client rectangle (to right) */
     x = pos.x + 500;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* try with icons, state icons index is 1 based so at least 2 bitmaps needed */
     himl = ImageList_Create(16, 16, 0, 4, 4);
@@ -2717,6 +2750,8 @@ static void test_hittest(void)
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
 
     /* state icons indices are 1 based, check with valid index */
     item.mask = LVIF_STATE;
@@ -2731,6 +2766,8 @@ static void test_hittest(void)
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
 
     himl2 = (HIMAGELIST)SendMessage(hwnd, LVM_SETIMAGELIST, LVSIL_STATE, (LPARAM)NULL);
     ok(himl2 == himl, "should return handle\n");
@@ -2741,6 +2778,8 @@ static void test_hittest(void)
     x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
     test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMICON, FALSE, FALSE, __LINE__);
+    test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
+    y = (bounds.bottom - bounds.top) / 2;
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
 
     DestroyWindow(hwnd);
@@ -3661,6 +3700,138 @@ static void test_mapidindex(void)
     DestroyWindow(hwnd);
 }
 
+static void test_getitemspacing(void)
+{
+    HWND hwnd;
+    DWORD ret;
+    INT cx, cy;
+    HIMAGELIST himl;
+    HBITMAP hbmp;
+    LVITEMA itema;
+
+    cx = GetSystemMetrics(SM_CXICONSPACING) - GetSystemMetrics(SM_CXICON);
+    cy = GetSystemMetrics(SM_CYICONSPACING) - GetSystemMetrics(SM_CYICON);
+
+    /* LVS_ICON */
+    hwnd = create_custom_listview_control(0);
+    ret = SendMessage(hwnd, LVM_GETITEMSPACING, FALSE, 0);
+todo_wine {
+    expect(cx, LOWORD(ret));
+    expect(cy, HIWORD(ret));
+}
+    /* now try with icons */
+    himl = ImageList_Create(40, 40, 0, 4, 4);
+    ok(himl != NULL, "failed to create imagelist\n");
+    hbmp = CreateBitmap(40, 40, 1, 1, NULL);
+    ok(hbmp != NULL, "failed to create bitmap\n");
+    ret = ImageList_Add(himl, hbmp, 0);
+    expect(0, ret);
+    ret = SendMessage(hwnd, LVM_SETIMAGELIST, 0, (LPARAM)himl);
+    expect(0, ret);
+
+    itema.mask = LVIF_IMAGE;
+    itema.iImage = 0;
+    itema.iItem = 0;
+    itema.iSubItem = 0;
+    ret = SendMessage(hwnd, LVM_INSERTITEM, 0, (LPARAM)&itema);
+    expect(0, ret);
+    ret = SendMessage(hwnd, LVM_GETITEMSPACING, FALSE, 0);
+todo_wine {
+    /* spacing + icon size returned */
+    expect(cx + 40, LOWORD(ret));
+    expect(cy + 40, HIWORD(ret));
+}
+    DestroyWindow(hwnd);
+    /* LVS_SMALLICON */
+    hwnd = create_custom_listview_control(LVS_SMALLICON);
+    ret = SendMessage(hwnd, LVM_GETITEMSPACING, FALSE, 0);
+todo_wine {
+    expect(cx, LOWORD(ret));
+    expect(cy, HIWORD(ret));
+}
+    DestroyWindow(hwnd);
+    /* LVS_REPORT */
+    hwnd = create_custom_listview_control(LVS_REPORT);
+    ret = SendMessage(hwnd, LVM_GETITEMSPACING, FALSE, 0);
+todo_wine {
+    expect(cx, LOWORD(ret));
+    expect(cy, HIWORD(ret));
+}
+    DestroyWindow(hwnd);
+    /* LVS_LIST */
+    hwnd = create_custom_listview_control(LVS_LIST);
+    ret = SendMessage(hwnd, LVM_GETITEMSPACING, FALSE, 0);
+todo_wine {
+    expect(cx, LOWORD(ret));
+    expect(cy, HIWORD(ret));
+}
+    DestroyWindow(hwnd);
+}
+
+static void test_getcolumnwidth(void)
+{
+    HWND hwnd;
+    DWORD ret;
+    DWORD_PTR style;
+    LVCOLUMNA col;
+
+    /* default column width */
+    hwnd = create_custom_listview_control(0);
+    ret = SendMessage(hwnd, LVM_GETCOLUMNWIDTH, 0, 0);
+    expect(0, ret);
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    SetWindowLong(hwnd, GWL_STYLE, style | LVS_LIST);
+    ret = SendMessage(hwnd, LVM_GETCOLUMNWIDTH, 0, 0);
+    todo_wine expect(8, ret);
+    style = GetWindowLong(hwnd, GWL_STYLE) & ~LVS_LIST;
+    SetWindowLong(hwnd, GWL_STYLE, style | LVS_REPORT);
+    col.mask = 0;
+    ret = SendMessage(hwnd, LVM_INSERTCOLUMNA, 0, (LPARAM)&col);
+    expect(0, ret);
+    ret = SendMessage(hwnd, LVM_GETCOLUMNWIDTH, 0, 0);
+    expect(10, ret);
+    DestroyWindow(hwnd);
+}
+
+static void test_scrollnotify(void)
+{
+    HWND hwnd;
+    DWORD ret;
+
+    hwnd = create_listview_control(0);
+
+    insert_column(hwnd, 0);
+    insert_column(hwnd, 1);
+    insert_item(hwnd, 0);
+
+    /* make it scrollable - resize */
+    ret = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 0, MAKELPARAM(100, 0));
+    expect(TRUE, ret);
+    ret = SendMessage(hwnd, LVM_SETCOLUMNWIDTH, 1, MAKELPARAM(100, 0));
+    expect(TRUE, ret);
+
+    /* try with dummy call */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = SendMessage(hwnd, LVM_SCROLL, 0, 0);
+    expect(TRUE, ret);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, scroll_parent_seq,
+                "scroll notify 1", TRUE);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = SendMessage(hwnd, LVM_SCROLL, 1, 0);
+    expect(TRUE, ret);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, scroll_parent_seq,
+                "scroll notify 2", TRUE);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = SendMessage(hwnd, LVM_SCROLL, 1, 1);
+    expect(TRUE, ret);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, scroll_parent_seq,
+                "scroll notify 3", TRUE);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -3714,6 +3885,8 @@ START_TEST(listview)
     test_editbox();
     test_notifyformat();
     test_indentation();
+    test_getitemspacing();
+    test_getcolumnwidth();
 
     if (!load_v6_module(&ctx_cookie))
     {
@@ -3725,6 +3898,7 @@ START_TEST(listview)
     test_get_set_view();
     test_canceleditlabel();
     test_mapidindex();
+    test_scrollnotify();
 
     unload_v6_module(ctx_cookie);
 

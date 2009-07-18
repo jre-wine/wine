@@ -35,6 +35,7 @@ dlls/kernel32/nls/winerr_deu.mc.rc
 dlls/kernel32/nls/winerr_enu.mc.rc
 dlls/kernel32/nls/winerr_fra.mc.rc
 dlls/kernel32/nls/winerr_kor.mc.rc
+dlls/kernel32/nls/winerr_lth.mc.rc
 dlls/kernel32/nls/winerr_nld.mc.rc
 dlls/kernel32/nls/winerr_nor.mc.rc
 dlls/kernel32/nls/winerr_plk.mc.rc
@@ -137,6 +138,7 @@ include/msinkaut.h
 include/mstask.h
 include/msxml.h
 include/msxml2.h
+include/netcon.h
 include/netfw.h
 include/oaidl.h
 include/objidl.h
@@ -166,6 +168,7 @@ include/unknwn.h
 include/urlhist.h
 include/urlmon.h
 include/vmr9.h
+include/wbemcli.h
 include/wincodec.h
 include/wine/itss.h
 include/wine/svcctl.h
@@ -197,7 +200,8 @@ programs/winedbg/dbg.tab.h
 programs/winedbg/debug.yy.c
 programs/winedbg/winedbg.man
 programs/winetest/*_test.exe
-programs/winetest/tests.rc
+programs/winetest/*_test.rc
+programs/winetest/build.rc
 programs/winhlp32/macro.lex.yy.c
 server/wineserver
 server/wineserver-installed

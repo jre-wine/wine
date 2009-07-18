@@ -1255,6 +1255,7 @@ TREEVIEW_InsertItemT(TREEVIEW_INFO *infoPtr, const TVINSERTSTRUCTW *ptdi, BOOL i
 
     newItem->parent = parentItem;
     newItem->iIntegral = 1;
+    newItem->visibleOrder = -1;
 
     if (!TREEVIEW_DoSetItemT(infoPtr, newItem, tvItem, isW))
         return 0;
@@ -1367,6 +1368,8 @@ TREEVIEW_InsertItemT(TREEVIEW_INFO *infoPtr, const TVINSERTSTRUCTW *ptdi, BOOL i
 
     TREEVIEW_VerifyTree(infoPtr);
 
+    if (!infoPtr->bRedraw) return (LRESULT)newItem;
+
     if (parentItem == infoPtr->root ||
         (ISVISIBLE(parentItem) && parentItem->state & TVIS_EXPANDED))
     {
@@ -1392,8 +1395,6 @@ TREEVIEW_InsertItemT(TREEVIEW_INFO *infoPtr, const TVINSERTSTRUCTW *ptdi, BOOL i
     }
     else
     {
-       newItem->visibleOrder = -1;
-
        /* refresh treeview if newItem is the first item inserted under parentItem */
        if (ISVISIBLE(parentItem) && newItem->prevSibling == newItem->nextSibling)
        {
@@ -1564,6 +1565,7 @@ TREEVIEW_DeleteItem(TREEVIEW_INFO *infoPtr, HTREEITEM wineItem)
 
     TREEVIEW_VerifyTree(infoPtr);
 
+    if (!infoPtr->bRedraw) return TRUE;
 
     if (visible)
     {
@@ -1586,12 +1588,16 @@ TREEVIEW_DeleteItem(TREEVIEW_INFO *infoPtr, HTREEITEM wineItem)
 static LRESULT
 TREEVIEW_SetRedraw(TREEVIEW_INFO* infoPtr, WPARAM wParam)
 {
-  if(wParam)
-    infoPtr->bRedraw = TRUE;
-  else
-    infoPtr->bRedraw = FALSE;
+    infoPtr->bRedraw = wParam ? TRUE : FALSE;
 
-  return 0;
+    if (infoPtr->bRedraw)
+    {
+        TREEVIEW_UpdateSubTree(infoPtr, infoPtr->root);
+        TREEVIEW_RecalculateVisibleOrder(infoPtr, NULL);
+        TREEVIEW_UpdateScrollBars(infoPtr);
+        TREEVIEW_Invalidate(infoPtr, NULL);
+    }
+    return 0;
 }
 
 static LRESULT

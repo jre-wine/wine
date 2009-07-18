@@ -145,7 +145,7 @@ time_t ConvertTimeString(LPCWSTR asctime)
 
 
 BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
-	struct sockaddr_in *psa)
+	struct sockaddr *psa, socklen_t *sa_len)
 {
     WCHAR *found;
     char *name;
@@ -155,6 +155,7 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
     int ret;
 #else
     struct hostent *phe;
+    struct sockaddr_in *sin = (struct sockaddr_in *)psa;
 #endif
 
     TRACE("%s\n", debugstr_w(lpszServerName));
@@ -177,19 +178,42 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
 
 #ifdef HAVE_GETADDRINFO
     memset( &hints, 0, sizeof(struct addrinfo) );
+    /* Prefer IPv4 to IPv6 addresses, since some servers do not listen on
+     * their IPv6 addresses even though they have IPv6 addresses in the DNS.
+     */
     hints.ai_family = AF_INET;
 
     ret = getaddrinfo( name, NULL, &hints, &res );
     HeapFree( GetProcessHeap(), 0, name );
     if (ret != 0)
     {
-        TRACE("failed to get address of %s (%s)\n", debugstr_w(lpszServerName), gai_strerror(ret));
+        TRACE("failed to get IPv4 address of %s (%s), retrying with IPv6\n", debugstr_w(lpszServerName), gai_strerror(ret));
+        hints.ai_family = AF_INET6;
+        ret = getaddrinfo( name, NULL, &hints, &res );
+        if (ret != 0)
+        {
+            TRACE("failed to get address of %s (%s)\n", debugstr_w(lpszServerName), gai_strerror(ret));
+            return FALSE;
+        }
+    }
+    if (*sa_len < res->ai_addrlen)
+    {
+        WARN("address too small\n");
+        freeaddrinfo( res );
         return FALSE;
     }
-    memset( psa, 0, sizeof(struct sockaddr_in) );
-    memcpy( &psa->sin_addr, &((struct sockaddr_in *)res->ai_addr)->sin_addr, sizeof(struct in_addr) );
-    psa->sin_family = res->ai_family;
-    psa->sin_port = htons(nServerPort);
+    *sa_len = res->ai_addrlen;
+    memcpy( psa, res->ai_addr, res->ai_addrlen );
+    /* Copy port */
+    switch (res->ai_family)
+    {
+    case AF_INET:
+        ((struct sockaddr_in *)psa)->sin_port = htons(nServerPort);
+        break;
+    case AF_INET6:
+        ((struct sockaddr_in6 *)psa)->sin6_port = htons(nServerPort);
+        break;
+    }
 
     freeaddrinfo( res );
 #else
@@ -203,10 +227,17 @@ BOOL GetAddress(LPCWSTR lpszServerName, INTERNET_PORT nServerPort,
         LeaveCriticalSection( &cs_gethostbyname );
         return FALSE;
     }
-    memset(psa,0,sizeof(struct sockaddr_in));
-    memcpy((char *)&psa->sin_addr, phe->h_addr, phe->h_length);
-    psa->sin_family = phe->h_addrtype;
-    psa->sin_port = htons(nServerPort);
+    if (*sa_len < sizeof(struct sockaddr_in))
+    {
+        WARN("address too small\n");
+        LeaveCriticalSection( &cs_gethostbyname );
+        return FALSE;
+    }
+    *sa_len = sizeof(struct sockaddr_in);
+    memset(sin,0,sizeof(struct sockaddr_in));
+    memcpy((char *)&sin->sin_addr, phe->h_addr, phe->h_length);
+    sin->sin_family = phe->h_addrtype;
+    sin->sin_port = htons(nServerPort);
 
     LeaveCriticalSection( &cs_gethostbyname );
 #endif
@@ -255,7 +286,7 @@ static const char *get_callback_name(DWORD dwInternetStatus) {
     return "Unknown";
 }
 
-VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
+VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
                            DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                            DWORD dwStatusInfoLength)
 {
@@ -275,11 +306,11 @@ VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
         case INTERNET_STATUS_NAME_RESOLVED:
         case INTERNET_STATUS_CONNECTING_TO_SERVER:
         case INTERNET_STATUS_CONNECTED_TO_SERVER:
-            lpvNewInfo = WININET_strdup_AtoW(lpvStatusInfo);
+            lpvNewInfo = heap_strdupAtoW(lpvStatusInfo);
             break;
         case INTERNET_STATUS_RESOLVING_NAME:
         case INTERNET_STATUS_REDIRECT:
-            lpvNewInfo = WININET_strdupW(lpvStatusInfo);
+            lpvNewInfo = heap_strdupW(lpvStatusInfo);
             break;
         }
     }else {
@@ -293,7 +324,7 @@ VOID INTERNET_SendCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
             break;
         case INTERNET_STATUS_RESOLVING_NAME:
         case INTERNET_STATUS_REDIRECT:
-            lpvNewInfo = WININET_strdup_WtoA(lpvStatusInfo);
+            lpvNewInfo = heap_strdupWtoA(lpvStatusInfo);
             break;
         }
     }
@@ -325,7 +356,7 @@ static void SendAsyncCallbackProc(WORKREQUEST *workRequest)
     HeapFree(GetProcessHeap(), 0, req->lpvStatusInfo);
 }
 
-VOID SendAsyncCallback(LPWININETHANDLEHEADER hdr, DWORD_PTR dwContext,
+void SendAsyncCallback(object_header_t *hdr, DWORD_PTR dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                        DWORD dwStatusInfoLength)
 {

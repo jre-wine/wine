@@ -21,11 +21,13 @@
 #include "wine/debug.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 
 #include "windef.h"
 #include "winbase.h"
 #include "winhttp.h"
 #include "wincrypt.h"
+#include "winreg.h"
 
 #include "winhttp_private.h"
 
@@ -166,13 +168,35 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     session->hdr.vtbl = &session_vtbl;
     session->hdr.flags = flags;
     session->hdr.refs = 1;
-    session->access = access;
     session->hdr.redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
     list_init( &session->cookie_cache );
 
     if (agent && !(session->agent = strdupW( agent ))) goto end;
-    if (proxy && !(session->proxy_server = strdupW( proxy ))) goto end;
-    if (bypass && !(session->proxy_bypass = strdupW( bypass ))) goto end;
+    if (access == WINHTTP_ACCESS_TYPE_DEFAULT_PROXY)
+    {
+        WINHTTP_PROXY_INFO info;
+
+        WinHttpGetDefaultProxyConfiguration( &info );
+        session->access = info.dwAccessType;
+        if (info.lpszProxy && !(session->proxy_server = strdupW( info.lpszProxy )))
+        {
+            GlobalFree( (LPWSTR)info.lpszProxy );
+            GlobalFree( (LPWSTR)info.lpszProxyBypass );
+            goto end;
+        }
+        if (info.lpszProxyBypass && !(session->proxy_bypass = strdupW( info.lpszProxyBypass )))
+        {
+            GlobalFree( (LPWSTR)info.lpszProxy );
+            GlobalFree( (LPWSTR)info.lpszProxyBypass );
+            goto end;
+        }
+    }
+    else if (access == WINHTTP_ACCESS_TYPE_NAMED_PROXY)
+    {
+        session->access = access;
+        if (proxy && !(session->proxy_server = strdupW( proxy ))) goto end;
+        if (bypass && !(session->proxy_bypass = strdupW( bypass ))) goto end;
+    }
 
     if (!(handle = alloc_handle( &session->hdr ))) goto end;
     session->hdr.handle = handle;
@@ -207,6 +231,148 @@ static const object_vtbl_t connect_vtbl =
     NULL,
     NULL
 };
+
+static BOOL domain_matches(LPCWSTR server, LPCWSTR domain)
+{
+    static const WCHAR localW[] = { '<','l','o','c','a','l','>',0 };
+    BOOL ret = FALSE;
+
+    if (!strcmpiW( domain, localW ) && !strchrW( server, '.' ))
+        ret = TRUE;
+    else if (*domain == '*')
+    {
+        if (domain[1] == '.')
+        {
+            LPCWSTR dot;
+
+            /* For a hostname to match a wildcard, the last domain must match
+             * the wildcard exactly.  E.g. if the wildcard is *.a.b, and the
+             * hostname is www.foo.a.b, it matches, but a.b does not.
+             */
+            dot = strchrW( server, '.' );
+            if (dot)
+            {
+                int len = strlenW( dot + 1 );
+
+                if (len > strlenW( domain + 2 ))
+                {
+                    LPCWSTR ptr;
+
+                    /* The server's domain is longer than the wildcard, so it
+                     * could be a subdomain.  Compare the last portion of the
+                     * server's domain.
+                     */
+                    ptr = dot + len + 1 - strlenW( domain + 2 );
+                    if (!strcmpiW( ptr, domain + 2 ))
+                    {
+                        /* This is only a match if the preceding character is
+                         * a '.', i.e. that it is a matching domain.  E.g.
+                         * if domain is '*.b.c' and server is 'www.ab.c' they
+                         * do not match.
+                         */
+                        ret = *(ptr - 1) == '.';
+                    }
+                }
+                else
+                    ret = !strcmpiW( dot + 1, domain + 2 );
+            }
+        }
+    }
+    else
+        ret = !strcmpiW( server, domain );
+    return ret;
+}
+
+/* Matches INTERNET_MAX_HOST_NAME_LENGTH in wininet.h, also RFC 1035 */
+#define MAX_HOST_NAME_LENGTH 256
+
+static BOOL should_bypass_proxy(session_t *session, LPCWSTR server)
+{
+    LPCWSTR ptr;
+    BOOL ret = FALSE;
+
+    ptr = session->proxy_bypass;
+    do {
+        LPCWSTR tmp = ptr;
+
+        ptr = strchrW( ptr, ';' );
+        if (!ptr)
+            ptr = strchrW( tmp, ' ' );
+        if (ptr)
+        {
+            if (ptr - tmp < MAX_HOST_NAME_LENGTH)
+            {
+                WCHAR domain[MAX_HOST_NAME_LENGTH];
+
+                memcpy( domain, tmp, (ptr - tmp) * sizeof(WCHAR) );
+                domain[ptr - tmp] = 0;
+                ret = domain_matches( server, domain );
+            }
+            ptr += 1;
+        }
+        else if (*tmp)
+            ret = domain_matches( server, tmp );
+    } while (ptr && !ret);
+    return ret;
+}
+
+BOOL set_server_for_hostname( connect_t *connect, LPCWSTR server, INTERNET_PORT port )
+{
+    session_t *session = connect->session;
+    BOOL ret = TRUE;
+
+    if (session->proxy_server && !should_bypass_proxy(session, server))
+    {
+        LPCWSTR colon;
+
+        if ((colon = strchrW( session->proxy_server, ':' )))
+        {
+            if (!connect->servername || strncmpiW( connect->servername,
+                session->proxy_server, colon - session->proxy_server - 1 ))
+            {
+                heap_free( connect->servername );
+                if (!(connect->servername = heap_alloc(
+                    (colon - session->proxy_server + 1) * sizeof(WCHAR) )))
+                {
+                    ret = FALSE;
+                    goto end;
+                }
+                memcpy( connect->servername, session->proxy_server,
+                    (colon - session->proxy_server) * sizeof(WCHAR) );
+                connect->servername[colon - session->proxy_server] = 0;
+                if (*(colon + 1))
+                    connect->serverport = atoiW( colon + 1 );
+                else
+                    connect->serverport = INTERNET_DEFAULT_PORT;
+            }
+        }
+        else
+        {
+            if (!connect->servername || strcmpiW( connect->servername,
+                session->proxy_server ))
+            {
+                heap_free( connect->servername );
+                if (!(connect->servername = strdupW( session->proxy_server )))
+                {
+                    ret = FALSE;
+                    goto end;
+                }
+                connect->serverport = INTERNET_DEFAULT_PORT;
+            }
+        }
+    }
+    else if (server)
+    {
+        if (!(connect->servername = strdupW( server )))
+        {
+            ret = FALSE;
+            goto end;
+        }
+        connect->serverport = port;
+    }
+end:
+    return ret;
+}
 
 /***********************************************************************
  *          WinHttpConnect (winhttp.@)
@@ -255,8 +421,8 @@ HINTERNET WINAPI WinHttpConnect( HINTERNET hsession, LPCWSTR server, INTERNET_PO
     if (server && !(connect->hostname = strdupW( server ))) goto end;
     connect->hostport = port;
 
-    if (server && !(connect->servername = strdupW( server ))) goto end;
-    connect->serverport = port;
+    if (!set_server_for_hostname( connect, server, port ))
+        goto end;
 
     if (!(hconnect = alloc_handle( &connect->hdr ))) goto end;
     connect->hdr.handle = hconnect;
@@ -648,17 +814,141 @@ BOOL WINAPI WinHttpDetectAutoProxyConfigUrl( DWORD flags, LPWSTR *url )
     return FALSE;
 }
 
+static const WCHAR Connections[] = {
+    'S','o','f','t','w','a','r','e','\\',
+    'M','i','c','r','o','s','o','f','t','\\',
+    'W','i','n','d','o','w','s','\\',
+    'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+    'I','n','t','e','r','n','e','t',' ','S','e','t','t','i','n','g','s','\\',
+    'C','o','n','n','e','c','t','i','o','n','s',0 };
+static const WCHAR WinHttpSettings[] = {
+    'W','i','n','H','t','t','p','S','e','t','t','i','n','g','s',0 };
+static const DWORD WINHTTPSETTINGS_MAGIC = 0x18;
+static const DWORD WINHTTP_PROXY_TYPE_DIRECT = 1;
+static const DWORD WINHTTP_PROXY_TYPE_PROXY = 2;
+
+struct winhttp_settings_header
+{
+    DWORD magic;
+    DWORD unknown; /* always zero? */
+    DWORD flags;   /* one of WINHTTP_PROXY_TYPE_* */
+};
+
+static inline void copy_char_to_wchar_sz(const BYTE *src, DWORD len, WCHAR *dst)
+{
+    const BYTE *begin;
+
+    for (begin = src; src - begin < len; src++, dst++)
+        *dst = *src;
+    *dst = 0;
+}
+
 /***********************************************************************
  *          WinHttpGetDefaultProxyConfiguration (winhttp.@)
  */
 BOOL WINAPI WinHttpGetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
 {
-    FIXME("%p\n", info);
+    LONG l;
+    HKEY key;
+    BOOL direct = TRUE;
+    char *envproxy;
 
-    info->dwAccessType    = WINHTTP_ACCESS_TYPE_NO_PROXY;
-    info->lpszProxy       = NULL;
-    info->lpszProxyBypass = NULL;
+    TRACE("%p\n", info);
 
+    l = RegOpenKeyExW( HKEY_LOCAL_MACHINE, Connections, 0, KEY_READ, &key );
+    if (!l)
+    {
+        DWORD type, size = 0;
+
+        l = RegQueryValueExW( key, WinHttpSettings, NULL, &type, NULL, &size );
+        if (!l && type == REG_BINARY &&
+            size >= sizeof(struct winhttp_settings_header) + 2 * sizeof(DWORD))
+        {
+            BYTE *buf = heap_alloc( size );
+
+            if (buf)
+            {
+                struct winhttp_settings_header *hdr =
+                    (struct winhttp_settings_header *)buf;
+                DWORD *len = (DWORD *)(hdr + 1);
+
+                l = RegQueryValueExW( key, WinHttpSettings, NULL, NULL, buf,
+                    &size );
+                if (!l && hdr->magic == WINHTTPSETTINGS_MAGIC &&
+                    hdr->unknown == 0)
+                {
+                    if (hdr->flags & WINHTTP_PROXY_TYPE_PROXY)
+                    {
+                       BOOL sane = FALSE;
+
+                        /* Sanity-check length of proxy string */
+                        if ((BYTE *)len - buf + *len <= size)
+                        {
+                            sane = TRUE;
+                            info->lpszProxy = GlobalAlloc( 0,
+                                (*len + 1) * sizeof(WCHAR) );
+                            if (info->lpszProxy)
+                                copy_char_to_wchar_sz( (BYTE *)(len + 1),
+                                    *len, (LPWSTR)info->lpszProxy );
+                            len = (DWORD *)((BYTE *)(len + 1) + *len);
+                        }
+                        if (sane)
+                        {
+                            /* Sanity-check length of proxy bypass string */
+                            if ((BYTE *)len - buf + *len <= size)
+                            {
+                                info->lpszProxyBypass = GlobalAlloc( 0,
+                                    (*len + 1) * sizeof(WCHAR) );
+                                if (info->lpszProxyBypass)
+                                    copy_char_to_wchar_sz( (BYTE *)(len + 1),
+                                        *len, (LPWSTR)info->lpszProxyBypass );
+                            }
+                            else
+                            {
+                                sane = FALSE;
+                                GlobalFree( (LPWSTR)info->lpszProxy );
+                                info->lpszProxy = NULL;
+                            }
+                        }
+                        if (sane)
+                        {
+                            direct = FALSE;
+                            info->dwAccessType =
+                                WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+                            TRACE("http proxy (from registry) = %s, bypass = %s\n",
+                                debugstr_w(info->lpszProxy),
+                                debugstr_w(info->lpszProxyBypass));
+                        }
+                    }
+                }
+                heap_free( buf );
+            }
+        }
+        RegCloseKey( key );
+    }
+    else if ((envproxy = getenv( "http_proxy" )))
+    {
+        WCHAR *envproxyW;
+        int len;
+
+        len = MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, NULL, 0 );
+        if ((envproxyW = GlobalAlloc( 0, len * sizeof(WCHAR))))
+        {
+            MultiByteToWideChar( CP_UNIXCP, 0, envproxy, -1, envproxyW, len );
+            direct = FALSE;
+            info->dwAccessType = WINHTTP_ACCESS_TYPE_NAMED_PROXY;
+            info->lpszProxy = envproxyW;
+            info->lpszProxyBypass = NULL;
+            TRACE("http proxy (from environment) = %s\n",
+                debugstr_w(info->lpszProxy));
+        }
+    }
+    if (direct)
+    {
+        info->dwAccessType    = WINHTTP_ACCESS_TYPE_NO_PROXY;
+        info->lpszProxy       = NULL;
+        info->lpszProxyBypass = NULL;
+    }
     return TRUE;
 }
 
@@ -703,9 +993,106 @@ BOOL WINAPI WinHttpGetProxyForUrl( HINTERNET hsession, LPCWSTR url, WINHTTP_AUTO
  */
 BOOL WINAPI WinHttpSetDefaultProxyConfiguration( WINHTTP_PROXY_INFO *info )
 {
-    FIXME("%p [%u, %s, %s]\n", info, info->dwAccessType, debugstr_w(info->lpszProxy),
-          debugstr_w(info->lpszProxyBypass));
-    return TRUE;
+    LONG l;
+    HKEY key;
+    BOOL ret = FALSE;
+    const WCHAR *src;
+
+    TRACE("%p\n", info);
+
+    if (!info)
+    {
+        set_last_error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    switch (info->dwAccessType)
+    {
+    case WINHTTP_ACCESS_TYPE_NO_PROXY:
+        break;
+    case WINHTTP_ACCESS_TYPE_NAMED_PROXY:
+        if (!info->lpszProxy)
+        {
+            set_last_error( ERROR_INVALID_PARAMETER );
+            return FALSE;
+        }
+        /* Only ASCII characters are allowed */
+        for (src = info->lpszProxy; *src; src++)
+            if (*src > 0x7f)
+            {
+                set_last_error( ERROR_INVALID_PARAMETER );
+                return FALSE;
+            }
+        if (info->lpszProxyBypass)
+        {
+            for (src = info->lpszProxyBypass; *src; src++)
+                if (*src > 0x7f)
+                {
+                    set_last_error( ERROR_INVALID_PARAMETER );
+                    return FALSE;
+                }
+        }
+        break;
+    default:
+        set_last_error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    l = RegCreateKeyExW( HKEY_LOCAL_MACHINE, Connections, 0, NULL, 0,
+        KEY_WRITE, NULL, &key, NULL );
+    if (!l)
+    {
+        DWORD size = sizeof(struct winhttp_settings_header) + 2 * sizeof(DWORD);
+        BYTE *buf;
+
+        if (info->dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY)
+        {
+            size += strlenW( info->lpszProxy );
+            if (info->lpszProxyBypass)
+                size += strlenW( info->lpszProxyBypass );
+        }
+        buf = heap_alloc( size );
+        if (buf)
+        {
+            struct winhttp_settings_header *hdr =
+                (struct winhttp_settings_header *)buf;
+            DWORD *len = (DWORD *)(hdr + 1);
+
+            hdr->magic = WINHTTPSETTINGS_MAGIC;
+            hdr->unknown = 0;
+            if (info->dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY)
+            {
+                BYTE *dst;
+
+                hdr->flags = WINHTTP_PROXY_TYPE_PROXY;
+                *len++ = strlenW( info->lpszProxy );
+                for (dst = (BYTE *)len, src = info->lpszProxy; *src;
+                    src++, dst++)
+                    *dst = *src;
+                len = (DWORD *)dst;
+                if (info->lpszProxyBypass)
+                {
+                    *len++ = strlenW( info->lpszProxyBypass );
+                    for (dst = (BYTE *)len, src = info->lpszProxyBypass; *src;
+                        src++, dst++)
+                        *dst = *src;
+                }
+                else
+                    *len++ = 0;
+            }
+            else
+            {
+                hdr->flags = WINHTTP_PROXY_TYPE_DIRECT;
+                *len++ = 0;
+                *len++ = 0;
+            }
+            l = RegSetValueExW( key, WinHttpSettings, 0, REG_BINARY, buf, size );
+            if (!l)
+                ret = TRUE;
+            heap_free( buf );
+        }
+        RegCloseKey( key );
+    }
+    return ret;
 }
 
 /***********************************************************************
@@ -737,8 +1124,40 @@ WINHTTP_STATUS_CALLBACK WINAPI WinHttpSetStatusCallback( HINTERNET handle, WINHT
  */
 BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int send, int receive )
 {
-    FIXME("%p, %d, %d, %d, %d\n", handle, resolve, connect, send, receive);
-    return TRUE;
+    BOOL ret = TRUE;
+    request_t *request;
+
+    TRACE("%p, %d, %d, %d, %d\n", handle, resolve, connect, send, receive);
+
+    if (resolve < -1 || connect < -1 || send < -1 || receive < -1)
+    {
+        set_last_error( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    FIXME("resolve and connect timeout not supported\n");
+
+    if (!(request = (request_t *)grab_object( handle )))
+    {
+        set_last_error( ERROR_INVALID_HANDLE );
+        return FALSE;
+    }
+
+    if (request->hdr.type != WINHTTP_HANDLE_TYPE_REQUEST)
+    {
+        release_object( &request->hdr );
+        set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
+        return FALSE;
+    }
+
+    if (send < 0) send = 0;
+    if (netconn_set_timeout( &request->netconn, TRUE, send )) ret = FALSE;
+
+    if (receive < 0) receive = 0;
+    if (netconn_set_timeout( &request->netconn, FALSE, receive )) ret = FALSE;
+
+    release_object( &request->hdr );
+    return ret;
 }
 
 static const WCHAR wkday[7][4] =

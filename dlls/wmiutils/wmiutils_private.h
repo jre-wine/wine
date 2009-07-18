@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 David Adam
+ * Copyright 2009 Hans Leidekker for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -16,17 +16,4 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __D3DX8_H__
-#define __D3DX8_H__
-
-#include <d3d8.h>
-#include <limits.h>
-
-#include <d3dx8math.h>
-#include <d3dx8core.h>
-/* FIXME: #include <d3dx8tex.h> */
-#include <d3dx8mesh.h>
-/* FIXME: #include <d3dx8shape.h> */
-/* FIXME: #include <d3dx8effect.h> */
-
-#endif
+HRESULT WbemStatusCodeText_create(IUnknown *, LPVOID *);

@@ -70,13 +70,22 @@ int symt_cmp_addr(const void* p1, const void* p2)
 static BOOL symt_grow_sorttab(struct module* module, unsigned sz)
 {
     struct symt_ht**    new;
+    unsigned int size;
 
+    if (sz <= module->sorttab_size) return TRUE;
     if (module->addr_sorttab)
+    {
+        size = module->sorttab_size * 2;
         new = HeapReAlloc(GetProcessHeap(), 0, module->addr_sorttab,
-                          sz * sizeof(struct symt_ht*));
+                          size * sizeof(struct symt_ht*));
+    }
     else
-        new = HeapAlloc(GetProcessHeap(), 0, sz * sizeof(struct symt_ht*));
+    {
+        size = 64;
+        new = HeapAlloc(GetProcessHeap(), 0, size * sizeof(struct symt_ht*));
+    }
     if (!new) return FALSE;
+    module->sorttab_size = size;
     module->addr_sorttab = new;
     return TRUE;
 }
@@ -477,7 +486,7 @@ struct symt_block* symt_open_func_block(struct module* module,
 }
 
 struct symt_block* symt_close_func_block(struct module* module, 
-                                         struct symt_function* func,
+                                         const struct symt_function* func,
                                          struct symt_block* block, unsigned pc)
 {
     assert(func);
@@ -509,7 +518,7 @@ struct symt_hierarchy_point* symt_add_function_point(struct module* module,
     return sym;
 }
 
-BOOL symt_normalize_function(struct module* module, struct symt_function* func)
+BOOL symt_normalize_function(struct module* module, const struct symt_function* func)
 {
     unsigned            len;
     struct line_info*   dli;
@@ -762,7 +771,7 @@ static BOOL send_symbol(const struct sym_enum* se, const struct module_pair* pai
     return !se->cb(se->sym_info, se->sym_info->Size, se->user);
 }
 
-static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
+static BOOL symt_enum_module(const struct module_pair* pair, const regex_t* regex,
                              const struct sym_enum* se)
 {
     void*                       ptr;
@@ -783,7 +792,7 @@ static BOOL symt_enum_module(struct module_pair* pair, const regex_t* regex,
     return FALSE;
 }
 
-static inline unsigned where_to_insert(const struct module* module, unsigned high, struct symt_ht* elt)
+static inline unsigned where_to_insert(const struct module* module, unsigned high, const struct symt_ht* elt)
 {
     unsigned    low = 0, mid = high / 2;
     ULONG64     addr;
@@ -839,7 +848,7 @@ static BOOL resort_symbols(struct module* module)
     return module->sortlist_valid = TRUE;
 }
 
-static void symt_get_length(struct symt* symt, ULONG64* size)
+static void symt_get_length(const struct symt* symt, ULONG64* size)
 {
     DWORD       type_index;
 

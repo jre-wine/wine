@@ -247,8 +247,7 @@ HEADER_SetItemBounds (HEADER_INFO *infoPtr)
 static LRESULT
 HEADER_Size (HEADER_INFO *infoPtr)
 {
-    infoPtr->bRectsValid = FALSE;
-
+    HEADER_SetItemBounds(infoPtr);
     return 0;
 }
 
@@ -1210,7 +1209,7 @@ HEADER_SetOrderArray(HEADER_INFO *infoPtr, INT size, const INT *order)
         lpItem = &infoPtr->items[*order++];
 	lpItem->iOrder=i;
       }
-    infoPtr->bRectsValid=0;
+    HEADER_SetItemBounds(infoPtr);
     InvalidateRect(infoPtr->hwndSelf, NULL, FALSE);
     return TRUE;
 }
@@ -1225,10 +1224,12 @@ HEADER_GetUnicodeFormat (const HEADER_INFO *infoPtr)
 static LRESULT
 HEADER_HitTest (const HEADER_INFO *infoPtr, LPHDHITTESTINFO phti)
 {
+    UINT outside = HHT_NOWHERE | HHT_ABOVE | HHT_BELOW | HHT_TOLEFT | HHT_TORIGHT;
+
     HEADER_InternalHitTest (infoPtr, &phti->pt, &phti->flags, &phti->iItem);
 
-    if (phti->flags == HHT_NOWHERE)
-        return -1;
+    if (phti->flags & outside)
+	return phti->iItem = -1;
     else
         return phti->iItem;
 }

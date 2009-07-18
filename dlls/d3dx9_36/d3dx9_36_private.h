@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2002 Raphael Junqueira
+ * Copyright (C) 2008 David Adam
  * Copyright (C) 2008 Tony Wasserka
  *
  * This library is free software; you can redistribute it and/or
@@ -32,6 +34,20 @@
 HRESULT map_view_of_file(LPCWSTR filename, LPVOID *buffer, DWORD *length);
 HRESULT load_resource_into_memory(HMODULE module, HRSRC resinfo, LPVOID *buffer, DWORD *length);
 
+extern const ID3DXBufferVtbl D3DXBuffer_Vtbl;
+
+/* ID3DXBUFFER */
+typedef struct ID3DXBufferImpl
+{
+    /* IUnknown fields */
+    const ID3DXBufferVtbl *lpVtbl;
+    LONG           ref;
+
+    /* ID3DXBuffer fields */
+    DWORD         *buffer;
+    DWORD          bufferSize;
+} ID3DXBufferImpl;
+
 
 /* ID3DXFont */
 typedef struct ID3DXFontImpl
@@ -48,6 +64,18 @@ typedef struct ID3DXFontImpl
     HFONT hfont;
 } ID3DXFontImpl;
 
+/* ID3DXMatrixStack */
+typedef struct ID3DXMatrixStackImpl
+{
+  /* IUnknown fields */
+  const ID3DXMatrixStackVtbl *lpVtbl;
+  LONG                   ref;
+
+  /* ID3DXMatrixStack fields */
+  unsigned int current;
+  unsigned int stack_size;
+  D3DXMATRIX *stack;
+} ID3DXMatrixStackImpl;
 
 /*ID3DXSprite */
 typedef struct _SPRITE {
