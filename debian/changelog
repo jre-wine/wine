@@ -1,8 +1,13 @@
-wine-unstable (1.1.26-1) UNRELEASED; urgency=low
+wine-unstable (1.1.26-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.26, released Jul 17, 2009.
+    - Still more translation updates.
+    - Faster bitmap stretching using XRender.
+    - Proxy support in WinHTTP.
+    - Many more JScript functions.
+    - Various bug fixes.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 18 Jul 2009 20:48:29 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 18 Jul 2009 21:16:14 +0200
 
 wine-unstable (1.1.25-1) unstable; urgency=low
 
