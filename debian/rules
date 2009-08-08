@@ -346,7 +346,7 @@ binary-arch: install-arch-stamp
 	rm -rf debian/libwine-dbg$(VERSUFFIX)/usr/lib/debug/usr/bin
 
 	# debhelper 6 has dh_lintian, but I don't want to depend on it yet...
-	install -D -m 644 debian/libwine.lintian-overrides debian/libwine$(VERSUFFIX)/usr/share/lintian/overrides/libwine$(VERSUFFIX)
+	install -D -m 644 debian/libwine$(VERSUFFIX).lintian-overrides debian/libwine$(VERSUFFIX)/usr/share/lintian/overrides/libwine$(VERSUFFIX)
 
 	dh_desktop -s
 

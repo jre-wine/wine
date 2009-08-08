@@ -4,12 +4,12 @@ LIBDIRS="$2"
 
 function expand_common
 {
-  sed "s,/usr/lib,/$1," debian/$package.install-common | \
+  sed "s,/usr/lib,/$1," debian/$package.${ext}-common | \
   sed "s,usr/share/doc/$package,&$SUFFIX," \
-   > debian/$package$SUFFIX.install
+   > debian/$package$SUFFIX.${ext}
   shift
   while [ -n "$1" ]; do
-    sed -n "s,/usr/lib,/$1,p" debian/$package.install-common >> debian/$package$SUFFIX.install
+    sed -n "s,/usr/lib,/$1,p" debian/$package.${ext}-common >> debian/$package$SUFFIX.${ext}
     shift
   done
 }
@@ -18,32 +18,27 @@ function expand_common
 # if they were compiled on the current one, install them
 function expand_platform
 {
-  if [ ! -f debian/$package.install-platform ]; then
+  if [ ! -f debian/$package.${ext}-platform ]; then
     return
   fi
-  for bin in $(sed "s,/usr/lib,/$1," debian/$package.install-platform); do
-    [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.install
+  for bin in $(sed "s,/usr/lib,/$1," debian/$package.${ext}-platform); do
+    [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
   done
   shift
   while [ -n "$1" ]; do
-    for bin in $(sed -n "s,/usr/lib,/$1,p" debian/$package.install-platform); do
-      [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.install
+    for bin in $(sed -n "s,/usr/lib,/$1,p" debian/$package.${ext}-platform); do
+      [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
     done
     shift
   done
 }
 
-for inst in debian/*.install-common; do
-  package="$(basename "$inst" .install-common)"
-  expand_common $LIBDIRS
-  expand_platform $LIBDIRS
-done
-
-for ext in links mime config preinst postinst prerm postrm docs manpages; do
+for ext in install links mime config preinst postinst prerm postrm docs manpages lintian-overrides; do
   for inst in debian/*.${ext}-common; do
     if [ -f "$inst" ]; then
       package="$(basename "$inst" .${ext}-common)"
-      cat debian/$package.${ext}-common > debian/$package$SUFFIX.${ext}
+      expand_common $LIBDIRS
+      expand_platform $LIBDIRS
     fi
   done
 done
