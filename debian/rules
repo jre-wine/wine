@@ -87,6 +87,14 @@ LOADERS = wine-kthread wine-pthread wine-preloader
 empty:=
 space:=$(empty) $(empty)
 
+SHLIBS_OPTS = -Llibwine$(VERSUFFIX) -l$(subst $(space),:,$(patsubst %,$(CURDIR)/debian/libwine$(VERSUFFIX)/%,$(LIBDIRS)))
+
+ifneq (,$(findstring build32,$(BUILDS)))
+ifeq (usr/lib32,$(IA32_LIBDIR))
+PRE_DEPS = Pre-Depends=libc6-i386 (>= 2.9-18)
+endif
+endif
+
 control-stamp: debian/control.in
 ifneq (,$(BUILDS))
 	bash debian/prep-control.sh "$(VERSUFFIX)"
@@ -357,18 +365,16 @@ binary-arch: install-arch-stamp
 	# tight libwine dependencies for packages built here
 	dh_makeshlibs -plibwine$(VERSUFFIX) -n -V "libwine$(VERSUFFIX) (= $(VERSION))"
 
+	echo "misc:Pre-Depends=$(PRE_DEPS)" >> debian/libwine$(VERSUFFIX).substvars
+
+	# forcing extra dependencies
 	bash debian/gendeps.sh "$(VERSUFFIX)" $(patsubst build%,%,$(BUILDS))
-	dh_shlibdeps -s -Llibwine$(VERSUFFIX) -l$(subst $(space),:,$(patsubst %,$(CURDIR)/debian/libwine$(VERSUFFIX)/%,$(LIBDIRS)))
+	dh_shlibdeps -s $(SHLIBS_OPTS) -Xextrarecs
+	bash debian/recs.sh "$(VERSUFFIX)"
 	bash debian/cleandeps.sh "$(VERSUFFIX)"
 
 	# relaxed libwine dependencies for everyone else
 	dh_makeshlibs -s
-
-ifneq (,$(findstring build32,$(BUILDS)))
-ifeq (usr/lib32,$(IA32_LIBDIR))
-	echo "misc:Pre-Depends=libc6-i386 (>= 2.9-18)" >> debian/libwine$(VERSUFFIX).substvars
-endif
-endif
 
 	dh_installdeb -s
 

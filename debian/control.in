@@ -90,6 +90,7 @@ Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powe
 Depends: ${shlibs:Depends}
 Pre-Depends: ${misc:Pre-Depends}
 Replaces: wine (<< 0.9.11-1), libwine-twain (<< 0.9.13), libwine-gl (<< 0.9.53-1)
+Recommends: ${shlibs:Recommends}
 Suggests: wine-doc
 Description: Windows API implementation - library
  Wine is a free MS-Windows API implementation.
