@@ -79,6 +79,8 @@ static const WCHAR testparentclassW[] =
 HWND hwndparent, hwndparentW;
 /* prevents edit box creation, LVN_BEGINLABELEDIT return value */
 BOOL blockEdit;
+/* dumps LVN_ITEMCHANGED message data */
+static BOOL g_dump_itemchanged;
 /* format reported to control:
    -1 falls to defproc, anything else returned */
 INT  notifyFormat;
@@ -205,6 +207,42 @@ static const struct message ownderdata_select_focus_parent_seq[] = {
     { 0 }
 };
 
+static const struct message ownerdata_setstate_all_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_defocus_all_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_GETDISPINFOA },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message ownerdata_deselect_all_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ODCACHEHINT },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
+static const struct message select_all_parent_seq[] = {
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
+    { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
+    { 0 }
+};
+
 static const struct message textcallback_set_again_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGING },
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED  },
@@ -229,14 +267,18 @@ static const struct message getitemposition_seq2[] = {
 
 static const struct message editbox_create_pos[] = {
     /* sequence sent after LVN_BEGINLABELEDIT */
+    /* next two are 4.7x specific */
     { WM_WINDOWPOSCHANGING, sent },
+    { WM_WINDOWPOSCHANGED, sent|optional },
+
+    { WM_WINDOWPOSCHANGING, sent|optional },
     { WM_NCCALCSIZE, sent },
     { WM_WINDOWPOSCHANGED, sent },
     { WM_MOVE, sent|defwinproc },
     { WM_SIZE, sent|defwinproc },
-    /* the rest is todo */
-    { WM_WINDOWPOSCHANGING, sent },
-    { WM_WINDOWPOSCHANGED, sent },
+    /* the rest is todo, skipped in 4.7x */
+    { WM_WINDOWPOSCHANGING, sent|optional },
+    { WM_WINDOWPOSCHANGED, sent|optional },
     { 0 }
 };
 
@@ -303,6 +345,14 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
 
               trace("LVN_%sSCROLL: (%d,%d)\n", pScroll->hdr.code == LVN_BEGINSCROLL ?
                                                "BEGIN" : "END", pScroll->dx, pScroll->dy);
+              }
+              break;
+          case LVN_ITEMCHANGED:
+              if (g_dump_itemchanged)
+              {
+                  NMLISTVIEW *nmlv = (NMLISTVIEW*)lParam;
+                  trace("LVN_ITEMCHANGED: item=%d,new=%x,old=%x,changed=%x\n",
+                         nmlv->iItem, nmlv->uNewState, nmlv->uOldState, nmlv->uChanged);
               }
               break;
           }
@@ -1916,6 +1966,24 @@ static void test_multiselect(void)
     }
     item_count = (int)SendMessage(hwnd, LVM_GETITEMCOUNT, 0, 0);
     expect(items,item_count);
+
+    /* try with NULL pointer */
+    r = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)NULL);
+    expect(FALSE, r);
+
+    /* select all, check notifications */
+    ListView_SetItemState(hwnd, -1, 0, LVIS_SELECTED);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    r = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, r);
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, select_all_parent_seq,
+                "select all notification", FALSE);
+
     /* deselect all items */
     ListView_SetItemState(hwnd, -1, 0, LVIS_SELECTED);
     SendMessage(hwnd, LVM_SETSELECTIONMARK, 0, -1);
@@ -1926,7 +1994,6 @@ static void test_multiselect(void)
     r = SendMessage(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
     expect(3, r);
     r = SendMessage(hwnd, LVM_GETSELECTIONMARK, 0, 0);
-todo_wine
     expect(-1, r);
 
     style = GetWindowLongPtrA(hwnd, GWL_STYLE);
@@ -1958,7 +2025,6 @@ todo_wine
     r = SendMessage(hwnd, LVM_GETSELECTEDCOUNT, 0, 0);
     expect(1, r);
     r = SendMessage(hwnd, LVM_GETSELECTIONMARK, 0, 0);
-todo_wine
     expect(-1, r);
 
     /* try to select all on LVS_SINGLESEL */
@@ -2385,7 +2451,7 @@ static void test_ownerdata(void)
     /* check notifications after focused/selected changed */
     hwnd = create_listview_control(LVS_OWNERDATA);
     ok(hwnd != NULL, "failed to create a listview window\n");
-    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 1, 0);
+    res = SendMessageA(hwnd, LVM_SETITEMCOUNT, 20, 0);
     ok(res != 0, "Expected LVM_SETITEMCOUNT to succeed\n");
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
@@ -2409,6 +2475,119 @@ static void test_ownerdata(void)
 
     ok_sequence(sequences, PARENT_SEQ_INDEX, ownderdata_select_focus_parent_seq,
                 "ownerdata focus notification", TRUE);
+
+    /* select all, check notifications */
+    item.stateMask = LVIS_SELECTED;
+    item.state     = 0;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_setstate_all_parent_seq,
+                "ownerdata select all notification", TRUE);
+
+    /* select all again, note that all items are selected already */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_setstate_all_parent_seq,
+                "ownerdata select all notification", TRUE);
+    /* deselect all */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_SELECTED;
+    item.state     = 0;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_deselect_all_parent_seq,
+                "ownerdata deselect all notification", TRUE);
+
+    /* select one, then deselect all */
+    item.stateMask = LVIS_SELECTED;
+    item.state     = LVIS_SELECTED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_SELECTED;
+    item.state     = 0;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_deselect_all_parent_seq,
+                "ownerdata select all notification", TRUE);
+
+    /* remove focused, try to focus all */
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = LVIS_FOCUSED;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = 0;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    item.stateMask = LVIS_FOCUSED;
+    res = SendMessageA(hwnd, LVM_GETITEMSTATE, 0, LVIS_FOCUSED);
+    expect(0, res);
+    /* setting all to focused returns failure value */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = LVIS_FOCUSED;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(FALSE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "ownerdata focus all notification", FALSE);
+    /* focus single item, remove all */
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = LVIS_FOCUSED;
+    res = SendMessage(hwnd, LVM_SETITEMSTATE, 0, (LPARAM)&item);
+    expect(TRUE, res);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_FOCUSED;
+    item.state     = 0;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_defocus_all_parent_seq,
+                "ownerdata remove focus all notification", TRUE);
+    /* set all cut */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_CUT;
+    item.state     = LVIS_CUT;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_setstate_all_parent_seq,
+                "ownerdata cut all notification", TRUE);
+    /* all marked cut, try again */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    item.stateMask = LVIS_CUT;
+    item.state     = LVIS_CUT;
+    g_dump_itemchanged = TRUE;
+    res = SendMessageA(hwnd, LVM_SETITEMSTATE, -1, (LPARAM)&item);
+    expect(TRUE, res);
+    g_dump_itemchanged = FALSE;
+    ok_sequence(sequences, PARENT_SEQ_INDEX, ownerdata_setstate_all_parent_seq,
+                "ownerdata cut all notification #2", TRUE);
+
     DestroyWindow(hwnd);
 
     /* check notifications on LVM_GETITEM */
@@ -2980,7 +3159,7 @@ static void test_getitemrect(void)
     r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pt);
     expect(TRUE, r);
     /* 1 indexed column width + padding */
-    todo_wine expect(102, pt.x);
+    expect(102, pt.x);
     /* rect is at zero too */
     rect.left = LVIR_BOUNDS;
     rect.right = rect.top = rect.bottom = -1;
@@ -2995,7 +3174,7 @@ static void test_getitemrect(void)
     r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
     expect(TRUE, r);
     /* column width + padding */
-    todo_wine expect(102, rect.left);
+    expect(102, rect.left);
 
     /* back to initial order */
     order[0] = 0; order[1] = 1;
@@ -3265,7 +3444,7 @@ static void test_editbox(void)
     ok(IsWindow(hwndedit), "Expected Edit window to be created\n");
     /* testing only sizing messages */
     ok_sequence(sequences, EDITBOX_SEQ_INDEX, editbox_create_pos,
-                "edit box create - sizing", TRUE);
+                "edit box create - sizing", FALSE);
 
     DestroyWindow(hwnd);
 }

@@ -557,6 +557,7 @@ HKLM,Software\Microsoft\Rpc\SecurityService,68,2,"netlogon.dll"
 HKLM,Software\Microsoft\Rpc\SecurityService,9,2,"secur32.dll"
 HKLM,System\CurrentControlSet\Control\Session Manager,,,""
 HKLM,System\CurrentControlSet\Control\VMM32Files,,,""
+HKCU,AppEvents\Schemes\Apps\Explorer\Navigating\.Current,,,""
 HKCU,Software\Microsoft\Protected Storage System Provider,,,""
 HKCU,Software\Wine\MSHTML,"GeckoUrl",,"http://source.winehq.org/winegecko.php"
 HKLM,HARDWARE\DEVICEMAP\PARALLEL PORTS,,,""
@@ -2403,6 +2404,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,dxdiagn.dll,1
 11,,hhctrl.ocx,1
 11,,hlink.dll,1
+11,,hnetcfg.dll,1
 11,,iexplore.exe,1
 11,,inetcomm.dll,1
 11,,infosoft.dll,1
@@ -2464,6 +2466,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,ddeml.dll
 11,,ddhelp.exe
 11,,ddraw.dll
+11,,dinput8.dll
 11,,dosx.exe
 11,,dsound.dll
 11,,dsound.vxd
@@ -2480,6 +2483,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,mapi32.dll
 11,,msadp32.acm
 11,,msg711.acm
+11,,msgsm32.acm
 11,,mshtml.dll
 11,,msi.dll
 11,,msiexec.exe
@@ -2542,6 +2546,7 @@ system.ini, drivers32,,"msacm.imaadpcm=imaadp32.acm"
 system.ini, drivers32,,"msacm.msadpcm=msadp32.acm"
 system.ini, drivers32,,"msacm.msg711=msg711.acm"
 system.ini, drivers32,,"msacm.winemp3=winemp3.acm"
+system.ini, drivers32,,"msacm.msgsm610=msgsm32.acm"
 system.ini, drivers32,,"vidc.mrle=msrle32.dll"
 system.ini, drivers32,,"vidc.msvc=msvidc32.dll"
 system.ini, drivers32,,"vidc.cvid=iccvid.dll"

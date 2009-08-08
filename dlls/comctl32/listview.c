@@ -52,7 +52,6 @@
  *   -- Support CustomDraw options for _WIN32_IE >= 0x560 (see NMLVCUSTOMDRAW docs).
  *   -- LVA_SNAPTOGRID not implemented
  *   -- LISTVIEW_ApproximateViewRect partially implemented
- *   -- LISTVIEW_[GS]etColumnOrderArray stubs
  *   -- LISTVIEW_SetColumnWidth ignores header images & bitmap
  *   -- LISTVIEW_SetIconSpacing is incomplete
  *   -- LISTVIEW_StyleChanged doesn't handle some changes too well
@@ -86,7 +85,6 @@
  * Extended Styles
  *   -- LVS_EX_BORDERSELECT
  *   -- LVS_EX_FLATSB
- *   -- LVS_EX_HEADERDRAGDROP
  *   -- LVS_EX_INFOTIP
  *   -- LVS_EX_LABELTIP
  *   -- LVS_EX_MULTIWORKAREAS
@@ -290,6 +288,7 @@ typedef struct tagLISTVIEW_INFO
   HDPA hdpaPosX;		/* maintains the (X, Y) coordinates of the */
   HDPA hdpaPosY;		/* items in LVS_ICON, and LVS_SMALLICON modes */
   HDPA hdpaColumns;		/* array of COLUMN_INFO pointers */
+  BOOL colRectsDirty;		/* trigger column rectangles requery from header */
   POINT currIconPos;		/* this is the position next icon will be placed */
   PFNLVCOMPARE pfnCompare;
   LPARAM lParamSort;
@@ -319,7 +318,7 @@ typedef struct tagLISTVIEW_INFO
  */
 /* How many we debug buffer to allocate */
 #define DEBUG_BUFFERS 20
-/* The size of a single debug bbuffer */
+/* The size of a single debug buffer */
 #define DEBUG_BUFFER_SIZE 256
 
 /* Internal interface to LISTVIEW_HScroll and LISTVIEW_VScroll */
@@ -1401,7 +1400,7 @@ static BOOL iterator_visibleitems(ITERATOR *i, const LISTVIEW_INFO *infoPtr, HDC
     while(iterator_next(i))
     {
 	LISTVIEW_GetItemOrigin(infoPtr, i->nItem, &Position);
-	rcItem.left = Position.x + Origin.x;
+	rcItem.left = (infoPtr->uView == LV_VIEW_DETAILS) ? Origin.x : Position.x + Origin.x;
 	rcItem.top = Position.y + Origin.y;
 	rcItem.right = rcItem.left + infoPtr->nItemWidth;
 	rcItem.bottom = rcItem.top + infoPtr->nItemHeight;
@@ -1483,6 +1482,21 @@ static inline COLUMN_INFO * LISTVIEW_GetColumnInfo(const LISTVIEW_INFO *infoPtr,
 
     if (nSubItem == 0 && DPA_GetPtrCount(infoPtr->hdpaColumns) == 0) return &mainItem;
     assert (nSubItem >= 0 && nSubItem < DPA_GetPtrCount(infoPtr->hdpaColumns));
+
+    /* update cached column rectangles */
+    if (infoPtr->colRectsDirty)
+    {
+        COLUMN_INFO *info;
+        LISTVIEW_INFO *Ptr = (LISTVIEW_INFO*)infoPtr;
+        INT i;
+
+        for (i = 0; i < DPA_GetPtrCount(infoPtr->hdpaColumns); i++) {
+            info = DPA_GetPtr(infoPtr->hdpaColumns, i);
+            SendMessageW(infoPtr->hwndHeader, HDM_GETITEMRECT, i, (LPARAM)&info->rcHeader);
+        }
+        Ptr->colRectsDirty = FALSE;
+    }
+
     return DPA_GetPtr(infoPtr->hdpaColumns, nSubItem);
 }
 
@@ -2202,7 +2216,12 @@ static void LISTVIEW_GetItemMetrics(const LISTVIEW_INFO *infoPtr, const LVITEMW 
 	Label.right = Box.right;
 	if (infoPtr->uView == LV_VIEW_DETAILS)
 	{
-	    if (lpLVItem->iSubItem == 0) Label = lpColumnInfo->rcHeader;
+	    if (lpLVItem->iSubItem == 0)
+	    {
+		/* we need a zero based rect here */
+		Label = lpColumnInfo->rcHeader;
+		OffsetRect(&Label, -Label.left, 0);
+	    }
 	}
 
 	if (lpLVItem->iSubItem || ((infoPtr->dwStyle & LVS_OWNERDRAWFIXED) && infoPtr->uView == LV_VIEW_DETAILS))
@@ -2267,7 +2286,8 @@ calc_label:
 	{
 	    Label.left = Icon.right;
 	    Label.top = Box.top;
-	    Label.right = lpColumnInfo->rcHeader.right;
+	    Label.right = lpLVItem->iSubItem ? lpColumnInfo->rcHeader.right :
+			  lpColumnInfo->rcHeader.right - lpColumnInfo->rcHeader.left;
 	    Label.bottom = Label.top + infoPtr->nItemHeight;
 	}
 	else /* LV_VIEW_SMALLICON or LV_VIEW_LIST */
@@ -4354,7 +4374,7 @@ static void LISTVIEW_RefreshReport(LISTVIEW_INFO *infoPtr, ITERATOR *i, HDC hdc,
 	    {
 		rcItem.top = 0;
 	        rcItem.bottom = infoPtr->nItemHeight;
-		OffsetRect(&rcItem, Position.x, Position.y);
+		OffsetRect(&rcItem, Origin.x, Position.y);
 		if (!RectVisible(hdc, &rcItem)) continue;
 	    }
 
@@ -4901,19 +4921,29 @@ static void LISTVIEW_ScrollColumns(LISTVIEW_INFO *infoPtr, INT nColumn, INT dx)
     RECT rcOld, rcCol;
     POINT ptOrigin;
     INT nCol;
-   
+    HDITEMW hdi;
+
     if (nColumn < 0 || DPA_GetPtrCount(infoPtr->hdpaColumns) < 1) return;
     lpColumnInfo = LISTVIEW_GetColumnInfo(infoPtr, min(nColumn, DPA_GetPtrCount(infoPtr->hdpaColumns) - 1));
     rcCol = lpColumnInfo->rcHeader;
     if (nColumn >= DPA_GetPtrCount(infoPtr->hdpaColumns))
 	rcCol.left = rcCol.right;
-    
+
     /* adjust the other columns */
-    for (nCol = nColumn; nCol < DPA_GetPtrCount(infoPtr->hdpaColumns); nCol++)
+    hdi.mask = HDI_ORDER;
+    if (SendMessageW(infoPtr->hwndHeader, HDM_GETITEMW, nColumn, (LPARAM)&hdi))
     {
-	lpColumnInfo = LISTVIEW_GetColumnInfo(infoPtr, nCol);
-	lpColumnInfo->rcHeader.left  += dx;
-	lpColumnInfo->rcHeader.right += dx;
+	INT nOrder = hdi.iOrder;
+	for (nCol = 0; nCol < DPA_GetPtrCount(infoPtr->hdpaColumns); nCol++)
+	{
+	    hdi.mask = HDI_ORDER;
+	    SendMessageW(infoPtr->hwndHeader, HDM_GETITEMW, nCol, (LPARAM)&hdi);
+	    if (hdi.iOrder >= nOrder) {
+		lpColumnInfo = LISTVIEW_GetColumnInfo(infoPtr, nCol);
+		lpColumnInfo->rcHeader.left  += dx;
+		lpColumnInfo->rcHeader.right += dx;
+	    }
+	}
     }
 
     /* do not update screen if not in report mode */
@@ -5743,9 +5773,9 @@ static INT LISTVIEW_GetColumnWidth(const LISTVIEW_INFO *infoPtr, INT nColumn)
 	nColumnWidth = infoPtr->nItemWidth;
 	break;
     case LV_VIEW_DETAILS:
-	/* We are not using LISTVIEW_GetHeaderRect as this data is updated only after a HDM_ITEMCHANGED.
+	/* We are not using LISTVIEW_GetHeaderRect as this data is updated only after a HDN_ITEMCHANGED.
 	 * There is an application that subclasses the listview, calls LVM_GETCOLUMNWIDTH in the
-	 * HDM_ITEMCHANGED handler and goes into infinite recursion if it receives old data.
+	 * HDN_ITEMCHANGED handler and goes into infinite recursion if it receives old data.
 	 *
 	 * TODO: should we do the same in LVM_GETCOLUMN?
 	 */
@@ -6252,6 +6282,7 @@ static BOOL LISTVIEW_GetItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT
     BOOL doLabel = TRUE, oversizedBox = FALSE;
     POINT Position, Origin;
     LVITEMW lvItem;
+    LONG mode;
 
     TRACE("(hwnd=%p, nItem=%d, lprc=%p)\n", infoPtr->hwndSelf, nItem, lprc);
 
@@ -6288,6 +6319,8 @@ static BOOL LISTVIEW_GetItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT
 
     if (infoPtr->uView == LV_VIEW_DETAILS && (infoPtr->dwLvExStyle & LVS_EX_FULLROWSELECT) && lprc->left == LVIR_SELECTBOUNDS)
 	lprc->left = LVIR_BOUNDS;
+
+    mode = lprc->left;
     switch(lprc->left)
     {
     case LVIR_ICON:
@@ -6312,7 +6345,13 @@ static BOOL LISTVIEW_GetItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT
     }
 
     if (infoPtr->uView == LV_VIEW_DETAILS)
-        OffsetRect(lprc, Origin.x, Position.y + Origin.y);
+    {
+	if (mode != LVIR_BOUNDS)
+	    OffsetRect(lprc, Origin.x + LISTVIEW_GetColumnInfo(infoPtr, 0)->rcHeader.left,
+	                     Position.y + Origin.y);
+	else
+	    OffsetRect(lprc, Origin.x, Position.y + Origin.y);
+    }
     else
         OffsetRect(lprc, Position.x + Origin.x, Position.y + Origin.y);
 
@@ -7515,16 +7554,16 @@ static BOOL LISTVIEW_SetColumnT(const LISTVIEW_INFO *infoPtr, INT nColumn,
  *   SUCCESS : TRUE
  *   FAILURE : FALSE
  */
-static BOOL LISTVIEW_SetColumnOrderArray(const LISTVIEW_INFO *infoPtr, INT iCount, const INT *lpiArray)
+static BOOL LISTVIEW_SetColumnOrderArray(LISTVIEW_INFO *infoPtr, INT iCount, const INT *lpiArray)
 {
-  FIXME("iCount %d lpiArray %p\n", iCount, lpiArray);
+    TRACE("iCount %d lpiArray %p\n", iCount, lpiArray);
 
-  if (!lpiArray)
-    return FALSE;
+    if (!lpiArray || !IsWindow(infoPtr->hwndHeader)) return FALSE;
 
-  return TRUE;
+    infoPtr->colRectsDirty = TRUE;
+
+    return SendMessageW(infoPtr->hwndHeader, HDM_SETORDERARRAY, iCount, (LPARAM)lpiArray);
 }
-
 
 /***
  * DESCRIPTION:
@@ -8108,45 +8147,15 @@ static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *infoPtr, INT nItem, const LVITE
 	if ((lvItem.state & lvItem.stateMask & LVIS_SELECTED) && (infoPtr->dwStyle & LVS_SINGLESEL))
 	    return FALSE;
 
+	/* focus all isn't allowed */
+	if (lvItem.state & lvItem.stateMask & LVIS_FOCUSED) return FALSE;
+
     	/* apply to all items */
     	for (lvItem.iItem = 0; lvItem.iItem < infoPtr->nItemCount; lvItem.iItem++)
 	    if (!LISTVIEW_SetItemT(infoPtr, &lvItem, TRUE)) bResult = FALSE;
     }
     else
 	bResult = LISTVIEW_SetItemT(infoPtr, &lvItem, TRUE);
-
-    /*
-     * Update selection mark
-     *
-     * Investigation on windows 2k showed that selection mark was updated
-     * whenever a new selection was made, but if the selected item was
-     * unselected it was not updated.
-     *
-     * we are probably still not 100% accurate, but this at least sets the
-     * proper selection mark when it is needed
-     */
-
-    if (bResult && (lvItem.state & lvItem.stateMask & LVIS_SELECTED) &&
-        (infoPtr->nSelectionMark == -1))
-    {
-        int i;
-        for (i = 0; i < infoPtr->nItemCount; i++)
-        {
-            if (infoPtr->uCallbackMask & LVIS_SELECTED)
-            {
-                if (LISTVIEW_GetItemState(infoPtr, i, LVIS_SELECTED))
-                {
-                    infoPtr->nSelectionMark = i;
-                    break;
-                }
-            }
-            else if (ranges_contain(infoPtr->selectionRanges, i))
-            {
-                infoPtr->nSelectionMark = i;
-                break;
-            }
-        }
-    }
 
     return bResult;
 }
@@ -8648,6 +8657,7 @@ static LRESULT LISTVIEW_NCCreate(HWND hwnd, const CREATESTRUCTW *lpcs)
   infoPtr->xTrackLine = -1;  /* no track line */
   infoPtr->itemEdit.fEnabled = FALSE;
   infoPtr->iVersion = COMCTL32_VERSION;
+  infoPtr->colRectsDirty = FALSE;
 
   /* get default font (icon title) */
   SystemParametersInfoW(SPI_GETICONTITLELOGFONT, 0, &logFont, 0);
@@ -9529,9 +9539,10 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
             return (infoPtr->dwLvExStyle & LVS_EX_HEADERDRAGDROP) == 0;
 
         case HDN_ENDDRAG:
-            FIXME("Changing column order not implemented\n");
+            infoPtr->colRectsDirty = TRUE;
+            LISTVIEW_InvalidateList(infoPtr);
             notify_forward_header(infoPtr, lpnmh);
-            return TRUE;
+            return FALSE;
 
         case HDN_ITEMCHANGINGW:
         case HDN_ITEMCHANGINGA:
@@ -9541,6 +9552,7 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 	case HDN_ITEMCHANGEDA:
 	{
 	    COLUMN_INFO *lpColumnInfo;
+	    HDITEMW hdi;
 	    INT dx, cxy;
 	    
             notify_forward_header(infoPtr, lpnmh);
@@ -9549,8 +9561,6 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 
 	    if (!lpnmh->pitem || !(lpnmh->pitem->mask & HDI_WIDTH))
 	    {
-    		HDITEMW hdi;
-    
 		hdi.mask = HDI_WIDTH;
 		if (!SendMessageW(infoPtr->hwndHeader, HDM_GETITEMW, lpnmh->iItem, (LPARAM)&hdi)) return 0;
 		cxy = hdi.cxy;
@@ -9564,8 +9574,17 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 	    if (dx != 0)
 	    {
 		lpColumnInfo->rcHeader.right += dx;
-		if (lpnmh->iItem + 1 < DPA_GetPtrCount(infoPtr->hdpaColumns))
-		    LISTVIEW_ScrollColumns(infoPtr, lpnmh->iItem + 1, dx);
+
+		hdi.mask = HDI_ORDER;
+		SendMessageW(infoPtr->hwndHeader, HDM_GETITEMW, lpnmh->iItem, (LPARAM)&hdi);
+
+		/* not the rightmost one */
+		if (hdi.iOrder + 1 < DPA_GetPtrCount(infoPtr->hdpaColumns))
+		{
+		    INT nIndex = SendMessageW(infoPtr->hwndHeader, HDM_ORDERTOINDEX,
+					      hdi.iOrder + 1, 0);
+		    LISTVIEW_ScrollColumns(infoPtr, nIndex, dx);
+		}
 		else
 		{
 		    /* only needs to update the scrolls */
@@ -9594,7 +9613,7 @@ static LRESULT LISTVIEW_HeaderNotification(LISTVIEW_INFO *infoPtr, const NMHEADE
 		    }
 
 		    /* when shrinking the last column clear the now unused field */
-		    if (lpnmh->iItem == DPA_GetPtrCount(infoPtr->hdpaColumns) - 1)
+		    if (hdi.iOrder == DPA_GetPtrCount(infoPtr->hdpaColumns) - 1)
 		    {
 		        RECT right;
 
@@ -10653,6 +10672,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return LISTVIEW_SetItemPosition(infoPtr, (INT)wParam, *((POINT*)lParam));
 
   case LVM_SETITEMSTATE:
+    if (lParam == 0) return FALSE;
     return LISTVIEW_SetItemState(infoPtr, (INT)wParam, (LPLVITEMW)lParam);
 
   case LVM_SETITEMTEXTA:

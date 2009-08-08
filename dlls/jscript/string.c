@@ -592,7 +592,7 @@ static HRESULT String_match(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
     DispatchEx *array;
     VARIANT var, *arg_var;
     DWORD length, match_cnt, i;
-    BSTR val_str;
+    BSTR val_str = NULL;
     HRESULT hres = S_OK;
 
     TRACE("\n");
@@ -1485,6 +1485,8 @@ static HRESULT String_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
     TRACE("\n");
 
     switch(flags) {
+    case INVOKE_FUNC:
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_FUNC, NULL);
     case DISPATCH_PROPERTYGET: {
         BSTR str = SysAllocString(This->str);
         if(!str)

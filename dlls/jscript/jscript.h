@@ -28,8 +28,12 @@
 #include "dispex.h"
 #include "activscp.h"
 
+#include "resource.h"
+
 #include "wine/unicode.h"
 #include "wine/list.h"
+
+#define JSCRIPT_ERROR 0x800A0000
 
 typedef struct _script_ctx_t script_ctx_t;
 typedef struct _exec_ctx_t exec_ctx_t;
@@ -57,6 +61,8 @@ void jsheap_free(jsheap_t*);
 jsheap_t *jsheap_mark(jsheap_t*);
 
 typedef struct DispatchEx DispatchEx;
+
+extern HINSTANCE jscript_hinstance;
 
 #define PROPF_ARGMASK 0x00ff
 #define PROPF_METHOD  0x0100
@@ -139,6 +145,13 @@ HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const builtin_inf
         DispatchEx*,DispatchEx**);
 HRESULT Function_value(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
 
+HRESULT throw_eval_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_range_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_reference_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_syntax_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_type_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_uri_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+
 
 HRESULT create_object(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_math(script_ctx_t*,DispatchEx**);
@@ -188,6 +201,13 @@ struct _script_ctx_t {
     DispatchEx *array_constr;
     DispatchEx *bool_constr;
     DispatchEx *date_constr;
+    DispatchEx *error_constr;
+    DispatchEx *eval_error_constr;
+    DispatchEx *range_error_constr;
+    DispatchEx *reference_error_constr;
+    DispatchEx *syntax_error_constr;
+    DispatchEx *type_error_constr;
+    DispatchEx *uri_error_constr;
     DispatchEx *number_constr;
     DispatchEx *object_constr;
     DispatchEx *regexp_constr;
@@ -208,6 +228,7 @@ HRESULT create_object_prototype(script_ctx_t*,DispatchEx**);
 HRESULT create_array_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_bool_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_date_constr(script_ctx_t*,DispatchEx**);
+HRESULT init_error_constr(script_ctx_t*);
 HRESULT create_number_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_object_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_regexp_constr(script_ctx_t*,DispatchEx**);

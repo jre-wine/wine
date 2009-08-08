@@ -39,11 +39,15 @@ dlls/kernel32/nls/winerr_lth.mc.rc
 dlls/kernel32/nls/winerr_nld.mc.rc
 dlls/kernel32/nls/winerr_nor.mc.rc
 dlls/kernel32/nls/winerr_plk.mc.rc
+dlls/kernel32/nls/winerr_ptg.mc.rc
 dlls/krnl386.exe16
 dlls/libd3dx9.def
 dlls/libwinspool.def
 dlls/libxinput.def
 dlls/mmsystem.dll16
+dlls/msdaps/msdaps.h
+dlls/msdaps/msdaps_i.c
+dlls/msdaps/msdaps_p.c
 dlls/mshtml.tlb/mshtml_tlb.tlb
 dlls/mshtml/nsiface.h
 dlls/msi/cond.tab.c

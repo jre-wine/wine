@@ -46,10 +46,8 @@ static HRESULT Bool_toString(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_BOOLEAN)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_BOOLEAN))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_BOOL, NULL);
 
     if(retv) {
         BoolInstance *bool = (BoolInstance*)dispex;
@@ -81,10 +79,8 @@ static HRESULT Bool_valueOf(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_BOOLEAN)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_BOOLEAN))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_BOOL, NULL);
 
     if(retv) {
         BoolInstance *bool = (BoolInstance*)dispex;
@@ -120,8 +116,18 @@ static HRESULT Bool_isPrototypeOf(DispatchEx *dispex, LCID lcid, WORD flags, DIS
 static HRESULT Bool_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    switch(flags) {
+    case INVOKE_FUNC:
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_FUNC, NULL);
+    default:
+        FIXME("unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+
 }
 
 static const builtin_prop_t Bool_props[] = {

@@ -74,10 +74,8 @@ static HRESULT Array_length(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
         else
             len = floor(V_R8(&num));
 
-        if(len!=(DWORD)len) {
-            FIXME("Throw RangeError\n");
-            return E_FAIL;
-        }
+        if(len!=(DWORD)len)
+            return throw_range_error(dispex->ctx, ei, IDS_INVALID_LENGTH, NULL);
 
         for(i=len; i<This->length; i++) {
             hres = jsdisp_delete_idx(dispex, i);
@@ -772,6 +770,8 @@ static HRESULT Array_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS
     TRACE("\n");
 
     switch(flags) {
+    case INVOKE_FUNC:
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_FUNC, NULL);
     case INVOKE_PROPERTYGET:
         return array_join(dispex, lcid, ((ArrayInstance*)dispex)->length, default_separatorW, retv, ei, sp);
     default:
@@ -850,10 +850,8 @@ static HRESULT ArrayConstr_value(DispatchEx *dispex, LCID lcid, WORD flags, DISP
     case DISPATCH_METHOD:
     case DISPATCH_CONSTRUCT: {
         if(arg_cnt(dp) == 1 && V_VT((arg_var = get_arg(dp, 0))) == VT_I4) {
-            if(V_I4(arg_var) < 0) {
-                FIXME("throw RangeError\n");
-                return E_FAIL;
-            }
+            if(V_I4(arg_var) < 0)
+                return throw_range_error(dispex->ctx, ei, IDS_INVALID_LENGTH, NULL);
 
             hres = create_array(dispex->ctx, V_I4(arg_var), &obj);
             if(FAILED(hres))

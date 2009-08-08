@@ -48,6 +48,7 @@ MAKE_FUNCPTR(gnutls_alert_get);
 MAKE_FUNCPTR(gnutls_alert_get_name);
 MAKE_FUNCPTR(gnutls_certificate_allocate_credentials);
 MAKE_FUNCPTR(gnutls_certificate_free_credentials);
+MAKE_FUNCPTR(gnutls_certificate_get_peers);
 MAKE_FUNCPTR(gnutls_cipher_get);
 MAKE_FUNCPTR(gnutls_credentials_set);
 MAKE_FUNCPTR(gnutls_deinit);
@@ -165,6 +166,7 @@ static void *schan_free_handle(ULONG_PTR handle_idx, enum schan_handle_type type
     void *object;
 
     if (handle_idx == SCHAN_INVALID_HANDLE) return NULL;
+    if (handle_idx >= schan_handle_count) return NULL;
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
@@ -185,6 +187,7 @@ static void *schan_get_object(ULONG_PTR handle_idx, enum schan_handle_type type)
     struct schan_handle *handle;
 
     if (handle_idx == SCHAN_INVALID_HANDLE) return NULL;
+    if (handle_idx >= schan_handle_count) return NULL;
     handle = &schan_handle_table[handle_idx];
     if (handle->type != type)
     {
@@ -285,6 +288,21 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryCredentialsAttributesW(
 static SECURITY_STATUS schan_CheckCreds(const SCHANNEL_CRED *schanCred)
 {
     SECURITY_STATUS st;
+    DWORD i;
+
+    TRACE("dwVersion = %d\n", schanCred->dwVersion);
+    TRACE("cCreds = %d\n", schanCred->cCreds);
+    TRACE("hRootStore = %p\n", schanCred->hRootStore);
+    TRACE("cMappers = %d\n", schanCred->cMappers);
+    TRACE("cSupportedAlgs = %d:\n", schanCred->cSupportedAlgs);
+    for (i = 0; i < schanCred->cSupportedAlgs; i++)
+        TRACE("%08x\n", schanCred->palgSupportedAlgs[i]);
+    TRACE("grbitEnabledProtocols = %08x\n", schanCred->grbitEnabledProtocols);
+    TRACE("dwMinimumCipherStrength = %d\n", schanCred->dwMinimumCipherStrength);
+    TRACE("dwMaximumCipherStrength = %d\n", schanCred->dwMaximumCipherStrength);
+    TRACE("dwSessionLifespan = %d\n", schanCred->dwSessionLifespan);
+    TRACE("dwFlags = %08x\n", schanCred->dwFlags);
+    TRACE("dwCredFormat = %d\n", schanCred->dwCredFormat);
 
     switch (schanCred->dwVersion)
     {
@@ -871,6 +889,27 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesW(
             stream_sizes->cbBlockSize = block_size;
             return SEC_E_OK;
         }
+        case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
+        {
+            unsigned int list_size;
+            const gnutls_datum_t *datum = pgnutls_certificate_get_peers(
+                    ctx->session, &list_size);
+
+            datum = pgnutls_certificate_get_peers(ctx->session, &list_size);
+            if (datum)
+            {
+                PCCERT_CONTEXT *cert = buffer;
+
+                *cert = CertCreateCertificateContext(X509_ASN_ENCODING,
+                        datum->data, datum->size);
+                if (!*cert)
+                    return GetLastError();
+                else
+                    return SEC_E_OK;
+            }
+            else
+                return SEC_E_INTERNAL_ERROR;
+        }
 
         default:
             FIXME("Unhandled attribute %#x\n", attribute);
@@ -887,6 +926,8 @@ static SECURITY_STATUS SEC_ENTRY schan_QueryContextAttributesA(
     switch(attribute)
     {
         case SECPKG_ATTR_STREAM_SIZES:
+            return schan_QueryContextAttributesW(context_handle, attribute, buffer);
+        case SECPKG_ATTR_REMOTE_CERT_CONTEXT:
             return schan_QueryContextAttributesW(context_handle, attribute, buffer);
 
         default:
@@ -1220,6 +1261,7 @@ void SECUR32_initSchannelSP(void)
     LOAD_FUNCPTR(gnutls_alert_get_name)
     LOAD_FUNCPTR(gnutls_certificate_allocate_credentials)
     LOAD_FUNCPTR(gnutls_certificate_free_credentials)
+    LOAD_FUNCPTR(gnutls_certificate_get_peers)
     LOAD_FUNCPTR(gnutls_cipher_get)
     LOAD_FUNCPTR(gnutls_credentials_set)
     LOAD_FUNCPTR(gnutls_deinit)

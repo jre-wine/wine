@@ -58,9 +58,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
-#define DEFAULT_SEND_TIMEOUT        30
-#define DEFAULT_RECEIVE_TIMEOUT     30
-
 #ifndef HAVE_GETADDRINFO
 
 /* critical section to protect non-reentrant gethostbyname() */
@@ -100,8 +97,6 @@ MAKE_FUNCPTR( SSL_write );
 MAKE_FUNCPTR( SSL_read );
 MAKE_FUNCPTR( SSL_get_verify_result );
 MAKE_FUNCPTR( SSL_get_peer_certificate );
-MAKE_FUNCPTR( SSL_CTX_get_timeout );
-MAKE_FUNCPTR( SSL_CTX_set_timeout );
 MAKE_FUNCPTR( SSL_CTX_set_default_verify_paths );
 
 MAKE_FUNCPTR( BIO_new_fp );
@@ -218,8 +213,6 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     LOAD_FUNCPTR( SSL_read );
     LOAD_FUNCPTR( SSL_get_verify_result );
     LOAD_FUNCPTR( SSL_get_peer_certificate );
-    LOAD_FUNCPTR( SSL_CTX_get_timeout );
-    LOAD_FUNCPTR( SSL_CTX_set_timeout );
     LOAD_FUNCPTR( SSL_CTX_set_default_verify_paths );
 #undef LOAD_FUNCPTR
 
@@ -294,15 +287,44 @@ BOOL netconn_close( netconn_t *conn )
     return TRUE;
 }
 
-BOOL netconn_connect( netconn_t *conn, const struct sockaddr *sockaddr, unsigned int addr_len )
+BOOL netconn_connect( netconn_t *conn, const struct sockaddr *sockaddr, unsigned int addr_len, int timeout )
 {
-    if (connect( conn->socket, sockaddr, addr_len ) == -1)
+    BOOL ret = FALSE;
+    int res = 0, state;
+
+    if (timeout > 0)
     {
-        WARN("unable to connect to host (%s)\n", strerror(errno));
-        set_last_error( sock_get_error( errno ) );
-        return FALSE;
+        state = 1;
+        ioctlsocket( conn->socket, FIONBIO, &state );
     }
-    return TRUE;
+    if (connect( conn->socket, sockaddr, addr_len ) < 0)
+    {
+        res = sock_get_error( errno );
+        if (res == WSAEWOULDBLOCK || res == WSAEINPROGRESS)
+        {
+            struct pollfd pfd;
+
+            pfd.fd = conn->socket;
+            pfd.events = POLLOUT;
+            if (poll( &pfd, 1, timeout ) > 0)
+                ret = TRUE;
+            else
+                res = sock_get_error( errno );
+        }
+    }
+    else
+        ret = TRUE;
+    if (timeout > 0)
+    {
+        state = 0;
+        ioctlsocket( conn->socket, FIONBIO, &state );
+    }
+    if (!ret)
+    {
+        WARN("unable to connect to host (%d)\n", res);
+        set_last_error( res );
+    }
+    return ret;
 }
 
 BOOL netconn_secure_connect( netconn_t *conn )
@@ -482,11 +504,6 @@ BOOL netconn_get_next_line( netconn_t *conn, char *buffer, DWORD *buflen )
     if (conn->secure)
     {
 #ifdef SONAME_LIBSSL
-        long timeout;
-
-        timeout = pSSL_CTX_get_timeout( ctx );
-        pSSL_CTX_set_timeout( ctx, DEFAULT_RECEIVE_TIMEOUT );
-
         while (recvd < *buflen)
         {
             int dummy;
@@ -502,7 +519,6 @@ BOOL netconn_get_next_line( netconn_t *conn, char *buffer, DWORD *buflen )
             }
             if (buffer[recvd] != '\r') recvd++;
         }
-        pSSL_CTX_set_timeout( ctx, timeout );
         if (ret)
         {
             buffer[recvd++] = 0;
@@ -519,9 +535,16 @@ BOOL netconn_get_next_line( netconn_t *conn, char *buffer, DWORD *buflen )
     pfd.events = POLLIN;
     while (recvd < *buflen)
     {
-        if (poll( &pfd, 1, DEFAULT_RECEIVE_TIMEOUT * 1000 ) > 0)
+        int timeout, res;
+        struct timeval tv;
+        socklen_t len = sizeof(tv);
+
+        if ((res = getsockopt( conn->socket, SOL_SOCKET, SO_RCVTIMEO, (void*)&tv, &len ) != -1))
+            timeout = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+        else
+            timeout = -1;
+        if (poll( &pfd, 1, timeout ) > 0)
         {
-            int res;
             if ((res = recv( conn->socket, &buffer[recvd], 1, 0 )) <= 0)
             {
                 if (res == -1) set_last_error( sock_get_error( errno ) );

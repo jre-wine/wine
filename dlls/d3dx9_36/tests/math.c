@@ -1,6 +1,8 @@
 /*
  * Copyright 2008 David Adam
+ * Copyright 2008 Luis Busquets
  * Copyright 2008 Philip Nilsson
+ * Copyright 2008 Henri Verbeet
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -950,7 +952,7 @@ static void D3DXQuaternionTest(void)
 
 static void D3DXVector2Test(void)
 {
-    D3DXVECTOR2 expectedvec, gotvec, nul, nulproj, u, v, w, x;
+    D3DXVECTOR2 expectedvec, gotvec, nul, u, v, w, x;
     LPD3DXVECTOR2 funcpointer;
     D3DXVECTOR4 expectedtrans, gottrans;
     D3DXMATRIX mat;
@@ -1105,11 +1107,6 @@ static void D3DXVector2Test(void)
     expectedvec.x = 0.6f; expectedvec.y = 11.0f/15.0f;
     D3DXVec2TransformCoord(&gotvec,&u,&mat);
     expect_vec(expectedvec,gotvec);
-    /* Test the nul projected vector */
-    nulproj.x = -2.0f; nulproj.y = -1.0f;
-    expectedvec.x = 0.0f; expectedvec.y = 0.0f;
-    D3DXVec2TransformCoord(&gotvec,&nulproj,&mat);
-    expect_vec(expectedvec,gotvec);
 
  /*_______________D3DXVec2TransformNormal______________________*/
     expectedvec.x = 23.0f; expectedvec.y = 30.0f;
@@ -1120,7 +1117,7 @@ static void D3DXVector2Test(void)
 static void D3DXVector3Test(void)
 {
     D3DVIEWPORT9 viewport;
-    D3DXVECTOR3 expectedvec, gotvec, nul, nulproj, u, v, w, x;
+    D3DXVECTOR3 expectedvec, gotvec, nul, u, v, w, x;
     LPD3DXVECTOR3 funcpointer;
     D3DXVECTOR4 expectedtrans, gottrans;
     D3DXMATRIX mat, projection, view, world;
@@ -1295,11 +1292,6 @@ static void D3DXVector3Test(void)
     expectedvec.x = 70.0f/124.0f; expectedvec.y = 88.0f/124.0f; expectedvec.z = 106.0f/124.0f;
     D3DXVec3TransformCoord(&gotvec,&u,&mat);
     expect_vec3(expectedvec,gotvec);
-    /* Test the nul projected vector */
-    nulproj.x = 1.0f; nulproj.y = -1.0f, nulproj.z = -1.0f;
-    expectedvec.x = 0.0f; expectedvec.y = 0.0f; expectedvec.z = 0.0f;
-    D3DXVec3TransformCoord(&gotvec,&nulproj,&mat);
-    expect_vec3(expectedvec,gotvec);
 
 /*_______________D3DXVec3TransformNormal______________________*/
     expectedvec.x = 57.0f; expectedvec.y = 74.0f; expectedvec.z = 91.0f;
@@ -1429,10 +1421,6 @@ static void D3DXVector4Test(void)
     expectedvec.x = 1.0f/11.0f; expectedvec.y = 2.0f/11.0f; expectedvec.z = 4.0f/11.0f; expectedvec.w = 10.0f/11.0f;
     D3DXVec4Normalize(&gotvec,&u);
     expect_vec4(expectedvec,gotvec);
-    /* Test the nul vector */
-    expectedvec.x = 0.0f; expectedvec.y = 0.0f; expectedvec.z = 0.0f; expectedvec.w = 0.0f;
-    D3DXVec4Normalize(&gotvec,&nul);
-    expect_vec4(expectedvec,gotvec);
 
 /*_______________D3DXVec4Scale____________________________*/
     expectedvec.x = -6.5f; expectedvec.y = -13.0f; expectedvec.z = -26.0f; expectedvec.w = -65.0f;
@@ -1497,9 +1485,6 @@ static void test_matrix_stack(void)
     hr = ID3DXMatrixStack_Push(stack);
     ok(SUCCEEDED(hr), "Push failed, hr %#x\n", hr);
 
-    hr = ID3DXMatrixStack_LoadMatrix(stack, NULL);
-    ok(hr == D3DERR_INVALIDCALL, "LoadMatrix returned %#x, expected D3DERR_INVALIDCALL\n", hr);
-
     hr = ID3DXMatrixStack_LoadMatrix(stack, &mat1);
     ok(SUCCEEDED(hr), "LoadMatrix failed, hr %#x\n", hr);
     expect_mat(&mat1, ID3DXMatrixStack_GetTop(stack));
@@ -1535,18 +1520,6 @@ static void test_matrix_stack(void)
     hr = ID3DXMatrixStack_Pop(stack);
     ok(SUCCEEDED(hr), "Pop failed, hr %#x\n", hr);
     ok(D3DXMatrixIsIdentity(ID3DXMatrixStack_GetTop(stack)), "The top should be an identity matrix\n");
-
-    hr = ID3DXMatrixStack_MultMatrix(stack, NULL);
-    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %#x\n", hr);
-
-    hr = ID3DXMatrixStack_MultMatrixLocal(stack, NULL);
-    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %#x\n", hr);
-
-    hr = ID3DXMatrixStack_RotateAxis(stack, NULL, 2.0f);
-    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %#x\n", hr);
-
-    hr = ID3DXMatrixStack_RotateAxisLocal(stack, NULL, 2.0f);
-    ok(hr == D3DERR_INVALIDCALL, "Expected D3DERR_INVALIDCALL, got %#x\n", hr);
 
     refcount = ID3DXMatrixStack_Release(stack);
     ok(!refcount, "Matrix stack has %u references left.\n", refcount);

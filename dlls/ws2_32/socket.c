@@ -170,10 +170,27 @@ union generic_unix_sockaddr
 static inline const char *debugstr_sockaddr( const struct WS_sockaddr *a )
 {
     if (!a) return "(nil)";
-    return wine_dbg_sprintf("{ family %d, address %s, port %d }",
-                            ((const struct sockaddr_in *)a)->sin_family,
-                            inet_ntoa(((const struct sockaddr_in *)a)->sin_addr),
-                            ntohs(((const struct sockaddr_in *)a)->sin_port));
+    switch (a->sa_family)
+    {
+    case WS_AF_INET:
+        return wine_dbg_sprintf("{ family AF_INET, address %s, port %d }",
+                                inet_ntoa(((const struct sockaddr_in *)a)->sin_addr),
+                                ntohs(((const struct sockaddr_in *)a)->sin_port));
+    case WS_AF_INET6:
+    {
+        char buf[46];
+        const char *p;
+        struct WS_sockaddr_in6 *sin = (struct WS_sockaddr_in6 *)a;
+
+        p = WS_inet_ntop( WS_AF_INET6, &sin->sin6_addr, buf, sizeof(buf) );
+        if (!p)
+            p = "(unknown IPv6 address)";
+        return wine_dbg_sprintf("{ family AF_INET6, address %s, port %d }",
+                                p, ntohs(sin->sin6_port));
+    }
+    default:
+        return wine_dbg_sprintf("{ family %d }", a->sa_family);
+    }
 }
 
 /* HANDLE<->SOCKET conversion (SOCKET is UINT_PTR). */
@@ -2406,25 +2423,11 @@ int WINAPI WS_ioctlsocket(SOCKET s, LONG cmd, WS_u_long *argp)
             SetLastError(WSAEINVAL);
             return SOCKET_ERROR;
         }
-        fd = get_sock_fd( s, 0, NULL );
-        if (fd != -1)
-        {
-            int ret;
-            if (*argp)
-            {
-                _enable_event(SOCKET2HANDLE(s), 0, FD_WINE_NONBLOCKING, 0);
-                ret = fcntl( fd, F_SETFL, O_NONBLOCK );
-            }
-            else
-            {
-                _enable_event(SOCKET2HANDLE(s), 0, 0, FD_WINE_NONBLOCKING);
-                ret = fcntl( fd, F_SETFL, 0 );
-            }
-            release_sock_fd( s, fd );
-            if (!ret) return 0;
-            SetLastError((errno == EBADF) ? WSAENOTSOCK : wsaErrno());
-        }
-        return SOCKET_ERROR;
+        if (*argp)
+            _enable_event(SOCKET2HANDLE(s), 0, FD_WINE_NONBLOCKING, 0);
+        else
+            _enable_event(SOCKET2HANDLE(s), 0, 0, FD_WINE_NONBLOCKING);
+        return 0;
 
     case WS_SIOCATMARK:
         newcmd=SIOCATMARK;
@@ -4955,12 +4958,19 @@ INT WINAPI WSAAddressToStringA( LPSOCKADDR sockaddr, DWORD len,
     {
         struct WS_sockaddr_in6 *sockaddr6 = (LPSOCKADDR_IN6) sockaddr;
 
+        buffer[0] = 0;
         if (len < sizeof(SOCKADDR_IN6)) return SOCKET_ERROR;
-        if (!WS_inet_ntop(WS_AF_INET6, &sockaddr6->sin6_addr, buffer, sizeof(buffer)))
+        if ((sockaddr6->sin6_port))
+            strcpy(buffer, "[");
+        if (!WS_inet_ntop(WS_AF_INET6, &sockaddr6->sin6_addr, buffer+strlen(buffer), sizeof(buffer)))
         {
             WSASetLastError(WSAEINVAL);
             return SOCKET_ERROR;
         }
+        if ((sockaddr6->sin6_scope_id))
+            sprintf(buffer+strlen(buffer), "%%%u", sockaddr6->sin6_scope_id);
+        if ((sockaddr6->sin6_port))
+            sprintf(buffer+strlen(buffer), "]:%u", ntohs(sockaddr6->sin6_port));
         break;
     }
 
@@ -5007,7 +5017,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
                                 LPDWORD lenstr )
 {
     INT   ret;
-    DWORD size, sizew;
+    DWORD size;
     WCHAR buffer[54]; /* 32 digits + 7':' + '[' + '%" + 5 digits + ']:' + 5 digits + '\0' */
     CHAR bufAddr[54];
 
@@ -5018,8 +5028,7 @@ INT WINAPI WSAAddressToStringW( LPSOCKADDR sockaddr, DWORD len,
 
     if (ret) return ret;
 
-    sizew = sizeof( buffer );
-    MultiByteToWideChar( CP_ACP, 0, bufAddr, size, buffer, sizew );
+    MultiByteToWideChar( CP_ACP, 0, bufAddr, size, buffer, sizeof( buffer )/sizeof(WCHAR));
 
     if (*lenstr <  size)
     {

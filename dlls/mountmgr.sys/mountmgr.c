@@ -61,7 +61,7 @@ void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int
 }
 
 static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
-                                            const WCHAR *link, const void *id, unsigned int id_len )
+                                            const WCHAR *link )
 {
     struct mount_point *mount;
     WCHAR *str;
@@ -83,7 +83,6 @@ static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRIN
     list_add_tail( &mount_points_list, &mount->entry );
 
     IoCreateSymbolicLink( &mount->link, device_name );
-    set_mount_point_id( mount, id, id_len );
 
     TRACE( "created %s id %s for %s\n", debugstr_w(mount->link.Buffer),
            debugstr_a(mount->id), debugstr_w(mount->name.Buffer) );
@@ -91,33 +90,29 @@ static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRIN
 }
 
 /* create the DosDevices mount point symlink for a new device */
-struct mount_point *add_dosdev_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
-                                            int drive, const void *id, unsigned int id_len )
+struct mount_point *add_dosdev_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name, int drive )
 {
     static const WCHAR driveW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','%','c',':',0};
     WCHAR link[sizeof(driveW)];
 
     sprintfW( link, driveW, 'A' + drive );
-    return add_mount_point( device, device_name, link, id, id_len );
+    return add_mount_point( device, device_name, link );
 }
 
 /* create the Volume mount point symlink for a new device */
 struct mount_point *add_volume_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
-                                            int drive, const void *id, unsigned int id_len )
+                                            const GUID *guid )
 {
     static const WCHAR volumeW[] = {'\\','?','?','\\','V','o','l','u','m','e','{',
                                     '%','0','8','x','-','%','0','4','x','-','%','0','4','x','-',
                                     '%','0','2','x','%','0','2','x','-','%','0','2','x','%','0','2','x',
                                     '%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x','}',0};
     WCHAR link[sizeof(volumeW)];
-    GUID guid;
 
-    memset( &guid, 0, sizeof(guid) );  /* FIXME */
-    guid.Data4[7] = 'A' + drive;
-    sprintfW( link, volumeW, guid.Data1, guid.Data2, guid.Data3,
-              guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
-              guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-    return add_mount_point( device, device_name, link, id, id_len );
+    sprintfW( link, volumeW, guid->Data1, guid->Data2, guid->Data3,
+              guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+              guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    return add_mount_point( device, device_name, link );
 }
 
 /* delete the mount point symlinks when a device goes away */
@@ -266,7 +261,7 @@ static NTSTATUS define_unix_drive( const void *in_buff, SIZE_T insize )
         case DRIVE_RAMDISK:   type = DEVICE_RAMDISK; break;
         case DRIVE_FIXED:     type = DEVICE_HARDDISK_VOL; break;
         }
-        return add_dos_device( letter - 'a', NULL, device, mount_point, type );
+        return add_dos_device( letter - 'a', NULL, device, mount_point, type, NULL );
     }
     else
     {
@@ -281,7 +276,7 @@ static NTSTATUS query_unix_drive( const void *in_buff, SIZE_T insize,
 {
     const struct mountmgr_unix_drive *input = in_buff;
     struct mountmgr_unix_drive *output = out_buff;
-    const char *device, *mount_point;
+    char *device, *mount_point;
     int letter = tolowerW( input->letter );
     NTSTATUS status;
     DWORD size, type = DEVICE_UNKNOWN;
@@ -319,7 +314,8 @@ static NTSTATUS query_unix_drive( const void *in_buff, SIZE_T insize,
             output->type = type;
             iosb->Information = FIELD_OFFSET( struct mountmgr_unix_drive, type ) + sizeof(output->type);
         }
-        return STATUS_MORE_ENTRIES;
+        status = STATUS_MORE_ENTRIES;
+        goto done;
     }
     output->size = size;
     output->letter = letter;
@@ -346,7 +342,10 @@ static NTSTATUS query_unix_drive( const void *in_buff, SIZE_T insize,
            letter, debugstr_a(device), debugstr_a(mount_point), type );
 
     iosb->Information = ptr - (char *)output;
-    return STATUS_SUCCESS;
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, device );
+    RtlFreeHeap( GetProcessHeap(), 0, mount_point );
+    return status;
 }
 
 /* handler for ioctls on the mount manager device */

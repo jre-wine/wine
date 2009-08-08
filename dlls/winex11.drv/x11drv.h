@@ -92,6 +92,13 @@ typedef struct
     Pixmap       pixmap;
 } X_PHYSBRUSH;
 
+enum x11drv_shm_mode
+{
+    X11DRV_SHM_NONE = 0,
+    X11DRV_SHM_PIXMAP,
+    X11DRV_SHM_IMAGE,
+};
+
   /* X physical bitmap */
 typedef struct
 {
@@ -105,6 +112,7 @@ typedef struct
     int         *colorMap;          /* color map info */
     int          nColorMap;
     CRITICAL_SECTION lock;          /* GDI access lock */
+    enum x11drv_shm_mode shm_mode;
 #ifdef HAVE_LIBXXSHM
     XShmSegmentInfo shminfo;        /* shared memory segment info */
 #endif
@@ -269,9 +277,7 @@ extern BOOL X11DRV_XRender_ExtTextOut(X11DRV_PDEVICE *physDev, INT x, INT y, UIN
 				      UINT count, const INT *lpDx);
 BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
                                       Pixmap pixmap, GC gc,
-                                      INT xSrc, INT ySrc,
                                       INT widthSrc, INT heightSrc,
-                                      INT xDst, INT yDst,
                                       INT widthDst, INT heightDst,
                                       RECT *visRectSrc, RECT *visRectDst);
 extern void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev);

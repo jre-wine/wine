@@ -627,6 +627,16 @@ for(i=2; i<10; i++) {
     ok((0).toString(i) === "0", "(0).toString("+i+") = " + (0).toString(i));
 }
 
+ok(parseFloat('123') === 123, "parseFloat('123') = " + parseFloat('123'));
+ok(parseFloat('-13.7') === -13.7, "parseFloat('-13.7') = " + parseFloat('-13.7'));
+ok(parseFloat('-0.01e-2') === -0.01e-2, "parseFloat('-0.01e-2') = " + parseFloat('-0.01e-2'));
+ok(parseFloat('-12e+5') === -12e+5, "parseFloat('-12e+5') = " + parseFloat('-12e+5'));
+ok(parseFloat('1E5 not parsed') === 1E5, "parseFloat('1E5 not parsed') = " + parseFloat('1E5 not parsed'));
+ok(isNaN(parseFloat('not a number')), "parseFloat('not a number') is not NaN");
+ok(parseFloat('+13.2e-3') === 13.2e-3, "parseFloat('+13.2e-3') = " + parseFloat('+13.2e-3'));
+ok(parseFloat('.12') === 0.12, "parseFloat('.12') = " + parseFloat('.12'));
+ok(parseFloat('1e') === 1, "parseFloat('1e') = " + parseFloat('1e'));
+
 tmp = Math.min(1);
 ok(tmp === 1, "Math.min(1) = " + tmp);
 
@@ -1243,5 +1253,96 @@ var bool = new Boolean("false");
 ok(bool.toString() === "true", "bool.toString() = " + bool.toString());
 ok(bool.valueOf() === Boolean(1), "bool.valueOf() = " + bool.valueOf());
 ok(bool.toLocaleString() === bool.toString(), "bool.toLocaleString() = " + bool.toLocaleString());
+
+ok(Error.prototype !== TypeError.prototype, "Error.prototype === TypeError.prototype");
+ok(RangeError.prototype !== TypeError.prototype, "RangeError.prototype === TypeError.prototype");
+ok(Error.prototype.toLocaleString === Object.prototype.toLocaleString,
+        "Error.prototype.toLocaleString !== Object.prototype.toLocaleString");
+err = new Error();
+ok(err.valueOf === Object.prototype.valueOf, "err.valueOf !== Object.prototype.valueOf");
+ok(Error.prototype.name === "Error", "Error.prototype.name = " + Error.prototype.name);
+ok(err.name === "Error", "err.name = " + err.name);
+EvalError.prototype.message = "test";
+ok(err.toString !== Object.prototype.toString, "err.toString === Object.prototype.toString");
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new EvalError();
+ok(EvalError.prototype.name === "EvalError", "EvalError.prototype.name = " + EvalError.prototype.name);
+ok(err.name === "EvalError", "err.name = " + err.name);
+ok(err.toString === Error.prototype.toString, "err.toString !== Error.prototype.toString");
+ok(err.message === "", "err.message != ''");
+err.message = date;
+ok(err.message === date, "err.message != date");
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+ok(err.toString !== Object.prototype.toString, "err.toString === Object.prototype.toString");
+err = new RangeError();
+ok(RangeError.prototype.name === "RangeError", "RangeError.prototype.name = " + RangeError.prototype.name);
+ok(err.name === "RangeError", "err.name = " + err.name);
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new ReferenceError();
+ok(ReferenceError.prototype.name === "ReferenceError", "ReferenceError.prototype.name = " + ReferenceError.prototype.name);
+ok(err.name === "ReferenceError", "err.name = " + err.name);
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new SyntaxError();
+ok(SyntaxError.prototype.name === "SyntaxError", "SyntaxError.prototype.name = " + SyntaxError.prototype.name);
+ok(err.name === "SyntaxError", "err.name = " + err.name);
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new TypeError();
+ok(TypeError.prototype.name === "TypeError", "TypeError.prototype.name = " + TypeError.prototype.name);
+ok(err.name === "TypeError", "err.name = " + err.name);
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new URIError();
+ok(URIError.prototype.name === "URIError", "URIError.prototype.name = " + URIError.prototype.name);
+ok(err.name === "URIError", "err.name = " + err.name);
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new Error("message");
+ok(err.message === "message", "err.message !== 'message'");
+ok(err.toString() === "[object Error]", "err.toString() = " + err.toString());
+err = new Error(123);
+ok(err.number === 123, "err.number = " + err.number);
+err = new Error(0, "message");
+ok(err.number === 0, "err.number = " + err.number);
+ok(err.message === "message", "err.message = " + err.message);
+ok(err.description === "message", "err.description = " + err.description);
+
+function exception_test(func, type, number) {
+    ret = "";
+    num = "";
+    try {
+        func();
+    } catch(e) {
+        ret = e.name;
+        num = e.number;
+    }
+    ok(ret === type, "Exception test, ret = " + ret + ", expected " + type +". Executed function: " + func.toString());
+    ok(num === number, "Exception test, num = " + num + ", expected " + number + ". Executed function: " + func.toString());
+}
+exception_test(function() {arr.toString = Date.prototype.toString; arr.toString();}, "TypeError", -2146823282);
+exception_test(function() {Array(-3);}, "RangeError", -2146823259);
+exception_test(function() {arr.toString = Boolean.prototype.toString; arr.toString();}, "TypeError", -2146823278);
+exception_test(function() {date.setTime();}, "TypeError", -2146827839);
+exception_test(function() {arr.test();}, "TypeError", -2146827850);
+exception_test(function() {arr.toString = Number.prototype.toString; arr.toString();}, "TypeError", -2146823287);
+exception_test(function() {(new Number(3)).toString(1);}, "TypeError", -2146828283);
+exception_test(function() {not_existing_variable.something();}, "TypeError", -2146823279);
+exception_test(function() {arr.toString = Function.prototype.toString; arr.toString();}, "TypeError", -2146823286);
+exception_test(function() {date();}, "TypeError", -2146823286);
+exception_test(function() {arr();}, "TypeError", -2146823286);
+exception_test(function() {eval("for(i=0;) {}");}, "SyntaxError", -2146827286);
+exception_test(function() {eval("function {};");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("if");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("do i=0; while");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("while");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("for");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("with");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("switch");}, "SyntaxError", -2146827283);
+exception_test(function() {eval("if(false");}, "SyntaxError", -2146827282);
+exception_test(function() {eval("for(i=0; i<10; i++");}, "SyntaxError", -2146827282);
+exception_test(function() {eval("while(true");}, "SyntaxError", -2146827282);
+exception_test(function() {test = function() {}}, "ReferenceError", -2146823280);
+exception_test(function() {eval("for(i=0")}, "SyntaxError", -2146827284);
+exception_test(function() {eval("for(i=0;i<10")}, "SyntaxError", -2146827284);
+exception_test(function() {eval("while(")}, "SyntaxError", -2146827286);
+exception_test(function() {eval("if(")}, "SyntaxError", -2146827286);
+exception_test(function() {eval("'unterminated")}, "SyntaxError", -2146827273);
 
 reportSuccess();

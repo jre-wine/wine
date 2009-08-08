@@ -590,10 +590,8 @@ static HRESULT Date_toString(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
     time = local_time(date->time, date);
@@ -615,10 +613,8 @@ static HRESULT Date_toLocaleString(DispatchEx *dispex, LCID lcid, WORD flags, DI
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -679,10 +675,8 @@ static HRESULT Date_valueOf(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -720,10 +714,8 @@ static HRESULT Date_toUTCString(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -829,10 +821,8 @@ static HRESULT Date_toDateString(DispatchEx *dispex, LCID lcid, WORD flags, DISP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -927,10 +917,8 @@ static HRESULT Date_toTimeString(DispatchEx *dispex, LCID lcid, WORD flags, DISP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -986,10 +974,8 @@ static HRESULT Date_toLocaleDateString(DispatchEx *dispex, LCID lcid, WORD flags
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -1033,10 +1019,8 @@ static HRESULT Date_toLocaleTimeString(DispatchEx *dispex, LCID lcid, WORD flags
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
 
@@ -1074,10 +1058,8 @@ static HRESULT Date_getTime(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1092,10 +1074,8 @@ static HRESULT Date_getFullYear(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1112,10 +1092,8 @@ static HRESULT Date_getUTCFullYear(DispatchEx *dispex, LCID lcid, WORD flags, DI
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1130,10 +1108,8 @@ static HRESULT Date_getMonth(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1150,10 +1126,8 @@ static HRESULT Date_getUTCMonth(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1168,10 +1142,8 @@ static HRESULT Date_getDate(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1188,10 +1160,8 @@ static HRESULT Date_getUTCDate(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1206,10 +1176,8 @@ static HRESULT Date_getDay(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1226,10 +1194,8 @@ static HRESULT Date_getUTCDay(DispatchEx *dispex, LCID lcid, WORD flags, DISPPAR
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1244,10 +1210,8 @@ static HRESULT Date_getHours(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1264,10 +1228,8 @@ static HRESULT Date_getUTCHours(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1282,10 +1244,8 @@ static HRESULT Date_getMinutes(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1302,10 +1262,8 @@ static HRESULT Date_getUTCMinutes(DispatchEx *dispex, LCID lcid, WORD flags, DIS
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1320,10 +1278,8 @@ static HRESULT Date_getSeconds(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1340,10 +1296,8 @@ static HRESULT Date_getUTCSeconds(DispatchEx *dispex, LCID lcid, WORD flags, DIS
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1358,10 +1312,8 @@ static HRESULT Date_getMilliseconds(DispatchEx *dispex, LCID lcid, WORD flags, D
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1378,10 +1330,8 @@ static HRESULT Date_getUTCMilliseconds(DispatchEx *dispex, LCID lcid, WORD flags
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1396,10 +1346,8 @@ static HRESULT Date_getTimezoneOffset(DispatchEx *dispex, LCID lcid, WORD flags,
 {
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     if(retv) {
         DateInstance *date = (DateInstance*)dispex;
@@ -1419,16 +1367,11 @@ static HRESULT Date_setTime(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1454,16 +1397,11 @@ static HRESULT Date_setMilliseconds(DispatchEx *dispex, LCID lcid, WORD flags, D
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1492,16 +1430,11 @@ static HRESULT Date_setUTCMilliseconds(DispatchEx *dispex, LCID lcid, WORD flags
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1530,16 +1463,11 @@ static HRESULT Date_setSeconds(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -1578,16 +1506,11 @@ static HRESULT Date_setUTCSeconds(DispatchEx *dispex, LCID lcid, WORD flags, DIS
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = date->time;
@@ -1626,16 +1549,11 @@ static HRESULT Date_setMinutes(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -1682,16 +1600,11 @@ static HRESULT Date_setUTCMinutes(DispatchEx *dispex, LCID lcid, WORD flags, DIS
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = date->time;
@@ -1738,16 +1651,11 @@ static HRESULT Date_setHours(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -1801,16 +1709,11 @@ static HRESULT Date_setUTCHours(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = date->time;
@@ -1864,16 +1767,11 @@ static HRESULT Date_setDate(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1902,16 +1800,11 @@ static HRESULT Date_setUTCDate(DispatchEx *dispex, LCID lcid, WORD flags, DISPPA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     hres = to_number(dispex->ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1940,16 +1833,11 @@ static HRESULT Date_setMonth(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARA
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -1988,16 +1876,11 @@ static HRESULT Date_setUTCMonth(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = date->time;
@@ -2036,16 +1919,11 @@ static HRESULT Date_setFullYear(DispatchEx *dispex, LCID lcid, WORD flags, DISPP
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -2091,16 +1969,11 @@ static HRESULT Date_setUTCFullYear(DispatchEx *dispex, LCID lcid, WORD flags, DI
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
-    if(!arg_cnt(dp)) {
-        FIXME("throw ArgumentNotOptional\n");
-        if(retv) num_set_nan(retv);
-        return S_OK;
-    }
+    if(!arg_cnt(dp))
+        return throw_type_error(dispex->ctx, ei, IDS_ARG_NOT_OPT, NULL);
 
     date = (DateInstance*)dispex;
     t = date->time;
@@ -2144,10 +2017,8 @@ static HRESULT Date_getYear(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 
     TRACE("\n");
 
-    if(!is_class(dispex, JSCLASS_DATE)) {
-        FIXME("throw TypeError\n");
-        return E_FAIL;
-    }
+    if(!is_class(dispex, JSCLASS_DATE))
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_DATE, NULL);
 
     date = (DateInstance*)dispex;
     t = local_time(date->time, date);
@@ -2169,8 +2040,17 @@ static HRESULT Date_getYear(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAM
 static HRESULT Date_value(DispatchEx *dispex, LCID lcid, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    switch(flags) {
+    case INVOKE_FUNC:
+        return throw_type_error(dispex->ctx, ei, IDS_NOT_FUNC, NULL);
+    default:
+        FIXME("unimplemented flags %x\n", flags);
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
 }
 
 static const builtin_prop_t Date_props[] = {

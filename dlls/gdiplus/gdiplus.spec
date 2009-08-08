@@ -291,7 +291,7 @@
 @ stdcall GdipGetImageHeight(ptr ptr)
 @ stdcall GdipGetImageHorizontalResolution(ptr ptr)
 @ stub GdipGetImageItemData
-@ stub GdipGetImagePalette
+@ stdcall GdipGetImagePalette(ptr ptr long)
 @ stdcall GdipGetImagePaletteSize(ptr ptr)
 @ stdcall GdipGetImagePixelFormat(ptr ptr)
 @ stdcall GdipGetImageRawFormat(ptr ptr)
@@ -430,7 +430,7 @@
 @ stdcall GdipIsVisiblePoint(ptr long long ptr)
 @ stdcall GdipIsVisiblePointI(ptr long long ptr)
 @ stub GdipIsVisibleRect
-@ stub GdipIsVisibleRectI
+@ stdcall GdipIsVisibleRectI(ptr long long long long ptr)
 @ stub GdipIsVisibleRegionPoint
 @ stdcall GdipIsVisibleRegionPointI(ptr long long ptr ptr)
 @ stub GdipIsVisibleRegionRect
@@ -469,7 +469,7 @@
 @ stub GdipRecordMetafile
 @ stdcall GdipRecordMetafileFileName(wstr long long ptr long wstr ptr)
 @ stdcall GdipRecordMetafileFileNameI(wstr long long ptr long wstr ptr)
-@ stub GdipRecordMetafileI
+@ stdcall GdipRecordMetafileI(long long ptr long wstr ptr)
 @ stub GdipRecordMetafileStream
 @ stub GdipRecordMetafileStreamI
 @ stdcall GdipReleaseDC(ptr ptr)

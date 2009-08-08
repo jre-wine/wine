@@ -109,11 +109,18 @@ my %exported_wine_headers = (
 my %private_idl_headers = (
     "axcore.idl" => 1,
     "axextend.idl" => 1,
+    "binres.idl" => 1,
+    "crtrow.idl" => 1,
+    "dbccmd.idl" => 1,
+    "dbcses.idl" => 1,
+    "dbdsad.idl" => 1,
     "dbinit.idl" => 1,
     "dbprop.idl" => 1,
     "dbs.idl" => 1,
     "devenum.idl" => 1,
     "dyngraph.idl" => 1,
+    "opnrst.idl" => 1,
+    "sesprp.idl" => 1,
     "vmrender.idl" => 1,
     "wine/wined3d.idl" => 1,
     "wine/winedxgi.idl" => 1,
@@ -294,7 +301,7 @@ sub assign_sources_to_makefiles()
         elsif ($basename =~ /\.l$/) { push @{${$make}{"=LEX_SRCS"}}, $basename; }
         elsif ($basename =~ /\.y$/) { push @{${$make}{"=BISON_SRCS"}}, $basename; }
         elsif ($basename =~ /\.rc$/) { push @{${$make}{"=RC_SRCS"}}, $basename; }
-        elsif ($basename =~ /\.rc$/) { push @{${$make}{"=RC_SRCS"}}, $basename; }
+        elsif ($basename =~ /\.mc$/) { push @{${$make}{"=MC_SRCS"}}, $basename; }
         elsif ($basename =~ /\.svg$/) { push @{${$make}{"=SVG_SRCS"}}, $basename; }
     }
 }

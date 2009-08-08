@@ -1345,7 +1345,8 @@ static void ME_RTFReadHook(RTF_Info *info)
       {
         case rtfBeginGroup:
           if (info->stackTop < maxStack) {
-            info->stack[info->stackTop].fmt = info->style->fmt;
+            info->stack[info->stackTop].style = info->style;
+            ME_AddRefStyle(info->style);
             info->stack[info->stackTop].codePage = info->codePage;
             info->stack[info->stackTop].unicodeLength = info->unicodeLength;
           }
@@ -1354,7 +1355,6 @@ static void ME_RTFReadHook(RTF_Info *info)
           break;
         case rtfEndGroup:
         {
-          ME_Style *s;
           RTFFlushOutputBuffer(info);
           info->stackTop--;
           if (info->stackTop<=0) {
@@ -1362,15 +1362,12 @@ static void ME_RTFReadHook(RTF_Info *info)
             return;
           }
           assert(info->stackTop >= 0);
-          if (info->styleChanged)
-          {
-            /* FIXME too slow ? how come ? */
-            s = ME_ApplyStyle(info->style, &info->stack[info->stackTop].fmt);
-            ME_ReleaseStyle(info->style);
-            info->style = s;
-            info->codePage = info->stack[info->stackTop].codePage;
-            info->unicodeLength = info->stack[info->stackTop].unicodeLength;
-          }
+
+          ME_ReleaseStyle(info->style);
+          info->style = info->stack[info->stackTop].style;
+          ME_AddRefStyle(info->style);
+          info->codePage = info->stack[info->stackTop].codePage;
+          info->unicodeLength = info->stack[info->stackTop].unicodeLength;
           break;
         }
       }
@@ -1865,6 +1862,8 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
 static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
 {
     int nStart, nCount; /* in chars */
+
+    if (!ex->cb || !pText) return 0;
 
     if (ex->flags & ~(GT_SELECTION | GT_USECRLF))
       FIXME("GETTEXTEX flags 0x%08x not supported\n", ex->flags & ~(GT_SELECTION | GT_USECRLF));
@@ -2603,6 +2602,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
                      ES_AUTOHSCROLL|ES_DISABLENOSCROLL);
   ed->pBuffer = ME_MakeText();
   ed->nZoomNumerator = ed->nZoomDenominator = 0;
+  ed->nAvailWidth = 0; /* wrap to client area */
   ME_MakeFirstParagraph(ed);
   /* The four cursors are for:
    * 0 - The position where the caret is shown
@@ -2635,7 +2635,6 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->nParagraphs = 1;
   ed->nLastSelStart = ed->nLastSelEnd = 0;
   ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
-  ed->nAvailWidth = 0; /* wrap to client area */
   ed->bHideSelection = FALSE;
   ed->pfnWordBreak = NULL;
   ed->lpOleCallback = NULL;
@@ -3545,36 +3544,12 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_GETTEXT:
   {
     GETTEXTEX ex;
-    LRESULT rc;
-    LPSTR bufferA = NULL;
-    LPWSTR bufferW = NULL;
-
-    if (unicode)
-        bufferW = heap_alloc((wParam + 2) * sizeof(WCHAR));
-    else
-        bufferA = heap_alloc(wParam + 2);
-
-    ex.cb = (wParam + 2) * (unicode ? sizeof(WCHAR) : sizeof(CHAR));
+    ex.cb = wParam * (unicode ? sizeof(WCHAR) : sizeof(CHAR));
     ex.flags = GT_USECRLF;
     ex.codepage = unicode ? 1200 : CP_ACP;
     ex.lpDefaultChar = NULL;
     ex.lpUsedDefChar = NULL;
-
-    rc = ME_GetTextEx(editor, &ex, unicode ? (LPARAM)bufferW : (LPARAM)bufferA);
-
-    if (unicode)
-    {
-        memcpy((LPWSTR)lParam, bufferW, wParam * sizeof(WCHAR));
-        if (strlenW(bufferW) >= wParam) rc = 0;
-    }
-    else
-    {
-        memcpy((LPSTR)lParam, bufferA, wParam);
-        if (strlen(bufferA) >= wParam) rc = 0;
-    }
-    heap_free(bufferA);
-    heap_free(bufferW);
-    return rc;
+    return ME_GetTextEx(editor, &ex, lParam);
   }
   case EM_GETTEXTEX:
     return ME_GetTextEx(editor, (GETTEXTEX*)wParam, lParam);
@@ -3590,6 +3565,11 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     POINT *point = (POINT *)lParam;
     point->x = editor->horz_si.nPos;
     point->y = editor->vert_si.nPos;
+    /* 16-bit scaled value is returned as stored in scrollinfo */
+    if (editor->horz_si.nMax > 0xffff)
+      point->x = MulDiv(point->x, 0xffff, editor->horz_si.nMax);
+    if (editor->vert_si.nMax > 0xffff)
+      point->y = MulDiv(point->y, 0xffff, editor->vert_si.nMax);
     return 1;
   }
   case EM_GETTEXTRANGE:
@@ -4015,15 +3995,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       case SB_THUMBTRACK:
       case SB_THUMBPOSITION:
       {
-        SCROLLINFO sbi;
-        sbi.cbSize = sizeof(sbi);
-        sbi.fMask = SIF_TRACKPOS;
-        /* Try to get 32-bit track position value. */
-        if (!GetScrollInfo(editor->hWnd, SB_HORZ, &sbi))
-          /* GetScrollInfo failed, settle for 16-bit value in wParam. */
-          sbi.nTrackPos = HIWORD(wParam);
-
-        ME_HScrollAbs(editor, sbi.nTrackPos);
+        int pos = HIWORD(wParam);
+        if (editor->horz_si.nMax > 0xffff)
+          pos = MulDiv(pos, editor->horz_si.nMax, 0xffff);
+        ME_HScrollAbs(editor, pos);
         break;
       }
     }
@@ -4067,15 +4042,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       case SB_THUMBTRACK:
       case SB_THUMBPOSITION:
       {
-        SCROLLINFO sbi;
-        sbi.cbSize = sizeof(sbi);
-        sbi.fMask = SIF_TRACKPOS;
-        /* Try to get 32-bit track position value. */
-        if (!GetScrollInfo(editor->hWnd, SB_VERT, &sbi))
-          /* GetScrollInfo failed, settle for 16-bit value in wParam. */
-          sbi.nTrackPos = HIWORD(wParam);
-
-        ME_VScrollAbs(editor, sbi.nTrackPos);
+        int pos = HIWORD(wParam);
+        if (editor->vert_si.nMax > 0xffff)
+          pos = MulDiv(pos, editor->vert_si.nMax, 0xffff);
+        ME_VScrollAbs(editor, pos);
         break;
       }
     }

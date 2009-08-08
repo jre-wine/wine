@@ -35,106 +35,98 @@
 const char *TEST_CALLBACK_TEXT = "callback_text";
 
 #define NUM_MSG_SEQUENCES   1
-#define LISTVIEW_SEQ_INDEX  0
+#define TREEVIEW_SEQ_INDEX  0
+
+#define expect(expected, got) ok(got == expected, "Expected %d, got %d\n", expected, got)
 
 static struct msg_sequence *MsgSequences[NUM_MSG_SEQUENCES];
 
 static const struct message FillRootSeq[] = {
     { TVM_INSERTITEM, sent },
-    { TVM_GETITEM, sent },
     { TVM_INSERTITEM, sent },
     { 0 }
 };
 
-static const struct message DoTest1Seq[] = {
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
+static const struct message rootnone_select_seq[] = {
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
     { 0 }
 };
 
-static const struct message DoTest2Seq[] = {
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
+static const struct message rootchild_select_seq[] = {
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    { TVM_SELECTITEM, sent|wparam, 9 },
     { 0 }
 };
 
-static const struct message DoTest3Seq[] = {
+static const struct message getitemtext_seq[] = {
     { TVM_INSERTITEM, sent },
     { TVM_GETITEM, sent },
     { TVM_DELETEITEM, sent },
     { 0 }
 };
 
-static const struct message DoFocusTestSeq[] = {
+static const struct message focus_seq[] = {
     { TVM_INSERTITEM, sent },
     { TVM_INSERTITEM, sent },
+    { TVM_SELECTITEM, sent|wparam, 9 },
+    /* The following end up out of order in wine */
     { WM_WINDOWPOSCHANGING, sent|defwinproc },
-    { WM_NCCALCSIZE, sent|wparam|defwinproc, 0x00000001 },
+    { WM_NCCALCSIZE, sent|wparam|defwinproc, TRUE },
     { WM_WINDOWPOSCHANGED, sent|defwinproc },
     { WM_SIZE, sent|defwinproc },
-    { WM_WINDOWPOSCHANGING, sent },
-    { WM_NCCALCSIZE, sent|wparam, 0x00000001 },
-    { WM_WINDOWPOSCHANGED, sent },
-    { WM_SIZE, sent|defwinproc },
-    { WM_WINDOWPOSCHANGING, sent|defwinproc|optional },
-    { WM_NCCALCSIZE, sent|wparam|defwinproc|optional, 0x00000001 },
-    { WM_WINDOWPOSCHANGED, sent|defwinproc|optional },
-    { WM_SIZE, sent|defwinproc|optional },
-    { TVM_SELECTITEM, sent|wparam, 0x00000009 },
-    /* The following end up out of order in wine */
     { WM_PAINT, sent|defwinproc },
-    { WM_NCPAINT, sent|wparam|defwinproc, 0x00000001 },
+    { WM_NCPAINT, sent|wparam|defwinproc, 1 },
     { WM_ERASEBKGND, sent|defwinproc },
     { TVM_EDITLABEL, sent },
-    { WM_COMMAND, sent|wparam|defwinproc, 0x04000000 },
-    { WM_COMMAND, sent|wparam|defwinproc, 0x03000000 },
-    { WM_PARENTNOTIFY, sent|wparam|defwinproc, 0x00000001 },
+    { WM_COMMAND, sent|wparam|defwinproc, MAKEWPARAM(0, EN_UPDATE) },
+    { WM_COMMAND, sent|wparam|defwinproc, MAKEWPARAM(0, EN_CHANGE) },
+    { WM_PARENTNOTIFY, sent|wparam|defwinproc, MAKEWPARAM(WM_CREATE, 0) },
     { WM_KILLFOCUS, sent|defwinproc },
     { WM_PAINT, sent|defwinproc },
     { WM_IME_SETCONTEXT, sent|defwinproc|optional },
-    { WM_COMMAND, sent|wparam|defwinproc, 0x01000000},
-    { WM_ERASEBKGND, sent|defwinproc },
+    { WM_COMMAND, sent|wparam|defwinproc, MAKEWPARAM(0, EN_SETFOCUS) },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },
     { 0 }
 };
 
 static const struct message TestGetSetBkColorSeq[] = {
-    { TVM_GETBKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETBKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETBKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETBKCOLOR, sent|wparam|lparam, 0x00000000, 0x00ffffff },
-    { TVM_GETBKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETBKCOLOR, sent|wparam|lparam, 0x00000000, -1 },
+    { TVM_GETBKCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETBKCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_GETBKCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETBKCOLOR, sent|wparam|lparam, 0, 0x00ffffff },
+    { TVM_GETBKCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETBKCOLOR, sent|wparam|lparam, 0, -1 },
     { 0 }
 };
 
 static const struct message TestGetSetImageListSeq[] = {
-    { TVM_SETIMAGELIST, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETIMAGELIST, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_SETIMAGELIST, sent|wparam|lparam, 0, 0 },
+    { TVM_GETIMAGELIST, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
 static const struct message TestGetSetIndentSeq[] = {
-    { TVM_SETINDENT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETINDENT, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_SETINDENT, sent|wparam|lparam, 0, 0 },
+    { TVM_GETINDENT, sent|wparam|lparam, 0, 0 },
     /* The actual amount to indent is dependent on the system for this message */
     { TVM_SETINDENT, sent },
-    { TVM_GETINDENT, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_GETINDENT, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
 static const struct message TestGetSetInsertMarkColorSeq[] = {
-    { TVM_SETINSERTMARKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETINSERTMARKCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_SETINSERTMARKCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_GETINSERTMARKCOLOR, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
@@ -147,50 +139,45 @@ static const struct message TestGetSetItemSeq[] = {
 };
 
 static const struct message TestGetSetItemHeightSeq[] = {
-    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETITEMHEIGHT, sent|wparam|lparam, -1, 0x00000000 },
-    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETITEMHEIGHT, sent|lparam, 0xcccccccc, 0x00000000 },
-    { TVM_GETITEMHEIGHT, sent|wparam|lparam|optional, 0x00000000, 0x00000000 },
-    { TVM_SETITEMHEIGHT, sent|wparam|lparam|optional, 0x00000009, 0x00000000 },
-    { WM_WINDOWPOSCHANGING, sent|defwinproc },
-    { WM_NCCALCSIZE, sent|wparam|defwinproc, 0x00000001 },
-    { WM_WINDOWPOSCHANGED, sent|defwinproc },
-    { WM_SIZE, sent|defwinproc },
-    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0, 0 },
+    { TVM_SETITEMHEIGHT, sent|wparam|lparam, -1, 0 },
+    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0, 0 },
+    { TVM_SETITEMHEIGHT, sent|lparam, 0xcccccccc, 0 },
+    { TVM_GETITEMHEIGHT, sent|wparam|lparam|optional, 0, 0 },
+    { TVM_SETITEMHEIGHT, sent|wparam|lparam|optional, 9, 0 },
+    { TVM_GETITEMHEIGHT, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
 static const struct message TestGetSetScrollTimeSeq[] = {
-    { TVM_SETSCROLLTIME, sent|wparam|lparam, 0x00000014, 0x00000000 },
-    { TVM_GETSCROLLTIME, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_SETSCROLLTIME, sent|wparam|lparam, 20, 0 },
+    { TVM_GETSCROLLTIME, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
 static const struct message TestGetSetTextColorSeq[] = {
-    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0x00000000, 0x00ffffff },
-    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0x00000000, -1 },
+    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0, 0x00ffffff },
+    { TVM_GETTEXTCOLOR, sent|wparam|lparam, 0, 0 },
+    { TVM_SETTEXTCOLOR, sent|wparam|lparam, 0, -1 },
     { 0 }
 };
 
 static const struct message TestGetSetToolTipsSeq[] = {
-    { WM_COMMAND,       sent|wparam,            0x02000000 },
-    { WM_PARENTNOTIFY,  sent|wparam|defwinproc, 0x00020002 },
-    { TVM_SETTOOLTIPS, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETTOOLTIPS, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { WM_KILLFOCUS,    sent },
+    { TVM_SETTOOLTIPS, sent|wparam|lparam, 0, 0 },
+    { TVM_GETTOOLTIPS, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
 static const struct message TestGetSetUnicodeFormatSeq[] = {
-    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, 0x00000001, 0x00000000 },
-    { TVM_GETUNICODEFORMAT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_GETUNICODEFORMAT, sent|wparam|lparam, 0x00000000, 0x00000000 },
-    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, 0x00000000, 0x00000000 },
+    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, TRUE, 0 },
+    { TVM_GETUNICODEFORMAT, sent|wparam|lparam, 0, 0 },
+    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, 0, 0 },
+    { TVM_GETUNICODEFORMAT, sent|wparam|lparam, 0, 0 },
+    { TVM_SETUNICODEFORMAT, sent|wparam|lparam, 0, 0 },
     { 0 }
 };
 
@@ -231,21 +218,83 @@ static void IdentifyItem(HTREEITEM hItem)
     AddItem('?');
 }
 
-static void FillRoot(void)
+/* This function hooks in and records all messages to the treeview control */
+static LRESULT WINAPI TreeviewWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    static LONG defwndproc_counter = 0;
+    LRESULT ret;
+    struct message msg;
+    WNDPROC lpOldProc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+
+    msg.message = message;
+    msg.flags = sent|wparam|lparam;
+    if (defwndproc_counter) msg.flags |= defwinproc;
+    msg.wParam = wParam;
+    msg.lParam = lParam;
+    add_message(MsgSequences, TREEVIEW_SEQ_INDEX, &msg);
+
+    defwndproc_counter++;
+    ret = CallWindowProcA(lpOldProc, hwnd, message, wParam, lParam);
+    defwndproc_counter--;
+
+    return ret;
+}
+
+static HWND create_treeview_control(void)
+{
+    WNDPROC pOldWndProc;
+    HWND hTree;
+
+    hTree = CreateWindowExA(WS_EX_CLIENTEDGE, WC_TREEVIEWA, NULL, WS_CHILD|WS_VISIBLE|
+            TVS_LINESATROOT|TVS_HASLINES|TVS_HASBUTTONS|TVS_EDITLABELS,
+            0, 0, 120, 100, hMainWnd, (HMENU)100, GetModuleHandleA(0), 0);
+
+    SetFocus(hTree);
+
+    /* Record the old WNDPROC so we can call it after recording the messages */
+    pOldWndProc = (WNDPROC)SetWindowLongPtrA(hTree, GWLP_WNDPROC, (LONG_PTR)TreeviewWndProc);
+    SetWindowLongPtrA(hTree, GWLP_USERDATA, (LONG_PTR)pOldWndProc);
+
+    return hTree;
+}
+
+static void fill_tree(HWND hTree)
 {
     TVINSERTSTRUCTA ins;
-    TVITEM tvi;
     static CHAR root[]  = "Root",
                 child[] = "Child";
 
-    Clear();
-    AddItem('A');
     ins.hParent = TVI_ROOT;
     ins.hInsertAfter = TVI_ROOT;
     U(ins).item.mask = TVIF_TEXT;
     U(ins).item.pszText = root;
     hRoot = TreeView_InsertItem(hTree, &ins);
+
+    ins.hParent = hRoot;
+    ins.hInsertAfter = TVI_FIRST;
+    U(ins).item.mask = TVIF_TEXT;
+    U(ins).item.pszText = child;
+    hChild = TreeView_InsertItem(hTree, &ins);
+}
+
+static void test_fillroot(void)
+{
+    TVITEM tvi;
+
+    hTree = create_treeview_control();
+
+    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
+
+    fill_tree(hTree);
+
+    Clear();
+    AddItem('A');
     assert(hRoot);
+    AddItem('B');
+    assert(hChild);
+    AddItem('.');
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, FillRootSeq, "FillRoot", FALSE);
+    ok(!strcmp(sequence, "AB."), "Item creation\n");
 
     /* UMLPad 1.15 depends on this being not -1 (I_IMAGECALLBACK) */
     tvi.hItem = hRoot;
@@ -254,19 +303,10 @@ static void FillRoot(void)
     ok(tvi.iImage == 0, "tvi.iImage=%d\n", tvi.iImage);
     ok(tvi.iSelectedImage == 0, "tvi.iSelectedImage=%d\n", tvi.iSelectedImage);
 
-    AddItem('B');
-    ins.hParent = hRoot;
-    ins.hInsertAfter = TVI_FIRST;
-    U(ins).item.mask = TVIF_TEXT;
-    U(ins).item.pszText = child;
-    hChild = TreeView_InsertItem(hTree, &ins);
-    assert(hChild);
-    AddItem('.');
-
-    ok(!strcmp(sequence, "AB."), "Item creation\n");
+    DestroyWindow(hTree);
 }
 
-static void TestCallback(void)
+static void test_callback(void)
 {
     HTREEITEM hRoot;
     HTREEITEM hItem1, hItem2;
@@ -275,6 +315,9 @@ static void TestCallback(void)
     CHAR test_string[] = "Test_string";
     CHAR buf[128];
     LRESULT ret;
+
+    hTree = create_treeview_control();
+    fill_tree(hTree);
 
     ret = TreeView_DeleteAllItems(hTree);
     ok(ret == TRUE, "ret\n");
@@ -326,11 +369,19 @@ static void TestCallback(void)
     ok(ret == TRUE, "Expected GetItem return TRUE, got %ld\n", ret);
     ok(strcmp(tvi.pszText, TEST_CALLBACK_TEXT) == 0, "Item text mismatch %s vs %s\n",
         tvi.pszText, TEST_CALLBACK_TEXT);
+
+    DestroyWindow(hTree);
 }
 
-static void DoTest1(void)
+static void test_select(void)
 {
     BOOL r;
+
+    hTree = create_treeview_control();
+    fill_tree(hTree);
+
+    /* root-none select tests */
+    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     r = TreeView_SelectItem(hTree, NULL);
     Clear();
     AddItem('1');
@@ -345,11 +396,11 @@ static void DoTest1(void)
     r = TreeView_SelectItem(hTree, hRoot);
     AddItem('.');
     ok(!strcmp(sequence, "1(nR)nR23(Rn)Rn45(nR)nR."), "root-none select test\n");
-}
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, rootnone_select_seq,
+                "root-none select seq", FALSE);
 
-static void DoTest2(void)
-{
-    BOOL r;
+    /* root-child select tests */
+    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     r = TreeView_SelectItem(hTree, NULL);
     Clear();
     AddItem('1');
@@ -364,16 +415,25 @@ static void DoTest2(void)
     r = TreeView_SelectItem(hTree, hRoot);
     AddItem('.');
     ok(!strcmp(sequence, "1(nR)nR23(RC)RC45(CR)CR."), "root-child select test\n");
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, rootchild_select_seq,
+                "root-child select seq", FALSE);
+
+    DestroyWindow(hTree);
 }
 
-static void DoTest3(void)
+static void test_getitemtext(void)
 {
     TVINSERTSTRUCTA ins;
     HTREEITEM hChild;
     TVITEM tvi;
 
-    int nBufferSize = 80;
     CHAR szBuffer[80] = "Blah";
+    int nBufferSize = sizeof(szBuffer)/sizeof(CHAR);
+
+    hTree = create_treeview_control();
+    fill_tree(hTree);
+
+    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
 
     /* add an item without TVIF_TEXT mask and pszText == NULL */
     ins.hParent = hRoot;
@@ -393,14 +453,22 @@ static void DoTest3(void)
     SendMessageA( hTree, TVM_GETITEM, 0, (LPARAM)&tvi );
     ok(!strcmp(szBuffer, ""), "szBuffer=\"%s\", expected \"\"\n", szBuffer);
     ok(SendMessageA(hTree, TVM_DELETEITEM, 0, (LPARAM)hChild), "DeleteItem failed\n");
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, getitemtext_seq, "get item text seq", FALSE);
+
+    DestroyWindow(hTree);
 }
 
-static void DoFocusTest(void)
+static void test_focus(void)
 {
     TVINSERTSTRUCTA ins;
     static CHAR child1[]  = "Edit",
                 child2[]  = "A really long string";
     HTREEITEM hChild1, hChild2;
+
+    hTree = create_treeview_control();
+    fill_tree(hTree);
+
+    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
 
     /* This test verifies that when a label is being edited, scrolling
      * the treeview does not cause the label to lose focus. To test
@@ -420,11 +488,13 @@ static void DoFocusTest(void)
     assert(hChild2);
 
     ShowWindow(hMainWnd,SW_SHOW);
-    /* Using SendMessageA since Win98 doesn't have default unicode support */
     SendMessageA(hTree, TVM_SELECTITEM, TVGN_CARET, (LPARAM)hChild);
     hEdit = TreeView_EditLabel(hTree, hChild);
     ScrollWindowEx(hTree, -10, 0, NULL, NULL, NULL, NULL, SW_SCROLLCHILDREN);
     ok(GetFocus() == hEdit, "Edit control should have focus\n");
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, focus_seq, "focus test", TRUE);
+
+    DestroyWindow(hTree);
 }
 
 static void TestGetSetBkColor(void)
@@ -603,111 +673,77 @@ static void TestGetSetUnicodeFormat(void)
     SendMessage( hTree, TVM_SETUNICODEFORMAT, (LPARAM)bPreviousSetting, 0 );
 }
 
-static void TestGetSet(void)
+static void test_getset(void)
 {
+    hTree = create_treeview_control();
+    fill_tree(hTree);
+
     /* TVM_GETBKCOLOR and TVM_SETBKCOLOR */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetBkColor();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetBkColorSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetBkColorSeq,
         "TestGetSetBkColor", FALSE);
 
     /* TVM_GETIMAGELIST and TVM_SETIMAGELIST */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetImageList();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetImageListSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetImageListSeq,
         "TestGetImageList", FALSE);
 
     /* TVM_SETINDENT and TVM_GETINDENT */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetIndent();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetIndentSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetIndentSeq,
         "TestGetSetIndent", FALSE);
 
     /* TVM_GETINSERTMARKCOLOR and TVM_GETINSERTMARKCOLOR */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetInsertMarkColor();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetInsertMarkColorSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetInsertMarkColorSeq,
         "TestGetSetInsertMarkColor", FALSE);
 
     /* TVM_GETITEM and TVM_SETITEM */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetItem();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetItemSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetItemSeq,
         "TestGetSetItem", FALSE);
 
     /* TVM_GETITEMHEIGHT and TVM_SETITEMHEIGHT */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetItemHeight();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetItemHeightSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetItemHeightSeq,
         "TestGetSetItemHeight", FALSE);
 
     /* TVM_GETSCROLLTIME and TVM_SETSCROLLTIME */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetScrollTime();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetScrollTimeSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetScrollTimeSeq,
         "TestGetSetScrollTime", FALSE);
 
     /* TVM_GETTEXTCOLOR and TVM_SETTEXTCOLOR */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetTextColor();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetTextColorSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetTextColorSeq,
         "TestGetSetTextColor", FALSE);
 
     /* TVM_GETTOOLTIPS and TVM_SETTOOLTIPS */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetToolTips();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetToolTipsSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetToolTipsSeq,
         "TestGetSetToolTips", TRUE);
 
     /* TVM_GETUNICODEFORMAT and TVM_SETUNICODEFORMAT */
     flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
     TestGetSetUnicodeFormat();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, TestGetSetUnicodeFormatSeq,
+    ok_sequence(MsgSequences, TREEVIEW_SEQ_INDEX, TestGetSetUnicodeFormatSeq,
         "TestGetSetUnicodeFormat", FALSE);
-}
 
-/* This function hooks in and records all messages to the treeview control */
-static LRESULT WINAPI TreeviewWndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    static LONG defwndproc_counter = 0;
-    LRESULT ret;
-    struct message msg;
-    WNDPROC lpOldProc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-
-    msg.message = message;
-    msg.flags = sent|wparam|lparam;
-    if (defwndproc_counter) msg.flags |= defwinproc;
-    msg.wParam = wParam;
-    msg.lParam = lParam;
-    add_message(MsgSequences, LISTVIEW_SEQ_INDEX, &msg);
-
-    defwndproc_counter++;
-    ret = CallWindowProcA(lpOldProc, hwnd, message, wParam, lParam);
-    defwndproc_counter--;
-
-    return ret;
+    DestroyWindow(hTree);
 }
 
 static LRESULT CALLBACK MyWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    WNDPROC pOldWndProc;
-
     switch(msg) {
-
-    case WM_CREATE:
-    {
-        hTree = CreateWindowExA(WS_EX_CLIENTEDGE, WC_TREEVIEWA, NULL, WS_CHILD|WS_VISIBLE|
-            TVS_LINESATROOT|TVS_HASLINES|TVS_HASBUTTONS|TVS_EDITLABELS,
-            0, 0, 120, 100, hWnd, (HMENU)100, GetModuleHandleA(0), 0);
-
-        SetFocus(hTree);
-
-        /* Record the old WNDPROC so we can call it after recording the messages */
-        pOldWndProc = (WNDPROC)SetWindowLongPtrA(hTree, GWLP_WNDPROC, (LONG_PTR)TreeviewWndProc);
-        SetWindowLongPtrA(hTree, GWLP_USERDATA, (LONG_PTR)pOldWndProc);
-
-        return 0;
-    }
     case WM_NOTIFY:
     {
         NMHDR *pHdr = (NMHDR *)lParam;
@@ -733,15 +769,12 @@ static LRESULT CALLBACK MyWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
                 }
                 return 0;
               }
+            case TVN_ENDLABELEDIT: return TRUE;
             }
         }
         return 0;
     }
   
-    case WM_SIZE:
-        MoveWindow(hTree, 0, 0, LOWORD(lParam), HIWORD(lParam), TRUE);
-        break;
-      
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -752,7 +785,7 @@ static LRESULT CALLBACK MyWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
     return 0L;
 }
 
-static void TestExpandInvisible(void)
+static void test_expandinvisible(void)
 {
     static CHAR nodeText[][5] = {"0", "1", "2", "3", "4"};
     TVINSERTSTRUCTA ins;
@@ -760,6 +793,8 @@ static void TestExpandInvisible(void)
     RECT dummyRect;
     BOOL nodeVisible;
     LRESULT ret;
+
+    hTree = create_treeview_control();
 
     /* The test builds the following tree and expands then node 1, while node 0 is collapsed.
      *
@@ -820,8 +855,75 @@ static void TestExpandInvisible(void)
     ok(!nodeVisible, "Node 3 should not be visible.\n");
     nodeVisible = TreeView_GetItemRect(hTree, node[4], &dummyRect, FALSE);
     ok(!nodeVisible, "Node 4 should not be visible.\n");
+
+    DestroyWindow(hTree);
 }
 
+static void test_itemedit(void)
+{
+    DWORD r;
+    HWND edit;
+    TVITEMA item;
+    CHAR buff[2];
+
+    hTree = create_treeview_control();
+    fill_tree(hTree);
+
+    /* try with null item */
+    edit = (HWND)SendMessage(hTree, TVM_EDITLABEL, 0, (LPARAM)NULL);
+    ok(!IsWindow(edit), "Expected valid handle\n");
+
+    /* trigger edit */
+    edit = (HWND)SendMessage(hTree, TVM_EDITLABEL, 0, (LPARAM)hRoot);
+    ok(IsWindow(edit), "Expected valid handle\n");
+    /* item shouldn't be selected automatically after TVM_EDITLABEL */
+    r = SendMessage(hTree, TVM_GETITEMSTATE, (WPARAM)hRoot, TVIS_SELECTED);
+    expect(0, r);
+    /* try to cancel with wrong edit handle */
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)NULL);
+    expect(0, r);
+    ok(IsWindow(edit), "Expected edit control to be valid\n");
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)edit);
+    expect(0, r);
+    ok(!IsWindow(edit), "Expected edit control to be destroyed\n");
+    /* try to cancel without creating edit */
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)NULL);
+    expect(0, r);
+
+    /* try to cancel with wrong (not null) handle */
+    edit = (HWND)SendMessage(hTree, TVM_EDITLABEL, 0, (LPARAM)hRoot);
+    ok(IsWindow(edit), "Expected valid handle\n");
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)hTree);
+    expect(0, r);
+    ok(IsWindow(edit), "Expected edit control to be valid\n");
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)edit);
+    expect(0, r);
+
+    /* remove selection after starting edit */
+    r = TreeView_SelectItem(hTree, hRoot);
+    expect(TRUE, r);
+    edit = (HWND)SendMessage(hTree, TVM_EDITLABEL, 0, (LPARAM)hRoot);
+    ok(IsWindow(edit), "Expected valid handle\n");
+    r = TreeView_SelectItem(hTree, NULL);
+    expect(TRUE, r);
+    /* alter text */
+    strncpy(buff, "x", sizeof(buff)/sizeof(CHAR));
+    r = SendMessage(edit, WM_SETTEXT, 0, (LPARAM)buff);
+    expect(TRUE, r);
+    r = SendMessage(hTree, WM_COMMAND, MAKEWPARAM(0, EN_KILLFOCUS), (LPARAM)edit);
+    expect(0, r);
+    ok(!IsWindow(edit), "Expected edit control to be destroyed\n");
+    /* check that text is saved */
+    item.mask = TVIF_TEXT;
+    item.hItem = hRoot;
+    item.pszText = buff;
+    item.cchTextMax = sizeof(buff)/sizeof(CHAR);
+    r = SendMessage(hTree, TVM_GETITEM, 0, (LPARAM)&item);
+    expect(TRUE, r);
+    ok(!strcmp("x", buff), "Expected item text to change\n");
+
+    DestroyWindow(hTree);
+}
 
 START_TEST(treeview)
 {
@@ -863,34 +965,14 @@ START_TEST(treeview)
     if ( !ok(hMainWnd != NULL, "Failed to create parent window. Tests aborted.\n") )
         return;
 
-    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
-    FillRoot();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, FillRootSeq, "FillRoot", FALSE);
-
-    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
-    DoTest1();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, DoTest1Seq, "DoTest1", FALSE);
-
-    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
-    DoTest2();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, DoTest2Seq, "DoTest2", FALSE);
-
-    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
-    DoTest3();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, DoTest3Seq, "DoTest3", FALSE);
-
-    flush_sequences(MsgSequences, NUM_MSG_SEQUENCES);
-    DoFocusTest();
-    ok_sequence(MsgSequences, LISTVIEW_SEQ_INDEX, DoFocusTestSeq, "DoFocusTest", TRUE);
-
-    /* Sequences tested inside due to number */
-    TestGetSet();
-
-    /* Clears all the previous items */
-    TestCallback();
-
-    /* Clears all the previous items */
-    TestExpandInvisible();
+    test_fillroot();
+    test_select();
+    test_getitemtext();
+    test_focus();
+    test_getset();
+    test_callback();
+    test_expandinvisible();
+    test_itemedit();
 
     PostMessageA(hMainWnd, WM_CLOSE, 0, 0);
     while(GetMessageA(&msg,0,0,0)) {
