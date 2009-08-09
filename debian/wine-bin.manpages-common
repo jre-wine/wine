@@ -4,8 +4,10 @@ debian/regedit.man
 debian/regsvr32.man
 debian/wine-auto.man
 debian/wine-font-convert.man
+debian/wine-safe.man
 debian/wineboot.man
 debian/winecfg.man
+debian/wineconsole.man
 debian/winefile.man
 debian/winemine.man
 debian/winepath.man

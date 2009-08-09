@@ -1,0 +1,31 @@
+.TH "wineconsole" "1" "2008-09-25"
+.SH "NAME" 
+wineconsole \- the wine(1) console
+
+.SH "SYNOPSIS"
+.PP
+.B wineconsole 
+[
+.I OPTIONS
+]
+.I command
+
+.SH "DESCRIPTION" 
+.PP
+This manual page documents briefly the \fBwineconsole\fR command.
+.PP
+\fBwineconsole\fR is used to run a CLI (Command-Line Interface) \fIcommand\fR with \fBwine\fR(1).
+
+.SH "OPTIONS"
+.TP
+\fB--backend=\fR{\fIuser\fR|\fIcurses\fR}  
+If \fIuser\fR is chosen, a new window will be created. The \fIcurses\fR option will cause 
+.B wineconsole
+to try to setup the current terminal as a \fBwine\fR(1) console.
+
+.SH "SEE ALSO"
+.BR wine (1)
+
+.SH "AUTHOR"
+This manual page was written by Francois Wendling <frwendling@free.fr> for the
+Debian GNU/Linux system (but may be used by others).
