@@ -1,6 +1,7 @@
 #!/bin/bash
-PREFIX="$1"
-SUFFIX="$2"
+SUFFIX="$1"
+TRANSPREFIX="$2"
+TRANSSUFFIX="$3"
 
 sed -n "
 /^Source: / {
@@ -10,7 +11,7 @@ sed -n "
 /^Package: / {
  : PKG
  x
- s/Package: \([^\n]*\)\n\(\([^\n]*\n\)*\)Depends: \(.*\n\([ ].*\n\)*\)/Package: \1${SUFFIX}\n\2Depends: ${PREFIX}\1${SUFFIX}\n/M
+ s/Package: \([^\n]*\)\n\(\([^\n]*\n\)*\)Depends: \(.*\n\([ ].*\n\)*\)/Package: \1${SUFFIX}\n\2Depends: ${TRANSPREFIX}\1${TRANSSUFFIX}\n/M
  s/Pre-Depends: .*\n//M
  s/Conflicts: .*\n//M
  s/Recommends: .*\n//M

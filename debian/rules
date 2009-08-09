@@ -74,6 +74,7 @@ LIBDIRS = $(IA32_LIBDIR)
 #BUILDS =
 #LIBDIRS =
 #TRANSPREFIX = ia32-
+#TRANSSUFFIX = $(VERSUFFIX)
 
 else # !x86_64
 
@@ -90,7 +91,7 @@ control-stamp: debian/control.in
 ifneq (,$(BUILDS))
 	bash debian/prep-control.sh "$(VERSUFFIX)"
 else
-	bash debian/prep-control-transit.sh "$(TRANSPREFIX)" "$(VERSUFFIX)"
+	bash debian/prep-control-transit.sh "$(VERSUFFIX)" "$(TRANSPREFIX)" "$(TRANSSUFFIX)"
 endif
 	touch control-stamp
 
