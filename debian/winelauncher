@@ -36,7 +36,7 @@ if [ "$ARCH" = "amd64" ]; then
 
 # http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=430845
 if grep -q "^hosts:.*mdns4_minimal \[NOTFOUND=return\]" /etc/nsswitch.conf && \
-   [ ! -e /lib32/libnss_mdns4.so.2 ]; then
+   [ ! -e /usr/lib32/libnss_mdns4.so.2 ]; then
  $XMESSAGE -center \
  -title "Wine Warning" \
  "
