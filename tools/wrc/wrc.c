@@ -155,6 +155,8 @@ int preprocess_only = 0;
  */
 int no_preprocess = 0;
 
+int check_utf8 = 1;  /* whether to check for valid utf8 */
+
 static int verify_translations_mode;
 
 char *output_name = NULL;	/* The name given by the -o option */
@@ -292,6 +294,7 @@ static int load_file( const char *input_name, const char *output_name )
 
     /* Reset the language */
     currentlanguage = dup_language( defaultlanguage );
+    check_utf8 = 1;
 
     /* Go from .rc to .res */
     chat("Starting parse\n");
@@ -513,6 +516,13 @@ int main(int argc,char *argv[])
 		strcat(output_name, ".res");
             }
             if (load_file( input_name, output_name )) exit(1);
+        }
+	/* stdin special case. NULL means "stdin" for wpp. */
+        if (nb_files == 0)
+        {
+            if(!output_name && !preprocess_only)
+		output_name = strdup("wrc.tab.res");
+            if (load_file( NULL, output_name )) exit(1);
         }
 
 	if(debuglevel & DEBUGLEVEL_DUMP)

@@ -20,7 +20,7 @@ use strict;
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
 #
 
-my $version="0.7.2";
+my $version="0.7.3";
 
 use Cwd;
 use File::Basename;
@@ -535,6 +535,7 @@ sub source_scan_project_file($$$)
     # some more settings
     my $path=dirname($filename);
     my $prj_target_cflags;
+    my $prj_target_defines;
     my $prj_target_ldflags;
     my $prj_target_libs;
     my $prj_name;
@@ -662,7 +663,7 @@ sub source_scan_project_file($$$)
                         # Use Multithreaded Run-Time Library
                     } elsif (/^D\s*\"(.*)\"/) {
                         # Preprocessor Definitions
-                        $prj_target_cflags.="-D".$1." ";
+                        $prj_target_defines.="-D".$1." ";
                     } elsif (/^I\s*\"(.*)\"/) {
                         # Additional Include Directories
                         $sfilet=$1;
@@ -726,11 +727,9 @@ sub source_scan_project_file($$$)
                 @prj_target_options=split(" /", $prj_target_ldflags);
                 $prj_target_ldflags="";
                 $prj_target_libs=$prj_target_options[0];
-                #print "\n$prj_target_libs bevor\n";
                 $prj_target_libs=~s/\\/\//g;
                 $prj_target_libs=~s/\.lib//g;
                 $prj_target_libs=~s/\s+/ -l/g;
-                #print "\n$prj_target_libs after\n";
                 shift (@prj_target_options);
                 foreach ( @prj_target_options ) {
                     if ($_ eq "") {
@@ -843,6 +842,7 @@ sub source_scan_project_file($$$)
         push @{@$project_settings[$T_LIBRARIES]},$prj_target_libs;
         push @{@$project_settings[$T_CEXTRA]},$prj_target_cflags;
         push @{@$project_settings[$T_CXXEXTRA]},$prj_target_cflags;
+        push @{@$project_settings[$T_DEFINES]},$prj_target_defines;
         push @{@$project_settings[$T_LDFLAGS]},$prj_target_ldflags;
     } elsif ($filename =~ /.vcproj$/i) {
         # Import XML::LibXML, you need the libxml package (deb: libxml-libxml-perl, rpm: perl-libxml-perl)
@@ -908,36 +908,49 @@ sub source_scan_project_file($$$)
 
         foreach my $vc_configuration_tools ($vc_configuration->findnodes('Tool')) {
             my @find_tool = $vc_configuration_tools->attributes;
-            if ($find_tool[0]->getValue ne "VCCLCompilerTool") {next;}
-            foreach my $vc_configuration_tool ($vc_configuration_tools->attributes) {
-                if ($vc_configuration_tool->getName eq "Optimization") {$prj_target_cflags.="-O".$vc_configuration_tool->getValue." ";}
-                if ($vc_configuration_tool->getName eq "WarningLevel") {
-                    if ($vc_configuration_tool->getValue==0) {
-                        $prj_target_cflags.="-w ";
-                    } elsif ($vc_configuration_tool->getValue<4) {
-                        $prj_target_cflags.="-W ";
-                    } elsif ($vc_configuration_tool->getValue==4) {
-                        $prj_target_cflags.="-Wall ";
-                    } elsif ($vc_configuration_tool->getValue eq "X") {
-                        $prj_target_cflags.="-Werror ";
+            if ($find_tool[0]->getValue eq "VCCLCompilerTool") {
+                foreach my $vc_compiler_tool ($vc_configuration_tools->attributes) {
+                    if ($vc_compiler_tool->getName eq "Optimization") {$prj_target_cflags.="-O".$vc_compiler_tool->getValue." ";}
+                    if ($vc_compiler_tool->getName eq "WarningLevel") {
+                        if ($vc_compiler_tool->getValue==0) {
+                            $prj_target_cflags.="-w ";
+                        } elsif ($vc_compiler_tool->getValue<4) {
+                            $prj_target_cflags.="-W ";
+                        } elsif ($vc_compiler_tool->getValue==4) {
+                            $prj_target_cflags.="-Wall ";
+                        } elsif ($vc_compiler_tool->getValue eq "X") {
+                            $prj_target_cflags.="-Werror ";
+                        }
+                    }
+                    if ($vc_compiler_tool->getName eq "PreprocessorDefinitions") {
+                        $configt=$vc_compiler_tool->getValue;
+                        $configt=~s/;/ -D/g;
+                        $prj_target_defines.="-D".$configt." ";
+                    }
+                    if ($vc_compiler_tool->getName eq "AdditionalIncludeDirectories") {
+                        $configt=$vc_compiler_tool->getValue;
+                        $configt=~s/\\/\//g;
+                        $configt=~s/;/ -I/g;
+                        push @{@$project_settings[$T_INCLUDE_PATH]},"-I".$configt;
                     }
                 }
-                if ($vc_configuration_tool->getName eq "PreprocessorDefinitions") {
-                    $configt=$vc_configuration_tool->getValue;
-                    $configt=~s/;/ -D/g;
-                    $prj_target_cflags.="-D".$configt." ";
-                }
-                if ($vc_configuration_tool->getName eq "AdditionalIncludeDirectories") {
-                    $configt=$vc_configuration_tool->getValue;
-                    $configt=~s/\\/\//g;
-                    $configt=~s/;/ -I/g;
-                    push @{@$project_settings[$T_INCLUDE_PATH]},"-I".$configt;
+            }
+            if ($find_tool[0]->getValue eq "VCLinkerTool") {
+                foreach my $vc_linker_tool ($vc_configuration_tools->attributes) {
+                    if ($vc_linker_tool->getName eq "AdditionalDependencies") {
+                        $prj_target_libs=" ".$vc_linker_tool->getValue;
+                        $prj_target_libs=~s/\\/\//g;
+                        $prj_target_libs=~s/\.lib//g;
+                        $prj_target_libs=~s/\s+/ -l/g;
+                    }
                 }
             }
         }
 
+        push @{@$project_settings[$T_LIBRARIES]},$prj_target_libs;
         push @{@$project_settings[$T_CEXTRA]},$prj_target_cflags;
         push @{@$project_settings[$T_CXXEXTRA]},$prj_target_cflags;
+        push @{@$project_settings[$T_DEFINES]},$prj_target_defines;
     }
 
     my $target_count;

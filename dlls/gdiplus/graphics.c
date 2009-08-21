@@ -1040,6 +1040,28 @@ static GpStatus restore_container(GpGraphics* graphics,
     return Ok;
 }
 
+static GpStatus get_graphics_bounds(GpGraphics* graphics, GpRectF* rect)
+{
+    RECT wnd_rect;
+
+    if(graphics->hwnd) {
+        if(!GetClientRect(graphics->hwnd, &wnd_rect))
+            return GenericError;
+
+        rect->X = wnd_rect.left;
+        rect->Y = wnd_rect.top;
+        rect->Width = wnd_rect.right - wnd_rect.left;
+        rect->Height = wnd_rect.bottom - wnd_rect.top;
+    }else{
+        rect->X = 0;
+        rect->Y = 0;
+        rect->Width = GetDeviceCaps(graphics->hdc, HORZRES);
+        rect->Height = GetDeviceCaps(graphics->hdc, VERTRES);
+    }
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipCreateFromHDC(HDC hdc, GpGraphics **graphics)
 {
     TRACE("(%p, %p)\n", hdc, graphics);
@@ -1712,18 +1734,10 @@ GpStatus WINGDIPAPI GdipDrawEllipseI(GpGraphics *graphics, GpPen *pen, INT x,
 
 GpStatus WINGDIPAPI GdipDrawImage(GpGraphics *graphics, GpImage *image, REAL x, REAL y)
 {
+    UINT width, height;
+    GpPointF points[3];
+
     TRACE("(%p, %p, %.2f, %.2f)\n", graphics, image, x, y);
-
-    /* IPicture::Render uses LONG coords */
-    return GdipDrawImageI(graphics,image,roundr(x),roundr(y));
-}
-
-GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
-    INT y)
-{
-    UINT width, height, srcw, srch;
-
-    TRACE("(%p, %p, %d, %d)\n", graphics, image, x, y);
 
     if(!graphics || !image)
         return InvalidParameter;
@@ -1731,20 +1745,23 @@ GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
     GdipGetImageWidth(image, &width);
     GdipGetImageHeight(image, &height);
 
-    srcw = width * (((REAL) INCH_HIMETRIC) /
-            ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX)));
-    srch = height * (((REAL) INCH_HIMETRIC) /
-            ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY)));
+    /* FIXME: we should use the graphics and image dpi, somehow */
 
-    if(image->type != ImageTypeMetafile){
-        y += height;
-        height *= -1;
-    }
+    points[0].X = points[2].X = x;
+    points[0].Y = points[1].Y = y;
+    points[1].X = x + width;
+    points[2].Y = y + height;
 
-    IPicture_Render(image->picture, graphics->hdc, x, y, width, height,
-                    0, 0, srcw, srch, NULL);
+    return GdipDrawImagePointsRect(graphics, image, points, 3, 0, 0, width, height,
+        UnitPixel, NULL, NULL, NULL);
+}
 
-    return Ok;
+GpStatus WINGDIPAPI GdipDrawImageI(GpGraphics *graphics, GpImage *image, INT x,
+    INT y)
+{
+    TRACE("(%p, %p, %d, %d)\n", graphics, image, x, y);
+
+    return GdipDrawImage(graphics, image, (REAL)x, (REAL)y);
 }
 
 GpStatus WINGDIPAPI GdipDrawImagePointRect(GpGraphics *graphics, GpImage *image,
@@ -3102,6 +3119,64 @@ GpStatus WINGDIPAPI GdipGetTextRenderingHint(GpGraphics *graphics,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics *graphics, GpRectF *rect)
+{
+    GpRegion *clip_rgn;
+    GpStatus stat;
+    GpRectF wnd_rect;
+
+    TRACE("(%p, %p)\n", graphics, rect);
+
+    if(!graphics || !rect)
+        return InvalidParameter;
+
+    if(graphics->busy)
+        return ObjectBusy;
+
+    /* get window bounds */
+    if((stat = get_graphics_bounds(graphics, &wnd_rect)) != Ok)
+        return stat;
+
+    /* intersect window and graphics clipping regions */
+    if((stat = GdipCreateRegion(&clip_rgn)) != Ok)
+        return stat;
+
+    if((stat = GdipCombineRegionRect(clip_rgn, &wnd_rect, CombineModeIntersect)) != Ok)
+        goto cleanup;
+
+    if((stat = GdipCombineRegionRegion(clip_rgn, graphics->clip, CombineModeIntersect)) != Ok)
+        goto cleanup;
+
+    /* get bounds of the region */
+    stat = GdipGetRegionBounds(clip_rgn, graphics, rect);
+
+cleanup:
+    GdipDeleteRegion(clip_rgn);
+
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipGetVisibleClipBoundsI(GpGraphics *graphics, GpRect *rect)
+{
+    GpRectF rectf;
+    GpStatus stat;
+
+    TRACE("(%p, %p)\n", graphics, rect);
+
+    if(!graphics || !rect)
+        return InvalidParameter;
+
+    if((stat = GdipGetVisibleClipBounds(graphics, &rectf)) == Ok)
+    {
+        rect->X = roundr(rectf.X);
+        rect->Y = roundr(rectf.Y);
+        rect->Width  = roundr(rectf.Width);
+        rect->Height = roundr(rectf.Height);
+    }
+
+    return stat;
+}
+
 GpStatus WINGDIPAPI GdipGetWorldTransform(GpGraphics *graphics, GpMatrix *matrix)
 {
     TRACE("(%p, %p)\n", graphics, matrix);
@@ -3120,7 +3195,7 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics *graphics, ARGB color)
 {
     GpSolidFill *brush;
     GpStatus stat;
-    RECT rect;
+    GpRectF wnd_rect;
 
     TRACE("(%p, %x)\n", graphics, color);
 
@@ -3133,18 +3208,13 @@ GpStatus WINGDIPAPI GdipGraphicsClear(GpGraphics *graphics, ARGB color)
     if((stat = GdipCreateSolidFill(color, &brush)) != Ok)
         return stat;
 
-    if(graphics->hwnd){
-        if(!GetWindowRect(graphics->hwnd, &rect)){
-            GdipDeleteBrush((GpBrush*)brush);
-            return GenericError;
-        }
-
-        GdipFillRectangle(graphics, (GpBrush*)brush, 0.0, 0.0, (REAL)(rect.right  - rect.left),
-                                                               (REAL)(rect.bottom - rect.top));
+    if((stat = get_graphics_bounds(graphics, &wnd_rect)) != Ok){
+        GdipDeleteBrush((GpBrush*)brush);
+        return stat;
     }
-    else
-        GdipFillRectangle(graphics, (GpBrush*)brush, 0.0, 0.0, (REAL)GetDeviceCaps(graphics->hdc, HORZRES),
-                                                               (REAL)GetDeviceCaps(graphics->hdc, VERTRES));
+
+    GdipFillRectangle(graphics, (GpBrush*)brush, wnd_rect.X, wnd_rect.Y,
+                                                 wnd_rect.Width, wnd_rect.Height);
 
     GdipDeleteBrush((GpBrush*)brush);
 
@@ -4065,15 +4135,6 @@ GpStatus WINGDIPAPI GdipMeasureDriverString(GpGraphics *graphics, GDIPCONST UINT
                                             INT flags, GDIPCONST GpMatrix *matrix, RectF *boundingBox)
 {
     FIXME("(%p %p %d %p %p %d %p %p): stub\n", graphics, text, length, font, positions, flags, matrix, boundingBox);
-    return NotImplemented;
-}
-
-/*****************************************************************************
- * GdipGetVisibleClipBoundsI [GDIPLUS.@]
- */
-GpStatus WINGDIPAPI GdipGetVisibleClipBoundsI(GpGraphics *graphics, GpRect *rect)
-{
-    FIXME("(%p %p): stub\n", graphics, rect);
     return NotImplemented;
 }
 

@@ -178,11 +178,10 @@ BOOL WINAPI DisableThreadLibraryCalls( HMODULE hModule )
  * FIXME: is reading the module imports the only way of discerning
  *        old Windows binaries from OS/2 ones ? At least it seems so...
  */
-static enum binary_type MODULE_Decide_OS2_OldWin(HANDLE hfile, const IMAGE_DOS_HEADER *mz,
-                                                 const IMAGE_OS2_HEADER *ne)
+static DWORD MODULE_Decide_OS2_OldWin(HANDLE hfile, const IMAGE_DOS_HEADER *mz, const IMAGE_OS2_HEADER *ne)
 {
     DWORD currpos = SetFilePointer( hfile, 0, NULL, SEEK_CUR);
-    enum binary_type ret = BINARY_OS216;
+    DWORD ret = BINARY_OS216;
     LPWORD modtab = NULL;
     LPSTR nametab = NULL;
     DWORD len;
@@ -227,22 +226,26 @@ good:
 /***********************************************************************
  *           MODULE_GetBinaryType
  */
-enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **res_end )
+DWORD MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **res_end )
 {
     union
     {
         struct
         {
             unsigned char magic[4];
-            unsigned char ignored[12];
+            unsigned char class;
+            unsigned char data;
+            unsigned char version;
+            unsigned char ignored[9];
             unsigned short type;
+            unsigned short machine;
         } elf;
         struct
         {
-            unsigned long magic;
-            unsigned long cputype;
-            unsigned long cpusubtype;
-            unsigned long filetype;
+            unsigned int magic;
+            unsigned int cputype;
+            unsigned int cpusubtype;
+            unsigned int filetype;
         } macho;
         IMAGE_DOS_HEADER mz;
     } header;
@@ -257,11 +260,12 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
 
     if (!memcmp( header.elf.magic, "\177ELF", 4 ))
     {
+        DWORD flags = (header.elf.class == 2) ? BINARY_FLAG_64BIT : 0;
         /* FIXME: we don't bother to check byte order, architecture, etc. */
         switch(header.elf.type)
         {
-        case 2: return BINARY_UNIX_EXE;
-        case 3: return BINARY_UNIX_LIB;
+        case 2: return flags | BINARY_UNIX_EXE;
+        case 3: return flags | BINARY_UNIX_LIB;
         }
         return BINARY_UNKNOWN;
     }
@@ -269,9 +273,11 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
     /* Mach-o File with Endian set to Big Endian or Little Endian */
     if (header.macho.magic == 0xfeedface || header.macho.magic == 0xcefaedfe)
     {
+        DWORD flags = (header.macho.cputype >> 24) == 1 ? BINARY_FLAG_64BIT : 0;
         switch(header.macho.filetype)
         {
-            case 0x8: /* MH_BUNDLE */ return BINARY_UNIX_LIB;
+        case 2: return flags | BINARY_UNIX_EXE;
+        case 8: return flags | BINARY_UNIX_LIB;
         }
         return BINARY_UNKNOWN;
     }
@@ -283,7 +289,7 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
         union
         {
             IMAGE_OS2_HEADER os2;
-            IMAGE_NT_HEADERS nt;
+            IMAGE_NT_HEADERS32 nt;
         } ext_header;
 
         /* We do have a DOS image so we will now try to seek into
@@ -305,13 +311,25 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
         {
             if (len >= sizeof(ext_header.nt.FileHeader))
             {
+                DWORD ret = BINARY_PE;
+                if (ext_header.nt.FileHeader.Characteristics & IMAGE_FILE_DLL) ret |= BINARY_FLAG_DLL;
                 if (len < sizeof(ext_header.nt))  /* clear remaining part of header if missing */
                     memset( (char *)&ext_header.nt + len, 0, sizeof(ext_header.nt) - len );
                 if (res_start) *res_start = (void *)ext_header.nt.OptionalHeader.ImageBase;
                 if (res_end) *res_end = (void *)(ext_header.nt.OptionalHeader.ImageBase +
                                                  ext_header.nt.OptionalHeader.SizeOfImage);
-                if (ext_header.nt.FileHeader.Characteristics & IMAGE_FILE_DLL) return BINARY_PE_DLL;
-                return BINARY_PE_EXE;
+                switch (ext_header.nt.OptionalHeader.Magic)
+                {
+                case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
+                    if (res_start) *res_start = (void *)ext_header.nt.OptionalHeader.ImageBase;
+                    if (res_end) *res_end = (void *)(ext_header.nt.OptionalHeader.ImageBase +
+                                                     ext_header.nt.OptionalHeader.SizeOfImage);
+                    return ret;
+                case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
+                    if (res_start) *res_start = NULL;
+                    if (res_end) *res_end = NULL;
+                    return ret | BINARY_FLAG_64BIT;
+                }
             }
             return BINARY_DOS;
         }
@@ -325,15 +343,16 @@ enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **re
              */
             if (len >= sizeof(ext_header.os2))
             {
+                DWORD flags = (ext_header.os2.ne_flags & NE_FFLAGS_LIBMODULE) ? BINARY_FLAG_DLL : 0;
                 switch ( ext_header.os2.ne_exetyp )
                 {
-                case 1:  return BINARY_OS216; /* OS/2 */
-                case 2:  return BINARY_WIN16; /* Windows */
-                case 3:  return BINARY_DOS; /* European MS-DOS 4.x */
-                case 4:  return BINARY_WIN16; /* Windows 386; FIXME: is this 32bit??? */
-                case 5:  return BINARY_DOS; /* BOSS, Borland Operating System Services */
+                case 1:  return flags | BINARY_OS216; /* OS/2 */
+                case 2:  return flags | BINARY_WIN16; /* Windows */
+                case 3:  return flags | BINARY_DOS; /* European MS-DOS 4.x */
+                case 4:  return flags | BINARY_WIN16; /* Windows 386; FIXME: is this 32bit??? */
+                case 5:  return flags | BINARY_DOS; /* BOSS, Borland Operating System Services */
                 /* other types, e.g. 0 is: "unknown" */
-                default: return MODULE_Decide_OS2_OldWin(hfile, &header.mz, &ext_header.os2);
+                default: return flags | MODULE_Decide_OS2_OldWin(hfile, &header.mz, &ext_header.os2);
                 }
             }
             /* Couldn't read header, so abort. */
@@ -384,6 +403,7 @@ BOOL WINAPI GetBinaryTypeW( LPCWSTR lpApplicationName, LPDWORD lpBinaryType )
 {
     BOOL ret = FALSE;
     HANDLE hfile;
+    DWORD binary_type;
 
     TRACE("%s\n", debugstr_w(lpApplicationName) );
 
@@ -401,7 +421,8 @@ BOOL WINAPI GetBinaryTypeW( LPCWSTR lpApplicationName, LPDWORD lpBinaryType )
 
     /* Check binary type
      */
-    switch(MODULE_GetBinaryType( hfile, NULL, NULL ))
+    binary_type = MODULE_GetBinaryType( hfile, NULL, NULL );
+    switch (binary_type & BINARY_TYPE_MASK)
     {
     case BINARY_UNKNOWN:
     {
@@ -424,8 +445,7 @@ BOOL WINAPI GetBinaryTypeW( LPCWSTR lpApplicationName, LPDWORD lpBinaryType )
         }
         break;
     }
-    case BINARY_PE_EXE:
-    case BINARY_PE_DLL:
+    case BINARY_PE:
         *lpBinaryType = SCS_32BIT_BINARY;
         ret = TRUE;
         break;

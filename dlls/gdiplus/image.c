@@ -646,8 +646,8 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromStream(IStream* stream,
         return stat;
 
     if((*bitmap)->image.type != ImageTypeBitmap){
-        IPicture_Release((*bitmap)->image.picture);
-        GdipFree(bitmap);
+        GdipDisposeImage(&(*bitmap)->image);
+        *bitmap = NULL;
         return GenericError; /* FIXME: what error to return? */
     }
 
@@ -1290,9 +1290,6 @@ GpStatus WINGDIPAPI GdipSaveImageToFile(GpImage *image, GDIPCONST WCHAR* filenam
     if (!image || !filename|| !clsidEncoder)
         return InvalidParameter;
 
-    if (!(image->picture))
-        return InvalidParameter;
-
     stat = GdipCreateStreamOnFile(filename, GENERIC_WRITE, &stream);
     if (stat != Ok)
         return GenericError;
@@ -1357,18 +1354,25 @@ static GpStatus encode_image_BMP(LPVOID bitmap_bits, LPBITMAPINFO bitmap_info,
     return Ok;
 }
 
-typedef GpStatus encode_image_func(LPVOID bitmap_bits, LPBITMAPINFO bitmap_info,
+typedef GpStatus (*encode_image_func)(LPVOID bitmap_bits, LPBITMAPINFO bitmap_info,
                                    void **output, unsigned int *output_size);
+
+typedef struct image_codec {
+    ImageCodecInfo info;
+    encode_image_func encode_func;
+} image_codec;
 
 typedef enum {
     BMP,
-    NUM_ENCODERS_SUPPORTED
+    JPEG,
+    GIF,
+    EMF,
+    WMF,
+    ICO,
+    NUM_CODECS
 } ImageFormat;
 
-static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED];
-static encode_image_func *const encode_image_funcs[NUM_ENCODERS_SUPPORTED] = {
-    encode_image_BMP,
-};
+static const struct image_codec codecs[NUM_CODECS];
 
 /*****************************************************************************
  * GdipSaveImageToStream [GDIPLUS.@]
@@ -1385,7 +1389,7 @@ GpStatus WINGDIPAPI GdipSaveImageToStream(GpImage *image, IStream* stream,
     int bm_is_selected;
     BITMAPINFO bmp_info;
     LPVOID bmp_bits;
-    encode_image_func* encode_image;
+    encode_image_func encode_image;
     LPVOID output;
     unsigned int output_size;
     unsigned int dummy;
@@ -1409,9 +1413,10 @@ GpStatus WINGDIPAPI GdipSaveImageToStream(GpImage *image, IStream* stream,
 
     /* select correct encoder */
     encode_image = NULL;
-    for (i = 0; i < NUM_ENCODERS_SUPPORTED; i++) {
-        if (IsEqualCLSID(clsid, &codecs[i].Clsid))
-            encode_image = encode_image_funcs[i];
+    for (i = 0; i < NUM_CODECS; i++) {
+        if ((codecs[i].info.Flags & ImageCodecFlagsEncoder) &&
+            IsEqualCLSID(clsid, &codecs[i].info.Clsid))
+            encode_image = codecs[i].encode_func;
     }
     if (encode_image == NULL)
         return UnknownImageFormat;
@@ -1503,7 +1508,42 @@ static const WCHAR bmp_format[] = {'B', 'M', 'P', 0}; /* BMP */
 static const BYTE bmp_sig_pattern[] = { 0x42, 0x4D };
 static const BYTE bmp_sig_mask[] = { 0xFF, 0xFF };
 
-static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED] =
+static const WCHAR jpeg_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'J','P','E','G', 0};
+static const WCHAR jpeg_extension[] = {'*','.','J','P','G',';', '*','.','J','P','E','G',';', '*','.','J','P','E',';', '*','.','J','F','I','F',0};
+static const WCHAR jpeg_mimetype[] = {'i','m','a','g','e','/','j','p','e','g', 0};
+static const WCHAR jpeg_format[] = {'J','P','E','G',0};
+static const BYTE jpeg_sig_pattern[] = { 0xFF, 0xD8 };
+static const BYTE jpeg_sig_mask[] = { 0xFF, 0xFF };
+
+static const WCHAR gif_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'G','I','F', 0};
+static const WCHAR gif_extension[] = {'*','.','G','I','F',0};
+static const WCHAR gif_mimetype[] = {'i','m','a','g','e','/','g','i','f', 0};
+static const WCHAR gif_format[] = {'G','I','F',0};
+static const BYTE gif_sig_pattern[4] = "GIF8";
+static const BYTE gif_sig_mask[] = { 0xFF, 0xFF, 0xFF, 0xFF };
+
+static const WCHAR emf_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'E','M','F', 0};
+static const WCHAR emf_extension[] = {'*','.','E','M','F',0};
+static const WCHAR emf_mimetype[] = {'i','m','a','g','e','/','x','-','e','m','f', 0};
+static const WCHAR emf_format[] = {'E','M','F',0};
+static const BYTE emf_sig_pattern[] = { 0x01, 0x00, 0x00, 0x00 };
+static const BYTE emf_sig_mask[] = { 0xFF, 0xFF, 0xFF, 0xFF };
+
+static const WCHAR wmf_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'W','M','F', 0};
+static const WCHAR wmf_extension[] = {'*','.','W','M','F',0};
+static const WCHAR wmf_mimetype[] = {'i','m','a','g','e','/','x','-','w','m','f', 0};
+static const WCHAR wmf_format[] = {'W','M','F',0};
+static const BYTE wmf_sig_pattern[] = { 0xd7, 0xcd };
+static const BYTE wmf_sig_mask[] = { 0xFF, 0xFF };
+
+static const WCHAR ico_codecname[] = {'B', 'u', 'i','l', 't', '-','i', 'n', ' ', 'I','C','O', 0};
+static const WCHAR ico_extension[] = {'*','.','I','C','O',0};
+static const WCHAR ico_mimetype[] = {'i','m','a','g','e','/','x','-','i','c','o','n', 0};
+static const WCHAR ico_format[] = {'I','C','O',0};
+static const BYTE ico_sig_pattern[] = { 0x00, 0x00, 0x01, 0x00 };
+static const BYTE ico_sig_mask[] = { 0xFF, 0xFF, 0xFF, 0xFF };
+
+static const struct image_codec codecs[NUM_CODECS] = {
     {
         { /* BMP */
             /* Clsid */              { 0x557cf400, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
@@ -1520,20 +1560,120 @@ static const ImageCodecInfo codecs[NUM_ENCODERS_SUPPORTED] =
             /* SigPattern */         bmp_sig_pattern,
             /* SigMask */            bmp_sig_mask,
         },
-    };
+        encode_image_BMP
+    },
+    {
+        { /* JPEG */
+            /* Clsid */              { 0x557cf401, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3caeU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          jpeg_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  jpeg_format,
+            /* FilenameExtension */  jpeg_extension,
+            /* MimeType */           jpeg_mimetype,
+            /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            2,
+            /* SigPattern */         jpeg_sig_pattern,
+            /* SigMask */            jpeg_sig_mask,
+        },
+        NULL
+    },
+    {
+        { /* GIF */
+            /* Clsid */              { 0x557cf402, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cb0U, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          gif_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  gif_format,
+            /* FilenameExtension */  gif_extension,
+            /* MimeType */           gif_mimetype,
+            /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            4,
+            /* SigPattern */         gif_sig_pattern,
+            /* SigMask */            gif_sig_mask,
+        },
+        NULL
+    },
+    {
+        { /* EMF */
+            /* Clsid */              { 0x557cf403, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cacU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          emf_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  emf_format,
+            /* FilenameExtension */  emf_extension,
+            /* MimeType */           emf_mimetype,
+            /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportVector | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            4,
+            /* SigPattern */         emf_sig_pattern,
+            /* SigMask */            emf_sig_mask,
+        },
+        NULL
+    },
+    {
+        { /* WMF */
+            /* Clsid */              { 0x557cf404, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cadU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          wmf_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  wmf_format,
+            /* FilenameExtension */  wmf_extension,
+            /* MimeType */           wmf_mimetype,
+            /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportVector | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            2,
+            /* SigPattern */         wmf_sig_pattern,
+            /* SigMask */            wmf_sig_mask,
+        },
+        NULL
+    },
+    {
+        { /* ICO */
+            /* Clsid */              { 0x557cf407, 0x1a04, 0x11d3, { 0x9a, 0x73, 0x0, 0x0, 0xf8, 0x1e, 0xf3, 0x2e } },
+            /* FormatID */           { 0xb96b3cabU, 0x0728U, 0x11d3U, {0x9d, 0x7b, 0x00, 0x00, 0xf8, 0x1e, 0xf3, 0x2e} },
+            /* CodecName */          ico_codecname,
+            /* DllName */            NULL,
+            /* FormatDescription */  ico_format,
+            /* FilenameExtension */  ico_extension,
+            /* MimeType */           ico_mimetype,
+            /* Flags */              ImageCodecFlagsDecoder | ImageCodecFlagsSupportBitmap | ImageCodecFlagsBuiltin,
+            /* Version */            1,
+            /* SigCount */           1,
+            /* SigSize */            4,
+            /* SigPattern */         ico_sig_pattern,
+            /* SigMask */            ico_sig_mask,
+        },
+        NULL
+    },
+};
 
 /*****************************************************************************
  * GdipGetImageDecodersSize [GDIPLUS.@]
  */
 GpStatus WINGDIPAPI GdipGetImageDecodersSize(UINT *numDecoders, UINT *size)
 {
-    FIXME("%p %p stub!\n", numDecoders, size);
+    int decoder_count=0;
+    int i;
+    TRACE("%p %p\n", numDecoders, size);
 
     if (!numDecoders || !size)
         return InvalidParameter;
 
-    *numDecoders = 0;
-    *size = 0;
+    for (i=0; i<NUM_CODECS; i++)
+    {
+        if (codecs[i].info.Flags & ImageCodecFlagsDecoder)
+            decoder_count++;
+    }
+
+    *numDecoders = decoder_count;
+    *size = decoder_count * sizeof(ImageCodecInfo);
 
     return Ok;
 }
@@ -1543,12 +1683,26 @@ GpStatus WINGDIPAPI GdipGetImageDecodersSize(UINT *numDecoders, UINT *size)
  */
 GpStatus WINGDIPAPI GdipGetImageDecoders(UINT numDecoders, UINT size, ImageCodecInfo *decoders)
 {
-    FIXME("%u %u %p stub!\n", numDecoders, size, decoders);
+    int i, decoder_count=0;
+    TRACE("%u %u %p\n", numDecoders, size, decoders);
 
-    if (!decoders)
+    if (!decoders ||
+        size != numDecoders * sizeof(ImageCodecInfo))
         return GenericError;
 
-    return NotImplemented;
+    for (i=0; i<NUM_CODECS; i++)
+    {
+        if (codecs[i].info.Flags & ImageCodecFlagsDecoder)
+        {
+            if (decoder_count == numDecoders) return GenericError;
+            memcpy(&decoders[decoder_count], &codecs[i].info, sizeof(ImageCodecInfo));
+            decoder_count++;
+        }
+    }
+
+    if (decoder_count < numDecoders) return GenericError;
+
+    return Ok;
 }
 
 /*****************************************************************************
@@ -1556,13 +1710,21 @@ GpStatus WINGDIPAPI GdipGetImageDecoders(UINT numDecoders, UINT size, ImageCodec
  */
 GpStatus WINGDIPAPI GdipGetImageEncodersSize(UINT *numEncoders, UINT *size)
 {
+    int encoder_count=0;
+    int i;
     TRACE("%p %p\n", numEncoders, size);
 
     if (!numEncoders || !size)
         return InvalidParameter;
 
-    *numEncoders = NUM_ENCODERS_SUPPORTED;
-    *size = sizeof (codecs);
+    for (i=0; i<NUM_CODECS; i++)
+    {
+        if (codecs[i].info.Flags & ImageCodecFlagsEncoder)
+            encoder_count++;
+    }
+
+    *numEncoders = encoder_count;
+    *size = encoder_count * sizeof(ImageCodecInfo);
 
     return Ok;
 }
@@ -1572,14 +1734,24 @@ GpStatus WINGDIPAPI GdipGetImageEncodersSize(UINT *numEncoders, UINT *size)
  */
 GpStatus WINGDIPAPI GdipGetImageEncoders(UINT numEncoders, UINT size, ImageCodecInfo *encoders)
 {
+    int i, encoder_count=0;
     TRACE("%u %u %p\n", numEncoders, size, encoders);
 
     if (!encoders ||
-        (numEncoders != NUM_ENCODERS_SUPPORTED) ||
-        (size != sizeof (codecs)))
+        size != numEncoders * sizeof(ImageCodecInfo))
         return GenericError;
 
-    memcpy(encoders, codecs, sizeof (codecs));
+    for (i=0; i<NUM_CODECS; i++)
+    {
+        if (codecs[i].info.Flags & ImageCodecFlagsEncoder)
+        {
+            if (encoder_count == numEncoders) return GenericError;
+            memcpy(&encoders[encoder_count], &codecs[i].info, sizeof(ImageCodecInfo));
+            encoder_count++;
+        }
+    }
+
+    if (encoder_count < numEncoders) return GenericError;
 
     return Ok;
 }

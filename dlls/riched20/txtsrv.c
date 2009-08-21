@@ -292,12 +292,14 @@ HRESULT WINAPI fnTextSrv_TxGetText(ITextServices *iface,
    length = ME_GetTextLength(This->editor);
    if (length)
    {
+      ME_Cursor start;
       BSTR bstr;
       bstr = SysAllocStringByteLen(NULL, length * sizeof(WCHAR));
       if (bstr == NULL)
          return E_OUTOFMEMORY;
 
-      ME_GetTextW(This->editor, bstr , 0, length, FALSE);
+      ME_CursorFromCharOfs(This->editor, 0, &start);
+      ME_GetTextW(This->editor, bstr, length, &start, INT_MAX, FALSE);
       *pbstrText = bstr;
    } else {
       *pbstrText = NULL;
@@ -310,9 +312,11 @@ HRESULT WINAPI fnTextSrv_TxSetText(ITextServices *iface,
                                    LPCWSTR pszText)
 {
    ICOM_THIS_MULTI(ITextServicesImpl, lpVtbl, iface);
+   ME_Cursor cursor;
 
-   ME_InternalDeleteText(This->editor, 0, ME_GetTextLength(This->editor),
-                         FALSE);
+   ME_SetCursorToStart(This->editor, &cursor);
+   ME_InternalDeleteText(This->editor, &cursor,
+                         ME_GetTextLength(This->editor), FALSE);
    ME_InsertTextFromCursor(This->editor, 0, pszText, -1,
                            This->editor->pBuffer->pDefaultStyle);
    ME_SetSelection(This->editor, 0, 0);

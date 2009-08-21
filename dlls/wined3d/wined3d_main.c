@@ -39,10 +39,9 @@ wined3d_settings_t wined3d_settings =
 {
     VS_HW,          /* Hardware by default */
     PS_HW,          /* Hardware by default */
-    VBO_HW,         /* Hardware by default */
     TRUE,           /* Use of GLSL enabled by default */
     ORM_FBO,        /* Use FBOs to do offscreen rendering */
-    RTL_AUTO,       /* Automatically determine best locking method */
+    RTL_READTEX,    /* Default render target locking method */
     PCI_VENDOR_NONE,/* PCI Vendor ID */
     PCI_DEVICE_NONE,/* PCI Device ID */
     0,              /* The default of memory is set in FillGLCaps */
@@ -196,19 +195,6 @@ static BOOL wined3d_init(HINSTANCE hInstDLL)
                 wined3d_settings.ps_mode = PS_NONE;
             }
         }
-        if ( !get_config_key( hkey, appkey, "VertexBufferMode", buffer, size) )
-        {
-            if (!strcmp(buffer,"none"))
-            {
-                TRACE("Disable Vertex Buffer Hardware support\n");
-                wined3d_settings.vbo_mode = VBO_NONE;
-            }
-            else if (!strcmp(buffer,"hardware"))
-            {
-                TRACE("Allow Vertex Buffer Hardware support\n");
-                wined3d_settings.vbo_mode = VBO_HW;
-            }
-        }
         if ( !get_config_key( hkey, appkey, "UseGLSL", buffer, size) )
         {
             if (!strcmp(buffer,"disabled"))
@@ -251,16 +237,6 @@ static BOOL wined3d_init(HINSTANCE hInstDLL)
             {
                 TRACE("Using glReadPixels for render target reading and textures for writing\n");
                 wined3d_settings.rendertargetlock_mode = RTL_READTEX;
-            }
-            else if (!strcmp(buffer,"texdraw"))
-            {
-                TRACE("Using textures for render target reading and glDrawPixels for writing\n");
-                wined3d_settings.rendertargetlock_mode = RTL_TEXDRAW;
-            }
-            else if (!strcmp(buffer,"textex"))
-            {
-                TRACE("Reading render targets via textures and writing via textures\n");
-                wined3d_settings.rendertargetlock_mode = RTL_TEXTEX;
             }
         }
         if ( !get_config_key_dword( hkey, appkey, "VideoPciDeviceID", &tmpvalue) )
@@ -324,8 +300,6 @@ static BOOL wined3d_init(HINSTANCE hInstDLL)
         TRACE("Allow HW vertex shaders\n");
     if (wined3d_settings.ps_mode == PS_NONE)
         TRACE("Disable pixel shaders\n");
-    if (wined3d_settings.vbo_mode == VBO_NONE)
-        TRACE("Disable Vertex Buffer Hardware support\n");
     if (wined3d_settings.glslRequested)
         TRACE("If supported by your system, GL Shading Language will be used\n");
 

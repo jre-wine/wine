@@ -652,18 +652,14 @@ static inline int stabs_pts_read_aggregate(struct ParseTypedefData* ptd,
 
             PTS_ABORTIF(ptd, stabs_pts_read_type_def(ptd, NULL, &adt) == -1);
 
-            if (doadd)
+            if (doadd && adt)
             {
                 char    tmp[256];
-                WCHAR*  name;
                 DWORD64 size;
 
-                symt_get_info(adt, TI_GET_SYMNAME, &name);
                 strcpy(tmp, "__inherited_class_");
-                WideCharToMultiByte(CP_ACP, 0, name, -1, 
-                                    tmp + strlen(tmp), sizeof(tmp) - strlen(tmp),
-                                    NULL, NULL);
-                HeapFree(GetProcessHeap(), 0, name);
+                strcat(tmp, symt_get_name(adt));
+
                 /* FIXME: TI_GET_LENGTH will not always work, especially when adt
                  * has just been seen as a forward definition and not the real stuff
                  * yet.
@@ -1258,6 +1254,21 @@ static void stabs_finalize_function(struct module* module, struct symt_function*
     if (size) func->size = size;
 }
 
+static inline void stabbuf_append(char **buf, unsigned *buf_size, const char *str)
+{
+    unsigned str_len, buf_len;
+
+    str_len = strlen(str);
+    buf_len = strlen(*buf);
+
+    if(str_len+buf_len >= *buf_size) {
+        *buf_size += buf_len + str_len;
+        *buf = HeapReAlloc(GetProcessHeap(), 0, *buf, *buf_size);
+    }
+
+    strcpy(*buf+buf_len, str);
+}
+
 BOOL stabs_parse(struct module* module, unsigned long load_offset, 
                  const void* pv_stab_ptr, int stablen,
                  const char* strs, int strtablen,
@@ -1317,18 +1328,12 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
              * next record.  Repeat the process until we find a stab without the
              * '/' character, as this indicates we have the whole thing.
              */
-            unsigned    len = strlen(ptr);
-            if (strlen(stabbuff) + len > stabbufflen)
-            {
-                stabbufflen *= 2;
-                stabbuff = HeapReAlloc(GetProcessHeap(), 0, stabbuff, stabbufflen);
-            }
-            strncat(stabbuff, ptr, len - 1);
+            stabbuf_append(&stabbuff, &stabbufflen, ptr);
             continue;
         }
         else if (stabbuff[0] != '\0')
         {
-            strcat(stabbuff, ptr);
+            stabbuf_append(&stabbuff, &stabbufflen, ptr);
             ptr = stabbuff;
         }
 
@@ -1355,7 +1360,8 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                  */
                 if (ptr != stabbuff)
                 {
-                    strcpy(stabbuff, ptr);
+                    stabbuff[0] = 0;
+                    stabbuf_append(&stabbuff, &stabbufflen, ptr);
                     ptr = stabbuff;
                 }
                 stab_strcpy(symname, sizeof(symname), ptr);

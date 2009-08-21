@@ -881,17 +881,17 @@ static void init_windows_dirs(void)
 /***********************************************************************
  *           start_wineboot
  *
- * Start the wineboot process if necessary. Return the event to wait on.
+ * Start the wineboot process if necessary. Return the handles to wait on.
  */
-static HANDLE start_wineboot(void)
+static void start_wineboot( HANDLE handles[2] )
 {
     static const WCHAR wineboot_eventW[] = {'_','_','w','i','n','e','b','o','o','t','_','e','v','e','n','t',0};
-    HANDLE event;
 
-    if (!(event = CreateEventW( NULL, TRUE, FALSE, wineboot_eventW )))
+    handles[1] = 0;
+    if (!(handles[0] = CreateEventW( NULL, TRUE, FALSE, wineboot_eventW )))
     {
         ERR( "failed to create wineboot event, expect trouble\n" );
-        return 0;
+        return;
     }
     if (GetLastError() != ERROR_ALREADY_EXISTS)  /* we created it */
     {
@@ -913,12 +913,15 @@ static HANDLE start_wineboot(void)
         {
             TRACE( "started wineboot pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
             CloseHandle( pi.hThread );
-            CloseHandle( pi.hProcess );
-
+            handles[1] = pi.hProcess;
         }
-        else ERR( "failed to start wineboot, err %u\n", GetLastError() );
+        else
+        {
+            ERR( "failed to start wineboot, err %u\n", GetLastError() );
+            CloseHandle( handles[0] );
+            handles[0] = 0;
+        }
     }
-    return event;
 }
 
 
@@ -1016,7 +1019,7 @@ void CDECL __wine_kernel_init(void)
     WCHAR *p, main_exe_name[MAX_PATH+1];
     PEB *peb = NtCurrentTeb()->Peb;
     RTL_USER_PROCESS_PARAMETERS *params = peb->ProcessParameters;
-    HANDLE boot_event = 0;
+    HANDLE boot_events[2];
     BOOL got_environment = TRUE;
 
     /* Initialize everything */
@@ -1045,6 +1048,7 @@ void CDECL __wine_kernel_init(void)
 
     set_process_name( __wine_main_argc, __wine_main_argv );
     set_library_wargv( __wine_main_argv );
+    boot_events[0] = boot_events[1] = 0;
 
     if (peb->ProcessParameters->ImagePathName.Buffer)
     {
@@ -1060,7 +1064,7 @@ void CDECL __wine_kernel_init(void)
         }
         update_library_argv0( main_exe_name );
         if (!build_command_line( __wine_main_wargv )) goto error;
-        boot_event = start_wineboot();
+        start_wineboot( boot_events );
     }
 
     /* if there's no extension, append a dot to prevent LoadLibrary from appending .dll */
@@ -1073,10 +1077,16 @@ void CDECL __wine_kernel_init(void)
     RtlInitUnicodeString( &NtCurrentTeb()->Peb->ProcessParameters->DllPath,
                           MODULE_get_dll_load_path(main_exe_name) );
 
-    if (boot_event)
+    if (boot_events[0])
     {
-        if (WaitForSingleObject( boot_event, 30000 )) ERR( "boot event wait timed out\n" );
-        CloseHandle( boot_event );
+        DWORD timeout = 30000, count = 1;
+
+        if (boot_events[1]) count++;
+        if (!got_environment) timeout = 300000;  /* initial prefix creation can take longer */
+        if (WaitForMultipleObjects( count, boot_events, FALSE, timeout ) == WAIT_TIMEOUT)
+            ERR( "boot event wait timed out\n" );
+        CloseHandle( boot_events[0] );
+        if (boot_events[1]) CloseHandle( boot_events[1] );
         /* if we didn't find environment section, try again now that wineboot has run */
         if (!got_environment)
         {
@@ -1512,7 +1522,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
                             LPCWSTR cur_dir, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                             BOOL inherit, DWORD flags, LPSTARTUPINFOW startup,
                             LPPROCESS_INFORMATION info, LPCSTR unixdir,
-                            void *res_start, void *res_end, int exec_only )
+                            void *res_start, void *res_end, DWORD binary_type, int exec_only )
 {
     BOOL ret, success = FALSE;
     HANDLE process_info, hstdin, hstdout;
@@ -1523,6 +1533,13 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     int socketfd[2], stdin_fd = -1, stdout_fd = -1;
     pid_t pid;
     int err;
+
+    if (sizeof(void *) == sizeof(int) && !is_wow64 && (binary_type & BINARY_FLAG_64BIT))
+    {
+        ERR( "starting 64-bit process %s not supported on this platform\n", debugstr_w(filename) );
+        SetLastError( ERROR_BAD_EXE_FORMAT );
+        return FALSE;
+    }
 
     if (!env) RtlAcquirePebLock();
 
@@ -1716,7 +1733,8 @@ error:
 static BOOL create_vdm_process( LPCWSTR filename, LPWSTR cmd_line, LPWSTR env, LPCWSTR cur_dir,
                                 LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                                 BOOL inherit, DWORD flags, LPSTARTUPINFOW startup,
-                                LPPROCESS_INFORMATION info, LPCSTR unixdir, int exec_only )
+                                LPPROCESS_INFORMATION info, LPCSTR unixdir,
+                                DWORD binary_type, int exec_only )
 {
     static const WCHAR argsW[] = {'%','s',' ','-','-','a','p','p','-','n','a','m','e',' ','"','%','s','"',' ','%','s',0};
 
@@ -1731,7 +1749,7 @@ static BOOL create_vdm_process( LPCWSTR filename, LPWSTR cmd_line, LPWSTR env, L
     }
     sprintfW( new_cmd_line, argsW, winevdmW, filename, cmd_line );
     ret = create_process( 0, winevdmW, new_cmd_line, env, cur_dir, psa, tsa, inherit,
-                          flags, startup, info, unixdir, NULL, NULL, exec_only );
+                          flags, startup, info, unixdir, NULL, NULL, binary_type, exec_only );
     HeapFree( GetProcessHeap(), 0, new_cmd_line );
     return ret;
 }
@@ -1909,6 +1927,7 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
     WCHAR name[MAX_PATH];
     WCHAR *tidy_cmdline, *p, *envW = env;
     void *res_start, *res_end;
+    DWORD binary_type;
 
     /* Process the AppName and/or CmdLine to get module name and path */
 
@@ -1962,32 +1981,37 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
     {
         TRACE( "starting %s as Winelib app\n", debugstr_w(name) );
         retv = create_process( 0, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir, NULL, NULL, FALSE );
+                               inherit, flags, startup_info, info, unixdir, NULL, NULL,
+                               BINARY_UNIX_LIB, FALSE );
         goto done;
     }
 
-    switch( MODULE_GetBinaryType( hFile, &res_start, &res_end ))
+    binary_type = MODULE_GetBinaryType( hFile, &res_start, &res_end );
+    if (binary_type & BINARY_FLAG_DLL)
     {
-    case BINARY_PE_EXE:
+        TRACE( "not starting %s since it is a dll\n", debugstr_w(name) );
+        SetLastError( ERROR_BAD_EXE_FORMAT );
+    }
+    else switch (binary_type & BINARY_TYPE_MASK)
+    {
+    case BINARY_PE:
         TRACE( "starting %s as Win32 binary (%p-%p)\n", debugstr_w(name), res_start, res_end );
         retv = create_process( hFile, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir, res_start, res_end, FALSE );
+                               inherit, flags, startup_info, info, unixdir,
+                               res_start, res_end, binary_type, FALSE );
         break;
     case BINARY_OS216:
     case BINARY_WIN16:
     case BINARY_DOS:
         TRACE( "starting %s as Win16/DOS binary\n", debugstr_w(name) );
         retv = create_vdm_process( name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                                   inherit, flags, startup_info, info, unixdir, FALSE );
-        break;
-    case BINARY_PE_DLL:
-        TRACE( "not starting %s since it is a dll\n", debugstr_w(name) );
-        SetLastError( ERROR_BAD_EXE_FORMAT );
+                                   inherit, flags, startup_info, info, unixdir, binary_type, FALSE );
         break;
     case BINARY_UNIX_LIB:
         TRACE( "%s is a Unix library, starting as Winelib app\n", debugstr_w(name) );
         retv = create_process( hFile, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir, NULL, NULL, FALSE );
+                               inherit, flags, startup_info, info, unixdir,
+                               NULL, NULL, binary_type, FALSE );
         break;
     case BINARY_UNKNOWN:
         /* check for .com or .bat extension */
@@ -1997,7 +2021,8 @@ BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIB
             {
                 TRACE( "starting %s as DOS binary\n", debugstr_w(name) );
                 retv = create_vdm_process( name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                                           inherit, flags, startup_info, info, unixdir, FALSE );
+                                           inherit, flags, startup_info, info, unixdir,
+                                           binary_type, FALSE );
                 break;
             }
             if (!strcmpiW( p, batW ) || !strcmpiW( p, cmdW ) )
@@ -2046,6 +2071,7 @@ static void exec_process( LPCWSTR name )
     void *res_start, *res_end;
     STARTUPINFOW startup_info;
     PROCESS_INFORMATION info;
+    DWORD binary_type;
 
     hFile = open_exe_file( name );
     if (!hFile || hFile == INVALID_HANDLE_VALUE) return;
@@ -2055,17 +2081,19 @@ static void exec_process( LPCWSTR name )
 
     /* Determine executable type */
 
-    switch( MODULE_GetBinaryType( hFile, &res_start, &res_end ))
+    binary_type = MODULE_GetBinaryType( hFile, &res_start, &res_end );
+    if (binary_type & BINARY_FLAG_DLL) return;
+    switch (binary_type & BINARY_TYPE_MASK)
     {
-    case BINARY_PE_EXE:
+    case BINARY_PE:
         TRACE( "starting %s as Win32 binary (%p-%p)\n", debugstr_w(name), res_start, res_end );
         create_process( hFile, name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                        FALSE, 0, &startup_info, &info, NULL, res_start, res_end, TRUE );
+                        FALSE, 0, &startup_info, &info, NULL, res_start, res_end, binary_type, TRUE );
         break;
     case BINARY_UNIX_LIB:
         TRACE( "%s is a Unix library, starting as Winelib app\n", debugstr_w(name) );
         create_process( hFile, name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                        FALSE, 0, &startup_info, &info, NULL, NULL, NULL, TRUE );
+                        FALSE, 0, &startup_info, &info, NULL, NULL, NULL, binary_type, TRUE );
         break;
     case BINARY_UNKNOWN:
         /* check for .com or .pif extension */
@@ -2077,7 +2105,7 @@ static void exec_process( LPCWSTR name )
     case BINARY_DOS:
         TRACE( "starting %s as Win16/DOS binary\n", debugstr_w(name) );
         create_vdm_process( name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                            FALSE, 0, &startup_info, &info, NULL, TRUE );
+                            FALSE, 0, &startup_info, &info, NULL, binary_type, TRUE );
         break;
     default:
         break;

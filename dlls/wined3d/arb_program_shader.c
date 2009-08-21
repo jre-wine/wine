@@ -91,13 +91,6 @@ static inline BOOL ffp_clip_emul(IWineD3DStateBlockImpl *stateblock)
 
 /* ARB_program_shader private data */
 
-struct loop_control
-{
-    unsigned int count;
-    unsigned int start;
-    int step;
-};
-
 struct control_frame
 {
     struct                          list entry;
@@ -115,7 +108,7 @@ struct control_frame
         unsigned int                loop_no;
         unsigned int                ifc_no;
     };
-    struct loop_control             loop_control;
+    struct wined3d_shader_loop_control loop_control;
     BOOL                            had_else;
 };
 
@@ -622,6 +615,7 @@ static DWORD shader_generate_arb_declarations(IWineD3DBaseShader *iface, const s
     char pshader = shader_is_pshader_version(reg_maps->shader_version.type);
     unsigned max_constantsF;
     const local_constant *lconst;
+    DWORD map;
 
     /* In pixel shaders, all private constants are program local, we don't need anything
      * from program.env. Thus we can advertise the full set of constants in pixel shaders.
@@ -665,20 +659,21 @@ static DWORD shader_generate_arb_declarations(IWineD3DBaseShader *iface, const s
         }
     }
 
-    for(i = 0; i < This->baseShader.limits.temporary; i++) {
-        if (reg_maps->temporary[i])
-            shader_addline(buffer, "TEMP R%u;\n", i);
+    for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+    {
+        if (map & 1) shader_addline(buffer, "TEMP R%u;\n", i);
     }
 
-    for (i = 0; i < This->baseShader.limits.address; i++) {
-        if (reg_maps->address[i])
-            shader_addline(buffer, "ADDRESS A%d;\n", i);
+    for (i = 0, map = reg_maps->address; map; map >>= 1, ++i)
+    {
+        if (map & 1) shader_addline(buffer, "ADDRESS A%u;\n", i);
     }
 
-    if(pshader && reg_maps->shader_version.major == 1 && reg_maps->shader_version.minor <= 3) {
-        for(i = 0; i < This->baseShader.limits.texcoord; i++) {
-            if (reg_maps->texcoord[i] && pshader)
-                shader_addline(buffer,"TEMP T%u;\n", i);
+    if (pshader && reg_maps->shader_version.major == 1 && reg_maps->shader_version.minor <= 3)
+    {
+        for (i = 0, map = reg_maps->texcoord; map; map >>= 1, ++i)
+        {
+            if (map & 1) shader_addline(buffer, "TEMP T%u;\n", i);
         }
     }
 
@@ -1252,8 +1247,8 @@ static void shader_hw_sample(const struct wined3d_shader_instruction *ins, DWORD
 
     if (flags & TEX_DERIV)
     {
-        if(flags & TEX_PROJ) FIXME("Projected texture sampling with custom derivates\n");
-        if(flags & TEX_BIAS) FIXME("Biased texture sampling with custom derivates\n");
+        if(flags & TEX_PROJ) FIXME("Projected texture sampling with custom derivatives\n");
+        if(flags & TEX_BIAS) FIXME("Biased texture sampling with custom derivatives\n");
         shader_addline(buffer, "TXD%s %s, %s, %s, %s, texture[%u], %s;\n", mod, dst_str, coord_reg,
                        dsx, dsy,sampler_idx, tex_type);
     }
@@ -2028,7 +2023,7 @@ static void pshader_hw_texm3x3vspec(const struct wined3d_shader_instruction *ins
     SHADER_PARSE_STATE* current_state = &This->baseShader.parse_state;
     char dst_str[50];
     char src0_name[50];
-    char dst_reg[8];
+    char dst_reg[50];
     BOOL is_color;
 
     /* Get the dst reg without writemask strings. We know this register is uninitialized, so we can use all
@@ -2071,7 +2066,7 @@ static void pshader_hw_texm3x3spec(const struct wined3d_shader_instruction *ins)
     char dst_str[50];
     char src0_name[50];
     char src1_name[50];
-    char dst_reg[8];
+    char dst_reg[50];
     BOOL is_color;
 
     shader_arb_get_src_param(ins, &ins->src[0], 0, src0_name);
@@ -3220,21 +3215,21 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
     BOOL dcl_tmp = args->super.srgb_correction, dcl_td = FALSE;
     BOOL want_nv_prog = FALSE;
     struct arb_pshader_private *shader_priv = This->backend_priv;
+    DWORD map;
 
     char srgbtmp[4][4];
     unsigned int i, found = 0;
 
-    for(i = 0; i < This->baseShader.limits.temporary; i++) {
+    for (i = 0, map = reg_maps->temporary; map; map >>= 1, ++i)
+    {
+        if (!(map & 1)
+                || (This->color0_mov && i == This->color0_reg)
+                || (reg_maps->shader_version.major < 2 && i == 0))
+            continue;
 
-        /* Don't overwrite the color source */
-        if(This->color0_mov && i == This->color0_reg) continue;
-        else if(reg_maps->shader_version.major < 2 && i == 0) continue;
-
-        if(reg_maps->temporary[i]) {
-            sprintf(srgbtmp[found], "R%u", i);
-            found++;
-            if(found == 4) break;
-        }
+        sprintf(srgbtmp[found], "R%u", i);
+        ++found;
+        if (found == 4) break;
     }
 
     switch(found) {
@@ -3365,8 +3360,9 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
     next_local = shader_generate_arb_declarations( (IWineD3DBaseShader*) This, reg_maps, buffer, &GLINFO_LOCATION,
             lconst_map, NULL, &priv_ctx);
 
-    for(i = 0; i < (sizeof(reg_maps->bumpmat) / sizeof(reg_maps->bumpmat[0])); i++) {
-        if(!reg_maps->bumpmat[i]) continue;
+    for (i = 0, map = reg_maps->bumpmat; map; map >>= 1, ++i)
+    {
+        if (!(map & 1)) continue;
 
         cur = compiled->numbumpenvmatconsts;
         compiled->bumpenvmatconst[cur].const_num = WINED3D_CONST_NUM_UNUSED;
@@ -3388,7 +3384,7 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
                        i, compiled->bumpenvmatconst[cur].const_num);
         compiled->numbumpenvmatconsts = cur + 1;
 
-        if(!reg_maps->luminanceparams[i]) continue;
+        if (!(reg_maps->luminanceparams & (1 << i))) continue;
 
         compiled->luminanceconst[cur].const_num = next_local++;
         shader_addline(buffer, "PARAM luminance%d = program.local[%d];\n",
@@ -3476,9 +3472,9 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
         next_local += fixup->super.num_consts;
     }
 
-    if(shader_priv->clipplane_emulation)
+    if (shader_priv->clipplane_emulation != ~0U)
     {
-        shader_addline(buffer, "KIL fragment.texcoord[%u];\n", shader_priv->clipplane_emulation - 1);
+        shader_addline(buffer, "KIL fragment.texcoord[%u];\n", shader_priv->clipplane_emulation);
     }
 
     /* Base Shader Body */
@@ -3916,42 +3912,6 @@ static GLuint shader_arb_generate_vshader(IWineD3DVertexShaderImpl *This, struct
     return ret;
 }
 
-static void find_clip_texcoord(IWineD3DPixelShaderImpl *ps)
-{
-    struct arb_pshader_private *shader_priv = ps->backend_priv;
-    int i;
-    const struct wined3d_gl_info *gl_info = &((IWineD3DDeviceImpl *)ps->baseShader.device)->adapter->gl_info;
-
-    /* See if we can use fragment.texcoord[7] for clipplane emulation
-     *
-     * Don't do this if it is not supported, or fragment.texcoord[7] is used
-     */
-    if(ps->baseShader.reg_maps.shader_version.major < 3)
-    {
-        for(i = GL_LIMITS(texture_stages); i > 0; i--)
-        {
-            if(!ps->baseShader.reg_maps.texcoord[i - 1])
-            {
-                shader_priv->clipplane_emulation = i;
-                return;
-            }
-        }
-        WARN("Did not find a free clip reg(2.0)\n");
-    }
-    else
-    {
-        for(i = GL_LIMITS(texture_stages); i > 0; i--)
-        {
-            if(!(ps->baseShader.reg_maps.input_registers & (1 << (i - 1))))
-            {
-                shader_priv->clipplane_emulation = i;
-                return;
-            }
-        }
-        WARN("Did not find a free clip reg(3.0)\n");
-    }
-}
-
 /* GL locking is done by the caller */
 static struct arb_ps_compiled_shader *find_arb_pshader(IWineD3DPixelShaderImpl *shader, const struct arb_ps_compile_args *args)
 {
@@ -3964,6 +3924,7 @@ static struct arb_ps_compiled_shader *find_arb_pshader(IWineD3DPixelShaderImpl *
 
     if(!shader->backend_priv) {
         IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) shader->baseShader.device;
+        const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
         struct shader_arb_priv *priv = device->shader_priv;
 
         shader->backend_priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*shader_data));
@@ -3976,7 +3937,11 @@ static struct arb_ps_compiled_shader *find_arb_pshader(IWineD3DPixelShaderImpl *
         shader_data->has_signature_idx = TRUE;
         TRACE("Shader got assigned input signature index %u\n", shader_data->input_signature_idx);
 
-        if(!device->vs_clipping) find_clip_texcoord(shader);
+        if (!device->vs_clipping)
+            shader_data->clipplane_emulation = shader_find_free_input_register(&shader->baseShader.reg_maps,
+                    GL_LIMITS(texture_stages) - 1);
+        else
+            shader_data->clipplane_emulation = ~0U;
     }
     shader_data = shader->backend_priv;
 
@@ -4161,7 +4126,7 @@ static inline void find_arb_vs_compile_args(IWineD3DVertexShaderImpl *shader, IW
         struct arb_pshader_private *shader_priv = ps->backend_priv;
         args->ps_signature = shader_priv->input_signature_idx;
 
-        args->boolclip.clip_control[0] = shader_priv->clipplane_emulation;
+        args->boolclip.clip_control[0] = shader_priv->clipplane_emulation + 1;
     }
     else
     {
@@ -4686,7 +4651,7 @@ static inline BOOL get_bool_const(const struct wined3d_shader_instruction *ins, 
 }
 
 static void get_loop_control_const(const struct wined3d_shader_instruction *ins,
-        IWineD3DBaseShaderImpl *This, UINT idx, struct loop_control *loop_control)
+        IWineD3DBaseShaderImpl *This, UINT idx, struct wined3d_shader_loop_control *loop_control)
 {
     struct shader_arb_ctx_priv *priv = ins->ctx->backend_data;
 
@@ -5229,8 +5194,9 @@ static void set_bumpmat_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock, s
 
     if (use_ps(stateblock))
     {
-        if(stage != 0 &&
-           ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.bumpmat[stage]) {
+        if (stage != 0
+                && (((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.reg_maps.bumpmat & (1 << stage)))
+        {
             /* The pixel shader has to know the bump env matrix. Do a constants update if it isn't scheduled
              * anyway
              */
@@ -5265,8 +5231,9 @@ static void tex_bumpenvlum_arbfp(DWORD state, IWineD3DStateBlockImpl *stateblock
 
     if (use_ps(stateblock))
     {
-        if(stage != 0 &&
-           ((IWineD3DPixelShaderImpl *) stateblock->pixelShader)->baseShader.reg_maps.luminanceparams[stage]) {
+        if (stage != 0
+                && (((IWineD3DPixelShaderImpl *)stateblock->pixelShader)->baseShader.reg_maps.luminanceparams & (1 << stage)))
+        {
             /* The pixel shader has to know the luminance offset. Do a constants update if it
              * isn't scheduled anyway
              */

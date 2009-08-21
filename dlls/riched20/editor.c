@@ -241,10 +241,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(richedit);
 
 static BOOL ME_RegisterEditorClass(HINSTANCE);
-static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_max);
+static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, ME_Cursor *start, int nChars);
 
-static const WCHAR RichEdit20W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '2', '0', 'W', 0};
-static const WCHAR RichEdit50W[] = {'R', 'i', 'c', 'h', 'E', 'd', 'i', 't', '5', '0', 'W', 0};
 static const WCHAR REListBox20W[] = {'R','E','L','i','s','t','B','o','x','2','0','W', 0};
 static const WCHAR REComboBox20W[] = {'R','E','C','o','m','b','o','B','o','x','2','0','W', 0};
 static HCURSOR hLeft;
@@ -1015,9 +1013,10 @@ void ME_RTFSpecialCharHook(RTF_Info *info)
           info->editor->pCursors[1].pRun = run;
           info->editor->pCursors[1].pPara = ME_GetParagraph(run);
           info->editor->pCursors[1].nOffset = 0;
-          nOfs = ME_GetCursorOfs(info->editor, 1);
-          nChars = ME_GetCursorOfs(info->editor, 0) - nOfs;
-          ME_InternalDeleteText(info->editor, nOfs, nChars, TRUE);
+          nOfs = ME_GetCursorOfs(&info->editor->pCursors[1]);
+          nChars = ME_GetCursorOfs(&info->editor->pCursors[0]) - nOfs;
+          ME_InternalDeleteText(info->editor, &info->editor->pCursors[1],
+                                nChars, TRUE);
         }
 
         para = ME_InsertTableRowEndFromCursor(info->editor);
@@ -1357,15 +1356,13 @@ static void ME_RTFReadHook(RTF_Info *info)
         {
           RTFFlushOutputBuffer(info);
           info->stackTop--;
-          if (info->stackTop<=0) {
+          if (info->stackTop <= 0)
             info->rtfClass = rtfEOF;
+          if (info->stackTop < 0)
             return;
-          }
-          assert(info->stackTop >= 0);
 
           ME_ReleaseStyle(info->style);
           info->style = info->stack[info->stackTop].style;
-          ME_AddRefStyle(info->style);
           info->codePage = info->stack[info->stackTop].codePage;
           info->unicodeLength = info->stack[info->stackTop].unicodeLength;
           break;
@@ -1389,19 +1386,22 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
 {
   RTF_Info parser;
   ME_Style *style;
-  int from, to, to2, nUndoMode;
+  int from, to, nUndoMode;
   int nEventMask = editor->nEventMask;
   ME_InStream inStream;
   BOOL invalidRTF = FALSE;
+  ME_Cursor *selStart, *selEnd;
 
   TRACE("stream==%p editor==%p format==0x%X\n", stream, editor, format);
   editor->nEventMask = 0;
 
-  ME_GetSelection(editor, &from, &to);
-  if ((format & SFF_SELECTION) && (editor->mode & TM_RICHTEXT)) {
+  ME_GetSelectionOfs(editor, &from, &to);
+  if (format & SFF_SELECTION && editor->mode & TM_RICHTEXT)
+  {
+    ME_GetSelection(editor, &selStart, &selEnd);
     style = ME_GetSelectionInsertStyle(editor);
 
-    ME_InternalDeleteText(editor, from, to-from, FALSE);
+    ME_InternalDeleteText(editor, selStart, to - from, FALSE);
 
     /* Don't insert text at the end of the table row */
     if (!editor->bEmulateVersion10) { /* v4.1 */
@@ -1426,12 +1426,12 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
           ME_IsInTable(editor->pCursors[0].pRun))
         return 0;
     }
-  }
-  else {
+  } else {
     style = editor->pBuffer->pDefaultStyle;
     ME_AddRefStyle(style);
     ME_SetSelection(editor, 0, 0);
-    ME_InternalDeleteText(editor, 0, ME_GetTextLength(editor), FALSE);
+    ME_InternalDeleteText(editor, &editor->pCursors[1],
+                          ME_GetTextLength(editor), FALSE);
     from = to = 0;
     ME_ClearTempStyle(editor);
     ME_SetDefaultParaFormat(editor->pCursors[0].pPara->member.para.pFmt);
@@ -1520,9 +1520,9 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
           editor->pCursors[1].pPara = para;
           editor->pCursors[1].pRun = ME_FindItemFwd(para, diRun);
           editor->pCursors[1].nOffset = 0;
-          nOfs = ME_GetCursorOfs(editor, 1);
-          nChars = ME_GetCursorOfs(editor, 0) - nOfs;
-          ME_InternalDeleteText(editor, nOfs, nChars, TRUE);
+          nOfs = ME_GetCursorOfs(&editor->pCursors[1]);
+          nChars = ME_GetCursorOfs(&editor->pCursors[0]) - nOfs;
+          ME_InternalDeleteText(editor, &editor->pCursors[1], nChars, TRUE);
           if (parser.tableDef)
             parser.tableDef->tableRowStart = NULL;
         }
@@ -1532,23 +1532,34 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
       if (parser.lpRichEditOle)
         IRichEditOle_Release(parser.lpRichEditOle);
 
-      if (!inStream.editstream->dwError && parser.stackTop > 0)
-        inStream.editstream->dwError = HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
+      if (parser.stackTop > 0)
+      {
+        while (--parser.stackTop >= 0)
+        {
+          ME_ReleaseStyle(parser.style);
+          parser.style = parser.stack[parser.stackTop].style;
+        }
+        if (!inStream.editstream->dwError)
+          inStream.editstream->dwError = HRESULT_FROM_WIN32(ERROR_HANDLE_EOF);
+      }
 
       /* Remove last line break, as mandated by tests. This is not affected by
          CR/LF counters, since RTF streaming presents only \para tokens, which
          are converted according to the standard rules: \r for 2.0, \r\n for 1.0
        */
       if (stripLastCR) {
-        int newfrom, newto;
-        ME_GetSelection(editor, &newfrom, &newto);
+        int newto;
+        ME_GetSelection(editor, &selStart, &selEnd);
+        newto = ME_GetCursorOfs(selEnd);
         if (newto > to + (editor->bEmulateVersion10 ? 1 : 0)) {
           WCHAR lastchar[3] = {'\0', '\0'};
           int linebreakSize = editor->bEmulateVersion10 ? 2 : 1;
+          ME_Cursor linebreakCursor = *selEnd;
 
-          ME_GetTextW(editor, lastchar, newto - linebreakSize, linebreakSize, 0);
+          ME_MoveCursorChars(editor, &linebreakCursor, -linebreakSize);
+          ME_GetTextW(editor, lastchar, 2, &linebreakCursor, linebreakSize, 0);
           if (lastchar[0] == '\r' && (lastchar[1] == '\n' || lastchar[1] == '\0')) {
-            ME_InternalDeleteText(editor, newto - linebreakSize, linebreakSize, FALSE);
+            ME_InternalDeleteText(editor, &linebreakCursor, linebreakSize, FALSE);
           }
         }
       }
@@ -1559,7 +1570,6 @@ static LRESULT ME_StreamIn(ME_TextEditor *editor, DWORD format, EDITSTREAM *stre
       ME_StreamInText(editor, format, &inStream, style);
     else
       ERR("EM_STREAMIN without SF_TEXT or SF_RTF\n");
-    ME_GetSelection(editor, &to, &to2);
     /* put the cursor at the top */
     if (!(format & SFF_SELECTION))
       ME_SetSelection(editor, 0, 0);
@@ -1630,10 +1640,8 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
 {
   const int nLen = lstrlenW(text);
   const int nTextLen = ME_GetTextLength(editor);
-  int nStart, nEnd;
   int nMin, nMax;
-  ME_DisplayItem *item;
-  ME_DisplayItem *para;
+  ME_Cursor cursor;
   WCHAR wLastChar = ' ';
 
   TRACE("flags==0x%08x, chrg->cpMin==%d, chrg->cpMax==%d text==%s\n",
@@ -1694,17 +1702,17 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
     /* If possible, find the character before where the search starts */
     if ((flags & FR_WHOLEWORD) && nMin)
     {
-      ME_RunOfsFromCharOfs(editor, nMin - 1, NULL, &item, &nStart);
-      wLastChar = item->member.run.strText->szData[nStart];
+      ME_CursorFromCharOfs(editor, nMin - 1, &cursor);
+      wLastChar = cursor.pRun->member.run.strText->szData[cursor.nOffset];
+      ME_MoveCursorChars(editor, &cursor, 1);
+    } else {
+      ME_CursorFromCharOfs(editor, nMin, &cursor);
     }
 
-    ME_RunOfsFromCharOfs(editor, nMin, &para, &item, &nStart);
-
-    while (item
-           && para->member.para.nCharOfs + item->member.run.nCharOfs + nStart + nLen <= nMax)
+    while (cursor.pRun && ME_GetCursorOfs(&cursor) + nLen <= nMax)
     {
-      ME_DisplayItem *pCurItem = item;
-      int nCurStart = nStart;
+      ME_DisplayItem *pCurItem = cursor.pRun;
+      int nCurStart = cursor.nOffset;
       int nMatched = 0;
     
       while (pCurItem && ME_CharCompare(pCurItem->member.run.strText->szData[nCurStart + nMatched], text[nMatched], (flags & FR_MATCHCASE)))
@@ -1737,14 +1745,14 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
               break;
           }
 
-          nStart += para->member.para.nCharOfs + item->member.run.nCharOfs;
+          cursor.nOffset += cursor.pPara->member.para.nCharOfs + cursor.pRun->member.run.nCharOfs;
           if (chrgText)
           {
-            chrgText->cpMin = nStart;
-            chrgText->cpMax = nStart + nLen;
+            chrgText->cpMin = cursor.nOffset;
+            chrgText->cpMax = cursor.nOffset + nLen;
           }
-          TRACE("found at %d-%d\n", nStart, nStart + nLen);
-          return nStart;
+          TRACE("found at %d-%d\n", cursor.nOffset, cursor.nOffset + nLen);
+          return cursor.nOffset;
         }
         if (nCurStart + nMatched == pCurItem->member.run.strText->nLen)
         {
@@ -1757,12 +1765,11 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
       else
         wLastChar = ' ';
 
-      nStart++;
-      if (nStart == item->member.run.strText->nLen)
+      cursor.nOffset++;
+      if (cursor.nOffset == cursor.pRun->member.run.strText->nLen)
       {
-        item = ME_FindItemFwd(item, diRun);
-        para = ME_GetParagraph(item);
-        nStart = 0;
+        ME_NextRun(&cursor.pPara, &cursor.pRun);
+        cursor.nOffset = 0;
       }
     }
   }
@@ -1771,22 +1778,23 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
     /* If possible, find the character after where the search ends */
     if ((flags & FR_WHOLEWORD) && nMax < nTextLen - 1)
     {
-      ME_RunOfsFromCharOfs(editor, nMax + 1, NULL, &item, &nEnd);
-      wLastChar = item->member.run.strText->szData[nEnd];
+      ME_CursorFromCharOfs(editor, nMax + 1, &cursor);
+      wLastChar = cursor.pRun->member.run.strText->szData[cursor.nOffset];
+      ME_MoveCursorChars(editor, &cursor, -1);
+    } else {
+      ME_CursorFromCharOfs(editor, nMax, &cursor);
     }
 
-    ME_RunOfsFromCharOfs(editor, nMax, &para, &item, &nEnd);
-
-    while (item
-           && para->member.para.nCharOfs + item->member.run.nCharOfs + nEnd - nLen >= nMin)
+    while (cursor.pRun && ME_GetCursorOfs(&cursor) - nLen >= nMin)
     {
-      ME_DisplayItem *pCurItem = item;
-      int nCurEnd = nEnd;
+      ME_DisplayItem *pCurItem = cursor.pRun;
+      ME_DisplayItem *pCurPara = cursor.pPara;
+      int nCurEnd = cursor.nOffset;
       int nMatched = 0;
 
       if (nCurEnd == 0)
       {
-        pCurItem = ME_FindItemBack(pCurItem, diRun);
+        ME_PrevRun(&pCurPara, &pCurItem);
         nCurEnd = pCurItem->member.run.strText->nLen + nMatched;
       }
 
@@ -1801,6 +1809,7 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
           ME_DisplayItem *pPrevItem = pCurItem;
           int nPrevEnd = nCurEnd;
           WCHAR wPrevChar;
+          int nStart;
 
           /* Check to see if previous character is a whitespace */
           if (flags & FR_WHOLEWORD)
@@ -1821,7 +1830,7 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
               break;
           }
 
-          nStart = ME_GetParagraph(pCurItem)->member.para.nCharOfs
+          nStart = pCurPara->member.para.nCharOfs
                    + pCurItem->member.run.nCharOfs + nCurEnd - nMatched;
           if (chrgText)
           {
@@ -1833,7 +1842,7 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
         }
         if (nCurEnd - nMatched == 0)
         {
-          pCurItem = ME_FindItemBack(pCurItem, diRun);
+          ME_PrevRun(&pCurPara, &pCurItem);
           /* Don't care about pCurItem becoming NULL here; it's already taken
            * care of in the exterior loop condition */
           nCurEnd = pCurItem->member.run.strText->nLen + nMatched;
@@ -1844,12 +1853,11 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
       else
         wLastChar = ' ';
 
-      nEnd--;
-      if (nEnd < 0)
+      cursor.nOffset--;
+      if (cursor.nOffset < 0)
       {
-        item = ME_FindItemBack(item, diRun);
-        para = ME_GetParagraph(item);
-        nEnd = item->member.run.strText->nLen;
+        ME_PrevRun(&cursor.pPara, &cursor.pRun);
+        cursor.nOffset = cursor.pRun->member.run.strText->nLen;
       }
     }
   }
@@ -1861,7 +1869,8 @@ ME_FindText(ME_TextEditor *editor, DWORD flags, const CHARRANGE *chrg, const WCH
 
 static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
 {
-    int nStart, nCount; /* in chars */
+    int nChars;
+    ME_Cursor start;
 
     if (!ex->cb || !pText) return 0;
 
@@ -1870,18 +1879,20 @@ static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
 
     if (ex->flags & GT_SELECTION)
     {
-      ME_GetSelection(editor, &nStart, &nCount);
-      nCount -= nStart;
+      int from, to;
+      int nStartCur = ME_GetSelectionOfs(editor, &from, &to);
+      start = editor->pCursors[nStartCur];
+      nChars = to - from;
     }
     else
     {
-      nStart = 0;
-      nCount = 0x7fffffff;
+      ME_SetCursorToStart(editor, &start);
+      nChars = INT_MAX;
     }
     if (ex->codepage == 1200)
     {
-      nCount = min(nCount, ex->cb / sizeof(WCHAR) - 1);
-      return ME_GetTextW(editor, (LPWSTR)pText, nStart, nCount, ex->flags & GT_USECRLF);
+      return ME_GetTextW(editor, (LPWSTR)pText, ex->cb / sizeof(WCHAR) - 1,
+                         &start, nChars, ex->flags & GT_USECRLF);
     }
     else
     {
@@ -1891,16 +1902,15 @@ static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
         occurs only in richedit 2.0 mode, in which line breaks have only one CR
        */
       int crlfmul = (ex->flags & GT_USECRLF) ? 2 : 1;
+      DWORD buflen;
       LPWSTR buffer;
-      DWORD buflen = ex->cb;
       LRESULT rc;
-      DWORD flags = 0;
 
-      nCount = min(nCount, ex->cb - 1);
-      buffer = heap_alloc((crlfmul*nCount + 1) * sizeof(WCHAR));
+      buflen = min(crlfmul * nChars, ex->cb - 1);
+      buffer = heap_alloc((buflen + 1) * sizeof(WCHAR));
 
-      buflen = ME_GetTextW(editor, buffer, nStart, nCount, ex->flags & GT_USECRLF);
-      rc = WideCharToMultiByte(ex->codepage, flags, buffer, buflen+1,
+      nChars = ME_GetTextW(editor, buffer, buflen, &start, nChars, ex->flags & GT_USECRLF);
+      rc = WideCharToMultiByte(ex->codepage, 0, buffer, nChars + 1,
                                (LPSTR)pText, ex->cb, ex->lpDefaultChar, ex->lpUsedDefChar);
       if (rc) rc--; /* do not count 0 terminator */
 
@@ -1910,13 +1920,16 @@ static int ME_GetTextEx(ME_TextEditor *editor, GETTEXTEX *ex, LPARAM pText)
 }
 
 static int ME_GetTextRange(ME_TextEditor *editor, WCHAR *strText,
-                           int start, int nLen, BOOL unicode)
+                           const ME_Cursor *start, int nLen, BOOL unicode)
 {
+    if (!strText) return 0;
     if (unicode) {
-      return ME_GetTextW(editor, strText, start, nLen, 0);
+      return ME_GetTextW(editor, strText, INT_MAX, start, nLen, 0);
     } else {
+      int nChars;
       WCHAR *p = ALLOC_N_OBJ(WCHAR, nLen+1);
-      int nChars = ME_GetTextW(editor, p, start, nLen, 0);
+      if (!p) return 0;
+      nChars = ME_GetTextW(editor, p, nLen, start, nLen, 0);
       WideCharToMultiByte(CP_ACP, 0, p, nChars+1, (char *)strText,
                           nLen+1, NULL, NULL);
       FREE_OBJ(p);
@@ -1992,7 +2005,7 @@ static BOOL ME_Paste(ME_TextEditor *editor)
   return TRUE;
 }
 
-static BOOL ME_Copy(ME_TextEditor *editor, CHARRANGE *range)
+static BOOL ME_Copy(ME_TextEditor *editor, const ME_Cursor *start, int nChars)
 {
   LPDATAOBJECT dataObj = NULL;
   HRESULT hr = S_OK;
@@ -2001,9 +2014,14 @@ static BOOL ME_Copy(ME_TextEditor *editor, CHARRANGE *range)
     return FALSE; /* Copying or Cutting masked text isn't allowed */
 
   if(editor->lpOleCallback)
-    hr = IRichEditOleCallback_GetClipboardData(editor->lpOleCallback, range, RECO_COPY, &dataObj);
+  {
+    CHARRANGE range;
+    range.cpMin = ME_GetCursorOfs(start);
+    range.cpMax = range.cpMin + nChars;
+    hr = IRichEditOleCallback_GetClipboardData(editor->lpOleCallback, &range, RECO_COPY, &dataObj);
+  }
   if(FAILED(hr) || !dataObj)
-    hr = ME_GetDataObject(editor, range, &dataObj);
+    hr = ME_GetDataObject(editor, start, nChars, &dataObj);
   if(SUCCEEDED(hr)) {
     hr = OleSetClipboard(dataObj);
     IDataObject_Release(dataObj);
@@ -2037,24 +2055,28 @@ static void ME_UpdateSelectionLinkAttribute(ME_TextEditor *editor)
 {
   ME_DisplayItem *startPara, *endPara;
   ME_DisplayItem *prev_para;
-  int from, to;
+  ME_Cursor *from, *to;
+  ME_Cursor start;
+  int nChars;
 
   if (!editor->AutoURLDetect_bEnable) return;
 
   ME_GetSelection(editor, &from, &to);
 
   /* Find paragraph previous to the one that contains start cursor */
-  ME_RunOfsFromCharOfs(editor, from, &startPara, NULL, NULL);
+  startPara = from->pPara;
   prev_para = startPara->member.para.prev_para;
   if (prev_para->type == diParagraph) startPara = prev_para;
 
   /* Find paragraph that contains end cursor */
-  ME_RunOfsFromCharOfs(editor, to, &endPara, NULL, NULL);
-  endPara = endPara->member.para.next_para;
+  endPara = to->pPara->member.para.next_para;
 
-  ME_UpdateLinkAttribute(editor,
-                         startPara->member.para.nCharOfs,
-                         endPara->member.para.nCharOfs);
+  start.pPara = startPara;
+  start.pRun = ME_FindItemFwd(startPara, diRun);
+  start.nOffset = 0;
+  nChars = endPara->member.para.nCharOfs - startPara->member.para.nCharOfs;
+
+  ME_UpdateLinkAttribute(editor, &start, nChars);
 }
 
 static BOOL
@@ -2136,7 +2158,7 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
           return TRUE;
         }
 
-        ME_GetSelection(editor, &from, &to);
+        ME_GetSelectionOfs(editor, &from, &to);
         if (editor->nTextLimit > ME_GetTextLength(editor) - (to-from))
         {
           if (!editor->bEmulateVersion10) { /* v4.1 */
@@ -2257,14 +2279,16 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
     case 'X':
       if (ctrl_is_down)
       {
-        CHARRANGE range;
         BOOL result;
+        int nOfs, nChars;
+        int nStartCur = ME_GetSelectionOfs(editor, &nOfs, &nChars);
+        ME_Cursor *selStart = &editor->pCursors[nStartCur];
 
-        ME_GetSelection(editor, &range.cpMin, &range.cpMax);
-        result = ME_Copy(editor, &range);
+        nChars -= nOfs;
+        result = ME_Copy(editor, selStart, nChars);
         if (result && nKey == 'X')
         {
-          ME_InternalDeleteText(editor, range.cpMin, range.cpMax-range.cpMin, FALSE);
+          ME_InternalDeleteText(editor, selStart, nChars, FALSE);
           ME_CommitUndo(editor);
           ME_UpdateRepaint(editor);
         }
@@ -2337,7 +2361,7 @@ static LRESULT ME_Char(ME_TextEditor *editor, WPARAM charCode,
     ME_DisplayItem *para = cursor.pPara;
     int from, to;
     BOOL ctrl_is_down = GetKeyState(VK_CONTROL) & 0x8000;
-    ME_GetSelection(editor, &from, &to);
+    ME_GetSelectionOfs(editor, &from, &to);
     if (wstr == '\t' &&
         /* v4.1 allows tabs to be inserted with ctrl key down */
         !(ctrl_is_down && !editor->bEmulateVersion10))
@@ -2348,7 +2372,7 @@ static LRESULT ME_Char(ME_TextEditor *editor, WPARAM charCode,
       para = cursor.pPara;
       if (ME_IsSelection(editor) &&
           cursor.pRun->member.run.nCharOfs + cursor.nOffset == 0 &&
-          to == ME_GetCursorOfs(editor, 0) &&
+          to == ME_GetCursorOfs(&editor->pCursors[0]) &&
           para->member.para.prev_para->type == diParagraph)
       {
         para = para->member.para.prev_para;
@@ -2456,9 +2480,9 @@ static int ME_CalculateClickCount(ME_TextEditor *editor, UINT msg, WPARAM wParam
 
 static BOOL ME_SetCursor(ME_TextEditor *editor)
 {
+  ME_Cursor cursor;
   POINT pt;
   BOOL isExact;
-  int offset;
   SCROLLBARINFO sbi;
   DWORD messagePos = GetMessagePos();
   pt.x = (short)LOWORD(messagePos);
@@ -2513,13 +2537,11 @@ static BOOL ME_SetCursor(ME_TextEditor *editor)
       ITextHost_TxSetCursor(editor->texthost, hLeft, FALSE);
       return TRUE;
   }
-  offset = ME_CharFromPos(editor, pt.x, pt.y, &isExact);
+  ME_CharFromPos(editor, pt.x, pt.y, &cursor, &isExact);
   if (isExact)
   {
-      ME_Cursor cursor;
       ME_Run *run;
 
-      ME_CursorFromCharOfs(editor, offset, &cursor);
       run = &cursor.pRun->member.run;
       if (run->style->fmt.dwMask & CFM_LINK &&
           run->style->fmt.dwEffects & CFE_LINK)
@@ -2533,7 +2555,9 @@ static BOOL ME_SetCursor(ME_TextEditor *editor)
       if (ME_IsSelection(editor))
       {
           int selStart, selEnd;
-          ME_GetSelection(editor, &selStart, &selEnd);
+          int offset = ME_GetCursorOfs(&cursor);
+
+          ME_GetSelectionOfs(editor, &selStart, &selEnd);
           if (selStart <= offset && selEnd >= offset) {
               ITextHost_TxSetCursor(editor->texthost,
                                     LoadCursorW(NULL, (WCHAR*)IDC_ARROW),
@@ -2562,7 +2586,7 @@ static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
   int seltype = 0;
   if(!editor->lpOleCallback || !editor->hWnd)
     return FALSE;
-  ME_GetSelection(editor, &selrange.cpMin, &selrange.cpMax);
+  ME_GetSelectionOfs(editor, &selrange.cpMin, &selrange.cpMax);
   if(selrange.cpMin == selrange.cpMax)
     seltype |= SEL_EMPTY;
   else
@@ -2612,9 +2636,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
    */
   ed->nCursors = 4;
   ed->pCursors = ALLOC_N_OBJ(ME_Cursor, ed->nCursors);
-  ed->pCursors[0].pPara = ed->pBuffer->pFirst->member.para.next_para;
-  ed->pCursors[0].pRun = ME_FindItemFwd(ed->pCursors[0].pPara, diRun);
-  ed->pCursors[0].nOffset = 0;
+  ME_SetCursorToStart(ed, &ed->pCursors[0]);
   ed->pCursors[1] = ed->pCursors[0];
   ed->pCursors[2] = ed->pCursors[0];
   ed->pCursors[3] = ed->pCursors[1];
@@ -2634,7 +2656,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->nUndoMode = umAddToUndo;
   ed->nParagraphs = 1;
   ed->nLastSelStart = ed->nLastSelEnd = 0;
-  ed->pLastSelStartPara = ed->pLastSelEndPara = ME_FindItemFwd(ed->pBuffer->pFirst, diParagraph);
+  ed->pLastSelStartPara = ed->pLastSelEndPara = ed->pCursors[0].pPara;
   ed->bHideSelection = FALSE;
   ed->pfnWordBreak = NULL;
   ed->lpOleCallback = NULL;
@@ -2751,9 +2773,9 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
       break;
 
     case DLL_PROCESS_DETACH:
-      UnregisterClassW(RichEdit20W, 0);
-      UnregisterClassW(RichEdit50W, 0);
-      UnregisterClassA("RichEdit20A", 0);
+      UnregisterClassW(RICHEDIT_CLASS20W, 0);
+      UnregisterClassW(MSFTEDIT_CLASS, 0);
+      UnregisterClassA(RICHEDIT_CLASS20A, 0);
       UnregisterClassA("RichEdit50A", 0);
       if (ME_ListBoxRegistered)
           UnregisterClassW(REListBox20W, 0);
@@ -2907,20 +2929,17 @@ get_msg_name(UINT msg)
 static void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM lParam)
 {
   int x,y;
-  ME_DisplayItem *para, *run;
   BOOL isExact;
-  int nCharOfs; /* The start of the clicked text. Absolute character offset */
+  ME_Cursor cursor; /* The start of the clicked text. */
 
   ENLINK info;
   x = (short)LOWORD(lParam);
   y = (short)HIWORD(lParam);
-  nCharOfs = ME_CharFromPos(editor, x, y, &isExact);
+  ME_CharFromPos(editor, x, y, &cursor, &isExact);
   if (!isExact) return;
 
-  ME_RunOfsFromCharOfs(editor, nCharOfs, &para, &run, NULL);
-
-  if ((run->member.run.style->fmt.dwMask & CFM_LINK)
-    && (run->member.run.style->fmt.dwEffects & CFE_LINK))
+  if (cursor.pRun->member.run.style->fmt.dwMask & CFM_LINK &&
+      cursor.pRun->member.run.style->fmt.dwEffects & CFE_LINK)
   { /* The clicked run has CFE_LINK set */
     info.nmhdr.hwndFrom = editor->hWnd;
     info.nmhdr.idFrom = GetWindowLongW(editor->hWnd, GWLP_ID);
@@ -2928,8 +2947,9 @@ static void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM
     info.msg = msg;
     info.wParam = wParam;
     info.lParam = lParam;
-    info.chrg.cpMin = ME_CharOfsFromRunOfs(editor, para, run, 0);
-    info.chrg.cpMax = info.chrg.cpMin + run->member.run.strText->nLen;
+    cursor.nOffset = 0;
+    info.chrg.cpMin = ME_GetCursorOfs(&cursor);
+    info.chrg.cpMax = info.chrg.cpMin + cursor.pRun->member.run.strText->nLen;
     SendMessageW(GetParent(editor->hWnd), WM_NOTIFY,info.nmhdr.idFrom, (LPARAM)&info);
   }
 }
@@ -3002,7 +3022,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     UINT from, to;
     PUINT pfrom = wParam ? (PUINT)wParam : &from;
     PUINT pto = lParam ? (PUINT)lParam : &to;
-    ME_GetSelection(editor, (int *)pfrom, (int *)pto);
+    ME_GetSelectionOfs(editor, (int *)pfrom, (int *)pto);
     if ((*pfrom|*pto) & 0xFFFF0000)
       return -1;
     return MAKELONG(*pfrom,*pto);
@@ -3010,7 +3030,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_EXGETSEL:
   {
     CHARRANGE *pRange = (CHARRANGE *)lParam;
-    ME_GetSelection(editor, &pRange->cpMin, &pRange->cpMax);
+    ME_GetSelectionOfs(editor, &pRange->cpMin, &pRange->cpMax);
     TRACE("EM_EXGETSEL = (%d,%d)\n", pRange->cpMin, pRange->cpMax);
     return 0;
   }
@@ -3206,11 +3226,13 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
 
     bSelection = (pStruct->flags & ST_SELECTION) != 0;
     if (bSelection) {
-      ME_GetSelection(editor, &from, &to);
+      int nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
       style = ME_GetSelectionInsertStyle(editor);
-      ME_InternalDeleteText(editor, from, to - from, FALSE);
+      ME_InternalDeleteText(editor, &editor->pCursors[nStartCursor], to - from, FALSE);
     } else {
-      ME_InternalDeleteText(editor, 0, ME_GetTextLength(editor), FALSE);
+      ME_Cursor start;
+      ME_SetCursorToStart(editor, &start);
+      ME_InternalDeleteText(editor, &start, ME_GetTextLength(editor), FALSE);
       style = editor->pBuffer->pDefaultStyle;
     }
 
@@ -3232,8 +3254,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       ME_ReleaseStyle(style);
       ME_UpdateSelectionLinkAttribute(editor);
     } else {
+      ME_Cursor cursor;
       len = 1;
-      ME_UpdateLinkAttribute(editor, 0, -1);
+      ME_SetCursorToStart(editor, &cursor);
+      ME_UpdateLinkAttribute(editor, &cursor, INT_MAX);
     }
     ME_CommitUndo(editor);
     if (!(pStruct->flags & ST_KEEPUNDO))
@@ -3310,17 +3334,17 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       if (editor->mode & TM_PLAINTEXT)
         ME_SetDefaultCharFormat(editor, p);
       else {
-        ME_SetCharFormat(editor, 0, ME_GetTextLength(editor), p);
+        ME_Cursor start;
+        ME_SetCursorToStart(editor, &start);
+        ME_SetCharFormat(editor, &start, NULL, p);
         editor->nModifyStep = 1;
       }
     } else if (editor->mode & TM_PLAINTEXT) {
       return 0;
     } else {
-      int from, to;
-      ME_GetSelection(editor, &from, &to);
-      bRepaint = (from != to);
+      bRepaint = ME_IsSelection(editor);
       ME_SetSelectionCharFormat(editor, p);
-      if (from != to) editor->nModifyStep = 1;
+      if (bRepaint) editor->nModifyStep = 1;
     }
     ME_CommitUndo(editor);
     if (bRepaint)
@@ -3399,23 +3423,23 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_CLEAR:
   {
     int from, to;
-    ME_GetSelection(editor, &from, &to);
-    ME_InternalDeleteText(editor, from, to-from, FALSE);
+    int nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
+    ME_InternalDeleteText(editor, &editor->pCursors[nStartCursor], to-from, FALSE);
     ME_CommitUndo(editor);
     ME_UpdateRepaint(editor);
     return 0;
   }
   case EM_REPLACESEL:
   {
-    int from, to;
+    int from, to, nStartCursor;
     ME_Style *style;
     LPWSTR wszText = lParam ? ME_ToUnicode(unicode, (void *)lParam) : NULL;
     size_t len = wszText ? lstrlenW(wszText) : 0;
     TRACE("EM_REPLACESEL - %s\n", debugstr_w(wszText));
 
-    ME_GetSelection(editor, &from, &to);
+    nStartCursor = ME_GetSelectionOfs(editor, &from, &to);
     style = ME_GetSelectionInsertStyle(editor);
-    ME_InternalDeleteText(editor, from, to-from, FALSE);
+    ME_InternalDeleteText(editor, &editor->pCursors[nStartCursor], to-from, FALSE);
     ME_InsertTextFromCursor(editor, 0, wszText, len, style);
     ME_ReleaseStyle(style);
     /* drop temporary style if line end */
@@ -3442,6 +3466,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     CHARFORMAT2W fmt;
     HDC hDC;
     BOOL bRepaint = LOWORD(lParam);
+    ME_Cursor start;
 
     if (!wParam)
       wParam = (WPARAM)GetStockObject(SYSTEM_FONT); 
@@ -3449,7 +3474,8 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     hDC = ITextHost_TxGetDC(editor->texthost);
     ME_CharFormatFromLogFont(hDC, &lf, &fmt); 
     ITextHost_TxReleaseDC(editor->texthost, hDC);
-    ME_SetCharFormat(editor, 0, ME_GetTextLength(editor), &fmt);
+    ME_SetCursorToStart(editor, &start);
+    ME_SetCharFormat(editor, &start, NULL, &fmt);
     ME_SetDefaultCharFormat(editor, &fmt);
 
     ME_CommitUndo(editor);
@@ -3462,7 +3488,9 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   }
   case WM_SETTEXT:
   {
-    ME_InternalDeleteText(editor, 0, ME_GetTextLength(editor), FALSE);
+    ME_Cursor cursor;
+    ME_SetCursorToStart(editor, &cursor);
+    ME_InternalDeleteText(editor, &cursor, ME_GetTextLength(editor), FALSE);
     if (lParam)
     {
       TRACE("WM_SETTEXT lParam==%lx\n",lParam);
@@ -3496,7 +3524,8 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     }
     else
       TRACE("WM_SETTEXT - NULL\n");
-    ME_UpdateLinkAttribute(editor, 0, -1);
+    ME_SetCursorToStart(editor, &cursor);
+    ME_UpdateLinkAttribute(editor, &cursor, INT_MAX);
     ME_SetSelection(editor, 0, 0);
     editor->nModifyStep = 0;
     ME_CommitUndo(editor);
@@ -3519,12 +3548,13 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_CUT:
   case WM_COPY:
   {
-    CHARRANGE range;
-    ME_GetSelection(editor, &range.cpMin, &range.cpMax);
+    int nFrom, nTo, nStartCur = ME_GetSelectionOfs(editor, &nFrom, &nTo);
+    int nChars = nTo - nFrom;
+    ME_Cursor *selStart = &editor->pCursors[nStartCur];
 
-    if (ME_Copy(editor, &range) && msg == WM_CUT)
+    if (ME_Copy(editor, selStart, nChars) && msg == WM_CUT)
     {
-      ME_InternalDeleteText(editor, range.cpMin, range.cpMax-range.cpMin, FALSE);
+      ME_InternalDeleteText(editor, selStart, nChars, FALSE);
       ME_CommitUndo(editor);
       ME_UpdateRepaint(editor);
     }
@@ -3555,10 +3585,10 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     return ME_GetTextEx(editor, (GETTEXTEX*)wParam, lParam);
   case EM_GETSELTEXT:
   {
-    int from, to;
-    ME_GetSelection(editor, &from, &to);
+    int nFrom, nTo, nStartCur = ME_GetSelectionOfs(editor, &nFrom, &nTo);
+    ME_Cursor *from = &editor->pCursors[nStartCur];
     return ME_GetTextRange(editor, (WCHAR *)lParam, from,
-                           to - from, unicode);
+                           nTo - nFrom, unicode);
   }
   case EM_GETSCROLLPOS:
   {
@@ -3575,17 +3605,20 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_GETTEXTRANGE:
   {
     TEXTRANGEW *rng = (TEXTRANGEW *)lParam;
-    int start = rng->chrg.cpMin;
-    int end = rng->chrg.cpMax;
+    ME_Cursor start;
+    int nStart = rng->chrg.cpMin;
+    int nEnd = rng->chrg.cpMax;
     int textlength = ME_GetTextLength(editor);
-    TRACE("EM_GETTEXTRANGE min=%d max=%d unicode=%d emul1.0=%d length=%d\n",
-      rng->chrg.cpMin, rng->chrg.cpMax, unicode,
-      editor->bEmulateVersion10, ME_GetTextLength(editor));
-    if (start < 0) return 0;
-    if ((start == 0 && end == -1) || end > textlength)
-      end = textlength;
-    if (start >= end) return 0;
-    return ME_GetTextRange(editor, rng->lpstrText, start, end - start, unicode);
+
+    TRACE("EM_GETTEXTRANGE min=%d max=%d unicode=%d textlength=%d\n",
+          rng->chrg.cpMin, rng->chrg.cpMax, unicode, textlength);
+    if (nStart < 0) return 0;
+    if ((nStart == 0 && nEnd == -1) || nEnd > textlength)
+      nEnd = textlength;
+    if (nStart >= nEnd) return 0;
+
+    ME_CursorFromCharOfs(editor, nStart, &start);
+    return ME_GetTextRange(editor, rng->lpstrText, &start, nEnd - nStart, unicode);
   }
   case EM_GETLINE:
   {
@@ -3671,14 +3704,14 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_LINEFROMCHAR:
   {
     if (wParam == -1)
-      return ME_RowNumberFromCharOfs(editor, ME_GetCursorOfs(editor, 1));
+      return ME_RowNumberFromCharOfs(editor, ME_GetCursorOfs(&editor->pCursors[1]));
     else
       return ME_RowNumberFromCharOfs(editor, wParam);
   }
   case EM_EXLINEFROMCHAR:
   {
     if (lParam == -1)
-      return ME_RowNumberFromCharOfs(editor, ME_GetCursorOfs(editor,1));
+      return ME_RowNumberFromCharOfs(editor, ME_GetCursorOfs(&editor->pCursors[1]));
     else    
       return ME_RowNumberFromCharOfs(editor, lParam);
   }
@@ -3794,7 +3827,14 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case EM_SETZOOM:
     return ME_SetZoom(editor, wParam, lParam);
   case EM_CHARFROMPOS:
-    return ME_CharFromPos(editor, ((POINTL *)lParam)->x, ((POINTL *)lParam)->y, NULL);
+  {
+    ME_Cursor cursor;
+    if (ME_CharFromPos(editor, ((POINTL *)lParam)->x, ((POINTL *)lParam)->y,
+                       &cursor, NULL))
+      return ME_GetCursorOfs(&cursor);
+    else
+      return -1;
+  }
   case EM_POSFROMCHAR:
   {
     ME_DisplayItem *pPara, *pRun;
@@ -4167,7 +4207,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
     return 0;
   case WM_IME_STARTCOMPOSITION:
   {
-    editor->imeStartIndex=ME_GetCursorOfs(editor,0);
+    editor->imeStartIndex=ME_GetCursorOfs(&editor->pCursors[0]);
     ME_DeleteSelection(editor);
     ME_CommitUndo(editor);
     ME_UpdateRepaint(editor);
@@ -4472,81 +4512,71 @@ void ME_SendOldNotify(ME_TextEditor *editor, int nCode)
   ITextHost_TxNotify(editor->texthost, nCode, NULL);
 }
 
-int ME_CountParagraphsBetween(ME_TextEditor *editor, int from, int to)
+/* Fill buffer with srcChars unicode characters from the start cursor.
+ *
+ * buffer: destination buffer
+ * buflen: length of buffer in characters excluding the NULL terminator.
+ * start: start of editor text to copy into buffer.
+ * srcChars: Number of characters to use from the editor text.
+ * bCRLF: if true, replaces all end of lines with \r\n pairs.
+ *
+ * returns the number of characters written excluding the NULL terminator.
+ *
+ * The written text is always NULL terminated.
+ */
+int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int buflen,
+                const ME_Cursor *start, int srcChars, BOOL bCRLF)
 {
-  ME_DisplayItem *item = ME_FindItemFwd(editor->pBuffer->pFirst, diParagraph);
-  int i = 0;
-  
-  while(item && item->member.para.next_para->member.para.nCharOfs <= from)
-    item = item->member.para.next_para;
-  if (!item)
-    return 0;
-  while(item && item->member.para.next_para->member.para.nCharOfs <= to) {
-    item = item->member.para.next_para;
-    i++;
-  }
-  return i;
-}
-
-
-int ME_GetTextW(ME_TextEditor *editor, WCHAR *buffer, int nStart,
-                int nChars, int bCRLF)
-{
-  ME_DisplayItem *pRun;
-  int nOffset, nWritten = 0;
-  WCHAR *pStart = buffer;
-
-  ME_RunOfsFromCharOfs(editor, nStart, NULL, &pRun, &nOffset);
+  ME_DisplayItem *pRun, *pNextRun;
+  const WCHAR *pStart = buffer;
+  const WCHAR cr_lf[] = {'\r', '\n', 0};
+  const WCHAR *str;
+  int nLen;
 
   /* bCRLF flag is only honored in 2.0 and up. 1.0 must always return text verbatim */
   if (editor->bEmulateVersion10) bCRLF = 0;
 
-  while (nChars && pRun)
+  pRun = start->pRun;
+  assert(pRun);
+  pNextRun = ME_FindItemFwd(pRun, diRun);
+
+  nLen = pRun->member.run.strText->nLen - start->nOffset;
+  str = pRun->member.run.strText->szData + start->nOffset;
+
+  /* No '\r' is appended to the last paragraph. */
+  while (srcChars && buflen && pNextRun)
   {
-    int nLen;
+    int nFlags = pRun->member.run.nFlags;
 
-    if (pRun->member.run.nFlags & MERF_ENDCELL &&
-        pRun->member.run.nFlags & MERF_ENDPARA)
+    if (bCRLF && nFlags & MERF_ENDPARA && ~nFlags & MERF_ENDCELL)
     {
-      *buffer = '\t';
-      nLen = 1;
-    } else if (pRun->member.run.nFlags & MERF_ENDPARA) {
-      if (!ME_FindItemFwd(pRun, diRun)) {
-        /* No '\r' is appended to the last paragraph. */
-        nLen = 0;
-      } else if (bCRLF && nChars == 1) {
-        nLen = 0;
-        nChars = 0;
-      } else {
-        WCHAR cr_lf[] = {'\r', '\n', 0};
-        WCHAR *szData;
-
-        if (bCRLF)
-        {
-          nLen = 2;
-          szData = cr_lf;
-        } else {
-          nLen = pRun->member.run.strText->nLen;
-          szData = pRun->member.run.strText->szData;
-        }
-        nLen = min(nChars, nLen - nOffset);
-        CopyMemory(buffer, szData + nOffset, sizeof(WCHAR) * nLen);
-      }
+      if (buflen == 1) break;
+      /* FIXME: native fails to reduce srcChars here for WM_GETTEXT or
+       *        EM_GETTEXTEX, however, this is done for copying text which
+       *        also uses this function. */
+      srcChars -= min(nLen, srcChars);
+      nLen = 2;
+      str = cr_lf;
     } else {
-      nLen = min(nChars, pRun->member.run.strText->nLen - nOffset);
-      CopyMemory(buffer, pRun->member.run.strText->szData + nOffset,
-                 sizeof(WCHAR) * nLen);
+      nLen = min(nLen, srcChars);
+      srcChars -= nLen;
     }
-    nChars -= nLen;
-    nWritten += nLen;
-    buffer += nLen;
-    nOffset = 0;
 
-    pRun = ME_FindItemFwd(pRun, diRun);
+    nLen = min(nLen, buflen);
+    buflen -= nLen;
+
+    CopyMemory(buffer, str, sizeof(WCHAR) * nLen);
+
+    buffer += nLen;
+
+    pRun = pNextRun;
+    pNextRun = ME_FindItemFwd(pRun, diRun);
+
+    nLen = pRun->member.run.strText->nLen;
+    str = pRun->member.run.strText->szData;
   }
   *buffer = 0;
-  TRACE("nWritten=%d, actual=%d\n", nWritten, buffer-pStart);
-  return nWritten;
+  return buffer - pStart;
 }
 
 static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
@@ -4566,9 +4596,9 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
 
   if (is_version_nt())
   {
-    wcW.lpszClassName = RichEdit20W;
+    wcW.lpszClassName = RICHEDIT_CLASS20W;
     if (!RegisterClassW(&wcW)) return FALSE;
-    wcW.lpszClassName = RichEdit50W;
+    wcW.lpszClassName = MSFTEDIT_CLASS;
     if (!RegisterClassW(&wcW)) return FALSE;
   }
   else
@@ -4589,7 +4619,7 @@ static BOOL ME_RegisterEditorClass(HINSTANCE hInstance)
   wcA.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(IDC_IBEAM));
   wcA.hbrBackground = GetStockObject(NULL_BRUSH);
   wcA.lpszMenuName = NULL;
-  wcA.lpszClassName = "RichEdit20A";
+  wcA.lpszClassName = RICHEDIT_CLASS20A;
   if (!RegisterClassA(&wcA)) return FALSE;
   wcA.lpszClassName = "RichEdit50A";
   if (!RegisterClassA(&wcA)) return FALSE;
@@ -4669,145 +4699,135 @@ static BOOL isurlspecial(WCHAR c)
  * or one of the following special characters: *|/\+%#@ and must consist entirely
  * of the characters allowed to start the URL, plus : (colon) which may occur
  * at most once, and not at either end.
- *
- * sel_max == -1 indicates scan to end of text.
  */
-static BOOL ME_FindNextURLCandidate(ME_TextEditor *editor, int sel_min, int sel_max,
-        int * candidate_min, int * candidate_max)
+static BOOL ME_FindNextURLCandidate(ME_TextEditor *editor,
+                                    const ME_Cursor *start,
+                                    int nChars,
+                                    ME_Cursor *candidate_min,
+                                    ME_Cursor *candidate_max)
 {
-  ME_DisplayItem * item;
-  ME_DisplayItem * para;
-  int nStart;
+  ME_Cursor cursor = *start;
   BOOL foundColon = FALSE;
+  BOOL candidateStarted = FALSE;
   WCHAR lastAcceptedChar = '\0';
 
-  TRACE("sel_min = %d sel_max = %d\n", sel_min, sel_max);
-
-  *candidate_min = *candidate_max = -1;
-  ME_RunOfsFromCharOfs(editor, sel_min, &para, &item, &nStart);
-  TRACE("nStart = %d\n", nStart);
-  if (sel_max == -1) sel_max = ME_GetTextLength(editor);
-  while (item && para->member.para.nCharOfs + item->member.run.nCharOfs + nStart < sel_max)
+  while (nChars > 0)
   {
-    ME_DisplayItem * next_item;
+    WCHAR *strStart = cursor.pRun->member.run.strText->szData;
+    WCHAR *str = strStart + cursor.nOffset;
+    int nLen = cursor.pRun->member.run.strText->nLen - cursor.nOffset;
+    nChars -= nLen;
 
-    if (!(item->member.run.nFlags & MERF_ENDPARA)) {
+    if (~cursor.pRun->member.run.nFlags & MERF_ENDPARA)
+    {
       /* Find start of candidate */
-      if (*candidate_min == -1) {
-        while (nStart < item->member.run.strText->nLen &&
-                !(isalnumW(item->member.run.strText->szData[nStart]) ||
-                  isurlspecial(item->member.run.strText->szData[nStart]))) {
-          nStart++;
-        }
-        if (nStart < item->member.run.strText->nLen &&
-                (isalnumW(item->member.run.strText->szData[nStart]) ||
-                 isurlspecial(item->member.run.strText->szData[nStart]))) {
-          *candidate_min = para->member.para.nCharOfs + item->member.run.nCharOfs + nStart;
-          lastAcceptedChar = item->member.run.strText->szData[nStart];
-          nStart++;
+      if (!candidateStarted)
+      {
+        while (nLen)
+        {
+          nLen--;
+          if (isalnumW(*str) || isurlspecial(*str))
+          {
+            cursor.nOffset = str - strStart;
+            *candidate_min = cursor;
+            candidateStarted = TRUE;
+            lastAcceptedChar = *str++;
+            break;
+          }
+          str++;
         }
       }
 
       /* Find end of candidate */
-      if (*candidate_min >= 0) {
-        while (nStart < item->member.run.strText->nLen &&
-                (isalnumW(item->member.run.strText->szData[nStart]) ||
-                 isurlspecial(item->member.run.strText->szData[nStart]) ||
-                 (!foundColon && item->member.run.strText->szData[nStart] == ':') )) {
-          if (item->member.run.strText->szData[nStart] == ':') foundColon = TRUE;
-          lastAcceptedChar = item->member.run.strText->szData[nStart];
-          nStart++;
-        }
-        if (nStart < item->member.run.strText->nLen &&
-                !(isalnumW(item->member.run.strText->szData[nStart]) ||
-                 isurlspecial(item->member.run.strText->szData[nStart]) )) {
-          *candidate_max = para->member.para.nCharOfs + item->member.run.nCharOfs + nStart;
-          nStart++;
-          if (lastAcceptedChar == ':') (*candidate_max)--;
-          return TRUE;
+      if (candidateStarted) {
+        while (nLen)
+        {
+          nLen--;
+          if (*str == ':' && !foundColon) {
+            foundColon = TRUE;
+          } else if (!isalnumW(*str) && !isurlspecial(*str)) {
+            cursor.nOffset = str - strStart;
+            if (lastAcceptedChar == ':')
+              ME_MoveCursorChars(editor, &cursor, -1);
+            *candidate_max = cursor;
+            return TRUE;
+          }
+          lastAcceptedChar = *str++;
         }
       }
     } else {
       /* End of paragraph: skip it if before candidate span, or terminates
          current active span */
-      if (*candidate_min >= 0) {
-        *candidate_max = para->member.para.nCharOfs + item->member.run.nCharOfs;
-        if (lastAcceptedChar == ':') (*candidate_max)--;
+      if (candidateStarted) {
+        if (lastAcceptedChar == ':')
+          ME_MoveCursorChars(editor, &cursor, -1);
+        *candidate_max = cursor;
         return TRUE;
       }
     }
 
     /* Reaching this point means no span was found, so get next span */
-    next_item = ME_FindItemFwd(item, diRun);
-    if (!next_item) {
-      if (*candidate_min >= 0) {
+    if (!ME_NextRun(&cursor.pPara, &cursor.pRun)) {
+      if (candidateStarted) {
         /* There are no further runs, so take end of text as end of candidate */
-        *candidate_max = para->member.para.nCharOfs + item->member.run.nCharOfs + nStart;
-        if (lastAcceptedChar == ':') (*candidate_max)--;
+        cursor.nOffset = str - strStart;
+        if (lastAcceptedChar == ':')
+          ME_MoveCursorChars(editor, &cursor, -1);
+        *candidate_max = cursor;
         return TRUE;
       }
+      *candidate_max = *candidate_min = cursor;
+      return FALSE;
     }
-    item = next_item;
-    para = ME_GetParagraph(item);
-    nStart = 0;
+    cursor.nOffset = 0;
   }
 
-  if (item) {
-    if (*candidate_min >= 0) {
-      /* There are no further runs, so take end of text as end of candidate */
-      *candidate_max = para->member.para.nCharOfs + item->member.run.nCharOfs + nStart;
-      if (lastAcceptedChar == ':') (*candidate_max)--;
-      return TRUE;
-    }
+  if (candidateStarted) {
+    /* There are no further runs, so take end of text as end of candidate */
+    if (lastAcceptedChar == ':')
+      ME_MoveCursorChars(editor, &cursor, -1);
+    *candidate_max = cursor;
+    return TRUE;
   }
+  *candidate_max = *candidate_min = cursor;
   return FALSE;
 }
 
 /**
  * This proc evaluates the selection and returns TRUE if it can be considered an URL
  */
-static BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, int sel_min, int sel_max)
+static BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, const ME_Cursor *start, int nChars)
 {
+#define MAX_PREFIX_LEN 9
   struct prefix_s {
-    const char *text;
+    const WCHAR text[MAX_PREFIX_LEN];
     int length;
-  } prefixes[12] = {
-    /* Code below depends on these being in decreasing length order! */
-    {"prospero:", 10},
-    {"telnet:", 8},
-    {"gopher:", 8},
-    {"mailto:", 8},
-    {"https:", 7},
-    {"file:", 6},
-    {"news:", 6},
-    {"wais:", 6},
-    {"nntp:", 6},
-    {"http:", 5},
-    {"www.", 5},
-    {"ftp:", 5},
+  }prefixes[] = {
+    {{'p','r','o','s','p','e','r','o',':'}, 9},
+    {{'t','e','l','n','e','t',':'}, 7},
+    {{'g','o','p','h','e','r',':'}, 7},
+    {{'m','a','i','l','t','o',':'}, 7},
+    {{'h','t','t','p','s',':'}, 6},
+    {{'f','i','l','e',':'}, 5},
+    {{'n','e','w','s',':'}, 5},
+    {{'w','a','i','s',':'}, 5},
+    {{'n','n','t','p',':'}, 5},
+    {{'h','t','t','p',':'}, 5},
+    {{'w','w','w','.'}, 4},
+    {{'f','t','p',':'}, 4},
   };
-  LPWSTR bufferW = NULL;
-  WCHAR bufW[32];
+  WCHAR bufferW[MAX_PREFIX_LEN + 1];
   unsigned int i;
 
-  if (sel_max == -1) sel_max = ME_GetTextLength(editor);
-  assert(sel_min <= sel_max);
-  for (i = 0; i < sizeof(prefixes) / sizeof(struct prefix_s); i++)
+  ME_GetTextW(editor, bufferW, MAX_PREFIX_LEN, start, nChars, 0);
+  for (i = 0; i < sizeof(prefixes) / sizeof(*prefixes); i++)
   {
-    if (sel_max - sel_min < prefixes[i].length) continue;
-    if (bufferW == NULL) {
-      bufferW = heap_alloc((sel_max - sel_min + 1) * sizeof(WCHAR));
-    }
-    ME_GetTextW(editor, bufferW, sel_min, min(sel_max - sel_min, lstrlenA(prefixes[i].text)), 0);
-    MultiByteToWideChar(CP_ACP, 0, prefixes[i].text, -1, bufW, 32);
-    if (!lstrcmpW(bufW, bufferW))
-    {
-      heap_free(bufferW);
+    if (nChars < prefixes[i].length) continue;
+    if (!memcmp(prefixes[i].text, bufferW, prefixes[i].length * sizeof(WCHAR)))
       return TRUE;
-    }
   }
-  heap_free(bufferW);
   return FALSE;
+#undef MAX_PREFIX_LEN
 }
 
 /**
@@ -4816,53 +4836,48 @@ static BOOL ME_IsCandidateAnURL(ME_TextEditor *editor, int sel_min, int sel_max)
  * their proper CFE_LINK attributes set or unset. If the CFE_LINK attribute is
  * not what it is supposed to be, this proc sets or unsets it as appropriate.
  *
+ * Since this function can cause runs to be split, do not depend on the value
+ * of the start cursor at the end of the function.
+ *
+ * nChars may be set to INT_MAX to update to the end of the text.
+ *
  * Returns TRUE if at least one section was modified.
  */
-static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_max)
+static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, ME_Cursor *start, int nChars)
 {
   BOOL modified = FALSE;
-  int cMin, cMax;
+  ME_Cursor startCur = *start;
 
   if (!editor->AutoURLDetect_bEnable) return FALSE;
 
-  if (sel_max == -1) sel_max = ME_GetTextLength(editor);
   do
   {
-    int beforeURL[2];
-    int inURL[2];
     CHARFORMAT2W link;
+    ME_Cursor candidateStart, candidateEnd;
 
-    if (ME_FindNextURLCandidate(editor, sel_min, sel_max, &cMin, &cMax))
+    if (ME_FindNextURLCandidate(editor, &startCur, nChars,
+                                &candidateStart, &candidateEnd))
     {
       /* Section before candidate is not an URL */
-      beforeURL[0] = sel_min;
-      beforeURL[1] = cMin;
+      int cMin = ME_GetCursorOfs(&candidateStart);
+      int cMax = ME_GetCursorOfs(&candidateEnd);
 
-      if (ME_IsCandidateAnURL(editor, cMin, cMax))
-      {
-        inURL[0] = cMin; inURL[1] = cMax;
-      }
-      else
-      {
-        beforeURL[1] = cMax;
-        inURL[0] = inURL[1] = -1;
-      }
-      sel_min = cMax;
+      if (!ME_IsCandidateAnURL(editor, &candidateStart, cMax - cMin))
+        candidateStart = candidateEnd;
+      nChars -= cMax - ME_GetCursorOfs(&startCur);
     }
     else
     {
       /* No more candidates until end of selection */
-      beforeURL[0] = sel_min;
-      beforeURL[1] = sel_max;
-      inURL[0] = inURL[1] = -1;
-      sel_min = sel_max;
+      nChars = 0;
     }
 
-    if (beforeURL[0] < beforeURL[1])
+    if (startCur.pRun != candidateStart.pRun ||
+        startCur.nOffset != candidateStart.nOffset)
     {
       /* CFE_LINK effect should be consistently unset */
       link.cbSize = sizeof(link);
-      ME_GetCharFormat(editor, beforeURL[0], beforeURL[1], &link);
+      ME_GetCharFormat(editor, &startCur, &candidateStart, &link);
       if (!(link.dwMask & CFM_LINK) || (link.dwEffects & CFE_LINK))
       {
         /* CFE_LINK must be unset from this range */
@@ -4870,15 +4885,24 @@ static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_m
         link.cbSize = sizeof(link);
         link.dwMask = CFM_LINK;
         link.dwEffects = 0;
-        ME_SetCharFormat(editor, beforeURL[0], beforeURL[1] - beforeURL[0], &link);
+        ME_SetCharFormat(editor, &startCur, &candidateStart, &link);
+        /* Update candidateEnd since setting character formats may split
+         * runs, which can cause a cursor to be at an invalid offset within
+         * a split run. */
+        while (candidateEnd.nOffset >= candidateEnd.pRun->member.run.strText->nLen)
+        {
+          candidateEnd.nOffset -= candidateEnd.pRun->member.run.strText->nLen;
+          candidateEnd.pRun = ME_FindItemFwd(candidateEnd.pRun, diRun);
+        }
         modified = TRUE;
       }
     }
-    if (inURL[0] < inURL[1])
+    if (candidateStart.pRun != candidateEnd.pRun ||
+        candidateStart.nOffset != candidateEnd.nOffset)
     {
       /* CFE_LINK effect should be consistently set */
       link.cbSize = sizeof(link);
-      ME_GetCharFormat(editor, inURL[0], inURL[1], &link);
+      ME_GetCharFormat(editor, &candidateStart, &candidateEnd, &link);
       if (!(link.dwMask & CFM_LINK) || !(link.dwEffects & CFE_LINK))
       {
         /* CFE_LINK must be set on this range */
@@ -4886,10 +4910,11 @@ static BOOL ME_UpdateLinkAttribute(ME_TextEditor *editor, int sel_min, int sel_m
         link.cbSize = sizeof(link);
         link.dwMask = CFM_LINK;
         link.dwEffects = CFE_LINK;
-        ME_SetCharFormat(editor, inURL[0], inURL[1] - inURL[0], &link);
+        ME_SetCharFormat(editor, &candidateStart, &candidateEnd, &link);
         modified = TRUE;
       }
     }
-  } while (sel_min < sel_max);
+    startCur = candidateEnd;
+  } while (nChars > 0);
   return modified;
 }

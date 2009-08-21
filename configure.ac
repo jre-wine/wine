@@ -6,7 +6,7 @@ m4_define(WINE_VERSION,regexp(m4_include(VERSION),[version \([-.0-9A-Za-z]+\)],[
 
 dnl autoconf versions before 2.59d don't handle multi-line subst variables correctly
 AC_PREREQ(2.59d)
-AC_INIT([Wine],[WINE_VERSION],[wine-devel@winehq.org])
+AC_INIT([Wine],[WINE_VERSION],[wine-devel@winehq.org],[wine],[http://www.winehq.org])
 AC_CONFIG_SRCDIR(server/atom.c)
 AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
@@ -40,7 +40,7 @@ AC_ARG_WITH(gphoto,    AS_HELP_STRING([--without-gphoto],[do not use gphoto (Dig
 AC_ARG_WITH(glu,       AS_HELP_STRING([--without-glu],[do not use the GLU library]),
             [if test "x$withval" = "xno"; then ac_cv_header_GL_glu_h=no; fi])
 AC_ARG_WITH(gnutls,    AS_HELP_STRING([--without-gnutls],[do not use GnuTLS (schannel support)]))
-AC_ARG_WITH(libgsm,    AS_HELP_STRING([--without-libgsm],[do not use libgsm (GSM 06.10 codec support)]),
+AC_ARG_WITH(gsm,       AS_HELP_STRING([--without-gsm],[do not use libgsm (GSM 06.10 codec support)]),
             [if test "x$withval" = "xno"; then ac_cv_header_gsm_h=no; ac_cv_header_gsm_gsm_h=no; fi])
 AC_ARG_WITH(hal,       AS_HELP_STRING([--without-hal],[do not use HAL (dynamic device support)]))
 AC_ARG_WITH(jack,      AS_HELP_STRING([--without-jack],[do not use the Jack sound support]),
@@ -83,6 +83,7 @@ AC_ARG_WITH(xxf86vm,   AS_HELP_STRING([--without-xxf86vm],[do not use XFree vide
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_xf86vmode_h=no; fi])
 
 AC_ARG_WITH(wine-tools,AS_HELP_STRING([--with-wine-tools=DIR],[use Wine tools from directory DIR]))
+AC_ARG_WITH(wine64,    AS_HELP_STRING([--with-wine64=DIR],[use the 64-bit Wine in DIR for a Wow64 build]))
 
 AC_CANONICAL_HOST
 
@@ -105,7 +106,7 @@ AC_CHECK_TOOL(CPPBIN,cpp,cpp)
 
 case $host in
   *-darwin*)
-    if test "x$enable_win64" == "xyes"
+    if test "x$enable_win64" = "xyes"
     then
       CC="$CC -m64"
       CXX="$CXX -m64"
@@ -174,20 +175,42 @@ then
     enable_winevdm=${enable_winevdm:-no}
 fi
 
+dnl Some special cases for the wow64 build
+if test -n "$with_wine64"
+then
+    if test "x$enable_win64" = "xyes"
+    then
+        AC_MSG_ERROR([--enable-win64 and --with-wine64 are mutually exclusive.
+--enable-win64 should be used in the 64-bit build tree, --with-wine64 in the 32-bit Wow64 build tree.])
+    fi
+    AC_SUBST([WOW64_DISABLE],[\#])
+    enable_fonts=${enable_fonts:-no}
+    enable_include=${enable_include:-no}
+    enable_server=${enable_server:-no}
+    enable_tools=${enable_tools:-no}
+    enable_wineboot=${enable_wineboot:-no}
+    enable_winedbg=${enable_winedbg:-no}
+    test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32"
+fi
+
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
-  [if test -z "$with_wine_tools"; then
+  [wine_cv_toolsdir="$with_wine_tools"
+   if test -z "$with_wine_tools"; then
      if test "$cross_compiling" = "yes"; then
        AC_MSG_ERROR([you must use the --with-wine-tools option when cross-compiling.])
-     else
-       wine_cv_toolsdir="\$(TOPOBJDIR)"
+     elif test -n "$with_wine64"; then
+       wine_cv_toolsdir="$with_wine64"
      fi
-   elif test -d "$with_wine_tools/tools/winebuild"; then
-     case $with_wine_tools in
-       /*) wine_cv_toolsdir="$with_wine_tools" ;;
-       *)  wine_cv_toolsdir="\$(TOPOBJDIR)/$with_wine_tools" ;;
+   fi
+   if test -z "$wine_cv_toolsdir"; then
+     wine_cv_toolsdir="\$(TOPOBJDIR)"
+   elif test -d "$wine_cv_toolsdir/tools/winebuild"; then
+     case "$wine_cv_toolsdir" in
+       /*) ;;
+       *)  wine_cv_toolsdir="\$(TOPOBJDIR)/$wine_cv_toolsdir" ;;
      esac
    else
-     AC_MSG_ERROR([could not find Wine tools in $with_wine_tools.])
+     AC_MSG_ERROR([could not find Wine tools in $wine_cv_toolsdir])
    fi])
 AC_SUBST(TOOLSDIR,$wine_cv_toolsdir)
 if test -n "$host_alias" -a "$host_alias" != "$build_alias"
@@ -479,7 +502,7 @@ AC_CHECK_HEADERS([netinet/tcp_timer.h netinet/udp_var.h netinet/icmp_var.h netin
      #include <netinet/tcp_timer.h>
      #endif])
 
-AC_CHECK_HEADERS([linux/ipx.h],,,
+AC_CHECK_HEADERS([linux/ipx.h linux/irda.h],,,
     [#include <sys/types.h>
      #ifdef HAVE_ASM_TYPES_H
      # include <asm/types.h>
@@ -746,12 +769,12 @@ AC_PATH_XTRA
 
 if test "$have_x" = "yes"
 then
-    XLIB="-lXext -lX11"
+    XLIB="-lX11"
     ac_save_CPPFLAGS="$CPPFLAGS"
     CPPFLAGS="$CPPFLAGS $X_CFLAGS"
 
     WINE_CHECK_SONAME(X11,XCreateWindow,,,[$X_LIBS $X_EXTRA_LIBS])
-    WINE_CHECK_SONAME(Xext,XextCreateExtension,,,[$X_LIBS -lX11 $X_EXTRA_LIBS])
+    WINE_CHECK_SONAME(Xext,XextCreateExtension,[XLIB="-lXext $XLIB"],,[$X_LIBS -lX11 $X_EXTRA_LIBS])
 
     dnl *** All of the following tests require X11/Xlib.h
     AC_CHECK_HEADERS([X11/Xlib.h \
@@ -778,13 +801,13 @@ then
         then
               AC_CHECK_LIB(X11, XkbQueryExtension,
               AC_DEFINE(HAVE_XKB, 1, [Define if you have the XKB extension]),,
-              $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
+              $X_LIBS $XLIB $X_EXTRA_LIBS)
         fi
 
         dnl *** Check for X cursor
         if test "$ac_cv_header_X11_Xcursor_Xcursor_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xcursor,XcursorImageLoadCursor,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+            WINE_CHECK_SONAME(Xcursor,XcursorImageLoadCursor,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])
         fi
         WINE_NOTICE_WITH(xcursor,[test "x$ac_cv_lib_soname_Xcursor" = "x"],
                          [libxcursor ${notice_platform}development files not found, the Xcursor extension won't be supported.])
@@ -792,7 +815,7 @@ then
         dnl *** Check for X input extension
         if test "$ac_cv_header_X11_extensions_XInput_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xi,XOpenDevice,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+            WINE_CHECK_SONAME(Xi,XOpenDevice,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])
         fi
         WINE_NOTICE_WITH(xinput,[test "x$ac_cv_lib_soname_Xi" = "x"],
                          [libxi ${notice_platform}development files not found, the Xinput extension won't be supported.])
@@ -802,7 +825,7 @@ then
         then
               AC_CHECK_LIB(Xext, XShmQueryExtension,
               AC_DEFINE(HAVE_LIBXXSHM, 1, [Define if you have the X Shm extension]),,
-              $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
+              $X_LIBS $XLIB $X_EXTRA_LIBS)
         fi
         WINE_NOTICE_WITH(xshm,[test "$ac_cv_lib_Xext_XShmQueryExtension" != "yes"],
                          [XShm ${notice_platform}development files not found, X Shared Memory won't be supported.])
@@ -812,7 +835,7 @@ then
         then
               AC_CHECK_LIB(Xext,XShapeQueryExtension,
 	      AC_DEFINE(HAVE_LIBXSHAPE, 1, [Define if you have the X Shape extension]),,
-	      $X_LIBS -lXext -lX11 $X_EXTRA_LIBS)
+	      $X_LIBS $XLIB $X_EXTRA_LIBS)
         fi
         WINE_NOTICE_WITH(xshape,[test "$ac_cv_lib_Xext_XShapeQueryExtension" != "yes"],
                          [XShape ${notice_platform}development files not found, XShape won't be supported.])
@@ -820,7 +843,7 @@ then
         dnl *** Check for XFree86 VMODE extension
         if test "$ac_cv_header_X11_extensions_xf86vmode_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xxf86vm,XF86VidModeQueryExtension,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+            WINE_CHECK_SONAME(Xxf86vm,XF86VidModeQueryExtension,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])
         fi
         WINE_NOTICE_WITH(xxf86vm,[test "x$ac_cv_lib_soname_Xxf86vm" = "x"],
                          [libXxf86vm ${notice_platform}development files not found, XFree86 Vidmode won't be supported.])
@@ -832,7 +855,7 @@ then
               [AC_CHECK_LIB(Xrender,XRenderSetPictureTransform,
                 [AC_DEFINE(HAVE_XRENDERSETPICTURETRANSFORM, 1,
                  [Define if Xrender has the XRenderSetPictureTransform function])],,
-                [$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])],,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+                [$X_LIBS $XLIB $X_EXTRA_LIBS])],,[$X_LIBS $XLIB $X_EXTRA_LIBS])
 
         fi
         WINE_WARNING_WITH(xrender,[test "x$ac_cv_lib_soname_Xrender" = "x"],
@@ -843,7 +866,7 @@ then
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>]], [[static typeof(XRRSetScreenConfigAndRate) * func;]])],
-                  [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
+                  [WINE_CHECK_SONAME(Xrandr,XRRQueryExtension,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])])
         fi
         WINE_NOTICE_WITH(xrandr,[test "x$ac_cv_lib_soname_Xrandr" = "x"],
                          [libxrandr ${notice_platform}development files not found, XRandr won't be supported.])
@@ -853,7 +876,7 @@ then
         then
                 AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <X11/Xlib.h>
 #include <X11/extensions/Xinerama.h>]], [[static typeof(XineramaQueryScreens) * func;]])],
-                  [WINE_CHECK_SONAME(Xinerama,XineramaQueryScreens,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
+                  [WINE_CHECK_SONAME(Xinerama,XineramaQueryScreens,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])])
         fi
         WINE_NOTICE_WITH(xinerama,[test "x$ac_cv_lib_soname_Xinerama" = "x"],
                          [libxinerama ${notice_platform}development files not found, multi-monitor setups won't be supported.])
@@ -861,7 +884,7 @@ then
         dnl *** Check for X Composite extension
         if test "$ac_cv_header_X11_extensions_Xcomposite_h" = "yes"
         then
-            WINE_CHECK_SONAME(Xcomposite,XCompositeRedirectWindow,,,[$X_LIBS -lXext -lX11 $X_EXTRA_LIBS])
+            WINE_CHECK_SONAME(Xcomposite,XCompositeRedirectWindow,,,[$X_LIBS $XLIB $X_EXTRA_LIBS])
         fi
         WINE_NOTICE_WITH(xcomposite,[test "x$ac_cv_lib_soname_Xcomposite" = "x"],
                          [libxcomposite ${notice_platform}development files not found, Xcomposite won't be supported.])
@@ -906,11 +929,11 @@ This probably prevents linking to OpenGL. Try deleting the file and restarting c
 	                            else
 	                                opengl_msg="No OpenGL library found on this system."
 	                            fi],
-				    $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
-			     $X_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS)
+				    $X_LIBS $XLIB -lm $X_EXTRA_LIBS -dylib_file /System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib)],
+			     $X_LIBS $XLIB -lm $X_EXTRA_LIBS)
                  if test "$ac_cv_header_GL_glu_h" = "yes"
                  then
-                    WINE_CHECK_SONAME(GLU,gluLookAt,,,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS -lXext -lX11 -lm $X_EXTRA_LIBS])
+                    WINE_CHECK_SONAME(GLU,gluLookAt,,,[$OPENGL_LIBS $X_LIBS $X_PRE_LIBS $XLIB -lm $X_EXTRA_LIBS])
                  fi
                  WINE_NOTICE_WITH(glu,[test "x$ac_cv_lib_soname_GLU" = "x"],
                                  [libGLU ${notice_platform}development files not found, GLU won't be supported.])
@@ -936,11 +959,11 @@ OpenGL and Direct3D won't be supported.])
           AC_CHECK_LIB(audio,AuCreateFlow,
                        [AC_DEFINE(HAVE_NAS,1,[Define if you have NAS including devel headers])
                         AC_CHECK_LIB(Xau,XauGetBestAuthByAddr,
-                          [NASLIBS="-lXau -laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
-                          [NASLIBS="-laudio -lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS"],
+                          [NASLIBS="-lXau -laudio -lXt $X_LIBS $XLIB $X_EXTRA_LIBS"],
+                          [NASLIBS="-laudio -lXt $X_LIBS $XLIB $X_EXTRA_LIBS"],
                           [$X_LIBS])
                        ],,
-                       [-lXt $X_LIBS -lXext -lX11 $X_EXTRA_LIBS])])
+                       [-lXt $X_LIBS $XLIB $X_EXTRA_LIBS])])
 
     CPPFLAGS="$ac_save_CPPFLAGS"
 else
@@ -1340,7 +1363,7 @@ if test "$ac_cv_header_gsm_h" = "yes" -o "$ac_cv_header_gsm_gsm_h" = "yes"
 then
     WINE_CHECK_SONAME(gsm,gsm_create)
 fi
-WINE_WARNING_WITH(libgsm,[test "x$ac_cv_lib_soname_gsm" = "x"],
+WINE_NOTICE_WITH(gsm,[test "x$ac_cv_lib_soname_gsm" = "x"],
                  [libgsm ${notice_platform}development files not found, gsm 06.10 codec won't be supported.])
 
 dnl **** Check for libjpeg ****
@@ -1564,6 +1587,9 @@ case $host_os in
     AC_SUBST(SOCKETLIBS,"-L\$(TOPOBJDIR)/dlls/ws2_32 -lws2_32")
     ;;
 esac
+
+AC_SUBST(MAIN_BINARY,"wine")
+test -z "$with_wine64" || MAIN_BINARY="wine32"
 
 case $host_cpu in
   *i[[3456789]]86*)

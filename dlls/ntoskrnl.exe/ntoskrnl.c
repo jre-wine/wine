@@ -688,6 +688,18 @@ PCONFIGURATION_INFORMATION WINAPI IoGetConfigurationInformation(void)
 
 
 /***********************************************************************
+ *           IoQueryDeviceDescription    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoQueryDeviceDescription(PINTERFACE_TYPE itype, PULONG bus, PCONFIGURATION_TYPE ctype,
+                                     PULONG cnum, PCONFIGURATION_TYPE ptype, PULONG pnum,
+                                     PIO_QUERY_DEVICE_ROUTINE callout, PVOID context)
+{
+    FIXME( "(%p %p %p %p %p %p %p %p)\n", itype, bus, ctype, cnum, ptype, pnum, callout, context);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
  *           IoRegisterDriverReinitialization    (NTOSKRNL.EXE.@)
  */
 void WINAPI IoRegisterDriverReinitialization( PDRIVER_OBJECT obj, PDRIVER_REINITIALIZE reinit, PVOID context )
@@ -703,6 +715,19 @@ NTSTATUS WINAPI IoRegisterShutdownNotification( PDEVICE_OBJECT obj )
 {
     FIXME( "stub: %p\n", obj );
     return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           IoReportResourceUsage    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoReportResourceUsage(PUNICODE_STRING name, PDRIVER_OBJECT drv_obj, PCM_RESOURCE_LIST drv_list,
+                                      ULONG drv_size, PDRIVER_OBJECT dev_obj, PCM_RESOURCE_LIST dev_list,
+                                      ULONG dev_size, BOOLEAN overwrite, PBOOLEAN detected)
+{
+    FIXME("(%s %p %p %u %p %p %u %d %p) stub \n", debugstr_w(name? name->Buffer : NULL),
+          drv_obj, drv_list, drv_size, dev_obj, dev_list, dev_size, overwrite, detected);
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 

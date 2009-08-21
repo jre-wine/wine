@@ -247,10 +247,15 @@ extern void output_imports( DLLSPEC *spec );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
+extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
+extern void output_fake_module( DLLSPEC *spec );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
+extern void output_bin_res16_data( DLLSPEC *spec );
 extern void output_res16_directory( DLLSPEC *spec );
+extern void output_bin_res16_directory( DLLSPEC *spec, unsigned int data_offset );
 extern void output_spec16_file( DLLSPEC *spec );
+extern void output_fake_module16( DLLSPEC *spec16 );
 extern void output_res_o_file( DLLSPEC *spec );
 
 extern void BuildRelays16(void);
@@ -262,6 +267,31 @@ extern void BuildDef32File( DLLSPEC *spec );
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );
 extern int parse_def_file( FILE *file, DLLSPEC *spec );
+
+/* buffer management */
+
+extern int byte_swapped;
+extern const char *input_buffer_filename;
+extern const unsigned char *input_buffer;
+extern size_t input_buffer_pos;
+extern size_t input_buffer_size;
+extern unsigned char *output_buffer;
+extern size_t output_buffer_pos;
+extern size_t output_buffer_size;
+
+extern void init_input_buffer( const char *file );
+extern void init_output_buffer(void);
+extern void flush_output_buffer(void);
+extern unsigned char get_byte(void);
+extern unsigned short get_word(void);
+extern unsigned int get_dword(void);
+extern void put_data( const void *data, size_t size );
+extern void put_byte( unsigned char val );
+extern void put_word( unsigned short val );
+extern void put_dword( unsigned int val );
+extern void put_qword( unsigned int val );
+extern void put_pword( unsigned int val );
+extern void align_output( unsigned int align );
 
 /* global variables */
 

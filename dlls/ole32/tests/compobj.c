@@ -233,7 +233,7 @@ static DWORD CALLBACK ole_initialize_thread(LPVOID pv)
     hr = pCoInitializeEx(NULL, COINIT_MULTITHREADED);
 
     SetEvent(info->wait);
-    WaitForSingleObject(info->stop, INFINITE);
+    WaitForSingleObject(info->stop, 10000);
 
     CoUninitialize();
     return hr;
@@ -281,7 +281,7 @@ static void test_CoCreateInstance(void)
     thread = CreateThread(NULL, 0, ole_initialize_thread, &info, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
 
-    WaitForSingleObject(info.wait, INFINITE);
+    ok( !WaitForSingleObject(info.wait, 10000 ), "wait timed out\n" );
 
     pUnk = (IUnknown *)0xdeadbeef;
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
@@ -289,7 +289,7 @@ static void test_CoCreateInstance(void)
     if (pUnk) IUnknown_Release(pUnk);
 
     SetEvent(info.stop);
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
 
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
@@ -330,7 +330,7 @@ static void test_CoGetClassObject(void)
     thread = CreateThread(NULL, 0, ole_initialize_thread, &info, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
 
-    WaitForSingleObject(info.wait, INFINITE);
+    ok( !WaitForSingleObject(info.wait, 10000), "wait timed out\n" );
 
     pUnk = (IUnknown *)0xdeadbeef;
     hr = CoGetClassObject(rclsid, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void **)&pUnk);
@@ -343,7 +343,7 @@ static void test_CoGetClassObject(void)
     }
 
     SetEvent(info.stop);
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
 
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
@@ -949,7 +949,7 @@ static void test_registered_object_thread_affinity(void)
 
     thread = CreateThread(NULL, 0, get_class_object_thread, (LPVOID)CLSCTX_INPROC_SERVER, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
     ok(hr == REGDB_E_CLASSNOTREG, "CoGetClassObject on inproc object "
@@ -962,7 +962,7 @@ static void test_registered_object_thread_affinity(void)
 
     thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
-    WaitForSingleObject(thread, INFINITE);
+    ok ( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
     ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different thread should return S_OK instead of 0x%08x\n", hr);
@@ -978,7 +978,7 @@ static void test_registered_object_thread_affinity(void)
 
     thread = CreateThread(NULL, 0, get_class_object_proxy_thread, (LPVOID)CLSCTX_LOCAL_SERVER, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
-    while (MsgWaitForMultipleObjects(1, &thread, FALSE, INFINITE, QS_ALLINPUT) == WAIT_OBJECT_0 + 1)
+    while (MsgWaitForMultipleObjects(1, &thread, FALSE, 10000, QS_ALLINPUT) == WAIT_OBJECT_0 + 1)
     {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
@@ -999,7 +999,7 @@ static void test_registered_object_thread_affinity(void)
 
     thread = CreateThread(NULL, 0, revoke_class_object_thread, (LPVOID)(DWORD_PTR)cookie, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
     ok(hr == RPC_E_WRONG_THREAD, "CoRevokeClassObject called from different "
@@ -1007,7 +1007,7 @@ static void test_registered_object_thread_affinity(void)
 
     thread = CreateThread(NULL, 0, register_class_object_thread, NULL, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
     ok(hr == S_OK, "CoRegisterClassObject with same CLSID but in different "
@@ -1061,7 +1061,7 @@ static void test_CoFreeUnusedLibraries(void)
     ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
 
     thread = CreateThread(NULL, 0, free_libraries_thread, NULL, 0, &tid);
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
     CloseHandle(thread);
 
     ok(is_module_loaded("urlmon.dll"), "urlmon.dll should be loaded\n");
@@ -1108,7 +1108,7 @@ static void test_CoGetObjectContext(void)
     thread = CreateThread(NULL, 0, ole_initialize_thread, &info, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
 
-    WaitForSingleObject(info.wait, INFINITE);
+    ok( !WaitForSingleObject(info.wait, 10000), "wait timed out\n" );
 
     pComThreadingInfo = NULL;
     hr = pCoGetObjectContext(&IID_IComThreadingInfo, (void **)&pComThreadingInfo);
@@ -1116,7 +1116,7 @@ static void test_CoGetObjectContext(void)
     IComThreadingInfo_Release(pComThreadingInfo);
 
     SetEvent(info.stop);
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
 
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
@@ -1320,15 +1320,14 @@ static void test_CoGetContextToken(void)
     thread = CreateThread(NULL, 0, ole_initialize_thread, &info, 0, &tid);
     ok(thread != NULL, "CreateThread failed with error %d\n", GetLastError());
 
-    WaitForSingleObject(info.wait, INFINITE);
+    ok( !WaitForSingleObject(info.wait, 10000), "wait timed out\n" );
 
     token = 0;
     hr = pCoGetContextToken(&token);
     ok(hr == S_OK, "Expected S_OK, got 0x%08x\n", hr);
-    IUnknown_Release((IUnknown *)token);
 
     SetEvent(info.stop);
-    WaitForSingleObject(thread, INFINITE);
+    ok( !WaitForSingleObject(thread, 10000), "wait timed out\n" );
 
     GetExitCodeThread(thread, &exitcode);
     hr = exitcode;
@@ -1349,7 +1348,7 @@ static void test_CoGetContextToken(void)
     ok(token, "Expected token != 0\n");
 
     refs = IUnknown_AddRef((IUnknown *)token);
-    ok(refs == 1, "Expected 1, got %u\n", refs);
+    todo_wine ok(refs == 1, "Expected 1, got %u\n", refs);
 
     hr = pCoGetObjectContext(&IID_IObjContext, (void **)&ctx);
     ok(hr == S_OK, "Expected S_OK, got 0x%08x\n", hr);
@@ -1362,7 +1361,7 @@ static void test_CoGetContextToken(void)
     todo_wine ok(refs == 2, "Expected 2, got %u\n", refs);
 
     refs = IUnknown_Release((IUnknown *)token);
-    todo_wine ok(refs == 1, "Expected 1, got %u\n", refs);
+    ok(refs == 1, "Expected 1, got %u\n", refs);
 
     /* CoGetContextToken does not add a reference */
     token = 0;

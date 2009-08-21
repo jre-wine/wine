@@ -36,6 +36,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(wincodecs);
 
+static WCHAR const pixelformats_keyname[] = {'P','i','x','e','l','F','o','r','m','a','t','s',0};
+
 typedef struct {
     const IWICBitmapDecoderInfoVtbl *lpIWICBitmapDecoderInfoVtbl;
     LONG ref;
@@ -464,6 +466,191 @@ static HRESULT BitmapDecoderInfo_Constructor(HKEY classkey, REFCLSID clsid, IWIC
     return S_OK;
 }
 
+typedef struct {
+    const IWICFormatConverterInfoVtbl *lpIWICFormatConverterInfoVtbl;
+    LONG ref;
+    HKEY classkey;
+    CLSID clsid;
+} FormatConverterInfo;
+
+static HRESULT WINAPI FormatConverterInfo_QueryInterface(IWICFormatConverterInfo *iface, REFIID iid,
+    void **ppv)
+{
+    FormatConverterInfo *This = (FormatConverterInfo*)iface;
+    TRACE("(%p,%s,%p)\n", iface, debugstr_guid(iid), ppv);
+
+    if (!ppv) return E_INVALIDARG;
+
+    if (IsEqualIID(&IID_IUnknown, iid) ||
+        IsEqualIID(&IID_IWICComponentInfo, iid) ||
+        IsEqualIID(&IID_IWICFormatConverterInfo ,iid))
+    {
+        *ppv = This;
+    }
+    else
+    {
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
+}
+
+static ULONG WINAPI FormatConverterInfo_AddRef(IWICFormatConverterInfo *iface)
+{
+    FormatConverterInfo *This = (FormatConverterInfo*)iface;
+    ULONG ref = InterlockedIncrement(&This->ref);
+
+    TRACE("(%p) refcount=%u\n", iface, ref);
+
+    return ref;
+}
+
+static ULONG WINAPI FormatConverterInfo_Release(IWICFormatConverterInfo *iface)
+{
+    FormatConverterInfo *This = (FormatConverterInfo*)iface;
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    TRACE("(%p) refcount=%u\n", iface, ref);
+
+    if (ref == 0)
+    {
+        RegCloseKey(This->classkey);
+        HeapFree(GetProcessHeap(), 0, This);
+    }
+
+    return ref;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetComponentType(IWICFormatConverterInfo *iface,
+    WICComponentType *pType)
+{
+    TRACE("(%p,%p)\n", iface, pType);
+    *pType = WICPixelFormatConverter;
+    return S_OK;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetCLSID(IWICFormatConverterInfo *iface, CLSID *pclsid)
+{
+    FIXME("(%p,%p): stub\n", iface, pclsid);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetSigningStatus(IWICFormatConverterInfo *iface, DWORD *pStatus)
+{
+    FIXME("(%p,%p): stub\n", iface, pStatus);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetAuthor(IWICFormatConverterInfo *iface, UINT cchAuthor,
+    WCHAR *wzAuthor, UINT *pcchActual)
+{
+    FIXME("(%p,%u,%p,%p): stub\n", iface, cchAuthor, wzAuthor, pcchActual);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetVendorGUID(IWICFormatConverterInfo *iface, GUID *pguidVendor)
+{
+    FIXME("(%p,%p): stub\n", iface, pguidVendor);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetVersion(IWICFormatConverterInfo *iface, UINT cchVersion,
+    WCHAR *wzVersion, UINT *pcchActual)
+{
+    FIXME("(%p,%u,%p,%p): stub\n", iface, cchVersion, wzVersion, pcchActual);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetSpecVersion(IWICFormatConverterInfo *iface, UINT cchSpecVersion,
+    WCHAR *wzSpecVersion, UINT *pcchActual)
+{
+    FIXME("(%p,%u,%p,%p): stub\n", iface, cchSpecVersion, wzSpecVersion, pcchActual);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetFriendlyName(IWICFormatConverterInfo *iface, UINT cchFriendlyName,
+    WCHAR *wzFriendlyName, UINT *pcchActual)
+{
+    FIXME("(%p,%u,%p,%p): stub\n", iface, cchFriendlyName, wzFriendlyName, pcchActual);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_GetPixelFormats(IWICFormatConverterInfo *iface,
+    UINT cFormats, GUID *pguidPixelFormats, UINT *pcActual)
+{
+    FIXME("(%p,%u,%p,%p): stub\n", iface, cFormats, pguidPixelFormats, pcActual);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI FormatConverterInfo_CreateInstance(IWICFormatConverterInfo *iface,
+    IWICFormatConverter **ppIFormatConverter)
+{
+    FormatConverterInfo *This = (FormatConverterInfo*)iface;
+
+    TRACE("(%p,%p)\n", iface, ppIFormatConverter);
+
+    return CoCreateInstance(&This->clsid, NULL, CLSCTX_INPROC_SERVER,
+        &IID_IWICFormatConverter, (void**)ppIFormatConverter);
+}
+
+static BOOL ConverterSupportsFormat(IWICFormatConverterInfo *iface, const WCHAR *formatguid)
+{
+    LONG res;
+    FormatConverterInfo *This = (FormatConverterInfo*)iface;
+    HKEY formats_key, guid_key;
+
+    /* Avoid testing using IWICFormatConverter_GetPixelFormats because that
+        would be O(n). A registry test should do better. */
+
+    res = RegOpenKeyExW(This->classkey, pixelformats_keyname, 0, KEY_READ, &formats_key);
+    if (res != ERROR_SUCCESS) return FALSE;
+
+    res = RegOpenKeyExW(formats_key, formatguid, 0, KEY_READ, &guid_key);
+    if (res == ERROR_SUCCESS) RegCloseKey(guid_key);
+
+    RegCloseKey(formats_key);
+
+    return (res == ERROR_SUCCESS);
+}
+
+static const IWICFormatConverterInfoVtbl FormatConverterInfo_Vtbl = {
+    FormatConverterInfo_QueryInterface,
+    FormatConverterInfo_AddRef,
+    FormatConverterInfo_Release,
+    FormatConverterInfo_GetComponentType,
+    FormatConverterInfo_GetCLSID,
+    FormatConverterInfo_GetSigningStatus,
+    FormatConverterInfo_GetAuthor,
+    FormatConverterInfo_GetVendorGUID,
+    FormatConverterInfo_GetVersion,
+    FormatConverterInfo_GetSpecVersion,
+    FormatConverterInfo_GetFriendlyName,
+    FormatConverterInfo_GetPixelFormats,
+    FormatConverterInfo_CreateInstance
+};
+
+static HRESULT FormatConverterInfo_Constructor(HKEY classkey, REFCLSID clsid, IWICComponentInfo **ppIInfo)
+{
+    FormatConverterInfo *This;
+
+    This = HeapAlloc(GetProcessHeap(), 0, sizeof(FormatConverterInfo));
+    if (!This)
+    {
+        RegCloseKey(classkey);
+        return E_OUTOFMEMORY;
+    }
+
+    This->lpIWICFormatConverterInfoVtbl = &FormatConverterInfo_Vtbl;
+    This->ref = 1;
+    This->classkey = classkey;
+    memcpy(&This->clsid, clsid, sizeof(CLSID));
+
+    *ppIInfo = (IWICComponentInfo*)This;
+    return S_OK;
+}
+
 static WCHAR const clsid_keyname[] = {'C','L','S','I','D',0};
 static WCHAR const instance_keyname[] = {'I','n','s','t','a','n','c','e',0};
 
@@ -475,6 +662,7 @@ struct category {
 
 static const struct category categories[] = {
     {WICDecoder, &CATID_WICBitmapDecoders, BitmapDecoderInfo_Constructor},
+    {WICPixelFormatConverter, &CATID_WICFormatConverters, FormatConverterInfo_Constructor},
     {0}
 };
 
@@ -791,4 +979,92 @@ HRESULT CreateComponentEnumerator(DWORD componentTypes, DWORD options, IEnumUnkn
     }
 
     return hr;
+}
+
+HRESULT WINAPI WICConvertBitmapSource(REFWICPixelFormatGUID dstFormat, IWICBitmapSource *pISrc, IWICBitmapSource **ppIDst)
+{
+    HRESULT res;
+    IEnumUnknown *enumconverters;
+    IUnknown *unkconverterinfo;
+    IWICFormatConverterInfo *converterinfo=NULL;
+    IWICFormatConverter *converter=NULL;
+    GUID srcFormat;
+    WCHAR srcformatstr[39], dstformatstr[39];
+    BOOL canconvert;
+    ULONG num_fetched;
+
+    res = IWICBitmapSource_GetPixelFormat(pISrc, &srcFormat);
+    if (FAILED(res)) return res;
+
+    if (IsEqualGUID(&srcFormat, dstFormat))
+    {
+        IWICBitmapSource_AddRef(pISrc);
+        *ppIDst = pISrc;
+        return S_OK;
+    }
+
+    StringFromGUID2(&srcFormat, srcformatstr, 39);
+    StringFromGUID2(dstFormat, dstformatstr, 39);
+
+    res = CreateComponentEnumerator(WICPixelFormatConverter, 0, &enumconverters);
+    if (FAILED(res)) return res;
+
+    while (!converter)
+    {
+        res = IEnumUnknown_Next(enumconverters, 1, &unkconverterinfo, &num_fetched);
+
+        if (res == S_OK)
+        {
+            res = IUnknown_QueryInterface(unkconverterinfo, &IID_IWICFormatConverterInfo, (void**)&converterinfo);
+
+            if (SUCCEEDED(res))
+            {
+                canconvert = ConverterSupportsFormat(converterinfo, srcformatstr);
+
+                if (canconvert)
+                    canconvert = ConverterSupportsFormat(converterinfo, dstformatstr);
+
+                if (canconvert)
+                {
+                    res = IWICFormatConverterInfo_CreateInstance(converterinfo, &converter);
+
+                    if (SUCCEEDED(res))
+                        res = IWICFormatConverter_CanConvert(converter, &srcFormat, dstFormat, &canconvert);
+
+                    if (SUCCEEDED(res) && canconvert)
+                        res = IWICFormatConverter_Initialize(converter, pISrc, dstFormat, WICBitmapDitherTypeNone,
+                            NULL, 0.0, WICBitmapPaletteTypeCustom);
+
+                    if (FAILED(res) || !canconvert)
+                    {
+                        if (converter)
+                        {
+                            IWICFormatConverter_Release(converter);
+                            converter = NULL;
+                        }
+                        res = S_OK;
+                    }
+                }
+
+                IWICFormatConverterInfo_Release(converterinfo);
+            }
+
+            IUnknown_Release(unkconverterinfo);
+        }
+        else
+            break;
+    }
+
+    IEnumUnknown_Release(enumconverters);
+
+    if (converter)
+    {
+        *ppIDst = (IWICBitmapSource*)converter;
+        return S_OK;
+    }
+    else
+    {
+        *ppIDst = NULL;
+        return WINCODEC_ERR_COMPONENTNOTFOUND;
+    }
 }

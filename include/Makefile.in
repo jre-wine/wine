@@ -18,6 +18,7 @@ PUBLIC_IDL_H_SRCS = \
 	bits.idl \
 	bits1_5.idl \
 	comcat.idl \
+	commoncontrols.idl \
 	control.idl \
 	ctxtcall.idl \
 	d3d10.idl \
@@ -98,6 +99,7 @@ SRCDIR_INCLUDES = \
 	aclui.h \
 	adshlp.h \
 	advpub.h \
+	af_irda.h \
 	appmgmt.h \
 	audevcod.h \
 	aviriff.h \
@@ -421,6 +423,7 @@ SRCDIR_INCLUDES = \
 	sqltypes.h \
 	srrestoreptapi.h \
 	sspi.h \
+	sti.h \
 	storage.h \
 	svrapi.h \
 	t2embapi.h \

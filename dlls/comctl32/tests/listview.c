@@ -24,6 +24,7 @@
 #include <commctrl.h>
 
 #include "wine/test.h"
+#include "v6util.h"
 #include "msg.h"
 
 #define PARENT_SEQ_INDEX       0
@@ -38,40 +39,6 @@
 #define expect(expected, got) ok(got == expected, "Expected %d, got %d\n", expected, got)
 #define expect2(expected1, expected2, got1, got2) ok(expected1 == got1 && expected2 == got2, \
        "expected (%d,%d), got (%d,%d)\n", expected1, expected2, got1, got2)
-
-#ifdef __i386__
-#define ARCH "x86"
-#elif defined __x86_64__
-#define ARCH "amd64"
-#else
-#define ARCH "none"
-#endif
-
-static const CHAR manifest_name[] = "cc6.manifest";
-
-static const CHAR manifest[] =
-    "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
-    "<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n"
-    "  <assemblyIdentity\n"
-    "      type=\"win32\"\n"
-    "      name=\"Wine.ComCtl32.Tests\"\n"
-    "      version=\"1.0.0.0\"\n"
-    "      processorArchitecture=\"" ARCH "\"\n"
-    "  />\n"
-    "<description>Wine comctl32 test suite</description>\n"
-    "<dependency>\n"
-    "  <dependentAssembly>\n"
-    "    <assemblyIdentity\n"
-    "        type=\"win32\"\n"
-    "        name=\"microsoft.windows.common-controls\"\n"
-    "        version=\"6.0.0.0\"\n"
-    "        processorArchitecture=\"" ARCH "\"\n"
-    "        publicKeyToken=\"6595b64144ccf1df\"\n"
-    "        language=\"*\"\n"
-    "    />\n"
-    "</dependentAssembly>\n"
-    "</dependency>\n"
-    "</assembly>\n";
 
 static const WCHAR testparentclassW[] =
     {'L','i','s','t','v','i','e','w',' ','t','e','s','t',' ','p','a','r','e','n','t','W', 0};
@@ -103,10 +70,10 @@ static const struct message redraw_listview_seq[] = {
     { WM_PAINT,      sent|id,            0, 0, LISTVIEW_ID },
     { WM_PAINT,      sent|id,            0, 0, HEADER_ID },
     { WM_NCPAINT,    sent|id|defwinproc, 0, 0, HEADER_ID },
-    { WM_ERASEBKGND, sent|id|defwinproc, 0, 0, HEADER_ID },
+    { WM_ERASEBKGND, sent|id|defwinproc|optional, 0, 0, HEADER_ID },
     { WM_NOTIFY,     sent|id|defwinproc, 0, 0, LISTVIEW_ID },
     { WM_NCPAINT,    sent|id|defwinproc, 0, 0, LISTVIEW_ID },
-    { WM_ERASEBKGND, sent|id|defwinproc, 0, 0, LISTVIEW_ID },
+    { WM_ERASEBKGND, sent|id|defwinproc|optional, 0, 0, LISTVIEW_ID },
     { 0 }
 };
 
@@ -155,6 +122,8 @@ static const struct message listview_item_count_seq[] = {
     { LVM_INSERTITEM,     sent },
     { LVM_GETITEMCOUNT,   sent },
     { LVM_DELETEITEM,     sent|wparam, 2 },
+    { WM_NCPAINT,         sent|optional },
+    { WM_ERASEBKGND,      sent|optional },
     { LVM_GETITEMCOUNT,   sent },
     { LVM_DELETEALLITEMS, sent },
     { LVM_GETITEMCOUNT,   sent },
@@ -171,6 +140,8 @@ static const struct message listview_itempos_seq[] = {
     { LVM_INSERTITEM,      sent },
     { LVM_INSERTITEM,      sent },
     { LVM_SETITEMPOSITION, sent|wparam|lparam, 1, MAKELPARAM(10,5) },
+    { WM_NCPAINT,          sent|optional },
+    { WM_ERASEBKGND,       sent|optional },
     { LVM_GETITEMPOSITION, sent|wparam,        1 },
     { LVM_SETITEMPOSITION, sent|wparam|lparam, 2, MAKELPARAM(0,0) },
     { LVM_GETITEMPOSITION, sent|wparam,        2 },
@@ -215,6 +186,7 @@ static const struct message ownerdata_setstate_all_parent_seq[] = {
 static const struct message ownerdata_defocus_all_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
     { WM_NOTIFY, sent|id, 0, 0, LVN_GETDISPINFOA },
+    { WM_NOTIFY, sent|id|optional, 0, 0, LVN_GETDISPINFOA },
     { WM_NOTIFY, sent|id, 0, 0, LVN_ITEMCHANGED },
     { 0 }
 };
@@ -285,6 +257,11 @@ static const struct message editbox_create_pos[] = {
 static const struct message scroll_parent_seq[] = {
     { WM_NOTIFY, sent|id, 0, 0, LVN_BEGINSCROLL },
     { WM_NOTIFY, sent|id, 0, 0, LVN_ENDSCROLL },
+    { 0 }
+};
+
+static const struct message setredraw_seq[] = {
+    { WM_SETREDRAW, sent|id|wparam, FALSE, 0, LISTVIEW_ID },
     { 0 }
 };
 
@@ -411,6 +388,7 @@ static BOOL register_parent_wnd_class(BOOL Unicode)
 static HWND create_parent_window(BOOL Unicode)
 {
     static const WCHAR nameW[] = {'t','e','s','t','p','a','r','e','n','t','n','a','m','e','W'};
+    HWND hwnd;
 
     if (!register_parent_wnd_class(Unicode))
         return NULL;
@@ -419,18 +397,20 @@ static HWND create_parent_window(BOOL Unicode)
     notifyFormat = -1;
 
     if (Unicode)
-        return CreateWindowExW(0, testparentclassW, nameW,
+        hwnd = CreateWindowExW(0, testparentclassW, nameW,
                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
                                WS_MAXIMIZEBOX | WS_VISIBLE,
                                0, 0, 100, 100,
                                GetDesktopWindow(), NULL, GetModuleHandleW(NULL), NULL);
     else
-        return CreateWindowExA(0, "Listview test parent class",
+        hwnd = CreateWindowExA(0, "Listview test parent class",
                                "Listview test parent window",
                                WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
                                WS_MAXIMIZEBOX | WS_VISIBLE,
                                0, 0, 100, 100,
                                GetDesktopWindow(), NULL, GetModuleHandleA(NULL), NULL);
+    SetWindowPos( hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE|SWP_NOMOVE );
+    return hwnd;
 }
 
 static LRESULT WINAPI listview_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -643,7 +623,7 @@ static HWND subclass_editbox(HWND hwndListview)
 }
 
 /* Performs a single LVM_HITTEST test */
-static void test_lvm_hittest(HWND hwnd, INT x, INT y, INT item, UINT flags,
+static void test_lvm_hittest(HWND hwnd, INT x, INT y, INT item, UINT flags, UINT broken_flags,
                              BOOL todo_item, BOOL todo_flags, int line)
 {
     LVHITTESTINFO lpht;
@@ -677,6 +657,9 @@ static void test_lvm_hittest(HWND hwnd, INT x, INT y, INT item, UINT flags,
         todo_wine
             ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
     }
+    else if (broken_flags)
+        ok_(__FILE__, line)(lpht.flags == flags || broken(lpht.flags == broken_flags),
+                            "Expected flags %x, got %x\n", flags, lpht.flags);
     else
         ok_(__FILE__, line)(lpht.flags == flags, "Expected flags %x, got %x\n", flags, lpht.flags);
 }
@@ -2786,8 +2769,9 @@ static void test_setredraw(void)
     HWND hwnd;
     DWORD_PTR style;
     DWORD ret;
+    HDC hdc;
 
-    hwnd = create_listview_control(0);
+    hwnd = create_listview_control(LVS_OWNERDATA);
     ok(hwnd != NULL, "failed to create a listview window\n");
 
     /* Passing WM_SETREDRAW to DefWinProc removes WS_VISIBLE.
@@ -2803,6 +2787,48 @@ static void test_setredraw(void)
     expect(0, ret);
     style = GetWindowLongPtr(hwnd, GWL_STYLE);
     ok(style & WS_VISIBLE, "Expected WS_VISIBLE to be set\n");
+    ret = SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
+    expect(0, ret);
+
+    /* WM_ERASEBKGND */
+    hdc = GetWindowDC(hwndparent);
+    ret = SendMessage(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    expect(TRUE, ret);
+    ret = SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+    expect(0, ret);
+    ret = SendMessage(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    expect(TRUE, ret);
+    ret = SendMessage(hwnd, WM_SETREDRAW, TRUE, 0);
+    expect(0, ret);
+    ReleaseDC(hwndparent, hdc);
+
+    /* check notification messages to show that repainting is disabled */
+    ret = SendMessage(hwnd, LVM_SETITEMCOUNT, 1, 0);
+    expect(TRUE, ret);
+    ret = SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+    expect(0, ret);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+
+    InvalidateRect(hwnd, NULL, TRUE);
+    UpdateWindow(hwnd);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "redraw after WM_SETREDRAW (FALSE)", FALSE);
+
+    ret = SendMessage(hwnd, LVM_SETBKCOLOR, 0, CLR_NONE);
+    expect(TRUE, ret);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    InvalidateRect(hwnd, NULL, TRUE);
+    UpdateWindow(hwnd);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "redraw after WM_SETREDRAW (FALSE) with CLR_NONE bkgnd", FALSE);
+
+    /* message isn't forwarded to header */
+    subclass_header(hwnd);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    ret = SendMessage(hwnd, WM_SETREDRAW, FALSE, 0);
+    expect(0, ret);
+    ok_sequence(sequences, LISTVIEW_SEQ_INDEX, setredraw_seq,
+                "WM_SETREDRAW: not forwarded to header", FALSE);
 
     DestroyWindow(hwnd);
 }
@@ -2849,22 +2875,22 @@ static void test_hittest(void)
     /* LVS_EX_FULLROWSELECT not set, no icons attached */
     x = pos.x + 50; /* column half width */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMLABEL, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMLABEL, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* outside possible client rectangle (to right) */
     x = pos.x + 500;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* subitem returned with -1 item too */
     x = pos.x + 150;
@@ -2874,34 +2900,34 @@ static void test_hittest(void)
     MoveWindow(hwnd, 0, 0, 300, 100, FALSE);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_NOWHERE, 0, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* the same with LVS_EX_FULLROWSELECT */
     SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEM, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEM, LVHT_ONITEMLABEL, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     MoveWindow(hwnd, 0, 0, 100, 100, FALSE);
     x = pos.x + 150; /* outside column */
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 1, LVHT_ONITEMLABEL, FALSE, FALSE, FALSE, __LINE__);
     /* outside possible client rectangle (to right) */
     x = pos.x + 500;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, FALSE, TRUE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, -1, LVHT_TORIGHT, 0, FALSE, TRUE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE, __LINE__);
     /* try with icons, state icons index is 1 based so at least 2 bitmaps needed */
     himl = ImageList_Create(16, 16, 0, 4, 4);
@@ -2927,7 +2953,7 @@ static void test_hittest(void)
     /* on state icon */
     x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
@@ -2943,7 +2969,7 @@ static void test_hittest(void)
     /* on state icon */
     x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMSTATEICON, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMSTATEICON, FALSE, FALSE, FALSE, __LINE__);
@@ -2956,7 +2982,7 @@ static void test_hittest(void)
     /* on item icon */
     x = pos.x + 8;
     y = pos.y + (bounds.bottom - bounds.top) / 2;
-    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMICON, FALSE, FALSE, __LINE__);
+    test_lvm_hittest(hwnd, x, y, 0, LVHT_ONITEMICON, 0, FALSE, FALSE, __LINE__);
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
     y = (bounds.bottom - bounds.top) / 2;
     test_lvm_subitemhittest(hwnd, x, y, 0, 0, LVHT_ONITEMICON, FALSE, FALSE, FALSE, __LINE__);
@@ -3491,7 +3517,7 @@ static void test_notifyformat(void)
     r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
     expect(0, r);
     r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
-    expect(1, r);
+    ok( r == 1 || broken(r == 0), /* win9x */ "Expected 1, got %d\n", r );
     r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_QUERY);
     ok(r != 0, "Expected valid format\n");
 
@@ -3501,7 +3527,7 @@ static void test_notifyformat(void)
     r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
     expect(1, r);
     r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
-    expect(1, r);
+    ok( r == 1 || broken(r == 0), /* win9x */ "Expected 1, got %d\n", r );
 
     notifyFormat = NFR_ANSI;
     r = SendMessage(hwnd, WM_NOTIFYFORMAT, 0, NF_REQUERY);
@@ -3509,7 +3535,7 @@ static void test_notifyformat(void)
     r = SendMessage(hwnd, LVM_GETUNICODEFORMAT, 0, 0);
     expect(0, r);
     r = SendMessage(header, HDM_GETUNICODEFORMAT, 0, 0);
-    expect(1, r);
+    ok( r == 1 || broken(r == 0), /* win9x */ "Expected 1, got %d\n", r );
 
     DestroyWindow(hwnd);
 
@@ -3630,104 +3656,6 @@ static BOOL is_below_comctl_5(void)
     DestroyWindow(hwnd);
 
     return !ret;
-}
-
-static void unload_v6_module(ULONG_PTR cookie)
-{
-    HANDLE hKernel32;
-    BOOL (WINAPI *pDeactivateActCtx)(DWORD, ULONG_PTR);
-
-    hKernel32 = GetModuleHandleA("kernel32.dll");
-    pDeactivateActCtx = (void*)GetProcAddress(hKernel32, "DeactivateActCtx");
-    if (!pDeactivateActCtx)
-    {
-        win_skip("Activation contexts unsupported\n");
-        return;
-    }
-
-    pDeactivateActCtx(0, cookie);
-
-    DeleteFileA(manifest_name);
-}
-
-static BOOL load_v6_module(ULONG_PTR *pcookie)
-{
-    HANDLE hKernel32;
-    HANDLE (WINAPI *pCreateActCtxA)(ACTCTXA*);
-    BOOL (WINAPI *pActivateActCtx)(HANDLE, ULONG_PTR*);
-
-    ACTCTXA ctx;
-    HANDLE hCtx;
-    BOOL ret;
-    HANDLE file;
-    DWORD written;
-    HWND hwnd;
-
-    hKernel32 = GetModuleHandleA("kernel32.dll");
-    pCreateActCtxA = (void*)GetProcAddress(hKernel32, "CreateActCtxA");
-    pActivateActCtx = (void*)GetProcAddress(hKernel32, "ActivateActCtx");
-    if (!(pCreateActCtxA && pActivateActCtx))
-    {
-        win_skip("Activation contexts unsupported. No version 6 tests possible.\n");
-        return FALSE;
-    }
-
-    /* create manifest */
-    file = CreateFileA( manifest_name, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL );
-    if (file != INVALID_HANDLE_VALUE)
-    {
-        ret = (WriteFile( file, manifest, sizeof(manifest)-1, &written, NULL ) &&
-               written == sizeof(manifest)-1);
-        CloseHandle( file );
-        if (!ret)
-        {
-            DeleteFileA( manifest_name );
-            skip("Failed to fill manifest file. Skipping comctl32 V6 tests.\n");
-            return FALSE;
-        }
-        else
-            trace("created %s\n", manifest_name);
-    }
-    else
-    {
-        skip("Failed to create manifest file. Skipping comctl32 V6 tests.\n");
-        return FALSE;
-    }
-
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.cbSize = sizeof(ctx);
-    ctx.lpSource = manifest_name;
-
-    hCtx = pCreateActCtxA(&ctx);
-    ok(hCtx != 0, "Expected context handle\n");
-
-    ret = pActivateActCtx(hCtx, pcookie);
-    expect(TRUE, ret);
-
-    if (!ret)
-    {
-        win_skip("A problem during context activation occurred.\n");
-        DeleteFileA(manifest_name);
-    }
-
-    else
-    {
-        /* this is a XP SP3 failure workaround */
-        hwnd = CreateWindowExA(0, WC_LISTVIEW, "foo",
-                               WS_CHILD | WS_BORDER | WS_VISIBLE | LVS_REPORT,
-                               0, 0, 100, 100,
-                               hwndparent, NULL, GetModuleHandleA(NULL), NULL);
-        if (!IsWindow(hwnd))
-        {
-            win_skip("FIXME: failed to create ListView window.\n");
-            unload_v6_module(*pcookie);
-            return FALSE;
-        }
-        else
-            DestroyWindow(hwnd);
-    }
-
-    return ret;
 }
 
 static void test_get_set_view(void)
@@ -4017,6 +3945,7 @@ START_TEST(listview)
     BOOL (WINAPI *pInitCommonControlsEx)(const INITCOMMONCONTROLSEX*);
 
     ULONG_PTR ctx_cookie;
+    HWND hwnd;
 
     hComctl32 = GetModuleHandleA("comctl32.dll");
     pInitCommonControlsEx = (void*)GetProcAddress(hComctl32, "InitCommonControlsEx");
@@ -4072,6 +4001,20 @@ START_TEST(listview)
         DestroyWindow(hwndparent);
         return;
     }
+
+    /* this is a XP SP3 failure workaround */
+    hwnd = CreateWindowExA(0, WC_LISTVIEW, "foo",
+                           WS_CHILD | WS_BORDER | WS_VISIBLE | LVS_REPORT,
+                           0, 0, 100, 100,
+                           hwndparent, NULL, GetModuleHandleA(NULL), NULL);
+    if (!IsWindow(hwnd))
+    {
+        win_skip("FIXME: failed to create ListView window.\n");
+        unload_v6_module(ctx_cookie);
+        return;
+    }
+    else
+        DestroyWindow(hwnd);
 
     /* comctl32 version 6 tests start here */
     test_get_set_view();

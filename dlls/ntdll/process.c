@@ -37,6 +37,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+static ULONG execute_flags = MEM_EXECUTE_OPTION_ENABLE;
+
 /*
  *	Process object
  */
@@ -347,6 +349,14 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         }
         SERVER_END_REQ;
         break;
+    case ProcessExecuteFlags:
+        if (ProcessInformationLength == sizeof(ULONG))
+        {
+            *(ULONG *)ProcessInformation = execute_flags;
+            len = sizeof(ULONG);
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
     default:
         FIXME("(%p,info_class=%d,%p,0x%08x,%p) Unknown information class\n",
               ProcessHandle,ProcessInformationClass,
@@ -410,6 +420,8 @@ NTSTATUS WINAPI NtSetInformationProcess(
     case ProcessExecuteFlags:
         if (ProcessInformationLength != sizeof(ULONG))
             return STATUS_INVALID_PARAMETER;
+        else if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT)
+            return STATUS_ACCESS_DENIED;
         else
         {
             BOOL enable;
@@ -424,6 +436,7 @@ NTSTATUS WINAPI NtSetInformationProcess(
             default:
                 return STATUS_INVALID_PARAMETER;
             }
+            execute_flags = *(ULONG *)ProcessInformation;
             VIRTUAL_SetForceExec( enable );
         }
         break;

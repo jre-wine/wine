@@ -94,6 +94,7 @@ static const struct message focus_seq[] = {
     { WM_PAINT, sent|defwinproc },
     { WM_IME_SETCONTEXT, sent|defwinproc|optional },
     { WM_COMMAND, sent|wparam|defwinproc, MAKEWPARAM(0, EN_SETFOCUS) },
+    { WM_ERASEBKGND, sent|defwinproc|optional },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },
     { WM_CTLCOLOREDIT, sent|defwinproc|optional },
     { 0 }
@@ -167,6 +168,8 @@ static const struct message TestGetSetTextColorSeq[] = {
 
 static const struct message TestGetSetToolTipsSeq[] = {
     { WM_KILLFOCUS,    sent },
+    { WM_IME_SETCONTEXT, sent|optional },
+    { WM_IME_NOTIFY, sent|optional },
     { TVM_SETTOOLTIPS, sent|wparam|lparam, 0, 0 },
     { TVM_GETTOOLTIPS, sent|wparam|lparam, 0, 0 },
     { 0 }

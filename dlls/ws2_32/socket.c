@@ -110,6 +110,14 @@
 # define HAVE_IPX
 #endif
 
+#ifdef HAVE_LINUX_IRDA_H
+# ifdef HAVE_LINUX_TYPES_H
+#  include <linux/types.h>
+# endif
+# include <linux/irda.h>
+# define HAVE_IRDA
+#endif
+
 #ifdef HAVE_POLL_H
 #include <poll.h>
 #endif
@@ -136,6 +144,7 @@
 #include "ws2spi.h"
 #include "wsipx.h"
 #include "mstcpip.h"
+#include "af_irda.h"
 #include "winnt.h"
 #include "iphlpapi.h"
 #include "wine/server.h"
@@ -187,6 +196,16 @@ static inline const char *debugstr_sockaddr( const struct WS_sockaddr *a )
             p = "(unknown IPv6 address)";
         return wine_dbg_sprintf("{ family AF_INET6, address %s, port %d }",
                                 p, ntohs(sin->sin6_port));
+    }
+    case WS_AF_IRDA:
+    {
+        DWORD addr;
+
+        memcpy( &addr, ((const SOCKADDR_IRDA *)a)->irdaDeviceID, sizeof(addr) );
+        addr = ntohl( addr );
+        return wine_dbg_sprintf("{ family AF_IRDA, addr %08x, name %s }",
+                                addr,
+                                ((const SOCKADDR_IRDA *)a)->irdaServiceName);
     }
     default:
         return wine_dbg_sprintf("{ family %d }", a->sa_family);
@@ -318,6 +337,9 @@ static const int ws_af_map[][2] =
     MAP_OPTION( AF_INET6 ),
 #ifdef HAVE_IPX
     MAP_OPTION( AF_IPX ),
+#endif
+#ifdef AF_IRDA
+    MAP_OPTION( AF_IRDA ),
 #endif
     {FROM_PROTOCOL_INFO, FROM_PROTOCOL_INFO},
 };
@@ -849,11 +871,25 @@ static struct WS_protoent *check_buffer_pe(int size)
 
 /* ----------------------------------- i/o APIs */
 
+static inline BOOL supported_pf(int pf)
+{
+    switch (pf)
+    {
+    case WS_AF_INET:
+    case WS_AF_INET6:
+        return TRUE;
 #ifdef HAVE_IPX
-#define SUPPORTED_PF(pf) ((pf)==WS_AF_INET || (pf)== WS_AF_IPX || (pf) == WS_AF_INET6)
-#else
-#define SUPPORTED_PF(pf) ((pf)==WS_AF_INET || (pf) == WS_AF_INET6)
+    case WS_AF_IPX:
+        return TRUE;
 #endif
+#ifdef HAVE_IRDA
+    case WS_AF_IRDA:
+        return TRUE;
+#endif
+    default:
+        return FALSE;
+    }
+}
 
 
 /**********************************************************************/
@@ -926,6 +962,32 @@ static unsigned int ws_sockaddr_ws2u(const struct WS_sockaddr* wsaddr, int wsadd
         memcpy(&uin->sin_addr,&win->sin_addr,4); /* 4 bytes = 32 address bits */
         break;
     }
+#ifdef HAVE_IRDA
+    case WS_AF_IRDA: {
+        struct sockaddr_irda *uin = (struct sockaddr_irda *)uaddr;
+        const SOCKADDR_IRDA *win = (const SOCKADDR_IRDA *)wsaddr;
+
+        if (wsaddrlen < sizeof(SOCKADDR_IRDA))
+            return 0;
+        uaddrlen = sizeof(struct sockaddr_irda);
+        memset( uaddr, 0, uaddrlen );
+        uin->sir_family = AF_IRDA;
+        if (!strncmp( win->irdaServiceName, "LSAP-SEL", strlen( "LSAP-SEL" ) ))
+        {
+            unsigned int lsap_sel;
+
+            sscanf( win->irdaServiceName, "LSAP-SEL%u", &lsap_sel );
+            uin->sir_lsap_sel = lsap_sel;
+        }
+        else
+        {
+            uin->sir_lsap_sel = LSAP_ANY;
+            memcpy( uin->sir_name, win->irdaServiceName, 25 );
+        }
+        memcpy( &uin->sir_addr, win->irdaDeviceID, sizeof(uin->sir_addr) );
+        break;
+    }
+#endif
     case WS_AF_UNSPEC: {
         /* Try to determine the needed space by the passed windows sockaddr space */
         switch (wsaddrlen) {
@@ -936,6 +998,11 @@ static unsigned int ws_sockaddr_ws2u(const struct WS_sockaddr* wsaddr, int wsadd
 #ifdef HAVE_IPX
         case sizeof(struct WS_sockaddr_ipx):
             uaddrlen = sizeof(struct sockaddr_ipx);
+            break;
+#endif
+#ifdef HAVE_IRDA
+        case sizeof(SOCKADDR_IRDA):
+            uaddrlen = sizeof(struct sockaddr_irda);
             break;
 #endif
         case sizeof(struct WS_sockaddr_in6):
@@ -1028,6 +1095,23 @@ static int ws_sockaddr_u2ws(const struct sockaddr* uaddr, struct WS_sockaddr* ws
             }
         }
         break;
+#endif
+#ifdef HAVE_IRDA
+    case AF_IRDA: {
+        const struct sockaddr_irda *uin = (const struct sockaddr_irda *)uaddr;
+        SOCKADDR_IRDA *win = (SOCKADDR_IRDA *)wsaddr;
+
+        if (*wsaddrlen < sizeof(SOCKADDR_IRDA))
+            return -1;
+        win->irdaAddressFamily = WS_AF_IRDA;
+        memcpy( win->irdaDeviceID, &uin->sir_addr, sizeof(win->irdaDeviceID) );
+        if (uin->sir_lsap_sel != LSAP_ANY)
+            sprintf( win->irdaServiceName, "LSAP-SEL%u", uin->sir_lsap_sel );
+        else
+            memcpy( win->irdaServiceName, uin->sir_name,
+                    sizeof(win->irdaServiceName) );
+        return 0;
+    }
 #endif
     case AF_INET6: {
         const struct sockaddr_in6* uin6 = (const struct sockaddr_in6*)uaddr;
@@ -1422,7 +1506,7 @@ int WINAPI WS_bind(SOCKET s, const struct WS_sockaddr* name, int namelen)
 
     if (fd != -1)
     {
-        if (!name || (name->sa_family && !SUPPORTED_PF(name->sa_family)))
+        if (!name || (name->sa_family && !supported_pf(name->sa_family)))
         {
             SetLastError(WSAEAFNOSUPPORT);
         }
@@ -1923,6 +2007,73 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         }/* end switch(optname) */
     } /* end case NSPROTO_IPX */
 #endif
+
+#ifdef HAVE_IRDA
+    case WS_SOL_IRLMP:
+        switch(optname)
+        {
+        case WS_IRLMP_ENUMDEVICES:
+        {
+            static const int MAX_IRDA_DEVICES = 10;
+            char buf[sizeof(struct irda_device_list) +
+                     (MAX_IRDA_DEVICES - 1) * sizeof(struct irda_device_info)];
+            int fd, res;
+            socklen_t len = sizeof(buf);
+
+            if ( (fd = get_sock_fd( s, 0, NULL )) == -1)
+                return SOCKET_ERROR;
+            res = getsockopt( fd, SOL_IRLMP, IRLMP_ENUMDEVICES, buf, &len );
+            if (res < 0)
+            {
+                SetLastError(wsaErrno());
+                return SOCKET_ERROR;
+            }
+            else
+            {
+                struct irda_device_list *src = (struct irda_device_list *)buf;
+                DEVICELIST *dst = (DEVICELIST *)optval;
+                INT needed = sizeof(DEVICELIST), i;
+
+                if (src->len > 0)
+                    needed += (src->len - 1) * sizeof(IRDA_DEVICE_INFO);
+                if (*optlen < needed)
+                {
+                    SetLastError(WSAEFAULT);
+                    return SOCKET_ERROR;
+                }
+                *optlen = needed;
+                TRACE("IRLMP_ENUMDEVICES: %d devices found:\n", src->len);
+                dst->numDevice = src->len;
+                for (i = 0; i < src->len; i++)
+                {
+                    TRACE("saddr = %08x, daddr = %08x, info = %s, hints = %02x%02x\n",
+                          src->dev[i].saddr, src->dev[i].daddr,
+                          src->dev[i].info, src->dev[i].hints[0],
+                          src->dev[i].hints[1]);
+                    memcpy( dst->Device[i].irdaDeviceID,
+                            &src->dev[i].daddr,
+                            sizeof(dst->Device[i].irdaDeviceID) ) ;
+                    memcpy( dst->Device[i].irdaDeviceName,
+                            &src->dev[i].info,
+                            sizeof(dst->Device[i].irdaDeviceName) ) ;
+                    memcpy( &dst->Device[i].irdaDeviceHints1,
+                            &src->dev[i].hints[0],
+                            sizeof(dst->Device[i].irdaDeviceHints1) ) ;
+                    memcpy( &dst->Device[i].irdaDeviceHints2,
+                            &src->dev[i].hints[1],
+                            sizeof(dst->Device[i].irdaDeviceHints2) ) ;
+                    dst->Device[i].irdaCharSet = src->dev[i].charset;
+                }
+                return 0;
+            }
+        }
+        default:
+            FIXME("IrDA optname:0x%x\n", optname);
+            return SOCKET_ERROR;
+        }
+        break; /* case WS_SOL_IRLMP */
+#endif
+
     /* Levels WS_IPPROTO_TCP and WS_IPPROTO_IP convert directly */
     case WS_IPPROTO_TCP:
         switch(optname)
@@ -4709,22 +4860,41 @@ PCSTR WINAPI WS_inet_ntop( INT family, PVOID addr, PSTR buffer, SIZE_T len )
 #ifdef HAVE_INET_NTOP
     struct WS_in6_addr *in6;
     struct WS_in_addr  *in;
+    PCSTR pdst;
 
     TRACE("family %d, addr (%p), buffer (%p), len %ld\n", family, addr, buffer, len);
+    if (!buffer)
+    {
+        WSASetLastError( STATUS_INVALID_PARAMETER );
+        return NULL;
+    }
+
     switch (family)
     {
     case WS_AF_INET:
+    {
         in = addr;
-        return inet_ntop( AF_INET, &in->WS_s_addr, buffer, len );
-    case WS_AF_INET6:
-        in6 = addr;
-        return inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len );
+        pdst = inet_ntop( AF_INET, &in->WS_s_addr, buffer, len );
+        break;
     }
+    case WS_AF_INET6:
+    {
+        in6 = addr;
+        pdst = inet_ntop( AF_INET6, in6->WS_s6_addr, buffer, len );
+        break;
+    }
+    default:
+        WSASetLastError( WSAEAFNOSUPPORT );
+        return NULL;
+    }
+
+    if (!pdst) WSASetLastError( STATUS_INVALID_PARAMETER );
+    return pdst;
 #else
     FIXME( "not supported on this platform\n" );
-#endif
     WSASetLastError( WSAEAFNOSUPPORT );
     return NULL;
+#endif
 }
 
 /***********************************************************************

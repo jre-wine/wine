@@ -2113,8 +2113,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Init3D(IWineD3DDevice *iface,
             This->texUnitMap[state] = state;
             This->rev_tex_unit_map[state] = state;
         } else {
-            This->texUnitMap[state] = -1;
-            This->rev_tex_unit_map[state] = -1;
+            This->texUnitMap[state] = WINED3D_UNMAPPED_STAGE;
+            This->rev_tex_unit_map[state] = WINED3D_UNMAPPED_STAGE;
         }
     }
 
@@ -3635,18 +3635,21 @@ static inline void markTextureStagesDirty(IWineD3DDeviceImpl *This, DWORD stage)
     }
 }
 
-static void device_map_stage(IWineD3DDeviceImpl *This, int stage, int unit) {
-    int i = This->rev_tex_unit_map[unit];
-    int j = This->texUnitMap[stage];
+static void device_map_stage(IWineD3DDeviceImpl *This, DWORD stage, DWORD unit)
+{
+    DWORD i = This->rev_tex_unit_map[unit];
+    DWORD j = This->texUnitMap[stage];
 
     This->texUnitMap[stage] = unit;
-    if (i != -1 && i != stage) {
-        This->texUnitMap[i] = -1;
+    if (i != WINED3D_UNMAPPED_STAGE && i != stage)
+    {
+        This->texUnitMap[i] = WINED3D_UNMAPPED_STAGE;
     }
 
     This->rev_tex_unit_map[unit] = stage;
-    if (j != -1 && j != unit) {
-        This->rev_tex_unit_map[j] = -1;
+    if (j != WINED3D_UNMAPPED_STAGE && j != unit)
+    {
+        This->rev_tex_unit_map[j] = WINED3D_UNMAPPED_STAGE;
     }
 }
 
@@ -3740,14 +3743,12 @@ static void device_map_psamplers(IWineD3DDeviceImpl *This) {
 }
 
 static BOOL device_unit_free_for_vs(IWineD3DDeviceImpl *This, const DWORD *pshader_sampler_tokens,
-        const DWORD *vshader_sampler_tokens, int unit)
+        const DWORD *vshader_sampler_tokens, DWORD unit)
 {
-    int current_mapping = This->rev_tex_unit_map[unit];
+    DWORD current_mapping = This->rev_tex_unit_map[unit];
 
-    if (current_mapping == -1) {
-        /* Not currently used */
-        return TRUE;
-    }
+    /* Not currently used */
+    if (current_mapping == WINED3D_UNMAPPED_STAGE) return TRUE;
 
     if (current_mapping < MAX_FRAGMENT_SAMPLERS) {
         /* Used by a fragment sampler */
@@ -3762,14 +3763,14 @@ static BOOL device_unit_free_for_vs(IWineD3DDeviceImpl *This, const DWORD *pshad
     }
 
     /* Used by a vertex sampler */
-    return !vshader_sampler_tokens[current_mapping];
+    return !vshader_sampler_tokens[current_mapping - MAX_FRAGMENT_SAMPLERS];
 }
 
 static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
     const WINED3DSAMPLER_TEXTURE_TYPE *vshader_sampler_type =
             ((IWineD3DVertexShaderImpl *)This->stateBlock->vertexShader)->baseShader.reg_maps.sampler_type;
     const WINED3DSAMPLER_TEXTURE_TYPE *pshader_sampler_type = NULL;
-    int start = GL_LIMITS(combined_samplers) - 1;
+    int start = min(MAX_COMBINED_SAMPLERS, GL_LIMITS(combined_samplers)) - 1;
     int i;
 
     if (ps) {
@@ -3781,7 +3782,7 @@ static void device_map_vsamplers(IWineD3DDeviceImpl *This, BOOL ps) {
     }
 
     for (i = 0; i < MAX_VERTEX_SAMPLERS; ++i) {
-        int vsampler_idx = i + MAX_FRAGMENT_SAMPLERS;
+        DWORD vsampler_idx = i + MAX_FRAGMENT_SAMPLERS;
         if (vshader_sampler_type[i])
         {
             if (This->texUnitMap[vsampler_idx] != WINED3D_UNMAPPED_STAGE)
@@ -4035,12 +4036,12 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
     BOOL doClip;
     DWORD numTextures;
 
-    if (stream_info->elements[WINED3D_FFP_NORMAL].data)
+    if (stream_info->use_map & (1 << WINED3D_FFP_NORMAL))
     {
         WARN(" lighting state not saved yet... Some strange stuff may happen !\n");
     }
 
-    if (!stream_info->elements[WINED3D_FFP_POSITION].data)
+    if (!(stream_info->use_map & (1 << WINED3D_FFP_POSITION)))
     {
         ERR("Source has no position mask\n");
         return WINED3DERR_INVALIDCALL;
@@ -4273,7 +4274,8 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
         if (DestFVF & WINED3DFVF_DIFFUSE) {
             const struct wined3d_stream_info_element *element = &stream_info->elements[WINED3D_FFP_DIFFUSE];
             const DWORD *color_d = (const DWORD *)(element->data + i * element->stride);
-            if(!color_d) {
+            if (!(stream_info->use_map & (1 << WINED3D_FFP_DIFFUSE)))
+            {
                 static BOOL warned = FALSE;
 
                 if(!warned) {
@@ -4304,7 +4306,8 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
             /* What's the color value in the feedback buffer? */
             const struct wined3d_stream_info_element *element = &stream_info->elements[WINED3D_FFP_SPECULAR];
             const DWORD *color_s = (const DWORD *)(element->data + i * element->stride);
-            if(!color_s) {
+            if (!(stream_info->use_map & (1 << WINED3D_FFP_SPECULAR)))
+            {
                 static BOOL warned = FALSE;
 
                 if(!warned) {
@@ -4334,7 +4337,8 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
         for (tex_index = 0; tex_index < numTextures; tex_index++) {
             const struct wined3d_stream_info_element *element = &stream_info->elements[WINED3D_FFP_TEXCOORD0 + tex_index];
             const float *tex_coord = (const float *)(element->data + i * element->stride);
-            if(!tex_coord) {
+            if (!(stream_info->use_map & (1 << (WINED3D_FFP_TEXCOORD0 + tex_index))))
+            {
                 ERR("No source texture, but destination requests one\n");
                 dest_ptr+=GET_TEXCOORD_SIZE_FROM_FVF(DestFVF, tex_index) * sizeof(float);
                 if(dest_conv) dest_conv += GET_TEXCOORD_SIZE_FROM_FVF(DestFVF, tex_index) * sizeof(float);
@@ -4396,7 +4400,11 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
          */
         for (i = 0; i < (sizeof(stream_info.elements) / sizeof(*stream_info.elements)); ++i)
         {
-            struct wined3d_stream_info_element *e = &stream_info.elements[i];
+            struct wined3d_stream_info_element *e;
+
+            if (!(stream_info.use_map & (1 << i))) continue;
+
+            e = &stream_info.elements[i];
             if (e->buffer_object)
             {
                 struct wined3d_buffer *vb = (struct wined3d_buffer *)This->stateBlock->streamSource[e->stream_idx];
@@ -5731,7 +5739,7 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
     int rowoffset = 0; /* how many bytes to add onto the end of a row to wraparound to the beginning of the next */
     const struct GlPixelFormatDesc *src_format_desc, *dst_format_desc;
     GLenum dummy;
-    int sampler;
+    DWORD sampler;
     int bpp;
     CONVERT_TYPES convert = NO_CONVERSION;
 
@@ -5871,7 +5879,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface, 
 
     IWineD3DSurface_ModifyLocation(pDestinationSurface, SFLAG_INTEXTURE, TRUE);
     sampler = This->rev_tex_unit_map[0];
-    if (sampler != -1) {
+    if (sampler != WINED3D_UNMAPPED_STAGE)
+    {
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(sampler));
     }
 
@@ -6565,10 +6574,6 @@ static HRESULT WINAPI IWineD3DDeviceImpl_SetRenderTarget(IWineD3DDevice *iface, 
         viewport.MaxZ   = 1.0f;
         viewport.MinZ   = 0.0f;
         IWineD3DDeviceImpl_SetViewport(iface, &viewport);
-        /* Make sure the viewport state is dirty, because the render_offscreen thing affects it.
-         * SetViewport may catch NOP viewport changes, which would occur when switching between equally sized targets
-         */
-        IWineD3DDeviceImpl_MarkStateDirty(This, STATE_VIEWPORT);
     }
     return WINED3D_OK;
 }
@@ -6680,7 +6685,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                 INT height = This->cursorHeight;
                 INT width = This->cursorWidth;
                 INT bpp = glDesc->byte_count;
-                INT i, sampler;
+                DWORD sampler;
+                INT i;
 
                 /* Reformat the texture memory (pitch and width can be
                  * different) */
@@ -6702,7 +6708,8 @@ static HRESULT  WINAPI  IWineD3DDeviceImpl_SetCursorProperties(IWineD3DDevice* i
                 GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
                 checkGLcall("glActiveTextureARB");
                 sampler = This->rev_tex_unit_map[0];
-                if (sampler != -1) {
+                if (sampler != WINED3D_UNMAPPED_STAGE)
+                {
                     IWineD3DDeviceImpl_MarkStateDirty(This, STATE_SAMPLER(sampler));
                 }
                 /* Create a new cursor texture */
@@ -7686,7 +7693,6 @@ void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) {
     BYTE shift;
     UINT i;
 
-    if(!rep) return;
     for(i = 0; i < This->numContexts; i++) {
         context = This->contexts[i];
         if(isStateDirty(context, rep)) continue;

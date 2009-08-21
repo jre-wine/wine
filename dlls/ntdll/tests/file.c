@@ -54,6 +54,8 @@ static NTSTATUS (WINAPI *pNtWriteFile)(HANDLE hFile, HANDLE hEvent,
                                        PIO_STATUS_BLOCK io_status,
                                        const void* buffer, ULONG length,
                                        PLARGE_INTEGER offset, PULONG key);
+static NTSTATUS (WINAPI *pNtCancelIoFile)(HANDLE hFile, PIO_STATUS_BLOCK io_status);
+static NTSTATUS (WINAPI *pNtCancelIoFileEx)(HANDLE hFile, PIO_STATUS_BLOCK iosb, PIO_STATUS_BLOCK io_status);
 static NTSTATUS (WINAPI *pNtClose)( PHANDLE );
 
 static NTSTATUS (WINAPI *pNtCreateIoCompletion)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, ULONG);
@@ -207,7 +209,7 @@ static void read_file_test(void)
     const char text[] = "foobar";
     HANDLE handle, read, write;
     NTSTATUS status;
-    IO_STATUS_BLOCK iosb;
+    IO_STATUS_BLOCK iosb, iosb2;
     DWORD written;
     int apc_count = 0;
     char buffer[128];
@@ -355,6 +357,112 @@ static void read_file_test(void)
     ok( apc_count == 1, "apc was not called\n" );
     CloseHandle( read );
 
+    if (!create_pipe( &read, &write, FILE_FLAG_OVERLAPPED, 4096 )) return;
+    ok(DuplicateHandle(GetCurrentProcess(), read, GetCurrentProcess(), &handle, 0, TRUE, DUPLICATE_SAME_ACCESS),
+        "Failed to duplicate handle: %d\n", GetLastError());
+
+    apc_count = 0;
+    U(iosb).Status = 0xdeadbabe;
+    iosb.Information = 0xdeadbeef;
+    status = pNtReadFile( handle, event, apc, &apc_count, &iosb, buffer, 2, NULL, NULL );
+    ok( status == STATUS_PENDING, "wrong status %x\n", status );
+    ok( !is_signaled( event ), "event is signaled\n" );
+    ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+    ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+    ok( !apc_count, "apc was called\n" );
+    /* Cancel by other handle */
+    status = pNtCancelIoFile( read, &iosb2 );
+    ok(status == STATUS_SUCCESS, "failed to cancel by different handle: %x\n", status);
+    Sleep(1);  /* FIXME: needed for wine to run the i/o apc  */
+    ok( U(iosb).Status == STATUS_CANCELLED, "wrong status %x\n", U(iosb).Status );
+    ok( iosb.Information == 0, "wrong info %lu\n", iosb.Information );
+    ok( is_signaled( event ), "event is signaled\n" );
+    todo_wine ok( !apc_count, "apc was called\n" );
+    SleepEx( 1, TRUE ); /* alertable sleep */
+    ok( apc_count == 1, "apc was not called\n" );
+
+    apc_count = 0;
+    U(iosb).Status = 0xdeadbabe;
+    iosb.Information = 0xdeadbeef;
+    status = pNtReadFile( read, event, apc, &apc_count, &iosb, buffer, 2, NULL, NULL );
+    ok( status == STATUS_PENDING, "wrong status %x\n", status );
+    ok( !is_signaled( event ), "event is signaled\n" );
+    ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+    ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+    ok( !apc_count, "apc was called\n" );
+    /* Close queued handle */
+    CloseHandle( read );
+    SleepEx( 1, TRUE ); /* alertable sleep */
+    ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+    ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+    status = pNtCancelIoFile( read, &iosb2 );
+    ok(status == STATUS_INVALID_HANDLE, "cancelled by closed handle?\n");
+    status = pNtCancelIoFile( handle, &iosb2 );
+    ok(status == STATUS_SUCCESS, "failed to cancel: %x\n", status);
+    Sleep(1);  /* FIXME: needed for wine to run the i/o apc  */
+    ok( U(iosb).Status == STATUS_CANCELLED, "wrong status %x\n", U(iosb).Status );
+    ok( iosb.Information == 0, "wrong info %lu\n", iosb.Information );
+    ok( is_signaled( event ), "event is signaled\n" );
+    todo_wine ok( !apc_count, "apc was called\n" );
+    SleepEx( 1, TRUE ); /* alertable sleep */
+    ok( apc_count == 1, "apc was not called\n" );
+    CloseHandle( handle );
+    CloseHandle( write );
+
+    if (pNtCancelIoFileEx)
+    {
+        /* Basic Cancel Ex */
+        if (!create_pipe( &read, &write, FILE_FLAG_OVERLAPPED, 4096 )) return;
+
+        apc_count = 0;
+        U(iosb).Status = 0xdeadbabe;
+        iosb.Information = 0xdeadbeef;
+        status = pNtReadFile( read, event, apc, &apc_count, &iosb, buffer, 2, NULL, NULL );
+        ok( status == STATUS_PENDING, "wrong status %x\n", status );
+        ok( !is_signaled( event ), "event is signaled\n" );
+        ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+        ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+        ok( !apc_count, "apc was called\n" );
+        status = pNtCancelIoFileEx( read, &iosb, &iosb2 );
+        ok(status == STATUS_SUCCESS, "Failed to cancel I/O\n");
+        Sleep(1);  /* FIXME: needed for wine to run the i/o apc  */
+        ok( U(iosb).Status == STATUS_CANCELLED, "wrong status %x\n", U(iosb).Status );
+        ok( iosb.Information == 0, "wrong info %lu\n", iosb.Information );
+        ok( is_signaled( event ), "event is signaled\n" );
+        todo_wine ok( !apc_count, "apc was called\n" );
+        SleepEx( 1, TRUE ); /* alertable sleep */
+        ok( apc_count == 1, "apc was not called\n" );
+
+        /* Duplicate iosb */
+        apc_count = 0;
+        U(iosb).Status = 0xdeadbabe;
+        iosb.Information = 0xdeadbeef;
+        status = pNtReadFile( read, event, apc, &apc_count, &iosb, buffer, 2, NULL, NULL );
+        ok( status == STATUS_PENDING, "wrong status %x\n", status );
+        ok( !is_signaled( event ), "event is signaled\n" );
+        ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+        ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+        ok( !apc_count, "apc was called\n" );
+        status = pNtReadFile( read, event, apc, &apc_count, &iosb, buffer, 2, NULL, NULL );
+        ok( status == STATUS_PENDING, "wrong status %x\n", status );
+        ok( !is_signaled( event ), "event is signaled\n" );
+        ok( U(iosb).Status == 0xdeadbabe, "wrong status %x\n", U(iosb).Status );
+        ok( iosb.Information == 0xdeadbeef, "wrong info %lu\n", iosb.Information );
+        ok( !apc_count, "apc was called\n" );
+        status = pNtCancelIoFileEx( read, &iosb, &iosb2 );
+        ok(status == STATUS_SUCCESS, "Failed to cancel I/O\n");
+        Sleep(1);  /* FIXME: needed for wine to run the i/o apc  */
+        ok( U(iosb).Status == STATUS_CANCELLED, "wrong status %x\n", U(iosb).Status );
+        ok( iosb.Information == 0, "wrong info %lu\n", iosb.Information );
+        ok( is_signaled( event ), "event is signaled\n" );
+        todo_wine ok( !apc_count, "apc was called\n" );
+        SleepEx( 1, TRUE ); /* alertable sleep */
+        ok( apc_count == 2, "apc was not called\n" );
+
+        CloseHandle( read );
+        CloseHandle( write );
+    }
+
     /* now try a real file */
     if (!(handle = create_temp_file( FILE_FLAG_OVERLAPPED ))) return;
     apc_count = 0;
@@ -362,8 +470,8 @@ static void read_file_test(void)
     iosb.Information = 0xdeadbeef;
     offset.QuadPart = 0;
     ResetEvent( event );
-    pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
-    ok( status == STATUS_PENDING, "wrong status %x\n", status );
+    status = pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
+    ok( status == STATUS_SUCCESS || status == STATUS_PENDING, "wrong status %x\n", status );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
     ok( iosb.Information == strlen(text), "wrong info %lu\n", iosb.Information );
     ok( is_signaled( event ), "event is signaled\n" );
@@ -420,8 +528,9 @@ static void read_file_test(void)
     U(iosb).Status = 0xdeadbabe;
     iosb.Information = 0xdeadbeef;
     offset.QuadPart = 0;
-    pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
+    status = pNtWriteFile( handle, event, apc, &apc_count, &iosb, text, strlen(text), &offset, NULL );
     ok( status == STATUS_END_OF_FILE ||
+        status == STATUS_SUCCESS ||
         status == STATUS_PENDING,  /* vista */
         "wrong status %x\n", status );
     ok( U(iosb).Status == STATUS_SUCCESS, "wrong status %x\n", U(iosb).Status );
@@ -712,6 +821,8 @@ START_TEST(file)
     pNtDeleteFile           = (void *)GetProcAddress(hntdll, "NtDeleteFile");
     pNtReadFile             = (void *)GetProcAddress(hntdll, "NtReadFile");
     pNtWriteFile            = (void *)GetProcAddress(hntdll, "NtWriteFile");
+    pNtCancelIoFile         = (void *)GetProcAddress(hntdll, "NtCancelIoFile");
+    pNtCancelIoFileEx       = (void *)GetProcAddress(hntdll, "NtCancelIoFileEx");
     pNtClose                = (void *)GetProcAddress(hntdll, "NtClose");
     pNtCreateIoCompletion   = (void *)GetProcAddress(hntdll, "NtCreateIoCompletion");
     pNtOpenIoCompletion     = (void *)GetProcAddress(hntdll, "NtOpenIoCompletion");

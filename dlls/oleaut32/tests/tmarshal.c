@@ -44,86 +44,6 @@ const MYSTRUCT MYSTRUCT_ARRAY[5] = {
     {0x5a5b5c5d, ULL_CONST(0x5e5f5051, 0x52535455)},
 };
 
-/* Debugging functions from wine/libs/wine/debug.c */
-
-/* allocate some tmp string space */
-/* FIXME: this is not 100% thread-safe */
-static char *get_tmp_space( int size )
-{
-    static char *list[32];
-    static long pos;
-    char *ret;
-    int idx;
-
-    idx = ++pos % (sizeof(list)/sizeof(list[0]));
-    if (list[idx])
-        ret = HeapReAlloc( GetProcessHeap(), 0, list[idx], size );
-    else
-        ret = HeapAlloc( GetProcessHeap(), 0, size );
-    if (ret) list[idx] = ret;
-    return ret;
-}
-
-/* default implementation of wine_dbgstr_wn */
-static const char *default_dbgstr_wn( const WCHAR *str, int n )
-{
-    char *dst, *res;
-
-    if (!HIWORD(str))
-    {
-        if (!str) return "(null)";
-        res = get_tmp_space( 6 );
-        sprintf( res, "#%04x", LOWORD(str) );
-        return res;
-    }
-    if (n == -1) n = lstrlenW(str);
-    if (n < 0) n = 0;
-    else if (n > 200) n = 200;
-    dst = res = get_tmp_space( n * 5 + 7 );
-    *dst++ = 'L';
-    *dst++ = '"';
-    while (n-- > 0)
-    {
-        WCHAR c = *str++;
-        switch (c)
-        {
-        case '\n': *dst++ = '\\'; *dst++ = 'n'; break;
-        case '\r': *dst++ = '\\'; *dst++ = 'r'; break;
-        case '\t': *dst++ = '\\'; *dst++ = 't'; break;
-        case '"':  *dst++ = '\\'; *dst++ = '"'; break;
-        case '\\': *dst++ = '\\'; *dst++ = '\\'; break;
-        default:
-            if (c >= ' ' && c <= 126)
-                *dst++ = (char)c;
-            else
-            {
-                *dst++ = '\\';
-                sprintf(dst,"%04x",c);
-                dst+=4;
-            }
-        }
-    }
-    *dst++ = '"';
-    if (*str)
-    {
-        *dst++ = '.';
-        *dst++ = '.';
-        *dst++ = '.';
-    }
-    *dst = 0;
-    return res;
-}
-
-const char *wine_dbgstr_wn( const WCHAR *s, int n )
-{
-    return default_dbgstr_wn(s, n);
-}
-
-const char *wine_dbgstr_w( const WCHAR *s )
-{
-    return default_dbgstr_wn( s, -1 );
-}
-
 
 #define RELEASEMARSHALDATA WM_USER
 
@@ -642,6 +562,22 @@ static HRESULT WINAPI Widget_get_prop_with_lcid(
     return S_OK;
 }
 
+static HRESULT WINAPI Widget_get_prop_int(
+    IWidget* iface, INT *i)
+{
+    trace("get_prop_int(%p)\n", i);
+    *i = -13;
+    return S_OK;
+}
+
+static HRESULT WINAPI Widget_get_prop_uint(
+    IWidget* iface, UINT *i)
+{
+    trace("get_prop_uint(%p)\n", i);
+    *i = 42;
+    return S_OK;
+}
+
 static const struct IWidgetVtbl Widget_VTable =
 {
     Widget_QueryInterface,
@@ -671,7 +607,9 @@ static const struct IWidgetVtbl Widget_VTable =
     Widget_Error,
     Widget_CloneInterface,
     Widget_put_prop_with_lcid,
-    Widget_get_prop_with_lcid
+    Widget_get_prop_with_lcid,
+    Widget_get_prop_int,
+    Widget_get_prop_uint
 };
 
 static HRESULT WINAPI StaticWidget_QueryInterface(IStaticWidget *iface, REFIID riid, void **ppvObject)
@@ -1377,6 +1315,28 @@ todo_wine
     ok(V_VT(&varresult) == VT_I4, "got %x\n", V_VT(&varresult));
     ok(V_I4(&varresult) == 0x409, "got %x\n", V_I4(&varresult));
 }
+    VariantClear(&varresult);
+
+    /* test propget of INT value */
+    dispparams.cNamedArgs = 0;
+    dispparams.cArgs = 0;
+    dispparams.rgvarg = NULL;
+    dispparams.rgdispidNamedArgs = NULL;
+    hr = IDispatch_Invoke(pDispatch, DISPID_TM_PROP_INT, &IID_NULL, 0x40c, DISPATCH_PROPERTYGET, &dispparams, &varresult, &excepinfo, NULL);
+    ok_ole_success(hr, ITypeInfo_Invoke);
+    ok(V_VT(&varresult) == VT_I4, "got %x\n", V_VT(&varresult));
+    ok(V_I4(&varresult) == -13, "got %x\n", V_I4(&varresult));
+    VariantClear(&varresult);
+
+    /* test propget of INT value */
+    dispparams.cNamedArgs = 0;
+    dispparams.cArgs = 0;
+    dispparams.rgvarg = NULL;
+    dispparams.rgdispidNamedArgs = NULL;
+    hr = IDispatch_Invoke(pDispatch, DISPID_TM_PROP_UINT, &IID_NULL, 0x40c, DISPATCH_PROPERTYGET, &dispparams, &varresult, &excepinfo, NULL);
+    ok_ole_success(hr, ITypeInfo_Invoke);
+    ok(V_VT(&varresult) == VT_UI4, "got %x\n", V_VT(&varresult));
+    ok(V_UI4(&varresult) == 42, "got %x\n", V_UI4(&varresult));
     VariantClear(&varresult);
 
     IDispatch_Release(pDispatch);

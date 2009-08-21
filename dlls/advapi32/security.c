@@ -184,6 +184,7 @@ static const WCHAR CREATOR_GROUP[] = { 'C','R','E','A','T','O','R',' ','G','R','
 static const WCHAR CREATOR_GROUP_SERVER[] = { 'C','R','E','A','T','O','R',' ','G','R','O','U','P',' ','S','E','R','V','E','R',0 };
 static const WCHAR CREATOR_OWNER[] = { 'C','R','E','A','T','O','R',' ','O','W','N','E','R',0 };
 static const WCHAR CREATOR_OWNER_SERVER[] = { 'C','R','E','A','T','O','R',' ','O','W','N','E','R',' ','S','E','R','V','E','R',0 };
+static const WCHAR CURRENT_USER[] = { 'C','U','R','R','E','N','T','_','U','S','E','R',0 };
 static const WCHAR DIALUP[] = { 'D','I','A','L','U','P',0 };
 static const WCHAR Digest_Authentication[] = { 'D','i','g','e','s','t',' ','A','u','t','h','e','n','t','i','c','a','t','i','o','n',0 };
 static const WCHAR DOMAIN[] = {'D','O','M','A','I','N',0};
@@ -3510,7 +3511,8 @@ DWORD WINAPI SetEntriesInAclW( ULONG count, PEXPLICIT_ACCESSW pEntries,
             DWORD sid_size = FIELD_OFFSET(SID, SubAuthority[SID_MAX_SUB_AUTHORITIES]);
             DWORD domain_size = MAX_COMPUTERNAME_LENGTH + 1;
             SID_NAME_USE use;
-            if (!LookupAccountNameW(NULL, pEntries[i].Trustee.ptstrName, ppsid[i], &sid_size, NULL, &domain_size, &use))
+            if ( strcmpW( pEntries[i].Trustee.ptstrName, CURRENT_USER ) &&
+                 !LookupAccountNameW(NULL, pEntries[i].Trustee.ptstrName, ppsid[i], &sid_size, NULL, &domain_size, &use))
             {
                 WARN("bad user name %s for trustee %d\n", debugstr_w(pEntries[i].Trustee.ptstrName), i);
                 ret = ERROR_INVALID_PARAMETER;
@@ -5339,4 +5341,14 @@ DWORD WINAPI TreeResetNamedSecurityInfoW( LPWSTR pObjectName,
         pDacl, pSacl, KeepExplicit, fnProgress, ProgressInvokeSetting, Args);
 
     return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * SaferGetPolicyInformation   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferGetPolicyInformation(DWORD scope, SAFER_POLICY_INFO_CLASS class, DWORD size,
+                                      PVOID buffer, PDWORD required, LPVOID lpReserved)
+{
+    FIXME("(%u %u %u %p %p %p) stub\n", scope, class, size, buffer, required, lpReserved);
+    return FALSE;
 }

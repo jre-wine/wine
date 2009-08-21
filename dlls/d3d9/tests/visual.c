@@ -182,7 +182,9 @@ static IDirect3DDevice9 *init_d3d9(void)
     ok(hr == D3D_OK, "Failed to get adapter identifier description\n");
     trace("Driver string: \"%s\"\n", identifier.Driver);
     trace("Description string: \"%s\"\n", identifier.Description);
+    ok(identifier.Description[0] != '\0', "Empty driver description\n");
     trace("Device name string: \"%s\"\n", identifier.DeviceName);
+    ok(identifier.DeviceName[0]  != '\0', "Empty device name\n");
     trace("Driver version %d.%d.%d.%d\n",
           HIWORD(U(identifier.DriverVersion).HighPart), LOWORD(U(identifier.DriverVersion).HighPart),
           HIWORD(U(identifier.DriverVersion).LowPart), LOWORD(U(identifier.DriverVersion).LowPart));
@@ -6586,8 +6588,15 @@ static void shademode_test(IDirect3DDevice9 *device)
             switch(shademode) {
                 case D3DSHADE_FLAT:
                     /* Should take the color of the first vertex of each triangle */
-                    todo_wine ok(color0 == 0x00ff0000, "FLAT shading has color0 %08x, expected 0x00ff0000 (todo)\n", color0);
-                    todo_wine ok(color1 == 0x0000ff00, "FLAT shading has color1 %08x, expected 0x0000ff00 (todo)\n", color1);
+                    if (0)
+                    {
+                        /* This test depends on EXT_provoking_vertex being
+                         * available. This extension is currently (20090810)
+                         * not common enough to let the test fail if it isn't
+                         * present. */
+                        ok(color0 == 0x00ff0000, "FLAT shading has color0 %08x, expected 0x00ff0000\n", color0);
+                        ok(color1 == 0x0000ff00, "FLAT shading has color1 %08x, expected 0x0000ff00\n", color1);
+                    }
                     shademode = D3DSHADE_GOURAUD;
                     break;
                 case D3DSHADE_GOURAUD:
@@ -8517,7 +8526,7 @@ static void pointsize_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 64-9, 64-9);
     ok(color == 0x000000ff, "pSize: Pixel (64-9),(64-9) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 64-8, 64-8);
-    todo_wine ok(color == 0x00ffffff, "pSize: Pixel (64-8),(64-8) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (64-8),(64-8) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 64-7, 64-7);
     ok(color == 0x00ffffff, "pSize: Pixel (64-7),(64-7) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 64+7, 64+7);
@@ -8530,7 +8539,7 @@ static void pointsize_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 128-17, 64-17);
     ok(color == 0x000000ff, "pSize: Pixel (128-17),(64-17) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 128-16, 64-16);
-    todo_wine ok(color == 0x00ffffff, "pSize: Pixel (128-16),(64-16) has color 0x%08x, expected 0x00ffffff\n", color);
+    ok(color == 0x00ffffff, "pSize: Pixel (128-16),(64-16) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 128-15, 64-15);
     ok(color == 0x00ffffff, "pSize: Pixel (128-15),(64-15) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 128+15, 64+15);
@@ -8543,7 +8552,7 @@ static void pointsize_test(IDirect3DDevice9 *device)
     color = getPixelColor(device, 192-17, 64-17);
     ok(color == 0x000000ff, "pSize: Pixel (192-17),(64-17) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 192-16, 64-16);
-    ok(color == 0x000000ff, "pSize: Pixel (192-16),(64-16) has color 0x%08x, expected 0x000000ff\n", color);
+    todo_wine ok(color == 0x000000ff, "pSize: Pixel (192-16),(64-16) has color 0x%08x, expected 0x000000ff\n", color);
     color = getPixelColor(device, 192-15, 64-15);
     ok(color == 0x00ffffff, "pSize: Pixel (192-15),(64-15) has color 0x%08x, expected 0x00ffffff\n", color);
     color = getPixelColor(device, 192+15, 64+15);

@@ -675,7 +675,8 @@ static void context_destroy_gl_resources(struct wined3d_context *context)
             GL_EXTCALL(glDeleteProgramsARB(1, &context->dummy_arbfp_prog));
         }
 
-        GL_EXTCALL(glDeleteQueriesARB(context->free_occlusion_query_count, context->free_occlusion_queries));
+        if (GL_SUPPORT(ARB_OCCLUSION_QUERY))
+            GL_EXTCALL(glDeleteQueriesARB(context->free_occlusion_query_count, context->free_occlusion_queries));
 
         if (GL_SUPPORT(APPLE_FENCE))
             GL_EXTCALL(glDeleteFencesAPPLE(context->free_event_query_count, context->free_event_queries));
@@ -793,7 +794,7 @@ static void Context_MarkStateDirty(struct wined3d_context *context, DWORD state,
     DWORD idx;
     BYTE shift;
 
-    if(!rep || isStateDirty(context, rep)) return;
+    if (isStateDirty(context, rep)) return;
 
     context->dirtyArray[context->numDirtyEntries++] = rep;
     idx = rep >> 5;
@@ -850,7 +851,8 @@ static struct wined3d_context *AddContextToArray(IWineD3DDeviceImpl *This,
     /* Mark all states dirty to force a proper initialization of the states on the first use of the context
      */
     for(state = 0; state <= STATE_HIGHEST; state++) {
-        Context_MarkStateDirty(This->contexts[This->numContexts], state, This->StateTable);
+        if (This->StateTable[state].representative)
+            Context_MarkStateDirty(This->contexts[This->numContexts], state, This->StateTable);
     }
 
     This->numContexts++;
@@ -1357,6 +1359,12 @@ struct wined3d_context *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceI
         glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE);
         checkGLcall("glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)");
     }
+
+    if (GL_SUPPORT(EXT_PROVOKING_VERTEX))
+    {
+        GL_EXTCALL(glProvokingVertexEXT(GL_FIRST_VERTEX_CONVENTION_EXT));
+    }
+
     LEAVE_GL();
 
     This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
@@ -1507,9 +1515,10 @@ static inline void set_blit_dimension(UINT width, UINT height) {
 /* Context activation is done by the caller. */
 static inline void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context *context, UINT width, UINT height)
 {
-    int i, sampler;
+    int i;
     const struct StateEntry *StateTable = This->StateTable;
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    DWORD sampler;
 
     TRACE("Setting up context %p for blitting\n", context);
     if(context->last_was_blit) {
@@ -1572,7 +1581,8 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
         checkGLcall("glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);");
 
-        if (sampler != -1) {
+        if (sampler != WINED3D_UNMAPPED_STAGE)
+        {
             if (sampler < MAX_TEXTURES) {
                 Context_MarkStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP), StateTable);
             }
@@ -1611,7 +1621,8 @@ static inline void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context
         checkGLcall("glTexEnvi GL_TEXTURE_LOD_BIAS_EXT ...");
     }
 
-    if (sampler != -1) {
+    if (sampler != WINED3D_UNMAPPED_STAGE)
+    {
         if (sampler < MAX_TEXTURES) {
             Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_TEXTURE0 + sampler), StateTable);
             Context_MarkStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP), StateTable);
@@ -1839,7 +1850,7 @@ retry:
 
     if (context->render_offscreen != old_render_offscreen)
     {
-        Context_MarkStateDirty(context, WINED3DTS_PROJECTION, StateTable);
+        Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION), StateTable);
         Context_MarkStateDirty(context, STATE_VDECL, StateTable);
         Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
         Context_MarkStateDirty(context, STATE_SCISSORRECT, StateTable);

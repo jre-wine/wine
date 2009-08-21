@@ -1952,6 +1952,17 @@ typedef void (WINE_GLAPI * PGLFNGLCOLORTABLEEXTPROC) (GLenum target, GLenum inte
 #endif
 typedef void (WINE_GLAPI * PGLFNGLPOINTPARAMETERFEXTPROC) (GLenum pname, GLfloat param);
 typedef void (WINE_GLAPI * PGLFNGLPOINTPARAMETERFVEXTPROC) (GLenum pname, const GLfloat *params);
+
+/* GL_EXT_provoking_vertex */
+#ifndef GL_EXT_provoking_vertex
+#define GL_EXT_provoking_vertex 1
+#define GL_FIRST_VERTEX_CONVENTION_EXT                      0x8e4d
+#define GL_LAST_VERTEX_CONVENTION_EXT                       0x8e4e
+#define GL_PROVOKING_VERTEX_EXT                             0x8e4f
+#define GL_QUADS_FOLLOW_PROVOKING_VERTEX_CONVENTIONS_EXT    0x8e4c
+#endif
+typedef void (WINE_GLAPI * PGLFNGLPROVOKINGVERTEXEXTPROC)(GLenum mode);
+
 /* GL_EXT_texture3D */
 #ifndef GL_EXT_texture3D
 #define GL_EXT_texture3D 1
@@ -3383,29 +3394,6 @@ typedef enum _GL_Cards {
 
 #define WINE_DEFAULT_VIDMEM 64*1024*1024
 
-typedef enum _GL_VSVersion {
-  VS_VERSION_NOT_SUPPORTED = 0x0,
-  VS_VERSION_10 = 0x10,
-  VS_VERSION_11 = 0x11,
-  VS_VERSION_20 = 0x20,
-  VS_VERSION_30 = 0x30,
-  /*Force 32-bits*/
-  VS_VERSION_FORCE_DWORD = 0x7FFFFFFF
-} GL_VSVersion;
-
-typedef enum _GL_PSVersion {
-  PS_VERSION_NOT_SUPPORTED = 0x0,
-  PS_VERSION_10 = 0x10,
-  PS_VERSION_11 = 0x11,
-  PS_VERSION_12 = 0x12,
-  PS_VERSION_13 = 0x13,
-  PS_VERSION_14 = 0x14,
-  PS_VERSION_20 = 0x20,
-  PS_VERSION_30 = 0x30,
-  /*Force 32-bits*/
-  PS_VERSION_FORCE_DWORD = 0x7FFFFFFF
-} GL_PSVersion;
-
 #define MAKEDWORD_VERSION(maj, min)  ((maj & 0x0000FFFF) << 16) | (min & 0x0000FFFF)
 
 /* OpenGL Supported Extensions (ARB and EXT) */
@@ -3458,6 +3446,7 @@ typedef enum _GL_SupportedExt {
   EXT_PALETTED_TEXTURE,
   EXT_PIXEL_BUFFER_OBJECT,
   EXT_POINT_PARAMETERS,
+  EXT_PROVOKING_VERTEX,
   EXT_SECONDARY_COLOR,
   EXT_STENCIL_TWO_SIDE,
   EXT_STENCIL_WRAP,
@@ -3634,6 +3623,8 @@ typedef enum _GL_SupportedExt {
     /* GL_EXT_point_parameters */ \
     USE_GL_FUNC(PGLFNGLPOINTPARAMETERFEXTPROC,                      glPointParameterfEXT,                       EXT_POINT_PARAMETERS,   NULL )\
     USE_GL_FUNC(PGLFNGLPOINTPARAMETERFVEXTPROC,                     glPointParameterfvEXT,                      EXT_POINT_PARAMETERS,   NULL )\
+    /* GL_EXT_provoking_vertex */ \
+    USE_GL_FUNC(PGLFNGLPROVOKINGVERTEXEXTPROC,                      glProvokingVertexEXT,                       EXT_PROVOKING_VERTEX,   NULL)\
     /* GL_EXT_secondary_color */ \
     USE_GL_FUNC(PGLFNGLSECONDARYCOLOR3UBEXTPROC,                    glSecondaryColor3ubEXT,                     EXT_SECONDARY_COLOR,    NULL )\
     USE_GL_FUNC(PGLFNGLSECONDARYCOLOR3UBVEXTPROC,                   glSecondaryColor3ubvEXT,                    EXT_SECONDARY_COLOR,    NULL )\
@@ -3989,13 +3980,6 @@ struct wined3d_gl_info
     unsigned int ps_arb_max_temps;
     unsigned int vs_glsl_constantsF;
     unsigned int ps_glsl_constantsF;
-
-    GL_PSVersion ps_arb_version;
-    GL_PSVersion ps_nv_version;
-
-    GL_VSVersion vs_arb_version;
-    GL_VSVersion vs_nv_version;
-    GL_VSVersion vs_ati_version;
 
     DWORD reserved_glsl_constants;
 

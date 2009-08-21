@@ -3472,6 +3472,14 @@ static LRESULT WINAPI PopupMenuWndProc( HWND hwnd, UINT message, WPARAM wParam, 
 	    EndPaint( hwnd, &ps );
             return 0;
 	}
+
+    case WM_PRINTCLIENT:
+	{
+	    MENU_DrawPopupMenu( hwnd, (HDC)wParam,
+                                (HMENU)GetWindowLongPtrW( hwnd, 0 ) );
+            return 0;
+        }
+
     case WM_ERASEBKGND:
         return 1;
 
@@ -4646,18 +4654,22 @@ static int MENU_depth( POPUPMENU *pmenu, int depth)
 {
     int i;
     MENUITEM *item;
+    int subdepth;
 
     depth++;
     if( depth > MAXMENUDEPTH) return depth;
     item = pmenu->items;
-    for( i = 0; i < pmenu->nItems && depth <= MAXMENUDEPTH; i++, item++){
-        POPUPMENU *psubmenu =  MENU_GetMenu( item->hSubMenu);
+    subdepth = depth;
+    for( i = 0; i < pmenu->nItems && subdepth <= MAXMENUDEPTH; i++, item++){
+        POPUPMENU *psubmenu =  item->hSubMenu ? MENU_GetMenu( item->hSubMenu) : NULL;
         if( psubmenu){
             int bdepth = MENU_depth( psubmenu, depth);
-            if( bdepth > depth) depth = bdepth;
+            if( bdepth > subdepth) subdepth = bdepth;
         }
+        if( subdepth > MAXMENUDEPTH)
+            TRACE("<- hmenu %p\n", item->hSubMenu);
     }
-    return depth;
+    return subdepth;
 }
 
 

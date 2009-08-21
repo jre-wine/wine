@@ -267,11 +267,8 @@ static inline float float_24_to_32(DWORD in)
 #define SHADER_NONE 4
 
 #define RTL_DISABLE   -1
-#define RTL_AUTO       0
 #define RTL_READDRAW   1
 #define RTL_READTEX    2
-#define RTL_TEXDRAW    3
-#define RTL_TEXTEX     4
 
 #define PCI_VENDOR_NONE 0xffff /* e.g. 0x8086 for Intel and 0x10de for Nvidia */
 #define PCI_DEVICE_NONE 0xffff /* e.g. 0x14f for a Geforce6200 */
@@ -282,7 +279,6 @@ typedef struct wined3d_settings_s {
 /* vertex and pixel shader modes */
   int vs_mode;
   int ps_mode;
-  int vbo_mode;
 /* Ideally, we don't want the user to have to request GLSL.  If the hardware supports GLSL,
     we should use it.  However, until it's fully implemented, we'll leave it as a registry
     setting for developers. */
@@ -631,10 +627,10 @@ struct wined3d_shader_version
 typedef struct shader_reg_maps
 {
     struct wined3d_shader_version shader_version;
-    char texcoord[MAX_REG_TEXCRD];          /* pixel < 3.0 */
-    char temporary[MAX_REG_TEMP];           /* pixel, vertex */
-    char address[MAX_REG_ADDR];             /* vertex */
-    char labels[MAX_LABELS];                /* pixel, vertex */
+    BYTE texcoord;                          /* MAX_REG_TEXCRD, 8 */
+    BYTE address;                           /* MAX_REG_ADDR, 1 */
+    WORD labels;                            /* MAX_LABELS, 16 */
+    DWORD temporary;                        /* MAX_REG_TEMP, 32 */
     DWORD *constf;                          /* pixel, vertex */
     DWORD texcoord_mask[MAX_REG_TEXCRD];    /* vertex < 3.0 */
     WORD input_registers;                   /* max(MAX_REG_INPUT, MAX_ATTRIBS), 16 */
@@ -645,21 +641,22 @@ typedef struct shader_reg_maps
     WORD local_bool_consts;                 /* MAX_CONST_B, 16 */
 
     WINED3DSAMPLER_TEXTURE_TYPE sampler_type[max(MAX_FRAGMENT_SAMPLERS, MAX_VERTEX_SAMPLERS)];
-    BOOL bumpmat[MAX_TEXTURES], luminanceparams[MAX_TEXTURES];
+    BYTE bumpmat;                           /* MAX_TEXTURES, 8 */
+    BYTE luminanceparams;                   /* MAX_TEXTURES, 8 */
 
-    unsigned usesnrm        : 1;
-    unsigned vpos           : 1;
-    unsigned usesdsx        : 1;
-    unsigned usesdsy        : 1;
-    unsigned usestexldd     : 1;
-    unsigned usesmova       : 1;
-    unsigned usesfacing     : 1;
-    unsigned usesrelconstF  : 1;
-    unsigned fog            : 1;
-    unsigned usestexldl     : 1;
-    unsigned usesifc        : 1;
-    unsigned usescall       : 1;
-    unsigned padding        : 4;
+    WORD usesnrm        : 1;
+    WORD vpos           : 1;
+    WORD usesdsx        : 1;
+    WORD usesdsy        : 1;
+    WORD usestexldd     : 1;
+    WORD usesmova       : 1;
+    WORD usesfacing     : 1;
+    WORD usesrelconstF  : 1;
+    WORD fog            : 1;
+    WORD usestexldl     : 1;
+    WORD usesifc        : 1;
+    WORD usescall       : 1;
+    WORD padding        : 4;
 
     /* Whether or not loops are used in this shader, and nesting depth */
     unsigned loop_depth;
@@ -725,6 +722,13 @@ struct wined3d_shader_attribute
 {
     WINED3DDECLUSAGE usage;
     UINT usage_idx;
+};
+
+struct wined3d_shader_loop_control
+{
+    unsigned int count;
+    unsigned int start;
+    int step;
 };
 
 struct wined3d_shader_frontend
@@ -937,10 +941,11 @@ do {                                          \
 } while(0)
 
 /* Trace vector and strided data information */
-#define TRACE_VECTOR(name) TRACE( #name "=(%f, %f, %f, %f)\n", name.x, name.y, name.z, name.w);
-#define TRACE_STRIDED(si, name) TRACE( #name "=(data:%p, stride:%d, format:%#x, vbo %d, stream %u)\n", \
+#define TRACE_VECTOR(name) TRACE( #name "=(%f, %f, %f, %f)\n", name.x, name.y, name.z, name.w)
+#define TRACE_STRIDED(si, name) do { if (si->use_map & (1 << name)) \
+        TRACE( #name "=(data:%p, stride:%d, format:%#x, vbo %d, stream %u)\n", \
         si->elements[name].data, si->elements[name].stride, si->elements[name].format_desc->format, \
-        si->elements[name].buffer_object, si->elements[name].stream_idx);
+        si->elements[name].buffer_object, si->elements[name].stream_idx); } while(0)
 
 /* Defines used for optimizations */
 
@@ -2640,6 +2645,7 @@ void shader_dump_src_param(const struct wined3d_shader_src_param *param,
         const struct wined3d_shader_version *shader_version);
 void shader_dump_dst_param(const struct wined3d_shader_dst_param *param,
         const struct wined3d_shader_version *shader_version);
+unsigned int shader_find_free_input_register(const struct shader_reg_maps *reg_maps, unsigned int max);
 void shader_generate_main(IWineD3DBaseShader *iface, struct wined3d_shader_buffer *buffer,
         const shader_reg_maps *reg_maps, const DWORD *pFunction, void *backend_ctx);
 HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct wined3d_shader_frontend *fe,
@@ -2880,8 +2886,12 @@ const struct GlPixelFormatDesc *getFormatDescEntry(WINED3DFORMAT fmt, const stru
 
 static inline BOOL use_vs(IWineD3DStateBlockImpl *stateblock)
 {
+    /* Check stateblock->vertexDecl to allow this to be used from
+     * IWineD3DDeviceImpl_FindTexUnitMap(). This is safe because
+     * stateblock->vertexShader implies a vertex declaration instead of ddraw
+     * style strided data. */
     return (stateblock->vertexShader
-            && !stateblock->wineD3DDevice->strided_streams.position_transformed
+            && !((IWineD3DVertexDeclarationImpl *)stateblock->vertexDecl)->position_transformed
             && stateblock->wineD3DDevice->vs_selected_mode != SHADER_NONE);
 }
 

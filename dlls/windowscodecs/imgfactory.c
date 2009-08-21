@@ -164,6 +164,21 @@ static HRESULT WINAPI ImagingFactory_CreateDecoderFromStream(
     }
     else
     {
+        if (WARN_ON(wincodecs))
+        {
+            LARGE_INTEGER seek;
+            BYTE data[4];
+            ULONG bytesread;
+
+            WARN("failed to load from a stream\n");
+
+            seek.QuadPart = 0;
+            res = IStream_Seek(pIStream, seek, STREAM_SEEK_SET, NULL);
+            if (SUCCEEDED(res))
+                res = IStream_Read(pIStream, data, 4, &bytesread);
+            if (SUCCEEDED(res))
+                WARN("first %i bytes of stream=%x %x %x %x\n", bytesread, data[0], data[1], data[2], data[3]);
+        }
         *ppIDecoder = NULL;
         return WINCODEC_ERR_COMPONENTNOTFOUND;
     }
@@ -241,8 +256,8 @@ static HRESULT WINAPI ImagingFactory_CreateBitmapFlipRotator(IWICImagingFactory 
 static HRESULT WINAPI ImagingFactory_CreateStream(IWICImagingFactory *iface,
     IWICStream **ppIWICStream)
 {
-    FIXME("(%p,%p): stub\n", iface, ppIWICStream);
-    return E_NOTIMPL;
+    TRACE("(%p,%p)\n", iface, ppIWICStream);
+    return StreamImpl_Create(ppIWICStream);
 }
 
 static HRESULT WINAPI ImagingFactory_CreateColorContext(IWICImagingFactory *iface,

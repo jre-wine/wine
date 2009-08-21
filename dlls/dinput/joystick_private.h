@@ -45,11 +45,15 @@ typedef struct JoystickGenericImpl
     GUID        guidProduct;
     GUID        guidInstance;
     char        *name;
+    int         device_axis_count;      /* Total number of axes in the device */
+    int        *axis_map;               /* User axes remapping */
+    LONG        deadzone;               /* Default dead-zone */
 
     joy_polldev_handler *joy_polldev;
 } JoystickGenericImpl;
 
 LONG joystick_map_axis(ObjProps *props, int val);
+HRESULT setup_dinput_options(JoystickGenericImpl *This, const BYTE *default_axis_map);
 
 DWORD joystick_map_pov(POINTL *p);
 

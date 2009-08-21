@@ -30,6 +30,12 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
+#ifdef HAVE_SYS_STAT_H
+# include <sys/stat.h>
+#endif
+#ifdef HAVE_SYS_MMAN_H
+#include <sys/mman.h>
+#endif
 
 #include "build.h"
 
@@ -368,6 +374,156 @@ char *get_temp_file_name( const char *prefix, const char *suffix )
     close( fd );
     tmp_files[nb_tmp_files++] = name;
     return name;
+}
+
+/*******************************************************************
+ *         buffer management
+ *
+ * Function for reading from/writing to a memory buffer.
+ */
+
+int byte_swapped = 0;
+const char *input_buffer_filename;
+const unsigned char *input_buffer;
+size_t input_buffer_pos;
+size_t input_buffer_size;
+unsigned char *output_buffer;
+size_t output_buffer_pos;
+size_t output_buffer_size;
+
+static void check_output_buffer_space( size_t size )
+{
+    if (output_buffer_pos + size >= output_buffer_size)
+    {
+        output_buffer_size = max( output_buffer_size * 2, output_buffer_pos + size );
+        output_buffer = xrealloc( output_buffer, output_buffer_size );
+    }
+}
+
+void init_input_buffer( const char *file )
+{
+    int fd;
+    struct stat st;
+
+    if ((fd = open( file, O_RDONLY | O_BINARY )) == -1) fatal_perror( "Cannot open %s", file );
+    if ((fstat( fd, &st ) == -1)) fatal_perror( "Cannot stat %s", file );
+    if (!st.st_size) fatal_error( "%s is an empty file\n", file );
+#ifdef	HAVE_MMAP
+    if ((input_buffer = mmap( NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0 )) == (void*)-1)
+#endif
+    {
+        unsigned char *buffer = xmalloc( st.st_size );
+        if (read( fd, buffer, st.st_size ) != st.st_size) fatal_error( "Cannot read %s\n", file );
+        input_buffer = buffer;
+    }
+    close( fd );
+    input_buffer_filename = xstrdup( file );
+    input_buffer_size = st.st_size;
+    input_buffer_pos = 0;
+    byte_swapped = 0;
+}
+
+void init_output_buffer(void)
+{
+    output_buffer_size = 1024;
+    output_buffer_pos = 0;
+    output_buffer = xmalloc( output_buffer_size );
+}
+
+void flush_output_buffer(void)
+{
+    if (fwrite( output_buffer, 1, output_buffer_pos, output_file ) != output_buffer_pos)
+        fatal_error( "Error writing to %s\n", output_file_name );
+    free( output_buffer );
+}
+
+unsigned char get_byte(void)
+{
+    if (input_buffer_pos >= input_buffer_size)
+        fatal_error( "%s is a truncated file\n", input_buffer_filename );
+    return input_buffer[input_buffer_pos++];
+}
+
+unsigned short get_word(void)
+{
+    unsigned short ret;
+
+    if (input_buffer_pos + sizeof(ret) > input_buffer_size)
+        fatal_error( "%s is a truncated file\n", input_buffer_filename );
+    memcpy( &ret, input_buffer + input_buffer_pos, sizeof(ret) );
+    if (byte_swapped) ret = (ret << 8) | (ret >> 8);
+    input_buffer_pos += sizeof(ret);
+    return ret;
+}
+
+unsigned int get_dword(void)
+{
+    unsigned int ret;
+
+    if (input_buffer_pos + sizeof(ret) > input_buffer_size)
+        fatal_error( "%s is a truncated file\n", input_buffer_filename );
+    memcpy( &ret, input_buffer + input_buffer_pos, sizeof(ret) );
+    if (byte_swapped)
+        ret = ((ret << 24) | ((ret << 8) & 0x00ff0000) | ((ret >> 8) & 0x0000ff00) | (ret >> 24));
+    input_buffer_pos += sizeof(ret);
+    return ret;
+}
+
+void put_data( const void *data, size_t size )
+{
+    check_output_buffer_space( size );
+    memcpy( output_buffer + output_buffer_pos, data, size );
+    output_buffer_pos += size;
+}
+
+void put_byte( unsigned char val )
+{
+    check_output_buffer_space( 1 );
+    output_buffer[output_buffer_pos++] = val;
+}
+
+void put_word( unsigned short val )
+{
+    if (byte_swapped) val = (val << 8) | (val >> 8);
+    put_data( &val, sizeof(val) );
+}
+
+void put_dword( unsigned int val )
+{
+    if (byte_swapped)
+        val = ((val << 24) | ((val << 8) & 0x00ff0000) | ((val >> 8) & 0x0000ff00) | (val >> 24));
+    put_data( &val, sizeof(val) );
+}
+
+void put_qword( unsigned int val )
+{
+    if (byte_swapped)
+    {
+        put_dword( 0 );
+        put_dword( val );
+    }
+    else
+    {
+        put_dword( val );
+        put_dword( 0 );
+    }
+}
+
+/* pointer-sized word */
+void put_pword( unsigned int val )
+{
+    if (get_ptr_size() == 8) put_qword( val );
+    else put_dword( val );
+}
+
+void align_output( unsigned int align )
+{
+    size_t size = align - (output_buffer_pos % align);
+
+    if (size == align) return;
+    check_output_buffer_space( size );
+    memset( output_buffer + output_buffer_pos, 0, size );
+    output_buffer_pos += size;
 }
 
 /* output a standard header for generated files */
