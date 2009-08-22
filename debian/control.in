@@ -91,8 +91,8 @@ Package: libwine
 Section: libs
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Multi-Arch: same
-Depends: ${shlibs:Depends}
-Pre-Depends: ${misc:Pre-Depends}
+Depends: ${wine:Depends}, ${shlibs:Depends}
+Pre-Depends: ${wine:Pre-Depends}
 Replaces: wine (<< 0.9.11-1), libwine-twain (<< 0.9.13), libwine-gl (<< 0.9.53-1)
 Recommends: ${shlibs:Recommends}
 Suggests: wine-doc

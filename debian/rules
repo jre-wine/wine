@@ -82,6 +82,14 @@ LIBDIRS =
 else
 BUILDS = build32
 LIBDIRS = $(IA32_LIBDIR)
+ifeq (usr/lib32,$(IA32_LIBDIR))
+# for /emul/ia32-linux/usr/lib -> /usr/lib32 transition
+LIBWINE_PREDEPS = libc6-i386 (>= 2.9-18)
+endif
+ifeq (usr/lib/i486-linux-gnu,$(IA32_LIBDIR))
+# need ld.so support for multiarch path
+LIBWINE_DEPS = libc6-i386 (>= 2.9-24)
+endif
 endif
 
 ifeq (y,$(ENABLE_WIN64))
@@ -101,12 +109,6 @@ empty:=
 space:=$(empty) $(empty)
 
 SHLIBS_OPTS = -Llibwine$(VERSUFFIX) -l$(subst $(space),:,$(patsubst %,$(CURDIR)/debian/libwine$(VERSUFFIX)/%,$(LIBDIRS)))
-
-ifneq (,$(findstring build32,$(BUILDS)))
-ifeq (usr/lib32,$(IA32_LIBDIR))
-PRE_DEPS = Pre-Depends=libc6-i386 (>= 2.9-18)
-endif
-endif
 
 control-stamp: debian/control.in
 ifneq (,$(BUILDS))
@@ -376,10 +378,11 @@ binary-arch: install-arch-stamp
 	dh_compress -s
 	dh_fixperms -s
 
+	echo "wine:Pre-Depends=$(LIBWINE_PREDEPS)" >> debian/libwine$(VERSUFFIX).substvars
+	echo "wine:Depends=$(LIBWINE_DEPS)" >> debian/libwine$(VERSUFFIX).substvars
+
 	# tight libwine dependencies for packages built here
 	dh_makeshlibs -plibwine$(VERSUFFIX) -n -V "libwine$(VERSUFFIX) (= $(VERSION))"
-
-	echo "misc:Pre-Depends=$(PRE_DEPS)" >> debian/libwine$(VERSUFFIX).substvars
 
 	# forcing extra dependencies
 	bash debian/gendeps.sh "$(VERSUFFIX)" $(patsubst build%,%,$(BUILDS))
