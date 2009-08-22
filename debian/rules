@@ -30,11 +30,18 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 VERSUFFIX=-unstable
 
-# for backports, maybe make this conditional on debian version compiled for
-MULTIARCH=y
+# Maybe make this conditional on debian version compiled for, for backports
+# Can be set to:
+#  "n": Install into traditional paths, /usr/lib and /usr/lib32
+#  "p": Install into multiarch paths, /usr/lib/x86_64-linux-gnu and /usr/lib/i486-linux-gnu
+#  "y": Full multiarch, build natively only
+MULTIARCH=p
+
+# Win64 is not ready yet
+ENABLE_WIN64=n
 
 CC=gcc
-ifneq (,$(MULTIARCH))
+ifneq (n,$(MULTIARCH))
 LIBDIR=usr/lib/$(DEB_HOST_GNU_TYPE)
 else
 LIBDIR=usr/lib
@@ -56,7 +63,7 @@ ifeq ($(DEB_HOST_GNU_CPU),x86_64)
 
 IA32_LIBS := /emul/ia32-linux
 IA32_LDFLAGS += -L$(CURDIR)/lib32
-ifneq (,$(MULTIARCH))
+ifneq (n,$(MULTIARCH))
 IA32_LIBDIR := usr/lib/i486-$(DEB_HOST_GNU_SYSTEM)
 else
 IA32_LIBDIR := usr/lib32
@@ -66,15 +73,21 @@ IA32_LIBDIR := $(patsubst /%,%,$(IA32_LIBDIR_LINK))
 endif
 endif
 
-# Not ready yet: build Win64 version
-#BUILDS = build32 build64
-#LIBDIRS = $(IA32_LIBDIR) $(AMD64_LIBDIR)
-BUILDS = build32
-LIBDIRS = $(IA32_LIBDIR)
-#BUILDS =
-#LIBDIRS =
+ifeq (y,$(MULTIARCH))
+# full multiarch, cannot build 32-bit Wine on amd64
+BUILDS =
+LIBDIRS =
 #TRANSPREFIX = ia32-
 #TRANSSUFFIX = $(VERSUFFIX)
+else
+BUILDS = build32
+LIBDIRS = $(IA32_LIBDIR)
+endif
+
+ifeq (y,$(ENABLE_WIN64))
+BUILDS += build64
+LIBDIRS += $(AMD64_LIBDIR)
+endif
 
 else # !x86_64
 
@@ -101,6 +114,7 @@ ifneq (,$(BUILDS))
 else
 	bash debian/prep-control-transit.sh "$(VERSUFFIX)" "$(TRANSPREFIX)" "$(TRANSSUFFIX)"
 endif
+	bash debian/multiarch-control.sh "$(MULTIARCH)" "$(ENABLE_WIN64)"
 	touch control-stamp
 
 configure-ia32: configure-ia32-stamp
@@ -252,10 +266,10 @@ install-arch32-stamp: build-arch32-stamp
 
 	touch install-arch32-stamp
 
-# I still have to work out how to install 32-bit and 64-bit Wine side by side.
-# This version only works if the 32-bit version isn't installed...
+# If building both 32-bit and 64-bit into the same packages, this will overwrite any 32-bit stuff
+# outside /usr/lib with their 64-bit equivalents. This is intentional.
 install-arch64: install-arch64-stamp
-install-arch64-stamp: build-arch64-stamp
+install-arch64-stamp: build-arch64-stamp $(patsubst build%,install-arch%-stamp,$(filter build32,$(BUILDS)))
 	dh_testdir
 	dh_testroot
 
