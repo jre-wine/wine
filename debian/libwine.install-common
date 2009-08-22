@@ -1,12 +1,4 @@
 debian/tmp/usr/lib/libwine*.so.*
-debian/tmp/usr/lib/wine/*.dll.so
-debian/tmp/usr/lib/wine/*.drv.so
-debian/tmp/usr/lib/wine/*.sys.so
-debian/tmp/usr/lib/wine/*.acm.so
-debian/tmp/usr/lib/wine/*.ocx.so
-debian/tmp/usr/lib/wine/*.tlb.so
-debian/tmp/usr/lib/wine/*.ds.so
-debian/tmp/usr/lib/wine/ntoskrnl.exe.so
 debian/tmp/usr/lib/wine/wine.bin
 debian/tmp/usr/lib/wine/wineserver
 debian/tmp/usr/share/wine/generic.ppd
