@@ -1,8 +1,40 @@
-wine-unstable (1.1.28-1) UNRELEASED; urgency=low
+wine-unstable (1.1.28-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.28, released Aug 21, 2009.
+    - Support for IRDA protocol.
+    - Faster initial wineprefix creation.
+    - Axis remapping with evdev joysticks.
+    - More image formats in WindowsCodecs.
+    - Various bug fixes.
+  * On amd64, check for libnss_mdns4.so.2 in /usr/lib32 instead of in
+    /lib32. (Apparently it was placed in /usr/lib32 by a NMU that didn't
+    try to match the old directory layout as much as I had assumed, and
+    that it probably should have.) (Closes: #541201)
+  * Changed XB-Multi-Arch to Multi-Arch in debian/control. (By the time
+    the field actually matters, dpkg-dev will probably support it.)
+  * Only include the Multi-Arch annotations in the packages when
+    building in full-multiarch mode, in which the amd64 Wine packages
+    will not include 32-bit Wine. This mode is, of course, not enabled
+    by default yet.
+  * Added ${shlibs:Depends} to libwine-dev's Depends field. The shlibs-
+    added dependencies for this package are redundant, but can't hurt,
+    and it suppresses a warning.
+  * Install the new pre-built fake DLLs into the Wine packages,
+    following the package split. To reduce future problems, I now use
+    *.install-modules files to list all DLLs to install, and then
+    prep-install.sh makes sure all files relevant to that DLL get
+    properly installed.
+  * If 32-bit Wine is compiled on amd64 using multiarch paths, depend on
+    a libc6-i386 >= 2.9-24.
+  * With ia32-apt-get gone, and multiarch paths only working on sid
+    (hence making my backports probably not work), switch back to
+    traditional library paths for now, to see if the package still works
+    with them. Also closes: #540706.
+  * Made sure the *.install-common files aren't empty, or they don't end
+    up in the diff, which would confuse the current build system
+    (perhaps I should fix that someday, but...)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Fri, 21 Aug 2009 19:49:14 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 22 Aug 2009 19:43:44 +0200
 
 wine-unstable (1.1.27-1) unstable; urgency=low
 
