@@ -78,7 +78,7 @@ Description: Windows API implementation - debugging symbols
 Package: libwine-dev
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Section: libdevel
-Depends: libwine (= ${binary:Version}), libc6-dev, libc6-dev-i386 [amd64 kfreebsd-amd64]
+Depends: ${shlibs:Depends}, libwine (= ${binary:Version}), libc6-dev, libc6-dev-i386 [amd64 kfreebsd-amd64]
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1)
 Suggests: wine-doc
 Description: Windows API implementation - development files
