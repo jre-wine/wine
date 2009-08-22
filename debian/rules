@@ -35,7 +35,7 @@ VERSUFFIX=-unstable
 #  "n": Install into traditional paths, /usr/lib and /usr/lib32
 #  "p": Install into multiarch paths, /usr/lib/x86_64-linux-gnu and /usr/lib/i486-linux-gnu
 #  "y": Full multiarch, build natively only
-MULTIARCH=p
+MULTIARCH=n
 
 # Win64 is not ready yet
 ENABLE_WIN64=n
