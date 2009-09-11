@@ -111,7 +111,6 @@ CONFIGDIRS = \
 	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(libdir)/wine`\" \
 	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
 	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(libdir)/wine $(dlldir)`\" \
-	-DLIB_TO_DATADIR=\"`$(RELPATH) $(libdir) $(datadir)/wine`\" \
 	-DBIN_TO_DATADIR=\"`$(RELPATH) $(libdir)/wine $(datadir)/wine`\"
 
 config.o: config.c $(RELPATH)
@@ -183,6 +182,6 @@ clean::
 	$(RM) libwine.so.$(SOVERSION) libwine.so.$(VERSION) version.c
 
 $(RELPATH):
-	@cd $(TOOLSDIR)/tools && $(MAKE) relpath
+	@cd $(TOOLSDIR)/tools && $(MAKE) relpath$(TOOLSEXT)
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

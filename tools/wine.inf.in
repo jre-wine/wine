@@ -2413,6 +2413,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,jscript.dll,1
 11,,mlang.dll,1
 11,,msctf.dll,1
+11,,msdaps.dll,1
 11,,mshtml.dll,1
 11,,msi.dll,1
 11,,msiexec.exe,1
@@ -2428,6 +2429,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,quartz.dll,1
 11,,rsaenh.dll,1
 11,,shdocvw.dll,1
+11,,sti.dll,1
 11,,urlmon.dll,1
 11,,wbemprox.dll,1
 11,,windowscodecs.dll,1

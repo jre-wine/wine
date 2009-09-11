@@ -503,6 +503,20 @@ static inline BOOL is_basic_auth_value( LPCWSTR pszAuthValue )
         ((pszAuthValue[ARRAYSIZE(szBasic)] == ' ') || !pszAuthValue[ARRAYSIZE(szBasic)]);
 }
 
+static void destroy_authinfo( struct HttpAuthInfo *authinfo )
+{
+    if (!authinfo) return;
+
+    if (SecIsValidHandle(&authinfo->ctx))
+        DeleteSecurityContext(&authinfo->ctx);
+    if (SecIsValidHandle(&authinfo->cred))
+        FreeCredentialsHandle(&authinfo->cred);
+
+    HeapFree(GetProcessHeap(), 0, authinfo->auth_data);
+    HeapFree(GetProcessHeap(), 0, authinfo->scheme);
+    HeapFree(GetProcessHeap(), 0, authinfo);
+}
+
 static BOOL HTTP_DoAuthorization( http_request_t *lpwhr, LPCWSTR pszAuthValue,
                                   struct HttpAuthInfo **ppAuthInfo,
                                   LPWSTR domain_and_username, LPWSTR password )
@@ -706,8 +720,9 @@ static BOOL HTTP_DoAuthorization( http_request_t *lpwhr, LPCWSTR pszAuthValue,
         else
         {
             ERR("InitializeSecurityContextW returned error 0x%08x\n", sec_status);
-            pAuthInfo->finished = TRUE;
             HeapFree(GetProcessHeap(), 0, out.pvBuffer);
+            destroy_authinfo(pAuthInfo);
+            *ppAuthInfo = NULL;
             return FALSE;
         }
     }
@@ -1507,31 +1522,8 @@ static void HTTPREQ_Destroy(object_header_t *hdr)
     DeleteCriticalSection( &lpwhr->read_section );
     WININET_Release(&lpwhr->lpHttpSession->hdr);
 
-    if (lpwhr->pAuthInfo)
-    {
-        if (SecIsValidHandle(&lpwhr->pAuthInfo->ctx))
-            DeleteSecurityContext(&lpwhr->pAuthInfo->ctx);
-        if (SecIsValidHandle(&lpwhr->pAuthInfo->cred))
-            FreeCredentialsHandle(&lpwhr->pAuthInfo->cred);
-
-        HeapFree(GetProcessHeap(), 0, lpwhr->pAuthInfo->auth_data);
-        HeapFree(GetProcessHeap(), 0, lpwhr->pAuthInfo->scheme);
-        HeapFree(GetProcessHeap(), 0, lpwhr->pAuthInfo);
-        lpwhr->pAuthInfo = NULL;
-    }
-
-    if (lpwhr->pProxyAuthInfo)
-    {
-        if (SecIsValidHandle(&lpwhr->pProxyAuthInfo->ctx))
-            DeleteSecurityContext(&lpwhr->pProxyAuthInfo->ctx);
-        if (SecIsValidHandle(&lpwhr->pProxyAuthInfo->cred))
-            FreeCredentialsHandle(&lpwhr->pProxyAuthInfo->cred);
-
-        HeapFree(GetProcessHeap(), 0, lpwhr->pProxyAuthInfo->auth_data);
-        HeapFree(GetProcessHeap(), 0, lpwhr->pProxyAuthInfo->scheme);
-        HeapFree(GetProcessHeap(), 0, lpwhr->pProxyAuthInfo);
-        lpwhr->pProxyAuthInfo = NULL;
-    }
+    destroy_authinfo(lpwhr->pAuthInfo);
+    destroy_authinfo(lpwhr->pProxyAuthInfo);
 
     HeapFree(GetProcessHeap(), 0, lpwhr->lpszPath);
     HeapFree(GetProcessHeap(), 0, lpwhr->lpszVerb);
@@ -1545,6 +1537,14 @@ static void HTTPREQ_Destroy(object_header_t *hdr)
         HeapFree(GetProcessHeap(), 0, lpwhr->pCustHeaders[i].lpszValue);
     }
 
+#ifdef HAVE_ZLIB
+    if(lpwhr->gzip_stream) {
+        if(!lpwhr->gzip_stream->end_of_data)
+            inflateEnd(&lpwhr->gzip_stream->zstream);
+        HeapFree(GetProcessHeap(), 0, lpwhr->gzip_stream);
+    }
+#endif
+
     HeapFree(GetProcessHeap(), 0, lpwhr->pCustHeaders);
     HeapFree(GetProcessHeap(), 0, lpwhr);
 }
@@ -1554,14 +1554,6 @@ static void HTTPREQ_CloseConnection(object_header_t *hdr)
     http_request_t *lpwhr = (http_request_t*) hdr;
 
     TRACE("%p\n",lpwhr);
-
-#ifdef HAVE_ZLIB
-    if(lpwhr->gzip_stream) {
-        inflateEnd(&lpwhr->gzip_stream->zstream);
-        HeapFree(GetProcessHeap(), 0, lpwhr->gzip_stream);
-        lpwhr->gzip_stream = NULL;
-    }
-#endif
 
     if (!NETCON_connected(&lpwhr->netConnection))
         return;
@@ -2057,6 +2049,7 @@ static DWORD read_gzip_data(http_request_t *req, BYTE *buf, int size, BOOL sync,
         if(zres == Z_STREAM_END) {
             TRACE("end of data\n");
             req->gzip_stream->end_of_data = TRUE;
+            inflateEnd(&req->gzip_stream->zstream);
         }else if(zres != Z_OK) {
             WARN("inflate failed %d\n", zres);
             if(!read)

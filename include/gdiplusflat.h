@@ -59,6 +59,7 @@ GpStatus WINGDIPAPI GdipCreateBitmapFromScan0(INT,INT,INT,PixelFormat,BYTE*,
     GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromStream(IStream*,GpBitmap**);
 GpStatus WINGDIPAPI GdipCreateBitmapFromStreamICM(IStream*,GpBitmap**);
+GpStatus WINGDIPAPI GdipCreateHBITMAPFromBitmap(GpBitmap*,HBITMAP*,ARGB);
 GpStatus WINGDIPAPI GdipCreateHICONFromBitmap(GpBitmap*,HICON*);
 GpStatus WINGDIPAPI GdipDeleteEffect(CGpEffect*);
 
@@ -232,6 +233,8 @@ GpStatus WINGDIPAPI GdipGetVisibleClipBoundsI(GpGraphics*,GpRect*);
 GpStatus WINGDIPAPI GdipIsClipEmpty(GpGraphics*, BOOL*);
 GpStatus WINGDIPAPI GdipIsVisiblePoint(GpGraphics*,REAL,REAL,BOOL*);
 GpStatus WINGDIPAPI GdipIsVisiblePointI(GpGraphics*,INT,INT,BOOL*);
+GpStatus WINGDIPAPI GdipIsVisibleRect(GpGraphics*,REAL,REAL,REAL,REAL,BOOL*);
+GpStatus WINGDIPAPI GdipIsVisibleRectI(GpGraphics*,INT,INT,INT,INT,BOOL*);
 GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics*, GDIPCONST WCHAR*,
     INT, GDIPCONST GpFont*, GDIPCONST RectF*, GDIPCONST GpStringFormat*, INT,
     GpRegion**);
@@ -565,6 +568,10 @@ GpStatus WINGDIPAPI GdipGetRegionHRgn(GpRegion *, GpGraphics *, HRGN *);
 GpStatus WINGDIPAPI GdipIsEmptyRegion(GpRegion *, GpGraphics *, BOOL *);
 GpStatus WINGDIPAPI GdipIsEqualRegion(GpRegion *, GpRegion *, GpGraphics *, BOOL *);
 GpStatus WINGDIPAPI GdipIsInfiniteRegion(GpRegion *, GpGraphics *, BOOL *);
+GpStatus WINGDIPAPI GdipIsVisibleRegionPoint(GpRegion *, REAL, REAL, GpGraphics *, BOOL *);
+GpStatus WINGDIPAPI GdipIsVisibleRegionPointI(GpRegion *, INT, INT, GpGraphics *, BOOL *);
+GpStatus WINGDIPAPI GdipIsVisibleRegionRect(GpRegion *, REAL, REAL, REAL, REAL, GpGraphics *, BOOL *);
+GpStatus WINGDIPAPI GdipIsVisibleRegionRectI(GpRegion *, INT, INT, INT, INT, GpGraphics *, BOOL *);
 GpStatus WINGDIPAPI GdipSetEmpty(GpRegion *);
 GpStatus WINGDIPAPI GdipSetInfinite(GpRegion *);
 GpStatus WINGDIPAPI GdipTransformRegion(GpRegion *, GpMatrix *);

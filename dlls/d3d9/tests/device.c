@@ -82,13 +82,13 @@ static int get_refcount(IUnknown *object)
 static void check_mipmap_levels(IDirect3DDevice9 *device, UINT width, UINT height, UINT count)
 {
     IDirect3DBaseTexture9* texture = NULL;
-    HRESULT hr = IDirect3DDevice9_CreateTexture( device, width, height, 0, 0, 
-        D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, (IDirect3DTexture9**) &texture, NULL );
-       
+    HRESULT hr = IDirect3DDevice9_CreateTexture( device, width, height, 0, 0,
+            D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, (IDirect3DTexture9**) &texture, NULL );
+
     if (SUCCEEDED(hr)) {
         DWORD levels = IDirect3DBaseTexture9_GetLevelCount(texture);
         ok(levels == count, "Invalid level count. Expected %d got %u\n", count, levels);
-    } else 
+    } else
         trace("CreateTexture failed: %08x\n", hr);
 
     if (texture) IUnknown_Release( texture );
@@ -104,7 +104,7 @@ static void test_mipmap_levels(void)
     IDirect3DDevice9      *pDevice = NULL;
     D3DPRESENT_PARAMETERS d3dpp;
     D3DDISPLAYMODE        d3ddm;
- 
+
     pD3d = pDirect3DCreate9( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D9 object\n");
     hwnd = CreateWindow( "static", "d3d9_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
@@ -388,7 +388,7 @@ static void test_refcount(void)
 
     D3DVERTEXELEMENT9 decl[] =
     {
-	D3DDECL_END()
+        D3DDECL_END()
     };
     static DWORD simple_ps[] = {0xFFFF0101,                                     /* ps_1_1                       */
         0x00000051, 0xA00F0001, 0x3F800000, 0x00000000, 0x00000000, 0x00000000, /* def c1 = 1.0, 0.0, 0.0, 0.0  */
@@ -1830,14 +1830,14 @@ static void test_null_stream(void)
     hr = IDirect3DDevice9_CreateVertexDeclaration(device, decl_elements, &decl);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexDeclaration failed (0x%08x)\n", hr);
     if (FAILED(hr)) {
-	skip("Vertex declaration handling not possible.\n");
-	goto cleanup;
+        skip("Vertex declaration handling not possible.\n");
+        goto cleanup;
     }
     hr = IDirect3DDevice9_CreateVertexBuffer(device, 12 * sizeof(float), 0, 0, D3DPOOL_MANAGED, &buffer, NULL);
     ok(SUCCEEDED(hr), "IDirect3DDevice9_CreateVertexBuffer failed (0x%08x)\n", hr);
     if (FAILED(hr)) {
-	skip("Vertex buffer handling not possible.\n");
-	goto cleanup;
+        skip("Vertex buffer handling not possible.\n");
+        goto cleanup;
     }
 
     hr = IDirect3DDevice9_SetStreamSource(device, 0, buffer, 0, sizeof(float) * 3);

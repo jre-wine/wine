@@ -1141,10 +1141,13 @@ void (WINE_GLAPI *glViewport) (GLint x, GLint y, GLsizei width, GLsizei height);
 void (WINE_GLAPI *glPointParameterfv) (GLenum pname, const GLfloat *params);
 
 /* glFinish and glFlush are always loaded from opengl32.dll, thus they always have
- * __stdcall calling convention
+ * __stdcall calling convention.
+ *
+ * They are wgl functions and must not be called inside the gl lock, give them a
+ * name that makes this clear
  */
-void (__stdcall  *glFinish) ();
-void (__stdcall  *glFlush) ();
+void (__stdcall  *wglFinish) ();
+void (__stdcall  *wglFlush) ();
 
 /* WGL functions */
 HGLRC   (WINAPI *pwglCreateContext)(HDC);
@@ -1523,6 +1526,12 @@ typedef void (WINE_GLAPI *PGLFNCLAMPCOLORARBPROC) (GLenum target, GLenum clamp);
 #define GL_DEPTH_COMPONENT32F             0x8cac
 #define GL_DEPTH32F_STENCIL8              0x8cad
 #define GL_FLOAT_32_UNSIGNED_INT_24_8_REV 0x8dad
+#endif
+
+/* GL_ARB_depth_clamp */
+#ifndef GL_ARB_depth_clamp
+#define GL_ARB_depth_clamp 1
+#define GL_DEPTH_CLAMP                    0x864f
 #endif
 
 /* GL_ARB_depth_texture */
@@ -3402,6 +3411,7 @@ typedef enum _GL_SupportedExt {
   /* ARB */
   ARB_COLOR_BUFFER_FLOAT,
   ARB_DEPTH_BUFFER_FLOAT,
+  ARB_DEPTH_CLAMP,
   ARB_DEPTH_TEXTURE,
   ARB_DRAW_BUFFERS,
   ARB_FRAGMENT_PROGRAM,

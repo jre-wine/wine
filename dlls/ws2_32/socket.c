@@ -2125,8 +2125,13 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
         FIXME("Unknown IPPROTO_IP optname 0x%08x\n", optname);
         return SOCKET_ERROR;
 
+    case WS_IPPROTO_IPV6:
+        FIXME("IPPROTO_IPV6 unimplemented (optname 0x%08x)\n", optname);
+        return SOCKET_ERROR;
+
     default:
-        FIXME("Unknown level: 0x%08x\n", level);
+        WARN("Unknown level: 0x%08x\n", level);
+        SetLastError(WSAEINVAL);
         return SOCKET_ERROR;
     } /* end switch(level) */
 }
@@ -3277,7 +3282,8 @@ int WINAPI WS_setsockopt(SOCKET s, int level, int optname,
         break;
 
     default:
-        FIXME("Unknown level: 0x%08x\n", level);
+        WARN("Unknown level: 0x%08x\n", level);
+        SetLastError(WSAEINVAL);
         return SOCKET_ERROR;
     } /* end switch(level) */
 

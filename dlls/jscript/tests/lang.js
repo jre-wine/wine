@@ -796,6 +796,27 @@ if (true)
     else
         ok(true, "else should be associated with nearest if statement");
 
+function instanceOfTest() {}
+tmp = new instanceOfTest();
+
+ok((tmp instanceof instanceOfTest) === true, "tmp is not instance of instanceOfTest");
+ok((tmp instanceof Object) === true, "tmp is not instance of Object");
+ok((tmp instanceof String) === false, "tmp is instance of String");
+
+instanceOfTest.prototype = new Object();
+ok((tmp instanceof instanceOfTest) === false, "tmp is instance of instanceOfTest");
+ok((tmp instanceof Object) === true, "tmp is not instance of Object");
+
+ok((1 instanceof Object) === false, "1 is instance of Object");
+ok((false instanceof Boolean) === false, "false is instance of Boolean");
+ok(("" instanceof Object) === false, "'' is instance of Object");
+
+(function () {
+    ok((arguments instanceof Object) === true, "argument is not instance of Object");
+    ok((arguments instanceof Array) === false, "argument is not instance of Array");
+    ok(arguments.toString() === "[object Object]", "arguments.toString() = " + arguments.toString());
+})(1,2);
+
 ok(isNaN(NaN) === true, "isNaN(NaN) !== true");
 ok(isNaN(0.5) === false, "isNaN(0.5) !== false");
 ok(isNaN(Infinity) === false, "isNaN(Infinity) !== false");
@@ -896,6 +917,18 @@ ok(""+str === "test", "''+str = " + str);
 
 ok((function (){return 1;})() === 1, "(function (){return 1;})() = " + (function (){return 1;})());
 
+var re = /=(\?|%3F)/g;
+ok(re.source === "=(\\?|%3F)", "re.source = " + re.source);
+
 ok(createNullBSTR() === '', "createNullBSTR() !== ''");
+
+function do_test() {}
+function nosemicolon() {} nosemicolon();
+function () {} nosemicolon();
+
+ok(typeof(doesnotexist) === "undefined", "typeof(doesnotexist) = " + typeof(doesnotexist));
+
+(function() { newValue = 1; })();
+ok(newValue === 1, "newValue = " + newValue);
 
 reportSuccess();

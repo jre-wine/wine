@@ -45,6 +45,7 @@ PUBLIC_IDL_H_SRCS = \
 	mmstream.idl \
 	mscoree.idl \
 	msctf.idl \
+	msdadc.idl \
 	mshtmhst.idl \
 	mshtml.idl \
 	msinkaut.idl \
@@ -300,6 +301,7 @@ SRCDIR_INCLUDES = \
 	msacmdlg.h \
 	msacmdrv.h \
 	mscat.h \
+	msdaguid.h \
 	mshtmcid.h \
 	mshtmdid.h \
 	msi.h \

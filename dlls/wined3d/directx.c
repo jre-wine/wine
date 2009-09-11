@@ -56,6 +56,7 @@ static const struct {
     /* ARB */
     {"GL_ARB_color_buffer_float",           ARB_COLOR_BUFFER_FLOAT,         0                           },
     {"GL_ARB_depth_buffer_float",           ARB_DEPTH_BUFFER_FLOAT,         0                           },
+    {"GL_ARB_depth_clamp",                  ARB_DEPTH_CLAMP,                0                           },
     {"GL_ARB_depth_texture",                ARB_DEPTH_TEXTURE,              0                           },
     {"GL_ARB_draw_buffers",                 ARB_DRAW_BUFFERS,               0                           },
     {"GL_ARB_fragment_program",             ARB_FRAGMENT_PROGRAM,           0                           },
@@ -183,6 +184,14 @@ const struct min_lookup minMipLookup_noFilter[] =
     {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* NONE */
     {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* POINT */
     {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* LINEAR */
+};
+
+const struct min_lookup minMipLookup_noMip[] =
+{
+    /* NONE         POINT                       LINEAR */
+    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* NONE */
+    {{GL_NEAREST,   GL_NEAREST,                 GL_NEAREST}},               /* POINT */
+    {{GL_LINEAR,    GL_LINEAR,                  GL_LINEAR }},               /* LINEAR */
 };
 
 const GLenum magLookup[] =
@@ -519,14 +528,10 @@ static BOOL match_apple(const struct wined3d_gl_info *gl_info, const char *gl_re
             && gl_info->supported[APPLE_FLUSH_RENDER]
             && gl_info->supported[APPLE_YCBCR_422])
     {
-        TRACE_(d3d_caps)("GL_APPLE_fence, GL_APPLE_client_storage, GL_APPLE_flush_render and GL_ycbcr_422 are supported.\n");
-        TRACE_(d3d_caps)("Activating MacOS fixups.\n");
         return TRUE;
     }
     else
     {
-        TRACE_(d3d_caps)("Apple extensions are not supported.\n");
-        TRACE_(d3d_caps)("Not activating MacOS fixups.\n");
         return FALSE;
     }
 }
@@ -576,7 +581,7 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     checkGLcall("Loading the PBO test texture");
 
     GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
-    glFinish(); /* just to be sure */
+    wglFinish(); /* just to be sure */
 
     memset(check, 0, sizeof(check));
     glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, check);
@@ -927,7 +932,9 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, const char *gl_ren
     /* Find out if PBOs work as they are supposed to. */
     test_pbo_functionality(gl_info);
 
-    /* Fixup the driver version */
+    /* Fixup the driver version we'll report to the app. */
+    gl_info->driver_version        = MAKEDWORD_VERSION(8, 6); /* Nvidia RIVA TNT, arbitrary */
+    gl_info->driver_version_hipart = MAKEDWORD_VERSION(7, 1);
     for (i = 0; i < (sizeof(driver_version_table) / sizeof(driver_version_table[0])); ++i)
     {
         if (gl_info->gl_vendor == driver_version_table[i].vendor
@@ -944,6 +951,8 @@ static void fixup_extensions(struct wined3d_gl_info *gl_info, const char *gl_ren
             break;
         }
     }
+    TRACE_(d3d_caps)("Reporting (fake) driver version 0x%08X-0x%08X.\n",
+            gl_info->driver_version_hipart, gl_info->driver_version);
 }
 
 static DWORD wined3d_parse_gl_version(const char *gl_version)
@@ -962,105 +971,6 @@ static DWORD wined3d_parse_gl_version(const char *gl_version)
     TRACE_(d3d_caps)("Found OpenGL version: %d.%d.\n", major, minor);
 
     return MAKEDWORD_VERSION(major, minor);
-}
-
-static DWORD wined3d_guess_driver_version(const char *gl_version, GL_Vendors vendor)
-{
-    int major, minor;
-    const char *ptr;
-    DWORD ret;
-
-    /* Now parse the driver specific string which we'll report to the app. */
-    switch (vendor)
-    {
-        case VENDOR_NVIDIA:
-            ptr = strstr(gl_version, "NVIDIA");
-            if (!ptr) return 0;
-
-            ptr = strstr(ptr, " ");
-            if (!ptr) return 0;
-
-            while (isspace(*ptr)) ++ptr;
-            if (!*ptr) return 0;
-
-            major = atoi(ptr);
-            while (isdigit(*ptr)) ++ptr;
-
-            if (*ptr++ != '.') return 0;
-
-            minor = atoi(ptr);
-            minor = major * 100 + minor;
-            major = 10;
-            break;
-
-        case VENDOR_ATI:
-            major = minor = 0;
-
-            ptr = strchr(gl_version, '-');
-            if (!ptr) return 0;
-
-            ++ptr;
-
-            /* Check if version number is of the form x.y.z. */
-            if (strlen(ptr) < 5
-                    || !isdigit(ptr[0]) || ptr[1] != '.'
-                    || !isdigit(ptr[2]) || ptr[3] != '.'
-                    || !isdigit(ptr[4]))
-            {
-                return 0;
-            }
-
-            major = ptr[0] - '0';
-            minor = ((ptr[2] - '0') << 8) | (ptr[4] - '0');
-            break;
-
-        case VENDOR_INTEL:
-            /* Apple and Mesa version strings look differently, but both provide intel drivers. */
-            if (strstr(gl_version, "APPLE"))
-            {
-                /* [0-9]+.[0-9]+ APPLE-[0-9]+.[0.9]+.[0.9]+
-                 * We only need the first part, and use the APPLE as identification
-                 * "1.2 APPLE-1.4.56". */
-                ptr = gl_version;
-
-                major = atoi(ptr);
-                while (isdigit(*ptr)) ++ptr;
-
-                if (*ptr++ != '.') return 0;
-
-                minor = atoi(ptr);
-                break;
-            }
-            /* Fallthrough */
-
-        case VENDOR_MESA:
-            ptr = strstr(gl_version, "Mesa");
-            if (!ptr) return 0;
-
-            ptr = strstr(ptr, " ");
-            if (!ptr) return 0;
-
-            while (isspace(*ptr)) ++ptr;
-            if (!*ptr) return 0;
-
-            major = atoi(ptr);
-            while (isdigit(*ptr)) ++ptr;
-
-            if (*ptr++ != '.') return 0;
-
-            minor = atoi(ptr);
-            break;
-
-        default:
-            FIXME("Unhandled vendor %#x.\n", vendor);
-            return 0;
-    }
-
-    ret = MAKEDWORD_VERSION(major, minor);
-    TRACE_(d3d_caps)("Found driver version %s -> %d.%d -> 0x%08x.\n",
-            debugstr_a(gl_version), major, minor, ret);
-
-    return ret;
 }
 
 static GL_Vendors wined3d_guess_vendor(const char *gl_vendor, const char *gl_renderer)
@@ -1571,6 +1481,7 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     TRACE_(d3d_caps)("GL_RENDERER: %s.\n", debugstr_a(gl_string));
     if (!gl_string)
     {
+        LEAVE_GL();
         ERR_(d3d_caps)("Received a NULL GL_RENDERER.\n");
         return FALSE;
     }
@@ -1579,6 +1490,7 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     gl_renderer = HeapAlloc(GetProcessHeap(), 0, len);
     if (!gl_renderer)
     {
+        LEAVE_GL();
         ERR_(d3d_caps)("Failed to allocate gl_renderer memory.\n");
         return FALSE;
     }
@@ -1588,6 +1500,7 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     TRACE_(d3d_caps)("GL_VENDOR: %s.\n", debugstr_a(gl_string));
     if (!gl_string)
     {
+        LEAVE_GL();
         ERR_(d3d_caps)("Received a NULL GL_VENDOR.\n");
         HeapFree(GetProcessHeap(), 0, gl_renderer);
         return FALSE;
@@ -1600,15 +1513,12 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     TRACE_(d3d_caps)("GL_VERSION: %s.\n", debugstr_a(gl_string));
     if (!gl_string)
     {
+        LEAVE_GL();
         ERR_(d3d_caps)("Received a NULL GL_VERSION.\n");
         HeapFree(GetProcessHeap(), 0, gl_renderer);
         return FALSE;
     }
     gl_version = wined3d_parse_gl_version(gl_string);
-    gl_info->driver_version = wined3d_guess_driver_version(gl_string, gl_info->gl_vendor);
-    if (!gl_info->driver_version) FIXME_(d3d_caps)("Unrecognized GL_VERSION %s.\n", debugstr_a(gl_string));
-    /* Current Windows drivers have versions like 6.14.... (some older have an earlier version). */
-    gl_info->driver_version_hipart = MAKEDWORD_VERSION(6, 14);
 
     /*
      * Initialize openGL extension related variables
@@ -1654,10 +1564,13 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     GL_Extensions = (const char *)glGetString(GL_EXTENSIONS);
     if (!GL_Extensions)
     {
+        LEAVE_GL();
         ERR_(d3d_caps)("Received a NULL GL_EXTENSIONS.\n");
         HeapFree(GetProcessHeap(), 0, gl_renderer);
         return FALSE;
     }
+
+    LEAVE_GL();
 
     TRACE_(d3d_caps)("GL_Extensions reported:\n");
 
@@ -1689,8 +1602,6 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
             }
         }
     }
-
-    LEAVE_GL();
 
     /* Now work out what GL support this card really has */
 #define USE_GL_FUNC(type, pfn, ext, replace) \
@@ -1756,6 +1667,11 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     {
         TRACE_(d3d_caps)(" IMPLIED: NVIDIA (NV) Texture Gen Reflection support.\n");
         gl_info->supported[NV_TEXGEN_REFLECTION] = TRUE;
+    }
+    if (!gl_info->supported[ARB_DEPTH_CLAMP] && gl_info->supported[NV_DEPTH_CLAMP])
+    {
+        TRACE_(d3d_caps)(" IMPLIED: ARB_depth_clamp support (by NV_depth_clamp).\n");
+        gl_info->supported[ARB_DEPTH_CLAMP] = TRUE;
     }
     if (gl_info->supported[NV_TEXTURE_SHADER2])
     {
@@ -1873,6 +1789,9 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
         GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB, &gl_max));
         gl_info->ps_arb_max_instructions = gl_max;
         TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native instructions: %d.\n", gl_info->ps_arb_max_instructions);
+        GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_LOCAL_PARAMETERS_ARB, &gl_max));
+        gl_info->ps_arb_max_local_constants = gl_max;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM local parameters: %d.\n", gl_info->ps_arb_max_instructions);
     }
     if (gl_info->supported[ARB_VERTEX_PROGRAM])
     {
@@ -2188,7 +2107,7 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         if (EnumDisplaySettingsExW(NULL, ModeIdx, &DevModeW, 0)) {
             pMode->Width        = DevModeW.dmPelsWidth;
             pMode->Height       = DevModeW.dmPelsHeight;
-            pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
+            pMode->RefreshRate  = DEFAULT_REFRESH_RATE;
             if (DevModeW.dmFields & DM_DISPLAYFREQUENCY)
                 pMode->RefreshRate = DevModeW.dmDisplayFrequency;
 
@@ -2235,7 +2154,7 @@ static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT A
         pMode->Width        = DevModeW.dmPelsWidth;
         pMode->Height       = DevModeW.dmPelsHeight;
         bpp                 = DevModeW.dmBitsPerPel;
-        pMode->RefreshRate  = WINED3DADAPTER_DEFAULT;
+        pMode->RefreshRate  = DEFAULT_REFRESH_RATE;
         if (DevModeW.dmFields&DM_DISPLAYFREQUENCY)
         {
             pMode->RefreshRate = DevModeW.dmDisplayFrequency;
@@ -2454,10 +2373,9 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
     return WINED3DERR_NOTAVAILABLE;
 }
 
-static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, 
-                                                       WINED3DFORMAT SurfaceFormat,
-                                                       BOOL Windowed, WINED3DMULTISAMPLE_TYPE MultiSampleType, DWORD*   pQualityLevels) {
-
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType,
+        WINED3DFORMAT SurfaceFormat, BOOL Windowed, WINED3DMULTISAMPLE_TYPE MultiSampleType, DWORD *pQualityLevels)
+{
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
     const struct GlPixelFormatDesc *glDesc;
     const struct WineD3DAdapter *adapter;
@@ -3141,9 +3059,10 @@ static BOOL CheckVertexTextureCapability(struct WineD3DAdapter *adapter, const s
     return FALSE;
 }
 
-static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, 
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType,
         WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat,
-        WINED3DSURFTYPE SurfaceType) {
+        WINED3DSURFTYPE SurfaceType)
+{
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
     struct WineD3DAdapter *adapter = &This->adapters[Adapter];
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
@@ -4047,14 +3966,13 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     pCaps->MaxPointSize    = GL_LIMITS(pointsize);
 
 
+    /* FIXME: Add D3DVTXPCAPS_TWEENING, D3DVTXPCAPS_TEXGEN_SPHEREMAP */
     pCaps->VertexProcessingCaps = WINED3DVTXPCAPS_DIRECTIONALLIGHTS |
                                   WINED3DVTXPCAPS_MATERIALSOURCE7   |
                                   WINED3DVTXPCAPS_POSITIONALLIGHTS  |
                                   WINED3DVTXPCAPS_LOCALVIEWER       |
                                   WINED3DVTXPCAPS_VERTEXFOG         |
                                   WINED3DVTXPCAPS_TEXGEN;
-                                  /* FIXME: Add 
-                                     D3DVTXPCAPS_TWEENING, D3DVTXPCAPS_TEXGEN_SPHEREMAP */
 
     pCaps->MaxPrimitiveCount   = 0xFFFFF; /* For now set 2^20-1 which is used by most >=Geforce3/Radeon8500 cards */
     pCaps->MaxVertexIndex      = 0xFFFFF;
@@ -4643,11 +4561,11 @@ BOOL InitAdapters(IWineD3DImpl *This)
      * otherwise because we have to use winex11.drv's override
      */
 #ifdef USE_WIN32_OPENGL
-    glFinish = (void*)GetProcAddress(mod_gl, "glFinish");
-    glFlush = (void*)GetProcAddress(mod_gl, "glFlush");
+    wglFinish = (void*)GetProcAddress(mod_gl, "glFinish");
+    wglFlush = (void*)GetProcAddress(mod_gl, "glFlush");
 #else
-    glFinish = (void*)pwglGetProcAddress("wglFinish");
-    glFlush = (void*)pwglGetProcAddress("wglFlush");
+    wglFinish = (void*)pwglGetProcAddress("wglFinish");
+    wglFlush = (void*)pwglGetProcAddress("wglFlush");
 #endif
 
     glEnableWINE = glEnable;

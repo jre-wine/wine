@@ -2,6 +2,9 @@
 
 #define __WINE_CONFIG_H
 
+/* Define to the file extension for executables. */
+#undef EXEEXT
+
 /* Define to 1 if you have the <alias.h> header file. */
 #undef HAVE_ALIAS_H
 
@@ -464,6 +467,9 @@
 
 /* Define to 1 if you have the `mousemask' function. */
 #undef HAVE_MOUSEMASK
+
+/* Define to 1 if you have the <mpg123.h> header file. */
+#undef HAVE_MPG123_H
 
 /* Define if you have NAS including devel headers */
 #undef HAVE_NAS
@@ -1205,6 +1211,12 @@
 
 /* Define to 1 if the X Window System is missing or not being used. */
 #undef X_DISPLAY_MISSING
+
+/* Number of bits in a file offset, on hosts where this is settable. */
+#undef _FILE_OFFSET_BITS
+
+/* Define for large files, on AIX-style hosts. */
+#undef _LARGE_FILES
 
 /* Define to a macro to output a .cfi assembly pseudo-op */
 #undef __ASM_CFI

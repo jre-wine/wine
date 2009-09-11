@@ -2973,7 +2973,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_Flip(IWineD3DSurface *iface, IWineD3DS
     }
 
     if(override) {
-        /* DDraw sets this for the X11 surfaces, so don't confuse the user 
+        /* DDraw sets this for the X11 surfaces, so don't confuse the user
          * FIXME("(%p) Target override is not supported by now\n", This);
          * Additionally, it isn't really possible to support triple-buffering
          * properly on opengl at all
@@ -3814,7 +3814,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, const 
 
         /* Flush in case the drawable is used by multiple GL contexts */
         if(dstSwapchain && (This == (IWineD3DSurfaceImpl *) dstSwapchain->frontBuffer || dstSwapchain->num_contexts >= 2))
-            glFlush();
+            wglFlush();
 
         /* TODO: If the surface is locked often, perform the Blt in software on the memory instead */
         /* The surface is now in the drawable. On onscreen surfaces or without fbos the texture
@@ -4680,7 +4680,7 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
         /* Make sure to flush the buffers. This is needed in apps like Red Alert II and Tiberian SUN that use multiple WGL contexts. */
         if(((IWineD3DSwapChainImpl*)swapchain)->frontBuffer == (IWineD3DSurface*)This ||
            ((IWineD3DSwapChainImpl*)swapchain)->num_contexts >= 2)
-            glFlush();
+            wglFlush();
 
         IWineD3DSwapChain_Release(swapchain);
     } else {

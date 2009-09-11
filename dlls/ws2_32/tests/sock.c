@@ -1018,6 +1018,23 @@ static void test_set_getsockopt(void)
     ok(lasterr == WSAEFAULT, "setsockopt with optval being a value "
                              "returned 0x%08x, not WSAEFAULT(0x%08x)\n",
                              lasterr, WSAEFAULT);
+
+    /* SO_RCVTIMEO with invalid values for level */
+    size = sizeof(timeout);
+    timeout = SOCKTIMEOUT1;
+    SetLastError(0xdeadbeef);
+    err = setsockopt(s, 0xffffffff, SO_RCVTIMEO, (char *) &timeout, size);
+    ok( (err == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d (expected SOCKET_ERROR with WSAEINVAL\n",
+        err, WSAGetLastError());
+
+    timeout = SOCKTIMEOUT1;
+    SetLastError(0xdeadbeef);
+    err = setsockopt(s, 0x00008000, SO_RCVTIMEO, (char *) &timeout, size);
+    ok( (err == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d (expected SOCKET_ERROR with WSAEINVAL\n",
+        err, WSAGetLastError());
+
     closesocket(s);
 }
 
@@ -2042,6 +2059,48 @@ static void test_extendedSocketOptions(void)
     ok((optval == 65507) || (optval == 65527),
             "SO_MAX_MSG_SIZE reported %d, expected 65507 or 65527\n", optval);
 
+    /* IE 3 use 0xffffffff instead of SOL_SOCKET (0xffff) */
+    SetLastError(0xdeadbeef);
+    optval = 0xdeadbeef;
+    optlen = sizeof(int);
+    ret = getsockopt(sock, 0xffffffff, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+    ok( (ret == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d and optval: 0x%x/%d (expected SOCKET_ERROR with WSAEINVAL)\n",
+        ret, WSAGetLastError(), optval, optval);
+
+    /* more invalid values for level */
+    SetLastError(0xdeadbeef);
+    optval = 0xdeadbeef;
+    optlen = sizeof(int);
+    ret = getsockopt(sock, 0x1234ffff, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+    ok( (ret == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d and optval: 0x%x/%d (expected SOCKET_ERROR with WSAEINVAL)\n",
+        ret, WSAGetLastError(), optval, optval);
+
+    SetLastError(0xdeadbeef);
+    optval = 0xdeadbeef;
+    optlen = sizeof(int);
+    ret = getsockopt(sock, 0x8000ffff, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+    ok( (ret == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d and optval: 0x%x/%d (expected SOCKET_ERROR with WSAEINVAL)\n",
+        ret, WSAGetLastError(), optval, optval);
+
+    SetLastError(0xdeadbeef);
+    optval = 0xdeadbeef;
+    optlen = sizeof(int);
+    ret = getsockopt(sock, 0x00008000, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+    ok( (ret == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d and optval: 0x%x/%d (expected SOCKET_ERROR with WSAEINVAL)\n",
+        ret, WSAGetLastError(), optval, optval);
+
+    SetLastError(0xdeadbeef);
+    optval = 0xdeadbeef;
+    optlen = sizeof(int);
+    ret = getsockopt(sock, 0x00000800, SO_MAX_MSG_SIZE, (char *)&optval, &optlen);
+    ok( (ret == SOCKET_ERROR) && (WSAGetLastError() == WSAEINVAL),
+        "got %d with %d and optval: 0x%x/%d (expected SOCKET_ERROR with WSAEINVAL)\n",
+        ret, WSAGetLastError(), optval, optval);
+
     optlen = sizeof(LINGER);
     ret = getsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&linger_val, &optlen);
     todo_wine{
@@ -2850,7 +2909,7 @@ static void test_AcceptEx(void)
     }
 
     iret = connect(acceptor,  (struct sockaddr*)&bindAddress, sizeof(bindAddress));
-    ok(iret == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL,
+    ok((iret == SOCKET_ERROR && WSAGetLastError() == WSAEINVAL) || broken(!iret) /* NT4 */,
        "connecting to acceptex acceptor succeeded? return %d + errno %d\n", iret, WSAGetLastError());
     if (!iret || (iret == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK)) {
         /* We need to cancel this call, otherwise things fail */

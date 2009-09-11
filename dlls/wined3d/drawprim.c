@@ -113,23 +113,38 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
     VTRACE(("glBegin(%x)\n", glPrimType));
     glBegin(glPrimType);
 
-    element = &si->elements[WINED3D_FFP_POSITION];
-    if (element->data) position = element->data + streamOffset[element->stream_idx];
+    if (si->use_map & (1 << WINED3D_FFP_POSITION))
+    {
+        element = &si->elements[WINED3D_FFP_POSITION];
+        position = element->data + streamOffset[element->stream_idx];
+    }
 
-    element = &si->elements[WINED3D_FFP_NORMAL];
-    if (element->data) normal = element->data + streamOffset[element->stream_idx];
-    else glNormal3f(0, 0, 0);
+    if (si->use_map & (1 << WINED3D_FFP_NORMAL))
+    {
+        element = &si->elements[WINED3D_FFP_NORMAL];
+        normal = element->data + streamOffset[element->stream_idx];
+    }
+    else
+    {
+        glNormal3f(0, 0, 0);
+    }
 
-    element = &si->elements[WINED3D_FFP_DIFFUSE];
-    if (element->data) diffuse = element->data + streamOffset[element->stream_idx];
-    else glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    if (si->use_map & (1 << WINED3D_FFP_DIFFUSE))
+    {
+        element = &si->elements[WINED3D_FFP_DIFFUSE];
+        diffuse = element->data + streamOffset[element->stream_idx];
+    }
+    else
+    {
+        glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    }
     num_untracked_materials = context->num_untracked_materials;
     if (num_untracked_materials && element->format_desc->format != WINED3DFMT_A8R8G8B8)
         FIXME("Implement diffuse color tracking from %s\n", debug_d3dformat(element->format_desc->format));
 
-    element = &si->elements[WINED3D_FFP_SPECULAR];
-    if (element->data)
+    if (si->use_map & (1 << WINED3D_FFP_SPECULAR))
     {
+        element = &si->elements[WINED3D_FFP_SPECULAR];
         specular = element->data + streamOffset[element->stream_idx];
 
         /* special case where the fog density is stored in the specular alpha channel */
@@ -187,9 +202,9 @@ static void drawStridedSlow(IWineD3DDevice *iface, const struct wined3d_context 
             continue;
         }
 
-        element = &si->elements[WINED3D_FFP_TEXCOORD0 + coordIdx];
-        if (element->data)
+        if (si->use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coordIdx)))
         {
+            element = &si->elements[WINED3D_FFP_TEXCOORD0 + coordIdx];
             texCoords[coordIdx] = element->data + streamOffset[element->stream_idx];
             tex_mask |= (1 << textureNo);
         }
@@ -451,8 +466,9 @@ static void drawStridedSlowVs(IWineD3DDevice *iface, const struct wined3d_stream
             }
         }
 
-        for(i = MAX_ATTRIBS - 1; i >= 0; i--) {
-            if(!si->elements[i].data) continue;
+        for (i = MAX_ATTRIBS - 1; i >= 0; i--)
+        {
+            if (!(si->use_map & (1 << i))) continue;
 
             ptr = si->elements[i].data +
                   si->elements[i].stride * SkipnStrides +
@@ -506,6 +522,8 @@ static inline void drawStridedInstanced(IWineD3DDevice *iface, const struct wine
 
     for (i = 0; i < sizeof(si->elements) / sizeof(*si->elements); ++i)
     {
+        if (!(si->use_map & (1 << i))) continue;
+
         if (stateblock->streamFlags[si->elements[i].stream_idx] & WINED3DSTREAMSOURCE_INSTANCEDATA)
         {
             instancedData[numInstancedAttribs] = i;
@@ -542,7 +560,11 @@ static inline void remove_vbos(IWineD3DDeviceImpl *This, struct wined3d_stream_i
 
     for (i = 0; i < (sizeof(s->elements) / sizeof(*s->elements)); ++i)
     {
-        struct wined3d_stream_info_element *e = &s->elements[i];
+        struct wined3d_stream_info_element *e;
+
+        if (!(s->use_map & (1 << i))) continue;
+
+        e = &s->elements[i];
         if (e->buffer_object)
         {
             struct wined3d_buffer *vb = (struct wined3d_buffer *)This->stateBlock->streamSource[e->stream_idx];
@@ -677,7 +699,7 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT numberOfVertice
 #ifdef SHOW_FRAME_MAKEUP
     {
         static long int primCounter = 0;
-        /* NOTE: set primCounter to the value reported by drawprim 
+        /* NOTE: set primCounter to the value reported by drawprim
            before you want to to write frame makeup to /tmp */
         if (primCounter >= 0) {
             WINED3DLOCKED_RECT r;

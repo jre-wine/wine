@@ -68,12 +68,20 @@ static inline INT roundr(REAL x)
     return (INT) floorf(x + 0.5);
 }
 
+static inline INT ceilr(REAL x)
+{
+    return (INT) ceilf(x);
+}
+
 static inline REAL deg2rad(REAL degrees)
 {
     return M_PI * degrees / 180.0;
 }
 
 extern const char *debugstr_rectf(CONST RectF* rc);
+
+extern void convert_32bppARGB_to_32bppPARGB(UINT width, UINT height,
+    BYTE *dst_bits, INT dst_stride, const BYTE *src_bits, INT src_stride);
 
 struct GpPen{
     UINT style;
@@ -217,6 +225,10 @@ struct GpBitmap{
     ImageLockMode lockmode;
     INT numlocks;
     BYTE *bitmapbits;   /* pointer to the buffer we passed in BitmapLockBits */
+    HBITMAP hbitmap;
+    HDC hdc;
+    BYTE *bits; /* actual image bits if this is a DIB */
+    INT stride; /* stride of bits if this is a DIB */
 };
 
 struct GpCachedBitmap{

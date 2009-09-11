@@ -182,7 +182,8 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
     const DWORD *streams = declaration->streams;
     unsigned int i;
 
-    memset(stream_info, 0, sizeof(*stream_info));
+    stream_info->use_map = 0;
+    stream_info->swizzle_map = 0;
 
     /* Check for transformed vertices, disable vertex shader if present. */
     stream_info->position_transformed = declaration->position_transformed;
@@ -4177,7 +4178,7 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
 
             if( !doClip ||
                 ( (-rhw -eps < x) && (-rhw -eps < y) && ( -eps < z) &&
-                  (x <= rhw + eps) && (y <= rhw + eps ) && (z <= rhw + eps) && 
+                  (x <= rhw + eps) && (y <= rhw + eps ) && (z <= rhw + eps) &&
                   ( rhw > eps ) ) ) {
 
                 /* "Normal" viewport transformation (not clipped)
@@ -4302,7 +4303,8 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
             }
         }
 
-        if (DestFVF & WINED3DFVF_SPECULAR) { 
+        if (DestFVF & WINED3DFVF_SPECULAR)
+        {
             /* What's the color value in the feedback buffer? */
             const struct wined3d_stream_info_element *element = &stream_info->elements[WINED3D_FFP_SPECULAR];
             const DWORD *color_s = (const DWORD *)(element->data + i * element->stride);
@@ -4854,7 +4856,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EndScene(IWineD3DDevice *iface) {
 
     ActivateContext(This, NULL, CTXUSAGE_RESOURCELOAD);
     /* We only have to do this if we need to read the, swapbuffers performs a flush for us */
-    glFlush();
+    wglFlush();
     /* No checkGLcall here to avoid locking the lock just for checking a call that hardly ever
      * fails
      */
@@ -5067,7 +5069,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This,  IWineD3DSurfa
 
     if (SUCCEEDED(IWineD3DSurface_GetContainer((IWineD3DSurface *)target, &IID_IWineD3DSwapChain, (void **)&swapchain))) {
         if (target == (IWineD3DSurfaceImpl*) swapchain->frontBuffer) {
-            glFlush();
+            wglFlush();
         }
         IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
     }

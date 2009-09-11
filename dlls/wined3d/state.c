@@ -564,16 +564,18 @@ static void state_clipping(DWORD state, IWineD3DStateBlockImpl *stateblock, stru
     if (stateblock->renderState[WINED3DRS_CLIPPING]) {
         enable  = stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
         disable = ~stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
-        if(GL_SUPPORT(NV_DEPTH_CLAMP)) {
-            glDisable(GL_DEPTH_CLAMP_NV);
-            checkGLcall("glDisable(GL_DEPTH_CLAMP_NV)");
+        if (GL_SUPPORT(ARB_DEPTH_CLAMP))
+        {
+            glDisable(GL_DEPTH_CLAMP);
+            checkGLcall("glDisable(GL_DEPTH_CLAMP)");
         }
     } else {
         disable = 0xffffffff;
         enable  = 0x00;
-        if(GL_SUPPORT(NV_DEPTH_CLAMP)) {
-            glEnable(GL_DEPTH_CLAMP_NV);
-            checkGLcall("glEnable(GL_DEPTH_CLAMP_NV)");
+        if (GL_SUPPORT(ARB_DEPTH_CLAMP))
+        {
+            glEnable(GL_DEPTH_CLAMP);
+            checkGLcall("glEnable(GL_DEPTH_CLAMP)");
         }
     }
 
@@ -1177,8 +1179,6 @@ static void state_colormat(DWORD state, IWineD3DStateBlockImpl *stateblock, stru
 {
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     GLenum Parm = 0;
-    const struct wined3d_stream_info_element *diffuse = &device->strided_streams.elements[WINED3D_FFP_DIFFUSE];
-    BOOL isDiffuseSupplied;
 
     /* Depends on the decoded vertex declaration to read the existence of diffuse data.
      * The vertex declaration will call this function if the fixed function pipeline is used.
@@ -1188,10 +1188,10 @@ static void state_colormat(DWORD state, IWineD3DStateBlockImpl *stateblock, stru
         return;
     }
 
-    isDiffuseSupplied = diffuse->data || diffuse->buffer_object;
-
     context->num_untracked_materials = 0;
-    if (isDiffuseSupplied && stateblock->renderState[WINED3DRS_COLORVERTEX]) {
+    if ((device->strided_streams.use_map & (1 << WINED3D_FFP_DIFFUSE))
+            && stateblock->renderState[WINED3DRS_COLORVERTEX])
+    {
         TRACE("diff %d, amb %d, emis %d, spec %d\n",
               stateblock->renderState[WINED3DRS_DIFFUSEMATERIALSOURCE],
               stateblock->renderState[WINED3DRS_AMBIENTMATERIALSOURCE],
@@ -1346,8 +1346,7 @@ static void state_normalize(DWORD state, IWineD3DStateBlockImpl *stateblock, str
      * by zero and is not properly defined in opengl, so avoid it
      */
     if (stateblock->renderState[WINED3DRS_NORMALIZENORMALS]
-            && (stateblock->wineD3DDevice->strided_streams.elements[WINED3D_FFP_NORMAL].data
-            || stateblock->wineD3DDevice->strided_streams.elements[WINED3D_FFP_NORMAL].buffer_object))
+            && (stateblock->wineD3DDevice->strided_streams.use_map & (1 << WINED3D_FFP_NORMAL)))
     {
         glEnable(GL_NORMALIZE);
         checkGLcall("glEnable(GL_NORMALIZE);");
@@ -3101,7 +3100,7 @@ static void transform_texture(DWORD state, IWineD3DStateBlockImpl *stateblock, s
 
     set_texture_matrix(&stateblock->transforms[WINED3DTS_TEXTURE0 + texUnit].u.m[0][0],
             stateblock->textureState[texUnit][WINED3DTSS_TEXTURETRANSFORMFLAGS], generated, context->last_was_rhw,
-            stateblock->wineD3DDevice->strided_streams.elements[WINED3D_FFP_TEXCOORD0 + coordIdx].stride
+            stateblock->wineD3DDevice->strided_streams.use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coordIdx))
             ? stateblock->wineD3DDevice->strided_streams.elements[WINED3D_FFP_TEXCOORD0 + coordIdx].format_desc->format
             : WINED3DFMT_UNKNOWN,
             stateblock->wineD3DDevice->frag_pipe->ffp_proj_control);
@@ -3140,14 +3139,14 @@ static void loadTexCoords(const struct wined3d_context *context, IWineD3DStateBl
 
     for (textureNo = 0; textureNo < GL_LIMITS(texture_stages); ++textureNo) {
         int coordIdx = stateblock->textureState[textureNo][WINED3DTSS_TEXCOORDINDEX];
-        const struct wined3d_stream_info_element *e;
 
         mapped_stage = stateblock->wineD3DDevice->texUnitMap[textureNo];
         if (mapped_stage == WINED3D_UNMAPPED_STAGE) continue;
 
-        e = &si->elements[WINED3D_FFP_TEXCOORD0 + coordIdx];
-        if (coordIdx < MAX_TEXTURES && (e->data || e->buffer_object))
+        if (coordIdx < MAX_TEXTURES && (si->use_map & (1 << (WINED3D_FFP_TEXCOORD0 + coordIdx))))
         {
+            const struct wined3d_stream_info_element *e = &si->elements[WINED3D_FFP_TEXCOORD0 + coordIdx];
+
             TRACE("Setting up texture %u, idx %d, cordindx %u, data %p\n",
                     textureNo, mapped_stage, coordIdx, e->data);
 
@@ -4144,11 +4143,11 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     stateblock->wineD3DDevice->instancedDraw = FALSE;
 
     /* Blend Data ---------------------------------------------- */
-    e = &si->elements[WINED3D_FFP_BLENDWEIGHT];
-    if (e->data || e->buffer_object
-            || si->elements[WINED3D_FFP_BLENDINDICES].data
-            || si->elements[WINED3D_FFP_BLENDINDICES].buffer_object)
+    if ((si->use_map & (1 << WINED3D_FFP_BLENDWEIGHT))
+            || si->use_map & (1 << WINED3D_FFP_BLENDINDICES))
     {
+        e = &si->elements[WINED3D_FFP_BLENDWEIGHT];
+
         if (GL_SUPPORT(ARB_VERTEX_BLEND)) {
             TRACE("Blend %d %p %d\n", e->format_desc->component_count,
                     e->data + stateblock->loadBaseVertexIndex * e->stride, e->stride + offset[e->stream_idx]);
@@ -4175,8 +4174,7 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
 
             checkGLcall("glWeightPointerARB");
 
-            if (si->elements[WINED3D_FFP_BLENDINDICES].data
-                    || (si->elements[WINED3D_FFP_BLENDINDICES].buffer_object))
+            if (si->use_map & (1 << WINED3D_FFP_BLENDINDICES))
             {
                 static BOOL warned;
                 if (!warned)
@@ -4200,8 +4198,7 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     }
 
     /* Point Size ----------------------------------------------*/
-    e = &si->elements[WINED3D_FFP_PSIZE];
-    if (e->data || e->buffer_object)
+    if (si->use_map & (1 << WINED3D_FFP_PSIZE))
     {
         /* no such functionality in the fixed function GL pipeline */
         TRACE("Cannot change ptSize here in openGl\n");
@@ -4209,11 +4206,11 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     }
 
     /* Vertex Pointers -----------------------------------------*/
-    e = &si->elements[WINED3D_FFP_POSITION];
-    if (e->data || e->buffer_object)
+    if (si->use_map & (1 << WINED3D_FFP_POSITION))
     {
         VTRACE(("glVertexPointer(%d, GL_FLOAT, %d, %p)\n", e->stride, e->size, e->data));
 
+        e = &si->elements[WINED3D_FFP_POSITION];
         if (curVBO != e->buffer_object)
         {
             GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, e->buffer_object));
@@ -4243,10 +4240,11 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     }
 
     /* Normals -------------------------------------------------*/
-    e = &si->elements[WINED3D_FFP_NORMAL];
-    if (e->data || e->buffer_object)
+    if (si->use_map & (1 << WINED3D_FFP_NORMAL))
     {
         VTRACE(("glNormalPointer(GL_FLOAT, %d, %p)\n", e->stride, e->data));
+
+        e = &si->elements[WINED3D_FFP_NORMAL];
         if (curVBO != e->buffer_object)
         {
             GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, e->buffer_object));
@@ -4273,11 +4271,11 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     /* NOTE: Unless we write a vertex shader to swizzle the colour*/
     /* , or the user doesn't care and wants the speed advantage   */
 
-    e = &si->elements[WINED3D_FFP_DIFFUSE];
-    if (e->data || e->buffer_object)
+    if (si->use_map & (1 << WINED3D_FFP_DIFFUSE))
     {
         VTRACE(("glColorPointer(4, GL_UNSIGNED_BYTE, %d, %p)\n", e->stride, e->data));
 
+        e = &si->elements[WINED3D_FFP_DIFFUSE];
         if (curVBO != e->buffer_object)
         {
             GL_EXTCALL(glBindBufferARB(GL_ARRAY_BUFFER_ARB, e->buffer_object));
@@ -4297,12 +4295,12 @@ static void loadVertexData(const struct wined3d_context *context, IWineD3DStateB
     }
 
     /* Specular Colour ------------------------------------------*/
-    e = &si->elements[WINED3D_FFP_SPECULAR];
-    if (e->data || e->buffer_object)
+    if (si->use_map & (1 << WINED3D_FFP_SPECULAR))
     {
         TRACE("setting specular colour\n");
         VTRACE(("glSecondaryColorPointer(4, GL_UNSIGNED_BYTE, %d, %p)\n", e->stride, e->data));
 
+        e = &si->elements[WINED3D_FFP_SPECULAR];
         if (GL_SUPPORT(EXT_SECONDARY_COLOR)) {
             GLenum type = e->format_desc->gl_vtx_type;
             GLint format = e->format_desc->gl_vtx_format;
@@ -4429,18 +4427,23 @@ static void streamsrc(DWORD state, IWineD3DStateBlockImpl *stateblock, struct wi
             device->useDrawStridedSlow = FALSE;
         }
     }
-    else if (fixup || (!dataLocations->elements[WINED3D_FFP_PSIZE].data
-            && !dataLocations->position_transformed
-            && (GL_SUPPORT(EXT_VERTEX_ARRAY_BGRA)
-            || (!dataLocations->elements[WINED3D_FFP_DIFFUSE].data
-            && !dataLocations->elements[WINED3D_FFP_SPECULAR].data))))
+    else
     {
-        /* Load the vertex data using named arrays */
-        load_named = TRUE;
-        device->useDrawStridedSlow = FALSE;
-    } else {
-        TRACE("Not loading vertex data\n");
-        device->useDrawStridedSlow = TRUE;
+        WORD slow_mask = (1 << WINED3D_FFP_PSIZE);
+        slow_mask |= -!GL_SUPPORT(EXT_VERTEX_ARRAY_BGRA) & ((1 << WINED3D_FFP_DIFFUSE) | (1 << WINED3D_FFP_SPECULAR));
+
+        if (fixup || (!dataLocations->position_transformed
+                && !(dataLocations->use_map & slow_mask)))
+        {
+            /* Load the vertex data using named arrays */
+            load_named = TRUE;
+            device->useDrawStridedSlow = FALSE;
+        }
+        else
+        {
+            TRACE("Not loading vertex data\n");
+            device->useDrawStridedSlow = TRUE;
+        }
     }
 
     if (context->numberedArraysLoaded && !load_numbered)

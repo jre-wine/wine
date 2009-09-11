@@ -305,6 +305,8 @@ MMRESULT WINAPI acmDriverDetailsW(HACMDRIVERID hadid, PACMDRIVERDETAILSW padd, D
         paddw.cbStruct = min(padd->cbStruct, sizeof(*padd));
         memcpy(padd, &paddw, paddw.cbStruct);
     }
+    else if (mmr == MMSYSERR_NODRIVER)
+        return MMSYSERR_NOTSUPPORTED;
 
     return mmr;
 }
@@ -555,6 +557,8 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
         if (!pad->hDrvr)
         {
             ret = adod.dwError;
+            if (ret == MMSYSERR_NOERROR)
+                ret = MMSYSERR_NODRIVER;
             goto gotError;
         }
     }
@@ -578,6 +582,8 @@ MMRESULT WINAPI acmDriverOpen(PHACMDRIVER phad, HACMDRIVERID hadid, DWORD fdwOpe
         if (!pad->pLocalDrvrInst)
         {
             ret = adod.dwError;
+            if (ret == MMSYSERR_NOERROR)
+                ret = MMSYSERR_NODRIVER;
             goto gotError;
         }
     }

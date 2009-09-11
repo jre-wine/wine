@@ -122,18 +122,22 @@ static void test_query_performance(void)
 {
     NTSTATUS status;
     ULONG ReturnLength;
-    SYSTEM_PERFORMANCE_INFORMATION spi;
+    ULONGLONG buffer[sizeof(SYSTEM_PERFORMANCE_INFORMATION)/sizeof(ULONGLONG) + 1];
 
-    status = pNtQuerySystemInformation(SystemPerformanceInformation, &spi, 0, &ReturnLength);
+    status = pNtQuerySystemInformation(SystemPerformanceInformation, buffer, 0, &ReturnLength);
     ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
 
-    status = pNtQuerySystemInformation(SystemPerformanceInformation, &spi, sizeof(spi), &ReturnLength);
+    status = pNtQuerySystemInformation(SystemPerformanceInformation, buffer,
+                                       sizeof(SYSTEM_PERFORMANCE_INFORMATION), &ReturnLength);
     ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
-    ok( sizeof(spi) == ReturnLength, "Inconsistent length %d\n", ReturnLength);
+    ok( ReturnLength == sizeof(SYSTEM_PERFORMANCE_INFORMATION), "Inconsistent length %d\n", ReturnLength);
 
-    status = pNtQuerySystemInformation(SystemPerformanceInformation, &spi, sizeof(spi) + 2, &ReturnLength);
+    status = pNtQuerySystemInformation(SystemPerformanceInformation, buffer,
+                                       sizeof(SYSTEM_PERFORMANCE_INFORMATION) + 2, &ReturnLength);
     ok( status == STATUS_SUCCESS, "Expected STATUS_SUCCESS, got %08x\n", status);
-    ok( sizeof(spi) == ReturnLength, "Inconsistent length %d\n", ReturnLength);
+    ok( ReturnLength == sizeof(SYSTEM_PERFORMANCE_INFORMATION) ||
+        ReturnLength == sizeof(SYSTEM_PERFORMANCE_INFORMATION) + 2,
+        "Inconsistent length %d\n", ReturnLength);
 
     /* Not return values yet, as struct members are unknown */
 }
@@ -746,6 +750,7 @@ static void test_query_process_handlecount(void)
     NTSTATUS status;
     ULONG ReturnLength;
     DWORD handlecount;
+    BYTE buffer[2 * sizeof(DWORD)];
     HANDLE process;
 
     status = pNtQueryInformationProcess(NULL, ProcessHandleCount, NULL, sizeof(handlecount), NULL);
@@ -773,8 +778,9 @@ static void test_query_process_handlecount(void)
     ok( sizeof(handlecount) == ReturnLength, "Inconsistent length %d\n", ReturnLength);
     CloseHandle(process);
 
-    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessHandleCount, &handlecount, sizeof(handlecount) * 2, &ReturnLength);
-    ok( status == STATUS_INFO_LENGTH_MISMATCH, "Expected STATUS_INFO_LENGTH_MISMATCH, got %08x\n", status);
+    status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessHandleCount, buffer, sizeof(buffer), &ReturnLength);
+    ok( status == STATUS_INFO_LENGTH_MISMATCH || status == STATUS_SUCCESS,
+        "Expected STATUS_INFO_LENGTH_MISMATCH or STATUS_SUCCESS, got %08x\n", status);
     ok( sizeof(handlecount) == ReturnLength, "Inconsistent length %d\n", ReturnLength);
 
     /* Check if we have some return values */

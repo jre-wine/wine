@@ -1062,6 +1062,33 @@ static GpStatus get_graphics_bounds(GpGraphics* graphics, GpRectF* rect)
     return Ok;
 }
 
+/* on success, rgn will contain the region of the graphics object which
+ * is visible after clipping has been applied */
+static GpStatus get_visible_clip_region(GpGraphics *graphics, GpRegion *rgn)
+{
+    GpStatus stat;
+    GpRectF rectf;
+    GpRegion* tmp;
+
+    if((stat = get_graphics_bounds(graphics, &rectf)) != Ok)
+        return stat;
+
+    if((stat = GdipCreateRegion(&tmp)) != Ok)
+        return stat;
+
+    if((stat = GdipCombineRegionRect(tmp, &rectf, CombineModeReplace)) != Ok)
+        goto end;
+
+    if((stat = GdipCombineRegionRegion(tmp, graphics->clip, CombineModeIntersect)) != Ok)
+        goto end;
+
+    stat = GdipCombineRegionRegion(rgn, tmp, CombineModeReplace);
+
+end:
+    GdipDeleteRegion(tmp);
+    return stat;
+}
+
 GpStatus WINGDIPAPI GdipCreateFromHDC(HDC hdc, GpGraphics **graphics)
 {
     TRACE("(%p, %p)\n", hdc, graphics);
@@ -1811,37 +1838,127 @@ GpStatus WINGDIPAPI GdipDrawImagePointsRect(GpGraphics *graphics, GpImage *image
     if(!graphics || !image || !points || count != 3)
          return InvalidParameter;
 
-    if(srcUnit == UnitInch)
-        dx = dy = (REAL) INCH_HIMETRIC;
-    else if(srcUnit == UnitPixel){
-        dx = ((REAL) INCH_HIMETRIC) /
-             ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX));
-        dy = ((REAL) INCH_HIMETRIC) /
-             ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY));
-    }
-    else
-        return NotImplemented;
-
     memcpy(ptf, points, 3 * sizeof(GpPointF));
     transform_and_round_points(graphics, pti, ptf, 3);
 
-    /* IPicture renders bitmaps with the y-axis reversed
-     * FIXME: flipping for unknown image type might not be correct. */
-    if(image->type != ImageTypeMetafile){
-        INT temp;
-        temp = pti[0].y;
-        pti[0].y = pti[2].y;
-        pti[2].y = temp;
-    }
+    if (image->picture)
+    {
+        if(srcUnit == UnitInch)
+            dx = dy = (REAL) INCH_HIMETRIC;
+        else if(srcUnit == UnitPixel){
+            dx = ((REAL) INCH_HIMETRIC) /
+                 ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSX));
+            dy = ((REAL) INCH_HIMETRIC) /
+                 ((REAL) GetDeviceCaps(graphics->hdc, LOGPIXELSY));
+        }
+        else
+            return NotImplemented;
 
-    if(IPicture_Render(image->picture, graphics->hdc,
-        pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
-        srcx * dx, srcy * dy,
-        srcwidth * dx, srcheight * dy,
-        NULL) != S_OK){
-        if(callback)
-            callback(callbackData);
-        return GenericError;
+        /* IPicture renders bitmaps with the y-axis reversed
+         * FIXME: flipping for unknown image type might not be correct. */
+        if(image->type != ImageTypeMetafile){
+            INT temp;
+            temp = pti[0].y;
+            pti[0].y = pti[2].y;
+            pti[2].y = temp;
+        }
+
+        if(IPicture_Render(image->picture, graphics->hdc,
+            pti[0].x, pti[0].y, pti[1].x - pti[0].x, pti[2].y - pti[0].y,
+            srcx * dx, srcy * dy,
+            srcwidth * dx, srcheight * dy,
+            NULL) != S_OK){
+            if(callback)
+                callback(callbackData);
+            return GenericError;
+        }
+    }
+    else if (image->type == ImageTypeBitmap && ((GpBitmap*)image)->hbitmap)
+    {
+        HDC hdc;
+        GpBitmap* bitmap = (GpBitmap*)image;
+        int temp_hdc=0, temp_bitmap=0;
+        HBITMAP hbitmap, old_hbm=NULL;
+
+        if (srcUnit == UnitInch)
+            dx = dy = 96.0; /* FIXME: use the image resolution */
+        else if (srcUnit == UnitPixel)
+            dx = dy = 1.0;
+        else
+            return NotImplemented;
+
+        if (bitmap->format == PixelFormat32bppARGB)
+        {
+            BITMAPINFOHEADER bih;
+            BYTE *temp_bits;
+
+            /* we need a bitmap with premultiplied alpha */
+            hdc = CreateCompatibleDC(0);
+            temp_hdc = 1;
+            temp_bitmap = 1;
+
+            bih.biSize = sizeof(BITMAPINFOHEADER);
+            bih.biWidth = bitmap->width;
+            bih.biHeight = -bitmap->height;
+            bih.biPlanes = 1;
+            bih.biBitCount = 32;
+            bih.biCompression = BI_RGB;
+            bih.biSizeImage = 0;
+            bih.biXPelsPerMeter = 0;
+            bih.biYPelsPerMeter = 0;
+            bih.biClrUsed = 0;
+            bih.biClrImportant = 0;
+
+            hbitmap = CreateDIBSection(hdc, (BITMAPINFO*)&bih, DIB_RGB_COLORS,
+                (void**)&temp_bits, NULL, 0);
+
+            convert_32bppARGB_to_32bppPARGB(bitmap->width, bitmap->height,
+                temp_bits, bitmap->width*4, bitmap->bits, bitmap->stride);
+        }
+        else
+        {
+            hbitmap = bitmap->hbitmap;
+            hdc = bitmap->hdc;
+            temp_hdc = (hdc == 0);
+        }
+
+        if (temp_hdc)
+        {
+            if (!hdc) hdc = CreateCompatibleDC(0);
+            old_hbm = SelectObject(hdc, hbitmap);
+        }
+
+        if (bitmap->format == PixelFormat32bppARGB || bitmap->format == PixelFormat32bppPARGB)
+        {
+            BLENDFUNCTION bf;
+
+            bf.BlendOp = AC_SRC_OVER;
+            bf.BlendFlags = 0;
+            bf.SourceConstantAlpha = 255;
+            bf.AlphaFormat = AC_SRC_ALPHA;
+
+            GdiAlphaBlend(graphics->hdc, pti[0].x, pti[0].y, pti[1].x-pti[0].x, pti[2].y-pti[0].y,
+                hdc, srcx*dx, srcy*dy, srcwidth*dx, srcheight*dy, bf);
+        }
+        else
+        {
+            StretchBlt(graphics->hdc, pti[0].x, pti[0].y, pti[1].x-pti[0].x, pti[2].y-pti[0].y,
+                hdc, srcx*dx, srcy*dy, srcwidth*dx, srcheight*dy, SRCCOPY);
+        }
+
+        if (temp_hdc)
+        {
+            SelectObject(hdc, old_hbm);
+            DeleteDC(hdc);
+        }
+
+        if (temp_bitmap)
+            DeleteObject(hbitmap);
+    }
+    else
+    {
+        ERR("GpImage with no IPicture or HBITMAP?!\n");
+        return NotImplemented;
     }
 
     return Ok;
@@ -3123,7 +3240,6 @@ GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics *graphics, GpRectF *rect
 {
     GpRegion *clip_rgn;
     GpStatus stat;
-    GpRectF wnd_rect;
 
     TRACE("(%p, %p)\n", graphics, rect);
 
@@ -3133,18 +3249,11 @@ GpStatus WINGDIPAPI GdipGetVisibleClipBounds(GpGraphics *graphics, GpRectF *rect
     if(graphics->busy)
         return ObjectBusy;
 
-    /* get window bounds */
-    if((stat = get_graphics_bounds(graphics, &wnd_rect)) != Ok)
-        return stat;
-
     /* intersect window and graphics clipping regions */
     if((stat = GdipCreateRegion(&clip_rgn)) != Ok)
         return stat;
 
-    if((stat = GdipCombineRegionRect(clip_rgn, &wnd_rect, CombineModeIntersect)) != Ok)
-        goto cleanup;
-
-    if((stat = GdipCombineRegionRegion(clip_rgn, graphics->clip, CombineModeIntersect)) != Ok)
+    if((stat = get_visible_clip_region(graphics, clip_rgn)) != Ok)
         goto cleanup;
 
     /* get bounds of the region */
@@ -3233,7 +3342,11 @@ GpStatus WINGDIPAPI GdipIsClipEmpty(GpGraphics *graphics, BOOL *res)
 
 GpStatus WINGDIPAPI GdipIsVisiblePoint(GpGraphics *graphics, REAL x, REAL y, BOOL *result)
 {
-    FIXME("(%p, %.2f, %.2f, %p) stub\n", graphics, x, y, result);
+    GpStatus stat;
+    GpRegion* rgn;
+    GpPointF pt;
+
+    TRACE("(%p, %.2f, %.2f, %p)\n", graphics, x, y, result);
 
     if(!graphics || !result)
         return InvalidParameter;
@@ -3241,12 +3354,37 @@ GpStatus WINGDIPAPI GdipIsVisiblePoint(GpGraphics *graphics, REAL x, REAL y, BOO
     if(graphics->busy)
         return ObjectBusy;
 
-    return NotImplemented;
+    pt.X = x;
+    pt.Y = y;
+    if((stat = GdipTransformPoints(graphics, CoordinateSpaceDevice,
+                   CoordinateSpaceWorld, &pt, 1)) != Ok)
+        return stat;
+
+    if((stat = GdipCreateRegion(&rgn)) != Ok)
+        return stat;
+
+    if((stat = get_visible_clip_region(graphics, rgn)) != Ok)
+        goto cleanup;
+
+    stat = GdipIsVisibleRegionPoint(rgn, pt.X, pt.Y, graphics, result);
+
+cleanup:
+    GdipDeleteRegion(rgn);
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipIsVisiblePointI(GpGraphics *graphics, INT x, INT y, BOOL *result)
 {
-    FIXME("(%p, %d, %d, %p) stub\n", graphics, x, y, result);
+    return GdipIsVisiblePoint(graphics, (REAL)x, (REAL)y, result);
+}
+
+GpStatus WINGDIPAPI GdipIsVisibleRect(GpGraphics *graphics, REAL x, REAL y, REAL width, REAL height, BOOL *result)
+{
+    GpStatus stat;
+    GpRegion* rgn;
+    GpPointF pts[2];
+
+    TRACE("(%p %.2f %.2f %.2f %.2f %p)\n", graphics, x, y, width, height, result);
 
     if(!graphics || !result)
         return InvalidParameter;
@@ -3254,7 +3392,34 @@ GpStatus WINGDIPAPI GdipIsVisiblePointI(GpGraphics *graphics, INT x, INT y, BOOL
     if(graphics->busy)
         return ObjectBusy;
 
-    return NotImplemented;
+    pts[0].X = x;
+    pts[0].Y = y;
+    pts[1].X = x + width;
+    pts[1].Y = y + height;
+
+    if((stat = GdipTransformPoints(graphics, CoordinateSpaceDevice,
+                    CoordinateSpaceWorld, pts, 2)) != Ok)
+        return stat;
+
+    pts[1].X -= pts[0].X;
+    pts[1].Y -= pts[0].Y;
+
+    if((stat = GdipCreateRegion(&rgn)) != Ok)
+        return stat;
+
+    if((stat = get_visible_clip_region(graphics, rgn)) != Ok)
+        goto cleanup;
+
+    stat = GdipIsVisibleRegionRect(rgn, pts[0].X, pts[0].Y, pts[1].X, pts[1].Y, graphics, result);
+
+cleanup:
+    GdipDeleteRegion(rgn);
+    return stat;
+}
+
+GpStatus WINGDIPAPI GdipIsVisibleRectI(GpGraphics *graphics, INT x, INT y, INT width, INT height, BOOL *result)
+{
+    return GdipIsVisibleRect(graphics, (REAL)x, (REAL)y, (REAL)width, (REAL)height, result);
 }
 
 GpStatus WINGDIPAPI GdipMeasureCharacterRanges(GpGraphics* graphics,
@@ -4151,29 +4316,11 @@ GpStatus WINGDIPAPI GdipDrawDriverString(GpGraphics *graphics, GDIPCONST UINT16 
 }
 
 /*****************************************************************************
- * GdipIsVisibleRegionPointI [GDIPLUS.@]
- */
-GpStatus WINGDIPAPI GdipIsVisibleRegionPointI(GpRegion *region, INT x, INT y, GpGraphics *graphics, BOOL *result)
-{
-    FIXME("(%p %d %d %p %p): stub\n", region, x, y, graphics, result);
-    return NotImplemented;
-}
-
-/*****************************************************************************
  * GdipRecordMetafileI [GDIPLUS.@]
  */
 GpStatus WINGDIPAPI GdipRecordMetafileI(HDC hdc, EmfType type, GDIPCONST GpRect *frameRect,
                                         MetafileFrameUnit frameUnit, GDIPCONST WCHAR *desc, GpMetafile **metafile)
 {
     FIXME("(%p %d %p %d %p %p): stub\n", hdc, type, frameRect, frameUnit, desc, metafile);
-    return NotImplemented;
-}
-
-/*****************************************************************************
- * GdipIsVisibleRectI [GDIPLUS.@]
- */
-GpStatus WINGDIPAPI GdipIsVisibleRectI(GpGraphics *graphics, INT x, INT y, INT width, INT height, BOOL *result)
-{
-    FIXME("(%p %d %d %d %d %p): stub\n", graphics, x, y, width, height, result);
     return NotImplemented;
 }

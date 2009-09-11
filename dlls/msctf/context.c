@@ -64,7 +64,7 @@ typedef struct tagContext {
     const ITfInsertAtSelectionVtbl *InsertAtSelectionVtbl;
     /* const ITfMouseTrackerVtbl *MouseTrackerVtbl; */
     /* const ITfQueryEmbeddedVtbl *QueryEmbeddedVtbl; */
-    /* const ITfSourceSingleVtbl *SourceSingleVtbl; */
+    const ITfSourceSingleVtbl *SourceSingleVtbl;
     LONG refCount;
     BOOL connected;
 
@@ -115,6 +115,11 @@ static inline Context *impl_from_ITfSourceVtbl(ITfSource *iface)
 static inline Context *impl_from_ITfInsertAtSelectionVtbl(ITfInsertAtSelection*iface)
 {
     return (Context *)((char *)iface - FIELD_OFFSET(Context,InsertAtSelectionVtbl));
+}
+
+static inline Context *impl_from_ITfSourceSingleVtbl(ITfSourceSingle* iface)
+{
+    return (Context *)((char *)iface - FIELD_OFFSET(Context,SourceSingleVtbl));
 }
 
 static void free_sink(ContextSink *sink)
@@ -203,6 +208,10 @@ static HRESULT WINAPI Context_QueryInterface(ITfContext *iface, REFIID iid, LPVO
     else if (IsEqualIID(iid, &IID_ITfCompartmentMgr))
     {
         *ppvOut = This->CompartmentMgr;
+    }
+    else if (IsEqualIID(iid, &IID_ITfSourceSingle))
+    {
+        *ppvOut = &This->SourceSingleVtbl;
     }
 
     if (*ppvOut)
@@ -729,6 +738,53 @@ static const ITfInsertAtSelectionVtbl Context_InsertAtSelectionVtbl =
     InsertAtSelection_InsertEmbeddedAtSelection,
 };
 
+/*****************************************************
+ * ITfSourceSingle functions
+ *****************************************************/
+static HRESULT WINAPI SourceSingle_QueryInterface(ITfSourceSingle *iface, REFIID iid, LPVOID *ppvOut)
+{
+    Context *This = impl_from_ITfSourceSingleVtbl(iface);
+    return Context_QueryInterface((ITfContext *)This, iid, *ppvOut);
+}
+
+static ULONG WINAPI SourceSingle_AddRef(ITfSourceSingle *iface)
+{
+    Context *This = impl_from_ITfSourceSingleVtbl(iface);
+    return Context_AddRef((ITfContext *)This);
+}
+
+static ULONG WINAPI SourceSingle_Release(ITfSourceSingle *iface)
+{
+    Context *This = impl_from_ITfSourceSingleVtbl(iface);
+    return Context_Release((ITfContext *)This);
+}
+
+static WINAPI HRESULT SourceSingle_AdviseSingleSink( ITfSourceSingle *iface,
+    TfClientId tid, REFIID riid, IUnknown *punk)
+{
+    Context *This = impl_from_ITfSourceSingleVtbl(iface);
+    FIXME("STUB:(%p) %i %s %p\n",This, tid, debugstr_guid(riid),punk);
+    return E_NOTIMPL;
+}
+
+static WINAPI HRESULT SourceSingle_UnadviseSingleSink( ITfSourceSingle *iface,
+    TfClientId tid, REFIID riid)
+{
+    Context *This = impl_from_ITfSourceSingleVtbl(iface);
+    FIXME("STUB:(%p) %i %s\n",This, tid, debugstr_guid(riid));
+    return E_NOTIMPL;
+}
+
+static const ITfSourceSingleVtbl Context_SourceSingleVtbl =
+{
+    SourceSingle_QueryInterface,
+    SourceSingle_AddRef,
+    SourceSingle_Release,
+
+    SourceSingle_AdviseSingleSink,
+    SourceSingle_UnadviseSingleSink,
+};
+
 HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfDocumentMgr *mgr, ITfContext **ppOut, TfEditCookie *pecTextStore)
 {
     Context *This;
@@ -750,6 +806,7 @@ HRESULT Context_Constructor(TfClientId tidOwner, IUnknown *punk, ITfDocumentMgr 
     This->ContextVtbl= &Context_ContextVtbl;
     This->SourceVtbl = &Context_SourceVtbl;
     This->InsertAtSelectionVtbl = &Context_InsertAtSelectionVtbl;
+    This->SourceSingleVtbl = &Context_SourceSingleVtbl;
     This->refCount = 1;
     This->tidOwner = tidOwner;
     This->connected = FALSE;
@@ -932,8 +989,9 @@ static HRESULT WINAPI TextStoreACPSink_OnLockGranted(ITextStoreACPSink *iface,
 {
     TextStoreACPSink *This = (TextStoreACPSink *)iface;
     HRESULT hr;
-    EditCookie *cookie;
+    EditCookie *cookie,*sinkcookie;
     TfEditCookie ec;
+    struct list *cursor;
 
     TRACE("(%p) %x\n",This, dwLockFlags);
 
@@ -953,11 +1011,34 @@ static HRESULT WINAPI TextStoreACPSink_OnLockGranted(ITextStoreACPSink *iface,
     if (!cookie)
         return E_OUTOFMEMORY;
 
+    sinkcookie = HeapAlloc(GetProcessHeap(),0,sizeof(EditCookie));
+    if (!sinkcookie)
+        return E_OUTOFMEMORY;
+
     cookie->lockType = dwLockFlags;
     cookie->pOwningContext = This->pContext;
     ec = generate_Cookie(COOKIE_MAGIC_EDITCOOKIE, cookie);
 
     hr = ITfEditSession_DoEditSession(This->pContext->currentEditSession, ec);
+
+    if ((dwLockFlags&TS_LF_READWRITE) == TS_LF_READWRITE)
+    {
+        TfEditCookie sc;
+
+        sinkcookie->lockType = TS_LF_READ;
+        sinkcookie->pOwningContext = This->pContext;
+        sc = generate_Cookie(COOKIE_MAGIC_EDITCOOKIE, sinkcookie);
+
+        /*TODO: implement ITfEditRecord */
+        LIST_FOR_EACH(cursor, &This->pContext->pTextEditSink)
+        {
+            ContextSink* sink = LIST_ENTRY(cursor,ContextSink,entry);
+            ITfTextEditSink_OnEndEdit(sink->interfaces.pITfTextEditSink,
+                                      (ITfContext*) &This->pContext, sc, NULL);
+        }
+        sinkcookie = remove_Cookie(sc);
+    }
+    HeapFree(GetProcessHeap(),0,sinkcookie);
 
     ITfEditSession_Release(This->pContext->currentEditSession);
     This->pContext->currentEditSession = NULL;

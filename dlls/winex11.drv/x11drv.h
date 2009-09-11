@@ -99,6 +99,18 @@ enum x11drv_shm_mode
     X11DRV_SHM_IMAGE,
 };
 
+typedef struct {
+    int shift;
+    int scale;
+    int max;
+} ChannelShift;
+
+typedef struct
+{
+    ChannelShift physicalRed, physicalBlue, physicalGreen;
+    ChannelShift logicalRed, logicalBlue, logicalGreen;
+} ColorShifts;
+
   /* X physical bitmap */
 typedef struct
 {
@@ -106,6 +118,7 @@ typedef struct
     Pixmap       pixmap;
     XID          glxpixmap;
     int          pixmap_depth;
+    ColorShifts  pixmap_color_shifts;
     /* the following fields are only used for DIB section bitmaps */
     int          status, p_status;  /* mapping status */
     XImage      *image;             /* cached XImage */
@@ -143,6 +156,7 @@ typedef struct
     int           backgroundPixel;
     int           textPixel;
     int           depth;       /* bit depth of the DC */
+    ColorShifts  *color_shifts; /* color shifts of the DC */
     int           exposures;   /* count of graphics exposures operations */
     int           current_pf;
     Drawable      gl_drawable;
@@ -468,6 +482,7 @@ extern UINT16 X11DRV_PALETTE_PaletteFlags;
 
 extern int *X11DRV_PALETTE_PaletteToXPixel;
 extern int *X11DRV_PALETTE_XPixelToPalette;
+extern ColorShifts X11DRV_PALETTE_default_shifts;
 
 extern int X11DRV_PALETTE_mapEGAPixel[16];
 
@@ -475,8 +490,9 @@ extern int X11DRV_PALETTE_Init(void);
 extern void X11DRV_PALETTE_Cleanup(void);
 extern BOOL X11DRV_IsSolidColor(COLORREF color);
 
-extern COLORREF X11DRV_PALETTE_ToLogical(int pixel);
+extern COLORREF X11DRV_PALETTE_ToLogical(X11DRV_PDEVICE *physDev, int pixel);
 extern int X11DRV_PALETTE_ToPhysical(X11DRV_PDEVICE *physDev, COLORREF color);
+extern int X11DRV_PALETTE_LookupPixel(COLORREF color);
 
 extern unsigned int depth_to_bpp( unsigned int depth );
 

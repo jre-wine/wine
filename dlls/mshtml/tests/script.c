@@ -74,6 +74,12 @@ DEFINE_GUID(CLSID_IdentityUnmarshal,0x0000001b,0x0000,0x0000,0xc0,0x00,0x00,0x00
         expect_ ## func = called_ ## func = FALSE; \
     }while(0)
 
+#define CHECK_CALLED_BROKEN(func) \
+    do { \
+        ok(called_ ## func || broken(!called_ ## func), "expected " #func "\n"); \
+        expect_ ## func = called_ ## func = FALSE; \
+    }while(0)
+
 #define CHECK_NOT_CALLED(func) \
     do { \
         ok(!called_ ## func, "unexpected " #func "\n"); \
@@ -89,7 +95,9 @@ DEFINE_EXPECT(GetInterfaceSafetyOptions);
 DEFINE_EXPECT(SetInterfaceSafetyOptions);
 DEFINE_EXPECT(InitNew);
 DEFINE_EXPECT(Close);
-DEFINE_EXPECT(SetProperty);
+DEFINE_EXPECT(SetProperty_HACK_TRIDENTEVENTSINK);
+DEFINE_EXPECT(SetProperty_INVOKEVERSIONING);
+DEFINE_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION);
 DEFINE_EXPECT(SetScriptSite);
 DEFINE_EXPECT(GetScriptState);
 DEFINE_EXPECT(SetScriptState_STARTED);
@@ -119,6 +127,25 @@ static const char *debugstr_guid(REFIID riid)
             riid->Data4[5], riid->Data4[6], riid->Data4[7]);
 
     return buf;
+}
+
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
+}
+
+static BSTR a2bstr(const char *str)
+{
+    BSTR ret;
+    int len;
+
+    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+    ret = SysAllocStringLen(NULL, len);
+    MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+
+    return ret;
 }
 
 static HRESULT WINAPI PropertyNotifySink_QueryInterface(IPropertyNotifySink *iface,
@@ -504,15 +531,31 @@ static HRESULT WINAPI ActiveScriptProperty_GetProperty(IActiveScriptProperty *if
 static HRESULT WINAPI ActiveScriptProperty_SetProperty(IActiveScriptProperty *iface, DWORD dwProperty,
         VARIANT *pvarIndex, VARIANT *pvarValue)
 {
-    CHECK_EXPECT(SetProperty);
+    switch(dwProperty) {
+    case SCRIPTPROP_HACK_TRIDENTEVENTSINK:
+        CHECK_EXPECT(SetProperty_HACK_TRIDENTEVENTSINK);
+        ok(V_VT(pvarValue) == VT_BOOL, "V_VT(pvarValue)=%d\n", V_VT(pvarValue));
+        ok(V_BOOL(pvarValue) == VARIANT_TRUE, "V_BOOL(pvarValue)=%x\n", V_BOOL(pvarValue));
+        break;
+    case SCRIPTPROP_INVOKEVERSIONING:
+        CHECK_EXPECT(SetProperty_INVOKEVERSIONING);
+        ok(V_VT(pvarValue) == VT_I4, "V_VT(pvarValue)=%d\n", V_VT(pvarValue));
+        ok(V_I4(pvarValue) == 1, "V_I4(pvarValue)=%d\n", V_I4(pvarValue));
+        break;
+    case SCRIPTPROP_ABBREVIATE_GLOBALNAME_RESOLUTION:
+        CHECK_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION);
+        ok(V_VT(pvarValue) == VT_BOOL, "V_VT(pvarValue)=%d\n", V_VT(pvarValue));
+        ok(V_BOOL(pvarValue) == VARIANT_TRUE, "V_BOOL(pvarValue)=%x\n", V_BOOL(pvarValue));
+        break;
+    default:
+        ok(0, "unexpected property %x\n", dwProperty);
+        return E_NOTIMPL;
+    }
 
-    ok(dwProperty == SCRIPTPROP_HACK_TRIDENTEVENTSINK, "unexpected property %d\n", dwProperty);
     ok(!pvarIndex, "pvarIndex != NULL\n");
     ok(pvarValue != NULL, "pvarValue == NULL\n");
-    ok(V_VT(pvarValue) == VT_BOOL, "V_VT(pvarValue)=%d\n", V_VT(pvarValue));
-    ok(V_BOOL(pvarValue) == VARIANT_TRUE, "V_BOOL(pvarValue)=%x\n", V_BOOL(pvarValue));
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static const IActiveScriptPropertyVtbl ActiveScriptPropertyVtbl = {
@@ -593,12 +636,69 @@ static HRESULT WINAPI ActiveScriptParse_AddScriptlet(IActiveScriptParse *iface,
     return E_NOTIMPL;
 }
 
+static void test_func(IDispatchEx *obj)
+{
+    DISPID id, propput_arg = DISPID_PROPERTYPUT;
+    IDispatchEx *dispex;
+    IDispatch *disp;
+    EXCEPINFO ei;
+    DISPPARAMS dp;
+    BSTR str;
+    VARIANT var;
+    HRESULT hres;
+
+    str = a2bstr("toString");
+    hres = IDispatchEx_GetDispID(obj, str, fdexNameCaseSensitive, &id);
+    SysFreeString(str);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+    ok(id == DISPID_IOMNAVIGATOR_TOSTRING, "id = %x\n", id);
+
+    memset(&dp, 0, sizeof(dp));
+    memset(&ei, 0, sizeof(ei));
+    VariantInit(&var);
+    hres = IDispatchEx_InvokeEx(obj, id, LOCALE_NEUTRAL, DISPATCH_PROPERTYGET, &dp, &var, &ei, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    ok(V_VT(&var) == VT_DISPATCH, "V_VT(var)=%d\n", V_VT(&var));
+    ok(V_DISPATCH(&var) != NULL, "V_DISPATCH(var) == NULL\n");
+    disp = V_DISPATCH(&var);
+
+    hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
+    IDispatch_Release(disp);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08x\n", hres);
+
+    /* FIXME: Test InvokeEx(DISPATCH_METHOD) */
+
+    memset(&dp, 0, sizeof(dp));
+    memset(&ei, 0, sizeof(ei));
+    VariantInit(&var);
+    hres = IDispatchEx_Invoke(dispex, DISPID_VALUE, &IID_NULL, LOCALE_NEUTRAL, DISPATCH_METHOD, &dp, &var, &ei, NULL);
+    ok(hres == S_OK || broken(E_ACCESSDENIED), "InvokeEx failed: %08x\n", hres);
+    if(SUCCEEDED(hres)) {
+        ok(V_VT(&var) == VT_BSTR, "V_VT(var)=%d\n", V_VT(&var));
+        ok(!strcmp_wa(V_BSTR(&var), "[object]"), "V_BSTR(var) = %s\n", wine_dbgstr_w(V_BSTR(&var)));
+        VariantClear(&var);
+    }
+
+    dp.cArgs = 1;
+    dp.rgvarg = &var;
+    dp.cNamedArgs = 1;
+    dp.rgdispidNamedArgs = &propput_arg;
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = 100;
+    hres = IDispatchEx_InvokeEx(obj, id, LOCALE_NEUTRAL, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, NULL);
+    ok(hres == E_NOTIMPL, "InvokeEx failed: %08x\n", hres);
+
+    IDispatchEx_Release(dispex);
+}
+
 static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *iface,
         LPCOLESTR pstrCode, LPCOLESTR pstrItemName, IUnknown *punkContext,
         LPCOLESTR pstrDelimiter, CTXARG_T dwSourceContextCookie, ULONG ulStartingLine,
         DWORD dwFlags, VARIANT *pvarResult, EXCEPINFO *pexcepinfo)
 {
-    IDispatchEx *document;
+    IDispatchEx *document, *dispex;
+    IHTMLWindow2 *window;
+    IOmNavigator *navigator;
     IUnknown *unk;
     VARIANT var, arg;
     DISPPARAMS dp;
@@ -713,6 +813,20 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
 
     IDispatchEx_Release(document);
 
+    hres = IDispatchEx_QueryInterface(window_dispex, &IID_IHTMLWindow2, (void**)&window);
+    ok(hres == S_OK, "Could not get IHTMLWindow2 iface: %08x\n", hres);
+
+    hres = IHTMLWindow2_get_navigator(window, &navigator);
+    IHTMLWindow2_Release(window);
+    ok(hres == S_OK, "get_navigator failed: %08x\n", hres);
+
+    hres = IOmNavigator_QueryInterface(navigator, &IID_IDispatchEx, (void**)&dispex);
+    IOmNavigator_Release(navigator);
+    ok(hres == S_OK, "Could not get IDispatchEx iface: %08x\n", hres);
+
+    test_func(dispex);
+    IDispatchEx_Release(dispex);
+
     return S_OK;
 }
 
@@ -755,6 +869,9 @@ static HRESULT WINAPI ActiveScript_QueryInterface(IActiveScript *iface, REFIID r
         *ppv = &ObjectSafety;
         return S_OK;
     }
+
+    if(IsEqualGUID(&IID_IActiveScriptDebug, riid))
+        return E_NOINTERFACE;
 
     ok(0, "unexpected riid %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;
@@ -1028,12 +1145,14 @@ static void test_simple_script(void)
     SET_EXPECT(CreateInstance);
     SET_EXPECT(GetInterfaceSafetyOptions);
     SET_EXPECT(SetInterfaceSafetyOptions);
-    SET_EXPECT(SetProperty);
+    SET_EXPECT(SetProperty_INVOKEVERSIONING); /* IE8 */
+    SET_EXPECT(SetProperty_HACK_TRIDENTEVENTSINK);
     SET_EXPECT(InitNew);
     SET_EXPECT(SetScriptSite);
     SET_EXPECT(GetScriptState);
     SET_EXPECT(SetScriptState_STARTED);
     SET_EXPECT(AddNamedItem);
+    SET_EXPECT(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION); /* IE8 */
     SET_EXPECT(ParseScriptText);
     SET_EXPECT(SetScriptState_CONNECTED);
 
@@ -1043,12 +1162,14 @@ static void test_simple_script(void)
     CHECK_CALLED(CreateInstance);
     CHECK_CALLED(GetInterfaceSafetyOptions);
     CHECK_CALLED(SetInterfaceSafetyOptions);
-    CHECK_CALLED(SetProperty);
+    CHECK_CALLED_BROKEN(SetProperty_INVOKEVERSIONING); /* IE8 */
+    CHECK_CALLED(SetProperty_HACK_TRIDENTEVENTSINK);
     CHECK_CALLED(InitNew);
     CHECK_CALLED(SetScriptSite);
     CHECK_CALLED(GetScriptState);
     CHECK_CALLED(SetScriptState_STARTED);
     CHECK_CALLED(AddNamedItem);
+    CHECK_CALLED_BROKEN(SetProperty_ABBREVIATE_GLOBALNAME_RESOLUTION); /* IE8 */
     CHECK_CALLED(ParseScriptText);
     CHECK_CALLED(SetScriptState_CONNECTED);
 

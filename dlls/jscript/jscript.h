@@ -69,6 +69,7 @@ extern HINSTANCE jscript_hinstance;
 #define PROPF_ENUM    0x0200
 #define PROPF_CONSTR  0x0400
 
+/* NOTE: Keep in sync with names in Object.toString implementation */
 typedef enum {
     JSCLASS_NONE,
     JSCLASS_ARRAY,
@@ -81,7 +82,8 @@ typedef enum {
     JSCLASS_NUMBER,
     JSCLASS_OBJECT,
     JSCLASS_REGEXP,
-    JSCLASS_STRING
+    JSCLASS_STRING,
+    JSCLASS_ARGUMENTS
 } jsclass_t;
 
 typedef HRESULT (*builtin_invoke_t)(DispatchEx*,LCID,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
@@ -175,7 +177,7 @@ HRESULT to_integer(script_ctx_t*,VARIANT*,jsexcept_t*,VARIANT*);
 HRESULT to_int32(script_ctx_t*,VARIANT*,jsexcept_t*,INT*);
 HRESULT to_uint32(script_ctx_t*,VARIANT*,jsexcept_t*,DWORD*);
 HRESULT to_string(script_ctx_t*,VARIANT*,jsexcept_t*,BSTR*);
-HRESULT to_object(exec_ctx_t*,VARIANT*,IDispatch**);
+HRESULT to_object(script_ctx_t*,VARIANT*,IDispatch**);
 
 typedef struct named_item_t {
     IDispatch *disp;

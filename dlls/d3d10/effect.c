@@ -36,6 +36,12 @@ static const struct ID3D10EffectPassVtbl d3d10_effect_pass_vtbl;
 static const struct ID3D10EffectVariableVtbl d3d10_effect_variable_vtbl;
 static const struct ID3D10EffectConstantBufferVtbl d3d10_effect_constant_buffer_vtbl;
 
+/* null objects - needed for invalid calls */
+static struct d3d10_effect_technique null_technique = {&d3d10_effect_technique_vtbl, NULL, NULL, 0, 0, NULL};
+static struct d3d10_effect_pass null_pass = {&d3d10_effect_pass_vtbl, NULL, NULL, 0, 0, 0, NULL};
+static struct d3d10_effect_local_buffer null_local_buffer = {&d3d10_effect_constant_buffer_vtbl, NULL, 0, 0, 0, NULL};
+static struct d3d10_effect_variable null_variable = {&d3d10_effect_variable_vtbl, NULL, 0, 0};
+
 static inline void read_dword(const char **ptr, DWORD *d)
 {
     memcpy(d, *ptr, sizeof(*d));
@@ -428,7 +434,10 @@ static HRESULT parse_fx10_variable(struct d3d10_effect_variable *v, const char *
     read_dword(ptr, &v->buffer_offset);
     TRACE("Variable offset in buffer: %#x.\n", v->buffer_offset);
 
-    skip_dword_unknown(ptr, 2);
+    skip_dword_unknown(ptr, 1);
+
+    read_dword(ptr, &v->flag);
+    TRACE("Variable flag: %#x.\n", v->flag);
 
     read_dword(ptr, &v->annotation_count);
     for(i = 0; i < v->annotation_count; ++i)
@@ -547,19 +556,18 @@ static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, DWORD data_s
     read_dword(&ptr, &e->local_buffer_count);
     TRACE("Local buffer count: %u.\n", e->local_buffer_count);
 
-    /* Number of variables in local buffers? */
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 0: %u\n", unknown);
+    read_dword(&ptr, &e->variable_count);
+    TRACE("Variable count: %u\n", e->variable_count);
 
-    read_dword(&ptr, &e->localobjects_count);
-    TRACE("Localobjects count: %u\n", e->localobjects_count);
+    read_dword(&ptr, &e->object_count);
+    TRACE("Object count: %u\n", e->object_count);
 
     read_dword(&ptr, &e->sharedbuffers_count);
     TRACE("Sharedbuffers count: %u\n", e->sharedbuffers_count);
 
     /* Number of variables in shared buffers? */
     read_dword(&ptr, &unknown);
-    FIXME("Unknown 1: %u\n", unknown);
+    FIXME("Unknown 0: %u\n", unknown);
 
     read_dword(&ptr, &e->sharedobjects_count);
     TRACE("Sharedobjects count: %u\n", e->sharedobjects_count);
@@ -571,9 +579,10 @@ static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, DWORD data_s
     TRACE("Index offset: %#x\n", e->index_offset);
 
     read_dword(&ptr, &unknown);
-    FIXME("Unknown 2: %u\n", unknown);
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 3: %u\n", unknown);
+    FIXME("Unknown 1: %u\n", unknown);
+
+    read_dword(&ptr, &e->texture_count);
+    TRACE("Texture count: %u\n", e->texture_count);
 
     read_dword(&ptr, &e->dephstencilstate_count);
     TRACE("Depthstencilstate count: %u\n", e->dephstencilstate_count);
@@ -587,16 +596,17 @@ static HRESULT parse_fx10(struct d3d10_effect *e, const char *data, DWORD data_s
     read_dword(&ptr, &e->samplerstate_count);
     TRACE("Samplerstate count: %u\n", e->samplerstate_count);
 
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 4: %u\n", unknown);
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 5: %u\n", unknown);
+    read_dword(&ptr, &e->rendertargetview_count);
+    TRACE("Rendertargetview count: %u\n", e->rendertargetview_count);
 
-    /* Number of function calls in all passes? */
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 6: %u\n", unknown);
-    read_dword(&ptr, &unknown);
-    FIXME("Unknown 7: %u\n", unknown);
+    read_dword(&ptr, &e->depthstencilview_count);
+    TRACE("Depthstencilview count: %u\n", e->depthstencilview_count);
+
+    read_dword(&ptr, &e->shader_call_count);
+    TRACE("Shader call count: %u\n", e->shader_call_count);
+
+    read_dword(&ptr, &e->shader_compile_count);
+    TRACE("Shader compile count: %u\n", e->shader_compile_count);
 
     return parse_fx10_body(e, ptr, data_size - (ptr - data));
 }
@@ -839,7 +849,7 @@ static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetCon
     if (index >= This->local_buffer_count)
     {
         WARN("Invalid index specified\n");
-        return NULL;
+        return (ID3D10EffectConstantBuffer *)&null_local_buffer;
     }
 
     l = &This->local_buffers[index];
@@ -868,7 +878,9 @@ static struct ID3D10EffectConstantBuffer * STDMETHODCALLTYPE d3d10_effect_GetCon
         }
     }
 
-    return NULL;
+    WARN("Invalid name specified\n");
+
+    return (ID3D10EffectConstantBuffer *)&null_local_buffer;
 }
 
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableByIndex(ID3D10Effect *iface, UINT index)
@@ -902,7 +914,9 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
         }
     }
 
-    return NULL;
+    WARN("Invalid name specified\n");
+
+    return (ID3D10EffectVariable *)&null_variable;
 }
 
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableBySemantic(ID3D10Effect *iface,
@@ -924,7 +938,7 @@ static struct ID3D10EffectTechnique * STDMETHODCALLTYPE d3d10_effect_GetTechniqu
     if (index >= This->technique_count)
     {
         WARN("Invalid index specified\n");
-        return NULL;
+        return (ID3D10EffectTechnique *)&null_technique;
     }
 
     t = &This->techniques[index];
@@ -952,7 +966,9 @@ static struct ID3D10EffectTechnique * STDMETHODCALLTYPE d3d10_effect_GetTechniqu
         }
     }
 
-    return NULL;
+    WARN("Invalid name specified\n");
+
+    return (ID3D10EffectTechnique *)&null_technique;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_Optimize(ID3D10Effect *iface)
@@ -1007,6 +1023,18 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_technique_GetDesc(ID3D10EffectTech
 
     TRACE("iface %p, desc %p\n", iface, desc);
 
+    if(This == &null_technique)
+    {
+        WARN("Null technique specified\n");
+        return E_FAIL;
+    }
+
+    if(!desc)
+    {
+        WARN("Invalid argument specified\n");
+        return E_INVALIDARG;
+    }
+
     desc->Name = This->name;
     desc->Passes = This->pass_count;
     WARN("Annotations not implemented\n");
@@ -1042,7 +1070,7 @@ static struct ID3D10EffectPass * STDMETHODCALLTYPE d3d10_effect_technique_GetPas
     if (index >= This->pass_count)
     {
         WARN("Invalid index specified\n");
-        return NULL;
+        return (ID3D10EffectPass *)&null_pass;
     }
 
     p = &This->passes[index];
@@ -1070,7 +1098,9 @@ static struct ID3D10EffectPass * STDMETHODCALLTYPE d3d10_effect_technique_GetPas
         }
     }
 
-    return NULL;
+    WARN("Invalid name specified\n");
+
+    return (ID3D10EffectPass *)&null_pass;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_effect_technique_ComputeStateBlockMask(ID3D10EffectTechnique *iface,
@@ -1108,6 +1138,18 @@ static HRESULT STDMETHODCALLTYPE d3d10_effect_pass_GetDesc(ID3D10EffectPass *ifa
     unsigned int i;
 
     FIXME("iface %p, desc %p partial stub!\n", iface, desc);
+
+    if(This == &null_pass)
+    {
+        WARN("Null pass specified\n");
+        return E_FAIL;
+    }
+
+    if(!desc)
+    {
+        WARN("Invalid argument specified\n");
+        return E_INVALIDARG;
+    }
 
     memset(desc, 0, sizeof(*desc));
     desc->Name = This->name;

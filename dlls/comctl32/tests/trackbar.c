@@ -30,6 +30,7 @@
 #define PARENT_SEQ_INDEX 0
 #define TRACKBAR_SEQ_INDEX 1
 
+HWND hWndParent;
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCE];
 
@@ -43,7 +44,7 @@ static const struct message create_parent_wnd_seq[] = {
     { WM_QUERYNEWPALETTE, sent|optional },
     { WM_WINDOWPOSCHANGING, sent|wparam, 0 },
     { WM_ACTIVATEAPP, sent|wparam, 1 },
-    { WM_NCACTIVATE, sent|wparam, 1 },
+    { WM_NCACTIVATE, sent },
     { WM_ACTIVATE, sent|wparam, 1 },
     { WM_IME_SETCONTEXT, sent|wparam|defwinproc|optional, 1 },
     { WM_IME_NOTIFY, sent|defwinproc|optional },
@@ -81,12 +82,12 @@ static const struct message parent_create_trackbar_wnd_seq[] = {
 
 static const struct message parent_new_window_test_seq[] = {
     { WM_QUERYNEWPALETTE, sent|optional },
-    { WM_WINDOWPOSCHANGING, sent},
-    { WM_NCACTIVATE, sent},
-    { PBT_APMRESUMECRITICAL, sent},
+    { WM_WINDOWPOSCHANGING, sent|optional},
+    { WM_NCACTIVATE, sent|optional},
+    { PBT_APMRESUMECRITICAL, sent|optional},
     { WM_IME_SETCONTEXT, sent|defwinproc|optional},
     { WM_IME_NOTIFY, sent|defwinproc|optional},
-    { WM_SETFOCUS, sent|defwinproc},
+    { WM_SETFOCUS, sent|defwinproc|optional},
     { WM_NOTIFYFORMAT, sent},
     { WM_QUERYUISTATE, sent|optional},
     {0}
@@ -846,9 +847,7 @@ static void test_tic_placement(HWND hWndTrackbar){
     r = SendMessage(hWndTrackbar, TBM_GETTIC, 2,0);
     expect(4, r);
     r = SendMessage(hWndTrackbar, TBM_GETTIC, 4,0);
-    todo_wine{
-        expect(-1, r);
-    }
+    expect(-1, r);
 
     /* test TBM_GETTICPIC */
     r = SendMessage(hWndTrackbar, TBM_GETTICPOS, 0, 0);
@@ -967,11 +966,27 @@ static void test_ignore_selection(HWND hWndTrackbar){
     ok_sequence(sequences, PARENT_SEQ_INDEX, parent_empty_test_seq, "parent ignore selection setting test sequence", FALSE);
 }
 
+static void test_initial_state(void)
+{
+    HWND hWnd;
+    DWORD ret;
+
+    hWnd = create_trackbar(0, hWndParent);
+
+    ret = SendMessage(hWnd, TBM_GETNUMTICS, 0, 0);
+    expect(2, ret);
+    ret = SendMessage(hWnd, TBM_GETTIC, 0, 0);
+    expect(-1, ret);
+    ret = SendMessage(hWnd, TBM_GETTICPOS, 0, 0);
+    expect(-1, ret);
+
+    DestroyWindow(hWnd);
+}
+
 START_TEST(trackbar)
 {
     DWORD style = WS_VISIBLE | TBS_TOOLTIPS | TBS_ENABLESELRANGE | TBS_FIXEDLENGTH | TBS_AUTOTICKS;
     HWND hWndTrackbar;
-    HWND hWndParent;
 
     init_msg_sequences(sequences, NUM_MSG_SEQUENCE);
     InitCommonControls();
@@ -1035,6 +1050,8 @@ START_TEST(trackbar)
     test_ignore_selection(hWndTrackbar);
 
     DestroyWindow(hWndTrackbar);
+
+    test_initial_state();
 
     DestroyWindow(hWndParent);
 }

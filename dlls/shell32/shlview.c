@@ -976,7 +976,7 @@ static void ShellView_DoContextMenu(IShellViewImpl * This, WORD x, WORD y, BOOL 
 	if( ShellView_GetSelections(This) )
 	{
 	  IShellFolder_GetUIObjectOf( This->pSFParent, This->hWndParent, This->cidl, (LPCITEMIDLIST*)This->apidl,
-					(REFIID)&IID_IContextMenu, NULL, (LPVOID *)&pContextMenu);
+                                      &IID_IContextMenu, NULL, (LPVOID *)&pContextMenu);
 
 	  if(pContextMenu)
 	  {
@@ -1428,8 +1428,8 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
 
 	          if (pds)
 	          {
-	            DWORD dwEffect;
-		    DoDragDrop(pda, pds, dwEffect, &dwEffect);
+	            DWORD dwEffect2;
+		    DoDragDrop(pda, pds, dwEffect, &dwEffect2);
 		  }
 	          IDataObject_Release(pda);
 	      }

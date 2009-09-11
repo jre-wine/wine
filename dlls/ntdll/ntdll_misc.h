@@ -79,6 +79,7 @@ extern size_t server_init_thread( void *entry_point );
 extern void DECLSPEC_NORETURN server_protocol_error( const char *err, ... );
 extern void DECLSPEC_NORETURN server_protocol_perror( const char *err );
 extern void DECLSPEC_NORETURN abort_thread( int status );
+extern void DECLSPEC_NORETURN terminate_thread( int status );
 extern void DECLSPEC_NORETURN exit_thread( int status );
 extern sigset_t server_block_set;
 extern void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset );
@@ -200,7 +201,11 @@ struct ntdll_thread_data
     int                reply_fd;      /* 1e4/314 fd for receiving server replies */
     int                wait_fd[2];    /* 1e8/318 fd for sleeping server requests */
     BOOL               wow64_redir;   /* 1f0/320 Wow64 filesystem redirection flag */
+#ifdef __i386__
     void              *vm86_ptr;      /* 1f4/328 data for vm86 mode */
+#else
+    void              *exit_frame;    /* 1f4/328 exit frame pointer */
+#endif
     pthread_t          pthread_id;    /* 1f8/330 pthread thread id */
 };
 

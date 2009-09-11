@@ -122,6 +122,13 @@ static RTL_CRITICAL_SECTION csVirtual = { &critsect_debug, -1, 0, 0, 0, 0 };
 static void *address_space_limit = (void *)0xc0000000;  /* top of the total available address space */
 static void *user_space_limit    = (void *)0x7fff0000;  /* top of the user address space */
 static void *working_set_limit   = (void *)0x7fff0000;  /* top of the current working set */
+#elif defined(__x86_64__)
+# define page_mask  0xfff
+# define page_shift 12
+# define page_size  0x1000
+static void *address_space_limit = (void *)0x7fffffff0000;
+static void *user_space_limit    = (void *)0x7fffffff0000;
+static void *working_set_limit   = (void *)0x7fffffff0000;
 #else
 static UINT page_shift;
 static UINT_PTR page_size;
@@ -1364,17 +1371,17 @@ void virtual_init_threading(void)
  */
 void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info )
 {
-    info->dwUnknown1 = 0;
-    info->uKeMaximumIncrement = 0;  /* FIXME */
-    info->uPageSize = page_size;
-    info->uMmLowestPhysicalPage = 1;
-    info->uMmHighestPhysicalPage = 0x7fffffff / page_size;
-    info->uMmNumberOfPhysicalPages = info->uMmHighestPhysicalPage - info->uMmLowestPhysicalPage;
-    info->uAllocationGranularity = get_mask(0) + 1;
-    info->pLowestUserAddress = (void *)0x10000;
-    info->pMmHighestUserAddress = (char *)user_space_limit - 1;
-    info->uKeActiveProcessors = NtCurrentTeb()->Peb->NumberOfProcessors;
-    info->bKeNumberProcessors = info->uKeActiveProcessors;
+    info->unknown                 = 0;
+    info->KeMaximumIncrement      = 0;  /* FIXME */
+    info->PageSize                = page_size;
+    info->MmLowestPhysicalPage    = 1;
+    info->MmHighestPhysicalPage   = 0x7fffffff / page_size;
+    info->MmNumberOfPhysicalPages = info->MmHighestPhysicalPage - info->MmLowestPhysicalPage;
+    info->AllocationGranularity   = get_mask(0) + 1;
+    info->LowestUserAddress       = (void *)0x10000;
+    info->HighestUserAddress      = (char *)user_space_limit - 1;
+    info->ActiveProcessors        = NtCurrentTeb()->Peb->NumberOfProcessors;
+    info->NumberOfProcessors      = NtCurrentTeb()->Peb->NumberOfProcessors;
 }
 
 

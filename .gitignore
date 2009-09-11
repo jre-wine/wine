@@ -80,6 +80,8 @@ dlls/oleaut32/tests/test_tlb.tlb
 dlls/oleaut32/tests/tmarshal.h
 dlls/oleaut32/tests/tmarshal.tlb
 dlls/oleaut32/tests/tmarshal_i.c
+dlls/oledb32/convert.h
+dlls/oledb32/convert_i.c
 dlls/qmgr/qmgr_local.h
 dlls/qmgr/qmgr_local_i.c
 dlls/qmgrprxy/qmgrprxy.h
@@ -139,6 +141,7 @@ include/mlang.h
 include/mmstream.h
 include/mscoree.h
 include/msctf.h
+include/msdadc.h
 include/mshtmhst.h
 include/mshtml.h
 include/msinkaut.h
