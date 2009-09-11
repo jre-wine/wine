@@ -4,6 +4,7 @@
  *  endproc.c
  *
  *  Copyright (C) 1999 - 2001  Brian Palmer  <brianp@reactos.org>
+ *  Copyright (C) 2008  Vladimir Pankratov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,22 +25,34 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
-#include <tchar.h>
 #include <stdio.h>
 #include <winnt.h>
-    
+
+#include "wine/unicode.h"
 #include "taskmgr.h"
 #include "perfdata.h"
 
+WCHAR    wszWarnMsg[511];
+WCHAR    wszWarnTitle[255];
+WCHAR    wszUnable2Terminate[255];
+
+static void load_message_strings(void)
+{
+    LoadStringW(hInst, IDS_TERMINATE_MESSAGE, wszWarnMsg, sizeof(wszWarnMsg)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_TERMINATE_UNABLE2TERMINATE, wszUnable2Terminate, sizeof(wszUnable2Terminate)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_WARNING_TITLE, wszWarnTitle, sizeof(wszWarnTitle)/sizeof(WCHAR));
+}
+
 void ProcessPage_OnEndProcess(void)
 {
-    LVITEM            lvitem;
+    LVITEMW          lvitem;
     ULONG            Index;
     DWORD            dwProcessId;
-    HANDLE            hProcess;
-    TCHAR            strErrorText[260];
+    HANDLE           hProcess;
+    WCHAR            wstrErrorText[256];
+
+    load_message_strings();
 
     for (Index=0; Index<(ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++)
     {
@@ -48,7 +61,7 @@ void ProcessPage_OnEndProcess(void)
         lvitem.iItem = Index;
         lvitem.iSubItem = 0;
 
-        SendMessage(hProcessPageListCtrl, LVM_GETITEM, 0, (LPARAM) &lvitem);
+        SendMessageW(hProcessPageListCtrl, LVM_GETITEMW, 0, (LPARAM) &lvitem);
 
         if (lvitem.state & LVIS_SELECTED)
             break;
@@ -59,22 +72,22 @@ void ProcessPage_OnEndProcess(void)
     if ((ListView_GetSelectedCount(hProcessPageListCtrl) != 1) || (dwProcessId == 0))
         return;
 
-    if (MessageBox(hMainWnd, _T("WARNING: Terminating a process can cause undesired\nresults including loss of data and system instability. The\nprocess will not be given the chance to save its state or\ndata before it is terminated. Are you sure you want to\nterminate the process?"), _T("Task Manager Warning"), MB_YESNO|MB_ICONWARNING) != IDYES)
+    if (MessageBoxW(hMainWnd, wszWarnMsg, wszWarnTitle, MB_YESNO|MB_ICONWARNING) != IDYES)
         return;
 
     hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, dwProcessId);
 
     if (!hProcess)
     {
-        GetLastErrorText(strErrorText, 260);
-        MessageBox(hMainWnd, strErrorText, _T("Unable to Terminate Process"), MB_OK|MB_ICONSTOP);
+        GetLastErrorText(wstrErrorText, sizeof(wstrErrorText)/sizeof(WCHAR));
+        MessageBoxW(hMainWnd, wstrErrorText,wszUnable2Terminate, MB_OK|MB_ICONSTOP);
         return;
     }
 
     if (!TerminateProcess(hProcess, 0))
     {
-        GetLastErrorText(strErrorText, 260);
-        MessageBox(hMainWnd, strErrorText, _T("Unable to Terminate Process"), MB_OK|MB_ICONSTOP);
+        GetLastErrorText(wstrErrorText, sizeof(wstrErrorText)/sizeof(WCHAR));
+        MessageBoxW(hMainWnd, wstrErrorText,wszUnable2Terminate, MB_OK|MB_ICONSTOP);
     }
 
     CloseHandle(hProcess);
@@ -82,11 +95,13 @@ void ProcessPage_OnEndProcess(void)
 
 void ProcessPage_OnEndProcessTree(void)
 {
-    LVITEM            lvitem;
+    LVITEMW          lvitem;
     ULONG            Index;
     DWORD            dwProcessId;
-    HANDLE            hProcess;
-    TCHAR            strErrorText[260];
+    HANDLE           hProcess;
+    WCHAR            wstrErrorText[256];
+
+    load_message_strings();
 
     for (Index=0; Index<(ULONG)ListView_GetItemCount(hProcessPageListCtrl); Index++)
     {
@@ -95,7 +110,7 @@ void ProcessPage_OnEndProcessTree(void)
         lvitem.iItem = Index;
         lvitem.iSubItem = 0;
 
-        SendMessage(hProcessPageListCtrl, LVM_GETITEM, 0, (LPARAM) &lvitem);
+        SendMessageW(hProcessPageListCtrl, LVM_GETITEMW, 0, (LPARAM) &lvitem);
 
         if (lvitem.state & LVIS_SELECTED)
             break;
@@ -106,22 +121,22 @@ void ProcessPage_OnEndProcessTree(void)
     if ((ListView_GetSelectedCount(hProcessPageListCtrl) != 1) || (dwProcessId == 0))
         return;
 
-    if (MessageBox(hMainWnd, _T("WARNING: Terminating a process can cause undesired\nresults including loss of data and system instability. The\nprocess will not be given the chance to save its state or\ndata before it is terminated. Are you sure you want to\nterminate the process?"), _T("Task Manager Warning"), MB_YESNO|MB_ICONWARNING) != IDYES)
+    if (MessageBoxW(hMainWnd, wszWarnMsg, wszWarnTitle, MB_YESNO|MB_ICONWARNING) != IDYES)
         return;
 
     hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, dwProcessId);
 
     if (!hProcess)
     {
-        GetLastErrorText(strErrorText, 260);
-        MessageBox(hMainWnd, strErrorText, _T("Unable to Terminate Process"), MB_OK|MB_ICONSTOP);
+        GetLastErrorText(wstrErrorText, sizeof(wstrErrorText)/sizeof(WCHAR));
+        MessageBoxW(hMainWnd, wstrErrorText,wszUnable2Terminate, MB_OK|MB_ICONSTOP);
         return;
     }
 
     if (!TerminateProcess(hProcess, 0))
     {
-        GetLastErrorText(strErrorText, 260);
-        MessageBox(hMainWnd, strErrorText, _T("Unable to Terminate Process"), MB_OK|MB_ICONSTOP);
+        GetLastErrorText(wstrErrorText, sizeof(wstrErrorText)/sizeof(WCHAR));
+        MessageBoxW(hMainWnd, wstrErrorText,wszUnable2Terminate, MB_OK|MB_ICONSTOP);
     }
 
     CloseHandle(hProcess);

@@ -50,35 +50,69 @@ struct SysKeyboardImpl
     BYTE DInputKeyState[WINE_DINPUT_KEYBOARD_MAX_KEYS];
 };
 
-static void KeyboardCallback( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
+static BYTE map_dik_code(DWORD scanCode, DWORD vkCode)
+{
+    static const BYTE asciiCodes[] =
+     {/*32*/  DIK_SPACE,0,0,0,0,0,0,DIK_APOSTROPHE,
+      /*40*/  0,0,0,0,DIK_COMMA,DIK_MINUS,DIK_PERIOD,DIK_SLASH,
+      /*48*/  DIK_0,DIK_1,DIK_2,DIK_3,DIK_4,DIK_5,DIK_6,DIK_7,
+      /*56*/  DIK_8,DIK_9,DIK_COLON,DIK_SEMICOLON,0,DIK_EQUALS,0,0,
+      /*64*/  DIK_AT,DIK_A,DIK_B,DIK_C,DIK_D,DIK_E,DIK_F,DIK_G,
+      /*72*/  DIK_H,DIK_I,DIK_J,DIK_K,DIK_L,DIK_M,DIK_N,DIK_O,
+      /*80*/  DIK_P,DIK_Q,DIK_R,DIK_S,DIK_T,DIK_U,DIK_V,DIK_W,
+      /*88*/  DIK_X,DIK_Y,DIK_Z,DIK_LBRACKET,0,DIK_RBRACKET,DIK_CIRCUMFLEX,DIK_UNDERLINE}      /*95*/ ;
+
+    BYTE out_code = 0;
+    WCHAR c = MapVirtualKeyW(vkCode,MAPVK_VK_TO_CHAR);
+
+    if (c > 31 && c < 96)
+        out_code = asciiCodes[c - 32];
+
+    if (out_code == 0)
+        out_code = scanCode;
+
+    return out_code;
+}
+
+static int KeyboardCallback( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
 {
     SysKeyboardImpl *This = (SysKeyboardImpl *)iface;
-    int dik_code;
+    int dik_code, ret = This->base.dwCoopLevel & DISCL_EXCLUSIVE;
     KBDLLHOOKSTRUCT *hook = (KBDLLHOOKSTRUCT *)lparam;
     BYTE new_diks;
 
     if (wparam != WM_KEYDOWN && wparam != WM_KEYUP &&
         wparam != WM_SYSKEYDOWN && wparam != WM_SYSKEYUP)
-        return;
+        return 0;
 
     TRACE("(%p) %ld,%ld\n", iface, wparam, lparam);
 
-    dik_code = hook->scanCode & 0xff;
-    if (hook->flags & LLKHF_EXTENDED) dik_code |= 0x80;
-
+    switch (hook->vkCode)
+    {
+        /* R-Shift is special - it is an extended key with separate scan code */
+        case VK_RSHIFT  : dik_code = DIK_RSHIFT; break;
+        case VK_PAUSE   : dik_code = DIK_PAUSE; break;
+        case VK_NUMLOCK : dik_code = DIK_NUMLOCK; break;
+        case VK_SUBTRACT: dik_code = DIK_SUBTRACT; break;
+        default:
+            dik_code = map_dik_code(hook->scanCode & 0xff, hook->vkCode);
+            if (hook->flags & LLKHF_EXTENDED) dik_code |= 0x80;
+    }
     new_diks = hook->flags & LLKHF_UP ? 0 : 0x80;
 
     /* returns now if key event already known */
     if (new_diks == This->DInputKeyState[dik_code])
-        return;
+        return ret;
 
     This->DInputKeyState[dik_code] = new_diks;
     TRACE(" setting %02X to %02X\n", dik_code, This->DInputKeyState[dik_code]);
-      
+
     dik_code = id_to_offset(&This->base.data_format, DIDFT_MAKEINSTANCE(dik_code) | DIDFT_PSHBUTTON);
     EnterCriticalSection(&This->base.crit);
     queue_event((LPDIRECTINPUTDEVICE8A)This, dik_code, new_diks, hook->time, This->base.dinput->evsequence++);
     LeaveCriticalSection(&This->base.crit);
+
+    return ret;
 }
 
 const GUID DInput_Wine_Keyboard_GUID = { /* 0ab8648a-7735-11d2-8c73-71df54a96441 */
@@ -268,7 +302,7 @@ static HRESULT WINAPI SysKeyboardAImpl_GetDeviceState(
 
     if (!This->base.acquired) return DIERR_NOTACQUIRED;
 
-    if (len != WINE_DINPUT_KEYBOARD_MAX_KEYS)
+    if (len != This->base.data_format.user_df->dwDataSize )
         return DIERR_INVALIDPARAM;
 
     EnterCriticalSection(&This->base.crit);
@@ -280,8 +314,8 @@ static HRESULT WINAPI SysKeyboardAImpl_GetDeviceState(
 		TRACE(" - %02X: %02x\n", i, This->DInputKeyState[i]);
 	}
     }
-    
-    memcpy(ptr, This->DInputKeyState, WINE_DINPUT_KEYBOARD_MAX_KEYS);
+
+    fill_DataFormat(ptr, len, This->DInputKeyState, &This->base.data_format);
     LeaveCriticalSection(&This->base.crit);
 
     return DI_OK;
@@ -404,6 +438,42 @@ static HRESULT WINAPI SysKeyboardWImpl_GetDeviceInfo(LPDIRECTINPUTDEVICE8W iface
     return DI_OK;
 }
 
+/******************************************************************************
+ *      GetProperty : Retrieves information about the input device.
+ */
+static HRESULT WINAPI SysKeyboardAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
+        REFGUID rguid, LPDIPROPHEADER pdiph)
+{
+    TRACE("(%p) %s,%p\n", iface, debugstr_guid(rguid), pdiph);
+    _dump_DIPROPHEADER(pdiph);
+
+    if (HIWORD(rguid)) return DI_OK;
+
+    switch (LOWORD(rguid))
+    {
+        case (DWORD_PTR)DIPROP_KEYNAME:
+        {
+            HRESULT hr;
+            LPDIPROPSTRING ps = (LPDIPROPSTRING)pdiph;
+            DIDEVICEOBJECTINSTANCEW didoi;
+
+            if (pdiph->dwSize != sizeof(DIPROPSTRING))
+                return DIERR_INVALIDPARAM;
+
+            didoi.dwSize = sizeof(DIDEVICEOBJECTINSTANCEW);
+
+            hr = SysKeyboardWImpl_GetObjectInfo((LPDIRECTINPUTDEVICE8W)iface , &didoi,
+                                                 ps->diph.dwObj, ps->diph.dwHow);
+            if (hr == DI_OK)
+                memcpy(ps->wsz, didoi.tszName, sizeof(ps->wsz));
+            return hr;
+        }
+        default:
+            return IDirectInputDevice2AImpl_GetProperty( iface, rguid, pdiph );
+    }
+    return DI_OK;
+}
+
 static const IDirectInputDevice8AVtbl SysKeyboardAvt =
 {
 	IDirectInputDevice2AImpl_QueryInterface,
@@ -411,7 +481,7 @@ static const IDirectInputDevice8AVtbl SysKeyboardAvt =
         IDirectInputDevice2AImpl_Release,
 	SysKeyboardAImpl_GetCapabilities,
         IDirectInputDevice2AImpl_EnumObjects,
-	IDirectInputDevice2AImpl_GetProperty,
+        SysKeyboardAImpl_GetProperty,
 	IDirectInputDevice2AImpl_SetProperty,
 	IDirectInputDevice2AImpl_Acquire,
 	IDirectInputDevice2AImpl_Unacquire,
@@ -453,7 +523,7 @@ static const IDirectInputDevice8WVtbl SysKeyboardWvt =
         XCAST(Release)IDirectInputDevice2AImpl_Release,
 	XCAST(GetCapabilities)SysKeyboardAImpl_GetCapabilities,
         IDirectInputDevice2WImpl_EnumObjects,
-	XCAST(GetProperty)IDirectInputDevice2AImpl_GetProperty,
+        XCAST(GetProperty)SysKeyboardAImpl_GetProperty,
 	XCAST(SetProperty)IDirectInputDevice2AImpl_SetProperty,
 	XCAST(Acquire)IDirectInputDevice2AImpl_Acquire,
 	XCAST(Unacquire)IDirectInputDevice2AImpl_Unacquire,

@@ -29,10 +29,16 @@
 
 #include "rpc_binding.h"
 #include "rpc_message.h"
+#include "ndr_stubless.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
 #define RPC_ASYNC_SIGNATURE 0x43595341
+
+static inline BOOL valid_async_handle(PRPC_ASYNC_STATE pAsync)
+{
+    return pAsync->Signature == RPC_ASYNC_SIGNATURE;
+}
 
 /***********************************************************************
  *           RpcAsyncInitializeHandle [RPCRT4.@]
@@ -64,7 +70,7 @@ RPC_STATUS WINAPI RpcAsyncInitializeHandle(PRPC_ASYNC_STATE pAsync, unsigned int
     pAsync->Flags = 0;
     pAsync->StubInfo = NULL;
     pAsync->RuntimeInfo = NULL;
-    memset(&pAsync->Reserved, 0, sizeof(*pAsync) - FIELD_OFFSET(RPC_ASYNC_STATE, Reserved));
+    memset(pAsync->Reserved, 0, sizeof(*pAsync) - FIELD_OFFSET(RPC_ASYNC_STATE, Reserved));
 
     return RPC_S_OK;
 }
@@ -104,8 +110,14 @@ RPC_STATUS WINAPI RpcAsyncGetCallStatus(PRPC_ASYNC_STATE pAsync)
  */
 RPC_STATUS WINAPI RpcAsyncCompleteCall(PRPC_ASYNC_STATE pAsync, void *Reply)
 {
-    FIXME("(%p, %p): stub\n", pAsync, Reply);
-    return RPC_S_INVALID_ASYNC_HANDLE;
+    TRACE("(%p, %p)\n", pAsync, Reply);
+
+    if (!valid_async_handle(pAsync))
+        return RPC_S_INVALID_ASYNC_HANDLE;
+
+    /* FIXME: check completed */
+
+    return NdrpCompleteAsyncClientCall(pAsync, Reply);
 }
 
 /***********************************************************************

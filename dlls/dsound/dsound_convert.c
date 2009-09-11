@@ -34,9 +34,7 @@
  */
 
 #include "config.h"
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#endif
+
 #include <stdarg.h>
 
 #define NONAMELESSSTRUCT
@@ -52,10 +50,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(dsound);
 
-typedef struct {
-    uint8_t byte[3];
-} int24_struct;
-
 #ifdef WORDS_BIGENDIAN
 #define le16(x) RtlUshortByteSwap((x))
 #define le32(x) RtlUlongByteSwap((x))
@@ -64,116 +58,241 @@ typedef struct {
 #define le32(x) (x)
 #endif
 
-static void convert_8_to_8 (const void *src, void *dst)
+static inline void src_advance(const void **src, UINT stride, INT *count, UINT *freqAcc, UINT adj)
 {
-    uint8_t *dest = dst;
-    *dest = *(uint8_t*)src;
+    *freqAcc += adj;
+    if (*freqAcc >= (1 << DSOUND_FREQSHIFT))
+    {
+        ULONG adv = (*freqAcc >> DSOUND_FREQSHIFT);
+        *freqAcc &= (1 << DSOUND_FREQSHIFT) - 1;
+        *(const char **)src += adv * stride;
+        *count -= adv;
+    }
 }
 
-static void convert_8_to_16 (const void *src, void *dst)
+static void convert_8_to_8 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint16_t dest = *(uint8_t*)src, *dest16 = dst;
-    *dest16 = le16(dest * 257 - 32768);
+    while (count > 0)
+    {
+        *(BYTE *)dst = *(const BYTE *)src;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_8_to_24 (const void *src, void *dst)
+static void convert_8_to_16 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint8_t dest = *(uint8_t*)src;
-    int24_struct *dest24 = dst;
-    dest24->byte[0] = dest;
-    dest24->byte[1] = dest;
-    dest24->byte[2] = dest - 0x80;
+    while (count > 0)
+    {
+        WORD dest = *(const BYTE *)src, *dest16 = dst;
+        *dest16 = le16(dest * 257 - 32768);
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_8_to_32 (const void *src, void *dst)
+static void convert_8_to_24 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint32_t dest = *(uint8_t*)src, *dest32 = dst;
-    *dest32 = le32(dest * 16843009 - 2147483648U);
+    while (count > 0)
+    {
+        BYTE dest = *(const BYTE *)src;
+        BYTE *dest24 = dst;
+        dest24[0] = dest;
+        dest24[1] = dest;
+        dest24[2] = dest - 0x80;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_16_to_8 (const void *src, void *dst)
+static void convert_8_to_32 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint8_t *dst8 = dst;
-    *dst8 = (le16(*(uint16_t*)src)) / 256;
-    *dst8 -= 0x80;
+    while (count > 0)
+    {
+        DWORD dest = *(const BYTE *)src, *dest32 = dst;
+        *dest32 = le32(dest * 16843009 - 2147483648U);
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_16_to_16 (const void *src, void *dst)
+static void convert_16_to_8 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint16_t *dest = dst;
-    *dest = *(uint16_t*)src;
+    while (count > 0)
+    {
+        BYTE *dst8 = dst;
+        *dst8 = (le16(*(const WORD *)src)) / 256;
+        *dst8 -= 0x80;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_16_to_24 (const void *src, void *dst)
+static void convert_16_to_16 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint16_t dest = le16(*(uint16_t*)src);
-    int24_struct *dest24 = dst;
+    while (count > 0)
+    {
+        *(WORD *)dst = *(const WORD *)src;
 
-    dest24->byte[0] = dest / 256;
-    dest24->byte[1] = dest;
-    dest24->byte[2] = dest / 256;
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_16_to_32 (const void *src, void *dst)
+static void convert_16_to_24 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint32_t dest = *(uint16_t*)src, *dest32 = dst;
-    *dest32 = dest * 65537;
+    while (count > 0)
+    {
+        WORD dest = le16(*(const WORD *)src);
+        BYTE *dest24 = dst;
+
+        dest24[0] = dest / 256;
+        dest24[1] = dest;
+        dest24[2] = dest / 256;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_24_to_8 (const void *src, void *dst)
+static void convert_16_to_32 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint8_t *dst8 = dst;
-    *dst8 = ((int24_struct*)src)->byte[2];
+    while (count > 0)
+    {
+        DWORD dest = *(const WORD *)src, *dest32 = dst;
+        *dest32 = dest * 65537;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_24_to_16 (const void *src, void *dst)
+static void convert_24_to_8 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint16_t *dest16 = dst;
-    const int24_struct *source = src;
-    *dest16 = le16(source->byte[2] * 256 + source->byte[1]);
+    while (count > 0)
+    {
+        BYTE *dst8 = dst;
+        *dst8 = ((const BYTE *)src)[2];
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_24_to_24 (const void *src, void *dst)
+static void convert_24_to_16 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    int24_struct *dest24 = dst;
-    const int24_struct *src24 = src;
-    *dest24 = *src24;
+    while (count > 0)
+    {
+        WORD *dest16 = dst;
+        const BYTE *source = src;
+        *dest16 = le16(source[2] * 256 + source[1]);
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_24_to_32 (const void *src, void *dst)
+static void convert_24_to_24 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint32_t *dest32 = dst;
-    const int24_struct *source = src;
-    *dest32 = le32(source->byte[2] * 16777217 + source->byte[1] * 65536 + source->byte[0] * 256);
+    while (count > 0)
+    {
+        BYTE *dest24 = dst;
+        const BYTE *src24 = src;
+
+        dest24[0] = src24[0];
+        dest24[1] = src24[1];
+        dest24[2] = src24[2];
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_32_to_8 (const void *src, void *dst)
+static void convert_24_to_32 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint8_t *dst8 = dst;
-    *dst8 = (le32(*(uint32_t*)src) / 16777216);
-    *dst8 -= 0x80;
+    while (count > 0)
+    {
+        DWORD *dest32 = dst;
+        const BYTE *source = src;
+        *dest32 = le32(source[2] * 16777217 + source[1] * 65536 + source[0] * 256);
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_32_to_16 (const void *src, void *dst)
+static void convert_32_to_8 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint16_t *dest16 = dst;
-    *dest16 = le16(le32(*(uint32_t*)src) / 65536);
+    while (count > 0)
+    {
+        BYTE *dst8 = dst;
+        *dst8 = (le32(*(const DWORD *)src) / 16777216);
+        *dst8 -= 0x80;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_32_to_24 (const void *src, void *dst)
+static void convert_32_to_16 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint32_t dest = le32(*(uint32_t*)dst);
-    int24_struct *dest24 = dst;
+    while (count > 0)
+    {
+        WORD *dest16 = dst;
+        *dest16 = le16(le32(*(const DWORD *)src) / 65536);
 
-    dest24->byte[0] = dest / 256;
-    dest24->byte[1] = dest / 65536;
-    dest24->byte[2] = dest / 16777216;
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
-static void convert_32_to_32 (const void *src, void *dst)
+static void convert_32_to_24 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
 {
-    uint32_t *dest = dst;
-    *dest = *(uint32_t*)src;
+    while (count > 0)
+    {
+        DWORD dest = le32(*(const DWORD *)src);
+        BYTE *dest24 = dst;
+
+        dest24[0] = dest / 256;
+        dest24[1] = dest / 65536;
+        dest24[2] = dest / 16777216;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
+}
+
+static void convert_32_to_32 (const void *src, void *dst, UINT src_stride,
+        UINT dst_stride, INT count, UINT freqAcc, UINT adj)
+{
+    while (count > 0)
+    {
+        DWORD *dest = dst;
+        *dest = *(const DWORD *)src;
+
+        dst = (char *)dst + dst_stride;
+        src_advance(&src, src_stride, &count, &freqAcc, adj);
+    }
 }
 
 const bitsconvertfunc convertbpp[4][4] = {
@@ -183,15 +302,15 @@ const bitsconvertfunc convertbpp[4][4] = {
     { convert_32_to_8, convert_32_to_16, convert_32_to_24, convert_32_to_32 },
 };
 
-static void mix8(int8_t *src, int32_t *dst, unsigned len)
+static void mix8(signed char *src, INT *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     while (len--)
         /* 8-bit WAV is unsigned, it's here converted to signed, normalize function will convert it back again */
-        *(dst++) += (int8_t)((uint8_t)*(src++) - (uint8_t)0x80);
+        *(dst++) += (signed char)((BYTE)*(src++) - (BYTE)0x80);
 }
 
-static void mix16(int16_t *src, int32_t *dst, unsigned len)
+static void mix16(SHORT *src, INT *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 2;
@@ -202,22 +321,22 @@ static void mix16(int16_t *src, int32_t *dst, unsigned len)
     }
 }
 
-static void mix24(int24_struct *src, int32_t *dst, unsigned len)
+static void mix24(BYTE *src, INT *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 3;
     while (len--)
     {
-        uint32_t field;
-        field = ((unsigned)src->byte[2] << 16) + ((unsigned)src->byte[1] << 8) + (unsigned)src->byte[0];
-        if (src->byte[2] & 0x80)
+        DWORD field;
+        field = ((DWORD)src[2] << 16) + ((DWORD)src[1] << 8) + (DWORD)src[0];
+        if (src[2] & 0x80)
             field |= 0xFF000000U;
         *(dst++) += field;
         ++src;
     }
 }
 
-static void mix32(int32_t *src, int64_t *dst, unsigned len)
+static void mix32(INT *src, LONGLONG *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 4;
@@ -232,7 +351,7 @@ const mixfunc mixfunctions[4] = {
     (mixfunc)mix32
 };
 
-static void norm8(int32_t *src, int8_t *dst, unsigned len)
+static void norm8(INT *src, signed char *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     while (len--)
@@ -247,7 +366,7 @@ static void norm8(int32_t *src, int8_t *dst, unsigned len)
     }
 }
 
-static void norm16(int32_t *src, int16_t *dst, unsigned len)
+static void norm16(INT *src, SHORT *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 2;
@@ -263,7 +382,7 @@ static void norm16(int32_t *src, int16_t *dst, unsigned len)
     }
 }
 
-static void norm24(int32_t *src, int24_struct *dst, unsigned len)
+static void norm24(INT *src, BYTE *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 3;
@@ -271,35 +390,35 @@ static void norm24(int32_t *src, int24_struct *dst, unsigned len)
     {
         if (*src <= -0x800000)
         {
-            dst->byte[0] = 0;
-            dst->byte[1] = 0;
-            dst->byte[2] = 0x80;
+            dst[0] = 0;
+            dst[1] = 0;
+            dst[2] = 0x80;
         }
         else if (*src > 0x7fffff)
         {
-            dst->byte[0] = 0xff;
-            dst->byte[1] = 0xff;
-            dst->byte[2] = 0x7f;
+            dst[0] = 0xff;
+            dst[1] = 0xff;
+            dst[2] = 0x7f;
         }
         else
         {
-            dst->byte[0] = *src;
-            dst->byte[1] = *src >> 8;
-            dst->byte[2] = *src >> 16;
+            dst[0] = *src;
+            dst[1] = *src >> 8;
+            dst[2] = *src >> 16;
         }
         ++dst;
         ++src;
     }
 }
 
-static void norm32(int64_t *src, int32_t *dst, unsigned len)
+static void norm32(LONGLONG *src, INT *dst, unsigned len)
 {
     TRACE("%p - %p %d\n", src, dst, len);
     len /= 4;
     while (len--)
     {
         *dst = le32(*src);
-        if (*src <= -(int64_t)0x80000000)
+        if (*src <= -(LONGLONG)0x80000000)
             *dst = le32(0x80000000);
         else if (*src > 0x7fffffff)
             *dst = le32(0x7fffffff);

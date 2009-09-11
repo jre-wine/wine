@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "oleauto.h"
-#include "wine/windef16.h"
 
 #define HELPDLLFLAG (0x0100)
 #define DO_NOT_SEEK (-1)
@@ -576,7 +575,7 @@ typedef struct {
   BYTE flags;
   WORD next;
   WORD name;
-  WORD byte_offs; /* pos in struct, or offset to const type */
+  WORD byte_offs; /* pos in struct, or offset to const type or const data (if flags & 0x08) */
   WORD type; /* if flags & 0x02 this is the type, else offset to type */
   DWORD memid;
   WORD helpcontext; /* ?? */

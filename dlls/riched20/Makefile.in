@@ -4,8 +4,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = riched20.dll
 IMPORTLIB = riched20
-IMPORTS   = ole32 imm32 user32 gdi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid ole32 oleaut32 imm32 user32 gdi32 kernel32
 
 C_SRCS = \
 	caret.c \
@@ -21,6 +20,8 @@ C_SRCS = \
 	run.c \
 	string.c \
 	style.c \
+	table.c \
+	txthost.c \
 	txtsrv.c \
 	undo.c \
 	wrap.c \

@@ -1,7 +1,7 @@
 /*
  * COM proxy definitions
  *
- * Copyright 2001 Ove Kåven, TransGaming Technologies
+ * Copyright 2001 Ove KÃ¥ven, TransGaming Technologies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,36 +21,25 @@
 #ifndef __WINE_CPSF_H
 #define __WINE_CPSF_H
 
-HRESULT WINAPI StdProxy_Construct(REFIID riid,
-				  LPUNKNOWN pUnkOuter,
-				  const ProxyFileInfo *ProxyInfo,
-				  int Index,
-				  LPPSFACTORYBUFFER pPSFactory,
-				  LPRPCPROXYBUFFER *ppProxy,
-				  LPVOID *ppvObj);
+HRESULT StdProxy_Construct(REFIID riid, LPUNKNOWN pUnkOuter, const ProxyFileInfo *ProxyInfo,
+                           int Index, LPPSFACTORYBUFFER pPSFactory, LPRPCPROXYBUFFER *ppProxy,
+                           LPVOID *ppvObj);
 
-HRESULT WINAPI CStdStubBuffer_Construct(REFIID riid,
-					LPUNKNOWN pUnkServer,
-					PCInterfaceName name,
-					CInterfaceStubVtbl *vtbl,
-					LPPSFACTORYBUFFER pPSFactory,
-					LPRPCSTUBBUFFER *ppStub);
+HRESULT CStdStubBuffer_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
+                                 CInterfaceStubVtbl *vtbl, LPPSFACTORYBUFFER pPSFactory,
+                                 LPRPCSTUBBUFFER *ppStub);
 
-HRESULT WINAPI CStdStubBuffer_Delegating_Construct(REFIID riid,
-                                                   LPUNKNOWN pUnkServer,
-                                                   PCInterfaceName name,
-                                                   CInterfaceStubVtbl *vtbl,
-                                                   REFIID delegating_iid,
-                                                   LPPSFACTORYBUFFER pPSFactory,
-                                                   LPRPCSTUBBUFFER *ppStub);
+HRESULT CStdStubBuffer_Delegating_Construct(REFIID riid, LPUNKNOWN pUnkServer, PCInterfaceName name,
+                                            CInterfaceStubVtbl *vtbl, REFIID delegating_iid,
+                                            LPPSFACTORYBUFFER pPSFactory, LPRPCSTUBBUFFER *ppStub);
 
 const MIDL_SERVER_INFO *CStdStubBuffer_GetServerInfo(IRpcStubBuffer *iface);
 
 const IRpcStubBufferVtbl CStdStubBuffer_Vtbl;
 const IRpcStubBufferVtbl CStdStubBuffer_Delegating_Vtbl;
 
-void create_delegating_vtbl(DWORD num_methods);
-
+BOOL fill_delegated_proxy_table(IUnknownVtbl *vtbl, DWORD num);
+HRESULT create_proxy(REFIID iid, IUnknown *pUnkOuter, IRpcProxyBuffer **pproxy, void **ppv);
 HRESULT create_stub(REFIID iid, IUnknown *pUnk, IRpcStubBuffer **ppstub);
 
 #endif  /* __WINE_CPSF_H */

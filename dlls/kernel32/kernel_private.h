@@ -21,6 +21,8 @@
 #ifndef __WINE_KERNEL_PRIVATE_H
 #define __WINE_KERNEL_PRIVATE_H
 
+#include "wine/server.h"
+
 struct tagSYSLEVEL;
 
 struct kernel_thread_data
@@ -30,8 +32,7 @@ struct kernel_thread_data
     WORD                htask16;        /* Win16 task handle */
     DWORD               sys_count[4];   /* syslevel mutex entry counters */
     struct tagSYSLEVEL *sys_mutex[4];   /* syslevel mutex pointers */
-    void               *pthread_data;   /* private data for pthread emulation */
-    void               *pad[43];        /* change this if you add fields! */
+    void               *pad[44];        /* change this if you add fields! */
 };
 
 static inline struct kernel_thread_data *kernel_get_thread_data(void)
@@ -57,9 +58,9 @@ static inline HANDLE console_handle_map(HANDLE h)
 }
 
 /* map a kernel32 console handle onto a real wineserver handle */
-static inline HANDLE console_handle_unmap(HANDLE h)
+static inline obj_handle_t console_handle_unmap(HANDLE h)
 {
-    return h != INVALID_HANDLE_VALUE ? (HANDLE)((UINT_PTR)h ^ 3) : INVALID_HANDLE_VALUE;
+    return wine_server_obj_handle( h != INVALID_HANDLE_VALUE ? (HANDLE)((UINT_PTR)h ^ 3) : INVALID_HANDLE_VALUE );
 }
 
 extern HMODULE kernel32_handle;
@@ -70,8 +71,7 @@ extern HANDLE dos_handles[DOS_TABLE_SIZE];
 
 extern const WCHAR *DIR_Windows;
 extern const WCHAR *DIR_System;
-
-extern void PTHREAD_Init(void);
+extern const WCHAR *DIR_SysWow64;
 
 extern VOID SYSLEVEL_CheckNotLevel( INT level );
 
@@ -81,24 +81,22 @@ extern DWORD FILE_name_WtoA( LPCWSTR src, INT srclen, LPSTR dest, INT destlen );
 
 extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
 extern LONG CALLBACK INSTR_vectored_handler( EXCEPTION_POINTERS *ptrs );
-extern void INSTR_CallBuiltinHandler( CONTEXT86 *context, BYTE intnum );
 
 /* return values for MODULE_GetBinaryType */
-enum binary_type
-{
-    BINARY_UNKNOWN,
-    BINARY_PE_EXE,
-    BINARY_PE_DLL,
-    BINARY_WIN16,
-    BINARY_OS216,
-    BINARY_DOS,
-    BINARY_UNIX_EXE,
-    BINARY_UNIX_LIB
-};
+#define BINARY_UNKNOWN    0x00
+#define BINARY_PE         0x01
+#define BINARY_WIN16      0x02
+#define BINARY_OS216      0x03
+#define BINARY_DOS        0x04
+#define BINARY_UNIX_EXE   0x05
+#define BINARY_UNIX_LIB   0x06
+#define BINARY_TYPE_MASK  0x0f
+#define BINARY_FLAG_DLL   0x10
+#define BINARY_FLAG_64BIT 0x20
 
 /* module.c */
 extern WCHAR *MODULE_get_dll_load_path( LPCWSTR module );
-extern enum binary_type MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **res_end );
+extern DWORD MODULE_GetBinaryType( HANDLE hfile, void **res_start, void **res_end );
 
 extern BOOL NLS_IsUnicodeOnlyLcid(LCID);
 
@@ -144,5 +142,17 @@ extern struct winedos_exports
 
 /* returns directory handle for named objects */
 extern HANDLE get_BaseNamedObjects_handle(void);
+
+/* Register functions */
+
+#ifdef __i386__
+#define DEFINE_REGS_ENTRYPOINT( name, args ) \
+    __ASM_GLOBAL_FUNC( name, \
+                       ".byte 0x68\n\t"  /* pushl $__regs_func */       \
+                       ".long " __ASM_NAME("__regs_") #name "-.-11\n\t" \
+                       ".byte 0x6a," #args "\n\t" /* pushl $args */     \
+                       "call " __ASM_NAME("__wine_call_from_32_regs") "\n\t" \
+                       "ret $(4*" #args ")" ) /* fake ret to make copy protections happy */
+#endif
 
 #endif

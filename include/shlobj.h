@@ -40,10 +40,11 @@ DECLARE_HANDLE(HPSXA);
 #endif
 
 UINT         WINAPI SHAddFromPropSheetExtArray(HPSXA,LPFNADDPROPSHEETPAGE,LPARAM);
-LPVOID       WINAPI SHAlloc(ULONG);
+LPVOID       WINAPI SHAlloc(ULONG) __WINE_ALLOC_SIZE(1);
 HRESULT      WINAPI SHCoCreateInstance(LPCWSTR,const CLSID*,IUnknown*,REFIID,LPVOID*);
 HPSXA        WINAPI SHCreatePropSheetExtArray(HKEY,LPCWSTR,UINT);
 HPSXA        WINAPI SHCreatePropSheetExtArrayEx(HKEY,LPCWSTR,UINT,IDataObject*);
+HRESULT      WINAPI SHCreateShellItem(LPCITEMIDLIST,IShellFolder*,LPCITEMIDLIST,IShellItem**);
 DWORD        WINAPI SHCLSIDFromStringA(LPCSTR,CLSID*);
 DWORD        WINAPI SHCLSIDFromStringW(LPCWSTR,CLSID*);
 #define             SHCLSIDFromString WINELIB_NAME_AW(SHCLSIDFromString)
@@ -54,12 +55,16 @@ DWORD        WINAPI SHFormatDrive(HWND,UINT,UINT,UINT);
 void         WINAPI SHFree(LPVOID);
 BOOL         WINAPI GetFileNameFromBrowse(HWND,LPSTR,DWORD,LPCSTR,LPCSTR,LPCSTR,LPCSTR);
 HRESULT      WINAPI SHGetInstanceExplorer(IUnknown**);
+HRESULT      WINAPI SHGetFolderPathAndSubDirA(HWND,int,HANDLE,DWORD,LPCSTR,LPSTR);
+HRESULT      WINAPI SHGetFolderPathAndSubDirW(HWND,int,HANDLE,DWORD,LPCWSTR,LPWSTR);
+#define             SHGetFolderPathAndSubDir WINELIB_NAME_AW(SHGetFolderPathAndSubDir);
 BOOL         WINAPI SHGetPathFromIDListA(LPCITEMIDLIST,LPSTR);
 BOOL         WINAPI SHGetPathFromIDListW(LPCITEMIDLIST,LPWSTR);
 #define             SHGetPathFromIDList WINELIB_NAME_AW(SHGetPathFromIDList)
 INT          WINAPI SHHandleUpdateImage(LPCITEMIDLIST);
 HRESULT      WINAPI SHILCreateFromPath(LPCWSTR,LPITEMIDLIST*,DWORD*);
 HRESULT      WINAPI SHLoadOLE(LPARAM);
+HRESULT      WINAPI SHParseDisplayName(LPCWSTR,IBindCtx*,LPITEMIDLIST*,SFGAOF,SFGAOF*);
 HRESULT      WINAPI SHPathPrepareForWriteA(HWND,IUnknown*,LPCSTR,DWORD);
 HRESULT      WINAPI SHPathPrepareForWriteW(HWND,IUnknown*,LPCWSTR,DWORD);
 #define             SHPathPrepareForWrite WINELIB_NAME_AW(SHPathPrepareForWrite);
@@ -72,10 +77,11 @@ VOID         WINAPI SHUpdateImageW(LPCWSTR,INT,UINT,INT);
 #define             SHUpdateImage WINELIB_NAME_AW(SHUpdateImage)
 int          WINAPI RestartDialog(HWND,LPCWSTR,DWORD);
 int          WINAPI RestartDialogEx(HWND,LPCWSTR,DWORD,DWORD);
+BOOL         WINAPI IsUserAnAdmin(void);
 
-#define SHFMT_ERROR     0xFFFFFFFFL  /* Error on last format, drive may be formatable */
-#define SHFMT_CANCEL    0xFFFFFFFEL  /* Last format was canceled */
-#define SHFMT_NOFORMAT  0xFFFFFFFDL  /* Drive is not formatable */
+#define SHFMT_ERROR     0xFFFFFFFFL  /* Error on last format, drive may be formattable */
+#define SHFMT_CANCEL    0xFFFFFFFEL  /* Last format was cancelled */
+#define SHFMT_NOFORMAT  0xFFFFFFFDL  /* Drive is not formattable */
 
 /* SHFormatDrive flags */
 #define SHFMT_ID_DEFAULT	0xFFFF
@@ -112,44 +118,167 @@ int WINAPI PathCleanupSpec(LPCWSTR,LPWSTR);
 
 
 /* DATAOBJECT_InitShellIDList*/
-#define CFSTR_SHELLIDLIST       "Shell IDList Array"      /* CF_IDLIST */
+#define CFSTR_SHELLIDLISTA           "Shell IDList Array"   /* CF_IDLIST */
+#define CFSTR_SHELLIDLISTOFFSETA     "Shell Object Offsets" /* CF_OBJECTPOSITIONS */
+#define CFSTR_NETRESOURCESA          "Net Resource"         /* CF_NETRESOURCE */
+/* DATAOBJECT_InitFileGroupDesc */
+#define CFSTR_FILEDESCRIPTORA        "FileGroupDescriptor"  /* CF_FILEGROUPDESCRIPTORA */
+/* DATAOBJECT_InitFileContents*/
+#define CFSTR_FILECONTENTSA          "FileContents"         /* CF_FILECONTENTS */
+#define CFSTR_FILENAMEA              "FileName"             /* CF_FILENAMEA */
+#define CFSTR_FILENAMEMAPA           "FileNameMap"          /* CF_FILENAMEMAPA */
+#define CFSTR_PRINTERGROUPA          "PrinterFriendlyName"  /* CF_PRINTERS */
+#define CFSTR_SHELLURLA              "UniformResourceLocator"
+#define CFSTR_INETURLA               CFSTR_SHELLURLA
+#define CFSTR_PREFERREDDROPEFFECTA   "Preferred DropEffect"
+#define CFSTR_PERFORMEDDROPEFFECTA   "Performed DropEffect"
+#define CFSTR_PASTESUCCEEDEDA        "Paste Succeeded"
+#define CFSTR_INDRAGLOOPA            "InShellDragLoop"
+#define CFSTR_DRAGCONTEXTA           "DragContext"
+#define CFSTR_MOUNTEDVOLUMEA         "MountedVolume"
+#define CFSTR_PERSISTEDDATAOBJECTA   "PersistedDataObject"
+#define CFSTR_TARGETCLSIDA           "TargetCLSID"
+#define CFSTR_AUTOPLAY_SHELLIDLISTSA "Autoplay Enumerated IDList Array"
+#define CFSTR_LOGICALPERFORMEDDROPEFFECTA "Logical Performed DropEffect"
+
+#if defined(__GNUC__)
+# define CFSTR_SHELLIDLISTW \
+    (const WCHAR []){ 'S','h','e','l','l',' ','I','D','L','i','s','t',' ','A','r','r','a','y',0 }
+# define CFSTR_SHELLIDLISTOFFSETW \
+    (const WCHAR []){ 'S','h','e','l','l',' ','O','b','j','e','c','t',' ','O','f','f','s','e','t','s',0 }
+# define CFSTR_NETRESOURCESW \
+    (const WCHAR []){ 'N','e','t',' ','R','e','s','o','u','r','c','e',0 }
+# define CFSTR_FILEDESCRIPTORW \
+    (const WCHAR []){ 'F','i','l','e','G','r','o','u','p','D','e','s','c','r','i','p','t','o','r','W',0 }
+# define CFSTR_FILECONTENTSW \
+    (const WCHAR []){ 'F','i','l','e','C','o','n','t','e','n','t','s',0 }
+# define CFSTR_FILENAMEW \
+    (const WCHAR []){ 'F','i','l','e','N','a','m','e','W',0 }
+# define CFSTR_FILENAMEMAPW \
+    (const WCHAR []){ 'F','i','l','e','N','a','m','e','M','a','p','W',0 }
+# define CFSTR_PRINTERGROUPW \
+    (const WCHAR []){ 'P','r','i','n','t','e','r','F','r','i','e','n','d','l','y','N','a','m','e',0 }
+# define CFSTR_SHELLURLW \
+    (const WCHAR []){ 'U','n','i','f','o','r','m','R','e','s','o','u','r','c','e','L','o','c','a','t','o','r',0 }
+# define CFSTR_INETURLW \
+    (const WCHAR []){ 'U','n','i','f','o','r','m','R','e','s','o','u','r','c','e','L','o','c','a','t','o','r','W',0 }
+# define CFSTR_PREFERREDDROPEFFECTW \
+    (const WCHAR []){ 'P','r','e','f','e','r','r','e','d',' ','D','r','o','p','E','f','f','e','c','t',0 }
+# define CFSTR_PERFORMEDDROPEFFECTW \
+    (const WCHAR []){ 'P','e','r','f','o','r','m','e','d',' ','D','r','o','p','E','f','f','e','c','t',0 }
+# define CFSTR_PASTESUCCEEDEDW \
+    (const WCHAR []){ 'P','a','s','t','e',' ','S','u','c','c','e','e','d','e','d',0 }
+# define CFSTR_INDRAGLOOPW \
+    (const WCHAR []){ 'I','n','S','h','e','l','l','D','r','a','g','L','o','o','p',0 }
+# define CFSTR_DRAGCONTEXTW \
+    (const WCHAR []){ 'D','r','a','g','C','o','n','t','e','x','t',0 }
+# define CFSTR_MOUNTEDVOLUMEW \
+    (const WCHAR []){ 'M','o','u','n','t','e','d','V','o','l','u','m','e',0 }
+# define CFSTR_PERSISTEDDATAOBJECTW \
+    (const WCHAR []){ 'P','e','r','s','i','s','t','e','d','D','a','t','a','O','b','j','e','c','t',0 }
+# define CFSTR_TARGETCLSIDW \
+    (const WCHAR []){ 'T','a','r','g','e','t','C','L','S','I','D',0 }
+# define CFSTR_AUTOPLAY_SHELLIDLISTSW \
+    (const WCHAR []){ 'A','u','t','o','p','l','a','y',' ','E','n','u','m','e','r','a','t','e','d',\
+                      ' ','I','D','L','i','s','t',' ','A','r','r','a','y',0 }
+# define CFSTR_LOGICALPERFORMEDDROPEFFECTW \
+    (const WCHAR []){ 'L','o','g','i','c','a','l',' ','P','e','r','f','o','r','m','e','d',\
+                      ' ','D','r','o','p','E','f','f','e','c','t',0 }
+#elif defined(_MSC_VER)
+# define CFSTR_SHELLIDLISTW           L"Shell IDList Array"
+# define CFSTR_SHELLIDLISTOFFSETW     L"Shell Object Offsets"
+# define CFSTR_NETRESOURCESW          L"Net Resource"
+# define CFSTR_FILEDESCRIPTORW        L"FileGroupDescriptorW"
+# define CFSTR_FILECONTENTSW          L"FileContents"
+# define CFSTR_FILENAMEW              L"FileNameW"
+# define CFSTR_FILENAMEMAPW           L"FileNameMapW"
+# define CFSTR_PRINTERGROUPW          L"PrinterFriendlyName"
+# define CFSTR_SHELLURLW              L"UniformResourceLocator"
+# define CFSTR_INETURLW               L"UniformResourceLocatorW"
+# define CFSTR_PREFERREDDROPEFFECTW   L"Preferred DropEffect"
+# define CFSTR_PERFORMEDDROPEFFECTW   L"Performed DropEffect"
+# define CFSTR_PASTESUCCEEDEDW        L"Paste Succeeded"
+# define CFSTR_INDRAGLOOPW            L"InShellDragLoop"
+# define CFSTR_DRAGCONTEXTW           L"DragContext"
+# define CFSTR_MOUNTEDVOLUMEW         L"MountedVolume"
+# define CFSTR_PERSISTEDDATAOBJECTW   L"PersistedDataObject"
+# define CFSTR_TARGETCLSIDW           L"TargetCLSID"
+# define CFSTR_AUTOPLAY_SHELLIDLISTSW L"Autoplay Enumerated IDList Array"
+# define CFSTR_LOGICALPERFORMEDDROPEFFECTW L"Logical Performed DropEffect"
+#else
+static const WCHAR CFSTR_SHELLIDLISTW[] =
+    { 'S','h','e','l','l',' ','I','D','L','i','s','t',' ','A','r','r','a','y',0 };
+static const WCHAR CFSTR_SHELLIDLISTOFFSETW[] =
+    { 'S','h','e','l','l',' ','O','b','j','e','c','t',' ','O','f','f','s','e','t','s',0 };
+static const WCHAR CFSTR_NETRESOURCESW[] =
+    { 'N','e','t',' ','R','e','s','o','u','r','c','e',0 };
+static const WCHAR CFSTR_FILEDESCRIPTORW[] =
+    { 'F','i','l','e','G','r','o','u','p','D','e','s','c','r','i','p','t','o','r','W',0 };
+static const WCHAR CFSTR_FILECONTENTSW[] =
+    { 'F','i','l','e','C','o','n','t','e','n','t','s',0 };
+static const WCHAR CFSTR_FILENAMEW[] =
+    { 'F','i','l','e','N','a','m','e','W',0 }
+static const WCHAR CFSTR_FILENAMEMAPW[] =
+    { 'F','i','l','e','N','a','m','e','M','a','p','W',0 };
+static const WCHAR CFSTR_PRINTERGROUPW[] =
+    { 'P','r','i','n','t','e','r','F','r','i','e','n','d','l','y','N','a','m','e',0 };
+static const WCHAR CFSTR_SHELLURLW[] =
+    { 'U','n','i','f','o','r','m','R','e','s','o','u','r','c','e','L','o','c','a','t','o','r',0 };
+static const WCHAR CFSTR_INETURLW[] =
+    { 'U','n','i','f','o','r','m','R','e','s','o','u','r','c','e','L','o','c','a','t','o','r','W',0 };
+static const WCHAR CFSTR_PREFERREDDROPEFFECTW[] =
+    { 'P','r','e','f','e','r','r','e','d',' ','D','r','o','p','E','f','f','e','c','t',0 };
+static const WCHAR CFSTR_PERFORMEDDROPEFFECTW[] =
+    { 'P','e','r','f','o','r','m','e','d',' ','D','r','o','p','E','f','f','e','c','t',0 };
+static const WCHAR CFSTR_PASTESUCCEEDEDW[] =
+    { 'P','a','s','t','e',' ','S','u','c','c','e','e','d','e','d',0 };
+static const WCHAR CFSTR_INDRAGLOOPW[] =
+    { 'I','n','S','h','e','l','l','D','r','a','g','L','o','o','p',0 };
+static const WCHAR CFSTR_DRAGCONTEXTW[] =
+    { 'D','r','a','g','C','o','n','t','e','x','t',0 };
+static const WCHAR CFSTR_MOUNTEDVOLUMEW[] =
+    { 'M','o','u','n','t','e','d','V','o','l','u','m','e',0 };
+static const WCHAR CFSTR_PERSISTEDDATAOBJECTW[] =
+    { 'P','e','r','s','i','s','t','e','d','D','a','t','a','O','b','j','e','c','t',0 };
+static const WCHAR CFSTR_TARGETCLSIDW[] =
+    { 'T','a','r','g','e','t','C','L','S','I','D',0 };
+static const WCHAR CFSTR_AUTOPLAY_SHELLIDLISTSW[] =
+    { 'A','u','t','o','p','l','a','y',' ','E','n','u','m','e','r','a','t','e','d',
+      ' ','I','D','L','i','s','t',' ','A','r','r','a','y',0 };
+static const WCHAR CFSTR_LOGICALPERFORMEDDROPEFFECTW[] =
+    { 'L','o','g','i','c','a','l',' ','P','e','r','f','o','r','m','e','d',
+      ' ','D','r','o','p','E','f','f','e','c','t',0 };
+#endif
+
+#define CFSTR_SHELLIDLIST           WINELIB_NAME_AW(CFSTR_SHELLIDLIST)
+#define CFSTR_SHELLIDLISTOFFSET     WINELIB_NAME_AW(CFSTR_SHELLIDLISTOFFSET)
+#define CFSTR_NETRESOURCES          WINELIB_NAME_AW(CFSTR_NETRESOURCES)
+#define CFSTR_FILEDESCRIPTOR        WINELIB_NAME_AW(CFSTR_FILEDESCRIPTOR)
+#define CFSTR_FILECONTENTS          WINELIB_NAME_AW(CFSTR_FILECONTENTS)
+#define CFSTR_FILENAME              WINELIB_NAME_AW(CFSTR_FILENAME)
+#define CFSTR_FILENAMEMAP           WINELIB_NAME_AW(CFSTR_FILENAMEMAP)
+#define CFSTR_PRINTERGROUP          WINELIB_NAME_AW(CFSTR_PRINTERGROUP)
+#define CFSTR_SHELLURL              WINELIB_NAME_AW(CFSTR_SHELLURL)
+#define CFSTR_INETURL               WINELIB_NAME_AW(CFSTR_INETURL)
+#define CFSTR_PREFERREDDROPEFFECT   WINELIB_NAME_AW(CFSTR_PREFERREDDROPEFFECT)
+#define CFSTR_PERFORMEDDROPEFFECT   WINELIB_NAME_AW(CFSTR_PERFORMEDDROPEFFECT)
+#define CFSTR_PASTESUCCEEDED        WINELIB_NAME_AW(CFSTR_PASTESUCCEEDED)
+#define CFSTR_INDRAGLOOP            WINELIB_NAME_AW(CFSTR_INDRAGLOOP)
+#define CFSTR_DRAGCONTEXT           WINELIB_NAME_AW(CFSTR_DRAGCONTEXT)
+#define CFSTR_MOUNTEDVOLUME         WINELIB_NAME_AW(CFSTR_MOUNTEDVOLUME)
+#define CFSTR_PERSISTEDDATAOBJECT   WINELIB_NAME_AW(CFSTR_PERSISTEDDATAOBJECT)
+#define CFSTR_TARGETCLSID           WINELIB_NAME_AW(CFSTR_TARGETCLSID)
+#define CFSTR_AUTOPLAY_SHELLIDLISTS WINELIB_NAME_AW(CFSTR_AUTOPLAY_SHELLIDLISTS)
+#define CFSTR_LOGICALPERFORMEDDROPEFFECT WINELIB_NAME_AW(CFSTR_LOGICALPERFORMEDDROPEFFECT)
 
 typedef struct
 {	UINT cidl;
 	UINT aoffset[1];
 } CIDA, *LPIDA;
 
-#define CFSTR_SHELLIDLISTOFFSET "Shell Object Offsets"    /* CF_OBJECTPOSITIONS */
-#define CFSTR_NETRESOURCES      "Net Resource"            /* CF_NETRESOURCE */
-
-/* DATAOBJECT_InitFileGroupDesc */
-#define CFSTR_FILEDESCRIPTORA   "FileGroupDescriptor"     /* CF_FILEGROUPDESCRIPTORA */
-
-#define CFSTR_FILEDESCRIPTORW   "FileGroupDescriptorW"    /* CF_FILEGROUPDESCRIPTORW */
-
-/* DATAOBJECT_InitFileContents*/
-#define CFSTR_FILECONTENTS      "FileContents"            /* CF_FILECONTENTS */
-
-#define CFSTR_FILENAMEA         "FileName"                /* CF_FILENAMEA */
-#define CFSTR_FILENAMEW         "FileNameW"               /* CF_FILENAMEW */
-#define CFSTR_PRINTERGROUP      "PrinterFriendlyName"     /* CF_PRINTERS */
-#define CFSTR_FILENAMEMAPA      "FileNameMap"             /* CF_FILENAMEMAPA */
-#define CFSTR_FILENAMEMAPW      "FileNameMapW"            /* CF_FILENAMEMAPW */
-#define CFSTR_SHELLURL          "UniformResourceLocator"
-#define CFSTR_PREFERREDDROPEFFECT "Preferred DropEffect"
-#define CFSTR_PERFORMEDDROPEFFECT "Performed DropEffect"
-#define CFSTR_PASTESUCCEEDED    "Paste Succeeded"
-#define CFSTR_INDRAGLOOP        "InShellDragLoop"
-
-#define CFSTR_FILEDESCRIPTOR WINELIB_NAME_AW(CFSTR_FILEDESCRIPTOR)
-#define CFSTR_FILENAME WINELIB_NAME_AW(CFSTR_FILENAME)
-
-
 /************************************************************************
 * IShellView interface
 */
-
-typedef GUID SHELLVIEWID;
 
 #define FCIDM_SHVIEWFIRST       0x0000
 /* undocumented */
@@ -357,6 +486,57 @@ DECLARE_INTERFACE_(IACList,IUnknown)
 #define IACList_Release(p)             (p)->lpVtbl->Release(p)
 /*** IACList methods ***/
 #define IACList_Expand(p,a)             (p)->lpVtbl->Expand(p,a)
+#endif
+
+/* IACList2 interface */
+#define INTERFACE IACList2
+DECLARE_INTERFACE_(IACList2,IACList)
+{
+    /*** IUnknown methods ***/
+    STDMETHOD_(HRESULT,QueryInterface) (THIS_ REFIID riid, void** ppvObject) PURE;
+    STDMETHOD_(ULONG,AddRef) (THIS) PURE;
+    STDMETHOD_(ULONG,Release) (THIS) PURE;
+    /*** IACList methods ***/
+    STDMETHOD(Expand)(THIS_ LPCOLESTR str) PURE;
+    /*** IACList2 methods ***/
+    STDMETHOD(SetOptions)(THIS_ DWORD dwFlag) PURE;
+    STDMETHOD(GetOptions)(THIS_ DWORD* pdwFlag) PURE;
+};
+#undef INTERFACE
+
+#if !defined(__cplusplus) || defined(CINTERFACE)
+/*** IUnknown methods ***/
+#define IACList2_QueryInterface(p,a,b)  (p)->lpVtbl->QueryInterface(p,a,b)
+#define IACList2_AddRef(p)              (p)->lpVtbl->AddRef(p)
+#define IACList2_Release(p)             (p)->lpVtbl->Release(p)
+/*** IACList2 methods ***/
+#define IACList2_GetOptions(p,a)        (p)->lpVtbl->GetOptions(p,a)
+#define IACList2_SetOptions(p,a)        (p)->lpVtbl->SetOptions(p,a)
+#endif
+
+/****************************************************************************
+ * IShellFolderViewCB interface
+ */
+
+#define INTERFACE IShellFolderViewCB
+DECLARE_INTERFACE_(IShellFolderViewCB,IUnknown)
+{
+    /*** IUnknown methods ***/
+    STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
+    STDMETHOD_(ULONG,AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG,Release)(THIS) PURE;
+    /*** IShellFolderViewCB methods ***/
+    STDMETHOD(MessageSFVCB)(THIS_ UINT uMsg, WPARAM wParam, LPARAM lParam) PURE;
+};
+#undef INTERFACE
+
+#if !defined(__cplusplus) || defined(CINTERFACE)
+/*** IUnknown methods ***/
+#define IShellFolderViewCB_QueryInterface(p,a,b)      (p)->lpVtbl->QueryInterface(p,a,b)
+#define IShellFolderViewCB_AddRef(p)                  (p)->lpVtbl->AddRef(p)
+#define IShellFolderViewCB_Release(p)                 (p)->lpVtbl->Release(p)
+/*** IShellFolderViewCB methods ***/
+#define IShellFolderViewCB_MessageSFVCB(p,a,b,c)      (p)->lpVtbl->MessageSFVCB(p,a,b,c)
 #endif
 
 /* IProgressDialog interface */
@@ -581,6 +761,16 @@ HRESULT WINAPI SHCreateShellFolderViewEx(LPCSFV pshfvi, IShellView **ppshv);
 #define SFVM_GET_WEBVIEW_TASKS        84 /* undocumented */
 #define SFVM_GET_WEBVIEW_THEME        86 /* undocumented */
 #define SFVM_GETDEFERREDVIEWSETTINGS  92 /* undocumented */
+
+typedef struct _SFV_CREATE
+{
+    UINT cbSize;
+    IShellFolder *pshf;
+    IShellView *psvOuter;
+    IShellFolderViewCB *psfvcb;
+} SFV_CREATE;
+
+HRESULT WINAPI SHCreateShellFolderView(const SFV_CREATE *pscfv, IShellView **ppsv);
 
 /* Types and definitions for the SFM_* parameters */
 #include <pshpack8.h>
@@ -1109,6 +1299,7 @@ HRESULT WINAPI SHGetRealIDL(IShellFolder *psf, LPCITEMIDLIST pidlSimple, LPITEMI
 DWORD WINAPI SHCreateDirectory(HWND, LPCVOID);
 int WINAPI SHCreateDirectoryExA(HWND, LPCSTR, LPSECURITY_ATTRIBUTES);
 int WINAPI SHCreateDirectoryExW(HWND, LPCWSTR, LPSECURITY_ATTRIBUTES);
+#define    SHCreateDirectoryEx WINELIB_NAME_AW(SHCreateDirectoryEx)
 
 /****************************************************************************
 * SHGetSpecialFolderLocation API

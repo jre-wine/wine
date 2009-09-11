@@ -3,9 +3,8 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = oleview.exe
-APPMODE   = -mwindows -municode
-IMPORTS   = comdlg32 comctl32 shell32 oleaut32 ole32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
+APPMODE   = -mwindows
+IMPORTS   = uuid comdlg32 comctl32 shell32 oleaut32 ole32 user32 advapi32 kernel32
 EXTRADEFS = -DUNICODE
 
 C_SRCS = \
@@ -16,7 +15,22 @@ C_SRCS = \
 	tree.c \
 	typelib.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	Da.rc \
+	De.rc \
+	En.rc \
+	Fr.rc \
+	Ja.rc \
+	Ko.rc \
+	Lt.rc \
+	Nl.rc \
+	No.rc \
+	Pl.rc \
+	Pt.rc \
+	Ru.rc \
+	Sv.rc \
+	Zh.rc \
+	rsrc.rc
 
 @MAKE_PROG_RULES@
 

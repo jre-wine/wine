@@ -22,7 +22,6 @@
 #include "wine/debug.h"
 
 #include "shdocvw.h"
-#include "mshtml.h"
 #include "exdispid.h"
 #include "shellapi.h"
 #include "winreg.h"
@@ -162,8 +161,7 @@ static ULONG WINAPI BindStatusCallback_Release(IBindStatusCallback *iface)
             IOleClientSite_Release(CLIENTSITE(This->doc_host));
         if(This->post_data)
             GlobalFree(This->post_data);
-        if(This->headers)
-            SysFreeString(This->headers);
+        SysFreeString(This->headers);
         heap_free(This->url);
         heap_free(This);
     }
@@ -221,7 +219,7 @@ static HRESULT WINAPI BindStatusCallback_OnProgress(IBindStatusCallback *iface,
         FIXME("status code %u\n", ulStatusCode);
     }
 
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 static HRESULT WINAPI BindStatusCallback_OnStopBinding(IBindStatusCallback *iface,
@@ -271,49 +269,14 @@ static HRESULT WINAPI BindStatusCallback_OnDataAvailable(IBindStatusCallback *if
     return E_NOTIMPL;
 }
 
-static void object_available_proc(DocHost *This, task_header_t *task)
-{
-    object_available(This);
-}
-
 static HRESULT WINAPI BindStatusCallback_OnObjectAvailable(IBindStatusCallback *iface,
         REFIID riid, IUnknown *punk)
 {
     BindStatusCallback *This = BINDSC_THIS(iface);
-    task_header_t *task;
-    IOleObject *oleobj;
-    HRESULT hres;
 
     TRACE("(%p)->(%s %p)\n", This, debugstr_guid(riid), punk);
 
-    IUnknown_AddRef(punk);
-    This->doc_host->document = punk;
-
-    hres = IUnknown_QueryInterface(punk, &IID_IOleObject, (void**)&oleobj);
-    if(SUCCEEDED(hres)) {
-        CLSID clsid;
-
-        hres = IOleObject_GetUserClassID(oleobj, &clsid);
-        if(SUCCEEDED(hres))
-            TRACE("Got clsid %s\n",
-                  IsEqualGUID(&clsid, &CLSID_HTMLDocument) ? "CLSID_HTMLDocument" : debugstr_guid(&clsid));
-
-        hres = IOleObject_SetClientSite(oleobj, CLIENTSITE(This->doc_host));
-        if(FAILED(hres))
-            FIXME("SetClientSite failed: %08x\n", hres);
-
-        IOleObject_Release(oleobj);
-    }else {
-        FIXME("Could not get IOleObject iface: %08x\n", hres);
-    }
-
-    /* FIXME: Call SetAdvise */
-    /* FIXME: Call Invoke(DISPID_READYSTATE) */
-
-    task = heap_alloc(sizeof(*task));
-    push_dochost_task(This->doc_host, task, object_available_proc, FALSE);
-
-    return S_OK;
+    return dochost_object_available(This->doc_host, punk);
 }
 
 #undef BSC_THIS
@@ -358,7 +321,7 @@ static HRESULT WINAPI HttpNegotiate_BeginningTransaction(IHttpNegotiate *iface,
 {
     BindStatusCallback *This = HTTPNEG_THIS(iface);
 
-    FIXME("(%p)->(%s %s %d %p)\n", This, debugstr_w(szURL), debugstr_w(szHeaders),
+    TRACE("(%p)->(%s %s %d %p)\n", This, debugstr_w(szURL), debugstr_w(szHeaders),
           dwReserved, pszAdditionalHeaders);
 
     if(This->headers) {
@@ -375,9 +338,9 @@ static HRESULT WINAPI HttpNegotiate_OnResponse(IHttpNegotiate *iface,
         LPWSTR *pszAdditionalRequestHeaders)
 {
     BindStatusCallback *This = HTTPNEG_THIS(iface);
-    FIXME("(%p)->(%d %s %s %p)\n", This, dwResponseCode, debugstr_w(szResponseHeaders),
+    TRACE("(%p)->(%d %s %s %p)\n", This, dwResponseCode, debugstr_w(szResponseHeaders),
           debugstr_w(szRequestHeaders), pszAdditionalRequestHeaders);
-    return E_NOTIMPL;
+    return S_OK;
 }
 
 #undef HTTPNEG_THIS
@@ -514,46 +477,6 @@ static BOOL try_application_url(LPCWSTR url)
     return ShellExecuteExW(&exec_info);
 }
 
-static HRESULT http_load_hack(DocHost *This, IMoniker *mon, IBindStatusCallback *callback, IBindCtx *bindctx)
-{
-    IPersistMoniker *persist;
-    IUnknown *doc;
-    HRESULT hres;
-
-    /*
-     * FIXME:
-     * We should use URLMoniker's BindToObject instead creating HTMLDocument here.
-     * This should be fixed when mshtml.dll and urlmon.dll will be good enough.
-     */
-
-    hres = CoCreateInstance(&CLSID_HTMLDocument, NULL,
-                            CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
-                            &IID_IUnknown, (void**)&doc);
-
-    if(FAILED(hres)) {
-        ERR("Could not create HTMLDocument: %08x\n", hres);
-        return hres;
-    }
-
-    hres = IUnknown_QueryInterface(doc, &IID_IPersistMoniker, (void**)&persist);
-    if(FAILED(hres)) {
-        IUnknown_Release(doc);
-        return hres;
-    }
-
-    hres = IPersistMoniker_Load(persist, FALSE, mon, bindctx, 0);
-    IPersistMoniker_Release(persist);
-
-    if(SUCCEEDED(hres))
-        hres = IBindStatusCallback_OnObjectAvailable(callback, &IID_IUnknown, doc);
-    else
-        WARN("Load failed: %08x\n", hres);
-
-    IUnknown_Release(doc);
-
-    return IBindStatusCallback_OnStopBinding(callback, hres, NULL);
-}
-
 static HRESULT create_moniker(LPCWSTR url, IMoniker **mon)
 {
     WCHAR new_url[INTERNET_MAX_URL_LENGTH];
@@ -586,13 +509,8 @@ static HRESULT create_moniker(LPCWSTR url, IMoniker **mon)
 static HRESULT bind_to_object(DocHost *This, IMoniker *mon, LPCWSTR url, IBindCtx *bindctx,
                               IBindStatusCallback *callback)
 {
-    WCHAR schema[30];
-    DWORD schema_len;
+    IUnknown *unk = NULL;
     HRESULT hres;
-
-    static const WCHAR httpW[] = {'h','t','t','p',0};
-    static const WCHAR httpsW[] = {'h','t','t','p','s',0};
-    static const WCHAR ftpW[]= {'f','t','p',0};
 
     if(mon) {
         IMoniker_AddRef(mon);
@@ -610,24 +528,15 @@ static HRESULT bind_to_object(DocHost *This, IMoniker *mon, LPCWSTR url, IBindCt
     IBindCtx_RegisterObjectParam(bindctx, (LPOLESTR)SZ_HTML_CLIENTSITE_OBJECTPARAM,
                                  (IUnknown*)CLIENTSITE(This));
 
-    hres = CoInternetParseUrl(This->url, PARSE_SCHEMA, 0, schema, sizeof(schema)/sizeof(schema[0]),
-            &schema_len, 0);
-    if(SUCCEEDED(hres) &&
-       (!strcmpW(schema, httpW) || !strcmpW(schema, httpsW) || !strcmpW(schema, ftpW))) {
-        hres = http_load_hack(This, mon, callback, bindctx);
+    hres = IMoniker_BindToObject(mon, bindctx, NULL, &IID_IUnknown, (void**)&unk);
+    if(SUCCEEDED(hres)) {
+        hres = S_OK;
+        if(unk)
+            IUnknown_Release(unk);
+    }else if(try_application_url(url)) {
+        hres = S_OK;
     }else {
-        IUnknown *unk = NULL;
-
-        hres = IMoniker_BindToObject(mon, bindctx, NULL, &IID_IUnknown, (void**)&unk);
-        if(SUCCEEDED(hres)) {
-            hres = S_OK;
-            if(unk)
-                IUnknown_Release(unk);
-        }else if(try_application_url(url)) {
-            hres = S_OK;
-        }else {
-            FIXME("BindToObject failed: %08x\n", hres);
-        }
+        FIXME("BindToObject failed: %08x\n", hres);
     }
 
     IMoniker_Release(mon);
@@ -639,6 +548,8 @@ static HRESULT navigate_bsc(DocHost *This, BindStatusCallback *bsc, IMoniker *mo
     IBindCtx *bindctx;
     VARIANT_BOOL cancel = VARIANT_FALSE;
     HRESULT hres;
+
+    This->ready_state = READYSTATE_LOADING;
 
     on_before_navigate2(This, bsc->url, bsc->post_data, bsc->post_data_len, bsc->headers, &cancel);
     if(cancel) {
@@ -777,11 +688,27 @@ static HRESULT navigate_hlink(DocHost *This, IMoniker *mon, IBindCtx *bindctx,
 
 HRESULT go_home(DocHost *This)
 {
+    HKEY hkey;
+    DWORD res, type, size;
+    WCHAR wszPageName[MAX_PATH];
     static const WCHAR wszAboutBlank[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
+    static const WCHAR wszStartPage[] = {'S','t','a','r','t',' ','P','a','g','e',0};
+    static const WCHAR wszSubKey[] = {'S','o','f','t','w','a','r','e','\\',
+                                      'M','i','c','r','o','s','o','f','t','\\',
+                                      'I','n','t','e','r','n','e','t',' ','E','x','p','l','o','r','e','r','\\',
+                                      'M','a','i','n',0};
 
-    FIXME("stub\n");
+    res = RegOpenKeyW(HKEY_CURRENT_USER, wszSubKey, &hkey);
+    if (res != ERROR_SUCCESS)
+        return navigate_url(This, wszAboutBlank, NULL, NULL, NULL, NULL);
 
-    return navigate_url(This, wszAboutBlank, NULL, NULL, NULL, NULL);
+    size = sizeof(wszPageName);
+    res = RegQueryValueExW(hkey, wszStartPage, NULL, &type, (LPBYTE)wszPageName, &size);
+    RegCloseKey(hkey);
+    if (res != ERROR_SUCCESS || type != REG_SZ)
+        return navigate_url(This, wszAboutBlank, NULL, NULL, NULL, NULL);
+
+    return navigate_url(This, wszPageName, NULL, NULL, NULL, NULL);
 }
 
 #define HLINKFRAME_THIS(iface) DEFINE_THIS(WebBrowser, HlinkFrame, iface)

@@ -25,6 +25,7 @@
 
 #ifdef SONAME_LIBSANE
 # include <sane/sane.h>
+# include <sane/saneopts.h>
 
 #define MAKE_FUNCPTR(f) typeof(f) * p##f;
 MAKE_FUNCPTR(sane_init)
@@ -48,9 +49,12 @@ MAKE_FUNCPTR(sane_strstatus)
 
 #include "windef.h"
 #include "winbase.h"
+#include "winuser.h"
 #include "twain.h"
 
 extern HINSTANCE SANE_instance;
+
+#define TWCC_CHECKSTATUS     (TWCC_CUSTOMBASE + 1)
 
 /* internal information about an active data source */
 struct tagActiveDS
@@ -58,8 +62,7 @@ struct tagActiveDS
     struct tagActiveDS	*next;			/* next active DS */
     TW_IDENTITY		identity;		/* identity */
     TW_UINT16		currentState;		/* current state */
-    TW_EVENT		pendingEvent;		/* pending event to be sent to
-                                                   application */
+    UINT                windowMessage;          /* message to use to send status */
     TW_UINT16		twCC;			/* condition code */
     HWND		hwndOwner;		/* window handle of the app */
     HWND		progressWnd;		/* window handle of the scanning window */
@@ -68,22 +71,22 @@ struct tagActiveDS
     SANE_Parameters     sane_param;             /* parameters about the image
                                                    transferred */
     BOOL                sane_param_valid;  /* true if valid sane_param*/
+    BOOL                sane_started;      /* If sane_start has been called */
     INT                 deviceIndex;    /* index of the current device */
 #endif
     /* Capabilities */
     TW_UINT16		capXferMech;		/* ICAP_XFERMECH */
+    BOOL                PixelTypeSet;
+    TW_UINT16		defaultPixelType;		/* ICAP_PIXELTYPE */
+    BOOL                XResolutionSet;
+    TW_FIX32            defaultXResolution;
+    BOOL                YResolutionSet;
+    TW_FIX32            defaultYResolution;
 } activeDS;
 
 /* Helper functions */
 extern TW_UINT16 SANE_SaneCapability (pTW_CAPABILITY pCapability, TW_UINT16 action);
-
-/*  */
-extern TW_UINT16 SANE_ControlGroupHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-extern TW_UINT16 SANE_ImageGroupHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-extern TW_UINT16 SANE_SourceManagerHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
+extern TW_UINT16 SANE_SaneSetDefaults (void);
 
 /* Implementation of operation triplets
  * From Application to Source (Control Information) */
@@ -214,11 +217,26 @@ TW_UINT16 SANE_RGBResponseReset
 TW_UINT16 SANE_RGBResponseSet
     (pTW_IDENTITY pOrigin, TW_MEMREF pData);
 
-/* Implementation of TWAIN capabilities */
-TW_UINT16 SANE_ICAPXferMech (pTW_CAPABILITY pCapability, TW_UINT16 action);
-
 /* UI function */
 BOOL DoScannerUI(void);
 HWND ScanningDialogBox(HWND dialog, LONG progress);
+
+/* Option functions */
+#ifdef SONAME_LIBSANE
+SANE_Status sane_option_get_int(SANE_Handle h, const char *option_name, SANE_Int *val);
+SANE_Status sane_option_set_int(SANE_Handle h, const char *option_name, SANE_Int val, SANE_Int *status);
+SANE_Status sane_option_get_str(SANE_Handle h, const char *option_name, SANE_String val, size_t len, SANE_Int *status);
+SANE_Status sane_option_set_str(SANE_Handle h, const char *option_name, SANE_String val, SANE_Int *status);
+SANE_Status sane_option_probe_resolution(SANE_Handle h, const char *option_name, SANE_Int *minval, SANE_Int *maxval, SANE_Int *quant);
+SANE_Status sane_option_probe_mode(SANE_Handle h, SANE_String_Const **choices, char *current, int current_size);
+SANE_Status sane_option_probe_scan_area(SANE_Handle h, const char *option_name, SANE_Fixed *val,
+                                        SANE_Unit *unit, SANE_Fixed *min, SANE_Fixed *max, SANE_Fixed *quant);
+SANE_Status sane_option_get_bool(SANE_Handle h, const char *option_name, SANE_Bool *val, SANE_Int *status);
+SANE_Status sane_option_set_bool(SANE_Handle h, const char *option_name, SANE_Bool val, SANE_Int *status);
+SANE_Status sane_option_set_fixed(SANE_Handle h, const char *option_name, SANE_Fixed val, SANE_Int *status);
+TW_UINT16 sane_status_to_twcc(SANE_Status rc);
+BOOL convert_sane_res_to_twain(double sane_res, SANE_Unit unit, TW_FIX32 *twain_res, TW_UINT16 twtype);
+#endif
+
 
 #endif

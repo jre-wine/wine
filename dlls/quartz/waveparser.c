@@ -42,7 +42,6 @@ static const WCHAR wcsOutputPinName[] = {'o','u','t','p','u','t',' ','p','i','n'
 typedef struct WAVEParserImpl
 {
     ParserImpl Parser;
-    IMediaSample * pCurrentSample;
     LONGLONG StartOfFile; /* in media time */
     LONGLONG EndOfFile;
     DWORD dwSampleSize;
@@ -72,148 +71,78 @@ static LONGLONG duration_to_bytepos(WAVEParserImpl *This, LONGLONG duration)
     return MEDIATIME_FROM_BYTES(bytepos);
 }
 
-static HRESULT WAVEParser_Sample(LPVOID iface, IMediaSample * pSample)
+static HRESULT WAVEParser_Sample(LPVOID iface, IMediaSample * pSample, DWORD_PTR cookie)
 {
-    WAVEParserImpl *This = (WAVEParserImpl *)iface;
+    WAVEParserImpl *This = iface;
     LPBYTE pbSrcStream = NULL;
-    long cbSrcStream = 0;
+    ULONG cbSrcStream = 0;
     REFERENCE_TIME tStart, tStop;
     HRESULT hr;
-    BOOL bMoreData = TRUE;
-    Parser_OutputPin * pOutputPin;
-    BYTE * pbDstStream;
-    long cbDstStream;
-    long chunk_remaining_bytes = 0;
-    long offset_src = 0;
+    IMediaSample *newsample = NULL;
+    Parser_OutputPin *pOutputPin;
+    PullPin *pin = This->Parser.pInputPin;
 
-    hr = IMediaSample_GetPointer(pSample, &pbSrcStream);
-
+    IMediaSample_GetPointer(pSample, &pbSrcStream);
     hr = IMediaSample_GetTime(pSample, &tStart, &tStop);
 
     cbSrcStream = IMediaSample_GetActualDataLength(pSample);
 
-    assert(BYTES_FROM_MEDIATIME(tStop - tStart) == cbSrcStream);
+    /* Flush occurring */
+    if (cbSrcStream == 0)
+    {
+        TRACE(".. Why do I need you?\n");
+        return S_OK;
+    }
 
     pOutputPin = (Parser_OutputPin *)This->Parser.ppPins[1];
 
-    /* Try to get rid of the current sample in case we had a S_FALSE last time */
-    if (This->pCurrentSample && (IMediaSample_GetActualDataLength(This->pCurrentSample) == IMediaSample_GetSize(This->pCurrentSample)))
+    if (SUCCEEDED(hr))
+        hr = IMemAllocator_GetBuffer(pin->pAlloc, &newsample, NULL, NULL, 0);
+
+    if (SUCCEEDED(hr))
     {
-        HRESULT hr;
+        LONGLONG rtSampleStart = pin->rtNext;
+        /* Add 4 for the next header, which should hopefully work */
+        LONGLONG rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(IMediaSample_GetSize(newsample));
 
-        /* Unset advancement */
-        This->Parser.pInputPin->rtCurrent -= MEDIATIME_FROM_BYTES(cbSrcStream);
+        if (rtSampleStop > pin->rtStop)
+            rtSampleStop = MEDIATIME_FROM_BYTES(ALIGNUP(BYTES_FROM_MEDIATIME(pin->rtStop), pin->cbAlign));
 
-        hr = OutputPin_SendSample(&pOutputPin->pin, This->pCurrentSample);
+        hr = IMediaSample_SetTime(newsample, &rtSampleStart, &rtSampleStop);
 
-        if (hr != S_OK)
-            return hr;
+        pin->rtCurrent = pin->rtNext;
+        pin->rtNext = rtSampleStop;
 
-        IMediaSample_Release(This->pCurrentSample);
-        This->pCurrentSample = NULL;
+        IMediaSample_SetPreroll(newsample, 0);
+        IMediaSample_SetDiscontinuity(newsample, 0);
+        IMediaSample_SetSyncPoint(newsample, 1);
 
-        This->Parser.pInputPin->rtCurrent += MEDIATIME_FROM_BYTES(cbSrcStream);
+        hr = IAsyncReader_Request(pin->pReader, newsample, 0);
     }
 
-    if (tStop < This->StartOfFile)
-        return S_OK;
-
-    if (tStart < This->StartOfFile)
-        offset_src = BYTES_FROM_MEDIATIME(This->StartOfFile - tStart);
-
-    while (bMoreData)
+    if (SUCCEEDED(hr))
     {
-        if (!This->pCurrentSample)
-        {
-            /* cache media sample until it is ready to be dispatched
-             * (i.e. we reach the end of the chunk) */
-            hr = OutputPin_GetDeliveryBuffer(&pOutputPin->pin, &This->pCurrentSample, NULL, NULL, 0);
+        REFERENCE_TIME tAviStart, tAviStop;
 
-            if (SUCCEEDED(hr))
-            {
-                hr = IMediaSample_SetActualDataLength(This->pCurrentSample, 0);
-                assert(hr == S_OK);
-            }
-            else
-            {
-                TRACE("Skipping sending sample due to error (%x)\n", hr);
-                This->pCurrentSample = NULL;
-                break;
-            }
-        }
+        IMediaSample_SetSyncPoint(pSample, TRUE);
+        pOutputPin->dwSamplesProcessed++;
 
-        hr = IMediaSample_GetPointer(This->pCurrentSample, &pbDstStream);
+        tAviStart = bytepos_to_duration(This, tStart);
+        tAviStop = bytepos_to_duration(This, tStart + MEDIATIME_FROM_BYTES(IMediaSample_GetActualDataLength(pSample)));
 
-        if (SUCCEEDED(hr))
-        {
-            cbDstStream = IMediaSample_GetSize(This->pCurrentSample);
+        IMediaSample_SetTime(pSample, &tAviStart, &tAviStop);
 
-            chunk_remaining_bytes = cbDstStream - IMediaSample_GetActualDataLength(This->pCurrentSample);
-        
-            assert(chunk_remaining_bytes >= 0);
-            assert(chunk_remaining_bytes <= cbDstStream - IMediaSample_GetActualDataLength(This->pCurrentSample));
-        }
-
-        if (chunk_remaining_bytes <= cbSrcStream - offset_src)
-        {
-            if (SUCCEEDED(hr))
-            {
-                memcpy(pbDstStream + IMediaSample_GetActualDataLength(This->pCurrentSample), pbSrcStream + offset_src, chunk_remaining_bytes);
-                hr = IMediaSample_SetActualDataLength(This->pCurrentSample, chunk_remaining_bytes + IMediaSample_GetActualDataLength(This->pCurrentSample));
-                assert(hr == S_OK);
-            }
-
-            if (SUCCEEDED(hr))
-            {
-                REFERENCE_TIME tAviStart, tAviStop, tOffset;
-
-                IMediaSample_SetDiscontinuity(This->pCurrentSample, pOutputPin->dwSamplesProcessed == 0);
-
-                IMediaSample_SetSyncPoint(This->pCurrentSample, TRUE);
-                pOutputPin->dwSamplesProcessed++;
-
-                tOffset = MEDIATIME_FROM_BYTES(offset_src + chunk_remaining_bytes - IMediaSample_GetActualDataLength(This->pCurrentSample));
-                tAviStart = bytepos_to_duration(This, tStart + tOffset);
-
-                tOffset += MEDIATIME_FROM_BYTES(IMediaSample_GetActualDataLength(This->pCurrentSample));
-                tAviStop = bytepos_to_duration(This, tStart + tOffset);
-
-                IMediaSample_SetTime(This->pCurrentSample, &tAviStart, &tAviStop);
-
-                hr = OutputPin_SendSample(&pOutputPin->pin, This->pCurrentSample);
-                if (hr != S_OK && hr != VFW_E_NOT_CONNECTED && hr != S_FALSE)
-                    ERR("Error sending sample (%x)\n", hr);
-            }
-
-            if (This->pCurrentSample && hr != S_FALSE)
-            {
-                IMediaSample_Release(This->pCurrentSample);
-                This->pCurrentSample = NULL;
-            }
-            if (hr == S_FALSE)
-            {
-                /* Break out */
-                This->Parser.pInputPin->rtCurrent -= MEDIATIME_FROM_BYTES(cbSrcStream - offset_src - chunk_remaining_bytes);
-                hr = S_OK;
-                break;
-            }
-
-        }
-        else
-        {
-            if (SUCCEEDED(hr))
-            {
-                memcpy(pbDstStream + IMediaSample_GetActualDataLength(This->pCurrentSample), pbSrcStream + offset_src, cbSrcStream - offset_src);
-                IMediaSample_SetActualDataLength(This->pCurrentSample, cbSrcStream - offset_src + IMediaSample_GetActualDataLength(This->pCurrentSample));
-            }
-	    bMoreData = FALSE;
-        }
-        offset_src += chunk_remaining_bytes;
+        hr = OutputPin_SendSample(&pOutputPin->pin, pSample);
+        if (hr != S_OK && hr != S_FALSE && hr != VFW_E_WRONG_STATE)
+            ERR("Error sending sample (%x)\n", hr);
+        else if (hr != S_OK)
+            /* Unset progression if denied! */
+            This->Parser.pInputPin->rtCurrent = tStart;
     }
 
-    if (tStop >= This->EndOfFile || (bytepos_to_duration(This, tStop) >= This->Parser.mediaSeeking.llStop))
+    if (tStop >= This->EndOfFile || (bytepos_to_duration(This, tStop) >= This->Parser.mediaSeeking.llStop) || hr == VFW_E_NOT_CONNECTED)
     {
-        int i;
+        unsigned int i;
 
         TRACE("End of file reached\n");
 
@@ -222,7 +151,7 @@ static HRESULT WAVEParser_Sample(LPVOID iface, IMediaSample * pSample)
             IPin* ppin;
             HRESULT hr;
 
-            TRACE("Send End Of Stream to output pin %d\n", i);
+            TRACE("Send End Of Stream to output pin %u\n", i);
 
             hr = IPin_ConnectedTo(This->Parser.ppPins[i+1], &ppin);
             if (SUCCEEDED(hr))
@@ -304,7 +233,7 @@ static HRESULT WAVEParserImpl_seek(IBaseFilter *iface)
     return S_OK;
 }
 
-static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
+static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin, ALLOCATOR_PROPERTIES *props)
 {
     PullPin *This = (PullPin *)iface;
     HRESULT hr;
@@ -312,7 +241,6 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     RIFFCHUNK chunk;
     LONGLONG pos = 0; /* in bytes */
     PIN_INFO piOutput;
-    ALLOCATOR_PROPERTIES props;
     AM_MEDIA_TYPE amt;
     WAVEParserImpl * pWAVEParser = (WAVEParserImpl *)This->pin.pinInfo.pFilter;
     LONGLONG length, avail;
@@ -380,20 +308,20 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
     if (hr != S_OK)
         return E_FAIL;
 
-    props.cbAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
-    props.cbPrefix = 0;
-    props.cbBuffer = 4096;
-    props.cBuffers = 2;
+    props->cbAlign = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
+    props->cbPrefix = 0;
+    props->cbBuffer = 4096;
+    props->cBuffers = 3;
     pWAVEParser->dwSampleSize = ((WAVEFORMATEX*)amt.pbFormat)->nBlockAlign;
     IAsyncReader_Length(This->pReader, &length, &avail);
     pWAVEParser->dwLength = length / (ULONGLONG)pWAVEParser->dwSampleSize;
     pWAVEParser->nSamplesPerSec = ((WAVEFORMATEX*)amt.pbFormat)->nSamplesPerSec;
-    hr = Parser_AddPin(&(pWAVEParser->Parser), &piOutput, &props, &amt);
+    hr = Parser_AddPin(&(pWAVEParser->Parser), &piOutput, props, &amt);
     CoTaskMemFree(amt.pbFormat);
 
     pWAVEParser->Parser.mediaSeeking.llCurrent = 0;
     pWAVEParser->Parser.mediaSeeking.llStop = pWAVEParser->Parser.mediaSeeking.llDuration = bytepos_to_duration(pWAVEParser, pWAVEParser->EndOfFile);
-    TRACE("Duration: %lld seconds\n", pWAVEParser->Parser.mediaSeeking.llDuration / (LONGLONG)10000000);
+    TRACE("Duration: %u seconds\n", (DWORD)(pWAVEParser->Parser.mediaSeeking.llDuration / (LONGLONG)10000000));
 
     This->rtStop = pWAVEParser->EndOfFile;
     This->rtStart = pWAVEParser->StartOfFile;
@@ -405,15 +333,57 @@ static HRESULT WAVEParser_InputPin_PreConnect(IPin * iface, IPin * pConnectPin)
 
 static HRESULT WAVEParser_Cleanup(LPVOID iface)
 {
-    WAVEParserImpl *This = (WAVEParserImpl*)iface;
+    WAVEParserImpl *This = iface;
 
     TRACE("(%p)->()\n", This);
 
-    if (This->pCurrentSample)
-        IMediaSample_Release(This->pCurrentSample);
-    This->pCurrentSample = NULL;
-
     return S_OK;
+}
+
+static HRESULT WAVEParser_first_request(LPVOID iface)
+{
+    WAVEParserImpl *This = iface;
+    PullPin *pin = This->Parser.pInputPin;
+    HRESULT hr;
+    IMediaSample *sample;
+
+    if (pin->rtCurrent >= pin->rtStop)
+    {
+        /* Last sample has already been queued, request nothing more */
+        TRACE("Done!\n");
+        return S_OK;
+    }
+
+    hr = IMemAllocator_GetBuffer(pin->pAlloc, &sample, NULL, NULL, 0);
+
+    pin->rtNext = pin->rtCurrent;
+    if (SUCCEEDED(hr))
+    {
+        LONGLONG rtSampleStart = pin->rtNext;
+        /* Add 4 for the next header, which should hopefully work */
+        LONGLONG rtSampleStop = rtSampleStart + MEDIATIME_FROM_BYTES(IMediaSample_GetSize(sample));
+        Parser_OutputPin *outpin = (Parser_OutputPin *)This->Parser.ppPins[1];
+
+        if (rtSampleStop > pin->rtStop)
+            rtSampleStop = MEDIATIME_FROM_BYTES(ALIGNUP(BYTES_FROM_MEDIATIME(pin->rtStop), pin->cbAlign));
+
+        hr = IMediaSample_SetTime(sample, &rtSampleStart, &rtSampleStop);
+
+        pin->rtCurrent = pin->rtNext;
+        pin->rtNext = rtSampleStop;
+
+        IMediaSample_SetPreroll(sample, FALSE);
+        if (!outpin->dwSamplesProcessed++)
+            IMediaSample_SetDiscontinuity(sample, TRUE);
+        else
+            IMediaSample_SetDiscontinuity(sample, FALSE);
+
+        hr = IAsyncReader_Request(pin->pReader, sample, 0);
+    }
+    if (FAILED(hr))
+        ERR("Horsemen of the apocalypse came to bring error 0x%08x %p\n", hr, sample);
+
+    return hr;
 }
 
 static HRESULT WAVEParser_disconnect(LPVOID iface)
@@ -421,6 +391,25 @@ static HRESULT WAVEParser_disconnect(LPVOID iface)
     /* TODO: Find and plug memory leaks */
     return S_OK;
 }
+
+static const IBaseFilterVtbl WAVEParser_Vtbl =
+{
+    Parser_QueryInterface,
+    Parser_AddRef,
+    Parser_Release,
+    Parser_GetClassID,
+    Parser_Stop,
+    Parser_Pause,
+    Parser_Run,
+    Parser_GetState,
+    Parser_SetSyncSource,
+    Parser_GetSyncSource,
+    Parser_EnumPins,
+    Parser_FindPin,
+    Parser_QueryFilterInfo,
+    Parser_JoinFilterGraph,
+    Parser_QueryVendorInfo
+};
 
 HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv)
 {
@@ -437,14 +426,12 @@ HRESULT WAVEParser_create(IUnknown * pUnkOuter, LPVOID * ppv)
     /* Note: This memory is managed by the transform filter once created */
     This = CoTaskMemAlloc(sizeof(WAVEParserImpl));
 
-    This->pCurrentSample = NULL;
-
-    hr = Parser_Create(&(This->Parser), &CLSID_WAVEParser, WAVEParser_Sample, WAVEParser_QueryAccept, WAVEParser_InputPin_PreConnect, WAVEParser_Cleanup, WAVEParser_disconnect, NULL, WAVEParserImpl_seek, NULL);
+    hr = Parser_Create(&(This->Parser), &WAVEParser_Vtbl, &CLSID_WAVEParser, WAVEParser_Sample, WAVEParser_QueryAccept, WAVEParser_InputPin_PreConnect, WAVEParser_Cleanup, WAVEParser_disconnect, WAVEParser_first_request, NULL, NULL, WAVEParserImpl_seek, NULL);
 
     if (FAILED(hr))
         return hr;
 
-    *ppv = (LPVOID)This;
+    *ppv = This;
 
     return hr;
 }

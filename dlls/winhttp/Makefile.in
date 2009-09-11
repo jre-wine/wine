@@ -3,9 +3,22 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = winhttp.dll
-IMPORTS   = kernel32
+IMPORTLIB = winhttp
+IMPORTS   = shlwapi kernel32
+DELAYIMPORTS = crypt32 advapi32
+EXTRALIBS = @SOCKETLIBS@
 
-C_SRCS	  = main.c
+C_SRCS = \
+	cookie.c \
+	handle.c \
+	main.c \
+	net.c \
+	request.c \
+	session.c \
+	url.c
+
+RC_SRCS = \
+	version.rc
 
 @MAKE_DLL_RULES@
 

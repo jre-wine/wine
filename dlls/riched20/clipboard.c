@@ -54,7 +54,7 @@ static HRESULT WINAPI EnumFormatImpl_QueryInterface(IEnumFORMATETC *iface, REFII
 
     if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IEnumFORMATETC)) {
         IEnumFORMATETC_AddRef(iface);
-        *ppvObj = (LPVOID)This;
+        *ppvObj = This;
         return S_OK;
     }
     *ppvObj = NULL;
@@ -170,7 +170,7 @@ static HRESULT WINAPI DataObjectImpl_QueryInterface(IDataObject *iface, REFIID r
 
     if (IsEqualGUID(riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDataObject)) {
         IDataObject_AddRef(iface);
-        *ppvObj = (LPVOID)This;
+        *ppvObj = This;
         return S_OK;
     }
     *ppvObj = NULL;
@@ -282,6 +282,7 @@ static HRESULT WINAPI DataObjectImpl_EnumFormatEtc(IDataObject* iface, DWORD dwD
     if(dwDirection != DATADIR_GET) {
         FIXME("Unsupported direction: %d\n", dwDirection);
         /* WinXP riched20 also returns E_NOTIMPL in this case */
+        *ppenumFormatEtc = NULL;
         return E_NOTIMPL;
     }
     return EnumFormatImpl_Create(This->fmtetc, This->fmtetc_cnt, ppenumFormatEtc);
@@ -325,18 +326,23 @@ static const IDataObjectVtbl VT_DataObjectImpl =
     DataObjectImpl_EnumDAdvise
 };
 
-static HGLOBAL get_unicode_text(ME_TextEditor *editor, const CHARRANGE *lpchrg)
+static HGLOBAL get_unicode_text(ME_TextEditor *editor, const ME_Cursor *start, int nChars)
 {
-    int pars, len;
+    int pars = 0;
     WCHAR *data;
     HANDLE ret;
+    ME_DisplayItem *para;
+    int nEnd = ME_GetCursorOfs(start) + nChars;
 
-    pars = ME_CountParagraphsBetween(editor, lpchrg->cpMin, lpchrg->cpMax);
-    len = lpchrg->cpMax-lpchrg->cpMin;
-    ret = GlobalAlloc(GMEM_MOVEABLE, sizeof(WCHAR)*(len+pars+1));
-    data = (WCHAR *)GlobalLock(ret);
-    len = ME_GetTextW(editor, data, lpchrg->cpMin, len, TRUE);
-    data[len] = 0;
+    /* count paragraphs in range */
+    para = start->pPara;
+    while((para = para->member.para.next_para) &&
+          para->member.para.nCharOfs <= nEnd)
+        pars++;
+
+    ret = GlobalAlloc(GMEM_MOVEABLE, sizeof(WCHAR) * (nChars + pars + 1));
+    data = GlobalLock(ret);
+    ME_GetTextW(editor, data, nChars + pars, start, nChars, TRUE);
     GlobalUnlock(ret);
     return ret;
 }
@@ -359,7 +365,7 @@ static DWORD CALLBACK ME_AppendToHGLOBAL(DWORD_PTR dwCookie, LPBYTE lpBuff, LONG
         int nNewSize = (((nMaxSize+cb+1)|0x1FFFF)+1) & 0xFFFE0000;
         pData->hData = GlobalReAlloc(pData->hData, nNewSize, 0);
     }
-    pDest = (BYTE *)GlobalLock(pData->hData);
+    pDest = GlobalLock(pData->hData);
     memcpy(pDest + pData->nLength, lpBuff, cb);
     pData->nLength += cb;
     pDest[pData->nLength] = '\0';
@@ -369,7 +375,7 @@ static DWORD CALLBACK ME_AppendToHGLOBAL(DWORD_PTR dwCookie, LPBYTE lpBuff, LONG
     return 0;
 }
 
-static HGLOBAL get_rtf_text(ME_TextEditor *editor, const CHARRANGE *lpchrg)
+static HGLOBAL get_rtf_text(ME_TextEditor *editor, const ME_Cursor *start, int nChars)
 {
     EDITSTREAM es;
     ME_GlobalDestStruct gds;
@@ -378,15 +384,16 @@ static HGLOBAL get_rtf_text(ME_TextEditor *editor, const CHARRANGE *lpchrg)
     gds.nLength = 0;
     es.dwCookie = (DWORD_PTR)&gds;
     es.pfnCallback = ME_AppendToHGLOBAL;
-    ME_StreamOutRange(editor, SF_RTF, lpchrg->cpMin, lpchrg->cpMax, &es);
+    ME_StreamOutRange(editor, SF_RTF, start, nChars, &es);
     GlobalReAlloc(gds.hData, gds.nLength+1, 0);
     return gds.hData;
 }
 
-HRESULT ME_GetDataObject(ME_TextEditor *editor, const CHARRANGE *lpchrg, LPDATAOBJECT *lplpdataobj)
+HRESULT ME_GetDataObject(ME_TextEditor *editor, const ME_Cursor *start,
+                         int nChars, LPDATAOBJECT *lplpdataobj)
 {
     DataObjectImpl *obj;
-    TRACE("(%p,%d,%d)\n", editor, lpchrg->cpMin, lpchrg->cpMax);
+    TRACE("(%p,%d,%d)\n", editor, ME_GetCursorOfs(start), nChars);
 
     obj = heap_alloc(sizeof(DataObjectImpl));
     if(cfRTF == 0)
@@ -394,7 +401,7 @@ HRESULT ME_GetDataObject(ME_TextEditor *editor, const CHARRANGE *lpchrg, LPDATAO
 
     obj->lpVtbl = &VT_DataObjectImpl;
     obj->ref = 1;
-    obj->unicode = get_unicode_text(editor, lpchrg);
+    obj->unicode = get_unicode_text(editor, start, nChars);
     obj->rtf = NULL;
 
     obj->fmtetc_cnt = 1;
@@ -403,7 +410,7 @@ HRESULT ME_GetDataObject(ME_TextEditor *editor, const CHARRANGE *lpchrg, LPDATAO
     obj->fmtetc = GlobalAlloc(GMEM_ZEROINIT, obj->fmtetc_cnt*sizeof(FORMATETC));
     InitFormatEtc(obj->fmtetc[0], CF_UNICODETEXT, TYMED_HGLOBAL);
     if(editor->mode & TM_RICHTEXT) {
-        obj->rtf = get_rtf_text(editor, lpchrg);
+        obj->rtf = get_rtf_text(editor, start, nChars);
         InitFormatEtc(obj->fmtetc[1], cfRTF, TYMED_HGLOBAL);
     }
 

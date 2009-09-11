@@ -1,7 +1,7 @@
 /*
  * Server-side socket management
  *
- * Copyright (C) 1999 Marcus Meissner, Ove Kåven
+ * Copyright (C) 1999 Marcus Meissner, Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -97,7 +97,7 @@ static void sock_poll_event( struct fd *fd, int event );
 static enum server_fd_type sock_get_fd_type( struct fd *fd );
 static void sock_queue_async( struct fd *fd, const async_data_t *data, int type, int count );
 static void sock_reselect_async( struct fd *fd, struct async_queue *queue );
-static void sock_cancel_async( struct fd *fd );
+static void sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb );
 
 static int sock_get_error( int err );
 static void sock_set_error(void);
@@ -272,14 +272,14 @@ static void sock_wake_up( struct sock *sock, int pollev )
     }
     if (sock->window)
     {
-        if (debug_level) fprintf(stderr, "signalling events %x win %p\n", events, sock->window );
+        if (debug_level) fprintf(stderr, "signalling events %x win %08x\n", events, sock->window );
         for (i = 0; i < FD_MAX_EVENTS; i++)
         {
             int event = event_bitorder[i];
             if (sock->pmask & (1 << event))
             {
-                unsigned int lparam = (1 << event) | (sock->errors[event] << 16);
-                post_message( sock->window, sock->message, (unsigned long)sock->wparam, lparam );
+                lparam_t lparam = (1 << event) | (sock->errors[event] << 16);
+                post_message( sock->window, sock->message, sock->wparam, lparam );
             }
         }
         sock->pmask = 0;
@@ -538,13 +538,16 @@ static void sock_reselect_async( struct fd *fd, struct async_queue *queue )
     if (events) sock_try_event( sock, events );
 }
 
-static void sock_cancel_async( struct fd *fd )
+static void sock_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb )
 {
     struct sock *sock = get_fd_user( fd );
+    int n = 0;
     assert( sock->obj.ops == &sock_ops );
 
-    async_wake_up( sock->read_q, STATUS_CANCELLED );
-    async_wake_up( sock->write_q, STATUS_CANCELLED );
+    n += async_wake_up_by( sock->read_q, process, thread, iosb, STATUS_CANCELLED );
+    n += async_wake_up_by( sock->write_q, process, thread, iosb, STATUS_CANCELLED );
+    if (!n && iosb)
+        set_error( STATUS_NOT_FOUND );
 }
 
 static struct fd *sock_get_fd( struct object *obj )

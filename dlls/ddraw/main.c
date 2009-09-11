@@ -3,7 +3,7 @@
  * Copyright 1997-1999 Marcus Meissner
  * Copyright 1998 Lionel Ulmer
  * Copyright 2000-2001 TransGaming Technologies Inc.
- * Copyright 2006 Stefan Dösinger
+ * Copyright 2006 Stefan DÃ¶singer
  * Copyright 2008 Denver Gingerich
  *
  * This file contains the (internal) driver registration functions,
@@ -45,12 +45,10 @@
 #include "ddraw.h"
 #include "d3d.h"
 
+#define DDRAW_INIT_GUID
 #include "ddraw_private.h"
 
-typedef IWineD3D* (WINAPI *fnWineDirect3DCreate)(UINT, UINT, IUnknown *);
-
-static HMODULE hWineD3D = (HMODULE) -1;
-static fnWineDirect3DCreate pWineDirect3DCreate;
+static typeof(WineDirect3DCreate) *pWineDirect3DCreate;
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 
@@ -71,6 +69,31 @@ CRITICAL_SECTION ddraw_cs = { &ddraw_cs_debug, -1, 0, 0, 0, 0 };
 
 /* value of ForceRefreshRate */
 DWORD force_refresh_rate = 0;
+
+/*
+ * Helper Function for DDRAW_Create and DirectDrawCreateClipper for
+ * lazy loading of the Wine D3D driver.
+ *
+ * Returns
+ *  TRUE on success
+ *  FALSE on failure.
+ */
+
+BOOL LoadWineD3D(void)
+{
+    static HMODULE hWineD3D = (HMODULE) -1;
+    if (hWineD3D == (HMODULE) -1)
+    {
+        hWineD3D = LoadLibraryA("wined3d");
+        if (hWineD3D)
+        {
+            pWineDirect3DCreate = (typeof(WineDirect3DCreate) *)GetProcAddress(hWineD3D, "WineDirect3DCreate");
+            pWineDirect3DCreateClipper = (typeof(WineDirect3DCreateClipper) *) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
+            return TRUE;
+        }
+    }
+    return hWineD3D != NULL;
+}
 
 /***********************************************************************
  *
@@ -148,15 +171,16 @@ DDRAW_Create(const GUID *guid,
      * IDirectDraw and IDirect3D are the same object,
      * QueryInterface is used to get other interfaces.
      */
-    ICOM_INIT_INTERFACE(This, IDirectDraw,  IDirectDraw1_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirectDraw2, IDirectDraw2_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirectDraw3, IDirectDraw3_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirectDraw4, IDirectDraw4_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirectDraw7, IDirectDraw7_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirect3D,  IDirect3D1_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirect3D2, IDirect3D2_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirect3D3, IDirect3D3_Vtbl);
-    ICOM_INIT_INTERFACE(This, IDirect3D7, IDirect3D7_Vtbl);
+    This->lpVtbl = &IDirectDraw7_Vtbl;
+    This->IDirectDraw_vtbl = &IDirectDraw1_Vtbl;
+    This->IDirectDraw2_vtbl = &IDirectDraw2_Vtbl;
+    This->IDirectDraw3_vtbl = &IDirectDraw3_Vtbl;
+    This->IDirectDraw4_vtbl = &IDirectDraw4_Vtbl;
+    This->IDirect3D_vtbl = &IDirect3D1_Vtbl;
+    This->IDirect3D2_vtbl = &IDirect3D2_Vtbl;
+    This->IDirect3D3_vtbl = &IDirect3D3_Vtbl;
+    This->IDirect3D7_vtbl = &IDirect3D7_Vtbl;
+    This->device_parent_vtbl = &ddraw_wined3d_device_parent_vtbl;
 
     /* See comments in IDirectDrawImpl_CreateNewSurface for a description
      * of this member.
@@ -171,17 +195,7 @@ DDRAW_Create(const GUID *guid,
     This->orig_width = GetSystemMetrics(SM_CXSCREEN);
     This->orig_height = GetSystemMetrics(SM_CYSCREEN);
 
-    if (hWineD3D == (HMODULE) -1)
-    {
-        hWineD3D = LoadLibraryA("wined3d");
-        if (hWineD3D)
-        {
-            pWineDirect3DCreate = (fnWineDirect3DCreate) GetProcAddress(hWineD3D, "WineDirect3DCreate");
-            pWineDirect3DCreateClipper = (fnWineDirect3DCreateClipper) GetProcAddress(hWineD3D, "WineDirect3DCreateClipper");
-        }
-    }
-
-    if (!hWineD3D)
+    if (!LoadWineD3D())
     {
         ERR("Couldn't load WineD3D - OpenGL libs not present?\n");
         hr = DDERR_NODIRECTDRAWSUPPORT;
@@ -194,7 +208,7 @@ DDRAW_Create(const GUID *guid,
      * but DirectDraw specific management, like DDSURFACEDESC and DDPIXELFORMAT
      * structure handling is handled in this lib.
      */
-    wineD3D = pWineDirect3DCreate(0 /* SDKVersion */, 7 /* DXVersion */, (IUnknown *) This /* Parent */);
+    wineD3D = pWineDirect3DCreate(7 /* DXVersion */, (IUnknown *) This /* Parent */);
     if(!wineD3D)
     {
         ERR("Failed to initialise WineD3D\n");
@@ -218,13 +232,8 @@ DDRAW_Create(const GUID *guid,
      * When a Direct3DDevice7 is created, the D3D capabilities of WineD3D are
      * initialized
      */
-    hr = IWineD3D_CreateDevice(wineD3D,
-                               0 /*D3D_ADAPTER_DEFAULT*/,
-                               devicetype,
-                               NULL, /* FocusWindow, don't know yet */
-                               0, /* BehaviorFlags */
-                               &wineD3DDevice,
-                               (IUnknown *) ICOM_INTERFACE(This, IDirectDraw7));
+    hr = IWineD3D_CreateDevice(wineD3D, 0 /* D3D_ADAPTER_DEFAULT */, devicetype, NULL /* FocusWindow, don't know yet */,
+            0 /* BehaviorFlags */, (IUnknown *)This, (IWineD3DDeviceParent *)&This->device_parent_vtbl, &wineD3DDevice);
     if(FAILED(hr))
     {
         ERR("Failed to create a wineD3DDevice, result = %x\n", hr);
@@ -255,7 +264,7 @@ DDRAW_Create(const GUID *guid,
     This->wnd_class.hInstance = GetModuleHandleA(0);
     This->wnd_class.hIcon = 0;
     This->wnd_class.hCursor = 0;
-    This->wnd_class.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
+    This->wnd_class.hbrBackground = GetStockObject(BLACK_BRUSH);
     This->wnd_class.lpszMenuName = NULL;
     This->wnd_class.lpszClassName = This->classname;
     if(!RegisterClassA(&This->wnd_class))
@@ -267,66 +276,13 @@ DDRAW_Create(const GUID *guid,
     /* Get the amount of video memory */
     This->total_vidmem = IWineD3DDevice_GetAvailableTextureMem(This->wineD3DDevice);
 
-    /* Initialize the caps */
-    This->caps.dwSize = sizeof(This->caps);
-/* do not report DDCAPS_OVERLAY and friends since we don't support overlays */
-#define BLIT_CAPS (DDCAPS_BLT | DDCAPS_BLTCOLORFILL | DDCAPS_BLTDEPTHFILL \
-          | DDCAPS_BLTSTRETCH | DDCAPS_CANBLTSYSMEM | DDCAPS_CANCLIP	  \
-          | DDCAPS_CANCLIPSTRETCHED | DDCAPS_COLORKEY			  \
-          | DDCAPS_COLORKEYHWASSIST | DDCAPS_ALIGNBOUNDARYSRC )
-#define CKEY_CAPS (DDCKEYCAPS_DESTBLT | DDCKEYCAPS_SRCBLT)
-#define FX_CAPS (DDFXCAPS_BLTALPHA | DDFXCAPS_BLTMIRRORLEFTRIGHT	\
-                | DDFXCAPS_BLTMIRRORUPDOWN | DDFXCAPS_BLTROTATION90	\
-                | DDFXCAPS_BLTSHRINKX | DDFXCAPS_BLTSHRINKXN		\
-                | DDFXCAPS_BLTSHRINKY | DDFXCAPS_BLTSHRINKXN		\
-                | DDFXCAPS_BLTSTRETCHX | DDFXCAPS_BLTSTRETCHXN		\
-                | DDFXCAPS_BLTSTRETCHY | DDFXCAPS_BLTSTRETCHYN)
-    This->caps.dwCaps |= DDCAPS_GDI | DDCAPS_PALETTE | BLIT_CAPS;
-
-    This->caps.dwCaps2 |= DDCAPS2_CERTIFIED | DDCAPS2_NOPAGELOCKREQUIRED |
-                          DDCAPS2_PRIMARYGAMMA | DDCAPS2_WIDESURFACES |
-                          DDCAPS2_CANRENDERWINDOWED;
-    This->caps.dwCKeyCaps |= CKEY_CAPS;
-    This->caps.dwFXCaps |= FX_CAPS;
-    This->caps.dwPalCaps |= DDPCAPS_8BIT | DDPCAPS_PRIMARYSURFACE;
-    This->caps.dwVidMemTotal = This->total_vidmem;
-    This->caps.dwVidMemFree = This->total_vidmem;
-    This->caps.dwSVBCaps |= BLIT_CAPS;
-    This->caps.dwSVBCKeyCaps |= CKEY_CAPS;
-    This->caps.dwSVBFXCaps |= FX_CAPS;
-    This->caps.dwVSBCaps |= BLIT_CAPS;
-    This->caps.dwVSBCKeyCaps |= CKEY_CAPS;
-    This->caps.dwVSBFXCaps |= FX_CAPS;
-    This->caps.dwSSBCaps |= BLIT_CAPS;
-    This->caps.dwSSBCKeyCaps |= CKEY_CAPS;
-    This->caps.dwSSBFXCaps |= FX_CAPS;
-    This->caps.ddsCaps.dwCaps |= DDSCAPS_ALPHA | DDSCAPS_BACKBUFFER |
-                                 DDSCAPS_FLIP | DDSCAPS_FRONTBUFFER |
-                                 DDSCAPS_OFFSCREENPLAIN | DDSCAPS_PALETTE |
-                                 DDSCAPS_PRIMARYSURFACE | DDSCAPS_SYSTEMMEMORY |
-                                 DDSCAPS_VIDEOMEMORY | DDSCAPS_VISIBLE;
-    /* Hacks for D3D code */
-    /* TODO: Check if WineD3D has 3D enabled
-       Need opengl surfaces or auto for 3D
-     */
-    if(This->ImplType == 0 || This->ImplType == SURFACE_OPENGL)
-    {
-        This->caps.dwCaps |= DDCAPS_3D;
-        This->caps.ddsCaps.dwCaps |= DDSCAPS_3DDEVICE | DDSCAPS_MIPMAP | DDSCAPS_TEXTURE | DDSCAPS_ZBUFFER;
-    }
-    This->caps.ddsOldCaps.dwCaps = This->caps.ddsCaps.dwCaps;
-
-#undef BLIT_CAPS
-#undef CKEY_CAPS
-#undef FX_CAPS
-
     list_init(&This->surface_list);
     list_add_head(&global_ddraw_list, &This->ddraw_list_entry);
 
     /* Call QueryInterface to get the pointer to the requested interface. This also initializes
      * The required refcount
      */
-    hr = IDirectDraw7_QueryInterface( ICOM_INTERFACE(This, IDirectDraw7), iid, DD);
+    hr = IDirectDraw7_QueryInterface((IDirectDraw7 *)This, iid, DD);
     if(SUCCEEDED(hr)) return DD_OK;
 
 err_out:
@@ -583,7 +539,7 @@ IDirectDrawClassFactoryImpl_QueryInterface(IClassFactory *iface,
                     REFIID riid,
                     void **obj)
 {
-    ICOM_THIS_FROM(IClassFactoryImpl, IClassFactory, iface);
+    IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
 
     TRACE("(%p)->(%s,%p)\n", This, debugstr_guid(riid), obj);
 
@@ -611,7 +567,7 @@ IDirectDrawClassFactoryImpl_QueryInterface(IClassFactory *iface,
 static ULONG WINAPI
 IDirectDrawClassFactoryImpl_AddRef(IClassFactory *iface)
 {
-    ICOM_THIS_FROM(IClassFactoryImpl, IClassFactory, iface);
+    IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->() incrementing from %d.\n", This, ref - 1);
@@ -632,7 +588,7 @@ IDirectDrawClassFactoryImpl_AddRef(IClassFactory *iface)
 static ULONG WINAPI
 IDirectDrawClassFactoryImpl_Release(IClassFactory *iface)
 {
-    ICOM_THIS_FROM(IClassFactoryImpl, IClassFactory, iface);
+    IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
     TRACE("(%p)->() decrementing from %d.\n", This, ref+1);
 
@@ -661,7 +617,7 @@ IDirectDrawClassFactoryImpl_CreateInstance(IClassFactory *iface,
                                            REFIID riid,
                                            void **obj)
 {
-    ICOM_THIS_FROM(IClassFactoryImpl, IClassFactory, iface);
+    IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
 
     TRACE("(%p)->(%p,%s,%p)\n",This,UnkOuter,debugstr_guid(riid),obj);
 
@@ -683,7 +639,7 @@ IDirectDrawClassFactoryImpl_CreateInstance(IClassFactory *iface,
 static HRESULT WINAPI
 IDirectDrawClassFactoryImpl_LockServer(IClassFactory *iface,BOOL dolock)
 {
-    ICOM_THIS_FROM(IClassFactoryImpl, IClassFactory, iface);
+    IClassFactoryImpl *This = (IClassFactoryImpl *)iface;
     FIXME("(%p)->(%d),stub!\n",This,dolock);
     return S_OK;
 }
@@ -743,12 +699,12 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
     factory = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*factory));
     if (factory == NULL) return E_OUTOFMEMORY;
 
-    ICOM_INIT_INTERFACE(factory, IClassFactory, IClassFactory_Vtbl);
+    factory->lpVtbl = &IClassFactory_Vtbl;
     factory->ref = 1;
 
     factory->pfnCreateInstance = object_creation[i].pfnCreateInstance;
 
-    *ppv = ICOM_INTERFACE(factory, IClassFactory);
+    *ppv = factory;
     return S_OK;
 }
 
@@ -791,8 +747,8 @@ DestroyCallback(IDirectDrawSurface7 *surf,
                 DDSURFACEDESC2 *desc,
                 void *context)
 {
-    IDirectDrawSurfaceImpl *Impl = ICOM_OBJECT(IDirectDrawSurfaceImpl, IDirectDrawSurface7, surf);
-    IDirectDrawImpl *ddraw = (IDirectDrawImpl *) context;
+    IDirectDrawSurfaceImpl *Impl = (IDirectDrawSurfaceImpl *)surf;
+    IDirectDrawImpl *ddraw = context;
     ULONG ref;
 
     ref = IDirectDrawSurface7_Release(surf);  /* For the EnumSurfaces */
@@ -942,11 +898,11 @@ DllMain(HINSTANCE hInstDLL,
                 WARN("DDraw %p has a refcount of %d\n", ddraw, ddraw->ref7 + ddraw->ref4 + ddraw->ref3 + ddraw->ref2 + ddraw->ref1);
 
                 /* Add references to each interface to avoid freeing them unexpectedly */
-                IDirectDraw_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw));
-                IDirectDraw2_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw2));
-                IDirectDraw3_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw3));
-                IDirectDraw4_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw4));
-                IDirectDraw7_AddRef(ICOM_INTERFACE(ddraw, IDirectDraw7));
+                IDirectDraw_AddRef((IDirectDraw *)&ddraw->IDirectDraw_vtbl);
+                IDirectDraw2_AddRef((IDirectDraw2 *)&ddraw->IDirectDraw2_vtbl);
+                IDirectDraw3_AddRef((IDirectDraw3 *)&ddraw->IDirectDraw3_vtbl);
+                IDirectDraw4_AddRef((IDirectDraw4 *)&ddraw->IDirectDraw4_vtbl);
+                IDirectDraw7_AddRef((IDirectDraw7 *)ddraw);
 
                 /* Does a D3D device exist? Destroy it
                     * TODO: Destroy all Vertex buffers, Lights, Materials
@@ -955,7 +911,7 @@ DllMain(HINSTANCE hInstDLL,
                 if(ddraw->d3ddevice)
                 {
                     WARN("DDraw %p has d3ddevice %p attached\n", ddraw, ddraw->d3ddevice);
-                    while(IDirect3DDevice7_Release(ICOM_INTERFACE(ddraw->d3ddevice, IDirect3DDevice7)));
+                    while(IDirect3DDevice7_Release((IDirect3DDevice7 *)ddraw->d3ddevice));
                 }
 
                 /* Try to release the objects
@@ -965,11 +921,8 @@ DllMain(HINSTANCE hInstDLL,
                 desc.dwSize = sizeof(desc);
                 for(i = 0; i <= 1; i++)
                 {
-                    hr = IDirectDraw7_EnumSurfaces(ICOM_INTERFACE(ddraw, IDirectDraw7),
-                                                    DDENUMSURFACES_ALL,
-                                                    &desc,
-                                                    (void *) ddraw,
-                                                    DestroyCallback);
+                    hr = IDirectDraw7_EnumSurfaces((IDirectDraw7 *)ddraw,
+                            DDENUMSURFACES_ALL, &desc, ddraw, DestroyCallback);
                     if(hr != D3D_OK)
                         ERR("(%p) EnumSurfaces failed, prepare for trouble\n", ddraw);
                 }
@@ -981,11 +934,11 @@ DllMain(HINSTANCE hInstDLL,
                 /* Release all hanging references to destroy the objects. This
                     * restores the screen mode too
                     */
-                while(IDirectDraw_Release(ICOM_INTERFACE(ddraw, IDirectDraw)));
-                while(IDirectDraw2_Release(ICOM_INTERFACE(ddraw, IDirectDraw2)));
-                while(IDirectDraw3_Release(ICOM_INTERFACE(ddraw, IDirectDraw3)));
-                while(IDirectDraw4_Release(ICOM_INTERFACE(ddraw, IDirectDraw4)));
-                while(IDirectDraw7_Release(ICOM_INTERFACE(ddraw, IDirectDraw7)));
+                while(IDirectDraw_Release((IDirectDraw *)&ddraw->IDirectDraw_vtbl));
+                while(IDirectDraw2_Release((IDirectDraw2 *)&ddraw->IDirectDraw2_vtbl));
+                while(IDirectDraw3_Release((IDirectDraw3 *)&ddraw->IDirectDraw3_vtbl));
+                while(IDirectDraw4_Release((IDirectDraw4 *)&ddraw->IDirectDraw4_vtbl));
+                while(IDirectDraw7_Release((IDirectDraw7 *)ddraw));
             }
         }
     }

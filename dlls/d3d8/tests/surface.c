@@ -22,7 +22,7 @@
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d8_test_wc";
     RegisterClass(&wc);
 
@@ -44,8 +44,11 @@ static IDirect3DDevice8 *init_d3d8(HMODULE d3d8_handle)
     if (!d3d8_create) return NULL;
 
     d3d8_ptr = d3d8_create(D3D_SDK_VERSION);
-    ok(d3d8_ptr != NULL, "Failed to create IDirect3D8 object\n");
-    if (!d3d8_ptr) return NULL;
+    if (!d3d8_ptr)
+    {
+        skip("could not create D3D8\n");
+        return NULL;
+    }
 
     IDirect3D8_GetAdapterDisplayMode(d3d8_ptr, D3DADAPTER_DEFAULT, &d3ddm );
     ZeroMemory(&present_parameters, sizeof(present_parameters));
@@ -64,6 +67,42 @@ static IDirect3DDevice8 *init_d3d8(HMODULE d3d8_handle)
     }
 
     return device_ptr;
+}
+
+/* Test the behaviour of the IDirect3DDevice8::CreateImageSurface method.
+
+Expected behaviour (and also documented in the original DX8 docs) is that the
+call returns a surface with the SYSTEMMEM pool type. Games like Max Payne 1
+and 2 which use Direct3D8 calls depend on this behaviour.
+
+A short remark in the DX9 docs however states that the pool of the
+returned surface object is of type SCRATCH. This is misinformation and results
+in screenshots not appearing in the savegame loading menu of both games
+mentioned above (engine tries to display a texture from the scratch pool).
+
+This test verifies that the behaviour described in the original D3D8 docs is
+the correct one. For more information about this issue, see the MSDN:
+
+D3D9 docs: "Converting to Direct3D 9"
+D3D9 reference: "IDirect3DDevice9::CreateOffscreenPlainSurface"
+D3D8 reference: "IDirect3DDevice8::CreateImageSurface"
+*/
+
+static void test_image_surface_pool(IDirect3DDevice8 *device) {
+    IDirect3DSurface8 *surface = 0;
+    D3DSURFACE_DESC surf_desc;
+    HRESULT hr;
+
+    hr = IDirect3DDevice8_CreateImageSurface(device, 128, 128, D3DFMT_A8R8G8B8, &surface);
+    ok(SUCCEEDED(hr), "CreateImageSurface failed (0x%08x)\n", hr);
+
+    hr = IDirect3DSurface8_GetDesc(surface, &surf_desc);
+    ok(SUCCEEDED(hr), "GetDesc failed (0x%08x)\n", hr);
+
+    ok((surf_desc.Pool == D3DPOOL_SYSTEMMEM),
+        "CreateImageSurface returns surface with unexpected pool type %u (should be SYSTEMMEM = 2)\n", surf_desc.Pool);
+
+    IDirect3DSurface8_Release(surface);
 }
 
 static void test_surface_get_container(IDirect3DDevice8 *device_ptr)
@@ -217,7 +256,7 @@ static void test_lockrect_invalid(IDirect3DDevice8 *device)
     IDirect3DSurface8_Release(surface);
 }
 
-static unsigned long getref(IUnknown *iface)
+static ULONG getref(IUnknown *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
@@ -285,6 +324,7 @@ START_TEST(surface)
 {
     HMODULE d3d8_handle;
     IDirect3DDevice8 *device_ptr;
+    ULONG refcount;
 
     d3d8_handle = LoadLibraryA("d3d8.dll");
     if (!d3d8_handle)
@@ -296,7 +336,11 @@ START_TEST(surface)
     device_ptr = init_d3d8(d3d8_handle);
     if (!device_ptr) return;
 
+    test_image_surface_pool(device_ptr);
     test_surface_get_container(device_ptr);
     test_lockrect_invalid(device_ptr);
     test_private_data(device_ptr);
+
+    refcount = IDirect3DDevice8_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

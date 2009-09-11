@@ -183,17 +183,17 @@ static DWORD wodDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
 {
     TRACE("(%u, %p)\n", wDevID, dwParam1);
 
-    *dwParam1 = MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
+    *dwParam1 = MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
                                     NULL, 0 ) * sizeof(WCHAR);
     return MMSYSERR_NOERROR;
 }
 
 static DWORD wodDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 {
-    if (dwParam2 >= MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
+    if (dwParam2 >= MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
                                         NULL, 0 ) * sizeof(WCHAR))
     {
-        MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
+        MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].ossdev.interface_name, -1,
                             dwParam1, dwParam2 / sizeof(WCHAR));
 	return MMSYSERR_NOERROR;
     }
@@ -205,17 +205,17 @@ static DWORD widDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
 {
     TRACE("(%u, %p)\n", wDevID, dwParam1);
 
-    *dwParam1 = MultiByteToWideChar(CP_ACP, 0, WInDev[wDevID].ossdev.interface_name, -1,
+    *dwParam1 = MultiByteToWideChar(CP_UNIXCP, 0, WInDev[wDevID].ossdev.interface_name, -1,
                                     NULL, 0 ) * sizeof(WCHAR);
     return MMSYSERR_NOERROR;
 }
 
 static DWORD widDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 {
-    if (dwParam2 >= MultiByteToWideChar(CP_ACP, 0, WInDev[wDevID].ossdev.interface_name, -1,
+    if (dwParam2 >= MultiByteToWideChar(CP_UNIXCP, 0, WInDev[wDevID].ossdev.interface_name, -1,
                                         NULL, 0 ) * sizeof(WCHAR))
     {
-        MultiByteToWideChar(CP_ACP, 0, WInDev[wDevID].ossdev.interface_name, -1,
+        MultiByteToWideChar(CP_UNIXCP, 0, WInDev[wDevID].ossdev.interface_name, -1,
                             dwParam1, dwParam2 / sizeof(WCHAR));
 	return MMSYSERR_NOERROR;
     }
@@ -701,7 +701,8 @@ static void OSS_Info(int fd)
 static BOOL OSS_WaveOutInit(OSS_DEVICE* ossdev)
 {
     int rc,arg;
-    int f,c,r;
+    int f,c;
+    unsigned int r;
     BOOL has_mixer = FALSE;
     TRACE("(%p) %s\n", ossdev, ossdev->dev_name);
 
@@ -719,7 +720,7 @@ static BOOL OSS_WaveOutInit(OSS_DEVICE* ossdev)
             if (ioctl(mixer, SNDCTL_MIXERINFO, &info) >= 0) {
                 lstrcpynA(ossdev->ds_desc.szDesc, info.name, sizeof(info.name));
                 strcpy(ossdev->ds_desc.szDrvname, "wineoss.drv");
-                MultiByteToWideChar(CP_ACP, 0, info.name, sizeof(info.name),
+                MultiByteToWideChar(CP_UNIXCP, 0, info.name, sizeof(info.name),
                                     ossdev->out_caps.szPname,
                                     sizeof(ossdev->out_caps.szPname) / sizeof(WCHAR));
                 TRACE("%s: %s\n", ossdev->mixer_name, ossdev->ds_desc.szDesc);
@@ -740,7 +741,7 @@ static BOOL OSS_WaveOutInit(OSS_DEVICE* ossdev)
             if (ioctl(mixer, SOUND_MIXER_INFO, &info) >= 0) {
                 lstrcpynA(ossdev->ds_desc.szDesc, info.name, sizeof(info.name));
                 strcpy(ossdev->ds_desc.szDrvname, "wineoss.drv");
-                MultiByteToWideChar(CP_ACP, 0, info.name, sizeof(info.name), 
+                MultiByteToWideChar(CP_UNIXCP, 0, info.name, sizeof(info.name),
                                     ossdev->out_caps.szPname, 
                                     sizeof(ossdev->out_caps.szPname) / sizeof(WCHAR));
                 TRACE("%s: %s\n", ossdev->mixer_name, ossdev->ds_desc.szDesc);
@@ -876,7 +877,8 @@ static BOOL OSS_WaveOutInit(OSS_DEVICE* ossdev)
 static BOOL OSS_WaveInInit(OSS_DEVICE* ossdev)
 {
     int rc,arg;
-    int f,c,r;
+    int f,c;
+    unsigned int r;
     TRACE("(%p) %s\n", ossdev, ossdev->dev_name);
 
     if (OSS_OpenDevice(ossdev, O_RDONLY, NULL, 0,-1,-1,-1) != 0)
@@ -891,7 +893,7 @@ static BOOL OSS_WaveInInit(OSS_DEVICE* ossdev)
             oss_mixerinfo info;
             info.dev = 0;
             if (ioctl(mixer, SNDCTL_MIXERINFO, &info) >= 0) {
-                MultiByteToWideChar(CP_ACP, 0, info.name, -1,
+                MultiByteToWideChar(CP_UNIXCP, 0, info.name, -1,
                                     ossdev->in_caps.szPname,
                                     sizeof(ossdev->in_caps.szPname) / sizeof(WCHAR));
                 TRACE("%s: %s\n", ossdev->mixer_name, ossdev->ds_desc.szDesc);
@@ -909,7 +911,7 @@ static BOOL OSS_WaveInInit(OSS_DEVICE* ossdev)
         if ((mixer = open(ossdev->mixer_name, O_RDONLY|O_NDELAY)) >= 0) {
             mixer_info info;
             if (ioctl(mixer, SOUND_MIXER_INFO, &info) >= 0) {
-                MultiByteToWideChar(CP_ACP, 0, info.name, -1, 
+                MultiByteToWideChar(CP_UNIXCP, 0, info.name, -1,
                                     ossdev->in_caps.szPname, 
                                     sizeof(ossdev->in_caps.szPname) / sizeof(WCHAR));
                 TRACE("%s: %s\n", ossdev->mixer_name, ossdev->ds_desc.szDesc);
@@ -1004,7 +1006,8 @@ static BOOL OSS_WaveInInit(OSS_DEVICE* ossdev)
 static void OSS_WaveFullDuplexInit(OSS_DEVICE* ossdev)
 {
     int rc,arg;
-    int f,c,r;
+    int f,c;
+    unsigned int r;
     int caps;
     BOOL has_mixer = FALSE;
     TRACE("(%p) %s\n", ossdev, ossdev->dev_name);
@@ -1149,7 +1152,7 @@ static char* StrDup(const char* str, const char* def)
 LRESULT OSS_WaveInit(void)
 {
     char* str;
-    int i;
+    unsigned int i;
 
     /* FIXME: Remove unneeded members of WOutDev and WInDev */
     TRACE("()\n");
@@ -1172,9 +1175,9 @@ LRESULT OSS_WaveInit(void)
         for (i = 1; i < MAX_WAVEDRV; ++i)
         {
             WOutDev[i].ossdev.dev_name = WInDev[i].ossdev.dev_name = HeapAlloc(GetProcessHeap(),0,11);
-            sprintf(WOutDev[i].ossdev.dev_name, "/dev/dsp%d", i);
+            sprintf(WOutDev[i].ossdev.dev_name, "/dev/dsp%u", i);
             WOutDev[i].ossdev.mixer_name = WInDev[i].ossdev.mixer_name = HeapAlloc(GetProcessHeap(),0,13);
-            sprintf(WOutDev[i].ossdev.mixer_name, "/dev/mixer%d", i);
+            sprintf(WOutDev[i].ossdev.mixer_name, "/dev/mixer%u", i);
         }
     }
 
@@ -1213,13 +1216,13 @@ LRESULT OSS_WaveInit(void)
 
     TRACE("%d wave out devices\n", numOutDev);
     for (i = 0; i < numOutDev; i++) {
-        TRACE("%d: %s, %s, %s\n", i, WOutDev[i].ossdev.dev_name,
+        TRACE("%u: %s, %s, %s\n", i, WOutDev[i].ossdev.dev_name,
               WOutDev[i].ossdev.mixer_name, WOutDev[i].ossdev.interface_name);
     }
 
     TRACE("%d wave in devices\n", numInDev);
     for (i = 0; i < numInDev; i++) {
-        TRACE("%d: %s, %s, %s\n", i, WInDev[i].ossdev.dev_name,
+        TRACE("%u: %s, %s, %s\n", i, WInDev[i].ossdev.dev_name,
               WInDev[i].ossdev.mixer_name, WInDev[i].ossdev.interface_name);
     }
 
@@ -1370,7 +1373,7 @@ static int OSS_AddRingMessage(OSS_MSG_RING* omr, enum win_wm_message msg, DWORD 
  * Get a message from the ring. Should be called by the playback/record thread.
  */
 static int OSS_RetrieveRingMessage(OSS_MSG_RING* omr,
-                                   enum win_wm_message *msg, DWORD *param, HANDLE *hEvent)
+                                   enum win_wm_message *msg, DWORD_PTR *param, HANDLE *hEvent)
 {
     EnterCriticalSection(&omr->msg_crst);
 
@@ -1398,7 +1401,7 @@ static int OSS_RetrieveRingMessage(OSS_MSG_RING* omr,
  */
 static int OSS_PeekRingMessage(OSS_MSG_RING* omr,
                                enum win_wm_message *msg,
-                               DWORD *param, HANDLE *hEvent)
+                               DWORD_PTR *param, HANDLE *hEvent)
 {
     EnterCriticalSection(&omr->msg_crst);
 
@@ -1422,9 +1425,9 @@ static int OSS_PeekRingMessage(OSS_MSG_RING* omr,
 /**************************************************************************
  * 			wodNotifyClient			[internal]
  */
-static DWORD wodNotifyClient(WINE_WAVEOUT* wwo, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
+static DWORD wodNotifyClient(WINE_WAVEOUT* wwo, WORD wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("wMsg = 0x%04x (%s) dwParm1 = %04X dwParam2 = %04X\n", wMsg,
+    TRACE("wMsg = 0x%04x (%s) dwParm1 = %04lx dwParam2 = %04lx\n", wMsg,
         wMsg == WOM_OPEN ? "WOM_OPEN" : wMsg == WOM_CLOSE ? "WOM_CLOSE" :
         wMsg == WOM_DONE ? "WOM_DONE" : "Unknown", dwParam1, dwParam2);
 
@@ -1671,14 +1674,14 @@ static DWORD wodPlayer_NotifyCompletions(WINE_WAVEOUT* wwo, BOOL force)
         {
             if (lpWaveHdr == wwo->lpPlayPtr) {TRACE("play %p\n", lpWaveHdr); break;}
             if (lpWaveHdr == wwo->lpLoopPtr) {TRACE("loop %p\n", lpWaveHdr); break;}
-            if (lpWaveHdr->reserved > wwo->dwPlayedTotal) {TRACE("still playing %p (%u/%u)\n", lpWaveHdr, lpWaveHdr->reserved, wwo->dwPlayedTotal);break;}
+            if (lpWaveHdr->reserved > wwo->dwPlayedTotal) {TRACE("still playing %p (%lu/%u)\n", lpWaveHdr, lpWaveHdr->reserved, wwo->dwPlayedTotal);break;}
         }
 	wwo->lpQueuePtr = lpWaveHdr->lpNext;
 
 	lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
 	lpWaveHdr->dwFlags |= WHDR_DONE;
 
-	wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
+	wodNotifyClient(wwo, WOM_DONE, (DWORD_PTR)lpWaveHdr, 0);
     }
 #endif
     return  (lpWaveHdr && lpWaveHdr != wwo->lpPlayPtr && lpWaveHdr != wwo->lpLoopPtr) ? 
@@ -1706,7 +1709,7 @@ static	void	wodPlayer_Reset(WINE_WAVEOUT* wwo, BOOL reset)
 
     if (reset) {
         enum win_wm_message	msg;
-        DWORD		        param;
+        DWORD_PTR	        param;
         HANDLE		        ev;
 
 	/* remove any buffer */
@@ -1739,7 +1742,7 @@ static	void	wodPlayer_Reset(WINE_WAVEOUT* wwo, BOOL reset)
     } else {
         if (wwo->lpLoopPtr) {
             /* complicated case, not handled yet (could imply modifying the loop counter */
-            FIXME("Pausing while in loop isn't correctly handled yet, except strange results\n");
+            FIXME("Pausing while in loop isn't correctly handled yet, expect strange results\n");
             wwo->lpPlayPtr = wwo->lpLoopPtr;
             wwo->dwPartialOffset = 0;
             wwo->dwWrittenTotal = wwo->dwPlayedTotal; /* this is wrong !!! */
@@ -1769,11 +1772,11 @@ static void wodPlayer_ProcessMessages(WINE_WAVEOUT* wwo)
 {
     LPWAVEHDR           lpWaveHdr;
     enum win_wm_message	msg;
-    DWORD		param;
+    DWORD_PTR		param;
     HANDLE		ev;
 
     while (OSS_RetrieveRingMessage(&wwo->msgRing, &msg, &param, &ev)) {
-	TRACE("Received %s %x\n", getCmdString(msg), param);
+	TRACE("Received %s %lx\n", getCmdString(msg), param);
 	switch (msg) {
 	case WINE_WM_PAUSING:
 	    wodPlayer_Reset(wwo, FALSE);
@@ -1880,7 +1883,7 @@ static DWORD wodPlayer_FeedDSP(WINE_WAVEOUT* wwo)
  */
 static	DWORD	CALLBACK	wodPlayer(LPVOID pmt)
 {
-    WORD	  uDevID = (DWORD)pmt;
+    WORD	  uDevID = (DWORD_PTR)pmt;
     WINE_WAVEOUT* wwo = &WOutDev[uDevID];
     DWORD         dwNextFeedTime = INFINITE;   /* Time before DSP needs feeding */
     DWORD         dwNextNotifyTime = INFINITE; /* Time before next wave completion */
@@ -1923,6 +1926,8 @@ static	DWORD	CALLBACK	wodPlayer(LPVOID pmt)
 	    dwNextFeedTime = dwNextNotifyTime = INFINITE;
 	}
     }
+
+    return 0;
 }
 
 /**************************************************************************
@@ -1953,14 +1958,14 @@ static DWORD wodGetDevCaps(WORD wDevID, LPWAVEOUTCAPSW lpCaps, DWORD dwSize)
 /**************************************************************************
  * 				wodOpen				[internal]
  */
-DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
+static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
 {
     int			audio_fragment;
     WINE_WAVEOUT*	wwo;
     audio_buf_info      info;
     DWORD               ret;
 
-    TRACE("(%u, %p[cb=%08x], %08X);\n", wDevID, lpDesc, lpDesc->dwCallback, dwFlags);
+    TRACE("(%u, %p[cb=%08lx], %08X);\n", wDevID, lpDesc, lpDesc->dwCallback, dwFlags);
     if (lpDesc == NULL) {
 	WARN("Invalid Parameter !\n");
 	return MMSYSERR_INVALPARAM;
@@ -2106,7 +2111,7 @@ DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     OSS_InitRingMessage(&wwo->msgRing);
 
     wwo->hStartUpEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-    wwo->hThread = CreateThread(NULL, 0, wodPlayer, (LPVOID)(DWORD)wDevID, 0, &(wwo->dwThreadID));
+    wwo->hThread = CreateThread(NULL, 0, wodPlayer, (LPVOID)(DWORD_PTR)wDevID, 0, &(wwo->dwThreadID));
     if (wwo->hThread)
         SetThreadPriority(wwo->hThread, THREAD_PRIORITY_TIME_CRITICAL);
     WaitForSingleObject(wwo->hStartUpEvent, INFINITE);
@@ -2185,7 +2190,7 @@ static DWORD wodWrite(WORD wDevID, LPWAVEHDR lpWaveHdr, DWORD dwSize)
         lpWaveHdr->dwBufferLength &= ~(WOutDev[wDevID].waveFormat.Format.nBlockAlign - 1);
     }
 
-    OSS_AddRingMessage(&WOutDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD)lpWaveHdr, FALSE);
+    OSS_AddRingMessage(&WOutDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD_PTR)lpWaveHdr, FALSE);
 
     return MMSYSERR_NOERROR;
 }
@@ -2403,10 +2408,10 @@ DWORD wodSetVolume(WORD wDevID, DWORD dwParam)
 /**************************************************************************
  * 				wodMessage (WINEOSS.7)
  */
-DWORD WINAPI OSS_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_wodMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%u, %s, %08X, %08X, %08X);\n",
+    TRACE("(%u, %s, %08lX, %08lX, %08lX);\n",
 	  wDevID, getMessage(wMsg), dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {
@@ -2452,9 +2457,9 @@ DWORD WINAPI OSS_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
 /**************************************************************************
  * 			widNotifyClient			[internal]
  */
-static DWORD widNotifyClient(WINE_WAVEIN* wwi, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
+static DWORD widNotifyClient(WINE_WAVEIN* wwi, WORD wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("wMsg = 0x%04x (%s) dwParm1 = %04X dwParam2 = %04X\n", wMsg,
+    TRACE("wMsg = 0x%04x (%s) dwParm1 = %04lx dwParam2 = %04lx\n", wMsg,
         wMsg == WIM_OPEN ? "WIM_OPEN" : wMsg == WIM_CLOSE ? "WIM_CLOSE" :
         wMsg == WIM_DATA ? "WIM_DATA" : "Unknown", dwParam1, dwParam2);
 
@@ -2501,7 +2506,7 @@ static DWORD widGetDevCaps(WORD wDevID, LPWAVEINCAPSW lpCaps, DWORD dwSize)
 static void widRecorder_ReadHeaders(WINE_WAVEIN * wwi)
 {
     enum win_wm_message tmp_msg;
-    DWORD		tmp_param;
+    DWORD_PTR		tmp_param;
     HANDLE		tmp_ev;
     WAVEHDR*		lpWaveHdr;
 
@@ -2528,7 +2533,7 @@ static void widRecorder_ReadHeaders(WINE_WAVEIN * wwi)
  */
 static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 {
-    WORD		uDevID = (DWORD)pmt;
+    WORD		uDevID = (DWORD_PTR)pmt;
     WINE_WAVEIN*	wwi = &WInDev[uDevID];
     WAVEHDR*		lpWaveHdr;
     DWORD		dwSleepTime;
@@ -2538,7 +2543,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
     audio_buf_info 	info;
     int 		xs;
     enum win_wm_message msg;
-    DWORD		param;
+    DWORD_PTR		param;
     HANDLE		ev;
     int                 enable;
 
@@ -2609,7 +2614,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 			    lpWaveHdr->dwFlags |=  WHDR_DONE;
 
 			    wwi->lpQueuePtr = lpNext;
-			    widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
+			    widNotifyClient(wwi, WIM_DATA, (DWORD_PTR)lpWaveHdr, 0);
 			    lpWaveHdr = lpNext;
 			}
                     } else {
@@ -2661,7 +2666,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
                             lpWaveHdr->dwFlags |=  WHDR_DONE;
 
 			    wwi->lpQueuePtr = lpNext;
-                            widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
+                            widNotifyClient(wwi, WIM_DATA, (DWORD_PTR)lpWaveHdr, 0);
 
 			    lpWaveHdr = lpNext;
 			    if (!lpNext && bytesRead) {
@@ -2706,7 +2711,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 
 	while (OSS_RetrieveRingMessage(&wwi->msgRing, &msg, &param, &ev))
 	{
-            TRACE("msg=%s param=0x%x\n", getCmdString(msg), param);
+            TRACE("msg=%s param=0x%lx\n", getCmdString(msg), param);
 	    switch (msg) {
 	    case WINE_WM_PAUSING:
 		wwi->state = WINE_WS_PAUSED;
@@ -2772,7 +2777,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 		        lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
 		        lpWaveHdr->dwFlags |= WHDR_DONE;
 		        wwi->lpQueuePtr = lpNext;
-		        widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
+		        widNotifyClient(wwi, WIM_DATA, (DWORD_PTR)lpWaveHdr, 0);
 		    }
 		}
 		wwi->state = WINE_WS_STOPPED;
@@ -2805,7 +2810,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 		    lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
 		    lpWaveHdr->dwFlags |= WHDR_DONE;
                     wwi->lpQueuePtr = lpWaveHdr->lpNext;
-		    widNotifyClient(wwi, WIM_DATA, (DWORD)lpWaveHdr, 0);
+		    widNotifyClient(wwi, WIM_DATA, (DWORD_PTR)lpWaveHdr, 0);
 		}
 
 		wwi->lpQueuePtr = NULL;
@@ -2843,7 +2848,7 @@ static	DWORD	CALLBACK	widRecorder(LPVOID pmt)
 /**************************************************************************
  * 				widOpen				[internal]
  */
-DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
+static DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
 {
     WINE_WAVEIN*	wwi;
     audio_buf_info      info;
@@ -2977,7 +2982,7 @@ DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     OSS_InitRingMessage(&wwi->msgRing);
 
     wwi->hStartUpEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-    wwi->hThread = CreateThread(NULL, 0, widRecorder, (LPVOID)(DWORD)wDevID, 0, &(wwi->dwThreadID));
+    wwi->hThread = CreateThread(NULL, 0, widRecorder, (LPVOID)(DWORD_PTR)wDevID, 0, &(wwi->dwThreadID));
     if (wwi->hThread)
         SetThreadPriority(wwi->hThread, THREAD_PRIORITY_TIME_CRITICAL);
     WaitForSingleObject(wwi->hStartUpEvent, INFINITE);
@@ -3040,7 +3045,7 @@ static DWORD widAddBuffer(WORD wDevID, LPWAVEHDR lpWaveHdr, DWORD dwSize)
     lpWaveHdr->dwBytesRecorded = 0;
     lpWaveHdr->lpNext = NULL;
 
-    OSS_AddRingMessage(&WInDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD)lpWaveHdr, FALSE);
+    OSS_AddRingMessage(&WInDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD_PTR)lpWaveHdr, FALSE);
     return MMSYSERR_NOERROR;
 }
 
@@ -3120,10 +3125,10 @@ static DWORD widGetPosition(WORD wDevID, LPMMTIME lpTime, DWORD uSize)
 /**************************************************************************
  * 				widMessage (WINEOSS.6)
  */
-DWORD WINAPI OSS_widMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_widMessage(WORD wDevID, WORD wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%u, %s, %08X, %08X, %08X);\n",
+    TRACE("(%u, %s, %08lX, %08lX, %08lX);\n",
 	  wDevID, getMessage(wMsg), dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {
@@ -3159,20 +3164,20 @@ DWORD WINAPI OSS_widMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
 /**************************************************************************
  * 				wodMessage (WINEOSS.7)
  */
-DWORD WINAPI OSS_wodMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_wodMessage(WORD wDevID, WORD wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    FIXME("(%u, %04X, %08X, %08X, %08X):stub\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
+    FIXME("(%u, %04X, %08lX, %08lX, %08lX):stub\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
     return MMSYSERR_NOTENABLED;
 }
 
 /**************************************************************************
  * 				widMessage (WINEOSS.6)
  */
-DWORD WINAPI OSS_widMessage(WORD wDevID, WORD wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_widMessage(WORD wDevID, WORD wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    FIXME("(%u, %04X, %08X, %08X, %08X):stub\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
+    FIXME("(%u, %04X, %08lX, %08lX, %08lX):stub\n", wDevID, wMsg, dwUser, dwParam1, dwParam2);
     return MMSYSERR_NOTENABLED;
 }
 

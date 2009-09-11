@@ -66,11 +66,16 @@ static void DEFWND_HandleWindowPosChanged( HWND hwnd, const WINDOWPOS *winpos )
 
     if (!(winpos->flags & SWP_NOCLIENTSIZE) || (winpos->flags & SWP_STATECHANGED))
     {
-        WPARAM wp = SIZE_RESTORED;
-        if (IsZoomed(hwnd)) wp = SIZE_MAXIMIZED;
-        else if (IsIconic(hwnd)) wp = SIZE_MINIMIZED;
+        if (IsIconic( hwnd ))
+        {
+            SendMessageW( hwnd, WM_SIZE, SIZE_MINIMIZED, 0 );
+        }
+        else
+        {
+            WPARAM wp = IsZoomed( hwnd ) ? SIZE_MAXIMIZED : SIZE_RESTORED;
 
-        SendMessageW( hwnd, WM_SIZE, wp, MAKELONG(rect.right-rect.left, rect.bottom-rect.top) );
+            SendMessageW( hwnd, WM_SIZE, wp, MAKELONG(rect.right-rect.left, rect.bottom-rect.top) );
+        }
     }
 }
 
@@ -97,7 +102,7 @@ static void DEFWND_SetTextA( HWND hwnd, LPCSTR text )
         MultiByteToWideChar( CP_ACP, 0, text, -1, textW, count );
         SERVER_START_REQ( set_window_text )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             wine_server_add_data( req, textW, (count-1) * sizeof(WCHAR) );
             wine_server_call( req );
         }
@@ -131,7 +136,7 @@ static void DEFWND_SetTextW( HWND hwnd, LPCWSTR text )
         strcpyW( wndPtr->text, text );
         SERVER_START_REQ( set_window_text )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             wine_server_add_data( req, wndPtr->text, (count-1) * sizeof(WCHAR) );
             wine_server_call( req );
         }
@@ -216,7 +221,7 @@ static void DEFWND_Print( HWND hwnd, HDC hdc, ULONG uFlags)
    * Client area
    */
   if ( uFlags & PRF_CLIENT)
-    SendMessageW(hwnd, WM_PRINTCLIENT, (WPARAM)hdc, PRF_CLIENT);
+    SendMessageW(hwnd, WM_PRINTCLIENT, (WPARAM)hdc, uFlags);
 }
 
 
@@ -385,6 +390,18 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         }
         break;
 
+    case WM_POPUPSYSTEMMENU:
+        {
+            /* This is an undocumented message used by the windows taskbar to
+               display the system menu of windows that belong to other processes. */
+            HMENU menu = GetSystemMenu(hwnd, FALSE);
+
+            if (menu)
+                TrackPopupMenu(menu, TPM_LEFTBUTTON|TPM_RIGHTBUTTON,
+                               LOWORD(lParam), HIWORD(lParam), 0, hwnd, NULL);
+            return 0;
+        }
+
     case WM_NCACTIVATE:
         return NC_HandleNCActivate( hwnd, wParam, lParam );
 
@@ -394,9 +411,8 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             if (!wndPtr) return 0;
             HeapFree( GetProcessHeap(), 0, wndPtr->text );
             wndPtr->text = NULL;
-            HeapFree( GetProcessHeap(), 0, wndPtr->pVScroll );
-            HeapFree( GetProcessHeap(), 0, wndPtr->pHScroll );
-            wndPtr->pVScroll = wndPtr->pHScroll = NULL;
+            HeapFree( GetProcessHeap(), 0, wndPtr->pScroll );
+            wndPtr->pScroll = NULL;
             WIN_ReleasePtr( wndPtr );
             return 0;
         }
@@ -606,7 +622,7 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
 
     case WM_CANCELMODE:
         iMenuSysKey = 0;
-        if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_CHILD)) EndMenu();
+        MENU_EndMenu( hwnd );
         if (GetCapture() == hwnd) ReleaseCapture();
         break;
 
@@ -649,11 +665,6 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
     case WM_QUERYOPEN:
     case WM_QUERYENDSESSION:
         return 1;
-
-    case WM_ENDSESSION:
-        if (wParam)
-            PostQuitMessage(0);
-        return 0;
 
     case WM_SETICON:
         {
@@ -746,6 +757,24 @@ static LRESULT DEFWND_DefWinProc( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             SendMessageW( hwnd, WM_HELP, 0, (LPARAM)&hi );
             break;
         }
+
+    case WM_INPUTLANGCHANGEREQUEST:
+        ActivateKeyboardLayout( (HKL)lParam, 0 );
+        break;
+
+    case WM_INPUTLANGCHANGE:
+        {
+            int count = 0;
+            HWND *win_array = WIN_ListChildren( hwnd );
+
+            if (!win_array)
+                break;
+            while (win_array[count])
+                SendMessageW( win_array[count++], WM_INPUTLANGCHANGE, wParam, lParam);
+            HeapFree(GetProcessHeap(),0,win_array);
+            break;
+        }
+
     }
 
     return 0;
@@ -843,17 +872,18 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         break;
 
     case WM_IME_KEYDOWN:
-        result = SendMessageA( hwnd, WM_KEYDOWN, wParam, lParam );
+        result = PostMessageA( hwnd, WM_KEYDOWN, wParam, lParam );
         break;
 
     case WM_IME_KEYUP:
-        result = SendMessageA( hwnd, WM_KEYUP, wParam, lParam );
+        result = PostMessageA( hwnd, WM_KEYUP, wParam, lParam );
         break;
 
     case WM_IME_STARTCOMPOSITION:
     case WM_IME_COMPOSITION:
     case WM_IME_ENDCOMPOSITION:
     case WM_IME_SELECT:
+    case WM_IME_NOTIFY:
         {
             HWND hwndIME;
 
@@ -870,14 +900,6 @@ LRESULT WINAPI DefWindowProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
             if (hwndIME)
                 result = DEFWND_ImmIsUIMessageA( hwndIME, msg, wParam, lParam );
         }
-        break;
-
-    case WM_INPUTLANGCHANGEREQUEST:
-        /* notify about the switch only if it's really our current layout */
-        if ((HKL)lParam == GetKeyboardLayout(0))
-            result = SendMessageA( hwnd, WM_INPUTLANGCHANGE, wParam, lParam );
-        else
-            result = 0;
         break;
 
     case WM_SYSCHAR:
@@ -992,6 +1014,14 @@ LRESULT WINAPI DefWindowProcW(
         PostMessageW( hwnd, WM_CHAR, wParam, lParam );
         break;
 
+    case WM_IME_KEYDOWN:
+        result = PostMessageW( hwnd, WM_KEYDOWN, wParam, lParam );
+        break;
+
+    case WM_IME_KEYUP:
+        result = PostMessageW( hwnd, WM_KEYUP, wParam, lParam );
+        break;
+
     case WM_IME_SETCONTEXT:
         {
             HWND hwndIME;
@@ -1006,6 +1036,7 @@ LRESULT WINAPI DefWindowProcW(
     case WM_IME_COMPOSITION:
     case WM_IME_ENDCOMPOSITION:
     case WM_IME_SELECT:
+    case WM_IME_NOTIFY:
         {
             HWND hwndIME;
 
@@ -1013,14 +1044,6 @@ LRESULT WINAPI DefWindowProcW(
             if (hwndIME)
                 result = SendMessageW( hwndIME, msg, wParam, lParam );
         }
-        break;
-
-    case WM_INPUTLANGCHANGEREQUEST:
-        /* notify about the switch only if it's really our current layout */
-        if ((HKL)lParam == GetKeyboardLayout(0))
-            result = SendMessageW( hwnd, WM_INPUTLANGCHANGE, wParam, lParam );
-        else
-            result = 0;
         break;
 
     default:

@@ -49,17 +49,15 @@
 #endif
 #ifdef HAVE_FREETYPE_FTSNAMES_H
 #include <freetype/ftsnames.h>
-#else
-# ifdef HAVE_FREETYPE_FTNAMES_H
-# include <freetype/ftnames.h>
-# endif
 #endif
 #ifdef HAVE_FREETYPE_TTNAMEID_H
 #include <freetype/ttnameid.h>
 #endif
 
 #include <sys/types.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #include <string.h>
 #include <stdarg.h>
 #include <stdio.h>

@@ -44,7 +44,7 @@ my $opt_output_directory = "man3w"; # All default options are for nroff (man pag
 my $opt_manual_section = "3w";
 my $opt_source_dir = "";
 my $opt_wine_root_dir = "";
-my $opt_output_format = "";         # '' = nroff, 'h' = html, 's' = sgml
+my $opt_output_format = "";         # '' = nroff, 'h' = html, 's' = sgml, 'x' = xml
 my $opt_output_empty = 0;           # Non-zero = Create 'empty' comments (for every implemented function)
 my $opt_fussy = 1;                  # Non-zero = Create only if we have a RETURNS section
 my $opt_verbose = 0;                # >0 = verbosity. Can be given multiple times (for debugging)
@@ -80,7 +80,9 @@ sub output_html_index_files();
 sub output_html_stylesheet();
 sub output_open_api_file($);
 sub output_sgml_dll_file($);
+sub output_xml_dll_file($);
 sub output_sgml_master_file($);
+sub output_xml_master_file($);
 sub output_spec($);
 sub process_comment($);
 sub process_extra_comment($);
@@ -90,14 +92,15 @@ sub process_extra_comment($);
 sub process_spec_file($)
 {
   my $spec_name = shift;
-  my $dll_name  = $spec_name;
-  $dll_name =~ s/\..*//;       # Strip the file extension
+  my ($dll_name, $dll_ext)  = split(/\./, $spec_name);
+  $dll_ext = "dll" if ( $dll_ext eq "spec" );
   my $uc_dll_name  = uc $dll_name;
 
   my $spec_details =
   {
     NAME => $spec_name,
     DLL_NAME => $dll_name,
+    DLL_EXT => $dll_ext,
     NUM_EXPORTS => 0,
     NUM_STUBS => 0,
     NUM_FUNCS => 0,
@@ -227,6 +230,7 @@ sub process_source_file($)
     COMMENT_NAME => "",
     ALT_NAME => "",
     DLL_NAME => "",
+    DLL_EXT => "",
     ORDINAL => "",
     RETURNS => "",
     PROTOTYPE => [],
@@ -511,7 +515,7 @@ sub process_comment_text($)
       # Preferred capitalisations
       s/ wine| WINE/ Wine/g;
       s/ API | api / Api /g;
-      s/DLL|Dll/dll /g;
+      s/ DLL | Dll / dll /g;
       s/ URL | url / Url /g;
       s/WIN16|win16/Win16/g;
       s/WIN32|win32/Win32/g;
@@ -627,7 +631,7 @@ sub process_comment($)
 
   # When the function is exported twice we have the second name below the first
   # (you see this a lot in ntdll, but also in some other places).
-  my $first_line = ${@{$comment->{TEXT}}}[1];
+  my $first_line = ${$comment->{TEXT}}[1];
 
   if ( $first_line =~ /^(@|[A-Za-z0-9_]+) +(\(|\[)([A-Za-z0-9_]+)\.(([0-9]+)|@)(\)|\])$/ )
   {
@@ -642,14 +646,14 @@ sub process_comment($)
       my $alt_export = @{$spec_details->{EXPORTS}}[$alt_index];
       @$alt_export[4] |= $FLAG_DOCUMENTED;
       $spec_details->{NUM_DOCS}++;
-      ${@{$comment->{TEXT}}}[1] = "";
+      ${$comment->{TEXT}}[1] = "";
     }
   }
 
   if (@{$spec_details->{CURRENT_EXTRA}})
   {
     # We have an extra comment that might be related to this one
-    my $current_comment = ${@{$spec_details->{CURRENT_EXTRA}}}[0];
+    my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
     my $current_name = $current_comment->{COMMENT_NAME};
     if ($comment->{COMMENT_NAME} =~ /^$current_name/ && $comment->{COMMENT_NAME} ne $current_name)
     {
@@ -820,12 +824,12 @@ sub process_comment($)
 
   if ( $prototype =~ /(WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16)/ )
   {
-    $prototype =~ s/^(.*?) (WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16) (.*?)\( *(.*)/$4/;
+    $prototype =~ s/^(.*?)\s+(WINAPIV|WINAPI|__cdecl|PASCAL|CALLBACK|FARPROC16)\s+(.*?)\(\s*(.*)/$4/;
     $comment->{RETURNS} = $1;
   }
   else
   {
-    $prototype =~ s/^(.*?)([A-Za-z0-9_]+)\( *(.*)/$3/;
+    $prototype =~ s/^(.*?)([A-Za-z0-9_]+)\s*\(\s*(.*)/$3/;
     $comment->{RETURNS} = $1;
   }
 
@@ -986,7 +990,7 @@ sub process_extra_comment($)
 
   if (@{$spec_details->{CURRENT_EXTRA}})
   {
-    my $current_comment = ${@{$spec_details->{CURRENT_EXTRA}}}[0];
+    my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
 
     if ($opt_verbose > 0)
     {
@@ -1072,7 +1076,7 @@ sub process_index_files()
       if (@{$spec_details->{CURRENT_EXTRA}})
       {
         # We have an unwritten extra comment, write it
-        my $current_comment = ${@{$spec_details->{CURRENT_EXTRA}}}[0];
+        my $current_comment = ${$spec_details->{CURRENT_EXTRA}}[0];
         process_extra_comment($current_comment);
         @{$spec_details->{CURRENT_EXTRA}} = ();
        }
@@ -1095,7 +1099,7 @@ sub output_spec($)
   my $comment =
   {
     FILE => $spec_details->{DLL_NAME},
-    COMMENT_NAME => $spec_details->{DLL_NAME}.".dll",
+    COMMENT_NAME => $spec_details->{DLL_NAME}.".".$spec_details->{DLL_EXT},
     ALT_NAME => $spec_details->{DLL_NAME},
     DLL_NAME => "",
     ORDINAL => "",
@@ -1297,6 +1301,13 @@ sub output_spec($)
     output_sgml_dll_file($spec_details);
     return;
   }
+
+  if ($opt_output_format eq "x")
+  {
+    output_xml_dll_file($spec_details);
+    return;
+  }
+
 }
 
 #
@@ -1319,6 +1330,10 @@ sub output_open_api_file($)
   elsif ($opt_output_format eq "s")
   {
     $output_name = $output_name.".sgml";
+  }
+  elsif ($opt_output_format eq "x")
+  {
+    $output_name = $output_name.".xml";
   }
   else
   {
@@ -1348,7 +1363,7 @@ sub output_api_header($)
       print OUTPUT "<META NAME=\"keywords\" CONTENT=\"Win32,Wine,API,$comment->{COMMENT_NAME}\">\n";
       print OUTPUT "<TITLE>Wine API: $comment->{COMMENT_NAME}</TITLE>\n</HEAD>\n<BODY>\n";
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
       print OUTPUT "<!-- Generated file - DO NOT EDIT! -->\n",
                    "<sect1>\n",
@@ -1371,7 +1386,7 @@ sub output_api_footer($)
                    " Visit <a href=\"http://www.winehq.org\">WineHQ</a> for license details.".
                    " Generated $date.</i></p>\n</body>\n</html>\n";
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
       print OUTPUT "</sect1>\n";
       return;
@@ -1390,7 +1405,7 @@ sub output_api_section_start($$)
   {
     print OUTPUT "\n<h2 class=\"section\">",$section_name,"</h2>\n";
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     print OUTPUT "<bridgehead>",$section_name,"</bridgehead>\n";
   }
@@ -1425,7 +1440,7 @@ sub output_api_name($)
                  "</b>&nbsp;&nbsp;<i class=\"dll_ord\">",
                  ,$dll_ordinal,"</i></p>\n";
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     print OUTPUT "<para>\n  <command>",$readable_name,"</command>  <emphasis>",
                  $dll_ordinal,"</emphasis>\n</para>\n";
@@ -1450,7 +1465,7 @@ sub output_api_synopsis($)
     print OUTPUT "<pre class=\"proto\">\n ", $comment->{RETURNS}," ",$comment->{COMMENT_NAME},"\n (\n";
     @fmt = ("", "\n", "<tt class=\"param\">", "</tt>");
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     print OUTPUT "<screen>\n ",$comment->{RETURNS}," ",$comment->{COMMENT_NAME},"\n (\n";
     @fmt = ("", "\n", "<emphasis>", "</emphasis>");
@@ -1468,7 +1483,7 @@ sub output_api_synopsis($)
   my $biggest_length = 0;
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
-    my $line = ${@{$comment->{PROTOTYPE}}}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     if ($line =~ /(.+?)([A-Za-z_][A-Za-z_0-9]*)$/)
     {
       my $length = length $1;
@@ -1482,19 +1497,19 @@ sub output_api_synopsis($)
   # Now pad the string with blanks
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
-    my $line = ${@{$comment->{PROTOTYPE}}}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     if ($line =~ /(.+?)([A-Za-z_][A-Za-z_0-9]*)$/)
     {
       my $pad_len = $biggest_length - length $1;
       my $padding = " " x ($pad_len);
-      ${@{$comment->{PROTOTYPE}}}[$i] = $1.$padding.$2;
+      ${$comment->{PROTOTYPE}}[$i] = $1.$padding.$2;
     }
   }
 
   for(my $i=0; $i < @{$comment->{PROTOTYPE}}; $i++)
   {
     # Format the parameter name
-    my $line = ${@{$comment->{PROTOTYPE}}}[$i];
+    my $line = ${$comment->{PROTOTYPE}}[$i];
     my $comma = ($i == @{$comment->{PROTOTYPE}}-1) ? "" : ",";
     $line =~ s/(.+?)([A-Za-z_][A-Za-z_0-9]*)$/  $fmt[0]$1$fmt[2]$2$fmt[3]$comma$fmt[1]/;
     print OUTPUT $line;
@@ -1504,7 +1519,7 @@ sub output_api_synopsis($)
   {
     print OUTPUT " )\n</pre>\n";
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     print OUTPUT " )\n</screen>\n";
   }
@@ -1532,7 +1547,7 @@ sub output_api_comment($)
             "<table class=\"tab\"><colgroup><col><col><col></colgroup><tbody>\n",
             "</tbody></table>\n","<tr><td>","</td></tr>\n","</td>","</td><td>");
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     @fmt = ("<para>\n","\n</para>\n","<constant>","</constant>","<emphasis>","</emphasis>",
             "<command>","</command>","<constant>","</constant>","<emphasis>","</emphasis>",
@@ -1559,7 +1574,7 @@ sub output_api_comment($)
 
   for (@{$comment->{TEXT}})
   {
-    if ($opt_output_format eq "h" || $opt_output_format eq "s")
+    if ($opt_output_format eq "h" || $opt_output_format eq "s" || $opt_output_format eq "x")
     {
       # Map special characters
       s/\&/\&amp;/g;
@@ -1607,7 +1622,7 @@ sub output_api_comment($)
 
       # Leading cases ("xxxx:","-") start new paragraphs & are emphasised
       # FIXME: Using bullet points for leading '-' would look nicer.
-      if ($open_paragraph == 1)
+      if ($open_paragraph == 1 && $param_docs == 0)
       {
         s/^(\-)/$fmt[1]$fmt[0]$fmt[4]$1$fmt[5]/;
         s/^([[A-Za-z\-]+\:)/$fmt[1]$fmt[0]$fmt[4]$1$fmt[5]/;
@@ -1669,6 +1684,7 @@ sub output_api_comment($)
           if ($param_docs == 1)
           {
             print OUTPUT $fmt[17],$fmt[15];
+            $param_docs = 0;
           }
           else
           {
@@ -1685,7 +1701,7 @@ sub output_api_comment($)
         else
         {
           #print OUTPUT $fmt[15];
-          $param_docs = 0;
+          #$param_docs = 0;
         }
       }
       elsif ( /^$/ )
@@ -1750,6 +1766,15 @@ sub output_api_comment($)
   {
     print OUTPUT $fmt[13];
   }
+  if ($param_docs == 1 && $open_paragraph == 1)
+  {
+    print OUTPUT $fmt[17];
+    $open_paragraph = 0;
+  }
+  if ($param_docs == 1)
+  {
+    print OUTPUT $fmt[15];
+  }
   if ($open_paragraph == 1)
   {
     print OUTPUT $fmt[1];
@@ -1790,7 +1815,7 @@ sub output_master_index_files()
     TEXT => [],
   };
 
-  if ($opt_output_format eq "s")
+  if ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     $comment->{COMMENT_NAME} = "Introduction";
     $comment->{ALT_NAME} = "Introduction",
@@ -1847,7 +1872,7 @@ sub output_master_index_files()
     }
     output_open_api_file("index");
   }
-  elsif ($opt_output_format eq "s")
+  elsif ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     # Just write this as the initial blurb, with a chapter heading
     output_open_api_file("blurb");
@@ -1858,7 +1883,7 @@ sub output_master_index_files()
   output_api_header($comment);
   output_api_comment($comment);
   output_api_footer($comment);
-  if ($opt_output_format eq "s")
+  if ($opt_output_format eq "s" || $opt_output_format eq "x")
   {
     print OUTPUT "</chapter>\n" # finish the chapter
   }
@@ -1869,12 +1894,48 @@ sub output_master_index_files()
     output_sgml_master_file(\@dlls);
     return;
   }
+  if ($opt_output_format eq "x")
+  {
+    output_xml_master_file(\@dlls);
+    return;
+  }
   if ($opt_output_format eq "h")
   {
     output_html_index_files();
     output_html_stylesheet();
     return;
   }
+}
+
+# Write the master wine-api.xml, linking it to each dll.
+sub output_xml_master_file($)
+{
+  my $dlls = shift;
+
+  output_open_api_file("wine-api");
+  print OUTPUT "<?xml version='1.0'?>";
+  print OUTPUT "<!-- Generated file - DO NOT EDIT! -->\n";
+  print OUTPUT "<!DOCTYPE book PUBLIC \"-//OASIS//DTD DocBook V5.0/EN\" ";
+  print OUTPUT "               \"http://www.docbook.org/xml/5.0/dtd/docbook.dtd\" [\n\n";
+  print OUTPUT "<!ENTITY blurb SYSTEM \"blurb.xml\">\n";
+
+  # List the entities
+  for (@$dlls)
+  {
+    $_ =~ s/(\..*)?\n//;
+    print OUTPUT "<!ENTITY ",$_," SYSTEM \"",$_,".xml\">\n"
+  }
+
+  print OUTPUT "]>\n\n<book id=\"index\">\n<bookinfo><title>The Wine Api Guide</title></bookinfo>\n\n";
+  print OUTPUT "  &blurb;\n";
+
+  for (@$dlls)
+  {
+    print OUTPUT "  &",$_,";\n"
+  }
+  print OUTPUT "\n\n</book>\n";
+
+  output_close_api_file();
 }
 
 # Write the master wine-api.sgml, linking it to each dll.
@@ -1948,6 +2009,50 @@ sub output_sgml_dll_file($)
   print OUTPUT "</chapter>\n";
   close OUTPUT;
   `mv $tmp_name $opt_output_directory/$spec_details->{DLL_NAME}.sgml`;
+}
+
+# Produce the xml for the dll chapter from the generated files
+sub output_xml_dll_file($)
+{
+  my $spec_details = shift;
+
+  # Make a list of all the documentation files to include
+  my $exports = $spec_details->{EXPORTS};
+  my @source_files = ();
+  for (@$exports)
+  {
+    # @$_ => ordinal, call convention, exported name, implementation name, documented;
+    if (@$_[1] ne "forward" && @$_[1] ne "extern" && @$_[1] ne "stub" && @$_[1] ne "equate" &&
+        @$_[1] ne "variable" && @$_[1] ne "fake" && @$_[4] & 1)
+    {
+      # A documented function
+      push (@source_files,@$_[3]);
+    }
+  }
+
+  push (@source_files,@{$spec_details->{EXTRA_COMMENTS}});
+
+  @source_files = sort @source_files;
+
+  # create a new chapter for this dll
+  my $tmp_name = $opt_output_directory."/".$spec_details->{DLL_NAME}.".tmp";
+  open(OUTPUT,">$tmp_name") || die "Couldn't create $tmp_name\n";
+  print OUTPUT "<?xml version='1.0' encoding='UTF-8'?>\n<chapter>\n<title>$spec_details->{DLL_NAME}</title>\n";
+  output_close_api_file();
+
+  # Add the sorted documentation, cleaning up as we go
+  `cat $opt_output_directory/$spec_details->{DLL_NAME}.xml >>$tmp_name`;
+  for (@source_files)
+  {
+    `cat $opt_output_directory/$_.xml >>$tmp_name`;
+    `rm -f $opt_output_directory/$_.xml`;
+  }
+
+  # close the chapter, and overwite the dll source
+  open(OUTPUT,">>$tmp_name") || die "Couldn't create $tmp_name\n";
+  print OUTPUT "</chapter>\n";
+  close OUTPUT;
+  `mv $tmp_name $opt_output_directory/$spec_details->{DLL_NAME}.xml`;
 }
 
 # Write the html index files containing the function names
@@ -2154,6 +2259,7 @@ while(defined($_ = shift @ARGV))
       s/^S// && do { $opt_manual_section   = $_;          last; };
       /^Th$/ && do { $opt_output_format  = "h";           last; };
       /^Ts$/ && do { $opt_output_format  = "s";           last; };
+      /^Tx$/ && do { $opt_output_format  = "x";           last; };
       /^v$/  && do { $opt_verbose++;                      last; };
       /^e$/  && do { $opt_output_empty = 1;               last; };
       /^L$/  && do { last; };

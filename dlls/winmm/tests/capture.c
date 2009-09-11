@@ -148,7 +148,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
         return;
 
     win=NULL;
-    rc=waveInOpen(&win,device,pwfx,(DWORD)hevent,0,CALLBACK_EVENT|flags);
+    rc=waveInOpen(&win,device,pwfx,(DWORD_PTR)hevent,0,CALLBACK_EVENT|flags);
     /* Note: Win9x doesn't know WAVE_FORMAT_DIRECT */
     ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_BADDEVICEID ||
        rc==MMSYSERR_NOTENABLED || rc==MMSYSERR_NODRIVER ||
@@ -255,7 +255,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
         HWAVEOUT wout;
 
         trace("Playing back recorded sound\n");
-        rc=waveOutOpen(&wout,WAVE_MAPPER,pwfx,(DWORD)hevent,0,CALLBACK_EVENT);
+        rc=waveOutOpen(&wout,WAVE_MAPPER,pwfx,(DWORD_PTR)hevent,0,CALLBACK_EVENT);
         ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_BADDEVICEID ||
            rc==MMSYSERR_NOTENABLED || rc==MMSYSERR_NODRIVER ||
            rc==MMSYSERR_ALLOCATED ||
@@ -295,7 +295,7 @@ static void wave_in_test_deviceIn(int device, LPWAVEFORMATEX pwfx, DWORD format,
     CloseHandle(hevent);
 }
 
-static void wave_in_test_device(int device)
+static void wave_in_test_device(UINT_PTR device)
 {
     WAVEINCAPSA capsA;
     WAVEINCAPSW capsW;
@@ -359,9 +359,10 @@ static void wave_in_test_device(int device)
        dev_name(device),wave_in_error(rc));
 
     rc=waveInGetDevCapsW(device,&capsW,4);
-    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED,
-       "waveInGetDevCapsW(%s): MMSYSERR_NOERROR or MMSYSERR_NOTSUPPORTED "
-       "expected, got %s\n",dev_name(device),wave_in_error(rc));
+    ok(rc==MMSYSERR_NOERROR || rc==MMSYSERR_NOTSUPPORTED ||
+       rc==MMSYSERR_INVALPARAM, /* Vista, W2K8 */
+       "waveInGetDevCapsW(%s): unexpected return value %s\n",
+       dev_name(device),wave_in_error(rc));
 
     nameA=NULL;
     rc=waveInMessage((HWAVEIN)device, DRV_QUERYDEVICEINTERFACESIZE,
@@ -385,7 +386,8 @@ static void wave_in_test_device(int device)
         }
         HeapFree(GetProcessHeap(), 0, nameW);
     } else if (rc==MMSYSERR_NOTSUPPORTED) {
-        nameA=strdup("not supported");
+        nameA=HeapAlloc(GetProcessHeap(), 0, sizeof("not supported"));
+        strcpy(nameA, "not supported");
     }
 
     trace("  %s: \"%s\" (%s) %d.%d (%d:%d)\n",dev_name(device),capsA.szPname,

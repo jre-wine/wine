@@ -1,7 +1,7 @@
 /* -*- tab-width: 8; c-basic-offset: 4 -*- */
 
 /*
- * MMSYTEM functions
+ * MMSYSTEM functions
  *
  * Copyright 1993      Martin Ayotte
  *           1998-2003 Eric Pouech
@@ -1279,15 +1279,26 @@ UINT16 WINAPI waveOutPrepareHeader16(HWAVEOUT16 hWaveOut,      /* [in] */
 {
     LPWINE_MLD		wmld;
     LPWAVEHDR		lpWaveOutHdr = MapSL(lpsegWaveOutHdr);
+    UINT16		result;
 
     TRACE("(%04X, %08x, %u);\n", hWaveOut, lpsegWaveOutHdr, uSize);
 
     if (lpWaveOutHdr == NULL) return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
+        return MMSYSERR_INVALHANDLE;
 
-    return MMDRV_Message(wmld, WODM_PREPARE, lpsegWaveOutHdr, uSize, FALSE);
+    if ((result = MMDRV_Message(wmld, WODM_PREPARE, lpsegWaveOutHdr,
+                                uSize, FALSE)) != MMSYSERR_NOTSUPPORTED)
+        return result;
+
+    if (lpWaveOutHdr->dwFlags & WHDR_INQUEUE)
+        return WAVERR_STILLPLAYING;
+
+    lpWaveOutHdr->dwFlags |= WHDR_PREPARED;
+    lpWaveOutHdr->dwFlags &= ~WHDR_DONE;
+
+    return MMSYSERR_NOERROR;
 }
 
 /**************************************************************************
@@ -1872,7 +1883,7 @@ extern DWORD	WINAPI	GetProcessFlags(DWORD);
  */
 static  WINE_MMTHREAD*	WINMM_GetmmThread(HANDLE16 h)
 {
-    return (WINE_MMTHREAD*)MapSL( MAKESEGPTR(h, 0) );
+    return MapSL(MAKESEGPTR(h, 0));
 }
 
 DWORD WINAPI WINE_mmThreadEntryPoint(LPVOID);
@@ -2834,7 +2845,7 @@ HMMIO16 WINAPI mmioOpen16(LPSTR szFileName, MMIOINFO16* lpmmioinfo16,
  */
 MMRESULT16 WINAPI mmioClose16(HMMIO16 hmmio, UINT16 uFlags)
 {
-    MMIO_SetSegmentedBuffer(HMMIO_32(hmmio), (SEGPTR)NULL, TRUE);
+    MMIO_SetSegmentedBuffer(HMMIO_32(hmmio), 0, TRUE);
     return mmioClose(HMMIO_32(hmmio), uFlags);
 }
 
@@ -3195,7 +3206,7 @@ MMRESULT16 WINAPI joyReleaseCapture16(UINT16 wID)
  */
 MMRESULT16 WINAPI joySetCapture16(HWND16 hWnd, UINT16 wID, UINT16 wPeriod, BOOL16 bChanged)
 {
-    return joySetCapture16(hWnd, wID, wPeriod, bChanged);
+    return joySetCapture(HWND_32(hWnd), wID, wPeriod, bChanged);
 }
 
 /**************************************************************************
@@ -3203,7 +3214,7 @@ MMRESULT16 WINAPI joySetCapture16(HWND16 hWnd, UINT16 wID, UINT16 wPeriod, BOOL1
  */
 MMRESULT16 WINAPI joySetThreshold16(UINT16 wID, UINT16 wThreshold)
 {
-    return joySetThreshold16(wID,wThreshold);
+    return joySetThreshold(wID,wThreshold);
 }
 
 /**************************************************************************

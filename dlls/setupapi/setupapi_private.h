@@ -19,15 +19,31 @@
 #ifndef __SETUPAPI_PRIVATE_H
 #define __SETUPAPI_PRIVATE_H
 
+#include <windef.h>
+#include <winuser.h>
+
 #define COPYFILEDLGORD	1000
 #define SOURCESTRORD	500
 #define DESTSTRORD	501
 #define PROGRESSORD	502
 
+#define IDPROMPTFORDISK   1001
+#define IDC_FILENEEDED    503
+#define IDC_INFO          504
+#define IDC_COPYFROM      505
+#define IDC_PATH          506
+#define IDC_RUNDLG_BROWSE 507
+
+#define IDS_PROMPTDISK  508
+#define IDS_UNKNOWN     509
+#define IDS_COPYFROM    510
+#define IDS_INFO        511
 
 #define REG_INSTALLEDFILES "System\\CurrentControlSet\\Control\\InstalledFiles"
 #define REGPART_RENAME "\\Rename"
 #define REG_VERSIONCONFLICT "Software\\Microsoft\\VersionConflictManager"
+
+extern HINSTANCE SETUPAPI_hInstance;
 
 static inline WCHAR *strdupW( const WCHAR *str )
 {
@@ -70,8 +86,6 @@ struct inf_file;
 extern const WCHAR *DIRID_get_string( int dirid );
 extern unsigned int PARSER_string_substA( const struct inf_file *file, const WCHAR *text,
                                           char *buffer, unsigned int size );
-extern unsigned int PARSER_string_substW( const struct inf_file *file, const WCHAR *text,
-                                          WCHAR *buffer, unsigned int size );
 extern const WCHAR *PARSER_get_inf_filename( HINF hinf );
 extern WCHAR *PARSER_get_src_root( HINF hinf );
 extern WCHAR *PARSER_get_dest_dir( INFCONTEXT *context );

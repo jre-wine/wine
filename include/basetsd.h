@@ -59,7 +59,7 @@ extern "C" {
 #    define __int32 int
 #  endif
 #  ifndef __int64
-#    ifdef _WIN64
+#    if defined(_WIN64) && !defined(__MINGW64__)
 #      define __int64 long
 #    else
 #      define __int64 long long
@@ -116,6 +116,8 @@ typedef unsigned __int64 DWORD_PTR, *PDWORD_PTR;
 #define MININT_PTR 0x8000000000000000
 #define MAXUINT_PTR 0xffffffffffffffff
 
+typedef __int64 SHANDLE_PTR;
+typedef unsigned __int64 HANDLE_PTR;
 typedef int HALF_PTR, *PHALF_PTR;
 typedef unsigned int UHALF_PTR, *PUHALF_PTR;
 
@@ -209,6 +211,8 @@ typedef ULONG_PTR DWORD_PTR, *PDWORD_PTR;
 #define MININT_PTR 0x80000000
 #define MAXUINT_PTR 0xffffffff
 
+typedef long SHANDLE_PTR;
+typedef unsigned long HANDLE_PTR;
 typedef signed short HALF_PTR, *PHALF_PTR;
 typedef unsigned short UHALF_PTR, *PUHALF_PTR;
 
@@ -267,7 +271,7 @@ typedef ULONG_PTR KAFFINITY, *PKAFFINITY;
 # undef  WORDS_BIGENDIAN
 # undef  BITFIELDS_BIGENDIAN
 # undef  ALLOW_UNALIGNED_ACCESS
-#elif !defined(RC_INVOKED) && !defined(__WIDL__)
+#elif !defined(RC_INVOKED) && !defined(__WIDL__) && !defined(__midl)
 # error Unknown CPU architecture!
 #endif
 

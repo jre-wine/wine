@@ -57,7 +57,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(cursor);
 #define Button7Mask (1<<14)
 #endif
 
-#define NB_BUTTONS   7     /* Windows can handle 5 buttons and the wheel too */
+#define NB_BUTTONS   9     /* Windows can handle 5 buttons and the wheel too */
 
 static const UINT button_down_flags[NB_BUTTONS] =
 {
@@ -66,6 +66,8 @@ static const UINT button_down_flags[NB_BUTTONS] =
     MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_WHEEL,
     MOUSEEVENTF_WHEEL,
+    MOUSEEVENTF_XDOWN,  /* FIXME: horizontal wheel */
+    MOUSEEVENTF_XDOWN,
     MOUSEEVENTF_XDOWN,
     MOUSEEVENTF_XDOWN
 };
@@ -78,6 +80,8 @@ static const UINT button_up_flags[NB_BUTTONS] =
     0,
     0,
     MOUSEEVENTF_XUP,
+    MOUSEEVENTF_XUP,
+    MOUSEEVENTF_XUP,
     MOUSEEVENTF_XUP
 };
 
@@ -85,7 +89,7 @@ POINT cursor_pos;
 static DWORD last_time_modified;
 static RECT cursor_clip; /* Cursor clipping rect */
 
-BOOL X11DRV_SetCursorPos( INT x, INT y );
+BOOL CDECL X11DRV_SetCursorPos( INT x, INT y );
 
 
 /***********************************************************************
@@ -192,7 +196,7 @@ static void update_mouse_state( HWND hwnd, Window window, int x, int y, unsigned
     {
         SERVER_START_REQ( update_window_zorder )
         {
-            req->window      = hwnd;
+            req->window      = wine_server_user_handle( hwnd );
             req->rect.left   = pt->x;
             req->rect.top    = pt->y;
             req->rect.right  = pt->x + 1;
@@ -251,7 +255,7 @@ static void queue_raw_mouse_message( UINT message, HWND hwnd, DWORD x, DWORD y,
     SERVER_START_REQ( send_hardware_message )
     {
         req->id       = (injected_flags & LLMHF_INJECTED) ? 0 : GetCurrentThreadId();
-        req->win      = hwnd;
+        req->win      = wine_server_user_handle( hwnd );
         req->msg      = message;
         req->wparam   = MAKEWPARAM( get_key_state(), data );
         req->lparam   = 0;
@@ -395,6 +399,47 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
 }
 
 
+/***********************************************************************
+ *              check_alpha_zero
+ *
+ * Generally 32 bit bitmaps have an alpha channel which is used in favor of the
+ * AND mask.  However, if all pixels have alpha = 0x00, the bitmap is treated
+ * like one without alpha and the masks are used.  As soon as one pixel has
+ * alpha != 0x00, and the mask ignored as described in the docs.
+ *
+ * This is most likely for applications which create the bitmaps with
+ * CreateDIBitmap, which creates a device dependent bitmap, so the format that
+ * arrives when loading depends on the screen's bpp.  Apps that were written at
+ * 8 / 16 bpp times do not know about the 32 bit alpha, so they would get a
+ * completely transparent cursor on 32 bit displays.
+ *
+ * Non-32 bit bitmaps always use the AND mask.
+ */
+static BOOL check_alpha_zero(CURSORICONINFO *ptr, unsigned char *xor_bits)
+{
+    int x, y;
+    unsigned char *xor_ptr;
+
+    if (ptr->bBitsPerPixel == 32)
+    {
+        for (y = 0; y < ptr->nHeight; ++y)
+        {
+            xor_ptr = xor_bits + (y * ptr->nWidthBytes);
+            for (x = 0; x < ptr->nWidth; ++x)
+            {
+                if (xor_ptr[3] != 0x00)
+                {
+                    return FALSE;
+                }
+                xor_ptr+=4;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
+
 #ifdef SONAME_LIBXCURSOR
 
 /***********************************************************************
@@ -404,60 +449,48 @@ void X11DRV_send_mouse_input( HWND hwnd, DWORD flags, DWORD x, DWORD y,
  */
 static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
 {
-    int x, xmax;
-    int y, ymax;
-    int and_size, xor_size;
+    static const unsigned char convert_5to8[] =
+    {
+        0x00, 0x08, 0x10, 0x19, 0x21, 0x29, 0x31, 0x3a,
+        0x42, 0x4a, 0x52, 0x5a, 0x63, 0x6b, 0x73, 0x7b,
+        0x84, 0x8c, 0x94, 0x9c, 0xa5, 0xad, 0xb5, 0xbd,
+        0xc5, 0xce, 0xd6, 0xde, 0xe6, 0xef, 0xf7, 0xff,
+    };
+    static const unsigned char convert_6to8[] =
+    {
+        0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c,
+        0x20, 0x24, 0x28, 0x2d, 0x31, 0x35, 0x39, 0x3d,
+        0x41, 0x45, 0x49, 0x4d, 0x51, 0x55, 0x59, 0x5d,
+        0x61, 0x65, 0x69, 0x6d, 0x71, 0x75, 0x79, 0x7d,
+        0x82, 0x86, 0x8a, 0x8e, 0x92, 0x96, 0x9a, 0x9e,
+        0xa2, 0xa6, 0xaa, 0xae, 0xb2, 0xb6, 0xba, 0xbe,
+        0xc2, 0xc6, 0xca, 0xce, 0xd2, 0xd7, 0xdb, 0xdf,
+        0xe3, 0xe7, 0xeb, 0xef, 0xf3, 0xf7, 0xfb, 0xff,
+    };
+    int x;
+    int y;
+    int and_size;
     unsigned char *and_bits, *and_ptr, *xor_bits, *xor_ptr;
     int and_width_bytes, xor_width_bytes;
     XcursorPixel *pixel_ptr;
     XcursorImage *image;
-    BOOL alpha_zero = TRUE;
+    unsigned char tmp;
+    BOOL alpha_zero;
 
-    ymax = (ptr->nHeight > 32) ? 32 : ptr->nHeight;
-    xmax = (ptr->nWidth > 32) ? 32 : ptr->nWidth;
+    and_width_bytes = 2 * ((ptr->nWidth+15) / 16);
+    xor_width_bytes = ptr->nWidthBytes;
 
-    and_width_bytes = xmax / 8;
-    xor_width_bytes = and_width_bytes * ptr->bBitsPerPixel;
-
-    and_size = ptr->nWidth * ptr->nHeight / 8;
+    and_size = ptr->nHeight * and_width_bytes;
     and_ptr = and_bits = (unsigned char *)(ptr + 1);
 
-    xor_size = xor_width_bytes * ptr->nHeight;
     xor_ptr = xor_bits = and_ptr + and_size;
 
-    image = pXcursorImageCreate( xmax, ymax );
+    image = pXcursorImageCreate( ptr->nWidth, ptr->nHeight );
+    if (!image) return NULL;
+
     pixel_ptr = image->pixels;
 
-    /* Generally 32 bit bitmaps have an alpha channel which is used in favor
-     * of the AND mask. However, if all pixels have alpha = 0x00, the bitmap
-     * is treated like one without alpha and the masks are used. As soon as
-     * one pixel has alpha != 0x00, and the mask ignored as described in the
-     * docs.
-     *
-     * This is most likely for applications which create the bitmaps with
-     * CreateDIBitmap, which creates a device dependent bitmap, so the format
-     * that arrives when loading depends on the screen's bpp. Apps that were
-     * written at 8 / 16 bpp times do not know about the 32 bit alpha, so
-     * they would get a completely transparent cursor on 32 bit displays.
-     *
-     * Non-32 bit bitmaps always use the AND mask
-     */
-    if(ptr->bBitsPerPixel == 32)
-    {
-        for (y = 0; alpha_zero && y < ymax; ++y)
-        {
-            xor_ptr = xor_bits + (y * xor_width_bytes);
-            for (x = 0; x < xmax; ++x)
-            {
-                if (xor_ptr[3] != 0x00)
-                {
-                    alpha_zero = FALSE;
-                    break;
-                }
-                xor_ptr+=4;
-            }
-        }
-    }
+    alpha_zero = check_alpha_zero(ptr, xor_bits);
 
     /* On windows, to calculate the color for a pixel, first an AND is done
      * with the background and the "and" bitmap, then an XOR with the "xor"
@@ -473,12 +506,12 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
      * the "xor" data to the alpha channel, and xor the color with either
      * black or white.
      */
-    for (y = 0; y < ymax; ++y)
+    for (y = 0; y < ptr->nHeight; ++y)
     {
         and_ptr = and_bits + (y * and_width_bytes);
         xor_ptr = xor_bits + (y * xor_width_bytes);
 
-        for (x = 0; x < xmax; ++x)
+        for (x = 0; x < ptr->nWidth; ++x)
         {
             /* Xcursor pixel data is in ARGB format, with A in the high byte */
             switch (ptr->bBitsPerPixel)
@@ -500,11 +533,12 @@ static XcursorImage *create_cursor_image( CURSORICONINFO *ptr )
 
                 case 16:
                     /* BGR, 5 red, 6 green, 5 blue */
-                    *pixel_ptr = *xor_ptr * 0x1f;
-                    *pixel_ptr |= (*xor_ptr & 0xe0) << 3;
-                    ++xor_ptr;
-                    *pixel_ptr |= (*xor_ptr & 0x07) << 11;
-                    *pixel_ptr |= (*xor_ptr & 0xf8) << 13;
+                    /* [gggbbbbb][rrrrrggg] -> [xxxxxxxx][rrrrrrrr][gggggggg][bbbbbbbb] */
+                    *pixel_ptr = convert_5to8[*xor_ptr & 0x1f];
+                    tmp = (*xor_ptr++ & 0xe0) >> 5;
+                    tmp |= (*xor_ptr & 0x07) << 3;
+                    *pixel_ptr |= convert_6to8[tmp] << 16;
+                    *pixel_ptr |= convert_5to8[*xor_ptr & 0xf8] << 24;
                     break;
 
                 case 1:
@@ -598,6 +632,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
     Cursor cursor = None;
     POINT hotspot;
     char *bitMask32 = NULL;
+    BOOL alpha_zero = TRUE;
 
 #ifdef SONAME_LIBXCURSOR
     if (pXcursorImageLoadCursor) return create_xcursor_cursor( display, ptr );
@@ -664,7 +699,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
             int     rbits, gbits, bbits, red, green, blue;
             int     rfg, gfg, bfg, rbg, gbg, bbg;
             int     rscale, gscale, bscale;
-            int     x, y, xmax, ymax, bitIndex, byteIndex, xorIndex;
+            int     x, y, xmax, ymax, byteIndex, xorIndex;
             unsigned char *theMask, *theImage, theChar;
             int     threshold, fgBits, bgBits, bitShifted;
             BYTE    pXorBits[128];   /* Up to 32x32 icons */
@@ -703,7 +738,6 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
              */
             theImage = &theMask[ptr->nWidth/8 * ptr->nHeight];
             rfg = gfg = bfg = rbg = gbg = bbg = 0;
-            bitIndex = 0;
             byteIndex = 0;
             xorIndex = 0;
             fgBits = 0;
@@ -714,6 +748,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
                   ptr->nWidth, ptr->nHeight);
             }
             ymax = (ptr->nHeight > 32) ? 32 : ptr->nHeight;
+            alpha_zero = check_alpha_zero(ptr, theImage);
 
             memset(pXorBits, 0, 128);
             for (y=0; y<ymax; y++)
@@ -822,7 +857,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
         /* Now create the 2 pixmaps for bits and mask */
 
         pixmapBits = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
-        if (ptr->bBitsPerPixel != 32)
+        if (alpha_zero)
         {
             pixmapMaskInv = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
             pixmapMask = XCreatePixmap( display, root_window, ptr->nWidth, ptr->nHeight, 1 );
@@ -882,7 +917,6 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
             pixmapMask = XCreateBitmapFromData( display, root_window,
                                                 bitMask32, ptr->nWidth,
                                                 ptr->nHeight );
-            HeapFree( GetProcessHeap(), 0, bitMask32 );
         }
 
         /* Make sure hotspot is valid */
@@ -905,6 +939,7 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
         if (pixmapBits) XFreePixmap( display, pixmapBits );
         if (pixmapMask) XFreePixmap( display, pixmapMask );
         if (pixmapMaskInv) XFreePixmap( display, pixmapMaskInv );
+        HeapFree( GetProcessHeap(), 0, bitMask32 );
         XFreeGC( display, gc );
     }
     return cursor;
@@ -914,9 +949,9 @@ static Cursor create_cursor( Display *display, CURSORICONINFO *ptr )
 /***********************************************************************
  *		SetCursor (X11DRV.@)
  */
-void X11DRV_SetCursor( CURSORICONINFO *lpCursor )
+void CDECL X11DRV_SetCursor( CURSORICONINFO *lpCursor )
 {
-    struct x11drv_thread_data *data = x11drv_thread_data();
+    struct x11drv_thread_data *data = x11drv_init_thread_data();
     Cursor cursor;
 
     if (lpCursor)
@@ -946,9 +981,9 @@ void X11DRV_SetCursor( CURSORICONINFO *lpCursor )
 /***********************************************************************
  *		SetCursorPos (X11DRV.@)
  */
-BOOL X11DRV_SetCursorPos( INT x, INT y )
+BOOL CDECL X11DRV_SetCursorPos( INT x, INT y )
 {
-    Display *display = thread_display();
+    Display *display = thread_init_display();
     POINT pt;
 
     TRACE( "warping to (%d,%d)\n", x, y );
@@ -975,9 +1010,9 @@ BOOL X11DRV_SetCursorPos( INT x, INT y )
 /***********************************************************************
  *		GetCursorPos (X11DRV.@)
  */
-BOOL X11DRV_GetCursorPos(LPPOINT pos)
+BOOL CDECL X11DRV_GetCursorPos(LPPOINT pos)
 {
-    Display *display = thread_display();
+    Display *display = thread_init_display();
     Window root, child;
     int rootX, rootY, winX, winY;
     unsigned int xstate;
@@ -1005,7 +1040,7 @@ BOOL X11DRV_GetCursorPos(LPPOINT pos)
  *
  * Set the cursor clipping rectangle.
  */
-BOOL X11DRV_ClipCursor( LPCRECT clip )
+BOOL CDECL X11DRV_ClipCursor( LPCRECT clip )
 {
     if (!IntersectRect( &cursor_clip, &virtual_screen_rect, clip ))
         cursor_clip = virtual_screen_rect;
@@ -1040,6 +1075,12 @@ void X11DRV_ButtonPress( HWND hwnd, XEvent *xev )
     case 6:
         wData = XBUTTON2;
         break;
+    case 7:
+        wData = XBUTTON1;
+        break;
+    case 8:
+        wData = XBUTTON2;
+        break;
     }
 
     update_mouse_state( hwnd, event->window, event->x, event->y, event->state, &pt );
@@ -1068,6 +1109,12 @@ void X11DRV_ButtonRelease( HWND hwnd, XEvent *xev )
         wData = XBUTTON1;
         break;
     case 6:
+        wData = XBUTTON2;
+        break;
+    case 7:
+        wData = XBUTTON1;
+        break;
+    case 8:
         wData = XBUTTON2;
         break;
     }

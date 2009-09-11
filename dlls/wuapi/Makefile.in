@@ -1,0 +1,20 @@
+EXTRADEFS = -DCOM_NO_WINDOWS_H
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = wuapi.dll
+IMPORTS   = uuid ole32 advapi32 kernel32
+
+C_SRCS = \
+	downloader.c \
+	installer.c \
+	main.c \
+	regsvr.c \
+	searcher.c \
+	session.c \
+	updates.c
+
+@MAKE_DLL_RULES@
+
+@DEPENDENCIES@  # everything below this line is overwritten by make depend

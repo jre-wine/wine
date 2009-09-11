@@ -3,7 +3,7 @@
  *
  * Copyright 1995 Martin von Loewis
  * Copyright 1998 David Lee Lambert
- * Copyright 2000 Julio César Gázquez
+ * Copyright 2000 Julio CÃ©sar GÃ¡zquez
  * Copyright 2002 Alexandre Julliard for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
@@ -241,8 +241,8 @@ static const union cptable *get_codepage_table( unsigned int codepage )
  */
 static int charset_cmp( const void *name, const void *entry )
 {
-    const struct charset_entry *charset = (const struct charset_entry *)entry;
-    return strcasecmp( (const char *)name, charset->charset_name );
+    const struct charset_entry *charset = entry;
+    return strcasecmp( name, charset->charset_name );
 }
 
 /***********************************************************************
@@ -621,7 +621,7 @@ static BOOL locale_update_registry( HKEY hkey, const WCHAR *name, LCID lcid,
 
     RtlInitUnicodeString( &nameW, name );
     count = sizeof(bufferW);
-    if (!NtQueryValueKey(hkey, &nameW, KeyValuePartialInformation, (LPBYTE)bufferW, count, &count))
+    if (!NtQueryValueKey(hkey, &nameW, KeyValuePartialInformation, bufferW, count, &count))
     {
         const KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)bufferW;
         LPCWSTR text = (LPCWSTR)info->Data;
@@ -673,7 +673,7 @@ void LOCALE_InitRegistry(void)
         { maccpW, LOCALE_IDEFAULTMACCODEPAGE }
     };
     static const LCTYPE lc_messages_values[] = {
-      LOCALE_SLANGUAGE,
+      LOCALE_SABBREVLANGNAME,
       LOCALE_SCOUNTRY,
       LOCALE_SLIST };
     static const LCTYPE lc_monetary_values[] = {
@@ -1051,7 +1051,7 @@ static const WCHAR *get_locale_value_name( DWORD lctype )
     case LOCALE_ILDATE:           return iLDateW;
     case LOCALE_ITLZERO:          return iTLZeroW;
     case LOCALE_SCOUNTRY:         return sCountryW;
-    case LOCALE_SLANGUAGE:        return sLanguageW;
+    case LOCALE_SABBREVLANGNAME:  return sLanguageW;
 
     /* The following are used in XP and later */
     case LOCALE_IDIGITSUBSTITUTION: return NumShapeW;
@@ -2371,6 +2371,8 @@ INT WINAPI LCMapStringW(LCID lcid, DWORD flags, LPCWSTR src, INT srclen,
         ret = wine_get_sortkey(flags, src, srclen, (char *)dst, dstlen);
         if (ret == 0)
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        else
+            ret++;
         return ret;
     }
 
@@ -2510,6 +2512,8 @@ INT WINAPI LCMapStringA(LCID lcid, DWORD flags, LPCSTR src, INT srclen,
         ret = wine_get_sortkey(flags, srcW, srclenW, dst, dstlen);
         if (ret == 0)
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        else
+            ret++;
         goto map_string_exit;
     }
 
@@ -2857,8 +2861,8 @@ int WINAPI lstrcmpiW(LPCWSTR str1, LPCWSTR str2)
  */
 void LOCALE_Init(void)
 {
-    extern void __wine_init_codepages( const union cptable *ansi_cp, const union cptable *oem_cp,
-                                       const union cptable *unix_cp );
+    extern void CDECL __wine_init_codepages( const union cptable *ansi_cp, const union cptable *oem_cp,
+                                             const union cptable *unix_cp );
 
     UINT ansi_cp = 1252, oem_cp = 437, mac_cp = 10000, unix_cp;
 
@@ -2867,12 +2871,15 @@ void LOCALE_Init(void)
     CFArrayRef preferred_locales, all_locales;
     CFStringRef user_language_string_ref = NULL;
     char user_locale[50];
+    char* p;
 
     CFLocaleRef user_locale_ref = CFLocaleCopyCurrent();
     CFStringRef user_locale_string_ref = CFLocaleGetIdentifier( user_locale_ref );
 
     CFStringGetCString( user_locale_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
     CFRelease( user_locale_ref );
+    /* Strip modifiers because setlocale() can't parse them. */
+    if ((p = strchr( user_locale, '@' ))) *p = 0;
     if (!strchr( user_locale, '.' )) strcat( user_locale, ".UTF-8" );
     unix_cp = CP_UTF8;  /* default to utf-8 even if we don't get a valid locale */
     setenv( "LANG", user_locale, 0 );
@@ -3255,7 +3262,7 @@ BOOL WINAPI IsValidLanguageGroup(LGRPID lgrpid, DWORD dwFlags)
 
         sprintfW( szValueName, szFormat, lgrpid );
 
-        if (NLS_RegGetDword( hKey, szValueName, (LPDWORD)&szValue ))
+        if (NLS_RegGetDword( hKey, szValueName, (LPDWORD)szValue ))
         {
             bSupported = TRUE;
 
@@ -3531,7 +3538,7 @@ GEOID WINAPI GetUserGeoID( GEOCLASS GeoClass )
         if ((hSubkey = NLS_RegOpenKey(hkey, geoW)))
         {
             if((NtQueryValueKey(hSubkey, &keyW, KeyValuePartialInformation,
-                                (LPBYTE)bufferW, count, &count) == STATUS_SUCCESS ) && info->DataLength)
+                                bufferW, count, &count) == STATUS_SUCCESS ) && info->DataLength)
                 ret = strtolW((LPCWSTR)info->Data, &end, 10);
         }
         break;

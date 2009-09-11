@@ -50,39 +50,101 @@ WINE_DEFAULT_DEBUG_CHANNEL(int);
 
 static struct {
     WORD	countmax;
-    BOOL16	byte_toggle; /* if TRUE, then hi byte has already been written */
     WORD	latch;
-    BOOL16	latched;
     BYTE	ctrlbyte_ch;
-    WORD	oldval;
+    BYTE	flags;
+    LONG64	start_time;
 } tmr_8253[3] = {
-    {0xFFFF,	FALSE,	0,	FALSE,	0x36,	0},
-    {0x0012,	FALSE,	0,	FALSE,	0x74,	0},
-    {0x0001,	FALSE,	0,	FALSE,	0xB6,	0},
+    {0xFFFF,	0,	0x36,	0,	0},
+    {0x0012,	0,	0x74,	0,	0},
+    {0x0001,	0,	0xB6,	0,	0},
 };
+/* two byte read in progress */
+#define TMR_RTOGGLE 0x01
+/* two byte write in progress */
+#define TMR_WTOGGLE 0x02
+/* latch contains data */
+#define TMR_LATCHED 0x04
+/* counter is in update phase */
+#define TMR_UPDATE  0x08
+/* readback status request */
+#define TMR_STATUS  0x10
 
-static int dummy_ctr = 0;
 
 static BYTE parport_8255[4] = {0x4f, 0x20, 0xff, 0xff};
 
 static BYTE cmosaddress;
 
-/* if you change anything here, use IO_FixCMOSCheckSum below to compute
- * the checksum and put the right values in.
- */
+static int cmos_image_initialized = 0;
+
 static BYTE cmosimage[64] =
 {
-  0x27, 0x34, 0x31, 0x47, 0x16, 0x15, 0x00, 0x01,
-  0x04, 0x94, 0x26, 0x02, 0x50, 0x80, 0x00, 0x00,
-  0x40, 0xb1, 0x00, 0x9c, 0x01, 0x80, 0x02, 0x00,
-  0x1c, 0x00, 0x00, 0xad, 0x02, 0x10, 0x00, 0x00,
-  0x08, 0x00, 0x00, 0x26, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0x03, 0x19,  /* last 2 bytes are checksum */
-  0x00, 0x1c, 0x19, 0x81, 0x00, 0x0e, 0x00, 0x80,
-  0x1b, 0x7b, 0x21, 0x00, 0x00, 0x00, 0x05, 0x5f
+  0x27, /* 0x00: seconds */
+  0x34, /* 0X01: seconds alarm */
+  0x31, /* 0x02: minutes */
+  0x47, /* 0x03: minutes alarm */
+  0x16, /* 0x04: hour */
+  0x15, /* 0x05: hour alarm */
+  0x00, /* 0x06: week day */
+  0x01, /* 0x07: month day */
+  0x04, /* 0x08: month */
+  0x94, /* 0x09: year */
+  0x26, /* 0x0a: state A */
+  0x02, /* 0x0b: state B */
+  0x50, /* 0x0c: state C */
+  0x80, /* 0x0d: state D */
+  0x00, /* 0x0e: state diagnostic */
+  0x00, /* 0x0f: state state shutdown */
+  0x40, /* 0x10: floppy type */
+  0xb1, /* 0x11: reserved */
+  0x00, /* 0x12: HD type */
+  0x9c, /* 0x13: reserved */
+  0x01, /* 0x14: equipment */
+  0x80, /* 0x15: low base memory */
+  0x02, /* 0x16: high base memory (0x280 => 640KB) */
+  0x00, /* 0x17: low extended memory */
+  0x3b, /* 0x18: high extended memory (0x3b00 => 15MB) */
+  0x00, /* 0x19: HD 1 extended type byte */
+  0x00, /* 0x1a: HD 2 extended type byte */
+  0xad, /* 0x1b: reserved */
+  0x02, /* 0x1c: reserved */
+  0x10, /* 0x1d: reserved */
+  0x00, /* 0x1e: reserved */
+  0x00, /* 0x1f: installed features */
+  0x08, /* 0x20: HD 1 low cylinder number */
+  0x00, /* 0x21: HD 1 high cylinder number */
+  0x00, /* 0x22: HD 1 heads */
+  0x26, /* 0x23: HD 1 low pre-compensation start */
+  0x00, /* 0x24: HD 1 high pre-compensation start */
+  0x00, /* 0x25: HD 1 low landing zone */
+  0x00, /* 0x26: HD 1 high landing zone */
+  0x00, /* 0x27: HD 1 sectors */
+  0x00, /* 0x28: options 1 */
+  0x00, /* 0x29: reserved */
+  0x00, /* 0x2a: reserved */
+  0x00, /* 0x2b: options 2 */
+  0x00, /* 0x2c: options 3 */
+  0x3f, /* 0x2d: reserved  */
+  0xcc, /* 0x2e: low CMOS ram checksum (computed automatically) */
+  0xcc, /* 0x2f: high CMOS ram checksum (computed automatically) */
+  0x00, /* 0x30: low extended memory byte */
+  0x1c, /* 0x31: high extended memory byte */
+  0x19, /* 0x32: century byte */
+  0x81, /* 0x33: setup information */
+  0x00, /* 0x34: CPU speed */
+  0x0e, /* 0x35: HD 2 low cylinder number */
+  0x00, /* 0x36: HD 2 high cylinder number */
+  0x80, /* 0x37: HD 2 heads */
+  0x1b, /* 0x38: HD 2 low pre-compensation start */
+  0x7b, /* 0x39: HD 2 high pre-compensation start */
+  0x21, /* 0x3a: HD 2 low landing zone */
+  0x00, /* 0x3b: HD 2 high landing zone */
+  0x00, /* 0x3c: HD 2 sectors */
+  0x00, /* 0x3d: reserved */
+  0x05, /* 0x3e: reserved */
+  0x5f  /* 0x3f: reserved */
 };
 
-#if 0
 static void IO_FixCMOSCheckSum(void)
 {
 	WORD sum = 0;
@@ -92,9 +154,8 @@ static void IO_FixCMOSCheckSum(void)
 		sum += cmosimage[i];
 	cmosimage[0x2e] = sum >> 8; /* yes, this IS hi byte !! */
 	cmosimage[0x2f] = sum & 0xff;
-	MESSAGE("calculated hi %02x, lo %02x\n", cmosimage[0x2e], cmosimage[0x2f]);
+	TRACE("calculated hi %02x, lo %02x\n", cmosimage[0x2e], cmosimage[0x2f]);
 }
-#endif
 
 #ifdef DIRECT_IO_ACCESS
 
@@ -112,11 +173,26 @@ static int do_pp_port_access = -1; /* -1: uninitialized, 1: not available
 				       0: available);*/
 #endif
 
-static void set_timer_maxval(unsigned timer, unsigned maxval)
+#define BCD2BIN(a) \
+((a)%10 + ((a)>>4)%10*10 + ((a)>>8)%10*100 + ((a)>>12)%10*1000)
+#define BIN2BCD(a) \
+((a)%10 | (a)/10%10<<4 | (a)/100%10<<8 | (a)/1000%10<<12)
+
+
+static void set_timer(unsigned timer)
 {
+    DWORD val = tmr_8253[timer].countmax;
+
+    if (tmr_8253[timer].ctrlbyte_ch & 0x01)
+        val = BCD2BIN(val);
+
+    tmr_8253[timer].flags &= ~TMR_UPDATE;
+    if (!QueryPerformanceCounter((LARGE_INTEGER*)&tmr_8253[timer].start_time))
+        WARN("QueryPerformanceCounter should not fail!\n");
+
     switch (timer) {
         case 0: /* System timer counter divisor */
-            DOSVM_SetTimer(maxval);
+            DOSVM_SetTimer(val);
             break;
         case 1: /* RAM refresh */
             FIXME("RAM refresh counter handling not implemented !\n");
@@ -125,11 +201,57 @@ static void set_timer_maxval(unsigned timer, unsigned maxval)
             /* speaker on ? */
             if ((parport_8255[1] & 3) == 3)
             {
-                TRACE("Beep (freq: %d) !\n", 1193180 / maxval );
-                Beep(1193180 / maxval, 20);
+                TRACE("Beep (freq: %d) !\n", 1193180 / val);
+                Beep(1193180 / val, 20);
             }
             break;
     }
+}
+
+
+static WORD get_timer_val(unsigned timer)
+{
+    LARGE_INTEGER time;
+    WORD maxval, val = tmr_8253[timer].countmax;
+    BYTE mode = tmr_8253[timer].ctrlbyte_ch >> 1 & 0x07;
+
+    /* This is not strictly correct. In most cases the old countdown should
+     * finish normally (by counting down to 0) or halt and not jump to 0.
+     * But we are calculating and not countig, so this seems to be a good
+     * solution and should work well with most (all?) programs
+     */
+    if (tmr_8253[timer].flags & TMR_UPDATE)
+        return 0;
+
+    if (!QueryPerformanceCounter(&time))
+        WARN("QueryPerformanceCounter should not fail!\n");
+
+    time.QuadPart -= tmr_8253[timer].start_time;
+    if (tmr_8253[timer].ctrlbyte_ch & 0x01)
+        val = BCD2BIN(val);
+
+    switch ( mode )
+    {
+        case 0:
+        case 1:
+        case 4:
+        case 5:
+            maxval = tmr_8253[timer].ctrlbyte_ch & 0x01 ? 9999 : 0xFFFF;
+            break;
+        case 2:
+        case 3:
+            maxval = val;
+            break;
+        default:
+            ERR("Invalid PIT mode: %d\n", mode);
+            return 0;
+    }
+
+    val = (val - time.QuadPart) % (maxval + 1);
+    if (tmr_8253[timer].ctrlbyte_ch & 0x01)
+        val = BIN2BCD(val);
+
+    return val;
 }
 
 
@@ -348,24 +470,22 @@ DWORD WINAPI DOSVM_inport( int port, int size )
     case 0x42:
         {
             BYTE chan = port & 3;
-            WORD tempval = 0;
-            if (tmr_8253[chan].latched)
-                tempval = tmr_8253[chan].latch;
-            else
-            {
-                dummy_ctr -= 1 + (int)(10.0 * rand() / (RAND_MAX + 1.0));
-                if (chan == 0) /* System timer counter divisor */
-                {
-                    /* FIXME: DOSVM_GetTimer() returns quite rigid values */
-                    tempval = dummy_ctr + (WORD)DOSVM_GetTimer();
-                }
-                else
-                {
-                    /* FIXME: intelligent hardware timer emulation needed */
-                    tempval = dummy_ctr;
-                }
-            }
+            WORD tempval = tmr_8253[chan].flags & TMR_LATCHED
+                ? tmr_8253[chan].latch : get_timer_val(chan);
 
+            if (tmr_8253[chan].flags & TMR_STATUS)
+            {
+                WARN("Read-back status\n");
+                /* We differ slightly from the spec:
+                 * - TMR_UPDATE is already set with the first write
+                 *   of a two byte counter update
+                 * - 0x80 should be set if OUT signal is 1 (high)
+                 */
+                tmr_8253[chan].flags &= ~TMR_STATUS;
+                res = (tmr_8253[chan].ctrlbyte_ch & 0x3F) |
+                    (tmr_8253[chan].flags & TMR_UPDATE ? 0x40 : 0x00);
+                break;
+            }
             switch ((tmr_8253[chan].ctrlbyte_ch & 0x30) >> 4)
             {
             case 0:
@@ -373,11 +493,11 @@ DWORD WINAPI DOSVM_inport( int port, int size )
                 break;
             case 1: /* read lo byte */
                 res = (BYTE)tempval;
-                tmr_8253[chan].latched = FALSE;
+                tmr_8253[chan].flags &= ~TMR_LATCHED;
                 break;
             case 3: /* read lo byte, then hi byte */
-                tmr_8253[chan].byte_toggle ^= 1; /* toggle */
-                if (tmr_8253[chan].byte_toggle)
+                tmr_8253[chan].flags ^= TMR_RTOGGLE; /* toggle */
+                if (tmr_8253[chan].flags & TMR_RTOGGLE)
                 {
                     res = (BYTE)tempval;
                     break;
@@ -385,7 +505,7 @@ DWORD WINAPI DOSVM_inport( int port, int size )
                 /* else [fall through if read hi byte !] */
             case 2: /* read hi byte */
                 res = (BYTE)(tempval >> 8);
-                tmr_8253[chan].latched = FALSE;
+                tmr_8253[chan].flags &= ~TMR_LATCHED;
                 break;
             }
         }
@@ -403,6 +523,11 @@ DWORD WINAPI DOSVM_inport( int port, int size )
         res = (DWORD)cmosaddress;
         break;
     case 0x71:
+        if (!cmos_image_initialized)
+        {
+            IO_FixCMOSCheckSum();
+            cmos_image_initialized = 1;
+        }
         res = (DWORD)cmosimage[cmosaddress & 0x3f];
         break;
     case 0x200:
@@ -414,29 +539,32 @@ DWORD WINAPI DOSVM_inport( int port, int size )
     case 0x22e:
         res = (DWORD)SB_ioport_in( port );
 	break;
-    case 0x3ba:
-    case 0x3c0:
-    case 0x3c1:
-    case 0x3c2:
-    case 0x3c3:
-    case 0x3c4:
-    case 0x3c5:
+    /* VGA read registers */
+    case 0x3b4:  /* CRT Controller Register - Index (MDA) */
+    case 0x3b5:  /* CRT Controller Register - Other (MDA) */
+    case 0x3ba:  /* General Register - Input status 1 (MDA) */
+    case 0x3c0:  /* Attribute Controller - Address */
+    case 0x3c1:  /* Attribute Controller - Other */
+    case 0x3c2:  /* General Register - Input status 0 */
+    case 0x3c3:  /* General Register - Video subsystem enable */
+    case 0x3c4:  /* Sequencer Register - Address */
+    case 0x3c5:  /* Sequencer Register - Other */
     case 0x3c6:
-    case 0x3c7:
+    case 0x3c7:  /* General Register -  DAC State */
     case 0x3c8:
     case 0x3c9:
-    case 0x3ca:
+    case 0x3ca:  /* General Register - Feature control */
     case 0x3cb:
-    case 0x3cc:
+    case 0x3cc:  /* General Register - Misc output */
     case 0x3cd:
-    case 0x3ce:
-    case 0x3cf:
+    case 0x3ce:  /* Graphics Controller Register - Address */
+    case 0x3cf:  /* Graphics Controller Register - Other */
     case 0x3d0:
     case 0x3d1:
     case 0x3d2:
     case 0x3d3:
-    case 0x3d4:
-    case 0x3d5:
+    case 0x3d4:  /* CRT Controller Register - Index (CGA) */
+    case 0x3d5:  /* CRT Controller Register - Other (CGA) */
     case 0x3d6:
     case 0x3d7:
     case 0x3d8:
@@ -447,8 +575,8 @@ DWORD WINAPI DOSVM_inport( int port, int size )
     case 0x3dd:
     case 0x3de:
     case 0x3df:
-        if(size > 1)
-           FIXME("Trying to read more than one byte from VGA!\n");
+        if (size > 1)
+            FIXME("Trying to read more than one byte from VGA!\n");
         res = (DWORD)VGA_ioport_in( port );
         break;
     case 0x00:
@@ -540,10 +668,7 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
         {
             BYTE chan = port & 3;
 
-            /* we need to get the oldval before any lo/hi byte change has been made */
-            if (((tmr_8253[chan].ctrlbyte_ch & 0x30) != 0x30) ||
-                !tmr_8253[chan].byte_toggle)
-                tmr_8253[chan].oldval = tmr_8253[chan].countmax;
+            tmr_8253[chan].flags |= TMR_UPDATE;
             switch ((tmr_8253[chan].ctrlbyte_ch & 0x30) >> 4)
             {
             case 0:
@@ -553,8 +678,8 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
                     (tmr_8253[chan].countmax & 0xff00) | (BYTE)value;
                 break;
             case 3: /* write lo byte, then hi byte */
-                tmr_8253[chan].byte_toggle ^= TRUE; /* toggle */
-                if (tmr_8253[chan].byte_toggle)
+                tmr_8253[chan].flags ^= TMR_WTOGGLE; /* toggle */
+                if (tmr_8253[chan].flags & TMR_WTOGGLE)
                 {
                     tmr_8253[chan].countmax =
                         (tmr_8253[chan].countmax & 0xff00) | (BYTE)value;
@@ -566,12 +691,10 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
                     (tmr_8253[chan].countmax & 0x00ff) | ((BYTE)value << 8);
                 break;
             }
-            /* if programming is finished and value has changed
-               then update to new value */
-            if ((((tmr_8253[chan].ctrlbyte_ch & 0x30) != 0x30) ||
-                 !tmr_8253[chan].byte_toggle) &&
-                (tmr_8253[chan].countmax != tmr_8253[chan].oldval))
-                set_timer_maxval(chan, tmr_8253[chan].countmax);
+            /* if programming is finished, update to new value */
+            if ((tmr_8253[chan].ctrlbyte_ch & 0x30) &&
+                !(tmr_8253[chan].flags & TMR_WTOGGLE))
+                set_timer(chan);
         }
         break;
     case 0x43:
@@ -580,28 +703,51 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
            /* ctrl byte for specific timer channel */
            if (chan == 3)
            {
-               FIXME("8254 timer readback not implemented yet\n");
+               if ( !(value & 0x20) )
+               {
+                   if (value & 0x02 && !(tmr_8253[0].flags & TMR_LATCHED))
+                   {
+                       tmr_8253[0].flags |= TMR_LATCHED;
+                       tmr_8253[0].latch = get_timer_val(0);
+                   }
+                   if (value & 0x04 && !(tmr_8253[1].flags & TMR_LATCHED))
+                   {
+                       tmr_8253[1].flags |= TMR_LATCHED;
+                       tmr_8253[1].latch = get_timer_val(1);
+                   }
+                   if (value & 0x08 && !(tmr_8253[2].flags & TMR_LATCHED))
+                   {
+                       tmr_8253[2].flags |= TMR_LATCHED;
+                       tmr_8253[2].latch = get_timer_val(2);
+                   }
+               }
+
+               if ( !(value & 0x10) )
+               {
+                   if (value & 0x02)
+                       tmr_8253[0].flags |= TMR_STATUS;
+                   if (value & 0x04)
+                       tmr_8253[1].flags |= TMR_STATUS;
+                   if (value & 0x08)
+                       tmr_8253[2].flags |= TMR_STATUS;
+               }
                break;
            }
            switch (((BYTE)value & 0x30) >> 4)
            {
            case 0:	/* latch timer */
-               tmr_8253[chan].latched = TRUE;
-               dummy_ctr -= 1 + (int)(10.0 * rand() / (RAND_MAX + 1.0));
-               if (chan == 0) /* System timer divisor */
-                   tmr_8253[chan].latch = dummy_ctr + (WORD)DOSVM_GetTimer();
-               else
+               if ( !(tmr_8253[chan].flags & TMR_LATCHED) )
                {
-                   /* FIXME: intelligent hardware timer emulation needed */
-                   tmr_8253[chan].latch = dummy_ctr;
+                   tmr_8253[chan].flags |= TMR_LATCHED;
+                   tmr_8253[chan].latch = get_timer_val(chan);
                }
                break;
-           case 3:	/* write lo byte, then hi byte */
-               tmr_8253[chan].byte_toggle = FALSE; /* init */
-               /* fall through */
            case 1:	/* write lo byte only */
            case 2:	/* write hi byte only */
+           case 3:	/* write lo byte, then hi byte */
                tmr_8253[chan].ctrlbyte_ch = (BYTE)value;
+               tmr_8253[chan].countmax = 0;
+               tmr_8253[chan].flags = TMR_UPDATE;
                break;
            }
        }
@@ -618,18 +764,27 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
         cmosaddress = (BYTE)value & 0x7f;
         break;
     case 0x71:
+        if (!cmos_image_initialized)
+        {
+            IO_FixCMOSCheckSum();
+            cmos_image_initialized = 1;
+        }
         cmosimage[cmosaddress & 0x3f] = (BYTE)value;
         break;
     case 0x226:
     case 0x22c:
         SB_ioport_out( port, (BYTE)value );
         break;
-    case 0x3c0:
+    /* VGA Write registers */
+    case 0x3b4:  /* CRT Controller Register - Index (MDA) */
+    case 0x3b5:  /* CRT Controller Register - Other (MDA) */
+    case 0x3ba:  /* General Register - Feature Control */
+    case 0x3c0:  /* Attribute Controller - Address/Other */
     case 0x3c1:
-    case 0x3c2:
-    case 0x3c3:
-    case 0x3c4:
-    case 0x3c5:
+    case 0x3c2:  /* General Register - Misc output */
+    case 0x3c3:  /* General Register - Video subsystem enable */
+    case 0x3c4:  /* Sequencer Register - Address */
+    case 0x3c5:  /* Sequencer Register - Other */
     case 0x3c6:
     case 0x3c7:
     case 0x3c8:
@@ -638,14 +793,14 @@ void WINAPI DOSVM_outport( int port, int size, DWORD value )
     case 0x3cb:
     case 0x3cc:
     case 0x3cd:
-    case 0x3ce:
-    case 0x3cf:
+    case 0x3ce:  /* Graphics Controller Register - Address */
+    case 0x3cf:  /* Graphics Controller Register - Other */
     case 0x3d0:
     case 0x3d1:
     case 0x3d2:
     case 0x3d3:
-    case 0x3d4:
-    case 0x3d5:
+    case 0x3d4:  /* CRT Controller Register - Index (CGA) */
+    case 0x3d5:  /* CRT Controller Register - Other (CGA) */
     case 0x3d6:
     case 0x3d7:
     case 0x3d8:

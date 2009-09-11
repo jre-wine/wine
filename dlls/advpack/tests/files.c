@@ -63,14 +63,6 @@ static void createTestFile(const CHAR *name)
 
 static void create_test_files(void)
 {
-    int len;
-
-    GetCurrentDirectoryA(MAX_PATH, CURR_DIR);
-    len = lstrlenA(CURR_DIR);
-
-    if(len && (CURR_DIR[len-1] == '\\'))
-        CURR_DIR[len-1] = 0;
-
     createTestFile("a.txt");
     createTestFile("b.txt");
     CreateDirectoryA("testdir", NULL);
@@ -103,38 +95,9 @@ static BOOL check_ini_file_attr(LPSTR filename)
     return ret;
 }
 
-#define FIELD_LEN   16
-
-static BOOL check_ini_contents(LPSTR filename, BOOL add)
-{
-    CHAR field[FIELD_LEN];
-    BOOL ret = TRUE, match;
-
-    GetPrivateProfileStringA("backup", "one", NULL, field, FIELD_LEN, filename);
-    match = !lstrcmpA(field, "-1,0,0,0,0,0,-1");
-    if ((add && !match) || (!add && match)) {
-        trace("first test: got %s\n", field);
-        ret = FALSE;
-    }
-
-    GetPrivateProfileStringA("backup", "two", NULL, field, FIELD_LEN, filename);
-    if (lstrcmpA(field, "-1,0,0,0,0,0,-1")) {
-        trace("second test: got %s\n", field);
-        ret = FALSE;
-    }
-
-    GetPrivateProfileStringA("backup", "three", NULL, field, FIELD_LEN, filename);
-    match = !lstrcmpA(field, "-1,0,0,0,0,0,-1");
-    if ((add && !match) || (!add && match)) {
-        trace("third test: got %s\n", field);
-        ret = FALSE;
-    }
-
-    return ret;
-}
-
 static void test_AddDelBackupEntry(void)
 {
+    BOOL ret;
     HRESULT res;
     CHAR path[MAX_PATH];
     CHAR windir[MAX_PATH];
@@ -170,9 +133,13 @@ static void test_AddDelBackupEntry(void)
     /* create the INF file */
     res = pAddDelBackupEntry("one\0two\0three\0", "c:\\", "basename", AADBE_ADD_ENTRY);
     ok(res == S_OK, "Expected S_OK, got %d\n", res);
-    ok(check_ini_file_attr(path), "Expected ini file to be hidden\n");
-    ok(check_ini_contents(path, TRUE), "Expected ini contents to match\n");
-    ok(DeleteFileA(path), "Expected path to exist\n");
+    if (GetFileAttributes(path) != INVALID_FILE_ATTRIBUTES)
+    {
+        ok(check_ini_file_attr(path), "Expected ini file to be hidden\n");
+        ok(DeleteFileA(path), "Expected path to exist\n");
+    }
+    else
+        win_skip("Test file could not be created\n");
 
     lstrcpyA(path, CURR_DIR);
     lstrcatA(path, "\\backup\\basename.INI");
@@ -182,7 +149,6 @@ static void test_AddDelBackupEntry(void)
     res = pAddDelBackupEntry("one\0two\0three\0", "backup", "basename", AADBE_ADD_ENTRY);
     ok(res == S_OK, "Expected S_OK, got %d\n", res);
     ok(!check_ini_file_attr(path), "Expected ini file to not be hidden\n");
-    ok(!check_ini_contents(path, TRUE), "Expected ini contents to not match\n");
     ok(!DeleteFileA(path), "Expected path to not exist\n");
 
     /* try an existent, relative backup directory */
@@ -190,7 +156,6 @@ static void test_AddDelBackupEntry(void)
     res = pAddDelBackupEntry("one\0two\0three\0", "backup", "basename", AADBE_ADD_ENTRY);
     ok(res == S_OK, "Expected S_OK, got %d\n", res);
     ok(check_ini_file_attr(path), "Expected ini file to be hidden\n");
-    ok(check_ini_contents(path, TRUE), "Expected ini contents to match\n");
     ok(DeleteFileA(path), "Expected path to exist\n");
     RemoveDirectoryA("backup");
 
@@ -200,46 +165,47 @@ static void test_AddDelBackupEntry(void)
     /* try a NULL backup dir, INI is created in the windows directory */
     res = pAddDelBackupEntry("one\0two\0three\0", NULL, "basename", AADBE_ADD_ENTRY);
     ok(res == S_OK, "Expected S_OK, got %d\n", res);
-    ok(check_ini_contents(path, TRUE), "Expected ini contents to match\n");
 
     /* remove the entries with AADBE_DEL_ENTRY */
     SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
     res = pAddDelBackupEntry("one\0three\0", NULL, "basename", AADBE_DEL_ENTRY);
     SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
     ok(res == S_OK, "Expected S_OK, got %d\n", res);
-    ok(check_ini_contents(path, FALSE), "Expected ini contents to match\n");
-    ok(DeleteFileA(path), "Expected path to exist\n");
+    ret = DeleteFileA(path);
+    ok(ret == TRUE ||
+       broken(ret == FALSE), /* win98 */
+       "Expected path to exist\n");
 }
 
 /* the FCI callbacks */
 
-static void *mem_alloc(ULONG cb)
+static void * CDECL mem_alloc(ULONG cb)
 {
     return HeapAlloc(GetProcessHeap(), 0, cb);
 }
 
-static void mem_free(void *memory)
+static void CDECL mem_free(void *memory)
 {
     HeapFree(GetProcessHeap(), 0, memory);
 }
 
-static BOOL get_next_cabinet(PCCAB pccab, ULONG  cbPrevCab, void *pv)
+static BOOL CDECL get_next_cabinet(PCCAB pccab, ULONG  cbPrevCab, void *pv)
 {
     return TRUE;
 }
 
-static long progress(UINT typeStatus, ULONG cb1, ULONG cb2, void *pv)
+static LONG CDECL progress(UINT typeStatus, ULONG cb1, ULONG cb2, void *pv)
 {
     return 0;
 }
 
-static int file_placed(PCCAB pccab, char *pszFile, long cbFile,
-                       BOOL fContinuation, void *pv)
+static int CDECL file_placed(PCCAB pccab, char *pszFile, LONG cbFile,
+                             BOOL fContinuation, void *pv)
 {
     return 0;
 }
 
-static INT_PTR fci_open(char *pszFile, int oflag, int pmode, int *err, void *pv)
+static INT_PTR CDECL fci_open(char *pszFile, int oflag, int pmode, int *err, void *pv)
 {
     HANDLE handle;
     DWORD dwAccess = 0;
@@ -263,7 +229,7 @@ static INT_PTR fci_open(char *pszFile, int oflag, int pmode, int *err, void *pv)
     return (INT_PTR)handle;
 }
 
-static UINT fci_read(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
+static UINT CDECL fci_read(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
 {
     HANDLE handle = (HANDLE)hf;
     DWORD dwRead;
@@ -275,7 +241,7 @@ static UINT fci_read(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
     return dwRead;
 }
 
-static UINT fci_write(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
+static UINT CDECL fci_write(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
 {
     HANDLE handle = (HANDLE)hf;
     DWORD dwWritten;
@@ -287,7 +253,7 @@ static UINT fci_write(INT_PTR hf, void *memory, UINT cb, int *err, void *pv)
     return dwWritten;
 }
 
-static int fci_close(INT_PTR hf, int *err, void *pv)
+static int CDECL fci_close(INT_PTR hf, int *err, void *pv)
 {
     HANDLE handle = (HANDLE)hf;
     ok(CloseHandle(handle), "Failed to CloseHandle\n");
@@ -295,7 +261,7 @@ static int fci_close(INT_PTR hf, int *err, void *pv)
     return 0;
 }
 
-static long fci_seek(INT_PTR hf, long dist, int seektype, int *err, void *pv)
+static LONG CDECL fci_seek(INT_PTR hf, LONG dist, int seektype, int *err, void *pv)
 {
     HANDLE handle = (HANDLE)hf;
     DWORD ret;
@@ -306,7 +272,7 @@ static long fci_seek(INT_PTR hf, long dist, int seektype, int *err, void *pv)
     return ret;
 }
 
-static int fci_delete(char *pszFile, int *err, void *pv)
+static int CDECL fci_delete(char *pszFile, int *err, void *pv)
 {
     BOOL ret = DeleteFileA(pszFile);
     ok(ret, "Failed to DeleteFile %s\n", pszFile);
@@ -314,7 +280,7 @@ static int fci_delete(char *pszFile, int *err, void *pv)
     return 0;
 }
 
-static BOOL get_temp_file(char *pszTempName, int cbTempName, void *pv)
+static BOOL CDECL get_temp_file(char *pszTempName, int cbTempName, void *pv)
 {
     LPSTR tempname;
 
@@ -333,8 +299,8 @@ static BOOL get_temp_file(char *pszTempName, int cbTempName, void *pv)
     return FALSE;
 }
 
-static INT_PTR get_open_info(char *pszName, USHORT *pdate, USHORT *ptime,
-                             USHORT *pattribs, int *err, void *pv)
+static INT_PTR CDECL get_open_info(char *pszName, USHORT *pdate, USHORT *ptime,
+                                   USHORT *pattribs, int *err, void *pv)
 {
     BY_HANDLE_FILE_INFORMATION finfo;
     FILETIME filetime;
@@ -437,8 +403,10 @@ static void test_ExtractFiles(void)
 
     /* extract all files in the cab to nonexistent destination directory */
     hr = pExtractFiles("extract.cab", destFolder, 0, NULL, NULL, 0);
-    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND),
-       "Expected %d, got %d\n", HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), hr);
+    ok(hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) ||
+       hr == E_FAIL, /* win95 */
+       "Expected %08x or %08x, got %08x\n", E_FAIL,
+       HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND), hr);
     ok(!DeleteFileA("dest\\a.txt"), "Expected dest\\a.txt to not exist\n");
     ok(!DeleteFileA("dest\\testdir\\c.txt"), "Expected dest\\testdir\\c.txt to not exist\n");
     ok(!RemoveDirectoryA("dest\\testdir"), "Expected dest\\testdir to not exist\n");
@@ -505,8 +473,18 @@ static void test_ExtractFiles(void)
 static void test_AdvInstallFile(void)
 {
     HRESULT hr;
+    HMODULE hmod;
     char CURR_DIR[MAX_PATH];
     char destFolder[MAX_PATH];
+
+    hmod = LoadLibrary("setupapi.dll");
+    if (!hmod)
+    {
+        skip("setupapi.dll not present\n");
+        return;
+    }
+
+    FreeLibrary(hmod);
 
     GetCurrentDirectoryA(MAX_PATH, CURR_DIR);
 
@@ -551,7 +529,21 @@ static void test_AdvInstallFile(void)
 
 START_TEST(files)
 {
+    DWORD len;
+    char temp_path[MAX_PATH], prev_path[MAX_PATH];
+
     init_function_pointers();
+
+    GetCurrentDirectoryA(MAX_PATH, prev_path);
+    GetTempPath(MAX_PATH, temp_path);
+    SetCurrentDirectoryA(temp_path);
+
+    lstrcpyA(CURR_DIR, temp_path);
+    len = lstrlenA(CURR_DIR);
+
+    if(len && (CURR_DIR[len - 1] == '\\'))
+        CURR_DIR[len - 1] = 0;
+
     create_test_files();
     create_cab_file();
 
@@ -562,4 +554,5 @@ START_TEST(files)
     delete_test_files();
 
     FreeLibrary(hAdvPack);
+    SetCurrentDirectoryA(prev_path);
 }

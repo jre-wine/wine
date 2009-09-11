@@ -16,6 +16,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "cdlg.h"
+#include "filedlgbrowser.h"
+
 /*
  * WARNING: DO NOT CHANGE THE SIZE OF THE STANDARD DIALOG TEMPLATES.
  */
@@ -46,7 +49,7 @@ FONT 8, "MS Shell Dlg"
 
 SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Lagre som . . ."
+CAPTION "Lagre som..."
 FONT 8, "MS Shell Dlg"
 {
  LTEXT "Fil&navn:", 1090, 6, 6, 76, 9
@@ -268,7 +271,7 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,180,156,48,14,WS_GROUP
     PUSHBUTTON      "Avbryt",IDCANCEL,232,156,48,14
-/*    PUSHBUTTON      "Nettverk . . .", psh5, 284,156,48,14 */
+/*    PUSHBUTTON      "Nettverk...", psh5, 284,156,48,14 */
 
     GROUPBOX        "Skriver",        grp4,   8,  4, 272,84, WS_GROUP
     PUSHBUTTON      "&Egenskaper",    psh2, 212, 17,  60,14, WS_GROUP
@@ -313,16 +316,16 @@ BEGIN
   AUTORADIOBUTTON "&Liggende", rad2, 16, 190, 52, 12, BS_AUTORADIOBUTTON
   GROUPBOX "Rammer", grp4, 80, 156, 152, 56, BS_GROUPBOX
   LTEXT "V&enstre:", stc15, 88, 172, 21, 8
-  EDITTEXT edt4, 111, 170, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER|ES_NUMBER
+  EDITTEXT edt4, 111, 170, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER
   LTEXT "Høy&re:", stc16, 159, 172, 27, 8
-  EDITTEXT edt6, 187, 170, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER|ES_NUMBER
+  EDITTEXT edt6, 187, 170, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER
   LTEXT "T&opp:", stc17, 88, 192, 21, 8
-  EDITTEXT edt5, 111, 190, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER|ES_NUMBER
+  EDITTEXT edt5, 111, 190, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER
   LTEXT "&Bunn:", stc18, 159, 192, 23, 8
-  EDITTEXT edt7, 187, 190, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER|ES_NUMBER
+  EDITTEXT edt7, 187, 190, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER
   DEFPUSHBUTTON "OK", IDOK, 71, 220, 50, 14, BS_PUSHBUTTON
   PUSHBUTTON "Avbryt", IDCANCEL, 126, 220, 50, 14
-  PUSHBUTTON "Sk&river . . .", psh3, 184, 220, 48, 14
+  PUSHBUTTON "Sk&river...", psh3, 184, 220, 48, 14
 END
 
 NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
@@ -408,8 +411,8 @@ Oppgi en verdi mellom %d og %d."
     PD32_DEFAULT_PRINTER                  "Standardskriver; "
     PD32_NR_OF_DOCUMENTS_IN_QUEUE         "Det er %d dokumenter i køen"
     PD32_MARGINS_IN_INCHES                "Marger (tommer)"
-    PD32_MARGINS_IN_MILIMETERS            "Marger (mm)"
-    PD32_MILIMETERS                       "mm"
+    PD32_MARGINS_IN_MILLIMETERS           "Marger (mm)"
+    PD32_MILLIMETERS                      "mm"
 
     PD32_PRINTER_STATUS_READY             "Klar"
     PD32_PRINTER_STATUS_PAUSED            "Satt på pause; "

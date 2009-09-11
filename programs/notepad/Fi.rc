@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 LANGUAGE LANG_FINNISH, SUBLANG_DEFAULT
 
 MAIN_MENU MENU
@@ -28,6 +30,7 @@ MAIN_MENU MENU
   MENUITEM "&Avaa...\tCtrl+O",		CMD_OPEN
   MENUITEM "Ta&lleta\tCtrl+S",		CMD_SAVE
   MENUITEM "Talleta &nimellä...",	CMD_SAVE_AS
+  MENUITEM SEPARATOR
   MENUITEM "T&ulosta...\tCtrl+P",		CMD_PRINT
   MENUITEM "&Sivun asetukset...",	CMD_PAGE_SETUP
   MENUITEM "&Kirjoittimen asetukset...",	CMD_PRINTER_SETUP
@@ -46,17 +49,19 @@ POPUP "&Muokkaa" {
   MENUITEM "&Aika/Päivämäärä\tF5",	CMD_TIME_DATE
   MENUITEM SEPARATOR
   MENUITEM "Ka&tkaise pitkä rivi",	CMD_WRAP
+  MENUITEM "&Font...",          CMD_FONT
  }
 POPUP "&Etsi" {
   MENUITEM "Etsi...",		CMD_SEARCH
   MENUITEM "Etsi &seuraava\tF3",	CMD_SEARCH_NEXT
+  MENUITEM "&Korvaa...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Apua" {
   MENUITEM "&Sisältö",		CMD_HELP_CONTENTS
   MENUITEM "&Etsi...",		CMD_HELP_SEARCH
   MENUITEM "Apua &Opastuksesta",	CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 

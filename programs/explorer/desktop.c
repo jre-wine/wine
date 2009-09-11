@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
 #include <stdio.h>
 #include "wine/unicode.h"
 
@@ -34,6 +36,22 @@ WINE_DEFAULT_DEBUG_CHANNEL(explorer);
 
 static BOOL using_root;
 
+/* screen saver handler */
+static BOOL start_screensaver( void )
+{
+    if (using_root)
+    {
+        const char *argv[3] = { "xdg-screensaver", "activate", NULL };
+        int pid = spawnvp( _P_NOWAIT, argv[0], argv );
+        if (pid > 0)
+        {
+            WINE_TRACE( "started process %d\n", pid );
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 /* window procedure for the desktop window */
 static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPARAM lp )
 {
@@ -42,7 +60,14 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
     switch(message)
     {
     case WM_SYSCOMMAND:
-        if ((wp & 0xfff0) == SC_CLOSE) ExitWindows( 0, 0 );
+        switch(wp & 0xfff0)
+        {
+        case SC_CLOSE:
+            ExitWindows( 0, 0 );
+            break;
+        case SC_SCREENSAVE:
+            return start_screensaver();
+        }
         return 0;
 
     case WM_CLOSE:
@@ -74,21 +99,22 @@ static LRESULT WINAPI desktop_wnd_proc( HWND hwnd, UINT message, WPARAM wp, LPAR
 }
 
 /* create the desktop and the associated X11 window, and make it the current desktop */
-static unsigned long create_desktop( const char *name, unsigned int width, unsigned int height )
+static unsigned long create_desktop( const WCHAR *name, unsigned int width, unsigned int height )
 {
+    static const WCHAR rootW[] = {'r','o','o','t',0};
     HMODULE x11drv = GetModuleHandleA( "winex11.drv" );
     HDESK desktop;
     unsigned long xwin = 0;
-    unsigned long (*create_desktop_func)(unsigned int, unsigned int);
+    unsigned long (CDECL *create_desktop_func)(unsigned int, unsigned int);
 
-    desktop = CreateDesktopA( name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
+    desktop = CreateDesktopW( name, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
     if (!desktop)
     {
-        WINE_ERR( "failed to create desktop %s error %d\n", wine_dbgstr_a(name), GetLastError() );
+        WINE_ERR( "failed to create desktop %s error %d\n", wine_dbgstr_w(name), GetLastError() );
         ExitProcess( 1 );
     }
     /* magic: desktop "root" means use the X11 root window */
-    if (x11drv && strcasecmp( name, "root" ))
+    if (x11drv && strcmpiW( name, rootW ))
     {
         create_desktop_func = (void *)GetProcAddress( x11drv, "wine_create_desktop" );
         if (create_desktop_func) xwin = create_desktop_func( width, height );
@@ -97,21 +123,71 @@ static unsigned long create_desktop( const char *name, unsigned int width, unsig
     return xwin;
 }
 
-/* retrieve the default desktop size from the X11 driver config */
-/* FIXME: this is for backwards compatibility, should probably be changed */
-static BOOL get_default_desktop_size( unsigned int *width, unsigned int *height )
+/* parse the desktop size specification */
+static BOOL parse_size( const WCHAR *size, unsigned int *width, unsigned int *height )
 {
-    HKEY hkey;
-    char buffer[64];
-    DWORD size = sizeof(buffer);
-    BOOL ret = FALSE;
+    WCHAR *end;
 
-    /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver */
-    if (RegOpenKeyA( HKEY_CURRENT_USER, "Software\\Wine\\X11 Driver", &hkey )) return FALSE;
-    if (!RegQueryValueExA( hkey, "Desktop", 0, NULL, (LPBYTE)buffer, &size ))
-        ret = (sscanf( buffer, "%ux%u", width, height ) == 2);
-    RegCloseKey( hkey );
+    *width = strtoulW( size, &end, 10 );
+    if (end == size) return FALSE;
+    if (*end != 'x') return FALSE;
+    size = end + 1;
+    *height = strtoulW( size, &end, 10 );
+    return !*end;
+}
+
+/* retrieve the desktop name to use if not specified on the command line */
+static const WCHAR *get_default_desktop_name(void)
+{
+    static const WCHAR desktopW[] = {'D','e','s','k','t','o','p',0};
+    static const WCHAR defaultW[] = {'D','e','f','a','u','l','t',0};
+    static const WCHAR explorer_keyW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+                                          'E','x','p','l','o','r','e','r',0};
+    static WCHAR buffer[MAX_PATH];
+    DWORD size = sizeof(buffer);
+    HDESK desk = GetThreadDesktop( GetCurrentThreadId() );
+    WCHAR *ret = NULL;
+    HKEY hkey;
+
+    if (desk && GetUserObjectInformationW( desk, UOI_NAME, buffer, sizeof(buffer)/sizeof(WCHAR), NULL ))
+    {
+        if (strcmpiW( buffer, defaultW )) return buffer;
+    }
+
+    /* @@ Wine registry key: HKCU\Software\Wine\Explorer */
+    if (!RegOpenKeyW( HKEY_CURRENT_USER, explorer_keyW, &hkey ))
+    {
+        if (!RegQueryValueExW( hkey, desktopW, 0, NULL, (LPBYTE)buffer, &size )) ret = buffer;
+        RegCloseKey( hkey );
+    }
     return ret;
+}
+
+/* retrieve the default desktop size from the registry */
+static BOOL get_default_desktop_size( const WCHAR *name, unsigned int *width, unsigned int *height )
+{
+    static const WCHAR desktop_keyW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+                                         'E','x','p','l','o','r','e','r','\\',
+                                         'D','e','s','k','t','o','p','s',0};
+    HKEY hkey;
+    WCHAR buffer[64];
+    DWORD size = sizeof(buffer);
+    BOOL found = FALSE;
+
+    *width = 800;
+    *height = 600;
+
+    /* @@ Wine registry key: HKCU\Software\Wine\Explorer\Desktops */
+    if (!RegOpenKeyW( HKEY_CURRENT_USER, desktop_keyW, &hkey ))
+    {
+        if (!RegQueryValueExW( hkey, name, 0, NULL, (LPBYTE)buffer, &size ))
+        {
+            found = TRUE;
+            if (!parse_size( buffer, width, height )) *width = *height = 0;
+        }
+        RegCloseKey( hkey );
+    }
+    return found;
 }
 
 static void initialize_display_settings( HWND desktop )
@@ -144,13 +220,12 @@ static void initialize_display_settings( HWND desktop )
     }
 }
 
-static void set_desktop_window_title( HWND hwnd, const char *name )
+static void set_desktop_window_title( HWND hwnd, const WCHAR *name )
 {
     static const WCHAR desktop_nameW[] = {'W','i','n','e',' ','d','e','s','k','t','o','p',0};
     static const WCHAR desktop_name_separatorW[] = {' ', '-', ' ', 0};
     WCHAR *window_titleW = NULL;
     int window_title_len;
-    int name_len;
 
     if (!name[0])
     {
@@ -158,8 +233,7 @@ static void set_desktop_window_title( HWND hwnd, const char *name )
         return;
     }
 
-    name_len = MultiByteToWideChar( CP_ACP, 0, name, -1, NULL, 0 );
-    window_title_len = name_len * sizeof(WCHAR)
+    window_title_len = strlenW(name) * sizeof(WCHAR)
                      + sizeof(desktop_name_separatorW)
                      + sizeof(desktop_nameW);
     window_titleW = HeapAlloc( GetProcessHeap(), 0, window_title_len );
@@ -169,8 +243,7 @@ static void set_desktop_window_title( HWND hwnd, const char *name )
         return;
     }
 
-    MultiByteToWideChar( CP_ACP, 0, name, -1,
-                         window_titleW, name_len );
+    strcpyW( window_titleW, name );
     strcatW( window_titleW, desktop_name_separatorW );
     strcatW( window_titleW, desktop_nameW );
 
@@ -179,15 +252,17 @@ static void set_desktop_window_title( HWND hwnd, const char *name )
 }
 
 /* main desktop management function */
-void manage_desktop( char *arg )
+void manage_desktop( WCHAR *arg )
 {
+    static const WCHAR defaultW[] = {'D','e','f','a','u','l','t',0};
+    static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
     MSG msg;
-    HWND hwnd;
+    HWND hwnd, msg_hwnd;
     unsigned long xwin = 0;
     unsigned int width, height;
-    char *cmdline = NULL;
-    char *p = arg;
-    const char *name = NULL;
+    WCHAR *cmdline = NULL;
+    WCHAR *p = arg;
+    const WCHAR *name = NULL;
 
     /* get the rest of the command line (if any) */
     while (*p && !isspace(*p)) p++;
@@ -203,20 +278,38 @@ void manage_desktop( char *arg )
     if (*arg == '=' || *arg == ',')
     {
         arg++;
-        if ((p = strchr( arg, ',' ))) *p++ = 0;
-        if (!p || sscanf( p, "%ux%u", &width, &height ) != 2)
-        {
-            width = 800;
-            height = 600;
-        }
         name = arg;
-        xwin = create_desktop( name, width, height );
+        if ((p = strchrW( arg, ',' ))) *p++ = 0;
+        if (!p || !parse_size( p, &width, &height ))
+            get_default_desktop_size( name, &width, &height );
     }
-    else if (get_default_desktop_size( &width, &height ))
+    else if ((name = get_default_desktop_name()))
     {
-        name = "Default";
-        xwin = create_desktop( name, width, height );
+        if (!get_default_desktop_size( name, &width, &height )) width = height = 0;
     }
+    else  /* check for the X11 driver key for backwards compatibility (to be removed) */
+    {
+        static const WCHAR desktopW[] = {'D','e','s','k','t','o','p',0};
+        static const WCHAR x11_keyW[] = {'S','o','f','t','w','a','r','e','\\','W','i','n','e','\\',
+                                         'X','1','1',' ','D','r','i','v','e','r',0};
+        HKEY hkey;
+        WCHAR buffer[64];
+        DWORD size = sizeof(buffer);
+
+        width = height = 0;
+        /* @@ Wine registry key: HKCU\Software\Wine\X11 Driver */
+        if (!RegOpenKeyW( HKEY_CURRENT_USER, x11_keyW, &hkey ))
+        {
+            if (!RegQueryValueExW( hkey, desktopW, 0, NULL, (LPBYTE)buffer, &size ))
+            {
+                name = defaultW;
+                if (!parse_size( buffer, &width, &height )) width = height = 0;
+            }
+            RegCloseKey( hkey );
+        }
+    }
+
+    if (name && width && height) xwin = create_desktop( name, width, height );
 
     if (!xwin) using_root = TRUE; /* using the root window */
 
@@ -226,17 +319,30 @@ void manage_desktop( char *arg )
                             GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN),
                             GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN),
                             0, 0, 0, NULL );
+
+    /* create the HWND_MESSAGE parent */
+    msg_hwnd = CreateWindowExW( 0, messageW, NULL, WS_POPUP | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
+                                0, 0, 100, 100, 0, 0, 0, NULL );
+
     if (hwnd == GetDesktopWindow())
     {
+        HMODULE shell32;
+        void (WINAPI *pShellDDEInit)( BOOL );
+
         SetWindowLongPtrW( hwnd, GWLP_WNDPROC, (LONG_PTR)desktop_wnd_proc );
         SendMessageW( hwnd, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW( 0, MAKEINTRESOURCEW(OIC_WINLOGO)));
         if (name) set_desktop_window_title( hwnd, name );
         SystemParametersInfoA( SPI_SETDESKPATTERN, -1, NULL, FALSE );
         SetDeskWallPaper( (LPSTR)-1 );
         initialize_display_settings( hwnd );
-        initialize_diskarbitration();
-        initialize_hal();
+        initialize_appbar();
         initialize_systray();
+
+        if ((shell32 = LoadLibraryA( "shell32.dll" )) &&
+            (pShellDDEInit = (void *)GetProcAddress( shell32, (LPCSTR)188)))
+        {
+            pShellDDEInit( TRUE );
+        }
     }
     else
     {
@@ -244,16 +350,18 @@ void manage_desktop( char *arg )
         hwnd = 0;
     }
 
+    if (GetAncestor( msg_hwnd, GA_PARENT )) DestroyWindow( msg_hwnd );  /* someone beat us to it */
+
     /* if we have a command line, execute it */
     if (cmdline)
     {
-        STARTUPINFOA si;
+        STARTUPINFOW si;
         PROCESS_INFORMATION pi;
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
-        WINE_TRACE( "starting %s\n", wine_dbgstr_a(cmdline) );
-        if (CreateProcessA( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
+        WINE_TRACE( "starting %s\n", wine_dbgstr_w(cmdline) );
+        if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ))
         {
             CloseHandle( pi.hThread );
             CloseHandle( pi.hProcess );

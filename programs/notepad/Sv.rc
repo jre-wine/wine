@@ -4,6 +4,7 @@
  *  Copyright 1997,98 Marcel Baur <mbaur@g26.ethz.ch>
  *  Proofread 1998 by David Lee Lambert <lamber45@egr.msu.edu>
  *  Copyright 2002 Sylvain Petreolle <spetreolle@yahoo.fr>
+ *  Copyright 2007, 2008 Daniel Nylander <po@danielnylander.se>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,7 +21,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_SWEDISH, SUBLANG_DEFAULT
+#include "notepad_res.h"
+
+LANGUAGE LANG_SWEDISH, SUBLANG_NEUTRAL
 
 MAIN_MENU MENU
 {
@@ -29,6 +32,7 @@ MAIN_MENU MENU
   MENUITEM "Ö&ppna...\tCtrl+O",            CMD_OPEN
   MENUITEM "&Spara\tCtrl+S",            CMD_SAVE
   MENUITEM "Spara s&om...",     CMD_SAVE_AS
+  MENUITEM SEPARATOR
   MENUITEM "&Skriv ut...\tCtrl+P",         CMD_PRINT
   MENUITEM "Sidla&yout...",    CMD_PAGE_SETUP
   MENUITEM "Skrivar&konfiguration...", CMD_PRINTER_SETUP
@@ -47,17 +51,19 @@ POPUP "&Redigera" {
   MENUITEM "&Tid/Datum\tF5",    CMD_TIME_DATE
   MENUITEM SEPARATOR
   MENUITEM "&Dela långa meningar",      CMD_WRAP
+  MENUITEM "&Font...",          CMD_FONT
  }
 POPUP "&Sök" {
   MENUITEM "Sök...",            CMD_SEARCH
   MENUITEM "&Sök nästa\tF3",    CMD_SEARCH_NEXT
+  MENUITEM "&Ersätt...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Hjälp" {
   MENUITEM "&Innehåll",         CMD_HELP_CONTENTS
   MENUITEM "&Sök...",           CMD_HELP_SEARCH
   MENUITEM "Användning &av hjälp",    CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&Om Anteckningar", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -88,6 +94,14 @@ PUSHBUTTON    "Avbryt",     IDCANCEL,               180, 21, 40, 15, WS_TABSTOP
 PUSHBUTTON    "&Hjälp",       IDHELP,                180, 39, 40, 15, WS_TABSTOP
 }
 
+IDD_OFN_TEMPLATE  DIALOG  DISCARDABLE 50,50,300,15
+STYLE DS_3DLOOK | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_BORDER
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "Kodning:", -1, 5,0, 50,12
+  COMBOBOX IDC_OFN_ENCCOMBO, 53,0, 156,48, WS_CHILD | WS_VSCROLL | CBS_DROPDOWNLIST
+END
+
 STRINGTABLE DISCARDABLE
 {
 STRING_PAGESETUP_HEADERVALUE,   "&f"
@@ -95,15 +109,15 @@ STRING_PAGESETUP_FOOTERVALUE,   "Sida &p"
 
 STRING_NOTEPAD,                                 "Anteckningar"
 STRING_ERROR,                                   "FEL"
-STRING_WARNING,                                 "WARNING"
+STRING_WARNING,                                 "VARNING"
 STRING_INFO,                                    "Information"
 
 STRING_UNTITLED,                                "(namnlös)"
 
 STRING_ALL_FILES,                               "Alla filer (*.*)"
-STRING_TEXT_FILES_TXT,                  "Textfiler (*.txt)"
+STRING_TEXT_FILES_TXT,                  	"Textfiler (*.txt)"
 
-STRING_TOOLARGE,                                "Filen '%s' är för stor för notepad.\n \
+STRING_TOOLARGE,                                "Filen '%s' är för stor för Anteckningar.\n \
 Använd en annan redigerare."
 STRING_NOTEXT,                                  "Du skrev inte in någon text. \
 \nSkriv något och försök sedan igen"
@@ -111,9 +125,18 @@ STRING_DOESNOTEXIST,                            "Filen '%s'\nfinns inte\n\n \
 Vill du skapa en ny fil?"
 STRING_NOTSAVED,                                "Filen '%s'\nhar ändrats\n\n \
 Vill du spara ändringarna?"
-STRING_NOTFOUND,                                        "'%s' hittades inte."
-STRING_OUT_OF_MEMORY,                   "Inte tillräckligt med minne för att slutföra \
-den här uppgiften. \nAvsluta ett eller flera program för att öka mängden \nledigt \
+STRING_NOTFOUND,                                "'%s' hittades inte."
+STRING_OUT_OF_MEMORY,                   "Det finns inte tillräckligt med minne för att slutföra \
+den här uppgiften.\nAvsluta ett eller flera program för att öka mängden\nledigt \
 minne."
 
+STRING_UNICODE_LE,     "Unicode (UTF-16)"
+STRING_UNICODE_BE,     "Unicode (UTF-16 big-endian)"
+
+STRING_LOSS_OF_UNICODE_CHARACTERS,         "%s\n\
+Denna fil innehåller Unicode-tecken vilka kommer att gå\n\
+förlorade om du sparar filen under kodningen %s.\n\
+Klicka Avbryt och välj sedan ett av Unicode-alternativen\n\
+i teckenkodningslistan för att behålla dessa tecken.\n\
+Vill du fortsätta?"
 }

@@ -130,7 +130,79 @@ static void testCursor(HANDLE hCon, COORD sbSize)
        ERROR_INVALID_PARAMETER, GetLastError());
 }
 
-static void testWriteSimple(HANDLE hCon, COORD sbSize)
+static void testCursorInfo(HANDLE hCon)
+{
+    BOOL ret;
+    CONSOLE_CURSOR_INFO info;
+
+    SetLastError(0xdeadbeef);
+    ret = GetConsoleCursorInfo(NULL, NULL);
+    ok(!ret, "Expected failure\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    info.dwSize = -1;
+    ret = GetConsoleCursorInfo(NULL, &info);
+    ok(!ret, "Expected failure\n");
+    ok(info.dwSize == -1, "Expected no change for dwSize\n");
+    ok(GetLastError() == ERROR_INVALID_HANDLE, "GetLastError: expecting %u got %u\n",
+       ERROR_INVALID_HANDLE, GetLastError());
+
+    /* Test the correct call first to distinguish between win9x and the rest */
+    SetLastError(0xdeadbeef);
+    ret = GetConsoleCursorInfo(hCon, &info);
+    ok(ret, "Expected success\n");
+    ok(info.dwSize == 25 ||
+       info.dwSize == 12 /* win9x */,
+       "Expected 12 or 25, got %d\n", info.dwSize);
+    ok(info.bVisible, "Expected the cursor to be visible\n");
+    ok(GetLastError() == 0xdeadbeef, "GetLastError: expecting %u got %u\n",
+       0xdeadbeef, GetLastError());
+
+    /* Don't test NULL CONSOLE_CURSOR_INFO, it crashes on win9x and win7 */
+}
+
+static void testEmptyWrite(HANDLE hCon)
+{
+    COORD		c;
+    DWORD		len;
+    const char* 	mytest = "";
+
+    c.X = c.Y = 0;
+    ok(SetConsoleCursorPosition(hCon, c) != 0, "Cursor in upper-left\n");
+
+    len = -1;
+    ok(WriteConsole(hCon, NULL, 0, &len, NULL) != 0 && len == 0, "WriteConsole\n");
+    okCURSOR(hCon, c);
+
+    /* Passing a NULL lpBuffer with sufficiently large non-zero length succeeds
+     * on native Windows and result in memory-like contents being written to
+     * the console. Calling WriteConsoleW like this will crash on Wine. */
+    if (0)
+    {
+        len = -1;
+        ok(!WriteConsole(hCon, NULL, 16, &len, NULL) && len == -1, "WriteConsole\n");
+        okCURSOR(hCon, c);
+
+        /* Cursor advances for this call. */
+        len = -1;
+        ok(WriteConsole(hCon, NULL, 128, &len, NULL) != 0 && len == 128, "WriteConsole\n");
+    }
+
+    len = -1;
+    ok(WriteConsole(hCon, mytest, 0, &len, NULL) != 0 && len == 0, "WriteConsole\n");
+    okCURSOR(hCon, c);
+
+    /* WriteConsole does not halt on a null terminator and is happy to write
+     * memory contents beyond the actual size of the buffer. */
+    len = -1;
+    ok(WriteConsole(hCon, mytest, 16, &len, NULL) != 0 && len == 16, "WriteConsole\n");
+    c.X += 16;
+    okCURSOR(hCon, c);
+}
+
+static void testWriteSimple(HANDLE hCon)
 {
     COORD		c;
     DWORD		len;
@@ -364,7 +436,9 @@ static void testWrite(HANDLE hCon, COORD sbSize)
     /* FIXME: should in fact insure that the sb is at least 10 character wide */
     ok(SetConsoleTextAttribute(hCon, TEST_ATTRIB), "Setting default text color\n");
     resetContent(hCon, sbSize, FALSE);
-    testWriteSimple(hCon, sbSize);
+    testEmptyWrite(hCon);
+    resetContent(hCon, sbSize, FALSE);
+    testWriteSimple(hCon);
     resetContent(hCon, sbSize, FALSE);
     testWriteNotWrappedNotProcessed(hCon, sbSize);
     resetContent(hCon, sbSize, FALSE);
@@ -380,6 +454,7 @@ static void testScroll(HANDLE hCon, COORD sbSize)
     SMALL_RECT  scroll, clip;
     COORD       dst, c, tc;
     CHAR_INFO   ci;
+    BOOL ret;
 
 #define W 11
 #define H 7
@@ -473,22 +548,31 @@ static void testScroll(HANDLE hCon, COORD sbSize)
     clip.Top = H / 2;
     clip.Bottom = min(H + H / 2, sbSize.Y - 1);
 
-    ok(ScrollConsoleScreenBuffer(hCon, &scroll, &clip, dst, &ci), "Scrolling SB\n");
-
-    for (c.Y = 0; c.Y < sbSize.Y; c.Y++)
+    SetLastError(0xdeadbeef);
+    ret = ScrollConsoleScreenBuffer(hCon, &scroll, &clip, dst, &ci);
+    if (ret)
     {
-        for (c.X = 0; c.X < sbSize.X; c.X++)
+        for (c.Y = 0; c.Y < sbSize.Y; c.Y++)
         {
-            if (IN_SRECT2(scroll, dst, c) && IN_SRECT(clip, c))
+            for (c.X = 0; c.X < sbSize.X; c.X++)
             {
-                tc.X = c.X - dst.X;
-                tc.Y = c.Y - dst.Y;
-                okCHAR(hCon, c, CONTENT(tc), DEFAULT_ATTRIB);
+                if (IN_SRECT2(scroll, dst, c) && IN_SRECT(clip, c))
+                {
+                    tc.X = c.X - dst.X;
+                    tc.Y = c.Y - dst.Y;
+                    okCHAR(hCon, c, CONTENT(tc), DEFAULT_ATTRIB);
+                }
+                else if (IN_SRECT(scroll, c) && IN_SRECT(clip, c))
+                    okCHAR(hCon, c, '#', TEST_ATTRIB);
+                else okCHAR(hCon, c, CONTENT(c), DEFAULT_ATTRIB);
             }
-            else if (IN_SRECT(scroll, c) && IN_SRECT(clip, c))
-                okCHAR(hCon, c, '#', TEST_ATTRIB);
-            else okCHAR(hCon, c, CONTENT(c), DEFAULT_ATTRIB);
         }
+    }
+    else
+    {
+        /* Win9x will fail, Only accept ERROR_NOT_ENOUGH_MEMORY */
+        ok(GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
+            "Expected ERROR_NOT_ENOUGH_MEMORY, got %u\n", GetLastError());
     }
 
     /* clipping, src & dst rect do overlap */
@@ -600,9 +684,22 @@ static void testScreenBuffer(HANDLE hConOut)
     BOOL ret;
     DWORD oldcp;
 
+    if (!IsValidCodePage(866))
+    {
+        skip("Codepage 866 not available\n");
+        return;
+    }
+
     /* In the beginning set output codepage to 866 */
     oldcp = GetConsoleOutputCP();
-    ok(SetConsoleOutputCP(866), "Cannot set output codepage to 866\n");
+    SetLastError(0xdeadbeef);
+    ret = SetConsoleOutputCP(866);
+    if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("SetConsoleOutputCP is not implemented\n");
+        return;
+    }
+    ok(ret, "Cannot set output codepage to 866\n");
 
     hConOutRW = CreateConsoleScreenBuffer(GENERIC_READ | GENERIC_WRITE,
                          FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
@@ -835,11 +932,14 @@ START_TEST(console)
     ok(hConIn != INVALID_HANDLE_VALUE, "Opening ConIn\n");
     ok(hConOut != INVALID_HANDLE_VALUE, "Opening ConOut\n");
 
-    ok(ret = GetConsoleScreenBufferInfo(hConOut, &sbi), "Getting sb info\n");
+    ret = GetConsoleScreenBufferInfo(hConOut, &sbi);
+    ok(ret, "Getting sb info\n");
     if (!ret) return;
 
     /* Non interactive tests */
     testCursor(hConOut, sbi.dwSize);
+    /* test parameters (FIXME: test functionality) */
+    testCursorInfo(hConOut);
     /* will test wrapped (on/off) & processed (on/off) strings output */
     testWrite(hConOut, sbi.dwSize);
     /* will test line scrolling at the bottom of the screen */
@@ -853,7 +953,7 @@ START_TEST(console)
 
     if (!pGetConsoleInputExeNameA || !pSetConsoleInputExeNameA)
     {
-        skip("GetConsoleInputExeNameA and/or SetConsoleInputExeNameA is not available\n");
+        win_skip("GetConsoleInputExeNameA and/or SetConsoleInputExeNameA is not available\n");
         return;
     }
     else

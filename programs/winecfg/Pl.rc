@@ -23,6 +23,9 @@
  *
  */
 
+#include "config.h"   /* Needed for the PACKAGE_STRING definition */
+#include "resource.h"
+
 LANGUAGE LANG_POLISH, SUBLANG_DEFAULT
 
 IDR_WINECFG MENU DISCARDABLE
@@ -42,6 +45,11 @@ BEGIN
     LTEXT           "http://www.winehq.org/",IDC_STATIC,119,31,106,8
     LTEXT           "Ta biblioteka jest wolnym oprogramowaniem; mo¿esz j¹ rozpowszechniaæ i/lub modyfikowaæ pod warunkami licencji GNU Lesser General Public License opublikowanej przez Free Software Foundation; licencji w wersji 2.1, lub (wed³ug w³asnego uznania) dowolnej póŸniejszej.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Windows Registration Information ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Owner:", IDC_STATIC, 22, 126, 40, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT           "Organization:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -63,36 +71,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Ustawienia okna ",IDC_STATIC,8,4,244,180
+    GROUPBOX    " Ustawienia okna ",IDC_STATIC,8,4,244,92
+    CONTROL     "Zezwalaj aplikacjom DirectX na zablokowanie opuszczania okna przez kursor &myszki",IDC_DX_MOUSE_GRAB,"Button",BS_MULTILINE|BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,16
+    CONTROL     "Pozwól mened¿erowi okien &dekorowaæ okna",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,40,230,8
+    CONTROL     "Pozwól mened¿erowi okien &zarz¹dzaæ oknami Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,52,230,8
+    CONTROL     "Emuluj wirtualny &pulpit",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,64,230,8
+    LTEXT       "&Rozmiar pulpitu:",IDC_DESKTOP_SIZE,15,78,44,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,109,78,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,64,76,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,117,76,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL	    "Zezwalaj aplikacjom DirectX na zablokowanie opuszczania okna przez kursor myszki",IDC_DX_MOUSE_GRAB,"Button",BS_MULTILINE|BS_AUTOCHECKBOX | WS_TABSTOP,15,14,231,16
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,101,244,49
+    LTEXT       "Obs³uga Vertex Shader: ",IDC_STATIC,15,116,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,114,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Obs³uguj Pixel Shader (je¿eli s¹ obs³ugiwane przez kartê graficzn¹)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,132,230,10
 
-    CONTROL	    "Pozwój mened¿erowi okien zarz¹dzaæ oknami Wine",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,40,230,8
-
-    LTEXT 	    "Je¿eli okna s¹ zarz¹dane przez mened¿era okien, to bêd¹ mia³y standardow¹ ramkê, wspó³pracowa³y z wirtualnymi pulpitami i pojawia³y siê na liœcie okien.\n\n\
-Je¿eli okna nie s¹ zarz¹dane to nie bêd¹ zauwa¿one przez mened¿era. To znaczy, ¿e okna bêd¹ gorzej wspó³pracowa³y z reszt¹ pulpitu, ale emulacja bêdzie dok³adniejsza.\
-Niektórym aplikacjom mo¿e to pomóc w lepszym dzia³aniu.",
-		    IDC_STATIC,19,51,225,80
-
-    CONTROL         "Emuluj wirtualny pulpit",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,128,230,10
-    LTEXT           "Uruchamiane aplikacje Windows mog¹ byæ albo zawarte w jednym okinie, które bêdzie pe³ni³o rolê wirtualnego pulpitu, albo mieæ w³asne okna jak inne aplikacje.",
-                    IDC_STATIC,19,138,225,28
-    LTEXT           "Rozmiar pulpitu:",IDC_DESKTOP_SIZE,15,168,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,108,168,8,8,WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,189,244,50
-
-    LTEXT	    "Obs³uga Vertex Shader: ",IDC_STATIC,15,199,80,30
-    COMBOBOX	    IDC_D3D_VSHADER_MODE,100,197,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Obs³uguj Pixel Shader (je¿eli s¹ obs³ugiwane przez kartê graficzn¹)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,216,230,10
-    GROUPBOX        " Rozdzielczoœæ ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Rozdzielczoœæ ",IDC_STATIC,8,155,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,165,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,165,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "dpi",IDC_STATIC,235,167,10,8
+    LTEXT       "Oto przyk³ad zastosowania 10-punktowej czcionki Tahoma",IDC_RES_FONT_PREVIEW,15,185,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -131,6 +130,7 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Przyporz¹dkowanie dysków ",IDC_STATIC,8,4,244,240
+    LTEXT           "Failed to connect to the mount manager, the drive configuration cannot be edited.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Dodaj...",IDC_BUTTON_ADD,15,98,37,14
@@ -138,7 +138,7 @@ BEGIN
     PUSHBUTTON      "Automatyczne wykrywanie",IDC_BUTTON_AUTODETECT,127,98,119,14
 
     /* editing drive details */
-    LTEXT           "&Œcie¿ka:",IDC_STATIC,15,123,25,9
+    LTEXT           "&Œcie¿ka:",IDC_STATIC_PATH,15,123,25,9
     EDITTEXT        IDC_EDIT_PATH,46,120,145,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Przegl¹daj...",IDC_BUTTON_BROWSE_PATH,196,120,50,13
 
@@ -167,19 +167,18 @@ IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Wybór sterownika ",IDC_STATIC,8,4,244,195
+    GROUPBOX        " Wybór sterownika ",IDC_STATIC,8,4,244,210
     LTEXT           "Wybierz sterownik przez wstawienie krzy¿yka. Je¿eli chcesz wy³¹czyæ dŸwiêk, zostaw wszystkie pola puste. Wybór wielu sterowników na raz nie jest zalecany. Aby skonfigurowaæ sterownik kliknij prawym przyciskiem myszy na nim.",IDC_STATIC,15,20,227,40
-    CONTROL         "Urz¹dzenia",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,58,140,132
+    CONTROL         "Urz¹dzenia",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,58,140,147
     PUSHBUTTON      "Test dŸwiêku",IDC_AUDIO_TEST,165,58,69,14
     PUSHBUTTON	    "Panel sterowania",IDC_AUDIO_CONTROL_PANEL,165,78,69,14
-    GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60
-    LTEXT	    "Przyœpiesznie sprzêtowe: ",IDC_STATIC,15,215,90,10
-    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,213,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Domyœlna czêstoœæ próbkowania:",IDC_STATIC,15,232,105,8
-    COMBOBOX        IDC_DSOUND_RATES,121,230,38,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Bitów na próbkê:",IDC_STATIC,165,232,55,8
-    COMBOBOX        IDC_DSOUND_BITS,223,230,27,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Emulacja sterownika",IDC_DSOUND_DRV_EMUL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,250,230,10
+    GROUPBOX        " DirectSound ",IDC_STATIC,8,220,244,45
+    LTEXT	    "Przyœpiesznie sprzêtowe: ",IDC_STATIC,15,230,90,10
+    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,228,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Domyœlna czêstoœæ próbkowania:",IDC_STATIC,15,245,105,8
+    COMBOBOX        IDC_DSOUND_RATES,121,243,38,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Bitów na próbkê:",IDC_STATIC,165,245,55,8
+    COMBOBOX        IDC_DSOUND_BITS,223,243,27,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 250
@@ -227,7 +226,7 @@ BEGIN
     IDS_WINECFG_TITLE_APP   "Konfiguracje Wine dla %s"
     IDS_THEMEFILE           "Pliki motywu"
     IDS_THEMEFILE_SELECT    "Wybierz plik motywu"
-    IDS_AUDIO_MISSING       "Nie wybrano sterownika dŸwiêku.\n\nZalecany sterownik zosta³ w³aœnie zaznaczony.\nMo¿esz go u¿yæ lub wybraæ jakiœ inny.\n\nAby wybór zosta³ zapamiêtany u¿yj 'Zastosuj'."
+    IDS_AUDIO_MISSING       "Nie wybrano sterownika dŸwiêku.\n\nZalecany sterownik zosta³ w³aœnie zaznaczony.\nMo¿esz go u¿yæ lub wybraæ jakiœ inny.\n\nAby wybór zosta³ zapamiêtany, u¿yj 'Zastosuj'."
     IDS_SHELL_FOLDER        "Folder"
     IDS_LINKS_TO            "Dowi¹zany do"
 END
@@ -262,7 +261,7 @@ BEGIN
     IDS_DRIVE_CDROM             "CD-ROM"
     IDS_DRIVE_LETTERS_EXCEEDED  "Nie mo¿esz dodaæ nastêpnego dysku.\n\nKa¿dy dysk musi mieæ literê od A do Z, wiêc nie mo¿e byæ ich wiêcej ni¿ 26"
     IDS_SYSTEM_DRIVE_LABEL      "Dysk systemowy"
-    IDS_CONFIRM_DELETE_C        "Czy na pewno chcesz usun¹æ dysk C?\n\nWiêkszoœæ programów dla Windows zak³ada, ¿e taki dysk istnieje i mog¹ nie dzia³aæ bez niego. Je¿eli go skasujesz nie zapomnij go znowu utworzyæ!"
+    IDS_CONFIRM_DELETE_C        "Czy na pewno chcesz usun¹æ dysk C?\n\nWiêkszoœæ programów dla Windows zak³ada, ¿e taki dysk istnieje i mog¹ nie dzia³aæ bez niego. Je¿eli go skasujesz, nie zapomnij go znowu utworzyæ!"
     IDS_COL_DRIVELETTER         "Litera"
     IDS_COL_DRIVEMAPPING        "Przyporz¹dkowany do"
     IDS_NO_DRIVE_C              "Nie masz dysku C. To mo¿e powodowaæ problemy.\n\nNie zapomnij u¿yæ 'Dodaj' w zak³adce 'Dyski', aby go utworzyæ!\n"

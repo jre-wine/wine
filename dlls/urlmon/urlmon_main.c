@@ -36,8 +36,106 @@ LONG URLMON_refCount = 0;
 
 HINSTANCE URLMON_hInstance = 0;
 static HMODULE hCabinet = NULL;
+static DWORD urlmon_tls = TLS_OUT_OF_INDEXES;
 
 static void init_session(BOOL);
+
+static struct list tls_list = LIST_INIT(tls_list);
+
+static CRITICAL_SECTION tls_cs;
+static CRITICAL_SECTION_DEBUG tls_cs_dbg =
+{
+    0, 0, &tls_cs,
+    { &tls_cs_dbg.ProcessLocksList, &tls_cs_dbg.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": tls") }
+};
+
+static CRITICAL_SECTION tls_cs = { &tls_cs_dbg, -1, 0, 0, 0, 0 };
+
+tls_data_t *get_tls_data(void)
+{
+    tls_data_t *data;
+
+    if(urlmon_tls == TLS_OUT_OF_INDEXES) {
+        DWORD tls = TlsAlloc();
+        if(tls == TLS_OUT_OF_INDEXES)
+            return NULL;
+
+        tls = InterlockedCompareExchange((LONG*)&urlmon_tls, tls, TLS_OUT_OF_INDEXES);
+        if(tls != urlmon_tls)
+            TlsFree(tls);
+    }
+
+    data = TlsGetValue(urlmon_tls);
+    if(!data) {
+        data = heap_alloc_zero(sizeof(tls_data_t));
+        if(!data)
+            return NULL;
+
+        EnterCriticalSection(&tls_cs);
+        list_add_tail(&tls_list, &data->entry);
+        LeaveCriticalSection(&tls_cs);
+
+        TlsSetValue(urlmon_tls, data);
+    }
+
+    return data;
+}
+
+static void free_tls_list(void)
+{
+    tls_data_t *data;
+
+    if(urlmon_tls == TLS_OUT_OF_INDEXES)
+        return;
+
+    while(!list_empty(&tls_list)) {
+        data = LIST_ENTRY(list_head(&tls_list), tls_data_t, entry);
+        list_remove(&data->entry);
+        heap_free(data);
+    }
+
+    TlsFree(urlmon_tls);
+}
+
+static void detach_thread(void)
+{
+    tls_data_t *data;
+
+    if(urlmon_tls == TLS_OUT_OF_INDEXES)
+        return;
+
+    data = TlsGetValue(urlmon_tls);
+    if(!data)
+        return;
+
+    EnterCriticalSection(&tls_cs);
+    list_remove(&data->entry);
+    LeaveCriticalSection(&tls_cs);
+
+    if(data->notif_hwnd) {
+        WARN("notif_hwnd not destroyed\n");
+        DestroyWindow(data->notif_hwnd);
+    }
+
+    heap_free(data);
+}
+
+static void process_detach(void)
+{
+    HINTERNET internet_session;
+
+    internet_session = get_internet_session(NULL);
+    if(internet_session)
+        InternetCloseHandle(internet_session);
+
+    if (hCabinet)
+        FreeLibrary(hCabinet);
+
+    init_session(FALSE);
+    free_session();
+    free_tls_list();
+}
 
 /***********************************************************************
  *		DllMain (URLMON.init)
@@ -48,18 +146,17 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID fImpLoad)
 
     switch(fdwReason) {
     case DLL_PROCESS_ATTACH:
-        DisableThreadLibraryCalls(hinstDLL);
         URLMON_hInstance = hinstDLL;
         init_session(TRUE);
-	break;
+        break;
 
     case DLL_PROCESS_DETACH:
-        if (hCabinet)
-            FreeLibrary(hCabinet);
-        hCabinet = NULL;
-        init_session(FALSE);
-        URLMON_hInstance = 0;
-	break;
+        process_detach();
+        break;
+
+    case DLL_THREAD_DETACH:
+        detach_thread();
+        break;
     }
     return TRUE;
 }
@@ -173,6 +270,8 @@ static const ClassFactory FileProtocolCF =
     { &ClassFactoryVtbl, FileProtocol_Construct};
 static const ClassFactory FtpProtocolCF =
     { &ClassFactoryVtbl, FtpProtocol_Construct};
+static const ClassFactory GopherProtocolCF =
+    { &ClassFactoryVtbl, GopherProtocol_Construct};
 static const ClassFactory HttpProtocolCF =
     { &ClassFactoryVtbl, HttpProtocol_Construct};
 static const ClassFactory HttpSProtocolCF =
@@ -183,6 +282,10 @@ static const ClassFactory SecurityManagerCF =
     { &ClassFactoryVtbl, SecManagerImpl_Construct};
 static const ClassFactory ZoneManagerCF =
     { &ClassFactoryVtbl, ZoneMgrImpl_Construct};
+static const ClassFactory StdURLMonikerCF =
+    { &ClassFactoryVtbl, StdURLMoniker_Construct};
+static const ClassFactory MimeFilterCF =
+    { &ClassFactoryVtbl, MimeFilter_Construct};
  
 struct object_creation_info
 {
@@ -193,6 +296,7 @@ struct object_creation_info
 
 static const WCHAR wszFile[] = {'f','i','l','e',0};
 static const WCHAR wszFtp[]  = {'f','t','p',0};
+static const WCHAR wszGopher[]  = {'g','o','p','h','e','r',0};
 static const WCHAR wszHttp[] = {'h','t','t','p',0};
 static const WCHAR wszHttps[] = {'h','t','t','p','s',0};
 static const WCHAR wszMk[]   = {'m','k',0};
@@ -201,16 +305,19 @@ static const struct object_creation_info object_creation[] =
 {
     { &CLSID_FileProtocol,            CLASSFACTORY(&FileProtocolCF),    wszFile },
     { &CLSID_FtpProtocol,             CLASSFACTORY(&FtpProtocolCF),     wszFtp  },
+    { &CLSID_GopherProtocol,          CLASSFACTORY(&GopherProtocolCF),  wszGopher },
     { &CLSID_HttpProtocol,            CLASSFACTORY(&HttpProtocolCF),    wszHttp },
     { &CLSID_HttpSProtocol,           CLASSFACTORY(&HttpSProtocolCF),   wszHttps },
     { &CLSID_MkProtocol,              CLASSFACTORY(&MkProtocolCF),      wszMk },
     { &CLSID_InternetSecurityManager, CLASSFACTORY(&SecurityManagerCF), NULL    },
-    { &CLSID_InternetZoneManager,     CLASSFACTORY(&ZoneManagerCF),     NULL    }
+    { &CLSID_InternetZoneManager,     CLASSFACTORY(&ZoneManagerCF),     NULL    },
+    { &CLSID_StdURLMoniker,           CLASSFACTORY(&StdURLMonikerCF),   NULL    },
+    { &CLSID_DeCompMimeFilter,        CLASSFACTORY(&MimeFilterCF),      NULL    }
 };
 
 static void init_session(BOOL init)
 {
-    int i;
+    unsigned int i;
 
     for(i=0; i < sizeof(object_creation)/sizeof(object_creation[0]); i++) {
 
@@ -240,7 +347,7 @@ static void init_session(BOOL init)
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 {
-    int i;
+    unsigned int i;
     
     TRACE("(%s,%s,%p)\n", debugstr_guid(rclsid), debugstr_guid(riid), ppv);
     
@@ -266,42 +373,6 @@ HRESULT WINAPI DllRegisterServerEx(void)
 }
 
 /**************************************************************************
- *                 UrlMkSetSessionOption (URLMON.@)
- */
-HRESULT WINAPI UrlMkSetSessionOption(DWORD dwOption, LPVOID pBuffer, DWORD dwBufferLength,
- 					DWORD Reserved)
-{
-    FIXME("(%#x, %p, %#x): stub\n", dwOption, pBuffer, dwBufferLength);
-
-    return S_OK;
-}
-
-static const CHAR Agent[] = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)";
-
-/**************************************************************************
- *                 ObtainUserAgentString (URLMON.@)
- */
-HRESULT WINAPI ObtainUserAgentString(DWORD dwOption, LPSTR pcszUAOut, DWORD *cbSize)
-{
-    FIXME("(%d, %p, %p): stub\n", dwOption, pcszUAOut, cbSize);
-
-    if (pcszUAOut == NULL || cbSize == NULL)
-        return E_INVALIDARG;
-
-    if (*cbSize < sizeof(Agent))
-    {
-        *cbSize = sizeof(Agent);
-        return E_OUTOFMEMORY;
-    }
-
-    if (sizeof(Agent) < *cbSize)
-        *cbSize = sizeof(Agent);
-    lstrcpynA(pcszUAOut, Agent, *cbSize);
-
-    return S_OK;
-}
-
-/**************************************************************************
  *                 IsValidURL (URLMON.@)
  * 
  * Determines if a specified string is a valid URL.
@@ -322,10 +393,10 @@ HRESULT WINAPI ObtainUserAgentString(DWORD dwOption, LPSTR pcszUAOut, DWORD *cbS
 HRESULT WINAPI IsValidURL(LPBC pBC, LPCWSTR szURL, DWORD dwReserved)
 {
     FIXME("(%p, %s, %d): stub\n", pBC, debugstr_w(szURL), dwReserved);
-    
-    if (pBC != NULL || dwReserved != 0)
+
+    if (pBC || dwReserved || !szURL)
         return E_INVALIDARG;
-    
+
     return S_OK;
 }
 
@@ -435,7 +506,7 @@ static BOOL text_richtext_filter(const BYTE *b, DWORD size)
 
 static BOOL text_html_filter(const BYTE *b, DWORD size)
 {
-    int i;
+    DWORD i;
 
     if(size < 5)
         return FALSE;
@@ -598,7 +669,7 @@ HRESULT WINAPI FindMimeFromData(LPBC pBC, LPCWSTR pwzUrl, LPVOID pBuffer,
         const BYTE *buf = pBuffer;
         DWORD len;
         LPCWSTR ret = NULL;
-        int i;
+        unsigned int i;
 
         static const WCHAR wszTextHtml[] = {'t','e','x','t','/','h','t','m','l',0};
         static const WCHAR wszTextRichtext[] = {'t','e','x','t','/','r','i','c','h','t','e','x','t',0};
@@ -766,4 +837,22 @@ HRESULT WINAPI Extract(void *dest, LPCSTR szCabName)
     if (!pExtract) return HRESULT_FROM_WIN32(GetLastError());
 
     return pExtract(dest, szCabName);
+}
+
+/***********************************************************************
+ *           IsLoggingEnabledA (URLMON.@)
+ */
+BOOL WINAPI IsLoggingEnabledA(LPCSTR url)
+{
+    FIXME("(%s)\n", debugstr_a(url));
+    return FALSE;
+}
+
+/***********************************************************************
+ *           IsLoggingEnabledW (URLMON.@)
+ */
+BOOL WINAPI IsLoggingEnabledW(LPCWSTR url)
+{
+    FIXME("(%s)\n", debugstr_w(url));
+    return FALSE;
 }

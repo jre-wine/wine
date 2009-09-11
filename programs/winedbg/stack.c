@@ -3,7 +3,7 @@
  *
  * Copyright 1995 Alexandre Julliard
  * Copyright 1996 Eric Youngdale
- * Copyright 1999 Ove Kåven
+ * Copyright 1999 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -182,7 +182,7 @@ unsigned stack_fetch_frames(void)
     /* don't confuse StackWalk by passing in inconsistent addresses */
     if ((sf.AddrPC.Mode == AddrModeFlat) && (sf.AddrFrame.Mode != AddrModeFlat))
     {
-        sf.AddrFrame.Offset = (DWORD)memory_to_linear_addr(&sf.AddrFrame);
+        sf.AddrFrame.Offset = (ULONG_PTR)memory_to_linear_addr(&sf.AddrFrame);
         sf.AddrFrame.Mode = AddrModeFlat;
     }
 
@@ -217,7 +217,7 @@ struct sym_enum
 
 static BOOL WINAPI sym_enum_cb(PSYMBOL_INFO sym_info, ULONG size, PVOID user)
 {
-    struct sym_enum*    se = (struct sym_enum*)user;
+    struct sym_enum*    se = user;
 
     if (sym_info->Flags & SYMFLAG_PARAMETER)
     {
@@ -289,7 +289,7 @@ static void backtrace(void)
     {
         dbg_printf("%s%d ", 
                    (cf == dbg_curr_thread->curr_frame ? "=>" : "  "),
-                   dbg_curr_thread->curr_frame + 1);
+                   dbg_curr_thread->curr_frame);
         stack_print_addr_and_args(dbg_curr_thread->curr_frame);
         dbg_printf(" (");
         print_bare_address(&dbg_curr_thread->frames[dbg_curr_thread->curr_frame].addr_frame);
@@ -391,7 +391,8 @@ static void backtrace_all(void)
             }
 
             dbg_printf("\nBacktracing for thread %04x in process %04x (%s):\n",
-                       entry.th32ThreadID, dbg_curr_pid, dbg_curr_process->imageName);
+                       entry.th32ThreadID, dbg_curr_pid,
+                       dbg_W2A(dbg_curr_process->imageName, -1));
             backtrace_tid(dbg_curr_process, entry.th32ThreadID);
         }
         while (Thread32Next(snapshot, &entry));

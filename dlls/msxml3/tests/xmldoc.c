@@ -28,27 +28,23 @@
 
 #include "wine/test.h"
 
-static void append_str(char **str, const char *data)
-{
-    sprintf(*str, data);
-    *str += strlen(*str);
-}
+/* Deprecated Error Code */
+#define XML_E_INVALIDATROOTLEVEL    0xc00ce556
 
 static void create_xml_file(LPCSTR filename)
 {
-    char data[1024];
-    char *ptr = data;
     DWORD dwNumberOfBytesWritten;
     HANDLE hf = CreateFile(filename, GENERIC_WRITE, 0, NULL,
                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-    append_str(&ptr, "<?xml version=\"1.0\" ?>\n");
-    append_str(&ptr, "<BankAccount>\n");
-    append_str(&ptr, "  <Number>1234</Number>\n");
-    append_str(&ptr, "  <Name>Captain Ahab</Name>\n");
-    append_str(&ptr, "</BankAccount>");
+    static const char data[] =
+        "<?xml version=\"1.0\" ?>\n"
+        "<BankAccount>\n"
+        "  <Number>1234</Number>\n"
+        "  <Name>Captain Ahab</Name>\n"
+        "</BankAccount>";
 
-    WriteFile(hf, data, ptr - data, &dwNumberOfBytesWritten, NULL);
+    WriteFile(hf, data, sizeof(data) - 1, &dwNumberOfBytesWritten, NULL);
     CloseHandle(hf);
 }
 
@@ -65,7 +61,7 @@ static void test_xmldoc(void)
     LPVOID ptr;
     DWORD file_size, read;
     CHAR path[MAX_PATH];
-    long type, num_child;
+    LONG type, num_child;
     VARIANT vIndex, vName;
     BSTR name = NULL;
 
@@ -98,80 +94,83 @@ static void test_xmldoc(void)
     ok(file_size == read, "Expected to read the whole file, read %d\n", read);
 
     hr = CreateStreamOnHGlobal(hglobal, TRUE, &stream);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(stream != NULL, "Expected non-NULL stream\n");
 
     CloseHandle(hfile);
     GlobalUnlock(hglobal);
 
     hr = IXMLDocument_QueryInterface(doc, &IID_IPersistStreamInit, (LPVOID *)&psi);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(psi != NULL, "Expected non-NULL psi\n");
 
     hr = IXMLDocument_get_root(doc, &element);
-    ok(hr == E_FAIL, "Expected E_FAIL, got %d\n", hr);
+    ok(hr == E_FAIL, "Expected E_FAIL, got %08x\n", hr);
     ok(element == NULL, "Expected NULL element\n");
 
     hr = IPersistStreamInit_Load(psi, stream);
-    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(hr == S_OK || hr == XML_E_INVALIDATROOTLEVEL, "Expected S_OK, got %08x\n", hr);
+    if(hr == XML_E_INVALIDATROOTLEVEL)
+        goto cleanup;
+
     ok(stream != NULL, "Expected non-NULL stream\n");
 
     hr = IXMLDocument_get_root(doc, &element);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(element != NULL, "Expected non-NULL element\n");
 
     hr = IXMLElement_get_type(element, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %d\n", type);
 
     hr = IXMLElement_get_tagName(element, &name);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!lstrcmpW(name, szBankAccount), "Expected BANKACCOUNT\n");
     SysFreeString(name);
 
     hr = IXMLElement_get_children(element, &collection);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(collection != NULL, "Expected non-NULL collection\n");
 
     hr = IXMLElementCollection_get_length(collection, &num_child);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(num_child == 2, "Expected 2, got %ld\n", num_child);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(num_child == 2, "Expected 2, got %d\n", num_child);
 
     V_VT(&vIndex) = VT_I4;
     V_I4(&vIndex) = 0;
     V_VT(&vName) = VT_ERROR;
     V_ERROR(&vName) = DISP_E_PARAMNOTFOUND;
     hr = IXMLElementCollection_item(collection, vIndex, vName, (IDispatch **)&child);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(child != NULL, "Expected non-NULL child\n");
 
     hr = IXMLElement_get_type(child, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %d\n", type);
 
     hr = IXMLElement_get_tagName(child, &name);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!lstrcmpW(name, szNumber), "Expected NUMBER\n");
     SysFreeString(name);
 
     hr = IXMLElement_get_children(child, &inner);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(inner != NULL, "Expected non-NULL inner\n");
 
     hr = IXMLElementCollection_get_length(inner, &num_child);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(num_child == 1, "Expected 1, got %ld\n", num_child);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(num_child == 1, "Expected 1, got %d\n", num_child);
 
     hr = IXMLElementCollection_item(inner, vIndex, vName, (IDispatch **)&value);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(value != NULL, "Expected non-NULL value\n");
 
     hr = IXMLElement_get_type(value, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_TEXT, "Expected XMLELEMTYPE_TEXT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_TEXT, "Expected XMLELEMTYPE_TEXT, got %d\n", type);
 
     hr = IXMLElement_get_text(value, &name);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!lstrcmpW(name, szNumVal), "Expected '1234'\n");
     SysFreeString(name);
 
@@ -179,7 +178,7 @@ static void test_xmldoc(void)
 
     inner = (IXMLElementCollection *)0xdeadbeef;
     hr = IXMLElement_get_children(value, &inner);
-    ok(hr == 1, "Expected 1, got %d\n", hr);
+    ok(hr == 1, "Expected 1, got %08x\n", hr);
     ok(inner == NULL, "Expected NULL inner, got %p\n", inner);
 
     IXMLElement_Release(value);
@@ -189,37 +188,37 @@ static void test_xmldoc(void)
 
     V_I4(&vIndex) = 1;
     hr = IXMLElementCollection_item(collection, vIndex, vName, (IDispatch **)&child);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(child != NULL, "Expected non-NULL child\n");
 
     hr = IXMLElement_get_type(child, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %d\n", type);
 
     hr = IXMLElement_get_tagName(child, &name);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!lstrcmpW(name, szName), "Expected NAME\n");
     SysFreeString(name);
 
     hr = IXMLElement_get_children(child, &inner);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(inner != NULL, "Expected non-NULL inner\n");
 
     hr = IXMLElementCollection_get_length(inner, &num_child);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(num_child == 1, "Expected 1, got %ld\n", num_child);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(num_child == 1, "Expected 1, got %d\n", num_child);
 
     V_I4(&vIndex) = 0;
     hr = IXMLElementCollection_item(inner, vIndex, vName, (IDispatch **)&value);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(value != NULL, "Expected non-NULL value\n");
 
     hr = IXMLElement_get_type(value, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_TEXT, "Expected XMLELEMTYPE_TEXT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_TEXT, "Expected XMLELEMTYPE_TEXT, got %d\n", type);
 
     hr = IXMLElement_get_text(value, &name);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(!lstrcmpW(name, szNameVal), "Expected 'Captain Ahab'\n");
     SysFreeString(name);
 
@@ -227,13 +226,14 @@ static void test_xmldoc(void)
 
     inner = (IXMLElementCollection *)0xdeadbeef;
     hr = IXMLElement_get_children(value, &inner);
-    ok(hr == 1, "Expected 1, got %d\n", hr);
+    ok(hr == 1, "Expected 1, got %08x\n", hr);
     ok(inner == NULL, "Expected NULL inner, got %p\n", inner);
 
     IXMLElement_Release(value);
     IXMLElement_Release(child);
     IXMLElementCollection_Release(collection);
     IXMLElement_Release(element);
+cleanup:
     IStream_Release(stream);
     IPersistStreamInit_Release(psi);
     IXMLDocument_Release(doc);
@@ -247,7 +247,7 @@ static void test_createElement(void)
     IXMLDocument *doc = NULL;
     IXMLElement *element = NULL, *root = NULL;
     VARIANT vType, vName;
-    long type;
+    LONG type;
 
     hr = CoCreateInstance(&CLSID_XMLDocument, NULL, CLSCTX_INPROC_SERVER,
                           &IID_IXMLDocument, (LPVOID*)&doc);
@@ -262,7 +262,7 @@ static void test_createElement(void)
     V_VT(&vName) = VT_NULL;
     element = (IXMLElement *)0xdeadbeef;
     hr = IXMLDocument_createElement(doc, vType, vName, &element);
-    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %d\n", hr);
+    ok(hr == E_INVALIDARG, "Expected E_INVALIDARG, got %08x\n", hr);
     ok(element == NULL, "Expected NULL element\n");
 
     /* invalid vType value */
@@ -277,17 +277,17 @@ static void test_createElement(void)
         if (element != NULL)
         {
             hr = IXMLElement_get_type(element, &type);
-            ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+            ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
             /* SP7 returns an XMLELEMTYPE_ELEMENT */
             ok(type == XMLELEMTYPE_OTHER || type == XMLELEMTYPE_ELEMENT,
-                         "Expected XMLELEMTYPE_OTHER || XMLELEMTYPE_ELEMENT, got %ld\n", type);
+                         "Expected XMLELEMTYPE_OTHER || XMLELEMTYPE_ELEMENT, got %d\n", type);
 
             IXMLElement_Release(element);
         }
     }
     else
     {
-        ok(hr == E_NOTIMPL, "Expected E_NOTIMPL, got %d\n", hr);
+        ok(hr == E_NOTIMPL, "Expected E_NOTIMPL, got %08x\n", hr);
         ok(element == NULL, "Expected NULL element\n");
     }
 
@@ -296,12 +296,12 @@ static void test_createElement(void)
     V_I4(&vType) = XMLELEMTYPE_ELEMENT;
     V_VT(&vName) = VT_I4;
     hr = IXMLDocument_createElement(doc, vType, vName, &element);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(element != NULL, "Expected non-NULL element\n");
 
     hr = IXMLElement_get_type(element, &type);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
-    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %ld\n", type);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
+    ok(type == XMLELEMTYPE_ELEMENT, "Expected XMLELEMTYPE_ELEMENT, got %d\n", type);
 
     IXMLElement_Release(element);
 
@@ -321,13 +321,13 @@ static void test_createElement(void)
     V_I4(&vType) = XMLELEMTYPE_ELEMENT;
     V_VT(&vName) = VT_NULL;
     hr = IXMLDocument_createElement(doc, vType, vName, &element);
-    ok(hr == S_OK, "Expected S_OK, got %d\n", hr);
+    ok(hr == S_OK, "Expected S_OK, got %08x\n", hr);
     ok(element != NULL, "Expected non-NULL element\n");
 
     /* createElement does not set the new element as root */
     root = (IXMLElement *)0xdeadbeef;
     hr = IXMLDocument_get_root(doc, &root);
-    ok(hr == E_FAIL, "Expected E_FAIL, got %d\n", hr);
+    ok(hr == E_FAIL, "Expected E_FAIL, got %08x\n", hr);
     ok(root == NULL, "Expected NULL root\n");
 
     IXMLElement_Release(element);
@@ -343,4 +343,6 @@ START_TEST(xmldoc)
 
     test_xmldoc();
     test_createElement();
+
+    CoUninitialize();
 }

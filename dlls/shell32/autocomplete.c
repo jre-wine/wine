@@ -1,7 +1,7 @@
 /*
  *	AutoComplete interfaces implementation.
  *
- *	Copyright 2004	Maxime Bellengé <maxime.bellenge@laposte.net>
+ *	Copyright 2004	Maxime BellengÃ© <maxime.bellenge@laposte.net>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,6 +31,8 @@
   - implement ACO_FILTERPREFIXES style
   - implement ACO_USETAB style
   - implement ACO_RTLREADING style
+  - implement ResetEnumerator
+  - string compares should be case-insensitive, the content of the list should be sorted
   
  */
 #include "config.h"
@@ -61,8 +63,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
 typedef struct
 {
-    const IAutoCompleteVtbl  *lpVtbl;
-    const IAutoComplete2Vtbl *lpvtblAutoComplete2;
+    const IAutoComplete2Vtbl  *lpVtbl;
+    const IAutoCompleteDropDownVtbl *lpDropDownVtbl;
     LONG ref;
     BOOL  enabled;
     HWND hwndEdit;
@@ -75,23 +77,43 @@ typedef struct
     AUTOCOMPLETEOPTIONS options;
 } IAutoCompleteImpl;
 
-static const IAutoCompleteVtbl acvt;
-static const IAutoComplete2Vtbl ac2vt;
-
-static inline IAutoCompleteImpl *impl_from_IAutoComplete2( IAutoComplete2 *iface )
-{
-    return (IAutoCompleteImpl *)((char*)iface - FIELD_OFFSET(IAutoCompleteImpl, lpvtblAutoComplete2));
-}
+static const IAutoComplete2Vtbl acvt;
+static const IAutoCompleteDropDownVtbl acdropdownvt;
 
 
 /*
   converts This to an interface pointer
 */
-#define _IUnknown_(This) (IUnknown*)&(This->lpVtbl)
-#define _IAutoComplete2_(This)  (IAutoComplete2*)&(This->lpvtblAutoComplete2) 
+#define _IUnknown_(This)              ((IUnknown*)&(This)->lpVtbl)
+#define _IAutoComplete2_(This)        ((IAutoComplete2*)&(This)->lpVtbl)
+#define _IAutoCompleteDropDown_(This) (&(This)->lpDropDownVtbl)
+
+static inline IAutoCompleteImpl *impl_from_IAutoCompleteDropDown(IAutoCompleteDropDown *iface)
+{
+    return (IAutoCompleteImpl *)((char *)iface - FIELD_OFFSET(IAutoCompleteImpl, lpDropDownVtbl));
+}
 
 static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 static LRESULT APIENTRY ACLBoxSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+static void create_listbox(IAutoCompleteImpl *This)
+{
+    HWND hwndParent;
+
+    hwndParent = GetParent(This->hwndEdit);
+
+    /* FIXME : The listbox should be resizable with the mouse. WS_THICKFRAME looks ugly */
+    This->hwndListBox = CreateWindowExW(0, WC_LISTBOXW, NULL,
+                                    WS_BORDER | WS_CHILD | WS_VSCROLL | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                                    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                    hwndParent, NULL,
+                                    (HINSTANCE)GetWindowLongPtrW( hwndParent, GWLP_HINSTANCE ), NULL);
+
+    if (This->hwndListBox) {
+        This->wpOrigLBoxProc = (WNDPROC) SetWindowLongPtrW( This->hwndListBox, GWLP_WNDPROC, (LONG_PTR) ACLBoxSubclassProc);
+        SetWindowLongPtrW( This->hwndListBox, GWLP_USERDATA, (LONG_PTR)This);
+    }
+}
 
 /**************************************************************************
  *  IAutoComplete_Constructor
@@ -109,7 +131,7 @@ HRESULT WINAPI IAutoComplete_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVO
 
     lpac->ref = 1;
     lpac->lpVtbl = &acvt;
-    lpac->lpvtblAutoComplete2 = &ac2vt;
+    lpac->lpDropDownVtbl = &acdropdownvt;
     lpac->enabled = TRUE;
     lpac->enumstr = NULL;
     lpac->options = ACO_AUTOAPPEND;
@@ -118,7 +140,7 @@ HRESULT WINAPI IAutoComplete_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVO
     lpac->txtbackup = NULL;
     lpac->quickComplete = NULL;
     
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (lpac), riid, ppv))) {
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (lpac), riid, ppv))) {
 	IUnknown_Release (_IUnknown_ (lpac));
 	return E_NOINTERFACE;
     }
@@ -131,44 +153,42 @@ HRESULT WINAPI IAutoComplete_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVO
 /**************************************************************************
  *  AutoComplete_QueryInterface
  */
-static HRESULT WINAPI IAutoComplete_fnQueryInterface(
-    IAutoComplete * iface,
+static HRESULT WINAPI IAutoComplete2_fnQueryInterface(
+    IAutoComplete2 * iface,
     REFIID riid,
     LPVOID *ppvObj)
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
     
-    TRACE("(%p)->(\n\tIID:\t%s,%p)\n", This, shdebugstr_guid(riid), ppvObj);
+    TRACE("(%p)->(IID:%s,%p)\n", This, shdebugstr_guid(riid), ppvObj);
     *ppvObj = NULL;
 
-    if(IsEqualIID(riid, &IID_IUnknown)) 
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IAutoComplete) ||
+        IsEqualIID(riid, &IID_IAutoComplete2))
     {
-	*ppvObj = This;
-    } 
-    else if(IsEqualIID(riid, &IID_IAutoComplete))
-    {
-	*ppvObj = (IAutoComplete*)This;
+        *ppvObj = This;
     }
-    else if(IsEqualIID(riid, &IID_IAutoComplete2))
+    else if (IsEqualIID(riid, &IID_IAutoCompleteDropDown))
     {
-	*ppvObj = _IAutoComplete2_ (This);
+        *ppvObj = _IAutoCompleteDropDown_(This);
     }
 
     if (*ppvObj)
     {
-	IAutoComplete_AddRef((IAutoComplete*)*ppvObj);
+	IUnknown_AddRef((IUnknown*)*ppvObj);
 	TRACE("-- Interface: (%p)->(%p)\n", ppvObj, *ppvObj);
 	return S_OK;
     }
-    TRACE("-- Interface: E_NOINTERFACE\n");
+    WARN("unsupported interface: %s\n", debugstr_guid(riid));
     return E_NOINTERFACE;	
 }
 
 /******************************************************************************
- * IAutoComplete_fnAddRef
+ * IAutoComplete2_fnAddRef
  */
-static ULONG WINAPI IAutoComplete_fnAddRef(
-	IAutoComplete * iface)
+static ULONG WINAPI IAutoComplete2_fnAddRef(
+	IAutoComplete2 * iface)
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
     ULONG refCount = InterlockedIncrement(&This->ref);
@@ -179,10 +199,10 @@ static ULONG WINAPI IAutoComplete_fnAddRef(
 }
 
 /******************************************************************************
- * IAutoComplete_fnRelease
+ * IAutoComplete2_fnRelease
  */
-static ULONG WINAPI IAutoComplete_fnRelease(
-	IAutoComplete * iface)
+static ULONG WINAPI IAutoComplete2_fnRelease(
+	IAutoComplete2 * iface)
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
     ULONG refCount = InterlockedDecrement(&This->ref);
@@ -203,10 +223,10 @@ static ULONG WINAPI IAutoComplete_fnRelease(
 }
 
 /******************************************************************************
- * IAutoComplete_fnEnable
+ * IAutoComplete2_fnEnable
  */
-static HRESULT WINAPI IAutoComplete_fnEnable(
-    IAutoComplete * iface,
+static HRESULT WINAPI IAutoComplete2_fnEnable(
+    IAutoComplete2 * iface,
     BOOL fEnable)
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
@@ -221,32 +241,28 @@ static HRESULT WINAPI IAutoComplete_fnEnable(
 }
 
 /******************************************************************************
- * IAutoComplete_fnInit
+ * IAutoComplete2_fnInit
  */
-static HRESULT WINAPI IAutoComplete_fnInit(
-    IAutoComplete * iface,
+static HRESULT WINAPI IAutoComplete2_fnInit(
+    IAutoComplete2 * iface,
     HWND hwndEdit,
     IUnknown *punkACL,
     LPCOLESTR pwzsRegKeyPath,
     LPCOLESTR pwszQuickComplete)
 {
     IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
-    static const WCHAR lbName[] = {'L','i','s','t','B','o','x',0};
 
     TRACE("(%p)->(0x%08lx, %p, %s, %s)\n", 
 	  This, (long)hwndEdit, punkACL, debugstr_w(pwzsRegKeyPath), debugstr_w(pwszQuickComplete));
 
-    if (This->options & ACO_AUTOSUGGEST) TRACE(" ACO_AUTOSUGGEST\n");
-    if (This->options & ACO_AUTOAPPEND) TRACE(" ACO_AUTOAPPEND\n");
     if (This->options & ACO_SEARCH) FIXME(" ACO_SEARCH not supported\n");
     if (This->options & ACO_FILTERPREFIXES) FIXME(" ACO_FILTERPREFIXES not supported\n");
     if (This->options & ACO_USETAB) FIXME(" ACO_USETAB not supported\n");
-    if (This->options & ACO_UPDOWNKEYDROPSLIST) TRACE(" ACO_UPDOWNKEYDROPSLIST\n");
     if (This->options & ACO_RTLREADING) FIXME(" ACO_RTLREADING not supported\n");
 
     This->hwndEdit = hwndEdit;
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (punkACL, &IID_IEnumString, (LPVOID*)&This->enumstr))) {
+    if (FAILED (IUnknown_QueryInterface (punkACL, &IID_IEnumString, (LPVOID*)&This->enumstr))) {
 	TRACE("No IEnumString interface\n");
 	return  E_NOINTERFACE;
     }
@@ -254,23 +270,8 @@ static HRESULT WINAPI IAutoComplete_fnInit(
     This->wpOrigEditProc = (WNDPROC) SetWindowLongPtrW( hwndEdit, GWLP_WNDPROC, (LONG_PTR) ACEditSubclassProc);
     SetWindowLongPtrW( hwndEdit, GWLP_USERDATA, (LONG_PTR)This);
 
-    if (This->options & ACO_AUTOSUGGEST) {
-	HWND hwndParent;
-
-	hwndParent = GetParent(This->hwndEdit);
-	
-	/* FIXME : The listbox should be resizable with the mouse. WS_THICKFRAME looks ugly */
-	This->hwndListBox = CreateWindowExW(0, lbName, NULL, 
-					    WS_BORDER | WS_CHILD | WS_VSCROLL | LBS_HASSTRINGS | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, 
-					    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-					    hwndParent, NULL, 
-					    (HINSTANCE)GetWindowLongPtrW( hwndParent, GWLP_HINSTANCE ), NULL);
-					    
-	if (This->hwndListBox) {
-	    This->wpOrigLBoxProc = (WNDPROC) SetWindowLongPtrW( This->hwndListBox, GWLP_WNDPROC, (LONG_PTR) ACLBoxSubclassProc);
-	    SetWindowLongPtrW( This->hwndListBox, GWLP_USERDATA, (LONG_PTR)This);
-	}
-    }
+    if (This->options & ACO_AUTOSUGGEST)
+        create_listbox(This);
 
     if (pwzsRegKeyPath) {
 	WCHAR *key;
@@ -312,91 +313,7 @@ static HRESULT WINAPI IAutoComplete_fnInit(
 }
 
 /**************************************************************************
- *  IAutoComplete_fnVTable
- */
-static const IAutoCompleteVtbl acvt =
-{
-    IAutoComplete_fnQueryInterface,
-    IAutoComplete_fnAddRef,
-    IAutoComplete_fnRelease,
-    IAutoComplete_fnInit,
-    IAutoComplete_fnEnable,
-};
-
-/**************************************************************************
- *  AutoComplete2_QueryInterface
- */
-static HRESULT WINAPI IAutoComplete2_fnQueryInterface(
-    IAutoComplete2 * iface,
-    REFIID riid,
-    LPVOID *ppvObj)
-{
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
-
-    TRACE ("(%p)->(%s,%p)\n", This, shdebugstr_guid (riid), ppvObj);
-
-    return IAutoComplete_QueryInterface((IAutoComplete*)This, riid, ppvObj);
-}
-
-/******************************************************************************
- * IAutoComplete2_fnAddRef
- */
-static ULONG WINAPI IAutoComplete2_fnAddRef(
-	IAutoComplete2 * iface)
-{
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
-
-    TRACE ("(%p)->(count=%u)\n", This, This->ref);
-
-    return IAutoComplete2_AddRef((IAutoComplete*)This);
-}
-
-/******************************************************************************
- * IAutoComplete2_fnRelease
- */
-static ULONG WINAPI IAutoComplete2_fnRelease(
-	IAutoComplete2 * iface)
-{
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
-
-    TRACE ("(%p)->(count=%u)\n", This, This->ref);
-
-    return IAutoComplete_Release((IAutoComplete*)This);
-}
-
-/******************************************************************************
- * IAutoComplete2_fnEnable
- */
-static HRESULT WINAPI IAutoComplete2_fnEnable(
-    IAutoComplete2 * iface,
-    BOOL fEnable)
-{
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
-
-    TRACE ("(%p)->(%s)\n", This, (fEnable)?"true":"false");
-
-    return IAutoComplete_Enable((IAutoComplete*)This, fEnable);
-}
-
-/******************************************************************************
- * IAutoComplete2_fnInit
- */
-static HRESULT WINAPI IAutoComplete2_fnInit(
-    IAutoComplete2 * iface,
-    HWND hwndEdit,
-    IUnknown *punkACL,
-    LPCOLESTR pwzsRegKeyPath,
-    LPCOLESTR pwszQuickComplete)
-{
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
-
-    TRACE("(%p)\n", This);
-
-    return IAutoComplete_Init((IAutoComplete*)This, hwndEdit, punkACL, pwzsRegKeyPath, pwszQuickComplete);
-}
-
-/**************************************************************************
- *  IAutoComplete_fnGetOptions
+ *  IAutoComplete2_fnGetOptions
  */
 static HRESULT WINAPI IAutoComplete2_fnGetOptions(
     IAutoComplete2 * iface,
@@ -404,7 +321,7 @@ static HRESULT WINAPI IAutoComplete2_fnGetOptions(
 {
     HRESULT hr = S_OK;
 
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
+    IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
 
     TRACE("(%p) -> (%p)\n", This, pdwFlag);
 
@@ -414,7 +331,7 @@ static HRESULT WINAPI IAutoComplete2_fnGetOptions(
 }
 
 /**************************************************************************
- *  IAutoComplete_fnSetOptions
+ *  IAutoComplete2_fnSetOptions
  */
 static HRESULT WINAPI IAutoComplete2_fnSetOptions(
     IAutoComplete2 * iface,
@@ -422,19 +339,78 @@ static HRESULT WINAPI IAutoComplete2_fnSetOptions(
 {
     HRESULT hr = S_OK;
 
-    IAutoCompleteImpl *This = impl_from_IAutoComplete2(iface);
+    IAutoCompleteImpl *This = (IAutoCompleteImpl *)iface;
 
     TRACE("(%p) -> (0x%x)\n", This, dwFlag);
 
     This->options = dwFlag;
 
+    if ((This->options & ACO_AUTOSUGGEST) && This->hwndEdit && !This->hwndListBox)
+        create_listbox(This);
+
     return hr;
 }
 
 /**************************************************************************
- *  IAutoComplete2_fnVTable
+ *  IAutoCompleteDropDown_fnGetDropDownStatus
  */
-static const IAutoComplete2Vtbl ac2vt =
+static HRESULT WINAPI IAutoCompleteDropDown_fnGetDropDownStatus(
+    IAutoCompleteDropDown *iface,
+    DWORD *pdwFlags,
+    LPWSTR *ppwszString)
+{
+    IAutoCompleteImpl *This = impl_from_IAutoCompleteDropDown(iface);
+    BOOL dropped;
+
+    TRACE("(%p) -> (%p, %p)\n", This, pdwFlags, ppwszString);
+
+    dropped = IsWindowVisible(This->hwndListBox);
+
+    if (pdwFlags)
+        *pdwFlags = (dropped ? ACDD_VISIBLE : 0);
+
+    if (ppwszString) {
+        if (dropped) {
+            int sel;
+
+            sel = SendMessageW(This->hwndListBox, LB_GETCURSEL, 0, 0);
+            if (sel >= 0)
+            {
+                DWORD len;
+
+                len = SendMessageW(This->hwndListBox, LB_GETTEXTLEN, sel, 0);
+                *ppwszString = CoTaskMemAlloc((len+1)*sizeof(WCHAR));
+                SendMessageW(This->hwndListBox, LB_GETTEXT, sel, (LPARAM)*ppwszString);
+            }
+            else
+                *ppwszString = NULL;
+        }
+        else
+            *ppwszString = NULL;
+    }
+
+    return S_OK;
+}
+
+/**************************************************************************
+ *  IAutoCompleteDropDown_fnResetEnumarator
+ */
+static HRESULT WINAPI IAutoCompleteDropDown_fnResetEnumerator(
+    IAutoCompleteDropDown *iface)
+{
+    IAutoCompleteImpl *This = impl_from_IAutoCompleteDropDown(iface);
+
+    FIXME("(%p): stub\n", This);
+
+    return E_NOTIMPL;
+}
+
+
+
+/**************************************************************************
+ *  IAutoComplete2 VTable
+ */
+static const IAutoComplete2Vtbl acvt =
 {
     IAutoComplete2_fnQueryInterface,
     IAutoComplete2_fnAddRef,
@@ -444,6 +420,38 @@ static const IAutoComplete2Vtbl ac2vt =
     /* IAutoComplete2 */
     IAutoComplete2_fnSetOptions,
     IAutoComplete2_fnGetOptions,
+};
+
+
+static HRESULT WINAPI IAutoCompleteDropDown_fnQueryInterface(IAutoCompleteDropDown *iface,
+            REFIID riid, LPVOID *ppvObj)
+{
+    IAutoCompleteImpl *This = impl_from_IAutoCompleteDropDown(iface);
+    return IAutoComplete2_fnQueryInterface(_IAutoComplete2_(This), riid, ppvObj);
+}
+
+static ULONG WINAPI IAutoCompleteDropDown_fnAddRef(IAutoCompleteDropDown *iface)
+{
+    IAutoCompleteImpl *This = impl_from_IAutoCompleteDropDown(iface);
+    return IAutoComplete2_fnAddRef(_IAutoComplete2_(This));
+}
+
+static ULONG WINAPI IAutoCompleteDropDown_fnRelease(IAutoCompleteDropDown *iface)
+{
+    IAutoCompleteImpl *This = impl_from_IAutoCompleteDropDown(iface);
+    return IAutoComplete2_fnRelease(_IAutoComplete2_(This));
+}
+
+/**************************************************************************
+ *  IAutoCompleteDropDown VTable
+ */
+static const IAutoCompleteDropDownVtbl acdropdownvt =
+{
+    IAutoCompleteDropDown_fnQueryInterface,
+    IAutoCompleteDropDown_fnAddRef,
+    IAutoCompleteDropDown_fnRelease,
+    IAutoCompleteDropDown_fnGetDropDownStatus,
+    IAutoCompleteDropDown_fnResetEnumerator,
 };
 
 /*
@@ -468,16 +476,15 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 	    ShowWindow(This->hwndListBox, SW_HIDE);
 	    break;
 	case WM_KILLFOCUS:
-	    if ((This->options && ACO_AUTOSUGGEST) && 
+            if ((This->options & ACO_AUTOSUGGEST) &&
 		((HWND)wParam != This->hwndListBox))
 	    {
 		ShowWindow(This->hwndListBox, SW_HIDE);
 	    }
-	    break;
+	    return CallWindowProcW(This->wpOrigEditProc, hwnd, uMsg, wParam, lParam);
 	case WM_KEYUP:
-	    
-	    GetWindowTextW( hwnd, (LPWSTR)hwndText, 255);
-      
+            GetWindowTextW( hwnd, hwndText, 255);
+
 	    switch(wParam) {
 		case VK_RETURN:
 		    /* If quickComplete is set and control is pressed, replace the string */
@@ -525,7 +532,7 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 				WCHAR *msg;
 				int len;
 				
-				len = SendMessageW(This->hwndListBox, LB_GETTEXTLEN, sel, (LPARAM)NULL);
+				len = SendMessageW(This->hwndListBox, LB_GETTEXTLEN, sel, 0);
 				msg = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (len+1)*sizeof(WCHAR));
 				SendMessageW(This->hwndListBox, LB_GETTEXT, sel, (LPARAM)msg);
 				SendMessageW(hwnd, WM_SETTEXT, 0, (LPARAM)msg);
@@ -547,7 +554,7 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 		    }
 		    if (This->options & ACO_AUTOAPPEND) {
 			DWORD b;
-			SendMessageW(hwnd, EM_GETSEL, (WPARAM)&b, (LPARAM)NULL);
+                        SendMessageW(hwnd, EM_GETSEL, (WPARAM)&b, 0);
 			if (b>1) {
 			    hwndText[b-1] = '\0';
 			} else {
@@ -574,22 +581,25 @@ static LRESULT APIENTRY ACEditSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
 	    IEnumString_Reset(This->enumstr);
 	    filled = FALSE;
 	    for(cpt = 0;;) {
-		hr = IEnumString_Next(This->enumstr, 1, &strs, NULL);
+	        ULONG fetched;
+		hr = IEnumString_Next(This->enumstr, 1, &strs, &fetched);
 		if (hr != S_OK)
 		    break;
 
 		if (strstrW(strs, hwndText) == strs) {
-		    if (This->options & ACO_AUTOAPPEND) {
+                    if (!filled && (This->options & ACO_AUTOAPPEND)) {
 			SetWindowTextW(hwnd, strs);
 			SendMessageW(hwnd, EM_SETSEL, lstrlenW(hwndText), lstrlenW(strs));
-			break;
+                        if (!(This->options & ACO_AUTOSUGGEST))
+                            break;
 		    }		
 
 		    if (This->options & ACO_AUTOSUGGEST) {
 			SendMessageW(This->hwndListBox, LB_ADDSTRING, 0, (LPARAM)strs);
-			filled = TRUE;
 			cpt++;
 		    }
+
+                    filled = TRUE;
 		}		
 	    }
 	    
@@ -627,7 +637,7 @@ static LRESULT APIENTRY ACLBoxSubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, 
     switch (uMsg) {
 	case WM_MOUSEMOVE:
 	    sel = SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, lParam);
-	    SendMessageW(hwnd, LB_SETCURSEL, (WPARAM)sel, (LPARAM)0);
+            SendMessageW(hwnd, LB_SETCURSEL, sel, 0);
 	    break;
 	case WM_LBUTTONDOWN:
 	    sel = SendMessageW(hwnd, LB_GETCURSEL, 0, 0);

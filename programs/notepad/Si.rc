@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -53,13 +55,14 @@ POPUP "&Urejanje" {
 POPUP "&Iskanje" {
   MENUITEM "&Najdi ...\tCtrl+F",   CMD_SEARCH
   MENUITEM "Najdi na&slednje\tF3",  CMD_SEARCH_NEXT
+  MENUITEM "&Zamenjaj ...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Pomoč" {
   MENUITEM "&Teme pomoči",         CMD_HELP_CONTENTS
   MENUITEM "&Iskanje ...",        CMD_HELP_SEARCH
   MENUITEM "&O pomoči",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&O Beležnici ...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&O Beležnici", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -115,8 +118,6 @@ STRING_NOTSAVED,                                "Datoteka '%s'\nje bila spremenj
 Ali želite shraniti spremembe?"
 STRING_NOTFOUND,                                        "Niza '%s' ni mogoče najti."
 STRING_OUT_OF_MEMORY,                   "Za dokončanje operacije je na voljo premalo \
-pomnilnika. \nZaprite enega ali več programov in poskusite znova."
+pomnilnika.\nZaprite enega ali več programov in poskusite znova."
 
 }
-
-#pragma code_page(default)

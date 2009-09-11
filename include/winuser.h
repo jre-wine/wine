@@ -652,8 +652,7 @@ typedef struct tagWINDOWPLACEMENT
 #define MAKEINTRESOURCEA(i) (LPSTR)((ULONG_PTR)((WORD)(i)))
 #define MAKEINTRESOURCEW(i) (LPWSTR)((ULONG_PTR)((WORD)(i)))
 
-#ifdef __WINESRC__
-/* force using a cast when inside Wine */
+#ifdef WINE_NO_UNICODE_MACROS /* force using a cast */
 #define MAKEINTRESOURCE(i) ((ULONG_PTR)((WORD)(i)))
 #else
 #define MAKEINTRESOURCE WINELIB_NAME_AW(MAKEINTRESOURCE)
@@ -966,6 +965,8 @@ WINUSERAPI BOOL     WINAPI SetSysColors(INT,const INT*,const COLORREF*);
 #define EM_GETLIMITTEXT          0x00d5
 #define EM_POSFROMCHAR           0x00d6
 #define EM_CHARFROMPOS           0x00d7
+#define EM_SETIMESTATUS          0x00d8
+#define EM_GETIMESTATUS          0x00d9
 /* a name change since win95 */
 #define EM_SETLIMITTEXT          EM_LIMITTEXT
 
@@ -2077,9 +2078,9 @@ typedef struct tagMSG
 #define POINTSTOPOINT(pt, pts) { (pt).x = (pts).x; (pt).y = (pts).y; }
 #define POINTTOPOINTS(pt)      (MAKELONG((short)((pt).x), (short)((pt).y)))
 
-#define MAKELPARAM(low,high)   ((LPARAM)MAKELONG(low,high))
-#define MAKEWPARAM(low,high)   ((WPARAM)MAKELONG(low,high))
-#define MAKELRESULT(low,high)  ((LRESULT)MAKELONG(low,high))
+#define MAKELPARAM(low,high)   ((LPARAM)(DWORD)MAKELONG(low,high))
+#define MAKEWPARAM(low,high)   ((WPARAM)(DWORD)MAKELONG(low,high))
+#define MAKELRESULT(low,high)  ((LRESULT)(DWORD)MAKELONG(low,high))
 
 /* Cursors / Icons */
 
@@ -2821,6 +2822,8 @@ typedef struct tagCBTACTIVATESTRUCT
   /* keybd_event flags */
 #define KEYEVENTF_EXTENDEDKEY        0x0001
 #define KEYEVENTF_KEYUP              0x0002
+#define KEYEVENTF_UNICODE            0x0004
+#define KEYEVENTF_SCANCODE           0x0008
 
   /* mouse_event flags */
 #define MOUSEEVENTF_MOVE        0x0001
@@ -3300,6 +3303,12 @@ typedef struct {
 /* SetLayeredWindowAttributes() flags */
 #define LWA_COLORKEY        0x00000001
 #define LWA_ALPHA           0x00000002
+
+/* UpdateLayeredWindow() flags */
+#define ULW_COLORKEY        0x00000001
+#define ULW_ALPHA           0x00000002
+#define ULW_OPAQUE          0x00000004
+#define ULW_EX_NORESIZE     0x00000008
 
   /* ShowWindow() codes */
 #define SW_HIDE             0
@@ -3806,7 +3815,8 @@ typedef struct tagCOMPAREITEMSTRUCT
 #define VK_PROCESSKEY       0xE5
 
 /*                          0xE6       OEM specific */
-/*                          0xE7-0xE8  Unassigned */
+#define VK_PACKET           0xE7
+/*                          0xE8       Unassigned */
 /*                          0xE9-0xF5  OEM specific */
 
 #define VK_ATTN             0xF6
@@ -5017,10 +5027,10 @@ WINUSERAPI LONG        WINAPI TabbedTextOutA(HDC,INT,INT,LPCSTR,INT,INT,const IN
 WINUSERAPI LONG        WINAPI TabbedTextOutW(HDC,INT,INT,LPCWSTR,INT,INT,const INT*,INT);
 #define                       TabbedTextOut WINELIB_NAME_AW(TabbedTextOut)
 WINUSERAPI WORD        WINAPI TileWindows (HWND,UINT,const RECT *,UINT,const HWND *);
-WINUSERAPI INT         WINAPI ToAscii(UINT,UINT,LPBYTE,LPWORD,UINT);
-WINUSERAPI INT         WINAPI ToAsciiEx(UINT,UINT,LPBYTE,LPWORD,UINT,HKL);
-WINUSERAPI INT         WINAPI ToUnicode(UINT,UINT,PBYTE,LPWSTR,int,UINT);
-WINUSERAPI INT         WINAPI ToUnicodeEx(UINT,UINT,LPBYTE,LPWSTR,int,UINT,HKL);
+WINUSERAPI INT         WINAPI ToAscii(UINT,UINT,const BYTE *,LPWORD,UINT);
+WINUSERAPI INT         WINAPI ToAsciiEx(UINT,UINT,const BYTE *,LPWORD,UINT,HKL);
+WINUSERAPI INT         WINAPI ToUnicode(UINT,UINT,const BYTE *,LPWSTR,int,UINT);
+WINUSERAPI INT         WINAPI ToUnicodeEx(UINT,UINT,const BYTE *,LPWSTR,int,UINT,HKL);
 WINUSERAPI BOOL        WINAPI TrackMouseEvent(LPTRACKMOUSEEVENT);
 WINUSERAPI BOOL        WINAPI TrackPopupMenu(HMENU,UINT,INT,INT,INT,HWND,const RECT*);
 WINUSERAPI BOOL        WINAPI TrackPopupMenuEx(HMENU,UINT,INT,INT,HWND,LPTPMPARAMS);
@@ -5061,8 +5071,8 @@ WINUSERAPI VOID        WINAPI mouse_event(DWORD,DWORD,DWORD,DWORD,ULONG_PTR);
 WINUSERAPI INT        WINAPIV wsprintfA(LPSTR,LPCSTR,...);
 WINUSERAPI INT        WINAPIV wsprintfW(LPWSTR,LPCWSTR,...);
 #define                       wsprintf WINELIB_NAME_AW(wsprintf)
-WINUSERAPI INT         WINAPI wvsprintfA(LPSTR,LPCSTR,va_list);
-WINUSERAPI INT         WINAPI wvsprintfW(LPWSTR,LPCWSTR,va_list);
+WINUSERAPI INT         WINAPI wvsprintfA(LPSTR,LPCSTR,__ms_va_list);
+WINUSERAPI INT         WINAPI wvsprintfW(LPWSTR,LPCWSTR,__ms_va_list);
 #define                       wvsprintf WINELIB_NAME_AW(wvsprintf)
 
 /* Undocumented functions */

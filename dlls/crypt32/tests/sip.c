@@ -2,6 +2,7 @@
  * Subject Interface Package tests
  *
  * Copyright 2006 Paul Vriens
+ * Copyright 2008 Juan Lang
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -35,17 +36,15 @@ static BOOL (WINAPI * funcCryptSIPCreateIndirectData)(SIP_SUBJECTINFO *,DWORD *,
 static BOOL (WINAPI * funcCryptSIPVerifyIndirectData)(SIP_SUBJECTINFO *,SIP_INDIRECT_DATA *);
 static BOOL (WINAPI * funcCryptSIPRemoveSignedDataMsg)(SIP_SUBJECTINFO *,DWORD);
 
-static char *show_guid(const GUID *guid)
+static char *show_guid(const GUID *guid, char *buf)
 {
-    static char guidstring[39];
-
-    sprintf(guidstring,
+    sprintf(buf,
         "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
         guid->Data1, guid->Data2, guid->Data3,
         guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
         guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
 
-    return guidstring;
+    return buf;
 }
 
 static void test_AddRemoveProvider(void)
@@ -73,9 +72,14 @@ static void test_AddRemoveProvider(void)
     }
     else
     {
-        ok (!ret, "Expected CryptSIPRemoveProvider to fail.\n");
-        ok (GetLastError() == ERROR_FILE_NOT_FOUND,
-            "Expected ERROR_FILE_NOT_FOUND, got %d.\n", GetLastError());
+        /* On some Win98 systems, CryptSIPRemoveProvider always succeeds if
+         * the arguments are correct, whether or not the registry key is
+         * present, so don't test ret, just check the last error if it does
+         * return FALSE.
+         */
+        if (!ret)
+            ok (GetLastError() == ERROR_FILE_NOT_FOUND,
+                "Expected ERROR_FILE_NOT_FOUND, got %d.\n", GetLastError());
     }
 
     /* Everything OK, pwszIsFunctionName and pwszIsFunctionNameFmt2 are left NULL
@@ -105,9 +109,14 @@ static void test_AddRemoveProvider(void)
      */
     SetLastError(0xdeadbeef);
     ret = CryptSIPRemoveProvider(&actionid);
-    ok (!ret, "Expected CryptSIPRemoveProvider to fail.\n");
-    ok (GetLastError() == ERROR_FILE_NOT_FOUND,
-        "Expected ERROR_FILE_NOT_FOUND, got %d.\n", GetLastError());
+    /* On some Win98 systems, CryptSIPRemoveProvider always succeeds if
+     * the arguments are correct, whether or not the registry key is
+     * present, so don't test ret, just check the last error if it does
+     * return FALSE.
+     */
+    if (!ret)
+        ok (GetLastError() == ERROR_FILE_NOT_FOUND,
+            "Expected ERROR_FILE_NOT_FOUND, got %d.\n", GetLastError());
 
     /* Everything OK */
     memset(&newprov, 0, sizeof(SIP_ADD_NEWPROVIDER));
@@ -131,6 +140,14 @@ static void test_AddRemoveProvider(void)
     ok ( ret, "CryptSIPRemoveProvider should have succeeded\n");
 }
 
+static const BYTE cabFileData[] = {
+0x4d,0x53,0x43,0x46,0x00,0x00,0x00,0x00,0x50,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+0x2c,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x03,0x01,0x01,0x00,0x01,0x00,0x00,0x00,
+0xef,0xbe,0xff,0xff,0x42,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x06,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0xf7,0x38,0x4b,0xac,0x00,0x00,0x61,0x2e,0x74,0x78,
+0x74,0x00,0x6d,0x5a,0x72,0x78,0x06,0x00,0x06,0x00,0x61,0x2e,0x74,0x78,0x74,0x0a,
+};
+
 static void test_SIPRetrieveSubjectGUID(void)
 {
     BOOL ret;
@@ -142,11 +159,13 @@ static void test_SIPRetrieveSubjectGUID(void)
     static const WCHAR deadbeef[]  = { 'c',':','\\','d','e','a','d','b','e','e','f','.','d','b','f',0 };
     /* Couldn't find a name for this GUID, it's the one used for 95% of the files */
     static const GUID unknownGUID = { 0xC689AAB8, 0x8E78, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }};
+    static const GUID cabGUID = { 0xc689aaba, 0x8e78, 0x11d0, {0x8c,0x47,0x00,0xc0,0x4f,0xc2,0x95,0xee }};
     static CHAR  regeditPath[MAX_PATH];
     static WCHAR regeditPathW[MAX_PATH];
     static CHAR path[MAX_PATH];
     static CHAR tempfile[MAX_PATH];
     static WCHAR tempfileW[MAX_PATH];
+    static char guid1[39], guid2[39];
     DWORD written;
 
     /* NULL check */
@@ -165,7 +184,7 @@ static void test_SIPRetrieveSubjectGUID(void)
     ok (GetLastError() == ERROR_FILE_NOT_FOUND,
         "Expected ERROR_FILE_NOT_FOUND, got %d.\n", GetLastError());
     ok ( !memcmp(&subject, &nullSubject, sizeof(GUID)),
-        "Expected a NULL GUID for c:\\deadbeef.dbf, not %s\n", show_guid(&subject));
+        "Expected a NULL GUID for c:\\deadbeef.dbf, not %s\n", show_guid(&subject, guid1));
 
     /* Now with an executable that should exist
      *
@@ -184,7 +203,7 @@ static void test_SIPRetrieveSubjectGUID(void)
     ret = CryptSIPRetrieveSubjectGuid(regeditPathW, NULL, &subject);
     ok ( ret, "Expected CryptSIPRetrieveSubjectGuid to succeed\n");
     ok ( !memcmp(&subject, &unknownGUID, sizeof(GUID)),
-        "Expected (%s), got (%s).\n", show_guid(&unknownGUID), show_guid(&subject));
+        "Expected (%s), got (%s).\n", show_guid(&unknownGUID, guid1), show_guid(&subject, guid2));
 
     /* The same thing but now with a handle instead of a filename */
     file = CreateFileA(regeditPath, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
@@ -193,7 +212,7 @@ static void test_SIPRetrieveSubjectGUID(void)
     ret = CryptSIPRetrieveSubjectGuid(NULL, file, &subject);
     ok ( ret, "Expected CryptSIPRetrieveSubjectGuid to succeed\n");
     ok ( !memcmp(&subject, &unknownGUID, sizeof(GUID)),
-        "Expected (%s), got (%s).\n", show_guid(&unknownGUID), show_guid(&subject));
+        "Expected (%s), got (%s).\n", show_guid(&unknownGUID, guid1), show_guid(&subject, guid2));
     CloseHandle(file);
 
     /* And both */
@@ -203,7 +222,7 @@ static void test_SIPRetrieveSubjectGUID(void)
     ret = CryptSIPRetrieveSubjectGuid(regeditPathW, file, &subject);
     ok ( ret, "Expected CryptSIPRetrieveSubjectGuid to succeed\n");
     ok ( !memcmp(&subject, &unknownGUID, sizeof(GUID)),
-        "Expected (%s), got (%s).\n", show_guid(&unknownGUID), show_guid(&subject));
+        "Expected (%s), got (%s).\n", show_guid(&unknownGUID, guid1), show_guid(&subject, guid2));
     CloseHandle(file);
 
     /* Now with an empty file */
@@ -219,10 +238,11 @@ static void test_SIPRetrieveSubjectGUID(void)
     ok ( !ret, "Expected CryptSIPRetrieveSubjectGuid to fail\n");
     ok ( GetLastError() == ERROR_FILE_INVALID ||
          GetLastError() == ERROR_INVALID_PARAMETER /* Vista */ ||
-         GetLastError() == ERROR_SUCCESS /* Win98 */,
-        "Expected ERROR_FILE_INVALID, ERROR_INVALID_PARAMETER or ERROR_SUCCESS, got 0x%08x\n", GetLastError());
+         GetLastError() == ERROR_SUCCESS /* most Win98 */ ||
+         GetLastError() == TRUST_E_SUBJECT_FORM_UNKNOWN /* some Win98 */,
+        "Expected ERROR_FILE_INVALID, ERROR_INVALID_PARAMETER, ERROR_SUCCESS or TRUST_E_SUBJECT_FORM_UNKNOWN, got 0x%08x\n", GetLastError());
     ok ( !memcmp(&subject, &nullSubject, sizeof(GUID)),
-        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject));
+        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject, guid1));
 
     /* Use a file with a size of 3 (at least < 4) */
     file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
@@ -234,10 +254,11 @@ static void test_SIPRetrieveSubjectGUID(void)
     ret = CryptSIPRetrieveSubjectGuid(tempfileW, NULL, &subject);
     ok ( !ret, "Expected CryptSIPRetrieveSubjectGuid to fail\n");
     ok ( GetLastError() == ERROR_INVALID_PARAMETER ||
-         GetLastError() == ERROR_SUCCESS /* Win98 */,
-        "Expected ERROR_INVALID_PARAMETER or ERROR_SUCCESS, got 0x%08x\n", GetLastError());
+         GetLastError() == ERROR_SUCCESS /* most Win98 */ ||
+         GetLastError() == TRUST_E_SUBJECT_FORM_UNKNOWN /* some Win98 */,
+        "Expected ERROR_INVALID_PARAMETER, ERROR_SUCCESS or TRUST_E_SUBJECT_FORM_UNKNOWN, got 0x%08x\n", GetLastError());
     ok ( !memcmp(&subject, &nullSubject, sizeof(GUID)),
-        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject));
+        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject, guid1));
 
     /* And now >= 4 */
     file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
@@ -252,7 +273,43 @@ static void test_SIPRetrieveSubjectGUID(void)
          GetLastError() == ERROR_SUCCESS /* Win98 */,
         "Expected TRUST_E_SUBJECT_FORM_UNKNOWN or ERROR_SUCCESS, got 0x%08x\n", GetLastError());
     ok ( !memcmp(&subject, &nullSubject, sizeof(GUID)),
-        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject));
+        "Expected a NULL GUID for empty file %s, not %s\n", tempfile, show_guid(&subject, guid1));
+
+    /* Clean up */
+    DeleteFileA(tempfile);
+
+    /* Create a file with just the .cab header 'MSCF' */
+    SetLastError(0xdeadbeef);
+    file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "failed with %u\n", GetLastError());
+    WriteFile(file, cabFileData, 4, &written, NULL);
+    CloseHandle(file);
+
+    SetLastError(0xdeadbeef);
+    memset(&subject, 1, sizeof(GUID));
+    ret = CryptSIPRetrieveSubjectGuid(tempfileW, NULL, &subject);
+    ok( ret, "CryptSIPRetrieveSubjectGuid failed: %d (0x%08x)\n",
+            GetLastError(), GetLastError() );
+    ok ( !memcmp(&subject, &cabGUID, sizeof(GUID)),
+        "Expected GUID %s for cabinet file, not %s\n", show_guid(&cabGUID, guid1), show_guid(&subject, guid2));
+
+    /* Clean up */
+    DeleteFileA(tempfile);
+
+    /* Create a .cab file */
+    SetLastError(0xdeadbeef);
+    file = CreateFileA(tempfile, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
+    ok(file != INVALID_HANDLE_VALUE, "failed with %u\n", GetLastError());
+    WriteFile(file, cabFileData, sizeof(cabFileData), &written, NULL);
+    CloseHandle(file);
+
+    SetLastError(0xdeadbeef);
+    memset(&subject, 1, sizeof(GUID));
+    ret = CryptSIPRetrieveSubjectGuid(tempfileW, NULL, &subject);
+    ok( ret, "CryptSIPRetrieveSubjectGuid failed: %d (0x%08x)\n",
+            GetLastError(), GetLastError() );
+    ok ( !memcmp(&subject, &cabGUID, sizeof(GUID)),
+        "Expected GUID %s for cabinet file, not %s\n", show_guid(&cabGUID, guid1), show_guid(&subject, guid2));
 
     /* Clean up */
     DeleteFileA(tempfile);
@@ -265,7 +322,7 @@ static void test_SIPLoad(void)
     static GUID dummySubject = { 0xdeadbeef, 0xdead, 0xbeef, { 0xde,0xad,0xbe,0xef,0xde,0xad,0xbe,0xef }};
     static GUID unknown      = { 0xC689AABA, 0x8E78, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }}; /* WINTRUST.DLL */
     static GUID unknown2     = { 0xDE351A43, 0x8E59, 0x11D0, { 0x8C,0x47,0x00,0xC0,0x4F,0xC2,0x95,0xEE }}; /* WINTRUST.DLL */
-    /* The next SIP is available on Windows (not on a clean Wine install) */
+    /* The next SIP is available on Windows and on Wine */
     static GUID unknown3     = { 0x000C10F1, 0x0000, 0x0000, { 0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46 }}; /* MSISIP.DLL */
     SIP_DISPATCH_INFO sdi;
     HMODULE hCrypt;
@@ -358,24 +415,21 @@ static void test_SIPLoad(void)
         /* As msisip.dll is not checked yet by any of the previous calls, the
          * function DllCanUnloadNow will be checked again in msisip.dll (it's not present)
          */
-        todo_wine
-        {
-            ok( sdi.pfGet != (pCryptSIPGetSignedDataMsg)0xdeadbeef, "Expected a function pointer to be loaded.\n");
+        ok( sdi.pfGet != (pCryptSIPGetSignedDataMsg)0xdeadbeef, "Expected a function pointer to be loaded.\n");
 
-            /* This is another SIP but this test proves the function addresses are the same as
-             * in the previous test.
-             */
-            if (funcCryptSIPGetSignedDataMsg && funcCryptSIPPutSignedDataMsg && funcCryptSIPCreateIndirectData &&
-                funcCryptSIPVerifyIndirectData && funcCryptSIPRemoveSignedDataMsg)
-                ok (sdi.pfGet == funcCryptSIPGetSignedDataMsg &&
-                    sdi.pfPut == funcCryptSIPPutSignedDataMsg &&
-                    sdi.pfCreate == funcCryptSIPCreateIndirectData &&
-                    sdi.pfVerify == funcCryptSIPVerifyIndirectData &&
-                    sdi.pfRemove == funcCryptSIPRemoveSignedDataMsg,
-                    "Expected function addresses to be from crypt32\n");
-            else
-                trace("Couldn't load function pointers\n");
-        }
+        /* This is another SIP but this test proves the function addresses are the same as
+         * in the previous test.
+         */
+        if (funcCryptSIPGetSignedDataMsg && funcCryptSIPPutSignedDataMsg && funcCryptSIPCreateIndirectData &&
+            funcCryptSIPVerifyIndirectData && funcCryptSIPRemoveSignedDataMsg)
+            ok (sdi.pfGet == funcCryptSIPGetSignedDataMsg &&
+                sdi.pfPut == funcCryptSIPPutSignedDataMsg &&
+                sdi.pfCreate == funcCryptSIPCreateIndirectData &&
+                sdi.pfVerify == funcCryptSIPVerifyIndirectData &&
+                sdi.pfRemove == funcCryptSIPRemoveSignedDataMsg,
+                "Expected function addresses to be from crypt32\n");
+        else
+            trace("Couldn't load function pointers\n");
     }
 
     /* Reserved parameter not 0 */

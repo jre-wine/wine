@@ -40,7 +40,7 @@ struct ioctl_call
     struct list            mgr_entry;     /* entry in manager queue */
     struct device         *device;        /* device containing this ioctl */
     struct thread         *thread;        /* thread that queued the ioctl */
-    void                  *user_arg;      /* user arg used to identify the request */
+    client_ptr_t           user_arg;      /* user arg used to identify the request */
     struct async          *async;         /* pending async op */
     ioctl_code_t           code;          /* ioctl code */
     unsigned int           status;        /* resulting status (or STATUS_PENDING) */
@@ -112,7 +112,7 @@ struct device
     struct object          obj;           /* object header */
     struct device_manager *manager;       /* manager for this device (or NULL if deleted) */
     struct fd             *fd;            /* file descriptor for ioctl */
-    void                  *user_ptr;      /* opaque ptr for client side */
+    client_ptr_t           user_ptr;      /* opaque ptr for client side */
     struct list            entry;         /* entry in device manager list */
     struct list            requests;      /* list of pending ioctl requests */
 };
@@ -125,7 +125,7 @@ static struct object *device_open_file( struct object *obj, unsigned int access,
                                         unsigned int sharing, unsigned int options );
 static enum server_fd_type device_get_fd_type( struct fd *fd );
 static obj_handle_t device_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                                  const void *data, data_size_t size );
+                                  int blocking, const void *data, data_size_t size );
 
 static const struct object_ops device_ops =
 {
@@ -296,7 +296,7 @@ static enum server_fd_type device_get_fd_type( struct fd *fd )
 }
 
 static struct ioctl_call *find_ioctl_call( struct device *device, struct thread *thread,
-                                           void *user_arg )
+                                           client_ptr_t user_arg )
 {
     struct ioctl_call *ioctl;
 
@@ -308,7 +308,7 @@ static struct ioctl_call *find_ioctl_call( struct device *device, struct thread 
 }
 
 static obj_handle_t device_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async_data,
-                                  const void *data, data_size_t size )
+                                  int blocking, const void *data, data_size_t size )
 {
     struct device *device = get_fd_user( fd );
     struct ioctl_call *ioctl;
@@ -332,7 +332,7 @@ static obj_handle_t device_ioctl( struct fd *fd, ioctl_code_t code, const async_
         return 0;
     }
 
-    if (!(ioctl->async = fd_queue_async( device->fd, async_data, ASYNC_TYPE_WAIT, 0 )))
+    if (!(ioctl->async = fd_queue_async( device->fd, async_data, ASYNC_TYPE_WAIT )))
     {
         close_handle( current->process, handle );
         release_object( ioctl );

@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 
+#include <initguid.h>
 #include <hlink.h>
 #include <hlguids.h>
 
@@ -56,15 +57,6 @@ DEFINE_EXPECT(IsSystemMoniker);
 DEFINE_EXPECT(BindToStorage);
 DEFINE_EXPECT(GetDisplayName);
 
-static const char *debugstr_w(LPCWSTR str)
-{
-    static char buf[1024];
-    if(!str)
-        return "(null)";
-    WideCharToMultiByte(CP_ACP, 0, str, -1, buf, sizeof(buf), NULL, NULL);
-    return buf;
-}
-
 static const char *debugstr_guid(REFIID riid)
 {
     static char buf[50];
@@ -79,7 +71,7 @@ static const char *debugstr_guid(REFIID riid)
 
 static void test_HlinkIsShortcut(void)
 {
-    int i;
+    UINT i;
     HRESULT hres;
 
     static const WCHAR file0[] = {'f','i','l','e',0};
@@ -157,6 +149,13 @@ static void test_reference(void)
     ok(r == S_OK, "failed\n");
     ok(str == NULL, "string should be null\n");
 
+    /* Unimplented functions checks */
+    r = IHlink_GetAdditionalParams(lnk, NULL);
+    ok(r == E_NOTIMPL, "failed\n");
+
+    r = IHlink_SetAdditionalParams(lnk, NULL);
+    ok(r == E_NOTIMPL, "failed\n");
+
     IHlink_Release(lnk);
 }
 
@@ -171,6 +170,23 @@ static const unsigned char expected_hlink_data[] =
     0x2f,0x00,0x77,0x00,0x69,0x00,0x6e,0x00,
     0x65,0x00,0x68,0x00,0x71,0x00,0x2e,0x00,
     0x6f,0x00,0x72,0x00,0x67,0x00,0x2f,0x00,
+    0x00,0x00,
+};
+
+/* url only (IE7) */
+static const unsigned char expected_hlink_data_ie7[] =
+{
+    0x02,0x00,0x00,0x00,0x03,0x00,0x00,0x00,
+    0xe0,0xc9,0xea,0x79,0xf9,0xba,0xce,0x11,
+    0x8c,0x82,0x00,0xaa,0x00,0x4b,0xa9,0x0b,
+    0x3e,0x00,0x00,0x00,0x68,0x00,0x74,0x00,
+    0x74,0x00,0x70,0x00,0x3a,0x00,0x2f,0x00,
+    0x2f,0x00,0x77,0x00,0x69,0x00,0x6e,0x00,
+    0x65,0x00,0x68,0x00,0x71,0x00,0x2e,0x00,
+    0x6f,0x00,0x72,0x00,0x67,0x00,0x2f,0x00,
+    0x00,0x00,0x79,0x58,0x81,0xf4,0x3b,0x1d,
+    0x7f,0x48,0xaf,0x2c,0x82,0x5d,0xc4,0x85,
+    0x27,0x63,0x00,0x00,0x00,0x00,0xa5,0xab,
     0x00,0x00,
 };
 
@@ -190,6 +206,25 @@ static const unsigned char expected_hlink_data2[] =
     0x67,0x00,0x2f,0x00,0x00,0x00,
 };
 
+/* url + friendly name (IE7) */
+static const unsigned char expected_hlink_data2_ie7[] =
+{
+    0x02,0x00,0x00,0x00,0x17,0x00,0x00,0x00,
+    0x08,0x00,0x00,0x00,0x57,0x00,0x69,0x00,
+    0x6e,0x00,0x65,0x00,0x20,0x00,0x48,0x00,
+    0x51,0x00,0x00,0x00,0xe0,0xc9,0xea,0x79,
+    0xf9,0xba,0xce,0x11,0x8c,0x82,0x00,0xaa,
+    0x00,0x4b,0xa9,0x0b,0x3e,0x00,0x00,0x00,
+    0x68,0x00,0x74,0x00,0x74,0x00,0x70,0x00,
+    0x3a,0x00,0x2f,0x00,0x2f,0x00,0x77,0x00,
+    0x69,0x00,0x6e,0x00,0x65,0x00,0x68,0x00,
+    0x71,0x00,0x2e,0x00,0x6f,0x00,0x72,0x00,
+    0x67,0x00,0x2f,0x00,0x00,0x00,0x79,0x58,
+    0x81,0xf4,0x3b,0x1d,0x7f,0x48,0xaf,0x2c,
+    0x82,0x5d,0xc4,0x85,0x27,0x63,0x00,0x00,
+    0x00,0x00,0xa5,0xab,0x00,0x00,
+};
+
 /* url + friendly name + location */
 static const unsigned char expected_hlink_data3[] =
 {
@@ -204,6 +239,27 @@ static const unsigned char expected_hlink_data3[] =
     0x69,0x00,0x6e,0x00,0x65,0x00,0x68,0x00,
     0x71,0x00,0x2e,0x00,0x6f,0x00,0x72,0x00,
     0x67,0x00,0x2f,0x00,0x00,0x00,0x07,0x00,
+    0x00,0x00,0x5f,0x00,0x62,0x00,0x6c,0x00,
+    0x61,0x00,0x6e,0x00,0x6b,0x00,0x00,0x00,
+};
+
+/* url + friendly name + location (IE7) */
+static const unsigned char expected_hlink_data3_ie7[] =
+{
+    0x02,0x00,0x00,0x00,0x1f,0x00,0x00,0x00,
+    0x08,0x00,0x00,0x00,0x57,0x00,0x69,0x00,
+    0x6e,0x00,0x65,0x00,0x20,0x00,0x48,0x00,
+    0x51,0x00,0x00,0x00,0xe0,0xc9,0xea,0x79,
+    0xf9,0xba,0xce,0x11,0x8c,0x82,0x00,0xaa,
+    0x00,0x4b,0xa9,0x0b,0x3e,0x00,0x00,0x00,
+    0x68,0x00,0x74,0x00,0x74,0x00,0x70,0x00,
+    0x3a,0x00,0x2f,0x00,0x2f,0x00,0x77,0x00,
+    0x69,0x00,0x6e,0x00,0x65,0x00,0x68,0x00,
+    0x71,0x00,0x2e,0x00,0x6f,0x00,0x72,0x00,
+    0x67,0x00,0x2f,0x00,0x00,0x00,0x79,0x58,
+    0x81,0xf4,0x3b,0x1d,0x7f,0x48,0xaf,0x2c,
+    0x82,0x5d,0xc4,0x85,0x27,0x63,0x00,0x00,
+    0x00,0x00,0xa5,0xab,0x00,0x00,0x07,0x00,
     0x00,0x00,0x5f,0x00,0x62,0x00,0x6c,0x00,
     0x61,0x00,0x6e,0x00,0x6b,0x00,0x00,0x00,
 };
@@ -238,6 +294,25 @@ static const unsigned char expected_hlink_data5[] =
     0x2f,0x00,0x00,0x00,
 };
 
+/* url + target frame name (IE7) */
+static const unsigned char expected_hlink_data5_ie7[] =
+{
+    0x02,0x00,0x00,0x00,0x83,0x00,0x00,0x00,
+    0x07,0x00,0x00,0x00,0x74,0x00,0x67,0x00,
+    0x74,0x00,0x66,0x00,0x72,0x00,0x6d,0x00,
+    0x00,0x00,0xe0,0xc9,0xea,0x79,0xf9,0xba,
+    0xce,0x11,0x8c,0x82,0x00,0xaa,0x00,0x4b,
+    0xa9,0x0b,0x3e,0x00,0x00,0x00,0x68,0x00,
+    0x74,0x00,0x74,0x00,0x70,0x00,0x3a,0x00,
+    0x2f,0x00,0x2f,0x00,0x77,0x00,0x69,0x00,
+    0x6e,0x00,0x65,0x00,0x68,0x00,0x71,0x00,
+    0x2e,0x00,0x6f,0x00,0x72,0x00,0x67,0x00,
+    0x2f,0x00,0x00,0x00,0x79,0x58,0x81,0xf4,
+    0x3b,0x1d,0x7f,0x48,0xaf,0x2c,0x82,0x5d,
+    0xc4,0x85,0x27,0x63,0x00,0x00,0x00,0x00,
+    0xa5,0xab,0x00,0x00,
+};
+
 /* filename */
 static const unsigned char expected_hlink_data6[] =
 {
@@ -255,7 +330,9 @@ static const unsigned char expected_hlink_data6[] =
 
 static void test_persist_save_data(const char *testname, IHlink *lnk,
                                    const unsigned char *expected_data,
-                                   unsigned int expected_data_size)
+                                   unsigned int expected_data_size,
+                                   const unsigned char *expected_data_alt,
+                                   unsigned int expected_data_alt_size)
 {
     HRESULT hr;
     IStream *stream;
@@ -265,6 +342,7 @@ static void test_persist_save_data(const char *testname, IHlink *lnk,
     const unsigned char *data;
     DWORD i;
     BOOL same;
+    unsigned int expected_data_win9x_size = 0;
 
     hr = IHlink_QueryInterface(lnk, &IID_IPersistStream, (void **)&ps);
     ok(hr == S_OK, "IHlink_QueryInterface failed with error 0x%08x\n", hr);
@@ -282,10 +360,15 @@ static void test_persist_save_data(const char *testname, IHlink *lnk,
 
     data = GlobalLock(hglobal);
 
+    if (expected_data_size % 4)
+        expected_data_win9x_size =  4 * ((expected_data_size / 4) + 1);
+
     /* first check we have the right amount of data */
-    ok(data_size == expected_data_size,
-       "%s: Size of saved data differs (expected %d, actual %d)\n",
-       testname, expected_data_size, data_size);
+    ok((data_size == expected_data_size) ||
+       (data_size == expected_data_alt_size) ||
+       broken(data_size == expected_data_win9x_size), /* Win9x and WinMe */
+       "%s: Size of saved data differs (expected %d or %d, actual %d)\n",
+       testname, expected_data_size, expected_data_alt_size, data_size);
 
     same = TRUE;
     /* then do a byte-by-byte comparison */
@@ -298,6 +381,23 @@ static void test_persist_save_data(const char *testname, IHlink *lnk,
         {
             same = FALSE;
             break;
+        }
+    }
+
+    if (!same && (expected_data_alt != expected_data))
+    {
+        /* then try the alternate data */
+        same = TRUE;
+        for (i = 0; i < min(data_size, expected_data_alt_size); i++)
+        {
+            if ((expected_data_alt[i] != data[i]) &&
+                (((expected_data_alt != expected_hlink_data2) &&
+                  (expected_data_alt != expected_hlink_data3)) ||
+                 ((i < 52 || i >= 56) && (i < 80 || i >= 84))))
+            {
+                same = FALSE;
+                break;
+            }
         }
     }
 
@@ -337,25 +437,33 @@ static void test_persist(void)
         skip("Can't create lnk, skipping test_persist.  Was wineprefixcreate run properly?\n");
         return;
     }
-    test_persist_save_data("url only", lnk, expected_hlink_data, sizeof(expected_hlink_data));
+    test_persist_save_data("url only", lnk,
+        expected_hlink_data, sizeof(expected_hlink_data),
+        expected_hlink_data_ie7, sizeof(expected_hlink_data_ie7));
     IHlink_Release(lnk);
 
     hr = HlinkCreateFromString(url, NULL, friendly_name, NULL,
                                0, NULL, &IID_IHlink, (LPVOID*) &lnk);
     ok(hr == S_OK, "IHlinCreateFromString failed with error 0x%08x\n", hr);
-    test_persist_save_data("url + friendly name", lnk, expected_hlink_data2, sizeof(expected_hlink_data2));
+    test_persist_save_data("url + friendly name", lnk,
+        expected_hlink_data2, sizeof(expected_hlink_data2),
+        expected_hlink_data2_ie7, sizeof(expected_hlink_data2_ie7));
     IHlink_Release(lnk);
 
     hr = HlinkCreateFromString(url, location, friendly_name, NULL,
                                0, NULL, &IID_IHlink, (LPVOID*) &lnk);
     ok(hr == S_OK, "IHlinCreateFromString failed with error 0x%08x\n", hr);
-    test_persist_save_data("url + friendly_name + location", lnk, expected_hlink_data3, sizeof(expected_hlink_data3));
+    test_persist_save_data("url + friendly_name + location", lnk,
+        expected_hlink_data3, sizeof(expected_hlink_data3),
+        expected_hlink_data3_ie7, sizeof(expected_hlink_data3_ie7));
     IHlink_Release(lnk);
 
     hr = HlinkCreateFromString(rel_url, NULL, NULL, NULL,
                                0, NULL, &IID_IHlink, (LPVOID*) &lnk);
     ok(hr == S_OK, "IHlinCreateFromString failed with error 0x%08x\n", hr);
-    test_persist_save_data("relative url", lnk, expected_hlink_data4, sizeof(expected_hlink_data4));
+    test_persist_save_data("relative url", lnk,
+        expected_hlink_data4, sizeof(expected_hlink_data4),
+        expected_hlink_data4, sizeof(expected_hlink_data4));
     IHlink_Release(lnk);
 
     hr = HlinkCreateFromString(url, NULL, NULL, NULL,
@@ -363,13 +471,17 @@ static void test_persist(void)
     ok(hr == S_OK, "IHlinCreateFromString failed with error 0x%08x\n", hr);
     hr = IHlink_SetTargetFrameName(lnk, target_frame_name);
     ok(hr == S_OK, "IHlink_SetTargetFrameName failed with error 0x%08x\n", hr);
-    test_persist_save_data("url + target frame name", lnk, expected_hlink_data5, sizeof(expected_hlink_data5));
+    test_persist_save_data("url + target frame name", lnk,
+        expected_hlink_data5, sizeof(expected_hlink_data5),
+        expected_hlink_data5_ie7, sizeof(expected_hlink_data5_ie7));
     IHlink_Release(lnk);
 
     hr = HlinkCreateFromString(filename, NULL, NULL, NULL,
                                0, NULL, &IID_IHlink, (LPVOID*) &lnk);
     ok(hr == S_OK, "IHlinCreateFromString failed with error 0x%08x\n", hr);
-    test_persist_save_data("filename", lnk, expected_hlink_data6, sizeof(expected_hlink_data6));
+    test_persist_save_data("filename", lnk,
+        expected_hlink_data6, sizeof(expected_hlink_data6),
+        expected_hlink_data6, sizeof(expected_hlink_data6));
     IHlink_Release(lnk);
 }
 
@@ -476,13 +588,13 @@ static void test_HlinkCreateExtensionServices(void)
     hres = IHttpNegotiate_BeginningTransaction(http_negotiate, (void*)0xdeadbeef, (void*)0xdeadbeef,
                                                0, &headers);
     ok(hres == S_OK, "BeginningTransaction failed: %08x\n", hres);
-    ok(!lstrcmpW(headers, headersexW), "unexpected headers \"%s\"\n", debugstr_w(headers));
+    ok(!lstrcmpW(headers, headersexW), "unexpected headers %s\n", wine_dbgstr_w(headers));
     CoTaskMemFree(headers);
 
     headers = (void*)0xdeadbeef;
     hres = IHttpNegotiate_OnResponse(http_negotiate, 200, (void*)0xdeadbeef, (void*)0xdeadbeef, &headers);
     ok(hres == S_OK, "OnResponse failed: %08x\n", hres);
-    ok(headers == NULL, "unexpected headers \"%s\"\n", debugstr_w(headers));
+    ok(headers == NULL, "unexpected headers %s\n", wine_dbgstr_w(headers));
 
     IHttpNegotiate_Release(http_negotiate);
     IAuthenticate_Release(authenticate);
@@ -514,7 +626,7 @@ static void test_HlinkParseDisplayName(void)
 
     hres = IMoniker_GetDisplayName(mon, bctx, 0, &name);
     ok(hres == S_OK, "GetDiasplayName failed: %08x\n", hres);
-    ok(!lstrcmpW(name, winehq_urlW), "wrong display name %s\n", debugstr_w(name));
+    ok(!lstrcmpW(name, winehq_urlW), "wrong display name %s\n", wine_dbgstr_w(name));
     CoTaskMemFree(name);
 
     hres = IMoniker_IsSystemMoniker(mon, &issys);
@@ -541,7 +653,7 @@ static void test_HlinkParseDisplayName(void)
 
     hres = IMoniker_GetDisplayName(mon, bctx, 0, &name);
     ok(hres == S_OK, "GetDiasplayName failed: %08x\n", hres);
-    ok(!lstrcmpW(name, invalid_urlW), "wrong display name %s\n", debugstr_w(name));
+    ok(!lstrcmpW(name, invalid_urlW), "wrong display name %s\n", wine_dbgstr_w(name));
     CoTaskMemFree(name);
 
     hres = IMoniker_IsSystemMoniker(mon, &issys);

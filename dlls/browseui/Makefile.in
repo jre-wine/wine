@@ -3,18 +3,35 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = browseui.dll
-IMPORTS   = ole32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid ole32 user32 advapi32 kernel32
 EXTRADEFS = -DCOM_NO_WINDOWS_H
 
 C_SRCS = \
 	aclmulti.c \
+	aclsource.c \
 	browseui_main.c \
 	compcatcachedaemon.c \
 	progressdlg.c \
 	regsvr.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	rsrc_De.rc \
+	rsrc_En.rc \
+	rsrc_Es.rc \
+	rsrc_Fr.rc \
+	rsrc_Ja.rc \
+	rsrc_Ko.rc \
+	rsrc_Lt.rc \
+	rsrc_Nl.rc \
+	rsrc_No.rc \
+	rsrc_Pl.rc \
+	rsrc_Pt.rc \
+	rsrc_Ro.rc \
+	rsrc_Ru.rc \
+	rsrc_Si.rc \
+	rsrc_Sv.rc \
+	rsrc_Zh.rc \
+	version.rc
 
 @MAKE_DLL_RULES@
 

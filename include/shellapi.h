@@ -23,7 +23,9 @@
 extern "C" {
 #endif /* defined(__cplusplus) */
 
+#ifndef _WIN64
 #include <pshpack1.h>
+#endif
 
 DECLARE_HANDLE(HDROP);
 
@@ -141,6 +143,19 @@ DECL_WINELIB_TYPE_AW(SHFILEINFO)
 DWORD_PTR	WINAPI SHGetFileInfoA(LPCSTR,DWORD,SHFILEINFOA*,UINT,UINT);
 DWORD_PTR	WINAPI SHGetFileInfoW(LPCWSTR,DWORD,SHFILEINFOW*,UINT,UINT);
 #define  SHGetFileInfo WINELIB_NAME_AW(SHGetFileInfo)
+
+/******************************************
+ * SHGetImageList
+ */
+
+HRESULT WINAPI SHGetImageList(INT, REFIID, void **);
+
+#define SHIL_LARGE        0x0
+#define SHIL_SMALL        0x1
+#define SHIL_EXTRALARGE   0x2
+#define SHIL_SYSSMALL     0x3
+#define SHIL_JUMBO        0x4
+#define SHIL_LAST         SHIL_JUMBO
 
 /******************************************
  * SHSetFileInfo
@@ -510,6 +525,8 @@ DWORD       WINAPI DoEnvironmentSubstW(LPWSTR, UINT);
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
+#ifndef _WIN64
 #include <poppack.h>
+#endif
 
 #endif /* __WINE_SHELLAPI_H */

@@ -20,13 +20,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "clock_res.h"
+
+/* UTF-8 */
+#pragma code_page(65001)
+
 LANGUAGE LANG_FRENCH, SUBLANG_NEUTRAL
 
 MAIN_MENU MENU
 {
- POPUP "&Propriétés" {
+ POPUP "&PropriÃ©tÃ©s" {
   MENUITEM "Ana&logique", IDM_ANALOG
-  MENUITEM "&Numérique", IDM_DIGITAL
+  MENUITEM "&NumÃ©rique", IDM_DIGITAL
   MENUITEM SEPARATOR
   MENUITEM "&Police...", IDM_FONT
   MENUITEM SEPARATOR
@@ -40,7 +45,7 @@ MAIN_MENU MENU
  POPUP "Inf&o" {
   MENUITEM "&Licence...", IDM_LICENSE
   MENUITEM "AUCUNE &GARANTIE...", IDM_NOWARRANTY
-  MENUITEM "À &propos de l'horloge", IDM_ABOUT
+  MENUITEM "Ã€ &propos de l'horloge", IDM_ABOUT
  }
 }
 
@@ -53,25 +58,23 @@ STRINGTABLE DISCARDABLE LANGUAGE LANG_FRENCH, SUBLANG_NEUTRAL
 {
 IDS_LICENSE_CAPTION,            "LICENCE"
 IDS_LICENSE,
-"Cette bibliothèque est libre, vous pouvez la redistribuer et/ou \
-la modifier selon les termes de la Licence Publique Générale GNU \
-Limitée publiée par la Free Software Foundation (version 2.1 ou \
-bien toute autre version ultérieure choisie par vous).\n\
-Cette bibliothèque est distribuée car potentiellement utile, \
-mais SANS AUCUNE GARANTIE, ni explicite ni implicite, y compris \
-les garanties de commercialisation ou d'adaptation dans un but \
-spécifique. Reportez-vous à la Licence Publique Générale GNU \
-Limitée pour plus de détails.\n\
-Vous devez avoir reçu une copie de la Licence Publique Générale \
-GNU Limitée en même temps que cette bibliothèque ; si ce n'est pas \
-le cas, écrivez à la Free Software Foundation, Inc., 51 Franklin St, \
-Fifth Floor, Boston, MA 02111-1301, États-Unis."
+"Ce programme est un logiciel libreÂ ; vous pouvez le redistribuer et/ou \
+le modifier suivant les termes de la Licence GÃ©nÃ©rale Publique LimitÃ©e GNU \
+telle que publiÃ©e par la Free Software FoundationÂ ; soit la version 2.1 \
+de la Licence, soit (Ã  votre grÃ©) toute version ultÃ©rieure.\n\
+Ce programme est distribuÃ© dans l'espoir qu'il sera utile, mais \
+SANS AUCUNE GARANTIEÂ : sans mÃªme la garantie implicite de \
+COMMERCIALISABILITÃ‰ ou d'ADÃ‰QUATION Ã€ UN OBJECTIF PARTICULIER. Consultez \
+la Licence GÃ©nÃ©rale Publique LimitÃ©e pour plus de dÃ©tails.\n\
+Vous devriez avoir reÃ§u une copie de la Licence GÃ©nÃ©rale Publique LimitÃ©e \
+GNU avec ce programmeÂ ; si ce n'est pas le cas, Ã©crivez Ã  laÂ : \
+Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, \
+MA 02110-1301, USA."
 
 IDS_WARRANTY_CAPTION, "AUCUNE GARANTIE"
 IDS_WARRANTY,
-"Cette bibliothèque est distribuée car potentiellement utile, \
-mais SANS AUCUNE GARANTIE, ni explicite ni implicite, y compris \
-les garanties de commercialisation ou d'adaptation dans un but \
-spécifique. Reportez-vous à la Licence Publique Générale GNU \
-Limitée pour plus de détails."
+"Ce programme est distribuÃ© dans l'espoir qu'il sera utile, mais \
+SANS AUCUNE GARANTIEÂ : sans mÃªme la garantie implicite de \
+COMMERCIALISABILITÃ‰ ou d'ADÃ‰QUATION Ã€ UN OBJECTIF PARTICULIER. Consultez \
+la Licence GÃ©nÃ©rale Publique LimitÃ©e pour plus de dÃ©tails."
 }

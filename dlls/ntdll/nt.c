@@ -37,6 +37,12 @@
 #include "ntdll_misc.h"
 #include "wine/server.h"
 
+#ifdef __APPLE__
+#include <mach/mach_init.h>
+#include <mach/mach_host.h>
+#include <mach/vm_map.h>
+#endif
+
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
 /*
@@ -57,10 +63,9 @@ NTSTATUS WINAPI NtDuplicateToken(
 {
     NTSTATUS status;
 
-    TRACE("(%p,0x%08x,%p,0x%08x,0x%08x,%p)\n",
-        ExistingToken, DesiredAccess, ObjectAttributes,
-        ImpersonationLevel, TokenType, NewToken);
-        dump_ObjectAttributes(ObjectAttributes);
+    TRACE("(%p,0x%08x,%s,0x%08x,0x%08x,%p)\n",
+          ExistingToken, DesiredAccess, debugstr_ObjectAttributes(ObjectAttributes),
+          ImpersonationLevel, TokenType, NewToken);
 
     if (ObjectAttributes && ObjectAttributes->SecurityQualityOfService)
     {
@@ -74,13 +79,13 @@ NTSTATUS WINAPI NtDuplicateToken(
 
     SERVER_START_REQ( duplicate_token )
     {
-        req->handle              = ExistingToken;
+        req->handle              = wine_server_obj_handle( ExistingToken );
         req->access              = DesiredAccess;
         req->attributes          = ObjectAttributes ? ObjectAttributes->Attributes : 0;
         req->primary             = (TokenType == TokenPrimary);
         req->impersonation_level = ImpersonationLevel;
         status = wine_server_call( req );
-        if (!status) *NewToken = reply->new_handle;
+        if (!status) *NewToken = wine_server_ptr_handle( reply->new_handle );
     }
     SERVER_END_REQ;
 
@@ -96,21 +101,30 @@ NTSTATUS WINAPI NtOpenProcessToken(
 	DWORD DesiredAccess,
 	HANDLE *TokenHandle)
 {
+    return NtOpenProcessTokenEx( ProcessHandle, DesiredAccess, 0, TokenHandle );
+}
+
+/******************************************************************************
+ *  NtOpenProcessTokenEx   [NTDLL.@]
+ *  ZwOpenProcessTokenEx   [NTDLL.@]
+ */
+NTSTATUS WINAPI NtOpenProcessTokenEx( HANDLE process, DWORD access, DWORD attributes,
+                                      HANDLE *handle )
+{
     NTSTATUS ret;
 
-    TRACE("(%p,0x%08x,%p)\n", ProcessHandle,DesiredAccess, TokenHandle);
+    TRACE("(%p,0x%08x,0x%08x,%p)\n", process, access, attributes, handle);
 
     SERVER_START_REQ( open_token )
     {
-        req->handle     = ProcessHandle;
-        req->access     = DesiredAccess;
-        req->attributes = 0;
+        req->handle     = wine_server_obj_handle( process );
+        req->access     = access;
+        req->attributes = attributes;
         req->flags      = 0;
         ret = wine_server_call( req );
-        if (!ret) *TokenHandle = reply->token;
+        if (!ret) *handle = wine_server_ptr_handle( reply->token );
     }
     SERVER_END_REQ;
-
     return ret;
 }
 
@@ -124,20 +138,29 @@ NTSTATUS WINAPI NtOpenThreadToken(
 	BOOLEAN OpenAsSelf,
 	HANDLE *TokenHandle)
 {
+    return NtOpenThreadTokenEx( ThreadHandle, DesiredAccess, OpenAsSelf, 0, TokenHandle );
+}
+
+/******************************************************************************
+ *  NtOpenThreadTokenEx   [NTDLL.@]
+ *  ZwOpenThreadTokenEx   [NTDLL.@]
+ */
+NTSTATUS WINAPI NtOpenThreadTokenEx( HANDLE thread, DWORD access, BOOLEAN as_self, DWORD attributes,
+                                     HANDLE *handle )
+{
     NTSTATUS ret;
 
-    TRACE("(%p,0x%08x,0x%08x,%p)\n",
-          ThreadHandle,DesiredAccess, OpenAsSelf, TokenHandle);
+    TRACE("(%p,0x%08x,%u,0x%08x,%p)\n", thread, access, as_self, attributes, handle );
 
     SERVER_START_REQ( open_token )
     {
-        req->handle     = ThreadHandle;
-        req->access     = DesiredAccess;
-        req->attributes = 0;
+        req->handle     = wine_server_obj_handle( thread );
+        req->access     = access;
+        req->attributes = attributes;
         req->flags      = OPEN_TOKEN_THREAD;
-        if (OpenAsSelf) req->flags |= OPEN_TOKEN_AS_SELF;
+        if (as_self) req->flags |= OPEN_TOKEN_AS_SELF;
         ret = wine_server_call( req );
-        if (!ret) *TokenHandle = reply->token;
+        if (!ret) *handle = wine_server_ptr_handle( reply->token );
     }
     SERVER_END_REQ;
 
@@ -165,16 +188,16 @@ NTSTATUS WINAPI NtAdjustPrivilegesToken(
 
     SERVER_START_REQ( adjust_token_privileges )
     {
-        req->handle = TokenHandle;
+        req->handle = wine_server_obj_handle( TokenHandle );
         req->disable_all = DisableAllPrivileges;
         req->get_modified_state = (PreviousState != NULL);
         if (!DisableAllPrivileges)
         {
-            wine_server_add_data( req, &NewState->Privileges,
+            wine_server_add_data( req, NewState->Privileges,
                                   NewState->PrivilegeCount * sizeof(NewState->Privileges[0]) );
         }
         if (PreviousState && BufferLength >= FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
-            wine_server_set_reply( req, &PreviousState->Privileges,
+            wine_server_set_reply( req, PreviousState->Privileges,
                                    BufferLength - FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) );
         ret = wine_server_call( req );
         if (PreviousState)
@@ -219,9 +242,6 @@ NTSTATUS WINAPI NtQueryInformationToken(
     case TokenPrimaryGroup:
         len = sizeof(TOKEN_PRIMARY_GROUP);
         break;
-    case TokenDefaultDacl:
-        len = sizeof(TOKEN_DEFAULT_DACL);
-        break;
     case TokenSource:
         len = sizeof(TOKEN_SOURCE);
         break;
@@ -249,10 +269,10 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_user )
         {
             TOKEN_USER * tuser = tokeninfo;
-            PSID sid = (PSID) (tuser + 1);
+            PSID sid = tuser + 1;
             DWORD sid_len = tokeninfolength < sizeof(TOKEN_USER) ? 0 : tokeninfolength - sizeof(TOKEN_USER);
 
-            req->handle = token;
+            req->handle = wine_server_obj_handle( token );
             wine_server_set_reply( req, sid, sid_len );
             status = wine_server_call( req );
             if (retlen) *retlen = reply->user_len + sizeof(TOKEN_USER);
@@ -269,18 +289,20 @@ NTSTATUS WINAPI NtQueryInformationToken(
         char stack_buffer[256];
         unsigned int server_buf_len = sizeof(stack_buffer);
         void *buffer = stack_buffer;
-        BOOLEAN need_more_memory = FALSE;
+        BOOLEAN need_more_memory;
 
         /* we cannot work out the size of the server buffer required for the
          * input size, since there are two factors affecting how much can be
          * stored in the buffer - number of groups and lengths of sids */
         do
         {
+            need_more_memory = FALSE;
+
             SERVER_START_REQ( get_token_groups )
             {
                 TOKEN_GROUPS *groups = tokeninfo;
 
-                req->handle = token;
+                req->handle = wine_server_obj_handle( token );
                 wine_server_set_reply( req, buffer, server_buf_len );
                 status = wine_server_call( req );
                 if (status == STATUS_BUFFER_TOO_SMALL)
@@ -299,7 +321,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
                     struct token_groups *tg = buffer;
                     unsigned int *attr = (unsigned int *)(tg + 1);
                     ULONG i;
-                    const int non_sid_portion = (sizeof(struct token_groups) + tg->count * sizeof(unsigned long));
+                    const int non_sid_portion = (sizeof(struct token_groups) + tg->count * sizeof(unsigned int));
                     SID *sids = (SID *)((char *)tokeninfo + FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ));
                     ULONG needed_bytes = FIELD_OFFSET( TOKEN_GROUPS, Groups[tg->count] ) +
                         reply->user_len - non_sid_portion;
@@ -345,9 +367,9 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_privileges )
         {
             TOKEN_PRIVILEGES *tpriv = tokeninfo;
-            req->handle = token;
+            req->handle = wine_server_obj_handle( token );
             if (tpriv && tokeninfolength > FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ))
-                wine_server_set_reply( req, &tpriv->Privileges, tokeninfolength - FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) );
+                wine_server_set_reply( req, tpriv->Privileges, tokeninfolength - FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) );
             status = wine_server_call( req );
             if (retlen) *retlen = FIELD_OFFSET( TOKEN_PRIVILEGES, Privileges ) + reply->len;
             if (tpriv) tpriv->PrivilegeCount = reply->len / sizeof(LUID_AND_ATTRIBUTES);
@@ -358,7 +380,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         if (tokeninfo)
         {
             TOKEN_OWNER *owner = tokeninfo;
-            PSID sid = (PSID) (owner + 1);
+            PSID sid = owner + 1;
             SID_IDENTIFIER_AUTHORITY localSidAuthority = {SECURITY_NT_AUTHORITY};
             RtlInitializeSid(sid, &localSidAuthority, 1);
             *(RtlSubAuthoritySid(sid, 0)) = SECURITY_INTERACTIVE_RID;
@@ -369,7 +391,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_impersonation_level )
         {
             SECURITY_IMPERSONATION_LEVEL *impersonation_level = tokeninfo;
-            req->handle = token;
+            req->handle = wine_server_obj_handle( token );
             status = wine_server_call( req );
             if (status == STATUS_SUCCESS)
                 *impersonation_level = reply->impersonation_level;
@@ -380,7 +402,7 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_statistics )
         {
             TOKEN_STATISTICS *statistics = tokeninfo;
-            req->handle = token;
+            req->handle = wine_server_obj_handle( token );
             status = wine_server_call( req );
             if (status == STATUS_SUCCESS)
             {
@@ -409,10 +431,35 @@ NTSTATUS WINAPI NtQueryInformationToken(
         SERVER_START_REQ( get_token_statistics )
         {
             TOKEN_TYPE *token_type = tokeninfo;
-            req->handle = token;
+            req->handle = wine_server_obj_handle( token );
             status = wine_server_call( req );
             if (status == STATUS_SUCCESS)
                 *token_type = reply->primary ? TokenPrimary : TokenImpersonation;
+        }
+        SERVER_END_REQ;
+        break;
+    case TokenDefaultDacl:
+        SERVER_START_REQ( get_token_default_dacl )
+        {
+            TOKEN_DEFAULT_DACL *default_dacl = tokeninfo;
+            ACL *acl = (ACL *)(default_dacl + 1);
+            DWORD acl_len;
+
+            if (tokeninfolength < sizeof(TOKEN_DEFAULT_DACL)) acl_len = 0;
+            else acl_len = tokeninfolength - sizeof(TOKEN_DEFAULT_DACL);
+
+            req->handle = wine_server_obj_handle( token );
+            wine_server_set_reply( req, acl, acl_len );
+            status = wine_server_call( req );
+
+            if (retlen) *retlen = reply->acl_len + sizeof(TOKEN_DEFAULT_DACL);
+            if (status == STATUS_SUCCESS)
+            {
+                if (reply->acl_len)
+                    default_dacl->DefaultDacl = acl;
+                else
+                    default_dacl->DefaultDacl = NULL;
+            }
         }
         SERVER_END_REQ;
         break;
@@ -435,9 +482,44 @@ NTSTATUS WINAPI NtSetInformationToken(
         PVOID TokenInformation,
         ULONG TokenInformationLength)
 {
-    FIXME("%p %d %p %u\n", TokenHandle, TokenInformationClass,
-          TokenInformation, TokenInformationLength);
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS ret = STATUS_NOT_IMPLEMENTED;
+
+    TRACE("%p %d %p %u\n", TokenHandle, TokenInformationClass,
+           TokenInformation, TokenInformationLength);
+
+    switch (TokenInformationClass)
+    {
+    case TokenDefaultDacl:
+        if (TokenInformationLength < sizeof(TOKEN_DEFAULT_DACL))
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+        if (!TokenInformation)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+        SERVER_START_REQ( set_token_default_dacl )
+        {
+            ACL *acl = ((TOKEN_DEFAULT_DACL *)TokenInformation)->DefaultDacl;
+            WORD size;
+
+            if (acl) size = acl->AclSize;
+            else size = 0;
+
+            req->handle = wine_server_obj_handle( TokenHandle );
+            wine_server_add_data( req, acl, size );
+            ret = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        break;
+    default:
+        FIXME("unimplemented class %u\n", TokenInformationClass);
+        break;
+    }
+
+    return ret;
 }
 
 /******************************************************************************
@@ -469,11 +551,11 @@ NTSTATUS WINAPI NtPrivilegeCheck(
     NTSTATUS status;
     SERVER_START_REQ( check_token_privileges )
     {
-        req->handle = ClientToken;
+        req->handle = wine_server_obj_handle( ClientToken );
         req->all_required = ((RequiredPrivileges->Control & PRIVILEGE_SET_ALL_NECESSARY) ? TRUE : FALSE);
-        wine_server_add_data( req, &RequiredPrivileges->Privilege,
+        wine_server_add_data( req, RequiredPrivileges->Privilege,
             RequiredPrivileges->PrivilegeCount * sizeof(RequiredPrivileges->Privilege[0]) );
-        wine_server_set_reply( req, &RequiredPrivileges->Privilege,
+        wine_server_set_reply( req, RequiredPrivileges->Privilege,
             RequiredPrivileges->PrivilegeCount * sizeof(RequiredPrivileges->Privilege[0]) );
 
         status = wine_server_call( req );
@@ -544,6 +626,28 @@ NTSTATUS WINAPI NtConnectPort(
 }
 
 /******************************************************************************
+ *  NtSecureConnectPort                (NTDLL.@)
+ *  ZwSecureConnectPort                (NTDLL.@)
+ */
+NTSTATUS WINAPI NtSecureConnectPort(
+        PHANDLE PortHandle,
+        PUNICODE_STRING PortName,
+        PSECURITY_QUALITY_OF_SERVICE SecurityQos,
+        PLPC_SECTION_WRITE WriteSection,
+        PSID pSid,
+        PLPC_SECTION_READ ReadSection,
+        PULONG MaximumMessageLength,
+        PVOID ConnectInfo,
+        PULONG pConnectInfoLength)
+{
+    FIXME("(%p,%s,%p,%p,%p,%p,%p,%p,%p),stub!\n",
+          PortHandle,debugstr_w(PortName->Buffer),SecurityQos,
+          WriteSection,pSid,ReadSection,MaximumMessageLength,ConnectInfo,
+          pConnectInfoLength);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
  *  NtListenPort		[NTDLL.@]
  *  ZwListenPort		[NTDLL.@]
  */
@@ -609,8 +713,8 @@ NTSTATUS WINAPI NtRequestWaitReplyPort(
     TRACE("\tVirtualRangesOffset = %u\n",pLpcMessageIn->VirtualRangesOffset);
     TRACE("\tClientId.UniqueProcess = %p\n",pLpcMessageIn->ClientId.UniqueProcess);
     TRACE("\tClientId.UniqueThread  = %p\n",pLpcMessageIn->ClientId.UniqueThread);
-    TRACE("\tMessageId           = %u\n",pLpcMessageIn->MessageId);
-    TRACE("\tSectionSize         = %u\n",pLpcMessageIn->SectionSize);
+    TRACE("\tMessageId           = %lu\n",pLpcMessageIn->MessageId);
+    TRACE("\tSectionSize         = %lu\n",pLpcMessageIn->SectionSize);
     TRACE("\tData                = %s\n",
       debugstr_an((const char*)pLpcMessageIn->Data,pLpcMessageIn->DataSize));
   }
@@ -684,17 +788,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         {
             SYSTEM_BASIC_INFORMATION sbi;
 
-            sbi.dwUnknown1 = 0;
-            sbi.uKeMaximumIncrement = 0;
-            sbi.uPageSize = 1024; /* FIXME */
-            sbi.uMmNumberOfPhysicalPages = 12345; /* FIXME */
-            sbi.uMmLowestPhysicalPage = 0; /* FIXME */
-            sbi.uMmHighestPhysicalPage = 12345; /* FIXME */
-            sbi.uAllocationGranularity = 65536; /* FIXME */
-            sbi.pLowestUserAddress = 0; /* FIXME */
-            sbi.pMmHighestUserAddress = (void*)~0; /* FIXME */
-            sbi.uKeActiveProcessors = 1; /* FIXME */
-            sbi.bKeNumberProcessors = 1; /* FIXME */
+            virtual_get_system_info( &sbi );
             len = sizeof(sbi);
 
             if ( Length == len)
@@ -728,6 +822,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
     case SystemPerformanceInformation:
         {
             SYSTEM_PERFORMANCE_INFORMATION spi;
+            static BOOL fixme_written = FALSE;
 
             memset(&spi, 0 , sizeof(spi));
             len = sizeof(spi);
@@ -738,7 +833,10 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                 else memcpy( SystemInformation, &spi, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
-            FIXME("info_class SYSTEM_PERFORMANCE_INFORMATION\n");
+            if(!fixme_written) {
+                FIXME("info_class SYSTEM_PERFORMANCE_INFORMATION\n");
+                fixme_written = TRUE;
+            }
         }
         break;
     case SystemTimeOfDayInformation:
@@ -761,7 +859,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         break;
     case SystemProcessInformation:
         {
-            SYSTEM_PROCESS_INFORMATION* spi = (SYSTEM_PROCESS_INFORMATION*)SystemInformation;
+            SYSTEM_PROCESS_INFORMATION* spi = SystemInformation;
             SYSTEM_PROCESS_INFORMATION* last = NULL;
             HANDLE hSnap = 0;
             WCHAR procname[1024];
@@ -773,8 +871,8 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             {
                 req->flags      = SNAP_PROCESS | SNAP_THREAD;
                 req->attributes = 0;
-                req->pid        = 0;
-                if (!(ret = wine_server_call( req ))) hSnap = reply->handle;
+                if (!(ret = wine_server_call( req )))
+                    hSnap = wine_server_ptr_handle( reply->handle );
             }
             SERVER_END_REQ;
             len = 0;
@@ -782,7 +880,7 @@ NTSTATUS WINAPI NtQuerySystemInformation(
             {
                 SERVER_START_REQ( next_process )
                 {
-                    req->handle = hSnap;
+                    req->handle = wine_server_obj_handle( hSnap );
                     req->reset = (len == 0);
                     wine_server_set_reply( req, procname, sizeof(procname)-sizeof(WCHAR) );
                     if (!(ret = wine_server_call( req )))
@@ -806,15 +904,15 @@ NTSTATUS WINAPI NtQuerySystemInformation(
  
                             memset(spi, 0, sizeof(*spi));
 
-                            spi->dwOffset = procstructlen - wlen;
+                            spi->NextEntryOffset = procstructlen - wlen;
                             spi->dwThreadCount = reply->threads;
 
                             /* spi->pszProcessName will be set later on */
 
                             spi->dwBasePriority = reply->priority;
-                            spi->dwProcessID = (DWORD)reply->pid;
-                            spi->dwParentProcessID = (DWORD)reply->ppid;
-                            spi->dwHandleCount = reply->handles;
+                            spi->UniqueProcessId = UlongToHandle(reply->pid);
+                            spi->ParentProcessId = UlongToHandle(reply->ppid);
+                            spi->HandleCount = reply->handles;
 
                             /* spi->ti will be set later on */
 
@@ -840,12 +938,12 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                     {
                         SERVER_START_REQ( next_thread )
                         {
-                            req->handle = hSnap;
+                            req->handle = wine_server_obj_handle( hSnap );
                             req->reset = (j == 0);
                             if (!(ret = wine_server_call( req )))
                             {
                                 j++;
-                                if (reply->pid == spi->dwProcessID)
+                                if (UlongToHandle(reply->pid) == spi->UniqueProcessId)
                                 {
                                     /* ftKernelTime, ftUserTime, ftCreateTime;
                                      * dwTickCount, dwStartAddress
@@ -853,8 +951,9 @@ NTSTATUS WINAPI NtQuerySystemInformation(
 
                                     memset(&spi->ti[i], 0, sizeof(spi->ti));
 
-                                    spi->ti[i].dwOwningPID = reply->pid;
-                                    spi->ti[i].dwThreadID  = reply->tid;
+                                    spi->ti[i].CreateTime.QuadPart = 0xdeadbeef;
+                                    spi->ti[i].ClientId.UniqueProcess = UlongToHandle(reply->pid);
+                                    spi->ti[i].ClientId.UniqueThread  = UlongToHandle(reply->tid);
                                     spi->ti[i].dwCurrentPriority = reply->base_pri + reply->delta_pri;
                                     spi->ti[i].dwBasePriority = reply->base_pri;
                                     i++;
@@ -866,34 +965,145 @@ NTSTATUS WINAPI NtQuerySystemInformation(
                     if (ret == STATUS_NO_MORE_FILES) ret = STATUS_SUCCESS;
 
                     /* now append process name */
-                    spi->ProcessName.Buffer = (WCHAR*)((char*)spi + spi->dwOffset);
+                    spi->ProcessName.Buffer = (WCHAR*)((char*)spi + spi->NextEntryOffset);
                     spi->ProcessName.Length = wlen - sizeof(WCHAR);
                     spi->ProcessName.MaximumLength = wlen;
                     memcpy( spi->ProcessName.Buffer, exename, wlen );
-                    spi->dwOffset += wlen;
+                    spi->NextEntryOffset += wlen;
 
                     last = spi;
-                    spi = (SYSTEM_PROCESS_INFORMATION*)((char*)spi + spi->dwOffset);
+                    spi = (SYSTEM_PROCESS_INFORMATION*)((char*)spi + spi->NextEntryOffset);
                 }
             }
-            if (ret == STATUS_SUCCESS && last) last->dwOffset = 0;
+            if (ret == STATUS_SUCCESS && last) last->NextEntryOffset = 0;
             if (hSnap) NtClose(hSnap);
         }
         break;
     case SystemProcessorPerformanceInformation:
         {
-            SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION sppi;
+            SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION *sppi = NULL;
+            unsigned int cpus = 0;
+            int out_cpus = Length / sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION);
 
-            memset(&sppi, 0 , sizeof(sppi)); /* FIXME */
-            len = sizeof(sppi);
+            if (out_cpus == 0)
+            {
+                len = 0;
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+                break;
+            }
+            else
+#ifdef __APPLE__
+            {
+                processor_cpu_load_info_data_t *pinfo;
+                mach_msg_type_number_t info_count;
+
+                if (host_processor_info (mach_host_self (),
+                                         PROCESSOR_CPU_LOAD_INFO,
+                                         &cpus,
+                                         (processor_info_array_t*)&pinfo,
+                                         &info_count) == 0)
+                {
+                    int i;
+                    cpus = min(cpus,out_cpus);
+                    len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * cpus;
+                    sppi = RtlAllocateHeap(GetProcessHeap(), 0,len);
+                    for (i = 0; i < cpus; i++)
+                    {
+                        sppi[i].IdleTime.QuadPart = pinfo[i].cpu_ticks[CPU_STATE_IDLE];
+                        sppi[i].KernelTime.QuadPart = pinfo[i].cpu_ticks[CPU_STATE_SYSTEM];
+                        sppi[i].UserTime.QuadPart = pinfo[i].cpu_ticks[CPU_STATE_USER];
+                    }
+                    vm_deallocate (mach_task_self (), (vm_address_t) pinfo, info_count * sizeof(natural_t));
+                }
+            }
+#else
+            {
+                FILE *cpuinfo = fopen("/proc/stat","r");
+                if (cpuinfo)
+                {
+                    unsigned usr,nice,sys;
+                    unsigned long idle;
+                    int count;
+                    char name[10];
+                    char line[255];
+
+                    /* first line is combined usage */
+                    if (fgets(line,255,cpuinfo))
+                        count = sscanf(line,"%s %u %u %u %lu",name, &usr, &nice,
+                                   &sys, &idle);
+                    else
+                        count = 0;
+                    /* we set this up in the for older non-smp enabled kernels */
+                    if (count == 5 && strcmp(name,"cpu")==0)
+                    {
+                        sppi = RtlAllocateHeap(GetProcessHeap(), 0,
+                                               sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
+                        sppi->IdleTime.QuadPart = idle;
+                        sppi->KernelTime.QuadPart = sys;
+                        sppi->UserTime.QuadPart = usr;
+                        cpus = 1;
+                        len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION);
+                    }
+
+                    do
+                    {
+                        if (fgets(line,255,cpuinfo))
+                            count = sscanf(line,"%s %u %u %u %lu",name, &usr,
+                                       &nice, &sys, &idle);
+                        else
+                            count = 0;
+                        if (count == 5 && strncmp(name,"cpu",3)==0)
+                        {
+                            out_cpus --;
+                            if (name[3]=='0') /* first cpu */
+                            {
+                                sppi->IdleTime.QuadPart = idle;
+                                sppi->KernelTime.QuadPart = sys;
+                                sppi->UserTime.QuadPart = usr;
+                            }
+                            else /* new cpu */
+                            {
+                                len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION) * (cpus+1);
+                                sppi = RtlReAllocateHeap(GetProcessHeap(), 0, sppi, len);
+                                sppi[cpus].IdleTime.QuadPart = idle;
+                                sppi[cpus].KernelTime.QuadPart = sys;
+                                sppi[cpus].UserTime.QuadPart = usr;
+                                cpus++;
+                            }
+                        }
+                        else
+                            break;
+                    } while (out_cpus > 0);
+                    fclose(cpuinfo);
+                }
+            }
+#endif
+
+            if (cpus == 0)
+            {
+                static int i = 1;
+
+                sppi = RtlAllocateHeap(GetProcessHeap(),0,sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
+
+                memset(sppi, 0 , sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION));
+                FIXME("stub info_class SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION\n");
+
+                /* many programs expect these values to change so fake change */
+                len = sizeof(SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION);
+                sppi->KernelTime.QuadPart = 1 * i;
+                sppi->UserTime.QuadPart = 2 * i;
+                sppi->IdleTime.QuadPart = 3 * i;
+                i++;
+            }
 
             if (Length >= len)
             {
                 if (!SystemInformation) ret = STATUS_ACCESS_VIOLATION;
-                else memcpy( SystemInformation, &sppi, len);
+                else memcpy( SystemInformation, sppi, len);
             }
             else ret = STATUS_INFO_LENGTH_MISMATCH;
-            FIXME("info_class SYSTEM_PROCESSOR_PERFORMANCE_INFORMATION\n");
+
+            RtlFreeHeap(GetProcessHeap(),0,sppi);
         }
         break;
     case SystemModuleInformation:
@@ -1080,7 +1290,7 @@ NTSTATUS WINAPI NtPowerInformation(
 		InformationLevel,lpInputBuffer,nInputBufferSize,lpOutputBuffer,nOutputBufferSize);
 	switch(InformationLevel) {
 		case SystemPowerCapabilities: {
-			PSYSTEM_POWER_CAPABILITIES PowerCaps = (PSYSTEM_POWER_CAPABILITIES)lpOutputBuffer;
+			PSYSTEM_POWER_CAPABILITIES PowerCaps = lpOutputBuffer;
 			FIXME("semi-stub: SystemPowerCapabilities\n");
 			if (nOutputBufferSize < sizeof(SYSTEM_POWER_CAPABILITIES))
 				return STATUS_BUFFER_TOO_SMALL;
@@ -1118,8 +1328,18 @@ NTSTATUS WINAPI NtPowerInformation(
 			PowerCaps->DefaultLowLatencyWake = PowerSystemUnspecified;
 			return STATUS_SUCCESS;
 		}
+		case SystemExecutionState: {
+			PULONG ExecutionState = lpOutputBuffer;
+			WARN("semi-stub: SystemExecutionState\n"); /* Needed for .NET Framework, but using a FIXME is really noisy. */
+			if (lpInputBuffer != NULL)
+				return STATUS_INVALID_PARAMETER;
+			/* FIXME: The actual state should be the value set by SetThreadExecutionState which is not currently implemented. */
+			*ExecutionState = ES_USER_PRESENT;
+			return STATUS_SUCCESS;
+		}
 		default:
-			FIXME("Unimplemented NtPowerInformation action: %d\n", InformationLevel);
+			/* FIXME: Needed by .NET Framework */
+			WARN("Unimplemented NtPowerInformation action: %d\n", InformationLevel);
 			return STATUS_NOT_IMPLEMENTED;
 	}
 }

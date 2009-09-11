@@ -40,27 +40,27 @@
  30 stdcall -noname GlobalUnWire16(long)
  31 stdcall -noname GlobalFree16(long)
  32 stdcall -noname GlobalSize16(long)
- 33 stdcall -noname HouseCleanLogicallyDeadHandles()
- 34 stdcall -noname GetWin16DOSEnv()
+ 33 stdcall -noname -i386 HouseCleanLogicallyDeadHandles()
+ 34 stdcall -noname -i386 GetWin16DOSEnv()
  35 stdcall -noname LoadLibrary16(str)
  36 stdcall -noname FreeLibrary16(long)
  37 stdcall -noname GetProcAddress16(long str) WIN32_GetProcAddress16
  38 stdcall -noname -i386 -register AllocMappedBuffer()
  39 stdcall -noname -i386 -register FreeMappedBuffer()
  40 stdcall -noname -i386 -register OT_32ThkLSF()
- 41 stdcall -noname ThunkInitLSF(long str long str str)
+ 41 stdcall -noname -i386 ThunkInitLSF(long str long str str)
  42 stdcall -noname -i386 -register LogApiThkLSF(str)
- 43 stdcall -noname ThunkInitLS(long str long str str)
+ 43 stdcall -noname -i386 ThunkInitLS(long str long str str)
  44 stdcall -noname -i386 -register LogApiThkSL(str)
  45 stdcall -noname -i386 -register Common32ThkLS()
- 46 stdcall -noname ThunkInitSL(long str long str str)
+ 46 stdcall -noname -i386 ThunkInitSL(long str long str str)
  47 stdcall -noname -i386 -register LogCBThkSL(str)
  48 stdcall -noname ReleaseThunkLock(ptr)
  49 stdcall -noname RestoreThunkLock(long)
 
  51 stdcall -noname -i386 -register W32S_BackTo32()
- 52 stdcall -noname GetThunkBuff()
- 53 stdcall -noname GetThunkStuff(str str)
+ 52 stdcall -noname -i386 GetThunkBuff()
+ 53 stdcall -noname -i386 GetThunkStuff(str str)
  54 stdcall -noname K32WOWCallback16(long long)
  55 stdcall -noname K32WOWCallback16Ex(ptr long long ptr ptr)
  56 stdcall -noname K32WOWGetVDMPointer(long long long)
@@ -94,20 +94,20 @@
  84 stdcall -noname -ret64 K32RtlConvertLongToLargeInteger(long) ntdll.RtlConvertLongToLargeInteger
  85 stdcall -noname -ret64 K32RtlConvertUlongToLargeInteger(long) ntdll.RtlConvertUlongToLargeInteger
  86 stdcall @(ptr) _KERNEL32_86
- 87 stdcall -noname SSOnBigStack()
- 88 varargs -noname SSCall(long long ptr)
+ 87 stdcall -noname -i386 SSOnBigStack()
+ 88 varargs -noname -i386 SSCall(long long ptr)
  89 stdcall -noname -i386 -register FT_PrologPrime()
  90 stdcall -noname -i386 -register QT_ThunkPrime()
- 91 stdcall -noname PK16FNF(ptr)
- 92 stdcall -noname GetPK16SysVar()
+ 91 stdcall -noname -i386 PK16FNF(ptr)
+ 92 stdcall -noname -i386 GetPK16SysVar()
  93 stdcall -noname GetpWin16Lock(ptr)
  94 stdcall -noname _CheckNotSysLevel(ptr)
  95 stdcall -noname _ConfirmSysLevel(ptr)
  96 stdcall -noname _ConfirmWin16Lock()
  97 stdcall -noname _EnterSysLevel(ptr)
  98 stdcall -noname _LeaveSysLevel(ptr)
- 99 stdcall @(long) _KERNEL32_99
-100 stdcall @(long long long) _KERNEL32_100
+ 99 stdcall -i386 @(long) _KERNEL32_99
+100 stdcall -i386 @(long long long) _KERNEL32_100
 101 stub @
 102 stub @
 103 stub @
@@ -143,8 +143,8 @@
 @ stdcall AddRefActCtx(ptr)
 @ stdcall AddVectoredExceptionHandler(long ptr) ntdll.RtlAddVectoredExceptionHandler
 @ stdcall AllocConsole()
-@ stub AllocLSCallback
-@ stdcall AllocSLCallback(ptr ptr)
+@ stub -i386 AllocLSCallback
+@ stdcall -i386 AllocSLCallback(ptr ptr)
 @ stub AllocateUserPhysicalPages
 @ stdcall AreFileApisANSI()
 @ stdcall AssignProcessToJobObject(ptr ptr)
@@ -177,9 +177,10 @@
 @ stdcall CallNamedPipeW(wstr ptr long ptr long ptr long)
 @ stub CancelDeviceWakeupRequest
 @ stdcall CancelIo(long)
+@ stdcall CancelIoEx(long ptr)
 # @ stub CancelTimerQueueTimer
 @ stdcall CancelWaitableTimer(long)
-@ stub ChangeTimerQueueTimer
+@ stdcall ChangeTimerQueueTimer(ptr ptr long long)
 # @ stub CheckNameLegalDOS8Dot3A
 # @ stub CheckNameLegalDOS8Dot3W
 @ stdcall CheckRemoteDebuggerPresent(long ptr)
@@ -217,6 +218,8 @@
 @ stdcall CreateDirectoryExW(wstr wstr ptr)
 @ stdcall CreateDirectoryW(wstr ptr)
 @ stdcall CreateEventA(ptr long long str)
+@ stdcall CreateEventExA(ptr str long long)
+@ stdcall CreateEventExW(ptr wstr long long)
 @ stdcall CreateEventW(ptr long long wstr)
 @ stdcall CreateFiber(long ptr ptr)
 @ stdcall CreateFiberEx(long long long ptr ptr)
@@ -224,8 +227,8 @@
 @ stdcall CreateFileMappingA(long ptr long long long str)
 @ stdcall CreateFileMappingW(long ptr long long long wstr)
 @ stdcall CreateFileW(wstr long long ptr long long long)
-# @ stub CreateHardLinkA
-# @ stub CreateHardLinkW
+@ stdcall CreateHardLinkA(str str ptr)
+@ stdcall CreateHardLinkW(wstr wstr ptr)
 @ stdcall CreateIoCompletionPort(long long long long)
 @ stdcall CreateJobObjectA(ptr str)
 @ stdcall CreateJobObjectW(ptr wstr)
@@ -235,6 +238,8 @@
 @ stdcall CreateMailslotW(ptr long long ptr)
 # @ stub CreateMemoryResourceNotification
 @ stdcall CreateMutexA(ptr long str)
+@ stdcall CreateMutexExA(ptr str long long)
+@ stdcall CreateMutexExW(ptr wstr long long)
 @ stdcall CreateMutexW(ptr long wstr)
 @ stdcall CreateNamedPipeA(str long long long long long long ptr)
 @ stdcall CreateNamedPipeW(wstr long long long long long long ptr)
@@ -247,6 +252,8 @@
 @ stdcall CreateProcessW(wstr wstr ptr ptr long long ptr wstr ptr ptr)
 @ stdcall CreateRemoteThread(long ptr long ptr long long ptr)
 @ stdcall CreateSemaphoreA(ptr long long str)
+@ stdcall CreateSemaphoreExA(ptr long long str long long)
+@ stdcall CreateSemaphoreExW(ptr long long wstr long long)
 @ stdcall CreateSemaphoreW(ptr long long wstr)
 @ stdcall CreateSocketHandle()
 @ stdcall CreateTapePartition(long long long long)
@@ -256,6 +263,8 @@
 @ stdcall CreateToolhelp32Snapshot(long long)
 @ stub CreateVirtualBuffer
 @ stdcall CreateWaitableTimerA(ptr long str)
+@ stdcall CreateWaitableTimerExA(ptr str long long)
+@ stdcall CreateWaitableTimerExW(ptr wstr long long)
 @ stdcall CreateWaitableTimerW(ptr long wstr)
 @ stdcall DeactivateActCtx(long ptr)
 @ stdcall DebugActiveProcess(long)
@@ -273,7 +282,7 @@
 @ stdcall DeleteFiber(ptr)
 @ stdcall DeleteFileA(str)
 @ stdcall DeleteFileW(wstr)
-# @ stub DeleteTimerQueue
+@ stdcall DeleteTimerQueue(long)
 @ stdcall DeleteTimerQueueEx (long long)
 @ stdcall DeleteTimerQueueTimer(long long long)
 # @ stub DeleteVolumeMountPointA
@@ -407,17 +416,17 @@
 @ stdcall FreeLibrary(long)
 @ stdcall FreeLibraryAndExitThread(long long)
 @ stdcall FreeResource(long)
-@ stdcall FreeSLCallback(long)
+@ stdcall -i386 FreeSLCallback(long)
 @ stub FreeUserPhysicalPages
 @ stub FreeVirtualBuffer
 @ stdcall GenerateConsoleCtrlEvent(long long)
-@ stdcall Get16DLLAddress(long str)
+@ stdcall -i386 Get16DLLAddress(long str)
 @ stdcall GetACP()
 @ stdcall GetAtomNameA(long ptr long)
 @ stdcall GetAtomNameW(long ptr long)
-@ stdcall GetBinaryType(ptr ptr) GetBinaryTypeA
-@ stdcall GetBinaryTypeA(ptr ptr)
-@ stdcall GetBinaryTypeW(ptr ptr)
+@ stdcall GetBinaryType(str ptr) GetBinaryTypeA
+@ stdcall GetBinaryTypeA(str ptr)
+@ stdcall GetBinaryTypeW(wstr ptr)
 # @ stub GetCPFileNameFromRegistry
 @ stdcall GetCPInfo(long ptr)
 @ stdcall GetCPInfoExA(long long ptr)
@@ -444,7 +453,7 @@
 @ stub GetConsoleAliasExesLengthA
 @ stub GetConsoleAliasExesLengthW
 @ stub GetConsoleAliasExesW
-@ stub GetConsoleAliasW
+@ stdcall GetConsoleAliasW(wstr ptr long wstr)
 @ stub GetConsoleAliasesA
 @ stub GetConsoleAliasesLengthA
 @ stub GetConsoleAliasesLengthW
@@ -457,7 +466,7 @@
 @ stub GetConsoleCommandHistoryW
 @ stdcall GetConsoleCursorInfo(long ptr)
 @ stub GetConsoleCursorMode
-@ stub GetConsoleDisplayMode
+@ stdcall GetConsoleDisplayMode(ptr)
 @ stub GetConsoleFontInfo
 @ stub GetConsoleFontSize
 @ stub GetConsoleHardwareState
@@ -505,7 +514,7 @@
 @ stdcall GetEnvironmentStringsW()
 @ stdcall GetEnvironmentVariableA(str ptr long)
 @ stdcall GetEnvironmentVariableW(wstr ptr long)
-@ stub GetErrorMode
+@ stdcall GetErrorMode()
 @ stdcall GetExitCodeProcess(long ptr)
 @ stdcall GetExitCodeThread(long ptr)
 @ stdcall GetExpandedNameA(str ptr)
@@ -620,7 +629,7 @@
 @ stdcall GetSystemTime(ptr)
 @ stdcall GetSystemTimeAdjustment(ptr ptr ptr)
 @ stdcall GetSystemTimeAsFileTime(ptr)
-# @ stub GetSystemTimes
+@ stdcall GetSystemTimes(ptr ptr ptr)
 @ stdcall GetSystemWindowsDirectoryA(ptr long)
 @ stdcall GetSystemWindowsDirectoryW(ptr long)
 @ stdcall GetSystemWow64DirectoryA(ptr long)
@@ -663,7 +672,7 @@
 # @ stub GetVolumePathNamesForVolumeNameW
 @ stdcall GetWindowsDirectoryA(ptr long)
 @ stdcall GetWindowsDirectoryW(ptr long)
-@ stub GetWriteWatch
+@ stdcall GetWriteWatch(long ptr long ptr ptr ptr)
 @ stdcall GlobalAddAtomA(str)
 @ stdcall GlobalAddAtomW(wstr)
 @ stdcall GlobalAlloc(long long)
@@ -712,13 +721,14 @@
 @ stdcall InitAtomTable(long)
 @ stdcall InitializeCriticalSection(ptr)
 @ stdcall InitializeCriticalSectionAndSpinCount(ptr long)
+@ stdcall InitializeCriticalSectionEx(ptr long long)
 @ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
-@ stdcall InterlockedCompareExchange (ptr long long)
-@ stdcall InterlockedDecrement(ptr)
-@ stdcall InterlockedExchange(ptr long)
-@ stdcall InterlockedExchangeAdd (ptr long )
+@ stdcall -arch=i386 InterlockedCompareExchange (ptr long long)
+@ stdcall -arch=i386 InterlockedDecrement(ptr)
+@ stdcall -arch=i386 InterlockedExchange(ptr long)
+@ stdcall -arch=i386 InterlockedExchangeAdd (ptr long )
 @ stdcall InterlockedFlushSList(ptr) ntdll.RtlInterlockedFlushSList
-@ stdcall InterlockedIncrement(ptr)
+@ stdcall -arch=i386 InterlockedIncrement(ptr)
 @ stdcall InterlockedPopEntrySList(ptr) ntdll.RtlInterlockedPopEntrySList
 @ stdcall InterlockedPushEntrySList(ptr ptr) ntdll.RtlInterlockedPushEntrySList
 @ stub InvalidateConsoleDIBits
@@ -734,7 +744,7 @@
 @ stdcall IsDBCSLeadByteEx(long long)
 @ stdcall IsDebuggerPresent()
 @ stub IsLSCallback
-# @ stub IsProcessInJob
+@ stdcall IsProcessInJob(long long ptr)
 @ stdcall IsProcessorFeaturePresent(long)
 @ stub IsSLCallback
 @ stdcall IsSystemResumeAutomatic()
@@ -821,12 +831,12 @@
 @ stdcall OpenFile(str ptr long)
 @ stdcall OpenFileMappingA(long long str)
 @ stdcall OpenFileMappingW(long long wstr)
-@ stub OpenJobObjectA
-@ stub OpenJobObjectW
+@ stdcall OpenJobObjectA(long long str)
+@ stdcall OpenJobObjectW(long long wstr)
 @ stdcall OpenMutexA(long long str)
 @ stdcall OpenMutexW(long long wstr)
 @ stdcall OpenProcess(long long long)
-@ stub OpenProfileUserMapping
+@ stdcall OpenProfileUserMapping()
 @ stdcall OpenSemaphoreA(long long str)
 @ stdcall OpenSemaphoreW(long long wstr)
 @ stdcall OpenThread(long long long)
@@ -856,7 +866,9 @@
 @ stdcall QueryDepthSList(ptr) ntdll.RtlQueryDepthSList
 @ stdcall QueryDosDeviceA(str ptr long)
 @ stdcall QueryDosDeviceW(wstr ptr long)
-@ stub QueryInformationJobObject
+@ stdcall QueryFullProcessImageNameA(ptr long ptr ptr)
+@ stdcall QueryFullProcessImageNameW(ptr long ptr ptr)
+@ stdcall QueryInformationJobObject(long long ptr long ptr)
 # @ stub QueryMemoryResourceNotification
 @ stub QueryNumberOfEventLogRecords
 @ stub QueryOldestEventLogRecord
@@ -908,14 +920,17 @@
 @ stub RequestDeviceWakeup
 @ stdcall RequestWakeupLatency(long)
 @ stdcall ResetEvent(long)
-@ stub ResetWriteWatch
+@ stdcall ResetWriteWatch(ptr long)
 @ stdcall RestoreLastError(long) ntdll.RtlRestoreLastWin32Error
 @ stdcall ResumeThread(long)
-# @ stub RtlCaptureContext ( -> ntdll.RtlCaptureContext)
-# @ stub RtlCaptureStackBackTrace ( -> ntdll.RtlCaptureStackBackTrace)
+@ stdcall -register RtlCaptureContext(ptr) ntdll.RtlCaptureContext
+@ stdcall RtlCaptureStackBackTrace(long long ptr ptr) ntdll.RtlCaptureStackBackTrace
 @ stdcall RtlFillMemory(ptr long long) ntdll.RtlFillMemory
+@ stdcall -arch=x86_64 RtlLookupFunctionEntry(long ptr ptr) ntdll.RtlLookupFunctionEntry
 @ stdcall RtlMoveMemory(ptr ptr long) ntdll.RtlMoveMemory
 @ stdcall RtlUnwind(ptr ptr ptr long) ntdll.RtlUnwind
+@ stdcall -arch=x86_64 RtlUnwindEx(long long ptr long ptr) ntdll.RtlUnwindEx
+@ stdcall -arch=x86_64 RtlVirtualUnwind(long long long ptr ptr ptr ptr ptr) ntdll.RtlVirtualUnwind
 @ stdcall RtlZeroMemory(ptr long) ntdll.RtlZeroMemory
 @ stdcall -i386 -norelay SMapLS()
 @ stdcall -i386 -norelay SMapLS_IP_EBP_12()
@@ -963,7 +978,7 @@
 @ stdcall SetConsoleCursorInfo(long ptr)
 @ stub SetConsoleCursorMode
 @ stdcall SetConsoleCursorPosition(long long)
-@ stub SetConsoleDisplayMode
+@ stdcall SetConsoleDisplayMode(long long ptr)
 @ stub SetConsoleFont
 @ stub SetConsoleHardwareState
 @ stub SetConsoleIcon
@@ -1013,7 +1028,7 @@
 @ stdcall SetHandleContext(long long)
 @ stdcall SetHandleCount(long)
 @ stdcall SetHandleInformation(long long long)
-@ stub SetInformationJobObject
+@ stdcall SetInformationJobObject(long long ptr long)
 @ stub SetLastConsoleEventActive
 @ stdcall SetLastError(long)
 # @ stub SetLocalPrimaryComputerNameA
@@ -1065,13 +1080,13 @@
 @ stdcall SwitchToThread()
 @ stdcall SystemTimeToFileTime(ptr ptr)
 @ stdcall SystemTimeToTzSpecificLocalTime (ptr ptr ptr)
-@ stub TerminateJobObject
+@ stdcall TerminateJobObject(long long)
 @ stdcall TerminateProcess(long long)
 @ stdcall TerminateThread(long long)
 @ stdcall TermsrvAppInstallMode()
 @ stdcall Thread32First(long ptr)
 @ stdcall Thread32Next(long ptr)
-@ stdcall ThunkConnect32(ptr str str str ptr ptr)
+@ stdcall -i386 ThunkConnect32(ptr str str str ptr ptr)
 @ stdcall TlsAlloc()
 @ stub TlsAllocInternal
 @ stdcall TlsFree(long)
@@ -1084,8 +1099,8 @@
 @ stub TrimVirtualBuffer
 @ stdcall TryEnterCriticalSection(ptr) ntdll.RtlTryEnterCriticalSection
 @ stdcall TzSpecificLocalTimeToSystemTime(ptr ptr ptr)
-@ stdcall UTRegister(long str str str ptr ptr ptr)
-@ stdcall UTUnRegister(long)
+@ stdcall -i386 UTRegister(long str str str ptr ptr ptr)
+@ stdcall -i386 UTUnRegister(long)
 @ stdcall UnMapLS(long)
 @ stdcall -i386 -norelay UnMapSLFixArray(long long)
 @ stdcall UnhandledExceptionFilter(ptr)
@@ -1119,7 +1134,7 @@
 @ stdcall VirtualQuery(ptr ptr long)
 @ stdcall VirtualQueryEx(long ptr ptr long)
 @ stdcall VirtualUnlock(ptr long)
-# @ stub WTSGetActiveConsoleSessionId
+@ stdcall WTSGetActiveConsoleSessionId()
 @ stdcall WaitCommEvent(long ptr ptr)
 @ stdcall WaitForDebugEvent(ptr long)
 @ stdcall WaitForMultipleObjects(long ptr long long)
@@ -1130,6 +1145,9 @@
 @ stdcall WaitNamedPipeW (wstr long)
 @ stdcall WideCharToMultiByte(long long wstr long ptr long ptr ptr)
 @ stdcall WinExec(str long)
+@ stdcall Wow64EnableWow64FsRedirection(long)
+@ stdcall Wow64DisableWow64FsRedirection(ptr)
+@ stdcall Wow64RevertWow64FsRedirection(ptr)
 @ stdcall WriteConsoleA(long ptr long ptr ptr)
 @ stdcall WriteConsoleInputA(long ptr long ptr)
 @ stub WriteConsoleInputVDMA
@@ -1212,6 +1230,7 @@
 @ stdcall GlobalDOSFree16(long)
 @ stdcall GlobalFlags16(long)
 @ stdcall GlobalReAlloc16(long long long)
+@ stdcall InitTask16(ptr)
 @ stdcall IsBadReadPtr16(long long)
 @ stdcall IsTask16(long)
 @ stdcall LoadModule16(str long)
@@ -1240,10 +1259,10 @@
 # or 'wine_' (for user-visible functions) to avoid namespace conflicts.
 
 # 16-bit relays
-@ cdecl __wine_dll_register_16(ptr str)
-@ cdecl __wine_dll_unregister_16(ptr)
-@ varargs -private __wine_call_from_16_regs()
-@ cdecl __wine_emulate_instruction(ptr ptr)
+@ cdecl -i386 __wine_dll_register_16(ptr str)
+@ cdecl -i386 __wine_dll_unregister_16(ptr)
+@ varargs -i386 -private __wine_call_from_16_regs()
+@ cdecl -i386 __wine_emulate_instruction(ptr ptr)
 
 # Unix files
 @ cdecl wine_get_unix_file_name(wstr)

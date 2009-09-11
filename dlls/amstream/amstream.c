@@ -57,6 +57,11 @@ HRESULT AM_create(IUnknown *pUnkOuter, LPVOID *ppObj)
         return CLASS_E_NOAGGREGATION;
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IAMMultiMediaStreamImpl));
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return E_OUTOFMEMORY;
+    }
 
     object->lpVtbl.lpVtbl = &AM_Vtbl;
     object->ref = 1;
@@ -71,7 +76,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_QueryInterface(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
+    TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IAMMultiMediaStream))
@@ -113,7 +118,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetInformation(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pdwFlags, pStreamType); 
+    FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pdwFlags, pStreamType);
 
     return E_NOTIMPL;
 }
@@ -124,7 +129,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetMediaStream(IAMMultiMediaStream
     MSPID PurposeId;
     unsigned int i;
 
-    TRACE("(%p/%p)->(%p,%p)\n", This, iface, idPurpose, ppMediaStream);
+    TRACE("(%p/%p)->(%s,%p)\n", This, iface, debugstr_guid(idPurpose), ppMediaStream);
 
     for (i = 0; i < This->nbStreams; i++)
     {
@@ -140,11 +145,11 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetMediaStream(IAMMultiMediaStream
     return MS_E_NOSTREAM;
 }
 
-static HRESULT WINAPI IAMMultiMediaStreamImpl_EnumMediaStreams(IAMMultiMediaStream* iface, long Index, IMediaStream** ppMediaStream)
+static HRESULT WINAPI IAMMultiMediaStreamImpl_EnumMediaStreams(IAMMultiMediaStream* iface, LONG Index, IMediaStream** ppMediaStream)
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%ld,%p) stub!\n", This, iface, Index, ppMediaStream); 
+    FIXME("(%p/%p)->(%d,%p) stub!\n", This, iface, Index, ppMediaStream);
 
     return E_NOTIMPL;
 }
@@ -153,7 +158,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetState(IAMMultiMediaStream* ifac
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentState); 
+    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentState);
 
     return E_NOTIMPL;
 }
@@ -162,7 +167,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_SetState(IAMMultiMediaStream* ifac
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->() stub!\n", This, iface); 
+    FIXME("(%p/%p)->() stub!\n", This, iface);
 
     return E_NOTIMPL;
 }
@@ -171,7 +176,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetTime(IAMMultiMediaStream* iface
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentTime); 
+    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pCurrentTime);
 
     return E_NOTIMPL;
 }
@@ -180,7 +185,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetDuration(IAMMultiMediaStream* i
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pDuration); 
+    FIXME("(%p/%p)->(%p) stub!\n", This, iface, pDuration);
 
     return E_NOTIMPL;
 }
@@ -189,7 +194,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_Seek(IAMMultiMediaStream* iface, S
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->() stub!\n", This, iface); 
+    FIXME("(%p/%p)->() stub!\n", This, iface);
 
     return E_NOTIMPL;
 }
@@ -198,7 +203,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetEndOfStream(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, phEOS); 
+    FIXME("(%p/%p)->(%p) stub!\n", This, iface, phEOS);
 
     return E_NOTIMPL;
 }
@@ -209,7 +214,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_Initialize(IAMMultiMediaStream* if
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
     HRESULT hr = S_OK;
 
-    FIXME("(%p/%p)->(%x,%x,%p) partial stub!\n", This, iface, (DWORD)StreamType, dwFlags, pFilterGraph);
+    TRACE("(%p/%p)->(%x,%x,%p)\n", This, iface, (DWORD)StreamType, dwFlags, pFilterGraph);
 
     if (pFilterGraph)
     {
@@ -233,9 +238,17 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_GetFilterGraph(IAMMultiMediaStream
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppGraphBuilder); 
+    TRACE("(%p/%p)->(%p)\n", This, iface, ppGraphBuilder);
 
-    return E_NOTIMPL;
+    if (!ppGraphBuilder)
+        return E_POINTER;
+
+    if (This->pFilterGraph)
+        return IFilterGraph_QueryInterface(This->pFilterGraph, &IID_IGraphBuilder, (void**)ppGraphBuilder);
+    else
+        *ppGraphBuilder = NULL;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IAMMultiMediaStreamImpl_GetFilter(IAMMultiMediaStream* iface, IMediaStreamFilter** ppFilter)
@@ -255,9 +268,13 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_AddMediaStream(IAMMultiMediaStream
     IMediaStream* pStream;
     IMediaStream** pNewStreams;
 
-    FIXME("(%p/%p)->(%p,%p,%x,%p) partial stub!\n", This, iface, pStreamObject, PurposeId, dwFlags, ppNewStream);
+    FIXME("(%p/%p)->(%p,%s,%x,%p) partial stub!\n", This, iface, pStreamObject, debugstr_guid(PurposeId), dwFlags, ppNewStream);
 
-    hr = MediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
+    if (IsEqualGUID(PurposeId, &MSPID_PrimaryVideo))
+        hr = DirectDrawMediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
+    else
+        hr = MediaStream_create((IMultiMediaStream*)iface, PurposeId, This->StreamType, &pStream);
+
     if (SUCCEEDED(hr))
     {
         pNewStreams = CoTaskMemAlloc((This->nbStreams+1)*sizeof(IMediaStream*));
@@ -332,6 +349,14 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_OpenFile(IAMMultiMediaStream* ifac
         goto end;
     }
 
+    /* If Initialize was not called before, we do it here */
+    if (!This->pFilterGraph)
+    {
+        ret = IAMMultiMediaStream_Initialize(iface, STREAMTYPE_READ, 0, NULL);
+        if (FAILED(ret))
+            goto end;
+    }
+
     ret = IFilterGraph_QueryInterface(This->pFilterGraph, &IID_IGraphBuilder, (void**)&This->GraphBuilder);
     if(ret != S_OK)
     {
@@ -339,7 +364,8 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_OpenFile(IAMMultiMediaStream* ifac
     }
 
     ret = IGraphBuilder_AddSourceFilter(This->GraphBuilder, pszFileName, pszFileName, &BaseFilter);
-    end:
+
+end:
     IBaseFilter_Release(BaseFilter);
     IFileSourceFilter_Release(SourceFilter);
     return ret;
@@ -358,7 +384,7 @@ static HRESULT WINAPI IAMMultiMediaStreamImpl_Render(IAMMultiMediaStream* iface,
 {
     IAMMultiMediaStreamImpl *This = (IAMMultiMediaStreamImpl *)iface;
 
-    FIXME("(%p/%p)->(%x)\n", This, iface, dwFlags);
+    FIXME("(%p/%p)->(%x) partial stub!\n", This, iface, dwFlags);
 
     if(dwFlags != AMMSF_NOCLOCK)
         return E_INVALIDARG;

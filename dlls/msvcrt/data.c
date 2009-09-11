@@ -29,34 +29,34 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
-int MSVCRT___argc;
-unsigned int MSVCRT_basemajor;/* FIXME: */
-unsigned int MSVCRT_baseminor;/* FIXME: */
-unsigned int MSVCRT_baseversion; /* FIXME: */
-unsigned int MSVCRT__commode;
-unsigned int MSVCRT__fmode;
-unsigned int MSVCRT_osmajor;/* FIXME: */
-unsigned int MSVCRT_osminor;/* FIXME: */
-unsigned int MSVCRT_osmode;/* FIXME: */
-unsigned int MSVCRT__osver;
-unsigned int MSVCRT_osversion; /* FIXME: */
-unsigned int MSVCRT__winmajor;
-unsigned int MSVCRT__winminor;
-unsigned int MSVCRT__winver;
-unsigned int MSVCRT___setlc_active;
-unsigned int MSVCRT___unguarded_readlc_active;
-double MSVCRT__HUGE;
-char **MSVCRT___argv;
-MSVCRT_wchar_t **MSVCRT___wargv;
-char *MSVCRT__acmdln;
-MSVCRT_wchar_t *MSVCRT__wcmdln;
-char **MSVCRT__environ = 0;
-MSVCRT_wchar_t **_wenviron = 0;
-char **MSVCRT___initenv = 0;
-MSVCRT_wchar_t **MSVCRT___winitenv = 0;
-int MSVCRT_app_type;
-char* MSVCRT__pgmptr = 0;
-WCHAR* MSVCRT__wpgmptr = 0;
+int MSVCRT___argc = 0;
+unsigned int MSVCRT_basemajor = 0;/* FIXME: */
+unsigned int MSVCRT_baseminor = 0;/* FIXME: */
+unsigned int MSVCRT_baseversion = 0; /* FIXME: */
+unsigned int MSVCRT__commode = 0;
+unsigned int MSVCRT__fmode = 0;
+unsigned int MSVCRT_osmajor = 0;/* FIXME: */
+unsigned int MSVCRT_osminor = 0;/* FIXME: */
+unsigned int MSVCRT_osmode = 0;/* FIXME: */
+unsigned int MSVCRT__osver = 0;
+unsigned int MSVCRT_osversion = 0; /* FIXME: */
+unsigned int MSVCRT__winmajor = 0;
+unsigned int MSVCRT__winminor = 0;
+unsigned int MSVCRT__winver = 0;
+unsigned int MSVCRT___setlc_active = 0;
+unsigned int MSVCRT___unguarded_readlc_active = 0;
+double MSVCRT__HUGE = 0;
+char **MSVCRT___argv = NULL;
+MSVCRT_wchar_t **MSVCRT___wargv = NULL;
+char *MSVCRT__acmdln = NULL;
+MSVCRT_wchar_t *MSVCRT__wcmdln = NULL;
+char **MSVCRT__environ = NULL;
+MSVCRT_wchar_t **_wenviron = NULL;
+char **MSVCRT___initenv = NULL;
+MSVCRT_wchar_t **MSVCRT___winitenv = NULL;
+int MSVCRT_app_type = 0;
+char* MSVCRT__pgmptr = NULL;
+WCHAR* MSVCRT__wpgmptr = NULL;
 
 /* Get a snapshot of the current environment
  * and construct the __p__environ array
@@ -130,7 +130,7 @@ MSVCRT_wchar_t ** msvcrt_SnapshotOfEnvironmentW(MSVCRT_wchar_t **wblk)
   return wblk;
 }
 
-typedef void (*_INITTERMFUN)(void);
+typedef void (CDECL *_INITTERMFUN)(void);
 
 /***********************************************************************
  *		__p___argc (MSVCRT.@)
@@ -231,12 +231,28 @@ MSVCRT_wchar_t*** CDECL __p___winitenv(void) { return &MSVCRT___winitenv; }
 /* INTERNAL: Create a wide string from an ascii string */
 MSVCRT_wchar_t *msvcrt_wstrdupa(const char *str)
 {
-  const size_t len = strlen(str) + 1 ;
+  const unsigned int len = strlen(str) + 1 ;
   MSVCRT_wchar_t *wstr = MSVCRT_malloc(len* sizeof (MSVCRT_wchar_t));
   if (!wstr)
     return NULL;
    MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED,str,len,wstr,len);
   return wstr;
+}
+
+/*********************************************************************
+ *		___unguarded_readlc_active_add_func (MSVCRT.@)
+ */
+unsigned int * CDECL MSVCRT____unguarded_readlc_active_add_func(void)
+{
+  return &MSVCRT___unguarded_readlc_active;
+}
+
+/*********************************************************************
+ *		___setlc_active_func (MSVCRT.@)
+ */
+unsigned int CDECL MSVCRT____setlc_active_func(void)
+{
+  return MSVCRT___setlc_active;
 }
 
 /* INTERNAL: Since we can't rely on Winelib startup code calling w/getmainargs,
@@ -246,7 +262,7 @@ MSVCRT_wchar_t *msvcrt_wstrdupa(const char *str)
  */
 void msvcrt_init_args(void)
 {
-  DWORD version;
+  OSVERSIONINFOW osvi;
 
   MSVCRT__acmdln = _strdup( GetCommandLineA() );
   MSVCRT__wcmdln = msvcrt_wstrdupa(MSVCRT__acmdln);
@@ -257,17 +273,23 @@ void msvcrt_init_args(void)
   TRACE("got %s, wide = %s argc=%d\n", debugstr_a(MSVCRT__acmdln),
         debugstr_w(MSVCRT__wcmdln),MSVCRT___argc);
 
-  version = GetVersion();
-  MSVCRT__osver       = version >> 16;
-  MSVCRT__winminor    = version & 0xFF;
-  MSVCRT__winmajor    = (version>>8) & 0xFF;
-  MSVCRT_baseversion = version >> 16;
-  MSVCRT__winver     = ((version >> 8) & 0xFF) + ((version & 0xFF) << 8);
-  MSVCRT_baseminor   = (version >> 16) & 0xFF;
-  MSVCRT_basemajor   = (version >> 24) & 0xFF;
-  MSVCRT_osversion   = version & 0xFFFF;
-  MSVCRT_osminor     = version & 0xFF;
-  MSVCRT_osmajor     = (version>>8) & 0xFF;
+  osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
+  GetVersionExW( &osvi );
+  MSVCRT__winver     = (osvi.dwMajorVersion << 8) | osvi.dwMinorVersion;
+  MSVCRT__winmajor   = osvi.dwMajorVersion;
+  MSVCRT__winminor   = osvi.dwMinorVersion;
+  MSVCRT__osver      = osvi.dwBuildNumber;
+  MSVCRT_osversion   = MSVCRT__winver;
+  MSVCRT_osmajor     = MSVCRT__winmajor;
+  MSVCRT_osminor     = MSVCRT__winminor;
+  MSVCRT_baseversion = MSVCRT__osver;
+  MSVCRT_baseminor   = MSVCRT_baseversion & 0xFF;
+  MSVCRT_basemajor   = (MSVCRT_baseversion >> 8) & 0xFF;
+  TRACE( "winver %08x winmajor %08x winminor %08x osver%08x baseversion %08x basemajor %08x baseminor %08x\n",
+          MSVCRT__winver, MSVCRT__winmajor, MSVCRT__winminor, MSVCRT__osver, MSVCRT_baseversion,
+          MSVCRT_basemajor, MSVCRT_baseminor);
+  TRACE( "osversion %08x osmajor %08x osminor %08x\n", MSVCRT_osversion, MSVCRT_osmajor, MSVCRT_osminor);
+
   MSVCRT__HUGE = HUGE_VAL;
   MSVCRT___setlc_active = 0;
   MSVCRT___unguarded_readlc_active = 0;

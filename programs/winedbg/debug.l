@@ -19,7 +19,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-%option nounput interactive 8bit prefix="dbg_"
+%option noinput nounput interactive 8bit prefix="dbg_"
 
 %{
 #include "config.h"
@@ -35,6 +35,34 @@
 #include "dbg.tab.h"
 
 #undef YY_INPUT
+
+static char** local_lexemes /* = NULL */;
+static int next_lexeme /* = 0 */;
+static int alloc_lexeme /* = 0 */;
+
+char* lexeme_alloc_size(int size)
+{
+    assert(0 <= next_lexeme && next_lexeme < alloc_lexeme + 1);
+    if (next_lexeme >= alloc_lexeme)
+    {
+        alloc_lexeme += 32;
+        local_lexemes = dbg_heap_realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
+        assert(local_lexemes);
+    }
+    return local_lexemes[next_lexeme++] = HeapAlloc(GetProcessHeap(), 0, size + 1);
+}
+
+static char* lexeme_alloc(const char* lexeme)
+{
+    char*       ptr = lexeme_alloc_size(strlen(lexeme) + 1);
+    return strcpy(ptr, lexeme);
+}
+
+void lexeme_flush(void)
+{
+    while (--next_lexeme >= 0) HeapFree(GetProcessHeap(), 0, local_lexemes[next_lexeme]);
+    next_lexeme = 0;
+}
 
 static int read_input(const char* pfx, char* buf, int size)
 {
@@ -83,11 +111,10 @@ DIGIT	   [0-9]
 HEXDIGIT   [0-9a-fA-F]
 FORMAT     [ubcdgiswx]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
-PATHNAME   [\\/-_a-zA-Z0-9\.~@]+
+PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
 STRING     \"[^\n"]+\"
 
 %s FORMAT_EXPECTED
-%s PATH_EXPECTED
 %s INFO_CMD
 %s HELP_CMD
 %s BD_CMD
@@ -96,7 +123,9 @@ STRING     \"[^\n"]+\"
 %s MODE_CMD
 %s MAINT_CMD
 %s NOCMD
+%s PATH_ACCEPTED
 
+%x PATH_EXPECTED
 %x ASTRING_EXPECTED
 %x NOPROCESS
 %%
@@ -106,11 +135,6 @@ STRING     \"[^\n"]+\"
 <<EOF>>                                 { return tEOF; }
 <*>\n		                        { BEGIN(INITIAL); syntax_error = 0; return tEOL; }
                                         /* Indicates end of command. Reset state. */
-
-                                        /* This rule must precede the ones below, */
-                                        /* otherwise paths like '/' or '0x9' would */
-                                        /* get parsed as an operator or tNUM */
-<PATH_EXPECTED>{PATHNAME}		{ dbg_lval.string = lexeme_alloc(yytext); return tPATH; }
 
 "||"					{ return OP_LOR; }
 "&&"					{ return OP_LAND; }
@@ -122,7 +146,6 @@ STRING     \"[^\n"]+\"
 ">>"					{ return OP_SHR; }
 "->"					{ return OP_DRF; }
 "::"					{ return OP_SCOPE; }
-[-+<=>|&^()*/%:!~,\.]			{ return *yytext; }
 "["					{ return *yytext; }
 "]"					{ return *yytext; }
 
@@ -144,7 +167,7 @@ STRING     \"[^\n"]+\"
 <INITIAL>up				{ BEGIN(NOCMD); return tUP; }
 <INITIAL>down|dow|do			{ BEGIN(NOCMD); return tDOWN; }
 <INITIAL>frame|fram|fra|fr		{ BEGIN(NOCMD); return tFRAME; }
-<INITIAL>list|lis|li|l			{ BEGIN(PATH_EXPECTED); return tLIST; }
+<INITIAL>list|lis|li|l			{ BEGIN(PATH_ACCEPTED); return tLIST; }
 <INITIAL>enable|enabl|enab|ena		{ BEGIN(BD_CMD); return tENABLE;}
 <INITIAL>disable|disabl|disab|disa|dis  { BEGIN(BD_CMD); return tDISABLE; }
 <INITIAL>disassemble|disassembl|disassemb|disassem|disasse|disass|disas { BEGIN(NOCMD); return tDISASSEMBLE; }
@@ -183,6 +206,7 @@ STRING     \"[^\n"]+\"
 <INITIAL>whatis|whati|what		{ BEGIN(NOCMD); return tWHATIS; }
 <INITIAL,NOPROCESS>run|ru|r     	{ BEGIN(ASTRING_EXPECTED); return tRUN;}
 <INITIAL>detach|detac|deta|det   	{ BEGIN(NOCMD); return tDETACH; }
+<INITIAL>kill|kil|ki|k                  { BEGIN(NOCMD); return tKILL; }
 <INITIAL,NOPROCESS>maintenance|maint    { BEGIN(MAINT_CMD); return tMAINTENANCE; }
 <INITIAL>minidump|mdmp                  { BEGIN(PATH_EXPECTED); return tMINIDUMP; }
 <INITIAL>echo				{ BEGIN(ASTRING_EXPECTED); return tECHO; }
@@ -224,6 +248,10 @@ all                                     { return tALL; }
 {IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext); return tIDENTIFIER; }
 "$"{IDENTIFIER}				{ dbg_lval.string = lexeme_alloc(yytext+1); return tINTVAR; }
 
+<PATH_EXPECTED,PATH_ACCEPTED>{PATHNAME}	{ dbg_lval.string = lexeme_alloc(yytext); return tPATH; }
+
+[-+<=>|&^()*/%:!~,\.]			{ return *yytext; }
+
 <*>[ \t\r]+                             /* Eat up whitespace and DOS LF */
 
 <NOPROCESS>.                            { BEGIN(ASTRING_EXPECTED); yyless(0); return tNOPROCESS;}
@@ -233,31 +261,3 @@ all                                     { return tALL; }
 #ifndef dbg_wrap
 int dbg_wrap(void) { return 1; }
 #endif
-
-static char** local_lexemes /* = NULL */;
-static int next_lexeme /* = 0 */;
-static int alloc_lexeme /* = 0 */;
-
-char* lexeme_alloc_size(int size)
-{
-    assert(0 <= next_lexeme && next_lexeme < alloc_lexeme + 1);
-    if (next_lexeme >= alloc_lexeme)
-    {
-        alloc_lexeme += 32;
-        local_lexemes = dbg_heap_realloc(local_lexemes, alloc_lexeme * sizeof(local_lexemes[0]));
-        assert(local_lexemes);
-    }
-    return local_lexemes[next_lexeme++] = HeapAlloc(GetProcessHeap(), 0, size + 1);
-}
-
-char* lexeme_alloc(const char* lexeme)
-{
-    char*       ptr = lexeme_alloc_size(strlen(lexeme) + 1);
-    return strcpy(ptr, lexeme);
-}
-
-void lexeme_flush(void)
-{
-    while (--next_lexeme >= 0) HeapFree(GetProcessHeap(), 0, local_lexemes[next_lexeme]);
-    next_lexeme = 0;
-}

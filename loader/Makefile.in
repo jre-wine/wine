@@ -2,35 +2,18 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
-MODULE    = wine
 
 C_SRCS = \
-	freebsd.c \
-	glibc.c \
-	kthread.c \
 	main.c \
-	preloader.c \
-	pthread.c
-
-KTHREAD_OBJS = kthread.o main.o
-PTHREAD_OBJS = pthread.o main.o
+	preloader.c
 
 MAIN_BINARY    = @MAIN_BINARY@
 EXTRA_BINARIES = @EXTRA_BINARIES@
-WINE_BINARIES  = $(MAIN_BINARY) $(EXTRA_BINARIES)
 
 PROGRAMS = \
 	wine \
-	wine-freebsd \
-	wine-freebsd-installed \
-	wine-glibc \
-	wine-glibc-installed \
-	wine-kthread \
-	wine-kthread-installed \
-	wine-preloader \
-	wine-preloader-installed \
-	wine-pthread \
-	wine-pthread-installed
+	wine-installed \
+	wine-preloader
 
 MANPAGES = \
 	wine.man \
@@ -43,56 +26,39 @@ INSTALLDIRS = \
 	$(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext) \
 	$(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)
 
-all: $(WINE_BINARIES) $(WINE_BINARIES:%=%-installed) $(MODULE) $(MANPAGES)
+all: wine wine-installed $(EXTRA_BINARIES) $(MANPAGES)
 
 @MAKE_RULES@
 
 LIBPTHREAD  = @LIBPTHREAD@
 LDEXECFLAGS = @LDEXECFLAGS@
 
-wine-freebsd: freebsd.o Makefile.in
-	$(CC) -o $@ freebsd.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
-
-wine-freebsd-installed: freebsd.o Makefile.in
-	$(CC) -o $@ freebsd.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
-
-wine-glibc: glibc.o Makefile.in
-	$(CC) -o $@ glibc.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
-
-wine-glibc-installed: glibc.o Makefile.in
-	$(CC) -o $@ glibc.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
-
-wine-preloader wine-preloader-installed: preloader.o Makefile.in
+wine-preloader: preloader.o Makefile.in
 	$(CC) -o $@ -static -nostartfiles -nodefaultlibs -Wl,-Ttext=0x7c000000 preloader.o $(LIBPORT) $(LDFLAGS)
 
-wine-kthread: $(KTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(KTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
+wine: main.o Makefile.in
+	$(CC) -o $@ $(LDEXECFLAGS) main.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
 
-wine-kthread-installed: $(KTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(KTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
+wine-installed: main.o Makefile.in
+	$(CC) -o $@ $(LDEXECFLAGS) main.o $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
 
-wine-pthread: $(PTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(PTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
+$(EXTRA_BINARIES:%=__install__%): $(EXTRA_BINARIES) $(DESTDIR)$(bindir) dummy
+	f=`expr $@ : '__install__\(.*\)'` && $(INSTALL_PROGRAM) $$f $(DESTDIR)$(bindir)/$$f
 
-wine-pthread-installed: $(PTHREAD_OBJS) Makefile.in
-	$(CC) -o $@ $(LDEXECFLAGS) $(PTHREAD_OBJS) $(LIBWINE) $(LIBPORT) $(LIBPTHREAD) $(EXTRALIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
+.PHONY: install-man-pages $(EXTRA_BINARIES:%=__install__%)
 
-$(MODULE): $(MAIN_BINARY)
-	$(RM) $(MODULE) && $(LN_S) $(MAIN_BINARY) $(MODULE)
+install install-lib:: wine-installed $(DESTDIR)$(bindir) $(EXTRA_BINARIES:%=__install__%)
+	$(INSTALL_PROGRAM) wine-installed $(DESTDIR)$(bindir)/$(MAIN_BINARY)
 
-install:: $(WINE_BINARIES:%=%-installed) $(MANPAGES) $(INSTALLDIRS)
-	for f in $(WINE_BINARIES); do \
-	  if [ "$(MAIN_BINARY)" = "$$f" ]; \
-	  then $(INSTALL_PROGRAM) $$f-installed $(DESTDIR)$(bindir)/$(MODULE); \
-	  else $(INSTALL_PROGRAM) $$f-installed $(DESTDIR)$(bindir)/$$f; \
-	  fi; \
-	done
+@WOW64_DISABLE@ install install-lib:: install-man-pages
+
+install-man-pages: $(MANPAGES) $(INSTALLDIRS) dummy
 	$(INSTALL_DATA) wine.man $(DESTDIR)$(mandir)/man$(prog_manext)/wine.$(prog_manext)
 	$(INSTALL_DATA) wine.de.man $(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/wine.$(prog_manext)
 	$(INSTALL_DATA) wine.fr.man $(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)/wine.$(prog_manext)
 
 uninstall::
-	-cd $(DESTDIR)$(bindir) && $(RM) $(WINE_BINARIES) $(MODULE)
+	-cd $(DESTDIR)$(bindir) && $(RM) $(MAIN_BINARY) $(EXTRA_BINARIES)
 	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/wine.$(prog_manext)
 	$(RM) $(DESTDIR)$(mandir)/de.UTF-8/man$(prog_manext)/wine.$(prog_manext)
 	$(RM) $(DESTDIR)$(mandir)/fr.UTF-8/man$(prog_manext)/wine.$(prog_manext)

@@ -239,7 +239,7 @@ LRESULT OSS_MidiInit(void)
             MidiOutDev[i].caps.wNotes      = 16;
             MidiOutDev[i].bEnabled = FALSE;
 	} else {
-            MultiByteToWideChar( CP_ACP, 0, sinfo.name, -1,
+            MultiByteToWideChar( CP_UNIXCP, 0, sinfo.name, -1,
                                  MidiOutDev[i].caps.szPname,
                                  sizeof(MidiOutDev[i].caps.szPname)/sizeof(WCHAR) );
 
@@ -313,7 +313,7 @@ LRESULT OSS_MidiInit(void)
             wsprintfW(MidiOutDev[numsynthdevs + i].caps.szPname, fmt, numsynthdevs + i);
             MidiOutDev[numsynthdevs + i].bEnabled = FALSE;
         } else {
-            MultiByteToWideChar(CP_ACP, 0, minfo.name, -1, 
+            MultiByteToWideChar(CP_UNIXCP, 0, minfo.name, -1,
                                 MidiOutDev[numsynthdevs + i].caps.szPname,
                                 sizeof(MidiOutDev[numsynthdevs + i].caps.szPname) / sizeof(WCHAR));
             MidiOutDev[numsynthdevs + i].bEnabled = TRUE;
@@ -344,7 +344,7 @@ LRESULT OSS_MidiInit(void)
             wsprintfW(MidiInDev[i].caps.szPname, fmt, numsynthdevs + i);
             MidiInDev[i].state = -1;
         } else {
-            MultiByteToWideChar(CP_ACP, 0, minfo.name, -1, 
+            MultiByteToWideChar(CP_UNIXCP, 0, minfo.name, -1,
                                 MidiInDev[i].caps.szPname,
                                 sizeof(MidiInDev[i].caps.szPname) / sizeof(WCHAR));
             MidiInDev[i].state = 0;
@@ -569,7 +569,7 @@ static void midReceiveChar(WORD wDevID, unsigned char value, DWORD dwTime)
 	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
 	    lpMidiHdr->dwFlags |= MHDR_DONE;
 	    MidiInDev[wDevID].lpQueueHdr = lpMidiHdr->lpNext;
-	    if (MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD)lpMidiHdr, dwTime) != MMSYSERR_NOERROR) {
+	    if (MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD_PTR)lpMidiHdr, dwTime) != MMSYSERR_NOERROR) {
 		WARN("Couldn't notify client\n");
 	    }
 	}
@@ -848,7 +848,10 @@ static DWORD midAddBuffer(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
     if (!(lpMidiHdr->dwFlags & MHDR_PREPARED)) return MIDIERR_UNPREPARED;
 
     EnterCriticalSection(&crit_sect);
+    lpMidiHdr->dwFlags &= ~WHDR_DONE;
     lpMidiHdr->dwFlags |= MHDR_INQUEUE;
+    lpMidiHdr->dwBytesRecorded = 0;
+    lpMidiHdr->lpNext = 0;
     if (MidiInDev[wDevID].lpQueueHdr == 0) {
 	MidiInDev[wDevID].lpQueueHdr = lpMidiHdr;
     } else {
@@ -923,7 +926,7 @@ static DWORD midReset(WORD wDevID)
 	MidiInDev[wDevID].lpQueueHdr->dwFlags |= MHDR_DONE;
 	/* FIXME: when called from 16 bit, lpQueueHdr needs to be a segmented ptr */
 	if (MIDI_NotifyClient(wDevID, MIM_LONGDATA,
-			      (DWORD)MidiInDev[wDevID].lpQueueHdr, dwTime) != MMSYSERR_NOERROR) {
+			      (DWORD_PTR)MidiInDev[wDevID].lpQueueHdr, dwTime) != MMSYSERR_NOERROR) {
 	    WARN("Couldn't notify client\n");
 	}
 	MidiInDev[wDevID].lpQueueHdr = MidiInDev[wDevID].lpQueueHdr->lpNext;
@@ -1022,7 +1025,7 @@ static int modFMLoad(int dev)
 	sbi.channel = i;
 	memcpy(sbi.operators, midiFMInstrumentPatches + i * 16, 16);
 
-	if (write(midiSeqFD, (char*)&sbi, sizeof(sbi)) == -1) {
+        if (write(midiSeqFD, &sbi, sizeof(sbi)) == -1) {
 	    WARN("Couldn't write patch for instrument %d, errno %d (%s)!\n", sbi.channel, errno, strerror(errno));
 	    return -1;
 	}
@@ -1031,7 +1034,7 @@ static int modFMLoad(int dev)
 	sbi.channel = 128 + i;
 	memcpy(sbi.operators, midiFMDrumsPatches + i * 16, 16);
 
-	if (write(midiSeqFD, (char*)&sbi, sizeof(sbi)) == -1) {
+        if (write(midiSeqFD, &sbi, sizeof(sbi)) == -1) {
 	    WARN("Couldn't write patch for drum %d, errno %d (%s)!\n", sbi.channel, errno, strerror(errno));
 	    return -1;
 	}
@@ -1044,7 +1047,7 @@ static int modFMLoad(int dev)
  */
 static	void modFMReset(WORD wDevID)
 {
-    sFMextra*	extra   = (sFMextra*)MidiOutDev[wDevID].lpExtra;
+    sFMextra*   extra   = MidiOutDev[wDevID].lpExtra;
     sVoice* 	voice   = extra->voice;
     sChannel*	channel = extra->channel;
     int		i;
@@ -1249,7 +1252,7 @@ static DWORD modData(WORD wDevID, DWORD dwParam)
 	 *	- chorus depth controller is not used
 	 */
 	{
-	    sFMextra*	extra   = (sFMextra*)MidiOutDev[wDevID].lpExtra;
+            sFMextra*   extra   = MidiOutDev[wDevID].lpExtra;
 	    sVoice* 	voice   = extra->voice;
 	    sChannel*	channel = extra->channel;
 	    int		chn = (evt & 0x0F);
@@ -1594,7 +1597,7 @@ static DWORD modLongData(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
 
     lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
     lpMidiHdr->dwFlags |= MHDR_DONE;
-    if (MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD)lpMidiHdr, 0L) != MMSYSERR_NOERROR) {
+    if (MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD_PTR)lpMidiHdr, 0L) != MMSYSERR_NOERROR) {
 	WARN("can't notify client !\n");
 	return MMSYSERR_INVALPARAM;
     }
@@ -1620,8 +1623,8 @@ static DWORD modPrepare(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
     if (dwSize < sizeof(MIDIHDR) || lpMidiHdr == 0 ||
 	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0 ||
 	lpMidiHdr->dwBufferLength >= 0x10000ul) {
-	WARN("%p %p %08x %d/%d\n", lpMidiHdr, lpMidiHdr->lpData,
-	           lpMidiHdr->dwFlags, sizeof(MIDIHDR), dwSize);
+	WARN("%p %p %08x %d\n", lpMidiHdr, lpMidiHdr ? lpMidiHdr->lpData : NULL,
+	           lpMidiHdr ? lpMidiHdr->dwFlags : 0, dwSize);
 	return MMSYSERR_INVALPARAM;
     }
 
@@ -1699,12 +1702,12 @@ LRESULT OSS_MidiExit(void)
  *======================================================================*/
 
 /**************************************************************************
- * 			midMessage (WINEOSS.4)
+ * 			midMessage (WINEOSS.@)
  */
-DWORD WINAPI OSS_midMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_midMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%04X, %04X, %08X, %08X, %08X);\n",
+    TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
     switch (wMsg) {
 #ifdef HAVE_OSS_MIDI
@@ -1742,12 +1745,12 @@ DWORD WINAPI OSS_midMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
 }
 
 /**************************************************************************
- * 				modMessage (WINEOSS.5)
+ * 				modMessage (WINEOSS.@)
  */
-DWORD WINAPI OSS_modMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI OSS_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%04X, %04X, %08X, %08X, %08X);\n",
+    TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {

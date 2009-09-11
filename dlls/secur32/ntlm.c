@@ -181,8 +181,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleW(
 
                 if(pAuthData != NULL)
                 {
-                    PSEC_WINNT_AUTH_IDENTITY_W auth_data =
-                        (PSEC_WINNT_AUTH_IDENTITY_W)pAuthData;
+                    PSEC_WINNT_AUTH_IDENTITY_W auth_data = pAuthData;
 
                     TRACE("Username is %s\n", debugstr_wn(auth_data->User, auth_data->UserLength));
                     TRACE("Domain name is %s\n", debugstr_wn(auth_data->Domain, auth_data->DomainLength));
@@ -262,8 +261,8 @@ static SECURITY_STATUS SEC_ENTRY ntlm_AcquireCredentialsHandleA(
     
     if(pAuthData != NULL)
     {
-        identity = (PSEC_WINNT_AUTH_IDENTITY_A)pAuthData;
-        
+        identity = pAuthData;
+
         if(identity->Flags == SEC_WINNT_AUTH_IDENTITY_ANSI)
         {
             pAuthDataW = HeapAlloc(GetProcessHeap(), 0, 
@@ -585,12 +584,12 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
             TRACE("Converting password to unicode.\n");
             passwd_lenW = MultiByteToWideChar(CP_ACP, 0,
-                                              password ? (LPCSTR)password : (LPCSTR)ntlm_cred->password,
+                                              password ? password : ntlm_cred->password,
                                               password ? pwlen : ntlm_cred->pwlen,
                                               NULL, 0);
             unicode_password = HeapAlloc(GetProcessHeap(), 0,
                                          passwd_lenW * sizeof(SEC_WCHAR));
-            MultiByteToWideChar(CP_ACP, 0, password ? (LPCSTR)password : (LPCSTR)ntlm_cred->password,
+            MultiByteToWideChar(CP_ACP, 0, password ? password : ntlm_cred->password,
                                 password ? pwlen : ntlm_cred->pwlen, unicode_password, passwd_lenW);
 
             SECUR32_CreateNTLMv1SessionKey((PBYTE)unicode_password,
@@ -615,8 +614,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         lstrcpyA(want_flags, "SF");
         if(fContextReq & ISC_REQ_CONFIDENTIALITY)
         {
-            char *ptr;
-            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SEAL")) == NULL)
+            if(strstr(want_flags, "NTLMSSP_FEATURE_SEAL") == NULL)
                 lstrcatA(want_flags, " NTLMSSP_FEATURE_SEAL");
         }
         if(fContextReq & ISC_REQ_CONNECTION)
@@ -625,22 +623,19 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
             ctxt_attr |= ISC_RET_EXTENDED_ERROR;
         if(fContextReq & ISC_REQ_INTEGRITY)
         {
-            char *ptr;
-            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+            if(strstr(want_flags, "NTLMSSP_FEATURE_SIGN") == NULL)
                 lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
         }
         if(fContextReq & ISC_REQ_MUTUAL_AUTH)
             ctxt_attr |= ISC_RET_MUTUAL_AUTH;
         if(fContextReq & ISC_REQ_REPLAY_DETECT)
         {
-            char *ptr;
-            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+            if(strstr(want_flags, "NTLMSSP_FEATURE_SIGN") == NULL)
                 lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
         }
         if(fContextReq & ISC_REQ_SEQUENCE_DETECT)
         {
-            char *ptr;
-            if((ptr = strstr(want_flags, "NTLMSSP_FEATURE_SIGN")) == NULL)
+            if(strstr(want_flags, "NTLMSSP_FEATURE_SIGN") == NULL)
                 lstrcatA(want_flags, " NTLMSSP_FEATURE_SIGN");
         }
         if(fContextReq & ISC_REQ_STREAM)
@@ -772,7 +767,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
 
         if(pInput->pBuffers[input_token_idx].cbBuffer > max_len)
         {
-            TRACE("pInput->pBuffers[%d].cbBuffer is: %ld\n",
+            TRACE("pInput->pBuffers[%d].cbBuffer is: %d\n",
                     input_token_idx,
                     pInput->pBuffers[input_token_idx].cbBuffer);
             ret = SEC_E_INVALID_TOKEN;
@@ -1527,7 +1522,7 @@ static SECURITY_STATUS ntlm_CreateSignature(PNegoHelper helper, PSecBufferDesc p
         for( i = 0; i < pMessage->cBuffers; ++i )
         {
             if(pMessage->pBuffers[i].BufferType & SECBUFFER_DATA)
-                HMACMD5Update(&hmac_md5_ctx, (BYTE *)pMessage->pBuffers[i].pvBuffer,
+                HMACMD5Update(&hmac_md5_ctx, pMessage->pBuffers[i].pvBuffer,
                         pMessage->pBuffers[i].cbBuffer);
         }
 
@@ -1774,7 +1769,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_EncryptMessage(PCtxtHandle phContext,
     { 
         ntlm_CreateSignature(helper, pMessage, token_idx, NTLM_SEND, FALSE);
         SECUR32_arc4Process(helper->crypt.ntlm2.send_a4i,
-                (BYTE *)pMessage->pBuffers[data_idx].pvBuffer,
+                pMessage->pBuffers[data_idx].pvBuffer,
                 pMessage->pBuffers[data_idx].cbBuffer);
 
         if(helper->neg_flags & NTLMSSP_NEGOTIATE_KEY_EXCHANGE)
@@ -1974,7 +1969,6 @@ static const SecPkgInfoA infoA = {
 
 void SECUR32_initNTLMSP(void)
 {
-    SECURITY_STATUS ret;
     PNegoHelper helper;
     static CHAR version[] = "--version";
 
@@ -1983,11 +1977,12 @@ void SECUR32_initNTLMSP(void)
         version,
         NULL };
 
-    if((ret = fork_helper(&helper, ntlm_auth, args)) != SEC_E_OK)
+    if(fork_helper(&helper, ntlm_auth, args) != SEC_E_OK)
     {
         /* Cheat and allocate a helper anyway, so cleanup later will work. */
-        helper = HeapAlloc(GetProcessHeap(),0, sizeof(PNegoHelper));
+        helper = HeapAlloc(GetProcessHeap(),0, sizeof(NegoHelper));
         helper->major = helper->minor = helper->micro = -1;
+        helper->pipe_in = helper->pipe_out = -1;
     }
     else
         check_version(helper);

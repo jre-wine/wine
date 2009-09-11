@@ -1,0 +1,13 @@
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = ctl3d.dll16
+IMPORTS   = user32 kernel32
+EXTRADLLFLAGS = -Wb,--subsystem,win16,--main-module,ctl3d32.dll
+
+C_SRCS = ctl3d.c
+
+@MAKE_DLL_RULES@
+
+@DEPENDENCIES@  # everything below this line is overwritten by make depend

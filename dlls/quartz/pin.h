@@ -20,8 +20,12 @@
 
 /* This function will process incoming samples to the pin.
  * Any return value valid in IMemInputPin::Receive is allowed here
+ *
+ * Cookie is the cookie that was set when requesting the buffer, if you don't
+ * implement custom requesting, you can safely ignore this
  */
-typedef HRESULT (* SAMPLEPROC)(LPVOID userdata, IMediaSample * pSample);
+typedef HRESULT (* SAMPLEPROC_PUSH)(LPVOID userdata, IMediaSample * pSample);
+typedef HRESULT (* SAMPLEPROC_PULL)(LPVOID userdata, IMediaSample * pSample, DWORD_PTR cookie);
 
 /* This function will determine whether a type is supported or not.
  * It is allowed to return any error value (within reason), as opposed
@@ -32,8 +36,10 @@ typedef HRESULT (* QUERYACCEPTPROC)(LPVOID userdata, const AM_MEDIA_TYPE * pmt);
 /* This function is called prior to finalizing a connection with
  * another pin and can be used to get things from the other pin
  * like IMemInput interfaces.
+ *
+ * props contains some defaults, but you can safely override them to your liking
  */
-typedef HRESULT (* PRECONNECTPROC)(IPin * iface, IPin * pConnectPin);
+typedef HRESULT (* PRECONNECTPROC)(IPin * iface, IPin * pConnectPin, ALLOCATOR_PROPERTIES *props);
 
 /* This function is called whenever a cleanup operation has to occur,
  * this is usually after a flush, seek, or end of stream notification.
@@ -41,6 +47,24 @@ typedef HRESULT (* PRECONNECTPROC)(IPin * iface, IPin * pConnectPin);
  * tolerate this behavior. Return value is ignored and should be S_OK.
  */
 typedef HRESULT (* CLEANUPPROC) (LPVOID userdata);
+
+/* This function is called whenever a request for a new sample is made,
+ * If you implement it (it can be NULL for default behavior), you have to
+ * call IMemAllocator_GetBuffer and IMemAllocator_RequestBuffer
+ * This is useful if you want to request more than 1 buffer at simultaneously
+ *
+ * This will also cause the Sample Proc to be called with empty buffers to indicate
+ * failure in retrieving the sample.
+ */
+typedef HRESULT (* REQUESTPROC) (LPVOID userdata);
+
+/* This function is called after processing is done (for whatever reason that is caused)
+ * This is useful if you create processing threads that need to die
+ */
+typedef HRESULT (* STOPPROCESSPROC) (LPVOID userdata);
+
+#define ALIGNDOWN(value,boundary) ((value)/(boundary)*(boundary))
+#define ALIGNUP(value,boundary) (ALIGNDOWN((value)+(boundary)-1, (boundary)))
 
 typedef struct IPinImpl
 {
@@ -62,12 +86,13 @@ typedef struct InputPin
 
 	const IMemInputPinVtbl * lpVtblMemInput;
 	IMemAllocator * pAllocator;
-	SAMPLEPROC fnSampleProc;
+	SAMPLEPROC_PUSH fnSampleProc;
 	CLEANUPPROC fnCleanProc;
 	REFERENCE_TIME tStart;
 	REFERENCE_TIME tStop;
 	double dRate;
 	BOOL flushing, end_of_stream;
+	IMemAllocator *preferred_allocator;
 } InputPin;
 
 typedef struct OutputPin
@@ -77,6 +102,9 @@ typedef struct OutputPin
 
 	IMemInputPin * pMemInputPin;
 	HRESULT (* pConnectSpecific)(IPin * iface, IPin * pReceiver, const AM_MEDIA_TYPE * pmt);
+	BOOL custom_allocator;
+	IMemAllocator *alloc;
+	BOOL readonly;
 	ALLOCATOR_PROPERTIES allocProps;
 } OutputPin;
 
@@ -85,30 +113,38 @@ typedef struct PullPin
 	/* inheritance C style! */
 	IPinImpl pin;
 
+	REFERENCE_TIME rtStart, rtCurrent, rtNext, rtStop;
 	IAsyncReader * pReader;
 	IMemAllocator * pAlloc;
-	SAMPLEPROC fnSampleProc;
+	SAMPLEPROC_PULL fnSampleProc;
 	PRECONNECTPROC fnPreConnect;
-	HANDLE hThread;
-	HANDLE hEventStateChanged;
+	REQUESTPROC fnCustomRequest;
 	CLEANUPPROC fnCleanProc;
-	REFERENCE_TIME rtStart;
-	REFERENCE_TIME rtStop;
-	REFERENCE_TIME rtCurrent;
+	STOPPROCESSPROC fnDone;
 	double dRate;
-	FILTER_STATE state;
 	BOOL stop_playback;
+	DWORD cbAlign;
 
 	/* Any code that touches the thread must hold the thread lock,
 	 * lock order: thread_lock and then the filter critical section
+	 * also signal thread_sleepy so the thread knows to wake up
 	 */
 	CRITICAL_SECTION thread_lock;
+	HANDLE hThread;
+	DWORD requested_state;
+	HANDLE hEventStateChanged, thread_sleepy;
+	DWORD state;
 } PullPin;
 
+#define Req_Sleepy 0
+#define Req_Die    1
+#define Req_Run    2
+#define Req_Pause  3
+
 /*** Constructors ***/
-HRESULT InputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
+HRESULT InputPin_Construct(const IPinVtbl *InputPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC_PUSH pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IMemAllocator *, IPin ** ppPin);
 HRESULT OutputPin_Construct(const IPinVtbl *OutputPin_Vtbl, long outputpin_size, const PIN_INFO * pPinInfo, ALLOCATOR_PROPERTIES *props, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
-HRESULT PullPin_Construct(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
+HRESULT PullPin_Construct(const IPinVtbl *PullPin_Vtbl, const PIN_INFO * pPinInfo, SAMPLEPROC_PULL pSampleProc, LPVOID pUserData, QUERYACCEPTPROC pQueryAccept, CLEANUPPROC pCleanUp, STOPPROCESSPROC, REQUESTPROC pCustomRequest, LPCRITICAL_SECTION pCritSec, IPin ** ppPin);
 
 /**************************/
 /*** Pin Implementation ***/
@@ -147,26 +183,14 @@ HRESULT WINAPI OutputPin_EndFlush(IPin * iface);
 HRESULT WINAPI OutputPin_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
 
 HRESULT OutputPin_CommitAllocator(OutputPin * This);
+HRESULT OutputPin_DecommitAllocator(OutputPin * This);
 HRESULT OutputPin_GetDeliveryBuffer(OutputPin * This, IMediaSample ** ppSample, REFERENCE_TIME * tStart, REFERENCE_TIME * tStop, DWORD dwFlags);
 HRESULT OutputPin_SendSample(OutputPin * This, IMediaSample * pSample);
 HRESULT OutputPin_DeliverDisconnect(OutputPin * This);
-HRESULT OutputPin_DeliverNewSegment(OutputPin * This, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
-
-/**********************************/
-/*** MemInputPin Implementation ***/
-
-HRESULT WINAPI MemInputPin_QueryInterface(IMemInputPin * iface, REFIID riid, LPVOID * ppv);
-ULONG   WINAPI MemInputPin_AddRef(IMemInputPin * iface);
-ULONG   WINAPI MemInputPin_Release(IMemInputPin * iface);
-HRESULT WINAPI MemInputPin_GetAllocator(IMemInputPin * iface, IMemAllocator ** ppAllocator);
-HRESULT WINAPI MemInputPin_NotifyAllocator(IMemInputPin * iface, IMemAllocator * pAllocator, BOOL bReadOnly);
-HRESULT WINAPI MemInputPin_GetAllocatorRequirements(IMemInputPin * iface, ALLOCATOR_PROPERTIES * pProps);
-HRESULT WINAPI MemInputPin_Receive(IMemInputPin * iface, IMediaSample * pSample);
-HRESULT WINAPI MemInputPin_ReceiveMultiple(IMemInputPin * iface, IMediaSample ** pSamples, long nSamples, long *nSamplesProcessed);
-HRESULT WINAPI MemInputPin_ReceiveCanBlock(IMemInputPin * iface);
 
 /* Pull Pin */
 HRESULT WINAPI PullPin_ReceiveConnection(IPin * iface, IPin * pReceivePin, const AM_MEDIA_TYPE * pmt);
+HRESULT WINAPI PullPin_Disconnect(IPin * iface);
 HRESULT WINAPI PullPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * ppv);
 ULONG   WINAPI PullPin_Release(IPin * iface);
 HRESULT WINAPI PullPin_EndOfStream(IPin * iface);
@@ -175,8 +199,6 @@ HRESULT WINAPI PullPin_EndFlush(IPin * iface);
 HRESULT WINAPI PullPin_NewSegment(IPin * iface, REFERENCE_TIME tStart, REFERENCE_TIME tStop, double dRate);
 
 /* Thread interaction functions: Hold the thread_lock before calling them */
-HRESULT PullPin_InitProcessing(PullPin * This);
 HRESULT PullPin_StartProcessing(PullPin * This);
-HRESULT PullPin_StopProcessing(PullPin * This);
 HRESULT PullPin_PauseProcessing(PullPin * This);
 HRESULT PullPin_WaitForStateChange(PullPin * This, DWORD dwMilliseconds);

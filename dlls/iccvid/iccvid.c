@@ -57,6 +57,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(iccvid);
 static HINSTANCE ICCVID_hModule;
 
 #define ICCVID_MAGIC mmioFOURCC('c', 'v', 'i', 'd')
+#define compare_fourcc(fcc1, fcc2) (((fcc1)^(fcc2))&~0x20202020)
 
 #define DBUG    0
 #define MAX_STRIPS 32
@@ -390,13 +391,13 @@ static void decode_cinepak(cinepak_info *cvinfo, unsigned char *buf, int size,
     unsigned long x, y, y_bottom, frame_flags, strips, cv_width, cv_height,
                   cnum, strip_id, chunk_id, x0, y0, x1, y1, ci, flag, mask;
     long len, top_size, chunk_size;
-    unsigned char *frm_ptr, *frm_end;
+    unsigned char *frm_ptr;
     unsigned int i, cur_strip;
     int d0, d1, d2, d3, frm_stride, bpp = 3;
     fn_cvid_v1 cvid_v1 = cvid_v1_24;
     fn_cvid_v4 cvid_v4 = cvid_v4_24;
 
-    x = y = 0;
+    y = 0;
     y_bottom = 0;
     in_buffer = buf;
 
@@ -431,7 +432,6 @@ static void decode_cinepak(cinepak_info *cvinfo, unsigned char *buf, int size,
 
     frm_stride = width * bpp;
     frm_ptr = frame;
-    frm_end = frm_ptr + width * height * bpp;
 
     if(len != size)
         {
@@ -976,7 +976,7 @@ LRESULT WINAPI ICCVID_DriverProc( DWORD_PTR dwDriverId, HDRVR hdrvr, UINT msg,
 
         TRACE("Opened\n");
 
-        if (icinfo && icinfo->fccType != ICTYPE_VIDEO) return 0;
+        if (icinfo && compare_fourcc(icinfo->fccType, ICTYPE_VIDEO)) return 0;
 
         info = heap_alloc( sizeof (ICCVID_Info) );
         if( info )

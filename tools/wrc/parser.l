@@ -84,7 +84,7 @@
 %x pp_code_page
 
 %option stack
-%option nounput noyy_top_state noyywrap
+%option noinput nounput noyy_top_state noyywrap
 %option 8bit never-interactive
 %option prefix="parser_"
 
@@ -103,6 +103,8 @@ cident	[a-zA-Z_][0-9a-zA-Z_]*
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+#include <errno.h>
+#include <limits.h>
 
 #ifndef HAVE_UNISTD_H
 #define YY_NO_UNISTD_H
@@ -118,6 +120,8 @@ cident	[a-zA-Z_][0-9a-zA-Z_]*
 
 /* Always update the current character position within a line */
 #define YY_USER_ACTION	char_number+=yyleng; wanted_id = want_id; want_id = 0;
+
+#define YY_USER_INIT current_codepage = -1;
 
 static void addcchar(char c);
 static void addwchar(WCHAR s);
@@ -295,6 +299,19 @@ static struct keyword *iskeyword(char *kw)
 		return kwp;
 }
 
+/* converts an integer in string form to an unsigned long and prints an error
+ * on overflow */
+static unsigned long xstrtoul(const char *nptr, char **endptr, int base)
+{
+    unsigned long l;
+
+    errno = 0;
+    l = strtoul(nptr, endptr, base);
+    if (l == ULONG_MAX && errno == ERANGE)
+        parser_error("integer constant %s is too large", nptr);
+    return l;
+}
+
 %}
 
 /*
@@ -359,7 +376,7 @@ static struct keyword *iskeyword(char *kw)
         yy_pop_state();
         while (*p < '0' || *p > '9') p++;
         current_codepage = strtol( p, NULL, 10 );
-        if (current_codepage && current_codepage != CP_UTF8 && !wine_cp_get_table( current_codepage ))
+        if (current_codepage != CP_UTF8 && !wine_cp_get_table( current_codepage ))
         {
             parser_error("Codepage %d not supported", current_codepage);
             current_codepage = 0;
@@ -378,9 +395,9 @@ static struct keyword *iskeyword(char *kw)
 \{			return tBEGIN;
 \}			return tEND;
 
-[0-9]+[lL]?		{ parser_lval.num = strtoul(yytext,  0, 10); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
-0[xX][0-9A-Fa-f]+[lL]?	{ parser_lval.num = strtoul(yytext,  0, 16); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
-0[oO][0-7]+[lL]?	{ parser_lval.num = strtoul(yytext+2, 0, 8); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+[0-9]+[lL]?		{ parser_lval.num = xstrtoul(yytext,  0, 10); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+0[xX][0-9A-Fa-f]+[lL]?	{ parser_lval.num = xstrtoul(yytext,  0, 16); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
+0[oO][0-7]+[lL]?	{ parser_lval.num = xstrtoul(yytext+2, 0, 8); return toupper(yytext[yyleng-1]) == 'L' ? tLNUMBER : tNUMBER; }
 
 	/*
 	 * The next two rules scan identifiers and filenames.
@@ -556,7 +573,7 @@ L\"			{
 			}
 {ws}+			want_id = wanted_id;	/* Eat whitespace */
 
-<INITIAL>.		return yytext[0];
+<INITIAL>[ -~]		return yytext[0];
 
 <*>.|\n			{
 				/* Catch all rule to find any unmatched text */
@@ -565,10 +582,11 @@ L\"			{
 					line_number++;
 					char_number = 1;
 				}
-				parser_warning("Unmatched text '%c' (0x%02x) YY_START=%d\n",
-					isprint(*yytext & 0xff) ? *yytext : '.', *yytext, YY_START);
+				parser_error("Unmatched text '%c' (0x%02x) YY_START=%d",
+                                             isprint((unsigned char)*yytext) ? *yytext : '.', *yytext, YY_START);
 			}
 
+<<EOF>>			current_codepage = -1; yyterminate();
 %%
 
 /* These dup functions copy the enclosed '\0' from
@@ -619,6 +637,9 @@ static string_t *get_buffered_cstring(void)
         if (!check_unicode_conversion( str, str_w, current_codepage ))
             parser_error("String %s does not convert identically to Unicode and back in codepage %d. "
                     "Try using a Unicode string instead", str->str.cstr, current_codepage );
+        if (check_valid_utf8( str, current_codepage ))
+            parser_warning( "string \"%s\" seems to be UTF-8 but codepage %u is in use.\n",
+                            str->str.cstr, current_codepage );
         free_string( str );
         return str_w;
     }

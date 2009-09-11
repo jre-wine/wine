@@ -1,15 +1,29 @@
+EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = reg.exe
 APPMODE   = -mconsole -municode
-IMPORTS   = advapi32 user32 kernel32
-EXTRADEFS = -DUNICODE
+IMPORTS   = advapi32 kernel32
+DELAYIMPORTS = user32
 
 C_SRCS = reg.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	Da.rc \
+	De.rc \
+	En.rc \
+	Fr.rc \
+	Ja.rc \
+	Ko.rc \
+	Lt.rc \
+	Nl.rc \
+	No.rc \
+	Pl.rc \
+	Pt.rc \
+	Ru.rc \
+	Si.rc
 
 @MAKE_PROG_RULES@
 

@@ -55,7 +55,8 @@ struct tray_icon
     HWND           tooltip;  /* Icon tooltip */
     UINT           id;       /* the unique id given by the app */
     UINT           callback_message;
-    WCHAR          tiptext[128]; /* Tooltip text. If empty => tooltip disabled */
+    WCHAR          tiptext[256]; /* Tooltip text. If empty => tooltip disabled */
+    WCHAR          tiptitle[64]; /* Tooltip title for ballon style tooltips.  If empty => tooltip is not balloon style. */
 };
 
 static struct list icon_list = LIST_INIT( icon_list );
@@ -95,12 +96,22 @@ static void create_tooltip(struct tray_icon *icon)
         InitCommonControlsEx(&init_tooltip);
         tooltips_initialized = TRUE;
     }
-
-    icon->tooltip = CreateWindowExW( WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
-                                     WS_POPUP | TTS_ALWAYSTIP,
-                                     CW_USEDEFAULT, CW_USEDEFAULT,
-                                     CW_USEDEFAULT, CW_USEDEFAULT,
-                                     icon->window, NULL, NULL, NULL);
+    if (icon->tiptitle[0] != 0)
+    {
+        icon->tooltip = CreateWindowExW( WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+                                         WS_POPUP | TTS_ALWAYSTIP | TTS_BALLOON,
+                                         CW_USEDEFAULT, CW_USEDEFAULT,
+                                         CW_USEDEFAULT, CW_USEDEFAULT,
+                                         icon->window, NULL, NULL, NULL);
+    }
+    else
+    {
+        icon->tooltip = CreateWindowExW( WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
+                                         WS_POPUP | TTS_ALWAYSTIP,
+                                         CW_USEDEFAULT, CW_USEDEFAULT,
+                                         CW_USEDEFAULT, CW_USEDEFAULT,
+                                         icon->window, NULL, NULL, NULL);
+    }
     if (icon->tooltip)
     {
         TTTOOLINFOW ti;
@@ -219,9 +230,8 @@ static Window get_systray_selection_owner( Display *display )
 
 
 /* dock the given X window with the NETWM system tray */
-static void dock_systray_window( HWND hwnd, Window systray_window )
+static void dock_systray_window( Display *display, HWND hwnd, Window systray_window )
 {
-    Display *display = thread_display();
     struct x11drv_win_data *data;
     XEvent ev;
     XSetWindowAttributes attr;
@@ -273,6 +283,7 @@ static BOOL show_icon( struct tray_icon *icon )
     RECT rect;
     static BOOL class_registered;
     Window systray_window;
+    Display *display = thread_display();
 
     TRACE( "id=0x%x, hwnd=%p\n", icon->id, icon->owner );
 
@@ -297,7 +308,7 @@ static BOOL show_icon( struct tray_icon *icon )
         class_registered = TRUE;
     }
 
-    if (!(systray_window = get_systray_selection_owner( thread_display() ))) return FALSE;
+    if (!(systray_window = get_systray_selection_owner( display ))) return FALSE;
 
     rect.left = 0;
     rect.top = 0;
@@ -309,7 +320,7 @@ static BOOL show_icon( struct tray_icon *icon )
                                     rect.right - rect.left, rect.bottom - rect.top,
                                     NULL, NULL, NULL, icon );
     create_tooltip( icon );
-    dock_systray_window( icon->window, systray_window );
+    dock_systray_window( display, icon->window, systray_window );
     SetTimer( icon->window, 1, 1000, NULL );
     ShowWindow( icon->window, SW_SHOWNA );
     return TRUE;
@@ -344,11 +355,14 @@ static BOOL modify_icon( struct tray_icon *icon, NOTIFYICONDATAW *nid )
     if (nid->uFlags & NIF_TIP)
     {
         lstrcpynW(icon->tiptext, nid->szTip, sizeof(icon->tiptext)/sizeof(WCHAR));
+        icon->tiptitle[0] = 0;
         if (icon->tooltip) update_tooltip_text(icon);
     }
     if (nid->uFlags & NIF_INFO && nid->cbSize >= NOTIFYICONDATAA_V2_SIZE)
     {
-        FIXME("balloon tip title %s, message %s\n", wine_dbgstr_w(nid->szInfoTitle), wine_dbgstr_w(nid->szInfo));
+        lstrcpynW(icon->tiptext, nid->szInfo, sizeof(icon->tiptext)/sizeof(WCHAR));
+        lstrcpynW(icon->tiptitle, nid->szInfoTitle, sizeof(icon->tiptitle)/sizeof(WCHAR));
+        if (icon->tooltip) update_tooltip_text(icon);
     }
     return TRUE;
 }
@@ -401,16 +415,17 @@ static BOOL delete_icon( struct tray_icon *icon )
  *
  * Driver-side implementation of Shell_NotifyIcon.
  */
-BOOL wine_notify_icon( DWORD msg, NOTIFYICONDATAW *data )
+int CDECL wine_notify_icon( DWORD msg, NOTIFYICONDATAW *data )
 {
     BOOL ret = FALSE;
     struct tray_icon *icon;
-    Window owner;
 
     switch (msg)
     {
     case NIM_ADD:
-        if ((owner = get_systray_selection_owner( thread_display() ))) ret = add_icon( data );
+        if (!get_systray_selection_owner( thread_init_display() ))
+            return -1;  /* fall back to default handling */
+        ret = add_icon( data );
         break;
     case NIM_DELETE:
         if ((icon = get_icon( data->hWnd, data->uID ))) ret = delete_icon( icon );

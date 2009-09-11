@@ -122,14 +122,14 @@ unsigned int MSVCRT__sys_nerr = sizeof(MSVCRT__sys_errlist)/sizeof(MSVCRT__sys_e
 void msvcrt_set_errno(int err)
 {
   int *errno = MSVCRT__errno();
-  unsigned long *doserrno = MSVCRT___doserrno();
+  MSVCRT_ulong *doserrno = MSVCRT___doserrno();
 
   *doserrno = err;
 
   switch(err)
   {
 #define ERR_CASE(oserr) case oserr:
-#define ERR_MAPS(oserr,crterr) case oserr:*errno = crterr;break;
+#define ERR_MAPS(oserr, crterr) case oserr: *errno = crterr; break
     ERR_CASE(ERROR_ACCESS_DENIED)
     ERR_CASE(ERROR_NETWORK_ACCESS_DENIED)
     ERR_CASE(ERROR_CANNOT_MAKE)
@@ -140,6 +140,7 @@ void msvcrt_set_errno(int err)
     ERR_CASE(ERROR_DRIVE_LOCKED)
     ERR_CASE(ERROR_NOT_LOCKED)
     ERR_CASE(ERROR_INVALID_ACCESS)
+    ERR_CASE(ERROR_SHARING_VIOLATION)
     ERR_MAPS(ERROR_LOCK_VIOLATION,       MSVCRT_EACCES);
     ERR_CASE(ERROR_FILE_NOT_FOUND)
     ERR_CASE(ERROR_NO_MORE_FILES)
@@ -189,7 +190,7 @@ int* CDECL MSVCRT__errno(void)
 /*********************************************************************
  *		__doserrno (MSVCRT.@)
  */
-unsigned long* CDECL MSVCRT___doserrno(void)
+MSVCRT_ulong* CDECL MSVCRT___doserrno(void)
 {
     return &msvcrt_get_thread_data()->thread_doserrno;
 }

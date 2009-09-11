@@ -129,13 +129,13 @@ static BOOL set_server_info( HWND hwnd, INT offset, LONG_PTR newval, UINT size )
 
     SERVER_START_REQ( set_class_info )
     {
-        req->window = hwnd;
+        req->window = wine_server_user_handle( hwnd );
         req->extra_offset = -1;
         switch(offset)
         {
         case GCW_ATOM:
             req->flags = SET_CLASS_ATOM;
-            req->atom = newval;
+            req->atom = LOWORD(newval);
         case GCL_STYLE:
             req->flags = SET_CLASS_STYLE;
             req->style = newval;
@@ -146,7 +146,7 @@ static BOOL set_server_info( HWND hwnd, INT offset, LONG_PTR newval, UINT size )
             break;
         case GCLP_HMODULE:
             req->flags = SET_CLASS_INSTANCE;
-            req->instance = (void *)newval;
+            req->instance = wine_server_client_ptr( (void *)newval );
             break;
         default:
             assert( offset >= 0 );
@@ -275,7 +275,7 @@ void CLASS_FreeModuleClasses( HMODULE16 hModule )
             SERVER_START_REQ( destroy_class )
             {
                 req->atom = class->atomName;
-                req->instance = class->hInstance;
+                req->instance = wine_server_client_ptr( class->hInstance );
                 ret = !wine_server_call_err( req );
             }
             SERVER_END_REQ;
@@ -338,11 +338,6 @@ static CLASS *CLASS_RegisterClass( LPCWSTR name, HINSTANCE hInstance, BOOL local
 
     /* Fix the extra bytes value */
 
-    if (classExtra < 0 || winExtra < 0)
-    {
-         SetLastError( ERROR_INVALID_PARAMETER );
-         return NULL;
-    }
     if (classExtra > 40)  /* Extra bytes are limited to 40 in Win32 */
         WARN("Class extra bytes %d is > 40\n", classExtra);
     if (winExtra > 40)    /* Extra bytes are limited to 40 in Win32 */
@@ -359,10 +354,10 @@ static CLASS *CLASS_RegisterClass( LPCWSTR name, HINSTANCE hInstance, BOOL local
     {
         req->local      = local;
         req->style      = style;
-        req->instance   = hInstance;
+        req->instance   = wine_server_client_ptr( hInstance );
         req->extra      = classExtra;
         req->win_extra  = winExtra;
-        req->client_ptr = classPtr;
+        req->client_ptr = wine_server_client_ptr( classPtr );
         req->atom       = classPtr->atomName;
         if (!req->atom && name) wine_server_add_data( req, name, strlenW(name) * sizeof(WCHAR) );
         ret = !wine_server_call_err( req );
@@ -426,6 +421,7 @@ void CLASS_RegisterBuiltinClasses(void)
     register_builtin( &LISTBOX_builtin_class );
     register_builtin( &MDICLIENT_builtin_class );
     register_builtin( &MENU_builtin_class );
+    register_builtin( &MESSAGE_builtin_class );
     register_builtin( &SCROLL_builtin_class );
     register_builtin( &STATIC_builtin_class );
 
@@ -526,11 +522,11 @@ ATOM WINAPI RegisterClassExA( const WNDCLASSEXA* wc )
     CLASS *classPtr;
     HINSTANCE instance;
 
-    if (wc->hInstance == user32_module)
+    if (wc->cbClsExtra < 0 || wc->cbWndExtra < 0 ||
+        wc->hInstance == user32_module)  /* we can't register a class for user32 */
     {
-        /* we can't register a class for user32 */
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
+         SetLastError( ERROR_INVALID_PARAMETER );
+         return 0;
     }
     if (!(instance = wc->hInstance)) instance = GetModuleHandleW( NULL );
 
@@ -575,11 +571,11 @@ ATOM WINAPI RegisterClassExW( const WNDCLASSEXW* wc )
     CLASS *classPtr;
     HINSTANCE instance;
 
-    if (wc->hInstance == user32_module)
+    if (wc->cbClsExtra < 0 || wc->cbWndExtra < 0 ||
+        wc->hInstance == user32_module)  /* we can't register a class for user32 */
     {
-        /* we can't register a class for user32 */
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return 0;
+         SetLastError( ERROR_INVALID_PARAMETER );
+         return 0;
     }
     if (!(instance = wc->hInstance)) instance = GetModuleHandleW( NULL );
 
@@ -629,10 +625,10 @@ BOOL WINAPI UnregisterClassW( LPCWSTR className, HINSTANCE hInstance )
 
     SERVER_START_REQ( destroy_class )
     {
-        req->instance = hInstance;
+        req->instance = wine_server_client_ptr( hInstance );
         if (!(req->atom = get_int_atom_value(className)) && className)
             wine_server_add_data( req, className, strlenW(className) * sizeof(WCHAR) );
-        if (!wine_server_call_err( req )) classPtr = reply->client_ptr;
+        if (!wine_server_call_err( req )) classPtr = wine_server_get_ptr( reply->client_ptr );
     }
     SERVER_END_REQ;
 
@@ -657,7 +653,7 @@ WORD WINAPI GetClassWord( HWND hwnd, INT offset )
     {
         SERVER_START_REQ( set_class_info )
         {
-            req->window = hwnd;
+            req->window = wine_server_user_handle( hwnd );
             req->flags = 0;
             req->extra_offset = offset;
             req->extra_size = sizeof(retvalue);
@@ -694,7 +690,7 @@ static ULONG_PTR CLASS_GetClassLong( HWND hwnd, INT offset, UINT size,
     {
         SERVER_START_REQ( set_class_info )
         {
-            req->window = hwnd;
+            req->window = wine_server_user_handle( hwnd );
             req->flags = 0;
             req->extra_offset = (offset >= 0) ? offset : -1;
             req->extra_size = (offset >= 0) ? size : 0;
@@ -722,7 +718,7 @@ static ULONG_PTR CLASS_GetClassLong( HWND hwnd, INT offset, UINT size,
                     retvalue = reply->old_extra;
                     break;
                 case GCLP_HMODULE:
-                    retvalue = (ULONG_PTR)reply->old_instance;
+                    retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
                     break;
                 case GCW_ATOM:
                     retvalue = reply->old_atom;
@@ -849,7 +845,7 @@ WORD WINAPI SetClassWord( HWND hwnd, INT offset, WORD newval )
 
     SERVER_START_REQ( set_class_info )
     {
-        req->window = hwnd;
+        req->window = wine_server_user_handle( hwnd );
         req->flags = SET_CLASS_EXTRA;
         req->extra_offset = offset;
         req->extra_size = sizeof(newval);
@@ -1168,10 +1164,10 @@ BOOL WINAPI GetClassInfoExW( HINSTANCE hInstance, LPCWSTR name, WNDCLASSEXW *wc 
     wc->cbClsExtra    = classPtr->cbClsExtra;
     wc->cbWndExtra    = classPtr->cbWndExtra;
     wc->hInstance     = (hInstance == user32_module) ? 0 : hInstance;
-    wc->hIcon         = (HICON)classPtr->hIcon;
-    wc->hIconSm       = (HICON)classPtr->hIconSm;
-    wc->hCursor       = (HCURSOR)classPtr->hCursor;
-    wc->hbrBackground = (HBRUSH)classPtr->hbrBackground;
+    wc->hIcon         = classPtr->hIcon;
+    wc->hIconSm       = classPtr->hIconSm;
+    wc->hCursor       = classPtr->hCursor;
+    wc->hbrBackground = classPtr->hbrBackground;
     wc->lpszMenuName  = CLASS_GetMenuNameW( classPtr );
     wc->lpszClassName = name;
     atom = classPtr->atomName;

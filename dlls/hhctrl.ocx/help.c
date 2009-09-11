@@ -89,7 +89,7 @@ BOOL NavigateToUrl(HHInfo *info, LPCWSTR surl)
     BOOL ret;
     HRESULT hres;
 
-    static const WCHAR url_indicator[] = {':', '/', '/'};
+    static const WCHAR url_indicator[] = {':', '/', '/', 0};
 
     TRACE("%s\n", debugstr_w(surl));
 
@@ -115,7 +115,9 @@ BOOL NavigateToChm(HHInfo *info, LPCWSTR file, LPCWSTR index)
     LPWSTR ptr;
 
     static const WCHAR url_format[] =
-        {'m','k',':','@','M','S','I','T','S','t','o','r','e',':','%','s',':',':','%','s',0};
+        {'m','k',':','@','M','S','I','T','S','t','o','r','e',':','%','s',':',':','%','s','%','s',0};
+    static const WCHAR slash[] = {'/',0};
+    static const WCHAR empty[] = {0};
 
     TRACE("%p %s %s\n", info, debugstr_w(file), debugstr_w(index));
 
@@ -127,7 +129,7 @@ BOOL NavigateToChm(HHInfo *info, LPCWSTR file, LPCWSTR index)
         return FALSE;
     }
 
-    wsprintfW(buf, url_format, full_path, index);
+    wsprintfW(buf, url_format, full_path, (!index || index[0] == '/') ? empty : slash, index);
 
     /* FIXME: HACK */
     if((ptr = strchrW(buf, '#')))
@@ -587,7 +589,7 @@ static BOOL HH_AddToolbar(HHInfo *pHHInfo)
         heap_free(szBuf);
     }
 
-    SendMessageW(hToolbar, TB_ADDBUTTONSW, dwNumButtons, (LPARAM)&buttons);
+    SendMessageW(hToolbar, TB_ADDBUTTONSW, dwNumButtons, (LPARAM)buttons);
     SendMessageW(hToolbar, TB_AUTOSIZE, 0, 0);
     ShowWindow(hToolbar, SW_SHOW);
 
@@ -825,7 +827,7 @@ static BOOL HH_CreateHelpWindow(HHInfo *info)
 
     /* Read in window parameters if available */
     if (info->WinType.fsValidMembers & HHWIN_PARAM_STYLES)
-        dwStyles = info->WinType.dwStyles;
+        dwStyles = info->WinType.dwStyles | WS_OVERLAPPEDWINDOW;
     else
         dwStyles = WS_OVERLAPPEDWINDOW | WS_VISIBLE |
                    WS_CLIPSIBLINGS | WS_CLIPCHILDREN;

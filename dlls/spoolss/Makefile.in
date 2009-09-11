@@ -6,8 +6,9 @@ MODULE      = spoolss.dll
 IMPORTLIB   = spoolss
 IMPORTS     = winspool kernel32
 
-C_SRCS  = \
-        spoolss_main.c
+C_SRCS = \
+	router.c \
+	spoolss_main.c
 
 @MAKE_DLL_RULES@
 

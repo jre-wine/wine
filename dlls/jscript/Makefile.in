@@ -3,14 +3,45 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = jscript.dll
-IMPORTS   = kernel32
+IMPORTS   = oleaut32 user32 advapi32 kernel32
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	jscript_De.rc \
+	jscript_En.rc \
+	jscript_Fr.rc \
+	jscript_Lt.rc \
+	jscript_Nl.rc \
+	jscript_Pt.rc \
+	rsrc.rc
 
 C_SRCS = \
+	array.c \
+	bool.c \
+	date.c \
+	dispex.c \
+	engine.c \
+	error.c \
+	function.c \
+	global.c \
 	jscript.c \
-	jscript_main.c
+	jscript_main.c \
+	jsutils.c \
+	lex.c \
+	math.c \
+	number.c \
+	object.c \
+	regexp.c \
+	string.c
+
+IDL_TLB_SRCS = jsglobal.idl
+
+BISON_SRCS = \
+	parser.y
 
 @MAKE_DLL_RULES@
 
+parser.tab.c: parser.tab.h   # for parallel makes
+
 @DEPENDENCIES@  # everything below this line is overwritten by make depend
+
+lex.o: parser.tab.h

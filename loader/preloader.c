@@ -110,8 +110,8 @@ static struct wine_preload_info preload_info[] =
 {
     { (void *)0x00000000, 0x00010000 },  /* low 64k */
     { (void *)0x00010000, 0x00100000 },  /* DOS area */
-    { (void *)0x00110000, 0x5fef0000 },  /* low memory area */
-    { (void *)0x7f000000, 0x02000000 },  /* top-down allocations + shared heap */
+    { (void *)0x00110000, 0x67ef0000 },  /* low memory area */
+    { (void *)0x7f000000, 0x03000000 },  /* top-down allocations + shared heap + virtual heap */
     { 0, 0 },                            /* PE exe range set with WINEPRELOADRESERVE */
     { 0, 0 }                             /* end of list */
 };
@@ -163,6 +163,7 @@ void __bb_init_func(void) { return; }
 
 /* similar to the above but for -fstack-protector */
 void *__stack_chk_guard = 0;
+void __stack_chk_fail_local(void) { return; }
 void __stack_chk_fail(void) { return; }
 
 /* data for setting up the glibc-style thread-local storage in %gs */
@@ -1084,8 +1085,10 @@ void* wld_start( void **stack )
         if (wld_mmap( preload_info[i].addr, preload_info[i].size, PROT_NONE,
                       MAP_FIXED | MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0 ) == (void *)-1)
         {
-            wld_printf( "preloader: Warning: failed to reserve range %p-%p\n",
-                        preload_info[i].addr, (char *)preload_info[i].addr + preload_info[i].size );
+            /* don't warn for low 64k */
+            if (preload_info[i].addr >= (void *)0x10000)
+                wld_printf( "preloader: Warning: failed to reserve range %p-%p\n",
+                            preload_info[i].addr, (char *)preload_info[i].addr + preload_info[i].size );
             remove_preload_range( i );
             i--;
         }

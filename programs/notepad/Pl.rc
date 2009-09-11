@@ -21,6 +21,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 LANGUAGE LANG_POLISH, SUBLANG_DEFAULT
 
 MAIN_MENU MENU
@@ -60,7 +62,7 @@ POPUP "Pomo&c" {
   MENUITEM "&Szukaj...",        CMD_HELP_SEARCH
   MENUITEM "&Pomoc",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "Notepad - &informacje", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 

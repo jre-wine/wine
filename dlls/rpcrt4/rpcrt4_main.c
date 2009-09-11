@@ -43,8 +43,7 @@
 #include "winuser.h"
 #include "winnt.h"
 #include "winternl.h"
-#include "iptypes.h"
-#include "iphlpapi.h"
+#include "ntsecapi.h"
 #include "wine/unicode.h"
 #include "rpc.h"
 
@@ -53,28 +52,13 @@
 #include "rpcproxy.h"
 
 #include "rpc_binding.h"
-#include "rpcss_np_client.h"
+#include "rpc_server.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(rpc);
 
 static UUID uuid_nil;
-static HANDLE master_mutex;
-
-HANDLE RPCRT4_GetMasterMutex(void)
-{
-    return master_mutex;
-}
-
-static CRITICAL_SECTION uuid_cs;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &uuid_cs,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": uuid_cs") }
-};
-static CRITICAL_SECTION uuid_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 static CRITICAL_SECTION threaddata_cs;
 static CRITICAL_SECTION_DEBUG threaddata_cs_debug =
@@ -85,7 +69,7 @@ static CRITICAL_SECTION_DEBUG threaddata_cs_debug =
 };
 static CRITICAL_SECTION threaddata_cs = { &threaddata_cs_debug, -1, 0, 0, 0, 0 };
 
-struct list threaddata_list = LIST_INIT(threaddata_list);
+static struct list threaddata_list = LIST_INIT(threaddata_list);
 
 struct context_handle_list
 {
@@ -122,9 +106,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
-        master_mutex = CreateMutexA( NULL, FALSE, RPCSS_MASTER_MUTEX_NAME);
-        if (!master_mutex)
-          ERR("Failed to create master mutex\n");
         break;
 
     case DLL_THREAD_DETACH:
@@ -145,8 +126,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         break;
 
     case DLL_PROCESS_DETACH:
-        CloseHandle(master_mutex);
-        master_mutex = NULL;
+        RPCRT4_destroy_all_protseqs();
         break;
     }
 
@@ -292,61 +272,6 @@ RPC_STATUS WINAPI UuidCreateNil(UUID *Uuid)
   return RPC_S_OK;
 }
 
-/* Number of 100ns ticks per clock tick. To be safe, assume that the clock
-   resolution is at least 1000 * 100 * (1/1000000) = 1/10 of a second */
-#define TICKS_PER_CLOCK_TICK 1000
-#define SECSPERDAY  86400
-#define TICKSPERSEC 10000000
-/* UUID system time starts at October 15, 1582 */
-#define SECS_15_OCT_1582_TO_1601  ((17 + 30 + 31 + 365 * 18 + 5) * SECSPERDAY)
-#define TICKS_15_OCT_1582_TO_1601 ((ULONGLONG)SECS_15_OCT_1582_TO_1601 * TICKSPERSEC)
-
-static void RPC_UuidGetSystemTime(ULONGLONG *time)
-{
-    FILETIME ft;
-
-    GetSystemTimeAsFileTime(&ft);
-
-    *time = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    *time += TICKS_15_OCT_1582_TO_1601;
-}
-
-/* Assume that a hardware address is at least 6 bytes long */ 
-#define ADDRESS_BYTES_NEEDED 6
-
-static RPC_STATUS RPC_UuidGetNodeAddress(BYTE *address)
-{
-    int i;
-    DWORD status = RPC_S_OK;
-
-    ULONG buflen = sizeof(IP_ADAPTER_INFO);
-    PIP_ADAPTER_INFO adapter = HeapAlloc(GetProcessHeap(), 0, buflen);
-
-    if (GetAdaptersInfo(adapter, &buflen) == ERROR_BUFFER_OVERFLOW) {
-        HeapFree(GetProcessHeap(), 0, adapter);
-        adapter = HeapAlloc(GetProcessHeap(), 0, buflen);
-    }
-
-    if (GetAdaptersInfo(adapter, &buflen) == NO_ERROR) {
-        for (i = 0; i < ADDRESS_BYTES_NEEDED; i++) {
-            address[i] = adapter->Address[i];
-        }
-    }
-    /* We can't get a hardware address, just use random numbers.
-       Set the multicast bit to prevent conflicts with real cards. */
-    else {
-        for (i = 0; i < ADDRESS_BYTES_NEEDED; i++) {
-            address[i] = rand() & 0xff;
-        }
-
-        address[0] |= 0x01;
-        status = RPC_S_UUID_LOCAL_ONLY;
-    }
-
-    HeapFree(GetProcessHeap(), 0, adapter);
-    return status;
-}
-
 /*************************************************************************
  *           UuidCreate   [RPCRT4.@]
  *
@@ -357,83 +282,26 @@ static RPC_STATUS RPC_UuidGetNodeAddress(BYTE *address)
  *  RPC_S_OK if successful.
  *  RPC_S_UUID_LOCAL_ONLY if UUID is only locally unique.
  *
- *  FIXME: No compensation for changes across reloading
- *         this dll or across reboots (e.g. clock going 
- *         backwards and swapped network cards). The RFC
- *         suggests using NVRAM for storing persistent 
- *         values.
+ * NOTES
+ *
+ *  Follows RFC 4122, section 4.4 (Algorithms for Creating a UUID from
+ *  Truly Random or Pseudo-Random Numbers)
  */
 RPC_STATUS WINAPI UuidCreate(UUID *Uuid)
 {
-    static int initialised, count;
-
-    ULONGLONG time;
-    static ULONGLONG timelast;
-    static WORD sequence;
-
-    static DWORD status;
-    static BYTE address[MAX_ADAPTER_ADDRESS_LENGTH];
-
-    EnterCriticalSection(&uuid_cs);
-
-    if (!initialised) {
-        RPC_UuidGetSystemTime(&timelast);
-        count = TICKS_PER_CLOCK_TICK;
-
-        sequence = ((rand() & 0xff) << 8) + (rand() & 0xff);
-        sequence &= 0x1fff;
-
-        status = RPC_UuidGetNodeAddress(address);
-        initialised = 1;
-    }
-
-    /* Generate time element of the UUID. Account for going faster
-       than our clock as well as the clock going backwards. */
-    while (1) {
-        RPC_UuidGetSystemTime(&time);
-        if (time > timelast) {
-            count = 0;
-            break;
-        }
-        if (time < timelast) {
-            sequence = (sequence + 1) & 0x1fff;
-            count = 0;
-            break;
-        }
-        if (count < TICKS_PER_CLOCK_TICK) {
-            count++;
-            break;
-        }
-    }
-
-    timelast = time;
-    time += count;
-
-    /* Pack the information into the UUID structure. */
-
-    Uuid->Data1  = (unsigned long)(time & 0xffffffff);
-    Uuid->Data2  = (unsigned short)((time >> 32) & 0xffff);
-    Uuid->Data3  = (unsigned short)((time >> 48) & 0x0fff);
-
-    /* This is a version 1 UUID */
-    Uuid->Data3 |= (1 << 12);
-
-    Uuid->Data4[0]  = sequence & 0xff;
-    Uuid->Data4[1]  = (sequence & 0x3f00) >> 8;
-    Uuid->Data4[1] |= 0x80;
-
-    Uuid->Data4[2] = address[0];
-    Uuid->Data4[3] = address[1];
-    Uuid->Data4[4] = address[2];
-    Uuid->Data4[5] = address[3];
-    Uuid->Data4[6] = address[4];
-    Uuid->Data4[7] = address[5];
-
-    LeaveCriticalSection(&uuid_cs);
+    RtlGenRandom(Uuid, sizeof(*Uuid));
+    /* Clear the version bits and set the version (4) */
+    Uuid->Data3 &= 0x0fff;
+    Uuid->Data3 |= (4 << 12);
+    /* Set the topmost bits of Data4 (clock_seq_hi_and_reserved) as
+     * specified in RFC 4122, section 4.4.
+     */
+    Uuid->Data4[0] &= 0x3f;
+    Uuid->Data4[0] |= 0x80;
 
     TRACE("%s\n", debugstr_guid(Uuid));
 
-    return status;
+    return RPC_S_OK;
 }
 
 /*************************************************************************
@@ -645,102 +513,6 @@ HRESULT WINAPI DllRegisterServer( void )
     return S_OK;
 }
 
-static BOOL RPCRT4_StartRPCSS(void)
-{
-    PROCESS_INFORMATION pi;
-    STARTUPINFOA si;
-    static char cmd[6];
-    BOOL rslt;
-
-    ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
-    ZeroMemory(&si, sizeof(STARTUPINFOA));
-    si.cb = sizeof(STARTUPINFOA);
-
-    /* apparently it's not OK to use a constant string below */
-    CopyMemory(cmd, "rpcss", 6);
-
-    /* FIXME: will this do the right thing when run as a test? */
-    rslt = CreateProcessA(
-        NULL,           /* executable */
-        cmd,            /* command line */
-        NULL,           /* process security attributes */
-        NULL,           /* primary thread security attributes */
-        FALSE,          /* inherit handles */
-        0,              /* creation flags */
-        NULL,           /* use parent's environment */
-        NULL,           /* use parent's current directory */
-        &si,            /* STARTUPINFO pointer */
-        &pi             /* PROCESS_INFORMATION */
-    );
-
-    if (rslt) {
-      CloseHandle(pi.hProcess);
-      CloseHandle(pi.hThread);
-    }
-
-    return rslt;
-}
-
-/***********************************************************************
- *           RPCRT4_RPCSSOnDemandCall (internal)
- * 
- * Attempts to send a message to the RPCSS process
- * on the local machine, invoking it if necessary.
- * For remote RPCSS calls, use.... your imagination.
- * 
- * PARAMS
- *     msg             [I] pointer to the RPCSS message
- *     vardata_payload [I] pointer vardata portion of the RPCSS message
- *     reply           [O] pointer to reply structure
- *
- * RETURNS
- *     TRUE if successful
- *     FALSE otherwise
- */
-BOOL RPCRT4_RPCSSOnDemandCall(PRPCSS_NP_MESSAGE msg, char *vardata_payload, PRPCSS_NP_REPLY reply)
-{
-    HANDLE client_handle;
-    BOOL ret;
-    int i, j = 0;
-
-    TRACE("(msg == %p, vardata_payload == %p, reply == %p)\n", msg, vardata_payload, reply);
-
-    client_handle = RPCRT4_RpcssNPConnect();
-
-    while (INVALID_HANDLE_VALUE == client_handle) {
-        /* start the RPCSS process */
-	if (!RPCRT4_StartRPCSS()) {
-	    ERR("Unable to start RPCSS process.\n");
-	    return FALSE;
-	}
-	/* wait for a connection (w/ periodic polling) */
-        for (i = 0; i < 60; i++) {
-            Sleep(200);
-            client_handle = RPCRT4_RpcssNPConnect();
-            if (INVALID_HANDLE_VALUE != client_handle) break;
-        } 
-        /* we are only willing to try twice */
-	if (j++ >= 1) break;
-    }
-
-    if (INVALID_HANDLE_VALUE == client_handle) {
-        /* no dice! */
-        ERR("Unable to connect to RPCSS process!\n");
-	SetLastError(RPC_E_SERVER_DIED_DNE);
-	return FALSE;
-    }
-
-    /* great, we're connected.  now send the message */
-    ret = TRUE;
-    if (!RPCRT4_SendReceiveNPMsg(client_handle, msg, vardata_payload, reply)) {
-        ERR("Something is amiss: RPC_SendReceive failed.\n");
-	ret = FALSE;
-    }
-    CloseHandle(client_handle);
-
-    return ret;
-}
-
 #define MAX_RPC_ERROR_TEXT 256
 
 /******************************************************************************
@@ -823,7 +595,7 @@ void WINAPI I_RpcFree(void *Object)
  */
 LONG WINAPI I_RpcMapWin32Status(RPC_STATUS status)
 {
-    TRACE("(%ld)\n", status);
+    TRACE("(%d)\n", status);
     switch (status)
     {
     case ERROR_ACCESS_DENIED: return STATUS_ACCESS_DENIED;
@@ -1076,19 +848,9 @@ NDR_SCONTEXT RPCRT4_PopThreadContextHandle(void)
     return context_handle;
 }
 
-/******************************************************************************
- * RpcCancelThread   (rpcrt4.@)
- */
-RPC_STATUS RPC_ENTRY RpcCancelThread(void* ThreadHandle)
+static RPC_STATUS rpc_cancel_thread(DWORD target_tid)
 {
-    DWORD target_tid;
     struct threaddata *tdata;
-
-    TRACE("(%p)\n", ThreadHandle);
-
-    target_tid = GetThreadId(ThreadHandle);
-    if (!target_tid)
-        return RPC_S_INVALID_ARG;
 
     EnterCriticalSection(&threaddata_cs);
     LIST_FOR_EACH_ENTRY(tdata, &threaddata_list, struct threaddata, entry)
@@ -1105,10 +867,32 @@ RPC_STATUS RPC_ENTRY RpcCancelThread(void* ThreadHandle)
 }
 
 /******************************************************************************
+ * RpcCancelThread   (rpcrt4.@)
+ */
+RPC_STATUS RPC_ENTRY RpcCancelThread(void* ThreadHandle)
+{
+    TRACE("(%p)\n", ThreadHandle);
+    return RpcCancelThreadEx(ThreadHandle, 0);
+}
+
+/******************************************************************************
  * RpcCancelThreadEx   (rpcrt4.@)
  */
 RPC_STATUS RPC_ENTRY RpcCancelThreadEx(void* ThreadHandle, LONG Timeout)
 {
+    DWORD target_tid;
+
     FIXME("(%p, %d)\n", ThreadHandle, Timeout);
-    return RPC_S_OK;
+
+    target_tid = GetThreadId(ThreadHandle);
+    if (!target_tid)
+        return RPC_S_INVALID_ARG;
+
+    if (Timeout)
+    {
+        FIXME("(%p, %d)\n", ThreadHandle, Timeout);
+        return RPC_S_OK;
+    }
+    else
+        return rpc_cancel_thread(target_tid);
 }

@@ -33,7 +33,7 @@
 
 #include "dplayx_global.h"
 #include "name_server.h"
-#include "dplaysp.h"
+#include "wine/dplaysp.h"
 #include "dplayx_messages.h"
 #include "dplayx_queue.h"
 
@@ -74,20 +74,9 @@ static DPQ_DECL_DELETECB( cbDeleteNSNodeFromHeap, lpNSCacheData );
  */
 void NS_SetLocalComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo )
 {
-#if 0
-  /* FIXME: Remove this method? */
-  DPLAYX_SetLocalSession( lpsd );
-#endif
   lpNSCache lpCache = (lpNSCache)lpNSInfo;
 
   lpCache->bNsIsLocal = TRUE;
-}
-
-void NS_SetRemoteComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo )
-{
-  lpNSCache lpCache = (lpNSCache)lpNSInfo;
-
-  lpCache->bNsIsLocal = FALSE;
 }
 
 static DPQ_DECL_COMPARECB( cbUglyPig, GUID )
@@ -169,7 +158,7 @@ LPVOID NS_GetNSAddr( LPVOID lpNSInfo )
   /* Ok. Cheat and don't search for the correct stuff just take the first.
    * FIXME: In the future how are we to know what is _THE_ enum we used?
    *        This is going to have to go into dplay somehow. Perhaps it
-   *        comes back with app server id for the join command! Oh...that
+   *        comes back with app server id for the join command! Oh... that
    *        must be it. That would make this method obsolete once that's
    *        in place.
    */
@@ -185,17 +174,9 @@ LPVOID NS_GetNSAddr( LPVOID lpNSInfo )
 /* Get the magic number associated with the Name Server */
 DWORD NS_GetNsMagic( LPVOID lpNSInfo )
 {
-  LPDWORD lpHdrInfo = (LPDWORD)NS_GetNSAddr( lpNSInfo );
+  LPDWORD lpHdrInfo = NS_GetNSAddr( lpNSInfo );
 
   return lpHdrInfo[1];
-}
-
-/* Get the magic number associated with the non NS end */
-DWORD NS_GetOtherMagic( LPVOID lpNSInfo )
-{
-  lpNSCache lpCache = (lpNSCache)lpNSInfo;
-
-  return ((LPDWORD)lpCache->lpLocalAddrHdr)[1];
 }
 
 void NS_SetLocalAddr( LPVOID lpNSInfo, LPCVOID lpHdr, DWORD dwHdrSize )

@@ -77,11 +77,9 @@ HACCEL WINAPI LoadAcceleratorsW(HINSTANCE instance,LPCWSTR lpTableName)
     DWORD size;
 
     if (HIWORD(lpTableName))
-        TRACE_(accel)("%p '%s'\n",
-                      (LPVOID)instance, (const char *)( lpTableName ) );
+        TRACE_(accel)("%p '%s'\n", instance, (const char *)( lpTableName ) );
     else
-        TRACE_(accel)("%p 0x%04x\n",
-                       (LPVOID)instance, LOWORD(lpTableName) );
+        TRACE_(accel)("%p 0x%04x\n", instance, LOWORD(lpTableName) );
 
     if (!(hRsrc = FindResourceW( instance, lpTableName, (LPWSTR)RT_ACCELERATOR )))
     {
@@ -156,7 +154,7 @@ INT WINAPI CopyAcceleratorTableW(HACCEL src, LPACCEL dst,
      as far as possible. */
   if((dst && (entries < 1)) || (src == NULL) || !accel) {
     WARN_(accel)("Application sent invalid parameters (%p %p %d).\n",
-	 (LPVOID)src, (LPVOID)dst, entries);
+         src, dst, entries);
     return 0;
   }
   xsize = GlobalSize16(HACCEL_16(src))/sizeof(ACCEL16);
@@ -396,10 +394,10 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
     i = min(buflen - 1, *p);
     if (i > 0) {
 	memcpy(buffer, p + 1, i * sizeof (WCHAR));
-	buffer[i] = (WCHAR) 0;
+        buffer[i] = 0;
     } else {
 	if (buflen > 1) {
-	    buffer[0] = (WCHAR) 0;
+            buffer[0] = 0;
 	    return 0;
 	}
     }
@@ -444,7 +442,13 @@ INT WINAPI LoadStringA( HINSTANCE instance, UINT resource_id, LPSTR buffer, INT 
  */
 DWORD WINAPI GetGuiResources( HANDLE hProcess, DWORD uiFlags )
 {
-    FIXME("(%p,%x): stub\n",hProcess,uiFlags);
+    static BOOL warn = TRUE;
+
+    if (warn) {
+        FIXME("(%p,%x): stub\n",hProcess,uiFlags);
+       warn = FALSE;
+    }
+
     SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
     return 0;
 }

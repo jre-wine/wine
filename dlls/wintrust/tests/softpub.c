@@ -27,6 +27,7 @@
 #include <softpub.h>
 #include <mssip.h>
 #include <winuser.h>
+#include "winnls.h"
 
 #include "wine/test.h"
 
@@ -228,6 +229,17 @@ static void testInitialize(SAFE_PROVIDER_FUNCTIONS *funcs, GUID *actionID)
     }
 }
 
+static void getNotepadPath(WCHAR *notepadPathW, DWORD size)
+{
+    static const CHAR notepad[] = "\\notepad.exe";
+    CHAR notepadPath[MAX_PATH];
+
+    /* Workaround missing W-functions for win9x */
+    GetWindowsDirectoryA(notepadPath, MAX_PATH);
+    lstrcatA(notepadPath, notepad);
+    MultiByteToWideChar(0, 0, notepadPath, -1, notepadPathW, size);
+}
+
 static void testObjTrust(SAFE_PROVIDER_FUNCTIONS *funcs, GUID *actionID)
 {
     HRESULT ret;
@@ -250,9 +262,7 @@ static void testObjTrust(SAFE_PROVIDER_FUNCTIONS *funcs, GUID *actionID)
      funcs->pfnAlloc(TRUSTERROR_MAX_STEPS * sizeof(DWORD));
     if (data.padwTrustStepErrors)
     {
-        static const WCHAR notepad[] = { '\\','n','o','t','e','p','a','d','.',
-         'e','x','e',0 };
-        WCHAR notepadPath[MAX_PATH];
+        WCHAR notepadPathW[MAX_PATH];
         PROVDATA_SIP provDataSIP = { 0 };
         static const GUID unknown = { 0xC689AAB8, 0x8E78, 0x11D0, { 0x8C,0x47,
          0x00,0xC0,0x4F,0xC2,0x95,0xEE } };
@@ -285,21 +295,28 @@ static void testObjTrust(SAFE_PROVIDER_FUNCTIONS *funcs, GUID *actionID)
         /* Crashes
         ret = funcs->pfnObjectTrust(&data);
          */
-        GetWindowsDirectoryW(notepadPath, MAX_PATH);
-        lstrcatW(notepadPath, notepad);
-        fileInfo.pcwszFilePath = notepadPath;
+        getNotepadPath(notepadPathW, MAX_PATH);
+        fileInfo.pcwszFilePath = notepadPathW;
         /* pfnObjectTrust now crashes unless both pPDSip and psPfns are set */
         U(data).pPDSip = &provDataSIP;
         data.psPfns = (CRYPT_PROVIDER_FUNCTIONS *)funcs;
         ret = funcs->pfnObjectTrust(&data);
         ok(ret == S_FALSE, "Expected S_FALSE, got %08x\n", ret);
         ok(data.padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] ==
-         TRUST_E_NOSIGNATURE, "Expected TRUST_E_NOSIGNATURE, got %08x\n",
+         TRUST_E_NOSIGNATURE ||
+         data.padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] ==
+         TRUST_E_SUBJECT_FORM_UNKNOWN,
+         "Expected TRUST_E_NOSIGNATURE or TRUST_E_SUBJECT_FORM_UNKNOWN, got %08x\n",
          data.padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV]);
-        ok(!memcmp(&provDataSIP.gSubject, &unknown, sizeof(unknown)),
-         "Unexpected subject GUID\n");
-        ok(provDataSIP.pSip != NULL, "Expected a SIP\n");
-        ok(provDataSIP.psSipSubjectInfo != NULL, "Expected a subject info\n");
+        if (data.padwTrustStepErrors[TRUSTERROR_STEP_FINAL_OBJPROV] ==
+         TRUST_E_NOSIGNATURE)
+        {
+            ok(!memcmp(&provDataSIP.gSubject, &unknown, sizeof(unknown)),
+             "Unexpected subject GUID\n");
+            ok(provDataSIP.pSip != NULL, "Expected a SIP\n");
+            ok(provDataSIP.psSipSubjectInfo != NULL,
+             "Expected a subject info\n");
+        }
         funcs->pfnFree(data.padwTrustStepErrors);
     }
 }
@@ -395,7 +412,7 @@ static void testCertTrust(SAFE_PROVIDER_FUNCTIONS *funcs, GUID *actionID)
     }
 }
 
-START_TEST(softpub)
+static void test_provider_funcs(void)
 {
     static GUID generic_verify_v2 = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     SAFE_PROVIDER_FUNCTIONS funcs = { sizeof(SAFE_PROVIDER_FUNCTIONS), 0 };
@@ -412,4 +429,121 @@ START_TEST(softpub)
         testObjTrust(&funcs, &generic_verify_v2);
         testCertTrust(&funcs, &generic_verify_v2);
     }
+}
+
+static void test_wintrust(void)
+{
+    static GUID generic_action_v2 = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    WINTRUST_DATA wtd;
+    WINTRUST_FILE_INFO file;
+    LONG r;
+    HRESULT hr;
+    WCHAR notepadPathW[MAX_PATH];
+
+    memset(&wtd, 0, sizeof(wtd));
+    wtd.cbStruct = sizeof(wtd);
+    wtd.dwUIChoice = WTD_UI_NONE;
+    wtd.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
+    wtd.dwUnionChoice = WTD_CHOICE_FILE;
+    U(wtd).pFile = &file;
+    wtd.dwStateAction = WTD_STATEACTION_VERIFY;
+    memset(&file, 0, sizeof(file));
+    file.cbStruct = sizeof(file);
+    getNotepadPath(notepadPathW, MAX_PATH);
+    file.pcwszFilePath = notepadPathW;
+    r = WinVerifyTrust(INVALID_HANDLE_VALUE, &generic_action_v2, &wtd);
+    ok(r == TRUST_E_NOSIGNATURE || r == CRYPT_E_FILE_ERROR,
+     "expected TRUST_E_NOSIGNATURE or CRYPT_E_FILE_ERROR, got %08x\n", r);
+    hr = WinVerifyTrustEx(INVALID_HANDLE_VALUE, &generic_action_v2, &wtd);
+    ok(hr == TRUST_E_NOSIGNATURE || r == CRYPT_E_FILE_ERROR,
+     "expected TRUST_E_NOSIGNATURE or CRYPT_E_FILE_ERROR, got %08x\n", hr);
+}
+
+static BOOL (WINAPI * pWTHelperGetKnownUsages)(DWORD action, PCCRYPT_OID_INFO **usages);
+
+static void InitFunctionPtrs(void)
+{
+    HMODULE hWintrust = GetModuleHandleA("wintrust.dll");
+
+#define WINTRUST_GET_PROC(func) \
+    p ## func = (void*)GetProcAddress(hWintrust, #func); \
+    if(!p ## func) { \
+      trace("GetProcAddress(%s) failed\n", #func); \
+    }
+
+    WINTRUST_GET_PROC(WTHelperGetKnownUsages)
+
+#undef WINTRUST_GET_PROC
+}
+
+static void test_get_known_usages(void)
+{
+    BOOL ret;
+    PCCRYPT_OID_INFO *usages;
+
+    if (!pWTHelperGetKnownUsages)
+    {
+        skip("missing WTHelperGetKnownUsages\n");
+        return;
+    }
+    SetLastError(0xdeadbeef);
+    ret = pWTHelperGetKnownUsages(0, NULL);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+     "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pWTHelperGetKnownUsages(1, NULL);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+     "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pWTHelperGetKnownUsages(0, &usages);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+     "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+    /* A value of 1 for the first parameter seems to imply the value is
+     * allocated
+     */
+    SetLastError(0xdeadbeef);
+    usages = NULL;
+    ret = pWTHelperGetKnownUsages(1, &usages);
+    ok(ret, "WTHelperGetKnownUsages failed: %d\n", GetLastError());
+    ok(usages != NULL, "expected a pointer\n");
+    if (ret && usages)
+    {
+        PCCRYPT_OID_INFO *ptr;
+
+        /* The returned usages are an array of PCCRYPT_OID_INFOs, terminated with a
+         * NULL pointer.
+         */
+        for (ptr = usages; *ptr; ptr++)
+        {
+            ok((*ptr)->cbSize == sizeof(CRYPT_OID_INFO) ||
+             (*ptr)->cbSize == (sizeof(CRYPT_OID_INFO) + 2 * sizeof(LPCWSTR)), /* Vista */
+             "unexpected size %d\n", (*ptr)->cbSize);
+            /* Each returned usage is in the CRYPT_ENHKEY_USAGE_OID_GROUP_ID group */
+            ok((*ptr)->dwGroupId == CRYPT_ENHKEY_USAGE_OID_GROUP_ID,
+             "expected group CRYPT_ENHKEY_USAGE_OID_GROUP_ID, got %d\n",
+             (*ptr)->dwGroupId);
+        }
+    }
+    /* A value of 2 for the second parameter seems to imply the value is freed
+     */
+    SetLastError(0xdeadbeef);
+    ret = pWTHelperGetKnownUsages(2, &usages);
+    ok(ret, "WTHelperGetKnownUsages failed: %d\n", GetLastError());
+    ok(usages == NULL, "expected pointer to be cleared\n");
+    SetLastError(0xdeadbeef);
+    usages = NULL;
+    ret = pWTHelperGetKnownUsages(2, &usages);
+    ok(ret, "WTHelperGetKnownUsages failed: %d\n", GetLastError());
+    SetLastError(0xdeadbeef);
+    ret = pWTHelperGetKnownUsages(2, NULL);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+     "expected ERROR_INVALID_PARAMETER, got %d\n", GetLastError());
+}
+
+START_TEST(softpub)
+{
+    InitFunctionPtrs();
+    test_provider_funcs();
+    test_wintrust();
+    test_get_known_usages();
 }

@@ -20,15 +20,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "clock_res.h"
+
 LANGUAGE LANG_ITALIAN, SUBLANG_NEUTRAL
 
 MAIN_MENU MENU
 {
- POPUP "&Properietà" {
+ POPUP "&Proprietà" {
   MENUITEM "Ana&logico", IDM_ANALOG
   MENUITEM "Digi&tale", IDM_DIGITAL
   MENUITEM SEPARATOR
-  MENUITEM "&Font...", IDM_FONT
+  MENUITEM "&Carattere...", IDM_FONT
   MENUITEM SEPARATOR
   MENUITEM "&Nascondi la barra del titolo", IDM_NOTITLE
   MENUITEM SEPARATOR

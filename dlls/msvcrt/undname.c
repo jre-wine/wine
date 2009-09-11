@@ -24,6 +24,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "msvcrt.h"
 
 #include "wine/debug.h"
@@ -112,7 +113,7 @@ struct datatype_t
  * where we use a poor-man allocator. It's fast, and since all
  * allocation is pool, memory management is easy (esp. freeing).
  */
-static void*    und_alloc(struct parsed_symbol* sym, size_t len)
+static void*    und_alloc(struct parsed_symbol* sym, unsigned int len)
 {
     void*       ptr;
 
@@ -232,11 +233,11 @@ static char* str_array_get_ref(struct array* cref, unsigned idx)
  */
 static char* str_printf(struct parsed_symbol* sym, const char* format, ...)
 {
-    va_list     args;
-    size_t      len = 1, i, sz;
-    char*       tmp;
-    char*       p;
-    char*       t;
+    va_list      args;
+    unsigned int len = 1, i, sz;
+    char*        tmp;
+    char*        p;
+    char*        t;
 
     va_start(args, format);
     for (i = 0; format[i]; i++)
@@ -318,7 +319,7 @@ static const char* get_number(struct parsed_symbol* sym)
     }
     else if (*sym->current >= 'A' && *sym->current <= 'P')
     {
-        long    ret = 0;
+        int ret = 0;
 
         while (*sym->current >= 'A' && *sym->current <= 'P')
         {
@@ -328,7 +329,7 @@ static const char* get_number(struct parsed_symbol* sym)
         if (*sym->current != '@') return NULL;
 
         ptr = und_alloc(sym, 17);
-        sprintf(ptr, "%s%ld", sgn ? "-" : "", ret);
+        sprintf(ptr, "%s%d", sgn ? "-" : "", ret);
         sym->current++;
     }
     else return NULL;
@@ -347,7 +348,7 @@ static char* get_args(struct parsed_symbol* sym, struct array* pmt_ref, BOOL z_t
     struct datatype_t   ct;
     struct array        arg_collect;
     char*               args_str = NULL;
-    int                 i;
+    unsigned int        i;
 
     str_array_init(&arg_collect);
 
@@ -409,7 +410,7 @@ static BOOL get_modifier(char ch, const char** ret)
 }
 
 static BOOL get_modified_type(struct datatype_t *ct, struct parsed_symbol* sym,
-                              struct array *pmt_ref, char modif)
+                              struct array *pmt_ref, char modif, BOOL in_args)
 {
     const char* modifier;
     const char* str_modif;
@@ -431,6 +432,31 @@ static BOOL get_modified_type(struct datatype_t *ct, struct parsed_symbol* sym,
         unsigned            mark = sym->stack.num;
         struct datatype_t   sub_ct;
 
+        /* multidimensional arrays */
+        if (*sym->current == 'Y')
+        {
+            const char* n1;
+            int num;
+
+            sym->current++;
+            if (!(n1 = get_number(sym))) return FALSE;
+            num = atoi(n1);
+
+            if (str_modif[0] == ' ' && !modifier)
+                str_modif++;
+
+            if (modifier)
+            {
+                str_modif = str_printf(sym, " (%s%s)", modifier, str_modif);
+                modifier = NULL;
+            }
+            else
+                str_modif = str_printf(sym, " (%s)", str_modif);
+
+            while (num--)
+                str_modif = str_printf(sym, "%s[%s]", str_modif, get_number(sym));
+        }
+
         /* Recurse to get the referred-to type */
         if (!demangle_datatype(sym, &sub_ct, pmt_ref, FALSE))
             return FALSE;
@@ -439,7 +465,7 @@ static BOOL get_modified_type(struct datatype_t *ct, struct parsed_symbol* sym,
         else
         {
             /* don't insert a space between duplicate '*' */
-            if (str_modif[0] && str_modif[1] == '*' && sub_ct.left[strlen(sub_ct.left)-1] == '*')
+            if (!in_args && str_modif[0] && str_modif[1] == '*' && sub_ct.left[strlen(sub_ct.left)-1] == '*')
                 str_modif++;
             ct->left = str_printf(sym, "%s%s", sub_ct.left, str_modif );
         }
@@ -561,9 +587,9 @@ static BOOL get_class(struct parsed_symbol* sym)
  */
 static char* get_class_string(struct parsed_symbol* sym, int start)
 {
-    int         i;
-    size_t      len, sz;
-    char*       ret;
+    int          i;
+    unsigned int len, sz;
+    char*        ret;
     struct array *a = &sym->stack;
 
     for (len = 0, i = start; i < a->num; i++)
@@ -759,16 +785,25 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
         break;
     case '?':
         /* not all the time is seems */
-        if (!get_modified_type(ct, sym, pmt_ref, '?')) goto done;
+        if (in_args)
+        {
+            const char*   ptr;
+            if (!(ptr = get_number(sym))) goto done;
+            ct->left = str_printf(sym, "`template-parameter-%s'", ptr);
+        }
+        else
+        {
+            if (!get_modified_type(ct, sym, pmt_ref, '?', in_args)) goto done;
+        }
         break;
     case 'A': /* reference */
     case 'B': /* volatile reference */
-        if (!get_modified_type(ct, sym, pmt_ref, dt)) goto done;
+        if (!get_modified_type(ct, sym, pmt_ref, dt, in_args)) goto done;
         break;
     case 'Q': /* const pointer */
     case 'R': /* volatile pointer */
     case 'S': /* const volatile pointer */
-        if (!get_modified_type(ct, sym, pmt_ref, in_args ? dt : 'P')) goto done;
+        if (!get_modified_type(ct, sym, pmt_ref, in_args ? dt : 'P', in_args)) goto done;
         break;
     case 'P': /* Pointer */
         if (isdigit(*sym->current))
@@ -798,7 +833,7 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
             }
             else goto done;
 	}
-	else if (!get_modified_type(ct, sym, pmt_ref, 'P')) goto done;
+	else if (!get_modified_type(ct, sym, pmt_ref, 'P', in_args)) goto done;
         break;
     case 'W':
         if (*sym->current == '4')
@@ -863,6 +898,17 @@ static BOOL demangle_datatype(struct parsed_symbol* sym, struct datatype_t* ct,
                 ct->left = str_printf(sym, "`non-type-template-parameter%s'", ptr);
             }
             break;
+        case '$':
+            if (*sym->current == 'C')
+            {
+                const char*   ptr;
+
+                sym->current++;
+                if (!get_modifier(*sym->current++, &ptr)) goto done;
+                if (!demangle_datatype(sym, ct, pmt_ref, in_args)) goto done;
+                ct->left = str_printf(sym, "%s %s", ct->left, ptr);
+            }
+            break;
         }
         break;
     default :
@@ -893,7 +939,6 @@ static BOOL handle_data(struct parsed_symbol* sym)
     struct datatype_t   ct;
     char*               name = NULL;
     BOOL                ret = FALSE;
-    char                dt;
 
     /* 0 private static
      * 1 protected static
@@ -924,7 +969,7 @@ static BOOL handle_data(struct parsed_symbol* sym)
 
     name = get_class_string(sym, 0);
 
-    switch (dt = *sym->current++)
+    switch (*sym->current++)
     {
     case '0': case '1': case '2':
     case '3': case '4': case '5':

@@ -30,6 +30,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "winerror.h"
+#include "winreg.h"
 #include "dinput.h"
 
 #include "dinput_private.h"
@@ -50,6 +51,13 @@ static const IDirectInputDevice8WVtbl SysMouseWvt;
 
 typedef struct SysMouseImpl SysMouseImpl;
 
+typedef enum
+{
+    WARP_DEFAULT,
+    WARP_DISABLE,
+    WARP_FORCE_ON
+} WARP_MOUSE;
+
 struct SysMouseImpl
 {
     struct IDirectInputDevice2AImpl base;
@@ -66,9 +74,11 @@ struct SysMouseImpl
 
     /* This is for mouse reporting. */
     DIMOUSESTATE2                   m_state;
+
+    WARP_MOUSE                      warp_override;
 };
 
-static void dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam );
+static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam );
 
 const GUID DInput_Wine_Mouse_GUID = { /* 9e573ed8-7734-11d2-8d4a-23903fb6bdf7 */
     0x9e573ed8, 0x7734, 0x11d2, {0x8d, 0x4a, 0x23, 0x90, 0x3f, 0xb6, 0xbd, 0xf7}
@@ -174,6 +184,8 @@ static SysMouseImpl *alloc_device(REFGUID rguid, const void *mvt, IDirectInputIm
     SysMouseImpl* newDevice;
     LPDIDATAFORMAT df = NULL;
     unsigned i;
+    char buffer[20];
+    HKEY hkey, appkey;
 
     newDevice = HeapAlloc(GetProcessHeap(),HEAP_ZERO_MEMORY,sizeof(SysMouseImpl));
     if (!newDevice) return NULL;
@@ -185,6 +197,17 @@ static SysMouseImpl *alloc_device(REFGUID rguid, const void *mvt, IDirectInputIm
     newDevice->base.crit.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": SysMouseImpl*->base.crit");
     newDevice->base.dinput = dinput;
     newDevice->base.event_proc = dinput_mouse_hook;
+
+    get_app_key(&hkey, &appkey);
+    if (!get_config_key(hkey, appkey, "MouseWarpOverride", buffer, sizeof(buffer)))
+    {
+        if (!strcasecmp(buffer, "disable"))
+            newDevice->warp_override = WARP_DISABLE;
+        else if (!strcasecmp(buffer, "force"))
+            newDevice->warp_override = WARP_FORCE_ON;
+    }
+    if (appkey) RegCloseKey(appkey);
+    if (hkey) RegCloseKey(hkey);
 
     /* Create copy of default data format */
     if (!(df = HeapAlloc(GetProcessHeap(), 0, c_dfDIMouse2.dwSize))) goto failed;
@@ -263,17 +286,18 @@ const struct dinput_device mouse_device = {
  */
 
 /* low-level mouse hook */
-static void dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
+static int dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARAM lparam )
 {
     MSLLHOOKSTRUCT *hook = (MSLLHOOKSTRUCT *)lparam;
     SysMouseImpl* This = (SysMouseImpl*) iface;
     DWORD dwCoop;
-    int wdata = 0, inst_id = -1;
+    int wdata = 0, inst_id = -1, ret;
 
     TRACE("msg %lx @ (%d %d)\n", wparam, hook->pt.x, hook->pt.y);
 
     EnterCriticalSection(&This->base.crit);
     dwCoop = This->base.dwCoopLevel;
+    ret = dwCoop & DISCL_EXCLUSIVE;
 
     switch(wparam) {
         case WM_MOUSEMOVE:
@@ -306,7 +330,9 @@ static void dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARA
                 wdata = pt1.y;
             }
 
-            This->need_warp = (pt.x || pt.y) && dwCoop & DISCL_EXCLUSIVE;
+            This->need_warp = This->warp_override != WARP_DISABLE &&
+                              (pt.x || pt.y) &&
+                              (dwCoop & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON);
             break;
         }
         case WM_MOUSEWHEEL:
@@ -345,6 +371,8 @@ static void dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARA
             inst_id = DIDFT_MAKEINSTANCE(WINE_MOUSE_BUTTONS_INSTANCE + 2 + HIWORD(hook->mouseData)) | DIDFT_PSHBUTTON;
             This->m_state.rgbButtons[2 + HIWORD(hook->mouseData)] = wdata = 0x00;
             break;
+        default:
+            ret = 0;
     }
 
 
@@ -356,6 +384,7 @@ static void dinput_mouse_hook( LPDIRECTINPUTDEVICE8A iface, WPARAM wparam, LPARA
     }
 
     LeaveCriticalSection(&This->base.crit);
+    return ret;
 }
 
 static BOOL dinput_window_check(SysMouseImpl* This) {
@@ -422,14 +451,18 @@ static HRESULT WINAPI SysMouseAImpl_Acquire(LPDIRECTINPUTDEVICE8A iface)
       else
         ERR("Failed to get RECT: %d\n", GetLastError());
     }
-    
+
+    /* Need a window to warp mouse in. */
+    if (This->warp_override == WARP_FORCE_ON && !This->base.win)
+        This->base.win = GetDesktopWindow();
+
     /* Get the window dimension and find the center */
     GetWindowRect(This->base.win, &rect);
     This->win_centerX = (rect.right  - rect.left) / 2;
     This->win_centerY = (rect.bottom - rect.top ) / 2;
-    
+
     /* Warp the mouse to the center of the window */
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
+    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON)
     {
       This->mapped_center.x = This->win_centerX;
       This->mapped_center.y = This->win_centerY;
@@ -463,7 +496,7 @@ static HRESULT WINAPI SysMouseAImpl_Unacquire(LPDIRECTINPUTDEVICE8A iface)
     }
 
     /* And put the mouse cursor back where it was at acquire time */
-    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE)
+    if (This->base.dwCoopLevel & DISCL_EXCLUSIVE || This->warp_override == WARP_FORCE_ON)
     {
       TRACE(" warping mouse back to (%d , %d)\n", This->org_coords.x, This->org_coords.y);
       SetCursorPos(This->org_coords.x, This->org_coords.y);
@@ -490,7 +523,7 @@ static HRESULT WINAPI SysMouseAImpl_GetDeviceState(
 
     EnterCriticalSection(&This->base.crit);
     /* Copy the current mouse state */
-    fill_DataFormat(ptr, &(This->m_state), &This->base.data_format);
+    fill_DataFormat(ptr, len, &This->m_state, &This->base.data_format);
 
     /* Initialize the buffer when in relative mode */
     if (!(This->base.data_format.user_df->dwFlags & DIDF_ABSAXIS))
@@ -556,7 +589,7 @@ static HRESULT WINAPI SysMouseAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
     
     if (!HIWORD(rguid)) {
 	switch (LOWORD(rguid)) {
-	    case (DWORD) DIPROP_GRANULARITY: {
+	    case (DWORD_PTR) DIPROP_GRANULARITY: {
 		LPDIPROPDWORD pr = (LPDIPROPDWORD) pdiph;
 		
 		/* We'll just assume that the app asks about the Z axis */
@@ -565,7 +598,7 @@ static HRESULT WINAPI SysMouseAImpl_GetProperty(LPDIRECTINPUTDEVICE8A iface,
 		break;
 	    }
 	      
-	    case (DWORD) DIPROP_RANGE: {
+	    case (DWORD_PTR) DIPROP_RANGE: {
 		LPDIPROPRANGE pr = (LPDIPROPRANGE) pdiph;
 		
 		if ((pdiph->dwHow == DIPH_BYID) &&

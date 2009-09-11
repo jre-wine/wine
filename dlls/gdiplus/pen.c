@@ -67,8 +67,28 @@ static DWORD gdip_to_gdi_join(GpLineJoin join)
     }
 }
 
+static GpPenType bt_to_pt(GpBrushType bt)
+{
+    switch(bt){
+        case BrushTypeSolidColor:
+            return PenTypeSolidColor;
+        case BrushTypeHatchFill:
+            return PenTypeHatchFill;
+        case BrushTypeTextureFill:
+            return PenTypeTextureFill;
+        case BrushTypePathGradient:
+            return PenTypePathGradient;
+        case BrushTypeLinearGradient:
+            return PenTypeLinearGradient;
+        default:
+            return PenTypeUnknown;
+    }
+}
+
 GpStatus WINGDIPAPI GdipClonePen(GpPen *pen, GpPen **clonepen)
 {
+    TRACE("(%p, %p)\n", pen, clonepen);
+
     if(!pen || !clonepen)
         return InvalidParameter;
 
@@ -88,14 +108,23 @@ GpStatus WINGDIPAPI GdipCreatePen1(ARGB color, REAL width, GpUnit unit,
     GpPen **pen)
 {
     GpBrush *brush;
+    GpStatus status;
+
+    TRACE("(%x, %.2f, %d, %p)\n", color, width, unit, pen);
+
     GdipCreateSolidFill(color, (GpSolidFill **)(&brush));
-    return GdipCreatePen2(brush, width, unit, pen);
+    status = GdipCreatePen2(brush, width, unit, pen);
+    GdipDeleteBrush(brush);
+    return status;
 }
 
 GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
     GpPen **pen)
 {
     GpPen *gp_pen;
+    GpBrush *clone_brush;
+
+    TRACE("(%p, %.2f, %d, %p)\n", brush, width, unit, pen);
 
     if(!pen || !brush)
         return InvalidParameter;
@@ -111,13 +140,17 @@ GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
     gp_pen->miterlimit = 10.0;
     gp_pen->dash = DashStyleSolid;
     gp_pen->offset = 0.0;
-    gp_pen->brush = brush;
+    gp_pen->customstart = NULL;
+    gp_pen->customend = NULL;
 
     if(!((gp_pen->unit == UnitWorld) || (gp_pen->unit == UnitPixel))) {
         FIXME("UnitWorld, UnitPixel only supported units\n");
         GdipFree(gp_pen);
         return NotImplemented;
     }
+
+    GdipCloneBrush(brush, &clone_brush);
+    gp_pen->brush = clone_brush;
 
     *pen = gp_pen;
 
@@ -126,6 +159,8 @@ GpStatus WINGDIPAPI GdipCreatePen2(GpBrush *brush, REAL width, GpUnit unit,
 
 GpStatus WINGDIPAPI GdipDeletePen(GpPen *pen)
 {
+    TRACE("(%p)\n", pen);
+
     if(!pen)    return InvalidParameter;
 
     GdipDeleteBrush(pen->brush);
@@ -139,6 +174,8 @@ GpStatus WINGDIPAPI GdipDeletePen(GpPen *pen)
 
 GpStatus WINGDIPAPI GdipGetPenBrushFill(GpPen *pen, GpBrush **brush)
 {
+    TRACE("(%p, %p)\n", pen, brush);
+
     if(!pen || !brush)
         return InvalidParameter;
 
@@ -147,6 +184,8 @@ GpStatus WINGDIPAPI GdipGetPenBrushFill(GpPen *pen, GpBrush **brush)
 
 GpStatus WINGDIPAPI GdipGetPenColor(GpPen *pen, ARGB *argb)
 {
+    TRACE("(%p, %p)\n", pen, argb);
+
     if(!pen || !argb)
         return InvalidParameter;
 
@@ -156,8 +195,40 @@ GpStatus WINGDIPAPI GdipGetPenColor(GpPen *pen, ARGB *argb)
     return GdipGetSolidFillColor(((GpSolidFill*)pen->brush), argb);
 }
 
+GpStatus WINGDIPAPI GdipGetPenCustomEndCap(GpPen *pen, GpCustomLineCap** customCap)
+{
+    TRACE("(%p, %p)\n", pen, customCap);
+
+    if(!pen || !customCap)
+        return InvalidParameter;
+
+    if(!pen->customend){
+        *customCap = NULL;
+        return Ok;
+    }
+
+    return GdipCloneCustomLineCap(pen->customend, customCap);
+}
+
+GpStatus WINGDIPAPI GdipGetPenCustomStartCap(GpPen *pen, GpCustomLineCap** customCap)
+{
+    TRACE("(%p, %p)\n", pen, customCap);
+
+    if(!pen || !customCap)
+        return InvalidParameter;
+
+    if(!pen->customstart){
+        *customCap = NULL;
+        return Ok;
+    }
+
+    return GdipCloneCustomLineCap(pen->customstart, customCap);
+}
+
 GpStatus WINGDIPAPI GdipGetPenDashArray(GpPen *pen, REAL *dash, INT count)
 {
+    TRACE("(%p, %p, %d)\n", pen, dash, count);
+
     if(!pen || !dash || count > pen->numdashes)
         return InvalidParameter;
 
@@ -170,8 +241,34 @@ GpStatus WINGDIPAPI GdipGetPenDashArray(GpPen *pen, REAL *dash, INT count)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetPenDashCap197819(GpPen *pen, GpDashCap *dashCap)
+{
+    TRACE("(%p, %p)\n", pen, dashCap);
+
+    if(!pen || !dashCap)
+        return InvalidParameter;
+
+    *dashCap = pen->dashcap;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenDashCount(GpPen *pen, INT *count)
+{
+    TRACE("(%p, %p)\n", pen, count);
+
+    if(!pen || !count)
+        return InvalidParameter;
+
+    *count = pen->numdashes;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipGetPenDashOffset(GpPen *pen, REAL *offset)
 {
+    TRACE("(%p, %p)\n", pen, offset);
+
     if(!pen || !offset)
         return InvalidParameter;
 
@@ -182,6 +279,8 @@ GpStatus WINGDIPAPI GdipGetPenDashOffset(GpPen *pen, REAL *offset)
 
 GpStatus WINGDIPAPI GdipGetPenDashStyle(GpPen *pen, GpDashStyle *dash)
 {
+    TRACE("(%p, %p)\n", pen, dash);
+
     if(!pen || !dash)
         return InvalidParameter;
 
@@ -190,8 +289,132 @@ GpStatus WINGDIPAPI GdipGetPenDashStyle(GpPen *pen, GpDashStyle *dash)
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipGetPenEndCap(GpPen *pen, GpLineCap *endCap)
+{
+    TRACE("(%p, %p)\n", pen, endCap);
+
+    if(!pen || !endCap)
+        return InvalidParameter;
+
+    *endCap = pen->endcap;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenFillType(GpPen *pen, GpPenType* type)
+{
+    TRACE("(%p, %p)\n", pen, type);
+
+    if(!pen || !type)
+        return InvalidParameter;
+
+    *type = bt_to_pt(pen->brush->bt);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenLineJoin(GpPen *pen, GpLineJoin *lineJoin)
+{
+    TRACE("(%p, %p)\n", pen, lineJoin);
+
+    if(!pen || !lineJoin)
+        return InvalidParameter;
+
+    *lineJoin = pen->join;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenMode(GpPen *pen, GpPenAlignment *mode)
+{
+    TRACE("(%p, %p)\n", pen, mode);
+
+    if(!pen || !mode)
+        return InvalidParameter;
+
+    *mode = pen->align;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenMiterLimit(GpPen *pen, REAL *miterLimit)
+{
+    TRACE("(%p, %p)\n", pen, miterLimit);
+
+    if(!pen || !miterLimit)
+        return InvalidParameter;
+
+    *miterLimit = pen->miterlimit;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenStartCap(GpPen *pen, GpLineCap *startCap)
+{
+    TRACE("(%p, %p)\n", pen, startCap);
+
+    if(!pen || !startCap)
+        return InvalidParameter;
+
+    *startCap = pen->startcap;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenUnit(GpPen *pen, GpUnit *unit)
+{
+    TRACE("(%p, %p)\n", pen, unit);
+
+    if(!pen || !unit)
+        return InvalidParameter;
+
+    *unit = pen->unit;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetPenWidth(GpPen *pen, REAL *width)
+{
+    TRACE("(%p, %p)\n", pen, width);
+
+    if(!pen || !width)
+        return InvalidParameter;
+
+    *width = pen->width;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipResetPenTransform(GpPen *pen)
+{
+    static int calls;
+
+    if(!pen)
+        return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("(%p) stub\n", pen);
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipScalePenTransform(GpPen *pen, REAL sx, REAL sy, GpMatrixOrder order)
+{
+    static int calls;
+
+    if(!pen)
+        return InvalidParameter;
+
+    if(!(calls++))
+        FIXME("(%p, %.2f, %.2f, %d) stub\n", pen, sx, sy, order);
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipSetPenBrushFill(GpPen *pen, GpBrush *brush)
 {
+    TRACE("(%p, %p)\n", pen, brush);
+
     if(!pen || !brush)
         return InvalidParameter;
 
@@ -201,6 +424,8 @@ GpStatus WINGDIPAPI GdipSetPenBrushFill(GpPen *pen, GpBrush *brush)
 
 GpStatus WINGDIPAPI GdipSetPenColor(GpPen *pen, ARGB argb)
 {
+    TRACE("(%p, %x)\n", pen, argb);
+
     if(!pen)
         return InvalidParameter;
 
@@ -210,12 +435,26 @@ GpStatus WINGDIPAPI GdipSetPenColor(GpPen *pen, ARGB argb)
     return GdipSetSolidFillColor(((GpSolidFill*)pen->brush), argb);
 }
 
+GpStatus WINGDIPAPI GdipSetPenCompoundArray(GpPen *pen, GDIPCONST REAL *dash,
+    INT count)
+{
+    FIXME("(%p, %p, %i): stub\n", pen, dash, count);
+
+    if (!pen || !dash || count < 2 || count%2 == 1)
+        return InvalidParameter;
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipSetPenCustomEndCap(GpPen *pen, GpCustomLineCap* customCap)
 {
     GpCustomLineCap * cap;
     GpStatus ret;
 
-    if(!pen || !customCap) return InvalidParameter;
+    TRACE("(%p, %p)\n", pen, customCap);
+
+    /* native crashes on pen == NULL, customCap != NULL */
+    if(!customCap) return InvalidParameter;
 
     if((ret = GdipCloneCustomLineCap(customCap, &cap)) == Ok){
         GdipDeleteCustomLineCap(pen->customend);
@@ -231,7 +470,10 @@ GpStatus WINGDIPAPI GdipSetPenCustomStartCap(GpPen *pen, GpCustomLineCap* custom
     GpCustomLineCap * cap;
     GpStatus ret;
 
-    if(!pen || !customCap) return InvalidParameter;
+    TRACE("(%p, %p)\n", pen, customCap);
+
+    /* native crashes on pen == NULL, customCap != NULL */
+    if(!customCap) return InvalidParameter;
 
     if((ret = GdipCloneCustomLineCap(customCap, &cap)) == Ok){
         GdipDeleteCustomLineCap(pen->customstart);
@@ -248,8 +490,13 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
     INT i;
     REAL sum = 0;
 
+    TRACE("(%p, %p, %d)\n", pen, dash, count);
+
     if(!pen || !dash)
         return InvalidParameter;
+
+    if(count <= 0)
+        return OutOfMemory;
 
     for(i = 0; i < count; i++){
         sum += dash[i];
@@ -277,9 +524,23 @@ GpStatus WINGDIPAPI GdipSetPenDashArray(GpPen *pen, GDIPCONST REAL *dash,
     return Ok;
 }
 
+GpStatus WINGDIPAPI GdipSetPenDashCap197819(GpPen *pen, GpDashCap dashCap)
+{
+    TRACE("(%p, %d)\n", pen, dashCap);
+
+    if(!pen)
+        return InvalidParameter;
+
+    pen->dashcap = dashCap;
+
+    return Ok;
+}
+
 /* FIXME: dash offset not used */
 GpStatus WINGDIPAPI GdipSetPenDashOffset(GpPen *pen, REAL offset)
 {
+    TRACE("(%p, %.2f)\n", pen, offset);
+
     if(!pen)
         return InvalidParameter;
 
@@ -290,6 +551,8 @@ GpStatus WINGDIPAPI GdipSetPenDashOffset(GpPen *pen, REAL offset)
 
 GpStatus WINGDIPAPI GdipSetPenDashStyle(GpPen *pen, GpDashStyle dash)
 {
+    TRACE("(%p, %d)\n", pen, dash);
+
     if(!pen)
         return InvalidParameter;
 
@@ -309,6 +572,8 @@ GpStatus WINGDIPAPI GdipSetPenDashStyle(GpPen *pen, GpDashStyle dash)
 
 GpStatus WINGDIPAPI GdipSetPenEndCap(GpPen *pen, GpLineCap cap)
 {
+    TRACE("(%p, %d)\n", pen, cap);
+
     if(!pen)    return InvalidParameter;
 
     /* The old custom cap gets deleted even if the new style is LineCapCustom. */
@@ -323,6 +588,8 @@ GpStatus WINGDIPAPI GdipSetPenEndCap(GpPen *pen, GpLineCap cap)
 GpStatus WINGDIPAPI GdipSetPenLineCap197819(GpPen *pen, GpLineCap start,
     GpLineCap end, GpDashCap dash)
 {
+    TRACE("%p, %d, %d, %d)\n", pen, start, end, dash);
+
     if(!pen)
         return InvalidParameter;
 
@@ -342,6 +609,8 @@ GpStatus WINGDIPAPI GdipSetPenLineCap197819(GpPen *pen, GpLineCap start,
  * Both kinds of miter joins clip if the angle is less than 11 degrees. */
 GpStatus WINGDIPAPI GdipSetPenLineJoin(GpPen *pen, GpLineJoin join)
 {
+    TRACE("(%p, %d)\n", pen, join);
+
     if(!pen)    return InvalidParameter;
 
     pen->join = join;
@@ -353,6 +622,8 @@ GpStatus WINGDIPAPI GdipSetPenLineJoin(GpPen *pen, GpLineJoin join)
 
 GpStatus WINGDIPAPI GdipSetPenMiterLimit(GpPen *pen, REAL limit)
 {
+    TRACE("(%p, %.2f)\n", pen, limit);
+
     if(!pen)
         return InvalidParameter;
 
@@ -363,6 +634,8 @@ GpStatus WINGDIPAPI GdipSetPenMiterLimit(GpPen *pen, REAL limit)
 
 GpStatus WINGDIPAPI GdipSetPenStartCap(GpPen *pen, GpLineCap cap)
 {
+    TRACE("(%p, %d)\n", pen, cap);
+
     if(!pen)    return InvalidParameter;
 
     GdipDeleteCustomLineCap(pen->customstart);
@@ -374,6 +647,8 @@ GpStatus WINGDIPAPI GdipSetPenStartCap(GpPen *pen, GpLineCap cap)
 
 GpStatus WINGDIPAPI GdipSetPenWidth(GpPen *pen, REAL width)
 {
+    TRACE("(%p, %.2f)\n", pen, width);
+
     if(!pen)    return InvalidParameter;
 
     pen->width = width;
@@ -381,12 +656,13 @@ GpStatus WINGDIPAPI GdipSetPenWidth(GpPen *pen, REAL width)
     return Ok;
 }
 
-
-GpStatus WINGDIPAPI GdipSetPenMode(GpPen *pen, GpPenAlignment penAlignment)
+GpStatus WINGDIPAPI GdipSetPenMode(GpPen *pen, GpPenAlignment mode)
 {
+    TRACE("(%p, %d)\n", pen, mode);
+
     if(!pen)    return InvalidParameter;
 
-    FIXME("stub (%d)\n", penAlignment);
+    pen->align = mode;
 
     return Ok;
 }

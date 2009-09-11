@@ -4,8 +4,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = dpnet.dll
 IMPORTLIB = dpnet
-IMPORTS   = ole32 user32 advapi32 kernel32
-EXTRALIBS = -ldxguid -luuid
+IMPORTS   = dxguid uuid ole32 advapi32 kernel32
 
 C_SRCS = \
 	address.c \
@@ -14,7 +13,8 @@ C_SRCS = \
 	lobbiedapp.c \
 	peer.c \
 	regsvr.c \
-	server.c
+	server.c \
+	threadpool.c
 
 RC_SRCS = version.rc
 

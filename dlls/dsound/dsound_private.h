@@ -37,8 +37,6 @@ extern int ds_snd_queue_max;
 extern int ds_snd_queue_min;
 extern int ds_snd_shadow_maxsize;
 extern int ds_hw_accel;
-extern int ds_default_playback;
-extern int ds_default_capture;
 extern int ds_default_sample_rate;
 extern int ds_default_bits_per_sample;
 
@@ -71,7 +69,7 @@ typedef struct DirectSoundDevice             DirectSoundDevice;
 typedef struct DirectSoundCaptureDevice      DirectSoundCaptureDevice;
 
 /* dsound_convert.h */
-typedef void (*bitsconvertfunc)(const void *, void *);
+typedef void (*bitsconvertfunc)(const void *, void *, UINT, UINT, INT, UINT, UINT);
 extern const bitsconvertfunc convertbpp[4][4];
 typedef void (*mixfunc)(const void *, void *, unsigned);
 extern const mixfunc mixfunctions[4];
@@ -107,6 +105,8 @@ struct DirectSoundDevice
     DWORD                       speaker_config;
     LPBYTE                      tmp_buffer, mix_buffer;
     DWORD                       tmp_buffer_len, mix_buffer_len;
+
+    DSVOLUMEPAN                 volpan;
 
     mixfunc mixfunction;
     normfunc normfunction;
@@ -454,7 +454,7 @@ void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DW
 DWORD DSOUND_secpos_to_bufpos(const IDirectSoundBufferImpl *dsb, DWORD secpos, DWORD secmixpos, DWORD* overshot);
 
 void CALLBACK DSOUND_timer(UINT timerID, UINT msg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
-void CALLBACK DSOUND_callback(HWAVEOUT hwo, UINT msg, DWORD dwUser, DWORD dw1, DWORD dw2);
+void CALLBACK DSOUND_callback(HWAVEOUT hwo, UINT msg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2);
 
 /* sound3d.c */
 

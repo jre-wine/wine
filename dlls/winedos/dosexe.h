@@ -1,7 +1,7 @@
 /*
  * DOS EXE loader
  *
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -352,6 +352,7 @@ extern BOOL WINAPI MZ_Current( void );
 extern void WINAPI MZ_AllocDPMITask( void );
 extern void WINAPI MZ_RunInThread( PAPCFUNC proc, ULONG_PTR arg );
 extern BOOL DOSVM_IsWin16(void);
+extern void DOSVM_Exit( WORD retval );
 
 /* dosvm.c */
 extern void DOSVM_SendQueuedEvents( CONTEXT86 * );
@@ -362,19 +363,11 @@ extern DWORD WINAPI DOSVM_Loop( HANDLE hThread );
 extern void WINAPI DOSVM_QueueEvent( INT irq, INT priority, DOSRELAY relay, LPVOID data );
 extern void WINAPI DOSVM_PIC_ioport_out( WORD port, BYTE val );
 extern void WINAPI DOSVM_SetTimer( UINT ticks );
-extern UINT WINAPI DOSVM_GetTimer( void );
 
 /* devices.c */
 extern void DOSDEV_InstallDOSDevices(void);
 extern void DOSDEV_SetupDevice(const WINEDEV * devinfo,
                                WORD seg, WORD off_dev, WORD off_thunk);
-extern DWORD DOSDEV_Console(void);
-extern DWORD DOSDEV_FindCharDevice(char*name);
-extern int DOSDEV_Peek(DWORD dev, BYTE*data);
-extern int DOSDEV_Read(DWORD dev, DWORD buf, int buflen);
-extern int DOSDEV_Write(DWORD dev, DWORD buf, int buflen, int verify);
-extern int DOSDEV_IoctlRead(DWORD dev, DWORD buf, int buflen);
-extern int DOSDEV_IoctlWrite(DWORD dev, DWORD buf, int buflen);
 extern void DOSDEV_SetSharingRetry(WORD delay, WORD count);
 extern SEGPTR DOSDEV_GetLOL(BOOL v86);
 
@@ -414,8 +407,6 @@ extern void WINAPI DOSVM_Int3eHandler(CONTEXT86*);
 
 /* himem.c */
 extern void DOSVM_InitSegments(void);
-extern LPVOID DOSVM_AllocUMB(DWORD);
-extern LPVOID DOSVM_AllocCodeUMB(DWORD, WORD *, WORD *);
 extern LPVOID DOSVM_AllocDataUMB(DWORD, WORD *, WORD *);
 
 /* int09.c */
@@ -458,7 +449,6 @@ extern void WINAPI DOSVM_Int31Handler(CONTEXT86*);
 extern void WINAPI DOSVM_RawModeSwitchHandler(CONTEXT86*);
 extern BOOL DOSVM_IsDos32(void);
 extern FARPROC16 WINAPI DPMI_AllocInternalRMCB(RMCBPROC);
-extern void WINAPI DPMI_FreeInternalRMCB(FARPROC16);
 extern int DPMI_CallRMProc(CONTEXT86*,LPWORD,int,int);
 extern BOOL DOSVM_CheckWrappers(CONTEXT86*);
 

@@ -18,13 +18,16 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+#include "resources.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_FRENCH, SUBLANG_NEUTRAL
 
 STRINGTABLE
 {
-    STRING_USAGE, "La syntaxe de cette commande est :\n\nNET [ HELP | START | STOP ]\n"
+    STRING_USAGE, "La syntaxe de cette commande est :\n\nNET [ HELP | START | STOP | USE ]\n"
     STRING_START_USAGE, "Spécifie le service à démarrer.\n"
     STRING_STOP_USAGE, "Spécifie le service à arrêter.\n"
     STRING_STOP_DEP, "Arrêt du service dépendant : %s\n"
@@ -37,10 +40,8 @@ STRINGTABLE
     STRING_STOP_SVC, "Le service %s est en train d'être arrêté.\n"
     STRING_STOP_SVC_SUCCESS, "Le service %s a été arrêté avec succès.\n"
     STRING_STOP_SVC_FAIL, "Le service %s n'a pas pu être arrêté.\n"
-    STRING_HELP_USAGE, "La syntaxe de cette commande est :\n\nNET HELP commande\n    -ou-\nNET commande /HELP\n\n   Les commandes disponibles sont :\n   NET HELP    NET START     NET STOP\n"
+    STRING_HELP_USAGE, "La syntaxe de cette commande est :\n\nNET HELP commande\n    -ou-\nNET commande /HELP\n\n   Les commandes disponibles sont :\n   NET HELP    NET START    NET STOP    NET USE\n"
     STRING_NO_ENTRIES, "Il n'y a pas d'entrées dans la liste.\n"
     STRING_USE_HEADER, "\nStatut    Local   Distant\n---------------------------------------------------------------\n"
     STRING_USE_ENTRY, "%s      %S      %S      Ressources ouvertes : %lu\n"
 }
-
-#pragma code_page(default)

@@ -147,12 +147,54 @@ static void build_dll_path(void)
     }
 }
 
+/* check if the library is the correct architecture */
+/* only returns false for a valid library of the wrong arch */
+static int check_library_arch( int fd )
+{
+#ifdef __APPLE__
+    struct  /* Mach-O header */
+    {
+        unsigned int magic;
+        unsigned int cputype;
+    } header;
+
+    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
+    if (header.magic != 0xfeedface) return 1;
+    if (sizeof(void *) == sizeof(int)) return !(header.cputype >> 24);
+    else return (header.cputype >> 24) == 1; /* CPU_ARCH_ABI64 */
+#else
+    struct  /* ELF header */
+    {
+        unsigned char magic[4];
+        unsigned char class;
+        unsigned char data;
+        unsigned char version;
+    } header;
+
+    if (read( fd, &header, sizeof(header) ) != sizeof(header)) return 1;
+    if (memcmp( header.magic, "\177ELF", 4 )) return 1;
+    if (header.version != 1 /* EV_CURRENT */) return 1;
+#ifdef WORDS_BIGENDIAN
+    if (header.data != 2 /* ELFDATA2MSB */) return 1;
+#else
+    if (header.data != 1 /* ELFDATA2LSB */) return 1;
+#endif
+    if (sizeof(void *) == sizeof(int)) return header.class == 1; /* ELFCLASS32 */
+    else return header.class == 2; /* ELFCLASS64 */
+#endif
+}
+
 /* check if a given file can be opened */
 static inline int file_exists( const char *name )
 {
+    int ret = 0;
     int fd = open( name, O_RDONLY );
-    if (fd != -1) close( fd );
-    return (fd != -1);
+    if (fd != -1)
+    {
+        ret = check_library_arch( fd );
+        close( fd );
+    }
+    return ret;
 }
 
 static inline char *prepend( char *buffer, const char *str, size_t len )
@@ -169,22 +211,23 @@ static char *next_dll_path( struct dll_path_context *context )
 
     switch(index)
     {
-    case 0:  /* try programs dir for .exe files */
-        if (!context->win16 && namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 ))
+    case 0:  /* try dlls dir with subdir prefix */
+        if (namelen > 4 && !memcmp( context->name + namelen - 4, ".dll", 4 )) namelen -= 4;
+        if (!context->win16) path = prepend( path, context->name, namelen );
+        path = prepend( path, "/dlls", sizeof("/dlls") - 1 );
+        path = prepend( path, build_dir, strlen(build_dir) );
+        return path;
+    case 1:  /* try programs dir with subdir prefix */
+        if (!context->win16)
         {
-            path = prepend( path, context->name, namelen - 4 );
+            if (namelen > 4 && !memcmp( context->name + namelen - 4, ".exe", 4 )) namelen -= 4;
+            path = prepend( path, context->name, namelen );
             path = prepend( path, "/programs", sizeof("/programs") - 1 );
             path = prepend( path, build_dir, strlen(build_dir) );
             return path;
         }
         context->index++;
         /* fall through */
-    case 1:  /* try dlls dir with subdir prefix */
-        if (namelen > 4 && !memcmp( context->name + namelen - 4, ".dll", 4 )) namelen -= 4;
-        if (!context->win16) path = prepend( path, context->name, namelen );
-        path = prepend( path, "/dlls", sizeof("/dlls") - 1 );
-        path = prepend( path, build_dir, strlen(build_dir) );
-        return path;
     default:
         index -= 2;
         if (index < nb_dll_paths)
@@ -277,7 +320,7 @@ static void fixup_imports( IMAGE_IMPORT_DESCRIPTOR *dir, BYTE *base, int delta )
         fixup_rva_dwords( &dir->u.OriginalFirstThunk, delta, 1 );
         fixup_rva_dwords( &dir->Name, delta, 1 );
         fixup_rva_dwords( &dir->FirstThunk, delta, 1 );
-        ptr = (UINT_PTR *)(base + dir->FirstThunk);
+        ptr = (UINT_PTR *)(base + (dir->u.OriginalFirstThunk ? dir->u.OriginalFirstThunk : dir->FirstThunk));
         while (*ptr)
         {
             if (!(*ptr & IMAGE_ORDINAL_FLAG)) *ptr += delta;
@@ -436,6 +479,18 @@ static void *map_dll( const IMAGE_NT_HEADERS *nt_descr )
 #else  /* HAVE_MMAP */
     return NULL;
 #endif  /* HAVE_MMAP */
+}
+
+
+/***********************************************************************
+ *           __wine_get_main_environment
+ *
+ * Return an environment pointer to work around lack of environ variable.
+ * Only exported on Mac OS.
+ */
+char **__wine_get_main_environment(void)
+{
+    return environ;
 }
 
 
@@ -637,7 +692,7 @@ void wine_init( int argc, char *argv[], char *error, int error_size )
     build_dll_path();
     __wine_main_argc = argc;
     __wine_main_argv = argv;
-    __wine_main_environ = environ;
+    __wine_main_environ = __wine_get_main_environment();
     mmap_init();
 
     for (path = first_dll_path( "ntdll.dll", 0, &context ); path; path = next_dll_path( &context ))

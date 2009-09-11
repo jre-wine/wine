@@ -138,11 +138,11 @@ struct IDsCaptureDriverBufferImpl
     int                                 fd;
 };
 
-static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
+static HRESULT IDsCaptureDriverPropertySetImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverPropertySetImpl **pdscdps);
 
-static HRESULT WINAPI IDsCaptureDriverNotifyImpl_Create(
+static HRESULT IDsCaptureDriverNotifyImpl_Create(
     IDsCaptureDriverBufferImpl * dsdcb,
     IDsCaptureDriverNotifyImpl **pdscdn);
 
@@ -161,7 +161,7 @@ static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_QueryInterface(
     if ( IsEqualGUID(riid, &IID_IUnknown) ||
          IsEqualGUID(riid, &IID_IDsDriverPropertySet) ) {
         IDsDriverPropertySet_AddRef(iface);
-        *ppobj = (LPVOID)This;
+        *ppobj = This;
         return DS_OK;
     }
 
@@ -317,10 +317,10 @@ static HRESULT WINAPI IDsCaptureDriverNotifyImpl_SetNotificationPositions(
     }
 
     if (TRACE_ON(dscapture)) {
-        int i;
+        DWORD i;
         for (i=0;i<howmuch;i++)
-            TRACE("notify at %d to 0x%08x\n",
-                notify[i].dwOffset,(DWORD)notify[i].hEventNotify);
+            TRACE("notify at %d to 0x%08lx\n",
+                notify[i].dwOffset,(DWORD_PTR)notify[i].hEventNotify);
     }
 
     /* Make an internal copy of the caller-supplied array.
@@ -395,7 +395,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_QueryInterface(
     if ( IsEqualGUID(riid, &IID_IUnknown) ||
          IsEqualGUID(riid, &IID_IDsCaptureDriverBuffer) ) {
         IDsCaptureDriverBuffer_AddRef(iface);
-        *ppobj = (LPVOID)This;
+        *ppobj = This;
         return DS_OK;
     }
 
@@ -404,7 +404,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_QueryInterface(
             IDsCaptureDriverNotifyImpl_Create(This, &(This->notify));
         if (This->notify) {
             IDsDriverNotify_AddRef((PIDSDRIVERNOTIFY)This->notify);
-            *ppobj = (LPVOID)This->notify;
+            *ppobj = This->notify;
             return DS_OK;
         }
         return E_FAIL;
@@ -415,7 +415,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_QueryInterface(
             IDsCaptureDriverPropertySetImpl_Create(This, &(This->property_set));
         if (This->property_set) {
             IDsDriverPropertySet_AddRef((PIDSDRIVERPROPERTYSET)This->property_set);
-            *ppobj = (LPVOID)This->property_set;
+            *ppobj = This->property_set;
             return DS_OK;
         }
         return E_FAIL;
@@ -721,7 +721,7 @@ static HRESULT WINAPI IDsCaptureDriverImpl_QueryInterface(
     if ( IsEqualGUID(riid, &IID_IUnknown) ||
          IsEqualGUID(riid, &IID_IDsCaptureDriver) ) {
         IDsCaptureDriver_AddRef(iface);
-        *ppobj = (LPVOID)This;
+        *ppobj = This;
         return DS_OK;
     }
 
@@ -859,7 +859,7 @@ static void * my_memcpy(void * dst, const void * src, int length)
 
 static DWORD CALLBACK DSCDB_Thread(LPVOID lpParameter)
 {
-    IDsCaptureDriverBufferImpl *This = (IDsCaptureDriverBufferImpl *)lpParameter;
+    IDsCaptureDriverBufferImpl *This = lpParameter;
     struct pollfd poll_list[2];
     int retval;
     DWORD offset = 0;
@@ -1212,7 +1212,7 @@ static HRESULT WINAPI IDsCaptureDriverImpl_CreateCaptureBuffer(
     (*ippdscdb)->hStartUpEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     (*ippdscdb)->hExitEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
 
-    (*ippdscdb)->hThread = CreateThread(NULL, 0,  DSCDB_Thread, (LPVOID)(*ippdscdb), 0, &((*ippdscdb)->dwThreadID));
+    (*ippdscdb)->hThread = CreateThread(NULL, 0,  DSCDB_Thread, *ippdscdb, 0, &((*ippdscdb)->dwThreadID));
     WaitForSingleObject((*ippdscdb)->hStartUpEvent, INFINITE);
     CloseHandle((*ippdscdb)->hStartUpEvent);
     (*ippdscdb)->hStartUpEvent = INVALID_HANDLE_VALUE;
@@ -1232,14 +1232,14 @@ static const IDsCaptureDriverVtbl dscdvt =
     IDsCaptureDriverImpl_CreateCaptureBuffer
 };
 
-static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
+static HRESULT IDsCaptureDriverPropertySetImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverPropertySetImpl **pdscdps)
 {
     IDsCaptureDriverPropertySetImpl * dscdps;
     TRACE("(%p,%p)\n",dscdb,pdscdps);
 
-    dscdps = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(dscdps));
+    dscdps = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dscdps));
     if (dscdps == NULL) {
         WARN("out of memory\n");
         return DSERR_OUTOFMEMORY;
@@ -1255,14 +1255,14 @@ static HRESULT WINAPI IDsCaptureDriverPropertySetImpl_Create(
     return DS_OK;
 }
 
-static HRESULT WINAPI IDsCaptureDriverNotifyImpl_Create(
+static HRESULT IDsCaptureDriverNotifyImpl_Create(
     IDsCaptureDriverBufferImpl * dscdb,
     IDsCaptureDriverNotifyImpl **pdscdn)
 {
     IDsCaptureDriverNotifyImpl * dscdn;
     TRACE("(%p,%p)\n",dscdb,pdscdn);
 
-    dscdn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(dscdn));
+    dscdn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dscdn));
     if (dscdn == NULL) {
         WARN("out of memory\n");
         return DSERR_OUTOFMEMORY;

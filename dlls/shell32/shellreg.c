@@ -33,7 +33,6 @@
 #include "winreg.h"
 
 #include "undocshell.h"
-#include "wine/winbase16.h"
 
 #include "wine/debug.h"
 
@@ -126,17 +125,6 @@ HRESULT WINAPI SHRegQueryValueExW (
 		hkey, debugstr_w(pszValue), pdwReserved, pdwType, pvData, pcbData);
 	ret = RegQueryValueExW ( hkey, pszValue, pdwReserved, pdwType, pvData, pcbData);
 	return ret;
-}
-
-/*************************************************************************
- * SHRegDeleteKeyA   [SHELL32.?]
- */
-HRESULT WINAPI SHRegDeleteKeyA(
-	HKEY hkey,
-	LPCSTR pszSubKey)
-{
-	FIXME("hkey=%p, %s\n", hkey, debugstr_a(pszSubKey));
-	return 0;
 }
 
 /*************************************************************************

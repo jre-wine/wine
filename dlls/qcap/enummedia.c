@@ -45,7 +45,7 @@ HRESULT CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc)
     return S_OK;
 }
 
-void FreeMediaType(AM_MEDIA_TYPE * pMediaType)
+static void FreeMediaType(AM_MEDIA_TYPE * pMediaType)
 {
     CoTaskMemFree(pMediaType->pbFormat);
     pMediaType->pbFormat = NULL;
@@ -133,9 +133,9 @@ static HRESULT WINAPI IEnumMediaTypesImpl_QueryInterface(IEnumMediaTypes * iface
     *ppv = NULL;
 
     if (IsEqualIID(riid, &IID_IUnknown))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
     else if (IsEqualIID(riid, &IID_IEnumMediaTypes))
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
 
     if (*ppv)
     {
@@ -167,7 +167,7 @@ static ULONG WINAPI IEnumMediaTypesImpl_Release(IEnumMediaTypes * iface)
 
     if (!refCount)
     {
-        int i;
+        ULONG i;
         for (i = 0; i < This->enumMediaDetails.cMediaTypes; i++)
            if (This->enumMediaDetails.pMediaTypes[i].pbFormat)
               CoTaskMemFree(This->enumMediaDetails.pMediaTypes[i].pbFormat);

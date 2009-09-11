@@ -74,7 +74,7 @@ static UINT EMFDRV_FindObject( PHYSDEV dev, HGDIOBJ obj )
 /******************************************************************
  *         EMFDRV_DeleteObject
  */
-BOOL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
+BOOL CDECL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
 {
     EMRDELETEOBJECT emr;
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*) dev;
@@ -99,7 +99,7 @@ BOOL EMFDRV_DeleteObject( PHYSDEV dev, HGDIOBJ obj )
 /***********************************************************************
  *           EMFDRV_SelectBitmap
  */
-HBITMAP EMFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
+HBITMAP CDECL EMFDRV_SelectBitmap( PHYSDEV dev, HBITMAP hbitmap )
 {
     return 0;
 }
@@ -174,7 +174,7 @@ DWORD EMFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush )
 	    bmSize = DIB_GetDIBImageBytes(info->bmiHeader.biWidth,
 					  info->bmiHeader.biHeight,
 					  info->bmiHeader.biBitCount);
-	biSize = DIB_BitmapInfoSize(info, LOWORD(logbrush.lbColor));
+	biSize = bitmap_info_size(info, LOWORD(logbrush.lbColor));
 	size = sizeof(EMRCREATEDIBPATTERNBRUSHPT) + biSize + bmSize;
 	emr = HeapAlloc( GetProcessHeap(), 0, size );
 	if(!emr) break;
@@ -273,12 +273,14 @@ DWORD EMFDRV_CreateBrushIndirect( PHYSDEV dev, HBRUSH hBrush )
 /***********************************************************************
  *           EMFDRV_SelectBrush
  */
-HBRUSH EMFDRV_SelectBrush(PHYSDEV dev, HBRUSH hBrush )
+HBRUSH CDECL EMFDRV_SelectBrush(PHYSDEV dev, HBRUSH hBrush )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
     DWORD index;
     int i;
+
+    if (physDev->restoring) return hBrush;  /* don't output SelectObject records during RestoreDC */
 
     /* If the object is a stock brush object, do not need to create it.
      * See definitions in  wingdi.h for range of stock brushes.
@@ -350,12 +352,14 @@ static BOOL EMFDRV_CreateFontIndirect(PHYSDEV dev, HFONT hFont )
 /***********************************************************************
  *           EMFDRV_SelectFont
  */
-HFONT EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont, HANDLE gdiFont )
+HFONT CDECL EMFDRV_SelectFont( PHYSDEV dev, HFONT hFont, HANDLE gdiFont )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
     DWORD index;
     int i;
+
+    if (physDev->restoring) return 0;  /* don't output SelectObject records during RestoreDC */
 
     /* If the object is a stock font object, do not need to create it.
      * See definitions in  wingdi.h for range of stock fonts.
@@ -429,12 +433,14 @@ static DWORD EMFDRV_CreatePenIndirect(PHYSDEV dev, HPEN hPen)
 /******************************************************************
  *         EMFDRV_SelectPen
  */
-HPEN EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
+HPEN CDECL EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
     EMRSELECTOBJECT emr;
     DWORD index;
     int i;
+
+    if (physDev->restoring) return hPen;  /* don't output SelectObject records during RestoreDC */
 
     /* If the object is a stock pen object, do not need to create it.
      * See definitions in  wingdi.h for range of stock pens.
@@ -465,9 +471,68 @@ HPEN EMFDRV_SelectPen(PHYSDEV dev, HPEN hPen )
 
 
 /******************************************************************
+ *         EMFDRV_CreatePalette
+ */
+static DWORD EMFDRV_CreatePalette(PHYSDEV dev, HPALETTE hPal)
+{
+    WORD i;
+    struct {
+        EMRCREATEPALETTE hdr;
+        PALETTEENTRY entry[255];
+    } pal;
+
+    memset( &pal, 0, sizeof(pal) );
+
+    if (!GetObjectW( hPal, sizeof(pal.hdr.lgpl) + sizeof(pal.entry), &pal.hdr.lgpl ))
+        return 0;
+
+    for (i = 0; i < pal.hdr.lgpl.palNumEntries; i++)
+        pal.hdr.lgpl.palPalEntry[i].peFlags = 0;
+
+    pal.hdr.emr.iType = EMR_CREATEPALETTE;
+    pal.hdr.emr.nSize = sizeof(pal.hdr) + pal.hdr.lgpl.palNumEntries * sizeof(PALETTEENTRY);
+    pal.hdr.ihPal = EMFDRV_AddHandle( dev, hPal );
+
+    if (!EMFDRV_WriteRecord( dev, &pal.hdr.emr ))
+        pal.hdr.ihPal = 0;
+    return pal.hdr.ihPal;
+}
+
+/******************************************************************
+ *         EMFDRV_SelectPalette
+ */
+HPALETTE CDECL EMFDRV_SelectPalette( PHYSDEV dev, HPALETTE hPal, BOOL force )
+{
+    EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*)dev;
+    EMRSELECTPALETTE emr;
+    DWORD index;
+
+    if (physDev->restoring) return hPal;  /* don't output SelectObject records during RestoreDC */
+
+    if (hPal == GetStockObject( DEFAULT_PALETTE ))
+    {
+        index = DEFAULT_PALETTE | 0x80000000;
+        goto found;
+    }
+
+    if ((index = EMFDRV_FindObject( dev, hPal )) != 0)
+        goto found;
+
+    if (!(index = EMFDRV_CreatePalette( dev, hPal ))) return 0;
+    GDI_hdc_using_object( hPal, physDev->hdc );
+
+found:
+    emr.emr.iType = EMR_SELECTPALETTE;
+    emr.emr.nSize = sizeof(emr);
+    emr.ihPal = index;
+    return EMFDRV_WriteRecord( dev, &emr.emr ) ? hPal : 0;
+}
+
+
+/******************************************************************
  *         EMFDRV_GdiComment
  */
-BOOL EMFDRV_GdiComment(PHYSDEV dev, UINT bytes, CONST BYTE *buffer)
+BOOL CDECL EMFDRV_GdiComment(PHYSDEV dev, UINT bytes, CONST BYTE *buffer)
 {
     EMRGDICOMMENT *emr;
     UINT total, rounded_size;

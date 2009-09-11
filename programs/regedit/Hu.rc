@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resource.h"
+
 /* Hungarian Resources */
 
 LANGUAGE LANG_HUNGARIAN, SUBLANG_NEUTRAL
@@ -47,6 +49,7 @@ BEGIN
             MENUITEM "&Sztring érték",               ID_EDIT_NEW_STRINGVALUE
             MENUITEM "&Bináris érték",               ID_EDIT_NEW_BINARYVALUE
             MENUITEM "&DWORD érték",                ID_EDIT_NEW_DWORDVALUE
+            MENUITEM "&Multi String Value",         ID_EDIT_NEW_MULTI_STRINGVALUE
         END
         MENUITEM SEPARATOR
         MENUITEM "&Törlés\tDel",                ID_EDIT_DELETE
@@ -67,8 +70,8 @@ BEGIN
     END
     POPUP "Ked&vencek"
     BEGIN
-        MENUITEM "Hozzá&adás a kedvencekhez",          ID_FAVORITES_ADDTOFAVORITES
-        MENUITEM "Tö&rlés a kedvencekbõl",           ID_FAVORITES_REMOVEFAVORITE
+        MENUITEM "Hozzá&adás a kedvencekhez...",          ID_FAVORITES_ADDTOFAVORITES
+        MENUITEM "Tö&rlés a kedvencekbõl...",           ID_FAVORITES_REMOVEFAVORITE
     END
     POPUP "&Súgó"
     BEGIN
@@ -227,10 +230,11 @@ BEGIN
     IDS_ERROR		    "Hiba"
     IDS_BAD_KEY		    "Nem tudom lekérni a kulcsot: '%s'"
     IDS_BAD_VALUE           "Nem tudom lekérni az értéket: '%s'"
-    IDS_UNSUPPORTED_TYPE    "Nem tudom ezt a típusú kulcsot szerkeszteni: (%ld)"
-    IDS_TOO_BIG_VALUE       "Az érték túl nagy: (%ld)"
+    IDS_UNSUPPORTED_TYPE    "Nem tudom ezt a típusú kulcsot szerkeszteni: (%u)"
+    IDS_TOO_BIG_VALUE       "Az érték túl nagy: (%u)"
     IDS_DELETE_BOX_TITLE    "Értéktörlés jóváhagyása"
     IDS_DELETE_BOX_TEXT     "Biztos hogy törölni szeretné a(z) '%s' kulcsot?"
+    IDS_DELETE_BOX_TEXT_MULTIPLE "Are you sure you want to delete these values?"
     IDS_NEWKEY              "Új kulcs #%d"
     IDS_NEWVALUE            "Új érték #%d"
     IDS_NOTFOUND            "A(z) '%s' keresési kifejezés nem található"
@@ -246,19 +250,5 @@ END
 BEGIN
     "resource.h\0"
 END
-
-
-
-/*
- * String Table
- */
-
-/*
- *STRINGTABLE DISCARDABLE
- *BEGIN
- *    ID_HELP_HELPTOPICS      "Megnyitja a Regisztrációs adatbázis szerkesztõ súgóját."
- *    ID_HELP_ABOUT           "Megjeleníti a program információkat, verziószámot, és a szerzõi jogot."
- *END
- */
 
 /*****************************************************************/

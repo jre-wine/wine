@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2003 Michael Günnewig
+ * Copyright 2002-2003 Michael GÃ¼nnewig
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +33,8 @@
 WINE_DEFAULT_DEBUG_CHANNEL(msrle32);
 
 static HINSTANCE MSRLE32_hModule = 0;
+
+#define compare_fourcc(fcc1, fcc2) (((fcc1)^(fcc2))&~0x20202020)
 
 #define ABS(a)                ((a) < 0 ? -(a) : (a))
 #define SQR(a)                ((a) * (a))
@@ -395,7 +397,7 @@ static INT MSRLE32_CompressRLE4Line(const CodecInfo *pi, const WORD *lpP,
       INT  i;
       INT  size       = min(count, 254);
       int  bytes      = ((size + 1) & (~1)) / 2;
-      BOOL extra_byte = bytes & 0x01;
+      int  extra_byte = bytes & 0x01;
 
       *lpSizeImage += 2 + bytes + extra_byte;
       assert(((*lpSizeImage) % 2) == 0);
@@ -488,7 +490,7 @@ static INT MSRLE32_CompressRLE8Line(const CodecInfo *pi, const WORD *lpP,
     while (count > 2) {
       INT  i;
       INT  size       = min(count, 255);
-      BOOL extra_byte = size % 2;
+      int  extra_byte = size % 2;
 
       *lpSizeImage += 2 + size + extra_byte;
       count -= size;
@@ -1114,7 +1116,7 @@ static CodecInfo* Open(LPICOPEN icinfo)
     return (LPVOID)0xFFFF0000;
   }
 
-  if (icinfo->fccType != ICTYPE_VIDEO) return NULL;
+  if (compare_fourcc(icinfo->fccType, ICTYPE_VIDEO)) return NULL;
 
   TRACE("(%p = {%u,0x%08X(%4.4s),0x%08X(%4.4s),0x%X,0x%X,...})\n", icinfo,
 	icinfo->dwSize,	icinfo->fccType, (char*)&icinfo->fccType,
@@ -1136,7 +1138,7 @@ static CodecInfo* Open(LPICOPEN icinfo)
     return NULL;
   }
 
-  pi = (CodecInfo*)LocalAlloc(LPTR, sizeof(CodecInfo));
+  pi = LocalAlloc(LPTR, sizeof(CodecInfo));
 
   if (pi != NULL) {
     pi->fccHandler  = icinfo->fccHandler;
@@ -1165,7 +1167,7 @@ static LRESULT Close(CodecInfo *pi)
   if (pi->pPrevFrame != NULL || pi->pCurFrame != NULL)
     CompressEnd(pi);
 
-  LocalFree((HLOCAL)pi);
+  LocalFree(pi);
   return 1;
 }
 
@@ -1419,7 +1421,7 @@ static LRESULT CompressBegin(CodecInfo *pi, LPCBITMAPINFOHEADER lpbiIn,
   switch (lpbiOut->biBitCount) {
   case 4:
   case 8:
-    pi->palette_map = (LPBYTE)LocalAlloc(LPTR, lpbiIn->biClrUsed);
+    pi->palette_map = LocalAlloc(LPTR, lpbiIn->biClrUsed);
     if (pi->palette_map == NULL) {
       CompressEnd(pi);
       return ICERR_MEMORY;
@@ -1497,11 +1499,11 @@ static LRESULT Compress(CodecInfo *pi, ICCOMPRESS* lpic, DWORD dwSize)
     lpic->lpbiOutput->biSizeImage = 0;
 
     if (lpic->lpbiOutput->biBitCount == 4)
-      MSRLE32_CompressRLE4(pi, lpic->lpbiInput, (LPBYTE)lpic->lpInput,
-		   lpic->lpbiOutput, (LPBYTE)lpic->lpOutput, (lpic->dwFlags & ICCOMPRESS_KEYFRAME) != 0);
+      MSRLE32_CompressRLE4(pi, lpic->lpbiInput, lpic->lpInput,
+                   lpic->lpbiOutput, lpic->lpOutput, (lpic->dwFlags & ICCOMPRESS_KEYFRAME) != 0);
     else
-      MSRLE32_CompressRLE8(pi, lpic->lpbiInput, (LPBYTE)lpic->lpInput,
-		   lpic->lpbiOutput, (LPBYTE)lpic->lpOutput, (lpic->dwFlags & ICCOMPRESS_KEYFRAME) != 0);
+      MSRLE32_CompressRLE8(pi, lpic->lpbiInput, lpic->lpInput,
+                   lpic->lpbiOutput, lpic->lpOutput, (lpic->dwFlags & ICCOMPRESS_KEYFRAME) != 0);
 
     if (lpic->dwFrameSize == 0 ||
 	lpic->lpbiOutput->biSizeImage < lpic->dwFrameSize)
@@ -1509,11 +1511,11 @@ static LRESULT Compress(CodecInfo *pi, ICCOMPRESS* lpic, DWORD dwSize)
 
     if ((*lpic->lpdwFlags & ICCOMPRESS_KEYFRAME) == 0) {
       if (lpic->lpbiOutput->biBitCount == 4)
-	MSRLE32_CompressRLE4(pi, lpic->lpbiInput, (LPBYTE)lpic->lpInput,
-			     lpic->lpbiOutput, (LPBYTE)lpic->lpOutput, TRUE);
+        MSRLE32_CompressRLE4(pi, lpic->lpbiInput, lpic->lpInput,
+                             lpic->lpbiOutput, lpic->lpOutput, TRUE);
       else
-	MSRLE32_CompressRLE8(pi, lpic->lpbiInput, (LPBYTE)lpic->lpInput,
-			     lpic->lpbiOutput, (LPBYTE)lpic->lpOutput, TRUE);
+        MSRLE32_CompressRLE8(pi, lpic->lpbiInput, lpic->lpInput,
+                             lpic->lpbiOutput, lpic->lpOutput, TRUE);
 
       if (lpic->dwFrameSize == 0 ||
 	  lpic->lpbiOutput->biSizeImage < lpic->dwFrameSize) {
@@ -1669,7 +1671,7 @@ static LRESULT DecompressBegin(CodecInfo *pi, LPCBITMAPINFOHEADER lpbiIn,
   switch (lpbiOut->biBitCount) {
   case 4:
   case 8:
-    pi->palette_map = (LPBYTE)LocalAlloc(LPTR, lpbiIn->biClrUsed);
+    pi->palette_map = LocalAlloc(LPTR, lpbiIn->biClrUsed);
     if (pi->palette_map == NULL)
       return ICERR_MEMORY;
 
@@ -1679,7 +1681,7 @@ static LRESULT DecompressBegin(CodecInfo *pi, LPCBITMAPINFOHEADER lpbiIn,
     break;
   case 15:
   case 16:
-    pi->palette_map = (LPBYTE)LocalAlloc(LPTR, lpbiIn->biClrUsed * 2);
+    pi->palette_map = LocalAlloc(LPTR, lpbiIn->biClrUsed * 2);
     if (pi->palette_map == NULL)
       return ICERR_MEMORY;
 
@@ -1699,7 +1701,7 @@ static LRESULT DecompressBegin(CodecInfo *pi, LPCBITMAPINFOHEADER lpbiIn,
     break;
   case 24:
   case 32:
-    pi->palette_map = (LPBYTE)LocalAlloc(LPTR, lpbiIn->biClrUsed * sizeof(RGBQUAD));
+    pi->palette_map = LocalAlloc(LPTR, lpbiIn->biClrUsed * sizeof(RGBQUAD));
     if (pi->palette_map == NULL)
       return ICERR_MEMORY;
     memcpy(pi->palette_map, rgbIn, lpbiIn->biClrUsed * sizeof(RGBQUAD));
@@ -1753,7 +1755,7 @@ static LRESULT DecompressEnd(CodecInfo *pi)
   pi->bDecompress = FALSE;
 
   if (pi->palette_map != NULL) {
-    LocalFree((HLOCAL)pi->palette_map);
+    LocalFree(pi->palette_map);
     pi->palette_map = NULL;
   }
 
@@ -1908,7 +1910,7 @@ LRESULT CALLBACK MSRLE32_DriverProc(DWORD_PTR dwDrvID, HDRVR hDrv, UINT uMsg,
 /* DllMain - library initialization code */
 BOOL WINAPI DllMain(HINSTANCE hModule, DWORD dwReason, LPVOID lpReserved)
 {
-  TRACE("(%p,%d,%p)\n",(LPVOID)hModule,dwReason,lpReserved);
+  TRACE("(%p,%d,%p)\n",hModule,dwReason,lpReserved);
 
   switch (dwReason) {
   case DLL_PROCESS_ATTACH:

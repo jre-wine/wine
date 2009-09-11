@@ -24,19 +24,17 @@
 #include "windef.h"
 #include "winbase.h"
 #include "dplay.h"
-#include "dplaysp.h"
+#include "wine/dplaysp.h"
 #include "dplayx_messages.h"
 #include "dplay_global.h"
 
 void NS_SetLocalComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo );
-void NS_SetRemoteComputerAsNameServer( LPCDPSESSIONDESC2 lpsd, LPVOID lpNSInfo );
 void NS_AddRemoteComputerAsNameServer( LPCVOID lpNSAddrHdr,
                                        DWORD dwHdrSize,
                                        LPCDPMSG_ENUMSESSIONSREPLY lpcMsg,
                                        LPVOID lpNSInfo );
 LPVOID NS_GetNSAddr( LPVOID lpNSInfo );
 DWORD NS_GetNsMagic( LPVOID lpNSInfo );
-DWORD NS_GetOtherMagic( LPVOID lpNSInfo );
 void NS_SetLocalAddr( LPVOID lpNSInfo, LPCVOID lpHdr, DWORD dwHdrSize );
 
 void NS_ReplyToEnumSessionsRequest( LPCVOID lpcMsg,

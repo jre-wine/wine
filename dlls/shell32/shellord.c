@@ -3,7 +3,7 @@
  * (NT uses Unicode strings, 95 uses ASCII strings)
  *
  * Copyright 1997 Marcus Meissner
- *           1998 Jürgen Schmied
+ *           1998 JÃ¼rgen Schmied
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +33,7 @@
 #include "winreg.h"
 #include "wine/debug.h"
 #include "winnls.h"
+#include "winternl.h"
 
 #include "shellapi.h"
 #include "objbase.h"
@@ -356,10 +357,10 @@ int WINAPIV ShellMessageBoxW(
 	WCHAR	szText[100],szTitle[100];
 	LPCWSTR pszText = szText, pszTitle = szTitle;
 	LPWSTR  pszTemp;
-	va_list args;
+	__ms_va_list args;
 	int	ret;
 
-	va_start(args, uType);
+	__ms_va_start(args, uType);
 	/* wvsprintfA(buf,fmt, args); */
 
 	TRACE("(%p,%p,%p,%p,%08x)\n",
@@ -378,10 +379,10 @@ int WINAPIV ShellMessageBoxW(
 	FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING,
 		       pszText, 0, 0, (LPWSTR)&pszTemp, 0, &args);
 
-	va_end(args);
+	__ms_va_end(args);
 
 	ret = MessageBoxW(hWnd,pszTemp,pszTitle,uType);
-	LocalFree((HLOCAL)pszTemp);
+        LocalFree(pszTemp);
 	return ret;
 }
 
@@ -414,10 +415,10 @@ int WINAPIV ShellMessageBoxA(
 	char	szText[100],szTitle[100];
 	LPCSTR  pszText = szText, pszTitle = szTitle;
 	LPSTR   pszTemp;
-	va_list args;
+	__ms_va_list args;
 	int	ret;
 
-	va_start(args, uType);
+	__ms_va_start(args, uType);
 	/* wvsprintfA(buf,fmt, args); */
 
 	TRACE("(%p,%p,%p,%p,%08x)\n",
@@ -436,10 +437,10 @@ int WINAPIV ShellMessageBoxA(
 	FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING,
 		       pszText, 0, 0, (LPSTR)&pszTemp, 0, &args);
 
-	va_end(args);
+	__ms_va_end(args);
 
 	ret = MessageBoxA(hWnd,pszTemp,pszTitle,uType);
-	LocalFree((HLOCAL)pszTemp);
+        LocalFree(pszTemp);
 	return ret;
 }
 
@@ -662,7 +663,7 @@ static INT SHADD_create_add_mru_data(HANDLE mruhandle, LPCSTR doc_name, LPCSTR n
 
     /* Add the new entry into the MRU list
      */
-    return AddMRUData(mruhandle, (LPCVOID)buffer, *len);
+    return AddMRUData(mruhandle, buffer, *len);
 }
 
 /*************************************************************************
@@ -718,7 +719,7 @@ void WINAPI SHAddToRecentDocs (UINT uFlags,LPCVOID pv)
     /* See if we need to do anything.
      */
     datalen = 64;
-    ret=SHADD_get_policy( "NoRecentDocsHistory", &type, &data, &datalen);
+    ret=SHADD_get_policy( "NoRecentDocsHistory", &type, data, &datalen);
     if ((ret > 0) && (ret != ERROR_FILE_NOT_FOUND)) {
 	ERR("Error %d getting policy \"NoRecentDocsHistory\"\n", ret);
 	return;
@@ -813,15 +814,15 @@ void WINAPI SHAddToRecentDocs (UINT uFlags,LPCVOID pv)
     switch (uFlags)
     {
     case SHARD_PIDL:
-	SHGetPathFromIDListA((LPCITEMIDLIST) pv, doc_name);
+        SHGetPathFromIDListA(pv, doc_name);
         break;
 
     case SHARD_PATHA:
-        lstrcpynA(doc_name, (LPCSTR)pv, MAX_PATH);
+        lstrcpynA(doc_name, pv, MAX_PATH);
         break;
 
     case SHARD_PATHW:
-        WideCharToMultiByte(CP_ACP, 0, (LPCWSTR)pv, -1, doc_name, MAX_PATH, NULL, NULL);
+        WideCharToMultiByte(CP_ACP, 0, pv, -1, doc_name, MAX_PATH, NULL, NULL);
         break;
 
     default:
@@ -969,9 +970,9 @@ void WINAPI SHAddToRecentDocs (UINT uFlags,LPCVOID pv)
 
 	    /* Set the document path or pidl */
 	    if (uFlags == SHARD_PIDL) {
-		hres = IShellLinkA_SetIDList(psl, (LPCITEMIDLIST) pv);
+                hres = IShellLinkA_SetIDList(psl, pv);
 	    } else {
-		hres = IShellLinkA_SetPath(psl, (LPCSTR) pv);
+                hres = IShellLinkA_SetPath(psl, pv);
 	    }
 	    if(FAILED(hres)) {
 		/* bombed */
@@ -1278,13 +1279,79 @@ BOOL WINAPI FileIconInit(BOOL bFullInit)
 {	FIXME("(%s)\n", bFullInit ? "true" : "false");
 	return 0;
 }
+
 /*************************************************************************
- * IsUserAdmin					[SHELL32.680] NT 4.0
+ * IsUserAnAdmin    [SHELL32.680] NT 4.0
  *
+ * Checks whether the current user is a member of the Administrators group.
+ *
+ * PARAMS
+ *     None
+ *
+ * RETURNS
+ *     Success: TRUE
+ *     Failure: FALSE
  */
-HRESULT WINAPI IsUserAdmin(void)
-{	FIXME("stub\n");
-	return TRUE;
+BOOL WINAPI IsUserAnAdmin(VOID)
+{
+    SID_IDENTIFIER_AUTHORITY Authority = {SECURITY_NT_AUTHORITY};
+    HANDLE hToken;
+    DWORD dwSize;
+    PTOKEN_GROUPS lpGroups;
+    PSID lpSid;
+    DWORD i;
+    BOOL bResult = FALSE;
+
+    TRACE("\n");
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
+    {
+        return FALSE;
+    }
+
+    if (!GetTokenInformation(hToken, TokenGroups, NULL, 0, &dwSize))
+    {
+        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+        {
+            CloseHandle(hToken);
+            return FALSE;
+        }
+    }
+
+    lpGroups = HeapAlloc(GetProcessHeap(), 0, dwSize);
+    if (lpGroups == NULL)
+    {
+        CloseHandle(hToken);
+        return FALSE;
+    }
+
+    if (!GetTokenInformation(hToken, TokenGroups, lpGroups, dwSize, &dwSize))
+    {
+        HeapFree(GetProcessHeap(), 0, lpGroups);
+        CloseHandle(hToken);
+        return FALSE;
+    }
+
+    CloseHandle(hToken);
+    if (!AllocateAndInitializeSid(&Authority, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                                  DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
+                                  &lpSid))
+    {
+        HeapFree(GetProcessHeap(), 0, lpGroups);
+        return FALSE;
+    }
+
+    for (i = 0; i < lpGroups->GroupCount; i++)
+    {
+        if (EqualSid(lpSid, lpGroups->Groups[i].Sid))
+        {
+            bResult = TRUE;
+            break;
+        }
+    }
+
+    FreeSid(lpSid);
+    HeapFree(GetProcessHeap(), 0, lpGroups);
+    return bResult;
 }
 
 /*************************************************************************
@@ -1528,6 +1595,17 @@ BOOL WINAPI shell32_243(DWORD a, DWORD b)
 }
 
 /*************************************************************************
+ *      GUIDFromStringW   [SHELL32.704]
+ */
+BOOL WINAPI GUIDFromStringW(LPCWSTR str, LPGUID guid)
+{
+    UNICODE_STRING guid_str;
+
+    RtlInitUnicodeString(&guid_str, str);
+    return !RtlGUIDFromString(&guid_str, guid);
+}
+
+/*************************************************************************
  *      @	[SHELL32.714]
  */
 DWORD WINAPI SHELL32_714(LPVOID x)
@@ -1641,7 +1719,7 @@ HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_
     if (lRet == ERROR_SUCCESS)
     {
         /* Create and initialize the Property Sheet Extensions Array */
-        psxa = (PPSXA)LocalAlloc(LMEM_FIXED, FIELD_OFFSET(PSXA, pspsx[max_iface]));
+        psxa = LocalAlloc(LMEM_FIXED, FIELD_OFFSET(PSXA, pspsx[max_iface]));
         if (psxa)
         {
             ZeroMemory(psxa, FIELD_OFFSET(PSXA, pspsx[max_iface]));
@@ -1759,7 +1837,7 @@ void WINAPI SHDestroyPropSheetExtArray(HPSXA hpsxa)
             psxa->pspsx[i]->lpVtbl->Release(psxa->pspsx[i]);
         }
 
-        LocalFree((HLOCAL)psxa);
+        LocalFree(psxa);
     }
 }
 
@@ -1813,33 +1891,6 @@ HRESULT WINAPI SHCreateStdEnumFmtEtc(
 	IEnumFORMATETC_Release(pef);
 
 	return hRes;
-}
-
-
-/*************************************************************************
- *		SHELL32_256 (SHELL32.256)
- */
-HRESULT WINAPI SHELL32_256(LPDWORD lpdw0, LPDWORD lpdw1)
-{
-    HRESULT ret = S_OK;
-
-    FIXME("stub %p 0x%08x %p\n", lpdw0, lpdw0 ? *lpdw0 : 0, lpdw1);
-
-    if (!lpdw0 || *lpdw0 != 0x10)
-        ret = E_INVALIDARG;
-    else
-    {
-        LPVOID lpdata = 0;/*LocalAlloc(LMEM_ZEROINIT, 0x4E4);*/
-
-	if (!lpdata)
-            ret = E_OUTOFMEMORY;
-	else
-	{
-            /* Initialize and return unknown lpdata structure */
-	}
-    }
-
-    return ret;
 }
 
 /*************************************************************************
@@ -1902,19 +1953,70 @@ BOOL WINAPI SHObjectProperties(HWND hwnd, DWORD dwType, LPCWSTR szObject, LPCWST
 BOOL WINAPI SHGetNewLinkInfoA(LPCSTR pszLinkTo, LPCSTR pszDir, LPSTR pszName, BOOL *pfMustCopy,
                               UINT uFlags)
 {
-    FIXME("%s, %s, %p, %p, 0x%08x - stub\n", debugstr_a(pszLinkTo), debugstr_a(pszDir),
-          pszName, pfMustCopy, uFlags);
+    WCHAR wszLinkTo[MAX_PATH];
+    WCHAR wszDir[MAX_PATH];
+    WCHAR wszName[MAX_PATH];
+    BOOL res;
 
-    return FALSE;
+    MultiByteToWideChar(CP_ACP, 0, pszLinkTo, -1, wszLinkTo, MAX_PATH);
+    MultiByteToWideChar(CP_ACP, 0, pszDir, -1, wszDir, MAX_PATH);
+
+    res = SHGetNewLinkInfoW(wszLinkTo, wszDir, wszName, pfMustCopy, uFlags);
+
+    if (res)
+        WideCharToMultiByte(CP_ACP, 0, wszName, -1, pszName, MAX_PATH, NULL, NULL);
+
+    return res;
 }
 
 BOOL WINAPI SHGetNewLinkInfoW(LPCWSTR pszLinkTo, LPCWSTR pszDir, LPWSTR pszName, BOOL *pfMustCopy,
                               UINT uFlags)
 {
-    FIXME("%s, %s, %p, %p, 0x%08x - stub\n", debugstr_w(pszLinkTo), debugstr_w(pszDir),
+    const WCHAR *basename;
+    WCHAR *dst_basename;
+    int i=2;
+    static const WCHAR lnkformat[] = {'%','s','.','l','n','k',0};
+    static const WCHAR lnkformatnum[] = {'%','s',' ','(','%','d',')','.','l','n','k',0};
+
+    TRACE("(%s, %s, %p, %p, 0x%08x)\n", debugstr_w(pszLinkTo), debugstr_w(pszDir),
           pszName, pfMustCopy, uFlags);
 
-    return FALSE;
+    *pfMustCopy = FALSE;
+
+    if (uFlags & SHGNLI_PIDL)
+    {
+        FIXME("SHGNLI_PIDL flag unsupported\n");
+        return FALSE;
+    }
+
+    if (uFlags)
+        FIXME("ignoring flags: 0x%08x\n", uFlags);
+
+    /* FIXME: should test if the file is a shortcut or DOS program */
+    if (GetFileAttributesW(pszLinkTo) == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+
+    basename = strrchrW(pszLinkTo, '\\');
+    if (basename)
+        basename = basename+1;
+    else
+        basename = pszLinkTo;
+
+    lstrcpynW(pszName, pszDir, MAX_PATH);
+    if (!PathAddBackslashW(pszName))
+        return FALSE;
+
+    dst_basename = pszName + strlenW(pszName);
+
+    snprintfW(dst_basename, pszName + MAX_PATH - dst_basename, lnkformat, basename);
+
+    while (GetFileAttributesW(pszName) != INVALID_FILE_ATTRIBUTES)
+    {
+        snprintfW(dst_basename, pszName + MAX_PATH - dst_basename, lnkformatnum, basename, i);
+        i++;
+    }
+
+    return TRUE;
 }
 
 HRESULT WINAPI SHStartNetConnectionDialog(HWND hwnd, LPCSTR pszRemoteName, DWORD dwType)
@@ -1991,4 +2093,56 @@ BOOL WINAPI LinkWindow_UnregisterClass(void)
 {
     FIXME("()\n");
     return TRUE;
+}
+
+/*************************************************************************
+ *              SHFlushSFCache (SHELL32.526)
+ *
+ * Notifies the shell that a user-specified special folder location has changed.
+ *
+ * NOTES
+ *   In Wine, the shell folder registry values are not cached, so this function
+ *   has no effect.
+ */
+void WINAPI SHFlushSFCache(void)
+{
+}
+
+HRESULT WINAPI SHGetImageList(int iImageList, REFIID riid, void **ppv)
+{
+    FIXME("STUB: %i %s\n",iImageList,debugstr_guid(riid));
+    return E_NOINTERFACE;
+}
+
+/*************************************************************************
+ * SHCreateShellFolderView			[SHELL32.256]
+ *
+ * Create a new instance of the default Shell folder view object.
+ *
+ * RETURNS
+ *  Success: S_OK
+ *  Failure: error value
+ *
+ * NOTES
+ *  see IShellFolder::CreateViewObject
+ */
+HRESULT WINAPI SHCreateShellFolderView(const SFV_CREATE *pcsfv,
+                        IShellView **ppsv)
+{
+	IShellView * psf;
+	HRESULT hRes;
+
+	TRACE("sf=%p outer=%p callback=%p\n",
+	  pcsfv->pshf, pcsfv->psvOuter, pcsfv->psfvcb);
+
+	psf = IShellView_Constructor(pcsfv->pshf);
+
+	if (!psf)
+	  return E_OUTOFMEMORY;
+
+	IShellView_AddRef(psf);
+	hRes = IShellView_QueryInterface(psf, &IID_IShellView, (LPVOID *)ppsv);
+	IShellView_Release(psf);
+
+	return hRes;
 }

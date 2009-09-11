@@ -19,7 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#include "resource.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
 
 /*
  Menu
@@ -170,20 +172,6 @@ END
 /*
  Dialog
 */
-
-IDD_ABOUTBOX DIALOG DISCARDABLE  22, 17, 259, 210
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-CAPTION "About Task Manager"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    CONTROL         "Task Manager v1.0\nCopyright (C) 1999 - 2001\nby Brian Palmer (brianp@reactos.org)",
-                    IDC_STATIC,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,53,28,
-                    122,26
-    DEFPUSHBUTTON   "OK",IDOK,183,189,44,14,WS_GROUP
-    ICON            IDI_TASKMANAGER,IDC_STATIC,19,30,20,20
-    EDITTEXT        IDC_LICENSE_EDIT,53,63,174,107,ES_MULTILINE |
-                    ES_READONLY | WS_VSCROLL
-END
 
 IDD_TASKMGR_DIALOG DIALOG DISCARDABLE  0, 0, 264, 246
 STYLE DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP |
@@ -433,6 +421,7 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "Task Manager"
     IDC_TASKMGR             "Task Manager"
+    IDS_RUNDLG_CAPTION      "Create New Task"
 END
 
 STRINGTABLE DISCARDABLE
@@ -496,5 +485,90 @@ BEGIN
     ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL
                             "Sets process to the BELOW NORMAL priority class"
     ID_PROCESS_PAGE_SETPRIORITY_LOW "Sets process to the LOW priority class"
-    IDS_LICENSE             "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.\r\n\r\nThis program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more details.\r\n\r\nYou should have received a copy of the GNU Lesser General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
+    ID_PROCESS_PAGE_DEBUGCHANNELS
+                            "Controls Debug Channels"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDS_VIEW_LARGE                     "Lar&ge Icons"
+    IDS_VIEW_SMALL                     "S&mall Icons"
+    IDS_VIEW_DETAILS                   "&Details"
+    IDS_WINDOWS                        "&Windows"
+    IDS_VIEW_SELECTCOLUMNS             "&Select Columns..."
+    IDS_OPTIONS_SHOW16BITTASKS         "&Show 16-bit tasks"
+    IDS_VIEW_CPUHISTORY                "&CPU History"
+    IDS_VIEW_CPUHISTORY_ONEGRAPHALL    "&One Graph, All CPUs"
+    IDS_VIEW_CPUHISTORY_ONEGRAPHPERCPU "One Graph &Per CPU"
+    IDS_VIEW_SHOWKERNELTIMES           "&Show Kernel Times"
+    IDS_APPLICATIONS                   "Applications"
+    IDS_PROCESSES                      "Processes"
+    IDS_PERFORMANCE                    "Performance"
+    IDS_STATUS_BAR_CPU_USAGE           "CPU Usage: %3d%%"
+    IDS_STATUS_BAR_PROCESSES           "Processes: %d"
+    IDS_STATUS_BAR_MEMORY_USAGE        "Mem Usage: %dK / %dK"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDS_IMAGENAME         "Image Name"
+    IDS_PID               "PID"
+    IDS_CPUUSAGE          "CPU"
+    IDS_CPUTIME           "CPU Time"
+    IDS_MEMORYUSAGE       "Mem Usage"
+    IDS_MEMORYUSAGEDELTA  "Mem Delta"
+    IDS_PEAKMEMORYUSAGE   "Peak Mem Usage"
+    IDS_PAGEFAULTS        "Page Faults"
+    IDS_USEROBJECTS       "USER Objects"
+    IDS_IOREADS           "I/O Reads"
+    IDS_IOREADBYTES       "I/O Read Bytes"
+    IDS_SESSIONID         "Session ID"
+    IDS_USERNAME          "Username"
+    IDS_PAGEFAULTSDELTA   "PF Delta"
+    IDS_VIRTUALMEMORYSIZE "VM Size"
+    IDS_PAGEDPOOL         "Paged Pool"
+    IDS_NONPAGEDPOOL      "NP Pool"
+    IDS_BASEPRIORITY      "Base Pri"
+    IDS_HANDLECOUNT       "Handles"
+    IDS_THREADCOUNT       "Threads"
+    IDS_GDIOBJECTS        "GDI Objects"
+    IDS_IOWRITES          "I/O Writes"
+    IDS_IOWRITEBYTES      "I/O Write Bytes"
+    IDS_IOOTHER           "I/O Other"
+    IDS_IOOTHERBYTES      "I/O Other Bytes"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDS_WARNING_TITLE               "Task Manager Warning"
+    IDS_PRIORITY_CHANGE_MESSAGE     "WARNING: Changing the priority class of this process may\n\
+                                     cause undesired results including system instability. Are you\n\
+                                     sure you want to change the priority class?"
+    IDS_PRIORITY_UNABLE2CHANGE      "Unable to Change Priority"
+    IDS_TERMINATE_MESSAGE           "WARNING: Terminating a process can cause undesired\n\
+                                     results including loss of data and system instability. The\n\
+                                     process will not be given the chance to save its state or\n\
+                                     data before it is terminated. Are you sure you want to\n\
+                                     terminate the process?"
+    IDS_TERMINATE_UNABLE2TERMINATE  "Unable to Terminate Process"
+    IDS_DEBUG_MESSAGE               "WARNING: Debugging this process may result in loss of data.\n\
+                                     Are you sure you wish to attach the debugger?"
+    IDS_DEBUG_UNABLE2DEBUG          "Unable to Debug Process"
+    IDS_AFFINITY_ERROR_MESSAGE      "The process must have affinity with at least one processor"
+    IDS_AFFINITY_ERROR_TITLE        "Invalid Option"
+    IDS_AFFINITY_UNABLE2ACCESS      "Unable to Access or Set Process Affinity"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    IDS_SYSTEM_IDLE_PROCESS            "System Idle Process"
+    IDS_APPLICATION_NOT_RESPONDING     "Not Responding"
+    IDS_APPLICATION_RUNNING            "Running"
+    IDS_APPLICATION_TASK               "Task"
+    IDS_APPLICATION_STATUS             "Status"
+    IDS_DEBUG_CHANNEL                  "Debug Channels"
+    IDS_DEBUG_CHANNEL_FIXME            "Fixme"
+    IDS_DEBUG_CHANNEL_ERR              "Err"
+    IDS_DEBUG_CHANNEL_WARN             "Warn"
+    IDS_DEBUG_CHANNEL_TRACE            "Trace"
 END

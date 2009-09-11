@@ -16,6 +16,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "shdoclc.h"
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
 
@@ -69,7 +70,7 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM SEPARATOR
         MENUITEM "P&okaži sliko",            IDM_SHOWPICTURE
         MENUITEM "&Shrani sliko kot ...",      IDM_SAVEPICTURE
-        MENUITEM "Po&šlji sliko...",       IDM_MP_EMAILPICTURE
+        MENUITEM "Po&šlji sliko ...",       IDM_MP_EMAILPICTURE
         MENUITEM "Natisni s&liko ...",        IDM_MP_PRINTPICTURE
         MENUITEM "Po&jdi v mapo Slike",       IDM_MP_MYPICS
         MENUITEM "Nastavi kot oza&dje",       IDM_SETWALLPAPER
@@ -247,5 +248,3 @@ IDR_BROWSE_CONTEXT_MENU MENU
         MENUITEM "Drsenje desno", IDM_SCROLL_RIGHT
     }
 }
-
-#pragma code_page(default)

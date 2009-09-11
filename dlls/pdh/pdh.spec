@@ -28,10 +28,10 @@
 @ stub PdhEnumMachinesHA
 @ stub PdhEnumMachinesHW
 @ stub PdhEnumMachinesW
-@ stub PdhEnumObjectItemsA
+@ stdcall PdhEnumObjectItemsA(str str str ptr ptr ptr ptr long long)
 @ stub PdhEnumObjectItemsHA
 @ stub PdhEnumObjectItemsHW
-@ stub PdhEnumObjectItemsW
+@ stdcall PdhEnumObjectItemsW(wstr wstr wstr ptr ptr ptr ptr long long)
 @ stub PdhEnumObjectsA
 @ stub PdhEnumObjectsHA
 @ stub PdhEnumObjectsHW
@@ -79,8 +79,8 @@
 @ stdcall PdhLookupPerfIndexByNameW(wstr wstr ptr)
 @ stdcall PdhLookupPerfNameByIndexA(str long ptr ptr)
 @ stdcall PdhLookupPerfNameByIndexW(wstr long ptr ptr)
-@ stub PdhMakeCounterPathA
-@ stub PdhMakeCounterPathW
+@ stdcall PdhMakeCounterPathA(ptr ptr ptr long)
+@ stdcall PdhMakeCounterPathW(ptr ptr ptr long)
 @ stub PdhOpenLogA
 @ stub PdhOpenLogW
 @ stdcall PdhOpenQuery(wstr long ptr) PdhOpenQueryW

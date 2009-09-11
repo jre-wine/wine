@@ -40,8 +40,6 @@ struct display
 static struct display *displaypoints = NULL;
 static unsigned int maxdisplays = 0, ndisplays = 0;
 
-#define OFFSET_OF(_f,_s)        ((unsigned)(&(((_s*)NULL)->_f)))
-
 static inline BOOL cmp_symbol(const SYMBOL_INFO* si1, const SYMBOL_INFO* si2)
 {
     /* FIXME: !memcmp(si1, si2, sizeof(SYMBOL_INFO) + si1->NameLen)
@@ -50,13 +48,13 @@ static inline BOOL cmp_symbol(const SYMBOL_INFO* si1, const SYMBOL_INFO* si2)
      * stack_get_frame, so that un-touched fields by stack_get_frame
      * get the same value!!
      */
-    return !memcmp(si1, si2, OFFSET_OF(Name, SYMBOL_INFO)) &&
+    return !memcmp(si1, si2, FIELD_OFFSET(SYMBOL_INFO, Name)) &&
         !memcmp(si1->Name, si2->Name, si1->NameLen);
 }
 
 int display_add(struct expr *exp, int count, char format)
 {
-    int         i;
+    unsigned i;
     BOOL local_binding = FALSE;
 
     for (i = 0; i < ndisplays; i++)
@@ -98,7 +96,7 @@ int display_add(struct expr *exp, int count, char format)
 
 int display_info(void)
 {
-    int                 i;
+    unsigned            i;
     char                buffer[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO*        func;
     const char*         info;
@@ -163,7 +161,7 @@ static void print_one_display(int i)
 
 int display_print(void)
 {
-    int                 i;
+    unsigned            i;
     char                buffer[sizeof(SYMBOL_INFO) + 256];
     SYMBOL_INFO*        func;
 
@@ -187,8 +185,6 @@ int display_print(void)
 
 int display_delete(int displaynum)
 {
-    int i;
-
     if (displaynum > ndisplays || displaynum == 0 || displaynum < -1 ||
         displaypoints[displaynum - 1].exp == NULL)
     {
@@ -198,6 +194,8 @@ int display_delete(int displaynum)
 
     if (displaynum == -1)
     {
+        unsigned i;
+
         for (i = 0; i < ndisplays; i++)
         {
             if (displaypoints[i].exp != NULL) 

@@ -236,7 +236,9 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "EM_GETLIMITTEXT",          /* 0x00d5 */
     "EM_POSFROMCHAR",           /* 0x00d6 */
     "EM_CHARFROMPOS",           /* 0x00d7 */
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    "EM_SETIMESTATUS",          /* 0x00d8 */
+    "EM_GETIMESTATUS",          /* 0x00d9 */
+    NULL, NULL, NULL, NULL, NULL, NULL,
 
     /* 0x00E0 - Win32 Scrollbars */
     "SBM_SETPOS",               /* 0x00e0 */
@@ -592,7 +594,8 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
     "WM_PALETTEISCHANGING",
     "WM_PALETTECHANGED",
     "WM_HOTKEY",                /* 0x0312 */
-    NULL, NULL, NULL, NULL,
+    "WM_POPUPSYSTEMMENU",       /* 0x0313 */
+    NULL, NULL, NULL,
     "WM_PRINT",                 /* 0x0317 */
     "WM_PRINTCLIENT",           /* 0x0318 */
     "WM_APPCOMMAND",            /* 0x0319 */
@@ -728,7 +731,7 @@ static const char * const MessageTypeNames[SPY_MAX_MSGNUM + 1] =
 };
 
 
-#define SPY_MAX_LVMMSGNUM   140
+#define SPY_MAX_LVMMSGNUM   182
 static const char * const LVMMessageTypeNames[SPY_MAX_LVMMSGNUM + 1] =
 {
     "LVM_GETBKCOLOR",           /* 1000 */
@@ -869,9 +872,51 @@ static const char * const LVMMessageTypeNames[SPY_MAX_LVMMSGNUM + 1] =
     NULL,
     NULL,
     NULL,
-    NULL,
     "LVM_SETBKIMAGEW",
-    "LVM_GETBKIMAGEW"   /* 0x108B */
+    "LVM_GETBKIMAGEW",   /* 0x108B */
+    "LVM_SETSELECTEDCOLUMN",
+    "LVM_SETTILEWIDTH",
+    "LVM_SETVIEW",
+    "LVM_GETVIEW",
+    NULL,
+    "LVM_INSERTGROUP",
+    NULL,
+    "LVM_SETGROUPINFO",
+    NULL,
+    "LVM_GETGROUPINFO",
+    "LVM_REMOVEGROUP",
+    "LVM_MOVEGROUP",
+    NULL,
+    NULL,
+    "LVM_MOVEITEMTOGROUP",
+    "LVM_SETGROUPMETRICS",
+    "LVM_GETGROUPMETRICS",
+    "LVM_ENABLEGROUPVIEW",
+    "LVM_SORTGROUPS",
+    "LVM_INSERTGROUPSORTED",
+    "LVM_REMOVEALLGROUPS",
+    "LVM_HASGROUP",
+    "LVM_SETTILEVIEWINFO",
+    "LVM_GETTILEVIEWINFO",
+    "LVM_SETTILEINFO",
+    "LVM_GETTILEINFO",
+    "LVM_SETINSERTMARK",
+    "LVM_GETINSERTMARK",
+    "LVM_INSERTMARKHITTEST",
+    "LVM_GETINSERTMARKRECT",
+    "LVM_SETINSERTMARKCOLOR",
+    "LVM_GETINSERTMARKCOLOR",
+    NULL,
+    "LVM_SETINFOTIP",
+    "LVM_GETSELECTEDCOLUMN",
+    "LVM_ISGROUPVIEWENABLED",
+    "LVM_GETOUTLINECOLOR",
+    "LVM_SETOUTLINECOLOR",
+    NULL,
+    "LVM_CANCELEDITLABEL",
+    "LVM_MAPINDEXTOID",
+    "LVM_MAPIDTOINDEX",
+    "LVM_ISITEMVISIBLE"
 };
 
 
@@ -1325,7 +1370,7 @@ static const char * const VK_KeyNames[SPY_MAX_VKKEYSNUM + 1] =
     "VK_ICO_00",        /* 0xE4 */
     "VK_PROCESSKEY",    /* 0xE5 */
     NULL,               /* 0xE6 */
-    NULL,               /* 0xE7 */
+    "VK_PACKET",        /* 0xE7 */
     NULL,               /* 0xE8 */
     NULL,               /* 0xE9 */
     NULL,               /* 0xEA */
@@ -1508,9 +1553,10 @@ static const USER_MSG toolbar_array[] = {
           USM(TB_GETSTRINGW            ,0),
           USM(TB_GETSTRINGA            ,0),
           USM(TB_UNKWN45D              ,8),
-          USM(TB_UNKWN45E              ,0),
-          USM(TB_UNKWN460              ,0),
-          USM(TB_UNKWN463              ,8),
+          USM(TB_SETHOTITEM2           ,0),
+          USM(TB_SETLISTGAP            ,0),
+          USM(TB_GETIMAGELISTCOUNT     ,0),
+          USM(TB_GETIDEALSIZE          ,8),
           USM(TB_UNKWN464              ,0),
           {0,0,0} };
 
@@ -1935,7 +1981,7 @@ static const SPY_NOTIFY spnfy_array[] = {
     SPNFY(RBN_DELETINGBAND,      NMREBAR),
     SPNFY(RBN_DELETEDBAND,       NMREBAR),
     SPNFY(RBN_CHILDSIZE,         NMREBARCHILDSIZE),
-    /* IP Adderss     0U-860U  to  0U-879U  */
+    /* IP address     0U-860U  to  0U-879U  */
     SPNFY(IPN_FIELDCHANGED,      NMHDR),
     /* Status bar     0U-880U  to  0U-899U  */
     SPNFY(SBN_SIMPLEMODECHANGE,  NMHDR),
@@ -2076,10 +2122,6 @@ const char *SPY_GetClassLongOffsetName( INT offset )
  */
 static void SPY_GetClassName( SPY_INSTANCE *sp_e )
 {
-    DWORD save_error;
-
-    /* save and restore error code over the next call */
-    save_error = GetLastError();
     /* special code to detect a property sheet dialog   */
     if ((GetClassLongW(sp_e->msg_hwnd, GCW_ATOM) == WC_DIALOG) &&
         (GetPropW(sp_e->msg_hwnd, PropSheetInfoStr))) {
@@ -2088,7 +2130,6 @@ static void SPY_GetClassName( SPY_INSTANCE *sp_e )
     else {
         GetClassNameW(sp_e->msg_hwnd, sp_e->wnd_class, sizeof(sp_e->wnd_class)/sizeof(WCHAR));
     }
-    SetLastError(save_error);
 }
 
 /***********************************************************************
@@ -2186,6 +2227,7 @@ static void SPY_GetWndName( SPY_INSTANCE *sp_e )
 const char *SPY_GetMsgName( UINT msg, HWND hWnd )
 {
     SPY_INSTANCE ext_sp_e;
+    DWORD save_error = GetLastError();
 
     ext_sp_e.msgnum = msg;
     ext_sp_e.msg_hwnd   = hWnd;
@@ -2193,6 +2235,7 @@ const char *SPY_GetMsgName( UINT msg, HWND hWnd )
     ext_sp_e.wParam = 0;
     ext_sp_e.wnd_class[0] = 0;
     SPY_GetMsgStuff(&ext_sp_e);
+    SetLastError( save_error );
     return wine_dbg_sprintf("%s", ext_sp_e.msg_name);
 }
 
@@ -2488,7 +2531,8 @@ static void SPY_DumpStructure(const SPY_INSTANCE *sp_e, BOOL enter)
                         SetLastError(save_error);
                         if (strcmpW(TOOLBARCLASSNAMEW, from_class) == 0)
                             dumplen = sizeof(NMTBCUSTOMDRAW)-sizeof(NMHDR);
-                    } else if ((pnmh->code >= HDN_ITEMCHANGINGA) && (pnmh->code <= HDN_ENDDRAG)) {
+                    } else if ( pnmh->code >= HDN_ENDDRAG
+                                && pnmh->code <= HDN_ITEMCHANGINGA ) {
                         dumplen = sizeof(NMHEADERA)-sizeof(NMHDR);
                     }
                     if (dumplen > 0) {
@@ -2515,6 +2559,7 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
 {
     SPY_INSTANCE sp_e;
     int indent;
+    DWORD save_error = GetLastError();
 
     if (!TRACE_ON(message) || SPY_EXCLUDE(msg)) return;
 
@@ -2577,6 +2622,7 @@ void SPY_EnterMessage( INT iFlag, HWND hWnd, UINT msg,
         break;
     }
     set_indent_level( indent + SPY_INDENT_UNIT );
+    SetLastError( save_error );
 }
 
 
@@ -2588,6 +2634,7 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
 {
     SPY_INSTANCE sp_e;
     int indent;
+    DWORD save_error = GetLastError();
 
     if (!TRACE_ON(message) || SPY_EXCLUDE(msg) ||
         (SPY_ExcludeDWP && (iFlag == SPY_RESULT_DEFWND16 || iFlag == SPY_RESULT_DEFWND)) )
@@ -2641,7 +2688,8 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
                         indent, "", hWnd, debugstr_w(sp_e.wnd_name), msg,
                         sp_e.msg_name );
         break;
-   }
+    }
+    SetLastError( save_error );
 }
 
 
@@ -2650,7 +2698,8 @@ void SPY_ExitMessage( INT iFlag, HWND hWnd, UINT msg, LRESULT lReturn,
  */
 int SPY_Init(void)
 {
-    int i, j;
+    int i;
+    UINT j;
     char buffer[1024];
     const SPY_NOTIFY *p;
     const USER_MSG *q;
@@ -2697,7 +2746,7 @@ int SPY_Init(void)
     p = &spnfy_array[0];
     j = 0xffffffff;
     while (p->name) {
-        if ((UINT)p->value > (UINT)j) {
+        if (p->value > j) {
             ERR("Notify message array out of order\n");
             ERR("  between values [%08x] %s and [%08x] %s\n",
                 j, (p-1)->name, p->value, p->name);

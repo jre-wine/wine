@@ -71,6 +71,9 @@ DWORD service_create(LPCWSTR name, struct service_entry **entry)
         return ERROR_NOT_ENOUGH_SERVER_MEMORY;
     }
     (*entry)->control_pipe = INVALID_HANDLE_VALUE;
+    (*entry)->status.dwCurrentState = SERVICE_STOPPED;
+    (*entry)->status.dwWin32ExitCode = ERROR_SERVICE_NEVER_STARTED;
+    /* all other fields are zero */
     return ERROR_SUCCESS;
 }
 
@@ -106,9 +109,9 @@ static DWORD load_service_config(HKEY hKey, struct service_entry *entry)
         return err;
     if ((err = load_reg_string(hKey, SZ_DESCRIPTION,  0,    &entry->description)) != 0)
         return err;
-    if ((err = load_reg_multisz(hKey, SZ_DEPEND_ON_SERVICE, &entry->dependOnServices)) != 0)
+    if ((err = load_reg_multisz(hKey, SZ_DEPEND_ON_SERVICE, TRUE, &entry->dependOnServices)) != 0)
         return err;
-    if ((err = load_reg_multisz(hKey, SZ_DEPEND_ON_GROUP,   &entry->dependOnGroups)) != 0)
+    if ((err = load_reg_multisz(hKey, SZ_DEPEND_ON_GROUP, FALSE, &entry->dependOnGroups)) != 0)
         return err;
 
     if ((err = load_reg_dword(hKey, SZ_TYPE,  &entry->config.dwServiceType)) != 0)
@@ -239,10 +242,12 @@ static void scmdatabase_autostart_services(struct scmdatabase *db)
         {
             if (i+1 >= size)
             {
+                struct service_entry **slist_new;
                 size *= 2;
-                services_list = HeapReAlloc(GetProcessHeap(), 0, services_list, size * sizeof(services_list[0]));
-                if (!services_list)
+                slist_new = HeapReAlloc(GetProcessHeap(), 0, services_list, size * sizeof(services_list[0]));
+                if (!slist_new)
                     break;
+                services_list = slist_new;
             }
             services_list[i] = service;
             service->ref_count++;
@@ -256,8 +261,11 @@ static void scmdatabase_autostart_services(struct scmdatabase *db)
     for (i = 0; i < size; i++)
     {
         DWORD err;
+        const WCHAR *argv[2];
         service = services_list[i];
-        err = service_start(service, 0, NULL);
+        argv[0] = service->name;
+        argv[1] = NULL;
+        err = service_start(service, 1, argv);
         /* FIXME: do something if the service failed to start */
         release_service(service);
     }
@@ -274,7 +282,7 @@ BOOL validate_service_config(struct service_entry *entry)
 {
     if (entry->config.dwServiceType & SERVICE_WIN32 && (entry->config.lpBinaryPathName == NULL || !entry->config.lpBinaryPathName[0]))
     {
-        WINE_ERR("Service %s is Win32 but have no image path set\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s is Win32 but has no image path set\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
@@ -296,18 +304,18 @@ BOOL validate_service_config(struct service_entry *entry)
         }
         break;
     default:
-        WINE_ERR("Service %s have unknown service type\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s has an unknown service type\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
     /* StartType can only be a single value (if several values are mixed the result is probably not what was intended) */
     if (entry->config.dwStartType > SERVICE_DISABLED)
     {
-        WINE_ERR("Service %s have unknown start type\n", wine_dbgstr_w(entry->name));
+        WINE_ERR("Service %s has an unknown start type\n", wine_dbgstr_w(entry->name));
         return FALSE;
     }
 
-    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START or only allowed for driver services */
+    /* SERVICE_BOOT_START and SERVICE_SYSTEM_START are only allowed for driver services */
     if (((entry->config.dwStartType == SERVICE_BOOT_START) || (entry->config.dwStartType == SERVICE_SYSTEM_START)) &&
         ((entry->config.dwServiceType & SERVICE_WIN32_OWN_PROCESS) || (entry->config.dwServiceType & SERVICE_WIN32_SHARE_PROCESS)))
     {
@@ -341,7 +349,7 @@ struct service_entry *scmdatabase_find_service_by_displayname(struct scmdatabase
 
     LIST_FOR_EACH_ENTRY(service, &db->services, struct service_entry, entry)
     {
-        if (strcmpiW(name, service->config.lpDisplayName) == 0)
+        if (service->config.lpDisplayName && strcmpiW(name, service->config.lpDisplayName) == 0)
             return service;
     }
 
@@ -439,10 +447,7 @@ static DWORD scmdatabase_load_services(struct scmdatabase *db)
         }
 
         entry->status.dwServiceType = entry->config.dwServiceType;
-        entry->status.dwCurrentState = SERVICE_STOPPED;
-        entry->status.dwWin32ExitCode = ERROR_SERVICE_NEVER_STARTED;
         entry->db = db;
-        /* all other fields are zero */
 
         list_add_tail(&db->services, &entry->entry);
     }
@@ -572,7 +577,6 @@ static DWORD service_start_process(struct service_entry *service_entry, HANDLE *
     }
 
     service_entry->status.dwCurrentState = SERVICE_START_PENDING;
-    service_entry->status.dwProcessId = pi.dwProcessId;
 
     service_unlock(service_entry);
 
@@ -582,11 +586,11 @@ static DWORD service_start_process(struct service_entry *service_entry, HANDLE *
     {
         service_lock_exclusive(service_entry);
         service_entry->status.dwCurrentState = SERVICE_STOPPED;
-        service_entry->status.dwProcessId = 0;
         service_unlock(service_entry);
         return GetLastError();
     }
 
+    service_entry->status.dwProcessId = pi.dwProcessId;
     *process = pi.hProcess;
     CloseHandle( pi.hThread );
 
@@ -621,17 +625,17 @@ static DWORD service_wait_for_startup(struct service_entry *service_entry, HANDL
 /******************************************************************************
  * service_send_start_message
  */
-static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
+static BOOL service_send_start_message(struct service_entry *service, LPCWSTR *argv, DWORD argc)
 {
     DWORD i, len, count, result;
     service_start_info *ssi;
     LPWSTR p;
     BOOL r;
 
-    WINE_TRACE("%p %p %d\n", pipe, argv, argc);
+    WINE_TRACE("%s %p %d\n", wine_dbgstr_w(service->name), argv, argc);
 
     /* FIXME: this can block so should be done in another thread */
-    r = ConnectNamedPipe(pipe, NULL);
+    r = ConnectNamedPipe(service->control_pipe, NULL);
     if (!r && GetLastError() != ERROR_PIPE_CONNECTED)
     {
         WINE_ERR("pipe connect failed\n");
@@ -639,16 +643,20 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
 
     /* calculate how much space do we need to send the startup info */
-    len = 1;
+    len = strlenW(service->name) + 1;
     for (i=0; i<argc; i++)
         len += strlenW(argv[i])+1;
+    len++;
 
-    ssi = HeapAlloc(GetProcessHeap(),0,FIELD_OFFSET(service_start_info, str[len]));
+    ssi = HeapAlloc(GetProcessHeap(),0,FIELD_OFFSET(service_start_info, data[len]));
     ssi->cmd = WINESERV_STARTINFO;
-    ssi->size = len;
+    ssi->control = 0;
+    ssi->total_size = FIELD_OFFSET(service_start_info, data[len]);
+    ssi->name_size = strlenW(service->name) + 1;
+    strcpyW( ssi->data, service->name );
 
     /* copy service args into a single buffer*/
-    p = &ssi->str[0];
+    p = &ssi->data[ssi->name_size];
     for (i=0; i<argc; i++)
     {
         strcpyW(p, argv[i]);
@@ -656,10 +664,10 @@ static BOOL service_send_start_message(HANDLE pipe, LPCWSTR *argv, DWORD argc)
     }
     *p=0;
 
-    r = WriteFile(pipe, ssi, FIELD_OFFSET(service_start_info, str[len]), &count, NULL);
+    r = WriteFile(service->control_pipe, ssi, ssi->total_size, &count, NULL);
     if (r)
     {
-        r = ReadFile(pipe, &result, sizeof result, &count, NULL);
+        r = ReadFile(service->control_pipe, &result, sizeof result, &count, NULL);
         if (r && result)
         {
             SetLastError(result);
@@ -691,7 +699,7 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
     service->control_mutex = CreateMutexW(NULL, TRUE, NULL);
 
     if (!service->status_changed_event)
-        service->status_changed_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+        service->status_changed_event = CreateEventW(NULL, FALSE, FALSE, NULL);
 
     name = service_get_pipe_name();
     service->control_pipe = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX,
@@ -709,12 +717,9 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
 
     if (err == ERROR_SUCCESS)
     {
-        if (!service_send_start_message(service->control_pipe,
-                service_argv, service_argc))
+        if (!service_send_start_message(service, service_argv, service_argc))
             err = ERROR_SERVICE_REQUEST_TIMEOUT;
     }
-
-    WINE_TRACE("returning %d\n", err);
 
     if (err == ERROR_SUCCESS)
         err = service_wait_for_startup(service, process_handle);
@@ -724,6 +729,8 @@ DWORD service_start(struct service_entry *service, DWORD service_argc, LPCWSTR *
 
     ReleaseMutex(service->control_mutex);
     scmdatabase_unlock_startup(service->db);
+
+    WINE_TRACE("returning %d\n", err);
 
     return err;
 }

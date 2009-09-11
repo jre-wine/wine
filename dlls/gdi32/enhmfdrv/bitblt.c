@@ -27,8 +27,8 @@
 #include "enhmetafiledrv.h"
 #include "wine/debug.h"
 
-BOOL EMFDRV_PatBlt( PHYSDEV dev, INT left, INT top,
-                    INT width, INT height, DWORD rop )
+BOOL CDECL EMFDRV_PatBlt( PHYSDEV dev, INT left, INT top,
+                          INT width, INT height, DWORD rop )
 {
     EMRBITBLT emr;
     BOOL ret;
@@ -173,7 +173,7 @@ static BOOL EMFDRV_BitBlockTransfer(
     return ret;
 }
 
-BOOL EMFDRV_BitBlt( 
+BOOL CDECL EMFDRV_BitBlt(
     PHYSDEV devDst, INT xDst, INT yDst, INT width, INT height,
     PHYSDEV devSrc, INT xSrc, INT ySrc, DWORD rop)
 {
@@ -182,7 +182,7 @@ BOOL EMFDRV_BitBlt(
                                     rop, EMR_BITBLT );
 }
 
-BOOL EMFDRV_StretchBlt( 
+BOOL CDECL EMFDRV_StretchBlt(
     PHYSDEV devDst, INT xDst, INT yDst, INT widthDst, INT heightDst,  
     PHYSDEV devSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc, DWORD rop )
 {
@@ -191,7 +191,7 @@ BOOL EMFDRV_StretchBlt(
                                     rop, EMR_STRETCHBLT );
 }
 
-INT EMFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
+INT CDECL EMFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
                                       INT heightDst, INT xSrc, INT ySrc,
                                       INT widthSrc, INT heightSrc,
                                       const void *bits, const BITMAPINFO *info,
@@ -206,7 +206,7 @@ INT EMFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
                                      info->bmiHeader.biBitCount);
 
     /* calculate the size of the colour table */
-    bmi_size = DIB_BitmapInfoSize(info, wUsage);
+    bmi_size = bitmap_info_size(info, wUsage);
 
     emr_size = sizeof (EMRSTRETCHDIBITS) + bmi_size + bits_size;
     emr = HeapAlloc(GetProcessHeap(), 0, emr_size );
@@ -254,7 +254,7 @@ INT EMFDRV_StretchDIBits( PHYSDEV dev, INT xDst, INT yDst, INT widthDst,
     return ret ? heightSrc : GDI_ERROR;
 }
 
-INT EMFDRV_SetDIBitsToDevice( 
+INT CDECL EMFDRV_SetDIBitsToDevice(
     PHYSDEV dev, INT xDst, INT yDst, DWORD width, DWORD height,
     INT xSrc, INT ySrc, UINT startscan, UINT lines,
     LPCVOID bits, const BITMAPINFO *info, UINT wUsage )
@@ -262,7 +262,7 @@ INT EMFDRV_SetDIBitsToDevice(
     EMRSETDIBITSTODEVICE* pEMR;
     DWORD size, bmiSize, bitsSize;
 
-    bmiSize = DIB_BitmapInfoSize(info, wUsage);
+    bmiSize = bitmap_info_size(info, wUsage);
     bitsSize = DIB_GetDIBImageBytes( info->bmiHeader.biWidth,
                                      info->bmiHeader.biHeight,
                                      info->bmiHeader.biBitCount );

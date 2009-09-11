@@ -26,15 +26,13 @@
 #include "msvcrt.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
-#include "msvcrt/mbctype.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 
-unsigned char MSVCRT_mbctype[257];
+unsigned char MSVCRT_mbctype[257] = { 0 };
 static int g_mbcp_is_multibyte = 0;
 
 int MSVCRT___mb_cur_max = 1;
-extern int MSVCRT___lc_collate_cp;
 
 /* It seems that the data about valid trail bytes is not available from kernel32
  * so we have to store is here. The format is the same as for lead bytes in CPINFO */
@@ -76,12 +74,12 @@ static MSVCRT_wchar_t msvcrt_mbc_to_wc(unsigned int ch)
   return chW;
 }
 
-static inline size_t u_strlen( const unsigned char *str )
+static inline MSVCRT_size_t u_strlen( const unsigned char *str )
 {
   return strlen( (const char*) str );
 }
 
-static inline unsigned char* u_strncat( unsigned char* dst, const unsigned char* src, size_t len )
+static inline unsigned char* u_strncat( unsigned char* dst, const unsigned char* src, MSVCRT_size_t len )
 {
   return (unsigned char*)strncat( (char*)dst, (const char*)src, len);
 }
@@ -96,12 +94,12 @@ static inline int u_strcasecmp( const unsigned char *s1, const unsigned char *s2
   return strcasecmp( (const char*)s1, (const char*)s2 );
 }
 
-static inline int u_strncmp( const unsigned char *s1, const unsigned char *s2, size_t len )
+static inline int u_strncmp( const unsigned char *s1, const unsigned char *s2, MSVCRT_size_t len )
 {
   return strncmp( (const char*)s1, (const char*)s2, len );
 }
 
-static inline int u_strncasecmp( const unsigned char *s1, const unsigned char *s2, size_t len )
+static inline int u_strncasecmp( const unsigned char *s1, const unsigned char *s2, MSVCRT_size_t len )
 {
   return strncasecmp( (const char*)s1, (const char*)s2, len );
 }
@@ -126,12 +124,12 @@ static inline unsigned char *u__strset( unsigned char *s, unsigned char c )
   return (unsigned char*) _strset( (char*)s, c);
 }
 
-static inline unsigned char *u__strnset( unsigned char *s, unsigned char c, size_t len )
+static inline unsigned char *u__strnset( unsigned char *s, unsigned char c, MSVCRT_size_t len )
 {
   return (unsigned char*) _strnset( (char*)s, c, len );
 }
 
-static inline size_t u_strcspn( const unsigned char *s, const unsigned char *rej )
+static inline MSVCRT_size_t u_strcspn( const unsigned char *s, const unsigned char *rej )
 {
   return strcspn( (const char *)s, (const char*)rej );
 }
@@ -145,9 +143,9 @@ unsigned char* CDECL __p__mbctype(void)
 }
 
 /*********************************************************************
- *		__p___mb_cur_max(MSVCRT.@)
+ *		___mb_cur_max_func(MSVCRT.@)
  */
-int* CDECL __p___mb_cur_max(void)
+int* CDECL MSVCRT____mb_cur_max_func(void)
 {
   return &MSVCRT___mb_cur_max;
 }
@@ -317,6 +315,42 @@ unsigned int CDECL _mbctoupper(unsigned int c)
       return c;
     }
     return toupper(c); /* ASCII CP or SB char */
+}
+
+/*********************************************************************
+ *		_mbcjistojms(MSVCRT.@)
+ *
+ *		Converts a jis character to sjis.
+ *		Based on description from
+ *		http://www.slayers.ne.jp/~oouchi/code/jistosjis.html
+ */
+unsigned int CDECL _mbcjistojms(unsigned int c)
+{
+  /* Conversion takes place only when codepage is 932.
+     In all other cases, c is returned unchanged */
+  if(MSVCRT___lc_codepage == 932)
+  {
+    if(HIBYTE(c) >= 0x21 && HIBYTE(c) <= 0x7e &&
+       LOBYTE(c) >= 0x21 && LOBYTE(c) <= 0x7e)
+    {
+      if(HIBYTE(c) % 2)
+        c += 0x1f;
+      else
+        c += 0x7d;
+
+      if(LOBYTE(c) > 0x7F)
+        c += 0x1;
+
+      c = (((HIBYTE(c) - 0x21)/2 + 0x81) << 8) | LOBYTE(c);
+
+      if(HIBYTE(c) > 0x9f)
+        c += 0x4000;
+    }
+    else
+      return 0; /* Codepage is 932, but c can't be converted */
+  }
+
+  return c;
 }
 
 /*********************************************************************

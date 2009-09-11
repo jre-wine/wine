@@ -80,6 +80,7 @@ typedef struct VfwPinImpl
 {
     OutputPin pin;
     Capture *driver_info;
+    VfwCapture *parent;
     const IKsPropertySetVtbl * KSP_VT;
 } VfwPinImpl;
 
@@ -114,7 +115,7 @@ IUnknown * WINAPI QCAP_createVFWCaptureFilter(IUnknown *pUnkOuter, HRESULT *phr)
     pVfwCapture->csFilter.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": VfwCapture.csFilter");
     hr = VfwPin_Construct((IBaseFilter *)&pVfwCapture->lpVtbl,
                    &pVfwCapture->csFilter, &pVfwCapture->pOutputPin);
-    if (!SUCCEEDED(hr))
+    if (FAILED(hr))
     {
         CoTaskMemFree(pVfwCapture);
         return NULL;
@@ -399,12 +400,18 @@ AMStreamConfig_SetFormat(IAMStreamConfig *iface, AM_MEDIA_TYPE *pmt)
     ICOM_THIS_MULTI(VfwCapture, IAMStreamConfig_vtbl, iface);
     IPinImpl *pin;
 
-    TRACE("(%p): %p->%p\n", iface, pmt, pmt->pbFormat);
+    TRACE("(%p): %p->%p\n", iface, pmt, pmt ? pmt->pbFormat : NULL);
 
     if (This->state != State_Stopped)
     {
         TRACE("Returning not stopped error\n");
         return VFW_E_NOT_STOPPED;
+    }
+
+    if (!pmt)
+    {
+        TRACE("pmt is NULL\n");
+        return E_POINTER;
     }
 
     dump_AM_MEDIA_TYPE(pmt);
@@ -496,8 +503,8 @@ static ULONG WINAPI AMVideoProcAmp_Release(IAMVideoProcAmp * iface)
 }
 
 static HRESULT WINAPI
-AMVideoProcAmp_GetRange( IAMVideoProcAmp * iface, long Property, long *pMin,
-        long *pMax, long *pSteppingDelta, long *pDefault, long *pCapsFlags )
+AMVideoProcAmp_GetRange( IAMVideoProcAmp * iface, LONG Property, LONG *pMin,
+        LONG *pMax, LONG *pSteppingDelta, LONG *pDefault, LONG *pCapsFlags )
 {
     ICOM_THIS_MULTI(VfwCapture, IAMVideoProcAmp_vtbl, iface);
 
@@ -506,8 +513,8 @@ AMVideoProcAmp_GetRange( IAMVideoProcAmp * iface, long Property, long *pMin,
 }
 
 static HRESULT WINAPI
-AMVideoProcAmp_Set( IAMVideoProcAmp * iface, long Property, long lValue,
-                    long Flags )
+AMVideoProcAmp_Set( IAMVideoProcAmp * iface, LONG Property, LONG lValue,
+                    LONG Flags )
 {
     ICOM_THIS_MULTI(VfwCapture, IAMVideoProcAmp_vtbl, iface);
 
@@ -515,8 +522,8 @@ AMVideoProcAmp_Set( IAMVideoProcAmp * iface, long Property, long lValue,
 }
 
 static HRESULT WINAPI
-AMVideoProcAmp_Get( IAMVideoProcAmp * iface, long Property, long *lValue,
-                    long *Flags )
+AMVideoProcAmp_Get( IAMVideoProcAmp * iface, LONG Property, LONG *lValue,
+                    LONG *Flags )
 {
     ICOM_THIS_MULTI(VfwCapture, IAMVideoProcAmp_vtbl, iface);
 
@@ -605,7 +612,7 @@ PPB_Load( IPersistPropertyBag * iface, IPropertyBag *pPropBag,
     TRACE("%p/%p-> (%p, %p)\n", iface, This, pPropBag, pErrorLog);
 
     V_VT(&var) = VT_I4;
-    hr = IPropertyBag_Read(pPropBag, (LPCOLESTR)VFWIndex, &var, pErrorLog);
+    hr = IPropertyBag_Read(pPropBag, VFWIndex, &var, pErrorLog);
 
     if (SUCCEEDED(hr))
     {
@@ -617,6 +624,7 @@ PPB_Load( IPersistPropertyBag * iface, IPropertyBag *pPropBag,
         {
             pin = (VfwPinImpl *)This->pOutputPin;
             pin->driver_info = This->driver_info;
+            pin->parent = This;
             This->init = TRUE;
             hr = S_OK;
         }
@@ -654,7 +662,7 @@ KSP_QueryInterface( IKsPropertySet * iface, REFIID riid, LPVOID * ppv )
     if (IsEqualIID(riid, &IID_IUnknown) ||
         IsEqualIID(riid, &IID_IKsPropertySet))
     {
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
         IKsPropertySet_AddRef( iface );
         return S_OK;
     }
@@ -780,9 +788,11 @@ static HRESULT WINAPI VfwPin_QueryInterface(IPin * iface, REFIID riid, LPVOID * 
 
     *ppv = NULL;
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IPin))
-        *ppv = (LPVOID)This;
+        *ppv = This;
     else if (IsEqualIID(riid, &IID_IKsPropertySet))
-        *ppv = (LPVOID)&(This->KSP_VT);
+        *ppv = &(This->KSP_VT);
+    else if (IsEqualIID(riid, &IID_IAMStreamConfig))
+        return IUnknown_QueryInterface((IUnknown *)This->parent, riid, ppv);
 
     if (*ppv)
     {

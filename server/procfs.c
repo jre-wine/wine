@@ -39,6 +39,9 @@
 
 #ifdef USE_PROCFS
 
+/* procfs doesn't support large files */
+# undef _FILE_OFFSET_BITS
+# define _FILE_OFFSET_BITS 32
 #include <procfs.h>
 
 static int open_proc_as( struct process *process, int flags )
@@ -46,8 +49,22 @@ static int open_proc_as( struct process *process, int flags )
     char buffer[32];
     int fd;
 
+    if (process->unix_pid == -1)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return -1;
+    }
+
     sprintf( buffer, "/proc/%u/as", process->unix_pid );
-    if ((fd = open( buffer, flags )) == -1) file_set_error();
+    if ((fd = open( buffer, flags )) == -1)
+    {
+        if (errno == ENOENT)  /* probably got killed */
+        {
+            process->unix_pid = -1;
+            set_error( STATUS_ACCESS_DENIED );
+        }
+        else file_set_error();
+    }
     return fd;
 }
 
@@ -56,8 +73,16 @@ static int open_proc_lwpctl( struct thread *thread )
     char buffer[48];
     int fd;
 
+    if (thread->unix_pid == -1) return -1;
+
     sprintf( buffer, "/proc/%u/lwp/%u/lwpctl", thread->unix_pid, thread->unix_tid );
-    if ((fd = open( buffer, O_WRONLY )) == -1) file_set_error();
+    if ((fd = open( buffer, O_WRONLY )) == -1)
+    {
+        if (errno == ENOENT)  /* probably got killed */
+            thread->unix_pid = thread->unix_tid = -1;
+        else
+            file_set_error();
+    }
     return fd;
 }
 
@@ -102,12 +127,18 @@ int send_thread_signal( struct thread *thread, int sig )
 }
 
 /* read data from a process memory space */
-int read_process_memory( struct process *process, const void *ptr, size_t size, char *dest )
+int read_process_memory( struct process *process, client_ptr_t ptr, size_t size, char *dest )
 {
     ssize_t ret;
-    int fd = open_proc_as( process, O_RDONLY );
+    int fd;
 
-    if (fd == -1) return 0;
+    if ((off_t)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+
+    if ((fd = open_proc_as( process, O_RDONLY )) == -1) return 0;
 
     ret = pread( fd, dest, size, (off_t)ptr );
     close( fd );
@@ -119,12 +150,18 @@ int read_process_memory( struct process *process, const void *ptr, size_t size, 
 }
 
 /* write data to a process memory space */
-int write_process_memory( struct process *process, void *ptr, size_t size, const char *src )
+int write_process_memory( struct process *process, client_ptr_t ptr, size_t size, const char *src )
 {
     ssize_t ret;
-    int fd = open_proc_as( process, O_WRONLY );
+    int fd;
 
-    if (fd == -1) return 0;
+    if ((off_t)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+
+    if ((fd = open_proc_as( process, O_RDONLY )) == -1) return 0;
 
     ret = pwrite( fd, src, size, (off_t)ptr );
     close( fd );
@@ -140,10 +177,15 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
                          unsigned int *limit, unsigned char *flags )
 {
     ssize_t ret;
-    off_t pos = (off_t)thread->process->ldt_copy;
-    int fd = open_proc_as( thread->process, O_RDONLY );
+    off_t pos = thread->process->ldt_copy;
+    int fd;
 
-    if (fd == -1) return;
+    if (!pos)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return;
+    }
+    if ((fd = open_proc_as( thread->process, O_RDONLY )) == -1) return;
 
     ret = pread( fd, base, sizeof(*base), pos + entry*sizeof(int) );
     if (ret != sizeof(*base)) goto error;
@@ -161,20 +203,14 @@ error:
 }
 
 /* retrieve the thread registers */
-void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
+void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
-    /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
-
     /* FIXME: get debug registers */
 }
 
 /* set the thread registers */
-void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
-    /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
-
     /* FIXME: set debug registers */
 }
 

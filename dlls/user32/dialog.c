@@ -205,7 +205,7 @@ static const WORD *DIALOG_GetControl32( const WORD *p, DLG_CONTROL_INFO *info,
     }
     else
     {
-        info->className = (LPCWSTR)p;
+        info->className = p;
         p += strlenW( info->className ) + 1;
     }
 
@@ -216,7 +216,7 @@ static const WORD *DIALOG_GetControl32( const WORD *p, DLG_CONTROL_INFO *info,
     }
     else
     {
-        info->windowName = (LPCWSTR)p;
+        info->windowName = p;
         p += strlenW( info->windowName ) + 1;
     }
 
@@ -393,7 +393,7 @@ static LPCSTR DIALOG_ParseTemplate32( LPCSTR template, DLG_TEMPLATE * result )
         TRACE(" MENU %04x\n", LOWORD(result->menuName) );
         break;
     default:
-        result->menuName = (LPCWSTR)p;
+        result->menuName = p;
         TRACE(" MENU %s\n", debugstr_w(result->menuName) );
         p += strlenW( result->menuName ) + 1;
         break;
@@ -413,7 +413,7 @@ static LPCSTR DIALOG_ParseTemplate32( LPCSTR template, DLG_TEMPLATE * result )
         TRACE(" CLASS %04x\n", LOWORD(result->className) );
         break;
     default:
-        result->className = (LPCWSTR)p;
+        result->className = p;
         TRACE(" CLASS %s\n", debugstr_w( result->className ));
         p += strlenW( result->className ) + 1;
         break;
@@ -421,7 +421,7 @@ static LPCSTR DIALOG_ParseTemplate32( LPCSTR template, DLG_TEMPLATE * result )
 
     /* Get the window caption */
 
-    result->caption = (LPCWSTR)p;
+    result->caption = p;
     p += strlenW( result->caption ) + 1;
     TRACE(" CAPTION %s\n", debugstr_w( result->caption ) );
 
@@ -436,16 +436,33 @@ static LPCSTR DIALOG_ParseTemplate32( LPCSTR template, DLG_TEMPLATE * result )
     {
         result->pointSize = GET_WORD(p);
         p++;
-        if (result->dialogEx)
+
+        /* If pointSize is 0x7fff, it means that we need to use the font
+         * in NONCLIENTMETRICSW.lfMessageFont, and NOT read the weight,
+         * italic, and facename from the dialog template.
+         */
+        if (result->pointSize == 0x7fff)
         {
-            result->weight = GET_WORD(p); p++;
-            result->italic = LOBYTE(GET_WORD(p)); p++;
+            /* We could call SystemParametersInfo here, but then we'd have
+             * to convert from pixel size to point size (which can be
+             * imprecise).
+             */
+            TRACE(" FONT: Using message box font\n");
         }
-        result->faceName = (LPCWSTR)p;
-        p += strlenW( result->faceName ) + 1;
-        TRACE(" FONT %d, %s, %d, %s\n",
-              result->pointSize, debugstr_w( result->faceName ),
-              result->weight, result->italic ? "TRUE" : "FALSE" );
+        else
+        {
+            if (result->dialogEx)
+            {
+                result->weight = GET_WORD(p); p++;
+                result->italic = LOBYTE(GET_WORD(p)); p++;
+            }
+            result->faceName = p;
+            p += strlenW( result->faceName ) + 1;
+
+            TRACE(" FONT %d, %s, %d, %s\n",
+                  result->pointSize, debugstr_w( result->faceName ),
+                  result->weight, result->italic ? "TRUE" : "FALSE" );
+        }
     }
 
     /* First control is on dword boundary */
@@ -492,16 +509,31 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
 
     if (template.style & DS_SETFONT)
     {
-          /* We convert the size to pixels and then make it -ve.  This works
-           * for both +ve and -ve template.pointSize */
-        HDC dc;
-        int pixels;
-        dc = GetDC(0);
-        pixels = MulDiv(template.pointSize, GetDeviceCaps(dc , LOGPIXELSY), 72);
-        hUserFont = CreateFontW( -pixels, 0, 0, 0, template.weight,
-                                          template.italic, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
-                                          PROOF_QUALITY, FF_DONTCARE,
-                                          template.faceName );
+        HDC dc = GetDC(0);
+
+        if (template.pointSize == 0x7fff)
+        {
+            /* We get the message font from the non-client metrics */
+            NONCLIENTMETRICSW ncMetrics;
+
+            ncMetrics.cbSize = sizeof(NONCLIENTMETRICSW);
+            if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,
+                                      sizeof(NONCLIENTMETRICSW), &ncMetrics, 0))
+            {
+                hUserFont = CreateFontIndirectW( &ncMetrics.lfMessageFont );
+            }
+        }
+        else
+        {
+            /* We convert the size to pixels and then make it -ve.  This works
+             * for both +ve and -ve template.pointSize */
+            int pixels = MulDiv(template.pointSize, GetDeviceCaps(dc , LOGPIXELSY), 72);
+            hUserFont = CreateFontW( -pixels, 0, 0, 0, template.weight,
+                                              template.italic, FALSE, FALSE, DEFAULT_CHARSET, 0, 0,
+                                              PROOF_QUALITY, FF_DONTCARE,
+                                              template.faceName );
+        }
+
         if (hUserFont)
         {
             SIZE charSize;
@@ -642,7 +674,7 @@ static HWND DIALOG_CreateIndirect( HINSTANCE hInst, LPCVOID dlgTemplate,
     dlgInfo->hMenu       = hMenu;
     dlgInfo->xBaseUnit   = xBaseUnit;
     dlgInfo->yBaseUnit   = yBaseUnit;
-    dlgInfo->idResult    = 0;
+    dlgInfo->idResult    = IDOK;
     dlgInfo->flags       = flags;
     dlgInfo->hDialogHeap = 0;
 
@@ -694,7 +726,7 @@ HWND WINAPI CreateDialogParamA( HINSTANCE hInst, LPCSTR name, HWND owner,
     LPCDLGTEMPLATEA ptr;
 
     if (!(hrsrc = FindResourceA( hInst, name, (LPSTR)RT_DIALOG ))) return 0;
-    if (!(ptr = (LPCDLGTEMPLATEA)LoadResource(hInst, hrsrc))) return 0;
+    if (!(ptr = LoadResource(hInst, hrsrc))) return 0;
     return CreateDialogIndirectParamA( hInst, ptr, owner, dlgProc, param );
 }
 
@@ -709,7 +741,7 @@ HWND WINAPI CreateDialogParamW( HINSTANCE hInst, LPCWSTR name, HWND owner,
     LPCDLGTEMPLATEA ptr;
 
     if (!(hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG ))) return 0;
-    if (!(ptr = (LPCDLGTEMPLATEW)LoadResource(hInst, hrsrc))) return 0;
+    if (!(ptr = LoadResource(hInst, hrsrc))) return 0;
     return CreateDialogIndirectParamW( hInst, ptr, owner, dlgProc, param );
 }
 
@@ -777,7 +809,7 @@ INT DIALOG_DoDialogBox( HWND hwnd, HWND owner )
                 if (!GetMessageW( &msg, 0, 0, 0 )) break;
             }
 
-            if (!IsWindow( hwnd )) return -1;
+            if (!IsWindow( hwnd )) return 0;
             if (!(dlgInfo->flags & DF_END) && !IsDialogMessageW( hwnd, &msg))
             {
                 TranslateMessage( &msg );
@@ -804,7 +836,7 @@ INT_PTR WINAPI DialogBoxParamA( HINSTANCE hInst, LPCSTR name,
     LPCDLGTEMPLATEA ptr;
 
     if (!(hrsrc = FindResourceA( hInst, name, (LPSTR)RT_DIALOG ))) return -1;
-    if (!(ptr = (LPCDLGTEMPLATEA)LoadResource(hInst, hrsrc))) return -1;
+    if (!(ptr = LoadResource(hInst, hrsrc))) return -1;
     hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, FALSE, TRUE );
     if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
     return 0;
@@ -822,7 +854,7 @@ INT_PTR WINAPI DialogBoxParamW( HINSTANCE hInst, LPCWSTR name,
     LPCDLGTEMPLATEW ptr;
 
     if (!(hrsrc = FindResourceW( hInst, name, (LPWSTR)RT_DIALOG ))) return -1;
-    if (!(ptr = (LPCDLGTEMPLATEW)LoadResource(hInst, hrsrc))) return -1;
+    if (!(ptr = LoadResource(hInst, hrsrc))) return -1;
     hwnd = DIALOG_CreateIndirect( hInst, ptr, owner, dlgProc, param, TRUE, TRUE );
     if (hwnd) return DIALOG_DoDialogBox( hwnd, owner );
     return 0;
@@ -1085,7 +1117,7 @@ BOOL WINAPI IsDialogMessageW( HWND hwndDlg, LPMSG msg )
     if (CallMsgFilterW( msg, MSGF_DIALOGBOX )) return TRUE;
 
     hwndDlg = WIN_GetFullHandle( hwndDlg );
-    if (hwndDlg == GetDesktopWindow()) return FALSE;
+    if (is_desktop_window(hwndDlg)) return FALSE;
     if ((hwndDlg != msg->hwnd) && !IsChild( hwndDlg, msg->hwnd )) return FALSE;
 
     hwndDlg = DIALOG_FindMsgDestination(hwndDlg);

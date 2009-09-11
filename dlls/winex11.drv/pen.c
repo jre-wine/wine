@@ -28,7 +28,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
 /***********************************************************************
  *           SelectPen   (X11DRV.@)
  */
-HPEN X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
+HPEN CDECL X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
 {
     static const char PEN_dash[]          = { 16,8 };
     static const char PEN_dot[]           = { 4,4 };
@@ -71,7 +71,7 @@ HPEN X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
     physDev->pen.linejoin = logpen.lopnStyle & PS_JOIN_MASK;
 
     physDev->pen.width = logpen.lopnWidth.x;
-    if ((logpen.lopnStyle & PS_GEOMETRIC) || (physDev->pen.width > 1))
+    if ((logpen.lopnStyle & PS_GEOMETRIC) || (physDev->pen.width >= 1))
     {
         physDev->pen.width = X11DRV_XWStoDS( physDev, physDev->pen.width );
         if (physDev->pen.width < 0) physDev->pen.width = -physDev->pen.width;
@@ -126,7 +126,7 @@ HPEN X11DRV_SelectPen( X11DRV_PDEVICE *physDev, HPEN hpen )
 /***********************************************************************
  *           SetDCPenColor (X11DRV.@)
  */
-COLORREF X11DRV_SetDCPenColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
+COLORREF CDECL X11DRV_SetDCPenColor( X11DRV_PDEVICE *physDev, COLORREF crColor )
 {
     if (GetCurrentObject(physDev->hdc, OBJ_PEN) == GetStockObject( DC_PEN ))
         physDev->pen.pixel = X11DRV_PALETTE_ToPhysical( physDev, crColor );

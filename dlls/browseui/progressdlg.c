@@ -78,7 +78,7 @@ static void set_buffer(LPWSTR *buffer, LPCWSTR string)
 {
     static const WCHAR empty_string[] = {0};
     IMalloc *malloc;
-    int cb;
+    ULONG cb;
 
     if (string == NULL)
         string = empty_string;
@@ -115,7 +115,7 @@ static void set_progress_marquee(ProgressDialog *This)
         GetWindowLongW(hProgress, GWL_STYLE)|PBS_MARQUEE);
 }
 
-void update_dialog(ProgressDialog *This, DWORD dwUpdate)
+static void update_dialog(ProgressDialog *This, DWORD dwUpdate)
 {
     WCHAR empty[] = {0};
 
@@ -223,7 +223,7 @@ static DWORD WINAPI dialog_thread(LPVOID lpParameter)
 {
     /* Note: until we set the hEvent in WM_INITDIALOG, the ProgressDialog object
      * is protected by the critical section held by StartProgress */
-    struct create_params *params = (struct create_params *)lpParameter;
+    struct create_params *params = lpParameter;
     HWND hwnd;
     MSG msg;
 
@@ -323,8 +323,9 @@ static HRESULT WINAPI ProgressDialog_StartProgressDialog(IProgressDialog *iface,
 
     hThread = CreateThread(NULL, 0, dialog_thread, &params, 0, NULL);
     WaitForSingleObject(params.hEvent, INFINITE);
-
+    CloseHandle(params.hEvent);
     CloseHandle(hThread);
+
     This->hwndDisabledParent = NULL;
     if (hwndParent && (dwFlags & PROGDLG_MODAL))
     {

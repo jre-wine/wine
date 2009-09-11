@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "xcopy.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -30,7 +32,7 @@ STRINGTABLE
     STRING_PAUSE,    "Za začetek kopiranja pritisnite <enter>\n"
     STRING_SIMCOPY,  "Prekopiral bom %d datotek\n"
     STRING_COPY,     "Prekopiral sem %d datotek\n"
-    STRING_QISDIR,   "Ali je '%s' ime ciljne datoteke \n" \
+    STRING_QISDIR,   "Ali je '%s' ime ciljne datoteke\n" \
                      "ali mape?\n" \
                      "(D - Datoteka, M - Mapa)\n"
     STRING_SRCPROMPT,"%s? (Da|Ne)\n"
@@ -48,12 +50,12 @@ STRINGTABLE
 "XCOPY - kopira navedene izvorne datoteke oz. mape v naveden cilj\n\
 \n\
 Sintaksa:\n\
-XCOPY izvor [cilj] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U] \n\
+XCOPY izvor [cilj] [/I] [/S] [/Q] [/F] [/L] [/W] [/T] [/N] [/U]\n\
 \t     [/R] [/H] [/C] [/P] [/A] [/M] [/E] [/D] [/Y] [/-Y]\n\
 \n\
 Where:\n\
 \n\
-[/I]  Če cilj ne obstaja in gre za kopiranje dveh ali več datotek, predpostavi, \n\
+[/I]  Če cilj ne obstaja in gre za kopiranje dveh ali več datotek, predpostavi,\n\
 \da je cilj mapa\n\
 [/S]  Kopiraj mape in podmape\n\
 [/E]  Kopiraj mape in podmape, vključno s praznimi mapami\n\
@@ -78,5 +80,3 @@ Where:\n\
 \t\tod izvora\n\n"
 
 }
-
-#pragma code_page(default)

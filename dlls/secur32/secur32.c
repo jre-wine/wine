@@ -32,6 +32,7 @@
 #include "secext.h"
 #include "ntsecapi.h"
 #include "thunks.h"
+#include "lmcons.h"
 
 #include "wine/list.h"
 #include "wine/debug.h"
@@ -104,8 +105,8 @@ static SecurityFunctionTableA securityFunctionTableA = {
     VerifySignature,
     FreeContextBuffer,
     QuerySecurityPackageInfoA,
-    NULL, /* Reserved3 */
-    NULL, /* Reserved4 */
+    EncryptMessage, /* Reserved3 */
+    DecryptMessage, /* Reserved4 */
     ExportSecurityContext,
     ImportSecurityContextA,
     AddCredentialsA,
@@ -135,8 +136,8 @@ static SecurityFunctionTableW securityFunctionTableW = {
     VerifySignature,
     FreeContextBuffer,
     QuerySecurityPackageInfoW,
-    NULL, /* Reserved3 */
-    NULL, /* Reserved4 */
+    EncryptMessage, /* Reserved3 */
+    DecryptMessage, /* Reserved4 */
     ExportSecurityContext,
     ImportSecurityContextW,
     AddCredentialsW,
@@ -163,7 +164,7 @@ PSecurityFunctionTableW WINAPI InitSecurityInterfaceW(void)
     return &securityFunctionTableW;
 }
 
-PWSTR SECUR32_strdupW(PCWSTR str)
+static PWSTR SECUR32_strdupW(PCWSTR str)
 {
     PWSTR ret;
 
@@ -419,10 +420,10 @@ SecureProvider *SECUR32_addProvider(const SecurityFunctionTableA *fnTableA,
 
     if (fnTableA || fnTableW)
     {
-        ret->moduleName = NULL;
+        ret->moduleName = moduleName ? SECUR32_strdupW(moduleName) : NULL;
         _makeFnTableA(&ret->fnTableA, fnTableA, fnTableW);
         _makeFnTableW(&ret->fnTableW, fnTableA, fnTableW);
-        ret->loaded = TRUE;
+        ret->loaded = moduleName ? FALSE : TRUE;
     }
     else
     {
@@ -505,9 +506,19 @@ static void _tryLoadProvider(PWSTR moduleName)
             if (pInitSecurityInterfaceW)
                 fnTableW = pInitSecurityInterfaceW();
             if (fnTableW && fnTableW->EnumerateSecurityPackagesW)
-                ret = fnTableW->EnumerateSecurityPackagesW(&toAdd, &infoW);
+            {
+                if (fnTableW != &securityFunctionTableW)
+                    ret = fnTableW->EnumerateSecurityPackagesW(&toAdd, &infoW);
+                else
+                    TRACE("%s has built-in providers, skip adding\n", debugstr_w(moduleName));
+            }
             else if (fnTableA && fnTableA->EnumerateSecurityPackagesA)
-                ret = fnTableA->EnumerateSecurityPackagesA(&toAdd, &infoA);
+            {
+                if (fnTableA != &securityFunctionTableA)
+                    ret = fnTableA->EnumerateSecurityPackagesA(&toAdd, &infoA);
+                else
+                    TRACE("%s has built-in providers, skip adding\n", debugstr_w(moduleName));
+            }
             if (ret == SEC_E_OK && toAdd > 0 && (infoW || infoA))
             {
                 SecureProvider *provider = SECUR32_addProvider(NULL, NULL,
@@ -546,13 +557,11 @@ static void SECUR32_initializeProviders(void)
     cs.DebugInfo->Spare[0] = (DWORD_PTR)(__FILE__ ": cs");
     /* First load built-in providers */
     SECUR32_initSchannelSP();
-    /* Do not load Negotiate yet. This breaks for some user on the wine-users
-     * mailing list as of 2006-09-12. Without Negotiate, applications should
-     * fall back to NTLM and that should work.*/
-#if 0
-    SECUR32_initNegotiateSP();
-#endif
     SECUR32_initNTLMSP();
+    /* Load the Negotiate provider last so apps stumble over the working NTLM
+     * provider first. Attempting to fix bug #16905 while keeping the
+     * application reported on wine-users on 2006-09-12 working. */
+    SECUR32_initNegotiateSP();
     /* Now load providers from registry */
     apiRet = RegOpenKeyExW(HKEY_LOCAL_MACHINE, securityProvidersKeyW, 0,
      KEY_READ, &key);
@@ -624,8 +633,11 @@ SecurePackage *SECUR32_findPackageW(PCWSTR packageName)
                     fnTableA = pInitSecurityInterfaceA();
                 if (pInitSecurityInterfaceW)
                     fnTableW = pInitSecurityInterfaceW();
-                _makeFnTableA(&ret->provider->fnTableA, fnTableA, fnTableW);
-                _makeFnTableW(&ret->provider->fnTableW, fnTableA, fnTableW);
+                /* don't update built-in SecurityFunctionTable */
+                if (fnTableA != &securityFunctionTableA)
+                    _makeFnTableA(&ret->provider->fnTableA, fnTableA, fnTableW);
+                if (fnTableW != &securityFunctionTableW)
+                    _makeFnTableW(&ret->provider->fnTableW, fnTableA, fnTableW);
                 ret->provider->loaded = TRUE;
             }
             else
@@ -659,6 +671,8 @@ static void SECUR32_freeProviders(void)
 
     TRACE("\n");
     EnterCriticalSection(&cs);
+
+    SECUR32_deinitSchannelSP();
 
     if (packageTable)
     {
@@ -969,10 +983,10 @@ BOOLEAN WINAPI GetComputerObjectNameW(
         case NameSamCompatible:
             {
                 WCHAR name[MAX_COMPUTERNAME_LENGTH + 1];
-                DWORD size = sizeof(name);
+                DWORD size = sizeof(name)/sizeof(name[0]);
                 if (GetComputerNameW(name, &size))
                 {
-                    int len = domainInfo->Name.Length + size + 3;
+                    DWORD len = domainInfo->Name.Length + size + 3;
                     if (lpNameBuffer)
                     {
                         if (*nSize < len)
@@ -1040,15 +1054,97 @@ BOOLEAN WINAPI GetComputerObjectNameW(
 BOOLEAN WINAPI GetUserNameExA(
   EXTENDED_NAME_FORMAT NameFormat, LPSTR lpNameBuffer, PULONG nSize)
 {
-    FIXME("%d %p %p\n", NameFormat, lpNameBuffer, nSize);
-    return FALSE;
+    BOOLEAN rc;
+    LPWSTR bufferW = NULL;
+    ULONG sizeW = *nSize;
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
+    if (lpNameBuffer) {
+        bufferW = HeapAlloc(GetProcessHeap(), 0, sizeW * sizeof(WCHAR));
+        if (bufferW == NULL) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return FALSE;
+        }
+    }
+    rc = GetUserNameExW(NameFormat, bufferW, &sizeW);
+    if (rc) {
+        ULONG len = WideCharToMultiByte(CP_ACP, 0, bufferW, -1, NULL, 0, NULL, NULL);
+        if (len <= *nSize)
+        {
+            WideCharToMultiByte(CP_ACP, 0, bufferW, -1, lpNameBuffer, *nSize, NULL, NULL);
+            *nSize = len - 1;
+        }
+        else
+        {
+            *nSize = len;
+            rc = FALSE;
+            SetLastError(ERROR_MORE_DATA);
+        }
+    }
+    else
+        *nSize = sizeW;
+    HeapFree(GetProcessHeap(), 0, bufferW);
+    return rc;
 }
 
 BOOLEAN WINAPI GetUserNameExW(
   EXTENDED_NAME_FORMAT NameFormat, LPWSTR lpNameBuffer, PULONG nSize)
 {
-    FIXME("%d %p %p\n", NameFormat, lpNameBuffer, nSize);
-    return FALSE;
+    BOOLEAN status;
+    WCHAR samname[UNLEN + 1 + MAX_COMPUTERNAME_LENGTH + 1];
+    LPWSTR out;
+    DWORD len;
+    TRACE("(%d %p %p)\n", NameFormat, lpNameBuffer, nSize);
+
+    switch (NameFormat)
+    {
+    case NameSamCompatible:
+        {
+            /* This assumes the current user is always a local account */
+            len = MAX_COMPUTERNAME_LENGTH + 1;
+            if (GetComputerNameW(samname, &len))
+            {
+                out = samname + lstrlenW(samname);
+                *out++ = '\\';
+                len = UNLEN + 1;
+                if (GetUserNameW(out, &len))
+                {
+                    status = (lstrlenW(samname) < *nSize);
+                    if (status)
+                    {
+                        lstrcpyW(lpNameBuffer, samname);
+                        *nSize = lstrlenW(samname);
+                    }
+                    else
+                    {
+                        SetLastError(ERROR_MORE_DATA);
+                        *nSize = lstrlenW(samname) + 1;
+                    }
+                }
+                else
+                    status = FALSE;
+            }
+            else
+                status = FALSE;
+        }
+        break;
+    case NameUnknown:
+    case NameFullyQualifiedDN:
+    case NameDisplay:
+    case NameUniqueId:
+    case NameCanonical:
+    case NameUserPrincipal:
+    case NameCanonicalEx:
+    case NameServicePrincipal:
+    case NameDnsDomain:
+        SetLastError(ERROR_NONE_MAPPED);
+        status = FALSE;
+        break;
+    default:
+        SetLastError(ERROR_INVALID_PARAMETER);
+        status = FALSE;
+    }
+
+    return status;
 }
 
 BOOLEAN WINAPI TranslateNameA(

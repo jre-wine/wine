@@ -132,7 +132,7 @@ static LPFMINFO FM_SetMenuParameter(
 static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 {	IShellFolder	*lpsf, *lpsf2;
 	ULONG		ulItemAttr = SFGAO_FOLDER;
-	UINT		uID, uFlags, uEnumFlags;
+	UINT		uID, uEnumFlags;
 	LPFNFMCALLBACK	lpfnCallback;
 	LPCITEMIDLIST	pidl;
 	WCHAR		sTemp[MAX_PATH];
@@ -164,7 +164,6 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 	  return 0;
 
 	uID = menudata->uID;
-	uFlags = menudata->uFlags;
 	uEnumFlags = menudata->uEnumFlags;
 	lpfnCallback = menudata->lpfnCallback;
 	menudata->bInitialized = FALSE;
@@ -173,7 +172,7 @@ static int FM_InitMenuPopup(HMENU hmenu, LPCITEMIDLIST pAlternatePidl)
 
 	if (SUCCEEDED (SHGetDesktopFolder(&lpsf)))
 	{
-	  if (SUCCEEDED(IShellFolder_BindToObject(lpsf, pidl,0,(REFIID)&IID_IShellFolder,(LPVOID *)&lpsf2)))
+	  if (SUCCEEDED(IShellFolder_BindToObject(lpsf, pidl,0,&IID_IShellFolder,(LPVOID *)&lpsf2)))
 	  {
 	    IEnumIDList	*lpe = NULL;
 
@@ -331,7 +330,7 @@ static BOOL FileMenu_AppendItemW(
 	if (lpText != FM_SEPARATOR)
 	{
 	  int len = strlenW (lpText);
-	  myItem = (LPFMITEM) SHAlloc( sizeof(FMITEM) + len*sizeof(WCHAR));
+          myItem = SHAlloc(sizeof(FMITEM) + len*sizeof(WCHAR));
 	  strcpyW (myItem->szItemText, lpText);
 	  myItem->cchItemText = len;
 	  myItem->iIconIndex = icon;
@@ -593,7 +592,7 @@ LRESULT WINAPI FileMenu_DrawItem(
 	COLORREF clrPrevText, clrPrevBkgnd;
 	int xi,yi,xt,yt;
 	HIMAGELIST hImageList;
-	RECT TextRect, BorderRect;
+	RECT TextRect;
 	LPFMINFO menuinfo;
 
 	TRACE("%p %p %s\n", hWnd, lpdis, debugstr_w(pMyItem->szItemText));
@@ -616,9 +615,6 @@ LRESULT WINAPI FileMenu_DrawItem(
 	if (menuinfo->nBorderWidth)
 	  TextRect.left += menuinfo->nBorderWidth;
 
-	BorderRect.right = menuinfo->nBorderWidth;
-/*	FillRect(lpdis->hDC, &BorderRect, CreateSolidBrush( menuinfo->crBorderColor));
-*/
 	TextRect.left += FM_LEFTBORDER;
 	xi = TextRect.left + FM_SPACE1;
 	yi = TextRect.top + FM_Y_SPACE/2;

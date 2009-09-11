@@ -132,7 +132,7 @@ static void create_system_registry_keys( const SYSTEM_INFO *info )
     if (NtCreateKey( &system_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL )) return;
 
     RtlInitUnicodeString( &valueW, IdentifierW );
-    NtSetValueKey( system_key, &valueW, 0, REG_SZ, SysidW, (strlenW(SysidW)+1) * sizeof(WCHAR) );
+    NtSetValueKey( system_key, &valueW, 0, REG_SZ, SysidW, sizeof(SysidW) );
 
     attr.RootDirectory = system_key;
     RtlInitUnicodeString( &nameW, fpuW );
@@ -151,6 +151,7 @@ static void create_system_registry_keys( const SYSTEM_INFO *info )
             if (!NtCreateKey( &hkey, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ))
             {
                 WCHAR idW[60];
+                DWORD sizeW;
                 DWORD cpuMHz = cpuHz / 1000000;
 
                 /*TODO: report 64bit processors properly*/
@@ -158,12 +159,12 @@ static void create_system_registry_keys( const SYSTEM_INFO *info )
                 sprintf( id, "x86 Family %d Model %d Stepping %d",
                          info->wProcessorLevel, HIBYTE(info->wProcessorRevision), LOBYTE(info->wProcessorRevision) );
 
-                RtlMultiByteToUnicodeN( idW, sizeof(idW), NULL, id, strlen(id)+1 );
-                NtSetValueKey( hkey, &valueW, 0, REG_SZ, idW, (strlenW(idW)+1)*sizeof(WCHAR) );
+                RtlMultiByteToUnicodeN( idW, sizeof(idW), &sizeW, id, strlen(id)+1 );
+                NtSetValueKey( hkey, &valueW, 0, REG_SZ, idW, sizeW );
 
                 /*TODO; report amd's properly*/
                 RtlInitUnicodeString( &valueW, VendorIdentifierW );
-                NtSetValueKey( hkey, &valueW, 0, REG_SZ, VenidIntelW, (strlenW(VenidIntelW)+1) * sizeof(WCHAR) );
+                NtSetValueKey( hkey, &valueW, 0, REG_SZ, VenidIntelW, sizeof(VenidIntelW) );
 
                 RtlInitUnicodeString( &valueW, mhzKeyW );
                 NtSetValueKey( hkey, &valueW, 0, REG_DWORD, &cpuMHz, sizeof(DWORD) );
@@ -194,6 +195,7 @@ static void create_env_registry_keys( const SYSTEM_INFO *info )
     HANDLE env_key;
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW, valueW;
+    DWORD sizeW;
 
     char nProc[10],id[60],procLevel[10],rev[10];
     WCHAR nProcW[10],idW[60],procLevelW[10],revW[10];
@@ -214,31 +216,31 @@ static void create_env_registry_keys( const SYSTEM_INFO *info )
     if (NtCreateKey( &env_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL )) return;
 
     sprintf( nProc, "%d", info->dwNumberOfProcessors );
-    RtlMultiByteToUnicodeN( nProcW, sizeof(nProcW), NULL, nProc, strlen(nProc)+1 );
+    RtlMultiByteToUnicodeN( nProcW, sizeof(nProcW), &sizeW, nProc, strlen(nProc)+1 );
     RtlInitUnicodeString( &valueW, NumProcW );
-    NtSetValueKey( env_key, &valueW, 0, REG_SZ, nProcW, (strlenW(nProcW)+1)*sizeof(WCHAR) );
+    NtSetValueKey( env_key, &valueW, 0, REG_SZ, nProcW, sizeW );
 
     /* TODO: currently hardcoded x86, add different processors */
     RtlInitUnicodeString( &valueW, ProcArchW );
-    NtSetValueKey( env_key, &valueW, 0, REG_SZ, x86W, (strlenW(x86W)+1) * sizeof(WCHAR) );
+    NtSetValueKey( env_key, &valueW, 0, REG_SZ, x86W, sizeof(x86W) );
 
     /* TODO: currently hardcoded Intel, add different processors */
     sprintf( id, "x86 Family %d Model %d Stepping %d, GenuineIntel",
         info->wProcessorLevel, HIBYTE(info->wProcessorRevision), LOBYTE(info->wProcessorRevision) );
-    RtlMultiByteToUnicodeN( idW, sizeof(idW), NULL, id, strlen(id)+1 );
+    RtlMultiByteToUnicodeN( idW, sizeof(idW), &sizeW, id, strlen(id)+1 );
     RtlInitUnicodeString( &valueW, ProcIdW );
-    NtSetValueKey( env_key, &valueW, 0, REG_SZ, idW, (strlenW(idW)+1)*sizeof(WCHAR) );
+    NtSetValueKey( env_key, &valueW, 0, REG_SZ, idW, sizeW );
 
     sprintf( procLevel, "%d", info->wProcessorLevel );
-    RtlMultiByteToUnicodeN( procLevelW, sizeof(procLevelW), NULL, procLevel, strlen(procLevel)+1 );
+    RtlMultiByteToUnicodeN( procLevelW, sizeof(procLevelW), &sizeW, procLevel, strlen(procLevel)+1 );
     RtlInitUnicodeString( &valueW, ProcLvlW );
-    NtSetValueKey( env_key, &valueW, 0, REG_SZ, procLevelW, (strlenW(procLevelW)+1)*sizeof(WCHAR) );
+    NtSetValueKey( env_key, &valueW, 0, REG_SZ, procLevelW, sizeW );
 
     /* Properly report model/stepping */
     sprintf( rev, "%04x", info->wProcessorRevision);
-    RtlMultiByteToUnicodeN( revW, sizeof(revW), NULL, rev, strlen(rev)+1 );
+    RtlMultiByteToUnicodeN( revW, sizeof(revW), &sizeW, rev, strlen(rev)+1 );
     RtlInitUnicodeString( &valueW, ProcRevW );
-    NtSetValueKey( env_key, &valueW, 0, REG_SZ, revW, (strlenW(revW)+1)*sizeof(WCHAR) );
+    NtSetValueKey( env_key, &valueW, 0, REG_SZ, revW, sizeW );
 
     NtClose( env_key );
 }
@@ -367,6 +369,7 @@ VOID WINAPI GetSystemInfo(
 {
 	static int cache = 0;
 	static SYSTEM_INFO cachedsi;
+        SYSTEM_BASIC_INFORMATION sbi;
 
 	TRACE("si=0x%p\n", si);
 	if (cache) {
@@ -375,19 +378,19 @@ VOID WINAPI GetSystemInfo(
 	}
 	memset(PF,0,sizeof(PF));
 
+        NtQuerySystemInformation( SystemBasicInformation, &sbi, sizeof(sbi), NULL );
+        cachedsi.dwPageSize                  = sbi.PageSize;
+        cachedsi.lpMinimumApplicationAddress = sbi.LowestUserAddress;
+        cachedsi.lpMaximumApplicationAddress = sbi.HighestUserAddress;
+        cachedsi.dwNumberOfProcessors        = sbi.ActiveProcessors;
+        cachedsi.dwAllocationGranularity     = sbi.AllocationGranularity;
+
 	/* choose sensible defaults ...
 	 * FIXME: perhaps overridable with precompiler flags?
 	 */
 	cachedsi.u.s.wProcessorArchitecture     = PROCESSOR_ARCHITECTURE_INTEL;
-	cachedsi.dwPageSize 			= getpagesize();
-
-	/* FIXME: the two entries below should be computed somehow... */
-	cachedsi.lpMinimumApplicationAddress	= (void *)0x00010000;
-	cachedsi.lpMaximumApplicationAddress	= (void *)0x7FFEFFFF;
 	cachedsi.dwActiveProcessorMask		= 0;
-	cachedsi.dwNumberOfProcessors		= 1;
 	cachedsi.dwProcessorType		= PROCESSOR_INTEL_PENTIUM;
-	cachedsi.dwAllocationGranularity	= 0x10000;
 	cachedsi.wProcessorLevel		= 5; /* 586 */
 	cachedsi.wProcessorRevision		= 0;
 
@@ -544,7 +547,8 @@ VOID WINAPI GetSystemInfo(
 #elif defined (__NetBSD__)
         {
              int mib[2];
-             int value[2];
+             int value;
+             size_t val_len;
              char model[256];
              char *cpuclass;
              FILE *f = fopen ("/var/run/dmesg.boot", "r");
@@ -553,33 +557,32 @@ VOID WINAPI GetSystemInfo(
              mib[0] = CTL_MACHDEP;
 #ifdef CPU_FPU_PRESENT
              mib[1] = CPU_FPU_PRESENT;
-             value[1] = sizeof(int);
-             if (sysctl(mib, 2, value, value+1, NULL, 0) >= 0)
-                 if (value) PF[PF_FLOATING_POINT_EMULATED] = FALSE;
-                 else       PF[PF_FLOATING_POINT_EMULATED] = TRUE;
+             val_len = sizeof(value);
+             if (sysctl(mib, 2, &value, &val_len, NULL, 0) >= 0)
+                 PF[PF_FLOATING_POINT_EMULATED] = !value;
 #endif
 #ifdef CPU_SSE
              mib[1] = CPU_SSE;   /* this should imply MMX */
-             value[1] = sizeof(int);
-             if (sysctl(mib, 2, value, value+1, NULL, 0) >= 0)
+             val_len = sizeof(value);
+             if (sysctl(mib, 2, &value, &val_len, NULL, 0) >= 0)
                  if (value) PF[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
 #endif
 #ifdef CPU_SSE2
              mib[1] = CPU_SSE2;  /* this should imply MMX */
-             value[1] = sizeof(int);
-             if (sysctl(mib, 2, value, value+1, NULL, 0) >= 0)
+             val_len = sizeof(value);
+             if (sysctl(mib, 2, &value, &val_len, NULL, 0) >= 0)
                  if (value) PF[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
 #endif
              mib[0] = CTL_HW;
              mib[1] = HW_NCPU;
-             value[1] = sizeof(int);
-             if (sysctl(mib, 2, value, value+1, NULL, 0) >= 0)
-                 if (value[0] > cachedsi.dwNumberOfProcessors)
-                    cachedsi.dwNumberOfProcessors = value[0];
+             val_len = sizeof(value);
+             if (sysctl(mib, 2, &value, &val_len, NULL, 0) >= 0)
+                 if (value > cachedsi.dwNumberOfProcessors)
+                    cachedsi.dwNumberOfProcessors = value;
              mib[1] = HW_MODEL;
-             value[1] = 255;
-             if (sysctl(mib, 2, model, value+1, NULL, 0) >= 0) {
-                  model[value[1]] = '\0'; /* just in case */
+             val_len = sizeof(model)-1;
+             if (sysctl(mib, 2, model, &val_len, NULL, 0) >= 0) {
+                  model[val_len] = '\0'; /* just in case */
                   cpuclass = strstr(model, "-class");
                   if (cpuclass != NULL) {
                        while(cpuclass > model && cpuclass[0] != '(') cpuclass--;
@@ -611,16 +614,17 @@ VOID WINAPI GetSystemInfo(
              if (f != NULL)
              {
 	         while (fgets(model, 255, f) != NULL) {
-                        if (sscanf(model,"cpu%d: features %x<", value, value+1) == 2) {
+                        int cpu, features;
+                        if (sscanf(model,"cpu%d: features %x<", &cpu, &features) == 2) {
                             /* we could scan the string but it is easier
                                to test the bits directly */
-                            if (value[1] & 0x1)
+                            if (features & 0x1)
                                 PF[PF_FLOATING_POINT_EMULATED] = TRUE;
-                            if (value[1] & 0x10)
+                            if (features & 0x10)
                                 PF[PF_RDTSC_INSTRUCTION_AVAILABLE] = TRUE;
-                            if (value[1] & 0x100)
+                            if (features & 0x100)
                                 PF[PF_COMPARE_EXCHANGE_DOUBLE] = TRUE;
-                            if (value[1] & 0x800000)
+                            if (features & 0x800000)
                                 PF[PF_MMX_INSTRUCTIONS_AVAILABLE] = TRUE;
 
                             break;
@@ -633,7 +637,7 @@ VOID WINAPI GetSystemInfo(
 #elif defined(__FreeBSD__)
 	{
 	int ret, num;
-	unsigned len;
+	size_t len;
 
         get_cpuinfo( &cachedsi );
 
@@ -678,7 +682,7 @@ VOID WINAPI GetSystemInfo(
 
 	valSize = sizeof(int);
 	if (sysctlbyname ("hw.activecpu", &value, &valSize, NULL, 0) == 0)
-	    cachedsi.dwActiveProcessorMask = (1 << value) - 1;
+	    cachedsi.dwActiveProcessorMask = ((ULONG_PTR)1 << value) - 1;
 
 	valSize = sizeof(int);
 	if (sysctlbyname ("hw.cputype", &cputype, &valSize, NULL, 0) == 0)
@@ -777,12 +781,12 @@ VOID WINAPI GetSystemInfo(
 	FIXME("not yet supported on this system\n");
 #endif
         if (!cachedsi.dwActiveProcessorMask)
-            cachedsi.dwActiveProcessorMask = (1 << cachedsi.dwNumberOfProcessors) - 1;
+            cachedsi.dwActiveProcessorMask = ((ULONG_PTR)1 << cachedsi.dwNumberOfProcessors) - 1;
 
         *si = cachedsi;
 
         TRACE("<- CPU arch %d, res'd %d, pagesize %d, minappaddr %p, maxappaddr %p,"
-              " act.cpumask %08x, numcpus %d, CPU type %d, allocgran. %d, CPU level %d, CPU rev %d\n",
+              " act.cpumask %lx, numcpus %d, CPU type %d, allocgran. %d, CPU level %d, CPU rev %d\n",
               si->u.s.wProcessorArchitecture, si->u.s.wReserved, si->dwPageSize,
               si->lpMinimumApplicationAddress, si->lpMaximumApplicationAddress,
               si->dwActiveProcessorMask, si->dwNumberOfProcessors, si->dwProcessorType,

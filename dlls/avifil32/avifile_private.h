@@ -1,5 +1,5 @@
 /*
- * Copyright 2002 Michael Günnewig
+ * Copyright 2002 Michael GÃ¼nnewig
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -18,6 +18,9 @@
 
 #ifndef __AVIFILE_PRIVATE_H
 #define __AVIFILE_PRIVATE_H
+
+#include <windef.h>
+#include <winuser.h>
 
 #ifndef MAX_AVISTREAMS
 #define MAX_AVISTREAMS 8

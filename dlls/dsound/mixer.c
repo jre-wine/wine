@@ -240,6 +240,8 @@ void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len
 			i, offset, event->hEventNotify);
 		/* DSBPN_OFFSETSTOP has to be the last element. So this is */
 		/* OK. [Inside DirectX, p274] */
+		/* Windows does not seem to enforce this, and some apps rely */
+		/* on that, so we can't stop there. */
 		/*  */
 		/* This also means we can't sort the entries by offset, */
 		/* because DSBPN_OFFSETSTOP == -1 */
@@ -247,9 +249,8 @@ void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len
 			if (dsb->state == STATE_STOPPED) {
 				SetEvent(event->hEventNotify);
 				TRACE("signalled event %p (%d)\n", event->hEventNotify, i);
-				return;
-			} else
-				return;
+			}
+                        continue;
 		}
 		if ((playpos + len) >= dsb->buflen) {
 			if ((offset < ((playpos + len) % dsb->buflen)) ||
@@ -270,26 +271,27 @@ void DSOUND_CheckEvent(const IDirectSoundBufferImpl *dsb, DWORD playpos, int len
  * Copy a single frame from the given input buffer to the given output buffer.
  * Translate 8 <-> 16 bits and mono <-> stereo
  */
-static inline void cp_fields(const IDirectSoundBufferImpl *dsb, const BYTE *ibuf, BYTE *obuf )
+static inline void cp_fields(const IDirectSoundBufferImpl *dsb, const BYTE *ibuf, BYTE *obuf,
+        UINT istride, UINT ostride, UINT count, UINT freqAcc, UINT adj)
 {
     DirectSoundDevice *device = dsb->device;
     INT istep = dsb->pwfx->wBitsPerSample / 8, ostep = device->pwfx->wBitsPerSample / 8;
 
     if (device->pwfx->nChannels == dsb->pwfx->nChannels) {
-        dsb->convert(ibuf, obuf);
+        dsb->convert(ibuf, obuf, istride, ostride, count, freqAcc, adj);
         if (device->pwfx->nChannels == 2)
-            dsb->convert(ibuf + istep, obuf + ostep);
+            dsb->convert(ibuf + istep, obuf + ostep, istride, ostride, count, freqAcc, adj);
     }
 
     if (device->pwfx->nChannels == 1 && dsb->pwfx->nChannels == 2)
     {
-        dsb->convert(ibuf, obuf);
+        dsb->convert(ibuf, obuf, istride, ostride, count, freqAcc, adj);
     }
 
     if (device->pwfx->nChannels == 2 && dsb->pwfx->nChannels == 1)
     {
-        dsb->convert(ibuf, obuf);
-        dsb->convert(ibuf, obuf + ostep);
+        dsb->convert(ibuf, obuf, istride, ostride, count, freqAcc, adj);
+        dsb->convert(ibuf, obuf + ostep, istride, ostride, count, freqAcc, adj);
     }
 }
 
@@ -323,7 +325,7 @@ static inline DWORD DSOUND_BufPtrDiff(DWORD buflen, DWORD ptr1, DWORD ptr2)
  */
 void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DWORD len, BOOL inmixer)
 {
-	INT	i, size;
+	INT	size;
 	BYTE	*ibp, *obp, *obp_begin;
 	INT	iAdvance = dsb->pwfx->nBlockAlign;
 	INT	oAdvance = dsb->device->pwfx->nBlockAlign;
@@ -355,6 +357,7 @@ void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DW
 		obp_begin = dsb->device->tmp_buffer;
 
 	TRACE("(%p, %p)\n", dsb, ibp);
+	size = len / iAdvance;
 
 	/* Check for same sample rate */
 	if (dsb->freq == dsb->device->pwfx->nSamplesPerSec) {
@@ -364,17 +367,12 @@ void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DW
 		if (!inmixer)
 			 obp += writepos/iAdvance*oAdvance;
 
-		for (i = 0; i < len; i += iAdvance) {
-			cp_fields(dsb, ibp, obp);
-			ibp += iAdvance;
-			obp += oAdvance;
-		}
+		cp_fields(dsb, ibp, obp, iAdvance, oAdvance, size, 0, 1 << DSOUND_FREQSHIFT);
 		return;
 	}
 
 	/* Mix in different sample rates */
 	TRACE("(%p) Adjusting frequency: %d -> %d\n", dsb, dsb->freq, dsb->device->pwfx->nSamplesPerSec);
-	size = len / iAdvance;
 
 	target_writepos = DSOUND_secpos_to_bufpos(dsb, writepos, dsb->sec_mixpos, &freqAcc);
 	overshot = freqAcc >> DSOUND_FREQSHIFT;
@@ -396,17 +394,7 @@ void DSOUND_MixToTemporary(const IDirectSoundBufferImpl *dsb, DWORD writepos, DW
 	else obp = obp_begin;
 
 	/* FIXME: Small problem here when we're overwriting buf_mixpos, it then STILL uses old freqAcc, not sure if it matters or not */
-	while (size > 0) {
-		cp_fields(dsb, ibp, obp);
-		obp += oAdvance;
-		freqAcc += dsb->freqAdjust;
-		if (freqAcc >= (1<<DSOUND_FREQSHIFT)) {
-			ULONG adv = (freqAcc>>DSOUND_FREQSHIFT);
-			freqAcc &= (1<<DSOUND_FREQSHIFT)-1;
-			ibp += adv * iAdvance;
-			size -= adv;
-		}
-	}
+	cp_fields(dsb, ibp, obp, iAdvance, oAdvance, size, freqAcc, dsb->freqAdjust);
 }
 
 /** Apply volume to the given soundbuffer from (primary) position writepos and length len
@@ -469,7 +457,7 @@ static LPBYTE DSOUND_MixerVol(const IDirectSoundBufferImpl *dsb, INT len)
 	case 8:
 		/* 8-bit WAV is unsigned, but we need to operate */
 		/* on signed data for this to work properly */
-		for (i = 0; i < len; i+=2) {
+		for (i = 0; i < len-1; i+=2) {
 			*(bpc++) = (((*(mem++) - 128) * vLeft) >> 16) + 128;
 			*(bpc++) = (((*(mem++) - 128) * vRight) >> 16) + 128;
 		}
@@ -478,7 +466,7 @@ static LPBYTE DSOUND_MixerVol(const IDirectSoundBufferImpl *dsb, INT len)
 		break;
 	case 16:
 		/* 16-bit WAV is signed -- much better */
-		for (i = 0; i < len; i += 4) {
+		for (i = 0; i < len-3; i += 4) {
 			*(bps++) = (*(mems++) * vLeft) >> 16;
 			*(bps++) = (*(mems++) * vRight) >> 16;
 		}
@@ -825,8 +813,32 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 
 		mixplaypos = DSOUND_bufpos_to_mixpos(device, device->playpos);
 		mixplaypos2 = DSOUND_bufpos_to_mixpos(device, playpos);
-		/* wipe out just-played sound data */
-		if (playpos < device->playpos) {
+
+		/* calc maximum prebuff */
+		prebuff_max = (device->prebuf * device->fraglen);
+		if (!device->hwbuf && playpos + prebuff_max >= device->helfrags * device->fraglen)
+			prebuff_max += device->buflen - device->helfrags * device->fraglen;
+
+		/* check how close we are to an underrun. It occurs when the writepos overtakes the mixpos */
+		prebuff_left = DSOUND_BufPtrDiff(device->buflen, device->mixpos, playpos);
+		writelead = DSOUND_BufPtrDiff(device->buflen, writepos, playpos);
+
+		/* check for underrun. underrun occurs when the write position passes the mix position
+		 * also wipe out just-played sound data */
+		if((prebuff_left > prebuff_max) || (device->state == STATE_STOPPED) || (device->state == STATE_STARTING)){
+			if (device->state == STATE_STOPPING || device->state == STATE_PLAYING)
+				WARN("Probable buffer underrun\n");
+			else TRACE("Buffer starting or buffer underrun\n");
+
+			/* recover mixing for all buffers */
+			recover = TRUE;
+
+			/* reset mix position to write position */
+			device->mixpos = writepos;
+
+			ZeroMemory(device->mix_buffer, device->mix_buffer_len);
+			ZeroMemory(device->buffer, device->buflen);
+		} else if (playpos < device->playpos) {
 			buf1 = device->buffer + device->playpos;
 			buf2 = device->buffer;
 			size1 = device->buflen - device->playpos;
@@ -860,33 +872,11 @@ static void DSOUND_PerformMix(DirectSoundDevice *device)
 		}
 		device->playpos = playpos;
 
-		/* calc maximum prebuff */
-		prebuff_max = (device->prebuf * device->fraglen);
-		if (!device->hwbuf && playpos + prebuff_max >= device->helfrags * device->fraglen)
-			prebuff_max += device->buflen - device->helfrags * device->fraglen;
-
-		/* check how close we are to an underrun. It occurs when the writepos overtakes the mixpos */
-		prebuff_left = DSOUND_BufPtrDiff(device->buflen, device->mixpos, playpos);
-		writelead = DSOUND_BufPtrDiff(device->buflen, writepos, playpos);
-
 		/* find the maximum we can prebuffer from current write position */
 		maxq = (writelead < prebuff_max) ? (prebuff_max - writelead) : 0;
 
 		TRACE("prebuff_left = %d, prebuff_max = %dx%d=%d, writelead=%d\n",
 			prebuff_left, device->prebuf, device->fraglen, prebuff_max, writelead);
-
-		/* check for underrun. underrun occurs when the write position passes the mix position */
-		if((prebuff_left > prebuff_max) || (device->state == STATE_STOPPED) || (device->state == STATE_STARTING)){
-			if (device->state == STATE_STOPPING || device->state == STATE_PLAYING)
-				WARN("Probable buffer underrun\n");
-			else TRACE("Buffer starting or buffer underrun\n");
-
-			/* recover mixing for all buffers */
-			recover = TRUE;
-
-			/* reset mix position to write position */
-			device->mixpos = writepos;
-		}
 
 		/* Do we risk an 'underrun' if we don't advance pointer? */
 		if (writelead/device->fraglen <= ds_snd_queue_min || recover)
@@ -1022,10 +1012,10 @@ void CALLBACK DSOUND_timer(UINT timerID, UINT msg, DWORD_PTR dwUser,
 	TRACE("completed processing at %d, duration = %d\n", end_time, end_time - start_time);
 }
 
-void CALLBACK DSOUND_callback(HWAVEOUT hwo, UINT msg, DWORD dwUser, DWORD dw1, DWORD dw2)
+void CALLBACK DSOUND_callback(HWAVEOUT hwo, UINT msg, DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
 {
 	DirectSoundDevice * device = (DirectSoundDevice*)dwUser;
-	TRACE("(%p,%x,%x,%x,%x)\n",hwo,msg,dwUser,dw1,dw2);
+	TRACE("(%p,%x,%lx,%lx,%lx)\n",hwo,msg,dwUser,dw1,dw2);
 	TRACE("entering at %d, msg=%08x(%s)\n", GetTickCount(), msg,
 		msg==MM_WOM_DONE ? "MM_WOM_DONE" : msg==MM_WOM_CLOSE ? "MM_WOM_CLOSE" : 
 		msg==MM_WOM_OPEN ? "MM_WOM_OPEN" : "UNKNOWN");

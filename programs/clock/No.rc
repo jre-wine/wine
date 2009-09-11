@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "clock_res.h"
+
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
 MAIN_MENU MENU 
@@ -26,7 +28,7 @@ MAIN_MENU MENU
   MENUITEM "Ana&log", IDM_ANALOG
   MENUITEM "Digi&tal", IDM_DIGITAL
   MENUITEM SEPARATOR
-  MENUITEM "Skri&ft . . .", IDM_FONT
+  MENUITEM "Skri&ft...", IDM_FONT
   MENUITEM SEPARATOR
   MENUITEM "&Uten tittellinje", IDM_NOTITLE
   MENUITEM SEPARATOR
@@ -36,9 +38,9 @@ MAIN_MENU MENU
   MENUITEM "&Alltid øverst", IDM_ONTOP
  }
  POPUP "Inf&ormasjon" {
-  MENUITEM "&Lisens . . .", IDM_LICENSE
-  MENUITEM "I&NGEN GARANTI . . .", IDM_NOWARRANTY
-  MENUITEM "&Om Klokke . . .", IDM_ABOUT
+  MENUITEM "&Lisens...", IDM_LICENSE
+  MENUITEM "I&NGEN GARANTI...", IDM_NOWARRANTY
+  MENUITEM "&Om Klokke...", IDM_ABOUT
  }
 }
 

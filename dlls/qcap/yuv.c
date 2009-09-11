@@ -24,6 +24,7 @@
 #include <stdarg.h>
 
 #include "windef.h"
+#include "wingdi.h"
 #include "objbase.h"
 #include "strmif.h"
 #include "qcap_main.h"
@@ -67,21 +68,21 @@ void YUV_Init(void) {
    for (y_ = 0; y_ <= 255; y_++)
    {
       y = ((float) 255 / 219) * (y_ - 16);
-      yuv_xy[y_] = ValidRange((int) (y));
+      yuv_xy[y_] = y;
    }
 
    for (cb = 0; cb <= 255; cb++)
    {
       u = ((float) 255 / 224) * (cb - 128);
-      yuv_gu[cb] = - ValidRange((int) (0.344 * u));
-      yuv_bu[cb] =   ValidRange((int) (1.772 * u));
+      yuv_gu[cb] = -0.344 * u;
+      yuv_bu[cb] =  1.772 * u;
    }
 
    for (cr = 0; cr <= 255; cr++)
    {
       v = ((float) 255 / 224) * (cr - 128);
-      yuv_rv[cr] =   ValidRange((int) (1.402 * v));
-      yuv_gv[cr] = - ValidRange((int) (0.714 * v));
+      yuv_rv[cr] =  1.402 * v;
+      yuv_gv[cr] = -0.714 * v;
    }
    TRACE("Filled hash table\n");
 }
@@ -140,14 +141,13 @@ static void Parse_PYUV(unsigned char *destbuffer, const unsigned char *input, in
    /* We have 3 pointers, One to Y, one to Cb and 1 to Cr */
 
 /* C19 *89* declaration block (Grr julliard for not allowing C99) */
-   int uvjump, ysize, uvsize;
+   int ysize, uvsize;
    const unsigned char *pY, *pCb, *pCr;
    int swstep = 0, shstep = 0;
    int ypos = 0, xpos = 0;
    int indexUV = 0, cUv;
 /* End of Grr */
 
-   uvjump = width / wstep;
    ysize = width * height;
    uvsize = (width / wstep) * (height / hstep);
    pY = input;

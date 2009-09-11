@@ -5,7 +5,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = ntdll.dll
 IMPORTLIB = ntdll
-EXTRALIBS = @IOKITLIB@
+EXTRALIBS = @IOKITLIB@ @LIBPTHREAD@
 EXTRADLLFLAGS = -Wl,--image-base,0x7bc00000
 
 C_SRCS = \
@@ -29,6 +29,7 @@ C_SRCS = \
 	nt.c \
 	om.c \
 	path.c \
+	printf.c \
 	process.c \
 	reg.c \
 	relay.c \

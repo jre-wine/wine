@@ -3,7 +3,7 @@
  *
  * Copyright 2002-2003 Jason Edmeades
  * Copyright 2002-2003 Raphael Junqueira
- * Copyright 2005 Oliver Stieber 
+ * Copyright 2005 Oliver Stieber
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -36,7 +36,7 @@
 #include "wine/unicode.h"
 
 #include "d3d9.h"
-#include "wine/wined3d_interface.h"
+#include "wine/wined3d.h"
 
 /* ===========================================================================
    Internal use
@@ -44,7 +44,8 @@
 extern HRESULT vdecl_convert_fvf(
     DWORD FVF,
     D3DVERTEXELEMENT9** ppVertexElements);
-extern CRITICAL_SECTION d3d9_cs;
+D3DFORMAT d3dformat_from_wined3dformat(WINED3DFORMAT format);
+WINED3DFORMAT wined3dformat_from_d3dformat(D3DFORMAT format);
 
 /* ===========================================================================
     Macros
@@ -167,6 +168,7 @@ void filter_caps(D3DCAPS9* pCaps);
  * Predeclare the interface implementation structures
  */
 extern const IDirect3DDevice9ExVtbl Direct3DDevice9_Vtbl;
+extern const IWineD3DDeviceParentVtbl d3d9_wined3d_device_parent_vtbl;
 
 /*****************************************************************************
  * IDirect3DDevice9 implementation structure
@@ -175,6 +177,7 @@ typedef struct IDirect3DDevice9Impl
 {
     /* IUnknown fields */
     const IDirect3DDevice9ExVtbl   *lpVtbl;
+    const IWineD3DDeviceParentVtbl *device_parent_vtbl;
     LONG                          ref;
 
     /* IDirect3DDevice9 fields */
@@ -191,7 +194,6 @@ typedef struct IDirect3DDevice9Impl
 
 
 /* IDirect3DDevice9: */
-extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetDirect3D(LPDIRECT3DDEVICE9EX iface, IDirect3D9** ppD3D9);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_CreateAdditionalSwapChain(LPDIRECT3DDEVICE9EX iface, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DSwapChain9** pSwapChain);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetSwapChain(LPDIRECT3DDEVICE9EX iface, UINT iSwapChain, IDirect3DSwapChain9** pSwapChain);
 extern UINT     WINAPI  IDirect3DDevice9Impl_GetNumberOfSwapChains(LPDIRECT3DDEVICE9EX iface);
@@ -206,8 +208,6 @@ extern HRESULT  WINAPI  IDirect3DDevice9Impl_EndStateBlock(LPDIRECT3DDEVICE9EX i
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_CreateVertexDeclaration(LPDIRECT3DDEVICE9EX iface, CONST D3DVERTEXELEMENT9* pVertexElements, IDirect3DVertexDeclaration9** ppDecl);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetVertexDeclaration(LPDIRECT3DDEVICE9EX iface, IDirect3DVertexDeclaration9* pDecl);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetVertexDeclaration(LPDIRECT3DDEVICE9EX iface, IDirect3DVertexDeclaration9** ppDecl);
-extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetFVF(LPDIRECT3DDEVICE9EX iface, DWORD FVF);
-extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetFVF(LPDIRECT3DDEVICE9EX iface, DWORD* pFVF);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_CreateVertexShader(LPDIRECT3DDEVICE9EX iface, CONST DWORD* pFunction, IDirect3DVertexShader9** ppShader);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetVertexShader(LPDIRECT3DDEVICE9EX iface, IDirect3DVertexShader9* pShader);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetVertexShader(LPDIRECT3DDEVICE9EX iface, IDirect3DVertexShader9** ppShader);
@@ -217,8 +217,6 @@ extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetVertexShaderConstantI(LPDIRECT3D
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetVertexShaderConstantI(LPDIRECT3DDEVICE9EX iface, UINT StartRegister, int* pConstantData, UINT Vector4iCount);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetVertexShaderConstantB(LPDIRECT3DDEVICE9EX iface, UINT StartRegister, CONST BOOL* pConstantData, UINT BoolCount);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetVertexShaderConstantB(LPDIRECT3DDEVICE9EX iface, UINT StartRegister, BOOL* pConstantData, UINT BoolCount);
-extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetStreamSource(LPDIRECT3DDEVICE9EX iface, UINT StreamNumber, IDirect3DVertexBuffer9* pStreamData, UINT OffsetInBytes, UINT Stride);
-extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetStreamSource(LPDIRECT3DDEVICE9EX iface, UINT StreamNumber, IDirect3DVertexBuffer9** ppStreamData, UINT* OffsetInBytes, UINT* pStride);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_CreatePixelShader(LPDIRECT3DDEVICE9EX iface, CONST DWORD* pFunction, IDirect3DPixelShader9** ppShader);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_SetPixelShader(LPDIRECT3DDEVICE9EX iface, IDirect3DPixelShader9* pShader);
 extern HRESULT  WINAPI  IDirect3DDevice9Impl_GetPixelShader(LPDIRECT3DDEVICE9EX iface, IDirect3DPixelShader9** ppShader);
@@ -238,6 +236,7 @@ extern HRESULT  WINAPI  IDirect3DDevice9Impl_CreateQuery(LPDIRECT3DDEVICE9EX ifa
 /*****************************************************************************
  * IDirect3DVolume9 implementation structure
  */
+extern const IDirect3DVolume9Vtbl Direct3DVolume9_Vtbl;
 typedef struct IDirect3DVolume9Impl
 {
     /* IUnknown fields */
@@ -276,26 +275,6 @@ typedef struct IDirect3DSwapChain9Impl
     /* Flags an implicit swap chain */
     BOOL                        isImplicit;
 } IDirect3DSwapChain9Impl;
-
-/* ------------------ */
-/* IDirect3DResource9 */
-/* ------------------ */
-
-/*****************************************************************************
- * IDirect3DResource9 implementation structure
- */
-typedef struct IDirect3DResource9Impl
-{
-    /* IUnknown fields */
-    const IDirect3DResource9Vtbl *lpVtbl;
-    LONG                    ref;
-
-    /* IDirect3DResource9 fields */
-    IWineD3DResource       *wineD3DResource;
-} IDirect3DResource9Impl;
-
-extern HRESULT  WINAPI        IDirect3DResource9Impl_GetDevice(LPDIRECT3DRESOURCE9 iface, IDirect3DDevice9** ppDevice);
-
 
 /* ----------------- */
 /* IDirect3DSurface9 */
@@ -345,10 +324,12 @@ typedef struct IDirect3DVertexBuffer9Impl
     LONG                    ref;
 
     /* IDirect3DResource9 fields */
-    IWineD3DVertexBuffer   *wineD3DVertexBuffer;
+    IWineD3DBuffer *wineD3DVertexBuffer;
 
     /* Parent reference */
     LPDIRECT3DDEVICE9EX       parentDevice;
+
+    DWORD fvf;
 } IDirect3DVertexBuffer9Impl;
 
 /* --------------------- */
@@ -365,10 +346,11 @@ typedef struct IDirect3DIndexBuffer9Impl
     LONG                    ref;
 
     /* IDirect3DResource9 fields */
-    IWineD3DIndexBuffer    *wineD3DIndexBuffer;
+    IWineD3DBuffer         *wineD3DIndexBuffer;
 
     /* Parent reference */
     LPDIRECT3DDEVICE9EX       parentDevice;
+    WINED3DFORMAT             format;
 } IDirect3DIndexBuffer9Impl;
 
 /* --------------------- */
@@ -386,10 +368,7 @@ typedef struct IDirect3DBaseTexture9Impl
 
     /* IDirect3DResource9 fields */
     IWineD3DBaseTexture    *wineD3DBaseTexture;
-    
 } IDirect3DBaseTexture9Impl;
-
-extern DWORD    WINAPI        IDirect3DBaseTexture9Impl_GetLOD(LPDIRECT3DBASETEXTURE9 iface);
 
 /* --------------------- */
 /* IDirect3DCubeTexture9 */
@@ -516,6 +495,8 @@ typedef struct IDirect3DVertexShader9Impl {
   LPDIRECT3DDEVICE9EX parentDevice;
 } IDirect3DVertexShader9Impl;
 
+#define D3D9_MAX_VERTEX_SHADER_CONSTANTF 256
+
 /* --------------------- */
 /* IDirect3DPixelShader9 */
 /* --------------------- */
@@ -556,34 +537,10 @@ typedef struct IDirect3DQuery9Impl {
 
 
 /* Callbacks */
-extern HRESULT WINAPI D3D9CB_CreateSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
-                                         WINED3DFORMAT Format, DWORD Usage, WINED3DPOOL Pool, UINT Level,
-                                         WINED3DCUBEMAP_FACES Face, IWineD3DSurface** ppSurface,
-                                         HANDLE* pSharedHandle);
-
-extern HRESULT WINAPI D3D9CB_CreateVolume(IUnknown  *pDevice, IUnknown *pSuperior, UINT Width, UINT Height, UINT Depth,
-                                          WINED3DFORMAT  Format, WINED3DPOOL Pool, DWORD Usage,
-                                          IWineD3DVolume **ppVolume,
-                                          HANDLE   * pSharedHandle);
-
-extern HRESULT WINAPI D3D9CB_CreateDepthStencilSurface(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
-                                         WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
-                                         DWORD MultisampleQuality, BOOL Discard,
-                                         IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
-
-extern HRESULT WINAPI D3D9CB_CreateRenderTarget(IUnknown *device, IUnknown *pSuperior, UINT Width, UINT Height,
-                                         WINED3DFORMAT Format, WINED3DMULTISAMPLE_TYPE MultiSample,
-                                         DWORD MultisampleQuality, BOOL Lockable,
-                                         IWineD3DSurface** ppSurface, HANDLE* pSharedHandle);
-
 extern ULONG WINAPI D3D9CB_DestroySwapChain (IWineD3DSwapChain *pSwapChain);
-
 extern ULONG WINAPI D3D9CB_DestroyDepthStencilSurface (IWineD3DSurface *pSurface);
-
 extern ULONG WINAPI D3D9CB_DestroyRenderTarget (IWineD3DSurface *pSurface);
-
 extern ULONG WINAPI D3D9CB_DestroySurface(IWineD3DSurface *pSurface);
-
 extern ULONG WINAPI D3D9CB_DestroyVolume(IWineD3DVolume *pVolume);
 
 #endif /* __WINE_D3D9_PRIVATE_H */

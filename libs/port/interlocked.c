@@ -40,7 +40,11 @@ __ASM_GLOBAL_FUNC(interlocked_cmpxchg_ptr,
                   "ret")
  __ASM_GLOBAL_FUNC(interlocked_cmpxchg64,
                    "push %ebx\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebx,0\n\t")
                    "push %esi\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %esi,0\n\t")
                    "movl 12(%esp),%esi\n\t"
                    "movl 16(%esp),%ebx\n\t"
                    "movl 20(%esp),%ecx\n\t"
@@ -48,7 +52,11 @@ __ASM_GLOBAL_FUNC(interlocked_cmpxchg_ptr,
                    "movl 28(%esp),%edx\n\t"
                    "lock; cmpxchg8b (%esi)\n\t"
                    "pop %esi\n\t"
+                   __ASM_CFI(".cfi_same_value %esi\n\t")
+                   __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
                    "pop %ebx\n\t"
+                   __ASM_CFI(".cfi_same_value %ebx\n\t")
+                   __ASM_CFI(".cfi_adjust_cfa_offset -4\n\t")
                    "ret")
 __ASM_GLOBAL_FUNC(interlocked_xchg,
                   "movl 8(%esp),%eax\n\t"
@@ -131,8 +139,6 @@ __declspec(naked) int interlocked_xchg_add( int *dest, int incr )
 
 #elif defined(__x86_64__)
 
-#ifdef __GNUC__
-
 __ASM_GLOBAL_FUNC(interlocked_cmpxchg,
                   "mov %edx, %eax\n\t"
                   "lock cmpxchgl %esi,(%rdi)\n\t"
@@ -157,10 +163,23 @@ __ASM_GLOBAL_FUNC(interlocked_xchg_add,
                   "mov %esi, %eax\n\t"
                   "lock xaddl %eax, (%rdi)\n\t"
                   "ret")
-
-#else
-# error You must implement the interlocked* functions for your compiler
-#endif
+__ASM_GLOBAL_FUNC(interlocked_cmpxchg128,
+                  "push %rbx\n\t"
+                   ".cfi_adjust_cfa_offset 8\n\t"
+                   ".cfi_rel_offset %rbx,0\n\t"
+                  "mov %rcx,%r8\n\t"  /* compare */
+                  "mov %rdx,%rbx\n\t" /* xchg_low */
+                  "mov %rsi,%rcx\n\t" /* xchg_high */
+                  "mov 0(%r8),%rax\n\t"
+                  "mov 8(%r8),%rdx\n\t"
+                  "lock cmpxchg16b (%rdi)\n\t"
+                  "mov %rax,0(%r8)\n\t"
+                  "mov %rdx,8(%r8)\n\t"
+                  "setz %al\n\t"
+                  "pop %rbx\n\t"
+                   ".cfi_adjust_cfa_offset -8\n\t"
+                   ".cfi_same_value %rbx\n\t"
+                  "ret")
 
 #elif defined(__powerpc__)
 void* interlocked_cmpxchg_ptr( void **dest, void* xchg, void* compare)
@@ -242,7 +261,7 @@ void* interlocked_xchg_ptr( void** dest, void* val )
     __asm__ __volatile__(
         "0:    lwarx %0,0,%1\n"
         "      stwcx. %2,0,%1\n"
-        "      bne- 0b \n"
+        "      bne- 0b\n"
         "      isync\n"
         : "=&r"(ret)
         : "r"(dest), "r"(val)

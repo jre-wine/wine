@@ -199,7 +199,7 @@ static struct line *find_line( struct inf_file *file, int section_index, const W
 {
     struct section *section;
     struct line *line;
-    int i;
+    unsigned int i;
 
     if (section_index < 0 || section_index >= file->nb_sections) return NULL;
     section = file->sections[section_index];
@@ -365,8 +365,8 @@ static const WCHAR *get_string_subst( const struct inf_file *file, const WCHAR *
 /* do string substitutions on the specified text */
 /* the buffer is assumed to be large enough */
 /* returns necessary length not including terminating null */
-unsigned int PARSER_string_substW( const struct inf_file *file, const WCHAR *text, WCHAR *buffer,
-                                   unsigned int size )
+static unsigned int PARSER_string_substW( const struct inf_file *file, const WCHAR *text,
+                                          WCHAR *buffer, unsigned int size )
 {
     const WCHAR *start, *subst, *p;
     unsigned int len, total = 0;
@@ -778,7 +778,7 @@ static const WCHAR *eol_backslash_state( struct parser *parser, const WCHAR *pos
 /* handler for parser QUOTES state */
 static const WCHAR *quotes_state( struct parser *parser, const WCHAR *pos )
 {
-    const WCHAR *p, *token_end = parser->start;
+    const WCHAR *p;
 
     for (p = pos; !is_eol( parser, p ); p++)
     {
@@ -787,7 +787,7 @@ static const WCHAR *quotes_state( struct parser *parser, const WCHAR *pos )
             if (p+1 < parser->end && p[1] == '"')  /* double quotes */
             {
                 push_token( parser, p + 1 );
-                parser->start = token_end = p + 2;
+                parser->start = p + 2;
                 p++;
             }
             else  /* end of quotes */
@@ -982,7 +982,7 @@ static struct inf_file *parse_file( HANDLE handle, const WCHAR *class, DWORD sty
     }
     else
     {
-        WCHAR *new_buff = (WCHAR *)buffer;
+        WCHAR *new_buff = buffer;
         /* UCS-16 files should start with the Unicode BOM; we should skip it */
         if (*new_buff == 0xfeff)
             new_buff++;
@@ -1158,7 +1158,7 @@ HINF WINAPI SetupOpenInfFileW( PCWSTR name, PCWSTR class, DWORD style, UINT *err
     TRACE( "%s -> %p\n", debugstr_w(path), file );
     file->filename = path;
     SetLastError( 0 );
-    return (HINF)file;
+    return file;
 }
 
 
@@ -1241,6 +1241,75 @@ void WINAPI SetupCloseInfFile( HINF hinf )
     HeapFree( GetProcessHeap(), 0, file->fields );
     HeapFree( GetProcessHeap(), 0, file->strings );
     HeapFree( GetProcessHeap(), 0, file );
+}
+
+
+/***********************************************************************
+ *            SetupEnumInfSectionsA   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupEnumInfSectionsA( HINF hinf, UINT index, PSTR buffer, DWORD size, DWORD *need )
+{
+    struct inf_file *file = hinf;
+
+    for (file = hinf; file; file = file->next)
+    {
+        if (index < file->nb_sections)
+        {
+            DWORD len = WideCharToMultiByte( CP_ACP, 0, file->sections[index]->name, -1,
+                                             NULL, 0, NULL, NULL );
+            if (need) *need = len;
+            if (!buffer)
+            {
+                if (!size) return TRUE;
+                SetLastError( ERROR_INVALID_USER_BUFFER );
+                return FALSE;
+            }
+            if (len > size)
+            {
+                SetLastError( ERROR_INSUFFICIENT_BUFFER );
+                return FALSE;
+            }
+            WideCharToMultiByte( CP_ACP, 0, file->sections[index]->name, -1, buffer, size, NULL, NULL );
+            return TRUE;
+        }
+        index -= file->nb_sections;
+    }
+    SetLastError( ERROR_NO_MORE_ITEMS );
+    return FALSE;
+}
+
+
+/***********************************************************************
+ *            SetupEnumInfSectionsW   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupEnumInfSectionsW( HINF hinf, UINT index, PWSTR buffer, DWORD size, DWORD *need )
+{
+    struct inf_file *file = hinf;
+
+    for (file = hinf; file; file = file->next)
+    {
+        if (index < file->nb_sections)
+        {
+            DWORD len = strlenW( file->sections[index]->name ) + 1;
+            if (need) *need = len;
+            if (!buffer)
+            {
+                if (!size) return TRUE;
+                SetLastError( ERROR_INVALID_USER_BUFFER );
+                return FALSE;
+            }
+            if (len > size)
+            {
+                SetLastError( ERROR_INSUFFICIENT_BUFFER );
+                return FALSE;
+            }
+            memcpy( buffer, file->sections[index]->name, len * sizeof(WCHAR) );
+            return TRUE;
+        }
+        index -= file->nb_sections;
+    }
+    SetLastError( ERROR_NO_MORE_ITEMS );
+    return FALSE;
 }
 
 

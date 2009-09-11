@@ -30,7 +30,9 @@
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 
 #include "windef.h"
 #include "winbase.h"
@@ -169,8 +171,7 @@ BOOL TRASH_CanTrashFile(LPCWSTR wszPath)
 static BOOL try_create_trashinfo_file(const char *info_dir, const char *file_name,
     const char *original_file_name)
 {
-    struct tm curr_time;
-    time_t curr_time_secs;
+    SYSTEMTIME curr_time;
     char datebuf[200];
     char *path = SHAlloc(strlen(info_dir)+strlen(file_name)+strlen(trashinfo_suffix)+1);
     int writer = -1;
@@ -184,16 +185,11 @@ static BOOL try_create_trashinfo_file(const char *info_dir, const char *file_nam
     write(writer, trashinfo_header, strlen(trashinfo_header));
     if (!XDG_WriteDesktopStringEntry(writer, "Path", XDG_URLENCODE, original_file_name))
         goto error;
-    
-    time(&curr_time_secs);
-    localtime_r(&curr_time_secs, &curr_time);
+
+    GetLocalTime( &curr_time );
     wnsprintfA(datebuf, 200, "%04d-%02d-%02dT%02d:%02d:%02d",
-        curr_time.tm_year+1900,
-        curr_time.tm_mon+1,
-        curr_time.tm_mday,
-        curr_time.tm_hour,
-        curr_time.tm_min,
-        curr_time.tm_sec);
+               curr_time.wYear, curr_time.wMonth, curr_time.wDay,
+               curr_time.wHour, curr_time.wMinute, curr_time.wSecond);
     if (!XDG_WriteDesktopStringEntry(writer, "DeletionDate", 0, datebuf))
         goto error;
     close(writer);
@@ -219,7 +215,7 @@ static char *create_trashinfo(const char *info_dir, const char *file_path)
 {
     const char *base_name;
     char *filename_buffer;
-    unsigned int seed = (unsigned int)time(NULL);
+    ULONG seed = GetTickCount();
     int i;
 
     errno = ENOMEM;       /* out-of-memory is the only case when errno isn't set */
@@ -244,7 +240,7 @@ static char *create_trashinfo(const char *info_dir, const char *file_path)
     
     for (i=0; i<1000; i++)
     {
-        sprintf(filename_buffer, "%s-%08x", base_name, rand_r(&seed));
+        sprintf(filename_buffer, "%s-%08x", base_name, RtlRandom(&seed));
         if (try_create_trashinfo_file(info_dir, filename_buffer, file_path))
             return filename_buffer;
     }
@@ -324,24 +320,18 @@ BOOL TRASH_TrashFile(LPCWSTR wszPath)
  *  bucket name                 - currently only an empty string meaning the home bucket is supported
  *  trash file name             - a NUL-terminated string
  */
-struct tagTRASH_ELEMENT
+static HRESULT TRASH_CreateSimplePIDL(LPCSTR filename, const WIN32_FIND_DATAW *data, LPITEMIDLIST *pidlOut)
 {
-    TRASH_BUCKET *bucket;
-    LPSTR filename;
-};
-
-static HRESULT TRASH_CreateSimplePIDL(const TRASH_ELEMENT *element, const WIN32_FIND_DATAW *data, LPITEMIDLIST *pidlOut)
-{
-    LPITEMIDLIST pidl = SHAlloc(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(element->filename)+1+2);
+    LPITEMIDLIST pidl = SHAlloc(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1+2);
     *pidlOut = NULL;
     if (pidl == NULL)
         return E_OUTOFMEMORY;
-    pidl->mkid.cb = (USHORT)(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(element->filename)+1);
+    pidl->mkid.cb = (USHORT)(2+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1);
     pidl->mkid.abID[0] = 0;
     memcpy(pidl->mkid.abID+1, data, sizeof(WIN32_FIND_DATAW));
     pidl->mkid.abID[1+sizeof(WIN32_FIND_DATAW)] = 0;
-    lstrcpyA((LPSTR)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1), element->filename);
-    *(USHORT *)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(element->filename)+1) = 0;
+    lstrcpyA((LPSTR)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1), filename);
+    *(USHORT *)(pidl->mkid.abID+1+sizeof(WIN32_FIND_DATAW)+1+lstrlenA(filename)+1) = 0;
     *pidlOut = pidl;
     return S_OK;
 }
@@ -350,17 +340,15 @@ static HRESULT TRASH_CreateSimplePIDL(const TRASH_ELEMENT *element, const WIN32_
  *      TRASH_UnpackItemID [Internal]
  *
  * DESCRIPTION:
- * Extract the information stored in an Item ID. The TRASH_ELEMENT
- * identifies the element in the Trash. The WIN32_FIND_DATA contains the
- * information about the original file. The data->ftLastAccessTime contains
+ * Extract the information stored in an Item ID. The WIN32_FIND_DATA contains
+ * the information about the original file. The data->ftLastAccessTime contains
  * the deletion time
  *
  * PARAMETER(S):
  * [I] id : the ID of the item
- * [O] element : the trash element this item id contains. Can be NULL if not needed
  * [O] data : the WIN32_FIND_DATA of the original file. Can be NULL is not needed
  */                 
-HRESULT TRASH_UnpackItemID(LPCSHITEMID id, TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
+HRESULT TRASH_UnpackItemID(LPCSHITEMID id, WIN32_FIND_DATAW *data)
 {
     if (id->cb < 2+1+sizeof(WIN32_FIND_DATAW)+2)
         return E_INVALIDARG;
@@ -371,22 +359,10 @@ HRESULT TRASH_UnpackItemID(LPCSHITEMID id, TRASH_ELEMENT *element, WIN32_FIND_DA
 
     if (data != NULL)
         *data = *(WIN32_FIND_DATAW *)(id->abID+1);
-    if (element != NULL)
-    {
-        element->bucket = home_trash;
-        element->filename = StrDupA((LPCSTR)(id->abID+1+sizeof(WIN32_FIND_DATAW)+1));
-        if (element->filename == NULL)
-            return E_OUTOFMEMORY;
-    }
     return S_OK;
 }
 
-void TRASH_DisposeElement(TRASH_ELEMENT *element)
-{
-    SHFree(element->filename);
-}
-
-static HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *data)
+static HRESULT TRASH_GetDetails(const TRASH_BUCKET *bucket, LPCSTR filename, WIN32_FIND_DATAW *data)
 {
     LPSTR path = NULL;
     XDG_PARSED_FILE *parsed = NULL;
@@ -397,21 +373,21 @@ static HRESULT TRASH_GetDetails(const TRASH_ELEMENT *element, WIN32_FIND_DATAW *
     HRESULT ret = S_FALSE;
     LPWSTR original_dos_name;
     int suffix_length = lstrlenA(trashinfo_suffix);
-    int filename_length = lstrlenA(element->filename);
-    int files_length = lstrlenA(element->bucket->files_dir);
-    int path_length = max(lstrlenA(element->bucket->info_dir), files_length);
+    int filename_length = lstrlenA(filename);
+    int files_length = lstrlenA(bucket->files_dir);
+    int path_length = max(lstrlenA(bucket->info_dir), files_length);
     
     path = SHAlloc(path_length + filename_length + 1);
     if (path == NULL) return E_OUTOFMEMORY;
-    wsprintfA(path, "%s%s", element->bucket->files_dir, element->filename);
+    wsprintfA(path, "%s%s", bucket->files_dir, filename);
     path[path_length + filename_length - suffix_length] = 0;  /* remove the '.trashinfo' */    
     if (lstat(path, &stats) == -1)
     {
-        ERR("Error accessing data file for trashinfo %s (errno=%d)\n", element->filename, errno);
+        ERR("Error accessing data file for trashinfo %s (errno=%d)\n", filename, errno);
         goto failed;
     }
     
-    wsprintfA(path, "%s%s", element->bucket->info_dir, element->filename);
+    wsprintfA(path, "%s%s", bucket->info_dir, filename);
     fd = open(path, O_RDONLY);
     if (fd == -1)
     {
@@ -540,15 +516,14 @@ HRESULT TRASH_EnumItems(LPITEMIDLIST **pidls, int *count)
     for (i=0; i<ti_count; i++)
     {
         WIN32_FIND_DATAW data;
-        TRASH_ELEMENT elem;
+        LPCSTR filename;
         
-        elem.bucket = home_trash;
-        elem.filename = DPA_GetPtr(tinfs, i);
-        if (FAILED(err = TRASH_GetDetails(&elem, &data)))
+        filename = DPA_GetPtr(tinfs, i);
+        if (FAILED(err = TRASH_GetDetails(home_trash, filename, &data)))
             goto failed;
         if (err == S_FALSE)
             continue;
-        if (FAILED(err = TRASH_CreateSimplePIDL(&elem, &data, &(*pidls)[pos])))
+        if (FAILED(err = TRASH_CreateSimplePIDL(filename, &data, &(*pidls)[pos])))
             goto failed;
         pos++;
     }

@@ -168,7 +168,7 @@ static HDC WINAPI wglGetPbufferDCARB(void *pbuffer)
 
     TRACE("(%p)\n", pbuffer);
 
-    if (!dc) return FALSE;
+    if (!dc) return 0;
 
     /* The display driver has to do the rest of the work because
      * we need access to lowlevel datatypes which we can't access here
@@ -238,6 +238,27 @@ static BOOL WINAPI wglMakeContextCurrentARB(HDC hDrawDC, HDC hReadDC, HGLRC hglr
     release_dc_ptr( DrawDC );
     release_dc_ptr( ReadDC );
     return ret;
+}
+
+/**************************************************************************************
+ *      WINE-specific wglSetPixelFormat which can set the iPixelFormat multiple times
+ *
+ */
+static BOOL WINAPI wglSetPixelFormatWINE(HDC hdc, int iPixelFormat, const PIXELFORMATDESCRIPTOR *ppfd)
+{
+    INT bRet = FALSE;
+    DC * dc = get_dc_ptr( hdc );
+
+    TRACE("(%p,%d,%p)\n", hdc, iPixelFormat, ppfd);
+
+    if (!dc) return 0;
+
+    update_dc( dc );
+    if (!dc->funcs->pwglSetPixelFormatWINE) FIXME(" :stub\n");
+    else bRet = dc->funcs->pwglSetPixelFormatWINE(dc->physDev, iPixelFormat, ppfd);
+
+    release_dc_ptr( dc );
+    return bRet;
 }
 
 /***********************************************************************
@@ -317,7 +338,7 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
 
     /* Retrieve the global hDC to get access to the driver.  */
     dc = OPENGL_GetDefaultDC();
-    if (!dc) return FALSE;
+    if (!dc) return NULL;
 
     if (!dc->funcs->pwglGetProcAddress) FIXME(" :stub\n");
     else ret = dc->funcs->pwglGetProcAddress(func);
@@ -333,6 +354,8 @@ PROC WINAPI wglGetProcAddress(LPCSTR func)
         return (PROC)wglMakeContextCurrentARB;
     else if(ret && strcmp(func, "wglGetPbufferDCARB") == 0)
         return (PROC)wglGetPbufferDCARB;
+    else if(ret && strcmp(func, "wglSetPixelFormatWINE") == 0)
+        return (PROC)wglSetPixelFormatWINE;
 
     return ret;
 }

@@ -31,7 +31,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "winnls.h"
-#include "properties.h"
+#include "commctrl.h"
 
 #define IS_OPTION_TRUE(ch) \
     ((ch) == 'y' || (ch) == 'Y' || (ch) == 't' || (ch) == 'T' || (ch) == '1')
@@ -54,7 +54,6 @@ extern WCHAR* current_app; /* NULL means editing global settings  */
 void set_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *value);
 void set_reg_key_dwordW(HKEY root, const WCHAR *path, const WCHAR *name, DWORD value);
 WCHAR *get_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *def);
-WCHAR **enumerate_valuesW(HKEY root, WCHAR *path);
 
 void set_reg_key(HKEY root, const char *path, const char *name, const char *value);
 void set_reg_key_dword(HKEY root, const char *path, const char *name, DWORD value);
@@ -71,7 +70,8 @@ WCHAR* load_string (UINT id);
  
    no explicit free is needed of the string returned by this function
  */
-char *keypath(const char *section); 
+char *keypath(const char *section);
+WCHAR *keypathW(const WCHAR *section);
 
 int initialize(HINSTANCE hInstance);
 extern HKEY config_key;
@@ -89,24 +89,27 @@ INT_PTR CALLBACK AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lPara
 INT_PTR CALLBACK ThemeDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 /* Drive management  */
-void load_drives(void);
+BOOL load_drives(void);
 int autodetect_drives(void);
 
 struct drive
 {
     char letter;
     char *unixpath;
-    char *label;
-    char *serial;
+    char *device;
+    WCHAR *label;
+    DWORD serial;
     DWORD type; /* one of the DRIVE_ constants from winbase.h  */
 
     BOOL in_use;
+    BOOL modified;
 };
 
 #define DRIVE_MASK_BIT(B) (1 << (toupper(B) - 'A'))
 
-long drive_available_mask(char letter);
-BOOL add_drive(const char letter, const char *targetpath, const char *label, const char *serial, unsigned int type);
+ULONG drive_available_mask(char letter);
+BOOL add_drive(char letter, const char *targetpath, const char *device,
+               const WCHAR *label, DWORD serial, DWORD type);
 void delete_drive(struct drive *pDrive);
 void apply_drive_changes(void);
 BOOL browse_for_unix_folder(HWND dialog, WCHAR *pszPath);
@@ -130,6 +133,19 @@ static inline WCHAR *strdupW(const WCHAR *s)
 {
     WCHAR *r = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(s)+1)*sizeof(WCHAR));
     return lstrcpyW(r, s);
+}
+
+/* create a unicode string from a string in Unix locale */
+static inline WCHAR *strdupU2W(const char *unix_str)
+{
+    WCHAR *unicode_str;
+    int lenW;
+
+    lenW = MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, NULL, 0);
+    unicode_str = HeapAlloc(GetProcessHeap(), 0, lenW * sizeof(WCHAR));
+    if (unicode_str)
+        MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, unicode_str, lenW);
+    return unicode_str;
 }
 
 static inline char *get_text(HWND dialog, WORD id)

@@ -49,19 +49,21 @@ WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 
 #define DRIVER_MASK 0x80000000
 #define DEVICE_MASK 0x40000000
+#define MAX_NAME_LENGTH 64
 
 typedef DWORD (WINAPI * MessagePtr)(UINT, UINT, DWORD, DWORD, DWORD);
 
 static struct DSOUNDACCEL
 {
   UINT displayID;
+  UINT visible;
   const char* settingStr;
-} const DSound_HW_Accels[] = {
-  {IDS_ACCEL_FULL,      "Full"},
-  {IDS_ACCEL_STANDARD,  "Standard"},
-  {IDS_ACCEL_BASIC,     "Basic"},
-  {IDS_ACCEL_EMULATION, "Emulation"},
-  {0, 0}
+} DSound_HW_Accels[] = {
+  {IDS_ACCEL_FULL,      1, "Full"},
+  {IDS_ACCEL_STANDARD,  0, "Standard"},
+  {IDS_ACCEL_BASIC,     0, "Basic"},
+  {IDS_ACCEL_EMULATION, 1, "Emulation"},
+  {0, 0, 0}
 };
 
 static const char* DSound_Rates[] = {
@@ -79,6 +81,12 @@ static const char* DSound_Bits[] = {
   "16",
   NULL
 };
+
+typedef struct
+{
+  UINT nameID;
+  const char *szDriver;
+} AUDIO_DRIVER;
 
 static const AUDIO_DRIVER sAudioDrivers[] = {
   {IDS_DRIVER_ALSA,      "alsa"},
@@ -166,45 +174,26 @@ static void addDriver(const char * driver)
 /* remove driver from local copy of driver registry string */
 static void removeDriver(const char * driver)
 {
-    char before[32], after[32], * start;
+    char pattern[32], *p;
+    int drvlen, listlen;
 
-    strcpy(before, ",");
-    strcat(before, driver);
-    strcpy(after, driver);
-    strcat(after, ",");
+    strcpy(pattern, ",");
+    strcat(pattern, driver);
+    strcat(pattern, ",");
+    drvlen = strlen(driver);
+    listlen = strlen(curAudioDriver);
 
-    if ((start = strstr(curAudioDriver, after)))
-    {
-        int len = strlen(after);
-        char * end = curAudioDriver + strlen(curAudioDriver);
-        int i, count = end - start + len;
-        for (i = 0; i < count; i++)
-        {
-            if (start + len >= end)
-                *start = 0;
-            else
-                *start = start[len];
-            start++;
-        }
-    }
-    else if ((start = strstr(curAudioDriver, before)))
-    {
-        int len = strlen(before);
-        char * end = curAudioDriver + strlen(curAudioDriver);
-        int i, count = end - start + len;
-        for (i = 0; i < count; i++)
-        {
-            if (start + len >= end)
-                *start = 0;
-            else
-                *start = start[len];
-            start++;
-        }
-    }
-    else if (strcmp(curAudioDriver, driver) == 0)
-    {
-        strcpy(curAudioDriver, "");
-    }
+    p = strstr(curAudioDriver, pattern);
+    if (p) /* somewhere in the middle */
+        memmove(p, p+drvlen+1, strlen(p+drvlen+1)+1);
+    else if (!strncmp(curAudioDriver, pattern+1, drvlen+1)) /* the head */
+        memmove(curAudioDriver, curAudioDriver+drvlen+1, listlen-drvlen);
+    else if (!strncmp(curAudioDriver+listlen-drvlen-1, pattern, drvlen+1)) /* the tail */
+        curAudioDriver[listlen-drvlen-1] = 0;
+    else if (!strcmp(curAudioDriver, driver)) /* only one entry (head&tail) */
+        curAudioDriver[0] = 0;
+    else
+        WINE_FIXME("driver '%s' is not in the list, please report!\n", driver);
 }
 
 static void initAudioDeviceTree(HWND hDlg)
@@ -297,6 +286,10 @@ static void initAudioDeviceTree(HWND hDlg)
                     insert.u.item.pszText = text;
                     insert.u.item.stateMask = TVIS_STATEIMAGEMASK;
                     insert.u.item.lParam =  i + DRIVER_MASK;
+                    if (isDriverSet(pAudioDrv->szDriver))
+                        insert.u.item.state = INDEXTOSTATEIMAGEMASK(2);
+                    else
+                        insert.u.item.state = INDEXTOSTATEIMAGEMASK(1);
 
                     driver[i] = (HTREEITEM)SendDlgItemMessageW (hDlg, IDC_AUDIO_TREE, TVM_INSERTITEMW, 0, (LPARAM)&insert);
                 }
@@ -541,15 +534,20 @@ static void findAudioDrivers(void)
     if (numFound) {
         loadedAudioDrv = HeapReAlloc(GetProcessHeap(), 0, loadedAudioDrv, (numFound + 1) * sizeof(AUDIO_DRIVER));
         CopyMemory(&loadedAudioDrv[numFound], pAudioDrv, sizeof(AUDIO_DRIVER));
-    } else
-        loadedAudioDrv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(AUDIO_DRIVER));
+    } else {
+        loadedAudioDrv = HeapAlloc(GetProcessHeap(), 0, sizeof(AUDIO_DRIVER));
+        CopyMemory(&loadedAudioDrv[0], pAudioDrv, sizeof(AUDIO_DRIVER));
+    }
 }
 
 /* check local copy of registry string for unloadable drivers */
 static void checkRegistrySetting(HWND hDlg)
 {
     const AUDIO_DRIVER *pAudioDrv;
-    char * token, * tokens = strdup(curAudioDriver);
+    char * token, * tokens;
+
+    tokens = HeapAlloc(GetProcessHeap(), 0, strlen(curAudioDriver)+1);
+    strcpy(tokens, curAudioDriver);
 
 start_over:
     token = strtok(tokens, ",");
@@ -587,7 +585,7 @@ start_over:
         }
         token = strtok(NULL, ",");
     }
-    free(tokens);
+    HeapFree(GetProcessHeap(), 0, tokens);
 }
 
 static void selectDriver(HWND hDlg, const char * driver)
@@ -609,7 +607,7 @@ static void selectDriver(HWND hDlg, const char * driver)
 
 static void initAudioDlg (HWND hDlg)
 {
-    int i;
+    int i, j, found;
     char* buf = NULL;
 
     WINE_TRACE("\n");
@@ -640,20 +638,31 @@ static void initAudioDlg (HWND hDlg)
     initAudioDeviceTree(hDlg);
 
     SendDlgItemMessage(hDlg, IDC_DSOUND_HW_ACCEL, CB_RESETCONTENT, 0, 0);
+    buf = get_reg_key(config_key, keypath("DirectSound"), "HardwareAcceleration", "Full");
+
+    j = found = 0;
     for (i = 0; 0 != DSound_HW_Accels[i].displayID; ++i) {
       WCHAR accelStr[64];
-      LoadStringW (GetModuleHandle (NULL), DSound_HW_Accels[i].displayID, accelStr,
-          sizeof(accelStr)/sizeof(accelStr[0]));
-      SendDlgItemMessageW (hDlg, IDC_DSOUND_HW_ACCEL, CB_ADDSTRING, 0, (LPARAM)accelStr);
-    }
-    buf = get_reg_key(config_key, keypath("DirectSound"), "HardwareAcceleration", "Full");
-    for (i = 0; NULL != DSound_HW_Accels[i].settingStr; ++i) {
-      if (strcmp(buf, DSound_HW_Accels[i].settingStr) == 0) {
-	SendDlgItemMessage(hDlg, IDC_DSOUND_HW_ACCEL, CB_SETCURSEL, i, 0);
-	break ;
+      int match;
+
+      match = (strcmp(buf, DSound_HW_Accels[i].settingStr) == 0);
+      if (match)
+      {
+        DSound_HW_Accels[i].visible = 1;
+        found = 1;
+      }
+
+      if (DSound_HW_Accels[i].visible)
+      {
+        LoadStringW (GetModuleHandle (NULL), DSound_HW_Accels[i].displayID,
+                     accelStr, sizeof(accelStr)/sizeof(accelStr[0]));
+        SendDlgItemMessageW (hDlg, IDC_DSOUND_HW_ACCEL, CB_ADDSTRING, 0, (LPARAM)accelStr);
+        if (match)
+          SendDlgItemMessage(hDlg, IDC_DSOUND_HW_ACCEL, CB_SETCURSEL, j, 0);
+        j++;
       }
     }
-    if (NULL == DSound_HW_Accels[i].settingStr) {
+    if (!found) {
       WINE_ERR("Invalid Direct Sound HW Accel read from registry (%s)\n", buf);
     }
     HeapFree(GetProcessHeap(), 0, buf);
@@ -681,12 +690,6 @@ static void initAudioDlg (HWND hDlg)
 	break ;
       }
     }
-
-    buf = get_reg_key(config_key, keypath("DirectSound"), "EmulDriver", "N");
-    if (IS_OPTION_TRUE(*buf))
-      CheckDlgButton(hDlg, IDC_DSOUND_DRV_EMUL, BST_CHECKED);
-    else
-      CheckDlgButton(hDlg, IDC_DSOUND_DRV_EMUL, BST_UNCHECKED);
     HeapFree(GetProcessHeap(), 0, buf);
 }
 
@@ -709,10 +712,23 @@ AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
           case IDC_DSOUND_HW_ACCEL:
 	    if (HIWORD(wParam) == CBN_SELCHANGE) {
 	      int selected_dsound_accel;
+              int i, j = 0;
+
 	      SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
 	      selected_dsound_accel = SendDlgItemMessage(hDlg, IDC_DSOUND_HW_ACCEL, CB_GETCURSEL, 0, 0);
-	      set_reg_key(config_key, keypath("DirectSound"), "HardwareAcceleration", 
-	         DSound_HW_Accels[selected_dsound_accel].settingStr);
+              for (i = 0; DSound_HW_Accels[i].settingStr; ++i)
+              {
+                if (DSound_HW_Accels[i].visible)
+                {
+                  if (j == selected_dsound_accel)
+                  {
+                    set_reg_key(config_key, keypath("DirectSound"), "HardwareAcceleration",
+                      DSound_HW_Accels[i].settingStr);
+                    break;
+                  }
+                  j++;
+                }
+              }
 	    }
 	    break;
           case IDC_DSOUND_RATES:
@@ -729,15 +745,6 @@ AudioDlgProc (HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	      SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
 	      selected_dsound_bits = SendDlgItemMessage(hDlg, IDC_DSOUND_BITS, CB_GETCURSEL, 0, 0);
 	      set_reg_key(config_key, keypath("DirectSound"), "DefaultBitsPerSample", DSound_Bits[selected_dsound_bits]);
-	    }
-	    break;
-          case IDC_DSOUND_DRV_EMUL:
-	    if (HIWORD(wParam) == BN_CLICKED) {
-	      SendMessage(GetParent(hDlg), PSM_CHANGED, 0, 0);
-	      if (IsDlgButtonChecked(hDlg, IDC_DSOUND_DRV_EMUL) == BST_CHECKED)
-		set_reg_key(config_key, keypath("DirectSound"), "EmulDriver", "Y");
-	      else
-		set_reg_key(config_key, keypath("DirectSound"), "EmulDriver", "N");
 	    }
 	    break;
 	}

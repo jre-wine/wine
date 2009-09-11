@@ -128,8 +128,8 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
     /* WINXP */
     {
         sizeof(RTL_OSVERSIONINFOEXW), 5, 1, 0xA28, VER_PLATFORM_WIN32_NT,
-        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','2',0},
-        2, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 30 /* FIXME: Great, a reserved field with a value! */
+        {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','3',0},
+        3, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 30 /* FIXME: Great, a reserved field with a value! */
     },
     /* WIN2K3 */
     {
@@ -449,7 +449,7 @@ void version_init( const WCHAR *appname )
     HANDLE root, hkey, config_key;
     BOOL got_win_ver = FALSE;
 
-    current_version = &VersionData[NT2K];  /* default if nothing else is specified */
+    current_version = &VersionData[WINXP];  /* default if nothing else is specified */
 
     RtlOpenCurrentUser( KEY_ALL_ACCESS, &root );
     attr.Length = sizeof(attr);
@@ -519,7 +519,7 @@ done:
     user_shared_data->MinorNtVersion     = current_version->dwMinorVersion;
     user_shared_data->SuiteMask          = current_version->wSuiteMask;
 
-    TRACE( "got %d.%d plaform %d build %x name %s service pack %d.%d product %d\n",
+    TRACE( "got %d.%d platform %d build %x name %s service pack %d.%d product %d\n",
            current_version->dwMajorVersion, current_version->dwMinorVersion,
            current_version->dwPlatformId, current_version->dwBuildNumber,
            debugstr_w(current_version->szCSDVersion),

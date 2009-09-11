@@ -23,6 +23,13 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
+#include "winreg.h"
+
+#include "wingdi.h"
+#include "winspool.h"
+#include "ddk/winsplp.h"
+#include "spoolss.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(spoolss);
@@ -30,9 +37,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(spoolss);
 /* ################################ */
 
 static HMODULE hwinspool;
+
 static const WCHAR winspooldrvW[] = {'w','i','n','s','p','o','o','l','.','d','r','v',0};
 
-/******************************************************************
+/******************************************************************************
  *
  */
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
@@ -44,6 +52,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             return FALSE;  /* prefer native version */
         case DLL_PROCESS_ATTACH: {
             DisableThreadLibraryCalls(hinstDLL);
+            break;
+
+        case DLL_PROCESS_DETACH:
+            backend_unload_all();
             break;
         }
     }
@@ -170,6 +182,24 @@ BOOL WINAPI ImpersonatePrinterClient(HANDLE hToken)
 }
 
 /******************************************************************
+ *   InitializeRouter   [SPOOLSS.@]
+ */
+BOOL WINAPI InitializeRouter(void)
+{
+    TRACE("()\n");
+    return backend_load_all();
+}
+
+/******************************************************************
+ *   IsLocalCall    [SPOOLSS.@]
+ */
+BOOL WINAPI IsLocalCall(void)
+{
+    FIXME("() stub\n");
+    return TRUE;
+}
+
+/******************************************************************
  *   RevertToPrinterSelf   [SPOOLSS.@]
  */
 HANDLE WINAPI RevertToPrinterSelf(void)
@@ -244,6 +274,15 @@ BOOL WINAPI SpoolerHasInitialized(void)
  *   SpoolerInit   [SPOOLSS.@]
  */
 BOOL WINAPI SpoolerInit(void)
+{
+    FIXME("() stub\n");
+    return TRUE;
+}
+
+/******************************************************************
+ *   WaitForSpoolerInitialization   [SPOOLSS.@]
+ */
+BOOL WINAPI WaitForSpoolerInitialization(void)
 {
     FIXME("() stub\n");
     return TRUE;

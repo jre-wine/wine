@@ -4,14 +4,17 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = inetcomm.dll
 IMPORTLIB = inetcomm
-IMPORTS   = ole32 ws2_32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid oleaut32 ole32 ws2_32 user32 advapi32 kernel32
 
 C_SRCS = \
+	imaptransport.c \
 	inetcomm_main.c \
 	internettransport.c \
+	mimeintl.c \
 	mimeole.c \
-	regsvr.c
+	pop3transport.c \
+	regsvr.c \
+	smtptransport.c
 
 @MAKE_DLL_RULES@
 

@@ -21,10 +21,10 @@
 #define WIN32_LEAN_AND_MEAN     /* Exclude rarely-used stuff from Windows headers */
 #include <windows.h>
 #include <commctrl.h>
-#include <tchar.h>
 #include <stdio.h>
 
 #include "main.h"
+#include "regproc.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -34,19 +34,37 @@ WINE_DEFAULT_DEBUG_CHANNEL(regedit);
 ChildWnd* g_pChildWnd;
 static int last_split;
 
+static const WCHAR wszLastKey[] = {'L','a','s','t','K','e','y',0};
+static const WCHAR wszKeyName[] = {'S','o','f','t','w','a','r','e','\\',
+                                   'M','i','c','r','o','s','o','f','t','\\',
+                                   'W','i','n','d','o','w','s','\\',
+                                   'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                   'A','p','p','l','e','t','s','\\','R','e','g','e','d','i','t',0};
+
 /*******************************************************************************
  * Local module support methods
  */
 
-LPCTSTR GetRootKeyName(HKEY hRootKey)
+static LPCWSTR GetRootKeyName(HKEY hRootKey)
 {
-    if (hRootKey == HKEY_CLASSES_ROOT) return _T("HKEY_CLASSES_ROOT");
-    if (hRootKey == HKEY_CURRENT_USER) return _T("HKEY_CURRENT_USER");
-    if (hRootKey == HKEY_LOCAL_MACHINE) return _T("HKEY_LOCAL_MACHINE");
-    if (hRootKey == HKEY_USERS) return _T("HKEY_USERS");
-    if (hRootKey == HKEY_CURRENT_CONFIG) return _T("HKEY_CURRENT_CONFIG");
-    if (hRootKey == HKEY_DYN_DATA) return _T("HKEY_DYN_DATA");
-    return _T("UNKNOWN HKEY, PLEASE REPORT");
+    if(hRootKey == HKEY_CLASSES_ROOT)
+        return reg_class_namesW[INDEX_HKEY_CLASSES_ROOT];
+    if(hRootKey == HKEY_CURRENT_USER)
+        return reg_class_namesW[INDEX_HKEY_CURRENT_USER];
+    if(hRootKey == HKEY_LOCAL_MACHINE)
+        return reg_class_namesW[INDEX_HKEY_LOCAL_MACHINE];
+    if(hRootKey == HKEY_USERS)
+        return reg_class_namesW[INDEX_HKEY_USERS];
+    if(hRootKey == HKEY_CURRENT_CONFIG)
+        return reg_class_namesW[INDEX_HKEY_CURRENT_CONFIG];
+    if(hRootKey == HKEY_DYN_DATA)
+        return reg_class_namesW[INDEX_HKEY_DYN_DATA];
+    else
+    {
+        static const WCHAR unknown_key[] = {'U','N','K','N','O','W','N',' ','H','K','E','Y',',',' ',
+                                            'P','L','E','A','S','E',' ','R','E','P','O','R','T',0};
+        return unknown_key;
+    }
 }
 
 static void draw_splitbar(HWND hWnd, int x)
@@ -84,24 +102,24 @@ static void OnPaint(HWND hWnd)
     EndPaint(hWnd, &ps);
 }
 
-static LPTSTR CombinePaths(LPCTSTR pPaths[], int nPaths) {
+static LPWSTR CombinePaths(LPCWSTR pPaths[], int nPaths) {
     int i, len, pos;
-    LPTSTR combined;
+    LPWSTR combined;
     for (i=0, len=0; i<nPaths; i++) {
         if (pPaths[i] && *pPaths[i]) {
-            len += lstrlen(pPaths[i])+1;
+            len += lstrlenW(pPaths[i])+1;
         }
     }
-    combined = HeapAlloc(GetProcessHeap(), 0, len * sizeof(TCHAR));
+    combined = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
     *combined = '\0';
     for (i=0, pos=0; i<nPaths; i++) {
         if (pPaths[i] && *pPaths[i]) {
-            int llen = _tcslen(pPaths[i]);
+            int llen = lstrlenW(pPaths[i]);
             if (!*combined)
-                _tcscpy(combined, pPaths[i]);
+                lstrcpyW(combined, pPaths[i]);
             else {
-                combined[pos++] = (TCHAR)'\\';
-                _tcscpy(combined+pos, pPaths[i]);
+                combined[pos++] = '\\';
+                lstrcpyW(combined+pos, pPaths[i]);
             }
             pos += llen;
         }
@@ -109,44 +127,45 @@ static LPTSTR CombinePaths(LPCTSTR pPaths[], int nPaths) {
     return combined;
 }
 
-static LPTSTR GetPathRoot(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
-    LPCTSTR parts[2] = {_T(""), _T("")};
-    TCHAR text[260];
+static LPWSTR GetPathRoot(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
+    LPCWSTR parts[2] = {0,0};
+    WCHAR text[260];
     HKEY hRootKey = NULL;
     if (!hItem)
         hItem = TreeView_GetSelection(hwndTV);
-    GetItemPath(hwndTV, hItem, &hRootKey);
+    HeapFree(GetProcessHeap(), 0, GetItemPath(hwndTV, hItem, &hRootKey));
     if (!bFull && !hRootKey)
         return NULL;
     if (hRootKey)
         parts[1] = GetRootKeyName(hRootKey);
     if (bFull) {
-        DWORD dwSize = sizeof(text)/sizeof(TCHAR);
-        GetComputerName(text, &dwSize);
+        DWORD dwSize = sizeof(text)/sizeof(WCHAR);
+        GetComputerNameW(text, &dwSize);
         parts[0] = text;
     }
     return CombinePaths(parts, 2);
 }
 
-LPTSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
-    LPTSTR parts[2];
-    LPTSTR ret;
+LPWSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull) {
+    LPWSTR parts[2];
+    LPWSTR ret;
     HKEY hRootKey = NULL;
 
     parts[0] = GetPathRoot(hwndTV, hItem, bFull);
     parts[1] = GetItemPath(hwndTV, hItem, &hRootKey);
-    ret = CombinePaths((LPCTSTR *)parts, 2);
+    ret = CombinePaths((LPCWSTR *)parts, 2);
     HeapFree(GetProcessHeap(), 0, parts[0]);
+    HeapFree(GetProcessHeap(), 0, parts[1]);
     return ret;
 }
 
-static LPTSTR GetPathFullPath(HWND hwndTV, LPTSTR path) {
-    LPTSTR parts[2];
-    LPTSTR ret;
+static LPWSTR GetPathFullPath(HWND hwndTV, LPWSTR path) {
+    LPWSTR parts[2];
+    LPWSTR ret;
 
     parts[0] = GetPathRoot(hwndTV, 0, TRUE);
     parts[1] = path;
-    ret = CombinePaths((LPCTSTR *)parts, 2);
+    ret = CombinePaths((LPCWSTR*)parts, 2);
     HeapFree(GetProcessHeap(), 0, parts[0]);
     return ret;
 }
@@ -154,10 +173,11 @@ static LPTSTR GetPathFullPath(HWND hwndTV, LPTSTR path) {
 static void OnTreeSelectionChanged(HWND hwndTV, HWND hwndLV, HTREEITEM hItem, BOOL bRefreshLV)
 {
     if (bRefreshLV) {
-        LPCTSTR keyPath;
+        LPWSTR keyPath;
         HKEY hRootKey = NULL;
         keyPath = GetItemPath(hwndTV, hItem, &hRootKey);
         RefreshListView(hwndLV, hRootKey, keyPath, NULL);
+        HeapFree(GetProcessHeap(), 0, keyPath);
     }
     UpdateStatusBar();
 }
@@ -210,6 +230,47 @@ static BOOL _CmdWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 }
 
 /*******************************************************************************
+ * get_last_key [internal]
+ *
+ * open last key
+ *
+ */
+static void get_last_key(HWND hwndTV)
+{
+    HKEY hkey;
+    WCHAR wszVal[KEY_MAX_LEN];
+    DWORD dwSize = sizeof(wszVal);
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, wszKeyName, 0, NULL, 0, KEY_READ, NULL, &hkey, NULL) == ERROR_SUCCESS)
+    {
+        if (RegQueryValueExW(hkey, wszLastKey, NULL, NULL, (LPBYTE)wszVal, &dwSize) == ERROR_SUCCESS)
+            SendMessageW(hwndTV, TVM_SELECTITEM, TVGN_CARET, (LPARAM)FindPathInTree(hwndTV, wszVal));
+
+        RegCloseKey(hkey);
+    }
+}
+
+/*******************************************************************************
+ * set_last_key [internal]
+ *
+ * save last key
+ *
+ */
+static void set_last_key(HWND hwndTV)
+{
+    HKEY hkey;
+    WCHAR *wszVal;
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, wszKeyName, 0, NULL, 0, KEY_WRITE, NULL, &hkey, NULL) == ERROR_SUCCESS)
+    {
+        wszVal = GetItemFullPath(g_pChildWnd->hTreeWnd, TreeView_GetSelection(g_pChildWnd->hTreeWnd), FALSE);
+        RegSetValueExW(hkey, wszLastKey, 0, REG_SZ, (LPBYTE)wszVal, (lstrlenW(wszVal) + 1) * sizeof(WCHAR));
+        HeapFree(GetProcessHeap(), 0, wszVal);
+        RegCloseKey(hkey);
+    }
+}
+
+/*******************************************************************************
  *
  *  FUNCTION: ChildWndProc(HWND, unsigned, WORD, LONG)
  *
@@ -226,13 +287,14 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
     case WM_CREATE:
         g_pChildWnd = HeapAlloc(GetProcessHeap(), 0, sizeof(ChildWnd));
         if (!g_pChildWnd) return 0;
-        LoadString(hInst, IDS_REGISTRY_ROOT_NAME, g_pChildWnd->szPath, MAX_PATH);
+        LoadStringW(hInst, IDS_REGISTRY_ROOT_NAME, g_pChildWnd->szPath, MAX_PATH);
         g_pChildWnd->nSplitPos = 250;
         g_pChildWnd->hWnd = hWnd;
         g_pChildWnd->hTreeWnd = CreateTreeView(hWnd, g_pChildWnd->szPath, TREE_WINDOW);
         g_pChildWnd->hListWnd = CreateListView(hWnd, LIST_WINDOW/*, g_pChildWnd->szPath*/);
         g_pChildWnd->nFocusPanel = 1;
         SetFocus(g_pChildWnd->hTreeWnd);
+        get_last_key(g_pChildWnd->hTreeWnd);
         break;
     case WM_COMMAND:
         if (!_CmdWndProc(hWnd, message, wParam, lParam)) {
@@ -254,6 +316,7 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
         }
         goto def;
     case WM_DESTROY:
+        set_last_key(g_pChildWnd->hTreeWnd);
         HeapFree(GetProcessHeap(), 0, g_pChildWnd);
         g_pChildWnd = NULL;
         PostQuitMessage(0);
@@ -325,11 +388,11 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
     case WM_NOTIFY:
         if (((int)wParam == TREE_WINDOW) && (g_pChildWnd != NULL)) {
             switch (((LPNMHDR)lParam)->code) {
-            case TVN_ITEMEXPANDING:
+            case TVN_ITEMEXPANDINGW:
                 return !OnTreeExpanding(g_pChildWnd->hTreeWnd, (NMTREEVIEW*)lParam);
-            case TVN_SELCHANGED:
+            case TVN_SELCHANGEDW:
                 OnTreeSelectionChanged(g_pChildWnd->hTreeWnd, g_pChildWnd->hListWnd,
-                    ((NMTREEVIEW *)lParam)->itemNew.hItem, TRUE);
+                    ((NMTREEVIEWW *)lParam)->itemNew.hItem, TRUE);
                 break;
 	    case NM_SETFOCUS:
 		g_pChildWnd->nFocusPanel = 0;
@@ -341,22 +404,23 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
 			       TPM_RIGHTBUTTON, pt.x, pt.y, 0, hFrameWnd, NULL);
 		break;
             }
-	    case TVN_ENDLABELEDIT: {
+	    case TVN_ENDLABELEDITW: {
 		HKEY hRootKey;
-	        LPNMTVDISPINFO dispInfo = (LPNMTVDISPINFO)lParam;
-		LPCTSTR path = GetItemPath(g_pChildWnd->hTreeWnd, 0, &hRootKey);
+	        LPNMTVDISPINFOW dispInfo = (LPNMTVDISPINFOW)lParam;
+		LPWSTR path = GetItemPath(g_pChildWnd->hTreeWnd, 0, &hRootKey);
 	        BOOL res = RenameKey(hWnd, hRootKey, path, dispInfo->item.pszText);
 		if (res) {
-		    TVITEMEX item;
-                    LPTSTR fullPath = GetPathFullPath(g_pChildWnd->hTreeWnd,
+		    TVITEMEXW item;
+                    LPWSTR fullPath = GetPathFullPath(g_pChildWnd->hTreeWnd,
                      dispInfo->item.pszText);
 		    item.mask = TVIF_HANDLE | TVIF_TEXT;
 		    item.hItem = TreeView_GetSelection(g_pChildWnd->hTreeWnd);
 		    item.pszText = dispInfo->item.pszText;
-                    SendMessage( g_pChildWnd->hTreeWnd, TVM_SETITEMW, 0, (LPARAM)&item );
-                    SendMessage(hStatusBar, SB_SETTEXT, 0, (LPARAM)fullPath);
+                    SendMessageW( g_pChildWnd->hTreeWnd, TVM_SETITEMW, 0, (LPARAM)&item );
+                    SendMessageW(hStatusBar, SB_SETTEXTW, 0, (LPARAM)fullPath);
                     HeapFree(GetProcessHeap(), 0, fullPath);
 		}
+                HeapFree(GetProcessHeap(), 0, path);
 		return res;
 	    }
             default:
@@ -366,7 +430,7 @@ LRESULT CALLBACK ChildWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPa
             if (((int)wParam == LIST_WINDOW) && (g_pChildWnd != NULL)) {
 		if (((LPNMHDR)lParam)->code == NM_SETFOCUS) {
 		    g_pChildWnd->nFocusPanel = 1;
-		} else if (!SendMessage(g_pChildWnd->hListWnd, WM_NOTIFY_REFLECT, wParam, lParam)) {
+		} else if (!SendMessageW(g_pChildWnd->hListWnd, WM_NOTIFY_REFLECT, wParam, lParam)) {
                     goto def;
                 }
             }

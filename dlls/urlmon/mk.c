@@ -22,16 +22,14 @@
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
 
 typedef struct {
-    const IInternetProtocolVtbl  *lpInternetProtocolVtbl;
+    const IInternetProtocolVtbl  *lpIInternetProtocolVtbl;
 
     LONG ref;
 
     IStream *stream;
 } MkProtocol;
 
-#define PROTOCOL_THIS(iface) DEFINE_THIS(MkProtocol, InternetProtocol, iface)
-
-#define PROTOCOL(x)  ((IInternetProtocol*)  &(x)->lpInternetProtocolVtbl)
+#define PROTOCOL_THIS(iface) DEFINE_THIS(MkProtocol, IInternetProtocol, iface)
 
 static HRESULT WINAPI MkProtocol_QueryInterface(IInternetProtocol *iface, REFIID riid, void **ppv)
 {
@@ -93,7 +91,7 @@ static HRESULT report_result(IInternetProtocolSink *sink, HRESULT hres, DWORD dw
 
 static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
         IInternetProtocolSink *pOIProtSink, IInternetBindInfo *pOIBindInfo,
-        DWORD grfPI, DWORD dwReserved)
+        DWORD grfPI, HANDLE_PTR dwReserved)
 {
     MkProtocol *This = PROTOCOL_THIS(iface);
     IParseDisplayName *pdn;
@@ -106,9 +104,9 @@ static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     CLSID clsid;
     HRESULT hres;
 
-    static const WCHAR wszMK[] = {'m','k',':'};
+    static const WCHAR wszMK[] = {'m','k',':','@'};
 
-    TRACE("(%p)->(%s %p %p %08x %d)\n", This, debugstr_w(szUrl), pOIProtSink,
+    TRACE("(%p)->(%s %p %p %08x %lx)\n", This, debugstr_w(szUrl), pOIProtSink,
             pOIBindInfo, grfPI, dwReserved);
 
     if(strncmpiW(szUrl, wszMK, sizeof(wszMK)/sizeof(WCHAR)))
@@ -133,10 +131,6 @@ static HRESULT WINAPI MkProtocol_Start(IInternetProtocol *iface, LPCWSTR szUrl,
     }
 
     ptr2 = szUrl + sizeof(wszMK)/sizeof(WCHAR);
-    if(*ptr2 != '@')
-        return report_result(pOIProtSink, INET_E_RESOURCE_NOT_FOUND, ERROR_INVALID_PARAMETER);
-    ptr2++;
-
     ptr = strchrW(ptr2, ':');
     if(!ptr)
         return report_result(pOIProtSink, INET_E_RESOURCE_NOT_FOUND, ERROR_INVALID_PARAMETER);
@@ -297,7 +291,7 @@ HRESULT MkProtocol_Construct(IUnknown *pUnkOuter, LPVOID *ppobj)
 
     ret = heap_alloc(sizeof(MkProtocol));
 
-    ret->lpInternetProtocolVtbl = &MkProtocolVtbl;
+    ret->lpIInternetProtocolVtbl = &MkProtocolVtbl;
     ret->ref = 1;
     ret->stream = NULL;
 

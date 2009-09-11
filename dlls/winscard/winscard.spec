@@ -2,9 +2,9 @@
 @ stub SCardAccessNewReaderEvent
 @ stub SCardReleaseAllEvents
 @ stub SCardReleaseNewReaderEvent
-@ stub SCardAccessStartedEvent
-@ stub SCardAddReaderToGroupA
-@ stub SCardAddReaderToGroupW
+@ stdcall SCardAccessStartedEvent()
+@ stdcall SCardAddReaderToGroupA(long str str)
+@ stdcall SCardAddReaderToGroupW(long wstr wstr)
 @ stub SCardBeginTransaction
 @ stub SCardCancel
 @ stub SCardConnectA
@@ -34,7 +34,7 @@
 @ stub SCardIntroduceReaderGroupW
 @ stub SCardIntroduceReaderW
 @ stub SCardIsValidContext
-@ stub SCardListCardsA
+@ stdcall SCardListCardsA(long ptr ptr long str long)
 @ stub SCardListCardsW
 @ stub SCardListInterfacesA
 @ stub SCardListInterfacesW

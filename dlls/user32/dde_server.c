@@ -165,11 +165,8 @@ HDDEDATA WINAPI DdeNameService(DWORD idInst, HSZ hsz1, HSZ hsz2, UINT afCmd)
 {
     WDML_SERVER*	pServer;
     WDML_INSTANCE*	pInstance;
-    HDDEDATA 		hDdeData;
     HWND 		hwndServer;
     WNDCLASSEXW  	wndclass;
-
-    hDdeData = NULL;
 
     TRACE("(%d,%p,%p,%x)\n", idInst, hsz1, hsz2, afCmd);
 
@@ -343,8 +340,8 @@ static WDML_CONV* WDML_CreateServerConv(WDML_INSTANCE* pInstance, HWND hwndClien
                                       hwndServerName, 0, 0, 0);
     }
 
-    TRACE("Created convServer=%p (nameServer=%p) for instance=%08x\n",
-	  hwndServerConv, hwndServerName, pInstance->instanceID);
+    TRACE("Created convServer=%p (nameServer=%p) for instance=%08x unicode=%d\n",
+	  hwndServerConv, hwndServerName, pInstance->instanceID, pInstance->unicode);
 
     pConv = WDML_AddConv(pInstance, WDML_SERVER_SIDE, hszApp, hszTopic,
 			 hwndClient, hwndServerConv);
@@ -628,7 +625,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandleAdvise(WDML_CONV* pConv, WDML_XACT* pXA
     HDDEDATA		hDdeData = 0;
     BOOL		fAck = TRUE;
 
-    pDdeAdvise = (DDEADVISE*)GlobalLock(pXAct->hMem);
+    pDdeAdvise = GlobalLock(pXAct->hMem);
     uType = XTYP_ADVSTART |
 	    (pDdeAdvise->fDeferUpd ? XTYPF_NODATA : 0) |
 	    (pDdeAdvise->fAckReq ? XTYPF_ACKREQ : 0);
@@ -775,7 +772,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandleExecute(WDML_CONV* pConv, WDML_XACT* pX
 
 	if (ptr)
 	{
-	    hDdeData = DdeCreateDataHandle(0, ptr, GlobalSize(pXAct->hMem),
+	    hDdeData = DdeCreateDataHandle(pConv->instance->instanceID, ptr, GlobalSize(pXAct->hMem),
 					   0, 0, CF_TEXT, 0);
 	    GlobalUnlock(pXAct->hMem);
 	}
@@ -838,7 +835,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandlePoke(WDML_CONV* pConv, WDML_XACT* pXAct
     HDDEDATA		hDdeData;
     BOOL		fBusy = FALSE, fAck = FALSE;
 
-    pDdePoke = (DDEPOKE*)GlobalLock(pXAct->hMem);
+    pDdePoke = GlobalLock(pXAct->hMem);
     if (!pDdePoke)
     {
 	return WDML_QS_ERROR;
@@ -847,7 +844,7 @@ static	WDML_QUEUE_STATE WDML_ServerHandlePoke(WDML_CONV* pConv, WDML_XACT* pXAct
     if (!(pConv->instance->CBFflags & CBF_FAIL_POKES))
     {
 	hDdeData = DdeCreateDataHandle(pConv->instance->instanceID, pDdePoke->Value,
-				       GlobalSize(pXAct->hMem) - sizeof(DDEPOKE) + 1,
+				       GlobalSize(pXAct->hMem) - FIELD_OFFSET(DDEPOKE, Value),
 				       0, 0, pDdePoke->cfFormat, 0);
 	if (hDdeData)
 	{

@@ -17,6 +17,8 @@
 
 #include "config.h"
 
+#ifdef HAVE_RESOLV
+
 #include <sys/types.h>
 
 #ifdef HAVE_NETINET_IN_H
@@ -37,10 +39,42 @@
 
 static const char	digits[] = "0123456789";
 
-/* Forward. */
+/* Private. */
 
-static int		special(int);
-static int		printable(int);
+/*
+ * special(ch)
+ *	Thinking in noninternationalized USASCII (per the DNS spec),
+ *	is this character special ("in need of quoting") ?
+ * return:
+ *	boolean.
+ */
+static int
+special(int ch) {
+	switch (ch) {
+	case 0x22: /* '"' */
+	case 0x2E: /* '.' */
+	case 0x3B: /* ';' */
+	case 0x5C: /* '\\' */
+	/* Special modifiers in zone files. */
+	case 0x40: /* '@' */
+	case 0x24: /* '$' */
+		return (1);
+	default:
+		return (0);
+	}
+}
+
+/*
+ * printable(ch)
+ *	Thinking in noninternationalized USASCII (per the DNS spec),
+ *	is this character visible and not a space when printed ?
+ * return:
+ *	boolean.
+ */
+static int
+printable(int ch) {
+	return (ch > 0x20 && ch < 0x7f);
+}
 
 /* Public. */
 
@@ -101,7 +135,7 @@ dns_ns_name_ntop(const u_char *src, char *dst, size_t dstsiz) {
 		if (dn + n >= eom) {
 			return (-1);
 		}
-		for ((void)NULL; n > 0; n--) {
+		while (n-- > 0) {
 			c = *cp++;
 			if (special(c)) {
 				if (dn + 1 >= eom) {
@@ -136,135 +170,6 @@ dns_ns_name_ntop(const u_char *src, char *dst, size_t dstsiz) {
 	}
 	*dn++ = '\0';
 	return (dn - dst);
-}
-
-/*
- * dns_ns_name_pton(src, dst, dstsiz)
- *	Convert a ascii string into an encoded domain name as per RFC1035.
- * return:
- *	-1 if it fails
- *	1 if string was fully qualified
- *	0 is string was not fully qualified
- * notes:
- *	Enforces label and domain length limits.
- */
-
-int
-dns_ns_name_pton(const char *src, u_char *dst, size_t dstsiz) {
-	u_char *label, *bp, *eom;
-	int c, n, escaped;
-	char *cp;
-
-	escaped = 0;
-	bp = dst;
-	eom = dst + dstsiz;
-	label = bp++;
-
-	while ((c = *src++) != 0) {
-		if (escaped) {
-			if ((cp = strchr(digits, c)) != NULL) {
-				n = (cp - digits) * 100;
-				if ((c = *src++) == 0 ||
-				    (cp = strchr(digits, c)) == NULL) {
-					return (-1);
-				}
-				n += (cp - digits) * 10;
-				if ((c = *src++) == 0 ||
-				    (cp = strchr(digits, c)) == NULL) {
-					return (-1);
-				}
-				n += (cp - digits);
-				if (n > 255) {
-					return (-1);
-				}
-				c = n;
-			} else if (c == '[' && label == bp - 1 && *src == 'x') {
-				/* Theoretically we would have to handle \[o
-				   as well but we do not since we do not need
-				   it internally.  */
-				*label = 0x41;
-				label = bp++;
-				++src;
-				while (isxdigit (*src)) {
-					n = *src > '9' ? *src - 'a' + 10 : *src - '0';
-					++src;
-					if (! isxdigit(*src)) {
-						return (-1);
-					}
-					n <<= 4;
-					n += *src > '9' ? *src - 'a' + 10 : *src - '0';
-					if (bp + 1 >= eom) {
-						return (-1);
-					}
-					*bp++ = n;
-					++src;
-				}
-				*label = (bp - label - 1) * 8;
-				if (*src++ != ']' || *src++ != '.') {
-					return (-1);
-				}
-				escaped = 0;
-				label = bp++;
-				if (bp >= eom) {
-					return (-1);
-				}
-				continue;
-			}
-			escaped = 0;
-		} else if (c == '\\') {
-			escaped = 1;
-			continue;
-		} else if (c == '.') {
-			c = (bp - label - 1);
-			if ((c & NS_CMPRSFLGS) != 0) {	/* Label too big. */
-				return (-1);
-			}
-			if (label >= eom) {
-				return (-1);
-			}
-			*label = c;
-			/* Fully qualified ? */
-			if (*src == '\0') {
-				if (c != 0) {
-					if (bp >= eom) {
-						return (-1);
-					}
-					*bp++ = '\0';
-				}
-				if ((bp - dst) > NS_MAXCDNAME) {
-					return (-1);
-				}
-				return (1);
-			}
-			if (c == 0 || *src == '.') {
-				return (-1);
-			}
-			label = bp++;
-			continue;
-		}
-		if (bp >= eom) {
-			return (-1);
-		}
-		*bp++ = (u_char)c;
-	}
-	c = (bp - label - 1);
-	if ((c & NS_CMPRSFLGS) != 0) {		/* Label too big. */
-		return (-1);
-	}
-	if (label >= eom) {
-		return (-1);
-	}
-	*label = c;
-	if (c != 0) {
-		if (bp >= eom) {
-			return (-1);
-		}
-		*bp++ = 0;
-	}
-	if ((bp - dst) > NS_MAXCDNAME) {	/* src too big */
-		return (-1);
-	}
-	return (0);
 }
 
 
@@ -405,39 +310,4 @@ dns_ns_name_skip(const u_char **ptrptr, const u_char *eom) {
 	return (0);
 }
 
-/* Private. */
-
-/*
- * special(ch)
- *	Thinking in noninternationalized USASCII (per the DNS spec),
- *	is this character special ("in need of quoting") ?
- * return:
- *	boolean.
- */
-static int
-special(int ch) {
-	switch (ch) {
-	case 0x22: /* '"' */
-	case 0x2E: /* '.' */
-	case 0x3B: /* ';' */
-	case 0x5C: /* '\\' */
-	/* Special modifiers in zone files. */
-	case 0x40: /* '@' */
-	case 0x24: /* '$' */
-		return (1);
-	default:
-		return (0);
-	}
-}
-
-/*
- * printable(ch)
- *	Thinking in noninternationalized USASCII (per the DNS spec),
- *	is this character visible and not a space when printed ?
- * return:
- *	boolean.
- */
-static int
-printable(int ch) {
-	return (ch > 0x20 && ch < 0x7f);
-}
+#endif  /* HAVE_RESOLV */

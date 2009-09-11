@@ -104,8 +104,8 @@ struct SCA {
  */
 static DWORD CALLBACK	MCI_SCAStarter(LPVOID arg)
 {
-    struct SCA*	sca = (struct SCA*)arg;
-    DWORD		ret;
+    struct SCA* sca = arg;
+    DWORD       ret;
 
     TRACE("In thread before async command (%08x,%u,%08lx,%08lx)\n",
 	  sca->wDevID, sca->wMsg, sca->dwParam1, sca->dwParam2);
@@ -403,7 +403,7 @@ static DWORD MIDI_mciReadMTrk(WINE_MCIMIDI* wmm, MCI_MIDITRACK* mmt)
 		WARN("Buffer for text is too small (%u are needed)\n", len);
 		len = sizeof(buf) - 1;
 	    }
-	    if (mmioRead(wmm->hFile, (HPSTR)buf, len) == len) {
+            if (mmioRead(wmm->hFile, buf, len) == len) {
 		buf[len] = 0;	/* end string in case */
 		switch (HIBYTE(LOWORD(mmt->dwEventData))) {
 		case 0x02:
@@ -810,7 +810,6 @@ static DWORD MIDI_mciOpen(UINT wDevID, DWORD dwFlags, LPMCI_OPEN_PARMSW lpParms)
 static DWORD MIDI_mciStop(UINT wDevID, DWORD dwFlags, LPMCI_GENERIC_PARMS lpParms)
 {
     WINE_MCIMIDI*	wmm = MIDI_mciGetOpenDev(wDevID);
-    DWORD		dwRet = 0;
 
     TRACE("(%04X, %08X, %p);\n", wDevID, dwFlags, lpParms);
 
@@ -821,7 +820,7 @@ static DWORD MIDI_mciStop(UINT wDevID, DWORD dwFlags, LPMCI_GENERIC_PARMS lpParm
 
 	wmm->dwStatus = MCI_MODE_NOT_READY;
 	if (oldstat == MCI_MODE_PAUSE)
-	    dwRet = midiOutReset((HMIDIOUT)wmm->hMidi);
+	    midiOutReset((HMIDIOUT)wmm->hMidi);
 
 	while (wmm->dwStatus != MCI_MODE_STOP)
 	    Sleep(10);
@@ -1052,7 +1051,7 @@ static DWORD MIDI_mciPlay(UINT wDevID, DWORD dwFlags, LPMCI_PLAY_PARMS lpParms)
 			WARN("Buffer for text is too small (%u are needed)\n", len);
 			len = sizeof(buf) - 1;
 		    }
-		    if (mmioRead(wmm->hFile, (HPSTR)buf, len) == len) {
+                    if (mmioRead(wmm->hFile, buf, len) == len) {
 			buf[len] = 0;	/* end string in case */
 			TRACE("%s => \"%s\"\n", (idx < 8 ) ? info[idx] : "", buf);
 		    } else {
@@ -1190,7 +1189,6 @@ static DWORD MIDI_mciRecord(UINT wDevID, DWORD dwFlags, LPMCI_RECORD_PARMS lpPar
 {
     int			start, end;
     MIDIHDR		midiHdr;
-    DWORD		dwRet;
     WINE_MCIMIDI*	wmm = MIDI_mciGetOpenDev(wDevID);
 
     TRACE("(%04X, %08X, %p);\n", wDevID, dwFlags, lpParms);
@@ -1216,7 +1214,7 @@ static DWORD MIDI_mciRecord(UINT wDevID, DWORD dwFlags, LPMCI_RECORD_PARMS lpPar
     midiHdr.dwBufferLength = 1024;
     midiHdr.dwUser = 0L;
     midiHdr.dwFlags = 0L;
-    dwRet = midiInPrepareHeader((HMIDIIN)wmm->hMidi, &midiHdr, sizeof(MIDIHDR));
+    midiInPrepareHeader((HMIDIIN)wmm->hMidi, &midiHdr, sizeof(MIDIHDR));
     TRACE("After MIDM_PREPARE\n");
     wmm->dwStatus = MCI_MODE_RECORD;
     /* FIXME: there is no buffer added */
@@ -1224,12 +1222,12 @@ static DWORD MIDI_mciRecord(UINT wDevID, DWORD dwFlags, LPMCI_RECORD_PARMS lpPar
 	TRACE("wmm->dwStatus=%p %d\n",
 	      &wmm->dwStatus, wmm->dwStatus);
 	midiHdr.dwBytesRecorded = 0;
-	dwRet = midiInStart((HMIDIIN)wmm->hMidi);
+	midiInStart((HMIDIIN)wmm->hMidi);
 	TRACE("midiInStart => dwBytesRecorded=%u\n", midiHdr.dwBytesRecorded);
 	if (midiHdr.dwBytesRecorded == 0) break;
     }
     TRACE("Before MIDM_UNPREPARE\n");
-    dwRet = midiInUnprepareHeader((HMIDIIN)wmm->hMidi, &midiHdr, sizeof(MIDIHDR));
+    midiInUnprepareHeader((HMIDIIN)wmm->hMidi, &midiHdr, sizeof(MIDIHDR));
     TRACE("After MIDM_UNPREPARE\n");
     HeapFree(GetProcessHeap(), 0, midiHdr.lpData);
     midiHdr.lpData = NULL;
@@ -1389,7 +1387,7 @@ static DWORD MIDI_mciStatus(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpPar
 	case MCI_STATUS_CURRENT_TRACK:
 	    /* FIXME in Format 2 */
 	    lpParms->dwReturn = 1;
-	    TRACE("MCI_STATUS_CURRENT_TRACK => %u\n", lpParms->dwReturn);
+	    TRACE("MCI_STATUS_CURRENT_TRACK => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_LENGTH:
 	    if ((dwFlags & MCI_TRACK) && wmm->wFormat == 2) {
@@ -1401,7 +1399,7 @@ static DWORD MIDI_mciStatus(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpPar
 		lpParms->dwReturn = MIDI_GetMThdLengthMS(wmm);
 	    }
 	    lpParms->dwReturn = MIDI_ConvertMSToTimeFormat(wmm, lpParms->dwReturn);
-	    TRACE("MCI_STATUS_LENGTH => %u\n", lpParms->dwReturn);
+	    TRACE("MCI_STATUS_LENGTH => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_MODE:
 	    TRACE("MCI_STATUS_MODE => %u\n", wmm->dwStatus);
@@ -1415,13 +1413,13 @@ static DWORD MIDI_mciStatus(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpPar
 	    break;
 	case MCI_STATUS_NUMBER_OF_TRACKS:
 	    lpParms->dwReturn = (wmm->wFormat == 2) ? wmm->nTracks : 1;
-	    TRACE("MCI_STATUS_NUMBER_OF_TRACKS => %u\n", lpParms->dwReturn);
+	    TRACE("MCI_STATUS_NUMBER_OF_TRACKS => %lu\n", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_POSITION:
 	    /* FIXME: do I need to use MCI_TRACK ? */
 	    lpParms->dwReturn = MIDI_ConvertMSToTimeFormat(wmm,
 							   (dwFlags & MCI_STATUS_START) ? 0 : wmm->dwPositionMS);
-	    TRACE("MCI_STATUS_POSITION %s => %u\n",
+	    TRACE("MCI_STATUS_POSITION %s => %lu\n",
 		  (dwFlags & MCI_STATUS_START) ? "start" : "current", lpParms->dwReturn);
 	    break;
 	case MCI_STATUS_READY:
@@ -1472,7 +1470,7 @@ static DWORD MIDI_mciStatus(UINT wDevID, DWORD dwFlags, LPMCI_STATUS_PARMS lpPar
 	    lpParms->dwReturn = wmm->dwTempo;
 	    break;
 	default:
-	    FIXME("Unknowm command %08X !\n", lpParms->dwItem);
+	    FIXME("Unknown command %08X !\n", lpParms->dwItem);
 	    return MCIERR_UNRECOGNIZED_COMMAND;
 	}
     } else {

@@ -174,10 +174,10 @@ static HRESULT WINAPI dimimpl_Invoke(
 
 static HRESULT WINAPI dimimpl_hasFeature(IXMLDOMImplementation* This, BSTR feature, BSTR version, VARIANT_BOOL *hasFeature)
 {
-    static WCHAR bVersion[] = {'1','.','0',0};
-    static WCHAR bXML[] = {'X','M','L',0};
-    static WCHAR bDOM[] = {'D','O','M',0};
-    static WCHAR bMSDOM[] = {'M','S','-','D','O','M',0};
+    static const WCHAR bVersion[] = {'1','.','0',0};
+    static const WCHAR bXML[] = {'X','M','L',0};
+    static const WCHAR bDOM[] = {'D','O','M',0};
+    static const WCHAR bMSDOM[] = {'M','S','-','D','O','M',0};
     BOOL bValidFeature = FALSE;
     BOOL bValidVersion = FALSE;
 
@@ -212,7 +212,7 @@ static const struct IXMLDOMImplementationVtbl dimimpl_vtbl =
     dimimpl_hasFeature
 };
 
-IUnknown* create_doc_Implementation()
+IUnknown* create_doc_Implementation(void)
 {
     domimpl *This;
 

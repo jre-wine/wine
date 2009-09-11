@@ -32,15 +32,20 @@ cpp_quote("#define SVCCTL_ENDPOINT {'\\\\','p','i','p','e','\\\\','s','v','c','c
 cpp_quote("#define SVCCTL_STARTED_EVENT {'_','_','w','i','n','e','_','S','v','c','c','t','l','S','t','a','r','t','e','d',0}")
 
 /* Service startup protocol over control pipe - not compatible with Windows */
-cpp_quote("typedef struct service_start_info_t")
-cpp_quote("{")
-cpp_quote("    DWORD cmd;")
-cpp_quote("    DWORD size;")
-cpp_quote("    WCHAR str[1];")
-cpp_quote("} service_start_info;")
+enum service_pipe_command
+{
+    WINESERV_STARTINFO = 1,
+    WINESERV_SENDCONTROL = 2
+};
 
-cpp_quote("#define WINESERV_STARTINFO   1")
-cpp_quote("#define WINESERV_SENDCONTROL 2")
+typedef struct service_start_info_t
+{
+    enum service_pipe_command cmd;        /* request code */
+    DWORD                     total_size; /* total request size */
+    DWORD                     name_size;  /* size of name in data buffer */
+    DWORD                     control;    /* control code */
+    WCHAR                     data[1];
+} service_start_info;
 
 [
     uuid(367abb81-9844-35f1-ad32-98f038001003),
@@ -54,9 +59,6 @@ interface svcctl
     typedef [handle] LPCWSTR MACHINE_HANDLEW;
     typedef [context_handle] void *SC_RPC_HANDLE;
     typedef [context_handle] void *SC_RPC_LOCK;
-
-    /* undocumented access rights */
-    cpp_quote("#define SERVICE_SET_STATUS   0x8000")
 
     /* undocumented access rights */
     cpp_quote("#define SERVICE_SET_STATUS   0x8000")
@@ -87,8 +89,46 @@ typedef struct _SERVICE_STATUS {
 typedef enum _SC_STATUS_TYPE {
   SC_STATUS_PROCESS_INFO      = 0
 } SC_STATUS_TYPE;
+
+typedef struct _SERVICE_DESCRIPTIONW {
+   LPWSTR lpDescription;
+} SERVICE_DESCRIPTIONW,*LPSERVICE_DESCRIPTIONW;
+
+typedef enum _SC_ACTION_TYPE {
+    SC_ACTION_NONE        = 0,
+    SC_ACTION_RESTART     = 1,
+    SC_ACTION_REBOOT      = 2,
+    SC_ACTION_RUN_COMMAND = 3
+} SC_ACTION_TYPE;
+
+typedef struct _SC_ACTION {
+    SC_ACTION_TYPE  Type;
+    DWORD       Delay;
+} SC_ACTION,*LPSC_ACTION;
+
+typedef struct _SERVICE_FAILURE_ACTIONSW {
+    DWORD dwResetPeriod;
+    [unique] LPWSTR lpRebootMsg;
+    [unique] LPWSTR lpCommand;
+    DWORD cActions;
+    [size_is(cActions)] SC_ACTION *lpsaActions;
+} SERVICE_FAILURE_ACTIONSW,*LPSERVICE_FAILURE_ACTIONSW;
+
+#define SERVICE_CONFIG_DESCRIPTION              1
+#define SERVICE_CONFIG_FAILURE_ACTIONS          2
+#define SERVICE_CONFIG_DELAYED_AUTO_START_INFO  3
+#define SERVICE_CONFIG_FAILURE_ACTIONS_FLAG     4
+#define SERVICE_CONFIG_SERVICE_SID_INFO         5
+#define SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO 6
+#define SERVICE_CONFIG_PRESHUTDOWN_INFO         7
+
 cpp_quote("#endif")
 
+typedef [switch_type(DWORD)] union
+{
+  [case (SERVICE_CONFIG_DESCRIPTION)] SERVICE_DESCRIPTIONW descr;
+  [case (SERVICE_CONFIG_FAILURE_ACTIONS)] SERVICE_FAILURE_ACTIONSW actions;
+} SERVICE_CONFIG2W;
 
     /* Compatible with Windows function 0x00 */
     DWORD svcctl_CloseServiceHandle(
@@ -217,17 +257,15 @@ cpp_quote("#endif")
     DWORD svcctl_GetServiceDisplayNameW(
         [in] SC_RPC_HANDLE hSCManager,
         [in] LPCWSTR lpServiceName,
-        [out,size_is(cchBufSize)] WCHAR lpBuffer[],
-        [in] DWORD cchBufSize,
-        [out] DWORD *cchLength);
+        [out,string,size_is(*cchBufSize+1)] WCHAR lpBuffer[],
+        [in,out] DWORD *cchBufSize);
 
     /* Compatible with Windows function 0x15 */
     DWORD svcctl_GetServiceKeyNameW(
         [in] SC_RPC_HANDLE hSCManager,
         [in] LPCWSTR lpServiceDisplayName,
-        [out,size_is(cchBufSize)] WCHAR lpBuffer[],
-        [in] DWORD cchBufSize,
-        [out] DWORD *cchLength);
+        [out,string,size_is(*cchBufSize+1)] WCHAR lpBuffer[],
+        [in,out] DWORD *cchBufSize);
 
     /* Not compatible with Windows function 0x16 */
     DWORD svcctl_SCSetServiceBitsA(/* FIXME */);
@@ -274,14 +312,23 @@ cpp_quote("#endif")
     /* Not compatible with Windows function 0x24 */
     DWORD svcctl_ChangeServiceConfig2A(/* FIXME */);
 
-    /* Not compatible with Windows function 0x25 */
-    DWORD svcctl_ChangeServiceConfig2W(/* FIXME */);
+    /* Untested with Windows function 0x25 */
+    DWORD svcctl_ChangeServiceConfig2W(
+        [in] SC_RPC_HANDLE hService,
+        [in] DWORD InfoLevel,
+        [in,switch_is(InfoLevel)] SERVICE_CONFIG2W *config );
 
     /* Not compatible with Windows function 0x26 */
     DWORD svcctl_QueryServiceConfig2A(/* FIXME */);
 
-    /* Not compatible with Windows function 0x27 */
-    DWORD svcctl_QueryServiceConfig2W(/* FIXME */);
+    /* Untested with Windows function 0x27 */
+    DWORD svcctl_QueryServiceConfig2W(
+        [in] SC_RPC_HANDLE hService,
+        [in] DWORD InfoLevel,
+        [out,size_is(cbBufSize)] BYTE lpBuffer[],
+        [in] DWORD cbBufSize,
+        [out] LPDWORD pcbBytesNeeded
+    );
 
     /* Untested with Windows function 0x28 */
     DWORD svcctl_QueryServiceStatusEx(

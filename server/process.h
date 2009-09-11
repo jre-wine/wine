@@ -37,9 +37,9 @@ struct process_dll
 {
     struct list          entry;           /* entry in per-process dll list */
     struct file         *file;            /* dll file */
-    void                *base;            /* dll base address (in process addr space) */
-    size_t               size;            /* dll size */
-    void                *name;            /* ptr to ptr to name (in process addr space) */
+    mod_handle_t         base;            /* dll base address (in process addr space) */
+    client_ptr_t         name;            /* ptr to ptr to name (in process addr space) */
+    data_size_t          size;            /* dll size */
     int                  dbg_offset;      /* debug info offset */
     int                  dbg_size;        /* debug info size */
     data_size_t          namelen;         /* length of dll file name */
@@ -58,13 +58,14 @@ struct process
     process_id_t         id;              /* id of the process */
     process_id_t         group_id;        /* group id of the process */
     struct timeout_user *sigkill_timeout; /* timeout for final SIGKILL */
+    enum cpu_type        cpu;             /* client CPU type */
     int                  unix_pid;        /* Unix pid for final SIGKILL */
     int                  exit_code;       /* process exit code */
     int                  running_threads; /* number of threads running in this process */
     timeout_t            start_time;      /* absolute time at process start */
     timeout_t            end_time;        /* absolute time at process end */
+    affinity_t           affinity;        /* process affinity mask */
     int                  priority;        /* priority class */
-    unsigned int         affinity;        /* process affinity mask */
     int                  suspend;         /* global process suspend count */
     int                  is_system;       /* is it a system process? */
     unsigned int         create_flags;    /* process creation flags */
@@ -79,8 +80,8 @@ struct process
     obj_handle_t         desktop;         /* handle to desktop to use for new threads */
     struct token        *token;           /* security token associated with this process */
     struct list          dlls;            /* list of loaded dlls */
-    void                *peb;             /* PEB address in client address space */
-    void                *ldt_copy;        /* pointer to LDT copy in client addr space */
+    client_ptr_t         peb;             /* PEB address in client address space */
+    client_ptr_t         ldt_copy;        /* pointer to LDT copy in client addr space */
     unsigned int         trace_data;      /* opaque data used by the process tracing mechanism */
 };
 
@@ -91,14 +92,6 @@ struct process_snapshot
     int             threads;  /* number of threads */
     int             priority; /* priority class */
     int             handles;  /* number of handles */
-};
-
-struct module_snapshot
-{
-    void           *base;     /* module base addr */
-    size_t          size;     /* module size */
-    data_size_t     namelen;  /* length of file name */
-    WCHAR          *filename; /* module file name */
 };
 
 /* process functions */
@@ -127,7 +120,6 @@ extern void kill_debugged_processes( struct thread *debugger, int exit_code );
 extern void break_process( struct process *process );
 extern void detach_debugged_processes( struct thread *debugger );
 extern struct process_snapshot *process_snap( int *count );
-extern struct module_snapshot *module_snap( struct process *process, int *count );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);
 
 /* console functions */
@@ -147,8 +139,8 @@ extern struct thread *console_get_renderer( struct console_input *console );
 extern void init_tracing_mechanism(void);
 extern void init_process_tracing( struct process *process );
 extern void finish_process_tracing( struct process *process );
-extern int read_process_memory( struct process *process, const void *ptr, data_size_t size, char *dest );
-extern int write_process_memory( struct process *process, void *ptr, data_size_t size, const char *src );
+extern int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest );
+extern int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src );
 
 static inline process_id_t get_process_id( struct process *process ) { return process->id; }
 

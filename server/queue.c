@@ -57,7 +57,7 @@ struct message_result
     struct msg_queue      *receiver;      /* receiver queue */
     int                    replied;       /* has it been replied to? */
     unsigned int           error;         /* error code to pass back to sender */
-    unsigned long          result;        /* reply result */
+    lparam_t               result;        /* reply result */
     struct message        *callback_msg;  /* message to queue for callback */
     void                  *data;          /* message reply data */
     unsigned int           data_size;     /* size of message reply data */
@@ -70,11 +70,8 @@ struct message
     enum message_type      type;      /* message type */
     user_handle_t          win;       /* window handle */
     unsigned int           msg;       /* message code */
-    unsigned long          wparam;    /* parameters */
-    unsigned long          lparam;    /* parameters */
-    unsigned long          info;      /* extra info */
-    int                    x;         /* x position */
-    int                    y;         /* y position */
+    lparam_t               wparam;    /* parameters */
+    lparam_t               lparam;    /* parameters */
     unsigned int           time;      /* message time */
     void                  *data;      /* message data for sent messages */
     unsigned int           data_size; /* size of message data */
@@ -89,8 +86,8 @@ struct timer
     unsigned int    rate;      /* timer rate in ms */
     user_handle_t   win;       /* window handle */
     unsigned int    msg;       /* message to post */
-    unsigned long   id;        /* timer id */
-    unsigned long   lparam;    /* lparam for message */
+    lparam_t        id;        /* timer id */
+    lparam_t        lparam;    /* lparam for message */
 };
 
 struct thread_input
@@ -127,7 +124,7 @@ struct msg_queue
     struct message_result *recv_result;     /* stack of received messages waiting for result */
     struct list            pending_timers;  /* list of pending timers */
     struct list            expired_timers;  /* list of expired timers */
-    unsigned long          next_timer_id;   /* id for the next timer with a 0 window */
+    lparam_t               next_timer_id;   /* id for the next timer with a 0 window */
     struct timeout_user   *timeout;         /* timeout for next timer to expire */
     struct thread_input   *input;           /* thread input descriptor */
     struct hook_table     *hooks;           /* hook table */
@@ -415,10 +412,15 @@ static int merge_message( struct thread_input *input, const struct message *msg 
     /* now we can merge it */
     prev->wparam  = msg->wparam;
     prev->lparam  = msg->lparam;
-    prev->x       = msg->x;
-    prev->y       = msg->y;
     prev->time    = msg->time;
-    prev->info    = msg->info;
+    if (msg->type == MSG_HARDWARE && prev->data && msg->data)
+    {
+        struct hardware_msg_data *prev_data = prev->data;
+        struct hardware_msg_data *msg_data = msg->data;
+        prev_data->x     = msg_data->x;
+        prev_data->y     = msg_data->y;
+        prev_data->info  = msg_data->info;
+    }
     return 1;
 }
 
@@ -442,8 +444,7 @@ static inline void remove_result_from_sender( struct message_result *result )
 }
 
 /* store the message result in the appropriate structure */
-static void store_message_result( struct message_result *res, unsigned long result,
-                                  unsigned int error )
+static void store_message_result( struct message_result *res, lparam_t result, unsigned int error )
 {
     res->result  = result;
     res->error   = error;
@@ -569,9 +570,6 @@ static struct message_result *alloc_message_result( struct msg_queue *send_queue
             callback_msg->wparam    = 0;
             callback_msg->lparam    = 0;
             callback_msg->time      = get_tick_count();
-            callback_msg->x         = 0;
-            callback_msg->y         = 0;
-            callback_msg->info      = 0;
             callback_msg->result    = NULL;
             /* steal the data from the original message */
             callback_msg->data      = msg->data;
@@ -611,10 +609,7 @@ static void receive_message( struct msg_queue *queue, struct message *msg,
     reply->msg    = msg->msg;
     reply->wparam = msg->wparam;
     reply->lparam = msg->lparam;
-    reply->x      = msg->x;
-    reply->y      = msg->y;
     reply->time   = msg->time;
-    reply->info   = msg->info;
 
     if (msg->data) set_reply_data_ptr( msg->data, msg->data_size );
 
@@ -631,7 +626,7 @@ static void receive_message( struct msg_queue *queue, struct message *msg,
 }
 
 /* set the result of the current received message */
-static void reply_message( struct msg_queue *queue, unsigned long result,
+static void reply_message( struct msg_queue *queue, lparam_t result,
                            unsigned int error, int remove, const void *data, data_size_t len )
 {
     struct message_result *res = queue->recv_result;
@@ -653,6 +648,14 @@ static void reply_message( struct msg_queue *queue, unsigned long result,
     }
 }
 
+static int match_window( user_handle_t win, user_handle_t msg_win )
+{
+    if (!win) return 1;
+    if (win == (user_handle_t)-1) return !msg_win;
+    if (msg_win == win) return 1;
+    return is_child_window( win, msg_win );
+}
+
 /* retrieve a posted message */
 static int get_posted_message( struct msg_queue *queue, user_handle_t win,
                                unsigned int first, unsigned int last, unsigned int flags,
@@ -663,7 +666,7 @@ static int get_posted_message( struct msg_queue *queue, user_handle_t win,
     /* check against the filters */
     LIST_FOR_EACH_ENTRY( msg, &queue->msg_list[POST_MESSAGE], struct message, entry )
     {
-        if (win && msg->win && msg->win != win && !is_child_window( win, msg->win )) continue;
+        if (!match_window( win, msg->win )) continue;
         if (!check_msg_filter( msg->msg, first, last )) continue;
         goto found; /* found one */
     }
@@ -682,10 +685,7 @@ found:
     reply->msg    = msg->msg;
     reply->wparam = msg->wparam;
     reply->lparam = msg->lparam;
-    reply->x      = msg->x;
-    reply->y      = msg->y;
     reply->time   = msg->time;
-    reply->info   = msg->info;
 
     if (flags & PM_REMOVE)
     {
@@ -709,14 +709,11 @@ static int get_quit_message( struct msg_queue *queue, unsigned int flags,
     {
         reply->total  = 0;
         reply->type   = MSG_POSTED;
-        reply->win    = NULL;
+        reply->win    = 0;
         reply->msg    = WM_QUIT;
         reply->wparam = queue->exit_code;
         reply->lparam = 0;
-        reply->x      = 0;
-        reply->y      = 0;
         reply->time   = get_tick_count();
-        reply->info   = 0;
 
         if (flags & PM_REMOVE)
         {
@@ -883,13 +880,14 @@ static void msg_queue_poll_event( struct fd *fd, int event )
     assert( queue->obj.ops == &msg_queue_ops );
 
     if (event & (POLLERR | POLLHUP)) set_fd_events( fd, -1 );
+    else set_fd_events( queue->fd, 0 );
     wake_up( &queue->obj, 0 );
 }
 
 static void thread_input_dump( struct object *obj, int verbose )
 {
     struct thread_input *input = (struct thread_input *)obj;
-    fprintf( stderr, "Thread input focus=%p capture=%p active=%p\n",
+    fprintf( stderr, "Thread input focus=%08x capture=%08x active=%08x\n",
              input->focus, input->capture, input->active );
 }
 
@@ -1009,7 +1007,7 @@ static void set_next_timer( struct msg_queue *queue )
 
 /* find a timer from its window and id */
 static struct timer *find_timer( struct msg_queue *queue, user_handle_t win,
-                                 unsigned int msg, unsigned long id )
+                                 unsigned int msg, lparam_t id )
 {
     struct list *ptr;
 
@@ -1244,7 +1242,7 @@ static void release_hardware_message( struct msg_queue *queue, unsigned int hw_i
 
 /* find the window that should receive a given hardware message */
 static user_handle_t find_hardware_message_window( struct thread_input *input, struct message *msg,
-                                                   unsigned int *msg_code )
+                                                   struct hardware_msg_data *data, unsigned int *msg_code )
 {
     user_handle_t win = 0;
 
@@ -1263,7 +1261,7 @@ static user_handle_t find_hardware_message_window( struct thread_input *input, s
         {
             if (!(win = msg->win) || !is_window_visible( win ))
             {
-                if (input) win = window_from_point( input->desktop, msg->x, msg->y );
+                if (input) win = window_from_point( input->desktop, data->x, data->y );
             }
         }
     }
@@ -1271,7 +1269,8 @@ static user_handle_t find_hardware_message_window( struct thread_input *input, s
 }
 
 /* queue a hardware message into a given thread input */
-static void queue_hardware_message( struct msg_queue *queue, struct message *msg )
+static void queue_hardware_message( struct msg_queue *queue, struct message *msg,
+                                    struct hardware_msg_data *data )
 {
     user_handle_t win;
     struct thread *thread;
@@ -1279,7 +1278,7 @@ static void queue_hardware_message( struct msg_queue *queue, struct message *msg
     unsigned int msg_code;
 
     last_input_time = get_tick_count();
-    win = find_hardware_message_window( input, msg, &msg_code );
+    win = find_hardware_message_window( input, msg, data, &msg_code );
     if (!win || !(thread = get_window_thread(win)))
     {
         if (input) update_input_key_state( input, msg );
@@ -1365,8 +1364,10 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
     while (ptr)
     {
         struct message *msg = LIST_ENTRY( ptr, struct message, entry );
+        struct hardware_msg_data *data = msg->data;
+
         ptr = list_next( &input->msg_list, ptr );
-        win = find_hardware_message_window( input, msg, &msg_code );
+        win = find_hardware_message_window( input, msg, data, &msg_code );
         if (!win || !(win_thread = get_window_thread( win )))
         {
             /* no window at all, remove it */
@@ -1409,11 +1410,10 @@ static int get_hardware_message( struct thread *thread, unsigned int hw_id, user
         reply->msg    = msg_code;
         reply->wparam = msg->wparam;
         reply->lparam = msg->lparam;
-        reply->x      = msg->x;
-        reply->y      = msg->y;
         reply->time   = msg->time;
-        reply->info   = msg->info;
-        reply->hw_id  = msg->unique_id;
+
+        data->hw_id = msg->unique_id;
+        set_reply_data( msg->data, msg->data_size );
         return 1;
     }
     /* nothing found, clear the hardware queue bits */
@@ -1481,8 +1481,7 @@ void queue_cleanup_window( struct thread *thread, user_handle_t win )
 }
 
 /* post a message to a window; used by socket handling */
-void post_message( user_handle_t win, unsigned int message,
-                   unsigned long wparam, unsigned long lparam )
+void post_message( user_handle_t win, unsigned int message, lparam_t wparam, lparam_t lparam )
 {
     struct message *msg;
     struct thread *thread = get_window_thread( win );
@@ -1497,9 +1496,6 @@ void post_message( user_handle_t win, unsigned int message,
         msg->wparam    = wparam;
         msg->lparam    = lparam;
         msg->time      = get_tick_count();
-        msg->x         = 0;
-        msg->y         = 0;
-        msg->info      = 0;
         msg->result    = NULL;
         msg->data      = NULL;
         msg->data_size = 0;
@@ -1513,7 +1509,7 @@ void post_message( user_handle_t win, unsigned int message,
 /* post a win event */
 void post_win_event( struct thread *thread, unsigned int event,
                      user_handle_t win, unsigned int object_id,
-                     unsigned int child_id, void *hook_proc,
+                     unsigned int child_id, client_ptr_t hook_proc,
                      const WCHAR *module, data_size_t module_size,
                      user_handle_t hook)
 {
@@ -1529,9 +1525,6 @@ void post_win_event( struct thread *thread, unsigned int event,
         msg->wparam    = object_id;
         msg->lparam    = child_id;
         msg->time      = get_tick_count();
-        msg->x         = 0;
-        msg->y         = 0;
-        msg->info      = 0;
         msg->result    = NULL;
 
         if ((data = malloc( sizeof(*data) + module_size )))
@@ -1545,7 +1538,7 @@ void post_win_event( struct thread *thread, unsigned int event,
             msg->data_size = sizeof(*data) + module_size;
 
             if (debug_level > 1)
-                fprintf( stderr, "post_win_event: tid %04x event %04x win %p object_id %d child_id %d\n",
+                fprintf( stderr, "post_win_event: tid %04x event %04x win %08x object_id %d child_id %d\n",
                          get_thread_id(thread), event, win, object_id, child_id );
             list_add_tail( &thread->queue->msg_list[SEND_MESSAGE], &msg->entry );
             set_queue_bits( thread->queue, QS_SENDMESSAGE );
@@ -1672,9 +1665,6 @@ DECL_HANDLER(send_message)
         msg->wparam    = req->wparam;
         msg->lparam    = req->lparam;
         msg->time      = get_tick_count();
-        msg->x         = 0;
-        msg->y         = 0;
-        msg->info      = 0;
         msg->result    = NULL;
         msg->data      = NULL;
         msg->data_size = get_req_data_size();
@@ -1723,6 +1713,7 @@ DECL_HANDLER(send_hardware_message)
     struct message *msg;
     struct msg_queue *recv_queue = NULL;
     struct thread *thread = NULL;
+    struct hardware_msg_data *data;
 
     if (req->id)
     {
@@ -1736,6 +1727,16 @@ DECL_HANDLER(send_hardware_message)
         return;
     }
 
+    if (!(data = mem_alloc( sizeof(*data) )))
+    {
+        if (thread) release_object( thread );
+        return;
+    }
+    memset( data, 0, sizeof(*data) );
+    data->x    = req->x;
+    data->y    = req->y;
+    data->info = req->info;
+
     if ((msg = mem_alloc( sizeof(*msg) )))
     {
         msg->type      = MSG_HARDWARE;
@@ -1744,14 +1745,13 @@ DECL_HANDLER(send_hardware_message)
         msg->wparam    = req->wparam;
         msg->lparam    = req->lparam;
         msg->time      = req->time;
-        msg->x         = req->x;
-        msg->y         = req->y;
-        msg->info      = req->info;
         msg->result    = NULL;
-        msg->data      = NULL;
-        msg->data_size = 0;
-        queue_hardware_message( recv_queue, msg );
+        msg->data      = data;
+        msg->data_size = sizeof(*data);
+        queue_hardware_message( recv_queue, msg, data );
     }
+    else free( data );
+
     if (thread) release_object( thread );
 }
 
@@ -1826,10 +1826,7 @@ DECL_HANDLER(get_message)
         reply->msg    = WM_PAINT;
         reply->wparam = 0;
         reply->lparam = 0;
-        reply->x      = 0;
-        reply->y      = 0;
         reply->time   = get_tick_count();
-        reply->info   = 0;
         return;
     }
 
@@ -1843,10 +1840,7 @@ DECL_HANDLER(get_message)
         reply->msg    = timer->msg;
         reply->wparam = timer->id;
         reply->lparam = timer->lparam;
-        reply->x      = 0;
-        reply->y      = 0;
         reply->time   = get_tick_count();
-        reply->info   = 0;
         return;
     }
 
@@ -1927,7 +1921,7 @@ DECL_HANDLER(set_win_timer)
     struct msg_queue *queue;
     struct thread *thread = NULL;
     user_handle_t win = 0;
-    unsigned long id = req->id;
+    lparam_t id = req->id;
 
     if (req->win)
     {
@@ -1950,7 +1944,7 @@ DECL_HANDLER(set_win_timer)
     {
         queue = get_current_queue();
         /* look for a timer with this id */
-        if (id && (timer = find_timer( queue, NULL, req->msg, id )))
+        if (id && (timer = find_timer( queue, 0, req->msg, id )))
         {
             /* free and reuse id */
             free_timer( queue, timer );

@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "wcmd.h"
+
 LANGUAGE LANG_SPANISH, SUBLANG_NEUTRAL
 
 STRINGTABLE
@@ -119,7 +121,7 @@ cambiar la configuración acompañe al comando PATH con el nuevo valor.\n\
 \n\
 También es posible modificar el PATH usando la variable de entorno\n\
 PATH, por ejamplo:\n\
-		PATH %PATH%;c:\\temp \n"
+		PATH %PATH%;c:\\temp\n"
 
   WCMD_PAUSE,
 "PAUSE muestra un mensaje en la pantalla 'Pulse la tecla Return para\n\
@@ -289,4 +291,5 @@ Introduzca HELP <comando> para más información sobre cualquiera de los comandos\
   WCMD_CONSTITLE,"Wine Command Prompt"
   WCMD_VERSION,"CMD Version %s\n\n"
   WCMD_MOREPROMPT, "More? "
+  WCMD_LINETOOLONG, "The input line is too long.\n"
 }

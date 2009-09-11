@@ -96,7 +96,7 @@ static void fatal_string_error(int which, DWORD error_code)
 {
 	WCHAR msg[2048];
 
-	if (!LoadStringW(GetModuleHandle(NULL), which,
+	if (!LoadStringW(GetModuleHandleW(NULL), which,
 					msg, sizeof(msg)/sizeof(WCHAR)))
 		WINE_ERR("LoadString failed, error %d\n", GetLastError());
 
@@ -107,7 +107,7 @@ static void fatal_string(int which)
 {
 	WCHAR msg[2048];
 
-	if (!LoadStringW(GetModuleHandle(NULL), which,
+	if (!LoadStringW(GetModuleHandleW(NULL), which,
 					msg, sizeof(msg)/sizeof(WCHAR)))
 		WINE_ERR("LoadString failed, error %d\n", GetLastError());
 
@@ -176,12 +176,15 @@ int wmain (int argc, WCHAR *argv[])
 	WCHAR *args = NULL;
 	int i;
 	int unix_mode = 0;
+	int progid_open = 0;
 	WCHAR *dos_filename = NULL;
 	WCHAR *parent_directory = NULL;
 	DWORD binary_type;
 
 	static const WCHAR openW[] = { 'o', 'p', 'e', 'n', 0 };
 	static const WCHAR unixW[] = { 'u', 'n', 'i', 'x', 0 };
+	static const WCHAR progIDOpenW[] =
+		{ 'p', 'r', 'o', 'g', 'I', 'D', 'O', 'p', 'e', 'n', 0};
 
 	memset(&sei, 0, sizeof(sei));
 	sei.cbSize = sizeof(sei);
@@ -203,7 +206,7 @@ int wmain (int argc, WCHAR *argv[])
 			break;
 
 		/* Unix paths can start with / so we have to assume anything following /U is not a flag */
-		if (unix_mode)
+		if (unix_mode || progid_open)
 			break;
 
 		/* Handle all options in this word */
@@ -211,6 +214,12 @@ int wmain (int argc, WCHAR *argv[])
 			/* Skip slash */
 			ci++;
 			switch(argv[i][ci]) {
+			case 'b':
+			case 'B':
+				break; /* FIXME: should stop new window from being created */
+			case 'i':
+			case 'I':
+				break; /* FIXME: should ignore any changes to current environment */
 			case 'l':
 			case 'L':
 				license();
@@ -235,6 +244,15 @@ int wmain (int argc, WCHAR *argv[])
 					usage();
 				}
 				break;
+			case 'p':
+			case 'P':
+				if (strncmpiW(&argv[i][ci], progIDOpenW, 17) == 0)
+					progid_open = 1;
+				else {
+					WINE_ERR("Option '%s' not recognized\n", wine_dbgstr_w( argv[i]+ci-1));
+					usage();
+				}
+				break;
 			case 'w':
 			case 'W':
 				sei.fMask |= SEE_MASK_NOCLOSEPROCESS;
@@ -252,17 +270,22 @@ int wmain (int argc, WCHAR *argv[])
 	if (i == argc)
 		usage();
 
+	if (progid_open) {
+		sei.lpClass = argv[i++];
+		sei.fMask |= SEE_MASK_CLASSNAME;
+	}
+
 	sei.lpFile = argv[i++];
 
 	args = build_args( argc - i, &argv[i] );
 	sei.lpParameters = args;
 
-	if (unix_mode) {
-		LPWSTR (*wine_get_dos_file_name_ptr)(LPCSTR);
+	if (unix_mode || progid_open) {
+		LPWSTR (*CDECL wine_get_dos_file_name_ptr)(LPCSTR);
 		char* multibyte_unixpath;
 		int multibyte_unixpath_len;
 
-		wine_get_dos_file_name_ptr = (void*)GetProcAddress(GetModuleHandle("KERNEL32"), "wine_get_dos_file_name");
+		wine_get_dos_file_name_ptr = (void*)GetProcAddress(GetModuleHandleA("KERNEL32"), "wine_get_dos_file_name");
 
 		if (!wine_get_dos_file_name_ptr)
 			fatal_string(STRING_UNIXFAIL);
@@ -281,6 +304,7 @@ int wmain (int argc, WCHAR *argv[])
 
 		sei.lpFile = dos_filename;
 		sei.lpDirectory = parent_directory = get_parent_dir(dos_filename);
+		sei.fMask &= ~SEE_MASK_FLAG_NO_UI;
 
                 if (GetBinaryTypeW(sei.lpFile, &binary_type)) {
                     WCHAR *commandline;
@@ -311,11 +335,14 @@ int wmain (int argc, WCHAR *argv[])
 			fatal_string_error(STRING_EXECFAIL, GetLastError());
                     }
                     sei.hProcess = process_information.hProcess;
+                    goto done;
                 }
 	}
-	else if (!ShellExecuteExW(&sei))
-	    	fatal_string_error(STRING_EXECFAIL, GetLastError());
 
+        if (!ShellExecuteExW(&sei))
+            fatal_string_error(STRING_EXECFAIL, GetLastError());
+
+done:
 	HeapFree( GetProcessHeap(), 0, args );
 	HeapFree( GetProcessHeap(), 0, dos_filename );
 	HeapFree( GetProcessHeap(), 0, parent_directory );

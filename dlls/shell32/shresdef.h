@@ -19,6 +19,13 @@
 #ifndef __WINE_SHELL_RES_H
 #define __WINE_SHELL_RES_H
 
+#include <windef.h>
+#include <winbase.h>
+#include <winuser.h>
+#include <winnls.h>
+#include <shlobj.h>
+#include <dlgs.h>
+
 /*
 	columntitles for the shellview
 */
@@ -38,13 +45,14 @@
 
 #define IDS_DESKTOP		20
 #define IDS_MYCOMPUTER		21
+#define IDS_CONTROLPANEL        22
 
-#define IDS_SELECT		22
-#define IDS_OPEN		23
-#define IDS_VIEW_LARGE		24
-#define IDS_VIEW_SMALL		25
-#define IDS_VIEW_LIST		26
-#define IDS_VIEW_DETAILS	27
+#define IDS_SELECT		23
+#define IDS_OPEN		24
+#define IDS_VIEW_LARGE		25
+#define IDS_VIEW_SMALL		26
+#define IDS_VIEW_LIST		27
+#define IDS_VIEW_DETAILS	28
 
 #define IDS_RESTART_TITLE      40
 #define IDS_RESTART_PROMPT     41
@@ -96,10 +104,26 @@
 
 #define IDS_NEWFOLDER 142
 
+#define IDS_CPANEL_TITLE            143
+#define IDS_CPANEL_NAME             144
+#define IDS_CPANEL_DESCRIPTION      145
+
+#define IDS_RUNDLG_ERROR            160
+#define IDS_RUNDLG_BROWSE_ERROR     161
+#define IDS_RUNDLG_BROWSE_CAPTION   162
+#define IDS_RUNDLG_BROWSE_FILTER    163
+
+#define IDS_SHLEXEC_NOASSOC         164
+
 #define IDS_LICENSE                 256
 #define IDS_LICENSE_CAPTION         257
 
 #define MENU_SHV_FILE 144
+
+#define MENU_CPANEL                 200
+#define IDM_CPANEL_EXIT             201
+#define IDM_CPANEL_ABOUT            202
+#define IDM_CPANEL_APPLET_BASE      210
 
 /* Note: this string is referenced from the registry*/
 #define IDS_RECYCLEBIN_FOLDER_NAME   8964
@@ -170,5 +194,21 @@ FIXME: Need to add them, but for now just let them use the same: searching.avi
 #define IDC_ABOUT_STATIC_TEXT1   100
 #define IDC_ABOUT_STATIC_TEXT2   101
 #define IDC_ABOUT_STATIC_TEXT3   102
+
+/* run dialog */
+#define IDC_RUNDLG_DESCRIPTION  12289
+#define IDC_RUNDLG_BROWSE       12288
+#define IDC_RUNDLG_ICON         12297
+#define IDC_RUNDLG_EDITPATH     12298
+#define IDC_RUNDLG_LABEL        12305
+
+/* bitmaps */
+/* explorer toolbar icons
+ * FIXME: images are hacky and should be re-drawn; also dark and light bitmaps are same for now
+ */
+#define IDB_TB_LARGE_LIGHT      214
+#define IDB_TB_LARGE_DARK       215
+#define IDB_TB_SMALL_LIGHT      216
+#define IDB_TB_SMALL_DARK       217
 
 #endif

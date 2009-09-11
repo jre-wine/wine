@@ -34,6 +34,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
+#include "winternl.h"
 #include "wine/winbase16.h"
 #include "wine/exception.h"
 #include "wine/library.h"
@@ -151,27 +152,8 @@ HANDLE WINAPI OpenThread( DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwTh
  */
 void WINAPI ExitThread( DWORD code ) /* [in] Exit code for this thread */
 {
-    BOOL last;
-    SERVER_START_REQ( terminate_thread )
-    {
-        /* send the exit code to the server */
-        req->handle    = GetCurrentThread();
-        req->exit_code = code;
-        wine_server_call( req );
-        last = reply->last;
-    }
-    SERVER_END_REQ;
-
-    if (last)
-    {
-        LdrShutdownProcess();
-        exit( code );
-    }
-    else
-    {
-        RtlFreeThreadActivationContextStack();
-        RtlExitUserThread( code );
-    }
+    RtlFreeThreadActivationContextStack();
+    RtlExitUserThread( code );
 }
 
 
@@ -370,7 +352,7 @@ BOOL WINAPI GetThreadPriorityBoost(
     PBOOL pstate)   /* [out] pointer to var that receives the boost state */
 {
     if (pstate) *pstate = FALSE;
-    return NO_ERROR;
+    return TRUE;
 }
 
 
@@ -420,7 +402,7 @@ DWORD_PTR WINAPI SetThreadAffinityMask( HANDLE hThread, DWORD_PTR dwThreadAffini
 
 
 /**********************************************************************
- * SetThreadIdealProcessor [KERNEL32.@]  Obtains timing information.
+ * SetThreadIdealProcessor [KERNEL32.@]  Sets preferred processor for thread.
  *
  * RETURNS
  *    Success: Value of last call to SetThreadIdealProcessor
@@ -431,8 +413,12 @@ DWORD WINAPI SetThreadIdealProcessor(
     DWORD dwIdealProcessor)  /* [in] Specifies the new preferred processor */
 {
     FIXME("(%p): stub\n",hThread);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return -1L;
+    if (dwIdealProcessor > MAXIMUM_PROCESSORS)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return ~0u;
+    }
+    return 0;
 }
 
 
@@ -575,7 +561,7 @@ VOID WINAPI VWin32_BoostThreadStatic( DWORD threadId, INT boost )
 #undef GetCurrentThread
 HANDLE WINAPI GetCurrentThread(void)
 {
-    return (HANDLE)0xfffffffe;
+    return (HANDLE)~(ULONG_PTR)1;
 }
 
 
@@ -586,7 +572,7 @@ HANDLE WINAPI GetCurrentThread(void)
  *		SetLastError (KERNEL32.@)
  */
 /* void WINAPI SetLastError( DWORD error ); */
-__ASM_GLOBAL_FUNC( SetLastError,
+__ASM_STDCALL_FUNC( SetLastError, 4,
                    "movl 4(%esp),%eax\n\t"
                    ".byte 0x64\n\t"
                    "movl %eax,0x34\n\t"
@@ -597,21 +583,21 @@ __ASM_GLOBAL_FUNC( SetLastError,
  *		GetLastError (KERNEL32.@)
  */
 /* DWORD WINAPI GetLastError(void); */
-__ASM_GLOBAL_FUNC( GetLastError, ".byte 0x64\n\tmovl 0x34,%eax\n\tret" )
+__ASM_STDCALL_FUNC( GetLastError, 0, ".byte 0x64\n\tmovl 0x34,%eax\n\tret" )
 
 /***********************************************************************
  *		GetCurrentProcessId (KERNEL.471)
  *		GetCurrentProcessId (KERNEL32.@)
  */
 /* DWORD WINAPI GetCurrentProcessId(void) */
-__ASM_GLOBAL_FUNC( GetCurrentProcessId, ".byte 0x64\n\tmovl 0x20,%eax\n\tret" )
+__ASM_STDCALL_FUNC( GetCurrentProcessId, 0, ".byte 0x64\n\tmovl 0x20,%eax\n\tret" )
 
 /***********************************************************************
  *		GetCurrentThreadId (KERNEL.462)
  *		GetCurrentThreadId (KERNEL32.@)
  */
 /* DWORD WINAPI GetCurrentThreadId(void) */
-__ASM_GLOBAL_FUNC( GetCurrentThreadId, ".byte 0x64\n\tmovl 0x24,%eax\n\tret" )
+__ASM_STDCALL_FUNC( GetCurrentThreadId, 0, ".byte 0x64\n\tmovl 0x24,%eax\n\tret" )
 
 #else  /* __i386__ */
 

@@ -483,7 +483,7 @@ BOOL WINAPI IsLFNDriveAW(LPCVOID lpszPath)
 /*************************************************************************
  * PathMakeUniqueNameA	[internal]
  */
-BOOL WINAPI PathMakeUniqueNameA(
+static BOOL PathMakeUniqueNameA(
 	LPSTR lpszBuffer,
 	DWORD dwBuffSize,
 	LPCSTR lpszShortName,
@@ -499,7 +499,7 @@ BOOL WINAPI PathMakeUniqueNameA(
 /*************************************************************************
  * PathMakeUniqueNameW	[internal]
  */
-BOOL WINAPI PathMakeUniqueNameW(
+static BOOL PathMakeUniqueNameW(
 	LPWSTR lpszBuffer,
 	DWORD dwBuffSize,
 	LPCWSTR lpszShortName,
@@ -636,7 +636,7 @@ int WINAPI PathCleanupSpec( LPCWSTR lpszPathW, LPWSTR lpszFileW )
 /*************************************************************************
  * PathQualifyA		[SHELL32]
  */
-BOOL WINAPI PathQualifyA(LPCSTR pszPath)
+static BOOL PathQualifyA(LPCSTR pszPath)
 {
 	FIXME("%s\n",pszPath);
 	return 0;
@@ -645,7 +645,7 @@ BOOL WINAPI PathQualifyA(LPCSTR pszPath)
 /*************************************************************************
  * PathQualifyW		[SHELL32]
  */
-BOOL WINAPI PathQualifyW(LPCWSTR pszPath)
+static BOOL PathQualifyW(LPCWSTR pszPath)
 {
 	FIXME("%s\n",debugstr_w(pszPath));
 	return 0;
@@ -661,10 +661,7 @@ BOOL WINAPI PathQualifyAW(LPCVOID pszPath)
 	return PathQualifyA(pszPath);
 }
 
-/*************************************************************************
- * PathResolveA [SHELL32.51]
- */
-BOOL WINAPI PathResolveA(
+static BOOL PathResolveA(
 	LPSTR lpszPath,
 	LPCSTR *alpszPaths,
 	DWORD dwFlags)
@@ -674,10 +671,7 @@ BOOL WINAPI PathResolveA(
 	return 0;
 }
 
-/*************************************************************************
- * PathResolveW [SHELL32]
- */
-BOOL WINAPI PathResolveW(
+static BOOL PathResolveW(
 	LPWSTR lpszPath,
 	LPCWSTR *alpszPaths,
 	DWORD dwFlags)
@@ -701,9 +695,9 @@ BOOL WINAPI PathResolveAW(
 }
 
 /*************************************************************************
-*	PathProcessCommandA	[SHELL32.653]
+*	PathProcessCommandA
 */
-LONG WINAPI PathProcessCommandA (
+static LONG PathProcessCommandA (
 	LPCSTR lpszPath,
 	LPSTR lpszBuff,
 	DWORD dwBuffSize,
@@ -719,7 +713,7 @@ LONG WINAPI PathProcessCommandA (
 /*************************************************************************
 *	PathProcessCommandW
 */
-LONG WINAPI PathProcessCommandW (
+static LONG PathProcessCommandW (
 	LPCWSTR lpszPath,
 	LPWSTR lpszBuff,
 	DWORD dwBuffSize,
@@ -770,6 +764,7 @@ static const WCHAR Common_Administrative_ToolsW[] = {'C','o','m','m','o','n',' '
 static const WCHAR Common_AppDataW[] = {'C','o','m','m','o','n',' ','A','p','p','D','a','t','a','\0'};
 static const WCHAR Common_DesktopW[] = {'C','o','m','m','o','n',' ','D','e','s','k','t','o','p','\0'};
 static const WCHAR Common_DocumentsW[] = {'C','o','m','m','o','n',' ','D','o','c','u','m','e','n','t','s','\0'};
+static const WCHAR Common_FavoritesW[] = {'C','o','m','m','o','n',' ','F','a','v','o','r','i','t','e','s','\0'};
 static const WCHAR CommonFilesDirW[] = {'C','o','m','m','o','n','F','i','l','e','s','D','i','r','\0'};
 static const WCHAR CommonMusicW[] = {'C','o','m','m','o','n','M','u','s','i','c','\0'};
 static const WCHAR CommonPicturesW[] = {'C','o','m','m','o','n','P','i','c','t','u','r','e','s','\0'};
@@ -807,11 +802,8 @@ static const WCHAR ProfilesDirectoryW[] = {'P','r','o','f','i','l','e','s','D','
 static const WCHAR AllUsersProfileValueW[] = {'A','l','l','U','s','e','r','s','P','r','o','f','i','l','e','\0'};
 static const WCHAR szSHFolders[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','S','h','e','l','l',' ','F','o','l','d','e','r','s','\0'};
 static const WCHAR szSHUserFolders[] = {'S','o','f','t','w','a','r','e','\\','M','i','c','r','o','s','o','f','t','\\','W','i','n','d','o','w','s','\\','C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\','E','x','p','l','o','r','e','r','\\','U','s','e','r',' ','S','h','e','l','l',' ','F','o','l','d','e','r','s','\0'};
-/* This defaults to L"Documents and Settings" on Windows 2000/XP, but we're
- * acting more Windows 9x-like for now.
- */
-static const WCHAR szDefaultProfileDirW[] = {'p','r','o','f','i','l','e','s','\0'};
-static const WCHAR AllUsersW[] = {'A','l','l',' ','U','s','e','r','s','\0'};
+static const WCHAR szDefaultProfileDirW[] = {'u','s','e','r','s',0};
+static const WCHAR AllUsersW[] = {'P','u','b','l','i','c',0};
 
 typedef enum _CSIDL_Type {
     CSIDL_Type_User,
@@ -821,6 +813,7 @@ typedef enum _CSIDL_Type {
     CSIDL_Type_NonExistent,
     CSIDL_Type_WindowsPath,
     CSIDL_Type_SystemPath,
+    CSIDL_Type_SystemX86Path,
 } CSIDL_Type;
 
 typedef struct
@@ -960,7 +953,7 @@ static const CSIDL_DATA CSIDL_Data[] =
     { /* 0x19 - CSIDL_COMMON_DESKTOPDIRECTORY */
         CSIDL_Type_AllUsers,
         Common_DesktopW,
-        MAKEINTRESOURCEW(IDS_DESKTOP)
+        MAKEINTRESOURCEW(IDS_DESKTOPDIRECTORY)
     },
     { /* 0x1a - CSIDL_APPDATA */
         CSIDL_Type_User,
@@ -989,7 +982,7 @@ static const CSIDL_DATA CSIDL_Data[] =
     },
     { /* 0x1f - CSIDL_COMMON_FAVORITES */
         CSIDL_Type_AllUsers,
-        FavoritesW,
+        Common_FavoritesW,
         MAKEINTRESOURCEW(IDS_FAVORITES)
     },
     { /* 0x20 - CSIDL_INTERNET_CACHE */
@@ -1038,7 +1031,7 @@ static const CSIDL_DATA CSIDL_Data[] =
         NULL
     },
     { /* 0x29 - CSIDL_SYSTEMX86 */
-        CSIDL_Type_NonExistent,
+        CSIDL_Type_SystemX86Path,
         NULL,
         NULL
     },
@@ -1574,13 +1567,14 @@ static HRESULT _SHExpandEnvironmentStrings(LPCWSTR szSrc, LPWSTR szDest)
     hr = _SHOpenProfilesKey(&key);
     if (SUCCEEDED(hr))
     {
-        WCHAR szDefaultProfilesPrefix[MAX_PATH];
+        WCHAR def_val[MAX_PATH];
 
-        GetWindowsDirectoryW(szDefaultProfilesPrefix, MAX_PATH);
-        PathAddBackslashW(szDefaultProfilesPrefix);
-        PathAppendW(szDefaultProfilesPrefix, szDefaultProfileDirW);
-        hr = _SHGetProfilesValue(key, ProfilesDirectoryW, szProfilesPrefix,
-         szDefaultProfilesPrefix);
+        /* get the system drive */
+        GetSystemDirectoryW(def_val, MAX_PATH);
+        if (def_val[1] == ':') strcpyW( def_val + 3, szDefaultProfileDirW );
+        else FIXME("non-drive system paths unsupported\n");
+
+        hr = _SHGetProfilesValue(key, ProfilesDirectoryW, szProfilesPrefix, def_val );
     }
 
     *szDest = 0;
@@ -1675,20 +1669,88 @@ HRESULT WINAPI SHGetFolderPathW(
 	DWORD dwFlags,     /* [I] which path to return */
 	LPWSTR pszPath)    /* [O] converted path */
 {
+    HRESULT hr =  SHGetFolderPathAndSubDirW(hwndOwner, nFolder, hToken, dwFlags, NULL, pszPath);
+    if(HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) == hr)
+        hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    return hr;
+}
+
+HRESULT WINAPI SHGetFolderPathAndSubDirA(
+	HWND hwndOwner,    /* [I] owner window */
+	int nFolder,       /* [I] CSIDL identifying the folder */
+	HANDLE hToken,     /* [I] access token */
+	DWORD dwFlags,     /* [I] which path to return */
+	LPCSTR pszSubPath, /* [I] sub directory of the specified folder */
+	LPSTR pszPath)     /* [O] converted path */
+{
+    int length;
+    HRESULT hr = S_OK;
+    LPWSTR pszSubPathW = NULL;
+    LPWSTR pszPathW = NULL;
+    TRACE("%08x,%08x,%s\n",nFolder, dwFlags, debugstr_w(pszSubPathW));
+
+    if(pszPath) {
+        pszPathW = HeapAlloc(GetProcessHeap(), 0, MAX_PATH * sizeof(WCHAR));
+        if(!pszPathW) {
+            hr = HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_MEMORY);
+            goto cleanup;
+        }
+    }
+    TRACE("%08x,%08x,%s\n",nFolder, dwFlags, debugstr_w(pszSubPathW));
+
+    /* SHGetFolderPathAndSubDirW does not distinguish if pszSubPath isn't
+     * set (null), or an empty string.therefore call it without the parameter set
+     * if pszSubPath is an empty string
+     */
+    if (pszSubPath && pszSubPath[0]) {
+        length = MultiByteToWideChar(CP_ACP, 0, pszSubPath, -1, NULL, 0);
+        pszSubPathW = HeapAlloc(GetProcessHeap(), 0, length * sizeof(WCHAR));
+        if(!pszSubPathW) {
+            hr = HRESULT_FROM_WIN32(ERROR_NOT_ENOUGH_MEMORY);
+            goto cleanup;
+        }
+        MultiByteToWideChar(CP_ACP, 0, pszSubPath, -1, pszSubPathW, length);
+    }
+
+    hr = SHGetFolderPathAndSubDirW(hwndOwner, nFolder, hToken, dwFlags, pszSubPathW, pszPathW);
+
+    if (SUCCEEDED(hr) && pszPath)
+        WideCharToMultiByte(CP_ACP, 0, pszPathW, -1, pszPath, MAX_PATH, NULL, NULL);
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, pszPathW);
+    HeapFree(GetProcessHeap(), 0, pszSubPathW);
+    return hr;
+}
+
+/*************************************************************************
+ * SHGetFolderPathAndSubDirW		[SHELL32.@]
+ */
+HRESULT WINAPI SHGetFolderPathAndSubDirW(
+	HWND hwndOwner,    /* [I] owner window */
+	int nFolder,       /* [I] CSIDL identifying the folder */
+	HANDLE hToken,     /* [I] access token */
+	DWORD dwFlags,     /* [I] which path to return */
+	LPCWSTR pszSubPath,/* [I] sub directory of the specified folder */
+	LPWSTR pszPath)    /* [O] converted path */
+{
     HRESULT    hr;
     WCHAR      szBuildPath[MAX_PATH], szTemp[MAX_PATH];
     DWORD      folder = nFolder & CSIDL_FOLDER_MASK;
     CSIDL_Type type;
     int        ret;
     
-    TRACE("%p,%p,nFolder=0x%04x\n", hwndOwner,pszPath,nFolder);
+    TRACE("%p,%p,nFolder=0x%04x,%s\n", hwndOwner,pszPath,nFolder,debugstr_w(pszSubPath));
 
     /* Windows always NULL-terminates the resulting path regardless of success
      * or failure, so do so first
      */
     if (pszPath)
         *pszPath = '\0';
+
     if (folder >= sizeof(CSIDL_Data) / sizeof(CSIDL_Data[0]))
+        return E_INVALIDARG;
+    if ((SHGFP_TYPE_CURRENT != dwFlags) && (SHGFP_TYPE_DEFAULT != dwFlags))
         return E_INVALIDARG;
     szTemp[0] = 0;
     type = CSIDL_Data[folder].type;
@@ -1722,6 +1784,17 @@ HRESULT WINAPI SHGetFolderPathW(
             }
             hr = S_OK;
             break;
+        case CSIDL_Type_SystemX86Path:
+            if (!GetSystemWow64DirectoryW(szTemp, MAX_PATH)) GetSystemDirectoryW(szTemp, MAX_PATH);
+            if (CSIDL_Data[folder].szDefaultPath &&
+             !IS_INTRESOURCE(CSIDL_Data[folder].szDefaultPath) &&
+             *CSIDL_Data[folder].szDefaultPath)
+            {
+                PathAddBackslashW(szTemp);
+                strcatW(szTemp, CSIDL_Data[folder].szDefaultPath);
+            }
+            hr = S_OK;
+            break;
         case CSIDL_Type_CurrVer:
             hr = _SHGetCurrentVersionPath(dwFlags, folder, szTemp);
             break;
@@ -1742,11 +1815,22 @@ HRESULT WINAPI SHGetFolderPathW(
         hr = _SHExpandEnvironmentStrings(szTemp, szBuildPath);
     else
         strcpyW(szBuildPath, szTemp);
+
+    if (FAILED(hr)) goto end;
+
+    if(pszSubPath) {
+        /* make sure the new path does not exceed th bufferlength
+         * rememebr to backslash and the termination */
+        if(MAX_PATH < (lstrlenW(szBuildPath) + lstrlenW(pszSubPath) + 2)) {
+            hr = HRESULT_FROM_WIN32(ERROR_FILENAME_EXCED_RANGE);
+            goto end;
+        }
+        PathAppendW(szBuildPath, pszSubPath);
+        PathRemoveBackslashW(szBuildPath);
+    }
     /* Copy the path if it's available before we might return */
     if (SUCCEEDED(hr) && pszPath)
         strcpyW(pszPath, szBuildPath);
-
-    if (FAILED(hr)) goto end;
 
     /* if we don't care about existing directories we are ready */
     if(nFolder & CSIDL_FLAG_DONT_VERIFY) goto end;
@@ -1758,7 +1842,7 @@ HRESULT WINAPI SHGetFolderPathW(
      */
     if (!(nFolder & CSIDL_FLAG_CREATE))
     {
-        hr = HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+        hr = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
         goto end;
     }
 
@@ -1849,7 +1933,15 @@ static HRESULT _SHRegisterFolders(HKEY hRootKey, HANDLE hToken,
             else if (CSIDL_Data[folders[i]].type == CSIDL_Type_AllUsers)
                 _SHGetAllUsersProfilePath(SHGFP_TYPE_DEFAULT, folders[i], path);
             else if (CSIDL_Data[folders[i]].type == CSIDL_Type_WindowsPath)
+            {
                 GetWindowsDirectoryW(path, MAX_PATH);
+                if (CSIDL_Data[folders[i]].szDefaultPath &&
+                    !IS_INTRESOURCE(CSIDL_Data[folders[i]].szDefaultPath))
+                {
+                    PathAddBackslashW(path);
+                    strcatW(path, CSIDL_Data[folders[i]].szDefaultPath);
+                }
+            }
             else
                 hr = E_FAIL;
             if (*path)
@@ -1950,6 +2042,10 @@ static HRESULT _SHRegisterCommonShellFolders(void)
      CSIDL_COMMON_APPDATA,
      CSIDL_COMMON_TEMPLATES,
      CSIDL_COMMON_DOCUMENTS,
+     CSIDL_COMMON_ADMINTOOLS,
+     CSIDL_COMMON_MUSIC,
+     CSIDL_COMMON_PICTURES,
+     CSIDL_COMMON_VIDEO,
     };
     HRESULT hr;
 
@@ -2046,7 +2142,8 @@ static void _SHCreateSymbolicLinks(void)
 {
     UINT aidsMyStuff[] = { IDS_MYPICTURES, IDS_MYVIDEO, IDS_MYMUSIC }, i;
     int acsidlMyStuff[] = { CSIDL_MYPICTURES, CSIDL_MYVIDEO, CSIDL_MYMUSIC };
-    static const char * xdg_dirs[] = { "PICTURES", "VIDEOS", "MUSIC", "DESKTOP" };
+    static const char * const xdg_dirs[] = { "PICTURES", "VIDEOS", "MUSIC", "DESKTOP" };
+    static const unsigned int num = sizeof(xdg_dirs) / sizeof(xdg_dirs[0]);
     WCHAR wszTempPath[MAX_PATH];
     char szPersonalTarget[FILENAME_MAX], *pszPersonal;
     char szMyStuffTarget[FILENAME_MAX], *pszMyStuff;
@@ -2054,8 +2151,7 @@ static void _SHCreateSymbolicLinks(void)
     struct stat statFolder;
     const char *pszHome;
     HRESULT hr;
-    const unsigned int num = sizeof(xdg_dirs) / sizeof(xdg_dirs[0]);
-    char ** xdg_results = NULL;
+    char ** xdg_results;
     char * xdg_desktop_dir;
 
     /* Create all necessary profile sub-dirs up to 'My Documents' and get the unix path. */
@@ -2065,7 +2161,8 @@ static void _SHCreateSymbolicLinks(void)
     pszPersonal = wine_get_unix_file_name(wszTempPath);
     if (!pszPersonal) return;
 
-    XDG_UserDirLookup(xdg_dirs, num, &xdg_results);
+    hr = XDG_UserDirLookup(xdg_dirs, num, &xdg_results);
+    if (FAILED(hr)) xdg_results = NULL;
 
     pszHome = getenv("HOME");
     if (pszHome && !stat(pszHome, &statFolder) && S_ISDIR(statFolder.st_mode)) {

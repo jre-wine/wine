@@ -265,15 +265,16 @@ static BOOL	start_debugger(PEXCEPTION_POINTERS epointers, HANDLE hEvent)
 
     if (format)
     {
-        cmdline = HeapAlloc(GetProcessHeap(), 0, strlen(format) + 2*20);
-        sprintf(cmdline, format, GetCurrentProcessId(), hEvent);
+        size_t format_size = strlen(format) + 2*20;
+        cmdline = HeapAlloc(GetProcessHeap(), 0, format_size);
+        snprintf(cmdline, format_size, format, (long)GetCurrentProcessId(), (long)HandleToLong(hEvent));
         HeapFree(GetProcessHeap(), 0, format);
     }
     else
     {
         cmdline = HeapAlloc(GetProcessHeap(), 0, 80);
-        sprintf(cmdline, "winedbg --auto %d %ld",
-                GetCurrentProcessId(), (ULONG_PTR)hEvent);
+        snprintf(cmdline, 80, "winedbg --auto %ld %ld", /* as in tools/wine.inf */
+                 (long)GetCurrentProcessId(), (long)HandleToLong(hEvent));
     }
 
     if (!bAuto)
@@ -366,7 +367,7 @@ static	int	start_debugger_atomic(PEXCEPTION_POINTERS epointers)
 	/* ask for manual reset, so that once the debugger is started,
 	 * every thread will know it */
 	NtCreateEvent( &hEvent, EVENT_ALL_ACCESS, &attr, TRUE, FALSE );
-	if (InterlockedCompareExchangePointer( (PVOID)&hRunOnce, hEvent, 0 ) == 0)
+        if (InterlockedCompareExchangePointer( &hRunOnce, hEvent, 0 ) == 0)
 	{
 	    /* ok, our event has been set... we're the winning thread */
 	    BOOL	ret = start_debugger( epointers, hRunOnce );
@@ -408,7 +409,7 @@ static inline BOOL check_resource_write( void *addr )
 
     if (!VirtualQuery( addr, &info, sizeof(info) )) return FALSE;
     if (info.State == MEM_FREE || !(info.Type & MEM_IMAGE)) return FALSE;
-    if (!(rsrc = RtlImageDirectoryEntryToData( (HMODULE)info.AllocationBase, TRUE,
+    if (!(rsrc = RtlImageDirectoryEntryToData( info.AllocationBase, TRUE,
                                               IMAGE_DIRECTORY_ENTRY_RESOURCE, &size )))
         return FALSE;
     if (addr < rsrc || (char *)addr >= (char *)rsrc + size) return FALSE;

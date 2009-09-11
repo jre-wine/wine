@@ -28,6 +28,7 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "winreg.h"
+#include "winsafer.h"
 #include "winternl.h"
 #include "winioctl.h"
 #include "ntsecapi.h"
@@ -38,6 +39,7 @@
 #include "objbase.h"
 #include "iads.h"
 #include "advapi32_misc.h"
+#include "lmcons.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -52,7 +54,7 @@ static BYTE ParseAceStringType(LPCWSTR* StringAcl);
 static DWORD ParseAceStringRights(LPCWSTR* StringAcl);
 static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     LPCWSTR StringSecurityDescriptor,
-    SECURITY_DESCRIPTOR* SecurityDescriptor,
+    SECURITY_DESCRIPTOR_RELATIVE* SecurityDescriptor,
     LPDWORD cBytes);
 static DWORD ParseAclStringFlags(LPCWSTR* StringAcl);
 
@@ -128,6 +130,10 @@ static const WELLKNOWNSID WellKnownSids[] =
     { {0,0}, WinBuiltinAuthorizationAccessSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_AUTHORIZATIONACCESS } } },
     { {0,0}, WinBuiltinTerminalServerLicenseServersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_TS_LICENSE_SERVERS } } },
     { {0,0}, WinBuiltinDCOMUsersSid, { SID_REVISION, 2, { SECURITY_NT_AUTHORITY }, { SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_DCOM_USERS } } },
+    { {'L','W'}, WinLowLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_LOW_RID} } },
+    { {'M','E'}, WinMediumLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_MEDIUM_RID } } },
+    { {'H','I'}, WinHighLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_HIGH_RID } } },
+    { {'S','I'}, WinSystemLabelSid, { SID_REVISION, 1, { SECURITY_MANDATORY_LABEL_AUTHORITY}, { SECURITY_MANDATORY_SYSTEM_RID } } },
 };
 
 /* these SIDs must be constructed as relative to some domain - only the RID is well-known */
@@ -161,6 +167,7 @@ typedef struct _AccountSid {
     LPCWSTR account;
     LPCWSTR domain;
     SID_NAME_USE name_use;
+    LPCWSTR alias;
 } AccountSid;
 
 static const WCHAR Account_Operators[] = { 'A','c','c','o','u','n','t',' ','O','p','e','r','a','t','o','r','s',0 };
@@ -177,6 +184,7 @@ static const WCHAR CREATOR_GROUP[] = { 'C','R','E','A','T','O','R',' ','G','R','
 static const WCHAR CREATOR_GROUP_SERVER[] = { 'C','R','E','A','T','O','R',' ','G','R','O','U','P',' ','S','E','R','V','E','R',0 };
 static const WCHAR CREATOR_OWNER[] = { 'C','R','E','A','T','O','R',' ','O','W','N','E','R',0 };
 static const WCHAR CREATOR_OWNER_SERVER[] = { 'C','R','E','A','T','O','R',' ','O','W','N','E','R',' ','S','E','R','V','E','R',0 };
+static const WCHAR CURRENT_USER[] = { 'C','U','R','R','E','N','T','_','U','S','E','R',0 };
 static const WCHAR DIALUP[] = { 'D','I','A','L','U','P',0 };
 static const WCHAR Digest_Authentication[] = { 'D','i','g','e','s','t',' ','A','u','t','h','e','n','t','i','c','a','t','i','o','n',0 };
 static const WCHAR DOMAIN[] = {'D','O','M','A','I','N',0};
@@ -194,9 +202,11 @@ static const WCHAR Guests[] = { 'G','u','e','s','t','s',0 };
 static const WCHAR INTERACTIVE[] = { 'I','N','T','E','R','A','C','T','I','V','E',0 };
 static const WCHAR LOCAL[] = { 'L','O','C','A','L',0 };
 static const WCHAR LOCAL_SERVICE[] = { 'L','O','C','A','L',' ','S','E','R','V','I','C','E',0 };
+static const WCHAR LOCAL_SERVICE2[] = { 'L','O','C','A','L','S','E','R','V','I','C','E',0 };
 static const WCHAR NETWORK[] = { 'N','E','T','W','O','R','K',0 };
 static const WCHAR Network_Configuration_Operators[] = { 'N','e','t','w','o','r','k',' ','C','o','n','f','i','g','u','r','a','t','i','o','n',' ','O','p','e','r','a','t','o','r','s',0 };
 static const WCHAR NETWORK_SERVICE[] = { 'N','E','T','W','O','R','K',' ','S','E','R','V','I','C','E',0 };
+static const WCHAR NETWORK_SERVICE2[] = { 'N','E','T','W','O','R','K','S','E','R','V','I','C','E',0 };
 static const WCHAR NT_AUTHORITY[] = { 'N','T',' ','A','U','T','H','O','R','I','T','Y',0 };
 static const WCHAR NT_Pseudo_Domain[] = { 'N','T',' ','P','s','e','u','d','o',' ','D','o','m','a','i','n',0 };
 static const WCHAR NTML_Authentication[] = { 'N','T','M','L',' ','A','u','t','h','e','n','t','i','c','a','t','i','o','n',0 };
@@ -246,8 +256,8 @@ static const AccountSid ACCOUNT_SIDS[] = {
     { WinTerminalServerSid, TERMINAL_SERVER_USER, NT_AUTHORITY, SidTypeWellKnownGroup },
     { WinRemoteLogonIdSid, REMOTE_INTERACTIVE_LOGON, NT_AUTHORITY, SidTypeWellKnownGroup },
     { WinLocalSystemSid, SYSTEM, NT_AUTHORITY, SidTypeWellKnownGroup },
-    { WinLocalServiceSid, LOCAL_SERVICE, NT_AUTHORITY, SidTypeWellKnownGroup },
-    { WinNetworkServiceSid, NETWORK_SERVICE, NT_AUTHORITY, SidTypeWellKnownGroup },
+    { WinLocalServiceSid, LOCAL_SERVICE, NT_AUTHORITY, SidTypeWellKnownGroup, LOCAL_SERVICE2 },
+    { WinNetworkServiceSid, NETWORK_SERVICE, NT_AUTHORITY, SidTypeWellKnownGroup , NETWORK_SERVICE2},
     { WinBuiltinDomainSid, BUILTIN, BUILTIN, SidTypeDomain },
     { WinBuiltinAdministratorsSid, Administrators, BUILTIN, SidTypeAlias },
     { WinBuiltinUsersSid, Users, BUILTIN, SidTypeAlias },
@@ -335,7 +345,7 @@ static const WCHAR SDDL_AUDIT_FAILURE[]      = {'F','A',0};
 const char * debugstr_sid(PSID sid)
 {
     int auth = 0;
-    SID * psid = (SID *)sid;
+    SID * psid = sid;
 
     if (psid == NULL)
         return "(null)";
@@ -480,7 +490,7 @@ BOOL ADVAPI_GetComputerSid(PSID sid)
         SID_IDENTIFIER_AUTHORITY identifierAuthority = {SECURITY_NT_AUTHORITY};
         DWORD id[3];
 
-        if (RtlGenRandom(&id, sizeof(id)))
+        if (RtlGenRandom(id, sizeof(id)))
         {
             if (AllocateAndInitializeSid(&identifierAuthority, 4, SECURITY_NT_NON_UNIQUE, id[0], id[1], id[2], 0, 0, 0, 0, &new_sid))
             {
@@ -850,7 +860,8 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
     unsigned int i;
     TRACE("(%d, %s, %p, %p)\n", WellKnownSidType, debugstr_sid(DomainSid), pSid, cbSid);
 
-    if (cbSid == NULL || pSid == NULL || (DomainSid && !IsValidSid(DomainSid))) {
+    if (cbSid == NULL || (DomainSid && !IsValidSid(DomainSid)))
+    {
         SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
@@ -859,11 +870,17 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
         if (WellKnownSids[i].Type == WellKnownSidType) {
             DWORD length = GetSidLengthRequired(WellKnownSids[i].Sid.SubAuthorityCount);
 
-            if (*cbSid < length) {
+            if (*cbSid < length)
+            {
+                *cbSid = length;
                 SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 return FALSE;
             }
-
+            if (!pSid)
+            {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
             CopyMemory(pSid, &WellKnownSids[i].Sid.Revision, length);
             *cbSid = length;
             return TRUE;
@@ -882,11 +899,17 @@ CreateWellKnownSid( WELL_KNOWN_SID_TYPE WellKnownSidType,
             DWORD domain_sid_length = GetSidLengthRequired(domain_subauth);
             DWORD output_sid_length = GetSidLengthRequired(domain_subauth + 1);
 
-            if (*cbSid < output_sid_length) {
+            if (*cbSid < output_sid_length)
+            {
+                *cbSid = output_sid_length;
                 SetLastError(ERROR_INSUFFICIENT_BUFFER);
                 return FALSE;
             }
-
+            if (!pSid)
+            {
+                SetLastError(ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
             CopyMemory(pSid, DomainSid, domain_sid_length);
             (*GetSidSubAuthorityCount(pSid))++;
             (*GetSidSubAuthority(pSid, domain_subauth)) = WellKnownRids[i].Rid;
@@ -1051,6 +1074,7 @@ GetSidIdentifierAuthority( PSID pSid )
 PDWORD WINAPI
 GetSidSubAuthority( PSID pSid, DWORD nSubAuthority )
 {
+        SetLastError(ERROR_SUCCESS);
 	return RtlSubAuthoritySid(pSid, nSubAuthority);
 }
 
@@ -1063,6 +1087,7 @@ GetSidSubAuthority( PSID pSid, DWORD nSubAuthority )
 PUCHAR WINAPI
 GetSidSubAuthorityCount (PSID pSid)
 {
+        SetLastError(ERROR_SUCCESS);
 	return RtlSubAuthorityCountSid(pSid);
 }
 
@@ -1678,7 +1703,7 @@ LookupPrivilegeValueW( LPCWSTR lpSystemName, LPCWSTR lpName, PLUID lpLuid )
         SetLastError(ERROR_NO_SUCH_PRIVILEGE);
         return FALSE;
     }
-    for( i=SE_MIN_WELL_KNOWN_PRIVILEGE; i<SE_MAX_WELL_KNOWN_PRIVILEGE; i++ )
+    for( i=SE_MIN_WELL_KNOWN_PRIVILEGE; i<=SE_MAX_WELL_KNOWN_PRIVILEGE; i++ )
     {
         if( !WellKnownPrivNames[i] )
             continue;
@@ -1914,6 +1939,10 @@ GetFileSecurityW( LPCWSTR lpFileName,
     NTSTATUS status;
     DWORD access = 0;
 
+    TRACE("(%s,%d,%p,%d,%p)\n", debugstr_w(lpFileName),
+          RequestedInformation, pSecurityDescriptor,
+          nLength, lpnLengthNeeded);
+
     if (RequestedInformation & (OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|
                                 DACL_SECURITY_INFORMATION))
         access |= READ_CONTROL;
@@ -1952,12 +1981,6 @@ LookupAccountSidA(
     LPWSTR domainW = NULL;
     DWORD accountSizeW = *accountSize;
     DWORD domainSizeW = *domainSize;
-
-    TRACE("(%s,sid=%s,%p,%p(%u),%p,%p(%u),%p)\n",
-          debugstr_a(system),debugstr_sid(sid),
-          account,accountSize,accountSize?*accountSize:0,
-          domain,domainSize,domainSize?*domainSize:0,
-          name_use);
 
     if (system) {
         len = MultiByteToWideChar( CP_ACP, 0, system, -1, NULL, 0 );
@@ -2022,6 +2045,7 @@ LookupAccountSidW(
     const WCHAR * dm = NULL;
     SID_NAME_USE use = 0;
     LPWSTR computer_name = NULL;
+    LPWSTR account_name = NULL;
 
     TRACE("(%s,sid=%s,%p,%p(%u),%p,%p(%u),%p)\n",
 	  debugstr_w(system),debugstr_sid(sid),
@@ -2031,7 +2055,7 @@ LookupAccountSidW(
 
     if (!ADVAPI_IsLocalComputer(system)) {
         FIXME("Only local computer supported!\n");
-        SetLastError(ERROR_NONE_MAPPED);
+        SetLastError(RPC_S_SERVER_UNAVAILABLE);
         return FALSE;
     }
 
@@ -2108,6 +2132,16 @@ LookupAccountSidW(
                         case DOMAIN_ALIAS_RID_RAS_SERVERS:
                             ac = RAS_and_IAS_Servers;
                             break;
+                        case 1000:	/* first user account */
+                            size = UNLEN + 1;
+                            account_name = HeapAlloc(
+                                GetProcessHeap(), 0, size * sizeof(WCHAR));
+                            if (GetUserNameW(account_name, &size))
+                                ac = account_name;
+                            else
+                                dm = NULL;
+
+                            break;
                         default:
                             dm = NULL;
                             break;
@@ -2119,33 +2153,38 @@ LookupAccountSidW(
     }
 
     if (dm) {
+        DWORD ac_len = lstrlenW(ac);
+        DWORD dm_len = lstrlenW(dm);
         BOOL status = TRUE;
-        if (*accountSize > lstrlenW(ac)) {
+
+        if (*accountSize > ac_len) {
             if (account)
                 lstrcpyW(account, ac);
         }
-        if (*domainSize > lstrlenW(dm)) {
+        if (*domainSize > dm_len) {
             if (domain)
                 lstrcpyW(domain, dm);
         }
-        if (((*accountSize != 0) && (*accountSize < strlenW(ac))) ||
-            ((*domainSize != 0) && (*domainSize < strlenW(dm)))) {
+        if (((*accountSize != 0) && (*accountSize < ac_len)) ||
+            ((*domainSize != 0) && (*domainSize < dm_len))) {
             SetLastError(ERROR_INSUFFICIENT_BUFFER);
             status = FALSE;
         }
         if (*domainSize)
-            *domainSize = strlenW(dm);
+            *domainSize = dm_len;
         else
-            *domainSize = strlenW(dm) + 1;
+            *domainSize = dm_len + 1;
         if (*accountSize)
-            *accountSize = strlenW(ac);
+            *accountSize = ac_len;
         else
-            *accountSize = strlenW(ac) + 1;
+            *accountSize = ac_len + 1;
         *name_use = use;
+        HeapFree(GetProcessHeap(), 0, account_name);
         HeapFree(GetProcessHeap(), 0, computer_name);
         return status;
     }
 
+    HeapFree(GetProcessHeap(), 0, account_name);
     HeapFree(GetProcessHeap(), 0, computer_name);
     SetLastError(ERROR_NONE_MAPPED);
     return FALSE;
@@ -2312,9 +2351,13 @@ BOOL WINAPI ImpersonateLoggedOnUser(HANDLE hToken)
     NTSTATUS Status;
     HANDLE ImpersonationToken;
     TOKEN_TYPE Type;
+    static BOOL warn = TRUE;
 
-    FIXME( "(%p)\n", hToken );
-
+    if (warn)
+    {
+        FIXME( "(%p)\n", hToken );
+        warn = FALSE;
+    }
     if (!GetTokenInformation( hToken, TokenType, &Type,
                               sizeof(TOKEN_TYPE), &size ))
         return FALSE;
@@ -2495,8 +2538,8 @@ LookupAccountNameA(
 
     if (ret && lpReferencedDomainNameW)
     {
-        WideCharToMultiByte(CP_ACP, 0, lpReferencedDomainNameW, *cbReferencedDomainName,
-            ReferencedDomainName, *cbReferencedDomainName, NULL, NULL);
+        WideCharToMultiByte(CP_ACP, 0, lpReferencedDomainNameW, -1,
+            ReferencedDomainName, *cbReferencedDomainName+1, NULL, NULL);
     }
 
     RtlFreeUnicodeString(&lpSystemW);
@@ -2507,33 +2550,18 @@ LookupAccountNameA(
 }
 
 /******************************************************************************
- * LookupAccountNameW [ADVAPI32.@]
+ * lookup_user_account_name
  */
-BOOL WINAPI LookupAccountNameW( LPCWSTR lpSystemName, LPCWSTR lpAccountName, PSID Sid,
-                                LPDWORD cbSid, LPWSTR ReferencedDomainName,
-                                LPDWORD cchReferencedDomainName, PSID_NAME_USE peUse )
+static BOOL lookup_user_account_name(PSID Sid, PDWORD cbSid, LPWSTR ReferencedDomainName,
+                                     LPDWORD cchReferencedDomainName, PSID_NAME_USE peUse )
 {
     /* Default implementation: Always return a default SID */
     SID_IDENTIFIER_AUTHORITY identifierAuthority = {SECURITY_NT_AUTHORITY};
     BOOL ret;
     PSID pSid;
     static const WCHAR dm[] = {'D','O','M','A','I','N',0};
-    unsigned int i;
-
-    FIXME("%s %s %p %p %p %p %p - stub\n", debugstr_w(lpSystemName), debugstr_w(lpAccountName),
-          Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse);
-
-    for (i = 0; i < (sizeof(ACCOUNT_SIDS) / sizeof(ACCOUNT_SIDS[0])); i++)
-    {
-        if (!strcmpW(lpAccountName, ACCOUNT_SIDS[i].account))
-        {
-            if (*cchReferencedDomainName)
-                *ReferencedDomainName = '\0';
-            *cchReferencedDomainName = 0;
-            *peUse = SidTypeWellKnownGroup;
-            return CreateWellKnownSid(ACCOUNT_SIDS[i].type, NULL, Sid, cbSid);
-        }
-    }
+    DWORD nameLen;
+    LPCWSTR domainName;
 
     ret = AllocateAndInitializeSid(&identifierAuthority,
         2,
@@ -2559,21 +2587,282 @@ BOOL WINAPI LookupAccountNameW( LPCWSTR lpSystemName, LPCWSTR lpAccountName, PSI
        ret = FALSE;
     }
     *cbSid = GetLengthSid(pSid);
-    
-    if (ReferencedDomainName != NULL && (*cchReferencedDomainName > strlenW(dm)))
-      strcpyW(ReferencedDomainName, dm);
 
-    if (*cchReferencedDomainName <= strlenW(dm))
+    domainName = dm;
+    nameLen = strlenW(domainName);
+
+    if (*cchReferencedDomainName <= nameLen || !ret)
     {
-       SetLastError(ERROR_INSUFFICIENT_BUFFER);
-       ret = FALSE;
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        nameLen += 1;
+        ret = FALSE;
     }
+    else if (ReferencedDomainName)
+        strcpyW(ReferencedDomainName, domainName);
 
-    *cchReferencedDomainName = strlenW(dm)+1;
+    *cchReferencedDomainName = nameLen;
+
+    if (ret)
+        *peUse = SidTypeUser;
 
     FreeSid(pSid);
 
     return ret;
+}
+
+/******************************************************************************
+ * lookup_computer_account_name
+ */
+static BOOL lookup_computer_account_name(PSID Sid, PDWORD cbSid, LPWSTR ReferencedDomainName,
+                                         LPDWORD cchReferencedDomainName, PSID_NAME_USE peUse )
+{
+    MAX_SID local;
+    BOOL ret;
+    static const WCHAR dm[] = {'D','O','M','A','I','N',0};
+    DWORD nameLen;
+    LPCWSTR domainName;
+
+    if ((ret = ADVAPI_GetComputerSid(&local)))
+    {
+        if (Sid != NULL && (*cbSid >= GetLengthSid(&local)))
+           CopySid(*cbSid, Sid, &local);
+        if (*cbSid < GetLengthSid(&local))
+        {
+           SetLastError(ERROR_INSUFFICIENT_BUFFER);
+           ret = FALSE;
+        }
+        *cbSid = GetLengthSid(&local);
+    }
+
+    domainName = dm;
+    nameLen = strlenW(domainName);
+
+    if (*cchReferencedDomainName <= nameLen || !ret)
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        nameLen += 1;
+        ret = FALSE;
+    }
+    else if (ReferencedDomainName)
+        strcpyW(ReferencedDomainName, domainName);
+
+    *cchReferencedDomainName = nameLen;
+
+    if (ret)
+        *peUse = SidTypeDomain;
+
+    return ret;
+}
+
+static void split_domain_account( const LSA_UNICODE_STRING *str, LSA_UNICODE_STRING *account,
+                                  LSA_UNICODE_STRING *domain )
+{
+    WCHAR *p = str->Buffer + str->Length / sizeof(WCHAR) - 1;
+
+    while (p > str->Buffer && *p != '\\') p--;
+
+    if (*p == '\\')
+    {
+        domain->Buffer = str->Buffer;
+        domain->Length = (p - str->Buffer) * sizeof(WCHAR);
+
+        account->Buffer = p + 1;
+        account->Length = str->Length - ((p - str->Buffer + 1) * sizeof(WCHAR));
+    }
+    else
+    {
+        domain->Buffer = NULL;
+        domain->Length = 0;
+
+        account->Buffer = str->Buffer;
+        account->Length = str->Length;
+    }
+}
+
+static BOOL match_domain( ULONG idx, LSA_UNICODE_STRING *domain )
+{
+    ULONG len = strlenW( ACCOUNT_SIDS[idx].domain );
+
+    if (len == domain->Length / sizeof(WCHAR) && !strncmpiW( domain->Buffer, ACCOUNT_SIDS[idx].domain, len ))
+        return TRUE;
+
+    return FALSE;
+}
+
+static BOOL match_account( ULONG idx, LSA_UNICODE_STRING *account )
+{
+    ULONG len = strlenW( ACCOUNT_SIDS[idx].account );
+
+    if (len == account->Length / sizeof(WCHAR) && !strncmpiW( account->Buffer, ACCOUNT_SIDS[idx].account, len ))
+        return TRUE;
+
+    if (ACCOUNT_SIDS[idx].alias)
+    {
+        len = strlenW( ACCOUNT_SIDS[idx].alias );
+        if (len == account->Length / sizeof(WCHAR) && !strncmpiW( account->Buffer, ACCOUNT_SIDS[idx].alias, len ))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+/*
+ * Helper function for LookupAccountNameW
+ */
+BOOL lookup_local_wellknown_name( LSA_UNICODE_STRING *account_and_domain,
+                                  PSID Sid, LPDWORD cbSid,
+                                  LPWSTR ReferencedDomainName,
+                                  LPDWORD cchReferencedDomainName,
+                                  PSID_NAME_USE peUse, BOOL *handled )
+{
+    PSID pSid;
+    LSA_UNICODE_STRING account, domain;
+    BOOL ret = TRUE;
+    ULONG i;
+
+    *handled = FALSE;
+    split_domain_account( account_and_domain, &account, &domain );
+
+    for (i = 0; i < sizeof(ACCOUNT_SIDS) / sizeof(ACCOUNT_SIDS[0]); i++)
+    {
+        /* check domain first */
+        if (domain.Buffer && !match_domain( i, &domain )) continue;
+
+        if (match_account( i, &account ))
+        {
+            DWORD len, sidLen = SECURITY_MAX_SID_SIZE;
+
+            if (!(pSid = HeapAlloc( GetProcessHeap(), 0, sidLen ))) return FALSE;
+
+            if ((ret = CreateWellKnownSid( ACCOUNT_SIDS[i].type, NULL, pSid, &sidLen )))
+            {
+                if (*cbSid < sidLen)
+                {
+                    SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                    ret = FALSE;
+                }
+                else if (Sid)
+                {
+                    CopySid(*cbSid, Sid, pSid);
+                }
+                *cbSid = sidLen;
+            }
+
+            len = strlenW( ACCOUNT_SIDS[i].domain );
+            if (*cchReferencedDomainName <= len || !ret)
+            {
+                SetLastError(ERROR_INSUFFICIENT_BUFFER);
+                len++;
+                ret = FALSE;
+            }
+            else if (ReferencedDomainName)
+            {
+                strcpyW( ReferencedDomainName, ACCOUNT_SIDS[i].domain );
+            }
+
+            *cchReferencedDomainName = len;
+            if (ret)
+                *peUse = ACCOUNT_SIDS[i].name_use;
+
+            HeapFree(GetProcessHeap(), 0, pSid);
+            *handled = TRUE;
+            return ret;
+        }
+    }
+    return ret;
+}
+
+BOOL lookup_local_user_name( LSA_UNICODE_STRING *account_and_domain,
+                             PSID Sid, LPDWORD cbSid,
+                             LPWSTR ReferencedDomainName,
+                             LPDWORD cchReferencedDomainName,
+                             PSID_NAME_USE peUse, BOOL *handled )
+{
+    DWORD nameLen;
+    LPWSTR userName = NULL;
+    LSA_UNICODE_STRING account, domain;
+    BOOL ret = TRUE;
+
+    *handled = FALSE;
+    split_domain_account( account_and_domain, &account, &domain );
+
+    /* Let the current Unix user id masquerade as first Windows user account */
+
+    nameLen = UNLEN + 1;
+    if (!(userName = HeapAlloc( GetProcessHeap(), 0, nameLen * sizeof(WCHAR) ))) return FALSE;
+
+    if (domain.Buffer)
+    {
+        /* check to make sure this account is on this computer */
+        if (GetComputerNameW( userName, &nameLen ) &&
+            (domain.Length / sizeof(WCHAR) != nameLen || strncmpW( domain.Buffer, userName, nameLen )))
+        {
+            SetLastError(ERROR_NONE_MAPPED);
+            ret = FALSE;
+        }
+        nameLen = UNLEN + 1;
+    }
+
+    if (GetUserNameW( userName, &nameLen ) &&
+        account.Length / sizeof(WCHAR) == nameLen - 1 && !strncmpW( account.Buffer, userName, nameLen - 1 ))
+    {
+            ret = lookup_user_account_name( Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse );
+            *handled = TRUE;
+    }
+    else
+    {
+        nameLen = UNLEN + 1;
+        if (GetComputerNameW( userName, &nameLen ) &&
+            account.Length / sizeof(WCHAR) == nameLen && !strncmpW( account.Buffer, userName , nameLen ))
+        {
+            ret = lookup_computer_account_name( Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse );
+            *handled = TRUE;
+        }
+    }
+
+    HeapFree(GetProcessHeap(), 0, userName);
+    return ret;
+}
+
+/******************************************************************************
+ * LookupAccountNameW [ADVAPI32.@]
+ */
+BOOL WINAPI LookupAccountNameW( LPCWSTR lpSystemName, LPCWSTR lpAccountName, PSID Sid,
+                                LPDWORD cbSid, LPWSTR ReferencedDomainName,
+                                LPDWORD cchReferencedDomainName, PSID_NAME_USE peUse )
+{
+    BOOL ret, handled;
+    LSA_UNICODE_STRING account;
+
+    FIXME("%s %s %p %p %p %p %p - stub\n", debugstr_w(lpSystemName), debugstr_w(lpAccountName),
+          Sid, cbSid, ReferencedDomainName, cchReferencedDomainName, peUse);
+
+    if (!ADVAPI_IsLocalComputer( lpSystemName ))
+    {
+        SetLastError( RPC_S_SERVER_UNAVAILABLE );
+        return FALSE;
+    }
+
+    if (!lpAccountName || !strcmpW( lpAccountName, Blank ))
+    {
+        lpAccountName = BUILTIN;
+    }
+
+    RtlInitUnicodeString( &account, lpAccountName );
+
+    /* Check well known SIDs first */
+    ret = lookup_local_wellknown_name( &account, Sid, cbSid, ReferencedDomainName,
+                                       cchReferencedDomainName, peUse, &handled );
+    if (handled)
+        return ret;
+
+    /* Check user names */
+    ret = lookup_local_user_name( &account, Sid, cbSid, ReferencedDomainName,
+                                  cchReferencedDomainName, peUse, &handled);
+    if (handled)
+        return ret;
+
+    SetLastError( ERROR_NONE_MAPPED );
+    return FALSE;
 }
 
 /******************************************************************************
@@ -2707,12 +2996,84 @@ BOOL WINAPI PrivilegedServiceAuditAlarmW( LPCWSTR SubsystemName, LPCWSTR Service
 
 /******************************************************************************
  * GetSecurityInfo [ADVAPI32.@]
+ *
+ * Retrieves a copy of the security descriptor associated with an object.
+ *
+ * PARAMS
+ *  hObject              [I] A handle for the object.
+ *  ObjectType           [I] The type of object.
+ *  SecurityInfo         [I] A bitmask indicating what info to retrieve.
+ *  ppsidOwner           [O] If non-null, receives a pointer to the owner SID.
+ *  ppsidGroup           [O] If non-null, receives a pointer to the group SID.
+ *  ppDacl               [O] If non-null, receives a pointer to the DACL.
+ *  ppSacl               [O] If non-null, receives a pointer to the SACL.
+ *  ppSecurityDescriptor [O] Receives a pointer to the security descriptor,
+ *                           which must be freed with LocalFree.
+ *
+ * RETURNS
+ *  ERROR_SUCCESS if all's well, and a WIN32 error code otherwise.
  */
 DWORD WINAPI GetSecurityInfo(
     HANDLE hObject, SE_OBJECT_TYPE ObjectType,
     SECURITY_INFORMATION SecurityInfo, PSID *ppsidOwner,
     PSID *ppsidGroup, PACL *ppDacl, PACL *ppSacl,
     PSECURITY_DESCRIPTOR *ppSecurityDescriptor
+)
+{
+    PSECURITY_DESCRIPTOR sd;
+    NTSTATUS status;
+    ULONG n1, n2;
+    BOOL present, defaulted;
+
+    status = NtQuerySecurityObject(hObject, SecurityInfo, NULL, 0, &n1);
+    if (status != STATUS_BUFFER_TOO_SMALL && status != STATUS_SUCCESS)
+        return RtlNtStatusToDosError(status);
+
+    sd = LocalAlloc(0, n1);
+    if (!sd)
+        return ERROR_NOT_ENOUGH_MEMORY;
+
+    status = NtQuerySecurityObject(hObject, SecurityInfo, sd, n1, &n2);
+    if (status != STATUS_SUCCESS)
+    {
+        LocalFree(sd);
+        return RtlNtStatusToDosError(status);
+    }
+
+    if (ppsidOwner)
+    {
+        *ppsidOwner = NULL;
+        GetSecurityDescriptorOwner(sd, ppsidOwner, &defaulted);
+    }
+    if (ppsidGroup)
+    {
+        *ppsidGroup = NULL;
+        GetSecurityDescriptorGroup(sd, ppsidGroup, &defaulted);
+    }
+    if (ppDacl)
+    {
+        *ppDacl = NULL;
+        GetSecurityDescriptorDacl(sd, &present, ppDacl, &defaulted);
+    }
+    if (ppSacl)
+    {
+        *ppSacl = NULL;
+        GetSecurityDescriptorSacl(sd, &present, ppSacl, &defaulted);
+    }
+    if (ppSecurityDescriptor)
+        *ppSecurityDescriptor = sd;
+
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * GetSecurityInfoExA [ADVAPI32.@]
+ */
+DWORD WINAPI GetSecurityInfoExA(
+	HANDLE hObject, SE_OBJECT_TYPE ObjectType,
+	SECURITY_INFORMATION SecurityInfo, LPCSTR lpProvider,
+	LPCSTR lpProperty, PACTRL_ACCESSA *ppAccessList,
+	PACTRL_AUDITA *ppAuditList, LPSTR *lppOwner, LPSTR *lppGroup
 )
 {
   FIXME("stub!\n");
@@ -2946,7 +3307,7 @@ VOID WINAPI BuildTrusteeWithSidA(PTRUSTEEA pTrustee, PSID pSid)
     pTrustee->MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
     pTrustee->TrusteeForm = TRUSTEE_IS_SID;
     pTrustee->TrusteeType = TRUSTEE_IS_UNKNOWN;
-    pTrustee->ptstrName = (LPSTR) pSid;
+    pTrustee->ptstrName = pSid;
 }
 
 /******************************************************************************
@@ -2960,7 +3321,7 @@ VOID WINAPI BuildTrusteeWithSidW(PTRUSTEEW pTrustee, PSID pSid)
     pTrustee->MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
     pTrustee->TrusteeForm = TRUSTEE_IS_SID;
     pTrustee->TrusteeType = TRUSTEE_IS_UNKNOWN;
-    pTrustee->ptstrName = (LPWSTR) pSid;
+    pTrustee->ptstrName = pSid;
 }
 
 /******************************************************************************
@@ -3086,7 +3447,8 @@ DWORD WINAPI SetEntriesInAclA( ULONG count, PEXPLICIT_ACCESSA pEntries,
                                PACL OldAcl, PACL* NewAcl )
 {
     FIXME("%d %p %p %p\n",count,pEntries,OldAcl,NewAcl);
-    *NewAcl = NULL;
+    if (NewAcl)
+         *NewAcl = NULL;
     return ERROR_SUCCESS;
 }
 
@@ -3147,9 +3509,10 @@ DWORD WINAPI SetEntriesInAclW( ULONG count, PEXPLICIT_ACCESSW pEntries,
         case TRUSTEE_IS_NAME:
         {
             DWORD sid_size = FIELD_OFFSET(SID, SubAuthority[SID_MAX_SUB_AUTHORITIES]);
-            DWORD domain_size = 0;
+            DWORD domain_size = MAX_COMPUTERNAME_LENGTH + 1;
             SID_NAME_USE use;
-            if (!LookupAccountNameW(NULL, pEntries[i].Trustee.ptstrName, ppsid[i], &sid_size, NULL, &domain_size, &use))
+            if ( strcmpW( pEntries[i].Trustee.ptstrName, CURRENT_USER ) &&
+                 !LookupAccountNameW(NULL, pEntries[i].Trustee.ptstrName, ppsid[i], &sid_size, NULL, &domain_size, &use))
             {
                 WARN("bad user name %s for trustee %d\n", debugstr_w(pEntries[i].Trustee.ptstrName), i);
                 ret = ERROR_INVALID_PARAMETER;
@@ -3442,6 +3805,27 @@ DWORD WINAPI GetExplicitEntriesFromAclW( PACL pacl, PULONG pcCountOfExplicitEntr
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
 
+/******************************************************************************
+ * GetAuditedPermissionsFromAclA [ADVAPI32.@]
+ */
+DWORD WINAPI GetAuditedPermissionsFromAclA( PACL pacl, PTRUSTEEA pTrustee, PACCESS_MASK pSuccessfulAuditedRights,
+        PACCESS_MASK pFailedAuditRights)
+{
+    FIXME("%p %p %p %p\n",pacl, pTrustee, pSuccessfulAuditedRights, pFailedAuditRights);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+
+}
+
+/******************************************************************************
+ * GetAuditedPermissionsFromAclW [ADVAPI32.@]
+ */
+DWORD WINAPI GetAuditedPermissionsFromAclW( PACL pacl, PTRUSTEEW pTrustee, PACCESS_MASK pSuccessfulAuditedRights,
+        PACCESS_MASK pFailedAuditRights)
+{
+    FIXME("%p %p %p %p\n",pacl, pTrustee, pSuccessfulAuditedRights, pFailedAuditRights);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+
+}
 
 /******************************************************************************
  * ParseAclStringFlags
@@ -3707,7 +4091,7 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
         StringAcl++;
 
         /* Parse ACE account sid */
-        if (ParseStringSidToSid(StringAcl, pAce ? (PSID)&pAce->SidStart : NULL, &sidlen))
+        if (ParseStringSidToSid(StringAcl, pAce ? &pAce->SidStart : NULL, &sidlen))
 	{
             while (*StringAcl && *StringAcl != ')')
                 StringAcl++;
@@ -3746,6 +4130,7 @@ static BOOL ParseStringAclToAcl(LPCWSTR StringAcl, LPDWORD lpdwFlags,
     return TRUE;
 
 lerr:
+    SetLastError(ERROR_INVALID_ACL);
     WARN("Invalid ACE string format\n");
     return FALSE;
 }
@@ -3756,7 +4141,7 @@ lerr:
  */
 static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     LPCWSTR StringSecurityDescriptor,
-    SECURITY_DESCRIPTOR* SecurityDescriptor,
+    SECURITY_DESCRIPTOR_RELATIVE* SecurityDescriptor,
     LPDWORD cBytes)
 {
     BOOL bret = FALSE;
@@ -3769,7 +4154,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
     *cBytes = sizeof(SECURITY_DESCRIPTOR);
 
     if (SecurityDescriptor)
-        lpNext = ((LPBYTE) SecurityDescriptor) + sizeof(SECURITY_DESCRIPTOR);
+        lpNext = (LPBYTE)(SecurityDescriptor + 1);
 
     while (*StringSecurityDescriptor)
     {
@@ -3802,12 +4187,12 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
             {
                 DWORD bytes;
 
-                if (!ParseStringSidToSid(tok, (PSID)lpNext, &bytes))
+                if (!ParseStringSidToSid(tok, lpNext, &bytes))
                     goto lend;
 
                 if (SecurityDescriptor)
                 {
-                    SecurityDescriptor->Owner = (PSID)(lpNext - (LPBYTE)SecurityDescriptor);
+                    SecurityDescriptor->Owner = lpNext - (LPBYTE)SecurityDescriptor;
                     lpNext += bytes; /* Advance to next token */
                 }
 
@@ -3820,12 +4205,12 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
             {
                 DWORD bytes;
 
-                if (!ParseStringSidToSid(tok, (PSID)lpNext, &bytes))
+                if (!ParseStringSidToSid(tok, lpNext, &bytes))
                     goto lend;
 
                 if (SecurityDescriptor)
                 {
-                    SecurityDescriptor->Group = (PSID)(lpNext - (LPBYTE)SecurityDescriptor);
+                    SecurityDescriptor->Group = lpNext - (LPBYTE)SecurityDescriptor;
                     lpNext += bytes; /* Advance to next token */
                 }
 
@@ -3845,7 +4230,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
                 if (SecurityDescriptor)
                 {
                     SecurityDescriptor->Control |= SE_DACL_PRESENT | flags;
-                    SecurityDescriptor->Dacl = (PACL)(lpNext - (LPBYTE)SecurityDescriptor);
+                    SecurityDescriptor->Dacl = lpNext - (LPBYTE)SecurityDescriptor;
                     lpNext += bytes; /* Advance to next token */
 		}
 
@@ -3865,7 +4250,7 @@ static BOOL ParseStringSecurityDescriptorToSecurityDescriptor(
                 if (SecurityDescriptor)
                 {
                     SecurityDescriptor->Control |= SE_SACL_PRESENT | flags;
-                    SecurityDescriptor->Sacl = (PACL)(lpNext - (LPBYTE)SecurityDescriptor);
+                    SecurityDescriptor->Sacl = lpNext - (LPBYTE)SecurityDescriptor;
                     lpNext += bytes; /* Advance to next token */
 		}
 
@@ -3938,6 +4323,11 @@ BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorW(
         SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
         goto lend;
     }
+    else if (!StringSecurityDescriptor || !SecurityDescriptor)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        goto lend;
+    }
     else if (StringSDRevision != SID_REVISION)
     {
         SetLastError(ERROR_UNKNOWN_REVISION);
@@ -3949,15 +4339,14 @@ BOOL WINAPI ConvertStringSecurityDescriptorToSecurityDescriptorW(
         NULL, &cBytes))
 	goto lend;
 
-    psd = *SecurityDescriptor = (SECURITY_DESCRIPTOR*) LocalAlloc(
-        GMEM_ZEROINIT, cBytes);
+    psd = *SecurityDescriptor = LocalAlloc(GMEM_ZEROINIT, cBytes);
     if (!psd) goto lend;
 
     psd->Revision = SID_REVISION;
     psd->Control |= SE_SELF_RELATIVE;
 
     if (!ParseStringSecurityDescriptorToSecurityDescriptor(StringSecurityDescriptor,
-        psd, &cBytes))
+             (SECURITY_DESCRIPTOR_RELATIVE *)psd, &cBytes))
     {
         LocalFree(psd);
 	goto lend;
@@ -4029,7 +4418,7 @@ static BOOL DumpSidNumeric(PSID psid, WCHAR **pwptr, ULONG *plen)
 
 static BOOL DumpSid(PSID psid, WCHAR **pwptr, ULONG *plen)
 {
-    int i;
+    size_t i;
     for (i = 0; i < sizeof(WellKnownSids) / sizeof(WellKnownSids[0]); i++)
     {
         if (WellKnownSids[i].wstr[0] && EqualSid(psid, (PSID)&(WellKnownSids[i].Sid.Revision)))
@@ -4081,7 +4470,7 @@ static void DumpRights(DWORD mask, WCHAR **pwptr, ULONG *plen)
 {
     static const WCHAR fmtW[] = {'0','x','%','x',0};
     WCHAR buf[15];
-    int i;
+    size_t i;
 
     if (mask == 0)
         return;
@@ -4129,7 +4518,7 @@ static BOOL DumpAce(LPVOID pace, WCHAR **pwptr, ULONG *plen)
         return FALSE;
     }
 
-    piace = (ACCESS_ALLOWED_ACE *)pace;
+    piace = pace;
     DumpString(&openbr, 1, pwptr, plen);
     switch (piace->Header.AceType)
     {
@@ -4169,7 +4558,7 @@ static BOOL DumpAce(LPVOID pace, WCHAR **pwptr, ULONG *plen)
     DumpString(&semicolon, 1, pwptr, plen);
     /* objects not supported */
     DumpString(&semicolon, 1, pwptr, plen);
-    if (!DumpSid((PSID)&piace->SidStart, pwptr, plen))
+    if (!DumpSid(&piace->SidStart, pwptr, plen))
         return FALSE;
     DumpString(&closebr, 1, pwptr, plen);
     return TRUE;
@@ -4389,7 +4778,6 @@ BOOL WINAPI ConvertStringSidToSidW(LPCWSTR StringSid, PSID* Sid)
         if (!bret)
             LocalFree(*Sid); 
     }
-    TRACE("returning %s\n", bret ? "TRUE" : "FALSE");
     return bret;
 }
 
@@ -4415,7 +4803,6 @@ BOOL WINAPI ConvertStringSidToSidA(LPCSTR StringSid, PSID* Sid)
         bret = ConvertStringSidToSidW(wStringSid, Sid);
         HeapFree(GetProcessHeap(), 0, wStringSid);
     }
-    TRACE("returning %s\n", bret ? "TRUE" : "FALSE");
     return bret;
 }
 
@@ -4469,6 +4856,19 @@ BOOL WINAPI ConvertSidToStringSidA(PSID pSid, LPSTR *pstr)
     *pstr = str;
 
     return TRUE;
+}
+
+BOOL WINAPI ConvertToAutoInheritPrivateObjectSecurity(
+        PSECURITY_DESCRIPTOR pdesc,
+        PSECURITY_DESCRIPTOR cdesc,
+        PSECURITY_DESCRIPTOR* ndesc,
+        GUID* objtype,
+        BOOL isdir,
+        PGENERIC_MAPPING genmap )
+{
+    FIXME("%p %p %p %p %d %p - stub\n", pdesc, cdesc, ndesc, objtype, isdir, genmap);
+
+    return FALSE;
 }
 
 BOOL WINAPI CreatePrivateObjectSecurity(
@@ -4809,7 +5209,7 @@ DWORD WINAPI GetNamedSecurityInfoW( LPWSTR name, SE_OBJECT_TYPE type,
         return ERROR_INVALID_SECURITY_DESCR;
     }
 
-    relative = (SECURITY_DESCRIPTOR_RELATIVE *)*descriptor;
+    relative = *descriptor;
     relative->Control |= SE_SELF_RELATIVE;
     buffer = (BYTE *)relative;
     offset = sizeof(SECURITY_DESCRIPTOR_RELATIVE);
@@ -4918,4 +5318,37 @@ DWORD WINAPI SetSecurityInfo(HANDLE handle, SE_OBJECT_TYPE ObjectType,
                       PSID psidGroup, PACL pDacl, PACL pSacl) {
     FIXME("stub\n");
     return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * SaferCreateLevel   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferCreateLevel(DWORD ScopeId, DWORD LevelId, DWORD OpenFlags,
+                             SAFER_LEVEL_HANDLE* LevelHandle, LPVOID lpReserved)
+{
+    FIXME("(%u, %x, %u, %p, %p) stub\n", ScopeId, LevelId, OpenFlags, LevelHandle, lpReserved);
+    return FALSE;
+}
+
+DWORD WINAPI TreeResetNamedSecurityInfoW( LPWSTR pObjectName,
+                SE_OBJECT_TYPE ObjectType, SECURITY_INFORMATION SecurityInfo,
+                PSID pOwner, PSID pGroup, PACL pDacl, PACL pSacl,
+                BOOL KeepExplicit, FN_PROGRESS fnProgress,
+                PROG_INVOKE_SETTING ProgressInvokeSetting, PVOID Args)
+{
+    FIXME("(%s, %i, %i, %p, %p, %p, %p, %i, %p, %i, %p  Stub\n",
+        debugstr_w(pObjectName), ObjectType, SecurityInfo, pOwner, pGroup,
+        pDacl, pSacl, KeepExplicit, fnProgress, ProgressInvokeSetting, Args);
+
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * SaferGetPolicyInformation   [ADVAPI32.@]
+ */
+BOOL WINAPI SaferGetPolicyInformation(DWORD scope, SAFER_POLICY_INFO_CLASS class, DWORD size,
+                                      PVOID buffer, PDWORD required, LPVOID lpReserved)
+{
+    FIXME("(%u %u %u %p %p %p) stub\n", scope, class, size, buffer, required, lpReserved);
+    return FALSE;
 }

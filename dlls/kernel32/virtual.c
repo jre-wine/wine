@@ -338,26 +338,9 @@ HANDLE WINAPI CreateFileMappingW( HANDLE hFile, LPSECURITY_ATTRIBUTES sa,
     static const int sec_flags = SEC_FILE | SEC_IMAGE | SEC_RESERVE | SEC_COMMIT | SEC_NOCACHE;
 
     HANDLE ret;
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nameW;
     NTSTATUS status;
     DWORD access, sec_type;
     LARGE_INTEGER size;
-
-    attr.Length                   = sizeof(attr);
-    attr.RootDirectory            = 0;
-    attr.ObjectName               = NULL;
-    attr.Attributes               = OBJ_CASE_INSENSITIVE | OBJ_OPENIF |
-                                    ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
-    attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
-    attr.SecurityQualityOfService = NULL;
-
-    if (name)
-    {
-        RtlInitUnicodeString( &nameW, name );
-        attr.ObjectName = &nameW;
-        attr.RootDirectory = get_BaseNamedObjects_handle();
-    }
 
     sec_type = protect & sec_flags;
     protect &= ~sec_flags;
@@ -370,10 +353,20 @@ HANDLE WINAPI CreateFileMappingW( HANDLE hFile, LPSECURITY_ATTRIBUTES sa,
         /* fall through */
     case PAGE_READONLY:
     case PAGE_WRITECOPY:
-        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ;
+        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE;
         break;
     case PAGE_READWRITE:
-        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE;
+        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_MAP_EXECUTE;
+        break;
+    case PAGE_EXECUTE:
+        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT;
+        break;
+    case PAGE_EXECUTE_READ:
+    case PAGE_EXECUTE_WRITECOPY:
+        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT;
+        break;
+    case PAGE_EXECUTE_READWRITE:
+        access = STANDARD_RIGHTS_REQUIRED | SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE | SECTION_MAP_EXECUTE | SECTION_MAP_EXECUTE_EXPLICIT;
         break;
     default:
         SetLastError( ERROR_INVALID_PARAMETER );
@@ -393,7 +386,27 @@ HANDLE WINAPI CreateFileMappingW( HANDLE hFile, LPSECURITY_ATTRIBUTES sa,
     size.u.LowPart  = size_low;
     size.u.HighPart = size_high;
 
-    status = NtCreateSection( &ret, access, &attr, &size, protect, sec_type, hFile );
+    if (sa || name)
+    {
+        OBJECT_ATTRIBUTES attr;
+        UNICODE_STRING nameW;
+
+        attr.Length                   = sizeof(attr);
+        attr.RootDirectory            = 0;
+        attr.ObjectName               = NULL;
+        attr.Attributes               = OBJ_OPENIF | ((sa && sa->bInheritHandle) ? OBJ_INHERIT : 0);
+        attr.SecurityDescriptor       = sa ? sa->lpSecurityDescriptor : NULL;
+        attr.SecurityQualityOfService = NULL;
+        if (name)
+        {
+            RtlInitUnicodeString( &nameW, name );
+            attr.ObjectName = &nameW;
+            attr.RootDirectory = get_BaseNamedObjects_handle();
+        }
+        status = NtCreateSection( &ret, access, &attr, &size, protect, sec_type, hFile );
+    }
+    else status = NtCreateSection( &ret, access, NULL, &size, protect, sec_type, hFile );
+
     if (status == STATUS_OBJECT_NAME_EXISTS)
         SetLastError( ERROR_ALREADY_EXISTS );
     else
@@ -451,12 +464,19 @@ HANDLE WINAPI OpenFileMappingW( DWORD access, BOOL inherit, LPCWSTR name)
     attr.Length = sizeof(attr);
     attr.RootDirectory = get_BaseNamedObjects_handle();
     attr.ObjectName = &nameW;
-    attr.Attributes = OBJ_CASE_INSENSITIVE | (inherit ? OBJ_INHERIT : 0);
+    attr.Attributes = inherit ? OBJ_INHERIT : 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, name );
 
-    if (access == FILE_MAP_COPY) access = FILE_MAP_READ;
+    if (access == FILE_MAP_COPY) access = SECTION_MAP_READ;
+    access |= SECTION_QUERY;
+
+    if (GetVersion() & 0x80000000)
+    {
+        /* win9x doesn't do access checks, so try with full access first */
+        if (!NtOpenSection( &ret, access | SECTION_MAP_READ | SECTION_MAP_WRITE, &attr )) return ret;
+    }
 
     if ((status = NtOpenSection( &ret, access, &attr )))
     {
@@ -519,9 +539,10 @@ LPVOID WINAPI MapViewOfFileEx( HANDLE handle, DWORD access,
     offset.u.HighPart = offset_high;
 
     if (access & FILE_MAP_WRITE) protect = PAGE_READWRITE;
-    else if (access & FILE_MAP_READ) protect = PAGE_READONLY;
     else if (access & FILE_MAP_COPY) protect = PAGE_WRITECOPY;
-    else protect = PAGE_NOACCESS;
+    else protect = PAGE_READONLY;
+
+    if (access & FILE_MAP_EXECUTE) protect <<= 4;
 
     if ((status = NtMapViewOfSection( handle, GetCurrentProcess(), &addr, 0, 0, &offset,
                                       &count, ViewShare, 0, protect )))
@@ -576,6 +597,33 @@ BOOL WINAPI FlushViewOfFile( LPCVOID base, SIZE_T size )
         else SetLastError( RtlNtStatusToDosError(status) );
     }
     return !status;
+}
+
+
+/***********************************************************************
+ *             GetWriteWatch   (KERNEL32.@)
+ */
+UINT WINAPI GetWriteWatch( DWORD flags, LPVOID base, SIZE_T size, LPVOID *addresses,
+                           ULONG_PTR *count, ULONG *granularity )
+{
+    NTSTATUS status;
+
+    status = NtGetWriteWatch( GetCurrentProcess(), flags, base, size, addresses, count, granularity );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return status ? ~0u : 0;
+}
+
+
+/***********************************************************************
+ *             ResetWriteWatch   (KERNEL32.@)
+ */
+UINT WINAPI ResetWriteWatch( LPVOID base, SIZE_T size )
+{
+    NTSTATUS status;
+
+    status = NtResetWriteWatch( GetCurrentProcess(), base, size );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return status ? ~0u : 0;
 }
 
 

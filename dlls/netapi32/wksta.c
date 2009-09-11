@@ -98,7 +98,7 @@ static void wprint_mac(WCHAR* buffer, int len, const MIB_IFROW *ifRow)
         else
             buffer[2*i+1] = (WCHAR)((val & 0xf) + '0');
     }
-    buffer[2*i]=(WCHAR)0;
+    buffer[2*i]=0;
 }
 
 /* Theoretically this could be too short, except that MS defines
@@ -157,8 +157,7 @@ static BOOL WkstaEnumAdaptersCallback(UCHAR totalLANAs, UCHAR lanaIndex,
  ULONG transport, const NetBIOSAdapterImpl *data, void *closure)
 {
     BOOL ret;
-    struct WkstaTransportEnumData *enumData = (struct WkstaTransportEnumData *)
-     closure;
+    struct WkstaTransportEnumData *enumData = closure;
 
     if (enumData && enumData->pbuf)
     {
@@ -348,7 +347,6 @@ NET_API_STATUS WINAPI NetWkstaUserGetInfo(LMSTR reserved, DWORD level,
     {
         PWKSTA_USER_INFO_1 ui;
         PWKSTA_USER_INFO_0 ui0;
-        DWORD dwSize;
         LSA_OBJECT_ATTRIBUTES ObjectAttributes;
         LSA_HANDLE PolicyHandle;
         PPOLICY_ACCOUNT_DOMAIN_INFO DomainInfo;
@@ -405,7 +403,6 @@ NET_API_STATUS WINAPI NetWkstaUserGetInfo(LMSTR reserved, DWORD level,
             oth_domains_sz * sizeof(WCHAR));
 
         /* get data */
-        dwSize = username_sz;
         lstrcpyW(ui->wkui1_username, ui0->wkui0_username);
         NetApiBufferFree(ui0);
 
@@ -443,6 +440,19 @@ NET_API_STATUS WINAPI NetWkstaUserGetInfo(LMSTR reserved, DWORD level,
         return ERROR_INVALID_LEVEL;
     }
     return NERR_Success;
+}
+
+/************************************************************
+ *                NetWkstaUserEnum  (NETAPI32.@)
+ */
+NET_API_STATUS WINAPI
+NetWkstaUserEnum(LMSTR servername, DWORD level, LPBYTE* bufptr,
+                 DWORD prefmaxlen, LPDWORD entriesread,
+                 LPDWORD totalentries, LPDWORD resumehandle)
+{
+    FIXME("(%s, %d, %p, %d, %p, %p, %p): stub!\n", debugstr_w(servername),
+          level, bufptr, prefmaxlen, entriesread, totalentries, resumehandle);
+    return ERROR_INVALID_PARAMETER;
 }
 
 /************************************************************

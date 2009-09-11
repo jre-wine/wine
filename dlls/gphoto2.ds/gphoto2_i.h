@@ -44,7 +44,10 @@
 # define UINT8 JPEG_UINT8
 # define UINT16 JPEG_UINT16
 # undef FAR
+# undef HAVE_STDLIB_H
 #  include <jpeglib.h>
+# undef HAVE_STDLIB_H
+# define HAVE_STDLIB_H 1
 # undef UINT16
 #endif
 
@@ -103,98 +106,6 @@ struct tagActiveDS
 /* Helper functions */
 extern TW_UINT16 GPHOTO2_SaneCapability (pTW_CAPABILITY pCapability, TW_UINT16 action);
 
-/*  */
-extern TW_UINT16 GPHOTO2_ControlGroupHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-extern TW_UINT16 GPHOTO2_ImageGroupHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-extern TW_UINT16 GPHOTO2_AudioGroupHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-extern TW_UINT16 GPHOTO2_SourceManagerHandler (
-	pTW_IDENTITY pOrigin, TW_UINT16 DAT, TW_UINT16 MSG, TW_MEMREF pData);
-
-/* Implementation of operation triplets
- * From Application to Source (Control Information) */
-TW_UINT16 GPHOTO2_CapabilityGet (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CapabilityGetCurrent
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CapabilityGetDefault
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CapabilityQuerySupport
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CapabilityReset
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CapabilitySet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CustomDSDataGet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CustomDSDataSet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_AutomaticCaptureDirectory
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_ChangeDirectory
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemCopy
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_CreateDirectory
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemDelete
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FormatMedia
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemGetClose
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemGetFirstFile
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemGetInfo
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemGetNextFile
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_FileSystemRename
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_ProcessEvent
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_PassThrough
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_PendingXfersEndXfer
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_PendingXfersGet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_PendingXfersReset
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_PendingXfersStopFeeder
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXferGet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXferGetDefault
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXferReset
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXferSet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXfer2Get
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXfer2GetDefault
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXfer2Reset
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupFileXfer2Set
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_SetupMemXferGet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_GetDSStatus
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_DisableDSUserInterface
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_EnableDSUserInterface
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_EnableDSUIOnly
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_XferGroupGet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-TW_UINT16 GPHOTO2_XferGroupSet
-    (pTW_IDENTITY pOrigin, TW_MEMREF pData);
-
 /* Implementation of operation triplets
  * From Application to Source (Image Information) */
 TW_UINT16 GPHOTO2_CIEColorGet
@@ -244,7 +155,7 @@ TW_UINT16 GPHOTO2_RGBResponseSet
 
 /* UI function */
 BOOL DoCameraUI(void);
-HWND TransferringDialogBox(HWND dialog, DWORD progress);
+HWND TransferringDialogBox(HWND dialog, LONG progress);
 
 #ifdef HAVE_GPHOTO2
 /* Helper function for GUI */

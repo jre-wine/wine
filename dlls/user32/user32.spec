@@ -37,6 +37,7 @@
 @ stdcall ChangeDisplaySettingsW(ptr long)
 @ stdcall ChangeMenuA(long long ptr long long)
 @ stdcall ChangeMenuW(long long ptr long long)
+@ stdcall ChangeWindowMessageFilter(long long)
 @ stdcall CharLowerA(str)
 @ stdcall CharLowerBuffA(str long)
 @ stdcall CharLowerBuffW(wstr long)
@@ -162,7 +163,7 @@
 @ stdcall DialogBoxIndirectParamW(long ptr long ptr long)
 @ stdcall DialogBoxParamA(long str long ptr long)
 @ stdcall DialogBoxParamW(long wstr long ptr long)
-# @ stub DisableProcessWindowsGhosting
+@ stdcall DisableProcessWindowsGhosting()
 @ stdcall DispatchMessageA(ptr)
 @ stdcall DispatchMessageW(ptr)
 # @ stub DisplayExitWindowsWarnings
@@ -256,8 +257,8 @@
 @ stdcall GetClassInfoW(long wstr ptr)
 @ stdcall GetClassLongA(long long)
 @ stdcall GetClassLongW(long long)
-@ stdcall GetClassLongPtrA(long long)
-@ stdcall GetClassLongPtrW(long long)
+@ stdcall -arch=win64 GetClassLongPtrA(long long)
+@ stdcall -arch=win64 GetClassLongPtrW(long long)
 @ stdcall GetClassNameA(long ptr long)
 @ stdcall GetClassNameW(long ptr long)
 @ stdcall GetClassWord(long long)
@@ -375,16 +376,16 @@
 @ stdcall GetWindowDC(long)
 @ stdcall GetWindowInfo(long ptr)
 @ stdcall GetWindowLongA(long long)
-@ stdcall GetWindowLongPtrA(long long)
-@ stdcall GetWindowLongPtrW(long long)
+@ stdcall -arch=win64 GetWindowLongPtrA(long long)
+@ stdcall -arch=win64 GetWindowLongPtrW(long long)
 @ stdcall GetWindowLongW(long long)
-# @ stub GetWindowModuleFileName
+@ stdcall GetWindowModuleFileName(long ptr long) GetWindowModuleFileNameA
 @ stdcall GetWindowModuleFileNameA(long ptr long)
 @ stdcall GetWindowModuleFileNameW(long ptr long)
 @ stdcall GetWindowPlacement(long ptr)
 @ stdcall GetWindowRect(long ptr)
 @ stdcall GetWindowRgn(long long)
-# @ stub GetWindowRgnBox
+@ stdcall GetWindowRgnBox(long ptr)
 @ stdcall GetWindowTextA(long ptr long)
 @ stdcall GetWindowTextLengthA(long)
 @ stdcall GetWindowTextLengthW(long)
@@ -475,7 +476,7 @@
 @ stdcall LockSetForegroundWindow (long)
 @ stub LockWindowStation
 @ stdcall LockWindowUpdate(long)
-@ stub LockWorkStation
+@ stdcall LockWorkStation()
 @ stdcall LookupIconIdFromDirectory(ptr long)
 @ stdcall LookupIconIdFromDirectoryEx(ptr long long long long)
 @ stub MBToWCSEx
@@ -603,8 +604,8 @@
 @ stdcall SetCaretBlinkTime(long)
 @ stdcall SetCaretPos(long long)
 @ stdcall SetClassLongA(long long long)
-@ stdcall SetClassLongPtrA(long long long)
-@ stdcall SetClassLongPtrW(long long long)
+@ stdcall -arch=win64 SetClassLongPtrA(long long long)
+@ stdcall -arch=win64 SetClassLongPtrW(long long long)
 @ stdcall SetClassLongW(long long long)
 @ stdcall SetClassWord(long long long)
 @ stdcall SetClipboardData(long long)
@@ -666,8 +667,8 @@
 @ stdcall SetWindowContextHelpId(long long)
 @ stub SetWindowFullScreenState
 @ stdcall SetWindowLongA(long long long)
-@ stdcall SetWindowLongPtrA(long long long)
-@ stdcall SetWindowLongPtrW(long long long)
+@ stdcall -arch=win64 SetWindowLongPtrA(long long long)
+@ stdcall -arch=win64 SetWindowLongPtrW(long long long)
 @ stdcall SetWindowLongW(long long long)
 @ stdcall SetWindowPlacement(long ptr)
 @ stdcall SetWindowPos(long long long long long long long)
@@ -727,6 +728,7 @@
 # @ stub UnregisterMessagePumpHook
 # @ stub UnregisterUserApiHook
 @ stdcall UpdateLayeredWindow(long long ptr ptr long ptr long ptr long)
+@ stdcall UpdateLayeredWindowIndirect(long ptr)
 @ stub UpdatePerUserSystemParameters
 @ stdcall UpdateWindow(long)
 @ stdcall User32InitializeImmEntryTable(ptr)
@@ -788,4 +790,3 @@
 # Wine dll separation hacks, these will go away, don't use them
 #
 @ cdecl HOOK_CallHooks(long long long long long)
-@ cdecl WIN_invalidate_dce(long ptr) invalidate_dce

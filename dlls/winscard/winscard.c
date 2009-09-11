@@ -22,10 +22,12 @@
 #include "winbase.h"
 #include "wine/debug.h"
 #include "winscard.h"
+#include "winternl.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winscard);
 
 static HMODULE WINSCARD_hModule;
+static HANDLE g_startedEvent = NULL;
 
 const SCARD_IO_REQUEST g_rgSCardT0Pci = { SCARD_PROTOCOL_T0, 8 };
 const SCARD_IO_REQUEST g_rgSCardT1Pci = { SCARD_PROTOCOL_T1, 8 };
@@ -42,19 +44,60 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         {
             DisableThreadLibraryCalls(hinstDLL);
             WINSCARD_hModule = hinstDLL;
+            /* FIXME: for now, we act as if the pcsc daemon is always started */
+            g_startedEvent = CreateEventA(NULL,TRUE,TRUE,NULL);
             break;
         }
         case DLL_PROCESS_DETACH:
+        {
+            CloseHandle(g_startedEvent);
             break;
+        }
     }
 
     return TRUE;
+}
+
+HANDLE WINAPI SCardAccessStartedEvent(void)
+{
+    return g_startedEvent;
+}
+
+LONG WINAPI SCardAddReaderToGroupA(SCARDCONTEXT context, LPCSTR reader, LPCSTR group)
+{
+    LONG retval;
+    UNICODE_STRING readerW, groupW;
+
+    if(reader) RtlCreateUnicodeStringFromAsciiz(&readerW,reader);
+    else readerW.Buffer = NULL;
+    if(group) RtlCreateUnicodeStringFromAsciiz(&groupW,group);
+    else groupW.Buffer = NULL;
+
+    retval = SCardAddReaderToGroupW(context, readerW.Buffer, groupW.Buffer);
+
+    RtlFreeUnicodeString(&readerW);
+    RtlFreeUnicodeString(&groupW);
+
+    return retval;
+}
+
+LONG WINAPI SCardAddReaderToGroupW(SCARDCONTEXT context, LPCWSTR reader, LPCWSTR group)
+{
+    FIXME("%x %s %s\n", (unsigned int) context, debugstr_w(reader), debugstr_w(group));
+    return SCARD_S_SUCCESS;
 }
 
 LONG WINAPI SCardEstablishContext(DWORD dwScope, LPCVOID pvReserved1,
     LPCVOID pvReserved2, LPSCARDCONTEXT phContext)
 {
     FIXME("(%x,%p,%p,%p) stub\n", dwScope, pvReserved1, pvReserved2, phContext);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return SCARD_F_INTERNAL_ERROR;
+}
+
+LONG WINAPI SCardListCardsA(SCARDCONTEXT hContext, LPCBYTE pbAtr, LPCGUID rgguidInterfaces, DWORD cguidInterfaceCount, LPSTR mszCards, LPDWORD pcchCards)
+{
+    FIXME(": stub\n");
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return SCARD_F_INTERNAL_ERROR;
 }

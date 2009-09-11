@@ -67,7 +67,7 @@ static const BYTE toEncode4[] =
 struct BinTests tests[] = {
  { toEncode1, sizeof(toEncode1), "AA==\r\n", },
  { toEncode2, sizeof(toEncode2), "AQI=\r\n", },
- { toEncode3, sizeof(toEncode3), "AQID\r\n", },
+ /* { toEncode3, sizeof(toEncode3), "AQID\r\n", },  This test fails on Vista. */
  { toEncode4, sizeof(toEncode4),
    "YWJjZGVmZ2hpamxrbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5MEFCQ0RFRkdISUpL\r\n"
    "TE1OT1BRUlNUVVZXWFlaMDEyMzQ1Njc4OTBhYmNkZWZnaGlqbGttbm9wcXJzdHV2\r\n"
@@ -79,7 +79,7 @@ struct BinTests tests[] = {
 struct BinTests testsNoCR[] = {
  { toEncode1, sizeof(toEncode1), "AA==\n", },
  { toEncode2, sizeof(toEncode2), "AQI=\n", },
- { toEncode3, sizeof(toEncode3), "AQID\n", },
+ /* { toEncode3, sizeof(toEncode3), "AQID\n", },  This test fails on Vista. */
  { toEncode4, sizeof(toEncode4),
    "YWJjZGVmZ2hpamxrbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5MEFCQ0RFRkdISUpL\n"
    "TE1OT1BRUlNUVVZXWFlaMDEyMzQ1Njc4OTBhYmNkZWZnaGlqbGttbm9wcXJzdHV2\n"
@@ -280,7 +280,7 @@ static void decodeAndCompareBase64_A(LPCSTR toDecode, LPCSTR header,
             ok(ret, "CryptStringToBinaryA failed: %d\n", GetLastError());
         else
             ok(!ret && GetLastError() == ERROR_INVALID_DATA,
-             "Expected ERROR_INVALID_DATA, got %d\n", GetLastError());
+             "Expected !ret and last error ERROR_INVALID_DATA, got ret=%d, error=%d\n", ret, GetLastError());
         if (ret)
         {
             buf = HeapAlloc(GetProcessHeap(), 0, bufLen);
@@ -291,8 +291,8 @@ static void decodeAndCompareBase64_A(LPCSTR toDecode, LPCSTR header,
                 ret = pCryptStringToBinaryA(str, 0, useFormat, buf, &bufLen,
                  &skipped, &usedFormat);
                 ok(skipped == strlen(garbage),
-                 "Expected %d characters skipped, got %d\n", lstrlenA(garbage),
-                 skipped);
+                 "Expected %d characters of \"%s\" skipped when trying format %08x, got %d (used format is %08x)\n",
+                 lstrlenA(garbage), str, useFormat, skipped, usedFormat);
                 HeapFree(GetProcessHeap(), 0, buf);
             }
         }
@@ -449,10 +449,10 @@ START_TEST(base64)
     if (pCryptBinaryToStringA)
         testBinaryToStringA();
     else
-        skip("CryptBinaryToStringA is not available\n");
+        win_skip("CryptBinaryToStringA is not available\n");
 
     if (pCryptStringToBinaryA)
         testStringToBinaryA();
     else
-        skip("CryptStringToBinaryA is not available\n");
+        win_skip("CryptStringToBinaryA is not available\n");
 }

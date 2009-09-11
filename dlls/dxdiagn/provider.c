@@ -23,6 +23,7 @@
 
 #define COBJMACROS
 #define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "dxdiag_private.h"
 #include "wine/unicode.h"
 #include "winver.h"
@@ -32,10 +33,16 @@
 #include "vfw.h"
 #include "mmddk.h"
 #include "ddraw.h"
+#include "d3d9.h"
+#include "strmif.h"
+#include "initguid.h"
+#include "fil_data.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dxdiag);
+
+static HRESULT DXDiag_InitRootDXDiagContainer(IDxDiagContainer* pRootCont);
 
 /* IDxDiagProvider IUnknown parts follow: */
 static HRESULT WINAPI IDxDiagProviderImpl_QueryInterface(PDXDIAGPROVIDER iface, REFIID riid, LPVOID *ppobj)
@@ -156,15 +163,65 @@ static inline HRESULT add_prop_str( IDxDiagContainer* cont, LPCWSTR prop, LPCWST
 
 static inline HRESULT add_prop_ui4( IDxDiagContainer* cont, LPCWSTR prop, DWORD data )
 {
-    HRESULT hr;
     VARIANT var;
 
     V_VT( &var ) = VT_UI4;
     V_UI4( &var ) = data;
+    return IDxDiagContainerImpl_AddProp( cont, prop, &var );
+}
+
+static inline HRESULT add_prop_bool( IDxDiagContainer* cont, LPCWSTR prop, BOOL data )
+{
+    VARIANT var;
+
+    V_VT( &var ) = VT_BOOL;
+    V_BOOL( &var ) = data;
+    return IDxDiagContainerImpl_AddProp( cont, prop, &var );
+}
+
+static inline HRESULT add_prop_ull_as_str( IDxDiagContainer* cont, LPCWSTR prop, ULONGLONG data )
+{
+    HRESULT hr;
+    VARIANT var;
+
+    V_VT( &var ) = VT_UI8;
+    V_UI8( &var ) = data;
+    VariantChangeType( &var, &var, 0, VT_BSTR );
     hr = IDxDiagContainerImpl_AddProp( cont, prop, &var );
     VariantClear( &var );
 
     return hr;
+}
+
+static void get_display_device_id(WCHAR *szIdentifierBuffer)
+{
+    static const WCHAR szNA[] = {'n','/','a',0};
+
+    HRESULT hr = E_FAIL;
+
+    HMODULE                 d3d9_handle;
+    IDirect3D9             *(WINAPI *pDirect3DCreate9)(UINT) = NULL;
+    IDirect3D9             *pD3d = NULL;
+    D3DADAPTER_IDENTIFIER9  adapter_ident;
+
+    /* Retrieves the display device identifier from the d3d9 implementation. */
+    d3d9_handle = LoadLibraryA("d3d9.dll");
+    if(d3d9_handle)
+        pDirect3DCreate9 = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9");
+    if(pDirect3DCreate9)
+        pD3d = pDirect3DCreate9(D3D_SDK_VERSION);
+    if(pD3d)
+        hr = IDirect3D9_GetAdapterIdentifier(pD3d, D3DADAPTER_DEFAULT, 0, &adapter_ident);
+    if(SUCCEEDED(hr)) {
+        StringFromGUID2(&adapter_ident.DeviceIdentifier, szIdentifierBuffer, 39);
+    } else {
+        memcpy(szIdentifierBuffer, szNA, sizeof(szNA));
+    }
+
+    if (pD3d)
+        IDirect3D9_Release(pD3d);
+    if (d3d9_handle)
+        FreeLibrary(d3d9_handle);
 }
 
 /**
@@ -189,7 +246,6 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
   static const WCHAR szFinal_Retail_v[] = {'F','i','n','a','l',' ','R','e','t','a','i','l',0};
   static const WCHAR szEnglish_v[] = {'E','n','g','l','i','s','h',0};
   static const WCHAR szVersionFormat[] = {'%','u','.','%','0','2','u','.','%','0','4','u','.','%','0','4','u',0};
-  VARIANT v;
 
   WCHAR szFile[512];
   WCHAR szVersion_v[1024];
@@ -199,8 +255,8 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
   UINT uiLength;
   VS_FIXEDFILEINFO* pFileInfo;
 
-  FIXME("(%p,%s)\n", pSubCont, debugstr_w(szFileName));
-  
+  TRACE("(%p,%s)\n", pSubCont, debugstr_w(szFileName));
+
   lstrcpyW(szFile, szFilePath);
   lstrcatW(szFile, szSlashSep);
   lstrcatW(szFile, szFileName);
@@ -210,15 +266,9 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
   boolret = GetFileVersionInfoW(szFile, 0, retval, pVersionInfo);
   boolret = VerQueryValueW(pVersionInfo, szSlashSep, (LPVOID) &pFileInfo, &uiLength);
 
-  V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szFile);
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, szPath, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szFileName);
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, szName, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BOOL; V_BOOL(&v) = boolret;
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, bExists, &v);  
-  VariantClear(&v);
+  add_prop_str(pSubCont, szPath, szFile);
+  add_prop_str(pSubCont, szName, szFileName);
+  add_prop_bool(pSubCont, bExists, boolret);
 
   if (boolret) {
     snprintfW(szVersion_v, sizeof(szVersion_v)/sizeof(szVersion_v[0]),
@@ -230,27 +280,13 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
 
     TRACE("Found version as (%s)\n", debugstr_w(szVersion_v));
 
-    V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szVersion_v);
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, szVersion, &v);
-    VariantClear(&v);
-    V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szFinal_Retail_v);
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, szAttributes, &v);
-    VariantClear(&v);
-    V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szEnglish_v);
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, szLanguageEnglish, &v);
-    VariantClear(&v);
-    V_VT(&v) = VT_UI4; V_UI4(&v) = pFileInfo->dwFileDateMS;
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, dwFileTimeHigh, &v);
-    VariantClear(&v);
-    V_VT(&v) = VT_UI4; V_UI4(&v) = pFileInfo->dwFileDateLS;
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, dwFileTimeLow, &v);
-    VariantClear(&v);
-    V_VT(&v) = VT_BOOL; V_BOOL(&v) = (0 != ((pFileInfo->dwFileFlags & pFileInfo->dwFileFlagsMask) & VS_FF_PRERELEASE));
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, bBeta, &v);  
-    VariantClear(&v);
-    V_VT(&v) = VT_BOOL; V_BOOL(&v) = (0 != ((pFileInfo->dwFileFlags & pFileInfo->dwFileFlagsMask) & VS_FF_DEBUG));
-    hr = IDxDiagContainerImpl_AddProp(pSubCont, bDebug, &v);  
-    VariantClear(&v);
+    add_prop_str(pSubCont, szVersion,         szVersion_v);
+    add_prop_str(pSubCont, szAttributes,      szFinal_Retail_v);
+    add_prop_str(pSubCont, szLanguageEnglish, szEnglish_v);
+    add_prop_ui4(pSubCont, dwFileTimeHigh,    pFileInfo->dwFileDateMS);
+    add_prop_ui4(pSubCont, dwFileTimeLow,     pFileInfo->dwFileDateLS);
+    add_prop_bool(pSubCont, bBeta,  0 != ((pFileInfo->dwFileFlags & pFileInfo->dwFileFlagsMask) & VS_FF_PRERELEASE));
+    add_prop_bool(pSubCont, bDebug, 0 != ((pFileInfo->dwFileFlags & pFileInfo->dwFileFlagsMask) & VS_FF_DEBUG));
   }
 
   HeapFree(GetProcessHeap(), 0, pVersionInfo);
@@ -259,7 +295,6 @@ static HRESULT DXDiag_AddFileDescContainer(IDxDiagContainer* pSubCont, const WCH
 }
 
 static HRESULT DXDiag_InitDXDiagSystemInfoContainer(IDxDiagContainer* pSubCont) {
-  HRESULT hr = S_OK;
   static const WCHAR dwDirectXVersionMajor[] = {'d','w','D','i','r','e','c','t','X','V','e','r','s','i','o','n','M','a','j','o','r',0};
   static const WCHAR dwDirectXVersionMinor[] = {'d','w','D','i','r','e','c','t','X','V','e','r','s','i','o','n','M','i','n','o','r',0};
   static const WCHAR szDirectXVersionLetter[] = {'s','z','D','i','r','e','c','t','X','V','e','r','s','i','o','n','L','e','t','t','e','r',0};
@@ -269,35 +304,45 @@ static HRESULT DXDiag_InitDXDiagSystemInfoContainer(IDxDiagContainer* pSubCont) 
   static const WCHAR szDirectXVersionEnglish_v[] = {'4','.','0','9','.','0','0','0','0','.','0','9','0','4',0};
   static const WCHAR szDirectXVersionLongEnglish[] = {'s','z','D','i','r','e','c','t','X','V','e','r','s','i','o','n','L','o','n','g','E','n','g','l','i','s','h',0};
   static const WCHAR szDirectXVersionLongEnglish_v[] = {'=',' ','"','D','i','r','e','c','t','X',' ','9','.','0','c',' ','(','4','.','0','9','.','0','0','0','0','.','0','9','0','4',')',0};
+  static const WCHAR ullPhysicalMemory[] = {'u','l','l','P','h','y','s','i','c','a','l','M','e','m','o','r','y',0};
+  static const WCHAR ullUsedPageFile[]   = {'u','l','l','U','s','e','d','P','a','g','e','F','i','l','e',0};
+  static const WCHAR ullAvailPageFile[]  = {'u','l','l','A','v','a','i','l','P','a','g','e','F','i','l','e',0};
   /*static const WCHAR szDxDiagVersion[] = {'s','z','D','x','D','i','a','g','V','e','r','s','i','o','n',0};*/
-  /*szWindowsDir*/
-  /*szWindowsDir*/
-  /*"dwOSMajorVersion"*/
-  /*"dwOSMinorVersion"*/
-  /*"dwOSBuildNumber"*/
-  /*"dwOSPlatformID"*/
-  VARIANT v;
+  static const WCHAR szWindowsDir[] = {'s','z','W','i','n','d','o','w','s','D','i','r',0};
+  static const WCHAR dwOSMajorVersion[] = {'d','w','O','S','M','a','j','o','r','V','e','r','s','i','o','n',0};
+  static const WCHAR dwOSMinorVersion[] = {'d','w','O','S','M','i','n','o','r','V','e','r','s','i','o','n',0};
+  static const WCHAR dwOSBuildNumber[] = {'d','w','O','S','B','u','i','l','d','N','u','m','b','e','r',0};
+  static const WCHAR dwOSPlatformID[] = {'d','w','O','S','P','l','a','t','f','o','r','m','I','D',0};
+  static const WCHAR szCSDVersion[] = {'s','z','C','S','D','V','e','r','s','i','o','n',0};
+  MEMORYSTATUSEX msex;
+  OSVERSIONINFOW info;
+  WCHAR buffer[MAX_PATH];
 
-  V_VT(&v) = VT_UI4; V_UI4(&v) = 9;
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, dwDirectXVersionMajor, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_UI4; V_UI4(&v) = 0;
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, dwDirectXVersionMinor, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szDirectXVersionLetter_v);
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, szDirectXVersionLetter, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szDirectXVersionEnglish_v);
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, szDirectXVersionEnglish, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(szDirectXVersionLongEnglish_v);
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, szDirectXVersionLongEnglish, &v);
-  VariantClear(&v);
-  V_VT(&v) = VT_BOOL; V_BOOL(&v) = FALSE;
-  hr = IDxDiagContainerImpl_AddProp(pSubCont, bDebug, &v);
-  VariantClear(&v);
+  add_prop_ui4(pSubCont, dwDirectXVersionMajor, 9);
+  add_prop_ui4(pSubCont, dwDirectXVersionMinor, 0);
+  add_prop_str(pSubCont, szDirectXVersionLetter, szDirectXVersionLetter_v);
+  add_prop_str(pSubCont, szDirectXVersionEnglish, szDirectXVersionEnglish_v);
+  add_prop_str(pSubCont, szDirectXVersionLongEnglish, szDirectXVersionLongEnglish_v);
+  add_prop_bool(pSubCont, bDebug, FALSE);
 
-  return hr;
+  msex.dwLength = sizeof(msex);
+  GlobalMemoryStatusEx( &msex );
+  add_prop_ull_as_str(pSubCont, ullPhysicalMemory, msex.ullTotalPhys);
+  add_prop_ull_as_str(pSubCont, ullUsedPageFile, msex.ullTotalPageFile - msex.ullAvailPageFile);
+  add_prop_ull_as_str(pSubCont, ullAvailPageFile, msex.ullAvailPageFile);
+
+  info.dwOSVersionInfoSize = sizeof(info);
+  GetVersionExW( &info );
+  add_prop_ui4(pSubCont, dwOSMajorVersion, info.dwMajorVersion);
+  add_prop_ui4(pSubCont, dwOSMinorVersion, info.dwMinorVersion);
+  add_prop_ui4(pSubCont, dwOSBuildNumber,  info.dwBuildNumber);
+  add_prop_ui4(pSubCont, dwOSPlatformID,   info.dwPlatformId);
+  add_prop_str(pSubCont, szCSDVersion,     info.szCSDVersion);
+
+  GetWindowsDirectoryW(buffer, MAX_PATH);
+  add_prop_str(pSubCont, szWindowsDir, buffer);
+
+  return S_OK;
 }
 
 static HRESULT DXDiag_InitDXDiagSystemDevicesContainer(IDxDiagContainer* pSubCont) {
@@ -312,7 +357,7 @@ static HRESULT DXDiag_InitDXDiagSystemDevicesContainer(IDxDiagContainer* pSubCon
   IDxDiagContainer* pDeviceSubCont = NULL;
   IDxDiagContainer* pDriversCont = NULL;
 
-  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDeviceSubCont);
+  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, &pDeviceSubCont);
   if (FAILED(hr)) { return hr; }
   V_VT(pvarProp) = VT_BSTR; V_BSTR(pvarProp) = SysAllocString(property->psz);
   hr = IDxDiagContainerImpl_AddProp(pDeviceSubCont, szDescription, &v);
@@ -328,7 +373,7 @@ static HRESULT DXDiag_InitDXDiagSystemDevicesContainer(IDxDiagContainer* pSubCon
    * Drivers Cont contains Files Desc Containers
    */
   /*
-  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDriversCont);
+  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, &pDriversCont);
   if (FAILED(hr)) { return hr; }
   hr = IDxDiagContainerImpl_AddChildContainer(pDeviceSubCont, szDrivers, pDriversCont);
 
@@ -353,7 +398,7 @@ static HRESULT DXDiag_InitDXDiagLogicalDisksContainer(IDxDiagContainer* pSubCont
   IDxDiagContainer* pDiskSubCont = NULL;
   IDxDiagContainer* pDriversCont = NULL;
 
-  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDiskSubCont);
+  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, &pDiskSubCont);
   if (FAILED(hr)) { return hr; }
   hr = IDxDiagContainerImpl_AddChildContainer(pSubCont, "" , pDiskSubCont);
   */
@@ -362,60 +407,63 @@ static HRESULT DXDiag_InitDXDiagLogicalDisksContainer(IDxDiagContainer* pSubCont
    * Drivers Cont contains Files Desc Containers
    */
   /*
-  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDriversCont);
+  hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, &pDriversCont);
   if (FAILED(hr)) { return hr; }
   hr = IDxDiagContainerImpl_AddChildContainer(pDeviceSubCont, szDrivers, pDriversCont);
   */
   return hr;
 }
-static HRESULT DXDiag_InitDXDiagDirectXFilesContainer(IDxDiagContainer* pSubCont) {
-  HRESULT hr = S_OK;
-  /**/
-  static const WCHAR ddraw_dll[] = {'d','d','r','a','w','.','d','l','l',0};
-  static const WCHAR dplayx_dll[] = {'d','p','l','a','y','x','.','d','l','l',0};
-  static const WCHAR dpnet_dll[] = {'d','p','n','e','t','.','d','l','l',0};
-  static const WCHAR dinput_dll[] = {'d','i','n','p','u','t','.','d','l','l',0};
-  static const WCHAR dinput8_dll[] = {'d','i','n','p','u','t','8','.','d','l','l',0};
-  static const WCHAR dsound_dll[] = {'d','s','o','u','n','d','.','d','l','l',0};
-  static const WCHAR dswave_dll[] = {'d','s','w','a','v','e','.','d','l','l',0};
-  static const WCHAR d3d8_dll[] = {'d','3','d','8','.','d','l','l',0};
-  static const WCHAR d3d9_dll[] = {'d','3','d','9','.','d','l','l',0};
-  static const WCHAR dmband_dll[] = {'d','m','b','a','n','d','.','d','l','l',0};
-  static const WCHAR dmcompos_dll[] = {'d','m','c','o','m','p','o','s','.','d','l','l',0};
-  static const WCHAR dmime_dll[] =  {'d','m','i','m','e','.','d','l','l',0};
-  static const WCHAR dmloader_dll[] = {'d','m','l','o','a','d','e','r','.','d','l','l',0};
-  static const WCHAR dmscript_dll[] = {'d','m','s','c','r','i','p','t','.','d','l','l',0};
-  static const WCHAR dmstyle_dll[] = {'d','m','s','t','y','l','e','.','d','l','l',0};
-  static const WCHAR dmsynth_dll[] = {'d','m','s','y','n','t','h','.','d','l','l',0};
-  static const WCHAR dmusic_dll[] = {'d','m','u','s','i','c','.','d','l','l',0};
-  static const WCHAR devenum_dll[] = {'d','e','v','e','n','u','m','.','d','l','l',0};
-  static const WCHAR quartz_dll[] = {'q','u','a','r','t','z','.','d','l','l',0};
-  WCHAR szFilePath[512];
 
-  hr = GetSystemDirectoryW(szFilePath, MAX_PATH);
-  if (FAILED(hr)) { return hr; }  
-  szFilePath[MAX_PATH-1]=0;     
+static HRESULT DXDiag_InitDXDiagDirectXFilesContainer(IDxDiagContainer* pSubCont)
+{
+    HRESULT hr = S_OK;
+    static const WCHAR dlls[][15] =
+    {
+        {'d','3','d','8','.','d','l','l',0},
+        {'d','3','d','9','.','d','l','l',0},
+        {'d','d','r','a','w','.','d','l','l',0},
+        {'d','e','v','e','n','u','m','.','d','l','l',0},
+        {'d','i','n','p','u','t','8','.','d','l','l',0},
+        {'d','i','n','p','u','t','.','d','l','l',0},
+        {'d','m','b','a','n','d','.','d','l','l',0},
+        {'d','m','c','o','m','p','o','s','.','d','l','l',0},
+        {'d','m','i','m','e','.','d','l','l',0},
+        {'d','m','l','o','a','d','e','r','.','d','l','l',0},
+        {'d','m','s','c','r','i','p','t','.','d','l','l',0},
+        {'d','m','s','t','y','l','e','.','d','l','l',0},
+        {'d','m','s','y','n','t','h','.','d','l','l',0},
+        {'d','m','u','s','i','c','.','d','l','l',0},
+        {'d','p','l','a','y','x','.','d','l','l',0},
+        {'d','p','n','e','t','.','d','l','l',0},
+        {'d','s','o','u','n','d','.','d','l','l',0},
+        {'d','s','w','a','v','e','.','d','l','l',0},
+        {'d','x','d','i','a','g','n','.','d','l','l',0},
+        {'q','u','a','r','t','z','.','d','l','l',0}
+    };
+    WCHAR szFilePath[MAX_PATH];
+    INT i;
 
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, ddraw_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dplayx_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dpnet_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dinput_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dinput8_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dsound_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dswave_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, d3d8_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, d3d9_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmband_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmcompos_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmime_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmloader_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmscript_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmstyle_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmsynth_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, dmusic_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, devenum_dll);
-  hr = DXDiag_AddFileDescContainer(pSubCont, szFilePath, quartz_dll);
-  return hr;
+    GetSystemDirectoryW(szFilePath, MAX_PATH);
+
+    for (i = 0; i < sizeof(dlls) / sizeof(dlls[0]); i++)
+    {
+        static const WCHAR szFormat[] = {'%','d',0};
+        WCHAR szFileID[5];
+        IDxDiagContainer *pDXFileSubCont;
+
+        snprintfW(szFileID, sizeof(szFileID)/sizeof(szFileID[0]), szFormat, i);
+
+        hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDXFileSubCont);
+        if (FAILED(hr)) continue;
+
+        if (FAILED(DXDiag_AddFileDescContainer(pDXFileSubCont, szFilePath, dlls[i])) ||
+            FAILED(IDxDiagContainerImpl_AddChildContainer(pSubCont, szFileID, pDXFileSubCont)))
+        {
+            IUnknown_Release(pDXFileSubCont);
+            continue;
+        }
+    }
+    return hr;
 }
 
 static HRESULT DXDiag_InitDXDiagDisplayContainer(IDxDiagContainer* pSubCont)
@@ -426,6 +474,7 @@ static HRESULT DXDiag_InitDXDiagDisplayContainer(IDxDiagContainer* pSubCont)
     static const WCHAR szKeyDeviceKey[] = {'s','z','K','e','y','D','e','v','i','c','e','K','e','y',0};
     static const WCHAR szVendorId[] = {'s','z','V','e','n','d','o','r','I','d',0};
     static const WCHAR szDeviceId[] = {'s','z','D','e','v','i','c','e','I','d',0};
+    static const WCHAR szDeviceIdentifier[] = {'s','z','D','e','v','i','c','e','I','d','e','n','t','i','f','i','e','r',0};
     static const WCHAR dwWidth[] = {'d','w','W','i','d','t','h',0};
     static const WCHAR dwHeight[] = {'d','w','H','e','i','g','h','t',0};
     static const WCHAR dwBpp[] = {'d','w','B','p','p',0};
@@ -483,6 +532,9 @@ static HRESULT DXDiag_InitDXDiagDisplayContainer(IDxDiagContainer* pSubCont)
             add_prop_ui4( pDisplayAdapterSubCont, dwBpp, surface_descr.u4.ddpfPixelFormat.u1.dwRGBBitCount );
     }
 
+    get_display_device_id( buffer );
+    add_prop_str( pDisplayAdapterSubCont, szDeviceIdentifier, buffer );
+
     add_prop_str( pDisplayAdapterSubCont, szVendorId, szEmpty );
     add_prop_str( pDisplayAdapterSubCont, szDeviceId, szEmpty );
     add_prop_str( pDisplayAdapterSubCont, szKeyDeviceKey, szEmpty );
@@ -524,37 +576,16 @@ static HRESULT DXDiag_InitDXDiagDirectPlayContainer(IDxDiagContainer* pSubCont) 
   return hr;
 }
 
-struct REG_RF {
-  DWORD dwVersion;
-  DWORD dwMerit;
-  DWORD dwPins;
-  DWORD dwUnused;
-};
-struct REG_RFP {
-  BYTE signature[4]; /* e.g. "0pi3" */
-  DWORD dwFlags;
-  DWORD dwInstances;
-  DWORD dwMediaTypes;
-  DWORD dwMediums;
-  DWORD bCategory; /* is there a category clsid? */
-  /* optional: dwOffsetCategoryClsid */
-};
-struct REG_TYPE {
-  BYTE signature[4]; /* e.g. "0ty3" */
-  DWORD dwUnused;
-  DWORD dwOffsetMajor;
-  DWORD dwOffsetMinor;
-};
-
 static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSubCont) {
   HRESULT hr = S_OK;
   static const WCHAR szName[] = {'s','z','N','a','m','e',0};
+  static const WCHAR szVersionW[] = {'s','z','V','e','r','s','i','o','n',0};
   static const WCHAR szCatName[] = {'s','z','C','a','t','N','a','m','e',0};
-  static const WCHAR szClsidCat[] = {'s','z','C','l','s','i','d','C','a','t',0};
-  static const WCHAR szClsidFilter[] = {'s','z','C','l','s','i','d','F','i','l','t','e','r',0};
+  static const WCHAR ClsidCatW[] = {'C','l','s','i','d','C','a','t',0};
+  static const WCHAR ClsidFilterW[] = {'C','l','s','i','d','F','i','l','t','e','r',0};
   static const WCHAR dwInputs[] = {'d','w','I','n','p','u','t','s',0};
   static const WCHAR dwOutputs[] = {'d','w','O','u','t','p','u','t','s',0};
-  static const WCHAR dwMerit[] = {'d','w','M','e','r','i','t',0};
+  static const WCHAR dwMeritW[] = {'d','w','M','e','r','i','t',0};
   /*
   static const WCHAR szFileName[] = {'s','z','F','i','l','e','N','a','m','e',0};
   static const WCHAR szFileVersion[] = {'s','z','F','i','l','e','V','e','r','s','i','o','n',0};
@@ -564,7 +595,11 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
   static const WCHAR wszClsidName[] = {'C','L','S','I','D',0};
   static const WCHAR wszFriendlyName[] = {'F','r','i','e','n','d','l','y','N','a','m','e',0};  
   static const WCHAR wszFilterDataName[] = {'F','i','l','t','e','r','D','a','t','a',0};
-  /*static const WCHAR wszMeritName[] = {'M','e','r','i','t',0};*/
+
+  static const WCHAR szVersionFormat[] = {'v','%','d',0};
+  static const WCHAR szIdFormat[] = {'%','d',0};
+  int i = 0;
+
 
   ICreateDevEnum* pCreateDevEnum = NULL;
   IEnumMoniker* pEmCat = NULL;
@@ -609,85 +644,100 @@ static HRESULT DXDiag_InitDXDiagDirectShowFiltersContainer(IDxDiagContainer* pSu
 	IEnumMoniker* pEnum = NULL;
 	IMoniker* pMoniker = NULL;
         hr = ICreateDevEnum_CreateClassEnumerator(pCreateDevEnum, &clsidCat, &pEnum, 0);        
-        FIXME("\tClassEnumerator for clsid(%s) pEnum(%p)\n", debugstr_guid(&clsidCat), pEnum);
+        TRACE("\tClassEnumerator for clsid(%s) pEnum(%p)\n", debugstr_guid(&clsidCat), pEnum);
         if (FAILED(hr) || pEnum == NULL) {
           goto class_enum_failed;
         }
         while (NULL != pEnum && S_OK == IEnumMoniker_Next(pEnum, 1, &pMoniker, NULL)) {          
 	  IPropertyBag* pPropFilterBag = NULL;
-          FIXME("\tIEnumMoniker_Next(%p, 1, %p)\n", pEnum, pMoniker);
+          TRACE("\tIEnumMoniker_Next(%p, 1, %p)\n", pEnum, pMoniker);
 	  hr = IMoniker_BindToStorage(pMoniker, NULL, NULL, &IID_IPropertyBag, (void**) &pPropFilterBag);
 	  if (SUCCEEDED(hr)) {
 	    LPBYTE pData = NULL;
-	    LPBYTE pCurrent = NULL;
-	    struct REG_RF* prrf = NULL;
-	    VARIANT v_data;
-	    DWORD it;
 	    DWORD dwNOutputs = 0;
 	    DWORD dwNInputs = 0;
-	    	    
-	    V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(wszCatName);
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szCatName, &v);
-	    VariantClear(&v);
+	    DWORD dwMerit = 0;
+            WCHAR bufferW[10];
+            IDxDiagContainer *pDShowSubCont = NULL;
+            IFilterMapper2 *pFileMapper = NULL;
+            IAMFilterData *pFilterData = NULL;
 
-	    V_VT(&v) = VT_BSTR; V_BSTR(&v) = SysAllocString(wszCatClsid);
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szClsidCat, &v);
-	    VariantClear(&v);
+            snprintfW(bufferW, sizeof(bufferW)/sizeof(bufferW[0]), szIdFormat, i);
+            if (FAILED(DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &pDShowSubCont)) ||
+                FAILED(IDxDiagContainerImpl_AddChildContainer(pSubCont, bufferW, pDShowSubCont)))
+            {
+              IPropertyBag_Release(pPropFilterBag);
+              if (pDShowSubCont) IUnknown_Release(pDShowSubCont);
+              continue;
+            }
 
+            bufferW[0] = 0;
 	    hr = IPropertyBag_Read(pPropFilterBag, wszFriendlyName, &v, 0);
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szName, &v);
-	    FIXME("\tName:%s\n", debugstr_w(V_BSTR(&v)));
+	    hr = IDxDiagContainerImpl_AddProp(pDShowSubCont, szName, &v);
+            TRACE("\tName:%s\n", debugstr_w(V_BSTR(&v)));
 	    VariantClear(&v);
 
 	    hr = IPropertyBag_Read(pPropFilterBag, wszClsidName, &v, 0);
-	    FIXME("\tClsid:%s\n", debugstr_w(V_BSTR(&v)));
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szClsidFilter, &v);
+            TRACE("\tClsid:%s\n", debugstr_w(V_BSTR(&v)));
+	    hr = IDxDiagContainerImpl_AddProp(pDShowSubCont, ClsidFilterW, &v);
 	    VariantClear(&v);
 
-	    hr = IPropertyBag_Read(pPropFilterBag, wszFilterDataName, &v, NULL);
-	    hr = SafeArrayAccessData(V_UNION(&v, parray), (LPVOID*) &pData);	    
-	    prrf = (struct REG_RF*) pData;
-	    pCurrent = pData;
- 
-	    VariantInit(&v_data);
-	    V_VT(&v_data) = VT_UI4; V_UI4(&v_data) = prrf->dwVersion;
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, szName, &v_data);
-	    VariantClear(&v_data);
-	    V_VT(&v_data) = VT_UI4; V_UI4(&v_data) = prrf->dwMerit;
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, dwMerit, &v_data);
-	    VariantClear(&v_data);
+            hr = CoCreateInstance(&CLSID_FilterMapper2, NULL, CLSCTX_INPROC, &IID_IFilterMapper2,
+                                  (LPVOID*)&pFileMapper);
+            if (SUCCEEDED(hr) &&
+                SUCCEEDED(IFilterMapper2_QueryInterface(pFileMapper, &IID_IAMFilterData, (void **)&pFilterData)))
+            {
+              DWORD array_size;
+              BYTE *tmp;
+              REGFILTER2 *pRF = NULL;
 
-	    pCurrent += sizeof(struct REG_RF);
-	    for (it = 0; it < prrf->dwPins; ++it) {
-	      struct REG_RFP* prrfp = (struct REG_RFP*) pCurrent;
-	      UINT j;
+              if (SUCCEEDED(IPropertyBag_Read(pPropFilterBag, wszFilterDataName, &v, NULL)) &&
+                  SUCCEEDED(SafeArrayAccessData(V_UNION(&v, parray), (LPVOID*) &pData)))
+              {
+                ULONG j;
+                array_size = V_UNION(&v, parray)->rgsabound->cElements;
 
-	      if (prrfp->dwFlags & REG_PINFLAG_B_OUTPUT) ++dwNOutputs;
-	      else ++dwNInputs;
+                if (SUCCEEDED(IAMFilterData_ParseFilterData(pFilterData, pData, array_size, &tmp)))
+                {
+                  pRF = ((REGFILTER2 **)tmp)[0];
 
-	      pCurrent += sizeof(struct REG_RFP);
-	      if (prrfp->bCategory) {
-		pCurrent += sizeof(DWORD);
-	      }
-	      for (j = 0; j < prrfp->dwMediaTypes; ++j) {
-                struct REG_TYPE* prt = (struct REG_TYPE *)pCurrent;
-                pCurrent += sizeof(*prt);
-	      }
-	      for (j = 0; j < prrfp->dwMediums; ++j) {
-		DWORD dwOffset = *(DWORD*) pCurrent;
-		pCurrent += sizeof(dwOffset);
-	      }
-	    }
+                  snprintfW(bufferW, sizeof(bufferW)/sizeof(bufferW[0]), szVersionFormat, pRF->dwVersion);
+                  if (pRF->dwVersion == 1)
+                  {
+                    for (j = 0; j < pRF->u.s.cPins; j++)
+                      if (pRF->u.s.rgPins[j].bOutput)
+                        dwNOutputs++;
+                      else
+                        dwNInputs++;
+                  }
+                  else if (pRF->dwVersion == 2)
+                  {
+                    for (j = 0; j < pRF->u.s1.cPins2; j++)
+                      if (pRF->u.s1.rgPins2[j].dwFlags & REG_PINFLAG_B_OUTPUT)
+                        dwNOutputs++;
+                      else
+                        dwNInputs++;
+                  }
 
-	    V_VT(&v_data) = VT_UI4; V_UI4(&v_data) = dwNInputs;
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, dwInputs, &v_data);
-	    VariantClear(&v_data);
-	    V_VT(&v_data) = VT_UI4; V_UI4(&v_data) = dwNOutputs;
-	    hr = IDxDiagContainerImpl_AddProp(pSubCont, dwOutputs, &v_data);
-	    VariantClear(&v_data);
+                  dwMerit = pRF->dwMerit;
+                  CoTaskMemFree(tmp);
+                }
 
-	    SafeArrayUnaccessData(V_UNION(&v, parray));
-	    VariantClear(&v);
+                SafeArrayUnaccessData(V_UNION(&v, parray));
+                VariantClear(&v);
+              }
+              IFilterMapper2_Release(pFilterData);
+            }
+            if (pFileMapper) IFilterMapper2_Release(pFileMapper);
+
+            add_prop_str(pDShowSubCont, szVersionW, bufferW);
+            add_prop_str(pDShowSubCont, szCatName, wszCatName);
+            add_prop_str(pDShowSubCont, ClsidCatW, wszCatClsid);
+            add_prop_ui4(pDShowSubCont, dwInputs,  dwNInputs);
+            add_prop_ui4(pDShowSubCont, dwOutputs, dwNOutputs);
+            add_prop_ui4(pDShowSubCont, dwMeritW, dwMerit);
+
+            i++;
 	  }
 	  IPropertyBag_Release(pPropFilterBag); pPropFilterBag = NULL;
 	}
@@ -707,7 +757,7 @@ out_show_filters:
   return hr;
 }
 
-HRESULT DXDiag_InitRootDXDiagContainer(IDxDiagContainer* pRootCont) {
+static HRESULT DXDiag_InitRootDXDiagContainer(IDxDiagContainer* pRootCont) {
   HRESULT hr = S_OK;
   static const WCHAR DxDiag_SystemInfo[] = {'D','x','D','i','a','g','_','S','y','s','t','e','m','I','n','f','o',0};
   static const WCHAR DxDiag_SystemDevices[] = {'D','x','D','i','a','g','_','S','y','s','t','e','m','D','e','v','i','c','e','s',0};

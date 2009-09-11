@@ -11,8 +11,6 @@ C_SRCS = \
 
 RC_SRCS = version.rc
 
-SPEC_SRCS16 = imm.spec
-
 @MAKE_DLL_RULES@
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

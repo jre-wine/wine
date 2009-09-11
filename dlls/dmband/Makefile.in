@@ -3,14 +3,13 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = dmband.dll
-IMPORTS   = ole32 user32 advapi32 kernel32
-EXTRALIBS = -ldxguid -luuid
+IMPORTS   = dxguid uuid ole32 advapi32 kernel32
 
 C_SRCS = \
 	band.c \
 	bandtrack.c \
-	dmutils.c \
 	dmband_main.c \
+	dmutils.c \
 	regsvr.c
 
 RC_SRCS = version.rc

@@ -125,7 +125,7 @@ RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
 
 RPC_STATUS RpcServerAssoc_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
                                          LPCSTR Endpoint, LPCWSTR NetworkOptions,
-                                         unsigned long assoc_gid,
+                                         ULONG assoc_gid,
                                          RpcAssoc **assoc_out)
 {
     RpcAssoc *assoc;
@@ -222,6 +222,8 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
     RpcPktHdr *response_hdr;
     RPC_MESSAGE msg;
     RPC_STATUS status;
+    unsigned char *auth_data = NULL;
+    ULONG auth_length;
 
     TRACE("sending bind request to server\n");
 
@@ -235,10 +237,10 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
     if (status != RPC_S_OK)
         return status;
 
-    status = RPCRT4_Receive(conn, &response_hdr, &msg);
+    status = RPCRT4_ReceiveWithAuth(conn, &response_hdr, &msg, &auth_data, &auth_length);
     if (status != RPC_S_OK)
     {
-        ERR("receive failed\n");
+        ERR("receive failed with error %d\n", status);
         return status;
     }
 
@@ -259,9 +261,17 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
                 switch (results->results[0].result)
                 {
                 case RESULT_ACCEPT:
-                    conn->assoc_group_id = response_hdr->bind_ack.assoc_gid;
-                    conn->MaxTransmissionSize = response_hdr->bind_ack.max_tsize;
-                    conn->ActiveInterface = *InterfaceId;
+                    /* respond to authorization request */
+                    if (auth_length > sizeof(RpcAuthVerifier))
+                        status = RPCRT4_AuthorizeConnection(conn,
+                                                            auth_data + sizeof(RpcAuthVerifier),
+                                                            auth_length);
+                    if (status == RPC_S_OK)
+                    {
+                        conn->assoc_group_id = response_hdr->bind_ack.assoc_gid;
+                        conn->MaxTransmissionSize = response_hdr->bind_ack.max_tsize;
+                        conn->ActiveInterface = *InterfaceId;
+                    }
                     break;
                 case RESULT_PROVIDER_REJECTION:
                     switch (results->results[0].reason)
@@ -334,6 +344,7 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
 
     I_RpcFree(msg.Buffer);
     RPCRT4_FreeHeader(response_hdr);
+    HeapFree(GetProcessHeap(), 0, auth_data);
     return status;
 }
 
@@ -383,6 +394,7 @@ RPC_STATUS RpcAssoc_GetClientConnection(RpcAssoc *assoc,
     if (status != RPC_S_OK)
         return status;
 
+    NewConnection->assoc = assoc;
     status = RPCRT4_OpenClientConnection(NewConnection);
     if (status != RPC_S_OK)
     {
@@ -405,6 +417,7 @@ RPC_STATUS RpcAssoc_GetClientConnection(RpcAssoc *assoc,
 void RpcAssoc_ReleaseIdleConnection(RpcAssoc *assoc, RpcConnection *Connection)
 {
     assert(!Connection->server);
+    Connection->async_state = NULL;
     EnterCriticalSection(&assoc->cs);
     if (!assoc->assoc_group_id) assoc->assoc_group_id = Connection->assoc_group_id;
     list_add_head(&assoc->free_connection_pool, &Connection->conn_pool_entry);

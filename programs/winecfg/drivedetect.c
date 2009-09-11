@@ -22,34 +22,44 @@
 #include "config.h"
 #include "wine/port.h"
 
-#include <wine/debug.h>
-#include <wine/library.h>
-
-#include "winecfg.h"
-
+#include <stdarg.h>
 #include <stdio.h>
 #ifdef HAVE_MNTENT_H
 #include <mntent.h>
 #endif
 #include <stdlib.h>
 #include <errno.h>
-
 #include <sys/stat.h>
 
+#include <windef.h>
 #include <winbase.h>
+#include <wine/debug.h>
+#include <wine/library.h>
+
+#include "winecfg.h"
+#include "resource.h"
+
 
 WINE_DEFAULT_DEBUG_CHANNEL(winecfg);
 
 BOOL gui_mode = TRUE;
-static long working_mask = 0;
+static ULONG working_mask = 0;
+
+typedef struct
+{
+  const char *szNode;
+  int nType;
+} DEV_NODES;
 
 #ifdef HAVE_MNTENT_H
 
 static const DEV_NODES sDeviceNodes[] = {
   {"/dev/fd", DRIVE_REMOVABLE},
   {"/dev/pf", DRIVE_REMOVABLE},
+  {"/dev/acd", DRIVE_CDROM},
   {"/dev/aztcd", DRIVE_CDROM},
   {"/dev/bpcd", DRIVE_CDROM},
+  {"/dev/cd", DRIVE_CDROM},
   {"/dev/cdrom", DRIVE_CDROM},
   {"/dev/cdu535", DRIVE_CDROM},
   {"/dev/cdwriter", DRIVE_CDROM},
@@ -227,7 +237,7 @@ static void ensure_root_is_mapped(void)
         {
             if (!drives[letter - 'A'].in_use) 
             {
-                add_drive(letter, "/", "System", "0", DRIVE_FIXED);
+                add_drive(letter, "/", NULL, NULL, 0, DRIVE_FIXED);
                 WINE_TRACE("allocated drive %c as the root drive\n", letter);
                 break;
             }
@@ -256,7 +266,7 @@ static void ensure_home_is_mapped(void)
         {
             if (!drives[letter - 'A'].in_use)
             {
-                add_drive(letter, home, "Home", "0", DRIVE_FIXED);
+                add_drive(letter, home, NULL, NULL, 0, DRIVE_FIXED);
                 WINE_TRACE("allocated drive %c as the user's home directory\n", letter);
                 break;
             }
@@ -281,7 +291,10 @@ static void ensure_drive_c_is_mapped(void)
 
     if (stat(drive_c_dir, &buf) == 0)
     {
-        add_drive('C', "../drive_c", "Virtual Windows Drive", "0", DRIVE_FIXED);
+        WCHAR label[64];
+        LoadStringW (GetModuleHandle (NULL), IDS_SYSTEM_DRIVE_LABEL, label,
+                     sizeof(label)/sizeof(label[0]));
+        add_drive('C', "../drive_c", NULL, label, 0, DRIVE_FIXED);
     }
     else
     {
@@ -318,9 +331,9 @@ int autodetect_drives(void)
     while ((ent = getmntent(fstab)))
     {
         char letter;
-        char label[256];
         int type;
-        
+        char *device = NULL;
+
         WINE_TRACE("ent->mnt_dir=%s\n", ent->mnt_dir);
 
         if (should_ignore_fstype(ent->mnt_type)) continue;
@@ -338,20 +351,19 @@ int autodetect_drives(void)
         
         /* allocate a drive for it */
         letter = allocate_letter(type);
-        if (letter == ']')
+        if (letter == 'Z' + 1)
         {
             report_error(NO_MORE_LETTERS);
             fclose(fstab);
             return FALSE;
         }
-        
-        strcpy(label, "Drive X");
-        label[6] = letter;
-        
-        WINE_TRACE("adding drive %c for %s, type %s with label %s\n", letter, ent->mnt_dir, ent->mnt_type,label);
 
-        add_drive(letter, ent->mnt_dir, label, "0", type);
-        
+        if (type == DRIVE_CDROM) device = ent->mnt_fsname;
+
+        WINE_TRACE("adding drive %c for %s, device %s, type %s\n",
+                   letter, ent->mnt_dir, device, ent->mnt_type);
+        add_drive(letter, ent->mnt_dir, device, NULL, 0, type);
+
         /* working_mask is a map of the drive letters still available. */
         working_mask &= ~DRIVE_MASK_BIT(letter);
     }

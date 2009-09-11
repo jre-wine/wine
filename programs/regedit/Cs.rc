@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resource.h"
+
 LANGUAGE LANG_CZECH, SUBLANG_DEFAULT
 
 /* Czech strings in CP1250 */
@@ -54,6 +56,7 @@ BEGIN
             MENUITEM "Ø&etìzcová položka",               ID_EDIT_NEW_STRINGVALUE
             MENUITEM "&Binární položka",               ID_EDIT_NEW_BINARYVALUE
             MENUITEM "&DWORD položka",                ID_EDIT_NEW_DWORDVALUE
+            MENUITEM "&Multi String Value",     ID_EDIT_NEW_MULTI_STRINGVALUE
         END
         MENUITEM SEPARATOR
         MENUITEM "&Smazat\tDel",                ID_EDIT_DELETE
@@ -74,8 +77,8 @@ BEGIN
     END
     POPUP "&Oblíbené"
     BEGIN
-        MENUITEM "Pøid&at k oblíbeným",          ID_FAVORITES_ADDTOFAVORITES
-        MENUITEM "Odeb&rat oblíbené",           ID_FAVORITES_REMOVEFAVORITE
+        MENUITEM "Pøid&at k oblíbeným...",          ID_FAVORITES_ADDTOFAVORITES
+        MENUITEM "Odeb&rat oblíbené...",           ID_FAVORITES_REMOVEFAVORITE
     END
     POPUP "&Nápovìda"
     BEGIN
@@ -104,11 +107,13 @@ BEGIN
             MENUITEM "Ø&etìzcová položka",               ID_EDIT_NEW_STRINGVALUE
             MENUITEM "&Binarní položka",               ID_EDIT_NEW_BINARYVALUE
             MENUITEM "&DWORD položka",                ID_EDIT_NEW_DWORDVALUE
+            MENUITEM "&Multi String Value",     ID_EDIT_NEW_MULTI_STRINGVALUE
         END
         MENUITEM SEPARATOR
         MENUITEM "&Smazat\tDel",                ID_EDIT_DELETE
         MENUITEM "Pøe&jmenovat\tF2",                 ID_EDIT_RENAME
         MENUITEM SEPARATOR
+        MENUITEM "&Export...",                  ID_EDIT_EXPORT
         MENUITEM "&Kopírovat název klíèe",              ID_EDIT_COPYKEYNAME
         MENUITEM SEPARATOR
         MENUITEM "&Najít\tCtrl+F",               ID_EDIT_FIND, GRAYED
@@ -214,12 +219,14 @@ BEGIN
     IDS_ERROR		    "Chyba"
     IDS_BAD_KEY		    "Nelze najít klíè '%s'"
     IDS_BAD_VALUE           "Nelze najít položku '%s'"
-    IDS_UNSUPPORTED_TYPE    "Nemohu upravit klíèe tohoto typu (%ld)"
-    IDS_TOO_BIG_VALUE       "Hodnota je pøíliš velká (%ld)"
+    IDS_UNSUPPORTED_TYPE    "Nemohu upravit klíèe tohoto typu (%u)"
+    IDS_TOO_BIG_VALUE       "Hodnota je pøíliš velká (%u)"
     IDS_DELETE_BOX_TITLE    "Potvrïte smazání položky"
     IDS_DELETE_BOX_TEXT     "Opravdu chcete smazat položku '%s'?"
+    IDS_DELETE_BOX_TEXT_MULTIPLE "Are you sure you want to delete these values?"
     IDS_NEWKEY              "Nový klíè #%d"
     IDS_NEWVALUE            "Nová položka #%d"
+    IDS_NOTFOUND            "Search string '%s' not found"
 END
 
 /*****************************************************************/
@@ -232,19 +239,5 @@ END
 BEGIN
     "resource.h\0"
 END
-
-
-
-/*
- * String Table
- */
-
-/*
- *STRINGTABLE DISCARDABLE
- *BEGIN
- *    ID_HELP_HELPTOPICS      "Opens Registry Editor Help."
- *    ID_HELP_ABOUT           "Displays program information, version number, and copyright."
- *END
- */
 
 /*****************************************************************/

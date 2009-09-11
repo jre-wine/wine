@@ -2,7 +2,7 @@
 #
 # Script to create the initial WINEPREFIX directory
 #
-# Copyright 1999 Ove Kåven
+# Copyright 1999 Ove KÃ¥ven
 # Copyright 2004 Chris Morgan
 # Copyright 2004 Alexandre Julliard
 #
@@ -59,7 +59,6 @@ esac
 
 bindir=`cd "$bindir" && pwd`
 dlldir="$bindir/@bintodlldir@"
-datadir="$bindir/@bintodatadir@"
 
 do_wait=0
 quiet=0
@@ -79,7 +78,6 @@ then
         LD_LIBRARY_PATH="$topdir/libs/wine"
     fi
     export LD_LIBRARY_PATH
-    datadir="$topdir/tools"
 fi
 
 while [ $# -gt 0 ]
@@ -113,6 +111,10 @@ do
   esac
 done
 
+echo "Note: wineprefixcreate is deprecated and shouldn't be needed anymore." 1>&2
+echo "      WINEPREFIX creation and updates now happen automatically when needed." 1>&2
+echo 1>&2
+
 WINEPREFIX="${WINEPREFIX:-$HOME/.wine}"
 
 if [ -d "$WINEPREFIX" ] || mkdir "$WINEPREFIX"; then :
@@ -122,42 +124,18 @@ else
 fi
 
 WINEPREFIX=`cd "$WINEPREFIX" && pwd`
-
-# Create the drive symlinks
-
-if [ ! -d "$WINEPREFIX/dosdevices" ]
-then
-    mkdir "$WINEPREFIX/dosdevices"
-    [ -d "$WINEPREFIX/drive_c" ] || mkdir "$WINEPREFIX/drive_c"
-    ln -s "../drive_c" "$WINEPREFIX/dosdevices/c:"
-    ln -s "/" "$WINEPREFIX/dosdevices/z:"
-fi
-
-CROOT="$WINEPREFIX/dosdevices/c:"
-
-# Create the directory tree
-
-for i in \
-    "$CROOT/windows" \
-    "$CROOT/windows/inf"
-do
-    [ -d "$i" ] || mkdir "$i"
-done
-
-# Copy the .inf script and run it
-
-cp "$datadir/wine.inf" "$CROOT/windows/inf/wine.inf"
 export WINEPREFIX
-"${WINELOADER:-$bindir/wine}" rundll32.exe setupapi.dll,InstallHinfSection DefaultInstall 128 wine.inf
+
+if [ -d "$WINEPREFIX/dosdevices" ]
+then
+    "${WINELOADER:-$bindir/wine}" wineboot.exe --update
+else
+    "${WINELOADER:-$bindir/wine}" wineboot.exe
+fi
 
 # Wait for the wineserver to finish
 
 if [ $do_wait = 1 ]
 then
     "${WINESERVER:-$bindir/wineserver}" -w
-fi
-
-if [ $quiet = 0 ]
-then
-    echo "$WINEPREFIX updated successfully."
 fi

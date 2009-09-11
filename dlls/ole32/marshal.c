@@ -45,9 +45,12 @@ extern const CLSID CLSID_DfMarshal;
 /* number of refs given out for normal marshaling */
 #define NORMALEXTREFS 5
 
+
+/* private flag indicating that the object was marshaled as table-weak */
+#define SORFP_TABLEWEAK SORF_OXRES1
 /* private flag indicating that the caller does not want to notify the stub
  * when the proxy disconnects or is destroyed */
-#define SORFP_NOLIFETIMEMGMT SORF_OXRES1
+#define SORFP_NOLIFETIMEMGMT SORF_OXRES2
 
 static HRESULT unmarshal_object(const STDOBJREF *stdobjref, APARTMENT *apt,
                                 MSHCTX dest_context, void *dest_context_data,
@@ -131,10 +134,11 @@ HRESULT marshal_object(APARTMENT *apt, STDOBJREF *stdobjref, REFIID riid, IUnkno
         }
     }
 
+    stdobjref->flags = SORF_NULL;
+    if (mshlflags & MSHLFLAGS_TABLEWEAK)
+        stdobjref->flags |= SORFP_TABLEWEAK;
     if (mshlflags & MSHLFLAGS_NOPING)
-        stdobjref->flags = SORF_NOPING;
-    else
-        stdobjref->flags = SORF_NULL;
+        stdobjref->flags |= SORF_NOPING;
 
     if ((manager = get_stub_manager_from_object(apt, object)))
         TRACE("registering new ifstub on pre-existing manager\n");
@@ -167,20 +171,22 @@ HRESULT marshal_object(APARTMENT *apt, STDOBJREF *stdobjref, REFIID riid, IUnkno
         stub_manager_int_release(manager);
         /* destroy the stub manager if it has no ifstubs by releasing
          * zero external references */
-        stub_manager_ext_release(manager, 0, TRUE);
+        stub_manager_ext_release(manager, 0, FALSE, TRUE);
         return E_OUTOFMEMORY;
     }
 
     if (!tablemarshal)
     {
         stdobjref->cPublicRefs = NORMALEXTREFS;
-        stub_manager_ext_addref(manager, stdobjref->cPublicRefs);
+        stub_manager_ext_addref(manager, stdobjref->cPublicRefs, FALSE);
     }
     else
     {
         stdobjref->cPublicRefs = 0;
         if (mshlflags & MSHLFLAGS_TABLESTRONG)
-            stub_manager_ext_addref(manager, 1);
+            stub_manager_ext_addref(manager, 1, FALSE);
+        else
+            stub_manager_ext_addref(manager, 0, TRUE);
     }
 
     /* FIXME: check return value */
@@ -210,7 +216,7 @@ static HRESULT WINAPI ClientIdentity_QueryInterface(IMultiQI * iface, REFIID rii
 
     mqi.pIID = riid;
     hr = IMultiQI_QueryMultipleInterfaces(iface, 1, &mqi);
-    *ppv = (void *)mqi.pItf;
+    *ppv = mqi.pItf;
 
     return hr;
 }
@@ -425,7 +431,7 @@ static HRESULT WINAPI Proxy_MarshalInterface(
 
         if (SUCCEEDED(hr))
         {
-            TRACE("writing stdobjref:\n\tflags = %04lx\n\tcPublicRefs = %ld\n\toxid = %s\n\toid = %s\n\tipid = %s\n",
+            TRACE("writing stdobjref: flags = %04x cPublicRefs = %d oxid = %s oid = %s ipid = %s\n",
                 stdobjref.flags, stdobjref.cPublicRefs,
                 wine_dbgstr_longlong(stdobjref.oxid),
                 wine_dbgstr_longlong(stdobjref.oid),
@@ -831,19 +837,19 @@ static HRESULT proxy_manager_query_local_interface(struct proxy_manager * This, 
     if (IsEqualIID(riid, &IID_IUnknown) ||
         IsEqualIID(riid, &IID_IMultiQI))
     {
-        *ppv = (void *)&This->lpVtbl;
+        *ppv = &This->lpVtbl;
         IUnknown_AddRef((IUnknown *)*ppv);
         return S_OK;
     }
     if (IsEqualIID(riid, &IID_IMarshal))
     {
-        *ppv = (void *)&This->lpVtblMarshal;
+        *ppv = &This->lpVtblMarshal;
         IUnknown_AddRef((IUnknown *)*ppv);
         return S_OK;
     }
     if (IsEqualIID(riid, &IID_IClientSecurity))
     {
-        *ppv = (void *)&This->lpVtblCliSec;
+        *ppv = &This->lpVtblCliSec;
         IUnknown_AddRef((IUnknown *)*ppv);
         return S_OK;
     }
@@ -884,7 +890,7 @@ static HRESULT proxy_manager_create_ifproxy(
      * proxy associated with the ifproxy as we handle IUnknown ourselves */
     if (IsEqualIID(riid, &IID_IUnknown))
     {
-        ifproxy->iface = (void *)&This->lpVtbl;
+        ifproxy->iface = &This->lpVtbl;
         IMultiQI_AddRef((IMultiQI *)&This->lpVtbl);
         hr = S_OK;
     }
@@ -919,7 +925,7 @@ static HRESULT proxy_manager_create_ifproxy(
         LeaveCriticalSection(&This->cs);
 
         *iif_out = ifproxy;
-        TRACE("ifproxy %p created for IPID %s, interface %s with %lu public refs\n",
+        TRACE("ifproxy %p created for IPID %s, interface %s with %u public refs\n",
               ifproxy, debugstr_guid(&stdobjref->ipid), debugstr_guid(riid), stdobjref->cPublicRefs);
     }
     else
@@ -1207,7 +1213,7 @@ StdMarshalImpl_MarshalInterface(
     /* make sure this apartment can be reached from other threads / processes */
     RPC_StartRemoting(apt);
 
-    hres = marshal_object(apt, &stdobjref, riid, (IUnknown *)pv, mshlflags);
+    hres = marshal_object(apt, &stdobjref, riid, pv, mshlflags);
     if (hres)
     {
         ERR("Failed to create ifstub, hres=0x%x\n", hres);
@@ -1233,7 +1239,7 @@ static HRESULT unmarshal_object(const STDOBJREF *stdobjref, APARTMENT *apt,
 
     assert(apt);
 
-    TRACE("stdobjref:\n\tflags = %04lx\n\tcPublicRefs = %ld\n\toxid = %s\n\toid = %s\n\tipid = %s\n",
+    TRACE("stdobjref: flags = %04x cPublicRefs = %d oxid = %s oid = %s ipid = %s\n",
         stdobjref->flags, stdobjref->cPublicRefs,
         wine_dbgstr_longlong(stdobjref->oxid),
         wine_dbgstr_longlong(stdobjref->oid),
@@ -1330,7 +1336,7 @@ StdMarshalImpl_UnmarshalInterface(LPMARSHAL iface, IStream *pStm, REFIID riid, v
       
         /* unref the ifstub. FIXME: only do this on success? */
         if (!stub_manager_is_table_marshaled(stubmgr, &stdobjref.ipid))
-            stub_manager_ext_release(stubmgr, stdobjref.cPublicRefs, TRUE);
+            stub_manager_ext_release(stubmgr, stdobjref.cPublicRefs, stdobjref.flags & SORFP_TABLEWEAK, TRUE);
 
         stub_manager_int_release(stubmgr);
         return hres;
@@ -1407,7 +1413,7 @@ StdMarshalImpl_ReleaseMarshalData(LPMARSHAL iface, IStream *pStm)
         return RPC_E_INVALID_OBJREF;
     }
 
-    stub_manager_release_marshal_data(stubmgr, stdobjref.cPublicRefs, &stdobjref.ipid);
+    stub_manager_release_marshal_data(stubmgr, stdobjref.cPublicRefs, &stdobjref.ipid, stdobjref.flags & SORFP_TABLEWEAK);
 
     stub_manager_int_release(stubmgr);
     apartment_release(apt);
@@ -1540,7 +1546,7 @@ static HRESULT get_unmarshaler_from_stream(IStream *stream, IMarshal **marshal, 
     /* sanity check on header */
     if (objref.signature != OBJREF_SIGNATURE)
     {
-        ERR("Bad OBJREF signature 0x%08lx\n", objref.signature);
+        ERR("Bad OBJREF signature 0x%08x\n", objref.signature);
         return RPC_E_INVALID_OBJREF;
     }
 
@@ -1572,7 +1578,7 @@ static HRESULT get_unmarshaler_from_stream(IStream *stream, IMarshal **marshal, 
     }
     else
     {
-        FIXME("Invalid or unimplemented marshaling type specified: %lx\n",
+        FIXME("Invalid or unimplemented marshaling type specified: %x\n",
             objref.flags);
         return RPC_E_INVALID_OBJREF;
     }
@@ -1967,7 +1973,7 @@ static HRESULT WINAPI StdMarshalCF_QueryInterface(LPCLASSFACTORY iface,
     *ppv = NULL;
     if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IClassFactory))
     {
-        *ppv = (LPVOID)iface;
+        *ppv = iface;
         return S_OK;
     }
     return E_NOINTERFACE;

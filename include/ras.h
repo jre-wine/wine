@@ -55,10 +55,6 @@ extern "C" {
 #define RASDT_Parallel   "PARALLEL"
 #define RASDT_PPPoE      "PPPoE"
 
-#define RASBASE				600
-#define ERROR_BUFFER_TOO_SMALL		(RASBASE+3)
-#define ERROR_INVALID_SIZE		(RASBASE+32)
-
 typedef struct tagRASDEVINFOA {
     DWORD    dwSize;
     CHAR     szDeviceType[ RAS_MaxDeviceType + 1 ];
@@ -85,6 +81,10 @@ typedef struct tagRASCONNA {
     CHAR     szDeviceName[ RAS_MaxDeviceName + 1 ];
     CHAR     szPhonebook[ MAX_PATH ];
     DWORD    dwSubEntry;
+    GUID     guidEntry;
+    DWORD    dwFlags;
+    LUID     luid;
+    GUID     guidCorrelationId;
 } RASCONNA,*LPRASCONNA;
 
 typedef struct tagRASCONNW {
@@ -95,6 +95,10 @@ typedef struct tagRASCONNW {
     WCHAR    szDeviceName[ RAS_MaxDeviceName + 1 ];
     WCHAR    szPhonebook[ MAX_PATH ];
     DWORD    dwSubEntry;
+    GUID     guidEntry;
+    DWORD    dwFlags;
+    LUID     luid;
+    GUID     guidCorrelationId;
 } RASCONNW,*LPRASCONNW;
 
 DECL_WINELIB_TYPE_AW(RASCONN)

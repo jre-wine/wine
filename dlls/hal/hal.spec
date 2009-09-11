@@ -1,5 +1,5 @@
-@ stub ExAcquireFastMutex
-@ stub ExReleaseFastMutex
+@ stdcall -norelay ExAcquireFastMutex(ptr)
+@ stdcall -norelay ExReleaseFastMutex(ptr)
 @ stub ExTryToAcquireFastMutex
 @ stub HalClearSoftwareInterrupt
 @ stub HalRequestSoftwareInterrupt
@@ -15,7 +15,7 @@
 @ stub KeTryToAcquireQueuedSpinLockRaiseToSynch
 @ stdcall -norelay KfAcquireSpinLock(ptr)
 @ stdcall -norelay KfLowerIrql(long)
-@ stdcall -norelay KfRaiseIrql()
+@ stdcall -norelay KfRaiseIrql(long)
 @ stdcall -norelay KfReleaseSpinLock(ptr long)
 @ stub HalAcquireDisplayOwnership
 @ stub HalAdjustResourceList
@@ -70,7 +70,7 @@
 @ stub KdComPortInUse
 @ stub KeAcquireSpinLock
 @ stub KeFlushWriteBuffer
-@ stub KeGetCurrentIrql
+@ stdcall KeGetCurrentIrql()
 @ stub KeLowerIrql
 @ stub KeQueryPerformanceCounter
 @ stub KeRaiseIrql

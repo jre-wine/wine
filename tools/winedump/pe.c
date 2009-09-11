@@ -469,7 +469,7 @@ static	void	dump_dir_exported_functions(void)
     const DWORD*		pFunc;
     const DWORD*		pName;
     const WORD* 		pOrdl;
-    DWORD*		        map;
+    DWORD*		        funcs;
 
     if (!exportDir) return;
 
@@ -496,39 +496,200 @@ static	void	dump_dir_exported_functions(void)
     pOrdl = RVA(exportDir->AddressOfNameOrdinals, exportDir->NumberOfNames * sizeof(WORD));
     if (!pOrdl) {printf("Can't grab functions' ordinal table\n"); return;}
 
-    /* bit map of used funcs */
-    map = calloc(((exportDir->NumberOfFunctions + 31) & ~31) / 32, sizeof(DWORD));
-    if (!map) fatal("no memory");
+    funcs = calloc( exportDir->NumberOfFunctions, sizeof(*funcs) );
+    if (!funcs) fatal("no memory");
 
-    for (i = 0; i < exportDir->NumberOfNames; i++, pName++, pOrdl++)
-    {
-	map[*pOrdl / 32] |= 1 << (*pOrdl % 32);
+    for (i = 0; i < exportDir->NumberOfNames; i++) funcs[pOrdl[i]] = pName[i];
 
-        printf("  %08X  %4u %s", pFunc[*pOrdl], exportDir->Base + *pOrdl,
-               get_symbol_str((const char*)RVA(*pName, sizeof(DWORD))));
-        /* check for forwarded function */
-        if ((const char *)RVA(pFunc[*pOrdl],sizeof(void*)) >= (const char *)exportDir &&
-            (const char *)RVA(pFunc[*pOrdl],sizeof(void*)) < (const char *)exportDir + size)
-            printf( " (-> %s)", (const char *)RVA(pFunc[*pOrdl],1));
-        printf("\n");
-    }
-    pFunc = RVA(exportDir->AddressOfFunctions, exportDir->NumberOfFunctions * sizeof(DWORD));
-    if (!pFunc)
-    {
-        printf("Can't grab functions' address table\n");
-        free(map);
-        return;
-    }
     for (i = 0; i < exportDir->NumberOfFunctions; i++)
     {
-	if (pFunc[i] && !(map[i / 32] & (1 << (i % 32))))
-	{
-            printf("  %08X  %4u <by ordinal>\n", pFunc[i], exportDir->Base + i);
-	}
+        if (!pFunc[i]) continue;
+        printf("  %08X %5u ", pFunc[i], exportDir->Base + i);
+        if (funcs[i])
+        {
+            printf("%s", get_symbol_str((const char*)RVA(funcs[i], sizeof(DWORD))));
+            /* check for forwarded function */
+            if ((const char *)RVA(pFunc[i],1) >= (const char *)exportDir &&
+                (const char *)RVA(pFunc[i],1) < (const char *)exportDir + size)
+                printf(" (-> %s)", (const char *)RVA(pFunc[i],1));
+            printf("\n");
+        }
+        else printf("<by ordinal>\n");
     }
-    free(map);
+    free(funcs);
     printf("\n");
 }
+
+
+struct runtime_function
+{
+    DWORD BeginAddress;
+    DWORD EndAddress;
+    DWORD UnwindData;
+};
+
+union handler_data
+{
+    struct runtime_function chain;
+    DWORD handler;
+};
+
+struct opcode
+{
+    BYTE offset;
+    BYTE code : 4;
+    BYTE info : 4;
+};
+
+struct unwind_info
+{
+    BYTE version : 3;
+    BYTE flags : 5;
+    BYTE prolog;
+    BYTE count;
+    BYTE frame_reg : 4;
+    BYTE frame_offset : 4;
+    struct opcode opcodes[1];  /* count entries */
+    /* followed by union handler_data */
+};
+
+#define UWOP_PUSH_NONVOL     0
+#define UWOP_ALLOC_LARGE     1
+#define UWOP_ALLOC_SMALL     2
+#define UWOP_SET_FPREG       3
+#define UWOP_SAVE_NONVOL     4
+#define UWOP_SAVE_NONVOL_FAR 5
+#define UWOP_SAVE_XMM128     8
+#define UWOP_SAVE_XMM128_FAR 9
+#define UWOP_PUSH_MACHFRAME  10
+
+#define UNW_FLAG_EHANDLER  1
+#define UNW_FLAG_UHANDLER  2
+#define UNW_FLAG_CHAININFO 4
+
+static void dump_x86_64_unwind_info( const struct runtime_function *function )
+{
+    static const char * const reg_names[16] =
+        { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+          "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15" };
+
+    union handler_data *handler_data;
+    const struct unwind_info *info;
+    unsigned int i, count;
+
+    printf( "\nFunction %08x-%08x:\n", function->BeginAddress, function->EndAddress );
+    if (function->UnwindData & 1)
+    {
+        const struct runtime_function *next = RVA( function->UnwindData & ~1, sizeof(*next) );
+        printf( "  -> function %08x-%08x\n", next->BeginAddress, next->EndAddress );
+        return;
+    }
+    info = RVA( function->UnwindData, sizeof(*info) );
+
+    printf( "  unwind info at %08x\n", function->UnwindData );
+    if (info->version != 1)
+    {
+        printf( "    *** unknown version %u\n", info->version );
+        return;
+    }
+    printf( "    flags %x", info->flags );
+    if (info->flags & UNW_FLAG_EHANDLER) printf( " EHANDLER" );
+    if (info->flags & UNW_FLAG_UHANDLER) printf( " UHANDLER" );
+    if (info->flags & UNW_FLAG_CHAININFO) printf( " CHAININFO" );
+    printf( "\n    prolog 0x%x bytes\n", info->prolog );
+
+    if (info->frame_reg)
+        printf( "    frame register %s offset 0x%x(%%rsp)\n",
+                reg_names[info->frame_reg], info->frame_offset * 16 );
+
+    for (i = 0; i < info->count; i++)
+    {
+        printf( "      0x%02x: ", info->opcodes[i].offset );
+        switch (info->opcodes[i].code)
+        {
+        case UWOP_PUSH_NONVOL:
+            printf( "push %%%s\n", reg_names[info->opcodes[i].info] );
+            break;
+        case UWOP_ALLOC_LARGE:
+            if (info->opcodes[i].info)
+            {
+                count = *(DWORD *)&info->opcodes[i+1];
+                i += 2;
+            }
+            else
+            {
+                count = *(USHORT *)&info->opcodes[i+1] * 8;
+                i++;
+            }
+            printf( "sub $0x%x,%%rsp\n", count );
+            break;
+        case UWOP_ALLOC_SMALL:
+            count = (info->opcodes[i].info + 1) * 8;
+            printf( "sub $0x%x,%%rsp\n", count );
+            break;
+        case UWOP_SET_FPREG:
+            printf( "lea 0x%x(%%rsp),%s\n",
+                    info->frame_offset * 16, reg_names[info->frame_reg] );
+            break;
+        case UWOP_SAVE_NONVOL:
+            count = *(USHORT *)&info->opcodes[i+1] * 8;
+            printf( "mov %%%s,0x%x(%%rsp)\n", reg_names[info->opcodes[i].info], count );
+            i++;
+            break;
+        case UWOP_SAVE_NONVOL_FAR:
+            count = *(DWORD *)&info->opcodes[i+1];
+            printf( "mov %%%s,0x%x(%%rsp)\n", reg_names[info->opcodes[i].info], count );
+            i += 2;
+            break;
+        case UWOP_SAVE_XMM128:
+            count = *(USHORT *)&info->opcodes[i+1] * 16;
+            printf( "movaps %%xmm%u,0x%x(%%rsp)\n", info->opcodes[i].info, count );
+            i++;
+            break;
+        case UWOP_SAVE_XMM128_FAR:
+            count = *(DWORD *)&info->opcodes[i+1];
+            printf( "movaps %%xmm%u,0x%x(%%rsp)\n", info->opcodes[i].info, count );
+            i += 2;
+            break;
+        case UWOP_PUSH_MACHFRAME:
+            printf( "PUSH_MACHFRAME %u\n", info->opcodes[i].info );
+            break;
+        default:
+            printf( "*** unknown code %u\n", info->opcodes[i].code );
+            break;
+        }
+    }
+
+    handler_data = (union handler_data *)&info->opcodes[(info->count + 1) & ~1];
+    if (info->flags & UNW_FLAG_CHAININFO)
+    {
+        printf( "    -> function %08x-%08x\n",
+                handler_data->chain.BeginAddress, handler_data->chain.EndAddress );
+        return;
+    }
+    if (info->flags & (UNW_FLAG_EHANDLER | UNW_FLAG_UHANDLER))
+        printf( "    handler %08x data at %08x\n", handler_data->handler,
+                (ULONG)(function->UnwindData + (char *)(&handler_data->handler + 1) - (char *)info ));
+}
+
+static void dump_dir_exceptions(void)
+{
+    unsigned int i, size = 0;
+    const struct runtime_function *funcs = get_dir_and_size(IMAGE_FILE_EXCEPTION_DIRECTORY, &size);
+    const IMAGE_FILE_HEADER *file_header = &PE_nt_headers->FileHeader;
+
+    if (!funcs) return;
+
+    if (file_header->Machine == IMAGE_FILE_MACHINE_AMD64)
+    {
+        size /= sizeof(*funcs);
+        printf( "Exception info (%u functions):\n", size );
+        for (i = 0; i < size; i++) dump_x86_64_unwind_info( funcs + i );
+    }
+    else printf( "Exception information not supported for %s binaries\n",
+                 get_machine_str(file_header->Machine));
+}
+
 
 static void dump_image_thunk_data64(const IMAGE_THUNK_DATA64 *il)
 {
@@ -664,7 +825,7 @@ static void dump_dir_delay_imported_functions(void)
 
         printf("  Ordn  Name\n");
 
-        il = (const IMAGE_THUNK_DATA32 *)RVA(importDesc->pINT - offset, sizeof(DWORD));
+        il = RVA(importDesc->pINT - offset, sizeof(DWORD));
 
         if (!il)
             printf("Can't grab thunk data, going to next imported DLL\n");
@@ -810,6 +971,52 @@ static void dump_dir_clr_header(void)
     print_clrdirectory( "VTableFixups", &dir->VTableFixups );
     print_clrdirectory( "ExportAddressTableJumps", &dir->ExportAddressTableJumps );
     print_clrdirectory( "ManagedNativeHeader", &dir->ManagedNativeHeader );
+    printf("\n");
+}
+
+static void dump_dir_reloc(void)
+{
+    unsigned int i, size = 0;
+    const USHORT *relocs;
+    const IMAGE_BASE_RELOCATION *rel = get_dir_and_size(IMAGE_DIRECTORY_ENTRY_BASERELOC, &size);
+    const IMAGE_BASE_RELOCATION *end = (IMAGE_BASE_RELOCATION *)((char *)rel + size);
+    static const char * const names[] =
+    {
+        "BASED_ABSOLUTE",
+        "BASED_HIGH",
+        "BASED_LOW",
+        "BASED_HIGHLOW",
+        "BASED_HIGHADJ",
+        "BASED_MIPS_JMPADDR",
+        "BASED_SECTION",
+        "BASED_REL",
+        "unknown 8",
+        "BASED_IA64_IMM64",
+        "BASED_DIR64",
+        "BASED_HIGH3ADJ",
+        "unknown 12",
+        "unknown 13",
+        "unknown 14",
+        "unknown 15"
+    };
+
+    if (!rel) return;
+
+    printf( "Relocations\n" );
+    while (rel < end - 1 && rel->SizeOfBlock)
+    {
+        printf( "  Page %x\n", rel->VirtualAddress );
+        relocs = (const USHORT *)(rel + 1);
+        i = (rel->SizeOfBlock - sizeof(*rel)) / sizeof(USHORT);
+        while (i--)
+        {
+            USHORT offset = *relocs & 0xfff;
+            int type = *relocs >> 12;
+            printf( "    off %04x type %s\n", offset, names[type] );
+            relocs++;
+        }
+        rel = (const IMAGE_BASE_RELOCATION *)relocs;
+    }
     printf("\n");
 }
 
@@ -1257,11 +1464,10 @@ void pe_dump(void)
 	    dump_dir_tls();
 	if (all || !strcmp(globals.dumpsect, "clr"))
 	    dump_dir_clr_header();
-#if 0
-	/* FIXME: not implemented yet */
 	if (all || !strcmp(globals.dumpsect, "reloc"))
 	    dump_dir_reloc();
-#endif
+	if (all || !strcmp(globals.dumpsect, "except"))
+	    dump_dir_exceptions();
     }
     if (globals.do_debug)
         dump_debug();
@@ -1321,8 +1527,7 @@ static	void	do_grab_sym( void )
 
     /* dll_close(); */
 
-    if (!(dll_symbols = (dll_symbol *) malloc((exportDir->NumberOfFunctions + 1) *
-					      sizeof (dll_symbol))))
+    if (!(dll_symbols = malloc((exportDir->NumberOfFunctions + 1) * sizeof(dll_symbol))))
 	fatal ("Out of memory");
     if (exportDir->AddressOfFunctions != exportDir->NumberOfNames || exportDir->Base > 1)
 	globals.do_ordinals = 1;

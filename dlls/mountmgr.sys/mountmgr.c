@@ -24,219 +24,106 @@
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 
-#include "ntstatus.h"
-#define WIN32_NO_STATUS
-#include "windef.h"
-#include "winbase.h"
-#include "winternl.h"
-#include "winioctl.h"
+#include "mountmgr.h"
 #include "winreg.h"
-#include "ntddstor.h"
-#include "ntddcdrm.h"
-#include "ddk/wdm.h"
-#include "ddk/mountmgr.h"
 #include "wine/library.h"
+#include "wine/list.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mountmgr);
 
-#define MAX_DOS_DRIVES 26
-#define MAX_MOUNT_POINTS (2 * MAX_DOS_DRIVES)
-
-/* extra info for disk devices, stored in DeviceExtension */
-struct disk_device_info
-{
-    UNICODE_STRING        name;     /* device name */
-    STORAGE_DEVICE_NUMBER devnum;   /* device number info */
-};
+#define MIN_ID_LEN     4
 
 struct mount_point
 {
-    DEVICE_OBJECT *device;
+    struct list    entry;   /* entry in mount points list */
+    DEVICE_OBJECT *device;  /* disk device */
+    UNICODE_STRING name;    /* device name */
     UNICODE_STRING link;    /* DOS device symlink */
     void          *id;      /* device unique id */
     unsigned int   id_len;
 };
 
-static struct mount_point mount_points[MAX_MOUNT_POINTS];
+static struct list mount_points_list = LIST_INIT(mount_points_list);
 static HKEY mount_key;
 
-static inline UNICODE_STRING *get_device_name( DEVICE_OBJECT *dev )
+void set_mount_point_id( struct mount_point *mount, const void *id, unsigned int id_len )
 {
-    return &((struct disk_device_info *)dev->DeviceExtension)->name;
+    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
+    mount->id_len = max( MIN_ID_LEN, id_len );
+    if ((mount->id = RtlAllocateHeap( GetProcessHeap(), HEAP_ZERO_MEMORY, mount->id_len )))
+    {
+        memcpy( mount->id, id, id_len );
+        RegSetValueExW( mount_key, mount->link.Buffer, 0, REG_BINARY, mount->id, mount->id_len );
+    }
+    else mount->id_len = 0;
 }
 
-/* read a Unix symlink; returned buffer must be freed by caller */
-static char *read_symlink( const char *path )
+static struct mount_point *add_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
+                                            const WCHAR *link )
 {
-    char *buffer;
-    int ret, size = 128;
+    struct mount_point *mount;
+    WCHAR *str;
+    UINT len = (strlenW(link) + 1) * sizeof(WCHAR) + device_name->Length + sizeof(WCHAR);
 
-    for (;;)
-    {
-        if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size )))
-        {
-            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-            return 0;
-        }
-        ret = readlink( path, buffer, size );
-        if (ret == -1)
-        {
-            RtlFreeHeap( GetProcessHeap(), 0, buffer );
-            return 0;
-        }
-        if (ret != size)
-        {
-            buffer[ret] = 0;
-            return buffer;
-        }
-        RtlFreeHeap( GetProcessHeap(), 0, buffer );
-        size *= 2;
-    }
+    if (!(mount = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(*mount) + len ))) return NULL;
+
+    str = (WCHAR *)(mount + 1);
+    strcpyW( str, link );
+    RtlInitUnicodeString( &mount->link, str );
+    str += strlenW(str) + 1;
+    memcpy( str, device_name->Buffer, device_name->Length );
+    str[device_name->Length / sizeof(WCHAR)] = 0;
+    mount->name.Buffer = str;
+    mount->name.Length = device_name->Length;
+    mount->name.MaximumLength = device_name->Length + sizeof(WCHAR);
+    mount->device = device;
+    mount->id = NULL;
+    list_add_tail( &mount_points_list, &mount->entry );
+
+    IoCreateSymbolicLink( &mount->link, device_name );
+
+    TRACE( "created %s id %s for %s\n", debugstr_w(mount->link.Buffer),
+           debugstr_a(mount->id), debugstr_w(mount->name.Buffer) );
+    return mount;
 }
 
-static NTSTATUS create_disk_device( DRIVER_OBJECT *driver, DWORD type, DEVICE_OBJECT **dev_obj )
-{
-    static const WCHAR harddiskW[] = {'\\','D','e','v','i','c','e',
-                                      '\\','H','a','r','d','d','i','s','k','V','o','l','u','m','e','%','u',0};
-    static const WCHAR cdromW[] = {'\\','D','e','v','i','c','e','\\','C','d','R','o','m','%','u',0};
-    static const WCHAR floppyW[] = {'\\','D','e','v','i','c','e','\\','F','l','o','p','p','y','%','u',0};
-
-    UINT i, first = 0;
-    NTSTATUS status = 0;
-    const WCHAR *format;
-    UNICODE_STRING name;
-    struct disk_device_info *info;
-
-    switch(type)
-    {
-    case DRIVE_REMOVABLE:
-        format = floppyW;
-        break;
-    case DRIVE_CDROM:
-        format = cdromW;
-        break;
-    case DRIVE_FIXED:
-    default:  /* FIXME */
-        format = harddiskW;
-        first = 1;  /* harddisk volumes start counting from 1 */
-        break;
-    }
-
-    name.MaximumLength = (strlenW(format) + 10) * sizeof(WCHAR);
-    name.Buffer = RtlAllocateHeap( GetProcessHeap(), 0, name.MaximumLength );
-    for (i = first; i < 32; i++)
-    {
-        sprintfW( name.Buffer, format, i );
-        name.Length = strlenW(name.Buffer) * sizeof(WCHAR);
-        status = IoCreateDevice( driver, sizeof(*info), &name, 0, 0, FALSE, dev_obj );
-        if (status != STATUS_OBJECT_NAME_COLLISION) break;
-    }
-    if (!status)
-    {
-        info = (*dev_obj)->DeviceExtension;
-        info->name = name;
-        switch(type)
-        {
-        case DRIVE_REMOVABLE:
-            info->devnum.DeviceType = FILE_DEVICE_DISK;
-            info->devnum.DeviceNumber = i;
-            info->devnum.PartitionNumber = ~0u;
-            break;
-        case DRIVE_CDROM:
-            info->devnum.DeviceType = FILE_DEVICE_CD_ROM;
-            info->devnum.DeviceNumber = i;
-            info->devnum.PartitionNumber = ~0u;
-            break;
-        case DRIVE_FIXED:
-        default:  /* FIXME */
-            info->devnum.DeviceType = FILE_DEVICE_DISK;
-            info->devnum.DeviceNumber = 0;
-            info->devnum.PartitionNumber = i;
-            break;
-        }
-    }
-    else
-    {
-        FIXME( "IoCreateDevice %s got %x\n", debugstr_w(name.Buffer), status );
-        RtlFreeUnicodeString( &name );
-    }
-    return status;
-}
-
-
-static NTSTATUS add_mount_point( DRIVER_OBJECT *driver, DWORD type, int drive,
-                                 const void *id, unsigned int id_len )
+/* create the DosDevices mount point symlink for a new device */
+struct mount_point *add_dosdev_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name, int drive )
 {
     static const WCHAR driveW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','%','c',':',0};
+    WCHAR link[sizeof(driveW)];
+
+    sprintfW( link, driveW, 'A' + drive );
+    return add_mount_point( device, device_name, link );
+}
+
+/* create the Volume mount point symlink for a new device */
+struct mount_point *add_volume_mount_point( DEVICE_OBJECT *device, UNICODE_STRING *device_name,
+                                            const GUID *guid )
+{
     static const WCHAR volumeW[] = {'\\','?','?','\\','V','o','l','u','m','e','{',
                                     '%','0','8','x','-','%','0','4','x','-','%','0','4','x','-',
                                     '%','0','2','x','%','0','2','x','-','%','0','2','x','%','0','2','x',
                                     '%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x','}',0};
-    WCHAR *drive_link, *volume_link;
-    NTSTATUS status;
-    GUID guid;
-    UINT i;
-    struct mount_point *mount_drive = NULL, *mount_volume = NULL;
+    WCHAR link[sizeof(volumeW)];
 
-    /* find two free mount points */
+    sprintfW( link, volumeW, guid->Data1, guid->Data2, guid->Data3,
+              guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
+              guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
+    return add_mount_point( device, device_name, link );
+}
 
-    for (i = 0; i < MAX_MOUNT_POINTS; i++)
-    {
-        if (mount_points[i].device) continue;
-        if (!mount_drive)
-        {
-            mount_drive = &mount_points[i];
-            continue;
-        }
-        mount_volume = &mount_points[i];
-        break;
-    }
-    if (!mount_volume) return STATUS_NO_MEMORY;
-
-    /* create the volume */
-
-    memset( &guid, 0, sizeof(guid) );  /* FIXME */
-    guid.Data4[7] = 'A' + drive;
-
-    drive_link = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(driveW) );
-    volume_link = RtlAllocateHeap( GetProcessHeap(), 0, sizeof(volumeW) );
-    sprintfW( drive_link, driveW, 'A' + drive );
-    sprintfW( volume_link, volumeW, guid.Data1, guid.Data2, guid.Data3,
-              guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
-              guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
-
-    RtlInitUnicodeString( &mount_drive->link, drive_link );
-    RtlInitUnicodeString( &mount_volume->link, volume_link );
-    status = create_disk_device( driver, type, &mount_drive->device );
-    if (status)
-    {
-        RtlFreeUnicodeString( &mount_drive->link );
-        RtlFreeUnicodeString( &mount_volume->link );
-        return status;
-    }
-
-    mount_volume->device = mount_drive->device;  /* FIXME: incr ref count */
-    mount_drive->id = RtlAllocateHeap( GetProcessHeap(), 0, id_len );
-    mount_drive->id_len = id_len;
-    memcpy( mount_drive->id, id, id_len );
-    mount_volume->id = RtlAllocateHeap( GetProcessHeap(), 0, id_len );
-    mount_volume->id_len = id_len;
-    memcpy( mount_volume->id, id, id_len );
-
-    IoCreateSymbolicLink( &mount_drive->link, get_device_name(mount_drive->device) );
-    IoCreateSymbolicLink( &mount_volume->link, get_device_name(mount_volume->device) );
-
-    TRACE( "created device %s symlinks %s %s\n", debugstr_w(get_device_name(mount_drive->device)->Buffer),
-           debugstr_w(mount_drive->link.Buffer), debugstr_w(mount_volume->link.Buffer) );
-
-    RegSetValueExW( mount_key, mount_drive->link.Buffer, 0, REG_BINARY,
-                    mount_drive->id, mount_drive->id_len );
-    RegSetValueExW( mount_key, mount_volume->link.Buffer, 0, REG_BINARY,
-                    mount_volume->id, mount_volume->id_len );
-
-    return STATUS_SUCCESS;
+/* delete the mount point symlinks when a device goes away */
+void delete_mount_point( struct mount_point *mount )
+{
+    TRACE( "deleting %s\n", debugstr_w(mount->link.Buffer) );
+    list_remove( &mount->entry );
+    RegDeleteValueW( mount_key, mount->link.Buffer );
+    IoDeleteSymbolicLink( &mount->link );
+    RtlFreeHeap( GetProcessHeap(), 0, mount->id );
+    RtlFreeHeap( GetProcessHeap(), 0, mount );
 }
 
 /* check if a given mount point matches the requested specs */
@@ -252,9 +139,8 @@ static BOOL matching_mount_point( const struct mount_point *mount, const MOUNTMG
     if (spec->DeviceNameOffset)
     {
         const WCHAR *name = (const WCHAR *)((const char *)spec + spec->DeviceNameOffset);
-        const UNICODE_STRING *dev_name = get_device_name( mount->device );
-        if (spec->DeviceNameLength != dev_name->Length) return FALSE;
-        if (memicmpW( name, dev_name->Buffer, dev_name->Length/sizeof(WCHAR)))
+        if (spec->DeviceNameLength != mount->name.Length) return FALSE;
+        if (memicmpW( name, mount->name.Buffer, mount->name.Length/sizeof(WCHAR)))
             return FALSE;
     }
     if (spec->UniqueIdOffset)
@@ -270,10 +156,10 @@ static BOOL matching_mount_point( const struct mount_point *mount, const MOUNTMG
 static NTSTATUS query_mount_points( const void *in_buff, SIZE_T insize,
                                     void *out_buff, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
 {
-    UINT i, j, pos, size;
+    UINT count, pos, size;
     const MOUNTMGR_MOUNT_POINT *input = in_buff;
     MOUNTMGR_MOUNT_POINTS *info = out_buff;
-    UNICODE_STRING *dev_name;
+    struct mount_point *mount;
 
     /* sanity checks */
     if (input->SymbolicLinkNameOffset + input->SymbolicLinkNameLength > insize ||
@@ -284,15 +170,17 @@ static NTSTATUS query_mount_points( const void *in_buff, SIZE_T insize,
         input->DeviceNameOffset + input->DeviceNameLength < input->DeviceNameOffset)
         return STATUS_INVALID_PARAMETER;
 
-    for (i = j = size = 0; i < MAX_MOUNT_POINTS; i++)
+    count = size = 0;
+    LIST_FOR_EACH_ENTRY( mount, &mount_points_list, struct mount_point, entry )
     {
-        if (!mount_points[i].device) continue;
-        if (!matching_mount_point( &mount_points[i], input )) continue;
-        size += get_device_name(mount_points[i].device)->Length;
-        size += mount_points[i].link.Length;
-        j++;
+        if (!matching_mount_point( mount, input )) continue;
+        size += mount->name.Length;
+        size += mount->link.Length;
+        size += mount->id_len;
+        size = (size + sizeof(WCHAR) - 1) & ~(sizeof(WCHAR) - 1);
+        count++;
     }
-    pos = FIELD_OFFSET( MOUNTMGR_MOUNT_POINTS, MountPoints[j] );
+    pos = FIELD_OFFSET( MOUNTMGR_MOUNT_POINTS, MountPoints[count] );
     size += pos;
 
     if (size > outsize)
@@ -302,29 +190,162 @@ static NTSTATUS query_mount_points( const void *in_buff, SIZE_T insize,
         return STATUS_MORE_ENTRIES;
     }
 
-    info->NumberOfMountPoints = j;
-    for (i = j = 0; i < MAX_MOUNT_POINTS; i++)
+    info->NumberOfMountPoints = count;
+    count = 0;
+    LIST_FOR_EACH_ENTRY( mount, &mount_points_list, struct mount_point, entry )
     {
-        if (!mount_points[i].device) continue;
-        if (!matching_mount_point( &mount_points[i], input )) continue;
-        info->MountPoints[j].UniqueIdOffset = 0;  /* FIXME */
-        info->MountPoints[j].UniqueIdLength = 0;
+        if (!matching_mount_point( mount, input )) continue;
 
-        dev_name = get_device_name( mount_points[i].device );
-        info->MountPoints[j].DeviceNameOffset = pos;
-        info->MountPoints[j].DeviceNameLength = dev_name->Length;
-        memcpy( (char *)out_buff + pos, dev_name->Buffer, dev_name->Length );
-        pos += dev_name->Length;
+        info->MountPoints[count].DeviceNameOffset = pos;
+        info->MountPoints[count].DeviceNameLength = mount->name.Length;
+        memcpy( (char *)out_buff + pos, mount->name.Buffer, mount->name.Length );
+        pos += mount->name.Length;
 
-        info->MountPoints[j].SymbolicLinkNameOffset = pos;
-        info->MountPoints[j].SymbolicLinkNameLength = mount_points[i].link.Length;
-        memcpy( (char *)out_buff + pos, mount_points[i].link.Buffer, mount_points[i].link.Length );
-        pos += mount_points[i].link.Length;
-        j++;
+        info->MountPoints[count].SymbolicLinkNameOffset = pos;
+        info->MountPoints[count].SymbolicLinkNameLength = mount->link.Length;
+        memcpy( (char *)out_buff + pos, mount->link.Buffer, mount->link.Length );
+        pos += mount->link.Length;
+
+        info->MountPoints[count].UniqueIdOffset = pos;
+        info->MountPoints[count].UniqueIdLength = mount->id_len;
+        memcpy( (char *)out_buff + pos, mount->id, mount->id_len );
+        pos += mount->id_len;
+        pos = (pos + sizeof(WCHAR) - 1) & ~(sizeof(WCHAR) - 1);
+        count++;
     }
     info->Size = pos;
     iosb->Information = pos;
     return STATUS_SUCCESS;
+}
+
+/* implementation of IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE */
+static NTSTATUS define_unix_drive( const void *in_buff, SIZE_T insize )
+{
+    const struct mountmgr_unix_drive *input = in_buff;
+    const char *mount_point = NULL, *device = NULL;
+    unsigned int i;
+    WCHAR letter = tolowerW( input->letter );
+
+    if (letter < 'a' || letter > 'z') return STATUS_INVALID_PARAMETER;
+    if (input->type > DRIVE_RAMDISK) return STATUS_INVALID_PARAMETER;
+    if (input->mount_point_offset > insize || input->device_offset > insize)
+        return STATUS_INVALID_PARAMETER;
+
+    /* make sure string are null-terminated */
+    if (input->mount_point_offset)
+    {
+        mount_point = (const char *)in_buff + input->mount_point_offset;
+        for (i = input->mount_point_offset; i < insize; i++)
+            if (!*((const char *)in_buff + i)) break;
+        if (i >= insize) return STATUS_INVALID_PARAMETER;
+    }
+    if (input->device_offset)
+    {
+        device = (const char *)in_buff + input->device_offset;
+        for (i = input->device_offset; i < insize; i++)
+            if (!*((const char *)in_buff + i)) break;
+        if (i >= insize) return STATUS_INVALID_PARAMETER;
+    }
+
+    if (input->type != DRIVE_NO_ROOT_DIR)
+    {
+        enum device_type type = DEVICE_UNKNOWN;
+
+        TRACE( "defining %c: dev %s mount %s type %u\n",
+               letter, debugstr_a(device), debugstr_a(mount_point), input->type );
+        switch (input->type)
+        {
+        case DRIVE_REMOVABLE: type = (letter >= 'c') ? DEVICE_HARDDISK : DEVICE_FLOPPY; break;
+        case DRIVE_REMOTE:    type = DEVICE_NETWORK; break;
+        case DRIVE_CDROM:     type = DEVICE_CDROM; break;
+        case DRIVE_RAMDISK:   type = DEVICE_RAMDISK; break;
+        case DRIVE_FIXED:     type = DEVICE_HARDDISK_VOL; break;
+        }
+        return add_dos_device( letter - 'a', NULL, device, mount_point, type, NULL );
+    }
+    else
+    {
+        TRACE( "removing %c:\n", letter );
+        return remove_dos_device( letter - 'a', NULL );
+    }
+}
+
+/* implementation of IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE */
+static NTSTATUS query_unix_drive( const void *in_buff, SIZE_T insize,
+                                  void *out_buff, SIZE_T outsize, IO_STATUS_BLOCK *iosb )
+{
+    const struct mountmgr_unix_drive *input = in_buff;
+    struct mountmgr_unix_drive *output = out_buff;
+    char *device, *mount_point;
+    int letter = tolowerW( input->letter );
+    NTSTATUS status;
+    DWORD size, type = DEVICE_UNKNOWN;
+    enum device_type device_type;
+    char *ptr;
+
+    if (letter < 'a' || letter > 'z') return STATUS_INVALID_PARAMETER;
+
+    if ((status = query_dos_device( letter - 'a', &device_type, &device, &mount_point ))) return status;
+    switch (device_type)
+    {
+    case DEVICE_UNKNOWN:      type = DRIVE_UNKNOWN; break;
+    case DEVICE_HARDDISK:     type = DRIVE_REMOVABLE; break;
+    case DEVICE_HARDDISK_VOL: type = DRIVE_FIXED; break;
+    case DEVICE_FLOPPY:       type = DRIVE_REMOVABLE; break;
+    case DEVICE_CDROM:        type = DRIVE_CDROM; break;
+    case DEVICE_NETWORK:      type = DRIVE_REMOTE; break;
+    case DEVICE_RAMDISK:      type = DRIVE_RAMDISK; break;
+    }
+
+    size = sizeof(*output);
+    if (device) size += strlen(device) + 1;
+    if (mount_point) size += strlen(mount_point) + 1;
+
+    if (size > outsize)
+    {
+        iosb->Information = 0;
+        if (size >= FIELD_OFFSET( struct mountmgr_unix_drive, size ) + sizeof(output->size))
+        {
+            output->size = size;
+            iosb->Information = FIELD_OFFSET( struct mountmgr_unix_drive, size ) + sizeof(output->size);
+        }
+        if (size >= FIELD_OFFSET( struct mountmgr_unix_drive, type ) + sizeof(output->type))
+        {
+            output->type = type;
+            iosb->Information = FIELD_OFFSET( struct mountmgr_unix_drive, type ) + sizeof(output->type);
+        }
+        status = STATUS_MORE_ENTRIES;
+        goto done;
+    }
+    output->size = size;
+    output->letter = letter;
+    output->type = type;
+    ptr = (char *)(output + 1);
+
+    if (mount_point)
+    {
+        output->mount_point_offset = ptr - (char *)output;
+        strcpy( ptr, mount_point );
+        ptr += strlen(ptr) + 1;
+    }
+    else output->mount_point_offset = 0;
+
+    if (device)
+    {
+        output->device_offset = ptr - (char *)output;
+        strcpy( ptr, device );
+        ptr += strlen(ptr) + 1;
+    }
+    else output->device_offset = 0;
+
+    TRACE( "returning %c: dev %s mount %s type %u\n",
+           letter, debugstr_a(device), debugstr_a(mount_point), type );
+
+    iosb->Information = ptr - (char *)output;
+done:
+    RtlFreeHeap( GetProcessHeap(), 0, device );
+    RtlFreeHeap( GetProcessHeap(), 0, mount_point );
+    return status;
 }
 
 /* handler for ioctls on the mount manager device */
@@ -348,6 +369,22 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
                                                      irpsp->Parameters.DeviceIoControl.OutputBufferLength,
                                                      &irp->IoStatus );
         break;
+    case IOCTL_MOUNTMGR_DEFINE_UNIX_DRIVE:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_unix_drive))
+            return STATUS_INVALID_PARAMETER;
+        irp->IoStatus.Information = 0;
+        irp->IoStatus.u.Status = define_unix_drive( irpsp->Parameters.DeviceIoControl.Type3InputBuffer,
+                                                    irpsp->Parameters.DeviceIoControl.InputBufferLength );
+        break;
+    case IOCTL_MOUNTMGR_QUERY_UNIX_DRIVE:
+        if (irpsp->Parameters.DeviceIoControl.InputBufferLength < sizeof(struct mountmgr_unix_drive))
+            return STATUS_INVALID_PARAMETER;
+        irp->IoStatus.u.Status = query_unix_drive( irpsp->Parameters.DeviceIoControl.Type3InputBuffer,
+                                                   irpsp->Parameters.DeviceIoControl.InputBufferLength,
+                                                   irp->MdlAddress->StartVa,
+                                                   irpsp->Parameters.DeviceIoControl.OutputBufferLength,
+                                                   &irp->IoStatus );
+        break;
     default:
         FIXME( "ioctl %x not supported\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
         irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
@@ -356,121 +393,10 @@ static NTSTATUS WINAPI mountmgr_ioctl( DEVICE_OBJECT *device, IRP *irp )
     return irp->IoStatus.u.Status;
 }
 
-/* handler for ioctls on the harddisk device */
-static NTSTATUS WINAPI harddisk_ioctl( DEVICE_OBJECT *device, IRP *irp )
-{
-    IO_STACK_LOCATION *irpsp = irp->Tail.Overlay.s.u.CurrentStackLocation;
-    struct disk_device_info *disk_info = device->DeviceExtension;
-
-    TRACE( "ioctl %x insize %u outsize %u\n",
-           irpsp->Parameters.DeviceIoControl.IoControlCode,
-           irpsp->Parameters.DeviceIoControl.InputBufferLength,
-           irpsp->Parameters.DeviceIoControl.OutputBufferLength );
-
-    switch(irpsp->Parameters.DeviceIoControl.IoControlCode)
-    {
-    case IOCTL_DISK_GET_DRIVE_GEOMETRY:
-    {
-        DISK_GEOMETRY info;
-        DWORD len = min( sizeof(info), irpsp->Parameters.DeviceIoControl.OutputBufferLength );
-
-        info.Cylinders.QuadPart = 10000;
-        info.MediaType = (disk_info->devnum.DeviceType == FILE_DEVICE_DISK) ? FixedMedia : RemovableMedia;
-        info.TracksPerCylinder = 255;
-        info.SectorsPerTrack = 63;
-        info.BytesPerSector = 512;
-        memcpy( irp->MdlAddress->StartVa, &info, len );
-        irp->IoStatus.Information = len;
-        irp->IoStatus.u.Status = STATUS_SUCCESS;
-        break;
-    }
-    case IOCTL_STORAGE_GET_DEVICE_NUMBER:
-    {
-        DWORD len = min( sizeof(disk_info->devnum), irpsp->Parameters.DeviceIoControl.OutputBufferLength );
-
-        memcpy( irp->MdlAddress->StartVa, &disk_info->devnum, len );
-        irp->IoStatus.Information = len;
-        irp->IoStatus.u.Status = STATUS_SUCCESS;
-        break;
-    }
-    case IOCTL_CDROM_READ_TOC:
-        irp->IoStatus.u.Status = STATUS_INVALID_DEVICE_REQUEST;
-        break;
-    default:
-        FIXME( "unsupported ioctl %x\n", irpsp->Parameters.DeviceIoControl.IoControlCode );
-        irp->IoStatus.u.Status = STATUS_NOT_SUPPORTED;
-        break;
-    }
-    return irp->IoStatus.u.Status;
-}
-
-/* create mount points for mapped drives */
-static void create_drive_mount_points( DRIVER_OBJECT *driver )
-{
-    const char *config_dir = wine_get_config_dir();
-    char *buffer, *p, *link;
-    unsigned int i;
-
-    if ((buffer = RtlAllocateHeap( GetProcessHeap(), 0,
-                                   strlen(config_dir) + sizeof("/dosdevices/a:") )))
-    {
-        strcpy( buffer, config_dir );
-        strcat( buffer, "/dosdevices/a:" );
-        p = buffer + strlen(buffer) - 2;
-
-        for (i = 0; i < MAX_DOS_DRIVES; i++)
-        {
-            *p = 'a' + i;
-            if (!(link = read_symlink( buffer ))) continue;
-            add_mount_point( driver, DRIVE_FIXED, i, link, strlen(link) );
-            RtlFreeHeap( GetProcessHeap(), 0, link );
-        }
-        RtlFreeHeap( GetProcessHeap(), 0, buffer );
-    }
-}
-
-/* driver entry point for the harddisk driver */
-static NTSTATUS WINAPI harddisk_driver_entry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
-{
-    static const WCHAR mounted_devicesW[] = {'S','y','s','t','e','m','\\',
-                                             'M','o','u','n','t','e','d','D','e','v','i','c','e','s',0};
-    static const WCHAR harddisk0W[] = {'\\','D','e','v','i','c','e',
-                                       '\\','H','a','r','d','d','i','s','k','0',0};
-    static const WCHAR physdrive0W[] = {'\\','?','?','\\','P','h','y','s','i','c','a','l','D','r','i','v','e','0',0};
-
-    UNICODE_STRING nameW, linkW;
-    DEVICE_OBJECT *device;
-    NTSTATUS status;
-    struct disk_device_info *info;
-
-    driver->MajorFunction[IRP_MJ_DEVICE_CONTROL] = harddisk_ioctl;
-
-    RegCreateKeyExW( HKEY_LOCAL_MACHINE, mounted_devicesW, 0, NULL,
-                     REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &mount_key, NULL );
-
-    RtlInitUnicodeString( &nameW, harddisk0W );
-    RtlInitUnicodeString( &linkW, physdrive0W );
-    if (!(status = IoCreateDevice( driver, sizeof(*info), &nameW, 0, 0, FALSE, &device )))
-        status = IoCreateSymbolicLink( &linkW, &nameW );
-    if (status)
-    {
-        FIXME( "failed to create device error %x\n", status );
-        return status;
-    }
-    info = device->DeviceExtension;
-    info->name = nameW;
-    info->devnum.DeviceType = FILE_DEVICE_DISK;
-    info->devnum.DeviceNumber = 0;
-    info->devnum.PartitionNumber = 0;
-
-    create_drive_mount_points( driver );
-
-    return status;
-}
-
 /* main entry point for the mount point manager driver */
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 {
+    static const WCHAR mounted_devicesW[] = {'S','y','s','t','e','m','\\','M','o','u','n','t','e','d','D','e','v','i','c','e','s',0};
     static const WCHAR device_mountmgrW[] = {'\\','D','e','v','i','c','e','\\','M','o','u','n','t','P','o','i','n','t','M','a','n','a','g','e','r',0};
     static const WCHAR link_mountmgrW[] = {'\\','?','?','\\','M','o','u','n','t','P','o','i','n','t','M','a','n','a','g','e','r',0};
     static const WCHAR harddiskW[] = {'\\','D','r','i','v','e','r','\\','H','a','r','d','d','i','s','k',0};
@@ -493,8 +419,14 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
         return status;
     }
 
+    RegCreateKeyExW( HKEY_LOCAL_MACHINE, mounted_devicesW, 0, NULL,
+                     REG_OPTION_VOLATILE, KEY_ALL_ACCESS, NULL, &mount_key, NULL );
+
     RtlInitUnicodeString( &nameW, harddiskW );
     status = IoCreateDriver( &nameW, harddisk_driver_entry );
+
+    initialize_hal();
+    initialize_diskarbitration();
 
     return status;
 }

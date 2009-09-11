@@ -193,7 +193,7 @@
 193 stdcall -noname SHGetCurColorRes()
 194 stdcall -noname SHWaitForSendMessageThread(ptr long)
 195 stdcall -noname SHIsExpandableFolder(ptr ptr)
-196 stub -noname DnsRecordSetCompare #stdcall @(ptr ptr ptr ptr) dnsapi.DnsRecordSetCompare
+196 stdcall -noname DnsRecordSetCompare(ptr ptr ptr ptr) dnsapi.DnsRecordSetCompare
 197 stdcall -noname SHFillRectClr(long ptr long)
 198 stdcall -noname SHSearchMapInt(ptr ptr long long)
 199 stdcall -noname IUnknown_Set(ptr ptr)
@@ -215,9 +215,9 @@
 215 stdcall -noname SHAnsiToUnicode(str ptr long)
 216 stdcall -noname SHAnsiToUnicodeCP(long str ptr long)
 217 stdcall -noname SHUnicodeToAnsi(wstr ptr ptr)
-218 stdcall -noname SHUnicodeToAnsiCP(long wstr ptr ptr)
+218 stdcall -noname SHUnicodeToAnsiCP(long wstr ptr long)
 219 stdcall -noname QISearch(long long long long)
-220 stub -noname SHSetDefaultDialogFont
+220 stdcall -noname SHSetDefaultDialogFont(ptr long)
 221 stdcall -noname SHRemoveDefaultDialogFont(ptr)
 222 stdcall -noname SHGlobalCounterCreate(long)
 223 stdcall -noname SHGlobalCounterGetValue(long)
@@ -280,7 +280,7 @@
 280 stdcall -noname SHRegGetIntW(ptr wstr long)
 281 stdcall -noname SHPackDispParamsV(ptr ptr long ptr)
 282 varargs -noname SHPackDispParams(ptr ptr long)
-283 stub -noname IConnectionPoint_InvokeWithCancel
+283 stdcall -noname IConnectionPoint_InvokeWithCancel(ptr long long long long)
 284 stdcall -noname IConnectionPoint_SimpleInvoke(ptr long ptr)
 285 stdcall -noname IConnectionPoint_OnChanged(ptr long)
 286 varargs -noname IUnknown_CPContainerInvokeParam(ptr ptr long ptr long)
@@ -429,8 +429,8 @@
 429 stdcall -noname MLIsMLHInstance(long)
 430 stdcall -noname MLSetMLHInstance(long long)
 431 stdcall -noname MLClearMLHInstance(long)
-432 stub -noname SHSendMessageBroadcastA
-433 stub -noname SHSendMessageBroadcastW
+432 stdcall -noname SHSendMessageBroadcastA(long long long)
+433 stdcall -noname SHSendMessageBroadcastW(long long long)
 434 stdcall -noname SendMessageTimeoutWrapW(long long long long long long ptr) user32.SendMessageTimeoutW
 435 stdcall -noname CLSIDFromProgIDWrap(wstr ptr) ole32.CLSIDFromProgID
 436 stdcall -noname CLSIDFromStringWrap(wstr ptr)
@@ -477,7 +477,7 @@
 477 stub -noname SHCreatePropertyBagOnMemory
 478 stdcall -noname IUnknown_TranslateAcceleratorIO(ptr ptr)
 479 stub -noname IUnknown_UIActivateIO
-480 stub -noname UrlCrackW
+480 stdcall -noname UrlCrackW(wstr long long ptr) wininet.InternetCrackUrlW
 481 stdcall -noname IUnknown_HasFocusIO(ptr)
 482 stub -noname SHMessageBoxHelpA
 483 stub -noname SHMessageBoxHelpW

@@ -4,12 +4,20 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = d3dx9_36.dll
 IMPORTLIB = d3dx9
-IMPORTS   = d3d9 d3dx8 kernel32
+IMPORTS   = d3d9 gdi32 user32 kernel32
 
 C_SRCS = \
+	core.c \
 	d3dx9_36_main.c \
 	font.c \
-	math.c
+	math.c \
+	mesh.c \
+	shader.c \
+	sprite.c \
+	surface.c \
+	util.c
+
+RC_SRCS = version.rc
 
 @MAKE_DLL_RULES@
 

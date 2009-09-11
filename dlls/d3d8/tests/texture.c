@@ -22,7 +22,7 @@
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d8_test_wc";
     RegisterClass(&wc);
 
@@ -44,8 +44,11 @@ static IDirect3DDevice8 *init_d3d8(HMODULE d3d8_handle)
     if (!d3d8_create) return NULL;
 
     d3d8_ptr = d3d8_create(D3D_SDK_VERSION);
-    ok(d3d8_ptr != NULL, "Failed to create IDirect3D8 object\n");
-    if (!d3d8_ptr) return NULL;
+    if (!d3d8_ptr)
+    {
+        skip("could not create D3D8\n");
+        return NULL;
+    }
 
     IDirect3D8_GetAdapterDisplayMode(d3d8_ptr, D3DADAPTER_DEFAULT, &d3ddm );
     ZeroMemory(&present_parameters, sizeof(present_parameters));
@@ -132,6 +135,7 @@ START_TEST(texture)
     D3DCAPS8 caps;
     HMODULE d3d8_handle;
     IDirect3DDevice8 *device_ptr;
+    ULONG refcount;
 
     d3d8_handle = LoadLibraryA("d3d8.dll");
     if (!d3d8_handle)
@@ -147,4 +151,7 @@ START_TEST(texture)
 
     test_texture_stage_states(device_ptr, caps.MaxTextureBlendStages);
     test_cube_textures(device_ptr, caps.TextureCaps);
+
+    refcount = IDirect3DDevice8_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

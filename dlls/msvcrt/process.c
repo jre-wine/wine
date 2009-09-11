@@ -96,7 +96,7 @@ static void msvcrt_search_executable(const MSVCRT_wchar_t *name, MSVCRT_wchar_t 
     if (path_len + name_len <= MAX_PATH - 2)
     {
       memcpy(buffer, env, path_len * sizeof(MSVCRT_wchar_t));
-      if (buffer[path_len] != '/' || buffer[path_len] != '\\')
+      if (buffer[path_len] != '/' && buffer[path_len] != '\\')
       {
         buffer[path_len++] = '\\';
         buffer[path_len] = '\0';
@@ -185,7 +185,7 @@ static MSVCRT_intptr_t msvcrt_spawn(int flags, const MSVCRT_wchar_t* exe, MSVCRT
 static MSVCRT_wchar_t* msvcrt_argvtos(const MSVCRT_wchar_t* const* arg, MSVCRT_wchar_t delim)
 {
   const MSVCRT_wchar_t* const* a;
-  long size;
+  int size;
   MSVCRT_wchar_t* p;
   MSVCRT_wchar_t* ret;
 
@@ -230,7 +230,7 @@ static MSVCRT_wchar_t* msvcrt_argvtos(const MSVCRT_wchar_t* const* arg, MSVCRT_w
 static MSVCRT_wchar_t *msvcrt_argvtos_aw(const char * const *arg, MSVCRT_wchar_t delim)
 {
   const char * const *a;
-  unsigned long len;
+  unsigned int len;
   MSVCRT_wchar_t *p, *ret;
 
   if (!arg)
@@ -269,105 +269,70 @@ static MSVCRT_wchar_t *msvcrt_argvtos_aw(const char * const *arg, MSVCRT_wchar_t
 /* INTERNAL: Convert wide va_list to a single 'delim'-separated wide string, with an
  * extra '\0' to terminate it.
  */
-static MSVCRT_wchar_t *msvcrt_valisttos(const MSVCRT_wchar_t *arg0, va_list alist, MSVCRT_wchar_t delim)
+static MSVCRT_wchar_t *msvcrt_valisttos(const MSVCRT_wchar_t *arg0, __ms_va_list alist, MSVCRT_wchar_t delim)
 {
-  va_list alist2;
-  unsigned long len;
-  const MSVCRT_wchar_t *arg;
-  MSVCRT_wchar_t *p, *ret;
+    unsigned int size = 0, pos = 0;
+    const MSVCRT_wchar_t *arg;
+    MSVCRT_wchar_t *new, *ret = NULL;
 
-#ifdef HAVE_VA_COPY
-  va_copy(alist2,alist);
-#else
-# ifdef HAVE___VA_COPY
-  __va_copy(alist2,alist);
-# else
-  alist2 = alist;
-# endif
-#endif
-
-  if (!arg0)
-  {
-      /* Return NULL for an empty environment list */
-      return NULL;
-  }
-
-  /* get length */
-  arg = arg0;
-  len = 0;
-  do {
-      len += strlenW(arg) + 1;
-      arg = va_arg(alist, MSVCRT_wchar_t*);
-  } while (arg != NULL);
-
-  ret = MSVCRT_malloc((len + 1) * sizeof(MSVCRT_wchar_t));
-  if (!ret)
-    return NULL;
-
-  /* fill string */
-  arg = arg0;
-  p = ret;
-  do {
-      len = strlenW(arg);
-      memcpy(p, arg, len * sizeof(MSVCRT_wchar_t));
-      p += len;
-      *p++ = delim;
-      arg = va_arg(alist2, MSVCRT_wchar_t*);
-  } while (arg != NULL);
-  if (delim && p > ret) p[-1] = 0;
-  else *p = 0;
-  return ret;
+    for (arg = arg0; arg; arg = va_arg( alist, MSVCRT_wchar_t * ))
+    {
+        unsigned int len = strlenW( arg ) + 1;
+        if (pos + len >= size)
+        {
+            size = max( 256, size * 2 );
+            size = max( size, pos + len + 1 );
+            if (!(new = MSVCRT_realloc( ret, size * sizeof(MSVCRT_wchar_t) )))
+            {
+                MSVCRT_free( ret );
+                return NULL;
+            }
+            ret = new;
+        }
+        strcpyW( ret + pos, arg );
+        pos += len;
+        ret[pos - 1] = delim;
+    }
+    if (pos)
+    {
+        if (delim) ret[pos - 1] = 0;
+        else ret[pos] = 0;
+    }
+    return ret;
 }
 
 /* INTERNAL: Convert ansi va_list to a single 'delim'-separated wide string, with an
  * extra '\0' to terminate it.
  */
-static MSVCRT_wchar_t *msvcrt_valisttos_aw(const char *arg0, va_list alist, MSVCRT_wchar_t delim)
+static MSVCRT_wchar_t *msvcrt_valisttos_aw(const char *arg0, __ms_va_list alist, MSVCRT_wchar_t delim)
 {
-  va_list alist2;
-  unsigned long len;
-  const char *arg;
-  MSVCRT_wchar_t *p, *ret;
+    unsigned int size = 0, pos = 0;
+    const char *arg;
+    MSVCRT_wchar_t *new, *ret = NULL;
 
-#ifdef HAVE_VA_COPY
-  va_copy(alist2,alist);
-#else
-# ifdef HAVE___VA_COPY
-  __va_copy(alist2,alist);
-# else
-  alist2 = alist;
-# endif
-#endif
-
-  if (!arg0)
-  {
-      /* Return NULL for an empty environment list */
-      return NULL;
-  }
-
-  /* get length */
-  arg = arg0;
-  len = 0;
-  do {
-      len += MultiByteToWideChar(CP_ACP, 0, arg, -1, NULL, 0);
-      arg = va_arg(alist, char*);
-  } while (arg != NULL);
-
-  ret = MSVCRT_malloc((len + 1) * sizeof(MSVCRT_wchar_t));
-  if (!ret)
-    return NULL;
-
-  /* fill string */
-  arg = arg0;
-  p = ret;
-  do {
-      p += MultiByteToWideChar(CP_ACP, 0, arg, strlen(arg), p, len - (p - ret));
-      *p++ = delim;
-      arg = va_arg(alist2, char*);
-  } while (arg != NULL);
-  if (delim && p > ret) p[-1] = 0;
-  else *p = 0;
-  return ret;
+    for (arg = arg0; arg; arg = va_arg( alist, char * ))
+    {
+        unsigned int len = MultiByteToWideChar( CP_ACP, 0, arg, -1, NULL, 0 );
+        if (pos + len >= size)
+        {
+            size = max( 256, size * 2 );
+            size = max( size, pos + len + 1 );
+            if (!(new = MSVCRT_realloc( ret, size * sizeof(MSVCRT_wchar_t) )))
+            {
+                MSVCRT_free( ret );
+                return NULL;
+            }
+            ret = new;
+        }
+        pos += MultiByteToWideChar( CP_ACP, 0, arg, -1, ret + pos, size - pos );
+        ret[pos - 1] = delim;
+    }
+    if (pos)
+    {
+        if (delim) ret[pos - 1] = 0;
+        else ret[pos] = 0;
+    }
+    return ret;
 }
 
 /* INTERNAL: retrieve COMSPEC environment variable */
@@ -426,13 +391,13 @@ MSVCRT_intptr_t CDECL _cwait(int *status, MSVCRT_intptr_t pid, int action)
  */
 MSVCRT_intptr_t CDECL _wexecl(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, name, args, NULL, 0);
 
@@ -448,15 +413,15 @@ MSVCRT_intptr_t CDECL _wexecl(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* 
  */
 MSVCRT_intptr_t CDECL _execl(const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, nameW, args, NULL, 0);
 
@@ -472,20 +437,20 @@ MSVCRT_intptr_t CDECL _execl(const char* name, const char* arg0, ...)
  */
 MSVCRT_intptr_t CDECL _wexecle(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args, *envs = NULL;
   const MSVCRT_wchar_t * const *envp;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, MSVCRT_wchar_t * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const MSVCRT_wchar_t * const * );
   if (envp) envs = msvcrt_argvtos(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, name, args, envs, 0);
 
@@ -499,22 +464,22 @@ MSVCRT_intptr_t CDECL _wexecle(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t*
  */
 MSVCRT_intptr_t CDECL _execle(const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args, *envs = NULL;
   const char * const *envp;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, char * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const char * const * );
   if (envp) envs = msvcrt_argvtos_aw(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, nameW, args, envs, 0);
 
@@ -531,13 +496,13 @@ MSVCRT_intptr_t CDECL _execle(const char* name, const char* arg0, ...)
  */
 MSVCRT_intptr_t CDECL _wexeclp(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, name, args, NULL, 1);
 
@@ -553,15 +518,15 @@ MSVCRT_intptr_t CDECL _wexeclp(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t*
  */
 MSVCRT_intptr_t CDECL _execlp(const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, nameW, args, NULL, 1);
 
@@ -577,20 +542,20 @@ MSVCRT_intptr_t CDECL _execlp(const char* name, const char* arg0, ...)
  */
 MSVCRT_intptr_t CDECL _wexeclpe(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args, *envs = NULL;
   const MSVCRT_wchar_t * const *envp;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, MSVCRT_wchar_t * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const MSVCRT_wchar_t * const * );
   if (envp) envs = msvcrt_argvtos(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, name, args, envs, 1);
 
@@ -604,22 +569,22 @@ MSVCRT_intptr_t CDECL _wexeclpe(const MSVCRT_wchar_t* name, const MSVCRT_wchar_t
  */
 MSVCRT_intptr_t CDECL _execlpe(const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args, *envs = NULL;
   const char * const *envp;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, char * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const char * const * );
   if (envp) envs = msvcrt_argvtos_aw(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(MSVCRT__P_OVERLAY, nameW, args, envs, 1);
 
@@ -720,13 +685,13 @@ MSVCRT_intptr_t CDECL _execvp(const char* name, char* const* argv)
  */
 MSVCRT_intptr_t CDECL _wspawnl(int flags, const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, name, args, NULL, 0);
 
@@ -742,15 +707,15 @@ MSVCRT_intptr_t CDECL _wspawnl(int flags, const MSVCRT_wchar_t* name, const MSVC
  */
 MSVCRT_intptr_t CDECL _spawnl(int flags, const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, nameW, args, NULL, 0);
 
@@ -766,20 +731,20 @@ MSVCRT_intptr_t CDECL _spawnl(int flags, const char* name, const char* arg0, ...
  */
 MSVCRT_intptr_t CDECL _wspawnle(int flags, const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args, *envs = NULL;
   const MSVCRT_wchar_t * const *envp;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, MSVCRT_wchar_t * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const MSVCRT_wchar_t * const * );
   if (envp) envs = msvcrt_argvtos(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, name, args, envs, 0);
 
@@ -793,22 +758,22 @@ MSVCRT_intptr_t CDECL _wspawnle(int flags, const MSVCRT_wchar_t* name, const MSV
  */
 MSVCRT_intptr_t CDECL _spawnle(int flags, const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args, *envs = NULL;
   const char * const *envp;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, char * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const char * const * );
   if (envp) envs = msvcrt_argvtos_aw(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, nameW, args, envs, 0);
 
@@ -825,13 +790,13 @@ MSVCRT_intptr_t CDECL _spawnle(int flags, const char* name, const char* arg0, ..
  */
 MSVCRT_intptr_t CDECL _wspawnlp(int flags, const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, name, args, NULL, 1);
 
@@ -847,15 +812,15 @@ MSVCRT_intptr_t CDECL _wspawnlp(int flags, const MSVCRT_wchar_t* name, const MSV
  */
 MSVCRT_intptr_t CDECL _spawnlp(int flags, const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, nameW, args, NULL, 1);
 
@@ -871,20 +836,20 @@ MSVCRT_intptr_t CDECL _spawnlp(int flags, const char* name, const char* arg0, ..
  */
 MSVCRT_intptr_t CDECL _wspawnlpe(int flags, const MSVCRT_wchar_t* name, const MSVCRT_wchar_t* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *args, *envs = NULL;
   const MSVCRT_wchar_t * const *envp;
   MSVCRT_intptr_t ret;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, MSVCRT_wchar_t * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const MSVCRT_wchar_t * const * );
   if (envp) envs = msvcrt_argvtos(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, name, args, envs, 1);
 
@@ -898,22 +863,22 @@ MSVCRT_intptr_t CDECL _wspawnlpe(int flags, const MSVCRT_wchar_t* name, const MS
  */
 MSVCRT_intptr_t CDECL _spawnlpe(int flags, const char* name, const char* arg0, ...)
 {
-  va_list ap;
+  __ms_va_list ap;
   MSVCRT_wchar_t *nameW, *args, *envs = NULL;
   const char * const *envp;
   MSVCRT_intptr_t ret;
 
   if (!(nameW = msvcrt_wstrdupa(name))) return -1;
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   args = msvcrt_valisttos_aw(arg0, ap, ' ');
-  va_end(ap);
+  __ms_va_end(ap);
 
-  va_start(ap, arg0);
+  __ms_va_start(ap, arg0);
   while (va_arg( ap, char * ) != NULL) /*nothing*/;
   envp = va_arg( ap, const char * const * );
   if (envp) envs = msvcrt_argvtos_aw(envp, 0);
-  va_end(ap);
+  __ms_va_end(ap);
 
   ret = msvcrt_spawn(flags, nameW, args, envs, 1);
 
@@ -1125,9 +1090,8 @@ MSVCRT_FILE* CDECL MSVCRT__wpopen(const MSVCRT_wchar_t* command, const MSVCRT_wc
   strcpyW(fullcmd, comspec);
   strcatW(fullcmd, flag);
   strcatW(fullcmd, command);
-  HeapFree(GetProcessHeap(), 0, comspec);
 
-  if (msvcrt_spawn(MSVCRT__P_NOWAIT, NULL, fullcmd, NULL, 1) == -1)
+  if (msvcrt_spawn(MSVCRT__P_NOWAIT, comspec, fullcmd, NULL, 1) == -1)
   {
     MSVCRT__close(fds[fdToOpen]);
     ret = NULL;
@@ -1138,6 +1102,7 @@ MSVCRT_FILE* CDECL MSVCRT__wpopen(const MSVCRT_wchar_t* command, const MSVCRT_wc
     if (!ret)
       MSVCRT__close(fds[fdToOpen]);
   }
+  HeapFree(GetProcessHeap(), 0, comspec);
   HeapFree(GetProcessHeap(), 0, fullcmd);
   MSVCRT__dup2(fdStdHandle, fdToDup);
   MSVCRT__close(fdStdHandle);

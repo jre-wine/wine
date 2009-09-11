@@ -5,11 +5,12 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = shell32.dll
 IMPORTLIB = shell32
-IMPORTS   = shlwapi comctl32 user32 gdi32 advapi32 kernel32 ntdll
-DELAYIMPORTS = ole32 oleaut32
-EXTRALIBS = -luuid
+IMPORTS   = uuid shlwapi comctl32 user32 gdi32 advapi32 kernel32 ntdll
+DELAYIMPORTS = ole32 oleaut32 shdocvw version
 
 C_SRCS = \
+	appbar.c \
+	assoc.c \
 	autocomplete.c \
 	brsfolder.c \
 	changenotify.c \
@@ -17,8 +18,8 @@ C_SRCS = \
 	clipboard.c \
 	control.c \
 	cpanelfolder.c \
-	dde.c \
 	dataobject.c \
+	dde.c \
 	debughlp.c \
 	dialogs.c \
 	dragdrophelper.c \
@@ -29,6 +30,7 @@ C_SRCS = \
 	recyclebin.c \
 	regsvr.c \
 	shell32_main.c \
+	shellitem.c \
 	shelllink.c \
 	shellole.c \
 	shellord.c \
@@ -53,23 +55,49 @@ C_SRCS = \
 	trash.c \
 	xdg.c
 
-RC_SRCS = shres.rc
+RC_SRCS = \
+	shell32_Bg.rc \
+	shell32_Ca.rc \
+	shell32_Cs.rc \
+	shell32_Da.rc \
+	shell32_De.rc \
+	shell32_En.rc \
+	shell32_Eo.rc \
+	shell32_Es.rc \
+	shell32_Fi.rc \
+	shell32_Fr.rc \
+	shell32_Hu.rc \
+	shell32_It.rc \
+	shell32_Ja.rc \
+	shell32_Ko.rc \
+	shell32_Lt.rc \
+	shell32_Nl.rc \
+	shell32_No.rc \
+	shell32_Pl.rc \
+	shell32_Pt.rc \
+	shell32_Ro.rc \
+	shell32_Ru.rc \
+	shell32_Si.rc \
+	shell32_Sk.rc \
+	shell32_Sv.rc \
+	shell32_Tr.rc \
+	shell32_Uk.rc \
+	shell32_Wa.rc \
+	shell32_Zh.rc \
+	shres.rc \
+	version.rc
 
-C_SRCS16  = shell.c
-RC_SRCS16 = version16.rc
-SPEC_SRCS16 = shell.spec
+SVG_SRCS = \
+	desktop.svg \
+	folder.svg \
+	folder_open.svg \
+	mycomputer.svg \
+	mydocs.svg \
+	trash_file.svg
 
 EXTRA_OBJS = authors.o
 
 @MAKE_DLL_RULES@
-
-# Special rules for 16-bit resource files
-
-version16.res: version16.rc
-	$(LDPATH) $(RC16) $(RC16FLAGS) -fo$@ $(SRCDIR)/version16.rc
-
-shell.spec.o: shell.spec version16.res
-	$(WINEBUILD) $(WINEBUILDFLAGS) --dll -o $@ --main-module $(MODULE) --res version16.res --export $(SRCDIR)/shell.spec
 
 authors.c: $(TOPSRCDIR)/AUTHORS
 	(LC_ALL=C; export LC_ALL; echo 'const char * const SHELL_Authors[] = {' && \

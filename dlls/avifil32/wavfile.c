@@ -1,5 +1,5 @@
 /*
- * Copyright 2002 Michael Günnewig
+ * Copyright 2002 Michael GÃ¼nnewig
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -251,13 +251,16 @@ static HRESULT WINAPI IAVIFile_fnQueryInterface(IAVIFile *iface, REFIID refiid,
   if (IsEqualGUID(&IID_IUnknown, refiid) ||
       IsEqualGUID(&IID_IAVIFile, refiid)) {
     *obj = iface;
+    IAVIFile_AddRef(iface);
     return S_OK;
   } else if (This->fInfo.dwStreams == 1 &&
 	     IsEqualGUID(&IID_IAVIStream, refiid)) {
     *obj = &This->iAVIStream;
+    IAVIFile_AddRef(iface);
     return S_OK;
   } else if (IsEqualGUID(&IID_IPersistFile, refiid)) {
     *obj = &This->iPersistFile;
+    IAVIFile_AddRef(iface);
     return S_OK;
   }
 
@@ -908,7 +911,7 @@ static HRESULT WINAPI IAVIStream_fnRead(IAVIStream *iface, LONG start,
   if (mmioSeek(This->hmmio, This->ckData.dwDataOffset
 	       + start * This->sInfo.dwSampleSize, SEEK_SET) == -1)
     return AVIERR_FILEREAD;
-  if (mmioRead(This->hmmio, (HPSTR)buffer, buffersize) != buffersize)
+  if (mmioRead(This->hmmio, buffer, buffersize) != buffersize)
     return AVIERR_FILEREAD;
 
   /* fill out return parameters if given */
@@ -960,7 +963,7 @@ static HRESULT WINAPI IAVIStream_fnWrite(IAVIStream *iface, LONG start,
     if (mmioSeek(This->hmmio, This->ckData.dwDataOffset +
 		 start * This->sInfo.dwSampleSize, SEEK_SET) == -1)
       return AVIERR_FILEWRITE;
-    if (mmioWrite(This->hmmio, (HPSTR)buffer, buffersize) != buffersize)
+    if (mmioWrite(This->hmmio, buffer, buffersize) != buffersize)
       return AVIERR_FILEWRITE;
 
     This->sInfo.dwLength = max(This->sInfo.dwLength, (DWORD)start + samples);

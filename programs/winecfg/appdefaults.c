@@ -51,7 +51,7 @@ static const struct
     { "win2008", "Windows 2008",   6,  0, 0x1771,VER_PLATFORM_WIN32_NT, "Service Pack 1", 0, 0, "ServerNT"},
     { "vista",   "Windows Vista",  6,  0, 0x1770,VER_PLATFORM_WIN32_NT, " ", 0, 0, "WinNT"},
     { "win2003", "Windows 2003",   5,  2, 0xECE, VER_PLATFORM_WIN32_NT, "Service Pack 1", 1, 0, "ServerNT"},
-    { "winxp",   "Windows XP",     5,  1, 0xA28, VER_PLATFORM_WIN32_NT, "Service Pack 2", 2, 0, "WinNT"},
+    { "winxp",   "Windows XP",     5,  1, 0xA28, VER_PLATFORM_WIN32_NT, "Service Pack 3", 3, 0, "WinNT"},
     { "win2k",   "Windows 2000",   5,  0, 0x893, VER_PLATFORM_WIN32_NT, "Service Pack 4", 4, 0, "WinNT"},
     { "winme",   "Windows ME",     4, 90, 0xBB8, VER_PLATFORM_WIN32_WINDOWS, " ", 0, 0, ""},
     { "win98",   "Windows 98",     4, 10, 0x8AE, VER_PLATFORM_WIN32_WINDOWS, " A ", 0, 0, ""},
@@ -70,7 +70,7 @@ static const char szKeyNT[] = "Software\\Microsoft\\Windows NT\\CurrentVersion";
 
 static int get_registry_version(void)
 {
-    int i, best = -1, platform, major, minor, build = 0;
+    int i, best = -1, platform, major, minor = 0, build = 0;
     char *p, *ver;
 
     if ((ver = get_reg_key( HKEY_LOCAL_MACHINE, szKeyNT, "CurrentVersion", NULL )))
@@ -133,7 +133,7 @@ static void update_comboboxes(HWND dialog)
             return;
         }
         if (ver != -1) winver = strdupA( win_versions[ver].szVersion );
-        else winver = strdupA("win2k");
+        else winver = strdupA("winxp");
     }
     WINE_TRACE("winver is %s\n", winver);
 
@@ -319,7 +319,8 @@ static void on_add_app_click(HWND dialog)
   OPENFILENAMEW ofn = { sizeof(OPENFILENAMEW),
 		       0, /*hInst*/0, 0, NULL, 0, 0, NULL,
 		       0, NULL, 0, pathC, 0,
-		       OFN_SHOWHELP | OFN_HIDEREADONLY, 0, 0, NULL, 0, NULL };
+		       OFN_SHOWHELP | OFN_HIDEREADONLY | OFN_ENABLESIZING,
+                       0, 0, NULL, 0, NULL };
 
   LoadStringW (GetModuleHandle (NULL), IDS_SELECT_EXECUTABLE, selectExecutableStr,
       sizeof(selectExecutableStr)/sizeof(selectExecutableStr[0]));

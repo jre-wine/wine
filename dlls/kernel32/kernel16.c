@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -134,43 +135,20 @@ HANDLE WINAPI CreateThread16( SECURITY_ATTRIBUTES *sa, DWORD stack,
     return CreateThread( sa, stack, start_thread16, args, flags, id );
 }
 
-/**************************************************************************
- *           WINOLDAP entry point
+/***********************************************************************
+ *           _DebugOutput                    (KERNEL.328)
  */
-void WINAPI WINOLDAP_EntryPoint( CONTEXT86 *context )
+void WINAPIV _DebugOutput( WORD flags, LPCSTR spec, VA_LIST16 valist )
 {
-    PDB16 *psp;
-    INT len;
-    LPSTR cmdline;
-    PROCESS_INFORMATION info;
-    STARTUPINFOA startup;
-    DWORD count, exit_code = 1;
+    char caller[101];
 
-    InitTask16( context );
+    /* Decode caller address */
+    if (!GetModuleName16( GetExePtr(CURRENT_STACK16->cs), caller, sizeof(caller) ))
+        sprintf( caller, "%04X:%04X", CURRENT_STACK16->cs, CURRENT_STACK16->ip );
 
-    TRACE( "(ds=%x es=%x fs=%x gs=%x, bx=%04x cx=%04x di=%04x si=%x)\n",
-            context->SegDs, context->SegEs, context->SegFs, context->SegGs,
-            context->Ebx, context->Ecx, context->Edi, context->Esi );
+    /* FIXME: cannot use wvsnprintf16 from kernel */
+    /* wvsnprintf16( temp, sizeof(temp), spec, valist ); */
 
-    psp = GlobalLock16( context->SegEs );
-    len = psp->cmdLine[0];
-    cmdline = HeapAlloc( GetProcessHeap(), 0, len + 1 );
-    memcpy( cmdline, psp->cmdLine + 1, len );
-    cmdline[len] = 0;
-    ReleaseThunkLock( &count );
-
-    memset( &startup, 0, sizeof(startup) );
-    startup.cb = sizeof(startup);
-
-    /* FIXME: Should this be WinExec instead of CreateProcess? */
-    if (CreateProcessA( NULL, cmdline, NULL, NULL, FALSE,
-                        0, NULL, NULL, &startup, &info ))
-    {
-        WaitForSingleObject( info.hProcess, INFINITE );
-        GetExitCodeProcess( info.hProcess, &exit_code );
-        CloseHandle( info.hThread );
-        CloseHandle( info.hProcess );
-    }
-    HeapFree( GetProcessHeap(), 0, cmdline );
-    ExitThread( exit_code );
+    /* Output */
+    FIXME("%s %04x %s\n", caller, flags, debugstr_a(spec) );
 }

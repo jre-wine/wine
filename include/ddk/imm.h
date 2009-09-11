@@ -114,7 +114,7 @@ HIMCC  WINAPI ImmReSizeIMCC(HIMCC, DWORD);
 DWORD  WINAPI ImmGetIMCCSize(HIMCC);
 
 #define IMMGWL_IMC                      0
-#define IMMGWL_PRIVATE                  (sizeof(LONG))
+#define IMMGWL_PRIVATE                  (sizeof(LONG_PTR))
 
 /* IME Property bits */
 #define IME_PROP_END_UNLOAD             0x0001
@@ -141,6 +141,13 @@ DWORD  WINAPI ImmGetIMCCSize(HIMCC);
 #define NI_IMEMENUSELECTED              0x0018
 
 BOOL WINAPI ImmGenerateMessage(HIMC);
+LRESULT WINAPI ImmRequestMessageA(HIMC, WPARAM, LPARAM);
+LRESULT WINAPI ImmRequestMessageW(HIMC, WPARAM, LPARAM);
+#define ImmRequestMessage WINELIB_NAME_AW(ImmRequestMessage);
+BOOL WINAPI ImmTranslateMessage(HWND, UINT, WPARAM, LPARAM);
+HWND WINAPI ImmCreateSoftKeyboard(UINT, UINT, int, int);
+BOOL WINAPI ImmDestroySoftKeyboard(HWND);
+BOOL WINAPI ImmShowSoftKeyboard(HWND, int);
 
 BOOL WINAPI ImeInquire(LPIMEINFO, LPWSTR, LPCWSTR lpszOptions);
 BOOL WINAPI ImeConfigure (HKL, HWND, DWORD, LPVOID);

@@ -77,6 +77,8 @@ static LRESULT WINAPI GrabWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 
   TRACE("hwnd=%p, grab=%ld\n", hWnd, wParam);
 
+  if (!data) return 0;
+
   if (wParam)
   {
     /* find the X11 window that ddraw uses */
@@ -106,11 +108,12 @@ static LRESULT WINAPI GrabWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM
 static void GrabPointer(BOOL grab)
 {
   if(grab) {
+    Display *display = thread_display();
     Window window = X11DRV_get_whole_window(GetFocus());
-    if(window)
+    if(window && display)
     {
       wine_tsx11_lock();
-      XSetInputFocus(thread_display(), window, RevertToParent, CurrentTime);
+      XSetInputFocus(display, window, RevertToParent, CurrentTime);
       wine_tsx11_unlock();
     }
   }
@@ -138,7 +141,7 @@ static DWORD PASCAL X11DRV_DDHAL_CreateSurface(LPDDHAL_CREATESURFACEDATA data)
 {
   if (data->lpDDSurfaceDesc->ddsCaps.dwCaps & DDSCAPS_PRIMARYSURFACE) {
     X11DRV_DD_Primary = *data->lplpSList;
-    X11DRV_DD_PrimaryWnd = (HWND)X11DRV_DD_Primary->lpSurfMore->lpDDRAWReserved;
+    X11DRV_DD_PrimaryWnd = X11DRV_DD_Primary->lpSurfMore->lpDDRAWReserved;
     X11DRV_DD_PrimaryGbl = X11DRV_DD_Primary->lpGbl;
     SetPrimaryDIB((HBITMAP)GET_LPDDRAWSURFACE_GBL_MORE(X11DRV_DD_PrimaryGbl)->hKernelSurface);
     X11DRV_DD_UserClass = GlobalFindAtomA("WINE_DDRAW");
@@ -372,7 +375,7 @@ INT X11DRV_DCICommand(INT cbInput, const DCICMD *lpCmd, LPVOID lpOutData)
     return TRUE;
   case DDVERSIONINFO:
     {
-      LPDDVERSIONDATA lpVer = (LPDDVERSIONDATA)lpOutData;
+      LPDDVERSIONDATA lpVer = lpOutData;
       ddraw_ver = lpCmd->dwParam1;
       if (!lpVer) break;
       /* well, whatever... the DDK says so */
@@ -393,7 +396,7 @@ INT X11DRV_DCICommand(INT cbInput, const DCICMD *lpCmd, LPVOID lpOutData)
     return TRUE;
   case DDCREATEDRIVEROBJECT:
     {
-      LPDWORD lpInstance = (LPDWORD)lpOutData;
+      LPDWORD lpInstance = lpOutData;
 
       /* FIXME: get x11drv's hInstance */
       X11DRV_Settings_CreateDriver(&hal_info);

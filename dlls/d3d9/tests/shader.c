@@ -25,7 +25,7 @@ static HMODULE d3d9_handle = 0;
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -44,10 +44,13 @@ static IDirect3DDevice9 *init_d3d9(void)
     d3d9_create = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9");
     ok(d3d9_create != NULL, "Failed to get address of Direct3DCreate9\n");
     if (!d3d9_create) return NULL;
-    
+
     d3d9_ptr = d3d9_create(D3D_SDK_VERSION);
-    ok(d3d9_ptr != NULL, "Failed to create IDirect3D9 object\n");
-    if (!d3d9_ptr) return NULL;
+    if (!d3d9_ptr)
+    {
+        skip("could not create D3D9\n");
+        return NULL;
+    }
 
     ZeroMemory(&present_parameters, sizeof(present_parameters));
     present_parameters.Windowed = TRUE;
@@ -87,7 +90,7 @@ static void test_get_set_vertex_shader(IDirect3DDevice9 *device_ptr)
     HRESULT hret = 0;
     int shader_refcount = 0;
     int i = 0;
-    
+
     hret = IDirect3DDevice9_CreateVertexShader(device_ptr, simple_vs, &shader_ptr);
     ok(hret == D3D_OK && shader_ptr != NULL, "CreateVertexShader returned: hret 0x%x, shader_ptr %p. "
         "Expected hret 0x%x, shader_ptr != %p. Aborting.\n", hret, shader_ptr, D3D_OK, NULL);
@@ -104,9 +107,12 @@ static void test_get_set_vertex_shader(IDirect3DDevice9 *device_ptr)
     i = shader_refcount+1;
     hret = IDirect3DDevice9_GetVertexShader(device_ptr, &current_shader_ptr);
     shader_refcount = get_refcount((IUnknown *)shader_ptr);
-    ok(hret == D3D_OK && shader_refcount == i && current_shader_ptr == shader_ptr, 
+    ok(hret == D3D_OK && shader_refcount == i && current_shader_ptr == shader_ptr,
         "GetVertexShader returned: hret 0x%x, current_shader_ptr %p refcount %d. "
         "Expected hret 0x%x, current_shader_ptr %p, refcount %d.\n", hret, current_shader_ptr, shader_refcount, D3D_OK, shader_ptr, i);
+    IDirect3DVertexShader9_Release(current_shader_ptr);
+
+    IDirect3DVertexShader9_Release(shader_ptr);
 }
 
 static void test_vertex_shader_constant(IDirect3DDevice9 *device_ptr, DWORD consts)
@@ -168,9 +174,12 @@ static void test_get_set_pixel_shader(IDirect3DDevice9 *device_ptr)
     i = shader_refcount+1;
     hret = IDirect3DDevice9_GetPixelShader(device_ptr, &current_shader_ptr);
     shader_refcount = get_refcount((IUnknown *)shader_ptr);
-    ok(hret == D3D_OK && shader_refcount == i && current_shader_ptr == shader_ptr, 
+    ok(hret == D3D_OK && shader_refcount == i && current_shader_ptr == shader_ptr,
         "GetPixelShader returned: hret 0x%x, current_shader_ptr %p refcount %d. "
         "Expected hret 0x%x, current_shader_ptr %p, refcount %d.\n", hret, current_shader_ptr, shader_refcount, D3D_OK, shader_ptr, i);
+    IDirect3DPixelShader9_Release(current_shader_ptr);
+
+    IDirect3DPixelShader9_Release(shader_ptr);
 }
 
 static void test_pixel_shader_constant(IDirect3DDevice9 *device_ptr)
@@ -204,6 +213,7 @@ START_TEST(shader)
 {
     D3DCAPS9 caps;
     IDirect3DDevice9 *device_ptr;
+    ULONG refcount;
 
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
@@ -231,4 +241,7 @@ START_TEST(shader)
         test_pixel_shader_constant(device_ptr);
     }
     else skip("No pixel shader support\n");
+
+    refcount = IDirect3DDevice9_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

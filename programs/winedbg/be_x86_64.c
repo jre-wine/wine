@@ -1,7 +1,7 @@
 /*
  * Debugger x86_64 specific functions
  *
- * Copyright 2004 Vincent Béron
+ * Copyright 2004 Vincent BÃ©ron
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,8 @@
 #include "debugger.h"
 
 #if defined(__x86_64__)
+
+#define STEP_FLAG 0x00000100 /* single step flag */
 
 static unsigned be_x86_64_get_addr(HANDLE hThread, const CONTEXT* ctx, 
                                  enum be_cpu_addr bca, ADDRESS64* addr)
@@ -60,13 +62,33 @@ static unsigned be_x86_64_get_register_info(int regno, enum be_cpu_addr* kind)
 
 static void be_x86_64_single_step(CONTEXT* ctx, unsigned enable)
 {
-    dbg_printf("not done single_step\n");
+    if (enable) ctx->EFlags |= STEP_FLAG;
+    else ctx->EFlags &= ~STEP_FLAG;
 }
 
 static void be_x86_64_print_context(HANDLE hThread, const CONTEXT* ctx,
                                     int all_regs)
 {
-    dbg_printf("Context printing for x86_64 not done yet\n");
+    static const char flags[] = "aVR-N--ODITSZ-A-P-C";
+    char buf[33];
+    int i;
+
+    strcpy(buf, flags);
+    for (i = 0; buf[i]; i++)
+        if (buf[i] != '-' && !(ctx->EFlags & (1 << (sizeof(flags) - 2 - i))))
+            buf[i] = ' ';
+
+    dbg_printf("Register dump:\n");
+    dbg_printf(" rip:%016lx rsp:%016lx rbp:%016lx eflags:%08x (%s)\n",
+               ctx->Rip, ctx->Rsp, ctx->Rbp, ctx->EFlags, buf);
+    dbg_printf(" rax:%016lx rbx:%016lx rcx:%016lx rdx:%016lx\n",
+               ctx->Rax, ctx->Rbx, ctx->Rcx, ctx->Rdx);
+    dbg_printf(" rsi:%016lx rdi:%016lx  r8:%016lx  r9:%016lx r10:%016lx\n",
+               ctx->Rsi, ctx->Rdi, ctx->R8, ctx->R9, ctx->R10 );
+    dbg_printf(" r11:%016lx r12:%016lx r13:%016lx r14:%016lx r15:%016lx\n",
+               ctx->R11, ctx->R12, ctx->R13, ctx->R14, ctx->R15 );
+
+    if (all_regs) dbg_printf( "Floating point x86_64 dump not implemented\n" );
 }
 
 static void be_x86_64_print_segment_info(HANDLE hThread, const CONTEXT* ctx)

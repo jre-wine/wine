@@ -1,7 +1,7 @@
 /*
  * Implementation of DirectX File Interfaces
  *
- * Copyright 2004 Christian Costa
+ * Copyright 2004, 2008 Christian Costa
  *
  * This file contains the (internal) driver registration functions,
  * driver enumeration APIs and DirectDraw creation functions.
@@ -32,7 +32,19 @@
 #include "d3dxof_private.h"
 #include "dxfile.h"
 
+#include <stdio.h>
+
 WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
+
+#define MAKEFOUR(a,b,c,d) ((DWORD)a + ((DWORD)b << 8) + ((DWORD)c << 16) + ((DWORD)d << 24))
+#define XOFFILE_FORMAT_MAGIC         MAKEFOUR('x','o','f',' ')
+#define XOFFILE_FORMAT_VERSION_302   MAKEFOUR('0','3','0','2')
+#define XOFFILE_FORMAT_VERSION_303   MAKEFOUR('0','3','0','3')
+#define XOFFILE_FORMAT_BINARY        MAKEFOUR('b','i','n',' ')
+#define XOFFILE_FORMAT_TEXT          MAKEFOUR('t','x','t',' ')
+#define XOFFILE_FORMAT_COMPRESSED    MAKEFOUR('c','m','p',' ')
+#define XOFFILE_FORMAT_FLOAT_BITS_32 MAKEFOUR('0','0','3','2')
+#define XOFFILE_FORMAT_FLOAT_BITS_64 MAKEFOUR('0','0','6','4')
 
 static const struct IDirectXFileVtbl IDirectXFile_Vtbl;
 static const struct IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl;
@@ -42,6 +54,10 @@ static const struct IDirectXFileEnumObjectVtbl IDirectXFileEnumObject_Vtbl;
 static const struct IDirectXFileObjectVtbl IDirectXFileObject_Vtbl;
 static const struct IDirectXFileSaveObjectVtbl IDirectXFileSaveObject_Vtbl;
 
+static HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj);
+static HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj);
+static HRESULT IDirectXFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj);
+
 HRESULT IDirectXFileImpl_Create(IUnknown* pUnkOuter, LPVOID* ppObj)
 {
     IDirectXFileImpl* object;
@@ -49,7 +65,12 @@ HRESULT IDirectXFileImpl_Create(IUnknown* pUnkOuter, LPVOID* ppObj)
     TRACE("(%p,%p)\n", pUnkOuter, ppObj);
       
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileImpl));
-    
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
+
     object->lpVtbl.lpVtbl = &IDirectXFile_Vtbl;
     object->ref = 1;
 
@@ -102,44 +123,307 @@ static ULONG WINAPI IDirectXFileImpl_Release(IDirectXFile* iface)
 
 /*** IDirectXFile methods ***/
 static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPVOID pvSource, DXFILELOADOPTIONS dwLoadOptions, LPDIRECTXFILEENUMOBJECT* ppEnumObj)
-
 {
   IDirectXFileImpl *This = (IDirectXFileImpl *)iface;
-  IDirectXFileEnumObjectImpl* object; 
+  IDirectXFileEnumObjectImpl* object;
+  HRESULT hr;
+  DWORD* header;
+  HANDLE hFile = INVALID_HANDLE_VALUE;
+  HANDLE file_mapping = 0;
+  LPBYTE buffer = NULL;
+  HGLOBAL resource_data = 0;
+  LPBYTE file_buffer;
+  DWORD file_size;
 
-  FIXME("(%p/%p)->(%p,%x,%p) stub!\n", This, iface, pvSource, dwLoadOptions, ppEnumObj);
+  LPDXFILELOADMEMORY lpdxflm = NULL;
 
-  if (dwLoadOptions == 0)
+  TRACE("(%p/%p)->(%p,%x,%p)\n", This, iface, pvSource, dwLoadOptions, ppEnumObj);
+
+  if (!ppEnumObj)
+    return DXFILEERR_BADVALUE;
+
+  if (dwLoadOptions == DXFILELOAD_FROMFILE)
   {
-    FIXME("Source is a file '%s'\n", (char*)pvSource);
+    TRACE("Open source file '%s'\n", (char*)pvSource);
+
+    hFile = CreateFileA(pvSource, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+      TRACE("File '%s' not found\n", (char*)pvSource);
+      return DXFILEERR_FILENOTFOUND;
+    }
+
+    file_size = GetFileSize(hFile, NULL);
+
+    file_mapping = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (!file_mapping)
+    {
+      hr = DXFILEERR_BADFILETYPE;
+      goto error;
+    }
+
+    buffer = MapViewOfFile(file_mapping, FILE_MAP_READ, 0, 0, 0);
+    if (!buffer)
+    {
+      hr = DXFILEERR_BADFILETYPE;
+      goto error;
+    }
+    file_buffer = buffer;
+  }
+  else if (dwLoadOptions == DXFILELOAD_FROMRESOURCE)
+  {
+    HRSRC resource_info;
+    LPDXFILELOADRESOURCE lpdxflr = pvSource;
+
+    TRACE("Source in resource (module = %p, name = %s, type = %s\n", lpdxflr->hModule, debugstr_a(lpdxflr->lpName), debugstr_a(lpdxflr->lpType));
+
+    resource_info = FindResourceA(lpdxflr->hModule, lpdxflr->lpName, lpdxflr->lpType);
+    if (!resource_info)
+    {
+      hr = DXFILEERR_RESOURCENOTFOUND;
+      goto error;
+    }
+
+    file_size = SizeofResource(lpdxflr->hModule, resource_info);
+
+    resource_data = LoadResource(lpdxflr->hModule, resource_info);
+    if (!resource_data)
+    {
+      hr = DXFILEERR_BADRESOURCE;
+      goto error;
+    }
+
+    file_buffer = LockResource(resource_data);
+    if (!file_buffer)
+    {
+      hr = DXFILEERR_BADRESOURCE;
+      goto error;
+    }
+  }
+  else if (dwLoadOptions == DXFILELOAD_FROMMEMORY)
+  {
+    lpdxflm = pvSource;
+
+    TRACE("Source in memory at %p with size %d\n", lpdxflm->lpMemory, lpdxflm->dSize);
+
+    file_buffer = lpdxflm->lpMemory;
+    file_size = lpdxflm->dSize;
+  }
+  else
+  {
+    FIXME("Source type %d is not handled yet\n", dwLoadOptions);
+    hr = DXFILEERR_NOTDONEYET;
+    goto error;
   }
 
-  object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileEnumObjectImpl));
+  header = (DWORD*)file_buffer;
 
-  object->lpVtbl.lpVtbl = &IDirectXFileEnumObject_Vtbl;
-  object->ref = 1;
+  if (TRACE_ON(d3dxof))
+  {
+    char string[17];
+    memcpy(string, header, 16);
+    string[16] = 0;
+    TRACE("header = '%s'\n", string);
+  }
+
+  if (file_size < 16)
+  {
+    hr = DXFILEERR_BADFILETYPE;
+    goto error;
+  }
+
+  if (header[0] != XOFFILE_FORMAT_MAGIC)
+  {
+    hr = DXFILEERR_BADFILETYPE;
+    goto error;
+  }
+
+  if ((header[1] != XOFFILE_FORMAT_VERSION_302) && (header[1] != XOFFILE_FORMAT_VERSION_303))
+  {
+    hr = DXFILEERR_BADFILEVERSION;
+    goto error;
+  }
+
+  if ((header[2] != XOFFILE_FORMAT_BINARY) && (header[2] != XOFFILE_FORMAT_TEXT) && (header[2] != XOFFILE_FORMAT_COMPRESSED))
+  {
+    hr = DXFILEERR_BADFILETYPE;
+    goto error;
+  }
+
+  if (header[2] == XOFFILE_FORMAT_COMPRESSED)
+  {
+    FIXME("Compressed formats not supported yet\n");
+    hr = DXFILEERR_BADVALUE;
+    goto error;
+  }
+
+  if ((header[3] != XOFFILE_FORMAT_FLOAT_BITS_32) && (header[3] != XOFFILE_FORMAT_FLOAT_BITS_64))
+  {
+    hr = DXFILEERR_BADFILEFLOATSIZE;
+    goto error;
+  }
+
+  TRACE("Header is correct\n");
+
+  hr = IDirectXFileEnumObjectImpl_Create(&object);
+  if (FAILED(hr))
+    goto error;
+
+  object->source = dwLoadOptions;
+  object->hFile = hFile;
+  object->file_mapping = file_mapping;
+  object->buffer = buffer;
+  object->pDirectXFile = This;
+  object->buf.pdxf = This;
+  object->buf.txt = (header[2] == XOFFILE_FORMAT_TEXT);
+  object->buf.token_present = FALSE;
+  object->buf.cur_subobject = 0;
+
+  TRACE("File size is %d bytes\n", file_size);
+
+  /* Go to data after header */
+  object->buf.buffer = file_buffer + 16;
+  object->buf.rem_bytes = file_size - 16;
 
   *ppEnumObj = (LPDIRECTXFILEENUMOBJECT)object;
-    
+
+  while (object->buf.rem_bytes && is_template_available(&object->buf))
+  {
+    if (!parse_template(&object->buf))
+    {
+      TRACE("Template is not correct\n");
+      hr = DXFILEERR_BADVALUE;
+      goto error;
+    }
+    else
+    {
+      TRACE("Template successfully parsed:\n");
+      if (TRACE_ON(d3dxof))
+        dump_template(This->xtemplates, &This->xtemplates[This->nb_xtemplates - 1]);
+    }
+  }
+
+  if (TRACE_ON(d3dxof))
+  {
+    int i;
+    TRACE("Registered templates (%d):\n", This->nb_xtemplates);
+    for (i = 0; i < This->nb_xtemplates; i++)
+      DPRINTF("%s - %s\n", This->xtemplates[i].name, debugstr_guid(&This->xtemplates[i].class_id));
+  }
+
   return DXFILE_OK;
+
+error:
+  if (buffer)
+    UnmapViewOfFile(buffer);
+  if (file_mapping)
+    CloseHandle(file_mapping);
+  if (hFile != INVALID_HANDLE_VALUE)
+    CloseHandle(hFile);
+  if (resource_data)
+    FreeResource(resource_data);
+  *ppEnumObj = NULL;
+
+  return hr;
 }
 
 static HRESULT WINAPI IDirectXFileImpl_CreateSaveObject(IDirectXFile* iface, LPCSTR szFileName, DXFILEFORMAT dwFileFormat, LPDIRECTXFILESAVEOBJECT* ppSaveObj)
 {
   IDirectXFileImpl *This = (IDirectXFileImpl *)iface;
 
-  FIXME("(%p/%p)->(%s,%x,%p) stub!\n", This, iface, szFileName, dwFileFormat, ppSaveObj);
+  FIXME("(%p/%p)->(%s,%x,%p) partial stub!\n", This, iface, szFileName, dwFileFormat, ppSaveObj);
 
-  return DXFILEERR_BADVALUE;
+  if (!szFileName || !ppSaveObj)
+    return E_POINTER;
+
+  return IDirectXFileSaveObjectImpl_Create((IDirectXFileSaveObjectImpl**)ppSaveObj);
 }
 
 static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LPVOID pvData, DWORD cbSize)
 {
   IDirectXFileImpl *This = (IDirectXFileImpl *)iface;
+  DWORD token_header;
+  parse_buffer buf;
 
-  FIXME("(%p/%p)->(%p,%d) stub!\n", This, iface, pvData, cbSize);
+  buf.buffer = pvData;
+  buf.rem_bytes = cbSize;
+  buf.txt = FALSE;
+  buf.token_present = FALSE;
+  buf.pdxf = This;
 
-  return DXFILEERR_BADVALUE;
+  TRACE("(%p/%p)->(%p,%d)\n", This, iface, pvData, cbSize);
+
+  if (!pvData)
+    return DXFILEERR_BADVALUE;
+
+  if (cbSize < 16)
+    return DXFILEERR_BADFILETYPE;
+
+  if (TRACE_ON(d3dxof))
+  {
+    char string[17];
+    memcpy(string, pvData, 16);
+    string[16] = 0;
+    TRACE("header = '%s'\n", string);
+  }
+
+  read_bytes(&buf, &token_header, 4);
+
+  if (token_header != XOFFILE_FORMAT_MAGIC)
+    return DXFILEERR_BADFILETYPE;
+
+  read_bytes(&buf, &token_header, 4);
+
+  if ((token_header != XOFFILE_FORMAT_VERSION_302) && (token_header != XOFFILE_FORMAT_VERSION_303))
+    return DXFILEERR_BADFILEVERSION;
+
+  read_bytes(&buf, &token_header, 4);
+
+  if ((token_header != XOFFILE_FORMAT_BINARY) && (token_header != XOFFILE_FORMAT_TEXT) && (token_header != XOFFILE_FORMAT_COMPRESSED))
+    return DXFILEERR_BADFILETYPE;
+
+  if (token_header == XOFFILE_FORMAT_TEXT)
+  {
+    buf.txt = TRUE;
+  }
+
+  if (token_header == XOFFILE_FORMAT_COMPRESSED)
+  {
+    FIXME("Compressed formats not supported yet\n");
+    return DXFILEERR_BADVALUE;
+  }
+
+  read_bytes(&buf, &token_header, 4);
+
+  if ((token_header != XOFFILE_FORMAT_FLOAT_BITS_32) && (token_header != XOFFILE_FORMAT_FLOAT_BITS_64))
+    return DXFILEERR_BADFILEFLOATSIZE;
+
+  TRACE("Header is correct\n");
+
+  while (buf.rem_bytes)
+  {
+    if (!parse_template(&buf))
+    {
+      TRACE("Template is not correct\n");
+      return DXFILEERR_BADVALUE;
+    }
+    else
+    {
+      TRACE("Template successfully parsed:\n");
+      if (TRACE_ON(d3dxof))
+        dump_template(This->xtemplates, &This->xtemplates[This->nb_xtemplates - 1]);
+    }
+  }
+
+  if (TRACE_ON(d3dxof))
+  {
+    int i;
+    TRACE("Registered templates (%d):\n", This->nb_xtemplates);
+    for (i = 0; i < This->nb_xtemplates; i++)
+      DPRINTF("%s - %s\n", This->xtemplates[i].name, debugstr_guid(&This->xtemplates[i].class_id));
+  }
+
+  return DXFILE_OK;
 }
 
 static const IDirectXFileVtbl IDirectXFile_Vtbl =
@@ -152,19 +436,24 @@ static const IDirectXFileVtbl IDirectXFile_Vtbl =
   IDirectXFileImpl_RegisterTemplates
 };
 
-HRESULT IDirectXFileBinaryImpl_Create(IDirectXFileBinaryImpl** ppObj)
+static HRESULT IDirectXFileBinaryImpl_Create(IDirectXFileBinaryImpl** ppObj)
 {
     IDirectXFileBinaryImpl* object;
 
     TRACE("(%p)\n", ppObj);
-      
+
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileBinaryImpl));
-    
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
+
     object->lpVtbl.lpVtbl = &IDirectXFileBinary_Vtbl;
     object->ref = 1;
 
     *ppObj = object;
-    
+
     return DXFILE_OK;
 }
 
@@ -184,7 +473,11 @@ static HRESULT WINAPI IDirectXFileBinaryImpl_QueryInterface(IDirectXFileBinary* 
     return S_OK;
   }
 
-  ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+  /* Do not print an error for interfaces that can be queried to retrieve the type of the object */
+  if (!IsEqualGUID(riid, &IID_IDirectXFileData)
+      && !IsEqualGUID(riid, &IID_IDirectXFileDataReference))
+    ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+
   return E_NOINTERFACE;
 }
 
@@ -271,14 +564,19 @@ static const IDirectXFileBinaryVtbl IDirectXFileBinary_Vtbl =
     IDirectXFileBinaryImpl_Read
 };
 
-HRESULT IDirectXFileDataImpl_Create(IDirectXFileDataImpl** ppObj)
+static HRESULT IDirectXFileDataImpl_Create(IDirectXFileDataImpl** ppObj)
 {
     IDirectXFileDataImpl* object;
 
     TRACE("(%p)\n", ppObj);
       
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileDataImpl));
-    
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
+
     object->lpVtbl.lpVtbl = &IDirectXFileData_Vtbl;
     object->ref = 1;
 
@@ -303,7 +601,11 @@ static HRESULT WINAPI IDirectXFileDataImpl_QueryInterface(IDirectXFileData* ifac
     return S_OK;
   }
 
-  ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+  /* Do not print an error for interfaces that can be queried to retrieve the type of the object */
+  if (!IsEqualGUID(riid, &IID_IDirectXFileBinary)
+      && !IsEqualGUID(riid, &IID_IDirectXFileDataReference))
+    ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+
   return E_NOINTERFACE;
 }
 
@@ -325,7 +627,15 @@ static ULONG WINAPI IDirectXFileDataImpl_Release(IDirectXFileData* iface)
   TRACE("(%p/%p): ReleaseRef to %d\n", iface, This, ref);
 
   if (!ref)
+  {
+    if (!This->level && !This->from_ref)
+    {
+      HeapFree(GetProcessHeap(), 0, This->pstrings);
+      HeapFree(GetProcessHeap(), 0, This->pobj->pdata);
+      HeapFree(GetProcessHeap(), 0, This->pobj);
+    }
     HeapFree(GetProcessHeap(), 0, This);
+  }
 
   return ref;
 }
@@ -336,18 +646,28 @@ static HRESULT WINAPI IDirectXFileDataImpl_GetName(IDirectXFileData* iface, LPST
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pstrNameBuf, pdwBufLen); 
+  TRACE("(%p/%p)->(%p,%p)\n", This, iface, pstrNameBuf, pdwBufLen);
 
-  return DXFILEERR_BADVALUE;
+  if (!pstrNameBuf)
+    return DXFILEERR_BADVALUE;
+
+  strcpy(pstrNameBuf, This->pobj->name);
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetId(IDirectXFileData* iface, LPGUID pGuid)
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pGuid); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, pGuid);
 
-  return DXFILEERR_BADVALUE;
+  if (!pGuid)
+    return DXFILEERR_BADVALUE;
+
+  memcpy(pGuid, &This->pobj->class_id, 16);
+
+  return DXFILE_OK;
 }
 
 /*** IDirectXFileData methods ***/
@@ -355,27 +675,94 @@ static HRESULT WINAPI IDirectXFileDataImpl_GetData(IDirectXFileData* iface, LPCS
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%s,%p,%p) stub!\n", This, iface, szMember, pcbSize, ppvData); 
+  TRACE("(%p/%p)->(%s,%p,%p)\n", This, iface, szMember, pcbSize, ppvData);
 
-  return DXFILEERR_BADVALUE;
+  if (!pcbSize || !ppvData)
+    return DXFILEERR_BADVALUE;
+
+  if (szMember)
+  {
+    FIXME("Specifying a member is not supported yet!\n");
+    return DXFILEERR_BADVALUE;
+  }
+
+  *pcbSize = This->pobj->size;
+  *ppvData = This->pobj->root->pdata + This->pobj->pos_data;
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetType(IDirectXFileData* iface, const GUID** pguid)
 {
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
+  static GUID guid;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pguid); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, pguid);
 
-  return DXFILEERR_BADVALUE;
+  if (!pguid)
+    return DXFILEERR_BADVALUE;
+
+  memcpy(&guid, &This->pobj->type, 16);
+  *pguid = &guid;
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_GetNextObject(IDirectXFileData* iface, LPDIRECTXFILEOBJECT* ppChildObj)
 {
+  HRESULT hr;
   IDirectXFileDataImpl *This = (IDirectXFileDataImpl *)iface;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppChildObj); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, ppChildObj);
 
-  return DXFILEERR_BADVALUE;
+  if (This->cur_enum_object >= This->pobj->nb_childs)
+    return DXFILEERR_NOMOREOBJECTS;
+
+  if (This->from_ref && (This->level >= 1))
+  {
+    /* Only 2 levels can enumerated if the object is obtained from a reference */
+    return DXFILEERR_NOMOREOBJECTS;
+  }
+
+  if (This->pobj->childs[This->cur_enum_object]->binary)
+  {
+    IDirectXFileBinaryImpl *object;
+
+    hr = IDirectXFileBinaryImpl_Create(&object);
+    if (FAILED(hr))
+      return hr;
+
+    *ppChildObj = (LPDIRECTXFILEOBJECT)object;
+  }
+  else if (This->pobj->childs[This->cur_enum_object]->ptarget)
+  {
+    IDirectXFileDataReferenceImpl *object;
+
+    hr = IDirectXFileDataReferenceImpl_Create(&object);
+    if (FAILED(hr))
+      return hr;
+
+    object->ptarget = This->pobj->childs[This->cur_enum_object++]->ptarget;
+
+    *ppChildObj = (LPDIRECTXFILEOBJECT)object;
+  }
+  else
+  {
+    IDirectXFileDataImpl *object;
+
+    hr = IDirectXFileDataImpl_Create(&object);
+    if (FAILED(hr))
+      return hr;
+
+    object->pobj = This->pobj->childs[This->cur_enum_object++];
+    object->cur_enum_object = 0;
+    object->from_ref = This->from_ref;
+    object->level = This->level + 1;
+
+    *ppChildObj = (LPDIRECTXFILEOBJECT)object;
+  }
+
+  return DXFILE_OK;
 }
 
 static HRESULT WINAPI IDirectXFileDataImpl_AddDataObject(IDirectXFileData* iface, LPDIRECTXFILEDATA pDataObj)
@@ -420,13 +807,18 @@ static const IDirectXFileDataVtbl IDirectXFileData_Vtbl =
     IDirectXFileDataImpl_AddBinaryObject
 };
 
-HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj)
+static HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj)
 {
     IDirectXFileDataReferenceImpl* object;
 
     TRACE("(%p)\n", ppObj);
       
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileDataReferenceImpl));
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
     
     object->lpVtbl.lpVtbl = &IDirectXFileDataReference_Vtbl;
     object->ref = 1;
@@ -452,7 +844,11 @@ static HRESULT WINAPI IDirectXFileDataReferenceImpl_QueryInterface(IDirectXFileD
     return S_OK;
   }
 
-  ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+  /* Do not print an error for interfaces that can be queried to retrieve the type of the object */
+  if (!IsEqualGUID(riid, &IID_IDirectXFileData)
+      && !IsEqualGUID(riid, &IID_IDirectXFileBinary))
+    ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
+
   return E_NOINTERFACE;
 }
 
@@ -484,7 +880,12 @@ static HRESULT WINAPI IDirectXFileDataReferenceImpl_GetName(IDirectXFileDataRefe
 {
   IDirectXFileDataReferenceImpl *This = (IDirectXFileDataReferenceImpl *)iface;
 
-  FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pstrNameBuf, pdwBufLen); 
+  TRACE("(%p/%p)->(%p,%p)\n", This, iface, pstrNameBuf, pdwBufLen);
+
+  if (!pstrNameBuf)
+    return DXFILEERR_BADVALUE;
+
+  strcpy(pstrNameBuf, This->ptarget->name);
 
   return DXFILEERR_BADVALUE;
 }
@@ -493,19 +894,40 @@ static HRESULT WINAPI IDirectXFileDataReferenceImpl_GetId(IDirectXFileDataRefere
 {
   IDirectXFileDataReferenceImpl *This = (IDirectXFileDataReferenceImpl *)iface;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pGuid); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, pGuid);
 
-  return DXFILEERR_BADVALUE;
+  if (!pGuid)
+    return DXFILEERR_BADVALUE;
+
+  memcpy(pGuid, &This->ptarget->class_id, 16);
+
+  return DXFILE_OK;
 }
 
 /*** IDirectXFileDataReference ***/
 static HRESULT WINAPI IDirectXFileDataReferenceImpl_Resolve(IDirectXFileDataReference* iface, LPDIRECTXFILEDATA* ppDataObj)
 {
   IDirectXFileDataReferenceImpl *This = (IDirectXFileDataReferenceImpl *)iface;
+  IDirectXFileDataImpl *object;
+  HRESULT hr;
 
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppDataObj); 
+  TRACE("(%p/%p)->(%p)\n", This, iface, ppDataObj);
 
-  return DXFILEERR_BADVALUE;
+  if (!ppDataObj)
+    return DXFILEERR_BADVALUE;
+
+  hr = IDirectXFileDataImpl_Create(&object);
+  if (FAILED(hr))
+    return hr;
+
+  object->pobj = This->ptarget;
+  object->cur_enum_object = 0;
+  object->level = 0;
+  object->from_ref = TRUE;
+
+  *ppDataObj = (LPDIRECTXFILEDATA)object;
+
+  return DXFILE_OK;
 }
 
 static const IDirectXFileDataReferenceVtbl IDirectXFileDataReference_Vtbl =
@@ -518,13 +940,18 @@ static const IDirectXFileDataReferenceVtbl IDirectXFileDataReference_Vtbl =
     IDirectXFileDataReferenceImpl_Resolve
 };
 
-HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj)
+static HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj)
 {
     IDirectXFileEnumObjectImpl* object;
 
     TRACE("(%p)\n", ppObj);
       
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileEnumObjectImpl));
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
     
     object->lpVtbl.lpVtbl = &IDirectXFileEnumObject_Vtbl;
     object->ref = 1;
@@ -571,7 +998,20 @@ static ULONG WINAPI IDirectXFileEnumObjectImpl_Release(IDirectXFileEnumObject* i
   TRACE("(%p/%p): ReleaseRef to %d\n", iface, This, ref);
 
   if (!ref)
+  {
+    int i;
+    for (i = 0; i < This->nb_xobjects; i++)
+      IDirectXFileData_Release(This->pRefObjects[i]);
+    if (This->source == DXFILELOAD_FROMFILE)
+    {
+      UnmapViewOfFile(This->buffer);
+      CloseHandle(This->file_mapping);
+      CloseHandle(This->hFile);
+    }
+    else if (This->source == DXFILELOAD_FROMRESOURCE)
+      FreeResource(This->resource_data);
     HeapFree(GetProcessHeap(), 0, This);
+  }
 
   return ref;
 }
@@ -581,17 +1021,89 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
 {
   IDirectXFileEnumObjectImpl *This = (IDirectXFileEnumObjectImpl *)iface;
   IDirectXFileDataImpl* object;
-  
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, ppDataObj); 
+  HRESULT hr;
+  LPBYTE pstrings = NULL;
 
-  object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileDataImpl));
+  TRACE("(%p/%p)->(%p)\n", This, iface, ppDataObj);
 
-  object->lpVtbl.lpVtbl = &IDirectXFileData_Vtbl;
-  object->ref = 1;
+  if (This->nb_xobjects >= MAX_OBJECTS)
+  {
+    ERR("Too many objects\n");
+    return DXFILEERR_NOMOREOBJECTS;
+  }
+
+  if (!This->buf.rem_bytes)
+    return DXFILEERR_NOMOREOBJECTS;
+
+  hr = IDirectXFileDataImpl_Create(&object);
+  if (FAILED(hr))
+    return hr;
+
+  This->buf.pxo_globals = This->xobjects;
+  This->buf.nb_pxo_globals = This->nb_xobjects;
+  This->buf.cur_subobject = 1;
+  This->buf.level = 0;
+
+  This->buf.pxo_tab = HeapAlloc(GetProcessHeap(), 0, sizeof(xobject)*MAX_SUBOBJECTS);
+  if (!This->buf.pxo_tab)
+  {
+    ERR("Out of memory\n");
+    hr = DXFILEERR_BADALLOC;
+    goto error;
+  }
+  This->buf.pxo = This->xobjects[This->nb_xobjects] = This->buf.pxo_tab;
+
+  This->buf.pxo->pdata = This->buf.pdata = NULL;
+  This->buf.capacity = 0;
+  This->buf.cur_pos_data = 0;
+
+  pstrings = HeapAlloc(GetProcessHeap(), 0, MAX_STRINGS_BUFFER);
+  if (!pstrings)
+  {
+    ERR("Out of memory\n");
+    hr = DXFILEERR_BADALLOC;
+    goto error;
+  }
+  This->buf.cur_pstrings = This->buf.pstrings = object->pstrings = pstrings;
+
+  if (!parse_object(&This->buf))
+  {
+    TRACE("Object is not correct\n");
+    hr = DXFILEERR_PARSEERROR;
+    goto error;
+  }
+
+  This->buf.pxo->nb_subobjects = This->buf.cur_subobject;
+  if (This->buf.cur_subobject > MAX_SUBOBJECTS)
+  {
+    FIXME("Too many suobjects %d\n", This->buf.cur_subobject);
+    hr = DXFILEERR_BADALLOC;
+    goto error;
+  }
+
+  object->pstrings = pstrings;
+  object->pobj = This->buf.pxo;
+  object->cur_enum_object = 0;
+  object->level = 0;
+  object->from_ref = FALSE;
 
   *ppDataObj = (LPDIRECTXFILEDATA)object;
 
-  return DXFILEERR_BADVALUE;
+  /* Get a reference to created object */
+  This->pRefObjects[This->nb_xobjects] = (LPDIRECTXFILEDATA)object;
+  IDirectXFileData_AddRef(This->pRefObjects[This->nb_xobjects]);
+
+  This->nb_xobjects++;
+
+  return DXFILE_OK;
+
+error:
+
+  HeapFree(GetProcessHeap(), 0, This->buf.pxo_tab);
+  HeapFree(GetProcessHeap(), 0, This->buf.pxo->pdata);
+  HeapFree(GetProcessHeap(), 0, pstrings);
+
+  return hr;
 }
 
 static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetDataObjectById(IDirectXFileEnumObject* iface, REFGUID rguid, LPDIRECTXFILEDATA* ppDataObj)
@@ -622,105 +1134,24 @@ static const IDirectXFileEnumObjectVtbl IDirectXFileEnumObject_Vtbl =
     IDirectXFileEnumObjectImpl_GetDataObjectByName
 };
 
-HRESULT IDirectXFileObjectImpl_Create(IDirectXFileObjectImpl** ppObj)
-{
-    IDirectXFileObjectImpl* object;
-
-    TRACE("(%p)\n", ppObj);
-      
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileObjectImpl));
-    
-    object->lpVtbl.lpVtbl = &IDirectXFileObject_Vtbl;
-    object->ref = 1;
-
-    *ppObj = object;
-    
-    return S_OK;
-}
-
-/*** IUnknown methods ***/
-static HRESULT WINAPI IDirectXFileObjectImpl_QueryInterface(IDirectXFileObject* iface, REFIID riid, void** ppvObject)
-{
-  IDirectXFileObjectImpl *This = (IDirectXFileObjectImpl *)iface;
-
-  TRACE("(%p/%p)->(%s,%p)\n", iface, This, debugstr_guid(riid), ppvObject);
-
-  if (IsEqualGUID(riid, &IID_IUnknown)
-      || IsEqualGUID(riid, &IID_IDirectXFileObject))
-  {
-    IClassFactory_AddRef(iface);
-    *ppvObject = This;
-    return S_OK;
-  }
-
-  ERR("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppvObject);
-  return E_NOINTERFACE;
-}
-
-static ULONG WINAPI IDirectXFileObjectImpl_AddRef(IDirectXFileObject* iface)
-{
-  IDirectXFileObjectImpl *This = (IDirectXFileObjectImpl *)iface;
-  ULONG ref = InterlockedIncrement(&This->ref);
-
-  TRACE("(%p/%p): AddRef from %d\n", iface, This, ref - 1);
-
-  return ref;
-}
-
-static ULONG WINAPI IDirectXFileObjectImpl_Release(IDirectXFileObject* iface)
-{
-  IDirectXFileObjectImpl *This = (IDirectXFileObjectImpl *)iface;
-  ULONG ref = InterlockedDecrement(&This->ref);
-
-  TRACE("(%p/%p): ReleaseRef to %d\n", iface, This, ref);
-
-  if (!ref)
-    HeapFree(GetProcessHeap(), 0, This);
-
-  return ref;
-}
-
-/*** IDirectXFileObject methods ***/
-static HRESULT WINAPI IDirectXFileObjectImpl_GetName(IDirectXFileObject* iface, LPSTR pstrNameBuf, LPDWORD pdwBufLen)
-{
-  IDirectXFileDataReferenceImpl *This = (IDirectXFileDataReferenceImpl *)iface;
-
-  FIXME("(%p/%p)->(%p,%p) stub!\n", This, iface, pstrNameBuf, pdwBufLen); 
-
-  return DXFILEERR_BADVALUE;
-}
-
-static HRESULT WINAPI IDirectXFileObjectImpl_GetId(IDirectXFileObject* iface, LPGUID pGuid)
-{
-  IDirectXFileObjectImpl *This = (IDirectXFileObjectImpl *)iface;
-
-  FIXME("(%p/%p)->(%p) stub!\n", This, iface, pGuid); 
-
-  return DXFILEERR_BADVALUE;
-}
-
-static const IDirectXFileObjectVtbl IDirectXFileObject_Vtbl =
-{
-    IDirectXFileObjectImpl_QueryInterface,
-    IDirectXFileObjectImpl_AddRef,
-    IDirectXFileObjectImpl_Release,
-    IDirectXFileObjectImpl_GetName,
-    IDirectXFileObjectImpl_GetId
-};
-
-HRESULT IDirectXFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj)
+static HRESULT IDirectXFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj)
 {
     IDirectXFileSaveObjectImpl* object;
 
     TRACE("(%p)\n", ppObj);
 
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectXFileSaveObjectImpl));
-    
+    if (!object)
+    {
+        ERR("Out of memory\n");
+        return DXFILEERR_BADALLOC;
+    }
+
     object->lpVtbl.lpVtbl = &IDirectXFileSaveObject_Vtbl;
     object->ref = 1;
 
     *ppObj = object;
-    
+
     return S_OK;
 }
 

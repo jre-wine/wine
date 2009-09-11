@@ -18,8 +18,8 @@
  */
 
 #define COBJMACROS
+#include <initguid.h>
 #include <d3d8.h>
-#include <dxerr8.h>
 #include "wine/test.h"
 
 static IDirect3D8 *(WINAPI *pDirect3DCreate8)(UINT);
@@ -93,19 +93,16 @@ static int get_refcount(IUnknown *object)
         if (container_ptr && container_ptr != (void *)0x1337c0d3) IUnknown_Release((IUnknown *)container_ptr); \
     }
 
-static void check_mipmap_levels(
-    IDirect3DDevice8* device, 
-    int width, int height, int count) 
+static void check_mipmap_levels(IDirect3DDevice8 *device, UINT width, UINT height, UINT count)
 {
-
     IDirect3DBaseTexture8* texture = NULL;
-    HRESULT hr = IDirect3DDevice8_CreateTexture( device, width, height, 0, 0, 
-        D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, (IDirect3DTexture8**) &texture );
-       
+    HRESULT hr = IDirect3DDevice8_CreateTexture( device, width, height, 0, 0,
+            D3DFMT_X8R8G8B8, D3DPOOL_DEFAULT, (IDirect3DTexture8**) &texture );
+
     if (SUCCEEDED(hr)) {
         DWORD levels = IDirect3DBaseTexture8_GetLevelCount(texture);
         ok(levels == count, "Invalid level count. Expected %d got %u\n", count, levels);
-    } else 
+    } else
         trace("CreateTexture failed: %#08x\n", hr);
 
     if (texture) IUnknown_Release( texture );
@@ -121,7 +118,7 @@ static void test_mipmap_levels(void)
     IDirect3DDevice8      *pDevice = NULL;
     D3DPRESENT_PARAMETERS d3dpp;
     D3DDISPLAYMODE        d3ddm;
- 
+
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
     ok(pD3d != NULL, "Failed to create IDirect3D8 object\n");
     hwnd = CreateWindow( "static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL );
@@ -147,9 +144,13 @@ static void test_mipmap_levels(void)
     check_mipmap_levels(pDevice, 1, 256, 9);
     check_mipmap_levels(pDevice, 1, 1, 1);
 
-    cleanup:
-    if (pD3d)     IUnknown_Release( pD3d );
-    if (pDevice)  IUnknown_Release( pDevice );
+cleanup:
+    if (pDevice)
+    {
+        UINT refcount = IUnknown_Release( pDevice );
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IUnknown_Release( pD3d );
     DestroyWindow( hwnd );
 }
 
@@ -262,12 +263,16 @@ static void test_swapchain(void)
     ok(backbuffer == (void *) 0xdeadbeef, "The back buffer pointer was modified (%p)\n", backbuffer);
     if(backbuffer && backbuffer != (void *) 0xdeadbeef) IDirect3DSurface8_Release(backbuffer);
 
-    cleanup:
+cleanup:
     if(swapchain1) IDirect3DSwapChain8_Release(swapchain1);
     if(swapchain2) IDirect3DSwapChain8_Release(swapchain2);
     if(swapchain3) IDirect3DSwapChain8_Release(swapchain3);
-    if(pDevice) IDirect3DDevice8_Release(pDevice);
-    if(pD3d) IDirect3DDevice8_Release(pD3d);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
     DestroyWindow( hwnd );
 }
 
@@ -305,7 +310,7 @@ static void test_refcount(void)
         D3DVSD_STREAM(0),
         D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3),  /* D3DVSDE_POSITION, Register v0 */
         D3DVSD_REG(D3DVSDE_DIFFUSE, D3DVSDT_D3DCOLOR), /* D3DVSDE_DIFFUSE, Register v5 */
-	D3DVSD_END()
+        D3DVSD_END()
     };
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
@@ -587,8 +592,8 @@ cleanup:
     CHECK_RELEASE(pVertexBuffer,        pDevice, --refcount);
     CHECK_RELEASE(pIndexBuffer,         pDevice, --refcount);
     /* Shaders */
-    if (dVertexShader != -1)  IDirect3DDevice8_DeleteVertexShader( pDevice, dVertexShader );
-    if (dPixelShader != -1)   IDirect3DDevice8_DeletePixelShader( pDevice, dPixelShader );
+    if (dVertexShader != ~0U) IDirect3DDevice8_DeleteVertexShader( pDevice, dVertexShader );
+    if (dPixelShader != ~0U) IDirect3DDevice8_DeletePixelShader( pDevice, dPixelShader );
     /* Textures */
     CHECK_RELEASE(pTexture,             pDevice, --refcount);
     CHECK_RELEASE(pCubeTexture,         pDevice, --refcount);
@@ -598,7 +603,7 @@ cleanup:
     CHECK_RELEASE(pImageSurface,        pDevice, --refcount);
     CHECK_RELEASE(pRenderTarget3,       pDevice, --refcount);
     /* Misc */
-    if (dStateBlock != -1)    IDirect3DDevice8_DeleteStateBlock( pDevice, dStateBlock );
+    if (dStateBlock != ~0U) IDirect3DDevice8_DeleteStateBlock( pDevice, dStateBlock );
     /* This will destroy device - cannot check the refcount here */
     if (pSwapChain)           CHECK_RELEASE_REFCOUNT( pSwapChain, 0);
 
@@ -623,13 +628,13 @@ static void test_cursor(void)
     pGetCursorInfo = (void *)GetProcAddress(user32_handle, "GetCursorInfo");
     if (!pGetCursorInfo)
     {
-        skip("GetCursorInfo is not available\n");
+        win_skip("GetCursorInfo is not available\n");
         return;
     }
 
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
-    hr = pGetCursorInfo(&info);
+    ok(pGetCursorInfo(&info), "GetCursorInfo failed\n");
     cur = info.hCursor;
 
     pD3d = pDirect3DCreate8( D3D_SDK_VERSION );
@@ -674,8 +679,7 @@ static void test_cursor(void)
 
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
-    hr = pGetCursorInfo(&info);
-    ok(hr != 0, "GetCursorInfo returned %#08x\n", hr);
+    ok(pGetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & CURSOR_SHOWING, "The gdi cursor is hidden (%08x)\n", info.flags);
     ok(info.hCursor == cur, "The cursor handle is %p\n", info.hCursor); /* unchanged */
 
@@ -690,14 +694,17 @@ static void test_cursor(void)
     /* GDI cursor unchanged */
     memset(&info, 0, sizeof(info));
     info.cbSize = sizeof(info);
-    hr = pGetCursorInfo(&info);
-    ok(hr != 0, "GetCursorInfo returned %#08x\n", hr);
+    ok(pGetCursorInfo(&info), "GetCursorInfo failed\n");
     ok(info.flags & CURSOR_SHOWING, "The gdi cursor is hidden (%08x)\n", info.flags);
     ok(info.hCursor == cur, "The cursor handle is %p\n", info.hCursor); /* unchanged */
 
 cleanup:
-    if(pD3d) IDirect3D8_Release(pD3d);
-    if(pDevice) IDirect3D8_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
 }
 
 static void test_states(void)
@@ -720,7 +727,7 @@ static void test_states(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 640;
-    d3dpp.BackBufferHeight  = 480;
+    d3dpp.BackBufferHeight = 480;
     d3dpp.BackBufferFormat = d3ddm.Format;
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
@@ -737,8 +744,12 @@ static void test_states(void)
     ok(hr == D3D_OK, "IDirect3DDevice8_SetRenderState(D3DRS_ZVISIBLE, FALSE) returned %#08x\n", hr);
 
 cleanup:
-    if(pD3d) IDirect3D8_Release(pD3d);
-    if(pDevice) IDirect3D8_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
 }
 
 static void test_shader_versions(void)
@@ -776,7 +787,9 @@ static void test_display_modes(void)
     if(!pD3d) return;
 
     max_modes = IDirect3D8_GetAdapterModeCount(pD3d, D3DADAPTER_DEFAULT);
-    ok(max_modes > 0, "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
+    ok(max_modes > 0 ||
+       broken(max_modes == 0), /* VMware */
+       "GetAdapterModeCount(D3DADAPTER_DEFAULT) returned 0!\n");
 
     for(i=0; i<max_modes;i++) {
         res = IDirect3D8_EnumAdapterModes(pD3d, D3DADAPTER_DEFAULT, i, &dmode);
@@ -811,13 +824,13 @@ static void test_scene(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 800;
-    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferHeight = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
 
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3D8_CreateDevice failed with %#08x\n", hr);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL || broken(hr == D3DERR_NOTAVAILABLE), "IDirect3D8_CreateDevice failed with %#08x\n", hr);
     if(!pDevice)
     {
         skip("could not create device, IDirect3D8_CreateDevice returned %#08x\n", hr);
@@ -854,8 +867,12 @@ static void test_scene(void)
     /* StretchRect does not exit in Direct3D8, so no equivalent to the d3d9 stretchrect tests */
 
 cleanup:
-    if(pD3d) IDirect3D8_Release(pD3d);
-    if(pDevice) IDirect3D8_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -871,6 +888,7 @@ static void test_shader(void)
     DWORD                        hPixelShader2 = 0, hVertexShader2 = 0;
     DWORD                        hTempHandle;
     D3DCAPS8                     caps;
+    DWORD fvf = D3DFVF_XYZ | D3DFVF_DIFFUSE;
     DWORD data_size;
     void *data;
 
@@ -916,13 +934,13 @@ static void test_shader(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 800;
-    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferHeight = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
 
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3D8_CreateDevice failed with %#08x\n", hr);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL || broken(hr == D3DERR_NOTAVAILABLE), "IDirect3D8_CreateDevice failed with %#08x\n", hr);
     if(!pDevice)
     {
         skip("could not create device, IDirect3D8_CreateDevice returned %#08x\n", hr);
@@ -930,7 +948,16 @@ static void test_shader(void)
     }
     IDirect3DDevice8_GetDeviceCaps(pDevice, &caps);
 
+    /* Test setting and retrieving a FVF */
+    hr = IDirect3DDevice8_SetVertexShader(pDevice, fvf);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_SetVertexShader returned %#08x\n", hr);
+    hr = IDirect3DDevice8_GetVertexShader(pDevice, &hTempHandle);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_GetVertexShader returned %#08x\n", hr);
+    ok(hTempHandle == fvf, "Vertex shader %#08x is set, expected %#08x\n", hTempHandle, fvf);
+
     /* First create a vertex shader */
+    hr = IDirect3DDevice8_SetVertexShader(pDevice, 0);
+    ok(SUCCEEDED(hr), "IDirect3DDevice8_SetVertexShader returned %#08x\n", hr);
     hr = IDirect3DDevice8_CreateVertexShader(pDevice, dwVertexDecl, simple_vs, &hVertexShader, 0);
     ok(hr == D3D_OK, "IDirect3DDevice8_CreateVertexShader returned %#08x\n", hr);
     /* Msdn says that the new vertex shader is set immediately. This is wrong, apparently */
@@ -1054,6 +1081,12 @@ static void test_shader(void)
         ok(hTempHandle == hPixelShader, "Pixel Shader %d is set, expected shader %d\n", hTempHandle, hPixelShader);
         hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader);
         ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %#08x\n", hr);
+
+        /* Check for double delete. */
+        hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader2);
+        ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %#08x\n", hr);
+        hr = IDirect3DDevice8_DeletePixelShader(pDevice, hPixelShader);
+        ok(hr == D3D_OK, "IDirect3DDevice8_DeletePixelShader returned %#08x\n", hr);
     }
     else
     {
@@ -1076,9 +1109,19 @@ static void test_shader(void)
     hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
     ok(hr == D3D_OK, "IDirect3DDevice8_DeleteVertexShader returned %#08x\n", hr);
 
+    /* Check for double delete. */
+    hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader2);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_DeleteVertexShader returned %#08x\n", hr);
+    hr = IDirect3DDevice8_DeleteVertexShader(pDevice, hVertexShader);
+    ok(hr == D3DERR_INVALIDCALL, "IDirect3DDevice8_DeleteVertexShader returned %#08x\n", hr);
+
 cleanup:
-    if(pD3d) IDirect3D8_Release(pD3d);
-    if(pDevice) IDirect3D8_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -1104,14 +1147,14 @@ static void test_limits(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 800;
-    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferHeight = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
     d3dpp.EnableAutoDepthStencil = TRUE;
     d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D8_CreateDevice( pD3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING, &d3dpp, &pDevice );
-    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL, "IDirect3D8_CreateDevice failed with %#08x\n", hr);
+    ok(hr == D3D_OK || hr == D3DERR_INVALIDCALL || broken(hr == D3DERR_NOTAVAILABLE), "IDirect3D8_CreateDevice failed with %#08x\n", hr);
     if(!pDevice)
     {
         skip("could not create device, IDirect3D8_CreateDevice returned %#08x\n", hr);
@@ -1139,8 +1182,12 @@ static void test_limits(void)
 
 cleanup:
     if(pTexture) IDirect3DTexture8_Release(pTexture);
-    if(pD3d) IDirect3D8_Release(pD3d);
-    if(pDevice) IDirect3D8_Release(pDevice);
+    if (pDevice)
+    {
+        UINT refcount = IDirect3DDevice8_Release(pDevice);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (pD3d) IDirect3D8_Release(pD3d);
     if(hwnd) DestroyWindow(hwnd);
 }
 
@@ -1167,14 +1214,15 @@ static void test_lights(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 800;
-    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferHeight = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
     d3dpp.EnableAutoDepthStencil = TRUE;
     d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D8_CreateDevice failed with %08x\n", hr);
     if(!device)
     {
         skip("Failed to create a d3d device\n");
@@ -1183,33 +1231,40 @@ static void test_lights(void)
 
     memset(&caps, 0, sizeof(caps));
     hr = IDirect3DDevice8_GetDeviceCaps(device, &caps);
-    ok(hr == D3D_OK, "IDirect3DDevice8_GetDeviceCaps failed with %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK, "IDirect3DDevice8_GetDeviceCaps failed with %08x\n", hr);
 
     for(i = 1; i <= caps.MaxActiveLights; i++) {
         hr = IDirect3DDevice8_LightEnable(device, i, TRUE);
-        ok(hr == D3D_OK, "Enabling light %u failed with %s\n", i, DXGetErrorString8(hr));
+        ok(hr == D3D_OK, "Enabling light %u failed with %08x\n", i, hr);
         hr = IDirect3DDevice8_GetLightEnable(device, i, &enabled);
-        ok(hr == D3D_OK, "GetLightEnable on light %u failed with %s\n", i, DXGetErrorString8(hr));
+        ok(hr == D3D_OK || broken(hr == D3DERR_INVALIDCALL),
+            "GetLightEnable on light %u failed with %08x\n", i, hr);
         ok(enabled, "Light %d is %s\n", i, enabled ? "enabled" : "disabled");
     }
 
     /* TODO: Test the rendering results in this situation */
     hr = IDirect3DDevice8_LightEnable(device, i + 1, TRUE);
-    ok(hr == D3D_OK, "Enabling one light more than supported returned %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK ||
+       broken(hr == D3DERR_INVALIDCALL), /* Some Win9x and WinME */
+       "Enabling one light more than supported returned %08x\n", hr);
     hr = IDirect3DDevice8_GetLightEnable(device, i + 1, &enabled);
-    ok(hr == D3D_OK, "GetLightEnable on light %u failed with %s\n", i + 1, DXGetErrorString8(hr));
+    ok(hr == D3D_OK, "GetLightEnable on light %u failed with %08x\n", i + 1, hr);
     ok(enabled, "Light %d is %s\n", i + 1, enabled ? "enabled" : "disabled");
     hr = IDirect3DDevice8_LightEnable(device, i + 1, FALSE);
-    ok(hr == D3D_OK, "Disabling the additional returned %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK, "Disabling the additional returned %08x\n", hr);
 
     for(i = 1; i <= caps.MaxActiveLights; i++) {
         hr = IDirect3DDevice8_LightEnable(device, i, FALSE);
-        ok(hr == D3D_OK, "Disabling light %u failed with %s\n", i, DXGetErrorString8(hr));
+        ok(hr == D3D_OK, "Disabling light %u failed with %08x\n", i, hr);
     }
 
-    cleanup:
-    if(device) IDirect3DDevice8_Release(device);
-    if(d3d8) IDirect3D8_Release(d3d8);
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (d3d8) IDirect3D8_Release(d3d8);
 }
 
 static void test_render_zero_triangles(void)
@@ -1245,14 +1300,15 @@ static void test_render_zero_triangles(void)
     d3dpp.Windowed         = TRUE;
     d3dpp.SwapEffect       = D3DSWAPEFFECT_DISCARD;
     d3dpp.BackBufferWidth  = 800;
-    d3dpp.BackBufferHeight  = 600;
+    d3dpp.BackBufferHeight = 600;
     d3dpp.BackBufferFormat = d3ddm.Format;
     d3dpp.EnableAutoDepthStencil = TRUE;
     d3dpp.AutoDepthStencilFormat = D3DFMT_D16;
 
     hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL /* no NULLREF here */, hwnd,
                                   D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_PUREDEVICE, &d3dpp, &device );
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "IDirect3D8_CreateDevice failed with %s\n", DXGetErrorString8(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE || hr == D3DERR_INVALIDCALL,
+       "IDirect3D8_CreateDevice failed with %08x\n", hr);
     if(!device)
     {
         skip("Failed to create a d3d device\n");
@@ -1276,9 +1332,126 @@ static void test_render_zero_triangles(void)
 
     IDirect3DDevice8_Present(device, NULL, NULL, NULL, NULL);
 
-    cleanup:
-    if(device) IDirect3DDevice8_Release(device);
-    if(d3d8) IDirect3D8_Release(d3d8);
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (d3d8) IDirect3D8_Release(d3d8);
+}
+
+static void test_depth_stencil_reset(void)
+{
+    D3DPRESENT_PARAMETERS present_parameters;
+    D3DDISPLAYMODE display_mode;
+    IDirect3DSurface8 *surface;
+    IDirect3DDevice8 *device = NULL;
+    IDirect3D8 *d3d8;
+    HRESULT hr;
+    HWND hwnd;
+
+    d3d8 = pDirect3DCreate8(D3D_SDK_VERSION);
+    ok(d3d8 != NULL, "Failed to create IDirect3D8 object\n");
+    hwnd = CreateWindow("static", "d3d8_test", WS_OVERLAPPEDWINDOW, 100, 100, 160, 160, NULL, NULL, NULL, NULL);
+    ok(hwnd != NULL, "Failed to create window\n");
+    if (!d3d8 || !hwnd) goto cleanup;
+
+    IDirect3D8_GetAdapterDisplayMode(d3d8, D3DADAPTER_DEFAULT, &display_mode);
+    memset(&present_parameters, 0, sizeof(present_parameters));
+    present_parameters.Windowed               = TRUE;
+    present_parameters.SwapEffect             = D3DSWAPEFFECT_DISCARD;
+    present_parameters.BackBufferFormat       = display_mode.Format;
+    present_parameters.EnableAutoDepthStencil = TRUE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3D8_CreateDevice(d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device);
+    if(FAILED(hr))
+    {
+        skip("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_TestCooperativeLevel(device);
+    ok(SUCCEEDED(hr), "TestCooperativeLevel failed with %#x\n", hr);
+
+    hr = IDirect3DDevice8_SetRenderTarget(device, NULL, NULL);
+    ok(hr == D3D_OK, "SetRenderTarget failed with 0x%08x\n", hr);
+
+    hr = IDirect3DDevice8_GetRenderTarget(device, &surface);
+    ok(hr == D3D_OK, "GetRenderTarget failed with 0x%08x\n", hr);
+    ok(surface != NULL, "Render target should not be NULL\n");
+    if (surface) IDirect3DSurface8_Release(surface);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surface);
+    ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned 0x%08x, expected D3DERR_NOTFOUND\n", hr);
+    ok(surface == NULL, "Depth stencil should be NULL\n");
+
+    present_parameters.EnableAutoDepthStencil = TRUE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+    hr = IDirect3DDevice8_Reset(device, &present_parameters);
+    ok(hr == D3D_OK, "Reset failed with 0x%08x\n", hr);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surface);
+    ok(hr == D3D_OK, "GetDepthStencilSurface failed with 0x%08x\n", hr);
+    ok(surface != NULL, "Depth stencil should not be NULL\n");
+    if (surface) IDirect3DSurface8_Release(surface);
+
+    present_parameters.EnableAutoDepthStencil = FALSE;
+    hr = IDirect3DDevice8_Reset(device, &present_parameters);
+    ok(hr == D3D_OK, "Reset failed with 0x%08x\n", hr);
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surface);
+    ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned 0x%08x, expected D3DERR_NOTFOUND\n", hr);
+    ok(surface == NULL, "Depth stencil should be NULL\n");
+
+    device = NULL;
+    IDirect3D8_GetAdapterDisplayMode( d3d8, D3DADAPTER_DEFAULT, &display_mode );
+
+    ZeroMemory( &present_parameters, sizeof(present_parameters) );
+    present_parameters.Windowed         = TRUE;
+    present_parameters.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    present_parameters.BackBufferFormat = display_mode.Format;
+    present_parameters.EnableAutoDepthStencil = FALSE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3D8_CreateDevice( d3d8, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
+                    D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present_parameters, &device );
+
+    if(FAILED(hr))
+    {
+        skip("could not create device, IDirect3D8_CreateDevice returned %#x\n", hr);
+        goto cleanup;
+    }
+
+    hr = IDirect3DDevice8_TestCooperativeLevel(device);
+    ok(hr == D3D_OK, "IDirect3DDevice8_TestCooperativeLevel after creation returned %#x\n", hr);
+
+    present_parameters.SwapEffect       = D3DSWAPEFFECT_DISCARD;
+    present_parameters.Windowed         = TRUE;
+    present_parameters.BackBufferWidth  = 400;
+    present_parameters.BackBufferHeight = 300;
+    present_parameters.EnableAutoDepthStencil = TRUE;
+    present_parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
+
+    hr = IDirect3DDevice8_Reset(device, &present_parameters);
+    ok(hr == D3D_OK, "IDirect3DDevice8_Reset failed with 0x%08x\n", hr);
+
+    if (FAILED(hr)) goto cleanup;
+
+    hr = IDirect3DDevice8_GetDepthStencilSurface(device, &surface);
+    ok(hr == D3D_OK, "GetDepthStencilSurface failed with 0x%08x\n", hr);
+    ok(surface != NULL, "Depth stencil should not be NULL\n");
+    if (surface) IDirect3DSurface8_Release(surface);
+
+cleanup:
+    if (device)
+    {
+        UINT refcount = IDirect3DDevice8_Release(device);
+        ok(!refcount, "Device has %u references left.\n", refcount);
+    }
+    if (d3d8) IDirect3D8_Release(d3d8);
 }
 
 START_TEST(device)
@@ -1294,6 +1467,15 @@ START_TEST(device)
     ok(pDirect3DCreate8 != NULL, "Failed to get address of Direct3DCreate8\n");
     if (pDirect3DCreate8)
     {
+        IDirect3D8 *d3d8;
+        d3d8 = pDirect3DCreate8( D3D_SDK_VERSION );
+        if(!d3d8)
+        {
+            skip("could not create D3D8\n");
+            return;
+        }
+        IDirect3D8_Release(d3d8);
+
         test_display_modes();
         test_shader_versions();
         test_swapchain();
@@ -1306,5 +1488,6 @@ START_TEST(device)
         test_limits();
         test_lights();
         test_render_zero_triangles();
+        test_depth_stencil_reset();
     }
 }

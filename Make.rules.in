@@ -32,6 +32,7 @@ EXEEXT    = @EXEEXT@
 OBJEXT    = @OBJEXT@
 LIBEXT    = @LIBEXT@
 DLLEXT    = @DLLEXT@
+TOOLSEXT  = @TOOLSEXT@
 IMPLIBEXT = @IMPLIBEXT@
 LDSHARED  = @LDSHARED@
 DLLTOOL   = @DLLTOOL@
@@ -40,12 +41,9 @@ AR        = @AR@
 ARFLAGS   = @ARFLAGS@
 RANLIB    = @RANLIB@
 STRIP     = @STRIP@
-WINDRES   = @WINDRES@
 LN        = @LN@
 LN_S      = @LN_S@
 TOOLSDIR  = @TOOLSDIR@
-AS        = @AS@
-LD        = @LD@
 LDFLAGS   = @LDFLAGS@
 PRELINK   = @PRELINK@
 RM        = rm -f
@@ -55,27 +53,28 @@ LINTFLAGS = @LINTFLAGS@
 FONTFORGE = @FONTFORGE@
 RSVG      = @RSVG@
 ICOTOOL   = @ICOTOOL@
+FAKEEXT   = $(DLLEXT:.so=.fake)
 INCLUDES     = -I$(SRCDIR) -I. -I$(TOPSRCDIR)/include -I$(TOPOBJDIR)/include $(EXTRAINCL)
 EXTRACFLAGS  = @EXTRACFLAGS@
 ALLCFLAGS    = $(INCLUDES) $(DEFS) $(DLLFLAGS) $(EXTRACFLAGS) $(CPPFLAGS) $(CFLAGS) $(MODCFLAGS)
 ALLLINTFLAGS = $(INCLUDES) $(DEFS) $(LINTFLAGS)
 IDLFLAGS     = $(INCLUDES) $(DEFS) $(EXTRAIDLFLAGS)
-WINEBUILDFLAGS = $(DLLFLAGS) --as-cmd "$(AS)"
+TARGETFLAGS  = @TARGETFLAGS@
+WINEBUILDFLAGS = $(TARGETFLAGS) $(DLLFLAGS)
 MKINSTALLDIRS= $(TOPSRCDIR)/tools/mkinstalldirs -m 755
 WINAPI_CHECK = $(TOPSRCDIR)/tools/winapi/winapi_check
 WINEWRAPPER  = $(TOPSRCDIR)/tools/winewrapper
 C2MAN        = $(TOPSRCDIR)/tools/c2man.pl
 RUNTEST      = $(TOPSRCDIR)/tools/runtest
-WINEBUILD    = $(TOOLSDIR)/tools/winebuild/winebuild
-MAKEDEP      = $(TOOLSDIR)/tools/makedep
-MAKECTESTS   = $(TOOLSDIR)/tools/make_ctests
-WRC          = $(TOOLSDIR)/tools/wrc/wrc
-WMC          = $(TOOLSDIR)/tools/wmc/wmc
-WIDL         = $(TOOLSDIR)/tools/widl/widl
-WINEGCC      = $(TOOLSDIR)/tools/winegcc/winegcc
-RELPATH      = $(TOOLSDIR)/tools/relpath
-SFNT2FNT     = $(TOOLSDIR)/tools/sfnt2fnt
-FNT2FON      = $(TOOLSDIR)/tools/fnt2fon
+WINEBUILD    = $(TOOLSDIR)/tools/winebuild/winebuild$(TOOLSEXT)
+MAKEDEP      = $(TOOLSDIR)/tools/makedep$(TOOLSEXT)
+MAKECTESTS   = $(TOOLSDIR)/tools/make_ctests$(TOOLSEXT)
+WRC          = $(TOOLSDIR)/tools/wrc/wrc$(TOOLSEXT)
+WMC          = $(TOOLSDIR)/tools/wmc/wmc$(TOOLSEXT)
+WIDL         = $(TOOLSDIR)/tools/widl/widl$(TOOLSEXT)
+WINEGCC      = $(TOOLSDIR)/tools/winegcc/winegcc $(TARGETFLAGS) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(TOPOBJDIR)
+RELPATH      = $(TOOLSDIR)/tools/relpath$(TOOLSEXT)
+SFNT2FNT     = $(TOOLSDIR)/tools/sfnt2fnt$(TOOLSEXT)
 RC           = $(WRC)
 RC16         = $(WRC)
 RCFLAGS      = --nostdinc $(INCLUDES) $(DEFS) $(EXTRARCFLAGS)
@@ -107,10 +106,11 @@ mandir          = @mandir@
 sysconfdir      = @sysconfdir@
 includedir      = @includedir@/wine
 dlldir          = @libdir@/wine
+fakedlldir      = $(dlldir)/fakedlls
 prog_manext     = 1
 api_manext      = 3w
 conf_manext     = 5
-CLEAN_FILES     = *.o *.a *.so *.ln *.res *.$(LIBEXT) \\\#*\\\# *~ *% .\\\#* *.bak *.orig *.rej *.flc core
+CLEAN_FILES     = *.o *.a *.so *.ln *.res *.fake *.$(LIBEXT) \\\#*\\\# *~ *% .\\\#* *.bak *.orig *.rej *.flc core
 
 IDL_GEN_C_SRCS  = $(IDL_C_SRCS:.idl=_c.c) $(IDL_I_SRCS:.idl=_i.c) \
                   $(IDL_P_SRCS:.idl=_p.c) $(IDL_S_SRCS:.idl=_s.c)
@@ -120,20 +120,26 @@ IDL_GEN_HEADERS = $(IDL_H_SRCS:.idl=.h) $(IDL_C_SRCS:.idl=.h) $(IDL_I_SRCS:.idl=
 CLEAN_TARGETS = $(IDL_GEN_C_SRCS) $(IDL_GEN_HEADERS) $(IDL_TLB_SRCS:.idl=.tlb) $(IDL_P_SRCS:%=dlldata.c) \
                 $(BISON_SRCS:.y=.tab.c) $(BISON_SRCS:.y=.tab.h) $(LEX_SRCS:.l=.yy.c) $(MC_SRCS:.mc=.mc.rc)
 
-OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o) $(IDL_GEN_C_SRCS:.c=.o) $(EXTRA_OBJS)
+OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o) $(IDL_GEN_C_SRCS:.c=.o) \
+       $(RC_SRCS:.rc=.res) $(MC_SRCS:.mc=.mc.res) $(EXTRA_OBJS)
 
-RCOBJS = $(RC_SRCS:.rc=.res.o)
 LINTS  = $(C_SRCS:.c=.ln)
+
+# 'all' target first in case the enclosing Makefile didn't define any target
+
+all:
+
+filter: dummy
+	@$(TOPSRCDIR)/tools/winapi/make_filter --make $(MAKE) all
+
+.PHONY: all filter
 
 # Implicit rules
 
-.SUFFIXES: .mc .rc .mc.rc .res .res.o .spec .spec.o .idl .tlb .h .y .l .tab.c .tab.h .yy.c .ok .man.in .man _c.c _i.c _p.c _s.c @MAINTAINER_MODE@ .sfd .ttf .svg .ico
+.SUFFIXES: .mc .rc .mc.rc .res .spec .spec.o .idl .tlb .h .y .l .tab.c .tab.h .yy.c .ok .man.in .man _c.c _i.c _p.c _s.c @MAINTAINER_MODE@ .sfd .ttf .svg .ico
 
 .c.o:
 	$(CC) -c $(ALLCFLAGS) -o $@ $<
-
-.s.o:
-	$(AS) -o $@ $<
 
 .y.tab.c:
 	$(BISON) $(BISONFLAGS) -p $*_ -o $@ $<
@@ -149,9 +155,6 @@ LINTS  = $(C_SRCS:.c=.ln)
 
 .rc.res:
 	$(LDPATH) $(RC) $(RCFLAGS) -fo$@ $<
-
-.res.res.o:
-	$(WINDRES) -i $< -o $@
 
 .spec.spec.o:
 	$(WINEBUILD) $(WINEBUILDFLAGS) --dll -o $@ --main-module $(MODULE) --export $<
@@ -172,7 +175,7 @@ LINTS  = $(C_SRCS:.c=.ln)
 	$(WIDL) $(IDLFLAGS) -s -S $@ $<
 
 .idl.tlb:
-	$(WIDL) $(IDLFLAGS) -t -T $@ $<
+	$(WIDL) $(TARGETFLAGS) $(IDLFLAGS) -t -T $@ $<
 
 .c.ln:
 	$(LINT) -c $(ALLLINTFLAGS) $< || ( $(RM) $@ && exit 1 )
@@ -193,23 +196,10 @@ LINTS  = $(C_SRCS:.c=.ln)
 	$(ICOTOOL) -c -o $@ $*-16.png $*-32.png $*-48.png
 	$(RM) $*-16.png $*-32.png $*-48.png
 
-# 'all' target first in case the enclosing Makefile didn't define any target
-
-all:
-
-filter: dummy
-	@$(TOPSRCDIR)/tools/winapi/make_filter --make $(MAKE) all
-
-.PHONY: all filter
-
 # Rules for IDL files
 
 dlldata.c: $(WIDL) Makefile.in
 	$(WIDL) $(IDLFLAGS) --dlldata-only --dlldata=$@ $(IDL_P_SRCS)
-
-# Rules for resources
-
-$(RC_SRCS:.rc=.res) $(RC_SRCS16:.rc=.res): $(WRC) $(IDL_TLB_SRCS:.idl=.tlb)
 
 # Rule for linting
 
@@ -233,13 +223,16 @@ winapi_check:: dummy
 
 # Rules for dependencies
 
-DEPEND_SRCS = $(C_SRCS) $(C_SRCS16) $(RC_SRCS) $(RC_SRCS16) $(MC_SRCS) $(IDL_H_SRCS) $(IDL_C_SRCS) $(IDL_I_SRCS) $(IDL_P_SRCS) $(IDL_S_SRCS) $(IDL_GEN_C_SRCS) $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_SRCS)
+DEPEND_SRCS = $(C_SRCS) $(C_SRCS16) $(RC_SRCS) $(RC_SRCS16) $(MC_SRCS) \
+              $(IDL_H_SRCS) $(IDL_C_SRCS) $(IDL_I_SRCS) $(IDL_P_SRCS) $(IDL_S_SRCS) \
+              $(IDL_GEN_C_SRCS) $(IDL_TLB_SRCS) $(IDL_TLB_SRCS:.idl=.tlb) \
+              $(BISON_SRCS) $(LEX_SRCS) $(EXTRA_SRCS)
 
 $(SUBDIRS:%=%/__depend__): dummy
 	@cd `dirname $@` && $(MAKE) depend
 
 depend: $(SUBDIRS:%=%/__depend__) dummy
-	$(MAKEDEP) -C$(SRCDIR) -S$(TOPSRCDIR) -T$(TOPOBJDIR) $(EXTRAINCL) $(DEPEND_SRCS)
+	$(MAKEDEP) $(MAKEDEPFLAGS) -C$(SRCDIR) -S$(TOPSRCDIR) -T$(TOPOBJDIR) $(EXTRAINCL) $(DEPEND_SRCS)
 
 .PHONY: depend $(SUBDIRS:%=%/__depend__)
 
@@ -270,9 +263,10 @@ $(SUBDIRS:%=%/__install-dev__): dummy
 $(SUBDIRS:%=%/__uninstall__): dummy
 	@cd `dirname $@` && $(MAKE) uninstall
 
-install:: $(INSTALLSUBDIRS:%=%/__install__)
-
-uninstall:: $(INSTALLSUBDIRS:%=%/__uninstall__)
+install:: $(INSTALLSUBDIRS:%=%/__install__) dummy
+install-lib:: $(INSTALLSUBDIRS:%=%/__install-lib__) dummy
+install-dev:: $(INSTALLSUBDIRS:%=%/__install-dev__) dummy
+uninstall:: $(INSTALLSUBDIRS:%=%/__uninstall__) dummy
 
 $(INSTALLDIRS):
 	$(MKINSTALLDIRS) $@
@@ -292,11 +286,11 @@ $(TESTSUBDIRS:%=%/__crosstest__): dummy
 $(TESTSUBDIRS:%=%/__testclean__): dummy
 	@cd `dirname $@` && $(MAKE) testclean
 
-check test:: $(TESTSUBDIRS:%=%/__test__)
+check test:: $(TESTSUBDIRS:%=%/__test__) dummy
 
-crosstest:: $(TESTSUBDIRS:%=%/__crosstest__)
+crosstest:: $(TESTSUBDIRS:%=%/__crosstest__) dummy
 
-testclean:: $(TESTSUBDIRS:%=%/__testclean__)
+testclean:: $(TESTSUBDIRS:%=%/__testclean__) dummy
 
 .PHONY: check test testclean crosstest $(TESTSUBDIRS:%=%/__test__) $(TESTSUBDIRS:%=%/__crosstest__) $(TESTSUBDIRS:%=%/__testclean__) 
 
@@ -311,17 +305,23 @@ $(DOCSUBDIRS:%=%/__doc_html__): dummy
 $(DOCSUBDIRS:%=%/__doc_sgml__): dummy
 	@cd `dirname $@` && $(MAKE) doc-sgml
 
+$(DOCSUBDIRS:%=%/__doc_xml__): dummy
+	@cd `dirname $@` && $(MAKE) doc-xml
+
 man: $(DOCSUBDIRS:%=%/__man__)
 doc-html: $(DOCSUBDIRS:%=%/__doc_html__)
 doc-sgml: $(DOCSUBDIRS:%=%/__doc_sgml__)
+doc-xml: $(DOCSUBDIRS:%=%/__doc_xml__)
 
-.PHONY: man doc-html doc-sgml $(DOCSUBDIRS:%=%/__man__) $(DOCSUBDIRS:%=%/__doc_html__) $(DOCSUBDIRS:%=%/__doc_sgml__)
+.PHONY: man doc-html doc-sgml doc-xml $(DOCSUBDIRS:%=%/__man__) $(DOCSUBDIRS:%=%/__doc_html__) $(DOCSUBDIRS:%=%/__doc_sgml__) $(DOCSUBDIRS:%=%/__doc_xml__)
 
 # Misc. rules
 
 $(MC_SRCS:.mc=.mc.rc): $(WMC)
 
 $(IDL_GEN_HEADERS) $(IDL_GEN_C_SRCS) $(IDL_TLB_SRCS:.idl=.tlb): $(WIDL)
+
+$(RC_SRCS:.rc=.res) $(MC_SRCS:.mc=.mc.res) $(RC_SRCS16:.rc=.res): $(WRC)
 
 $(SUBDIRS): dummy
 	@cd $@ && $(MAKE)

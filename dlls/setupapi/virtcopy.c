@@ -43,8 +43,6 @@ static BOOL VCP_opened = FALSE;
 
 static VCPSTATUS vcp_status;
 
-static HINSTANCE SETUPAPI_hInstance;
-
 static WORD VCP_Callback( LPVOID obj, UINT16 msg, WPARAM16 wParam, LPARAM lParam, LPARAM lParamRef )
 {
     WORD args[8];
@@ -163,18 +161,6 @@ INT16 WINAPI vsmStringDelete16(VHSTR vhstr)
     return VCPN_FAIL;
 }
 
-/*
- * vsmStringFind() - not exported from a standard SETUPX.DLL, it seems
- */
-VHSTR WINAPI vsmStringFind16(LPCSTR lpszName)
-{
-    WORD n;
-    for (n = 0; n < vhstr_alloc; n++)
-	if ((vhstrlist[n]) && (vhstrlist[n]->refcount) && (!strcmp(vhstrlist[n]->pStr, lpszName)))
-	    return n;
-    return 0xffff;
-}
-
 /***********************************************************************
  *		vsmGetStringName (SETUPX.205)
  *
@@ -193,16 +179,6 @@ INT16 WINAPI vsmGetStringName16(VHSTR vhstr, LPSTR lpszBuffer, int cbBuffer)
 	}
     }
     return VCPN_FAIL;
-}
-
-/***********************************************************************
- *		vsmStringCompare (not exported from a standard SETUPX.DLL, it seems)
- */
-INT16 WINAPI vsmStringCompare16(VHSTR vhstrA, VHSTR vhstrB)
-{
-    if ((!VALID_VHSTR(vhstrA)) || (!VALID_VHSTR(vhstrB)))
-	return VCPN_FAIL; /* correct ? */
-    return strcmp(vhstrlist[vhstrA]->pStr, vhstrlist[vhstrB]->pStr);
 }
 
 /***********************************************************************
@@ -268,26 +244,6 @@ static RETERR16 VCP_VirtnodeCreate(const VCPFILESPEC *vfsSrc, const VCPFILESPEC 
     return OK;
 }
 
-#if 0
-static BOOL VCP_VirtnodeDelete(LPVIRTNODE lpvnDel)
-{
-    DWORD n;
-    RETERR16 cbres;
-
-    for (n = 0; n < vn_last; n++)
-    {
-	if (pvnlist[n] == lpvnDel)
-	{
-	    cbres = VCP_Callback(lpvnDel, VCPM_NODEDESTROY, 0, 0, VCP_MsgRef);
-	    HeapFree(GetProcessHeap(), 0, lpvnDel);
-	    pvnlist[n] = NULL;
-	    return TRUE;
-	}
-    }
-    return FALSE;
-}
-#endif
-
 /***********************************************************************
  *		VcpOpen (SETUPX.200)
  *
@@ -308,13 +264,6 @@ RETERR16 WINAPI VcpOpen16(VIFPROC vifproc, LPARAM lparamMsgRef)
     VCP_Proc = (FARPROC16)vifproc;
     VCP_MsgRef = lparamMsgRef;
 
-    /* load SETUPAPI needed for dialog resources etc. */
-    SETUPAPI_hInstance = GetModuleHandleA("setupapi.dll");
-    if (!SETUPAPI_hInstance)
-    {
-	ERR("Could not load sibling setupapi.dll\n");
-	return ERR_VCP_NOMEM;
-    }
     VCP_opened = TRUE;
     return OK;
 }
@@ -514,16 +463,6 @@ static RETERR16 VCP_CopyFiles(void)
 }
 
 /***********************************************************************
- *		VcpFlush - internal (not exported), but documented
- *
- * VNFL_NOW is used for VcpFlush.
- */
-RETERR16 VcpFlush16(WORD fl, LPCSTR lpszBackupDest)
-{
-    return OK;
-}
-
-/***********************************************************************
  *		VcpClose (SETUPX.201)
  *
  * Does callbacks (-> vifproc) with VCPM_VSTATCLOSESTART,
@@ -539,7 +478,7 @@ RETERR16 WINAPI VcpClose16(WORD fl, LPCSTR lpszBackupDest)
 
     TRACE("(%04x, '%s')\n", fl, lpszBackupDest);
 
-    /* FIXME: needs to sort virtnodes in case VCPFL_INSPECIFIEDORDER
+    /* FIXME: needs to sort VIRTNODEs in case VCPFL_INSPECIFIEDORDER
      * is not set. This is done by VCP_Callback(VCPM_NODECOMPARE) */
 
     TRACE("#1\n");
@@ -562,32 +501,6 @@ RETERR16 WINAPI VcpClose16(WORD fl, LPCSTR lpszBackupDest)
     VCP_opened = FALSE;
     return OK;
 }
-
-#if 0
-static RETERR16 VCP_RenameFiles(void)
-{
-    char fn_src[MAX_PATH], fn_dst[MAX_PATH];
-    RETERR16 res = OK, cbres;
-    DWORD n;
-    LPVIRTNODE lpvn;
-
-    cbres = VCP_Callback(&vcp_status, VCPM_VSTATRENAMESTART, 0, 0, VCP_MsgRef);
-    for (n = 0; n < vn_num; n++)
-    {
-	lpvn = pvnlist[n];
-	if ((!lpvn) || ((lpvn->fl & VNFL_NODE_TYPE) != VNFL_RENAME)) continue;
-        strcpy(fn_src, VcpExplain16(lpvn, VCPEX_SRC_FULL));
-        strcpy(fn_dst, VcpExplain16(lpvn, VCPEX_DST_FULL));
-	cbres = VCP_Callback(&lpvn->vfsDst, VCPM_FILEOPENOUT, 0, (LPARAM)lpvn, VCP_MsgRef);
-        if (!(MoveFileExA(fn_src, fn_dst, MOVEFILE_REPLACE_EXISTING)))
-	    res = ERR_VCP_IOFAIL;
-	else
-	    VCP_VirtnodeDelete(lpvn);
-    }
-    cbres = VCP_Callback(&vcp_status, VCPM_VSTATRENAMEEND, 0, 0, VCP_MsgRef);
-    return res;
-}
-#endif
 
 /***********************************************************************
  *		vcpDefCallbackProc (SETUPX.202)

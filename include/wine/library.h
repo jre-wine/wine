@@ -31,6 +31,10 @@
 #error This file should not be used in Wine tests
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* configuration */
 
 extern const char *wine_get_build_dir(void);
@@ -61,7 +65,6 @@ extern int wine_dll_get_owner( const char *name, char *buffer, int size, int *fi
 extern int __wine_main_argc;
 extern char **__wine_main_argv;
 extern WCHAR **__wine_main_wargv;
-extern char **__wine_main_environ;
 extern void __wine_dll_register( const IMAGE_NT_HEADERS *header, const char *filename );
 extern void wine_init( int argc, char *argv[], char *error, int error_size );
 
@@ -69,8 +72,6 @@ extern void wine_init( int argc, char *argv[], char *error, int error_size );
 
 extern void DECLSPEC_NORETURN wine_switch_to_stack( void (*func)(void *), void *arg, void *stack );
 extern int wine_call_on_stack( int (*func)(void *), void *arg, void *stack );
-extern void wine_set_pe_load_area( void *base, size_t size );
-extern void wine_free_pe_load_area(void);
 
 /* memory mappings */
 
@@ -91,7 +92,7 @@ extern void *wine_ldt_get_ptr( unsigned short sel, unsigned long offset );
 extern unsigned short wine_ldt_alloc_entries( int count );
 extern unsigned short wine_ldt_realloc_entries( unsigned short sel, int oldcount, int newcount );
 extern void wine_ldt_free_entries( unsigned short sel, int count );
-#ifdef __i386__
+#if defined(__i386__) && !defined(__MINGW32__) && !defined(_MSC_VER)
 extern unsigned short wine_ldt_alloc_fs(void);
 extern void wine_ldt_init_fs( unsigned short sel, const LDT_ENTRY *entry );
 extern void wine_ldt_free_fs( unsigned short sel );
@@ -130,9 +131,12 @@ WINE_LDT_EXTERN struct __wine_ldt_copy
 /* helper functions to manipulate the LDT_ENTRY structure */
 static inline void wine_ldt_set_base( LDT_ENTRY *ent, const void *base )
 {
-    ent->BaseLow               = (WORD)(unsigned long)base;
-    ent->HighWord.Bits.BaseMid = (BYTE)((unsigned long)base >> 16);
-    ent->HighWord.Bits.BaseHi  = (BYTE)((unsigned long)base >> 24);
+    ent->BaseLow               = (WORD)(ULONG_PTR)base;
+    ent->HighWord.Bits.BaseMid = (BYTE)((ULONG_PTR)base >> 16);
+    ent->HighWord.Bits.BaseHi  = (BYTE)((ULONG_PTR)base >> 24);
+#ifdef _WIN64
+    ent->BaseHigh              = (ULONG_PTR)base >> 32;
+#endif
 }
 static inline void wine_ldt_set_limit( LDT_ENTRY *ent, unsigned int limit )
 {
@@ -143,8 +147,11 @@ static inline void wine_ldt_set_limit( LDT_ENTRY *ent, unsigned int limit )
 static inline void *wine_ldt_get_base( const LDT_ENTRY *ent )
 {
     return (void *)(ent->BaseLow |
-                    (unsigned long)ent->HighWord.Bits.BaseMid << 16 |
-                    (unsigned long)ent->HighWord.Bits.BaseHi << 24);
+#ifdef _WIN64
+                    (ULONG_PTR)ent->BaseHigh << 32 |
+#endif
+                    (ULONG_PTR)ent->HighWord.Bits.BaseMid << 16 |
+                    (ULONG_PTR)ent->HighWord.Bits.BaseHi << 24);
 }
 static inline unsigned int wine_ldt_get_limit( const LDT_ENTRY *ent )
 {
@@ -176,7 +183,15 @@ static inline int wine_ldt_is_empty( const LDT_ENTRY *ent )
 /* segment register access */
 
 #ifdef __i386__
-# ifdef __GNUC__
+# ifdef __MINGW32__
+#  define __DEFINE_GET_SEG(seg) \
+    static inline unsigned short wine_get_##seg(void); \
+    static inline unsigned short wine_get_##seg(void) \
+    { unsigned short res; __asm__ __volatile__("movw %%" #seg ",%w0" : "=r"(res)); return res; }
+#  define __DEFINE_SET_SEG(seg) \
+    static inline void wine_set_##seg(int val); \
+    static inline void wine_set_##seg(int val) { __asm__("movw %w0,%%" #seg : : "r" (val)); }
+# elif defined(__GNUC__)
 #  define __DEFINE_GET_SEG(seg) \
     extern inline unsigned short wine_get_##seg(void); \
     extern inline unsigned short wine_get_##seg(void) \
@@ -211,5 +226,9 @@ __DEFINE_SET_SEG(fs)
 __DEFINE_SET_SEG(gs)
 #undef __DEFINE_GET_SEG
 #undef __DEFINE_SET_SEG
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  /* __WINE_WINE_LIBRARY_H */

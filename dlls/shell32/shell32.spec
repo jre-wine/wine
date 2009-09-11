@@ -34,7 +34,7 @@
   35 stdcall -noname PathRemoveFileSpec(ptr) PathRemoveFileSpecAW
   36 stdcall -noname PathAppend(ptr ptr) PathAppendAW
   37 stdcall -noname PathCombine(ptr ptr ptr) PathCombineAW
-  38 stdcall -noname PathStripPath(ptr)PathStripPathAW
+  38 stdcall -noname PathStripPath(ptr) PathStripPathAW
   39 stdcall -noname PathIsUNC(ptr) PathIsUNCAW
   40 stdcall -noname PathIsRelative(ptr) PathIsRelativeAW
   41 stdcall -noname IsLFNDriveA(str)
@@ -42,7 +42,7 @@
   43 stdcall -noname PathIsExe(ptr) PathIsExeAW
   45 stdcall -noname PathFileExists(ptr) PathFileExistsAW
   46 stdcall -noname PathMatchSpec(ptr ptr) PathMatchSpecAW
-  47 stdcall -noname PathMakeUniqueName(ptr long ptr ptr ptr)PathMakeUniqueNameAW
+  47 stdcall -noname PathMakeUniqueName(ptr long ptr ptr ptr) PathMakeUniqueNameAW
   48 stdcall -noname PathSetDlgItemPath(long long ptr) PathSetDlgItemPathAW
   49 stdcall -noname PathQualify(ptr) PathQualifyAW
   50 stdcall -noname PathStripToRoot(ptr) PathStripToRootAW
@@ -56,7 +56,7 @@
   58 stdcall -noname ParseField(str long ptr long) ParseFieldAW
   59 stdcall -noname RestartDialog(long wstr long)
   60 stdcall -noname ExitWindowsDialog(long)
-  61 stdcall -noname RunFileDlg(long long long str str long)
+  61 stdcall -noname RunFileDlg(long long long str str long) RunFileDlgAW
   62 stdcall -noname PickIconDlg(long long long long)
   63 stdcall -noname GetFileNameFromBrowse(long long long long str str str)
   64 stdcall -noname DriveType(long)
@@ -210,7 +210,7 @@
  249 stdcall -noname PathParseIconLocation(ptr) PathParseIconLocationAW
  250 stdcall -noname PathRemoveExtension(ptr) PathRemoveExtensionAW
  251 stdcall -noname PathRemoveArgs(ptr) PathRemoveArgsAW
- 256 stdcall @(ptr ptr) SHELL32_256
+ 256 stdcall SHCreateShellFolderView(ptr ptr)
  258 stdcall -noname LinkWindow_RegisterClass()
  259 stdcall -noname LinkWindow_UnregisterClass()
 #299 stub Shl1632_ThunkData32
@@ -231,6 +231,7 @@
  523 stdcall -noname SHFreeShared(long long)
  524 stdcall -noname RealDriveType(long long)
  525 stub RealDriveTypeFlags
+ 526 stdcall SHFlushSFCache()
 
  640 stdcall -noname NTSHChangeNotifyRegister(long long long long long long)
  641 stdcall -noname NTSHChangeNotifyDeregister(long)
@@ -250,9 +251,12 @@
  654 stdcall @(long long) shell32_654 # ReadCabinetState@8
 
  660 stdcall -noname FileIconInit(long)
- 680 stdcall -noname IsUserAdmin()
+ 680 stdcall IsUserAnAdmin()
+
+ 704 stdcall -noname GUIDFromStringW(wstr ptr)
 
  714 stdcall @(ptr) SHELL32_714 # PathIsTemporaryW
+ 727 stdcall SHGetImageList(long ptr ptr)
  730 stdcall -noname RestartDialogEx(long wstr long long)
 
 1217 stub FOOBAR1217   # no joke! This is the real name!!
@@ -294,12 +298,13 @@
 @ stub ExtractIconResInfoA
 @ stub ExtractIconResInfoW
 @ stdcall ExtractIconW(long wstr long)
-@ stub ExtractVersionResource16W
+@ stdcall ExtractVersionResource16W(wstr long)
 @ stub FindExeDlgProc
 @ stdcall FindExecutableA(str str ptr)
 @ stdcall FindExecutableW(wstr wstr ptr)
 @ stub FixupOptionalComponents
 @ stdcall FreeIconList(long)
+@ stdcall InitNetworkAddressControl()
 @ stub InternalExtractIconListA
 @ stub InternalExtractIconListW
 @ stub OCInstall
@@ -325,6 +330,7 @@
 @ stdcall SHCreateDirectoryExA(long str ptr)
 @ stdcall SHCreateDirectoryExW(long wstr ptr)
 @ stub SHCreateProcessAsUserW
+@ stdcall SHCreateShellItem(ptr ptr ptr ptr)
 @ stdcall SHEmptyRecycleBinA(long str long)
 @ stdcall SHEmptyRecycleBinW(long wstr long)
 @ stub SHExtractIconsW
@@ -344,10 +350,12 @@
 @ stdcall SHGetFileInfoW(ptr long ptr long long)
 @ stdcall SHGetFolderLocation(long long long long ptr)
 @ stdcall SHGetFolderPathA(long long long long ptr)
+@ stdcall SHGetFolderPathAndSubDirA(long long long long str ptr)
+@ stdcall SHGetFolderPathAndSubDirW(long long long long wstr ptr)
 @ stdcall SHGetFolderPathW(long long long long ptr)
 @ stub SHGetFreeDiskSpace
-@ stub SHGetIconOverlayIndexA
-@ stub SHGetIconOverlayIndexW
+@ stdcall SHGetIconOverlayIndexA(str long)
+@ stdcall SHGetIconOverlayIndexW(wstr long)
 @ stdcall SHGetInstanceExplorer(long)
 @ stdcall SHGetMalloc(ptr)
 @ stdcall SHGetNewLinkInfo(str str ptr long long) SHGetNewLinkInfoA
@@ -366,6 +374,7 @@
 @ stdcall SHIsFileAvailableOffline(wstr ptr)
 @ stdcall SHLoadInProc(long)
 @ stdcall SHLoadNonloadedIconOverlayIdentifiers()
+@ stdcall SHParseDisplayName(wstr ptr ptr long ptr)
 @ stdcall SHPathPrepareForWriteA(long ptr str long)
 @ stdcall SHPathPrepareForWriteW(long ptr wstr long)
 @ stdcall SHQueryRecycleBinA(str ptr)
@@ -431,4 +440,4 @@
 @ stdcall StrStrIA(str str) shlwapi.StrStrIA
 @ stdcall StrStrIW(wstr wstr) shlwapi.StrStrIW
 @ stdcall StrStrW(wstr wstr) shlwapi.StrStrW
-@ stub WOWShellExecute
+@ stdcall WOWShellExecute(long str str str str long ptr)

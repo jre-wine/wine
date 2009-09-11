@@ -41,6 +41,8 @@
 #include "wine/library.h"
 #include "wine/list.h"
 
+#ifdef HAVE_MMAP
+
 struct reserved_area
 {
     struct list entry;
@@ -50,8 +52,6 @@ struct reserved_area
 
 static struct list reserved_areas = LIST_INIT(reserved_areas);
 static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
-
-#ifdef HAVE_MMAP
 
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
@@ -243,7 +243,7 @@ static inline int mmap_reserve( void *addr, size_t size )
  *
  * Reserve as much memory as possible in the given area.
  */
-#if defined(__i386__) && !defined(__FreeBSD__) && !defined(__FreeBSD_kernel__)  /* commented out until FreeBSD gets fixed */
+#ifdef __i386__
 static void reserve_area( void *addr, void *end )
 {
     size_t size = (char *)end - (char *)addr;
@@ -286,7 +286,30 @@ static void reserve_area( void *addr, void *end )
     }
 #endif
 }
+
+
+/***********************************************************************
+ *           reserve_malloc_space
+ *
+ * Solaris malloc is not smart enough to obtain space through mmap(), so try to make
+ * sure that there is some available sbrk() space before we reserve other things.
+ */
+static void reserve_malloc_space( size_t size )
+{
+#ifdef __sun
+    size_t i, count = size / 1024;
+    void **ptrs = malloc( count * sizeof(ptrs[0]) );
+
+    if (!ptrs) return;
+
+    for (i = 0; i < count; i++) if (!(ptrs[i] = malloc( 1024 ))) break;
+    if (i--)  /* free everything except the last one */
+        while (i) free( ptrs[--i] );
+    free( ptrs );
 #endif
+}
+
+#endif  /* __i386__ */
 
 
 /***********************************************************************
@@ -320,10 +343,12 @@ void mmap_init(void)
 {
     struct reserved_area *area;
     struct list *ptr;
-#if defined(__i386__) && !defined(__FreeBSD__) && !defined(__FreeBSD_kernel__)  /* commented out until FreeBSD gets fixed */
+#ifdef __i386__
     char stack;
     char * const stack_ptr = &stack;
     char *user_space_limit = (char *)0x7ffe0000;
+
+    reserve_malloc_space( 8 * 1024 * 1024 );
 
     /* check for a reserved area starting at the user space limit */
     /* to avoid wasting time trying to allocate it again */
@@ -344,8 +369,8 @@ void mmap_init(void)
         char *base = stack_ptr - ((unsigned int)stack_ptr & granularity_mask) - (granularity_mask + 1);
         if (base > user_space_limit) reserve_area( user_space_limit, base );
         base = stack_ptr - ((unsigned int)stack_ptr & granularity_mask) + (granularity_mask + 1);
-#ifdef linux
-        /* Linux heuristic: assume the stack is near the end of the address */
+#if defined(linux) || defined(__FreeBSD__)
+        /* Heuristic: assume the stack is near the end of the address */
         /* space, this avoids a lot of futile allocation attempts */
         end = (char *)(((unsigned long)base + 0x0fffffff) & 0xf0000000);
 #endif
@@ -365,23 +390,6 @@ void mmap_init(void)
     reserve_dos_area();
 }
 
-#else /* HAVE_MMAP */
-
-void *wine_anon_mmap( void *start, size_t size, int prot, int flags )
-{
-    return (void *)-1;
-}
-
-static inline int munmap( void *ptr, size_t size )
-{
-    return 0;
-}
-
-void mmap_init(void)
-{
-}
-
-#endif
 
 /***********************************************************************
  *           wine_mmap_add_reserved_area
@@ -577,3 +585,11 @@ int wine_mmap_enum_reserved_areas( int (*enum_func)(void *base, size_t size, voi
     }
     return ret;
 }
+
+#else /* HAVE_MMAP */
+
+void mmap_init(void)
+{
+}
+
+#endif

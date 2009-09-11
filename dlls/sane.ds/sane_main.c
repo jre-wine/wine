@@ -141,6 +141,9 @@ static TW_UINT16 SANE_SourceControlHandler (
 		case MSG_CLOSEDS:
 #ifdef SONAME_LIBSANE
 		     psane_close (activeDS.deviceHandle);
+#else
+		     twRC = TWRC_FAILURE;
+                     activeDS.twCC = TWCC_CAPUNSUPPORTED;
 #endif
 		     break;
 		case MSG_OPENDS:
@@ -148,6 +151,7 @@ static TW_UINT16 SANE_SourceControlHandler (
 		     twRC = SANE_OpenDS( pOrigin, (pTW_IDENTITY)pData);
 #else
 		     twRC = TWRC_FAILURE;
+                     activeDS.twCC = TWCC_CAPUNSUPPORTED;
 #endif
 		     break;
 		case MSG_GET:
@@ -155,6 +159,7 @@ static TW_UINT16 SANE_SourceControlHandler (
 		     twRC = SANE_GetIdentity( pOrigin, (pTW_IDENTITY)pData);
 #else
 		     twRC = TWRC_FAILURE;
+                     activeDS.twCC = TWCC_CAPUNSUPPORTED;
 #endif
 		     break;
 	    }
@@ -182,63 +187,8 @@ static TW_UINT16 SANE_SourceControlHandler (
                     break;
                 default:
                     twRC = TWRC_FAILURE;
+                    activeDS.twCC = TWCC_CAPBADOPERATION;
                     FIXME("unrecognized opertion triplet\n");
-            }
-            break;
-
-        case DAT_CUSTOMDSDATA:
-            switch (MSG)
-            {
-                case MSG_GET:
-                    twRC = SANE_CustomDSDataGet (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_CustomDSDataSet (pOrigin, pData);
-                    break;
-                default:
-                    break;
-            }
-            break;
-
-        case DAT_FILESYSTEM:
-            switch (MSG)
-            {
-                /*case MSG_AUTOMATICCAPTUREDIRECTORY:
-                    twRC = SANE_AutomaticCaptureDirectory
-                               (pOrigin, pData);
-                    break;*/
-                case MSG_CHANGEDIRECTORY:
-                    twRC = SANE_ChangeDirectory (pOrigin, pData);
-                    break;
-                /*case MSG_COPY:
-                    twRC = SANE_FileSystemCopy (pOrigin, pData);
-                    break;*/
-                case MSG_CREATEDIRECTORY:
-                    twRC = SANE_CreateDirectory (pOrigin, pData);
-                    break;
-                case MSG_DELETE:
-                    twRC = SANE_FileSystemDelete (pOrigin, pData);
-                    break;
-                case MSG_FORMATMEDIA:
-                    twRC = SANE_FormatMedia (pOrigin, pData);
-                    break;
-                case MSG_GETCLOSE:
-                    twRC = SANE_FileSystemGetClose (pOrigin, pData);
-                    break;
-                case MSG_GETFIRSTFILE:
-                    twRC = SANE_FileSystemGetFirstFile (pOrigin, pData);
-                    break;
-                case MSG_GETINFO:
-                    twRC = SANE_FileSystemGetInfo (pOrigin, pData);
-                    break;
-                case MSG_GETNEXTFILE:
-                    twRC = SANE_FileSystemGetNextFile (pOrigin, pData);
-                    break;
-                case MSG_RENAME:
-                    twRC = SANE_FileSystemRename (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
                     break;
             }
             break;
@@ -247,14 +197,10 @@ static TW_UINT16 SANE_SourceControlHandler (
             if (MSG == MSG_PROCESSEVENT)
                 twRC = SANE_ProcessEvent (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
-            break;
-
-        case DAT_PASSTHRU:
-            if (MSG == MSG_PASSTHRU)
-                twRC = SANE_PassThrough (pOrigin, pData);
-            else
-                twRC = TWRC_FAILURE;
+            }
             break;
 
         case DAT_PENDINGXFERS:
@@ -269,64 +215,30 @@ static TW_UINT16 SANE_SourceControlHandler (
                 case MSG_RESET:
                     twRC = SANE_PendingXfersReset (pOrigin, pData);
                     break;
-                /*case MSG_STOPFEEDER:
-                    twRC = SANE_PendingXfersStopFeeder (pOrigin, pData);
-                    break;*/
                 default:
+                    activeDS.twCC = TWCC_CAPBADOPERATION;
                     twRC = TWRC_FAILURE;
             }
             break;
 
-        case DAT_SETUPFILEXFER:
-            switch (MSG)
-            {
-                case MSG_GET:
-                    twRC = SANE_SetupFileXferGet (pOrigin, pData);
-                    break;
-                case MSG_GETDEFAULT:
-                    twRC = SANE_SetupFileXferGetDefault (pOrigin, pData);
-                    break;
-                case MSG_RESET:
-                    twRC = SANE_SetupFileXferReset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_SetupFileXferSet (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
-                    break;
-            }
-            break;
-
-        /*case DAT_SETUPFILEXFER2:
-            switch (MSG)
-            {
-                case MSG_GET:
-                    twRC = SANE_SetupFileXfer2Get (pOrigin, pData);
-                    break;
-                case MSG_GETDEFAULT:
-                    twRC = SANE_SetupFileXfer2GetDefault (pOrigin, pData);
-                    break;
-                case MSG_RESET:
-                    twRC = SANE_SetupFileXfer2Reset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_SetupFileXfer2Set (pOrigin, pData);
-                    break;
-            }
-            break;*/
         case DAT_SETUPMEMXFER:
             if (MSG == MSG_GET)
                 twRC = SANE_SetupMemXferGet (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
+            }
             break;
 
         case DAT_STATUS:
             if (MSG == MSG_GET)
                 twRC = SANE_GetDSStatus (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
+            }
             break;
 
         case DAT_USERINTERFACE:
@@ -342,6 +254,7 @@ static TW_UINT16 SANE_SourceControlHandler (
                     twRC = SANE_EnableDSUIOnly (pOrigin, pData);
                     break;
                 default:
+                    activeDS.twCC = TWCC_CAPBADOPERATION;
                     twRC = TWRC_FAILURE;
                     break;
             }
@@ -357,13 +270,15 @@ static TW_UINT16 SANE_SourceControlHandler (
                     twRC = SANE_XferGroupSet (pOrigin, pData);
                     break;
                 default:
+                    activeDS.twCC = TWCC_CAPBADOPERATION;
                     twRC = TWRC_FAILURE;
                     break;
             }
             break;
 
         default:
-	    FIXME("code unknown: %d\n", DAT);
+	    WARN("code unsupported: %d\n", DAT);
+            activeDS.twCC = TWCC_CAPUNSUPPORTED;
             twRC = TWRC_FAILURE;
             break;
     }
@@ -372,7 +287,7 @@ static TW_UINT16 SANE_SourceControlHandler (
 }
 
 
-TW_UINT16 SANE_ImageGroupHandler (
+static TW_UINT16 SANE_ImageGroupHandler (
            pTW_IDENTITY pOrigin,
            TW_UINT16    DAT,
            TW_UINT16    MSG,
@@ -382,48 +297,14 @@ TW_UINT16 SANE_ImageGroupHandler (
 
     switch (DAT)
     {
-        case DAT_CIECOLOR:
-            if (MSG == MSG_GET)
-                twRC = SANE_CIEColorGet (pOrigin, pData);
-            else
-                twRC = TWRC_FAILURE;
-            break;
-
-        case DAT_EXTIMAGEINFO:
-            if (MSG == MSG_GET)
-                twRC = SANE_ExtImageInfoGet (pOrigin, pData);
-            else
-                twRC = TWRC_FAILURE;
-            break;
-
-        case DAT_GRAYRESPONSE:
-            switch (MSG)
-            {
-                case MSG_RESET:
-                    twRC = SANE_GrayResponseReset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_GrayResponseSet (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
-                    activeDS.twCC = TWCC_BADPROTOCOL;
-                    FIXME("unrecognized operation triplet\n");
-                    break;
-            }
-            break;
-        case DAT_IMAGEFILEXFER:
-            if (MSG == MSG_GET)
-                twRC = SANE_ImageFileXferGet (pOrigin, pData);
-            else
-                twRC = TWRC_FAILURE;
-            break;
-
         case DAT_IMAGEINFO:
             if (MSG == MSG_GET)
                 twRC = SANE_ImageInfoGet (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
+            }
             break;
 
         case DAT_IMAGELAYOUT:
@@ -443,7 +324,7 @@ TW_UINT16 SANE_ImageGroupHandler (
                     break;
                 default:
                     twRC = TWRC_FAILURE;
-                    activeDS.twCC = TWCC_BADPROTOCOL;
+                    activeDS.twCC = TWCC_CAPBADOPERATION;
                     ERR("unrecognized operation triplet\n");
                     break;
             }
@@ -453,82 +334,27 @@ TW_UINT16 SANE_ImageGroupHandler (
             if (MSG == MSG_GET)
                 twRC = SANE_ImageMemXferGet (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
+            }
             break;
 
         case DAT_IMAGENATIVEXFER:
             if (MSG == MSG_GET)
                 twRC = SANE_ImageNativeXferGet (pOrigin, pData);
             else
+            {
+                activeDS.twCC = TWCC_CAPBADOPERATION;
                 twRC = TWRC_FAILURE;
-            break;
-
-        case DAT_JPEGCOMPRESSION:
-            switch (MSG)
-            {
-                case MSG_GET:
-                    twRC = SANE_JPEGCompressionGet (pOrigin, pData);
-                    break;
-                case MSG_GETDEFAULT:
-                    twRC = SANE_JPEGCompressionGetDefault (pOrigin, pData);
-                    break;
-                case MSG_RESET:
-                    twRC = SANE_JPEGCompressionReset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_JPEGCompressionSet (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
-                    activeDS.twCC = TWCC_BADPROTOCOL;
-                    WARN("unrecognized operation triplet\n");
-                    break;
-            }
-            break;
-
-        case DAT_PALETTE8:
-            switch (MSG)
-            {
-                case MSG_GET:
-                    twRC = SANE_Palette8Get (pOrigin, pData);
-                    break;
-                case MSG_GETDEFAULT:
-                    twRC = SANE_Palette8GetDefault (pOrigin, pData);
-                    break;
-                case MSG_RESET:
-                    twRC = SANE_Palette8Reset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_Palette8Set (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
-                    activeDS.twCC = TWCC_BADPROTOCOL;
-                    WARN("unrecognized operation triplet\n");
-            }
-            break;
-
-        case DAT_RGBRESPONSE:
-            switch (MSG)
-            {
-                case MSG_RESET:
-                    twRC = SANE_RGBResponseReset (pOrigin, pData);
-                    break;
-                case MSG_SET:
-                    twRC = SANE_RGBResponseSet (pOrigin, pData);
-                    break;
-                default:
-                    twRC = TWRC_FAILURE;
-                    activeDS.twCC = TWCC_BADPROTOCOL;
-                    WARN("unrecognized operation triplet\n");
-                    break;
             }
             break;
 
         default:
             twRC = TWRC_FAILURE;
-            activeDS.twCC = TWCC_BADPROTOCOL;
-            FIXME("unrecognized DG type %d\n", DAT);
+            activeDS.twCC = TWCC_CAPUNSUPPORTED;
+            WARN("unsupported DG type %d\n", DAT);
+            break;
     }
     return twRC;
 }
@@ -543,7 +369,7 @@ DS_Entry ( pTW_IDENTITY pOrigin,
 {
     TW_UINT16 twRC = TWRC_SUCCESS;  /* Return Code */
 
-    TRACE("(DG=%ld DAT=%d MSG=%d)\n", DG, DAT, MSG);
+    TRACE("(DG=%d DAT=%d MSG=%d)\n", DG, DAT, MSG);
 
     switch (DG)
     {
@@ -554,7 +380,10 @@ DS_Entry ( pTW_IDENTITY pOrigin,
             twRC = SANE_ImageGroupHandler (pOrigin,DAT,MSG,pData);
             break;
         case DG_AUDIO:
-            FIXME("Audio group of controls not implemented yet.\n");
+            WARN("Audio group of controls not implemented yet.\n");
+            twRC = TWRC_FAILURE;
+            activeDS.twCC = TWCC_CAPUNSUPPORTED;
+            break;
         default:
             activeDS.twCC = TWCC_BADPROTOCOL;
             twRC = TWRC_FAILURE;
@@ -615,6 +444,7 @@ SANE_GetIdentity( pTW_IDENTITY pOrigin, pTW_IDENTITY self) {
 	return TWRC_FAILURE;
     self->ProtocolMajor = TWON_PROTOCOLMAJOR;
     self->ProtocolMinor = TWON_PROTOCOLMINOR;
+    self->SupportedGroups = DG_CONTROL | DG_IMAGE;
     copy_sane_short_name(sane_devlist[cursanedev]->name, self->ProductName, sizeof(self->ProductName) - 1);
     lstrcpynA (self->Manufacturer, sane_devlist[cursanedev]->vendor, sizeof(self->Manufacturer) - 1);
     lstrcpynA (self->ProductFamily, sane_devlist[cursanedev]->model, sizeof(self->ProductFamily) - 1);
@@ -644,27 +474,32 @@ static TW_UINT16 SANE_OpenDS( pTW_IDENTITY pOrigin, pTW_IDENTITY self) {
 
 	/* To make string as short as above */
 	lstrcpynA(name, sane_devlist[i]->vendor, sizeof(name)-1);
-	if (strcmp(name, self->Manufacturer))
+	if (self->Manufacturer && *self->Manufacturer && strcmp(name, self->Manufacturer))
 	    continue;
 	lstrcpynA(name, sane_devlist[i]->model, sizeof(name)-1);
-	if (strcmp(name, self->ProductFamily))
+	if (self->ProductFamily && *self->ProductFamily && strcmp(name, self->ProductFamily))
 	    continue;
         copy_sane_short_name(sane_devlist[i]->name, name, sizeof(name) - 1);
-	if (strcmp(name, self->ProductName))
+	if (self->ProductName && *self->ProductName && strcmp(name, self->ProductName))
 	    continue;
 	break;
     }
     if (!sane_devlist[i]) {
-	FIXME("Scanner not found? Using first one!\n");
-	i=0;
+	WARN("Scanner not found.\n");
+	return TWRC_FAILURE;
     }
     status = psane_open(sane_devlist[i]->name,&activeDS.deviceHandle);
     if (status == SANE_STATUS_GOOD) {
-	activeDS.currentState = 4;
-	activeDS.twCC = TWRC_SUCCESS;
-	return TWRC_SUCCESS;
+        activeDS.twCC = SANE_SaneSetDefaults();
+        if (activeDS.twCC == TWCC_SUCCESS) {
+	    activeDS.currentState = 4;
+	    return TWRC_SUCCESS;
+        }
+        else
+            psane_close(activeDS.deviceHandle);
     }
-    FIXME("sane_open(%s): %s\n", sane_devlist[i]->name, psane_strstatus (status));
+    else
+        ERR("sane_open(%s): %s\n", sane_devlist[i]->name, psane_strstatus (status));
     return TWRC_FAILURE;
 }
 #endif

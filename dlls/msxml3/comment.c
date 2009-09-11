@@ -59,6 +59,7 @@ static HRESULT WINAPI domcomment_QueryInterface(
     TRACE("%p %s %p\n", This, debugstr_guid(riid), ppvObject);
 
     if ( IsEqualGUID( riid, &IID_IXMLDOMComment ) ||
+         IsEqualGUID( riid, &IID_IXMLDOMCharacterData) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
          IsEqualGUID( riid, &IID_IUnknown ) )
     {
@@ -510,12 +511,12 @@ static HRESULT WINAPI domcomment_put_data(
 
 static HRESULT WINAPI domcomment_get_length(
     IXMLDOMComment *iface,
-    long *len)
+    LONG *len)
 {
     domcomment *This = impl_from_IXMLDOMComment( iface );
     xmlnode *pDOMNode = impl_from_IXMLDOMNode( This->node );
     xmlChar *pContent;
-    long nLength = 0;
+    LONG nLength = 0;
 
     TRACE("%p\n", iface);
 
@@ -536,12 +537,12 @@ static HRESULT WINAPI domcomment_get_length(
 
 static HRESULT WINAPI domcomment_substringData(
     IXMLDOMComment *iface,
-    long offset, long count, BSTR *p)
+    LONG offset, LONG count, BSTR *p)
 {
     domcomment *This = impl_from_IXMLDOMComment( iface );
     xmlnode *pDOMNode = impl_from_IXMLDOMNode( This->node );
     xmlChar *pContent;
-    long nLength = 0;
+    LONG nLength = 0;
     HRESULT hr = S_FALSE;
 
     TRACE("%p\n", iface);
@@ -594,13 +595,28 @@ static HRESULT WINAPI domcomment_appendData(
     if(p == NULL || SysStringLen(p) == 0)
         return S_OK;
 
-    pContent = xmlChar_from_wchar( (WCHAR*)p );
+    pContent = xmlChar_from_wchar( p );
     if(pContent)
     {
+        /* Older versions of libxml < 2.6.27 didn't correctly support
+           xmlTextConcat on Comment nodes. Fallback to setting the
+           contents directly if xmlTextConcat fails.
+         */
         if(xmlTextConcat(pDOMNode->node, pContent, SysStringLen(p) ) == 0)
             hr = S_OK;
         else
-            hr = E_FAIL;
+        {
+            xmlChar *pNew;
+            pNew = xmlStrcat(xmlNodeGetContent(pDOMNode->node), pContent);
+            if(pNew)
+            {
+                xmlNodeSetContent(pDOMNode->node, pNew);
+                hr = S_OK;
+            }
+            else
+                hr = E_FAIL;
+        }
+        HeapFree( GetProcessHeap(), 0, pContent );
     }
     else
         hr = E_FAIL;
@@ -610,15 +626,77 @@ static HRESULT WINAPI domcomment_appendData(
 
 static HRESULT WINAPI domcomment_insertData(
     IXMLDOMComment *iface,
-    long offset, BSTR p)
+    LONG offset, BSTR p)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    domcomment *This = impl_from_IXMLDOMComment( iface );
+    xmlnode *pDOMNode = impl_from_IXMLDOMNode( This->node );
+    xmlChar *pXmlContent;
+    BSTR sNewString;
+    HRESULT hr = S_FALSE;
+    LONG nLength = 0, nLengthP = 0;
+    xmlChar *str = NULL;
+
+    TRACE("%p\n", This);
+
+    /* If have a NULL or empty string, don't do anything. */
+    if(SysStringLen(p) == 0)
+        return S_OK;
+
+    if(offset < 0)
+    {
+        return E_INVALIDARG;
+    }
+
+    pXmlContent = xmlNodeGetContent(pDOMNode->node);
+    if(pXmlContent)
+    {
+        BSTR sContent = bstr_from_xmlChar( pXmlContent );
+        nLength = SysStringLen(sContent);
+        nLengthP = SysStringLen(p);
+
+        if(nLength < offset)
+        {
+            SysFreeString(sContent);
+            xmlFree(pXmlContent);
+
+            return E_INVALIDARG;
+        }
+
+        sNewString = SysAllocStringLen(NULL, nLength + nLengthP + 1);
+        if(sNewString)
+        {
+            if(offset > 0)
+                memcpy(sNewString, sContent, offset * sizeof(WCHAR));
+
+            memcpy(&sNewString[offset], p, nLengthP * sizeof(WCHAR));
+
+            if(offset+nLengthP < nLength)
+                memcpy(&sNewString[offset+nLengthP], &sContent[offset], (nLength-offset) * sizeof(WCHAR));
+
+            sNewString[nLengthP + nLength] = 0;
+
+            str = xmlChar_from_wchar(sNewString);
+            if(str)
+            {
+                xmlNodeSetContent(pDOMNode->node, str);
+                hr = S_OK;
+            }
+            HeapFree( GetProcessHeap(), 0, str );
+
+            SysFreeString(sNewString);
+        }
+
+        SysFreeString(sContent);
+
+        xmlFree(pXmlContent);
+    }
+
+    return hr;
 }
 
 static HRESULT WINAPI domcomment_deleteData(
     IXMLDOMComment *iface,
-    long offset, long count)
+    LONG offset, LONG count)
 {
     FIXME("\n");
     return E_NOTIMPL;
@@ -626,7 +704,7 @@ static HRESULT WINAPI domcomment_deleteData(
 
 static HRESULT WINAPI domcomment_replaceData(
     IXMLDOMComment *iface,
-    long offset, long count, BSTR p)
+    LONG offset, LONG count, BSTR p)
 {
     FIXME("\n");
     return E_NOTIMPL;
@@ -690,7 +768,7 @@ static const struct IXMLDOMCommentVtbl domcomment_vtbl =
 IUnknown* create_comment( xmlNodePtr comment )
 {
     domcomment *This;
-    HRESULT hr;
+    xmlnode *node;
 
     This = HeapAlloc( GetProcessHeap(), 0, sizeof *This );
     if ( !This )
@@ -699,22 +777,15 @@ IUnknown* create_comment( xmlNodePtr comment )
     This->lpVtbl = &domcomment_vtbl;
     This->ref = 1;
 
-    This->node_unk = create_basic_node( comment, (IUnknown*)&This->lpVtbl );
-    if(!This->node_unk)
+    node = create_basic_node( comment, (IUnknown*)&This->lpVtbl, NULL );
+    if(!node)
     {
         HeapFree(GetProcessHeap(), 0, This);
         return NULL;
     }
 
-    hr = IUnknown_QueryInterface(This->node_unk, &IID_IXMLDOMNode, (LPVOID*)&This->node);
-    if(FAILED(hr))
-    {
-        IUnknown_Release(This->node_unk);
-        HeapFree( GetProcessHeap(), 0, This );
-        return NULL;
-    }
-    /* The ref on This->node is actually looped back into this object, so release it */
-    IXMLDOMNode_Release(This->node);
+    This->node_unk = (IUnknown*)&node->lpInternalUnkVtbl;
+    This->node = IXMLDOMNode_from_impl(node);
 
     return (IUnknown*) &This->lpVtbl;
 }

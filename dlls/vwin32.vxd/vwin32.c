@@ -29,7 +29,48 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(vxd);
 
-extern void WINAPI CallBuiltinHandler( CONTEXT86 *context, BYTE intnum );  /* from winedos */
+typedef struct tagDIOCRegs {
+    DWORD   reg_EBX;
+    DWORD   reg_EDX;
+    DWORD   reg_ECX;
+    DWORD   reg_EAX;
+    DWORD   reg_EDI;
+    DWORD   reg_ESI;
+    DWORD   reg_Flags;
+} DIOC_REGISTERS, *PDIOC_REGISTERS;
+
+#define VWIN32_DIOC_DOS_IOCTL     1 /* This is the specified MS-DOS device I/O ctl - Interrupt 21h Function 4400h - 4411h */
+#define VWIN32_DIOC_DOS_INT25     2 /* This is the Absolute Disk Read command - Interrupt 25h */
+#define VWIN32_DIOC_DOS_INT26     3 /* This is the Absolute Disk Write command - Interrupt 25h */
+#define VWIN32_DIOC_DOS_INT13     4 /* This is Interrupt 13h commands */
+#define VWIN32_DIOC_SIMCTRLC      5 /* Simulate Ctrl-C */
+#define VWIN32_DIOC_DOS_DRIVEINFO 6 /* This is Interrupt 21h Function 730X commands */
+
+#include <pshpack1.h>
+typedef struct tagMID {
+    WORD  midInfoLevel;
+    DWORD midSerialNum;
+    BYTE  midVolLabel[11];
+    BYTE  midFileSysType[8];
+} MID, *PMID;
+#include <poppack.h>
+
+typedef void (WINAPI *CallBuiltinHandler)( CONTEXT *context, BYTE intnum );
+
+static CallBuiltinHandler load_builtin_handler(void)
+{
+    static CallBuiltinHandler handler;
+    static BOOL init_done;
+
+    if (!init_done)
+    {
+        HMODULE mod = LoadLibraryA( "winedos.dll" );
+        if (mod) handler = (void *)GetProcAddress( mod, "CallBuiltinHandler" );
+        if (!handler) FIXME( "DOS calls not supported\n" );
+        init_done = TRUE;
+    }
+    return handler;
+}
 
 /* Pop a DWORD from the 32-bit stack */
 static inline DWORD stack32_pop( CONTEXT86 *context )
@@ -73,20 +114,6 @@ static void CONTEXT_2_DIOCRegs( CONTEXT86 *pCxt, DIOC_REGISTERS *pOut )
     pOut->reg_Flags = pCxt->EFlags;
 }
 
-#define DIOC_AH(regs) (((unsigned char*)&((regs)->reg_EAX))[1])
-#define DIOC_AL(regs) (((unsigned char*)&((regs)->reg_EAX))[0])
-#define DIOC_BH(regs) (((unsigned char*)&((regs)->reg_EBX))[1])
-#define DIOC_BL(regs) (((unsigned char*)&((regs)->reg_EBX))[0])
-#define DIOC_DH(regs) (((unsigned char*)&((regs)->reg_EDX))[1])
-#define DIOC_DL(regs) (((unsigned char*)&((regs)->reg_EDX))[0])
-
-#define DIOC_AX(regs) (((unsigned short*)&((regs)->reg_EAX))[0])
-#define DIOC_BX(regs) (((unsigned short*)&((regs)->reg_EBX))[0])
-#define DIOC_CX(regs) (((unsigned short*)&((regs)->reg_ECX))[0])
-#define DIOC_DX(regs) (((unsigned short*)&((regs)->reg_EDX))[0])
-
-#define DIOC_SET_CARRY(regs) (((regs)->reg_Flags)|=0x00000001)
-
 /***********************************************************************
  *           DeviceIoControl   (VWIN32.VXD.@)
  */
@@ -106,9 +133,16 @@ BOOL WINAPI VWIN32_DeviceIoControl(DWORD dwIoControlCode,
     case VWIN32_DIOC_DOS_DRIVEINFO:
         {
             CONTEXT86 cxt;
-            DIOC_REGISTERS *pIn  = (DIOC_REGISTERS *)lpvInBuffer;
-            DIOC_REGISTERS *pOut = (DIOC_REGISTERS *)lpvOutBuffer;
+            DIOC_REGISTERS *pIn  = lpvInBuffer;
+            DIOC_REGISTERS *pOut = lpvOutBuffer;
             BYTE intnum = 0;
+            CallBuiltinHandler handler;
+
+            if (!(handler = load_builtin_handler()))
+            {
+                pOut->reg_Flags |= 0x0001;
+                return FALSE;
+            }
 
             TRACE( "Control '%s': "
                    "eax=0x%08x, ebx=0x%08x, ecx=0x%08x, "
@@ -143,7 +177,7 @@ BOOL WINAPI VWIN32_DeviceIoControl(DWORD dwIoControlCode,
                 break;
             }
 
-            CallBuiltinHandler( &cxt, intnum );
+            handler( &cxt, intnum );
             CONTEXT_2_DIOCRegs( &cxt, pOut );
         }
         return TRUE;
@@ -191,12 +225,19 @@ DWORD WINAPI VWIN32_VxDCall( DWORD service, CONTEXT86 *context )
         {
             DWORD callnum = stack32_pop(context);
             DWORD parm    = stack32_pop(context);
+            CallBuiltinHandler handler;
 
             TRACE("Int31/DPMI dispatch(%08x)\n", callnum);
 
+            if (!(handler = load_builtin_handler()))
+            {
+                context->EFlags |= 0x0001;
+                return 0;
+            }
+
             context->Eax = callnum;
             context->Ecx = parm;
-            CallBuiltinHandler( context, 0x31 );
+            handler( context, 0x31 );
             return LOWORD(context->Eax);
         }
     case 0x002a: /* Int41 dispatch - parm = int41 service number */

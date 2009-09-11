@@ -32,58 +32,9 @@
  */
 DWORD getInterfaceStatsByName(const char *name, PMIB_IFROW entry);
 
-/* Gets ICMP statistics into stats.  Returns ERROR_INVALID_PARAMETER if stats is
- * NULL, NO_ERROR otherwise.
- */
-DWORD getICMPStats(MIB_ICMP *stats);
-
-/* Gets IP statistics into stats.  Returns ERROR_INVALID_PARAMETER if stats is
- * NULL, NO_ERROR otherwise.
- */
-DWORD getIPStats(PMIB_IPSTATS stats);
-
-/* Gets TCP statistics into stats.  Returns ERROR_INVALID_PARAMETER if stats is
- * NULL, NO_ERROR otherwise.
- */
-DWORD getTCPStats(MIB_TCPSTATS *stats);
-
-/* Gets UDP statistics into stats.  Returns ERROR_INVALID_PARAMETER if stats is
- * NULL, NO_ERROR otherwise.
- */
-DWORD getUDPStats(MIB_UDPSTATS *stats);
-
-/* Returns the number of entries in the route table. */
-DWORD getNumRoutes(void);
-
-/* Allocates the route table from heap and returns it to you in
- * *ppIpForwardTable.  Returns NO_ERROR on success, something else on failure.
- */
-DWORD getRouteTable(PMIB_IPFORWARDTABLE *ppIpForwardTable, HANDLE heap,
- DWORD flags);
-
-/* Returns the number of entries in the arp table. */
-DWORD getNumArpEntries(void);
-
-/* Allocates the arp table from heap and returns it to you in *ppIpNetTable.
- * Returns NO_ERROR on success, something else on failure.
- */
-DWORD getArpTable(PMIB_IPNETTABLE *ppIpNetTable, HANDLE heap, DWORD flags);
-
-/* Returns the number of entries in the UDP state table. */
-DWORD getNumUdpEntries(void);
-
-/* Allocates the UDP state table from heap and returns it to you in *ppUdpTable.
- * Returns NO_ERROR on success, something else on failure.
- */
-DWORD getUdpTable(PMIB_UDPTABLE *ppUdpTable, HANDLE heap, DWORD flags);
-
-/* Returns the number of entries in the TCP state table. */
-DWORD getNumTcpEntries(void);
-
-/* Allocates the TCP state table from heap and returns it to you in *ppTcpTable.
- * Returns NO_ERROR on success, something else on failure.
- */
-DWORD getTcpTable(PMIB_TCPTABLE *ppTcpTable, DWORD maxEntries, HANDLE heap,
-                  DWORD flags);
+DWORD WINAPI AllocateAndGetUdpTableFromStack(PMIB_UDPTABLE *ppUdpTable, BOOL bOrder, HANDLE heap, DWORD flags);
+DWORD WINAPI AllocateAndGetTcpTableFromStack(PMIB_TCPTABLE *ppTcpTable, BOOL bOrder, HANDLE heap, DWORD flags);
+DWORD WINAPI AllocateAndGetIpNetTableFromStack(PMIB_IPNETTABLE *ppIpNetTable, BOOL bOrder, HANDLE heap, DWORD flags);
+DWORD WINAPI AllocateAndGetIpForwardTableFromStack(PMIB_IPFORWARDTABLE *ppIpForwardTable, BOOL bOrder, HANDLE heap, DWORD flags);
 
 #endif /* ndef WINE_IPSTATS_H_ */

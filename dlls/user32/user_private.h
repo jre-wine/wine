@@ -82,6 +82,7 @@ static inline HLOCAL16 LOCAL_Free( HANDLE16 ds, HLOCAL16 handle )
 #define GET_DWORD(ptr) (*(const DWORD *)(ptr))
 
 #define WM_SYSTIMER	    0x0118
+#define WM_POPUPSYSTEMMENU  0x0313
 
 /* internal messages codes */
 enum wine_internal_message
@@ -103,61 +104,63 @@ struct tagCURSORICONINFO;
 
 typedef struct tagUSER_DRIVER {
     /* keyboard functions */
-    HKL    (*pActivateKeyboardLayout)(HKL, UINT);
-    void   (*pBeep)(void);
-    SHORT  (*pGetAsyncKeyState)(INT);
-    INT    (*pGetKeyNameText)(LONG, LPWSTR, INT);
-    HKL    (*pGetKeyboardLayout)(DWORD);
-    UINT   (*pGetKeyboardLayoutList)(INT, HKL *);
-    BOOL   (*pGetKeyboardLayoutName)(LPWSTR);
-    HKL    (*pLoadKeyboardLayout)(LPCWSTR, UINT);
-    UINT   (*pMapVirtualKeyEx)(UINT, UINT, HKL);
-    UINT   (*pSendInput)(UINT, LPINPUT, int);
-    INT    (*pToUnicodeEx)(UINT, UINT, LPBYTE, LPWSTR, int, UINT, HKL);
-    BOOL   (*pUnloadKeyboardLayout)(HKL);
-    SHORT  (*pVkKeyScanEx)(WCHAR, HKL);
+    HKL    (CDECL *pActivateKeyboardLayout)(HKL, UINT);
+    void   (CDECL *pBeep)(void);
+    SHORT  (CDECL *pGetAsyncKeyState)(INT);
+    INT    (CDECL *pGetKeyNameText)(LONG, LPWSTR, INT);
+    HKL    (CDECL *pGetKeyboardLayout)(DWORD);
+    BOOL   (CDECL *pGetKeyboardLayoutName)(LPWSTR);
+    HKL    (CDECL *pLoadKeyboardLayout)(LPCWSTR, UINT);
+    UINT   (CDECL *pMapVirtualKeyEx)(UINT, UINT, HKL);
+    UINT   (CDECL *pSendInput)(UINT, LPINPUT, int);
+    INT    (CDECL *pToUnicodeEx)(UINT, UINT, const BYTE *, LPWSTR, int, UINT, HKL);
+    BOOL   (CDECL *pUnloadKeyboardLayout)(HKL);
+    SHORT  (CDECL *pVkKeyScanEx)(WCHAR, HKL);
     /* mouse functions */
-    void   (*pSetCursor)(struct tagCURSORICONINFO *);
-    BOOL   (*pGetCursorPos)(LPPOINT);
-    BOOL   (*pSetCursorPos)(INT,INT);
-    BOOL   (*pClipCursor)(LPCRECT);
+    void   (CDECL *pSetCursor)(struct tagCURSORICONINFO *);
+    BOOL   (CDECL *pGetCursorPos)(LPPOINT);
+    BOOL   (CDECL *pSetCursorPos)(INT,INT);
+    BOOL   (CDECL *pClipCursor)(LPCRECT);
     /* screen saver functions */
-    BOOL   (*pGetScreenSaveActive)(void);
-    void   (*pSetScreenSaveActive)(BOOL);
+    BOOL   (CDECL *pGetScreenSaveActive)(void);
+    void   (CDECL *pSetScreenSaveActive)(BOOL);
     /* clipboard functions */
-    INT    (*pAcquireClipboard)(HWND);                     /* Acquire selection */
-    BOOL   (*pCountClipboardFormats)(void);                /* Count available clipboard formats */
-    void   (*pEmptyClipboard)(BOOL);                       /* Empty clipboard data */
-    void   (*pEndClipboardUpdate)(void);                   /* End clipboard update */
-    UINT   (*pEnumClipboardFormats)(UINT);                 /* Enumerate clipboard formats */
-    BOOL   (*pGetClipboardData)(UINT, HANDLE16*, HANDLE*); /* Get specified selection data */
-    INT    (*pGetClipboardFormatName)(UINT, LPWSTR, UINT); /* Get a clipboard format name */
-    BOOL   (*pIsClipboardFormatAvailable)(UINT);           /* Check if specified format is available */
-    UINT   (*pRegisterClipboardFormat)(LPCWSTR);           /* Register a clipboard format */
-    BOOL   (*pSetClipboardData)(UINT, HANDLE16, HANDLE, BOOL);   /* Set specified selection data */
+    INT    (CDECL *pAcquireClipboard)(HWND);                     /* Acquire selection */
+    BOOL   (CDECL *pCountClipboardFormats)(void);                /* Count available clipboard formats */
+    void   (CDECL *pEmptyClipboard)(BOOL);                       /* Empty clipboard data */
+    void   (CDECL *pEndClipboardUpdate)(void);                   /* End clipboard update */
+    UINT   (CDECL *pEnumClipboardFormats)(UINT);                 /* Enumerate clipboard formats */
+    BOOL   (CDECL *pGetClipboardData)(UINT, HANDLE16*, HANDLE*); /* Get specified selection data */
+    INT    (CDECL *pGetClipboardFormatName)(UINT, LPWSTR, UINT); /* Get a clipboard format name */
+    BOOL   (CDECL *pIsClipboardFormatAvailable)(UINT);           /* Check if specified format is available */
+    UINT   (CDECL *pRegisterClipboardFormat)(LPCWSTR);           /* Register a clipboard format */
+    BOOL   (CDECL *pSetClipboardData)(UINT, HANDLE16, HANDLE, BOOL);   /* Set specified selection data */
     /* display modes */
-    LONG   (*pChangeDisplaySettingsEx)(LPCWSTR,LPDEVMODEW,HWND,DWORD,LPVOID);
-    BOOL   (*pEnumDisplayMonitors)(HDC,LPRECT,MONITORENUMPROC,LPARAM);
-    BOOL   (*pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
-    BOOL   (*pGetMonitorInfo)(HMONITOR,MONITORINFO*);
+    LONG   (CDECL *pChangeDisplaySettingsEx)(LPCWSTR,LPDEVMODEW,HWND,DWORD,LPVOID);
+    BOOL   (CDECL *pEnumDisplayMonitors)(HDC,LPRECT,MONITORENUMPROC,LPARAM);
+    BOOL   (CDECL *pEnumDisplaySettingsEx)(LPCWSTR,DWORD,LPDEVMODEW,DWORD);
+    BOOL   (CDECL *pGetMonitorInfo)(HMONITOR,MONITORINFO*);
     /* windowing functions */
-    BOOL   (*pCreateDesktopWindow)(HWND);
-    BOOL   (*pCreateWindow)(HWND);
-    void   (*pDestroyWindow)(HWND);
-    void   (*pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
-    DWORD  (*pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
-    void   (*pReleaseDC)(HWND,HDC);
-    BOOL   (*pScrollDC)(HDC, INT, INT, const RECT *, const RECT *, HRGN, LPRECT);
-    void   (*pSetCapture)(HWND,UINT);
-    void   (*pSetFocus)(HWND);
-    void   (*pSetParent)(HWND,HWND,HWND);
-    void   (*pSetWindowPos)(HWND,HWND,UINT,const RECT *,const RECT *,const RECT *,const RECT *);
-    int    (*pSetWindowRgn)(HWND,HRGN,BOOL);
-    void   (*pSetWindowIcon)(HWND,UINT,HICON);
-    void   (*pSetWindowStyle)(HWND,DWORD);
-    void   (*pSetWindowText)(HWND,LPCWSTR);
-    LRESULT (*pSysCommand)(HWND,WPARAM,LPARAM);
-    LRESULT (*pWindowMessage)(HWND,UINT,WPARAM,LPARAM);
+    BOOL   (CDECL *pCreateDesktopWindow)(HWND);
+    BOOL   (CDECL *pCreateWindow)(HWND);
+    void   (CDECL *pDestroyWindow)(HWND);
+    void   (CDECL *pGetDC)(HDC,HWND,HWND,const RECT *,const RECT *,DWORD);
+    DWORD  (CDECL *pMsgWaitForMultipleObjectsEx)(DWORD,const HANDLE*,DWORD,DWORD,DWORD);
+    void   (CDECL *pReleaseDC)(HWND,HDC);
+    BOOL   (CDECL *pScrollDC)(HDC, INT, INT, const RECT *, const RECT *, HRGN, LPRECT);
+    void   (CDECL *pSetCapture)(HWND,UINT);
+    void   (CDECL *pSetFocus)(HWND);
+    void   (CDECL *pSetLayeredWindowAttributes)(HWND,COLORREF,BYTE,DWORD);
+    void   (CDECL *pSetParent)(HWND,HWND,HWND);
+    int    (CDECL *pSetWindowRgn)(HWND,HRGN,BOOL);
+    void   (CDECL *pSetWindowIcon)(HWND,UINT,HICON);
+    void   (CDECL *pSetWindowStyle)(HWND,INT,STYLESTRUCT*);
+    void   (CDECL *pSetWindowText)(HWND,LPCWSTR);
+    UINT   (CDECL *pShowWindow)(HWND,INT,RECT*,UINT);
+    LRESULT (CDECL *pSysCommand)(HWND,WPARAM,LPARAM);
+    LRESULT (CDECL *pWindowMessage)(HWND,UINT,WPARAM,LPARAM);
+    void   (CDECL *pWindowPosChanging)(HWND,HWND,UINT,const RECT *,const RECT *,RECT *);
+    void   (CDECL *pWindowPosChanged)(HWND,HWND,UINT,const RECT *,const RECT *,const RECT *,const RECT *);
 } USER_DRIVER;
 
 extern const USER_DRIVER *USER_Driver DECLSPEC_HIDDEN;
@@ -204,9 +207,10 @@ struct user_thread_info
     HCURSOR                       cursor;                 /* Current cursor */
     INT                           cursor_count;           /* Cursor show count */
     UINT                          active_hooks;           /* Bitmap of active hooks */
-    HWND                          desktop;                /* Desktop window */
+    HWND                          top_window;             /* Desktop window */
+    HWND                          msg_window;             /* HWND_MESSAGE parent window */
 
-    ULONG                         pad[10];                /* Available for more data */
+    ULONG                         pad[9];                 /* Available for more data */
 };
 
 struct hook_extra_info
@@ -349,5 +353,11 @@ typedef struct
 #include "poppack.h"
 
 extern void CURSORICON_FreeModuleIcons( HMODULE16 hModule ) DECLSPEC_HIDDEN;
+
+/* Mingw's assert() imports MessageBoxA and gets confused by user32 exporting it */
+#ifdef __MINGW32__
+#undef assert
+#define assert(expr) ((void)0)
+#endif
 
 #endif /* __WINE_USER_PRIVATE_H */

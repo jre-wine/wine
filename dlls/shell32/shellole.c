@@ -47,9 +47,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
-extern HRESULT WINAPI IFSFolder_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVOID * ppv);
-
-static const WCHAR sShell32[12] = {'S','H','E','L','L','3','2','.','D','L','L','\0'};
+extern INT WINAPI SHStringFromGUIDW(REFGUID guid, LPWSTR lpszDest, INT cchMax);  /* shlwapi.24 */
 
 /**************************************************************************
  * Default ClassFactory types
@@ -62,40 +60,25 @@ static const struct {
 	REFIID			riid;
 	LPFNCREATEINSTANCE	lpfnCI;
 } InterfaceTable[] = {
-	{&CLSID_ShellFSFolder,	&IFSFolder_Constructor},
-	{&CLSID_MyComputer,	&ISF_MyComputer_Constructor},
-	{&CLSID_NetworkPlaces,  &ISF_NetworkPlaces_Constructor},
-	{&CLSID_ShellDesktop,	&ISF_Desktop_Constructor},
-	{&CLSID_ShellLink,	&IShellLink_Constructor},
-	{&CLSID_DragDropHelper, &IDropTargetHelper_Constructor},
-	{&CLSID_ControlPanel,	&IControlPanel_Constructor},
-	{&CLSID_AutoComplete,   &IAutoComplete_Constructor},
-	{&CLSID_UnixFolder,     &UnixFolder_Constructor},
-	{&CLSID_UnixDosFolder,  &UnixDosFolder_Constructor},
-	{&CLSID_FolderShortcut, &FolderShortcut_Constructor},
-	{&CLSID_MyDocuments,    &MyDocuments_Constructor},
-	{&CLSID_RecycleBin,     &RecycleBin_Constructor},
+	{&CLSID_ShellFSFolder,	IFSFolder_Constructor},
+	{&CLSID_MyComputer,	ISF_MyComputer_Constructor},
+	{&CLSID_NetworkPlaces,  ISF_NetworkPlaces_Constructor},
+	{&CLSID_ShellDesktop,	ISF_Desktop_Constructor},
+	{&CLSID_ShellItem,	IShellItem_Constructor},
+	{&CLSID_ShellLink,	IShellLink_Constructor},
+	{&CLSID_DragDropHelper, IDropTargetHelper_Constructor},
+	{&CLSID_ControlPanel,	IControlPanel_Constructor},
+	{&CLSID_AutoComplete,   IAutoComplete_Constructor},
+	{&CLSID_UnixFolder,     UnixFolder_Constructor},
+	{&CLSID_UnixDosFolder,  UnixDosFolder_Constructor},
+	{&CLSID_FolderShortcut, FolderShortcut_Constructor},
+	{&CLSID_MyDocuments,    MyDocuments_Constructor},
+	{&CLSID_RecycleBin,     RecycleBin_Constructor},
+	{&CLSID_QueryAssociations, QueryAssociations_Constructor},
 	{NULL,NULL}
 };
 
 
-/* FIXME: this should be SHLWAPI.24 since we can't yet import by ordinal */
-
-DWORD WINAPI __SHGUIDToStringW (REFGUID guid, LPWSTR str)
-{
-    WCHAR sFormat[52] = {'{','%','0','8','l','x','-','%','0','4',
-		         'x','-','%','0','4','x','-','%','0','2',
-                         'x','%','0','2','x','-','%','0','2','x',
-			 '%','0','2','x','%','0','2','x','%','0',
-			 '2','x','%','0','2','x','%','0','2','x',
-			 '}','\0'};
-
-    return wsprintfW ( str, sFormat,
-             guid->Data1, guid->Data2, guid->Data3,
-             guid->Data4[0], guid->Data4[1], guid->Data4[2], guid->Data4[3],
-             guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7] );
-
-}
 
 /*************************************************************************
  * SHCoCreateInstance [SHELL32.102]
@@ -155,7 +138,7 @@ HRESULT WINAPI SHCoCreateInstance(
         }
 
 	/* we look up the dll path in the registry */
-        __SHGUIDToStringW(myclsid, sClassID);
+        SHStringFromGUIDW(myclsid, sClassID, sizeof(sClassID)/sizeof(WCHAR));
 	lstrcpyW(sKeyName, sCLSID);
 	lstrcatW(sKeyName, sClassID);
 	lstrcatW(sKeyName, sInProcServer32);
@@ -183,7 +166,7 @@ HRESULT WINAPI SHCoCreateInstance(
 	        FreeLibrary( hLibrary );
 		hres = E_ACCESSDENIED;
 	        goto end;
-	    } else if (! SUCCEEDED(hres = DllGetClassObject(myclsid, &IID_IClassFactory, (LPVOID*)&pcf))) {
+            } else if (FAILED(hres = DllGetClassObject(myclsid, &IID_IClassFactory, (LPVOID*)&pcf))) {
 		    TRACE("GetClassObject failed 0x%08x\n", hres);
 		    goto end;
 	    }
@@ -537,7 +520,7 @@ void WINAPI DragAcceptFiles(HWND hWnd, BOOL b)
 void WINAPI DragFinish(HDROP h)
 {
 	TRACE("\n");
-	GlobalFree((HGLOBAL)h);
+	GlobalFree(h);
 }
 
 /*************************************************************************
@@ -550,7 +533,7 @@ BOOL WINAPI DragQueryPoint(HDROP hDrop, POINT *p)
 
 	TRACE("\n");
 
-	lpDropFileStruct = (DROPFILES *) GlobalLock(hDrop);
+	lpDropFileStruct = GlobalLock(hDrop);
 
         *p = lpDropFileStruct->pt;
 	bRet = lpDropFileStruct->fNC;
@@ -571,7 +554,7 @@ UINT WINAPI DragQueryFileA(
 {
 	LPSTR lpDrop;
 	UINT i = 0;
-	DROPFILES *lpDropFileStruct = (DROPFILES *) GlobalLock(hDrop);
+	DROPFILES *lpDropFileStruct = GlobalLock(hDrop);
 
 	TRACE("(%p, %x, %p, %u)\n",	hDrop,lFile,lpszFile,lLength);
 
@@ -626,7 +609,7 @@ UINT WINAPI DragQueryFileW(
 {
 	LPWSTR lpwDrop;
 	UINT i = 0;
-	DROPFILES *lpDropFileStruct = (DROPFILES *) GlobalLock(hDrop);
+	DROPFILES *lpDropFileStruct = GlobalLock(hDrop);
 
 	TRACE("(%p, %x, %p, %u)\n", hDrop,lFile,lpszwFile,lLength);
 

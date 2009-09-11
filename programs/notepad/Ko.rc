@@ -5,6 +5,7 @@
  *  Proofread 1998 by David Lee Lambert <lamber45@egr.msu.edu>
  *  Copyright 2002 Sylvain Petreolle <spetreolle@yahoo.fr>
  *  Copyright 2007 Bang Jun-Young <junyoung@mogua.com>
+ *  Copyright 2009  YunSong Hwang <hys545@dreamwiz.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,6 +21,8 @@
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
+
+#include "notepad_res.h"
 
 LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 
@@ -54,6 +57,7 @@ POPUP "편집(&E)" {
 POPUP "찾기(&S)" {
   MENUITEM "찾기(&S)...\tCtrl+F",       CMD_SEARCH
   MENUITEM "다음 찾기(&N)\tF3",         CMD_SEARCH_NEXT
+  MENUITEM "바꾸기(&R)...\tCtrl+H", CMD_REPLACE
  }
 POPUP "도움말(&H)" {
   MENUITEM "항목(&C)",                  CMD_HELP_CONTENTS
@@ -68,7 +72,7 @@ POPUP "도움말(&H)" {
 
 DIALOG_PAGESETUP DIALOG 0, 0, 225, 95
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 CAPTION "페이지 설정"
 {
 LTEXT    "머리글(&H):",  0x140,   10, 07, 40, 15
@@ -110,12 +114,22 @@ STRING_TOOLARGE,                                "%s 파일이 너무 커서 메모장으로�
 다른 편집기를 사용하십시오."
 STRING_NOTEXT,                                  "입력한 내용이 없습니다.\
 \n내용을 입력한 후 재시도하십시오"
-STRING_DOESNOTEXIST,                            "%s\n파일이 없습니다.\n\n \
+STRING_DOESNOTEXIST,                            "%s\ 파일이 없습니다.\n\n \
 파일을 새로 만드시겠습니까?"
-STRING_NOTSAVED,                                "%s\n파일 내용이 변경되었습니다.\n\n \
+STRING_NOTSAVED,                                "%s\ 파일 내용이 변경되었습니다.\n\n \
 변경 내용을 저장하시겠습니까?"
 STRING_NOTFOUND,                                "%s 문자열을 찾을 수 없습니다."
 STRING_OUT_OF_MEMORY,                           "이 작업을 완료하는 데 필요한 메모리가 부족합니다.\
-\n사용 가능한 메모리의 양을 확보하기 위해 하나 이상의 응용 프로그램을 닫아 주십시오.\n"
+\n사용 가능한 메모리의 양을 확보하기 위해 하나 이상의 응용 프로그램을 닫아 주십시오."
 
+
+STRING_UNICODE_LE,     "유니코드 (UTF-16)"
+STRING_UNICODE_BE,     "유니코드  (UTF-16 빅-엔디언)"
+
+STRING_LOSS_OF_UNICODE_CHARACTERS,         "%s\n\
+유니코드 문자를 포함하고 있는 이 파일은 만약 당신이 %s 인코딩으로\n\
+파일을 저장하면 문자의 손실이 있을 것입니다.\n\
+이 문자를 보존하려면  취소를 클릭하고, 인코딩 드롭다운목록의 유니코드\n\
+옵션 중의 하나를  선택하십시오t.\n\
+계속하시겠습니까?"
 }

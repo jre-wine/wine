@@ -29,7 +29,6 @@
 
 #include "wine/test.h"
 #include "dsound.h"
-#include "dxerr8.h"
 #include "mmreg.h"
 #include "dsound_test.h"
 
@@ -49,7 +48,7 @@ char* wave_generate_la(WAVEFORMATEX* wfx, double duration, DWORD* size)
 
     nb_samples=(int)(duration*wfx->nSamplesPerSec);
     *size=nb_samples*wfx->nBlockAlign;
-    b=buf=malloc(*size);
+    b=buf=HeapAlloc(GetProcessHeap(), 0, *size);
     for (i=0;i<nb_samples;i++) {
         double y=sin(440.0*2*PI*i/wfx->nSamplesPerSec);
         if (wfx->wBitsPerSample==8) {
@@ -185,10 +184,13 @@ static int buffer_refill(play_state_t* state, DWORD size)
     if (size>state->wave_len-state->written)
         size=state->wave_len-state->written;
 
+    /* some broken apps like Navyfield mistakenly pass NULL for a ppValue */
+    rc=IDirectSoundBuffer_Lock(state->dsbo,state->offset,size,
+                               &ptr1,NULL,&ptr2,&len2,0);
+    ok(rc==DSERR_INVALIDPARAM,"expected %08x got %08x\n",DSERR_INVALIDPARAM, rc);
     rc=IDirectSoundBuffer_Lock(state->dsbo,state->offset,size,
                                &ptr1,&len1,&ptr2,&len2,0);
-    ok(rc==DS_OK,"IDirectSoundBuffer_Lock() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_Lock() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return -1;
 
@@ -199,9 +201,11 @@ static int buffer_refill(play_state_t* state, DWORD size)
         state->written+=len2;
     }
     state->offset=state->written % state->buffer_size;
+    /* some apps blindly pass &ptr1 instead of ptr1 */
+    rc=IDirectSoundBuffer_Unlock(state->dsbo,&ptr1,len1,ptr2,len2);
+    ok(rc==DSERR_INVALIDPARAM, "IDDirectSoundBuffer_Unlock(): expected %08x got %08x, %p %p\n",DSERR_INVALIDPARAM, rc, &ptr1, ptr1);
     rc=IDirectSoundBuffer_Unlock(state->dsbo,ptr1,len1,ptr2,len2);
-    ok(rc==DS_OK,"IDirectSoundBuffer_Unlock() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_Unlock() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return -1;
     return size;
@@ -216,8 +220,7 @@ static int buffer_silence(play_state_t* state, DWORD size)
 
     rc=IDirectSoundBuffer_Lock(state->dsbo,state->offset,size,
                                &ptr1,&len1,&ptr2,&len2,0);
-    ok(rc==DS_OK,"IDirectSoundBuffer_Lock() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_Lock() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return -1;
 
@@ -228,8 +231,7 @@ static int buffer_silence(play_state_t* state, DWORD size)
     }
     state->offset=(state->offset+size) % state->buffer_size;
     rc=IDirectSoundBuffer_Unlock(state->dsbo,ptr1,len1,ptr2,len2);
-    ok(rc==DS_OK,"IDirectSoundBuffer_Unlock() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_Unlock() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return -1;
     return size;
@@ -241,8 +243,7 @@ static int buffer_service(play_state_t* state)
     HRESULT rc;
 
     rc=IDirectSoundBuffer_GetCurrentPosition(state->dsbo,&play_pos,NULL);
-    ok(rc==DS_OK,"IDirectSoundBuffer_GetCurrentPosition() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_GetCurrentPosition() failed: %08x\n", rc);
     if (rc!=DS_OK) {
         goto STOP;
     }
@@ -301,8 +302,7 @@ STOP:
     if (winetest_debug > 1)
         trace("stopping playback\n");
     rc=IDirectSoundBuffer_Stop(state->dsbo);
-    ok(rc==DS_OK,"IDirectSoundBuffer_Stop() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_Stop() failed: %08x\n", rc);
     return 0;
 }
 
@@ -322,8 +322,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
     if (set_frequency) {
         rc=IDirectSoundBuffer_SetFrequency(*dsbo,frequency);
         ok(rc==DS_OK||rc==DSERR_CONTROLUNAVAIL,
-           "IDirectSoundBuffer_SetFrequency() failed to set frequency "
-           "%s\n",DXGetErrorString8(rc));
+           "IDirectSoundBuffer_SetFrequency() failed to set frequency %08x\n",rc);
         if (rc!=DS_OK)
             return;
     }
@@ -331,19 +330,18 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
     /* DSOUND: Error: Invalid caps pointer */
     rc=IDirectSoundBuffer_GetCaps(*dsbo,0);
     ok(rc==DSERR_INVALIDPARAM,"IDirectSoundBuffer_GetCaps() should have "
-       "returned DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+       "returned DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
     ZeroMemory(&dsbcaps, sizeof(dsbcaps));
 
     /* DSOUND: Error: Invalid caps pointer */
     rc=IDirectSoundBuffer_GetCaps(*dsbo,&dsbcaps);
     ok(rc==DSERR_INVALIDPARAM,"IDirectSoundBuffer_GetCaps() should have "
-       "returned DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+       "returned DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
     dsbcaps.dwSize=sizeof(dsbcaps);
     rc=IDirectSoundBuffer_GetCaps(*dsbo,&dsbcaps);
-    ok(rc==DS_OK,"IDirectSoundBuffer_GetCaps() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_GetCaps() failed: %08x\n", rc);
     if (rc==DS_OK && winetest_debug > 1) {
         trace("    Caps: flags=0x%08x size=%d\n",dsbcaps.dwFlags,
               dsbcaps.dwBufferBytes);
@@ -353,7 +351,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
     size=0;
     rc=IDirectSoundBuffer_GetFormat(*dsbo,NULL,0,&size);
     ok(rc==DS_OK && size!=0,"IDirectSoundBuffer_GetFormat() should have "
-       "returned the needed size: rc=%s size=%d\n",DXGetErrorString8(rc),size);
+       "returned the needed size: rc=%08x size=%d\n",rc,size);
 
     ok(size == sizeof(WAVEFORMATEX) || size == sizeof(WAVEFORMATEXTENSIBLE),
        "Expected a correct structure size, got %d\n", size);
@@ -367,7 +365,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         wfx = wfxe.Format;
     }
     ok(rc==DS_OK,
-        "IDirectSoundBuffer_GetFormat() failed: %s\n", DXGetErrorString8(rc));
+        "IDirectSoundBuffer_GetFormat() failed: %08x\n", rc);
     if (rc==DS_OK && winetest_debug > 1) {
         trace("    Format: %s tag=0x%04x %dx%dx%d avg.B/s=%d align=%d\n",
               is_primary ? "Primary" : "Secondary",
@@ -378,13 +376,13 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
     /* DSOUND: Error: Invalid frequency buffer */
     rc=IDirectSoundBuffer_GetFrequency(*dsbo,0);
     ok(rc==DSERR_INVALIDPARAM,"IDirectSoundBuffer_GetFrequency() should have "
-       "returned DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+       "returned DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
     /* DSOUND: Error: Primary buffers don't support CTRLFREQUENCY */
     rc=IDirectSoundBuffer_GetFrequency(*dsbo,&freq);
     ok((rc==DS_OK && !is_primary) || (rc==DSERR_CONTROLUNAVAIL&&is_primary) ||
        (rc==DSERR_CONTROLUNAVAIL&&!(dsbcaps.dwFlags&DSBCAPS_CTRLFREQUENCY)),
-       "IDirectSoundBuffer_GetFrequency() failed: %s\n",DXGetErrorString8(rc));
+       "IDirectSoundBuffer_GetFrequency() failed: %08x\n",rc);
     if (rc==DS_OK) {
         DWORD f = set_frequency?frequency:wfx.nSamplesPerSec;
         ok(freq==f,"The frequency returned by GetFrequency "
@@ -394,11 +392,10 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
     /* DSOUND: Error: Invalid status pointer */
     rc=IDirectSoundBuffer_GetStatus(*dsbo,0);
     ok(rc==DSERR_INVALIDPARAM,"IDirectSoundBuffer_GetStatus() should have "
-       "returned DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+       "returned DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
     rc=IDirectSoundBuffer_GetStatus(*dsbo,&status);
-    ok(rc==DS_OK,"IDirectSoundBuffer_GetStatus() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSoundBuffer_GetStatus() failed: %08x\n", rc);
     ok(status==0,"status=0x%x instead of 0\n",status);
 
     if (is_primary) {
@@ -406,28 +403,26 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         /* We must call SetCooperativeLevel to be allowed to call SetFormat */
         /* DSOUND: Setting DirectSound cooperative level to DSSCL_PRIORITY */
         rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_PRIORITY);
-        ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: "
-           "%s\n",DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: %08x\n",rc);
         if (rc!=DS_OK)
             return;
 
         /* DSOUND: Error: Invalid format pointer */
         rc=IDirectSoundBuffer_SetFormat(*dsbo,0);
         ok(rc==DSERR_INVALIDPARAM,"IDirectSoundBuffer_SetFormat() should have "
-           "returned DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+           "returned DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
         init_format(&wfx2,WAVE_FORMAT_PCM,11025,16,2);
         rc=IDirectSoundBuffer_SetFormat(*dsbo,&wfx2);
-        ok(rc==DS_OK,"IDirectSoundBuffer_SetFormat(%s) failed: %s\n",
-           format_string(&wfx2), DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer_SetFormat(%s) failed: %08x\n",
+           format_string(&wfx2), rc);
 
         /* There is no guarantee that SetFormat will actually change the
 	 * format to what we asked for. It depends on what the soundcard
 	 * supports. So we must re-query the format.
 	 */
         rc=IDirectSoundBuffer_GetFormat(*dsbo,&wfx,sizeof(wfx),NULL);
-        ok(rc==DS_OK,"IDirectSoundBuffer_GetFormat() failed: %s\n",
-           DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer_GetFormat() failed: %08x\n", rc);
         if (rc==DS_OK &&
             (wfx.wFormatTag!=wfx2.wFormatTag ||
              wfx.nSamplesPerSec!=wfx2.nSamplesPerSec ||
@@ -444,8 +439,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         ZeroMemory(&new_dsbcaps, sizeof(new_dsbcaps));
         new_dsbcaps.dwSize = sizeof(new_dsbcaps);
         rc=IDirectSoundBuffer_GetCaps(*dsbo,&new_dsbcaps);
-        ok(rc==DS_OK,"IDirectSoundBuffer_GetCaps() failed: %s\n",
-           DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer_GetCaps() failed: %08x\n", rc);
         if (rc==DS_OK && winetest_debug > 1) {
             trace("    new Caps: flags=0x%08x size=%d\n",new_dsbcaps.dwFlags,
                   new_dsbcaps.dwBufferBytes);
@@ -467,8 +461,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         /* Set the CooperativeLevel back to normal */
         /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
         rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
-        ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: "
-           "%s\n",DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %08x\n",rc);
     }
 
     if (play) {
@@ -498,7 +491,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),
                                                 DSSCL_WRITEPRIMARY);
             ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_WRITEPRIMARY) "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
             if (rc!=DS_OK)
                 return;
         }
@@ -507,8 +500,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
 
             rc=IDirectSoundBuffer_QueryInterface(*dsbo,&IID_IDirectSound3DBuffer,
                                                  (LPVOID *)&buffer);
-            ok(rc==DS_OK,"IDirectSoundBuffer_QueryInterface() failed: %s\n",
-               DXGetErrorString8(rc));
+            ok(rc==DS_OK,"IDirectSoundBuffer_QueryInterface() failed: %08x\n", rc);
             if (rc!=DS_OK)
                 return;
 
@@ -516,8 +508,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             rc=IDirectSoundBuffer_QueryInterface(*dsbo, &IID_IDirectSoundBuffer,
                                                  (LPVOID *)&temp_buffer);
             ok(rc==DS_OK && temp_buffer!=NULL,
-               "IDirectSoundBuffer_QueryInterface() failed: %s\n",
-               DXGetErrorString8(rc));
+               "IDirectSoundBuffer_QueryInterface() failed: %08x\n", rc);
             ok(temp_buffer==*dsbo,"COM interface broken: %p != %p\n",
                temp_buffer,*dsbo);
             ref=IDirectSoundBuffer_Release(temp_buffer);
@@ -529,8 +520,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                                                    &IID_IDirectSoundBuffer,
                                                    (LPVOID *)&temp_buffer);
             ok(rc==DS_OK && temp_buffer!=NULL,
-               "IDirectSound3DBuffer_QueryInterface() failed: %s\n",
-               DXGetErrorString8(rc));
+               "IDirectSound3DBuffer_QueryInterface() failed: %08x\n", rc);
             ok(temp_buffer==*dsbo,"COM interface broken: %p != %p\n",
                temp_buffer,*dsbo);
             ref=IDirectSoundBuffer_Release(temp_buffer);
@@ -545,41 +535,37 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                                                    &IID_IDirectSoundBuffer,
                                                    (LPVOID *)dsbo);
             ok(rc==DS_OK && *dsbo!=NULL,"IDirectSound3DBuffer_QueryInterface() "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
 
             /* DSOUND: Error: Invalid buffer */
             rc=IDirectSound3DBuffer_GetAllParameters(buffer,0);
             ok(rc==DSERR_INVALIDPARAM,"IDirectSound3DBuffer_GetAllParameters() "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
 
             ZeroMemory(&buffer_param, sizeof(buffer_param));
 
             /* DSOUND: Error: Invalid buffer */
             rc=IDirectSound3DBuffer_GetAllParameters(buffer,&buffer_param);
             ok(rc==DSERR_INVALIDPARAM,"IDirectSound3DBuffer_GetAllParameters() "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
 
             buffer_param.dwSize=sizeof(buffer_param);
             rc=IDirectSound3DBuffer_GetAllParameters(buffer,&buffer_param);
-            ok(rc==DS_OK,"IDirectSound3DBuffer_GetAllParameters() failed: %s\n",
-               DXGetErrorString8(rc));
+            ok(rc==DS_OK,"IDirectSound3DBuffer_GetAllParameters() failed: %08x\n", rc);
         }
         if (set_volume) {
             if (dsbcaps.dwFlags & DSBCAPS_CTRLVOLUME) {
                 LONG val;
                 rc=IDirectSoundBuffer_GetVolume(*dsbo,&val);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume() failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume() failed: %08x\n", rc);
 
                 rc=IDirectSoundBuffer_SetVolume(*dsbo,volume);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume() failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume() failed: %08x\n", rc);
             } else {
                 /* DSOUND: Error: Buffer does not have CTRLVOLUME */
                 rc=IDirectSoundBuffer_GetVolume(*dsbo,&volume);
                 ok(rc==DSERR_CONTROLUNAVAIL,"IDirectSoundBuffer_GetVolume() "
-                   "should have returned DSERR_CONTROLUNAVAIL, returned: %s\n",
-                   DXGetErrorString8(rc));
+                   "should have returned DSERR_CONTROLUNAVAIL, returned: %08x\n", rc);
             }
         }
 
@@ -587,18 +573,15 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             if (dsbcaps.dwFlags & DSBCAPS_CTRLPAN) {
                 LONG val;
                 rc=IDirectSoundBuffer_GetPan(*dsbo,&val);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan() failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan() failed: %08x\n", rc);
 
                 rc=IDirectSoundBuffer_SetPan(*dsbo,pan);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan() failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan() failed: %08x\n", rc);
             } else {
                 /* DSOUND: Error: Buffer does not have CTRLPAN */
                 rc=IDirectSoundBuffer_GetPan(*dsbo,&pan);
                 ok(rc==DSERR_CONTROLUNAVAIL,"IDirectSoundBuffer_GetPan() "
-                   "should have returned DSERR_CONTROLUNAVAIL, returned: %s\n",
-                   DXGetErrorString8(rc));
+                   "should have returned DSERR_CONTROLUNAVAIL, returned: %08x\n", rc);
             }
         }
 
@@ -607,14 +590,14 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                                       &length1, NULL, NULL,
                                       DSBLOCK_ENTIREBUFFER);
         ok(rc==DSERR_INVALIDPARAM, "IDirectSoundBuffer_Lock() should have "
-           "returned DSERR_INVALIDPARAM, returned %s\n", DXGetErrorString8(rc));
+           "returned DSERR_INVALIDPARAM, returned %08x\n", rc);
 
         /* try a size larger than the buffer */
         rc = IDirectSoundBuffer_Lock(*dsbo, 0, dsbcaps.dwBufferBytes + 1,
                                      &buffer1, &length1, NULL, NULL,
                                      DSBLOCK_FROMWRITECURSOR);
         ok(rc==DSERR_INVALIDPARAM, "IDirectSoundBuffer_Lock() should have "
-           "returned DSERR_INVALIDPARAM, returned %s\n", DXGetErrorString8(rc));
+           "returned DSERR_INVALIDPARAM, returned %08x\n", rc);
 
         if (set_frequency)
             state.wave=wave_generate_la(&wfx,(duration*frequency)/wfx.nSamplesPerSec,&state.wave_len);
@@ -628,12 +611,10 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
         buffer_refill(&state,state.buffer_size);
 
         rc=IDirectSoundBuffer_Play(*dsbo,0,0,DSBPLAY_LOOPING);
-        ok(rc==DS_OK,"IDirectSoundBuffer_Play() failed: %s\n",
-           DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer_Play() failed: %08x\n", rc);
 
         rc=IDirectSoundBuffer_GetStatus(*dsbo,&status);
-        ok(rc==DS_OK,"IDirectSoundBuffer_GetStatus() failed: %s\n",
-           DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer_GetStatus() failed: %08x\n", rc);
         ok(status==(DSBSTATUS_PLAYING|DSBSTATUS_LOOPING),
            "GetStatus: bad status: %x\n",status);
 
@@ -643,7 +624,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             rc=IDirectSound3DListener_GetAllParameters(listener,
                                                        &listener_param);
             ok(rc==DS_OK,"IDirectSound3dListener_GetAllParameters() "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
             if (move_listener) {
                 listener_param.vPosition.x = -5.0f;
                 listener_param.vVelocity.x = (float)(10.0/duration);
@@ -651,8 +632,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             rc=IDirectSound3DListener_SetAllParameters(listener,
                                                        &listener_param,
                                                        DS3D_IMMEDIATE);
-            ok(rc==DS_OK,"IDirectSound3dListener_SetPosition() failed: %s\n",
-               DXGetErrorString8(rc));
+            ok(rc==DS_OK,"IDirectSound3dListener_SetPosition() failed: %08x\n", rc);
         }
         if (buffer3d) {
             if (move_sound) {
@@ -662,8 +642,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
             buffer_param.flMinDistance = 10;
             rc=IDirectSound3DBuffer_SetAllParameters(buffer,&buffer_param,
                                                      DS3D_IMMEDIATE);
-            ok(rc==DS_OK,"IDirectSound3dBuffer_SetPosition() failed: %s\n",
-               DXGetErrorString8(rc));
+            ok(rc==DS_OK,"IDirectSound3dBuffer_SetPosition() failed: %08x\n", rc);
         }
 
         start_time=GetTickCount();
@@ -677,8 +656,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                 rc=IDirectSound3DListener_SetPosition(listener,
                     listener_param.vPosition.x,listener_param.vPosition.y,
                     listener_param.vPosition.z,DS3D_IMMEDIATE);
-                ok(rc==DS_OK,"IDirectSound3dListener_SetPosition() failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSound3dListener_SetPosition() failed: %08x\n",rc);
             }
             if (buffer3d && move_sound) {
                 buffer_param.vPosition.x = (float)(100-200.0*(now-start_time)/1000/duration);
@@ -687,8 +665,7 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
                 rc=IDirectSound3DBuffer_SetPosition(buffer,
                     buffer_param.vPosition.x,buffer_param.vPosition.y,
                     buffer_param.vPosition.z,DS3D_IMMEDIATE);
-                ok(rc==DS_OK,"IDirectSound3dBuffer_SetPosition() failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSound3dBuffer_SetPosition() failed: %08x\n", rc);
             }
         }
         /* Check the sound duration was within 10% of the expected value */
@@ -697,13 +674,13 @@ void test_buffer(LPDIRECTSOUND dso, LPDIRECTSOUNDBUFFER *dsbo,
            "The sound played for %d ms instead of %g ms\n",
            now-start_time,1000*duration);
 
-        free(state.wave);
+        HeapFree(GetProcessHeap(), 0, state.wave);
         if (is_primary) {
             /* Set the CooperativeLevel back to normal */
             /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
             rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
             ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) "
-               "failed: %s\n",DXGetErrorString8(rc));
+               "failed: %08x\n",rc);
         }
         if (buffer3d) {
             ref=IDirectSound3DBuffer_Release(buffer);
@@ -728,16 +705,14 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
 
     /* Create the DirectSound object */
     rc=pDirectSoundCreate(lpGuid,&dso,NULL);
-    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return rc;
 
     /* We must call SetCooperativeLevel before creating primary buffer */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_PRIORITY */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_PRIORITY);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: "
-       "%s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
@@ -750,14 +725,12 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
         bufdesc.dwFlags|=(DSBCAPS_CTRLVOLUME|DSBCAPS_CTRLPAN);
     rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&primary,NULL);
     ok((rc==DS_OK && primary!=NULL) || (rc==DSERR_CONTROLUNAVAIL),
-       "IDirectSound_CreateSoundBuffer() failed to create a %sprimary buffer: "
-       "%s\n",has_3d?"3D ":"", DXGetErrorString8(rc));
+       "IDirectSound_CreateSoundBuffer() failed to create a %sprimary buffer: %08x\n",has_3d?"3D ":"", rc);
     if (rc==DSERR_CONTROLUNAVAIL)
         trace("  No Primary\n");
     else if (rc==DS_OK && primary!=NULL) {
         rc=IDirectSoundBuffer_GetFormat(primary,&wfx1,sizeof(wfx1),NULL);
-        ok(rc==DS_OK,"IDirectSoundBuffer8_Getformat() failed: %s\n",
-           DXGetErrorString8(rc));
+        ok(rc==DS_OK,"IDirectSoundBuffer8_Getformat() failed: %08x\n", rc);
         if (rc!=DS_OK)
             goto EXIT1;
 
@@ -766,8 +739,7 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
                                                  &IID_IDirectSound3DListener,
                                                  (void **)&listener);
             ok(rc==DS_OK && listener!=NULL,
-               "IDirectSoundBuffer_QueryInterface() failed to get a 3D "
-               "listener: %s\n",DXGetErrorString8(rc));
+               "IDirectSoundBuffer_QueryInterface() failed to get a 3D listener: %08x\n",rc);
             ref=IDirectSoundBuffer_Release(primary);
             ok(ref==0,"IDirectSoundBuffer_Release() primary has %d references, "
                "should have 0\n",ref);
@@ -778,22 +750,20 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
                 rc=IDirectSound3DListener_GetAllParameters(listener,0);
                 ok(rc==DSERR_INVALIDPARAM,
                    "IDirectSound3dListener_GetAllParameters() should have "
-                   "returned DSERR_INVALIDPARAM, returned: %s\n",
-                   DXGetErrorString8(rc));
+                   "returned DSERR_INVALIDPARAM, returned: %08x\n", rc);
 
                 /* DSOUND: Error: Invalid buffer */
                 rc=IDirectSound3DListener_GetAllParameters(listener,
                                                            &listener_param);
                 ok(rc==DSERR_INVALIDPARAM,
                    "IDirectSound3dListener_GetAllParameters() should have "
-                   "returned DSERR_INVALIDPARAM, returned: %s\n",
-                   DXGetErrorString8(rc));
+                   "returned DSERR_INVALIDPARAM, returned: %08x\n", rc);
 
                 listener_param.dwSize=sizeof(listener_param);
                 rc=IDirectSound3DListener_GetAllParameters(listener,
                                                            &listener_param);
                 ok(rc==DS_OK,"IDirectSound3dListener_GetAllParameters() "
-                   "failed: %s\n",DXGetErrorString8(rc));
+                   "failed: %08x\n",rc);
             } else {
                 ok(listener==NULL, "IDirectSoundBuffer_QueryInterface() "
                    "failed but returned a listener anyway\n");
@@ -836,72 +806,60 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
         }
         rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&secondary,NULL);
         ok(rc==DS_OK && secondary!=NULL,"IDirectSound_CreateSoundBuffer() "
-           "failed to create a %s%ssecondary buffer %s%s%s%sat %dx%dx%d (%s): %s\n",
+           "failed to create a %s%ssecondary buffer %s%s%s%sat %dx%dx%d (%s): %08x\n",
            has_3dbuffer?"3D ":"", has_duplicate?"duplicated ":"",
            listener!=NULL||move_sound?"with ":"", move_listener?"moving ":"",
            listener!=NULL?"listener ":"",
            listener&&move_sound?"and moving sound ":move_sound?
            "moving sound ":"",
            wfx.nSamplesPerSec,wfx.wBitsPerSample,wfx.nChannels,
-           getDSBCAPS(bufdesc.dwFlags),DXGetErrorString8(rc));
+           getDSBCAPS(bufdesc.dwFlags),rc);
         if (rc==DS_OK && secondary!=NULL) {
             if (!has_3d) {
                 LONG refvol,vol,refpan,pan;
 
                 /* Check the initial secondary buffer's volume and pan */
                 rc=IDirectSoundBuffer_GetVolume(secondary,&vol);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(secondary) failed: %08x\n",rc);
                 ok(vol==0,"wrong volume for a new secondary buffer: %d\n",vol);
                 rc=IDirectSoundBuffer_GetPan(secondary,&pan);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(secondary) failed: %08x\n",rc);
                 ok(pan==0,"wrong pan for a new secondary buffer: %d\n",pan);
 
                 /* Check that changing the secondary buffer's volume and pan
                  * does not impact the primary buffer's volume and pan
                  */
                 rc=IDirectSoundBuffer_GetVolume(primary,&refvol);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(primary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(primary) failed: %08x\n",rc);
                 rc=IDirectSoundBuffer_GetPan(primary,&refpan);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(primary) failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(primary) failed: %08x\n", rc);
 
                 rc=IDirectSoundBuffer_SetVolume(secondary,-1000);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: %08x\n",rc);
                 rc=IDirectSoundBuffer_GetVolume(secondary,&vol);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: %08x\n",rc);
                 ok(vol==-1000,"secondary: wrong volume %d instead of -1000\n",
                    vol);
                 rc=IDirectSoundBuffer_SetPan(secondary,-1000);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: %08x\n",rc);
                 rc=IDirectSoundBuffer_GetPan(secondary,&pan);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: %08x\n",rc);
                 ok(pan==-1000,"secondary: wrong pan %d instead of -1000\n",
                    pan);
 
                 rc=IDirectSoundBuffer_GetVolume(primary,&vol);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(primary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetVolume(primary) failed: %08x\n",rc);
                 ok(vol==refvol,"The primary volume changed from %d to %d\n",
                    refvol,vol);
                 rc=IDirectSoundBuffer_GetPan(primary,&pan);
-                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(primary) failed: %s\n",
-                   DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_GetPan(primary) failed: %08x\n", rc);
                 ok(pan==refpan,"The primary pan changed from %d to %d\n",
                    refpan,pan);
 
                 rc=IDirectSoundBuffer_SetVolume(secondary,0);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetVolume(secondary) failed: %08x\n",rc);
                 rc=IDirectSoundBuffer_SetPan(secondary,0);
-                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: "
-                   "%s\n",DXGetErrorString8(rc));
+                ok(rc==DS_OK,"IDirectSoundBuffer_SetPan(secondary) failed: %08x\n",rc);
             }
             if (has_duplicate) {
                 LPDIRECTSOUNDBUFFER duplicated=NULL;
@@ -910,26 +868,26 @@ static HRESULT test_secondary(LPGUID lpGuid, int play,
                 rc=IDirectSound_DuplicateSoundBuffer(dso,0,0);
                 ok(rc==DSERR_INVALIDPARAM,
                    "IDirectSound_DuplicateSoundBuffer() should have returned "
-                   "DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+                   "DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
                 /* DSOUND: Error: Invalid dest buffer */
                 rc=IDirectSound_DuplicateSoundBuffer(dso,secondary,0);
                 ok(rc==DSERR_INVALIDPARAM,
                    "IDirectSound_DuplicateSoundBuffer() should have returned "
-                   "DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+                   "DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
                 /* DSOUND: Error: Invalid source buffer */
                 rc=IDirectSound_DuplicateSoundBuffer(dso,0,&duplicated);
                 ok(rc==DSERR_INVALIDPARAM,
                   "IDirectSound_DuplicateSoundBuffer() should have returned "
-                  "DSERR_INVALIDPARAM, returned: %s\n",DXGetErrorString8(rc));
+                  "DSERR_INVALIDPARAM, returned: %08x\n",rc);
 
                 duplicated=NULL;
                 rc=IDirectSound_DuplicateSoundBuffer(dso,secondary,
                                                      &duplicated);
                 ok(rc==DS_OK && duplicated!=NULL,
                    "IDirectSound_DuplicateSoundBuffer() failed to duplicate "
-                   "a secondary buffer: %s\n",DXGetErrorString8(rc));
+                   "a secondary buffer: %08x\n",rc);
 
                 if (rc==DS_OK && duplicated!=NULL) {
                     ref=IDirectSoundBuffer_Release(secondary);
@@ -976,8 +934,7 @@ EXIT2:
     /* Set the CooperativeLevel back to normal */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %08x\n", rc);
 
 EXIT:
     ref=IDirectSound_Release(dso);
@@ -997,7 +954,7 @@ static HRESULT test_for_driver(LPGUID lpGuid)
     /* Create the DirectSound object */
     rc=pDirectSoundCreate(lpGuid,&dso,NULL);
     ok(rc==DS_OK||rc==DSERR_NODRIVER||rc==DSERR_ALLOCATED||rc==E_FAIL,
-       "DirectSoundCreate() failed: %s\n",DXGetErrorString8(rc));
+       "DirectSoundCreate() failed: %08x\n",rc);
     if (rc!=DS_OK)
         return rc;
 
@@ -1020,8 +977,7 @@ static HRESULT test_primary(LPGUID lpGuid)
 
     /* Create the DirectSound object */
     rc=pDirectSoundCreate(lpGuid,&dso,NULL);
-    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return rc;
 
@@ -1029,15 +985,14 @@ static HRESULT test_primary(LPGUID lpGuid)
     ZeroMemory(&dscaps, sizeof(dscaps));
     dscaps.dwSize=sizeof(dscaps);
     rc=IDirectSound_GetCaps(dso,&dscaps);
-    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
     /* We must call SetCooperativeLevel before calling CreateSoundBuffer */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_PRIORITY */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_PRIORITY);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: "
-       "%s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
@@ -1048,8 +1003,7 @@ static HRESULT test_primary(LPGUID lpGuid)
     bufdesc.dwFlags=DSBCAPS_PRIMARYBUFFER|DSBCAPS_CTRLVOLUME|DSBCAPS_CTRLPAN;
     rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&primary,NULL);
     ok((rc==DS_OK && primary!=NULL) || (rc==DSERR_CONTROLUNAVAIL),
-       "IDirectSound_CreateSoundBuffer() failed to create a primary buffer: "
-       "%s\n",DXGetErrorString8(rc));
+       "IDirectSound_CreateSoundBuffer() failed to create a primary buffer: %08x\n",rc);
     if (rc==DSERR_CONTROLUNAVAIL)
         trace("  No Primary\n");
     else if (rc==DS_OK && primary!=NULL) {
@@ -1084,8 +1038,7 @@ static HRESULT test_primary(LPGUID lpGuid)
     /* Set the CooperativeLevel back to normal */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %08x\n", rc);
 
 EXIT:
     ref=IDirectSound_Release(dso);
@@ -1107,8 +1060,7 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
 
     /* Create the DirectSound object */
     rc=pDirectSoundCreate(lpGuid,&dso,NULL);
-    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return rc;
 
@@ -1116,15 +1068,14 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
     ZeroMemory(&dscaps, sizeof(dscaps));
     dscaps.dwSize=sizeof(dscaps);
     rc=IDirectSound_GetCaps(dso,&dscaps);
-    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
     /* We must call SetCooperativeLevel before calling CreateSoundBuffer */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_PRIORITY */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_PRIORITY);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: "
-       "%s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
@@ -1134,7 +1085,7 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
     bufdesc.dwFlags=DSBCAPS_PRIMARYBUFFER;
     rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&primary,NULL);
     ok(rc==DS_OK && primary!=NULL,"IDirectSound_CreateSoundBuffer() failed "
-       "to create a primary buffer: %s\n",DXGetErrorString8(rc));
+       "to create a primary buffer: %08x\n",rc);
     if (rc==DS_OK && primary!=NULL) {
         ref=IDirectSoundBuffer_Release(primary);
         ok(ref==0,"IDirectSoundBuffer_Release() primary has %d references, "
@@ -1145,7 +1096,7 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
         bufdesc.dwFlags=DSBCAPS_PRIMARYBUFFER|DSBCAPS_CTRL3D;
         rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&primary,NULL);
         ok(rc==DS_OK && primary!=NULL,"IDirectSound_CreateSoundBuffer() "
-           "failed to create a 3D primary buffer: %s\n",DXGetErrorString8(rc));
+           "failed to create a 3D primary buffer: %08x\n",rc);
         if (rc==DS_OK && primary!=NULL) {
             test_buffer(dso,&primary,1,FALSE,0,FALSE,0,winetest_interactive &&
                         !(dscaps.dwFlags & DSCAPS_EMULDRIVER),1.0,0,0,0,0,
@@ -1158,8 +1109,7 @@ static HRESULT test_primary_3d(LPGUID lpGuid)
     /* Set the CooperativeLevel back to normal */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_NORMAL */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_NORMAL);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_NORMAL) failed: %08x\n", rc);
 
 EXIT:
     ref=IDirectSound_Release(dso);
@@ -1181,8 +1131,7 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
 
     /* Create the DirectSound object */
     rc=pDirectSoundCreate(lpGuid,&dso,NULL);
-    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %s\n",
-       DXGetErrorString8(rc));
+    ok(rc==DS_OK||rc==DSERR_NODRIVER,"DirectSoundCreate() failed: %08x\n", rc);
     if (rc!=DS_OK)
         return rc;
 
@@ -1190,15 +1139,14 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
     ZeroMemory(&dscaps, sizeof(dscaps));
     dscaps.dwSize=sizeof(dscaps);
     rc=IDirectSound_GetCaps(dso,&dscaps);
-    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_GetCaps() failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
 
     /* We must call SetCooperativeLevel before calling CreateSoundBuffer */
     /* DSOUND: Setting DirectSound cooperative level to DSSCL_PRIORITY */
     rc=IDirectSound_SetCooperativeLevel(dso,get_hwnd(),DSSCL_PRIORITY);
-    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: "
-       "%s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"IDirectSound_SetCooperativeLevel(DSSCL_PRIORITY) failed: %08x\n",rc);
     if (rc!=DS_OK)
         goto EXIT;
     primary=NULL;
@@ -1207,13 +1155,13 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
     bufdesc.dwFlags=DSBCAPS_PRIMARYBUFFER|DSBCAPS_CTRL3D;
     rc=IDirectSound_CreateSoundBuffer(dso,&bufdesc,&primary,NULL);
     ok(rc==DS_OK && primary!=NULL,"IDirectSound_CreateSoundBuffer() failed "
-       "to create a 3D primary buffer: %s\n",DXGetErrorString8(rc));
+       "to create a 3D primary buffer: %08x\n",rc);
     if (rc==DS_OK && primary!=NULL) {
         LPDIRECTSOUND3DLISTENER listener=NULL;
         rc=IDirectSoundBuffer_QueryInterface(primary,
             &IID_IDirectSound3DListener,(void **)&listener);
         ok(rc==DS_OK && listener!=NULL,"IDirectSoundBuffer_QueryInterface() "
-           "failed to get a 3D listener: %s\n",DXGetErrorString8(rc));
+           "failed to get a 3D listener: %08x\n",rc);
         if (rc==DS_OK && listener!=NULL) {
             LPDIRECTSOUNDBUFFER temp_buffer=NULL;
 
@@ -1221,8 +1169,7 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
             rc=IDirectSoundBuffer_QueryInterface(primary,
                 &IID_IDirectSoundBuffer,(LPVOID *)&temp_buffer);
             ok(rc==DS_OK && temp_buffer!=NULL,
-               "IDirectSoundBuffer_QueryInterface() failed: %s\n",
-               DXGetErrorString8(rc));
+               "IDirectSoundBuffer_QueryInterface() failed: %08x\n", rc);
             ok(temp_buffer==primary,
                "COM interface broken: %p != %p\n",
                temp_buffer,primary);
@@ -1235,8 +1182,7 @@ static HRESULT test_primary_3d_with_listener(LPGUID lpGuid)
                 rc=IDirectSound3DListener_QueryInterface(listener,
                     &IID_IDirectSoundBuffer,(LPVOID *)&temp_buffer);
                 ok(rc==DS_OK && temp_buffer!=NULL,
-                   "IDirectSoundBuffer_QueryInterface() failed: %s\n",
-                   DXGetErrorString8(rc));
+                   "IDirectSoundBuffer_QueryInterface() failed: %08x\n", rc);
                 ok(temp_buffer==primary,
                    "COM interface broken: %p != %p\n",
                    temp_buffer,primary);
@@ -1322,7 +1268,7 @@ static void ds3d_tests(void)
 {
     HRESULT rc;
     rc=pDirectSoundEnumerateA(&dsenum_callback,NULL);
-    ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %s\n",DXGetErrorString8(rc));
+    ok(rc==DS_OK,"DirectSoundEnumerateA() failed: %08x\n",rc);
 }
 
 START_TEST(ds3d)
@@ -1334,7 +1280,6 @@ START_TEST(ds3d)
     hDsound = LoadLibrary("dsound.dll");
     if (hDsound)
     {
-        trace("DLL Version: %s\n", get_file_version("dsound.dll"));
 
         pDirectSoundEnumerateA = (void*)GetProcAddress(hDsound,
             "DirectSoundEnumerateA");

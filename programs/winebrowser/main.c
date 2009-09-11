@@ -66,6 +66,15 @@ static char *strdup_unixcp( const WCHAR *str )
     return ret;
 }
 
+static WCHAR *strdupW( const WCHAR *src )
+{
+    WCHAR *dst;
+    if (!src) return NULL;
+    if ((dst = HeapAlloc( GetProcessHeap(), 0, (strlenW( src ) + 1) * sizeof(WCHAR) )))
+        strcpyW( dst, src );
+    return dst;
+}
+
 /* try to launch a unix app from a comma separated string of app names */
 static int launch_app( WCHAR *candidates, const WCHAR *argv1 )
 {
@@ -100,11 +109,16 @@ static int launch_app( WCHAR *candidates, const WCHAR *argv1 )
 
 static int open_http_url( const WCHAR *url )
 {
+#ifdef __APPLE__
+    static const WCHAR defaultbrowsers[] =
+        { '/', 'u', 's', 'r', '/', 'b', 'i', 'n', '/', 'o', 'p', 'e', 'n', 0 };
+#else
     static const WCHAR defaultbrowsers[] =
         {'x','d','g','-','o','p','e','n',',','f','i','r','e','f','o','x',',',
          'k','o','n','q','u','e','r','o','r',',','m','o','z','i','l','l','a',',',
          'n','e','t','s','c','a','p','e',',','g','a','l','e','o','n',',',
          'o','p','e','r','a',',','d','i','l','l','o',0};
+#endif
     static const WCHAR browsersW[] =
         {'B','r','o','w','s','e','r','s',0};
 
@@ -128,11 +142,16 @@ static int open_http_url( const WCHAR *url )
 
 static int open_mailto_url( const WCHAR *url )
 {
+#ifdef __APPLE__
+    static const WCHAR defaultmailers[] =
+        { '/', 'u', 's', 'r', '/', 'b', 'i', 'n', '/', 'o', 'p', 'e', 'n', 0 };
+#else
     static const WCHAR defaultmailers[] =
         {'x','d','g','-','e','m','a','i','l',',',
          'm','o','z','i','l','l','a','-','t','h','u','n','d','e','r','b','i','r','d',',',
          't','h','u','n','d','e','r','b','i','r','d',',',
          'e','v','o','l','u','t','i','o','n',0};
+#endif
     static const WCHAR mailersW[] =
         {'M','a','i','l','e','r','s',0};
 
@@ -180,15 +199,27 @@ static HDDEDATA CALLBACK ddeCb(UINT uType, UINT uFmt, HCONV hConv,
             return (HDDEDATA)FALSE;
 
         case XTYP_EXECUTE:
+        {
+            char *buffer = NULL;
+
             if (!(size = DdeGetData(hData, NULL, 0, 0)))
                 WINE_ERR("DdeGetData returned zero size of execute string\n");
-            else if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, size)))
+            else if (!(buffer = HeapAlloc(GetProcessHeap(), 0, size)))
                 WINE_ERR("Out of memory\n");
-            else if (DdeGetData(hData, (LPBYTE)ddeString, size, 0) != size)
+            else if (DdeGetData(hData, (LPBYTE)buffer, size, 0) != size)
                 WINE_WARN("DdeGetData did not return %d bytes\n", size);
+            else
+            {
+                int len = MultiByteToWideChar(CP_ACP, 0, buffer, -1, NULL, 0);
+                if (!(ddeString = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+                    WINE_ERR("Out of memory\n");
+                else
+                    MultiByteToWideChar(CP_ACP, 0, buffer, -1, ddeString, len);
+            }
+            HeapFree(GetProcessHeap(), 0, buffer);
             DdeFreeDataHandle(hData);
             return (HDDEDATA)DDE_FACK;
-
+        }
         case XTYP_REQUEST:
             ret = -3; /* error */
             if (!(size = DdeQueryStringW(ddeInst, hsz2, NULL, 0, CP_WINUNICODE)))
@@ -262,9 +293,9 @@ static WCHAR *get_url_from_dde(void)
     while (!ddeString)
     {
         MSG msg;
-        if (!GetMessage(&msg, NULL, 0, 0)) break;
+        if (!GetMessageW(&msg, NULL, 0, 0)) break;
         if (msg.message == WM_TIMER) break;
-        DispatchMessage(&msg);
+        DispatchMessageW(&msg);
     }
 
     if (ddeString)
@@ -274,7 +305,7 @@ static WCHAR *get_url_from_dde(void)
             WCHAR *endquote = strchrW(ddeString + 1, '"');
             if (!endquote)
             {
-                WINE_ERR("Unabled to retrieve URL from string %s\n", wine_dbgstr_w(ddeString));
+                WINE_ERR("Unable to retrieve URL from string %s\n", wine_dbgstr_w(ddeString));
                 goto done;
             }
             *endquote = 0;
@@ -307,7 +338,7 @@ int wmain(int argc, WCHAR *argv[])
     static const WCHAR mailtoW[] = {'m','a','i','l','t','o',':',0};
     static const WCHAR fileW[] = {'f','i','l','e',':',0};
 
-    WCHAR *url = argv[1];
+    WCHAR *p, *filenameW = NULL, *fileurlW = NULL, *url = argv[1];
     wine_get_unix_file_name_t wine_get_unix_file_name_ptr;
     int ret = 1;
 
@@ -325,7 +356,6 @@ int wmain(int argc, WCHAR *argv[])
     /* handle an RFC1738 file URL */
     if (!strncmpiW( url, fileW, 5 ))
     {
-        WCHAR *p;
         DWORD len = strlenW( url ) + 1;
 
         if (UrlUnescapeW( url, NULL, &len, URL_UNESCAPE_INPLACE ) != S_OK)
@@ -359,7 +389,7 @@ int wmain(int argc, WCHAR *argv[])
 
     /* check if the argument is a local file */
     wine_get_unix_file_name_ptr = (wine_get_unix_file_name_t)
-        GetProcAddress( GetModuleHandle( "KERNEL32" ), "wine_get_unix_file_name" );
+        GetProcAddress( GetModuleHandleA( "KERNEL32" ), "wine_get_unix_file_name" );
 
     if (wine_get_unix_file_name_ptr == NULL)
     {
@@ -368,20 +398,38 @@ int wmain(int argc, WCHAR *argv[])
     else
     {
         char *unixpath;
-        if ((unixpath = wine_get_unix_file_name_ptr( url )))
+        WCHAR c = 0;
+
+        if (!(filenameW = strdupW( url ))) goto done;
+        if ((p = strchrW( filenameW, '?' )) || (p = strchrW( filenameW, '#' )))
+        {
+            c = *p;
+            *p = 0;
+        }
+
+        if ((unixpath = wine_get_unix_file_name_ptr( filenameW )))
         {
             struct stat dummy;
             if (stat( unixpath, &dummy ) >= 0)
             {
-                int len;
-                WCHAR *unixpathW;
+                static const WCHAR schemeW[] = {'f','i','l','e',':','/','/',0};
+                int len, len_scheme;
 
-                len = MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, NULL, 0 );
-                if ((unixpathW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
-                    MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, unixpathW, len );
+                len = len_scheme = strlenW( schemeW );
+                len += MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, NULL, 0 );
+                if (p)
+                {
+                    *p = c;
+                    len += strlenW( p );
+                }
 
-                ret = open_http_url( unixpathW );
-                HeapFree( GetProcessHeap(), 0, unixpathW );
+                if (!(fileurlW = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) goto done;
+
+                strcpyW( fileurlW, schemeW );
+                MultiByteToWideChar( CP_UNIXCP, 0, unixpath, -1, fileurlW + len_scheme, len - len_scheme );
+                if (p) strcatW( fileurlW, p );
+
+                ret = open_http_url( fileurlW );
                 goto done;
             }
         }
@@ -395,5 +443,7 @@ int wmain(int argc, WCHAR *argv[])
 
 done:
     HeapFree(GetProcessHeap(), 0, ddeString);
+    HeapFree( GetProcessHeap(), 0, filenameW );
+    HeapFree( GetProcessHeap(), 0, fileurlW );
     return ret;
 }

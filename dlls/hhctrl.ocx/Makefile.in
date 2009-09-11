@@ -3,8 +3,7 @@ TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = hhctrl.ocx
-IMPORTS   = advapi32 comctl32 shlwapi ole32 oleaut32 user32 gdi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid advapi32 comctl32 shlwapi ole32 oleaut32 user32 gdi32 kernel32
 
 C_SRCS = \
 	chm.c \
@@ -14,7 +13,27 @@ C_SRCS = \
 	regsvr.c \
 	webbrowser.c
 
-RC_SRCS = hhctrl.rc
+RC_SRCS = \
+	Cs.rc \
+	Da.rc \
+	De.rc \
+	El.rc \
+	En.rc \
+	Fi.rc \
+	Fr.rc \
+	Hu.rc \
+	Ko.rc \
+	Lt.rc \
+	Nl.rc \
+	No.rc \
+	Pl.rc \
+	Pt.rc \
+	Ru.rc \
+	Si.rc \
+	Sv.rc \
+	Tr.rc \
+	Zh.rc \
+	version.rc
 
 @MAKE_DLL_RULES@
 

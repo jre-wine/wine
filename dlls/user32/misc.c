@@ -477,7 +477,12 @@ BOOL WINAPI GetMonitorInfoA(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
  */
 BOOL WINAPI GetMonitorInfoW(HMONITOR hMonitor, LPMONITORINFO lpMonitorInfo)
 {
-    return USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
+    BOOL ret = USER_Driver->pGetMonitorInfo( hMonitor, lpMonitorInfo );
+    if (ret)
+        TRACE("flags %04x, monitor %s, work %s\n", lpMonitorInfo->dwFlags,
+              wine_dbgstr_rect(&lpMonitorInfo->rcMonitor),
+              wine_dbgstr_rect(&lpMonitorInfo->rcWork));
+    return ret;
 }
 
 /***********************************************************************
@@ -564,8 +569,9 @@ HDEVNOTIFY WINAPI RegisterDeviceNotificationA(HANDLE hnd, LPVOID notifyfilter, D
  */
 HDEVNOTIFY WINAPI RegisterDeviceNotificationW(HANDLE hRecepient, LPVOID pNotificationFilter, DWORD dwFlags)
 {
-    FIXME("(hwnd=%p, filter=%p,flags=0x%08x), STUB!\n", hRecepient,pNotificationFilter,dwFlags );
-    return 0;
+    FIXME("(hwnd=%p, filter=%p,flags=0x%08x),\n"
+          "\treturns a fake device notification handle!\n", hRecepient,pNotificationFilter,dwFlags );
+    return (HDEVNOTIFY) 0xcafeaffe;
 }
 
 /***********************************************************************
@@ -699,4 +705,15 @@ LRESULT WINAPI SendIMEMessageExW(HWND p1, LPARAM p2)
   FIXME("(%p,%lx): stub\n", p1, p2);
   SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
   return 0;
+}
+
+/**********************************************************************
+ * DisableProcessWindowsGhosting [USER32.@]
+ *
+ */
+VOID WINAPI DisableProcessWindowsGhosting(VOID)
+{
+  FIXME(": stub\n");
+  SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+  return;
 }

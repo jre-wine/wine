@@ -14,7 +14,7 @@
 @ stub CoUninitializeCor
 @ stub CoUninitializeEE
 @ stub CollectCtrs
-@ stub CorBindToCurrentRuntime
+@ stdcall CorBindToCurrentRuntime(wstr ptr ptr ptr)
 @ stub CorBindToRuntime
 @ stub CorBindToRuntimeByCfg
 @ stub CorBindToRuntimeByPath
@@ -70,7 +70,7 @@
 @ stdcall LoadLibraryShim(ptr ptr ptr ptr)
 @ stub LoadLibraryWithPolicyShim
 @ stdcall LoadStringRCEx(long long ptr long long ptr)
-@ stub LockClrVersion
+@ stdcall LockClrVersion(ptr ptr ptr)
 @ stub MetaDataGetDispenser
 @ stdcall ND_CopyObjDst(ptr ptr long long)
 @ stdcall ND_CopyObjSrc(ptr long ptr long)
@@ -80,7 +80,7 @@
 @ stdcall ND_RU1(ptr long)
 @ stdcall ND_WI2(ptr long long)
 @ stdcall ND_WI4(ptr long long)
-@ stdcall ND_WI8(ptr long long long)
+@ stdcall ND_WI8(ptr long double)
 @ stdcall ND_WU1(ptr long long)
 @ stub OpenCtrs
 @ stub ReOpenMetaDataWithMemoryEx
@@ -103,8 +103,8 @@
 @ stub StrongNameSignatureGeneration
 @ stub StrongNameSignatureGenerationEx
 @ stub StrongNameSignatureSize
-@ stub StrongNameSignatureVerification
-@ stub StrongNameSignatureVerificationEx
+@ stdcall StrongNameSignatureVerification(wstr long ptr)
+@ stdcall StrongNameSignatureVerificationEx(wstr long ptr)
 @ stub StrongNameSignatureVerificationFromImage
 @ stub StrongNameTokenFromAssembly
 @ stub StrongNameTokenFromAssemblyEx

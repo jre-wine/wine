@@ -19,9 +19,8 @@
  */
 #ifndef __WINE_CRTDBG_H_
 #define __WINE_CRTDBG_H_
-#ifndef __WINE_USE_MSVCRT
-#define __WINE_USE_MSVCRT
-#endif
+
+#include <crtdefs.h>
 
 /* The debug API is not implemented in Winelib.
  * Redirect everything to the regular APIs.
@@ -45,10 +44,10 @@
 typedef struct _CrtMemState
 {
     struct _CrtMemBlockHeader* pBlockHeader;
-    unsigned long lCounts[_MAX_BLOCKS];
-    unsigned long lSizes[_MAX_BLOCKS];
-    unsigned long lHighWaterCount;
-    unsigned long lTotalCount;
+    __msvcrt_ulong lCounts[_MAX_BLOCKS];
+    __msvcrt_ulong lSizes[_MAX_BLOCKS];
+    __msvcrt_ulong lHighWaterCount;
+    __msvcrt_ulong lTotalCount;
 } _CrtMemState;
 
 
@@ -61,7 +60,7 @@ typedef struct _CrtMemState
 #define _CrtCheckMemory()               ((int)1)
 #define _CrtDbgReport(...)              ((int)0)
 #define _CrtDumpMemoryLeaks()           ((int)0)
-#define _CrtSetBreakAlloc(a)            ((long)0)
+#define _CrtSetBreakAlloc(a)            ((__msvcrt_long)0)
 #define _CrtSetDbgFlag(f)               ((int)0)
 #define _CrtSetDumpClient(f)            ((void)0)
 #define _CrtSetReportMode(t,m)          ((int)0)
@@ -77,18 +76,26 @@ typedef struct _CrtMemState
 #define _CrtDbgBreak()                  ((void)0)
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern int _crtAssertBusy;
 extern int _crtBreakAlloc;
 extern int _crtDbgFlag;
 
-int   _CrtCheckMemory(void);
-int   _CrtDbgReport(int reportType, const char *filename, int linenumber,
-                    const char *moduleName, const char *format, ...);
-int   _CrtDumpMemoryLeaks(void);
-int   _CrtSetBreakAlloc(int new);
-int   _CrtSetDbgFlag(int new);
-void *_CrtSetDumpClient(void *dumpClient);
-int   _CrtSetReportMode(int reportType, int reportMode);
+int   __cdecl _CrtCheckMemory(void);
+int   __cdecl _CrtDbgReport(int reportType, const char *filename, int linenumber,
+                            const char *moduleName, const char *format, ...);
+int   __cdecl _CrtDumpMemoryLeaks(void);
+int   __cdecl _CrtSetBreakAlloc(int new);
+int   __cdecl _CrtSetDbgFlag(int new);
+void *__cdecl _CrtSetDumpClient(void *dumpClient);
+int   __cdecl _CrtSetReportMode(int reportType, int reportMode);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _DEBUG */
 

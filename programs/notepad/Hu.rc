@@ -21,6 +21,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 MAIN_MENU MENU LANGUAGE LANG_HUNGARIAN, SUBLANG_DEFAULT
 {
  POPUP "&Fájl" {
@@ -29,8 +31,8 @@ MAIN_MENU MENU LANGUAGE LANG_HUNGARIAN, SUBLANG_DEFAULT
   MENUITEM "&Mentés\tCtrl+S",             CMD_SAVE
   MENUITEM "Mentés má&sként...",       CMD_SAVE_AS
   MENUITEM SEPARATOR
-  MENUITEM "&Oldalbeállítás...",    CMD_PAGE_SETUP
   MENUITEM "Nyom&tatás...\tCtrl+P",            CMD_PRINT
+  MENUITEM "&Oldalbeállítás...",    CMD_PAGE_SETUP
   MENUITEM "Nyomtató &beállítás...", CMD_PRINTER_SETUP
   MENUITEM SEPARATOR
   MENUITEM "&Kilépés",             CMD_EXIT
@@ -47,6 +49,7 @@ POPUP "S&zerkesztés" {
   MENUITEM "&Idõ/dátum\tF5",    CMD_TIME_DATE
   MENUITEM SEPARATOR
   MENUITEM "&Hosszú sorok tördelése",  CMD_WRAP
+  MENUITEM "&Font...",          CMD_FONT
  }
 POPUP "&Keresés" {
   MENUITEM "&Keresés...",           CMD_SEARCH
@@ -57,7 +60,7 @@ POPUP "&Súgó" {
   MENUITEM "&Keresés...",        CMD_HELP_SEARCH
   MENUITEM "&Használat",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&About Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 

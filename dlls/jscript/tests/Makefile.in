@@ -3,11 +3,13 @@ TOPOBJDIR = ../../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = jscript.dll
-IMPORTS   = ole32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = oleaut32 ole32 kernel32
 
 CTESTS = \
-	jscript.c
+	jscript.c \
+	run.c
+
+RC_SRCS = rsrc.rc
 
 @MAKE_TEST_RULES@
 

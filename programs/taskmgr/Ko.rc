@@ -19,7 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+#include "resource.h"
+
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 
 /*
  Menu
@@ -171,34 +173,20 @@ END
  Dialog
 */
 
-IDD_ABOUTBOX DIALOG DISCARDABLE  22, 17, 259, 210
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
-CAPTION "작업 관리자 정보"
-FONT 8, "MS Shell Dlg"
-BEGIN
-    CONTROL         "작업 관리자 v1.0\nCopyright (C) 1999 - 2001\nby Brian Palmer (brianp@reactos.org)",
-                    IDC_STATIC,"Static",SS_LEFTNOWORDWRAP | WS_GROUP,53,28,
-                    122,26
-    DEFPUSHBUTTON   "확인",IDOK,183,189,44,14,WS_GROUP
-    ICON            IDI_TASKMANAGER,IDC_STATIC,19,30,20,20
-    EDITTEXT        IDC_LICENSE_EDIT,53,63,174,107,ES_MULTILINE |
-                    ES_READONLY | WS_VSCROLL
-END
-
 IDD_TASKMGR_DIALOG DIALOG DISCARDABLE  0, 0, 264, 246
 STYLE DS_CENTER | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_POPUP |
     WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
     WS_THICKFRAME
 CAPTION "작업 관리자"
 MENU IDR_TASKMANAGER
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "Tab1",IDC_TAB,"SysTabControl32",WS_TABSTOP,3,3,257,228
 END
 
 IDD_APPLICATION_PAGE DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_APPLIST,"SysListView32",LVS_REPORT |
                     LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,7,233,177
@@ -209,7 +197,7 @@ END
 
 IDD_PROCESS_PAGE DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_PROCESSLIST,"SysListView32",LVS_REPORT |
                     LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_OWNERDATA |
@@ -222,7 +210,7 @@ END
 /*IDD_PERFORMANCE_PAGE DIALOGEX 0, 0, 247, 210*/
 IDD_PERFORMANCE_PAGE DIALOGEX DISCARDABLE  0, 0, 247, 210
 STYLE DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     GROUPBOX        "CPU 사용",IDC_CPU_USAGE_FRAME,5,5,60,54,WS_TABSTOP, WS_EX_TRANSPARENT
     GROUPBOX        "MEM 사용",IDC_MEM_USAGE_FRAME,5,63,60,54,BS_LEFTTEXT, WS_EX_TRANSPARENT
@@ -281,7 +269,7 @@ END
 IDD_DEBUG_CHANNELS_DIALOG DIALOG DISCARDABLE  0, 0, 247, 210
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "디버그 채널"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     CONTROL         "List2",IDC_DEBUG_CHANNELS_LIST,"SysListView32",LVS_REPORT |
                     LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP |
@@ -292,7 +280,7 @@ END
 IDD_AFFINITY_DIALOG DIALOG DISCARDABLE  0, 0, 231, 154
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "프로세서 친화도"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     DEFPUSHBUTTON   "확인",IDOK,120,133,50,14
     PUSHBUTTON      "취소",IDCANCEL,174,133,50,14
@@ -367,7 +355,7 @@ END
 IDD_COLUMNS_DIALOG DIALOG DISCARDABLE  0, 0, 195, 199
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "세로줄 선택"
-FONT 8, "MS Shell Dlg"
+FONT 9, "MS Shell Dlg"
 BEGIN
     DEFPUSHBUTTON   "확인",IDOK,84,178,50,14
     PUSHBUTTON      "취소",IDCANCEL,138,178,50,14
@@ -433,11 +421,12 @@ STRINGTABLE DISCARDABLE
 BEGIN
     IDS_APP_TITLE           "작업 관리자"
     IDC_TASKMGR             "작엄 관리자"
+    IDS_RUNDLG_CAPTION      "새 작업 만들기"
 END
 
 STRINGTABLE DISCARDABLE
 BEGIN
-    ID_FILE_NEW             "새 풀그림 실행"
+    ID_FILE_NEW             "새 프로그램 실행"
     ID_OPTIONS_ALWAYSONTOP  "작업관리자는 최소화 되지 않는 한 다른 창 앞에 있게 됩니다"
     ID_OPTIONS_MINIMIZEONUSE
                             "작엄관리자는 전환 작업이 완료될 때 최소화됩니다"
@@ -496,5 +485,89 @@ BEGIN
     ID_PROCESS_PAGE_SETPRIORITY_BELOWNORMAL
                             "작업을 보통보다 낮은 순위 클래스로 설정"
     ID_PROCESS_PAGE_SETPRIORITY_LOW "작업을 낮은 순위 클래스로 설정"
-    IDS_LICENSE             "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.\r\n\r\nThis program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License for more details.\r\n\r\nYou should have received a copy of the GNU Lesser General Public License along with this program; if not, write to the Free Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
+    ID_PROCESS_PAGE_DEBUGCHANNELS "디버그 채널 제어"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+	IDS_VIEW_LARGE                     "큰 아이콘(&G)"
+	IDS_VIEW_SMALL                     "작은 아이콘(&M)"
+	IDS_VIEW_DETAILS                   "항목(&D)"
+	IDS_WINDOWS                        "창(&W)"
+	IDS_VIEW_SELECTCOLUMNS             "컬럼 선택(&S)..."
+	IDS_OPTIONS_SHOW16BITTASKS         "16비트 작업 보여주기(&S)"
+	IDS_VIEW_CPUHISTORY                "&CPU 기록"
+	IDS_VIEW_CPUHISTORY_ONEGRAPHALL    " 모든 CPU를 하나의 그래프로(&O)"
+	IDS_VIEW_CPUHISTORY_ONEGRAPHPERCPU "CPU마다 각각의 그래프(&P)"
+	IDS_VIEW_SHOWKERNELTIMES           "커널 시간 보여주기(&S)"
+	IDS_APPLICATIONS                   "프로그램"
+	IDS_PROCESSES                      "작업"
+	IDS_PERFORMANCE                    "퍼포먼스"
+	IDS_STATUS_BAR_CPU_USAGE           "CPU 사용량: %3d%%"
+	IDS_STATUS_BAR_PROCESSES           "프로세스: %d"
+	IDS_STATUS_BAR_MEMORY_USAGE        "메모리 사용량: %dK / %dK"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+	IDS_IMAGENAME        "이미지 이름"
+	IDS_PID               "PID"
+	IDS_CPUUSAGE          "CPU"
+	IDS_CPUTIME           "CPU 시간"
+	IDS_MEMORYUSAGE       "메모리 사용량"
+	IDS_MEMORYUSAGEDELTA  "메모리 델타"
+	IDS_PEAKMEMORYUSAGE   "피크 메모리 사용"
+	IDS_PAGEFAULTS        "페이지 실패"
+	IDS_USEROBJECTS       "사용자 객체"
+	IDS_IOREADS           "I/O 읽기"
+	IDS_IOREADBYTES       "I/O 읽은 바이트"
+	IDS_SESSIONID         "세션 ID"
+	IDS_USERNAME          "사용자 이름"
+	IDS_PAGEFAULTSDELTA   "PF 델타"
+	IDS_VIRTUALMEMORYSIZE "VM 크기"
+	IDS_PAGEDPOOL         "페이지된 풀"
+	IDS_NONPAGEDPOOL      "NP 풀"
+	IDS_BASEPRIORITY      "기본 Pri"
+	IDS_HANDLECOUNT       "핸들"
+	IDS_THREADCOUNT       "쓰레드"
+	IDS_GDIOBJECTS        "GDI 객체"
+	IDS_IOWRITES          "I/O 쓰기"
+	IDS_IOWRITEBYTES      "I/O 쓴 바이트"
+	IDS_IOOTHER           "I/O 기타"
+	IDS_IOOTHERBYTES      "I/O 기타 바이트"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+	IDS_WARNING_TITLE               "작업 관리자 경고"
+	IDS_PRIORITY_CHANGE_MESSAGE     "경고: 프로세스의 우선 순위 클래그를 변경하는 것은\n\
+	시스템 불안정을 포함해서 바람직하지 않은 결과를 가져 올 수 있습니다. 당신은\n\
+	우선 순위 수준을 변경하시겠습니까?"
+	IDS_PRIORITY_UNABLE2CHANGE      "우선순위를 바꿀 수 없습니다"
+	IDS_TERMINATE_MESSAGE           "경고: 프로세스를 중단시키는 것은 데이타 손실과\n\
+	시스템 불안정을 포함해서 바람직하지 않은 결과를 가져올 수\n\
+	있습니다. 이 프로세스 데이터나 상태를 저장할 기회가\n\
+	주어지기 전에 종료될 것입니다.\n\
+	정말로 중단시키겠습니까?"
+	IDS_TERMINATE_UNABLE2TERMINATE  "프로세스를 중단시킬 수 없습니다"
+	IDS_DEBUG_MESSAGE               "경고: 프로세스를 디버그 하는 것은 데이터의 손실을 가져올 수 있습니다.\n\
+	디버거를  사용하시겠습니까?"
+	IDS_DEBUG_UNABLE2DEBUG          "프로세스를 디버그 할 수 없습니다"
+	IDS_AFFINITY_ERROR_MESSAGE      "	이 과정은 적어도 하나의 프로세서와 동질성이 있어야합니다"
+	IDS_AFFINITY_ERROR_TITLE        "올바르지 않은 옵션"
+	IDS_AFFINITY_UNABLE2ACCESS      "접근할수 없거나 프로세스 동질성을 설정할수 없습니다"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+	IDS_SYSTEM_IDLE_PROCESS            "시스템 유휴 작업"
+	IDS_APPLICATION_NOT_RESPONDING     "반응이 없음"
+	IDS_APPLICATION_RUNNING            "실행중"
+	IDS_APPLICATION_TASK               "태스크"
+	IDS_APPLICATION_STATUS             "상태"
+	IDS_DEBUG_CHANNEL                  "디버그 채널"
+	IDS_DEBUG_CHANNEL_FIXME            " 고정"
+	IDS_DEBUG_CHANNEL_ERR              " 에러"
+	IDS_DEBUG_CHANNEL_WARN             "경고"
+	IDS_DEBUG_CHANNEL_TRACE            "추적"
 END

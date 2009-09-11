@@ -232,7 +232,8 @@ static BOOL check_live_target(struct process* pcs)
 {
     if (!GetProcessId(pcs->handle)) return FALSE;
     if (GetEnvironmentVariableA("DBGHELP_NOLIVE", NULL, 0)) return FALSE;
-    elf_read_wine_loader_dbg_info(pcs);
+    if (!elf_read_wine_loader_dbg_info(pcs))
+        macho_read_wine_loader_dbg_info(pcs);
     return TRUE;
 }
 
@@ -314,7 +315,6 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
             pcs->search_path = HeapReAlloc(GetProcessHeap(), 0, pcs->search_path, (size + 1 + len + 1) * sizeof(WCHAR));
             pcs->search_path[size] = ';';
             GetEnvironmentVariableW(alt_sym_path, pcs->search_path + size + 1, len);
-            size += 1 + len;
         }
     }
 
@@ -328,6 +328,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
         if (fInvadeProcess)
             EnumerateLoadedModules(hProcess, process_invade_cb, hProcess);
         elf_synchronize_module_list(pcs);
+        macho_synchronize_module_list(pcs);
     }
     else if (fInvadeProcess)
     {

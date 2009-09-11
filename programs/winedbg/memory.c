@@ -259,16 +259,32 @@ BOOL memory_get_string(struct dbg_process* pcs, void* addr, BOOL in_debuggee,
     return TRUE;
 }
 
-BOOL memory_get_string_indirect(struct dbg_process* pcs, void* addr, BOOL unicode, char* buffer, int size)
+BOOL memory_get_string_indirect(struct dbg_process* pcs, void* addr, BOOL unicode, WCHAR* buffer, int size)
 {
     void*       ad;
     SIZE_T	sz;
 
     buffer[0] = 0;
-    if (addr && 
+    if (addr &&
         pcs->process_io->read(pcs->handle, addr, &ad, sizeof(ad), &sz) && sz == sizeof(ad) && ad)
     {
-        return memory_get_string(pcs, ad, TRUE, unicode, buffer, size);
+        LPSTR buff;
+        BOOL ret;
+
+        if (unicode)
+            ret = pcs->process_io->read(pcs->handle, ad, buffer, size * sizeof(WCHAR), &sz) && sz != 0;
+        else
+        {
+            if ((buff = HeapAlloc(GetProcessHeap(), 0, size)))
+            {
+                ret = pcs->process_io->read(pcs->handle, ad, buff, size, &sz) && sz != 0;
+                MultiByteToWideChar(CP_ACP, 0, buff, sz, buffer, size);
+                HeapFree(GetProcessHeap(), 0, buff);
+            }
+            else ret = FALSE;
+        }
+        if (size) buffer[size-1] = 0;
+        return ret;
     }
     return FALSE;
 }
@@ -340,6 +356,7 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         case btInt:
         case btLong:
             if (!be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            if (size == 1) goto print_char;
             dbg_print_longlong(val_int, TRUE);
             break;
         case btUInt:
@@ -354,10 +371,15 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         case btChar:
             if (!be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
             /* FIXME: should do the same for a Unicode character (size == 2) */
+        print_char:
             if (size == 1 && (val_int < 0x20 || val_int > 0x80))
                 dbg_printf("%d", (int)val_int);
             else
                 dbg_printf("'%c'", (char)val_int);
+            break;
+        case btBool:
+            if (!be_cpu->fetch_integer(lvalue, size, TRUE, &val_int)) return;
+            dbg_printf("%s", val_int ? "true" : "false");
             break;
         default:
             WINE_FIXME("Unsupported basetype %u\n", bt);
@@ -377,8 +399,8 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
         if (!types_get_real_type(&sub_type, &tag)) return;
 
         if (types_get_info(&sub_type, TI_GET_SYMTAG, &tag) && tag == SymTagBaseType &&
-            types_get_info(&sub_type, TI_GET_BASETYPE, &bt) && bt == btChar &&
-            types_get_info(&sub_type, TI_GET_LENGTH, &size64))
+            types_get_info(&sub_type, TI_GET_BASETYPE, &bt) && (bt == btChar || bt == btInt) &&
+            types_get_info(&sub_type, TI_GET_LENGTH, &size64) && size64 == 1)
         {
             char    buffer[1024];
 
@@ -446,9 +468,9 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
                             }
                         }
                     }
+                    count -= min(count, 256);
+                    fcp->Start += 256;
                 }
-                count -= min(count, 256);
-                fcp->Start += 256;
             }
             if (!ok) dbg_print_longlong(val_int, TRUE);
         }
@@ -464,58 +486,61 @@ static void print_typed_basic(const struct dbg_lvalue* lvalue)
  *
  * Implementation of the 'print' command.
  */
-void print_basic(const struct dbg_lvalue* lvalue, int count, char format)
+void print_basic(const struct dbg_lvalue* lvalue, char format)
 {
-    LONGLONG res;
-
     if (lvalue->type.id == dbg_itype_none)
     {
         dbg_printf("Unable to evaluate expression\n");
         return;
     }
 
-    res = types_extract_as_longlong(lvalue);
-
-    /* FIXME: this implies i386 byte ordering */
-    switch (format)
+    if (format != 0)
     {
-    case 'x':
-        dbg_printf("0x%x", (DWORD)(ULONG64)res);
-        break;
+        unsigned size;
+        LONGLONG res = types_extract_as_longlong(lvalue, &size);
+        DWORD hi;
+        WCHAR wch;
 
-    case 'd':
-        dbg_print_longlong(res, TRUE);
-        dbg_printf("\n");
-        break;
-
-    case 'c':
-        dbg_printf("%d = '%c'", (char)(res & 0xff), (char)(res & 0xff));
-        break;
-
-    case 'u':
+        /* FIXME: this implies i386 byte ordering */
+        switch (format)
         {
-            WCHAR wch = (WCHAR)(res & 0xFFFF);
+        case 'x':
+            hi = (ULONG64)res >> 32;
+            if (size == 8 && hi)
+                dbg_printf("0x%x%08x", hi, (DWORD)res);
+            else
+                dbg_printf("0x%x", (DWORD)res);
+            return;
+
+        case 'd':
+            dbg_print_longlong(res, TRUE);
+            dbg_printf("\n");
+            return;
+
+        case 'c':
+            dbg_printf("%d = '%c'", (char)(res & 0xff), (char)(res & 0xff));
+            return;
+
+        case 'u':
+            wch = (WCHAR)(res & 0xFFFF);
             dbg_printf("%d = '", wch);
             dbg_outputW(&wch, 1);
             dbg_printf("'");
-        }
-        break;
+            return;
 
-    case 'i':
-    case 's':
-    case 'w':
-    case 'b':
-        dbg_printf("Format specifier '%c' is meaningless in 'print' command\n", format);
-    case 0:
-        if (lvalue->type.id == dbg_itype_segptr)
-        {
-            dbg_print_longlong(res, TRUE);
-            dbg_printf("\n");
+        case 'i':
+        case 's':
+        case 'w':
+        case 'b':
+            dbg_printf("Format specifier '%c' is meaningless in 'print' command\n", format);
         }
-        else 
-            print_typed_basic(lvalue);
-        break;
     }
+    if (lvalue->type.id == dbg_itype_segptr)
+    {
+        dbg_print_longlong(types_extract_as_longlong(lvalue, NULL), TRUE);
+        dbg_printf("\n");
+    }
+    else print_typed_basic(lvalue);
 }
 
 void print_bare_address(const ADDRESS64* addr)
@@ -652,7 +677,7 @@ BOOL memory_get_register(DWORD regno, DWORD** value, char* buffer, int len)
             else
                 *value = div->pval;
 
-            if (buffer) snprintf(buffer, len, div->name);
+            if (buffer) lstrcpynA(buffer, div->name, len);
             return TRUE;
         }
     }

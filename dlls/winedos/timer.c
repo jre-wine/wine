@@ -58,6 +58,8 @@ static UINT TIMER_ticks = 0;
 /* Number of pending timer IRQs. */
 static LONG TIMER_pending = 0;
 
+/* Number of milliseconds between IRQs. */
+static DWORD TIMER_millis = 0;
 
 /*********************************************************************** 
  *              TIMER_Relay
@@ -81,11 +83,11 @@ static void CALLBACK TIMER_TimerProc( HWND     hwnd,
                                       DWORD    dwTime )
 {
     LONG pending = InterlockedIncrement( &TIMER_pending );
+    DWORD delta = (dwTime >= TIMER_stamp) ?
+        (dwTime - TIMER_stamp) : (0xffffffff - (TIMER_stamp - dwTime));
 
     if (pending >= TIMER_MAX_PENDING)
     {
-        DWORD delta = (dwTime >= TIMER_stamp) ? 
-            (dwTime - TIMER_stamp) : (0xffffffff - (TIMER_stamp - dwTime));
 
         if (delta >= 60000)
         {
@@ -97,8 +99,19 @@ static void CALLBACK TIMER_TimerProc( HWND     hwnd,
     }
     else
     {
-        TIMER_stamp = dwTime;
-        DOSVM_QueueEvent( 0, DOS_PRIORITY_REALTIME, TIMER_Relay, NULL );
+        DWORD i;
+
+        /* Calculate the number of valid timer interrupts we can generate */
+        DWORD count = delta / TIMER_millis;
+
+        /* Forward the timestamp with the time used */
+        TIMER_stamp += (count * TIMER_millis);
+
+        /* Generate interrupts */
+        for(i=0;i<count;i++)
+        {
+          DOSVM_QueueEvent( 0, DOS_PRIORITY_REALTIME, TIMER_Relay, NULL );
+        }
     }
 }
 
@@ -122,27 +135,9 @@ static void WINAPI TIMER_DoSetTimer( ULONG_PTR arg )
     TIMER_id = SetTimer( NULL, 0, millis, TIMER_TimerProc );
     TIMER_stamp = GetTickCount();
     TIMER_ticks = arg;
-}
 
-
-/***********************************************************************
- *              DOSVM_GetTimer
- */
-UINT WINAPI DOSVM_GetTimer( void )
-{
-    if (!DOSVM_IsWin16())
-    {
-        DWORD millis = GetTickCount() - TIMER_stamp;
-        INT   ticks = MulDiv( millis, TIMER_FREQ, 1000 );
-
-        /* sanity check - tick wrap or suspended process or update race */
-        if (ticks < 0 || ticks >= TIMER_ticks)
-            ticks = 0;
-
-        return ticks;
-    }
-
-    return 0;
+    /* Remember number of milliseconds to wait */
+    TIMER_millis = millis;
 }
 
 

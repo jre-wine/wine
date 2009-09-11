@@ -299,7 +299,7 @@ static DWORD getInterfaceMaskByName(const char *name)
 }
 
 #if defined (SIOCGIFHWADDR)
-DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
+static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
  PDWORD type)
 {
   DWORD ret;
@@ -387,7 +387,7 @@ DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
   return ret;
 }
 #elif defined (SIOCGARP)
-DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
+static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
  PDWORD type)
 {
   DWORD ret;
@@ -446,7 +446,7 @@ DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
   return ret;
 }
 #elif defined (HAVE_SYS_SYSCTL_H) && defined (HAVE_NET_IF_DL_H)
-DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
+static DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
  PDWORD type)
 {
   DWORD ret;
@@ -548,7 +548,7 @@ DWORD getInterfacePhysicalByIndex(DWORD index, PDWORD len, PBYTE addr,
     return ERROR_INVALID_DATA;
 }
 
-static DWORD getInterfaceMtuByName(const char *name, PDWORD mtu)
+DWORD getInterfaceMtuByName(const char *name, PDWORD mtu)
 {
   DWORD ret;
   int fd;
@@ -580,7 +580,7 @@ static DWORD getInterfaceMtuByName(const char *name, PDWORD mtu)
   return ret;
 }
 
-static DWORD getInterfaceStatusByName(const char *name, PDWORD status)
+DWORD getInterfaceStatusByName(const char *name, PDWORD status)
 {
   DWORD ret;
   int fd;
@@ -650,17 +650,6 @@ DWORD getInterfaceEntryByName(const char *name, PMIB_IFROW entry)
   else
     ret = ERROR_INVALID_DATA;
   return ret;
-}
-
-DWORD getInterfaceEntryByIndex(DWORD index, PMIB_IFROW entry)
-{
-  char nameBuf[IF_NAMESIZE];
-  char *name = getInterfaceNameByIndex(index, nameBuf);
-
-  if (name)
-    return getInterfaceEntryByName(name, entry);
-  else
-    return ERROR_INVALID_DATA;
 }
 
 /* Enumerates the IP addresses in the system using SIOCGIFCONF, returning

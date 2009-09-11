@@ -32,13 +32,19 @@
 
 /* function pointers */
 static HMODULE hSetupAPI;
-static LPCWSTR (WINAPI *pSetupGetField)(PINFCONTEXT,DWORD);
+static LPCSTR (WINAPI *pSetupGetFieldA)(PINFCONTEXT,DWORD);
+static LPCWSTR (WINAPI *pSetupGetFieldW)(PINFCONTEXT,DWORD);
+static BOOL (WINAPI *pSetupEnumInfSectionsA)( HINF hinf, UINT index, PSTR buffer, DWORD size, UINT *need );
 
 static void init_function_pointers(void)
 {
     hSetupAPI = GetModuleHandleA("setupapi.dll");
 
-    pSetupGetField = (void *)GetProcAddress(hSetupAPI, "pSetupGetField"); 
+    /* Nice, pSetupGetField is either A or W depending on the Windows version! The actual test
+     * takes care of this difference */
+    pSetupGetFieldA = (void *)GetProcAddress(hSetupAPI, "pSetupGetField");
+    pSetupGetFieldW = (void *)GetProcAddress(hSetupAPI, "pSetupGetField");
+    pSetupEnumInfSectionsA = (void *)GetProcAddress(hSetupAPI, "SetupEnumInfSectionsA" );
 }
 
 static const char tmpfilename[] = ".\\tmp.inf";
@@ -52,6 +58,7 @@ static const char tmpfilename[] = ".\\tmp.inf";
 #define A400 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
              "aaaaaaaaaaaaaaaa" A256
+#define A1200 A400 A400 A400
 #define A511 A255 A256
 #define A4097 "a" A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256 A256
 
@@ -61,7 +68,7 @@ static const char tmpfilename[] = ".\\tmp.inf";
                     "per%%cent=abcd\nper=1\ncent=2\n22=foo\n" \
                     "big=" A400 "\n" \
                     "mydrive=\"C:\\\"\n" \
-                    "verybig=" A400 A400 A400 "\n"
+                    "verybig=" A1200 "\n"
 
 /* create a new file with specified contents and open it */
 static HINF test_file_contents( const char *data, UINT *err_line )
@@ -123,10 +130,10 @@ static const struct
     { ";\n;\nabc\r\n" STD_HEADER,                            ERROR_EXPECTED_SECTION_NAME, 3,    0 },
     { ";\n;\nab\nab\n" STD_HEADER,                           ERROR_EXPECTED_SECTION_NAME, 3,    0 },
     { ";aa\n;bb\n" STD_HEADER,                               0,                           0,    0 },
-    { STD_HEADER " [TestSection\x00] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [Test\x00Section] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [TestSection\x00] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
-    { STD_HEADER " [Test\x00Section] \n",                    ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [TestSection\x00]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [Test\x00Section]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [TestSection\x00]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
+    { STD_HEADER " [Test\x00Section]\n",                     ERROR_BAD_SECTION_NAME_LINE, 3,    0 },
 };
 
 static void test_invalid_files(void)
@@ -245,6 +252,52 @@ static void test_section_names(void)
     }
 }
 
+static void test_enum_sections(void)
+{
+    static const char *contents = STD_HEADER "[s1]\nfoo=bar\n[s2]\nbar=foo\n[s3]\n[strings]\na=b\n";
+
+    BOOL ret;
+    DWORD len;
+    HINF hinf;
+    UINT err, index;
+    char buffer[256];
+
+    if (!pSetupEnumInfSectionsA)
+    {
+        win_skip( "SetupEnumInfSectionsA not available\n" );
+        return;
+    }
+
+    hinf = test_file_contents( contents, &err );
+    ok( hinf != NULL, "Expected valid INF file\n" );
+
+    for (index = 0; ; index++)
+    {
+        SetLastError( 0xdeadbeef );
+        ret = pSetupEnumInfSectionsA( hinf, index, NULL, 0, &len );
+        err = GetLastError();
+        if (!ret && GetLastError() == ERROR_NO_MORE_ITEMS) break;
+        ok( ret, "SetupEnumInfSectionsA failed\n" );
+        ok( len == 3 || len == 8, "wrong len %u\n", len );
+
+        SetLastError( 0xdeadbeef );
+        ret = pSetupEnumInfSectionsA( hinf, index, NULL, sizeof(buffer), &len );
+        err = GetLastError();
+        ok( !ret, "SetupEnumInfSectionsA succeeded\n" );
+        ok( err == ERROR_INVALID_USER_BUFFER, "wrong error %u\n", err );
+        ok( len == 3 || len == 8, "wrong len %u\n", len );
+
+        SetLastError( 0xdeadbeef );
+        ret = pSetupEnumInfSectionsA( hinf, index, buffer, sizeof(buffer), &len );
+        ok( ret, "SetupEnumInfSectionsA failed err %u\n", GetLastError() );
+        ok( len == 3 || len == 8, "wrong len %u\n", len );
+        ok( !lstrcmpi( buffer, "version" ) || !lstrcmpi( buffer, "s1" ) ||
+            !lstrcmpi( buffer, "s2" ) || !lstrcmpi( buffer, "s3" ) || !lstrcmpi( buffer, "strings" ),
+            "bad section '%s'\n", buffer );
+    }
+    SetupCloseInfFile( hinf );
+}
+
 
 /* Test various key and value names */
 
@@ -315,7 +368,7 @@ static const struct
  { "loop=%loop%\n" STR_SECTION,     "loop",  { "%loop2%" } },
  { "%per%%cent%=100\n" STR_SECTION, "12",    { "100" } },
  { "a=%big%\n" STR_SECTION,         "a",     { A400 } },
- { "a=%verybig%\n" STR_SECTION,     "a",     { A511 } },  /* truncated to 511 */
+ { "a=%verybig%\n" STR_SECTION,     "a",     { A511 } },  /* truncated to 511, not on Vista/W2K8 */
  { "a=%big%%big%%big%%big%\n" STR_SECTION,   "a", { A400 A400 A400 A400 } },
  { "a=%big%%big%%big%%big%%big%%big%%big%%big%%big%\n" STR_SECTION,   "a", { A400 A400 A400 A400 A400 A400 A400 A400 A400 } },
  { "a=%big%%big%%big%%big%%big%%big%%big%%big%%big%%big%%big%\n" STR_SECTION,   "a", { A4097 /*MAX_INF_STRING_LENGTH+1*/ } },
@@ -384,8 +437,21 @@ static void test_key_names(void)
             {
                 ok( err == 0, "line %u: bad error %u\n", i, err );
                 if (key_names[i].fields[index])
-                    ok( !strcmp( field, key_names[i].fields[index] ), "line %u: bad field %s/%s\n",
-                        i, field, key_names[i].fields[index] );
+                {
+                    if (i == 49)
+                        ok( !strcmp( field, key_names[i].fields[index] ) ||
+                            !strcmp( field, A1200), /* Vista, W2K8 */
+                            "line %u: bad field %s/%s\n",
+                            i, field, key_names[i].fields[index] );
+                    else  /* don't compare drive letter of paths */
+                        if (field[0] && field[1] == ':' && field[2] == '\\')
+                        ok( !strcmp( field + 1, key_names[i].fields[index] + 1 ),
+                            "line %u: bad field %s/%s\n",
+                            i, field, key_names[i].fields[index] );
+                    else
+                        ok( !strcmp( field, key_names[i].fields[index] ), "line %u: bad field %s/%s\n",
+                            i, field, key_names[i].fields[index] );
+                }
                 else
                     ok( 0, "line %u: got extra field %s\n", i, field );
                 strcat( buffer, "," );
@@ -416,12 +482,15 @@ static void test_close_inf_file(void)
 {
     SetLastError(0xdeadbeef);
     SetupCloseInfFile(NULL);
-    ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %u\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef ||
+        GetLastError() == ERROR_INVALID_PARAMETER, /* Win9x, WinMe */
+        "Expected 0xdeadbeef, got %u\n", GetLastError());
 
     SetLastError(0xdeadbeef);
     SetupCloseInfFile(INVALID_HANDLE_VALUE);
-    ok(GetLastError() == 0xdeadbeef, "Expected 0xdeadbeef, got %u\n", GetLastError());
-
+    ok(GetLastError() == 0xdeadbeef ||
+        GetLastError() == ERROR_INVALID_PARAMETER, /* Win9x, WinMe */
+        "Expected 0xdeadbeef, got %u\n", GetLastError());
 }
 
 static const char *contents = "[Version]\n"
@@ -432,7 +501,14 @@ static const char *contents = "[Version]\n"
                               "[Strings]\n"
                               "RTMQFE_NAME = \"RTMQFE\"\n";
 
-static const WCHAR getfield_res[][20] =
+static const CHAR getfield_resA[][20] =
+{
+    "RTMQFE",
+    "%RTMGFE_NAME%",
+    "SP1RTM",
+};
+
+static const WCHAR getfield_resW[][20] =
 {
     {'R','T','M','Q','F','E',0},
     {'%','R','T','M','G','F','E','_','N','A','M','E','%',0},
@@ -444,9 +520,20 @@ static void test_pSetupGetField(void)
     UINT err;
     BOOL ret;
     HINF hinf;
-    LPCWSTR field;
+    LPCSTR fieldA;
+    LPCWSTR fieldW;
     INFCONTEXT context;
     int i;
+    int len;
+    BOOL unicode = TRUE;
+
+    SetLastError(0xdeadbeef);
+    lstrcmpW(NULL, NULL);
+    if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("Using A-functions instead of W\n");
+        unicode = FALSE;
+    }
 
     hinf = test_file_contents( contents, &err );
     ok( hinf != NULL, "Expected valid INF file\n" );
@@ -458,19 +545,47 @@ static void test_pSetupGetField(void)
 
     for ( i = 0; i < 3; i++ )
     {
-        field = pSetupGetField( &context, i );
-        ok( field != NULL, "Failed to get field %i\n", i );
-        ok( !lstrcmpW( getfield_res[i], field ), "Wrong string returned\n" );
+        if (unicode)
+        {
+            fieldW = pSetupGetFieldW( &context, i );
+            ok( fieldW != NULL, "Failed to get field %i\n", i );
+            ok( !lstrcmpW( getfield_resW[i], fieldW ), "Wrong string returned\n" );
+        }
+        else
+        {
+            fieldA = pSetupGetFieldA( &context, i );
+            ok( fieldA != NULL, "Failed to get field %i\n", i );
+            ok( !lstrcmpA( getfield_resA[i], fieldA ), "Wrong string returned\n" );
+        }
     }
 
-    field = pSetupGetField( &context, 3 );
-    ok( field != NULL, "Failed to get field 3\n" );
-    ok( lstrlenW( field ) == 511, "Expected 511, got %d\n", lstrlenW( field ) );
+    if (unicode)
+    {
+        fieldW = pSetupGetFieldW( &context, 3 );
+        ok( fieldW != NULL, "Failed to get field 3\n" );
+        len = lstrlenW( fieldW );
+        ok( len == 511 || /* NT4, W2K, XP and W2K3 */
+            len == 4096,  /* Vista */
+            "Unexpected length, got %d\n", len );
 
-    field = pSetupGetField( &context, 4 );
-    ok( field == NULL, "Expected NULL, got %p\n", field );
-    ok( GetLastError() == ERROR_INVALID_PARAMETER,
-        "Expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
+        fieldW = pSetupGetFieldW( &context, 4 );
+        ok( fieldW == NULL, "Expected NULL, got %p\n", fieldW );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER,
+            "Expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
+    }
+    else
+    {
+        fieldA = pSetupGetFieldA( &context, 3 );
+        ok( fieldA != NULL, "Failed to get field 3\n" );
+        len = lstrlenA( fieldA );
+        ok( len == 511, /* Win9x, WinME */
+            "Unexpected length, got %d\n", len );
+
+        fieldA = pSetupGetFieldA( &context, 4 );
+        ok( fieldA == NULL, "Expected NULL, got %p\n", fieldA );
+        ok( GetLastError() == ERROR_INVALID_PARAMETER,
+            "Expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError() );
+    }
 
     SetupCloseInfFile( hinf );
 }
@@ -519,18 +634,24 @@ static void test_SetupGetIntField(void)
         retb = SetupGetIntField( &context, keys[i].index, &intfield );
         if ( keys[i].err == ERROR_SUCCESS )
         {
-            ok( retb, "Expected success\n" );
+            if ( !retb && !lstrcmpA( keys[i].key, "123=" ) )
+            {
+                win_skip( "results differ on Win9x\n" );
+                SetupCloseInfFile( hinf );
+                continue;
+            }
+            ok( retb, "%u: Expected success\n", i );
             ok( GetLastError() == ERROR_SUCCESS ||
                 GetLastError() == 0xdeadbeef /* win9x, NT4 */,
-                "Expected ERROR_SUCCESS or 0xdeadbeef, got %u\n", GetLastError() );
+                "%u: Expected ERROR_SUCCESS or 0xdeadbeef, got %u\n", i, GetLastError() );
         }
         else
         {
-            ok( !retb, "Expected failure\n" );
+            ok( !retb, "%u: Expected failure\n", i );
             ok( GetLastError() == keys[i].err,
-                "Expected %d, got %u\n", keys[i].err, GetLastError() );
+                "%u: Expected %d, got %u\n", i, keys[i].err, GetLastError() );
         }
-        ok( intfield == keys[i].value, "Expected %d, got %d\n", keys[i].value, intfield );
+        ok( intfield == keys[i].value, "%u: Expected %d, got %d\n", i, keys[i].value, intfield );
 
         SetupCloseInfFile( hinf );
     }
@@ -655,6 +776,7 @@ START_TEST(parser)
     init_function_pointers();
     test_invalid_files();
     test_section_names();
+    test_enum_sections();
     test_key_names();
     test_close_inf_file();
     test_pSetupGetField();

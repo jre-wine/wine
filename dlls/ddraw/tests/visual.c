@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Stefan Dösinger(for CodeWeavers)
+ * Copyright (C) 2007 Stefan DÃ¶singer(for CodeWeavers)
  * Copyright (C) 2008 Alexander Dorofeyev
  *
  * This library is free software; you can redistribute it and/or
@@ -37,6 +37,8 @@ IDirect3DDevice *Direct3DDevice1 = NULL;
 IDirect3DExecuteBuffer *ExecuteBuffer = NULL;
 IDirect3DViewport *Viewport = NULL;
 
+static BOOL refdevice = FALSE;
+
 static HRESULT (WINAPI *pDirectDrawCreateEx)(LPGUID,LPVOID*,REFIID,LPUNKNOWN);
 
 static BOOL createObjects(void)
@@ -55,7 +57,7 @@ static BOOL createObjects(void)
     ok(hr==DD_OK || hr==DDERR_NODIRECTDRAWSUPPORT, "DirectDrawCreateEx returned: %x\n", hr);
     if(!DirectDraw) goto err;
 
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d7_test_wc";
     RegisterClass(&wc);
     window = CreateWindow("d3d7_test_wc", "d3d7_test", WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
@@ -89,8 +91,7 @@ static BOOL createObjects(void)
     ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE | DDSCAPS_3DDEVICE;
     ddsd.dwBackBufferCount = 1;
     hr = IDirectDraw7_CreateSurface(DirectDraw, &ddsd, &Surface, NULL);
-    ok(hr==DD_OK, "CreateSurface returned: %08x\n", hr);
-    if(!Surface) goto err;
+    if(FAILED(hr)) goto err;
 
     hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DTnLHalDevice, Surface, &Direct3DDevice);
     if(FAILED(hr))
@@ -101,9 +102,10 @@ static BOOL createObjects(void)
         {
             trace("Creating a HAL device failed, trying Ref\n");
             hr = IDirect3D7_CreateDevice(Direct3D, &IID_IDirect3DRefDevice, Surface, &Direct3DDevice);
+            if (SUCCEEDED(hr))
+                refdevice = TRUE;
         }
     }
-    ok(hr == D3D_OK, "IDirect3D7_CreateDevice failed with %08x\n", hr);
     if(!Direct3DDevice) goto err;
     return TRUE;
 
@@ -185,6 +187,21 @@ static DWORD getPixelColor(IDirect3DDevice7 *device, UINT x, UINT y)
 out:
     IDirectDrawSurface7_Release(surf);
     return ret;
+}
+
+/*
+ * Helper function to get and set the viewport - needed on geforce 8800 on XP - driver bug?
+ * This is needed after IDirect3DDevice7_SetRenderTarget in combination with offscreen to backbuffer rendering.
+ */
+static void set_the_same_viewport_again(IDirect3DDevice7 *device)
+{
+    D3DVIEWPORT7 vp = {0};
+    HRESULT hr;
+    hr = IDirect3DDevice7_GetViewport(device,&vp);
+    ok(hr == D3D_OK && vp.dwWidth == 640 && vp.dwHeight == 480, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
+    hr = IDirect3DDevice7_SetViewport(device, &vp);
+    ok(hr == D3D_OK, "IDirect3DDevice7_SetViewport returned %08x\n", hr);
+    return;
 }
 
 struct vertex
@@ -549,6 +566,11 @@ static void offscreen_test(IDirect3DDevice7 *device)
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_LIGHTING, FALSE);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState returned hr = %08x\n", hr);
 
+    if (refdevice) {
+        win_skip("Tests would crash on W2K with a refdevice\n");
+        goto out;
+    }
+
     if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
         hr = IDirect3DDevice7_SetRenderTarget(device, offscreen, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
@@ -561,6 +583,8 @@ static void offscreen_test(IDirect3DDevice7 *device)
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
         ok(hr == D3D_OK, "SetRenderTarget failed, hr = %08x\n", hr);
+        set_the_same_viewport_again(device);
+
         hr = IDirect3DDevice7_SetTexture(device, 0, offscreen);
         ok(hr == D3D_OK, "SetTexture failed, %08x\n", hr);
 
@@ -668,6 +692,12 @@ static void alpha_test(IDirect3DDevice7 *device)
 
     hr = IDirect3DDevice7_SetRenderState(device, D3DRENDERSTATE_ALPHABLENDENABLE, TRUE);
     ok(hr == D3D_OK, "IDirect3DDevice7_SetRenderState failed, hr = %08x\n", hr);
+
+    if (refdevice) {
+        win_skip("Tests would crash on W2K with a refdevice\n");
+        goto out;
+    }
+
     if(IDirect3DDevice7_BeginScene(device) == D3D_OK) {
 
         /* Draw two quads, one with src alpha blending, one with dest alpha blending. The
@@ -718,6 +748,7 @@ static void alpha_test(IDirect3DDevice7 *device)
 
         hr = IDirect3DDevice7_SetRenderTarget(device, backbuffer, 0);
         ok(hr == D3D_OK, "Can't get back buffer, hr = %08x\n", hr);
+        set_the_same_viewport_again(device);
 
         /* Render the offscreen texture onto the frame buffer to be able to compare it regularly.
          * Disable alpha blending for the final composition
@@ -741,28 +772,28 @@ static void alpha_test(IDirect3DDevice7 *device)
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
-       "SRCALPHA on frame buffer returned color %08x, expected 0x00bf4000\n", color);
+       "SRCALPHA on frame buffer returned color 0x%08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 160, 120);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red == 0x00 && green == 0x00 && blue >= 0xfe && blue <= 0xff ,
-       "DSTALPHA on frame buffer returned color %08x, expected 0x00ff0000\n", color);
+       "DSTALPHA on frame buffer returned color 0x%08x, expected 0x000000ff\n", color);
 
     color = getPixelColor(device, 480, 360);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0xbe && red <= 0xc0 && green >= 0x39 && green <= 0x41 && blue == 0x00,
-       "SRCALPHA on texture returned color %08x, expected bar\n", color);
+       "SRCALPHA on texture returned color 0x%08x, expected 0x00bf4000\n", color);
 
     color = getPixelColor(device, 480, 120);
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
     ok(red >= 0x7e && red <= 0x81 && green == 0x00 && blue >= 0x7e && blue <= 0x81,
-       "DSTALPHA on texture returned color %08x, expected foo\n", color);
+       "DSTALPHA on texture returned color 0x%08x, expected 0x00800080\n", color);
 
     out:
     if(offscreen) IDirectDrawSurface7_Release(offscreen);
@@ -803,7 +834,9 @@ static void rhw_zero_test(IDirect3DDevice7 *device)
     }
 
     color = getPixelColor(device, 5, 5);
-    ok(color == 0xffffff, "Got color %08x, expected 00ffffff\n", color);
+    ok(color == 0xffffff ||
+       broken(color == 0), /* VMware */
+       "Got color %08x, expected 00ffffff\n", color);
 
     color = getPixelColor(device, 105, 105);
     ok(color == 0, "Got color %08x, expected 00000000\n", color);
@@ -825,7 +858,7 @@ static BOOL D3D1_createObjects(void)
         return FALSE;
     }
 
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "texturemapblend_test_wc";
     RegisterClass(&wc);
     window = CreateWindow("texturemapblend_test_wc", "texturemapblend_test", WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
@@ -1029,7 +1062,7 @@ out:
                          ptr = ((D3DTRIANGLE*)(ptr))+1;\
                         } while (0)
 
-HRESULT CALLBACK TextureFormatEnumCallback(LPDDSURFACEDESC lpDDSD, LPVOID lpContext)
+static HRESULT CALLBACK TextureFormatEnumCallback(LPDDSURFACEDESC lpDDSD, LPVOID lpContext)
 {
     if (lpDDSD->ddpfPixelFormat.dwFlags & DDPF_PALETTEINDEXED8) {
         *(BOOL*)lpContext = TRUE;
@@ -1805,7 +1838,9 @@ static void D3D1_ViewportClearTest(void)
     red =   (color & 0x00ff0000) >> 16;
     green = (color & 0x0000ff00) >>  8;
     blue =  (color & 0x000000ff);
-    ok(red == 0xff && green == 0 && blue == 0, "Got color %08x, expected 00ff0000\n", color);
+    ok((red == 0xff && green == 0 && blue == 0) ||
+       broken(red == 0 && green == 0 && blue == 0xff), /* VMware and some native boxes */
+       "Got color %08x, expected 00ff0000\n", color);
 
     color = D3D1_getPixelColor(DirectDraw1, Surface1, 205, 205);
     red =   (color & 0x00ff0000) >> 16;
@@ -1911,7 +1946,7 @@ static void D3D3_ViewportClearTest(void)
     WORD Indices[] = {0, 1, 2, 2, 3, 0};
     DWORD fvf = D3DFVF_XYZ | D3DFVF_DIFFUSE;
 
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "D3D3_ViewportClearTest_wc";
     RegisterClass(&wc);
     window = CreateWindow("D3D3_ViewportClearTest_wc", "D3D3_ViewportClearTest",
@@ -2151,7 +2186,7 @@ static BOOL colortables_check_equality(PALETTEENTRY table1[256], RGBQUAD table2[
     return TRUE;
 }
 
-static void p8_primary_test()
+static void p8_primary_test(void)
 {
     /* Test 8bit mode used by games like StarCraft, C&C Red Alert I etc */
     DDSURFACEDESC ddsd;
@@ -2177,7 +2212,7 @@ static void p8_primary_test()
         goto out;
     }
 
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "p8_primary_test_wc";
     RegisterClass(&wc);
     window = CreateWindow("p8_primary_test_wc", "p8_primary_test", WS_MAXIMIZE | WS_VISIBLE | WS_CAPTION , 0, 0, 640, 480, 0, 0, 0, 0);
@@ -2258,7 +2293,9 @@ static void p8_primary_test()
     ddsd.ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
     U1(ddsd.ddpfPixelFormat).dwRGBBitCount      = 8;
     hr = IDirectDraw_CreateSurface(DirectDraw1, &ddsd, &offscreen, NULL);
-    ok(hr == DD_OK, "IDirectDraw_CreateSurface returned %08x\n", hr);
+    ok(hr == DD_OK ||
+       broken(hr == DDERR_INVALIDPIXELFORMAT), /* VMware */
+       "IDirectDraw_CreateSurface returned %08x\n", hr);
     if (FAILED(hr)) goto out;
 
     memset(entries, 0, sizeof(entries));
@@ -2313,6 +2350,31 @@ static void p8_primary_test()
     color = getPixelColor_GDI(Surface1, 112, 112);
     ok(GetRValue(color) == 0 && GetGValue(color) == 0x00 && GetBValue(color) == 0xFF,
             "got R %02X G %02X B %02X, expected R 00 G 00 B FF\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    rect.left = 100;
+    rect.top = 200;
+    rect.right = 116;
+    rect.bottom = 216;
+
+    memset(&ddbltfx, 0, sizeof(ddbltfx));
+    ddbltfx.dwSize = sizeof(ddbltfx);
+    ddbltfx.ddckSrcColorkey.dwColorSpaceLowValue = ddbltfx.ddckSrcColorkey.dwColorSpaceHighValue = 2;
+    hr = IDirectDrawSurface_Blt(Surface1, &rect, offscreen, NULL,
+        DDBLT_WAIT | DDBLT_KEYSRC | DDBLT_KEYSRCOVERRIDE, &ddbltfx);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirectDrawSurface_Blt returned: %x\n", hr);
+    hr = IDirectDrawSurface_Blt(Surface1, &rect, offscreen, NULL,
+        DDBLT_WAIT | DDBLT_KEYSRCOVERRIDE, &ddbltfx);
+    ok(hr==DD_OK, "IDirectDrawSurface_Blt returned: %x\n", hr);
+
+    color = getPixelColor_GDI(Surface1, 105, 205);
+    ok(GetRValue(color) == 0x80 && GetGValue(color) == 0 && GetBValue(color) == 0,
+            "got R %02X G %02X B %02X, expected R 80 G 00 B 00\n",
+            GetRValue(color), GetGValue(color), GetBValue(color));
+
+    color = getPixelColor_GDI(Surface1, 112, 212);
+    ok(GetRValue(color) == 0 && GetGValue(color) == 0xFF && GetBValue(color) == 0,
+            "got R %02X G %02X B %02X, expected R 00 G FF B 00\n",
             GetRValue(color), GetGValue(color), GetBValue(color));
 
     /* Test blitting and locking patterns that are likely to trigger bugs in opengl renderer (p8
@@ -2552,6 +2614,14 @@ static void cubemap_test(IDirect3DDevice7 *device)
     if(SUCCEEDED(hr))
     {
         hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 0 * 6, 4, 0);
+        if (hr == E_NOTIMPL)
+        {
+            /* VMware */
+            win_skip("IDirect3DDevice7_DrawPrimitive is not completely implemented, colors won't be tested\n");
+            hr = IDirect3DDevice7_EndScene(device);
+            ok(hr == DD_OK, "IDirect3DDevice7_EndScene returned %08x\n", hr);
+            goto out;
+        }
         ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
         hr = IDirect3DDevice7_DrawPrimitive(device, D3DPT_TRIANGLESTRIP, D3DFVF_XYZ | D3DFVF_TEXCOORDSIZE3(0) | D3DFVF_TEX1, quad + 4 * 6, 4, 0);
         ok(hr == DD_OK, "IDirect3DDevice7_DrawPrimitive returned %08x\n", hr);
@@ -2574,6 +2644,8 @@ static void cubemap_test(IDirect3DDevice7 *device)
     ok(color == 0x00ff00ff, "DDSCAPS2_CUBEMAP_POSITIVEY has color 0x%08x, expected 0x00ff00ff\n", color);
     color = getPixelColor(device, 480, 120); /* upper right quad - positivez */
     ok(color == 0x000000ff, "DDSCAPS2_CUBEMAP_POSITIVEZ has color 0x%08x, expected 0x000000ff\n", color);
+
+out:
     hr = IDirect3DDevice7_SetTexture(device, 0, NULL);
     ok(hr == DD_OK, "IDirect3DDevice7_SetTexture returned %08x\n", hr);
     IDirectDrawSurface7_Release(cubemap);
@@ -2593,28 +2665,28 @@ START_TEST(visual)
     hr = IDirect3DDevice7_Clear(Direct3DDevice, 0, NULL, D3DCLEAR_TARGET, 0xffff0000, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
 
     color = getPixelColor(Direct3DDevice, 1, 1);
     if(color !=0x00ff0000)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 
     hr = IDirect3DDevice7_Clear(Direct3DDevice, 0, NULL, D3DCLEAR_TARGET, 0xff00ddee, 0.0, 0);
     if(FAILED(hr))
     {
-        trace("Clear failed, can't assure correctness of the test results, skipping\n");
+        skip("Clear failed, can't assure correctness of the test results, skipping\n");
         goto cleanup;
     }
 
     color = getPixelColor(Direct3DDevice, 639, 479);
     if(color != 0x0000ddee)
     {
-        trace("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
+        skip("Sanity check returned an incorrect color(%08x), can't assure the correctness of the tests, skipping\n", color);
         goto cleanup;
     }
 

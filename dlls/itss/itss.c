@@ -296,10 +296,10 @@ static HRESULT WINAPI ITStorageImpl_StgOpenStorageOnILockBytes(
 
 static HRESULT WINAPI ITStorageImpl_StgSetTimes(
     IITStorage* iface,
-    WCHAR* lpszName,
-    FILETIME* pctime,
-    FILETIME* patime,
-    FILETIME* pmtime)
+    const WCHAR* lpszName,
+    const FILETIME* pctime,
+    const FILETIME* patime,
+    const FILETIME* pmtime)
 {
     ITStorageImpl *This = (ITStorageImpl *)iface;
     FIXME("%p\n", This);
@@ -363,7 +363,7 @@ static HRESULT ITSS_create(IUnknown *pUnkOuter, LPVOID *ppObj)
     its->ref = 1;
 
     TRACE("-> %p\n", its);
-    *ppObj = (LPVOID) its;
+    *ppObj = its;
 
     ITSS_LockModule();
     return S_OK;
@@ -396,7 +396,7 @@ static HRESULT register_server(BOOL do_register)
     STRTABLEA strtable;
     STRENTRYA pse[4];
     static CLSID const *clsids[4];
-    int i = 0;
+    DWORD i = 0;
 
     static const WCHAR wszAdvpack[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
 

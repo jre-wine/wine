@@ -55,8 +55,11 @@ WINE_DECLARE_DEBUG_CHANNEL(shell);
 extern LPVOID WINAPI Alloc(INT);
 extern BOOL WINAPI Free(LPVOID);
 
+static LPSTR _ILGetSTextPointer(LPCITEMIDLIST pidl);
+static LPWSTR _ILGetTextPointerW(LPCITEMIDLIST pidl);
+
 /*************************************************************************
- * ILGetDisplayNameEx        [SHELL32.186]
+ * ILGetDisplayNameExA
  *
  * Retrieves the display name of an ItemIDList
  *
@@ -72,7 +75,7 @@ extern BOOL WINAPI Free(LPVOID);
  * RETURNS
  *  True if the display name could be retrieved successfully, False otherwise
  */
-BOOL WINAPI ILGetDisplayNameExA(LPSHELLFOLDER psf, LPCITEMIDLIST pidl, LPSTR path, DWORD type)
+static BOOL ILGetDisplayNameExA(LPSHELLFOLDER psf, LPCITEMIDLIST pidl, LPSTR path, DWORD type)
 {
     BOOL ret = FALSE;
     WCHAR wPath[MAX_PATH];
@@ -157,6 +160,9 @@ BOOL WINAPI ILGetDisplayNameExW(LPSHELLFOLDER psf, LPCITEMIDLIST pidl, LPWSTR pa
     return SUCCEEDED(ret);
 }
 
+/*************************************************************************
+ * ILGetDisplayNameEx        [SHELL32.186]
+ */
 BOOL WINAPI ILGetDisplayNameEx(LPSHELLFOLDER psf, LPCITEMIDLIST pidl, LPVOID path, DWORD type)
 {
     TRACE_(shell)("%p %p %p %d\n", psf, pidl, path, type);
@@ -232,7 +238,7 @@ LPITEMIDLIST WINAPI ILClone (LPCITEMIDLIST pidl)
         return NULL;
 
     len = ILGetSize(pidl);
-    newpidl = (LPITEMIDLIST)SHAlloc(len);
+    newpidl = SHAlloc(len);
     if (newpidl)
         memcpy(newpidl,pidl,len);
 
@@ -259,7 +265,7 @@ LPITEMIDLIST WINAPI ILCloneFirst(LPCITEMIDLIST pidl)
     if (pidl)
     {
         len = pidl->mkid.cb;
-        pidlNew = (LPITEMIDLIST) SHAlloc (len+2);
+        pidlNew = SHAlloc(len+2);
         if (pidlNew)
         {
             memcpy(pidlNew,pidl,len+2);        /* 2 -> mind a desktop pidl */
@@ -293,7 +299,7 @@ HRESULT WINAPI ILLoadFromStream (IStream * pStream, LPITEMIDLIST * ppPidl)
 
     IStream_AddRef (pStream);
 
-    if (SUCCEEDED(IStream_Read(pStream, (LPVOID)&wLen, 2, &dwBytesRead)))
+    if (SUCCEEDED(IStream_Read(pStream, &wLen, 2, &dwBytesRead)))
     {
         TRACE("PIDL length is %d\n", wLen);
         if (wLen != 0)
@@ -348,7 +354,7 @@ HRESULT WINAPI ILSaveToStream (IStream * pStream, LPCITEMIDLIST pPidl)
 
     wLen = ILGetSize(pPidl);
 
-    if (SUCCEEDED(IStream_Write(pStream, (LPVOID)&wLen, 2, NULL)))
+    if (SUCCEEDED(IStream_Write(pStream, &wLen, 2, NULL)))
     {
         if (SUCCEEDED(IStream_Write(pStream, pPidl, wLen, NULL)))
             ret = S_OK;
@@ -375,7 +381,7 @@ HRESULT WINAPI ILSaveToStream (IStream * pStream, LPCITEMIDLIST pPidl)
  * NOTES
  *  Wrapper for IShellFolder_ParseDisplayName().
  */
-HRESULT WINAPI SHILCreateFromPathA(LPCSTR path, LPITEMIDLIST * ppidl, DWORD * attributes)
+static HRESULT SHILCreateFromPathA(LPCSTR path, LPITEMIDLIST * ppidl, DWORD * attributes)
 {
     WCHAR lpszDisplayName[MAX_PATH];
 
@@ -464,7 +470,7 @@ LPITEMIDLIST WINAPI ILGlobalClone(LPCITEMIDLIST pidl)
         return NULL;
 
     len = ILGetSize(pidl);
-    newpidl = (LPITEMIDLIST)Alloc(len);
+    newpidl = Alloc(len);
     if (newpidl)
         memcpy(newpidl,pidl,len);
 
@@ -712,7 +718,7 @@ HRESULT WINAPI SHGetRealIDL(LPSHELLFOLDER lpsf, LPCITEMIDLIST pidlSimple, LPITEM
         STGMEDIUM medium;
         FORMATETC fmt;
 
-        fmt.cfFormat = RegisterClipboardFormatA(CFSTR_SHELLIDLIST);
+        fmt.cfFormat = RegisterClipboardFormatW(CFSTR_SHELLIDLISTW);
         fmt.ptd = NULL;
         fmt.dwAspect = DVASPECT_CONTENT;
         fmt.lindex = -1;
@@ -725,7 +731,7 @@ HRESULT WINAPI SHGetRealIDL(LPSHELLFOLDER lpsf, LPCITEMIDLIST pidlSimple, LPITEM
         if (SUCCEEDED(hr))
         {
             /*assert(pida->cidl==1);*/
-            LPIDA pida = (LPIDA)GlobalLock(medium.u.hGlobal);
+            LPIDA pida = GlobalLock(medium.u.hGlobal);
 
             LPCITEMIDLIST pidl_folder = (LPCITEMIDLIST) ((LPBYTE)pida+pida->aoffset[0]);
             LPCITEMIDLIST pidl_child = (LPCITEMIDLIST) ((LPBYTE)pida+pida->aoffset[1]);
@@ -985,7 +991,7 @@ LPITEMIDLIST WINAPI ILCreateFromPathAW (LPCVOID path)
  *  is used to avoid having to verify the current path element on disk, so
  *  that creating an ItemIDList from a nonexistent path still can work.
  */
-static HRESULT WINAPI _ILParsePathW(LPCWSTR path, LPWIN32_FIND_DATAW lpFindFile,
+static HRESULT _ILParsePathW(LPCWSTR path, LPWIN32_FIND_DATAW lpFindFile,
                              BOOL bBindCtx, LPITEMIDLIST *ppidl, LPDWORD prgfInOut)
 {
     LPSHELLFOLDER pSF = NULL;
@@ -1016,7 +1022,7 @@ static HRESULT WINAPI _ILParsePathW(LPCWSTR path, LPWIN32_FIND_DATAW lpFindFile,
 
     IShellFolder_Release(pSF);
 
-    if (!SUCCEEDED(ret) && ppidl)
+    if (FAILED(ret) && ppidl)
         *ppidl = NULL;
 
     TRACE("%s %p 0x%x\n", debugstr_w(path), ppidl ? *ppidl : NULL, prgfInOut ? *prgfInOut : 0);
@@ -1314,6 +1320,17 @@ HRESULT WINAPI SHBindToParent(LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCI
     return hr;
 }
 
+/*************************************************************************
+ * SHParseDisplayName             [SHELL32.@]
+ */
+HRESULT WINAPI SHParseDisplayName(LPCWSTR name, IBindCtx *bindctx, LPITEMIDLIST *pidlist,
+                                  SFGAOF attr_in, SFGAOF *attr_out)
+{
+    FIXME("%s %p %p %d %p stub!\n", debugstr_w(name), bindctx, pidlist, attr_in, attr_out);
+    if(pidlist) *pidlist = NULL;
+    return E_NOTIMPL;
+}
+
 /**************************************************************************
  *
  *        internal functions
@@ -1322,7 +1339,14 @@ HRESULT WINAPI SHBindToParent(LPCITEMIDLIST pidl, REFIID riid, LPVOID *ppv, LPCI
  *
  *************************************************************************
  */
-LPITEMIDLIST _ILAlloc(PIDLTYPE type, unsigned int size)
+
+/* Basic PIDL constructor.  Allocates size + 5 bytes, where:
+ * - two bytes are SHITEMID.cb
+ * - one byte is PIDLDATA.type
+ * - two bytes are the NULL PIDL terminator
+ * Sets type of the returned PIDL to type.
+ */
+static LPITEMIDLIST _ILAlloc(PIDLTYPE type, unsigned int size)
 {
     LPITEMIDLIST pidlOut = NULL;
 
@@ -1461,7 +1485,7 @@ LPITEMIDLIST _ILCreateGuidFromStrA(LPCSTR szGUID)
 {
     IID iid;
 
-    if (!SUCCEEDED(SHCLSIDFromStringA(szGUID, &iid)))
+    if (FAILED(SHCLSIDFromStringA(szGUID, &iid)))
     {
         ERR("%s is not a GUID\n", szGUID);
         return NULL;
@@ -1473,7 +1497,7 @@ LPITEMIDLIST _ILCreateGuidFromStrW(LPCWSTR szGUID)
 {
     IID iid;
 
-    if (!SUCCEEDED(SHCLSIDFromStringW(szGUID, &iid)))
+    if (FAILED(SHCLSIDFromStringW(szGUID, &iid)))
     {
         ERR("%s is not a GUID\n", debugstr_w(szGUID));
         return NULL;
@@ -1886,7 +1910,7 @@ DWORD _ILSimpleGetTextW (LPCITEMIDLIST pidl, LPWSTR szOut, UINT uOutSize)
 LPPIDLDATA _ILGetDataPointer(LPCITEMIDLIST pidl)
 {
     if(pidl && pidl->mkid.cb != 0x00)
-        return (LPPIDLDATA) &(pidl->mkid.abID);
+        return (LPPIDLDATA)pidl->mkid.abID;
     return NULL;
 }
 
@@ -1894,7 +1918,7 @@ LPPIDLDATA _ILGetDataPointer(LPCITEMIDLIST pidl)
  *  _ILGetTextPointerW()
  * gets a pointer to the unicode long filename string stored in the pidl
  */
-LPWSTR _ILGetTextPointerW(LPCITEMIDLIST pidl)
+static LPWSTR _ILGetTextPointerW(LPCITEMIDLIST pidl)
 {
     /* TRACE(pidl,"(pidl%p)\n", pidl);*/
 
@@ -1934,7 +1958,7 @@ LPWSTR _ILGetTextPointerW(LPCITEMIDLIST pidl)
         return NULL;
 
     case PT_VALUEW:
-        return (LPWSTR)&(pdata->u.file.szNames);
+        return (LPWSTR)pdata->u.file.szNames;
     }
     return NULL;
 }
@@ -1964,21 +1988,21 @@ LPSTR _ILGetTextPointer(LPCITEMIDLIST pidl)
     case PT_DRIVE1:
     case PT_DRIVE2:
     case PT_DRIVE3:
-        return (LPSTR)&(pdata->u.drive.szDriveName);
+        return pdata->u.drive.szDriveName;
 
     case PT_FOLDER:
     case PT_FOLDER1:
     case PT_VALUE:
     case PT_IESPECIAL1:
     case PT_IESPECIAL2:
-        return (LPSTR)&(pdata->u.file.szNames);
+        return pdata->u.file.szNames;
 
     case PT_WORKGRP:
     case PT_COMP:
     case PT_NETWORK:
     case PT_NETPROVIDER:
     case PT_SHARE:
-        return (LPSTR)&(pdata->u.network.szNames);
+        return pdata->u.network.szNames;
     }
     return NULL;
 }
@@ -1987,7 +2011,7 @@ LPSTR _ILGetTextPointer(LPCITEMIDLIST pidl)
  *  _ILGetSTextPointer()
  * gets a pointer to the short filename string stored in the pidl
  */
-LPSTR _ILGetSTextPointer(LPCITEMIDLIST pidl)
+static LPSTR _ILGetSTextPointer(LPCITEMIDLIST pidl)
 {
     /* TRACE(pidl,"(pidl%p)\n", pidl); */
 
@@ -2002,10 +2026,10 @@ LPSTR _ILGetSTextPointer(LPCITEMIDLIST pidl)
     case PT_VALUE:
     case PT_IESPECIAL1:
     case PT_IESPECIAL2:
-        return (LPSTR)(pdata->u.file.szNames + strlen (pdata->u.file.szNames) + 1);
+        return pdata->u.file.szNames + strlen (pdata->u.file.szNames) + 1;
 
     case PT_WORKGRP:
-        return (LPSTR)(pdata->u.network.szNames + strlen (pdata->u.network.szNames) + 1);
+        return pdata->u.network.szNames + strlen (pdata->u.network.szNames) + 1;
     }
     return NULL;
 }

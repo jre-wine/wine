@@ -11,53 +11,40 @@
 
 DLLFLAGS    = @DLLFLAGS@
 DEFS        = $(EXTRADEFS)
-ALL_LIBS    = $(DELAYIMPORTS:%=-l%) $(IMPORTS:%=-l%) $(EXTRALIBS) $(LIBPORT) $(LDFLAGS) $(LIBS)
-BASEMODULE  = $(MODULE:.exe=)
+ALL_LIBS    = $(DELAYIMPORTS:%=-l%) $(IMPORTS:%=-l%) $(EXTRALIBS) -lwine $(LIBPORT) $(LDFLAGS) $(LIBS)
 RUNTESTFLAGS= -q -P wine -T $(TOPOBJDIR)
-INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(dlldir) $(DESTDIR)$(mandir)/man$(prog_manext)
+INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(dlldir) $(DESTDIR)$(fakedlldir) $(DESTDIR)$(mandir)/man$(prog_manext)
 
 @MAKE_RULES@
 
-all: $(MODULE)$(DLLEXT) $(BASEMODULE)$(EXEEXT)
+all: $(MODULE)$(DLLEXT) $(MODULE)$(FAKEEXT)
 
-# Rules for .so main module
-
-$(MODULE).so: $(OBJS) $(RC_SRCS:.rc=.res) Makefile.in
-	$(WINEGCC) -B$(TOOLSDIR)/tools/winebuild $(APPMODE) $(OBJS) $(RC_SRCS:.rc=.res) -o $@ $(ALL_LIBS) $(DELAYIMPORTS:%=-Wb,-d%)
-
-$(BASEMODULE): $(WINEWRAPPER)
-	$(RM) $@ && $(LN_S) $(WINEWRAPPER) $@
-
-# Rules for .exe main module
-
-$(MODULE): $(OBJS) $(RCOBJS) Makefile.in
-	$(CC) $(APPMODE) $(OBJS) $(RCOBJS) -o $@ $(LIBWINE) $(ALL_LIBS)
+$(MODULE) $(MODULE).so $(MODULE).fake: $(OBJS) Makefile.in
+	$(WINEGCC) $(APPMODE) $(OBJS) -o $@ $(ALL_LIBS) $(DELAYIMPORTS:%=-Wb,-d%)
 
 # Rules for testing
 
-check test:: $(SUBDIRS:%=%/__test__)
+check test:: $(SUBDIRS:%=%/__test__) dummy
 
 $(TESTRESULTS): $(MODULE)$(DLLEXT)
 
 # Rules for installation
 
-.PHONY: install_prog install_prog.so uninstall_prog uninstall_prog.so
+.PHONY: install_prog install_prog.so install_prog.fake
 
 install_prog.so: $(MODULE).so $(DESTDIR)$(dlldir) dummy
 	$(INSTALL_PROGRAM) $(MODULE).so $(DESTDIR)$(dlldir)/$(MODULE).so
 
+install_prog.fake: $(MODULE).fake $(DESTDIR)$(fakedlldir) dummy
+	$(INSTALL_DATA) $(MODULE).fake $(DESTDIR)$(fakedlldir)/$(MODULE)
+
 install_prog: $(MODULE) $(DESTDIR)$(bindir) dummy
 	$(INSTALL_PROGRAM) $(MODULE) $(DESTDIR)$(bindir)/$(MODULE)
 
-uninstall_prog.so: dummy
-	$(RM) $(DESTDIR)$(dlldir)/$(MODULE).so
+install install-lib:: install_prog$(DLLEXT) install_prog$(FAKEEXT)
 
-uninstall_prog: dummy
-	$(RM) $(DESTDIR)$(bindir)/$(MODULE)
-
-install:: install_prog$(DLLEXT)
-
-uninstall:: uninstall_prog$(DLLEXT)
+uninstall::
+	$(RM) $(DESTDIR)$(bindir)/$(MODULE) $(DESTDIR)$(dlldir)/$(MODULE)$(DLLEXT) $(DESTDIR)$(fakedlldir)/$(MODULE)
 
 clean::
-	$(RM) $(BASEMODULE) $(MODULE)
+	$(RM) $(MODULE)

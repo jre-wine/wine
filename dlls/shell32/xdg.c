@@ -46,6 +46,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -158,7 +159,7 @@ static char *load_path(int path_id)
  *
  * The paths are guaranteed to start with '/'
  */
-const char *XDG_GetPath(int path_id)
+static const char *XDG_GetPath(int path_id)
 {
     if (path_id >= PATHS_COUNT || path_id < 0)
     {
@@ -781,7 +782,7 @@ static HRESULT get_xdg_config_file(char * home_dir, char ** config_file)
  * [in/out] p_ptr - pointer to where we are in the buffer
  * Returns the index to xdg_dirs if we find the key, or -1 on error.
  */
-static int parse_config1(const char ** xdg_dirs, const unsigned int num_dirs, char ** p_ptr)
+static int parse_config1(const char * const *xdg_dirs, const unsigned int num_dirs, char ** p_ptr)
 {
     char *p;
     int i;
@@ -884,13 +885,14 @@ static HRESULT parse_config2(char * p, const char * home_dir, char ** out_ptr)
  * [in] num_dirs - number of elements in xdg_dirs
  * [out] out_ptr - an array of the xdg directories names
  */
-HRESULT XDG_UserDirLookup(const char ** xdg_dirs, const unsigned int num_dirs, char *** out_ptr)
+HRESULT XDG_UserDirLookup(const char * const *xdg_dirs, const unsigned int num_dirs, char *** out_ptr)
 {
     FILE *file;
     char **out;
     char *home_dir, *config_file;
     char buffer[512];
-    int i, len;
+    int len;
+    unsigned int i;
     HRESULT hr;
 
     *out_ptr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, num_dirs * sizeof(char *));
@@ -944,9 +946,10 @@ HRESULT XDG_UserDirLookup(const char ** xdg_dirs, const unsigned int num_dirs, c
             continue;
         }
     }
+    fclose (file);
     hr = S_OK;
 
-    /* Remove entries for directories that do no exist */
+    /* Remove entries for directories that do not exist */
     for (i = 0; i <  num_dirs; i++)
     {
         struct stat statFolder;
@@ -963,7 +966,7 @@ xdg_user_dir_lookup_error:
     if (FAILED(hr))
     {
         for (i = 0; i < num_dirs; i++) HeapFree(GetProcessHeap(), 0, out[i]);
-        HeapFree(GetProcessHeap(), 0, out_ptr);
+        HeapFree(GetProcessHeap(), 0, *out_ptr);
     }
     return hr;
 }

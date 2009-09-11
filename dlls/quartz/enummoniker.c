@@ -84,7 +84,7 @@ static HRESULT WINAPI EnumMonikerImpl_QueryInterface(
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IEnumMoniker))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         EnumMonikerImpl_AddRef(iface);
         return S_OK;
     }
@@ -123,6 +123,11 @@ static ULONG WINAPI EnumMonikerImpl_Release(LPENUMMONIKER iface)
 
     if (!ref)
     {
+        ULONG i;
+
+        for (i = 0; i < This->nMonikerCount; i++)
+            IMoniker_Release(This->ppMoniker[i]);
+
         CoTaskMemFree(This->ppMoniker);
         This->ppMoniker = NULL;
         CoTaskMemFree(This);

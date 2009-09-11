@@ -28,7 +28,7 @@ static DWORD texture_stages;
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -48,10 +48,13 @@ static HRESULT init_d3d9(
     d3d9_create = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9");
     ok(d3d9_create != NULL, "Failed to get address of Direct3DCreate9\n");
     if (!d3d9_create) return E_FAIL;
-    
+
     d3d9_ptr = d3d9_create(D3D_SDK_VERSION);
-    ok(d3d9_ptr != NULL, "Failed to create IDirect3D9 object\n");
-    if (!d3d9_ptr) return E_FAIL;
+    if (!d3d9_ptr)
+    {
+        skip("could not create D3D9\n");
+        return E_FAIL;
+    }
 
     window = create_window();
 
@@ -60,9 +63,10 @@ static HRESULT init_d3d9(
     device_pparams->hDeviceWindow = window;
     device_pparams->SwapEffect = D3DSWAPEFFECT_DISCARD;
 
-    hres = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_NULLREF, window,
+    hres = IDirect3D9_CreateDevice(d3d9_ptr, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, window,
         D3DCREATE_SOFTWARE_VERTEXPROCESSING, device_pparams, device);
-    ok(hres == D3D_OK, "IDirect3D_CreateDevice returned: 0x%x\n", hres);
+    ok(hres == D3D_OK || hres == D3DERR_NOTAVAILABLE,
+        "IDirect3D_CreateDevice returned: 0x%x\n", hres);
     return hres;
 }
 
@@ -84,14 +88,15 @@ static void test_begin_end_state_block(IDirect3DDevice9 *device_ptr)
     /* Should succeed */
     state_block_ptr = (IDirect3DStateBlock9 *)0xdeadbeef;
     hret = IDirect3DDevice9_EndStateBlock(device_ptr, &state_block_ptr);
-    ok(hret == D3D_OK && state_block_ptr != 0 && state_block_ptr != (IDirect3DStateBlock9 *)0xdeadbeef, 
+    ok(hret == D3D_OK && state_block_ptr != 0 && state_block_ptr != (IDirect3DStateBlock9 *)0xdeadbeef,
         "EndStateBlock returned: hret 0x%x, state_block_ptr %p. "
         "Expected hret 0x%x, state_block_ptr != %p, state_block_ptr != 0xdeadbeef.\n", hret, state_block_ptr, D3D_OK, NULL);
+    IDirect3DStateBlock9_Release(state_block_ptr);
 
     /* Calling EndStateBlock while not recording should return D3DERR_INVALIDCALL. state_block_ptr should not be touched. */
     state_block_ptr = (IDirect3DStateBlock9 *)0xdeadbeef;
     hret = IDirect3DDevice9_EndStateBlock(device_ptr, &state_block_ptr);
-    ok(hret == D3DERR_INVALIDCALL && state_block_ptr == (IDirect3DStateBlock9 *)0xdeadbeef, 
+    ok(hret == D3DERR_INVALIDCALL && state_block_ptr == (IDirect3DStateBlock9 *)0xdeadbeef,
         "EndStateBlock returned: hret 0x%x, state_block_ptr %p. "
         "Expected hret 0x%x, state_block_ptr 0xdeadbeef.\n", hret, state_block_ptr, D3DERR_INVALIDCALL);
 }
@@ -119,7 +124,7 @@ typedef struct state_test {
 
     /* The poison data is the data to preinitialize the return buffer to */
     const void* poison_data;
-    
+
     /* Return buffer */
     void* return_data;
 
@@ -145,7 +150,7 @@ typedef struct state_test {
 
 /* See below for explanation of the flags */
 #define EVENT_OK             0x00
-#define EVENT_CHECK_DEFAULT  0x01 
+#define EVENT_CHECK_DEFAULT  0x01
 #define EVENT_CHECK_INITIAL  0x02
 #define EVENT_CHECK_TEST     0x04
 #define EVENT_ERROR          0x08
@@ -211,8 +216,8 @@ static void execute_test_chain(
                     }
                 }
 
-                else if (outcome & EVENT_CHECK_DEFAULT) {
-                  
+                else if (outcome & EVENT_CHECK_DEFAULT)
+                {
                     BOOL test_failed = memcmp(test[i].default_data, test[i].return_data, test[i].data_size);
                     ok (!test_failed, "Test %s, Stage %u: returned data does not match default data [csize=%u]\n",
                         test[i].test_name, j, test[i].data_size);
@@ -225,8 +230,8 @@ static void execute_test_chain(
                     }
                 }
 
-                else if (outcome & EVENT_CHECK_INITIAL) {
-                    
+                else if (outcome & EVENT_CHECK_INITIAL)
+                {
                     BOOL test_failed = memcmp(test[i].initial_data, test[i].return_data, test[i].data_size);
                     ok (!test_failed, "Test %s, Stage %u: returned data does not match initial data [csize=%u]\n",
                         test[i].test_name, j, test[i].data_size);
@@ -255,15 +260,14 @@ static void execute_test_chain(
 typedef struct event_data {
     IDirect3DStateBlock9* stateblock;
     IDirect3DSurface9* original_render_target;
+    IDirect3DSwapChain9* new_swap_chain;
 } event_data;
 
-static int switch_render_target(
-    IDirect3DDevice9* device,
-    void* data) {
-  
+static int switch_render_target(IDirect3DDevice9 *device, void *data)
+{
     HRESULT hret;
     D3DPRESENT_PARAMETERS present_parameters;
-    event_data* edata = (event_data*) data;
+    event_data* edata = data;
     IDirect3DSwapChain9* swapchain = NULL;
     IDirect3DSurface9* backbuffer = NULL;
 
@@ -283,7 +287,7 @@ static int switch_render_target(
     if (hret != D3D_OK) goto error;
 
     /* Save the current render target */
-    hret = IDirect3DDevice9_GetRenderTarget(device, 0, &edata->original_render_target); 
+    hret = IDirect3DDevice9_GetRenderTarget(device, 0, &edata->original_render_target);
     ok (hret == D3D_OK, "GetRenderTarget returned %#x.\n", hret);
     if (hret != D3D_OK) goto error;
 
@@ -293,7 +297,7 @@ static int switch_render_target(
     if (hret != D3D_OK) goto error;
 
     IUnknown_Release(backbuffer);
-    IUnknown_Release(swapchain);
+    edata->new_swap_chain = swapchain;
     return EVENT_OK;
 
     error:
@@ -302,13 +306,11 @@ static int switch_render_target(
     return EVENT_ERROR;
 }
 
-static int revert_render_target( 
-    IDirect3DDevice9* device,
-    void* data) {
-
+static int revert_render_target(IDirect3DDevice9 *device, void *data)
+{
     HRESULT hret;
-    event_data* edata = (event_data*) data;
-   
+    event_data* edata = data;
+
     /* Reset the old render target */
     hret = IDirect3DDevice9_SetRenderTarget(device, 0, edata->original_render_target);
     ok (hret == D3D_OK, "SetRenderTarget returned %#x.\n", hret);
@@ -318,6 +320,8 @@ static int revert_render_target(
     }
 
     IUnknown_Release(edata->original_render_target);
+
+    IUnknown_Release(edata->new_swap_chain);
     return EVENT_OK;
 }
 
@@ -339,7 +343,7 @@ static int end_stateblock(
     void* data) {
 
     HRESULT hret;
-    event_data* edata = (event_data*) data;
+    event_data* edata = data;
 
     hret = IDirect3DDevice9_EndStateBlock(device, &edata->stateblock);
     ok(hret == D3D_OK, "EndStateBlock returned %#x.\n", hret);
@@ -351,7 +355,7 @@ static int abort_stateblock(
     IDirect3DDevice9* device,
     void* data) {
 
-    event_data* edata = (event_data*) data;
+    event_data* edata = data;
 
     IUnknown_Release(edata->stateblock);
     return EVENT_OK;
@@ -361,7 +365,7 @@ static int apply_stateblock(
     IDirect3DDevice9* device,
     void* data) {
 
-    event_data* edata = (event_data*) data;
+    event_data* edata = data;
     HRESULT hret;
 
     hret = IDirect3DStateBlock9_Apply(edata->stateblock);
@@ -380,7 +384,7 @@ static int capture_stateblock(
     void* data) {
 
     HRESULT hret;
-    event_data* edata = (event_data*) data;
+    event_data* edata = data;
 
     hret = IDirect3DStateBlock9_Capture(edata->stateblock);
     ok(hret == D3D_OK, "Capture returned %#x.\n", hret);
@@ -429,7 +433,7 @@ static void execute_test_chain_all(
     event rendertarget_switch_events[] = {
           { NULL, EVENT_APPLY_DATA },
           { switch_render_target, EVENT_CHECK_TEST },
-          { revert_render_target, EVENT_OK } 
+          { revert_render_target, EVENT_OK }
     };
 
     event rendertarget_stateblock_events[] = {
@@ -462,7 +466,7 @@ static void execute_test_chain_all(
 
     trace("Running stateblock capture/reapply state tests\n");
     execute_test_chain(device, test, ntests, capture_reapply_stateblock_events, 4, &arg);
-  
+
     trace("Running rendertarget switch state tests\n");
     execute_test_chain(device, test, ntests, rendertarget_switch_events, 3, &arg);
 
@@ -540,7 +544,7 @@ static void shader_constant_get_handler(
     IDirect3DDevice9* device, const state_test* test, void* data) {
 
     HRESULT hret;
-    shader_constant_data* scdata = (shader_constant_data*) data;
+    shader_constant_data* scdata = data;
     const shader_constant_arg* scarg = test->test_arg;
     unsigned int index = scarg->idx;
 
@@ -574,7 +578,7 @@ static const shader_constant_data shader_constant_default_data = {
 
 static const shader_constant_data shader_constant_test_data = {
     { 0xdead0000, 0xdead0001, 0xdead0002, 0xdead0003 },
-    { 0.0f, 0.0f, 0.0f, 0.0f },
+    { 5.0f, 6.0f, 7.0f, 8.0f },
     { TRUE, FALSE, FALSE, TRUE }
 };
 
@@ -584,7 +588,7 @@ static HRESULT shader_constant_setup_handler(
     shader_constant_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(shader_constant_context));
     if (ctx == NULL) return E_FAIL;
     test->test_context = ctx;
-     
+
     test->return_data = &ctx->return_data_buffer;
     test->test_data_in = &shader_constant_test_data;
     test->test_data_out = &shader_constant_test_data;
@@ -593,13 +597,12 @@ static HRESULT shader_constant_setup_handler(
     test->poison_data = &shader_constant_poison_data;
 
     test->data_size = sizeof(shader_constant_data);
-    
+
     return D3D_OK;
 }
 
-static void shader_constant_teardown_handler(
-    state_test* test) {
-    
+static void shader_constant_teardown_handler(state_test *test)
+{
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
@@ -696,7 +699,7 @@ static void light_get_handler(
     ldata->get_light_result = hret;
 }
 
-static const light_data light_poison_data = 
+static const light_data light_poison_data =
     { { 0x1337c0de,
         { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 },
         { 3.3f, 4.4f, 5.5f },{ 6.6f, 7.7f, 8.8f },
@@ -725,19 +728,18 @@ static const light_data light_test_data_in =
         7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0 }, 1, D3D_OK, D3D_OK};
 
 /* SetLight will use 128 as the "enabled" value */
-static const light_data light_test_data_out = 
+static const light_data light_test_data_out =
     { { 1,
         { 2.0, 2.0, 2.0, 2.0 }, { 3.0, 3.0, 3.0, 3.0 }, { 4.0, 4.0, 4.0, 4.0 },
         { 5.0, 5.0, 5.0 }, { 6.0, 6.0, 6.0 },
         7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0 }, 128, D3D_OK, D3D_OK};
 
-static HRESULT light_setup_handler(
-    state_test* test) {
-     
+static HRESULT light_setup_handler(state_test *test)
+{
     light_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(light_context));
     if (ctx == NULL) return E_FAIL;
     test->test_context = ctx;
- 
+
     test->return_data = &ctx->return_data_buffer;
     test->test_data_in = &light_test_data_in;
     test->test_data_out = &light_test_data_out;
@@ -746,13 +748,12 @@ static HRESULT light_setup_handler(
     test->poison_data = &light_poison_data;
 
     test->data_size = sizeof(light_data);
-    
+
     return D3D_OK;
 }
 
-static void light_teardown_handler(
-    state_test* test) {
-    
+static void light_teardown_handler(state_test *test)
+{
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
@@ -840,7 +841,7 @@ static void transform_get_handler(
     IDirect3DDevice9* device, const state_test* test, void* data) {
 
     HRESULT hret;
-    transform_data* tdata = (transform_data*) data;
+    transform_data* tdata = data;
 
     hret = IDirect3DDevice9_GetTransform(device, D3DTS_VIEW, &tdata->view);
     ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
@@ -929,9 +930,8 @@ static HRESULT transform_setup_handler(
     return D3D_OK;
 }
 
-static void transform_teardown_handler(
-    state_test* test) {
-    
+static void transform_teardown_handler(state_test *test)
+{
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
@@ -1065,6 +1065,7 @@ typedef struct render_state_data {
 
 typedef struct render_state_arg {
     D3DPRESENT_PARAMETERS* device_pparams;
+    float pointsize_max;
 } render_state_arg;
 
 typedef struct render_state_context {
@@ -1091,7 +1092,7 @@ static void render_state_get_handler(
     IDirect3DDevice9* device, const state_test* test, void* data) {
 
     HRESULT hret;
-    render_state_data* rsdata = (render_state_data*) data;
+    render_state_data* rsdata = data;
     unsigned int i = 0;
 
     for (i = 0; i < D3D9_RENDER_STATES; i++) {
@@ -1115,14 +1116,12 @@ static inline DWORD to_dword(float fl) {
     return *((DWORD*) &fl);
 }
 
-static void render_state_default_data_init(
-    D3DPRESENT_PARAMETERS* device_pparams,
-    render_state_data* data) {
-
+static void render_state_default_data_init(const struct render_state_arg *rsarg, struct render_state_data *data)
+{
+   DWORD zenable = rsarg->device_pparams->EnableAutoDepthStencil ? D3DZB_TRUE : D3DZB_FALSE;
    unsigned int idx = 0;
 
-   data->states[idx++] = device_pparams->EnableAutoDepthStencil?
-                         D3DZB_TRUE : D3DZB_FALSE;  /* ZENABLE */
+   data->states[idx++] = zenable;               /* ZENABLE */
    data->states[idx++] = D3DFILL_SOLID;         /* FILLMODE */
    data->states[idx++] = D3DSHADE_GOURAUD;      /* SHADEMODE */
    data->states[idx++] = TRUE;                  /* ZWRITEENABLE */
@@ -1185,9 +1184,9 @@ static void render_state_default_data_init(
    data->states[idx++] = to_dword(0.0f);        /* POINTSCALE_C */
    data->states[idx++] = TRUE;                  /* MULTISAMPLEANTIALIAS */
    data->states[idx++] = 0xFFFFFFFF;            /* MULTISAMPLEMASK */
-   data->states[idx++] = D3DPATCHEDGE_DISCRETE; /* PATCHEDGESTYLE */ 
+   data->states[idx++] = D3DPATCHEDGE_DISCRETE; /* PATCHEDGESTYLE */
    data->states[idx++] = 0xbaadcafe;            /* DEBUGMONITORTOKEN */
-   data->states[idx++] = to_dword(64.0f);       /* POINTSIZE_MAX */
+   data->states[idx++] = to_dword(rsarg->pointsize_max); /* POINTSIZE_MAX */
    data->states[idx++] = FALSE;                 /* INDEXEDVERTEXBLENDENABLE */
    data->states[idx++] = 0x0000000F;            /* COLORWRITEENABLE */
    data->states[idx++] = to_dword(0.0f);        /* TWEENFACTOR */
@@ -1236,7 +1235,7 @@ static void render_state_poison_data_init(
    for (i = 0; i < D3D9_RENDER_STATES; i++)
        data->states[i] = 0x1337c0de;
 }
- 
+
 static void render_state_test_data_init(
     render_state_data* data) {
 
@@ -1364,7 +1363,7 @@ static HRESULT render_state_setup_handler(
     test->test_data_out = &ctx->test_data_buffer;
     test->poison_data = &ctx->poison_data_buffer;
 
-    render_state_default_data_init(rsarg->device_pparams, &ctx->default_data_buffer);
+    render_state_default_data_init(rsarg, &ctx->default_data_buffer);
     render_state_test_data_init(&ctx->test_data_buffer);
     render_state_poison_data_init(&ctx->poison_data_buffer);
 
@@ -1401,7 +1400,7 @@ static void test_state_management(
     HRESULT hret;
     D3DCAPS9 caps;
 
-    /* Test count: 2 for shader constants 
+    /* Test count: 2 for shader constants
                    1 for lights
                    1 for transforms
                    1 for render states
@@ -1446,10 +1445,115 @@ static void test_state_management(
     tcount++;
 
     render_state_arg.device_pparams = device_pparams;
+    render_state_arg.pointsize_max = caps.MaxPointSize;
     render_states_queue_test(&tests[tcount], &render_state_arg);
     tcount++;
 
     execute_test_chain_all(device, tests, tcount);
+}
+
+static void test_shader_constant_apply(IDirect3DDevice9 *device)
+{
+    static const float initial[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    static const float vs_const[] = {1.0f, 2.0f, 3.0f, 4.0f};
+    static const float ps_const[] = {5.0f, 6.0f, 7.0f, 8.0f};
+    IDirect3DStateBlock9 *stateblock;
+    float ret[4];
+    HRESULT hr;
+
+    hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 0, initial, 1);
+    ok(SUCCEEDED(hr), "SetVertexShaderConstantF returned %#x\n", hr);
+    hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 1, initial, 1);
+    ok(SUCCEEDED(hr), "SetVertexShaderConstantF returned %#x\n", hr);
+    hr = IDirect3DDevice9_SetPixelShaderConstantF(device, 0, initial, 1);
+    ok(SUCCEEDED(hr), "SetPixelShaderConstantF returned %#x\n", hr);
+    hr = IDirect3DDevice9_SetPixelShaderConstantF(device, 1, initial, 1);
+    ok(SUCCEEDED(hr), "SetPixelShaderConstantF returned %#x\n", hr);
+
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetpixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetPixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+
+    hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 0, vs_const, 1);
+    ok(SUCCEEDED(hr), "SetVertexShaderConstantF returned %#x\n", hr);
+    hr = IDirect3DDevice9_SetPixelShaderConstantF(device, 0, ps_const, 1);
+    ok(SUCCEEDED(hr), "SetPixelShaderConstantF returned %#x\n", hr);
+
+    hr = IDirect3DDevice9_BeginStateBlock(device);
+    ok(SUCCEEDED(hr), "BeginStateBlock returned %#x\n", hr);
+
+    hr = IDirect3DDevice9_SetVertexShaderConstantF(device, 1, vs_const, 1);
+    ok(SUCCEEDED(hr), "SetVertexShaderConstantF returned %#x\n", hr);
+    hr = IDirect3DDevice9_SetPixelShaderConstantF(device, 1, ps_const, 1);
+    ok(SUCCEEDED(hr), "SetPixelShaderConstantF returned %#x\n", hr);
+
+    hr = IDirect3DDevice9_EndStateBlock(device, &stateblock);
+    ok(SUCCEEDED(hr), "EndStateBlock returned %#x\n", hr);
+
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, vs_const, sizeof(vs_const)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], vs_const[0], vs_const[1], vs_const[2], vs_const[3]);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, ps_const, sizeof(ps_const)),
+            "GetPixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], ps_const[0], ps_const[1], ps_const[2], ps_const[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, initial, sizeof(initial)),
+            "GetPixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], initial[0], initial[1], initial[2], initial[3]);
+
+    hr = IDirect3DStateBlock9_Apply(stateblock);
+    ok(SUCCEEDED(hr), "Apply returned %#x\n", hr);
+
+    /* Apply doesn't overwrite constants that aren't explicitly set on the source stateblock. */
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, vs_const, sizeof(vs_const)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], vs_const[0], vs_const[1], vs_const[2], vs_const[3]);
+    hr = IDirect3DDevice9_GetVertexShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, vs_const, sizeof(vs_const)),
+            "GetVertexShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], vs_const[0], vs_const[1], vs_const[2], vs_const[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 0, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, ps_const, sizeof(ps_const)),
+            "GetPixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], ps_const[0], ps_const[1], ps_const[2], ps_const[3]);
+    hr = IDirect3DDevice9_GetPixelShaderConstantF(device, 1, ret, 1);
+    ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x\n", hr);
+    ok(!memcmp(ret, ps_const, sizeof(ps_const)),
+            "GetPixelShaderConstantF got {%f, %f, %f, %f}, expected {%f, %f, %f, %f}\n",
+            ret[0], ret[1], ret[2], ret[3], ps_const[0], ps_const[1], ps_const[2], ps_const[3]);
+
+    IDirect3DStateBlock9_Release(stateblock);
 }
 
 START_TEST(stateblock)
@@ -1457,6 +1561,7 @@ START_TEST(stateblock)
     IDirect3DDevice9 *device_ptr = NULL;
     D3DPRESENT_PARAMETERS device_pparams;
     HRESULT hret;
+    ULONG refcount;
 
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
@@ -1470,6 +1575,8 @@ START_TEST(stateblock)
 
     test_begin_end_state_block(device_ptr);
     test_state_management(device_ptr, &device_pparams);
+    test_shader_constant_apply(device_ptr);
 
-    if (device_ptr) IUnknown_Release(device_ptr);
+    refcount = IDirect3DDevice9_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

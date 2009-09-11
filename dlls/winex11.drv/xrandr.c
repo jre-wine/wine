@@ -111,8 +111,8 @@ static int XRandRErrorHandler(Display *dpy, XErrorEvent *event, void *arg)
 /* create the mode structures */
 static void make_modes(void)
 {
-    unsigned int i;
-    int j;
+    int i, j;
+
     for (i=0; i<real_xrandr_sizes_count; i++)
     {
         if (real_xrandr_rates_count[i])
@@ -178,16 +178,11 @@ static LONG X11DRV_XRandR_SetCurrentMode(int mode)
     short rate;
     unsigned int i;
     int j;
-    DWORD dwBpp = screen_bpp;
 
     wine_tsx11_lock();
     root = RootWindow (gdi_display, DefaultScreen(gdi_display));
     sc = pXRRGetScreenInfo (gdi_display, root);
     size = pXRRConfigCurrentConfiguration (sc, &rot);
-    if (dwBpp != dd_modes[mode].dwBPP)
-    {
-        FIXME("Cannot change screen BPP from %d to %d\n", dwBpp, dd_modes[mode].dwBPP);
-    }
     mode = mode%real_xrandr_modes_count;
 
     TRACE("Changing Resolution to %dx%d @%d Hz\n", 
@@ -240,8 +235,7 @@ static LONG X11DRV_XRandR_SetCurrentMode(int mode)
 void X11DRV_XRandR_Init(void)
 {
     Bool ok;
-    int nmodes = 0;
-    unsigned int i;
+    int i, nmodes = 0;
 
     if (xrandr_major) return; /* already initialized? */
     if (!usexrandr) return; /* disabled in config */
@@ -272,7 +266,7 @@ void X11DRV_XRandR_Init(void)
         for (i=0; i < real_xrandr_sizes_count; i++)
         {
             real_xrandr_rates[i] = pXRRRates (gdi_display, DefaultScreen(gdi_display), i, &(real_xrandr_rates_count[i]));
-	    TRACE("- at %u: %dx%d (%d rates):", i, real_xrandr_sizes[i].width, real_xrandr_sizes[i].height, real_xrandr_rates_count[i]);
+	    TRACE("- at %d: %dx%d (%d rates):", i, real_xrandr_sizes[i].width, real_xrandr_sizes[i].height, real_xrandr_rates_count[i]);
             if (real_xrandr_rates_count[i])
             {
                 int j;
@@ -306,14 +300,6 @@ void X11DRV_XRandR_Init(void)
 
     TRACE("Available DD modes: count=%d\n", dd_mode_count);
     TRACE("Enabling XRandR\n");
-}
-
-void X11DRV_XRandR_Cleanup(void)
-{
-    HeapFree(GetProcessHeap(), 0, real_xrandr_rates);
-    real_xrandr_rates = NULL;
-    HeapFree(GetProcessHeap(), 0, real_xrandr_rates_count);
-    real_xrandr_rates_count = NULL;
 }
 
 #endif /* SONAME_LIBXRANDR */

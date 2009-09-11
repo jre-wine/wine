@@ -34,7 +34,7 @@
 
 static BOOL CALLBACK FormatTagEnumProc(HACMDRIVERID hadid,
                                        PACMFORMATTAGDETAILS paftd,
-                                       DWORD dwInstance,
+                                       DWORD_PTR dwInstance,
                                        DWORD fdwSupport)
 {
     if (winetest_interactive)
@@ -45,7 +45,7 @@ static BOOL CALLBACK FormatTagEnumProc(HACMDRIVERID hadid,
 
 static BOOL CALLBACK FormatEnumProc(HACMDRIVERID hadid,
                                     LPACMFORMATDETAILS pafd,
-                                    DWORD dwInstance,
+                                    DWORD_PTR dwInstance,
                                     DWORD fd)
 {
     if (winetest_interactive)
@@ -55,7 +55,7 @@ static BOOL CALLBACK FormatEnumProc(HACMDRIVERID hadid,
 }
 
 static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
-                                    DWORD dwInstance,
+                                    DWORD_PTR dwInstance,
                                     DWORD fdwSupport)
 {
     MMRESULT rc;
@@ -94,7 +94,7 @@ static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
     /* MSDN says this should fail but it doesn't in practice */
     dd.cbStruct = 4;
     rc = acmDriverDetails(hadid, &dd, 0);
-    ok(rc == MMSYSERR_NOERROR,
+    ok(rc == MMSYSERR_NOERROR || rc == MMSYSERR_NOTSUPPORTED,
        "acmDriverDetails(): rc = %08x, should be %08x\n",
        rc, MMSYSERR_NOERROR);
 
@@ -119,7 +119,7 @@ static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
 
     /* try valid parameters */
     rc = acmDriverDetails(hadid, &dd, 0);
-    ok(rc == MMSYSERR_NOERROR,
+    ok(rc == MMSYSERR_NOERROR || rc == MMSYSERR_NOTSUPPORTED,
        "acmDriverDetails(): rc = %08x, should be %08x\n",
        rc, MMSYSERR_NOERROR);
 
@@ -210,7 +210,7 @@ static BOOL CALLBACK DriverEnumProc(HACMDRIVERID hadid,
 
     /* try valid parameters */
     rc = acmDriverOpen(&had, hadid, 0);
-    ok(rc == MMSYSERR_NOERROR,
+    ok(rc == MMSYSERR_NOERROR || rc == MMSYSERR_NODRIVER,
        "acmDriverOpen(): rc = %08x, should be %08x\n",
        rc, MMSYSERR_NOERROR);
 

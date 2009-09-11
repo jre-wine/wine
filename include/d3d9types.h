@@ -128,7 +128,7 @@
 #define MAX_DEVICE_IDENTIFIER_STRING        512
 
 #define D3DFVF_RESERVED0           0x0001
-#define D3DFVF_POSITION_MASK       0x000E
+#define D3DFVF_POSITION_MASK       0x400E
 #define D3DFVF_XYZ                 0x0002
 #define D3DFVF_XYZRHW              0x0004
 #define D3DFVF_XYZB1               0x0006
@@ -201,6 +201,8 @@
 #define D3DPRESENTFLAG_DISCARD_DEPTHSTENCIL 0x00000002 /* Discard Z buffer */
 #define D3DPRESENTFLAG_DEVICECLIP           0x00000004 /* Clip the window blited into the client area 2k + xp only */
 #define D3DPRESENTFLAG_VIDEO                0x00000010 /* backbuffer 'may' contain video data */
+#define D3DPRESENTFLAG_NOAUTOROTATE         0x00000020 /* d3d9ex, ignore display rotation */
+#define D3DPRESENTFLAG_UNPRUNEDMODE         0x00000040 /* d3d9ex, specify invalid display modes */
 
 #define D3DPRESENT_BACK_BUFFERS_MAX         3L
 #define D3DPRESENT_RATE_DEFAULT             0x00000000
@@ -1128,21 +1130,9 @@ typedef enum _D3DTEXTURESTAGESTATETYPE {
     D3DTSS_BUMPENVMAT10          =  9,
     D3DTSS_BUMPENVMAT11          = 10,
     D3DTSS_TEXCOORDINDEX         = 11,
-#if 1 /* TODO: remove once samplerstates are implemented.  */
-    D3DTSS_ADDRESSU              = 13,
-    D3DTSS_ADDRESSV              = 14,
-    D3DTSS_BORDERCOLOR           = 15,
-    D3DTSS_MAGFILTER             = 16,
-    D3DTSS_MINFILTER             = 17,
-    D3DTSS_MIPFILTER             = 18,
-    D3DTSS_MIPMAPLODBIAS         = 19,
-    D3DTSS_MAXMIPLEVEL           = 20,
-    D3DTSS_MAXANISOTROPY         = 21,
-#endif
     D3DTSS_BUMPENVLSCALE         = 22,
     D3DTSS_BUMPENVLOFFSET        = 23,
     D3DTSS_TEXTURETRANSFORMFLAGS = 24,
-    D3DTSS_ADDRESSW              = 25,
     D3DTSS_COLORARG0             = 26,
     D3DTSS_ALPHAARG0             = 27,
     D3DTSS_RESULTARG             = 28,

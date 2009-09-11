@@ -1193,6 +1193,32 @@ BOOL WINAPI MoveFileA( LPCSTR source, LPCSTR dest )
 }
 
 
+/*************************************************************************
+ *           CreateHardLinkW   (KERNEL32.@)
+ */
+BOOL WINAPI CreateHardLinkW(LPCWSTR lpFileName, LPCWSTR lpExistingFileName,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes)
+{
+    FIXME("(%s, %s, %p): stub\n", debugstr_w(lpFileName),
+        debugstr_w(lpExistingFileName), lpSecurityAttributes);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+
+/*************************************************************************
+ *           CreateHardLinkA   (KERNEL32.@)
+ */
+BOOL WINAPI CreateHardLinkA(LPCSTR lpFileName, LPCSTR lpExistingFileName,
+    LPSECURITY_ATTRIBUTES lpSecurityAttributes)
+{
+    FIXME("(%s, %s, %p): stub\n", debugstr_a(lpFileName),
+        debugstr_a(lpExistingFileName), lpSecurityAttributes);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+
 /***********************************************************************
  *           CreateDirectoryW   (KERNEL32.@)
  * RETURNS:
@@ -1495,10 +1521,22 @@ UINT WINAPI GetSystemDirectoryA( LPSTR path, UINT count )
  * - On Win32 we should returns ERROR_CALL_NOT_IMPLEMENTED
  * - On Win64 we should returns the SysWow64 (system64) directory
  */
-UINT WINAPI GetSystemWow64DirectoryW( LPWSTR lpBuffer, UINT uSize )
+UINT WINAPI GetSystemWow64DirectoryW( LPWSTR path, UINT count )
 {
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    UINT len;
+
+    if (!DIR_SysWow64)
+    {
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return 0;
+    }
+    len = strlenW( DIR_SysWow64 ) + 1;
+    if (path && count >= len)
+    {
+        strcpyW( path, DIR_SysWow64 );
+        len--;
+    }
+    return len;
 }
 
 
@@ -1507,10 +1545,47 @@ UINT WINAPI GetSystemWow64DirectoryW( LPWSTR lpBuffer, UINT uSize )
  *
  * See comment for GetWindowsWow64DirectoryW.
  */
-UINT WINAPI GetSystemWow64DirectoryA( LPSTR lpBuffer, UINT uSize )
+UINT WINAPI GetSystemWow64DirectoryA( LPSTR path, UINT count )
 {
-    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
-    return 0;
+    if (!DIR_SysWow64)
+    {
+        SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+        return 0;
+    }
+    return copy_filename_WtoA( DIR_SysWow64, path, count );
+}
+
+
+/***********************************************************************
+ *           Wow64EnableWow64FsRedirection   (KERNEL32.@)
+ */
+BOOLEAN WINAPI Wow64EnableWow64FsRedirection( BOOLEAN enable )
+{
+    NTSTATUS status = RtlWow64EnableFsRedirection( enable );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+
+/***********************************************************************
+ *           Wow64DisableWow64FsRedirection   (KERNEL32.@)
+ */
+BOOL WINAPI Wow64DisableWow64FsRedirection( PVOID *old_value )
+{
+    NTSTATUS status = RtlWow64EnableFsRedirectionEx( TRUE, (ULONG *)old_value );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
+}
+
+
+/***********************************************************************
+ *           Wow64RevertWow64FsRedirection   (KERNEL32.@)
+ */
+BOOL WINAPI Wow64RevertWow64FsRedirection( PVOID old_value )
+{
+    NTSTATUS status = RtlWow64EnableFsRedirection( (UINT_PTR)old_value );
+    if (status) SetLastError( RtlNtStatusToDosError(status) );
+    return !status;
 }
 
 
@@ -1557,7 +1632,7 @@ BOOL WINAPI NeedCurrentDirectoryForExePathA( LPCSTR name )
  * Return the full Unix file name for a given path.
  * Returned buffer must be freed by caller.
  */
-char *wine_get_unix_file_name( LPCWSTR dosW )
+char * CDECL wine_get_unix_file_name( LPCWSTR dosW )
 {
     UNICODE_STRING nt_name;
     ANSI_STRING unix_name;
@@ -1581,7 +1656,7 @@ char *wine_get_unix_file_name( LPCWSTR dosW )
  * Return the full DOS file name for a given Unix path.
  * Returned buffer must be freed by caller.
  */
-WCHAR *wine_get_dos_file_name( LPCSTR str )
+WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
 {
     UNICODE_STRING nt_name;
     ANSI_STRING unix_name;

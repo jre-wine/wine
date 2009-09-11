@@ -85,9 +85,9 @@ static inline void unix_tm_to_msvcrt( struct MSVCRT_tm *dest, const struct tm *s
 #define TICKS_1601_TO_1970 (SECS_1601_TO_1970 * TICKSPERSEC)
 
 /**********************************************************************
- *		mktime (MSVCRT.@)
+ *		_mktime64 (MSVCRT.@)
  */
-MSVCRT_time_t CDECL MSVCRT_mktime(struct MSVCRT_tm *mstm)
+MSVCRT___time64_t CDECL MSVCRT__mktime64(struct MSVCRT_tm *mstm)
 {
     time_t secs;
     struct tm tm;
@@ -99,10 +99,33 @@ MSVCRT_time_t CDECL MSVCRT_mktime(struct MSVCRT_tm *mstm)
     return secs < 0 ? -1 : secs;
 }
 
-/*********************************************************************
- *      localtime (MSVCRT.@)
+/**********************************************************************
+ *		_mktime32 (MSVCRT.@)
  */
-struct MSVCRT_tm* CDECL MSVCRT_localtime(const MSVCRT_time_t* secs)
+MSVCRT___time32_t CDECL MSVCRT__mktime32(struct MSVCRT_tm *mstm)
+{
+    return MSVCRT__mktime64( mstm );
+}
+
+/**********************************************************************
+ *		mktime (MSVCRT.@)
+ */
+#ifdef _WIN64
+MSVCRT___time64_t CDECL MSVCRT_mktime(struct MSVCRT_tm *mstm)
+{
+    return MSVCRT__mktime64( mstm );
+}
+#else
+MSVCRT___time32_t CDECL MSVCRT_mktime(struct MSVCRT_tm *mstm)
+{
+    return MSVCRT__mktime32( mstm );
+}
+#endif
+
+/*********************************************************************
+ *      _localtime64 (MSVCRT.@)
+ */
+struct MSVCRT_tm* CDECL MSVCRT__localtime64(const MSVCRT___time64_t* secs)
 {
     struct tm tm;
     thread_data_t *data;
@@ -119,9 +142,33 @@ struct MSVCRT_tm* CDECL MSVCRT_localtime(const MSVCRT_time_t* secs)
 }
 
 /*********************************************************************
- *      gmtime (MSVCRT.@)
+ *      _localtime32 (MSVCRT.@)
  */
-struct MSVCRT_tm* CDECL MSVCRT_gmtime(const MSVCRT_time_t* secs)
+struct MSVCRT_tm* CDECL MSVCRT__localtime32(const MSVCRT___time32_t* secs)
+{
+    MSVCRT___time64_t secs64 = *secs;
+    return MSVCRT__localtime64( &secs64 );
+}
+
+/*********************************************************************
+ *      localtime (MSVCRT.@)
+ */
+#ifdef _WIN64
+struct MSVCRT_tm* CDECL MSVCRT_localtime(const MSVCRT___time64_t* secs)
+{
+    return MSVCRT__localtime64( secs );
+}
+#else
+struct MSVCRT_tm* CDECL MSVCRT_localtime(const MSVCRT___time32_t* secs)
+{
+    return MSVCRT__localtime32( secs );
+}
+#endif
+
+/*********************************************************************
+ *      _gmtime64 (MSVCRT.@)
+ */
+struct MSVCRT_tm* CDECL MSVCRT__gmtime64(const MSVCRT___time64_t* secs)
 {
   thread_data_t * const data = msvcrt_get_thread_data();
   int i;
@@ -154,6 +201,30 @@ struct MSVCRT_tm* CDECL MSVCRT_gmtime(const MSVCRT_time_t* secs)
   return &data->time_buffer;
 }
 
+/*********************************************************************
+ *      _gmtime32 (MSVCRT.@)
+ */
+struct MSVCRT_tm* CDECL MSVCRT__gmtime32(const MSVCRT___time32_t* secs)
+{
+    MSVCRT___time64_t secs64 = *secs;
+    return MSVCRT__gmtime64( &secs64 );
+}
+
+/*********************************************************************
+ *      gmtime (MSVCRT.@)
+ */
+#ifdef _WIN64
+struct MSVCRT_tm* CDECL MSVCRT_gmtime(const MSVCRT___time64_t* secs)
+{
+    return MSVCRT__gmtime64( secs );
+}
+#else
+struct MSVCRT_tm* CDECL MSVCRT_gmtime(const MSVCRT___time32_t* secs)
+{
+    return MSVCRT__gmtime32( secs );
+}
+#endif
+
 /**********************************************************************
  *		_strdate (MSVCRT.@)
  */
@@ -173,7 +244,7 @@ MSVCRT_wchar_t* CDECL _wstrdate(MSVCRT_wchar_t* date)
 {
   static const WCHAR format[] = { 'M','M','\'','/','\'','d','d','\'','/','\'','y','y',0 };
 
-  GetDateFormatW(LOCALE_NEUTRAL, 0, NULL, format, (LPWSTR)date, 9);
+  GetDateFormatW(LOCALE_NEUTRAL, 0, NULL, format, date, 9);
 
   return date;
 }
@@ -197,7 +268,7 @@ MSVCRT_wchar_t* CDECL _wstrtime(MSVCRT_wchar_t* time)
 {
   static const WCHAR format[] = { 'H','H','\'',':','\'','m','m','\'',':','\'','s','s',0 };
 
-  GetTimeFormatW(LOCALE_NEUTRAL, 0, NULL, format, (LPWSTR)time, 9);
+  GetTimeFormatW(LOCALE_NEUTRAL, 0, NULL, format, time, 9);
 
   return time;
 }
@@ -223,17 +294,40 @@ MSVCRT_clock_t CDECL MSVCRT_clock(void)
 }
 
 /*********************************************************************
- *		difftime (MSVCRT.@)
+ *		_difftime64 (MSVCRT.@)
  */
-double CDECL MSVCRT_difftime(MSVCRT_time_t time1, MSVCRT_time_t time2)
+double CDECL MSVCRT__difftime64(MSVCRT___time64_t time1, MSVCRT___time64_t time2)
 {
   return (double)(time1 - time2);
 }
 
 /*********************************************************************
- *		_ftime (MSVCRT.@)
+ *		_difftime32 (MSVCRT.@)
  */
-void CDECL _ftime(struct MSVCRT__timeb *buf)
+double CDECL MSVCRT__difftime32(MSVCRT___time32_t time1, MSVCRT___time32_t time2)
+{
+  return (double)(time1 - time2);
+}
+
+/*********************************************************************
+ *		difftime (MSVCRT.@)
+ */
+#ifdef _WIN64
+double CDECL MSVCRT_difftime(MSVCRT___time64_t time1, MSVCRT___time64_t time2)
+{
+    return MSVCRT__difftime64( time1, time2 );
+}
+#else
+double CDECL MSVCRT_difftime(MSVCRT___time32_t time1, MSVCRT___time32_t time2)
+{
+    return MSVCRT__difftime32( time1, time2 );
+}
+#endif
+
+/*********************************************************************
+ *		_ftime64 (MSVCRT.@)
+ */
+void CDECL MSVCRT__ftime64(struct MSVCRT___timeb64 *buf)
 {
   TIME_ZONE_INFORMATION tzinfo;
   FILETIME ft;
@@ -253,18 +347,76 @@ void CDECL _ftime(struct MSVCRT__timeb *buf)
 }
 
 /*********************************************************************
+ *		_ftime32 (MSVCRT.@)
+ */
+void CDECL MSVCRT__ftime32(struct MSVCRT___timeb32 *buf)
+{
+    struct MSVCRT___timeb64 buf64;
+
+    MSVCRT__ftime64( &buf64 );
+    buf->time     = buf64.time;
+    buf->millitm  = buf64.millitm;
+    buf->timezone = buf64.timezone;
+    buf->dstflag  = buf64.dstflag;
+}
+
+/*********************************************************************
+ *		_ftime (MSVCRT.@)
+ */
+#ifdef _WIN64
+void CDECL MSVCRT__ftime(struct MSVCRT___timeb64 *buf)
+{
+    return MSVCRT__ftime64( buf );
+}
+#else
+void CDECL MSVCRT__ftime(struct MSVCRT___timeb32 *buf)
+{
+    return MSVCRT__ftime32( buf );
+}
+#endif
+
+/*********************************************************************
+ *		_time64 (MSVCRT.@)
+ */
+MSVCRT___time64_t CDECL MSVCRT__time64(MSVCRT___time64_t *buf)
+{
+    MSVCRT___time64_t curtime;
+    struct MSVCRT___timeb64 tb;
+
+    MSVCRT__ftime64(&tb);
+
+    curtime = tb.time;
+    return buf ? *buf = curtime : curtime;
+}
+
+/*********************************************************************
+ *		_time32 (MSVCRT.@)
+ */
+MSVCRT___time32_t CDECL MSVCRT__time32(MSVCRT___time32_t *buf)
+{
+    MSVCRT___time32_t curtime;
+    struct MSVCRT___timeb64 tb;
+
+    MSVCRT__ftime64(&tb);
+
+    curtime = tb.time;
+    return buf ? *buf = curtime : curtime;
+}
+
+/*********************************************************************
  *		time (MSVCRT.@)
  */
-MSVCRT_time_t CDECL MSVCRT_time(MSVCRT_time_t* buf)
+#ifdef _WIN64
+MSVCRT___time64_t CDECL MSVCRT_time(MSVCRT___time64_t* buf)
 {
-  MSVCRT_time_t curtime;
-  struct MSVCRT__timeb tb;
-
-  _ftime(&tb);
-
-  curtime = tb.time;
-  return buf ? *buf = curtime : curtime;
+    return MSVCRT__time64( buf );
 }
+#else
+MSVCRT___time32_t CDECL MSVCRT_time(MSVCRT___time32_t* buf)
+{
+    return MSVCRT__time32( buf );
+}
+#endif
 
 /*********************************************************************
  *		_daylight (MSVCRT.@)
@@ -295,12 +447,12 @@ int * CDECL __p__dstbias(void)
 /*********************************************************************
  *		_timezone (MSVCRT.@)
  */
-long MSVCRT___timezone = 0;
+MSVCRT_long MSVCRT___timezone = 0;
 
 /*********************************************************************
  *		__p_timezone (MSVCRT.@)
  */
-long * CDECL MSVCRT___p__timezone(void)
+MSVCRT_long * CDECL MSVCRT___p__timezone(void)
 {
 	return &MSVCRT___timezone;
 }
@@ -338,9 +490,9 @@ void CDECL MSVCRT__tzset(void)
         static const time_t seconds_in_year = (365 * 24 + 6) * 3600;
         time_t t;
         struct tm *tmp;
-        long zone_january, zone_july;
+        int zone_january, zone_july;
 
-        t = (time((time_t *)0) / seconds_in_year) * seconds_in_year;
+        t = (time(NULL) / seconds_in_year) * seconds_in_year;
         tmp = localtime(&t);
         zone_january = -tmp->tm_gmtoff;
         t += seconds_in_year / 2;
@@ -377,7 +529,7 @@ MSVCRT_size_t CDECL MSVCRT_wcsftime( MSVCRT_wchar_t *str, MSVCRT_size_t max,
     char *s, *fmt;
     MSVCRT_size_t len;
 
-    TRACE("%p %d %s %p\n", str, max, debugstr_w(format), mstm );
+    TRACE("%p %ld %s %p\n", str, max, debugstr_w(format), mstm );
 
     len = WideCharToMultiByte( CP_UNIXCP, 0, format, -1, NULL, 0, NULL, NULL );
     if (!(fmt = MSVCRT_malloc( len ))) return 0;
@@ -443,17 +595,69 @@ MSVCRT_wchar_t * CDECL MSVCRT__wasctime(const struct MSVCRT_tm *mstm)
 }
 
 /*********************************************************************
+ *		_ctime64 (MSVCRT.@)
+ */
+char * CDECL MSVCRT__ctime64(const MSVCRT___time64_t *time)
+{
+    struct MSVCRT_tm *t;
+    t = MSVCRT__localtime64( time );
+    if (!t) return NULL;
+    return MSVCRT_asctime( t );
+}
+
+/*********************************************************************
+ *		_ctime32 (MSVCRT.@)
+ */
+char * CDECL MSVCRT__ctime32(const MSVCRT___time32_t *time)
+{
+    struct MSVCRT_tm *t;
+    t = MSVCRT__localtime32( time );
+    if (!t) return NULL;
+    return MSVCRT_asctime( t );
+}
+
+/*********************************************************************
  *		ctime (MSVCRT.@)
  */
-char * CDECL MSVCRT_ctime(const MSVCRT_time_t *time)
+#ifdef _WIN64
+char * CDECL MSVCRT_ctime(const MSVCRT___time64_t *time)
 {
-    return MSVCRT_asctime( MSVCRT_localtime(time) );
+    return MSVCRT__ctime64( time );
+}
+#else
+char * CDECL MSVCRT_ctime(const MSVCRT___time32_t *time)
+{
+    return MSVCRT__ctime32( time );
+}
+#endif
+
+/*********************************************************************
+ *		_wctime64 (MSVCRT.@)
+ */
+MSVCRT_wchar_t * CDECL MSVCRT__wctime64(const MSVCRT___time64_t *time)
+{
+    return MSVCRT__wasctime( MSVCRT__localtime64(time) );
+}
+
+/*********************************************************************
+ *		_wctime32 (MSVCRT.@)
+ */
+MSVCRT_wchar_t * CDECL MSVCRT__wctime32(const MSVCRT___time32_t *time)
+{
+    return MSVCRT__wasctime( MSVCRT__localtime32(time) );
 }
 
 /*********************************************************************
  *		_wctime (MSVCRT.@)
  */
-MSVCRT_wchar_t * CDECL MSVCRT__wctime(const MSVCRT_time_t *time)
+#ifdef _WIN64
+MSVCRT_wchar_t * CDECL MSVCRT__wctime(const MSVCRT___time64_t *time)
 {
-    return MSVCRT__wasctime( MSVCRT_localtime(time) );
+    return MSVCRT__wctime64( time );
 }
+#else
+MSVCRT_wchar_t * CDECL MSVCRT__wctime(const MSVCRT___time32_t *time)
+{
+    return MSVCRT__wctime32( time );
+}
+#endif

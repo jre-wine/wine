@@ -55,6 +55,9 @@ static ULONG WINAPI ID3DXFontImpl_Release(LPD3DXFONT iface)
     TRACE("(%p): ReleaseRef to %d\n", This, ref);
 
     if(ref==0) {
+        DeleteObject(This->hfont);
+        DeleteDC(This->hdc);
+        IDirect3DDevice9_Release(This->device);
         HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
@@ -63,43 +66,57 @@ static ULONG WINAPI ID3DXFontImpl_Release(LPD3DXFONT iface)
 static HRESULT WINAPI ID3DXFontImpl_GetDevice(LPD3DXFONT iface, LPDIRECT3DDEVICE9 *device)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
+    TRACE("(%p)\n", This);
+
+    if( !device ) return D3DERR_INVALIDCALL;
+    *device = This->device;
+    IDirect3DDevice9_AddRef(This->device);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXFontImpl_GetDescA(LPD3DXFONT iface, D3DXFONT_DESCA *desc)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
+    TRACE("(%p)\n", This);
+
+    if( !desc ) return D3DERR_INVALIDCALL;
+    memcpy(desc, &This->desc, FIELD_OFFSET(D3DXFONT_DESCA, FaceName));
+    WideCharToMultiByte(CP_ACP, 0, This->desc.FaceName, -1, desc->FaceName, sizeof(desc->FaceName) / sizeof(CHAR), NULL, NULL);
+
     return D3D_OK;
 }
 
 static HRESULT WINAPI ID3DXFontImpl_GetDescW(LPD3DXFONT iface, D3DXFONT_DESCW *desc)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
+    TRACE("(%p)\n", This);
+
+    if( !desc ) return D3DERR_INVALIDCALL;
+    *desc = This->desc;
+
     return D3D_OK;
 }
 
 static BOOL WINAPI ID3DXFontImpl_GetTextMetricsA(LPD3DXFONT iface, TEXTMETRICA *metrics)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return FALSE;
+    TRACE("(%p)\n", This);
+    return GetTextMetricsA(This->hdc, metrics);
 }
 
 static BOOL WINAPI ID3DXFontImpl_GetTextMetricsW(LPD3DXFONT iface, TEXTMETRICW *metrics)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return FALSE;
+    TRACE("(%p)\n", This);
+    return GetTextMetricsW(This->hdc, metrics);
 }
 
 static HDC WINAPI ID3DXFontImpl_GetDC(LPD3DXFONT iface)
 {
     ID3DXFontImpl *This=(ID3DXFontImpl*)iface;
-    FIXME("(%p): stub\n", This);
-    return NULL;
+    TRACE("(%p)\n", This);
+    return This->hdc;
 }
 
 static HRESULT WINAPI ID3DXFontImpl_GetGlyphData(LPD3DXFONT iface, UINT glyph, LPDIRECT3DTEXTURE9 *texture, RECT *blackbox, POINT *cellinc)
@@ -194,7 +211,7 @@ HRESULT WINAPI D3DXCreateFontA(LPDIRECT3DDEVICE9 device, INT height, UINT width,
 {
     D3DXFONT_DESCA desc;
 
-    if(!facename) return D3DXERR_INVALIDDATA;
+    if( !device || !font ) return D3DERR_INVALIDCALL;
 
     desc.Height=height;
     desc.Width=width;
@@ -205,7 +222,8 @@ HRESULT WINAPI D3DXCreateFontA(LPDIRECT3DDEVICE9 device, INT height, UINT width,
     desc.OutputPrecision=precision;
     desc.Quality=quality;
     desc.PitchAndFamily=pitchandfamily;
-    lstrcpyA(desc.FaceName, facename);
+    if(facename != NULL) lstrcpyA(desc.FaceName, facename);
+    else desc.FaceName[0] = '\0';
 
     return D3DXCreateFontIndirectA(device, &desc, font);
 }
@@ -215,7 +233,7 @@ HRESULT WINAPI D3DXCreateFontW(LPDIRECT3DDEVICE9 device, INT height, UINT width,
 {
     D3DXFONT_DESCW desc;
 
-    if(!facename) return D3DXERR_INVALIDDATA;
+    if( !device || !font ) return D3DERR_INVALIDCALL;
 
     desc.Height=height;
     desc.Width=width;
@@ -226,17 +244,20 @@ HRESULT WINAPI D3DXCreateFontW(LPDIRECT3DDEVICE9 device, INT height, UINT width,
     desc.OutputPrecision=precision;
     desc.Quality=quality;
     desc.PitchAndFamily=pitchandfamily;
-    strcpyW(desc.FaceName, facename);
+    if(facename != NULL) strcpyW(desc.FaceName, facename);
+    else desc.FaceName[0] = '\0';
 
     return D3DXCreateFontIndirectW(device, &desc, font);
 }
 
+/***********************************************************************
+ *           D3DXCreateFontIndirectA    (D3DX9_36.@)
+ */
 HRESULT WINAPI D3DXCreateFontIndirectA(LPDIRECT3DDEVICE9 device, CONST D3DXFONT_DESCA *desc, LPD3DXFONT *font)
 {
     D3DXFONT_DESCW widedesc;
 
-    if(!desc) return D3DERR_INVALIDCALL;
-    if(!desc->FaceName) return D3DERR_INVALIDCALL;
+    if( !device || !desc || !font ) return D3DERR_INVALIDCALL;
 
     /* Copy everything but the last structure member. This requires the
        two D3DXFONT_DESC structures to be equal until the FaceName member */
@@ -246,13 +267,30 @@ HRESULT WINAPI D3DXCreateFontIndirectA(LPDIRECT3DDEVICE9 device, CONST D3DXFONT_
     return D3DXCreateFontIndirectW(device, &widedesc, font);
 }
 
+/***********************************************************************
+ *           D3DXCreateFontIndirectW    (D3DX9_36.@)
+ */
 HRESULT WINAPI D3DXCreateFontIndirectW(LPDIRECT3DDEVICE9 device, CONST D3DXFONT_DESCW *desc, LPD3DXFONT *font)
 {
+    D3DDEVICE_CREATION_PARAMETERS cpars;
+    D3DDISPLAYMODE mode;
     ID3DXFontImpl *object;
-
+    IDirect3D9 *d3d;
+    HRESULT hr;
     FIXME("stub\n");
 
-    if(!desc) return D3DERR_INVALIDCALL;
+    if( !device || !desc || !font ) return D3DERR_INVALIDCALL;
+
+    /* the device MUST support D3DFMT_A8R8G8B8 */
+    IDirect3DDevice9_GetDirect3D(device, &d3d);
+    IDirect3DDevice9_GetCreationParameters(device, &cpars);
+    IDirect3DDevice9_GetDisplayMode(device, 0, &mode);
+    hr = IDirect3D9_CheckDeviceFormat(d3d, cpars.AdapterOrdinal, cpars.DeviceType, mode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_A8R8G8B8);
+    if(FAILED(hr)) {
+        IDirect3D9_Release(d3d);
+        return D3DXERR_INVALIDDATA;
+    }
+    IDirect3D9_Release(d3d);
 
     object=HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ID3DXFontImpl));
     if(object==NULL) {
@@ -261,7 +299,25 @@ HRESULT WINAPI D3DXCreateFontIndirectW(LPDIRECT3DDEVICE9 device, CONST D3DXFONT_
     }
     object->lpVtbl=&D3DXFont_Vtbl;
     object->ref=1;
+    object->device=device;
+    object->desc=*desc;
 
+    object->hdc = CreateCompatibleDC(NULL);
+    if( !object->hdc ) {
+        HeapFree(GetProcessHeap(), 0, object);
+        return D3DXERR_INVALIDDATA;
+    }
+
+    object->hfont = CreateFontW(desc->Height, desc->Width, 0, 0, desc->Weight, desc->Italic, FALSE, FALSE, desc->CharSet,
+                                desc->OutputPrecision, CLIP_DEFAULT_PRECIS, desc->Quality, desc->PitchAndFamily, desc->FaceName);
+    if( !object->hfont ) {
+        DeleteDC(object->hdc);
+        HeapFree(GetProcessHeap(), 0, object);
+        return D3DXERR_INVALIDDATA;
+    }
+    SelectObject(object->hdc, object->hfont);
+
+    IDirect3DDevice9_AddRef(device);
     *font=(LPD3DXFONT)object;
 
     return D3D_OK;

@@ -461,6 +461,11 @@ void set_reg_key_dword(HKEY root, const char *path, const char *name, DWORD valu
     HeapFree(GetProcessHeap(), 0, wname);
 }
 
+void set_reg_keyW(HKEY root, const WCHAR *path, const WCHAR *name, const WCHAR *value)
+{
+    set_reg_key_ex(root, path, name, value, REG_SZ);
+}
+
 void set_reg_key_dwordW(HKEY root, const WCHAR *path, const WCHAR *name, DWORD value)
 {
     set_reg_key_ex(root, path, name, &value, REG_DWORD);
@@ -473,12 +478,11 @@ void set_reg_key_dwordW(HKEY root, const WCHAR *path, const WCHAR *name, DWORD v
  * you are expected to HeapFree each element of the array, which is null
  * terminated, as well as the array itself.
  */
-WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
+static WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
 {
     HKEY key;
-    DWORD res, i = 0;
+    DWORD res, i = 0, valueslen = 0;
     WCHAR **values = NULL;
-    int valueslen = 0;
     struct list *cursor;
 
     res = RegOpenKeyW(root, path, &key);
@@ -487,7 +491,7 @@ WCHAR **enumerate_valuesW(HKEY root, WCHAR *path)
         while (TRUE)
         {
             WCHAR name[1024];
-            DWORD namesize = sizeof(name);
+            DWORD namesize = sizeof(name)/sizeof(name[0]);
             BOOL removed = FALSE;
 
             /* find out the needed size, allocate a buffer, read the value  */
@@ -679,6 +683,34 @@ char *keypath(const char *section)
     else
     {
         result = strdupA(section);
+    }
+
+    return result;
+}
+
+WCHAR *keypathW(const WCHAR *section)
+{
+    static const WCHAR appdefaultsW[] = {'A','p','p','D','e','f','a','u','l','t','s','\\',0};
+    static WCHAR *result = NULL;
+
+    HeapFree(GetProcessHeap(), 0, result);
+
+    if (current_app)
+    {
+        DWORD len = sizeof(appdefaultsW) + (lstrlenW(current_app) + lstrlenW(section) + 1) * sizeof(WCHAR);
+        result = HeapAlloc(GetProcessHeap(), 0, len );
+        lstrcpyW( result, appdefaultsW );
+        lstrcatW( result, current_app );
+        if (section[0])
+        {
+            len = lstrlenW(result);
+            result[len++] = '\\';
+            lstrcpyW( result + len, section );
+        }
+    }
+    else
+    {
+        result = strdupW(section);
     }
 
     return result;

@@ -44,6 +44,8 @@
 #include "handle.h"
 #include "thread.h"
 #include "request.h"
+#include "process.h"
+#include "security.h"
 #include "winternl.h"
 
 /* dnotify support */
@@ -63,7 +65,10 @@
 
 /* inotify support */
 
-#if defined(__linux__) && defined(__i386__)
+#ifdef HAVE_SYS_INOTIFY_H
+#include <sys/inotify.h>
+#define USE_INOTIFY
+#elif defined(__linux__) && defined(__i386__)
 
 #define SYS_inotify_init	291
 #define SYS_inotify_add_watch	292
@@ -112,7 +117,7 @@ static inline int inotify_add_watch( int fd, const char *name, unsigned int mask
     return ret;
 }
 
-static inline int inotify_remove_watch( int fd, int wd )
+static inline int inotify_rm_watch( int fd, int wd )
 {
     int ret;
     __asm__ __volatile__( "pushl %%ebx;\n\t"
@@ -146,6 +151,8 @@ struct dir
 {
     struct object  obj;      /* object header */
     struct fd     *fd;       /* file descriptor to the directory */
+    mode_t         mode;     /* file stat.st_mode */
+    uid_t          uid;      /* file stat.st_uid */
     struct list    entry;    /* entry in global change notifications list */
     unsigned int   filter;   /* notification filter */
     int            notified; /* SIGIO counter */
@@ -157,6 +164,9 @@ struct dir
 };
 
 static struct fd *dir_get_fd( struct object *obj );
+static struct security_descriptor *dir_get_sd( struct object *obj );
+static int dir_set_sd( struct object *obj, const struct security_descriptor *sd,
+                       unsigned int set_info );
 static void dir_dump( struct object *obj, int verbose );
 static void dir_destroy( struct object *obj );
 
@@ -172,8 +182,8 @@ static const struct object_ops dir_ops =
     no_signal,                /* signal */
     dir_get_fd,               /* get_fd */
     default_fd_map_access,    /* map_access */
-    default_get_sd,           /* get_sd */
-    default_set_sd,           /* set_sd */
+    dir_get_sd,               /* get_sd */
+    dir_set_sd,               /* set_sd */
     no_lookup_name,           /* lookup_name */
     no_open_file,             /* open_file */
     fd_close_handle,          /* close_handle */
@@ -289,6 +299,90 @@ static struct fd *dir_get_fd( struct object *obj )
     struct dir *dir = (struct dir *)obj;
     assert( obj->ops == &dir_ops );
     return (struct fd *)grab_object( dir->fd );
+}
+
+static int get_dir_unix_fd( struct dir *dir )
+{
+    return get_unix_fd( dir->fd );
+}
+
+static struct security_descriptor *dir_get_sd( struct object *obj )
+{
+    struct dir *dir = (struct dir *)obj;
+    int unix_fd;
+    struct stat st;
+    struct security_descriptor *sd;
+    assert( obj->ops == &dir_ops );
+
+    unix_fd = get_dir_unix_fd( dir );
+
+    if (unix_fd == -1 || fstat( unix_fd, &st ) == -1)
+        return obj->sd;
+
+    /* mode and uid the same? if so, no need to re-generate security descriptor */
+    if (obj->sd &&
+        (st.st_mode & (S_IRWXU|S_IRWXO)) == (dir->mode & (S_IRWXU|S_IRWXO)) &&
+        (st.st_uid == dir->uid))
+        return obj->sd;
+
+    sd = mode_to_sd( st.st_mode,
+                     security_unix_uid_to_sid( st.st_uid ),
+                     token_get_primary_group( current->process->token ));
+    if (!sd) return obj->sd;
+
+    dir->mode = st.st_mode;
+    dir->uid = st.st_uid;
+    free( obj->sd );
+    obj->sd = sd;
+    return sd;
+}
+
+static int dir_set_sd( struct object *obj, const struct security_descriptor *sd,
+                       unsigned int set_info )
+{
+    struct dir *dir = (struct dir *)obj;
+    const SID *owner;
+    struct stat st;
+    mode_t mode;
+    int unix_fd;
+
+    assert( obj->ops == &dir_ops );
+
+    unix_fd = get_dir_unix_fd( dir );
+
+    if (unix_fd == -1 || fstat( unix_fd, &st ) == -1) return 1;
+
+    if (set_info & OWNER_SECURITY_INFORMATION)
+    {
+        owner = sd_get_owner( sd );
+        if (!owner)
+        {
+            set_error( STATUS_INVALID_SECURITY_DESCR );
+            return 0;
+        }
+        if (!obj->sd || !security_equal_sid( owner, sd_get_owner( obj->sd ) ))
+        {
+            /* FIXME: get Unix uid and call fchown */
+        }
+    }
+    else if (obj->sd)
+        owner = sd_get_owner( obj->sd );
+    else
+        owner = token_get_user( current->process->token );
+
+    if (set_info & DACL_SECURITY_INFORMATION)
+    {
+        /* keep the bits that we don't map to access rights in the ACL */
+        mode = st.st_mode & (S_ISUID|S_ISGID|S_ISVTX|S_IRWXG);
+        mode |= sd_to_mode( sd, owner );
+
+        if (st.st_mode != mode && fchmod( unix_fd, mode ) == -1)
+        {
+            file_set_error();
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static struct change_record *get_first_change_record( struct dir *dir )
@@ -473,7 +567,7 @@ static void free_inode( struct inode *inode )
 
     if (inode->wd != -1)
     {
-        inotify_remove_watch( get_unix_fd( inotify_fd ), inode->wd );
+        inotify_rm_watch( get_unix_fd( inotify_fd ), inode->wd );
         list_remove( &inode->wd_entry );
     }
     list_remove( &inode->ino_entry );
@@ -1010,7 +1104,7 @@ static int dir_add_to_existing_notify( struct dir *dir )
 
 #endif  /* USE_INOTIFY */
 
-struct object *create_dir_obj( struct fd *fd )
+struct object *create_dir_obj( struct fd *fd, unsigned int access, mode_t mode )
 {
     struct dir *dir;
 
@@ -1025,6 +1119,8 @@ struct object *create_dir_obj( struct fd *fd )
     dir->inode = NULL;
     grab_object( fd );
     dir->fd = fd;
+    dir->mode = mode;
+    dir->uid  = ~(uid_t)0;
     set_fd_user( fd, &dir_fd_ops, &dir->obj );
 
     dir_add_to_existing_notify( dir );
@@ -1044,12 +1140,12 @@ DECL_HANDLER(read_directory_changes)
         return;
     }
 
-    dir = get_dir_obj( current->process, req->handle, 0 );
+    dir = get_dir_obj( current->process, req->async.handle, 0 );
     if (!dir)
         return;
 
     /* requests don't timeout */
-    if (!(async = fd_queue_async( dir->fd, &req->async, ASYNC_TYPE_WAIT, 0 ))) goto end;
+    if (!(async = fd_queue_async( dir->fd, &req->async, ASYNC_TYPE_WAIT ))) goto end;
 
     /* assign it once */
     if (!dir->filter)

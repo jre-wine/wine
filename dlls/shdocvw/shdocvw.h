@@ -78,6 +78,7 @@ struct DocHost {
     const IOleDocumentSiteVtbl    *lpOleDocumentSiteVtbl;
     const IOleCommandTargetVtbl   *lpOleCommandTargetVtbl;
     const IDispatchVtbl           *lpDispatchVtbl;
+    const IPropertyNotifySinkVtbl *lpIPropertyNotifySinkVtbl;
     const IServiceProviderVtbl    *lpServiceProviderVtbl;
 
     /* Interfaces of InPlaceFrame object */
@@ -101,6 +102,10 @@ struct DocHost {
     VARIANT_BOOL offline;
     VARIANT_BOOL busy;
 
+    READYSTATE ready_state;
+    DWORD prop_notif_cookie;
+    BOOL is_prop_notif;
+
     ConnectionPointContainer cps;
 };
 
@@ -119,6 +124,7 @@ struct WebBrowser {
     const IOleInPlaceActiveObjectVtbl   *lpOleInPlaceActiveObjectVtbl;
     const IOleCommandTargetVtbl         *lpOleCommandTargetVtbl;
     const IHlinkFrameVtbl               *lpHlinkFrameVtbl;
+    const IServiceProviderVtbl          *lpServiceProviderVtbl;
 
     LONG ref;
 
@@ -139,6 +145,7 @@ struct WebBrowser {
 
     HWND shell_embedding_hwnd;
 
+    VARIANT_BOOL register_browser;
     VARIANT_BOOL visible;
     VARIANT_BOOL menu_bar;
     VARIANT_BOOL address_bar;
@@ -182,6 +189,7 @@ struct InternetExplorer {
 #define DOCHOSTUI2(x)   ((IDocHostUIHandler2*)          &(x)->lpDocHostUIHandlerVtbl)
 #define DOCSITE(x)      ((IOleDocumentSite*)            &(x)->lpOleDocumentSiteVtbl)
 #define CLDISP(x)       ((IDispatch*)                   &(x)->lpDispatchVtbl)
+#define PROPNOTIF(x)    ((IPropertyNotifySink*)         &(x)->lpIPropertyNotifySinkVtbl)
 #define SERVPROV(x)     ((IServiceProvider*)            &(x)->lpServiceProviderVtbl)
 
 #define INPLACEFRAME(x) ((IOleInPlaceFrame*)            &(x)->lpOleInPlaceFrameVtbl)
@@ -209,7 +217,7 @@ HRESULT WebBrowserV2_Create(IUnknown*,REFIID,void**);
 
 void create_doc_view_hwnd(DocHost*);
 void deactivate_document(DocHost*);
-void object_available(DocHost*);
+HRESULT dochost_object_available(DocHost*,IUnknown*);
 void call_sink(ConnectionPoint*,DISPID,DISPPARAMS*);
 HRESULT navigate_url(DocHost*,LPCWSTR,const VARIANT*,const VARIANT*,VARIANT*,VARIANT*);
 HRESULT go_home(DocHost*);
@@ -222,6 +230,10 @@ HRESULT InternetExplorer_Create(IUnknown*,REFIID,void**);
 void InternetExplorer_WebBrowser_Init(InternetExplorer*);
 
 HRESULT CUrlHistory_Create(IUnknown*,REFIID,void**);
+
+HRESULT InternetShortcut_Create(IUnknown*,REFIID,void**);
+
+HRESULT TaskbarList_Create(IUnknown*,REFIID,void**);
 
 #define DEFINE_THIS(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,lp ## ifc ## Vtbl)))
 
@@ -269,6 +281,36 @@ static inline LPWSTR heap_strdupW(LPCWSTR str)
         memcpy(ret, str, size);
     }
 
+    return ret;
+}
+
+static inline LPWSTR co_strdupW(LPCWSTR str)
+{
+    WCHAR *ret = CoTaskMemAlloc((strlenW(str) + 1)*sizeof(WCHAR));
+    if (ret)
+        lstrcpyW(ret, str);
+    return ret;
+}
+
+static inline LPWSTR co_strdupAtoW(LPCSTR str)
+{
+    INT len;
+    WCHAR *ret;
+    len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
+    ret = CoTaskMemAlloc(len*sizeof(WCHAR));
+    if (ret)
+        MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
+    return ret;
+}
+
+static inline LPSTR co_strdupWtoA(LPCWSTR str)
+{
+    INT len;
+    CHAR *ret;
+    len = WideCharToMultiByte(CP_ACP, 0, str, -1, NULL, 0, 0, 0);
+    ret = CoTaskMemAlloc(len);
+    if (ret)
+        WideCharToMultiByte(CP_ACP, 0, str, -1, ret, len, 0, 0);
     return ret;
 }
 

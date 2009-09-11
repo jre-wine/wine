@@ -1,7 +1,7 @@
 /*
  *      DirectX File private interfaces (D3DXOF.DLL)
  *
- * Copyright 2004 Christian Costa
+ * Copyright 2004, 2008 Christian Costa
  *
  * This file contains the (internal) driver registration functions,
  * driver enumeration APIs and DirectDraw creation functions.
@@ -33,9 +33,65 @@
 #include "winuser.h"
 #include "dxfile.h"
 
+#define MAX_NAME_LEN 32
+#define MAX_ARRAY_DIM 4
+#define MAX_MEMBERS 50
+#define MAX_CHILDS 100
+#define MAX_TEMPLATES 200
+#define MAX_OBJECTS 500
+#define MAX_SUBOBJECTS 500
+#define MAX_STRINGS_BUFFER 10000
+
+typedef struct {
+    DWORD type;
+    LONG idx_template;
+    char name[MAX_NAME_LEN];
+    ULONG nb_dims;
+    BOOL  dim_fixed[MAX_ARRAY_DIM]; /* fixed or variable */
+    ULONG dim_value[MAX_ARRAY_DIM]; /* fixed value or member index */
+} member;
+
+typedef struct {
+    char name[MAX_NAME_LEN];
+    GUID class_id;
+    BOOL open;
+    BOOL binary;
+    ULONG nb_childs;
+    char childs[MAX_CHILDS][MAX_NAME_LEN];
+    ULONG nb_members;
+    member members[MAX_MEMBERS];
+} xtemplate;
+
+typedef struct {
+    char* name;
+    ULONG start;
+    ULONG size;
+} xobject_member;
+
+struct _xobject {
+   BOOL binary;
+   struct _xobject* ptarget;
+   char name[MAX_NAME_LEN];
+   GUID class_id;
+   GUID type;
+   LPBYTE pdata;
+   ULONG pos_data;
+   DWORD size;
+   ULONG nb_members;
+   xobject_member members[MAX_MEMBERS];
+   ULONG nb_childs;
+   ULONG nb_subobjects;
+   struct _xobject * childs[MAX_CHILDS];
+   struct _xobject * root;
+};
+
+typedef struct _xobject xobject;
+
 typedef struct {
     IDirectXFile lpVtbl;
     LONG ref;
+    ULONG nb_xtemplates;
+    xtemplate xtemplates[MAX_TEMPLATES];
 } IDirectXFileImpl;
 
 typedef struct {
@@ -46,11 +102,17 @@ typedef struct {
 typedef struct {
     IDirectXFileData lpVtbl;
     LONG ref;
+    xobject* pobj;
+    int cur_enum_object;
+    BOOL from_ref;
+    ULONG level;
+    LPBYTE pstrings;
 } IDirectXFileDataImpl;
 
 typedef struct {
     IDirectXFileDataReference lpVtbl;
     LONG ref;
+    xobject* ptarget;
 } IDirectXFileDataReferenceImpl;
 
 typedef struct {
@@ -59,8 +121,42 @@ typedef struct {
 } IDirectXFileObjectImpl;
 
 typedef struct {
+  /* Buffer to parse */
+  LPBYTE buffer;
+  DWORD rem_bytes;
+  /* Misc info */
+  WORD current_token;
+  BOOL token_present;
+  BOOL txt;
+  ULONG cur_subobject;
+  ULONG cur_pos_data;
+  LPBYTE cur_pstrings;
+  BYTE value[100];
+  xobject** pxo_globals;
+  ULONG nb_pxo_globals;
+  xobject* pxo_tab;
+  IDirectXFileImpl* pdxf;
+  xobject* pxo;
+  xtemplate* pxt[MAX_SUBOBJECTS];
+  ULONG level;
+  LPBYTE pdata;
+  ULONG capacity;
+  LPBYTE pstrings;
+} parse_buffer;
+
+typedef struct {
     IDirectXFileEnumObject lpVtbl;
     LONG ref;
+    DXFILELOADOPTIONS source;
+    HANDLE hFile;
+    HANDLE file_mapping;
+    LPBYTE buffer;
+    HGLOBAL resource_data;
+    parse_buffer buf;
+    IDirectXFileImpl* pDirectXFile;
+    ULONG nb_xobjects;
+    xobject* xobjects[MAX_OBJECTS];
+    IDirectXFileData* pRefObjects[MAX_OBJECTS];
 } IDirectXFileEnumObjectImpl;
 
 typedef struct {
@@ -69,11 +165,13 @@ typedef struct {
 } IDirectXFileSaveObjectImpl;
 
 HRESULT IDirectXFileImpl_Create(IUnknown *pUnkOuter, LPVOID *ppObj);
-HRESULT IDirectXFileBinaryImpl_Create(IDirectXFileBinaryImpl** ppObj);
-HRESULT IDirectXFileDataImpl_Create(IDirectXFileDataImpl** ppObj);
-HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj);
-HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj);
 HRESULT IDirectXFileFileObjectImpl_Create(IDirectXFileObjectImpl** ppObj);
 HRESULT IDirectXFileFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj);
+
+BOOL read_bytes(parse_buffer * buf, LPVOID data, DWORD size);
+BOOL parse_template(parse_buffer * buf);
+void dump_template(xtemplate* templates_array, xtemplate* ptemplate);
+BOOL is_template_available(parse_buffer * buf);
+BOOL parse_object(parse_buffer * buf);
 
 #endif /* __D3DXOF_PRIVATE_INCLUDED__ */

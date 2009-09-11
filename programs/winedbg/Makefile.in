@@ -5,7 +5,7 @@ VPATH     = @srcdir@
 MODULE    = winedbg.exe
 APPMODE   = -mconsole
 IMPORTS   = psapi dbghelp advapi32 kernel32 ntdll
-DELAYIMPORTS = user32
+DELAYIMPORTS = user32 gdi32
 EXTRALIBS = @LIBPOLL@
 
 C_SRCS = \
@@ -14,6 +14,7 @@ C_SRCS = \
 	be_ppc.c \
 	be_x86_64.c \
 	break.c \
+	crashdlg.c \
 	db_disasm.c \
 	display.c \
 	expr.c \
@@ -21,13 +22,24 @@ C_SRCS = \
 	info.c \
 	memory.c \
 	source.c \
-	symbol.c \
 	stack.c \
+	symbol.c \
 	tgt_active.c \
 	tgt_minidump.c \
 	tgt_module.c \
 	types.c \
 	winedbg.c
+
+RC_SRCS = \
+	rsrc_De.rc \
+	rsrc_En.rc \
+	rsrc_Fr.rc \
+	rsrc_Ko.rc \
+	rsrc_Lt.rc \
+	rsrc_Nl.rc \
+	rsrc_Pt.rc \
+	rsrc_Ru.rc \
+	rsrc_Sv.rc
 
 LEX_SRCS   = debug.l
 BISON_SRCS = dbg.y
@@ -38,7 +50,7 @@ MANPAGES = winedbg.man
 
 all: $(MANPAGES)
 
-install:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
+install install-lib:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
 	$(INSTALL_DATA) winedbg.man $(DESTDIR)$(mandir)/man$(prog_manext)/winedbg.$(prog_manext)
 
 uninstall::

@@ -1,7 +1,7 @@
 /*
  * BIOS interrupt 10h handler
  *
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  * Copyright 1998 Joseph Pranevich
  *
  * This library is free software; you can redistribute it and/or
@@ -133,66 +133,6 @@ struct _ModeInfoBlock {
 
 #include "poppack.h"
 
-/*
- * Wine internal information about video modes.
- * If depth is zero, the mode is considered to
- * be a text mode.
- */
-typedef struct {
-    WORD Mode;
-    WORD Width;
-    WORD Height;
-    WORD Depth;
-} INT10_MODE;
-
-
-/*
- * List of supported video modes.
- */
-static const INT10_MODE INT10_modelist[] =
-{
-    {0x0000,   40,   25,  0},
-    {0x0001,   40,   25,  0},
-    {0x0002,   80,   25,  0},
-    {0x0003,   80,   25,  0},
-    {0x0007,   80,   25,  0},
-    {0x000d,  320,  200,  4},
-    {0x000e,  640,  200,  4},
-    {0x0010,  640,  350,  4},
-    {0x0012,  640,  480,  4},
-    {0x0013,  320,  200,  8},
-    {0x006a,  800,  600,  4},   /* VESA mode, same as 0x102 */
-    {0x0100,  640,  400,  8},
-    {0x0101,  640,  480,  8},
-    {0x0102,  800,  600,  4},
-    {0x0103,  800,  600,  8},
-    {0x0104, 1024,  768,  4},
-    {0x0105, 1024,  768,  8},
-    {0x0106, 1280, 1024,  4},
-    {0x0107, 1280, 1024,  8},
-    {0x0108,   80,   60,  0},
-    {0x0109,  132,   25,  0},
-    {0x010a,  132,   43,  0},
-    {0x010b,  132,   50,  0},
-    {0x010c,  132,   60,  0},
-    {0x010d,  320,  200, 15},
-    {0x010e,  320,  200, 16},
-    {0x010f,  320,  200, 24},
-    {0x0110,  640,  480, 15},
-    {0x0111,  640,  480, 16},
-    {0x0112,  640,  480, 24},
-    {0x0113,  800,  600, 15},
-    {0x0114,  800,  600, 16},
-    {0x0115,  800,  600, 24},
-    {0x0116, 1024,  768, 15},
-    {0x0117, 1024,  768, 16},
-    {0x0118, 1024,  768, 24},
-    {0x0119, 1280, 1024, 15},
-    {0x011a, 1280, 1024, 16},
-    {0x011b, 1280, 1024, 24},
-    {0xffff,    0,    0,  0}
-};
-
 /* True if video mode is a vesa mode, false otherwise.
  * More correct would be to use something like (x > 0xff || x == 0x6a)
  * but as long as we have only the standard VGA and VESA modes this is ok too */
@@ -201,30 +141,6 @@ static const INT10_MODE INT10_modelist[] =
 /* Forward declarations. */
 static INT10_HEAP *INT10_GetHeap(void);
 static void INT10_SetCursorPos(BIOSDATA*, unsigned, unsigned, unsigned);
-
-
-/**********************************************************************
- *         INT10_FindMode
- */
-static const INT10_MODE *INT10_FindMode( WORD mode )
-{
-    const INT10_MODE *ptr = INT10_modelist;
-    
-    /*
-     * Filter out flags.
-     */
-    mode &= 0x17f;
-
-    while (ptr->Mode != 0xffff)
-    {
-        if (ptr->Mode == mode)
-            return ptr;
-        ptr++;
-    }
-
-    return NULL;
-}
-
 
 /**********************************************************************
  *         INT10_FillControllerInformation
@@ -318,7 +234,7 @@ static void INT10_FillControllerInformation( BYTE *buffer )
  */
 static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
 {
-    const INT10_MODE *ptr = INT10_FindMode( mode );
+    const VGA_MODE *ptr = VGA_GetModeInfo( mode );
     if (!ptr)
         return FALSE;
 
@@ -343,22 +259,32 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
      * 13-15 - Reserved.
      */
     {
-        WORD attr = 0x000a; /* color mode, optional info */
+        WORD attr = 0x0002; /* set optional info available */
+        /* Enable color mode - if both Colors & Depth are 0, then assume monochrome*/
+        if (ptr->Colors || ptr->Depth)
+        {
+            attr |= 0x0008;
+        }
 
         /*
          * FIXME: Attribute handling is incomplete.
          */
 
-        /* Mode supported? FIXME: correct value */
-        attr |= 0x0001;
+        /* Mode supported? */
+        if (ptr->Supported)
+        {
+            attr |= 0x0001;  /* set display mode supported */
+        }
 
         /* Graphical mode? */
-        if (ptr->Depth) 
-            attr |= 0x0010;
+        if (ptr->ModeType != TEXT)
+        {
+            attr |= 0x0010;  /* set graphics mode on (text mode off) */
+        }
 
         /* Not VGA-compatible? */
         if (IS_VESA_MODE(mode))
-            attr |= 0x0020;
+            attr |= 0x0020;    /* disable VGA ports */
 
         mib->ModeAttributes = attr;
     }
@@ -392,16 +318,30 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
     mib->BytesPerScanLine = ptr->Width * (ptr->Depth ? (ptr->Depth + 7) / 8 : 1);
 
     /* 18 - WORD: width in pixels (graphics) or characters (text) */
-    mib->XResolution = ptr->Width;
+    if (ptr->ModeType == TEXT)
+    {
+        mib->XResolution = ptr->TextCols;
+    }
+    else
+    {
+        mib->XResolution = ptr->Width;
+    }
 
     /* 20 - WORD: height in pixels (graphics) or characters (text) */
-    mib->YResolution = ptr->Height;
+    if (ptr->ModeType == TEXT)
+    {
+        mib->YResolution = ptr->TextRows;
+    }
+    else
+    {
+        mib->YResolution = ptr->Height;
+    }
 
     /* 22 - BYTE: width of character cell in pixels */
-    mib->XCharSize = 0; /* FIXME */
+    mib->XCharSize = ptr->CharWidth;
 
     /* 23 - BYTE: height of character cell in pixels */
-    mib->YCharSize = 0; /* FIXME */
+    mib->YCharSize = ptr->CharHeight;
 
     /* 24 - BYTE: number of memory planes */
     mib->NumberOfPlanes = 1; /* FIXME */
@@ -426,7 +366,7 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
      * 08-0F - Reserved for VESA.
      * 10-FF - OEM memory models.
      */
-    if (!ptr->Depth)
+    if (ptr->ModeType == TEXT)
         mib->MemoryModel = 0; /* text mode */
     else
         mib->MemoryModel = 3; /* FIXME */
@@ -435,7 +375,7 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
     mib->BankSize = 0; /* FIXME */
 
     /* 29 - BYTE: number of image pages (less one) in video RAM */
-    mib->NumberOfImagePages = 0; /* FIXME */
+    mib->NumberOfImagePages = (ptr->ScreenPages)-1;
 
     /* 30 - BYTE: reserved (0x00 for VBE 1.0-2.0, 0x01 for VBE 3.0) */
     mib->Reserved1 = 0x01;
@@ -548,7 +488,7 @@ static BOOL INT10_FillModeInformation( struct _ModeInfoBlock *mib, WORD mode )
     mib->MaxPixelClock = 0; /* FIXME */
 
     /* 66 - BYTE[190]: reserved, set to zero */
-    memset( &mib->Reserved4, 0, 190 );
+    memset( mib->Reserved4, 0, 190 );
 
     return TRUE;
 }
@@ -706,15 +646,15 @@ INT10_HEAP *INT10_GetHeap( void )
 
         for (i=0; TRUE; i++)
         {
-            heap_pointer->VesaModeList[i] = INT10_modelist[i].Mode;
-            if (INT10_modelist[i].Mode == 0xffff)
+            heap_pointer->VesaModeList[i] = VGA_modelist[i].Mode;
+            if (VGA_modelist[i].Mode == 0xffff)
                 break;
         }
 
         strcpy( heap_pointer->VesaOEMName, "WINE SVGA BOARD" );
         strcpy( heap_pointer->VesaVendorName, "WINE" );
         strcpy( heap_pointer->VesaProductName, "WINE SVGA" );
-        strcpy( heap_pointer->VesaProductRev, "2003" );
+        strcpy( heap_pointer->VesaProductRev, "2008" );
         
         heap_pointer->VesaCurrentMode = 0; /* Initialized later. */
         heap_pointer->WineHeapSegment = segment;
@@ -749,7 +689,7 @@ INT10_HEAP *INT10_GetHeap( void )
  */
 static BOOL INT10_SetVideoMode( BIOSDATA *data, WORD mode )
 {
-    const INT10_MODE *ptr = INT10_FindMode( mode );
+    const VGA_MODE *ptr = VGA_GetModeInfo( mode );
     INT10_HEAP *heap = INT10_GetHeap();
     BOOL clearScreen = TRUE;
 
@@ -758,6 +698,8 @@ static BOOL INT10_SetVideoMode( BIOSDATA *data, WORD mode )
 
     /*
      * Linear framebuffer is not supported.
+     * FIXME - not sure this is valid since mode 19 is 256 color & linear
+     *   of course only 1 window is addressable.
      */
     if (mode & 0x4000)
         return FALSE;
@@ -777,25 +719,25 @@ static BOOL INT10_SetVideoMode( BIOSDATA *data, WORD mode )
     else
         data->VideoMode = 0;
 
-    if (ptr->Depth == 0)
+    if (ptr->ModeType == TEXT)
     {
         /* Text mode. */
         TRACE( "Setting %s %dx%d text mode (screen %s)\n", 
                IS_VESA_MODE(mode) ? "VESA" : "VGA", 
-               ptr->Width, ptr->Height, 
+               ptr->TextCols, ptr->TextRows,
                clearScreen ? "cleared" : "preserved" );
 
         /*
          * FIXME: We should check here if alpha mode could be set.
          */
-        VGA_SetAlphaMode( ptr->Width, ptr->Height );
+        VGA_SetAlphaMode( ptr->TextCols, ptr->TextRows );
 
-        data->VideoColumns = ptr->Width;
-        data->RowsOnScreenMinus1 = ptr->Height - 1;
+        data->VideoColumns = ptr->TextCols;
+        data->RowsOnScreenMinus1 = ptr->TextRows - 1;
 
         if (clearScreen)
         {            
-            VGA_ClearText( 0, 0, ptr->Height-1, ptr->Width-1, 0x07 );
+            VGA_ClearText( 0, 0, ptr->TextCols-1, ptr->TextRows-1, 0x07 );
             INT10_SetCursorPos( data, 0, 0, 0 );
             VGA_SetCursorPos( 0, 0 );            
         }
@@ -808,7 +750,7 @@ static BOOL INT10_SetVideoMode( BIOSDATA *data, WORD mode )
                ptr->Width, ptr->Height, ptr->Depth,
                clearScreen ? "cleared" : "preserved" );
 
-        if (VGA_SetMode( ptr->Width, ptr->Height, ptr->Depth ))
+        if ( VGA_SetMode(mode) )
             return FALSE;
     }
 
@@ -1192,11 +1134,27 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
                apparently, the foreground or attribute of the background
                with this call, so we should check first to see what the
                foreground already is... FIXME */
-            FIXME("Set Background/Border Color: %d/%d\n",
-               BH_reg(context), BL_reg(context));
+
+            /* For CGA modes, background color change is the same as writing
+               to I/O address 0x3d9 bit 4  */
+            if(data->VideoMode >= 4 && data->VideoMode <= 6)
+            {
+              VGA_SetBright((BL_reg(context) & 0x10) && 1);
+              VGA_UpdatePalette();
+            }
+            else FIXME("Set Background/Border Color: %d/%d\n",
+              BH_reg(context), BL_reg(context));
             break;
         case 0x01: /* SET PALETTE */
-            FIXME("Set Palette - Not Supported\n");
+
+            /* For CGA modes, palette color change is the same as writing
+               to I/O address 0x3d9 bit 5 */
+            if(data->VideoMode >= 4 && data->VideoMode <= 6)
+	    {
+              VGA_SetPaletteIndex(BL_reg(context) & 1);
+              VGA_UpdatePalette();
+            }
+            else FIXME("Set Palette - Not Supported: %02X\n", BL_reg(context));
             break;
         default:
             FIXME("INT 10 AH = 0x0b BH = 0x%x - Unknown\n",
@@ -1206,8 +1164,13 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
         break;
 
     case 0x0c: /* WRITE GRAPHICS PIXEL */
-        /* Not in graphics mode, can ignore w/o error */
-        FIXME("Write Graphics Pixel - Not Supported\n");
+
+        /* Only supported in CGA mode for now */
+        if(data->VideoMode >= 4 && data->VideoMode <= 6)
+        {
+          VGA_WritePixel(AL_reg(context), BH_reg(context), CX_reg(context), DX_reg(context));
+        }
+        else FIXME("Write pixel not implemented for current mode\n");
         break;
 
     case 0x0d: /* READ GRAPHICS PIXEL */
@@ -1286,7 +1249,7 @@ void WINAPI DOSVM_Int10Handler( CONTEXT86 *context )
                 BYTE *pt;
 
                 TRACE("Set Block of DAC registers\n");
-		pt = (BYTE*)CTX_SEG_OFF_TO_LIN(context,context->SegEs,context->Edx);
+                pt = CTX_SEG_OFF_TO_LIN(context,context->SegEs,context->Edx);
 		for (i=0;i<CX_reg(context);i++)
                 {
                     paldat.peRed   = (*(pt+i*3+0)) << 2;

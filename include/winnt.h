@@ -162,6 +162,12 @@ extern "C" {
 # define DECLSPEC_HIDDEN
 #endif
 
+#if defined(__GNUC__) && ((__GNUC__ > 4) || ((__GNUC__ == 4) && (__GNUC_MINOR__ >= 3)))
+#define __WINE_ALLOC_SIZE(x) __attribute__((__alloc_size__(x)))
+#else
+#define __WINE_ALLOC_SIZE(x)
+#endif
+
 /* Anonymous union/struct handling */
 
 #ifndef NONAMELESSSTRUCT
@@ -240,6 +246,7 @@ extern "C" {
 
 /* C99 unaligned support */
 
+#ifndef UNALIGNED
 #if defined(_MSC_VER) && (defined(_M_MRX000) || defined(_M_ALPHA) || defined(_M_PPC) || defined(_M_IA64) || defined(_M_AMD64))
 # define UNALIGNED __unaligned
 # ifdef _WIN64
@@ -250,6 +257,7 @@ extern "C" {
 #else
 # define UNALIGNED
 # define UNALIGNED64
+#endif
 #endif
 
 /* Alignment macros */
@@ -283,10 +291,8 @@ extern "C" {
 
 #if defined(_MSC_VER)
 # define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]
-#elif defined(__GNUC__) 
-# define C_ASSERT(e) extern char __C_ASSERT__[(e)?1:-1] __attribute__((unused))
 #else
-# define C_ASSERT(e)
+# define C_ASSERT(e) extern void __C_ASSERT__(int [(e)?1:-1])
 #endif
 
 /* Eliminate Microsoft C/C++ compiler warning 4715 */
@@ -385,7 +391,7 @@ typedef const WCHAR    *PCWSTR,     *LPCWSTR;
  * the emulator. The reason is they depend on the UNICODE
  * macro which only exists in the user's code.
  */
-#ifndef __WINESRC__
+#ifndef WINE_NO_UNICODE_MACROS
 # ifdef UNICODE
 # ifndef _TCHAR_DEFINED
 typedef WCHAR           TCHAR,      *PTCHAR;
@@ -404,7 +410,7 @@ typedef LPCSTR          PCTSTR,      LPCTSTR;
 #  define __TEXT(string) string
 # endif /* UNICODE */
 # define TEXT(quote) __TEXT(quote)
-#endif   /* __WINESRC__ */
+#endif   /* WINE_NO_UNICODE_MACROS */
 
 /* Misc common WIN32 types */
 typedef char            CCHAR;
@@ -532,7 +538,12 @@ typedef DWORD FLONG;
 #define PROCESSOR_ARM920         2336    /* 0x920 */
 #define PROCESSOR_ARM_7TDMI      70001
 
+#ifdef _WIN64
+#define MAXIMUM_PROCESSORS       64
+#else
 #define MAXIMUM_PROCESSORS       32
+#endif
+
 typedef struct _MEMORY_BASIC_INFORMATION
 {
     LPVOID   BaseAddress;
@@ -569,9 +580,6 @@ typedef struct _MEMORY_BASIC_INFORMATION
 #define MEM_PHYSICAL            0x00400000
 #define MEM_LARGE_PAGES         0x20000000
 #define MEM_4MB_PAGES           0x80000000
-#ifdef __WINESRC__
-#define MEM_SYSTEM              0x80000000
-#endif
 
 #define SEC_FILE                0x00800000
 #define SEC_IMAGE               0x01000000
@@ -841,6 +849,9 @@ typedef struct _LDT_ENTRY {
             unsigned    BaseHi : 8;
         } Bits;
     } HighWord;
+#ifdef _WIN64  /* FIXME: 64-bit code should not be using the LDT */
+    DWORD BaseHigh;
+#endif
 } LDT_ENTRY, *PLDT_ENTRY;
 
 /* x86-64 context definitions */
@@ -866,110 +877,117 @@ typedef struct DECLSPEC_ALIGN(16) _M128A {
 } M128A, *PM128A;
 
 typedef struct _XMM_SAVE_AREA32 {
-    WORD ControlWord;
-    WORD StatusWord;
-    BYTE TagWord;
-    BYTE Reserved1;
-    WORD ErrorOpcode;
-    DWORD ErrorOffset;
-    WORD ErrorSelector;
-    WORD Reserved2;
-    DWORD DataOffset;
-    WORD DataSelector;
-    WORD Reserved3;
-    DWORD MxCsr;
-    DWORD MxCsr_Mask;
-    M128A FloatRegisters[8];
-    M128A XmmRegisters[16];
-    BYTE Reserved4[96];
+    WORD ControlWord;        /* 000 */
+    WORD StatusWord;         /* 002 */
+    BYTE TagWord;            /* 004 */
+    BYTE Reserved1;          /* 005 */
+    WORD ErrorOpcode;        /* 006 */
+    DWORD ErrorOffset;       /* 008 */
+    WORD ErrorSelector;      /* 00c */
+    WORD Reserved2;          /* 00e */
+    DWORD DataOffset;        /* 010 */
+    WORD DataSelector;       /* 014 */
+    WORD Reserved3;          /* 016 */
+    DWORD MxCsr;             /* 018 */
+    DWORD MxCsr_Mask;        /* 01c */
+    M128A FloatRegisters[8]; /* 020 */
+    M128A XmmRegisters[16];  /* 0a0 */
+    BYTE Reserved4[96];      /* 1a0 */
 } XMM_SAVE_AREA32, *PXMM_SAVE_AREA32;
 
 typedef struct DECLSPEC_ALIGN(16) _CONTEXT {
-    DWORD64 P1Home;
-    DWORD64 P2Home;
-    DWORD64 P3Home;
-    DWORD64 P4Home;
-    DWORD64 P5Home;
-    DWORD64 P6Home;
+    DWORD64 P1Home;          /* 000 */
+    DWORD64 P2Home;          /* 008 */
+    DWORD64 P3Home;          /* 010 */
+    DWORD64 P4Home;          /* 018 */
+    DWORD64 P5Home;          /* 020 */
+    DWORD64 P6Home;          /* 028 */
 
     /* Control flags */
-    DWORD ContextFlags;
-    DWORD MxCsr;
+    DWORD ContextFlags;      /* 030 */
+    DWORD MxCsr;             /* 034 */
 
     /* Segment */
-    WORD SegCs;
-    WORD SegDs;
-    WORD SegEs;
-    WORD SegFs;
-    WORD SegGs;
-    WORD SegSs;
-    DWORD EFlags;
+    WORD SegCs;              /* 038 */
+    WORD SegDs;              /* 03a */
+    WORD SegEs;              /* 03c */
+    WORD SegFs;              /* 03e */
+    WORD SegGs;              /* 040 */
+    WORD SegSs;              /* 042 */
+    DWORD EFlags;            /* 044 */
 
     /* Debug */
-    DWORD64 Dr0;
-    DWORD64 Dr1;
-    DWORD64 Dr2;
-    DWORD64 Dr3;
-    DWORD64 Dr6;
-    DWORD64 Dr7;
+    DWORD64 Dr0;             /* 048 */
+    DWORD64 Dr1;             /* 050 */
+    DWORD64 Dr2;             /* 058 */
+    DWORD64 Dr3;             /* 060 */
+    DWORD64 Dr6;             /* 068 */
+    DWORD64 Dr7;             /* 070 */
 
     /* Integer */
-    DWORD64 Rax;
-    DWORD64 Rcx;
-    DWORD64 Rdx;
-    DWORD64 Rbx;
-    DWORD64 Rsp;
-    DWORD64 Rbp;
-    DWORD64 Rsi;
-    DWORD64 Rdi;
-    DWORD64 R8;
-    DWORD64 R9;
-    DWORD64 R10;
-    DWORD64 R11;
-    DWORD64 R12;
-    DWORD64 R13;
-    DWORD64 R14;
-    DWORD64 R15;
+    DWORD64 Rax;             /* 078 */
+    DWORD64 Rcx;             /* 080 */
+    DWORD64 Rdx;             /* 088 */
+    DWORD64 Rbx;             /* 090 */
+    DWORD64 Rsp;             /* 098 */
+    DWORD64 Rbp;             /* 0a0 */
+    DWORD64 Rsi;             /* 0a8 */
+    DWORD64 Rdi;             /* 0b0 */
+    DWORD64 R8;              /* 0b8 */
+    DWORD64 R9;              /* 0c0 */
+    DWORD64 R10;             /* 0c8 */
+    DWORD64 R11;             /* 0d0 */
+    DWORD64 R12;             /* 0d8 */
+    DWORD64 R13;             /* 0e0 */
+    DWORD64 R14;             /* 0e8 */
+    DWORD64 R15;             /* 0f0 */
 
     /* Counter */
-    DWORD64 Rip;
+    DWORD64 Rip;             /* 0f8 */
 
     /* Floating point */
     union {
-        XMM_SAVE_AREA32 FltSave;
+        XMM_SAVE_AREA32 FltSave;  /* 100 */
         struct {
-            M128A Header[2];
-            M128A Legacy[8];
-            M128A Xmm0;
-            M128A Xmm1;
-            M128A Xmm2;
-            M128A Xmm3;
-            M128A Xmm4;
-            M128A Xmm5;
-            M128A Xmm6;
-            M128A Xmm7;
-            M128A Xmm8;
-            M128A Xmm9;
-            M128A Xmm10;
-            M128A Xmm11;
-            M128A Xmm12;
-            M128A Xmm13;
-            M128A Xmm14;
-            M128A Xmm15;
+            M128A Header[2];      /* 100 */
+            M128A Legacy[8];      /* 120 */
+            M128A Xmm0;           /* 1a0 */
+            M128A Xmm1;           /* 1b0 */
+            M128A Xmm2;           /* 1c0 */
+            M128A Xmm3;           /* 1d0 */
+            M128A Xmm4;           /* 1e0 */
+            M128A Xmm5;           /* 1f0 */
+            M128A Xmm6;           /* 200 */
+            M128A Xmm7;           /* 210 */
+            M128A Xmm8;           /* 220 */
+            M128A Xmm9;           /* 230 */
+            M128A Xmm10;          /* 240 */
+            M128A Xmm11;          /* 250 */
+            M128A Xmm12;          /* 260 */
+            M128A Xmm13;          /* 270 */
+            M128A Xmm14;          /* 280 */
+            M128A Xmm15;          /* 290 */
         } DUMMYSTRUCTNAME;
     } DUMMYUNIONNAME;
 
     /* Vector */
-    M128A VectorRegister[26];
-    DWORD64 VectorControl;
+    M128A VectorRegister[26];     /* 300 */
+    DWORD64 VectorControl;        /* 4a0 */
 
     /* Debug control */
-    DWORD64 DebugControl;
-    DWORD64 LastBranchToRip;
-    DWORD64 LastBranchFromRip;
-    DWORD64 LastExceptionToRip;
-    DWORD64 LastExceptionFromRip;
+    DWORD64 DebugControl;         /* 4a8 */
+    DWORD64 LastBranchToRip;      /* 4b0 */
+    DWORD64 LastBranchFromRip;    /* 4b8 */
+    DWORD64 LastExceptionToRip;   /* 4c0 */
+    DWORD64 LastExceptionFromRip; /* 4c8 */
 } CONTEXT;
+
+typedef struct _RUNTIME_FUNCTION
+{
+    DWORD BeginAddress;
+    DWORD EndAddress;
+    DWORD UnwindData;
+} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
 
 #endif /* __x86_64__ */
 
@@ -1445,11 +1463,252 @@ typedef struct _CONTEXT
 
 #endif  /* __sparc__ */
 
+#ifdef __ia64__
+
+#define CONTEXT_IA64                  0x00080000
+#define CONTEXT_CONTROL               (CONTEXT_IA64 | 0x00000001)
+#define CONTEXT_LOWER_FLOATING_POINT  (CONTEXT_IA64 | 0x00000002)
+#define CONTEXT_HIGHER_FLOATING_POINT (CONTEXT_IA64 | 0x00000004)
+#define CONTEXT_INTEGER               (CONTEXT_IA64 | 0x00000008)
+#define CONTEXT_DEBUG                 (CONTEXT_IA64 | 0x00000010)
+#define CONTEXT_IA32_CONTROL          (CONTEXT_IA64 | 0x00000020)
+#define CONTEXT_FLOATING_POINT        (CONTEXT_LOWER_FLOATING_POINT | CONTEXT_HIGHER_FLOATING_POINT)
+#define CONTEXT_FULL                  (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER | CONTEXT_IA32_CONTROL)
+#define CONTEXT_ALL                   (CONTEXT_CONTROL | CONTEXT_FLOATING_POINT | CONTEXT_INTEGER | CONTEXT_DEBUG | CONTEXT_IA32_CONTROL)
+
+#define CONTEXT_EXCEPTION_ACTIVE      0x8000000
+#define CONTEXT_SERVICE_ACTIVE        0x10000000
+#define CONTEXT_EXCEPTION_REQUEST     0x40000000
+#define CONTEXT_EXCEPTION_REPORTING   0x80000000
+
+typedef struct _CONTEXT
+{
+    DWORD ContextFlags;
+    DWORD Fill1[3];
+    ULONGLONG DbI0;
+    ULONGLONG DbI1;
+    ULONGLONG DbI2;
+    ULONGLONG DbI3;
+    ULONGLONG DbI4;
+    ULONGLONG DbI5;
+    ULONGLONG DbI6;
+    ULONGLONG DbI7;
+    ULONGLONG DbD0;
+    ULONGLONG DbD1;
+    ULONGLONG DbD2;
+    ULONGLONG DbD3;
+    ULONGLONG DbD4;
+    ULONGLONG DbD5;
+    ULONGLONG DbD6;
+    ULONGLONG DbD7;
+    FLOAT128 FltS0;
+    FLOAT128 FltS1;
+    FLOAT128 FltS2;
+    FLOAT128 FltS3;
+    FLOAT128 FltT0;
+    FLOAT128 FltT1;
+    FLOAT128 FltT2;
+    FLOAT128 FltT3;
+    FLOAT128 FltT4;
+    FLOAT128 FltT5;
+    FLOAT128 FltT6;
+    FLOAT128 FltT7;
+    FLOAT128 FltT8;
+    FLOAT128 FltT9;
+    FLOAT128 FltS4;
+    FLOAT128 FltS5;
+    FLOAT128 FltS6;
+    FLOAT128 FltS7;
+    FLOAT128 FltS8;
+    FLOAT128 FltS9;
+    FLOAT128 FltS10;
+    FLOAT128 FltS11;
+    FLOAT128 FltS12;
+    FLOAT128 FltS13;
+    FLOAT128 FltS14;
+    FLOAT128 FltS15;
+    FLOAT128 FltS16;
+    FLOAT128 FltS17;
+    FLOAT128 FltS18;
+    FLOAT128 FltS19;
+    FLOAT128 FltF32;
+    FLOAT128 FltF33;
+    FLOAT128 FltF34;
+    FLOAT128 FltF35;
+    FLOAT128 FltF36;
+    FLOAT128 FltF37;
+    FLOAT128 FltF38;
+    FLOAT128 FltF39;
+    FLOAT128 FltF40;
+    FLOAT128 FltF41;
+    FLOAT128 FltF42;
+    FLOAT128 FltF43;
+    FLOAT128 FltF44;
+    FLOAT128 FltF45;
+    FLOAT128 FltF46;
+    FLOAT128 FltF47;
+    FLOAT128 FltF48;
+    FLOAT128 FltF49;
+    FLOAT128 FltF50;
+    FLOAT128 FltF51;
+    FLOAT128 FltF52;
+    FLOAT128 FltF53;
+    FLOAT128 FltF54;
+    FLOAT128 FltF55;
+    FLOAT128 FltF56;
+    FLOAT128 FltF57;
+    FLOAT128 FltF58;
+    FLOAT128 FltF59;
+    FLOAT128 FltF60;
+    FLOAT128 FltF61;
+    FLOAT128 FltF62;
+    FLOAT128 FltF63;
+    FLOAT128 FltF64;
+    FLOAT128 FltF65;
+    FLOAT128 FltF66;
+    FLOAT128 FltF67;
+    FLOAT128 FltF68;
+    FLOAT128 FltF69;
+    FLOAT128 FltF70;
+    FLOAT128 FltF71;
+    FLOAT128 FltF72;
+    FLOAT128 FltF73;
+    FLOAT128 FltF74;
+    FLOAT128 FltF75;
+    FLOAT128 FltF76;
+    FLOAT128 FltF77;
+    FLOAT128 FltF78;
+    FLOAT128 FltF79;
+    FLOAT128 FltF80;
+    FLOAT128 FltF81;
+    FLOAT128 FltF82;
+    FLOAT128 FltF83;
+    FLOAT128 FltF84;
+    FLOAT128 FltF85;
+    FLOAT128 FltF86;
+    FLOAT128 FltF87;
+    FLOAT128 FltF88;
+    FLOAT128 FltF89;
+    FLOAT128 FltF90;
+    FLOAT128 FltF91;
+    FLOAT128 FltF92;
+    FLOAT128 FltF93;
+    FLOAT128 FltF94;
+    FLOAT128 FltF95;
+    FLOAT128 FltF96;
+    FLOAT128 FltF97;
+    FLOAT128 FltF98;
+    FLOAT128 FltF99;
+    FLOAT128 FltF100;
+    FLOAT128 FltF101;
+    FLOAT128 FltF102;
+    FLOAT128 FltF103;
+    FLOAT128 FltF104;
+    FLOAT128 FltF105;
+    FLOAT128 FltF106;
+    FLOAT128 FltF107;
+    FLOAT128 FltF108;
+    FLOAT128 FltF109;
+    FLOAT128 FltF110;
+    FLOAT128 FltF111;
+    FLOAT128 FltF112;
+    FLOAT128 FltF113;
+    FLOAT128 FltF114;
+    FLOAT128 FltF115;
+    FLOAT128 FltF116;
+    FLOAT128 FltF117;
+    FLOAT128 FltF118;
+    FLOAT128 FltF119;
+    FLOAT128 FltF120;
+    FLOAT128 FltF121;
+    FLOAT128 FltF122;
+    FLOAT128 FltF123;
+    FLOAT128 FltF124;
+    FLOAT128 FltF125;
+    FLOAT128 FltF126;
+    FLOAT128 FltF127;
+    ULONGLONG StFPSR;
+    ULONGLONG IntGp;
+    ULONGLONG IntT0;
+    ULONGLONG IntT1;
+    ULONGLONG IntS0;
+    ULONGLONG IntS1;
+    ULONGLONG IntS2;
+    ULONGLONG IntS3;
+    ULONGLONG IntV0;
+    ULONGLONG IntT2;
+    ULONGLONG IntT3;
+    ULONGLONG IntT4;
+    ULONGLONG IntSp;
+    ULONGLONG IntTeb;
+    ULONGLONG IntT5;
+    ULONGLONG IntT6;
+    ULONGLONG IntT7;
+    ULONGLONG IntT8;
+    ULONGLONG IntT9;
+    ULONGLONG IntT10;
+    ULONGLONG IntT11;
+    ULONGLONG IntT12;
+    ULONGLONG IntT13;
+    ULONGLONG IntT14;
+    ULONGLONG IntT15;
+    ULONGLONG IntT16;
+    ULONGLONG IntT17;
+    ULONGLONG IntT18;
+    ULONGLONG IntT19;
+    ULONGLONG IntT20;
+    ULONGLONG IntT21;
+    ULONGLONG IntT22;
+    ULONGLONG IntNats;
+    ULONGLONG Preds;
+    ULONGLONG BrRp;
+    ULONGLONG BrS0;
+    ULONGLONG BrS1;
+    ULONGLONG BrS2;
+    ULONGLONG BrS3;
+    ULONGLONG BrS4;
+    ULONGLONG BrT0;
+    ULONGLONG BrT1;
+    ULONGLONG ApUNAT;
+    ULONGLONG ApLC;
+    ULONGLONG ApEC;
+    ULONGLONG ApCCV;
+    ULONGLONG ApDCR;
+    ULONGLONG RsPFS;
+    ULONGLONG RsBSP;
+    ULONGLONG RsBSPSTORE;
+    ULONGLONG RsRSC;
+    ULONGLONG RsRNAT;
+    ULONGLONG StIPSR;
+    ULONGLONG StIIP;
+    ULONGLONG StIFS;
+    ULONGLONG StFCR;
+    ULONGLONG Eflag;
+    ULONGLONG SegCSD;
+    ULONGLONG SegSSD;
+    ULONGLONG Cflag;
+    ULONGLONG StFSR;
+    ULONGLONG StFIR;
+    ULONGLONG StFDR;
+    ULONGLONG UNUSEDPACK;
+} CONTEXT, *PCONTEXT;
+
+typedef struct _RUNTIME_FUNCTION
+{
+    ULONG BeginAddress;
+    ULONG EndAddress;
+    ULONG UnwindInfoAddress;
+} RUNTIME_FUNCTION, *PRUNTIME_FUNCTION;
+
+#endif /* __ia64__ */
+
 #if !defined(CONTEXT_FULL) && !defined(RC_INVOKED)
 #error You need to define a CONTEXT for your CPU
 #endif
 
 typedef CONTEXT *PCONTEXT;
+
+NTSYSAPI void WINAPI RtlCaptureContext(CONTEXT*);
 
 /*
  * Language IDs
@@ -1470,9 +1729,9 @@ typedef CONTEXT *PCONTEXT;
 #define LOCALE_USER_DEFAULT	(MAKELCID(LANG_USER_DEFAULT, SORT_DEFAULT))
 #define LOCALE_NEUTRAL		(MAKELCID(MAKELANGID(LANG_NEUTRAL,SUBLANG_NEUTRAL),SORT_DEFAULT))
 
-#define UNREFERENCED_PARAMETER(u)	(u)
-#define DBG_UNREFERENCED_PARAMETER(u)	(u)
-#define DBG_UNREFERENCED_LOCAL_VARIABLE(u) (u)
+#define UNREFERENCED_PARAMETER(u)	(void)(u)
+#define DBG_UNREFERENCED_PARAMETER(u)	(void)(u)
+#define DBG_UNREFERENCED_LOCAL_VARIABLE(u) (void)(u)
 
 #define LANG_NEUTRAL        0x00
 #define LANG_INVARIANT      0x7f
@@ -1913,6 +2172,7 @@ typedef CONTEXT *PCONTEXT;
 #define WT_EXECUTEINPERSISTENTTHREAD   0x80
 #define WT_EXECUTEINLONGTHREAD         0x10
 #define WT_EXECUTEDELETEWAIT           0x08
+#define WT_TRANSFER_IMPERSONATION      0x0100
 
 
 #define EXCEPTION_CONTINUABLE        0
@@ -2001,6 +2261,21 @@ extern inline struct _TEB * WINAPI NtCurrentTeb(void)
   struct _TEB *teb;
   __asm mov eax, fs:[0x18];
   __asm mov teb, eax;
+  return teb;
+}
+#elif defined(__x86_64__) && defined(__GNUC__)
+static inline struct _TEB * WINAPI NtCurrentTeb(void)
+{
+    struct _TEB *teb;
+    __asm__(".byte 0x65\n\tmovq (0x30),%0" : "=r" (teb));
+    return teb;
+}
+#elif defined(__x86_64__) && defined (_MSC_VER)
+extern inline struct _TEB * WINAPI NtCurrentTeb(void)
+{
+  struct _TEB *teb;
+  __asm mov rax, gs:[0x30];
+  __asm mov teb, rax;
   return teb;
 }
 #else
@@ -3326,7 +3601,21 @@ typedef enum _TOKEN_INFORMATION_CLASS {
   TokenSessionId,
   TokenGroupsAndPrivileges,
   TokenSessionReference,
-  TokenSandBoxInert
+  TokenSandBoxInert,
+  TokenAuditPolicy,
+  TokenOrigin,
+  TokenElevationType,
+  TokenLinkedToken,
+  TokenElevation,
+  TokenHasRestrictions,
+  TokenAccessInformation,
+  TokenVirtualizationAllowed,
+  TokenVirtualizationEnabled,
+  TokenIntegrityLevel,
+  TokenUIAccess,
+  TokenMandatoryPolicy,
+  TokenLogonSid,
+  MaxTokenInfoClass
 } TOKEN_INFORMATION_CLASS;
 
 #define TOKEN_TOKEN_ADJUST_DEFAULT   0x0080
@@ -3608,6 +3897,14 @@ typedef struct _SID_AND_ATTRIBUTES {
 #define DOMAIN_GROUP_RID_ENTERPRISE_ADMINS      0x00000207L
 #define DOMAIN_GROUP_RID_POLICY_ADMINS          0x00000208L
 
+#define SECURITY_MANDATORY_LABEL_AUTHORITY {0,0,0,0,0,16}
+#define SECURITY_MANDATORY_UNTRUSTED_RID        0x00000000L
+#define SECURITY_MANDATORY_LOW_RID              0x00001000L
+#define SECURITY_MANDATORY_MEDIUM_RID           0x00002000L
+#define SECURITY_MANDATORY_HIGH_RID             0x00003000L
+#define SECURITY_MANDATORY_SYSTEM_RID           0x00004000L
+#define SECURITY_MANDATORY_PROTECTED_PROCESS_RID 0x00005000L
+
 #define DOMAIN_ALIAS_RID_ADMINS                 0x00000220L
 #define DOMAIN_ALIAS_RID_USERS                  0x00000221L
 #define DOMAIN_ALIAS_RID_GUESTS                 0x00000222L
@@ -3698,7 +3995,22 @@ typedef enum {
     WinBuiltinPerfLoggingUsersSid               = 58,
     WinBuiltinAuthorizationAccessSid            = 59,
     WinBuiltinTerminalServerLicenseServersSid   = 60,
-    WinBuiltinDCOMUsersSid                      = 61
+    WinBuiltinDCOMUsersSid                      = 61,
+    WinBuiltinIUsersSid                         = 62,
+    WinIUserSid                                 = 63,
+    WinBuiltinCryptoOperatorsSid                = 64,
+    WinUntrustedLabelSid                        = 65,
+    WinLowLabelSid                              = 66,
+    WinMediumLabelSid                           = 67,
+    WinHighLabelSid                             = 68,
+    WinSystemLabelSid                           = 69,
+    WinWriteRestrictedCodeSid                   = 70,
+    WinCreatorOwnerRightsSid                    = 71,
+    WinCacheablePrincipalsGroupSid              = 72,
+    WinNonCacheablePrincipalsGroupSid           = 73,
+    WinEnterpriseReadonlyControllersSid         = 74,
+    WinAccountReadonlyControllersSid            = 75,
+    WinBuiltinEventLogReadersGroup              = 76,
 } WELL_KNOWN_SID_TYPE;
 
 /*
@@ -4007,6 +4319,13 @@ typedef enum tagSID_NAME_USE {
 #define MUTEX_MODIFY_STATE         0x0001
 #define MUTEX_ALL_ACCESS           (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1)
 
+#define JOB_OBJECT_ASSIGN_PROCESS           0x0001
+#define JOB_OBJECT_SET_ATTRIBUTES           0x0002
+#define JOB_OBJECT_QUERY                    0x0004
+#define JOB_OBJECT_TERMINATE                0x0008
+#define JOB_OBJECT_SET_SECURITY_ATTRIBUTES  0x0010
+#define JOB_OBJECT_ALL_ACCESS               (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x1f)
+
 #define TIMER_QUERY_STATE          0x0001
 #define TIMER_MODIFY_STATE         0x0002
 #define TIMER_ALL_ACCESS           (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0x3)
@@ -4022,6 +4341,7 @@ typedef enum tagSID_NAME_USE {
 #define PROCESS_SET_INFORMATION    0x0200
 #define PROCESS_QUERY_INFORMATION  0x0400
 #define PROCESS_SUSPEND_RESUME     0x0800
+#define PROCESS_QUERY_LIMITED_INFORMATION 0x1000
 #define PROCESS_ALL_ACCESS         (STANDARD_RIGHTS_REQUIRED|SYNCHRONIZE|0xfff)
 
 #define THREAD_TERMINATE           0x0001
@@ -4117,6 +4437,7 @@ typedef struct _QUOTA_LIMITS_EX {
 #define FILE_ATTRIBUTE_SYSTEM              0x00000004
 #define FILE_ATTRIBUTE_DIRECTORY           0x00000010
 #define FILE_ATTRIBUTE_ARCHIVE             0x00000020
+#define FILE_ATTRIBUTE_DEVICE              0x00000040
 #define FILE_ATTRIBUTE_NORMAL              0x00000080
 #define FILE_ATTRIBUTE_TEMPORARY           0x00000100
 #define FILE_ATTRIBUTE_SPARSE_FILE         0x00000200
@@ -4565,6 +4886,9 @@ typedef struct _TAPE_GET_MEDIA_PARAMETERS {
 #define KEY_ENUMERATE_SUB_KEYS	0x00000008
 #define KEY_NOTIFY		0x00000010
 #define KEY_CREATE_LINK		0x00000020
+#define KEY_WOW64_64KEY         0x00000100
+#define KEY_WOW64_32KEY         0x00000200
+#define KEY_WOW64_RES           0x00000300
 
 /* for RegKeyRestore flags */
 #define REG_WHOLE_HIVE_VOLATILE 0x00000001
@@ -4699,6 +5023,12 @@ typedef struct _RTL_CRITICAL_SECTION {
     HANDLE LockSemaphore;
     ULONG_PTR SpinCount;
 }  RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;
+
+#define RTL_CRITICAL_SECTION_FLAG_NO_DEBUG_INFO 0x1000000
+#define RTL_CRITICAL_SECTION_FLAG_DYNAMIC_SPIN  0x2000000
+#define RTL_CRITICAL_SECTION_FLAG_STATIC_INIT   0x4000000
+#define RTL_CRITICAL_SECTION_ALL_FLAG_BITS      0xFF000000
+#define RTL_CRITICAL_SECTION_FLAG_RESERVED      (RTL_CRITICAL_SECTION_ALL_FLAG_BITS & ~0x7000000)
 
 typedef VOID (NTAPI * WAITORTIMERCALLBACKFUNC) (PVOID, BOOLEAN );
 typedef VOID (NTAPI * PFLS_CALLBACK_FUNCTION) ( PVOID );
@@ -4888,6 +5218,21 @@ typedef enum _ACTIVATION_CONTEXT_INFO_CLASS {
 #define ACTIVATION_CONTEXT_SECTION_COM_PROGID_REDIRECTION        7
 #define ACTIVATION_CONTEXT_SECTION_GLOBAL_OBJECT_RENAME_TABLE    8
 #define ACTIVATION_CONTEXT_SECTION_CLR_SURROGATES                9
+
+typedef enum _JOBOBJECTINFOCLASS
+{
+    JobObjectBasicAccountingInformation = 1,
+    JobObjectBasicLimitInformation,
+    JobObjectBasicProcessIdList,
+    JobObjectBasicUIRestrictions,
+    JobObjectSecurityLimitInformation,
+    JobObjectEndOfJobTimeInformation,
+    JobObjectAssociateCompletionPortInformation,
+    JobObjectBasicAndIoAccountingInformation,
+    JobObjectExtendedLimitInformation,
+    JobObjectJobSetInformation,
+    MaxJobObjectInfoClass
+} JOBOBJECTINFOCLASS;
 
 #ifdef __cplusplus
 }

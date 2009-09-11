@@ -104,9 +104,12 @@ static void test_conversions(void)
 
     memset(&ft,0,sizeof ft);
 
+    SetLastError(0xdeadbeef);
     SETUP_EARLY(st)
     ok (!SystemTimeToFileTime(&st, &ft), "Conversion succeeded EARLY\n");
-    ok (GetLastError() == ERROR_INVALID_PARAMETER, "EARLY should be INVALID\n");
+    ok (GetLastError() == ERROR_INVALID_PARAMETER ||
+        GetLastError() == 0xdeadbeef, /* win9x */
+        "EARLY should be INVALID\n");
 
     SETUP_ZEROTIME(st)
     ok (SystemTimeToFileTime(&st, &ft), "Conversion failed ZERO_TIME\n");
@@ -291,7 +294,7 @@ static void test_GetTimeZoneInformation(void)
 
     if (!pSystemTimeToTzSpecificLocalTime)
     {
-        skip("SystemTimeToTzSpecificLocalTime not present\n");
+        win_skip("SystemTimeToTzSpecificLocalTime not available\n");
         return;
     }
 
@@ -302,7 +305,7 @@ static void test_GetTimeZoneInformation(void)
     res = pSystemTimeToTzSpecificLocalTime(&tzinfo, &utc, &current);
     if (!res && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("SystemTimeToTzSpecificLocalTime is not implemented\n");
+        win_skip("SystemTimeToTzSpecificLocalTime is not implemented\n");
         return;
     }
 
@@ -422,7 +425,7 @@ static void test_TzSpecificLocalTimeToSystemTime(void)
 
     if (!pTzSpecificLocalTimeToSystemTime || !pSystemTimeToTzSpecificLocalTime)
     {
-        skip("TzSpecificLocalTimeToSystemTime or SystemTimeToTzSpecificLocalTime not present\n");
+        win_skip("TzSpecificLocalTimeToSystemTime or SystemTimeToTzSpecificLocalTime not available\n");
         return;
     }
 

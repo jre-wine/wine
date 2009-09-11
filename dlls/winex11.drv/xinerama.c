@@ -65,6 +65,25 @@ static inline int monitor_to_index( HMONITOR handle )
     return index - 1;
 }
 
+static void query_work_area( RECT *rc_work )
+{
+    Atom type;
+    int format;
+    unsigned long count, remaining;
+    long *work_area;
+
+    if (!XGetWindowProperty( gdi_display, DefaultRootWindow(gdi_display), x11drv_atom(_NET_WORKAREA), 0,
+                             ~0, False, XA_CARDINAL, &type, &format, &count,
+                             &remaining, (unsigned char **)&work_area ))
+    {
+        if (type == XA_CARDINAL && format == 32 && count >= 4)
+        {
+            SetRect( rc_work, work_area[0], work_area[1],
+                     work_area[0] + work_area[2], work_area[1] + work_area[3] );
+        }
+        XFree( work_area );
+    }
+}
 
 #ifdef SONAME_LIBXINERAMA
 
@@ -92,9 +111,12 @@ static int query_screens(void)
 {
     int i, count, event_base, error_base;
     XineramaScreenInfo *screens;
+    RECT rc_work = {0, 0, 0, 0};
 
     if (!monitors)  /* first time around */
         load_xinerama();
+
+    query_work_area( &rc_work );
 
     if (!pXineramaQueryExtension || !pXineramaQueryScreens ||
         !pXineramaQueryExtension( gdi_display, &event_base, &error_base ) ||
@@ -111,8 +133,9 @@ static int query_screens(void)
             monitors[i].rcMonitor.top    = screens[i].y_org;
             monitors[i].rcMonitor.right  = screens[i].x_org + screens[i].width;
             monitors[i].rcMonitor.bottom = screens[i].y_org + screens[i].height;
-            monitors[i].rcWork           = monitors[i].rcMonitor;
             monitors[i].dwFlags          = 0;
+            if (!IntersectRect( &monitors[i].rcWork, &rc_work, &monitors[i].rcMonitor ))
+                monitors[i].rcWork = monitors[i].rcMonitor;
             /* FIXME: using the same device name for all monitors for now */
             lstrcpyW( monitors[i].szDevice, default_monitor.szDevice );
         }
@@ -147,6 +170,8 @@ void xinerama_init( unsigned int width, unsigned int height )
     if (root_window != DefaultRootWindow( gdi_display ) || !query_screens())
     {
         default_monitor.rcWork = default_monitor.rcMonitor = rect;
+        if (root_window == DefaultRootWindow( gdi_display ))
+            query_work_area( &default_monitor.rcWork );
         nb_monitors = 1;
         monitors = &default_monitor;
     }
@@ -159,8 +184,9 @@ void xinerama_init( unsigned int width, unsigned int height )
     {
         OffsetRect( &monitors[i].rcMonitor, rect.left, rect.top );
         OffsetRect( &monitors[i].rcWork, rect.left, rect.top );
-        TRACE( "monitor %p: %s%s\n",
+        TRACE( "monitor %p: %s work %s%s\n",
                index_to_monitor(i), wine_dbgstr_rect(&monitors[i].rcMonitor),
+               wine_dbgstr_rect(&monitors[i].rcWork),
                (monitors[i].dwFlags & MONITORINFOF_PRIMARY) ? " (primary)" : "" );
     }
 
@@ -178,7 +204,7 @@ void xinerama_init( unsigned int width, unsigned int height )
 /***********************************************************************
  *		X11DRV_GetMonitorInfo  (X11DRV.@)
  */
-BOOL X11DRV_GetMonitorInfo( HMONITOR handle, LPMONITORINFO info )
+BOOL CDECL X11DRV_GetMonitorInfo( HMONITOR handle, LPMONITORINFO info )
 {
     int i = monitor_to_index( handle );
 
@@ -199,7 +225,7 @@ BOOL X11DRV_GetMonitorInfo( HMONITOR handle, LPMONITORINFO info )
 /***********************************************************************
  *		X11DRV_EnumDisplayMonitors  (X11DRV.@)
  */
-BOOL X11DRV_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
+BOOL CDECL X11DRV_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPARAM lp )
 {
     int i;
 
@@ -218,7 +244,8 @@ BOOL X11DRV_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPA
             RECT monrect = monitors[i].rcMonitor;
             OffsetRect( &monrect, -origin.x, -origin.y );
             if (IntersectRect( &monrect, &monrect, &limit ))
-                if (!proc( index_to_monitor(i), hdc, &monrect, lp )) break;
+                if (!proc( index_to_monitor(i), hdc, &monrect, lp ))
+                    return FALSE;
         }
     }
     else
@@ -227,7 +254,8 @@ BOOL X11DRV_EnumDisplayMonitors( HDC hdc, LPRECT rect, MONITORENUMPROC proc, LPA
         {
             RECT unused;
             if (!rect || IntersectRect( &unused, &monitors[i].rcMonitor, rect ))
-                if (!proc( index_to_monitor(i), 0, &monitors[i].rcMonitor, lp )) break;
+                if (!proc( index_to_monitor(i), 0, &monitors[i].rcMonitor, lp ))
+                    return FALSE;
         }
     }
     return TRUE;

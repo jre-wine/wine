@@ -4,12 +4,12 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = d3dxof.dll
 IMPORTLIB = d3dxof
-IMPORTS   = ole32 user32 advapi32 kernel32
-EXTRALIBS = -ldxguid -luuid
+IMPORTS   = dxguid uuid ole32 advapi32 kernel32
 
 C_SRCS = \
-	main.c \
 	d3dxof.c \
+	main.c \
+	parsing.c \
 	regsvr.c
 
 RC_SRCS = version.rc

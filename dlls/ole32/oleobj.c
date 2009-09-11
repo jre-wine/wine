@@ -32,6 +32,8 @@
 #include "wine/debug.h"
 #include "ole2.h"
 
+#include "compobj_private.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
 #define INITIAL_SINKS 10
@@ -254,7 +256,7 @@ static HRESULT WINAPI OleAdviseHolderImpl_QueryInterface(
   else if(IsEqualIID(riid, &IID_IOleAdviseHolder))
   {
     /* IOleAdviseHolder */
-    *ppvObj = (IOleAdviseHolder*) This;
+    *ppvObj = This;
   }
 
   if(*ppvObj == NULL)

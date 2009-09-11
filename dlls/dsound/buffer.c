@@ -82,8 +82,8 @@ static ULONG WINAPI IDirectSoundNotifyImpl_Release(LPDIRECTSOUNDNOTIFY iface)
     TRACE("(%p) ref was %d\n", This, ref + 1);
 
     if (!ref) {
-        IDirectSoundBuffer_Release((LPDIRECTSOUNDBUFFER)This->dsb);
         This->dsb->notify = NULL;
+        IDirectSoundBuffer_Release((LPDIRECTSOUNDBUFFER)This->dsb);
         HeapFree(GetProcessHeap(), 0, This);
         TRACE("(%p) released\n", This);
     }
@@ -117,11 +117,8 @@ static HRESULT WINAPI IDirectSoundNotifyImpl_SetNotificationPositions(
         } else if (howmuch > 0) {
 	    /* Make an internal copy of the caller-supplied array.
 	     * Replace the existing copy if one is already present. */
-	    if (This->dsb->notifies)
-		    This->dsb->notifies = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-			This->dsb->notifies, howmuch * sizeof(DSBPOSITIONNOTIFY));
-	    else
-		    This->dsb->notifies = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
+	    HeapFree(GetProcessHeap(), 0, This->dsb->notifies);
+	    This->dsb->notifies = HeapAlloc(GetProcessHeap(), 0,
 			howmuch * sizeof(DSBPOSITIONNOTIFY));
 
 	    if (This->dsb->notifies == NULL) {
@@ -154,7 +151,7 @@ static HRESULT IDirectSoundNotifyImpl_Create(
     IDirectSoundNotifyImpl * dsn;
     TRACE("(%p,%p)\n",dsb,pdsn);
 
-    dsn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(dsn));
+    dsn = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*dsn));
 
     if (dsn == NULL) {
         WARN("out of memory\n");
@@ -383,17 +380,9 @@ static ULONG WINAPI IDirectSoundBufferImpl_Release(LPDIRECTSOUNDBUFFER8 iface)
 	DirectSoundDevice_RemoveBuffer(This->device, This);
 	RtlDeleteResource(&This->lock);
 
-	if (This->hwbuf) {
+	if (This->hwbuf)
 		IDsDriverBuffer_Release(This->hwbuf);
-		if (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY) {
-			This->buffer->ref--;
-			list_remove(&This->entry);
-			if (This->buffer->ref==0) {
-				HeapFree(GetProcessHeap(),0,This->buffer->memory);
-				HeapFree(GetProcessHeap(),0,This->buffer);
-			}
-		}
-	} else {
+	if (!This->hwbuf || (This->device->drvdesc.dwFlags & DSDDESC_USESYSTEMMEMORY)) {
 		This->buffer->ref--;
 		list_remove(&This->entry);
 		if (This->buffer->ref==0) {
@@ -531,6 +520,9 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Lock(
 		flags,
 		GetTickCount()
 	);
+
+        if (!audiobytes1)
+            return DSERR_INVALIDPARAM;
 
         /* when this flag is set, writecursor is meaningless and must be calculated */
 	if (flags & DSBLOCK_FROMWRITECURSOR) {
@@ -735,7 +727,12 @@ static HRESULT WINAPI IDirectSoundBufferImpl_Unlock(
 		{
 			RtlAcquireResourceShared(&iter->lock, TRUE);
 			if (x1)
-				DSOUND_MixToTemporary(iter, (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory, x1, FALSE);
+                        {
+			    if(x1 + (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory > iter->buflen)
+			      hres = DSERR_INVALIDPARAM;
+			    else
+			      DSOUND_MixToTemporary(iter, (DWORD_PTR)p1 - (DWORD_PTR)iter->buffer->memory, x1, FALSE);
+                        }
 			if (x2)
 				DSOUND_MixToTemporary(iter, 0, x2, FALSE);
 			RtlReleaseResource(&iter->lock);

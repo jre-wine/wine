@@ -27,8 +27,23 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 
+GpStatus WINGDIPAPI GdipCloneImageAttributes(GDIPCONST GpImageAttributes *imageattr,
+    GpImageAttributes **cloneImageattr)
+{
+    TRACE("(%p, %p)\n", imageattr, cloneImageattr);
+
+    if(!imageattr || !cloneImageattr)
+        return InvalidParameter;
+
+    **cloneImageattr = *imageattr;
+
+    return Ok;
+}
+
 GpStatus WINGDIPAPI GdipCreateImageAttributes(GpImageAttributes **imageattr)
 {
+    TRACE("(%p)\n", imageattr);
+
     if(!imageattr)
         return InvalidParameter;
 
@@ -40,6 +55,8 @@ GpStatus WINGDIPAPI GdipCreateImageAttributes(GpImageAttributes **imageattr)
 
 GpStatus WINGDIPAPI GdipDisposeImageAttributes(GpImageAttributes *imageattr)
 {
+    TRACE("(%p)\n", imageattr);
+
     if(!imageattr)
         return InvalidParameter;
 
@@ -51,15 +68,16 @@ GpStatus WINGDIPAPI GdipDisposeImageAttributes(GpImageAttributes *imageattr)
 GpStatus WINGDIPAPI GdipSetImageAttributesColorKeys(GpImageAttributes *imageattr,
     ColorAdjustType type, BOOL enableFlag, ARGB colorLow, ARGB colorHigh)
 {
-    static int calls;
+    TRACE("(%p,%u,%i,%08x,%08x)\n", imageattr, type, enableFlag, colorLow, colorHigh);
 
-    if(!imageattr)
+    if(!imageattr || type >= ColorAdjustTypeCount)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    imageattr->colorkeys[type].enabled = enableFlag;
+    imageattr->colorkeys[type].low = colorLow;
+    imageattr->colorkeys[type].high = colorHigh;
 
-    return NotImplemented;
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetImageAttributesColorMatrix(GpImageAttributes *imageattr,

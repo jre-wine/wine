@@ -23,19 +23,27 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(enhmetafile);
 
-INT EMFDRV_SaveDC( PHYSDEV dev )
+INT CDECL EMFDRV_SaveDC( PHYSDEV dev )
 {
+    EMFDRV_PDEVICE* physDev = (EMFDRV_PDEVICE*)dev;
+    INT ret = save_dc_state( physDev->hdc );
     EMRSAVEDC emr;
-    emr.emr.iType = EMR_SAVEDC;
-    emr.emr.nSize = sizeof(emr);
-    return EMFDRV_WriteRecord( dev, &emr.emr );
+
+    if (ret)
+    {
+        emr.emr.iType = EMR_SAVEDC;
+        emr.emr.nSize = sizeof(emr);
+        EMFDRV_WriteRecord( dev, &emr.emr );
+    }
+    return ret;
 }
 
-BOOL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
+BOOL CDECL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
 {
     EMFDRV_PDEVICE* physDev = (EMFDRV_PDEVICE*)dev;
     DC *dc = get_dc_ptr( physDev->hdc );
     EMRRESTOREDC emr;
+    BOOL ret;
 
     emr.emr.iType = EMR_RESTOREDC;
     emr.emr.nSize = sizeof(emr);
@@ -44,14 +52,17 @@ BOOL EMFDRV_RestoreDC( PHYSDEV dev, INT level )
         emr.iRelative = level;
     else
         emr.iRelative = level - dc->saveLevel - 1;
-
-    EMFDRV_WriteRecord( dev, &emr.emr );
-
     release_dc_ptr( dc );
-    return TRUE;
+
+    physDev->restoring++;
+    ret = restore_dc_state( physDev->hdc, level );
+    physDev->restoring--;
+
+    if (ret) EMFDRV_WriteRecord( dev, &emr.emr );
+    return ret;
 }
 
-UINT EMFDRV_SetTextAlign( PHYSDEV dev, UINT align )
+UINT CDECL EMFDRV_SetTextAlign( PHYSDEV dev, UINT align )
 {
     EMRSETTEXTALIGN emr;
     emr.emr.iType = EMR_SETTEXTALIGN;
@@ -60,7 +71,7 @@ UINT EMFDRV_SetTextAlign( PHYSDEV dev, UINT align )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_SetTextJustification(PHYSDEV dev, INT nBreakExtra, INT nBreakCount)
+BOOL CDECL EMFDRV_SetTextJustification(PHYSDEV dev, INT nBreakExtra, INT nBreakCount)
 {
     EMRSETTEXTJUSTIFICATION emr;
     emr.emr.iType = EMR_SETTEXTJUSTIFICATION;
@@ -70,7 +81,7 @@ BOOL EMFDRV_SetTextJustification(PHYSDEV dev, INT nBreakExtra, INT nBreakCount)
     return EMFDRV_WriteRecord(dev, &emr.emr);
 }
 
-INT EMFDRV_SetBkMode( PHYSDEV dev, INT mode )
+INT CDECL EMFDRV_SetBkMode( PHYSDEV dev, INT mode )
 {
     EMRSETBKMODE emr;
     emr.emr.iType = EMR_SETBKMODE;
@@ -79,7 +90,7 @@ INT EMFDRV_SetBkMode( PHYSDEV dev, INT mode )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_SetROP2( PHYSDEV dev, INT rop )
+INT CDECL EMFDRV_SetROP2( PHYSDEV dev, INT rop )
 {
     EMRSETROP2 emr;
     emr.emr.iType = EMR_SETROP2;
@@ -88,7 +99,7 @@ INT EMFDRV_SetROP2( PHYSDEV dev, INT rop )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_SetPolyFillMode( PHYSDEV dev, INT mode )
+INT CDECL EMFDRV_SetPolyFillMode( PHYSDEV dev, INT mode )
 {
     EMRSETPOLYFILLMODE emr;
     emr.emr.iType = EMR_SETPOLYFILLMODE;
@@ -97,7 +108,7 @@ INT EMFDRV_SetPolyFillMode( PHYSDEV dev, INT mode )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_SetStretchBltMode( PHYSDEV dev, INT mode )
+INT CDECL EMFDRV_SetStretchBltMode( PHYSDEV dev, INT mode )
 {
     EMRSETSTRETCHBLTMODE emr;
     emr.emr.iType = EMR_SETSTRETCHBLTMODE;
@@ -106,7 +117,7 @@ INT EMFDRV_SetStretchBltMode( PHYSDEV dev, INT mode )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
+INT CDECL EMFDRV_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom )
 {
     EMREXCLUDECLIPRECT emr;
     emr.emr.iType      = EMR_EXCLUDECLIPRECT;
@@ -118,7 +129,7 @@ INT EMFDRV_ExcludeClipRect( PHYSDEV dev, INT left, INT top, INT right, INT botto
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom)
+INT CDECL EMFDRV_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bottom)
 {
     EMRINTERSECTCLIPRECT emr;
     emr.emr.iType      = EMR_INTERSECTCLIPRECT;
@@ -130,7 +141,7 @@ INT EMFDRV_IntersectClipRect( PHYSDEV dev, INT left, INT top, INT right, INT bot
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_OffsetClipRgn( PHYSDEV dev, INT x, INT y )
+INT CDECL EMFDRV_OffsetClipRgn( PHYSDEV dev, INT x, INT y )
 {
     EMROFFSETCLIPRGN emr;
     emr.emr.iType   = EMR_OFFSETCLIPRGN;
@@ -140,7 +151,7 @@ INT EMFDRV_OffsetClipRgn( PHYSDEV dev, INT x, INT y )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_ExtSelectClipRgn( PHYSDEV dev, HRGN hrgn, INT mode )
+INT CDECL EMFDRV_ExtSelectClipRgn( PHYSDEV dev, HRGN hrgn, INT mode )
 {
     EMREXTSELECTCLIPRGN *emr;
     DWORD size, rgnsize;
@@ -167,7 +178,7 @@ INT EMFDRV_ExtSelectClipRgn( PHYSDEV dev, HRGN hrgn, INT mode )
     return ret ? SIMPLEREGION : ERROR;
 }
 
-DWORD EMFDRV_SetMapperFlags( PHYSDEV dev, DWORD flags )
+DWORD CDECL EMFDRV_SetMapperFlags( PHYSDEV dev, DWORD flags )
 {
     EMRSETMAPPERFLAGS emr;
 
@@ -178,7 +189,7 @@ DWORD EMFDRV_SetMapperFlags( PHYSDEV dev, DWORD flags )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_AbortPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_AbortPath( PHYSDEV dev )
 {
     EMRABORTPATH emr;
 
@@ -188,7 +199,7 @@ BOOL EMFDRV_AbortPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_BeginPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_BeginPath( PHYSDEV dev )
 {
     EMRBEGINPATH emr;
 
@@ -198,7 +209,7 @@ BOOL EMFDRV_BeginPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_CloseFigure( PHYSDEV dev )
+BOOL CDECL EMFDRV_CloseFigure( PHYSDEV dev )
 {
     EMRCLOSEFIGURE emr;
 
@@ -208,7 +219,7 @@ BOOL EMFDRV_CloseFigure( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_EndPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_EndPath( PHYSDEV dev )
 {
     EMRENDPATH emr;
 
@@ -218,7 +229,7 @@ BOOL EMFDRV_EndPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_FillPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_FillPath( PHYSDEV dev )
 {
     EMRFILLPATH emr;
 
@@ -232,7 +243,7 @@ BOOL EMFDRV_FillPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_FlattenPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_FlattenPath( PHYSDEV dev )
 {
     EMRFLATTENPATH emr;
 
@@ -242,7 +253,7 @@ BOOL EMFDRV_FlattenPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_SelectClipPath( PHYSDEV dev, INT iMode )
+BOOL CDECL EMFDRV_SelectClipPath( PHYSDEV dev, INT iMode )
 {
     EMRSELECTCLIPPATH emr;
 
@@ -253,7 +264,7 @@ BOOL EMFDRV_SelectClipPath( PHYSDEV dev, INT iMode )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_StrokeAndFillPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_StrokeAndFillPath( PHYSDEV dev )
 {
     EMRSTROKEANDFILLPATH emr;
 
@@ -267,7 +278,7 @@ BOOL EMFDRV_StrokeAndFillPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_StrokePath( PHYSDEV dev )
+BOOL CDECL EMFDRV_StrokePath( PHYSDEV dev )
 {
     EMRSTROKEPATH emr;
 
@@ -281,7 +292,7 @@ BOOL EMFDRV_StrokePath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-BOOL EMFDRV_WidenPath( PHYSDEV dev )
+BOOL CDECL EMFDRV_WidenPath( PHYSDEV dev )
 {
     EMRWIDENPATH emr;
 
@@ -291,7 +302,7 @@ BOOL EMFDRV_WidenPath( PHYSDEV dev )
     return EMFDRV_WriteRecord( dev, &emr.emr );
 }
 
-INT EMFDRV_GetDeviceCaps(PHYSDEV dev, INT cap)
+INT CDECL EMFDRV_GetDeviceCaps(PHYSDEV dev, INT cap)
 {
     EMFDRV_PDEVICE *physDev = (EMFDRV_PDEVICE*) dev;
 

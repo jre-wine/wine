@@ -417,6 +417,9 @@ LRESULT NC_HandleNCCalcSize( HWND hwnd, RECT *winRect )
     LONG style = GetWindowLongW( hwnd, GWL_STYLE );
     LONG exStyle = GetWindowLongW( hwnd, GWL_EXSTYLE );
 
+    if (winRect == NULL)
+        return 0;
+
     if (cls_style & CS_VREDRAW) result |= WVR_VREDRAW;
     if (cls_style & CS_HREDRAW) result |= WVR_HREDRAW;
 
@@ -1254,7 +1257,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         /* Check if the sysmenu item for minimize is there  */
         state = GetMenuState(hSysMenu, SC_MINIMIZE, MF_BYCOMMAND);
 
-        paintButton = &NC_DrawMinButton;
+        paintButton = NC_DrawMinButton;
     }
     else
     {
@@ -1265,7 +1268,7 @@ static void NC_TrackMinMaxBox( HWND hwnd, WORD wParam )
         /* Check if the sysmenu item for maximize is there  */
         state = GetMenuState(hSysMenu, SC_MAXIMIZE, MF_BYCOMMAND);
 
-        paintButton = &NC_DrawMaxButton;
+        paintButton = NC_DrawMaxButton;
     }
 
     SetCapture( hwnd );
@@ -1648,7 +1651,7 @@ BOOL WINAPI GetTitleBarInfo(HWND hwnd, PTITLEBARINFO tbi) {
         tbi->rcTitleBar.left += GetSystemMetrics(SM_CXSIZE);
     }
 
-    ZeroMemory(&tbi->rgstate, sizeof(tbi->rgstate));
+    ZeroMemory(tbi->rgstate, sizeof(tbi->rgstate));
     /* Does the title bar always have STATE_SYSTEM_FOCUSABLE?
      * Under XP it seems to
      */

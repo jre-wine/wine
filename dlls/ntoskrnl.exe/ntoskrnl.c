@@ -31,16 +31,17 @@
 #include "windef.h"
 #include "winternl.h"
 #include "excpt.h"
-#include "ddk/wdm.h"
+#include "ddk/ntddk.h"
 #include "wine/unicode.h"
 #include "wine/server.h"
+#include "wine/list.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 
-KSYSTEM_TIME KeTickCount;
+KSYSTEM_TIME KeTickCount = { 0, 0, 0 };
 
 typedef struct _KSERVICE_TABLE_DESCRIPTOR
 {
@@ -50,24 +51,40 @@ typedef struct _KSERVICE_TABLE_DESCRIPTOR
     PUCHAR Number;
 } KSERVICE_TABLE_DESCRIPTOR, *PKSERVICE_TABLE_DESCRIPTOR;
 
-KSERVICE_TABLE_DESCRIPTOR KeServiceDescriptorTable[4];
+KSERVICE_TABLE_DESCRIPTOR KeServiceDescriptorTable[4] = { { 0 } };
 
 typedef void (WINAPI *PCREATE_PROCESS_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
+typedef void (WINAPI *PCREATE_THREAD_NOTIFY_ROUTINE)(HANDLE,HANDLE,BOOLEAN);
+
+static struct list Irps = LIST_INIT(Irps);
+
+struct IrpInstance
+{
+    struct list entry;
+    IRP *irp;
+};
 
 #ifdef __i386__
 #define DEFINE_FASTCALL1_ENTRYPOINT( name ) \
-    __ASM_GLOBAL_FUNC( name, \
+    __ASM_STDCALL_FUNC( name, 4, \
                        "popl %eax\n\t" \
                        "pushl %ecx\n\t" \
                        "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name )
+                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(4))
 #define DEFINE_FASTCALL2_ENTRYPOINT( name ) \
-    __ASM_GLOBAL_FUNC( name, \
+    __ASM_STDCALL_FUNC( name, 8, \
                        "popl %eax\n\t" \
                        "pushl %edx\n\t" \
                        "pushl %ecx\n\t" \
                        "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name )
+                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(8))
+#define DEFINE_FASTCALL3_ENTRYPOINT( name ) \
+    __ASM_STDCALL_FUNC( name, 12, \
+                       "popl %eax\n\t" \
+                       "pushl %edx\n\t" \
+                       "pushl %ecx\n\t" \
+                       "pushl %eax\n\t" \
+                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(12))
 #endif
 
 static inline LPCSTR debugstr_us( const UNICODE_STRING *us )
@@ -87,7 +104,7 @@ static HANDLE get_device_manager(void)
         {
             req->access     = SYNCHRONIZE;
             req->attributes = 0;
-            if (!wine_server_call( req )) handle = reply->handle;
+            if (!wine_server_call( req )) handle = wine_server_ptr_handle( reply->handle );
         }
         SERVER_END_REQ;
 
@@ -107,16 +124,20 @@ static HANDLE get_device_manager(void)
 /* exception handler for emulation of privileged instructions */
 static LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs )
 {
-    extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT86 *context );
-
     EXCEPTION_RECORD *record = ptrs->ExceptionRecord;
-    CONTEXT86 *context = ptrs->ContextRecord;
 
     if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
         record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION)
     {
+#ifdef __i386__
+        CONTEXT *context = ptrs->ContextRecord;
+        extern DWORD __wine_emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context );
+
         if (__wine_emulate_instruction( record, context ) == ExceptionContinueExecution)
             return EXCEPTION_CONTINUE_EXECUTION;
+#else
+        FIXME( "Privileged instruction emulation not implemented on this CPU\n" );
+#endif
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -144,6 +165,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     irp.UserBuffer = out_buff;
     irp.MdlAddress = &mdl;
     irp.Tail.Overlay.s.u.CurrentStackLocation = &irpsp;
+    irp.UserIosb = NULL;
 
     irpsp.MajorFunction = IRP_MJ_DEVICE_CONTROL;
     irpsp.Parameters.DeviceIoControl.OutputBufferLength = *out_size;
@@ -151,6 +173,7 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
     irpsp.Parameters.DeviceIoControl.IoControlCode = code;
     irpsp.Parameters.DeviceIoControl.Type3InputBuffer = in_buff;
     irpsp.DeviceObject = device;
+    irpsp.CompletionRoutine = NULL;
 
     mdl.Next = NULL;
     mdl.Size = 0;
@@ -180,10 +203,10 @@ static NTSTATUS process_ioctl( DEVICE_OBJECT *device, ULONG code, void *in_buff,
 /***********************************************************************
  *           wine_ntoskrnl_main_loop   (Not a Windows API)
  */
-NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event )
+NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 {
     HANDLE manager = get_device_manager();
-    HANDLE ioctl = 0;
+    obj_handle_t ioctl = 0;
     NTSTATUS status = STATUS_SUCCESS;
     ULONG code = 0;
     void *in_buff, *out_buff = NULL;
@@ -204,7 +227,7 @@ NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event )
     {
         SERVER_START_REQ( get_next_device_request )
         {
-            req->manager = manager;
+            req->manager = wine_server_obj_handle( manager );
             req->prev = ioctl;
             req->status = status;
             wine_server_add_data( req, out_buff, out_size );
@@ -213,7 +236,7 @@ NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event )
             {
                 code     = reply->code;
                 ioctl    = reply->next;
-                device   = reply->user_ptr;
+                device   = wine_server_get_ptr( reply->user_ptr );
                 in_size  = reply->in_size;
                 out_size = reply->out_size;
             }
@@ -241,11 +264,114 @@ NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event )
             break;
         case STATUS_PENDING:
             if (WaitForMultipleObjects( 2, handles, FALSE, INFINITE ) == WAIT_OBJECT_0)
+            {
+                HeapFree( GetProcessHeap(), 0, in_buff );
+                HeapFree( GetProcessHeap(), 0, out_buff );
                 return STATUS_SUCCESS;
+            }
             break;
         }
     }
 }
+
+
+/***********************************************************************
+ *           IoAllocateDriverObjectExtension  (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoAllocateDriverObjectExtension( PDRIVER_OBJECT DriverObject,
+                                                 PVOID ClientIdentificationAddress,
+                                                 ULONG DriverObjectExtensionSize,
+                                                 PVOID *DriverObjectExtension )
+{
+    FIXME( "stub: %p, %p, %u, %p\n", DriverObject, ClientIdentificationAddress,
+            DriverObjectExtensionSize, DriverObjectExtension );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IoGetDriverObjectExtension  (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI IoGetDriverObjectExtension( PDRIVER_OBJECT DriverObject,
+                                         PVOID ClientIdentificationAddress )
+{
+    FIXME( "stub: %p, %p\n", DriverObject, ClientIdentificationAddress );
+    return NULL;
+}
+
+
+/***********************************************************************
+ *           IoInitializeIrp  (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoInitializeIrp( IRP *irp, USHORT size, CCHAR stack_size )
+{
+    TRACE( "%p, %u, %d\n", irp, size, stack_size );
+
+    RtlZeroMemory( irp, size );
+
+    irp->Type = IO_TYPE_IRP;
+    irp->Size = size;
+    InitializeListHead( &irp->ThreadListEntry );
+    irp->StackCount = stack_size;
+    irp->CurrentLocation = stack_size + 1;
+    irp->Tail.Overlay.s.u.CurrentStackLocation =
+            (PIO_STACK_LOCATION)(irp + 1) + stack_size;
+}
+
+
+/***********************************************************************
+ *           IoInitializeTimer   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoInitializeTimer(PDEVICE_OBJECT DeviceObject,
+                                  PIO_TIMER_ROUTINE TimerRoutine,
+                                  PVOID Context)
+{
+    FIXME( "stub: %p, %p, %p\n", DeviceObject, TimerRoutine, Context );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IoStartTimer   (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoStartTimer(PDEVICE_OBJECT DeviceObject)
+{
+    FIXME( "stub: %p\n", DeviceObject );
+}
+
+
+/***********************************************************************
+ *           IoAllocateIrp  (NTOSKRNL.EXE.@)
+ */
+PIRP WINAPI IoAllocateIrp( CCHAR stack_size, BOOLEAN charge_quota )
+{
+    SIZE_T size;
+    PIRP irp;
+
+    TRACE( "%d, %d\n", stack_size, charge_quota );
+
+    size = sizeof(IRP) + stack_size * sizeof(IO_STACK_LOCATION);
+    irp = ExAllocatePool( NonPagedPool, size );
+    if (irp == NULL)
+        return NULL;
+    IoInitializeIrp( irp, size, stack_size );
+    irp->AllocationFlags = IRP_ALLOCATED_FIXED_SIZE;
+    if (charge_quota)
+        irp->AllocationFlags |= IRP_LOOKASIDE_ALLOCATION;
+    return irp;
+}
+
+
+/***********************************************************************
+ *           IoFreeIrp  (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoFreeIrp( IRP *irp )
+{
+    TRACE( "%p\n", irp );
+
+    ExFreePool( irp );
+}
+
 
 /***********************************************************************
  *           IoAllocateMdl  (NTOSKRNL.EXE.@)
@@ -264,6 +390,68 @@ PIO_WORKITEM WINAPI IoAllocateWorkItem( PDEVICE_OBJECT DeviceObject )
 {
     FIXME( "stub: %p\n", DeviceObject );
     return NULL;
+}
+
+
+/***********************************************************************
+ *           IoAttachDeviceToDeviceStack  (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoAttachDeviceToDeviceStack( DEVICE_OBJECT *source,
+                                                   DEVICE_OBJECT *target )
+{
+    TRACE( "%p, %p\n", source, target );
+    target->AttachedDevice = source;
+    source->StackSize = target->StackSize + 1;
+    return target;
+}
+
+
+/***********************************************************************
+ *           IoBuildDeviceIoControlRequest  (NTOSKRNL.EXE.@)
+ */
+PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG IoControlCode,
+                                           PDEVICE_OBJECT DeviceObject,
+                                           PVOID InputBuffer,
+                                           ULONG InputBufferLength,
+                                           PVOID OutputBuffer,
+                                           ULONG OutputBufferLength,
+                                           BOOLEAN InternalDeviceIoControl,
+                                           PKEVENT Event,
+                                           PIO_STATUS_BLOCK IoStatusBlock )
+{
+    PIRP irp;
+    PIO_STACK_LOCATION irpsp;
+    struct IrpInstance *instance;
+
+    TRACE( "%x, %p, %p, %u, %p, %u, %u, %p, %p\n",
+           IoControlCode, DeviceObject, InputBuffer, InputBufferLength,
+           OutputBuffer, OutputBufferLength, InternalDeviceIoControl,
+           Event, IoStatusBlock );
+
+    if (DeviceObject == NULL)
+        return NULL;
+
+    irp = IoAllocateIrp( DeviceObject->StackSize, FALSE );
+    if (irp == NULL)
+        return NULL;
+
+    instance = HeapAlloc( GetProcessHeap(), 0, sizeof(struct IrpInstance) );
+    if (instance == NULL)
+    {
+        IoFreeIrp( irp );
+        return NULL;
+    }
+    instance->irp = irp;
+    list_add_tail( &Irps, &instance->entry );
+
+    irpsp = irp->Tail.Overlay.s.u.CurrentStackLocation - 1;
+    irpsp->MajorFunction = InternalDeviceIoControl ?
+            IRP_MJ_INTERNAL_DEVICE_CONTROL : IRP_MJ_DEVICE_CONTROL;
+    irpsp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;
+    irp->UserIosb = IoStatusBlock;
+    irp->UserEvent = Event;
+
+    return irp;
 }
 
 
@@ -338,10 +526,10 @@ NTSTATUS WINAPI IoCreateDevice( DRIVER_OBJECT *driver, ULONG ext_size,
         req->access     = 0;
         req->attributes = 0;
         req->rootdir    = 0;
-        req->manager    = manager;
-        req->user_ptr   = device;
+        req->manager    = wine_server_obj_handle( manager );
+        req->user_ptr   = wine_server_client_ptr( device );
         if (name) wine_server_add_data( req, name->Buffer, name->Length );
-        if (!(status = wine_server_call( req ))) handle = reply->handle;
+        if (!(status = wine_server_call( req ))) handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
 
@@ -350,6 +538,7 @@ NTSTATUS WINAPI IoCreateDevice( DRIVER_OBJECT *driver, ULONG ext_size,
         device->DriverObject    = driver;
         device->DeviceExtension = device + 1;
         device->DeviceType      = type;
+        device->StackSize       = 1;
         device->Reserved        = handle;
 
         device->NextDevice   = driver->DeviceObject;
@@ -374,7 +563,7 @@ void WINAPI IoDeleteDevice( DEVICE_OBJECT *device )
 
     SERVER_START_REQ( delete_device )
     {
-        req->handle = device->Reserved;
+        req->handle = wine_server_obj_handle( device->Reserved );
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -412,6 +601,137 @@ NTSTATUS WINAPI IoCreateSymbolicLink( UNICODE_STRING *name, UNICODE_STRING *targ
 
 
 /***********************************************************************
+ *           IoDeleteSymbolicLink   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoDeleteSymbolicLink( UNICODE_STRING *name )
+{
+    HANDLE handle;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+
+    attr.Length                   = sizeof(attr);
+    attr.RootDirectory            = 0;
+    attr.ObjectName               = name;
+    attr.Attributes               = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor       = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if (!(status = NtOpenSymbolicLinkObject( &handle, 0, &attr )))
+    {
+        SERVER_START_REQ( unlink_object )
+        {
+            req->handle = wine_server_obj_handle( handle );
+            status = wine_server_call( req );
+        }
+        SERVER_END_REQ;
+        NtClose( handle );
+    }
+    return status;
+}
+
+
+/***********************************************************************
+ *           IoGetDeviceObjectPointer   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS  WINAPI IoGetDeviceObjectPointer( UNICODE_STRING *name, ACCESS_MASK access, PFILE_OBJECT *file, PDEVICE_OBJECT *device )
+{
+    FIXME( "stub: %s %x %p %p\n", debugstr_us(name), access, file, device );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IofCallDriver   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( IofCallDriver )
+NTSTATUS WINAPI __regs_IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
+#else
+NTSTATUS WINAPI IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
+#endif
+{
+    PDRIVER_DISPATCH dispatch;
+    IO_STACK_LOCATION *irpsp;
+    NTSTATUS status;
+
+    TRACE( "%p %p\n", device, irp );
+
+    --irp->CurrentLocation;
+    irpsp = --irp->Tail.Overlay.s.u.CurrentStackLocation;
+    dispatch = device->DriverObject->MajorFunction[irpsp->MajorFunction];
+    status = dispatch( device, irp );
+
+    return status;
+}
+
+
+/***********************************************************************
+ *           IoGetRelatedDeviceObject    (NTOSKRNL.EXE.@)
+ */
+PDEVICE_OBJECT WINAPI IoGetRelatedDeviceObject( PFILE_OBJECT obj )
+{
+    FIXME( "stub: %p\n", obj );
+    return NULL;
+}
+
+static CONFIGURATION_INFORMATION configuration_information;
+
+/***********************************************************************
+ *           IoGetConfigurationInformation    (NTOSKRNL.EXE.@)
+ */
+PCONFIGURATION_INFORMATION WINAPI IoGetConfigurationInformation(void)
+{
+    FIXME( "partial stub\n" );
+    /* FIXME: return actual devices on system */
+    return &configuration_information;
+}
+
+
+/***********************************************************************
+ *           IoQueryDeviceDescription    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoQueryDeviceDescription(PINTERFACE_TYPE itype, PULONG bus, PCONFIGURATION_TYPE ctype,
+                                     PULONG cnum, PCONFIGURATION_TYPE ptype, PULONG pnum,
+                                     PIO_QUERY_DEVICE_ROUTINE callout, PVOID context)
+{
+    FIXME( "(%p %p %p %p %p %p %p %p)\n", itype, bus, ctype, cnum, ptype, pnum, callout, context);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IoRegisterDriverReinitialization    (NTOSKRNL.EXE.@)
+ */
+void WINAPI IoRegisterDriverReinitialization( PDRIVER_OBJECT obj, PDRIVER_REINITIALIZE reinit, PVOID context )
+{
+    FIXME( "stub: %p %p %p\n", obj, reinit, context );
+}
+
+
+/***********************************************************************
+ *           IoRegisterShutdownNotification    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoRegisterShutdownNotification( PDEVICE_OBJECT obj )
+{
+    FIXME( "stub: %p\n", obj );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           IoReportResourceUsage    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoReportResourceUsage(PUNICODE_STRING name, PDRIVER_OBJECT drv_obj, PCM_RESOURCE_LIST drv_list,
+                                      ULONG drv_size, PDRIVER_OBJECT dev_obj, PCM_RESOURCE_LIST dev_list,
+                                      ULONG dev_size, BOOLEAN overwrite, PBOOLEAN detected)
+{
+    FIXME("(%s %p %p %u %p %p %u %d %p) stub\n", debugstr_w(name? name->Buffer : NULL),
+          drv_obj, drv_list, drv_size, dev_obj, dev_list, dev_size, overwrite, detected);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
  *           IofCompleteRequest   (NTOSKRNL.EXE.@)
  */
 #ifdef DEFINE_FASTCALL2_ENTRYPOINT
@@ -421,8 +741,127 @@ void WINAPI __regs_IofCompleteRequest( IRP *irp, UCHAR priority_boost )
 void WINAPI IofCompleteRequest( IRP *irp, UCHAR priority_boost )
 #endif
 {
+    IO_STACK_LOCATION *irpsp;
+    PIO_COMPLETION_ROUTINE routine;
+    IO_STATUS_BLOCK *iosb;
+    struct IrpInstance *instance;
+    NTSTATUS status, stat;
+    int call_flag = 0;
+
     TRACE( "%p %u\n", irp, priority_boost );
-    /* nothing to do for now */
+
+    iosb = irp->UserIosb;
+    status = irp->IoStatus.u.Status;
+    while (irp->CurrentLocation <= irp->StackCount)
+    {
+        irpsp = irp->Tail.Overlay.s.u.CurrentStackLocation;
+        routine = irpsp->CompletionRoutine;
+        call_flag = 0;
+        /* FIXME: add SL_INVOKE_ON_CANCEL support */
+        if (routine)
+        {
+            if ((irpsp->Control & SL_INVOKE_ON_SUCCESS) && STATUS_SUCCESS == status)
+                call_flag = 1;
+            if ((irpsp->Control & SL_INVOKE_ON_ERROR) && STATUS_SUCCESS != status)
+                call_flag = 1;
+        }
+        ++irp->CurrentLocation;
+        ++irp->Tail.Overlay.s.u.CurrentStackLocation;
+        if (call_flag)
+        {
+            TRACE( "calling %p( %p, %p, %p )\n", routine,
+                    irpsp->DeviceObject, irp, irpsp->Context );
+            stat = routine( irpsp->DeviceObject, irp, irpsp->Context );
+            TRACE( "CompletionRoutine returned %x\n", stat );
+            if (STATUS_MORE_PROCESSING_REQUIRED == stat)
+                return;
+        }
+    }
+    if (iosb && STATUS_SUCCESS == status)
+    {
+        iosb->u.Status = irp->IoStatus.u.Status;
+        iosb->Information = irp->IoStatus.Information;
+    }
+    LIST_FOR_EACH_ENTRY( instance, &Irps, struct IrpInstance, entry )
+    {
+        if (instance->irp == irp)
+        {
+            list_remove( &instance->entry );
+            HeapFree( GetProcessHeap(), 0, instance );
+            IoFreeIrp( irp );
+            break;
+        }
+    }
+}
+
+
+/***********************************************************************
+ *           InterlockedCompareExchange   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL3_ENTRYPOINT
+DEFINE_FASTCALL3_ENTRYPOINT( NTOSKRNL_InterlockedCompareExchange )
+LONG WINAPI __regs_NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+#else
+LONG WINAPI NTOSKRNL_InterlockedCompareExchange( LONG volatile *dest, LONG xchg, LONG compare )
+#endif
+{
+    return InterlockedCompareExchange( dest, xchg, compare );
+}
+
+
+/***********************************************************************
+ *           InterlockedDecrement   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedDecrement )
+LONG WINAPI __regs_NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
+#else
+LONG WINAPI NTOSKRNL_InterlockedDecrement( LONG volatile *dest )
+#endif
+{
+    return InterlockedDecrement( dest );
+}
+
+
+/***********************************************************************
+ *           InterlockedExchange   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchange )
+LONG WINAPI __regs_NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
+#else
+LONG WINAPI NTOSKRNL_InterlockedExchange( LONG volatile *dest, LONG val )
+#endif
+{
+    return InterlockedExchange( dest, val );
+}
+
+
+/***********************************************************************
+ *           InterlockedExchangeAdd   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( NTOSKRNL_InterlockedExchangeAdd )
+LONG WINAPI __regs_NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+#else
+LONG WINAPI NTOSKRNL_InterlockedExchangeAdd( LONG volatile *dest, LONG incr )
+#endif
+{
+    return InterlockedExchangeAdd( dest, incr );
+}
+
+
+/***********************************************************************
+ *           InterlockedIncrement   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( NTOSKRNL_InterlockedIncrement )
+LONG WINAPI __regs_NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
+#else
+LONG WINAPI NTOSKRNL_InterlockedIncrement( LONG volatile *dest )
+#endif
+{
+    return InterlockedIncrement( dest );
 }
 
 
@@ -485,11 +924,76 @@ void WINAPI ExFreePoolWithTag( void *ptr, ULONG tag )
 
 
 /***********************************************************************
+ *           ExInitializeResourceLite   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ExInitializeResourceLite(PERESOURCE Resource)
+{
+    FIXME( "stub: %p\n", Resource );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           ExInitializeNPagedLookasideList   (NTOSKRNL.EXE.@)
+ */
+void WINAPI ExInitializeNPagedLookasideList(PNPAGED_LOOKASIDE_LIST Lookaside,
+                                            PALLOCATE_FUNCTION Allocate,
+                                            PFREE_FUNCTION Free,
+                                            ULONG Flags,
+                                            SIZE_T Size,
+                                            ULONG Tag,
+                                            USHORT Depth)
+{
+    FIXME( "stub: %p, %p, %p, %u, %lu, %u, %u\n", Lookaside, Allocate, Free, Flags, Size, Tag, Depth );
+}
+
+
+/***********************************************************************
+ *           ExInitializeZone   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ExInitializeZone(PZONE_HEADER Zone,
+                                 ULONG BlockSize,
+                                 PVOID InitialSegment,
+                                 ULONG InitialSegmentSize)
+{
+    FIXME( "stub: %p, %u, %p, %u\n", Zone, BlockSize, InitialSegment, InitialSegmentSize );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+*           FsRtlRegisterUncProvider   (NTOSKRNL.EXE.@)
+*/
+NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING RedirDevName,
+                                         BOOLEAN MailslotsSupported)
+{
+    FIXME("(%p %p %d): stub\n", MupHandle, RedirDevName, MailslotsSupported);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *           KeInitializeEvent   (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeEvent( PRKEVENT Event, EVENT_TYPE Type, BOOLEAN State )
+{
+    FIXME( "stub: %p %d %d\n", Event, Type, State );
+}
+
+
+ /***********************************************************************
+ *           KeInitializeMutex   (NTOSKRNL.EXE.@)
+ */
+void WINAPI KeInitializeMutex(PRKMUTEX Mutex, ULONG Level)
+{
+    FIXME( "stub: %p, %u\n", Mutex, Level );
+}
+
+
+/***********************************************************************
  *           KeInitializeSpinLock   (NTOSKRNL.EXE.@)
  */
 void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
 {
-    FIXME("%p\n", SpinLock);
+    FIXME( "stub: %p\n", SpinLock );
 }
 
 
@@ -498,7 +1002,7 @@ void WINAPI KeInitializeSpinLock( PKSPIN_LOCK SpinLock )
  */
 void WINAPI KeInitializeTimerEx( PKTIMER Timer, TIMER_TYPE Type )
 {
-    FIXME("%p %d\n", Timer, Type);
+    FIXME( "stub: %p %d\n", Timer, Type );
 }
 
 
@@ -576,6 +1080,35 @@ ULONG WINAPI KeQueryTimeIncrement(void)
 
 
 /***********************************************************************
+ *           KeWaitForSingleObject   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI KeWaitForSingleObject(PVOID Object,
+                                      KWAIT_REASON WaitReason,
+                                      KPROCESSOR_MODE WaitMode,
+                                      BOOLEAN Alertable,
+                                      PLARGE_INTEGER Timeout)
+{
+    FIXME( "stub: %p, %d, %d, %d, %p\n", Object, WaitReason, WaitMode, Alertable, Timeout );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+/***********************************************************************
+ *           IoRegisterFileSystem   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI IoRegisterFileSystem(PDEVICE_OBJECT DeviceObject)
+{
+    FIXME("(%p): stub\n", DeviceObject);
+}
+
+/***********************************************************************
+*           IoUnregisterFileSystem   (NTOSKRNL.EXE.@)
+*/
+VOID WINAPI IoUnregisterFileSystem(PDEVICE_OBJECT DeviceObject)
+{
+    FIXME("(%p): stub\n", DeviceObject);
+}
+
+/***********************************************************************
  *           MmAllocateNonCachedMemory   (NTOSKRNL.EXE.@)
  */
 PVOID WINAPI MmAllocateNonCachedMemory( SIZE_T size )
@@ -631,6 +1164,41 @@ void WINAPI MmResetDriverPaging(PVOID AddrInSection)
 }
 
 /***********************************************************************
+ *           ObfReferenceObject   (NTOSKRNL.EXE.@)
+ */
+VOID WINAPI ObfReferenceObject(PVOID Object)
+{
+    FIXME("(%p): stub\n", Object);
+}
+
+ /***********************************************************************
+ *           ObReferenceObjectByHandle    (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI ObReferenceObjectByHandle( HANDLE obj, ACCESS_MASK access,
+                                           POBJECT_TYPE type,
+                                           KPROCESSOR_MODE mode, PVOID* ptr,
+                                           POBJECT_HANDLE_INFORMATION info)
+{
+    FIXME( "stub: %p %x %p %d %p %p\n", obj, access, type, mode, ptr, info);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           ObfDereferenceObject   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ObfDereferenceObject )
+void WINAPI __regs_ObfDereferenceObject( VOID *obj )
+#else
+void WINAPI ObfDereferenceObject( VOID *obj )
+#endif
+{
+    FIXME( "stub: %p\n", obj );
+}
+
+
+/***********************************************************************
  *           PsCreateSystemThread   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
@@ -649,7 +1217,7 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
  */
 HANDLE WINAPI PsGetCurrentProcessId(void)
 {
-    return (HANDLE)GetCurrentProcessId();  /* FIXME: not quite right... */
+    return UlongToHandle(GetCurrentProcessId());  /* FIXME: not quite right... */
 }
 
 
@@ -658,7 +1226,7 @@ HANDLE WINAPI PsGetCurrentProcessId(void)
  */
 HANDLE WINAPI PsGetCurrentThreadId(void)
 {
-    return (HANDLE)GetCurrentThreadId();  /* FIXME: not quite right... */
+    return UlongToHandle(GetCurrentThreadId());  /* FIXME: not quite right... */
 }
 
 
@@ -697,19 +1265,85 @@ NTSTATUS WINAPI PsSetCreateProcessNotifyRoutine( PCREATE_PROCESS_NOTIFY_ROUTINE 
 }
 
 
+/***********************************************************************
+ *           PsSetCreateThreadNotifyRoutine   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsSetCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE NotifyRoutine )
+{
+    FIXME( "stub: %p\n", NotifyRoutine );
+    return STATUS_SUCCESS;
+}
+
+
+/***********************************************************************
+ *           PsTerminateSystemThread   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI PsTerminateSystemThread(NTSTATUS ExitStatus)
+{
+    FIXME( "stub: %u\n", ExitStatus );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           MmGetSystemRoutineAddress   (NTOSKRNL.EXE.@)
+ */
+PVOID WINAPI MmGetSystemRoutineAddress(PUNICODE_STRING SystemRoutineName)
+{
+    HMODULE hMod;
+    STRING routineNameA;
+    PVOID pFunc = NULL;
+
+    static const WCHAR ntoskrnlW[] = {'n','t','o','s','k','r','n','l','.','e','x','e',0};
+    static const WCHAR halW[] = {'h','a','l','.','d','l','l',0};
+
+    if (!SystemRoutineName) return NULL;
+
+    if (RtlUnicodeStringToAnsiString( &routineNameA, SystemRoutineName, TRUE ) == STATUS_SUCCESS)
+    {
+        /* We only support functions exported from ntoskrnl.exe or hal.dll */
+        hMod = GetModuleHandleW( ntoskrnlW );
+        pFunc = GetProcAddress( hMod, routineNameA.Buffer );
+        if (!pFunc)
+        {
+           hMod = GetModuleHandleW( halW );
+           if (hMod) pFunc = GetProcAddress( hMod, routineNameA.Buffer );
+        }
+        RtlFreeAnsiString( &routineNameA );
+    }
+
+    TRACE( "%s -> %p\n", debugstr_us(SystemRoutineName), pFunc );
+    return pFunc;
+}
+
+
+/***********************************************************************
+ *           MmQuerySystemSize   (NTOSKRNL.EXE.@)
+ */
+MM_SYSTEMSIZE WINAPI MmQuerySystemSize(void)
+{
+    FIXME("stub\n");
+    return MmLargeSystem;
+}
+
+
 /*****************************************************
  *           DllMain
  */
 BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
 {
+    static void *handler;
     LARGE_INTEGER count;
 
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls( inst );
-        RtlAddVectoredExceptionHandler( TRUE, vectored_handler );
+        handler = RtlAddVectoredExceptionHandler( TRUE, vectored_handler );
         KeQueryTickCount( &count );  /* initialize the global KeTickCount */
+        break;
+    case DLL_PROCESS_DETACH:
+        RtlRemoveVectoredExceptionHandler( handler );
         break;
     }
     return TRUE;

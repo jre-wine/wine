@@ -30,7 +30,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(qmgr);
 
 HANDLE stop_event = NULL;
 
-static WCHAR qmgr_nameW[] = {'B','I','T','S',0};
 static SERVICE_STATUS_HANDLE status_handle;
 static SERVICE_STATUS status;
 
@@ -86,20 +85,20 @@ StartCount(void)
     TRACE("\n");
 
     hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-    if (!SUCCEEDED(hr))
+    if (FAILED(hr))
         return FALSE;
 
     hr = CoInitializeSecurity(NULL, -1, NULL, NULL, RPC_C_AUTHN_LEVEL_NONE,
                               RPC_C_IMP_LEVEL_IMPERSONATE, NULL, EOAC_NONE,
                               NULL);
-    if (!SUCCEEDED(hr))
+    if (FAILED(hr))
         return FALSE;
 
     hr = CoRegisterClassObject(&CLSID_BackgroundCopyManager,
                                (IUnknown *) &BITS_ClassFactory,
                                CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE,
                                &dwReg);
-    if (!SUCCEEDED(hr))
+    if (FAILED(hr))
         return FALSE;
 
     return TRUE;
@@ -110,6 +109,7 @@ VOID WINAPI
 ServiceMain(DWORD dwArgc, LPWSTR *lpszArgv)
 {
     HANDLE fileTxThread;
+    static const WCHAR qmgr_nameW[] = {'B','I','T','S',0};
     DWORD threadId;
     TRACE("\n");
 
@@ -153,4 +153,6 @@ ServiceMain(DWORD dwArgc, LPWSTR *lpszArgv)
     UpdateStatus(SERVICE_STOPPED, NO_ERROR, 0);
     CloseHandle(stop_event);
     TRACE("service stoped\n");
+
+    CoUninitialize();
 }

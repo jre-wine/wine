@@ -13,7 +13,6 @@ C_SRCS = \
 	bitmap.c \
 	brush.c \
 	clipboard.c \
-	clipping.c \
 	codepage.c \
 	desktop.c \
 	dib.c \
@@ -34,7 +33,6 @@ C_SRCS = \
 	systray.c \
 	text.c \
 	window.c \
-	winpos.c \
 	wintab.c \
 	x11ddraw.c \
 	x11drv_main.c \

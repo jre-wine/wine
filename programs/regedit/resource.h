@@ -18,6 +18,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <windef.h>
+#include <winuser.h>
+
 #define ID_REGISTRY_MENU                0
 #define ID_EDIT_MENU                    1
 #define ID_VIEW_MENU                    2
@@ -121,6 +124,7 @@
 #define IDS_DELETE_BOX_TITLE		32840
 #define IDS_DELETE_BOX_TEXT		32841
 #define IDS_NOTFOUND    		32842
+#define IDS_DELETE_BOX_TEXT_MULTIPLE	32843
 #define IDD_EDIT_DWORD			32850
 #define IDC_DWORD_BASE			32852
 #define IDC_DWORD_HEX			32853
@@ -133,6 +137,7 @@
 #define ID_FAVORITE_FIRST               33000
 #define ID_FAVORITE_LAST                33099
 #define ID_EDIT_NEW_MULTI_STRINGVALUE   33100
+#define ID_EDIT_EXPORT                  33101
 
 #define IDD_EDIT_STRING			2000
 #define IDC_VALUE_NAME			2001

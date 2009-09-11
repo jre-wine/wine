@@ -75,6 +75,7 @@
 #include "wingdi.h"
 #include "wine/winuser16.h"
 #include "controls.h"
+#include "win.h"
 #include "user_private.h"
 #include "wine/debug.h"
 
@@ -229,8 +230,8 @@ static void setup_clipping( HWND hwnd, HDC hdc )
 /***********************************************************************
  *           ButtonWndProc_common
  */
-static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
-                                           WPARAM wParam, LPARAM lParam, BOOL unicode )
+static LRESULT ButtonWndProc_common(HWND hWnd, UINT uMsg,
+                                    WPARAM wParam, LPARAM lParam, BOOL unicode )
 {
     RECT rect;
     POINT pt;
@@ -271,6 +272,13 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
         }
         if (btn_type >= MAX_BTN_TYPE)
             return -1; /* abort */
+
+        /* XP turns a BS_USERBUTTON into BS_PUSHBUTTON */
+        if (btn_type == BS_USERBUTTON )
+        {
+            style = (style & ~0x0f) | BS_PUSHBUTTON;
+            WIN_SetStyle( hWnd, style, 0x0f & ~style );
+        }
         set_button_state( hWnd, BUTTON_UNCHECKED );
         return 0;
 
@@ -309,6 +317,7 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
 	{
 	    SendMessageW( hWnd, BM_SETSTATE, TRUE, 0 );
             set_button_state( hWnd, get_button_state( hWnd ) | BUTTON_BTNPRESSED );
+            SetCapture( hWnd );
 	}
 	break;
 
@@ -445,6 +454,7 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
         if (style & BS_NOTIFY)
             BUTTON_NOTIFY_PARENT(hWnd, BN_KILLFOCUS);
 
+        InvalidateRect( hWnd, NULL, FALSE );
         break;
 
     case WM_SYSCOLORCHANGE:
@@ -456,11 +466,11 @@ static LRESULT WINAPI ButtonWndProc_common(HWND hWnd, UINT uMsg,
         if ((wParam & 0x0f) >= MAX_BTN_TYPE) break;
         btn_type = wParam & 0x0f;
         style = (style & ~0x0f) | btn_type;
-        SetWindowLongW( hWnd, GWL_STYLE, style );
+        WIN_SetStyle( hWnd, style, 0x0f & ~style );
 
         /* Only redraw if lParam flag is set.*/
         if (lParam)
-           paint_button( hWnd, btn_type, ODA_DRAWENTIRE );
+            InvalidateRect( hWnd, NULL, TRUE );
 
         break;
 
@@ -812,9 +822,12 @@ static void PB_Paint( HWND hwnd, HDC hDC, UINT action )
 
     setup_clipping( hwnd, hDC );
 
-    hOldPen = (HPEN)SelectObject(hDC, SYSCOLOR_GetPen(COLOR_WINDOWFRAME));
-    hOldBrush =(HBRUSH)SelectObject(hDC,GetSysColorBrush(COLOR_BTNFACE));
+    hOldPen = SelectObject(hDC, SYSCOLOR_GetPen(COLOR_WINDOWFRAME));
+    hOldBrush = SelectObject(hDC,GetSysColorBrush(COLOR_BTNFACE));
     oldBkMode = SetBkMode(hDC, TRANSPARENT);
+
+    /* completely skip the drawing if only focus has changed */
+    if (action == ODA_FOCUS) goto draw_focus;
 
     if (get_button_type(style) == BS_DEFPUSHBUTTON)
     {
@@ -859,7 +872,9 @@ static void PB_Paint( HWND hwnd, HDC hDC, UINT action )
 
     SetTextColor( hDC, oldTxtColor );
 
-    if (state & BUTTON_HASFOCUS)
+draw_focus:
+    if ((action == ODA_FOCUS) ||
+        ((action == ODA_DRAWENTIRE) && (state & BUTTON_HASFOCUS)))
     {
         InflateRect( &focus_rect, -1, -1 );
         IntersectRect(&focus_rect, &focus_rect, &rc);
@@ -1065,7 +1080,7 @@ static void GB_Paint( HWND hwnd, HDC hDC, UINT action )
      * But Windows doesn't clip label's rect, so do I.
      */
 
-    /* There is 1-pixel marging at the left, right, and bottom */
+    /* There is 1-pixel margin at the left, right, and bottom */
     rc.left--; rc.right++; rc.bottom++;
     FillRect(hDC, &rc, hbr);
     rc.left++; rc.right--; rc.bottom--;
@@ -1103,6 +1118,8 @@ static void UB_Paint( HWND hwnd, HDC hDC, UINT action )
     if ((action == ODA_FOCUS) ||
         ((action == ODA_DRAWENTIRE) && (state & BUTTON_HASFOCUS)))
         DrawFocusRect( hDC, &rc );
+
+    BUTTON_NOTIFY_PARENT( hwnd, BN_PAINT );
 }
 
 

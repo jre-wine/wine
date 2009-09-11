@@ -33,6 +33,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "dshow.h"
+#include "wine/list.h"
 
 #define MEDIATIME_FROM_BYTES(x) ((LONGLONG)(x) * 10000000)
 #define SEC_FROM_MEDIATIME(time) ((time) / 10000000)
@@ -61,25 +62,20 @@ HRESULT SeekingPassThru_create(IUnknown *pUnkOuter, LPVOID *ppObj);
 
 HRESULT EnumMonikerImpl_Create(IMoniker ** ppMoniker, ULONG nMonikerCount, IEnumMoniker ** ppEnum);
 
-typedef struct tagENUMPINDETAILS
-{
-	ULONG cPins;
-	IPin ** ppPins;
-} ENUMPINDETAILS;
-
 typedef struct tagENUMEDIADETAILS
 {
 	ULONG cMediaTypes;
 	AM_MEDIA_TYPE * pMediaTypes;
 } ENUMMEDIADETAILS;
 
-HRESULT IEnumPinsImpl_Construct(const ENUMPINDETAILS * pDetails, IEnumPins ** ppEnum);
+typedef HRESULT (* FNOBTAINPIN)(IBaseFilter *iface, ULONG pos, IPin **pin, DWORD *lastsynctick);
+
+HRESULT IEnumPinsImpl_Construct(IEnumPins ** ppEnum, FNOBTAINPIN receive_pin, IBaseFilter *base);
 HRESULT IEnumMediaTypesImpl_Construct(const ENUMMEDIADETAILS * pDetails, IEnumMediaTypes ** ppEnum);
 HRESULT IEnumRegFiltersImpl_Construct(REGFILTER * pInRegFilters, const ULONG size, IEnumRegFilters ** ppEnum);
 HRESULT IEnumFiltersImpl_Construct(IBaseFilter ** ppFilters, ULONG nFilters, IEnumFilters ** ppEnum);
 
 extern const char * qzdebugstr_guid(const GUID * id);
-extern const char * qzdebugstr_State(FILTER_STATE state);
 
 HRESULT CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc);
 void FreeMediaType(AM_MEDIA_TYPE * pmt);
@@ -87,5 +83,17 @@ void DeleteMediaType(AM_MEDIA_TYPE * pmt);
 BOOL CompareMediaTypes(const AM_MEDIA_TYPE * pmt1, const AM_MEDIA_TYPE * pmt2, BOOL bWildcards);
 void dump_AM_MEDIA_TYPE(const AM_MEDIA_TYPE * pmt);
 HRESULT updatehres( HRESULT original, HRESULT new );
+
+typedef struct StdMediaSample2
+{
+    const IMediaSample2Vtbl * lpvtbl;
+
+    LONG ref;
+    AM_SAMPLE2_PROPERTIES props;
+    IMemAllocator * pParent;
+    struct list listentry;
+    LONGLONG tMediaStart;
+    LONGLONG tMediaEnd;
+} StdMediaSample2;
 
 #endif /* __QUARTZ_PRIVATE_INCLUDED__ */

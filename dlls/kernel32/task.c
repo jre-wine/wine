@@ -49,6 +49,14 @@ WINE_DECLARE_DEBUG_CHANNEL(toolhelp);
 
 #include "pshpack1.h"
 
+struct thunk
+{
+    BYTE      movw;
+    HANDLE16  instance;
+    BYTE      ljmp;
+    FARPROC16 func;
+};
+
 /* Segment containing MakeProcInstance() thunks */
 typedef struct
 {
@@ -56,7 +64,7 @@ typedef struct
     WORD  magic;      /* Thunks signature */
     WORD  unused;
     WORD  free;       /* Head of the free list */
-    WORD  thunks[4];  /* Each thunk is 4 words long */
+    struct thunk thunks[1];
 } THUNKS;
 
 #include "poppack.h"
@@ -163,20 +171,15 @@ static void TASK_UnlinkTask( HTASK16 hTask )
 static void TASK_CreateThunks( HGLOBAL16 handle, WORD offset, WORD count )
 {
     int i;
-    WORD free;
     THUNKS *pThunk;
 
     pThunk = (THUNKS *)((BYTE *)GlobalLock16( handle ) + offset);
     pThunk->next = 0;
     pThunk->magic = THUNK_MAGIC;
-    pThunk->free = (int)&pThunk->thunks - (int)pThunk;
-    free = pThunk->free;
+    pThunk->free = FIELD_OFFSET( THUNKS, thunks );
     for (i = 0; i < count-1; i++)
-    {
-        free += 8;  /* Offset of next thunk */
-        pThunk->thunks[4*i] = free;
-    }
-    pThunk->thunks[4*i] = 0;  /* Last thunk */
+        *(WORD *)&pThunk->thunks[i] = FIELD_OFFSET( THUNKS, thunks[i+1] );
+    *(WORD *)&pThunk->thunks[i] = 0;  /* Last thunk */
 }
 
 
@@ -193,7 +196,7 @@ static SEGPTR TASK_AllocThunk(void)
 
     if (!(pTask = TASK_GetCurrent())) return 0;
     sel = pTask->hCSAlias;
-    pThunk = (THUNKS *)&pTask->thunks;
+    pThunk = (THUNKS *)pTask->thunks;
     base = (char *)pThunk - (char *)pTask;
     while (!pThunk->free)
     {
@@ -202,11 +205,11 @@ static SEGPTR TASK_AllocThunk(void)
         {
             sel = GLOBAL_Alloc( GMEM_FIXED, sizeof(THUNKS) + (MIN_THUNKS-1)*8,
                                 pTask->hPDB, WINE_LDT_FLAGS_CODE );
-            if (!sel) return (SEGPTR)0;
+            if (!sel) return 0;
             TASK_CreateThunks( sel, 0, MIN_THUNKS );
             pThunk->next = sel;
         }
-        pThunk = (THUNKS *)GlobalLock16( sel );
+        pThunk = GlobalLock16( sel );
         base = 0;
     }
     base += pThunk->free;
@@ -228,12 +231,12 @@ static BOOL TASK_FreeThunk( SEGPTR thunk )
 
     if (!(pTask = TASK_GetCurrent())) return 0;
     sel = pTask->hCSAlias;
-    pThunk = (THUNKS *)&pTask->thunks;
+    pThunk = (THUNKS *)pTask->thunks;
     base = (char *)pThunk - (char *)pTask;
     while (sel && (sel != HIWORD(thunk)))
     {
         sel = pThunk->next;
-        pThunk = (THUNKS *)GlobalLock16( sel );
+        pThunk = GlobalLock16( sel );
         base = 0;
     }
     if (!sel) return FALSE;
@@ -283,7 +286,7 @@ static TDB *TASK_Create( NE_MODULE *pModule, UINT16 cmdShow, LPCSTR cmdline, BYT
 
       /* Create the thunks block */
 
-    TASK_CreateThunks( hTask, (char *)&pTask->thunks - (char *)pTask, 7 );
+    TASK_CreateThunks( hTask, (char *)pTask->thunks - (char *)pTask, 7 );
 
       /* Copy the module name */
 
@@ -312,7 +315,7 @@ static TDB *TASK_Create( NE_MODULE *pModule, UINT16 cmdShow, LPCSTR cmdline, BYT
     pTask->pdb.savedint23 = 0;
     pTask->pdb.savedint24 = 0;
     pTask->pdb.fileHandlesPtr =
-        MAKESEGPTR( GlobalHandleToSel16(pTask->hPDB), (int)&((PDB16 *)0)->fileHandles );
+        MAKESEGPTR( GlobalHandleToSel16(pTask->hPDB), FIELD_OFFSET( PDB16, fileHandles ));
     pTask->pdb.hFileHandles = 0;
     memset( pTask->pdb.fileHandles, 0xff, sizeof(pTask->pdb.fileHandles) );
     /* FIXME: should we make a copy of the environment? */
@@ -340,12 +343,12 @@ static TDB *TASK_Create( NE_MODULE *pModule, UINT16 cmdShow, LPCSTR cmdline, BYT
 
       /* Allocate a code segment alias for the TDB */
 
-    pTask->hCSAlias = GLOBAL_CreateBlock( GMEM_FIXED, (void *)pTask,
-                                          sizeof(TDB), pTask->hPDB, WINE_LDT_FLAGS_CODE );
+    pTask->hCSAlias = GLOBAL_CreateBlock( GMEM_FIXED, pTask, sizeof(TDB),
+                                          pTask->hPDB, WINE_LDT_FLAGS_CODE );
 
       /* Default DTA overwrites command line */
 
-    pTask->dta = MAKESEGPTR( pTask->hPDB, (int)&pTask->pdb.cmdLine - (int)&pTask->pdb );
+    pTask->dta = MAKESEGPTR( pTask->hPDB, FIELD_OFFSET( PDB16, cmdLine ));
 
     /* Create scheduler event for 16-bit tasks */
 
@@ -845,7 +848,8 @@ HTASK16 WINAPI KERNEL_490( HTASK16 someTask )
  */
 FARPROC16 WINAPI MakeProcInstance16( FARPROC16 func, HANDLE16 hInstance )
 {
-    BYTE *thunk,*lfunc;
+    struct thunk *thunk;
+    BYTE *lfunc;
     SEGPTR thunkaddr;
     WORD hInstanceSelector;
 
@@ -856,7 +860,7 @@ FARPROC16 WINAPI MakeProcInstance16( FARPROC16 func, HANDLE16 hInstance )
     if (!HIWORD(func)) {
       /* Win95 actually protects via SEH, but this is better for debugging */
       WARN("Ouch ! Called with invalid func %p !\n", func);
-      return (FARPROC16)0;
+      return NULL;
     }
 
     if ( (GlobalHandleToSel16(CURRENT_DS) != hInstanceSelector)
@@ -880,7 +884,7 @@ FARPROC16 WINAPI MakeProcInstance16( FARPROC16 func, HANDLE16 hInstance )
 	return func;
 
     thunkaddr = TASK_AllocThunk();
-    if (!thunkaddr) return (FARPROC16)0;
+    if (!thunkaddr) return NULL;
     thunk = MapSL( thunkaddr );
     lfunc = MapSL( (SEGPTR)func );
 
@@ -891,11 +895,10 @@ FARPROC16 WINAPI MakeProcInstance16( FARPROC16 func, HANDLE16 hInstance )
     	WARN("This was the (in)famous \"thunk useless\" warning. We thought we have to overwrite with nop;nop;, but this isn't true.\n");
     }
 
-    *thunk++ = 0xb8;    /* movw instance, %ax */
-    *thunk++ = (BYTE)(hInstanceSelector & 0xff);
-    *thunk++ = (BYTE)(hInstanceSelector >> 8);
-    *thunk++ = 0xea;    /* ljmp func */
-    *(DWORD *)thunk = (DWORD)func;
+    thunk->movw     = 0xb8;    /* movw instance, %ax */
+    thunk->instance = hInstanceSelector;
+    thunk->ljmp     = 0xea;    /* ljmp func */
+    thunk->func     = func;
     return (FARPROC16)thunkaddr;
     /* CX reg indicates if thunkaddr != NULL, implement if needed */
 }
@@ -934,7 +937,7 @@ static BOOL TASK_GetCodeSegment( FARPROC16 proc, NE_MODULE **ppModule,
     int segNr=0;
 
     /* Try pair of module handle / segment number */
-    pModule = (NE_MODULE *) GlobalLock16( HIWORD( proc ) );
+    pModule = GlobalLock16( HIWORD( proc ) );
     if ( pModule && pModule->ne_magic == IMAGE_OS2_SIGNATURE )
     {
         segNr = LOWORD( proc );
@@ -987,7 +990,7 @@ HANDLE16 WINAPI GetCodeHandle16( FARPROC16 proc )
     SEGTABLEENTRY *pSeg;
 
     if ( !TASK_GetCodeSegment( proc, NULL, &pSeg, NULL ) )
-        return (HANDLE16)0;
+        return 0;
 
     return pSeg->hSeg;
 }
@@ -1097,7 +1100,7 @@ void WINAPI SwitchStackTo16( WORD seg, WORD ptr, WORD top )
     INSTANCEDATA *pData;
     UINT16 copySize;
 
-    if (!(pData = (INSTANCEDATA *)GlobalLock16( seg ))) return;
+    if (!(pData = GlobalLock16( seg ))) return;
     TRACE("old=%04x:%04x new=%04x:%04x\n",
           SELECTOROF( NtCurrentTeb()->WOW32Reserved ),
           OFFSETOF( NtCurrentTeb()->WOW32Reserved ), seg, ptr );
@@ -1139,7 +1142,7 @@ void WINAPI SwitchStackBack16( CONTEXT86 *context )
     STACK16FRAME *oldFrame, *newFrame;
     INSTANCEDATA *pData;
 
-    if (!(pData = (INSTANCEDATA *)GlobalLock16(SELECTOROF(NtCurrentTeb()->WOW32Reserved))))
+    if (!(pData = GlobalLock16(SELECTOROF(NtCurrentTeb()->WOW32Reserved))))
         return;
     if (!pData->old_ss_sp)
     {
@@ -1240,7 +1243,7 @@ DWORD WINAPI GetCurPID16( DWORD unused )
  */
 INT16 WINAPI GetInstanceData16( HINSTANCE16 instance, WORD buffer, INT16 len )
 {
-    char *ptr = (char *)GlobalLock16( instance );
+    char *ptr = GlobalLock16( instance );
     if (!ptr || !len) return 0;
     if ((int)buffer + len >= 0x10000) len = 0x10000 - buffer;
     memcpy( (char *)GlobalLock16(CURRENT_DS) + buffer, ptr + buffer, len );

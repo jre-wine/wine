@@ -31,6 +31,7 @@
 #define WND_MAGIC     0x444e4957  /* 'WIND' */
 
 struct tagCLASS;
+struct tagDIALOGINFO;
 
 typedef struct tagWND
 {
@@ -50,8 +51,7 @@ typedef struct tagWND
     POINT          max_pos;       /* Position for maximized window */
     HWND           icon_title;    /* Icon title window */
     LPWSTR         text;          /* Window text */
-    void          *pVScroll;      /* Vertical scroll-bar info */
-    void          *pHScroll;      /* Horizontal scroll-bar info */
+    void          *pScroll;       /* Scroll-bar info */
     DWORD          dwStyle;       /* Window style (from CreateWindow) */
     DWORD          dwExStyle;     /* Extended style (from CreateWindowEx) */
     UINT_PTR       wIDmenu;       /* ID or hmenu (from CreateWindow) */
@@ -60,6 +60,7 @@ typedef struct tagWND
     HMENU          hSysMenu;      /* window's copy of System Menu */
     HICON          hIcon;         /* window's icon */
     HICON          hIconSmall;    /* window's small icon */
+    struct tagDIALOGINFO *dlgInfo;/* Dialog additional info (dialogs only) */
     int            cbWndExtra;    /* class cbWndExtra at window creation */
     DWORD_PTR      userdata;      /* User private data */
     DWORD          wExtra[1];     /* Window extra bytes */
@@ -76,6 +77,8 @@ typedef struct tagWND
 #define WIN_NEEDS_SHOW_OWNEDPOPUP 0x0080 /* WM_SHOWWINDOW:SC_SHOW must be sent in the next ShowOwnedPopup call */
 
   /* Window functions */
+extern HWND get_hwnd_message_parent(void) DECLSPEC_HIDDEN;
+extern BOOL is_desktop_window( HWND hwnd ) DECLSPEC_HIDDEN;
 extern WND *WIN_GetPtr( HWND hwnd ) DECLSPEC_HIDDEN;
 extern HWND WIN_Handle32( HWND16 hwnd16 ) DECLSPEC_HIDDEN;
 extern HWND WIN_IsCurrentProcess( HWND hwnd ) DECLSPEC_HIDDEN;

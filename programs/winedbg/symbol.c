@@ -102,7 +102,7 @@ static BOOL fill_sym_lvalue(const SYMBOL_INFO* sym, ULONG base,
          */
         if (!types_get_info(&type, TI_GET_VALUE, &v) || (v.n1.n2.vt & VT_BYREF))
         {
-            snprintf(buffer, sz, "Couldn't dereference pointer for const value");
+            if (buffer) snprintf(buffer, sz, "Couldn't dereference pointer for const value");
             return FALSE;
         }
         pdw = (DWORD*)lexeme_alloc_size(sizeof(*pdw));
@@ -146,7 +146,7 @@ struct sgv_data
 
 static BOOL CALLBACK sgv_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
 {
-    struct sgv_data*    sgv = (struct sgv_data*)ctx;
+    struct sgv_data*    sgv = ctx;
     unsigned            insp;
     char                tmp[64];
 
@@ -191,6 +191,99 @@ static BOOL CALLBACK sgv_cb(PSYMBOL_INFO sym, ULONG size, PVOID ctx)
 
     return TRUE;
 }
+
+enum sym_get_lval symbol_picker_interactive(const char* name, const struct sgv_data* sgv,
+                                            struct dbg_lvalue* rtn)
+{
+    char        buffer[512];
+    unsigned    i;
+
+    if (!dbg_interactiveP)
+    {
+        dbg_printf("More than one symbol named %s, picking the first one\n", name);
+        *rtn = sgv->syms[0].lvalue;
+        return sglv_found;
+    }
+
+    dbg_printf("Many symbols with name '%s', "
+               "choose the one you want (<cr> to abort):\n", name);
+    for (i = 0; i < sgv->num; i++)
+    {
+        if (sgv->num - sgv->num_thunks > 1 && (sgv->syms[i].flags & SYMFLAG_THUNK) && !DBG_IVAR(AlwaysShowThunks))
+            continue;
+        dbg_printf("[%d]: ", i + 1);
+        if (sgv->syms[i].flags & SYMFLAG_LOCAL)
+        {
+            dbg_printf("%s %sof %s\n",
+                       sgv->syms[i].flags & SYMFLAG_PARAMETER ? "Parameter" : "Local variable",
+                       sgv->syms[i].flags & (SYMFLAG_REGISTER|SYMFLAG_REGREL) ? "(in a register) " : "",
+                       name);
+        }
+        else if (sgv->syms[i].flags & SYMFLAG_THUNK)
+        {
+            print_address(&sgv->syms[i].lvalue.addr, TRUE);
+            /* FIXME: should display where the thunks points to */
+            dbg_printf(" thunk %s\n", name);
+        }
+        else
+        {
+            print_address(&sgv->syms[i].lvalue.addr, TRUE);
+            dbg_printf("\n");
+        }
+    }
+    do
+    {
+        i = 0;
+        if (input_read_line("=> ", buffer, sizeof(buffer)))
+        {
+            if (buffer[0] == '\0') return sglv_aborted;
+            i = atoi(buffer);
+            if (i < 1 || i > sgv->num)
+                dbg_printf("Invalid choice %d\n", i);
+        }
+        else return sglv_aborted;
+    } while (i < 1 || i > sgv->num);
+
+    /* The array is 0-based, but the choices are 1..n,
+     * so we have to subtract one before returning.
+     */
+    *rtn = sgv->syms[i - 1].lvalue;
+    return sglv_found;
+}
+
+enum sym_get_lval symbol_picker_scoped(const char* name, const struct sgv_data* sgv,
+                                       struct dbg_lvalue* rtn)
+{
+    unsigned i;
+    int local = -1;
+
+    for (i = 0; i < sgv->num; i++)
+    {
+        if (sgv->num - sgv->num_thunks > 1 && (sgv->syms[i].flags & SYMFLAG_THUNK) && !DBG_IVAR(AlwaysShowThunks))
+            continue;
+        if (sgv->syms[i].flags & SYMFLAG_LOCAL)
+        {
+            if (local == -1)
+                local = i;
+            else
+            {
+                /* FIXME: several locals with same name... which one to pick ?? */
+                dbg_printf("Several local variables/parameters for %s, aborting\n", name);
+                return sglv_aborted;
+            }
+        }
+    }
+    if (local != -1)
+    {
+        *rtn = sgv->syms[local].lvalue;
+        return sglv_found;
+    }
+    /* no locals found, multiple globals... abort for now */
+    dbg_printf("Several global variables for %s, aborting\n", name);
+    return sglv_aborted;
+}
+
+symbol_picker_t symbol_current_picker = symbol_picker_interactive;
 
 /***********************************************************************
  *           symbol_get_lvalue
@@ -317,65 +410,17 @@ enum sym_get_lval symbol_get_lvalue(const char* name, const int lineno,
         }
     }
 
-    i = 0;
-    if (dbg_interactiveP)
+    if (sgv.num - sgv.num_thunks > 1 || /* many symbols non thunks (and showing only non thunks) */
+        (sgv.num > 1 && DBG_IVAR(AlwaysShowThunks)) || /* many symbols (showing symbols & thunks) */
+        (sgv.num == sgv.num_thunks && sgv.num_thunks > 1))
     {
-        if (sgv.num - sgv.num_thunks > 1 || /* many symbols non thunks (and showing only non thunks) */
-            (sgv.num > 1 && DBG_IVAR(AlwaysShowThunks)) || /* many symbols (showing symbols & thunks) */
-            (sgv.num == sgv.num_thunks && sgv.num_thunks > 1))
-        {
-            dbg_printf("Many symbols with name '%s', "
-                       "choose the one you want (<cr> to abort):\n", name);
-            for (i = 0; i < sgv.num; i++) 
-            {
-                if (sgv.num - sgv.num_thunks > 1 && (sgv.syms[i].flags & SYMFLAG_THUNK) && !DBG_IVAR(AlwaysShowThunks))
-                    continue;
-                dbg_printf("[%d]: ", i + 1);
-                if (sgv.syms[i].flags & SYMFLAG_LOCAL)
-                {
-                    dbg_printf("%s %sof %s\n",
-                               sgv.syms[i].flags & SYMFLAG_PARAMETER ? "Parameter" : "Local variable",
-                               sgv.syms[i].flags & (SYMFLAG_REGISTER|SYMFLAG_REGREL) ? "(in a register) " : "",
-                               name);
-                }
-                else if (sgv.syms[i].flags & SYMFLAG_THUNK) 
-                {
-                    print_address(&sgv.syms[i].lvalue.addr, TRUE);
-                    /* FIXME: should display where the thunks points to */
-                    dbg_printf(" thunk %s\n", name);
-                }
-                else
-                {
-                    print_address(&sgv.syms[i].lvalue.addr, TRUE);
-                    dbg_printf("\n");
-                }
-            }
-            do
-            {
-                i = 0;
-                if (input_read_line("=> ", buffer, sizeof(buffer)))
-                {
-                    if (buffer[0] == '\0') return sglv_aborted;
-                    i = atoi(buffer);
-                    if (i < 1 || i > sgv.num)
-                        dbg_printf("Invalid choice %d\n", i);
-                }
-                else return sglv_aborted;
-            } while (i < 1 || i > sgv.num);
-
-            /* The array is 0-based, but the choices are 1..n, 
-             * so we have to subtract one before returning.
-             */
-            i--;
-        }
+        return symbol_current_picker(name, &sgv, rtn);
     }
-    else
-    {
-        /* FIXME: could display the list of non-picked up symbols */
-        if (sgv.num > 1)
-            dbg_printf("More than one symbol named %s, picking the first one\n", name);
-    }
-    *rtn = sgv.syms[i].lvalue;
+    /* first symbol is the one we want:
+     * - only one symbol found,
+     * - or many symbols but only one non thunk when AlwaysShowThunks is FALSE
+     */
+    *rtn = sgv.syms[0].lvalue;
     return sglv_found;
 }
 
@@ -561,7 +606,7 @@ BOOL symbol_get_line(const char* filename, const char* name, IMAGEHLP_LINE* line
         il.SizeOfStruct = sizeof(il);
         if (!SymGetLineFromAddr(dbg_curr_process->handle, linear, &disp, &il))
             continue;
-        if (filename && strcmp(line->FileName, filename)) continue;
+        if (filename && strcmp(il.FileName, filename)) continue;
         if (found)
         {
             WINE_FIXME("Several found, returning first (may not be what you want)...\n");
@@ -597,7 +642,7 @@ void symbol_print_local(const SYMBOL_INFO* sym, ULONG base,
 
     if (fill_sym_lvalue(sym, base, &lvalue, buffer, sizeof(buffer)))
     {
-        print_value(&lvalue, 'x', 1);
+        print_value(&lvalue, 0, 1);
         if (detailed)
             dbg_printf(" (%s%s)",
                        (sym->Flags & SYMFLAG_PARAMETER) ? "parameter" : "local",
@@ -605,7 +650,7 @@ void symbol_print_local(const SYMBOL_INFO* sym, ULONG base,
     }
     else
     {
-        dbg_printf(buffer);
+        dbg_printf("%s", buffer);
         if (detailed)
             dbg_printf(" (%s)",
                        (sym->Flags & SYMFLAG_PARAMETER) ? "parameter" : "local");

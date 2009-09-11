@@ -53,7 +53,7 @@ static property_data_t *get_properties( HWND hwnd, int *count )
         *count = 0;
         SERVER_START_REQ( get_window_properties )
         {
-            req->window = hwnd;
+            req->window = wine_server_user_handle( hwnd );
             wine_server_set_reply( req, data, total * sizeof(*data) );
             if (!wine_server_call( req )) res = reply->total;
         }
@@ -130,17 +130,17 @@ HANDLE WINAPI GetPropA( HWND hwnd, LPCSTR str )
  */
 HANDLE WINAPI GetPropW( HWND hwnd, LPCWSTR str )
 {
-    HANDLE ret = 0;
+    ULONG_PTR ret = 0;
 
     SERVER_START_REQ( get_window_property )
     {
-        req->window = hwnd;
+        req->window = wine_server_user_handle( hwnd );
         if (!HIWORD(str)) req->atom = LOWORD(str);
         else wine_server_add_data( req, str, strlenW(str) * sizeof(WCHAR) );
-        if (!wine_server_call_err( req )) ret = reply->handle;
+        if (!wine_server_call_err( req )) ret = reply->data;
     }
     SERVER_END_REQ;
-    return ret;
+    return (HANDLE)ret;
 }
 
 
@@ -166,8 +166,8 @@ BOOL WINAPI SetPropW( HWND hwnd, LPCWSTR str, HANDLE handle )
 
     SERVER_START_REQ( set_window_property )
     {
-        req->window = hwnd;
-        req->handle = handle;
+        req->window = wine_server_user_handle( hwnd );
+        req->data   = (ULONG_PTR)handle;
         if (!HIWORD(str)) req->atom = LOWORD(str);
         else wine_server_add_data( req, str, strlenW(str) * sizeof(WCHAR) );
         ret = !wine_server_call_err( req );
@@ -195,18 +195,18 @@ HANDLE WINAPI RemovePropA( HWND hwnd, LPCSTR str )
  */
 HANDLE WINAPI RemovePropW( HWND hwnd, LPCWSTR str )
 {
-    HANDLE ret = 0;
+    ULONG_PTR ret = 0;
 
     SERVER_START_REQ( remove_window_property )
     {
-        req->window = hwnd;
+        req->window = wine_server_user_handle( hwnd );
         if (!HIWORD(str)) req->atom = LOWORD(str);
         else wine_server_add_data( req, str, strlenW(str) * sizeof(WCHAR) );
-        if (!wine_server_call_err( req )) ret = reply->handle;
+        if (!wine_server_call_err( req )) ret = reply->data;
     }
     SERVER_END_REQ;
 
-    return ret;
+    return (HANDLE)ret;
 }
 
 
@@ -224,7 +224,7 @@ INT WINAPI EnumPropsExA(HWND hwnd, PROPENUMPROCEXA func, LPARAM lParam)
         {
             char string[ATOM_BUFFER_SIZE];
             if (!GlobalGetAtomNameA( list[i].atom, string, ATOM_BUFFER_SIZE )) continue;
-            if (!(ret = func( hwnd, string, list[i].handle, lParam ))) break;
+            if (!(ret = func( hwnd, string, (HANDLE)(ULONG_PTR)list[i].data, lParam ))) break;
         }
         HeapFree( GetProcessHeap(), 0, list );
     }
@@ -246,7 +246,7 @@ INT WINAPI EnumPropsExW(HWND hwnd, PROPENUMPROCEXW func, LPARAM lParam)
         {
             WCHAR string[ATOM_BUFFER_SIZE];
             if (!GlobalGetAtomNameW( list[i].atom, string, ATOM_BUFFER_SIZE )) continue;
-            if (!(ret = func( hwnd, string, list[i].handle, lParam ))) break;
+            if (!(ret = func( hwnd, string, (HANDLE)(ULONG_PTR)list[i].data, lParam ))) break;
         }
         HeapFree( GetProcessHeap(), 0, list );
     }
@@ -277,14 +277,14 @@ INT16 WINAPI EnumProps16( HWND16 hwnd, PROPENUMPROC16 func )
                 args[3] = hwnd;
                 args[2] = SELECTOROF(segptr);
                 args[1] = OFFSETOF(segptr);
-                args[0] = LOWORD(list[i].handle);
+                args[0] = LOWORD(list[i].data);
             }
             else
             {
                 args[3] = hwnd;
                 args[2] = 0;
                 args[1] = list[i].atom;
-                args[0] = LOWORD(list[i].handle);
+                args[0] = LOWORD(list[i].data);
             }
             WOWCallback16Ex( (DWORD)func, WCB16_PASCAL, sizeof(args), args, &result );
             if (!(ret = LOWORD(result))) break;

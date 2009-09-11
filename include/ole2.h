@@ -84,6 +84,7 @@ HRESULT     WINAPI OleCreateLinkFromData(LPDATAOBJECT pSrcDataObj, REFIID riid,
                 LPOLECLIENTSITE pClientSite, LPSTORAGE pStg,
                 LPVOID* ppvObj);
 HRESULT     WINAPI OleSetContainedObject(LPUNKNOWN pUnknown, BOOL fContained);
+HRESULT     WINAPI OleNoteObjectVisible(LPUNKNOWN pUnknown, BOOL fVisible);
 HRESULT     WINAPI OleQueryLinkFromData(IDataObject* pSrcDataObject);
 HRESULT     WINAPI OleQueryCreateFromData(LPDATAOBJECT pSrcDataObject);
 HRESULT     WINAPI OleRun(LPUNKNOWN pUnknown);
@@ -111,6 +112,7 @@ HRESULT     WINAPI OleCreateLink(LPMONIKER pmkLinkSrc, REFIID riid, DWORD render
 HRESULT     WINAPI OleCreate(REFCLSID rclsid, REFIID riid, DWORD renderopt, LPFORMATETC pFormatEtc, LPOLECLIENTSITE pClientSite,
                 LPSTORAGE pStg, LPVOID* ppvObj);
 HRESULT     WINAPI OleFlushClipboard(void);
+HRESULT     WINAPI GetConvertStg(LPSTORAGE pStg);
 HRESULT     WINAPI SetConvertStg(LPSTORAGE pStg, BOOL fConvert);
 BOOL        WINAPI IsAccelerator(HACCEL hAccel, int cAccelEntries, struct tagMSG* lpMsg, WORD* lpwCmd);
 HRESULT     WINAPI OleCreateLinkToFile(LPCOLESTR lpszFileName, REFIID riid, DWORD renderopt, LPFORMATETC lpFormatEtc,
@@ -120,6 +122,9 @@ HRESULT     WINAPI WriteFmtUserTypeStg(LPSTORAGE pstg, CLIPFORMAT cf, LPOLESTR l
 HRESULT     WINAPI OleTranslateAccelerator (LPOLEINPLACEFRAME lpFrame, LPOLEINPLACEFRAMEINFO lpFrameInfo, struct tagMSG* lpmsg);
 HRESULT     WINAPI OleCreateFromData(LPDATAOBJECT pSrcDataObj, REFIID riid, DWORD renderopt, LPFORMATETC pFormatEtc,
                 LPOLECLIENTSITE pClientSite, LPSTORAGE pStg, LPVOID* ppvObj);
+HRESULT     WINAPI OleCreateFromDataEx(LPDATAOBJECT pSrcDataObj, REFIID riid, DWORD dwFlags, DWORD renderopt, ULONG num_formats,
+                                       DWORD *adv_flags, LPFORMATETC fmts, IAdviseSink *sink, DWORD *conns,
+                                       LPOLECLIENTSITE pClientSite, LPSTORAGE pStg, LPVOID* ppvObj);
 HRESULT     WINAPI OleCreateDefaultHandler(REFCLSID  clsid,
 					   LPUNKNOWN pUnkOuter,
 					   REFIID    riid,
@@ -154,6 +159,7 @@ typedef struct _OLESTREAM {
 HRESULT     WINAPI OleConvertOLESTREAMToIStorage( LPOLESTREAM lpolestream, LPSTORAGE pstg, const DVTARGETDEVICE* ptd);
 HRESULT     WINAPI OleConvertIStorageToOLESTREAM( LPSTORAGE pstg, LPOLESTREAM lpolestream);
 
+HRESULT     WINAPI OleDoAutoConvert( LPSTORAGE pStg, LPCLSID pClsidNew );
 HRESULT     WINAPI OleGetAutoConvert( REFCLSID clsidOld, LPCLSID pClsidNew );
 HRESULT     WINAPI OleSetAutoConvert( REFCLSID clsidOld, REFCLSID clsidNew );
 

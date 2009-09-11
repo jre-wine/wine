@@ -29,20 +29,18 @@
 #include <stdarg.h>
 
 #include "debugger.h"
-#include "wine/debug.h"
 
-WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
 static struct be_process_io be_process_module_io;
 
-static BOOL WINAPI tgt_process_module_read(HANDLE hProcess, const void* addr,
-                                             void* buffer, SIZE_T len, SIZE_T* rlen)
+static BOOL tgt_process_module_read(HANDLE hProcess, const void* addr,
+                                    void* buffer, SIZE_T len, SIZE_T* rlen)
 {
     return FALSE;
 }
 
-static BOOL WINAPI tgt_process_module_write(HANDLE hProcess, void* addr,
-                                             const void* buffer, SIZE_T len, SIZE_T* wlen)
+static BOOL tgt_process_module_write(HANDLE hProcess, void* addr,
+                                     const void* buffer, SIZE_T len, SIZE_T* wlen)
 {
     return FALSE;
 }
@@ -52,15 +50,29 @@ enum dbg_start tgt_module_load(const char* name, BOOL keep)
     DWORD opts = SymGetOptions();
     HANDLE hDummy = (HANDLE)0x87654321;
     enum dbg_start ret = start_ok;
+    WCHAR* nameW;
+    unsigned len;
 
     SymSetOptions((opts & ~(SYMOPT_UNDNAME|SYMOPT_DEFERRED_LOADS)) |
                   SYMOPT_LOAD_LINES | SYMOPT_AUTO_PUBLICS | 0x40000000);
-    if (!SymInitialize(hDummy, NULL, FALSE))
+    if (!dbg_init(hDummy, NULL, FALSE))
         return start_error_init;
-    if (!SymLoadModule(hDummy, NULL, name, NULL, 0, 0))
+    len = MultiByteToWideChar(CP_ACP, 0, name, -1, NULL, 0);
+    nameW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR));
+    if (!nameW)
     {
         ret = start_error_init;
         keep = FALSE;
+    }
+    else
+    {
+        len = MultiByteToWideChar(CP_ACP, 0, name, -1, nameW, len);
+        if (!dbg_load_module(hDummy, NULL, nameW, 0, 0))
+        {
+            ret = start_error_init;
+            keep = FALSE;
+        }
+        HeapFree(GetProcessHeap(), 0, nameW);
     }
 
     if (keep)
@@ -90,7 +102,7 @@ static BOOL tgt_process_module_close_process(struct dbg_process* pcs, BOOL kill)
     return TRUE;
 }
 
-static BOOL WINAPI tgt_process_module_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)
+static BOOL tgt_process_module_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)
 {
     return FALSE;
 }

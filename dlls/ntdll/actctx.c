@@ -338,6 +338,7 @@ static void free_assembly_identity(struct assembly_identity *ai)
     RtlFreeHeap( GetProcessHeap(), 0, ai->arch );
     RtlFreeHeap( GetProcessHeap(), 0, ai->public_key );
     RtlFreeHeap( GetProcessHeap(), 0, ai->language );
+    RtlFreeHeap( GetProcessHeap(), 0, ai->type );
 }
 
 static struct entity* add_entity(struct entity_array *array, DWORD kind)
@@ -496,17 +497,19 @@ static WCHAR *build_assembly_dir(struct assembly_identity* ai)
     static const WCHAR noneW[] = {'n','o','n','e',0};
     static const WCHAR mskeyW[] = {'d','e','a','d','b','e','e','f',0};
 
+    const WCHAR *arch = ai->arch ? ai->arch : noneW;
     const WCHAR *key = ai->public_key ? ai->public_key : noneW;
     const WCHAR *lang = ai->language ? ai->language : noneW;
-    SIZE_T size = (strlenW(ai->arch) + 1 + strlenW(ai->name) + 1 + strlenW(key) + 24 + 1 +
-                   strlenW(lang) + 1) * sizeof(WCHAR) + sizeof(mskeyW);
+    const WCHAR *name = ai->name ? ai->name : noneW;
+    SIZE_T size = (strlenW(arch) + 1 + strlenW(name) + 1 + strlenW(key) + 24 + 1 +
+		    strlenW(lang) + 1) * sizeof(WCHAR) + sizeof(mskeyW);
     WCHAR *ret;
 
     if (!(ret = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return NULL;
 
-    strcpyW( ret, ai->arch );
+    strcpyW( ret, arch );
     strcatW( ret, undW );
-    strcatW( ret, ai->name );
+    strcatW( ret, name );
     strcatW( ret, undW );
     strcatW( ret, key );
     strcatW( ret, undW );
@@ -1387,33 +1390,6 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
              assembly->no_inherit)
         return FALSE;
 
-    if (xmlstr_cmp(&elem, assemblyIdentityW))
-    {
-        if (!parse_assembly_identity_elem(xmlbuf, acl->actctx, &assembly->id)) return FALSE;
-        ret = next_xml_elem(xmlbuf, &elem);
-
-        if (expected_ai)
-        {
-            /* FIXME: more tests */
-            if (assembly->type == ASSEMBLY_MANIFEST &&
-                memcmp(&assembly->id.version, &expected_ai->version, sizeof(assembly->id.version)))
-            {
-                FIXME("wrong version for assembly manifest\n");
-                return FALSE;
-            }
-            else if (assembly->type == ASSEMBLY_SHARED_MANIFEST &&
-                (assembly->id.version.major != expected_ai->version.major ||
-                 assembly->id.version.minor != expected_ai->version.minor ||
-                 assembly->id.version.build < expected_ai->version.build ||
-                 (assembly->id.version.build == expected_ai->version.build &&
-                  assembly->id.version.revision < expected_ai->version.revision)))
-            {
-                FIXME("wrong version for shared assembly manifest\n");
-                return FALSE;
-            }
-        }
-    }
-
     while (ret)
     {
         if (xmlstr_cmp_end(&elem, assemblyW))
@@ -1444,6 +1420,35 @@ static BOOL parse_assembly_elem(xmlbuf_t* xmlbuf, struct actctx_loader* acl,
         else if (xmlstr_cmp(&elem, clrSurrogateW))
         {
             ret = parse_clr_surrogate_elem(xmlbuf, assembly);
+        }
+        else if (xmlstr_cmp(&elem, assemblyIdentityW))
+        {
+            if (!parse_assembly_identity_elem(xmlbuf, acl->actctx, &assembly->id)) return FALSE;
+
+            if (expected_ai)
+            {
+                /* FIXME: more tests */
+                if (assembly->type == ASSEMBLY_MANIFEST &&
+                    memcmp(&assembly->id.version, &expected_ai->version, sizeof(assembly->id.version)))
+                {
+                    FIXME("wrong version for assembly manifest: %u.%u.%u.%u / %u.%u.%u.%u\n",
+                          expected_ai->version.major, expected_ai->version.minor,
+                          expected_ai->version.build, expected_ai->version.revision,
+                          assembly->id.version.major, assembly->id.version.minor,
+                          assembly->id.version.build, assembly->id.version.revision);
+                    ret = FALSE;
+                }
+                else if (assembly->type == ASSEMBLY_SHARED_MANIFEST &&
+                         (assembly->id.version.major != expected_ai->version.major ||
+                          assembly->id.version.minor != expected_ai->version.minor ||
+                          assembly->id.version.build < expected_ai->version.build ||
+                          (assembly->id.version.build == expected_ai->version.build &&
+                           assembly->id.version.revision < expected_ai->version.revision)))
+                {
+                    FIXME("wrong version for shared assembly manifest\n");
+                    ret = FALSE;
+                }
+            }
         }
         else
         {
@@ -2017,7 +2022,9 @@ static NTSTATUS parse_depend_manifests(struct actctx_loader* acl)
         {
             if (!acl->dependencies[i].optional)
             {
-                FIXME( "Could not find dependent assembly %s\n", debugstr_w(acl->dependencies[i].name) );
+                FIXME( "Could not find dependent assembly %s (%s)\n",
+                    debugstr_w(acl->dependencies[i].name),
+                    debugstr_version(&acl->dependencies[i].version) );
                 status = STATUS_SXS_CANT_GEN_ACTCTX;
                 break;
             }
@@ -2028,12 +2035,14 @@ static NTSTATUS parse_depend_manifests(struct actctx_loader* acl)
 }
 
 /* find the appropriate activation context for RtlQueryInformationActivationContext */
-static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags )
+static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags, ULONG class )
 {
     NTSTATUS status = STATUS_SUCCESS;
 
     if (flags & QUERY_ACTCTX_FLAG_USE_ACTIVE_ACTCTX)
     {
+        if (*handle) return STATUS_INVALID_PARAMETER;
+
         if (NtCurrentTeb()->ActivationContextStack.ActiveFrame)
             *handle = NtCurrentTeb()->ActivationContextStack.ActiveFrame->ActivationContext;
     }
@@ -2041,6 +2050,8 @@ static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags )
     {
         ULONG magic;
         LDR_MODULE *pldr;
+
+        if (!*handle) return STATUS_INVALID_PARAMETER;
 
         LdrLockLoaderLock( 0, NULL, &magic );
         if (!LdrFindEntryForAddress( *handle, &pldr ))
@@ -2053,7 +2064,8 @@ static NTSTATUS find_query_actctx( HANDLE *handle, DWORD flags )
         else status = STATUS_DLL_NOT_FOUND;
         LdrUnlockLoaderLock( 0, magic );
     }
-    else if (!*handle) *handle = process_actctx;
+    else if (!*handle && (class != ActivationContextBasicInformation))
+        *handle = process_actctx;
 
     return status;
 }
@@ -2210,9 +2222,12 @@ NTSTATUS WINAPI RtlCreateActivationContext( HANDLE *handle, const void *ptr )
     {
         UNICODE_STRING dir;
         WCHAR *p;
+        HMODULE module;
 
-        if ((status = get_module_filename( NtCurrentTeb()->Peb->ImageBaseAddress, &dir, 0 )))
-            goto error;
+        if (pActCtx->dwFlags & ACTCTX_FLAG_HMODULE_VALID) module = pActCtx->hModule;
+        else module = NtCurrentTeb()->Peb->ImageBaseAddress;
+
+        if ((status = get_module_filename( module, &dir, 0 ))) goto error;
         if ((p = strrchrW( dir.Buffer, '\\' ))) p[1] = 0;
         actctx->appdir.info = dir.Buffer;
     }
@@ -2427,7 +2442,8 @@ NTSTATUS WINAPI RtlQueryInformationActivationContext( ULONG flags, HANDLE handle
     TRACE("%08x %p %p %u %p %ld %p\n", flags, handle,
           subinst, class, buffer, bufsize, retlen);
 
-    if ((status = find_query_actctx( &handle, flags ))) return status;
+    if (retlen) *retlen = 0;
+    if ((status = find_query_actctx( &handle, flags, class ))) return status;
 
     switch (class)
     {

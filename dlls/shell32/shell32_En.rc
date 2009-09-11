@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "shresdef.h"
+
 LANGUAGE LANG_ENGLISH, SUBLANG_DEFAULT
 
 MENU_001 MENU DISCARDABLE
@@ -90,6 +92,28 @@ BEGIN
 	END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Lar&ge Icons", FCIDM_SHVIEW_BIGICON
+        MENUITEM "S&mall Icons", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&List", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "&Details", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+    END
+END
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Browse for Folder"
@@ -106,7 +130,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Browse for Folder"
 FONT 8, "MS Shell Dlg"
 {
@@ -156,13 +180,13 @@ STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION ""
 FONT 8, "MS Shell Dlg"
 {
- ICON "", 12297, 7, 11, 18, 20, WS_VISIBLE
- LTEXT "Type the name of a program, folder, document, or Internet resource, and Wine will open it for you.", 12289, 36, 11, 182, 18
- LTEXT "&Open:", 12305, 7, 39, 24, 10
- CONTROL "", 12298, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
+ ICON "", IDC_RUNDLG_ICON, 7, 11, 18, 20, WS_VISIBLE
+ LTEXT "Type the name of a program, folder, document, or Internet resource, and Wine will open it for you.", IDC_RUNDLG_DESCRIPTION, 36, 11, 182, 18
+ LTEXT "&Open:", IDC_RUNDLG_LABEL, 7, 39, 24, 10
+ CONTROL "", IDC_RUNDLG_EDITPATH, "COMBOBOX", WS_TABSTOP | WS_GROUP | WS_VSCROLL | WS_VISIBLE | CBS_DISABLENOSCROLL | CBS_AUTOHSCROLL | CBS_DROPDOWN, 36, 37, 183, 100
  DEFPUSHBUTTON "OK", IDOK, 62, 63, 50, 14, WS_TABSTOP
  PUSHBUTTON "Cancel", IDCANCEL, 116, 63, 50, 14, WS_TABSTOP
- PUSHBUTTON "&Browse...", 12288, 170, 63, 50, 14, WS_TABSTOP
+ PUSHBUTTON "&Browse...", IDC_RUNDLG_BROWSE, 170, 63, 50, 14, WS_TABSTOP
 }
 
 STRINGTABLE
@@ -186,6 +210,7 @@ STRINGTABLE
 	IDS_DESKTOP		"Desktop"
 	IDS_MYCOMPUTER		"My Computer"
 	IDS_RECYCLEBIN_FOLDER_NAME      "Trash"
+	IDS_CONTROLPANEL	"Control Panel"
 
         /* context menus */
 	IDS_VIEW_LARGE		"Lar&ge Icons"
@@ -219,6 +244,12 @@ STRINGTABLE
         IDS_SHUTDOWN_TITLE      "Shutdown"
         IDS_SHUTDOWN_PROMPT     "Do you want to shutdown your Wine session?"
 
+        /* Run File dialog */
+        IDS_RUNDLG_ERROR           "Unable to display Run File dialog box (internal error)"
+        IDS_RUNDLG_BROWSE_ERROR    "Unable to display Browse dialog box (internal error)"
+        IDS_RUNDLG_BROWSE_CAPTION  "Browse"
+        IDS_RUNDLG_BROWSE_FILTER   "Executable Files\0*.exe\0All Files\0*.*\0\0"
+
         /* shell folder path default values */
 	IDS_PROGRAMS                "Start Menu\\Programs"
 	IDS_PERSONAL                "My Documents"
@@ -243,12 +274,18 @@ STRINGTABLE
 	IDS_PROGRAM_FILES_COMMON    "Program Files\\Common Files"
 	IDS_COMMON_DOCUMENTS        "Documents"
 	IDS_ADMINTOOLS              "Start Menu\\Programs\\Administrative Tools"
-	IDS_COMMON_MUSIC            "Documents\\My Music"
-	IDS_COMMON_PICTURES         "Documents\\My Pictures"
-	IDS_COMMON_VIDEO            "Documents\\My Videos"
+	IDS_COMMON_MUSIC            "Music"
+	IDS_COMMON_PICTURES         "Pictures"
+	IDS_COMMON_VIDEO            "Videos"
 	IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
 
 	IDS_NEWFOLDER		"New Folder"
+
+	IDS_CPANEL_TITLE            "Wine Control Panel"
+	IDS_CPANEL_NAME             "Name"
+	IDS_CPANEL_DESCRIPTION      "Description"
+
+        IDS_SHLEXEC_NOASSOC         "There is no Windows program configured to open this type of file."
 }
 
 STRINGTABLE
@@ -264,6 +301,6 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of \
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
 Lesser General Public License for more details.\n\n\
 You should have received a copy of the GNU Lesser General Public \
-License along with this library; if not, write to the Free Software \
+License along with Wine; if not, write to the Free Software \
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 }

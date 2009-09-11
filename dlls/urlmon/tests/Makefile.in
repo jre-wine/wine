@@ -4,12 +4,12 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = urlmon.dll
 IMPORTS   = urlmon ole32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
 
 CTESTS = \
 	generated.c \
 	misc.c \
 	protocol.c \
+	sec_mgr.c \
 	stream.c \
 	url.c
 

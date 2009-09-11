@@ -368,7 +368,7 @@ UINT DOSMEM_ResizeBlock(void *ptr, UINT size, BOOL exact)
 
     /* resize needed? */
     if (mcb->size == size)
-        return size;
+        return size << 4;
 
     /* collapse free blocks */
     DOSMEM_Collapse( mcb );    
@@ -511,8 +511,6 @@ BOOL DOSMEM_MapDosLayout(void)
             ERR( "Need full access to the first megabyte for DOS mode\n" );
             ExitProcess(1);
         }
-        MESSAGE( "Warning: unprotecting memory to allow real-mode calls.\n"
-                 "         NULL pointer accesses will no longer be caught.\n" );
         /* copy the BIOS and ISR area down */
         memcpy( DOSMEM_dosmem, DOSMEM_sysmem, 0x400 + 0x100 );
         DOSMEM_sysmem = DOSMEM_dosmem;

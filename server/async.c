@@ -43,7 +43,7 @@ struct async
     unsigned int         timeout_status;  /* status to report upon timeout */
     struct event        *event;
     struct completion   *completion;
-    unsigned long        comp_key;
+    apc_param_t          comp_key;
     async_data_t         data;            /* data for async I/O call */
 };
 
@@ -214,7 +214,7 @@ struct async *create_async( struct thread *thread, struct async_queue *queue, co
     async->timeout = NULL;
     async->queue   = (struct async_queue *)grab_object( queue );
     async->completion = NULL;
-    if (queue->fd) fd_assign_completion( queue->fd, &async->completion, &async->comp_key );
+    if (queue->fd) async->completion = fd_get_completion( queue->fd, &async->comp_key );
 
     list_add_tail( &queue->queue, &async->queue_entry );
     grab_object( async );
@@ -234,7 +234,7 @@ void async_set_timeout( struct async *async, timeout_t timeout, unsigned int sta
 }
 
 /* store the result of the client-side async callback */
-void async_set_result( struct object *obj, unsigned int status, unsigned long total )
+void async_set_result( struct object *obj, unsigned int status, unsigned int total, client_ptr_t apc )
 {
     struct async *async = (struct async *)obj;
 
@@ -260,14 +260,14 @@ void async_set_result( struct object *obj, unsigned int status, unsigned long to
         async->status = status;
         if (async->completion && async->data.cvalue)
             add_completion( async->completion, async->comp_key, async->data.cvalue, status, total );
-        if (async->data.apc)
+        if (apc)
         {
             apc_call_t data;
             memset( &data, 0, sizeof(data) );
             data.type         = APC_USER;
-            data.user.func    = async->data.apc;
-            data.user.args[0] = (unsigned long)async->data.arg;
-            data.user.args[1] = (unsigned long)async->data.iosb;
+            data.user.func    = apc;
+            data.user.args[0] = async->data.arg;
+            data.user.args[1] = async->data.iosb;
             data.user.args[2] = 0;
             thread_queue_apc( async->thread, NULL, &data );
         }
@@ -286,6 +286,28 @@ int async_waiting( struct async_queue *queue )
     if (!(ptr = list_head( &queue->queue ))) return 0;
     async = LIST_ENTRY( ptr, struct async, queue_entry );
     return async->status == STATUS_PENDING;
+}
+
+int async_wake_up_by( struct async_queue *queue, struct process *process,
+                      struct thread *thread, client_ptr_t iosb, unsigned int status )
+{
+    struct list *ptr, *next;
+    int woken = 0;
+
+    if (!queue || (!process && !thread && !iosb)) return 0;
+
+    LIST_FOR_EACH_SAFE( ptr, next, &queue->queue )
+    {
+        struct async *async = LIST_ENTRY( ptr, struct async, queue_entry );
+        if ( (!process || async->thread->process == process) &&
+             (!thread || async->thread == thread) &&
+             (!iosb || async->data.iosb == iosb) )
+        {
+            async_terminate( async, status );
+            woken++;
+        }
+    }
+    return woken;
 }
 
 /* wake up async operations on the queue */

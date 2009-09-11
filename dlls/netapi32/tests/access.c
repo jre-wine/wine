@@ -50,8 +50,7 @@ static WCHAR sTooLongPassword[] = {'a','b','c','d','e','f','g','h','a','b','c','
     'a', 0};
 
 static WCHAR sTestUserName[] = {'t', 'e', 's', 't', 'u', 's', 'e', 'r', 0};
-static WCHAR sTestUserOldPass[] = {'o', 'l', 'd', 'p', 'a', 's', 's', 0};
-static WCHAR sTestUserNewPass[] = {'n', 'e', 'w', 'p', 'a', 's', 's', 0};
+static WCHAR sTestUserOldPass[] = {'O', 'l', 'd', 'P', 'a', 's', 's', 'W', '0', 'r', 'd', 'S', 'e', 't', '!', '~', 0};
 static const WCHAR sBadNetPath[] = {'\\','\\','B','a',' ',' ','p','a','t','h',0};
 static const WCHAR sInvalidName[] = {'\\',0};
 static const WCHAR sInvalidName2[] = {'\\','\\',0};
@@ -63,7 +62,6 @@ static NET_API_STATUS (WINAPI *pNetQueryDisplayInformation)(LPWSTR,DWORD,DWORD,D
 static NET_API_STATUS (WINAPI *pNetUserGetInfo)(LPCWSTR,LPCWSTR,DWORD,LPBYTE*)=NULL;
 static NET_API_STATUS (WINAPI *pNetUserModalsGet)(LPCWSTR,DWORD,LPBYTE*)=NULL;
 static NET_API_STATUS (WINAPI *pNetUserAdd)(LPCWSTR,DWORD,LPBYTE,LPDWORD)=NULL;
-static NET_API_STATUS (WINAPI *pNetUserChangePassword)(LPCWSTR,LPCWSTR,LPCWSTR,LPCWSTR)=NULL;
 static NET_API_STATUS (WINAPI *pNetUserDel)(LPCWSTR,LPCWSTR)=NULL;
 
 static int init_access_tests(void)
@@ -72,17 +70,17 @@ static int init_access_tests(void)
     BOOL rc;
 
     user_name[0] = 0;
-    dwSize = sizeof(user_name);
+    dwSize = sizeof(user_name)/sizeof(WCHAR);
     rc=GetUserNameW(user_name, &dwSize);
     if (rc==FALSE && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED)
     {
-        skip("GetUserNameW is not available.\n");
+        win_skip("GetUserNameW is not available.\n");
         return 0;
     }
     ok(rc, "User Name Retrieved\n");
 
     computer_name[0] = 0;
-    dwSize = sizeof(computer_name);
+    dwSize = sizeof(computer_name)/sizeof(WCHAR);
     ok(GetComputerNameW(computer_name, &dwSize), "Computer Name Retrieved\n");
     return 1;
 }
@@ -144,6 +142,11 @@ static void run_usergetinfo_tests(void)
     pNetApiBufferFree(ui0);
     pNetApiBufferFree(ui10);
 
+    /* NetUserGetInfo should always work for the current user. */
+    rc=pNetUserGetInfo(NULL, user_name, 0, (LPBYTE*)&ui0);
+    ok(rc == NERR_Success, "NetUsetGetInfo for current user failed: 0x%08x.\n", rc);
+    pNetApiBufferFree(ui0);
+
     /* errors handling */
     rc=pNetUserGetInfo(NULL, sTestUserName, 10000, (LPBYTE *)&ui0);
     ok(rc == ERROR_INVALID_LEVEL,"Invalid Level: rc=%d\n",rc);
@@ -152,24 +155,22 @@ static void run_usergetinfo_tests(void)
     todo_wine {
         /* FIXME - Currently Wine can't verify whether the network path is good or bad */
         rc=pNetUserGetInfo(sBadNetPath, sTestUserName, 0, (LPBYTE *)&ui0);
-        ok(rc == ERROR_BAD_NETPATH || rc == ERROR_NETWORK_UNREACHABLE,
+        ok(rc == ERROR_BAD_NETPATH || rc == ERROR_NETWORK_UNREACHABLE || rc == RPC_S_SERVER_UNAVAILABLE,
            "Bad Network Path: rc=%d\n",rc);
     }
     rc=pNetUserGetInfo(sEmptyStr, sTestUserName, 0, (LPBYTE *)&ui0);
     ok(rc == ERROR_BAD_NETPATH || rc == NERR_Success,
        "Bad Network Path: rc=%d\n",rc);
     rc=pNetUserGetInfo(sInvalidName, sTestUserName, 0, (LPBYTE *)&ui0);
-    ok(rc == ERROR_INVALID_NAME,"Invalid Server Name: rc=%d\n",rc);
+    ok(rc == ERROR_INVALID_NAME || rc == ERROR_INVALID_HANDLE,"Invalid Server Name: rc=%d\n",rc);
     rc=pNetUserGetInfo(sInvalidName2, sTestUserName, 0, (LPBYTE *)&ui0);
-    ok(rc == ERROR_INVALID_NAME,"Invalid Server Name: rc=%d\n",rc);
+    ok(rc == ERROR_INVALID_NAME || rc == ERROR_INVALID_HANDLE,"Invalid Server Name: rc=%d\n",rc);
 
     if(delete_test_user() != NERR_Success)
         trace("Deleting the test user failed. You might have to manually delete it.\n");
 }
 
-/* checks Level 1 of NetQueryDisplayInformation
- * FIXME: Needs to be rewritten to not depend on the spelling of the users,
- * ideally based on the admin and guest user SIDs/RIDs.*/
+/* Checks Level 1 of NetQueryDisplayInformation */
 static void run_querydisplayinformation1_tests(void)
 {
     PNET_DISPLAY_USER Buffer, rec;
@@ -177,9 +178,6 @@ static void run_querydisplayinformation1_tests(void)
     DWORD i = 0;
     BOOL hasAdmin = FALSE;
     BOOL hasGuest = FALSE;
-    static const WCHAR sAdminUserName[] = {'A','d','m','i','n','i','s','t','r','a',
-        't','o','r',0};
-    static const WCHAR sGuestUserName[] = {'G','u','e','s','t',0};
 
     do
     {
@@ -192,14 +190,14 @@ static void run_querydisplayinformation1_tests(void)
         rec = Buffer;
         for(; EntryCount > 0; EntryCount--)
         {
-            if (!lstrcmpW(rec->usri1_name, sAdminUserName))
+            if (rec->usri1_user_id == DOMAIN_USER_RID_ADMIN)
             {
                 ok(!hasAdmin, "One admin user\n");
                 ok(rec->usri1_flags & UF_SCRIPT, "UF_SCRIPT flag is set\n");
                 ok(rec->usri1_flags & UF_NORMAL_ACCOUNT, "UF_NORMAL_ACCOUNT flag is set\n");
                 hasAdmin = TRUE;
             }
-            else if (!lstrcmpW(rec->usri1_name, sGuestUserName))
+            else if (rec->usri1_user_id == DOMAIN_USER_RID_GUEST)
             {
                 ok(!hasGuest, "One guest record\n");
                 ok(rec->usri1_flags & UF_SCRIPT, "UF_SCRIPT flag is set\n");
@@ -214,7 +212,7 @@ static void run_querydisplayinformation1_tests(void)
         pNetApiBufferFree(Buffer);
     } while (Result == ERROR_MORE_DATA);
 
-    ok(hasAdmin, "Has Administrator account\n");
+    ok(hasAdmin, "Doesn't have 'Administrator' account\n");
 }
 
 static void run_usermodalsget_tests(void)
@@ -253,14 +251,22 @@ static void run_userhandling_tests(void)
         ret = pNetUserDel(NULL, sTooLongName);
         ok(ret == NERR_Success, "Deleting the user failed : %d\n", ret);
     }
+    else if (ret == ERROR_ACCESS_DENIED)
+    {
+        skip("not enough permissions to add a user\n");
+        return;
+    }
     else
-        ok(ret == NERR_BadUsername, "Adding user with too long username returned 0x%08x\n", ret);
+        ok(ret == NERR_BadUsername ||
+           broken(ret == NERR_PasswordTooShort), /* NT4 */
+           "Adding user with too long username returned 0x%08x\n", ret);
 
     usri.usri1_name = sTestUserName;
     usri.usri1_password = sTooLongPassword;
 
     ret = pNetUserAdd(NULL, 1, (LPBYTE)&usri, NULL);
-    ok(ret == NERR_PasswordTooShort, "Adding user with too long password returned 0x%08x\n", ret);
+    ok(ret == NERR_PasswordTooShort || ret == ERROR_ACCESS_DENIED /* Win2003 */,
+       "Adding user with too long password returned 0x%08x\n", ret);
 
     usri.usri1_name = sTooLongName;
     usri.usri1_password = sTooLongPassword;
@@ -290,33 +296,19 @@ static void run_userhandling_tests(void)
         return;
     }
 
-    ok(ret == NERR_Success, "Adding user failed with error 0x%08x\n", ret);
+    ok(ret == NERR_Success ||
+       broken(ret == NERR_PasswordTooShort), /* NT4 */
+       "Adding user failed with error 0x%08x\n", ret);
     if(ret != NERR_Success)
         return;
 
-    ret = pNetUserChangePassword(NULL, sNonexistentUser, sTestUserOldPass,
-            sTestUserNewPass);
-    ok(ret == NERR_UserNotFound || ret == ERROR_INVALID_PASSWORD,
-            "Changing password for nonexistent user returned 0x%08x.\n", ret);
-
-    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
-            sTestUserOldPass);
-    ok(ret == NERR_Success,
-            "Changing old password to old password returned 0x%08x.\n", ret);
-
-    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserNewPass,
-            sTestUserOldPass);
-    ok(ret == ERROR_INVALID_PASSWORD,
-            "Trying to change password giving an invalid password returned 0x%08x.\n", ret);
-
-    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
-            sTooLongPassword);
-    ok(ret == ERROR_PASSWORD_RESTRICTION,
-            "Changing to a password that's too long returned 0x%08x.\n", ret);
-
-    ret = pNetUserChangePassword(NULL, sTestUserName, sTestUserOldPass,
-            sTestUserNewPass);
-    ok(ret == NERR_Success, "Changing the password correctly returned 0x%08x.\n", ret);
+    /* On Windows XP (and newer), calling NetUserChangePassword with a NULL
+     * domainname parameter creates a user home directory, iff the machine is
+     * not member of a domain.
+     * Using \\127.0.0.1 as domain name does not work on standalone machines
+     * either, unless the ForceGuest option in the registry is turned off.
+     * So let's not test NetUserChangePassword for now.
+     */
 
     ret = pNetUserDel(NULL, sTestUserName);
     ok(ret == NERR_Success, "Deleting the user failed.\n");
@@ -335,14 +327,13 @@ START_TEST(access)
     pNetUserGetInfo=(void*)GetProcAddress(hnetapi32,"NetUserGetInfo");
     pNetUserModalsGet=(void*)GetProcAddress(hnetapi32,"NetUserModalsGet");
     pNetUserAdd=(void*)GetProcAddress(hnetapi32, "NetUserAdd");
-    pNetUserChangePassword=(void*)GetProcAddress(hnetapi32, "NetUserChangePassword");
     pNetUserDel=(void*)GetProcAddress(hnetapi32, "NetUserDel");
 
     /* These functions were introduced with NT. It's safe to assume that
      * if one is not available, none are.
      */
     if (!pNetApiBufferFree) {
-        skip("Needed functions are not available\n");
+        win_skip("Needed functions are not available\n");
         FreeLibrary(hnetapi32);
         return;
     }

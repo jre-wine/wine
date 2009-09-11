@@ -27,9 +27,11 @@
 
 #include "debugger.h"
 #include "psapi.h"
+#include "resource.h"
 #include "winternl.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(winedbg);
 
@@ -44,15 +46,15 @@ static void dbg_init_current_thread(void* start)
 {
     if (start)
     {
-	if (dbg_curr_process->threads && 
+	if (dbg_curr_process->threads &&
             !dbg_curr_process->threads->next && /* first thread ? */
-	    DBG_IVAR(BreakAllThreadsStartup)) 
+	    DBG_IVAR(BreakAllThreadsStartup))
         {
 	    ADDRESS64   addr;
 
             break_set_xpoints(FALSE);
 	    addr.Mode   = AddrModeFlat;
-	    addr.Offset = (DWORD)start;
+	    addr.Offset = (DWORD_PTR)start;
 	    break_add_break(&addr, TRUE, TRUE);
 	    break_set_xpoints(TRUE);
 	}
@@ -269,7 +271,7 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
             return DBG_CONTINUE;
         }
         if (dbg_read_memory(pThreadName->szName, pThread->name, 9))
-            dbg_printf("Thread ID=%04x renamed using MS VC6 extension (name==\"%s\")\n",
+            dbg_printf("Thread ID=%04x renamed using MS VC6 extension (name==\"%.9s\")\n",
                        pThread->tid, pThread->name);
         return DBG_CONTINUE;
     }
@@ -380,10 +382,10 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
             dbg_printf("invalid float operation");
             break;
 	case EXCEPTION_FLT_OVERFLOW:
-            dbg_printf("floating pointer overflow");
+            dbg_printf("floating point overflow");
             break;
 	case EXCEPTION_FLT_UNDERFLOW:
-            dbg_printf("floating pointer underflow");
+            dbg_printf("floating point underflow");
             break;
 	case EXCEPTION_FLT_STACK_CHECK:
             dbg_printf("floating point stack check");
@@ -418,16 +420,19 @@ static DWORD dbg_handle_exception(const EXCEPTION_RECORD* rec, BOOL first_chance
 static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill);
 
 static void fetch_module_name(void* name_addr, BOOL unicode, void* mod_addr,
-                              char* buffer, size_t bufsz, BOOL is_pcs)
+                              WCHAR* buffer, size_t bufsz, BOOL is_pcs)
 {
+    static WCHAR        pcspid[] = {'P','r','o','c','e','s','s','_','%','0','8','x',0};
+    static WCHAR        dlladdr[] = {'D','L','L','_','%','0','8','l','x',0};
+
     memory_get_string_indirect(dbg_curr_process, name_addr, unicode, buffer, bufsz);
     if (!buffer[0] &&
-        !GetModuleFileNameExA(dbg_curr_process->handle, mod_addr, buffer, bufsz))
+        !GetModuleFileNameExW(dbg_curr_process->handle, mod_addr, buffer, bufsz))
     {
         if (is_pcs)
         {
             HMODULE h;
-            WORD (WINAPI *gpif)(HANDLE, LPSTR, DWORD);
+            WORD (WINAPI *gpif)(HANDLE, LPWSTR, DWORD);
 
             /* On Windows, when we get the process creation debug event for a process
              * created by winedbg, the modules' list is not initialized yet. Hence,
@@ -436,18 +441,21 @@ static void fetch_module_name(void* name_addr, BOOL unicode, void* mod_addr,
              * give us the expected result
              */
             if (!(h = GetModuleHandleA("psapi")) ||
-                !(gpif = (void*)GetProcAddress(h, "GetProcessImageFileName")) ||
+                !(gpif = (void*)GetProcAddress(h, "GetProcessImageFileNameW")) ||
                 !(gpif)(dbg_curr_process->handle, buffer, bufsz))
-                snprintf(buffer, bufsz, "Process_%08x", dbg_curr_pid);
+                snprintfW(buffer, bufsz, pcspid, dbg_curr_pid);
         }
         else
-            snprintf(buffer, bufsz, "DLL_%p", mod_addr);
+            snprintfW(buffer, bufsz, dlladdr, (unsigned long)mod_addr);
     }
 }
 
 static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
 {
-    char	buffer[256];
+    union {
+        char	bufferA[256];
+        WCHAR	buffer[256];
+    } u;
     DWORD       cont = DBG_CONTINUE;
 
     dbg_curr_pid = de->dwProcessId;
@@ -499,20 +507,21 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         fetch_module_name(de->u.CreateProcessInfo.lpImageName,
                           de->u.CreateProcessInfo.fUnicode,
                           de->u.CreateProcessInfo.lpBaseOfImage,
-                          buffer, sizeof(buffer), TRUE);
+                          u.buffer, sizeof(u.buffer) / sizeof(WCHAR), TRUE);
 
         WINE_TRACE("%04x:%04x: create process '%s'/%p @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
-                   buffer, de->u.CreateProcessInfo.lpImageName,
+                   wine_dbgstr_w(u.buffer),
+                   de->u.CreateProcessInfo.lpImageName,
                    de->u.CreateProcessInfo.lpStartAddress,
                    de->u.CreateProcessInfo.dwDebugInfoFileOffset,
                    de->u.CreateProcessInfo.nDebugInfoSize);
-        dbg_set_process_name(dbg_curr_process, buffer);
+        dbg_set_process_name(dbg_curr_process, u.buffer);
 
-        if (!SymInitialize(dbg_curr_process->handle, NULL, FALSE))
+        if (!dbg_init(dbg_curr_process->handle, u.buffer, FALSE))
             dbg_printf("Couldn't initiate DbgHelp\n");
-        if (!SymLoadModule(dbg_curr_process->handle, de->u.CreateProcessInfo.hFile, buffer, NULL,
-                           (unsigned long)de->u.CreateProcessInfo.lpBaseOfImage, 0))
+        if (!dbg_load_module(dbg_curr_process->handle, de->u.CreateProcessInfo.hFile, u.buffer,
+                             (DWORD_PTR)de->u.CreateProcessInfo.lpBaseOfImage, 0))
             dbg_printf("couldn't load main module (%u)\n", GetLastError());
 
         WINE_TRACE("%04x:%04x: create thread I @%p\n",
@@ -593,22 +602,22 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         fetch_module_name(de->u.LoadDll.lpImageName,
                           de->u.LoadDll.fUnicode,
                           de->u.LoadDll.lpBaseOfDll,
-                          buffer, sizeof(buffer), FALSE);
+                          u.buffer, sizeof(u.buffer) / sizeof(WCHAR), FALSE);
 
         WINE_TRACE("%04x:%04x: loads DLL %s @%p (%u<%u>)\n",
                    de->dwProcessId, de->dwThreadId,
-                   buffer, de->u.LoadDll.lpBaseOfDll,
+                   wine_dbgstr_w(u.buffer), de->u.LoadDll.lpBaseOfDll,
                    de->u.LoadDll.dwDebugInfoFileOffset,
                    de->u.LoadDll.nDebugInfoSize);
-        SymLoadModule(dbg_curr_process->handle, de->u.LoadDll.hFile, buffer, NULL,
-                      (unsigned long)de->u.LoadDll.lpBaseOfDll, 0);
+        dbg_load_module(dbg_curr_process->handle, de->u.LoadDll.hFile, u.buffer,
+                        (DWORD_PTR)de->u.LoadDll.lpBaseOfDll, 0);
         break_set_xpoints(FALSE);
         break_check_delayed_bp();
         break_set_xpoints(TRUE);
         if (DBG_IVAR(BreakOnDllLoad))
         {
             dbg_printf("Stopping on DLL %s loading at 0x%08lx\n",
-                       buffer, (unsigned long)de->u.LoadDll.lpBaseOfDll);
+                       dbg_W2A(u.buffer, -1), (unsigned long)de->u.LoadDll.lpBaseOfDll);
             if (dbg_fetch_context()) cont = 0;
         }
         break;
@@ -631,9 +640,9 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
 
         memory_get_string(dbg_curr_process,
                           de->u.DebugString.lpDebugStringData, TRUE,
-                          de->u.DebugString.fUnicode, buffer, sizeof(buffer));
+                          de->u.DebugString.fUnicode, u.bufferA, sizeof(u.bufferA));
         WINE_TRACE("%04x:%04x: output debug string (%s)\n",
-                   de->dwProcessId, de->dwThreadId, buffer);
+                   de->dwProcessId, de->dwThreadId, u.bufferA);
         break;
 
     case RIP_EVENT:
@@ -890,7 +899,16 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         /* auto mode */
         argc--; argv++;
         ds = dbg_active_attach(argc, argv);
-        if (ds != start_ok) return ds;
+        if (ds != start_ok) {
+            msgbox_res_id(NULL, IDS_INVALID_PARAMS, IDS_AUTO_CAPTION, MB_OK);
+            return ds;
+        }
+        if (!display_crash_dialog()) {
+            dbg_init_console();
+            dbg_start_interactive(INVALID_HANDLE_VALUE);
+            return start_ok;
+        }
+
         hFile = parser_generate_command_file("echo Modules:", "info share",
                                              "echo Threads:", "info threads",
                                              "backtrace", "detach", NULL);
@@ -971,7 +989,14 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
             SetThreadContext(dbg_curr_thread->handle, &dbg_context);
             ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, DBG_CONTINUE);
         }
-        if (!kill && !DebugActiveProcessStop(dbg_curr_pid)) return FALSE;
+    }
+    if (kill)
+    {
+        TerminateProcess(pcs->handle, 0);
+    }
+    else
+    {
+        if (!DebugActiveProcessStop(pcs->pid)) return FALSE;
     }
     SymCleanup(pcs->handle);
     dbg_del_process(pcs);
@@ -979,10 +1004,27 @@ static BOOL tgt_process_active_close_process(struct dbg_process* pcs, BOOL kill)
     return TRUE;
 }
 
+static BOOL tgt_process_active_read(HANDLE hProcess, const void* addr,
+                                    void* buffer, SIZE_T len, SIZE_T* rlen)
+{
+    return ReadProcessMemory( hProcess, addr, buffer, len, rlen );
+}
+
+static BOOL tgt_process_active_write(HANDLE hProcess, void* addr,
+                                     const void* buffer, SIZE_T len, SIZE_T* wlen)
+{
+    return WriteProcessMemory( hProcess, addr, buffer, len, wlen );
+}
+
+static BOOL tgt_process_active_get_selector(HANDLE hThread, DWORD sel, LDT_ENTRY* le)
+{
+    return GetThreadSelectorEntry( hThread, sel, le );
+}
+
 static struct be_process_io be_process_active_io =
 {
     tgt_process_active_close_process,
-    ReadProcessMemory,
-    WriteProcessMemory,
-    GetThreadSelectorEntry,
+    tgt_process_active_read,
+    tgt_process_active_write,
+    tgt_process_active_get_selector
 };

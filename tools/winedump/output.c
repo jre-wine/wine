@@ -148,7 +148,7 @@ void  output_header_preamble (void)
 
   fprintf (hfile,
            "/*\n * %s.dll\n *\n * Generated from %s.dll by winedump.\n *\n"
-           " * DO NOT SEND GENERATED DLLS FOR INCLUSION INTO WINE !\n * \n */"
+           " * DO NOT SEND GENERATED DLLS FOR INCLUSION INTO WINE !\n *\n */"
            "\n#ifndef __WINE_%s_DLL_H\n#define __WINE_%s_DLL_H\n\n"
            "#include \"windef.h\"\n#include \"wine/debug.h\"\n"
            "#include \"winbase.h\"\n#include \"winnt.h\"\n\n\n",
@@ -233,35 +233,42 @@ void  output_c_preamble (void)
     if (VERBOSE)
       puts ("Creating a forwarding DLL");
 
-    fputs ("\nHMODULE hDLL=0;\t/* DLL to call */\n\n", cfile);
+    fputs ("\nHMODULE hDLL=0;    /* DLL to call */\n\n", cfile);
   }
 
   fprintf (cfile,
            "BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID "
            "lpvReserved)\n{\n"
-           "\tTRACE(\"(0x%%p, %%d, %%p)\\n\", hinstDLL, fdwReason, lpvReserved);\n"
-           "\n\tswitch (fdwReason)\n\t{\n"
-           "\t\tcase DLL_WINE_PREATTACH:\n"
-           "\t\t\treturn FALSE;    /* prefer native version */\n"
-           "\t\tcase DLL_PROCESS_ATTACH:\n");
+           "    TRACE(\"(0x%%p, %%d, %%p)\\n\", hinstDLL, fdwReason, lpvReserved);\n\n"
+           "    switch (fdwReason)\n"
+           "    {\n"
+           "        case DLL_WINE_PREATTACH:\n"
+           "            return FALSE;    /* prefer native version */\n"
+           "        case DLL_PROCESS_ATTACH:\n");
 
   if (globals.forward_dll)
-    fprintf (cfile, "\t\t\thDLL = LoadLibraryA(\"%s\");\n"
-             "\t\t\tTRACE(\"Forwarding DLL (%s) loaded (%%p)\\n\", hDLL);\n",
-             globals.forward_dll, globals.forward_dll);
+    fprintf (cfile,
+           "            DLL = LoadLibraryA(\"%s\");\n"
+           "            TRACE(\"Forwarding DLL (%s) loaded (%%p)\\n\", hDLL);\n",
+           globals.forward_dll, globals.forward_dll);
   else
-    fprintf (cfile, "\t\t\t/* FIXME: Initialisation */\n"
-             "\t\t\tDisableThreadLibraryCalls(hinstDLL);\n\t\t\tbreak;\n");
+    fprintf (cfile,
+           "            DisableThreadLibraryCalls(hinstDLL);\n");
 
-  fprintf (cfile, "\t\t\tbreak;\n\t\tcase DLL_PROCESS_DETACH:\n");
+  fprintf (cfile,
+           "            break;\n"
+           "        case DLL_PROCESS_DETACH:\n");
 
   if (globals.forward_dll)
-    fprintf (cfile, "\t\t\tFreeLibrary(hDLL);\n"
-             "\t\t\tTRACE(\"Forwarding DLL (%s) freed\\n\");\n",
-             globals.forward_dll);
+    fprintf (cfile,
+           "            FreeLibrary(hDLL);\n"
+           "            TRACE(\"Forwarding DLL (%s) freed\\n\");\n",
+           globals.forward_dll);
 
-  fprintf (cfile, "\t\t\tbreak;\n\t\tdefault:\n\t\t\tbreak;\n\t}\n\n"
-           "\treturn TRUE;\n}\n\n\n");
+  fprintf (cfile,
+           "            break;\n"
+           "    }\n\n"
+           "    return TRUE;\n}\n");
 }
 
 

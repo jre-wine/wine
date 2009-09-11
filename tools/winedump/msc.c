@@ -57,14 +57,20 @@ static const char* p_string(const struct p_string* s)
     return tmp;
 }
 
-static int numeric_leaf(int* value, const unsigned short int* leaf)
+union full_value
+{
+    int                 i;
+    long long unsigned  llu;
+};
+
+static int full_numeric_leaf(union full_value* fv, const unsigned short int* leaf)
 {
     unsigned short int type = *leaf++;
     int length = 2;
 
     if (type < LF_NUMERIC)
     {
-        *value = type;
+        fv->i = type;
     }
     else
     {
@@ -72,103 +78,115 @@ static int numeric_leaf(int* value, const unsigned short int* leaf)
         {
         case LF_CHAR:
             length += 1;
-            *value = *(const char*)leaf;
+            fv->i = *(const char*)leaf;
             break;
 
         case LF_SHORT:
             length += 2;
-            *value = *(const short*)leaf;
+            fv->i = *(const short*)leaf;
             break;
 
         case LF_USHORT:
             length += 2;
-            *value = *(const unsigned short*)leaf;
+            fv->i = *(const unsigned short*)leaf;
             break;
 
         case LF_LONG:
             length += 4;
-            *value = *(const int*)leaf;
+            fv->i = *(const int*)leaf;
             break;
 
         case LF_ULONG:
             length += 4;
-            *value = *(const unsigned int*)leaf;
+            fv->i = *(const unsigned int*)leaf;
             break;
 
         case LF_QUADWORD:
+            length += 8;
+            fv->llu = *(const long long int*)leaf;
+            break;
+
         case LF_UQUADWORD:
             length += 8;
-            printf(">>> unsupported leaf value\n");
-            *value = 0;    /* FIXME */
+            fv->llu = *(const long long unsigned int*)leaf;
             break;
 
         case LF_REAL32:
             length += 4;
-            printf(">>> unsupported leaf value\n");
-            *value = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
+            fv->i = 0;    /* FIXME */
             break;
 
         case LF_REAL48:
             length += 6;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_REAL64:
             length += 8;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_REAL80:
             length += 10;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_REAL128:
             length += 16;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_COMPLEX32:
             length += 4;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_COMPLEX64:
             length += 8;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_COMPLEX80:
             length += 10;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_COMPLEX128:
             length += 16;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         case LF_VARSTRING:
             length += 2 + *leaf;
-            *value = 0;    /* FIXME */
-            printf(">>> unsupported leaf value\n");
+            fv->i = 0;    /* FIXME */
+            printf(">>> unsupported leaf value %04x\n", type);
             break;
 
         default:
 	    printf(">>> Unsupported numeric leaf-id %04x\n", type);
-            *value = 0;
+            fv->i = 0;
             break;
         }
     }
     return length;
+}
+
+static int numeric_leaf(int* value, const unsigned short int* leaf)
+{
+    union full_value fv;
+    int len = len = full_numeric_leaf(&fv, leaf);
+
+    *value = fv.i;
+    return len;
 }
 
 static const char* get_attr(unsigned attr)
@@ -196,6 +214,31 @@ static const char* get_attr(unsigned attr)
     if ((attr >> 5) & 1) strcat(tmp, "pseudo ");
     if ((attr >> 6) & 1) strcat(tmp, "no-inherit ");
     if ((attr >> 7) & 1) strcat(tmp, "no-construct ");
+    return tmp;
+}
+
+static const char* get_property(unsigned prop)
+{
+    static char tmp[1024];
+    unsigned    pos = 0;
+
+    if (!prop) return "none";
+#define X(s) {if (pos) tmp[pos++] = ';'; strcpy(tmp + pos, s); pos += strlen(s);}
+    if (prop & 0x0001) X("packed");
+    if (prop & 0x0002) X("w/{cd}tor");
+    if (prop & 0x0004) X("w/overloaded-ops");
+    if (prop & 0x0008) X("nested-class");
+    if (prop & 0x0010) X("has-nested-classes");
+    if (prop & 0x0020) X("w/overloaded-assign");
+    if (prop & 0x0040) X("w/casting-methods");
+    if (prop & 0x0080) X("forward");
+    if (prop & 0x0100) X("scoped");
+#undef X
+
+    if (prop & ~0x01FF) pos += sprintf(tmp, "unk%x", prop & ~0x01FF);
+    else tmp[pos] = '\0';
+    assert(pos < sizeof(tmp));
+
     return tmp;
 }
 
@@ -569,10 +612,10 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
     case LF_STRUCTURE_V1:
     case LF_CLASS_V1:
         leaf_len = numeric_leaf(&value, &type->struct_v1.structlen);
-        printf("\t%x => %s V1 '%s' elts:%u prop:%u fieldlist-type:%x derived-type:%x vshape:%x size:%u\n",
+        printf("\t%x => %s V1 '%s' elts:%u property:%s fieldlist-type:%x derived-type:%x vshape:%x size:%u\n",
                curr_type, type->generic.id == LF_CLASS_V1 ? "Class" : "Struct",
                p_string(PSTRING(&type->struct_v1.structlen, leaf_len)),
-               type->struct_v1.n_element, type->struct_v1.property,
+               type->struct_v1.n_element, get_property(type->struct_v1.property),
                type->struct_v1.fieldlist, type->struct_v1.derived,
                type->struct_v1.vshape, value);
         break;
@@ -580,11 +623,11 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
     case LF_STRUCTURE_V2:
     case LF_CLASS_V2:
         leaf_len = numeric_leaf(&value, &type->struct_v2.structlen);
-        printf("\t%x => %s V2 '%s' elts:%u prop:%u\n"
+        printf("\t%x => %s V2 '%s' elts:%u property:%s\n"
                "                fieldlist-type:%x derived-type:%x vshape:%x size:%u\n",
                curr_type, type->generic.id == LF_CLASS_V2 ? "Class" : "Struct",
                p_string(PSTRING(&type->struct_v2.structlen, leaf_len)),
-               type->struct_v2.n_element, type->struct_v2.property,
+               type->struct_v2.n_element, get_property(type->struct_v2.property),
                type->struct_v2.fieldlist, type->struct_v2.derived,
                type->struct_v2.vshape, value);
         break;
@@ -593,63 +636,64 @@ static void codeview_dump_one_type(unsigned curr_type, const union codeview_type
     case LF_CLASS_V3:
         leaf_len = numeric_leaf(&value, &type->struct_v3.structlen);
         str = (const char*)&type->struct_v3.structlen + leaf_len;
-        printf("\t%x => %s V3 '%s' elts:%u prop:%u\n"
+        printf("\t%x => %s V3 '%s' elts:%u property:%s\n"
                "                fieldlist-type:%x derived-type:%x vshape:%x size:%u\n",
                curr_type, type->generic.id == LF_CLASS_V3 ? "Class" : "Struct",
-               str, type->struct_v3.n_element, type->struct_v3.property,
+               str, type->struct_v3.n_element, get_property(type->struct_v3.property),
                type->struct_v3.fieldlist, type->struct_v3.derived,
                type->struct_v3.vshape, value);
         break;
 
     case LF_UNION_V1:
         leaf_len = numeric_leaf(&value, &type->union_v1.un_len);
-        printf("\t%x => Union V1 '%s' count:%u prop:%u fieldlist-type:%x size:%u\n",
+        printf("\t%x => Union V1 '%s' count:%u property:%s fieldlist-type:%x size:%u\n",
                curr_type, p_string(PSTRING(&type->union_v1.un_len, leaf_len)),
-               type->union_v1.count, type->union_v1.property,
+               type->union_v1.count, get_property(type->union_v1.property),
                type->union_v1.fieldlist, value);
         break;
 
     case LF_UNION_V2:
         leaf_len = numeric_leaf(&value, &type->union_v2.un_len);
-        printf("\t%x => Union V2 '%s' count:%u prop:%u fieldlist-type:%x size:%u\n",
+        printf("\t%x => Union V2 '%s' count:%u property:%s fieldlist-type:%x size:%u\n",
                curr_type, p_string(PSTRING(&type->union_v2.un_len, leaf_len)),
-               type->union_v2.count, type->union_v2.property,
+               type->union_v2.count, get_property(type->union_v2.property),
                type->union_v2.fieldlist, value);
         break;
 
     case LF_UNION_V3:
         leaf_len = numeric_leaf(&value, &type->union_v3.un_len);
         str = (const char*)&type->union_v3.un_len + leaf_len;
-        printf("\t%x => Union V3 '%s' count:%u prop:%u fieldlist-type:%x size:%u\n",
+        printf("\t%x => Union V3 '%s' count:%u property:%s fieldlist-type:%x size:%u\n",
                curr_type, str, type->union_v3.count,
-               type->union_v3.property, type->union_v3.fieldlist, value);
+               get_property(type->union_v3.property),
+               type->union_v3.fieldlist, value);
         break;
 
     case LF_ENUM_V1:
-        printf("\t%x => Enum V1 '%s' type:%x field-type:%x count:%u property:%x\n",
+        printf("\t%x => Enum V1 '%s' type:%x field-type:%x count:%u property:%s\n",
                curr_type, p_string(&type->enumeration_v1.p_name),
                type->enumeration_v1.type,
                type->enumeration_v1.fieldlist,
                type->enumeration_v1.count,
-               type->enumeration_v1.property);
+               get_property(type->enumeration_v1.property));
         break;
 
     case LF_ENUM_V2:
-        printf("\t%x => Enum V2 '%s' type:%x field-type:%x count:%u property:%x\n",
+        printf("\t%x => Enum V2 '%s' type:%x field-type:%x count:%u property:%s\n",
                curr_type, p_string(&type->enumeration_v2.p_name),
                type->enumeration_v2.type,
                type->enumeration_v2.fieldlist,
                type->enumeration_v2.count,
-               type->enumeration_v2.property);
+               get_property(type->enumeration_v2.property));
         break;
 
     case LF_ENUM_V3:
-        printf("\t%x => Enum V3 '%s' type:%x field-type:%x count:%u property:%x\n",
+        printf("\t%x => Enum V3 '%s' type:%x field-type:%x count:%u property:%s\n",
                curr_type, type->enumeration_v3.name,
                type->enumeration_v3.type,
                type->enumeration_v3.fieldlist,
                type->enumeration_v3.count,
-               type->enumeration_v3.property);
+               get_property(type->enumeration_v3.property));
         break;
 
     case LF_ARGLIST_V1:
@@ -912,11 +956,14 @@ int codeview_dump_symbols(const void* root, unsigned long size)
         /* Global and static functions */
 	case S_GPROC_V1:
 	case S_LPROC_V1:
-            printf("\tS-%s-Proc V1: '%s' (%04x:%08x#%x) type:%x\n",
+            printf("\tS-%s-Proc V1: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC_V1 ? "Global" : "-Local",
                    p_string(&sym->proc_v1.p_name),
                    sym->proc_v1.segment, sym->proc_v1.offset,
-                   sym->proc_v1.proc_len, sym->proc_v1.proctype);
+                   sym->proc_v1.proc_len, sym->proc_v1.proctype,
+                   sym->proc_v1.flags);
+            printf("\t  Debug: start=%08x end=%08x\n",
+                   sym->proc_v1.debug_start, sym->proc_v1.debug_end);
             if (nest_block)
             {
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
@@ -926,18 +973,18 @@ int codeview_dump_symbols(const void* root, unsigned long size)
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */
-/* EPP 	unsigned int	debug_start; */
-/* EPP 	unsigned int	debug_end; */
-/* EPP 	unsigned char	flags; */
 	    break;
 
 	case S_GPROC_V2:
 	case S_LPROC_V2:
-            printf("\tS-%s-Proc V2: '%s' (%04x:%08x#%x) type:%x\n",
+            printf("\tS-%s-Proc V2: '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC_V2 ? "Global" : "-Local",
                    p_string(&sym->proc_v2.p_name),
                    sym->proc_v2.segment, sym->proc_v2.offset,
-                   sym->proc_v2.proc_len, sym->proc_v2.proctype);
+                   sym->proc_v2.proc_len, sym->proc_v2.proctype,
+                   sym->proc_v2.flags);
+            printf("\t  Debug: start=%08x end=%08x\n",
+                   sym->proc_v2.debug_start, sym->proc_v2.debug_end);
             if (nest_block)
             {
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
@@ -947,18 +994,18 @@ int codeview_dump_symbols(const void* root, unsigned long size)
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */
-/* EPP 	unsigned int	debug_start; */
-/* EPP 	unsigned int	debug_end; */
-/* EPP 	unsigned char	flags; */
 	    break;
 
         case S_LPROC_V3:
         case S_GPROC_V3:
-            printf("\tS-%s-Procedure V3 '%s' (%04x:%08x#%x) type:%x\n",
+            printf("\tS-%s-Procedure V3 '%s' (%04x:%08x#%x) type:%x attr:%x\n",
                    sym->generic.id == S_GPROC_V3 ? "Global" : "Local",
                    sym->proc_v3.name,
                    sym->proc_v3.segment, sym->proc_v3.offset,
-                   sym->proc_v3.proc_len, sym->proc_v3.proctype);
+                   sym->proc_v3.proc_len, sym->proc_v3.proctype,
+                   sym->proc_v3.flags);
+            printf("\t  Debug: start=%08x end=%08x\n",
+                   sym->proc_v3.debug_start, sym->proc_v3.debug_end);
             if (nest_block)
             {
                 printf(">>> prev func '%s' still has nest_block %u count\n", curr_func, nest_block);
@@ -968,9 +1015,6 @@ int codeview_dump_symbols(const void* root, unsigned long size)
 /* EPP 	unsigned int	pparent; */
 /* EPP 	unsigned int	pend; */
 /* EPP 	unsigned int	next; */
-/* EPP 	unsigned int	debug_start; */
-/* EPP 	unsigned int	debug_end; */
-/* EPP 	unsigned char	flags; */
             break;
 
         /* Function parameters and stack variables */
@@ -1031,6 +1075,24 @@ int codeview_dump_symbols(const void* root, unsigned long size)
                    sym->block_v3.segment, sym->block_v3.offset, sym->block_v3.length,
                    sym->block_v3.parent, sym->block_v3.end);
             nest_block++;
+            break;
+
+        /* Additional function information */
+        case S_FUNCINFO_V2:
+            printf("\tFunction info V2 unk1:%x unk2:%x unk3:%x unk4:%x unk5:%x unk6:%x flags:%04x unk7:%x\n",
+                   sym->func_info_v2.unknown1,
+                   sym->func_info_v2.unknown2,
+                   sym->func_info_v2.unknown3,
+                   sym->func_info_v2.unknown4,
+                   sym->func_info_v2.unknown5,
+                   sym->func_info_v2.unknown6,
+                   sym->func_info_v2.flags,
+                   sym->func_info_v2.unknown7);
+            break;
+
+        case S_SECUCOOKIE_V3:
+            printf("\tSecurity Cookie V3 @%d unk:%x\n",
+                   sym->security_cookie_v3.offset, sym->security_cookie_v3.unknown);
             break;
 
         case S_END_V1:
@@ -1131,23 +1193,25 @@ int codeview_dump_symbols(const void* root, unsigned long size)
 
         case S_CONSTANT_V2:
             {
-                int             val, vlen;
+                int             vlen;
+                union full_value fv;
 
-                vlen = numeric_leaf(&val, &sym->constant_v2.cvalue);
-                printf("\tS-Constant V2 '%s' = %u type:%x\n",
+                vlen = full_numeric_leaf(&fv, &sym->constant_v2.cvalue);
+                printf("\tS-Constant V2 '%s' = 0x%x%08x type:%x\n",
                        p_string(PSTRING(&sym->constant_v2.cvalue, vlen)),
-                       val, sym->constant_v2.type);
+                       (unsigned)(fv.llu >> 32), (unsigned)fv.llu, sym->constant_v2.type);
             }
             break;
 
         case S_CONSTANT_V3:
             {
-                int             val, vlen;
+                int             vlen;
+                union full_value fv;
 
-                vlen = numeric_leaf(&val, &sym->constant_v3.cvalue);
-                printf("\tS-Constant V3 '%s' = %u type:%x\n",
+                vlen = full_numeric_leaf(&fv, &sym->constant_v3.cvalue);
+                printf("\tS-Constant V3 '%s' =  0x%x%08x type:%x\n",
                        (const char*)&sym->constant_v3.cvalue + vlen,
-                       val, sym->constant_v3.type);
+                       (unsigned)(fv.llu >> 32), (unsigned)fv.llu, sym->constant_v3.type);
             }
             break;
 
@@ -1189,13 +1253,47 @@ int codeview_dump_symbols(const void* root, unsigned long size)
             break;
         case S_MSTOOL_V3:    /* info about tool used to create CU */
             {
-                const unsigned short*     ptr = ((const unsigned short*)sym) + 2;
-
+                const unsigned short*   ptr = ((const unsigned short*)sym) + 2;
+                const char*             x1;
+                const char*             x2 = (const char*)&ptr[9];
                 /* FIXME: what are all those values for ? */
-                printf("\tTool V3 ??? %x-%x-%x-%x-%x-%x-%x-%x-%x %s\n",
+                printf("\tTool V3 unk=%04x%04x%04x front=%d.%d.%d.0 back=%d.%d.%d.0 %s\n",
                        ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7],
-                       ptr[8], (const char*)(&ptr[9]));
-                dump_data((const void*)sym, sym->generic.len + 2, "\t\t");
+                       ptr[8], x2);
+                while (*(x1 = x2 + strlen(x2) + 1))
+                {
+                    x2 = x1 + strlen(x1) + 1;
+                    if (!*x2) break;
+                    printf("\t\t%s: %s\n", x1, x2);
+                }
+            }
+            break;
+
+        case S_MSTOOLINFO_V3:
+            {
+                const unsigned short*   ptr = ((const unsigned short*)sym) + 2;
+
+                printf("\tTool info V3: unk=%04x%04x%04x front=%d.%d.%d.%d back=%d.%d.%d.%d %s\n",
+                       ptr[0], ptr[1], ptr[2],
+                       ptr[3], ptr[4], ptr[5], ptr[6],
+                       ptr[7], ptr[8], ptr[9], ptr[10],
+                       (const char*)(ptr + 11));
+            }
+            break;
+
+        case S_MSTOOLENV_V3:
+            {
+                const char*             x1 = (const char*)sym + 4 + 1;
+                const char*             x2;
+
+                printf("\tTool conf V3\n");
+                while (*x1)
+                {
+                    x2 = x1 + strlen(x1) + 1;
+                    if (!*x2) break;
+                    printf("\t\t%s: %s\n", x1, x2);
+                    x1 = x2 + strlen(x2) + 1;
+                }
             }
             break;
 
@@ -1208,10 +1306,124 @@ int codeview_dump_symbols(const void* root, unsigned long size)
                    sym->ssearch_v1.segment, sym->ssearch_v1.offset);
             break;
 
+        case S_SECTINFO_V3:
+            printf("\tSSection Info: seg=%04x ?=%04x rva=%08x size=%08x attr=%08x %s\n",
+                   *(unsigned short*)((const char*)sym + 4),
+                   *(unsigned short*)((const char*)sym + 6),
+                   *(unsigned*)((const char*)sym + 8),
+                   *(unsigned*)((const char*)sym + 12),
+                   *(unsigned*)((const char*)sym + 16),
+                   (const char*)sym + 20);
+            break;
+
+        case S_SUBSECTINFO_V3:
+            printf("\tSSubSection Info: addr=%04x:%08x size=%08x attr=%08x %s\n",
+                   *(unsigned short*)((const char*)sym + 16),
+                   *(unsigned*)((const char*)sym + 12),
+                   *(unsigned*)((const char*)sym + 4),
+                   *(unsigned*)((const char*)sym + 8),
+                   (const char*)sym + 18);
+            break;
+
+        case S_ENTRYPOINT_V3:
+            printf("\tSEntryPoint: id=%x '%s'\n",
+                   *(unsigned*)((const char*)sym + 4), (const char*)sym + 8);
+            break;
+
         default:
             printf(">>> Unsupported symbol-id %x sz=%d\n", sym->generic.id, sym->generic.len + 2);
             dump_data((const void*)sym, sym->generic.len + 2, "  ");
         }
     }
     return 0;
+}
+
+void codeview_dump_linetab(const char* linetab, DWORD size, BOOL pascal_str, const char* pfx)
+{
+    const char*                 ptr = linetab;
+    int				nfile, nseg, nline;
+    int				i, j, k;
+    const unsigned int*         filetab;
+    const unsigned int*         lt_ptr;
+    const struct startend*      start;
+
+    nfile = *(const short*)linetab;
+    filetab = (const unsigned int*)(linetab + 2 * sizeof(short));
+    printf("%s%d files with %d ???\n", pfx, nfile, *(const short*)(linetab + sizeof(short)));
+
+    for (i = 0; i < nfile; i++)
+    {
+        ptr = linetab + filetab[i];
+        nseg = *(const short*)ptr;
+        ptr += 2 * sizeof(short);
+        lt_ptr = (const unsigned int*)ptr;
+        start = (const struct startend*)(lt_ptr + nseg);
+
+        /*
+         * Now snarf the filename for all of the segments for this file.
+         */
+        if (pascal_str)
+        {
+            char			filename[MAX_PATH];
+            const struct p_string*      p_fn;
+
+            p_fn = (const struct p_string*)(start + nseg);
+            memset(filename, 0, sizeof(filename));
+            memcpy(filename, p_fn->name, p_fn->namelen);
+            printf("%slines for file #%d/%d %s %d\n", pfx, i, nfile, filename, nseg);
+        }
+        else
+            printf("%slines for file #%d/%d %s %d\n", pfx, i, nfile, (const char*)(start + nseg), nseg);
+
+        for (j = 0; j < nseg; j++)
+	{
+            ptr = linetab + *lt_ptr++;
+            nline = *(const short*)(ptr + 2);
+            printf("%s  %04x:%08x-%08x #%d\n",
+                   pfx, *(const short*)(ptr + 0), start[j].start, start[j].end, nline);
+            ptr += 4;
+            for (k = 0; k < nline; k++)
+            {
+                printf("%s    %x %d\n",
+                       pfx, ((const unsigned int*)ptr)[k],
+                       ((const unsigned short*)((const unsigned int*)ptr + nline))[k]);
+            }
+	}
+    }
+}
+
+void codeview_dump_linetab2(const char* linetab, DWORD size, const char* strimage, DWORD strsize, const char* pfx)
+{
+    DWORD       offset;
+    unsigned    i;
+    const struct codeview_linetab2_block* lbh;
+    const struct codeview_linetab2_file* fd;
+
+    if (*(const DWORD*)linetab != 0x000000f4) return;
+    offset = *((const DWORD*)linetab + 1);
+    lbh = (const struct codeview_linetab2_block*)(linetab + 8 + offset);
+    while ((const char*)lbh < linetab + size)
+    {
+        if (lbh->header != 0x000000f2)
+        /* FIXME: should also check that whole lbh fits in linetab + size */
+        {
+            /* printf("%sblock end %x\n", pfx, lbh->header); */
+            break;
+        }
+        printf("%sblock from %04x:%08x #%x (%x lines)\n",
+               pfx, lbh->seg, lbh->start, lbh->size, lbh->nlines);
+        fd = (const struct codeview_linetab2_file*)(linetab + 8 + lbh->file_offset);
+        printf("%s  md5=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
+               pfx, fd->md5[ 0], fd->md5[ 1], fd->md5[ 2], fd->md5[ 3],
+               fd->md5[ 4], fd->md5[ 5], fd->md5[ 6], fd->md5[ 7],
+               fd->md5[ 8], fd->md5[ 9], fd->md5[10], fd->md5[11],
+               fd->md5[12], fd->md5[13], fd->md5[14], fd->md5[15]);
+        /* FIXME: should check that string is within strimage + strsize */
+        printf("%s  file=%s\n", pfx, strimage ? strimage + fd->offset : "--none--");
+        for (i = 0; i < lbh->nlines; i++)
+        {
+            printf("%s  offset=%08x line=%d\n", pfx, lbh->l[i].offset, lbh->l[i].lineno ^ 0x80000000);
+        }
+        lbh = (const struct codeview_linetab2_block*)((const char*)lbh + 8 + lbh->size_of_block);
+    }
 }

@@ -482,20 +482,20 @@ static LRESULT COMBO_WindowPosChanging(
     /*
      * Resizing a combobox has another side effect, it resizes the dropped
      * rectangle as well. However, it does it only if the new height for the
-     * combobox is different from the height it should have. In other words,
+     * combobox is more than the height it should have. In other words,
      * if the application resizing the combobox only had the intention to resize
      * the actual control, for example, to do the layout of a dialog that is
      * resized, the height of the dropdown is not changed.
      */
-    if (posChanging->cy != newComboHeight)
+    if (posChanging->cy > newComboHeight)
     {
 	TRACE("posChanging->cy=%d, newComboHeight=%d, oldbot=%d, oldtop=%d\n",
 	      posChanging->cy, newComboHeight, lphc->droppedRect.bottom,
 	      lphc->droppedRect.top);
       lphc->droppedRect.bottom = lphc->droppedRect.top + posChanging->cy - newComboHeight;
 
-      posChanging->cy = newComboHeight;
     }
+    posChanging->cy = newComboHeight;
   }
 
   return 0;
@@ -1344,7 +1344,7 @@ static LRESULT COMBO_Command( LPHEADCOMBO lphc, WPARAM wParam, HWND hWnd )
                 TRACE("[%p]: lbox selection change [%x]\n", lphc->self, lphc->wState );
 
                 /* do not roll up if selection is being tracked
-                 * by arrowkeys in the dropdown listbox */
+                 * by arrow keys in the dropdown listbox */
                 if (!(lphc->wState & CBF_NOROLLUP))
                 {
                     CBRollUp( lphc, (HIWORD(wParam) == LBN_SELCHANGE), TRUE );

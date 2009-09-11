@@ -63,9 +63,9 @@ int CDECL MSVCRT_rand(void)
 /*********************************************************************
  *		_sleep (MSVCRT.@)
  */
-void CDECL MSVCRT__sleep(unsigned long timeout)
+void CDECL MSVCRT__sleep(MSVCRT_ulong timeout)
 {
-  TRACE("_sleep for %ld milliseconds\n",timeout);
+  TRACE("_sleep for %d milliseconds\n",timeout);
   Sleep((timeout)?timeout:1);
 }
 
@@ -138,7 +138,10 @@ __ASM_GLOBAL_FUNC(_chkesp,
                   "jnz 1f\n\t"
                   "ret\n"
                   "1:\tpushl %ebp\n\t"
+                  __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                  __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
                   "movl %esp,%ebp\n\t"
+                  __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
                   "subl $12,%esp\n\t"
                   "pushl %eax\n\t"
                   "pushl %ecx\n\t"
@@ -148,6 +151,8 @@ __ASM_GLOBAL_FUNC(_chkesp,
                   "popl %ecx\n\t"
                   "popl %eax\n\t"
                   "leave\n\t"
+                  __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                  __ASM_CFI(".cfi_same_value %ebp\n\t")
                   "ret")
 
 void CDECL MSVCRT_chkesp_fail(void)

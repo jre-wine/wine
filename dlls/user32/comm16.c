@@ -21,13 +21,13 @@
  *
  * History:
  *
- * Mar 31, 1999. Ove Kåven <ovek@arcticnet.no>
+ * Mar 31, 1999. Ove KÃ¥ven <ovek@arcticnet.no>
  * - Implemented buffers and EnableCommNotification.
  *
  * Apr 3, 1999.  Lawson Whitney <lawson_whitney@juno.com>
  * - Fixed the modem control part of EscapeCommFunction16.
  *
- * Mar 3, 1999. Ove Kåven <ovek@arcticnet.no>
+ * Mar 3, 1999. Ove KÃ¥ven <ovek@arcticnet.no>
  * - Use port indices instead of unixfds for win16
  * - Moved things around (separated win16 and win32 routines)
  * - Added some hints on how to implement buffers and EnableCommNotification.
@@ -752,14 +752,14 @@ SEGPTR WINAPI SetCommEventMask16(INT16 cid,UINT16 fuEvtMask)
     	TRACE("cid %d,mask %d\n",cid,fuEvtMask);
 	if ((ptr = GetDeviceStruct(cid)) == NULL) {
 		FIXME("no handle for cid = %0x!\n",cid);
-	    return (SEGPTR)NULL;
+            return 0;
 	}
 
 	ptr->eventmask = fuEvtMask;
 
         if (cid&FLAG_LPT) {
             WARN(" cid %d not comm port\n",cid);
-            return (SEGPTR)NULL;
+            return 0;
         }
         /* it's a COM port ? -> modify flags */
         stol = (unsigned char *)COM[cid].unknown + COMM_MSR_OFFSET;

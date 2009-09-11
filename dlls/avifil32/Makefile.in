@@ -4,8 +4,7 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = avifil32.dll
 IMPORTLIB = avifil32
-IMPORTS   = msacm32 msvfw32 winmm ole32 user32 advapi32 kernel32
-EXTRALIBS = -luuid
+IMPORTS   = uuid msacm32 msvfw32 winmm ole32 user32 advapi32 kernel32
 
 C_SRCS = \
 	acmstream.c \
@@ -20,9 +19,29 @@ C_SRCS = \
 	tmpfile.c \
 	wavfile.c
 
-SPEC_SRCS16 = avifile.spec
-
 RC_SRCS = \
+	avifile_Cs.rc \
+	avifile_Da.rc \
+	avifile_De.rc \
+	avifile_En.rc \
+	avifile_Es.rc \
+	avifile_Fr.rc \
+	avifile_Hu.rc \
+	avifile_It.rc \
+	avifile_Ja.rc \
+	avifile_Ko.rc \
+	avifile_Lt.rc \
+	avifile_Nl.rc \
+	avifile_No.rc \
+	avifile_Pl.rc \
+	avifile_Pt.rc \
+	avifile_Ro.rc \
+	avifile_Ru.rc \
+	avifile_Si.rc \
+	avifile_Sv.rc \
+	avifile_Tr.rc \
+	avifile_Uk.rc \
+	avifile_Zh.rc \
 	rsrc.rc
 
 @MAKE_DLL_RULES@

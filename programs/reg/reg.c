@@ -17,6 +17,7 @@
  */
 
 #include <windows.h>
+#include <wine/unicode.h>
 #include "reg.h"
 
 static int reg_printfW(const WCHAR *msg, ...)
@@ -27,7 +28,7 @@ static int reg_printfW(const WCHAR *msg, ...)
     WCHAR msg_buffer[8192];
 
     va_start(va_args, msg);
-    wvsprintf(msg_buffer, msg, va_args);
+    vsprintfW(msg_buffer, msg, va_args);
     va_end(va_args);
 
     wlen = lstrlenW(msg_buffer);
@@ -52,45 +53,291 @@ static int reg_printfW(const WCHAR *msg, ...)
     return count;
 }
 
-static int reg_message(int msg, ...)
+static int reg_message(int msg)
 {
-    va_list va_args;
+    static const WCHAR formatW[] = {'%','s',0};
     WCHAR msg_buffer[8192];
 
-    LoadString(GetModuleHandle(NULL), msg, msg_buffer,
+    LoadStringW(GetModuleHandleW(NULL), msg, msg_buffer,
         sizeof(msg_buffer)/sizeof(WCHAR));
-    va_start(va_args, msg);
-    reg_printfW(msg_buffer, va_args);
-    va_end(va_args);
+    return reg_printfW(formatW, msg_buffer);
+}
 
-    return 0;
+static HKEY get_rootkey(LPWSTR key)
+{
+    static const WCHAR szHKLM[] = {'H','K','L','M',0};
+    static const WCHAR szHKCU[] = {'H','K','C','U',0};
+    static const WCHAR szHKCR[] = {'H','K','C','R',0};
+    static const WCHAR szHKU[] = {'H','K','U',0};
+    static const WCHAR szHKCC[] = {'H','K','C','C',0};
+
+    if (CompareStringW(CP_ACP,NORM_IGNORECASE,key,4,szHKLM,4)==2)
+        return HKEY_LOCAL_MACHINE;
+    else if (CompareStringW(CP_ACP,NORM_IGNORECASE,key,4,szHKCU,4)==2)
+        return HKEY_CURRENT_USER;
+    else if (CompareStringW(CP_ACP,NORM_IGNORECASE,key,4,szHKCR,4)==2)
+        return HKEY_CLASSES_ROOT;
+    else if (CompareStringW(CP_ACP,NORM_IGNORECASE,key,3,szHKU,3)==2)
+        return HKEY_USERS;
+    else if (CompareStringW(CP_ACP,NORM_IGNORECASE,key,4,szHKCC,4)==2)
+        return HKEY_CURRENT_CONFIG;
+    else return NULL;
+}
+
+static DWORD get_regtype(LPWSTR type)
+{
+    static const WCHAR szREG_SZ[] = {'R','E','G','_','S','Z',0};
+    static const WCHAR szREG_MULTI_SZ[] = {'R','E','G','_','M','U','L','T','I','_','S','Z',0};
+    static const WCHAR szREG_DWORD_BIG_ENDIAN[] = {'R','E','G','_','D','W','O','R','D','_','B','I','G','_','E','N','D','I','A','N',0};
+    static const WCHAR szREG_DWORD[] = {'R','E','G','_','D','W','O','R','D',0};
+    static const WCHAR szREG_BINARY[] = {'R','E','G','_','B','I','N','A','R','Y',0};
+    static const WCHAR szREG_DWORD_LITTLE_ENDIAN[] = {'R','E','G','_','D','W','O','R','D','_','L','I','T','T','L','E','_','E','N','D','I','A','N',0};
+    static const WCHAR szREG_NONE[] = {'R','E','G','_','N','O','N','E',0};
+    static const WCHAR szREG_EXPAND_SZ[] = {'R','E','G','_','E','X','P','A','N','D','_','S','Z',0};
+
+    if (!type)
+        return REG_SZ;
+
+    if (lstrcmpiW(type,szREG_SZ)==0) return REG_SZ;
+    if (lstrcmpiW(type,szREG_DWORD)==0) return REG_DWORD;
+    if (lstrcmpiW(type,szREG_MULTI_SZ)==0) return REG_MULTI_SZ;
+    if (lstrcmpiW(type,szREG_EXPAND_SZ)==0) return REG_EXPAND_SZ;
+    if (lstrcmpiW(type,szREG_DWORD_BIG_ENDIAN)==0) return REG_DWORD_BIG_ENDIAN;
+    if (lstrcmpiW(type,szREG_DWORD_LITTLE_ENDIAN)==0) return REG_DWORD_LITTLE_ENDIAN;
+    if (lstrcmpiW(type,szREG_BINARY)==0) return REG_BINARY;
+    if (lstrcmpiW(type,szREG_NONE)==0) return REG_NONE;
+
+    return -1;
+}
+
+static LPBYTE get_regdata(LPWSTR data, DWORD reg_type, WCHAR separator, DWORD *reg_count)
+{
+    LPBYTE out_data = NULL;
+    *reg_count = 0;
+
+    switch (reg_type)
+    {
+        case REG_SZ:
+        {
+            *reg_count = (lstrlenW(data) + 1) * sizeof(WCHAR);
+            out_data = HeapAlloc(GetProcessHeap(),0,*reg_count);
+            lstrcpyW((LPWSTR)out_data,data);
+            break;
+        }
+        default:
+        {
+            static const WCHAR unhandled[] = {'U','n','h','a','n','d','l','e','d',' ','T','y','p','e',' ','0','x','%','x',' ',' ','d','a','t','a',' ','%','s','\n',0};
+            reg_printfW(unhandled, reg_type,data);
+        }
+    }
+
+    return out_data;
 }
 
 static int reg_add(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
     WCHAR *type, WCHAR separator, WCHAR *data, BOOL force)
 {
-    const WCHAR stubW[] = {'S','T','U','B',' ','A','D','D',' ','-',' ','%','s',
+    static const WCHAR stubW[] = {'A','D','D',' ','-',' ','%','s',
         ' ','%','s',' ','%','d',' ','%','s',' ','%','s',' ','%','d','\n',0};
+    LPWSTR p;
+    HKEY root,subkey;
+
     reg_printfW(stubW, key_name, value_name, value_empty, type, data, force);
 
-    return 1;
+    if (key_name[0]=='\\' && key_name[1]=='\\')
+    {
+        reg_message(STRING_NO_REMOTE);
+        return 1;
+    }
+
+    p = strchrW(key_name,'\\');
+    if (!p)
+    {
+        reg_message(STRING_INVALID_KEY);
+        return 1;
+    }
+    p++;
+
+    root = get_rootkey(key_name);
+    if (!root)
+    {
+        reg_message(STRING_INVALID_KEY);
+        return 1;
+    }
+
+    if(RegCreateKeyW(root,p,&subkey)!=ERROR_SUCCESS)
+    {
+        reg_message(STRING_INVALID_KEY);
+        return 1;
+    }
+
+    if (value_name || data)
+    {
+        DWORD reg_type;
+        DWORD reg_count = 0;
+        BYTE* reg_data = NULL;
+
+        if (!force)
+        {
+            if (RegQueryValueW(subkey,value_name,NULL,NULL)==ERROR_SUCCESS)
+            {
+                /* FIXME:  Prompt for overwrite */
+            }
+        }
+
+        reg_type = get_regtype(type);
+        if (reg_type == -1)
+        {
+            RegCloseKey(subkey);
+            reg_message(STRING_INVALID_CMDLINE);
+            return 1;
+        }
+
+        if (data)
+            reg_data = get_regdata(data,reg_type,separator,&reg_count);
+
+        RegSetValueExW(subkey,value_name,0,reg_type,reg_data,reg_count);
+        HeapFree(GetProcessHeap(),0,reg_data);
+    }
+
+    RegCloseKey(subkey);
+    reg_message(STRING_SUCCESS);
+
+    return 0;
 }
 
 static int reg_delete(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
     BOOL value_all, BOOL force)
 {
-    const WCHAR stubW[] = {'S','T','U','B',' ','D','E','L','E','T','E',' ','-',
-        ' ','%','s',' ','%','s',' ','%','d',' ','%','d',' ','%','d','\n',0};
+    LPWSTR p;
+    HKEY root,subkey;
+
+    static const WCHAR stubW[] = {'D','E','L','E','T','E',
+        ' ','-',' ','%','s',' ','%','s',' ','%','d',' ','%','d',' ','%','d','\n'
+        ,0};
     reg_printfW(stubW, key_name, value_name, value_empty, value_all, force);
 
-    return 1;
+    if (key_name[0]=='\\' && key_name[1]=='\\')
+    {
+        reg_message(STRING_NO_REMOTE);
+        return 1;
+    }
+
+    p = strchrW(key_name,'\\');
+    if (!p)
+    {
+        reg_message(STRING_INVALID_KEY);
+        return 1;
+    }
+    p++;
+
+    root = get_rootkey(key_name);
+    if (!root)
+    {
+        reg_message(STRING_INVALID_KEY);
+        return 1;
+    }
+
+    if (value_name && value_empty)
+    {
+        reg_message(STRING_INVALID_CMDLINE);
+        return 1;
+    }
+
+    if (value_empty && value_all)
+    {
+        reg_message(STRING_INVALID_CMDLINE);
+        return 1;
+    }
+
+    if (!force)
+    {
+        /* FIXME:  Prompt for delete */
+    }
+
+    if (!value_name)
+    {
+        if (RegDeleteTreeW(root,p)!=ERROR_SUCCESS)
+        {
+            reg_message(STRING_CANNOT_FIND);
+            return 1;
+        }
+        reg_message(STRING_SUCCESS);
+        return 0;
+    }
+
+    if(RegOpenKeyW(root,p,&subkey)!=ERROR_SUCCESS)
+    {
+        reg_message(STRING_CANNOT_FIND);
+        return 1;
+    }
+
+    if (value_all)
+    {
+        LPWSTR szValue;
+        DWORD maxValue;
+        DWORD count;
+        LONG rc;
+
+        if (value_name)
+        {
+            RegCloseKey(subkey);
+            reg_message(STRING_INVALID_CMDLINE);
+            return 1;
+        }
+
+        rc = RegQueryInfoKeyW(subkey, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+            &maxValue, NULL, NULL, NULL);
+        if (rc != ERROR_SUCCESS)
+        {
+            /* FIXME: failure */
+            RegCloseKey(subkey);
+            return 1;
+        }
+        maxValue++;
+        szValue = HeapAlloc(GetProcessHeap(),0,maxValue*sizeof(WCHAR));
+
+        while (1)
+        {
+            count = maxValue;
+            rc = RegEnumValueW(subkey, 0, value_name, &count, NULL, NULL, NULL, NULL);
+            if (rc == ERROR_SUCCESS)
+            {
+                rc = RegDeleteValueW(subkey,value_name);
+                if (rc != ERROR_SUCCESS)
+                    break;
+            }
+            else break;
+        }
+        if (rc != ERROR_SUCCESS)
+        {
+            /* FIXME  delete failed */
+        }
+    }
+    else if (value_name)
+    {
+        if (RegDeleteValueW(subkey,value_name) != ERROR_SUCCESS)
+        {
+            RegCloseKey(subkey);
+            reg_message(STRING_CANNOT_FIND);
+            return 1;
+        }
+    }
+    else if (value_empty)
+    {
+        RegSetValueExW(subkey,NULL,0,REG_SZ,NULL,0);
+    }
+
+    RegCloseKey(subkey);
+    reg_message(STRING_SUCCESS);
+    return 0;
 }
 
 static int reg_query(WCHAR *key_name, WCHAR *value_name, BOOL value_empty,
     BOOL subkey)
 {
-    const WCHAR stubW[] = {'S','T','U','B',' ','Q','U','E','R','Y',' ','-',' ',
-        '%','s',' ','%','s',' ','%','d',' ','%','d','\n',0};
+    static const WCHAR stubW[] = {'S','T','U','B',' ','Q','U','E','R','Y',' ',
+        '-',' ','%','s',' ','%','s',' ','%','d',' ','%','d','\n',0};
     reg_printfW(stubW, key_name, value_name, value_empty, subkey);
 
     return 1;
@@ -100,21 +347,24 @@ int wmain(int argc, WCHAR *argvW[])
 {
     int i;
 
-    const WCHAR addW[] = {'a','d','d',0};
-    const WCHAR deleteW[] = {'d','e','l','e','t','e',0};
-    const WCHAR queryW[] = {'q','u','e','r','y',0};
-    const WCHAR slashDW[] = {'/','d',0};
-    const WCHAR slashFW[] = {'/','f',0};
-    const WCHAR slashSW[] = {'/','s',0};
-    const WCHAR slashTW[] = {'/','t',0};
-    const WCHAR slashVW[] = {'/','v',0};
-    const WCHAR slashVAW[] = {'/','v','a',0};
-    const WCHAR slashVEW[] = {'/','v','e',0};
+    static const WCHAR addW[] = {'a','d','d',0};
+    static const WCHAR deleteW[] = {'d','e','l','e','t','e',0};
+    static const WCHAR queryW[] = {'q','u','e','r','y',0};
+    static const WCHAR slashDW[] = {'/','d',0};
+    static const WCHAR slashFW[] = {'/','f',0};
+    static const WCHAR slashHW[] = {'/','h',0};
+    static const WCHAR slashSW[] = {'/','s',0};
+    static const WCHAR slashTW[] = {'/','t',0};
+    static const WCHAR slashVW[] = {'/','v',0};
+    static const WCHAR slashVAW[] = {'/','v','a',0};
+    static const WCHAR slashVEW[] = {'/','v','e',0};
+    static const WCHAR slashHelpW[] = {'/','?',0};
 
-    if (argc < 2)
+    if (argc < 2 || !lstrcmpW(argvW[1], slashHelpW)
+                 || !lstrcmpiW(argvW[1], slashHW))
     {
         reg_message(STRING_USAGE);
-        return 1;
+        return 0;
     }
 
     if (!lstrcmpiW(argvW[1], addW))
@@ -124,8 +374,14 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            reg_message(STRING_ADD_USAGE);
+            reg_message(STRING_INVALID_CMDLINE);
             return 1;
+        }
+        else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
+                               !lstrcmpiW(argvW[2], slashHW)))
+        {
+            reg_message(STRING_ADD_USAGE);
+            return 0;
         }
 
         key_name = argvW[2];
@@ -154,8 +410,14 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            reg_message(STRING_DELETE_USAGE);
+            reg_message(STRING_INVALID_CMDLINE);
             return 1;
+        }
+        else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
+                               !lstrcmpiW(argvW[2], slashHW)))
+        {
+            reg_message(STRING_DELETE_USAGE);
+            return 0;
         }
 
         key_name = argvW[2];
@@ -179,8 +441,14 @@ int wmain(int argc, WCHAR *argvW[])
 
         if (argc < 3)
         {
-            reg_message(STRING_QUERY_USAGE);
+            reg_message(STRING_INVALID_CMDLINE);
             return 1;
+        }
+        else if (argc == 3 && (!lstrcmpW(argvW[2], slashHelpW) ||
+                               !lstrcmpiW(argvW[2], slashHW)))
+        {
+            reg_message(STRING_QUERY_USAGE);
+            return 0;
         }
 
         key_name = argvW[2];
@@ -195,6 +463,9 @@ int wmain(int argc, WCHAR *argvW[])
         }
         return reg_query(key_name, value_name, value_empty, subkey);
     }
-
-    return 0;
+    else
+    {
+        reg_message(STRING_INVALID_CMDLINE);
+        return 1;
+    }
 }

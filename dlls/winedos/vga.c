@@ -1,7 +1,7 @@
 /*
  * VGA hardware emulation
  *
- * Copyright 1998 Ove Kåven (with some help from Marcus Meissner)
+ * Copyright 1998 Ove KÃ¥ven (with some help from Marcus Meissner)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -54,6 +54,12 @@ static BOOL vga_retrace_horizontal;
 #define VGA_WINDOW_START ((char *)0xa0000)
 
 /*
+ * Size and location of CGA controller window to framebuffer.
+ */
+#define CGA_WINDOW_SIZE  (32 * 1024)
+#define CGA_WINDOW_START ((char *)0xb8000)
+
+/*
  * VGA controller memory is emulated using linear framebuffer.
  * This frambuffer also acts as an interface
  * between VGA controller emulation and DirectDraw.
@@ -91,6 +97,13 @@ static int   vga_fb_offset;
 static int   vga_fb_size = 0;
 static char *vga_fb_data = 0;
 static int   vga_fb_window = 0;
+static int   vga_fb_window_size;
+static char *vga_fb_window_data;
+static PALETTEENTRY *vga_fb_palette;
+static unsigned vga_fb_palette_index;
+static unsigned vga_fb_palette_size;
+static BOOL  vga_fb_bright;
+static BOOL  vga_fb_enabled;
 
 /*
  * VGA text mode data.
@@ -132,6 +145,73 @@ static BYTE vga_index_3d4;
 static BOOL vga_address_3c0 = TRUE;
 
 /*
+ * List of supported video modes.
+ *
+ * should be expanded to contain most or all information
+ * as required for SVGA VESA mode info block for VESA BIOS subsystem 1 (see _ModeInfoBlock)
+ * this will allow proper support for FIXME items in VGA/VESA mode configuration
+ *
+ * FIXME - verify and define support for VESA modes
+ * FIXME - add # bit planes, # video memory banks, & memory model
+ */
+static WORD VGA_CurrentMode;
+static BOOL CGA_ColorComposite = FALSE;  /* behave like composite monitor */
+
+const VGA_MODE VGA_modelist[] =
+{
+    /* Mode, ModeType, TextCols, TextRows, CharWidth, CharHeight, Width, Height, Depth, Colors, ScreenPages, Supported*/
+    /* VGA modes */
+    {0x0000,    TEXT, 40, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA/CGA text mode 0 */
+    {0x0001,    TEXT, 40, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA/CGA text mode 1 */
+    {0x0002,    TEXT, 80, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA/CGA text mode 2 */
+    {0x0003,    TEXT, 80, 25,  9, 16,  360,  400,  0,  16, 8, TRUE},   /* VGA/CGA text mode 3 */
+    {0x0004, GRAPHIC, 40, 25,  8,  8,  320,  200,  2,   4, 1, TRUE},   /* VGA/CGA graphics mode 4 */
+    {0x0005, GRAPHIC, 40, 25,  8,  8,  320,  200,  2,   4, 1, TRUE},   /* VGA/CGA graphics mode 5 */
+    {0x0006, GRAPHIC, 80, 25,  8,  8,  640,  200,  1,   2, 1, TRUE},   /* VGA/CGA graphics mode 6 */
+    {0x0007,    TEXT, 80, 25,  9, 16,  720,  400,  0,   0, 8, FALSE},   /* VGA text mode 7 - FIXME bad default address */
+    {0x000d, GRAPHIC, 40, 25,  8,  8,  320,  200,  4,  16, 8, FALSE},   /* VGA graphics mode 13 */
+    {0x000e, GRAPHIC, 80, 25,  8,  8,  640,  200,  4,  16, 4, FALSE},   /* VGA graphics mode 14 */
+    {0x000f, GRAPHIC, 80, 25,  8, 14,  640,  350,  0,   0, 2, FALSE},   /* VGA graphics mode 15 */
+    {0x0010, GRAPHIC, 80, 25,  8, 14,  640,  350,  4,  16, 2, FALSE},   /* VGA graphics mode 16 */
+    {0x0012, GRAPHIC, 80, 30,  8, 16,  640,  480,  1,   2, 1, FALSE},   /* VGA graphics mode 17 */
+    {0x0012, GRAPHIC, 80, 30,  8, 16,  640,  480,  4,  16, 1, FALSE},   /* VGA graphics mode 18 */
+    {0x0013, GRAPHIC, 40, 25,  8,  8,  320,  200,  8, 256, 1, TRUE},   /* VGA graphics mode 19 */
+    /* VESA 7-bit modes */
+    {0x006a, GRAPHIC,  0,  0,  0,  0,  800,  600,  4,  16, 1, TRUE},   /* VESA graphics mode, same as 0x102 */
+    /* VESA 15-bit modes */
+    {0x0100, GRAPHIC,  0,  0,  0,  0,  640,  400,  8, 256, 1, TRUE},   /* VESA graphics mode */
+    {0x0101, GRAPHIC,  0,  0,  0,  0,  640,  480,  8, 256, 1, TRUE},   /* VESA graphics mode */
+    {0x0102, GRAPHIC,  0,  0,  0,  0,  800,  600,  4,  16, 1, TRUE},   /* VESA graphics mode */
+    {0x0103, GRAPHIC,  0,  0,  0,  0,  800,  600,  8, 256, 1, TRUE},   /* VESA graphics mode */
+    {0x0104, GRAPHIC,  0,  0,  0,  0, 1024,  768,  4,  16, 1, TRUE},   /* VESA graphics mode */
+    {0x0105, GRAPHIC,  0,  0,  0,  0, 1024,  768,  8, 256, 1, TRUE},   /* VESA graphics mode */
+    {0x0106, GRAPHIC,  0,  0,  0,  0, 1280, 1024,  4,  16, 1, TRUE},   /* VESA graphics mode */
+    {0x0107, GRAPHIC,  0,  0,  0,  0, 1280, 1024,  8, 256, 1, TRUE},   /* VESA graphics mode */
+    {0x0108,    TEXT,  0,  0,  0,  0,   80,   60,  0,   0, 1, TRUE},   /* VESA text mode */
+    {0x0109,    TEXT,  0,  0,  0,  0,  132,   25,  0,   0, 1, TRUE},   /* VESA text mode */
+    {0x010a,    TEXT,  0,  0,  0,  0,  132,   43,  0,   0, 1, TRUE},   /* VESA text mode */
+    {0x010b,    TEXT,  0,  0,  0,  0,  132,   50,  0,   0, 1, TRUE},   /* VESA text mode */
+    {0x010c,    TEXT,  0,  0,  0,  0,  132,   60,  0,   0, 1, TRUE},   /* VESA text mode */
+    /* VESA 1.2 modes */
+    {0x010d, GRAPHIC,  0,  0,  0,  0,  320,  200, 15,   0, 1, TRUE},   /* VESA graphics mode, 32K colors */
+    {0x010e, GRAPHIC,  0,  0,  0,  0,  320,  200, 16,   0, 1, TRUE},   /* VESA graphics mode, 64K colors */
+    {0x010f, GRAPHIC,  0,  0,  0,  0,  320,  200, 24,   0, 1, TRUE},   /* VESA graphics mode, 16.8 Million colors */
+    {0x0110, GRAPHIC,  0,  0,  0,  0,  640,  480, 15,   0, 1, TRUE},   /* VESA graphics mode, 32K colors */
+    {0x0111, GRAPHIC,  0,  0,  0,  0,  640,  480, 16,   0, 1, TRUE},   /* VESA graphics mode, 64K colors */
+    {0x0112, GRAPHIC,  0,  0,  0,  0,  640,  480, 24,   0, 1, TRUE},   /* VESA graphics mode, 16.8 Million colors */
+    {0x0113, GRAPHIC,  0,  0,  0,  0,  800,  600, 15,   0, 1, TRUE},   /* VESA graphics mode, 32K colors */
+    {0x0114, GRAPHIC,  0,  0,  0,  0,  800,  600, 16,   0, 1, TRUE},   /* VESA graphics mode, 64K colors */
+    {0x0115, GRAPHIC,  0,  0,  0,  0,  800,  600, 24,   0, 1, TRUE},   /* VESA graphics mode, 16.8 Million colors */
+    {0x0116, GRAPHIC,  0,  0,  0,  0, 1024,  768, 15,   0, 1, TRUE},   /* VESA graphics mode, 32K colors */
+    {0x0117, GRAPHIC,  0,  0,  0,  0, 1024,  768, 16,   0, 1, TRUE},   /* VESA graphics mode, 64K colors */
+    {0x0118, GRAPHIC,  0,  0,  0,  0, 1024,  768, 24,   0, 1, TRUE},   /* VESA graphics mode, 16.8 Million colors */
+    {0x0119, GRAPHIC,  0,  0,  0,  0, 1280, 1024, 15,   0, 1, TRUE},   /* VESA graphics mode, 32K colors */
+    {0x011a, GRAPHIC,  0,  0,  0,  0, 1280, 1024, 16,   0, 1, TRUE},   /* VESA graphics mode, 64K colors */
+    {0x011b, GRAPHIC,  0,  0,  0,  0, 1280, 1024, 24,   0, 1, TRUE},   /* VESA graphics mode, 16.8 Million colors */
+    {0xffff,    TEXT,  0,  0,  0,  0,    0,    0,  0,   0, 1, FALSE}
+};
+
+/*
  * This mutex is used to protect VGA state during asynchronous
  * screen updates (see VGA_Poll). It makes sure that VGA state changes
  * are atomic and the user interface is protected from flicker and
@@ -159,12 +239,57 @@ static void CALLBACK VGA_Poll( LPVOID arg, DWORD low, DWORD high );
 static HWND vga_hwnd = NULL;
 
 /*
- * For simplicity, I'm creating a second palette.
- * 16 color accesses will use these pointers and insert
- * entries from the 64-color palette into the default
- * palette.   --Robert 'Admiral' Coeyman
+ * CGA palette 1
  */
+static PALETTEENTRY cga_palette1[] = {
+  {0x00, 0x00, 0x00}, /* 0 - Black */
+  {0x00, 0xAA, 0xAA}, /* 1 - Cyan */
+  {0xAA, 0x00, 0xAA}, /* 2 - Magenta */
+  {0xAA, 0xAA, 0xAA}  /* 3 - White */
+};
 
+/*
+ * CGA palette 1 in the bright variant
+ * intensities, when signalled to do so
+ * in register 0x3d9
+ */
+static PALETTEENTRY cga_palette1_bright[] = {
+  {0x00, 0x00, 0x00}, /* 0 - Black */
+  {0x55, 0xFF, 0xFF}, /* 1 - Light cyan */
+  {0xFF, 0x55, 0xFF}, /* 2 - Light magenta */
+  {0xFF, 0xFF, 0xFF}, /* 3 - Bright White */
+};
+
+/*
+ * CGA palette 2
+ */
+static PALETTEENTRY cga_palette2[] = {
+  {0x00, 0x00, 0x00}, /* 0 - Black */
+  {0x00, 0xAA, 0x00}, /* 1 - Green */
+  {0xAA, 0x00, 0x00}, /* 2 - Red */
+  {0xAA, 0x55, 0x00}  /* 3 - Brown */
+};
+
+/*
+ * CGA palette 2 in the bright variant
+ * intensities, when signalled to do so
+ * in register 0x3d9
+ */
+static PALETTEENTRY cga_palette2_bright[] = {
+  {0x00, 0x00, 0x00}, /* 0 - Black */
+  {0x55, 0xFF, 0x55}, /* 1 - Light green */
+  {0xFF, 0x55, 0x55}, /* 2 - Light red */
+  {0xFF, 0xFF, 0x55}, /* 3 - Yellow */
+};
+
+/*
+ *  VGA Palette Registers, in actual 16 bit color
+ *  port 3C0H - 6 bit rgbRGB format
+ *
+ *  16 color accesses will use these pointers and insert
+ *  entries from the 64-color palette (mode 18) into the default
+ *  palette.   --Robert 'Admiral' Coeyman
+ */
 static char vga_16_palette[17]={
   0x00,  /* 0 - Black         */
   0x01,  /* 1 - Blue          */
@@ -173,7 +298,7 @@ static char vga_16_palette[17]={
   0x04,  /* 4 - Red           */
   0x05,  /* 5 - Magenta       */
   0x14,  /* 6 - Brown         */
-  0x07,  /* 7 - Light gray    */
+  0x07,  /* 7 - White (Light gray)        */
   0x38,  /* 8 - Dark gray     */
   0x39,  /* 9 - Light blue    */
   0x3a,  /* A - Light green   */
@@ -181,35 +306,286 @@ static char vga_16_palette[17]={
   0x3c,  /* C - Light red     */
   0x3d,  /* D - Light magenta */
   0x3e,  /* E - Yellow        */
-  0x3f,  /* F - White         */
+  0x3f,  /* F - Bright White (White) */
   0x00   /* Border Color      */
 };
 
+/*
+ *  Mode 19 Default Color Register Setting
+ *  DAC palette registers, converted from actual 18 bit color to 24.
+ */
 static PALETTEENTRY vga_def_palette[256]={
 /* red  green  blue */
-  {0x00, 0x00, 0x00}, /* 0 - Black */
-  {0x00, 0x00, 0x80}, /* 1 - Blue */
-  {0x00, 0x80, 0x00}, /* 2 - Green */
-  {0x00, 0x80, 0x80}, /* 3 - Cyan */
-  {0x80, 0x00, 0x00}, /* 4 - Red */
-  {0x80, 0x00, 0x80}, /* 5 - Magenta */
-  {0x80, 0x80, 0x00}, /* 6 - Brown */
-  {0xC0, 0xC0, 0xC0}, /* 7 - Light gray */
-  {0x80, 0x80, 0x80}, /* 8 - Dark gray */
-  {0x00, 0x00, 0xFF}, /* 9 - Light blue */
-  {0x00, 0xFF, 0x00}, /* A - Light green */
-  {0x00, 0xFF, 0xFF}, /* B - Light cyan */
-  {0xFF, 0x00, 0x00}, /* C - Light red */
-  {0xFF, 0x00, 0xFF}, /* D - Light magenta */
-  {0xFF, 0xFF, 0x00}, /* E - Yellow */
-  {0xFF, 0xFF, 0xFF}, /* F - White */
-  {0,0,0} /* FIXME: a series of continuous rainbow hues should follow */
+  /* 16 colors in IRGB values */
+  {0x00, 0x00, 0x00}, /* 0 (0) - Black */
+  {0x00, 0x00, 0xAA}, /* 1 (1) - Blue */
+  {0x00, 0xAA, 0x00}, /* 2 (2) - Green */
+  {0x00, 0xAA, 0xAA}, /* 3 (3) - Cyan */
+  {0xAA, 0x00, 0x00}, /* 4 (4) - Red */
+  {0xAA, 0x00, 0xAA}, /* 5 (5) - Magenta */
+  {0xAA, 0x55, 0x00}, /* 6 (6) - Brown */
+  {0xAA, 0xAA, 0xAA}, /* 7 (7) - White (Light gray) */
+  {0x55, 0x55, 0x55}, /* 8 (8) - Dark gray */
+  {0x55, 0x55, 0xFF}, /* 9 (9) - Light blue */
+  {0x55, 0xFF, 0x55}, /* 10 (A) - Light green */
+  {0x55, 0xFF, 0xFF}, /* 11 (B) - Light cyan */
+  {0xFF, 0x55, 0x55}, /* 12 (C) - Light red */
+  {0xFF, 0x55, 0xFF}, /* 13 (D) - Light magenta */
+  {0xFF, 0xFF, 0x55}, /* 14 (E) -  Yellow */
+  {0xFF, 0xFF, 0xFF}, /* 15 (F) - Bright White (White) */
+  /* 16 shades of gray */
+  {0x00, 0x00, 0x00}, /* 16 (10) */
+  {0x10, 0x10, 0x10}, /* 17 (11) */
+  {0x20, 0x20, 0x20}, /* 18 (12) */
+  {0x35, 0x35, 0x35}, /* 19 (13) */
+  {0x45, 0x45, 0x45}, /* 20 (14) */
+  {0x55, 0x55, 0x55}, /* 21 (15) */
+  {0x65, 0x65, 0x65}, /* 22 (16) */
+  {0x75, 0x75, 0x75}, /* 23 (17) */
+  {0x8A, 0x8A, 0x8A}, /* 24 (18) */
+  {0x9A, 0x9A, 0x9A}, /* 25 (19) */
+  {0xAA, 0xAA, 0xAA}, /* 26 (1A) */
+  {0xBA, 0xBA, 0xBA}, /* 27 (1B) */
+  {0xCA, 0xCA, 0xCA}, /* 28 (1C) */
+  {0xDF, 0xDF, 0xDF}, /* 29 (1D) */
+  {0xEF, 0xEF, 0xEF}, /* 30 (1E) */
+  {0xFF, 0xFF, 0xFF}, /* 31 (1F) */
+  /* High Intensity group - 72 colors in 1/3 saturation groups (20H-37H high) */
+  {0x00, 0x00, 0xFF}, /* 32 (20) */
+  {0x41, 0x00, 0xFF}, /* 33 (21) */
+  {0x82, 0x00, 0xFF}, /* 34 (22) */
+  {0xBE, 0x00, 0xFF}, /* 35 (23) */
+  {0xFF, 0x00, 0xFF}, /* 36 (24) */
+  {0xFF, 0x00, 0xBE}, /* 37 (25) */
+  {0xFF, 0x00, 0x82}, /* 38 (26) */
+  {0xFF, 0x00, 0x41}, /* 39 (27) */
+  {0xFF, 0x00, 0x00}, /* 40 (28) */
+  {0xFF, 0x41, 0x00}, /* 41 (29) */
+  {0xFF, 0x82, 0x00}, /* 42 (2A) */
+  {0xFF, 0xBE, 0x00}, /* 43 (2B) */
+  {0xFF, 0xFF, 0x00}, /* 44 (2C) */
+  {0xBE, 0xFF, 0x00}, /* 45 (2D) */
+  {0x82, 0xFF, 0x00}, /* 46 (2E) */
+  {0x41, 0xFF, 0x00}, /* 47 (2F) */
+  {0x00, 0xFF, 0x00}, /* 48 (30) */
+  {0x00, 0xFF, 0x41}, /* 49 (31) */
+  {0x00, 0xFF, 0x82}, /* 50 (32) */
+  {0x00, 0xFF, 0xBE}, /* 51 (33) */
+  {0x00, 0xFF, 0xFF}, /* 52 (34) */
+  {0x00, 0xBE, 0xFF}, /* 53 (35) */
+  {0x00, 0x82, 0xFF}, /* 54 (36) */
+  {0x00, 0x41, 0xFF}, /* 55 (37) */
+  /* High Intensity group - 72 colors in 2/3 saturation groups (38H-4FH moderate) */
+  {0x82, 0x82, 0xFF}, /* 56 (38) */
+  {0x9E, 0x82, 0xFF}, /* 57 (39) */
+  {0xBE, 0x82, 0xFF}, /* 58 (3A) */
+  {0xDF, 0x82, 0xFF}, /* 59 (3B) */
+  {0xFF, 0x82, 0xFF}, /* 60 (3C) */
+  {0xFF, 0x82, 0xDF}, /* 61 (3D) */
+  {0xFF, 0x82, 0xBE}, /* 62 (3E) */
+  {0xFF, 0x82, 0x9E}, /* 63 (3F) */
+  {0xFF, 0x82, 0x82}, /* 64 (40) */
+  {0xFF, 0x9E, 0x82}, /* 65 (41) */
+  {0xFF, 0xBE, 0x82}, /* 66 (42) */
+  {0xFF, 0xDF, 0x82}, /* 67 (43) */
+  {0xFF, 0xFF, 0x82}, /* 68 (44) */
+  {0xDF, 0xFF, 0x82}, /* 69 (45) */
+  {0xBE, 0xFF, 0x82}, /* 70 (46) */
+  {0x9E, 0xFF, 0x82}, /* 71 (47) */
+  {0x82, 0xFF, 0x82}, /* 72 (48) */
+  {0x82, 0xFF, 0x9E}, /* 73 (49) */
+  {0x82, 0xFF, 0xBE}, /* 74 (4A) */
+  {0x82, 0xFF, 0xDF}, /* 75 (4B) */
+  {0x82, 0xFF, 0xFF}, /* 76 (4C) */
+  {0x82, 0xDF, 0xFF}, /* 77 (4D) */
+  {0x82, 0xBE, 0xFF}, /* 78 (4E) */
+  {0x82, 0x9E, 0xFF}, /* 79 (4F) */
+  /* High Intensity group - 72 colors in 3/3 saturation groups (50H-67H low) */
+  {0xBA, 0xBA, 0xFF}, /* 80 (50) */
+  {0xCA, 0xBA, 0xFF}, /* 81 (51) */
+  {0xDF, 0xBA, 0xFF}, /* 82 (52) */
+  {0xEF, 0xBA, 0xFF}, /* 83 (53) */
+  {0xFF, 0xBA, 0xFF}, /* 84 (54) */
+  {0xFF, 0xBA, 0xEF}, /* 85 (55) */
+  {0xFF, 0xBA, 0xDF}, /* 86 (56) */
+  {0xFF, 0xBA, 0xCA}, /* 87 (57) */
+  {0xFF, 0xBA, 0xBA}, /* 88 (58) */
+  {0xFF, 0xCA, 0xBA}, /* 89 (59) */
+  {0xFF, 0xDF, 0xBA}, /* 90 (5A) */
+  {0xFF, 0xEF, 0xBA}, /* 91 (5B) */
+  {0xFF, 0xFF, 0xBA}, /* 92 (5C) */
+  {0xEF, 0xFF, 0xBA}, /* 93 (5D) */
+  {0xDF, 0xFF, 0xBA}, /* 94 (5E) */
+  {0xCA, 0xFF, 0xBA}, /* 95 (5F) */
+  {0xBA, 0xFF, 0xBA}, /* 96 (60) */
+  {0xBA, 0xFF, 0xCA}, /* 97 (61) */
+  {0xBA, 0xFF, 0xDF}, /* 98 (62) */
+  {0xBA, 0xFF, 0xEF}, /* 99 (63) */
+  {0xBA, 0xFF, 0xFF}, /* 100 (64) */
+  {0xBA, 0xEF, 0xFF}, /* 101 (65) */
+  {0xBA, 0xDF, 0xFF}, /* 102 (66) */
+  {0xBA, 0xCA, 0xFF}, /* 103 (67) */
+  /* Medium Intensity group - 72 colors in 1/3 saturation groups (68H-7FH high) */
+  {0x00, 0x00, 0x71}, /* 104 (68) */
+  {0x1C, 0x00, 0x71}, /* 105 (69) */
+  {0x39, 0x00, 0x71}, /* 106 (6A) */
+  {0x55, 0x00, 0x71}, /* 107 (6B) */
+  {0x71, 0x00, 0x71}, /* 108 (6C) */
+  {0x71, 0x00, 0x55}, /* 109 (6D) */
+  {0x71, 0x00, 0x39}, /* 110 (6E) */
+  {0x71, 0x00, 0x1C}, /* 111 (6F) */
+  {0x71, 0x00, 0x00}, /* 112 (70) */
+  {0x71, 0x1C, 0x00}, /* 113 (71) */
+  {0x71, 0x39, 0x00}, /* 114 (72) */
+  {0x71, 0x55, 0x00}, /* 115 (73) */
+  {0x71, 0x71, 0x00}, /* 116 (74) */
+  {0x55, 0x71, 0x00}, /* 117 (75) */
+  {0x39, 0x71, 0x00}, /* 118 (76) */
+  {0x1C, 0x71, 0x00}, /* 119 (77) */
+  {0x00, 0x71, 0x00}, /* 120 (78) */
+  {0x00, 0x71, 0x1C}, /* 121 (79) */
+  {0x00, 0x71, 0x39}, /* 122 (7A) */
+  {0x00, 0x71, 0x55}, /* 123 (7B) */
+  {0x00, 0x71, 0x71}, /* 124 (7C) */
+  {0x00, 0x55, 0x71}, /* 125 (7D) */
+  {0x00, 0x39, 0x71}, /* 126 (7E) */
+  {0x00, 0x1C, 0x71}, /* 127 (7F) */
+  /* Medium Intensity group - 72 colors in 2/3 saturation groups (80H-97H moderate) */
+  {0x39, 0x39, 0x71}, /* 128 (80) */
+  {0x45, 0x39, 0x71}, /* 129 (81) */
+  {0x55, 0x39, 0x71}, /* 130 (82) */
+  {0x61, 0x39, 0x71}, /* 131 (83) */
+  {0x71, 0x39, 0x71}, /* 132 (84) */
+  {0x71, 0x39, 0x61}, /* 133 (85) */
+  {0x71, 0x39, 0x55}, /* 134 (86) */
+  {0x71, 0x39, 0x45}, /* 135 (87) */
+  {0x71, 0x39, 0x39}, /* 136 (88) */
+  {0x71, 0x45, 0x39}, /* 137 (89) */
+  {0x71, 0x55, 0x39}, /* 138 (8A) */
+  {0x71, 0x61, 0x39}, /* 139 (8B) */
+  {0x71, 0x71, 0x39}, /* 140 (8C) */
+  {0x61, 0x71, 0x39}, /* 141 (8D) */
+  {0x55, 0x71, 0x39}, /* 142 (8E) */
+  {0x45, 0x71, 0x39}, /* 143 (8F) */
+  {0x39, 0x71, 0x39}, /* 144 (90) */
+  {0x39, 0x71, 0x45}, /* 145 (91) */
+  {0x39, 0x71, 0x55}, /* 146 (92) */
+  {0x39, 0x71, 0x61}, /* 147 (93) */
+  {0x39, 0x71, 0x71}, /* 148 (94) */
+  {0x39, 0x61, 0x71}, /* 149 (95) */
+  {0x39, 0x55, 0x71}, /* 150 (96) */
+  {0x39, 0x45, 0x71}, /* 151 (97) */
+  /* Medium Intensity group - 72 colors in 3/3 saturation groups (98H-AFH low) */
+  {0x51, 0x51, 0x71}, /* 152 (98) */
+  {0x59, 0x51, 0x71}, /* 153 (99) */
+  {0x61, 0x51, 0x71}, /* 154 (9A) */
+  {0x69, 0x51, 0x71}, /* 155 (9B) */
+  {0x71, 0x51, 0x71}, /* 156 (9C) */
+  {0x71, 0x51, 0x69}, /* 157 (9D) */
+  {0x71, 0x51, 0x61}, /* 158 (9E) */
+  {0x71, 0x51, 0x59}, /* 159 (9F) */
+  {0x71, 0x51, 0x51}, /* 160 (A0) */
+  {0x71, 0x59, 0x51}, /* 161 (A1) */
+  {0x71, 0x61, 0x51}, /* 162 (A2) */
+  {0x71, 0x69, 0x51}, /* 163 (A3) */
+  {0x71, 0x71, 0x51}, /* 164 (A4) */
+  {0x69, 0x71, 0x51}, /* 165 (A5) */
+  {0x61, 0x71, 0x51}, /* 166 (A6) */
+  {0x59, 0x71, 0x51}, /* 167 (A7) */
+  {0x51, 0x71, 0x51}, /* 168 (A8) */
+  {0x51, 0x71, 0x59}, /* 169 (A9) */
+  {0x51, 0x71, 0x61}, /* 170 (AA) */
+  {0x51, 0x71, 0x69}, /* 171 (AB) */
+  {0x51, 0x71, 0x71}, /* 172 (AC) */
+  {0x51, 0x69, 0x71}, /* 173 (AD) */
+  {0x51, 0x61, 0x71}, /* 174 (AE) */
+  {0x51, 0x59, 0x71}, /* 175 (AF) */
+  /* Low Intensity group - 72 colors in 1/3 saturation groups (B0H-C7H high) */
+  {0x00, 0x00, 0x41}, /* 176 (B0) */
+  {0x10, 0x00, 0x41}, /* 177 (B1) */
+  {0x20, 0x00, 0x41}, /* 178 (B2) */
+  {0x31, 0x00, 0x41}, /* 179 (B3) */
+  {0x41, 0x00, 0x41}, /* 180 (B4) */
+  {0x41, 0x00, 0x31}, /* 181 (B5) */
+  {0x41, 0x00, 0x20}, /* 182 (B6) */
+  {0x41, 0x00, 0x10}, /* 183 (B7) */
+  {0x41, 0x00, 0x00}, /* 184 (B8) */
+  {0x41, 0x10, 0x00}, /* 185 (B9) */
+  {0x41, 0x20, 0x00}, /* 186 (BA) */
+  {0x41, 0x31, 0x00}, /* 187 (BB) */
+  {0x41, 0x41, 0x00}, /* 188 (BC) */
+  {0x31, 0x41, 0x00}, /* 189 (BD) */
+  {0x20, 0x41, 0x00}, /* 190 (BE) */
+  {0x10, 0x41, 0x00}, /* 191 (BF) */
+  {0x00, 0x41, 0x00}, /* 192 (C0) */
+  {0x00, 0x41, 0x10}, /* 193 (C1) */
+  {0x00, 0x41, 0x20}, /* 194 (C2) */
+  {0x00, 0x41, 0x31}, /* 195 (C3) */
+  {0x00, 0x41, 0x41}, /* 196 (C4) */
+  {0x00, 0x31, 0x41}, /* 197 (C5) */
+  {0x00, 0x20, 0x41}, /* 198 (C6) */
+  {0x00, 0x10, 0x41}, /* 199 (C7) */
+  /* Low Intensity group - 72 colors in 2/3 saturation groups (C8H-DFH moderate) */
+  {0x20, 0x20, 0x41}, /* 200 (C8) */
+  {0x28, 0x20, 0x41}, /* 201 (C9) */
+  {0x31, 0x20, 0x41}, /* 202 (CA) */
+  {0x39, 0x20, 0x41}, /* 203 (CB) */
+  {0x41, 0x20, 0x41}, /* 204 (CC) */
+  {0x41, 0x20, 0x39}, /* 205 (CD) */
+  {0x41, 0x20, 0x31}, /* 206 (CE) */
+  {0x41, 0x20, 0x28}, /* 207 (CF) */
+  {0x41, 0x20, 0x20}, /* 208 (D0) */
+  {0x41, 0x28, 0x20}, /* 209 (D1) */
+  {0x41, 0x31, 0x20}, /* 210 (D2) */
+  {0x41, 0x39, 0x20}, /* 211 (D3) */
+  {0x41, 0x41, 0x20}, /* 212 (D4) */
+  {0x39, 0x41, 0x20}, /* 213 (D5) */
+  {0x31, 0x41, 0x20}, /* 214 (D6) */
+  {0x28, 0x41, 0x20}, /* 215 (D7) */
+  {0x20, 0x41, 0x20}, /* 216 (D8) */
+  {0x20, 0x41, 0x28}, /* 217 (D9) */
+  {0x20, 0x41, 0x31}, /* 218 (DA) */
+  {0x20, 0x41, 0x39}, /* 219 (DB) */
+  {0x20, 0x41, 0x41}, /* 220 (DC) */
+  {0x20, 0x39, 0x41}, /* 221 (DD) */
+  {0x20, 0x31, 0x41}, /* 222 (DE) */
+  {0x20, 0x28, 0x41}, /* 223 (DF) */
+  /* Low Intensity group - 72 colors in 3/3 saturation groups (E0H-F7H low) */
+  {0x2D, 0x2D, 0x41}, /* 223 (E0) */
+  {0x31, 0x2D, 0x41}, /* 224 (E1) */
+  {0x35, 0x2D, 0x41}, /* 225 (E2) */
+  {0x3D, 0x2D, 0x41}, /* 226 (E3) */
+  {0x41, 0x2D, 0x41}, /* 227 (E4) */
+  {0x41, 0x2D, 0x3D}, /* 228 (E5) */
+  {0x41, 0x2D, 0x35}, /* 229 (E6) */
+  {0x41, 0x2D, 0x31}, /* 230 (E7) */
+  {0x41, 0x2D, 0x2D}, /* 231 (E8) */
+  {0x41, 0x31, 0x2D}, /* 232 (E9) */
+  {0x41, 0x35, 0x2D}, /* 233 (EA) */
+  {0x41, 0x3D, 0x2D}, /* 234 (EB) */
+  {0x41, 0x41, 0x2D}, /* 235 (EC) */
+  {0x3D, 0x41, 0x2D}, /* 236 (ED) */
+  {0x35, 0x41, 0x2D}, /* 237 (EE) */
+  {0x31, 0x41, 0x2D}, /* 238 (EF) */
+  {0x2D, 0x41, 0x2D}, /* 239 (F0) */
+  {0x2D, 0x41, 0x31}, /* 240 (F1) */
+  {0x2D, 0x41, 0x35}, /* 241 (F2) */
+  {0x2D, 0x41, 0x3D}, /* 242 (F3) */
+  {0x2D, 0x41, 0x41}, /* 243 (F4) */
+  {0x2D, 0x3D, 0x41}, /* 244 (F5) */
+  {0x2D, 0x35, 0x41}, /* 245 (F6) */
+  {0x2D, 0x31, 0x41}, /* 246 (F7) */
+  /* Fill up remainder of palettes with black */
+  {0,0,0}
 };
 
 /*
- *   This palette is the dos default, converted from 18 bit color to 24.
- *      It contains only 64 entries of colors--all others are zeros.
- *          --Robert 'Admiral' Coeyman
+ *  Mode 18 Default Color Register Setting
+ *  DAC palette registers, converted from actual 18 bit color to 24.
+ *
+ *  This palette is the dos default, converted from 18 bit color to 24.
+ *  It contains only 64 entries of colors--all others are zeros.
+ *      --Robert 'Admiral' Coeyman
  */
 static PALETTEENTRY vga_def64_palette[256]={
 /* red  green  blue */
@@ -220,7 +596,7 @@ static PALETTEENTRY vga_def64_palette[256]={
   {0xaa, 0x00, 0x00}, /* 0x04      Red        */
   {0xaa, 0x00, 0xaa}, /* 0x05      Magenta    */
   {0xaa, 0xaa, 0x00}, /* 0x06      */
-  {0xaa, 0xaa, 0xaa}, /* 0x07      Light Gray */
+  {0xaa, 0xaa, 0xaa}, /* 0x07      White (Light Gray) */
   {0x00, 0x00, 0x55}, /* 0x08      */
   {0x00, 0x00, 0xff}, /* 0x09      */
   {0x00, 0xaa, 0x55}, /* 0x0a      */
@@ -295,6 +671,7 @@ static void CALLBACK set_timer_rate( ULONG_PTR arg )
 static DWORD CALLBACK VGA_TimerThread( void *dummy )
 {
     for (;;) SleepEx( INFINITE, TRUE );
+    return 0;
 }
 
 static void VGA_DeinstallTimer(void)
@@ -373,20 +750,20 @@ typedef struct {
  */
 static void VGA_SyncWindow( BOOL target_is_fb )
 {
-    int size = VGA_WINDOW_SIZE;
+    int size = vga_fb_window_size;
 
     /* Window does not overlap framebuffer. */
     if (vga_fb_window >= vga_fb_size)
         return;
 
     /* Check if window overlaps framebuffer only partially. */
-    if (vga_fb_size - vga_fb_window < VGA_WINDOW_SIZE)
+    if (vga_fb_size - vga_fb_window < vga_fb_window_size)
         size = vga_fb_size - vga_fb_window;
 
     if (target_is_fb)
-        memmove( vga_fb_data + vga_fb_window, VGA_WINDOW_START, size );
+        memmove( vga_fb_data + vga_fb_window, vga_fb_window_data, size );
     else
-        memmove( VGA_WINDOW_START, vga_fb_data + vga_fb_window, size );
+        memmove( vga_fb_window_data, vga_fb_data + vga_fb_window, size );
 }
 
 
@@ -404,7 +781,7 @@ static void WINAPI VGA_DoExit(ULONG_PTR arg)
 
 static void WINAPI VGA_DoSetMode(ULONG_PTR arg)
 {
-    LRESULT	res;
+    HRESULT	res;
     ModeSet *par = (ModeSet *)arg;
     par->ret=1;
 
@@ -421,7 +798,7 @@ static void WINAPI VGA_DoSetMode(ULONG_PTR arg)
         }
         res = pDirectDrawCreate(NULL,&lpddraw,NULL);
         if (!lpddraw) {
-            ERR("DirectDraw is not available (res = %lx)\n",res);
+            ERR("DirectDraw is not available (res = 0x%x)\n",res);
             return;
         }
         if (!vga_hwnd) {
@@ -438,33 +815,38 @@ static void WINAPI VGA_DoSetMode(ULONG_PTR arg)
         else
             SetWindowPos(vga_hwnd,0,0,0,par->Xres,par->Yres,SWP_NOMOVE|SWP_NOZORDER);
 
-        if ((res=IDirectDraw_SetCooperativeLevel(lpddraw,vga_hwnd,DDSCL_FULLSCREEN|DDSCL_EXCLUSIVE))) {
-	    ERR("Could not set cooperative level to exclusive (%lx)\n",res);
+        res=IDirectDraw_SetCooperativeLevel(lpddraw,vga_hwnd,DDSCL_FULLSCREEN|DDSCL_EXCLUSIVE);
+        if (res != S_OK) {
+	    ERR("Could not set cooperative level to exclusive (0x%x)\n",res);
 	}
 
-        if ((res=IDirectDraw_SetDisplayMode(lpddraw,par->Xres,par->Yres,par->Depth))) {
-            ERR("DirectDraw does not support requested display mode (%dx%dx%d), res = %lx!\n",par->Xres,par->Yres,par->Depth,res);
+        res=IDirectDraw_SetDisplayMode(lpddraw,par->Xres,par->Yres,par->Depth);
+        if (res != S_OK) {
+            ERR("DirectDraw does not support requested display mode (%dx%dx%d), res = 0x%x!\n",par->Xres,par->Yres,par->Depth,res);
             IDirectDraw_Release(lpddraw);
             lpddraw=NULL;
             return;
         }
 
         res=IDirectDraw_CreatePalette(lpddraw,DDPCAPS_8BIT,NULL,&lpddpal,NULL);
-        if (res) {
-	    ERR("Could not create palette (res = %lx)\n",res);
+        if (res != S_OK) {
+	    ERR("Could not create palette (res = 0x%x)\n",res);
             IDirectDraw_Release(lpddraw);
             lpddraw=NULL;
             return;
         }
-        if ((res=IDirectDrawPalette_SetEntries(lpddpal,0,0,256,vga_def_palette))) {
-            ERR("Could not set default palette entries (res = %lx)\n", res);
+
+        res=IDirectDrawPalette_SetEntries(lpddpal,0,0,vga_fb_palette_size,vga_fb_palette);
+        if (res != S_OK) {
+           ERR("Could not set default palette entries (res = 0x%x)\n", res);
         }
 
         memset(&sdesc,0,sizeof(sdesc));
         sdesc.dwSize=sizeof(sdesc);
 	sdesc.dwFlags = DDSD_CAPS;
 	sdesc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
-        if (IDirectDraw_CreateSurface(lpddraw,&sdesc,&lpddsurf,NULL)||(!lpddsurf)) {
+        res=IDirectDraw_CreateSurface(lpddraw,&sdesc,&lpddsurf,NULL);
+        if (res != S_OK || !lpddsurf) {
             ERR("DirectDraw surface is not available\n");
             IDirectDraw_Release(lpddraw);
             lpddraw=NULL;
@@ -479,18 +861,53 @@ static void WINAPI VGA_DoSetMode(ULONG_PTR arg)
     return;
 }
 
-int VGA_SetMode(unsigned Xres,unsigned Yres,unsigned Depth)
+/**********************************************************************\
+* VGA_GetModeInfo
+*
+* Returns mode information, given mode number
+\**********************************************************************/
+const VGA_MODE *VGA_GetModeInfo(WORD mode)
+{
+    const VGA_MODE *ModeInfo = VGA_modelist;
+
+    /*
+     * Filter out flags.
+     */
+    mode &= 0x17f;
+
+    while (ModeInfo->Mode != 0xffff)
+    {
+        if (ModeInfo->Mode == mode)
+            return ModeInfo;
+        ModeInfo++;
+    }
+    return NULL;
+}
+
+static int VGA_SetGraphicMode(WORD mode)
 {
     ModeSet par;
     int     newSize;
 
-    vga_fb_width = Xres;
-    vga_fb_height = Yres;
-    vga_fb_depth = Depth;
+    /* get info on VGA mode & set appropriately */
+    const VGA_MODE *ModeInfo = VGA_GetModeInfo(VGA_CurrentMode);
+    /* check if we're assuming composite display */
+    if ((mode == 6) && (CGA_ColorComposite))
+    {
+       vga_fb_width = (ModeInfo->Width / 4);
+       vga_fb_height = ModeInfo->Height;
+       vga_fb_depth = (ModeInfo->Depth * 4);
+    }
+    else
+    {
+       vga_fb_width = ModeInfo->Width;
+       vga_fb_height = ModeInfo->Height;
+       vga_fb_depth = ModeInfo->Depth;
+    }
     vga_fb_offset = 0;
-    vga_fb_pitch = Xres * ((Depth + 7) / 8);
+    vga_fb_pitch = vga_fb_width * ((vga_fb_depth + 7) / 8);
 
-    newSize = Xres * Yres * ((Depth + 7) / 8);
+    newSize = vga_fb_width * vga_fb_height * ((vga_fb_depth + 7) / 8);
     if(newSize < 256 * 1024)
       newSize = 256 * 1024;
 
@@ -500,20 +917,82 @@ int VGA_SetMode(unsigned Xres,unsigned Yres,unsigned Depth)
       vga_fb_size = newSize;
     }
 
-    if(Xres >= 640 || Yres >= 480) {
-      par.Xres = Xres;
-      par.Yres = Yres;
+    if(vga_fb_width >= 640 || vga_fb_height >= 480) {
+      par.Xres = vga_fb_width;
+      par.Yres = vga_fb_height;
     } else {
       par.Xres = 640;
       par.Yres = 480;
     }
 
-    VGA_SetWindowStart((Depth < 8) ? -1 : 0);
+    /* Setup window */
+    if(vga_fb_depth >= 8)
+    {
+      vga_fb_window_data = VGA_WINDOW_START;
+      vga_fb_window_size = VGA_WINDOW_SIZE;
+      vga_fb_palette = vga_def_palette;
+      vga_fb_palette_size = 256;
+    }
+    else
+    {
+      vga_fb_window_data = CGA_WINDOW_START;
+      vga_fb_window_size = CGA_WINDOW_SIZE;
+      if(vga_fb_depth == 2)
+      {
+        /* Select default 2 bit CGA palette */
+        vga_fb_palette = cga_palette1;
+        vga_fb_palette_size = 4;
+      }
+      else
+      {
+        /* Top of VGA palette is same as 4 bit CGA palette */
+        vga_fb_palette = vga_def_palette;
+        vga_fb_palette_size = 16;
+      }
 
-    par.Depth = (Depth < 8) ? 8 : Depth;
+      vga_fb_palette_index = 0;
+      vga_fb_bright = 0;
+    }
+
+    /* Clean the HW buffer */
+    memset(vga_fb_window_data, 0x00, vga_fb_window_size);
+
+    /* Reset window start */
+    VGA_SetWindowStart(0);
+
+    par.Depth = (vga_fb_depth < 8) ? 8 : vga_fb_depth;
 
     MZ_RunInThread(VGA_DoSetMode, (ULONG_PTR)&par);
     return par.ret;
+}
+
+int VGA_SetMode(WORD mode)
+{
+    const VGA_MODE *ModeInfo;
+    /* get info on VGA mode & set appropriately */
+    VGA_CurrentMode = mode;
+    ModeInfo = VGA_GetModeInfo(VGA_CurrentMode);
+
+    /* check if mode is supported */
+    if (ModeInfo->Supported)
+    {
+       FIXME("Setting VGA mode %i - Supported mode - Improve reporting of missing capabilities for modes & modetypes.\n", mode);
+    }
+    else
+    {
+       FIXME("Setting VGA mode %i - Unsupported mode - Will doubtfully work at all, but we'll try anyways.\n", mode);
+    }
+
+    /* set up graphic or text display */
+    if (ModeInfo->ModeType == TEXT)
+    {
+       VGA_SetAlphaMode(ModeInfo->TextCols, ModeInfo->TextRows);
+    }
+    else
+    {
+       return VGA_SetGraphicMode(mode);
+    }
+    return 0; /* assume all good & return zero */
 }
 
 int VGA_GetMode(unsigned*Height,unsigned*Width,unsigned*Depth)
@@ -563,7 +1042,7 @@ void VGA_Set16Palette(char *Table)
 	int c;
 
     if (!lpddraw) return;         /* return if we're in text only mode */
-    memcpy( Table, &vga_16_palette, 17 ); /* copy the entries into the table */
+    memcpy( Table, vga_16_palette, 17 ); /* copy the entries into the table */
 
     for (c=0; c<17; c++) {                                /* 17 entries */
 	pal= &vga_def64_palette[(int)vga_16_palette[c]];  /* get color  */
@@ -577,29 +1056,14 @@ void VGA_Get16Palette(char *Table)
 {
 
     if (!lpddraw) return;         /* return if we're in text only mode */
-    memcpy( &vga_16_palette, Table, 17 ); /* copy the entries into the table */
-}
-
-void VGA_SetQuadPalette(RGBQUAD*color,int start,int len)
-{
-    PALETTEENTRY pal[256];
-    int c;
-
-    if (!lpddraw) return;
-    for (c=0; c<len; c++) {
-        pal[c].peRed  =color[c].rgbRed;
-        pal[c].peGreen=color[c].rgbGreen;
-        pal[c].peBlue =color[c].rgbBlue;
-        pal[c].peFlags=0;
-    }
-    IDirectDrawPalette_SetEntries(lpddpal,0,start,len,pal);
+    memcpy( vga_16_palette, Table, 17 ); /* copy the entries into the table */
 }
 
 static LPSTR VGA_Lock(unsigned*Pitch,unsigned*Height,unsigned*Width,unsigned*Depth)
 {
     if (!lpddraw) return NULL;
     if (!lpddsurf) return NULL;
-    if (IDirectDrawSurface_Lock(lpddsurf,NULL,&sdesc,0,0)) {
+    if (IDirectDrawSurface_Lock(lpddsurf,NULL,&sdesc,0,0) != S_OK) {
         ERR("could not lock surface!\n");
         return NULL;
     }
@@ -682,6 +1146,124 @@ void VGA_ShowMouse( BOOL show )
         MZ_RunInThread( VGA_DoShowMouse, (ULONG_PTR)show );
 }
 
+
+/**********************************************************************
+ *         VGA_UpdatePalette
+ *
+ * Update the current palette
+ *
+ * Note: When updating the current CGA palette, palette index 0
+ * refers to palette2, and index 1 is palette1 (default palette)
+ */
+void VGA_UpdatePalette(void)
+{
+  /* Figure out which palette is used now */
+  if(vga_fb_bright == TRUE)
+  {
+    if(vga_fb_palette_index == 0)
+    {
+      vga_fb_palette = cga_palette2_bright;
+    }
+    else if(vga_fb_palette_index == 1)
+    {
+      vga_fb_palette = cga_palette1_bright;
+    }
+  }
+  else
+  {
+    if(vga_fb_palette_index == 0)
+    {
+      vga_fb_palette = cga_palette2;
+    }
+    else if(vga_fb_palette_index == 1)
+    {
+      vga_fb_palette = cga_palette1;
+    }
+  }
+
+  /* Now update the palette */
+  VGA_SetPalette(vga_fb_palette,0,4);
+}
+
+/**********************************************************************
+ *         VGA_SetBright
+ *
+ * Select if using a "bright" palette or not.
+ * This is a property of the CGA controller
+ */
+void VGA_SetBright(BOOL bright)
+{
+  TRACE("%i\n", bright);
+
+  /* Remember the "bright" value used by the CGA controller */
+  vga_fb_bright = bright;
+}
+
+/**********************************************************************
+ *         VGA_SetEnabled
+ *
+ * Select if output is enabled or disabled
+ * This is a property of the CGA controller
+ */
+static void VGA_SetEnabled(BOOL enabled)
+{
+  TRACE("%i\n", enabled);
+
+  /* Check if going from enabled to disabled */
+  if(vga_fb_enabled == TRUE && enabled == FALSE)
+  {
+    /* Clear frame buffer */
+    memset(vga_fb_window_data, 0x00, vga_fb_window_size);
+  }
+
+  /* Remember the "enabled" value */
+  vga_fb_enabled = enabled;
+}
+
+/**********************************************************************
+ *         VGA_SetPaletteIndex
+ *
+ * Select the index of the palette which is currently in use
+ * This is a property of the CGA controller
+ */
+void VGA_SetPaletteIndex(unsigned index)
+{
+  TRACE("%i\n", index);
+
+  /* Remember the palette index, which is only used by CGA for now */
+  vga_fb_palette_index = index;
+}
+
+/**********************************************************************
+ *         VGA_WritePixel
+ *
+ * Write data to the framebuffer
+ * This is a property of the CGA controller, but might be supported
+ * later by other framebuffer types
+ */
+void VGA_WritePixel(unsigned color, unsigned page, unsigned col, unsigned row)
+{
+  int off;
+  int bits;
+  int pos;
+
+  /* Calculate CGA byte offset */
+  char *data = vga_fb_window_data;
+  off = row & 1 ? (8 * 1024) : 0;
+  off += (80 * (row/2));
+  off += col/4;
+
+  /* Calculate bits offset */
+  pos = 6 - (col%4 * 2);
+
+  /* Clear current data */
+  bits = 0x03 << pos;
+  data[off] &= ~bits;
+
+  /* Set new data */
+  bits = color << pos;
+  data[off] |= bits;
+}
 
 /*** TEXT MODE ***/
 
@@ -815,10 +1397,18 @@ void VGA_GetCursorPos(unsigned*X,unsigned*Y)
 
 static void VGA_PutCharAt(unsigned x, unsigned y, BYTE ascii, int attr)
 {
-    char *dat = VGA_AlphaBuffer() + ((vga_text_width * y + x) * 2);
-    dat[0] = ascii;
-    if (attr>=0)
-        dat[1] = attr;
+    const VGA_MODE *ModeInfo = VGA_GetModeInfo(VGA_CurrentMode);
+    if ( ModeInfo->ModeType == TEXT )
+    {
+       char *dat = VGA_AlphaBuffer() + ((vga_text_width * y + x) * 2);
+       dat[0] = ascii;
+       if (attr>=0)
+          dat[1] = attr;
+    }
+    else
+    {
+       FIXME("Write %c at (%i,%i) - not yet supported in graphic modes.\n", (char)ascii, x, y);
+    }
 }
 
 void VGA_WriteChars(unsigned X,unsigned Y,unsigned ch,int attr,int count)
@@ -888,11 +1478,6 @@ void VGA_PutChar(BYTE ascii)
         WriteFile(VGA_AlphaConsole(), &ascii, 1, &w, NULL);
 
     LeaveCriticalSection(&vga_lock);
-}
-
-void VGA_SetTextAttribute(BYTE attr)
-{
-    vga_text_attr = attr;
 }
 
 void VGA_ClearText(unsigned row1, unsigned col1,
@@ -994,9 +1579,68 @@ static void VGA_Poll_Graphics(void)
       VGA_SyncWindow( TRUE );
 
   /*
+   * CGA framebuffer (160x200) - CGA_ColorComposite, special subtype of mode 6
+   * This buffer is encoded as following:
+   * - 4 bit pr. pixel, 2 pixels per byte
+   * - 80 bytes per row
+   * - Every second line has an offset of 8096
+   */
+  if(vga_fb_depth == 4 && vga_fb_width == 160 && vga_fb_height == 200){
+    WORD off = 0;
+    BYTE bits = 4;
+    BYTE value;
+    for(Y=0; Y<vga_fb_height; Y++, surf+=(Pitch*2)){
+      for(X=0; X<vga_fb_width; X++){
+        off = Y & 1 ? (8 * 1024) : 0;
+        off += (80 * (Y/2));
+        off += X/2;
+        value = (dat[off] >> bits) & 0xF;
+        surf[(X*4)+0] = value;
+        surf[(X*4)+1] = value;
+        surf[(X*4)+2] = value;
+        surf[(X*4)+3] = value;
+        surf[(X*4)+Pitch+0] = value;
+        surf[(X*4)+Pitch+1] = value;
+        surf[(X*4)+Pitch+2] = value;
+        surf[(X*4)+Pitch+3] = value;
+        bits -= 4;
+        bits &= 7;
+      }
+    }
+  }
+
+  /*
+   * CGA framebuffer (320x200)
+   * This buffer is encoded as following:
+   * - 2 bits per color, 4 pixels per byte
+   * - 80 bytes per row
+   * - Every second line has an offset of 8096
+   */
+  else if(vga_fb_depth == 2 && vga_fb_width == 320 && vga_fb_height == 200){
+    WORD off = 0;
+    BYTE bits = 6;
+    BYTE value;
+    /* Go thru rows */
+    for(Y=0; Y<vga_fb_height; Y++, surf+=(Pitch*2)){
+      for(X=0; X<vga_fb_width; X++){
+        off = Y & 1 ? (8 * 1024) : 0;
+        off += (80 * (Y/2));
+        off += X/4;
+        value = (dat[off] >> bits) & 0x3;
+        surf[(X*2)] = value;
+        surf[(X*2)+1] = value;
+        surf[(X*2)+Pitch] = value;
+        surf[(X*2)+Pitch+1] = value;
+        bits -= 2;
+        bits &= 7;
+      }
+    }
+  }
+
+  /*
    * Double VGA framebuffer (320x200 -> 640x400), if needed.
    */
-  if(Height >= 2 * vga_fb_height && Width >= 2 * vga_fb_width && bpp == 1)
+  else if(Height >= 2 * vga_fb_height && Width >= 2 * vga_fb_width && bpp == 1)
     for (Y=0; Y<vga_fb_height; Y++,surf+=Pitch*2,dat+=vga_fb_pitch)
       for (X=0; X<vga_fb_width; X++) {
        BYTE value = dat[X];
@@ -1005,6 +1649,9 @@ static void VGA_Poll_Graphics(void)
        surf[X*2+Pitch] = value;
        surf[X*2+Pitch+1] = value;
       }
+  /*
+   * Linear Buffer, including mode 19
+   */
   else
     for (Y=0; Y<vga_fb_height; Y++,surf+=Pitch,dat+=vga_fb_pitch)
       memcpy(surf, dat, vga_fb_width * bpp);
@@ -1080,17 +1727,32 @@ static PALETTEENTRY paldat;
 void VGA_ioport_out( WORD port, BYTE val )
 {
     switch (port) {
+        /* General Register - Feature Control */
+        case 0x3ba:
+           FIXME("Unsupported VGA register: general register - feature control 0x%04x (value 0x%02x)\n", port, val);
+           break;
+        /* Attribute Controller - Address/Other */
         case 0x3c0:
            if (vga_address_3c0)
                vga_index_3c0 = val;
            else
-               FIXME("Unsupported index, register 0x3c0: 0x%02x (value 0x%02x)\n",
+               FIXME("Unsupported index, VGA attribute controller register 0x3c0: 0x%02x (value 0x%02x)\n",
                      vga_index_3c0, val);
            vga_address_3c0 = !vga_address_3c0;
            break;
+        /* General Register - Misc output */
+        case 0x3c2:
+           FIXME("Unsupported VGA register: general register - misc output 0x%04x (value 0x%02x)\n", port, val);
+           break;
+        /* General Register - Video subsystem enable */
+        case 0x3c3:
+           FIXME("Unsupported VGA register: general register - video subsystem enable 0x%04x (value 0x%02x)\n", port, val);
+           break;
+        /* Sequencer Register - Address */
         case 0x3c4:
            vga_index_3c4 = val;
            break;
+        /* Sequencer Register - Other */
         case 0x3c5:
           switch(vga_index_3c4) {
                case 0x04: /* Sequencer: Memory Mode Register */
@@ -1098,9 +1760,9 @@ void VGA_ioport_out( WORD port, BYTE val )
                       VGA_SetWindowStart((val & 8) ? 0 : -1);
                   else
                       FIXME("Memory Mode Register not supported in this mode.\n");
-               break;
+                  break;
                default:
-                  FIXME("Unsupported index, register 0x3c4: 0x%02x (value 0x%02x)\n",
+                  FIXME("Unsupported index, VGA sequencer register 0x3c4: 0x%02x (value 0x%02x)\n",
                         vga_index_3c4, val);
            }
            break;
@@ -1113,19 +1775,123 @@ void VGA_ioport_out( WORD port, BYTE val )
                 palcnt=0;
             }
             break;
+        /* Graphics Controller Register - Address */
         case 0x3ce:
             vga_index_3ce = val;
            break;
+        /* Graphics Controller Register - Other */
         case 0x3cf:
-           FIXME("Unsupported index, register 0x3ce: 0x%02x (value 0x%02x)\n",
+           FIXME("Unsupported index, VGA graphics controller register - other 0x3ce: 0x%02x (value 0x%02x)\n",
                  vga_index_3ce, val);
            break;
+        /* CRT Controller Register - Index (MDA) */
+        case 0x3b4:
+        /* CRT Controller Register - Index (CGA) */
         case 0x3d4:
            vga_index_3d4 = val;
            break;
+        /* CRT Controller Register - Other (MDA) */
+        case 0x3b5:
+        /* CRT Controller Register - Other (CGA) */
         case 0x3d5:
-           FIXME("Unsupported index, register 0x3d4: 0x%02x (value 0x%02x)\n",
+           FIXME("Unsupported index, VGA crt controller register 0x3b4/0x3d4: 0x%02x (value 0x%02x)\n",
                  vga_index_3d4, val);
+           break;
+        /* Mode control register - 6845 Motorola (MDA) */
+        case 0x3b8:
+        /* Mode control register - 6845 Motorola (CGA) */
+        case 0x3d8:
+           /*
+            *  xxxxxxx1 = 80x25 text
+            *  xxxxxxx0 = 40x25 text (default)
+            *  xxxxxx1x = graphics (320x200)
+            *  xxxxxx0x = text
+            *  xxxxx1xx = B/W
+            *  xxxxx0xx = color
+            *  xxxx1xxx = enable video signal
+            *  xxx1xxxx = 640x200 B/W graphics
+            *  xx1xxxxx = blink
+            */
+
+           /* check bits 6 and 7 */
+           if (val & 0xC0)
+           {
+              FIXME("Unsupported value, VGA register 0x3d8: 0x%02x - bits 7 and 6 not supported.\n", val);
+           }
+           /* check bits 5 - blink on */
+           if (val & 0x20)
+           {
+              FIXME("Unsupported value, VGA register 0x3d8: 0x%02x (bit 5) - blink is not supported.\n", val);
+           }
+           /* Enable Video Signal (bit 3) - Set the enabled bit */
+           VGA_SetEnabled((val & 0x08) && 1);
+
+           /* xxx1x010 - Detect 160x200, 16 color mode (CGA composite) */
+           if( (val & 0x17) == 0x12 )
+           {
+             /* Switch to 160x200x4 composite mode - special case of mode 6 */
+             CGA_ColorComposite = TRUE;
+             VGA_SetMode(6);
+           }
+           else
+           {
+             /* turn off composite colors otherwise, including 320x200 (80x200 16 color) */
+             CGA_ColorComposite = FALSE;
+           }
+
+           /* xxx0x100 - Detect VGA mode 0 */
+           if( (val & 0x17) == 0x04 )
+           {
+             VGA_SetMode(0);
+           }
+           /* xxx0x000 - Detect VGA mode 1 */
+           else if( (val & 0x17) == 0x00 )
+           {
+             VGA_SetMode(1);
+           }
+           /* xxx0x101 - Detect VGA mode 2 */
+           else if( (val & 0x17) == 0x05 )
+           {
+             VGA_SetMode(2);
+           }
+           /* xxx0x001 - Detect VGA mode 3 */
+           else if( (val & 0x17) == 0x01 )
+           {
+             VGA_SetMode(3);
+           }
+           /* xxx0x010 - Detect VGA mode 4 */
+           else if( (val & 0x17) == 0x02 )
+           {
+             VGA_SetMode(4);
+           }
+           /* xxx0x110 - Detect VGA mode 5 */
+           else if( (val & 0x17) == 0x06 )
+           {
+             VGA_SetMode(5);
+           }
+           /* xxx1x110 - Detect VGA mode 6 */
+           else if( (val & 0x17) == 0x16 )
+           {
+             VGA_SetMode(6);
+           }
+           /* unsupported mode */
+           else
+           {
+             FIXME("Unsupported value, VGA register 0x3d8: 0x%02x - unrecognized MDA/CGA mode\n", val); /* Set the enabled bit */
+           }
+
+           break;
+
+        /* Colour control register (CGA) */
+        case 0x3d9:
+           /* Set bright */
+           VGA_SetBright((val & 0x10) && 1);
+
+           /* Set palette index */
+           VGA_SetPaletteIndex((val & 0x20) && 1);
+
+           /* Now update the palette */
+           VGA_UpdatePalette();
            break;
         default:
             FIXME("Unsupported VGA register: 0x%04x (value 0x%02x)\n", port, val);
@@ -1137,10 +1903,22 @@ BYTE VGA_ioport_in( WORD port )
     BYTE ret;
 
     switch (port) {
+        /* Attribute Controller - Other */
         case 0x3c1:
-           FIXME("Unsupported index, register 0x3c0: 0x%02x\n",
+           FIXME("Unsupported index, VGA attribute controller register 0x3c0: 0x%02x\n",
                  vga_index_3c0);
            return 0xff;
+        /* General Register - Input status 0 */
+        case 0x3c2:
+           ret=0xff;
+           FIXME("Unsupported VGA register: general register - input status 0 0x%04x\n", port);
+           break;
+        /* General Register - Video subsystem enable */
+        case 0x3c3:
+           ret=0xff;
+           FIXME("Unsupported VGA register: general register - video subsystem enable 0x%04x\n", port);
+           break;
+        /* Sequencer Register - Other */
         case 0x3c5:
            switch(vga_index_3c4) {
                case 0x04: /* Sequencer: Memory Mode Register */
@@ -1150,15 +1928,36 @@ BYTE VGA_ioport_in( WORD port )
                          vga_index_3c4);
                    return 0xff;
            }
+        /* General Register -  DAC State */
+        case 0x3c7:
+           ret=0xff;
+           FIXME("Unsupported VGA register: general register - DAC State 0x%04x\n", port);
+           break;
+        /* General Register - Feature control */
+        case 0x3ca:
+           ret=0xff;
+           FIXME("Unsupported VGA register: general register - Feature control 0x%04x\n", port);
+           break;
+        /* General Register - Misc output */
+        case 0x3cc:
+           ret=0xff;
+           FIXME("Unsupported VGA register: general register - Feature control 0x%04x\n", port);
+           break;
+        /* Graphics Controller Register - Other */
         case 0x3cf:
            FIXME("Unsupported index, register 0x3ce: 0x%02x\n",
                  vga_index_3ce);
            return 0xff;
+        /* CRT Controller Register - Other (MDA) */
+        case 0x3b5:
+        /* CRT Controller Register - Other (CGA) */
         case 0x3d5:
-           FIXME("Unsupported index, register 0x3d4: 0x%02x\n",
+           FIXME("Unsupported index, VGA crt controller register 0x3b4/0x3d4: 0x%02x\n",
                  vga_index_3d4);
            return 0xff;
-
+        /* General Register - Input status 1 (MDA) */
+        case 0x3ba:
+        /* General Register - Input status 1 (CGA) */
         case 0x3da:
             /*
              * Read from this register resets register 0x3c0 address flip-flop.

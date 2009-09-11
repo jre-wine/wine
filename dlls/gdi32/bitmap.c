@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wine/winbase16.h"
 #include "gdi_private.h"
 #include "wine/debug.h"
 
@@ -34,8 +33,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(bitmap);
 
 
 static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc );
-static INT BITMAP_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer );
-static BOOL BITMAP_DeleteObject( HGDIOBJ handle, void *obj );
+static INT BITMAP_GetObject( HGDIOBJ handle, INT count, LPVOID buffer );
+static BOOL BITMAP_DeleteObject( HGDIOBJ handle );
 
 static const struct gdi_obj_funcs bitmap_funcs =
 {
@@ -274,24 +273,18 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
     /* Windows ignores the provided bm.bmWidthBytes */
     bm.bmWidthBytes = BITMAP_GetWidthBytes( bm.bmWidth, bm.bmBitsPixel );
     /* XP doesn't allow to create bitmaps larger than 128 Mb */
-    if (bm.bmHeight * bm.bmWidthBytes > 128 * 1024 * 1024)
+    if (bm.bmHeight > 128 * 1024 * 1024 / bm.bmWidthBytes)
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
         return 0;
     }
 
-      /* Create the BITMAPOBJ */
-    bmpobj = GDI_AllocObject( sizeof(BITMAPOBJ), BITMAP_MAGIC,
-                              (HGDIOBJ *)&hbitmap, &bitmap_funcs );
-
-    if (!bmpobj)
+    /* Create the BITMAPOBJ */
+    if (!(bmpobj = HeapAlloc( GetProcessHeap(), 0, sizeof(*bmpobj) )))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
-        return NULL;
+        return 0;
     }
-
-    TRACE("%dx%d, %d colors returning %p\n", bm.bmWidth, bm.bmHeight,
-          1 << (bm.bmPlanes * bm.bmBitsPixel), hbitmap);
 
     bmpobj->size.cx = 0;
     bmpobj->size.cy = 0;
@@ -303,10 +296,18 @@ HBITMAP WINAPI CreateBitmapIndirect( const BITMAP *bmp )
     bmpobj->color_table = NULL;
     bmpobj->nb_colors = 0;
 
+    if (!(hbitmap = alloc_gdi_handle( &bmpobj->header, OBJ_BITMAP, &bitmap_funcs )))
+    {
+        HeapFree( GetProcessHeap(), 0, bmpobj );
+        return 0;
+    }
+
     if (bm.bmBits)
         SetBitmapBits( hbitmap, bm.bmHeight * bm.bmWidthBytes, bm.bmBits );
 
-    GDI_ReleaseObj( hbitmap );
+    TRACE("%dx%d, %d colors returning %p\n", bm.bmWidth, bm.bmHeight,
+          1 << (bm.bmPlanes * bm.bmBitsPixel), hbitmap);
+
     return hbitmap;
 }
 
@@ -325,7 +326,7 @@ LONG WINAPI GetBitmapBits(
     LONG count,        /* [in]  Number of bytes to copy */
     LPVOID bits)       /* [out] Pointer to buffer to receive bits */
 {
-    BITMAPOBJ *bmp = (BITMAPOBJ *) GDI_GetObjPtr( hbitmap, BITMAP_MAGIC );
+    BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
     LONG height, ret;
 
     if (!bmp) return 0;
@@ -335,7 +336,7 @@ LONG WINAPI GetBitmapBits(
         DIBSECTION *dib = bmp->dib;
         const char *src = dib->dsBm.bmBits;
         INT width_bytes = BITMAP_GetWidthBytes(dib->dsBm.bmWidth, dib->dsBm.bmBitsPixel);
-        DWORD max = width_bytes * bmp->bitmap.bmHeight;
+        LONG max = width_bytes * bmp->bitmap.bmHeight;
 
         if (!bits)
         {
@@ -436,7 +437,7 @@ LONG WINAPI SetBitmapBits(
     LONG count,        /* [in] Number of bytes in bitmap array */
     LPCVOID bits)      /* [in] Address of array with bitmap bits */
 {
-    BITMAPOBJ *bmp = (BITMAPOBJ *) GDI_GetObjPtr( hbitmap, BITMAP_MAGIC );
+    BITMAPOBJ *bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
     LONG height, ret;
 
     if ((!bmp) || (!bits))
@@ -451,7 +452,7 @@ LONG WINAPI SetBitmapBits(
     {
         DIBSECTION *dib = bmp->dib;
         char *dest = dib->dsBm.bmBits;
-        DWORD max = dib->dsBm.bmWidthBytes * dib->dsBm.bmHeight;
+        LONG max = dib->dsBm.bmWidthBytes * dib->dsBm.bmHeight;
         if (count > max) count = max;
         ret = count;
 
@@ -540,7 +541,7 @@ BOOL BITMAP_SetOwnerDC( HBITMAP hbitmap, DC *dc )
     /* never set the owner of the stock bitmap since it can be selected in multiple DCs */
     if (hbitmap == GetStockObject(DEFAULT_BITMAP)) return TRUE;
 
-    if (!(bitmap = GDI_GetObjPtr( hbitmap, BITMAP_MAGIC ))) return FALSE;
+    if (!(bitmap = GDI_GetObjPtr( hbitmap, OBJ_BITMAP ))) return FALSE;
 
     ret = TRUE;
     if (!bitmap->funcs)  /* not owned by a DC yet */
@@ -578,13 +579,13 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
     ret = dc->hBitmap;
     if (handle == dc->hBitmap) goto done;  /* nothing to do */
 
-    if (!(bitmap = GDI_GetObjPtr( handle, BITMAP_MAGIC )))
+    if (!(bitmap = GDI_GetObjPtr( handle, OBJ_BITMAP )))
     {
         ret = 0;
         goto done;
     }
 
-    if (bitmap->header.dwCount && (handle != GetStockObject(DEFAULT_BITMAP)))
+    if (bitmap->header.selcount && (handle != GetStockObject(DEFAULT_BITMAP)))
     {
         WARN( "Bitmap already selected in another DC\n" );
         GDI_ReleaseObj( handle );
@@ -624,12 +625,18 @@ static HGDIOBJ BITMAP_SelectObject( HGDIOBJ handle, HDC hdc )
 /***********************************************************************
  *           BITMAP_DeleteObject
  */
-static BOOL BITMAP_DeleteObject( HGDIOBJ handle, void *obj )
+static BOOL BITMAP_DeleteObject( HGDIOBJ handle )
 {
-    BITMAPOBJ * bmp = obj;
+    const DC_FUNCTIONS *funcs;
+    BITMAPOBJ *bmp = GDI_GetObjPtr( handle, OBJ_BITMAP );
 
-    if (bmp->funcs && bmp->funcs->pDeleteBitmap)
-        bmp->funcs->pDeleteBitmap( handle );
+    if (!bmp) return FALSE;
+    funcs = bmp->funcs;
+    GDI_ReleaseObj( handle );
+
+    if (funcs && funcs->pDeleteBitmap) funcs->pDeleteBitmap( handle );
+
+    if (!(bmp = free_gdi_handle( handle ))) return FALSE;
 
     HeapFree( GetProcessHeap(), 0, bmp->bitmap.bmBits );
 
@@ -661,40 +668,44 @@ static BOOL BITMAP_DeleteObject( HGDIOBJ handle, void *obj )
         }
         HeapFree(GetProcessHeap(), 0, bmp->color_table);
     }
-    return GDI_FreeObject( handle, obj );
+    return HeapFree( GetProcessHeap(), 0, bmp );
 }
 
 
 /***********************************************************************
  *           BITMAP_GetObject
  */
-static INT BITMAP_GetObject( HGDIOBJ handle, void *obj, INT count, LPVOID buffer )
+static INT BITMAP_GetObject( HGDIOBJ handle, INT count, LPVOID buffer )
 {
-    BITMAPOBJ *bmp = obj;
+    INT ret;
+    BITMAPOBJ *bmp = GDI_GetObjPtr( handle, OBJ_BITMAP );
 
-    if( !buffer ) return sizeof(BITMAP);
-    if (count < sizeof(BITMAP)) return 0;
+    if (!bmp) return 0;
 
-    if (bmp->dib)
+    if (!buffer) ret = sizeof(BITMAP);
+    else if (count < sizeof(BITMAP)) ret = 0;
+    else if (bmp->dib)
     {
 	if (count >= sizeof(DIBSECTION))
 	{
             memcpy( buffer, bmp->dib, sizeof(DIBSECTION) );
-            return sizeof(DIBSECTION);
+            ret = sizeof(DIBSECTION);
 	}
 	else /* if (count >= sizeof(BITMAP)) */
         {
             DIBSECTION *dib = bmp->dib;
             memcpy( buffer, &dib->dsBm, sizeof(BITMAP) );
-            return sizeof(BITMAP);
+            ret = sizeof(BITMAP);
 	}
     }
     else
     {
         memcpy( buffer, &bmp->bitmap, sizeof(BITMAP) );
         ((BITMAP *) buffer)->bmBits = NULL;
-        return sizeof(BITMAP);
+        ret = sizeof(BITMAP);
     }
+    GDI_ReleaseObj( handle );
+    return ret;
 }
 
 
@@ -729,7 +740,7 @@ BOOL WINAPI GetBitmapDimensionEx(
     HBITMAP hbitmap, /* [in]  Handle to bitmap */
     LPSIZE size)     /* [out] Address of struct receiving dimensions */
 {
-    BITMAPOBJ * bmp = (BITMAPOBJ *) GDI_GetObjPtr( hbitmap, BITMAP_MAGIC );
+    BITMAPOBJ * bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
     if (!bmp) return FALSE;
     *size = bmp->size;
     GDI_ReleaseObj( hbitmap );
@@ -754,7 +765,7 @@ BOOL WINAPI SetBitmapDimensionEx(
     INT y,           /* [in]  Bitmap height */
     LPSIZE prevSize) /* [out] Address of structure for orig dims */
 {
-    BITMAPOBJ * bmp = (BITMAPOBJ *) GDI_GetObjPtr( hbitmap, BITMAP_MAGIC );
+    BITMAPOBJ * bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP );
     if (!bmp) return FALSE;
     if (prevSize) *prevSize = bmp->size;
     bmp->size.cx = x;

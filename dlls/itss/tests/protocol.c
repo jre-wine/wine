@@ -23,11 +23,10 @@
 
 #include "windef.h"
 #include "winbase.h"
+#include "initguid.h"
 #include "ole2.h"
 #include "urlmon.h"
 #include "shlwapi.h"
-
-#include "initguid.h"
 
 #define DEFINE_EXPECT(func) \
     static BOOL expect_ ## func = FALSE, called_ ## func = FALSE
@@ -303,7 +302,6 @@ static HRESULT _protocol_start(unsigned line, IInternetProtocol *protocol, LPCWS
     expect_hrResult = S_OK;
 
     hres = IInternetProtocol_Start(protocol, url, &protocol_sink, &bind_info, 0, 0);
-    ok_(__FILE__,line) (hres == S_OK, "Start failed: %08x\n", hres);
 
     if(FAILED(hres)) {
         SET_CALLED(GetBindInfo);
@@ -573,8 +571,10 @@ static void test_its_protocol(void)
     test_protocol = ITS_PROTOCOL;
 
     hres = CoGetClassObject(&CLSID_ITSProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void**)&unk);
-    ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
-    if(!SUCCEEDED(hres))
+    ok(hres == S_OK ||
+       broken(hres == REGDB_E_CLASSNOTREG), /* Some W95 and NT4 */
+       "CoGetClassObject failed: %08x\n", hres);
+    if(FAILED(hres))
         return;
 
     hres = IUnknown_QueryInterface(unk, &IID_IInternetProtocolInfo, (void**)&info);
@@ -631,8 +631,10 @@ static void test_mk_protocol(void)
 
     hres = CoGetClassObject(&CLSID_MkProtocol, CLSCTX_INPROC_SERVER, NULL, &IID_IClassFactory,
                             (void**)&cf);
-    ok(hres == S_OK, "CoGetClassObject failed: %08x\n", hres);
-    if(!SUCCEEDED(hres))
+    ok(hres == S_OK ||
+       broken(hres == REGDB_E_CLASSNOTREG), /* Some W95 and NT4 */
+       "CoGetClassObject failed: %08x\n", hres);
+    if(FAILED(hres))
         return;
 
     cache_file = cache_file1;

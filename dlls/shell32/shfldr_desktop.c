@@ -55,6 +55,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL (shell);
 
+/* Undocumented functions from shdocvw */
+extern HRESULT WINAPI IEParseDisplayNameWithBCW(DWORD codepage, LPCWSTR lpszDisplayName, LPBC pbc, LPITEMIDLIST *ppidl);
+
+
 /***********************************************************************
 *     Desktopfolder implementation
 */
@@ -180,6 +184,22 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
     {
         *ppidl = pidlTemp;
         return S_OK;
+    }
+    else if (strchrW(lpszDisplayName,':'))
+    {
+        PARSEDURLW urldata;
+
+        urldata.cbSize = sizeof(urldata);
+        ParseURLW(lpszDisplayName,&urldata);
+
+        if (urldata.nScheme == URL_SCHEME_SHELL) /* handle shell: urls */
+        {
+            TRACE ("-- shell url: %s\n", debugstr_w(urldata.pszSuffix));
+            SHCLSIDFromStringW (urldata.pszSuffix+2, &clsid);
+            pidlTemp = _ILCreateGuid (PT_GUID, &clsid);
+        }
+        else
+            return IEParseDisplayNameWithBCW(CP_ACP,lpszDisplayName,pbc,ppidl);
     }
     else
     {

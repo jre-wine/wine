@@ -6,7 +6,7 @@
  * Copyright 1997 David Faure
  * Copyright 1998 Morten Welinder
  * Copyright 1998 Ulrich Weigand
- * Copyright 1999 Ove Kåven
+ * Copyright 1999 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -44,6 +44,7 @@
 #include "winbase.h"
 #include "wingdi.h"
 #include "winuser.h"
+#include "winreg.h"
 #include "winnls.h"
 #include "x11drv.h"
 #include "wine/server.h"
@@ -126,6 +127,19 @@ static const WORD main_key_scan_qwerty_jp106[MAIN_LEN] =
    0x56 /* the 102nd key (actually to the right of l-shift) */
 };
 
+static const WORD main_key_scan_qwerty_macjp[MAIN_LEN] =
+{
+ /* 1    2    3    4    5    6    7    8    9    0    -    ^    \ */
+   0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x7d,
+ /* q    w    e    r    t    y    u    i    o    p    @    [ */
+   0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,
+ /* a    s    d    f    g    h    j    k    l    ;    :    ] */
+   0x1E,0x1F,0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2B,
+ /* z    x    c    v    b    n    m    ,    .    / */
+   0x2C,0x2D,0x2E,0x2F,0x30,0x31,0x32,0x33,0x34,0x35,
+   0x73 /* the 102nd key (actually to the right of l-shift) */
+};
+
 
 static const WORD main_key_vkey_qwerty[MAIN_LEN] =
 {
@@ -143,6 +157,16 @@ static const WORD main_key_vkey_qwerty_jp106[MAIN_LEN] =
    '1','2','3','4','5','6','7','8','9','0',VK_OEM_MINUS,VK_OEM_PLUS,VK_OEM_3,
    'Q','W','E','R','T','Y','U','I','O','P',VK_OEM_4,VK_OEM_6,
    'A','S','D','F','G','H','J','K','L',VK_OEM_1,VK_OEM_7,VK_OEM_5,
+   'Z','X','C','V','B','N','M',VK_OEM_COMMA,VK_OEM_PERIOD,VK_OEM_2,
+   VK_OEM_102 /* the 102nd key (actually to the right of l-shift) */
+};
+
+static const WORD main_key_vkey_qwerty_macjp[MAIN_LEN] =
+{
+/* NOTE: this layout must concur with the scan codes layout above */
+   '1','2','3','4','5','6','7','8','9','0',VK_OEM_MINUS,VK_OEM_7,VK_OEM_5,
+   'Q','W','E','R','T','Y','U','I','O','P',VK_OEM_3,VK_OEM_4,
+   'A','S','D','F','G','H','J','K','L',VK_OEM_PLUS,VK_OEM_1,VK_OEM_6,
    'Z','X','C','V','B','N','M',VK_OEM_COMMA,VK_OEM_PERIOD,VK_OEM_2,
    VK_OEM_102 /* the 102nd key (actually to the right of l-shift) */
 };
@@ -165,15 +189,6 @@ static const WORD main_key_vkey_qwertz[MAIN_LEN] =
    'A','S','D','F','G','H','J','K','L',VK_OEM_1,VK_OEM_7,VK_OEM_5,
    'Y','X','C','V','B','N','M',VK_OEM_COMMA,VK_OEM_PERIOD,VK_OEM_2,
    VK_OEM_102 /* the 102nd key (actually to the right of l-shift) */
-};
-
-static const WORD main_key_vkey_qwertz_105[MAIN_LEN] =
-{
-/* NOTE: this layout must concur with the scan codes layout above */
-   VK_OEM_3,'1','2','3','4','5','6','7','8','9','0',VK_OEM_MINUS,VK_OEM_PLUS,
-   'Q','W','E','R','T','Z','U','I','O','P',VK_OEM_4,VK_OEM_6,
-   'A','S','D','F','G','H','J','K','L',VK_OEM_1,VK_OEM_7,VK_OEM_5,
-   VK_OEM_102,'Y','X','C','V','B','N','M',VK_OEM_COMMA,VK_OEM_PERIOD,VK_OEM_2
 };
 
 static const WORD main_key_vkey_abnt_qwerty[MAIN_LEN] =
@@ -218,16 +233,6 @@ static const WORD main_key_vkey_dvorak[MAIN_LEN] =
    separate line, see existing tables */
 /* If Wine fails to match your new table, use WINEDEBUG=+key to find out why */
 /* Remember to also add your new table to the layout index table far below! */
-
-/*** German Logitech Desktop Pro keyboard layout */
-static const char main_key_DE_logitech[MAIN_LEN][4] =
-{
- "^\xb0","1!","2\"","3\xa7","4$","5%","6&","7/{","8([","9)]","0=}","\xdf?\\","'`",
- "qQ@","wW","eE","rR","tT","zZ","uU","iI","oO","pP","\xfc\xdc","+*~",
- "aA","sS","dD","fF","gG","hH","jJ","kK","lL","\xf6\xd6","\xe4\xc4","#'",
- "yY","xX","cC","vV","bB","nN","mM",",;",".:","-_",
- "<>|"
-};
 
 /*** United States keyboard layout (mostly contributed by Uwe Bonnes) */
 static const char main_key_US[MAIN_LEN][4] =
@@ -288,10 +293,32 @@ static const char main_key_IS[MAIN_LEN][4] =
  "<>"
 };
 
+/* All german keyb layout tables have the acute/apostrophe symbol next to
+ * the BACKSPACE key removed (replaced with NULL which is ignored by the
+ * detection code).
+ * This was done because the mapping of the acute (and apostrophe) is done
+ * differently in various xkb-data/xkeyboard-config versions. Some replace
+ * the acute with a normal apostrophe, so that the apostrophe is found twice
+ * on the keyboard (one next to BACKSPACE and one next to ENTER).
+ * Others put the acute and grave accents on the key left of BACKSPACE.
+ * More information on the fd.o bugtracker:
+ * https://bugs.freedesktop.org/show_bug.cgi?id=11514
+ */
+
+/*** German Logitech Desktop Pro keyboard layout */
+static const char main_key_DE_logitech[MAIN_LEN][4] =
+{
+ "^\xb0","1!","2\"","3\xa7","4$","5%","6&","7/{","8([","9)]","0=}","\xdf?\\","\0`",
+ "qQ@","wW","eE","rR","tT","zZ","uU","iI","oO","pP","\xfc\xdc","+*~",
+ "aA","sS","dD","fF","gG","hH","jJ","kK","lL","\xf6\xd6","\xe4\xc4","#'",
+ "yY","xX","cC","vV","bB","nN","mM",",;",".:","-_",
+ "<>|"
+};
+
 /*** German keyboard layout (setxkbmap de) */
 static const char main_key_DE[MAIN_LEN][4] =
 {
- "^°","1!","2\"","3§","4$","5%","6&","7/","8(","9)","0=","ß?","´`",
+ "^°","1!","2\"","3§","4$","5%","6&","7/","8(","9)","0=","ß?","\0`",
  "qQ","wW","eE","rR","tT","zZ","uU","iI","oO","pP","üÜ","+*",
  "aA","sS","dD","fF","gG","hH","jJ","kK","lL","öÖ","äÄ","#'",
  "yY","xX","cC","vV","bB","nN","mM",",;",".:","-_",
@@ -301,20 +328,11 @@ static const char main_key_DE[MAIN_LEN][4] =
 /*** German keyboard layout without dead keys */
 static const char main_key_DE_nodead[MAIN_LEN][4] =
 {
- "^°","1!","2\"","3§","4$","5%","6&","7/{","8([","9)]","0=}","ß?\\","´",
+ "^°","1!","2\"","3§","4$","5%","6&","7/{","8([","9)]","0=}","ß?\\","",
  "qQ","wW","eE","rR","tT","zZ","uU","iI","oO","pP","üÜ","+*~",
  "aA","sS","dD","fF","gG","hH","jJ","kK","lL","öÖ","äÄ","#'",
  "yY","xX","cC","vV","bB","nN","mM",",;",".:","-_",
  "<>"
-};
-
-/*** German keyboard layout without dead keys 105 Keys (contributed by Matthias Fechner)*/
-static const char main_key_DE_nodead_105[MAIN_LEN][4] =
-{
- "^°","1!","2\"²","3§³","4$","5%","6&","7/{","8([","9)]","0=}","ß?\\","'`",
- "qQ@","wW","eE","rR","tT","zZ","uU","iI","oO","pP","üÜ","+*~",
- "aA","sS","dD","fF","gG","hH","jJ","kK","lL","öÖ","äÄ","#'",
- "<>|","yY","xX","cC","vV","bB","nN","mM",",;",".:","-_",
 };
 
 /*** Swiss German keyboard layout (setxkbmap ch -variant de) */
@@ -648,6 +666,15 @@ static const char main_key_JA_jp106[MAIN_LEN][4] =
  "\\_",
 };
 
+static const char main_key_JA_macjp[MAIN_LEN][4] =
+{
+ "1!","2\"","3#","4$","5%","6&","7'","8(","9)","0","-=","^~","\\|",
+ "qQ","wW","eE","rR","tT","yY","uU","iI","oO","pP","@`","[{",
+ "aA","sS","dD","fF","gG","hH","jJ","kK","lL",";+",":*","]}",
+ "zZ","xX","cC","vV","bB","nN","mM",",<",".>","/?",
+ "__",
+};
+
 /*** Japanese pc98x1 keyboard layout ***/
 static const char main_key_JA_pc98x1[MAIN_LEN][4] =
 {
@@ -887,7 +914,6 @@ static const struct {
  {0x0407, "German keyboard layout", &main_key_DE, &main_key_scan_qwerty, &main_key_vkey_qwertz},
  {0x0407, "German keyboard layout without dead keys", &main_key_DE_nodead, &main_key_scan_qwerty, &main_key_vkey_qwertz},
  {0x0407, "German keyboard layout for logitech desktop pro", &main_key_DE_logitech,  &main_key_scan_qwerty, &main_key_vkey_qwertz},
- {0x0407, "German keyboard layout without dead keys 105", &main_key_DE_nodead_105, &main_key_scan_qwerty, &main_key_vkey_qwertz_105},
  {0x0807, "Swiss German keyboard layout", &main_key_SG, &main_key_scan_qwerty, &main_key_vkey_qwertz},
  {0x100c, "Swiss French keyboard layout", &main_key_SF, &main_key_scan_qwerty, &main_key_vkey_qwertz},
  {0x041d, "Swedish keyboard layout", &main_key_SE, &main_key_scan_qwerty, &main_key_vkey_qwerty_v2},
@@ -925,6 +951,7 @@ static const struct {
  {0x041a, "Croatian keyboard layout", &main_key_HR, &main_key_scan_qwerty, &main_key_vkey_qwertz},
  {0x041a, "Croatian keyboard layout (specific)", &main_key_HR_jelly, &main_key_scan_qwerty, &main_key_vkey_qwerty},
  {0x0411, "Japanese 106 keyboard layout", &main_key_JA_jp106, &main_key_scan_qwerty_jp106, &main_key_vkey_qwerty_jp106},
+ {0x0411, "Japanese Mac keyboard layout", &main_key_JA_macjp, &main_key_scan_qwerty_macjp, &main_key_vkey_qwerty_macjp},
  {0x0411, "Japanese pc98x1 keyboard layout", &main_key_JA_pc98x1, &main_key_scan_qwerty, &main_key_vkey_qwerty},
  {0x041b, "Slovak keyboard layout", &main_key_SK, &main_key_scan_qwerty, &main_key_vkey_qwerty},
  {0x041b, "Slovak and Czech keyboard layout without dead keys", &main_key_SK_prog, &main_key_scan_qwerty, &main_key_vkey_qwerty},
@@ -1002,7 +1029,7 @@ static const WORD nonchar_key_vkey[256] =
     /* modifier keys */
     0, VK_LSHIFT, VK_RSHIFT, VK_LCONTROL,                       /* FFE0 */
     VK_RCONTROL, VK_CAPITAL, 0, VK_MENU,
-    VK_MENU, VK_LMENU, VK_RMENU, 0, 0, 0, 0, 0,                 /* FFE8 */
+    VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN, 0, 0, 0,     /* FFE8 */
     0, 0, 0, 0, 0, 0, 0, 0,                                     /* FFF0 */
     0, 0, 0, 0, 0, 0, 0, VK_DELETE                              /* FFF8 */
 };
@@ -1026,11 +1053,11 @@ static const WORD nonchar_key_scan[256] =
     0x147, 0x14B, 0x148, 0x14D, 0x150, 0x149, 0x151, 0x14F,      /* FF50 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF58 */
     /* misc keys */
-    /*?*/ 0, 0x137, /*?*/ 0, 0x152, 0x00, 0x00, 0x00, 0x00,      /* FF60 */
+    /*?*/ 0, 0x137, /*?*/ 0, 0x152, 0x00, 0x00, 0x00, 0x15D,     /* FF60 */
     /*?*/ 0, /*?*/ 0, 0x38, 0x146, 0x00, 0x00, 0x00, 0x00,       /* FF68 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF70 */
     /* keypad keys */
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x138, 0x145,            /* FF78 */
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x145,             /* FF78 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FF80 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x11C, 0x00, 0x00,             /* FF88 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x47, 0x4B, 0x48,              /* FF90 */
@@ -1047,7 +1074,7 @@ static const WORD nonchar_key_scan[256] =
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFD8 */
     /* modifier keys */
     0x00, 0x2A, 0x136, 0x1D, 0x11D, 0x3A, 0x00, 0x38,            /* FFE0 */
-    0x138, 0x38, 0x138, 0x00, 0x00, 0x00, 0x00, 0x00,            /* FFE8 */
+    0x138, 0x38, 0x138, 0x15b, 0x15c, 0x00, 0x00, 0x00,          /* FFE8 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,              /* FFF0 */
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x153              /* FFF8 */
 };
@@ -1128,6 +1155,7 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD event_flags, DWORD 
     UINT message;
     KBDLLHOOKSTRUCT hook;
     WORD flags, wVkStripped, wVkL, wVkR, vk_hook = wVk;
+    LPARAM lParam = 0;
 
     wVk = LOBYTE(wVk);
     flags = LOBYTE(wScan);
@@ -1189,11 +1217,16 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD event_flags, DWORD 
             message = WM_SYSKEYDOWN;
             TrackSysKey = wVkStripped;
         }
-        if (key_state_table[wVk] & 0x80) flags |= KF_REPEAT;
+        if (!(event_flags & KEYEVENTF_UNICODE) && key_state_table[wVk] & 0x80) flags |= KF_REPEAT;
     }
 
-    TRACE_(key)(" wParam=%04x, lParam=%08lx, InputKeyState=%x\n",
-                wVk, MAKELPARAM( 1, flags ), key_state_table[wVk] );
+    if (event_flags & KEYEVENTF_UNICODE)
+    {
+        vk_hook = wVk = VK_PACKET;
+        lParam = MAKELPARAM(1 /* repeat count */, wScan);
+        TRACE_(key)(" message=0x%04x wParam=0x%04x lParam=0x%08lx\n",
+                    message, wVk, lParam);
+    }
 
     /* Hook gets whatever key was sent. */
     hook.vkCode      = vk_hook;
@@ -1203,21 +1236,29 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD event_flags, DWORD 
     hook.dwExtraInfo = dwExtraInfo;
     if (HOOK_CallHooks( WH_KEYBOARD_LL, HC_ACTION, message, (LPARAM)&hook, TRUE )) return;
 
-    if (event_flags & KEYEVENTF_KEYUP)
+    if (!(event_flags & KEYEVENTF_UNICODE))
     {
-        key_state_table[wVk] &= ~0x80;
-        key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
-    }
-    else
-    {
-        if (!(key_state_table[wVk] & 0x80)) key_state_table[wVk] ^= 0x01;
-        key_state_table[wVk] |= 0xc0;
-        key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
-    }
+        if (event_flags & KEYEVENTF_KEYUP)
+        {
+            key_state_table[wVk] &= ~0x80;
+            key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
+        }
+        else
+        {
+            if (!(key_state_table[wVk] & 0x80)) key_state_table[wVk] ^= 0x01;
+            key_state_table[wVk] |= 0xc0;
+            key_state_table[wVkStripped] = key_state_table[wVkL] | key_state_table[wVkR];
+        }
 
-    if (key_state_table[VK_MENU] & 0x80) flags |= KF_ALTDOWN;
+        if (key_state_table[VK_MENU] & 0x80) flags |= KF_ALTDOWN;
 
-    if (wVkStripped == VK_SHIFT) flags &= ~KF_EXTENDED;
+        if (wVkStripped == VK_SHIFT) flags &= ~KF_EXTENDED;
+
+        lParam = MAKELPARAM(1 /* repeat count */, flags);
+
+        TRACE_(key)(" message=0x%04x wParam=0x%04x, lParam=0x%08lx, InputKeyState=0x%x\n",
+                    message, wVk, lParam, key_state_table[wVk]);
+    }
 
     SERVER_START_REQ( send_hardware_message )
     {
@@ -1225,7 +1266,7 @@ void X11DRV_send_keyboard_input( WORD wVk, WORD wScan, DWORD event_flags, DWORD 
         req->win      = 0;
         req->msg      = message;
         req->wparam   = wVk;
-        req->lparam   = MAKELPARAM( 1 /* repeat count */, flags );
+        req->lparam   = lParam;
         req->x        = cursor_pos.x;
         req->y        = cursor_pos.y;
         req->time     = time;
@@ -1319,7 +1360,8 @@ static void update_lock_state(BYTE vkey, WORD scan, DWORD time)
 void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
 {
     XKeyEvent *event = &xev->xkey;
-    char Str[24];
+    char buf[24];
+    char *Str = buf;
     KeySym keysym = 0;
     WORD vkey = 0, bScan;
     DWORD dwFlags;
@@ -1334,19 +1376,32 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
     wine_tsx11_lock();
     /* Clients should pass only KeyPress events to XmbLookupString */
     if (xic && event->type == KeyPress)
-        ascii_chars = XmbLookupString(xic, event, Str, sizeof(Str), &keysym, &status);
+    {
+        ascii_chars = XmbLookupString(xic, event, buf, sizeof(buf), &keysym, &status);
+        TRACE("XmbLookupString needs %i byte(s)\n", ascii_chars);
+        if (status == XBufferOverflow)
+        {
+            Str = HeapAlloc(GetProcessHeap(), 0, ascii_chars);
+            if (Str == NULL)
+            {
+                ERR("Failed to allocate memory!\n");
+                wine_tsx11_unlock();
+                return;
+            }
+            ascii_chars = XmbLookupString(xic, event, Str, ascii_chars, &keysym, &status);
+        }
+    }
     else
-        ascii_chars = XLookupString(event, Str, sizeof(Str), &keysym, NULL);
+        ascii_chars = XLookupString(event, buf, sizeof(buf), &keysym, NULL);
     wine_tsx11_unlock();
 
     TRACE_(key)("nbyte = %d, status 0x%x\n", ascii_chars, status);
 
-    if (status == XBufferOverflow)
-        ERR("Buffer Overflow need %i!\n",ascii_chars);
-
     if (status == XLookupChars)
     {
         X11DRV_XIMLookupChars( Str, ascii_chars );
+        if (buf != Str)
+            HeapFree(GetProcessHeap(), 0, Str);
         return;
     }
 
@@ -1374,6 +1429,8 @@ void X11DRV_KeyEvent( HWND hwnd, XEvent *xev )
                     (event->type == KeyPress) ? "KeyPress" : "KeyRelease",
                     keysym, ksname, ascii_chars, debugstr_an(Str, ascii_chars));
     }
+    if (buf != Str)
+        HeapFree(GetProcessHeap(), 0, Str);
 
     wine_tsx11_lock();
     vkey = EVENT_event_to_vkey(xic,event);
@@ -1488,7 +1545,7 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
 	/* search for a match in layout table */
 	/* right now, we just find an absolute match for defined positions */
 	/* (undefined positions are ignored, so if it's defined as "3#" in */
-	/* the table, it's okay that the X server has "3#£", for example) */
+	/* the table, it's okay that the X server has "3#Â£", for example) */
 	/* however, the score will be higher for longer matches */
 	for (key = 0; key < MAIN_LEN; key++) {
 	  for (ok = 0, i = 0; (ok >= 0) && (i < syms); i++) {
@@ -1538,6 +1595,82 @@ X11DRV_KEYBOARD_DetectLayout( Display *display )
   TRACE("detected layout is \"%s\"\n", main_key_tab[kbd_layout].comment);
 }
 
+static HKL get_locale_kbd_layout(void)
+{
+    ULONG_PTR layout;
+    LANGID langid;
+
+    /* FIXME:
+     *
+     * layout = main_key_tab[kbd_layout].lcid;
+     *
+     * Winword uses return value of GetKeyboardLayout as a codepage
+     * to translate ANSI keyboard messages to unicode. But we have
+     * a problem with it: for instance Polish keyboard layout is
+     * identical to the US one, and therefore instead of the Polish
+     * locale id we return the US one.
+     */
+
+    layout = GetUserDefaultLCID();
+
+    /*
+     * Microsoft Office expects this value to be something specific
+     * for Japanese and Korean Windows with an IME the value is 0xe001
+     * We should probably check to see if an IME exists and if so then
+     * set this word properly.
+     */
+    langid = PRIMARYLANGID(LANGIDFROMLCID(layout));
+    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
+        layout |= 0xe001 << 16; /* IME */
+    else
+        layout |= layout << 16;
+
+    return (HKL)layout;
+}
+
+/***********************************************************************
+ *     GetKeyboardLayoutName (X11DRV.@)
+ */
+BOOL CDECL X11DRV_GetKeyboardLayoutName(LPWSTR name)
+{
+    static const WCHAR formatW[] = {'%','0','8','l','x',0};
+    DWORD layout;
+    LANGID langid;
+
+    layout = main_key_tab[kbd_layout].lcid;
+    /* see comment for get_locale_kbd_layout */
+    langid = PRIMARYLANGID(LANGIDFROMLCID(layout));
+    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
+        layout |= 0xe001 << 16; /* FIXME */
+
+    sprintfW(name, formatW, layout);
+    TRACE("returning %s\n", debugstr_w(name));
+    return TRUE;
+}
+
+static void set_kbd_layout_preload_key(void)
+{
+    static const WCHAR preload[] =
+        {'K','e','y','b','o','a','r','d',' ','L','a','y','o','u','t','\\','P','r','e','l','o','a','d',0};
+    static const WCHAR one[] = {'1',0};
+
+    HKEY hkey;
+    WCHAR layout[KL_NAMELENGTH];
+
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, preload, 0, NULL, 0, KEY_ALL_ACCESS, NULL, &hkey, NULL))
+        return;
+
+    if (!RegQueryValueExW(hkey, one, NULL, NULL, NULL, NULL))
+    {
+        RegCloseKey(hkey);
+        return;
+    }
+    if (X11DRV_GetKeyboardLayoutName(layout))
+        RegSetValueExW(hkey, one, 0, REG_SZ, (const BYTE *)layout, sizeof(layout));
+
+    RegCloseKey(hkey);
+}
+
 /**********************************************************************
  *		X11DRV_InitKeyboard
  */
@@ -1553,6 +1686,8 @@ void X11DRV_InitKeyboard( Display *display )
     char ckey[4]={0,0,0,0};
     const char (*lkey)[MAIN_LEN][4];
     char vkey_used[256] = { 0 };
+
+    set_kbd_layout_preload_key();
 
     wine_tsx11_lock();
     XDisplayKeycodes(display, &min_keycode, &max_keycode);
@@ -1777,11 +1912,22 @@ void X11DRV_InitKeyboard( Display *display )
     wine_tsx11_unlock();
 }
 
+static BOOL match_x11_keyboard_layout(HKL hkl)
+{
+    const DWORD isIME = 0xE0000000;
+    HKL xHkl = get_locale_kbd_layout();
+
+    /* if the layout is an IME, only match the low word (LCID) */
+    if (((ULONG_PTR)hkl & isIME) == isIME)
+        return (LOWORD(hkl) == LOWORD(xHkl));
+    else
+        return (hkl == xHkl);
+}
 
 /**********************************************************************
  *		GetAsyncKeyState (X11DRV.@)
  */
-SHORT X11DRV_GetAsyncKeyState(INT key)
+SHORT CDECL X11DRV_GetAsyncKeyState(INT key)
 {
     SHORT retval;
 
@@ -1797,107 +1943,26 @@ SHORT X11DRV_GetAsyncKeyState(INT key)
 
 
 /***********************************************************************
- *		GetKeyboardLayoutList (X11DRV.@)
- */
-UINT X11DRV_GetKeyboardLayoutList(INT size, HKL *hkl)
-{
-    INT i;
-
-    TRACE("%d, %p\n", size, hkl);
-
-    if (!size)
-    {
-        size = 4096; /* hope we will never have that many */
-        hkl = NULL;
-    }
-
-    for (i = 0; main_key_tab[i].comment && (i < size); i++)
-    {
-        if (hkl)
-        {
-            ULONG_PTR layout = main_key_tab[i].lcid;
-            LANGID langid;
-
-            /* see comment for GetKeyboardLayout */
-            langid = PRIMARYLANGID(LANGIDFROMLCID(layout));
-            if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-                layout |= 0xe001 << 16; /* FIXME */
-            else
-                layout |= layout << 16;
-
-            hkl[i] = (HKL)layout;
-        }
-    }
-    return i;
-}
-
-
-/***********************************************************************
  *		GetKeyboardLayout (X11DRV.@)
  */
-HKL X11DRV_GetKeyboardLayout(DWORD dwThreadid)
+HKL CDECL X11DRV_GetKeyboardLayout(DWORD dwThreadid)
 {
-    ULONG_PTR layout;
-    LANGID langid;
-
-    if (dwThreadid && dwThreadid != GetCurrentThreadId())
+    if (!dwThreadid || dwThreadid == GetCurrentThreadId())
+    {
+        struct x11drv_thread_data *thread_data = x11drv_thread_data();
+        if (thread_data && thread_data->kbd_layout) return thread_data->kbd_layout;
+    }
+    else
         FIXME("couldn't return keyboard layout for thread %04x\n", dwThreadid);
 
-#if 0
-    layout = main_key_tab[kbd_layout].lcid;
-#else
-    /* FIXME:
-     * Winword uses return value of GetKeyboardLayout as a codepage
-     * to translate ANSI keyboard messages to unicode. But we have
-     * a problem with it: for instance Polish keyboard layout is
-     * identical to the US one, and therefore instead of the Polish
-     * locale id we return the US one.
-     */
-    layout = GetUserDefaultLCID();
-#endif
-    /* 
-     * Microsoft Office expects this value to be something specific
-     * for Japanese and Korean Windows with an IME the value is 0xe001
-     * We should probably check to see if an IME exists and if so then
-     * set this word properly.
-     */
-    langid = PRIMARYLANGID(LANGIDFROMLCID(layout));
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout |= 0xe001 << 16; /* FIXME */
-    else
-        layout |= layout << 16;
-
-    return (HKL)layout;
-}
-
-
-/***********************************************************************
- *		GetKeyboardLayoutName (X11DRV.@)
- */
-BOOL X11DRV_GetKeyboardLayoutName(LPWSTR name)
-{
-    static const WCHAR formatW[] = {'%','0','8','l','x',0};
-    DWORD layout;
-    LANGID langid;
-
-    layout = main_key_tab[kbd_layout].lcid;
-    /* see comment for GetKeyboardLayout */
-    langid = PRIMARYLANGID(LANGIDFROMLCID(layout));
-    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
-        layout |= 0xe001 << 16; /* FIXME */
-    else
-        layout |= layout << 16;
-
-    sprintfW(name, formatW, layout);
-    TRACE("returning %s\n", debugstr_w(name));
-    return TRUE;
+    return get_locale_kbd_layout();
 }
 
 
 /***********************************************************************
  *		LoadKeyboardLayout (X11DRV.@)
  */
-HKL X11DRV_LoadKeyboardLayout(LPCWSTR name, UINT flags)
+HKL CDECL X11DRV_LoadKeyboardLayout(LPCWSTR name, UINT flags)
 {
     FIXME("%s, %04x: stub!\n", debugstr_w(name), flags);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
@@ -1908,7 +1973,7 @@ HKL X11DRV_LoadKeyboardLayout(LPCWSTR name, UINT flags)
 /***********************************************************************
  *		UnloadKeyboardLayout (X11DRV.@)
  */
-BOOL X11DRV_UnloadKeyboardLayout(HKL hkl)
+BOOL CDECL X11DRV_UnloadKeyboardLayout(HKL hkl)
 {
     FIXME("%p: stub!\n", hkl);
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
@@ -1919,11 +1984,42 @@ BOOL X11DRV_UnloadKeyboardLayout(HKL hkl)
 /***********************************************************************
  *		ActivateKeyboardLayout (X11DRV.@)
  */
-HKL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
+HKL CDECL X11DRV_ActivateKeyboardLayout(HKL hkl, UINT flags)
 {
-    FIXME("%p, %04x: stub!\n", hkl, flags);
-    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
-    return 0;
+    HKL oldHkl = 0;
+    struct x11drv_thread_data *thread_data = x11drv_init_thread_data();
+
+    FIXME("%p, %04x: semi-stub!\n", hkl, flags);
+    if (flags & KLF_SETFORPROCESS)
+    {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        FIXME("KLF_SETFORPROCESS not supported\n");
+        return 0;
+    }
+
+    if (flags)
+        FIXME("flags %x not supported\n",flags);
+
+    if (hkl == (HKL)HKL_NEXT || hkl == (HKL)HKL_PREV)
+    {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        FIXME("HKL_NEXT and HKL_PREV not supported\n");
+        return 0;
+    }
+
+    if (!match_x11_keyboard_layout(hkl))
+    {
+        SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+        FIXME("setting keyboard of different locales not supported\n");
+        return 0;
+    }
+
+    oldHkl = thread_data->kbd_layout;
+    if (!oldHkl) oldHkl = get_locale_kbd_layout();
+
+    thread_data->kbd_layout = hkl;
+
+    return oldHkl;
 }
 
 
@@ -1937,7 +2033,7 @@ void X11DRV_MappingNotify( HWND dummy, XEvent *event )
     wine_tsx11_lock();
     XRefreshKeyboardMapping(&event->xmapping);
     wine_tsx11_unlock();
-    X11DRV_InitKeyboard( thread_display() );
+    X11DRV_InitKeyboard( event->xmapping.display );
 
     hwnd = GetFocus();
     if (!hwnd) hwnd = GetActiveWindow();
@@ -1951,9 +2047,9 @@ void X11DRV_MappingNotify( HWND dummy, XEvent *event )
  *
  * Note: Windows ignores HKL parameter and uses current active layout instead
  */
-SHORT X11DRV_VkKeyScanEx(WCHAR wChar, HKL hkl)
+SHORT CDECL X11DRV_VkKeyScanEx(WCHAR wChar, HKL hkl)
 {
-    Display *display = thread_display();
+    Display *display = thread_init_display();
     KeyCode keycode;
     KeySym keysym;
     int i, index;
@@ -2043,41 +2139,80 @@ SHORT X11DRV_VkKeyScanEx(WCHAR wChar, HKL hkl)
 /***********************************************************************
  *		MapVirtualKeyEx (X11DRV.@)
  */
-UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
+UINT CDECL X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 {
-    Display *display = thread_display();
+    Display *display = thread_init_display();
 
-#define returnMVK(value) { TRACE("returning 0x%x.\n",value); return value; }
+#define returnMVK(value) do { TRACE("returning 0x%x.\n",value); return value; } while(0)
 
     TRACE("wCode=0x%x, wMapType=%d, hkl %p\n", wCode, wMapType, hkl);
-    if (hkl != X11DRV_GetKeyboardLayout(0))
+    if (!match_x11_keyboard_layout(hkl))
         FIXME("keyboard layout %p is not supported\n", hkl);
 
-	switch(wMapType) {
-		case MAPVK_VK_TO_VSC: /* vkey-code to scan-code */
-		case MAPVK_VK_TO_VSC_EX: /* FIXME: should differentiate between
-                                            left and right keys */
-		{
-			/* let's do vkey -> keycode -> scan */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2vkey[keyc] & 0xFF) == wCode)
-					returnMVK (keyc2scan[keyc] & 0xFF);
-			TRACE("returning no scan-code.\n");
-		        return 0;
-		}
-		case MAPVK_VSC_TO_VK: /* scan-code to vkey-code */
-		case MAPVK_VSC_TO_VK_EX: /* FIXME: should differentiate between
-                                            left and right keys */
-		{
-			/* let's do scan -> keycode -> vkey */
-			int keyc;
-			for (keyc=min_keycode; keyc<=max_keycode; keyc++)
-				if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF))
-					returnMVK (keyc2vkey[keyc] & 0xFF);
-			TRACE("returning no vkey-code.\n");
-		        return 0;
-		}
+    switch(wMapType)
+    {
+        case MAPVK_VK_TO_VSC: /* vkey-code to scan-code */
+        case MAPVK_VK_TO_VSC_EX:
+        {
+            int keyc;
+
+            switch (wCode)
+            {
+                case VK_SHIFT: wCode = VK_LSHIFT; break;
+                case VK_CONTROL: wCode = VK_LCONTROL; break;
+                case VK_MENU: wCode = VK_LMENU; break;
+            }
+
+            /* let's do vkey -> keycode -> scan */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2vkey[keyc] & 0xFF) == wCode) break;
+
+            if (keyc > max_keycode)
+            {
+                TRACE("returning no scan-code.\n");
+                return 0;
+            }
+            returnMVK (keyc2scan[keyc] & 0xFF);
+        }
+        case MAPVK_VSC_TO_VK: /* scan-code to vkey-code */
+        case MAPVK_VSC_TO_VK_EX:
+        {
+            int keyc;
+            UINT vkey = 0;
+
+            /* let's do scan -> keycode -> vkey */
+            for (keyc = min_keycode; keyc <= max_keycode; keyc++)
+                if ((keyc2scan[keyc] & 0xFF) == (wCode & 0xFF))
+                {
+                    vkey = keyc2vkey[keyc] & 0xFF;
+                    /* Only stop if it's not a numpad vkey; otherwise keep
+                       looking for a potential better vkey. */
+                    if (vkey && (vkey < VK_NUMPAD0 || VK_DIVIDE < vkey))
+                        break;
+                }
+
+            if (vkey == 0)
+            {
+                TRACE("returning no vkey-code.\n");
+                return 0;
+            }
+
+            if (wMapType == MAPVK_VSC_TO_VK)
+                switch (vkey)
+                {
+                    case VK_LSHIFT:
+                    case VK_RSHIFT:
+                        vkey = VK_SHIFT; break;
+                    case VK_LCONTROL:
+                    case VK_RCONTROL:
+                        vkey = VK_CONTROL; break;
+                    case VK_LMENU:
+                    case VK_RMENU:
+                        vkey = VK_MENU; break;
+                }
+
+            returnMVK (vkey);
+        }
 		case MAPVK_VK_TO_CHAR: /* vkey-code to unshifted ANSI code */
 		{
                         /* we still don't know what "unshifted" means. in windows VK_W (0x57)
@@ -2147,8 +2282,9 @@ UINT X11DRV_MapVirtualKeyEx(UINT wCode, UINT wMapType, HKL hkl)
 /***********************************************************************
  *		GetKeyNameText (X11DRV.@)
  */
-INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
+INT CDECL X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
 {
+  Display *display = thread_init_display();
   int vkey, ansi, scanCode;
   KeyCode keyc;
   int keyi;
@@ -2158,14 +2294,15 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
   scanCode = lParam >> 16;
   scanCode &= 0x1ff;  /* keep "extended-key" flag with code */
 
-  /* FIXME: should use MVK type 3 (NT version that distinguishes right and left */
-  vkey = X11DRV_MapVirtualKeyEx(scanCode, 1, X11DRV_GetKeyboardLayout(0));
+  vkey = X11DRV_MapVirtualKeyEx(scanCode, MAPVK_VSC_TO_VK_EX, X11DRV_GetKeyboardLayout(0));
 
   /*  handle "don't care" bit (0x02000000) */
   if (!(lParam & 0x02000000)) {
     switch (vkey) {
-         case VK_LSHIFT:
          case VK_RSHIFT:
+                          /* R-Shift is "special" - it is an extended key with separate scan code */
+                          scanCode |= 0x100;
+         case VK_LSHIFT:
                           vkey = VK_SHIFT;
                           break;
        case VK_LCONTROL:
@@ -2176,12 +2313,10 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
           case VK_RMENU:
                           vkey = VK_MENU;
                           break;
-               default:
-                          break;
     }
   }
 
-  ansi = X11DRV_MapVirtualKeyEx(vkey, 2, X11DRV_GetKeyboardLayout(0));
+  ansi = X11DRV_MapVirtualKeyEx(vkey, MAPVK_VK_TO_CHAR, X11DRV_GetKeyboardLayout(0));
   TRACE("scan 0x%04x, vkey 0x%04x, ANSI 0x%04x\n", scanCode, vkey, ansi);
 
   /* first get the name of the "regular" keys which is the Upper case
@@ -2222,17 +2357,13 @@ INT X11DRV_GetKeyNameText(LONG lParam, LPWSTR lpBuffer, INT nSize)
   {
       wine_tsx11_lock();
       keyc = (KeyCode) keyi;
-      keys = XKeycodeToKeysym(thread_display(), keyc, 0);
+      keys = XKeycodeToKeysym(display, keyc, 0);
       name = XKeysymToString(keys);
       wine_tsx11_unlock();
       TRACE("found scan=%04x keyc=%04x keysym=%04x string=%s\n",
             scanCode, keyc, (int)keys, name);
       if (lpBuffer && nSize && name)
-      {
-          MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpBuffer, nSize);
-          lpBuffer[nSize - 1] = 0;
-          return 1;
-      }
+          return MultiByteToWideChar(CP_UNIXCP, 0, name, -1, lpBuffer, nSize);
   }
 
   /* Finally issue WARN for unknown keys   */
@@ -2339,15 +2470,16 @@ static char KEYBOARD_MapDeadKeysym(KeySym keysym)
  * FIXME : should do the above (return 2 for non matching deadchar+char combinations)
  *
  */
-INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
-		     LPWSTR bufW, int bufW_size, UINT flags, HKL hkl)
+INT CDECL X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
+                             LPWSTR bufW, int bufW_size, UINT flags, HKL hkl)
 {
-    Display *display = thread_display();
+    Display *display = thread_init_display();
     XKeyEvent e;
     KeySym keysym = 0;
     INT ret;
     int keyc;
-    char lpChar[10];
+    char buf[10];
+    char *lpChar = buf;
     HWND focus;
     XIC xic;
     Status status = 0;
@@ -2358,7 +2490,7 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
         return 0;
     }
 
-    if (hkl != X11DRV_GetKeyboardLayout(0))
+    if (!match_x11_keyboard_layout(hkl))
         FIXME("keyboard layout %p is not supported\n", hkl);
 
     if ((lpKeyState[VK_MENU] & 0x80) && (lpKeyState[VK_CONTROL] & 0x80))
@@ -2446,15 +2578,26 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
      * e.type was set to KeyPress above.
      */
     if (xic)
-        ret = XmbLookupString(xic, &e, lpChar, sizeof(lpChar), &keysym, &status);
+    {
+        ret = XmbLookupString(xic, &e, buf, sizeof(buf), &keysym, &status);
+        TRACE("XmbLookupString needs %d byte(s)\n", ret);
+        if (status == XBufferOverflow)
+        {
+            lpChar = HeapAlloc(GetProcessHeap(), 0, ret);
+            if (lpChar == NULL)
+            {
+                ERR("Failed to allocate memory!\n");
+                wine_tsx11_unlock();
+                return 0;
+            }
+            ret = XmbLookupString(xic, &e, lpChar, ret, &keysym, &status);
+        }
+    }
     else
-        ret = XLookupString(&e, lpChar, sizeof(lpChar), &keysym, NULL);
+        ret = XLookupString(&e, buf, sizeof(buf), &keysym, NULL);
     wine_tsx11_unlock();
 
     TRACE_(key)("nbyte = %d, status 0x%x\n", ret, status);
-
-    if (status == XBufferOverflow)
-        ERR("Buffer Overflow need %d!\n", ret);
 
     if (TRACE_ON(key))
     {
@@ -2485,7 +2628,7 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 #endif
         /* Special case: X turns shift-tab into ISO_Left_Tab. */
         /* Here we change it back. */
-        if (keysym == XK_ISO_Left_Tab)
+        if (keysym == XK_ISO_Left_Tab && !(e.state & ControlMask))
         {
             bufW[0] = 0x09;
             ret = 1;
@@ -2546,7 +2689,8 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
         if (e.state & ControlMask)
         {
             if (((keysym>=33) && (keysym < 'A')) ||
-                ((keysym > 'Z') && (keysym < 'a')))
+                ((keysym > 'Z') && (keysym < 'a')) ||
+                (keysym == XK_Tab))
             {
                 lpChar[0] = 0;
                 ret = 0;
@@ -2566,6 +2710,12 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
             lpChar[0] = 0;
             ret = 0;
         }
+	else if((lpKeyState[VK_CONTROL] & 0x80) /* Control is pressed */
+		&& (keysym == XK_Return || keysym == XK_KP_Enter))
+        {
+            lpChar[0] = '\n';
+            ret = 1;
+        }
 
         /* Hack to detect an XLookupString hard-coded to Latin1 */
         if (ret == 1 && keysym >= 0x00a0 && keysym <= 0x00ff && (BYTE)lpChar[0] == keysym)
@@ -2583,17 +2733,18 @@ INT X11DRV_ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
     }
 
 found:
-    TRACE_(key)("ToUnicode about to return %d with char %x %s\n",
-		ret, (ret && bufW) ? bufW[0] : 0, bufW ? "" : "(no buffer)");
+    if (buf != lpChar)
+        HeapFree(GetProcessHeap(), 0, lpChar);
+    TRACE_(key)("returning %d with %s\n", ret, debugstr_wn(bufW, ret));
     return ret;
 }
 
 /***********************************************************************
  *		Beep (X11DRV.@)
  */
-void X11DRV_Beep(void)
+void CDECL X11DRV_Beep(void)
 {
     wine_tsx11_lock();
-    XBell(thread_display(), 0);
+    XBell(gdi_display, 0);
     wine_tsx11_unlock();
 }

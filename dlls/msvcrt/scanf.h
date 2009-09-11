@@ -48,7 +48,7 @@
 #ifdef CONSOLE
 #define _GETC_(file) (consumed++, _getch())
 #define _UNGETC_(nch, file) do { _ungetch(nch); consumed--; } while(0)
-#define _FUNCTION_ static int MSVCRT_vcscanf(const char *format, va_list ap)
+#define _FUNCTION_ static int MSVCRT_vcscanf(const char *format, __ms_va_list ap)
 #else
 #ifdef STRING
 #undef _EOF_
@@ -56,19 +56,19 @@
 #define _GETC_(file) (consumed++, *file++)
 #define _UNGETC_(nch, file) do { file--; consumed--; } while(0)
 #ifdef WIDE_SCANF
-#define _FUNCTION_ static int MSVCRT_vswscanf(const MSVCRT_wchar_t *file, const MSVCRT_wchar_t *format, va_list ap)
+#define _FUNCTION_ static int MSVCRT_vswscanf(const MSVCRT_wchar_t *file, const MSVCRT_wchar_t *format, __ms_va_list ap)
 #else /* WIDE_SCANF */
-#define _FUNCTION_ static int MSVCRT_vsscanf(const char *file, const char *format, va_list ap)
+#define _FUNCTION_ static int MSVCRT_vsscanf(const char *file, const char *format, __ms_va_list ap)
 #endif /* WIDE_SCANF */
 #else /* STRING */
 #ifdef WIDE_SCANF
 #define _GETC_(file) (consumed++, MSVCRT_fgetwc(file))
 #define _UNGETC_(nch, file) do { MSVCRT_ungetwc(nch, file); consumed--; } while(0)
-#define _FUNCTION_ static int MSVCRT_vfwscanf(MSVCRT_FILE* file, const MSVCRT_wchar_t *format, va_list ap)
+#define _FUNCTION_ static int MSVCRT_vfwscanf(MSVCRT_FILE* file, const MSVCRT_wchar_t *format, __ms_va_list ap)
 #else /* WIDE_SCANF */
 #define _GETC_(file) (consumed++, MSVCRT_fgetc(file))
 #define _UNGETC_(nch, file) do { MSVCRT_ungetc(nch, file); consumed--; } while(0)
-#define _FUNCTION_ static int MSVCRT_vfscanf(MSVCRT_FILE* file, const char *format, va_list ap)
+#define _FUNCTION_ static int MSVCRT_vfscanf(MSVCRT_FILE* file, const char *format, __ms_va_list ap)
 #endif /* WIDE_SCANF */
 #endif /* STRING */
 #endif /* CONSOLE */
@@ -79,7 +79,7 @@ _FUNCTION_ {
     if (!*format) return 0;
 #ifndef WIDE_SCANF
 #ifdef CONSOLE
-    TRACE("(%s): \n", debugstr_a(format));
+    TRACE("(%s):\n", debugstr_a(format));
 #else /* CONSOLE */
 #ifdef STRING
     TRACE("%s (%s)\n", file, debugstr_a(format));
@@ -149,6 +149,10 @@ _FUNCTION_ {
 	    }
 	    /* read type */
             switch(*format) {
+	    case 'p':
+	    case 'P': /* pointer. */
+                if (sizeof(void *) == sizeof(LONGLONG)) I64_prefix = 1;
+                /* fall through */
 	    case 'x':
 	    case 'X': /* hexadecimal integer. */
 		base = 16;
@@ -179,7 +183,7 @@ _FUNCTION_ {
 			if (width>0) width--;
                     }
 		    /* look for leading indication of base */
-		    if (width!=0 && nch == '0') {
+		    if (width!=0 && nch == '0' && *format != 'p' && *format != 'P') {
                         nch = _GETC_(file);
 			if (width>0) width--;
 			seendigit=1;
@@ -222,7 +226,7 @@ _FUNCTION_ {
                     if (!suppress) {
 #define _SET_NUMBER_(type) *va_arg(ap, type*) = negative ? -cur : cur
 			if (I64_prefix) _SET_NUMBER_(LONGLONG);
-			else if (l_prefix) _SET_NUMBER_(long int);
+			else if (l_prefix) _SET_NUMBER_(LONG);
 			else if (h_prefix) _SET_NUMBER_(short int);
 			else _SET_NUMBER_(int);
 		    }

@@ -77,8 +77,9 @@ static CRITICAL_SECTION SHELL32_SicCS = { &critsect_debug, -1, 0, 0, 0, 0 };
  *  Callback for DPA_Search
  */
 static INT CALLBACK SIC_CompareEntries( LPVOID p1, LPVOID p2, LPARAM lparam)
-{	LPSIC_ENTRY e1 = (LPSIC_ENTRY)p1, e2 = (LPSIC_ENTRY)p2;
-	
+{
+        LPSIC_ENTRY e1 = p1, e2 = p2;
+
 	TRACE("%p %p %8lx\n", p1, p2, lparam);
 
 	/* Icons in the cache are keyed by the name of the file they are
@@ -260,7 +261,7 @@ static INT SIC_IconAppend (LPCWSTR sSourceFile, INT dwSourceIndex, HICON hSmallI
 	WCHAR path[MAX_PATH];
 	TRACE("%s %i %p %p\n", debugstr_w(sSourceFile), dwSourceIndex, hSmallIcon ,hBigIcon);
 
-	lpsice = (LPSIC_ENTRY) SHAlloc (sizeof (SIC_ENTRY));
+	lpsice = SHAlloc(sizeof(SIC_ENTRY));
 
 	GetFullPathNameW(sSourceFile, MAX_PATH, path, NULL);
 	lpsice->sSourceFile = HeapAlloc( GetProcessHeap(), 0, (strlenW(path)+1)*sizeof(WCHAR) );
@@ -413,9 +414,9 @@ BOOL SIC_Initialize(void)
         ImageList_SetBkColor(ShellBigIconList, CLR_NONE);
 
         /* Load the document icon, which is used as the default if an icon isn't found. */
-        hSm = (HICON)LoadImageA(shell32_hInstance, MAKEINTRESOURCEA(IDI_SHELL_DOCUMENT), 
+        hSm = LoadImageA(shell32_hInstance, MAKEINTRESOURCEA(IDI_SHELL_DOCUMENT),
                                 IMAGE_ICON, cx_small, cy_small, LR_SHARED);
-        hLg = (HICON)LoadImageA(shell32_hInstance, MAKEINTRESOURCEA(IDI_SHELL_DOCUMENT), 
+        hLg = LoadImageA(shell32_hInstance, MAKEINTRESOURCEA(IDI_SHELL_DOCUMENT),
                                 IMAGE_ICON, cx_large, cy_large, LR_SHARED);
 
         if (!hSm || !hLg) 
@@ -632,7 +633,7 @@ HRESULT WINAPI SHMapIDListToImageListIndexAsync(IUnknown *pts, IShellFolder *psf
  * Shell_GetCachedImageIndex		[SHELL32.72]
  *
  */
-INT WINAPI Shell_GetCachedImageIndexA(LPCSTR szPath, INT nIndex, BOOL bSimulateDoc)
+static INT Shell_GetCachedImageIndexA(LPCSTR szPath, INT nIndex, BOOL bSimulateDoc)
 {
 	INT ret, len;
 	LPWSTR szTemp;
@@ -650,7 +651,7 @@ INT WINAPI Shell_GetCachedImageIndexA(LPCSTR szPath, INT nIndex, BOOL bSimulateD
 	return ret;
 }
 
-INT WINAPI Shell_GetCachedImageIndexW(LPCWSTR szPath, INT nIndex, BOOL bSimulateDoc)
+static INT Shell_GetCachedImageIndexW(LPCWSTR szPath, INT nIndex, BOOL bSimulateDoc)
 {
 	WARN("(%s,%08x,%08x) semi-stub.\n",debugstr_w(szPath), nIndex, bSimulateDoc);
 
@@ -816,8 +817,14 @@ HRESULT WINAPI SHDefExtractIconW(LPCWSTR pszIconFile, int iIndex, UINT uFlags,
 	if (ret == 0xFFFFFFFF)
 	  return E_FAIL;
 	if (ret > 0) {
-	  *phiconLarge = hIcons[0];
-	  *phiconSmall = hIcons[1];
+	  if (phiconLarge)
+	    *phiconLarge = hIcons[0];
+	  else
+	    DestroyIcon(hIcons[0]);
+	  if (phiconSmall)
+	    *phiconSmall = hIcons[1];
+	  else
+	    DestroyIcon(hIcons[1]);
 	  return S_OK;
 	}
 	return S_FALSE;
@@ -839,4 +846,29 @@ HRESULT WINAPI SHDefExtractIconA(LPCSTR pszIconFile, int iIndex, UINT uFlags,
   ret = SHDefExtractIconW(lpwstrFile, iIndex, uFlags, phiconLarge, phiconSmall, nIconSize);
   HeapFree(GetProcessHeap(), 0, lpwstrFile);
   return ret;
+}
+
+
+/****************************************************************************
+ * SHGetIconOverlayIndexA    [SHELL32.@]
+ *
+ * Returns the index of the overlay icon in the system image list.
+ */
+INT WINAPI SHGetIconOverlayIndexA(LPCSTR pszIconPath, INT iIconIndex)
+{
+  FIXME("%s, %d\n", debugstr_a(pszIconPath), iIconIndex);
+
+  return -1;
+}
+
+/****************************************************************************
+ * SHGetIconOverlayIndexW    [SHELL32.@]
+ *
+ * Returns the index of the overlay icon in the system image list.
+ */
+INT WINAPI SHGetIconOverlayIndexW(LPCWSTR pszIconPath, INT iIconIndex)
+{
+  FIXME("%s, %d\n", debugstr_w(pszIconPath), iIconIndex);
+
+  return -1;
 }

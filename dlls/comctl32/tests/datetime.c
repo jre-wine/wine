@@ -140,7 +140,7 @@ struct subclass_info
 static LRESULT WINAPI datetime_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
-    static long defwndproc_counter = 0;
+    static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
 
@@ -197,7 +197,7 @@ static void test_dtm_set_format(HWND hWndDateTime)
     SYSTEMTIME systime;
     LRESULT r;
 
-    r = SendMessage(hWndDateTime, DTM_SETFORMAT, 0, (LPARAM)NULL);
+    r = SendMessage(hWndDateTime, DTM_SETFORMAT, 0, 0);
     expect(1, r);
 
     r = SendMessage(hWndDateTime, DTM_SETFORMAT, 0,
@@ -256,7 +256,7 @@ static void test_dtm_set_and_get_mcfont(HWND hWndDateTime)
 {
     HFONT hFontOrig, hFontNew;
 
-    hFontOrig = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    hFontOrig = GetStockObject(DEFAULT_GUI_FONT);
     SendMessage(hWndDateTime, DTM_SETMCFONT, (WPARAM)hFontOrig, TRUE);
     hFontNew = (HFONT)SendMessage(hWndDateTime, DTM_GETMCFONT, 0, 0);
     ok(hFontOrig == hFontNew, "Expected hFontOrig==hFontNew, hFontOrig=%p, hFontNew=%p\n", hFontOrig, hFontNew);
@@ -271,7 +271,7 @@ static void test_dtm_get_monthcal(HWND hWndDateTime)
 
     todo_wine {
         r = SendMessage(hWndDateTime, DTM_GETMONTHCAL, 0, 0);
-        ok(r == (LPARAM)NULL, "Expected NULL(no child month calendar control), got %ld\n", r);
+        ok(r == 0, "Expected NULL(no child month calendar control), got %ld\n", r);
     }
 
     ok_sequence(sequences, DATETIME_SEQ_INDEX, test_dtm_get_monthcal_seq, "test_dtm_get_monthcal", FALSE);
@@ -423,10 +423,13 @@ static void test_dtm_set_range_swap_min_max(HWND hWndDateTime)
     r = SendMessage(hWndDateTime, DTM_GETRANGE, 0, (LPARAM)getSt);
     ok(r == (GDTR_MIN | GDTR_MAX), "Expected %x, not %x(GDTR_MIN) or %x(GDTR_MAX), got %lx\n", (GDTR_MIN | GDTR_MAX), GDTR_MIN, GDTR_MAX, r);
     todo_wine {
-        expect_systime(&st[0], &getSt[0]);
-    }
-    todo_wine {
-        expect_systime(&st[1], &getSt[1]);
+        ok(compare_systime(&st[0], &getSt[0]) == 1 ||
+           broken(compare_systime(&st[0], &getSt[1]) == 1), /* comctl32 version  <= 5.80 */
+           "ST1 != ST2\n");
+
+        ok(compare_systime(&st[1], &getSt[1]) == 1 ||
+           broken(compare_systime(&st[1], &getSt[0]) == 1), /* comctl32 version  <= 5.80 */
+           "ST1 != ST2\n");
     }
 
     fill_systime_struct(&st[0], 1980, 1, 3, 23, 14, 34, 37, 465);
@@ -439,7 +442,9 @@ static void test_dtm_set_range_swap_min_max(HWND hWndDateTime)
     and doing DTM_SETSYSTEMTIME */
     expect_systime_date(&st[0], &getSt[0]);
     todo_wine {
-        expect_systime_time(&origSt, &getSt[0]);
+        ok(compare_systime_time(&origSt, &getSt[0]) == 1 ||
+           broken(compare_systime_time(&st[0], &getSt[0]) == 1), /* comctl32 version  <= 5.80 */
+           "ST1.time != ST2.time\n");
     }
 
     /* set st[0] to value higher than minimum */
@@ -455,10 +460,13 @@ static void test_dtm_set_range_swap_min_max(HWND hWndDateTime)
     r = SendMessage(hWndDateTime, DTM_GETRANGE, 0, (LPARAM)getSt);
     ok(r == (GDTR_MIN | GDTR_MAX), "Expected %x, not %x(GDTR_MIN) or %x(GDTR_MAX), got %lx\n", (GDTR_MIN | GDTR_MAX), GDTR_MIN, GDTR_MAX, r);
     todo_wine {
-        expect_systime(&st[0], &getSt[1]);
-    }
-    todo_wine {
-        expect_systime(&st[1], &getSt[0]);
+        ok(compare_systime(&st[0], &getSt[1]) == 1 ||
+           broken(compare_systime(&st[0], &getSt[0]) == 1), /* comctl32 version  <= 5.80 */
+           "ST1 != ST2\n");
+
+        ok(compare_systime(&st[1], &getSt[0]) == 1 ||
+           broken(compare_systime(&st[1], &getSt[1]) == 1), /* comctl32 version <= 5.80 */
+           "ST1 != ST2\n");
     }
 
     /* set st[0] to value higher than st[1] */

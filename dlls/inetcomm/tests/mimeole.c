@@ -21,11 +21,11 @@
 #define COBJMACROS
 #define NONAMELESSUNION
 
+#include "initguid.h"
 #include "windows.h"
 #include "ole2.h"
 #include "ocidl.h"
 
-#include "initguid.h"
 #include "mimeole.h"
 
 #include <stdio.h>
@@ -130,6 +130,8 @@ static void test_CreateBody(void)
     ok(hr == S_FALSE, "ret %08x\n", hr);
     hr = IMimeBody_IsContentType(body, NULL, "mixed");
     ok(hr == S_OK, "ret %08x\n", hr);
+    hr = IMimeBody_IsType(body, IBT_EMPTY);
+    ok(hr == S_OK, "got %08x\n", hr);
 
     hr = IMimeBody_SetData(body, IET_8BIT, "text", "plain", &IID_IStream, in);
     ok(hr == S_OK, "ret %08x\n", hr);
@@ -147,6 +149,9 @@ static void test_CreateBody(void)
     ok(offsets.cbHeaderStart == 0, "got %d\n", offsets.cbHeaderStart);
     ok(offsets.cbBodyStart == 0, "got %d\n", offsets.cbBodyStart);
     ok(offsets.cbBodyEnd == 0, "got %d\n", offsets.cbBodyEnd);
+
+    hr = IMimeBody_IsType(body, IBT_EMPTY);
+    ok(hr == S_FALSE, "got %08x\n", hr);
 
     hr = MimeOleGetAllocator(&alloc);
     ok(hr == S_OK, "ret %08x\n", hr);
@@ -216,7 +221,6 @@ static void test_CreateMessage(void)
     ULONG count;
     FINDBODY find_struct;
     HCHARSET hcs;
-    INETCSETINFO csi;
 
     char text[] = "text";
     HBODY *body_list;
@@ -274,7 +278,10 @@ static void test_CreateMessage(void)
 
     hr = IMimeBody_GetCharset(body, &hcs);
     ok(hr == S_OK, "ret %08x\n", hr);
-    ok(hcs == NULL, "ret %p\n", hcs);
+    todo_wine
+    {
+        ok(hcs != NULL, "Expected non-NULL charset\n");
+    }
 
     IMimeBody_Release(body);
 
@@ -309,14 +316,17 @@ static void test_CreateMessage(void)
 
     hr = IMimeMessage_GetCharset(body, &hcs);
     ok(hr == S_OK, "ret %08x\n", hr);
-    ok(hcs == NULL, "ret %p\n", hcs);
-    hr = MimeOleGetCharsetInfo(hcs, &csi);
-    ok(hr == E_INVALIDARG, "ret %08x\n", hr);
+    todo_wine
+    {
+        ok(hcs != NULL, "Expected non-NULL charset\n");
+    }
 
     IMimeMessage_Release(msg);
 
     ref = IStream_AddRef(stream);
-    ok(ref == 2, "ref %d\n", ref);
+    ok(ref == 2 ||
+       broken(ref == 1), /* win95 */
+       "ref %d\n", ref);
     IStream_Release(stream);
 
     IStream_Release(stream);

@@ -1,18 +1,35 @@
+EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = wineboot.exe
 APPMODE   = -mconsole
-IMPORTS   = advapi32 kernel32 ntdll
-DELAYIMPORTS = shell32 shlwapi version user32
-EXTRALIBS = -luuid
+IMPORTS   = uuid advapi32 kernel32 ntdll
+DELAYIMPORTS = setupapi shell32 shlwapi version user32
 
 C_SRCS = \
 	shutdown.c \
 	wineboot.c
 
-RC_SRCS = wineboot.rc
+RC_SRCS = \
+	wineboot_Da.rc \
+	wineboot_De.rc \
+	wineboot_En.rc \
+	wineboot_Es.rc \
+	wineboot_Fr.rc \
+	wineboot_Ja.rc \
+	wineboot_Ko.rc \
+	wineboot_Lt.rc \
+	wineboot_Nl.rc \
+	wineboot_No.rc \
+	wineboot_Pl.rc \
+	wineboot_Pt.rc \
+	wineboot_Ro.rc \
+	wineboot_Ru.rc \
+	wineboot_Si.rc \
+	wineboot_Sv.rc \
+	wineboot_Zh.rc
 
 @MAKE_PROG_RULES@
 

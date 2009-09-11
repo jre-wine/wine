@@ -116,7 +116,7 @@ static void color_or_size_dsa_add (WrappedDsa* wdsa, const WCHAR* name,
 
 static int CALLBACK dsa_destroy_callback (LPVOID p, LPVOID pData)
 {
-    ThemeColorOrSize* item = (ThemeColorOrSize*)p;
+    ThemeColorOrSize* item = p;
     HeapFree (GetProcessHeap(), 0, item->name);
     HeapFree (GetProcessHeap(), 0, item->fancyName);
     return 1;
@@ -135,7 +135,7 @@ static void create_color_or_size_dsa (WrappedDsa* wdsa)
 
 static ThemeColorOrSize* color_or_size_dsa_get (WrappedDsa* wdsa, int index)
 {
-    return (ThemeColorOrSize*)DSA_GetItemPtr (wdsa->dsa, index);
+    return DSA_GetItemPtr (wdsa->dsa, index);
 }
 
 static int color_or_size_dsa_find (WrappedDsa* wdsa, const WCHAR* name)
@@ -163,7 +163,7 @@ static int themeFilesCount = 0;
 
 static int CALLBACK theme_dsa_destroy_callback (LPVOID p, LPVOID pData)
 {
-    ThemeFile* item = (ThemeFile*)p;
+    ThemeFile* item = p;
     HeapFree (GetProcessHeap(), 0, item->themeFileName);
     HeapFree (GetProcessHeap(), 0, item->fancyName);
     free_color_or_size_dsa (&item->colors);
@@ -302,7 +302,7 @@ static BOOL fill_theme_list (HWND comboTheme, HWND comboColor, HWND comboSize)
 
     for (i = 0; i < themeFilesCount; i++)
     {
-	ThemeFile* item = (ThemeFile*)DSA_GetItemPtr (themeFiles, i);
+        ThemeFile* item = DSA_GetItemPtr (themeFiles, i);
 	SendMessageW (comboTheme, CB_ADDSTRING, 0, 
 	    (LPARAM)item->fancyName);
     }
@@ -316,7 +316,7 @@ static BOOL fill_theme_list (HWND comboTheme, HWND comboColor, HWND comboSize)
 	BOOL found = FALSE;
 	for (i = 0; i < themeFilesCount; i++)
 	{
-	    theme = (ThemeFile*)DSA_GetItemPtr (themeFiles, i);
+            theme = DSA_GetItemPtr (themeFiles, i);
 	    if (lstrcmpiW (theme->themeFileName, currentTheme) == 0)
 	    {
 		found = TRUE;
@@ -332,8 +332,7 @@ static BOOL fill_theme_list (HWND comboTheme, HWND comboColor, HWND comboSize)
 	    myEnumThemeProc (NULL, currentTheme, currentTheme, 
 		currentTheme, NULL, NULL);
 	    themeIndex = themeFilesCount;
-	    theme = (ThemeFile*)DSA_GetItemPtr (themeFiles, 
-		themeFilesCount-1);
+            theme = DSA_GetItemPtr (themeFiles, themeFilesCount-1);
 	}
 	fill_color_size_combos (theme, comboColor, comboSize);
 	select_color_and_size (theme, currentColor, comboColor,
@@ -364,8 +363,7 @@ static BOOL update_color_and_size (int themeIndex, HWND comboColor,
 	WCHAR currentTheme[MAX_PATH];
 	WCHAR currentColor[MAX_PATH];
 	WCHAR currentSize[MAX_PATH];
-	ThemeFile* theme = 
-	    (ThemeFile*)DSA_GetItemPtr (themeFiles, themeIndex - 1);
+	ThemeFile* theme = DSA_GetItemPtr (themeFiles, themeIndex - 1);
     
 	fill_color_size_combos (theme, comboColor, comboSize);
       
@@ -399,8 +397,7 @@ static void do_apply_theme (int themeIndex, int colorIndex, int sizeIndex)
     }
     else
     {
-	ThemeFile* theme = 
-	    (ThemeFile*)DSA_GetItemPtr (themeFiles, themeIndex-1);
+        ThemeFile* theme = DSA_GetItemPtr (themeFiles, themeIndex-1);
 	const WCHAR* themeFileName = theme->themeFileName;
 	const WCHAR* colorName = NULL;
 	const WCHAR* sizeName = NULL;
@@ -554,7 +551,7 @@ static void set_color_from_theme(WCHAR *keyName, COLORREF color)
 
     keyNameSize = WideCharToMultiByte(CP_ACP, 0, keyName, -1, keyNameA, 0, NULL, NULL);
     keyNameA = HeapAlloc(GetProcessHeap(), 0, keyNameSize);
-    WideCharToMultiByte(CP_ACP, 0, keyName, -1, keyNameA, -1, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, keyName, -1, keyNameA, keyNameSize, NULL, NULL);
 
     for (i=0; i<sizeof(metrics)/sizeof(metrics[0]); i++)
     {
@@ -583,17 +580,17 @@ static void do_parse_theme(WCHAR *file)
     WINE_TRACE("%s\n", wine_dbgstr_w(file));
 
     GetPrivateProfileStringW(colorSect, NULL, NULL, keyName,
-                             MAX_PATH*sizeof(WCHAR), file);
+                             MAX_PATH, file);
 
     keyNamePtr = keyName;
     while (*keyNamePtr!=0) {
         GetPrivateProfileStringW(colorSect, keyNamePtr, NULL, keyNameValue,
-                                 MAX_PATH*sizeof(WCHAR), file);
+                                 MAX_PATH, file);
 
         keyNameValueSize = WideCharToMultiByte(CP_ACP, 0, keyNameValue, -1,
                                                keyNameValueA, 0, NULL, NULL);
         keyNameValueA = HeapAlloc(GetProcessHeap(), 0, keyNameValueSize);
-        WideCharToMultiByte(CP_ACP, 0, keyNameValue, -1, keyNameValueA, -1, NULL, NULL);
+        WideCharToMultiByte(CP_ACP, 0, keyNameValue, -1, keyNameValueA, keyNameValueSize, NULL, NULL);
 
         WINE_TRACE("parsing key: %s with value: %s\n",
                    wine_dbgstr_w(keyNamePtr), wine_dbgstr_w(keyNameValue));
@@ -645,7 +642,7 @@ static void on_theme_install(HWND dialog)
   ofn.nMaxFileTitle = sizeof(filetitle)/sizeof(filetitle[0]);
   ofn.lpstrInitialDir = NULL;
   ofn.lpstrTitle = title;
-  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+  ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLESIZING;
   ofn.nFileOffset = 0;
   ofn.nFileExtension = 0;
   ofn.lpstrDefExt = NULL;
@@ -734,19 +731,6 @@ static struct ShellFolderInfo asfiInfo[] = {
 static struct ShellFolderInfo *psfiSelected = NULL;
 
 #define NUM_ELEMS(x) (sizeof(x)/sizeof(*(x)))
-
-/* create a unicode string from a string in Unix locale */
-static WCHAR *strdupU2W(const char *unix_str)
-{
-    WCHAR *unicode_str;
-    int lenW;
-
-    lenW = MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, NULL, 0);
-    unicode_str = HeapAlloc(GetProcessHeap(), 0, lenW * sizeof(WCHAR));
-    if (unicode_str)
-        MultiByteToWideChar(CP_UNIXCP, 0, unix_str, -1, unicode_str, lenW);
-    return unicode_str;
-}
 
 static void init_shell_folder_listview_headers(HWND dialog) {
     LVCOLUMN listColumn;

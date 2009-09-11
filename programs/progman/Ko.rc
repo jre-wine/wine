@@ -20,6 +20,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "progman.h"
+
 /* Menu */
 
 MAIN_MENU MENU LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
@@ -66,14 +68,14 @@ POPUP "도움말(&H)" {
 /* Dialog `New' */
 
 DIALOG_NEW DIALOG 0, 0, 170, 65
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "새 작업"
 {
 RADIOBUTTON   "",                 PM_NEW_GROUP,    10, 15,  10, 15
-LTEXT         "풀그림 그룹(&G)",   PM_NEW_GROUP,    20, 18,  80, 15
+LTEXT         "풀그림 그룹(&G)",   -1,    20, 18,  80, 15
 RADIOBUTTON   "",                 PM_NEW_PROGRAM,  10, 35,  10, 15
-LTEXT         "풀그림(&P)", PM_NEW_PROGRAM,  20, 38,  80, 15
+LTEXT         "풀그림(&P)", -1,  20, 38,  80, 15
 DEFPUSHBUTTON "확인",          IDOK,           105,  5,  60, 15, WS_TABSTOP
 PUSHBUTTON    "취소",      IDCANCEL,       105, 25,  60, 15, WS_TABSTOP
 PUSHBUTTON    "도움말(&H)",        PM_HELP,        105, 45,  60, 15, WS_TABSTOP
@@ -82,13 +84,13 @@ PUSHBUTTON    "도움말(&H)",        PM_HELP,        105, 45,  60, 15, WS_TABSTOP
 /* Dialog `Move' */
 
  DIALOG_MOVE DIALOG 0, 0, 250, 65
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "풀그림 이동"
 {
-LTEXT         "풀그림 이동:",    IDIGNORE,            5,  5,  90, 15
+LTEXT         "풀그림 이동:",    -1,            5,  5,  90, 15
 LTEXT         "",                     PM_PROGRAM,         95,  5,  90, 15
-LTEXT         "대상 그룹:", IDIGNORE,            5, 13,  90, 15
+LTEXT         "대상 그룹:", -1,            5, 13,  90, 15
 LTEXT         "",                     PM_FROM_GROUP,      95, 13,  90, 15
 LTEXT         "목적 그룹(&T):",   PM_TO_GROUP_TXT,     5, 28, 140, 15
 COMBOBOX                              PM_TO_GROUP,         5, 38, 140, 50, WS_TABSTOP | CBS_DROPDOWNLIST
@@ -100,13 +102,13 @@ PUSHBUTTON    "도움말(&H)",            PM_HELP,           185, 45,  60, 15, WS_T
 /* Dialog `Copy' */
 
 DIALOG_COPY DIALOG 0, 0, 250, 65
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "풀그림 복사"
 {
-LTEXT         "풀그림 복사:",    IDIGNORE,            5,  5,  90, 15
+LTEXT         "풀그림 복사:",    -1,            5,  5,  90, 15
 LTEXT         "",                     PM_PROGRAM,         95,  5,  90, 15
-LTEXT         "대상 그룹:", IDIGNORE,            5, 13,  90, 15
+LTEXT         "대상 그룹:", -1,            5, 13,  90, 15
 LTEXT         "",                     PM_FROM_GROUP,      95, 13,  90, 15
 LTEXT         "목적 그룹(&T):",   PM_TO_GROUP_TXT,     5, 28, 140, 15
 COMBOBOX                              PM_TO_GROUP,         5, 38, 140, 50, WS_TABSTOP | CBS_DROPDOWNLIST
@@ -118,7 +120,7 @@ PUSHBUTTON    "도움말(&H)",            PM_HELP,           185, 45,  60, 15, WS_T
 /* Dialog `Group attributes' */
 
 DIALOG_GROUP DIALOG 0, 0, 230, 65
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "풀그림 그룹 속성"
 {
@@ -134,7 +136,7 @@ PUSHBUTTON    "도움말(&H)",          PM_HELP,             155, 45,  60, 15, WS_T
 /* Dialog `Program attributes' */
 
 DIALOG_PROGRAM DIALOG 0, 0, 250, 105
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "풀그림 속성"
 {
@@ -148,7 +150,7 @@ LTEXT         "단축키 지정(&K):",      PM_HOT_KEY_TXT,       05, 55,  60, 10
 EDITTEXT                                   PM_HOT_KEY,           80, 55,  90, 15, WS_TABSTOP
 ICON          "",                          PM_ICON,              20, 70
 CHECKBOX      "",                          PM_SYMBOL,            80, 75,  10, 10, WS_TABSTOP
-LTEXT         "실행시 최소화(&M)",       IDIGNORE,             95, 75,  75, 10
+LTEXT         "실행시 최소화(&M)",       -1,             95, 75,  75, 10
 DEFPUSHBUTTON "확인",                   IDOK,                185,  5,  60, 15, WS_TABSTOP
 PUSHBUTTON    "취소",               IDCANCEL,            185, 25,  60, 15, WS_TABSTOP
 PUSHBUTTON    "찾기(&B)...",               PM_BROWSE,           185, 45,  60, 15, WS_TABSTOP
@@ -159,7 +161,7 @@ PUSHBUTTON    "도움말(&H)",                 PM_HELP,             185, 85,  60, 1
 /* Dialog `Symbol' */
 
 DIALOG_SYMBOL DIALOG 0, 0, 200, 85
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "아이콘 바꾸기"
 {
@@ -177,14 +179,14 @@ PUSHBUTTON    "도움말(&H)",       PM_HELP,           135, 65,  60, 15, WS_TABSTO
 /* Dialog `Execute' */
 
 DIALOG_EXECUTE DIALOG 0, 0, 200, 85
-LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "풀그림 실행"
 {
-LTEXT     "명령 라인(&C):", IDIGNORE,   05, 15, 120, 10
+LTEXT     "명령 라인(&C):", -1,   05, 15, 120, 10
 EDITTEXT                               PM_COMMAND, 05, 25, 120, 15, WS_TABSTOP
 CHECKBOX      "",                      PM_SYMBOL,  05, 45,  10, 10, WS_TABSTOP
-LTEXT         "실행시 최소화(&M)",   IDIGNORE,   20, 45, 120, 10
+LTEXT         "실행시 최소화(&M)",   -1,   20, 45, 120, 10
 DEFPUSHBUTTON "확인",               IDOK,      135,  5,  60, 15, WS_TABSTOP
 PUSHBUTTON    "취소",           IDCANCEL,  135, 25,  60, 15, WS_TABSTOP
 PUSHBUTTON    "찾기(&B)...",          PM_BROWSE, 135, 45,  60, 15, WS_TABSTOP
@@ -193,7 +195,7 @@ PUSHBUTTON    "도움말(&H)",             PM_HELP,   135, 65,  60, 15, WS_TABSTOP
 
 /* Strings */
 
-STRINGTABLE DISCARDABLE LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+STRINGTABLE DISCARDABLE LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 {
 IDS_PROGRAM_MANAGER,		"풀그림 관리자"
 IDS_ERROR,			"에러"
@@ -219,25 +221,25 @@ IDS_SYMBOL_FILES,		"아이콘 파일"
 IDS_SYMBOLS_ICO,		"아이콘 (*.ico)"
 }
 
-STRINGTABLE DISCARDABLE LANGUAGE LANG_KOREAN, SUBLANG_NEUTRAL
+STRINGTABLE DISCARDABLE LANGUAGE LANG_KOREAN, SUBLANG_DEFAULT
 {
 IDS_LICENSE_CAPTION,            "라이센스"
 IDS_LICENSE,
-"This library is free software; you can redistribute it and/or \
+"This program is free software; you can redistribute it and/or \
 modify it under the terms of the GNU Lesser General Public \
 License as published by the Free Software Foundation; either \
 version 2.1 of the License, or (at your option) any later version.\n\
-This library is distributed in the hope that it will be useful, \
+This program is distributed in the hope that it will be useful, \
 but WITHOUT ANY WARRANTY; without even the implied warranty of \
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
 Lesser General Public License for more details.\n\
 You should have received a copy of the GNU Lesser General Public \
-License along with this library; if not, write to the Free Software \
+License along with this program; if not, write to the Free Software \
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA"
 
 IDS_WARRANTY_CAPTION, "보증 없음"
 IDS_WARRANTY,
-"This library is distributed in the hope that it will be useful, \
+"This program is distributed in the hope that it will be useful, \
 but WITHOUT ANY WARRANTY; without even the implied warranty of \
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU \
 Lesser General Public License for more details."

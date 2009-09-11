@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resources.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -29,8 +31,6 @@ SYSMENU MENU LOADONCALL MOVEABLE DISCARDABLE
  MENUITEM "Ma&ksimiraj", 61488
  MENUITEM SEPARATOR
  MENUITEM "&Zapri\tAlt-F4", 61536
- MENUITEM SEPARATOR
- MENUITEM "&Preklopi na ...\tCtrl-Esc", 61744
  MENUITEM SEPARATOR
  MENUITEM "&O Wine ...", 61761
 }
@@ -83,5 +83,3 @@ STRINGTABLE DISCARDABLE
     IDS_ERROR "Napaka"
     IDS_MDI_MOREWINDOWS "&Več oken ..."
 }
-
-#pragma code_page(default)

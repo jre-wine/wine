@@ -1,5 +1,5 @@
 /*
- * Copyright 2007 Jacek Caban for CodeWeavers
+ * Copyright 2007-2008 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,6 +31,7 @@
 #include "wine/unicode.h"
 
 #include "mshtml_private.h"
+#include "htmlevent.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
@@ -129,15 +130,15 @@ static nsresult NSAPI handle_keypress(nsIDOMEventListener *iface,
 static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
-    task_t *task;
+    nsIDOMHTMLElement *nsbody = NULL;
 
     TRACE("(%p)\n", This);
 
     if(!This->doc)
         return NS_OK;
 
+    update_nsdocument(This->doc);
     connect_scripts(This->doc);
-    setup_nswindow(This->doc->window);
 
     if(This->editor_controller) {
         nsIController_Release(This->editor_controller);
@@ -147,43 +148,53 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     if(This->doc->usermode == EDITMODE)
         handle_edit_load(This->doc);
 
-    task = heap_alloc(sizeof(task_t));
+    if(!This->doc->nsdoc) {
+        ERR("NULL nsdoc\n");
+        return NS_ERROR_FAILURE;
+    }
 
-    task->doc = This->doc;
-    task->task_id = TASK_PARSECOMPLETE;
-    task->next = NULL;
-
-    /*
-     * This should be done in the worker thread that parses HTML,
-     * but we don't have such thread (Gecko parses HTML for us).
-     */
-    push_task(task);
+    nsIDOMHTMLDocument_GetBody(This->doc->nsdoc, &nsbody);
+    if(nsbody) {
+        fire_event(This->doc, EVENTID_LOAD, (nsIDOMNode*)nsbody);
+        nsIDOMHTMLElement_Release(nsbody);
+    }
 
     return NS_OK;
 }
 
-static nsresult NSAPI handle_node_insert(nsIDOMEventListener *iface, nsIDOMEvent *event)
+static nsresult NSAPI handle_htmlevent(nsIDOMEventListener *iface, nsIDOMEvent *event)
 {
     NSContainer *This = NSEVENTLIST_THIS(iface)->This;
-    nsIDOMHTMLScriptElement *script;
-    nsIDOMEventTarget *target;
+    const PRUnichar *type;
+    nsIDOMEventTarget *event_target;
+    nsIDOMNode *nsnode;
+    nsAString type_str;
+    eventid_t eid;
     nsresult nsres;
 
-    TRACE("(%p %p)\n", This, event);
+    nsAString_Init(&type_str, NULL);
+    nsIDOMEvent_GetType(event, &type_str);
+    nsAString_GetData(&type_str, &type);
+    eid = str_to_eid(type);
+    nsAString_Finish(&type_str);
 
-    nsres = nsIDOMEvent_GetTarget(event, &target);
+    nsres = nsIDOMEvent_GetTarget(event, &event_target);
+    if(NS_FAILED(nsres) || !event_target) {
+        ERR("GetEventTarget failed: %08x\n", nsres);
+        return NS_OK;
+    }
+
+    nsres = nsIDOMEventTarget_QueryInterface(event_target, &IID_nsIDOMNode, (void**)&nsnode);
+    nsIDOMEventTarget_Release(event_target);
     if(NS_FAILED(nsres)) {
-        ERR("GetTarget failed: %08x\n", nsres);
-        return nsres;
+        ERR("Could not get nsIDOMNode: %08x\n", nsres);
+        return NS_OK;
     }
 
-    nsres = nsISupports_QueryInterface(target, &IID_nsIDOMHTMLScriptElement, (void**)&script);
-    if(SUCCEEDED(nsres)) {
-        doc_insert_script(This->doc, script);
-        nsIDOMHTMLScriptElement_Release(script);
-    }
+    fire_event(This->doc, eid, nsnode);
 
-    nsIDOMEventTarget_Release(target);
+    nsIDOMNode_Release(nsnode);
+
     return NS_OK;
 }
 
@@ -201,7 +212,7 @@ static const nsIDOMEventListenerVtbl blur_vtbl =      EVENTLISTENER_VTBL(handle_
 static const nsIDOMEventListenerVtbl focus_vtbl =     EVENTLISTENER_VTBL(handle_focus);
 static const nsIDOMEventListenerVtbl keypress_vtbl =  EVENTLISTENER_VTBL(handle_keypress);
 static const nsIDOMEventListenerVtbl load_vtbl =      EVENTLISTENER_VTBL(handle_load);
-static const nsIDOMEventListenerVtbl node_insert_vtbl = EVENTLISTENER_VTBL(handle_node_insert);
+static const nsIDOMEventListenerVtbl htmlevent_vtbl = EVENTLISTENER_VTBL(handle_htmlevent);
 
 static void init_event(nsIDOMEventTarget *target, const PRUnichar *type,
         nsIDOMEventListener *listener, BOOL capture)
@@ -224,6 +235,29 @@ static void init_listener(nsEventListener *This, NSContainer *container,
     This->This = container;
 }
 
+void add_nsevent_listener(NSContainer *container, LPCWSTR type)
+{
+    nsIDOMWindow *dom_window;
+    nsIDOMEventTarget *target;
+    nsresult nsres;
+
+    nsres = nsIWebBrowser_GetContentDOMWindow(container->webbrowser, &dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("GetContentDOMWindow failed: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIDOMWindow_QueryInterface(dom_window, &IID_nsIDOMEventTarget, (void**)&target);
+    nsIDOMWindow_Release(dom_window);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMEventTarget interface: %08x\n", nsres);
+        return;
+    }
+
+    init_event(target, type, NSEVENTLIST(&container->htmlevent_listener), TRUE);
+    nsIDOMEventTarget_Release(target);
+}
+
 void init_nsevents(NSContainer *This)
 {
     nsIDOMWindow *dom_window;
@@ -234,14 +268,12 @@ void init_nsevents(NSContainer *This)
     static const PRUnichar wsz_focus[]     = {'f','o','c','u','s',0};
     static const PRUnichar wsz_keypress[]  = {'k','e','y','p','r','e','s','s',0};
     static const PRUnichar wsz_load[]      = {'l','o','a','d',0};
-    static const PRUnichar DOMNodeInsertedW[] =
-        {'D','O','M','N','o','d','e','I','n','s','e','r','t','e','d',0};
 
     init_listener(&This->blur_listener,        This, &blur_vtbl);
     init_listener(&This->focus_listener,       This, &focus_vtbl);
     init_listener(&This->keypress_listener,    This, &keypress_vtbl);
     init_listener(&This->load_listener,        This, &load_vtbl);
-    init_listener(&This->node_insert_listener, This, &node_insert_vtbl);
+    init_listener(&This->htmlevent_listener,   This, &htmlevent_vtbl);
 
     nsres = nsIWebBrowser_GetContentDOMWindow(This->webbrowser, &dom_window);
     if(NS_FAILED(nsres)) {
@@ -260,7 +292,6 @@ void init_nsevents(NSContainer *This)
     init_event(target, wsz_focus,      NSEVENTLIST(&This->focus_listener),       TRUE);
     init_event(target, wsz_keypress,   NSEVENTLIST(&This->keypress_listener),    FALSE);
     init_event(target, wsz_load,       NSEVENTLIST(&This->load_listener),        TRUE);
-    init_event(target, DOMNodeInsertedW,NSEVENTLIST(&This->node_insert_listener),TRUE);
 
     nsIDOMEventTarget_Release(target);
 }

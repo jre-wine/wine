@@ -102,13 +102,11 @@ static const struct fd_ops process_fd_ops =
 struct startup_info
 {
     struct object       obj;          /* object header */
-    obj_handle_t        hstdin;       /* handle for stdin */
-    obj_handle_t        hstdout;      /* handle for stdout */
-    obj_handle_t        hstderr;      /* handle for stderr */
     struct file        *exe_file;     /* file handle for main exe */
     struct process     *process;      /* created process */
-    data_size_t         data_size;    /* size of startup data */
-    void               *data;         /* data for startup info */
+    data_size_t         info_size;    /* size of startup info */
+    data_size_t         data_size;    /* size of whole startup data */
+    startup_info_t     *data;         /* data for startup info */
 };
 
 static void startup_info_dump( struct object *obj, int verbose );
@@ -331,8 +329,8 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
     process->startup_info    = NULL;
     process->idle_event      = NULL;
     process->queue           = NULL;
-    process->peb             = NULL;
-    process->ldt_copy        = NULL;
+    process->peb             = 0;
+    process->ldt_copy        = 0;
     process->winstation      = 0;
     process->desktop         = 0;
     process->token           = NULL;
@@ -377,7 +375,7 @@ struct thread *create_process( int fd, struct thread *parent_thread, int inherit
         file_set_error();
         goto error;
     }
-    if (send_client_fd( process, request_pipe[1], 0 ) == -1)
+    if (send_client_fd( process, request_pipe[1], SERVER_PROTOCOL_VERSION ) == -1)
     {
         close( request_pipe[0] );
         close( request_pipe[1] );
@@ -459,18 +457,7 @@ static void process_poll_event( struct fd *fd, int event )
     struct process *process = get_fd_user( fd );
     assert( process->obj.ops == &process_ops );
 
-    if (event & (POLLERR | POLLHUP))
-    {
-        release_object( process->msg_fd );
-        process->msg_fd = NULL;
-        if (process->sigkill_timeout)  /* already waiting for it to die */
-        {
-            remove_timeout_user( process->sigkill_timeout );
-            process->sigkill_timeout = NULL;
-            process_died( process );
-        }
-        else kill_process( process, 0 );
-    }
+    if (event & (POLLERR | POLLHUP)) kill_process( process, 0 );
     else if (event & POLLIN) receive_fd( process );
 }
 
@@ -488,8 +475,8 @@ static void startup_info_dump( struct object *obj, int verbose )
     struct startup_info *info = (struct startup_info *)obj;
     assert( obj->ops == &startup_info_ops );
 
-    fprintf( stderr, "Startup info in=%p out=%p err=%p\n",
-             info->hstdin, info->hstdout, info->hstderr );
+    fprintf( stderr, "Startup info in=%04x out=%04x err=%04x\n",
+             info->data->hstdin, info->data->hstdout, info->data->hstderr );
 }
 
 static int startup_info_signaled( struct object *obj, struct thread *thread )
@@ -516,7 +503,7 @@ struct process *get_process_from_handle( obj_handle_t handle, unsigned int acces
 }
 
 /* find a dll from its base address */
-static inline struct process_dll *find_process_dll( struct process *process, void *base )
+static inline struct process_dll *find_process_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll;
 
@@ -529,7 +516,8 @@ static inline struct process_dll *find_process_dll( struct process *process, voi
 
 /* add a dll to a process list */
 static struct process_dll *process_load_dll( struct process *process, struct file *file,
-                                             void *base, const WCHAR *filename, data_size_t name_len )
+                                             mod_handle_t base, const WCHAR *filename,
+                                             data_size_t name_len )
 {
     struct process_dll *dll;
 
@@ -558,7 +546,7 @@ static struct process_dll *process_load_dll( struct process *process, struct fil
 }
 
 /* remove a dll from a process list */
-static void process_unload_dll( struct process *process, void *base )
+static void process_unload_dll( struct process *process, mod_handle_t base )
 {
     struct process_dll *dll = find_process_dll( process, base );
 
@@ -568,7 +556,7 @@ static void process_unload_dll( struct process *process, void *base )
         free( dll->filename );
         list_remove( &dll->entry );
         free( dll );
-        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, base );
+        generate_debug_event( current, UNLOAD_DLL_DEBUG_EVENT, &base );
     }
     else set_error( STATUS_INVALID_PARAMETER );
 }
@@ -736,6 +724,20 @@ void resume_process( struct process *process )
 /* kill a process on the spot */
 void kill_process( struct process *process, int violent_death )
 {
+    if (!violent_death && process->msg_fd)  /* normal termination on pipe close */
+    {
+        release_object( process->msg_fd );
+        process->msg_fd = NULL;
+    }
+
+    if (process->sigkill_timeout)  /* already waiting for it to die */
+    {
+        remove_timeout_user( process->sigkill_timeout );
+        process->sigkill_timeout = NULL;
+        process_died( process );
+        return;
+    }
+
     if (violent_death) terminate_process( process, NULL, 1 );
     else
     {
@@ -825,7 +827,7 @@ int set_process_debug_flag( struct process *process, int flag )
     char data = (flag != 0);
 
     /* BeingDebugged flag is the byte at offset 2 in the PEB */
-    return write_process_memory( process, (char *)process->peb + 2, 1, &data );
+    return write_process_memory( process, process->peb + 2, 1, &data );
 }
 
 /* take a snapshot of currently running processes */
@@ -858,30 +860,6 @@ struct process_snapshot *process_snap( int *count )
     return snapshot;
 }
 
-/* take a snapshot of the modules of a process */
-struct module_snapshot *module_snap( struct process *process, int *count )
-{
-    struct module_snapshot *snapshot, *ptr;
-    struct process_dll *dll;
-    int total = 0;
-
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry ) total++;
-    if (!(snapshot = mem_alloc( sizeof(*snapshot) * total ))) return NULL;
-
-    ptr = snapshot;
-    LIST_FOR_EACH_ENTRY( dll, &process->dlls, struct process_dll, entry )
-    {
-        ptr->base     = dll->base;
-        ptr->size     = dll->size;
-        ptr->namelen  = dll->namelen;
-        ptr->filename = memdup( dll->filename, dll->namelen );
-        ptr++;
-    }
-    *count = total;
-    return snapshot;
-}
-
-
 /* create a new process */
 DECL_HANDLER(new_process)
 {
@@ -911,19 +889,46 @@ DECL_HANDLER(new_process)
 
     /* build the startup info for a new process */
     if (!(info = alloc_object( &startup_info_ops ))) return;
-    info->hstdin       = req->hstdin;
-    info->hstdout      = req->hstdout;
-    info->hstderr      = req->hstderr;
-    info->exe_file     = NULL;
-    info->process      = NULL;
-    info->data_size    = get_req_data_size();
-    info->data         = NULL;
+    info->exe_file = NULL;
+    info->process  = NULL;
+    info->data     = NULL;
 
     if (req->exe_file &&
         !(info->exe_file = get_file_obj( current->process, req->exe_file, FILE_READ_DATA )))
         goto done;
 
-    if (!(info->data = memdup( get_req_data(), info->data_size ))) goto done;
+    info->data_size = get_req_data_size();
+    info->info_size = min( req->info_size, info->data_size );
+
+    if (req->info_size < sizeof(*info->data))
+    {
+        /* make sure we have a full startup_info_t structure */
+        data_size_t env_size = info->data_size - info->info_size;
+        data_size_t info_size = min( req->info_size, FIELD_OFFSET( startup_info_t, curdir_len ));
+
+        if (!(info->data = mem_alloc( sizeof(*info->data) + env_size ))) goto done;
+        memcpy( info->data, get_req_data(), info_size );
+        memset( (char *)info->data + info_size, 0, sizeof(*info->data) - info_size );
+        memcpy( info->data + 1, (const char *)get_req_data() + req->info_size, env_size );
+        info->info_size = sizeof(startup_info_t);
+        info->data_size = info->info_size + env_size;
+    }
+    else
+    {
+        data_size_t pos = sizeof(*info->data);
+
+        if (!(info->data = memdup( get_req_data(), info->data_size ))) goto done;
+#define FIXUP_LEN(len) do { (len) = min( (len), info->info_size - pos ); pos += (len); } while(0)
+        FIXUP_LEN( info->data->curdir_len );
+        FIXUP_LEN( info->data->dllpath_len );
+        FIXUP_LEN( info->data->imagepath_len );
+        FIXUP_LEN( info->data->cmdline_len );
+        FIXUP_LEN( info->data->title_len );
+        FIXUP_LEN( info->data->desktop_len );
+        FIXUP_LEN( info->data->shellinfo_len );
+        FIXUP_LEN( info->data->runtime_len );
+#undef FIXUP_LEN
+    }
 
     if (!(thread = create_process( socket_fd, current, req->inherit_all ))) goto done;
     process = thread->process;
@@ -943,17 +948,17 @@ DECL_HANDLER(new_process)
          * like if hConOut and hConIn are console handles, then they should be on the same
          * physical console
          */
-        inherit_console( current, process, req->inherit_all ? req->hstdin : 0 );
+        inherit_console( current, process, req->inherit_all ? info->data->hstdin : 0 );
     }
 
     if (!req->inherit_all && !(req->create_flags & CREATE_NEW_CONSOLE))
     {
-        info->hstdin  = duplicate_handle( parent, req->hstdin, process,
-                                          0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
-        info->hstdout = duplicate_handle( parent, req->hstdout, process,
-                                          0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
-        info->hstderr = duplicate_handle( parent, req->hstderr, process,
-                                          0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
+        info->data->hstdin  = duplicate_handle( parent, info->data->hstdin, process,
+                                                0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
+        info->data->hstdout = duplicate_handle( parent, info->data->hstdout, process,
+                                                0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
+        info->data->hstderr = duplicate_handle( parent, info->data->hstderr, process,
+                                                0, OBJ_INHERIT, DUPLICATE_SAME_ACCESS );
         /* some handles above may have been invalid; this is not an error */
         if (get_error() == STATUS_INVALID_HANDLE ||
             get_error() == STATUS_OBJECT_TYPE_MISMATCH) clear_error();
@@ -1005,11 +1010,8 @@ DECL_HANDLER(get_startup_info)
     if (info->exe_file &&
         !(reply->exe_file = alloc_handle( process, info->exe_file, GENERIC_READ, 0 ))) return;
 
-    reply->hstdin  = info->hstdin;
-    reply->hstdout = info->hstdout;
-    reply->hstderr = info->hstderr;
-
     /* we return the data directly without making a copy so this can only be called once */
+    reply->info_size = info->info_size;
     size = info->data_size;
     if (size > get_reply_max_size()) size = get_reply_max_size();
     set_reply_data_ptr( info->data, size );
@@ -1037,6 +1039,8 @@ DECL_HANDLER(init_process_done)
     /* main exe is the first in the dll list */
     list_remove( &dll->entry );
     list_add_head( &process->dlls, &dll->entry );
+
+    process->ldt_copy = req->ldt_copy;
 
     generate_startup_debug_events( process, req->entry );
     set_process_startup_state( process, STARTUP_DONE );
@@ -1086,6 +1090,7 @@ DECL_HANDLER(get_process_info)
         reply->peb              = process->peb;
         reply->start_time       = process->start_time;
         reply->end_time         = process->end_time;
+        reply->cpu              = process->cpu;
         release_object( process );
     }
 }
@@ -1186,7 +1191,7 @@ DECL_HANDLER(get_dll_info)
         if (dll)
         {
             reply->size = dll->size;
-            reply->entry_point = NULL; /* FIXME */
+            reply->entry_point = 0; /* FIXME */
             reply->filename_len = dll->namelen;
             if (dll->filename)
             {

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 LANGUAGE LANG_DUTCH, SUBLANG_NEUTRAL
 
 MAIN_MENU MENU
@@ -49,15 +51,16 @@ POPUP "Be&werken" {
   MENUITEM "&Lettertype instellen...",   CMD_FONT
  }
 POPUP "&Zoeken" {
-  MENUITEM "&Zoeken...\tCtrl+Z",       CMD_SEARCH
-  MENUITEM "&Volgende zoeken\tF3",  CMD_SEARCH_NEXT
+  MENUITEM "&Zoeken...\tCtrl+Z",    CMD_SEARCH
+  MENUITEM "V&olgende zoeken\tF3",  CMD_SEARCH_NEXT
+  MENUITEM "&Vervangen...\tCtrl+H", CMD_REPLACE
  }
 POPUP "&Help" {
   MENUITEM "&Help-onderwerpen",  CMD_HELP_CONTENTS
   MENUITEM "&Zoeken...",         CMD_HELP_SEARCH
   MENUITEM "&Hulp bij Help",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "&About Notepad...", CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "&Over Notepad", CMD_HELP_ABOUT_NOTEPAD
  }
 }
 
@@ -88,6 +91,14 @@ PUSHBUTTON    "Annuleren", IDCANCEL,               180, 21, 40, 15, WS_TABSTOP
 PUSHBUTTON    "&Help",     IDHELP,               180, 39, 40, 15, WS_TABSTOP
 }
 
+IDD_OFN_TEMPLATE  DIALOG  DISCARDABLE 50,50,300,15
+STYLE DS_3DLOOK | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_BORDER
+FONT 8, "MS Shell Dlg"
+BEGIN
+  LTEXT "Codering:", -1, 5,0, 50,12
+  COMBOBOX IDC_OFN_ENCCOMBO, 53,0, 156,48, WS_CHILD | WS_VSCROLL | CBS_DROPDOWNLIST
+END
+
 STRINGTABLE DISCARDABLE
 {
 STRING_PAGESETUP_HEADERVALUE,   "&f"
@@ -113,5 +124,15 @@ STRING_NOTSAVED,                                "Het bestand '%s'\nis gewijzigd\
 Wilt u de wijzigingen opslaan?"
 STRING_NOTFOUND,                                "'%s' kan niet worden gevonden."
 STRING_OUT_OF_MEMORY,                           "Onvoldoende geheugen. \
-\nSluit een of meer applicaties om de hoeveelheid \nbeschikbaar geheugen te vergroten."
+\nSluit een of meer applicaties om de hoeveelheid\nbeschikbaar geheugen te vergroten."
+
+STRING_UNICODE_LE,     "Unicode (UTF-16)"
+STRING_UNICODE_BE,     "Unicode (UTF-16 big-endian)"
+
+STRING_LOSS_OF_UNICODE_CHARACTERS,         "%s\n\
+Dit bestand bevat Unicode tekens welke verloren zullen gaan\n\
+als dit bestand wordt opgeslagen in de %s codering.\n\
+Om deze tekens te behouden, klikt u op Annuleren en selecteert\n\
+daarna een van de Unicode-opties in de Codering keuzelijst.\n\
+Wilt u doorgaan?"
 }

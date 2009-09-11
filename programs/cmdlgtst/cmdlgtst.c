@@ -288,11 +288,11 @@ static void paintMainWindow(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lPar
 	/* Commence painting! */
 
 	BeginPaint(hWnd, &ps);
-	GetClientRect(hWnd, (LPRECT) &rect);
+	GetClientRect(hWnd, &rect);
 
-	pen = (HPEN) SelectObject(ps.hdc, CreatePen(0, 0, fgColor));
-	brush = (HBRUSH) SelectObject(ps.hdc, CreateSolidBrush(bgColor));
-	font = (HFONT) SelectObject(ps.hdc, CreateFontIndirect(&cf_lf));
+	pen = SelectObject(ps.hdc, CreatePen(0, 0, fgColor));
+	brush = SelectObject(ps.hdc, CreateSolidBrush(bgColor));
+	font = SelectObject(ps.hdc, CreateFontIndirect(&cf_lf));
 
 	/*
 	 * Ideally, we'd only need to draw the exposed bit.
@@ -304,9 +304,9 @@ static void paintMainWindow(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lPar
 
 	/* now draw a couple of lines, just for giggles. */
 
-	MoveToEx(ps.hdc, rect.left, rect.top, (POINT *) 0);
+	MoveToEx(ps.hdc, rect.left, rect.top, NULL);
 	LineTo(ps.hdc, rect.right, rect.bottom);
-	MoveToEx(ps.hdc, rect.left, rect.bottom, (POINT *) 0);
+	MoveToEx(ps.hdc, rect.left, rect.bottom, NULL);
 	LineTo(ps.hdc, rect.right, rect.top);
 
 	/* draw some text */
@@ -324,11 +324,11 @@ static void paintMainWindow(HWND hWnd, UINT iMessage, WPARAM wParam, LPARAM lPar
 	 * and delete the newly created objects.
 	 */
 
-	pen = (HPEN) SelectObject(ps.hdc, pen);
+	pen = SelectObject(ps.hdc, pen);
 	DeleteObject(pen);
-	brush = (HBRUSH) SelectObject(ps.hdc, brush);
+	brush = SelectObject(ps.hdc, brush);
 	DeleteObject(brush);
-	font = (HFONT) SelectObject(ps.hdc, font);
+	font = SelectObject(ps.hdc, font);
 	DeleteObject(font);
 
 	EndPaint(hWnd, &ps);
@@ -367,8 +367,8 @@ static void mw_ColorSetup(HWND hWnd)
 	if(ChooseColor(&cc)) {
 		RECT rect;
 
-		GetClientRect(hWnd, (LPRECT) &rect);
-		InvalidateRect(hWnd, (LPRECT) &rect, FALSE);
+		GetClientRect(hWnd, &rect);
+		InvalidateRect(hWnd, &rect, FALSE);
 		bgColor = cc.rgbResult;
 	}
 	else mw_checkError(hWnd, FALSE);
@@ -378,8 +378,8 @@ static void mw_FontSetup(HWND hWnd)
 {
 	if(ChooseFont(&cf)) {
 		RECT rect;
-		GetClientRect(hWnd, (LPRECT) &rect);
-		InvalidateRect(hWnd, (LPRECT) &rect, FALSE);
+		GetClientRect(hWnd, &rect);
+		InvalidateRect(hWnd, &rect, FALSE);
 		txtColor = cf.rgbColors;
 	}
 	else mw_checkError(hWnd, FALSE);
@@ -405,8 +405,8 @@ static void mw_OpenSetup(HWND hWnd)
 {
 	if(GetOpenFileName(&ofn)) {
 		RECT rect;
-		GetClientRect(hWnd, (LPRECT) &rect);
-		InvalidateRect(hWnd, (LPRECT) &rect, FALSE);
+		GetClientRect(hWnd, &rect);
+		InvalidateRect(hWnd, &rect, FALSE);
 	}
 	else mw_checkError(hWnd,FALSE);
 }
@@ -415,8 +415,8 @@ static void mw_SaveSetup(HWND hWnd)
 {
 	if(GetSaveFileName(&ofn)) {
 		RECT rect;
-		GetClientRect(hWnd, (LPRECT) &rect);
-		InvalidateRect(hWnd, (LPRECT) &rect, FALSE);
+		GetClientRect(hWnd, &rect);
+		InvalidateRect(hWnd, &rect, FALSE);
 	}
 	else mw_checkError(hWnd,FALSE);
 }
@@ -885,8 +885,8 @@ static LRESULT CALLBACK EXPORT mainWindowDispatcher(
 	else switch(uMsg) {
 	case WM_CREATE:
 			/*
-			 * this is always the first message...at least as far as
-			 * we are concerned.
+			 * this is always the first message... at least as far
+			 * as we are concerned.
 			 */
 		mwi_InitAll(hWnd);
 		break;
@@ -999,7 +999,7 @@ static int registerMainWindowClass(HINSTANCE hInstance)
 #endif
 	wndClass.hIcon         = 0;
 	wndClass.hCursor       = 0;
-	wndClass.hbrBackground = (HBRUSH) GetStockObject(WHITE_BRUSH);
+	wndClass.hbrBackground = GetStockObject(WHITE_BRUSH);
 	wndClass.lpszMenuName  = menuName;
 	wndClass.lpszClassName = className;
 

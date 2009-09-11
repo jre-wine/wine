@@ -19,22 +19,30 @@
  */
 #ifndef __WINE_SYS_TIMEB_H
 #define __WINE_SYS_TIMEB_H
-#ifndef __WINE_USE_MSVCRT
-#define __WINE_USE_MSVCRT
-#endif
+
+#include <crtdefs.h>
 
 #include <pshpack8.h>
-
-#ifndef _TIME_T_DEFINED
-typedef long time_t;
-#define _TIME_T_DEFINED
-#endif
 
 #ifndef _TIMEB_DEFINED
 #define _TIMEB_DEFINED
 struct _timeb
 {
     time_t time;
+    unsigned short millitm;
+    short          timezone;
+    short          dstflag;
+};
+struct __timeb32
+{
+    __time32_t     time;
+    unsigned short millitm;
+    short          timezone;
+    short          dstflag;
+};
+struct __timeb64
+{
+    __time64_t     time;
     unsigned short millitm;
     short          timezone;
     short          dstflag;
@@ -46,12 +54,18 @@ struct _timeb
 extern "C" {
 #endif
 
-void        _ftime(struct _timeb*);
+void __cdecl _ftime32(struct __timeb32*);
+void __cdecl _ftime64(struct __timeb64*);
 
 #ifdef __cplusplus
 }
 #endif
 
+#ifdef _USE_32BIT_TIME_T
+static inline void __cdecl _ftime(struct _timeb *tb) { return _ftime32((struct __timeb32*)tb); }
+#else
+static inline void __cdecl _ftime(struct _timeb *tb) { return _ftime64((struct __timeb64*)tb); }
+#endif
 
 #define timeb _timeb
 

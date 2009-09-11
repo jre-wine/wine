@@ -32,8 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "windef.h"
-#include "winbase.h"
 #include "build.h"
 
 int current_line = 0;
@@ -67,7 +65,6 @@ static const char * const FlagNames[] =
     "noname",      /* FLAG_NONAME */
     "ret16",       /* FLAG_RET16 */
     "ret64",       /* FLAG_RET64 */
-    "i386",        /* FLAG_I386 */
     "register",    /* FLAG_REGISTER */
     "private",     /* FLAG_PRIVATE */
     "ordinal",     /* FLAG_ORDINAL */
@@ -147,13 +144,17 @@ static const char * GetToken( int allow_eol )
 
 static ORDDEF *add_entry_point( DLLSPEC *spec )
 {
+    ORDDEF *ret;
+
     if (spec->nb_entry_points == spec->alloc_entry_points)
     {
         spec->alloc_entry_points += 128;
         spec->entry_points = xrealloc( spec->entry_points,
                                        spec->alloc_entry_points * sizeof(*spec->entry_points) );
     }
-    return &spec->entry_points[spec->nb_entry_points++];
+    ret = &spec->entry_points[spec->nb_entry_points++];
+    memset( ret, 0, sizeof(*ret) );
+    return ret;
 }
 
 /*******************************************************************
@@ -378,7 +379,7 @@ static int parse_spec_stub( ORDDEF *odp, DLLSPEC *spec )
 {
     odp->u.func.arg_types[0] = '\0';
     odp->link_name = xstrdup("");
-    odp->flags |= FLAG_I386;  /* don't bother generating stubs for Winelib */
+    odp->flags |= FLAG_CPU(CPU_x86) | FLAG_CPU(CPU_x86_64); /* don't bother generating stubs for Winelib */
     return 1;
 }
 
@@ -428,14 +429,45 @@ static const char *parse_spec_flags( ORDDEF *odp )
     do
     {
         if (!(token = GetToken(0))) break;
-        for (i = 0; FlagNames[i]; i++)
-            if (!strcmp( FlagNames[i], token )) break;
-        if (!FlagNames[i])
+        if (!strncmp( token, "arch=", 5))
         {
-            error( "Unknown flag '%s'\n", token );
-            return NULL;
+            char *args = xstrdup( token + 5 );
+            char *cpu_name = strtok( args, "," );
+            while (cpu_name)
+            {
+                if (!strcmp( cpu_name, "win32" ))
+                    odp->flags |= FLAG_CPU_WIN32;
+                else if (!strcmp( cpu_name, "win64" ))
+                    odp->flags |= FLAG_CPU_WIN64;
+                else
+                {
+                    enum target_cpu cpu = get_cpu_from_name( cpu_name );
+                    if (cpu == -1)
+                    {
+                        error( "Unknown architecture '%s'\n", cpu_name );
+                        return NULL;
+                    }
+                    odp->flags |= FLAG_CPU( cpu );
+                }
+                cpu_name = strtok( NULL, "," );
+            }
+            free( args );
         }
-        odp->flags |= 1 << i;
+        else if (!strcmp( token, "i386" ))  /* backwards compatibility */
+        {
+            odp->flags |= FLAG_CPU(CPU_x86);
+        }
+        else
+        {
+            for (i = 0; FlagNames[i]; i++)
+                if (!strcmp( FlagNames[i], token )) break;
+            if (!FlagNames[i])
+            {
+                error( "Unknown flag '%s'\n", token );
+                return NULL;
+            }
+            odp->flags |= 1 << i;
+        }
         token = GetToken(0);
     } while (token && *token == '-');
 
@@ -452,9 +484,7 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
 {
     const char *token;
     size_t len;
-
     ORDDEF *odp = add_entry_point( spec );
-    memset( odp, 0, sizeof(*odp) );
 
     if (!(token = GetToken(0))) goto error;
 
@@ -506,9 +536,9 @@ static int parse_spec_ordinal( int ordinal, DLLSPEC *spec )
         assert( 0 );
     }
 
-    if ((target_cpu != CPU_x86) && (odp->flags & FLAG_I386))
+    if ((odp->flags & FLAG_CPU_MASK) && !(odp->flags & FLAG_CPU(target_cpu)))
     {
-        /* ignore this entry point on non-Intel archs */
+        /* ignore this entry point */
         spec->nb_entry_points--;
         return 1;
     }
@@ -701,6 +731,39 @@ static void assign_ordinals( DLLSPEC *spec )
 
 
 /*******************************************************************
+ *         add_16bit_exports
+ *
+ * Add the necessary exports to the 32-bit counterpart of a 16-bit module.
+ */
+void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 )
+{
+    ORDDEF *odp;
+
+    /* add an export for the NE module */
+
+    odp = add_entry_point( spec32 );
+    odp->type = TYPE_EXTERN;
+    odp->name = xstrdup( "__wine_spec_dos_header" );
+    odp->lineno = 0;
+    odp->ordinal = 1;
+    odp->link_name = xstrdup( ".L__wine_spec_dos_header" );
+
+    if (spec16->main_module)
+    {
+        odp = add_entry_point( spec32 );
+        odp->type = TYPE_EXTERN;
+        odp->name = xstrdup( "__wine_spec_main_module" );
+        odp->lineno = 0;
+        odp->ordinal = 2;
+        odp->link_name = xstrdup( ".L__wine_spec_main_module" );
+    }
+
+    assign_names( spec32 );
+    assign_ordinals( spec32 );
+}
+
+
+/*******************************************************************
  *         parse_spec_file
  *
  * Parse a .spec file.
@@ -821,9 +884,7 @@ static int parse_def_export( char *name, DLLSPEC *spec )
 {
     int i, args;
     const char *token = GetToken(1);
-
     ORDDEF *odp = add_entry_point( spec );
-    memset( odp, 0, sizeof(*odp) );
 
     odp->lineno = current_line;
     odp->ordinal = -1;

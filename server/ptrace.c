@@ -313,8 +313,8 @@ static int suspend_for_ptrace( struct thread *thread )
     return 0;
 }
 
-/* read an int from a thread address space */
-static int read_thread_int( struct thread *thread, int *addr, int *data )
+/* read a long from a thread address space */
+static long read_thread_long( struct thread *thread, long *addr, long *data )
 {
     errno = 0;
     *data = ptrace( PTRACE_PEEKDATA, get_ptrace_pid(thread), (caddr_t)addr, 0 );
@@ -326,13 +326,13 @@ static int read_thread_int( struct thread *thread, int *addr, int *data )
     return 0;
 }
 
-/* write an int to a thread address space */
-static int write_thread_int( struct thread *thread, int *addr, int data, unsigned int mask )
+/* write a long to a thread address space */
+static long write_thread_long( struct thread *thread, long *addr, long data, unsigned long mask )
 {
-    int res;
+    long res;
     if (mask != ~0u)
     {
-        if (read_thread_int( thread, addr, &res ) == -1) return -1;
+        if (read_thread_long( thread, addr, &res ) == -1) return -1;
         data = (data & mask) | (res & ~mask);
     }
     if ((res = ptrace( PTRACE_POKEDATA, get_ptrace_pid(thread), (caddr_t)addr, data )) == -1)
@@ -354,41 +354,47 @@ static struct thread *get_ptrace_thread( struct process *process )
 }
 
 /* read data from a process memory space */
-int read_process_memory( struct process *process, const void *ptr, data_size_t size, char *dest )
+int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest )
 {
     struct thread *thread = get_ptrace_thread( process );
     unsigned int first_offset, last_offset, len;
-    int data, *addr;
+    long data, *addr;
 
     if (!thread) return 0;
 
-    first_offset = (unsigned long)ptr % sizeof(int);
-    last_offset = (size + first_offset) % sizeof(int);
-    if (!last_offset) last_offset = sizeof(int);
+    if ((unsigned long)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
 
-    addr = (int *)((char *)ptr - first_offset);
-    len = (size + first_offset + sizeof(int) - 1) / sizeof(int);
+    first_offset = ptr % sizeof(long);
+    last_offset = (size + first_offset) % sizeof(long);
+    if (!last_offset) last_offset = sizeof(long);
+
+    addr = (long *)(unsigned long)(ptr - first_offset);
+    len = (size + first_offset + sizeof(long) - 1) / sizeof(long);
 
     if (suspend_for_ptrace( thread ))
     {
         if (len > 1)
         {
-            if (read_thread_int( thread, addr++, &data ) == -1) goto done;
-            memcpy( dest, (char *)&data + first_offset, sizeof(int) - first_offset );
-            dest += sizeof(int) - first_offset;
+            if (read_thread_long( thread, addr++, &data ) == -1) goto done;
+            memcpy( dest, (char *)&data + first_offset, sizeof(long) - first_offset );
+            dest += sizeof(long) - first_offset;
             first_offset = 0;
             len--;
         }
 
         while (len > 1)
         {
-            if (read_thread_int( thread, addr++, &data ) == -1) goto done;
-            memcpy( dest, &data, sizeof(int) );
-            dest += sizeof(int);
+            if (read_thread_long( thread, addr++, &data ) == -1) goto done;
+            memcpy( dest, &data, sizeof(long) );
+            dest += sizeof(long);
             len--;
         }
 
-        if (read_thread_int( thread, addr++, &data ) == -1) goto done;
+        if (read_thread_long( thread, addr++, &data ) == -1) goto done;
         memcpy( dest, (char *)&data + first_offset, last_offset - first_offset );
         len--;
 
@@ -400,44 +406,51 @@ int read_process_memory( struct process *process, const void *ptr, data_size_t s
 
 /* make sure we can write to the whole address range */
 /* len is the total size (in ints) */
-static int check_process_write_access( struct thread *thread, int *addr, data_size_t len )
+static int check_process_write_access( struct thread *thread, long *addr, data_size_t len )
 {
     int page = get_page_size() / sizeof(int);
 
     for (;;)
     {
-        if (write_thread_int( thread, addr, 0, 0 ) == -1) return 0;
+        if (write_thread_long( thread, addr, 0, 0 ) == -1) return 0;
         if (len <= page) break;
         addr += page;
         len -= page;
     }
-    return (write_thread_int( thread, addr + len - 1, 0, 0 ) != -1);
+    return (write_thread_long( thread, addr + len - 1, 0, 0 ) != -1);
 }
 
 /* write data to a process memory space */
-int write_process_memory( struct process *process, void *ptr, data_size_t size, const char *src )
+int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src )
 {
     struct thread *thread = get_ptrace_thread( process );
-    int ret = 0, data = 0;
+    int ret = 0;
+    long data = 0;
     data_size_t len;
-    int *addr;
-    unsigned int first_mask, first_offset, last_mask, last_offset;
+    long *addr;
+    unsigned long first_mask, first_offset, last_mask, last_offset;
 
     if (!thread) return 0;
 
-    /* compute the mask for the first int */
+    if ((unsigned long)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
+
+    /* compute the mask for the first long */
     first_mask = ~0;
-    first_offset = (unsigned long)ptr % sizeof(int);
+    first_offset = ptr % sizeof(long);
     memset( &first_mask, 0, first_offset );
 
-    /* compute the mask for the last int */
-    last_offset = (size + first_offset) % sizeof(int);
-    if (!last_offset) last_offset = sizeof(int);
+    /* compute the mask for the last long */
+    last_offset = (size + first_offset) % sizeof(long);
+    if (!last_offset) last_offset = sizeof(long);
     last_mask = 0;
     memset( &last_mask, 0xff, last_offset );
 
-    addr = (int *)((char *)ptr - first_offset);
-    len = (size + first_offset + sizeof(int) - 1) / sizeof(int);
+    addr = (long *)(unsigned long)(ptr - first_offset);
+    len = (size + first_offset + sizeof(long) - 1) / sizeof(long);
 
     if (suspend_for_ptrace( thread ))
     {
@@ -449,9 +462,9 @@ int write_process_memory( struct process *process, void *ptr, data_size_t size, 
         /* first word is special */
         if (len > 1)
         {
-            memcpy( (char *)&data + first_offset, src, sizeof(int) - first_offset );
-            src += sizeof(int) - first_offset;
-            if (write_thread_int( thread, addr++, data, first_mask ) == -1) goto done;
+            memcpy( (char *)&data + first_offset, src, sizeof(long) - first_offset );
+            src += sizeof(long) - first_offset;
+            if (write_thread_long( thread, addr++, data, first_mask ) == -1) goto done;
             first_offset = 0;
             len--;
         }
@@ -459,15 +472,15 @@ int write_process_memory( struct process *process, void *ptr, data_size_t size, 
 
         while (len > 1)
         {
-            memcpy( &data, src, sizeof(int) );
-            src += sizeof(int);
-            if (write_thread_int( thread, addr++, data, ~0 ) == -1) goto done;
+            memcpy( &data, src, sizeof(long) );
+            src += sizeof(long);
+            if (write_thread_long( thread, addr++, data, ~0ul ) == -1) goto done;
             len--;
         }
 
         /* last word is special too */
         memcpy( (char *)&data + first_offset, src, last_offset - first_offset );
-        if (write_thread_int( thread, addr, data, last_mask ) == -1) goto done;
+        if (write_thread_long( thread, addr, data, last_mask ) == -1) goto done;
         ret = 1;
 
     done:
@@ -492,13 +505,13 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
     }
     if (suspend_for_ptrace( thread ))
     {
-        unsigned char flags_buf[4];
-        int *addr = (int *)thread->process->ldt_copy + entry;
-        if (read_thread_int( thread, addr, (int *)base ) == -1) goto done;
-        if (read_thread_int( thread, addr + 8192, (int *)limit ) == -1) goto done;
-        addr = (int *)thread->process->ldt_copy + 2*8192 + (entry >> 2);
-        if (read_thread_int( thread, addr, (int *)flags_buf ) == -1) goto done;
-        *flags = flags_buf[entry & 3];
+        unsigned char flags_buf[sizeof(long)];
+        long *addr = (long *)(unsigned long)thread->process->ldt_copy + entry;
+        if (read_thread_long( thread, addr, (long *)base ) == -1) goto done;
+        if (read_thread_long( thread, addr + 8192, (long *)limit ) == -1) goto done;
+        addr = (long *)(unsigned long)thread->process->ldt_copy + 2*8192 + (entry / sizeof(long));
+        if (read_thread_long( thread, addr, (long *)flags_buf ) == -1) goto done;
+        *flags = flags_buf[entry % sizeof(long)];
     done:
         resume_after_ptrace( thread );
     }
@@ -515,13 +528,13 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
 #define DR_OFFSET(dr) ((((struct user *)0)->u_debugreg) + (dr))
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
+void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
     int i, pid = get_ptrace_tid(thread);
     long data[8];
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (!suspend_for_ptrace( thread )) return;
 
@@ -536,39 +549,39 @@ void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int f
             goto done;
         }
     }
-    context->Dr0 = data[0];
-    context->Dr1 = data[1];
-    context->Dr2 = data[2];
-    context->Dr3 = data[3];
-    context->Dr6 = data[6];
-    context->Dr7 = data[7];
-    context->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+    context->debug.i386_regs.dr0 = data[0];
+    context->debug.i386_regs.dr1 = data[1];
+    context->debug.i386_regs.dr2 = data[2];
+    context->debug.i386_regs.dr3 = data[3];
+    context->debug.i386_regs.dr6 = data[6];
+    context->debug.i386_regs.dr7 = data[7];
+    context->flags |= SERVER_CTX_DEBUG_REGISTERS;
 done:
     resume_after_ptrace( thread );
 }
 
 /* set the thread x86 registers */
-void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
     int pid = get_ptrace_tid( thread );
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (!suspend_for_ptrace( thread )) return;
 
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->Dr0 ) == -1) goto error;
-    if (thread->context) thread->context->Dr0 = context->Dr0;
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->Dr1 ) == -1) goto error;
-    if (thread->context) thread->context->Dr1 = context->Dr1;
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(2), context->Dr2 ) == -1) goto error;
-    if (thread->context) thread->context->Dr2 = context->Dr2;
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(3), context->Dr3 ) == -1) goto error;
-    if (thread->context) thread->context->Dr3 = context->Dr3;
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(6), context->Dr6 ) == -1) goto error;
-    if (thread->context) thread->context->Dr6 = context->Dr6;
-    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->Dr7 ) == -1) goto error;
-    if (thread->context) thread->context->Dr7 = context->Dr7;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(0), context->debug.i386_regs.dr0 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr0 = context->debug.i386_regs.dr0;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(1), context->debug.i386_regs.dr1 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr1 = context->debug.i386_regs.dr1;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(2), context->debug.i386_regs.dr2 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr2 = context->debug.i386_regs.dr2;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(3), context->debug.i386_regs.dr3 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr3 = context->debug.i386_regs.dr3;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(6), context->debug.i386_regs.dr6 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr6 = context->debug.i386_regs.dr6;
+    if (ptrace( PTRACE_POKEUSER, pid, DR_OFFSET(7), context->debug.i386_regs.dr7 ) == -1) goto error;
+    if (thread->context) thread->context->debug.i386_regs.dr7 = context->debug.i386_regs.dr7;
     resume_after_ptrace( thread );
     return;
  error:
@@ -582,13 +595,13 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
 #include <machine/reg.h>
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
+void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
     int pid = get_ptrace_tid(thread);
     struct dbreg dbregs;
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (!suspend_for_ptrace( thread )) return;
 
@@ -597,78 +610,71 @@ void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int f
     {
 #ifdef DBREG_DRX
         /* needed for FreeBSD, the structure fields have changed under 5.x */
-        context->Dr0 = DBREG_DRX((&dbregs), 0);
-        context->Dr1 = DBREG_DRX((&dbregs), 1);
-        context->Dr2 = DBREG_DRX((&dbregs), 2);
-        context->Dr3 = DBREG_DRX((&dbregs), 3);
-        context->Dr6 = DBREG_DRX((&dbregs), 6);
-        context->Dr7 = DBREG_DRX((&dbregs), 7);
+        context->debug.i386_regs.dr0 = DBREG_DRX((&dbregs), 0);
+        context->debug.i386_regs.dr1 = DBREG_DRX((&dbregs), 1);
+        context->debug.i386_regs.dr2 = DBREG_DRX((&dbregs), 2);
+        context->debug.i386_regs.dr3 = DBREG_DRX((&dbregs), 3);
+        context->debug.i386_regs.dr6 = DBREG_DRX((&dbregs), 6);
+        context->debug.i386_regs.dr7 = DBREG_DRX((&dbregs), 7);
 #else
-        context->Dr0 = dbregs.dr0;
-        context->Dr1 = dbregs.dr1;
-        context->Dr2 = dbregs.dr2;
-        context->Dr3 = dbregs.dr3;
-        context->Dr6 = dbregs.dr6;
-        context->Dr7 = dbregs.dr7;
+        context->debug.i386_regs.dr0 = dbregs.dr0;
+        context->debug.i386_regs.dr1 = dbregs.dr1;
+        context->debug.i386_regs.dr2 = dbregs.dr2;
+        context->debug.i386_regs.dr3 = dbregs.dr3;
+        context->debug.i386_regs.dr6 = dbregs.dr6;
+        context->debug.i386_regs.dr7 = dbregs.dr7;
 #endif
-        context->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+        context->flags |= SERVER_CTX_DEBUG_REGISTERS;
     }
     resume_after_ptrace( thread );
 }
 
 /* set the thread x86 registers */
-void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
     int pid = get_ptrace_tid(thread);
     struct dbreg dbregs;
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (!suspend_for_ptrace( thread )) return;
 
 #ifdef DBREG_DRX
     /* needed for FreeBSD, the structure fields have changed under 5.x */
-    DBREG_DRX((&dbregs), 0) = context->Dr0;
-    DBREG_DRX((&dbregs), 1) = context->Dr1;
-    DBREG_DRX((&dbregs), 2) = context->Dr2;
-    DBREG_DRX((&dbregs), 3) = context->Dr3;
+    DBREG_DRX((&dbregs), 0) = context->debug.i386_regs.dr0;
+    DBREG_DRX((&dbregs), 1) = context->debug.i386_regs.dr1;
+    DBREG_DRX((&dbregs), 2) = context->debug.i386_regs.dr2;
+    DBREG_DRX((&dbregs), 3) = context->debug.i386_regs.dr3;
     DBREG_DRX((&dbregs), 4) = 0;
     DBREG_DRX((&dbregs), 5) = 0;
-    DBREG_DRX((&dbregs), 6) = context->Dr6;
-    DBREG_DRX((&dbregs), 7) = context->Dr7;
+    DBREG_DRX((&dbregs), 6) = context->debug.i386_regs.dr6;
+    DBREG_DRX((&dbregs), 7) = context->debug.i386_regs.dr7;
 #else
-    dbregs.dr0 = context->Dr0;
-    dbregs.dr1 = context->Dr1;
-    dbregs.dr2 = context->Dr2;
-    dbregs.dr3 = context->Dr3;
+    dbregs.dr0 = context->debug.i386_regs.dr0;
+    dbregs.dr1 = context->debug.i386_regs.dr1;
+    dbregs.dr2 = context->debug.i386_regs.dr2;
+    dbregs.dr3 = context->debug.i386_regs.dr3;
     dbregs.dr4 = 0;
     dbregs.dr5 = 0;
-    dbregs.dr6 = context->Dr6;
-    dbregs.dr7 = context->Dr7;
+    dbregs.dr6 = context->debug.i386_regs.dr6;
+    dbregs.dr7 = context->debug.i386_regs.dr7;
 #endif
     if (ptrace( PTRACE_SETDBREGS, pid, (caddr_t) &dbregs, 0 ) == -1) file_set_error();
-    else if (thread->context)  /* update the cached values */
-    {
-        thread->context->Dr0 = context->Dr0;
-        thread->context->Dr1 = context->Dr1;
-        thread->context->Dr2 = context->Dr2;
-        thread->context->Dr3 = context->Dr3;
-        thread->context->Dr6 = context->Dr6;
-        thread->context->Dr7 = context->Dr7;
-    }
+    else if (thread->context)
+        thread->context->debug.i386_regs = context->debug.i386_regs;  /* update the cached values */
     resume_after_ptrace( thread );
 }
 
 #else  /* linux || __FreeBSD__ */
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
+void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
 }
 
 /* set the thread x86 debug registers */
-void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
 }
 

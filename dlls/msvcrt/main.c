@@ -18,7 +18,6 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 #include "msvcrt.h"
-#include "msvcrt/mbctype.h"
 
 #include "wine/debug.h"
 
@@ -68,10 +67,10 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
   thread_data_t *tls;
 
-  TRACE("(%p, %s, %p) pid(%x), tid(%x), tls(%ld)\n",
+  TRACE("(%p, %s, %p) pid(%x), tid(%x), tls(%u)\n",
         hinstDLL, msvcrt_get_reason(fdwReason), lpvReserved,
         GetCurrentProcessId(), GetCurrentThreadId(),
-        (long)msvcrt_tls_index);
+        msvcrt_tls_index);
 
   switch (fdwReason)
   {
@@ -127,9 +126,3 @@ void CDECL MSVCRT_I10_OUTPUT(void)
   /* also known as 80 bit floating point (long double */
   /* for some compilers, not MSVC) */
 }
-
-/*********************************************************************
- *		_adjust_fdiv (MSVCRT.@)
- * Used by the MSVC compiler to work around the Pentium FDIV bug.
- */
-int MSVCRT__adjust_fdiv = 0;

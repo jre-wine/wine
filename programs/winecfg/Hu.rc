@@ -20,6 +20,9 @@
  *
  */
 
+#include "config.h"   /* Needed for the PACKAGE_STRING definition */
+#include "resource.h"
+
 LANGUAGE LANG_HUNGARIAN, SUBLANG_DEFAULT
 
 IDR_WINECFG MENU DISCARDABLE
@@ -39,6 +42,11 @@ BEGIN
     LTEXT           "http://www.winehq.org/",IDC_STATIC,119,31,106,8
     LTEXT           "Ez a függvénykönvtár szabad szoftver; szabadon terjesztheti, vagy módosíthatja a GNU Lesser General Public Liszenc feltételei szerint, amit a Free Software Foundation készített; mind a 2.1 verziójú licensz, vagy (választása szerint) bármely késõbbi verzió használható.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Windows Registration Information ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Owner:", IDC_STATIC, 22, 126, 40, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT           "Organization:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -60,34 +68,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Ablakbeállítások ",IDC_STATIC,8,5,244,180
+    GROUPBOX    " Ablakbeállítások ",IDC_STATIC,8,4,244,84
+    CONTROL     "A DirectX-es alkalmazások ablakábol nem léphet ki az egérmutató",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    CONTROL     "Allow the window manager to &decorate the windows",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,32,230,8
+    CONTROL     "Az ablakkezelõ kezelheti az ablakokat",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,44,230,8
+    CONTROL     "Virtuális asztal emulálása",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,56,230,8
+    LTEXT       "Ablakméret:",IDC_DESKTOP_SIZE,15,70,44,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,109,70,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,64,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,117,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL	    "A DirectX-es alkalmazások ablakábol nem léphet ki az egérmutató",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,15,230,8
-    LTEXT 	    "Ha az ablakokat egy másik ablakkezelõ kezeli, akkor lesz standard keretjük, tisztelni fogják a virtuális asztalokat, és megjelennek az ablaklistában. \n\nHa az ablakok kezeletlenek, el fognak vállni az Ön ablakkezelõjétõl. Ez azt jelenti, hogy az ablakok nem fognak szorosan egybeépülni az Ön asztalával, de az emuláció hatásosabb, jobban együtt tud mûködni néhány programmal.",
-		    IDC_STATIC,15,38,228,80
-    CONTROL	    "Az ablakkezelõ kezelheti az ablakokat",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,112,230,8
-    
-    /* FIXME: the wording of this explanation could be a lot better */
-    LTEXT           "Ön választhatja a windows asztal emulálást, ahol az összes ablak egy 'virtuális képernyõn' fog megjelnni, vagy az ablakok megjelníthetõk az Ön standard asztalán.",
-                    IDC_STATIC,15,126,228,28
-    LTEXT           "Ablakméret:",IDC_DESKTOP_SIZE,15,168,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,108,168,8,8,WS_DISABLED
-    CONTROL         "Virtuális asztal emulálása",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,153,230,10
-		    
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,168,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,168,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,95,244,49
+    LTEXT       "Vertex Shader támogatás: ",IDC_STATIC,15,110,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,108,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Pixel Shader engedélyezése (ha támogatja a hardver)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,126,230,10
 
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,190,244,50
-
-    LTEXT	    "Vertex Shader támogatás: ",IDC_STATIC,15,200,80,30
-    COMBOBOX	    IDC_D3D_VSHADER_MODE,100,198,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Pixel Shader engedélyezése (ha támogatja a hardver)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,217,230,10
-    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Screen &Resolution ",IDC_STATIC,8,151,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,161,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,161,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "dpi",IDC_STATIC,235,163,10,8
+    LTEXT       "This is a sample text using 10 point Tahoma",IDC_RES_FONT_PREVIEW,15,181,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -126,6 +127,7 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Meghajtó hozzárendelések ",IDC_STATIC,8,4,244,240
+    LTEXT           "Failed to connect to the mount manager, the drive configuration cannot be edited.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "Hozzá&ad...",IDC_BUTTON_ADD,15,98,37,14
@@ -133,7 +135,7 @@ BEGIN
     PUSHBUTTON      "Auto&felism...",IDC_BUTTON_AUTODETECT,197,98,49,14
 
     /* editing drive details */
-    LTEXT           "&Útv.:",IDC_STATIC,15,123,20,9    
+    LTEXT           "&Útv.:",IDC_STATIC_PATH,15,123,20,9
     EDITTEXT        IDC_EDIT_PATH,41,120,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Tallózás...",IDC_BUTTON_BROWSE_PATH,206,120,40,13
     
@@ -162,15 +164,18 @@ IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Meghajtóprogram választás ",IDC_STATIC,8,4,244,195
+    GROUPBOX        " Meghajtóprogram választás ",IDC_STATIC,8,4,244,210
     LTEXT           "Válasszon egy hangmeghajtót a kiválasztott meghajtóprogram elõtti négyzet bejlölésével.  A hang letiltható, ha nem jelöl be egy meghajtót sem. Több meghajtóprogram bejelölése nem ajánlott. Az összes meghajtó beállítható, ha rájuk kattint jobb egérgombbal.",IDC_STATIC,15,15,227,35
-    CONTROL         "Eszközök",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,50,140,140 
+    CONTROL         "Eszközök",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,50,140,155
     PUSHBUTTON      "&Test Sound",IDC_AUDIO_TEST,170,50,59,14
     PUSHBUTTON	    "Vezérlõpult",IDC_AUDIO_CONTROL_PANEL,170,70,59,14
-    GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60
-    LTEXT	    "Hardveres gyorsítás: ",IDC_STATIC,15,215,90,10
-    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,213,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Meghajtóprogram emuláció",IDC_DSOUND_DRV_EMUL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,230,230,10
+    GROUPBOX        " DirectSound ",IDC_STATIC,8,220,244,45
+    LTEXT	    "Hardveres gyorsítás: ",IDC_STATIC,15,230,90,10
+    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,228,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Default &Sample Rate:",IDC_STATIC,15,247,70,8
+    COMBOBOX        IDC_DSOUND_RATES,90,245,42,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Default &Bits Per Sample:",IDC_STATIC,137,247,80,8
+    COMBOBOX        IDC_DSOUND_BITS,220,245,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 250

@@ -2,6 +2,7 @@
  * MPEG Layer 3 handling
  *
  *      Copyright (C) 2002		Eric Pouech
+ *      Copyright (C) 2009		CodeWeavers, Aric Stewart
  *
  *
  * This library is free software; you can redistribute it and/or
@@ -19,6 +20,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+#include "wine/port.h"
+
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -31,8 +35,10 @@
 #include "mmreg.h"
 #include "msacm.h"
 #include "msacmdrv.h"
-#include "mpg123.h"
-#include "mpglib.h"
+
+#ifdef HAVE_MPG123_H
+#include <mpg123.h>
+#endif
 
 #include "wine/debug.h"
 
@@ -43,6 +49,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mpeg3);
  */
 static LRESULT MPEG3_drvOpen(LPCSTR str)
 {
+    mpg123_init();
     return 1;
 }
 
@@ -51,6 +58,7 @@ static LRESULT MPEG3_drvOpen(LPCSTR str)
  */
 static LRESULT MPEG3_drvClose(DWORD_PTR dwDevID)
 {
+    mpg123_exit();
     return 1;
 }
 
@@ -58,7 +66,7 @@ typedef struct tagAcmMpeg3Data
 {
     void (*convert)(PACMDRVSTREAMINSTANCE adsi,
 		    const unsigned char*, LPDWORD, unsigned char*, LPDWORD);
-    struct mpstr mp;
+    mpg123_handle *mh;
 } AcmMpeg3Data;
 
 /* table to list all supported formats... those are the basic ones. this
@@ -75,16 +83,26 @@ static const Format PCM_Formats[] =
 {
     {1,  8,  8000}, {2,  8,  8000}, {1, 16,  8000}, {2, 16,  8000},
     {1,  8, 11025}, {2,  8, 11025}, {1, 16, 11025}, {2, 16, 11025},
+    {1,  8, 12000}, {2,  8, 12000}, {1, 16, 12000}, {2, 16, 12000},
+    {1,  8, 16000}, {2,  8, 16000}, {1, 16, 16000}, {2, 16, 16000},
     {1,  8, 22050}, {2,  8, 22050}, {1, 16, 22050}, {2, 16, 22050},
+    {1,  8, 24000}, {2,  8, 24000}, {1, 16, 24000}, {2, 16, 24000},
+    {1,  8, 32000}, {2,  8, 32000}, {1, 16, 32000}, {2, 16, 32000},
     {1,  8, 44100}, {2,  8, 44100}, {1, 16, 44100}, {2, 16, 44100},
-    {1,  8, 48000}, {2,  8, 48000}, {1, 16, 48000}, {2, 16, 48000},
+    {1,  8, 48000}, {2,  8, 48000}, {1, 16, 48000}, {2, 16, 48000}
 };
 
 static const Format MPEG3_Formats[] =
 {
-    {1,  0,  8000}, {2,	0,  8000},  {1,  0, 11025}, {2,	 0, 11025},
-    {1,  0, 22050}, {2,	0, 22050},  {1,  0, 44100}, {2,	 0, 44100},
-    {1,  0, 48000}, {2,	0, 48000},
+    {1,  0,  8000}, {2,  0,  8000},
+    {1,  0, 11025}, {2,  0, 11025},
+    {1,  0, 12000}, {2,  0, 12000},
+    {1,  0, 16000}, {2,  0, 16000},
+    {1,  0, 22050}, {2,  0, 22050},
+    {1,  0, 24000}, {2,  0, 24000},
+    {1,  0, 32000}, {2,  0, 32000},
+    {1,  0, 44100}, {2,  0, 44100},
+    {1,  0, 48000}, {2,  0, 48000}
 };
 
 #define	NUM_PCM_FORMATS		(sizeof(PCM_Formats) / sizeof(PCM_Formats[0]))
@@ -116,22 +134,11 @@ static	DWORD	MPEG3_GetFormatIndex(LPWAVEFORMATEX wfx)
     {
 	if (wfx->nChannels == fmts[i].nChannels &&
 	    wfx->nSamplesPerSec == fmts[i].rate &&
-	    wfx->wBitsPerSample == fmts[i].nBits)
+	    (wfx->wBitsPerSample == fmts[i].nBits || !fmts[i].nBits))
 	    return i;
     }
 
     return 0xFFFFFFFF;
-}
-
-static DWORD get_num_buffered_bytes(struct mpstr *mp)
-{
-    DWORD numBuff = 0;
-    struct buf * p = mp->tail;
-    while (p) {
-        numBuff += p->size - p->pos;
-        p = p->next;
-    }
-    return numBuff;
 }
 
 static void mp3_horse(PACMDRVSTREAMINSTANCE adsi,
@@ -139,50 +146,45 @@ static void mp3_horse(PACMDRVSTREAMINSTANCE adsi,
                       unsigned char* dst, LPDWORD ndst)
 {
     AcmMpeg3Data*       amd = (AcmMpeg3Data*)adsi->dwDriver;
-    int                 size, ret;
+    int                 ret;
+    size_t              size;
     DWORD               dpos = 0;
-    DWORD               buffered_before;
-    DWORD               buffered_during;
-    DWORD               buffered_after;
 
-    /* Skip leading ID v3 header */
-    if (amd->mp.fsizeold == -1 && !strncmp("ID3", (char*)src, 3))
+
+    if (*nsrc > 0)
     {
-        UINT length = 10;
-        const char *header = (char *)src;
-
-        TRACE("Found ID3 v2.%d.%d\n", header[3], header[4]);
-        length += (header[6] & 0x7F) << 21;
-        length += (header[7] & 0x7F) << 14;
-        length += (header[8] & 0x7F) << 7;
-        length += (header[9] & 0x7F);
-        TRACE("Length: %u\n", length);
-        *nsrc = length;
-        *ndst = 0;
-        return;
+        ret = mpg123_feed(amd->mh, src, *nsrc);
+        if (ret != MPG123_OK)
+        {
+            ERR("Error feeding data\n");
+            *ndst = *nsrc = 0;
+            return;
+        }
     }
 
-    buffered_before = get_num_buffered_bytes(&amd->mp);
-    ret = decodeMP3(&amd->mp, src, *nsrc, dst, *ndst, &size);
-    buffered_during = get_num_buffered_bytes(&amd->mp);
-    if (ret != MP3_OK)
-    {
-        *ndst = *nsrc = 0;
-        return;
-    }
     do {
+        size = 0;
+        ret = mpg123_read(amd->mh, dst + dpos, *ndst - dpos, &size);
+        if (ret == MPG123_ERR)
+        {
+            FIXME("Error occurred during decoding!\n");
+            *ndst = *nsrc = 0;
+            return;
+        }
+
+        if (ret == MPG123_NEW_FORMAT)
+        {
+            if TRACE_ON(mpeg3)
+            {
+                long rate;
+                int channels, enc;
+                mpg123_getformat(amd->mh, &rate, &channels, &enc);
+                TRACE("New format: %li Hz, %i channels, encoding value %i\n", rate, channels, enc);
+            }
+        }
         dpos += size;
-        if (*ndst - dpos < 4608) break;
-        ret = decodeMP3(&amd->mp, NULL, 0,
-                        dst + dpos, *ndst - dpos, &size);
-    } while (ret == MP3_OK);
+    } while (ret == MPG123_OK);
     *ndst = dpos;
-
-    buffered_after = get_num_buffered_bytes(&amd->mp);
-    TRACE("before %d put %d during %d after %d\n", buffered_before, *nsrc, buffered_during, buffered_after);
-
-    *nsrc -= buffered_after;
-    ClearMP3Buffer(&amd->mp);
 }
 
 /***********************************************************************
@@ -205,7 +207,7 @@ static	LRESULT MPEG3_DriverDetails(PACMDRIVERDETAILSW add)
                          add->szShortName, sizeof(add->szShortName)/sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, "Wine MPEG3 decoder", -1,
                          add->szLongName, sizeof(add->szLongName)/sizeof(WCHAR) );
-    MultiByteToWideChar( CP_ACP, 0, "Brought to you by the Wine team (based on mpglib by Michael Hipp)...", -1,
+    MultiByteToWideChar( CP_ACP, 0, "Brought to you by the Wine team...", -1,
                          add->szCopyright, sizeof(add->szCopyright)/sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, "Refer to LICENSE file", -1,
                          add->szLicensing, sizeof(add->szLicensing)/sizeof(WCHAR) );
@@ -394,10 +396,11 @@ static	LRESULT	MPEG3_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
  *           MPEG3_Reset
  *
  */
-static	void	MPEG3_Reset(PACMDRVSTREAMINSTANCE adsi, AcmMpeg3Data* aad)
+static void MPEG3_Reset(PACMDRVSTREAMINSTANCE adsi, AcmMpeg3Data* aad)
 {
-    ClearMP3Buffer(&aad->mp);
-    InitMP3(&aad->mp);
+    mpg123_feedseek(aad->mh, 0, SEEK_SET, NULL);
+    mpg123_close(aad->mh);
+    mpg123_open_feed(aad->mh);
 }
 
 /***********************************************************************
@@ -407,6 +410,7 @@ static	void	MPEG3_Reset(PACMDRVSTREAMINSTANCE adsi, AcmMpeg3Data* aad)
 static	LRESULT	MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
 {
     AcmMpeg3Data*	aad;
+    int err;
 
     assert(!(adsi->fdwOpen & ACM_STREAMOPENF_ASYNC));
 
@@ -417,7 +421,7 @@ static	LRESULT	MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
     aad = HeapAlloc(GetProcessHeap(), 0, sizeof(AcmMpeg3Data));
     if (aad == 0) return MMSYSERR_NOMEM;
 
-    adsi->dwDriver = (DWORD)aad;
+    adsi->dwDriver = (DWORD_PTR)aad;
 
     if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
@@ -435,7 +439,8 @@ static	LRESULT	MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
             adsi->pwfxDst->wBitsPerSample != 16)
 	    goto theEnd;
         aad->convert = mp3_horse;
-        InitMP3(&aad->mp);
+        aad->mh = mpg123_new(NULL,&err);
+        mpg123_open_feed(aad->mh);
     }
     /* no encoding yet
     else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
@@ -458,7 +463,8 @@ static	LRESULT	MPEG3_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
  */
 static	LRESULT	MPEG3_StreamClose(PACMDRVSTREAMINSTANCE adsi)
 {
-    ClearMP3Buffer(&((AcmMpeg3Data*)adsi->dwDriver)->mp);
+    mpg123_close(((AcmMpeg3Data*)adsi->dwDriver)->mh);
+    mpg123_delete(((AcmMpeg3Data*)adsi->dwDriver)->mh);
     HeapFree(GetProcessHeap(), 0, (void*)adsi->dwDriver);
     return MMSYSERR_NOERROR;
 }
@@ -469,6 +475,8 @@ static	LRESULT	MPEG3_StreamClose(PACMDRVSTREAMINSTANCE adsi)
  */
 static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE adss)
 {
+    DWORD nblocks;
+
     switch (adss->fdwSize)
     {
     case ACM_STREAMSIZEF_DESTINATION:
@@ -476,14 +484,18 @@ static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE ad
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_MPEGLAYER3)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbSrcLength = adss->cbDstLength * 12;
+            nblocks = (adss->cbDstLength - 3000) / (DWORD)(adsi->pwfxDst->nAvgBytesPerSec * 1152 / adsi->pwfxDst->nSamplesPerSec + 0.5);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            adss->cbSrcLength = nblocks * 1152 * adsi->pwfxSrc->nBlockAlign;
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_MPEGLAYER3 &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbSrcLength = 256 + adss->cbDstLength / 12;
+            nblocks = adss->cbDstLength / (adsi->pwfxDst->nBlockAlign * 1152);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            adss->cbSrcLength = nblocks * (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec);
 	}
         else
         {
@@ -495,14 +507,24 @@ static	LRESULT MPEG3_StreamSize(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMSIZE ad
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_MPEGLAYER3)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbDstLength = 256 + adss->cbSrcLength / 12;
+            nblocks = adss->cbSrcLength / (adsi->pwfxSrc->nBlockAlign * 1152);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            if (adss->cbSrcLength % (DWORD)(adsi->pwfxSrc->nBlockAlign * 1152))
+                /* Round block count up. */
+                nblocks++;
+            adss->cbDstLength = 3000 + nblocks * (DWORD)(adsi->pwfxDst->nAvgBytesPerSec * 1152 / adsi->pwfxDst->nSamplesPerSec + 0.5);
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_MPEGLAYER3 &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbDstLength = adss->cbSrcLength * 12;
+            nblocks = adss->cbSrcLength / (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            if (adss->cbSrcLength % (DWORD)(adsi->pwfxSrc->nAvgBytesPerSec * 1152 / adsi->pwfxSrc->nSamplesPerSec))
+                /* Round block count up. */
+                nblocks++;
+            adss->cbDstLength = nblocks * 1152 * adsi->pwfxDst->nBlockAlign;
 	}
         else
         {
@@ -540,7 +562,7 @@ static LRESULT MPEG3_StreamConvert(PACMDRVSTREAMINSTANCE adsi, PACMDRVSTREAMHEAD
      */
     if ((adsh->fdwConvert & ACM_STREAMCONVERTF_START))
     {
-	MPEG3_Reset(adsi, aad);
+        MPEG3_Reset(adsi, aad);
     }
 
     aad->convert(adsi, adsh->pbSrc, &nsrc, adsh->pbDst, &ndst);

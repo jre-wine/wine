@@ -183,11 +183,11 @@ static UINT ALTER_get_dimensions( struct tagMSIVIEW *view, UINT *rows, UINT *col
 }
 
 static UINT ALTER_get_column_info( struct tagMSIVIEW *view,
-                UINT n, LPWSTR *name, UINT *type )
+                UINT n, LPWSTR *name, UINT *type, BOOL *temporary )
 {
     MSIALTERVIEW *av = (MSIALTERVIEW*)view;
 
-    TRACE("%p %d %p %p\n", av, n, name, type );
+    TRACE("%p %d %p %p %p\n", av, n, name, type, temporary );
 
     return ERROR_FUNCTION_FAILED;
 }
@@ -242,6 +242,7 @@ static const MSIVIEWOPS alter_ops =
     NULL,
     NULL,
     NULL,
+    NULL,
 };
 
 UINT ALTER_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR name, column_info *colinfo, int hold )
@@ -256,8 +257,11 @@ UINT ALTER_CreateView( MSIDATABASE *db, MSIVIEW **view, LPCWSTR name, column_inf
         return ERROR_FUNCTION_FAILED;
 
     r = TABLE_CreateView( db, name, &av->table );
-    if (r != ERROR_SUCCESS || !av->table)
+    if (r != ERROR_SUCCESS)
+    {
+        msi_free( av );
         return r;
+    }
 
     if (colinfo)
         colinfo->table = name;

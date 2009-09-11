@@ -160,7 +160,7 @@ void finish_process_tracing( struct process *process )
 }
 
 /* retrieve the thread x86 registers */
-void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int flags )
+void get_thread_context( struct thread *thread, context_t *context, unsigned int flags )
 {
 #ifdef __i386__
     x86_debug_state32_t state;
@@ -169,7 +169,7 @@ void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int f
     mach_port_t port, process_port = get_process_port( thread->process );
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (thread->unix_pid == -1 || !process_port ||
         mach_port_extract_right( process_port, thread->unix_tid,
@@ -183,28 +183,28 @@ void get_thread_context( struct thread *thread, CONTEXT *context, unsigned int f
     {
 /* work around silly renaming of struct members in OS X 10.5 */
 #if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
-        context->Dr0 = state.__dr0;
-        context->Dr1 = state.__dr1;
-        context->Dr2 = state.__dr2;
-        context->Dr3 = state.__dr3;
-        context->Dr6 = state.__dr6;
-        context->Dr7 = state.__dr7;
+        context->debug.i386_regs.dr0 = state.__dr0;
+        context->debug.i386_regs.dr1 = state.__dr1;
+        context->debug.i386_regs.dr2 = state.__dr2;
+        context->debug.i386_regs.dr3 = state.__dr3;
+        context->debug.i386_regs.dr6 = state.__dr6;
+        context->debug.i386_regs.dr7 = state.__dr7;
 #else
-        context->Dr0 = state.dr0;
-        context->Dr1 = state.dr1;
-        context->Dr2 = state.dr2;
-        context->Dr3 = state.dr3;
-        context->Dr6 = state.dr6;
-        context->Dr7 = state.dr7;
+        context->debug.i386_regs.dr0 = state.dr0;
+        context->debug.i386_regs.dr1 = state.dr1;
+        context->debug.i386_regs.dr2 = state.dr2;
+        context->debug.i386_regs.dr3 = state.dr3;
+        context->debug.i386_regs.dr6 = state.dr6;
+        context->debug.i386_regs.dr7 = state.dr7;
 #endif
-        context->ContextFlags |= CONTEXT_DEBUG_REGISTERS;
+        context->flags |= SERVER_CTX_DEBUG_REGISTERS;
     }
     mach_port_deallocate( mach_task_self(), port );
 #endif
 }
 
 /* set the thread x86 registers */
-void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned int flags )
+void set_thread_context( struct thread *thread, const context_t *context, unsigned int flags )
 {
 #ifdef __i386__
     x86_debug_state32_t state;
@@ -213,7 +213,7 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
     mach_port_t port, process_port = get_process_port( thread->process );
 
     /* all other regs are handled on the client side */
-    assert( (flags | CONTEXT_i386) == CONTEXT_DEBUG_REGISTERS );
+    assert( flags == SERVER_CTX_DEBUG_REGISTERS );
 
     if (thread->unix_pid == -1 || !process_port ||
         mach_port_extract_right( process_port, thread->unix_tid,
@@ -224,35 +224,28 @@ void set_thread_context( struct thread *thread, const CONTEXT *context, unsigned
     }
 
 #if __DARWIN_UNIX03 && defined(_STRUCT_X86_DEBUG_STATE32)
-    state.__dr0 = context->Dr0;
-    state.__dr1 = context->Dr1;
-    state.__dr2 = context->Dr2;
-    state.__dr3 = context->Dr3;
+    state.__dr0 = context->debug.i386_regs.dr0;
+    state.__dr1 = context->debug.i386_regs.dr1;
+    state.__dr2 = context->debug.i386_regs.dr2;
+    state.__dr3 = context->debug.i386_regs.dr3;
     state.__dr4 = 0;
     state.__dr5 = 0;
-    state.__dr6 = context->Dr6;
-    state.__dr7 = context->Dr7;
+    state.__dr6 = context->debug.i386_regs.dr6;
+    state.__dr7 = context->debug.i386_regs.dr7;
 #else
-    state.dr0 = context->Dr0;
-    state.dr1 = context->Dr1;
-    state.dr2 = context->Dr2;
-    state.dr3 = context->Dr3;
+    state.dr0 = context->debug.i386_regs.dr0;
+    state.dr1 = context->debug.i386_regs.dr1;
+    state.dr2 = context->debug.i386_regs.dr2;
+    state.dr3 = context->debug.i386_regs.dr3;
     state.dr4 = 0;
     state.dr5 = 0;
-    state.dr6 = context->Dr6;
-    state.dr7 = context->Dr7;
+    state.dr6 = context->debug.i386_regs.dr6;
+    state.dr7 = context->debug.i386_regs.dr7;
 #endif
     if (!thread_set_state( port, x86_DEBUG_STATE32, (thread_state_t)&state, count ))
     {
         if (thread->context)  /* update the cached values */
-        {
-            thread->context->Dr0 = context->Dr0;
-            thread->context->Dr1 = context->Dr1;
-            thread->context->Dr2 = context->Dr2;
-            thread->context->Dr3 = context->Dr3;
-            thread->context->Dr6 = context->Dr6;
-            thread->context->Dr7 = context->Dr7;
-        }
+            thread->context->debug.i386_regs = context->debug.i386_regs;
     }
     mach_port_deallocate( mach_task_self(), port );
 #endif
@@ -292,7 +285,7 @@ int send_thread_signal( struct thread *thread, int sig )
 }
 
 /* read data from a process memory space */
-int read_process_memory( struct process *process, const void *ptr, data_size_t size, char *dest )
+int read_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, char *dest )
 {
     kern_return_t ret;
     mach_msg_type_number_t bytes_read;
@@ -307,6 +300,11 @@ int read_process_memory( struct process *process, const void *ptr, data_size_t s
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
+    if ((vm_address_t)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
 
     if ((ret = task_suspend( process_port )) != KERN_SUCCESS)
     {
@@ -314,8 +312,8 @@ int read_process_memory( struct process *process, const void *ptr, data_size_t s
         return 0;
     }
 
-    offset = (unsigned long)ptr % page_size;
-    aligned_address = (vm_address_t)((char *)ptr - offset);
+    offset = ptr % page_size;
+    aligned_address = (vm_address_t)(ptr - offset);
     aligned_size = (size + offset + page_size - 1) / page_size * page_size;
 
     ret = vm_read( process_port, aligned_address, aligned_size, &data, &bytes_read );
@@ -330,7 +328,7 @@ int read_process_memory( struct process *process, const void *ptr, data_size_t s
 }
 
 /* write data to a process memory space */
-int write_process_memory( struct process *process, void *ptr, data_size_t size, const char *src )
+int write_process_memory( struct process *process, client_ptr_t ptr, data_size_t size, const char *src )
 {
     kern_return_t ret;
     vm_address_t aligned_address, region_address;
@@ -347,9 +345,14 @@ int write_process_memory( struct process *process, void *ptr, data_size_t size, 
         set_error( STATUS_ACCESS_DENIED );
         return 0;
     }
+    if ((vm_address_t)ptr != ptr)
+    {
+        set_error( STATUS_ACCESS_DENIED );
+        return 0;
+    }
 
-    offset = (unsigned long)ptr % page_size;
-    aligned_address = (vm_address_t)((char *)ptr - offset);
+    offset = ptr % page_size;
+    aligned_address = (vm_address_t)(ptr - offset);
     aligned_size = (size + offset + page_size - 1) / page_size * page_size;
 
     if ((ret = task_suspend( process_port )) != KERN_SUCCESS)
@@ -436,9 +439,8 @@ void get_selector_entry( struct thread *thread, int entry, unsigned int *base,
 
     if ((ret = task_suspend( process_port )) == KERN_SUCCESS)
     {
-        void *ptr = process->ldt_copy;
-        vm_offset_t offset = (unsigned long)ptr % page_size;
-        vm_address_t aligned_address = (vm_address_t)((char *)ptr - offset);
+        vm_offset_t offset = process->ldt_copy % page_size;
+        vm_address_t aligned_address = (vm_address_t)(process->ldt_copy - offset);
         vm_size_t aligned_size = (total_size + offset + page_size - 1) / page_size * page_size;
 
         ret = vm_read( process_port, aligned_address, aligned_size, &data, &bytes_read );

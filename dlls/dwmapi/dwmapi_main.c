@@ -71,6 +71,36 @@ HRESULT WINAPI DwmEnableComposition(UINT uCompositionAction)
 }
 
 /**********************************************************************
+ *           DwmExtendFrameIntoClientArea    (DWMAPI.@)
+ */
+HRESULT WINAPI DwmExtendFrameIntoClientArea(HWND hwnd, const MARGINS* margins)
+{
+    FIXME("(%p, %p) stub\n", hwnd, margins);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmGetColorizationColor      (DWMAPI.@)
+ */
+HRESULT WINAPI DwmGetColorizationColor(DWORD *colorization, BOOL opaque_blend)
+{
+    FIXME("(%p, %d) stub\n", colorization, opaque_blend);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *                  DwmFlush              (DWMAPI.@)
+ */
+HRESULT WINAPI DwmFlush(void)
+{
+    FIXME("() stub\n");
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
  *           DwmSetWindowAttribute         (DWMAPI.@)
  */
 HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attribute, DWORD size)
@@ -88,4 +118,14 @@ HRESULT WINAPI DwmUnregisterThumbnail(HTHUMBNAIL thumbnail)
     FIXME("(%p) stub\n", thumbnail);
 
     return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmEnableMMCSS         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmEnableMMCSS(BOOL enableMMCSS)
+{
+    FIXME("(%d) stub\n", enableMMCSS);
+
+    return S_OK;
 }

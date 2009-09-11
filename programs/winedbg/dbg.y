@@ -37,6 +37,7 @@
 
 int dbg_lex(void);
 static int dbg_error(const char*);
+static void parser(const char*);
 
 %}
 
@@ -53,13 +54,13 @@ static int dbg_error(const char*);
 %token tCONT tPASS tSTEP tLIST tNEXT tQUIT tHELP tBACKTRACE tALL tINFO tUP tDOWN
 %token tENABLE tDISABLE tBREAK tHBREAK tWATCH tDELETE tSET tPRINT tEXAM
 %token tABORT tECHO
-%token tCLASS tMAPS tSTACK tSEGMENTS tSYMBOL tREGS tALLREGS tWND tQUEUE tLOCAL tEXCEPTION
+%token tCLASS tMAPS tSTACK tSEGMENTS tSYMBOL tREGS tALLREGS tWND tLOCAL tEXCEPTION
 %token tPROCESS tTHREAD tEOL tEOF
 %token tFRAME tSHARE tMODULE tCOND tDISPLAY tUNDISPLAY tDISASSEMBLE
 %token tSTEPI tNEXTI tFINISH tSHOW tDIR tWHATIS tSOURCE
-%token <string> tPATH tIDENTIFIER tSTRING tDEBUGSTR tINTVAR
+%token <string> tPATH tIDENTIFIER tSTRING tINTVAR
 %token <integer> tNUM tFORMAT
-%token tSYMBOLFILE tRUN tATTACH tDETACH tMAINTENANCE tTYPE tMINIDUMP
+%token tSYMBOLFILE tRUN tATTACH tDETACH tKILL tMAINTENANCE tTYPE tMINIDUMP
 %token tNOPROCESS
 
 %token tCHAR tSHORT tINT tLONG tFLOAT tDOUBLE tUNSIGNED tSIGNED
@@ -132,7 +133,7 @@ command:
     | tFRAME tNUM              	{ stack_set_frame($2); }
     | tSHOW tDIR     	       	{ source_show_path(); }
     | tDIR pathname            	{ source_add_path($2); }
-    | tDIR     		       	{ source_nuke_path(); }
+    | tDIR     		       	{ source_nuke_path(dbg_curr_process); }
     | tCOND tNUM               	{ break_add_condition($2, NULL); }
     | tCOND tNUM expr     	{ break_add_condition($2, $3); }
     | tSOURCE pathname          { parser($2); }
@@ -141,6 +142,7 @@ command:
     | tWHATIS expr_lvalue       { dbg_printf("type = "); types_print_type(&$2.type, FALSE); dbg_printf("\n"); }
     | tATTACH tNUM     		{ dbg_attach_debuggee($2, FALSE); dbg_active_wait_for_first_exception(); }
     | tDETACH                   { dbg_curr_process->process_io->close_process(dbg_curr_process, FALSE); }
+    | tKILL                     { dbg_curr_process->process_io->close_process(dbg_curr_process, TRUE); }
     | tMINIDUMP pathname        { minidump_write($2, (dbg_curr_thread && dbg_curr_thread->in_exception) ? &dbg_curr_thread->excpt_record : NULL);}
     | tECHO tSTRING             { dbg_printf("%s\n", $2); }
     | run_command
@@ -179,9 +181,10 @@ list_arg:
       tNUM		        { $$.FileName = NULL; $$.LineNumber = $1; }
     | pathname ':' tNUM	        { $$.FileName = $1; $$.LineNumber = $3; }
     | identifier	        { symbol_get_line(NULL, $1, &$$); }
-    | pathname ':' identifier   { symbol_get_line($3, $1, &$$); }
-    | '*' expr_lvalue	        { DWORD disp; $$.SizeOfStruct = sizeof($$);
-                                  SymGetLineFromAddr(dbg_curr_process->handle, (unsigned long)memory_to_linear_addr(& $2.addr), &disp, & $$); }
+    | pathname ':' identifier   { symbol_get_line($1, $3, &$$); }
+    | '*' expr_lvalue	        { DWORD disp; ADDRESS64 addr; $$.SizeOfStruct = sizeof($$);
+                                  types_extract_as_address(&$2, &addr);
+                                  SymGetLineFromAddr(dbg_curr_process->handle, (unsigned long)memory_to_linear_addr(& addr), &disp, & $$); }
     ;
 
 run_command:
@@ -206,9 +209,15 @@ disassemble_command:
 set_command:
       tSET lvalue_addr '=' expr_rvalue { memory_write_value(&$2, sizeof(int), &$4); }
     | tSET '+' tIDENTIFIER      { info_wine_dbg_channel(TRUE, NULL, $3); }
+    | tSET '+' tALL             { info_wine_dbg_channel(TRUE, NULL, "all"); }
     | tSET '-' tIDENTIFIER      { info_wine_dbg_channel(FALSE, NULL, $3); }
+    | tSET '-' tALL             { info_wine_dbg_channel(FALSE, NULL, "all"); }
     | tSET tIDENTIFIER '+' tIDENTIFIER { info_wine_dbg_channel(TRUE, $2, $4); }
+    | tSET tIDENTIFIER '+' tALL        { info_wine_dbg_channel(TRUE, $2, "all"); }
     | tSET tIDENTIFIER '-' tIDENTIFIER { info_wine_dbg_channel(FALSE, $2, $4); }
+    | tSET tIDENTIFIER '-' tALL        { info_wine_dbg_channel(FALSE, $2, "all"); }
+    | tSET '!' tIDENTIFIER tIDENTIFIER  { dbg_set_option($3, $4); }
+    | tSET '!' tIDENTIFIER      { dbg_set_option($3, NULL); }
     ;
 
 x_command:
@@ -545,7 +554,7 @@ void	parser_handle(HANDLE input)
     dbg_parser_output = out_copy;
 }
 
-void parser(const char* filename)
+static void parser(const char* filename)
 {
     HANDLE h = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0L, 0);
     if (h != INVALID_HANDLE_VALUE)
@@ -555,7 +564,7 @@ void parser(const char* filename)
     }
 }
 
-int dbg_error(const char* s)
+static int dbg_error(const char* s)
 {
     dbg_printf("%s\n", s);
     return 0;

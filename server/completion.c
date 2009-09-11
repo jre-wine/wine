@@ -79,9 +79,9 @@ static const struct object_ops completion_ops =
 struct comp_msg
 {
     struct   list queue_entry;
-    unsigned long ckey;
-    unsigned long cvalue;
-    unsigned long information;
+    apc_param_t   ckey;
+    apc_param_t   cvalue;
+    unsigned int  information;
     unsigned int  status;
 };
 
@@ -141,7 +141,8 @@ struct completion *get_completion_obj( struct process *process, obj_handle_t han
     return (struct completion *) get_handle_obj( process, handle, access, &completion_ops );
 }
 
-void add_completion( struct completion *completion, unsigned long ckey, unsigned long cvalue, unsigned int status, unsigned long information )
+void add_completion( struct completion *completion, apc_param_t ckey, apc_param_t cvalue,
+                     unsigned int status, unsigned int information )
 {
     struct comp_msg *msg = mem_alloc( sizeof( *msg ) );
 

@@ -1,7 +1,7 @@
 /*
  * IParent implementation
  *
- * Copyright (c) 2006 Stefan Dösinger
+ * Copyright (c) 2006 Stefan DÃ¶singer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -45,8 +45,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 
-const GUID IID_IParent = {0xc20e4c88, 0x74e7, 0x4940, {0xba, 0x9f, 0x2e, 0x32, 0x3f, 0x9d, 0xc9, 0x81}};
-
 /*****************************************************************************
  * IUnknown methods
  *****************************************************************************/
@@ -70,15 +68,14 @@ IParentImpl_QueryInterface(IParent *iface,
                            REFIID riid,
                            void **obj)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
-    TRACE("(%p)->(%s,%p)\n", This, debugstr_guid(riid), obj);
+    TRACE("(%p)->(%s,%p)\n", iface, debugstr_guid(riid), obj);
 
     *obj = NULL;
     if ( IsEqualGUID( &IID_IUnknown, riid ) ||
          IsEqualGUID( &IID_IParent, riid ) )
     {
-        *obj = ICOM_INTERFACE(This, IParent);
-        IParent_AddRef(ICOM_INTERFACE(This, IParent));
+        *obj = iface;
+        IParent_AddRef(iface);
         return DD_OK;
     }
     return E_NOINTERFACE;
@@ -98,7 +95,7 @@ IParentImpl_QueryInterface(IParent *iface,
 static ULONG WINAPI
 IParentImpl_AddRef(IParent *iface)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
+    IParentImpl *This = (IParentImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p) : AddRef from %d\n", This, ref - 1);
@@ -120,10 +117,9 @@ IParentImpl_AddRef(IParent *iface)
  *  The new refcount
  *
  *****************************************************************************/
-static ULONG WINAPI 
-IParentImpl_Release(IParent *iface)
+static ULONG WINAPI IParentImpl_Release(IParent *iface)
 {
-    ICOM_THIS_FROM(IParentImpl, IParent, iface);
+    IParentImpl *This = (IParentImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p) : ReleaseRef to %d\n", This, ref);

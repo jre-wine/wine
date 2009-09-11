@@ -54,8 +54,8 @@ static const union cptable* unix_table; /* NULL if UTF8 */
  *
  * Set the code page once kernel32 is loaded. Should be done differently.
  */
-void __wine_init_codepages( const union cptable *ansi, const union cptable *oem,
-                            const union cptable *ucp)
+void CDECL __wine_init_codepages( const union cptable *ansi, const union cptable *oem,
+                                  const union cptable *ucp)
 {
     ansi_table = ansi;
     oem_table = oem;
@@ -66,7 +66,8 @@ void __wine_init_codepages( const union cptable *ansi, const union cptable *oem,
 int ntdll_umbstowcs(DWORD flags, const char* src, int srclen, WCHAR* dst, int dstlen)
 {
 #ifdef __APPLE__
-    flags |= MB_COMPOSITE;  /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+    /* work around broken Mac OS X filesystem that enforces decomposed Unicode */
+    if (!unix_table) flags |= MB_COMPOSITE;
 #endif
     return (unix_table) ?
         wine_cp_mbstowcs( unix_table, flags, src, srclen, dst, dstlen ) :
@@ -346,7 +347,7 @@ void WINAPI RtlCopyUnicodeString( UNICODE_STRING *dst, const UNICODE_STRING *src
 /**************************************************************************
  *      RtlDuplicateUnicodeString   (NTDLL.@)
  *
- * Duplicates an unicode string.
+ * Duplicates a unicode string.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. destination contains the duplicated unicode string.
@@ -662,7 +663,7 @@ WCHAR WINAPI RtlAnsiCharToUnicodeChar(LPSTR *ansi)
 /**************************************************************************
  *      RtlAnsiStringToUnicodeString   (NTDLL.@)
  *
- * Converts an ansi string to an unicode string.
+ * Converts an ansi string to a unicode string.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. uni contains the converted string
@@ -699,7 +700,7 @@ NTSTATUS WINAPI RtlAnsiStringToUnicodeString(
 /**************************************************************************
  *	RtlOemStringToUnicodeString   (NTDLL.@)
  *
- * Converts an oem string to an unicode string.
+ * Converts an oem string to a unicode string.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. uni contains the converted string
@@ -736,7 +737,7 @@ NTSTATUS WINAPI RtlOemStringToUnicodeString(
 /**************************************************************************
  *	RtlUnicodeStringToAnsiString   (NTDLL.@)
  *
- * Converts an unicode string to an ansi string.
+ * Converts a unicode string to an ansi string.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. ansi contains the converted string
@@ -961,7 +962,7 @@ void WINAPI RtlUpperString( STRING *dst, const STRING *src )
 /**************************************************************************
  *	RtlUpcaseUnicodeChar   (NTDLL.@)
  *
- * Converts an Unicode character to uppercase.
+ * Converts a Unicode character to uppercase.
  *
  * PARAMS
  *  wch [I] Character to convert
@@ -978,7 +979,7 @@ WCHAR WINAPI RtlUpcaseUnicodeChar( WCHAR wch )
 /**************************************************************************
  *	RtlDowncaseUnicodeChar   (NTDLL.@)
  *
- * Converts an Unicode character to lowercase.
+ * Converts a Unicode character to lowercase.
  *
  * PARAMS
  *  wch [I] Character to convert
@@ -995,7 +996,7 @@ WCHAR WINAPI RtlDowncaseUnicodeChar(WCHAR wch)
 /**************************************************************************
  *	RtlUpcaseUnicodeString   (NTDLL.@)
  *
- * Converts an Unicode string to uppercase.
+ * Converts a Unicode string to uppercase.
  *
  * PARAMS
  *  dest    [O] Destination for converted string
@@ -1034,7 +1035,7 @@ NTSTATUS WINAPI RtlUpcaseUnicodeString( UNICODE_STRING *dest,
 /**************************************************************************
  *	RtlDowncaseUnicodeString   (NTDLL.@)
  *
- * Converts an Unicode string to lowercase.
+ * Converts a Unicode string to lowercase.
  *
  * PARAMS
  *  dest    [O] Destination for converted string
@@ -1498,7 +1499,7 @@ NTSTATUS WINAPI RtlAppendUnicodeStringToString(
 /**************************************************************************
  *      RtlFindCharInUnicodeString   (NTDLL.@)
  *
- * Searches for one of several unicode characters in an unicode string.
+ * Searches for one of several unicode characters in a unicode string.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. pos contains the position after the character found.
@@ -1510,8 +1511,7 @@ NTSTATUS WINAPI RtlFindCharInUnicodeString(
     const UNICODE_STRING *search_chars, /* [I] Unicode string which contains the characters to search for */
     USHORT *pos)                        /* [O] Position of the first character found + 2 */
 {
-    int main_idx;
-    unsigned int search_idx;
+    unsigned int main_idx, search_idx;
 
     switch (flags) {
         case 0:
@@ -1526,7 +1526,8 @@ NTSTATUS WINAPI RtlFindCharInUnicodeString(
             *pos = 0;
             return STATUS_NOT_FOUND;
         case 1:
-            for (main_idx = main_str->Length / sizeof(WCHAR) - 1; main_idx >= 0; main_idx--) {
+            main_idx = main_str->Length / sizeof(WCHAR);
+            while (main_idx-- > 0) {
                 for (search_idx = 0; search_idx < search_chars->Length / sizeof(WCHAR); search_idx++) {
                     if (main_str->Buffer[main_idx] == search_chars->Buffer[search_idx]) {
                         *pos = main_idx * sizeof(WCHAR);
@@ -1551,7 +1552,8 @@ NTSTATUS WINAPI RtlFindCharInUnicodeString(
             *pos = 0;
             return STATUS_NOT_FOUND;
         case 3:
-            for (main_idx = main_str->Length / sizeof(WCHAR) - 1; main_idx >= 0; main_idx--) {
+            main_idx = main_str->Length / sizeof(WCHAR);
+            while (main_idx-- > 0) {
                 search_idx = 0;
                 while (search_idx < search_chars->Length / sizeof(WCHAR) &&
                          main_str->Buffer[main_idx] != search_chars->Buffer[search_idx]) {
@@ -1591,6 +1593,8 @@ NTSTATUS WINAPI RtlFindCharInUnicodeString(
  */
 BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
 {
+    static const WCHAR std_control_chars[] = {'\r','\n','\t',' ',0x3000,0};
+    static const WCHAR byterev_control_chars[] = {0x0d00,0x0a00,0x0900,0x2000,0};
     const WCHAR *s = buf;
     int i;
     unsigned int flags = ~0U, out_flags = 0;
@@ -1645,6 +1649,30 @@ BOOLEAN WINAPI RtlIsTextUnicode( LPCVOID buf, INT len, INT *pf )
             if (!(s[i] & 0xff) || !(s[i] >> 8))
             {
                 out_flags |= IS_TEXT_UNICODE_NULL_BYTES;
+                break;
+            }
+        }
+    }
+
+    if (flags & IS_TEXT_UNICODE_CONTROLS)
+    {
+        for (i = 0; i < len; i++)
+        {
+            if (strchrW(std_control_chars, s[i]))
+            {
+                out_flags |= IS_TEXT_UNICODE_CONTROLS;
+                break;
+            }
+        }
+    }
+
+    if (flags & IS_TEXT_UNICODE_REVERSE_CONTROLS)
+    {
+        for (i = 0; i < len; i++)
+        {
+            if (strchrW(byterev_control_chars, s[i]))
+            {
+                out_flags |= IS_TEXT_UNICODE_REVERSE_CONTROLS;
                 break;
             }
         }
@@ -1820,7 +1848,7 @@ NTSTATUS WINAPI RtlIntegerToChar(
 /**************************************************************************
  *      RtlUnicodeStringToInteger (NTDLL.@)
  *
- * Converts an unicode string into its integer equivalent.
+ * Converts a unicode string into its integer equivalent.
  *
  * RETURNS
  *  Success: STATUS_SUCCESS. value contains the converted number
@@ -2098,7 +2126,7 @@ NTSTATUS WINAPI RtlStringFromGUID(const GUID* guid, UNICODE_STRING *str)
 
   str->Length = GUID_STRING_LENGTH * sizeof(WCHAR);
   str->MaximumLength = str->Length + sizeof(WCHAR);
-  str->Buffer = (WCHAR*)RtlAllocateHeap(GetProcessHeap(), 0, str->MaximumLength);
+  str->Buffer = RtlAllocateHeap(GetProcessHeap(), 0, str->MaximumLength);
   if (!str->Buffer)
   {
     str->Length = str->MaximumLength = 0;

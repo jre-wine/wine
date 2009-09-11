@@ -4,6 +4,7 @@
  *  dbgchnl.c
  *
  *  Copyright (C) 2003 - 2004 Eric Pouech
+ *  Copyright (C) 2008  Vladimir Pankratov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,9 +26,7 @@
 #include <ctype.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
-#include <tchar.h>
 #include <stdio.h>
 #include <winnt.h>
 #include <dbghelp.h>
@@ -61,9 +60,11 @@ BOOL AreDebugChannelsSupported(void)
 {
     static HANDLE   hDbgHelp /* = NULL */;
 
+    static const WCHAR    wszDbgHelp[] = {'D','B','G','H','E','L','P','.','D','L','L',0};
+
     if (hDbgHelp) return TRUE;
 
-    if (!(hDbgHelp = LoadLibrary("dbghelp.dll"))) return FALSE;
+    if (!(hDbgHelp = LoadLibraryW(wszDbgHelp))) return FALSE;
     pSymSetOptions = (void*)GetProcAddress(hDbgHelp, "SymSetOptions");
     pSymInitialize = (void*)GetProcAddress(hDbgHelp, "SymInitialize");
     pSymLoadModule = (void*)GetProcAddress(hDbgHelp, "SymLoadModule");
@@ -107,10 +108,10 @@ static DWORD    get_selected_pid(void)
 static int     list_channel_CB(HANDLE hProcess, void* addr, struct __wine_debug_channel* channel, void* user)
 {
     int         j;
-    char        val[2];
+    WCHAR       val[2];
     LVITEMA     lvitem;
     int         index;
-    HWND        hChannelLV = (HWND)user;
+    HWND        hChannelLV = user;
 
     lvitem.mask = LVIF_TEXT;
     lvitem.pszText = channel->name;
@@ -124,7 +125,7 @@ static int     list_channel_CB(HANDLE hProcess, void* addr, struct __wine_debug_
     for (j = 0; j < 4; j++)
     {
         val[0] = (channel->flags & (1 << j)) ? 'x' : ' ';
-        ListView_SetItemText(hChannelLV, index, j + 1, val);
+        ListView_SetItemTextW(hChannelLV, index, j + 1, val);
     }
     return 1;
 }
@@ -221,42 +222,49 @@ static void DebugChannels_FillList(HWND hChannelLV)
 static void DebugChannels_OnCreate(HWND hwndDlg)
 {
     HWND        hLV = GetDlgItem(hwndDlg, IDC_DEBUG_CHANNELS_LIST);
-    LVCOLUMN    lvc;
-    static TCHAR debug_channelT[] = {'D','e','b','u','g',' ','C','h','a','n','n','e','l',0},
-                 fixmeT[]         = {'F','i','x','m','e',0},
-                 errT[]           = {'E','r','r',0},
-                 warnT[]          = {'W','a','r','n',0},
-                 traceT[]         = {'T','r','a','c','e',0};
+    LVCOLUMNW   lvc;
+
+    WCHAR debug_channelW[255];
+    WCHAR fixmeW[255];
+    WCHAR errW[255];
+    WCHAR warnW[255];
+    WCHAR traceW[255];
+
+    LoadStringW(hInst, IDS_DEBUG_CHANNEL, debug_channelW, sizeof(debug_channelW)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_DEBUG_CHANNEL_FIXME, fixmeW, sizeof(fixmeW)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_DEBUG_CHANNEL_ERR, errW, sizeof(errW)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_DEBUG_CHANNEL_WARN, warnW, sizeof(warnW)/sizeof(WCHAR));
+    LoadStringW(hInst, IDS_DEBUG_CHANNEL_TRACE, traceW, sizeof(traceW)/sizeof(WCHAR));
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_LEFT;
-    lvc.pszText = debug_channelT;
+    lvc.pszText = debug_channelW;
     lvc.cx = 100;
-    SendMessage(hLV, LVM_INSERTCOLUMN, 0, (LPARAM) &lvc);
+    SendMessageW(hLV, LVM_INSERTCOLUMNW, 0, (LPARAM) &lvc);
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_CENTER;
-    lvc.pszText = fixmeT;
+    lvc.pszText = fixmeW;
     lvc.cx = 55;
-    SendMessage(hLV, LVM_INSERTCOLUMN, 1, (LPARAM) &lvc);
+    SendMessageW(hLV, LVM_INSERTCOLUMNW, 1, (LPARAM) &lvc);
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_CENTER;
-    lvc.pszText = errT;
+    lvc.pszText = errW;
     lvc.cx = 55;
-    SendMessage(hLV, LVM_INSERTCOLUMN, 2, (LPARAM) &lvc);
+    SendMessageW(hLV, LVM_INSERTCOLUMNW, 2, (LPARAM) &lvc);
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_CENTER;
-    lvc.pszText = warnT;
+    lvc.pszText = warnW;
     lvc.cx = 55;
-    SendMessage(hLV, LVM_INSERTCOLUMN, 3, (LPARAM) &lvc);
+    SendMessageW(hLV, LVM_INSERTCOLUMNW, 3, (LPARAM) &lvc);
 
     lvc.mask = LVCF_FMT | LVCF_TEXT | LVCF_WIDTH;
     lvc.fmt = LVCFMT_CENTER;
-    lvc.pszText = traceT;
+    lvc.pszText = traceW;
     lvc.cx = 55;
-    SendMessage(hLV, LVM_INSERTCOLUMN, 4, (LPARAM) &lvc);
+    SendMessageW(hLV, LVM_INSERTCOLUMNW, 4, (LPARAM) &lvc);
 
     DebugChannels_FillList(hLV);
 }
@@ -282,13 +290,13 @@ static void DebugChannels_OnNotify(HWND hDlg, LPARAM lParam)
             SendMessage(hChannelLV, LVM_SUBITEMHITTEST, 0, (LPARAM)&lhti);
             if (nmia->iSubItem >= 1 && nmia->iSubItem <= 4)
             {
-                TCHAR           val[2];
-                TCHAR           name[32];
+                WCHAR           val[2];
+                char            name[32];
                 unsigned        bitmask = 1 << (lhti.iSubItem - 1);
                 struct cce_user user;
 
-                ListView_GetItemText(hChannelLV, lhti.iItem, 0, name, sizeof(name) / sizeof(name[0]));
-                ListView_GetItemText(hChannelLV, lhti.iItem, lhti.iSubItem, val, sizeof(val) / sizeof(val[0]));
+                ListView_GetItemTextA(hChannelLV, lhti.iItem, 0, name, sizeof(name) / sizeof(name[0]));
+                ListView_GetItemTextW(hChannelLV, lhti.iItem, lhti.iSubItem, val, sizeof(val) / sizeof(val[0]));
                 user.name = name;
                 user.value = (val[0] == 'x') ? 0 : bitmask;
                 user.mask = bitmask;
@@ -297,7 +305,7 @@ static void DebugChannels_OnNotify(HWND hDlg, LPARAM lParam)
                 if (user.done)
                 {
                     val[0] ^= ('x' ^ ' ');
-                    ListView_SetItemText(hChannelLV, lhti.iItem, lhti.iSubItem, val);
+                    ListView_SetItemTextW(hChannelLV, lhti.iItem, lhti.iSubItem, val);
                 }
                 if (user.notdone)
                     printf("Some channel instances weren't correctly set\n");
@@ -331,5 +339,5 @@ static INT_PTR CALLBACK DebugChannelsDlgProc(HWND hDlg, UINT message, WPARAM wPa
 
 void ProcessPage_OnDebugChannels(void)
 {
-    DialogBox(hInst, (LPCTSTR)IDD_DEBUG_CHANNELS_DIALOG, hMainWnd, DebugChannelsDlgProc);
+    DialogBoxW(hInst, (LPCWSTR)IDD_DEBUG_CHANNELS_DIALOG, hMainWnd, DebugChannelsDlgProc);
 }

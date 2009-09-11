@@ -45,6 +45,7 @@
 #include "msxml_private.h"
 
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
@@ -180,7 +181,7 @@ static HRESULT register_interfaces(struct regsvr_interface const *list)
 				  KEY_READ | KEY_WRITE, NULL, &key, NULL);
 	    if (res != ERROR_SUCCESS) goto error_close_iid_key;
 
-	    wsprintfW(buf, fmt, list->num_methods);
+	    sprintfW(buf, fmt, list->num_methods);
 	    res = RegSetValueExW(key, NULL, 0, REG_SZ,
 				 (CONST BYTE*)buf,
 				 (lstrlenW(buf) + 1) * sizeof(WCHAR));
@@ -563,6 +564,30 @@ static struct regsvr_coclass const coclass_list[] = {
         "Msxml2.SAXXMLReader",
         "3.0"
     },
+    {   &CLSID_SAXXMLReader30,
+        "SAX XML Reader 3.0",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.SAXXMLReader",
+        "3.0"
+    },
+    {   &CLSID_MXXMLWriter,
+        "IMXWriter interface",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.MXXMLWriter",
+        "3.0"
+    },
+    {   &CLSID_MXXMLWriter30,
+        "IMXWriter interface 3.0",
+        NULL,
+        "msxml3.dll",
+        "Both",
+        "Msxml2.MXXMLWriter",
+        "3.0"
+    },
     { NULL }			/* list terminator */
 };
 
@@ -652,6 +677,26 @@ static struct progid const progid_list[] = {
         &CLSID_XMLSchemaCache30,
         NULL
     },
+    {   "Msxml2.SAXXMLReader",
+        "SAX XML Reader",
+        &CLSID_SAXXMLReader,
+        "Msxml2.SAXXMLReader.3.0"
+    },
+    {   "Msxml2.SAXXMLReader.3.0",
+        "SAX XML Reader 3.0",
+        &CLSID_SAXXMLReader30,
+        NULL
+    },
+    {   "Msxml2.MXXMLWriter",
+        "MXXMLWriter",
+        &CLSID_MXXMLWriter,
+        "Msxml2.MXXMLWriter.3.0"
+    },
+    {   "Msxml2.MXXMLWriter.3.0",
+        "MXXMLWriter 3.0",
+        &CLSID_MXXMLWriter30,
+        NULL
+    },
 
     { NULL }			/* list terminator */
 };
@@ -663,7 +708,7 @@ HRESULT WINAPI DllRegisterServer(void)
 {
     HRESULT hr;
     ITypeLib *tl;
-    LPWSTR path = NULL;
+    static const WCHAR wszMsXml3[] = {'m','s','x','m','l','3','.','d','l','l',0};
 
     TRACE("\n");
 
@@ -673,14 +718,12 @@ HRESULT WINAPI DllRegisterServer(void)
     if (SUCCEEDED(hr))
 	hr = register_progids(progid_list);
 
-    tl = get_msxml3_typelib( &path );
-    if (tl)
-    {
-        hr = RegisterTypeLib( tl, path, NULL );
-        ITypeLib_Release( tl );
+    if(SUCCEEDED(hr)) {
+
+        hr = LoadTypeLibEx(wszMsXml3, REGKIND_REGISTER, &tl);
+        if(SUCCEEDED(hr))
+            ITypeLib_Release(tl);
     }
-    else
-        hr = E_FAIL;
 
     return hr;
 }
@@ -699,8 +742,8 @@ HRESULT WINAPI DllUnregisterServer(void)
 	hr = unregister_interfaces(interface_list);
     if (SUCCEEDED(hr))
 	hr = unregister_progids(progid_list);
-	if (SUCCEEDED(hr))
-	    hr = UnRegisterTypeLib(&LIBID_MSXML2, 3, 0, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
+    if (SUCCEEDED(hr))
+        hr = UnRegisterTypeLib(&LIBID_MSXML2, 3, 0, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
 
     return hr;
 }

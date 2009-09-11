@@ -4,6 +4,7 @@
  * Copyright 2004 Michael Stefaniuc
  * Copyright 2002 Mike McCormack for CodeWeavers
  * Copyright 2007 Dmitry Timoshkov
+ * Copyright 2009 Owen Rudge for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,8 +34,12 @@
 #include "winuser.h"
 #include "objbase.h"
 #include "commctrl.h" /* must be included after objbase.h to get ImageList_Write */
+#include "initguid.h"
+#include "commoncontrols.h"
+#include "shellapi.h"
 
 #include "wine/test.h"
+#include "v6util.h"
 
 #undef VISIBLE
 
@@ -136,9 +141,9 @@ static HWND create_a_window(void)
         cls.cbClsExtra    = 0;
         cls.cbWndExtra    = 0;
         cls.hInstance     = 0;
-        cls.hIcon         = LoadIconA (0, (LPSTR)IDI_APPLICATION);
-        cls.hCursor       = LoadCursorA (0, (LPSTR)IDC_ARROW);
-        cls.hbrBackground = (HBRUSH) GetStockObject (WHITE_BRUSH);
+        cls.hIcon         = LoadIconA (0, IDI_APPLICATION);
+        cls.hCursor       = LoadCursorA (0, IDC_ARROW);
+        cls.hbrBackground = GetStockObject (WHITE_BRUSH);
         cls.lpszMenuName  = 0;
         cls.lpszClassName = className;
 
@@ -433,7 +438,7 @@ static BOOL DoTest3(void)
 
     if (!pImageList_DrawIndirect)
     {
-        trace("ImageList_DrawIndirect not available, skipping test\n");
+        win_skip("ImageList_DrawIndirect not available, skipping test\n");
         return TRUE;
     }
 
@@ -835,10 +840,18 @@ static void check_ilhead_data(const char *ilh_data, INT cx, INT cy, INT cur, INT
     ok(ilh->cy == cy, "wrong cy %d (expected %d)\n", ilh->cy, cy);
     ok(ilh->bkcolor == CLR_NONE, "wrong bkcolor %x\n", ilh->bkcolor);
     ok(ilh->flags == ILC_COLOR24, "wrong flags %04x\n", ilh->flags);
-    ok(ilh->ovls[0] == -1, "wrong ovls[0] %04x\n", ilh->ovls[0]);
-    ok(ilh->ovls[1] == -1, "wrong ovls[1] %04x\n", ilh->ovls[1]);
-    ok(ilh->ovls[2] == -1, "wrong ovls[2] %04x\n", ilh->ovls[2]);
-    ok(ilh->ovls[3] == -1, "wrong ovls[3] %04x\n", ilh->ovls[3]);
+    ok(ilh->ovls[0] == -1 ||
+       ilh->ovls[0] == 0, /* win95 */
+       "wrong ovls[0] %04x\n", ilh->ovls[0]);
+    ok(ilh->ovls[1] == -1 ||
+       ilh->ovls[1] == 0, /* win95 */
+       "wrong ovls[1] %04x\n", ilh->ovls[1]);
+    ok(ilh->ovls[2] == -1 ||
+       ilh->ovls[2] == 0, /* win95 */
+       "wrong ovls[2] %04x\n", ilh->ovls[2]);
+    ok(ilh->ovls[3] == -1 ||
+       ilh->ovls[3] == 0, /* win95 */
+       "wrong ovls[3] %04x\n", ilh->ovls[3]);
 }
 
 static HBITMAP create_bitmap(INT cx, INT cy, COLORREF color, const char *comment)
@@ -973,8 +986,52 @@ static void test_imagelist_storage(void)
     iml_clear_stream_data();
 }
 
+static void test_shell_imagelist(void)
+{
+    BOOL (WINAPI *pSHGetImageList)(INT, REFIID, void**);
+    IImageList *iml = NULL;
+    HMODULE hShell32;
+    HRESULT hr;
+    int out = 0;
+    RECT rect;
+
+    /* Try to load function from shell32 */
+    hShell32 = LoadLibrary("shell32.dll");
+    pSHGetImageList = (void*)GetProcAddress(hShell32, (LPCSTR) 727);
+
+    if (!pSHGetImageList)
+    {
+        win_skip("SHGetImageList not available, skipping test\n");
+        return;
+    }
+
+    /* Get system image list */
+    hr = (pSHGetImageList)(SHIL_LARGE, &IID_IImageList, (void**)&iml);
+
+    todo_wine ok(SUCCEEDED(hr), "SHGetImageList failed, hr=%x\n", hr);
+
+    if (hr != S_OK)
+        return;
+
+    IImageList_GetImageCount(iml, &out);
+    todo_wine ok(out > 0, "IImageList_GetImageCount returned out <= 0\n");
+
+    /* right and bottom should be 32x32 for large icons, or 48x48 if larger
+       icons enabled in control panel */
+    IImageList_GetImageRect(iml, 0, &rect);
+    todo_wine ok((((rect.right == 32) && (rect.bottom == 32)) ||
+                  ((rect.right == 48) && (rect.bottom == 48))),
+                 "IImageList_GetImageRect returned r:%d,b:%d\n",
+                 rect.right, rect.bottom);
+
+    IImageList_Release(iml);
+    FreeLibrary(hShell32);
+}
+
 START_TEST(imagelist)
 {
+    ULONG_PTR ctx_cookie;
+
     HMODULE hComCtl32 = GetModuleHandle("comctl32.dll");
     pImageList_DrawIndirect = (void*)GetProcAddress(hComCtl32, "ImageList_DrawIndirect");
     pImageList_SetImageCount = (void*)GetProcAddress(hComCtl32, "ImageList_SetImageCount");
@@ -990,4 +1047,13 @@ START_TEST(imagelist)
     DoTest3();
     testMerge();
     test_imagelist_storage();
+
+    /* Now perform v6 tests */
+
+    if (!load_v6_module(&ctx_cookie))
+        return;
+
+    test_shell_imagelist();
+
+    unload_v6_module(ctx_cookie);
 }

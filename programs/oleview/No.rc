@@ -19,16 +19,18 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resource.h"
+
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
 IDM_MENU MENU
 {
     POPUP "&Fil"
     {
-        MENUITEM "&Bind til fil . . .",    IDM_BIND
-        MENUITEM "&Vis TypeLib . . .",    IDM_TYPELIB
+        MENUITEM "&Bind til fil...",    IDM_BIND
+        MENUITEM "&Vis TypeLib...",    IDM_TYPELIB
         MENUITEM SEPARATOR
-        MENUITEM "&Systemoppsett . . .",    IDM_SYSCONF
+        MENUITEM "&Systemoppsett...",    IDM_SYSCONF
         MENUITEM "Kjø&r registerredigerer",    IDM_REGEDIT
         MENUITEM SEPARATOR
         MENUITEM "&Avslutt",    IDM_EXIT
@@ -46,13 +48,13 @@ IDM_MENU MENU
         MENUITEM "Vis &type-informasjon",    IDM_TYPEINFO, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Opprett &instans",    IDM_CREATEINST, GRAYED
-        MENUITEM "&Opprett instans på . . .",    IDM_CREATEINSTON, GRAYED
+        MENUITEM "&Opprett instans på...",    IDM_CREATEINSTON, GRAYED
         MENUITEM "&Slipp instans",    IDM_RELEASEINST, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Kopier C&LSID til utklippstavlen",    IDM_COPYCLSID, GRAYED
         MENUITEM "&Kopier &HTML-objektlapp til utklippstavlen", IDM_HTMLTAG, GRAYED
         MENUITEM SEPARATOR
-        MENUITEM "&Vis . . .",    IDM_VIEW, GRAYED
+        MENUITEM "&Vis...",    IDM_VIEW, GRAYED
     }
     POPUP "&Vis"
     {
@@ -75,7 +77,7 @@ IDM_TYPELIB MENU
 {
     POPUP "&Fil"
     {
-        MENUITEM "Lagre &som . . .",    IDM_SAVEAS
+        MENUITEM "Lagre &som...",    IDM_SAVEAS
         MENUITEM "&Lukk",  IDM_CLOSE
     }
     POPUP "&Vis"
@@ -152,7 +154,7 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Koble til en annen maskin"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "&Maskinnavn:", IDIGNORE, 5, 6, 190, 8
+    LTEXT   "&Maskinnavn:", -1, 5, 6, 190, 8
     EDITTEXT    IDC_MACHINE, 5, 16, 190, 12, WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL
     DEFPUSHBUTTON   "&OK", IDOK, 200, 5, 45, 14
     PUSHBUTTON  "&Avbryt", IDCANCEL, 200, 22, 45, 14
@@ -163,10 +165,10 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Systemoppsett"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Systeminnstillinger", IDIGNORE, 5, 6, 160, 8
+    LTEXT   "Systeminnstillinger", -1, 5, 6, 160, 8
     CHECKBOX    "Slå på distribu&ert  COM", IDC_ENABLEDCOM, 5, 20, 160, 10, WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX
     CHECKBOX    "Slå på eksterne tilkoblinge&r (kun Win95)", IDC_ENABLEREMOTE, 5, 35, 160, 10, WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX
-    LTEXT   "Disse innstillingene endrer kun registerverdier.\nDe påvirker ikke Wines ytelse.", IDIGNORE, 5, 50, 160, 40
+    LTEXT   "Disse innstillingene endrer kun registerverdier.\nDe påvirker ikke Wines ytelse.", -1, 5, 50, 160, 40
     DEFPUSHBUTTON   "&OK", IDOK, 70, 80, 45, 14
     PUSHBUTTON  "&Avbryt", IDCANCEL, 120, 80, 45, 14
 }
@@ -176,9 +178,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Standard grensesnittviser"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Grensesnitt", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Grensesnitt", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "IID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "IID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Lukk", IDCANCEL, 230, 6, 45, 14
     PUSHBUTTON  "&Vis typeinfo", IDC_VIEWTYPEINFO, 6, 31, 70, 14, WS_DISABLED
@@ -189,9 +191,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Grensesnittvsier for IPersist"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Klassenavn:", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Klassenavn:", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "CLSID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "CLSID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Lukk", IDCANCEL, 230, 6, 45, 14
 }
@@ -201,9 +203,9 @@ STYLE DS_MODALFRAME | DS_NOIDLEMSG | WS_CAPTION | WS_SYSMENU
 CAPTION "Grensesnittviser for IPersistStream"
 FONT 8, "MS Shell Dlg"
 {
-    LTEXT   "Klassenavn:", IDIGNORE, 5, 6, 50, 8
+    LTEXT   "Klassenavn:", -1, 5, 6, 50, 8
     LTEXT   "", IDC_LABEL, 60, 6, 145, 8
-    LTEXT   "CLSID:", IDIGNORE, 5, 16, 50, 8
+    LTEXT   "CLSID:", -1, 5, 16, 50, 8
     LTEXT   "", IDC_IDENTIFIER, 60, 16, 165, 8
     DEFPUSHBUTTON   "&Lukk", IDCANCEL, 230, 6, 45, 14
     PUSHBUTTON  "&IsDirty", IDC_ISDIRTY_BUTTON, 6, 31, 50, 14

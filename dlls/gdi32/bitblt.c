@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "config.h"
+
 #include <stdarg.h>
 
 #include <math.h>
@@ -65,6 +67,9 @@ BOOL WINAPI BitBlt( HDC hdcDst, INT xDst, INT yDst, INT width,
     BOOL ret = FALSE;
     DC *dcDst, *dcSrc;
 
+    TRACE("hdcSrc=%p %d,%d -> hdcDest=%p %d,%d %dx%d rop=%06x\n",
+          hdcSrc, xSrc, ySrc, hdcDst, xDst, yDst, width, height, rop);
+
     if (!(dcDst = get_dc_ptr( hdcDst ))) return FALSE;
 
     if (dcDst->funcs->pBitBlt)
@@ -72,8 +77,6 @@ BOOL WINAPI BitBlt( HDC hdcDst, INT xDst, INT yDst, INT width,
         update_dc( dcDst );
         dcSrc = get_dc_ptr( hdcSrc );
         if (dcSrc) update_dc( dcSrc );
-        TRACE("hdcSrc=%p %d,%d -> hdcDest=%p %d,%d %dx%d rop=%06x\n",
-              hdcSrc, xSrc, ySrc, hdcDst, xDst, yDst, width, height, rop);
 
         ret = dcDst->funcs->pBitBlt( dcDst->physDev, xDst, yDst, width, height,
                                      dcSrc ? dcSrc->physDev : NULL, xSrc, ySrc, rop );
@@ -143,6 +146,11 @@ BOOL WINAPI StretchBlt( HDC hdcDst, INT xDst, INT yDst,
     BOOL ret = FALSE;
     DC *dcDst, *dcSrc;
 
+    TRACE("%p %d,%d %dx%d -> %p %d,%d %dx%d rop=%06x\n",
+          hdcSrc, xSrc, ySrc, widthSrc, heightSrc,
+          hdcDst, xDst, yDst, widthDst, heightDst, rop );
+
+
     if (!(dcDst = get_dc_ptr( hdcDst ))) return FALSE;
 
     if (dcDst->funcs->pStretchBlt)
@@ -151,10 +159,6 @@ BOOL WINAPI StretchBlt( HDC hdcDst, INT xDst, INT yDst,
         {
             update_dc( dcDst );
             update_dc( dcSrc );
-
-            TRACE("%p %d,%d %dx%d -> %p %d,%d %dx%d rop=%06x\n",
-                  hdcSrc, xSrc, ySrc, widthSrc, heightSrc,
-                  hdcDst, xDst, yDst, widthDst, heightDst, rop );
 
             ret = dcDst->funcs->pStretchBlt( dcDst->physDev, xDst, yDst, widthDst, heightDst,
                                              dcSrc->physDev, xSrc, ySrc, widthSrc, heightSrc,
@@ -170,6 +174,17 @@ BOOL WINAPI StretchBlt( HDC hdcDst, INT xDst, INT yDst,
         HBITMAP hbm;
         LPVOID bits;
         INT lines;
+        POINT pts[2];
+
+        pts[0].x = xSrc;
+        pts[0].y = ySrc;
+        pts[1].x = xSrc + widthSrc;
+        pts[1].y = ySrc + heightSrc;
+        LPtoDP(hdcSrc, pts, 2);
+        xSrc      = pts[0].x;
+        ySrc      = pts[0].y;
+        widthSrc  = pts[1].x - pts[0].x;
+        heightSrc = pts[1].y - pts[0].y;
 
         release_dc_ptr( dcDst );
 
@@ -538,7 +553,7 @@ BOOL WINAPI PlgBlt( HDC hdcDest, const POINT *lpPoint,
     XFORM xf;
     XFORM SrcXf;
     XFORM oldDestXf;
-    FLOAT det;
+    double det;
 
     /* save actual mode, set GM_ADVANCED */
     oldgMode = SetGraphicsMode(hdcDest,GM_ADVANCED);
@@ -554,7 +569,7 @@ BOOL WINAPI PlgBlt( HDC hdcDest, const POINT *lpPoint,
     rect[2].y = nYSrc + nHeight;
     /* calc XFORM matrix to transform hdcDest -> hdcSrc (parallelogram to rectangle) */
     /* determinant */
-    det = (FLOAT)(rect[1].x*(rect[2].y - rect[0].y) - rect[2].x*(rect[1].y - rect[0].y) - rect[0].x*(rect[2].y - rect[1].y));
+    det = rect[1].x*(rect[2].y - rect[0].y) - rect[2].x*(rect[1].y - rect[0].y) - rect[0].x*(rect[2].y - rect[1].y);
 
     if (fabs(det) < 1e-5)
     {

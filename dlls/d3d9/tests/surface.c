@@ -17,13 +17,12 @@
  */
 #define COBJMACROS
 #include <d3d9.h>
-#include <dxerr9.h>
 #include "wine/test.h"
 
 static HWND create_window(void)
 {
     WNDCLASS wc = {0};
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -44,8 +43,11 @@ static IDirect3DDevice9 *init_d3d9(HMODULE d3d9_handle)
     if (!d3d9_create) return NULL;
 
     d3d9_ptr = d3d9_create(D3D_SDK_VERSION);
-    ok(d3d9_ptr != NULL, "Failed to create IDirect3D9 object\n");
-    if (!d3d9_ptr) return NULL;
+    if (!d3d9_ptr)
+    {
+        skip("could not create D3D9\n");
+        return NULL;
+    }
 
     ZeroMemory(&present_parameters, sizeof(present_parameters));
     present_parameters.Windowed = TRUE;
@@ -150,7 +152,7 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
 
         hr = IDirect3DDevice9_CreateTexture(device_ptr, 64, 64, 0, 0, MAKEFOURCC('D', 'X', 'T', '1'+i),
                                             D3DPOOL_MANAGED, &pTexture, NULL);
-        ok(SUCCEEDED(hr) || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateTexture: %s\n", DXGetErrorString9(hr));
+        ok(SUCCEEDED(hr) || hr == D3DERR_INVALIDCALL, "IDirect3DDevice9_CreateTexture: %08x\n", hr);
         if (FAILED(hr)) {
             skip("DXT%d surfaces are not supported\n", i + 1);
             continue;
@@ -163,7 +165,7 @@ static void test_surface_alignment(IDirect3DDevice9 *device_ptr)
 
             IDirect3DTexture9_GetLevelDesc(pTexture, j, &descr);
             hr = IDirect3DTexture9_LockRect(pTexture, j, &rc, NULL, 0);
-            ok(SUCCEEDED(hr), "IDirect3DTexture9_LockRect: %s\n", DXGetErrorString9(hr));
+            ok(SUCCEEDED(hr), "IDirect3DTexture9_LockRect: %08x\n", hr);
             IDirect3DTexture9_UnlockRect(pTexture, j);
 
             pitch = ((descr.Width + 3) >> 2) << 3;
@@ -312,7 +314,7 @@ static void test_lockrect_invalid(IDirect3DDevice9 *device)
     IDirect3DSurface9_Release(surface);
 }
 
-static unsigned long getref(IUnknown *iface)
+static ULONG getref(IUnknown *iface)
 {
     IUnknown_AddRef(iface);
     return IUnknown_Release(iface);
@@ -380,6 +382,7 @@ START_TEST(surface)
 {
     HMODULE d3d9_handle;
     IDirect3DDevice9 *device_ptr;
+    ULONG refcount;
 
     d3d9_handle = LoadLibraryA("d3d9.dll");
     if (!d3d9_handle)
@@ -396,4 +399,7 @@ START_TEST(surface)
     test_lockrect_offset(device_ptr);
     test_lockrect_invalid(device_ptr);
     test_private_data(device_ptr);
+
+    refcount = IDirect3DDevice9_Release(device_ptr);
+    ok(!refcount, "Device has %u references left\n", refcount);
 }

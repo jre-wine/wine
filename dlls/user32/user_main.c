@@ -154,6 +154,61 @@ static void palette_init(void)
 
 
 /***********************************************************************
+ *           get_default_desktop
+ *
+ * Get the name of the desktop to use for this app if not specified explicitly.
+ */
+static const WCHAR *get_default_desktop(void)
+{
+    static const WCHAR defaultW[] = {'D','e','f','a','u','l','t',0};
+    static const WCHAR desktopW[] = {'D','e','s','k','t','o','p',0};
+    static const WCHAR explorerW[] = {'\\','E','x','p','l','o','r','e','r',0};
+    static const WCHAR app_defaultsW[] = {'S','o','f','t','w','a','r','e','\\',
+                                          'W','i','n','e','\\',
+                                          'A','p','p','D','e','f','a','u','l','t','s',0};
+    static WCHAR buffer[MAX_PATH + sizeof(explorerW)/sizeof(WCHAR)];
+    WCHAR *p, *appname = buffer;
+    const WCHAR *ret = defaultW;
+    DWORD len;
+    HKEY tmpkey, appkey;
+
+    len = (GetModuleFileNameW( 0, buffer, MAX_PATH ));
+    if (!len || len >= MAX_PATH) return ret;
+    if ((p = strrchrW( appname, '/' ))) appname = p + 1;
+    if ((p = strrchrW( appname, '\\' ))) appname = p + 1;
+    p = appname + strlenW(appname);
+    strcpyW( p, explorerW );
+
+    /* @@ Wine registry key: HKCU\Software\Wine\AppDefaults\app.exe\Explorer */
+    if (!RegOpenKeyW( HKEY_CURRENT_USER, app_defaultsW, &tmpkey ))
+    {
+        if (RegOpenKeyW( tmpkey, appname, &appkey )) appkey = 0;
+        RegCloseKey( tmpkey );
+        if (appkey)
+        {
+            len = sizeof(buffer);
+            if (!RegQueryValueExW( appkey, desktopW, 0, NULL, (LPBYTE)buffer, &len )) ret = buffer;
+            RegCloseKey( appkey );
+            if (ret && strcmpiW( ret, defaultW )) return ret;
+            ret = defaultW;
+        }
+    }
+
+    memcpy( buffer, app_defaultsW, 13 * sizeof(WCHAR) );  /* copy only software\\wine */
+    strcpyW( buffer + 13, explorerW );
+
+    /* @@ Wine registry key: HKCU\Software\Wine\Explorer */
+    if (!RegOpenKeyW( HKEY_CURRENT_USER, buffer, &appkey ))
+    {
+        len = sizeof(buffer);
+        if (!RegQueryValueExW( appkey, desktopW, 0, NULL, (LPBYTE)buffer, &len )) ret = buffer;
+        RegCloseKey( appkey );
+    }
+    return ret;
+}
+
+
+/***********************************************************************
  *           winstation_init
  *
  * Connect to the process window station and desktop.
@@ -161,7 +216,6 @@ static void palette_init(void)
 static void winstation_init(void)
 {
     static const WCHAR WinSta0[] = {'W','i','n','S','t','a','0',0};
-    static const WCHAR Default[] = {'D','e','f','a','u','l','t',0};
 
     STARTUPINFOW info;
     WCHAR *winstation = NULL, *desktop = NULL, *buffer = NULL;
@@ -200,7 +254,8 @@ static void winstation_init(void)
     }
     if (buffer || !GetThreadDesktop( GetCurrentThreadId() ))
     {
-        handle = CreateDesktopW( desktop ? desktop : Default, NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
+        handle = CreateDesktopW( desktop ? desktop : get_default_desktop(),
+                                 NULL, NULL, 0, DESKTOP_ALL_ACCESS, NULL );
         if (handle) SetThreadDesktop( handle );
     }
     HeapFree( GetProcessHeap(), 0, buffer );
@@ -257,13 +312,16 @@ BOOL USER_IsExitingThread( DWORD tid )
  */
 static void thread_detach(void)
 {
+    struct user_thread_info *thread_info = get_user_thread_info();
+
     exiting_thread_id = GetCurrentThreadId();
 
     WDML_NotifyThreadDetach();
 
-    WIN_DestroyThreadWindows( get_user_thread_info()->desktop );
-    CloseHandle( get_user_thread_info()->server_queue );
-    HeapFree( GetProcessHeap(), 0, get_user_thread_info()->wmchar_data );
+    if (thread_info->top_window) WIN_DestroyThreadWindows( thread_info->top_window );
+    if (thread_info->msg_window) WIN_DestroyThreadWindows( thread_info->msg_window );
+    CloseHandle( thread_info->server_queue );
+    HeapFree( GetProcessHeap(), 0, thread_info->wmchar_data );
 
     exiting_thread_id = 0;
 }
@@ -330,6 +388,16 @@ BOOL WINAPI ExitWindowsEx( UINT flags, DWORD reason )
     CloseHandle( pi.hProcess );
     CloseHandle( pi.hThread );
     return TRUE;
+}
+
+/***********************************************************************
+ *		LockWorkStation (USER32.@)
+ */
+BOOL WINAPI LockWorkStation(void)
+{
+    TRACE(": stub\n");
+    SetLastError( ERROR_CALL_NOT_IMPLEMENTED );
+    return FALSE;
 }
 
 /***********************************************************************

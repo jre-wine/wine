@@ -22,16 +22,18 @@
 
 #include <commctrl.h>
 
-#ifdef __cplusplus
-extern "C" {
+#ifdef _WIN64
+#include <pshpack8.h>
+#else
+#include <pshpack1.h>
 #endif
 
 /* setupapi doesn't use the normal convention, it adds an underscore before A/W */
-#ifdef __WINESRC__
+#ifdef WINE_NO_UNICODE_MACROS
 # define DECL_WINELIB_SETUPAPI_TYPE_AW(type)  /* nothing */
-#else   /* __WINESRC__ */
+#else
 # define DECL_WINELIB_SETUPAPI_TYPE_AW(type)  typedef WINELIB_NAME_AW(type##_) type;
-#endif  /* __WINESRC__ */
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -1054,6 +1056,11 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define FLG_REGSVR_DLLREGISTER           0x00000001
 #define FLG_REGSVR_DLLINSTALL            0x00000002
 
+#define FLG_PROFITEM_CURRENTUSER         0x00000001
+#define FLG_PROFITEM_DELETE              0x00000002
+#define FLG_PROFITEM_GROUP               0x00000004
+#define FLG_PROFITEM_CSIDL               0x00000008
+
 #define DI_NOVCP 0x00000008
 
 /* Class installer function codes */
@@ -1209,6 +1216,7 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define ERROR_SET_SYSTEM_RESTORE_POINT    (APPLICATION_ERROR_MASK|ERROR_SEVERITY_ERROR|0x236)
 #define ERROR_INCORRECTLY_COPIED_INF      (APPLICATION_ERROR_MASK|ERROR_SEVERITY_ERROR|0x237)
 #define ERROR_SCE_DISABLED                (APPLICATION_ERROR_MASK|ERROR_SEVERITY_ERROR|0x238)
+#define ERROR_WRONG_INF_TYPE              (APPLICATION_ERROR_MASK|ERROR_SEVERITY_ERROR|0x24A)
 #define ERROR_NO_DEFAULT_INTERFACE_DEVICE ERROR_NO_DEFAULT_DEVICE_INTERFACE
 #define ERROR_INTERFACE_DEVICE_ACTIVE     ERROR_DEVICE_INTERFACE_ACTIVE
 #define ERROR_INTERFACE_DEVICE_REMOVED    ERROR_DEVICE_INTERFACE_REMOVED
@@ -1287,11 +1295,11 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define SPDRP_INSTALL_STATE               0x00000022
 #define SPDRP_MAXIMUM_PROPERTY            0x00000023
 
-#define DPROMPT_SUCCESS       0
-#define DPROMPT_CANCEL        1
-#define DPROMPT_SKIPFILE      2
-#define DPROMPT_BUFFERTOSMALL 3
-#define DPROMPT_OUTOFMEMORY   4
+#define DPROMPT_SUCCESS        0
+#define DPROMPT_CANCEL         1
+#define DPROMPT_SKIPFILE       2
+#define DPROMPT_BUFFERTOOSMALL 3
+#define DPROMPT_OUTOFMEMORY    4
 
 #define SETDIRID_NOT_FULL_PATH 0x00000001
 
@@ -1303,6 +1311,10 @@ DECL_WINELIB_SETUPAPI_TYPE_AW(PSP_INF_SIGNER_INFO)
 #define IDF_NOBEEP       0x00000200
 #define IDF_NOFOREGROUND 0x00000400
 #define IDF_WARNIFSKIP   0x00000800
+
+#define IDF_NOREMOVABLEMEDIAPROMPT 0x00001000
+#define IDF_USEDISKNAMEASPROMPT    0x00002000
+#define IDF_OEMDISK                0x80000000
 
 #define INFINFO_INF_SPEC_IS_HINF        1
 #define INFINFO_INF_NAME_IS_ABSOLUTE    2
@@ -1378,6 +1390,9 @@ typedef enum {
 
 /* SetupConfigureWmiFromInfSection Flags values */
 #define SCWMI_CLOBBER_SECURITY 0x00000001
+
+/* SetupUninstallOEMInf Flags values */
+#define SUOI_FORCEDELETE 0x00000001
 
 LONG     WINAPI AddTagToGroupOrderList(PCWSTR lpGroupName, DWORD dwUnknown2, DWORD dwUnknown3);
 DWORD    WINAPI CaptureAndConvertAnsiArg(PCSTR lpSrc, PWSTR *lpDst);
@@ -1627,8 +1642,8 @@ BOOL     WINAPI SetupDiUnremoveDevice(HDEVINFO, PSP_DEVINFO_DATA);
 HDSKSPC  WINAPI SetupDuplicateDiskSpaceListA(HDSKSPC, PVOID, DWORD, UINT);
 HDSKSPC  WINAPI SetupDuplicateDiskSpaceListW(HDSKSPC, PVOID, DWORD, UINT);
 #define         SetupDuplicateDiskSpaceList WINELIB_NAME_AW(SetupDuplicateDiskSpaceList)
-BOOL     WINAPI SetupEnumInfSectionsA(HINF, UINT, PSTR, SIZE, UINT *);
-BOOL     WINAPI SetupEnumInfSectionsW(HINF, UINT, PWSTR, SIZE, UINT *);
+BOOL     WINAPI SetupEnumInfSectionsA(HINF, UINT, PSTR, DWORD, DWORD *);
+BOOL     WINAPI SetupEnumInfSectionsW(HINF, UINT, PWSTR, DWORD, DWORD *);
 #define         SetupEnumInfSections WINELIB_NAME_AW(SetupEnumInfSections)
 BOOL     WINAPI SetupFindFirstLineA( HINF hinf, PCSTR section, PCSTR key, INFCONTEXT *context );
 BOOL     WINAPI SetupFindFirstLineW( HINF hinf, PCWSTR section, PCWSTR key, INFCONTEXT *context );
@@ -1842,8 +1857,6 @@ BOOL     WINAPI UnmapAndCloseFile(HANDLE, HANDLE, PVOID);
 
 #undef DECL_WINELIB_SETUPAPI_TYPE_AW
 
-#ifdef __cplusplus
-}
-#endif
+#include <poppack.h>
 
 #endif /* _INC_SETUPAPI */

@@ -443,8 +443,8 @@ BOOL WINAPI SetTimeZoneInformation( const TIME_ZONE_INFORMATION *tzinfo )
  */
 
 BOOL WINAPI SystemTimeToTzSpecificLocalTime(
-    LPTIME_ZONE_INFORMATION lpTimeZoneInformation,
-    LPSYSTEMTIME lpUniversalTime, LPSYSTEMTIME lpLocalTime )
+    const TIME_ZONE_INFORMATION *lpTimeZoneInformation,
+    const SYSTEMTIME *lpUniversalTime, LPSYSTEMTIME lpLocalTime )
 {
     FILETIME ft;
     LONG lBias;
@@ -489,8 +489,8 @@ BOOL WINAPI SystemTimeToTzSpecificLocalTime(
  *  Failure: FALSE.
  */
 BOOL WINAPI TzSpecificLocalTimeToSystemTime(
-    LPTIME_ZONE_INFORMATION lpTimeZoneInformation,
-    LPSYSTEMTIME lpLocalTime, LPSYSTEMTIME lpUniversalTime)
+    const TIME_ZONE_INFORMATION *lpTimeZoneInformation,
+    const SYSTEMTIME *lpLocalTime, LPSYSTEMTIME lpUniversalTime)
 {
     FILETIME ft;
     LONG lBias;
@@ -550,8 +550,7 @@ VOID WINAPI GetSystemTimeAsFileTime(
 static void TIME_ClockTimeToFileTime(clock_t unix_time, LPFILETIME filetime)
 {
     long clocksPerSec = sysconf(_SC_CLK_TCK);
-    ULONGLONG secs = RtlEnlargedUnsignedMultiply( unix_time, 10000000 );
-    secs = RtlExtendedLargeIntegerDivide( secs, clocksPerSec, NULL );
+    ULONGLONG secs = (ULONGLONG)unix_time * 10000000 / clocksPerSec;
     filetime->dwLowDateTime  = (DWORD)secs;
     filetime->dwHighDateTime = (DWORD)(secs >> 32);
 }
@@ -651,16 +650,16 @@ int WINAPI GetCalendarInfoW(LCID Locale, CALID Calendar, CALTYPE CalType,
     switch (CalType & ~(CAL_NOUSEROVERRIDE|CAL_RETURN_NUMBER|CAL_USE_CP_ACP)) {
 	case CAL_ICALINTVALUE:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SCALNAME:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_IYEAROFFSETRANGE:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SERASTRING:
             FIXME("Unimplemented caltype %d\n", CalType & 0xffff);
-	    return E_FAIL;
+	    return 0;
 	case CAL_SSHORTDATE:
 	    return GetLocaleInfoW(Locale, LOCALE_SSHORTDATE, lpCalData, cchData);
 	case CAL_SLONGDATE:
@@ -750,8 +749,10 @@ int WINAPI GetCalendarInfoW(LCID Locale, CALID Calendar, CALTYPE CalType,
 	case CAL_ITWODIGITYEARMAX:
 	    if (lpValue) *lpValue = CALINFO_MAX_YEAR;
 	    break;
-	default: MESSAGE("Unknown caltype %d\n",CalType & 0xffff);
-		 return E_FAIL;
+	default:
+            FIXME("Unknown caltype %d\n",CalType & 0xffff);
+            SetLastError(ERROR_INVALID_FLAGS);
+            return 0;
     }
     return 0;
 }
@@ -1010,4 +1011,24 @@ BOOL WINAPI FileTimeToDosDateTime( const FILETIME *ft, LPWORD fatdate,
         *fatdate = ((tm->tm_year - 80) << 9) + ((tm->tm_mon + 1) << 5)
                    + tm->tm_mday;
     return TRUE;
+}
+
+/*********************************************************************
+ *      GetSystemTimes                                  (KERNEL32.@)
+ *
+ * Retrieves system timing information
+ *
+ * PARAMS
+ *  lpIdleTime [O] Destination for idle time.
+ *  lpKernelTime [O] Destination for kernel time.
+ *  lpUserTime [O] Destination for user time.
+ *
+ * RETURNS
+ *  TRUE if success, FALSE otherwise.
+ */
+BOOL WINAPI GetSystemTimes(LPFILETIME lpIdleTime, LPFILETIME lpKernelTime, LPFILETIME lpUserTime)
+{
+    FIXME("(%p,%p,%p): Stub!\n", lpIdleTime, lpKernelTime, lpUserTime);
+
+    return FALSE;
 }

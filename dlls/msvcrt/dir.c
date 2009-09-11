@@ -201,7 +201,7 @@ int CDECL _chdrive(int newdrive)
  * NOTES
  *  See FindClose.
  */
-int CDECL MSVCRT__findclose(long hand)
+int CDECL MSVCRT__findclose(MSVCRT_intptr_t hand)
 {
   TRACE(":handle %ld\n",hand);
   if (!FindClose((HANDLE)hand))
@@ -229,7 +229,7 @@ int CDECL MSVCRT__findclose(long hand)
  * NOTES
  *  See FindFirstFileA.
  */
-long CDECL MSVCRT__findfirst(const char * fspec, struct MSVCRT__finddata_t* ft)
+MSVCRT_intptr_t CDECL MSVCRT__findfirst(const char * fspec, struct MSVCRT__finddata_t* ft)
 {
   WIN32_FIND_DATAA find_data;
   HANDLE hfind;
@@ -242,7 +242,7 @@ long CDECL MSVCRT__findfirst(const char * fspec, struct MSVCRT__finddata_t* ft)
   }
   msvcrt_fttofd(&find_data,ft);
   TRACE(":got handle %p\n",hfind);
-  return (long)hfind;
+  return (MSVCRT_intptr_t)hfind;
 }
 
 /*********************************************************************
@@ -250,7 +250,7 @@ long CDECL MSVCRT__findfirst(const char * fspec, struct MSVCRT__finddata_t* ft)
  *
  * Unicode version of _findfirst.
  */
-long CDECL MSVCRT__wfindfirst(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfinddata_t* ft)
+MSVCRT_intptr_t CDECL MSVCRT__wfindfirst(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfinddata_t* ft)
 {
   WIN32_FIND_DATAW find_data;
   HANDLE hfind;
@@ -263,7 +263,7 @@ long CDECL MSVCRT__wfindfirst(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfind
   }
   msvcrt_wfttofd(&find_data,ft);
   TRACE(":got handle %p\n",hfind);
-  return (long)hfind;
+  return (MSVCRT_intptr_t)hfind;
 }
 
 /*********************************************************************
@@ -271,7 +271,7 @@ long CDECL MSVCRT__wfindfirst(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfind
  *
  * 64-bit version of _findfirst.
  */
-long CDECL MSVCRT__findfirsti64(const char * fspec, struct MSVCRT__finddatai64_t* ft)
+MSVCRT_intptr_t CDECL MSVCRT__findfirsti64(const char * fspec, struct MSVCRT__finddatai64_t* ft)
 {
   WIN32_FIND_DATAA find_data;
   HANDLE hfind;
@@ -284,7 +284,7 @@ long CDECL MSVCRT__findfirsti64(const char * fspec, struct MSVCRT__finddatai64_t
   }
   msvcrt_fttofdi64(&find_data,ft);
   TRACE(":got handle %p\n",hfind);
-  return (long)hfind;
+  return (MSVCRT_intptr_t)hfind;
 }
 
 /*********************************************************************
@@ -292,7 +292,7 @@ long CDECL MSVCRT__findfirsti64(const char * fspec, struct MSVCRT__finddatai64_t
  *
  * Unicode version of _findfirsti64.
  */
-long CDECL MSVCRT__wfindfirsti64(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfinddatai64_t* ft)
+MSVCRT_intptr_t CDECL MSVCRT__wfindfirsti64(const MSVCRT_wchar_t * fspec, struct MSVCRT__wfinddatai64_t* ft)
 {
   WIN32_FIND_DATAW find_data;
   HANDLE hfind;
@@ -305,7 +305,7 @@ long CDECL MSVCRT__wfindfirsti64(const MSVCRT_wchar_t * fspec, struct MSVCRT__wf
   }
   msvcrt_wfttofdi64(&find_data,ft);
   TRACE(":got handle %p\n",hfind);
-  return (long)hfind;
+  return (MSVCRT_intptr_t)hfind;
 }
 
 /*********************************************************************
@@ -324,7 +324,7 @@ long CDECL MSVCRT__wfindfirsti64(const MSVCRT_wchar_t * fspec, struct MSVCRT__wf
  * NOTES
  *  See FindNextFileA.
  */
-int CDECL MSVCRT__findnext(long hand, struct MSVCRT__finddata_t * ft)
+int CDECL MSVCRT__findnext(MSVCRT_intptr_t hand, struct MSVCRT__finddata_t * ft)
 {
   WIN32_FIND_DATAA find_data;
 
@@ -343,7 +343,7 @@ int CDECL MSVCRT__findnext(long hand, struct MSVCRT__finddata_t * ft)
  *
  * Unicode version of _findnext.
  */
-int CDECL MSVCRT__wfindnext(long hand, struct MSVCRT__wfinddata_t * ft)
+int CDECL MSVCRT__wfindnext(MSVCRT_intptr_t hand, struct MSVCRT__wfinddata_t * ft)
 {
   WIN32_FIND_DATAW find_data;
 
@@ -362,7 +362,7 @@ int CDECL MSVCRT__wfindnext(long hand, struct MSVCRT__wfinddata_t * ft)
  *
  * 64-bit version of _findnext.
  */
-int CDECL MSVCRT__findnexti64(long hand, struct MSVCRT__finddatai64_t * ft)
+int CDECL MSVCRT__findnexti64(MSVCRT_intptr_t hand, struct MSVCRT__finddatai64_t * ft)
 {
   WIN32_FIND_DATAA find_data;
 
@@ -381,7 +381,7 @@ int CDECL MSVCRT__findnexti64(long hand, struct MSVCRT__finddatai64_t * ft)
  *
  * Unicode version of _findnexti64.
  */
-int CDECL MSVCRT__wfindnexti64(long hand, struct MSVCRT__wfinddatai64_t * ft)
+int CDECL MSVCRT__wfindnexti64(MSVCRT_intptr_t hand, struct MSVCRT__wfinddatai64_t * ft)
 {
   WIN32_FIND_DATAW find_data;
 
@@ -735,6 +735,84 @@ void CDECL _wsplitpath(const MSVCRT_wchar_t *inpath, MSVCRT_wchar_t *drv, MSVCRT
     if (ext) strcpyW( ext, end );
 }
 
+/******************************************************************
+ *		_wsplitpath_s (MSVCRT.@)
+ *
+ * Secure version of _wsplitpath
+ */
+int _wsplitpath_s(const MSVCRT_wchar_t* inpath,
+                  MSVCRT_wchar_t* drive, MSVCRT_size_t sz_drive,
+                  MSVCRT_wchar_t* dir, MSVCRT_size_t sz_dir,
+                  MSVCRT_wchar_t* fname, MSVCRT_size_t sz_fname,
+                  MSVCRT_wchar_t* ext, MSVCRT_size_t sz_ext)
+{
+    const MSVCRT_wchar_t *p, *end;
+
+    if (!inpath) return MSVCRT_EINVAL;
+    if (!drive && sz_drive) return MSVCRT_EINVAL;
+    if (drive && !sz_drive) return MSVCRT_EINVAL;
+    if (!dir && sz_dir) return MSVCRT_EINVAL;
+    if (dir && !sz_dir) return MSVCRT_EINVAL;
+    if (!fname && sz_fname) return MSVCRT_EINVAL;
+    if (fname && !sz_fname) return MSVCRT_EINVAL;
+    if (!ext && sz_ext) return MSVCRT_EINVAL;
+    if (ext && !sz_ext) return MSVCRT_EINVAL;
+
+    if (inpath[0] && inpath[1] == ':')
+    {
+        if (drive)
+        {
+            if (sz_drive <= 2) goto do_error;
+            drive[0] = inpath[0];
+            drive[1] = inpath[1];
+            drive[2] = 0;
+        }
+        inpath += 2;
+    }
+    else if (drive) drive[0] = '\0';
+
+    /* look for end of directory part */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '/' || *p == '\\') end = p + 1;
+
+    if (end)  /* got a directory */
+    {
+        if (dir)
+        {
+            if (sz_dir <= end - inpath) goto do_error;
+            memcpy( dir, inpath, (end - inpath) * sizeof(MSVCRT_wchar_t) );
+            dir[end - inpath] = 0;
+        }
+        inpath = end;
+    }
+    else if (dir) dir[0] = 0;
+
+    /* look for extension: what's after the last dot */
+    end = NULL;
+    for (p = inpath; *p; p++) if (*p == '.') end = p;
+
+    if (!end) end = p; /* there's no extension */
+
+    if (fname)
+    {
+        if (sz_fname <= end - inpath) goto do_error;
+        memcpy( fname, inpath, (end - inpath) * sizeof(MSVCRT_wchar_t) );
+        fname[end - inpath] = 0;
+    }
+    if (ext)
+    {
+        if (sz_ext <= strlenW(end)) goto do_error;
+        strcpyW( ext, end );
+    }
+    return 0;
+do_error:
+    if (drive)  drive[0] = '\0';
+    if (dir)    dir[0] = '\0';
+    if (fname)  fname[0]= '\0';
+    if (ext)    ext[0]= '\0';
+    return MSVCRT_ERANGE;
+}
+
 /*********************************************************************
  *		_wfullpath (MSVCRT.@)
  *
@@ -865,28 +943,29 @@ VOID CDECL _makepath(char * path, const char * drive,
     {
         *p++ = drive[0];
         *p++ = ':';
-        *p = 0;
     }
     if (directory && directory[0])
     {
-        strcpy(p, directory);
-        p += strlen(directory) - 1;
-        if (*p != '/' && *p != '\\') {
-            strcat(p, "\\");
-            p++;
-        }
-        p++;
+        unsigned int len = strlen(directory);
+        memmove(p, directory, len);
+        p += len;
+        if (p[-1] != '/' && p[-1] != '\\')
+            *p++ = '\\';
     }
     if (filename && filename[0])
     {
-        strcpy(p, filename);
-        if (extension && extension[0])
-        {
-            if ( extension[0] != '.' )
-                strcat(p,".");
-            strcat(p,extension);
-        }
+        unsigned int len = strlen(filename);
+        memmove(p, filename, len);
+        p += len;
     }
+    if (extension && extension[0])
+    {
+        if (extension[0] != '.')
+            *p++ = '.';
+        strcpy(p, extension);
+    }
+    else
+        *p = '\0';
     TRACE("returning %s\n",path);
 }
 
@@ -898,43 +977,41 @@ VOID CDECL _makepath(char * path, const char * drive,
 VOID CDECL _wmakepath(MSVCRT_wchar_t *path, const MSVCRT_wchar_t *drive, const MSVCRT_wchar_t *directory,
                       const MSVCRT_wchar_t *filename, const MSVCRT_wchar_t *extension)
 {
-    MSVCRT_wchar_t ch;
+    MSVCRT_wchar_t *p = path;
+
     TRACE("%s %s %s %s\n", debugstr_w(drive), debugstr_w(directory),
           debugstr_w(filename), debugstr_w(extension));
 
     if ( !path )
         return;
 
-    path[0] = 0;
     if (drive && drive[0])
     {
-        path[0] = drive[0];
-        path[1] = ':';
-        path[2] = 0;
+        *p++ = drive[0];
+        *p++ = ':';
     }
     if (directory && directory[0])
     {
-        strcatW(path, directory);
-        ch = path[strlenW(path) - 1];
-        if (ch != '/' && ch != '\\')
-        {
-            static const MSVCRT_wchar_t backslashW[] = {'\\',0};
-            strcatW(path, backslashW);
-        }
+        unsigned int len = strlenW(directory);
+        memmove(p, directory, len * sizeof(MSVCRT_wchar_t));
+        p += len;
+        if (p[-1] != '/' && p[-1] != '\\')
+            *p++ = '\\';
     }
     if (filename && filename[0])
     {
-        strcatW(path, filename);
-        if (extension && extension[0])
-        {
-            if ( extension[0] != '.' )
-            {
-                static const MSVCRT_wchar_t dotW[] = {'.',0};
-                strcatW(path, dotW);
-            }
-            strcatW(path, extension);
-        }
+        unsigned int len = strlenW(filename);
+        memmove(p, filename, len * sizeof(MSVCRT_wchar_t));
+        p += len;
     }
+    if (extension && extension[0])
+    {
+        if (extension[0] != '.')
+            *p++ = '.';
+        strcpyW(p, extension);
+    }
+    else
+        *p = '\0';
 
     TRACE("returning %s\n", debugstr_w(path));
 }
@@ -942,7 +1019,7 @@ VOID CDECL _wmakepath(MSVCRT_wchar_t *path, const MSVCRT_wchar_t *drive, const M
 /*********************************************************************
  *		_searchenv (MSVCRT.@)
  *
- * Search for a file in a list of paths from an envronment variable.
+ * Search for a file in a list of paths from an environment variable.
  *
  * PARAMS
  *  file   [I] Name of the file to search for.
@@ -991,7 +1068,7 @@ void CDECL _searchenv(const char* file, const char* env, char *buf)
       return;
     }
     memcpy(curPath, penv, end - penv);
-    if (curPath[end - penv] != '/' || curPath[end - penv] != '\\')
+    if (curPath[end - penv] != '/' && curPath[end - penv] != '\\')
     {
       curPath[end - penv] = '\\';
       curPath[end - penv + 1] = '\0';
@@ -1054,7 +1131,7 @@ void CDECL _wsearchenv(const MSVCRT_wchar_t* file, const MSVCRT_wchar_t* env, MS
       return;
     }
     memcpy(curPath, penv, (end - penv) * sizeof(MSVCRT_wchar_t));
-    if (curPath[end - penv] != '/' || curPath[end - penv] != '\\')
+    if (curPath[end - penv] != '/' && curPath[end - penv] != '\\')
     {
       curPath[end - penv] = '\\';
       curPath[end - penv + 1] = '\0';

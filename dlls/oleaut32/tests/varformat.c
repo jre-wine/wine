@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <math.h>
 #include <float.h>
-#include <time.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -64,9 +63,11 @@ static inline int strcmpW( const WCHAR *str1, const WCHAR *str2 )
   VariantInit(&v); V_VT(&v) = vt; val(&v) = 1; \
   hres = pVarFormatNumber(&v,2,0,0,0,0,&str); \
   ok(hres == S_OK, "VarFormatNumber (vt %d): returned %8x\n", vt, hres); \
-  if (hres == S_OK) \
+  if (hres == S_OK) { \
     ok(str && strcmpW(str,szResult1) == 0, \
-       "VarFormatNumber (vt %d): string different\n", vt)
+       "VarFormatNumber (vt %d): string different\n", vt); \
+    SysFreeString(str); \
+  }
 
 static void test_VarFormatNumber(void)
 {
@@ -126,7 +127,7 @@ static void test_VarFormatNumber(void)
 
 static const char *szVarFmtFail = "VT %d|0x%04x Format %s: expected 0x%08x, '%s', got 0x%08x, '%s'\n";
 #define VARFMT(vt,v,val,fmt,ret,str) do { \
-  if (out) SysFreeString(out); out = NULL; \
+  out = NULL; \
   V_VT(&in) = (vt); v(&in) = val; \
   if (fmt) MultiByteToWideChar(CP_ACP, 0, fmt, -1, buffW, sizeof(buffW)/sizeof(WCHAR)); \
   hres = pVarFormat(&in,fmt ? buffW : NULL,fd,fw,flags,&out); \
@@ -135,6 +136,7 @@ static const char *szVarFmtFail = "VT %d|0x%04x Format %s: expected 0x%08x, '%s'
   ok(hres == ret && (FAILED(ret) || !strcmp(buff, str)), \
      szVarFmtFail, \
      (vt)&VT_TYPEMASK,(vt)&~VT_TYPEMASK,fmt?fmt:"<null>",ret,str,hres,buff); \
+  SysFreeString(out); \
   } while(0)
 
 typedef struct tagFMTRES
@@ -228,6 +230,7 @@ static const FMTDATERES VarFormat_date_results[] =
 static void test_VarFormat(void)
 {
   static const WCHAR szTesting[] = { 't','e','s','t','i','n','g','\0' };
+  static const WCHAR szNum[] = { '3','9','6','9','7','.','1','1','\0' };
   size_t i;
   WCHAR buffW[256];
   char buff[256];
@@ -313,6 +316,10 @@ static void test_VarFormat(void)
   VARFMT(VT_BSTR,V_BSTR,bstrin,"<&&",S_OK,"testing");
   VARFMT(VT_BSTR,V_BSTR,bstrin,"<&>&",S_OK,"testing");
   SysFreeString(bstrin);
+  bstrin = SysAllocString(szNum);
+  todo_wine VARFMT(VT_BSTR,V_BSTR,bstrin,"hh:mm",S_OK,"02:38");
+  todo_wine VARFMT(VT_BSTR,V_BSTR,bstrin,"mm-dd-yy",S_OK,"09-06-08");
+  SysFreeString(bstrin);
   /* Numeric values are converted to strings then output */
   VARFMT(VT_I1,V_I1,1,"<&>&",S_OK,"1");
 
@@ -321,9 +328,12 @@ static void test_VarFormat(void)
   VARFMT(VT_I4,V_I4,1,"000###",S_OK,"000001");
   VARFMT(VT_I4,V_I4,1,"#00##00#0",S_OK,"00000001");
   VARFMT(VT_I4,V_I4,1,"1#####0000",S_OK,"10001");
-  todo_wine {
   VARFMT(VT_I4,V_I4,100000,"#,###,###,###",S_OK,"100,000");
-  }
+  VARFMT(VT_I4,V_I4,1,"0,000,000,000",S_OK,"0,000,000,001");
+  VARFMT(VT_I4,V_I4,123456789,"#,#.#",S_OK,"123,456,789.");
+  VARFMT(VT_I4,V_I4,123456789,"###, ###, ###",S_OK,"123, 456, 789");
+  VARFMT(VT_I4,V_I4,1,"#;-#",S_OK,"1");
+  VARFMT(VT_I4,V_I4,-1,"#;-#",S_OK,"-1");
   VARFMT(VT_R8,V_R8,1.23456789,"0#.0#0#0#0#0",S_OK,"01.234567890");
   VARFMT(VT_R8,V_R8,1.2,"0#.0#0#0#0#0",S_OK,"01.200000000");
   VARFMT(VT_R8,V_R8,9.87654321,"#0.#0#0#0#0#",S_OK,"9.87654321");
@@ -365,6 +375,14 @@ static void test_VarFormat(void)
   VARFMT(VT_R8,V_R8,1.0001e-27,"##00.0000e-0",S_OK,"1000.1000e-30");
   VARFMT(VT_R8,V_R8,47.11,".0000E+0",S_OK,".4711E+2");
   VARFMT(VT_R8,V_R8,3.0401e-13,"#####.####e-0%",S_OK,"30401.e-15%");
+  VARFMT(VT_R8,V_R8,1.57,"0.00",S_OK,"1.57");
+  VARFMT(VT_R8,V_R8,-1.57,"0.00",S_OK,"-1.57");
+  VARFMT(VT_R8,V_R8,-1.57,"#.##",S_OK,"-1.57");
+  VARFMT(VT_R8,V_R8,-0.1,".#",S_OK,"-.1");
+  VARFMT(VT_R8,V_R8,0.099,"#.#",S_OK,".1");
+  VARFMT(VT_R8,V_R8,0.0999,"#.##",S_OK,".1");
+  /* for large negative exponents, wine truncates instead of rounding */
+  todo_wine VARFMT(VT_R8,V_R8,0.099,"#.##",S_OK,".1");
 
 
   /* 'out' is not cleared */
@@ -430,6 +448,14 @@ static void test_VarWeekdayName(void)
   DWORD localeValue;
 
   CHECKPTR(VarWeekdayName);
+
+  SetLastError(0xdeadbeef);
+  GetLocaleInfoW(LOCALE_USER_DEFAULT, 0, NULL, 0);
+  if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+  {
+    win_skip("GetLocaleInfoW is not implemented\n");
+    return;
+  }
 
   /* Initialize days' names */
   for (day = 0; day <= 6; ++day)

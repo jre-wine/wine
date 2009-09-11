@@ -28,6 +28,7 @@
 #include "shdocvw.h"
 #include "htiframe.h"
 #include "idispids.h"
+#include "mshtmdid.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shdocvw);
 
@@ -83,7 +84,7 @@ static void create_shell_embedding_hwnd(WebBrowser *This)
             CS_DBLCLKS,
             shell_embedding_proc,
             0, 0 /* native uses 8 */, NULL, NULL, NULL,
-            (HBRUSH)COLOR_WINDOWFRAME, NULL,
+            (HBRUSH)(COLOR_WINDOW + 1), NULL,
             wszShellEmbedding,
             NULL
         };
@@ -151,8 +152,16 @@ static HRESULT activate_inplace(WebBrowser *This, IOleClientSite *active_site)
                  SWP_NOZORDER | SWP_SHOWWINDOW);
 
     if(This->client) {
+        IOleContainer *container;
+
         IOleClientSite_ShowObject(This->client);
-        IOleClientSite_GetContainer(This->client, &This->container);
+
+        hres = IOleClientSite_GetContainer(This->client, &container);
+        if(SUCCEEDED(hres)) {
+            if(This->container)
+                IOleContainer_Release(This->container);
+            This->container = container;
+        }
     }
 
     if(This->doc_host.frame)
@@ -614,7 +623,13 @@ static HRESULT WINAPI OleInPlaceObject_InPlaceDeactivate(IOleInPlaceObject *ifac
 {
     WebBrowser *This = INPLACEOBJ_THIS(iface);
     FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    if(This->inplace) {
+        IOleInPlaceSite_Release(This->inplace);
+        This->inplace = NULL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI OleInPlaceObject_UIDeactivate(IOleInPlaceObject *iface)
@@ -718,6 +733,13 @@ static HRESULT WINAPI OleControl_OnAmbientPropertyChange(IOleControl *iface, DIS
     TRACE("(%p)->(%d)\n", This, dispID);
 
     switch(dispID) {
+    case DISPID_UNKNOWN:
+        /* Unknown means multiple properties changed, so check them all.
+         * BUT the Webbrowser OleControl object doesn't appear to do this.
+         */
+        return S_OK;
+    case DISPID_AMBIENT_DLCONTROL:
+        return S_OK;
     case DISPID_AMBIENT_OFFLINEIFNOTCONNECTED:
         return on_offlineconnected_change(This);
     case DISPID_AMBIENT_SILENT:
@@ -863,9 +885,26 @@ static HRESULT WINAPI WBOleCommandTarget_QueryStatus(IOleCommandTarget *iface,
         const GUID *pguidCmdGroup, ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
 {
     WebBrowser *This = OLECMD_THIS(iface);
-    FIXME("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
+    IOleCommandTarget *cmdtrg;
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %u %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds,
           pCmdText);
-    return E_NOTIMPL;
+
+    if(!This->doc_host.document)
+        return 0x80040104;
+
+    /* NOTE: There are probably some commands that we should handle here
+     * instead of forwarding to document object. */
+
+    hres = IUnknown_QueryInterface(This->doc_host.document, &IID_IOleCommandTarget, (void**)&cmdtrg);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IOleCommandTarget_QueryStatus(cmdtrg, pguidCmdGroup, cCmds, prgCmds, pCmdText);
+    IOleCommandTarget_Release(cmdtrg);
+
+    return hres;
 }
 
 static HRESULT WINAPI WBOleCommandTarget_Exec(IOleCommandTarget *iface,
@@ -890,6 +929,16 @@ static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
 
 void WebBrowser_OleObject_Init(WebBrowser *This)
 {
+    DWORD dpi_x;
+    DWORD dpi_y;
+    HDC hdc;
+
+    /* default aspect ratio is 96dpi / 96dpi */
+    hdc = GetDC(0);
+    dpi_x = GetDeviceCaps(hdc, LOGPIXELSX);
+    dpi_y = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(0, hdc);
+
     This->lpOleObjectVtbl              = &OleObjectVtbl;
     This->lpOleInPlaceObjectVtbl       = &OleInPlaceObjectVtbl;
     This->lpOleControlVtbl             = &OleControlVtbl;
@@ -907,8 +956,9 @@ void WebBrowser_OleObject_Init(WebBrowser *This)
     memset(&This->clip_rect, 0, sizeof(RECT));
     memset(&This->frameinfo, 0, sizeof(OLEINPLACEFRAMEINFO));
 
-    This->extent.cx = 1323;
-    This->extent.cy = 529;
+    /* Default size is 50x20 pixels, in himetric units */
+    This->extent.cx = MulDiv( 50, 2540, dpi_x );
+    This->extent.cy = MulDiv( 20, 2540, dpi_y );
 }
 
 void WebBrowser_OleObject_Destroy(WebBrowser *This)

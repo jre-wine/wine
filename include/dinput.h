@@ -634,6 +634,8 @@ typedef BOOL (CALLBACK *LPDIENUMCREATEDEFFECTOBJECTSCALLBACK)(LPDIRECTINPUTEFFEC
 
 #define DIGDD_PEEK		0x00000001
 
+#define DISEQUENCE_COMPARE(dwSq1,cmp,dwSq2) ((int)((dwSq1) - (dwSq2)) cmp 0)
+
 typedef struct DIDEVICEOBJECTDATA_DX3 {
     DWORD	dwOfs;
     DWORD	dwData;
@@ -725,6 +727,12 @@ typedef struct DIPROPGUIDANDPATH {
 } DIPROPGUIDANDPATH, *LPDIPROPGUIDANDPATH;
 typedef const DIPROPGUIDANDPATH *LPCDIPROPGUIDANDPATH;
 
+typedef struct DIPROPSTRING {
+        DIPROPHEADER diph;
+        WCHAR        wsz[MAX_PATH];
+} DIPROPSTRING, *LPDIPROPSTRING;
+typedef const DIPROPSTRING *LPCDIPROPSTRING;
+
 /* special property GUIDs */
 #ifdef __cplusplus
 #define MAKEDIPROP(prop)	(*(const GUID *)(prop))
@@ -755,6 +763,7 @@ typedef const DIPROPGUIDANDPATH *LPCDIPROPGUIDANDPATH;
 
 #define DIPROP_CALIBRATION	MAKEDIPROP(11)
 #define DIPROP_GUIDANDPATH	MAKEDIPROP(12)
+#define DIPROP_KEYNAME          MAKEDIPROP(20)
 
 typedef struct DIDEVCAPS_DX3 {
     DWORD	dwSize;
@@ -1351,7 +1360,7 @@ DECLARE_INTERFACE_(IDirectInputEffect,IUnknown)
 #define IDirectInputEffect_SetParameters(p,a,b)   (p)->lpVtbl->SetParameters(p,a,b)
 #define IDirectInputEffect_Start(p,a,b)           (p)->lpVtbl->Start(p,a,b)
 #define IDirectInputEffect_Stop(p)                (p)->lpVtbl->Stop(p)
-#define IDirectInputEffect_GetEffectStatus(p,a,b) (p)->lpVtbl->GetEffectStatus(p,a)
+#define IDirectInputEffect_GetEffectStatus(p,a)   (p)->lpVtbl->GetEffectStatus(p,a)
 #define IDirectInputEffect_Download(p)            (p)->lpVtbl->Download(p)
 #define IDirectInputEffect_Unload(p)              (p)->lpVtbl->Unload(p)
 #define IDirectInputEffect_Escape(p,a)            (p)->lpVtbl->Escape(p,a)
@@ -1367,7 +1376,7 @@ DECLARE_INTERFACE_(IDirectInputEffect,IUnknown)
 #define IDirectInputEffect_SetParameters(p,a,b)   (p)->SetParameters(a,b)
 #define IDirectInputEffect_Start(p,a,b)           (p)->Start(a,b)
 #define IDirectInputEffect_Stop(p)                (p)->Stop()
-#define IDirectInputEffect_GetEffectStatus(p,a,b) (p)->GetEffectStatus(a)
+#define IDirectInputEffect_GetEffectStatus(p,a)   (p)->GetEffectStatus(a)
 #define IDirectInputEffect_Download(p)            (p)->Download()
 #define IDirectInputEffect_Unload(p)              (p)->Unload()
 #define IDirectInputEffect_Escape(p,a)            (p)->Escape(a)

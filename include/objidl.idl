@@ -1378,7 +1378,6 @@ interface IAdviseSink : IUnknown
     [size_is(cbData)] byte data[];
   } RemSTGMEDIUM;
 
-  /* FIXME: C/C++ nameless union version */
   typedef struct tagSTGMEDIUM {
     DWORD tymed;
     [switch_is(tymed)] union {
@@ -1390,7 +1389,7 @@ interface IAdviseSink : IUnknown
     [case(TYMED_ISTREAM)]  IStream *pstm;
     [case(TYMED_ISTORAGE)] IStorage *pstg;
     [default]              ;
-    };
+    } DUMMYUNIONNAME;
     [unique] IUnknown *pUnkForRelease;
   } uSTGMEDIUM;
 
@@ -1425,7 +1424,7 @@ interface IAdviseSink : IUnknown
     case TYMED_FILE:     LPOLESTR lpszFileName;
     case TYMED_ISTREAM:  BYTE_BLOB *pstm;
     case TYMED_ISTORAGE: BYTE_BLOB *pstg;
-    };
+    } DUMMYUNIONNAME;
     IUnknown *pUnkForRelease;
   } userSTGMEDIUM;
 
@@ -2443,7 +2442,7 @@ interface IContext : IUnknown
         [in] CPFLAGS flags,
         [in] IUnknown *pUnk);
 
-    HRESULT RemovePropert(
+    HRESULT RemoveProperty(
         [in] REFGUID policyId);
 
     HRESULT GetProperty(
@@ -2453,6 +2452,23 @@ interface IContext : IUnknown
 
     HRESULT EnumContextProps(
         [out] IEnumContextProps **ppEnumContextProps);
+}
+
+[
+    local,
+    object,
+    uuid(000001c6-0000-0000-c000-000000000046),
+    pointer_default(unique)
+]
+interface IObjContext : IContext
+{
+    void Reserved1();
+    void Reserved2();
+    void Reserved3();
+    void Reserved4();
+    void Reserved5();
+    void Reserved6();
+    void Reserved7();
 }
 
 cpp_quote("#endif /* defined USE_COM_CONTEXT_DEF */")

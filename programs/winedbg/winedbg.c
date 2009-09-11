@@ -99,7 +99,7 @@ struct dbg_internal_var         dbg_internal_vars[DBG_IV_LAST];
 const struct dbg_internal_var*  dbg_context_vars;
 static HANDLE                   dbg_houtput;
 
-void	dbg_outputA(const char* buffer, int len)
+static void dbg_outputA(const char* buffer, int len)
 {
     static char line_buff[4096];
     static unsigned int line_pos;
@@ -125,22 +125,33 @@ void	dbg_outputA(const char* buffer, int len)
     }
 }
 
+const char* dbg_W2A(const WCHAR* buffer, unsigned len)
+{
+    static unsigned ansilen;
+    static char* ansi;
+    unsigned newlen;
+
+    newlen = WideCharToMultiByte(CP_ACP, 0, buffer, len, NULL, 0, NULL, NULL);
+    if (newlen > ansilen)
+    {
+        static char* newansi;
+        if (ansi)
+            newansi = HeapReAlloc(GetProcessHeap(), 0, ansi, newlen);
+        else
+            newansi = HeapAlloc(GetProcessHeap(), 0, newlen);
+        if (!newansi) return NULL;
+        ansilen = newlen;
+        ansi = newansi;
+    }
+    WideCharToMultiByte(CP_ACP, 0, buffer, len, ansi, newlen, NULL, NULL);
+    return ansi;
+}
+
 void	dbg_outputW(const WCHAR* buffer, int len)
 {
-    char* ansi = NULL;
-    int newlen;
-	
-    /* do a serious Unicode to ANSI conversion
-     * FIXME: should CP_ACP be GetConsoleCP()?
-     */
-    newlen = WideCharToMultiByte(CP_ACP, 0, buffer, len, NULL, 0, NULL, NULL);
-    if (newlen)
-    {
-        if (!(ansi = HeapAlloc(GetProcessHeap(), 0, newlen))) return;
-        WideCharToMultiByte(CP_ACP, 0, buffer, len, ansi, newlen, NULL, NULL);
-        dbg_outputA(ansi, newlen);
-        HeapFree(GetProcessHeap(), 0, ansi);
-    }
+    const char* ansi = dbg_W2A(buffer, len);
+    if (ansi) dbg_outputA(ansi, strlen(ansi));
+    /* FIXME: should CP_ACP be GetConsoleCP()? */
 }
 
 int	dbg_printf(const char* format, ...)
@@ -302,6 +313,11 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     memset(p->bp, 0, sizeof(p->bp));
     p->delayed_bp = NULL;
     p->num_delayed_bp = 0;
+    p->source_ofiles = NULL;
+    p->search_path = NULL;
+    p->source_current_file[0] = '\0';
+    p->source_start_line = -1;
+    p->source_end_line = -1;
 
     p->next = dbg_process_list;
     p->prev = NULL;
@@ -310,13 +326,13 @@ struct dbg_process*	dbg_add_process(const struct be_process_io* pio, DWORD pid, 
     return p;
 }
 
-void dbg_set_process_name(struct dbg_process* p, const char* imageName)
+void dbg_set_process_name(struct dbg_process* p, const WCHAR* imageName)
 {
     assert(p->imageName == NULL);
     if (imageName)
     {
-        char* tmp = HeapAlloc(GetProcessHeap(), 0, strlen(imageName) + 1);
-        if (tmp) p->imageName = strcpy(tmp, imageName);
+        WCHAR* tmp = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(imageName) + 1) * sizeof(WCHAR));
+        if (tmp) p->imageName = lstrcpyW(tmp, imageName);
     }
 }
 
@@ -331,12 +347,53 @@ void dbg_del_process(struct dbg_process* p)
             HeapFree(GetProcessHeap(), 0, p->delayed_bp[i].u.symbol.name);
 
     HeapFree(GetProcessHeap(), 0, p->delayed_bp);
+    source_nuke_path(p);
+    source_free_files(p);
     if (p->prev) p->prev->next = p->next;
     if (p->next) p->next->prev = p->prev;
     if (p == dbg_process_list) dbg_process_list = p->next;
     if (p == dbg_curr_process) dbg_curr_process = NULL;
     HeapFree(GetProcessHeap(), 0, (char*)p->imageName);
     HeapFree(GetProcessHeap(), 0, p);
+}
+
+/******************************************************************
+ *		dbg_init
+ *
+ * Initializes the dbghelp library, and also sets the application directory
+ * as a place holder for symbol searches.
+ */
+BOOL dbg_init(HANDLE hProc, const WCHAR* in, BOOL invade)
+{
+    BOOL        ret;
+
+    ret = SymInitialize(hProc, NULL, invade);
+    if (ret && in)
+    {
+        const WCHAR*    last;
+
+        for (last = in + lstrlenW(in) - 1; last >= in; last--)
+        {
+            if (*last == '/' || *last == '\\')
+            {
+                WCHAR*  tmp;
+                tmp = HeapAlloc(GetProcessHeap(), 0, (1024 + 1 + (last - in) + 1) * sizeof(WCHAR));
+                if (tmp && SymGetSearchPathW(hProc, tmp, 1024))
+                {
+                    WCHAR*      x = tmp + lstrlenW(tmp);
+
+                    *x++ = ';';
+                    memcpy(x, in, (last - in) * sizeof(WCHAR));
+                    x[last - in] = '\0';
+                    ret = SymSetSearchPathW(hProc, tmp);
+                }
+                else ret = FALSE;
+                HeapFree(GetProcessHeap(), 0, tmp);
+                break;
+            }
+        }
+    }
+    return ret;
 }
 
 struct mod_loader_info
@@ -347,7 +404,7 @@ struct mod_loader_info
 
 static BOOL CALLBACK mod_loader_cb(PCSTR mod_name, ULONG base, PVOID ctx)
 {
-    struct mod_loader_info*     mli = (struct mod_loader_info*)ctx;
+    struct mod_loader_info*     mli = ctx;
 
     if (!strcmp(mod_name, "<wine-loader>"))
     {
@@ -376,6 +433,19 @@ BOOL dbg_get_debuggee_info(HANDLE hProcess, IMAGEHLP_MODULE* imh_mod)
     SymSetOptions(opt);
 
     return imh_mod->BaseOfImage != 0;
+}
+
+BOOL dbg_load_module(HANDLE hProc, HANDLE hFile, const WCHAR* name, DWORD base, DWORD size)
+{
+    BOOL ret = SymLoadModuleExW(hProc, NULL, name, NULL, base, size, NULL, 0);
+    if (ret)
+    {
+        IMAGEHLP_MODULEW64      ihm;
+        ihm.SizeOfStruct = sizeof(ihm);
+        if (SymGetModuleInfoW64(hProc, base, &ihm) && (ihm.PdbUnmatched || ihm.DbgUnmatched))
+            dbg_printf("Loaded unmatched debug information for %s\n", wine_dbgstr_w(name));
+    }
+    return ret;
 }
 
 struct dbg_thread* dbg_get_thread(struct dbg_process* p, DWORD tid)
@@ -431,6 +501,40 @@ void dbg_del_thread(struct dbg_thread* t)
     HeapFree(GetProcessHeap(), 0, t);
 }
 
+void dbg_set_option(const char* option, const char* val)
+{
+    if (!strcasecmp(option, "module_load_mismatched"))
+    {
+        DWORD   opt = SymGetOptions();
+        if (!val)
+            dbg_printf("Option: module_load_mismatched %s\n", opt & SYMOPT_LOAD_ANYTHING ? "true" : "false");
+        else if (!strcasecmp(val, "true"))      opt |= SYMOPT_LOAD_ANYTHING;
+        else if (!strcasecmp(val, "false"))     opt &= ~SYMOPT_LOAD_ANYTHING;
+        else
+        {
+            dbg_printf("Syntax: module_load_mismatched [true|false]\n");
+            return;
+        }
+        SymSetOptions(opt);
+    }
+    else if (!strcasecmp(option, "symbol_picker"))
+    {
+        if (!val)
+            dbg_printf("Option: symbol_picker %s\n",
+                       symbol_current_picker == symbol_picker_interactive ? "interactive" : "scoped");
+        else if (!strcasecmp(val, "interactive"))
+            symbol_current_picker = symbol_picker_interactive;
+        else if (!strcasecmp(val, "scoped"))
+            symbol_current_picker = symbol_picker_scoped;
+        else
+        {
+            dbg_printf("Syntax: symbol_picker [interactive|scoped]\n");
+            return;
+        }
+    }
+    else dbg_printf("Unknown option '%s'\n", option);
+}
+
 BOOL dbg_interrupt_debuggee(void)
 {
     if (!dbg_process_list) return FALSE;
@@ -452,8 +556,11 @@ static BOOL WINAPI ctrl_c_handler(DWORD dwCtrlType)
     return FALSE;
 }
 
-static void dbg_init_console(void)
+void dbg_init_console(void)
 {
+    /* set the output handle */
+    dbg_houtput = GetStdHandle(STD_OUTPUT_HANDLE);
+
     /* set our control-C handler */
     SetConsoleCtrlHandler(ctrl_c_handler, TRUE);
 
@@ -480,7 +587,24 @@ static int dbg_winedbg_usage(BOOL advanced)
     }
     else
         dbg_printf("Usage:\n\twinedbg [ [ --gdb ] [ prog-name [ prog-args ] | <num> | file.mdmp | --help ]\n");
-    return -1;
+    return 0;
+}
+
+void dbg_start_interactive(HANDLE hFile)
+{
+    if (dbg_curr_process)
+    {
+        dbg_printf("WineDbg starting on pid %04x\n", dbg_curr_pid);
+        if (dbg_curr_process->active_debuggee) dbg_active_wait_for_first_exception();
+    }
+
+    dbg_interactiveP = TRUE;
+    parser_handle(hFile);
+
+    while (dbg_process_list)
+        dbg_process_list->process_io->close_process(dbg_process_list, FALSE);
+
+    dbg_save_internal_vars();
 }
 
 struct backend_cpu* be_cpu;
@@ -594,19 +718,7 @@ int main(int argc, char** argv)
     case start_error_init:      return -1;
     }
 
-    if (dbg_curr_process)
-    {
-        dbg_printf("WineDbg starting on pid %04x\n", dbg_curr_pid);
-        if (dbg_curr_process->active_debuggee) dbg_active_wait_for_first_exception();
-    }
-
-    dbg_interactiveP = TRUE;
-    parser_handle(hFile);
-
-    while (dbg_process_list)
-        dbg_process_list->process_io->close_process(dbg_process_list, FALSE);
-
-    dbg_save_internal_vars();
+    dbg_start_interactive(hFile);
 
     return 0;
 }

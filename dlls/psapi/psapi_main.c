@@ -135,7 +135,7 @@ static BOOL PSAPI_GetLdrModule(HANDLE hProcess, HMODULE hModule,
     while ((ret = PSAPI_ModuleIteratorNext(&iter)) > 0)
         /* When hModule is NULL we return the process image - which will be
          * the first module since our iterator uses InLoadOrderModuleList */
-        if (!hModule || hModule == (HMODULE)iter.LdrModule.BaseAddress)
+        if (!hModule || hModule == iter.LdrModule.BaseAddress)
         {
             *pLdrModule = iter.LdrModule;
             return TRUE;
@@ -222,13 +222,13 @@ BOOL WINAPI EnumProcesses(DWORD *lpdwProcessIDs, DWORD cb, DWORD *lpcbUsed)
 
     for (*lpcbUsed = 0; cb >= sizeof(DWORD); cb -= sizeof(DWORD))
     {
-        *lpdwProcessIDs++ = spi->dwProcessID;
+        *lpdwProcessIDs++ = HandleToUlong(spi->UniqueProcessId);
         *lpcbUsed += sizeof(DWORD);
 
-        if (spi->dwOffset == 0)
+        if (spi->NextEntryOffset == 0)
             break;
 
-        spi = (SYSTEM_PROCESS_INFORMATION *)(((PCHAR)spi) + spi->dwOffset);
+        spi = (SYSTEM_PROCESS_INFORMATION *)(((PCHAR)spi) + spi->NextEntryOffset);
     }
 
     HeapFree(GetProcessHeap(), 0, pBuf);
@@ -256,7 +256,7 @@ BOOL WINAPI EnumProcessModules(HANDLE hProcess, HMODULE *lphModule,
     {
         if (cb >= sizeof(HMODULE))
         {
-            *lphModule++ = (HMODULE)iter.LdrModule.BaseAddress;
+            *lphModule++ = iter.LdrModule.BaseAddress;
             cb -= sizeof(HMODULE);
         }
         *lpcbNeeded += sizeof(HMODULE);
@@ -507,8 +507,11 @@ DWORD WINAPI GetProcessImageFileNameA( HANDLE process, LPSTR file, DWORD size )
  */
 DWORD WINAPI GetProcessImageFileNameW( HANDLE process, LPWSTR file, DWORD size )
 {
-    FIXME("(%p, %p, %d) stub\n", process, file, size );
-    return 0;
+    BOOL success = QueryFullProcessImageNameW(process, PROCESS_NAME_NATIVE, file, &size);
+    if (success)
+        return size;
+    else
+        return 0;
 }
 
 /***********************************************************************

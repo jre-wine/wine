@@ -20,6 +20,8 @@
 #include "config.h"
 #include "wine/port.h"
 
+#ifdef __i386__
+
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,8 +39,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(relay);
-
-#ifdef __i386__
 
 static const WCHAR **debug_relay_excludelist;
 static const WCHAR **debug_relay_includelist;
@@ -277,32 +277,41 @@ static const CALLFROM16 *get_entry_point( STACK16FRAME *frame, LPSTR module, LPS
     /* Retrieve entry point call structure */
     p = MapSL( MAKESEGPTR( frame->module_cs, frame->callfrom_ip ) );
     /* p now points to lret, get the start of CALLFROM16 structure */
-    return (CALLFROM16 *)(p - (BYTE *)&((CALLFROM16 *)0)->ret);
+    return (CALLFROM16 *)(p - FIELD_OFFSET( CALLFROM16, ret ));
 }
 
 
 extern int call_entry_point( void *func, int nb_args, const int *args );
 __ASM_GLOBAL_FUNC( call_entry_point,
-                   "\tpushl %ebp\n"
-                   "\tmovl %esp,%ebp\n"
-                   "\tpushl %esi\n"
-                   "\tpushl %edi\n"
-                   "\tmovl 12(%ebp),%edx\n"
-                   "\tshll $2,%edx\n"
-                   "\tjz 1f\n"
-                   "\tsubl %edx,%esp\n"
-                   "\tandl $~15,%esp\n"
-                   "\tmovl 12(%ebp),%ecx\n"
-                   "\tmovl 16(%ebp),%esi\n"
-                   "\tmovl %esp,%edi\n"
-                   "\tcld\n"
-                   "\trep; movsl\n"
-                   "1:\tcall *8(%ebp)\n"
-                   "\tleal -8(%ebp),%esp\n"
-                   "\tpopl %edi\n"
-                   "\tpopl %esi\n"
-                   "\tpopl %ebp\n"
-                   "\tret" )
+                   "pushl %ebp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+                   __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
+                   "movl %esp,%ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
+                   "pushl %esi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %esi,-4\n\t")
+                   "pushl %edi\n\t"
+                   __ASM_CFI(".cfi_rel_offset %edi,-8\n\t")
+                   "movl 12(%ebp),%edx\n\t"
+                   "shll $2,%edx\n\t"
+                   "jz 1f\n\t"
+                   "subl %edx,%esp\n\t"
+                   "andl $~15,%esp\n\t"
+                   "movl 12(%ebp),%ecx\n\t"
+                   "movl 16(%ebp),%esi\n\t"
+                   "movl %esp,%edi\n\t"
+                   "cld\n\t"
+                   "rep; movsl\n"
+                   "1:\tcall *8(%ebp)\n\t"
+                   "leal -8(%ebp),%esp\n\t"
+                   "popl %edi\n\t"
+                   __ASM_CFI(".cfi_same_value %edi\n\t")
+                   "popl %esi\n\t"
+                   __ASM_CFI(".cfi_same_value %esi\n\t")
+                   "popl %ebp\n\t"
+                   __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+                   __ASM_CFI(".cfi_same_value %ebp\n\t")
+                   "ret" )
 
 
 /***********************************************************************
@@ -568,26 +577,5 @@ int relay_call_from_16( void *entry_point, unsigned char *args16, CONTEXT86 *con
     }
     return ret_val;
 }
-
-#else /* __i386__ */
-
-/*
- * Stubs for the CallTo16/CallFrom16 routines on non-Intel architectures
- * (these will never be called but need to be present to satisfy the linker ...)
- */
-
-/***********************************************************************
- *		__wine_call_from_16_regs (KERNEL32.@)
- */
-void __wine_call_from_16_regs(void)
-{
-    assert( FALSE );
-}
-
-DWORD WINAPI CALL32_CBClient( FARPROC proc, LPWORD args, DWORD *esi )
-{ assert( FALSE ); }
-
-DWORD WINAPI CALL32_CBClientEx( FARPROC proc, LPWORD args, DWORD *esi, INT *nArgs )
-{ assert( FALSE ); }
 
 #endif  /* __i386__ */

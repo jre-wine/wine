@@ -355,7 +355,7 @@ static int X11DRV_XDND_MapFormat(unsigned int property, unsigned char *data, int
  */
 static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len)
 {
-    char *uriList = (char*) data;
+    char *uriList = data;
     char *uri;
     WCHAR *path;
 
@@ -375,9 +375,7 @@ static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len)
     {
         while (end < len && uriList[end] != '\r')
             ++end;
-        if (end == len)
-            break;
-        if (uriList[end+1] != '\n')
+        if (end < (len - 1) && uriList[end+1] != '\n')
         {
             WARN("URI list line doesn't end in \\r\\n\n");
             break;
@@ -412,7 +410,7 @@ static int X11DRV_XDND_DeconstructTextURIList(int property, void* data, int len)
         start = end + 2;
         end = start;
     }
-    if (out && end == len)
+    if (out && end >= len)
     {
         DROPFILES *dropFiles;
         dropFiles = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(DROPFILES) + size + 1);
@@ -444,7 +442,7 @@ static int X11DRV_XDND_DeconstructTextPlain(int property, void* data, int len)
     char* dostext;
 
     /* Always supply plain text */
-    X11DRV_XDND_UnixToDos(&dostext, (char*)data, len);
+    X11DRV_XDND_UnixToDos(&dostext, data, len);
     X11DRV_XDND_InsertXDNDData(property, CF_TEXT, dostext, strlen(dostext));
 
     TRACE("CF_TEXT (%d): %s\n", CF_TEXT, dostext);
@@ -494,7 +492,7 @@ static void X11DRV_XDND_SendDropFiles(HWND hwnd)
 
     if (current != NULL)
     {
-        DROPFILES *lpDrop = (DROPFILES*) current->data;
+        DROPFILES *lpDrop = current->data;
 
         if (lpDrop)
         {

@@ -173,10 +173,11 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
     dbg_printf(")\n");
     
     /* Here are the rest of the registers */
-    dbg_printf(" FLES:%08x ", (unsigned int) ctx->FloatSave.ErrorSelector);
-    dbg_printf(" FLDO:%08x ", (unsigned int) ctx->FloatSave.DataOffset);
-    dbg_printf(" FLDS:%08x ", (unsigned int) ctx->FloatSave.DataSelector);
-    dbg_printf(" FLCNS:%08x \n", (unsigned int) ctx->FloatSave.Cr0NpxState);
+    dbg_printf(" FLES:%08x  FLDO:%08x  FLDS:%08x  FLCNS:%08x\n",
+               ctx->FloatSave.ErrorSelector,
+               ctx->FloatSave.DataOffset,
+               ctx->FloatSave.DataSelector,
+               ctx->FloatSave.Cr0NpxState);
 
     /* Now for the floating point registers */
     dbg_printf("Floating Point Registers:\n");
@@ -196,8 +197,9 @@ static void be_i386_all_print_context(HANDLE hThread, const CONTEXT* ctx)
 
 static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_regs)
 {
+    static const char flags[] = "aVR-N--ODITSZ-A-P-C";
+    int i;
     char        buf[33];
-    char*       pt;
 
     dbg_printf("Register dump:\n");
 
@@ -207,28 +209,11 @@ static void be_i386_print_context(HANDLE hThread, const CONTEXT* ctx, int all_re
                (WORD)ctx->SegDs, (WORD)ctx->SegEs,
                (WORD)ctx->SegFs, (WORD)ctx->SegGs);
 
-    strcpy(buf, "   - 00      - - - ");
-    pt = buf + strlen(buf) - 1;
-    if (ctx->EFlags & 0x00000001) *pt-- = 'C'; /* Carry Flag */
-    if (ctx->EFlags & 0x00000002) *pt-- = '1';
-    if (ctx->EFlags & 0x00000004) *pt-- = 'P'; /* Parity Flag */
-    if (ctx->EFlags & 0x00000008) *pt-- = '-';
-    if (ctx->EFlags & 0x00000010) *pt-- = 'A'; /* Auxiliary Carry Flag */
-    if (ctx->EFlags & 0x00000020) *pt-- = '-';
-    if (ctx->EFlags & 0x00000040) *pt-- = 'Z'; /* Zero Flag */
-    if (ctx->EFlags & 0x00000080) *pt-- = 'S'; /* Sign Flag */
-    if (ctx->EFlags & 0x00000100) *pt-- = 'T'; /* Trap/Trace Flag */
-    if (ctx->EFlags & 0x00000200) *pt-- = 'I'; /* Interrupt Enable Flag */
-    if (ctx->EFlags & 0x00000400) *pt-- = 'D'; /* Direction Indicator */
-    if (ctx->EFlags & 0x00000800) *pt-- = 'O'; /* Overflow flags */
-    if (ctx->EFlags & 0x00001000) *pt-- = '1'; /* I/O Privilege Level */
-    if (ctx->EFlags & 0x00002000) *pt-- = '1'; /* I/O Privilege Level */
-    if (ctx->EFlags & 0x00004000) *pt-- = 'N'; /* Nested Task Flag */
-    if (ctx->EFlags & 0x00008000) *pt-- = '-';
-    if (ctx->EFlags & 0x00010000) *pt-- = 'R'; /* Resume Flag */
-    if (ctx->EFlags & 0x00020000) *pt-- = 'V'; /* Vritual Mode Flag */
-    if (ctx->EFlags & 0x00040000) *pt-- = 'a'; /* Alignment Check Flag */
-    
+    strcpy(buf, flags);
+    for (i = 0; buf[i]; i++)
+        if (buf[i] != '-' && !(ctx->EFlags & (1 << (sizeof(flags) - 2 - i))))
+            buf[i] = ' ';
+
     switch (get_selector_type(hThread, ctx, ctx->SegCs))
     {
     case AddrMode1616:
@@ -558,9 +543,6 @@ static unsigned be_i386_is_func_call(const void* insn, ADDRESS64* callee)
         }
         return TRUE;
 
-    case 0xCD:
-        WINE_FIXME("Unsupported yet call insn (0x%02x) at %p\n", ch, insn);
-        /* fall through */
     default:
         return FALSE;
     }

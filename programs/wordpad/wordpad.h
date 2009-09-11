@@ -17,9 +17,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include <windef.h>
+#include <winuser.h>
+
 #define MAX_STRING_LEN 255
 
-#define TWIPS_PER_CM 567
+#define TWIPS_PER_INCH 1440
+#define CENTMM_PER_INCH 2540
 
 #define ID_FILE_EXIT 1000
 #define ID_FILE_OPEN 1001
@@ -113,9 +117,10 @@
 #define IDC_PAGEFMT_FB 101
 #define IDC_PAGEFMT_RU 102
 #define IDC_PAGEFMT_SB 103
-#define IDC_PAGEFMT_WW 104
-#define IDC_PAGEFMT_WM 105
-#define IDC_PAGEFMT_ID 106
+#define IDC_PAGEFMT_WN 104
+#define IDC_PAGEFMT_WW 105
+#define IDC_PAGEFMT_WM 106
+#define IDC_PAGEFMT_ID 107
 
 #define ID_DATETIME 1600
 #define ID_PARAFORMAT 1601
@@ -167,24 +172,24 @@
 #define STRING_NEWFILE_TXT 1405
 #define STRING_NEWFILE_TXT_UNICODE 1406
 
-#define STRING_ALIGN_LEFT 1407
-#define STRING_ALIGN_RIGHT 1408
-#define STRING_ALIGN_CENTER 1409
+#define STRING_PRINTER_FILES_PRN 1407
 
-#define STRING_PRINTER_FILES_PRN 1410
+#define STRING_ALIGN_LEFT 1416
+#define STRING_ALIGN_RIGHT 1417
+#define STRING_ALIGN_CENTER 1418
 
-#define STRING_VIEWPROPS_TITLE 1411
-#define STRING_VIEWPROPS_TEXT 1412
-#define STRING_VIEWPROPS_RICHTEXT 1413
+#define STRING_VIEWPROPS_TITLE 1432
+#define STRING_VIEWPROPS_TEXT 1433
+#define STRING_VIEWPROPS_RICHTEXT 1434
 
-#define STRING_PREVIEW_PRINT 1414
-#define STRING_PREVIEW_NEXTPAGE 1415
-#define STRING_PREVIEW_PREVPAGE 1416
-#define STRING_PREVIEW_TWOPAGES 1417
-#define STRING_PREVIEW_ONEPAGE 1418
-#define STRING_PREVIEW_CLOSE 1419
+#define STRING_PREVIEW_PRINT 1448
+#define STRING_PREVIEW_NEXTPAGE 1449
+#define STRING_PREVIEW_PREVPAGE 1450
+#define STRING_PREVIEW_TWOPAGES 1451
+#define STRING_PREVIEW_ONEPAGE 1452
+#define STRING_PREVIEW_CLOSE 1453
 
-#define STRING_UNITS_CM 1420
+#define STRING_UNITS_CM 1454
 
 #define STRING_DEFAULT_FILENAME 1700
 #define STRING_PROMPT_SAVE_CHANGES 1701
@@ -193,6 +198,12 @@
 #define STRING_SAVE_LOSEFORMATTING 1704
 #define STRING_INVALID_NUMBER 1705
 #define STRING_OLE_STORAGE_NOT_SUPPORTED 1706
+#define STRING_WRITE_FAILED 1707
+#define STRING_WRITE_ACCESS_DENIED 1708
+#define STRING_OPEN_FAILED 1709
+#define STRING_OPEN_ACCESS_DENIED 1710
+#define STRING_PRINTING_NOT_IMPLEMENTED 1711
+#define STRING_MAX_TAB_STOPS 1712
 
 LPWSTR file_basename(LPWSTR);
 
@@ -200,7 +211,7 @@ void dialog_printsetup(HWND);
 void dialog_print(HWND, LPWSTR);
 void target_device(HWND, DWORD);
 void print_quick(LPWSTR);
-LRESULT preview_command(HWND, WPARAM, LPARAM);
+LRESULT preview_command(HWND, WPARAM);
 void init_preview(HWND, LPWSTR);
 void close_preview(HWND);
 BOOL preview_isactive(void);
@@ -216,6 +227,7 @@ void registry_read_filelist(HWND);
 void registry_read_options(void);
 void registry_read_formatopts_all(DWORD[], DWORD[]);
 void registry_read_winrect(RECT*);
+void registry_read_maximized(DWORD*);
 void registry_set_filelist(LPCWSTR, HWND);
 void registry_set_formatopts_all(DWORD[]);
 void registry_set_options(HWND);

@@ -100,9 +100,8 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
 {
     WORD index;
     WND *win;
-    HWND full_parent = 0, full_owner = 0;
+    HWND handle = 0, full_parent = 0, full_owner = 0;
     struct tagCLASS *class = NULL;
-    user_handle_t handle = 0;
     int extra_bytes = 0;
 
     /* if 16-bit instance, map to module handle */
@@ -111,18 +110,18 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
 
     SERVER_START_REQ( create_window )
     {
-        req->parent   = parent;
-        req->owner    = owner;
-        req->instance = instance;
+        req->parent   = wine_server_user_handle( parent );
+        req->owner    = wine_server_user_handle( owner );
+        req->instance = wine_server_client_ptr( instance );
         if (!(req->atom = get_int_atom_value( name )) && name)
             wine_server_add_data( req, name, strlenW(name)*sizeof(WCHAR) );
         if (!wine_server_call_err( req ))
         {
-            handle = reply->handle;
-            full_parent = reply->parent;
-            full_owner  = reply->owner;
+            handle      = wine_server_ptr_handle( reply->handle );
+            full_parent = wine_server_ptr_handle( reply->parent );
+            full_owner  = wine_server_ptr_handle( reply->owner );
             extra_bytes = reply->extra;
-            class = reply->class_ptr;
+            class       = wine_server_get_ptr( reply->class_ptr );
         }
     }
     SERVER_END_REQ;
@@ -138,7 +137,7 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     {
         SERVER_START_REQ( destroy_window )
         {
-            req->handle = handle;
+            req->handle = wine_server_user_handle( handle );
             wine_server_call( req );
         }
         SERVER_END_REQ;
@@ -150,10 +149,17 @@ static WND *create_window_handle( HWND parent, HWND owner, LPCWSTR name,
     {
         struct user_thread_info *thread_info = get_user_thread_info();
 
-        if (!thread_info->desktop) thread_info->desktop = full_parent ? full_parent : handle;
-        else assert( full_parent == thread_info->desktop );
-        if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->desktop ))
-            ERR( "failed to create desktop window\n" );
+        if (name == (LPCWSTR)DESKTOP_CLASS_ATOM)
+        {
+            if (!thread_info->top_window) thread_info->top_window = full_parent ? full_parent : handle;
+            else assert( full_parent == thread_info->top_window );
+            if (full_parent && !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
+                ERR( "failed to create desktop window\n" );
+        }
+        else  /* HWND_MESSAGE parent */
+        {
+            if (!thread_info->msg_window && !full_parent) thread_info->msg_window = handle;
+        }
     }
 
     USER_Lock();
@@ -189,7 +195,7 @@ static WND *free_window_handle( HWND hwnd )
     {
         SERVER_START_REQ( destroy_window )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             if (!wine_server_call_err( req ))
             {
                 user_handles[index] = NULL;
@@ -215,7 +221,11 @@ static WND *free_window_handle( HWND hwnd )
 static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWORD tid )
 {
     HWND *list;
-    int size = 128;
+    int i, size = 128;
+    ATOM atom = get_int_atom_value( class );
+
+    /* empty class is not the same as NULL class */
+    if (!atom && class && !class[0]) return NULL;
 
     for (;;)
     {
@@ -225,17 +235,20 @@ static HWND *list_window_children( HDESK desktop, HWND hwnd, LPCWSTR class, DWOR
 
         SERVER_START_REQ( get_window_children )
         {
-            req->desktop = desktop;
-            req->parent = hwnd;
+            req->desktop = wine_server_obj_handle( desktop );
+            req->parent = wine_server_user_handle( hwnd );
             req->tid = tid;
-            if (!(req->atom = get_int_atom_value( class )) && class)
-                wine_server_add_data( req, class, strlenW(class)*sizeof(WCHAR) );
-            wine_server_set_reply( req, list, (size-1) * sizeof(HWND) );
+            req->atom = atom;
+            if (!atom && class) wine_server_add_data( req, class, strlenW(class)*sizeof(WCHAR) );
+            wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
             if (!wine_server_call( req )) count = reply->count;
         }
         SERVER_END_REQ;
         if (count && count < size)
         {
+            /* start from the end since HWND is potentially larger than user_handle_t */
+            for (i = count - 1; i >= 0; i--)
+                list[i] = wine_server_ptr_handle( ((user_handle_t *)list)[i] );
             list[count] = 0;
             return list;
         }
@@ -257,7 +270,7 @@ static HWND *list_window_parents( HWND hwnd )
 {
     WND *win;
     HWND current, *list;
-    int pos = 0, size = 16, count = 0;
+    int i, pos = 0, size = 16, count = 0;
 
     if (!(list = HeapAlloc( GetProcessHeap(), 0, size * sizeof(HWND) ))) return NULL;
 
@@ -292,14 +305,17 @@ static HWND *list_window_parents( HWND hwnd )
         count = 0;
         SERVER_START_REQ( get_window_parents )
         {
-            req->handle = hwnd;
-            wine_server_set_reply( req, list, (size-1) * sizeof(HWND) );
+            req->handle = wine_server_user_handle( hwnd );
+            wine_server_set_reply( req, list, (size-1) * sizeof(user_handle_t) );
             if (!wine_server_call( req )) count = reply->count;
         }
         SERVER_END_REQ;
         if (!count) goto empty;
         if (size > count)
         {
+            /* start from the end since HWND is potentially larger than user_handle_t */
+            for (i = count - 1; i >= 0; i--)
+                list[i] = wine_server_ptr_handle( ((user_handle_t *)list)[i] );
             list[count] = 0;
             return list;
         }
@@ -341,12 +357,48 @@ static void get_server_window_text( HWND hwnd, LPWSTR text, INT count )
 
     SERVER_START_REQ( get_window_text )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         wine_server_set_reply( req, text, (count - 1) * sizeof(WCHAR) );
         if (!wine_server_call_err( req )) len = wine_server_reply_size(reply);
     }
     SERVER_END_REQ;
     text[len / sizeof(WCHAR)] = 0;
+}
+
+
+/*******************************************************************
+ *           get_hwnd_message_parent
+ *
+ * Return the parent for HWND_MESSAGE windows.
+ */
+HWND get_hwnd_message_parent(void)
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!thread_info->msg_window) GetDesktopWindow();  /* trigger creation */
+    return thread_info->msg_window;
+}
+
+
+/*******************************************************************
+ *           is_desktop_window
+ *
+ * Check if window is the desktop or the HWND_MESSAGE top parent.
+ */
+BOOL is_desktop_window( HWND hwnd )
+{
+    struct user_thread_info *thread_info = get_user_thread_info();
+
+    if (!hwnd) return FALSE;
+    if (hwnd == thread_info->top_window) return TRUE;
+    if (hwnd == thread_info->msg_window) return TRUE;
+
+    if (!HIWORD(hwnd) || HIWORD(hwnd) == 0xffff)
+    {
+        if (LOWORD(thread_info->top_window) == LOWORD(hwnd)) return TRUE;
+        if (LOWORD(thread_info->msg_window) == LOWORD(hwnd)) return TRUE;
+    }
+    return FALSE;
 }
 
 
@@ -372,11 +424,7 @@ WND *WIN_GetPtr( HWND hwnd )
             return ptr;
         ptr = NULL;
     }
-    else if (index == USER_HANDLE_TO_INDEX(GetDesktopWindow()))
-    {
-        if (hwnd == GetDesktopWindow() || !HIWORD(hwnd) || HIWORD(hwnd) == 0xffff) ptr = WND_DESKTOP;
-        else ptr = NULL;
-    }
+    else if (is_desktop_window( hwnd )) ptr = WND_DESKTOP;
     else ptr = WND_OTHER_PROCESS;
     USER_Unlock();
     return ptr;
@@ -433,7 +481,11 @@ HWND WIN_Handle32( HWND16 hwnd16 )
 
     if (!(ptr = WIN_GetPtr( hwnd ))) return hwnd;
 
-    if (ptr == WND_DESKTOP) return GetDesktopWindow();
+    if (ptr == WND_DESKTOP)
+    {
+        if (LOWORD(hwnd) == LOWORD(GetDesktopWindow())) return GetDesktopWindow();
+        else return get_hwnd_message_parent();
+    }
 
     if (ptr != WND_OTHER_PROCESS)
     {
@@ -444,8 +496,8 @@ HWND WIN_Handle32( HWND16 hwnd16 )
     {
         SERVER_START_REQ( get_window_info )
         {
-            req->handle = hwnd;
-            if (!wine_server_call_err( req )) hwnd = reply->full_handle;
+            req->handle = wine_server_user_handle( hwnd );
+            if (!wine_server_call_err( req )) hwnd = wine_server_ptr_handle( reply->full_handle );
         }
         SERVER_END_REQ;
     }
@@ -471,12 +523,12 @@ HWND WIN_SetOwner( HWND hwnd, HWND owner )
     }
     SERVER_START_REQ( set_window_owner )
     {
-        req->handle = hwnd;
-        req->owner  = owner;
+        req->handle = wine_server_user_handle( hwnd );
+        req->owner  = wine_server_user_handle( owner );
         if (!wine_server_call( req ))
         {
-            win->owner = reply->full_owner;
-            ret = reply->prev_owner;
+            win->owner = wine_server_ptr_handle( reply->full_owner );
+            ret = wine_server_ptr_handle( reply->prev_owner );
         }
     }
     SERVER_END_REQ;
@@ -493,7 +545,7 @@ HWND WIN_SetOwner( HWND hwnd, HWND owner )
 ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
 {
     BOOL ok;
-    ULONG new_style, old_style = 0;
+    STYLESTRUCT style;
     WND *win = WIN_GetPtr( hwnd );
 
     if (!win || win == WND_DESKTOP) return 0;
@@ -504,32 +556,33 @@ ULONG WIN_SetStyle( HWND hwnd, ULONG set_bits, ULONG clear_bits )
                  set_bits, clear_bits, hwnd );
         return 0;
     }
-    new_style = (win->dwStyle | set_bits) & ~clear_bits;
-    if (new_style == win->dwStyle)
+    style.styleOld = win->dwStyle;
+    style.styleNew = (win->dwStyle | set_bits) & ~clear_bits;
+    if (style.styleNew == style.styleOld)
     {
         WIN_ReleasePtr( win );
-        return new_style;
+        return style.styleNew;
     }
     SERVER_START_REQ( set_window_info )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         req->flags  = SET_WIN_STYLE;
-        req->style  = new_style;
+        req->style  = style.styleNew;
         req->extra_offset = -1;
         if ((ok = !wine_server_call( req )))
         {
-            old_style = reply->old_style;
-            win->dwStyle = new_style;
+            style.styleOld = reply->old_style;
+            win->dwStyle = style.styleNew;
         }
     }
     SERVER_END_REQ;
     WIN_ReleasePtr( win );
     if (ok)
     {
-        USER_Driver->pSetWindowStyle( hwnd, old_style );
-        if ((old_style ^ new_style) & WS_VISIBLE) invalidate_dce( hwnd, NULL );
+        USER_Driver->pSetWindowStyle( hwnd, GWL_STYLE, &style );
+        if ((style.styleOld ^ style.styleNew) & WS_VISIBLE) invalidate_dce( hwnd, NULL );
     }
-    return old_style;
+    return style.styleOld;
 }
 
 
@@ -548,8 +601,16 @@ BOOL WIN_GetRectangles( HWND hwnd, RECT *rectWindow, RECT *rectClient )
     {
         RECT rect;
         rect.left = rect.top = 0;
-        rect.right  = GetSystemMetrics(SM_CXSCREEN);
-        rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        if (hwnd == get_hwnd_message_parent())
+        {
+            rect.right  = 100;
+            rect.bottom = 100;
+        }
+        else
+        {
+            rect.right  = GetSystemMetrics(SM_CXSCREEN);
+            rect.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
         if (rectWindow) *rectWindow = rect;
         if (rectClient) *rectClient = rect;
     }
@@ -557,7 +618,7 @@ BOOL WIN_GetRectangles( HWND hwnd, RECT *rectWindow, RECT *rectClient )
     {
         SERVER_START_REQ( get_window_rectangles )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             if ((ret = !wine_server_call( req )))
             {
                 if (rectWindow)
@@ -617,7 +678,7 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     /* Unlink now so we won't bother with the children later on */
     SERVER_START_REQ( set_parent )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         req->parent = 0;
         wine_server_call( req );
     }
@@ -651,6 +712,75 @@ LRESULT WIN_DestroyWindow( HWND hwnd )
     return 0;
 }
 
+
+/***********************************************************************
+ *		destroy_thread_window
+ *
+ * Destroy a window upon exit of its thread.
+ */
+static void destroy_thread_window( HWND hwnd )
+{
+    WND *wndPtr;
+    HWND *list;
+    HMENU menu = 0, sys_menu = 0;
+    WORD index;
+
+    /* free child windows */
+
+    if ((list = WIN_ListChildren( hwnd )))
+    {
+        int i;
+        for (i = 0; list[i]; i++)
+        {
+            if (WIN_IsCurrentThread( list[i] )) destroy_thread_window( list[i] );
+            else SendMessageW( list[i], WM_WINE_DESTROYWINDOW, 0, 0 );
+        }
+        HeapFree( GetProcessHeap(), 0, list );
+    }
+
+    /* destroy the client-side storage */
+
+    index = USER_HANDLE_TO_INDEX(hwnd);
+    if (index >= NB_USER_HANDLES) return;
+    USER_Lock();
+    if ((wndPtr = user_handles[index]))
+    {
+        if ((wndPtr->dwStyle & (WS_CHILD | WS_POPUP)) != WS_CHILD) menu = (HMENU)wndPtr->wIDmenu;
+        sys_menu = wndPtr->hSysMenu;
+        free_dce( wndPtr->dce, hwnd );
+        user_handles[index] = NULL;
+        wndPtr->dwMagic = 0;
+    }
+    USER_Unlock();
+
+    HeapFree( GetProcessHeap(), 0, wndPtr );
+    if (menu) DestroyMenu( menu );
+    if (sys_menu) DestroyMenu( sys_menu );
+}
+
+
+/***********************************************************************
+ *		destroy_thread_child_windows
+ *
+ * Destroy child windows upon exit of its thread.
+ */
+static void destroy_thread_child_windows( HWND hwnd )
+{
+    HWND *list;
+    int i;
+
+    if (WIN_IsCurrentThread( hwnd ))
+    {
+        destroy_thread_window( hwnd );
+    }
+    else if ((list = WIN_ListChildren( hwnd )))
+    {
+        for (i = 0; list[i]; i++) destroy_thread_child_windows( list[i] );
+        HeapFree( GetProcessHeap(), 0, list );
+    }
+}
+
+
 /***********************************************************************
  *           WIN_DestroyThreadWindows
  *
@@ -662,13 +792,18 @@ void WIN_DestroyThreadWindows( HWND hwnd )
     int i;
 
     if (!(list = WIN_ListChildren( hwnd ))) return;
+
+    /* reset owners of top-level windows */
     for (i = 0; list[i]; i++)
     {
-        if (WIN_IsCurrentThread( list[i] ))
-            DestroyWindow( list[i] );
-        else
-            WIN_DestroyThreadWindows( list[i] );
+        if (!WIN_IsCurrentThread( list[i] ))
+        {
+            HWND owner = GetWindow( list[i], GW_OWNER );
+            if (owner && WIN_IsCurrentThread( owner )) WIN_SetOwner( list[i], 0 );
+        }
     }
+
+    for (i = 0; list[i]; i++) destroy_thread_child_windows( list[i] );
     HeapFree( GetProcessHeap(), 0, list );
 }
 
@@ -922,7 +1057,7 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
         mdi_cs.style = cs->style;
         mdi_cs.lParam = (LPARAM)cs->lpCreateParams;
 
-        cs->lpCreateParams = (LPVOID)&mdi_cs;
+        cs->lpCreateParams = &mdi_cs;
 
         if (GetWindowLongW(cs->hwndParent, GWL_STYLE) & MDIS_ALLCHILDSTYLES)
         {
@@ -962,11 +1097,7 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
 
     if (cs->hwndParent == HWND_MESSAGE)
     {
-      /* native ole32.OleInitialize uses HWND_MESSAGE to create the
-       * message window (style: WS_POPUP|WS_DISABLED)
-       */
-      FIXME("Parent is HWND_MESSAGE\n");
-      parent = GetDesktopWindow();
+        cs->hwndParent = parent = get_hwnd_message_parent();
     }
     else if (cs->hwndParent)
     {
@@ -978,13 +1109,17 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     }
     else
     {
+        static const WCHAR messageW[] = {'M','e','s','s','a','g','e',0};
+
         if ((cs->style & (WS_CHILD|WS_POPUP)) == WS_CHILD)
         {
             WARN("No parent for child window\n" );
             SetLastError(ERROR_TLW_WITH_WSCHILD);
             return 0;  /* WS_CHILD needs a parent, but WS_POPUP doesn't */
         }
-        if (className != (LPCWSTR)DESKTOP_CLASS_ATOM)  /* are we creating the desktop itself? */
+        /* are we creating the desktop or HWND_MESSAGE parent itself? */
+        if (className != (LPCWSTR)DESKTOP_CLASS_ATOM &&
+            (IS_INTRESOURCE(className) || strcmpiW( className, messageW )))
             parent = GetDesktopWindow();
     }
 
@@ -1012,13 +1147,15 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     wndPtr->dwExStyle      = cs->dwExStyle;
     wndPtr->wIDmenu        = 0;
     wndPtr->helpContext    = 0;
-    wndPtr->pVScroll       = NULL;
-    wndPtr->pHScroll       = NULL;
+    wndPtr->pScroll        = NULL;
     wndPtr->userdata       = 0;
     wndPtr->hIcon          = 0;
     wndPtr->hIconSmall     = 0;
     wndPtr->hSysMenu       = 0;
     wndPtr->flags         |= (flags & WIN_ISWIN32);
+
+    wndPtr->min_pos.x = wndPtr->min_pos.y = -1;
+    wndPtr->max_pos.x = wndPtr->max_pos.y = -1;
 
     if (wndPtr->dwStyle & WS_SYSMENU) SetSystemMenu( hwnd, 0 );
 
@@ -1051,11 +1188,11 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
 
     SERVER_START_REQ( set_window_info )
     {
-        req->handle    = hwnd;
+        req->handle    = wine_server_user_handle( hwnd );
         req->flags     = SET_WIN_STYLE | SET_WIN_EXSTYLE | SET_WIN_INSTANCE | SET_WIN_UNICODE;
         req->style     = wndPtr->dwStyle;
         req->ex_style  = wndPtr->dwExStyle;
-        req->instance  = (void *)wndPtr->hInstance;
+        req->instance  = wine_server_client_ptr( wndPtr->hInstance );
         req->is_unicode = (wndPtr->flags & WIN_ISUNICODE) != 0;
         req->extra_offset = -1;
         wine_server_call( req );
@@ -1114,11 +1251,16 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
         WINPOS_GetMinMaxInfo( hwnd, &maxSize, &maxPos, &minTrack, &maxTrack);
         if (maxTrack.x < cx) cx = maxTrack.x;
         if (maxTrack.y < cy) cy = maxTrack.y;
+        if (minTrack.x > cx) cx = minTrack.x;
+        if (minTrack.y > cy) cy = minTrack.y;
     }
 
     if (cx < 0) cx = 0;
     if (cy < 0) cy = 0;
     SetRect( &rect, cs->x, cs->y, cs->x + cx, cs->y + cy );
+    /* check for wraparound */
+    if (cs->x + cx < cs->x) rect.right = 0x7fffffff;
+    if (cs->y + cy < cs->y) rect.bottom = 0x7fffffff;
     if (!set_window_pos( hwnd, 0, SWP_NOZORDER | SWP_NOACTIVATE, &rect, &rect, NULL )) goto failed;
 
     /* send WM_NCCREATE */
@@ -1139,11 +1281,18 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
     if ((wndPtr = WIN_GetPtr(hwnd)))
     {
         /* yes, even if the CBT hook was called with HWND_TOP */
+        POINT pt;
         HWND insert_after = (wndPtr->dwStyle & WS_CHILD) ? HWND_BOTTOM : HWND_TOP;
         RECT window_rect = wndPtr->rectWindow;
         RECT client_rect = window_rect;
         WIN_ReleasePtr( wndPtr );
+
+        /* the rectangle is in screen coords for WM_NCCALCSIZE when wparam is FALSE */
+        pt.x = pt.y = 0;
+        MapWindowPoints( parent, 0, &pt, 1 );
+        OffsetRect( &client_rect, pt.x, pt.y );
         SendMessageW( hwnd, WM_NCCALCSIZE, FALSE, (LPARAM)&client_rect );
+        OffsetRect( &client_rect, -pt.x, -pt.y );
         set_window_pos( hwnd, insert_after, SWP_NOACTIVATE, &window_rect, &client_rect, NULL );
     }
     else return 0;
@@ -1164,7 +1313,8 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
 
     /* send the size messages */
 
-    if (!(wndPtr = WIN_GetPtr(hwnd))) return 0;
+    if (!(wndPtr = WIN_GetPtr( hwnd )) ||
+          wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP) return 0;
     if (!(wndPtr->flags & WIN_NEED_SIZE))
     {
         rect = wndPtr->rectClient;
@@ -1186,7 +1336,8 @@ static HWND WIN_CreateWindowEx( CREATESTRUCTA *cs, LPCWSTR className, UINT flags
         swFlag = WINPOS_MinMaximize( hwnd, swFlag, &newPos );
         swFlag |= SWP_FRAMECHANGED; /* Frame always gets changed */
         if (!(style & WS_VISIBLE) || (style & WS_CHILD) || GetActiveWindow()) swFlag |= SWP_NOACTIVATE;
-        SetWindowPos( hwnd, 0, newPos.left, newPos.top, newPos.right, newPos.bottom, swFlag );
+        SetWindowPos( hwnd, 0, newPos.left, newPos.top, newPos.right - newPos.left,
+                      newPos.bottom - newPos.top, swFlag );
     }
 
     /* Notify the parent window only */
@@ -1400,7 +1551,7 @@ BOOL WINAPI DestroyWindow( HWND hwnd )
 {
     BOOL is_child;
 
-    if (!(hwnd = WIN_IsCurrentThread( hwnd )) || (hwnd == GetDesktopWindow()))
+    if (!(hwnd = WIN_IsCurrentThread( hwnd )) || is_desktop_window( hwnd ))
     {
         SetLastError( ERROR_ACCESS_DENIED );
         return FALSE;
@@ -1517,7 +1668,9 @@ HWND WINAPI FindWindowExW( HWND parent, HWND child, LPCWSTR className, LPCWSTR t
     int i = 0, len = 0;
     WCHAR *buffer = NULL;
 
-    if (!parent) parent = GetDesktopWindow();
+    if (!parent && child) parent = GetDesktopWindow();
+    else if (parent == HWND_MESSAGE) parent = get_hwnd_message_parent();
+
     if (title)
     {
         len = strlenW(title) + 1;  /* one extra char to check for chars beyond the end */
@@ -1610,16 +1763,20 @@ HWND WINAPI GetDesktopWindow(void)
 {
     struct user_thread_info *thread_info = get_user_thread_info();
 
-    if (thread_info->desktop) return thread_info->desktop;
+    if (thread_info->top_window) return thread_info->top_window;
 
     SERVER_START_REQ( get_desktop_window )
     {
         req->force = 0;
-        if (!wine_server_call( req )) thread_info->desktop = reply->handle;
+        if (!wine_server_call( req ))
+        {
+            thread_info->top_window = wine_server_ptr_handle( reply->top_window );
+            thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
+        }
     }
     SERVER_END_REQ;
 
-    if (!thread_info->desktop)
+    if (!thread_info->top_window)
     {
         USEROBJECTFLAGS flags;
         if (!GetUserObjectInformationW( GetProcessWindowStation(), UOI_FLAGS, &flags,
@@ -1628,6 +1785,7 @@ HWND WINAPI GetDesktopWindow(void)
             static const WCHAR command_line[] = {'\\','e','x','p','l','o','r','e','r','.','e','x','e',' ','/','d','e','s','k','t','o','p',0};
             STARTUPINFOW si;
             PROCESS_INFORMATION pi;
+            WCHAR systemdir[MAX_PATH];
             WCHAR cmdline[MAX_PATH + sizeof(command_line)/sizeof(WCHAR)];
 
             memset( &si, 0, sizeof(si) );
@@ -1637,10 +1795,11 @@ HWND WINAPI GetDesktopWindow(void)
             si.hStdOutput = 0;
             si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
 
-            GetSystemDirectoryW( cmdline, MAX_PATH );
+            GetSystemDirectoryW( systemdir, MAX_PATH );
+            lstrcpyW( cmdline, systemdir );
             lstrcatW( cmdline, command_line );
             if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS,
-                                NULL, NULL, &si, &pi ))
+                                NULL, systemdir, &si, &pi ))
             {
                 TRACE( "started explorer pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
                 WaitForInputIdle( pi.hProcess, 10000 );
@@ -1654,15 +1813,19 @@ HWND WINAPI GetDesktopWindow(void)
         SERVER_START_REQ( get_desktop_window )
         {
             req->force = 1;
-            if (!wine_server_call( req )) thread_info->desktop = reply->handle;
+            if (!wine_server_call( req ))
+            {
+                thread_info->top_window = wine_server_ptr_handle( reply->top_window );
+                thread_info->msg_window = wine_server_ptr_handle( reply->msg_window );
+            }
         }
         SERVER_END_REQ;
     }
 
-    if (!thread_info->desktop || !USER_Driver->pCreateDesktopWindow( thread_info->desktop ))
+    if (!thread_info->top_window || !USER_Driver->pCreateDesktopWindow( thread_info->top_window ))
         ERR( "failed to create desktop window\n" );
 
-    return thread_info->desktop;
+    return thread_info->top_window;
 }
 
 
@@ -1745,7 +1908,7 @@ BOOL WINAPI IsWindowUnicode( HWND hwnd )
     {
         SERVER_START_REQ( get_window_info )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             if (!wine_server_call_err( req )) retvalue = reply->is_unicode;
         }
         SERVER_END_REQ;
@@ -1786,7 +1949,7 @@ static LONG_PTR WIN_GetWindowLong( HWND hwnd, INT offset, UINT size, BOOL unicod
         }
         SERVER_START_REQ( set_window_info )
         {
-            req->handle = hwnd;
+            req->handle = wine_server_user_handle( hwnd );
             req->flags  = 0;  /* don't set anything, just retrieve */
             req->extra_offset = (offset >= 0) ? offset : -1;
             req->extra_size = (offset >= 0) ? size : 0;
@@ -1797,7 +1960,7 @@ static LONG_PTR WIN_GetWindowLong( HWND hwnd, INT offset, UINT size, BOOL unicod
                 case GWL_STYLE:      retvalue = reply->old_style; break;
                 case GWL_EXSTYLE:    retvalue = reply->old_ex_style; break;
                 case GWLP_ID:        retvalue = reply->old_id; break;
-                case GWLP_HINSTANCE: retvalue = (ULONG_PTR)reply->old_instance; break;
+                case GWLP_HINSTANCE: retvalue = (ULONG_PTR)wine_server_get_ptr( reply->old_instance ); break;
                 case GWLP_USERDATA:  retvalue = reply->old_user_data; break;
                 default:
                     if (offset >= 0) retvalue = get_win_data( &reply->old_extra_value, size );
@@ -1983,7 +2146,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
 
     SERVER_START_REQ( set_window_info )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         req->extra_offset = -1;
         switch(offset)
         {
@@ -2003,7 +2166,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
             break;
         case GWLP_HINSTANCE:
             req->flags = SET_WIN_INSTANCE;
-            req->instance = (void *)newval;
+            req->instance = wine_server_client_ptr( (void *)newval );
             break;
         case GWLP_WNDPROC:
             req->flags = SET_WIN_UNICODE;
@@ -2037,7 +2200,7 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
                 break;
             case GWLP_HINSTANCE:
                 wndPtr->hInstance = (HINSTANCE)newval;
-                retval = (ULONG_PTR)reply->old_instance;
+                retval = (ULONG_PTR)wine_server_get_ptr( reply->old_instance );
                 break;
             case GWLP_WNDPROC:
                 break;
@@ -2057,10 +2220,11 @@ LONG_PTR WIN_SetWindowLong( HWND hwnd, INT offset, UINT size, LONG_PTR newval, B
 
     if (!ok) return 0;
 
-    if (offset == GWL_STYLE) USER_Driver->pSetWindowStyle( hwnd, retval );
-
     if (offset == GWL_STYLE || offset == GWL_EXSTYLE)
+    {
+        USER_Driver->pSetWindowStyle( hwnd, offset, &style );
         SendMessageW( hwnd, WM_STYLECHANGED, offset, (LPARAM)&style );
+    }
 
     return retval;
 }
@@ -2436,7 +2600,7 @@ BOOL WINAPI IsWindow( HWND hwnd )
     /* check other processes */
     SERVER_START_REQ( get_window_info )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         ret = !wine_server_call_err( req );
     }
     SERVER_END_REQ;
@@ -2470,7 +2634,7 @@ DWORD WINAPI GetWindowThreadProcessId( HWND hwnd, LPDWORD process )
     /* check other processes */
     SERVER_START_REQ( get_window_info )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         if (!wine_server_call_err( req ))
         {
             tid = (DWORD)reply->tid;
@@ -2503,11 +2667,11 @@ HWND WINAPI GetParent( HWND hwnd )
         {
             SERVER_START_REQ( get_window_tree )
             {
-                req->handle = hwnd;
+                req->handle = wine_server_user_handle( hwnd );
                 if (!wine_server_call_err( req ))
                 {
-                    if (style & WS_POPUP) retvalue = reply->owner;
-                    else if (style & WS_CHILD) retvalue = reply->parent;
+                    if (style & WS_POPUP) retvalue = wine_server_ptr_handle( reply->owner );
+                    else if (style & WS_CHILD) retvalue = wine_server_ptr_handle( reply->parent );
                 }
             }
             SERVER_END_REQ;
@@ -2549,8 +2713,8 @@ HWND WINAPI GetAncestor( HWND hwnd, UINT type )
         {
             SERVER_START_REQ( get_window_tree )
             {
-                req->handle = hwnd;
-                if (!wine_server_call_err( req )) ret = reply->parent;
+                req->handle = wine_server_user_handle( hwnd );
+                if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->parent );
             }
             SERVER_END_REQ;
         }
@@ -2570,7 +2734,8 @@ HWND WINAPI GetAncestor( HWND hwnd, UINT type )
         break;
 
     case GA_ROOTOWNER:
-        if ((ret = WIN_GetFullHandle( hwnd )) == GetDesktopWindow()) return 0;
+        if (is_desktop_window( hwnd )) return 0;
+        ret = WIN_GetFullHandle( hwnd );
         for (;;)
         {
             HWND parent = GetParent( ret );
@@ -2601,6 +2766,7 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
     }
 
     if (!parent) parent = GetDesktopWindow();
+    else if (parent == HWND_MESSAGE) parent = get_hwnd_message_parent();
     else parent = WIN_GetFullHandle( parent );
 
     if (!IsWindow( parent ))
@@ -2628,12 +2794,12 @@ HWND WINAPI SetParent( HWND hwnd, HWND parent )
 
     SERVER_START_REQ( set_parent )
     {
-        req->handle = hwnd;
-        req->parent = parent;
+        req->handle = wine_server_user_handle( hwnd );
+        req->parent = wine_server_user_handle( parent );
         if ((ret = !wine_server_call( req )))
         {
-            old_parent = reply->old_parent;
-            wndPtr->parent = parent = reply->full_parent;
+            old_parent = wine_server_ptr_handle( reply->old_parent );
+            wndPtr->parent = parent = wine_server_ptr_handle( reply->full_parent );
         }
 
     }
@@ -2685,11 +2851,11 @@ BOOL WINAPI IsWindowVisible( HWND hwnd )
 
     if (!(GetWindowLongW( hwnd, GWL_STYLE ) & WS_VISIBLE)) return FALSE;
     if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0] && list[1])  /* desktop window is considered always visible so we don't check it */
+    if (list[0])
     {
         for (i = 0; list[i+1]; i++)
             if (!(GetWindowLongW( list[i], GWL_STYLE ) & WS_VISIBLE)) break;
-        retval = !list[i+1];
+        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
     }
     HeapFree( GetProcessHeap(), 0, list );
     return retval;
@@ -2714,12 +2880,12 @@ BOOL WIN_IsWindowDrawable( HWND hwnd, BOOL icon )
     if ((style & WS_MINIMIZE) && icon && GetClassLongPtrW( hwnd, GCLP_HICON ))  return FALSE;
 
     if (!(list = list_window_parents( hwnd ))) return TRUE;
-    if (list[0] && list[1])  /* desktop window is considered always visible so we don't check it */
+    if (list[0])
     {
         for (i = 0; list[i+1]; i++)
             if ((GetWindowLongW( list[i], GWL_STYLE ) & (WS_VISIBLE|WS_MINIMIZE)) != WS_VISIBLE)
                 break;
-        retval = !list[i+1];
+        retval = !list[i+1] && (list[i] == GetDesktopWindow());  /* top message window isn't visible */
     }
     HeapFree( GetProcessHeap(), 0, list );
     return retval;
@@ -2763,28 +2929,28 @@ HWND WINAPI GetWindow( HWND hwnd, UINT rel )
 
     SERVER_START_REQ( get_window_tree )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         if (!wine_server_call_err( req ))
         {
             switch(rel)
             {
             case GW_HWNDFIRST:
-                retval = reply->first_sibling;
+                retval = wine_server_ptr_handle( reply->first_sibling );
                 break;
             case GW_HWNDLAST:
-                retval = reply->last_sibling;
+                retval = wine_server_ptr_handle( reply->last_sibling );
                 break;
             case GW_HWNDNEXT:
-                retval = reply->next_sibling;
+                retval = wine_server_ptr_handle( reply->next_sibling );
                 break;
             case GW_HWNDPREV:
-                retval = reply->prev_sibling;
+                retval = wine_server_ptr_handle( reply->prev_sibling );
                 break;
             case GW_OWNER:
-                retval = reply->owner;
+                retval = wine_server_ptr_handle( reply->owner );
                 break;
             case GW_CHILD:
-                retval = reply->first_child;
+                retval = wine_server_ptr_handle( reply->first_child );
                 break;
             }
         }
@@ -2853,8 +3019,8 @@ HWND WINAPI GetLastActivePopup( HWND hwnd )
 
     SERVER_START_REQ( get_window_info )
     {
-        req->handle = hwnd;
-        if (!wine_server_call_err( req )) retval = reply->last_active;
+        req->handle = wine_server_user_handle( hwnd );
+        if (!wine_server_call_err( req )) retval = wine_server_ptr_handle( reply->last_active );
     }
     SERVER_END_REQ;
     return retval;
@@ -2869,6 +3035,11 @@ HWND WINAPI GetLastActivePopup( HWND hwnd )
  */
 HWND *WIN_ListChildren( HWND hwnd )
 {
+    if (!hwnd)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return NULL;
+    }
     return list_window_children( 0, hwnd, NULL, 0 );
 }
 
@@ -3057,7 +3228,7 @@ BOOL WINAPI FlashWindow( HWND hWnd, BOOL bInvert )
         else wparam = (hWnd == GetForegroundWindow());
 
         WIN_ReleasePtr( wndPtr );
-        SendMessageW( hWnd, WM_NCACTIVATE, wparam, (LPARAM)0 );
+        SendMessageW( hWnd, WM_NCACTIVATE, wparam, 0 );
         return wparam;
     }
 }
@@ -3155,21 +3326,45 @@ BOOL WINAPI DragDetect( HWND hWnd, POINT pt )
 /******************************************************************************
  *		GetWindowModuleFileNameA (USER32.@)
  */
-UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR lpszFileName, UINT cchFileNameMax)
+UINT WINAPI GetWindowModuleFileNameA( HWND hwnd, LPSTR module, UINT size )
 {
-    FIXME("GetWindowModuleFileNameA(hwnd %p, lpszFileName %p, cchFileNameMax %u) stub!\n",
-          hwnd, lpszFileName, cchFileNameMax);
-    return 0;
+    WND *win;
+    HINSTANCE hinst;
+
+    TRACE( "%p, %p, %u\n", hwnd, module, size );
+
+    win = WIN_GetPtr( hwnd );
+    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    hinst = win->hInstance;
+    WIN_ReleasePtr( win );
+
+    return GetModuleFileNameA( hinst, module, size );
 }
 
 /******************************************************************************
  *		GetWindowModuleFileNameW (USER32.@)
  */
-UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR lpszFileName, UINT cchFileNameMax)
+UINT WINAPI GetWindowModuleFileNameW( HWND hwnd, LPWSTR module, UINT size )
 {
-    FIXME("GetWindowModuleFileNameW(hwnd %p, lpszFileName %p, cchFileNameMax %u) stub!\n",
-          hwnd, lpszFileName, cchFileNameMax);
-    return 0;
+    WND *win;
+    HINSTANCE hinst;
+
+    TRACE( "%p, %p, %u\n", hwnd, module, size );
+
+    win = WIN_GetPtr( hwnd );
+    if (!win || win == WND_OTHER_PROCESS || win == WND_DESKTOP)
+    {
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return 0;
+    }
+    hinst = win->hInstance;
+    WIN_ReleasePtr( win );
+
+    return GetModuleFileNameW( hinst, module, size );
 }
 
 /******************************************************************************
@@ -3214,22 +3409,109 @@ BOOL WINAPI SwitchDesktop( HDESK hDesktop)
 /*****************************************************************************
  *              SetLayeredWindowAttributes (USER32.@)
  */
-BOOL WINAPI SetLayeredWindowAttributes( HWND hWnd, COLORREF rgbKey, 
-                                        BYTE bAlpha, DWORD dwFlags )
+BOOL WINAPI SetLayeredWindowAttributes( HWND hwnd, COLORREF key, BYTE alpha, DWORD flags )
 {
-    FIXME("(%p,0x%.8x,%d,%d): stub!\n", hWnd, rgbKey, bAlpha, dwFlags);
-    return TRUE;
+    BOOL ret;
+
+    TRACE("(%p,%08x,%d,%x): stub!\n", hwnd, key, alpha, flags);
+
+    SERVER_START_REQ( set_window_layered_info )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        req->color_key = key;
+        req->alpha = alpha;
+        req->flags = flags;
+        ret = !wine_server_call_err( req );
+    }
+    SERVER_END_REQ;
+
+    if (ret) USER_Driver->pSetLayeredWindowAttributes( hwnd, key, alpha, flags );
+
+    return ret;
 }
+
 
 /*****************************************************************************
  *              GetLayeredWindowAttributes (USER32.@)
  */
-BOOL WINAPI GetLayeredWindowAttributes( HWND hWnd, COLORREF *prgbKey,
-                                        BYTE *pbAlpha, DWORD *pdwFlags )
+BOOL WINAPI GetLayeredWindowAttributes( HWND hwnd, COLORREF *key, BYTE *alpha, DWORD *flags )
 {
-    FIXME("(%p,%p,%p,%p): stub!\n", hWnd, prgbKey, pbAlpha, pdwFlags);
-    return FALSE;
+    BOOL ret;
+
+    SERVER_START_REQ( get_window_layered_info )
+    {
+        req->handle = wine_server_user_handle( hwnd );
+        if ((ret = !wine_server_call_err( req )))
+        {
+            if (key) *key = reply->color_key;
+            if (alpha) *alpha = reply->alpha;
+            if (flags) *flags = reply->flags;
+        }
+    }
+    SERVER_END_REQ;
+
+    return ret;
 }
+
+
+/*****************************************************************************
+ *              UpdateLayeredWindowIndirect  (USER32.@)
+ */
+BOOL WINAPI UpdateLayeredWindowIndirect( HWND hwnd, const UPDATELAYEREDWINDOWINFO *info )
+{
+    BYTE alpha = 0xff;
+
+    if (!(info->dwFlags & ULW_EX_NORESIZE) && (info->pptDst || info->psize))
+    {
+        int x = 0, y = 0, cx = 0, cy = 0;
+        DWORD flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | SWP_NOSENDCHANGING;
+
+        if (info->pptDst)
+        {
+            x = info->pptDst->x;
+            y = info->pptDst->y;
+            flags &= ~SWP_NOMOVE;
+        }
+        if (info->psize)
+        {
+            cx = info->psize->cx;
+            cy = info->psize->cy;
+            flags &= ~SWP_NOSIZE;
+        }
+        TRACE( "moving window %p pos %d,%d %dx%x\n", hwnd, x, y, cx, cy );
+        SetWindowPos( hwnd, 0, x, y, cx, cy, flags );
+    }
+
+    if (info->hdcSrc)
+    {
+        RECT rect;
+        HDC hdc = GetDCEx( hwnd, 0, DCX_CACHE );
+
+        if (hdc)
+        {
+            int x = 0, y = 0;
+
+            GetClientRect( hwnd, &rect );
+            if (info->pptSrc)
+            {
+                x = info->pptSrc->x;
+                y = info->pptSrc->y;
+            }
+            /* FIXME: intersect rect with info->prcDirty */
+            TRACE( "copying window %p pos %d,%d\n", hwnd, x, y );
+            BitBlt( hdc, rect.left, rect.top, rect.right, rect.bottom,
+                    info->hdcSrc, rect.left + x, rect.top + y, SRCCOPY );
+            ReleaseDC( hwnd, hdc );
+        }
+    }
+
+    if (info->pblend && !(info->dwFlags & ULW_OPAQUE)) alpha = info->pblend->SourceConstantAlpha;
+    TRACE( "setting window %p alpha %u\n", hwnd, alpha );
+    USER_Driver->pSetLayeredWindowAttributes( hwnd, info->crKey, alpha,
+                                              info->dwFlags & (LWA_ALPHA | LWA_COLORKEY) );
+    return TRUE;
+}
+
 
 /*****************************************************************************
  *              UpdateLayeredWindow (USER32.@)
@@ -3238,14 +3520,19 @@ BOOL WINAPI UpdateLayeredWindow( HWND hwnd, HDC hdcDst, POINT *pptDst, SIZE *psi
                                  HDC hdcSrc, POINT *pptSrc, COLORREF crKey, BLENDFUNCTION *pblend,
                                  DWORD dwFlags)
 {
-    static int once;
-    if (!once)
-    {
-        once = 1;
-        FIXME("(%p,%p,%p,%p,%p,%p,0x%08x,%p,%d): stub!\n",
-              hwnd, hdcDst, pptDst, psize, hdcSrc, pptSrc, crKey, pblend, dwFlags);
-    }
-    return 0;
+    UPDATELAYEREDWINDOWINFO info;
+
+    info.cbSize   = sizeof(info);
+    info.hdcDst   = hdcDst;
+    info.pptDst   = pptDst;
+    info.psize    = psize;
+    info.hdcSrc   = hdcSrc;
+    info.pptSrc   = pptSrc;
+    info.crKey    = crKey;
+    info.pblend   = pblend;
+    info.dwFlags  = dwFlags;
+    info.prcDirty = NULL;
+    return UpdateLayeredWindowIndirect( hwnd, &info );
 }
 
 /* 64bit versions */

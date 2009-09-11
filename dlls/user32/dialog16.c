@@ -434,9 +434,9 @@ static HWND DIALOG_CreateIndirect16( HINSTANCE16 hInst, LPCVOID dlgTemplate,
     }
     wndPtr = WIN_GetPtr( hwnd );
     wndPtr->flags |= WIN_ISDIALOG;
+    wndPtr->dlgInfo = dlgInfo;
     WIN_ReleasePtr( wndPtr );
 
-    SetWindowLongPtrW( hwnd, DWLP_WINE_DIALOGINFO, (LONG_PTR)dlgInfo );
     SetWindowLong16( HWND_16(hwnd), DWLP_DLGPROC, (LONG)dlgProc );
 
     if (dlgInfo->hUserFont)
@@ -768,8 +768,8 @@ HWND16 WINAPI CreateDialogParam16( HINSTANCE16 hInst, LPCSTR dlgTemplate,
     HGLOBAL16 hmem;
     LPCVOID data;
 
-    TRACE("%04x,%s,%04x,%08x,%ld\n",
-          hInst, debugstr_a(dlgTemplate), owner, (DWORD)dlgProc, param );
+    TRACE("%04x,%s,%04x,%p,%ld\n",
+          hInst, debugstr_a(dlgTemplate), owner, dlgProc, param );
 
     if (!(hRsrc = FindResource16( hInst, dlgTemplate, (LPSTR)RT_DIALOG ))) return 0;
     if (!(hmem = LoadResource16( hInst, hRsrc ))) return 0;

@@ -88,10 +88,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 /* A floating point version of the POINT structure */
 typedef struct tagFLOAT_POINT
 {
-   FLOAT x, y;
+   double x, y;
 } FLOAT_POINT;
 
 
+static BOOL PATH_AddEntry(GdiPath *pPath, const POINT *pPoint, BYTE flags);
 static BOOL PATH_PathToRegion(GdiPath *pPath, INT nPolyFillMode,
    HRGN *pHrgn);
 static void   PATH_EmptyPath(GdiPath *pPath);
@@ -109,7 +110,7 @@ static BOOL PATH_CheckCorners(DC *dc, POINT corners[], INT x1, INT y1, INT x2, I
  */
 static inline void INTERNAL_LPTODP_FLOAT(DC *dc, FLOAT_POINT *point)
 {
-    FLOAT x, y;
+    double x, y;
 
     /* Perform the transformation */
     x = point->x;
@@ -754,14 +755,14 @@ BOOL PATH_Arc(DC *dc, INT x1, INT y1, INT x2, INT y2,
       return TRUE;
 
    /* Convert points to device coordinates */
-   corners[0].x=(FLOAT)x1;
-   corners[0].y=(FLOAT)y1;
-   corners[1].x=(FLOAT)x2;
-   corners[1].y=(FLOAT)y2;
-   pointStart.x=(FLOAT)xStart;
-   pointStart.y=(FLOAT)yStart;
-   pointEnd.x=(FLOAT)xEnd;
-   pointEnd.y=(FLOAT)yEnd;
+   corners[0].x = x1;
+   corners[0].y = y1;
+   corners[1].x = x2;
+   corners[1].y = y2;
+   pointStart.x = xStart;
+   pointStart.y = yStart;
+   pointEnd.x = xEnd;
+   pointEnd.y = yEnd;
    INTERNAL_LPTODP_FLOAT(dc, corners);
    INTERNAL_LPTODP_FLOAT(dc, corners+1);
    INTERNAL_LPTODP_FLOAT(dc, &pointStart);
@@ -1352,7 +1353,6 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
 
         pt.x = x + int_from_fixed(header->pfxStart.x);
         pt.y = y - int_from_fixed(header->pfxStart.y);
-        LPtoDP(dc->hSelf, &pt, 1);
         PATH_AddEntry(pPath, &pt, PT_MOVETO);
 
         curve = (TTPOLYCURVE *)(header + 1);
@@ -1371,7 +1371,6 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
                 {
                     pt.x = x + int_from_fixed(curve->apfx[i].x);
                     pt.y = y - int_from_fixed(curve->apfx[i].y);
-                    LPtoDP(dc->hSelf, &pt, 1);
                     PATH_AddEntry(pPath, &pt, PT_LINETO);
                 }
                 break;
@@ -1390,13 +1389,11 @@ static BOOL PATH_add_outline(DC *dc, INT x, INT y, TTPOLYGONHEADER *header, DWOR
 
                 pts[0].x = x + int_from_fixed(ptfx.x);
                 pts[0].y = y - int_from_fixed(ptfx.y);
-                LPtoDP(dc->hSelf, &pts[0], 1);
 
                 for(i = 0; i < curve->cpfx; i++)
                 {
                     pts[i + 1].x = x + int_from_fixed(curve->apfx[i].x);
                     pts[i + 1].y = y - int_from_fixed(curve->apfx[i].y);
-                    LPtoDP(dc->hSelf, &pts[i + 1], 1);
                 }
 
                 PATH_BezierTo(pPath, pts, curve->cpfx + 1);
@@ -1428,7 +1425,6 @@ BOOL PATH_ExtTextOut(DC *dc, INT x, INT y, UINT flags, const RECT *lprc,
     unsigned int idx;
     double cosEsc, sinEsc;
     LOGFONTW lf;
-    POINT org;
     HDC hdc = dc->hSelf;
     INT offset = 0, xoff = 0, yoff = 0;
 
@@ -1449,25 +1445,28 @@ BOOL PATH_ExtTextOut(DC *dc, INT x, INT y, UINT flags, const RECT *lprc,
         sinEsc = 0;
     }
 
-    GetDCOrgEx(hdc, &org);
-
     for (idx = 0; idx < count; idx++)
     {
+        static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
         GLYPHMETRICS gm;
         DWORD dwSize;
         void *outline;
 
-        dwSize = GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, 0, NULL, NULL);
-        if (!dwSize) return FALSE;
+        dwSize = GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, 0, NULL, &identity);
+        if (dwSize == GDI_ERROR) return FALSE;
 
-        outline = HeapAlloc(GetProcessHeap(), 0, dwSize);
-        if (!outline) return FALSE;
+        /* add outline only if char is printable */
+        if(dwSize)
+        {
+            outline = HeapAlloc(GetProcessHeap(), 0, dwSize);
+            if (!outline) return FALSE;
 
-        GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, dwSize, outline, NULL);
+            GetGlyphOutlineW(hdc, str[idx], GGO_GLYPH_INDEX | GGO_NATIVE, &gm, dwSize, outline, &identity);
 
-        PATH_add_outline(dc, org.x + x + xoff, org.x + y + yoff, outline, dwSize);
+            PATH_add_outline(dc, x + xoff, y + yoff, outline, dwSize);
 
-        HeapFree(GetProcessHeap(), 0, outline);
+            HeapFree(GetProcessHeap(), 0, outline);
+        }
 
         if (dx)
         {
@@ -1502,7 +1501,7 @@ static void PATH_EmptyPath(GdiPath *pPath)
  * or PT_BEZIERTO, optionally ORed with PT_CLOSEFIGURE. Returns TRUE if
  * successful, FALSE otherwise (e.g. if not enough memory was available).
  */
-BOOL PATH_AddEntry(GdiPath *pPath, const POINT *pPoint, BYTE flags)
+static BOOL PATH_AddEntry(GdiPath *pPath, const POINT *pPoint, BYTE flags)
 {
    assert(pPath!=NULL);
 
@@ -1967,9 +1966,8 @@ static BOOL PATH_WidenPath(DC *dc)
             /* Beginning or end of the path if not closed */
             if((!(pStrokes[i]->pFlags[pStrokes[i]->numEntriesUsed - 1] & PT_CLOSEFIGURE)) && (j == 0 || j == pStrokes[i]->numEntriesUsed - 1) ) {
                 /* Compute segment angle */
-                FLOAT xo, yo, xa, ya;
+                double xo, yo, xa, ya, theta;
                 POINT pt;
-                FLOAT theta, scalarProduct;
                 FLOAT_POINT corners[2];
                 if(j == 0) {
                     xo = pStrokes[i]->pPoints[j].x;
@@ -1983,11 +1981,7 @@ static BOOL PATH_WidenPath(DC *dc)
                     xo = pStrokes[i]->pPoints[j].x;
                     yo = pStrokes[i]->pPoints[j].y;
                 }
-                scalarProduct = (xa - xo) /sqrt(pow((xa - xo), 2) + pow((ya - yo), 2));
-                theta = acos(scalarProduct);
-                if( (ya - yo) < 0) {
-                    theta = -theta;
-                }
+                theta = atan2( ya - yo, xa - xo );
                 switch(endcap) {
                     case PS_ENDCAP_SQUARE :
                         pt.x = xo + round(sqrt(2) * penWidthOut * cos(M_PI_4 + theta));
@@ -2022,9 +2016,8 @@ static BOOL PATH_WidenPath(DC *dc)
             else {
                 /* Compute angle */
                 INT previous, next;
-                FLOAT xa, ya, xb, yb, xo, yo;
-                FLOAT alpha, theta;
-                FLOAT scalarProduct, oa, ob, miterWidth;
+                double xa, ya, xb, yb, xo, yo;
+                double alpha, theta, miterWidth;
                 DWORD _joint = joint;
                 POINT pt;
 		GdiPath *pInsidePath, *pOutsidePath;
@@ -2046,18 +2039,10 @@ static BOOL PATH_WidenPath(DC *dc)
                 ya = pStrokes[i]->pPoints[previous].y;
                 xb = pStrokes[i]->pPoints[next].x;
                 yb = pStrokes[i]->pPoints[next].y;
-                oa = sqrt(pow((xa - xo), 2) + pow((ya - yo), 2));
-                ob = sqrt(pow((xb - xo), 2) + pow((yb - yo), 2));
-                scalarProduct = ((xa - xo) * (xb - xo) + (ya - yo) * (yb - yo))/ (oa * ob);
-                alpha = acos(scalarProduct);
-                if(( (xa - xo) * (yb - yo) - (ya - yo) * (xb - xo) ) < 0) {
-                    alpha = -alpha;
-                }
-                scalarProduct = (xo - xa) / oa;
-                theta = acos(scalarProduct);
-                if( (yo - ya) < 0) {
-                    theta = -theta;
-                }
+                theta = atan2( yo - ya, xo - xa );
+                alpha = atan2( yb - yo, xb - xo ) - theta;
+                if (alpha > 0) alpha -= M_PI;
+                else alpha += M_PI;
                 if(_joint == PS_JOIN_MITER && dc->miterLimit < fabs(1 / sin(alpha/2))) {
                     _joint = PS_JOIN_BEVEL;
                 }

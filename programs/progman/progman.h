@@ -26,7 +26,8 @@
 #define MAX_PATHNAME_LEN    1024
 #define MAX_LANGUAGE_NUMBER (PM_LAST_LANGUAGE - PM_FIRST_LANGUAGE)
 
-#include "windows.h"
+#include <windows.h>
+#include <windef.h>
 
 /* Fallback icon */
 #define DEFAULTICON OIC_WINLOGO
@@ -184,8 +185,6 @@ BOOL   DIALOG_ProgramAttributes(LPSTR lpszTitle, LPSTR lpszCmdLine,
 				LPSTR lpszWorkDir, LPSTR lpszIconFile,
 				HICON *lphIcon, INT *nIconIndex,
 				INT *lpnHotKey, INT *lpnCmdShow, INT nSize);
-VOID   DIALOG_Symbol(HICON *lphIcon, LPSTR lpszIconFile,
-		     INT *lpnIconIndex, INT nSize);
 VOID   DIALOG_Execute(void);
 
 VOID   STRING_LoadMenus(VOID);

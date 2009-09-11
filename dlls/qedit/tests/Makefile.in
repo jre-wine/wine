@@ -4,7 +4,6 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = qedit.dll
 IMPORTS   = oleaut32 ole32 kernel32
-EXTRALIBS = -lstrmiids -luuid
 
 CTESTS = \
 	mediadet.c

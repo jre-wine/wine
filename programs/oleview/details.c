@@ -46,12 +46,12 @@ static void CreateRegRec(HKEY hKey, HTREEITEM parent, WCHAR *wszKeyName, BOOL ad
     U(tvis).item.mask = TVIF_TEXT;
     U(tvis).item.cchTextMax = MAX_LOAD_STRING;
     U(tvis).item.pszText = wszTree;
-    tvis.hInsertAfter = (HTREEITEM)TVI_LAST;
+    tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = parent;
 
     while(TRUE)
     {
-        lenName = sizeof(WCHAR[MAX_LOAD_STRING]);
+        lenName = sizeof(WCHAR[MAX_LOAD_STRING])/sizeof(WCHAR);
         lenData = sizeof(WCHAR[MAX_LOAD_STRING]);
 
         retEnum = RegEnumValue(hKey, i, wszName, &lenName,
@@ -61,7 +61,7 @@ static void CreateRegRec(HKEY hKey, HTREEITEM parent, WCHAR *wszKeyName, BOOL ad
         {
             if(!i && lstrlenW(wszKeyName) > 1)
             {
-                U(tvis).item.pszText = (LPWSTR)wszKeyName;
+                U(tvis).item.pszText = wszKeyName;
                 addPlace = TreeView_InsertItem(details.hReg, &tvis);
                 U(tvis).item.pszText = wszTree;
             }
@@ -213,7 +213,7 @@ static void CreateReg(WCHAR *buffer)
     U(tvis).item.mask = TVIF_TEXT;
     U(tvis).item.cchTextMax = MAX_LOAD_STRING;
     U(tvis).item.pszText = wszTree;
-    tvis.hInsertAfter = (HTREEITEM)TVI_LAST;
+    tvis.hInsertAfter = TVI_LAST;
     tvis.hParent = TVI_ROOT;
 
     path = buffer;
@@ -225,7 +225,7 @@ static void CreateReg(WCHAR *buffer)
         {
             *path = '\0';
 
-            if(RegOpenKey(HKEY_CLASSES_ROOT, (LPWSTR)buffer, &hKey) != ERROR_SUCCESS)
+            if(RegOpenKey(HKEY_CLASSES_ROOT, buffer, &hKey) != ERROR_SUCCESS)
                 return;
 
             lastLenBuffer = lenBuffer+1;
@@ -259,9 +259,9 @@ static void CreateReg(WCHAR *buffer)
         else break;
     }
 
-    if(RegOpenKey(HKEY_CLASSES_ROOT, (LPWSTR)buffer, &hKey) != ERROR_SUCCESS) return;
+    if(RegOpenKey(HKEY_CLASSES_ROOT, buffer, &hKey) != ERROR_SUCCESS) return;
 
-    CreateRegRec(hKey, addPlace, (LPWSTR)&buffer[lenBuffer+1], TRUE);
+    CreateRegRec(hKey, addPlace, &buffer[lenBuffer+1], TRUE);
 
     RegCloseKey(hKey);
 
@@ -301,14 +301,14 @@ void RefreshDetails(HTREEITEM item)
             memset(&tci, 0, sizeof(TCITEM));
             tci.mask = TCIF_TEXT;
             tci.pszText = wszBuf;
-            tci.cchTextMax = sizeof(WCHAR[MAX_LOAD_STRING]);
+            tci.cchTextMax = sizeof(wszBuf)/sizeof(wszBuf[0]);
 
             LoadString(globals.hMainInst, IDS_TAB_IMPL,
-                    wszBuf, sizeof(WCHAR[MAX_LOAD_STRING]));
+                    wszBuf, sizeof(wszBuf)/sizeof(wszBuf[0]));
             SendMessage(details.hTab, TCM_INSERTITEM, 1, (LPARAM)&tci);
 
             LoadString(globals.hMainInst, IDS_TAB_ACTIV,
-                    wszBuf, sizeof(WCHAR[MAX_LOAD_STRING]));
+                    wszBuf, sizeof(wszBuf)/sizeof(wszBuf[0]));
             SendMessage(details.hTab, TCM_INSERTITEM, 2, (LPARAM)&tci);
         }
     }
@@ -336,13 +336,13 @@ static void CreateTabCtrl(HWND hWnd)
     memset(&tci, 0, sizeof(TCITEM));
     tci.mask = TCIF_TEXT;
     tci.pszText = buffer;
-    tci.cchTextMax = sizeof(WCHAR[MAX_LOAD_STRING]);
+    tci.cchTextMax = sizeof(buffer)/sizeof(buffer[0]);
 
     details.hTab = CreateWindow(WC_TABCONTROL, NULL, WS_CHILD|WS_VISIBLE,
             0, 0, 0, 0, hWnd, (HMENU)TAB_WINDOW, globals.hMainInst, NULL);
     ShowWindow(details.hTab, SW_HIDE);
 
-    LoadString(globals.hMainInst, IDS_TAB_REG, buffer, sizeof(WCHAR[MAX_LOAD_STRING]));
+    LoadString(globals.hMainInst, IDS_TAB_REG, buffer, sizeof(buffer)/sizeof(buffer[0]));
     SendMessage(details.hTab, TCM_INSERTITEM, 0, (LPARAM)&tci);
 
     details.hReg = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, NULL,
@@ -350,7 +350,7 @@ static void CreateTabCtrl(HWND hWnd)
             0, 0, 0, 0, details.hTab, NULL, globals.hMainInst, NULL);
 }
 
-LRESULT CALLBACK DetailsProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+static LRESULT CALLBACK DetailsProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     int sel;
 

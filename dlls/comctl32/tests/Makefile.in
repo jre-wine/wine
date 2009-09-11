@@ -11,11 +11,11 @@ CTESTS = \
 	dpa.c \
 	header.c \
 	imagelist.c \
+	ipaddress.c \
 	listview.c \
 	misc.c \
 	monthcal.c \
 	mru.c \
-	msg.c \
 	progress.c \
 	propsheet.c \
 	rebar.c \

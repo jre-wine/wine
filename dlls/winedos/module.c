@@ -1,7 +1,7 @@
 /*
  * DOS (MZ) loader
  *
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -63,6 +63,18 @@ BOOL DOSVM_IsWin16(void)
 {
   return DOSVM_isdosexe ? FALSE : TRUE;
 }
+
+/**********************************************************************
+ *          DOSVM_Exit
+ */
+void DOSVM_Exit( WORD retval )
+{
+    DWORD count;
+
+    ReleaseThunkLock( &count );
+    ExitThread( retval );
+}
+
 
 #ifdef MZ_SUPPORTED
 
@@ -460,7 +472,7 @@ BOOL WINAPI MZ_Exec( CONTEXT86 *context, LPCSTR filename, BYTE func, LPVOID para
       WORD fullCmdLength;
       LPBYTE psp_start = (LPBYTE)((DWORD)DOSVM_psp << 4);
       PDB16 *psp = (PDB16 *)psp_start;
-      ExecBlock *blk = (ExecBlock *)paramblk;
+      ExecBlock *blk = paramblk;
       LPBYTE cmdline = PTR_REAL_TO_LIN(SELECTOROF(blk->cmdline),OFFSETOF(blk->cmdline));
       LPBYTE envblock = PTR_REAL_TO_LIN(psp->environment, 0);
       int    cmdLength = cmdline[0];
@@ -530,7 +542,7 @@ BOOL WINAPI MZ_Exec( CONTEXT86 *context, LPCSTR filename, BYTE func, LPVOID para
       /* MZ_LoadImage created a new PSP and loaded new values into it,
        * let's work on the new values now */
       LPBYTE psp_start = (LPBYTE)((DWORD)DOSVM_psp << 4);
-      ExecBlock *blk = (ExecBlock *)paramblk;
+      ExecBlock *blk = paramblk;
       LPBYTE cmdline = PTR_REAL_TO_LIN(SELECTOROF(blk->cmdline),OFFSETOF(blk->cmdline));
 
       /* First character contains the length of the command line. */
@@ -547,7 +559,7 @@ BOOL WINAPI MZ_Exec( CONTEXT86 *context, LPCSTR filename, BYTE func, LPVOID para
          */
         LPBYTE stack;
         init_sp -= 2;
-        stack = (LPBYTE) CTX_SEG_OFF_TO_LIN(context, init_ss, init_sp);
+        stack = CTX_SEG_OFF_TO_LIN(context, init_ss, init_sp);
         /* FIXME: push AX correctly */
         stack[0] = 0x00;    /* push AL */
         stack[1] = 0x00;    /* push AH */
@@ -570,7 +582,7 @@ BOOL WINAPI MZ_Exec( CONTEXT86 *context, LPCSTR filename, BYTE func, LPVOID para
     break;
   case 3: /* load overlay */
     {
-      OverlayBlock *blk = (OverlayBlock *)paramblk;
+      OverlayBlock *blk = paramblk;
       ret = MZ_DoLoadImage( hFile, filename, blk, 0);
     }
     break;
@@ -614,7 +626,7 @@ void WINAPI MZ_RunInThread( PAPCFUNC proc, ULONG_PTR arg )
 static DWORD WINAPI MZ_DOSVM( LPVOID lpExtra )
 {
   CONTEXT context;
-  DWORD ret;
+  INT ret;
 
   dosvm_pid = getpid();
 
@@ -628,9 +640,23 @@ static DWORD WINAPI MZ_DOSVM( LPVOID lpExtra )
   context.EFlags = V86_FLAG | VIF_MASK;
   DOSVM_SetTimer(0x10000);
   ret = DOSVM_Enter( &context );
+  if (ret == -1)
+  {
+      /* fetch the app name from the environment */
+      PDB16 *psp = PTR_REAL_TO_LIN( DOSVM_psp, 0 );
+      char *env = PTR_REAL_TO_LIN( psp->environment, 0 );
+      while (*env) env += strlen(env) + 1;
+      env += 1 + sizeof(WORD);
 
+      if (GetLastError() == ERROR_NOT_SUPPORTED)
+          MESSAGE( "wine: Cannot start DOS application %s\n"
+                   "      because vm86 mode is not supported on this platform.\n",
+                   debugstr_a(env) );
+      else
+          FIXME( "vm86 mode failed error %u\n", GetLastError() );
+  }
   dosvm_pid = 0;
-  return ret;
+  return ret != 0;
 }
 
 static BOOL MZ_InitTask(void)
@@ -655,6 +681,7 @@ static void MZ_Launch( LPCSTR cmdtail, int length )
   BYTE *psp_start = PTR_REAL_TO_LIN( DOSVM_psp, 0 );
   DWORD rv;
   SYSLEVEL *lock;
+  MSG msg;
 
   MZ_FillPSP(psp_start, cmdtail, length);
   pTask->flags |= TDBF_WINOLDAP;
@@ -664,6 +691,9 @@ static void MZ_Launch( LPCSTR cmdtail, int length )
 
   GetpWin16Lock( &lock );
   _LeaveSysLevel( lock );
+
+  /* force the message queue to be created */
+  PeekMessageW(&msg, NULL, WM_USER, WM_USER, PM_NOREMOVE);
 
   ResumeThread(dosvm_thread);
   rv = DOSVM_Loop(dosvm_thread);
@@ -713,7 +743,7 @@ void WINAPI MZ_Exit( CONTEXT86 *context, BOOL cs_psp, WORD retval )
     } else
       TRACE("killing DOS task\n");
   }
-  ExitThread( retval );
+  DOSVM_Exit( retval );
 }
 
 
@@ -767,7 +797,7 @@ void WINAPI MZ_RunInThread( PAPCFUNC proc, ULONG_PTR arg )
  */
 void WINAPI MZ_Exit( CONTEXT86 *context, BOOL cs_psp, WORD retval )
 {
-  ExitThread( retval );
+  DOSVM_Exit( retval );
 }
 
 /***********************************************************************

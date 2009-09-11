@@ -660,8 +660,9 @@ BOOL WINAPI GetStandardColorSpaceProfileW( PCWSTR machine, DWORD id, PWSTR profi
     GetColorDirectoryW( machine, rgbprofile, &len );
 
     switch (id)
-    {
-        case SPACE_RGB: /* 'RGB ' */
+        case LCS_sRGB:
+        case LCS_WINDOWS_COLOR_SPACE: /* FIXME */
+        {
             lstrcatW( rgbprofile, rgbprofilefile );
             len = lstrlenW( rgbprofile ) * sizeof(WCHAR);
 
@@ -1461,7 +1462,7 @@ HPROFILE WINAPI OpenColorProfileW( PPROFILE profile, DWORD access, DWORD sharing
     {
         DWORD size, read, flags = 0;
 
-        TRACE( "profile file: %s\n", debugstr_w( (WCHAR *)profile->pProfileData ) );
+        TRACE( "profile file: %s\n", debugstr_w( profile->pProfileData ) );
 
         if (access & PROFILE_READ) flags = GENERIC_READ;
         if (access & PROFILE_READWRITE) flags = GENERIC_READ|GENERIC_WRITE;

@@ -38,20 +38,40 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 
 #ifdef __i386__
 #define DEFINE_FASTCALL1_ENTRYPOINT( name ) \
-    __ASM_GLOBAL_FUNC( name, \
+    __ASM_STDCALL_FUNC( name, 4, \
                        "popl %eax\n\t" \
                        "pushl %ecx\n\t" \
                        "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name )
+                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(4))
 #define DEFINE_FASTCALL2_ENTRYPOINT( name ) \
-    __ASM_GLOBAL_FUNC( name, \
+    __ASM_STDCALL_FUNC( name, 8, \
                        "popl %eax\n\t" \
                        "pushl %edx\n\t" \
                        "pushl %ecx\n\t" \
                        "pushl %eax\n\t" \
-                       "jmp " __ASM_NAME("__regs_") #name )
+                       "jmp " __ASM_NAME("__regs_") #name __ASM_STDCALL(8))
 #endif
 
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExAcquireFastMutex )
+VOID WINAPI __regs_ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExAcquireFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
+
+#ifdef DEFINE_FASTCALL1_ENTRYPOINT
+DEFINE_FASTCALL1_ENTRYPOINT( ExReleaseFastMutex )
+VOID WINAPI __regs_ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#else
+VOID WINAPI ExReleaseFastMutex(PFAST_MUTEX FastMutex)
+#endif
+{
+    FIXME("%p: stub\n", FastMutex);
+}
 
 #ifdef DEFINE_FASTCALL1_ENTRYPOINT
 DEFINE_FASTCALL1_ENTRYPOINT( KfAcquireSpinLock )
@@ -62,7 +82,7 @@ KIRQL WINAPI KfAcquireSpinLock(PKSPIN_LOCK SpinLock)
 {
     FIXME( "(%p) stub!\n", SpinLock );
 
-    return (KIRQL)0;
+    return 0;
 }
 
 
@@ -86,7 +106,7 @@ KIRQL WINAPI KfRaiseIrql(KIRQL NewIrql)
 {
     FIXME( "(%u) stub!\n", NewIrql );
 
-    return (KIRQL)0;
+    return 0;
 }
 
 
@@ -104,5 +124,11 @@ ULONG WINAPI HalGetBusData(BUS_DATA_TYPE BusDataType, ULONG BusNumber, ULONG Slo
 {
     FIXME("(%u %u %u %p %u) stub!\n", BusDataType, BusNumber, SlotNumber, Buffer, Length);
     /* Claim that there is no such bus */
+    return 0;
+}
+
+KIRQL WINAPI KeGetCurrentIrql(VOID)
+{
+    FIXME( " stub!\n");
     return 0;
 }

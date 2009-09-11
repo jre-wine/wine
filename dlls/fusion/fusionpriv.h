@@ -26,6 +26,9 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winver.h"
+
+#include <pshpack1.h>
 
 typedef struct
 {
@@ -34,12 +37,10 @@ typedef struct
     USHORT MinorVersion;
     ULONG Reserved;
     ULONG VersionLength;
-    BYTE Version[12];
+    LPSTR Version;
     BYTE Flags;
     WORD Streams;
 } METADATAHDR;
-
-#include <pshpack1.h>
 
 typedef struct
 {
@@ -79,10 +80,17 @@ typedef struct
 
 typedef struct
 {
-    DWORD ResolutionScope;
+    WORD ResolutionScope;
     WORD Name;
     WORD Namespace;
 } TYPEREFTABLE;
+
+typedef struct
+{
+    WORD Flags;
+    WORD Name;
+    WORD Signature;
+} FIELDTABLE;
 
 typedef struct
 {
@@ -104,6 +112,225 @@ typedef struct
     WORD Name;
     WORD Implementation;
 } MANIFESTRESTABLE;
+
+typedef struct
+{
+    DWORD RVA;
+    WORD ImplFlags;
+    WORD Flags;
+    WORD Name;
+    WORD Signature;
+    WORD ParamList;
+} METHODDEFTABLE;
+
+typedef struct
+{
+    WORD Flags;
+    WORD Sequence;
+    WORD Name;
+} PARAMTABLE;
+
+typedef struct
+{
+    WORD Class;
+    WORD Interface;
+} INTERFACEIMPLTABLE;
+
+typedef struct
+{
+    WORD Class;
+    WORD Name;
+    WORD Signature;
+} MEMBERREFTABLE;
+
+typedef struct
+{
+    BYTE Type;
+    BYTE Reserved;
+    WORD Parent;
+    WORD Value;
+} CONSTANTTABLE;
+
+typedef struct
+{
+    WORD Parent;
+    WORD Type;
+    WORD Value;
+} CUSTOMATTRIBUTETABLE;
+
+typedef struct
+{
+    WORD Parent;
+    WORD NativeType;
+} FIELDMARSHALTABLE;
+
+typedef struct
+{
+    WORD Action;
+    WORD Parent;
+    WORD PermissionSet;
+} DECLSECURITYTABLE;
+
+typedef struct
+{
+    WORD PackingSize;
+    DWORD ClassSize;
+    WORD Parent;
+} CLASSLAYOUTTABLE;
+
+typedef struct
+{
+    DWORD Offset;
+    WORD Field;
+} FIELDLAYOUTTABLE;
+
+typedef struct
+{
+    WORD Signature;
+} STANDALONESIGTABLE;
+
+typedef struct
+{
+    WORD Parent;
+    WORD EventList;
+} EVENTMAPTABLE;
+
+typedef struct
+{
+    WORD EventFlags;
+    WORD Name;
+    WORD EventType;
+} EVENTTABLE;
+
+typedef struct
+{
+    WORD Parent;
+    WORD PropertyList;
+} PROPERTYMAPTABLE;
+
+typedef struct
+{
+    WORD Flags;
+    WORD Name;
+    WORD Type;
+} PROPERTYTABLE;
+
+typedef struct
+{
+    WORD Semantics;
+    WORD Method;
+    WORD Association;
+} METHODSEMANTICSTABLE;
+
+typedef struct
+{
+    WORD Class;
+    WORD MethodBody;
+    WORD MethodDeclaration;
+} METHODIMPLTABLE;
+
+typedef struct
+{
+    WORD Name;
+} MODULEREFTABLE;
+
+typedef struct
+{
+    WORD Signature;
+} TYPESPECTABLE;
+
+typedef struct
+{
+    WORD MappingFlags;
+    WORD MemberForwarded;
+    WORD ImportName;
+    WORD ImportScope;
+} IMPLMAPTABLE;
+
+typedef struct
+{
+    DWORD RVA;
+    WORD Field;
+} FIELDRVATABLE;
+
+typedef struct
+{
+    DWORD Processor;
+} ASSEMBLYPROCESSORTABLE;
+
+typedef struct
+{
+    DWORD OSPlatformID;
+    DWORD OSMajorVersion;
+    DWORD OSMinorVersion;
+} ASSEMBLYOSTABLE;
+
+typedef struct
+{
+    WORD MajorVersion;
+    WORD MinorVersion;
+    WORD BuildNumber;
+    WORD RevisionNumber;
+    DWORD Flags;
+    WORD PublickKeyOrToken;
+    WORD Name;
+    WORD Culture;
+    WORD HashValue;
+} ASSEMBLYREFTABLE;
+
+typedef struct
+{
+    DWORD Processor;
+    WORD AssemblyRef;
+} ASSEMBLYREFPROCESSORTABLE;
+
+typedef struct
+{
+    DWORD OSPlatformId;
+    DWORD OSMajorVersion;
+    DWORD OSMinorVersion;
+    WORD AssemblyRef;
+} ASSEMBLYREFOSTABLE;
+
+typedef struct
+{
+    DWORD Flags;
+    WORD Name;
+    WORD HashValue;
+} FILETABLE;
+
+typedef struct
+{
+    DWORD Flags;
+    DWORD TypeDefId;
+    WORD TypeName;
+    WORD TypeNameSpace;
+    WORD Implementation;
+} EXPORTEDTYPETABLE;
+
+typedef struct
+{
+    WORD NestedClass;
+    WORD EnclosingClass;
+} NESTEDCLASSTABLE;
+
+typedef struct
+{
+    WORD Number;
+    WORD Flags;
+} GENERICPARAMTABLE;
+
+typedef struct
+{
+    WORD MethodDef;
+    WORD Instantiation;
+} METHODSPECTABLE;
+
+typedef struct
+{
+    WORD Owner;
+    WORD Constraint;
+} GENERICPARAMCONSTRAINTTABLE;
 
 typedef struct
 {
@@ -203,10 +430,43 @@ typedef struct tagASSEMBLY ASSEMBLY;
 
 HRESULT assembly_create(ASSEMBLY **out, LPCWSTR file);
 HRESULT assembly_release(ASSEMBLY *assembly);
-HRESULT assembly_get_name(ASSEMBLY *assembly, LPSTR *name);
-HRESULT assembly_get_path(ASSEMBLY *assembly, LPSTR *path);
-HRESULT assembly_get_version(ASSEMBLY *assembly, LPSTR *version);
-HRESULT assembly_get_architecture(ASSEMBLY *assembly, DWORD fixme);
-HRESULT assembly_get_pubkey_token(ASSEMBLY *assembly, LPSTR *token);
+HRESULT assembly_get_name(ASSEMBLY *assembly, LPWSTR *name);
+HRESULT assembly_get_path(ASSEMBLY *assembly, LPWSTR *path);
+HRESULT assembly_get_version(ASSEMBLY *assembly, LPWSTR *version);
+HRESULT assembly_get_pubkey_token(ASSEMBLY *assembly, LPWSTR *token);
+
+static inline LPWSTR strdupW(LPCWSTR src)
+{
+    LPWSTR dest;
+
+    if (!src)
+        return NULL;
+
+    dest = HeapAlloc(GetProcessHeap(), 0, (lstrlenW(src) + 1) * sizeof(WCHAR));
+    if (dest)
+        lstrcpyW(dest, src);
+
+    return dest;
+}
+
+#define BYTES_PER_TOKEN 8
+#define CHARS_PER_BYTE  2
+#define TOKEN_LENGTH    (BYTES_PER_TOKEN * CHARS_PER_BYTE + 1)
+
+static inline void token_to_str(BYTE *bytes, LPWSTR str)
+{
+    DWORD i;
+
+    static const WCHAR hexval[16] = {
+        '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'
+    };
+
+    for(i = 0; i < BYTES_PER_TOKEN; i++)
+    {
+        str[i * 2] = hexval[((bytes[i] >> 4) & 0xF)];
+        str[i * 2 + 1] = hexval[(bytes[i]) & 0x0F];
+    }
+    str[i * 2] = 0;
+}
 
 #endif /* __WINE_FUSION_PRIVATE__ */

@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "cmdlgtst.h"
+
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
 CmdlgtstMenu MENU
@@ -291,5 +293,5 @@ BEGIN
   EDITTEXT edt7, 187, 190, 39, 12, WS_TABSTOP|WS_GROUP|WS_BORDER
   DEFPUSHBUTTON "OK", IDOK, 71, 220, 50, 14, BS_PUSHBUTTON
   PUSHBUTTON "Avbryt", IDCANCEL, 126, 220, 50, 14
-  PUSHBUTTON "Skr&iver . . .", psh3, 184, 220, 48, 14
+  PUSHBUTTON "Skr&iver...", psh3, 184, 220, 48, 14
 END

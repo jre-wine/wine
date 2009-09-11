@@ -31,18 +31,20 @@
     ok( (ERROR_PATH_NOT_FOUND == GetLastError()) || \
 	(ERROR_RESOURCE_DATA_NOT_FOUND == GetLastError()) || \
 	(ERROR_FILE_NOT_FOUND == GetLastError()) || \
-	(ERROR_BAD_PATHNAME == GetLastError()), \
+	(ERROR_BAD_PATHNAME == GetLastError()) || \
+        (ERROR_SUCCESS == GetLastError()), \
 	"Last error wrong! ERROR_RESOURCE_DATA_NOT_FOUND/ERROR_BAD_PATHNAME (98)/" \
-	"ERROR_PATH_NOT_FOUND (NT4)/ERROR_FILE_NOT_FOUND (2k3)" \
-	"expected, got %u\n", GetLastError());
+	"ERROR_PATH_NOT_FOUND (NT4)/ERROR_FILE_NOT_FOUND (2k3) " \
+        "ERROR_SUCCESS (2k) expected, got %u\n", GetLastError());
 #define EXPECT_INVALID__NOT_FOUND \
     ok( (ERROR_PATH_NOT_FOUND == GetLastError()) || \
 	(ERROR_RESOURCE_DATA_NOT_FOUND == GetLastError()) || \
 	(ERROR_FILE_NOT_FOUND == GetLastError()) || \
-	(ERROR_INVALID_PARAMETER == GetLastError()), \
+	(ERROR_INVALID_PARAMETER == GetLastError()) || \
+        (ERROR_SUCCESS == GetLastError()), \
 	"Last error wrong! ERROR_RESOURCE_DATA_NOT_FOUND/ERROR_INVALID_PARAMETER (98)/" \
-	"ERROR_PATH_NOT_FOUND (NT4)/ERROR_FILE_NOT_FOUND (2k3)" \
-	"expected, got %u\n", GetLastError());
+	"ERROR_PATH_NOT_FOUND (NT4)/ERROR_FILE_NOT_FOUND (2k3) " \
+	"ERROR_SUCCESS (2k) expected, got %u\n", GetLastError());
 
 static void create_file(const CHAR *name)
 {
@@ -122,7 +124,8 @@ static void test_info_size(void)
 	retval);
     ok( (ERROR_FILE_NOT_FOUND == GetLastError()) ||
 	(ERROR_RESOURCE_DATA_NOT_FOUND == GetLastError()) ||
-	(MY_LAST_ERROR == GetLastError()),
+	(MY_LAST_ERROR == GetLastError()) ||
+	(ERROR_SUCCESS == GetLastError()), /* win2k */
 	"Last error wrong! ERROR_FILE_NOT_FOUND/ERROR_RESOURCE_DATA_NOT_FOUND "
 	"(XP)/0x%08x (NT4) expected, got %u\n", MY_LAST_ERROR, GetLastError());
 
@@ -164,7 +167,7 @@ static void test_info_size(void)
 	}
     }
     else
-	trace("skipping GetModuleFileNameA(NULL,..) failed\n");
+	trace("skipping GetSystemDirectoryA(mypath,..) failed\n");
 
     create_file("test.txt");
 
@@ -174,7 +177,9 @@ static void test_info_size(void)
     retval = GetFileVersionInfoSizeA("test.txt", &hdl);
     ok(retval == 0, "Expected 0, got %d\n", retval);
     ok(hdl == 0, "Expected 0, got %d\n", hdl);
-    ok(GetLastError() == ERROR_RESOURCE_DATA_NOT_FOUND,
+    ok(GetLastError() == ERROR_RESOURCE_DATA_NOT_FOUND ||
+       GetLastError() == ERROR_BAD_FORMAT || /* win9x */
+       GetLastError() == ERROR_SUCCESS, /* win2k */
        "Expected ERROR_RESOURCE_DATA_NOT_FOUND, got %d\n", GetLastError());
 
     DeleteFileA("test.txt");
@@ -243,6 +248,13 @@ static void test_info(void)
     if (!boolret)
         goto cleanup;
 
+    boolret = VerQueryValueA( pVersionInfo, NULL, (LPVOID *)&pFixedVersionInfo, &uiLength );
+    ok (boolret || GetLastError() == NO_ERROR /* Win98 */,
+       "VerQueryValueA failed: GetLastError = %u\n", GetLastError());
+
+    boolret = VerQueryValueA( pVersionInfo, "", (LPVOID *)&pFixedVersionInfo, &uiLength );
+    ok (boolret, "VerQueryValueA failed: GetLastError = %u\n", GetLastError());
+
     boolret = VerQueryValueA( pVersionInfo, backslash, (LPVOID *)&pFixedVersionInfo, &uiLength );
     ok (boolret, "VerQueryValueA failed: GetLastError = %u\n", GetLastError());
     if (!boolret)
@@ -281,6 +293,7 @@ static void test_32bit_win(void)
     WCHAR mypathW[MAX_PATH];
     char rootA[] = "\\";
     WCHAR rootW[] = { '\\', 0 };
+    WCHAR emptyW[] = { 0 };
     char varfileinfoA[] = "\\VarFileInfo\\Translation";
     WCHAR varfileinfoW[]    = { '\\','V','a','r','F','i','l','e','I','n','f','o',
                                 '\\','T','r','a','n','s','l','a','t','i','o','n', 0 };
@@ -319,7 +332,7 @@ static void test_32bit_win(void)
     GetModuleFileNameW(NULL, mypathW, MAX_PATH);
     if (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
     {
-        trace("GetModuleFileNameW not existing on this platform, skipping comparison between A- and W-calls\n");
+        win_skip("GetModuleFileNameW not existing on this platform, skipping comparison between A- and W-calls\n");
         is_unicode_enabled = FALSE;
     }
 
@@ -370,7 +383,7 @@ static void test_32bit_win(void)
 
     if (is_unicode_enabled)
     { 
-        VS_VERSION_INFO_STRUCT32 *vvis = (VS_VERSION_INFO_STRUCT32 *)pVersionInfoW;
+        VS_VERSION_INFO_STRUCT32 *vvis = pVersionInfoW;
         ok ( retvalW == ((vvis->wLength * 2) + 4) || retvalW == (vvis->wLength * 1.5),
              "Structure is not of the correct size\n");
     }
@@ -387,6 +400,15 @@ static void test_32bit_win(void)
 
     if (is_unicode_enabled)
     { 
+        if(0)
+        {   /* This causes Vista and w2k8 to crash */
+            retW = VerQueryValueW( pVersionInfoW, NULL, (LPVOID *)&pBufW, &uiLengthW );
+            ok (retW, "VerQueryValueW failed: GetLastError = %u\n", GetLastError());
+        }
+
+        retW = VerQueryValueW( pVersionInfoW, emptyW, (LPVOID *)&pBufW, &uiLengthW );
+        ok (retW, "VerQueryValueW failed: GetLastError = %u\n", GetLastError());
+
         retW = VerQueryValueW( pVersionInfoW, rootW, (LPVOID *)&pBufW, &uiLengthW );
         ok (retW, "VerQueryValueW failed: GetLastError = %u\n", GetLastError());
         ok ( uiLengthA == sizeof(VS_FIXEDFILEINFO), "Size (%d) doesn't match the size of the VS_FIXEDFILEINFO struct\n", uiLengthA);
@@ -480,7 +502,9 @@ static void test_VerQueryValue(void)
        GetLastError() == 0xdeadbeef /* Win9x, NT4, W2K */,
        "VerQueryValue returned %u\n", GetLastError());
     ok(p == (char *)0xdeadbeef, "expected 0xdeadbeef got %p\n", p);
-    ok(len == 0, "expected 0 got %x\n", len);
+    ok(len == 0 ||
+       len == 0xbeef, /* win9x */
+       "expected 0 got %x\n", len);
 
     p = (char *)0xdeadbeef;
     len = 0xdeadbeef;
@@ -547,7 +571,9 @@ todo_wine ok(len == 0, "VerQueryValue returned %u, expected 0\n", len);
            GetLastError() == 0xdeadbeef /* Win9x, NT4, W2K */,
            "VerQueryValue returned %u\n", GetLastError());
         ok(p == (char *)0xdeadbeef, "expected 0xdeadbeef got %p\n", p);
-        ok(len == 0, "expected 0 got %x\n", len);
+        ok(len == 0 ||
+           len == 0xbeef, /* win9x */
+           "expected 0 or 0xbeef, got %x\n", len);
     }
 
     HeapFree(GetProcessHeap(), 0, ver);

@@ -4,9 +4,8 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = msi.dll
 IMPORTLIB = msi
-IMPORTS   = urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32 kernel32 ntdll
+IMPORTS   = uuid urlmon wininet comctl32 shell32 shlwapi cabinet oleaut32 ole32 version user32 gdi32 advapi32 kernel32 ntdll
 DELAYIMPORTS = odbccp32
-EXTRALIBS = -luuid
 
 C_SRCS = \
 	action.c \
@@ -20,6 +19,7 @@ C_SRCS = \
 	delete.c \
 	dialog.c \
 	distinct.c \
+	drop.c \
 	events.c \
 	files.c \
 	font.c \
@@ -29,6 +29,7 @@ C_SRCS = \
 	insert.c \
 	install.c \
 	join.c \
+	media.c \
 	msi.c \
 	msi_main.c \
 	msiquery.c \
@@ -40,6 +41,7 @@ C_SRCS = \
 	script.c \
 	select.c \
 	source.c \
+	storages.c \
 	streams.c \
 	string.c \
 	suminfo.c \
@@ -57,7 +59,31 @@ BISON_SRCS = \
 	cond.y \
 	sql.y
 
-RC_SRCS = msi.rc
+RC_SRCS = \
+	msi.rc \
+	msi_Bg.rc \
+	msi_Da.rc \
+	msi_De.rc \
+	msi_En.rc \
+	msi_Eo.rc \
+	msi_Es.rc \
+	msi_Fi.rc \
+	msi_Fr.rc \
+	msi_Hu.rc \
+	msi_It.rc \
+	msi_Ko.rc \
+	msi_Lt.rc \
+	msi_Nl.rc \
+	msi_No.rc \
+	msi_Pl.rc \
+	msi_Pt.rc \
+	msi_Ro.rc \
+	msi_Ru.rc \
+	msi_Si.rc \
+	msi_Sv.rc \
+	msi_Tr.rc \
+	msi_Zh.rc \
+	version.rc
 
 @MAKE_DLL_RULES@
 

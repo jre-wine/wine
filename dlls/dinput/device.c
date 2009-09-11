@@ -44,7 +44,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(dinput);
 /******************************************************************************
  *	Various debugging tools
  */
-void _dump_cooperativelevel_DI(DWORD dwFlags) {
+static void _dump_cooperativelevel_DI(DWORD dwFlags) {
     if (TRACE_ON(dinput)) {
 	unsigned int   i;
 	static const struct {
@@ -67,7 +67,7 @@ void _dump_cooperativelevel_DI(DWORD dwFlags) {
     }
 }
 
-void _dump_EnumObjects_flags(DWORD dwFlags) {
+static void _dump_EnumObjects_flags(DWORD dwFlags) {
     if (TRACE_ON(dinput)) {
 	unsigned int   i;
 	DWORD type, instance;
@@ -179,7 +179,7 @@ const char *_dump_dinput_GUID(const GUID *guid) {
 	    return guids[i].name;
 	}
     }
-    return "Unknown GUID";
+    return debugstr_guid(guid);
 }
 
 void _dump_DIDATAFORMAT(const DIDATAFORMAT *df) {
@@ -265,14 +265,16 @@ DWORD get_config_key( HKEY defkey, HKEY appkey, const char *name,
 }
 
 /* Conversion between internal data buffer and external data buffer */
-void fill_DataFormat(void *out, const void *in, const DataFormat *df) {
+void fill_DataFormat(void *out, DWORD size, const void *in, const DataFormat *df)
+{
     int i;
     const char *in_c = in;
-    char *out_c = (char *) out;
+    char *out_c = out;
 
+    memset(out, 0, size);
     if (df->dt == NULL) {
 	/* This means that the app uses Wine's internal data format */
-	memcpy(out, in, df->internal_format_size);
+        memcpy(out, in, min(size, df->internal_format_size));
     } else {
 	for (i = 0; i < df->size; i++) {
 	    if (df->dt[i].offset_in >= 0) {
@@ -340,13 +342,13 @@ void release_DataFormat(DataFormat * format)
     format->user_df = NULL;
 }
 
-inline LPDIOBJECTDATAFORMAT dataformat_to_odf(LPCDIDATAFORMAT df, int idx)
+static inline LPDIOBJECTDATAFORMAT dataformat_to_odf(LPCDIDATAFORMAT df, int idx)
 {
     if (idx < 0 || idx >= df->dwNumObjs) return NULL;
     return (LPDIOBJECTDATAFORMAT)((LPBYTE)df->rgodf + idx * df->dwObjSize);
 }
 
-HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
+static HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
 {
     DataTransform *dt;
     unsigned int i, j;
@@ -430,11 +432,8 @@ HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
 		break;
 	    }
 	}
-	
-	if (j == asked_format->dwNumObjs)
-	    same = 0;
     }
-    
+
     TRACE("Setting to default value :\n");
     for (j = 0; j < asked_format->dwNumObjs; j++) {
 	if (done[j] == 0) {
@@ -452,9 +451,12 @@ HRESULT create_DataFormat(LPCDIDATAFORMAT asked_format, DataFormat *format)
 		dt[index].size = sizeof(DWORD);
 	    dt[index].offset_in  = -1;
 	    dt[index].offset_out = asked_format->rgodf[j].dwOfs;
-	    dt[index].value = 0;
+            if (asked_format->rgodf[j].dwType & DIDFT_POV)
+                dt[index].value = -1;
+            else
+                dt[index].value = 0;
 	    index++;
-	    
+
 	    same = 0;
 	}
     }
@@ -525,40 +527,6 @@ int find_property(const DataFormat *df, LPCDIPROPHEADER ph)
     FIXME("Unhandled ph->dwHow=='%04X'\n", (unsigned int)ph->dwHow);
 
     return -1;
-}
-
-
-BOOL DIEnumDevicesCallbackAtoW(LPCDIDEVICEOBJECTINSTANCEA lpddi, LPVOID lpvRef) {
-    DIDEVICEOBJECTINSTANCEW ddtmp;
-    device_enumobjects_AtoWcb_data* data;
-
-    data = (device_enumobjects_AtoWcb_data*) lpvRef;
-    
-    memset(&ddtmp, 0, sizeof(ddtmp));
-    
-    ddtmp.dwSize = sizeof(DIDEVICEINSTANCEW);
-    ddtmp.guidType     = lpddi->guidType;
-    ddtmp.dwOfs        = lpddi->dwOfs;
-    ddtmp.dwType       = lpddi->dwType;
-    ddtmp.dwFlags      = lpddi->dwFlags;
-    MultiByteToWideChar(CP_ACP, 0, lpddi->tszName, -1, ddtmp.tszName, MAX_PATH);
-    
-    if (lpddi->dwSize == sizeof(DIDEVICEINSTANCEA)) {
-	/**
-	 * if dwSize < sizeof(DIDEVICEINSTANCEA of DInput version >= 5)
-	 *  force feedback and other newer datas aren't available
-	 */
-	ddtmp.dwFFMaxForce        = lpddi->dwFFMaxForce;
-	ddtmp.dwFFForceResolution = lpddi->dwFFForceResolution;
-	ddtmp.wCollectionNumber   = lpddi->wCollectionNumber;
-	ddtmp.wDesignatorIndex    = lpddi->wDesignatorIndex;
-	ddtmp.wUsagePage          = lpddi->wUsagePage;
-	ddtmp.wUsage              = lpddi->wUsage;
-	ddtmp.dwDimension         = lpddi->dwDimension;
-	ddtmp.wExponent           = lpddi->wExponent;
-	ddtmp.wReserved           = lpddi->wReserved;
-    }
-    return data->lpCallBack(&ddtmp, data->lpvRef);
 }
 
 /******************************************************************************
@@ -908,7 +876,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_GetProperty(
 
     switch (LOWORD(rguid))
     {
-        case (DWORD) DIPROP_BUFFERSIZE:
+        case (DWORD_PTR) DIPROP_BUFFERSIZE:
         {
             LPDIPROPDWORD pd = (LPDIPROPDWORD)pdiph;
 
@@ -942,7 +910,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SetProperty(
 
     switch (LOWORD(rguid))
     {
-        case (DWORD) DIPROP_AXISMODE:
+        case (DWORD_PTR) DIPROP_AXISMODE:
         {
             LPCDIPROPDWORD pd = (LPCDIPROPDWORD)pdiph;
 
@@ -962,7 +930,7 @@ HRESULT WINAPI IDirectInputDevice2AImpl_SetProperty(
             LeaveCriticalSection(&This->crit);
             break;
         }
-        case (DWORD) DIPROP_BUFFERSIZE:
+        case (DWORD_PTR) DIPROP_BUFFERSIZE:
         {
             LPCDIPROPDWORD pd = (LPCDIPROPDWORD)pdiph;
 
@@ -1125,26 +1093,6 @@ HRESULT WINAPI IDirectInputDevice2AImpl_GetDeviceData(
 
     TRACE("Returning %d events queued\n", *entries);
     return ret;
-}
-
-HRESULT WINAPI IDirectInputDevice2AImpl_GetDeviceInfo(
-	LPDIRECTINPUTDEVICE8A iface,
-	LPDIDEVICEINSTANCEA pdidi)
-{
-    FIXME("(this=%p,%p): stub!\n",
-	  iface, pdidi);
-    
-    return DI_OK;
-}
-
-HRESULT WINAPI IDirectInputDevice2WImpl_GetDeviceInfo(
-	LPDIRECTINPUTDEVICE8W iface,
-	LPDIDEVICEINSTANCEW pdidi)
-{
-    FIXME("(this=%p,%p): stub!\n",
-	  iface, pdidi);
-    
-    return DI_OK;
 }
 
 HRESULT WINAPI IDirectInputDevice2AImpl_RunControlPanel(

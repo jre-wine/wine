@@ -1,0 +1,13 @@
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = w32sys.dll16
+IMPORTS   = kernel32
+EXTRADLLFLAGS = -Wb,--subsystem,win16,--main-module,w32skrnl.dll
+
+C_SRCS = w32sys.c
+
+@MAKE_DLL_RULES@
+
+@DEPENDENCIES@  # everything below this line is overwritten by make depend

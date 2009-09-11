@@ -21,6 +21,7 @@
 
 #define IDI_ICON1	1
 #include <windows.h>
+#include <windef.h>
 #ifndef RC_INVOKED
 #include <string.h>
 #include <stdlib.h>
@@ -70,7 +71,6 @@ void WCMD_more (WCHAR *);
 void WCMD_move (void);
 void WCMD_output (const WCHAR *format, ...);
 void WCMD_output_asis (const WCHAR *message);
-void WCMD_parse (WCHAR *s, WCHAR *q, WCHAR *p1, WCHAR *p2);
 void WCMD_pause (void);
 void WCMD_popd (void);
 void WCMD_print_error (void);
@@ -88,7 +88,6 @@ void WCMD_setshow_path (WCHAR *command);
 void WCMD_setshow_prompt (void);
 void WCMD_setshow_time (void);
 void WCMD_shift (WCHAR *command);
-void WCMD_show_prompt (void);
 void WCMD_title (WCHAR *);
 void WCMD_type (WCHAR *);
 void WCMD_verify (WCHAR *command);
@@ -98,14 +97,13 @@ int  WCMD_volume (int mode, WCHAR *command);
 WCHAR *WCMD_fgets (WCHAR *s, int n, HANDLE stream);
 WCHAR *WCMD_parameter (WCHAR *s, int n, WCHAR **where);
 WCHAR *WCMD_strtrim_leading_spaces (WCHAR *string);
-void WCMD_strtrim_trailing_spaces (WCHAR *string);
-void WCMD_opt_s_strip_quotes(WCHAR *cmd);
 void WCMD_HandleTildaModifiers(WCHAR **start, WCHAR *forVariable, WCHAR *forValue, BOOL justFors);
-BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll);
 
 void WCMD_splitpath(const WCHAR* path, WCHAR* drv, WCHAR* dir, WCHAR* name, WCHAR* ext);
+void WCMD_opt_s_strip_quotes(WCHAR *cmd);
 WCHAR *WCMD_LoadMessage(UINT id);
 WCHAR *WCMD_strdupW(WCHAR *input);
+void WCMD_strsubstW(WCHAR *start, WCHAR* next, WCHAR* insert, int len);
 BOOL WCMD_ReadFile(const HANDLE hIn, WCHAR *intoBuf, const DWORD maxChars,
                    LPDWORD charsRead, const LPOVERLAPPED unused);
 
@@ -248,6 +246,7 @@ extern WCHAR version_string[];
 #define WCMD_CONSTITLE        1032
 #define WCMD_VERSION          1033
 #define WCMD_MOREPROMPT       1034
+#define WCMD_LINETOOLONG      1035
 
 /* msdn specified max for Win XP */
 #define MAXSTRING 8192

@@ -1,7 +1,7 @@
 /*
  * VGA emulation
  *
- * Copyright 1998 Ove KÅven
+ * Copyright 1998 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,18 +27,47 @@
 #include "winbase.h"
 #include "wingdi.h"
 
+/*
+ * VGA VESA definitions
+ */
+/* mode descriptor */
+enum modetype {TEXT=0, GRAPHIC=1};
+/* Wine internal information about video modes */
+typedef struct {
+    WORD Mode;
+    BOOL ModeType;
+    WORD TextCols;  /* columns of text in display */
+    WORD TextRows;  /* rows of text in display */
+    WORD CharWidth;
+    WORD CharHeight;
+    WORD Width;  /* width of display in pixels */
+    WORD Height; /* height of display in pixels */
+    WORD Depth;  /* bits per pixel */
+    WORD Colors; /* total available colors */
+    WORD ScreenPages;
+    BOOL Supported;
+} VGA_MODE;
+
+extern const VGA_MODE VGA_modelist[];
+
+/* all vga modes */
+const VGA_MODE *VGA_GetModeInfo(WORD mode);
+int VGA_SetMode(WORD mode);
+
 /* graphics mode */
-int VGA_SetMode(unsigned Xres,unsigned Yres,unsigned Depth);
 int VGA_GetMode(unsigned*Height,unsigned*Width,unsigned*Depth);
 void VGA_SetPalette(PALETTEENTRY*pal,int start,int len);
 void VGA_SetColor16(int reg,int color);
 char VGA_GetColor16(int reg);
 void VGA_Set16Palette(char *Table);
 void VGA_Get16Palette(char *Table);
-void VGA_SetQuadPalette(RGBQUAD*color,int start,int len);
 void VGA_SetWindowStart(int start);
 int  VGA_GetWindowStart(void);
 void VGA_ShowMouse(BOOL show);
+void VGA_UpdatePalette(void);
+void VGA_SetPaletteIndex(unsigned index);
+void VGA_SetBright(BOOL bright);
+void VGA_WritePixel(unsigned color, unsigned page, unsigned col, unsigned row);
 
 /* text mode */
 void VGA_InitAlphaMode(unsigned*Xres,unsigned*Yres);
@@ -49,7 +78,6 @@ void VGA_SetCursorPos(unsigned X,unsigned Y);
 void VGA_GetCursorPos(unsigned*X,unsigned*Y);
 void VGA_WriteChars(unsigned X,unsigned Y,unsigned ch,int attr,int count);
 void VGA_PutChar(BYTE ascii);
-void VGA_SetTextAttribute(BYTE attr);
 void VGA_ClearText(unsigned row1, unsigned col1,
                   unsigned row2, unsigned col2,
                   BYTE attr);

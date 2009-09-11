@@ -104,7 +104,7 @@ static HWND build_toolbar(int nr, HWND hParent)
         case 1: iBitmapId = IDB_VIEW_SMALL_COLOR; break;
         case 2: iBitmapId = IDB_STD_SMALL_COLOR; break;
     }
-    ok(SendMessage(hToolbar, TB_LOADIMAGES, iBitmapId, (LPARAM)HINST_COMMCTRL) == 0, "TB_LOADIMAGE failed\n");
+    ok(SendMessage(hToolbar, TB_LOADIMAGES, iBitmapId, (LPARAM)HINST_COMMCTRL) == 0, "TB_LOADIMAGES failed\n");
     ok(SendMessage(hToolbar, TB_ADDBUTTONS, 5+nr, (LPARAM)btns), "TB_ADDBUTTONS failed\n");
     return hToolbar;
 }
@@ -150,14 +150,14 @@ static void dump_sizes(HWND hRebar)
     for (i=0; i<count; i++)
     {
         REBARBANDINFO rbi;
-        rbi.cbSize = sizeof(REBARBANDINFO);
+        rbi.cbSize = REBARBANDINFOA_V6_SIZE;
         rbi.fMask = RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_STYLE;
         ok(SendMessageA(hRebar, RB_GETBANDINFOA, i, (LPARAM)&rbi), "RB_GETBANDINFO failed\n");
         ok(SendMessageA(hRebar, RB_GETRECT, i, (LPARAM)&r), "RB_GETRECT failed\n");
         printf("%s{ {%3d, %3d, %3d, %3d}, 0x%02x, %d}, ", (i%2==0 ? "\n    " : ""), r.left, r.top, r.right, r.bottom,
             rbi.fStyle, rbi.cx);
     }
-    printf("\n  }, }, \n");
+    printf("\n  }, },\n");
 }
 
 #define check_sizes() dump_sizes(hRebar);
@@ -310,10 +310,10 @@ static int rbsize_numtests = 0;
         count = SendMessage(hRebar, RB_GETBANDCOUNT, 0, 0); \
         compare(count, res->nBands, "%d"); \
         for (i=0; i<min(count, res->nBands); i++) { \
-            ok(SendMessageA(hRebar, RB_GETRECT, i, (LPARAM)&rc) == 1, "RB_ITEMRECT\n"); \
+            ok(SendMessageA(hRebar, RB_GETRECT, i, (LPARAM)&rc) == 1, "RB_GETRECT\n"); \
             if (!(res->bands[i].fStyle & RBBS_HIDDEN)) \
                 check_rect("band", rc, res->bands[i].rc); \
-            rbi.cbSize = sizeof(REBARBANDINFO); \
+            rbi.cbSize = REBARBANDINFOA_V6_SIZE; \
             rbi.fMask = RBBIM_STYLE | RBBIM_SIZE; \
             ok(SendMessageA(hRebar, RB_GETBANDINFO,  i, (LPARAM)&rbi) == 1, "RB_GETBANDINFO\n"); \
             compare(rbi.fStyle, res->bands[i].fStyle, "%x"); \
@@ -329,11 +329,11 @@ static int rbsize_numtests = 0;
 static void add_band_w(HWND hRebar, LPCSTR lpszText, int cxMinChild, int cx, int cxIdeal)
 {
     CHAR buffer[MAX_PATH];
-    REBARBANDINFO rbi;
+    REBARBANDINFOA rbi;
 
     if (lpszText != NULL)
         strcpy(buffer, lpszText);
-    rbi.cbSize = sizeof(rbi);
+    rbi.cbSize = REBARBANDINFOA_V6_SIZE;
     rbi.fMask = RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_CHILD | RBBIM_IDEALSIZE | RBBIM_TEXT;
     rbi.cx = cx;
     rbi.cxMinChild = cxMinChild;
@@ -353,7 +353,7 @@ static void layout_test(void)
 
     rebuild_rebar(&hRebar);
     check_sizes();
-    rbi.cbSize = sizeof(rbi);
+    rbi.cbSize = REBARBANDINFOA_V6_SIZE;
     rbi.fMask = RBBIM_SIZE | RBBIM_CHILDSIZE | RBBIM_CHILD;
     rbi.cx = 200;
     rbi.cxMinChild = 100;
@@ -512,7 +512,7 @@ static void dump_client(HWND hRebar)
     RECT r;
     BOOL notify;
     GetWindowRect(hRebar, &r);
-    MapWindowPoints(HWND_DESKTOP, hMainWnd, (LPPOINT)&r, 2);
+    MapWindowPoints(HWND_DESKTOP, hMainWnd, &r, 2);
     if (height_change_notify_rect.top != -1)
     {
         RECT rcClient;
@@ -742,10 +742,10 @@ static void expect_band_content(UINT uBand, INT fStyle, COLORREF clrFore,
     INT cxHeader)
 {
     CHAR buf[MAX_PATH] = "abc";
-    REBARBANDINFO rb;
+    REBARBANDINFOA rb;
 
     memset(&rb, 0xdd, sizeof(rb));
-    rb.cbSize = sizeof(rb);
+    rb.cbSize = REBARBANDINFOA_V6_SIZE;
     rb.fMask = RBBIM_BACKGROUND | RBBIM_CHILD | RBBIM_CHILDSIZE | RBBIM_COLORS
         | RBBIM_HEADERSIZE | RBBIM_ID | RBBIM_IDEALSIZE | RBBIM_IMAGE | RBBIM_LPARAM
         | RBBIM_SIZE | RBBIM_STYLE | RBBIM_TEXT;
@@ -779,7 +779,7 @@ static void bandinfo_test(void)
     CHAR szABCD[] = "ABCD";
 
     rebuild_rebar(&hRebar);
-    rb.cbSize = sizeof(REBARBANDINFO);
+    rb.cbSize = REBARBANDINFOA_V6_SIZE;
     rb.fMask = 0;
     ok(SendMessageA(hRebar, RB_INSERTBANDA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
     expect_band_content(0, 0, 0, GetSysColor(COLOR_3DFACE), "", -1, NULL, 0, 0, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 0);
@@ -790,15 +790,15 @@ static void bandinfo_test(void)
     rb.cyChild = 30;
     rb.cyMaxChild = 20;
     rb.cyIntegral = 10;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, 0, 0, GetSysColor(COLOR_3DFACE), "", -1, NULL, 15, 20, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 0);
 
     rb.fMask = RBBIM_TEXT;
     rb.lpText = szABC;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, 0, 0, GetSysColor(COLOR_3DFACE), "ABC", -1, NULL, 15, 20, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 35);
 
-    rb.cbSize = sizeof(REBARBANDINFO);
+    rb.cbSize = REBARBANDINFOA_V6_SIZE;
     rb.fMask = 0;
     ok(SendMessageA(hRebar, RB_INSERTBANDA, 1, (LPARAM)&rb), "RB_INSERTBAND failed\n");
     expect_band_content(1, 0, 0, GetSysColor(COLOR_3DFACE), "", -1, NULL, 0, 0, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 9);
@@ -806,21 +806,21 @@ static void bandinfo_test(void)
 
     rb.fMask = RBBIM_HEADERSIZE;
     rb.cxHeader = 50;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, 0x40000000, 0, GetSysColor(COLOR_3DFACE), "ABC", -1, NULL, 15, 20, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 50);
 
     rb.cxHeader = 5;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, 0x40000000, 0, GetSysColor(COLOR_3DFACE), "ABC", -1, NULL, 15, 20, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 5);
 
     rb.fMask = RBBIM_TEXT;
     rb.lpText = szABCD;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, 0x40000000, 0, GetSysColor(COLOR_3DFACE), "ABCD", -1, NULL, 15, 20, 0, NULL, 0, 0xdddddddd, 0xdddddddd, 0xdddddddd, 0, 0, 5);
     rb.fMask = RBBIM_STYLE | RBBIM_TEXT;
     rb.fStyle = RBBS_VARIABLEHEIGHT;
     rb.lpText = szABC;
-    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_INSERTBAND failed\n");
+    ok(SendMessageA(hRebar, RB_SETBANDINFOA, 0, (LPARAM)&rb), "RB_SETBANDINFO failed\n");
     expect_band_content(0, RBBS_VARIABLEHEIGHT, 0, GetSysColor(COLOR_3DFACE), "ABC", -1, NULL, 15, 20, 0, NULL, 0, 20, 0x7fffffff, 0, 0, 0, 40);
 
     DestroyWindow(hRebar);

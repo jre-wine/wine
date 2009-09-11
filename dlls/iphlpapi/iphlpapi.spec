@@ -18,6 +18,7 @@
 @ stub FlushIpNetTableFromStack
 @ stdcall GetAdapterIndex( wstr ptr )
 @ stub GetAdapterOrderMap
+@ stdcall GetAdaptersAddresses( long long ptr ptr ptr )
 @ stdcall GetAdaptersInfo( ptr ptr )
 @ stdcall GetBestInterface( long ptr )
 @ stdcall GetBestInterfaceEx( ptr ptr )
@@ -54,6 +55,11 @@
 @ stdcall GetUdpTable( ptr ptr long )
 @ stub GetUdpTableFromStack
 @ stdcall GetUniDirectionalAdapterInfo( ptr ptr )
+@ stdcall IcmpCloseHandle(ptr)
+@ stdcall IcmpCreateFile()
+@ stub IcmpParseReplies
+@ stdcall IcmpSendEcho2(ptr ptr ptr ptr long ptr long ptr ptr long long)
+@ stdcall IcmpSendEcho(ptr long ptr long ptr ptr long long)
 @ stub InternalCreateIpForwardEntry
 @ stub InternalCreateIpNetEntry
 @ stub InternalDeleteIpForwardEntry

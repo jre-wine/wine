@@ -30,7 +30,6 @@
 #include "winnls.h"
 #include "x11drv.h"
 #include "imm.h"
-#include "ddk/imm.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(x11drv);
@@ -155,7 +154,7 @@ static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
             }
         }
 
-        rc = IME_SetCompositionString(SCS_SETSTR, (LPWSTR)CompositionString,
+        rc = IME_SetCompositionString(SCS_SETSTR, CompositionString,
                                       dwCompStringLength, NULL, 0);
     }
     else if ((dwIndex == GCS_RESULTSTR) && (lpComp) && (dwCompLen))
@@ -166,7 +165,7 @@ static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
         ResultString= HeapAlloc(GetProcessHeap(),0,byte_length);
         memcpy(ResultString,lpComp,byte_length);
 
-        rc = IME_SetCompositionString(SCS_SETSTR, (LPWSTR)ResultString,
+        rc = IME_SetCompositionString(SCS_SETSTR, ResultString,
                                      dwResultStringSize, NULL, 0);
 
         IME_NotifyIME( NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
@@ -178,15 +177,20 @@ static BOOL X11DRV_ImmSetInternalString(DWORD dwIndex, DWORD dwOffset,
 void X11DRV_XIMLookupChars( const char *str, DWORD count )
 {
     DWORD dwOutput;
-    WCHAR wcOutput[64];
+    WCHAR *wcOutput;
     HWND focus;
 
-    dwOutput = MultiByteToWideChar(CP_UNIXCP, 0, str, count, wcOutput, sizeof(wcOutput)/sizeof(WCHAR));
+    dwOutput = MultiByteToWideChar(CP_UNIXCP, 0, str, count, NULL, 0);
+    wcOutput = HeapAlloc(GetProcessHeap(), 0, sizeof(WCHAR) * dwOutput);
+    if (wcOutput == NULL)
+        return;
+    MultiByteToWideChar(CP_UNIXCP, 0, str, count, wcOutput, dwOutput);
 
     if ((focus = GetFocus()))
         IME_UpdateAssociation(focus);
 
     X11DRV_ImmSetInternalString(GCS_RESULTSTR,0,0,wcOutput,dwOutput);
+    HeapFree(GetProcessHeap(), 0, wcOutput);
 }
 
 static void X11DRV_ImmSetOpenStatus(BOOL fOpen)
@@ -360,7 +364,7 @@ BOOL X11DRV_InitXIM( const char *input_style )
 }
 
 
-static void X11DRV_OpenIM(Display *display, XPointer p, XPointer data);
+static void open_xim_callback( Display *display, XPointer ptr, XPointer data );
 
 static void X11DRV_DestroyIM(XIM xim, XPointer p, XPointer data)
 {
@@ -370,14 +374,16 @@ static void X11DRV_DestroyIM(XIM xim, XPointer p, XPointer data)
     thread_data->xim = NULL;
     ximStyle = 0;
     wine_tsx11_lock();
-    XRegisterIMInstantiateCallback( thread_data->display, NULL, NULL, NULL, X11DRV_OpenIM, NULL );
+    XRegisterIMInstantiateCallback( thread_data->display, NULL, NULL, NULL, open_xim_callback, NULL );
     wine_tsx11_unlock();
 }
 
 /***********************************************************************
-*           X11DRV Ime creation
-*/
-static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
+ *           X11DRV Ime creation
+ *
+ * Should always be called with the x11 lock held
+ */
+static BOOL open_xim( Display *display )
 {
     struct x11drv_thread_data *thread_data = x11drv_thread_data();
     XIMStyle ximStyleCallback, ximStyleNone;
@@ -386,14 +392,11 @@ static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
     XIM xim;
     XIMCallback destroy;
 
-    wine_tsx11_lock();
-
     xim = XOpenIM(display, NULL, NULL, NULL);
     if (xim == NULL)
     {
         WARN("Could not open input method.\n");
-        wine_tsx11_unlock();
-        return;
+        return FALSE;
     }
 
     destroy.client_data = NULL;
@@ -412,8 +415,7 @@ static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
     {
         WARN("Could not find supported input style.\n");
         XCloseIM(xim);
-        wine_tsx11_unlock();
-        return;
+        return FALSE;
     }
     else
     {
@@ -474,17 +476,46 @@ static void X11DRV_OpenIM(Display *display, XPointer ptr, XPointer data)
     }
 
     thread_data->xim = xim;
-    XUnregisterIMInstantiateCallback(display, NULL, NULL, NULL, X11DRV_OpenIM, NULL);
+
+    if ((ximStyle & (XIMPreeditNothing | XIMPreeditNone)) == 0 ||
+        (ximStyle & (XIMStatusNothing | XIMStatusNone)) == 0)
+    {
+        char **list;
+        int count;
+        thread_data->font_set = XCreateFontSet(display, "fixed",
+                          &list, &count, NULL);
+        TRACE("ximFontSet = %p\n", thread_data->font_set);
+        TRACE("list = %p, count = %d\n", list, count);
+        if (list != NULL)
+        {
+            int i;
+            for (i = 0; i < count; ++i)
+                TRACE("list[%d] = %s\n", i, list[i]);
+            XFreeStringList(list);
+        }
+    }
+    else
+        thread_data->font_set = NULL;
+
     wine_tsx11_unlock();
-    IME_XIMPresent(TRUE);
     IME_UpdateAssociation(NULL);
+    wine_tsx11_lock();
+    return TRUE;
 }
 
+static void open_xim_callback( Display *display, XPointer ptr, XPointer data )
+{
+    if (open_xim( display ))
+        XUnregisterIMInstantiateCallback( display, NULL, NULL, NULL, open_xim_callback, NULL);
+}
 
 void X11DRV_SetupXIM(void)
 {
+    Display *display = thread_display();
+
     wine_tsx11_lock();
-    XRegisterIMInstantiateCallback(thread_display(), NULL, NULL, NULL, X11DRV_OpenIM, NULL);
+    if (!open_xim( display ))
+        XRegisterIMInstantiateCallback( display, NULL, NULL, NULL, open_xim_callback, NULL );
     wine_tsx11_unlock();
 }
 
@@ -507,6 +538,7 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
     XICCallback P_StartCB, P_DoneCB, P_DrawCB, P_CaretCB;
     LANGID langid = PRIMARYLANGID(LANGIDFROMLCID(GetThreadLocale()));
     Window win = data->whole_window;
+    XFontSet fontSet = x11drv_thread_data()->font_set;
 
     TRACE("xim = %p\n", xim);
 
@@ -541,6 +573,7 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
     if ((ximStyle & (XIMPreeditNothing | XIMPreeditNone)) == 0)
     {
         preedit = XVaCreateNestedList(0,
+                        XNFontSet, fontSet,
                         XNSpotLocation, &spot,
                         XNPreeditStartCallback, &P_StartCB,
                         XNPreeditDoneCallback, &P_DoneCB,
@@ -564,6 +597,7 @@ XIC X11DRV_CreateIC(XIM xim, struct x11drv_win_data *data)
     if ((ximStyle & (XIMStatusNothing | XIMStatusNone)) == 0)
     {
         status = XVaCreateNestedList(0,
+            XNFontSet, fontSet,
             NULL);
         TRACE("status = %p\n", status);
      }

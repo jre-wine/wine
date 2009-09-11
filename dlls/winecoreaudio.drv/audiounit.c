@@ -19,14 +19,22 @@
  */
 
 #include "config.h"
+
+#ifdef HAVE_AUDIOUNIT_AUDIOUNIT_H
+
+#define ULONG CoreFoundation_ULONG
+#define HRESULT CoreFoundation_HRESULT
+#include <CoreServices/CoreServices.h>
+#include <AudioUnit/AudioUnit.h>
+#include <AudioToolbox/AudioToolbox.h>
+#undef ULONG
+#undef HRESULT
+
+#undef DPRINTF
+#undef STDMETHODCALLTYPE
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wave);
-
-#ifdef HAVE_AUDIOUNIT_AUDIOUNIT_H
-#include <AudioUnit/AudioUnit.h>
-#include <AudioToolbox/AudioToolbox.h>
-
 WINE_DECLARE_DEBUG_CHANNEL(midi);
 
 extern OSStatus CoreAudio_woAudioUnitIOProc(void *inRefCon, 

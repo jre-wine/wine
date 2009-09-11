@@ -23,6 +23,10 @@
  *
  */
 
+#include <windef.h>
+#include <winuser.h>
+#include <commctrl.h>
+
 #define IDC_STATIC                     -1
 #define IDS_TAB_APPLICATIONS            2
 #define IDS_TAB_DLLS                    3
@@ -90,6 +94,7 @@
 #define IDS_SELECT_EXECUTABLE           8020
 
 /* drive editing */
+#define IDC_STATIC_MOUNTMGR_ERROR       1041
 #define IDC_LIST_DRIVES                 1042
 #define IDC_BUTTON_ADD                  1043
 #define IDC_BUTTON_REMOVE               1044
@@ -112,6 +117,7 @@
 #define IDC_EDIT_LABEL                  1060
 #define IDC_EDIT_PATH                   1061
 #define IDC_EDIT_SERIAL                 1062
+#define IDC_STATIC_PATH                 1063
 #define IDC_COMBO_TYPE                  1065
 #define IDC_EDIT_DEVICE                 1066
 #define IDC_BUTTON_BROWSE_PATH          1067
@@ -140,6 +146,8 @@
 #define IDS_COL_DRIVELETTER             8208
 #define IDS_COL_DRIVEMAPPING            8209
 #define IDS_NO_DRIVE_C                  8210
+#define IDD_DRIVECHOOSE                 8211
+#define IDC_DRIVESA2Z                   8212
 
 /* graphics */
 #define IDC_ENABLE_MANAGED              1100
@@ -154,6 +162,7 @@
 
 #define IDC_RES_TRACKBAR                1107
 #define IDC_RES_DPIEDIT                 1108
+#define IDC_RES_FONT_PREVIEW            1109
 
 /* applications tab */
 #define IDC_APP_LISTVIEW                1200
@@ -165,7 +174,6 @@
 #define IDC_AUDIO_TEST                  1301
 #define IDC_AUDIO_CONTROL_PANEL         1302
 #define IDC_DSOUND_HW_ACCEL             1303
-#define IDC_DSOUND_DRV_EMUL             1304
 #define IDC_AUDIO_TREE			1305
 #define IDR_WINECFG			1306
 #define IDB_CHECKBOX                    1307
@@ -248,3 +256,7 @@
 #define IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT 8429
 #define IDC_SYSPARAMS_MENU_HILIGHT      8430
 #define IDC_SYSPARAMS_MENUBAR           8431
+
+/* About tab */
+#define IDC_ABT_OWNER                8432
+#define IDC_ABT_ORG                  8433

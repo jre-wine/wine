@@ -25,6 +25,9 @@
  */
 
 #include "config.h"
+
+#ifdef HAVE_ALSA
+
 #include "wine/port.h"
 
 #include <stdlib.h>
@@ -64,8 +67,6 @@
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wave);
-
-#ifdef HAVE_ALSA
 
 /*----------------------------------------------------------------------------
 **  ALSA_TestDeviceForWine
@@ -490,7 +491,7 @@ static int ALSA_AddPlaybackDevice(snd_ctl_t *ctl, snd_pcm_t *pcm, const char *pc
     if (rc)
         return(rc);
 
-    MultiByteToWideChar(CP_ACP, 0, wwo.ds_desc.szDesc, -1,
+    MultiByteToWideChar(CP_UNIXCP, 0, wwo.ds_desc.szDesc, -1,
                         wwo.outcaps.szPname, sizeof(wwo.outcaps.szPname)/sizeof(WCHAR));
     wwo.outcaps.szPname[sizeof(wwo.outcaps.szPname)/sizeof(WCHAR) - 1] = '\0';
 
@@ -530,7 +531,7 @@ static int ALSA_AddCaptureDevice(snd_ctl_t *ctl, snd_pcm_t *pcm, const char *pcm
     if (rc)
         return(rc);
 
-    MultiByteToWideChar(CP_ACP, 0, wwi.ds_desc.szDesc, -1,
+    MultiByteToWideChar(CP_UNIXCP, 0, wwi.ds_desc.szDesc, -1,
                         wwi.incaps.szPname, sizeof(wwi.incaps.szPname) / sizeof(WCHAR));
     wwi.incaps.szPname[sizeof(wwi.incaps.szPname)/sizeof(WCHAR) - 1] = '\0';
 
@@ -559,7 +560,7 @@ static int ALSA_AddCaptureDevice(snd_ctl_t *ctl, snd_pcm_t *pcm, const char *pcm
 **      Given an Alsa style configuration node, scan its subitems
 **  for environment variable names, and use them to find an override,
 **  if appropriate.
-**      This is essentially a long and convolunted way of doing:
+**      This is essentially a long and convoluted way of doing:
 **          getenv("ALSA_CARD")
 **          getenv("ALSA_CTL_CARD")
 **          getenv("ALSA_PCM_CARD")
@@ -619,7 +620,7 @@ static void ALSA_CheckEnvironment(snd_config_t *node, int *outvalue)
 **                          environment variable, we'll set to the
 **                          device the user specified.
 **
-**  Returns:  0 on success, < 0 on failiure
+**  Returns:  0 on success, < 0 on failure
 */
 static int ALSA_DefaultDevices(int directhw,
             long *defctlcard,
@@ -689,7 +690,7 @@ static int ALSA_DefaultDevices(int directhw,
 **      fixedpcmdev     If not -1, then gives the value of ALSA_PCM_DEVICE
 **                          or equivalent environment variable
 **
-**  Returns:  0 on success, < 0 on failiure
+**  Returns:  0 on success, < 0 on failure
 */
 static int ALSA_ScanDevices(int directhw,
         long defctlcard, long defpcmcard, long defpcmdev,

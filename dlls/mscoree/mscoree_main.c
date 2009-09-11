@@ -257,6 +257,12 @@ HRESULT WINAPI LoadLibraryShim( LPCWSTR szDllName, LPCWSTR szVersion, LPVOID pvR
     return S_OK;
 }
 
+HRESULT WINAPI LockClrVersion(FLockClrVersionCallback hostCallback, FLockClrVersionCallback *pBeginHostSetup, FLockClrVersionCallback *pEndHostSetup)
+{
+    FIXME("(%p %p %p): stub\n", hostCallback, pBeginHostSetup, pEndHostSetup);
+    return S_OK;
+}
+
 HRESULT WINAPI CoInitializeCor(DWORD fFlags)
 {
     FIXME("(0x%08x): stub\n", fFlags);
@@ -310,6 +316,24 @@ HRESULT WINAPI CorBindToRuntimeEx(LPWSTR szVersion, LPWSTR szBuildFlavor, DWORD 
     }
     *ppv = NULL;
     return E_NOTIMPL;
+}
+
+HRESULT WINAPI CorBindToCurrentRuntime(LPCWSTR filename, REFCLSID rclsid, REFIID riid, LPVOID *ppv)
+{
+    FIXME("(%s, %s, %s, %p): stub\n", debugstr_w(filename), debugstr_guid(rclsid), debugstr_guid(riid), ppv);
+    return E_NOTIMPL;
+}
+
+BOOL WINAPI StrongNameSignatureVerification(LPCWSTR filename, DWORD inFlags, DWORD* pOutFlags)
+{
+    FIXME("(%s, 0x%X, %p): stub\n", debugstr_w(filename), inFlags, pOutFlags);
+    return FALSE;
+}
+
+BOOL WINAPI StrongNameSignatureVerificationEx(LPCWSTR filename, BOOL forceVerification, BOOL* pVerified)
+{
+    FIXME("(%s, %u, %p): stub\n", debugstr_w(filename), forceVerification, pVerified);
+    return FALSE;
 }
 
 HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)

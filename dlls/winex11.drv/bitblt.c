@@ -896,7 +896,7 @@ static int BITBLT_GetSrcAreaStretch( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE 
     XPutImage( gdi_display, pixmap, gc, imageDst, 0, 0, 0, 0,
                rectDst.right - rectDst.left, rectDst.bottom - rectDst.top );
     XDestroyImage( imageSrc );
-    XDestroyImage( imageDst );
+    X11DRV_DIB_DestroyXImage( imageDst );
     wine_tsx11_unlock();
     return 0;  /* no exposure events generated */
 }
@@ -909,7 +909,7 @@ static int BITBLT_GetSrcAreaStretch( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE 
  * pixels to Windows colors.
  */
 static int BITBLT_GetSrcArea( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
-                              Pixmap pixmap, GC gc, INT xSrc, INT ySrc, RECT *visRectSrc )
+                              Pixmap pixmap, GC gc, RECT *visRectSrc )
 {
     XImage *imageSrc, *imageDst;
     register INT x, y;
@@ -1026,7 +1026,7 @@ static int BITBLT_GetSrcArea( X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDe
             XPutImage( gdi_display, pixmap, gc, imageDst,
                        0, 0, 0, 0, width, height );
             XDestroyImage( imageSrc );
-            XDestroyImage( imageDst );
+            X11DRV_DIB_DestroyXImage( imageDst );
             wine_tsx11_unlock();
         }
     }
@@ -1322,7 +1322,7 @@ static BOOL BITBLT_InternalStretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT
 
     opcode = BITBLT_Opcodes[(rop >> 16) & 0xff];
 
-    /* a few optimisations for single-op rops */
+    /* a few optimizations for single-op ROPs */
     if (!fStretch && !opcode[1])
     {
         if (OP_SRCDST(*opcode) == OP_ARGS(PAT,DST))
@@ -1436,14 +1436,20 @@ static BOOL BITBLT_InternalStretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT
         pixmaps[SRC] = XCreatePixmap( gdi_display, root_window, width, height,
                                       physDevDst->depth );
         wine_tsx11_unlock();
-        if (fStretch)
-            BITBLT_GetSrcAreaStretch( physDevSrc, physDevDst, pixmaps[SRC], tmpGC,
-                                      xSrc, ySrc, widthSrc, heightSrc,
-                                      xDst, yDst, widthDst, heightDst,
-                                      &visRectSrc, &visRectDst );
-        else
-            BITBLT_GetSrcArea( physDevSrc, physDevDst, pixmaps[SRC], tmpGC,
-                               xSrc, ySrc, &visRectSrc );
+
+        if(!X11DRV_XRender_GetSrcAreaStretch( physDevSrc, physDevDst, pixmaps[SRC], tmpGC,
+                                              widthSrc, heightSrc, widthDst, heightDst,
+                                              &visRectSrc, &visRectDst))
+        {
+            if (fStretch)
+                BITBLT_GetSrcAreaStretch( physDevSrc, physDevDst, pixmaps[SRC], tmpGC,
+                                          xSrc, ySrc, widthSrc, heightSrc,
+                                          xDst, yDst, widthDst, heightDst,
+                                          &visRectSrc, &visRectDst );
+            else
+                BITBLT_GetSrcArea( physDevSrc, physDevDst, pixmaps[SRC], tmpGC,
+                                  &visRectSrc );
+        }
     }
 
     if (useDst) BITBLT_GetDstArea( physDevDst, pixmaps[DST], tmpGC, &visRectDst );
@@ -1502,7 +1508,7 @@ static BOOL BITBLT_InternalStretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT
 /***********************************************************************
  *           X11DRV_PatBlt
  */
-BOOL X11DRV_PatBlt( X11DRV_PDEVICE *physDev, INT left, INT top, INT width, INT height, DWORD rop )
+BOOL CDECL X11DRV_PatBlt( X11DRV_PDEVICE *physDev, INT left, INT top, INT width, INT height, DWORD rop )
 {
     BOOL result;
 
@@ -1541,8 +1547,7 @@ static BOOL X11DRV_ClientSideDIBCopy( X11DRV_PDEVICE *physDevSrc, INT xSrc, INT 
     if (ySrc + height > srcDib.dsBm.bmHeight)
       height = srcDib.dsBm.bmHeight - ySrc;
 
-    if (GetRgnBox(physDevSrc->region, &unusedRect) == COMPLEXREGION ||
-        GetRgnBox(physDevDst->region, &unusedRect) == COMPLEXREGION)
+    if (GetRgnBox(physDevDst->region, &unusedRect) == COMPLEXREGION)
     {
       /* for simple regions, the clipping was already done by BITBLT_GetVisRectangles */
       FIXME("potential optimization: client-side complex region clipping\n");
@@ -1638,7 +1643,7 @@ static BOOL X11DRV_ClientSideDIBCopy( X11DRV_PDEVICE *physDevSrc, INT xSrc, INT 
 /***********************************************************************
  *           X11DRV_BitBlt
  */
-BOOL X11DRV_BitBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
+BOOL CDECL X11DRV_BitBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
                     INT width, INT height, X11DRV_PDEVICE *physDevSrc,
                     INT xSrc, INT ySrc, DWORD rop )
 {
@@ -1687,7 +1692,10 @@ BOOL X11DRV_BitBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
       if (!BITBLT_GetVisRectangles( physDevDst, xDst, yDst, width, height,
                                     physDevSrc, xSrc, ySrc, width, height,
                                     &visRectSrc, &visRectDst ))
+      {
+        result = TRUE;
         goto END;
+      }
 
       xSrc = visRectSrc.left;
       ySrc = visRectSrc.top;
@@ -1734,10 +1742,10 @@ END:
 /***********************************************************************
  *           X11DRV_StretchBlt
  */
-BOOL X11DRV_StretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
-                        INT widthDst, INT heightDst,
-                        X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc,
-                        INT widthSrc, INT heightSrc, DWORD rop )
+BOOL CDECL X11DRV_StretchBlt( X11DRV_PDEVICE *physDevDst, INT xDst, INT yDst,
+                              INT widthDst, INT heightDst,
+                              X11DRV_PDEVICE *physDevSrc, INT xSrc, INT ySrc,
+                              INT widthSrc, INT heightSrc, DWORD rop )
 {
     BOOL result;
 

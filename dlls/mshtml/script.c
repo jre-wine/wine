@@ -37,6 +37,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 static const WCHAR windowW[] = {'w','i','n','d','o','w',0};
+static const WCHAR emptyW[] = {0};
 
 static const CLSID CLSID_JScript =
     {0xf414c260,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
@@ -62,16 +63,34 @@ typedef struct {
 } ScriptHost;
 
 #define ACTSCPSITE(x)  ((IActiveScriptSite*)               &(x)->lpIActiveScriptSiteVtbl)
-#define ACTSCPPOLL(x)  ((IActiveScriptSiteInterruptPoll*)  &(x)->lpIActiveScriptSiteInterruptPollVtbl)
-#define ACTSCPWIN(x)   ((IActiveScriptSiteWindow*)         &(x)->lpIActiveScriptSiteWindowVtbl)
-#define ACTSCPDBG32(x) ((IActiveScriptSiteDebug32*)        &(x)->lpIActiveScriptSiteDebug32Vtbl)
+#define ACTSCPPOLL(x)  (&(x)->lpIActiveScriptSiteInterruptPollVtbl)
+#define ACTSCPWIN(x)   (&(x)->lpIActiveScriptSiteWindowVtbl)
+#define ACTSCPDBG32(x) (&(x)->lpIActiveScriptSiteDebug32Vtbl)
+
+static void set_script_prop(ScriptHost *script_host, DWORD property, VARIANT *val)
+{
+    IActiveScriptProperty *script_prop;
+    HRESULT hres;
+
+    hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptProperty,
+            (void**)&script_prop);
+    if(FAILED(hres)) {
+        WARN("Could not get IActiveScriptProperty iface: %08x\n", hres);
+        return;
+    }
+
+    hres = IActiveScriptProperty_SetProperty(script_prop, property, NULL, val);
+    IActiveScriptProperty_Release(script_prop);
+    if(FAILED(hres))
+        WARN("SetProperty(%x) failed: %08x\n", property, hres);
+}
 
 static BOOL init_script_engine(ScriptHost *script_host)
 {
-    IActiveScriptProperty *property;
     IObjectSafety *safety;
     SCRIPTSTATE state;
     DWORD supported_opts=0, enabled_opts=0;
+    VARIANT var;
     HRESULT hres;
 
     hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptParse, (void**)&script_host->parse);
@@ -103,22 +122,15 @@ static BOOL init_script_engine(ScriptHost *script_host)
     if(FAILED(hres))
         return FALSE;
 
-    hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptProperty, (void**)&property);
-    if(SUCCEEDED(hres)) {
-        VARIANT var;
+    V_VT(&var) = VT_I4;
+    V_I4(&var) = 1;
+    set_script_prop(script_host, SCRIPTPROP_INVOKEVERSIONING, &var);
 
-        V_VT(&var) = VT_BOOL;
-        V_BOOL(&var) = VARIANT_TRUE;
-        hres = IActiveScriptProperty_SetProperty(property, SCRIPTPROP_HACK_TRIDENTEVENTSINK, NULL, &var);
-        if(FAILED(hres))
-            WARN("SetProperty failed: %08x\n", hres);
+    V_VT(&var) = VT_BOOL;
+    V_BOOL(&var) = VARIANT_TRUE;
+    set_script_prop(script_host, SCRIPTPROP_HACK_TRIDENTEVENTSINK, &var);
 
-        IActiveScriptProperty_Release(property);
-    }else {
-        WARN("Could not get IActiveScriptProperty: %08x\n", hres);
-    }
-
-    hres = IActiveScriptParse_InitNew(script_host->parse);
+    hres = IActiveScriptParse64_InitNew(script_host->parse);
     if(FAILED(hres)) {
         WARN("InitNew failed: %08x\n", hres);
         return FALSE;
@@ -145,8 +157,13 @@ static BOOL init_script_engine(ScriptHost *script_host)
 
     hres = IActiveScript_AddNamedItem(script_host->script, windowW,
             SCRIPTITEM_ISVISIBLE|SCRIPTITEM_ISSOURCE|SCRIPTITEM_GLOBALMEMBERS);
-    if(FAILED(hres))
+    if(SUCCEEDED(hres)) {
+        V_VT(&var) = VT_BOOL;
+        V_BOOL(&var) = VARIANT_TRUE;
+        set_script_prop(script_host, SCRIPTPROP_ABBREVIATE_GLOBALNAME_RESOLUTION, &var);
+    }else {
        WARN("AddNamedItem failed: %08x\n", hres);
+    }
 
     hres = IActiveScript_QueryInterface(script_host->script, &IID_IActiveScriptParseProcedure2,
                                         (void**)&script_host->parse_proc);
@@ -174,12 +191,12 @@ static void release_script_engine(ScriptHost *This)
 
     default:
         if(This->parse_proc) {
-            IActiveScriptParseProcedure_Release(This->parse_proc);
+            IUnknown_Release(This->parse_proc);
             This->parse_proc = NULL;
         }
 
         if(This->parse) {
-            IActiveScriptParse_Release(This->parse);
+            IUnknown_Release(This->parse);
             This->parse = NULL;
         }
     }
@@ -222,6 +239,9 @@ static HRESULT WINAPI ActiveScriptSite_QueryInterface(IActiveScriptSite *iface, 
     }else if(IsEqualGUID(&IID_IActiveScriptSiteDebug32, riid)) {
         TRACE("(%p)->(IID_IActiveScriptSiteDebug32 %p)\n", This, ppv);
         *ppv = ACTSCPDBG32(This);
+    }else if(IsEqualGUID(&IID_ICanHandleException, riid)) {
+        TRACE("(%p)->(IID_ICanHandleException not supported %p)\n", This, ppv);
+        return E_NOINTERFACE;
     }else {
         FIXME("(%p)->(%s %p)\n", This, debugstr_guid(riid), ppv);
         return E_NOINTERFACE;
@@ -385,8 +405,10 @@ static ULONG WINAPI ActiveScriptSiteInterruptPoll_Release(IActiveScriptSiteInter
 static HRESULT WINAPI ActiveScriptSiteInterruptPoll_QueryContinue(IActiveScriptSiteInterruptPoll *iface)
 {
     ScriptHost *This = ACTSCPPOLL_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)\n", This);
+
+    return S_OK;
 }
 
 #undef ACTSCPPOLL_THIS
@@ -507,7 +529,7 @@ static const IActiveScriptSiteDebug32Vtbl ActiveScriptSiteDebug32Vtbl = {
     ActiveScriptSiteDebug32_OnScriptErrorDebug
 };
 
-static ScriptHost *create_script_host(HTMLDocument *doc, GUID *guid)
+static ScriptHost *create_script_host(HTMLDocument *doc, const GUID *guid)
 {
     ScriptHost *ret;
     HRESULT hres;
@@ -546,7 +568,7 @@ static void parse_text(ScriptHost *script_host, LPCWSTR text)
 
     VariantInit(&var);
     memset(&excepinfo, 0, sizeof(excepinfo));
-    hres = IActiveScriptParse_ParseScriptText(script_host->parse, text, windowW, NULL, script_endW,
+    hres = IActiveScriptParse64_ParseScriptText(script_host->parse, text, windowW, NULL, script_endW,
                                               0, 0, SCRIPTTEXT_ISVISIBLE|SCRIPTTEXT_HOSTMANAGESSOURCE,
                                               &var, &excepinfo);
     if(FAILED(hres))
@@ -634,7 +656,7 @@ static BOOL get_guid_from_type(LPCWSTR type, GUID *guid)
         {'t','e','x','t','/','j','a','v','a','s','c','r','i','p','t',0};
 
     /* FIXME: Handle more types */
-    if(!strcmpW(type, text_javascriptW)) {
+    if(!strcmpiW(type, text_javascriptW)) {
         *guid = CLSID_JScript;
     }else {
         FIXME("Unknown type %s\n", debugstr_w(type));
@@ -705,39 +727,136 @@ static BOOL get_script_guid(nsIDOMHTMLScriptElement *nsscript, GUID *guid)
     return ret;
 }
 
-static ScriptHost *get_script_host(HTMLDocument *doc, nsIDOMHTMLScriptElement *nsscript)
+static ScriptHost *get_script_host(HTMLDocument *doc, const GUID *guid)
 {
     ScriptHost *iter;
-    GUID guid;
 
-    if(!get_script_guid(nsscript, &guid)) {
-        WARN("Could not find script GUID\n");
-        return NULL;
-    }
-
-    if(IsEqualGUID(&CLSID_JScript, &guid)) {
-        FIXME("Ignoring JScript\n");
+    if(IsEqualGUID(&CLSID_JScript, guid) && doc->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
+        TRACE("Ignoring JScript\n");
         return NULL;
     }
 
     LIST_FOR_EACH_ENTRY(iter, &doc->script_hosts, ScriptHost, entry) {
-        if(IsEqualGUID(&guid, &iter->guid))
+        if(IsEqualGUID(guid, &iter->guid))
             return iter;
     }
 
-    return create_script_host(doc, &guid);
+    return create_script_host(doc, guid);
 }
 
 void doc_insert_script(HTMLDocument *doc, nsIDOMHTMLScriptElement *nsscript)
 {
     ScriptHost *script_host;
+    GUID guid;
 
-    script_host = get_script_host(doc, nsscript);
+    if(!get_script_guid(nsscript, &guid)) {
+        WARN("Could not find script GUID\n");
+        return;
+    }
+
+    script_host = get_script_host(doc, &guid);
     if(!script_host)
         return;
 
     if(script_host->parse)
         parse_script_elem(script_host, nsscript);
+}
+
+IDispatch *script_parse_event(HTMLDocument *doc, LPCWSTR text)
+{
+    ScriptHost *script_host;
+    GUID guid = CLSID_JScript;
+    const WCHAR *ptr;
+    IDispatch *disp;
+    HRESULT hres;
+
+    static const WCHAR delimiterW[] = {'\"',0};
+
+    for(ptr = text; isalnumW(*ptr); ptr++);
+    if(*ptr == ':') {
+        LPWSTR language;
+        BOOL b;
+
+        language = heap_alloc((ptr-text+1)*sizeof(WCHAR));
+        memcpy(language, text, (ptr-text)*sizeof(WCHAR));
+        language[ptr-text] = 0;
+
+        b = get_guid_from_language(language, &guid);
+
+        heap_free(language);
+
+        if(!b) {
+            WARN("Could not find language\n");
+            return NULL;
+        }
+
+        ptr++;
+    }else {
+        ptr = text;
+    }
+
+    script_host = get_script_host(doc, &guid);
+    if(!script_host || !script_host->parse_proc)
+        return NULL;
+
+    hres = IActiveScriptParseProcedure64_ParseProcedureText(script_host->parse_proc, ptr, NULL, emptyW,
+            NULL, NULL, delimiterW, 0 /* FIXME */, 0,
+            SCRIPTPROC_HOSTMANAGESSOURCE|SCRIPTPROC_IMPLICIT_THIS|SCRIPTPROC_IMPLICIT_PARENTS, &disp);
+    if(FAILED(hres)) {
+        WARN("ParseProcedureText failed: %08x\n", hres);
+        return NULL;
+    }
+
+    TRACE("ret %p\n", disp);
+    return disp;
+}
+
+static BOOL is_jscript_available(void)
+{
+    static BOOL available, checked;
+
+    if(!checked) {
+        IUnknown *unk;
+        HRESULT hres = CoGetClassObject(&CLSID_JScript, CLSCTX_INPROC_SERVER, NULL, &IID_IUnknown, (void**)&unk);
+
+        if(SUCCEEDED(hres)) {
+            available = TRUE;
+            IUnknown_Release(unk);
+        }else {
+            available = FALSE;
+        }
+        checked = TRUE;
+    }
+
+    return available;
+}
+
+void set_script_mode(HTMLDocument *doc, SCRIPTMODE mode)
+{
+    nsIWebBrowserSetup *setup;
+    nsresult nsres;
+
+    if(mode == SCRIPTMODE_ACTIVESCRIPT && !is_jscript_available()) {
+        TRACE("jscript.dll not available\n");
+        doc->scriptmode = SCRIPTMODE_GECKO;
+        return;
+    }
+
+    doc->scriptmode = mode;
+
+    if(!doc->nscontainer || !doc->nscontainer->webbrowser)
+        return;
+
+    nsres = nsIWebBrowser_QueryInterface(doc->nscontainer->webbrowser,
+            &IID_nsIWebBrowserSetup, (void**)&setup);
+    if(NS_SUCCEEDED(nsres)) {
+        nsres = nsIWebBrowserSetup_SetProperty(setup, SETUP_ALLOW_JAVASCRIPT,
+                doc->scriptmode == SCRIPTMODE_GECKO);
+        nsIWebBrowserSetup_Release(setup);
+    }
+
+    if(NS_FAILED(nsres))
+        ERR("JavaScript setup failed: %08x\n", nsres);
 }
 
 void release_script_hosts(HTMLDocument *doc)

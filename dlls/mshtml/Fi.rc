@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resource.h"
 
 LANGUAGE LANG_FINNISH, SUBLANG_DEFAULT
 
@@ -25,4 +26,6 @@ STRINGTABLE DISCARDABLE
 {
     IDS_HTMLDISABLED    "HTML:n näyttäminen on tällähetkellä poistettu käytöstä."
     IDS_HTMLDOCUMENT    "HTML Dokumentti"
+    IDS_DOWNLOADING     "Downloading..."
+    IDS_INSTALLING      "Installing..."
 }

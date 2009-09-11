@@ -124,7 +124,7 @@ void ALSA_WaitRingMessage(ALSA_MSG_RING* omr, DWORD sleep)
  *
  * Inserts a new message into the ring (should be called from DriverProc derived routines)
  */
-int ALSA_AddRingMessage(ALSA_MSG_RING* omr, enum win_wm_message msg, DWORD param, BOOL wait)
+int ALSA_AddRingMessage(ALSA_MSG_RING* omr, enum win_wm_message msg, DWORD_PTR param, BOOL wait)
 {
     HANDLE	hEvent = INVALID_HANDLE_VALUE;
 
@@ -192,8 +192,8 @@ int ALSA_AddRingMessage(ALSA_MSG_RING* omr, enum win_wm_message msg, DWORD param
  *
  * Get a message from the ring. Should be called by the playback/record thread.
  */
-int ALSA_RetrieveRingMessage(ALSA_MSG_RING* omr,
-                                   enum win_wm_message *msg, DWORD *param, HANDLE *hEvent)
+int ALSA_RetrieveRingMessage(ALSA_MSG_RING* omr, enum win_wm_message *msg,
+                             DWORD_PTR *param, HANDLE *hEvent)
 {
     EnterCriticalSection(&omr->msg_crst);
 
@@ -209,31 +209,6 @@ int ALSA_RetrieveRingMessage(ALSA_MSG_RING* omr,
     *hEvent = omr->messages[omr->msg_toget].hEvent;
     omr->msg_toget = (omr->msg_toget + 1) % omr->ring_buffer_size;
     CLEAR_OMR(omr);
-    LeaveCriticalSection(&omr->msg_crst);
-    return 1;
-}
-
-/******************************************************************
- *              ALSA_PeekRingMessage
- *
- * Peek at a message from the ring but do not remove it.
- * Should be called by the playback/record thread.
- */
-int ALSA_PeekRingMessage(ALSA_MSG_RING* omr,
-                               enum win_wm_message *msg,
-                               DWORD *param, HANDLE *hEvent)
-{
-    EnterCriticalSection(&omr->msg_crst);
-
-    if (omr->msg_toget == omr->msg_tosave) /* buffer empty ? */
-    {
-	LeaveCriticalSection(&omr->msg_crst);
-	return 0;
-    }
-
-    *msg = omr->messages[omr->msg_toget].msg;
-    *param = omr->messages[omr->msg_toget].param;
-    *hEvent = omr->messages[omr->msg_toget].hEvent;
     LeaveCriticalSection(&omr->msg_crst);
     return 1;
 }
@@ -389,7 +364,7 @@ void ALSA_copyFormat(LPWAVEFORMATEX wf1, LPWAVEFORMATPCMEX wf2)
     else
         iLength = sizeof(WAVEFORMATEX) + wf1->cbSize;
     if (iLength > sizeof(WAVEFORMATPCMEX)) {
-        ERR("calculated %u bytes, capping to %u bytes\n", iLength, sizeof(WAVEFORMATPCMEX));
+        ERR("calculated %u bytes, capping\n", iLength);
         iLength = sizeof(WAVEFORMATPCMEX);
     }
     memcpy(wf2, wf1, iLength);
@@ -621,8 +596,6 @@ void ALSA_TraceParameters(snd_pcm_hw_params_t * hw_params, snd_pcm_sw_params_t *
     int err;
     snd_pcm_format_t   format;
     snd_pcm_access_t   access;
-    err = snd_pcm_hw_params_get_access(hw_params, &access);
-    err = snd_pcm_hw_params_get_format(hw_params, &format);
 
 #define X(x) ((x)? "true" : "false")
     if (full)
@@ -640,8 +613,11 @@ void ALSA_TraceParameters(snd_pcm_hw_params_t * hw_params, snd_pcm_sw_params_t *
 	      X(snd_pcm_hw_params_is_joint_duplex(hw_params)));
 #undef X
 
-    if (access >= 0)
+    err = snd_pcm_hw_params_get_access(hw_params, &access);
+    if (err >= 0)
+    {
 	TRACE("access=%s\n", snd_pcm_access_name(access));
+    }
     else
     {
 	snd_pcm_access_mask_t * acmask;
@@ -654,7 +630,8 @@ void ALSA_TraceParameters(snd_pcm_hw_params_t * hw_params, snd_pcm_sw_params_t *
         HeapFree( GetProcessHeap(), 0, acmask );
     }
 
-    if (format >= 0)
+    err = snd_pcm_hw_params_get_format(hw_params, &format);
+    if (err >= 0)
     {
 	TRACE("format=%s\n", snd_pcm_format_name(format));
 
@@ -735,7 +712,6 @@ if (err<0) { \
     } while(0);
 
     X(period_time);
-    X(tick_time);
 #undef X
 
     if (!sw)

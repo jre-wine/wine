@@ -11,11 +11,6 @@ C_SRCS = \
 	manager.c \
 	wintab32.c
 
-C_SRCS16 = \
-	wintab16.c
-
-SPEC_SRCS16 = wintab.spec
-
 @MAKE_DLL_RULES@
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

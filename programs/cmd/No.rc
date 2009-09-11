@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "wcmd.h"
+
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
 STRINGTABLE
@@ -85,7 +87,7 @@ Bruk:	IF [NOT] EXIST filnavn kommando\n\
 \n\
 I kommandoform nummer to må streng1 og streng2 omsluttes av doble\n\ anførselstegn. Det skiller ikke mellom store og små bokstaver.\n"
 
-  WCMD_LABEL,  "LABEL brukes for å navgi et stasjonsvolum.  \n\
+  WCMD_LABEL,  "LABEL brukes for å navgi et stasjonsvolum.\n\
 \n\
 Syntaks: LABEL [stasjon:]\n\
 Kommandoen vil be om det nye volumnavnet for stasjonen.\n\
@@ -112,7 +114,7 @@ kommandoen med et nytt navn for å endre innstillingen.\n\
 \n\
 Det er også mulig å endre PATH ved å bruke miljøvariablen PATH, for\n\
 eksempel:\n\
-		PATH %PATH%;c:\\temp \n"
+		PATH %PATH%;c:\\temp\n"
 
   WCMD_PAUSE,
 "PAUSE viser meldingen 'Trykk Enter for å fortsette', og venter på at\n\ brukeren trykker Enter. Dette er hovedsakelig nyttig i satsvise filer,\n\
@@ -242,7 +244,7 @@ Skriv «HELP <kommando>» for mer informasjon om kommandoene ovenfor\n"
   WCMD_NOASSOC, "Manglende filtilknytning for etternavnet %s\n"
   WCMD_NOFTYPE, "Ingen åpnekommando er tilknyttet filtypene '%s'\n"
   WCMD_OVERWRITE, "Overwrite %s"
-  WCMD_MORESTR, "Mer . . ."
+  WCMD_MORESTR, "Mer..."
   WCMD_TRUNCATEDLINE, "Line in Batch processing possibly truncated. Using:\n"
   WCMD_NYI, "Not Yet Implemented\n\n"
   WCMD_NOARG, "Argument missing\n"
@@ -270,4 +272,5 @@ Skriv «HELP <kommando>» for mer informasjon om kommandoene ovenfor\n"
   WCMD_CONSTITLE,"Wine Command Prompt"
   WCMD_VERSION,"CMD Version %s\n\n"
   WCMD_MOREPROMPT, "More? "
+  WCMD_LINETOOLONG, "The input line is too long.\n"
 }

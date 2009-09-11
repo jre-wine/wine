@@ -230,8 +230,10 @@ static LRESULT DEFDLG_Proc( HWND hwnd, UINT msg, WPARAM wParam,
             return 1;
         }
         case WM_NCDESTROY:
-            if ((dlgInfo = (DIALOGINFO *)SetWindowLongPtrW( hwnd, DWLP_WINE_DIALOGINFO, 0 )))
+            if (dlgInfo)
             {
+                WND *wndPtr;
+
                 /* Free dialog heap (if created) */
                 if (dlgInfo->hDialogHeap)
                 {
@@ -241,6 +243,10 @@ static LRESULT DEFDLG_Proc( HWND hwnd, UINT msg, WPARAM wParam,
                 if (dlgInfo->hUserFont) DeleteObject( dlgInfo->hUserFont );
                 if (dlgInfo->hMenu) DestroyMenu( dlgInfo->hMenu );
                 HeapFree( GetProcessHeap(), 0, dlgInfo );
+
+                wndPtr = WIN_GetPtr( hwnd );
+                wndPtr->dlgInfo = NULL;
+                WIN_ReleasePtr( wndPtr );
             }
               /* Window clean-up */
             return DefWindowProcA( hwnd, msg, wParam, lParam );
@@ -335,11 +341,21 @@ static LRESULT DEFDLG_Epilog(HWND hwnd, UINT msg, BOOL fResult)
 DIALOGINFO *DIALOG_get_info( HWND hwnd, BOOL create )
 {
     WND* wndPtr;
-    DIALOGINFO* dlgInfo = (DIALOGINFO *)GetWindowLongPtrW( hwnd, DWLP_WINE_DIALOGINFO );
+    DIALOGINFO* dlgInfo;
 
-    if(!dlgInfo && create)
+    wndPtr = WIN_GetPtr( hwnd );
+    if (!wndPtr || wndPtr == WND_OTHER_PROCESS || wndPtr == WND_DESKTOP)
     {
-        if (!(dlgInfo = HeapAlloc( GetProcessHeap(), 0, sizeof(*dlgInfo) ))) return NULL;
+        SetLastError( ERROR_INVALID_WINDOW_HANDLE );
+        return NULL;
+    }
+
+    dlgInfo = wndPtr->dlgInfo;
+
+    if (!dlgInfo && create)
+    {
+        if (!(dlgInfo = HeapAlloc( GetProcessHeap(), 0, sizeof(*dlgInfo) )))
+            goto out;
         dlgInfo->hwndFocus   = 0;
         dlgInfo->hUserFont   = 0;
         dlgInfo->hMenu       = 0;
@@ -348,19 +364,12 @@ DIALOGINFO *DIALOG_get_info( HWND hwnd, BOOL create )
         dlgInfo->idResult    = 0;
         dlgInfo->flags       = 0;
         dlgInfo->hDialogHeap = 0;
-        wndPtr = WIN_GetPtr( hwnd );
-        if (wndPtr && wndPtr != WND_OTHER_PROCESS && wndPtr != WND_DESKTOP)
-        {
-            wndPtr->flags |= WIN_ISDIALOG;
-            WIN_ReleasePtr( wndPtr );
-            SetWindowLongPtrW( hwnd, DWLP_WINE_DIALOGINFO, (ULONG_PTR)dlgInfo );
-        }
-        else
-        {
-            HeapFree( GetProcessHeap(), 0, dlgInfo );
-            return NULL;
-        }
+        wndPtr->dlgInfo = dlgInfo;
+        wndPtr->flags |= WIN_ISDIALOG;
     }
+
+out:
+    WIN_ReleasePtr( wndPtr );
     return dlgInfo;
 }
 
@@ -376,7 +385,7 @@ LRESULT WINAPI DefDlgProc16( HWND16 hwnd, UINT16 msg, WPARAM16 wParam,
     BOOL result = FALSE;
 
     /* Perform DIALOGINFO initialization if not done */
-    if(!(dlgInfo = DIALOG_get_info(hwnd32, TRUE))) return -1;
+    if(!(dlgInfo = DIALOG_get_info(hwnd32, TRUE))) return 0;
 
     SetWindowLongPtrW( hwnd32, DWLP_MSGRESULT, 0 );
 
@@ -427,7 +436,7 @@ LRESULT WINAPI DefDlgProcA( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
     BOOL result = FALSE;
 
     /* Perform DIALOGINFO initialization if not done */
-    if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return -1;
+    if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return 0;
 
     SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
 
@@ -478,7 +487,7 @@ LRESULT WINAPI DefDlgProcW( HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam )
     DLGPROC dlgproc;
 
     /* Perform DIALOGINFO initialization if not done */
-    if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return -1;
+    if(!(dlgInfo = DIALOG_get_info( hwnd, TRUE ))) return 0;
 
     SetWindowLongPtrW( hwnd, DWLP_MSGRESULT, 0 );
 

@@ -20,8 +20,8 @@
 
 VOID DIALOG_FileNew(VOID);
 VOID DIALOG_FileOpen(VOID);
-VOID DIALOG_FileSave(VOID);
-VOID DIALOG_FileSaveAs(VOID);
+BOOL DIALOG_FileSave(VOID);
+BOOL DIALOG_FileSaveAs(VOID);
 VOID DIALOG_FilePrint(VOID);
 VOID DIALOG_FilePageSetup(VOID);
 VOID DIALOG_FilePrinterSetup(VOID);
@@ -38,6 +38,7 @@ VOID DIALOG_EditWrap(VOID);
 
 VOID DIALOG_Search(VOID);
 VOID DIALOG_SearchNext(VOID);
+VOID DIALOG_Replace(VOID);
 
 VOID DIALOG_SelectFont(VOID);
 
@@ -51,6 +52,7 @@ int DIALOG_StringMsgBox(HWND hParent, int formatId, LPCWSTR szString, DWORD dwFl
 
 /* utility functions */
 VOID ShowLastError(void);
+void UpdateWindowCaption(void);
 BOOL FileExists(LPCWSTR szFilename);
 BOOL DoCloseFile(void);
-void DoOpenFile(LPCWSTR szFileName);
+void DoOpenFile(LPCWSTR szFileName, ENCODING enc);

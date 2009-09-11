@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "shresdef.h"
+
 LANGUAGE LANG_BULGARIAN, SUBLANG_DEFAULT
 
 MENU_001 MENU DISCARDABLE
@@ -90,6 +92,28 @@ BEGIN
 	END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Големи икони", FCIDM_SHVIEW_BIGICON
+        MENUITEM "&Малки икони", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&Списък", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "&Подробности", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+    END
+END
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Избор на папка"
@@ -105,17 +129,19 @@ FONT 8, "MS Shell Dlg"
 	4, 40, 180, 120
 }
 
-SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 210, 152
+SHELL_ABOUT_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 220, 152
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Относно %s"
 FONT 10, "MS Shell Dlg"
 {
- DEFPUSHBUTTON "OK", IDOK, 153, 133, 50, 12, WS_TABSTOP
+ DEFPUSHBUTTON "OK", IDOK, 153, 133, 60, 12, WS_TABSTOP
+ PUSHBUTTON "Wine &license...", IDC_ABOUT_LICENSE, 153, 113, 60, 12, WS_TABSTOP
  LISTBOX IDC_ABOUT_LISTBOX, 8, 65, 137, 82, LBS_NOTIFY | WS_VSCROLL | WS_BORDER
  ICON "", stc1, 10, 10, 30, 30
- LTEXT "", IDC_ABOUT_STATIC_TEXT1, 40, 10, 137, 10
- LTEXT "", IDC_ABOUT_STATIC_TEXT2, 40, 22, 137, 10
- LTEXT "Wine беше създаден за вас от:", IDC_ABOUT_WINE_TEXT, 8, 55, 137, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT1, 40, 10, 170, 10
+ LTEXT "", IDC_ABOUT_STATIC_TEXT2, 40, 22, 170, 10
+ LTEXT "Running on %s", IDC_ABOUT_STATIC_TEXT3, 42, 34, 170, 10
+ LTEXT "Wine беше създаден за вас от:", IDC_ABOUT_WINE_TEXT, 8, 54, 204, 10
 }
 
 SHELL_RUN_DLG DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 227, 95
@@ -146,10 +172,13 @@ STRINGTABLE
 	IDS_SHV_COLUMN9		"Коментар"
 	IDS_SHV_COLUMN10	"Собственик"
 	IDS_SHV_COLUMN11	"Група"
+	IDS_SHV_COLUMN_DELFROM	"Original location"
+	IDS_SHV_COLUMN_DELDATE	"Date deleted"
 
         /* special folders */
 	IDS_DESKTOP		"Работен плот"
 	IDS_MYCOMPUTER		"Моят компютър"
+	IDS_CONTROLPANEL	"Control Panel"
 
         /* context menus */
 	IDS_VIEW_LARGE		"&Големи икони"
@@ -166,6 +195,10 @@ STRINGTABLE
 	IDS_DELETEITEM_TEXT "Наистина ли искате да изтриете '%1'?"
 	IDS_DELETEMULTIPLE_TEXT "Наистина ли искате да изтриете тези %1 елемента?"
 	IDS_DELETESELECTED_TEXT "Наистина ли искате да изтриете избраните елементи?"
+	IDS_TRASHITEM_TEXT "Are you sure that you want to send '%1' to the Trash?"
+	IDS_TRASHFOLDER_TEXT "Are you sure that you want to send '%1' and all its content to the Trash?"
+	IDS_TRASHMULTIPLE_TEXT "Are you sure that you want to send these %1 items to the Trash?"
+	IDS_CANTTRASH_TEXT "The item '%1' can't be sent to Trash. Do you want to delete it instead?"
 	IDS_OVERWRITEFILE_TEXT "This folder already contains a file called '%1'.\n\nDo you want to replace it?"
 	IDS_OVERWRITEFILE_CAPTION "Потвърдете презаписа на файла"
 	IDS_OVERWRITEFOLDER_TEXT "This folder already contains a folder named '%1'.\n\n"\
@@ -210,4 +243,8 @@ STRINGTABLE
 	IDS_CDBURN_AREA             "Local Settings\\Application Data\\Microsoft\\CD Burning"
 
 	IDS_NEWFOLDER		"New Folder"
+
+	IDS_CPANEL_TITLE            "Wine Control Panel"
+	IDS_CPANEL_NAME             "Name"
+	IDS_CPANEL_DESCRIPTION      "Description"
 }

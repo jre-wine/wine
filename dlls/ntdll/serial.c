@@ -74,6 +74,9 @@
 #include "wine/debug.h"
 
 #ifdef HAVE_LINUX_SERIAL_H
+#ifdef HAVE_ASM_TYPES_H
+#include <asm/types.h>
+#endif
 #include <linux/serial.h>
 #endif
 
@@ -87,7 +90,7 @@ static const char* iocode2str(DWORD ioc)
 {
     switch (ioc)
     {
-#define X(x)    case (x): return #x;
+#define X(x)    case (x): return #x
         X(IOCTL_SERIAL_CLEAR_STATS);
         X(IOCTL_SERIAL_CLR_DTR);
         X(IOCTL_SERIAL_CLR_RTS);
@@ -287,18 +290,13 @@ static NTSTATUS get_line_control(int fd, SERIAL_LINE_CONTROL* slc)
 
 static NTSTATUS get_modem_status(int fd, DWORD* lpModemStat)
 {
-    NTSTATUS    status = STATUS_SUCCESS;
+    NTSTATUS    status = STATUS_NOT_SUPPORTED;
     int         mstat;
 
+    *lpModemStat = 0;
 #ifdef TIOCMGET
-    if (ioctl(fd, TIOCMGET, &mstat) == -1)
+    if (!ioctl(fd, TIOCMGET, &mstat))
     {
-        WARN("ioctl failed\n");
-        status = FILE_GetNtStatus();
-    }
-    else
-    {
-        *lpModemStat = 0;
 #ifdef TIOCM_CTS
         if (mstat & TIOCM_CTS)  *lpModemStat |= MS_CTS_ON;
 #endif
@@ -317,9 +315,10 @@ static NTSTATUS get_modem_status(int fd, DWORD* lpModemStat)
               (*lpModemStat & MS_RING_ON) ? "MS_RING_ON " : "",
               (*lpModemStat & MS_DSR_ON)  ? "MS_DSR_ON  " : "",
               (*lpModemStat & MS_CTS_ON)  ? "MS_CTS_ON  " : "");
+        return STATUS_SUCCESS;
     }
-#else
-    status = STATUS_NOT_SUPPORTED;
+    WARN("ioctl failed\n");
+    status = FILE_GetNtStatus();
 #endif
     return status;
 }
@@ -378,7 +377,7 @@ static NTSTATUS get_timeouts(HANDLE handle, SERIAL_TIMEOUTS* st)
     NTSTATUS    status;
     SERVER_START_REQ( get_serial_info )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         if (!(status = wine_server_call( req )))
         {
             st->ReadIntervalTimeout         = reply->readinterval;
@@ -398,7 +397,7 @@ static NTSTATUS get_wait_mask(HANDLE hDevice, DWORD* mask)
 
     SERVER_START_REQ( get_serial_info )
     {
-        req->handle = hDevice;
+        req->handle = wine_server_obj_handle( hDevice );
         if (!(status = wine_server_call( req )))
             *mask = reply->eventmask;
     }
@@ -487,7 +486,7 @@ static NTSTATUS set_baud_rate(int fd, const SERIAL_BAUD_RATE* sbr)
                  "a non-standard baud rate %d.  Wine will set the rate to %d,\n"
                  "which is as close as we can get by our present understanding of your\n"
                  "hardware. I hope you know what you are doing.  Any disruption Wine\n"
-                 "has caused to your linux system can be undone with setserial \n"
+                 "has caused to your linux system can be undone with setserial\n"
                  "(see man setserial). If you have incapacitated a Hayes type modem,\n"
                  "reset it and it will probably recover.\n", sbr->BaudRate, arby);
             ioctl(fd, TIOCSSERIAL, &nuts);
@@ -652,7 +651,11 @@ static NTSTATUS set_line_control(int fd, const SERIAL_LINE_CONTROL* slc)
     port.c_cflag &= ~(HUPCL);
     port.c_cflag |= CLOCAL | CREAD;
     
-    port.c_lflag &= ~(ICANON|ECHO|ISIG);
+    /*
+     * on FreeBSD, turning off ICANON does not disable IEXTEN,
+     * so we must turn it off explicitly. No harm done on Linux.
+     */
+    port.c_lflag &= ~(ICANON|ECHO|ISIG|IEXTEN);
     port.c_lflag |= NOFLSH;
     
     bytesize = slc->WordLength;
@@ -663,6 +666,10 @@ static NTSTATUS set_line_control(int fd, const SERIAL_LINE_CONTROL* slc)
 #else
     port.c_cflag &= ~(PARENB | PARODD);
 #endif
+
+    /* make sure that reads don't block */
+    port.c_cc[VMIN] = 0;
+    port.c_cc[VTIME] = 0;
 
     switch (slc->Parity)
     {
@@ -751,9 +758,6 @@ static NTSTATUS set_special_chars(int fd, const SERIAL_CHARS* sc)
         return FILE_GetNtStatus();
     }
     
-    port.c_cc[VMIN  ] = 0;
-    port.c_cc[VTIME ] = 1;
-    
     port.c_cc[VEOF  ] = sc->EofChar;
     /* FIXME: sc->ErrorChar is not supported */
     /* FIXME: sc->BreakChar is not supported */
@@ -769,15 +773,13 @@ static NTSTATUS set_special_chars(int fd, const SERIAL_CHARS* sc)
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS set_timeouts(HANDLE handle, int fd, const SERIAL_TIMEOUTS* st)
+static NTSTATUS set_timeouts(HANDLE handle, const SERIAL_TIMEOUTS* st)
 {
     NTSTATUS            status;
-    struct termios      port;
-    unsigned int        ux_timeout;
 
     SERVER_START_REQ( set_serial_info )
     {
-        req->handle       = handle;
+        req->handle       = wine_server_obj_handle( handle );
         req->flags        = SERIALINFO_SET_TIMEOUTS;
         req->readinterval = st->ReadIntervalTimeout ;
         req->readmult     = st->ReadTotalTimeoutMultiplier ;
@@ -787,31 +789,7 @@ static NTSTATUS set_timeouts(HANDLE handle, int fd, const SERIAL_TIMEOUTS* st)
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
-    if (status) return status;
-
-    if (tcgetattr(fd, &port) == -1)
-    {
-        FIXME("tcgetattr on fd %d failed (%s)!\n", fd, strerror(errno));
-        return FILE_GetNtStatus();
-    }
-
-    /* VTIME is in 1/10 seconds */
-    if (st->ReadIntervalTimeout == 0) /* 0 means no timeout */
-        ux_timeout = 0;
-    else
-    {
-        ux_timeout = (st->ReadIntervalTimeout + 99) / 100;
-        if (ux_timeout == 0)
-            ux_timeout = 1; /* must be at least some timeout */
-    }
-    port.c_cc[VTIME] = ux_timeout;
-
-    if (tcsetattr(fd, 0, &port) == -1)
-    {
-        FIXME("tcsetattr on fd %d failed (%s)!\n", fd, strerror(errno));
-        return FILE_GetNtStatus();
-    }
-    return STATUS_SUCCESS;
+    return status;
 }
 
 static NTSTATUS set_wait_mask(HANDLE hDevice, DWORD mask)
@@ -820,7 +798,7 @@ static NTSTATUS set_wait_mask(HANDLE hDevice, DWORD mask)
 
     SERVER_START_REQ( set_serial_info )
     {
-        req->handle    = hDevice;
+        req->handle    = wine_server_obj_handle( hDevice );
         req->flags     = SERIALINFO_SET_MASK;
         req->eventmask = mask;
         status = wine_server_call( req );
@@ -829,39 +807,25 @@ static NTSTATUS set_wait_mask(HANDLE hDevice, DWORD mask)
     return status;
 }
 
+/*
+ * does not change IXOFF but simulates that IXOFF has been received:
+ */
 static NTSTATUS set_XOff(int fd)
 {
-    struct termios      port;
-
-    if (tcgetattr(fd,&port) == -1)
+    if (tcflow(fd, TCOOFF))
     {
-        FIXME("tcgetattr on fd %d failed (%s)!\n", fd, strerror(errno));
-        return FILE_GetNtStatus();
-
-
-    }
-    port.c_iflag |= IXOFF;
-    if (tcsetattr(fd, TCSADRAIN, &port) == -1)
-    {
-        FIXME("tcsetattr on fd %d failed (%s)!\n", fd, strerror(errno));
         return FILE_GetNtStatus();
     }
     return STATUS_SUCCESS;
 }
 
+/*
+ * does not change IXON but simulates that IXON has been received:
+ */
 static NTSTATUS set_XOn(int fd)
 {
-    struct termios      port;
-
-    if (tcgetattr(fd,&port) == -1)
+    if (tcflow(fd, TCOON))
     {
-        FIXME("tcgetattr on fd %d failed (%s)!\n", fd, strerror(errno));
-        return FILE_GetNtStatus();
-    }
-    port.c_iflag |= IXON;
-    if (tcsetattr(fd, TCSADRAIN, &port) == -1)
-    {
-        FIXME("tcsetattr on fd %d failed (%s)!\n", fd, strerror(errno));
         return FILE_GetNtStatus();
     }
     return STATUS_SUCCESS;
@@ -898,6 +862,7 @@ typedef struct async_commio
  */
 static NTSTATUS get_irq_info(int fd, serial_irq_info *irq_info)
 {
+    NTSTATUS status = STATUS_NOT_IMPLEMENTED;
 #ifdef TIOCGICOUNT
     struct serial_icounter_struct einfo;
     if (!ioctl(fd, TIOCGICOUNT, &einfo))
@@ -912,18 +877,17 @@ static NTSTATUS get_irq_info(int fd, serial_irq_info *irq_info)
         return STATUS_SUCCESS;
     }
     TRACE("TIOCGICOUNT err %s\n", strerror(errno));
-    return FILE_GetNtStatus();
-#else
-    memset(irq_info,0, sizeof(serial_irq_info));
-    return STATUS_NOT_IMPLEMENTED;
+    status = FILE_GetNtStatus();
 #endif
+    memset(irq_info,0, sizeof(serial_irq_info));
+    return status;
 }
 
 
-static DWORD WINAPI check_events(int fd, DWORD mask, 
-                                 const serial_irq_info *new, 
-                                 const serial_irq_info *old,
-                                 DWORD new_mstat, DWORD old_mstat)
+static DWORD check_events(int fd, DWORD mask,
+                          const serial_irq_info *new,
+                          const serial_irq_info *old,
+                          DWORD new_mstat, DWORD old_mstat)
 {
     DWORD ret = 0, queue;
 
@@ -982,7 +946,7 @@ static DWORD WINAPI check_events(int fd, DWORD mask,
  */
 static DWORD CALLBACK wait_for_event(LPVOID arg)
 {
-    async_commio *commio = (async_commio*) arg;
+    async_commio *commio = arg;
     int fd, needs_close;
 
     if (!server_get_unix_fd( commio->hDevice, FILE_READ_DATA | FILE_WRITE_DATA, &fd, &needs_close, NULL, NULL ))
@@ -1075,15 +1039,24 @@ static NTSTATUS wait_on(HANDLE hDevice, int fd, HANDLE hEvent, DWORD* events)
 #endif
     if (commio->evtmask & EV_RXFLAG)
 	FIXME("EV_RXFLAG not handled\n");
-    if ((status = get_irq_info(fd, &commio->irq_info)) ||
-        (status = get_modem_status(fd, &commio->mstat)))
-        goto out_now;
+
+    if ((status = get_irq_info(fd, &commio->irq_info)) &&
+        (commio->evtmask & (EV_BREAK | EV_ERR)))
+	goto out_now;
+
+    if ((status = get_modem_status(fd, &commio->mstat)) &&
+        (commio->evtmask & (EV_CTS | EV_DSR| EV_RING| EV_RLSD)))
+	goto out_now;
 
     /* We might have received something or the TX buffer is delivered */
     *events = check_events(fd, commio->evtmask,
                                &commio->irq_info, &commio->irq_info,
                                commio->mstat, commio->mstat);
-    if (*events) goto out_now;
+    if (*events)
+    {
+        status = STATUS_SUCCESS;
+        goto out_now;
+    }
 
     /* create the worker for the task */
     status = RtlQueueWorkItem(wait_for_event, commio, 0 /* FIXME */);
@@ -1132,7 +1105,8 @@ static inline NTSTATUS io_control(HANDLE hDevice,
 
     piosb->Information = 0;
 
-    if (dwIoControlCode != IOCTL_SERIAL_GET_TIMEOUTS)
+    if (dwIoControlCode != IOCTL_SERIAL_GET_TIMEOUTS &&
+        dwIoControlCode != IOCTL_SERIAL_SET_TIMEOUTS)
         if ((status = server_get_unix_fd( hDevice, access, &fd, &needs_close, NULL, NULL )))
             goto error;
 
@@ -1155,7 +1129,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_BAUD_RATE:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_BAUD_RATE))
         {
-            if (!(status = get_baud_rate(fd, (SERIAL_BAUD_RATE*)lpOutBuffer)))
+            if (!(status = get_baud_rate(fd, lpOutBuffer)))
                 sz = sizeof(SERIAL_BAUD_RATE);
         }
         else
@@ -1164,7 +1138,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_CHARS:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_CHARS))
         {
-            if (!(status = get_special_chars(fd, (SERIAL_CHARS*)lpOutBuffer)))
+            if (!(status = get_special_chars(fd, lpOutBuffer)))
                 sz = sizeof(SERIAL_CHARS);
         }
         else
@@ -1173,7 +1147,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
      case IOCTL_SERIAL_GET_COMMSTATUS:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_STATUS))
         {
-            if (!(status = get_status(fd, (SERIAL_STATUS*)lpOutBuffer)))
+            if (!(status = get_status(fd, lpOutBuffer)))
                 sz = sizeof(SERIAL_STATUS);
         }
         else status = STATUS_INVALID_PARAMETER;
@@ -1181,7 +1155,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_HANDFLOW:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_HANDFLOW))
         {
-            if (!(status = get_hand_flow(fd, (SERIAL_HANDFLOW*)lpOutBuffer)))
+            if (!(status = get_hand_flow(fd, lpOutBuffer)))
                 sz = sizeof(SERIAL_HANDFLOW);
         }
         else
@@ -1190,7 +1164,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_LINE_CONTROL:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_LINE_CONTROL))
         {
-            if (!(status = get_line_control(fd, (SERIAL_LINE_CONTROL*)lpOutBuffer)))
+            if (!(status = get_line_control(fd, lpOutBuffer)))
                 sz = sizeof(SERIAL_LINE_CONTROL);
         }
         else
@@ -1199,7 +1173,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_MODEMSTATUS:
         if (lpOutBuffer && nOutBufferSize == sizeof(DWORD))
         {
-            if (!(status = get_modem_status(fd, (DWORD*)lpOutBuffer)))
+            if (!(status = get_modem_status(fd, lpOutBuffer)))
                 sz = sizeof(DWORD);
         }
         else status = STATUS_INVALID_PARAMETER;
@@ -1207,7 +1181,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_TIMEOUTS:
         if (lpOutBuffer && nOutBufferSize == sizeof(SERIAL_TIMEOUTS))
         {
-            if (!(status = get_timeouts(hDevice, (SERIAL_TIMEOUTS*)lpOutBuffer)))
+            if (!(status = get_timeouts(hDevice, lpOutBuffer)))
                 sz = sizeof(SERIAL_TIMEOUTS);
         }
         else
@@ -1216,7 +1190,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_GET_WAIT_MASK:
         if (lpOutBuffer && nOutBufferSize == sizeof(DWORD))
         {
-            if (!(status = get_wait_mask(hDevice, (DWORD*)lpOutBuffer)))
+            if (!(status = get_wait_mask(hDevice, lpOutBuffer)))
                 sz = sizeof(DWORD);
         }
         else
@@ -1239,7 +1213,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
         break;
     case IOCTL_SERIAL_SET_BAUD_RATE:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_BAUD_RATE))
-            status = set_baud_rate(fd, (const SERIAL_BAUD_RATE*)lpInBuffer);
+            status = set_baud_rate(fd, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
@@ -1269,7 +1243,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
         break;
     case IOCTL_SERIAL_SET_CHARS:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_CHARS))
-            status = set_special_chars(fd, (const SERIAL_CHARS*)lpInBuffer);
+            status = set_special_chars(fd, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
@@ -1282,19 +1256,19 @@ static inline NTSTATUS io_control(HANDLE hDevice,
         break;
     case IOCTL_SERIAL_SET_HANDFLOW:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_HANDFLOW))
-            status = set_handflow(fd, (const SERIAL_HANDFLOW*)lpInBuffer);
+            status = set_handflow(fd, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
     case IOCTL_SERIAL_SET_LINE_CONTROL:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_LINE_CONTROL))
-            status = set_line_control(fd, (const SERIAL_LINE_CONTROL*)lpInBuffer);
+            status = set_line_control(fd, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
     case IOCTL_SERIAL_SET_QUEUE_SIZE:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_QUEUE_SIZE))
-            status = set_queue_size(fd, (const SERIAL_QUEUE_SIZE*)lpInBuffer);
+            status = set_queue_size(fd, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
@@ -1307,7 +1281,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
         break;
     case IOCTL_SERIAL_SET_TIMEOUTS:
         if (lpInBuffer && nInBufferSize == sizeof(SERIAL_TIMEOUTS))
-            status = set_timeouts(hDevice, fd, (const SERIAL_TIMEOUTS*)lpInBuffer);
+            status = set_timeouts(hDevice, lpInBuffer);
         else
             status = STATUS_INVALID_PARAMETER;
         break;
@@ -1327,7 +1301,7 @@ static inline NTSTATUS io_control(HANDLE hDevice,
     case IOCTL_SERIAL_WAIT_ON_MASK:
         if (lpOutBuffer && nOutBufferSize == sizeof(DWORD))
         {
-            if (!(status = wait_on(hDevice, fd, hEvent, (DWORD*)lpOutBuffer)))
+            if (!(status = wait_on(hDevice, fd, hEvent, lpOutBuffer)))
                 sz = sizeof(DWORD);
         }
         else

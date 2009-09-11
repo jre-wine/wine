@@ -122,20 +122,6 @@ INT16 WINAPI SetAbortProc16(HDC16 hdc16, ABORTPROC16 abrtprc)
     return TRUE;
 }
 
-/**********************************************************************
- *           SetAbortProc   (GDI32.@)
- *
- */
-INT WINAPI SetAbortProc(HDC hdc, ABORTPROC abrtprc)
-{
-    DC *dc = get_dc_ptr( hdc );
-
-    if (!dc) return FALSE;
-    dc->pAbortProc = abrtprc;
-    release_dc_ptr( dc );
-    return TRUE;
-}
-
 
 /****************** misc. printer related functions */
 
@@ -357,7 +343,7 @@ static int CreateSpoolFile(LPCSTR pszOutput)
             signal( SIGPIPE, SIG_DFL );
             signal( SIGCHLD, SIG_DFL );
 
-            execl("/bin/sh", "/bin/sh", "-c", psCmdP, (char*)0);
+            execl("/bin/sh", "/bin/sh", "-c", psCmdP, NULL);
             _exit(1);
 
         }

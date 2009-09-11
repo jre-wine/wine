@@ -28,12 +28,14 @@
 #include "winreg.h"
 #include "setupapi.h"
 #include "lzexpand.h"
+#include "softpub.h"
+#include "mscat.h"
+#include "shlobj.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 #include "setupapi_private.h"
-
 
 WINE_DEFAULT_DEBUG_CHANNEL(setupapi);
 
@@ -196,67 +198,8 @@ LONG WINAPI QueryRegistryValue(HKEY hKey,
  */
 BOOL WINAPI IsUserAdmin(VOID)
 {
-    SID_IDENTIFIER_AUTHORITY Authority = {SECURITY_NT_AUTHORITY};
-    HANDLE hToken;
-    DWORD dwSize;
-    PTOKEN_GROUPS lpGroups;
-    PSID lpSid;
-    DWORD i;
-    BOOL bResult = FALSE;
-
     TRACE("\n");
-
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken))
-    {
-        return FALSE;
-    }
-
-    if (!GetTokenInformation(hToken, TokenGroups, NULL, 0, &dwSize))
-    {
-        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER)
-        {
-            CloseHandle(hToken);
-            return FALSE;
-        }
-    }
-
-    lpGroups = MyMalloc(dwSize);
-    if (lpGroups == NULL)
-    {
-        CloseHandle(hToken);
-        return FALSE;
-    }
-
-    if (!GetTokenInformation(hToken, TokenGroups, lpGroups, dwSize, &dwSize))
-    {
-        MyFree(lpGroups);
-        CloseHandle(hToken);
-        return FALSE;
-    }
-
-    CloseHandle(hToken);
-
-    if (!AllocateAndInitializeSid(&Authority, 2, SECURITY_BUILTIN_DOMAIN_RID,
-                                  DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
-                                  &lpSid))
-    {
-        MyFree(lpGroups);
-        return FALSE;
-    }
-
-    for (i = 0; i < lpGroups->GroupCount; i++)
-    {
-        if (EqualSid(lpSid, lpGroups->Groups[i].Sid))
-        {
-            bResult = TRUE;
-            break;
-        }
-    }
-
-    FreeSid(lpSid);
-    MyFree(lpGroups);
-
-    return bResult;
+    return IsUserAnAdmin();
 }
 
 
@@ -726,7 +669,7 @@ DWORD WINAPI TakeOwnershipOfFile(LPCWSTR lpFileName)
         goto fail;
     }
 
-    pOwner = (PTOKEN_OWNER)MyMalloc(dwSize);
+    pOwner = MyMalloc(dwSize);
     if (pOwner == NULL)
     {
         CloseHandle(hToken);
@@ -1052,17 +995,38 @@ BOOL WINAPI SetupCopyOEMInfW( PCWSTR source, PCWSTR location,
                            sizeof(catalog_file)/sizeof(catalog_file[0]), NULL ))
     {
         WCHAR source_cat[MAX_PATH];
-        strcpyW( source_cat, source );
+        HCATADMIN handle;
+        HCATINFO cat;
+        GUID msguid = DRIVER_ACTION_VERIFY;
 
+        SetupCloseInfFile( hinf );
+
+        strcpyW( source_cat, source );
         p = strrchrW( source_cat, '\\' );
         if (p) p++;
         else p = source_cat;
-
         strcpyW( p, catalog_file );
 
-        FIXME("install catalog file %s\n", debugstr_w( source_cat ));
+        TRACE("installing catalog file %s\n", debugstr_w( source_cat ));
+
+        if (!CryptCATAdminAcquireContext(&handle, &msguid, 0))
+        {
+            ERR("Could not acquire security context\n");
+            return FALSE;
+        }
+
+        if (!(cat = CryptCATAdminAddCatalog(handle, source_cat, catalog_file, 0)))
+        {
+            ERR("Could not add catalog\n");
+            CryptCATAdminReleaseContext(handle, 0);
+            return FALSE;
+        }
+
+        CryptCATAdminReleaseCatalogContext(handle, cat, 0);
+        CryptCATAdminReleaseContext(handle, 0);
     }
-    SetupCloseInfFile( hinf );
+    else
+        SetupCloseInfFile( hinf );
 
     if (!(ret = CopyFileW( source, target, (style & SP_COPY_NOOVERWRITE) != 0 )))
         return ret;
@@ -1092,12 +1056,85 @@ BOOL WINAPI SetupCopyOEMInfW( PCWSTR source, PCWSTR location,
 }
 
 /***********************************************************************
+ *      SetupUninstallOEMInfA  (SETUPAPI.@)
+ */
+BOOL WINAPI SetupUninstallOEMInfA( PCSTR inf_file, DWORD flags, PVOID reserved )
+{
+    BOOL ret;
+    WCHAR *inf_fileW = NULL;
+
+    TRACE("%s, 0x%08x, %p\n", debugstr_a(inf_file), flags, reserved);
+
+    if (inf_file && !(inf_fileW = strdupAtoW( inf_file ))) return FALSE;
+    ret = SetupUninstallOEMInfW( inf_fileW, flags, reserved );
+    HeapFree( GetProcessHeap(), 0, inf_fileW );
+    return ret;
+}
+
+/***********************************************************************
+ *      SetupUninstallOEMInfW  (SETUPAPI.@)
+ */
+BOOL WINAPI SetupUninstallOEMInfW( PCWSTR inf_file, DWORD flags, PVOID reserved )
+{
+    static const WCHAR infW[] = {'\\','i','n','f','\\',0};
+    WCHAR target[MAX_PATH];
+
+    TRACE("%s, 0x%08x, %p\n", debugstr_w(inf_file), flags, reserved);
+
+    if (!inf_file)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!GetWindowsDirectoryW( target, sizeof(target)/sizeof(WCHAR) )) return FALSE;
+
+    strcatW( target, infW );
+    strcatW( target, inf_file );
+
+    if (flags & SUOI_FORCEDELETE)
+        return DeleteFileW(target);
+
+    FIXME("not deleting %s\n", debugstr_w(target));
+
+    return TRUE;
+}
+
+/***********************************************************************
  *      InstallCatalog  (SETUPAPI.@)
  */
 DWORD WINAPI InstallCatalog( LPCSTR catalog, LPCSTR basename, LPSTR fullname )
 {
     FIXME("%s, %s, %p\n", debugstr_a(catalog), debugstr_a(basename), fullname);
     return 0;
+}
+
+/***********************************************************************
+ *      pSetupInstallCatalog  (SETUPAPI.@)
+ */
+DWORD WINAPI pSetupInstallCatalog( LPCWSTR catalog, LPCWSTR basename, LPWSTR fullname )
+{
+    HCATADMIN admin;
+    HCATINFO cat;
+
+    TRACE ("%s, %s, %p\n", debugstr_w(catalog), debugstr_w(basename), fullname);
+
+    if (!CryptCATAdminAcquireContext(&admin,NULL,0))
+        return GetLastError();
+
+    if (!(cat = CryptCATAdminAddCatalog( admin, (PWSTR)catalog, (PWSTR)basename, 0 )))
+    {
+        DWORD rc = GetLastError();
+        CryptCATAdminReleaseContext(admin, 0);
+        return rc;
+    }
+    CryptCATAdminReleaseCatalogContext(admin, cat, 0);
+    CryptCATAdminReleaseContext(admin,0);
+
+    if (fullname)
+        FIXME("not returning full installed catalog path\n");
+
+    return NO_ERROR;
 }
 
 static UINT detect_compression_type( LPCWSTR file )

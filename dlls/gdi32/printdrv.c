@@ -77,6 +77,12 @@ INT WINAPI StartDocW(HDC hdc, const DOCINFOW* doc)
 
     if(!dc) return SP_ERROR;
 
+    if (dc->pAbortProc && !dc->pAbortProc( hdc, 0 ))
+    {
+        release_dc_ptr( dc );
+        return ret;
+    }
+
     if (dc->funcs->pStartDoc) ret = dc->funcs->pStartDoc( dc->physDev, doc );
     release_dc_ptr( dc );
     return ret;
@@ -173,11 +179,6 @@ INT WINAPI EndPage(HDC hdc)
     if(!dc) return SP_ERROR;
 
     if (dc->funcs->pEndPage) ret = dc->funcs->pEndPage( dc->physDev );
-    if (dc->pAbortProc && !dc->pAbortProc( hdc, 0 ))
-    {
-        EndDoc( hdc );
-        ret = 0;
-    }
     release_dc_ptr( dc );
     return ret;
 }
@@ -195,4 +196,19 @@ INT WINAPI AbortDoc(HDC hdc)
     if (dc->funcs->pAbortDoc) ret = dc->funcs->pAbortDoc( dc->physDev );
     release_dc_ptr( dc );
     return ret;
+}
+
+
+/**********************************************************************
+ *           SetAbortProc   (GDI32.@)
+ *
+ */
+INT WINAPI SetAbortProc(HDC hdc, ABORTPROC abrtprc)
+{
+    DC *dc = get_dc_ptr( hdc );
+
+    if (!dc) return FALSE;
+    dc->pAbortProc = abrtprc;
+    release_dc_ptr( dc );
+    return TRUE;
 }

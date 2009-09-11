@@ -19,6 +19,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 #include <stdarg.h>
 #include <stdio.h>
 #ifdef HAVE_UNISTD_H
@@ -44,6 +45,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntlm);
 SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
         char* const argv[])
 {
+#ifdef HAVE_FORK
     int pipe_in[2];
     int pipe_out[2];
     int i;
@@ -56,16 +58,28 @@ SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
     }
     TRACE("\n");
 
-    if( pipe(pipe_in) < 0 )
+#ifdef HAVE_PIPE2
+    if (pipe2( pipe_in, O_CLOEXEC ) < 0 )
+#endif
     {
-        return SEC_E_INTERNAL_ERROR;
+        if( pipe(pipe_in) < 0 ) return SEC_E_INTERNAL_ERROR;
+        fcntl( pipe_in[0], F_SETFD, FD_CLOEXEC );
+        fcntl( pipe_in[1], F_SETFD, FD_CLOEXEC );
     }
-    if( pipe(pipe_out) < 0 )
+#ifdef HAVE_PIPE2
+    if (pipe2( pipe_out, O_CLOEXEC ) < 0 )
+#endif
     {
-        close(pipe_in[0]);
-        close(pipe_in[1]);
-        return SEC_E_INTERNAL_ERROR;
+        if( pipe(pipe_out) < 0 )
+        {
+            close(pipe_in[0]);
+            close(pipe_in[1]);
+            return SEC_E_INTERNAL_ERROR;
+        }
+        fcntl( pipe_out[0], F_SETFD, FD_CLOEXEC );
+        fcntl( pipe_out[1], F_SETFD, FD_CLOEXEC );
     }
+
     if (!(helper = HeapAlloc(GetProcessHeap(),0, sizeof(NegoHelper))))
     {
         close(pipe_in[0]);
@@ -90,9 +104,6 @@ SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
     if(helper->helper_pid == 0)
     {
         /* We're in the child now */
-        close(0);
-        close(1);
-
         dup2(pipe_out[0], 0);
         close(pipe_out[0]);
         close(pipe_out[1]);
@@ -124,14 +135,16 @@ SECURITY_STATUS fork_helper(PNegoHelper *new_helper, const char *prog,
         helper->crypt.ntlm2.recv_sign_key = NULL;
         helper->crypt.ntlm2.recv_seal_key = NULL;
         helper->pipe_in = pipe_in[0];
-        fcntl( pipe_in[0], F_SETFD, 1 );
         close(pipe_in[1]);
         helper->pipe_out = pipe_out[1];
-        fcntl( pipe_out[1], F_SETFD, 1 );
         close(pipe_out[0]);
     }
 
     return SEC_E_OK;
+#else
+    ERR( "no fork support on this platform\n" );
+    return SEC_E_INTERNAL_ERROR;
+#endif
 }
 
 static SECURITY_STATUS read_line(PNegoHelper helper, int *offset_len)
@@ -271,8 +284,6 @@ void cleanup_helper(PNegoHelper helper)
     /* closing stdin will terminate ntlm_auth */
     close(helper->pipe_out);
     close(helper->pipe_in);
-
-    waitpid(helper->helper_pid, NULL, 0);
 
     helper->helper_pid = 0;
     HeapFree(GetProcessHeap(), 0, helper);

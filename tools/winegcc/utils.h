@@ -31,10 +31,21 @@
 # endif
 #endif
 
+enum target_cpu
+{
+    CPU_x86, CPU_x86_64, CPU_SPARC, CPU_ALPHA, CPU_POWERPC
+};
+
+enum target_platform
+{
+    PLATFORM_UNSPECIFIED, PLATFORM_APPLE, PLATFORM_SOLARIS, PLATFORM_WINDOWS
+};
+
 void error(const char* s, ...) DECLSPEC_NORETURN;
 
 void* xmalloc(size_t size);
 void* xrealloc(void* p, size_t size);
+char *xstrdup( const char *str );
 char* strmake(const char* fmt, ...);
 int strendswith(const char* str, const char* end);
 
@@ -61,7 +72,7 @@ typedef enum {
 char* get_basename(const char* file);
 void create_file(const char* name, int mode, const char* fmt, ...);
 file_type get_file_type(const char* filename);
-file_type get_lib_type(strarray* path, const char* library, char** file);
+file_type get_lib_type(enum target_platform platform, strarray* path, const char* library, char** file);
 void spawn(const strarray* prefix, const strarray* arr, int ignore_errors);
 
 extern int verbose;

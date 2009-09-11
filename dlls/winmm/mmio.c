@@ -2,7 +2,7 @@
  * MMIO functions
  *
  * Copyright 1998 Andrew Taylor
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  * Copyright 2000,2002 Eric Pouech
  *
  * This library is free software; you can redistribute it and/or
@@ -314,7 +314,7 @@ LPMMIOPROC MMIO_InstallIOProc(FOURCC fccIOProc, LPMMIOPROC pIOProc,
 	    }
 	    /* remove it, but only if it isn't builtin */
 	    if ((*ppListNode) >= defaultProcs &&
-		(*ppListNode) < defaultProcs + sizeof(defaultProcs)) {
+		(*ppListNode) < defaultProcs + sizeof(defaultProcs) / sizeof(defaultProcs[0])) {
 		WARN("Tried to remove built-in mmio proc. Skipping\n");
 	    } else {
 		/* Okay, nuke it */
@@ -557,7 +557,6 @@ static MMRESULT MMIO_SetBuffer(WINE_MMIO* wm, void* pchBuffer, LONG cchBuffer,
 {
     TRACE("(%p %p %d %u)\n", wm, pchBuffer, cchBuffer, uFlags);
 
-    if (uFlags)			return MMSYSERR_INVALPARAM;
     if (cchBuffer > 0xFFFF)
 	WARN("Untested handling of huge mmio buffers (%d >= 64k)\n", cchBuffer);
 
@@ -585,7 +584,7 @@ static MMRESULT MMIO_SetBuffer(WINE_MMIO* wm, void* pchBuffer, LONG cchBuffer,
     wm->info.pchNext = wm->info.pchBuffer;
     wm->info.pchEndRead = wm->info.pchBuffer;
     wm->info.pchEndWrite = wm->info.pchBuffer + cchBuffer;
-    wm->info.lBufOffset = 0;
+    wm->info.lBufOffset = wm->info.lDiskOffset;
     wm->bBufferLoaded = FALSE;
 
     return MMSYSERR_NOERROR;
@@ -656,22 +655,25 @@ HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
 	wm->bTmpIOProc = TRUE;
     }
 
-    wm->bBufferLoaded = FALSE;
     wm->ioProc->count++;
+    wm->info.dwFlags = dwOpenFlags;
 
     if (dwOpenFlags & MMIO_ALLOCBUF) {
-	if ((refmminfo->wErrorRet = MMIO_SetBuffer(wm, NULL, MMIO_DEFAULTBUFFER, 0)))
+	refmminfo->wErrorRet = MMIO_SetBuffer(wm, refmminfo->pchBuffer,
+	    refmminfo->cchBuffer ? refmminfo->cchBuffer : MMIO_DEFAULTBUFFER, 0);
+	if (refmminfo->wErrorRet != MMSYSERR_NOERROR)
 	    goto error1;
-    } else if (wm->info.fccIOProc == FOURCC_MEM) {
+    } else {
         refmminfo->wErrorRet = MMIO_SetBuffer(wm, refmminfo->pchBuffer, refmminfo->cchBuffer, 0);
 	if (refmminfo->wErrorRet != MMSYSERR_NOERROR)
 	    goto error1;
-	wm->bBufferLoaded = TRUE;
-    } /* else => unbuffered, wm->info.pchBuffer == NULL */
+    }
+
+    if (wm->info.fccIOProc == FOURCC_MEM && !(wm->info.dwFlags & MMIO_ALLOCBUF))
+        wm->bBufferLoaded = TRUE;
 
     /* see mmioDosIOProc for that one */
     wm->info.adwInfo[0] = refmminfo->adwInfo[0];
-    wm->info.dwFlags = dwOpenFlags;
 
     /* call IO proc to actually open file */
     refmminfo->wErrorRet = send_message(wm->ioProc, &wm->info, MMIOM_OPEN, 
@@ -1223,7 +1225,10 @@ MMRESULT WINAPI mmioDescend(HMMIO hmmio, LPMMCKINFO lpck,
     if (lpck->ckid == FOURCC_RIFF || lpck->ckid == FOURCC_LIST)
 	mmioSeek(hmmio, lpck->dwDataOffset + sizeof(DWORD), SEEK_SET);
     else
+    {
 	mmioSeek(hmmio, lpck->dwDataOffset, SEEK_SET);
+	lpck->fccType = 0;
+    }
     TRACE("lpck: ckid=%.4s, cksize=%d, dwDataOffset=%d fccType=%08X (%.4s)!\n",
 	  (LPSTR)&lpck->ckid, lpck->cksize, lpck->dwDataOffset,
 	  lpck->fccType, srchType?(LPSTR)&lpck->fccType:"");

@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "notepad_res.h"
+
 LANGUAGE LANG_ESPERANTO, SUBLANG_DEFAULT
 
 MAIN_MENU MENU
@@ -57,7 +59,7 @@ POPUP "&Helpo" {
   MENUITEM "Seræu...",        CMD_HELP_SEARCH
   MENUITEM "Pri Helpanto",     CMD_HELP_ON_HELP
   MENUITEM SEPARATOR
-  MENUITEM "Pri Notepad...",  CMD_HELP_ABOUT_NOTEPAD
+  MENUITEM "Pri Notepad",  CMD_HELP_ABOUT_NOTEPAD
  }
 }
 

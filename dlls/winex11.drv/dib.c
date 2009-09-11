@@ -62,31 +62,32 @@ static int ximageDepthTable[32];
 /* This structure holds the arguments for DIB_SetImageBits() */
 typedef struct
 {
-    X11DRV_PDEVICE *physDev;
-    LPCVOID         bits;
-    XImage         *image;
-    PALETTEENTRY   *palentry;
-    int             lines;
-    DWORD           infoWidth;
-    WORD            depth;
-    WORD            infoBpp;
-    WORD            compression;
-    RGBQUAD        *colorMap;
-    int             nColorMap;
-    Drawable        drawable;
-    GC              gc;
-    int             xSrc;
-    int             ySrc;
-    int             xDest;
-    int             yDest;
-    int             width;
-    int             height;
-    DWORD           rMask;
-    DWORD           gMask;
-    DWORD           bMask;
-    BOOL            useShm;
-    int             dibpitch;
-    DWORD           sizeImage;  
+    X11DRV_PDEVICE         *physDev;
+    LPCVOID                 bits;
+    XImage                 *image;
+    PALETTEENTRY           *palentry;
+    int                     lines;
+    DWORD                   infoWidth;
+    WORD                    depth;
+    WORD                    infoBpp;
+    WORD                    compression;
+    RGBQUAD                *colorMap;
+    int                     nColorMap;
+    Drawable                drawable;
+    GC                      gc;
+    int                     xSrc;
+    int                     ySrc;
+    int                     xDest;
+    int                     yDest;
+    int                     width;
+    int                     height;
+    DWORD                   rMask;
+    DWORD                   gMask;
+    DWORD                   bMask;
+    enum x11drv_shm_mode    shm_mode;
+    int                     dibpitch;
+    DWORD                   sizeImage;
+    X_PHYSBITMAP           *physBitmap;
 } X11DRV_DIB_IMAGEBITS_DESCR;
 
 
@@ -186,13 +187,13 @@ static int X11DRV_DIB_GetDIBImageBytes( int width, int height, int depth )
 
 
 /***********************************************************************
- *           X11DRV_DIB_BitmapInfoSize
+ *           bitmap_info_size
  *
  * Return the size of the bitmap info structure including color table.
  */
-int X11DRV_DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
+int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
-    unsigned int colors;
+    unsigned int colors, masks = 0;
 
     if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -206,7 +207,8 @@ int X11DRV_DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
         colors = info->bmiHeader.biClrUsed;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
-        return sizeof(BITMAPINFOHEADER) + colors *
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        return sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) + colors *
                ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -220,15 +222,32 @@ int X11DRV_DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
 XImage *X11DRV_DIB_CreateXImage( int width, int height, int depth )
 {
     int width_bytes;
-    XImage *image;
+    XImage *image = NULL;
+    void *data;
 
     wine_tsx11_lock();
     width_bytes = X11DRV_DIB_GetXImageWidthBytes( width, depth );
-    image = XCreateImage( gdi_display, visual, depth, ZPixmap, 0,
-                          calloc( height, width_bytes ),
-                          width, height, 32, width_bytes );
+    data = HeapAlloc( GetProcessHeap(), 0, height * width_bytes );
+    if (data) image = XCreateImage( gdi_display, visual, depth, ZPixmap, 0,
+                                    data, width, height, 32, width_bytes );
+    if (!image) HeapFree( GetProcessHeap(), 0, data );
     wine_tsx11_unlock();
     return image;
+}
+
+
+/***********************************************************************
+ *           X11DRV_DIB_DestroyXImage
+ *
+ * Destroy an X image created with X11DRV_DIB_CreateXImage.
+ */
+void X11DRV_DIB_DestroyXImage( XImage *image )
+{
+    HeapFree( GetProcessHeap(), 0, image->data );
+    image->data = NULL;
+    wine_tsx11_lock();
+    XDestroyImage( image );
+    wine_tsx11_unlock();
 }
 
 
@@ -334,7 +353,7 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
     {
         if (quads)
         {
-            const RGBQUAD * rgb = (const RGBQUAD *)colorPtr;
+            const RGBQUAD * rgb = colorPtr;
 
             if (depth == 1)  /* Monochrome */
             {
@@ -352,13 +371,13 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
             }
             else
                 for (i = start; i < end; i++, rgb++)
-                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( NULL, RGB(rgb->rgbRed,
+                    colorMapping[i] = X11DRV_PALETTE_LookupPixel(RGB(rgb->rgbRed,
                                                                 rgb->rgbGreen,
                                                                 rgb->rgbBlue));
         }
         else
         {
-            const RGBTRIPLE * rgb = (const RGBTRIPLE *)colorPtr;
+            const RGBTRIPLE * rgb = colorPtr;
 
             if (depth == 1)  /* Monochrome */
             {
@@ -376,14 +395,14 @@ static int *X11DRV_DIB_GenColorMap( X11DRV_PDEVICE *physDev, int *colorMapping,
             }
             else
                 for (i = start; i < end; i++, rgb++)
-                    colorMapping[i] = X11DRV_PALETTE_ToPhysical( NULL, RGB(rgb->rgbtRed,
+                    colorMapping[i] = X11DRV_PALETTE_LookupPixel(RGB(rgb->rgbtRed,
                                                                rgb->rgbtGreen,
                                                                rgb->rgbtBlue));
         }
     }
     else  /* DIB_PAL_COLORS */
     {
-        const WORD * index = (const WORD *)colorPtr;
+        const WORD * index = colorPtr;
 
         for (i = start; i < end; i++, index++)
             colorMapping[i] = X11DRV_PALETTE_ToPhysical( physDev, PALETTEINDEX(*index) );
@@ -423,7 +442,7 @@ static int *X11DRV_DIB_BuildColorMap( X11DRV_PDEVICE *physDev, WORD coloruse, WO
  */
 static int X11DRV_DIB_MapColor( int *physMap, int nPhysMap, int phys, int oldcol )
 {
-    unsigned int color;
+    int color;
 
     if ((oldcol < nPhysMap) && (physMap[oldcol] == phys))
         return oldcol;
@@ -503,7 +522,7 @@ static inline int X11DRV_DIB_CheckMask(int red_mask, int green_mask, int blue_ma
  */
 static void X11DRV_DIB_SetImageBits_1( int lines, const BYTE *srcbits,
                                 DWORD srcwidth, DWORD dstwidth, int left,
-                                int *colors, XImage *bmpImage, DWORD linebytes)
+                                int *colors, XImage *bmpImage, int linebytes)
 {
     int h, width;
     const BYTE* srcbyte;
@@ -562,7 +581,7 @@ static void X11DRV_DIB_SetImageBits_1( int lines, const BYTE *srcbits,
 static void X11DRV_DIB_GetImageBits_1( int lines, BYTE *dstbits,
 				       DWORD dstwidth, DWORD srcwidth,
 				       RGBQUAD *colors, PALETTEENTRY *srccolors,
-                                XImage *bmpImage, DWORD linebytes )
+                                       XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(dstwidth, srcwidth);
@@ -600,8 +619,11 @@ static void X11DRV_DIB_GetImageBits_1( int lines, BYTE *dstbits,
                     }
                 }
                 if ((width&7)!=0) {
-                    *dstbyte=dstval;
+                    *dstbyte++=dstval;
                 }
+                /* pad with 0 to DWORD alignment */
+                for (x = (x+7)&~7; x < ((width + 31) & ~31); x+=8)
+                    *dstbyte++ = 0;
                 dstbits += linebytes;
             }
         } else {
@@ -901,7 +923,7 @@ static void X11DRV_DIB_GetImageBits_1( int lines, BYTE *dstbits,
  */
 static void X11DRV_DIB_SetImageBits_4( int lines, const BYTE *srcbits,
                                 DWORD srcwidth, DWORD dstwidth, int left,
-                                int *colors, XImage *bmpImage, DWORD linebytes)
+                                int *colors, XImage *bmpImage, int linebytes)
 {
     int h, width;
     const BYTE* srcbyte;
@@ -944,7 +966,7 @@ static void X11DRV_DIB_SetImageBits_4( int lines, const BYTE *srcbits,
 static void X11DRV_DIB_GetImageBits_4( int lines, BYTE *dstbits,
 				       DWORD srcwidth, DWORD dstwidth,
 				       RGBQUAD *colors, PALETTEENTRY *srccolors,
-				       XImage *bmpImage, DWORD linebytes )
+				       XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
@@ -1420,7 +1442,7 @@ static void X11DRV_DIB_SetImageBits_RLE4( int lines, const BYTE *bits,
 static void X11DRV_DIB_SetImageBits_8( int lines, const BYTE *srcbits,
 				DWORD srcwidth, DWORD dstwidth, int left,
                                 const int *colors, XImage *bmpImage,
-				DWORD linebytes )
+				int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
@@ -1543,7 +1565,7 @@ static void X11DRV_DIB_SetImageBits_8( int lines, const BYTE *srcbits,
 static void X11DRV_DIB_GetImageBits_8( int lines, BYTE *dstbits,
 				       DWORD srcwidth, DWORD dstwidth,
 				       RGBQUAD *colors, PALETTEENTRY *srccolors,
-				       XImage *bmpImage, DWORD linebytes )
+				       XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
@@ -1916,9 +1938,9 @@ static void X11DRV_DIB_SetImageBits_RLE8( int lines, const BYTE *bits,
  * SetDIBits for a 16-bit deep DIB.
  */
 static void X11DRV_DIB_SetImageBits_16( int lines, const BYTE *srcbits,
-                                 DWORD srcwidth, DWORD dstwidth, int left,
-                                       X11DRV_PDEVICE *physDev, DWORD rSrc, DWORD gSrc, DWORD bSrc,
-                                       XImage *bmpImage, DWORD linebytes )
+                                        DWORD srcwidth, DWORD dstwidth, int left,
+                                        X11DRV_PDEVICE *physDev, DWORD rSrc, DWORD gSrc, DWORD bSrc,
+                                        XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
@@ -2179,17 +2201,15 @@ static void X11DRV_DIB_SetImageBits_16( int lines, const BYTE *srcbits,
  *
  * GetDIBits for an 16-bit deep DIB.
  */
-static void X11DRV_DIB_GetImageBits_16( int lines, BYTE *dstbits,
+static void X11DRV_DIB_GetImageBits_16( X11DRV_PDEVICE *physDev, int lines, BYTE *dstbits,
 					DWORD dstwidth, DWORD srcwidth,
 					PALETTEENTRY *srccolors,
 					DWORD rDst, DWORD gDst, DWORD bDst,
-					XImage *bmpImage, DWORD dibpitch )
+					XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
     const dib_conversions *convs = (bmpImage->byte_order == LSBFirst) ? &dib_normal : &dib_src_byteswap;
-
-    DWORD linebytes = dibpitch;
 
     if (lines < 0 )
     {
@@ -2489,7 +2509,7 @@ static void X11DRV_DIB_GetImageBits_16( int lines, BYTE *dstbits,
                 for (x = 0; x < width; x++) {
                     COLORREF srcval;
                     DWORD dstval;
-                    srcval=X11DRV_PALETTE_ToLogical(XGetPixel(bmpImage, x, h));
+                    srcval=X11DRV_PALETTE_ToLogical(physDev, XGetPixel(bmpImage, x, h));
                     dstval=((GetRValue(srcval) << rShift) & rDst) |
                            ((GetGValue(srcval) << gShift) & gDst) |
                            ((GetBValue(srcval) << bShift) & bDst);
@@ -2674,7 +2694,7 @@ static void X11DRV_DIB_SetImageBits_24( int lines, const BYTE *srcbits,
  *
  * GetDIBits for an 24-bit deep DIB.
  */
-static void X11DRV_DIB_GetImageBits_24( int lines, BYTE *dstbits,
+static void X11DRV_DIB_GetImageBits_24( X11DRV_PDEVICE *physDev, int lines, BYTE *dstbits,
 					DWORD dstwidth, DWORD srcwidth,
 					PALETTEENTRY *srccolors,
                                         DWORD rDst, DWORD gDst, DWORD bDst,
@@ -2871,7 +2891,7 @@ static void X11DRV_DIB_GetImageBits_24( int lines, BYTE *dstbits,
                 dstbyte=dstbits;
                 for (x = 0; x < width; x++) {
                     COLORREF srcval=X11DRV_PALETTE_ToLogical
-                        (XGetPixel( bmpImage, x, h ));
+                        (physDev, XGetPixel( bmpImage, x, h ));
                     dstbyte[0]=GetBValue(srcval);
                     dstbyte[1]=GetGValue(srcval);
                     dstbyte[2]=GetRValue(srcval);
@@ -2898,7 +2918,6 @@ static void X11DRV_DIB_SetImageBits_32(int lines, const BYTE *srcbits,
                                        DWORD linebytes)
 {
     DWORD x;
-    const DWORD *ptr;
     int h, width = min(srcwidth, dstwidth);
     const dib_conversions *convs = (bmpImage->byte_order == LSBFirst) ? &dib_normal : &dib_dst_byteswap;
 
@@ -2908,8 +2927,6 @@ static void X11DRV_DIB_SetImageBits_32(int lines, const BYTE *srcbits,
        srcbits = srcbits + ( linebytes * (lines-1) );
        linebytes = -linebytes;
     }
-
-    ptr = (const DWORD *) srcbits + left;
 
     switch (bmpImage->depth)
     {
@@ -3159,11 +3176,11 @@ static void X11DRV_DIB_SetImageBits_32(int lines, const BYTE *srcbits,
  *
  * GetDIBits for an 32-bit deep DIB.
  */
-static void X11DRV_DIB_GetImageBits_32( int lines, BYTE *dstbits,
+static void X11DRV_DIB_GetImageBits_32( X11DRV_PDEVICE *physDev, int lines, BYTE *dstbits,
 					DWORD dstwidth, DWORD srcwidth,
 					PALETTEENTRY *srccolors,
 					DWORD rDst, DWORD gDst, DWORD bDst,
-					XImage *bmpImage, DWORD linebytes )
+					XImage *bmpImage, int linebytes )
 {
     DWORD x;
     int h, width = min(srcwidth, dstwidth);
@@ -3458,7 +3475,7 @@ static void X11DRV_DIB_GetImageBits_32( int lines, BYTE *dstbits,
                 dstpixel=(DWORD*)dstbits;
                 for (x = 0; x < width; x++) {
                     COLORREF srcval;
-                    srcval=X11DRV_PALETTE_ToLogical(XGetPixel(bmpImage, x, h));
+                    srcval=X11DRV_PALETTE_ToLogical(physDev, XGetPixel(bmpImage, x, h));
                     *dstpixel++=(GetRValue(srcval) << rShift) |
                                 (GetGValue(srcval) << gShift) |
                                 (GetBValue(srcval) << bShift);
@@ -3514,6 +3531,7 @@ static void X11DRV_DIB_SetImageBits_GetSubImage(
 static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
 {
     int lines = descr->lines >= 0 ? descr->lines : -descr->lines;
+    void *old_data = NULL;
     XImage *bmpImage;
 
     wine_tsx11_lock();
@@ -3522,12 +3540,12 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
     else {
         bmpImage = XCreateImage( gdi_display, visual, descr->depth, ZPixmap, 0, NULL,
 				 descr->infoWidth, lines, 32, 0 );
-	bmpImage->data = calloc( lines, bmpImage->bytes_per_line );
+	bmpImage->data = HeapAlloc( GetProcessHeap(), 0, lines * bmpImage->bytes_per_line );
         if(bmpImage->data == NULL) {
             ERR("Out of memory!\n");
             XDestroyImage( bmpImage );
             wine_tsx11_unlock();
-            return lines;
+            return 0;
         }
     }
     wine_tsx11_unlock();
@@ -3537,6 +3555,22 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
     TRACE("Bmp: depth=%d/%d r=%lx g=%lx b=%lx\n",
           bmpImage->depth,bmpImage->bits_per_pixel,
           bmpImage->red_mask,bmpImage->green_mask,bmpImage->blue_mask);
+
+#ifdef HAVE_LIBXXSHM
+    if (descr->shm_mode == X11DRV_SHM_PIXMAP
+            && descr->xSrc == 0 && descr->ySrc == 0
+            && descr->xDest == 0 && descr->yDest == 0)
+    {
+        TRACE("Using the shared pixmap data.\n");
+
+        wine_tsx11_lock();
+        XSync( gdi_display, False );
+        wine_tsx11_unlock();
+
+        old_data = descr->image->data;
+        descr->image->data = descr->physBitmap->shminfo.shmaddr;
+    }
+#endif
 
       /* Transfer the pixels */
     __TRY
@@ -3617,7 +3651,13 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
     if (lines)
     {
 #ifdef HAVE_LIBXXSHM
-        if (descr->image && descr->useShm)
+        if (descr->shm_mode == X11DRV_SHM_PIXMAP
+                && descr->xSrc == 0 && descr->ySrc == 0
+                && descr->xDest == 0 && descr->yDest == 0)
+        {
+            XSync( gdi_display, False );
+        }
+        else if (descr->shm_mode == X11DRV_SHM_IMAGE && descr->image)
         {
             XShmPutImage( gdi_display, descr->drawable, descr->gc, bmpImage,
                           descr->xSrc, descr->ySrc, descr->xDest, descr->yDest,
@@ -3626,11 +3666,16 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
         }
         else
 #endif
+        {
             XPutImage( gdi_display, descr->drawable, descr->gc, bmpImage,
                        descr->xSrc, descr->ySrc, descr->xDest, descr->yDest,
                        descr->width, descr->height );
+        }
     }
-    if (!descr->image) XDestroyImage( bmpImage );
+
+    if (old_data) descr->image->data = old_data;
+
+    if (!descr->image) X11DRV_DIB_DestroyXImage( bmpImage );
     wine_tsx11_unlock();
     return lines;
 }
@@ -3643,6 +3688,7 @@ static int X11DRV_DIB_SetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
 static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
 {
     int lines = descr->lines >= 0 ? descr->lines : -descr->lines;
+    void *old_data = NULL;
     XImage *bmpImage;
 
     wine_tsx11_lock();
@@ -3651,12 +3697,12 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
     else {
         bmpImage = XCreateImage( gdi_display, visual, descr->depth, ZPixmap, 0, NULL,
 				 descr->infoWidth, lines, 32, 0 );
-	bmpImage->data = calloc( lines, bmpImage->bytes_per_line );
+	bmpImage->data = HeapAlloc( GetProcessHeap(), 0, lines * bmpImage->bytes_per_line );
         if(bmpImage->data == NULL) {
             ERR("Out of memory!\n");
             XDestroyImage( bmpImage );
             wine_tsx11_unlock();
-            return lines;
+            return 0;
         }
     }
 
@@ -3664,8 +3710,20 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
 
     /* We must not call XShmGetImage() with a bitmap which is bigger than the available area.
        If we do, XShmGetImage() will fail (X exception), as it checks for this internally. */
-    if((descr->image && descr->useShm) && (bmpImage->width <= (descr->width - descr->xSrc))
-      && (bmpImage->height <= (descr->height - descr->ySrc)))
+    if (descr->shm_mode == X11DRV_SHM_PIXMAP && descr->image
+            && descr->xSrc == 0 && descr->ySrc == 0
+            && descr->xDest == 0 && descr->yDest == 0
+            && bmpImage->width <= (descr->width - descr->xSrc)
+            && bmpImage->height <= (descr->height - descr->ySrc))
+    {
+        XSync( gdi_display, False );
+        old_data = bmpImage->data;
+        bmpImage->data = descr->physBitmap->shminfo.shmaddr;
+        TRACE("Using shared pixmap data.\n");
+    }
+    else if (descr->shm_mode == X11DRV_SHM_IMAGE && descr->image
+            && bmpImage->width <= (descr->width - descr->xSrc)
+            && bmpImage->height <= (descr->height - descr->ySrc))
     {
         int saveRed, saveGreen, saveBlue;
 
@@ -3740,7 +3798,7 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
         break;
     case 15:
     case 16:
-       X11DRV_DIB_GetImageBits_16( descr->lines, (LPVOID)descr->bits,
+       X11DRV_DIB_GetImageBits_16( descr->physDev, descr->lines, (LPVOID)descr->bits,
 				   descr->infoWidth,descr->width,
 				   descr->palentry,
 				   descr->rMask, descr->gMask, descr->bMask,
@@ -3748,7 +3806,7 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
        break;
 
     case 24:
-       X11DRV_DIB_GetImageBits_24( descr->lines, (LPVOID)descr->bits,
+       X11DRV_DIB_GetImageBits_24( descr->physDev, descr->lines, (LPVOID)descr->bits,
 				   descr->infoWidth,descr->width,
 				   descr->palentry,
 				   descr->rMask, descr->gMask, descr->bMask,
@@ -3756,7 +3814,7 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
        break;
 
     case 32:
-       X11DRV_DIB_GetImageBits_32( descr->lines, (LPVOID)descr->bits,
+       X11DRV_DIB_GetImageBits_32( descr->physDev, descr->lines, (LPVOID)descr->bits,
 				   descr->infoWidth, descr->width,
 				   descr->palentry,
                                    descr->rMask, descr->gMask, descr->bMask,
@@ -3768,12 +3826,8 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
         break;
     }
 
-    if (!descr->image)
-    {
-        wine_tsx11_lock();
-        XDestroyImage( bmpImage );
-        wine_tsx11_unlock();
-    }
+    if (old_data) bmpImage->data = old_data;
+    if (!descr->image) X11DRV_DIB_DestroyXImage( bmpImage );
     return lines;
 }
 
@@ -3781,10 +3835,10 @@ static int X11DRV_DIB_GetImageBits( const X11DRV_DIB_IMAGEBITS_DESCR *descr )
  *		X11DRV_SetDIBitsToDevice
  *
  */
-INT X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWORD cx,
-				DWORD cy, INT xSrc, INT ySrc,
-				UINT startscan, UINT lines, LPCVOID bits,
-				const BITMAPINFO *info, UINT coloruse )
+INT CDECL X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWORD cx,
+                                    DWORD cy, INT xSrc, INT ySrc,
+                                    UINT startscan, UINT lines, LPCVOID bits,
+                                    const BITMAPINFO *info, UINT coloruse )
 {
     X11DRV_DIB_IMAGEBITS_DESCR descr;
     INT result;
@@ -3875,23 +3929,24 @@ INT X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWO
                break;
     }
 
-    descr.physDev   = physDev;
-    descr.bits      = bits;
-    descr.image     = NULL;
-    descr.palentry  = NULL;
-    descr.lines     = top_down ? -lines : lines;
-    descr.infoWidth = width;
-    descr.depth     = physDev->depth;
-    descr.drawable  = physDev->drawable;
-    descr.gc        = physDev->gc;
-    descr.xSrc      = xSrc;
-    descr.ySrc      = ySrc;
-    descr.xDest     = physDev->dc_rect.left + pt.x;
-    descr.yDest     = physDev->dc_rect.top + pt.y;
-    descr.width     = cx;
-    descr.height    = cy;
-    descr.useShm    = FALSE;
-    descr.dibpitch  = ((width * descr.infoBpp + 31) &~31) / 8;
+    descr.physDev    = physDev;
+    descr.bits       = bits;
+    descr.image      = NULL;
+    descr.palentry   = NULL;
+    descr.lines      = top_down ? -lines : lines;
+    descr.infoWidth  = width;
+    descr.depth      = physDev->depth;
+    descr.drawable   = physDev->drawable;
+    descr.gc         = physDev->gc;
+    descr.xSrc       = xSrc;
+    descr.ySrc       = ySrc;
+    descr.xDest      = physDev->dc_rect.left + pt.x;
+    descr.yDest      = physDev->dc_rect.top + pt.y;
+    descr.width      = cx;
+    descr.height     = cy;
+    descr.shm_mode   = X11DRV_SHM_NONE;
+    descr.dibpitch   = ((width * descr.infoBpp + 31) &~31) / 8;
+    descr.physBitmap = NULL;
 
     result = X11DRV_DIB_SetImageBits( &descr );
 
@@ -3907,12 +3962,12 @@ INT X11DRV_SetDIBitsToDevice( X11DRV_PDEVICE *physDev, INT xDest, INT yDest, DWO
 /***********************************************************************
  *           SetDIBits   (X11DRV.@)
  */
-INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
-                      UINT lines, LPCVOID bits, const BITMAPINFO *info, UINT coloruse )
+INT CDECL X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
+                            UINT lines, LPCVOID bits, const BITMAPINFO *info, UINT coloruse )
 {
   X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
   X11DRV_DIB_IMAGEBITS_DESCR descr;
-  BITMAP bitmap;
+  DIBSECTION ds;
   LONG width, height, tmpheight;
   INT result;
 
@@ -3929,7 +3984,7 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
   if (!lines || (startscan >= height))
       return 0;
 
-  if (!GetObjectW( hbitmap, sizeof(bitmap), &bitmap )) return 0;
+  if (!GetObjectW( hbitmap, sizeof(ds), &ds )) return 0;
 
   if (startscan + lines > height) lines = height - startscan;
 
@@ -3964,22 +4019,23 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
        default: break;
   }
 
-  descr.bits      = bits;
-  descr.image     = NULL;
-  descr.palentry  = NULL;
-  descr.infoWidth = width;
-  descr.lines     = tmpheight >= 0 ? lines : -lines;
-  descr.depth     = physBitmap->pixmap_depth;
-  descr.drawable  = physBitmap->pixmap;
-  descr.gc        = BITMAP_GC(physBitmap);
-  descr.xSrc      = 0;
-  descr.ySrc      = 0;
-  descr.xDest     = 0;
-  descr.yDest     = height - startscan - lines;
-  descr.width     = bitmap.bmWidth;
-  descr.height    = lines;
-  descr.useShm    = FALSE;
-  descr.dibpitch  = ((descr.infoWidth * descr.infoBpp + 31) &~31) / 8;
+  descr.bits       = bits;
+  descr.image      = NULL;
+  descr.palentry   = NULL;
+  descr.infoWidth  = width;
+  descr.lines      = tmpheight >= 0 ? lines : -lines;
+  descr.depth      = physBitmap->pixmap_depth;
+  descr.drawable   = physBitmap->pixmap;
+  descr.gc         = get_bitmap_gc(physBitmap->pixmap_depth);
+  descr.xSrc       = 0;
+  descr.ySrc       = 0;
+  descr.xDest      = 0;
+  descr.yDest      = height - startscan - lines;
+  descr.width      = ds.dsBm.bmWidth;
+  descr.height     = lines;
+  descr.shm_mode   = X11DRV_SHM_NONE;
+  descr.dibpitch   = ((descr.infoWidth * descr.infoBpp + 31) &~31) / 8;
+  descr.physBitmap = NULL;
   X11DRV_DIB_Lock( physBitmap, DIB_Status_GdiMod );
   result = X11DRV_DIB_SetImageBits( &descr );
 
@@ -3988,27 +4044,27 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
    * cheap - saves a round trip to the X server */
   if (descr.compression == BI_RGB &&
       coloruse == DIB_RGB_COLORS &&
-      descr.infoBpp == bitmap.bmBitsPixel &&
+      descr.infoBpp == ds.dsBm.bmBitsPixel &&
       physBitmap->base && physBitmap->size < 65536)
   {
-      unsigned int srcwidthb = bitmap.bmWidthBytes;
+      unsigned int srcwidthb = ds.dsBm.bmWidthBytes;
       int dstwidthb = X11DRV_DIB_GetDIBWidthBytes( width, descr.infoBpp );
       LPBYTE dbits = physBitmap->base, sbits = (LPBYTE)bits + (startscan * srcwidthb);
       int widthb;
       UINT y;
 
       TRACE("syncing compatible set bits to app bits\n");
-      if ((tmpheight < 0) ^ (bitmap.bmHeight < 0))
+      if ((tmpheight < 0) ^ (ds.dsBmih.biHeight < 0))
       {
-          dbits = (LPBYTE)bits + (dstwidthb * (lines-1));
+          dbits += dstwidthb * (lines-1);
           dstwidthb = -dstwidthb;
       }
-	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );
+      X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READWRITE );
       widthb = min(srcwidthb, abs(dstwidthb));
       for (y = 0; y < lines; y++, dbits += dstwidthb, sbits += srcwidthb)
           memcpy(dbits, sbits, widthb);
-	  X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READONLY );
-	  physBitmap->status = DIB_Status_InSync;
+      X11DRV_DIB_DoProtectDIBSection( physBitmap, PAGE_READONLY );
+      physBitmap->status = DIB_Status_InSync;
   }
   X11DRV_DIB_Unlock( physBitmap, TRUE );
 
@@ -4020,8 +4076,8 @@ INT X11DRV_SetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan,
 /***********************************************************************
  *           GetDIBits   (X11DRV.@)
  */
-INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, UINT lines,
-                      LPVOID bits, BITMAPINFO *info, UINT coloruse )
+INT CDECL X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, UINT lines,
+                            LPVOID bits, BITMAPINFO *info, UINT coloruse )
 {
   X_PHYSBITMAP *physBitmap = X11DRV_get_phys_bitmap( hbitmap );
   DIBSECTION dib;
@@ -4033,13 +4089,24 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
   int bitmap_type;
   BOOL core_header;
   void* colorPtr;
-
-  GetPaletteEntries( GetCurrentObject( physDev->hdc, OBJ_PAL ), 0, 256, palette );
+  static const PALETTEENTRY peBlack = {0,0,0,0};
+  static const PALETTEENTRY peWhite = {255,255,255,0};
 
   if (!physBitmap) return 0;
   if (!(obj_size = GetObjectW( hbitmap, sizeof(dib), &dib ))) return 0;
 
   bitmap_type = DIB_GetBitmapInfo( (BITMAPINFOHEADER*)info, &width, &tempHeight, &descr.infoBpp, &descr.compression);
+
+  if (physBitmap->pixmap_depth > 1)
+  {
+    GetPaletteEntries( GetCurrentObject( physDev->hdc, OBJ_PAL ), 0, 256, palette );
+  }
+  else
+  {
+    palette[0] = peBlack;
+    palette[1] = peWhite;
+  }
+
   if (bitmap_type == -1)
   {
       ERR("Invalid bitmap\n");
@@ -4081,10 +4148,10 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
               int num_colors = 1 << descr.infoBpp, i;
               RGBQUAD *rgb;
               COLORREF colref;
-              WORD *index = (WORD*)colorPtr;
+              WORD *index = colorPtr;
               descr.colorMap = rgb = HeapAlloc(GetProcessHeap(), 0, num_colors * sizeof(RGBQUAD));
               for(i = 0; i < num_colors; i++, rgb++, index++) {
-                  colref = X11DRV_PALETTE_ToLogical(X11DRV_PALETTE_ToPhysical(physDev, PALETTEINDEX(*index)));
+                  colref = X11DRV_PALETTE_ToLogical(physDev, X11DRV_PALETTE_ToPhysical(physDev, PALETTEINDEX(*index)));
                   rgb->rgbRed = GetRValue(colref);
                   rgb->rgbGreen = GetGValue(colref);
                   rgb->rgbBlue = GetBValue(colref);
@@ -4106,21 +4173,22 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
           break;
   }
 
-  descr.physDev   = physDev;
-  descr.palentry  = palette;
-  descr.bits      = bits;
-  descr.image     = physBitmap->image;
-  descr.infoWidth = width;
-  descr.lines     = lines;
-  descr.depth     = physBitmap->pixmap_depth;
-  descr.drawable  = physBitmap->pixmap;
-  descr.gc        = BITMAP_GC(physBitmap);
-  descr.width     = dib.dsBm.bmWidth;
-  descr.height    = dib.dsBm.bmHeight;
-  descr.xDest     = 0;
-  descr.yDest     = 0;
-  descr.xSrc      = 0;
-  descr.sizeImage = core_header ? 0 : info->bmiHeader.biSizeImage;
+  descr.physDev    = physDev;
+  descr.palentry   = palette;
+  descr.bits       = bits;
+  descr.image      = physBitmap->image;
+  descr.infoWidth  = width;
+  descr.lines      = lines;
+  descr.depth      = physBitmap->pixmap_depth;
+  descr.drawable   = physBitmap->pixmap;
+  descr.gc         = get_bitmap_gc(physBitmap->pixmap_depth);
+  descr.width      = dib.dsBm.bmWidth;
+  descr.height     = dib.dsBm.bmHeight;
+  descr.xDest      = 0;
+  descr.yDest      = 0;
+  descr.xSrc       = 0;
+  descr.sizeImage  = core_header ? 0 : info->bmiHeader.biSizeImage;
+  descr.physBitmap = physBitmap;
 
   if (descr.lines > 0)
   {
@@ -4130,11 +4198,7 @@ INT X11DRV_GetDIBits( X11DRV_PDEVICE *physDev, HBITMAP hbitmap, UINT startscan, 
   {
      descr.ySrc = startscan;
   }
-#ifdef HAVE_LIBXXSHM
-  descr.useShm = (obj_size == sizeof(DIBSECTION)) && (physBitmap->shminfo.shmid != -1);
-#else
-  descr.useShm = FALSE;
-#endif
+  descr.shm_mode = physBitmap->shm_mode;
   descr.dibpitch = (obj_size == sizeof(DIBSECTION)) ? dib.dsBm.bmWidthBytes
 		       : (((descr.infoWidth * descr.infoBpp + 31) &~31) / 8);
 
@@ -4181,17 +4245,18 @@ static void X11DRV_DIB_DoCopyDIBSection(X_PHYSBITMAP *physBitmap, BOOL toDIB,
 
   if (!GetObjectW( physBitmap->hbitmap, sizeof(dibSection), &dibSection )) return;
 
-  descr.physDev   = NULL;
-  descr.palentry  = NULL;
-  descr.infoWidth = dibSection.dsBmih.biWidth;
-  descr.infoBpp   = dibSection.dsBmih.biBitCount;
-  descr.lines     = dibSection.dsBmih.biHeight;
-  descr.image     = physBitmap->image;
-  descr.colorMap  = colorMap;
-  descr.nColorMap = nColorMap;
-  descr.bits      = dibSection.dsBm.bmBits;
-  descr.depth     = physBitmap->pixmap_depth;
+  descr.physDev     = NULL;
+  descr.palentry    = NULL;
+  descr.infoWidth   = dibSection.dsBmih.biWidth;
+  descr.infoBpp     = dibSection.dsBmih.biBitCount;
+  descr.lines       = dibSection.dsBmih.biHeight;
+  descr.image       = physBitmap->image;
+  descr.colorMap    = colorMap;
+  descr.nColorMap   = nColorMap;
+  descr.bits        = dibSection.dsBm.bmBits;
+  descr.depth       = physBitmap->pixmap_depth;
   descr.compression = dibSection.dsBmih.biCompression;
+  descr.physBitmap  = physBitmap;
 
   if(descr.infoBpp == 1)
       descr.colorMap = (void*)identity;
@@ -4229,10 +4294,12 @@ static void X11DRV_DIB_DoCopyDIBSection(X_PHYSBITMAP *physBitmap, BOOL toDIB,
   descr.height    = height;
   descr.sizeImage = 0;
 
+  descr.shm_mode = physBitmap->shm_mode;
 #ifdef HAVE_LIBXXSHM
-  descr.useShm = (physBitmap->shminfo.shmid != -1);
-#else
-  descr.useShm = FALSE;
+  if (physBitmap->shm_mode == X11DRV_SHM_PIXMAP && physBitmap->pixmap != dest)
+  {
+    descr.shm_mode = X11DRV_SHM_NONE;
+  }
 #endif
   descr.dibpitch = dibSection.dsBm.bmWidthBytes;
 
@@ -4293,7 +4360,7 @@ void X11DRV_DIB_CopyDIBSection(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physD
         freeColorMap = FALSE;
       } else {
 	  const BITMAPINFO* info = (BITMAPINFO*)&dib.dsBmih;
-	  int i;
+	  unsigned int i;
 
 	  nColorMap = X11DRV_DIB_GetColorCount(info);
 	  x11ColorMap = HeapAlloc(GetProcessHeap(), 0, nColorMap * sizeof(int));
@@ -4329,7 +4396,7 @@ static void X11DRV_DIB_DoUpdateDIBSection(X_PHYSBITMAP *physBitmap, BOOL toDIB)
     GetObjectW( physBitmap->hbitmap, sizeof(bitmap), &bitmap );
     X11DRV_DIB_DoCopyDIBSection(physBitmap, toDIB,
                                 physBitmap->colorMap, physBitmap->nColorMap,
-                                physBitmap->pixmap, BITMAP_GC(physBitmap),
+                                physBitmap->pixmap, get_bitmap_gc(physBitmap->pixmap_depth),
                                 0, 0, 0, 0, bitmap.bmWidth, bitmap.bmHeight);
 }
 
@@ -4621,7 +4688,7 @@ static XImage *X11DRV_XShmCreateImage( int width, int height, int bpp,
                                   IPC_CREAT|0700);
         if( shminfo->shmid != -1 )
         {
-            shminfo->shmaddr = image->data = shmat(shminfo->shmid, 0, 0);
+            shminfo->shmaddr = shmat( shminfo->shmid, 0, 0 );
             if( shminfo->shmaddr != (char*)-1 )
             {
                 BOOL ok;
@@ -4654,11 +4721,15 @@ static XImage *X11DRV_XShmCreateImage( int width, int height, int bpp,
 /***********************************************************************
  *           X11DRV_CreateDIBSection   (X11DRV.@)
  */
-HBITMAP X11DRV_CreateDIBSection( X11DRV_PDEVICE *physDev, HBITMAP hbitmap,
-                                 const BITMAPINFO *bmi, UINT usage )
+HBITMAP CDECL X11DRV_CreateDIBSection( X11DRV_PDEVICE *physDev, HBITMAP hbitmap,
+                                       const BITMAPINFO *bmi, UINT usage )
 {
     X_PHYSBITMAP *physBitmap;
     DIBSECTION dib;
+#ifdef HAVE_LIBXXSHM
+    int major, minor;
+    Bool pixmaps;
+#endif
 
     if (!(physBitmap = X11DRV_init_phys_bitmap( hbitmap ))) return 0;
     physBitmap->status = DIB_Status_None;
@@ -4675,17 +4746,58 @@ HBITMAP X11DRV_CreateDIBSection( X11DRV_PDEVICE *physDev, HBITMAP hbitmap,
 
     /* create pixmap and X image */
     wine_tsx11_lock();
-    physBitmap->pixmap_depth = (dib.dsBm.bmBitsPixel == 1) ? 1 : screen_depth;
-    physBitmap->pixmap = XCreatePixmap( gdi_display, root_window, dib.dsBm.bmWidth,
-                                        dib.dsBm.bmHeight, physBitmap->pixmap_depth );
+    if(dib.dsBm.bmBitsPixel == 1)
+    {
+        physBitmap->pixmap_depth = 1;
+    }
+    else
+    {
+        physBitmap->pixmap_depth = screen_depth;
+        physBitmap->pixmap_color_shifts = X11DRV_PALETTE_default_shifts;
+    }
 #ifdef HAVE_LIBXXSHM
     physBitmap->shminfo.shmid = -1;
-    if (!XShmQueryExtension(gdi_display) ||
-        !(physBitmap->image = X11DRV_XShmCreateImage( dib.dsBm.bmWidth, dib.dsBm.bmHeight,
-                                                      physBitmap->pixmap_depth, &physBitmap->shminfo )) )
+
+    if (XShmQueryVersion( gdi_display, &major, &minor, &pixmaps )
+            && (physBitmap->image = X11DRV_XShmCreateImage( dib.dsBm.bmWidth, dib.dsBm.bmHeight,
+                                                            physBitmap->pixmap_depth, &physBitmap->shminfo )))
+    {
+        if (pixmaps)
+        {
+            physBitmap->shm_mode = X11DRV_SHM_PIXMAP;
+            physBitmap->image->data = HeapAlloc( GetProcessHeap(), 0,
+                    dib.dsBm.bmHeight * physBitmap->image->bytes_per_line );
+        }
+        else
+        {
+            physBitmap->shm_mode = X11DRV_SHM_IMAGE;
+            physBitmap->image->data = physBitmap->shminfo.shmaddr;
+        }
+    }
+    else
 #endif
+    {
+        physBitmap->shm_mode = X11DRV_SHM_NONE;
         physBitmap->image = X11DRV_DIB_CreateXImage( dib.dsBm.bmWidth, dib.dsBm.bmHeight,
                                                      physBitmap->pixmap_depth );
+    }
+
+#ifdef HAVE_LIBXXSHM
+    if (physBitmap->shm_mode == X11DRV_SHM_PIXMAP)
+    {
+        TRACE("Creating shared pixmap for bmp %p.\n", physBitmap->hbitmap);
+        physBitmap->pixmap = XShmCreatePixmap( gdi_display, root_window,
+                                               physBitmap->shminfo.shmaddr, &physBitmap->shminfo,
+                                               dib.dsBm.bmWidth, dib.dsBm.bmHeight,
+                                               physBitmap->pixmap_depth );
+    }
+    else
+#endif
+    {
+        physBitmap->pixmap = XCreatePixmap( gdi_display, root_window, dib.dsBm.bmWidth,
+                                            dib.dsBm.bmHeight, physBitmap->pixmap_depth );
+    }
+
     wine_tsx11_unlock();
     if (!physBitmap->pixmap || !physBitmap->image) return 0;
 
@@ -4736,13 +4848,15 @@ void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib)
       if (physBitmap->shminfo.shmid != -1)
       {
           XShmDetach( gdi_display, &(physBitmap->shminfo) );
-          XDestroyImage( physBitmap->image );
+          if (physBitmap->shm_mode == X11DRV_SHM_PIXMAP) X11DRV_DIB_DestroyXImage( physBitmap->image );
+          else XDestroyImage( physBitmap->image );
           shmdt( physBitmap->shminfo.shmaddr );
           physBitmap->shminfo.shmid = -1;
+          physBitmap->shm_mode = X11DRV_SHM_NONE;
       }
       else
 #endif
-          XDestroyImage( physBitmap->image );
+          X11DRV_DIB_DestroyXImage( physBitmap->image );
       wine_tsx11_unlock();
   }
 
@@ -4754,7 +4868,7 @@ void X11DRV_DIB_DeleteDIBSection(X_PHYSBITMAP *physBitmap, DIBSECTION *dib)
 /***********************************************************************
  *           SetDIBColorTable   (X11DRV.@)
  */
-UINT X11DRV_SetDIBColorTable( X11DRV_PDEVICE *physDev, UINT start, UINT count, const RGBQUAD *colors )
+UINT CDECL X11DRV_SetDIBColorTable( X11DRV_PDEVICE *physDev, UINT start, UINT count, const RGBQUAD *colors )
 {
     DIBSECTION dib;
     UINT ret = 0;
@@ -4874,7 +4988,8 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
 {
     HDC hdcMem;
     X_PHYSBITMAP *physBitmap;
-    HBITMAP hBmp = 0, old;
+    Pixmap orig_pixmap;
+    HBITMAP hBmp = 0;
     HGLOBAL hPackedDIB = 0;
     Window root;
     int x,y;               /* Unused */
@@ -4899,17 +5014,14 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
 
     /* force bitmap to be owned by a screen DC */
     hdcMem = CreateCompatibleDC( hdc );
-    old = SelectObject( hdcMem, hBmp );
+    SelectObject( hdcMem, SelectObject( hdcMem, hBmp ));
+    DeleteDC( hdcMem );
 
     physBitmap = X11DRV_get_phys_bitmap( hBmp );
 
-    wine_tsx11_lock();
-    if (physBitmap->pixmap) XFreePixmap( gdi_display, physBitmap->pixmap );
+    /* swap the new pixmap in */
+    orig_pixmap = physBitmap->pixmap;
     physBitmap->pixmap = pixmap;
-    wine_tsx11_unlock();
-
-    SelectObject( hdcMem, old );
-    DeleteDC( hdcMem );
 
     /*
      * Create a packed DIB from the Pixmap wrapper bitmap created above.
@@ -4918,9 +5030,8 @@ HGLOBAL X11DRV_DIB_CreateDIBFromPixmap(Pixmap pixmap, HDC hdc)
      */
     hPackedDIB = X11DRV_DIB_CreateDIBFromBitmap(hdc, hBmp);
 
-    /* We can now get rid of the HBITMAP wrapper we created earlier.
-     * Note: Simply calling DeleteObject will free the embedded Pixmap as well.
-     */
+    /* we can now get rid of the HBITMAP and its original pixmap */
+    physBitmap->pixmap = orig_pixmap;
     DeleteObject(hBmp);
 
     TRACE("\tReturning packed DIB %p\n", hPackedDIB);
@@ -4944,7 +5055,7 @@ Pixmap X11DRV_DIB_CreatePixmapFromDIB( HGLOBAL hPackedDIB, HDC hdc )
 
     pbmi = GlobalLock(hPackedDIB);
     hBmp = CreateDIBitmap(hdc, &pbmi->bmiHeader, CBM_INIT,
-                          (LPBYTE)pbmi + X11DRV_DIB_BitmapInfoSize( pbmi, DIB_RGB_COLORS ),
+                          (LPBYTE)pbmi + bitmap_info_size( pbmi, DIB_RGB_COLORS ),
                           pbmi, DIB_RGB_COLORS);
     GlobalUnlock(hPackedDIB);
 
@@ -4956,6 +5067,6 @@ Pixmap X11DRV_DIB_CreatePixmapFromDIB( HGLOBAL hPackedDIB, HDC hdc )
     /* Delete the DDB we created earlier now that we have stolen its pixmap */
     DeleteObject(hBmp);
 
-    TRACE("Returning Pixmap %ld\n", pixmap);
+    TRACE("Returning Pixmap %lx\n", pixmap);
     return pixmap;
 }

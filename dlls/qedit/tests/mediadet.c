@@ -22,6 +22,7 @@
 
 #define COBJMACROS
 
+#include "initguid.h"
 #include "ole2.h"
 #include "vfwmsgs.h"
 #include "uuids.h"
@@ -43,7 +44,7 @@ static BOOL unpack_avi_file(int id, WCHAR name[MAX_PATH])
     DWORD size, written;
     HANDLE fh;
 
-    res = FindResourceW(NULL, (LPWSTR) id, (LPWSTR) AVI_RES_TYPE);
+    res = FindResource(NULL, MAKEINTRESOURCE(id), MAKEINTRESOURCE(AVI_RES_TYPE));
     if (!res)
         return FALSE;
 
@@ -93,8 +94,8 @@ static void test_mediadet(void)
     HRESULT hr;
     IMediaDet *pM = NULL;
     BSTR filename = NULL;
-    long nstrms = 0;
-    long strm;
+    LONG nstrms = 0;
+    LONG strm;
     AM_MEDIA_TYPE mt;
     double fps;
     int flags;

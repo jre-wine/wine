@@ -318,7 +318,7 @@ void WCUSER_DumpTextMetric(const TEXTMETRIC* tm, DWORD ft)
  *
  *
  */
-BOOL WCUSER_AreFontsEqual(const struct config_data* config, const LOGFONT* lf)
+static BOOL WCUSER_AreFontsEqual(const struct config_data* config, const LOGFONT* lf)
 {
     return lf->lfHeight == config->cell_height &&
         lf->lfWeight == config->font_weight &&
@@ -447,7 +447,7 @@ HFONT WCUSER_CopyFont(struct config_data* config, HWND hWnd, const LOGFONT* lf, 
      *  - the width of all characters in the font
      * This isn't true in Wine. As a temporary workaround, we get as the width of the
      * cell, the width of the first character in the font, after checking that all
-     * characters in the font have the same width (I hear paranoïa coming)
+     * characters in the font have the same width (I hear paranoÃ¯a coming)
      * when this gets fixed, the code should be using tm.tmAveCharWidth
      * or tm.tmMaxCharWidth as the cell width.
      */
@@ -1035,26 +1035,23 @@ static void    WCUSER_GenerateKeyInputRecord(struct inner_data* data, BOOL down,
     if (lParam & (1L << 24))		ir.Event.KeyEvent.dwControlKeyState |= ENHANCED_KEY;
     if (sys)				ir.Event.KeyEvent.dwControlKeyState |= LEFT_ALT_PRESSED; /* FIXME: gotta choose one */
 
-    if (!(ir.Event.KeyEvent.dwControlKeyState & ENHANCED_KEY))
+    if (down)
     {
-	if (down)
-	{
-	    switch (ToUnicode(wParam, HIWORD(lParam), keyState, buf, 2, 0))
-	    {
-	    case 2:
-		/* FIXME... should generate two events... */
-		/* fall thru */
-	    case 1:
-		last = buf[0];
-		break;
-	    default:
-		last = 0;
-		break;
-	    }
-	}
-	ir.Event.KeyEvent.uChar.UnicodeChar = last; /* FIXME HACKY... and buggy 'coz it should be a stack, not a single value */
-	if (!down) last = 0;
+        switch (ToUnicode(wParam, HIWORD(lParam), keyState, buf, 2, 0))
+        {
+        case 2:
+            /* FIXME... should generate two events... */
+            /* fall thru */
+        case 1:
+            last = buf[0];
+            break;
+        default:
+            last = 0;
+            break;
+        }
     }
+    ir.Event.KeyEvent.uChar.UnicodeChar = last; /* FIXME: HACKY... and buggy because it should be a stack, not a single value */
+    if (!down) last = 0;
 
     WriteConsoleInput(data->hConIn, &ir, 1, &n);
 }
@@ -1434,7 +1431,7 @@ enum init_return WCUSER_InitBackend(struct inner_data* data)
 
     RegisterClass(&wndclass);
 
-    CreateWindow(wndclass.lpszClassName, NULL,
+    data->hWnd = CreateWindow(wndclass.lpszClassName, NULL,
 		 WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_THICKFRAME|WS_MINIMIZEBOX|WS_HSCROLL|WS_VSCROLL,
 		 CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0, 0, wndclass.hInstance, data);
     if (!data->hWnd) return init_not_supported;

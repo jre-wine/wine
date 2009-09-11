@@ -570,7 +570,8 @@ static LRESULT MDIDestroyChild( HWND client, MDICLIENTINFO *ci,
                 ci->hwndChildMaximized = 0;
                 MDI_UpdateFrameText(frame, client, TRUE, NULL);
             }
-            if (flagDestroy) ci->hwndActiveChild = 0;
+            if (flagDestroy)
+                MDI_ChildActivate(client, 0);
         }
     }
 
@@ -1256,7 +1257,7 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
         return 0;
 
       case WM_SIZE:
-        if( ci->hwndChildMaximized )
+        if( ci->hwndActiveChild && IsZoomed(ci->hwndActiveChild) )
 	{
 	    RECT	rect;
 
@@ -1264,10 +1265,9 @@ static LRESULT MDIClientWndProc_common( HWND hwnd, UINT message,
 	    rect.top = 0;
 	    rect.right = LOWORD(lParam);
 	    rect.bottom = HIWORD(lParam);
-
-	    AdjustWindowRectEx( &rect, GetWindowLongA(ci->hwndChildMaximized, GWL_STYLE),
-                               0, GetWindowLongA(ci->hwndChildMaximized, GWL_EXSTYLE) );
-	    MoveWindow( ci->hwndChildMaximized, rect.left, rect.top,
+	    AdjustWindowRectEx(&rect, GetWindowLongA(ci->hwndActiveChild, GWL_STYLE),
+                               0, GetWindowLongA(ci->hwndActiveChild, GWL_EXSTYLE) );
+	    MoveWindow(ci->hwndActiveChild, rect.left, rect.top,
 			 rect.right - rect.left, rect.bottom - rect.top, 1);
 	}
 	else
@@ -2025,7 +2025,6 @@ static HWND MDI_MoreWindowsDialog(HWND hwnd)
     if (template == 0)
         return 0;
 
-    return (HWND) DialogBoxIndirectParamA(user32_module,
-                                          (const DLGTEMPLATE*) template,
-                                          hwnd, MDI_MoreWindowsDlgProc, (LPARAM) hwnd);
+    return (HWND) DialogBoxIndirectParamA(user32_module, template, hwnd,
+                                          MDI_MoreWindowsDlgProc, (LPARAM) hwnd);
 }

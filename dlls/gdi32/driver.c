@@ -28,6 +28,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winreg.h"
+#include "ddrawgdi.h"
 
 #include "gdi_private.h"
 #include "wine/unicode.h"
@@ -203,6 +204,7 @@ static struct graphics_driver *create_driver( HMODULE module )
         GET_FUNC(wglGetPbufferDCARB);
         GET_FUNC(wglMakeContextCurrentARB);
         GET_FUNC(wglMakeCurrent);
+        GET_FUNC(wglSetPixelFormatWINE);
         GET_FUNC(wglShareLists);
         GET_FUNC(wglUseFontBitmapsA);
         GET_FUNC(wglUseFontBitmapsW);
@@ -430,15 +432,19 @@ DEVMODEW * WINAPI GdiConvertToDevmodeW(const DEVMODEA *dmA)
     dmW = HeapAlloc(GetProcessHeap(), 0, dmW_size + dmA->dmDriverExtra);
     if (!dmW) return NULL;
 
-    MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmDeviceName, CCHDEVICENAME,
+    MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmDeviceName, -1,
                                    dmW->dmDeviceName, CCHDEVICENAME);
     /* copy slightly more, to avoid long computations */
     memcpy(&dmW->dmSpecVersion, &dmA->dmSpecVersion, dmA_size - CCHDEVICENAME);
 
     if (dmA_size >= FIELD_OFFSET(DEVMODEA, dmFormName) + CCHFORMNAME)
     {
-        MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmFormName, CCHFORMNAME,
+        if (dmA->dmFields & DM_FORMNAME)
+            MultiByteToWideChar(CP_ACP, 0, (const char*) dmA->dmFormName, -1,
                                        dmW->dmFormName, CCHFORMNAME);
+        else
+            dmW->dmFormName[0] = 0;
+
         if (dmA_size > FIELD_OFFSET(DEVMODEA, dmLogPixels))
             memcpy(&dmW->dmLogPixels, &dmA->dmLogPixels, dmA_size - FIELD_OFFSET(DEVMODEA, dmLogPixels));
     }
@@ -491,7 +497,7 @@ INT WINAPI GDI_CallExtDeviceModePropSheet16( HWND hWnd, LPCSTR lpszDevice,
 /*****************************************************************************
  *      @ [GDI32.102]
  *
- * This should load the correct driver for lpszDevice and calls this driver's
+ * This should load the correct driver for lpszDevice and call this driver's
  * ExtDeviceMode proc.
  *
  * FIXME: convert ExtDeviceMode to unicode in the driver interface
@@ -722,5 +728,27 @@ INT WINAPI ExtEscape( HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData,
 INT WINAPI DrawEscape(HDC hdc, INT nEscape, INT cbInput, LPCSTR lpszInData)
 {
     FIXME("DrawEscape, stub\n");
+    return 0;
+}
+
+/*******************************************************************
+ *      NamedEscape [GDI32.@]
+ */
+INT WINAPI NamedEscape( HDC hdc, LPCWSTR pDriver, INT nEscape, INT cbInput, LPCSTR lpszInData,
+                        INT cbOutput, LPSTR lpszOutData )
+{
+    FIXME("(%p, %s, %d, %d, %p, %d, %p)\n",
+          hdc, wine_dbgstr_w(pDriver), nEscape, cbInput, lpszInData, cbOutput,
+          lpszOutData);
+    return 0;
+}
+
+/*******************************************************************
+ *      DdQueryDisplaySettingsUniqueness [GDI32.@]
+ *      GdiEntry13                       [GDI32.@]
+ */
+ULONG WINAPI DdQueryDisplaySettingsUniqueness(VOID)
+{
+    FIXME("stub\n");
     return 0;
 }

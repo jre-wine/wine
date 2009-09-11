@@ -20,14 +20,14 @@
 
 #define COBJMACROS
 
-#include <stdarg.h>
-#include <stdio.h>
-
-#include "windef.h"
-#include "winbase.h"
-#include "winnt.h"
-#include "winsock2.h"
 #include "ws2tcpip.h"
+#include "windef.h"
+#include "winnt.h"
+#include "objbase.h"
+#include "ole2.h"
+#include "mimeole.h"
+
+#include <stdio.h>
 
 #include "wine/debug.h"
 
@@ -200,29 +200,6 @@ HRESULT InternetTransport_ChangeStatus(InternetTransport *This, IXPSTATUS Status
     return S_OK;
 }
 
-HRESULT InternetTransport_Read(InternetTransport *This, int cbBuffer,
-    INETXPORT_COMPLETION_FUNCTION fnCompletion)
-{
-    if (This->Status == IXP_DISCONNECTED)
-        return IXP_E_NOT_CONNECTED;
-
-    if (This->fnCompletion)
-        return IXP_E_BUSY;
-
-    This->fnCompletion = fnCompletion;
-
-    This->cbBuffer = cbBuffer;
-    This->pBuffer = HeapAlloc(GetProcessHeap(), 0, This->cbBuffer);
-    This->iCurrentBufferOffset = 0;
-
-    if (WSAAsyncSelect(This->Socket, This->hwnd, IX_READ, FD_READ) == SOCKET_ERROR)
-    {
-        ERR("WSAAsyncSelect failed with error %d\n", WSAGetLastError());
-        /* FIXME: handle error */
-    }
-    return S_OK;
-}
-
 HRESULT InternetTransport_ReadLine(InternetTransport *This,
     INETXPORT_COMPLETION_FUNCTION fnCompletion)
 {
@@ -268,6 +245,23 @@ HRESULT InternetTransport_Write(InternetTransport *This, const char *pvData,
     fnCompletion((IInternetTransport *)&This->u.vtbl, NULL, 0);
 
     return S_OK;
+}
+
+HRESULT InternetTransport_DoCommand(InternetTransport *This,
+    LPCSTR pszCommand, INETXPORT_COMPLETION_FUNCTION fnCompletion)
+{
+    if (This->Status == IXP_DISCONNECTED)
+        return IXP_E_NOT_CONNECTED;
+
+    if (This->fnCompletion)
+        return IXP_E_BUSY;
+
+    if (This->pCallback && This->fCommandLogging)
+    {
+        ITransportCallback_OnCommand(This->pCallback, CMD_SEND, (LPSTR)pszCommand, 0,
+            (IInternetTransport *)&This->u.vtbl);
+    }
+    return InternetTransport_Write(This, pszCommand, strlen(pszCommand), fnCompletion);
 }
 
 static LRESULT CALLBACK InternetTransport_WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -324,7 +318,6 @@ static LRESULT CALLBACK InternetTransport_WndProc(HWND hwnd, UINT uMsg, WPARAM w
 
         while (This->iCurrentBufferOffset < This->cbBuffer - 1)
         {
-            struct timeval tv;
             fd_set infd;
 
             if (recv(This->Socket, &This->pBuffer[This->iCurrentBufferOffset], 1, 0) <= 0)
@@ -358,8 +351,6 @@ static LRESULT CALLBACK InternetTransport_WndProc(HWND hwnd, UINT uMsg, WPARAM w
 
             FD_ZERO(&infd);
             FD_SET(This->Socket, &infd);
-            tv.tv_sec = 0;
-            tv.tv_usec = 0;
         }
         if (This->iCurrentBufferOffset == This->cbBuffer - 1)
             return 0;

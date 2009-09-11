@@ -36,6 +36,7 @@
 #include "sane_i.h"
 #include "wine/debug.h"
 #include "resource.h"
+#include "wine/unicode.h"
 
 #ifdef SONAME_LIBSANE
 
@@ -622,7 +623,7 @@ static void UpdateRelevantEdit(HWND hwnd, const SANE_Option_Descriptor *opt,
         else
             si = position;
 
-        len = wsprintfW( buffer, formatW, si );
+        len = sprintfW( buffer, formatW, si );
     }
     else if  (opt->type == SANE_TYPE_FIXED)
     {
@@ -636,7 +637,7 @@ static void UpdateRelevantEdit(HWND hwnd, const SANE_Option_Descriptor *opt,
         else
             dd = position * 0.01;
 
-        len = wsprintfW( buffer, formatW, dd );
+        len = sprintfW( buffer, formatW, dd );
     }
     else return;
 
@@ -852,10 +853,14 @@ static INT_PTR InitializeDialog(HWND hwnd)
                 dd = SANE_UNFIX(*sf);
                 HeapFree(GetProcessHeap(),0,sf);
 
+                /* Note that conversion of float -> SANE_Fixed is lossy;
+                 *   and when you truncate it into an integer, you can get
+                 *   unfortunate results.  This calculation attempts
+                 *   to mitigate that harm */
                 if (s_quant)
-                    pos = (dd / s_quant);
+                    pos = ((dd + (s_quant/2.0)) / s_quant);
                 else
-                    pos = dd / 0.01;
+                    pos = (dd + 0.005) / 0.01;
 
                 SendMessageW(control, SBM_SETPOS, pos, TRUE);
                 
@@ -995,11 +1000,13 @@ static INT_PTR CALLBACK DialogProc(HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM
                         if (psn->lParam == TRUE)
                         {
                             activeDS.currentState = 6;
-                            activeDS.pendingEvent.TWMessage = MSG_XFERREADY;
+                            if (activeDS.windowMessage)
+                                PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_XFERREADY, 0);
                         }
                         break;
                     case PSN_QUERYCANCEL:
-                        activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
+                        if (activeDS.windowMessage)
+                            PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
                         break;
                     case PSN_SETACTIVE:
                         InitializeDialog(hwndDlg);

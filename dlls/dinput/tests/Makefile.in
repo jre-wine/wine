@@ -4,7 +4,6 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 TESTDLL   = dinput.dll
 IMPORTS   = dinput ole32 version user32 kernel32
-EXTRALIBS = -ldxguid -luuid -ldxerr8
 
 CTESTS = \
 	device.c \

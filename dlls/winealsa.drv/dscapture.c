@@ -448,11 +448,10 @@ static int CreateMMAP(IDsCaptureDriverBufferImpl* pdbi)
     snd_pcm_sw_params_set_silence_threshold(pcm, sw_params, INT_MAX);
     snd_pcm_sw_params_set_silence_size(pcm, sw_params, 0);
     snd_pcm_sw_params_set_avail_min(pcm, sw_params, 0);
-    snd_pcm_sw_params_set_xrun_mode(pcm, sw_params, SND_PCM_XRUN_NONE);
     err = snd_pcm_sw_params(pcm, sw_params);
 
     avail = snd_pcm_avail_update(pcm);
-    if (avail < 0)
+    if ((snd_pcm_sframes_t)avail < 0)
     {
         ERR("No buffer is available: %s.\n", snd_strerror(avail));
         return DSERR_GENERIC;
@@ -478,7 +477,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_QueryInterface(PIDSCDRIVERBUFFE
     if ( IsEqualGUID(riid, &IID_IUnknown) ||
          IsEqualGUID(riid, &IID_IDsCaptureDriverBuffer) ) {
         IDsCaptureDriverBuffer_AddRef(iface);
-        *ppobj = (LPVOID)iface;
+        *ppobj = iface;
         return DS_OK;
     }
 
@@ -495,7 +494,7 @@ static HRESULT WINAPI IDsCaptureDriverBufferImpl_QueryInterface(PIDSCDRIVERBUFFE
             IDsDriverNotify_AddRef((PIDSDRIVERNOTIFY)This->notify);
         }
         IDsDriverNotify_AddRef((PIDSDRIVERNOTIFY)This->notify);
-        *ppobj = (LPVOID)This->notify;
+        *ppobj = This->notify;
         return DS_OK;
     }
 
@@ -885,7 +884,7 @@ static HRESULT WINAPI IDsCaptureDriverImpl_Open(PIDSCDRIVER iface)
         return hr;
     }
 
-    err = snd_pcm_open(&pcm, WOutDev[This->wDevID].pcmname, SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK);
+    err = snd_pcm_open(&pcm, WInDev[This->wDevID].pcmname, SND_PCM_STREAM_CAPTURE, SND_PCM_NONBLOCK);
     if (err < 0) goto err;
     err = snd_pcm_hw_params_any(pcm, hw_params);
     if (err < 0) goto err;

@@ -1,7 +1,7 @@
 /*
  * DOS Virtual Machine
  *
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -182,7 +182,7 @@ static void DOSVM_SendOneEvent( CONTEXT86 *context )
             DOSVM_BuildCallFrame( context, event->relay, event->data );
         }
 
-        free(event);
+        HeapFree(GetProcessHeap(), 0, event);
     }
 }
 
@@ -257,7 +257,7 @@ void WINAPI DOSVM_QueueEvent( INT irq, INT priority, DOSRELAY relay, LPVOID data
   BOOL       old_pending;
 
   if (MZ_Current()) {
-    event = malloc(sizeof(DOSEVENT));
+    event = HeapAlloc(GetProcessHeap(), 0, sizeof(DOSEVENT));
     if (!event) {
       ERR("out of memory allocating event entry\n");
       return;
@@ -464,19 +464,18 @@ void WINAPI DOSVM_Wait( CONTEXT86 *waitctx )
 DWORD WINAPI DOSVM_Loop( HANDLE hThread )
 {
   HANDLE objs[2];
+  int count = 0;
   MSG msg;
   DWORD waitret;
 
-  objs[0] = GetStdHandle(STD_INPUT_HANDLE);
-  objs[1] = hThread;
+  objs[count++] = hThread;
+  if (GetConsoleMode( GetStdHandle(STD_INPUT_HANDLE), NULL ))
+      objs[count++] = GetStdHandle(STD_INPUT_HANDLE);
 
   for(;;) {
       TRACE_(int)("waiting for action\n");
-      waitret = MsgWaitForMultipleObjects(2, objs, FALSE, INFINITE, QS_ALLINPUT);
+      waitret = MsgWaitForMultipleObjects(count, objs, FALSE, INFINITE, QS_ALLINPUT);
       if (waitret == WAIT_OBJECT_0) {
-          DOSVM_ProcessConsole();
-      }
-      else if (waitret == WAIT_OBJECT_0 + 1) {
          DWORD rv;
          if(!GetExitCodeThread(hThread, &rv)) {
              ERR("Failed to get thread exit code!\n");
@@ -484,7 +483,7 @@ DWORD WINAPI DOSVM_Loop( HANDLE hThread )
          }
          return rv;
       }
-      else if (waitret == WAIT_OBJECT_0 + 2) {
+      else if (waitret == WAIT_OBJECT_0 + count) {
           while (PeekMessageA(&msg,0,0,0,PM_REMOVE)) {
               if (msg.hwnd) {
                   /* it's a window message */
@@ -512,6 +511,10 @@ DWORD WINAPI DOSVM_Loop( HANDLE hThread )
                   }
               }
           }
+      }
+      else if (waitret == WAIT_OBJECT_0 + 1)
+      {
+          DOSVM_ProcessConsole();
       }
       else
       {
@@ -566,15 +569,16 @@ static LONG WINAPI exception_handler(EXCEPTION_POINTERS *eptr)
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
-int WINAPI DOSVM_Enter( CONTEXT86 *context )
+INT WINAPI DOSVM_Enter( CONTEXT86 *context )
 {
+  INT ret = 0;
   if (!ISV86(context))
       ERR( "Called with protected mode context!\n" );
 
   __TRY
   {
-      WOWCallback16Ex( 0, WCB16_REGS, 0, NULL, (DWORD *)context );
-      TRACE_(module)( "vm86 returned: %s\n", strerror(errno) );
+      if (!WOWCallback16Ex( 0, WCB16_REGS, 0, NULL, (DWORD *)context )) ret = -1;
+      TRACE_(module)( "ret %d err %u\n", ret, GetLastError() );
   }
   __EXCEPT(exception_handler)
   {
@@ -582,7 +586,7 @@ int WINAPI DOSVM_Enter( CONTEXT86 *context )
   }
   __ENDTRY
 
-  return 0;
+  return ret;
 }
 
 /***********************************************************************
@@ -618,7 +622,7 @@ void WINAPI DOSVM_PIC_ioport_out( WORD port, BYTE val)
             current_event = event->next;
             if (event->relay)
                 (*event->relay)(NULL,event->data);
-            free(event);
+            HeapFree(GetProcessHeap(), 0, event);
 
             if (DOSVM_HasPendingEvents()) 
             {
@@ -642,8 +646,8 @@ void WINAPI DOSVM_PIC_ioport_out( WORD port, BYTE val)
  */
 INT WINAPI DOSVM_Enter( CONTEXT86 *context )
 {
- ERR_(module)("DOS realmode not supported on this architecture!\n");
- return -1;
+    SetLastError( ERROR_NOT_SUPPORTED );
+    return -1;
 }
 
 /***********************************************************************

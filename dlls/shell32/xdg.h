@@ -25,7 +25,6 @@
 #define XDG_CONFIG_DIRS 3
 #define XDG_CACHE_HOME 4
 
-const char *XDG_GetPath(int path_id);
 char *XDG_BuildPath(int root_id, const char *subpath);
 int XDG_MakeDirs(const char *path);
 
@@ -38,15 +37,11 @@ XDG_PARSED_FILE *XDG_ParseDesktopFile(int fd);
 char *XDG_GetStringValue(XDG_PARSED_FILE *file, const char *group_name, const char *value_name, DWORD dwFlags);
 void XDG_FreeParsedFile(XDG_PARSED_FILE *file);
 
-/* implemented in trash.c */
-typedef struct tagTRASH_ELEMENT TRASH_ELEMENT;
-
 BOOL TRASH_CanTrashFile(LPCWSTR wszPath);
 BOOL TRASH_TrashFile(LPCWSTR wszPath);
-HRESULT TRASH_UnpackItemID(LPCSHITEMID id, TRASH_ELEMENT *element, WIN32_FIND_DATAW *data);
+HRESULT TRASH_UnpackItemID(LPCSHITEMID id, WIN32_FIND_DATAW *data);
 HRESULT TRASH_EnumItems(LPITEMIDLIST **pidls, int *count);
-void TRASH_DisposeElement(TRASH_ELEMENT *element);
 
-HRESULT XDG_UserDirLookup(const char ** xdg_dirs, const unsigned int num_dirs, char *** out_ptr);
+HRESULT XDG_UserDirLookup(const char * const *xdg_dirs, const unsigned int num_dirs, char *** out_ptr);
 
 #endif /* ndef __XDG_H__ */

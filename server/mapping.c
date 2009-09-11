@@ -39,14 +39,27 @@
 #include "request.h"
 #include "security.h"
 
+/* list of memory ranges, used to store committed info */
+struct ranges
+{
+    unsigned int count;
+    unsigned int max;
+    struct range
+    {
+        file_pos_t  start;
+        file_pos_t  end;
+    } ranges[1];
+};
+
 struct mapping
 {
     struct object   obj;             /* object header */
-    file_pos_t      size;            /* mapping size */
+    mem_size_t      size;            /* mapping size */
     int             protect;         /* protection flags */
     struct file    *file;            /* file mapped */
     int             header_size;     /* size of headers (for PE image mapping) */
-    void           *base;            /* default base addr (for PE image mapping) */
+    client_ptr_t    base;            /* default base addr (for PE image mapping) */
+    struct ranges  *committed;       /* list of committed ranges in this mapping */
     struct file    *shared_file;     /* temp file for shared PE mapping */
     struct list     shared_entry;    /* entry in global shared PE mappings list */
 };
@@ -138,12 +151,87 @@ static inline void get_section_sizes( const IMAGE_SECTION_HEADER *sec, size_t *m
     if (*file_size > *map_size) *file_size = *map_size;
 }
 
+/* add a range to the committed list */
+static void add_committed_range( struct mapping *mapping, file_pos_t start, file_pos_t end )
+{
+    unsigned int i, j;
+    struct range *ranges;
+
+    if (!mapping->committed) return;  /* everything committed already */
+
+    for (i = 0, ranges = mapping->committed->ranges; i < mapping->committed->count; i++)
+    {
+        if (ranges[i].start > end) break;
+        if (ranges[i].end < start) continue;
+        if (ranges[i].start > start) ranges[i].start = start;   /* extend downwards */
+        if (ranges[i].end < end)  /* extend upwards and maybe merge with next */
+        {
+            for (j = i + 1; j < mapping->committed->count; j++)
+            {
+                if (ranges[j].start > end) break;
+                if (ranges[j].end > end) end = ranges[j].end;
+            }
+            if (j > i + 1)
+            {
+                memmove( &ranges[i + 1], &ranges[j], (mapping->committed->count - j) * sizeof(*ranges) );
+                mapping->committed->count -= j - (i + 1);
+            }
+            ranges[i].end = end;
+        }
+        return;
+    }
+
+    /* now add a new range */
+
+    if (mapping->committed->count == mapping->committed->max)
+    {
+        unsigned int new_size = mapping->committed->max * 2;
+        struct ranges *new_ptr = realloc( mapping->committed, offsetof( struct ranges, ranges[new_size] ));
+        if (!new_ptr) return;
+        new_ptr->max = new_size;
+        ranges = new_ptr->ranges;
+        mapping->committed = new_ptr;
+    }
+    memmove( &ranges[i + 1], &ranges[i], (mapping->committed->count - i) * sizeof(*ranges) );
+    ranges[i].start = start;
+    ranges[i].end = end;
+    mapping->committed->count++;
+}
+
+/* find the range containing start and return whether it's committed */
+static int find_committed_range( struct mapping *mapping, file_pos_t start, mem_size_t *size )
+{
+    unsigned int i;
+    struct range *ranges;
+
+    if (!mapping->committed)  /* everything is committed */
+    {
+        *size = mapping->size - start;
+        return 1;
+    }
+    for (i = 0, ranges = mapping->committed->ranges; i < mapping->committed->count; i++)
+    {
+        if (ranges[i].start > start)
+        {
+            *size = ranges[i].start - start;
+            return 0;
+        }
+        if (ranges[i].end > start)
+        {
+            *size = ranges[i].end - start;
+            return 1;
+        }
+    }
+    *size = mapping->size - start;
+    return 0;
+}
+
 /* allocate and fill the temp file for a shared PE image mapping */
 static int build_shared_mapping( struct mapping *mapping, int fd,
                                  IMAGE_SECTION_HEADER *sec, unsigned int nb_sec )
 {
     unsigned int i;
-    file_pos_t total_size;
+    mem_size_t total_size;
     size_t file_size, map_size, max_size;
     off_t shared_pos, read_pos, write_pos;
     char *buffer = NULL;
@@ -215,11 +303,20 @@ static int build_shared_mapping( struct mapping *mapping, int fd,
 static int get_image_params( struct mapping *mapping )
 {
     IMAGE_DOS_HEADER dos;
-    IMAGE_NT_HEADERS nt;
     IMAGE_SECTION_HEADER *sec = NULL;
+    struct
+    {
+        DWORD Signature;
+        IMAGE_FILE_HEADER FileHeader;
+        union
+        {
+            IMAGE_OPTIONAL_HEADER32 hdr32;
+            IMAGE_OPTIONAL_HEADER64 hdr64;
+        } opt;
+    } nt;
     struct fd *fd;
     off_t pos;
-    int unix_fd, size, toread;
+    int unix_fd, size;
 
     /* load the headers */
 
@@ -229,22 +326,34 @@ static int get_image_params( struct mapping *mapping )
     if (dos.e_magic != IMAGE_DOS_SIGNATURE) goto error;
     pos = dos.e_lfanew;
 
-    if (pread( unix_fd, &nt.Signature, sizeof(nt.Signature), pos ) != sizeof(nt.Signature))
-        goto error;
-    pos += sizeof(nt.Signature);
-    if (nt.Signature != IMAGE_NT_SIGNATURE) goto error;
-    if (pread( unix_fd, &nt.FileHeader, sizeof(nt.FileHeader), pos ) != sizeof(nt.FileHeader))
-        goto error;
-    pos += sizeof(nt.FileHeader);
+    size = pread( unix_fd, &nt, sizeof(nt), pos );
+    if (size < sizeof(nt.Signature) + sizeof(nt.FileHeader)) goto error;
     /* zero out Optional header in the case it's not present or partial */
-    memset(&nt.OptionalHeader, 0, sizeof(nt.OptionalHeader));
-    toread = min( sizeof(nt.OptionalHeader), nt.FileHeader.SizeOfOptionalHeader );
-    if (pread( unix_fd, &nt.OptionalHeader, toread, pos ) != toread) goto error;
-    pos += nt.FileHeader.SizeOfOptionalHeader;
+    if (size < sizeof(nt)) memset( (char *)&nt + size, 0, sizeof(nt) - size );
+    if (nt.Signature != IMAGE_NT_SIGNATURE) goto error;
+
+    switch (nt.opt.hdr32.Magic)
+    {
+    case IMAGE_NT_OPTIONAL_HDR32_MAGIC:
+        mapping->size        = ROUND_SIZE( nt.opt.hdr32.SizeOfImage );
+        mapping->base        = nt.opt.hdr32.ImageBase;
+        mapping->header_size = nt.opt.hdr32.SizeOfHeaders;
+        break;
+    case IMAGE_NT_OPTIONAL_HDR64_MAGIC:
+        mapping->size        = ROUND_SIZE( nt.opt.hdr64.SizeOfImage );
+        mapping->base        = nt.opt.hdr64.ImageBase;
+        mapping->header_size = nt.opt.hdr64.SizeOfHeaders;
+        break;
+    default:
+        goto error;
+    }
 
     /* load the section headers */
 
+    pos += sizeof(nt.Signature) + sizeof(nt.FileHeader) + nt.FileHeader.SizeOfOptionalHeader;
     size = sizeof(*sec) * nt.FileHeader.NumberOfSections;
+    if (pos + size > mapping->size) goto error;
+    if (pos + size > mapping->header_size) mapping->header_size = pos + size;
     if (!(sec = malloc( size ))) goto error;
     if (pread( unix_fd, sec, size, pos ) != size) goto error;
 
@@ -252,14 +361,7 @@ static int get_image_params( struct mapping *mapping )
 
     if (mapping->shared_file) list_add_head( &shared_list, &mapping->shared_entry );
 
-    mapping->size        = ROUND_SIZE( nt.OptionalHeader.SizeOfImage );
-    mapping->base        = (void *)nt.OptionalHeader.ImageBase;
-    mapping->header_size = max( pos + size, nt.OptionalHeader.SizeOfHeaders );
-    mapping->protect     = VPROT_IMAGE;
-
-    /* sanity check */
-    if (pos + size > mapping->size) goto error;
-
+    mapping->protect = VPROT_IMAGE;
     free( sec );
     release_object( fd );
     return 1;
@@ -272,7 +374,7 @@ static int get_image_params( struct mapping *mapping )
 }
 
 /* get the size of the unix file associated with the mapping */
-static inline int get_file_size( struct file *file, file_pos_t *size )
+static inline int get_file_size( struct file *file, mem_size_t *size )
 {
     struct stat st;
     int unix_fd = get_file_unix_fd( file );
@@ -283,7 +385,7 @@ static inline int get_file_size( struct file *file, file_pos_t *size )
 }
 
 static struct object *create_mapping( struct directory *root, const struct unicode_str *name,
-                                      unsigned int attr, file_pos_t size, int protect,
+                                      unsigned int attr, mem_size_t size, int protect,
                                       obj_handle_t handle, const struct security_descriptor *sd )
 {
     struct mapping *mapping;
@@ -301,14 +403,21 @@ static struct object *create_mapping( struct directory *root, const struct unico
                                                DACL_SECURITY_INFORMATION|
                                                SACL_SECURITY_INFORMATION );
     mapping->header_size = 0;
-    mapping->base        = NULL;
+    mapping->base        = 0;
+    mapping->file        = NULL;
     mapping->shared_file = NULL;
+    mapping->committed   = NULL;
 
     if (protect & VPROT_READ) access |= FILE_READ_DATA;
     if (protect & VPROT_WRITE) access |= FILE_WRITE_DATA;
 
     if (handle)
     {
+        if (!(protect & VPROT_COMMITTED))
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            goto error;
+        }
         if (!(mapping->file = get_file_obj( current->process, handle, access ))) goto error;
         if (protect & VPROT_IMAGE)
         {
@@ -334,13 +443,18 @@ static struct object *create_mapping( struct directory *root, const struct unico
         if (!size || (protect & VPROT_IMAGE))
         {
             set_error( STATUS_INVALID_PARAMETER );
-            mapping->file = NULL;
             goto error;
+        }
+        if (!(protect & VPROT_COMMITTED))
+        {
+            if (!(mapping->committed = mem_alloc( offsetof(struct ranges, ranges[8]) ))) goto error;
+            mapping->committed->count = 0;
+            mapping->committed->max   = 8;
         }
         if (!(mapping->file = create_temp_file( access ))) goto error;
         if (!grow_file( mapping->file, size )) goto error;
     }
-    mapping->size    = (size + page_mask) & ~((file_pos_t)page_mask);
+    mapping->size    = (size + page_mask) & ~((mem_size_t)page_mask);
     mapping->protect = protect;
     return &mapping->obj;
 
@@ -353,11 +467,11 @@ static void mapping_dump( struct object *obj, int verbose )
 {
     struct mapping *mapping = (struct mapping *)obj;
     assert( obj->ops == &mapping_ops );
-    fprintf( stderr, "Mapping size=%08x%08x prot=%08x file=%p header_size=%08x base=%p "
+    fprintf( stderr, "Mapping size=%08x%08x prot=%08x file=%p header_size=%08x base=%08lx "
              "shared_file=%p ",
              (unsigned int)(mapping->size >> 32), (unsigned int)mapping->size,
              mapping->protect, mapping->file, mapping->header_size,
-             mapping->base, mapping->shared_file );
+             (unsigned long)mapping->base, mapping->shared_file );
     dump_object_name( &mapping->obj );
     fputc( '\n', stderr );
 }
@@ -394,6 +508,7 @@ static void mapping_destroy( struct object *obj )
         release_object( mapping->shared_file );
         list_remove( &mapping->shared_entry );
     }
+    free( mapping->committed );
 }
 
 int get_page_size(void)
@@ -461,7 +576,7 @@ DECL_HANDLER(get_mapping_info)
     struct fd *fd;
 
     if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle,
-                                                     0, &mapping_ops )))
+                                                     req->access, &mapping_ops )))
     {
         reply->size        = mapping->size;
         reply->protect     = mapping->protect;
@@ -482,6 +597,42 @@ DECL_HANDLER(get_mapping_info)
                 if (reply->mapping) close_handle( current->process, reply->mapping );
             }
         }
+        release_object( mapping );
+    }
+}
+
+/* get a range of committed pages in a file mapping */
+DECL_HANDLER(get_mapping_committed_range)
+{
+    struct mapping *mapping;
+
+    if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle, 0, &mapping_ops )))
+    {
+        if (!(req->offset & page_mask) && req->offset < mapping->size)
+            reply->committed = find_committed_range( mapping, req->offset, &reply->size );
+        else
+            set_error( STATUS_INVALID_PARAMETER );
+
+        release_object( mapping );
+    }
+}
+
+/* add a range to the committed pages in a file mapping */
+DECL_HANDLER(add_mapping_committed_range)
+{
+    struct mapping *mapping;
+
+    if ((mapping = (struct mapping *)get_handle_obj( current->process, req->handle, 0, &mapping_ops )))
+    {
+        if (!(req->size & page_mask) &&
+            !(req->offset & page_mask) &&
+            req->offset < mapping->size &&
+            req->size > 0 &&
+            req->size <= mapping->size - req->offset)
+            add_committed_range( mapping, req->offset, req->offset + req->size );
+        else
+            set_error( STATUS_INVALID_PARAMETER );
+
         release_object( mapping );
     }
 }

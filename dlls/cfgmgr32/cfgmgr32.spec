@@ -7,10 +7,10 @@
 @ stub CM_Add_Range
 @ stub CM_Add_Res_Des
 @ stub CM_Add_Res_Des_Ex
-@ stub CM_Connect_MachineA
+@ stdcall CM_Connect_MachineA(str ptr) setupapi.CM_Connect_MachineA
 @ stdcall CM_Connect_MachineW(wstr ptr) setupapi.CM_Connect_MachineW
-@ stub CM_Create_DevNodeA
-@ stub CM_Create_DevNodeW
+@ stdcall CM_Create_DevNodeA(ptr str long long) setupapi.CM_Create_DevNodeA
+@ stdcall CM_Create_DevNodeW(ptr wstr long long) setupapi.CM_Create_DevNodeW
 @ stub CM_Create_DevNode_ExA
 @ stub CM_Create_DevNode_ExW
 @ stub CM_Create_Range_List
@@ -117,10 +117,10 @@
 @ stub CM_Intersect_Range_List
 @ stub CM_Invert_Range_List
 @ stub CM_Is_Dock_Station_Present
-@ stub CM_Locate_DevNodeA
-@ stub CM_Locate_DevNodeW
-@ stub CM_Locate_DevNode_ExA
-@ stub CM_Locate_DevNode_ExW
+@ stdcall CM_Locate_DevNodeA(ptr str long) setupapi.CM_Locate_DevNodeA
+@ stdcall CM_Locate_DevNodeW(ptr wstr long) setupapi.CM_Locate_DevNodeW
+@ stdcall CM_Locate_DevNode_ExA(ptr str long long) setupapi.CM_Locate_DevNode_ExA
+@ stdcall CM_Locate_DevNode_ExW(ptr wstr long long) setupapi.CM_Locate_DevNode_ExW
 @ stub CM_Merge_Range_List
 @ stub CM_Modify_Res_Des
 @ stub CM_Modify_Res_Des_Ex

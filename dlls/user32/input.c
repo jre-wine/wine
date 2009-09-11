@@ -45,6 +45,7 @@
 #include "user_private.h"
 #include "wine/server.h"
 #include "wine/debug.h"
+#include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 WINE_DECLARE_DEBUG_CHANNEL(keyboard);
@@ -90,12 +91,12 @@ BOOL set_capture_window( HWND hwnd, UINT gui_flags, HWND *prev_ret )
 
     SERVER_START_REQ( set_capture_window )
     {
-        req->handle = hwnd;
+        req->handle = wine_server_user_handle( hwnd );
         req->flags  = flags;
         if ((ret = !wine_server_call_err( req )))
         {
-            previous = reply->previous;
-            hwnd = reply->full_handle;
+            previous = wine_server_ptr_handle( reply->previous );
+            hwnd = wine_server_ptr_handle( reply->full_handle );
         }
     }
     SERVER_END_REQ;
@@ -256,7 +257,7 @@ HWND WINAPI GetCapture(void)
     SERVER_START_REQ( get_thread_input )
     {
         req->tid = GetCurrentThreadId();
-        if (!wine_server_call_err( req )) ret = reply->capture;
+        if (!wine_server_call_err( req )) ret = wine_server_ptr_handle( reply->capture );
     }
     SERVER_END_REQ;
     return ret;
@@ -272,6 +273,8 @@ HWND WINAPI GetCapture(void)
  */
 SHORT WINAPI GetAsyncKeyState(INT nKey)
 {
+    if (nKey < 0 || nKey > 256)
+        return 0;
     return USER_Driver->pGetAsyncKeyState( nKey );
 }
 
@@ -729,7 +732,7 @@ INT WINAPI GetKeyNameTextW(LONG lParam, LPWSTR lpBuffer, INT nSize)
 /****************************************************************************
  *		ToUnicode (USER32.@)
  */
-INT WINAPI ToUnicode(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
+INT WINAPI ToUnicode(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 		     LPWSTR lpwStr, int size, UINT flags)
 {
     return ToUnicodeEx(virtKey, scanCode, lpKeyState, lpwStr, size, flags, GetKeyboardLayout(0));
@@ -738,7 +741,7 @@ INT WINAPI ToUnicode(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 /****************************************************************************
  *		ToUnicodeEx (USER32.@)
  */
-INT WINAPI ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
+INT WINAPI ToUnicodeEx(UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
 		       LPWSTR lpwStr, int size, UINT flags, HKL hkl)
 {
     return USER_Driver->pToUnicodeEx(virtKey, scanCode, lpKeyState, lpwStr, size, flags, hkl);
@@ -747,7 +750,7 @@ INT WINAPI ToUnicodeEx(UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 /****************************************************************************
  *		ToAscii (USER32.@)
  */
-INT WINAPI ToAscii( UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
+INT WINAPI ToAscii( UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
                     LPWORD lpChar, UINT flags )
 {
     return ToAsciiEx(virtKey, scanCode, lpKeyState, lpChar, flags, GetKeyboardLayout(0));
@@ -756,7 +759,7 @@ INT WINAPI ToAscii( UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
 /****************************************************************************
  *		ToAsciiEx (USER32.@)
  */
-INT WINAPI ToAsciiEx( UINT virtKey, UINT scanCode, LPBYTE lpKeyState,
+INT WINAPI ToAsciiEx( UINT virtKey, UINT scanCode, const BYTE *lpKeyState,
                       LPWORD lpChar, UINT flags, HKL dwhkl )
 {
     WCHAR uni_chars[2];
@@ -798,9 +801,62 @@ BOOL WINAPI BlockInput(BOOL fBlockIt)
  */
 UINT WINAPI GetKeyboardLayoutList(INT nBuff, HKL *layouts)
 {
+    HKEY hKeyKeyboard;
+    DWORD rc;
+    INT count = 0;
+    ULONG_PTR baselayout;
+    LANGID langid;
+    static const WCHAR szKeyboardReg[] = {'S','y','s','t','e','m','\\','C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\','C','o','n','t','r','o','l','\\','K','e','y','b','o','a','r','d',' ','L','a','y','o','u','t','s',0};
+
     TRACE_(keyboard)("(%d,%p)\n",nBuff,layouts);
 
-    return USER_Driver->pGetKeyboardLayoutList(nBuff, layouts);
+    baselayout = GetUserDefaultLCID();
+    langid = PRIMARYLANGID(LANGIDFROMLCID(baselayout));
+    if (langid == LANG_CHINESE || langid == LANG_JAPANESE || langid == LANG_KOREAN)
+        baselayout |= 0xe001 << 16; /* IME */
+    else
+        baselayout |= baselayout << 16;
+
+    /* Enumerate the Registry */
+    rc = RegOpenKeyW(HKEY_LOCAL_MACHINE,szKeyboardReg,&hKeyKeyboard);
+    if (rc == ERROR_SUCCESS)
+    {
+        do {
+            WCHAR szKeyName[9];
+            HKL layout;
+            rc = RegEnumKeyW(hKeyKeyboard, count, szKeyName, 9);
+            if (rc == ERROR_SUCCESS)
+            {
+                layout = (HKL)strtoulW(szKeyName,NULL,16);
+                if (baselayout != 0 && layout == (HKL)baselayout)
+                    baselayout = 0; /* found in the registry do not add again */
+                if (nBuff && layouts)
+                {
+                    if (count >= nBuff ) break;
+                    layouts[count] = layout;
+                }
+                count ++;
+            }
+        } while (rc == ERROR_SUCCESS);
+        RegCloseKey(hKeyKeyboard);
+    }
+
+    /* make sure our base layout is on the list */
+    if (baselayout != 0)
+    {
+        if (nBuff && layouts)
+        {
+            if (count < nBuff)
+            {
+                layouts[count] = (HKL)baselayout;
+                count++;
+            }
+        }
+        else
+            count++;
+    }
+
+    return count;
 }
 
 
@@ -1112,7 +1168,7 @@ int WINAPI GetMouseMovePointsEx(UINT size, LPMOUSEMOVEPOINT ptin, LPMOUSEMOVEPOI
         return -1;
     }
 
-    if(!ptin || !ptout) {
+    if(!ptin || (!ptout && count)) {
         SetLastError(ERROR_NOACCESS);
         return -1;
     }

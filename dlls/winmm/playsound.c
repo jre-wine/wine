@@ -1,7 +1,7 @@
 /* -*- tab-width: 8; c-basic-offset: 4 -*- */
 
 /*
- * MMSYTEM functions
+ * MMSYSTEM functions
  *
  * Copyright 1993      Martin Ayotte
  *           1998-2002 Eric Pouech
@@ -158,8 +158,8 @@ struct playsound_data
 };
 
 static void CALLBACK PlaySound_Callback(HWAVEOUT hwo, UINT uMsg,
-					DWORD dwInstance,
-					DWORD dwParam1, DWORD dwParam2)
+					DWORD_PTR dwInstance,
+					DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     struct playsound_data*	s = (struct playsound_data*)dwInstance;
 
@@ -169,7 +169,7 @@ static void CALLBACK PlaySound_Callback(HWAVEOUT hwo, UINT uMsg,
 	break;
     case WOM_DONE:
 	InterlockedIncrement(&s->dwEventCount);
-	TRACE("Returning waveHdr=%x\n", dwParam1);
+	TRACE("Returning waveHdr=%lx\n", dwParam1);
 	SetEvent(s->hEvent);
 	break;
     default:
@@ -193,11 +193,12 @@ static BOOL PlaySound_IsString(DWORD fdwSound, const void* psz)
     /* SND_RESOURCE is 0x40004 while
      * SND_MEMORY is 0x00004
      */
-    switch (fdwSound & (SND_RESOURCE|SND_ALIAS|SND_FILENAME))
+    switch (fdwSound & (SND_RESOURCE|SND_ALIAS_ID|SND_FILENAME))
     {
     case SND_RESOURCE:  return HIWORD(psz) != 0; /* by name or by ID ? */
+    case SND_ALIAS_ID:
     case SND_MEMORY:    return FALSE;
-    case SND_ALIAS:     /* what about ALIAS_ID ??? */
+    case SND_ALIAS:
     case SND_FILENAME:
     case 0:             return TRUE;
     default:            FIXME("WTF\n"); return FALSE;
@@ -263,7 +264,7 @@ static WINE_PLAYSOUND*  PlaySound_Alloc(const void* pszSound, HMODULE hmod,
 
 static DWORD WINAPI proc_PlaySound(LPVOID arg)
 {
-    WINE_PLAYSOUND*     wps = (WINE_PLAYSOUND*)arg;
+    WINE_PLAYSOUND*     wps = arg;
     BOOL		bRet = FALSE;
     HMMIO		hmmio = 0;
     MMCKINFO		ckMainRIFF;
@@ -302,13 +303,43 @@ static DWORD WINAPI proc_PlaySound(LPVOID arg)
 
 	memset(&mminfo, 0, sizeof(mminfo));
 	mminfo.fccIOProc = FOURCC_MEM;
-	mminfo.pchBuffer = (LPSTR)data;
+	mminfo.pchBuffer = data;
 	mminfo.cchBuffer = -1; /* FIXME: when a resource, could grab real size */
 	TRACE("Memory sound %p\n", data);
 	hmmio = mmioOpenW(NULL, &mminfo, MMIO_READ);
     }
     else if (wps->fdwSound & SND_ALIAS)
     {
+        if ((wps->fdwSound & SND_ALIAS_ID) == SND_ALIAS_ID)
+        {
+            static const WCHAR  wszSystemAsterisk[] = {'S','y','s','t','e','m','A','s','t','e','r','i','s','k',0};
+            static const WCHAR  wszSystemDefault[] = {'S','y','s','t','e','m','D','e','f','a','u','l','t',0};
+            static const WCHAR  wszSystemExclamation[] = {'S','y','s','t','e','m','E','x','c','l','a','m','a','t','i','o','n',0};
+            static const WCHAR  wszSystemExit[] = {'S','y','s','t','e','m','E','x','i','t',0};
+            static const WCHAR  wszSystemHand[] = {'S','y','s','t','e','m','H','a','n','d',0};
+            static const WCHAR  wszSystemQuestion[] = {'S','y','s','t','e','m','Q','u','e','s','t','i','o','n',0};
+            static const WCHAR  wszSystemStart[] = {'S','y','s','t','e','m','S','t','a','r','t',0};
+            static const WCHAR  wszSystemWelcome[] = {'S','y','s','t','e','m','W','e','l','c','o','m','e',0};
+
+            wps->fdwSound &= ~(SND_ALIAS_ID ^ SND_ALIAS);
+            if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMASTERISK)
+                wps->pszSound = wszSystemAsterisk;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMDEFAULT)
+                wps->pszSound = wszSystemDefault;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMEXCLAMATION)
+                wps->pszSound = wszSystemExclamation;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMEXIT)
+                wps->pszSound = wszSystemExit;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMHAND)
+                wps->pszSound = wszSystemHand;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMQUESTION)
+                wps->pszSound = wszSystemQuestion;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMSTART)
+                wps->pszSound = wszSystemStart;
+            else if (wps->pszSound == (LPCWSTR)SND_ALIAS_SYSTEMWELCOME)
+                wps->pszSound = wszSystemWelcome;
+            else goto errCleanUp;
+        }
         hmmio = get_mmioFromProfile(wps->fdwSound, wps->pszSound);
     }
     else if (wps->fdwSound & SND_FILENAME)
@@ -367,8 +398,8 @@ static DWORD WINAPI proc_PlaySound(LPVOID arg)
 
     s.hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
 
-    if (waveOutOpen(&wps->hWave, WAVE_MAPPER, lpWaveFormat, (DWORD)PlaySound_Callback,
-		    (DWORD)&s, CALLBACK_FUNCTION) != MMSYSERR_NOERROR)
+    if (waveOutOpen(&wps->hWave, WAVE_MAPPER, lpWaveFormat, (DWORD_PTR)PlaySound_Callback,
+		    (DWORD_PTR)&s, CALLBACK_FUNCTION) != MMSYSERR_NOERROR)
 	goto errCleanUp;
 
     /* make it so that 3 buffers per second are needed */

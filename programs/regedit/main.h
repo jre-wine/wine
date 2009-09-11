@@ -72,7 +72,7 @@ typedef struct {
     int     nFocusPanel;      /* 0: left  1: right */
     int	    nSplitPos;
     WINDOWPLACEMENT pos;
-    TCHAR   szPath[MAX_PATH];
+    WCHAR   szPath[MAX_PATH];
 } ChildWnd;
 extern ChildWnd* g_pChildWnd;
 
@@ -90,14 +90,24 @@ extern enum OPTION_FLAGS Options;
 extern TCHAR szTitle[];
 extern const TCHAR szFrameClass[];
 extern const TCHAR szChildClass[];
-extern TCHAR g_pszDefaultValueName[];
+extern WCHAR g_pszDefaultValueName[];
+
+/* Registry class names and their indexes */
+extern const WCHAR* reg_class_namesW[];
+#define INDEX_HKEY_LOCAL_MACHINE    0
+#define INDEX_HKEY_USERS            1
+#define INDEX_HKEY_CLASSES_ROOT     2
+#define INDEX_HKEY_CURRENT_CONFIG   3
+#define INDEX_HKEY_CURRENT_USER     4
+#define INDEX_HKEY_DYN_DATA         5
+
+
 
 /* about.c */
 extern void ShowAboutBox(HWND hWnd);
 
 /* childwnd.c */
-extern LPCTSTR GetRootKeyName(HKEY hRootKey);
-extern LPTSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull);
+extern LPWSTR GetItemFullPath(HWND hwndTV, HTREEITEM hItem, BOOL bFull);
 extern LRESULT CALLBACK ChildWndProc(HWND, UINT, WPARAM, LPARAM);
 
 /* framewnd.c */
@@ -107,35 +117,35 @@ extern void UpdateStatusBar(void);
 
 /* listview.c */
 extern HWND CreateListView(HWND hwndParent, UINT id);
-extern BOOL RefreshListView(HWND hwndLV, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR highlightValue);
+extern BOOL RefreshListView(HWND hwndLV, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR highlightValue);
 extern HWND StartValueRename(HWND hwndLV);
-extern LPCTSTR GetValueName(HWND hwndLV);
+extern LPWSTR GetItemText(HWND hwndLV, UINT item);
+extern LPCWSTR GetValueName(HWND hwndLV);
 extern BOOL ListWndNotifyProc(HWND hWnd, WPARAM wParam, LPARAM lParam, BOOL *Result);
 extern BOOL IsDefaultValue(HWND hwndLV, int i);
 
 /* treeview.c */
-extern HWND CreateTreeView(HWND hwndParent, LPTSTR pHostName, UINT id);
+extern HWND CreateTreeView(HWND hwndParent, LPWSTR pHostName, UINT id);
 extern BOOL RefreshTreeView(HWND hWndTV);
 extern BOOL OnTreeExpanding(HWND hWnd, NMTREEVIEW* pnmtv);
-extern LPTSTR GetItemPath(HWND hwndTV, HTREEITEM hItem, HKEY* phRootKey);
+extern LPWSTR GetItemPath(HWND hwndTV, HTREEITEM hItem, HKEY* phRootKey);
 extern BOOL DeleteNode(HWND hwndTV, HTREEITEM hItem);
-extern HTREEITEM InsertNode(HWND hwndTV, HTREEITEM hItem, LPTSTR name);
+extern HTREEITEM InsertNode(HWND hwndTV, HTREEITEM hItem, LPWSTR name);
 extern HWND StartKeyRename(HWND hwndTV);
-extern HTREEITEM FindPathInTree(HWND hwndTV, LPCTSTR lpKeyName);
-extern HTREEITEM FindNext(HWND hwndTV, HTREEITEM hItem, LPCTSTR sstring, int mode, int *row);
+extern HTREEITEM FindPathInTree(HWND hwndTV, LPCWSTR lpKeyName);
+extern HTREEITEM FindNext(HWND hwndTV, HTREEITEM hItem, LPCWSTR sstring, int mode, int *row);
 
 /* edit.c */
-extern BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPTSTR newKeyName);
-extern BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, DWORD valueType, LPTSTR valueName);
-extern BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR valueName);
-extern BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath);
-extern BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCTSTR keyPath, LPCTSTR valueName);
-extern BOOL RenameValue(HWND hwnd, HKEY hRootKey, LPCTSTR keyPath, LPCTSTR oldName, LPCTSTR newName);
-extern BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCTSTR keyPath, LPCTSTR newName);
+extern BOOL CreateKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPWSTR newKeyName);
+extern BOOL CreateValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, DWORD valueType, LPWSTR valueName);
+extern BOOL ModifyValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName);
+extern BOOL DeleteKey(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath);
+extern BOOL DeleteValue(HWND hwnd, HKEY hKeyRoot, LPCWSTR keyPath, LPCWSTR valueName, BOOL showMessageBox);
+extern BOOL RenameValue(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR oldName, LPCWSTR newName);
+extern BOOL RenameKey(HWND hwnd, HKEY hRootKey, LPCWSTR keyPath, LPCWSTR newName);
 extern void error(HWND hwnd, INT resId, ...);
 
 /* hexedit.c */
 extern void HexEdit_Register(void);
-extern void HexEdit_Unregister(void);
 
 #endif /* __MAIN_H__ */

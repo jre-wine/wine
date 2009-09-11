@@ -41,6 +41,7 @@ static DWORD  (WINAPI * pSplInitializeWinSpoolDrv)(LPVOID *);
 static LPVOID fn_spl[WINSPOOL_TABLESIZE];
 static LPVOID fn_w2k[WINSPOOL_TABLESIZE];
 static LPVOID fn_xp[WINSPOOL_TABLESIZE];
+static LPVOID fn_v[WINSPOOL_TABLESIZE];
 
 /* ########################### */
 
@@ -89,6 +90,18 @@ static LPCSTR load_functions(void)
     fn_xp[7] = (void *) GetProcAddress(hwinspool, (LPSTR) 214);  /* RefCntUnloadDriver */
     fn_xp[8] = (void *) GetProcAddress(hwinspool, (LPSTR) 215);  /* ForceUnloadDriver */
 
+    memset(fn_v,  0xff, sizeof(fn_v));
+    fn_v[0] = (void *) GetProcAddress(hwinspool, "OpenPrinterW");
+    fn_v[1] = (void *) GetProcAddress(hwinspool, "ClosePrinter");
+    fn_v[2] = (void *) GetProcAddress(hwinspool, "SpoolerDevQueryPrintW");
+    fn_v[3] = (void *) GetProcAddress(hwinspool, "SpoolerPrinterEvent");
+    fn_v[4] = (void *) GetProcAddress(hwinspool, "DocumentPropertiesW");
+    fn_v[5] = (void *) GetProcAddress(hwinspool, (LPSTR) 212);  /* LoadPrinterDriver */
+    fn_v[6] = (void *) GetProcAddress(hwinspool, (LPSTR) 213);  /* RefCntLoadDriver */
+    fn_v[7] = (void *) GetProcAddress(hwinspool, (LPSTR) 214);  /* RefCntUnloadDriver */
+    fn_v[8] = (void *) GetProcAddress(hwinspool, (LPSTR) 215);  /* ForceUnloadDriver */
+    fn_v[9] = (void *) GetProcAddress(hwinspool, (LPSTR) 251);  /* 0xfb */
+
     return NULL;
 
 }
@@ -107,13 +120,42 @@ static void test_BuildOtherNamesFromMachineName(void)
     SetLastError(0xdeadbeef);
     res = pBuildOtherNamesFromMachineName(&buffers, &numentries);
 
-    /* An array with 3 stringpointer is returned:
+    /* An array with a number of stringpointers is returned (minimum of 3):
       entry_#0: "" (empty String)
-      entry_#1: <hostname> (this is the same as the computernam)
-      entry_#2: <ip-address> (string with the ip-address of <hostname>)
+      entry_#1: <hostname> (this is the same as the computername)
+      1 entry per Ethernet adapter : <ip-address> (string with a IPv4 ip-address)
+
+      As of Vista:
+
+      IPv6 fully disabled (lan interfaces, connections, tunnel interfaces and loopback interfaces)
+      entry_#0: "" (empty String)
+      entry_#1: <hostname> (this is the same as the computername)
+      1 entry per Ethernet adapter : <ip-address> (string with a IPv4 ip-address)
+      entry_#x: "::1"
+
+      IPv6 partly disabled (lan interfaces, connections):
+      entry_#0: "" (empty String)
+      entry_#1: <hostname> (this is the same as the computername)
+      entry_#2: "::1"
+      1 entry per Ethernet adapter : <ip-address> (string with a IPv4 ip-address)
+
+      IPv6 fully enabled but not on all lan interfaces:
+      entry_#0: "" (empty String)
+      entry_#1: <hostname> (this is the same as the computername)
+      1 entry per IPv6 enabled Ethernet adapter : <ip-address> (string with a Link-local IPv6 ip-address)
+      1 entry per IPv4 enabled Ethernet adapter : <ip-address> (string with a IPv4 ip-address)
+
+      IPv6 fully enabled on all lan interfaces:
+      entry_#0: "" (empty String)
+      entry_#1: <hostname> (this is the same as the computername)
+      1 entry per IPv6 enabled Ethernet adapter : <ip-address> (string with a Link-local IPv6 ip-address)
+      entry_#x: <ip-address> Tunnel adapter (string with a Link-local IPv6 ip-address)
+      1 entry per IPv4 enabled Ethernet adapter : <ip-address> (string with a IPv4 ip-address)
+      entry_#y: <ip-address> Tunnel adapter (string with a IPv6 ip-address)
     */
+
     todo_wine
-    ok( res && (buffers != NULL) && (numentries == 3) && (buffers[0] != NULL) && (buffers[0][0] == '\0'),
+    ok( res && (buffers != NULL) && (numentries >= 3) && (buffers[0] != NULL) && (buffers[0][0] == '\0'),
         "got %u with %u and %p,%u (%p:%d)\n", res, GetLastError(), buffers, numentries,
         ((numentries > 0) && buffers) ? buffers[0] : NULL,
         ((numentries > 0) && buffers && buffers[0]) ? lstrlenW(buffers[0]) : -1);
@@ -124,21 +166,28 @@ static void test_BuildOtherNamesFromMachineName(void)
 
 static void test_SplInitializeWinSpoolDrv(VOID)
 {
+    LPVOID *fn_ref = fn_xp;
     DWORD   res;
     LONG    id;
-    BOOL    is_xp;
 
     memset(fn_spl, 0xff, sizeof(fn_spl));
     SetLastError(0xdeadbeef);
     res = pSplInitializeWinSpoolDrv(fn_spl);
     ok(res, "got %u with %u (expected '!= 0')\n", res, GetLastError());
 
-    /* functions 0 to 5 are the same with "spoolss.dll" from w2k and xp */
-    is_xp = (fn_spl[6] == fn_xp[6]);
+    /* functions 0 to 5 are the same in "spoolss.dll" from w2k and above */
+    if (fn_spl[6] == fn_w2k[6]) {
+        fn_ref = fn_w2k;
+    }
+    if (fn_spl[9] == fn_v[9]) {
+        fn_ref = fn_v;
+    }
+
     id = 0;
     while (id < WINSPOOL_TABLESIZE) {
-        ok( fn_spl[id] == (is_xp ? fn_xp[id] : fn_w2k[id]),
-            "(#%02u) spoolss: %p,  xp: %p,  w2k: %p\n", id, fn_spl[id], fn_xp[id], fn_w2k[id]);
+        ok( fn_spl[id] == fn_ref[id],
+            "(#%02u) spoolss: %p (vista: %p,  xp: %p,  w2k: %p)\n",
+            id, fn_spl[id], fn_v[id], fn_xp[id], fn_w2k[id]);
         id++;
     }
 }

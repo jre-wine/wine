@@ -48,14 +48,15 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_QueryInterface(
     LPVOID *ppvObj)
 {
     RegPropBagImpl *This = (RegPropBagImpl *)iface;
-    TRACE("\n\tIID:\t%s\n",debugstr_guid(riid));
+
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppvObj);
 
     if (This == NULL || ppvObj == NULL) return E_POINTER;
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IPropertyBag))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         DEVENUM_IPropertyBag_AddRef(iface);
         return S_OK;
     }
@@ -70,7 +71,8 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_QueryInterface(
 static ULONG WINAPI DEVENUM_IPropertyBag_AddRef(LPPROPERTYBAG iface)
 {
     RegPropBagImpl *This = (RegPropBagImpl *)iface;
-    TRACE("\n");
+
+    TRACE("(%p)->() AddRef from %d\n", iface, This->ref);
 
     return InterlockedIncrement(&This->ref);
 }
@@ -83,7 +85,7 @@ static ULONG WINAPI DEVENUM_IPropertyBag_Release(LPPROPERTYBAG iface)
     RegPropBagImpl *This = (RegPropBagImpl *)iface;
     ULONG ref;
 
-    TRACE("\n");
+    TRACE("(%p)->() ReleaseThis->ref from %d\n", iface, This->ref);
 
     ref = InterlockedDecrement(&This->ref);
     if (ref == 0) {
@@ -120,7 +122,7 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_Read(
         pData = HeapAlloc(GetProcessHeap(), 0, received);
 
         /* work around a GCC bug that occurs here unless we use the reswin32 variable as well */
-        reswin32 = RegQueryValueExW(This->hkey, pszPropName, NULL, &type, (LPBYTE)pData, &received);
+        reswin32 = RegQueryValueExW(This->hkey, pszPropName, NULL, &type, pData, &received);
         res = HRESULT_FROM_WIN32(reswin32);
     }
 
@@ -128,7 +130,7 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_Read(
     {
         res = E_INVALIDARG; /* assume we cannot coerce into right type */
 
-        TRACE("Read %d bytes (%s)\n", received, type == REG_SZ ? debugstr_w((LPWSTR)pData) : "binary data");
+        TRACE("Read %d bytes (%s)\n", received, type == REG_SZ ? debugstr_w(pData) : "binary data");
 
         switch (type)
         {
@@ -137,14 +139,14 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_Read(
             {
             case VT_LPWSTR:
                 V_UNION(pVar, bstrVal) = CoTaskMemAlloc(received);
-                memcpy(V_UNION(pVar, bstrVal), (LPWSTR)pData, received);
+                memcpy(V_UNION(pVar, bstrVal), pData, received);
                 res = S_OK;
                 break;
             case VT_EMPTY:
                 V_VT(pVar) = VT_BSTR;
             /* fall through */
             case VT_BSTR:
-                V_UNION(pVar, bstrVal) = SysAllocStringLen((LPWSTR)pData, received/sizeof(WCHAR) - 1);
+                V_UNION(pVar, bstrVal) = SysAllocStringLen(pData, received/sizeof(WCHAR) - 1);
                 res = S_OK;
                 break;
             }
@@ -173,10 +175,13 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_Read(
                 switch (V_VT(pVar))
                 {
                 case VT_EMPTY:
+                    V_VT(pVar) = VT_ARRAY | VT_UI1;
+                    /* fall through */
                 case VT_ARRAY | VT_UI1:
                     if (!(V_UNION(pVar, parray) = SafeArrayCreate(VT_UI1, 1, &bound)))
                         res = E_OUTOFMEMORY;
-                    res = S_OK;
+                    else
+                        res = S_OK;
                     break;
                 }
 
@@ -219,14 +224,14 @@ static HRESULT WINAPI DEVENUM_IPropertyBag_Write(
     {
     case VT_BSTR:
         TRACE("writing %s\n", debugstr_w(V_UNION(pVar, bstrVal)));
-        lpData = (LPVOID)V_UNION(pVar, bstrVal);
+        lpData = V_UNION(pVar, bstrVal);
         dwType = REG_SZ;
         cbData = (lstrlenW(V_UNION(pVar, bstrVal)) + 1) * sizeof(WCHAR);
         break;
     case VT_I4:
     case VT_UI4:
         TRACE("writing %u\n", V_UNION(pVar, ulVal));
-        lpData = (LPVOID)&V_UNION(pVar, ulVal);
+        lpData = &V_UNION(pVar, ulVal);
         dwType = REG_DWORD;
         cbData = sizeof(DWORD);
         break;
@@ -298,7 +303,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_QueryInterface(
         IsEqualGUID(riid, &IID_IPersistStream) ||
         IsEqualGUID(riid, &IID_IMoniker))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         DEVENUM_IMediaCatMoniker_AddRef(iface);
         return S_OK;
     }
@@ -341,7 +346,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_GetClassID(
     CLSID* pClassID)
 {
     MediaCatMoniker *This = (MediaCatMoniker *)iface;
-    FIXME("(%p)->(%p)\n", This, pClassID);
+    FIXME("(%p)->(%p): stub\n", This, pClassID);
 
     if (pClassID == NULL)
         return E_POINTER;
@@ -351,21 +356,21 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_GetClassID(
 
 static HRESULT WINAPI DEVENUM_IMediaCatMoniker_IsDirty(LPMONIKER iface)
 {
-    FIXME("()\n");
+    FIXME("(%p)->(): stub\n", iface);
 
     return S_FALSE;
 }
 
 static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Load(LPMONIKER iface, IStream* pStm)
 {
-    FIXME("(%p)\n", pStm);
+    FIXME("(%p)->(%p): stub\n", iface, pStm);
 
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Save(LPMONIKER iface, IStream* pStm, BOOL fClearDirty)
 {
-    FIXME("(%p, %s)\n", pStm, fClearDirty ? "true" : "false");
+    FIXME("(%p)->(%p, %s): stub\n", iface, pStm, fClearDirty ? "true" : "false");
 
     return STG_E_CANTSAVE;
 }
@@ -374,7 +379,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_GetSizeMax(
     LPMONIKER iface,
     ULARGE_INTEGER* pcbSize)
 {
-    FIXME("(%p)\n", pcbSize);
+    FIXME("(%p)->(%p): stub\n", iface, pcbSize);
 
     ZeroMemory(pcbSize, sizeof(*pcbSize));
 
@@ -396,7 +401,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_BindToObject(
 
     MediaCatMoniker *This = (MediaCatMoniker *)iface;
 
-    VariantClear(&var);
+    VariantInit(&var);
 
     TRACE("(%p)->(%p, %p, %s, %p)\n", This, pbc, pmkToLeft, debugstr_guid(riidResult), ppvResult);
 
@@ -407,7 +412,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_BindToObject(
             /* first activation of this class */
 	    LPVOID pvptr;
             res=IMoniker_BindToStorage(iface, NULL, NULL, &IID_IPropertyBag, &pvptr);
-	    pProp = (IPropertyBag*)pvptr;
+            pProp = pvptr;
             if (SUCCEEDED(res))
             {
                 V_VT(&var) = VT_LPWSTR;
@@ -421,7 +426,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_BindToObject(
             if (SUCCEEDED(res))
             {
                 res=CoCreateInstance(&clsID,NULL,CLSCTX_ALL,&IID_IUnknown,&pvptr);
-		pObj = (IUnknown*)pvptr;
+                pObj = pvptr;
             }
     }
 
@@ -485,7 +490,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Reduce(
     IMoniker** ppmkToLeft,
     IMoniker** ppmkReduced)
 {
-    TRACE("(%p, %d, %p, %p)\n", pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
+    TRACE("(%p)->(%p, %d, %p, %p)\n", iface, pbc, dwReduceHowFar, ppmkToLeft, ppmkReduced);
 
     if (ppmkToLeft)
         *ppmkToLeft = NULL;
@@ -500,7 +505,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_ComposeWith(
     BOOL fOnlyIfNotGeneric,
     IMoniker** ppmkComposite)
 {
-    FIXME("(%p, %s, %p): stub\n", pmkRight, fOnlyIfNotGeneric ? "true" : "false", ppmkComposite);
+    FIXME("(%p)->(%p, %s, %p): stub\n", iface, pmkRight, fOnlyIfNotGeneric ? "true" : "false", ppmkComposite);
 
     /* FIXME: use CreateGenericComposite? */
     *ppmkComposite = NULL;
@@ -513,7 +518,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Enum(
     BOOL fForward,
     IEnumMoniker** ppenumMoniker)
 {
-    FIXME("(%s, %p): stub\n", fForward ? "true" : "false", ppenumMoniker);
+    FIXME("(%p)->(%s, %p): stub\n", iface, fForward ? "true" : "false", ppenumMoniker);
 
     *ppenumMoniker = NULL;
 
@@ -524,7 +529,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_IsEqual(
     LPMONIKER iface,
     IMoniker* pmkOtherMoniker)
 {
-    FIXME("(%p)\n", pmkOtherMoniker);
+    FIXME("(%p)->(%p): stub\n", iface, pmkOtherMoniker);
 
     return E_NOTIMPL;
 }
@@ -533,7 +538,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Hash(
     LPMONIKER iface,
     DWORD* pdwHash)
 {
-    TRACE("(%p)\n", pdwHash);
+    TRACE("(%p)->(%p)\n", iface, pdwHash);
 
     *pdwHash = 0;
 
@@ -546,7 +551,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_IsRunning(
     IMoniker* pmkToLeft,
     IMoniker* pmkNewlyRunning)
 {
-    FIXME("(%p, %p, %p)\n", pbc, pmkToLeft, pmkNewlyRunning);
+    FIXME("(%p)->(%p, %p, %p): stub\n", iface, pbc, pmkToLeft, pmkNewlyRunning);
 
     return S_FALSE;
 }
@@ -557,7 +562,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_GetTimeOfLastChange(
     IMoniker* pmkToLeft,
     FILETIME* pFileTime)
 {
-    TRACE("(%p, %p, %p)\n", pbc, pmkToLeft, pFileTime);
+    TRACE("(%p)->(%p, %p, %p)\n", iface, pbc, pmkToLeft, pFileTime);
 
     pFileTime->dwLowDateTime = 0xFFFFFFFF;
     pFileTime->dwHighDateTime = 0x7FFFFFFF;
@@ -569,7 +574,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_Inverse(
     LPMONIKER iface,
     IMoniker** ppmk)
 {
-    TRACE("(%p)\n", ppmk);
+    TRACE("(%p)->(%p)\n", iface, ppmk);
 
     *ppmk = NULL;
 
@@ -581,7 +586,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_CommonPrefixWith(
     IMoniker* pmkOtherMoniker,
     IMoniker** ppmkPrefix)
 {
-    TRACE("(%p, %p)\n", pmkOtherMoniker, ppmkPrefix);
+    TRACE("(%p)->(%p, %p)\n", iface, pmkOtherMoniker, ppmkPrefix);
 
     *ppmkPrefix = NULL;
 
@@ -593,7 +598,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_RelativePathTo(
     IMoniker* pmkOther,
     IMoniker** ppmkRelPath)
 {
-    TRACE("(%p, %p)\n", pmkOther, ppmkRelPath);
+    TRACE("(%p)->(%p, %p)\n", iface, pmkOther, ppmkRelPath);
 
     *ppmkRelPath = pmkOther;
 
@@ -611,7 +616,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_GetDisplayName(
     static const WCHAR wszFriendlyName[] = {'F','r','i','e','n','d','l','y','N','a','m','e',0};
     LONG received = sizeof(wszFriendlyName);
 
-    TRACE("(%p, %p, %p)\n", pbc, pmkToLeft, ppszDisplayName);
+    TRACE("(%p)->(%p, %p, %p)\n", iface, pbc, pmkToLeft, ppszDisplayName);
 
     *ppszDisplayName = NULL;
 
@@ -634,7 +639,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_ParseDisplayName(
     ULONG* pchEaten,
     IMoniker** ppmkOut)
 {
-    FIXME("(%p, %p, %s, %p, %p)\n", pbc, pmkToLeft, debugstr_w(pszDisplayName), pchEaten, ppmkOut);
+    FIXME("(%p)->(%p, %p, %s, %p, %p)\n", iface, pbc, pmkToLeft, debugstr_w(pszDisplayName), pchEaten, ppmkOut);
 
     *pchEaten = 0;
     *ppmkOut = NULL;
@@ -646,7 +651,7 @@ static HRESULT WINAPI DEVENUM_IMediaCatMoniker_IsSystemMoniker(
     LPMONIKER iface,
     DWORD* pdwMksys)
 {
-    TRACE("(%p)\n", pdwMksys);
+    TRACE("(%p)->(%p)\n", iface, pdwMksys);
 
     return S_FALSE;
 }
@@ -705,14 +710,15 @@ static HRESULT WINAPI DEVENUM_IEnumMoniker_QueryInterface(
     LPVOID *ppvObj)
 {
     EnumMonikerImpl *This = (EnumMonikerImpl *)iface;
-    TRACE("\n\tIID:\t%s\n",debugstr_guid(riid));
+
+    TRACE("(%p)->(%s, %p)\n", iface, debugstr_guid(riid), ppvObj);
 
     if (This == NULL || ppvObj == NULL) return E_POINTER;
 
     if (IsEqualGUID(riid, &IID_IUnknown) ||
         IsEqualGUID(riid, &IID_IEnumMoniker))
     {
-        *ppvObj = (LPVOID)iface;
+        *ppvObj = iface;
         DEVENUM_IEnumMoniker_AddRef(iface);
         return S_OK;
     }

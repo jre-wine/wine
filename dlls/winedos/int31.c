@@ -183,7 +183,7 @@ static void INT_SetRealModeContext( REALMODECALL *call, CONTEXT86 *context )
 
 /**********************************************************************
  *          DPMI_xalloc
- * special virtualalloc, allocates lineary monoton growing memory.
+ * special virtualalloc, allocates linearly monoton growing memory.
  * (the usual VirtualAlloc does not satisfy that restriction)
  */
 static LPVOID DPMI_xalloc( DWORD len ) 
@@ -312,9 +312,14 @@ void DPMI_CallRMCB32(RMCB *rmcb, UINT16 ss, DWORD esp, UINT16*es, DWORD*edi)
 ;
 __ASM_GLOBAL_FUNC(DPMI_CallRMCB32,
     "pushl %ebp\n\t"
+    __ASM_CFI(".cfi_adjust_cfa_offset 4\n\t")
+    __ASM_CFI(".cfi_rel_offset %ebp,0\n\t")
     "movl %esp,%ebp\n\t"
+    __ASM_CFI(".cfi_def_cfa_register %ebp\n\t")
     "pushl %edi\n\t"
+    __ASM_CFI(".cfi_rel_offset %edi,-4\n\t")
     "pushl %esi\n\t"
+    __ASM_CFI(".cfi_rel_offset %esi,-8\n\t")
     "movl 0x8(%ebp),%eax\n\t"
     "movl 0x10(%ebp),%esi\n\t"
     "movl 0xc(%ebp),%edx\n\t"
@@ -339,8 +344,12 @@ __ASM_GLOBAL_FUNC(DPMI_CallRMCB32,
     "movl 0x18(%ebp),%edx\n\t"
     "movl %edi,(%edx)\n\t"
     "popl %esi\n\t"
+    __ASM_CFI(".cfi_same_value %esi\n\t")
     "popl %edi\n\t"
+    __ASM_CFI(".cfi_same_value %edi\n\t")
     "leave\n\t"
+    __ASM_CFI(".cfi_def_cfa %esp,4\n\t")
+    __ASM_CFI(".cfi_same_value %ebp\n\t")
     "ret")
 #endif
 
@@ -626,11 +635,11 @@ static void StartPM( CONTEXT86 *context )
     TRACE( "Protected mode DOS program is terminating\n" );
 
     /*
-     * FIXME: Instead of calling ExitThread, we should release all
+     * FIXME: Instead of calling DOSVM_Exit, we should release all
      *        allocated protected mode resources and call MZ_Exit
      *        using real mode context. See DPMI specification.
      */
-    ExitThread( DPMI_retval );
+    DOSVM_Exit( DPMI_retval );
 
 #if 0
     wine_ldt_free_entries( psp->environment, 1 );
@@ -702,12 +711,6 @@ static int DPMI_FreeRMCB( DWORD address )
 	return 0;
     }
     return 1;
-}
-
-
-void WINAPI DPMI_FreeInternalRMCB( FARPROC16 proc )
-{
-    DPMI_FreeRMCB( (DWORD)proc );
 }
 
 
@@ -1004,9 +1007,8 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
     case 0x000b:  /* Get descriptor */
         TRACE( "get descriptor (0x%04x)\n", BX_reg(context) );
         {
-            LDT_ENTRY *entry = (LDT_ENTRY*)CTX_SEG_OFF_TO_LIN( context,
-                                                               context->SegEs, 
-                                                               context->Edi );
+            LDT_ENTRY *entry = CTX_SEG_OFF_TO_LIN( context, context->SegEs,
+                                                   context->Edi );
             wine_ldt_get_entry( BX_reg(context), entry );
         }
         break;
@@ -1014,9 +1016,8 @@ void WINAPI DOSVM_Int31Handler( CONTEXT86 *context )
     case 0x000c:  /* Set descriptor */
         TRACE( "set descriptor (0x%04x)\n", BX_reg(context) );
         {
-            LDT_ENTRY *entry = (LDT_ENTRY*)CTX_SEG_OFF_TO_LIN( context,
-                                                               context->SegEs, 
-                                                               context->Edi );
+            LDT_ENTRY *entry = CTX_SEG_OFF_TO_LIN( context, context->SegEs,
+                                                   context->Edi );
             wine_ldt_set_entry( BX_reg(context), entry );
         }
         break;

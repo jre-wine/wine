@@ -69,7 +69,7 @@
  * (hdr)  IMAGE_SECTION_HEADER - list of COFF sections copied verbatim from .EXE;
  *        although this directory contains file offsets, these offsets are meaningless
  *        in the context of the .DBG file, because only the section headers are copied
- *        to the .DBG file...not the binary data it points to.
+ *        to the .DBG file... not the binary data it points to.
  * (hdr)  IMAGE_DEBUG_DIRECTORY - list of different formats of debug info contained in file
  *        (see IMAGE_DEBUG_TYPE_* descriptions below); tells where each section starts
  * (hdr)  OMFSignature (CV) - Contains "NBxx" signature, plus file offset telling how far
@@ -418,7 +418,7 @@ static void dump_codeview_headers(unsigned long base, unsigned long len)
         printf("      Filepos:           0x%08lX\n", pdb_data->filepos);
 	printf("      TimeStamp:         %08X (%s)\n",
 	       pdb_data->timestamp, get_time_str(pdb_data->timestamp));
-	printf("      Dunno:             %08X\n", pdb_data->unknown);
+	printf("      Age:               %08X\n", pdb_data->age);
 	printf("      Filename:          %s\n", pdb_data->name);
 	return;
     }
@@ -428,7 +428,7 @@ static void dump_codeview_headers(unsigned long base, unsigned long len)
 
 	rsds_data = (const void *)cv_base;
 	printf("      Guid:              %s\n", get_guid_str(&rsds_data->guid));
-	printf("      Dunno:             %08X\n", rsds_data->unknown);
+	printf("      Age:               %08X\n", rsds_data->age);
 	printf("      Filename:          %s\n", rsds_data->name);
 	return;
     }
@@ -514,7 +514,7 @@ static const char *get_coff_name( const IMAGE_SYMBOL *coff_sym, const char *coff
 
 void	dump_coff(unsigned long coffbase, unsigned long len, const void* pmt)
 {
-    const IMAGE_COFF_SYMBOLS_HEADER *coff = (const IMAGE_COFF_SYMBOLS_HEADER *)PRD(coffbase, len);
+    const IMAGE_COFF_SYMBOLS_HEADER *coff = PRD(coffbase, len);
     const IMAGE_SYMBOL              *coff_sym;
     const IMAGE_SYMBOL              *coff_symbols =
                                         (const IMAGE_SYMBOL *) ((const char *)coff + coff->LvaToFirstSymbol);
@@ -592,7 +592,7 @@ void	dump_frame_pointer_omission(unsigned long base, unsigned long len)
     printf("Range             #loc #pmt Prlg #reg Info\n"
            "-----------------+----+----+----+----+------------\n");
 
-    fpo = (const FPO_DATA*)PRD(base, len);
+    fpo = PRD(base, len);
     if (!fpo) {printf("Couldn't get FPO blob\n"); return;}
     last = (const FPO_DATA*)((const char*)fpo + len);
 

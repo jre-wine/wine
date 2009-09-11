@@ -199,7 +199,7 @@ struct fd
     struct async_queue  *write_q;     /* async writers of this fd */
     struct async_queue  *wait_q;      /* other async waiters of this fd */
     struct completion   *completion;  /* completion object attached to this fd */
-    unsigned long        comp_key;    /* completion key to set in completion events */
+    apc_param_t          comp_key;    /* completion key to set in completion events */
 };
 
 static void fd_dump( struct object *obj, int verbose );
@@ -1582,7 +1582,7 @@ struct fd *open_fd( const char *name, int flags, mode_t *mode, unsigned int acce
         /* if we tried to open a directory for write access, retry read-only */
         if (errno != EISDIR ||
             !(access & FILE_UNIX_WRITE_ACCESS) ||
-            (fd->unix_fd = open( name, O_RDONLY | (flags & ~O_TRUNC), *mode )) == -1)
+            (fd->unix_fd = open( name, O_RDONLY | (flags & ~(O_TRUNC | O_CREAT | O_EXCL)), *mode )) == -1)
         {
             file_set_error();
             goto error;
@@ -1710,6 +1710,12 @@ void set_fd_signaled( struct fd *fd, int signaled )
     if (signaled) wake_up( fd->user, 0 );
 }
 
+/* set or clear the fd signaled state */
+int is_fd_signaled( struct fd *fd )
+{
+    return fd->signaled;
+}
+
 /* handler for close_handle that refuses to close fd-associated handles in other processes */
 int fd_close_handle( struct object *obj, struct process *process, obj_handle_t handle )
 {
@@ -1769,7 +1775,7 @@ void default_poll_event( struct fd *fd, int event )
     else if (!fd->inode) set_fd_events( fd, fd->fd_ops->get_poll_events( fd ) );
 }
 
-struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type, int count )
+struct async *fd_queue_async( struct fd *fd, const async_data_t *data, int type )
 {
     struct async_queue *queue;
     struct async *async;
@@ -1830,7 +1836,7 @@ void default_fd_queue_async( struct fd *fd, const async_data_t *data, int type, 
 {
     struct async *async;
 
-    if ((async = fd_queue_async( fd, data, type, count )))
+    if ((async = fd_queue_async( fd, data, type )))
     {
         release_object( async );
         set_error( STATUS_PENDING );
@@ -1850,11 +1856,15 @@ void default_fd_reselect_async( struct fd *fd, struct async_queue *queue )
 }
 
 /* default cancel_async() fd routine */
-void default_fd_cancel_async( struct fd *fd )
+void default_fd_cancel_async( struct fd *fd, struct process *process, struct thread *thread, client_ptr_t iosb )
 {
-    async_wake_up( fd->read_q, STATUS_CANCELLED );
-    async_wake_up( fd->write_q, STATUS_CANCELLED );
-    async_wake_up( fd->wait_q, STATUS_CANCELLED );
+    int n = 0;
+
+    n += async_wake_up_by( fd->read_q, process, thread, iosb, STATUS_CANCELLED );
+    n += async_wake_up_by( fd->write_q, process, thread, iosb, STATUS_CANCELLED );
+    n += async_wake_up_by( fd->wait_q, process, thread, iosb, STATUS_CANCELLED );
+    if (!n && iosb)
+        set_error( STATUS_NOT_FOUND );
 }
 
 /* default flush() routine */
@@ -1912,7 +1922,7 @@ static void unmount_device( struct fd *device_fd )
 
 /* default ioctl() routine */
 obj_handle_t default_fd_ioctl( struct fd *fd, ioctl_code_t code, const async_data_t *async,
-                               const void *data, data_size_t size )
+                               int blocking, const void *data, data_size_t size )
 {
     switch(code)
     {
@@ -1940,10 +1950,16 @@ static struct fd *get_handle_fd_obj( struct process *process, obj_handle_t handl
     return fd;
 }
 
-void fd_assign_completion( struct fd *fd, struct completion **p_port, unsigned long *p_key )
+struct completion *fd_get_completion( struct fd *fd, apc_param_t *p_key )
 {
     *p_key = fd->comp_key;
-    *p_port = fd->completion ? (struct completion *)grab_object( fd->completion ) : NULL;
+    return fd->completion ? (struct completion *)grab_object( fd->completion ) : NULL;
+}
+
+void fd_copy_completion( struct fd *src, struct fd *dst )
+{
+    assert( !dst->completion );
+    dst->completion = fd_get_completion( src, &dst->comp_key );
 }
 
 /* flush a file buffers */
@@ -2011,11 +2027,11 @@ DECL_HANDLER(get_handle_fd)
 DECL_HANDLER(ioctl)
 {
     unsigned int access = (req->code >> 14) & (FILE_READ_DATA|FILE_WRITE_DATA);
-    struct fd *fd = get_handle_fd_obj( current->process, req->handle, access );
+    struct fd *fd = get_handle_fd_obj( current->process, req->async.handle, access );
 
     if (fd)
     {
-        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async,
+        reply->wait = fd->fd_ops->ioctl( fd, req->code, &req->async, req->blocking,
                                          get_req_data(), get_req_data_size() );
         reply->options = fd->options;
         release_object( fd );
@@ -2041,7 +2057,7 @@ DECL_HANDLER(register_async)
         return;
     }
 
-    if ((fd = get_handle_fd_obj( current->process, req->handle, access )))
+    if ((fd = get_handle_fd_obj( current->process, req->async.handle, access )))
     {
         if (get_unix_fd( fd ) != -1) fd->fd_ops->queue_async( fd, &req->async, req->type, req->count );
         release_object( fd );
@@ -2052,10 +2068,11 @@ DECL_HANDLER(register_async)
 DECL_HANDLER(cancel_async)
 {
     struct fd *fd = get_handle_fd_obj( current->process, req->handle, 0 );
+    struct thread *thread = req->only_thread ? current : NULL;
 
     if (fd)
     {
-        if (get_unix_fd( fd ) != -1) fd->fd_ops->cancel_async( fd );
+        if (get_unix_fd( fd ) != -1) fd->fd_ops->cancel_async( fd, current->process, thread, req->iosb );
         release_object( fd );
     }
 }

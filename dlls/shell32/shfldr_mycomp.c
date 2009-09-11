@@ -75,13 +75,13 @@ static inline IGenericSFImpl *impl_from_IPersistFolder2( IPersistFolder2 *iface 
 /*
   converts This to an interface pointer
 */
-#define _IUnknown_(This)    (IUnknown*)&(This->lpVtbl)
-#define _IShellFolder_(This)    (IShellFolder*)&(This->lpVtbl)
-#define _IShellFolder2_(This)    (IShellFolder2*)&(This->lpVtbl)
+#define _IUnknown_(This)        ((IUnknown*)&(This)->lpVtbl)
+#define _IShellFolder_(This)    ((IShellFolder*)&(This)->lpVtbl)
+#define _IShellFolder2_(This)   (&(This)->lpVtbl)
 
-#define _IPersist_(This)    (IPersist*)&(This->lpVtblPersistFolder2)
-#define _IPersistFolder_(This)    (IPersistFolder*)&(This->lpVtblPersistFolder2)
-#define _IPersistFolder2_(This)    (IPersistFolder2*)&(This->lpVtblPersistFolder2)
+#define _IPersist_(This)        (&(This)->lpVtblPersistFolder2)
+#define _IPersistFolder_(This)  (&(This)->lpVtblPersistFolder2)
+#define _IPersistFolder2_(This) (&(This)->lpVtblPersistFolder2)
 
 /***********************************************************************
 *   IShellFolder [MyComputer] implementation
@@ -119,7 +119,7 @@ HRESULT WINAPI ISF_MyComputer_Constructor (IUnknown * pUnkOuter, REFIID riid, LP
     sf->lpVtblPersistFolder2 = &vt_PersistFolder2;
     sf->pidlRoot = _ILCreateMyComputer ();    /* my qualified pidl */
 
-    if (!SUCCEEDED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
+    if (FAILED (IUnknown_QueryInterface (_IUnknown_ (sf), riid, ppv)))
     {
         IUnknown_Release (_IUnknown_ (sf));
         return E_NOINTERFACE;
@@ -187,7 +187,7 @@ static ULONG WINAPI ISF_MyComputer_fnRelease (IShellFolder2 * iface)
     {
         TRACE ("-- destroying IShellFolder(%p)\n", This);
         SHFree (This->pidlRoot);
-        LocalFree ((HLOCAL) This);
+        LocalFree (This);
     }
     return refCount;
 }

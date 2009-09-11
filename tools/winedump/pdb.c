@@ -160,6 +160,8 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
     PDB_SYMBOLS*    symbols;
     unsigned char*  modimage;
     const char*     file;
+    char*           filesimage;
+    DWORD           filessize = 0;
 
     symbols = reader->read_file(reader, 3);
 
@@ -170,6 +172,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
     case 0:            /* VC 4.0 */
     case 19960307:     /* VC 5.0 */
     case 19970606:     /* VC 6.0 */
+    case 19990903:     /* VC 7.0 */
         break;
     default:
         printf("-Unknown symbol info version %d\n", symbols->version);
@@ -180,7 +183,8 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
            "\tunknown:        %08x\n"
            "\thash1_file:     %08x\n"
            "\thash2_file:     %08x\n"
-           "\tgsym_file:      %08x\n"
+           "\tgsym_file:      %04x\n"
+           "\tunknown1:       %04x\n"
            "\tmodule_size:    %08x\n"
            "\toffset_size:    %08x\n"
            "\thash_size:      %08x\n"
@@ -192,6 +196,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
            symbols->hash1_file,
            symbols->hash2_file,
            symbols->gsym_file,
+           symbols->unknown1,
            symbols->module_size,
            symbols->offset_size,
            symbols->hash_size,
@@ -207,11 +212,28 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
         dump_data(src, symbols->offset_size, "    ");
     }
 
+    filesimage = reader->read_file(reader, 12);   /* FIXME: really fixed ??? */
+    if (filesimage)
+    {
+        if (*(const DWORD*)filesimage == 0xeffeeffe)
+        {
+            filessize = *(const DWORD*)(filesimage + 8);
+        }
+        else
+        {
+            printf("wrong header %x expecting 0xeffeeffe\n", *(const DWORD*)filesimage);
+            free(filesimage);
+            filesimage = NULL;
+        }
+    }
+
     if (symbols->srcmodule_size)
     {
         const PDB_SYMBOL_SOURCE*src;
-        int                     i;
+        int                     i, j, cfile;
+        const WORD*             indx;
         const DWORD*            offset;
+        const char*             start_cstr;
         const char*             cstr;
 
         printf("\t----------src module------------\n");
@@ -219,35 +241,38 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
                                          symbols->module_size + symbols->offset_size + symbols->hash_size);
         printf("\tSource Modules\n"
                "\t\tnModules:         %u\n"
-               "\t\tnSrcFiles:        %u\n"
-               "\t\ttable:\n",
+               "\t\tnSrcFiles:        %u\n",
                src->nModules, src->nSrcFiles);
 
         /* usage of table seems to be as follows:
          * two arrays of WORD (src->nModules as size)
-         *  - first array contains index into files for "module" compilation (module = compilation unit ??)
-         *  - second array contains increment in index (if needed)
-         *  - usage of this later is not very clear. it could be that if second array entry is null, then no file
-         *    name is to be used ?
-         * an array of DWORD (src->nSrcFiles as size)
+         *  - first array contains index into files for "module" compilation
+         *    (module = compilation unit ??)
+         *  - second array contains the number of source files in module
+         *    an array of DWORD (src->nSrcFiles as size)
          *  - contains offset (in following string table) of the source file name
-         * a string table
-         * - each string is a pascal string (ie. with its length as first BYTE) or
-         *   0-terminated string (depending on version)
+         *    a string table
+         *  - each string is a pascal string (ie. with its length as first BYTE) or
+         *    0-terminated string (depending on version)
          */
-
+        indx = &src->table[src->nModules];
         offset = (const DWORD*)&src->table[2 * src->nModules];
         cstr = (const char*)&src->table[2 * (src->nModules + src->nSrcFiles)];
+        start_cstr = cstr;
 
-        for (i = 0; i < src->nModules; i++)
+        for (i = cfile = 0; i < src->nModules; i++)
         {
-            /* FIXME: in some cases, it's a p_string but WHEN ? */
-            if (cstr + offset[src->table[i]] < (const char*)src + symbols->srcmodule_size)
-                printf("\t\t\tmodule[%2d]: src=%s (%04x)\n",
-                       i, cstr + offset[src->table[i]], src->table[src->nModules + i]);
-            else
-                printf("\t\t\tmodule[%2d]: src=<<out of bounds>> (%04x)\n",
-                       i, src->table[src->nModules + i]);
+            printf("\t\tModule[%2d]:\n", i);
+            for (j = 0; j < indx[i]; j++, cfile++)
+            {
+                /* FIXME: in some cases, it's a p_string but WHEN ? */
+                if (src->table[cfile] < src->nSrcFiles &&
+                    cstr + offset[src->table[cfile]] >= (const char*)start_cstr /* wrap around */ &&
+                    cstr + offset[src->table[cfile]] < (const char*)src + symbols->srcmodule_size)
+                    printf("\t\t\tSource file: %s\n", cstr + offset[src->table[cfile]]);
+                else
+                    printf("\t\t\tSource file: <<out of bounds>>\n");
+            }
         }
     }
     if (symbols->pdbimport_size)
@@ -309,7 +334,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
             lineno_size = sym_file->lineno_size;
             printf("\t--------symbol file----------- %s\n", file_name);
             printf("\tgot symbol_file\n"
-                   "\t\tunknown1:   %08x \n"
+                   "\t\tunknown1:   %08x\n"
                    "\t\trange\n"
                    "\t\t\tsegment:         %04x\n"
                    "\t\t\tpad1:            %04x\n"
@@ -349,7 +374,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
             symbol_size = sym_file->symbol_size;
             lineno_size = sym_file->lineno_size;
             printf("\t--------symbol file----------- %s\n", file_name);
-            printf("\t\tunknown1:   %08x \n"
+            printf("\t\tunknown1:   %08x\n"
                    "\t\trange\n"
                    "\t\t\tsegment:         %04x\n"
                    "\t\t\tpad1:            %04x\n"
@@ -397,6 +422,15 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
             if (symbol_size)
                 codeview_dump_symbols((const char*)modimage + sizeof(DWORD), symbol_size);
 
+            /* line number info */
+            if (lineno_size)
+                codeview_dump_linetab((const char*)modimage + symbol_size, lineno_size, TRUE, "        ");
+            /* anyway, lineno_size doesn't see to really be the size of the line number information, and
+             * it's not clear yet when to call for linetab2...
+             */
+            codeview_dump_linetab2((const char*)modimage + symbol_size + lineno_size,
+                                   total_size - (symbol_size + lineno_size),
+                                   filesimage + 12, filessize, "        ");
             /* what's that part ??? */
             if (0)
                 dump_data(modimage + symbol_size + lineno_size, total_size - (symbol_size + lineno_size), "    ");
@@ -407,6 +441,7 @@ static void pdb_dump_symbols(struct pdb_reader* reader)
         file = (char*)((DWORD_PTR)(file_name + strlen(file_name) + 1 + 3) & ~3);
     }
     free(symbols);
+    free(filesimage);
 }
 
 static void pdb_dump_types(struct pdb_reader* reader)
@@ -421,6 +456,7 @@ static void pdb_dump_types(struct pdb_reader* reader)
     case 19951122:
     case 19961031:      /* VC 5.0 / 6.0 */
     case 19990903:      /* VC 7.0 */
+    case 20040203:      /* VC 8.0 */
         break;
     default:
         printf("-Unknown type info version %d\n", types->version);

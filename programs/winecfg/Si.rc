@@ -20,6 +20,9 @@
  *
  */
 
+#include "config.h"   /* Needed for the PACKAGE_STRING definition */
+#include "resource.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -39,8 +42,13 @@ BEGIN
     LTEXT           PACKAGE_STRING,IDC_STATIC,119,17,120,8
     CONTROL         IDB_WINE,IDC_STATIC,"Static",SS_BITMAP ,15,17,157,111
     LTEXT           "http://www.winehq.org/",IDC_STATIC,119,31,106,8
-    LTEXT           "This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
+    LTEXT           "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Podatki o registraciji Oken ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Lastnik:", IDC_STATIC, 22, 126, 40, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT           "Organizacija:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -62,35 +70,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Nastavitve oken ",IDC_STATIC,8,4,244,184
+    GROUPBOX    " Nastavitve oken ",IDC_STATIC,8,4,244,84
+    CONTROL     "Dovoli DirectX programom, da preprečijo &miški zapuščanje okna",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    CONTROL     "Dovoli upravljalniku oken, da okra&si okna",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,32,230,8
+    CONTROL     "Dovoli upravljalniku &oken, da upravlja z Wine-ovimi okni",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,44,230,8
+    CONTROL     "Uporabi navidezni &zaslon",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,56,230,8
+    LTEXT       "&Velikost okna:",IDC_DESKTOP_SIZE,15,70,44,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,109,70,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,64,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,117,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL         "Dovoli DirectX programom, da preprečijo &miški zapuščanje okna",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,95,244,49
+    LTEXT       "&Podpora Vertex Shader: ",IDC_STATIC,15,110,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,108,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Omogoči &Pixel Shader (če to omogoča strojna oprema)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,126,230,10
 
-    CONTROL         "Dovoli upravljalniku oken, da okra&si okna",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,30,230,8
-
-    CONTROL	        "Dovoli upravljalniku &oken, da upravlja z Wine-ovimi okni",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,40,230,8
-    LTEXT           "Če z Wine-ovimi okni upravlja upravljalnik oken, so robovi, obnašanje in ostale nastavitve le-teh enake, kot za ostala okna vašega namizja, kar omogoča boljšo združitev z vašim namizjem.\n\nV nasprotnem primeru okna ne bodo tako tesno povezana z vašim namizjem, kar pa v nekaterih primerih omogoča pravilnejšo emulacijo in izboljša delovanje nekaterih programoh.",
-		           IDC_STATIC,19,51,225,70
-
-    CONTROL         "Uporabi navidezni &zaslon",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,118,230,10
-    LTEXT           "Uporaba navideznega zaslona povzroči prikaz vseh Wine-ovih oken znotraj enega samega okna (t.i. navidezni zaslon). V nasprotnem primeru so Wine-ova okna razvrščena po namizju, tako kot ostala okna vašega namizja.",
-                    IDC_STATIC,19,128,225,38
-    LTEXT           "&Velikost okna:",IDC_DESKTOP_SIZE,15,168,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,109,168,8,8,WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,166,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,190,244,48
-
-    LTEXT           "&Podpora Vertex Shader: ",IDC_STATIC,15,203,80,32
-    COMBOBOX        IDC_D3D_VSHADER_MODE,100,201,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Omogoči &Pixel Shader (če to omogoča strojna oprema)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,219,230,10
-    GROUPBOX        " Ločljivost &zaslona ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Ločljivost &zaslona ",IDC_STATIC,8,151,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,161,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,161,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "dpi",IDC_STATIC,235,163,10,8
+    LTEXT       "Vzorčno besedilo, napisano s pisavo Tahoma velikosti 10 točk",IDC_RES_FONT_PREVIEW,15,181,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -129,6 +129,7 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Preslikave &pogonov ",IDC_STATIC,8,4,244,240
+    LTEXT           "Napaka pri povezovanju z upravljalnikom priklopov (mount manager); nastavitev pogonov ne bo mogoče urejati.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Dodaj ...",IDC_BUTTON_ADD,15,98,37,14
@@ -136,7 +137,7 @@ BEGIN
     PUSHBUTTON      "&Samozaznaj ...",IDC_BUTTON_AUTODETECT,187,98,59,14
 
     /* editing drive details */
-    LTEXT           "&Pot:",IDC_STATIC,15,123,20,9
+    LTEXT           "&Pot:",IDC_STATIC_PATH,15,123,20,9
     EDITTEXT        IDC_EDIT_PATH,41,120,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Brskaj ...",IDC_BUTTON_BROWSE_PATH,206,120,40,13
 
@@ -165,19 +166,18 @@ IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Izbira gonilnika ",IDC_STATIC,8,4,244,195
+    GROUPBOX        " Izbira gonilnika ",IDC_STATIC,8,4,244,210
     LTEXT           "Omogočite želeni zvočni gonilnik tako, da ga obkljukate. Zvočni gonilniki, ki niso izbrani, bodo onemogočeni. Izbira več zvočnih gonilnikov ni priporočljiva. Če želite urediti nastavitve zvočnega gonilnika, kliknite nanj z desnim gumbom.",IDC_STATIC,15,20,227,40
-    CONTROL         "Naprave",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,60,140,130
+    CONTROL         "Naprave",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,60,140,145
     PUSHBUTTON      "&Preizkusi zvok",IDC_AUDIO_TEST,170,60,59,14
     PUSHBUTTON	    "&Nadzorna plošča",IDC_AUDIO_CONTROL_PANEL,170,80,59,14
-    GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60
-    LTEXT	    "&Strojno pospeševanje: ",IDC_STATIC,15,215,90,10
-    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,213,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "&Frekvenca vzorčenja:",IDC_STATIC,15,232,70,8
-    COMBOBOX        IDC_DSOUND_RATES,90,230,42,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Število &bitov na vzorec:",IDC_STATIC,137,232,80,8
-    COMBOBOX        IDC_DSOUND_BITS,220,230,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "&Emulacija gonilnika",IDC_DSOUND_DRV_EMUL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,250,230,10
+    GROUPBOX        " DirectSound ",IDC_STATIC,8,220,244,45
+    LTEXT	    "&Strojno pospeševanje: ",IDC_STATIC,15,230,90,10
+    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,228,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "&Frekvenca vzorčenja:",IDC_STATIC,15,247,70,8
+    COMBOBOX        IDC_DSOUND_RATES,90,245,42,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Število &bitov na vzorec:",IDC_STATIC,137,247,80,8
+    COMBOBOX        IDC_DSOUND_BITS,220,245,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 250
@@ -326,5 +326,3 @@ BEGIN
     IDC_SYSPARAMS_MENU_HILIGHT      "Meni: osvetljen"
     IDC_SYSPARAMS_MENUBAR           "Meni: vrstica"
 END
-
-#pragma code_page(default)

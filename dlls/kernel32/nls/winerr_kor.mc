@@ -18,6 +18,7 @@
 ;
 
 LanguageNames=(KOR=0x412:winerr)
+CodePages=(KOR=949:0)
 
 MessageId=0
 SymbolicName=ERROR_SUCCESS
@@ -3728,4 +3729,9 @@ MessageId=1929
 SymbolicName=RPC_S_GRP_ELT_NOT_REMOVED
 Language=KOR
 RPC_S_GRP_ELT_NOT_REMOVED
+.
+MessageId=2221
+SymbolicName=NERR_UserNotFound
+Language=KOR
+사용자 이름을 찾을 수 없습니다
 .

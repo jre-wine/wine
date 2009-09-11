@@ -41,6 +41,7 @@
 static CHAR does_not_exist_dll[]= "does_not_exist.dll";
 static CHAR does_not_exist[]    = "does_not_exist";
 static CHAR empty[]             = "";
+static CHAR env_x64[]           = "Windows x64";
 static CHAR env_x86[]           = "Windows NT x86";
 static CHAR env_win9x_case[]    = "windowS 4.0";
 static CHAR illegal_name[]      = "illegal,name";
@@ -176,6 +177,7 @@ static struct monitor_entry * find_installed_monitor(void)
     static struct monitor_entry  monitor_table[] = {
         {env_win9x_case, "localspl.dll"},
         {env_x86,        "localspl.dll"},
+        {env_x64,        "localspl.dll"},
         {env_win9x_case, "localmon.dll"},
         {env_x86,        "localmon.dll"},
         {env_win9x_case, "tcpmon.dll"},
@@ -196,6 +198,7 @@ static struct monitor_entry * find_installed_monitor(void)
     num_tests = (sizeof(monitor_table)/sizeof(struct monitor_entry));
 
     /* cleanup */
+    DeleteMonitorA(NULL, env_x64, winetest);
     DeleteMonitorA(NULL, env_x86, winetest);
     DeleteMonitorA(NULL, env_win9x_case, winetest);
 
@@ -342,7 +345,7 @@ static void test_AddMonitor(void)
     {
     /* The Test is deactivated, because when mi2a.pName is NULL, the subkey
        HKLM\System\CurrentControlSet\Control\Print\Monitors\C:\WINDOWS\SYSTEM
-       or HKLM\System\CurrentControlSet\Control\Print\Monitors\ì
+       or HKLM\System\CurrentControlSet\Control\Print\Monitors\Ã¬
        is created on win9x and we do not want to hit this bug here. */
 
     mi2a.pEnvironment = entry->env;
@@ -476,7 +479,7 @@ static void test_AddPortEx(void)
 
 
     if (!pAddPortExA) {
-        skip("AddPortEx not supported\n");
+        win_skip("AddPortEx not supported\n");
         return;
     }
 
@@ -693,7 +696,9 @@ static void test_DeleteMonitor(void)
     AddMonitorA(NULL, 2, (LPBYTE) &mi2a);
     SetLastError(MAGIC_DEAD);
     res = DeleteMonitorA(NULL, invalid_env, winetest);
-    ok(res, "returned %d with %d (expected '!=0')\n", res, GetLastError());
+    ok( res ||
+        (!res && GetLastError() == ERROR_INVALID_ENVIRONMENT) /* Vista/W2K8 */,
+        "returned %d with %d\n", res, GetLastError());
 
     /* the monitor-name */
     AddMonitorA(NULL, 2, (LPBYTE) &mi2a);
@@ -1102,6 +1107,8 @@ static void test_EnumPorts(void)
 
 static void test_EnumPrinterDrivers(void)
 {
+    static char env_all[] = "all";
+
     DWORD   res;
     LPBYTE  buffer;
     DWORD   cbBuf;
@@ -1205,6 +1212,28 @@ static void test_EnumPrinterDrivers(void)
 
         HeapFree(GetProcessHeap(), 0, buffer);
     } /* for(level ... */
+
+    pcbNeeded = 0;
+    pcReturned = 0;
+    SetLastError(0xdeadbeef);
+    res = EnumPrinterDriversA(NULL, env_all, 1, NULL, 0, &pcbNeeded, &pcReturned);
+    if (res)
+    {
+        skip("no printer drivers found\n");
+        return;
+    }
+    if (GetLastError() == ERROR_INVALID_ENVIRONMENT)
+    {
+        win_skip("NT4 and below don't support the 'all' environment value\n");
+        return;
+    }
+    ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "unexpected error %u\n", GetLastError());
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, pcbNeeded);
+    res = EnumPrinterDriversA(NULL, env_all, 1, buffer, pcbNeeded, &pcbNeeded, &pcReturned);
+    ok(res, "EnumPrinterDriversA failed %u\n", GetLastError());
+
+    HeapFree(GetProcessHeap(), 0, buffer);
 }
 
 /* ########################### */
@@ -2230,7 +2259,7 @@ static void test_EnumPrinters(void)
     /* EnumPrintersW is not supported on all platforms */
     if (!ret && (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED))
     {
-        skip("EnumPrintersW is not implemented\n");
+        win_skip("EnumPrintersW is not implemented\n");
         return;
     }
 
@@ -2345,19 +2374,25 @@ static void test_DeviceCapabilities(void)
     ok(n_copies > 0, "DeviceCapabilities DC_COPIES failed\n");
     trace("n_copies = %d\n", n_copies);
 
-    ret = DeviceCapabilities(device, port, DC_MAXEXTENT, NULL, NULL);
-    ok(ret != -1, "DeviceCapabilities DC_MAXEXTENT failed\n");
-    ext = MAKEPOINTS(ret);
-    trace("max ext = %d x %d\n", ext.x, ext.y);
+    /* these capabilities not available on all printer drivers */
+    if (0)
+    {
+        ret = DeviceCapabilities(device, port, DC_MAXEXTENT, NULL, NULL);
+        ok(ret != -1, "DeviceCapabilities DC_MAXEXTENT failed\n");
+        ext = MAKEPOINTS(ret);
+        trace("max ext = %d x %d\n", ext.x, ext.y);
 
-    ret = DeviceCapabilities(device, port, DC_MINEXTENT, NULL, NULL);
-    ok(ret != -1, "DeviceCapabilities DC_MINEXTENT failed\n");
-    ext = MAKEPOINTS(ret);
-    trace("min ext = %d x %d\n", ext.x, ext.y);
+        ret = DeviceCapabilities(device, port, DC_MINEXTENT, NULL, NULL);
+        ok(ret != -1, "DeviceCapabilities DC_MINEXTENT failed\n");
+        ext = MAKEPOINTS(ret);
+        trace("min ext = %d x %d\n", ext.x, ext.y);
+    }
 
     fields = DeviceCapabilities(device, port, DC_FIELDS, NULL, NULL);
     ok(fields != (DWORD)-1, "DeviceCapabilities DC_FIELDS failed\n");
-    ok(fields == dm->dmFields, "fields %x != dm->dmFields %x\n", fields, dm->dmFields);
+    todo_wine
+    ok(fields == (dm->dmFields | DM_FORMNAME),
+        "fields %x != (dm->dmFields | DM_FORMNAME) %x\n", fields, dm->dmFields);
 
     GlobalUnlock(prn_dlg.hDevMode);
     GlobalFree(prn_dlg.hDevMode);

@@ -66,6 +66,60 @@ static const WCHAR parmY[] = {'/','Y','\0'};
 static const WCHAR parmNoY[] = {'/','-','Y','\0'};
 static const WCHAR nullW[] = {'\0'};
 
+/**************************************************************************
+ * WCMD_ask_confirm
+ *
+ * Issue a message and ask 'Are you sure (Y/N)', waiting on a valid
+ * answer.
+ *
+ * Returns True if Y (or A) answer is selected
+ *         If optionAll contains a pointer, ALL is allowed, and if answered
+ *                   set to TRUE
+ *
+ */
+static BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll) {
+
+    WCHAR  msgbuffer[MAXSTRING];
+    WCHAR  Ybuffer[MAXSTRING];
+    WCHAR  Nbuffer[MAXSTRING];
+    WCHAR  Abuffer[MAXSTRING];
+    WCHAR  answer[MAX_PATH] = {'\0'};
+    DWORD count = 0;
+
+    /* Load the translated 'Are you sure', plus valid answers */
+    LoadString (hinst, WCMD_CONFIRM, msgbuffer, sizeof(msgbuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_YES, Ybuffer, sizeof(Ybuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_NO,  Nbuffer, sizeof(Nbuffer)/sizeof(WCHAR));
+    LoadString (hinst, WCMD_ALL, Abuffer, sizeof(Abuffer)/sizeof(WCHAR));
+
+    /* Loop waiting on a Y or N */
+    while (answer[0] != Ybuffer[0] && answer[0] != Nbuffer[0]) {
+      static const WCHAR startBkt[] = {' ','(','\0'};
+      static const WCHAR endBkt[]   = {')','?','\0'};
+
+      WCMD_output_asis (message);
+      if (showSureText) {
+        WCMD_output_asis (msgbuffer);
+      }
+      WCMD_output_asis (startBkt);
+      WCMD_output_asis (Ybuffer);
+      WCMD_output_asis (fslashW);
+      WCMD_output_asis (Nbuffer);
+      if (optionAll) {
+          WCMD_output_asis (fslashW);
+          WCMD_output_asis (Abuffer);
+      }
+      WCMD_output_asis (endBkt);
+      WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer,
+                     sizeof(answer)/sizeof(WCHAR), &count, NULL);
+      answer[0] = toupperW(answer[0]);
+    }
+
+    /* Return the answer */
+    return ((answer[0] == Ybuffer[0]) ||
+            (optionAll && (answer[0] == Abuffer[0])));
+}
+
 /****************************************************************************
  * WCMD_clear_screen
  *
@@ -979,7 +1033,7 @@ void WCMD_part_execute(CMD_LIST **cmdList, WCHAR *firstcmd, WCHAR *variable,
   if (conditionTRUE && firstcmd && *firstcmd) {
     WCHAR *command = WCMD_strdupW(firstcmd);
     WCMD_execute (firstcmd, (*cmdList)->redirects, variable, value, cmdList);
-    free (command);
+    HeapFree(GetProcessHeap(), 0, command);
   }
 
 
@@ -1007,7 +1061,7 @@ void WCMD_part_execute(CMD_LIST **cmdList, WCHAR *firstcmd, WCHAR *variable,
       /* FIXME: Only if previous call worked for && or failed for || */
       if ((*cmdList)->prevDelim == CMD_ONFAILURE ||
           (*cmdList)->prevDelim != CMD_ONSUCCESS) {
-        if (processThese) {
+        if (processThese && (*cmdList)->command) {
           WCMD_execute ((*cmdList)->command, (*cmdList)->redirects, variable,
                         value, cmdList);
         }
@@ -2018,6 +2072,8 @@ void WCMD_setshow_env (WCHAR *s) {
 
     s += 2;
     while (*s && *s==' ') s++;
+    if (*s=='\"')
+        WCMD_opt_s_strip_quotes(s);
 
     /* If no parameter, or no '=' sign, return an error */
     if (!(*s) || ((p = strchrW (s, '=')) == NULL )) {
@@ -2042,6 +2098,9 @@ void WCMD_setshow_env (WCHAR *s) {
 
   } else {
     DWORD gle;
+
+    if (*s=='\"')
+        WCMD_opt_s_strip_quotes(s);
     p = strchrW (s, '=');
     if (p == NULL) {
       env = GetEnvironmentStrings ();
@@ -2135,7 +2194,7 @@ void WCMD_setshow_time (void) {
     GetLocalTime(&st);
     if (GetTimeFormat (LOCALE_USER_DEFAULT, 0, &st, NULL,
 		curtime, sizeof(curtime)/sizeof(WCHAR))) {
-      WCMD_output (WCMD_LoadMessage(WCMD_CURRENTDATE), curtime);
+      WCMD_output (WCMD_LoadMessage(WCMD_CURRENTTIME), curtime);
       if (strstrW (quals, parmT) == NULL) {
         WCMD_output (WCMD_LoadMessage(WCMD_NEWTIME));
         WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), buffer,
@@ -2236,12 +2295,14 @@ void WCMD_type (WCHAR *command) {
         static const WCHAR fmt[] = {'\n','%','s','\n','\n','\0'};
         WCMD_output(fmt, thisArg);
       }
-      while (WCMD_ReadFile (h, buffer, sizeof(buffer)/sizeof(WCHAR), &count, NULL)) {
+      while (WCMD_ReadFile (h, buffer, sizeof(buffer)/sizeof(WCHAR) - 1, &count, NULL)) {
         if (count == 0) break;	/* ReadFile reports success on EOF! */
         buffer[count] = 0;
         WCMD_output_asis (buffer);
       }
       CloseHandle (h);
+      if (!writeHeaders)
+          WCMD_output_asis (newline);
     }
   }
 }
@@ -2482,59 +2543,6 @@ void WCMD_exit (CMD_LIST **cmdList) {
     }
 }
 
-/**************************************************************************
- * WCMD_ask_confirm
- *
- * Issue a message and ask 'Are you sure (Y/N)', waiting on a valid
- * answer.
- *
- * Returns True if Y (or A) answer is selected
- *         If optionAll contains a pointer, ALL is allowed, and if answered
- *                   set to TRUE
- *
- */
-BOOL WCMD_ask_confirm (WCHAR *message, BOOL showSureText, BOOL *optionAll) {
-
-    WCHAR  msgbuffer[MAXSTRING];
-    WCHAR  Ybuffer[MAXSTRING];
-    WCHAR  Nbuffer[MAXSTRING];
-    WCHAR  Abuffer[MAXSTRING];
-    WCHAR  answer[MAX_PATH] = {'\0'};
-    DWORD count = 0;
-
-    /* Load the translated 'Are you sure', plus valid answers */
-    LoadString (hinst, WCMD_CONFIRM, msgbuffer, sizeof(msgbuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_YES, Ybuffer, sizeof(Ybuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_NO,  Nbuffer, sizeof(Nbuffer)/sizeof(WCHAR));
-    LoadString (hinst, WCMD_ALL, Abuffer, sizeof(Abuffer)/sizeof(WCHAR));
-
-    /* Loop waiting on a Y or N */
-    while (answer[0] != Ybuffer[0] && answer[0] != Nbuffer[0]) {
-      static const WCHAR startBkt[] = {' ','(','\0'};
-      static const WCHAR endBkt[]   = {')','?','\0'};
-
-      WCMD_output_asis (message);
-      if (showSureText) {
-        WCMD_output_asis (msgbuffer);
-      }
-      WCMD_output_asis (startBkt);
-      WCMD_output_asis (Ybuffer);
-      WCMD_output_asis (fslashW);
-      WCMD_output_asis (Nbuffer);
-      if (optionAll) {
-          WCMD_output_asis (fslashW);
-          WCMD_output_asis (Abuffer);
-      }
-      WCMD_output_asis (endBkt);
-      WCMD_ReadFile (GetStdHandle(STD_INPUT_HANDLE), answer,
-                     sizeof(answer)/sizeof(WCHAR), &count, NULL);
-      answer[0] = toupperW(answer[0]);
-    }
-
-    /* Return the answer */
-    return ((answer[0] == Ybuffer[0]) ||
-            (optionAll && (answer[0] == Abuffer[0])));
-}
 
 /*****************************************************************************
  * WCMD_assoc

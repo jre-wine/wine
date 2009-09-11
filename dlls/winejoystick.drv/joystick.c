@@ -78,7 +78,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(joystick);
 
 #ifdef HAVE_LINUX_JOYSTICK_H
 
-#define MAXJOYSTICK	(JOYSTICKID2 + 1)
+#define MAXJOYSTICK (JOYSTICKID2 + 30)
 
 typedef struct tagWINE_JSTCK {
     int		joyIntf;
@@ -100,7 +100,10 @@ typedef struct tagWINE_JSTCK {
     int         r;
     int         u;
     int         v;
+    int         pov_x;
+    int         pov_y;
     int         buttons;
+    char        axesMap[ABS_MAX + 1];
 } WINE_JSTCK;
 
 static	WINE_JSTCK	JSTCK_Data[MAXJOYSTICK];
@@ -178,8 +181,13 @@ static	int	JSTCK_OpenDevice(WINE_JSTCK* jstick)
 #endif
     if ((jstick->dev = open(buf, flags)) < 0) {
         sprintf(buf, JOYDEV_OLD, jstick->joyIntf);
+        if ((jstick->dev = open(buf, flags)) < 0)
+            return jstick->dev;
     }
-    return (jstick->dev = open(buf, flags));
+#ifdef HAVE_LINUX_22_JOYSTICK_API
+    ioctl(jstick->dev, JSIOCGAXMAP, jstick->axesMap);
+#endif
+    return jstick->dev;
 }
 
 
@@ -194,6 +202,7 @@ static LRESULT JSTCK_GetDevCaps(DWORD_PTR dwDevID, LPJOYCAPSW lpCaps, DWORD dwSi
     char	nrOfAxes;
     char	nrOfButtons;
     char	identString[MAXPNAMELEN];
+    int		i;
     int		driverVersion;
 #else
 static const WCHAR ini[] = {'W','i','n','e',' ','J','o','y','s','t','i','c','k',' ','D','r','i','v','e','r',0};
@@ -207,12 +216,12 @@ static const WCHAR ini[] = {'W','i','n','e',' ','J','o','y','s','t','i','c','k',
     ioctl(dev, JSIOCGAXES, &nrOfAxes);
     ioctl(dev, JSIOCGBUTTONS, &nrOfButtons);
     ioctl(dev, JSIOCGVERSION, &driverVersion);
-    ioctl(dev, JSIOCGNAME(sizeof(identString)), &identString);
+    ioctl(dev, JSIOCGNAME(sizeof(identString)), identString);
     TRACE("Driver: 0x%06x, Name: %s, #Axes: %d, #Buttons: %d\n",
 	  driverVersion, identString, nrOfAxes, nrOfButtons);
     lpCaps->wMid = MM_MICROSOFT;
     lpCaps->wPid = MM_PC_JOYSTICK;
-    MultiByteToWideChar(CP_ACP, 0, identString, -1, lpCaps->szPname, MAXPNAMELEN);
+    MultiByteToWideChar(CP_UNIXCP, 0, identString, -1, lpCaps->szPname, MAXPNAMELEN);
     lpCaps->szPname[MAXPNAMELEN-1] = '\0';
     lpCaps->wXmin = 0;
     lpCaps->wXmax = 0xFFFF;
@@ -234,28 +243,51 @@ static const WCHAR ini[] = {'W','i','n','e',' ','J','o','y','s','t','i','c','k',
     lpCaps->wNumButtons = nrOfButtons;
 #endif
     if (dwSize == sizeof(JOYCAPSW)) {
-	/* since we suppose ntOfAxes <= 6 in the following code, do it explicitly */
-	if (nrOfAxes > 6) nrOfAxes = 6;
 	/* complete 95 structure */
 	lpCaps->wRmin = 0;
-	lpCaps->wRmax = nrOfAxes >= 4 ? 0xFFFF : 0;
+	lpCaps->wRmax = 0xFFFF;
 	lpCaps->wUmin = 0;
-	lpCaps->wUmax = nrOfAxes >= 5 ? 0xFFFF : 0;
+	lpCaps->wUmax = 0xFFFF;
 	lpCaps->wVmin = 0;
-	lpCaps->wVmax = nrOfAxes >= 6 ? 0xFFFF : 0;
+	lpCaps->wVmax = 0xFFFF;
 	lpCaps->wMaxAxes = 6; /* same as MS Joystick Driver */
-	lpCaps->wNumAxes = nrOfAxes; /* nr of axes in use */
+	lpCaps->wNumAxes = 0; /* nr of axes in use */
 	lpCaps->wMaxButtons = 32; /* same as MS Joystick Driver */
 	lpCaps->szRegKey[0] = 0;
 	lpCaps->szOEMVxD[0] = 0;
 	lpCaps->wCaps = 0;
-	switch(nrOfAxes) {
-	case 6: lpCaps->wCaps |= JOYCAPS_HASV;
-	case 5: lpCaps->wCaps |= JOYCAPS_HASU;
-	case 4: lpCaps->wCaps |= JOYCAPS_HASR;
-	case 3: lpCaps->wCaps |= JOYCAPS_HASZ;
-	    /* FIXME: don't know how to detect for
-	       JOYCAPS_HASPOV, JOYCAPS_POV4DIR, JOYCAPS_POVCTS */
+        for (i = 0; i < nrOfAxes; i++) {
+	    switch (jstck->axesMap[i]) {
+	    case 0: /* X */
+	    case 1: /* Y */
+		lpCaps->wNumAxes++;
+		break;
+	    case 2: /* Z */
+	    case 6: /* Throttle */
+		lpCaps->wNumAxes++;
+		lpCaps->wCaps |= JOYCAPS_HASZ;
+		break;
+	    case 5: /* Rz */
+	    case 7: /* Rudder */
+		lpCaps->wNumAxes++;
+		lpCaps->wCaps |= JOYCAPS_HASR;
+		break;
+	    case 3: /* Rx */
+		lpCaps->wNumAxes++;
+		lpCaps->wCaps |= JOYCAPS_HASU;
+		break;
+	    case 4: /* Ry */
+		lpCaps->wNumAxes++;
+		lpCaps->wCaps |= JOYCAPS_HASV;
+		break;
+	    case 16: /* Hat 0 X */
+	    case 17: /* Hat 0 Y */
+		lpCaps->wCaps |= JOYCAPS_HASPOV | JOYCAPS_POV4DIR;
+		/* TODO: JOYCAPS_POVCTS handling */
+		break;
+	    default:
+		WARN("Unknown axis %hhu(%hhu). Skipped.\n", jstck->axesMap[i], i);
+	    }
 	}
     }
 #else
@@ -311,24 +343,32 @@ static LRESULT JSTCK_GetPosEx(DWORD_PTR dwDevID, LPJOYINFOEX lpInfo)
 #ifdef HAVE_LINUX_22_JOYSTICK_API
     while ((read(dev, &ev, sizeof(struct js_event))) > 0) {
 	if (ev.type == (JS_EVENT_AXIS)) {
-	    switch (ev.number) {
-	    case 0:
+	    switch (jstck->axesMap[ev.number]) {
+	    case 0: /* X */
 		jstck->x = ev.value;
 		break;
-	    case 1:
+	    case 1: /* Y */
 		jstck->y = ev.value;
 		break;
-	    case 2:
+	    case 2: /* Z */
+	    case 6: /* Throttle */
 		jstck->z = ev.value;
 		break;
-	    case 3:
+	    case 5: /* Rz */
+	    case 7: /* Rudder */
 		jstck->r = ev.value;
 		break;
-	    case 4:
+	    case 3: /* Rx */
 		jstck->u = ev.value;
 		break;
-	    case 5:
+	    case 4: /* Ry */
 		jstck->v = ev.value;
+		break;
+	    case 16: /* Hat 0 X */
+		jstck->pov_x = ev.value;
+		break;
+	    case 17: /* Hat 0 Y */
+		jstck->pov_y = ev.value;
 		break;
 	    default:
 		FIXME("Unknown joystick event '%d'\n", ev.number);
@@ -384,6 +424,28 @@ static LRESULT JSTCK_GetPosEx(DWORD_PTR dwDevID, LPJOYINFOEX lpInfo)
 # endif
     if (lpInfo->dwFlags & JOY_RETURNV)
        lpInfo->dwVpos   = jstck->v + 32767;
+    if (lpInfo->dwFlags & JOY_RETURNPOV) {
+	if (jstck->pov_y > 0) {
+	    if (jstck->pov_x < 0)
+		lpInfo->dwPOV = 22500; /* SW */
+	    else if (jstck->pov_x > 0)
+		lpInfo->dwPOV = 13500; /* SE */
+	    else
+		lpInfo->dwPOV = 18000; /* S, JOY_POVBACKWARD */
+	} else if (jstck->pov_y < 0) {
+	    if (jstck->pov_x < 0)
+		lpInfo->dwPOV = 31500; /* NW */
+	    else if (jstck->pov_x > 0)
+		lpInfo->dwPOV = 4500; /* NE */
+	    else
+		lpInfo->dwPOV = 0; /* N, JOY_POVFORWARD */
+	} else if (jstck->pov_x < 0)
+	    lpInfo->dwPOV = 27000; /* W, JOY_POVLEFT */
+	else if (jstck->pov_x > 0)
+	    lpInfo->dwPOV = 9000; /* E, JOY_POVRIGHT */
+	else
+	    lpInfo->dwPOV = JOY_POVCENTERED; /* Center */
+    }
 
 #else
     dev_stat = read(dev, &js, sizeof(js));

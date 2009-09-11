@@ -16,6 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "shresdef.h"
+
 #pragma code_page(65001)
 
 LANGUAGE LANG_SLOVENIAN, SUBLANG_DEFAULT
@@ -92,6 +94,28 @@ BEGIN
 	END
 END
 
+MENU_CPANEL MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_CPANEL_EXIT
+    END
+
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Ve&like ikone", FCIDM_SHVIEW_BIGICON
+        MENUITEM "&Male ikone", FCIDM_SHVIEW_SMALLICON
+        MENUITEM "&Seznam", FCIDM_SHVIEW_LISTVIEW
+        MENUITEM "Po&drobnosti", FCIDM_SHVIEW_REPORTVIEW
+    END
+
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&O Nadzorni plošči ...", IDM_CPANEL_ABOUT
+    END
+END
+
 SHBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 188, 192
 STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Brskanje po mapah"
@@ -108,7 +132,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 SHNEWBRSFORFOLDER_MSGBOX DIALOG LOADONCALL MOVEABLE DISCARDABLE 15, 40, 218, 196
-STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
+STYLE DS_MODALFRAME | WS_CAPTION | WS_SYSMENU | WS_SIZEBOX | DS_MODALFRAME | DS_SETFONT | DS_3DLOOK
 CAPTION "Brskanje po mapah"
 FONT 8, "MS Shell Dlg"
 {
@@ -188,6 +212,7 @@ STRINGTABLE
 	IDS_DESKTOP		"Namizje"
 	IDS_MYCOMPUTER		"Moj računalnik"
 	IDS_RECYCLEBIN_FOLDER_NAME      "Smeti"
+	IDS_CONTROLPANEL	"Control Panel"
 
         /* context menus */
 	IDS_VIEW_LARGE		"Ve&like ikone"
@@ -214,13 +239,19 @@ STRINGTABLE
 	    "Datoteke v ciljni mapi, ki imajo enaka imena kot datoteke v izvorni mapi\n"\
 	    "bodo prepisane. Ali še vedno želite premakniti oziroma kopirati mapo?"
 
-        /* message box strings */
-        IDS_RESTART_TITLE       "Ponoven zagon"
-        IDS_RESTART_PROMPT      "Ali želite simulirati ponoven zagon Oken?"
-        IDS_SHUTDOWN_TITLE      "Izklop"
-        IDS_SHUTDOWN_PROMPT     "Ali želite zaključiti vašo Wine sejo?"
+    /* message box strings */
+    IDS_RESTART_TITLE       "Ponoven zagon"
+    IDS_RESTART_PROMPT      "Ali želite simulirati ponoven zagon Oken?"
+    IDS_SHUTDOWN_TITLE      "Izklop"
+    IDS_SHUTDOWN_PROMPT     "Ali želite zaključiti vašo Wine sejo?"
 
-        /* shell folder path default values */
+    /* Run File dialog */
+    IDS_RUNDLG_ERROR           "Dialoga 'Zagon programa' ni mogoče prikazati (notranja napaka)"
+    IDS_RUNDLG_BROWSE_ERROR    "Dialoga 'Brskanje' ni mogoče prikazati (notranja napaka)"
+    IDS_RUNDLG_BROWSE_CAPTION  "Brskanje"
+    IDS_RUNDLG_BROWSE_FILTER   "Izvršljive datoteke\0*.exe\0All Files\0*.*\0\0"
+
+    /* shell folder path default values */
 	IDS_PROGRAMS                "Meni Start\\Programi"
 	IDS_PERSONAL                "Moji dokumenti"
 	IDS_FAVORITES               "Priljubljene"
@@ -250,6 +281,12 @@ STRINGTABLE
 	IDS_CDBURN_AREA             "Lokalne nastavitve\\Podatki programov\\Microsoft\\Zapisovanje CD-jev"
 
 	IDS_NEWFOLDER		"Nova mapa"
+
+	IDS_CPANEL_TITLE            "Wine Nadzorna Plošča"
+	IDS_CPANEL_NAME             "Ime"
+	IDS_CPANEL_DESCRIPTION      "Opis"
+
+        IDS_SHLEXEC_NOASSOC         "Noben Okenski program ni nastavljen, da bi odpiral ta tip datotek."
 }
 
 STRINGTABLE
@@ -268,6 +305,3 @@ You should have received a copy of the GNU Lesser General Public \
 License along with this library; if not, write to the Free Software \
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA."
 }
-
-
-#pragma code_page(default)

@@ -1,0 +1,32 @@
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = windowscodecs.dll
+IMPORTLIB = windowscodecs
+IMPORTS   = uuid ole32 advapi32 kernel32
+EXTRAINCL = @PNGINCL@
+
+C_SRCS = \
+	bmpdecode.c \
+	bmpencode.c \
+	clsfactory.c \
+	converter.c \
+	gifformat.c \
+	icoformat.c \
+	imgfactory.c \
+	info.c \
+	jpegformat.c \
+	main.c \
+	palette.c \
+	pngformat.c \
+	propertybag.c \
+	regsvr.c \
+	stream.c \
+	ungif.c
+
+RC_SRCS = version.rc
+
+@MAKE_DLL_RULES@
+
+@DEPENDENCIES@  # everything below this line is overwritten by make depend

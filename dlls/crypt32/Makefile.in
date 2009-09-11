@@ -6,7 +6,6 @@ VPATH     = @srcdir@
 MODULE    = crypt32.dll
 IMPORTLIB = crypt32
 IMPORTS   = user32 advapi32 kernel32 ntdll
-DELAYIMPORTS = imagehlp
 
 C_SRCS = \
 	base64.c \
@@ -15,10 +14,12 @@ C_SRCS = \
 	collectionstore.c \
 	context.c \
 	crl.c \
+	ctl.c \
 	decode.c \
 	encode.c \
 	filestore.c \
 	main.c \
+	message.c \
 	msg.c \
 	object.c \
 	oid.c \
@@ -32,7 +33,18 @@ C_SRCS = \
 	store.c \
 	str.c
 
-RC_SRCS = crypt32.rc
+RC_SRCS = \
+	crypt32_De.rc \
+	crypt32_En.rc \
+	crypt32_Fr.rc \
+	crypt32_Ko.rc \
+	crypt32_Lt.rc \
+	crypt32_Nl.rc \
+	crypt32_No.rc \
+	crypt32_Pt.rc \
+	crypt32_Ro.rc \
+	crypt32_Sv.rc \
+	version.rc
 
 @MAKE_DLL_RULES@
 

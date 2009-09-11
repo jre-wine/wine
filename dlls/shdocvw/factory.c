@@ -26,6 +26,8 @@
 #include "advpub.h"
 #include "isguids.h"
 
+#include "winver.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(shdocvw);
@@ -132,6 +134,8 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
     static IClassFactoryImpl WB1ClassFactory = {&WBCF_Vtbl, WebBrowserV1_Create};
     static IClassFactoryImpl WB2ClassFactory = {&WBCF_Vtbl, WebBrowserV2_Create};
     static IClassFactoryImpl CUHClassFactory = {&WBCF_Vtbl, CUrlHistory_Create};
+    static IClassFactoryImpl ISCClassFactory = {&WBCF_Vtbl, InternetShortcut_Create};
+    static IClassFactoryImpl TBLClassFactory = {&WBCF_Vtbl, TaskbarList_Create};
 
     TRACE("\n");
 
@@ -143,6 +147,12 @@ HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void **ppv)
 
     if(IsEqualGUID(&CLSID_CUrlHistory, rclsid))
         return IClassFactory_QueryInterface(FACTORY(&CUHClassFactory), riid, ppv);
+
+    if(IsEqualGUID(&CLSID_InternetShortcut, rclsid))
+        return IClassFactory_QueryInterface(FACTORY(&ISCClassFactory), riid, ppv);
+
+    if(IsEqualGUID(&CLSID_TaskbarList, rclsid))
+        return IClassFactory_QueryInterface(FACTORY(&TBLClassFactory), riid, ppv);
 
     /* As a last resort, figure if the CLSID belongs to a 'Shell Instance Object' */
     return SHDOCVW_GetShellInstanceObjectClassObject(rclsid, riid, ppv);
@@ -207,9 +217,9 @@ static const GUID CLSID_MruLongList =
 static HRESULT register_server(BOOL doregister)
 {
     STRTABLEA strtable;
-    STRENTRYA pse[14];
-    static CLSID const *clsids[14];
-    int i = 0;
+    STRENTRYA pse[15];
+    static CLSID const *clsids[15];
+    unsigned int i = 0;
     HRESULT hres;
 
     INF_SET_CLSID(CUrlHistory);
@@ -224,6 +234,7 @@ static HRESULT register_server(BOOL doregister)
     INF_SET_CLSID(ShellShellNameSpace);
     INF_SET_CLSID(ShellUIHelper);
     INF_SET_CLSID(ShellWindows);
+    INF_SET_CLSID(TaskbarList);
     INF_SET_CLSID(WebBrowser);
     INF_SET_CLSID(WebBrowser_V1);
 
@@ -287,8 +298,42 @@ HRESULT WINAPI DllUnregisterServer(void)
     return UnRegisterTypeLib(&LIBID_SHDocVw, 1, 1, LOCALE_SYSTEM_DEFAULT, SYS_WIN32);
 }
 
+static BOOL check_native_ie(void)
+{
+    static const WCHAR cszPath[] = {'b','r','o','w','s','e','u','i','.','d','l','l',0};
+    DWORD handle,size;
+    BOOL ret = TRUE;
+
+    size = GetFileVersionInfoSizeW(cszPath,&handle);
+    if (size)
+    {
+        LPVOID buf;
+        LPWSTR lpFileDescription;
+        UINT dwBytes;
+        static const WCHAR cszFD[] = {'\\','S','t','r','i','n','g','F','i','l','e','I','n','f','o','\\','0','4','0','9','0','4','e','4','\\','F','i','l','e','D','e','s','c','r','i','p','t','i','o','n',0};
+        static const WCHAR cszWine[] = {'W','i','n','e',0};
+
+        buf = HeapAlloc(GetProcessHeap(),0,size);
+        GetFileVersionInfoW(cszPath,0,size,buf);
+
+        if (VerQueryValueW(buf, cszFD, (LPVOID*)&lpFileDescription, &dwBytes) &&
+            strstrW(lpFileDescription,cszWine))
+                ret = FALSE;
+
+        HeapFree(GetProcessHeap(), 0, buf);
+    }
+
+    return ret;
+}
+
 DWORD register_iexplore(BOOL doregister)
 {
-    HRESULT hres = reg_install(doregister ? "RegisterIE" : "UnregisterIE", NULL);
-    return !SUCCEEDED(hres);
+    HRESULT hres;
+    if (check_native_ie())
+    {
+        TRACE("Native IE detected, not doing registration\n");
+        return S_OK;
+    }
+    hres = reg_install(doregister ? "RegisterIE" : "UnregisterIE", NULL);
+    return FAILED(hres);
 }

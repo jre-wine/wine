@@ -260,7 +260,7 @@ struct _CRYPT_PROVIDER_DATA;
 
 #define TRUSTERROR_MAX_STEPS                   38
 
-typedef void * (WINAPI *PFN_CPD_MEM_ALLOC)(DWORD cbSize);
+typedef void * (__WINE_ALLOC_SIZE(1) WINAPI *PFN_CPD_MEM_ALLOC)(DWORD cbSize);
 typedef void (WINAPI *PFN_CPD_MEM_FREE)(void *pvMem2Free);
 typedef BOOL (WINAPI *PFN_CPD_ADD_STORE)(struct _CRYPT_PROVIDER_DATA *pProvData,
  HCERTSTORE hStore2Add);
@@ -385,6 +385,10 @@ typedef struct _CRYPT_PROVUI_FUNCS {
 
 #include <poppack.h>
 
+#define WVT_OFFSETOF(t,f)     ((ULONG)((ULONG_PTR)(&((t*)0)->f)))
+#define WVT_ISINSTRUCT(t,s,f) (WVT_OFFSETOF(t,f) + sizeof(((t*)0)->f) <= (s))
+#define WVT_IS_CBSTRUCT_GT_MEMBEROFFSET(t,s,f) WVT_ISINSTRUCT(t,s,f)
+
 #define WTPF_TRUSTTEST            0x00000020
 #define WTPF_TESTCANBEVALID       0x00000080
 #define WTPF_IGNOREEXPIRATION     0x00000100
@@ -428,6 +432,7 @@ CRYPT_PROVIDER_SGNR * WINAPI WTHelperGetProvSignerFromChain(
  CRYPT_PROVIDER_DATA *pProvData, DWORD idxSigner, BOOL fCounterSigner,
  DWORD idxCounterSigner);
 CRYPT_PROVIDER_DATA * WINAPI WTHelperProvDataFromStateData(HANDLE hStateData);
+CRYPT_PROVIDER_PRIVDATA * WINAPI WTHelperGetProvPrivateDataFromChain(CRYPT_PROVIDER_DATA *,GUID *);
 
 #define SPC_INDIRECT_DATA_OBJID      "1.3.6.1.4.1.311.2.1.4"
 #define SPC_SP_AGENCY_INFO_OBJID     "1.3.6.1.4.1.311.2.1.10"

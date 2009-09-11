@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Stefan Dösinger(for CodeWeavers)
+ * Copyright (C) 2008 Stefan DÃ¶singer(for CodeWeavers)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -21,8 +21,8 @@
  */
 
 #define COBJMACROS
+#include <initguid.h>
 #include <d3d9.h>
-#include <dxerr9.h>
 #include "wine/test.h"
 
 static HMODULE d3d9_handle = 0;
@@ -34,7 +34,7 @@ static HWND create_window(void)
 {
     WNDCLASS wc = {0};
     HWND ret;
-    wc.lpfnWndProc = &DefWindowProc;
+    wc.lpfnWndProc = DefWindowProc;
     wc.lpszClassName = "d3d9_test_wc";
     RegisterClass(&wc);
 
@@ -43,7 +43,7 @@ static HWND create_window(void)
     return ret;
 }
 
-static unsigned long getref(IUnknown *obj) {
+static ULONG getref(IUnknown *obj) {
     IUnknown_AddRef(obj);
     return IUnknown_Release(obj);
 }
@@ -58,10 +58,16 @@ static void test_qi_base_to_ex(void)
     HWND window = create_window();
     D3DPRESENT_PARAMETERS present_parameters;
 
+    if (!d3d9)
+    {
+        skip("Direct3D9 is not available\n");
+        return;
+    }
+
     hr = IDirect3D9_QueryInterface(d3d9, &IID_IDirect3D9Ex, (void **) &d3d9ex);
     ok(hr == E_NOINTERFACE,
-       "IDirect3D9::QueryInterface for IID_IDirect3D9Ex returned %s, expected E_NOINTERFACE\n",
-       DXGetErrorString9(hr));
+       "IDirect3D9::QueryInterface for IID_IDirect3D9Ex returned %08x, expected E_NOINTERFACE\n",
+       hr);
     ok(d3d9ex == NULL, "QueryInterface returned interface %p, expected NULL\n", d3d9ex);
     if(d3d9ex) IDirect3D9Ex_Release(d3d9ex);
 
@@ -81,8 +87,8 @@ static void test_qi_base_to_ex(void)
 
     hr = IDirect3DDevice9_QueryInterface(device, &IID_IDirect3DDevice9Ex, (void **) &deviceEx);
     ok(hr == E_NOINTERFACE,
-       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %s, expected E_NOINTERFACE\n",
-       DXGetErrorString9(hr));
+       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %08x, expected E_NOINTERFACE\n",
+       hr);
     ok(deviceEx == NULL, "QueryInterface returned interface %p, expected NULL\n", deviceEx);
     if(deviceEx) IDirect3DDevice9Ex_Release(deviceEx);
 
@@ -102,10 +108,10 @@ static void test_qi_ex_to_base(void)
     HRESULT hr;
     HWND window = create_window();
     D3DPRESENT_PARAMETERS present_parameters;
-    unsigned long ref;
+    ULONG ref;
 
     hr = pDirect3DCreate9Ex(D3D_SDK_VERSION, &d3d9ex);
-    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "Direct3DCreate9Ex returned %s\n", DXGetErrorString9(hr));
+    ok(hr == D3D_OK || hr == D3DERR_NOTAVAILABLE, "Direct3DCreate9Ex returned %08x\n", hr);
     if(FAILED(hr)) {
         skip("Direct3D9Ex is not available\n");
         goto out;
@@ -113,14 +119,14 @@ static void test_qi_ex_to_base(void)
 
     hr = IDirect3D9Ex_QueryInterface(d3d9ex, &IID_IDirect3D9, (void **) &d3d9);
     ok(hr == D3D_OK,
-       "IDirect3D9Ex::QueryInterface for IID_IDirect3D9 returned %s, expected D3D_OK\n",
-       DXGetErrorString9(hr));
+       "IDirect3D9Ex::QueryInterface for IID_IDirect3D9 returned %08x, expected D3D_OK\n",
+       hr);
     ok(d3d9 != NULL && d3d9 != (void *) 0xdeadbeef,
        "QueryInterface returned interface %p, expected != NULL && != 0xdeadbeef\n", d3d9);
     ref = getref((IUnknown *) d3d9ex);
-    ok(ref == 2, "IDirect3D9Ex refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3D9Ex refcount is %d, expected 2\n", ref);
     ref = getref((IUnknown *) d3d9);
-    ok(ref == 2, "IDirect3D9 refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3D9 refcount is %d, expected 2\n", ref);
 
     memset(&present_parameters, 0, sizeof(present_parameters));
     present_parameters.Windowed = TRUE;
@@ -140,14 +146,14 @@ static void test_qi_ex_to_base(void)
 
     hr = IDirect3DDevice9_QueryInterface(device, &IID_IDirect3DDevice9Ex, (void **) &deviceEx);
     ok(hr == D3D_OK,
-       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %s, expected D3D_OK\n",
-       DXGetErrorString9(hr));
+       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %08x, expected D3D_OK\n",
+       hr);
     ok(deviceEx != NULL && deviceEx != (void *) 0xdeadbeef,
        "QueryInterface returned interface %p, expected != NULL && != 0xdeadbeef\n", deviceEx);
     ref = getref((IUnknown *) device);
-    ok(ref == 2, "IDirect3DDevice9 refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3DDevice9 refcount is %d, expected 2\n", ref);
     ref = getref((IUnknown *) deviceEx);
-    ok(ref == 2, "IDirect3DDevice9Ex refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3DDevice9Ex refcount is %d, expected 2\n", ref);
     if(deviceEx) IDirect3DDevice9Ex_Release(deviceEx);
     IDirect3DDevice9_Release(device);
 
@@ -160,14 +166,14 @@ static void test_qi_ex_to_base(void)
 
     hr = IDirect3DDevice9_QueryInterface(device, &IID_IDirect3DDevice9Ex, (void **) &deviceEx);
     ok(hr == D3D_OK,
-       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %s, expected D3D_OK\n",
-       DXGetErrorString9(hr));
+       "IDirect3D9Device::QueryInterface for IID_IDirect3DDevice9Ex returned %08x, expected D3D_OK\n",
+       hr);
     ok(deviceEx != NULL && deviceEx != (void *) 0xdeadbeef,
        "QueryInterface returned interface %p, expected != NULL && != 0xdeadbeef\n", deviceEx);
     ref = getref((IUnknown *) device);
-    ok(ref == 2, "IDirect3DDevice9 refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3DDevice9 refcount is %d, expected 2\n", ref);
     ref = getref((IUnknown *) deviceEx);
-    ok(ref == 2, "IDirect3DDevice9Ex refcount is %ld, expected 2\n", ref);
+    ok(ref == 2, "IDirect3DDevice9Ex refcount is %d, expected 2\n", ref);
     if(deviceEx) IDirect3DDevice9Ex_Release(deviceEx);
     IDirect3DDevice9_Release(device);
 
@@ -193,7 +199,7 @@ START_TEST(d3d9ex)
 
     pDirect3DCreate9Ex = (void *)GetProcAddress(d3d9_handle, "Direct3DCreate9Ex");
     if (!pDirect3DCreate9Ex) {
-        skip("Failed to get address of Direct3DCreate9Ex\n");
+        win_skip("Failed to get address of Direct3DCreate9Ex\n");
         return;
     }
 

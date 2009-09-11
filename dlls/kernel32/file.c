@@ -3,6 +3,7 @@
  *
  * Copyright 1993 John Burton
  * Copyright 1996, 2004 Alexandre Julliard
+ * Copyright 2008 Jeff Zaroyko
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -346,7 +347,7 @@ static void FILE_InitProcessDosHandles( void )
  */
 static void WINAPI FILE_ReadWriteApc(void* apc_user, PIO_STATUS_BLOCK io_status, ULONG reserved)
 {
-    LPOVERLAPPED_COMPLETION_ROUTINE  cr = (LPOVERLAPPED_COMPLETION_ROUTINE)apc_user;
+    LPOVERLAPPED_COMPLETION_ROUTINE  cr = apc_user;
 
     cr(RtlNtStatusToDosError(io_status->u.Status), io_status->Information, (LPOVERLAPPED)io_status);
 }
@@ -559,16 +560,6 @@ BOOL WINAPI WriteFile( HANDLE hFile, LPCVOID buffer, DWORD bytesToWrite,
     status = NtWriteFile(hFile, hEvent, NULL, cvalue, piosb,
                          buffer, bytesToWrite, poffset, NULL);
 
-    /* FIXME: NtWriteFile does not always cause page faults, generate them now */
-    if (status == STATUS_INVALID_USER_BUFFER && !IsBadReadPtr( buffer, bytesToWrite ))
-    {
-        status = NtWriteFile(hFile, hEvent, NULL, cvalue, piosb,
-                             buffer, bytesToWrite, poffset, NULL);
-        if (status != STATUS_INVALID_USER_BUFFER)
-            FIXME("Could not access memory (%p,%d) at first, now OK. Protected by DIBSection code?\n",
-                  buffer, bytesToWrite);
-    }
-
     if (status == STATUS_PENDING && !overlapped)
     {
         WaitForSingleObject( hFile, INFINITE );
@@ -612,12 +603,6 @@ BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
 
     TRACE( "(%p %p %p %x)\n", hFile, lpOverlapped, lpTransferred, bWait );
 
-    if ( lpOverlapped == NULL )
-    {
-        ERR("lpOverlapped was null\n");
-        return FALSE;
-    }
-
     status = lpOverlapped->Internal;
     if (status == STATUS_PENDING)
     {
@@ -633,10 +618,36 @@ BOOL WINAPI GetOverlappedResult(HANDLE hFile, LPOVERLAPPED lpOverlapped,
         status = lpOverlapped->Internal;
     }
 
-    if (lpTransferred) *lpTransferred = lpOverlapped->InternalHigh;
+    *lpTransferred = lpOverlapped->InternalHigh;
 
     if (status) SetLastError( RtlNtStatusToDosError(status) );
     return !status;
+}
+
+/***********************************************************************
+ *             CancelIoEx                 (KERNEL32.@)
+ *
+ * Cancels pending I/O operations on a file given the overlapped used.
+ *
+ * PARAMS
+ *  handle        [I] File handle.
+ *  lpOverlapped  [I,OPT] pointer to overlapped (if null, cancel all)
+ *
+ * RETURNS
+ *  Success: TRUE.
+ *  Failure: FALSE, check GetLastError().
+ */
+BOOL WINAPI CancelIoEx(HANDLE handle, LPOVERLAPPED lpOverlapped)
+{
+    IO_STATUS_BLOCK    io_status;
+
+    NtCancelIoFileEx(handle, (PIO_STATUS_BLOCK) lpOverlapped, &io_status);
+    if (io_status.u.Status)
+    {
+        SetLastError( RtlNtStatusToDosError( io_status.u.Status ) );
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /***********************************************************************
@@ -899,11 +910,11 @@ DWORD WINAPI GetFileSize( HANDLE hFile, LPDWORD filesizehigh )
  */
 BOOL WINAPI GetFileSizeEx( HANDLE hFile, PLARGE_INTEGER lpFileSize )
 {
-    FILE_END_OF_FILE_INFORMATION info;
+    FILE_STANDARD_INFORMATION info;
     IO_STATUS_BLOCK io;
     NTSTATUS status;
 
-    status = NtQueryInformationFile( hFile, &io, &info, sizeof(info), FileEndOfFileInformation );
+    status = NtQueryInformationFile( hFile, &io, &info, sizeof(info), FileStandardInformation );
     if (status == STATUS_SUCCESS)
     {
         *lpFileSize = info.EndOfFile;
@@ -1315,6 +1326,7 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
     IO_STATUS_BLOCK io;
     HANDLE ret;
     DWORD dosdev;
+    const WCHAR *vxd_name = NULL;
     static const WCHAR bkslashes_with_dotW[] = {'\\','\\','.','\\',0};
     static const WCHAR coninW[] = {'C','O','N','I','N','$',0};
     static const WCHAR conoutW[] = {'C','O','N','O','U','T','$',0};
@@ -1370,19 +1382,9 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
         {
             dosdev += MAKELONG( 0, 4*sizeof(WCHAR) );  /* adjust position to start of filename */
         }
-        else if (!(GetVersion() & 0x80000000))
+        else if (GetVersion() & 0x80000000)
         {
-            dosdev = 0;
-        }
-        else if (filename[4])
-        {
-            ret = VXD_Open( filename+4, access, sa );
-            goto done;
-        }
-        else
-        {
-            SetLastError( ERROR_INVALID_NAME );
-            return INVALID_HANDLE_VALUE;
+            vxd_name = filename + 4;
         }
     }
     else dosdev = RtlIsDosDeviceName_U( filename );
@@ -1464,6 +1466,8 @@ HANDLE WINAPI CreateFileW( LPCWSTR filename, DWORD access, DWORD sharing,
                            options, NULL, 0 );
     if (status)
     {
+        if (vxd_name && vxd_name[0] && (ret = VXD_Open( vxd_name, access, sa ))) goto done;
+
         WARN("Unable to create file %s (status %x)\n", debugstr_w(filename), status);
         ret = INVALID_HANDLE_VALUE;
 
@@ -1528,6 +1532,8 @@ BOOL WINAPI DeleteFileW( LPCWSTR path )
     UNICODE_STRING nameW;
     OBJECT_ATTRIBUTES attr;
     NTSTATUS status;
+    HANDLE hFile;
+    IO_STATUS_BLOCK io;
 
     TRACE("%s\n", debugstr_w(path) );
 
@@ -1544,7 +1550,12 @@ BOOL WINAPI DeleteFileW( LPCWSTR path )
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
 
-    status = NtDeleteFile(&attr);
+    status = NtCreateFile(&hFile, GENERIC_READ | GENERIC_WRITE | DELETE,
+			  &attr, &io, NULL, 0,
+			  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+			  FILE_OPEN, FILE_DELETE_ON_CLOSE | FILE_NON_DIRECTORY_FILE, NULL, 0);
+    if (status == STATUS_SUCCESS) status = NtClose(hFile);
+
     RtlFreeUnicodeString( &nameW );
     if (status)
     {
@@ -1968,7 +1979,7 @@ BOOL WINAPI FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *data )
         SetLastError( ERROR_INVALID_HANDLE );
         return ret;
     }
-    info = (FIND_FIRST_INFO *)handle;
+    info = handle;
     if (info->magic != FIND_FIRST_MAGIC)
     {
         SetLastError( ERROR_INVALID_HANDLE );
@@ -2052,7 +2063,7 @@ BOOL WINAPI FindNextFileW( HANDLE handle, WIN32_FIND_DATAW *data )
  */
 BOOL WINAPI FindClose( HANDLE handle )
 {
-    FIND_FIRST_INFO *info = (FIND_FIRST_INFO *)handle;
+    FIND_FIRST_INFO *info = handle;
 
     if (!handle || handle == INVALID_HANDLE_VALUE)
     {
@@ -2120,7 +2131,7 @@ HANDLE WINAPI FindFirstFileExA( LPCSTR lpFileName, FINDEX_INFO_LEVELS fInfoLevel
     handle = FindFirstFileExW(nameW, fInfoLevelId, &dataW, fSearchOp, lpSearchFilter, dwAdditionalFlags);
     if (handle == INVALID_HANDLE_VALUE) return handle;
 
-    dataA = (WIN32_FIND_DATAA *) lpFindFileData;
+    dataA = lpFindFileData;
     dataA->dwFileAttributes = dataW.dwFileAttributes;
     dataA->ftCreationTime   = dataW.ftCreationTime;
     dataA->ftLastAccessTime = dataW.ftLastAccessTime;

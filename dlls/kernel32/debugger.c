@@ -25,7 +25,6 @@
 #include "wine/winbase16.h"
 #include "wine/server.h"
 #include "kernel_private.h"
-#include "kernel16_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(debugstr);
@@ -50,7 +49,7 @@ BOOL WINAPI WaitForDebugEvent(
     DWORD         timeout)
 {
     BOOL ret;
-    DWORD res;
+    DWORD i, res;
 
     for (;;)
     {
@@ -64,7 +63,7 @@ BOOL WINAPI WaitForDebugEvent(
 
             if (!wine_server_reply_size(reply))  /* timeout */
             {
-                wait = reply->wait;
+                wait = wine_server_ptr_handle( reply->wait );
                 ret = FALSE;
                 goto done;
             }
@@ -74,51 +73,57 @@ BOOL WINAPI WaitForDebugEvent(
             switch(data.code)
             {
             case EXCEPTION_DEBUG_EVENT:
-                event->u.Exception.ExceptionRecord = data.info.exception.record;
-                event->u.Exception.dwFirstChance   = data.info.exception.first;
+                event->u.Exception.dwFirstChance = data.exception.first;
+                event->u.Exception.ExceptionRecord.ExceptionCode    = data.exception.exc_code;
+                event->u.Exception.ExceptionRecord.ExceptionFlags   = data.exception.flags;
+                event->u.Exception.ExceptionRecord.ExceptionRecord  = wine_server_get_ptr( data.exception.record );
+                event->u.Exception.ExceptionRecord.ExceptionAddress = wine_server_get_ptr( data.exception.address );
+                event->u.Exception.ExceptionRecord.NumberParameters = data.exception.nb_params;
+                for (i = 0; i < data.exception.nb_params; i++)
+                    event->u.Exception.ExceptionRecord.ExceptionInformation[i] = data.exception.params[i];
                 break;
             case CREATE_THREAD_DEBUG_EVENT:
-                event->u.CreateThread.hThread           = data.info.create_thread.handle;
-                event->u.CreateThread.lpThreadLocalBase = data.info.create_thread.teb;
-                event->u.CreateThread.lpStartAddress    = data.info.create_thread.start;
+                event->u.CreateThread.hThread           = wine_server_ptr_handle( data.create_thread.handle );
+                event->u.CreateThread.lpThreadLocalBase = wine_server_get_ptr( data.create_thread.teb );
+                event->u.CreateThread.lpStartAddress    = wine_server_get_ptr( data.create_thread.start );
                 break;
             case CREATE_PROCESS_DEBUG_EVENT:
-                event->u.CreateProcessInfo.hFile                 = data.info.create_process.file;
-                event->u.CreateProcessInfo.hProcess              = data.info.create_process.process;
-                event->u.CreateProcessInfo.hThread               = data.info.create_process.thread;
-                event->u.CreateProcessInfo.lpBaseOfImage         = data.info.create_process.base;
-                event->u.CreateProcessInfo.dwDebugInfoFileOffset = data.info.create_process.dbg_offset;
-                event->u.CreateProcessInfo.nDebugInfoSize        = data.info.create_process.dbg_size;
-                event->u.CreateProcessInfo.lpThreadLocalBase     = data.info.create_process.teb;
-                event->u.CreateProcessInfo.lpStartAddress        = data.info.create_process.start;
-                event->u.CreateProcessInfo.lpImageName           = data.info.create_process.name;
-                event->u.CreateProcessInfo.fUnicode              = data.info.create_process.unicode;
+                event->u.CreateProcessInfo.hFile                 = wine_server_ptr_handle( data.create_process.file );
+                event->u.CreateProcessInfo.hProcess              = wine_server_ptr_handle( data.create_process.process );
+                event->u.CreateProcessInfo.hThread               = wine_server_ptr_handle( data.create_process.thread );
+                event->u.CreateProcessInfo.lpBaseOfImage         = wine_server_get_ptr( data.create_process.base );
+                event->u.CreateProcessInfo.dwDebugInfoFileOffset = data.create_process.dbg_offset;
+                event->u.CreateProcessInfo.nDebugInfoSize        = data.create_process.dbg_size;
+                event->u.CreateProcessInfo.lpThreadLocalBase     = wine_server_get_ptr( data.create_process.teb );
+                event->u.CreateProcessInfo.lpStartAddress        = wine_server_get_ptr( data.create_process.start );
+                event->u.CreateProcessInfo.lpImageName           = wine_server_get_ptr( data.create_process.name );
+                event->u.CreateProcessInfo.fUnicode              = data.create_process.unicode;
                 break;
             case EXIT_THREAD_DEBUG_EVENT:
-                event->u.ExitThread.dwExitCode = data.info.exit.exit_code;
+                event->u.ExitThread.dwExitCode = data.exit.exit_code;
                 break;
             case EXIT_PROCESS_DEBUG_EVENT:
-                event->u.ExitProcess.dwExitCode = data.info.exit.exit_code;
+                event->u.ExitProcess.dwExitCode = data.exit.exit_code;
                 break;
             case LOAD_DLL_DEBUG_EVENT:
-                event->u.LoadDll.hFile                 = data.info.load_dll.handle;
-                event->u.LoadDll.lpBaseOfDll           = data.info.load_dll.base;
-                event->u.LoadDll.dwDebugInfoFileOffset = data.info.load_dll.dbg_offset;
-                event->u.LoadDll.nDebugInfoSize        = data.info.load_dll.dbg_size;
-                event->u.LoadDll.lpImageName           = data.info.load_dll.name;
-                event->u.LoadDll.fUnicode              = data.info.load_dll.unicode;
+                event->u.LoadDll.hFile                 = wine_server_ptr_handle( data.load_dll.handle );
+                event->u.LoadDll.lpBaseOfDll           = wine_server_get_ptr( data.load_dll.base );
+                event->u.LoadDll.dwDebugInfoFileOffset = data.load_dll.dbg_offset;
+                event->u.LoadDll.nDebugInfoSize        = data.load_dll.dbg_size;
+                event->u.LoadDll.lpImageName           = wine_server_get_ptr( data.load_dll.name );
+                event->u.LoadDll.fUnicode              = data.load_dll.unicode;
                 break;
             case UNLOAD_DLL_DEBUG_EVENT:
-                event->u.UnloadDll.lpBaseOfDll = data.info.unload_dll.base;
+                event->u.UnloadDll.lpBaseOfDll = wine_server_get_ptr( data.unload_dll.base );
                 break;
             case OUTPUT_DEBUG_STRING_EVENT:
-                event->u.DebugString.lpDebugStringData  = data.info.output_string.string;
-                event->u.DebugString.fUnicode           = data.info.output_string.unicode;
-                event->u.DebugString.nDebugStringLength = data.info.output_string.length;
+                event->u.DebugString.lpDebugStringData  = wine_server_get_ptr( data.output_string.string );
+                event->u.DebugString.fUnicode           = data.output_string.unicode;
+                event->u.DebugString.nDebugStringLength = data.output_string.length;
                 break;
             case RIP_EVENT:
-                event->u.RipInfo.dwError = data.info.rip_info.error;
-                event->u.RipInfo.dwType  = data.info.rip_info.type;
+                event->u.RipInfo.dwError = data.rip_info.error;
+                event->u.RipInfo.dwType  = data.rip_info.type;
                 break;
             }
         done:
@@ -237,7 +242,7 @@ void WINAPI OutputDebugStringA( LPCSTR str )
 {
     SERVER_START_REQ( output_debug_string )
     {
-        req->string  = (void *)str;
+        req->string  = wine_server_client_ptr( str );
         req->unicode = 0;
         req->length  = strlen(str) + 1;
         wine_server_call( req );
@@ -264,7 +269,7 @@ void WINAPI OutputDebugStringW( LPCWSTR str )
 {
     SERVER_START_REQ( output_debug_string )
     {
-        req->string  = (void *)str;
+        req->string  = wine_server_client_ptr( str );
         req->unicode = 1;
         req->length  = (lstrlenW(str) + 1) * sizeof(WCHAR);
         wine_server_call( req );
@@ -327,7 +332,7 @@ BOOL WINAPI DebugBreakProcess(HANDLE hProc)
 
     SERVER_START_REQ( debug_break )
     {
-        req->handle = hProc;
+        req->handle = wine_server_obj_handle( hProc );
         ret = !wine_server_call_err( req );
         self = ret && reply->self;
     }
@@ -400,24 +405,6 @@ BOOL WINAPI CheckRemoteDebuggerPresent(HANDLE process, PBOOL DebuggerPresent)
     FIXME("(%p)->(%p): Stub!\n", process, DebuggerPresent);
     *DebuggerPresent = FALSE;
     return TRUE;
-}
-
-/***********************************************************************
- *           _DebugOutput                    (KERNEL.328)
- */
-void WINAPIV _DebugOutput( WORD flags, LPCSTR spec, VA_LIST16 valist )
-{
-    char caller[101];
-
-    /* Decode caller address */
-    if (!GetModuleName16( GetExePtr(CURRENT_STACK16->cs), caller, sizeof(caller) ))
-        sprintf( caller, "%04X:%04X", CURRENT_STACK16->cs, CURRENT_STACK16->ip );
-
-    /* FIXME: cannot use wvsnprintf16 from kernel */
-    /* wvsnprintf16( temp, sizeof(temp), spec, valist ); */
-
-    /* Output */
-    FIXME("%s %04x %s\n", caller, flags, debugstr_a(spec) );
 }
 
 /***********************************************************************

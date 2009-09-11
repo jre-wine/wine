@@ -53,7 +53,7 @@ BOOL types_get_real_type(struct dbg_type* type, DWORD* tag)
  * Given a lvalue, try to get an integral (or pointer/address) value
  * out of it
  */
-LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
+LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue, unsigned* psize)
 {
     LONGLONG            rtn;
     DWORD               tag, bt;
@@ -68,6 +68,7 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
         return (long int)memory_to_linear_addr(&lvalue->addr);
     }
 
+    if (psize) *psize = 0;
     switch (tag)
     {
     case SymTagBaseType:
@@ -96,6 +97,7 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
         case btFloat:
             RaiseException(DEBUG_STATUS_NOT_AN_INTEGER, 0, 0, NULL);
         }
+        if (psize) *psize = (unsigned)size;
         break;
     case SymTagPointerType:
         if (!be_cpu->fetch_integer(lvalue, sizeof(void*), FALSE, &rtn))
@@ -112,7 +114,7 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
             RaiseException(DEBUG_STATUS_INTERNAL_ERROR, 0, 0, NULL);
         break;
     case SymTagFunctionType:
-        rtn = (unsigned)memory_to_linear_addr(&lvalue->addr);
+        rtn = (ULONG_PTR)memory_to_linear_addr(&lvalue->addr);
         break;
     default:
         WINE_FIXME("Unsupported tag %u\n", tag);
@@ -131,7 +133,7 @@ LONGLONG types_extract_as_longlong(const struct dbg_lvalue* lvalue)
  */
 long int types_extract_as_integer(const struct dbg_lvalue* lvalue)
 {
-    return types_extract_as_longlong(lvalue);
+    return types_extract_as_longlong(lvalue, NULL);
 }
 
 /******************************************************************
@@ -148,7 +150,7 @@ void types_extract_as_address(const struct dbg_lvalue* lvalue, ADDRESS64* addr)
     else
     {
         addr->Mode = AddrModeFlat;
-        addr->Offset = types_extract_as_longlong( lvalue );
+        addr->Offset = types_extract_as_longlong(lvalue, NULL);
     }
 }
 
@@ -228,7 +230,7 @@ static BOOL types_get_udt_element_lvalue(struct dbg_lvalue* lvalue,
         *tmpbuf &= ~mask;
 
         lvalue->cookie      = DLV_HOST;
-        lvalue->addr.Offset = (DWORD)tmpbuf;
+        lvalue->addr.Offset = (ULONG_PTR)tmpbuf;
 
         /*
          * OK, now we have the correct part of the number.
@@ -261,8 +263,7 @@ BOOL types_udt_find_element(struct dbg_lvalue* lvalue, const char* name, long in
     char                        tmp[256];
     struct dbg_type             type;
 
-    if (!types_get_info(&lvalue->type, TI_GET_SYMTAG, &tag) ||
-        tag != SymTagUDT)
+    if (!types_get_real_type(&lvalue->type, &tag) || tag != SymTagUDT)
         return FALSE;
 
     if (types_get_info(&lvalue->type, TI_GET_CHILDRENCOUNT, &count))
@@ -308,26 +309,26 @@ BOOL types_array_index(const struct dbg_lvalue* lvalue, int index,
     DWORD64             length;
 
     if (!types_get_real_type(&type, &tag)) return FALSE;
+    /* Contents of array share same data (addr mode, module...) */
+    *result = *lvalue;
     switch (tag)
     {
     case SymTagArrayType:
         types_get_info(&type, TI_GET_COUNT, &count);
         if (index < 0 || index >= count) return FALSE;
-        /* fall through */
+        break;
     case SymTagPointerType:
-        /* Contents of array share same data (addr mode, module...) */
-        *result = *lvalue;
-        /*
-         * Get the base type, so we know how much to index by.
-         */
-        types_get_info(&type, TI_GET_TYPE, &result->type.id);
-        types_get_info(&result->type, TI_GET_LENGTH, &length);
         memory_read_value(lvalue, sizeof(result->addr.Offset), &result->addr.Offset);
-        result->addr.Offset += index * (DWORD)length;
         break;
     default:
         assert(FALSE);
     }
+    /*
+     * Get the base type, so we know how much to index by.
+     */
+    types_get_info(&type, TI_GET_TYPE, &result->type.id);
+    types_get_info(&result->type, TI_GET_LENGTH, &length);
+    result->addr.Offset += index * (DWORD)length;
     return TRUE;
 }
 
@@ -344,7 +345,7 @@ struct type_find_t
 
 static BOOL CALLBACK types_cb(PSYMBOL_INFO sym, ULONG size, void* _user)
 {
-    struct type_find_t* user = (struct type_find_t*)_user;
+    struct type_find_t* user = _user;
     BOOL                ret = TRUE;
     struct dbg_type     type;
     DWORD               type_id;
@@ -457,7 +458,7 @@ void print_value(const struct dbg_lvalue* lvalue, char format, int level)
         /* FIXME: this in not 100% optimal (as we're going through the typedef handling
          * stuff again
          */
-        print_basic(lvalue, 1, format);
+        print_basic(lvalue, format);
         break;
     case SymTagUDT:
         if (types_get_info(&type, TI_GET_CHILDRENCOUNT, &count))
@@ -560,7 +561,7 @@ static BOOL CALLBACK print_types_cb(PSYMBOL_INFO sym, ULONG size, void* ctx)
     struct dbg_type     type;
     type.module = sym->ModBase;
     type.id = sym->TypeIndex;
-    dbg_printf("Mod: %08x ID: %08lx \n", type.module, type.id);
+    dbg_printf("Mod: %08x ID: %08lx\n", type.module, type.id);
     types_print_type(&type, TRUE);
     dbg_printf("\n");
     return TRUE;
@@ -669,7 +670,10 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         types_get_info(type, TI_GET_TYPE, &subtype.id);
         subtype.module = type->module;
         types_print_type(&subtype, details);
-        dbg_printf(" %s[]", name);
+        if (types_get_info(type, TI_GET_COUNT, &count))
+            dbg_printf(" %s[%d]", name, count);
+        else
+            dbg_printf(" %s[]", name);
         break;
     case SymTagEnum:
         dbg_printf("enum %s", name);
@@ -694,7 +698,8 @@ int types_print_type(const struct dbg_type* type, BOOL details)
             int                         i;
 
             fcp->Start = 0;
-            while (count)
+            if (!count) dbg_printf("void");
+            else while (count)
             {
                 fcp->Count = min(count, 256);
                 if (types_get_info(type, TI_FINDCHILDREN, fcp))
@@ -714,7 +719,7 @@ int types_print_type(const struct dbg_type* type, BOOL details)
         dbg_printf(")");
         break;
     case SymTagTypedef:
-        dbg_printf(name);
+        dbg_printf("%s", name);
         break;
     default:
         WINE_ERR("Unknown type %u for %s\n", tag, name);

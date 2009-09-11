@@ -86,18 +86,15 @@ DWORD getInterfaceIndexByName(const char *name, PDWORD index);
  * if internal errors occur.
  * Returns NO_ERROR on success.
  */
-DWORD getInterfacePhysicalByName(const char *name, PDWORD len, PBYTE addr,
- PDWORD type);
 DWORD getInterfacePhysicalByIndex(DWORD index, PDWORD len, PBYTE addr,
  PDWORD type);
 
-/* Fills in the MIB_IFROW by name/index.  Doesn't fill in interface statistics,
+/* Fills in the MIB_IFROW by name.  Doesn't fill in interface statistics,
  * see ipstats.h for that.
- * Returns ERROR_INVALID_PARAMETER if name or entry is NULL, ERROR_INVALID_DATA
- * if name/index isn't valid, and NO_ERROR otherwise.
+ * Returns ERROR_INVALID_PARAMETER if name is NULL, ERROR_INVALID_DATA
+ * if name isn't valid, and NO_ERROR otherwise.
  */
 DWORD getInterfaceEntryByName(const char *name, PMIB_IFROW entry);
-DWORD getInterfaceEntryByIndex(DWORD index, PMIB_IFROW entry);
 
 DWORD getNumIPAddresses(void);
 
@@ -112,5 +109,8 @@ DWORD getIPAddrTable(PMIB_IPADDRTABLE *ppIpAddrTable, HANDLE heap, DWORD flags);
  * string.
  */
 char *toIPAddressString(unsigned int addr, char string[16]);
+
+DWORD getInterfaceMtuByName(const char *name, PDWORD mtu);
+DWORD getInterfaceStatusByName(const char *name, PDWORD status);
 
 #endif /* ndef WINE_IFENUM_H_ */

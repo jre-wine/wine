@@ -183,7 +183,7 @@ UINT CALLBACK QUEUE_callback_WtoA( void *context, UINT notification,
     switch(notification)
     {
     case SPFILENOTIFY_COPYERROR:
-        param2 = (UINT_PTR)&buffer;
+        param2 = (UINT_PTR)buffer;
         /* fall through */
     case SPFILENOTIFY_STARTDELETE:
     case SPFILENOTIFY_ENDDELETE:
@@ -1063,6 +1063,133 @@ static BOOL do_file_copyW( LPCWSTR source, LPCWSTR target, DWORD style,
 }
 
 /***********************************************************************
+ *            SetupInstallFileExA   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupInstallFileExA( HINF hinf, PINFCONTEXT inf_context, PCSTR source, PCSTR root,
+                                 PCSTR dest, DWORD style, PSP_FILE_CALLBACK_A handler, PVOID context, PBOOL in_use )
+{
+    BOOL ret = FALSE;
+    struct callback_WtoA_context ctx;
+    UNICODE_STRING sourceW, rootW, destW;
+
+    TRACE("%p %p %s %s %s %x %p %p %p\n", hinf, inf_context, debugstr_a(source), debugstr_a(root),
+          debugstr_a(dest), style, handler, context, in_use);
+
+    sourceW.Buffer = rootW.Buffer = destW.Buffer = NULL;
+    if (source && !RtlCreateUnicodeStringFromAsciiz( &sourceW, source ))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+    if (root && !RtlCreateUnicodeStringFromAsciiz( &rootW, root ))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        goto exit;
+    }
+    if (dest && !RtlCreateUnicodeStringFromAsciiz( &destW, dest ))
+    {
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        goto exit;
+    }
+
+    ctx.orig_context = context;
+    ctx.orig_handler = handler;
+
+    ret = SetupInstallFileExW( hinf, inf_context, sourceW.Buffer, rootW.Buffer, destW.Buffer, style, QUEUE_callback_WtoA, &ctx, in_use );
+
+exit:
+    RtlFreeUnicodeString( &sourceW );
+    RtlFreeUnicodeString( &rootW );
+    RtlFreeUnicodeString( &destW );
+    return ret;
+}
+
+/***********************************************************************
+ *            SetupInstallFileA   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupInstallFileA( HINF hinf, PINFCONTEXT inf_context, PCSTR source, PCSTR root,
+                               PCSTR dest, DWORD style, PSP_FILE_CALLBACK_A handler, PVOID context )
+{
+    return SetupInstallFileExA( hinf, inf_context, source, root, dest, style, handler, context, NULL );
+}
+
+/***********************************************************************
+ *            SetupInstallFileExW   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupInstallFileExW( HINF hinf, PINFCONTEXT inf_context, PCWSTR source, PCWSTR root,
+                                 PCWSTR dest, DWORD style, PSP_FILE_CALLBACK_W handler, PVOID context, PBOOL in_use )
+{
+    static const WCHAR CopyFiles[] = {'C','o','p','y','F','i','l','e','s',0};
+
+    BOOL ret, absolute = (root && *root && !(style & SP_COPY_SOURCE_ABSOLUTE));
+    WCHAR *buffer, *p, *inf_source = NULL;
+    unsigned int len;
+
+    TRACE("%p %p %s %s %s %x %p %p %p\n", hinf, inf_context, debugstr_w(source), debugstr_w(root),
+          debugstr_w(dest), style, handler, context, in_use);
+
+    if (in_use) FIXME("no file in use support\n");
+
+    if (hinf)
+    {
+        INFCONTEXT ctx;
+
+        if (!inf_context)
+        {
+            inf_context = &ctx;
+            if (!SetupFindFirstLineW( hinf, CopyFiles, NULL, inf_context )) return FALSE;
+        }
+        if (!SetupGetStringFieldW( inf_context, 1, NULL, 0, &len )) return FALSE;
+        if (!(inf_source = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+        {
+            SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+            return FALSE;
+        }
+        if (!SetupGetStringFieldW( inf_context, 1, inf_source, len, NULL )) return FALSE;
+        source = inf_source;
+    }
+    else if (!source)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+
+    len = strlenW( source ) + 1;
+    if (absolute) len += strlenW( root ) + 1;
+
+    if (!(p = buffer = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+    {
+        HeapFree( GetProcessHeap(), 0, inf_source );
+        SetLastError( ERROR_NOT_ENOUGH_MEMORY );
+        return FALSE;
+    }
+
+    if (absolute)
+    {
+        strcpyW( buffer, root );
+        p += strlenW( buffer );
+        if (p[-1] != '\\') *p++ = '\\';
+    }
+    while (*source == '\\') source++;
+    strcpyW( p, source );
+
+    ret = do_file_copyW( buffer, dest, style, handler, context );
+
+    HeapFree( GetProcessHeap(), 0, inf_source );
+    HeapFree( GetProcessHeap(), 0, buffer );
+    return ret;
+}
+
+/***********************************************************************
+ *            SetupInstallFileW   (SETUPAPI.@)
+ */
+BOOL WINAPI SetupInstallFileW( HINF hinf, PINFCONTEXT inf_context, PCWSTR source, PCWSTR root,
+                               PCWSTR dest, DWORD style, PSP_FILE_CALLBACK_W handler, PVOID context )
+{
+    return SetupInstallFileExW( hinf, inf_context, source, root, dest, style, handler, context, NULL );
+}
+
+/***********************************************************************
  *            SetupCommitFileQueueW   (SETUPAPI.@)
  */
 BOOL WINAPI SetupCommitFileQueueW( HWND owner, HSPFILEQ handle, PSP_FILE_CALLBACK_W handler,
@@ -1366,7 +1493,7 @@ UINT WINAPI SetupDefaultQueueCallbackA( PVOID context, UINT notification,
                                         UINT_PTR param1, UINT_PTR param2 )
 {
     FILEPATHS_A *paths = (FILEPATHS_A *)param1;
-    struct default_callback_context *ctx = (struct default_callback_context *)context;
+    struct default_callback_context *ctx = context;
 
     switch(notification)
     {
@@ -1430,7 +1557,7 @@ UINT WINAPI SetupDefaultQueueCallbackW( PVOID context, UINT notification,
                                         UINT_PTR param1, UINT_PTR param2 )
 {
     FILEPATHS_W *paths = (FILEPATHS_W *)param1;
-    struct default_callback_context *ctx = (struct default_callback_context *)context;
+    struct default_callback_context *ctx = context;
 
     switch(notification)
     {

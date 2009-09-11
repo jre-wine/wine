@@ -33,8 +33,6 @@
 #include "shlwapi.h"
 #include "shlguid.h"
 
-#include "initguid.h"
-
 #include "browseui.h"
 
 #include "initguid.h"
@@ -55,6 +53,7 @@ static const struct {
     {&CLSID_ACLMulti, ACLMulti_Constructor},
     {&CLSID_ProgressDialog, ProgressDialog_Constructor},
     {&CLSID_CompCatCacheDaemon, CompCatCacheDaemon_Constructor},
+    {&CLSID_ACListISF, ACLShellSource_Constructor},
     {NULL, NULL}
 };
 
@@ -147,7 +146,7 @@ static HRESULT ClassFactory_Constructor(LPFNCONSTRUCTOR ctor, LPVOID *ppvOut)
     This->vtbl = &ClassFactoryVtbl;
     This->ref = 1;
     This->ctor = ctor;
-    *ppvOut = (LPVOID)This;
+    *ppvOut = This;
     TRACE("Created class factory %p\n", This);
     BROWSEUI_refCount++;
     return S_OK;
@@ -212,4 +211,13 @@ HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, LPVOID *ppvOut)
         }
     FIXME("CLSID %s not supported\n", debugstr_guid(clsid));
     return CLASS_E_CLASSNOTAVAILABLE;
+}
+
+/***********************************************************************
+ *  DllInstall (BROWSEUI.@)
+ */
+HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
+{
+    FIXME("(%s, %s): stub\n", bInstall ? "TRUE" : "FALSE", debugstr_w(cmdline));
+    return S_OK;
 }

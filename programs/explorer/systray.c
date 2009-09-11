@@ -35,7 +35,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(systray);
 #define IS_OPTION_FALSE(ch) \
     ((ch) == 'n' || (ch) == 'N' || (ch) == 'f' || (ch) == 'F' || (ch) == '0')
 
-static BOOL (*wine_notify_icon)(DWORD,NOTIFYICONDATAW *);
+static int (CDECL *wine_notify_icon)(DWORD,NOTIFYICONDATAW *);
 
 /* an individual systray icon, unpacked from the NOTIFYICONDATA and always in unicode */
 struct icon
@@ -109,7 +109,7 @@ static void create_tooltip(struct icon *icon)
         tooltips_initialized = TRUE;
     }
 
-    icon->tooltip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+    icon->tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL,
                                    WS_POPUP | TTS_ALWAYSTIP,
                                    CW_USEDEFAULT, CW_USEDEFAULT,
                                    CW_USEDEFAULT, CW_USEDEFAULT,
@@ -348,10 +348,10 @@ static BOOL handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
     struct icon *icon = NULL;
     NOTIFYICONDATAW nid;
     DWORD cbSize;
-    BOOL ret = FALSE;
+    int ret = FALSE;
 
     if (cds->cbData < NOTIFYICONDATAW_V1_SIZE) return FALSE;
-    cbSize = ((PNOTIFYICONDATA)cds->lpData)->cbSize;
+    cbSize = ((PNOTIFYICONDATAW)cds->lpData)->cbSize;
     if (cbSize < NOTIFYICONDATAW_V1_SIZE) return FALSE;
 
     ZeroMemory(&nid, sizeof(nid));
@@ -398,11 +398,12 @@ static BOOL handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
     /* try forward to x11drv first */
     if (cds->dwData == NIM_ADD || !(icon = get_icon( nid.hWnd, nid.uID )))
     {
-        if (wine_notify_icon && wine_notify_icon( cds->dwData, &nid ))
+        if (wine_notify_icon && ((ret = wine_notify_icon( cds->dwData, &nid )) != -1))
         {
             if (nid.uFlags & NIF_ICON) DestroyIcon( nid.hIcon );
-            return TRUE;
+            return ret;
         }
+        ret = FALSE;
     }
 
     switch (cds->dwData)
@@ -429,12 +430,24 @@ static BOOL handle_incoming(HWND hwndSource, COPYDATASTRUCT *cds)
     return ret;
 }
 
+static void do_hide_systray(void)
+{
+    SetWindowPos( tray_window, 0,
+                  GetSystemMetrics(SM_XVIRTUALSCREEN) + GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                  GetSystemMetrics(SM_YVIRTUALSCREEN) + GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                  0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE );
+}
+
 static LRESULT WINAPI tray_wndproc( HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     switch (msg)
     {
     case WM_COPYDATA:
         return handle_incoming((HWND)wparam, (COPYDATASTRUCT *)lparam);
+
+    case WM_DISPLAYCHANGE:
+        if (hide_systray) do_hide_systray();
+        break;
 
     case WM_TIMER:
         cleanup_destroyed_windows();
@@ -531,7 +544,7 @@ void initialize_systray(void)
 {
     HMODULE x11drv;
     SIZE size;
-    WNDCLASSEX class;
+    WNDCLASSEXW class;
     static const WCHAR classname[] = {'S','h','e','l','l','_','T','r','a','y','W','n','d',0};
     static const WCHAR winname[] = {'W','i','n','e',' ','S','y','s','t','e','m',' ','T','r','a','y',0};
 
@@ -548,12 +561,12 @@ void initialize_systray(void)
     class.style         = CS_DBLCLKS;
     class.lpfnWndProc   = tray_wndproc;
     class.hInstance     = NULL;
-    class.hIcon         = LoadIcon(0, IDI_WINLOGO);
-    class.hCursor       = LoadCursor(0, IDC_ARROW);
+    class.hIcon         = LoadIconW(0, (LPCWSTR)IDI_WINLOGO);
+    class.hCursor       = LoadCursorW(0, (LPCWSTR)IDC_ARROW);
     class.hbrBackground = (HBRUSH) COLOR_WINDOW;
     class.lpszClassName = (WCHAR *) &classname;
 
-    if (!RegisterClassEx(&class))
+    if (!RegisterClassExW(&class))
     {
         WINE_ERR("Could not register SysTray window class\n");
         return;
@@ -567,5 +580,8 @@ void initialize_systray(void)
         WINE_ERR("Could not create tray window\n");
         return;
     }
+
+    if (hide_systray) do_hide_systray();
+
     SetTimer( tray_window, 1, 2000, NULL );
 }

@@ -1,7 +1,7 @@
 /*
  * XMS v2+ emulation
  *
- * Copyright 1998 Ove Kåven
+ * Copyright 1998 Ove KÃ¥ven
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -53,7 +53,7 @@ typedef struct {
 static BYTE * XMS_Offset( MOVEOFS *ofs )
 {
     if (ofs->Handle) return (BYTE*)GlobalLock16(ofs->Handle)+ofs->Offset;
-    else return (BYTE*)PTR_REAL_TO_LIN(SELECTOROF(ofs->Offset),OFFSETOF(ofs->Offset));
+    else return PTR_REAL_TO_LIN(SELECTOROF(ofs->Offset),OFFSETOF(ofs->Offset));
 }
 
 /**********************************************************************

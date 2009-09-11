@@ -47,13 +47,71 @@ static BOOL X11DRV_XRender_Installed = FALSE;
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrender.h>
 
+#ifndef RepeatNone  /* added in 0.10 */
+#define RepeatNone    0
+#define RepeatNormal  1
+#define RepeatPad     2
+#define RepeatReflect 3
+#endif
 
-enum drawable_depth_type {mono_drawable, color_drawable};
-static XRenderPictFormat *pict_formats[2];
+#define MAX_FORMATS 10
+typedef enum wine_xrformat
+{
+  WXR_FORMAT_MONO,
+  WXR_FORMAT_GRAY,
+  WXR_FORMAT_X1R5G5B5,
+  WXR_FORMAT_X1B5G5R5,
+  WXR_FORMAT_R5G6B5,
+  WXR_FORMAT_B5G6R5,
+  WXR_FORMAT_R8G8B8,
+  WXR_FORMAT_B8G8R8,
+  WXR_FORMAT_A8R8G8B8,
+  WXR_FORMAT_X8R8G8B8,
+} WXRFormat;
+
+typedef struct wine_xrender_format_template
+{
+    WXRFormat wxr_format;
+    unsigned int depth;
+    unsigned int alpha;
+    unsigned int alphaMask;
+    unsigned int red;
+    unsigned int redMask;
+    unsigned int green;
+    unsigned int greenMask;
+    unsigned int blue;
+    unsigned int blueMask;
+} WineXRenderFormatTemplate;
+
+static const WineXRenderFormatTemplate wxr_formats_template[] =
+{
+    /* Format               depth   alpha   mask    red     mask    green   mask    blue    mask*/
+    {WXR_FORMAT_MONO,       1,      0,      0x01,   0,      0,      0,      0,      0,      0       },
+    {WXR_FORMAT_GRAY,       8,      0,      0xff,   0,      0,      0,      0,      0,      0       },
+    {WXR_FORMAT_X1R5G5B5,   16,     0,      0,      10,     0x1f,   5,      0x1f,   0,      0x1f    },
+    {WXR_FORMAT_X1B5G5R5,   16,     0,      0,      0,      0x1f,   5,      0x1f,   10,     0x1f    },
+    {WXR_FORMAT_R5G6B5,     16,     0,      0,      11,     0x1f,   5,      0x3f,   0,      0x1f    },
+    {WXR_FORMAT_B5G6R5,     16,     0,      0,      0,      0x1f,   5,      0x3f,   11,     0x1f    },
+    {WXR_FORMAT_R8G8B8,     24,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    },
+    {WXR_FORMAT_B8G8R8,     24,     0,      0,      0,      0xff,   8,      0xff,   16,     0xff    },
+    {WXR_FORMAT_A8R8G8B8,   32,     24,     0xff,   16,     0xff,   8,      0xff,   0,      0xff    },
+    {WXR_FORMAT_X8R8G8B8,   32,     0,      0,      16,     0xff,   8,      0xff,   0,      0xff    }
+};
+
+typedef struct wine_xrender_format
+{
+    WXRFormat               format;
+    XRenderPictFormat       *pict_format;
+} WineXRenderFormat;
+
+static WineXRenderFormat wxr_formats[MAX_FORMATS];
+static int WineXRenderFormatsListSize = 0;
+static WineXRenderFormat *default_format = NULL;
 
 typedef struct
 {
     LOGFONTW lf;
+    XFORM    xform;
     SIZE     devsize;  /* size in device coords */
     DWORD    hash;
 } LFANDSIZE;
@@ -65,7 +123,7 @@ typedef enum { AA_None = 0, AA_Grey, AA_RGB, AA_BGR, AA_VRGB, AA_VBGR, AA_MAXVAL
 typedef struct
 {
     GlyphSet glyphset;
-    XRenderPictFormat *font_format;
+    WineXRenderFormat *font_format;
     int nrealized;
     BOOL *realized;
     void **bitmaps;
@@ -142,9 +200,106 @@ static CRITICAL_SECTION xrender_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 #ifdef WORDS_BIGENDIAN
 #define get_be_word(x) (x)
+#define NATIVE_BYTE_ORDER MSBFirst
 #else
 #define get_be_word(x) RtlUshortByteSwap(x)
+#define NATIVE_BYTE_ORDER LSBFirst
 #endif
+
+static BOOL get_xrender_template(const WineXRenderFormatTemplate *fmt, XRenderPictFormat *templ, unsigned long *mask)
+{
+    templ->id = 0;
+    templ->type = PictTypeDirect;
+    templ->depth = fmt->depth;
+    templ->direct.alpha = fmt->alpha;
+    templ->direct.alphaMask = fmt->alphaMask;
+    templ->direct.red = fmt->red;
+    templ->direct.redMask = fmt->redMask;
+    templ->direct.green = fmt->green;
+    templ->direct.greenMask = fmt->greenMask;
+    templ->direct.blue = fmt->blue;
+    templ->direct.blueMask = fmt->blueMask;
+    templ->colormap = 0;
+
+    *mask = PictFormatType | PictFormatDepth | PictFormatAlpha | PictFormatAlphaMask | PictFormatRed | PictFormatRedMask | PictFormatGreen | PictFormatGreenMask | PictFormatBlue | PictFormatBlueMask;
+
+    return TRUE;
+}
+
+static BOOL is_wxrformat_compatible_with_default_visual(const WineXRenderFormatTemplate *fmt)
+{
+    if(fmt->depth != screen_depth)
+        return FALSE;
+    if( (fmt->redMask << fmt->red) != visual->red_mask)
+        return FALSE;
+    if( (fmt->greenMask << fmt->green) != visual->green_mask)
+        return FALSE;
+    if( (fmt->blueMask << fmt->blue) != visual->blue_mask)
+        return FALSE;
+
+    /* We never select a default ARGB visual */
+    if(fmt->alphaMask)
+        return FALSE;
+
+    return TRUE;
+}
+
+static int load_xrender_formats(void)
+{
+    unsigned int i;
+    for(i = 0; i < (sizeof(wxr_formats_template) / sizeof(wxr_formats_template[0])); i++)
+    {
+        XRenderPictFormat templ, *pict_format;
+
+        if(is_wxrformat_compatible_with_default_visual(&wxr_formats_template[i]))
+        {
+            wine_tsx11_lock();
+            pict_format = pXRenderFindVisualFormat(gdi_display, visual);
+            if(!pict_format)
+            {
+                /* Xrender doesn't like DirectColor visuals, try to find a TrueColor one instead */
+                if (visual->class == DirectColor)
+                {
+                    XVisualInfo info;
+                    if (XMatchVisualInfo( gdi_display, DefaultScreen(gdi_display),
+                                          screen_depth, TrueColor, &info ))
+                    {
+                        pict_format = pXRenderFindVisualFormat(gdi_display, info.visual);
+                        if (pict_format) visual = info.visual;
+                    }
+                }
+            }
+            wine_tsx11_unlock();
+
+            if(pict_format)
+            {
+                wxr_formats[WineXRenderFormatsListSize].format = wxr_formats_template[i].wxr_format;
+                wxr_formats[WineXRenderFormatsListSize].pict_format = pict_format;
+                default_format = &wxr_formats[WineXRenderFormatsListSize];
+                WineXRenderFormatsListSize++;
+                TRACE("Loaded pict_format with id=%#lx for wxr_format=%#x\n", pict_format->id, wxr_formats_template[i].wxr_format);
+            }
+        }
+        else
+        {
+            unsigned long mask = 0;
+            get_xrender_template(&wxr_formats_template[i], &templ, &mask);
+
+            wine_tsx11_lock();
+            pict_format = pXRenderFindFormat(gdi_display, mask, &templ, 0);
+            wine_tsx11_unlock();
+
+            if(pict_format)
+            {
+                wxr_formats[WineXRenderFormatsListSize].format = wxr_formats_template[i].wxr_format;
+                wxr_formats[WineXRenderFormatsListSize].pict_format = pict_format;
+                WineXRenderFormatsListSize++;
+                TRACE("Loaded pict_format with id=%#lx for wxr_format=%#x\n", pict_format->id, wxr_formats_template[i].wxr_format);
+            }
+        }
+    }
+    return WineXRenderFormatsListSize;
+}
 
 /***********************************************************************
  *   X11DRV_XRender_Init
@@ -155,7 +310,6 @@ static CRITICAL_SECTION xrender_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 void X11DRV_XRender_Init(void)
 {
     int event_base, i;
-    XRenderPictFormat pf;
 
     if (client_side_with_render &&
 	wine_dlopen(SONAME_LIBX11, RTLD_NOW|RTLD_GLOBAL, NULL, 0) &&
@@ -186,27 +340,12 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
 #undef LOAD_OPTIONAL_FUNCPTR
 #endif
 
-
         wine_tsx11_lock();
-        if(pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base)) {
-            X11DRV_XRender_Installed = TRUE;
+        X11DRV_XRender_Installed = pXRenderQueryExtension(gdi_display, &event_base, &xrender_error_base);
+        wine_tsx11_unlock();
+        if(X11DRV_XRender_Installed) {
             TRACE("Xrender is up and running error_base = %d\n", xrender_error_base);
-            pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, visual);
-            if(!pict_formats[color_drawable])
-            {
-                /* Xrender doesn't like DirectColor visuals, try to find a TrueColor one instead */
-                if (visual->class == DirectColor)
-                {
-                    XVisualInfo info;
-                    if (XMatchVisualInfo( gdi_display, DefaultScreen(gdi_display),
-                                          screen_depth, TrueColor, &info ))
-                    {
-                        pict_formats[color_drawable] = pXRenderFindVisualFormat(gdi_display, info.visual);
-                        if (pict_formats[color_drawable]) visual = info.visual;
-                    }
-                }
-            }
-            if(!pict_formats[color_drawable]) /* This fails in buggy versions of libXrender.so */
+            if(!load_xrender_formats()) /* This fails in buggy versions of libXrender.so */
             {
                 wine_tsx11_unlock();
                 WINE_MESSAGE(
@@ -216,23 +355,12 @@ LOAD_OPTIONAL_FUNCPTR(XRenderSetPictureTransform)
                 X11DRV_XRender_Installed = FALSE;
                 return;
             }
-            pf.type = PictTypeDirect;
-            pf.depth = 1;
-            pf.direct.alpha = 0;
-            pf.direct.alphaMask = 1;
-            pict_formats[mono_drawable] = pXRenderFindFormat(gdi_display, PictFormatType |
-                                                             PictFormatDepth | PictFormatAlpha |
-                                                             PictFormatAlphaMask, &pf, 0);
-            if(!pict_formats[mono_drawable]) {
-                ERR("mono_format == NULL?\n");
-                X11DRV_XRender_Installed = FALSE;
-            }
+
             if (!visual->red_mask || !visual->green_mask || !visual->blue_mask) {
                 WARN("one or more of the colour masks are 0, disabling XRENDER. Try running in 16-bit mode or higher.\n");
                 X11DRV_XRender_Installed = FALSE;
             }
         }
-        wine_tsx11_unlock();
     }
 
 sym_not_found:
@@ -262,12 +390,69 @@ sym_not_found:
     else TRACE("Using X11 core fonts\n");
 }
 
+/* Helper function to convert from a color packed in a 32-bit integer to a XRenderColor */
+static void get_xrender_color(WineXRenderFormat *wxr_format, int src_color, XRenderColor *dst_color)
+{
+    XRenderPictFormat *pf = wxr_format->pict_format;
+
+    if(pf->direct.redMask)
+        dst_color->red = ((src_color >> pf->direct.red) & pf->direct.redMask) * 65535/pf->direct.redMask;
+    else
+       dst_color->red = 0;
+
+    if(pf->direct.greenMask)
+        dst_color->green = ((src_color >> pf->direct.green) & pf->direct.greenMask) * 65535/pf->direct.greenMask;
+    else
+        dst_color->green = 0;
+
+    if(pf->direct.blueMask)
+        dst_color->blue = ((src_color >> pf->direct.blue) & pf->direct.blueMask) * 65535/pf->direct.blueMask;
+    else
+        dst_color->blue = 0;
+
+    dst_color->alpha = 0xffff;
+}
+
+static WineXRenderFormat *get_xrender_format(WXRFormat format)
+{
+    int i;
+    for(i=0; i<WineXRenderFormatsListSize; i++)
+    {
+        if(wxr_formats[i].format == format)
+        {
+            TRACE("Returning wxr_format=%#x\n", format);
+            return &wxr_formats[i];
+        }
+    }
+    return NULL;
+}
+
+static WineXRenderFormat *get_xrender_format_from_pdevice(X11DRV_PDEVICE *physDev)
+{
+    WXRFormat format;
+
+    switch(physDev->depth)
+    {
+        case 1:
+            format = WXR_FORMAT_MONO;
+            break;
+        default:
+            /* For now fall back to the format of the default visual.
+               In the future we should check if we are using a DDB/DIB and what exact format we need.
+             */
+            return default_format;
+    }
+
+    return get_xrender_format(format);
+}
+
 static BOOL fontcmp(LFANDSIZE *p1, LFANDSIZE *p2)
 {
   if(p1->hash != p2->hash) return TRUE;
   if(memcmp(&p1->devsize, &p2->devsize, sizeof(p1->devsize))) return TRUE;
+  if(memcmp(&p1->xform, &p2->xform, sizeof(p1->xform))) return TRUE;
   if(memcmp(&p1->lf, &p2->lf, offsetof(LOGFONTW, lfFaceName))) return TRUE;
-  return strcmpW(p1->lf.lfFaceName, p2->lf.lfFaceName);
+  return strcmpiW(p1->lf.lfFaceName, p2->lf.lfFaceName);
 }
 
 #if 0
@@ -449,13 +634,45 @@ static BOOL get_gasp_flags(X11DRV_PDEVICE *physDev, WORD *flags)
     return TRUE;
 }
 
+static AA_Type get_antialias_type( X11DRV_PDEVICE *physDev, BOOL subpixel, BOOL hinter)
+{
+    AA_Type ret;
+    WORD flags;
+    UINT font_smoothing_type, font_smoothing_orientation;
+
+    if (X11DRV_XRender_Installed && subpixel &&
+        SystemParametersInfoW( SPI_GETFONTSMOOTHINGTYPE, 0, &font_smoothing_type, 0) &&
+        font_smoothing_type == FE_FONTSMOOTHINGCLEARTYPE)
+    {
+        if ( SystemParametersInfoW( SPI_GETFONTSMOOTHINGORIENTATION, 0,
+                                    &font_smoothing_orientation, 0) &&
+             font_smoothing_orientation == FE_FONTSMOOTHINGORIENTATIONBGR)
+        {
+            ret = AA_BGR;
+        }
+        else
+            ret = AA_RGB;
+        /*FIXME
+          If the monitor is in portrait mode, ClearType is disabled in the MS Windows (MSDN).
+          But, Wine's subpixel rendering can support the portrait mode.
+         */
+    }
+    else if (!hinter || !get_gasp_flags(physDev, &flags) || flags & GASP_DOGRAY)
+        ret = AA_Grey;
+    else
+        ret = AA_None;
+
+    return ret;
+}
+
 static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
 {
     int ret;
     int format;
     gsCacheEntry *entry;
-    WORD flags;
     static int hinter = -1;
+    static int subpixel = -1;
+    BOOL font_smoothing;
 
     if((ret = LookupEntry(plfsz)) != -1) return ret;
 
@@ -468,16 +685,36 @@ static int GetCacheEntry(X11DRV_PDEVICE *physDev, LFANDSIZE *plfsz)
 
     if(antialias && plfsz->lf.lfQuality != NONANTIALIASED_QUALITY)
     {
-        if(hinter == -1)
+        if(hinter == -1 || subpixel == -1)
         {
             RASTERIZER_STATUS status;
             GetRasterizerCaps(&status, sizeof(status));
             hinter = status.wFlags & WINE_TT_HINTER_ENABLED;
+            subpixel = status.wFlags & WINE_TT_SUBPIXEL_RENDERING_ENABLED;
         }
-        if(!hinter || !get_gasp_flags(physDev, &flags) || flags & GASP_DOGRAY)
-            entry->aa_default = AA_Grey;
-        else
-            entry->aa_default = AA_None;
+
+        switch (plfsz->lf.lfQuality)
+        {
+            case ANTIALIASED_QUALITY:
+                entry->aa_default = get_antialias_type( physDev, FALSE, hinter );
+                break;
+            case CLEARTYPE_QUALITY:
+            case CLEARTYPE_NATURAL_QUALITY:
+                entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                break;
+            case DEFAULT_QUALITY:
+            case DRAFT_QUALITY:
+            case PROOF_QUALITY:
+            default:
+                if ( SystemParametersInfoW( SPI_GETFONTSMOOTHING, 0, &font_smoothing, 0) &&
+                     font_smoothing)
+                {
+                    entry->aa_default = get_antialias_type( physDev, subpixel, hinter );
+                }
+                else
+                    entry->aa_default = AA_None;
+                break;
+        }
     }
     else
         entry->aa_default = AA_None;
@@ -495,18 +732,24 @@ static void dec_ref_cache(int index)
 
 static void lfsz_calc_hash(LFANDSIZE *plfsz)
 {
-  DWORD hash = 0, *ptr;
+  DWORD hash = 0, *ptr, two_chars;
+  WORD *pwc;
   int i;
 
   hash ^= plfsz->devsize.cx;
   hash ^= plfsz->devsize.cy;
+  for(i = 0, ptr = (DWORD*)&plfsz->xform; i < sizeof(XFORM)/sizeof(DWORD); i++, ptr++)
+    hash ^= *ptr;
   for(i = 0, ptr = (DWORD*)&plfsz->lf; i < 7; i++, ptr++)
     hash ^= *ptr;
-  for(i = 0, ptr = (DWORD*)&plfsz->lf.lfFaceName; i < LF_FACESIZE/2; i++, ptr++) {
-    WCHAR *pwc = (WCHAR *)ptr;
+  for(i = 0, ptr = (DWORD*)plfsz->lf.lfFaceName; i < LF_FACESIZE/2; i++, ptr++) {
+    two_chars = *ptr;
+    pwc = (WCHAR *)&two_chars;
     if(!*pwc) break;
-    hash ^= *ptr;
+    *pwc = toupperW(*pwc);
     pwc++;
+    *pwc = toupperW(*pwc);
+    hash ^= two_chars;
     if(!*pwc) break;
   }
   plfsz->hash = hash;
@@ -538,8 +781,10 @@ BOOL X11DRV_XRender_SelectFont(X11DRV_PDEVICE *physDev, HFONT hfont)
     TRACE("h=%d w=%d weight=%d it=%d charset=%d name=%s\n",
 	  lfsz.lf.lfHeight, lfsz.lf.lfWidth, lfsz.lf.lfWeight,
 	  lfsz.lf.lfItalic, lfsz.lf.lfCharSet, debugstr_w(lfsz.lf.lfFaceName));
+    lfsz.lf.lfWidth = abs( lfsz.lf.lfWidth );
     lfsz.devsize.cx = X11DRV_XWStoDS( physDev, lfsz.lf.lfWidth );
     lfsz.devsize.cy = X11DRV_YWStoDS( physDev, lfsz.lf.lfHeight );
+    GetWorldTransform( physDev->hdc, &lfsz.xform );
     lfsz_calc_hash(&lfsz);
 
     EnterCriticalSection(&xrender_cs);
@@ -575,8 +820,7 @@ void X11DRV_XRender_DeleteDC(X11DRV_PDEVICE *physDev)
 /***********************************************************************
  *   X11DRV_XRender_UpdateDrawable
  *
- * This gets called from X11DRV_SetDrawable and X11DRV_SelectBitmap.
- * It deletes the pict and tile when the drawable changes.
+ * Deletes the pict and tile when the drawable changes.
  */
 void X11DRV_XRender_UpdateDrawable(X11DRV_PDEVICE *physDev)
 {
@@ -609,12 +853,25 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
     gsCacheEntry *entry = glyphsetCache + physDev->xrender->cache_index;
     gsCacheEntryFormat *formatEntry;
     UINT ggo_format = GGO_GLYPH_INDEX;
-    XRenderPictFormat pf;
+    WXRFormat wxr_format;
     static const char zero[4];
+    static const MAT2 identity = { {0,1},{0,0},{0,0},{0,1} };
 
     switch(format) {
     case AA_Grey:
 	ggo_format |= WINE_GGO_GRAY16_BITMAP;
+	break;
+    case AA_RGB:
+	ggo_format |= WINE_GGO_HRGB_BITMAP;
+	break;
+    case AA_BGR:
+	ggo_format |= WINE_GGO_HBGR_BITMAP;
+	break;
+    case AA_VRGB:
+	ggo_format |= WINE_GGO_VRGB_BITMAP;
+	break;
+    case AA_VBGR:
+	ggo_format |= WINE_GGO_VBGR_BITMAP;
 	break;
 
     default:
@@ -624,16 +881,13 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 	break;
     }
 
-    buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL,
-			      NULL);
+    buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
     if(buflen == GDI_ERROR) {
         if(format != AA_None) {
             format = AA_None;
             entry->aa_default = AA_None;
-            ggo_format &= ~WINE_GGO_GRAY16_BITMAP;
-            ggo_format |= GGO_BITMAP;
-            buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL,
-                                      NULL);
+            ggo_format = GGO_GLYPH_INDEX | GGO_BITMAP;
+            buflen = GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, 0, NULL, &identity);
         }
         if(buflen == GDI_ERROR) {
             WARN("GetGlyphOutlineW failed\n");
@@ -688,37 +942,33 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 
     if(formatEntry->glyphset == 0 && X11DRV_XRender_Installed) {
         switch(format) {
-	case AA_Grey:
-	    pf.depth = 8;
-	    pf.direct.alphaMask = 0xff;
-	    break;
+            case AA_Grey:
+                wxr_format = WXR_FORMAT_GRAY;
+                break;
 
-	default:
-	    ERR("aa = %d - not implemented\n", format);
-	case AA_None:
-	    pf.depth = 1;
-	    pf.direct.alphaMask = 1;
-	    break;
-	}
+            case AA_RGB:
+            case AA_BGR:
+            case AA_VRGB:
+            case AA_VBGR:
+                wxr_format = WXR_FORMAT_A8R8G8B8;
+                break;
 
-	pf.type = PictTypeDirect;
-	pf.direct.alpha = 0;
+            default:
+                ERR("aa = %d - not implemented\n", format);
+            case AA_None:
+                wxr_format = WXR_FORMAT_MONO;
+                break;
+        }
 
-	wine_tsx11_lock();
-	formatEntry->font_format = pXRenderFindFormat(gdi_display,
-						PictFormatType |
-						PictFormatDepth |
-						PictFormatAlpha |
-						PictFormatAlphaMask,
-						&pf, 0);
-
-	formatEntry->glyphset = pXRenderCreateGlyphSet(gdi_display, formatEntry->font_format);
-	wine_tsx11_unlock();
+        wine_tsx11_lock();
+        formatEntry->font_format = get_xrender_format(wxr_format);
+        formatEntry->glyphset = pXRenderCreateGlyphSet(gdi_display, formatEntry->font_format->pict_format);
+        wine_tsx11_unlock();
     }
 
 
     buf = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, buflen);
-    GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, buflen, buf, NULL);
+    GetGlyphOutlineW(physDev->hdc, glyph, ggo_format, &gm, buflen, buf, &identity);
     formatEntry->realized[glyph] = TRUE;
 
     TRACE("buflen = %d. Got metrics: %dx%d adv=%d,%d origin=%d,%d\n",
@@ -746,8 +996,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		for(j = 0; j < pitch * 8; j++) {
 	            strcat(output, (line[j / 8] & (1 << (7 - (j % 8)))) ? "#" : " ");
 		}
-		strcat(output, "\n");
-		TRACE(output);
+		TRACE("%s\n", output);
 	    }
 	} else {
 	    static const char blks[] = " .:;!o*#";
@@ -762,8 +1011,7 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		    str[0] = blks[line[j] >> 5];
 		    strcat(output, str);
 		}
-		strcat(output, "\n");
-		TRACE(output);
+		TRACE("%s\n", output);
 	    }
 	}
     }
@@ -785,6 +1033,12 @@ static BOOL UploadGlyph(X11DRV_PDEVICE *physDev, int glyph, AA_Type format)
 		*byte++ = c;
 	    }
 	}
+        else if ( format != AA_Grey &&
+                  ImageByteOrder (gdi_display) != NATIVE_BYTE_ORDER)
+        {
+            unsigned int i, *data = (unsigned int *)buf;
+            for (i = buflen / sizeof(int); i; i--, data++) *data = RtlUlongByteSwap(*data);
+        }
 	gid = glyph;
 
         /*
@@ -995,7 +1249,7 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
     width = gi->width;
     height = gi->height;
 
-    maskLine = (unsigned char *) bitmap;
+    maskLine = bitmap;
     maskStride = (width + 3) & ~3;
 
     ExamineBitfield (image->red_mask, &r_shift, &r_len);
@@ -1053,33 +1307,33 @@ static void SmoothGlyphGray(XImage *image, int x, int y, void *bitmap, XGlyphInf
  * Returns an appropriate Picture for tiling the text colour.
  * Call and use result within the xrender_cs
  */
-static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
+static Picture get_tile_pict(WineXRenderFormat *wxr_format, int text_pixel)
 {
     static struct
     {
         Pixmap xpm;
         Picture pict;
         int current_color;
-    } tiles[2], *tile;
+    } tiles[MAX_FORMATS], *tile;
     XRenderColor col;
 
-    tile = &tiles[type];
+    tile = &tiles[wxr_format->format];
 
     if(!tile->xpm)
     {
         XRenderPictureAttributes pa;
 
         wine_tsx11_lock();
-        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, pict_formats[type]->depth);
+        tile->xpm = XCreatePixmap(gdi_display, root_window, 1, 1, wxr_format->pict_format->depth);
 
-        pa.repeat = True;
-        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, pict_formats[type], CPRepeat, &pa);
+        pa.repeat = RepeatNormal;
+        tile->pict = pXRenderCreatePicture(gdi_display, tile->xpm, wxr_format->pict_format, CPRepeat, &pa);
         wine_tsx11_unlock();
 
         /* init current_color to something different from text_pixel */
         tile->current_color = ~text_pixel;
 
-        if(type == mono_drawable)
+        if(wxr_format->format == WXR_FORMAT_MONO)
         {
             /* for a 1bpp bitmap we always need a 1 in the tile */
             col.red = col.green = col.blue = 0;
@@ -1090,25 +1344,9 @@ static Picture get_tile_pict(enum drawable_depth_type type, int text_pixel)
         }
     }
 
-    if(text_pixel != tile->current_color && type == color_drawable)
+    if(text_pixel != tile->current_color && wxr_format->format != WXR_FORMAT_MONO)
     {
-        /* Map 0 -- 0xff onto 0 -- 0xffff */
-        int r_shift, r_len;
-        int g_shift, g_len;
-        int b_shift, b_len;
-
-        ExamineBitfield (visual->red_mask, &r_shift, &r_len );
-        ExamineBitfield (visual->green_mask, &g_shift, &g_len);
-        ExamineBitfield (visual->blue_mask, &b_shift, &b_len);
-
-        col.red = GetField(text_pixel, r_shift, r_len);
-        col.red |= col.red << 8;
-        col.green = GetField(text_pixel, g_shift, g_len);
-        col.green |= col.green << 8;
-        col.blue = GetField(text_pixel, b_shift, b_len);
-        col.blue |= col.blue << 8;
-        col.alpha = 0xffff;
-
+        get_xrender_color(wxr_format, text_pixel, &col);
         wine_tsx11_lock();
         pXRenderFillRectangle(gdi_display, PictOpSrc, tile->pict, &col, 0, 0, 1, 1);
         wine_tsx11_unlock();
@@ -1143,7 +1381,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
     unsigned int idx;
     double cosEsc, sinEsc;
     LOGFONTW lf;
-    enum drawable_depth_type depth_type = (physDev->depth == 1) ? mono_drawable : color_drawable;
+    WineXRenderFormat *dst_format = get_xrender_format_from_pdevice(physDev);
     Picture tile_pict = 0;
 
     /* Do we need to disable antialiasing because of palette mode? */
@@ -1222,8 +1460,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
 
 	    wine_tsx11_lock();
 	    physDev->xrender->pict = pXRenderCreatePicture(gdi_display,
-							   physDev->drawable,
-                                                           pict_formats[depth_type],
+							   physDev->drawable, dst_format->pict_format,
 							   CPSubwindowMode, &pa);
 	    wine_tsx11_unlock();
 
@@ -1288,11 +1525,11 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         desired.y = physDev->dc_rect.top + y;
         current.x = current.y = 0;
 
-        tile_pict = get_tile_pict(depth_type, physDev->textPixel);
+        tile_pict = get_tile_pict(dst_format, physDev->textPixel);
 
 	/* FIXME the mapping of Text/BkColor onto 1 or 0 needs investigation.
 	 */
-	if((depth_type == mono_drawable) && (textPixel == 0))
+	if((dst_format->format == WXR_FORMAT_MONO) && (textPixel == 0))
 	    render_op = PictOpOutReverse; /* This gives us 'black' text */
 
         for(idx = 0; idx < count; idx++)
@@ -1322,7 +1559,7 @@ BOOL X11DRV_XRender_ExtTextOut( X11DRV_PDEVICE *physDev, INT x, INT y, UINT flag
         pXRenderCompositeText16(gdi_display, render_op,
                                 tile_pict,
                                 physDev->xrender->pict,
-                                formatEntry->font_format,
+                                formatEntry->font_format->pict_format,
                                 0, 0, 0, 0, elts, count);
         wine_tsx11_unlock();
         HeapFree(GetProcessHeap(), 0, elts);
@@ -1482,43 +1719,63 @@ done_unlock:
     return retv;
 }
 
+/* Set the x/y scaling and x/y offsets in the transformation matrix of the source picture */
+static void set_xrender_transformation(Picture src_pict, float xscale, float yscale, int xoffset, int yoffset)
+{
+#ifdef HAVE_XRENDERSETPICTURETRANSFORM
+    XTransform xform = {{
+        { XDoubleToFixed(xscale), XDoubleToFixed(0), XDoubleToFixed(xoffset) },
+        { XDoubleToFixed(0), XDoubleToFixed(yscale), XDoubleToFixed(yoffset) },
+        { XDoubleToFixed(0), XDoubleToFixed(0), XDoubleToFixed(1) }
+    }};
+
+    pXRenderSetPictureTransform(gdi_display, src_pict, &xform);
+#endif
+}
+
+/* Helper function for (stretched) blitting using xrender */
+static void xrender_blit(Picture src_pict, Picture mask_pict, Picture dst_pict, int x_src, int y_src, float xscale, float yscale, int width, int height)
+{
+    /* Further down a transformation matrix is used for stretching and mirroring the source data.
+     * xscale/yscale contain the scaling factors for the width and height. In case of mirroring
+     * we also need a x- and y-offset because without the pixels will be in the wrong quadrant of the x-y plane.
+     */
+    int x_offset = (xscale<0) ? width : 0;
+    int y_offset = (yscale<0) ? height : 0;
+
+    /* When we need to scale we perform scaling and source_x / source_y translation using a transformation matrix.
+     * This is needed because XRender is inaccurate in combination with scaled source coordinates passed to XRenderComposite.
+     * In all other cases we do use XRenderComposite for translation as it is faster than using a transformation matrix. */
+    if(xscale != 1.0 || yscale != 1.0)
+    {
+        /* When we are using a mask, 'src_pict' contains a 1x1 picture for tiling, the actual source data is in mask_pict */
+        if(mask_pict)
+            set_xrender_transformation(mask_pict, xscale, yscale, x_offset, y_offset);
+        else
+            set_xrender_transformation(src_pict, xscale, yscale, x_src + x_offset, y_src + y_offset);
+
+        pXRenderComposite(gdi_display, PictOpSrc, src_pict, mask_pict, dst_pict, 0, 0, 0, 0, 0, 0, width, height);
+    }
+    else
+    {
+        /* When we are using a mask, 'src_pict' contains a 1x1 picture for tiling, the actual source data is in mask_pict */
+        if(mask_pict)
+            set_xrender_transformation(mask_pict, 1, 1, 0, 0);
+        else
+            set_xrender_transformation(src_pict, 1, 1, 0, 0);
+
+        pXRenderComposite(gdi_display, PictOpSrc, src_pict, mask_pict, dst_pict, x_src, y_src, 0, 0, 0, 0, width, height);
+    }
+}
+
 /******************************************************************************
  * AlphaBlend         (x11drv.@)
  */
-BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
-                       X11DRV_PDEVICE *devSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
-                       BLENDFUNCTION blendfn)
+BOOL CDECL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst, INT heightDst,
+                             X11DRV_PDEVICE *devSrc, INT xSrc, INT ySrc, INT widthSrc, INT heightSrc,
+                             BLENDFUNCTION blendfn)
 {
     XRenderPictureAttributes pa;
-    XRenderPictFormat *src_format;
-    XRenderPictFormat argb32_templ = {
-        0,                          /* id */
-        PictTypeDirect,             /* type */
-        32,                         /* depth */
-        {                           /* direct */
-            16,                     /* direct.red */
-            0xff,                   /* direct.redMask */
-            8,                      /* direct.green */
-            0xff,                   /* direct.greenMask */
-            0,                      /* direct.blue */
-            0xff,                   /* direct.blueMask */
-            24,                     /* direct.alpha */
-            0xff,                   /* direct.alphaMask */
-        },
-        0,                          /* colormap */
-    };
-    unsigned long argb32_templ_mask = 
-        PictFormatType |
-        PictFormatDepth |
-        PictFormatRed |
-        PictFormatRedMask |
-        PictFormatGreen |
-        PictFormatGreenMask |
-        PictFormatBlue |
-        PictFormatBlueMask |
-        PictFormatAlpha |
-        PictFormatAlphaMask;
-
     Picture dst_pict, src_pict;
     Pixmap xpm;
     DIBSECTION dib;
@@ -1530,7 +1787,9 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     POINT pts[2];
     BOOL top_down = FALSE;
     RGNDATA *rgndata;
-    enum drawable_depth_type dst_depth_type = (devDst->depth == 1) ? mono_drawable : color_drawable;
+    WineXRenderFormat *dst_format = get_xrender_format_from_pdevice(devDst);
+    WineXRenderFormat *src_format;
+    int repeat_src;
 
     if(!X11DRV_XRender_Installed) {
         FIXME("Unable to AlphaBlend without Xrender\n");
@@ -1557,10 +1816,14 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     heightSrc = pts[1].y - pts[0].y;
     if (!widthDst || !heightDst || !widthSrc || !heightSrc) return TRUE;
 
+    /* If the source is a 1x1 bitmap, tiling is equivalent to stretching, but
+        tiling is much faster. Therefore, we do no stretching in this case. */
+    repeat_src = widthSrc == 1 && heightSrc == 1;
+
 #ifndef HAVE_XRENDERSETPICTURETRANSFORM
-    if(widthDst != widthSrc || heightDst != heightSrc)
+    if((widthDst != widthSrc || heightDst != heightSrc) && !repeat_src)
 #else
-    if(!pXRenderSetPictureTransform)
+    if(!pXRenderSetPictureTransform && !repeat_src)
 #endif
     {
         FIXME("Unable to Stretch, XRenderSetPictureTransform is currently required\n");
@@ -1569,7 +1832,12 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
 
     if (!devSrc->bitmap || GetObjectW( devSrc->bitmap->hbitmap, sizeof(dib), &dib ) != sizeof(dib))
     {
-        FIXME("not a dibsection\n");
+        static BOOL out = FALSE;
+        if (!out)
+        {
+            FIXME("not a dibsection\n");
+            out = TRUE;
+        }
         return FALSE;
     }
 
@@ -1637,20 +1905,21 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     image = XCreateImage(gdi_display, visual, 32, ZPixmap, 0,
                          (char*) data, widthSrc, heightSrc, 32, widthSrc * 4);
 
-    /*
-      Avoid using XRenderFindStandardFormat as older libraries don't have it
-      src_format = pXRenderFindStandardFormat(gdi_display, PictStandardARGB32);
-    */
-    src_format = pXRenderFindFormat(gdi_display, argb32_templ_mask, &argb32_templ, 0);
-
+    src_format = get_xrender_format(WXR_FORMAT_A8R8G8B8);
     TRACE("src_format %p\n", src_format);
+    if(!src_format)
+    {
+        WARN("Unable to find a picture format supporting alpha, make sure X is running at 24-bit\n");
+        return FALSE;
+    }
 
     pa.subwindow_mode = IncludeInferiors;
+    pa.repeat = repeat_src ? RepeatNormal : RepeatNone;
 
     /* FIXME use devDst->xrender->pict ? */
     dst_pict = pXRenderCreatePicture(gdi_display,
                                      devDst->drawable,
-                                     pict_formats[dst_depth_type],
+                                     dst_format->pict_format,
                                      CPSubwindowMode, &pa);
     TRACE("dst_pict %08lx\n", dst_pict);
     TRACE("src_drawable = %08lx\n", devSrc->drawable);
@@ -1663,8 +1932,8 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
     XPutImage(gdi_display, xpm, gc, image, 0, 0, 0, 0, widthSrc, heightSrc);
 
     src_pict = pXRenderCreatePicture(gdi_display,
-                                     xpm, src_format,
-                                     CPSubwindowMode, &pa);
+                                     xpm, src_format->pict_format,
+                                     CPSubwindowMode|CPRepeat, &pa);
     TRACE("src_pict %08lx\n", src_pict);
 
     if (rgndata)
@@ -1676,18 +1945,10 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
         HeapFree( GetProcessHeap(), 0, rgndata );
     }
 
-#ifdef HAVE_XRENDERSETPICTURETRANSFORM
-    if(widthDst != widthSrc || heightDst != heightSrc) {
-        double xscale = widthSrc/(double)widthDst;
-        double yscale = heightSrc/(double)heightDst;
-        XTransform xform = {{
-            { XDoubleToFixed(xscale), XDoubleToFixed(0), XDoubleToFixed(0) },
-            { XDoubleToFixed(0), XDoubleToFixed(yscale), XDoubleToFixed(0) },
-            { XDoubleToFixed(0), XDoubleToFixed(0), XDoubleToFixed(1) }
-        }};
-        pXRenderSetPictureTransform(gdi_display, src_pict, &xform);
-    }
-#endif
+    /* Make sure we ALWAYS set the transformation matrix even if we don't need to scale. The reason is
+     * that later on we want to reuse pictures (it can bring a lot of extra performance) and each time
+     * a different transformation matrix might have been used. */
+    set_xrender_transformation(src_pict, widthSrc/(double)widthDst, heightSrc/(double)heightDst, 0, 0);
     pXRenderComposite(gdi_display, PictOpOver, src_pict, 0, dst_pict,
                       0, 0, 0, 0,
                       xDst + devDst->dc_rect.left, yDst + devDst->dc_rect.top, widthDst, heightDst);
@@ -1702,6 +1963,98 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
 
     wine_tsx11_unlock();
     HeapFree(GetProcessHeap(), 0, data);
+    return TRUE;
+}
+
+BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
+                                      Pixmap pixmap, GC gc,
+                                      INT widthSrc, INT heightSrc,
+                                      INT widthDst, INT heightDst,
+                                      RECT *visRectSrc, RECT *visRectDst )
+{
+    BOOL stretch = (widthSrc != widthDst) || (heightSrc != heightDst);
+    int width = visRectDst->right - visRectDst->left;
+    int height = visRectDst->bottom - visRectDst->top;
+    int x_src = physDevSrc->dc_rect.left + visRectSrc->left;
+    int y_src = physDevSrc->dc_rect.top + visRectSrc->top;
+    WineXRenderFormat *src_format = get_xrender_format_from_pdevice(physDevSrc);
+    WineXRenderFormat *dst_format = get_xrender_format_from_pdevice(physDevDst);
+    Picture src_pict=0, dst_pict=0, mask_pict=0;
+
+    double xscale = widthSrc/(double)widthDst;
+    double yscale = heightSrc/(double)heightDst;
+
+    XRenderPictureAttributes pa;
+    pa.subwindow_mode = IncludeInferiors;
+    pa.repeat = RepeatNone;
+
+    TRACE("src depth=%d widthSrc=%d heightSrc=%d xSrc=%d ySrc=%d\n", physDevSrc->depth, widthSrc, heightSrc, x_src, y_src);
+    TRACE("dst depth=%d widthDst=%d heightDst=%d\n", physDevDst->depth, widthDst, heightDst);
+
+    if(!X11DRV_XRender_Installed)
+    {
+        TRACE("Not using XRender since it is not available or disabled\n");
+        return FALSE;
+    }
+
+    /* XRender can't handle palettes, so abort */
+    if(X11DRV_PALETTE_XPixelToPalette)
+        return FALSE;
+
+    /* XRender is of no use in this case */
+    if((physDevDst->depth == 1) && (physDevSrc->depth > 1))
+        return FALSE;
+
+    /* Just use traditional X copy when the depths match and we don't need stretching */
+    if((physDevSrc->depth == physDevDst->depth) && !stretch)
+    {
+        TRACE("Source and destination depth match and no stretching needed falling back to XCopyArea\n");
+        wine_tsx11_lock();
+        XCopyArea( gdi_display, physDevSrc->drawable, pixmap, gc, x_src, y_src, width, height, 0, 0);
+        wine_tsx11_unlock();
+        return TRUE;
+    }
+
+    /* mono -> color */
+    if(physDevSrc->depth == 1)
+    {
+        XRenderColor col;
+        get_xrender_color(dst_format, physDevDst->textPixel, &col);
+
+        /* We use the source drawable as a mask */
+        wine_tsx11_lock();
+        mask_pict = pXRenderCreatePicture(gdi_display, physDevSrc->drawable, src_format->pict_format, CPSubwindowMode|CPRepeat, &pa);
+
+        /* Use backgroundPixel as the foreground color */
+        src_pict = get_tile_pict(dst_format, physDevDst->backgroundPixel);
+
+        /* Create a destination picture and fill it with textPixel color as the background color */
+        dst_pict = pXRenderCreatePicture(gdi_display, pixmap, dst_format->pict_format, CPSubwindowMode|CPRepeat, &pa);
+        pXRenderFillRectangle(gdi_display, PictOpSrc, dst_pict, &col, 0, 0, width, height);
+
+        xrender_blit(src_pict, mask_pict, dst_pict, x_src, y_src, xscale, yscale, width, height);
+
+        if(dst_pict) pXRenderFreePicture(gdi_display, dst_pict);
+        if(mask_pict) pXRenderFreePicture(gdi_display, mask_pict);
+        wine_tsx11_unlock();
+    }
+    else /* color -> color but with different depths */
+    {
+        wine_tsx11_lock();
+        src_pict = pXRenderCreatePicture(gdi_display,
+                                          physDevSrc->drawable, src_format->pict_format,
+                                          CPSubwindowMode|CPRepeat, &pa);
+
+        dst_pict = pXRenderCreatePicture(gdi_display,
+                                          pixmap, dst_format->pict_format,
+                                          CPSubwindowMode|CPRepeat, &pa);
+
+        xrender_blit(src_pict, 0, dst_pict, x_src, y_src, xscale, yscale, width, height);
+
+        if(src_pict) pXRenderFreePicture(gdi_display, src_pict);
+        if(dst_pict) pXRenderFreePicture(gdi_display, dst_pict);
+        wine_tsx11_unlock();
+    }
     return TRUE;
 }
 
@@ -1754,4 +2107,12 @@ BOOL X11DRV_AlphaBlend(X11DRV_PDEVICE *devDst, INT xDst, INT yDst, INT widthDst,
   return FALSE;
 }
 
+BOOL X11DRV_XRender_GetSrcAreaStretch(X11DRV_PDEVICE *physDevSrc, X11DRV_PDEVICE *physDevDst,
+                                      Pixmap pixmap, GC gc,
+                                      INT widthSrc, INT heightSrc,
+                                      INT widthDst, INT heightDst,
+                                      RECT *visRectSrc, RECT *visRectDst )
+{
+    return FALSE;
+}
 #endif /* SONAME_LIBXRENDER */

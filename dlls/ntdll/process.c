@@ -37,6 +37,8 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 
+static ULONG execute_flags = MEM_EXECUTE_OPTION_ENABLE;
+
 /*
  *	Process object
  */
@@ -52,7 +54,7 @@ NTSTATUS WINAPI NtTerminateProcess( HANDLE handle, LONG exit_code )
     BOOL self;
     SERVER_START_REQ( terminate_process )
     {
-        req->handle    = handle;
+        req->handle    = wine_server_obj_handle( handle );
         req->exit_code = exit_code;
         ret = wine_server_call( req );
         self = !ret && reply->self;
@@ -77,12 +79,12 @@ PEB * WINAPI RtlGetCurrentPeb(void)
  * Mark the current process as a system process.
  * Returns the event that is signaled when all non-system processes have exited.
  */
-HANDLE __wine_make_process_system(void)
+HANDLE CDECL __wine_make_process_system(void)
 {
     HANDLE ret = 0;
     SERVER_START_REQ( make_process_system )
     {
-        if (!wine_server_call( req )) ret = reply->event;
+        if (!wine_server_call( req )) ret = wine_server_ptr_handle( reply->event );
     }
     SERVER_END_REQ;
     return ret;
@@ -146,7 +148,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     case ProcessBasicInformation:
         {
             PROCESS_BASIC_INFORMATION pbi;
-            const unsigned int affinity_mask = (1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
+            const ULONG_PTR affinity_mask = ((ULONG_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1;
 
             if (ProcessInformationLength >= sizeof(PROCESS_BASIC_INFORMATION))
             {
@@ -158,11 +160,11 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                 {
                     SERVER_START_REQ(get_process_info)
                     {
-                        req->handle = ProcessHandle;
+                        req->handle = wine_server_obj_handle( ProcessHandle );
                         if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                         {
                             pbi.ExitStatus = reply->exit_code;
-                            pbi.PebBaseAddress = reply->peb;
+                            pbi.PebBaseAddress = wine_server_get_ptr( reply->peb );
                             pbi.AffinityMask = reply->affinity & affinity_mask;
                             pbi.BasePriority = reply->priority;
                             pbi.UniqueProcessId = reply->pid;
@@ -179,7 +181,11 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                 if (ProcessInformationLength > sizeof(PROCESS_BASIC_INFORMATION))
                     ret = STATUS_INFO_LENGTH_MISMATCH;
             }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
+            else
+            {
+                len = sizeof(PROCESS_BASIC_INFORMATION);
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
         }
         break;
     case ProcessIoCounters:
@@ -205,14 +211,19 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                 if (ProcessInformationLength > sizeof(IO_COUNTERS))
                     ret = STATUS_INFO_LENGTH_MISMATCH;
             }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
+            else
+            {
+                len = sizeof(IO_COUNTERS);
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
         }
         break;
     case ProcessVmCounters:
         {
             VM_COUNTERS pvmi;
 
-            if (ProcessInformationLength >= sizeof(VM_COUNTERS))
+            /* older Windows versions don't have the PrivatePageCount field */
+            if (ProcessInformationLength >= FIELD_OFFSET(VM_COUNTERS,PrivatePageCount))
             {
                 if (!ProcessInformation)
                     ret = STATUS_ACCESS_VIOLATION;
@@ -223,15 +234,21 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                     /* FIXME : real data */
                     memset(&pvmi, 0 , sizeof(VM_COUNTERS));
 
-                    memcpy(ProcessInformation, &pvmi, sizeof(VM_COUNTERS));
+                    len = ProcessInformationLength;
+                    if (len != FIELD_OFFSET(VM_COUNTERS,PrivatePageCount)) len = sizeof(VM_COUNTERS);
 
-                    len = sizeof(VM_COUNTERS);
+                    memcpy(ProcessInformation, &pvmi, min(ProcessInformationLength,sizeof(VM_COUNTERS)));
                 }
 
-                if (ProcessInformationLength > sizeof(VM_COUNTERS))
+                if (ProcessInformationLength != FIELD_OFFSET(VM_COUNTERS,PrivatePageCount) &&
+                    ProcessInformationLength != sizeof(VM_COUNTERS))
                     ret = STATUS_INFO_LENGTH_MISMATCH;
             }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
+            else
+            {
+                len = sizeof(pvmi);
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
         }
         break;
     case ProcessTimes:
@@ -251,7 +268,7 @@ NTSTATUS WINAPI NtQueryInformationProcess(
 
                     SERVER_START_REQ(get_process_info)
                     {
-                      req->handle = ProcessHandle;
+                      req->handle = wine_server_obj_handle( ProcessHandle );
                       if ((ret = wine_server_call( req )) == STATUS_SUCCESS)
                       {
                           pti.CreateTime.QuadPart = reply->start_time;
@@ -261,25 +278,27 @@ NTSTATUS WINAPI NtQueryInformationProcess(
                     SERVER_END_REQ;
 
                     memcpy(ProcessInformation, &pti, sizeof(KERNEL_USER_TIMES));
-
                     len = sizeof(KERNEL_USER_TIMES);
                 }
 
                 if (ProcessInformationLength > sizeof(KERNEL_USER_TIMES))
                     ret = STATUS_INFO_LENGTH_MISMATCH;
             }
-            else ret = STATUS_INFO_LENGTH_MISMATCH;
+            else
+            {
+                len = sizeof(KERNEL_USER_TIMES);
+                ret = STATUS_INFO_LENGTH_MISMATCH;
+            }
         }
         break;
     case ProcessDebugPort:
         /* "These are not the debuggers you are looking for." *
          * set it to 0 aka "no debugger" to satisfy copy protections */
-        if (ProcessInformationLength == 4)
-        {
+        len = 4;
+        if (ProcessInformationLength == len)
             memset(ProcessInformation, 0, ProcessInformationLength);
-            len = 4;
-        }
-        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     case ProcessHandleCount:
         if (ProcessInformationLength >= 4)
@@ -291,31 +310,47 @@ NTSTATUS WINAPI NtQueryInformationProcess(
             else
             {
                 memset(ProcessInformation, 0, 4);
-
-
                 len = 4;
             }
 
             if (ProcessInformationLength > 4)
                 ret = STATUS_INFO_LENGTH_MISMATCH;
-         }
-         else ret = STATUS_INFO_LENGTH_MISMATCH;
-         break;
-    case ProcessWow64Information:
-        if (ProcessInformationLength == 4)
+        }
+        else
         {
-            memset(ProcessInformation, 0, ProcessInformationLength);
             len = 4;
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        }
+        break;
+    case ProcessWow64Information:
+        len = sizeof(DWORD);
+        if (ProcessInformationLength == len)
+        {
+            DWORD val = 0;
+
+            if (ProcessHandle == GetCurrentProcess()) val = is_wow64;
+            else if (server_cpus & (1 << CPU_x86_64))
+            {
+                SERVER_START_REQ( get_process_info )
+                {
+                    req->handle = wine_server_obj_handle( ProcessHandle );
+                    if (!(ret = wine_server_call( req ))) val = (reply->cpu != CPU_x86_64);
+                }
+                SERVER_END_REQ;
+            }
+            *(DWORD *)ProcessInformation = val;
         }
         else ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     case ProcessImageFileName:
+        /* FIXME: this will return a DOS path. Windows returns an NT path. Changing this would require also changing kernel32.QueryFullProcessImageName.
+         * The latter may be harder because of the lack of RtlNtPathNameToDosPathName. */
         SERVER_START_REQ(get_dll_info)
         {
             UNICODE_STRING *image_file_name_str = ProcessInformation;
 
-            req->handle = ProcessHandle;
-            req->base_address = NULL; /* main module */
+            req->handle = wine_server_obj_handle( ProcessHandle );
+            req->base_address = 0; /* main module */
             wine_server_set_reply( req, image_file_name_str ? image_file_name_str + 1 : NULL,
                                    ProcessInformationLength > sizeof(UNICODE_STRING) ? ProcessInformationLength - sizeof(UNICODE_STRING) : 0 );
             ret = wine_server_call( req );
@@ -329,6 +364,13 @@ NTSTATUS WINAPI NtQueryInformationProcess(
             }
         }
         SERVER_END_REQ;
+        break;
+    case ProcessExecuteFlags:
+        len = sizeof(ULONG);
+        if (ProcessInformationLength == len)
+            *(ULONG *)ProcessInformation = execute_flags;
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
     default:
         FIXME("(%p,info_class=%d,%p,0x%08x,%p) Unknown information class\n",
@@ -360,11 +402,11 @@ NTSTATUS WINAPI NtSetInformationProcess(
     {
     case ProcessAffinityMask:
         if (ProcessInformationLength != sizeof(DWORD_PTR)) return STATUS_INVALID_PARAMETER;
-        if (*(PDWORD_PTR)ProcessInformation & ~((1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1))
+        if (*(PDWORD_PTR)ProcessInformation & ~(((DWORD_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1))
             return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( set_process_info )
         {
-            req->handle   = ProcessHandle;
+            req->handle   = wine_server_obj_handle( ProcessHandle );
             req->affinity = *(PDWORD_PTR)ProcessInformation;
             req->mask     = SET_PROCESS_INFO_AFFINITY;
             ret = wine_server_call( req );
@@ -380,7 +422,7 @@ NTSTATUS WINAPI NtSetInformationProcess(
 
             SERVER_START_REQ( set_process_info )
             {
-                req->handle   = ProcessHandle;
+                req->handle   = wine_server_obj_handle( ProcessHandle );
                 /* FIXME Foreground isn't used */
                 req->priority = ppc->PriorityClass;
                 req->mask     = SET_PROCESS_INFO_PRIORITY;
@@ -389,6 +431,31 @@ NTSTATUS WINAPI NtSetInformationProcess(
             SERVER_END_REQ;
         }
         break;
+
+    case ProcessExecuteFlags:
+        if (ProcessInformationLength != sizeof(ULONG))
+            return STATUS_INVALID_PARAMETER;
+        else if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT)
+            return STATUS_ACCESS_DENIED;
+        else
+        {
+            BOOL enable;
+            switch (*(ULONG *)ProcessInformation & (MEM_EXECUTE_OPTION_ENABLE|MEM_EXECUTE_OPTION_DISABLE))
+            {
+            case MEM_EXECUTE_OPTION_ENABLE:
+                enable = TRUE;
+                break;
+            case MEM_EXECUTE_OPTION_DISABLE:
+                enable = FALSE;
+                break;
+            default:
+                return STATUS_INVALID_PARAMETER;
+            }
+            execute_flags = *(ULONG *)ProcessInformation;
+            VIRTUAL_SetForceExec( enable );
+        }
+        break;
+
     default:
         FIXME("(%p,0x%08x,%p,0x%08x) stub\n",
               ProcessHandle,ProcessInformationClass,ProcessInformation,
@@ -431,7 +498,7 @@ NTSTATUS  WINAPI NtOpenProcess(PHANDLE handle, ACCESS_MASK access,
         req->access     = access;
         req->attributes = attr ? attr->Attributes : 0;
         status = wine_server_call( req );
-        if (!status) *handle = reply->handle;
+        if (!status) *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     return status;

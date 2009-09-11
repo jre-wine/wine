@@ -2,7 +2,8 @@
  * Some unit tests for d3d functions
  *
  * Copyright (C) 2005 Antoine Chavasse
- * Copyright (C) 2006 Stefan Dösinger for CodeWeavers
+ * Copyright (C) 2006 Stefan DÃ¶singer for CodeWeavers
+ * Copyright (C) 2008 Alexander Dorofeyev
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,10 +20,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#define COBJMACROS
+
 #include <assert.h>
 #include "wine/test.h"
+#include "initguid.h"
 #include "ddraw.h"
 #include "d3d.h"
+#include "unknwn.h"
 
 static LPDIRECTDRAW7           lpDD = NULL;
 static LPDIRECT3D7             lpD3D = NULL;
@@ -39,6 +44,7 @@ static IDirect3D *Direct3D1 = NULL;
 static IDirect3DDevice *Direct3DDevice1 = NULL;
 static IDirect3DExecuteBuffer *ExecuteBuffer = NULL;
 static IDirect3DViewport *Viewport = NULL;
+static IDirect3DLight *Light = NULL;
 
 typedef struct {
     int total;
@@ -73,6 +79,13 @@ static void init_function_pointers(void)
 }
 
 
+static ULONG getRefcount(IUnknown *iface)
+{
+    IUnknown_AddRef(iface);
+    return IUnknown_Release(iface);
+}
+
+
 static BOOL CreateDirect3D(void)
 {
     HRESULT rc;
@@ -100,7 +113,7 @@ static BOOL CreateDirect3D(void)
     ddsd.dwWidth = 256;
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDS, NULL);
-    if (!SUCCEEDED(rc))
+    if (FAILED(rc))
         return FALSE;
 
     memset(&ddsd, 0, sizeof(ddsd));
@@ -115,12 +128,12 @@ static BOOL CreateDirect3D(void)
     ddsd.dwHeight = 256;
     rc = IDirectDraw7_CreateSurface(lpDD, &ddsd, &lpDDSdepth, NULL);
     ok(rc==DD_OK, "CreateSurface returned: %x\n", rc);
-    if (!SUCCEEDED(rc)) {
+    if (FAILED(rc)) {
         lpDDSdepth = NULL;
     } else {
         rc = IDirectDrawSurface_AddAttachedSurface(lpDDS, lpDDSdepth);
         ok(rc == DD_OK, "IDirectDrawSurface_AddAttachedSurface returned %x\n", rc);
-        if (!SUCCEEDED(rc))
+        if (FAILED(rc))
             return FALSE;
     }
 
@@ -326,7 +339,8 @@ static void LightTest(void)
 
     light.dvAttenuation0 = zero / zero; /* NaN */
     rc = IDirect3DDevice7_SetLight(lpD3DDevice, 103, &light);
-    ok(rc==D3D_OK, "SetLight returned: %x\n", rc);
+    ok(rc==D3D_OK ||
+       broken(rc==DDERR_INVALIDPARAMS), "SetLight returned: %x\n", rc);
 
     /* Directional light ignores attenuation */
     light.dltType = D3DLIGHT_DIRECTIONAL;
@@ -840,7 +854,7 @@ static HRESULT WINAPI enumDevicesCallback(GUID *Guid,LPSTR DeviceDescription,LPS
 
 static HRESULT WINAPI enumDevicesCallbackTest7(LPSTR DeviceDescription, LPSTR DeviceName, LPD3DDEVICEDESC7 lpdd7, LPVOID Context)
 {
-    D3D7ETest *d3d7et = (D3D7ETest*)Context;
+    D3D7ETest *d3d7et = Context;
     if(IsEqualGUID(&lpdd7->deviceGUID, &IID_IDirect3DRGBDevice))
         d3d7et->rgb++;
     else if(IsEqualGUID(&lpdd7->deviceGUID, &IID_IDirect3DHALDevice))
@@ -868,7 +882,7 @@ static void D3D7EnumTest(void)
     }
 
     memset(&d3d7et, 0, sizeof(d3d7et));
-    IDirect3D7_EnumDevices(lpD3D, enumDevicesCallbackTest7, (LPVOID) &d3d7et);
+    IDirect3D7_EnumDevices(lpD3D, enumDevicesCallbackTest7, &d3d7et);
 
 
     /* A couple of games (Delta Force LW and TFD) rely on this behaviour */
@@ -937,6 +951,7 @@ static BOOL D3D1_createObjects(void)
     ok(hr==DD_OK, "SetCooperativeLevel returned: %x\n", hr);
 
     hr = IDirectDraw_QueryInterface(DirectDraw1, &IID_IDirect3D, (void**) &Direct3D1);
+    if (hr == E_NOINTERFACE) return FALSE;
     ok(hr==DD_OK, "QueryInterface returned: %x\n", hr);
     if (!Direct3D1) {
         return FALSE;
@@ -997,11 +1012,17 @@ static BOOL D3D1_createObjects(void)
     hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
 
+    hr = IDirect3D_CreateLight(Direct3D1, &Light, NULL);
+    ok(hr == D3D_OK, "IDirect3D_CreateLight failed: %08x\n", hr);
+    if (!Light)
+        return FALSE;
+
     return TRUE;
 }
 
 static void D3D1_releaseObjects(void)
 {
+    if (Light) IDirect3DLight_Release(Light);
     if (Viewport) IDirect3DViewport_Release(Viewport);
     if (ExecuteBuffer) IDirect3DExecuteBuffer_Release(ExecuteBuffer);
     if (Direct3DDevice1) IDirect3DDevice_Release(Direct3DDevice1);
@@ -1010,6 +1031,19 @@ static void D3D1_releaseObjects(void)
     if (DirectDraw1) IDirectDraw_Release(DirectDraw1);
 }
 
+#define SET_VP_DATA(vp_data) \
+    vp_data.dwSize = sizeof(vp_data); \
+    vp_data.dwX = 0; \
+    vp_data.dwY = 0; \
+    vp_data.dwWidth = 256; \
+    vp_data.dwHeight = 256; \
+    vp_data.dvMaxX = 256; \
+    vp_data.dvMaxY = 256; \
+    vp_data.dvScaleX = 5; \
+    vp_data.dvScaleY = 5; \
+    vp_data.dvMinZ = -25; \
+    vp_data.dvMaxZ = 60;
+
 static void Direct3D1Test(void)
 {
     HRESULT hr;
@@ -1017,6 +1051,9 @@ static void Direct3D1Test(void)
     D3DVIEWPORT vp_data;
     D3DINSTRUCTION *instr;
     D3DBRANCH *branch;
+    IDirect3D *Direct3D_alt;
+    IDirect3DLight *d3dlight;
+    ULONG refcount;
     unsigned int idx = 0;
     static struct v_in testverts[] = {
         {0.0, 0.0, 0.0},  { 1.0,  1.0,  1.0}, {-1.0, -1.0, -1.0},
@@ -1033,6 +1070,12 @@ static void Direct3D1Test(void)
     D3DHVERTEX outH[sizeof(testverts) / sizeof(testverts[0])];
     D3DTRANSFORMDATA transformdata;
     DWORD i = FALSE;
+
+    /* Interface consistency check. */
+    hr = IDirect3DDevice_GetDirect3D(Direct3DDevice1, &Direct3D_alt);
+    ok(hr == D3D_OK, "IDirect3DDevice_GetDirect3D failed: %08x\n", hr);
+    if (hr == D3D_OK)
+        ok(Direct3D_alt == Direct3D1, "Direct3D1 struct pointer missmatch: %p != %p\n", Direct3D_alt, Direct3D1);
 
     memset(&desc, 0, sizeof(desc));
     desc.dwSize = sizeof(desc);
@@ -1102,7 +1145,7 @@ static void Direct3D1Test(void)
     instr->bOpcode = D3DOP_TRIANGLE;
     instr->bSize = sizeof(D3DOP_TRIANGLE);
     instr->wCount = 0;
-    instr = ((D3DINSTRUCTION*)(instr))+1;
+    instr++;
     instr->bOpcode = D3DOP_EXIT;
     instr->bSize = 0;
     instr->wCount = 0;
@@ -1114,7 +1157,7 @@ static void Direct3D1Test(void)
 
     memset(&transformdata, 0, sizeof(transformdata));
     transformdata.dwSize = sizeof(transformdata);
-    transformdata.lpIn = (void *) testverts;
+    transformdata.lpIn = testverts;
     transformdata.dwInSize = sizeof(testverts[0]);
     transformdata.lpOut = out;
     transformdata.dwOutSize = sizeof(out[0]);
@@ -1152,17 +1195,7 @@ static void Direct3D1Test(void)
         }
     }
 
-    vp_data.dwSize = sizeof(vp_data);
-    vp_data.dwX = 0;
-    vp_data.dwY = 0;
-    vp_data.dwWidth = 256;
-    vp_data.dwHeight = 256;
-    vp_data.dvMaxX = 256;
-    vp_data.dvMaxY = 256;
-    vp_data.dvScaleX = 5;
-    vp_data.dvScaleY = 5;
-    vp_data.dvMinZ = -25;
-    vp_data.dvMaxZ = 60;
+    SET_VP_DATA(vp_data);
     hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
     ok(hr == D3D_OK, "IDirect3DViewport_SetViewport returned %08x\n", hr);
     hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(testverts) / sizeof(testverts[0]),
@@ -1183,6 +1216,7 @@ static void Direct3D1Test(void)
            cmp[i].x, cmp[i].y, cmp[i].z, cmp[i].rhw);
     }
 
+    SET_VP_DATA(vp_data);
     vp_data.dwX = 10;
     vp_data.dwY = 20;
     hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
@@ -1245,7 +1279,7 @@ static void Direct3D1Test(void)
                 "Regular output DWORD %d remained untouched\n", i);
     }
 
-    transformdata.lpIn = (void *) cliptest;
+    transformdata.lpIn = cliptest;
     transformdata.dwInSize = sizeof(cliptest[0]);
     hr = IDirect3DViewport_TransformVertices(Viewport, sizeof(cliptest) / sizeof(cliptest[0]),
                                              &transformdata, D3DTRANSFORM_CLIPPED,
@@ -1265,6 +1299,7 @@ static void Direct3D1Test(void)
            outH[i].dwFlags, Flags[i]);
     }
 
+    SET_VP_DATA(vp_data);
     vp_data.dwWidth = 10;
     vp_data.dwHeight = 1000;
     hr = IDirect3DViewport_SetViewport(Viewport, &vp_data);
@@ -1287,6 +1322,8 @@ static void Direct3D1Test(void)
            "Cliptest %d differs. Got %08x expexted %08x\n", i + 1,
            outH[i].dwFlags, Flags[i]);
     }
+
+    SET_VP_DATA(vp_data);
     vp_data.dwWidth = 256;
     vp_data.dwHeight = 256;
     vp_data.dvScaleX = 1;
@@ -1316,6 +1353,7 @@ static void Direct3D1Test(void)
      * and with clipping on the offscreen flag is set if only one vertex
      * is transformed, and this vertex is offscreen.
      */
+    SET_VP_DATA(vp_data);
     vp_data.dwWidth = 5;
     vp_data.dwHeight = 5;
     vp_data.dvScaleX = 10000;
@@ -1345,8 +1383,9 @@ static void Direct3D1Test(void)
     ok(hr == D3D_OK, "IDirect3DViewport_TransformVertices returned %08x\n", hr);
     ok(i == (D3DCLIP_BOTTOM | D3DCLIP_LEFT), "Offscreen is %d\n", i);
 
-    transformdata.lpIn = (void *) offscreentest;
+    transformdata.lpIn = offscreentest;
     transformdata.dwInSize = sizeof(offscreentest[0]);
+    SET_VP_DATA(vp_data);
     vp_data.dwWidth = 257;
     vp_data.dwHeight = 257;
     vp_data.dvScaleX = 1;
@@ -1375,6 +1414,24 @@ static void Direct3D1Test(void)
 
     hr = IDirect3DDevice_DeleteViewport(Direct3DDevice1, Viewport);
     ok(hr == D3D_OK, "IDirect3DDevice_DeleteViewport returned %08x\n", hr);
+
+    hr = IDirect3DViewport_AddLight(Viewport, Light);
+    ok(hr == D3D_OK, "IDirect3DViewport_AddLight returned %08x\n", hr);
+    refcount = getRefcount((IUnknown*) Light);
+    ok(refcount == 2, "Refcount should be 2, returned is %d\n", refcount);
+
+    hr = IDirect3DViewport_NextLight(Viewport, NULL, &d3dlight, D3DNEXT_HEAD);
+    ok(hr == D3D_OK, "IDirect3DViewport_AddLight returned %08x\n", hr);
+    ok(d3dlight == Light, "Got different light returned %p, expected %p\n", d3dlight, Light);
+    refcount = getRefcount((IUnknown*) Light);
+    ok(refcount == 3, "Refcount should be 2, returned is %d\n", refcount);
+
+    hr = IDirect3DViewport_DeleteLight(Viewport, Light);
+    ok(hr == D3D_OK, "IDirect3DViewport_DeleteLight returned %08x\n", hr);
+    refcount = getRefcount((IUnknown*) Light);
+    ok(refcount == 2, "Refcount should be 2, returned is %d\n", refcount);
+
+    IDirect3DLight_Release(Light);
 }
 
 static BOOL colortables_check_equality(PALETTEENTRY table1[256], PALETTEENTRY table2[256])
@@ -1443,6 +1500,10 @@ static void TextureLoadTest(void)
         skip("Can't get IDirect3DTexture interface; skipping further tests\n");
         goto cleanup;
     }
+
+    /* test load of Texture to Texture */
+    hr = IDirect3DTexture_Load(Texture, Texture);
+    ok(hr == DD_OK, "IDirect3DTexture_Load returned %08x\n", hr);
 
     /* test Load when both textures have no palette */
     hr = IDirect3DTexture_Load(Texture2, Texture);
@@ -1590,12 +1651,1333 @@ out:
     IDirect3DVertexBuffer7_Release(lpVBufSrc);
 }
 
+static void D3D7_OldRenderStateTest(void)
+{
+    HRESULT rc;
+    DWORD val;
+
+    /* Test reaction to some deprecated states in D3D7.
+
+     * IDirect3DDevice7 in Wine currently relays such states to wined3d where they are do-nothing and return 0, instead
+     * of INVALIDPARAMS. Unless an app is found which cares this is probably ok. What this test shows is that these states
+     * need not to be handled in D3D7.
+     */
+    todo_wine {
+        rc = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, 0);
+        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %08x\n", rc);
+
+        rc = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREHANDLE, &val);
+        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %08x\n", rc);
+
+        rc = IDirect3DDevice7_SetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, D3DTBLEND_MODULATE);
+        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_SetRenderState returned %08x\n", rc);
+
+        rc = IDirect3DDevice7_GetRenderState(lpD3DDevice, D3DRENDERSTATE_TEXTUREMAPBLEND, &val);
+        ok(rc == DDERR_INVALIDPARAMS, "IDirect3DDevice7_GetRenderState returned %08x\n", rc);
+    }
+}
+
+#define IS_VALUE_NEAR(a, b)    ( ((a) == (b)) || ((a) == (b) - 1) || ((a) == (b) + 1) )
+#define MIN(a, b)    ((a) < (b) ? (a) : (b))
+
+static void DeviceLoadTest(void)
+{
+    DDSURFACEDESC2 ddsd;
+    IDirectDrawSurface7 *texture_levels[2][8];
+    IDirectDrawSurface7 *cube_face_levels[2][6][8];
+    DWORD flags;
+    HRESULT hr;
+    DDBLTFX ddbltfx;
+    RECT loadrect;
+    POINT loadpoint;
+    int i, i1, i2;
+    unsigned diff_count = 0, diff_count2 = 0;
+    unsigned x, y;
+    BOOL load_mip_subset_broken = FALSE;
+    IDirectDrawPalette *palettes[5];
+    PALETTEENTRY table1[256];
+    DDCOLORKEY ddckey;
+    D3DDEVICEDESC7 d3dcaps;
+
+    /* Test loading of texture subrectangle with a mipmap surface. */
+    memset(texture_levels, 0, sizeof(texture_levels));
+    memset(cube_face_levels, 0, sizeof(cube_face_levels));
+    memset(palettes, 0, sizeof(palettes));
+
+    for (i = 0; i < 2; i++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+        U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+        U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+        U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+        U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+        U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[i][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        /* Check the number of created mipmaps */
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[i][0], &ddsd);
+        ok(hr==DD_OK,"IDirectDrawSurface7_GetSurfaceDesc returned: %x\n",hr);
+        ok(U2(ddsd).dwMipMapCount == 8, "unexpected mip count %u\n", U2(ddsd).dwMipMapCount);
+        if (U2(ddsd).dwMipMapCount != 8) goto out;
+
+        for (i1 = 1; i1 < 8; i1++)
+        {
+            hr = IDirectDrawSurface7_GetAttachedSurface(texture_levels[i][i1 - 1], &ddsd.ddsCaps, &texture_levels[i][i1]);
+            ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+            if (FAILED(hr)) goto out;
+        }
+    }
+
+    for (i1 = 0; i1 < 8; i1++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_Lock(texture_levels[0][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                /* x stored in green component, y in blue. */
+                DWORD color = 0xff0000 | (x << 8)  | y;
+                *textureRow++ = color;
+            }
+        }
+
+        hr = IDirectDrawSurface7_Unlock(texture_levels[0][i1], NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+    }
+
+    for (i1 = 0; i1 < 8; i1++)
+    {
+        memset(&ddbltfx, 0, sizeof(ddbltfx));
+        ddbltfx.dwSize = sizeof(ddbltfx);
+        U5(ddbltfx).dwFillColor = 0;
+        hr = IDirectDrawSurface7_Blt(texture_levels[1][i1], NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+        ok(hr == DD_OK, "IDirectDrawSurface7_Blt failed with %08x\n", hr);
+    }
+
+    /* First test some broken coordinates. */
+    loadpoint.x = loadpoint.y = 0;
+    loadrect.left = 0;
+    loadrect.top = 0;
+    loadrect.right = 0;
+    loadrect.bottom = 0;
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    loadpoint.x = loadpoint.y = 50;
+    loadrect.left = 0;
+    loadrect.top = 0;
+    loadrect.right = 100;
+    loadrect.bottom = 100;
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    /* Test actual loading. */
+    loadpoint.x = loadpoint.y = 31;
+    loadrect.left = 30;
+    loadrect.top = 20;
+    loadrect.right = 93;
+    loadrect.bottom = 52;
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    for (i1 = 0; i1 < 8; i1++)
+    {
+        diff_count = 0;
+        diff_count2 = 0;
+
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_Lock(texture_levels[1][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                DWORD color = *textureRow++;
+
+                if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                    y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top)
+                {
+                    if (color & 0xffffff) diff_count++;
+                }
+                else
+                {
+                    DWORD r = (color & 0xff0000) >> 16;
+                    DWORD g = (color & 0xff00) >> 8;
+                    DWORD b = (color & 0xff);
+
+                    if (r != 0xff || g != x + loadrect.left - loadpoint.x || b != y + loadrect.top - loadpoint.y) diff_count++;
+                }
+
+                /* This codepath is for software RGB device. It has what looks like some weird off by one errors, but may
+                   technically be correct as it's not precisely defined by docs. */
+                if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                    y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top + 1)
+                {
+                    if (color & 0xffffff) diff_count2++;
+                }
+                else
+                {
+                    DWORD r = (color & 0xff0000) >> 16;
+                    DWORD g = (color & 0xff00) >> 8;
+                    DWORD b = (color & 0xff);
+
+                    if (r != 0xff || !IS_VALUE_NEAR(g, x + loadrect.left - loadpoint.x) ||
+                        !IS_VALUE_NEAR(b, y + loadrect.top - loadpoint.y)) diff_count2++;
+                }
+            }
+        }
+
+        hr = IDirectDrawSurface7_Unlock(texture_levels[1][i1], NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+
+        ok(diff_count == 0 || diff_count2 == 0, "Unexpected destination texture level pixels; %u differences at %d level\n",
+                MIN(diff_count, diff_count2), i1);
+
+        loadpoint.x /= 2;
+        loadpoint.y /= 2;
+        loadrect.top /= 2;
+        loadrect.left /= 2;
+        loadrect.right = (loadrect.right + 1) / 2;
+        loadrect.bottom = (loadrect.bottom + 1) / 2;
+    }
+
+    /* This crashes on native (tested on real windows XP / directx9 / nvidia and
+     * qemu Win98 / directx7 / RGB software rasterizer):
+     * passing non toplevel surfaces (sublevels) to Load (DX7 docs tell not to do this)
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][1], NULL, texture_levels[0][1], NULL, 0);
+    */
+
+    /* Freed in reverse order as native seems to dislike and crash on freeing top level surface first. */
+    for (i = 0; i < 2; i++)
+    {
+        for (i1 = 7; i1 >= 0; i1--)
+        {
+            if (texture_levels[i][i1]) IDirectDrawSurface7_Release(texture_levels[i][i1]);
+        }
+    }
+    memset(texture_levels, 0, sizeof(texture_levels));
+
+    /* Test texture size mismatch. */
+    for (i = 0; i < 2; i++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+        ddsd.dwWidth = i ? 256 : 128;
+        ddsd.dwHeight = 128;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[i][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+    }
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], NULL, texture_levels[0][0], NULL, 0);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[0][0], NULL, texture_levels[1][0], NULL, 0);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    IDirectDrawSurface7_Release(texture_levels[0][0]);
+    IDirectDrawSurface7_Release(texture_levels[1][0]);
+    memset(texture_levels, 0, sizeof(texture_levels));
+
+    memset(&d3dcaps, 0, sizeof(d3dcaps));
+    hr = IDirect3DDevice7_GetCaps(lpD3DDevice, &d3dcaps);
+    ok(hr == D3D_OK, "IDirect3DDevice7_GetCaps returned %08x\n", hr);
+
+    if (!(d3dcaps.dpcTriCaps.dwTextureCaps & D3DPTEXTURECAPS_CUBEMAP))
+    {
+        skip("No cubemap support\n");
+    }
+    else
+    {
+        /* Test loading mipmapped cubemap texture subrectangle from another similar texture. */
+        for (i = 0; i < 2; i++)
+        {
+            memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+            ddsd.dwSize = sizeof(ddsd);
+            ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+            ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+            ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_ALLFACES;
+            ddsd.dwWidth = 128;
+            ddsd.dwHeight = 128;
+            U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+            U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+            U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+            U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+            U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+            U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+            hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &cube_face_levels[i][0][0], NULL);
+            ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+            if (FAILED(hr)) goto out;
+
+            flags = DDSCAPS2_CUBEMAP_NEGATIVEX;
+            for (i1 = 1; i1 < 6; i1++, flags <<= 1)
+            {
+                ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+                ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | flags;
+                hr = IDirectDrawSurface7_GetAttachedSurface(cube_face_levels[i][0][0], &ddsd.ddsCaps, &cube_face_levels[i][i1][0]);
+                ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+                if (FAILED(hr)) goto out;
+            }
+
+            for (i1 = 0; i1 < 6; i1++)
+            {
+                /* Check the number of created mipmaps */
+                memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+                ddsd.dwSize = sizeof(ddsd);
+                hr = IDirectDrawSurface7_GetSurfaceDesc(cube_face_levels[i][i1][0], &ddsd);
+                ok(hr==DD_OK,"IDirectDrawSurface7_GetSurfaceDesc returned: %x\n",hr);
+                ok(U2(ddsd).dwMipMapCount == 8, "unexpected mip count %u\n", U2(ddsd).dwMipMapCount);
+                if (U2(ddsd).dwMipMapCount != 8) goto out;
+
+                for (i2 = 1; i2 < 8; i2++)
+                {
+                    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_MIPMAP;
+                    ddsd.ddsCaps.dwCaps2 = DDSCAPS2_MIPMAPSUBLEVEL;
+                    hr = IDirectDrawSurface7_GetAttachedSurface(cube_face_levels[i][i1][i2 - 1], &ddsd.ddsCaps, &cube_face_levels[i][i1][i2]);
+                    ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+                    if (FAILED(hr)) goto out;
+                }
+            }
+        }
+
+        for (i = 0; i < 6; i++)
+            for (i1 = 0; i1 < 8; i1++)
+            {
+                memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+                ddsd.dwSize = sizeof(ddsd);
+                hr = IDirectDrawSurface7_Lock(cube_face_levels[0][i][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+                if (FAILED(hr)) goto out;
+
+                for (y = 0 ; y < ddsd.dwHeight; y++)
+                {
+                    DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                    {
+                        /* face number in low 4 bits of red, x stored in green component, y in blue. */
+                        DWORD color = 0xf00000 | (i << 16) | (x << 8)  | y;
+                        *textureRow++ = color;
+                    }
+                }
+
+                hr = IDirectDrawSurface7_Unlock(cube_face_levels[0][i][i1], NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+            }
+
+        for (i = 0; i < 6; i++)
+            for (i1 = 0; i1 < 8; i1++)
+            {
+                memset(&ddbltfx, 0, sizeof(ddbltfx));
+                ddbltfx.dwSize = sizeof(ddbltfx);
+                U5(ddbltfx).dwFillColor = 0;
+                hr = IDirectDrawSurface7_Blt(cube_face_levels[1][i][i1], NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+                ok(hr == DD_OK, "IDirectDrawSurface7_Blt failed with %08x\n", hr);
+            }
+
+        loadpoint.x = loadpoint.y = 10;
+        loadrect.left = 30;
+        loadrect.top = 20;
+        loadrect.right = 93;
+        loadrect.bottom = 52;
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[1][0][0], &loadpoint, cube_face_levels[0][0][0], &loadrect,
+                                        DDSCAPS2_CUBEMAP_ALLFACES);
+        ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        for (i = 0; i < 6; i++)
+        {
+            loadpoint.x = loadpoint.y = 10;
+            loadrect.left = 30;
+            loadrect.top = 20;
+            loadrect.right = 93;
+            loadrect.bottom = 52;
+
+            for (i1 = 0; i1 < 8; i1++)
+            {
+                diff_count = 0;
+                diff_count2 = 0;
+
+                memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+                ddsd.dwSize = sizeof(ddsd);
+                hr = IDirectDrawSurface7_Lock(cube_face_levels[1][i][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+                if (FAILED(hr)) goto out;
+
+                for (y = 0 ; y < ddsd.dwHeight; y++)
+                {
+                    DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                    {
+                        DWORD color = *textureRow++;
+
+                        if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                            y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top)
+                        {
+                            if (color & 0xffffff) diff_count++;
+                        }
+                        else
+                        {
+                            DWORD r = (color & 0xff0000) >> 16;
+                            DWORD g = (color & 0xff00) >> 8;
+                            DWORD b = (color & 0xff);
+
+                            if (r != (0xf0 | i) || g != x + loadrect.left - loadpoint.x ||
+                                b != y + loadrect.top - loadpoint.y) diff_count++;
+                        }
+
+                        /* This codepath is for software RGB device. It has what looks like some weird off by one errors, but may
+                        technically be correct as it's not precisely defined by docs. */
+                        if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                            y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top + 1)
+                        {
+                            if (color & 0xffffff) diff_count2++;
+                        }
+                        else
+                        {
+                            DWORD r = (color & 0xff0000) >> 16;
+                            DWORD g = (color & 0xff00) >> 8;
+                            DWORD b = (color & 0xff);
+
+                            if (r != (0xf0 | i) || !IS_VALUE_NEAR(g, x + loadrect.left - loadpoint.x) ||
+                                !IS_VALUE_NEAR(b, y + loadrect.top - loadpoint.y)) diff_count2++;
+                        }
+                    }
+                }
+
+                hr = IDirectDrawSurface7_Unlock(cube_face_levels[1][i][i1], NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+
+                ok(diff_count == 0 || diff_count2 == 0,
+                    "Unexpected destination texture level pixels; %u differences at face %x level %d\n",
+                    MIN(diff_count, diff_count2), i, i1);
+
+                loadpoint.x /= 2;
+                loadpoint.y /= 2;
+                loadrect.top /= 2;
+                loadrect.left /= 2;
+                loadrect.right = (loadrect.right + 1) / 2;
+                loadrect.bottom = (loadrect.bottom + 1) / 2;
+            }
+        }
+
+        for (i = 0; i < 2; i++)
+            for (i1 = 5; i1 >= 0; i1--)
+                for (i2 = 7; i2 >= 0; i2--)
+                {
+                    if (cube_face_levels[i][i1][i2]) IDirectDrawSurface7_Release(cube_face_levels[i][i1][i2]);
+                }
+        memset(cube_face_levels, 0, sizeof(cube_face_levels));
+
+        /* Test cubemap loading from regular texture. */
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX;
+        ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_ALLFACES;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &cube_face_levels[0][0][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[0][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[0][0][0], NULL, texture_levels[0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_ALLFACES);
+        ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        IDirectDrawSurface7_Release(cube_face_levels[0][0][0]);
+        memset(cube_face_levels, 0, sizeof(cube_face_levels));
+        IDirectDrawSurface7_Release(texture_levels[0][0]);
+        memset(texture_levels, 0, sizeof(texture_levels));
+
+        /* Test cubemap loading from cubemap with different number of faces. */
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX;
+        ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_POSITIVEX;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &cube_face_levels[0][0][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX;
+        ddsd.ddsCaps.dwCaps2 = DDSCAPS2_CUBEMAP | DDSCAPS2_CUBEMAP_POSITIVEX | DDSCAPS2_CUBEMAP_POSITIVEY;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &cube_face_levels[1][0][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        /* INVALIDPARAMS tests currently would fail because wine doesn't support partial cube faces
+            (the above created cubemaps will have all faces. */
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[0][0][0], NULL, cube_face_levels[1][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_ALLFACES);
+        todo_wine ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[0][0][0], NULL, cube_face_levels[1][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_POSITIVEX | DDSCAPS2_CUBEMAP_POSITIVEY);
+        todo_wine ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[0][0][0], NULL, cube_face_levels[1][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_POSITIVEX);
+        todo_wine ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[1][0][0], NULL, cube_face_levels[0][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_ALLFACES);
+        ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[1][0][0], NULL, cube_face_levels[0][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_POSITIVEX);
+        ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, cube_face_levels[1][0][0], NULL, cube_face_levels[0][0][0], NULL,
+                                        DDSCAPS2_CUBEMAP_POSITIVEZ);
+        ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        IDirectDrawSurface7_Release(cube_face_levels[0][0][0]);
+        IDirectDrawSurface7_Release(cube_face_levels[1][0][0]);
+        memset(cube_face_levels, 0, sizeof(cube_face_levels));
+    }
+
+    /* Test texture loading with different mip level count (larger levels match, smaller levels missing in destination. */
+    for (i = 0; i < 2; i++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT | DDSD_MIPMAPCOUNT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        U2(ddsd).dwMipMapCount = i ? 4 : 8;
+        U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+        U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+        U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+        U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+        U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+        U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[i][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        /* Check the number of created mipmaps */
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[i][0], &ddsd);
+        ok(hr==DD_OK,"IDirectDrawSurface7_GetSurfaceDesc returned: %x\n",hr);
+        ok(U2(ddsd).dwMipMapCount == (i ? 4 : 8), "unexpected mip count %u\n", U2(ddsd).dwMipMapCount);
+        if (U2(ddsd).dwMipMapCount != (i ? 4 : 8)) goto out;
+
+        for (i1 = 1; i1 < (i ? 4 : 8); i1++)
+        {
+            hr = IDirectDrawSurface7_GetAttachedSurface(texture_levels[i][i1 - 1], &ddsd.ddsCaps, &texture_levels[i][i1]);
+            ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+            if (FAILED(hr)) goto out;
+        }
+    }
+
+    for (i1 = 0; i1 < 8; i1++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_Lock(texture_levels[0][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                /* x stored in green component, y in blue. */
+                DWORD color = 0xf00000 | (i1 << 16) | (x << 8)  | y;
+                *textureRow++ = color;
+            }
+        }
+
+        hr = IDirectDrawSurface7_Unlock(texture_levels[0][i1], NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+    }
+
+    for (i1 = 0; i1 < 4; i1++)
+    {
+        memset(&ddbltfx, 0, sizeof(ddbltfx));
+        ddbltfx.dwSize = sizeof(ddbltfx);
+        U5(ddbltfx).dwFillColor = 0;
+        hr = IDirectDrawSurface7_Blt(texture_levels[1][i1], NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+        ok(hr == DD_OK, "IDirectDrawSurface7_Blt failed with %08x\n", hr);
+    }
+
+    loadpoint.x = loadpoint.y = 31;
+    loadrect.left = 30;
+    loadrect.top = 20;
+    loadrect.right = 93;
+    loadrect.bottom = 52;
+
+    /* Destination mip levels are a subset of source mip levels. */
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    for (i1 = 0; i1 < 4; i1++)
+    {
+        diff_count = 0;
+        diff_count2 = 0;
+
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_Lock(texture_levels[1][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                DWORD color = *textureRow++;
+
+                if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                    y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top)
+                {
+                    if (color & 0xffffff) diff_count++;
+                }
+                else
+                {
+                    DWORD r = (color & 0xff0000) >> 16;
+                    DWORD g = (color & 0xff00) >> 8;
+                    DWORD b = (color & 0xff);
+
+                    if (r != (0xf0 | i1) || g != x + loadrect.left - loadpoint.x ||
+                        b != y + loadrect.top - loadpoint.y) diff_count++;
+                }
+
+                /* This codepath is for software RGB device. It has what looks like some weird off by one errors, but may
+                technically be correct as it's not precisely defined by docs. */
+                if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                    y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top + 1)
+                {
+                    if (color & 0xffffff) diff_count2++;
+                }
+                else
+                {
+                    DWORD r = (color & 0xff0000) >> 16;
+                    DWORD g = (color & 0xff00) >> 8;
+                    DWORD b = (color & 0xff);
+
+                    if (r != (0xf0 | i1) || !IS_VALUE_NEAR(g, x + loadrect.left - loadpoint.x) ||
+                        !IS_VALUE_NEAR(b, y + loadrect.top - loadpoint.y)) diff_count2++;
+                }
+            }
+        }
+
+        hr = IDirectDrawSurface7_Unlock(texture_levels[1][i1], NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+
+        ok(diff_count == 0 || diff_count2 == 0, "Unexpected destination texture level pixels; %u differences at %d level\n",
+             MIN(diff_count, diff_count2), i1);
+
+        loadpoint.x /= 2;
+        loadpoint.y /= 2;
+        loadrect.top /= 2;
+        loadrect.left /= 2;
+        loadrect.right = (loadrect.right + 1) / 2;
+        loadrect.bottom = (loadrect.bottom + 1) / 2;
+    }
+
+    /* Destination mip levels are a superset of source mip levels (should fail). */
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[0][0], &loadpoint, texture_levels[1][0], &loadrect, 0);
+    ok(hr==DDERR_INVALIDPARAMS, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    for (i = 0; i < 2; i++)
+    {
+        for (i1 = 7; i1 >= 0; i1--)
+        {
+            if (texture_levels[i][i1]) IDirectDrawSurface7_Release(texture_levels[i][i1]);
+        }
+    }
+    memset(texture_levels, 0, sizeof(texture_levels));
+
+    /* Test loading from mipmap texture to a regular texture that matches one sublevel in size. */
+    memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+    ddsd.dwWidth = 128;
+    ddsd.dwHeight = 128;
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+    U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+    U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+    hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[0][0], NULL);
+    ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+    if (FAILED(hr)) goto out;
+
+    memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+    ddsd.dwSize = sizeof(ddsd);
+    ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+    ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;
+    ddsd.dwWidth = 32;
+    ddsd.dwHeight = 32;
+    U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+    U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+    U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+    U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+    U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+    U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+    hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[1][0], NULL);
+    ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+    if (FAILED(hr)) goto out;
+
+    for (i1 = 1; i1 < 8; i1++)
+    {
+        hr = IDirectDrawSurface7_GetAttachedSurface(texture_levels[0][i1 - 1], &ddsd.ddsCaps, &texture_levels[0][i1]);
+        ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+        if (FAILED(hr)) goto out;
+    }
+
+    for (i1 = 0; i1 < 8; i1++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_Lock(texture_levels[0][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                /* x stored in green component, y in blue. */
+                DWORD color = 0xf00000 | (i1 << 16) | (x << 8)  | y;
+                *textureRow++ = color;
+            }
+        }
+
+        hr = IDirectDrawSurface7_Unlock(texture_levels[0][i1], NULL);
+        ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+    }
+
+    memset(&ddbltfx, 0, sizeof(ddbltfx));
+    ddbltfx.dwSize = sizeof(ddbltfx);
+    U5(ddbltfx).dwFillColor = 0;
+    hr = IDirectDrawSurface7_Blt(texture_levels[1][0], NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+    ok(hr == DD_OK, "IDirectDrawSurface7_Blt failed with %08x\n", hr);
+
+    loadpoint.x = loadpoint.y = 32;
+    loadrect.left = 32;
+    loadrect.top = 32;
+    loadrect.right = 96;
+    loadrect.bottom = 96;
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    loadpoint.x /= 4;
+    loadpoint.y /= 4;
+    loadrect.top /= 4;
+    loadrect.left /= 4;
+    loadrect.right = (loadrect.right + 3) / 4;
+    loadrect.bottom = (loadrect.bottom + 3) / 4;
+
+    /* NOTE: something in either nvidia driver or directx9 on WinXP appears to be broken:
+     * this kind of Load calls (to subset with smaller surface(s)) produces wrong results with
+     * copied subrectangles divided more than needed, without apparent logic. But it works
+     * as expected on qemu / Win98 / directx7 / RGB device. Some things are broken on XP, e.g.
+     * some games don't work that worked in Win98, so it is assumed here XP results are wrong.
+     * The following code attempts to detect broken results, actual tests will then be skipped
+     */
+    load_mip_subset_broken = TRUE;
+    diff_count = 0;
+
+    memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+    ddsd.dwSize = sizeof(ddsd);
+    hr = IDirectDrawSurface7_Lock(texture_levels[1][0], NULL, &ddsd, DDLOCK_WAIT, NULL);
+    ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+    if (FAILED(hr)) goto out;
+
+    for (y = 0 ; y < ddsd.dwHeight; y++)
+    {
+        DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+        for (x = 0; x < ddsd.dwWidth;  x++)
+        {
+            DWORD color = *textureRow++;
+
+            if (x < 2 || x >= 2 + 4 ||
+                y < 2 || y >= 2 + 4)
+            {
+                if (color & 0xffffff) diff_count++;
+            }
+            else
+            {
+                DWORD r = (color & 0xff0000) >> 16;
+
+                if ((r & (0xf0)) != 0xf0) diff_count++;
+            }
+        }
+    }
+
+    if (diff_count) load_mip_subset_broken = FALSE;
+
+    if (load_mip_subset_broken) {
+        skip("IDirect3DDevice7_Load is broken (happens on some modern Windows installations like XP). Skipping affected tests.\n");
+    } else {
+        diff_count = 0;
+
+        for (y = 0 ; y < ddsd.dwHeight; y++)
+        {
+            DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+            for (x = 0; x < ddsd.dwWidth;  x++)
+            {
+                DWORD color = *textureRow++;
+
+                if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                    y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top)
+                {
+                    if (color & 0xffffff) diff_count++;
+                }
+                else
+                {
+                    DWORD r = (color & 0xff0000) >> 16;
+                    DWORD g = (color & 0xff00) >> 8;
+                    DWORD b = (color & 0xff);
+
+                    if (r != (0xf0 | 2) || g != x + loadrect.left - loadpoint.x ||
+                        b != y + loadrect.top - loadpoint.y) diff_count++;
+                }
+            }
+        }
+    }
+
+    hr = IDirectDrawSurface7_Unlock(texture_levels[1][0], NULL);
+    ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+
+    ok(diff_count == 0, "Unexpected destination texture level pixels; %u differences\n", diff_count);
+
+    for (i = 0; i < 2; i++)
+    {
+        for (i1 = 7; i1 >= 0; i1--)
+        {
+            if (texture_levels[i][i1]) IDirectDrawSurface7_Release(texture_levels[i][i1]);
+        }
+    }
+    memset(texture_levels, 0, sizeof(texture_levels));
+
+    if (!load_mip_subset_broken)
+    {
+        /* Test loading when destination mip levels are a subset of source mip levels and start from smaller
+        * surface (than first source mip level)
+        */
+        for (i = 0; i < 2; i++)
+        {
+            memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+            ddsd.dwSize = sizeof(ddsd);
+            ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+            if (i) ddsd.dwFlags |= DDSD_MIPMAPCOUNT;
+            ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+            ddsd.dwWidth = i ? 32 : 128;
+            ddsd.dwHeight = i ? 32 : 128;
+            if (i) U2(ddsd).dwMipMapCount = 4;
+            U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+            U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB;
+            U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 32;
+            U2(U4(ddsd).ddpfPixelFormat).dwRBitMask = 0x00FF0000;
+            U3(U4(ddsd).ddpfPixelFormat).dwGBitMask = 0x0000FF00;
+            U4(U4(ddsd).ddpfPixelFormat).dwBBitMask = 0x000000FF;
+            hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[i][0], NULL);
+            ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+            if (FAILED(hr)) goto out;
+
+            /* Check the number of created mipmaps */
+            memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+            ddsd.dwSize = sizeof(ddsd);
+            hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[i][0], &ddsd);
+            ok(hr==DD_OK,"IDirectDrawSurface7_GetSurfaceDesc returned: %x\n",hr);
+            ok(U2(ddsd).dwMipMapCount == (i ? 4 : 8), "unexpected mip count %u\n", U2(ddsd).dwMipMapCount);
+            if (U2(ddsd).dwMipMapCount != (i ? 4 : 8)) goto out;
+
+            for (i1 = 1; i1 < (i ? 4 : 8); i1++)
+            {
+                hr = IDirectDrawSurface7_GetAttachedSurface(texture_levels[i][i1 - 1], &ddsd.ddsCaps, &texture_levels[i][i1]);
+                ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+                if (FAILED(hr)) goto out;
+            }
+        }
+
+        for (i1 = 0; i1 < 8; i1++)
+        {
+            memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+            ddsd.dwSize = sizeof(ddsd);
+            hr = IDirectDrawSurface7_Lock(texture_levels[0][i1], NULL, &ddsd, DDLOCK_WAIT, NULL);
+            ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+            if (FAILED(hr)) goto out;
+
+            for (y = 0 ; y < ddsd.dwHeight; y++)
+            {
+                DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+                for (x = 0; x < ddsd.dwWidth;  x++)
+                {
+                    /* x stored in green component, y in blue. */
+                    DWORD color = 0xf00000 | (i1 << 16) | (x << 8)  | y;
+                    *textureRow++ = color;
+                }
+            }
+
+            hr = IDirectDrawSurface7_Unlock(texture_levels[0][i1], NULL);
+            ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+        }
+
+        for (i1 = 0; i1 < 4; i1++)
+        {
+            memset(&ddbltfx, 0, sizeof(ddbltfx));
+            ddbltfx.dwSize = sizeof(ddbltfx);
+            U5(ddbltfx).dwFillColor = 0;
+            hr = IDirectDrawSurface7_Blt(texture_levels[1][i1], NULL, NULL, NULL, DDBLT_COLORFILL | DDBLT_WAIT, &ddbltfx);
+            ok(hr == DD_OK, "IDirectDrawSurface7_Blt failed with %08x\n", hr);
+        }
+
+        loadpoint.x = loadpoint.y = 0;
+        loadrect.left = 0;
+        loadrect.top = 0;
+        loadrect.right = 64;
+        loadrect.bottom = 64;
+
+        hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], &loadpoint, texture_levels[0][0], &loadrect, 0);
+        ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+        i = 0;
+        for (i1 = 0; i1 < 8 && i < 4; i1++)
+        {
+            DDSURFACEDESC2 ddsd2;
+
+            memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+            ddsd.dwSize = sizeof(ddsd);
+            hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[0][i1], &ddsd);
+
+            memset(&ddsd2, 0, sizeof(DDSURFACEDESC2));
+            ddsd2.dwSize = sizeof(ddsd2);
+            hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[1][i], &ddsd2);
+
+            if (ddsd.dwWidth == ddsd2.dwWidth && ddsd.dwHeight == ddsd2.dwHeight)
+            {
+                diff_count = 0;
+
+                memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+                ddsd.dwSize = sizeof(ddsd);
+                hr = IDirectDrawSurface7_Lock(texture_levels[1][i], NULL, &ddsd, DDLOCK_WAIT, NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Lock returned: %x\n",hr);
+                if (FAILED(hr)) goto out;
+
+                for (y = 0 ; y < ddsd.dwHeight; y++)
+                {
+                    DWORD *textureRow = (DWORD*)((char*)ddsd.lpSurface + y * U1(ddsd).lPitch);
+
+                    for (x = 0; x < ddsd.dwWidth;  x++)
+                    {
+                        DWORD color = *textureRow++;
+
+                        if (x < loadpoint.x || x >= loadpoint.x + loadrect.right - loadrect.left ||
+                            y < loadpoint.y || y >= loadpoint.y + loadrect.bottom - loadrect.top)
+                        {
+                            if (color & 0xffffff) diff_count++;
+                        }
+                        else
+                        {
+                            DWORD r = (color & 0xff0000) >> 16;
+                            DWORD g = (color & 0xff00) >> 8;
+                            DWORD b = (color & 0xff);
+
+                            if (r != (0xf0 | i1) || g != x + loadrect.left - loadpoint.x ||
+                                b != y + loadrect.top - loadpoint.y) diff_count++;
+                        }
+                    }
+                }
+
+                hr = IDirectDrawSurface7_Unlock(texture_levels[1][i], NULL);
+                ok(hr==DD_OK, "IDirectDrawSurface7_Unlock returned: %x\n",hr);
+
+                ok(diff_count == 0, "Unexpected destination texture level pixels; %u differences at %d level\n", diff_count, i1);
+
+                i++;
+            }
+
+            loadpoint.x /= 2;
+            loadpoint.y /= 2;
+            loadrect.top /= 2;
+            loadrect.left /= 2;
+            loadrect.right = (loadrect.right + 1) / 2;
+            loadrect.bottom = (loadrect.bottom + 1) / 2;
+        }
+
+        for (i = 0; i < 2; i++)
+        {
+            for (i1 = 7; i1 >= 0; i1--)
+            {
+                if (texture_levels[i][i1]) IDirectDrawSurface7_Release(texture_levels[i][i1]);
+            }
+        }
+        memset(texture_levels, 0, sizeof(texture_levels));
+    }
+
+    /* Test palette copying. */
+    for (i = 0; i < 2; i++)
+    {
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
+        ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE | DDSCAPS_COMPLEX | DDSCAPS_MIPMAP;
+        ddsd.dwWidth = 128;
+        ddsd.dwHeight = 128;
+        U4(ddsd).ddpfPixelFormat.dwSize = sizeof(U4(ddsd).ddpfPixelFormat);
+        U4(ddsd).ddpfPixelFormat.dwFlags = DDPF_RGB | DDPF_PALETTEINDEXED8;
+        U1(U4(ddsd).ddpfPixelFormat).dwRGBBitCount = 8;
+        hr = IDirectDraw7_CreateSurface(lpDD, &ddsd, &texture_levels[i][0], NULL);
+        ok(hr==DD_OK,"CreateSurface returned: %x\n",hr);
+        if (FAILED(hr)) goto out;
+
+        /* Check the number of created mipmaps */
+        memset(&ddsd, 0, sizeof(DDSURFACEDESC2));
+        ddsd.dwSize = sizeof(ddsd);
+        hr = IDirectDrawSurface7_GetSurfaceDesc(texture_levels[i][0], &ddsd);
+        ok(hr==DD_OK,"IDirectDrawSurface7_GetSurfaceDesc returned: %x\n",hr);
+        ok(U2(ddsd).dwMipMapCount == 8, "unexpected mip count %u\n", U2(ddsd).dwMipMapCount);
+        if (U2(ddsd).dwMipMapCount != 8) goto out;
+
+        for (i1 = 1; i1 < 8; i1++)
+        {
+            hr = IDirectDrawSurface7_GetAttachedSurface(texture_levels[i][i1 - 1], &ddsd.ddsCaps, &texture_levels[i][i1]);
+            ok(hr == DD_OK, "GetAttachedSurface returned %08x\n", hr);
+            if (FAILED(hr)) goto out;
+        }
+    }
+
+    memset(table1, 0, sizeof(table1));
+    for (i = 0; i < 3; i++)
+    {
+        table1[0].peBlue = i + 1;
+        hr = IDirectDraw7_CreatePalette(lpDD, DDPCAPS_ALLOW256 | DDPCAPS_8BIT, table1, &palettes[i], NULL);
+        ok(hr == DD_OK, "CreatePalette returned %08x\n", hr);
+        if (FAILED(hr))
+        {
+            skip("IDirectDraw7_CreatePalette failed; skipping further tests\n");
+            goto out;
+        }
+    }
+
+    hr = IDirectDrawSurface7_SetPalette(texture_levels[0][0], palettes[0]);
+    ok(hr==DD_OK, "IDirectDrawSurface7_SetPalette returned: %x\n", hr);
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], NULL, texture_levels[0][0], NULL, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    hr = IDirectDrawSurface7_GetPalette(texture_levels[1][0], &palettes[4]);
+    ok(hr==DDERR_NOPALETTEATTACHED, "IDirectDrawSurface7_GetPalette returned: %x\n", hr);
+
+    hr = IDirectDrawSurface7_SetPalette(texture_levels[0][1], palettes[1]);
+    todo_wine ok(hr==DDERR_NOTONMIPMAPSUBLEVEL, "IDirectDrawSurface7_SetPalette returned: %x\n", hr);
+    hr = IDirectDrawSurface7_SetPalette(texture_levels[1][0], palettes[2]);
+    ok(hr==DD_OK, "IDirectDrawSurface7_SetPalette returned: %x\n", hr);
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], NULL, texture_levels[0][0], NULL, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    memset(table1, 0, sizeof(table1));
+    hr = IDirectDrawSurface7_GetPalette(texture_levels[1][0], &palettes[4]);
+    ok(hr==DD_OK, "IDirectDrawSurface7_GetPalette returned: %x\n", hr);
+    if (SUCCEEDED(hr))
+    {
+        hr = IDirectDrawPalette_GetEntries(palettes[4], 0, 0, 256, table1);
+        ok(hr == DD_OK, "IDirectDrawPalette_GetEntries returned %08x\n", hr);
+        ok(table1[0].peBlue == 1, "Unexpected palette color after load: %u\n", (unsigned)table1[0].peBlue);
+    }
+
+    /* Test colorkey copying. */
+    ddckey.dwColorSpaceLowValue = ddckey.dwColorSpaceHighValue = 64;
+    hr = IDirectDrawSurface7_SetColorKey(texture_levels[0][0], DDCKEY_SRCBLT, &ddckey);
+    ok(hr==DD_OK, "IDirectDrawSurface7_SetColorKey returned: %x\n", hr);
+    hr = IDirectDrawSurface7_SetColorKey(texture_levels[0][1], DDCKEY_SRCBLT, &ddckey);
+    todo_wine ok(hr==DDERR_NOTONMIPMAPSUBLEVEL, "IDirectDrawSurface7_SetColorKey returned: %x\n", hr);
+
+    hr = IDirectDrawSurface7_GetColorKey(texture_levels[1][0], DDCKEY_SRCBLT, &ddckey);
+    ok(hr==DDERR_NOCOLORKEY, "IDirectDrawSurface7_GetColorKey returned: %x\n", hr);
+
+    hr = IDirect3DDevice7_Load(lpD3DDevice, texture_levels[1][0], NULL, texture_levels[0][0], NULL, 0);
+    ok(hr==D3D_OK, "IDirect3DDevice7_Load returned: %x\n",hr);
+
+    hr = IDirectDrawSurface7_GetColorKey(texture_levels[1][0], DDCKEY_SRCBLT, &ddckey);
+    ok(hr==DD_OK, "IDirectDrawSurface7_GetColorKey returned: %x\n", hr);
+    ok(ddckey.dwColorSpaceLowValue == ddckey.dwColorSpaceHighValue && ddckey.dwColorSpaceLowValue == 64,
+        "Unexpected color key values: %u - %u\n", ddckey.dwColorSpaceLowValue, ddckey.dwColorSpaceHighValue);
+
+    out:
+
+    for (i = 0; i < 5; i++)
+    {
+        if (palettes[i]) IDirectDrawPalette_Release(palettes[i]);
+    }
+
+    for (i = 0; i < 2; i++)
+    {
+        for (i1 = 7; i1 >= 0; i1--)
+        {
+            if (texture_levels[i][i1]) IDirectDrawSurface7_Release(texture_levels[i][i1]);
+        }
+    }
+
+    for (i = 0; i < 2; i++)
+        for (i1 = 5; i1 >= 0; i1--)
+            for (i2 = 7; i2 >= 0; i2--)
+            {
+                if (cube_face_levels[i][i1][i2]) IDirectDrawSurface7_Release(cube_face_levels[i][i1][i2]);
+            }
+}
+
+static void SetMaterialTest(void)
+{
+    HRESULT rc;
+
+    rc =IDirect3DDevice7_SetMaterial(lpD3DDevice, NULL);
+    ok(rc == DDERR_INVALIDPARAMS, "Expected DDERR_INVALIDPARAMS, got %x\n", rc);
+}
+
+static void ComputeSphereVisibility(void)
+{
+    D3DMATRIX proj, view, world;
+    D3DVALUE radius[3];
+    D3DVECTOR center[3];
+    DWORD result[3];
+    HRESULT rc;
+
+    world._11=1.0; world._12=0.0; world._13=0.0; world._14=0.0;
+    world._21=0.0; world._22=1.0; world._23=0.0; world._24=0.0;
+    world._31=0.0; world._32=0.0; world._33=1.0; world._34=0.0;
+    world._41=0.0; world._42=0.0; world._43=0.0; world._44=1.0;
+
+    view._11=1.000000; view._12=0.000000; view._13=0.000000; view._14=0.000000;
+    view._21=0.000000; view._22=0.768221; view._23=-0.640185; view._24=0.000000;
+    view._31=-0.000000; view._32=0.640185; view._33=0.768221; view._34=0.000000;
+    view._41=-14.852037; view._42=9.857489; view._43=11.600972; view._44=1.000000;
+
+    proj._11=1.810660; proj._12=0.000000; proj._13=0.00000; proj._14=0.000000;
+    proj._21=0.000000; proj._22=2.414213; proj._23=0.000000, proj._24=0.000000;
+    proj._31=0.000000; proj._32=0.000000; proj._33=1.020408, proj._34=1.000000;
+    proj._41=0.000000; proj._42=0.000000; proj._43=-0.102041; proj._44=0.000000;
+
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_WORLD, &world);
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_VIEW , &view);
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_PROJECTION, &proj);
+
+    U1(center[0]).x=11.461533;
+    U2(center[0]).y=-4.761727;
+    U3(center[0]).z=-1.171646;
+
+    radius[0]=38.252632;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x3f, "Expected 0x3f, got %x\n", result[0]);
+
+    U1(center[0]).x=-3.515620; U2(center[0]).y=-1.560661; U3(center[0]).z=-12.464638;
+    radius[0]=4.354097;
+    U1(center[1]).x=14.290396; U2(center[1]).y=-2.981143; U3(center[1]).z=-24.311312;
+    radius[1]=12.500704;
+    U1(center[2]).x=1.461626; U2(center[2]).y=-6.093709; U3(center[2]).z=-13.901010;
+    radius[2]=17.251318;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 3, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x103d, "Expected 0x103d, got %x\n", result[0]);
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[1] == 0x3f, "Expected 0x3f, got %x\n", result[1]);
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[2] == 0x3f, "Expected 0x3f, got %x\n", result[2]);
+
+    view._11=1.0; view._12=0.0; view._13=0.0; view._14=0.0;
+    view._21=0.0; view._22=1.0; view._23=0.0; view._24=0.0;
+    view._31=0.0; view._32=0.0; view._33=1.0; view._34=0.0;
+    view._41=0.0; view._42=0.0; view._43=0.0; view._44=1.0;
+
+    proj._11=10.0; proj._12=0.0; proj._13=0.0; proj._14=0.0;
+    proj._21=0.0; proj._22=10.0; proj._23=0.0, proj._24=0.0;
+    proj._31=0.0; proj._32=0.0; proj._33=10.0, proj._34=0.0;
+    proj._41=0.0; proj._42=0.0; proj._43=0.0; proj._44=1.0;
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=0.05;
+
+    radius[0]=0.04;
+
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_VIEW , &view);
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_PROJECTION, &proj);
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x0, "Expected 0x0, got %x\n", result[0]);
+
+    proj._11=1.0; proj._12=0.0; proj._13=0.0; proj._14=0.0;
+    proj._21=0.0; proj._22=1.0; proj._23=0.0, proj._24=0.0;
+    proj._31=0.0; proj._32=0.0; proj._33=1.0, proj._34=0.0;
+    proj._41=0.0; proj._42=0.0; proj._43=0.0; proj._44=1.0;
+
+    IDirect3DDevice7_SetTransform(lpD3DDevice, D3DTRANSFORMSTATE_PROJECTION, &proj);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=0.5;
+
+    radius[0]=0.5;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x0, "Expected 0x0, got %x\n", result[0]);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=0.0;
+
+    radius[0]=0.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x0, "Expected 0x0, got %x\n", result[0]);
+
+    U1(center[0]).x=-1.0;
+    U2(center[0]).y=-1.0;
+    U3(center[0]).z=0.50;
+
+    radius[0]=0.25;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x9, "Expected 0x9, got %x\n", result[0]);
+
+    U1(center[0]).x=-20.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=0.50;
+
+    radius[0]=3.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x103d, "Expected 0x103d, got %x\n", result[0]);
+
+    U1(center[0]).x=20.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=0.50;
+
+    radius[0]=3.0f;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x203e, "Expected 0x203e, got %x\n", result[0]);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=-20.0;
+    U3(center[0]).z=0.50;
+
+    radius[0]=3.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x803b, "Expected 0x803b, got %x\n", result[0]);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=20.0;
+    U3(center[0]).z=0.5;
+
+    radius[0]=3.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x4037, "Expected 0x4037, got %x\n", result[0]);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=-20;
+
+    radius[0]=3.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x1001f, "Expected 0x1001f, got %x\n", result[0]);
+
+    U1(center[0]).x=0.0;
+    U2(center[0]).y=0.0;
+    U3(center[0]).z=20.0;
+
+    radius[0]=3.0;
+
+    rc = IDirect3DDevice7_ComputeSphereVisibility(lpD3DDevice, center, radius, 1, 0, result);
+
+    ok(rc == D3D_OK, "Expected D3D_OK, received %x\n", rc);
+    ok(result[0] == 0x2002f, "Expected 0x2002f, got %x\n", result[0]);
+}
 
 START_TEST(d3d)
 {
     init_function_pointers();
     if(!pDirectDrawCreateEx) {
-        skip("function DirectDrawCreateEx not available\n");
+        win_skip("function DirectDrawCreateEx not available\n");
         return;
     }
 
@@ -1608,8 +2990,12 @@ START_TEST(d3d)
         SceneTest();
         LimitTest();
         D3D7EnumTest();
+        SetMaterialTest();
+        ComputeSphereVisibility();
         CapsTest();
         VertexBufferDescTest();
+        D3D7_OldRenderStateTest();
+        DeviceLoadTest();
         ReleaseDirect3D();
     }
 

@@ -372,6 +372,7 @@ BOOL WINAPI SetPixelFormat( HDC hdc, INT iPixelFormat,
 
     if (!dc) return 0;
 
+    update_dc( dc );
     if (!dc->funcs->pSetPixelFormat) FIXME(" :stub\n");
     else bRet = dc->funcs->pSetPixelFormat(dc->physDev,iPixelFormat,ppfd);
 
@@ -433,6 +434,7 @@ INT WINAPI DescribePixelFormat( HDC hdc, INT iPixelFormat, UINT nBytes,
 
     if (!dc) return 0;
 
+    update_dc( dc );
     if (!dc->funcs->pDescribePixelFormat)
     {
         FIXME(" :stub\n");
@@ -1241,8 +1243,8 @@ BOOL WINAPI GdiGradientFill( HDC hdc, TRIVERTEX *vert_array, ULONG nvert,
 {
   unsigned int i;
 
-  TRACE("vert_array:0x%08lx nvert:%d grad_array:0x%08lx ngrad:%d\n",
-        (long)vert_array, nvert, (long)grad_array, ngrad);
+  TRACE("vert_array:%p nvert:%d grad_array:%p ngrad:%d\n",
+        vert_array, nvert, grad_array, ngrad);
 
   switch(mode) 
     {

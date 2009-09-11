@@ -72,17 +72,12 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module,
                           RtlImageRvaToVa(nth, mapping, stabs, NULL),
                           stabsize,
                           RtlImageRvaToVa(nth, mapping, stabstr, NULL),
-                          stabstrsize);
+                          stabstrsize,
+                          NULL, NULL);
     }
 
     TRACE("%s the STABS debug info\n", ret ? "successfully loaded" : "failed to load");
     return ret;
-}
-
-static BOOL CALLBACK dbg_match(const char* file, void* user)
-{
-    /* accept first file */
-    return FALSE;
 }
 
 /******************************************************************
@@ -96,51 +91,35 @@ static BOOL pe_load_dbg_file(const struct process* pcs, struct module* module,
     char                                tmp[MAX_PATH];
     HANDLE                              hFile = INVALID_HANDLE_VALUE, hMap = 0;
     const BYTE*                         dbg_mapping = NULL;
-    const IMAGE_SEPARATE_DEBUG_HEADER*  hdr;
-    const IMAGE_DEBUG_DIRECTORY*        dbg;
     BOOL                                ret = FALSE;
 
-    WINE_TRACE("Processing DBG file %s\n", debugstr_a(dbg_name));
+    TRACE("Processing DBG file %s\n", debugstr_a(dbg_name));
 
-    if (SymFindFileInPath(pcs->handle, NULL, dbg_name, NULL, 0, 0, 0, tmp, dbg_match, NULL) &&
+    if (path_find_symbol_file(pcs, dbg_name, NULL, timestamp, 0, tmp, &module->module.DbgUnmatched) &&
         (hFile = CreateFileA(tmp, GENERIC_READ, FILE_SHARE_READ, NULL,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL)) != INVALID_HANDLE_VALUE &&
         ((hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL)) != 0) &&
         ((dbg_mapping = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0)) != NULL))
     {
+        const IMAGE_SEPARATE_DEBUG_HEADER*      hdr;
+        const IMAGE_SECTION_HEADER*             sectp;
+        const IMAGE_DEBUG_DIRECTORY*            dbg;
+
         hdr = (const IMAGE_SEPARATE_DEBUG_HEADER*)dbg_mapping;
-        if (hdr->TimeDateStamp != timestamp)
-        {
-            WINE_ERR("Warning - %s has incorrect internal timestamp\n",
-                     debugstr_a(dbg_name));
-            /*
-             * Well, sometimes this happens to DBG files which ARE REALLY the
-             * right .DBG files but nonetheless this check fails. Anyway,
-             * WINDBG (debugger for Windows by Microsoft) loads debug symbols
-             * which have incorrect timestamps.
-             */
-        }
-        if (hdr->Signature == IMAGE_SEPARATE_DEBUG_SIGNATURE)
-        {
-            /* section headers come immediately after debug header */
-            const IMAGE_SECTION_HEADER *sectp =
-                (const IMAGE_SECTION_HEADER*)(hdr + 1);
-            /* and after that and the exported names comes the debug directory */
-            dbg = (const IMAGE_DEBUG_DIRECTORY*) 
-                (dbg_mapping + sizeof(*hdr) + 
-                 hdr->NumberOfSections * sizeof(IMAGE_SECTION_HEADER) +
-                 hdr->ExportedNamesSize);
+        /* section headers come immediately after debug header */
+        sectp = (const IMAGE_SECTION_HEADER*)(hdr + 1);
+        /* and after that and the exported names comes the debug directory */
+        dbg = (const IMAGE_DEBUG_DIRECTORY*)
+            (dbg_mapping + sizeof(*hdr) +
+             hdr->NumberOfSections * sizeof(IMAGE_SECTION_HEADER) +
+             hdr->ExportedNamesSize);
 
-
-            ret = pe_load_debug_directory(pcs, module, dbg_mapping, sectp,
-                                          hdr->NumberOfSections, dbg,
-                                          hdr->DebugDirectorySize / sizeof(*dbg));
-        }
-        else
-            ERR("Wrong signature in .DBG file %s\n", debugstr_a(tmp));
+        ret = pe_load_debug_directory(pcs, module, dbg_mapping, sectp,
+                                      hdr->NumberOfSections, dbg,
+                                      hdr->DebugDirectorySize / sizeof(*dbg));
     }
     else
-        WINE_ERR("-Unable to peruse .DBG file %s (%s)\n", debugstr_a(dbg_name), debugstr_a(tmp));
+        ERR("Couldn't find .DBG file %s (%s)\n", debugstr_a(dbg_name), debugstr_a(tmp));
 
     if (dbg_mapping) UnmapViewOfFile(dbg_mapping);
     if (hMap) CloseHandle(hMap);
@@ -155,7 +134,7 @@ static BOOL pe_load_dbg_file(const struct process* pcs, struct module* module,
  */
 static BOOL pe_load_msc_debug_info(const struct process* pcs, 
                                    struct module* module,
-                                   void* mapping, IMAGE_NT_HEADERS* nth)
+                                   void* mapping, const IMAGE_NT_HEADERS* nth)
 {
     BOOL                        ret = FALSE;
     const IMAGE_DATA_DIRECTORY* dir;
@@ -203,7 +182,7 @@ static BOOL pe_load_msc_debug_info(const struct process* pcs,
  */
 static BOOL pe_load_export_debug_info(const struct process* pcs, 
                                       struct module* module, 
-                                      void* mapping, IMAGE_NT_HEADERS* nth)
+                                      void* mapping, const IMAGE_NT_HEADERS* nth)
 {
     unsigned int 		        i;
     const IMAGE_EXPORT_DIRECTORY* 	exports;
@@ -448,19 +427,16 @@ PVOID WINAPI ImageDirectoryEntryToDataEx( PVOID base, BOOLEAN image, USHORT dir,
     DWORD addr;
 
     *size = 0;
+    if (section) *section = NULL;
 
     if (!(nt = RtlImageNtHeader( base ))) return NULL;
     if (dir >= nt->OptionalHeader.NumberOfRvaAndSizes) return NULL;
     if (!(addr = nt->OptionalHeader.DataDirectory[dir].VirtualAddress)) return NULL;
 
     *size = nt->OptionalHeader.DataDirectory[dir].Size;
-    if (image || addr < nt->OptionalHeader.SizeOfHeaders)
-    {
-        if (section) *section = NULL;
-        return (char *)base + addr;
-    }
+    if (image || addr < nt->OptionalHeader.SizeOfHeaders) return (char *)base + addr;
 
-    return RtlImageRvaToVa( nt, (HMODULE)base, addr, section );
+    return RtlImageRvaToVa( nt, base, addr, section );
 }
 
 /***********************************************************************

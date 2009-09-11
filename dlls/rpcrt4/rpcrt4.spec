@@ -31,7 +31,7 @@
 @ stub I_RpcBindingInqDynamicEndPointW
 @ stub I_RpcBindingInqLocalClientPID # wxp
 @ stub I_RpcBindingInqSecurityContext
-@ stub I_RpcBindingInqTransportType
+@ stdcall I_RpcBindingInqTransportType(ptr ptr)
 @ stub I_RpcBindingInqWireIdForSnego
 @ stub I_RpcBindingIsClientLocal
 # 9x version of I_RpcBindingSetAsync has 3 arguments, not 2
@@ -97,13 +97,13 @@
 @ stub MIDL_wchar_strcpy
 @ stub MIDL_wchar_strlen
 @ stub MesBufferHandleReset
-@ stub MesDecodeBufferHandleCreate
-@ stub MesDecodeIncrementalHandleCreate
-@ stub MesEncodeDynBufferHandleCreate
-@ stub MesEncodeFixedBufferHandleCreate
-@ stub MesEncodeIncrementalHandleCreate
-@ stub MesHandleFree
-@ stub MesIncrementalHandleReset
+@ stdcall MesDecodeBufferHandleCreate(ptr long ptr)
+@ stdcall MesDecodeIncrementalHandleCreate(ptr ptr ptr)
+@ stdcall MesEncodeDynBufferHandleCreate(ptr ptr ptr)
+@ stdcall MesEncodeFixedBufferHandleCreate(ptr long ptr ptr)
+@ stdcall MesEncodeIncrementalHandleCreate(ptr ptr ptr ptr)
+@ stdcall MesHandleFree(ptr)
+@ stdcall MesIncrementalHandleReset(ptr ptr ptr ptr ptr long)
 @ stub MesInqProcEncodingId
 @ stdcall NDRCContextBinding(ptr)
 @ stdcall NDRCContextMarshall(ptr ptr)
@@ -116,8 +116,9 @@
 @ stdcall NDRSContextUnmarshallEx(ptr ptr ptr)
 @ stub NDRcopy
 @ stdcall NdrAllocate(ptr long)
-@ stub NdrAsyncClientCall
+@ varargs NdrAsyncClientCall(ptr ptr)
 @ stub NdrAsyncServerCall
+@ stdcall NdrAsyncStubCall(ptr ptr ptr ptr)
 @ stdcall NdrByteCountPointerBufferSize(ptr ptr ptr)
 @ stdcall NdrByteCountPointerFree(ptr ptr ptr)
 @ stdcall NdrByteCountPointerMarshall(ptr ptr ptr)
@@ -203,7 +204,7 @@
 @ stub NdrGetSimpleTypeBufferSize # wxp
 @ stub NdrGetSimpleTypeMemorySize # wxp
 @ stub NdrGetTypeFlags # wxp
-@ stub NdrGetUserMarshallInfo
+@ stdcall NdrGetUserMarshalInfo(ptr long ptr)
 @ stub NdrHardStructBufferSize #(ptr ptr ptr)
 @ stub NdrHardStructFree #(ptr ptr ptr)
 @ stub NdrHardStructMarshall #(ptr ptr ptr)
@@ -218,7 +219,7 @@
 @ stdcall NdrMapCommAndFaultStatus(ptr ptr ptr long)
 @ stub NdrMarkNextActivePipe
 @ stub NdrMesProcEncodeDecode2
-@ stub NdrMesProcEncodeDecode
+@ varargs NdrMesProcEncodeDecode(ptr ptr ptr)
 @ stub NdrMesSimpleTypeAlignSize
 @ stub NdrMesSimpleTypeDecode
 @ stub NdrMesSimpleTypeEncode
@@ -350,7 +351,7 @@
 @ stdcall RpcBindingInqAuthInfoW(ptr ptr ptr ptr ptr ptr)
 @ stdcall RpcBindingInqObject(ptr ptr)
 @ stub RpcBindingInqOption
-@ stub RpcBindingReset
+@ stdcall RpcBindingReset(ptr)
 @ stub RpcBindingServerFromClient
 @ stdcall RpcBindingSetAuthInfoA(ptr str long long ptr long)
 @ stdcall RpcBindingSetAuthInfoExA(ptr str long long ptr long ptr)
@@ -370,7 +371,7 @@
 @ stdcall RpcEpRegisterA(ptr ptr ptr str)
 @ stub RpcEpRegisterNoReplaceA
 @ stub RpcEpRegisterNoReplaceW
-@ stub RpcEpRegisterW
+@ stdcall RpcEpRegisterW(ptr ptr ptr wstr)
 @ stdcall RpcEpResolveBinding(ptr ptr)
 @ stdcall RpcEpUnregister(ptr ptr ptr)
 @ stub RpcErrorAddRecord # wxp
@@ -399,13 +400,13 @@
 @ stdcall RpcMgmtInqIfIds(ptr ptr)
 @ stub RpcMgmtInqServerPrincNameA
 @ stub RpcMgmtInqServerPrincNameW
-@ stub RpcMgmtInqStats
+@ stdcall RpcMgmtInqStats(ptr ptr)
 @ stdcall RpcMgmtIsServerListening(ptr)
 @ stub RpcMgmtSetAuthorizationFn
 @ stdcall RpcMgmtSetCancelTimeout(long)
 @ stdcall RpcMgmtSetComTimeout(ptr long)
 @ stdcall RpcMgmtSetServerStackSize(long)
-@ stub RpcMgmtStatsVectorFree
+@ stdcall RpcMgmtStatsVectorFree(ptr)
 @ stdcall RpcMgmtStopServerListening(ptr)
 @ stdcall RpcMgmtWaitServerListen()
 @ stub RpcNetworkInqProtseqsA

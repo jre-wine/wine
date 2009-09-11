@@ -32,32 +32,32 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
-typedef struct {
+struct HTMLStyleSheet {
     const IHTMLStyleSheetVtbl *lpHTMLStyleSheetVtbl;
 
     LONG ref;
 
     nsIDOMCSSStyleSheet *nsstylesheet;
-} HTMLStyleSheet;
+};
 
-typedef struct {
+struct HTMLStyleSheetsCollection {
     const IHTMLStyleSheetsCollectionVtbl *lpHTMLStyleSheetsCollectionVtbl;
 
     LONG ref;
 
     nsIDOMStyleSheetList *nslist;
-} HTMLStyleSheetsCollection;
+};
 
-typedef struct {
+struct HTMLStyleSheetRulesCollection {
     const IHTMLStyleSheetRulesCollectionVtbl *lpHTMLStyleSheetRulesCollectionVtbl;
 
     LONG ref;
 
     nsIDOMCSSRuleList *nslist;
-} HTMLStyleSheetRulesCollection;
+};
 
-#define HTMLSTYLESHEET(x)     ((IHTMLStyleSheet*)                &(x)->lpHTMLStyleSheetVtbl);
-#define HTMLSTYLESHEETSCOL(x) ((IHTMLStyleSheetsCollection*)     &(x)->lpHTMLStyleSheetsCollectionVtbl);
+#define HTMLSTYLESHEET(x)     ((IHTMLStyleSheet*)                &(x)->lpHTMLStyleSheetVtbl)
+#define HTMLSTYLESHEETSCOL(x) ((IHTMLStyleSheetsCollection*)     &(x)->lpHTMLStyleSheetsCollectionVtbl)
 #define HTMLSTYLERULESCOL(x)  ((IHTMLStyleSheetRulesCollection*) &(x)->lpHTMLStyleSheetRulesCollectionVtbl)
 
 #define HTMLSTYLERULESCOL_THIS(iface) \
@@ -147,7 +147,7 @@ static HRESULT WINAPI HTMLStyleSheetRulesCollection_Invoke(IHTMLStyleSheetRulesC
 }
 
 static HRESULT WINAPI HTMLStyleSheetRulesCollection_get_length(IHTMLStyleSheetRulesCollection *iface,
-        long *p)
+        LONG *p)
 {
     HTMLStyleSheetRulesCollection *This = HTMLSTYLERULESCOL_THIS(iface);
     PRUint32 len = 0;
@@ -167,10 +167,10 @@ static HRESULT WINAPI HTMLStyleSheetRulesCollection_get_length(IHTMLStyleSheetRu
 }
 
 static HRESULT WINAPI HTMLStyleSheetRulesCollection_item(IHTMLStyleSheetRulesCollection *iface,
-        long index, IHTMLStyleSheetRule **ppHTMLStyleSheetRule)
+        LONG index, IHTMLStyleSheetRule **ppHTMLStyleSheetRule)
 {
     HTMLStyleSheetRulesCollection *This = HTMLSTYLERULESCOL_THIS(iface);
-    FIXME("(%p)->(%ld %p)\n", This, index, ppHTMLStyleSheetRule);
+    FIXME("(%p)->(%d %p)\n", This, index, ppHTMLStyleSheetRule);
     return E_NOTIMPL;
 }
 
@@ -295,7 +295,7 @@ static HRESULT WINAPI HTMLStyleSheetsCollection_Invoke(IHTMLStyleSheetsCollectio
 }
 
 static HRESULT WINAPI HTMLStyleSheetsCollection_get_length(IHTMLStyleSheetsCollection *iface,
-        long *p)
+        LONG *p)
 {
     HTMLStyleSheetsCollection *This = HTMLSTYLESHEETSCOL_THIS(iface);
     PRUint32 len = 0;
@@ -557,33 +557,33 @@ static HRESULT WINAPI HTMLStyleSheet_get_id(IHTMLStyleSheet *iface, BSTR *p)
 }
 
 static HRESULT WINAPI HTMLStyleSheet_addImport(IHTMLStyleSheet *iface, BSTR bstrURL,
-                                               long lIndex, long *plIndex)
+                                               LONG lIndex, LONG *plIndex)
 {
     HTMLStyleSheet *This = HTMLSTYLESHEET_THIS(iface);
-    FIXME("(%p)->(%s %ld %p)\n", This, debugstr_w(bstrURL), lIndex, plIndex);
+    FIXME("(%p)->(%s %d %p)\n", This, debugstr_w(bstrURL), lIndex, plIndex);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLStyleSheet_addRule(IHTMLStyleSheet *iface, BSTR bstrSelector,
-                                             BSTR bstrStyle, long lIndex, long *plIndex)
+                                             BSTR bstrStyle, LONG lIndex, LONG *plIndex)
 {
     HTMLStyleSheet *This = HTMLSTYLESHEET_THIS(iface);
-    FIXME("(%p)->(%s %s %ld %p)\n", This, debugstr_w(bstrSelector), debugstr_w(bstrStyle),
+    FIXME("(%p)->(%s %s %d %p)\n", This, debugstr_w(bstrSelector), debugstr_w(bstrStyle),
           lIndex, plIndex);
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI HTMLStyleSheet_removeImport(IHTMLStyleSheet *iface, long lIndex)
+static HRESULT WINAPI HTMLStyleSheet_removeImport(IHTMLStyleSheet *iface, LONG lIndex)
 {
     HTMLStyleSheet *This = HTMLSTYLESHEET_THIS(iface);
-    FIXME("(%p)->(%ld)\n", This, lIndex);
+    FIXME("(%p)->(%d)\n", This, lIndex);
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI HTMLStyleSheet_removeRule(IHTMLStyleSheet *iface, long lIndex)
+static HRESULT WINAPI HTMLStyleSheet_removeRule(IHTMLStyleSheet *iface, LONG lIndex)
 {
     HTMLStyleSheet *This = HTMLSTYLESHEET_THIS(iface);
-    FIXME("(%p)->(%ld)\n", This, lIndex);
+    FIXME("(%p)->(%d)\n", This, lIndex);
     return E_NOTIMPL;
 }
 

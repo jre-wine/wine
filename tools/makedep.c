@@ -53,6 +53,14 @@ typedef struct _INCL_FILE
 static struct list sources = LIST_INIT(sources);
 static struct list includes = LIST_INIT(includes);
 
+typedef struct _OBJECT_EXTENSION
+{
+    struct list entry;
+    const char *extension;
+} OBJECT_EXTENSION;
+
+static struct list object_extensions = LIST_INIT(object_extensions);
+
 typedef struct _INCL_PATH
 {
     struct list entry;
@@ -75,7 +83,7 @@ static const char Usage[] =
     "   -Idir   Search for include files in directory 'dir'\n"
     "   -Cdir   Search for source files in directory 'dir'\n"
     "   -Sdir   Set the top source directory\n"
-    "   -Sdir   Set the top object directory\n"
+    "   -Tdir   Set the top object directory\n"
     "   -fxxx   Store output in file 'xxx' (default: Makefile)\n"
     "   -sxxx   Use 'xxx' as separator (default: \"### Dependencies\")\n";
 
@@ -215,6 +223,18 @@ static char *get_line( FILE *file )
         }
         return buffer;
     }
+}
+
+/*******************************************************************
+ *         add_object_extension
+ *
+ * Add an extension for object files.
+ */
+static void add_object_extension( const char *ext )
+{
+    OBJECT_EXTENSION *object_extension = xmalloc( sizeof(*object_extension) );
+    list_add_tail( &object_extensions, &object_extension->entry );
+    object_extension->extension = ext;
 }
 
 /*******************************************************************
@@ -693,10 +713,12 @@ static void parse_generated_idl( INCL_FILE *source )
     {
         add_include( source, "objbase.h", 0, 1 );
         add_include( source, "rpcproxy.h", 0, 1 );
+        add_include( source, "wine/exception.h", 0, 1 );
         add_include( source, header, 0, 0 );
     }
     else if (strendswith( source->name, "_s.c" ))
     {
+        add_include( source, "wine/exception.h", 0, 1 );
         add_include( source, header, 0, 0 );
     }
     else if (!strcmp( source->name, "dlldata.c" ))
@@ -724,6 +746,13 @@ static void parse_file( INCL_FILE *pFile, int src )
         !strcmp( pFile->name, "dlldata.c" ))
     {
         parse_generated_idl( pFile );
+        return;
+    }
+
+    /* don't try to open .tlb files */
+    if (strendswith( pFile->name, ".tlb" ))
+    {
+        pFile->filename = xstrdup( pFile->name );
         return;
     }
 
@@ -791,7 +820,7 @@ static void output_include( FILE *file, INCL_FILE *pFile,
 /*******************************************************************
  *         output_src
  */
-static void output_src( FILE *file, INCL_FILE *pFile, int *column )
+static int output_src( FILE *file, INCL_FILE *pFile, int *column )
 {
     char *obj = xstrdup( pFile->name );
     char *ext = get_extension( obj );
@@ -817,30 +846,72 @@ static void output_src( FILE *file, INCL_FILE *pFile, int *column )
         else if (!strcmp( ext, "idl" ))  /* IDL file */
         {
             char *name;
+            int got_header = 0;
+            const char *suffix = "cips";
 
-            *column += fprintf( file, "%s.h", obj );
-
-            name = strmake( "%s_c.c", obj );
-            if (find_src_file( name )) *column += fprintf( file, " %s", name );
-            free( name );
-            name = strmake( "%s_i.c", obj );
-            if (find_src_file( name )) *column += fprintf( file, " %s", name );
-            free( name );
-            name = strmake( "%s_p.c", obj );
-            if (find_src_file( name )) *column += fprintf( file, " %s", name );
-            free( name );
-            name = strmake( "%s_s.c", obj );
-            if (find_src_file( name )) *column += fprintf( file, " %s", name );
+            name = strmake( "%s.tlb", obj );
+            if (find_src_file( name )) *column += fprintf( file, "%s", name );
+            else
+            {
+                got_header = 1;
+                *column += fprintf( file, "%s.h", obj );
+            }
             free( name );
 
+            while (*suffix)
+            {
+                name = strmake( "%s_%c.c", obj, *suffix );
+                if (find_src_file( name ))
+                {
+                    if (!got_header++) *column += fprintf( file, " %s.h", obj );
+                    *column += fprintf( file, " %s", name );
+                }
+                free( name );
+                suffix++;
+            }
             *column += fprintf( file, ": %s", pFile->filename );
+        }
+        else if (!strcmp( ext, "tlb" ))
+        {
+            return 0;  /* nothing to do for typelib files */
         }
         else
         {
-            *column += fprintf( file, "%s.o: %s", obj, pFile->filename );
+            OBJECT_EXTENSION *ext;
+            LIST_FOR_EACH_ENTRY( ext, &object_extensions, OBJECT_EXTENSION, entry )
+                *column += fprintf( file, "%s.%s ", obj, ext->extension );
+            *column += fprintf( file, ": %s", pFile->filename );
         }
     }
     free( obj );
+    return 1;
+}
+
+
+/*******************************************************************
+ *         create_temp_file
+ */
+static FILE *create_temp_file( char **tmp_name )
+{
+    char *name = xmalloc( strlen(OutputFileName) + 13 );
+    unsigned int i, id = getpid();
+    int fd;
+    FILE *ret = NULL;
+
+    for (i = 0; i < 100; i++)
+    {
+        sprintf( name, "%s.tmp%08x", OutputFileName, id );
+        if ((fd = open( name, O_RDWR | O_CREAT | O_EXCL, 0666 )) != -1)
+        {
+            ret = fdopen( fd, "w" );
+            break;
+        }
+        if (errno != EEXIST) break;
+        id += 7777;
+    }
+    if (!ret) fatal_error( "failed to create output file for '%s'\n", OutputFileName );
+    *tmp_name = name;
+    return ret;
 }
 
 
@@ -852,19 +923,23 @@ static void output_dependencies(void)
     INCL_FILE *pFile;
     int i, column;
     FILE *file = NULL;
-    char *buffer;
+    char *tmp_name = NULL;
 
-    if (Separator && ((file = fopen( OutputFileName, "r+" ))))
+    if (Separator && ((file = fopen( OutputFileName, "r" ))))
     {
-        while ((buffer = get_line( file )))
+        char buffer[1024];
+        FILE *tmp_file = create_temp_file( &tmp_name );
+
+        while (fgets( buffer, sizeof(buffer), file ))
         {
-            if (strncmp( buffer, Separator, strlen(Separator) )) continue;
-            ftruncate( fileno(file), ftell(file) );
-            fseek( file, 0L, SEEK_END );
-            break;
+            if (fwrite( buffer, 1, strlen(buffer), tmp_file ) != strlen(buffer))
+                fatal_error( "error writing to %s\n", tmp_name );
+            if (!strncmp( buffer, Separator, strlen(Separator) )) break;
         }
+        fclose( file );
+        file = tmp_file;
     }
-    if (!file)
+    else
     {
         if (!(file = fopen( OutputFileName, Separator ? "a" : "w" )))
         {
@@ -875,13 +950,30 @@ static void output_dependencies(void)
     LIST_FOR_EACH_ENTRY( pFile, &sources, INCL_FILE, entry )
     {
         column = 0;
-        output_src( file, pFile, &column );
+        if (!output_src( file, pFile, &column )) continue;
         for (i = 0; i < MAX_INCLUDES; i++)
             if (pFile->files[i]) output_include( file, pFile->files[i],
                                                  pFile, &column );
         fprintf( file, "\n" );
     }
-    fclose(file);
+    fclose( file );
+
+    if (tmp_name)
+    {
+        int ret = rename( tmp_name, OutputFileName );
+        if (ret == -1 && errno == EEXIST)
+        {
+            /* rename doesn't overwrite on windows */
+            unlink( OutputFileName );
+            ret = rename( tmp_name, OutputFileName );
+        }
+        if (ret == -1)
+        {
+            unlink( tmp_name );
+            fatal_error( "failed to rename output file to '%s'\n", OutputFileName );
+        }
+        free( tmp_name );
+    }
 }
 
 
@@ -910,6 +1002,9 @@ static void parse_option( const char *opt )
     case 's':
         if (opt[2]) Separator = opt + 2;
         else Separator = NULL;
+        break;
+    case 'x':
+        if (opt[2]) add_object_extension( opt + 2 );
         break;
     default:
         fprintf( stderr, "Unknown option '%s'\n", opt );
@@ -945,6 +1040,10 @@ int main( int argc, char *argv[] )
     /* ignore redundant source paths */
     if (src_dir && !strcmp( src_dir, "." )) src_dir = NULL;
     if (top_src_dir && top_obj_dir && !strcmp( top_src_dir, top_obj_dir )) top_src_dir = NULL;
+
+    /* set the default extension list for object files */
+    if (list_empty( &object_extensions ))
+        add_object_extension( "o" );
 
     /* get rid of absolute paths that don't point into the source dir */
     LIST_FOR_EACH_ENTRY_SAFE( path, next, &paths, INCL_PATH, entry )

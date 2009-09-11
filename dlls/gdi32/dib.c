@@ -117,13 +117,13 @@ int DIB_GetDIBImageBytes( int width, int height, int depth )
 
 
 /***********************************************************************
- *           DIB_BitmapInfoSize
+ *           bitmap_info_size
  *
  * Return the size of the bitmap info structure including color table.
  */
-int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
+int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
 {
-    int colors;
+    int colors, masks = 0;
 
     if (info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -138,7 +138,8 @@ int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
         if (colors > 256) colors = 256;
         if (!colors && (info->bmiHeader.biBitCount <= 8))
             colors = 1 << info->bmiHeader.biBitCount;
-        return sizeof(BITMAPINFOHEADER) + colors *
+        if (info->bmiHeader.biCompression == BI_BITFIELDS) masks = 3;
+        return sizeof(BITMAPINFOHEADER) + masks * sizeof(DWORD) + colors *
                ((coloruse == DIB_RGB_COLORS) ? sizeof(RGBQUAD) : sizeof(WORD));
     }
 }
@@ -150,8 +151,8 @@ int DIB_BitmapInfoSize( const BITMAPINFO * info, WORD coloruse )
  * Get the info from a bitmap header.
  * Return 0 for COREHEADER, 1 for INFOHEADER, -1 for error.
  */
-static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
-                              LONG *height, WORD *planes, WORD *bpp, DWORD *compr, DWORD *size )
+int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
+                       LONG *height, WORD *planes, WORD *bpp, DWORD *compr, DWORD *size )
 {
     if (header->biSize == sizeof(BITMAPCOREHEADER))
     {
@@ -234,7 +235,7 @@ INT WINAPI StretchDIBits(HDC hdc, INT xDst, INT yDst, INT widthDst,
             dwRop == SRCCOPY)
         {
             BITMAPOBJ *bmp;
-            if ((bmp = (BITMAPOBJ *)GDI_GetObjPtr( hBitmap, BITMAP_MAGIC )))
+            if ((bmp = GDI_GetObjPtr( hBitmap, OBJ_BITMAP )))
             {
                 if (bmp->bitmap.bmBitsPixel == bpp &&
                     bmp->bitmap.bmWidth == widthSrc &&
@@ -343,7 +344,7 @@ INT WINAPI SetDIBits( HDC hdc, HBITMAP hbitmap, UINT startscan,
 
     update_dc( dc );
 
-    if (!(bitmap = GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
+    if (!(bitmap = GDI_GetObjPtr( hbitmap, OBJ_BITMAP )))
     {
         release_dc_ptr( dc );
         return 0;
@@ -410,7 +411,7 @@ UINT WINAPI SetDIBColorTable( HDC hdc, UINT startpos, UINT entries, CONST RGBQUA
 
     if (!(dc = get_dc_ptr( hdc ))) return 0;
 
-    if ((bitmap = GDI_GetObjPtr( dc->hBitmap, BITMAP_MAGIC )))
+    if ((bitmap = GDI_GetObjPtr( dc->hBitmap, OBJ_BITMAP )))
     {
         /* Check if currently selected bitmap is a DIB */
         if (bitmap->color_table)
@@ -447,7 +448,7 @@ UINT WINAPI GetDIBColorTable( HDC hdc, UINT startpos, UINT entries, RGBQUAD *col
         result = dc->funcs->pGetDIBColorTable(dc->physDev, startpos, entries, colors);
     else
     {
-        BITMAPOBJ *bitmap = GDI_GetObjPtr( dc->hBitmap, BITMAP_MAGIC );
+        BITMAPOBJ *bitmap = GDI_GetObjPtr( dc->hBitmap, OBJ_BITMAP );
         if (bitmap)
         {
             /* Check if currently selected bitmap is a DIB */
@@ -608,15 +609,15 @@ INT WINAPI GetDIBits(
         return 0;
     }
     update_dc( dc );
-    if (!(bmp = (BITMAPOBJ *)GDI_GetObjPtr( hbitmap, BITMAP_MAGIC )))
+    if (!(bmp = GDI_GetObjPtr( hbitmap, OBJ_BITMAP )))
     {
         release_dc_ptr( dc );
 	return 0;
     }
 
     colorPtr = (LPBYTE) info + (WORD) info->bmiHeader.biSize;
-    rgbTriples = (RGBTRIPLE *) colorPtr;
-    rgbQuads = (RGBQUAD *) colorPtr;
+    rgbTriples = colorPtr;
+    rgbQuads = colorPtr;
 
     /* Transfer color info */
 
@@ -640,19 +641,17 @@ INT WINAPI GetDIBits(
                 DIB_GetDIBImageBytes( bmp->bitmap.bmWidth,
                                       bmp->bitmap.bmHeight,
                                       bmp->bitmap.bmBitsPixel );
+            info->bmiHeader.biCompression = (bmp->bitmap.bmBitsPixel > 8) ? BI_BITFIELDS : BI_RGB;
             switch(bmp->bitmap.bmBitsPixel)
             {
             case 15:
                 info->bmiHeader.biBitCount = 16;
-                info->bmiHeader.biCompression = BI_RGB;
                 break;
-            case 16:
-                info->bmiHeader.biBitCount = 16;
-                info->bmiHeader.biCompression = BI_BITFIELDS;
+            case 24:
+                info->bmiHeader.biBitCount = 32;
                 break;
             default:
                 info->bmiHeader.biBitCount = bmp->bitmap.bmBitsPixel;
-                info->bmiHeader.biCompression = BI_RGB;
                 break;
             }
             info->bmiHeader.biXPelsPerMeter = 0;
@@ -702,8 +701,14 @@ INT WINAPI GetDIBits(
             }
         }
         else {
-            if(bpp >= bmp->bitmap.bmBitsPixel) {
-                /* Generate the color map from the selected palette */
+            if (coloruse == DIB_PAL_COLORS) {
+                for (i = 0; i < (1 << bpp); i++)
+                    ((WORD *)colorPtr)[i] = (WORD)i;
+            }
+            else if(bpp > 1 && bpp == bmp->bitmap.bmBitsPixel) {
+                /* For color DDBs in native depth (mono DDBs always have
+                   a black/white palette):
+                   Generate the color map from the selected palette */
                 PALETTEENTRY palEntry[256];
 
                 memset( palEntry, 0, sizeof(palEntry) );
@@ -714,22 +719,19 @@ INT WINAPI GetDIBits(
                     return 0;
                 }
                 for (i = 0; i < (1 << bmp->bitmap.bmBitsPixel); i++) {
-                    if (coloruse == DIB_RGB_COLORS) {
-                        if (core_header)
-                        {
-                            rgbTriples[i].rgbtRed   = palEntry[i].peRed;
-                            rgbTriples[i].rgbtGreen = palEntry[i].peGreen;
-                            rgbTriples[i].rgbtBlue  = palEntry[i].peBlue;
-                        }
-                        else
-                        {
-                            rgbQuads[i].rgbRed      = palEntry[i].peRed;
-                            rgbQuads[i].rgbGreen    = palEntry[i].peGreen;
-                            rgbQuads[i].rgbBlue     = palEntry[i].peBlue;
-                            rgbQuads[i].rgbReserved = 0;
-                        }
+                    if (core_header)
+                    {
+                        rgbTriples[i].rgbtRed   = palEntry[i].peRed;
+                        rgbTriples[i].rgbtGreen = palEntry[i].peGreen;
+                        rgbTriples[i].rgbtBlue  = palEntry[i].peBlue;
                     }
-                    else ((WORD *)colorPtr)[i] = (WORD)i;
+                    else
+                    {
+                        rgbQuads[i].rgbRed      = palEntry[i].peRed;
+                        rgbQuads[i].rgbGreen    = palEntry[i].peGreen;
+                        rgbQuads[i].rgbBlue     = palEntry[i].peBlue;
+                        rgbQuads[i].rgbReserved = 0;
+                    }
                 }
             } else {
                 switch (bpp) {
@@ -822,6 +824,16 @@ INT WINAPI GetDIBits(
             ((PDWORD)info->bmiColors)[0] = 0xf800;
             ((PDWORD)info->bmiColors)[1] = 0x07e0;
             ((PDWORD)info->bmiColors)[2] = 0x001f;
+        }
+        break;
+
+    case 24:
+    case 32:
+        if (info->bmiHeader.biCompression == BI_BITFIELDS)
+        {
+            ((PDWORD)info->bmiColors)[0] = 0xff0000;
+            ((PDWORD)info->bmiColors)[1] = 0x00ff00;
+            ((PDWORD)info->bmiColors)[2] = 0x0000ff;
         }
         break;
     }
@@ -1085,6 +1097,8 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
     DWORD compr, size;
     DC *dc;
 
+    if (!header) return 0;
+
     if (DIB_GetBitmapInfo( header, &width, &height, &planes, &bpp, &compr, &size ) == -1) return 0;
     
     if (width < 0)
@@ -1106,7 +1120,14 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
 
     if (handle)
     {
-        if (init == CBM_INIT) SetDIBits( hdc, handle, 0, height, bits, data, coloruse );
+        if (init & CBM_INIT)
+        {
+            if (SetDIBits( hdc, handle, 0, height, bits, data, coloruse ) == 0)
+            {
+                DeleteObject( handle );
+                handle = 0;
+            }
+        }
 
         else if (hdc && ((dc = get_dc_ptr( hdc )) != NULL) )
         {
@@ -1122,60 +1143,11 @@ HBITMAP WINAPI CreateDIBitmap( HDC hdc, const BITMAPINFOHEADER *header,
     return handle;
 }
 
-/***********************************************************************
- *           CreateDIBSection    (GDI.489)
- */
-HBITMAP16 WINAPI CreateDIBSection16 (HDC16 hdc, const BITMAPINFO *bmi, UINT16 usage,
-                                     SEGPTR *bits16, HANDLE section, DWORD offset)
-{
-    LPVOID bits32;
-    HBITMAP hbitmap;
-
-    hbitmap = CreateDIBSection( HDC_32(hdc), bmi, usage, &bits32, section, offset );
-    if (hbitmap)
-    {
-        BITMAPOBJ *bmp = (BITMAPOBJ *) GDI_GetObjPtr(hbitmap, BITMAP_MAGIC);
-        if (bmp && bmp->dib && bits32)
-        {
-            const BITMAPINFOHEADER *bi = &bmi->bmiHeader;
-            LONG width, height;
-            WORD planes, bpp;
-            DWORD compr, size;
-            INT width_bytes;
-            WORD count, sel;
-            int i;
-
-            DIB_GetBitmapInfo(bi, &width, &height, &planes, &bpp, &compr, &size);
-
-            height = height >= 0 ? height : -height;
-            width_bytes = DIB_GetDIBWidthBytes(width, bpp);
-
-            if (!size || (compr != BI_RLE4 && compr != BI_RLE8)) size = width_bytes * height;
-
-            /* calculate number of sel's needed for size with 64K steps */
-            count = (size + 0xffff) / 0x10000;
-            sel = AllocSelectorArray16(count);
-
-            for (i = 0; i < count; i++)
-            {
-                SetSelectorBase(sel + (i << __AHSHIFT), (DWORD)bits32 + i * 0x10000);
-                SetSelectorLimit16(sel + (i << __AHSHIFT), size - 1); /* yep, limit is correct */
-                size -= 0x10000;
-            }
-            bmp->segptr_bits = MAKESEGPTR( sel, 0 );
-            if (bits16) *bits16 = bmp->segptr_bits;
-        }
-        if (bmp) GDI_ReleaseObj( hbitmap );
-    }
-    return HBITMAP_16(hbitmap);
-}
-
 /* Copy/synthesize RGB palette from BITMAPINFO. Ripped from dlls/winex11.drv/dib.c */
 static void DIB_CopyColorTable( DC *dc, BITMAPOBJ *bmp, WORD coloruse, const BITMAPINFO *info )
 {
     RGBQUAD *colorTable;
-    unsigned int colors;
-    int i;
+    unsigned int colors, i;
     BOOL core_info = info->bmiHeader.biSize == sizeof(BITMAPCOREHEADER);
 
     if (core_info)
@@ -1248,6 +1220,11 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
     WORD planes, bpp;
     DWORD compression, sizeImage;
     void *mapBits = NULL;
+
+    if(!bmi){
+        if(bits) *bits = NULL;
+        return NULL;
+    }
 
     if (((bitmap_type = DIB_GetBitmapInfo( &bmi->bmiHeader, &width, &height,
                                            &planes, &bpp, &compression, &sizeImage )) == -1))
@@ -1362,7 +1339,7 @@ HBITMAP WINAPI CreateDIBSection(HDC hdc, CONST BITMAPINFO *bmi, UINT usage,
     ret = CreateBitmap( dib->dsBm.bmWidth, dib->dsBm.bmHeight, 1,
                         (bpp == 1) ? 1 : GetDeviceCaps(hdc, BITSPIXEL), NULL );
 
-    if (ret && ((bmp = GDI_GetObjPtr(ret, BITMAP_MAGIC))))
+    if (ret && ((bmp = GDI_GetObjPtr(ret, OBJ_BITMAP))))
     {
         bmp->dib = dib;
         bmp->funcs = dc->funcs;

@@ -1,7 +1,7 @@
 /*
  * OLE32 callouts, COM interface marshalling
  *
- * Copyright 2001 Ove Kåven, TransGaming Technologies
+ * Copyright 2001 Ove KÃ¥ven, TransGaming Technologies
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -79,7 +79,7 @@ static HMODULE LoadCOM(void)
 typedef struct RpcStreamImpl
 {
   const IStreamVtbl *lpVtbl;
-  DWORD RefCount;
+  LONG RefCount;
   PMIDL_STUB_MESSAGE pMsg;
   LPDWORD size;
   unsigned char *data;
@@ -95,7 +95,7 @@ static HRESULT WINAPI RpcStream_QueryInterface(LPSTREAM iface,
       IsEqualGUID(&IID_ISequentialStream, riid) ||
       IsEqualGUID(&IID_IStream, riid)) {
     *obj = This;
-    This->RefCount++;
+    InterlockedIncrement( &This->RefCount );
     return S_OK;
   }
   return E_NOINTERFACE;
@@ -104,19 +104,20 @@ static HRESULT WINAPI RpcStream_QueryInterface(LPSTREAM iface,
 static ULONG WINAPI RpcStream_AddRef(LPSTREAM iface)
 {
   RpcStreamImpl *This = (RpcStreamImpl *)iface;
-  return ++(This->RefCount);
+  return InterlockedIncrement( &This->RefCount );
 }
 
 static ULONG WINAPI RpcStream_Release(LPSTREAM iface)
 {
   RpcStreamImpl *This = (RpcStreamImpl *)iface;
-  if (!--(This->RefCount)) {
+  ULONG ref = InterlockedDecrement( &This->RefCount );
+  if (!ref) {
     TRACE("size=%d\n", *This->size);
     This->pMsg->Buffer = This->data + *This->size;
     HeapFree(GetProcessHeap(),0,This);
     return 0;
   }
-  return This->RefCount;
+  return ref;
 }
 
 static HRESULT WINAPI RpcStream_Read(LPSTREAM iface,
@@ -353,7 +354,7 @@ void WINAPI NdrInterfacePointerFree(PMIDL_STUB_MESSAGE pStubMsg,
 /***********************************************************************
  *           NdrOleAllocate [RPCRT4.@]
  */
-void * WINAPI NdrOleAllocate(size_t Size)
+void * WINAPI NdrOleAllocate(SIZE_T Size)
 {
   if (!LoadCOM()) return NULL;
   return COM_MemAlloc(Size);
@@ -366,6 +367,30 @@ void WINAPI NdrOleFree(void *NodeToFree)
 {
   if (!LoadCOM()) return;
   COM_MemFree(NodeToFree);
+}
+
+/***********************************************************************
+ * Helper function to create a proxy.
+ * Probably similar to NdrpCreateProxy.
+ */
+HRESULT create_proxy(REFIID iid, IUnknown *pUnkOuter, IRpcProxyBuffer **pproxy, void **ppv)
+{
+    CLSID clsid;
+    IPSFactoryBuffer *psfac;
+    HRESULT r;
+
+    if(!LoadCOM()) return E_FAIL;
+
+    r = COM_GetPSClsid( iid, &clsid );
+    if(FAILED(r)) return r;
+
+    r = COM_GetClassObject( &clsid, CLSCTX_INPROC_SERVER, NULL, &IID_IPSFactoryBuffer, (void**)&psfac );
+    if(FAILED(r)) return r;
+
+    r = IPSFactoryBuffer_CreateProxy(psfac, pUnkOuter, iid, pproxy, ppv);
+
+    IPSFactoryBuffer_Release(psfac);
+    return r;
 }
 
 /***********************************************************************

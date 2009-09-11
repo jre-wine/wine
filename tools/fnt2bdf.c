@@ -39,7 +39,130 @@
 # include <io.h>
 #endif
 
-#include "fnt2bdf.h"
+#include "windef.h"
+#include "wingdi.h"
+
+enum data_types {dfChar, dfShort, dfLong, dfString};
+
+#define ERROR_DATA	1
+#define ERROR_VERSION	2
+#define ERROR_SIZE	3
+#define ERROR_MEMORY	4
+#define ERROR_FILE	5
+
+#include "pshpack1.h"
+
+typedef struct
+{
+    INT16 dfType;
+    INT16 dfPoints;
+    INT16 dfVertRes;
+    INT16 dfHorizRes;
+    INT16 dfAscent;
+    INT16 dfInternalLeading;
+    INT16 dfExternalLeading;
+    BYTE  dfItalic;
+    BYTE  dfUnderline;
+    BYTE  dfStrikeOut;
+    INT16 dfWeight;
+    BYTE  dfCharSet;
+    INT16 dfPixWidth;
+    INT16 dfPixHeight;
+    BYTE  dfPitchAndFamily;
+    INT16 dfAvgWidth;
+    INT16 dfMaxWidth;
+    BYTE  dfFirstChar;
+    BYTE  dfLastChar;
+    BYTE  dfDefaultChar;
+    BYTE  dfBreakChar;
+    INT16 dfWidthBytes;
+    LONG  dfDevice;
+    LONG  dfFace;
+    LONG  dfBitsPointer;
+    LONG  dfBitsOffset;
+    BYTE  dfReserved;
+    LONG  dfFlags;
+    INT16 dfAspace;
+    INT16 dfBspace;
+    INT16 dfCspace;
+    LONG  dfColorPointer;
+    LONG  dfReserved1[4];
+} FONTINFO16;
+
+typedef struct
+{
+    WORD  offset;
+    WORD  length;
+    WORD  flags;
+    WORD  id;
+    WORD  handle;
+    WORD  usage;
+} NE_NAMEINFO;
+
+typedef struct
+{
+    WORD  type_id;
+    WORD  count;
+    DWORD resloader;
+} NE_TYPEINFO;
+
+#define NE_FFLAGS_SINGLEDATA    0x0001
+#define NE_FFLAGS_MULTIPLEDATA  0x0002
+#define NE_FFLAGS_WIN32         0x0010
+#define NE_FFLAGS_FRAMEBUF      0x0100
+#define NE_FFLAGS_CONSOLE       0x0200
+#define NE_FFLAGS_GUI           0x0300
+#define NE_FFLAGS_SELFLOAD      0x0800
+#define NE_FFLAGS_LINKERROR     0x2000
+#define NE_FFLAGS_CALLWEP       0x4000
+#define NE_FFLAGS_LIBMODULE     0x8000
+
+#define NE_OSFLAGS_WINDOWS      0x02
+
+#define NE_RSCTYPE_FONTDIR            0x8007
+#define NE_RSCTYPE_FONT               0x8008
+#define NE_RSCTYPE_SCALABLE_FONTPATH  0x80cc
+
+#define NE_SEGFLAGS_DATA        0x0001
+#define NE_SEGFLAGS_ALLOCATED   0x0002
+#define NE_SEGFLAGS_LOADED      0x0004
+#define NE_SEGFLAGS_ITERATED    0x0008
+#define NE_SEGFLAGS_MOVEABLE    0x0010
+#define NE_SEGFLAGS_SHAREABLE   0x0020
+#define NE_SEGFLAGS_PRELOAD     0x0040
+#define NE_SEGFLAGS_EXECUTEONLY 0x0080
+#define NE_SEGFLAGS_READONLY    0x0080
+#define NE_SEGFLAGS_RELOC_DATA  0x0100
+#define NE_SEGFLAGS_SELFLOAD    0x0800
+#define NE_SEGFLAGS_DISCARDABLE 0x1000
+#define NE_SEGFLAGS_32BIT       0x2000
+
+typedef struct tagFontHeader
+{
+    SHORT dfVersion;		/* Version */
+    LONG dfSize;		/* Total File Size */
+    char dfCopyright[60];	/* Copyright notice */
+    FONTINFO16 fi;		/* FONTINFO structure */
+} fnt_hdrS;
+
+typedef struct WinCharStruct
+{
+    unsigned int charWidth;
+    long charOffset;
+} WinCharS;
+
+typedef struct fntFontStruct
+{
+    fnt_hdrS 	 	hdr;
+    WinCharS 		*dfCharTable;
+    unsigned char	*dfDeviceP;
+    unsigned char 	*dfFaceP;
+    unsigned char 	*dfBitsPointerP;
+    unsigned char 	*dfBitsOffsetP;
+    short 		*dfColorTableP;
+} fnt_fontS;
+
+#include "poppack.h"
 
 #define FILE_ERROR	0
 #define FILE_DLL	1
@@ -47,21 +170,13 @@
 
 /* global options */
 
-int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer);
-int dump_bdf_hdr(FILE* fs, fnt_fontS* cpe_font_struct, unsigned char* file_buffer);
+static int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer);
+static int dump_bdf_hdr(FILE* fs, fnt_fontS* cpe_font_struct, unsigned char* file_buffer);
 
-char*	g_lpstrFileName = NULL;
-char*	g_lpstrCharSet = NULL;
-char*   g_lpstrInputFile = NULL;
-int     g_outputPoints = 0;
-
-static const char*  errorDLLRead = "Unable to read Windows DLL.\n";
-static const char*  errorFNTRead = "Unable to read .FNT file.\n";
-static const char*  errorOpenFile = "Unable to open file.\n";
-static const char*  errorMemory = "Memory allocation error.\n";
-static const char*  errorFile = "Corrupt or invalid file.\n";
-static const char*  errorFontData = "Unable to parse font data: Error ";
-static const char*  errorEmpty = "No fonts found.\n";
+static char* g_lpstrFileName = NULL;
+static char* g_lpstrCharSet = NULL;
+static char* g_lpstrInputFile = NULL;
+static int   g_outputPoints = 0;
 
 /* info */
 
@@ -202,7 +317,7 @@ static int parse_fnt_data(unsigned char* file_buffer, int length)
   return t;
 }
 
-int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
+static int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
 {
   FILE*   fp;
   int	  ic;
@@ -217,14 +332,17 @@ int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
     if( (ic = make_bdf_filename(l_filename, cpe_font_struct, file_buffer)) )
 	return ic;
 
-    if((fp = fopen(l_filename, "w")) == (FILE *) 0)
+    if((fp = fopen(l_filename, "w")) == NULL)
     {
       fprintf(stderr, "Couldn't open \"%s\" for output.\n", l_filename);
       return ERROR_FILE;
     }
 
     ic = dump_bdf_hdr(fp, cpe_font_struct, file_buffer);
-    if (ic) return (ic);
+    if (ic) {
+      fclose(fp);
+      return (ic);
+    }
 
     /* NOW, convert all chars to UNIX (lton) notation... */
 
@@ -234,13 +352,13 @@ int dump_bdf( fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
 
 	l_span = (int) (cpe_font_struct->dfCharTable[ic].charWidth-1)/8;
 
-	fprintf(fp, "STARTCHAR %d  \n", ic);
+	fprintf(fp, "STARTCHAR %d\n", ic);
 	fprintf(fp, "ENCODING %d\n",   l_fchar);
-	fprintf(fp, "SWIDTH    %d    %d \n",
+	fprintf(fp, "SWIDTH    %d    %d\n",
 		cpe_font_struct->dfCharTable[ic].charWidth*1000,
 		0);
 
-	fprintf(fp, "DWIDTH    %d    %d \n",
+	fprintf(fp, "DWIDTH    %d    %d\n",
 		cpe_font_struct->dfCharTable[ic].charWidth, 0);
 
 	fprintf(fp, "BBX  %d  %d  %d   %d\n",
@@ -311,7 +429,7 @@ return 0;
 }
 
 
-int dump_bdf_hdr(FILE* fs, fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
+static int dump_bdf_hdr(FILE* fs, fnt_fontS* cpe_font_struct, unsigned char* file_buffer)
 {
 int	l_fchar = return_data_value(dfChar, &cpe_font_struct->hdr.fi.dfFirstChar),
 	l_lchar = return_data_value(dfChar, &cpe_font_struct->hdr.fi.dfLastChar);
@@ -552,7 +670,7 @@ int main(int argc, char **argv)
 
   parse_options( argc, argv);
 
-  if( (fd = open( g_lpstrInputFile, O_RDONLY | O_BINARY)) )
+  if( (fd = open( g_lpstrInputFile, O_RDONLY | O_BINARY)) != -1 )
   {
     int    i;
     struct stat file_stat;
@@ -595,20 +713,20 @@ int main(int argc, char **argv)
 
 		    if( !(lpfont = (unsigned char*) realloc( lpfont, length )) )
 		    {
-			fprintf(stderr, errorMemory );
+			fprintf(stderr, "Memory allocation error.\n" );
 			exit(1);
 		    }
 
 		    lseek( fd, offset, SEEK_SET );
 		    if( read(fd, lpfont, length) != length )
 		    {
-			fprintf(stderr, errorDLLRead );
+			fprintf(stderr, "Unable to read Windows DLL.\n" );
 			exit(1);
 		    }
 
 		    if( (i = parse_fnt_data( lpfont, length )) )
 		    {
-			fprintf(stderr, "%s%d\n", errorFontData, i );
+			fprintf(stderr, "Unable to parse font data: Error %d\n", i );
 			exit(1);
 		    }
 		 }
@@ -617,14 +735,14 @@ int main(int argc, char **argv)
 	       }
 	       else
 	       {
-		 fprintf(stderr, errorEmpty );
+                 fprintf(stderr, "No fonts found.\n" );
 		 exit(1);
 	       }
 	       free( lpdata );
 	     }
 	     else
 	     {
-	       fprintf(stderr, errorDLLRead);
+               fprintf(stderr, "Unable to read Windows DLL.\n" );
 	       exit(1);
 	     }
 	     break;
@@ -634,20 +752,20 @@ int main(int argc, char **argv)
 	     {
 	       if( (i = parse_fnt_data( lpdata, file_stat.st_size )) )
 	       {
-		   fprintf(stderr, "%s%d\n", errorFontData, i );
+                   fprintf(stderr, "Unable to parse font data: Error %d\n", i );
 		   exit(1);
 	       }
 	       free( lpdata );
 	     }
 	     else
 	     {
-	       fprintf(stderr, errorFNTRead);
+               fprintf(stderr, "Unable to read .FNT file.\n" );
 	       exit(1);
 	     }
 	     break;
 
 	case FILE_ERROR:
-	     fprintf(stderr, errorFile );
+             fprintf(stderr, "Corrupt or invalid file.\n" );
 	     exit(1);
     }
     close(fd);
@@ -655,7 +773,7 @@ int main(int argc, char **argv)
   }
   else
   {
-    fprintf(stderr, errorOpenFile );
+    fprintf(stderr, "Unable to open '%s'.\n", g_lpstrInputFile );
     exit(1);
   }
 }

@@ -23,7 +23,9 @@
 
 #include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -49,6 +51,10 @@
 #ifdef HAVE_SYS_UIO_H
 #include <sys/uio.h>
 #endif
+#ifdef HAVE_SYS_THR_H
+#include <sys/ucontext.h>
+#include <sys/thr.h>
+#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -56,7 +62,6 @@
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
 #include "wine/library.h"
-#include "wine/pthread.h"
 #include "wine/server.h"
 #include "wine/debug.h"
 #include "ntdll_misc.h"
@@ -68,8 +73,29 @@ WINE_DEFAULT_DEBUG_CHANNEL(server);
 #define SCM_RIGHTS 1
 #endif
 
+#ifndef MSG_CMSG_CLOEXEC
+#define MSG_CMSG_CLOEXEC 0
+#endif
+
 #define SOCKETNAME "socket"        /* name of the socket file */
 #define LOCKNAME   "lock"          /* name of the lock file */
+
+#ifdef __i386__
+static const enum cpu_type client_cpu = CPU_x86;
+#elif defined(__x86_64__)
+static const enum cpu_type client_cpu = CPU_x86_64;
+#elif defined(__ALPHA__)
+static const enum cpu_type client_cpu = CPU_ALPHA;
+#elif defined(__powerpc__)
+static const enum cpu_type client_cpu = CPU_POWERPC;
+#elif defined(__sparc__)
+static const enum cpu_type client_cpu = CPU_SPARC;
+#else
+#error Unsupported CPU
+#endif
+
+unsigned int server_cpus = 0;
+int is_wow64 = FALSE;
 
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
 /* data structure used to pass an fd with sendmsg/recvmsg */
@@ -86,8 +112,6 @@ struct cmsg_fd
 #endif  /* HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS */
 
 timeout_t server_start_time = 0;  /* time of server startup */
-
-extern struct wine_pthread_functions pthread_functions;
 
 sigset_t server_block_set;  /* signals to block during server calls */
 static int fd_socket = -1;  /* socket to exchange file descriptors with the server */
@@ -135,62 +159,6 @@ static void fatal_perror( const char *err, ... )
 
 
 /***********************************************************************
- *           server_exit_thread
- */
-void server_exit_thread( int status )
-{
-    struct wine_pthread_thread_info info;
-    SIZE_T size;
-    int fds[4];
-
-    RtlAcquirePebLock();
-    RemoveEntryList( &NtCurrentTeb()->TlsLinks );
-    RtlReleasePebLock();
-    RtlFreeHeap( GetProcessHeap(), 0, NtCurrentTeb()->FlsSlots );
-    RtlFreeHeap( GetProcessHeap(), 0, NtCurrentTeb()->TlsExpansionSlots );
-
-    info.stack_base  = NtCurrentTeb()->DeallocationStack;
-    info.teb_base    = NtCurrentTeb();
-    info.teb_sel     = wine_get_fs();
-    info.exit_status = status;
-
-    fds[0] = ntdll_get_thread_data()->wait_fd[0];
-    fds[1] = ntdll_get_thread_data()->wait_fd[1];
-    fds[2] = ntdll_get_thread_data()->reply_fd;
-    fds[3] = ntdll_get_thread_data()->request_fd;
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
-
-    size = 0;
-    NtFreeVirtualMemory( GetCurrentProcess(), &info.stack_base, &size, MEM_RELEASE | MEM_SYSTEM );
-    info.stack_size = size;
-
-    size = 0;
-    NtFreeVirtualMemory( GetCurrentProcess(), &info.teb_base, &size, MEM_RELEASE | MEM_SYSTEM );
-    info.teb_size = size;
-
-    close( fds[0] );
-    close( fds[1] );
-    close( fds[2] );
-    close( fds[3] );
-    pthread_functions.exit_thread( &info );
-}
-
-
-/***********************************************************************
- *           server_abort_thread
- */
-void server_abort_thread( int status )
-{
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
-    close( ntdll_get_thread_data()->wait_fd[0] );
-    close( ntdll_get_thread_data()->wait_fd[1] );
-    close( ntdll_get_thread_data()->reply_fd );
-    close( ntdll_get_thread_data()->request_fd );
-    pthread_functions.abort_thread( status );
-}
-
-
-/***********************************************************************
  *           server_protocol_error
  */
 void server_protocol_error( const char *err, ... )
@@ -201,7 +169,7 @@ void server_protocol_error( const char *err, ... )
     fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     vfprintf( stderr, err, args );
     va_end( args );
-    server_abort_thread(1);
+    abort_thread(1);
 }
 
 
@@ -212,7 +180,7 @@ void server_protocol_perror( const char *err )
 {
     fprintf( stderr, "wine client error:%x: ", GetCurrentThreadId() );
     perror( err );
-    server_abort_thread(1);
+    abort_thread(1);
 }
 
 
@@ -248,7 +216,7 @@ static unsigned int send_request( const struct __server_request_info *req )
     }
 
     if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
-    if (errno == EPIPE) server_abort_thread(0);
+    if (errno == EPIPE) abort_thread(0);
     if (errno == EFAULT) return STATUS_ACCESS_VIOLATION;
     server_protocol_perror( "write" );
 }
@@ -277,7 +245,7 @@ static void read_reply_data( void *buffer, size_t size )
         server_protocol_perror("read");
     }
     /* the server closed the connection; time to die... */
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -323,10 +291,10 @@ unsigned int wine_server_call( void *req_ptr )
     sigset_t old_set;
     unsigned int ret;
 
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, &old_set );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, &old_set );
     ret = send_request( req );
     if (!ret) ret = wait_reply( req );
-    pthread_functions.sigprocmask( SIG_SETMASK, &old_set, NULL );
+    pthread_sigmask( SIG_SETMASK, &old_set, NULL );
     return ret;
 }
 
@@ -336,7 +304,7 @@ unsigned int wine_server_call( void *req_ptr )
  */
 void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
 {
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, sigset );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, sigset );
     RtlEnterCriticalSection( cs );
 }
 
@@ -347,7 +315,7 @@ void server_enter_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sig
 void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sigset )
 {
     RtlLeaveCriticalSection( cs );
-    pthread_functions.sigprocmask( SIG_SETMASK, sigset, NULL );
+    pthread_sigmask( SIG_SETMASK, sigset, NULL );
 }
 
 
@@ -362,7 +330,7 @@ void server_leave_uninterrupted_section( RTL_CRITICAL_SECTION *cs, sigset_t *sig
  * RETURNS
  *     nothing
  */
-void wine_server_send_fd( int fd )
+void CDECL wine_server_send_fd( int fd )
 {
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
     struct cmsg_fd cmsg;
@@ -401,7 +369,7 @@ void wine_server_send_fd( int fd )
         if ((ret = sendmsg( fd_socket, &msghdr, 0 )) == sizeof(data)) return;
         if (ret >= 0) server_protocol_error( "partial write %d\n", ret );
         if (errno == EINTR) continue;
-        if (errno == EPIPE) server_abort_thread(0);
+        if (errno == EPIPE) abort_thread(0);
         server_protocol_perror( "sendmsg" );
     }
 }
@@ -445,12 +413,12 @@ static int receive_fd( obj_handle_t *handle )
 
     for (;;)
     {
-        if ((ret = recvmsg( fd_socket, &msghdr, 0 )) > 0)
+        if ((ret = recvmsg( fd_socket, &msghdr, MSG_CMSG_CLOEXEC )) > 0)
         {
 #ifndef HAVE_STRUCT_MSGHDR_MSG_ACCRIGHTS
             fd = cmsg.fd;
 #endif
-            if (fd != -1) fcntl( fd, F_SETFD, 1 ); /* set close on exec flag */
+            if (fd != -1) fcntl( fd, F_SETFD, FD_CLOEXEC ); /* in case MSG_CMSG_CLOEXEC is not supported */
             return fd;
         }
         if (!ret) break;
@@ -459,7 +427,7 @@ static int receive_fd( obj_handle_t *handle )
         server_protocol_perror("recvmsg");
     }
     /* the server closed the connection; time to die... */
-    server_abort_thread(0);
+    abort_thread(0);
 }
 
 
@@ -480,9 +448,9 @@ struct fd_cache_entry
 static struct fd_cache_entry *fd_cache[FD_CACHE_ENTRIES];
 static struct fd_cache_entry fd_cache_initial_block[FD_CACHE_BLOCK_SIZE];
 
-static inline unsigned int handle_to_index( obj_handle_t handle, unsigned int *entry )
+static inline unsigned int handle_to_index( HANDLE handle, unsigned int *entry )
 {
-    unsigned long idx = ((unsigned long)handle >> 2) - 1;
+    unsigned int idx = (wine_server_obj_handle(handle) >> 2) - 1;
     *entry = idx / FD_CACHE_BLOCK_SIZE;
     return idx % FD_CACHE_BLOCK_SIZE;
 }
@@ -493,7 +461,7 @@ static inline unsigned int handle_to_index( obj_handle_t handle, unsigned int *e
  *
  * Caller must hold fd_cache_section.
  */
-static int add_fd_to_cache( obj_handle_t handle, int fd, enum server_fd_type type,
+static int add_fd_to_cache( HANDLE handle, int fd, enum server_fd_type type,
                             unsigned int access, unsigned int options )
 {
     unsigned int entry, idx = handle_to_index( handle, &entry );
@@ -531,7 +499,7 @@ static int add_fd_to_cache( obj_handle_t handle, int fd, enum server_fd_type typ
  *
  * Caller must hold fd_cache_section.
  */
-static inline int get_cached_fd( obj_handle_t handle, enum server_fd_type *type,
+static inline int get_cached_fd( HANDLE handle, enum server_fd_type *type,
                                  unsigned int *access, unsigned int *options )
 {
     unsigned int entry, idx = handle_to_index( handle, &entry );
@@ -551,7 +519,7 @@ static inline int get_cached_fd( obj_handle_t handle, enum server_fd_type *type,
 /***********************************************************************
  *           server_remove_fd_from_cache
  */
-int server_remove_fd_from_cache( obj_handle_t handle )
+int server_remove_fd_from_cache( HANDLE handle )
 {
     unsigned int entry, idx = handle_to_index( handle, &entry );
     int fd = -1;
@@ -568,7 +536,7 @@ int server_remove_fd_from_cache( obj_handle_t handle )
  *
  * The returned unix_fd should be closed iff needs_close is non-zero.
  */
-int server_get_unix_fd( obj_handle_t handle, unsigned int wanted_access, int *unix_fd,
+int server_get_unix_fd( HANDLE handle, unsigned int wanted_access, int *unix_fd,
                         int *needs_close, enum server_fd_type *type, unsigned int *options )
 {
     sigset_t sigset;
@@ -587,7 +555,7 @@ int server_get_unix_fd( obj_handle_t handle, unsigned int wanted_access, int *un
 
     SERVER_START_REQ( get_handle_fd )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         if (!(ret = wine_server_call( req )))
         {
             if (type) *type = reply->type;
@@ -595,7 +563,7 @@ int server_get_unix_fd( obj_handle_t handle, unsigned int wanted_access, int *un
             access = reply->access;
             if ((fd = receive_fd( &fd_handle )) != -1)
             {
-                assert( fd_handle == handle );
+                assert( wine_server_ptr_handle(fd_handle) == handle );
                 *needs_close = (reply->removable ||
                                 !add_fd_to_cache( handle, fd, reply->type,
                                                   reply->access, reply->options ));
@@ -631,7 +599,7 @@ done:
  * RETURNS
  *     NTSTATUS code
  */
-int wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, obj_handle_t *handle )
+int CDECL wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attributes, HANDLE *handle )
 {
     int ret;
 
@@ -643,7 +611,7 @@ int wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attribut
         req->access     = access;
         req->attributes = attributes;
         req->fd         = fd;
-        if (!(ret = wine_server_call( req ))) *handle = reply->handle;
+        if (!(ret = wine_server_call( req ))) *handle = wine_server_ptr_handle( reply->handle );
     }
     SERVER_END_REQ;
     return ret;
@@ -664,7 +632,7 @@ int wine_server_fd_to_handle( int fd, unsigned int access, unsigned int attribut
  * RETURNS
  *     NTSTATUS code
  */
-int wine_server_handle_to_fd( obj_handle_t handle, unsigned int access, int *unix_fd,
+int CDECL wine_server_handle_to_fd( HANDLE handle, unsigned int access, int *unix_fd,
                               unsigned int *options )
 {
     int needs_close, ret = server_get_unix_fd( handle, access, unix_fd, &needs_close, NULL, options );
@@ -689,9 +657,35 @@ int wine_server_handle_to_fd( obj_handle_t handle, unsigned int access, int *uni
  * RETURNS
  *     nothing
  */
-void wine_server_release_fd( obj_handle_t handle, int unix_fd )
+void CDECL wine_server_release_fd( HANDLE handle, int unix_fd )
 {
     close( unix_fd );
+}
+
+
+/***********************************************************************
+ *           server_pipe
+ *
+ * Create a pipe for communicating with the server.
+ */
+int server_pipe( int fd[2] )
+{
+    int ret;
+#ifdef HAVE_PIPE2
+    static int have_pipe2 = 1;
+
+    if (have_pipe2)
+    {
+        if (!(ret = pipe2( fd, O_CLOEXEC ))) return ret;
+        if (errno == ENOSYS || errno == EINVAL) have_pipe2 = 0;  /* don't try again */
+    }
+#endif
+    if (!(ret = pipe( fd )))
+    {
+        fcntl( fd[0], F_SETFD, FD_CLOEXEC );
+        fcntl( fd[1], F_SETFD, FD_CLOEXEC );
+    }
+    return ret;
 }
 
 
@@ -726,6 +720,52 @@ static void start_server(void)
         if (status) exit(status);  /* server failed */
         started = 1;
     }
+}
+
+
+/***********************************************************************
+ *           setup_config_dir
+ *
+ * Setup the wine configuration dir.
+ */
+static void setup_config_dir(void)
+{
+    const char *p, *config_dir = wine_get_config_dir();
+
+    if (chdir( config_dir ) == -1)
+    {
+        if (errno != ENOENT) fatal_perror( "chdir to %s\n", config_dir );
+
+        if ((p = strrchr( config_dir, '/' )) && p != config_dir)
+        {
+            struct stat st;
+            char *tmp_dir;
+
+            if (!(tmp_dir = malloc( p + 1 - config_dir ))) fatal_error( "out of memory\n" );
+            memcpy( tmp_dir, config_dir, p - config_dir );
+            tmp_dir[p - config_dir] = 0;
+            if (!stat( tmp_dir, &st ) && st.st_uid != getuid())
+                fatal_error( "'%s' is not owned by you, refusing to create a configuration directory there\n",
+                             tmp_dir );
+            free( tmp_dir );
+        }
+
+        mkdir( config_dir, 0777 );
+        if (chdir( config_dir ) == -1) fatal_perror( "chdir to %s\n", config_dir );
+        MESSAGE( "wine: created the configuration directory '%s'\n", config_dir );
+    }
+
+    if (mkdir( "dosdevices", 0777 ) == -1)
+    {
+        if (errno == EEXIST) return;
+        fatal_perror( "cannot create %s/dosdevices\n", config_dir );
+    }
+
+    /* create the drive symlinks */
+
+    mkdir( "drive_c", 0777 );
+    symlink( "../drive_c", "dosdevices/c:" );
+    symlink( "/", "dosdevices/z:" );
 }
 
 
@@ -768,8 +808,9 @@ static void server_connect_error( const char *serverdir )
  * Attempt to connect to an existing server socket.
  * We need to be in the server directory already.
  */
-static int server_connect( const char *serverdir )
+static int server_connect(void)
 {
+    const char *serverdir;
     struct sockaddr_un addr;
     struct stat st;
     int s, slen, retry, fd_cwd;
@@ -777,6 +818,9 @@ static int server_connect( const char *serverdir )
     /* retrieve the current directory */
     fd_cwd = open( ".", O_RDONLY );
     if (fd_cwd != -1) fcntl( fd_cwd, F_SETFD, 1 ); /* set close on exec flag */
+
+    setup_config_dir();
+    serverdir = wine_get_server_dir();
 
     /* chdir to the server directory */
     if (chdir( serverdir ) == -1)
@@ -838,63 +882,6 @@ static int server_connect( const char *serverdir )
 }
 
 
-/***********************************************************************
- *           create_config_dir
- *
- * Create the wine configuration dir (~/.wine).
- */
-static void create_config_dir(void)
-{
-    const char *p, *config_dir = wine_get_config_dir();
-    pid_t pid, wret;
-
-    if ((p = strrchr( config_dir, '/' )) && p != config_dir)
-    {
-        struct stat st;
-        char *tmp_dir;
-
-        if (!(tmp_dir = malloc( p + 1 - config_dir ))) fatal_error( "out of memory\n" );
-        memcpy( tmp_dir, config_dir, p - config_dir );
-        tmp_dir[p - config_dir] = 0;
-        if (!stat( tmp_dir, &st ) && st.st_uid != getuid())
-            fatal_error( "'%s' is not owned by you, refusing to create a configuration directory there\n",
-                         tmp_dir );
-        free( tmp_dir );
-    }
-    if (mkdir( config_dir, 0777 ) == -1 && errno != EEXIST)
-        fatal_perror( "cannot create directory %s", config_dir );
-
-    MESSAGE( "wine: creating configuration directory '%s'...\n", config_dir );
-    pid = fork();
-    if (pid == -1) fatal_perror( "fork" );
-
-    if (!pid)
-    {
-        char *argv[3];
-        static char argv0[] = "tools/wineprefixcreate",
-                    argv1[] = "--quiet";
-
-        argv[0] = argv0;
-        argv[1] = argv1;
-        argv[2] = NULL;
-        wine_exec_wine_binary( argv[0], argv, NULL );
-        fatal_perror( "could not exec wineprefixcreate" );
-    }
-    else
-    {
-        int status;
-
-        while ((wret = waitpid( pid, &status, 0 )) != pid)
-        {
-            if (wret == -1 && errno != EINTR) fatal_perror( "wait4" );
-        }
-        if (!WIFEXITED(status) || WEXITSTATUS(status))
-            fatal_error( "wineprefixcreate failed while creating '%s'.\n", config_dir );
-    }
-    MESSAGE( "wine: '%s' created successfully.\n", config_dir );
-}
-
-
 #ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_error.h>
@@ -938,6 +925,32 @@ static void send_server_task_port(void)
 }
 #endif  /* __APPLE__ */
 
+
+/***********************************************************************
+ *           get_unix_tid
+ *
+ * Retrieve the Unix tid to use on the server side for the current thread.
+ */
+static int get_unix_tid(void)
+{
+    int ret = -1;
+#if defined(linux) && defined(__i386__)
+    __asm__("int $0x80" : "=a" (ret) : "0" (224) /* SYS_gettid */);
+#elif defined(linux) && defined(__x86_64__)
+    __asm__("syscall" : "=a" (ret) : "0" (186) /* SYS_gettid */);
+#elif defined(__sun)
+    ret = pthread_self();
+#elif defined(__APPLE__)
+    ret = mach_thread_self();
+#elif defined(__FreeBSD__)
+    long lwpid;
+    thr_self( &lwpid );
+    ret = lwpid;
+#endif
+    return ret;
+}
+
+
 /***********************************************************************
  *           server_init_process
  *
@@ -945,7 +958,7 @@ static void send_server_task_port(void)
  */
 void server_init_process(void)
 {
-    obj_handle_t dummy_handle;
+    obj_handle_t version;
     const char *env_socket = getenv( "WINESERVERSOCKET" );
 
     if (env_socket)
@@ -955,19 +968,7 @@ void server_init_process(void)
             fatal_perror( "Bad server socket %d", fd_socket );
         unsetenv( "WINESERVERSOCKET" );
     }
-    else
-    {
-        const char *server_dir = wine_get_server_dir();
-
-        if (!server_dir)  /* this means the config dir doesn't exist */
-        {
-            create_config_dir();
-            server_dir = wine_get_server_dir();
-        }
-
-        /* connect to the server */
-        fd_socket = server_connect( server_dir );
-    }
+    else fd_socket = server_connect();
 
     /* setup the signal mask */
     sigemptyset( &server_block_set );
@@ -978,11 +979,18 @@ void server_init_process(void)
     sigaddset( &server_block_set, SIGUSR1 );
     sigaddset( &server_block_set, SIGUSR2 );
     sigaddset( &server_block_set, SIGCHLD );
-    pthread_functions.sigprocmask( SIG_BLOCK, &server_block_set, NULL );
+    pthread_sigmask( SIG_BLOCK, &server_block_set, NULL );
 
     /* receive the first thread request fd on the main socket */
-    ntdll_get_thread_data()->request_fd = receive_fd( &dummy_handle );
+    ntdll_get_thread_data()->request_fd = receive_fd( &version );
 
+    if (version != SERVER_PROTOCOL_VERSION)
+        server_protocol_error( "version mismatch %d/%d.\n"
+                               "Your %s binary was not upgraded correctly,\n"
+                               "or you have an older one somewhere in your PATH.\n"
+                               "Or maybe the wrong wineserver is still running?\n",
+                               version, SERVER_PROTOCOL_VERSION,
+                               (version > SERVER_PROTOCOL_VERSION) ? "wine" : "wineserver" );
 #ifdef __APPLE__
     send_server_task_port();
 #endif
@@ -1004,14 +1012,17 @@ NTSTATUS server_init_process_done(void)
      * We do need the handlers in place by the time the request is over, so
      * we set them up here. If we segfault between here and the server call
      * something is very wrong... */
-    if (!SIGNAL_Init()) exit(1);
+    signal_init_process();
 
     /* Signal the parent process to continue */
     SERVER_START_REQ( init_process_done )
     {
-        req->module = peb->ImageBaseAddress;
-        req->entry  = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
-        req->gui    = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
+        req->module   = wine_server_client_ptr( peb->ImageBaseAddress );
+#ifdef __i386__
+        req->ldt_copy = wine_server_client_ptr( &wine_ldt_copy );
+#endif
+        req->entry    = wine_server_client_ptr( (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint );
+        req->gui      = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
         status = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -1025,9 +1036,9 @@ NTSTATUS server_init_process_done(void)
  *
  * Send an init thread request. Return 0 if OK.
  */
-size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point )
+size_t server_init_thread( void *entry_point )
 {
-    int version, ret;
+    int ret;
     int reply_pipe[2];
     struct sigaction sig_act;
     size_t info_size;
@@ -1045,45 +1056,46 @@ size_t server_init_thread( int unix_pid, int unix_tid, void *entry_point )
     sigaction( SIGCHLD, &sig_act, NULL );
 
     /* create the server->client communication pipes */
-    if (pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );
-    if (pipe( ntdll_get_thread_data()->wait_fd ) == -1) server_protocol_perror( "pipe" );
+    if (server_pipe( reply_pipe ) == -1) server_protocol_perror( "pipe" );
+    if (server_pipe( ntdll_get_thread_data()->wait_fd ) == -1) server_protocol_perror( "pipe" );
     wine_server_send_fd( reply_pipe[1] );
     wine_server_send_fd( ntdll_get_thread_data()->wait_fd[1] );
     ntdll_get_thread_data()->reply_fd = reply_pipe[0];
     close( reply_pipe[1] );
 
-    /* set close on exec flag */
-    fcntl( ntdll_get_thread_data()->reply_fd, F_SETFD, 1 );
-    fcntl( ntdll_get_thread_data()->wait_fd[0], F_SETFD, 1 );
-    fcntl( ntdll_get_thread_data()->wait_fd[1], F_SETFD, 1 );
-
     SERVER_START_REQ( init_thread )
     {
-        req->unix_pid    = unix_pid;
-        req->unix_tid    = unix_tid;
-        req->teb         = NtCurrentTeb();
-        req->peb         = NtCurrentTeb()->Peb;
-        req->entry       = entry_point;
-        req->ldt_copy    = &wine_ldt_copy;
+        req->unix_pid    = getpid();
+        req->unix_tid    = get_unix_tid();
+        req->teb         = wine_server_client_ptr( NtCurrentTeb() );
+        req->entry       = wine_server_client_ptr( entry_point );
         req->reply_fd    = reply_pipe[1];
         req->wait_fd     = ntdll_get_thread_data()->wait_fd[1];
         req->debug_level = (TRACE_ON(server) != 0);
+        req->cpu         = client_cpu;
         ret = wine_server_call( req );
         NtCurrentTeb()->ClientId.UniqueProcess = ULongToHandle(reply->pid);
         NtCurrentTeb()->ClientId.UniqueThread  = ULongToHandle(reply->tid);
         info_size         = reply->info_size;
-        version           = reply->version;
         server_start_time = reply->server_start;
+        server_cpus       = reply->all_cpus;
     }
     SERVER_END_REQ;
 
-    if (ret) server_protocol_error( "init_thread failed with status %x\n", ret );
-    if (version != SERVER_PROTOCOL_VERSION)
-        server_protocol_error( "version mismatch %d/%d.\n"
-                               "Your %s binary was not upgraded correctly,\n"
-                               "or you have an older one somewhere in your PATH.\n"
-                               "Or maybe the wrong wineserver is still running?\n",
-                               version, SERVER_PROTOCOL_VERSION,
-                               (version > SERVER_PROTOCOL_VERSION) ? "wine" : "wineserver" );
+#ifndef _WIN64
+    is_wow64 = (server_cpus & (1 << CPU_x86_64)) != 0;
+#endif
+    ntdll_get_thread_data()->wow64_redir = is_wow64;
+
+    if (ret)
+    {
+        if (ret == STATUS_NOT_SUPPORTED)
+        {
+            static const char * const cpu_arch[] = { "x86", "x86_64", "Alpha", "PowerPC", "Sparc" };
+            server_protocol_error( "the running wineserver doesn't support the %s architecture.\n",
+                                   cpu_arch[client_cpu] );
+        }
+        else server_protocol_error( "init_thread failed with status %x\n", ret );
+    }
     return info_size;
 }

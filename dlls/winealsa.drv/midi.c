@@ -142,7 +142,7 @@ static void error_handler(const char* file, int line, const char* function, int 
  * return the Windows equivalent to a Unix Device Type
  *
  */
-static	int 	MIDI_AlsaToWindowsDeviceType(int type)
+static	int 	MIDI_AlsaToWindowsDeviceType(unsigned int type)
 {
     /* MOD_MIDIPORT     output port
      * MOD_SYNTH        generic internal synth
@@ -173,14 +173,14 @@ static	int 	MIDI_AlsaToWindowsDeviceType(int type)
  * 			MIDI_NotifyClient			[internal]
  */
 static DWORD MIDI_NotifyClient(UINT wDevID, WORD wMsg,
-			       DWORD dwParam1, DWORD dwParam2)
+			       DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     DWORD 		dwCallBack;
     UINT 		uFlags;
     HANDLE		hDev;
     DWORD 		dwInstance;
 
-    TRACE("wDevID = %04X wMsg = %d dwParm1 = %04X dwParam2 = %04X\n",
+    TRACE("wDevID = %04X wMsg = %d dwParm1 = %04lX dwParam2 = %04lX\n",
 	  wDevID, wMsg, dwParam1, dwParam2);
 
     switch (wMsg) {
@@ -374,27 +374,34 @@ static DWORD WINAPI midRecThread(LPVOID arg)
                     break;
 		case SND_SEQ_EVENT_SYSEX:
 		    {
+			int pos = 0;
 			int len = ev->data.ext.len;
-			LPBYTE ptr = (BYTE*) ev->data.ext.ptr;
+                        LPBYTE ptr = ev->data.ext.ptr;
 			LPMIDIHDR lpMidiHdr;
 
-			/* FIXME: Should handle sysex greater than lpMidiHdr->dwBufferLength */
 			EnterCriticalSection(&crit_sect);
-			if ((lpMidiHdr = MidiInDev[wDevID].lpQueueHdr) != NULL) {
-			    if (lpMidiHdr->dwBytesRecorded + len <= lpMidiHdr->dwBufferLength) {
-				memcpy(lpMidiHdr->lpData + lpMidiHdr->dwBytesRecorded, ptr, len);
-				lpMidiHdr->dwBytesRecorded += len;
-				if (*(ptr + (len-1)) == 0xF7) {
+			while (len) {
+			    if ((lpMidiHdr = MidiInDev[wDevID].lpQueueHdr) != NULL) {
+				int copylen = min(len, lpMidiHdr->dwBufferLength - lpMidiHdr->dwBytesRecorded);
+				memcpy(lpMidiHdr->lpData + lpMidiHdr->dwBytesRecorded, ptr + pos, copylen);
+				lpMidiHdr->dwBytesRecorded += copylen;
+				len -= copylen;
+				pos += copylen;
+				/* We check if we reach the end of buffer or the end of sysex before notifying
+				 * to handle the case where ALSA split the sysex into several events */
+				if ((lpMidiHdr->dwBytesRecorded == lpMidiHdr->dwBufferLength) ||
+				    (*(BYTE*)(lpMidiHdr->lpData + lpMidiHdr->dwBytesRecorded - 1) == 0xF7)) {
 				    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
 				    lpMidiHdr->dwFlags |= MHDR_DONE;
-				    MidiInDev[wDevID].lpQueueHdr = (LPMIDIHDR)lpMidiHdr->lpNext;
-				    if (MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD)lpMidiHdr, dwTime) != MMSYSERR_NOERROR)
+                                    MidiInDev[wDevID].lpQueueHdr = lpMidiHdr->lpNext;
+				    if (MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD_PTR)lpMidiHdr, dwTime) != MMSYSERR_NOERROR)
 					WARN("Couldn't notify client\n");
 				}
-			    } else
-				FIXME("No enough space in the buffer to store sysex!\n");
-			} else
-			    FIXME("Sysex received but no buffer to store it!\n");
+			    } else {
+				FIXME("Sysex data received but no buffer to store it!\n");
+				break;
+			    }
+			}
 			LeaveCriticalSection(&crit_sect);
 		    }
 		    break;
@@ -578,16 +585,18 @@ static DWORD midAddBuffer(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
     if (!(lpMidiHdr->dwFlags & MHDR_PREPARED)) return MIDIERR_UNPREPARED;
 
     EnterCriticalSection(&crit_sect);
+    lpMidiHdr->dwFlags &= ~WHDR_DONE;
     lpMidiHdr->dwFlags |= MHDR_INQUEUE;
+    lpMidiHdr->dwBytesRecorded = 0;
+    lpMidiHdr->lpNext = 0;
     if (MidiInDev[wDevID].lpQueueHdr == 0) {
 	MidiInDev[wDevID].lpQueueHdr = lpMidiHdr;
     } else {
 	LPMIDIHDR	ptr;
 
-	for (ptr = MidiInDev[wDevID].lpQueueHdr;
-	     ptr->lpNext != 0;
-	     ptr = (LPMIDIHDR)ptr->lpNext);
-	ptr->lpNext = (struct midihdr_tag*)lpMidiHdr;
+        for (ptr = MidiInDev[wDevID].lpQueueHdr; ptr->lpNext != 0;
+             ptr = ptr->lpNext);
+        ptr->lpNext = lpMidiHdr;
     }
     LeaveCriticalSection(&crit_sect);
 
@@ -653,10 +662,10 @@ static DWORD midReset(WORD wDevID)
 	MidiInDev[wDevID].lpQueueHdr->dwFlags |= MHDR_DONE;
 	/* FIXME: when called from 16 bit, lpQueueHdr needs to be a segmented ptr */
 	if (MIDI_NotifyClient(wDevID, MIM_LONGDATA,
-			      (DWORD)MidiInDev[wDevID].lpQueueHdr, dwTime) != MMSYSERR_NOERROR) {
+			      (DWORD_PTR)MidiInDev[wDevID].lpQueueHdr, dwTime) != MMSYSERR_NOERROR) {
 	    WARN("Couldn't notify client\n");
 	}
-	MidiInDev[wDevID].lpQueueHdr = (LPMIDIHDR)MidiInDev[wDevID].lpQueueHdr->lpNext;
+        MidiInDev[wDevID].lpQueueHdr = MidiInDev[wDevID].lpQueueHdr->lpNext;
     }
     LeaveCriticalSection(&crit_sect);
 
@@ -1024,7 +1033,7 @@ static DWORD modLongData(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
 
     lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
     lpMidiHdr->dwFlags |= MHDR_DONE;
-    if (MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD)lpMidiHdr, 0L) != MMSYSERR_NOERROR) {
+    if (MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD_PTR)lpMidiHdr, 0L) != MMSYSERR_NOERROR) {
 	WARN("can't notify client !\n");
 	return MMSYSERR_INVALPARAM;
     }
@@ -1050,8 +1059,8 @@ static DWORD modPrepare(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
     if (dwSize < sizeof(MIDIHDR) || lpMidiHdr == 0 ||
 	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0 ||
 	lpMidiHdr->dwBufferLength >= 0x10000ul) {
-	WARN("%p %p %08x %d/%d\n", lpMidiHdr, lpMidiHdr->lpData,
-	           lpMidiHdr->dwFlags, sizeof(MIDIHDR), dwSize);
+	WARN("%p %p %08x %d\n", lpMidiHdr, lpMidiHdr ? lpMidiHdr->lpData : NULL,
+             lpMidiHdr ? lpMidiHdr->dwFlags : 0, dwSize);
 	return MMSYSERR_INVALPARAM;
     }
 
@@ -1113,8 +1122,10 @@ static DWORD modReset(WORD wDevID)
  *
  * Helper for ALSA_MidiInit
  */
-static void ALSA_AddMidiPort(snd_seq_client_info_t* cinfo, snd_seq_port_info_t* pinfo, int cap, int type)
+static void ALSA_AddMidiPort(snd_seq_client_info_t* cinfo, snd_seq_port_info_t* pinfo, unsigned int cap, unsigned int type)
 {
+    char midiPortName[MAXPNAMELEN];
+
     if (cap & SND_SEQ_PORT_CAP_WRITE) {
 	TRACE("OUT (%d:%s:%s:%d:%s:%x)\n",snd_seq_client_info_get_client(cinfo),
 					  snd_seq_client_info_get_name(cinfo),
@@ -1146,7 +1157,17 @@ static void ALSA_AddMidiPort(snd_seq_client_info_t* cinfo, snd_seq_port_info_t* 
 	 * not MIDICAPS_CACHE.
 	 */
 	MidiOutDev[MODM_NumDevs].caps.dwSupport      = MIDICAPS_VOLUME|MIDICAPS_LRVOLUME;
-	MultiByteToWideChar(CP_ACP, 0, snd_seq_client_info_get_name(cinfo), -1,
+
+	/* Try to use both client and port names, if this is too long take the port name only.
+           In the second case the port name should be explicit enough due to its big size.
+	 */
+	if ( (strlen(snd_seq_client_info_get_name(cinfo)) + strlen(snd_seq_port_info_get_name(pinfo)) + 3) < MAXPNAMELEN ) {
+	    sprintf(midiPortName, "%s - %s", snd_seq_client_info_get_name(cinfo), snd_seq_port_info_get_name(pinfo));
+	} else {
+	    lstrcpynA(midiPortName, snd_seq_port_info_get_name(pinfo), MAXPNAMELEN-1);
+	    midiPortName[MAXPNAMELEN-1] = 0;
+	}
+	MultiByteToWideChar(CP_UNIXCP, 0, midiPortName, -1,
                             MidiOutDev[MODM_NumDevs].caps.szPname,
                             sizeof(MidiOutDev[MODM_NumDevs].caps.szPname) / sizeof(WCHAR));
 
@@ -1162,12 +1183,12 @@ static void ALSA_AddMidiPort(snd_seq_client_info_t* cinfo, snd_seq_port_info_t* 
 	MidiOutDev[MODM_NumDevs].bEnabled    = TRUE;
 
 	TRACE("MidiOut[%d]\tname='%s' techn=%d voices=%d notes=%d chnMsk=%04x support=%d\n"
-            "\tALSA info: midi dev-type=%lx, capa=%lx\n",
+            "\tALSA info: midi dev-type=%x, capa=0\n",
               MODM_NumDevs, wine_dbgstr_w(MidiOutDev[MODM_NumDevs].caps.szPname),
               MidiOutDev[MODM_NumDevs].caps.wTechnology,
               MidiOutDev[MODM_NumDevs].caps.wVoices, MidiOutDev[MODM_NumDevs].caps.wNotes,
               MidiOutDev[MODM_NumDevs].caps.wChannelMask, MidiOutDev[MODM_NumDevs].caps.dwSupport,
-              (long)type, (long)0);
+              type);
 		
 	MODM_NumDevs++;
     }
@@ -1201,16 +1222,26 @@ static void ALSA_AddMidiPort(snd_seq_client_info_t* cinfo, snd_seq_port_info_t* 
 	 * not MIDICAPS_CACHE.
 	 */
 	MidiInDev[MIDM_NumDevs].caps.dwSupport      = MIDICAPS_VOLUME|MIDICAPS_LRVOLUME;
-	MultiByteToWideChar(CP_ACP, 0, snd_seq_client_info_get_name(cinfo), -1,
+
+	/* Try to use both client and port names, if this is too long take the port name only.
+           In the second case the port name should be explicit enough due to its big size.
+	 */
+	if ( (strlen(snd_seq_client_info_get_name(cinfo)) + strlen(snd_seq_port_info_get_name(pinfo)) + 3) < MAXPNAMELEN ) {
+	    sprintf(midiPortName, "%s - %s", snd_seq_client_info_get_name(cinfo), snd_seq_port_info_get_name(pinfo));
+	} else {
+	    lstrcpynA(midiPortName, snd_seq_port_info_get_name(pinfo), MAXPNAMELEN-1);
+	    midiPortName[MAXPNAMELEN-1] = 0;
+        }
+	MultiByteToWideChar(CP_UNIXCP, 0, midiPortName, -1,
                             MidiInDev[MIDM_NumDevs].caps.szPname,
                             sizeof(MidiInDev[MIDM_NumDevs].caps.szPname) / sizeof(WCHAR));
 	MidiInDev[MIDM_NumDevs].state = 0;
 
 	TRACE("MidiIn [%d]\tname='%s' support=%d\n"
-              "\tALSA info: midi dev-type=%lx, capa=%lx\n",
+              "\tALSA info: midi dev-type=%x, capa=0\n",
               MIDM_NumDevs, wine_dbgstr_w(MidiInDev[MIDM_NumDevs].caps.szPname),
               MidiInDev[MIDM_NumDevs].caps.dwSupport,
-              (long)type, (long)0);
+              type);
 
 	MIDM_NumDevs++;
     }
@@ -1258,8 +1289,8 @@ LONG ALSA_MidiInit(void)
         snd_seq_port_info_set_client(pinfo, snd_seq_client_info_get_client(cinfo));
 	snd_seq_port_info_set_port(pinfo, -1);
 	while (snd_seq_query_next_port(midiSeq, pinfo) >= 0) {
-            int cap = snd_seq_port_info_get_capability(pinfo);
-	    int type = snd_seq_port_info_get_type(pinfo);
+	    unsigned int cap = snd_seq_port_info_get_capability(pinfo);
+	    unsigned int type = snd_seq_port_info_get_type(pinfo);
 	    if (!(type & SND_SEQ_PORT_TYPE_PORT))
 	        ALSA_AddMidiPort(cinfo, pinfo, cap, type);
 	}
@@ -1271,8 +1302,8 @@ LONG ALSA_MidiInit(void)
         snd_seq_port_info_set_client(pinfo, snd_seq_client_info_get_client(cinfo));
 	snd_seq_port_info_set_port(pinfo, -1);
 	while (snd_seq_query_next_port(midiSeq, pinfo) >= 0) {
-            int cap = snd_seq_port_info_get_capability(pinfo);
-	    int type = snd_seq_port_info_get_type(pinfo);
+	    unsigned int cap = snd_seq_port_info_get_capability(pinfo);
+	    unsigned int type = snd_seq_port_info_get_type(pinfo);
 	    if (type & SND_SEQ_PORT_TYPE_PORT)
 	        ALSA_AddMidiPort(cinfo, pinfo, cap, type);
 	}
@@ -1289,12 +1320,12 @@ LONG ALSA_MidiInit(void)
 }
 
 /**************************************************************************
- * 			midMessage (WINEOSS.4)
+ * 			midMessage (WINEALSA.@)
  */
-DWORD WINAPI ALSA_midMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI ALSA_midMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+			    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%04X, %04X, %08X, %08X, %08X);\n",
+    TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
     switch (wMsg) {
 #ifdef HAVE_ALSA
@@ -1332,12 +1363,12 @@ DWORD WINAPI ALSA_midMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
 }
 
 /**************************************************************************
- * 				modMessage (WINEOSS.5)
+ * 				modMessage (WINEALSA.@)
  */
-DWORD WINAPI ALSA_modMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-			    DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI ALSA_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+                             DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%04X, %04X, %08X, %08X, %08X);\n",
+    TRACE("(%04X, %04X, %08lX, %08lX, %08lX);\n",
 	  wDevID, wMsg, dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {

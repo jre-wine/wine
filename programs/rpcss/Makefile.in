@@ -1,3 +1,4 @@
+EXTRADEFS = -D__WINESRC__
 TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
@@ -7,12 +8,12 @@ APPMODE   = -mconsole
 IMPORTS   = rpcrt4 kernel32 ntdll
 
 C_SRCS = \
-       epmap_server.c \
-       irotp.c \
-       np_server.c \
-       rpcss_main.c
+	epmp.c \
+	irotp.c \
+	rpcss_main.c
 
 IDL_S_SRCS = \
+	epm.idl \
 	irot.idl
 
 @MAKE_PROG_RULES@

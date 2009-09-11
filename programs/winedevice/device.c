@@ -38,7 +38,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(winedevice);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
-extern NTSTATUS wine_ntoskrnl_main_loop( HANDLE stop_event );
+extern NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event );
 
 static WCHAR *driver_name;
 static SERVICE_STATUS_HANDLE service_handle;
@@ -64,9 +64,11 @@ static LDR_MODULE *find_ldr_module( HMODULE module )
 /* load the driver module file */
 static HMODULE load_driver_module( const WCHAR *name )
 {
-    const IMAGE_NT_HEADERS *nt;
+    IMAGE_NT_HEADERS *nt;
+    const IMAGE_IMPORT_DESCRIPTOR *imports;
     size_t page_size = getpagesize();
-    int delta;
+    int i, delta;
+    ULONG size;
     HMODULE module = LoadLibraryW( name );
 
     if (!module) return NULL;
@@ -80,7 +82,6 @@ static HMODULE load_driver_module( const WCHAR *name )
     if (nt->OptionalHeader.SectionAlignment < page_size ||
         !(nt->FileHeader.Characteristics & IMAGE_FILE_DLL))
     {
-        ULONG size;
         DWORD old;
         IMAGE_BASE_RELOCATION *rel, *end;
 
@@ -98,8 +99,25 @@ static HMODULE load_driver_module( const WCHAR *name )
                 if (old != PAGE_EXECUTE_READWRITE) VirtualProtect( page, page_size, old, NULL );
                 if (!rel) goto error;
             }
+            /* make sure we don't try again */
+            nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress = 0;
         }
     }
+
+    /* make sure imports are relocated too */
+
+    if ((imports = RtlImageDirectoryEntryToData( module, TRUE, IMAGE_DIRECTORY_ENTRY_IMPORT, &size )))
+    {
+        for (i = 0; imports[i].Name && imports[i].FirstThunk; i++)
+        {
+            char *name = (char *)module + imports[i].Name;
+            WCHAR buffer[32], *p = buffer;
+
+            while (p < buffer + 32) if (!(*p++ = *name++)) break;
+            if (p <= buffer + 32) FreeLibrary( load_driver_module( buffer ) );
+        }
+    }
+
     return module;
 
 error:
@@ -147,6 +165,8 @@ static NTSTATUS init_driver( HMODULE module, UNICODE_STRING *keyname )
 /* load the .sys module for a device driver */
 static BOOL load_driver(void)
 {
+    static const WCHAR driversW[] = {'\\','d','r','i','v','e','r','s','\\',0};
+    static const WCHAR postfixW[] = {'.','s','y','s',0};
     static const WCHAR ntprefixW[] = {'\\','?','?','\\',0};
     static const WCHAR ImagePathW[] = {'I','m','a','g','e','P','a','t','h',0};
     static const WCHAR servicesW[] = {'\\','R','e','g','i','s','t','r','y',
@@ -174,20 +194,31 @@ static BOOL load_driver(void)
 
     /* read the executable path from memory */
     size = 0;
-    if (RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, NULL, &size )) return FALSE;
-
-    str = HeapAlloc( GetProcessHeap(), 0, size );
-    if (!RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, (LPBYTE)str, &size ))
+    if (!RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, NULL, &size ))
     {
-        size = ExpandEnvironmentStringsW(str,NULL,0);
-        path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
-        ExpandEnvironmentStringsW(str,path,size);
+        str = HeapAlloc( GetProcessHeap(), 0, size );
+        if (!RegQueryValueExW( driver_hkey, ImagePathW, NULL, &type, (LPBYTE)str, &size ))
+        {
+            size = ExpandEnvironmentStringsW(str,NULL,0);
+            path = HeapAlloc(GetProcessHeap(),0,size*sizeof(WCHAR));
+            ExpandEnvironmentStringsW(str,path,size);
+        }
+        HeapFree( GetProcessHeap(), 0, str );
+        if (!path) return FALSE;
     }
-    HeapFree( GetProcessHeap(), 0, str );
-    if (!path) return FALSE;
-
-    /* make sure msvcrt is loaded to resolve the ntoskrnl.exe forwards */
-    LoadLibraryA( "msvcrt.dll" );
+    else
+    {
+        /* default is to use the driver name + ".sys" */
+        WCHAR buffer[MAX_PATH];
+        GetSystemDirectoryW(buffer, MAX_PATH);
+        path = HeapAlloc(GetProcessHeap(),0,
+          (strlenW(buffer) + strlenW(driversW) + strlenW(driver_name) + strlenW(postfixW) + 1)
+          *sizeof(WCHAR));
+        lstrcpyW(path, buffer);
+        lstrcatW(path, driversW);
+        lstrcatW(path, driver_name);
+        lstrcatW(path, postfixW);
+    }
 
     /* GameGuard uses an NT-style path name */
     str = path;

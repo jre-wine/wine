@@ -1,0 +1,13 @@
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = msacm.dll16
+IMPORTS   = msacm32 kernel32
+EXTRADLLFLAGS = -Wb,--subsystem,win16,--main-module,msacm32.dll
+
+C_SRCS = msacm.c
+
+@MAKE_DLL_RULES@
+
+@DEPENDENCIES@  # everything below this line is overwritten by make depend

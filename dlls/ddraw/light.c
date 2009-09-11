@@ -1,6 +1,6 @@
 /* Direct3D Light
  * Copyright (c) 1998 / 2002 Lionel ULMER
- * Copyright (c) 2006        Stefan DÖSINGER
+ * Copyright (c) 2006        Stefan DÃ–SINGER
  *
  * This file contains the implementation of Direct3DLight.
  *
@@ -65,7 +65,7 @@ IDirect3DLightImpl_QueryInterface(IDirect3DLight *iface,
                                   REFIID riid,
                                   void **obp)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
     FIXME("(%p)->(%s,%p): stub!\n", This, debugstr_guid(riid), obp);
     *obp = NULL;
     return E_NOINTERFACE;
@@ -83,7 +83,7 @@ IDirect3DLightImpl_QueryInterface(IDirect3DLight *iface,
 static ULONG WINAPI
 IDirect3DLightImpl_AddRef(IDirect3DLight *iface)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
     ULONG ref = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->() incrementing from %u.\n", This, ref - 1);
@@ -104,7 +104,7 @@ IDirect3DLightImpl_AddRef(IDirect3DLight *iface)
 static ULONG WINAPI
 IDirect3DLightImpl_Release(IDirect3DLight *iface)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
     ULONG ref = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->() decrementing from %u.\n", This, ref + 1);
@@ -137,8 +137,8 @@ static HRESULT WINAPI
 IDirect3DLightImpl_Initialize(IDirect3DLight *iface,
                               IDirect3D *lpDirect3D)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
-    IDirectDrawImpl *d3d = ICOM_OBJECT(IDirectDrawImpl, IDirect3D, lpDirect3D);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
+    IDirectDrawImpl *d3d = lpDirect3D ? ddraw_from_d3d1(lpDirect3D) : NULL;
     TRACE("(%p)->(%p) no-op...\n", This, d3d);
     return D3D_OK;
 }
@@ -169,7 +169,7 @@ static HRESULT WINAPI
 IDirect3DLightImpl_SetLight(IDirect3DLight *iface,
                             D3DLIGHT *lpLight)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
     LPD3DLIGHT7 light7 = &(This->light7);
     TRACE("(%p)->(%p)\n", This, lpLight);
     if (TRACE_ON(d3d7)) {
@@ -179,17 +179,17 @@ IDirect3DLightImpl_SetLight(IDirect3DLight *iface,
 
     if ( (lpLight->dltType == 0) || (lpLight->dltType > D3DLIGHT_PARALLELPOINT) )
          return DDERR_INVALIDPARAMS;
-    
+
     if ( lpLight->dltType == D3DLIGHT_PARALLELPOINT )
-	 FIXME("D3DLIGHT_PARALLELPOINT no supported\n");
-    
+        FIXME("D3DLIGHT_PARALLELPOINT no supported\n");
+
     /* Translate D3DLIGH2 structure to D3DLIGHT7 */
     light7->dltType        = lpLight->dltType;
     light7->dcvDiffuse     = lpLight->dcvColor;
-    if ((((LPD3DLIGHT2)lpLight)->dwFlags & D3DLIGHT_NO_SPECULAR) != 0)	    
+    if ((((LPD3DLIGHT2)lpLight)->dwFlags & D3DLIGHT_NO_SPECULAR) != 0)
       light7->dcvSpecular    = lpLight->dcvColor;
     else
-      light7->dcvSpecular    = *(const D3DCOLORVALUE*)zero_value;	    
+      light7->dcvSpecular    = *(const D3DCOLORVALUE*)zero_value;
     light7->dcvAmbient     = lpLight->dcvColor;
     light7->dvPosition     = lpLight->dvPosition;
     light7->dvDirection    = lpLight->dvDirection;
@@ -204,7 +204,7 @@ IDirect3DLightImpl_SetLight(IDirect3DLight *iface,
     EnterCriticalSection(&ddraw_cs);
     memcpy(&This->light, lpLight, lpLight->dwSize);
     if ((This->light.dwFlags & D3DLIGHT_ACTIVE) != 0) {
-        This->update(This);        
+        This->update(This);
     }
     LeaveCriticalSection(&ddraw_cs);
     return D3D_OK;
@@ -226,7 +226,7 @@ static HRESULT WINAPI
 IDirect3DLightImpl_GetLight(IDirect3DLight *iface,
                             D3DLIGHT *lpLight)
 {
-    ICOM_THIS_FROM(IDirect3DLightImpl, IDirect3DLight, iface);
+    IDirect3DLightImpl *This = (IDirect3DLightImpl *)iface;
     TRACE("(%p/%p)->(%p)\n", This, iface, lpLight);
     if (TRACE_ON(d3d7)) {
         TRACE("  Returning light definition :\n");
@@ -256,7 +256,7 @@ void light_update(IDirect3DLightImpl* This)
         return;
     device =  This->active_viewport->active_device;
 
-    IDirect3DDevice7_SetLight(ICOM_INTERFACE(device,IDirect3DDevice7), This->dwLightIndex, &(This->light7));
+    IDirect3DDevice7_SetLight((IDirect3DDevice7 *)device, This->dwLightIndex, &(This->light7));
 }
 
 /*****************************************************************************
@@ -274,11 +274,11 @@ void light_activate(IDirect3DLightImpl* This)
     if (!This->active_viewport || !This->active_viewport->active_device)
         return;
     device =  This->active_viewport->active_device;
-    
+
     light_update(This);
     /* If was not active, activate it */
     if ((This->light.dwFlags & D3DLIGHT_ACTIVE) == 0) {
-        IDirect3DDevice7_LightEnable(ICOM_INTERFACE(device,IDirect3DDevice7), This->dwLightIndex, TRUE);
+        IDirect3DDevice7_LightEnable((IDirect3DDevice7 *)device, This->dwLightIndex, TRUE);
 	This->light.dwFlags |= D3DLIGHT_ACTIVE;
     }
 }
@@ -299,10 +299,10 @@ void light_desactivate(IDirect3DLightImpl* This)
     if (!This->active_viewport || !This->active_viewport->active_device)
         return;
     device =  This->active_viewport->active_device;
-    
+
     /* If was not active, activate it */
     if ((This->light.dwFlags & D3DLIGHT_ACTIVE) != 0) {
-        IDirect3DDevice7_LightEnable(ICOM_INTERFACE(device,IDirect3DDevice7), This->dwLightIndex, FALSE);
+        IDirect3DDevice7_LightEnable((IDirect3DDevice7 *)device, This->dwLightIndex, FALSE);
 	This->light.dwFlags &= ~D3DLIGHT_ACTIVE;
     }
 }

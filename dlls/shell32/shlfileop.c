@@ -112,7 +112,7 @@ static void confirm_msg_move_button(HWND hDlg, INT iId, INT *xPos, INT yOffset, 
 /* Note: we paint the text manually and don't use the static control to make
  * sure the text has the same height as the one computed in WM_INITDIALOG
  */
-static INT_PTR CALLBACK ConfirmMsgBox_Paint(HWND hDlg)
+static INT_PTR ConfirmMsgBox_Paint(HWND hDlg)
 {
     PAINTSTRUCT ps;
     HFONT hOldFont;
@@ -126,13 +126,13 @@ static INT_PTR CALLBACK ConfirmMsgBox_Paint(HWND hDlg)
     /* this will remap the rect to dialog coords */
     MapWindowPoints(GetDlgItem(hDlg, IDD_MESSAGE), hDlg, (LPPOINT)&r, 2);
     hOldFont = SelectObject(hdc, (HFONT)SendDlgItemMessageW(hDlg, IDD_MESSAGE, WM_GETFONT, 0, 0));
-    DrawTextW(hdc, (LPWSTR)GetPropW(hDlg, CONFIRM_MSG_PROP), -1, &r, DT_NOPREFIX | DT_PATH_ELLIPSIS | DT_WORDBREAK);
+    DrawTextW(hdc, GetPropW(hDlg, CONFIRM_MSG_PROP), -1, &r, DT_NOPREFIX | DT_PATH_ELLIPSIS | DT_WORDBREAK);
     SelectObject(hdc, hOldFont);
     EndPaint(hDlg, &ps);
     return TRUE;
 }
 
-static INT_PTR CALLBACK ConfirmMsgBox_Init(HWND hDlg, LPARAM lParam)
+static INT_PTR ConfirmMsgBox_Init(HWND hDlg, LPARAM lParam)
 {
     struct confirm_msg_info *info = (struct confirm_msg_info *)lParam;
     INT xPos, yOffset;
@@ -143,7 +143,7 @@ static INT_PTR CALLBACK ConfirmMsgBox_Init(HWND hDlg, LPARAM lParam)
 
     SetWindowTextW(hDlg, info->lpszCaption);
     ShowWindow(GetDlgItem(hDlg, IDD_MESSAGE), SW_HIDE);
-    SetPropW(hDlg, CONFIRM_MSG_PROP, (HANDLE)info->lpszText);
+    SetPropW(hDlg, CONFIRM_MSG_PROP, info->lpszText);
     SendDlgItemMessageW(hDlg, IDD_ICON, STM_SETICON, (WPARAM)info->hIcon, 0);
 
     /* compute the text height and resize the dialog */
@@ -291,7 +291,7 @@ static BOOL SHELL_ConfirmDialogW(HWND hWnd, int nKindOfDialog, LPCWSTR szDir, FI
 
 	args[0] = (DWORD_PTR)szDir;
 	FormatMessageW(FORMAT_MESSAGE_FROM_STRING|FORMAT_MESSAGE_ARGUMENT_ARRAY,
-	               szText, 0, 0, szBuffer, sizeof(szBuffer), (va_list*)args);
+	               szText, 0, 0, szBuffer, sizeof(szBuffer), (__ms_va_list*)args);
         hIcon = LoadIconW(ids.hIconInstance, (LPWSTR)MAKEINTRESOURCE(ids.icon_resource_id));
 
         ret = SHELL_ConfirmMsgBox(hWnd, szBuffer, szCaption, hIcon, op && op->bManyItems);
@@ -346,7 +346,7 @@ HRESULT WINAPI SHIsFileAvailableOffline(LPCWSTR path, LPDWORD status)
  * Asks for confirmation when bShowUI is true and deletes the directory and
  * all its subdirectories and files if necessary.
  */
-BOOL SHELL_DeleteDirectoryW(HWND hwnd, LPCWSTR pszDir, BOOL bShowUI)
+static BOOL SHELL_DeleteDirectoryW(HWND hwnd, LPCWSTR pszDir, BOOL bShowUI)
 {
 	BOOL    ret = TRUE;
 	HANDLE  hFind;
@@ -649,11 +649,11 @@ static DWORD SHNotifyCopyFileW(LPCWSTR src, LPCWSTR dest, BOOL bFailIfExists)
  *  path       [I]   path of directory to create
  *
  * RETURNS
- *  ERRROR_SUCCESS or one of the following values:
+ *  ERROR_SUCCESS or one of the following values:
  *  ERROR_BAD_PATHNAME if the path is relative
  *  ERROR_FILE_EXISTS when a file with that name exists
  *  ERROR_PATH_NOT_FOUND can't find the path, probably invalid
- *  ERROR_INVLID_NAME if the path contains invalid chars
+ *  ERROR_INVALID_NAME if the path contains invalid chars
  *  ERROR_ALREADY_EXISTS when the directory already exists
  *  ERROR_FILENAME_EXCED_RANGE if the filename was to long to process
  *
@@ -682,9 +682,9 @@ DWORD WINAPI SHCreateDirectory(HWND hWnd, LPCVOID path)
  *  sec        [I]   security attributes to use or NULL
  *
  * RETURNS
- *  ERRROR_SUCCESS or one of the following values:
+ *  ERROR_SUCCESS or one of the following values:
  *  ERROR_BAD_PATHNAME or ERROR_PATH_NOT_FOUND if the path is relative
- *  ERROR_INVLID_NAME if the path contains invalid chars
+ *  ERROR_INVALID_NAME if the path contains invalid chars
  *  ERROR_FILE_EXISTS when a file with that name exists
  *  ERROR_ALREADY_EXISTS when the directory already exists
  *  ERROR_FILENAME_EXCED_RANGE if the filename was to long to process
@@ -1002,7 +1002,7 @@ static HRESULT parse_file_list(FILE_LIST *flList, LPCWSTR szFiles)
 {
     LPCWSTR ptr = szFiles;
     WCHAR szCurFile[MAX_PATH];
-    DWORD i = 0, dwDirLen;
+    DWORD i = 0;
 
     if (!szFiles)
         return ERROR_INVALID_PARAMETER;
@@ -1027,7 +1027,7 @@ static HRESULT parse_file_list(FILE_LIST *flList, LPCWSTR szFiles)
         /* change relative to absolute path */
         if (PathIsRelativeW(ptr))
         {
-            dwDirLen = GetCurrentDirectoryW(MAX_PATH, szCurFile) + 1;
+            GetCurrentDirectoryW(MAX_PATH, szCurFile);
             PathCombineW(szCurFile, szCurFile, ptr);
             flList->feFiles[i].bFromRelative = TRUE;
         }
@@ -1552,7 +1552,7 @@ int WINAPI SHFileOperationW(LPSHFILEOPSTRUCTW lpFileOp)
 /*************************************************************************
  * SHFreeNameMappings      [shell32.246]
  *
- * Free the mapping handle returned by SHFileoperation if FOF_WANTSMAPPINGHANDLE
+ * Free the mapping handle returned by SHFileOperation if FOF_WANTSMAPPINGHANDLE
  * was specified.
  *
  * PARAMS
@@ -1569,12 +1569,12 @@ void WINAPI SHFreeNameMappings(HANDLE hNameMapping)
 
 	  for (; i>= 0; i--)
 	  {
-	    LPSHNAMEMAPPINGW lp = DSA_GetItemPtr((HDSA)hNameMapping, i);
+            LPSHNAMEMAPPINGW lp = DSA_GetItemPtr(hNameMapping, i);
 
 	    SHFree(lp->pszOldPath);
 	    SHFree(lp->pszNewPath);
 	  }
-	  DSA_Destroy((HDSA)hNameMapping);
+          DSA_Destroy(hNameMapping);
 	}
 }
 
@@ -1717,7 +1717,7 @@ HRESULT WINAPI SHPathPrepareForWriteA(HWND hwnd, IUnknown *modless, LPCSTR path,
  */
 HRESULT WINAPI SHPathPrepareForWriteW(HWND hwnd, IUnknown *modless, LPCWSTR path, DWORD flags)
 {
-    HRESULT res;
+    DWORD res;
     DWORD err;
     LPCWSTR realpath;
     int len;

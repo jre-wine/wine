@@ -93,6 +93,7 @@ int copy_default_colors = 128;
 int alloc_system_colors = 256;
 DWORD thread_data_tls_index = TLS_OUT_OF_INDEXES;
 int xrender_error_base = 0;
+HMODULE x11drv_module = 0;
 
 static x11drv_error_callback err_callback;   /* current callback for error */
 static Display *err_callback_display;        /* display callback is set for */
@@ -114,6 +115,7 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
 {
     "CLIPBOARD",
     "COMPOUND_TEXT",
+    "INCR",
     "MULTIPLE",
     "SELECTION_DATA",
     "TARGETS",
@@ -130,6 +132,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "DndSelection",
     "_ICC_PROFILE",
     "_MOTIF_WM_HINTS",
+    "_NET_STARTUP_INFO_BEGIN",
+    "_NET_STARTUP_INFO",
     "_NET_SUPPORTED",
     "_NET_SYSTEM_TRAY_OPCODE",
     "_NET_SYSTEM_TRAY_S0",
@@ -144,10 +148,12 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "_NET_WM_STATE_MAXIMIZED_VERT",
     "_NET_WM_STATE_SKIP_PAGER",
     "_NET_WM_STATE_SKIP_TASKBAR",
+    "_NET_WM_WINDOW_OPACITY",
     "_NET_WM_WINDOW_TYPE",
     "_NET_WM_WINDOW_TYPE_DIALOG",
     "_NET_WM_WINDOW_TYPE_NORMAL",
     "_NET_WM_WINDOW_TYPE_UTILITY",
+    "_NET_WORKAREA",
     "_XEMBED_INFO",
     "XdndAware",
     "XdndEnter",
@@ -166,6 +172,8 @@ static const char * const atom_names[NB_XATOMS - FIRST_XATOM] =
     "XdndTypeList",
     "WCF_DIB",
     "image/gif",
+    "image/jpeg",
+    "image/png",
     "text/html",
     "text/plain",
     "text/rtf",
@@ -267,7 +275,7 @@ static int error_handler( Display *display, XErrorEvent *error_evt )
 /***********************************************************************
  *		wine_tsx11_lock   (X11DRV.@)
  */
-void wine_tsx11_lock(void)
+void CDECL wine_tsx11_lock(void)
 {
     EnterCriticalSection( &X11DRV_CritSection );
 }
@@ -275,7 +283,7 @@ void wine_tsx11_lock(void)
 /***********************************************************************
  *		wine_tsx11_unlock   (X11DRV.@)
  */
-void wine_tsx11_unlock(void)
+void CDECL wine_tsx11_unlock(void)
 {
     LeaveCriticalSection( &X11DRV_CritSection );
 }
@@ -483,16 +491,12 @@ sym_not_found:
 static BOOL process_attach(void)
 {
     Display *display;
-    const char *env;
 
     setup_options();
 
     if ((thread_data_tls_index = TlsAlloc()) == TLS_OUT_OF_INDEXES) return FALSE;
 
     /* Open display */
-
-    if (!(env = getenv("XMODIFIERS")) || !*env)  /* try to avoid the Xlib XIM locking bug */
-        if (!XInitThreads()) ERR( "XInitThreads failed, trouble ahead\n" );
 
     if (!(display = XOpenDisplay( NULL ))) return FALSE;
 
@@ -528,7 +532,7 @@ static BOOL process_attach(void)
     xinerama_init( WidthOfScreen(screen), HeightOfScreen(screen) );
     X11DRV_Settings_Init();
 
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* initialize XVidMode */
     X11DRV_XF86VM_Init();
 #endif
@@ -540,6 +544,9 @@ static BOOL process_attach(void)
     X11DRV_XComposite_Init();
 #endif
 
+#ifdef HAVE_XKB
+    if (use_xkb) use_xkb = XkbUseExtension( gdi_display, NULL, NULL );
+#endif
     X11DRV_InitKeyboard( gdi_display );
     X11DRV_InitClipboard();
     if (use_xim) use_xim = X11DRV_InitXIM( input_style );
@@ -560,6 +567,7 @@ static void thread_detach(void)
         X11DRV_ResetSelectionOwner();
         wine_tsx11_lock();
         if (data->xim) XCloseIM( data->xim );
+        if (data->font_set) XFreeFontSet( data->display, data->font_set );
         XCloseDisplay( data->display );
         wine_tsx11_unlock();
         HeapFree( GetProcessHeap(), 0, data );
@@ -572,7 +580,7 @@ static void thread_detach(void)
  */
 static void process_detach(void)
 {
-#ifdef HAVE_LIBXXF86VM
+#ifdef SONAME_LIBXXF86VM
     /* cleanup XVidMode */
     X11DRV_XF86VM_Cleanup();
 #endif
@@ -581,7 +589,9 @@ static void process_detach(void)
 
     /* cleanup GDI */
     X11DRV_GDI_Finalize();
+    X11DRV_OpenGL_Cleanup();
 
+    IME_UnregisterClasses();
     DeleteCriticalSection( &X11DRV_CritSection );
     TlsFree( thread_data_tls_index );
 }
@@ -600,7 +610,7 @@ static void set_queue_display_fd( Display *display )
     }
     SERVER_START_REQ( set_queue_fd )
     {
-        req->handle = handle;
+        req->handle = wine_server_obj_handle( handle );
         ret = wine_server_call( req );
     }
     SERVER_END_REQ;
@@ -618,7 +628,9 @@ static void set_queue_display_fd( Display *display )
  */
 struct x11drv_thread_data *x11drv_init_thread_data(void)
 {
-    struct x11drv_thread_data *data;
+    struct x11drv_thread_data *data = x11drv_thread_data();
+
+    if (data) return data;
 
     if (!(data = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*data) )))
     {
@@ -637,18 +649,8 @@ struct x11drv_thread_data *x11drv_init_thread_data(void)
     fcntl( ConnectionNumber(data->display), F_SETFD, 1 ); /* set close on exec flag */
 
 #ifdef HAVE_XKB
-    if (use_xkb)
-    {
-        use_xkb = XkbUseExtension( data->display, NULL, NULL );
-        if (use_xkb)
-        {
-            /* Hack: dummy call to XkbKeysymToModifiers to force initialisation of Xkb internals */
-            /* This works around an Xlib bug where it tries to get the display lock */
-            /* twice during XFilterEvents if Xkb hasn't been initialised yet. */
-            XkbKeysymToModifiers( data->display, 'A' );
-            XkbSetDetectableAutoRepeat( data->display, True, NULL );
-        }
-    }
+    if (use_xkb && XkbUseExtension( data->display, NULL, NULL ))
+        XkbSetDetectableAutoRepeat( data->display, True, NULL );
 #endif
 
     if (TRACE_ON(synchronous)) XSynchronize( data->display, True );
@@ -674,15 +676,14 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
     switch(reason)
     {
     case DLL_PROCESS_ATTACH:
+        x11drv_module = hinst;
         ret = process_attach();
-        IME_RegisterClasses(hinst);
         break;
     case DLL_THREAD_DETACH:
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
         process_detach();
-        IME_UnregisterClasses(hinst);
         break;
     }
     return ret;
@@ -693,7 +694,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
  *
  * Returns the active status of the screen saver
  */
-BOOL X11DRV_GetScreenSaveActive(void)
+BOOL CDECL X11DRV_GetScreenSaveActive(void)
 {
     int timeout, temp;
     wine_tsx11_lock();
@@ -707,7 +708,7 @@ BOOL X11DRV_GetScreenSaveActive(void)
  *
  * Activate/Deactivate the screen saver
  */
-void X11DRV_SetScreenSaveActive(BOOL bActivate)
+void CDECL X11DRV_SetScreenSaveActive(BOOL bActivate)
 {
     int timeout, interval, prefer_blanking, allow_exposures;
     static int last_timeout = 15 * 60;

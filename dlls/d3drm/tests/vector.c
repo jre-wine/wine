@@ -130,25 +130,41 @@ static BOOL InitFunctionPtrs(void)
 static void VectorTest(void)
 {
     D3DVALUE mod,par,theta;
-    D3DVECTOR e,r,u,v,w,axis,casnul,norm,ray;
+    D3DVECTOR e,r,u,v,w,axis,casnul,norm,ray,self;
 
     U1(u).x=2.0f; U2(u).y=2.0f; U3(u).z=1.0f;
     U1(v).x=4.0f; U2(v).y=4.0f; U3(v).z=0.0f;
+
 
 /*______________________VectorAdd_________________________________*/
     pD3DRMVectorAdd(&r,&u,&v);
     U1(e).x=6.0f; U2(e).y=6.0f; U3(e).z=1.0f;
     expect_vec(e,r);
 
+    U1(self).x=9.0f; U2(self).y=18.0f; U3(self).z=27.0f;
+    pD3DRMVectorAdd(&self,&self,&u);
+    U1(e).x=11.0f; U2(e).y=20.0f; U3(e).z=28.0f;
+    expect_vec(e,self);
+
 /*_______________________VectorSubtract__________________________*/
     pD3DRMVectorSubtract(&r,&u,&v);
     U1(e).x=-2.0f; U2(e).y=-2.0f; U3(e).z=1.0f;
     expect_vec(e,r);
 
+    U1(self).x=9.0f; U2(self).y=18.0f; U3(self).z=27.0f;
+    pD3DRMVectorSubtract(&self,&self,&u);
+    U1(e).x=7.0f; U2(e).y=16.0f; U3(e).z=26.0f;
+    expect_vec(e,self);
+
 /*_______________________VectorCrossProduct_______________________*/
     pD3DRMVectorCrossProduct(&r,&u,&v);
     U1(e).x=-4.0f; U2(e).y=4.0f; U3(e).z=0.0f;
     expect_vec(e,r);
+
+    U1(self).x=9.0f; U2(self).y=18.0f; U3(self).z=27.0f;
+    pD3DRMVectorCrossProduct(&self,&self,&u);
+    U1(e).x=-36.0f; U2(e).y=45.0f; U3(e).z=-18.0f;
+    expect_vec(e,self);
 
 /*_______________________VectorDotProduct__________________________*/
     mod=pD3DRMVectorDotProduct(&u,&v);
@@ -191,11 +207,21 @@ static void VectorTest(void)
     U1(e).x=1.4f/sqrtf(2.0f); U2(e).y=0.2f/sqrtf(2.0f); U3(e).z=0.0f;
     expect_vec(e,r);
 
+    theta=PI/8.0f;
+    pD3DRMVectorRotate(&self,&self,&axis,theta);
+    U1(e).x=0.989950; U2(e).y=0.141421f; U3(e).z=0.0f;
+    expect_vec(e,r);
+
 /*_______________________VectorScale__________________________*/
     par=2.5f;
     pD3DRMVectorScale(&r,&v,par);
     U1(e).x=10.0f; U2(e).y=10.0f; U3(e).z=0.0f;
     expect_vec(e,r);
+
+    U1(self).x=9.0f; U2(self).y=18.0f; U3(self).z=27.0f;
+    pD3DRMVectorScale(&self,&self,2);
+    U1(e).x=18.0f; U2(e).y=36.0f; U3(e).z=54.0f;
+    expect_vec(e,self);
 }
 
 static void MatrixTest(void)
@@ -216,7 +242,7 @@ static void MatrixTest(void)
 static void QuaternionTest(void)
 {
     D3DVECTOR axis;
-    D3DVALUE g,h,epsilon,par,theta;
+    D3DVALUE par,theta;
     D3DRMQUATERNION q,q1,q2,r;
 
 /*_________________QuaternionFromRotation___________________*/
@@ -227,33 +253,28 @@ static void QuaternionTest(void)
     expect_quat(q,r);
 
 /*_________________QuaternionSlerp_________________________*/
-/* Interpolation slerp is in fact a linear interpolation, not a spherical linear
- * interpolation. Moreover, if the angle of the two quaternions is in ]PI/2;3PI/2[, QuaternionSlerp
- * interpolates between the first quaternion and the opposite of the second one. The test proves
- * these two facts. */
+/* If the angle of the two quaternions is in ]PI/2;3PI/2[, QuaternionSlerp
+ * interpolates between the first quaternion and the opposite of the second one.
+ * The test proves this fact. */
     par=0.31f;
     q1.s=1.0f; U1(q1.v).x=2.0f; U2(q1.v).y=3.0f; U3(q1.v).z=50.0f;
     q2.s=-4.0f; U1(q2.v).x=6.0f; U2(q2.v).y=7.0f; U3(q2.v).z=8.0f;
 /* The angle between q1 and q2 is in [-PI/2,PI/2]. So, one interpolates between q1 and q2. */
-    epsilon=1.0f;
-    g=1.0f-par; h=epsilon*par;
-/* Part of the test proving that the interpolation is linear. */
-    q.s=g*q1.s+h*q2.s;
-    U1(q.v).x=g*U1(q1.v).x+h*U1(q2.v).x;
-    U2(q.v).y=g*U2(q1.v).y+h*U2(q2.v).y;
-    U3(q.v).z=g*U3(q1.v).z+h*U3(q2.v).z;
+    q.s = -0.55f; U1(q.v).x=3.24f; U2(q.v).y=4.24f; U3(q.v).z=36.98f;
     pD3DRMQuaternionSlerp(&r,&q1,&q2,par);
     expect_quat(q,r);
 
     q1.s=1.0f; U1(q1.v).x=2.0f; U2(q1.v).y=3.0f; U3(q1.v).z=50.0f;
     q2.s=-94.0f; U1(q2.v).x=6.0f; U2(q2.v).y=7.0f; U3(q2.v).z=-8.0f;
 /* The angle between q1 and q2 is not in [-PI/2,PI/2]. So, one interpolates between q1 and -q2. */
-    epsilon=-1.0f;
-    g=1.0f-par; h=epsilon*par;
-    q.s=g*q1.s+h*q2.s;
-    U1(q.v).x=g*U1(q1.v).x+h*U1(q2.v).x;
-    U2(q.v).y=g*U2(q1.v).y+h*U2(q2.v).y;
-    U3(q.v).z=g*U3(q1.v).z+h*U3(q2.v).z;
+    q.s=29.83f; U1(q.v).x=-0.48f; U2(q.v).y=-0.10f; U3(q.v).z=36.98f;
+    pD3DRMQuaternionSlerp(&r,&q1,&q2,par);
+    expect_quat(q,r);
+
+/* Test the spherical interpolation part */
+    q1.s=0.1f; U1(q1.v).x=0.2f; U2(q1.v).y=0.3f; U3(q1.v).z=0.4f;
+    q2.s=0.5f; U1(q2.v).x=0.6f; U2(q2.v).y=0.7f; U3(q2.v).z=0.8f;
+    q.s = 0.243943f; U1(q.v).x = 0.351172f; U2(q.v).y = 0.458401f; U3(q.v).z = 0.565629f;
     pD3DRMQuaternionSlerp(&r,&q1,&q2,par);
     expect_quat(q,r);
 }

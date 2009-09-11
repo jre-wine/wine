@@ -18,14 +18,5 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#include "winetest.rc"
-#include "tests.rc"
-
-/* @makedep: build.id */
-WINE_BUILD STRINGRES "build.id"
-
 /* @makedep: build.nfo */
 BUILD_INFO STRINGRES "build.nfo"
-
-/* @makedep: tests.url */
-TESTS_URL  STRINGRES "tests.url"

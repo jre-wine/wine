@@ -141,7 +141,7 @@ dnl
 AC_DEFUN([WINE_CHECK_MINGW_PROG],
 [AC_CHECK_PROGS([$1],
    m4_foreach([ac_wine_prefix],
-              [i586-mingw32msvc, i386-mingw32msvc, i686-mingw32, i586-mingw32, i386-mingw32, mingw32, mingw],
+              [$host_cpu-pc-mingw32, i586-mingw32msvc, i386-mingw32msvc, i686-mingw32, i586-mingw32, i486-mingw32, i386-mingw32, i686-pc-mingw32],
               [ac_wine_prefix-$2 ]),
    [$3],[$4])])
 
@@ -152,6 +152,36 @@ dnl Usage: WINE_CONFIG_EXTRA_DIR(dirname)
 dnl
 AC_DEFUN([WINE_CONFIG_EXTRA_DIR],
 [AC_CONFIG_COMMANDS([$1],[test -d "$1" || (AC_MSG_NOTICE([creating $1]) && mkdir "$1")])])
+
+dnl **** Create a make rules file from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_MAKERULES(file,var,deps)
+dnl
+AC_DEFUN([WINE_CONFIG_MAKERULES],
+[ALL_MAKERULES="$ALL_MAKERULES \\
+	$1"
+ALL_MAKEFILE_DEPENDS="$ALL_MAKEFILE_DEPENDS
+$1: m4_ifval([$3],[$1.in $3],[$1.in])"
+$2=$1
+AC_SUBST_FILE([$2])dnl
+AC_CONFIG_FILES([$1])])
+
+dnl **** Create a makefile from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_MAKEFILE(file,deps,prefix,var,enable)
+dnl
+AC_DEFUN([WINE_CONFIG_MAKEFILE],
+[m4_pushdef([ac_dir],m4_bpatsubst([$1],[^\($3/?\(.*\)/\)?Makefile$],[\2]))dnl
+m4_ifval(ac_dir,[ALL_MAKEFILES="$ALL_MAKEFILES \\
+	$1"])
+AS_VAR_PUSHDEF([ac_enable],m4_default([$5],[enable_]ac_dir))dnl
+m4_ifval([$4],[test "x$ac_enable" != xno]m4_foreach([ac_var],[$4],[ && ac_var="$ac_var \\
+	ac_dir"]))
+AS_VAR_POPDEF([ac_enable])dnl
+ALL_MAKEFILE_DEPENDS="$ALL_MAKEFILE_DEPENDS
+[$1: ]m4_ifval([$2],[$1.in $2],[$1.in])"
+AC_CONFIG_FILES([$1])dnl
+m4_popdef([ac_dir])])
 
 dnl **** Add a message to the list displayed at the end ****
 dnl
@@ -178,17 +208,26 @@ AC_DEFUN([WINE_WARNING_WITH],[AS_IF([$2],[case "x$with_$1" in
 This is an error since --with-$1 was requested.]) ;;
 esac])])
 
+AC_DEFUN([WINE_ERROR_WITH],[AS_IF([$2],[case "x$with_$1" in
+  xno) ;;
+  *)   AC_MSG_ERROR([$3
+Use the --without-$1 option if you really want this.]) ;;
+esac])])
+
 AC_DEFUN([WINE_PRINT_MESSAGES],[ac_save_IFS="$IFS"
-IFS="|"
 if test "x$wine_notices != "x; then
     echo >&AS_MESSAGE_FD
+    IFS="|"
     for msg in $wine_notices; do
+        IFS="$ac_save_IFS"
         if test -n "$msg"; then
             AC_MSG_NOTICE([$msg])
         fi
     done
 fi
+IFS="|"
 for msg in $wine_warnings; do
+    IFS="$ac_save_IFS"
     if test -n "$msg"; then
         echo >&2
         AC_MSG_WARN([$msg])

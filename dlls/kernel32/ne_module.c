@@ -119,6 +119,15 @@ static inline void patch_code_segment( NE_MODULE *pModule )
 
 
 /***********************************************************************
+ *           contains_path
+ */
+static inline int contains_path( LPCSTR name )
+{
+    return ((*name && (name[1] == ':')) || strchr(name, '/') || strchr(name, '\\'));
+}
+
+
+/***********************************************************************
  *              NE_strcasecmp
  *
  * locale-independent case conversion for module lookups
@@ -224,7 +233,7 @@ void __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
  */
 NE_MODULE *NE_GetPtr( HMODULE16 hModule )
 {
-    return (NE_MODULE *)GlobalLock16( GetExePtr(hModule) );
+    return GlobalLock16( GetExePtr(hModule) );
 }
 
 
@@ -706,7 +715,7 @@ static HMODULE16 build_module( const void *mapping, SIZE_T mapping_size, LPCSTR 
     if (!hModule) return ERROR_BAD_FORMAT;
 
     FarSetOwner16( hModule, hModule );
-    pModule = (NE_MODULE *)GlobalLock16( hModule );
+    pModule = GlobalLock16( hModule );
     memcpy( pModule, ne_header, sizeof(*ne_header) );
     pModule->count = 0;
     /* check programs for default minimal stack size */
@@ -846,7 +855,7 @@ static BOOL NE_LoadDLLs( NE_MODULE *pModule )
 {
     int i;
     WORD *pModRef = (WORD *)((char *)pModule + pModule->ne_modtab);
-    WORD *pDLLs = (WORD *)GlobalLock16( pModule->dlls_to_init );
+    WORD *pDLLs = GlobalLock16( pModule->dlls_to_init );
 
     for (i = 0; i < pModule->ne_cmod; i++, pModRef++)
     {
@@ -998,10 +1007,8 @@ static HMODULE16 NE_DoLoadBuiltinModule( const IMAGE_DOS_HEADER *mz_header, cons
     HMODULE16 hModule;
     HINSTANCE16 hInstance;
     OSVERSIONINFOW versionInfo;
-    const IMAGE_OS2_HEADER *ne_header;
     SIZE_T mapping_size = ~0UL;  /* assume builtins don't contain invalid offsets... */
 
-    ne_header = (const IMAGE_OS2_HEADER *)((const BYTE *)mz_header + mz_header->e_lfanew);
     hModule = build_module( mz_header, mapping_size, file_name );
     if (hModule < 32) return hModule;
     pModule = GlobalLock16( hModule );
@@ -1047,8 +1054,8 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     NE_MODULE *pModule;
     const IMAGE_DOS_HEADER *descr = NULL;
     const char *file_name = NULL;
-    char dllname[20], owner[20], *p;
-    const char *basename;
+    char dllname[32], owner[20], *p;
+    const char *basename, *main_module;
     int owner_exists = FALSE;
 
     /* strip path information */
@@ -1058,14 +1065,52 @@ static HINSTANCE16 MODULE_LoadModule16( LPCSTR libname, BOOL implicit, BOOL lib_
     if ((p = strrchr( basename, '\\' ))) basename = p + 1;
     if ((p = strrchr( basename, '/' ))) basename = p + 1;
 
-    if (strlen(basename) < sizeof(dllname)-4)
+    if (strlen(basename) < sizeof(dllname)-6)
     {
         strcpy( dllname, basename );
         p = strrchr( dllname, '.' );
         if (!p) strcat( dllname, ".dll" );
         for (p = dllname; *p; p++) if (*p >= 'A' && *p <= 'Z') *p += 32;
 
-        if (wine_dll_get_owner( dllname, owner, sizeof(owner), &owner_exists ) != -1)
+        strcpy( p, "16" );
+        if ((mod32 = LoadLibraryA( dllname )))
+        {
+            if (!(descr = (void *)GetProcAddress( mod32, "__wine_spec_dos_header" )))
+            {
+                WARN( "loaded %s but does not contain a 16-bit module\n", debugstr_a(dllname) );
+                FreeLibrary( mod32 );
+            }
+            else
+            {
+                TRACE( "found %s with embedded 16-bit module\n", debugstr_a(dllname) );
+                file_name = basename;
+
+                /* if module has a 32-bit owner, match the load order of the owner */
+                if ((main_module = (void *)GetProcAddress( mod32, "__wine_spec_main_module" )))
+                {
+                    LDR_MODULE *ldr;
+                    HMODULE main_owner = LoadLibraryA( main_module );
+
+                    if (!main_owner)
+                    {
+                        WARN( "couldn't load owner %s for 16-bit dll %s\n", main_module, dllname );
+                        FreeLibrary( mod32 );
+                        return ERROR_FILE_NOT_FOUND;
+                    }
+                    /* check if module was loaded native */
+                    if (LdrFindEntryForAddress( main_owner, &ldr ) || !(ldr->Flags & LDR_WINE_INTERNAL))
+                    {
+                        FreeLibrary( mod32 );
+                        descr = NULL;
+                    }
+                    FreeLibrary( main_owner );
+                }
+            }
+        }
+        *p = 0;
+
+        /* old-style 16-bit placeholders support, to be removed at some point */
+        if (!mod32 && wine_dll_get_owner( dllname, owner, sizeof(owner), &owner_exists ) != -1)
         {
             mod32 = LoadLibraryA( owner );
             if (mod32)
@@ -1236,7 +1281,7 @@ HINSTANCE16 WINAPI LoadModule16( LPCSTR name, LPVOID paramBlock )
      *  in the meantime), or else to a stub module which contains only header
      *  information.
      */
-    params = (LOADPARAMS16 *)paramBlock;
+    params = paramBlock;
     if (params->showCmd)
         cmdShow = ((WORD *)MapSL( params->showCmd ))[1];
     cmdline = MapSL( params->cmdLine );
@@ -1638,6 +1683,8 @@ HINSTANCE16 WINAPI WinExec16( LPCSTR lpCmdLine, UINT16 nCmdShow )
     int arglen;
     HINSTANCE16 ret;
     char buffer[MAX_PATH];
+    LOADPARAMS16 params;
+    WORD showCmd[2];
 
     if (*lpCmdLine == '"') /* has to be only one and only at beginning ! */
     {
@@ -1686,23 +1733,29 @@ HINSTANCE16 WINAPI WinExec16( LPCSTR lpCmdLine, UINT16 nCmdShow )
 
     TRACE("name: '%s', cmdline: '%.*s'\n", name, cmdline[0], &cmdline[1]);
 
+    showCmd[0] = 2;
+    showCmd[1] = nCmdShow;
+
+    params.hEnvironment = 0;
+    params.cmdLine = MapLS( cmdline );
+    params.showCmd = MapLS( showCmd );
+    params.reserved = 0;
+
     if (SearchPathA( NULL, name, ".exe", sizeof(buffer), buffer, NULL ))
     {
-        LOADPARAMS16 params;
-        WORD showCmd[2];
-        showCmd[0] = 2;
-        showCmd[1] = nCmdShow;
-
-        params.hEnvironment = 0;
-        params.cmdLine = MapLS( cmdline );
-        params.showCmd = MapLS( showCmd );
-        params.reserved = 0;
-
         ret = LoadModule16( buffer, &params );
-        UnMapLS( params.cmdLine );
-        UnMapLS( params.showCmd );
     }
-    else ret = GetLastError();
+    else if (!contains_path( name ))  /* try 16-bit builtin */
+    {
+        lstrcpynA( buffer, name, sizeof(buffer) );
+        if (strlen( buffer ) < sizeof(buffer) - 4 && !strchr( buffer, '.' )) strcat( buffer, ".exe" );
+        ret = LoadModule16( buffer, &params );
+        if (ret == ERROR_FILE_NOT_FOUND) ret = 21;  /* it might be a 32-bit builtin too */
+    }
+    else ret = ERROR_FILE_NOT_FOUND;
+
+    UnMapLS( params.cmdLine );
+    UnMapLS( params.showCmd );
 
     HeapFree( GetProcessHeap(), 0, cmdline );
     if (name != lpCmdLine) HeapFree( GetProcessHeap(), 0, name );
@@ -1752,7 +1805,7 @@ FARPROC16 WINAPI GetProcAddress16( HMODULE16 hModule, LPCSTR name )
         ordinal = LOWORD(name);
         TRACE("%04x %04x\n", hModule, ordinal );
     }
-    if (!ordinal) return (FARPROC16)0;
+    if (!ordinal) return NULL;
 
     ret = NE_GetEntryPoint( hModule, ordinal );
 
@@ -2016,7 +2069,7 @@ static HMODULE16 create_dummy_module( HMODULE module32 )
     if (!hModule) return ERROR_BAD_FORMAT;
 
     FarSetOwner16( hModule, hModule );
-    pModule = (NE_MODULE *)GlobalLock16( hModule );
+    pModule = GlobalLock16( hModule );
 
     /* Set all used entries */
     pModule->ne_magic         = IMAGE_OS2_SIGNATURE;
@@ -2122,11 +2175,11 @@ HMODULE16 WINAPI MapHModuleLS(HMODULE hmod)
         return TASK_GetCurrent()->hInstance;
     if (!HIWORD(hmod))
         return LOWORD(hmod); /* we already have a 16 bit module handle */
-    pModule = (NE_MODULE*)GlobalLock16(hFirstModule);
+    pModule = GlobalLock16(hFirstModule);
     while (pModule)  {
         if (pModule->module32 == hmod)
             return pModule->self;
-        pModule = (NE_MODULE*)GlobalLock16(pModule->next);
+        pModule = GlobalLock16(pModule->next);
     }
     if ((ret = create_dummy_module( hmod )) < 32)
     {
@@ -2147,7 +2200,7 @@ HMODULE WINAPI MapHModuleSL(HMODULE16 hmod)
         TDB *pTask = TASK_GetCurrent();
         hmod = pTask->hModule;
     }
-    pModule = (NE_MODULE*)GlobalLock16(hmod);
+    pModule = GlobalLock16(hmod);
     if ((pModule->ne_magic != IMAGE_OS2_SIGNATURE) || !(pModule->ne_flags & NE_FFLAGS_WIN32))
         return 0;
     return pModule->module32;
@@ -2174,37 +2227,37 @@ void WINAPI MapHInstSL16( CONTEXT86 *context )
 /***************************************************************************
  *		MapHInstLS			(KERNEL32.@)
  */
-__ASM_GLOBAL_FUNC( MapHInstLS,
+__ASM_STDCALL_FUNC( MapHInstLS, 0,
                    "pushl %eax\n\t"
-                   "call " __ASM_NAME("MapHModuleLS") "\n\t"
+                   "call " __ASM_NAME("MapHModuleLS") __ASM_STDCALL(4) "\n\t"
                    "ret" )
 
 /***************************************************************************
  *		MapHInstSL			(KERNEL32.@)
  */
-__ASM_GLOBAL_FUNC( MapHInstSL,
+__ASM_STDCALL_FUNC( MapHInstSL, 0,
                    "pushl %eax\n\t"
-                   "call " __ASM_NAME("MapHModuleSL") "\n\t"
+                   "call " __ASM_NAME("MapHModuleSL") __ASM_STDCALL(4) "\n\t"
                    "ret" )
 
 /***************************************************************************
  *		MapHInstLS_PN			(KERNEL32.@)
  */
-__ASM_GLOBAL_FUNC( MapHInstLS_PN,
+__ASM_STDCALL_FUNC( MapHInstLS_PN, 0,
                    "testl %eax,%eax\n\t"
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
-                   "call " __ASM_NAME("MapHModuleLS") "\n"
+                   "call " __ASM_NAME("MapHModuleLS") __ASM_STDCALL(4) "\n"
                    "1:\tret" )
 
 /***************************************************************************
  *		MapHInstSL_PN			(KERNEL32.@)
  */
-__ASM_GLOBAL_FUNC( MapHInstSL_PN,
+__ASM_STDCALL_FUNC( MapHInstSL_PN, 0,
                    "andl $0xffff,%eax\n\t"
                    "jz 1f\n\t"
                    "pushl %eax\n\t"
-                   "call " __ASM_NAME("MapHModuleSL") "\n"
+                   "call " __ASM_NAME("MapHModuleSL") __ASM_STDCALL(4) "\n"
                    "1:\tret" )
 
 #endif  /* __i386__ */

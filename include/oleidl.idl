@@ -24,6 +24,8 @@ import "objidl.idl";
 
 interface IOleInPlaceActiveObject;
 
+cpp_quote("#include <winuser.h>")
+
 /*****************************************************************************
  * IOleTypes interface
  */
@@ -333,7 +335,7 @@ interface IOleItemContainer : IOleContainer
 	OLECONTF_EMBEDDINGS = 1,
 	OLECONTF_LINKS = 2,
 	OLECONTF_OTHERS = 4,
-	OLECONTF_OLNYUSER = 8,
+	OLECONTF_ONLYUSER = 8,
 	OLECONTF_ONLYIFRUNNING = 16
     } OLECONTF;
 

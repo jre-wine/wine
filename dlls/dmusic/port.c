@@ -23,12 +23,25 @@ WINE_DEFAULT_DEBUG_CHANNEL(dmusic);
 
 /* IDirectMusicPortImpl IUnknown part: */
 static HRESULT WINAPI IDirectMusicPortImpl_QueryInterface (LPDIRECTMUSICPORT iface, REFIID riid, LPVOID *ppobj) {
-	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpVtbl, iface);
+
 	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
 
-	if (IsEqualIID (riid, &IID_IUnknown) || IsEqualGUID(riid, &IID_IDirectMusicPort)) {
-		IUnknown_AddRef(iface);
-		*ppobj = This;
+	if (IsEqualIID (riid, &IID_IUnknown) ||
+	    IsEqualGUID(riid, &IID_IDirectMusicPort) ||
+	    IsEqualGUID(riid, &IID_IDirectMusicPort8)) {
+		*ppobj = &This->lpVtbl;
+		IDirectMusicPort_AddRef((LPDIRECTMUSICPORT)*ppobj);
+		return S_OK;
+	} else if (IsEqualGUID(riid, &IID_IDirectMusicPortDownload) ||
+		   IsEqualGUID(riid, &IID_IDirectMusicPortDownload8)) {
+		*ppobj = &This->lpDownloadVtbl;
+		IDirectMusicPortDownload_AddRef((LPDIRECTMUSICPORTDOWNLOAD)*ppobj);
+		return S_OK;
+	} else if (IsEqualGUID(riid, &IID_IDirectMusicThru) ||
+		   IsEqualGUID(riid, &IID_IDirectMusicThru8)) {
+		*ppobj = &This->lpThruVtbl;
+		IDirectMusicThru_AddRef((LPDIRECTMUSICTHRU)*ppobj);
 		return S_OK;
 	}
 	WARN("(%p, %s, %p): not found\n", This, debugstr_dmguid(riid), ppobj);
@@ -82,8 +95,13 @@ static HRESULT WINAPI IDirectMusicPortImpl_Read (LPDIRECTMUSICPORT iface, LPDIRE
 
 static HRESULT WINAPI IDirectMusicPortImpl_DownloadInstrument (LPDIRECTMUSICPORT iface, IDirectMusicInstrument* pInstrument, IDirectMusicDownloadedInstrument** ppDownloadedInstrument, DMUS_NOTERANGE* pNoteRanges, DWORD dwNumNoteRanges) {
 	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+
 	FIXME("(%p, %p, %p, %p, %d): stub\n", This, pInstrument, ppDownloadedInstrument, pNoteRanges, dwNumNoteRanges);
-	return S_OK;
+
+	if (!pInstrument || !ppDownloadedInstrument || (dwNumNoteRanges && !pNoteRanges))
+		return E_POINTER;
+
+	return DMUSIC_CreateDirectMusicDownloadedInstrumentImpl(&IID_IDirectMusicDownloadedInstrument, (LPVOID*)ppDownloadedInstrument, NULL);
 }
 
 static HRESULT WINAPI IDirectMusicPortImpl_UnloadInstrument (LPDIRECTMUSICPORT iface, IDirectMusicDownloadedInstrument *pDownloadedInstrument) {
@@ -213,7 +231,7 @@ static HRESULT WINAPI IDirectMusicPortImpl_GetFormat (LPDIRECTMUSICPORT iface, L
 	return S_OK;
 }
 
-const IDirectMusicPortVtbl DirectMusicPort_Vtbl = {
+static const IDirectMusicPortVtbl DirectMusicPort_Vtbl = {
 	IDirectMusicPortImpl_QueryInterface,
 	IDirectMusicPortImpl_AddRef,
 	IDirectMusicPortImpl_Release,
@@ -236,6 +254,112 @@ const IDirectMusicPortVtbl DirectMusicPort_Vtbl = {
 	IDirectMusicPortImpl_GetFormat
 };
 
+/* IDirectMusicPortDownload IUnknown parts follow: */
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_QueryInterface (LPDIRECTMUSICPORTDOWNLOAD iface, REFIID riid, LPVOID *ppobj) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+	TRACE("(%p/%p)->(%s, %p)\n", This, iface, debugstr_dmguid(riid), ppobj);
+	return IUnknown_QueryInterface((IUnknown *)&(This->lpVtbl), riid, ppobj);
+}
+
+static ULONG WINAPI IDirectMusicPortDownloadImpl_AddRef (LPDIRECTMUSICPORTDOWNLOAD iface) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+	TRACE("(%p/%p)->()\n", This, iface);
+	return IUnknown_AddRef((IUnknown *)&(This->lpVtbl));
+}
+
+static ULONG WINAPI IDirectMusicPortDownloadImpl_Release (LPDIRECTMUSICPORTDOWNLOAD iface) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+	TRACE("(%p/%p)->()\n", This, iface);
+	return IUnknown_Release((IUnknown *)&(This->lpVtbl));
+}
+
+/* IDirectMusicPortDownload Interface follow: */
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_GetBuffer (LPDIRECTMUSICPORTDOWNLOAD iface, DWORD dwDLId, IDirectMusicDownload** ppIDMDownload) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+
+	FIXME("(%p/%p)->(%d, %p): stub\n", This, iface, dwDLId, ppIDMDownload);
+
+	if (!ppIDMDownload)
+		return E_POINTER;
+
+	return DMUSIC_CreateDirectMusicDownloadImpl(&IID_IDirectMusicDownload, (LPVOID*)ppIDMDownload, NULL);
+}
+
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_AllocateBuffer (LPDIRECTMUSICPORTDOWNLOAD iface, DWORD dwSize, IDirectMusicDownload** ppIDMDownload) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+	FIXME("(%p/%p)->(%d, %p): stub\n", This, iface, dwSize, ppIDMDownload);
+	return S_OK;
+}
+
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_GetDLId (LPDIRECTMUSICPORTDOWNLOAD iface, DWORD* pdwStartDLId, DWORD dwCount) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpDownloadVtbl, iface);
+	FIXME("(%p/%p)->(%p, %d): stub\n", This, iface, pdwStartDLId, dwCount);
+	return S_OK;
+}
+
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_GetAppend (LPDIRECTMUSICPORTDOWNLOAD iface, DWORD* pdwAppend) {
+	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+	FIXME("(%p/%p)->(%p): stub\n", This, iface, pdwAppend);
+	return S_OK;
+}
+
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_Download (LPDIRECTMUSICPORTDOWNLOAD iface, IDirectMusicDownload* pIDMDownload) {
+	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+	FIXME("(%p/%p)->(%p): stub\n", This, iface, pIDMDownload);
+	return S_OK;
+}
+
+static HRESULT WINAPI IDirectMusicPortDownloadImpl_Unload (LPDIRECTMUSICPORTDOWNLOAD iface, IDirectMusicDownload* pIDMDownload) {
+	IDirectMusicPortImpl *This = (IDirectMusicPortImpl *)iface;
+	FIXME("(%p/%p)->(%p): stub\n", This, iface, pIDMDownload);
+	return S_OK;
+}
+
+static const IDirectMusicPortDownloadVtbl DirectMusicPortDownload_Vtbl = {
+	IDirectMusicPortDownloadImpl_QueryInterface,
+	IDirectMusicPortDownloadImpl_AddRef,
+	IDirectMusicPortDownloadImpl_Release,
+	IDirectMusicPortDownloadImpl_GetBuffer,
+	IDirectMusicPortDownloadImpl_AllocateBuffer,
+	IDirectMusicPortDownloadImpl_GetDLId,
+	IDirectMusicPortDownloadImpl_GetAppend,
+	IDirectMusicPortDownloadImpl_Download,
+	IDirectMusicPortDownloadImpl_Unload
+};
+
+/* IDirectMusicThru IUnknown parts follow: */
+static HRESULT WINAPI IDirectMusicThruImpl_QueryInterface (LPDIRECTMUSICTHRU iface, REFIID riid, LPVOID *ppobj) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpThruVtbl, iface);
+	TRACE("(%p/%p)->(%s, %p)\n", This, iface, debugstr_dmguid(riid), ppobj);
+	return IUnknown_QueryInterface((IUnknown *)&(This->lpVtbl), riid, ppobj);
+}
+
+static ULONG WINAPI IDirectMusicThruImpl_AddRef (LPDIRECTMUSICTHRU iface) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpThruVtbl, iface);
+	TRACE("(%p/%p)->()\n", This, iface);
+	return IUnknown_AddRef((IUnknown *)&(This->lpVtbl));
+}
+
+static ULONG WINAPI IDirectMusicThruImpl_Release (LPDIRECTMUSICTHRU iface) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpThruVtbl, iface);
+	TRACE("(%p/%p)->()\n", This, iface);
+	return IUnknown_Release((IUnknown *)&(This->lpVtbl));
+}
+
+/* IDirectMusicThru Interface follow: */
+static HRESULT WINAPI IDirectMusicThruImpl_ThruChannel (LPDIRECTMUSICTHRU iface, DWORD dwSourceChannelGroup, DWORD dwSourceChannel, DWORD dwDestinationChannelGroup, DWORD dwDestinationChannel, LPDIRECTMUSICPORT pDestinationPort) {
+	ICOM_THIS_MULTI(IDirectMusicPortImpl, lpThruVtbl, iface);
+	FIXME("(%p/%p)->(%d, %d, %d, %d, %p): stub\n", This, iface, dwSourceChannelGroup, dwSourceChannel, dwDestinationChannelGroup, dwDestinationChannel, pDestinationPort);
+	return S_OK;
+}
+
+static const IDirectMusicThruVtbl DirectMusicThru_Vtbl = {
+	IDirectMusicThruImpl_QueryInterface,
+	IDirectMusicThruImpl_AddRef,
+	IDirectMusicThruImpl_Release,
+	IDirectMusicThruImpl_ThruChannel
+};
+
 HRESULT WINAPI DMUSIC_CreateDirectMusicPortImpl (LPCGUID lpcGUID, LPVOID *ppobj, LPUNKNOWN pUnkOuter, LPDMUS_PORTPARAMS pPortParams, LPDMUS_PORTCAPS pPortCaps) {
 	IDirectMusicPortImpl *obj;
 	HRESULT hr = E_FAIL;
@@ -243,11 +367,13 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicPortImpl (LPCGUID lpcGUID, LPVOID *ppobj,
 	TRACE("(%p,%p,%p)\n", lpcGUID, ppobj, pUnkOuter);
 
 	obj = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDirectMusicPortImpl));
-	if (NULL == obj) 	{
-		*ppobj = (LPDIRECTMUSICPORT) NULL;
+	if (NULL == obj) {
+		*ppobj = NULL;
 		return E_OUTOFMEMORY;
 	}
 	obj->lpVtbl = &DirectMusicPort_Vtbl;
+	obj->lpDownloadVtbl = &DirectMusicPortDownload_Vtbl;
+	obj->lpThruVtbl = &DirectMusicThru_Vtbl;
 	obj->ref = 0;  /* will be inited by QueryInterface */
 	obj->fActive = FALSE;
 	obj->params = *pPortParams;

@@ -2,7 +2,7 @@
  * WineCfg resources
  * Spanish Language Support
  *
- * Copyright 2003-2007 José Manuel Ferrer Ortiz
+ * Copyright 2003-2009 José Manuel Ferrer Ortiz
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,9 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  *
  */
+
+#include "config.h"   /* Needed for the PACKAGE_STRING definition */
+#include "resource.h"
 
 LANGUAGE LANG_SPANISH, SUBLANG_NEUTRAL
 
@@ -37,8 +40,13 @@ BEGIN
     LTEXT           PACKAGE_STRING,IDC_STATIC,119,17,120,8
     CONTROL         IDB_WINE,IDC_STATIC,"Static",SS_BITMAP ,15,17,157,111
     LTEXT           "http://www.winehq.org/",IDC_STATIC,119,31,106,8
-    LTEXT           "This library is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
+    LTEXT           "This program is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation; either version 2.1 of the License, or (at your option) any later version.",
                     IDC_STATIC,119,44,124,72
+    GROUPBOX        " Información de Registro de Windows ", IDC_STATIC, 15, 110, 230, 55
+    LTEXT           "Propietario:", IDC_STATIC, 22, 126, 40, 20
+    EDITTEXT        IDC_ABT_OWNER, 75, 126, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
+    LTEXT           "Organización:", IDC_STATIC, 22, 140, 50, 20
+    EDITTEXT        IDC_ABT_ORG, 75, 140, 160, 13, ES_AUTOHSCROLL | WS_TABSTOP
 END
 
 IDD_APPCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -47,7 +55,7 @@ FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Configuración de aplicaciones ",IDC_STATIC, 8,4,244,240
     LTEXT           "Wine puede imitar distintas versiones de Windows para cada aplicación. Esta pestaña está enlazada a las de Librerías y Gráficos para poder cambiar en ellas la configuración global y/o la de por aplicación.",
-                    IDC_STATIC,15,20,227,30
+                    IDC_STATIC,15,16,227,32
     CONTROL         "Aplicaciones",IDC_APP_LISTVIEW,"SysListView32",WS_BORDER | WS_TABSTOP | LVS_LIST | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
                     15,50,230,150
     PUSHBUTTON      "&Añadir aplicación...",IDC_APP_ADDAPP, 90,204,75,14
@@ -60,33 +68,27 @@ IDD_GRAPHCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Configuración de ventanas ",IDC_STATIC,8,4,244,180
+    GROUPBOX    " Configuración de ventanas ",IDC_STATIC,8,4,244,84
+    CONTROL     "Permitir a los programas DirectX retener el ratón en sus ventanas",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,20,230,8
+    CONTROL     "Permitir al gestor de ventanas decorar las ventanas",IDC_ENABLE_DECORATED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,32,230,8
+    CONTROL     "Permitir al gestor de ventanas controlar las ventanas",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,44,230,8
+    CONTROL     "Emular un escritorio virtual",IDC_ENABLE_DESKTOP,"Button",
+                BS_AUTOCHECKBOX | WS_TABSTOP,15,56,230,8
+    LTEXT       "Dimensiones:",IDC_DESKTOP_SIZE,15,70,44,8,WS_DISABLED
+    LTEXT       "X",IDC_DESKTOP_BY,109,70,8,8,WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_WIDTH,64,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
+    EDITTEXT    IDC_DESKTOP_HEIGHT,117,68,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
 
-    CONTROL        "Permitir a los programas DirectX retener el ratón en sus ventanas",IDC_DX_MOUSE_GRAB,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,14,230,8
-    LTEXT          "Si las ventanas son gestionadas por su gestor de ventanas, tendrán los bordes estándar, respetarán su escritorio virtual y aparecerán en su lista de ventanas.\n\nSi las ventanas no son gestionadas, estarán desconectadas de su gestor de ventanas. Esto significa que las ventanas no se integrarán tanto con su escritorio, pero la emulación será más precisa por lo que puede hacer que algunos programas funcionen mejor.",
-		    IDC_STATIC,15,37,228,80
-    CONTROL        "Permitir al gestor de ventanas controlar las ventanas",IDC_ENABLE_MANAGED,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,111,230,8
+    GROUPBOX    " Direct3D ",IDC_STATIC,8,95,244,49
+    LTEXT       "Soporte Vertex Shader: ",IDC_STATIC,15,110,80,32
+    COMBOBOX    IDC_D3D_VSHADER_MODE,100,108,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    CONTROL     "Permitir Pixel Shader (si hay soporte por hardware)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,126,230,10
 
-    LTEXT           "Puede elegir entre tener todas las aplicaciones de Windows confinadas a única ventana que actúe como un escritorio virtual, o bien hacer que se comporten como sus otras aplicaciones.",
-                    IDC_STATIC,15,125,228,28
-    LTEXT           "Dimensiones:",IDC_DESKTOP_SIZE,15,167,44,8,WS_DISABLED
-    LTEXT           "X",IDC_DESKTOP_BY,108,167,8,8,WS_DISABLED
-    CONTROL         "Emular un escritorio virtual",IDC_ENABLE_DESKTOP,"Button",
-                    BS_AUTOCHECKBOX | WS_TABSTOP,15,152,230,10
-
-    EDITTEXT        IDC_DESKTOP_WIDTH,64,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-    EDITTEXT        IDC_DESKTOP_HEIGHT,117,167,40,12,ES_AUTOHSCROLL | ES_NUMBER | WS_DISABLED
-
-    GROUPBOX        " Direct3D ",IDC_STATIC,8,189,244,50
-
-    LTEXT           "Soporte Vertex Shader: ",IDC_STATIC,15,199,80,30
-    COMBOBOX        IDC_D3D_VSHADER_MODE,100,197,145,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-
-    CONTROL         "Permitir Pixel Shader (si hay soporte por hardware)",IDC_D3D_PSHADER_MODE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,216,230,10
-    GROUPBOX        " Screen Resolution ",IDC_STATIC,8,242,244,25
-    CONTROL         "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,250,187,15
-    EDITTEXT        IDC_RES_DPIEDIT,204,250,23,13,ES_NUMBER|WS_TABSTOP
-    LTEXT           "dpi",IDC_STATIC,235,252,10,8
+    GROUPBOX    " Resolución de pantalla ",IDC_STATIC,8,151,244,93
+    CONTROL     "", IDC_RES_TRACKBAR, "msctls_trackbar32",WS_TABSTOP,12,161,187,15
+    EDITTEXT    IDC_RES_DPIEDIT,204,161,23,13,ES_NUMBER|WS_TABSTOP
+    LTEXT       "ppp",IDC_STATIC,235,163,10,8
+    LTEXT       "Esto es un texto de ejemplo usando Tahoma de 10 puntos",IDC_RES_FONT_PREVIEW,15,181,230,55
 END
 
 IDD_DLLCFG DIALOG DISCARDABLE  0, 0, 260, 250
@@ -125,14 +127,15 @@ STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX        " Mapeos de unidad ",IDC_STATIC,8,4,244,240
+    LTEXT           "Conexión fallida al gestor de montaje, la configuración de unidades no se puede editar.", IDC_STATIC_MOUNTMGR_ERROR, 15,30,220,76
     CONTROL         "Listview",IDC_LIST_DRIVES,"SysListView32",LVS_REPORT | LVS_AUTOARRANGE | LVS_ALIGNLEFT |
                     LVS_SINGLESEL | WS_BORDER | WS_TABSTOP, 15,18,232,76
     PUSHBUTTON      "&Añadir...",IDC_BUTTON_ADD,15,98,37,14
     PUSHBUTTON      "&Eliminar",IDC_BUTTON_REMOVE,56,98,37,14
-    PUSHBUTTON      "Auto&detectar...",IDC_BUTTON_AUTODETECT,197,98,49,14
+    PUSHBUTTON      "Auto&detectar...",IDC_BUTTON_AUTODETECT,187,98,59,14
 
     /* editing drive details */
-    LTEXT           "&Ruta:",IDC_STATIC,15,123,20,9
+    LTEXT           "&Ruta:",IDC_STATIC_PATH,15,123,20,9
     EDITTEXT        IDC_EDIT_PATH,41,120,160,13,ES_AUTOHSCROLL | WS_TABSTOP
     PUSHBUTTON      "&Examinar...",IDC_BUTTON_BROWSE_PATH,206,120,40,13
 
@@ -142,7 +145,7 @@ BEGIN
     LTEXT           "Etiqueta y núm. de serie",IDC_LABELSERIAL_STATIC,15,155,95,10
 
     PUSHBUTTON      "&Mostrar avanzado",IDC_BUTTON_SHOW_HIDE_ADVANCED,186,136,60,13
-    CONTROL         "Autodetectar &desde dispositivo:",IDC_RADIO_AUTODETECT,"Button",
+    CONTROL         "Autodetectar &del dispositivo:",IDC_RADIO_AUTODETECT,"Button",
                     BS_AUTORADIOBUTTON,15,166,93,10
     EDITTEXT        IDC_EDIT_DEVICE,27,176,174,13,ES_AUTOHSCROLL
     PUSHBUTTON      "E&xaminar...",IDC_BUTTON_BROWSE_DEVICE,206,176,40,13
@@ -161,19 +164,18 @@ IDD_AUDIOCFG DIALOG DISCARDABLE  0, 0, 260, 250
 STYLE WS_CHILD | WS_DISABLED
 FONT 8, "MS Shell Dlg"
 BEGIN
-    GROUPBOX        " Selección de manejador ",IDC_STATIC,8,4,244,195
+    GROUPBOX        " Selección de manejador ",IDC_STATIC,8,4,244,210
     LTEXT           "Seleccione un manejador de sonido marcando la casilla del deseado. Para deshabilitar el sonido no seleccione ninguno. No se recomienda la selección de más de un manejador. Para configurar un manejador haga doble click sobre él.",IDC_STATIC,15,15,227,35
-    CONTROL         "Dispositivos",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,50,140,140
+    CONTROL         "Dispositivos",IDC_AUDIO_TREE,"SysTreeView32",WS_BORDER | WS_TABSTOP,15,50,140,155
     PUSHBUTTON      "Probar sonido",IDC_AUDIO_TEST,170,50,59,14
     PUSHBUTTON      "Panel de control",IDC_AUDIO_CONTROL_PANEL,170,70,59,14
-    GROUPBOX        " DirectSound ",IDC_STATIC,8,205,244,60
-    LTEXT           "Aceleración Hardware: ",IDC_STATIC,15,215,90,10
-    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,213,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Frecuencia muestreo:",IDC_STATIC,15,232,70,8
-    COMBOBOX        IDC_DSOUND_RATES,90,230,42,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    LTEXT           "Bits por muestra:",IDC_STATIC,137,232,80,8
-    COMBOBOX        IDC_DSOUND_BITS,220,230,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
-    CONTROL         "Emulación del manejador",IDC_DSOUND_DRV_EMUL,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,15,250,230,10
+    GROUPBOX        " DirectSound ",IDC_STATIC,8,220,244,45
+    LTEXT           "Aceleración Hardware: ",IDC_STATIC,15,230,90,10
+    COMBOBOX	    IDC_DSOUND_HW_ACCEL,100,228,150,70,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Frecuencia muestreo:",IDC_STATIC,15,247,70,8
+    COMBOBOX        IDC_DSOUND_RATES,90,245,42,76,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "Bits por muestra:",IDC_STATIC,137,247,80,8
+    COMBOBOX        IDC_DSOUND_BITS,220,245,30,56,CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
 END
 
 IDD_DESKTOP_INTEGRATION DIALOG DISCARDABLE  0, 0, 260, 250
@@ -305,5 +307,20 @@ BEGIN
     IDC_SYSPARAMS_ACTIVE_TITLE_TEXT "Texto de barra de título activa"
     IDC_SYSPARAMS_INACTIVE_TITLE    "Barra de título inactiva"
     IDC_SYSPARAMS_INACTIVE_TITLE_TEXT "Texto de barra de título inactiva"
-    IDC_SYSPARAMS_MSGBOX_TEXT       "Message Box Text"
+    IDC_SYSPARAMS_MSGBOX_TEXT       "Texto de cuadro de diálogo"
+    IDC_SYSPARAMS_APPWORKSPACE      "Entorno de trabajo de la aplicación"
+    IDC_SYSPARAMS_WINDOW_FRAME      "Recuadro de la ventana"
+    IDC_SYSPARAMS_ACTIVE_BORDER     "Borde activo"
+    IDC_SYSPARAMS_INACTIVE_BORDER   "Borde inactivo"
+    IDC_SYSPARAMS_BUTTON_SHADOW     "Sombra del control"
+    IDC_SYSPARAMS_GRAY_TEXT         "Texto en gris"
+    IDC_SYSPARAMS_BUTTON_HILIGHT    "Resaltado del control"
+    IDC_SYSPARAMS_BUTTON_DARK_SHADOW "Sombra oscura del control"
+    IDC_SYSPARAMS_BUTTON_LIGHT      "Parte iluminada del control"
+    IDC_SYSPARAMS_BUTTON_ALTERNATE  "Fondo alternativo del control"
+    IDC_SYSPARAMS_HOT_TRACKING      "Elemento resaltado"
+    IDC_SYSPARAMS_ACTIVE_TITLE_GRADIENT "Gradiente barra título activa"
+    IDC_SYSPARAMS_INACTIVE_TITLE_GRADIENT "Gradiente barra título inactiva"
+    IDC_SYSPARAMS_MENU_HILIGHT      "Resaltado del menú"
+    IDC_SYSPARAMS_MENUBAR           "Barra de menú"
 END

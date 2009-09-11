@@ -266,14 +266,14 @@ static BOOL write_registry_settings(const DEVMODEW *dm)
  *		EnumDisplaySettingsEx  (X11DRV.@)
  *
  */
-BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
+BOOL CDECL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DWORD flags)
 {
     static const WCHAR dev_name[CCHDEVICENAME] =
         { 'W','i','n','e',' ','X','1','1',' ','d','r','i','v','e','r',0 };
 
-    devmode->dmSize = sizeof(DEVMODEW);
-    devmode->dmSpecVersion = MAKEWORD(1,4);
-    devmode->dmDriverVersion = MAKEWORD(1,4);
+    devmode->dmSize = FIELD_OFFSET(DEVMODEW, dmICMMethod);
+    devmode->dmSpecVersion = DM_SPECVERSION;
+    devmode->dmDriverVersion = DM_SPECVERSION;
     memcpy(devmode->dmDeviceName, dev_name, sizeof(dev_name));
     devmode->dmDriverExtra = 0;
     devmode->u2.dmDisplayFlags = 0;
@@ -299,7 +299,8 @@ BOOL X11DRV_EnumDisplaySettingsEx( LPCWSTR name, DWORD n, LPDEVMODEW devmode, DW
         devmode->dmPelsHeight = dd_modes[n].dwHeight;
         devmode->dmBitsPerPel = dd_modes[n].dwBPP;
         devmode->dmDisplayFrequency = dd_modes[n].wRefreshRate;
-        devmode->dmFields = (DM_PELSWIDTH|DM_PELSHEIGHT|DM_BITSPERPEL);
+        devmode->dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL |
+                            DM_DISPLAYFLAGS;
         if (devmode->dmDisplayFrequency)
         {
             devmode->dmFields |= DM_DISPLAYFREQUENCY;
@@ -348,8 +349,8 @@ static const char * _DM_fields(DWORD fields)
  *		ChangeDisplaySettingsEx  (X11DRV.@)
  *
  */
-LONG X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
-                                     HWND hwnd, DWORD flags, LPVOID lpvoid )
+LONG CDECL X11DRV_ChangeDisplaySettingsEx( LPCWSTR devname, LPDEVMODEW devmode,
+                                           HWND hwnd, DWORD flags, LPVOID lpvoid )
 {
     DWORD i, dwBpp = 0;
     DEVMODEW dm;

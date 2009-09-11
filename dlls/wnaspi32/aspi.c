@@ -40,7 +40,9 @@
 #include <sys/ioctl.h>
 #endif
 #include <fcntl.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
 #endif
@@ -120,7 +122,7 @@ int ASPI_GetNumControllers(void)
 {
     HKEY hkeyScsi, hkeyPort;
     DWORD i = 0, numPorts, num_ha = 0;
-    WCHAR wPortName[11];
+    WCHAR wPortName[15];
 
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, wDevicemapScsi, 0,
         KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS, &hkeyScsi) != ERROR_SUCCESS )
@@ -128,7 +130,7 @@ int ASPI_GetNumControllers(void)
         ERR("Could not open HKLM\\%s\n", debugstr_w(wDevicemapScsi));
         return 0;
     }
-    while (RegEnumKeyW(hkeyScsi, i++, wPortName, sizeof(wPortName)) == ERROR_SUCCESS)
+    while (RegEnumKeyW(hkeyScsi, i++, wPortName, sizeof(wPortName)/sizeof(wPortName[0])) == ERROR_SUCCESS)
     {
         if (RegOpenKeyExW(hkeyScsi, wPortName, 0, KEY_QUERY_VALUE, &hkeyPort) == ERROR_SUCCESS)
         {
@@ -146,7 +148,7 @@ int ASPI_GetNumControllers(void)
     return num_ha;
 }
 
-BOOL SCSI_GetDeviceName( int h, int c, int t, int d, LPSTR devstr, LPDWORD lpcbData )
+static BOOL SCSI_GetDeviceName( int h, int c, int t, int d, LPSTR devstr, LPDWORD lpcbData )
 {
     char buffer[200];
     HKEY hkeyScsi;
@@ -190,7 +192,7 @@ DWORD ASPI_GetHCforController( int controller )
         ERR("Could not open HKLM\\%s\n", debugstr_w(wDevicemapScsi));
         return 0xFFFFFFFF;
     }
-    while (RegEnumKeyW(hkeyScsi, i++, wPortName, sizeof(wPortName)) == ERROR_SUCCESS)
+    while (RegEnumKeyW(hkeyScsi, i++, wPortName, sizeof(wPortName)/sizeof(wPortName[0])) == ERROR_SUCCESS)
     {
         if (RegOpenKeyExW(hkeyScsi, wPortName, 0, KEY_QUERY_VALUE | KEY_ENUMERATE_SUB_KEYS,
                           &hkeyPort) == ERROR_SUCCESS)
@@ -213,7 +215,7 @@ DWORD ASPI_GetHCforController( int controller )
         return 0xFFFFFFFF;
     }
 
-    if (RegEnumKeyW(hkeyPort, -num_ha, wBusName, sizeof(wBusName)) != ERROR_SUCCESS)
+    if (RegEnumKeyW(hkeyPort, -num_ha, wBusName, sizeof(wBusName)/sizeof(wBusName[0])) != ERROR_SUCCESS)
     {
         ERR("Failed to enumerate keys\n");
         RegCloseKey(hkeyPort);
@@ -309,7 +311,7 @@ SCSI_LinuxDeviceIo( int fd,
 		WARN("Not enough bytes written to scsi device. bytes=%d .. %d\n", cbInBuffer, dwBytes );
                 /* FIXME: set_last_error() never sets error to ERROR_NOT_ENOUGH_MEMORY... */
 		if( save_error == ERROR_NOT_ENOUGH_MEMORY )
-			MESSAGE("Your Linux kernel was not able to handle the amount of data sent to the scsi device. Try recompiling with a larger SG_BIG_BUFF value (kernel 2.0.x sg.h)");
+			MESSAGE("Your Linux kernel was not able to handle the amount of data sent to the scsi device. Try recompiling with a larger SG_BIG_BUFF value (kernel 2.0.x sg.h)\n");
 		WARN("error= %d\n", save_error );
 		*lpcbBytesReturned = 0;
 		return FALSE;

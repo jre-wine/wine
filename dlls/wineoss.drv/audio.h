@@ -62,7 +62,7 @@ enum win_wm_message {
 
 typedef struct {
     enum win_wm_message 	msg;	/* message identifier */
-    DWORD	                param;  /* parameter for this message */
+    DWORD_PTR                   param;  /* parameter for this message */
     HANDLE	                hEvent;	/* if message is synchronous, handle of event for synchro */
 } OSS_MSG;
 
@@ -174,9 +174,7 @@ extern DWORD OSS_OpenDevice(OSS_DEVICE* ossdev, unsigned req_access,
 
 extern void OSS_CloseDevice(OSS_DEVICE* ossdev);
 
-extern DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags);
 extern DWORD wodSetVolume(WORD wDevID, DWORD dwParam);
-extern DWORD widOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags);
 
 /* dscapture.c */
 extern DWORD widDsCreate(UINT wDevID, PIDSCDRIVER* drv);

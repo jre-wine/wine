@@ -101,9 +101,24 @@ TW_UINT16 SANE_CapabilityGetDefault (pTW_IDENTITY pOrigin, TW_MEMREF pData)
 TW_UINT16 SANE_CapabilityQuerySupport (pTW_IDENTITY pOrigin,
                                         TW_MEMREF pData)
 {
-    FIXME ("stub!\n");
+    TW_UINT16 twRC = TWRC_SUCCESS, twCC = TWCC_SUCCESS;
+    pTW_CAPABILITY pCapability = (pTW_CAPABILITY) pData;
 
-    return TWRC_FAILURE;
+    TRACE("DG_CONTROL/DAT_CAPABILITY/MSG_QUERYSUPPORT\n");
+
+    if (activeDS.currentState < 4 || activeDS.currentState > 7)
+    {
+        twRC = TWRC_FAILURE;
+        activeDS.twCC = TWCC_SEQERROR;
+    }
+    else
+    {
+        twCC = SANE_SaneCapability (pCapability, MSG_QUERYSUPPORT);
+        twRC = (twCC == TWCC_SUCCESS)?TWRC_SUCCESS:TWRC_FAILURE;
+        activeDS.twCC = twCC;
+    }
+
+    return twRC;
 }
 
 /* DG_CONTROL/DAT_CAPABILITY/MSG_RESET */
@@ -147,180 +162,56 @@ TW_UINT16 SANE_CapabilitySet (pTW_IDENTITY pOrigin,
     else
     {
         twCC = SANE_SaneCapability (pCapability, MSG_SET);
-        twRC = (twCC == TWCC_SUCCESS)?TWRC_SUCCESS:TWRC_FAILURE;
+        if (twCC == TWCC_CHECKSTATUS)
+        {
+            twCC = TWCC_SUCCESS;
+            twRC = TWRC_CHECKSTATUS;
+        }
+        else
+            twRC = (twCC == TWCC_SUCCESS)?TWRC_SUCCESS:TWRC_FAILURE;
         activeDS.twCC = twCC;
     }
     return twRC;
-}
-
-/* DG_CONTROL/DAT_CUSTOMDSDATA/MSG_GET */
-TW_UINT16 SANE_CustomDSDataGet (pTW_IDENTITY pOrigin, 
-                                TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_CUSTOMDSDATA/MSG_SET */
-TW_UINT16 SANE_CustomDSDataSet (pTW_IDENTITY pOrigin, 
-                                 TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_AUTOMATICCAPTUREDIRECTORY */
-TW_UINT16 SANE_AutomaticCaptureDirectory (pTW_IDENTITY pOrigin,
-                                           
-                                           TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_CHANGEDIRECTORY */
-TW_UINT16 SANE_ChangeDirectory (pTW_IDENTITY pOrigin, 
-                                 TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_COPY */
-TW_UINT16 SANE_FileSystemCopy (pTW_IDENTITY pOrigin, 
-                                TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_CREATEDIRECTORY */
-TW_UINT16 SANE_CreateDirectory (pTW_IDENTITY pOrigin, 
-                                 TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_DELETE */
-TW_UINT16 SANE_FileSystemDelete (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_FORMATMEDIA */
-TW_UINT16 SANE_FormatMedia (pTW_IDENTITY pOrigin, 
-                             TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_GETCLOSE */
-TW_UINT16 SANE_FileSystemGetClose (pTW_IDENTITY pOrigin, 
-                                    TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_GETFIRSTFILE */
-TW_UINT16 SANE_FileSystemGetFirstFile (pTW_IDENTITY pOrigin,
-                                        
-                                        TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_GETINFO */
-TW_UINT16 SANE_FileSystemGetInfo (pTW_IDENTITY pOrigin, 
-                                   TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_GETNEXTFILE */
-TW_UINT16 SANE_FileSystemGetNextFile (pTW_IDENTITY pOrigin,
-                                       
-                                       TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_FILESYSTEM/MSG_RENAME */
-TW_UINT16 SANE_FileSystemRename (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
 }
 
 /* DG_CONTROL/DAT_EVENT/MSG_PROCESSEVENT */
 TW_UINT16 SANE_ProcessEvent (pTW_IDENTITY pOrigin, 
                               TW_MEMREF pData)
 {
-    TW_UINT16 twRC = TWRC_SUCCESS;
+    TW_UINT16 twRC = TWRC_NOTDSEVENT;
     pTW_EVENT pEvent = (pTW_EVENT) pData;
+    MSG *pMsg = pEvent->pEvent;
 
-    TRACE("DG_CONTROL/DAT_EVENT/MSG_PROCESSEVENT\n");
+    TRACE("DG_CONTROL/DAT_EVENT/MSG_PROCESSEVENT  msg 0x%x, wParam 0x%lx\n", pMsg->message, pMsg->wParam);
+
+    activeDS.twCC = TWCC_SUCCESS;
+    if (pMsg->message == activeDS.windowMessage && activeDS.windowMessage)
+    {
+        twRC = TWRC_DSEVENT;
+        pEvent->TWMessage = pMsg->wParam;
+    }
+    else
+        pEvent->TWMessage = MSG_NULL;  /* no message to the application */
 
     if (activeDS.currentState < 5 || activeDS.currentState > 7)
     {
         twRC = TWRC_FAILURE;
         activeDS.twCC = TWCC_SEQERROR;
     }
-    else
-    {
-        if (activeDS.pendingEvent.TWMessage != MSG_NULL)
-        {
-            pEvent->TWMessage = activeDS.pendingEvent.TWMessage;
-            activeDS.pendingEvent.TWMessage = MSG_NULL;
-            twRC = TWRC_NOTDSEVENT;
-        }
-        else
-        {
-            pEvent->TWMessage = MSG_NULL;  /* no message to the application */
-            twRC = TWRC_NOTDSEVENT;
-        }
-        activeDS.twCC = TWCC_SUCCESS;
-    }
 
     return twRC;
-}
-
-/* DG_CONTROL/DAT_PASSTHRU/MSG_PASSTHRU */
-TW_UINT16 SANE_PassThrough (pTW_IDENTITY pOrigin, 
-                             TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
 }
 
 /* DG_CONTROL/DAT_PENDINGXFERS/MSG_ENDXFER */
 TW_UINT16 SANE_PendingXfersEndXfer (pTW_IDENTITY pOrigin, 
                                      TW_MEMREF pData)
 {
+#ifndef SONAME_LIBSANE
+    return TWRC_FAILURE;
+#else
     TW_UINT16 twRC = TWRC_SUCCESS;
     pTW_PENDINGXFERS pPendingXfers = (pTW_PENDINGXFERS) pData;
+    SANE_Status status;
 
     TRACE("DG_CONTROL/DAT_PENDINGXFERS/MSG_ENDXFER\n");
 
@@ -331,30 +222,41 @@ TW_UINT16 SANE_PendingXfersEndXfer (pTW_IDENTITY pOrigin,
     }
     else
     {
-        if (pPendingXfers->Count != 0)
+        pPendingXfers->Count = -1;
+        activeDS.currentState = 6;
+        if (! activeDS.sane_started)
         {
-            pPendingXfers->Count --;
-            activeDS.currentState = 6;
-        }
-        else
-        {
-            activeDS.currentState = 5;
-            /* Notify the application that it can close the data source */
-            activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
+            status = psane_start (activeDS.deviceHandle);
+            if (status != SANE_STATUS_GOOD)
+            {
+                TRACE("PENDINGXFERS/MSG_ENDXFER sane_start returns %s\n", psane_strstatus(status));
+                pPendingXfers->Count = 0;
+                activeDS.currentState = 5;
+                /* Notify the application that it can close the data source */
+                if (activeDS.windowMessage)
+                    PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
+            }
+            else
+                activeDS.sane_started = TRUE;
         }
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
     }
 
     return twRC;
+#endif
 }
 
 /* DG_CONTROL/DAT_PENDINGXFERS/MSG_GET */
 TW_UINT16 SANE_PendingXfersGet (pTW_IDENTITY pOrigin, 
                                  TW_MEMREF pData)
 {
+#ifndef SONAME_LIBSANE
+    return TWRC_FAILURE;
+#else
     TW_UINT16 twRC = TWRC_SUCCESS;
     pTW_PENDINGXFERS pPendingXfers = (pTW_PENDINGXFERS) pData;
+    SANE_Status status;
 
     TRACE("DG_CONTROL/DAT_PENDINGXFERS/MSG_GET\n");
 
@@ -365,19 +267,33 @@ TW_UINT16 SANE_PendingXfersGet (pTW_IDENTITY pOrigin,
     }
     else
     {
-        /* FIXME: we shouldn't return 1 here */
-        pPendingXfers->Count = 1;
+        pPendingXfers->Count = -1;
+        if (! activeDS.sane_started)
+        {
+            status = psane_start (activeDS.deviceHandle);
+            if (status != SANE_STATUS_GOOD)
+            {
+                TRACE("PENDINGXFERS/MSG_GET sane_start returns %s\n", psane_strstatus(status));
+                pPendingXfers->Count = 0;
+            }
+            else
+                activeDS.sane_started = TRUE;
+        }
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
     }
 
     return twRC;
+#endif
 }
 
 /* DG_CONTROL/DAT_PENDINGXFERS/MSG_RESET */
 TW_UINT16 SANE_PendingXfersReset (pTW_IDENTITY pOrigin, 
                                    TW_MEMREF pData)
 {
+#ifndef SONAME_LIBSANE
+    return TWRC_FAILURE;
+#else
     TW_UINT16 twRC = TWRC_SUCCESS;
     pTW_PENDINGXFERS pPendingXfers = (pTW_PENDINGXFERS) pData;
 
@@ -394,91 +310,16 @@ TW_UINT16 SANE_PendingXfersReset (pTW_IDENTITY pOrigin,
         activeDS.currentState = 5;
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
+
+        if (activeDS.sane_started)
+        {
+            psane_cancel (activeDS.deviceHandle);
+            activeDS.sane_started = FALSE;
+        }
     }
 
     return twRC;
-}
-
-/* DG_CONTROL/DAT_PENDINGXFERS/MSG_STOPFEEDER */
-TW_UINT16 SANE_PendingXfersStopFeeder (pTW_IDENTITY pOrigin,
-                                        TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER/MSG_GET */
-TW_UINT16 SANE_SetupFileXferGet (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPXFER/MSG_GETDEFAULT */
-TW_UINT16 SANE_SetupFileXferGetDefault (pTW_IDENTITY pOrigin, 
-                                         TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-
-/* DG_CONTROL/DAT_SETUPFILEXFER/MSG_RESET */
-TW_UINT16 SANE_SetupFileXferReset (pTW_IDENTITY pOrigin, 
-                                    TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER/MSG_SET */
-TW_UINT16 SANE_SetupFileXferSet (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER2/MSG_GET */
-TW_UINT16 SANE_SetupFileXfer2Get (pTW_IDENTITY pOrigin, 
-                                   TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER2/MSG_GETDEFAULT */
-TW_UINT16 SANE_SetupFileXfer2GetDefault (pTW_IDENTITY pOrigin, 
-                                         TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER2/MSG_RESET */
-TW_UINT16 SANE_SetupFileXfer2Reset (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
-}
-
-/* DG_CONTROL/DAT_SETUPFILEXFER2/MSG_SET */
-TW_UINT16 SANE_SetupFileXfer2Set (pTW_IDENTITY pOrigin, 
-                                  TW_MEMREF pData)
-{
-    FIXME ("stub!\n");
-
-    return TWRC_FAILURE;
+#endif
 }
 
 /* DG_CONTROL/DAT_SETUPMEMXFER/MSG_GET */
@@ -558,20 +399,23 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
     {
         twRC = TWRC_FAILURE;
         activeDS.twCC = TWCC_SEQERROR;
-	FIXME("sequence error %d\n", activeDS.currentState);
+	WARN("sequence error %d\n", activeDS.currentState);
     }
     else
     {
         activeDS.hwndOwner = pUserInterface->hParent;
+        if (! activeDS.windowMessage)
+            activeDS.windowMessage = RegisterWindowMessageA("SANE.DS ACTIVITY MESSAGE");
         if (pUserInterface->ShowUI)
         {
             BOOL rc;
             activeDS.currentState = 5; /* Transitions to state 5 */
-		FIXME("showing UI\n");
             rc = DoScannerUI();
+            pUserInterface->ModalUI = TRUE;
             if (!rc)
             {
-                activeDS.pendingEvent.TWMessage = MSG_CLOSEDSREQ;
+                if (activeDS.windowMessage)
+                    PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_CLOSEDSREQ, 0);
             }
 #ifdef SONAME_LIBSANE
             else
@@ -584,11 +428,11 @@ TW_UINT16 SANE_EnableDSUserInterface (pTW_IDENTITY pOrigin,
         else
         {
             /* no UI will be displayed, so source is ready to transfer data */
-            activeDS.pendingEvent.TWMessage = MSG_XFERREADY;
             activeDS.currentState = 6; /* Transitions to state 6 directly */
+            if (activeDS.windowMessage)
+                PostMessageA(activeDS.hwndOwner, activeDS.windowMessage, MSG_XFERREADY, 0);
         }
 
-        activeDS.hwndOwner = pUserInterface->hParent;
         twRC = TWRC_SUCCESS;
         activeDS.twCC = TWCC_SUCCESS;
     }

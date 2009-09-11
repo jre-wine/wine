@@ -140,7 +140,6 @@ ASPI_OpenDevice(SRB_ExecSCSICmd *prb)
 static void
 ASPI_DebugPrintCmd(SRB_ExecSCSICmd *prb)
 {
-  BYTE	cmd;
   int	i;
   BYTE *cdb;
 
@@ -185,7 +184,6 @@ ASPI_DebugPrintCmd(SRB_ExecSCSICmd *prb)
   TRACE("CDB Length: %d\n", prb->SRB_CDBLen);
   TRACE("POST Proc: %p\n", prb->SRB_PostProc);
   cdb = &prb->CDBByte[0];
-  cmd = prb->CDBByte[0];
   if (TRACE_ON(aspi)) {
       TRACE("CDB buffer[");
       for (i = 0; i < prb->SRB_CDBLen; i++) {
@@ -294,8 +292,8 @@ WNASPI32_DoPosting( SRB_ExecSCSICmd *lpPRB, DWORD status )
 			(*SRB_PostProc)(lpPRB);
 		}
 		else if (SRB_Flags & SRB_EVENT_NOTIFY) {
-			TRACE("Setting event %p\n", (HANDLE)SRB_PostProc);
-			SetEvent((HANDLE)SRB_PostProc);
+			TRACE("Setting event %p\n", SRB_PostProc);
+			SetEvent(SRB_PostProc);
 		}
 	}
 	return SS_PENDING;
@@ -597,10 +595,10 @@ DWORD __cdecl GetASPI32DLLVersion(void)
 {
 #ifdef linux
 	TRACE("Returning version 1\n");
-        return (DWORD)1;
+        return 1;
 #else
 	FIXME("Please add SCSI support for your operating system, returning 0\n");
-        return (DWORD)0;
+        return 0;
 #endif
 }
 

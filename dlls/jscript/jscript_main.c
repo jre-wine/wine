@@ -22,7 +22,6 @@
 
 #include "winreg.h"
 #include "advpub.h"
-#include "activscp.h"
 #include "activaut.h"
 #include "objsafe.h"
 
@@ -39,7 +38,9 @@ static const CLSID CLSID_JScriptAuthor =
 static const CLSID CLSID_JScriptEncode =
     {0xf414c262,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
 
-static HINSTANCE jscript_hinstance;
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+
+HINSTANCE jscript_hinstance;
 
 static HRESULT WINAPI ClassFactory_QueryInterface(IClassFactory *iface, REFIID riid, void **ppv)
 {
@@ -161,7 +162,7 @@ static HRESULT register_inf(BOOL doregister)
     STRTABLEA strtable;
     STRENTRYA pse[7];
     static CLSID const *clsids[7];
-    int i = 0;
+    unsigned int i = 0;
 
     static const WCHAR advpackW[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
 

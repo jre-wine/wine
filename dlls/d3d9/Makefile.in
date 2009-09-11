@@ -4,11 +4,9 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = d3d9.dll
 IMPORTLIB = d3d9
-IMPORTS   = wined3d kernel32
-EXTRALIBS = -ldxguid -luuid
+IMPORTS   = dxguid uuid wined3d kernel32
 
 C_SRCS = \
-	basetexture.c \
 	cubetexture.c \
 	d3d9_main.c \
 	device.c \
@@ -16,7 +14,6 @@ C_SRCS = \
 	indexbuffer.c \
 	pixelshader.c \
 	query.c \
-	resource.c \
 	stateblock.c \
 	surface.c \
 	swapchain.c \

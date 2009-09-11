@@ -27,6 +27,8 @@
 
 #include "wine/debug.h"
 
+#include "winhttp_private.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
 /******************************************************************
@@ -36,8 +38,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
     switch(fdwReason)
     {
-    case DLL_WINE_PREATTACH:
-        return FALSE;  /* prefer native version */
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hInstDLL);
         break;
@@ -81,62 +81,4 @@ HRESULT WINAPI DllUnregisterServer(void)
 {
     FIXME("()\n");
     return S_OK;
-}
-
-/***********************************************************************
- *          WinHttpCheckPlatform (winhttp.@)
- */
-BOOL WINAPI WinHttpCheckPlatform(void)
-{
-    FIXME("stub\n");
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpDetectAutoProxyConfigUrl (winhttp.@)
- */
-BOOL WINAPI WinHttpDetectAutoProxyConfigUrl(DWORD flags, LPWSTR *url)
-{
-    FIXME("(%x %p)\n", flags, url);
-
-    SetLastError(ERROR_WINHTTP_AUTODETECTION_FAILED);
-    return FALSE;
-}
-
-/***********************************************************************
- *          WinHttpGetIEProxyConfigForCurrentUser (winhttp.@)
- */
-BOOL WINAPI WinHttpGetIEProxyConfigForCurrentUser(WINHTTP_CURRENT_USER_IE_PROXY_CONFIG* config)
-{
-    if(!config)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    /* TODO: read from HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings */
-    FIXME("returning no proxy used\n");
-    config->fAutoDetect = FALSE;
-    config->lpszAutoConfigUrl = NULL;
-    config->lpszProxy = NULL;
-    config->lpszProxyBypass = NULL;
-
-    SetLastError(ERROR_SUCCESS);
-    return TRUE;
-}
-
-/***********************************************************************
- *          WinHttpOpen (winhttp.@)
- */
-HINTERNET WINAPI WinHttpOpen(LPCWSTR pwszUserAgent, DWORD dwAccessType,
-                             LPCWSTR pwszProxyName, LPCWSTR pwszProxyByPass,
-                             DWORD dwFlags)
-{
-    FIXME("(%s, %d, %s, %s, 0x%x): stub\n", debugstr_w(pwszUserAgent),
-        dwAccessType, debugstr_w(pwszProxyName), debugstr_w(pwszProxyByPass),
-        dwFlags);
-
-    SetLastError(ERROR_NOT_SUPPORTED);
-    return NULL;
 }

@@ -120,7 +120,50 @@ static	DWORD	ADPCM_GetFormatIndex(const WAVEFORMATEX *wfx)
 	    return i;
     }
 
+    switch (wfx->wFormatTag)
+    {
+    case WAVE_FORMAT_PCM:
+	if(3 > wfx->nChannels &&
+	   wfx->nChannels > 0 &&
+	   wfx->nAvgBytesPerSec == 2 * wfx->nSamplesPerSec * wfx->nChannels &&
+	   wfx->nBlockAlign == 2 * wfx->nChannels &&
+	   wfx->wBitsPerSample == 16)
+	   return hi;
+	break;
+    case WAVE_FORMAT_IMA_ADPCM:
+	if(3 > wfx->nChannels &&
+	   wfx->nChannels > 0 &&
+	   wfx->wBitsPerSample == 4 &&
+	   wfx->cbSize == 2)
+	   return hi;
+	break;
+    }
+
     return 0xFFFFFFFF;
+}
+
+static void     init_wfx_ima_adpcm(IMAADPCMWAVEFORMAT* awfx/*, DWORD nba*/)
+{
+    register WAVEFORMATEX*      pwfx = &awfx->wfx;
+
+    /* we assume wFormatTag, nChannels, nSamplesPerSec and wBitsPerSample
+     * have been initialized... */
+
+    if (pwfx->wFormatTag != WAVE_FORMAT_IMA_ADPCM) {FIXME("wrong FT\n"); return;}
+    if (ADPCM_GetFormatIndex(pwfx) == 0xFFFFFFFF) {FIXME("wrong fmt\n"); return;}
+
+    switch (pwfx->nSamplesPerSec)
+    {
+    case  8000: pwfx->nBlockAlign = 256 * pwfx->nChannels;   break;
+    case 11025: pwfx->nBlockAlign = 256 * pwfx->nChannels;   break;
+    case 22050: pwfx->nBlockAlign = 512 * pwfx->nChannels;   break;
+    case 44100: pwfx->nBlockAlign = 1024 * pwfx->nChannels;  break;
+    default: /*pwfx->nBlockAlign = nba;*/  break;
+    }
+    pwfx->cbSize = sizeof(WORD);
+
+    awfx->wSamplesPerBlock = (pwfx->nBlockAlign - (4 * pwfx->nChannels) * 2) / pwfx->nChannels + 1;
+    pwfx->nAvgBytesPerSec = (pwfx->nSamplesPerSec * pwfx->nBlockAlign) / awfx->wSamplesPerBlock;
 }
 
 /***********************************************************************
@@ -472,17 +515,17 @@ static	LRESULT ADPCM_DriverDetails(PACMDRIVERDETAILSW add)
 {
     add->fccType = ACMDRIVERDETAILS_FCCTYPE_AUDIOCODEC;
     add->fccComp = ACMDRIVERDETAILS_FCCCOMP_UNDEFINED;
-    add->wMid = 0xFF;
-    add->wPid = 0x00;
-    add->vdwACM = 0x01000000;
-    add->vdwDriver = 0x01000000;
+    add->wMid = 0x1;
+    add->wPid = 0x22;
+    add->vdwACM = 0x3320000;
+    add->vdwDriver = 0x04000000;
     add->fdwSupport = ACMDRIVERDETAILS_SUPPORTF_CODEC;
     add->cFormatTags = 2; /* PCM, IMA ADPCM */
     add->cFilterTags = 0;
     add->hicon = NULL;
-    MultiByteToWideChar( CP_ACP, 0, "WINE-ADPCM", -1,
+    MultiByteToWideChar( CP_ACP, 0, "Microsoft IMA ADPCM", -1,
                          add->szShortName, sizeof(add->szShortName)/sizeof(WCHAR) );
-    MultiByteToWideChar( CP_ACP, 0, "Wine IMA ADPCM converter", -1,
+    MultiByteToWideChar( CP_ACP, 0, "Microsoft IMA ADPCM CODEC", -1,
                          add->szLongName, sizeof(add->szLongName)/sizeof(WCHAR) );
     MultiByteToWideChar( CP_ACP, 0, "Brought to you by the Wine team...", -1,
                          add->szCopyright, sizeof(add->szCopyright)/sizeof(WCHAR) );
@@ -500,7 +543,7 @@ static	LRESULT ADPCM_DriverDetails(PACMDRIVERDETAILSW add)
 static	LRESULT	ADPCM_FormatTagDetails(PACMFORMATTAGDETAILSW aftd, DWORD dwQuery)
 {
     static const WCHAR szPcm[]={'P','C','M',0};
-    static const WCHAR szImaAdPcm[]={'I','M','A',' ','A','d','P','C','M',0};
+    static const WCHAR szImaAdPcm[]={'I','M','A',' ','A','D','P','C','M',0};
 
     switch (dwQuery)
     {
@@ -612,6 +655,7 @@ static	LRESULT	ADPCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
     /* some tests ... */
     if (adfs->cbwfxSrc < sizeof(PCMWAVEFORMAT) ||
 	adfs->cbwfxDst < sizeof(PCMWAVEFORMAT) ||
+	adfs->pwfxSrc->wFormatTag == adfs->pwfxDst->wFormatTag ||
 	ADPCM_GetFormatIndex(adfs->pwfxSrc) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
     /* FIXME: should do those tests against the real size (according to format tag */
 
@@ -636,26 +680,24 @@ static	LRESULT	ADPCM_FormatSuggest(PACMDRVFORMATSUGGEST adfs)
             adfs->pwfxDst->wFormatTag = WAVE_FORMAT_PCM;
     }
 
-    /* check if result is ok */
-    if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
-
     /* recompute other values */
     switch (adfs->pwfxDst->wFormatTag)
     {
     case WAVE_FORMAT_PCM:
         adfs->pwfxDst->nBlockAlign = (adfs->pwfxDst->nChannels * adfs->pwfxDst->wBitsPerSample) / 8;
         adfs->pwfxDst->nAvgBytesPerSec = adfs->pwfxDst->nSamplesPerSec * adfs->pwfxDst->nBlockAlign;
+        /* check if result is ok */
+        if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
         break;
     case WAVE_FORMAT_IMA_ADPCM:
-        adfs->pwfxDst->nBlockAlign = 1024;
+        init_wfx_ima_adpcm((IMAADPCMWAVEFORMAT*)adfs->pwfxDst);
         /* FIXME: not handling header overhead */
-        adfs->pwfxDst->nAvgBytesPerSec = ((adfs->pwfxDst->nSamplesPerSec * 4) / 8) * adfs->pwfxSrc->nChannels;
-        ((IMAADPCMWAVEFORMAT*)adfs->pwfxDst)->wSamplesPerBlock = (1024 - 4 * adfs->pwfxSrc->nChannels) * (2 / adfs->pwfxSrc->nChannels) + 1;
         TRACE("setting spb=%u\n", ((IMAADPCMWAVEFORMAT*)adfs->pwfxDst)->wSamplesPerBlock);
+        /* check if result is ok */
+        if (ADPCM_GetFormatIndex(adfs->pwfxDst) == 0xFFFFFFFF) return ACMERR_NOTPOSSIBLE;
         break;
     default:
-        FIXME("\n");
-        break;
+        return ACMERR_NOTPOSSIBLE;
     }
 
     return MMSYSERR_NOERROR;
@@ -688,7 +730,7 @@ static	LRESULT	ADPCM_StreamOpen(PACMDRVSTREAMINSTANCE adsi)
     aad = HeapAlloc(GetProcessHeap(), 0, sizeof(AcmAdpcmData));
     if (aad == 0) return MMSYSERR_NOMEM;
 
-    adsi->dwDriver = (DWORD)aad;
+    adsi->dwDriver = (DWORD_PTR)aad;
 
     if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
@@ -775,6 +817,8 @@ static	LRESULT	ADPCM_StreamClose(PACMDRVSTREAMINSTANCE adsi)
  */
 static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMSIZE adss)
 {
+    DWORD nblocks;
+
     switch (adss->fdwSize)
     {
     case ACM_STREAMSIZEF_DESTINATION:
@@ -782,14 +826,18 @@ static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMS
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_IMA_ADPCM)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbSrcLength = adss->cbDstLength * 4;
+            nblocks = adss->cbDstLength / adsi->pwfxDst->nBlockAlign;
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            adss->cbSrcLength = nblocks * adsi->pwfxSrc->nBlockAlign * ((IMAADPCMWAVEFORMAT*)adsi->pwfxDst)->wSamplesPerBlock;
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_IMA_ADPCM &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbSrcLength = 256 + adss->cbDstLength / 4;
+            nblocks = adss->cbDstLength / (adsi->pwfxDst->nBlockAlign * ((IMAADPCMWAVEFORMAT*)adsi->pwfxSrc)->wSamplesPerBlock);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            adss->cbSrcLength = nblocks * adsi->pwfxSrc->nBlockAlign;
 	}
         else
         {
@@ -801,14 +849,24 @@ static	LRESULT ADPCM_StreamSize(const ACMDRVSTREAMINSTANCE *adsi, PACMDRVSTREAMS
 	if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_PCM &&
 	    adsi->pwfxDst->wFormatTag == WAVE_FORMAT_IMA_ADPCM)
         {
-	    FIXME("misses the block header overhead\n");
-	    adss->cbDstLength = 256 + adss->cbSrcLength / 4;
+            nblocks = adss->cbSrcLength / (adsi->pwfxSrc->nBlockAlign * ((IMAADPCMWAVEFORMAT*)adsi->pwfxDst)->wSamplesPerBlock);
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            if (adss->cbSrcLength % (adsi->pwfxSrc->nBlockAlign * ((IMAADPCMWAVEFORMAT*)adsi->pwfxDst)->wSamplesPerBlock))
+                /* Round block count up. */
+                nblocks++;
+            adss->cbDstLength = nblocks * adsi->pwfxDst->nBlockAlign;
 	}
         else if (adsi->pwfxSrc->wFormatTag == WAVE_FORMAT_IMA_ADPCM &&
                  adsi->pwfxDst->wFormatTag == WAVE_FORMAT_PCM)
         {
-	    /* don't take block overhead into account, doesn't matter too much */
-	    adss->cbDstLength = adss->cbSrcLength * 4;
+            nblocks = adss->cbSrcLength / adsi->pwfxSrc->nBlockAlign;
+            if (nblocks == 0)
+                return ACMERR_NOTPOSSIBLE;
+            if (adss->cbSrcLength % adsi->pwfxSrc->nBlockAlign)
+                /* Round block count up. */
+                nblocks++;
+            adss->cbDstLength = nblocks * adsi->pwfxDst->nBlockAlign * ((IMAADPCMWAVEFORMAT*)adsi->pwfxSrc)->wSamplesPerBlock;
 	}
         else
         {

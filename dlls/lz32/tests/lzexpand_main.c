@@ -230,7 +230,8 @@ static void test_LZOpenFileA_existing_compressed(void)
   /* d, using underscore-terminated file name. */
   file = LZOpenFileA(_terminated, &test, OF_EXIST);
   ok(file >= 0, "LZOpenFileA failed on switching to a compressed file name\n");
-  ok(test.cBytes == sizeof(OFSTRUCT), 
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
   ok(test.nErrCode == 0, "LZOpenFileA set test.nErrCode to %d\n", 
      test.nErrCode);
@@ -369,7 +370,8 @@ static void test_LZOpenFileA(void)
   ok(file >= 0, "LZOpenFileA failed on creation\n");
   ok(test.cBytes == sizeof(OFSTRUCT),
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
-  ok(test.nErrCode == ERROR_SUCCESS,
+  ok(test.nErrCode == ERROR_SUCCESS ||
+     broken(test.nErrCode != ERROR_SUCCESS), /* win9x */
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
   ok(lstrcmpA(test.szPathName, expected) == 0,
      "LZOpenFileA returned '%s', but was expected to return '%s'\n",
@@ -387,8 +389,9 @@ static void test_LZOpenFileA(void)
   /* a, for reading. */
   file = LZOpenFileA(filename_, &test, OF_READ);
   ok(file >= 0, "LZOpenFileA failed on read\n");
-  ok(test.cBytes == sizeof(OFSTRUCT),
-     "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
+     "LZOpenFileA set test.cBytes to %d '%s'('%s')\n", test.cBytes, expected, short_expected);
   ok(test.nErrCode == ERROR_SUCCESS,
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
   ok(lstrcmpA(test.szPathName, expected) == 0 ||
@@ -402,7 +405,8 @@ static void test_LZOpenFileA(void)
   /* b, for writing. */
   file = LZOpenFileA(filename_, &test, OF_WRITE);
   ok(file >= 0, "LZOpenFileA failed on write\n");
-  ok(test.cBytes == sizeof(OFSTRUCT),
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
   ok(test.nErrCode == ERROR_SUCCESS,
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
@@ -417,7 +421,8 @@ static void test_LZOpenFileA(void)
   /* c, for reading and writing. */
   file = LZOpenFileA(filename_, &test, OF_READWRITE);
   ok(file >= 0, "LZOpenFileA failed on read/write\n");
-  ok(test.cBytes == sizeof(OFSTRUCT),
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
   ok(test.nErrCode == ERROR_SUCCESS,
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
@@ -432,7 +437,8 @@ static void test_LZOpenFileA(void)
   /* d, for checking file existence. */
   file = LZOpenFileA(filename_, &test, OF_EXIST);
   ok(file >= 0, "LZOpenFileA failed on read/write\n");
-  ok(test.cBytes == sizeof(OFSTRUCT),
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
   ok(test.nErrCode == ERROR_SUCCESS,
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
@@ -447,7 +453,8 @@ static void test_LZOpenFileA(void)
   /* Delete the file then make sure it doesn't exist anymore. */
   file = LZOpenFileA(filename_, &test, OF_DELETE);
   ok(file >= 0, "LZOpenFileA failed on delete\n");
-  ok(test.cBytes == sizeof(OFSTRUCT),
+  ok(test.cBytes == sizeof(OFSTRUCT) ||
+     broken(test.cBytes == FIELD_OFFSET(OFSTRUCT, szPathName) + lstrlenA(test.szPathName)), /* win9x */
      "LZOpenFileA set test.cBytes to %d\n", test.cBytes);
   ok(test.nErrCode == ERROR_SUCCESS,
      "LZOpenFileA set test.nErrCode to %d\n", test.nErrCode);
@@ -763,13 +770,13 @@ static void test_LZOpenFileW(void)
   SetLastError(0xfaceabee);
   /* Check for nonexistent file. */
   file = LZOpenFileW(badfilenameW, &test, OF_READ);
-  ok(GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_CALL_NOT_IMPLEMENTED,
-     "GetLastError() returns %d\n", GetLastError());
   if(GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
   {
-    trace("LZOpenFileW call not implemented, skipping rest of the test\n");
+    win_skip("LZOpenFileW call is not implemented\n");
     return;
   }
+  ok(GetLastError() == ERROR_FILE_NOT_FOUND,
+     "GetLastError() returns %d\n", GetLastError());
   ok(file == LZERROR_BADINHANDLE, "LZOpenFileW succeeded on nonexistent file\n");
   LZClose(file);
 
@@ -874,10 +881,10 @@ static void test_LZOpenFileW(void)
 
 START_TEST(lzexpand_main)
 {
-  buf = malloc(uncompressed_data_size * 2);
+  buf = HeapAlloc(GetProcessHeap(), 0, uncompressed_data_size * 2);
   test_LZOpenFileA();
   test_LZOpenFileW();
   test_LZRead();
   test_LZCopy();
-  free(buf);
+  HeapFree(GetProcessHeap(), 0, buf);
 }

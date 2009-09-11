@@ -82,7 +82,7 @@ HDSKSPC WINAPI SetupCreateDiskSpaceListW(PVOID Reserved1, DWORD Reserved2, UINT 
         }
        ptr += lstrlenW(ptr) + 1;
     }
-    return  (HANDLE)list;
+    return list;
 }
 
 
@@ -115,7 +115,7 @@ BOOL WINAPI SetupQuerySpaceRequiredOnDriveA(HDSKSPC DiskSpace,
 {
     WCHAR driveW[20];
     unsigned int i;
-    LPDISKSPACELIST list = (LPDISKSPACELIST)DiskSpace;
+    LPDISKSPACELIST list = DiskSpace;
     BOOL rc = FALSE;
     static const WCHAR bkslsh[]= {'\\',0};
 
@@ -144,7 +144,7 @@ BOOL WINAPI SetupQuerySpaceRequiredOnDriveA(HDSKSPC DiskSpace,
 */
 BOOL WINAPI SetupDestroyDiskSpaceList(HDSKSPC DiskSpace)
 {
-    LPDISKSPACELIST list = (LPDISKSPACELIST)DiskSpace;
+    LPDISKSPACELIST list = DiskSpace;
     HeapFree(GetProcessHeap(),0,list);
     return TRUE; 
 }

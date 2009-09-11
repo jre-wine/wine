@@ -69,7 +69,6 @@
 @ cdecl GetAsyncKeyState(long) X11DRV_GetAsyncKeyState
 @ cdecl GetKeyNameText(long ptr long) X11DRV_GetKeyNameText
 @ cdecl GetKeyboardLayout(long) X11DRV_GetKeyboardLayout
-@ cdecl GetKeyboardLayoutList(long ptr) X11DRV_GetKeyboardLayoutList
 @ cdecl GetKeyboardLayoutName(ptr) X11DRV_GetKeyboardLayoutName
 @ cdecl LoadKeyboardLayout(wstr long) X11DRV_LoadKeyboardLayout
 @ cdecl MapVirtualKeyEx(long long long) X11DRV_MapVirtualKeyEx
@@ -106,14 +105,17 @@
 @ cdecl SetClipboardData(long long long long) X11DRV_SetClipboardData
 @ cdecl SetCapture(long long) X11DRV_SetCapture
 @ cdecl SetFocus(long) X11DRV_SetFocus
+@ cdecl SetLayeredWindowAttributes(long long long long) X11DRV_SetLayeredWindowAttributes
 @ cdecl SetParent(long long long) X11DRV_SetParent
 @ cdecl SetWindowIcon(long long long) X11DRV_SetWindowIcon
-@ cdecl SetWindowPos(long long long ptr ptr ptr ptr) X11DRV_SetWindowPos
 @ cdecl SetWindowRgn(long long long) X11DRV_SetWindowRgn
-@ cdecl SetWindowStyle(ptr long) X11DRV_SetWindowStyle
+@ cdecl SetWindowStyle(ptr long ptr) X11DRV_SetWindowStyle
 @ cdecl SetWindowText(long wstr) X11DRV_SetWindowText
-@ cdecl SysCommand(long long) X11DRV_SysCommand
+@ cdecl ShowWindow(long long ptr long) X11DRV_ShowWindow
+@ cdecl SysCommand(long long long) X11DRV_SysCommand
 @ cdecl WindowMessage(long long long long) X11DRV_WindowMessage
+@ cdecl WindowPosChanging(long long long ptr ptr ptr) X11DRV_WindowPosChanging
+@ cdecl WindowPosChanged(long long long ptr ptr ptr ptr) X11DRV_WindowPosChanged
 
 # WinTab32
 @ cdecl AttachEventQueueToTablet(long) X11DRV_AttachEventQueueToTablet
@@ -131,9 +133,6 @@
 # System tray
 @ cdecl wine_notify_icon(long ptr)
 
-# XIM
-@ cdecl ForceXIMReset(long) X11DRV_ForceXIMReset
-
 # OpenGL
 @ cdecl wglCopyContext(long long long) X11DRV_wglCopyContext
 @ cdecl wglCreateContext(ptr) X11DRV_wglCreateContext
@@ -142,6 +141,7 @@
 @ cdecl wglGetPbufferDCARB(ptr ptr) X11DRV_wglGetPbufferDCARB
 @ cdecl wglMakeContextCurrentARB(ptr ptr long) X11DRV_wglMakeContextCurrentARB
 @ cdecl wglMakeCurrent(ptr long) X11DRV_wglMakeCurrent
+@ cdecl wglSetPixelFormatWINE(ptr long ptr) X11DRV_wglSetPixelFormatWINE
 @ cdecl wglShareLists(long long) X11DRV_wglShareLists
 @ cdecl wglUseFontBitmapsA(ptr long long long) X11DRV_wglUseFontBitmapsA
 @ cdecl wglUseFontBitmapsW(ptr long long long) X11DRV_wglUseFontBitmapsW
@@ -161,5 +161,5 @@
 @ stdcall ImeSetCompositionString(long long ptr long ptr long)
 @ stdcall ImeConversionList(long wstr ptr long long)
 @ stdcall ImeProcessKey(long long long ptr)
-@ stdcall ImeGetRegisterWordStyle(wstr long wstr)
+@ stdcall ImeGetRegisterWordStyle(long ptr)
 @ stdcall ImeGetImeMenuItems(long long long ptr ptr long)

@@ -22,6 +22,9 @@
 
 #include <time.h>
 #include <math.h>
+#ifdef HAVE_SYS_UTSNAME_H
+#include <sys/utsname.h>
+#endif
 
 #include "wine/library.h"
 #include "wine/debug.h"
@@ -34,12 +37,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntdll);
 #define POP_FPU(x) DO_FPU("fstpl",x)
 #endif
 
-void dump_ObjectAttributes (const OBJECT_ATTRIBUTES *oa)
+LPCSTR debugstr_ObjectAttributes(const OBJECT_ATTRIBUTES *oa)
 {
-	if (oa)
-	  TRACE("%p:(name=%s, attr=0x%08x, hRoot=%p, sd=%p)\n",
-	    oa, debugstr_us(oa->ObjectName),
-	    oa->Attributes, oa->RootDirectory, oa->SecurityDescriptor);
+    if (!oa) return "<null>";
+    return wine_dbg_sprintf( "{name=%s, attr=0x%08x, hRoot=%p, sd=%p}\n",
+                             debugstr_us(oa->ObjectName), oa->Attributes,
+                             oa->RootDirectory, oa->SecurityDescriptor );
 }
 
 LPCSTR debugstr_us( const UNICODE_STRING *us )
@@ -82,18 +85,6 @@ LONGLONG CDECL NTDLL__ftol(double fl)
 #endif /* !defined(__GNUC__) && defined(__i386__) */
 
 /*********************************************************************
- *                  _ftol   (NTDLL.@)
- * VERSION
- *	[!i386]
- */
-#ifndef __i386__
-LONG CDECL NTDLL__ftol(double fl)
-{
-	return (LONG) fl;
-}
-#endif /* !defined(__i386__) */
-
-/*********************************************************************
  *                  _CIpow   (NTDLL.@)
  * VERSION
  *	[GNUC && i386]
@@ -127,19 +118,6 @@ double CDECL NTDLL__CIpow(double x,double y)
 #endif /* !defined(__GNUC__) && defined(__i386__) */
 
 /*********************************************************************
- *                  _CIpow   (NTDLL.@)
- * VERSION
- *	[!i386]
- */
-#ifndef __i386__
-double CDECL NTDLL__CIpow(double x,double y)
-{
-	return pow(x,y);
-}
-#endif /* !defined(__i386__) */
-
-
-/*********************************************************************
  *                  wine_get_version   (NTDLL.@)
  */
 const char * CDECL NTDLL_wine_get_version(void)
@@ -153,6 +131,28 @@ const char * CDECL NTDLL_wine_get_version(void)
 const char * CDECL NTDLL_wine_get_build_id(void)
 {
     return wine_get_build_id();
+}
+
+/*********************************************************************
+ *                  wine_get_host_version   (NTDLL.@)
+ */
+void CDECL NTDLL_wine_get_host_version( const char **sysname, const char **release )
+{
+#ifdef HAVE_SYS_UTSNAME_H
+    static struct utsname buf;
+    static int init_done;
+
+    if (!init_done)
+    {
+        uname( &buf );
+        init_done = 1;
+    }
+    if (sysname) *sysname = buf.sysname;
+    if (release) *release = buf.release;
+#else
+    if (sysname) *sysname = "";
+    if (release) *release = "";
+#endif
 }
 
 /*********************************************************************

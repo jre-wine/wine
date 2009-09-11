@@ -23,8 +23,11 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <assert.h>
 #include <sys/types.h>
-#include <dirent.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -134,6 +137,15 @@ static inline int getdents64( int fd, char *de, unsigned int size )
 
 #define MAX_DIR_ENTRY_LEN 255  /* max length of a directory entry in chars */
 
+#define MAX_IGNORED_FILES 4
+
+static struct
+{
+    dev_t dev;
+    ino_t ino;
+} ignored_files[MAX_IGNORED_FILES];
+static int ignored_files_count;
+
 static const unsigned int max_dir_info_size = FIELD_OFFSET( FILE_BOTH_DIR_INFORMATION, FileName[MAX_DIR_ENTRY_LEN] );
 
 static int show_dot_files = -1;
@@ -168,6 +180,28 @@ static inline int is_valid_mounted_device( const struct stat *st )
     /* disks are char devices on *BSD */
     return S_ISCHR( st->st_mode );
 #endif
+}
+
+static inline void ignore_file( const char *name )
+{
+    struct stat st;
+    assert( ignored_files_count < MAX_IGNORED_FILES );
+    if (!stat( name, &st ))
+    {
+        ignored_files[ignored_files_count].dev = st.st_dev;
+        ignored_files[ignored_files_count].ino = st.st_ino;
+        ignored_files_count++;
+    }
+}
+
+static inline BOOL is_ignored_file( const struct stat *st )
+{
+    unsigned int i;
+
+    for (i = 0; i < ignored_files_count; i++)
+        if (ignored_files[i].dev == st->st_dev && ignored_files[i].ino == st->st_ino)
+            return TRUE;
+    return FALSE;
 }
 
 /***********************************************************************
@@ -692,6 +726,14 @@ static void init_options(void)
         NtClose( hkey );
     }
     NtClose( root );
+
+    /* a couple of directories that we don't want to return in directory searches */
+    ignore_file( wine_get_config_dir() );
+    ignore_file( "/dev" );
+    ignore_file( "/proc" );
+#ifdef linux
+    ignore_file( "/sys" );
+#endif
 }
 
 
@@ -926,6 +968,11 @@ static FILE_BOTH_DIR_INFORMATION *append_entry( void *info_ptr, ULONG_PTR *pos, 
     {
         if (stat( long_name, &st ) == -1) return NULL;
         if (S_ISDIR( st.st_mode )) info->FileAttributes |= FILE_ATTRIBUTE_REPARSE_POINT;
+    }
+    if (is_ignored_file( &st ))
+    {
+        TRACE( "ignoring file %s\n", long_name );
+        return NULL;
     }
 
     info->NextEntryOffset = total_len;
@@ -1189,7 +1236,8 @@ static int read_directory_getdents( int fd, IO_STATUS_BLOCK *io, void *buffer, U
     while (res > 0)
     {
         res -= de->d_reclen;
-        if (!(fake_dot_dot && (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))) &&
+        if (de->d_ino &&
+            !(fake_dot_dot && (!strcmp( de->d_name, "." ) || !strcmp( de->d_name, ".." ))) &&
             (info = append_entry( buffer, &io->Information, length, de->d_name, NULL, mask )))
         {
             last_info = info;
@@ -1225,6 +1273,30 @@ done:
 }
 
 #elif defined HAVE_GETDIRENTRIES
+
+#if _DARWIN_FEATURE_64_BIT_INODE
+
+/* Darwin doesn't provide a version of getdirentries with support for 64-bit
+ * inodes.  When 64-bit inodes are enabled, the getdirentries symbol is mapped
+ * to _getdirentries_is_not_available_when_64_bit_inodes_are_in_effect so that
+ * we get link errors if we try to use it.  We still need getdirentries, but we
+ * don't need it to support 64-bit inodes.  So, we use the legacy getdirentries
+ * with 32-bit inodes.  We have to be careful to use a corresponding dirent
+ * structure, too.
+ */
+int darwin_legacy_getdirentries(int, char *, int, long *) __asm("_getdirentries");
+#define getdirentries darwin_legacy_getdirentries
+
+struct darwin_legacy_dirent {
+    __uint32_t d_ino;
+    __uint16_t d_reclen;
+    __uint8_t  d_type;
+    __uint8_t  d_namlen;
+    char d_name[__DARWIN_MAXNAMLEN + 1];
+};
+#define dirent darwin_legacy_dirent
+
+#endif
 
 /***********************************************************************
  *           wine_getdirentries
@@ -1390,6 +1462,12 @@ done:
     if (data != local_buffer) RtlFreeHeap( GetProcessHeap(), 0, data );
     return res;
 }
+
+#if _DARWIN_FEATURE_64_BIT_INODE
+#undef getdirentries
+#undef dirent
+#endif
+
 #endif  /* HAVE_GETDIRENTRIES */
 
 
@@ -1508,7 +1586,7 @@ static int read_directory_stat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
         ret = stat( unix_name, &st );
         if (!ret)
         {
-            FILE_BOTH_DIR_INFORMATION *info = append_entry( buffer, &io->Information, length, unix_name, NULL, mask );
+            FILE_BOTH_DIR_INFORMATION *info = append_entry( buffer, &io->Information, length, unix_name, NULL, NULL );
             if (info)
             {
                 info->NextEntryOffset = 0;
@@ -1517,6 +1595,7 @@ static int read_directory_stat( int fd, IO_STATUS_BLOCK *io, void *buffer, ULONG
                 else
                     lseek( fd, 1, SEEK_CUR );
             }
+            else io->u.Status = STATUS_NO_MORE_FILES;
         }
     }
     else ret = -1;
@@ -1828,8 +1907,8 @@ static NTSTATUS get_dos_device( const WCHAR *name, UINT name_len, ANSI_STRING *u
             dev[2] = 0;  /* remove last ':' to get the drive mount point symlink */
             new_name = get_default_drive_device( unix_name );
         }
-        else if (!strncmp( dev, "com", 3 )) new_name = get_default_com_device( dev[3] - '0' );
-        else if (!strncmp( dev, "lpt", 3 )) new_name = get_default_lpt_device( dev[3] - '0' );
+        else if (!strncmp( dev, "com", 3 )) new_name = get_default_com_device( atoi(dev + 3 ));
+        else if (!strncmp( dev, "lpt", 3 )) new_name = get_default_lpt_device( atoi(dev + 3 ));
 
         if (!new_name) break;
 
@@ -1870,8 +1949,8 @@ static inline int get_dos_prefix_len( const UNICODE_STRING *name )
  * element doesn't have to exist; in that case STATUS_NO_SUCH_FILE is
  * returned, but the unix name is still filled in properly.
  */
-NTSTATUS wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
-                                    UINT disposition, BOOLEAN check_case )
+NTSTATUS CDECL wine_nt_to_unix_file_name( const UNICODE_STRING *nameW, ANSI_STRING *unix_name_ret,
+                                          UINT disposition, BOOLEAN check_case )
 {
     static const WCHAR unixW[] = {'u','n','i','x'};
     static const WCHAR invalid_charsW[] = { INVALID_NT_CHARS, 0 };
@@ -2081,6 +2160,29 @@ done:
 
 
 /******************************************************************
+ *		RtlWow64EnableFsRedirection   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64EnableFsRedirection( BOOLEAN enable )
+{
+    if (!is_wow64) return STATUS_NOT_IMPLEMENTED;
+    ntdll_get_thread_data()->wow64_redir = enable;
+    return STATUS_SUCCESS;
+}
+
+
+/******************************************************************
+ *		RtlWow64EnableFsRedirectionEx   (NTDLL.@)
+ */
+NTSTATUS WINAPI RtlWow64EnableFsRedirectionEx( ULONG enable, ULONG *old_value )
+{
+    if (!is_wow64) return STATUS_NOT_IMPLEMENTED;
+    *old_value = ntdll_get_thread_data()->wow64_redir;
+    ntdll_get_thread_data()->wow64_redir = enable;
+    return STATUS_SUCCESS;
+}
+
+
+/******************************************************************
  *		RtlDoesFileExists_U   (NTDLL.@)
  */
 BOOLEAN WINAPI RtlDoesFileExists_U(LPCWSTR file_name)
@@ -2253,7 +2355,7 @@ static void WINAPI read_changes_user_apc( void *arg, IO_STATUS_BLOCK *io, ULONG 
     RtlFreeHeap( GetProcessHeap(), 0, info );
 }
 
-static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, ULONG_PTR *total )
+static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS status, void **apc )
 {
     struct read_changes_info *info = user;
     char path[PATH_MAX];
@@ -2262,7 +2364,7 @@ static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS st
 
     SERVER_START_REQ( read_change )
     {
-        req->handle = info->FileHandle;
+        req->handle = wine_server_obj_handle( info->FileHandle );
         wine_server_set_reply( req, path, PATH_MAX );
         ret = wine_server_call( req );
         action = reply->action;
@@ -2275,7 +2377,7 @@ static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS st
     {
         PFILE_NOTIFY_INFORMATION pfni;
 
-        pfni = (PFILE_NOTIFY_INFORMATION) info->Buffer;
+        pfni = info->Buffer;
 
         /* convert to an NT style path */
         for (i=0; i<len; i++)
@@ -2298,7 +2400,8 @@ static NTSTATUS read_changes_apc( void *user, PIO_STATUS_BLOCK iosb, NTSTATUS st
     }
 
     iosb->u.Status = ret;
-    iosb->Information = *total = len;
+    iosb->Information = len;
+    *apc = read_changes_user_apc;
     return ret;
 }
 
@@ -2347,15 +2450,14 @@ NtNotifyChangeDirectoryFile( HANDLE FileHandle, HANDLE Event,
 
     SERVER_START_REQ( read_directory_changes )
     {
-        req->handle     = FileHandle;
         req->filter     = CompletionFilter;
         req->want_data  = (Buffer != NULL);
         req->subtree    = WatchTree;
-        req->async.callback = read_changes_apc;
-        req->async.iosb     = IoStatusBlock;
-        req->async.arg      = info;
-        req->async.apc      = read_changes_user_apc;
-        req->async.event    = Event;
+        req->async.handle   = wine_server_obj_handle( FileHandle );
+        req->async.callback = wine_server_client_ptr( read_changes_apc );
+        req->async.iosb     = wine_server_client_ptr( IoStatusBlock );
+        req->async.arg      = wine_server_client_ptr( info );
+        req->async.event    = wine_server_obj_handle( Event );
         req->async.cvalue   = cvalue;
         status = wine_server_call( req );
     }

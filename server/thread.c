@@ -50,6 +50,21 @@
 #include "security.h"
 
 
+#define CPU_FLAG(cpu) (1 << (cpu))
+#ifdef __i386__
+static const unsigned int supported_cpus = CPU_FLAG(CPU_x86);
+#elif defined(__x86_64__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_x86_64) | CPU_FLAG(CPU_x86);
+#elif defined(__ALPHA__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_ALPHA);
+#elif defined(__powerpc__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_POWERPC);
+#elif defined(__sparc__)
+static const unsigned int supported_cpus = CPU_FLAG(CPU_SPARC);
+#else
+#error Unsupported CPU
+#endif
+
 /* thread queues */
 
 struct thread_wait
@@ -58,7 +73,7 @@ struct thread_wait
     struct thread          *thread;     /* owner thread */
     int                     count;      /* count of objects */
     int                     flags;
-    void                   *cookie;     /* magic cookie to return to client */
+    client_ptr_t            cookie;     /* magic cookie to return to client */
     timeout_t               timeout;
     struct timeout_user    *user;
     struct wait_queue_entry queues[1];
@@ -154,7 +169,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->unix_tid        = -1;  /* not known yet */
     thread->context         = NULL;
     thread->suspend_context = NULL;
-    thread->teb             = NULL;
+    thread->teb             = 0;
     thread->debug_ctx       = NULL;
     thread->debug_event     = NULL;
     thread->debug_break     = 0;
@@ -188,9 +203,9 @@ static inline void init_thread_structure( struct thread *thread )
 }
 
 /* check if address looks valid for a client-side data structure (TEB etc.) */
-static inline int is_valid_address( void *addr )
+static inline int is_valid_address( client_ptr_t addr )
 {
-    return addr && !((unsigned long)addr % sizeof(int));
+    return addr && !(addr % sizeof(int));
 }
 
 /* create a new thread */
@@ -249,9 +264,9 @@ static void cleanup_thread( struct thread *thread )
     if (thread->reply_fd) release_object( thread->reply_fd );
     if (thread->wait_fd) release_object( thread->wait_fd );
     free( thread->suspend_context );
-    free_msg_queue( thread );
     cleanup_clipboard_thread(thread);
     destroy_thread_windows( thread );
+    free_msg_queue( thread );
     close_thread_desktop( thread );
     for (i = 0; i < MAX_INFLIGHT_FDS; i++)
     {
@@ -291,8 +306,8 @@ static void dump_thread( struct object *obj, int verbose )
     struct thread *thread = (struct thread *)obj;
     assert( obj->ops == &thread_ops );
 
-    fprintf( stderr, "Thread id=%04x unix pid=%d unix tid=%d teb=%p state=%d\n",
-             thread->id, thread->unix_pid, thread->unix_tid, thread->teb, thread->state );
+    fprintf( stderr, "Thread id=%04x unix pid=%d unix tid=%d state=%d\n",
+             thread->id, thread->unix_pid, thread->unix_tid, thread->state );
 }
 
 static int thread_signaled( struct object *obj, struct thread *thread )
@@ -560,11 +575,12 @@ static int check_wait( struct thread *thread )
 }
 
 /* send the wakeup signal to a thread */
-static int send_thread_wakeup( struct thread *thread, void *cookie, int signaled )
+static int send_thread_wakeup( struct thread *thread, client_ptr_t cookie, int signaled )
 {
     struct wake_up_reply reply;
     int ret;
 
+    memset( &reply, 0, sizeof(reply) );
     reply.cookie   = cookie;
     reply.signaled = signaled;
     if ((ret = write( get_unix_fd( thread->wait_fd ), &reply, sizeof(reply) )) == sizeof(reply))
@@ -583,15 +599,14 @@ static int send_thread_wakeup( struct thread *thread, void *cookie, int signaled
 int wake_thread( struct thread *thread )
 {
     int signaled, count;
-    void *cookie;
+    client_ptr_t cookie;
 
     for (count = 0; thread->wait; count++)
     {
         if ((signaled = check_wait( thread )) == -1) break;
 
         cookie = thread->wait->cookie;
-        if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d cookie=%p\n",
-                                  thread->id, signaled, cookie );
+        if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d\n", thread->id, signaled );
         end_wait( thread );
         if (send_thread_wakeup( thread, cookie, signaled ) == -1) /* error */
 	    break;
@@ -604,14 +619,13 @@ static void thread_timeout( void *ptr )
 {
     struct thread_wait *wait = ptr;
     struct thread *thread = wait->thread;
-    void *cookie = wait->cookie;
+    client_ptr_t cookie = wait->cookie;
 
     wait->user = NULL;
     if (thread->wait != wait) return; /* not the top-level wait, ignore it */
     if (thread->suspend + thread->process->suspend > 0) return;  /* suspended, ignore it */
 
-    if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=%d cookie=%p\n",
-                              thread->id, (int)STATUS_TIMEOUT, cookie );
+    if (debug_level) fprintf( stderr, "%04x: *wakeup* signaled=TIMEOUT\n", thread->id );
     end_wait( thread );
     if (send_thread_wakeup( thread, cookie, STATUS_TIMEOUT ) == -1) return;
     /* check if other objects have become signaled in the meantime */
@@ -634,7 +648,7 @@ static int signal_object( obj_handle_t handle )
 }
 
 /* select on a list of handles */
-static timeout_t select_on( unsigned int count, void *cookie, const obj_handle_t *handles,
+static timeout_t select_on( unsigned int count, client_ptr_t cookie, const obj_handle_t *handles,
                             int flags, timeout_t timeout, obj_handle_t signal_obj )
 {
     int ret;
@@ -698,15 +712,15 @@ done:
 /* attempt to wake threads sleeping on the object wait queue */
 void wake_up( struct object *obj, int max )
 {
-    struct list *ptr, *next;
+    struct list *ptr;
 
-    LIST_FOR_EACH_SAFE( ptr, next, &obj->wait_queue )
+    LIST_FOR_EACH( ptr, &obj->wait_queue )
     {
         struct wait_queue_entry *entry = LIST_ENTRY( ptr, struct wait_queue_entry, entry );
-        if (wake_thread( entry->thread ))
-        {
-            if (max && !--max) break;
-        }
+        if (!wake_thread( entry->thread )) continue;
+        if (max && !--max) break;
+        /* restart at the head of the list since a wake up can change the object wait queue */
+        ptr = &obj->wait_queue;
     }
 }
 
@@ -916,7 +930,7 @@ void kill_thread( struct thread *thread, int violent_death )
     if (thread->wait)
     {
         while (thread->wait) end_wait( thread );
-        send_thread_wakeup( thread, NULL, STATUS_PENDING );
+        send_thread_wakeup( thread, 0, STATUS_PENDING );
         /* if it is waiting on the socket, we don't need to send a SIGQUIT */
         violent_death = 0;
     }
@@ -930,19 +944,63 @@ void kill_thread( struct thread *thread, int violent_death )
     release_object( thread );
 }
 
+/* copy parts of a context structure */
+static void copy_context( context_t *to, const context_t *from, unsigned int flags )
+{
+    assert( to->cpu == from->cpu );
+    to->flags |= flags;
+    if (flags & SERVER_CTX_CONTROL) to->ctl = from->ctl;
+    if (flags & SERVER_CTX_INTEGER) to->integer = from->integer;
+    if (flags & SERVER_CTX_SEGMENTS) to->seg = from->seg;
+    if (flags & SERVER_CTX_FLOATING_POINT) to->fp = from->fp;
+    if (flags & SERVER_CTX_DEBUG_REGISTERS) to->debug = from->debug;
+    if (flags & SERVER_CTX_EXTENDED_REGISTERS) to->ext = from->ext;
+}
+
+/* return the context flags that correspond to system regs */
+/* (system regs are the ones we can't access on the client side) */
+static unsigned int get_context_system_regs( enum cpu_type cpu )
+{
+    switch (cpu)
+    {
+    case CPU_x86:     return SERVER_CTX_DEBUG_REGISTERS;
+    case CPU_x86_64:  return SERVER_CTX_DEBUG_REGISTERS;
+    case CPU_ALPHA:   return 0;
+    case CPU_POWERPC: return 0;
+    case CPU_SPARC:   return 0;
+    }
+    return 0;
+}
+
 /* trigger a breakpoint event in a given thread */
 void break_thread( struct thread *thread )
 {
-    struct debug_event_exception data;
+    debug_event_t data;
 
     assert( thread->context );
 
-    data.record.ExceptionCode    = STATUS_BREAKPOINT;
-    data.record.ExceptionFlags   = EXCEPTION_CONTINUABLE;
-    data.record.ExceptionRecord  = NULL;
-    data.record.ExceptionAddress = get_context_ip( thread->context );
-    data.record.NumberParameters = 0;
-    data.first = 1;
+    memset( &data, 0, sizeof(data) );
+    data.exception.first     = 1;
+    data.exception.exc_code  = STATUS_BREAKPOINT;
+    data.exception.flags     = EXCEPTION_CONTINUABLE;
+    switch (thread->context->cpu)
+    {
+    case CPU_x86:
+        data.exception.address = thread->context->ctl.i386_regs.eip;
+        break;
+    case CPU_x86_64:
+        data.exception.address = thread->context->ctl.x86_64_regs.rip;
+        break;
+    case CPU_ALPHA:
+        data.exception.address = thread->context->ctl.alpha_regs.fir;
+        break;
+    case CPU_POWERPC:
+        data.exception.address = thread->context->ctl.powerpc_regs.iar;
+        break;
+    case CPU_SPARC:
+        data.exception.address = thread->context->ctl.sparc_regs.pc;
+        break;
+    }
     generate_debug_event( thread, EXCEPTION_DEBUG_EVENT, &data );
     thread->debug_break = 0;
 }
@@ -1033,7 +1091,7 @@ DECL_HANDLER(init_thread)
     if (!(current->wait_fd  = create_anonymous_fd( &thread_fd_ops, wait_fd, &current->obj, 0 )))
         return;
 
-    if (!is_valid_address(req->teb) || !is_valid_address(req->peb) || !is_valid_address(req->ldt_copy))
+    if (!is_valid_address(req->teb))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1045,17 +1103,27 @@ DECL_HANDLER(init_thread)
 
     if (!process->peb)  /* first thread, initialize the process too */
     {
+        if (!CPU_FLAG(req->cpu) || !(supported_cpus & CPU_FLAG(req->cpu)))
+        {
+            set_error( STATUS_NOT_SUPPORTED );
+            return;
+        }
         process->unix_pid = current->unix_pid;
-        process->peb      = req->peb;
-        process->ldt_copy = req->ldt_copy;
+        process->peb      = req->entry;
+        process->cpu      = req->cpu;
         reply->info_size  = init_process( current );
     }
     else
     {
+        if (req->cpu != process->cpu)
+        {
+            set_error( STATUS_INVALID_PARAMETER );
+            return;
+        }
         if (process->unix_pid != current->unix_pid)
             process->unix_pid = -1;  /* can happen with linuxthreads */
         if (current->suspend + process->suspend > 0) stop_thread( current );
-        generate_debug_event( current, CREATE_THREAD_DEBUG_EVENT, req->entry );
+        generate_debug_event( current, CREATE_THREAD_DEBUG_EVENT, &req->entry );
     }
     debug_level = max( debug_level, req->debug_level );
 
@@ -1063,6 +1131,7 @@ DECL_HANDLER(init_thread)
     reply->tid     = get_thread_id( current );
     reply->version = SERVER_PROTOCOL_VERSION;
     reply->server_start = server_start_time;
+    reply->all_cpus     = supported_cpus;
     return;
 
  error:
@@ -1160,8 +1229,7 @@ DECL_HANDLER(resume_thread)
 
     if ((thread = get_thread_from_handle( req->handle, THREAD_SUSPEND_RESUME )))
     {
-        if (thread->state == TERMINATED) set_error( STATUS_ACCESS_DENIED );
-        else reply->count = resume_thread( thread );
+        reply->count = resume_thread( thread );
         release_object( thread );
     }
 }
@@ -1198,7 +1266,9 @@ DECL_HANDLER(select)
         }
         else if (apc->result.type == APC_ASYNC_IO)
         {
-            if (apc->owner) async_set_result( apc->owner, apc->result.async_io.status, apc->result.async_io.total );
+            if (apc->owner)
+                async_set_result( apc->owner, apc->result.async_io.status,
+                                  apc->result.async_io.total, apc->result.async_io.apc );
         }
         wake_up( &apc->obj, 0 );
         close_handle( current->process, req->prev_apc );
@@ -1243,7 +1313,7 @@ DECL_HANDLER(queue_apc)
     {
     case APC_NONE:
     case APC_USER:
-        thread = get_thread_from_handle( req->thread, THREAD_SET_CONTEXT );
+        thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT );
         break;
     case APC_VIRTUAL_ALLOC:
     case APC_VIRTUAL_FREE:
@@ -1252,13 +1322,13 @@ DECL_HANDLER(queue_apc)
     case APC_VIRTUAL_LOCK:
     case APC_VIRTUAL_UNLOCK:
     case APC_UNMAP_VIEW:
-        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        process = get_process_from_handle( req->handle, PROCESS_VM_OPERATION );
         break;
     case APC_VIRTUAL_QUERY:
-        process = get_process_from_handle( req->process, PROCESS_QUERY_INFORMATION );
+        process = get_process_from_handle( req->handle, PROCESS_QUERY_INFORMATION );
         break;
     case APC_MAP_VIEW:
-        process = get_process_from_handle( req->process, PROCESS_VM_OPERATION );
+        process = get_process_from_handle( req->handle, PROCESS_VM_OPERATION );
         if (process && process != current->process)
         {
             /* duplicate the handle into the target process */
@@ -1273,7 +1343,7 @@ DECL_HANDLER(queue_apc)
         }
         break;
     case APC_CREATE_THREAD:
-        process = get_process_from_handle( req->process, PROCESS_CREATE_THREAD );
+        process = get_process_from_handle( req->handle, PROCESS_CREATE_THREAD );
         break;
     default:
         set_error( STATUS_INVALID_PARAMETER );
@@ -1332,9 +1402,9 @@ DECL_HANDLER(get_apc_result)
 DECL_HANDLER(get_thread_context)
 {
     struct thread *thread;
-    CONTEXT *context;
+    context_t *context;
 
-    if (get_reply_max_size() < sizeof(CONTEXT))
+    if (get_reply_max_size() < sizeof(context_t))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1351,7 +1421,7 @@ DECL_HANDLER(get_thread_context)
         else
         {
             if (thread->context == thread->suspend_context) thread->context = NULL;
-            set_reply_data_ptr( thread->suspend_context, sizeof(CONTEXT) );
+            set_reply_data_ptr( thread->suspend_context, sizeof(context_t) );
             thread->suspend_context = NULL;
         }
     }
@@ -1361,12 +1431,12 @@ DECL_HANDLER(get_thread_context)
         if (thread->state != RUNNING) set_error( STATUS_ACCESS_DENIED );
         else set_error( STATUS_PENDING );
     }
-    else if ((context = set_reply_data_size( sizeof(CONTEXT) )))
+    else if ((context = set_reply_data_size( sizeof(context_t) )))
     {
-        unsigned int flags = get_context_system_regs( req->flags );
+        unsigned int flags = get_context_system_regs( thread->process->cpu );
 
-        memset( context, 0, sizeof(CONTEXT) );
-        context->ContextFlags = get_context_cpu_flag();
+        memset( context, 0, sizeof(context_t) );
+        context->cpu = thread->process->cpu;
         if (thread->context) copy_context( context, thread->context, req->flags & ~flags );
         if (flags) get_thread_context( thread, context, flags );
     }
@@ -1378,8 +1448,9 @@ DECL_HANDLER(get_thread_context)
 DECL_HANDLER(set_thread_context)
 {
     struct thread *thread;
+    const context_t *context = get_req_data();
 
-    if (get_req_data_size() < sizeof(CONTEXT))
+    if (get_req_data_size() < sizeof(context_t))
     {
         set_error( STATUS_INVALID_PARAMETER );
         return;
@@ -1388,14 +1459,14 @@ DECL_HANDLER(set_thread_context)
 
     if (req->suspend)
     {
-        if (thread != current || thread->context)
+        if (thread != current || thread->context || context->cpu != thread->process->cpu)
         {
             /* nested suspend or exception, shouldn't happen */
             set_error( STATUS_INVALID_PARAMETER );
         }
-        else if ((thread->suspend_context = mem_alloc( sizeof(CONTEXT) )))
+        else if ((thread->suspend_context = mem_alloc( sizeof(context_t) )))
         {
-            memcpy( thread->suspend_context, get_req_data(), sizeof(CONTEXT) );
+            memcpy( thread->suspend_context, get_req_data(), sizeof(context_t) );
             thread->context = thread->suspend_context;
             if (thread->debug_break) break_thread( thread );
         }
@@ -1406,15 +1477,16 @@ DECL_HANDLER(set_thread_context)
         if (thread->state != RUNNING) set_error( STATUS_ACCESS_DENIED );
         else set_error( STATUS_PENDING );
     }
-    else
+    else if (context->cpu == thread->process->cpu)
     {
-        const CONTEXT *context = get_req_data();
-        unsigned int flags = get_context_system_regs( req->flags );
+        unsigned int system_flags = get_context_system_regs(context->cpu) & context->flags;
+        unsigned int client_flags = context->flags & ~system_flags;
 
-        if (flags) set_thread_context( thread, context, flags );
-        if (thread->context && !get_error())
-            copy_context( thread->context, context, req->flags & ~flags );
+        if (system_flags) set_thread_context( thread, context, system_flags );
+        if (thread->context && !get_error()) copy_context( thread->context, context, client_flags );
     }
+    else set_error( STATUS_INVALID_PARAMETER );
+
     reply->self = (thread == current);
     release_object( thread );
 }

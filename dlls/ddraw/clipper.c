@@ -2,7 +2,7 @@
  *
  * Copyright 2000 (c) Marcus Meissner
  * Copyright 2000 (c) TransGaming Technologies Inc.
- * Copyright 2006 (c) Stefan Dösinger
+ * Copyright 2006 (c) Stefan DÃ¶singer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -24,6 +24,8 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define COBJMACROS
 
 #include "windef.h"
 #include "winbase.h"
@@ -60,14 +62,12 @@ WINE_DEFAULT_DEBUG_CHANNEL(ddraw);
 static HRESULT WINAPI IDirectDrawClipperImpl_QueryInterface(
     LPDIRECTDRAWCLIPPER iface, REFIID riid, LPVOID* ppvObj
 ) {
-    IDirectDrawClipperImpl *This = (IDirectDrawClipperImpl *)iface;
-
     if (IsEqualGUID(&IID_IUnknown, riid)
 	|| IsEqualGUID(&IID_IDirectDrawClipper, riid))
     {
-	*ppvObj = ICOM_INTERFACE(This, IDirectDrawClipper);
-	InterlockedIncrement(&This->ref);
-	return S_OK;
+        IUnknown_AddRef(iface);
+        *ppvObj = iface;
+        return S_OK;
     }
     else
     {
@@ -265,7 +265,7 @@ static HRESULT WINAPI IDirectDrawClipperImpl_Initialize(
         return DDERR_ALREADYINITIALIZED;
     }
 
-    pOwner = ICOM_OBJECT(IDirectDrawImpl, IDirectDraw, lpDD);
+    pOwner = lpDD ? ddraw_from_ddraw1(lpDD) : NULL;
     This->ddraw_owner = pOwner;
 
     LeaveCriticalSection(&ddraw_cs);

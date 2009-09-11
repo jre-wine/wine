@@ -71,13 +71,7 @@ CHARFORMAT2W *ME_ToCF2W(CHARFORMAT2W *to, CHARFORMAT2W *from)
   return (from->cbSize >= sizeof(CHARFORMAT2W)) ? from : NULL;
 }
 
-void ME_CopyToCF2W(CHARFORMAT2W *to, CHARFORMAT2W *from)
-{
-  if (ME_ToCF2W(to, from) == from)
-    *to = *from;
-}
-
-CHARFORMAT2W *ME_ToCFAny(CHARFORMAT2W *to, CHARFORMAT2W *from)
+static CHARFORMAT2W *ME_ToCFAny(CHARFORMAT2W *to, CHARFORMAT2W *from)
 {
   assert(from->cbSize == sizeof(CHARFORMAT2W));
   if (to->cbSize == sizeof(CHARFORMATA))
@@ -162,6 +156,7 @@ ME_Style *ME_MakeStyle(CHARFORMAT2W *style) {
   s->hFont = NULL;
   s->tm.tmAscent = -1;
   all_refs++;
+  TRACE_(richedit_style)("ME_MakeStyle %p, total refs=%d\n", s, all_refs);
   return s;
 }
 
@@ -197,7 +192,10 @@ ME_Style *ME_ApplyStyle(ME_Style *sSrc, CHARFORMAT2W *style)
   COPY_STYLE_ITEM(CFM_LCID, lcid);
   COPY_STYLE_ITEM(CFM_OFFSET, yOffset);
   COPY_STYLE_ITEM(CFM_REVAUTHOR, bRevAuthor);
-  COPY_STYLE_ITEM(CFM_SIZE, yHeight);
+  if (style->dwMask & CFM_SIZE) {
+    s->fmt.dwMask |= CFM_SIZE;
+    s->fmt.yHeight = min(style->yHeight, yHeightCharPtsMost * 20);
+  }
   COPY_STYLE_ITEM(CFM_SPACING, sSpacing);
   COPY_STYLE_ITEM(CFM_STYLE, sStyle);
   COPY_STYLE_ITEM(CFM_UNDERLINETYPE, bUnderlineType);
@@ -220,6 +218,15 @@ ME_Style *ME_ApplyStyle(ME_Style *sSrc, CHARFORMAT2W *style)
       s->fmt.dwMask |= CFM_UNDERLINETYPE;
       s->fmt.bUnderlineType = (style->dwEffects & CFM_UNDERLINE) ?
           CFU_CF1UNDERLINE : CFU_UNDERLINENONE;
+  }
+  if (style->dwMask & CFM_BOLD && !(style->dwMask & CFM_WEIGHT))
+  {
+      s->fmt.wWeight = (style->dwEffects & CFE_BOLD) ? FW_BOLD : FW_NORMAL;
+  } else if (style->dwMask & CFM_WEIGHT && !(style->dwMask & CFM_BOLD)) {
+      if (style->wWeight > FW_NORMAL)
+          s->fmt.dwEffects |= CFE_BOLD;
+      else
+          s->fmt.dwEffects &= ~CFE_BOLD;
   }
   return s;
 }
@@ -327,10 +334,9 @@ ME_LogFontFromStyle(ME_Context* c, LOGFONTW *lf, const ME_Style *s)
 
 void ME_CharFormatFromLogFont(HDC hDC, const LOGFONTW *lf, CHARFORMAT2W *fmt)
 {
-  int rx, ry;
+  int ry;
 
   ME_InitCharFormat2W(fmt);
-  rx = GetDeviceCaps(hDC, LOGPIXELSX);
   ry = GetDeviceCaps(hDC, LOGPIXELSY);
   lstrcpyW(fmt->szFaceName, lf->lfFaceName);
   fmt->dwEffects = 0;
@@ -341,7 +347,7 @@ void ME_CharFormatFromLogFont(HDC hDC, const LOGFONTW *lf, CHARFORMAT2W *fmt)
   if (lf->lfItalic) fmt->dwEffects |= CFM_ITALIC;
   if (lf->lfUnderline) fmt->dwEffects |= CFM_UNDERLINE;
   /* notice that if a logfont was created with underline due to CFM_LINK, this
-      would add an erronous CFM_UNDERLINE. This isn't currently ever a problem */
+      would add an erroneous CFM_UNDERLINE. This isn't currently ever a problem. */
   if (lf->lfStrikeOut) fmt->dwEffects |= CFM_STRIKEOUT;
   fmt->bPitchAndFamily = lf->lfPitchAndFamily;
   fmt->bCharSet = lf->lfCharSet;
@@ -362,7 +368,6 @@ HFONT ME_SelectStyleFont(ME_Context *c, ME_Style *s)
   LOGFONTW lf;
   int i, nEmpty, nAge = 0x7FFFFFFF;
   ME_FontCacheItem *item;
-  assert(c->hDC);
   assert(s);
   
   ME_LogFontFromStyle(c, &lf, s);
@@ -415,7 +420,6 @@ void ME_UnselectStyleFont(ME_Context *c, ME_Style *s, HFONT hOldFont)
 {
   int i;
   
-  assert(c->hDC);
   assert(s);
   SelectObject(c->hDC, hOldFont);
   for (i=0; i<HFONT_CACHE_SIZE; i++)
@@ -446,6 +450,7 @@ void ME_AddRefStyle(ME_Style *s)
   assert(s->nRefs>0); /* style with 0 references isn't supposed to exist */
   s->nRefs++;
   all_refs++;
+  TRACE_(richedit_style)("ME_AddRefStyle %p, new refs=%d, total refs=%d\n", s, s->nRefs, all_refs);
 }
 
 void ME_ReleaseStyle(ME_Style *s)
@@ -462,16 +467,15 @@ void ME_ReleaseStyle(ME_Style *s)
     ME_DestroyStyle(s);
 }
 
-ME_Style *ME_GetInsertStyle(ME_TextEditor *editor, int nCursor) {
+ME_Style *ME_GetInsertStyle(ME_TextEditor *editor, int nCursor)
+{
   if (ME_IsSelection(editor))
   {
-    ME_Cursor c;
-    int from, to;
-    
+    ME_Cursor *from, *to;
+
     ME_GetSelection(editor, &from, &to);
-    ME_CursorFromCharOfs(editor, from, &c);
-    ME_AddRefStyle(c.pRun->member.run.style);
-    return c.pRun->member.run.style;
+    ME_AddRefStyle(from->pRun->member.run.style);
+    return from->pRun->member.run.style;
   }
   if (editor->pBuffer->pCharStyle) {
     ME_AddRefStyle(editor->pBuffer->pCharStyle);

@@ -24,7 +24,6 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <stdlib.h>
-#include <malloc.h>
 #include <memory.h>
 #include <tchar.h>
 #include <stdio.h>
@@ -55,10 +54,13 @@ static PSYSTEM_PROCESSORTIME_INFO      SystemProcessorTimeInfo = NULL;
 BOOL PerfDataInitialize(void)
 {
     LONG    status;
+    static const WCHAR wszNtdll[] = {'n','t','d','l','l','.','d','l','l',0};
+    static const WCHAR wszUser32[] = {'u','s','e','r','3','2','.','d','l','l',0};
+    static const WCHAR wszKernel32[] = {'k','e','r','n','e','l','3','2','.','d','l','l',0};
 
-    NtQuerySystemInformation = (PROCNTQSI)GetProcAddress(GetModuleHandle(_T("ntdll.dll")), "NtQuerySystemInformation");
-    pGetGuiResources = (PROCGGR)GetProcAddress(GetModuleHandle(_T("user32.dll")), "GetGuiResources");
-    pGetProcessIoCounters = (PROCGPIC)GetProcAddress(GetModuleHandle(_T("kernel32.dll")), "GetProcessIoCounters");
+    NtQuerySystemInformation = (PROCNTQSI)GetProcAddress(GetModuleHandleW(wszNtdll), "NtQuerySystemInformation");
+    pGetGuiResources = (PROCGGR)GetProcAddress(GetModuleHandleW(wszUser32), "GetGuiResources");
+    pGetProcessIoCounters = (PROCGPIC)GetProcAddress(GetModuleHandleW(wszKernel32), "GetProcessIoCounters");
     
     InitializeCriticalSection(&PerfDataCriticalSection);
     
@@ -93,7 +95,7 @@ void PerfDataRefresh(void)
     ULONG                            Idx, Idx2;
     HANDLE                            hProcess;
     HANDLE                            hProcessToken;
-    TCHAR                            szTemp[MAX_PATH];
+    WCHAR                            wszTemp[MAX_PATH];
     DWORD                            dwSize;
     SYSTEM_PERFORMANCE_INFORMATION    SysPerfInfo;
     SYSTEM_TIME_INFORMATION            SysTimeInfo;
@@ -122,10 +124,11 @@ void PerfDataRefresh(void)
         return;
 
     /* Get processor time information */
-    SysProcessorTimeInfo = (PSYSTEM_PROCESSORTIME_INFO)malloc(sizeof(SYSTEM_PROCESSORTIME_INFO) * SystemBasicInfo.bKeNumberProcessors);
+    SysProcessorTimeInfo = HeapAlloc(GetProcessHeap(), 0,
+                                sizeof(SYSTEM_PROCESSORTIME_INFO) * SystemBasicInfo.bKeNumberProcessors);
     status = NtQuerySystemInformation(SystemProcessorTimeInformation, SysProcessorTimeInfo, sizeof(SYSTEM_PROCESSORTIME_INFO) * SystemBasicInfo.bKeNumberProcessors, &ulSize);
     if (status != NO_ERROR) {
-        free(SysProcessorTimeInfo);
+        HeapFree(GetProcessHeap(), 0, SysProcessorTimeInfo);
         return;
     }
 
@@ -137,12 +140,12 @@ void PerfDataRefresh(void)
     do
     {
         BufferSize += 0x10000;
-        SysHandleInfoData = (LPBYTE)malloc(BufferSize);
+        SysHandleInfoData = HeapAlloc(GetProcessHeap(), 0, BufferSize);
 
         status = NtQuerySystemInformation(SystemHandleInformation, SysHandleInfoData, BufferSize, &ulSize);
 
         if (status == 0xC0000004 /*STATUS_INFO_LENGTH_MISMATCH*/) {
-            free(SysHandleInfoData);
+            HeapFree(GetProcessHeap(), 0, SysHandleInfoData);
         }
 
     } while (status == 0xC0000004 /*STATUS_INFO_LENGTH_MISMATCH*/);
@@ -155,12 +158,12 @@ void PerfDataRefresh(void)
     do
     {
         BufferSize += 0x10000;
-        pBuffer = (LPBYTE)malloc(BufferSize);
+        pBuffer = HeapAlloc(GetProcessHeap(), 0, BufferSize);
 
         status = NtQuerySystemInformation(SystemProcessInformation, pBuffer, BufferSize, &ulSize);
 
         if (status == 0xC0000004 /*STATUS_INFO_LENGTH_MISMATCH*/) {
-            free(pBuffer);
+            HeapFree(GetProcessHeap(), 0, pBuffer);
         }
 
     } while (status == 0xC0000004 /*STATUS_INFO_LENGTH_MISMATCH*/);
@@ -180,14 +183,14 @@ void PerfDataRefresh(void)
     /*
      * Save system processor time info
      */
-    free(SystemProcessorTimeInfo);
+    HeapFree(GetProcessHeap(), 0, SystemProcessorTimeInfo);
     SystemProcessorTimeInfo = SysProcessorTimeInfo;
     
     /*
      * Save system handle info
      */
     memcpy(&SystemHandleInfo, SysHandleInfoData, sizeof(SYSTEM_HANDLE_INFORMATION));
-    free(SysHandleInfoData);
+    HeapFree(GetProcessHeap(), 0, SysHandleInfoData);
     
     for (CurrentKernelTime=0, Idx=0; Idx<SystemBasicInfo.bKeNumberProcessors; Idx++) {
         CurrentKernelTime += Li2Double(SystemProcessorTimeInfo[Idx].KernelTime);
@@ -231,9 +234,9 @@ void PerfDataRefresh(void)
     }
 
     /* Now alloc a new PERFDATA array and fill in the data */
-    free(pPerfDataOld);
+    HeapFree(GetProcessHeap(), 0, pPerfDataOld);
     pPerfDataOld = pPerfData;
-    pPerfData = (PPERFDATA)malloc(sizeof(PERFDATA) * ProcessCount);
+    pPerfData = HeapAlloc(GetProcessHeap(), 0, sizeof(PERFDATA) * ProcessCount);
     pSPI = (PSYSTEM_PROCESS_INFORMATION)pBuffer;
     for (Idx=0; Idx<ProcessCount; Idx++) {
         /* Get the old perf data for this process (if any) */
@@ -253,7 +256,8 @@ void PerfDataRefresh(void)
             lstrcpyW(pPerfData[Idx].ImageName, pSPI->Name.Buffer);
         else
         {
-            static const WCHAR idleW[] = {'S','y','s','t','e','m',' ','I','d','l','e',' ','P','r','o','c','e','s','s',0};
+            WCHAR idleW[255];
+            LoadStringW(hInst, IDS_SYSTEM_IDLE_PROCESS, idleW, sizeof(idleW)/sizeof(WCHAR));
             lstrcpyW(pPerfData[Idx].ImageName, idleW );
         }
 
@@ -290,22 +294,9 @@ void PerfDataRefresh(void)
         if (hProcess) {
             if (OpenProcessToken(hProcess, TOKEN_QUERY|TOKEN_DUPLICATE|TOKEN_IMPERSONATE, &hProcessToken)) {
                 ImpersonateLoggedOnUser(hProcessToken);
-                memset(szTemp, 0, sizeof(TCHAR[MAX_PATH]));
+                memset(wszTemp, 0, sizeof(wszTemp));
                 dwSize = MAX_PATH;
-                GetUserName(szTemp, &dwSize);
-#ifndef UNICODE
-                MultiByteToWideChar(CP_ACP, MB_PRECOMPOSED, szTemp, -1, pPerfData[Idx].UserName, MAX_PATH);
-/*
-int MultiByteToWideChar(
-  UINT CodePage,         // code page
-  DWORD dwFlags,         //  character-type options
-  LPCSTR lpMultiByteStr, //  string to map
-  int cbMultiByte,       //  number of bytes in string
-  LPWSTR lpWideCharStr,  //  wide-character buffer
-  int cchWideChar        //  size of buffer
-);
- */
-#endif
+                GetUserNameW(wszTemp, &dwSize);
                 RevertToSelf();
                 CloseHandle(hProcessToken);
             }
@@ -321,7 +312,7 @@ int MultiByteToWideChar(
         pPerfData[Idx].KernelTime.QuadPart = pSPI->KernelTime.QuadPart;
         pSPI = (PSYSTEM_PROCESS_INFORMATION)((LPBYTE)pSPI + pSPI->RelativeOffset);
     }
-    free(pBuffer);
+    HeapFree(GetProcessHeap(), 0, pBuffer);
     LeaveCriticalSection(&PerfDataCriticalSection);
 }
 
@@ -348,19 +339,14 @@ ULONG PerfDataGetProcessorSystemUsage(void)
     return (ULONG)dbKernelTime;
 }
 
-BOOL PerfDataGetImageName(ULONG Index, LPTSTR lpImageName, int nMaxCount)
+BOOL PerfDataGetImageName(ULONG Index, LPWSTR lpImageName, int nMaxCount)
 {
     BOOL    bSuccessful;
 
     EnterCriticalSection(&PerfDataCriticalSection);
 
     if (Index < ProcessCount) {
-#ifdef _UNICODE
-            wcsncpy(lpImageName, pPerfData[Index].ImageName, nMaxCount);
-#else
-            WideCharToMultiByte(CP_ACP, 0, pPerfData[Index].ImageName, -1, lpImageName, nMaxCount, NULL, NULL);
-#endif
-
+        wcsncpy(lpImageName, pPerfData[Index].ImageName, nMaxCount);
         bSuccessful = TRUE;
     } else {
         bSuccessful = FALSE;
@@ -385,19 +371,14 @@ ULONG PerfDataGetProcessId(ULONG Index)
     return ProcessId;
 }
 
-BOOL PerfDataGetUserName(ULONG Index, LPTSTR lpUserName, int nMaxCount)
+BOOL PerfDataGetUserName(ULONG Index, LPWSTR lpUserName, int nMaxCount)
 {
     BOOL    bSuccessful;
 
     EnterCriticalSection(&PerfDataCriticalSection);
 
     if (Index < ProcessCount) {
-#ifdef _UNICODE
-            wcsncpy(lpUserName, pPerfData[Index].UserName, nMaxCount);
-#else
-            WideCharToMultiByte(CP_ACP, 0, pPerfData[Index].UserName, -1, lpUserName, nMaxCount, NULL, NULL);
-#endif
-
+        wcsncpy(lpUserName, pPerfData[Index].UserName, nMaxCount);
         bSuccessful = TRUE;
     } else {
         bSuccessful = FALSE;

@@ -23,6 +23,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+#include "resource.h"
+
 LANGUAGE LANG_CZECH, SUBLANG_DEFAULT
 
 /* Czech strings in CP1250 */
@@ -206,4 +208,6 @@ STRINGTABLE
     IDS_COL_LINKS           "Linky"
     IDS_COL_ATTR            "Atributy"
     IDS_COL_SEC             "Zabezpeèení"
+
+    IDS_FREE_SPACE_FMT      "%s z %s volného"
 }

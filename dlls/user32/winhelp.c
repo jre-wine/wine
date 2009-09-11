@@ -38,7 +38,7 @@
 WINE_DEFAULT_DEBUG_CHANNEL(win);
 
 /* Wine doesn't use the way WinHelp API sends information in Windows, because:
- * 1/ it's not consistent acrosss Win9x, NT...
+ * 1/ it's not consistent across Win9x, NT...
  * 2/ NT implementation is not yet fully understood (and includes some shared
  *     memory mechanism)
  * 3/ uses a dynamically allocated message number (WM_WINHELP), which 
@@ -85,9 +85,9 @@ BOOL WINAPI WinHelpA( HWND hWnd, LPCSTR lpHelpFile, UINT wCommand, ULONG_PTR dwD
     if (!hDest) 
     {
         if (wCommand == HELP_QUIT) return TRUE;
-        if (WinExec("winhelp.exe -x", SW_SHOWNORMAL) < 32) 
+        if (WinExec("winhlp32.exe -x", SW_SHOWNORMAL) < 32) 
         {
-            ERR("can't start winhelp.exe -x ?\n");
+            ERR("can't start winhlp32.exe -x ?\n");
             return FALSE;
         }
         if (!(hDest = FindWindowA("MS_WINHELP", NULL))) 

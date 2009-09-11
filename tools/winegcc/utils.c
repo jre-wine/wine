@@ -66,6 +66,13 @@ void *xrealloc(void* p, size_t size)
     return p2;
 }
 
+char *xstrdup( const char *str )
+{
+    char *res = strdup( str );
+    if (!res) error("Virtual memory exhausted.\n");
+    return res;
+}
+
 int strendswith(const char* str, const char* end)
 {
     int l = strlen(str);
@@ -251,36 +258,38 @@ static char* try_lib_path(const char* dir, const char* pre,
     return 0; 
 }
 
-static file_type guess_lib_type(const char* dir, const char* library, char** file)
+static file_type guess_lib_type(enum target_platform platform, const char* dir,
+                                const char* library, char** file)
 {
-    /* Unix shared object */
-    if ((*file = try_lib_path(dir, "lib", library, ".so", file_so)))
-	return file_so;
-	
-    /* Mach-O (Darwin/Mac OS X) Dynamic Library behaves mostly like .so */
-    if ((*file = try_lib_path(dir, "lib", library, ".dylib", file_so)))
-	return file_so;
+    if (platform != PLATFORM_WINDOWS)
+    {
+        /* Unix shared object */
+        if ((*file = try_lib_path(dir, "lib", library, ".so", file_so)))
+            return file_so;
 
-    /* Windows DLL */
-    if ((*file = try_lib_path(dir, "lib", library, ".def", file_def)))
-	return file_dll;
-    if ((*file = try_lib_path(dir, "", library, ".def", file_def)))
-	return file_dll;
+        /* Mach-O (Darwin/Mac OS X) Dynamic Library behaves mostly like .so */
+        if ((*file = try_lib_path(dir, "lib", library, ".dylib", file_so)))
+            return file_so;
 
-    /* Unix static archives */
+        /* Windows DLL */
+        if ((*file = try_lib_path(dir, "lib", library, ".def", file_def)))
+            return file_dll;
+    }
+
+    /* static archives */
     if ((*file = try_lib_path(dir, "lib", library, ".a", file_arh)))
 	return file_arh;
 
     return file_na;
 }
 
-file_type get_lib_type(strarray* path, const char* library, char** file)
+file_type get_lib_type(enum target_platform platform, strarray* path, const char* library, char** file)
 {
     unsigned int i;
 
     for (i = 0; i < path->size; i++)
     {
-        file_type type = guess_lib_type(path->base[i], library, file);
+        file_type type = guess_lib_type(platform, path->base[i], library, file);
 	if (type != file_na) return type;
     }
     return file_na;
@@ -299,21 +308,20 @@ void spawn(const strarray* prefix, const strarray* args, int ignore_errors)
 
     if (prefix)
     {
+        const char *p = strrchr(argv[0], '/');
+        if (!p) p = argv[0];
+        else p++;
+
         for (i = 0; i < prefix->size; i++)
         {
-            const char* p;
             struct stat st;
 
-            if (!(p = strrchr(argv[0], '/'))) p = argv[0];
             free( prog );
-            prog = strmake("%s/%s", prefix->base[i], p);
-            if (stat(prog, &st) == 0)
+            prog = strmake("%s/%s%s", prefix->base[i], p, EXEEXT);
+            if (stat(prog, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0111))
             {
-                if ((st.st_mode & S_IFREG) && (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)))
-                {
-                    argv[0] = prog;
-                    break;
-                }
+                argv[0] = prog;
+                break;
             }
         }
     }

@@ -20,6 +20,7 @@
  */
 
 #include "config.h"
+#include "wine/port.h"
 
 #define COBJMACROS
 
@@ -31,141 +32,120 @@
 #include "msxml.h"
 #include "msxml2.h"
 
+#include "wine/unicode.h"
 #include "wine/debug.h"
+#include "wine/library.h"
 
 #include "msxml_private.h"
 
-#ifdef HAVE_LIBXSLT
-#include <libxslt/xslt.h>
-#endif
-
 WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
-static HINSTANCE hInstance;
-static ITypeLib *typelib;
-static ITypeInfo *typeinfos[LAST_tid];
+#ifdef HAVE_LIBXML2
 
-static REFIID tid_ids[] = {
-    &IID_IXMLDOMAttribute,
-    &IID_IXMLDOMCDATASection,
-    &IID_IXMLDOMComment,
-    &IID_IXMLDOMDocument2,
-    &IID_IXMLDOMDocumentFragment,
-    &IID_IXMLDOMElement,
-    &IID_IXMLDOMEntityReference,
-    &IID_IXMLDOMImplementation,
-    &IID_IXMLDOMNamedNodeMap,
-    &IID_IXMLDOMNodeList,
-    &IID_IXMLDOMParseError,
-    &IID_IXMLDOMProcessingInstruction,
-    &IID_IXMLDOMSchemaCollection,
-    &IID_IXMLDOMText,
-    &IID_IXMLElement,
-    &IID_IXMLDOMDocument,
-    &IID_IVBSAXAttributes,
-    &IID_IVBSAXContentHandler,
-    &IID_IVBSAXDeclHandler,
-    &IID_IVBSAXDTDHandler,
-    &IID_IVBSAXEntityResolver,
-    &IID_IVBSAXErrorHandler,
-    &IID_IVBSAXLexicalHandler,
-    &IID_IVBSAXLocator,
-    &IID_IVBSAXXMLFilter,
-    &IID_IVBSAXXMLReader,
-    &IID_IMXAttributes,
-    &IID_IMXReaderControl,
-    &IID_IMXWriter,
-};
-
-HRESULT get_typeinfo(enum tid_t tid, ITypeInfo **typeinfo)
+/* Support for loading xml files from a Wine Windows drive */
+static int wineXmlMatchCallback (char const * filename)
 {
-    HRESULT hres;
+    int nRet = 0;
 
-    if(!typelib) {
-        ITypeLib *tl;
+    TRACE("%s\n", filename);
 
-        hres = LoadRegTypeLib(&LIBID_MSXML2, 3, 0, LOCALE_SYSTEM_DEFAULT, &tl);
-        if(FAILED(hres)) {
-            ERR("LoadRegTypeLib failed: %08x\n", hres);
-            return hres;
-        }
+    /*
+     * We will deal with loading XML files from the file system
+     *   We only care about files that linux cannot find.
+     *    e.g. C:,D: etc
+     */
+    if(isalpha(filename[0]) && filename[1] == ':')
+        nRet = 1;
 
-        if(InterlockedCompareExchangePointer((void**)&typelib, tl, NULL))
-            ITypeLib_Release(tl);
-    }
-
-    if(!typeinfos[tid]) {
-        ITypeInfo *typeinfo;
-
-        hres = ITypeLib_GetTypeInfoOfGuid(typelib, tid_ids[tid], &typeinfo);
-        if(FAILED(hres)) {
-            ERR("GetTypeInfoOfGuid failed: %08x\n", hres);
-            return hres;
-        }
-
-        if(InterlockedCompareExchangePointer((void**)(typeinfos+tid), typeinfo, NULL))
-            ITypeInfo_Release(typeinfo);
-    }
-
-    *typeinfo = typeinfos[tid];
-
-    ITypeInfo_AddRef(typeinfos[tid]);
-    return S_OK;
+    return nRet;
 }
 
-static CRITICAL_SECTION MSXML3_typelib_cs;
-static CRITICAL_SECTION_DEBUG MSXML3_typelib_cs_debug =
+static void *wineXmlOpenCallback (char const * filename)
 {
-    0, 0, &MSXML3_typelib_cs,
-    { &MSXML3_typelib_cs_debug.ProcessLocksList,
-      &MSXML3_typelib_cs_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": MSXML3_typelib_cs") }
-};
-static CRITICAL_SECTION MSXML3_typelib_cs = { &MSXML3_typelib_cs_debug, -1, 0, 0, 0, 0 };
+    BSTR sFilename = bstr_from_xmlChar( (xmlChar*)filename);
+    HANDLE hFile;
 
-ITypeLib *get_msxml3_typelib( LPWSTR *path )
+    TRACE("%s\n", debugstr_w(sFilename));
+
+    hFile = CreateFileW(sFilename, GENERIC_READ,FILE_SHARE_READ, NULL,
+                       OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL, NULL);
+    if(hFile == INVALID_HANDLE_VALUE) hFile = 0;
+    SysFreeString(sFilename);
+    return hFile;
+}
+
+static int wineXmlReadCallback(void * context, char * buffer, int len)
 {
-    static WCHAR msxml3_path[MAX_PATH];
+    DWORD dwBytesRead;
 
-    EnterCriticalSection( &MSXML3_typelib_cs );
+    TRACE("%p %s %d\n", context, buffer, len);
 
-    if (!typelib)
+    if ((context == NULL) || (buffer == NULL))
+        return(-1);
+
+    if(!ReadFile( context, buffer,len, &dwBytesRead, NULL))
     {
-        TRACE("loading typelib\n");
-
-        if (GetModuleFileNameW( hInstance, msxml3_path, MAX_PATH ))
-            LoadTypeLib( msxml3_path, &typelib );
+        ERR("Failed to read file\n");
+        return -1;
     }
 
-    LeaveCriticalSection( &MSXML3_typelib_cs );
+    TRACE("Read %d\n", dwBytesRead);
 
-    if (path)
-        *path = msxml3_path;
-
-    if (typelib)
-        ITypeLib_AddRef( typelib );
-
-    return typelib;
+    return dwBytesRead;
 }
 
-static void process_detach(void)
+static int wineXmlFileCloseCallback (void * context)
 {
-    if(typelib) {
-        unsigned i;
-
-        for(i=0; i < sizeof(typeinfos)/sizeof(*typeinfos); i++)
-            if(typeinfos[i])
-                ITypeInfo_Release(typeinfos[i]);
-
-        ITypeLib_Release(typelib);
-    }
+    return CloseHandle(context) ? 0 : -1;
 }
+
+#endif
+
 
 HRESULT WINAPI DllCanUnloadNow(void)
 {
     FIXME("\n");
     return S_FALSE;
 }
+
+
+void* libxslt_handle = NULL;
+#ifdef SONAME_LIBXSLT
+# define DECL_FUNCPTR(f) typeof(f) * p##f = NULL
+DECL_FUNCPTR(xsltApplyStylesheet);
+DECL_FUNCPTR(xsltCleanupGlobals);
+DECL_FUNCPTR(xsltFreeStylesheet);
+DECL_FUNCPTR(xsltParseStylesheetDoc);
+# undef MAKE_FUNCPTR
+#endif
+
+static void init_libxslt(void)
+{
+#ifdef SONAME_LIBXSLT
+    void (*pxsltInit)(void); /* Missing in libxslt <= 1.1.14 */
+
+    libxslt_handle = wine_dlopen(SONAME_LIBXSLT, RTLD_NOW, NULL, 0);
+    if (!libxslt_handle)
+        return;
+
+#define LOAD_FUNCPTR(f, needed) if ((p##f = wine_dlsym(libxslt_handle, #f, NULL, 0)) == NULL && needed) { WARN("Can't find symbol %s\n", #f); goto sym_not_found; }
+    LOAD_FUNCPTR(xsltInit, 0);
+    LOAD_FUNCPTR(xsltApplyStylesheet, 1);
+    LOAD_FUNCPTR(xsltCleanupGlobals, 1);
+    LOAD_FUNCPTR(xsltFreeStylesheet, 1);
+    LOAD_FUNCPTR(xsltParseStylesheetDoc, 1);
+#undef LOAD_FUNCPTR
+
+    if (pxsltInit)
+        pxsltInit();
+    return;
+
+ sym_not_found:
+    wine_dlclose(libxslt_handle, NULL, 0);
+    libxslt_handle = NULL;
+#endif
+}
+
 
 BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
 {
@@ -174,21 +154,38 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID lpv)
     case DLL_PROCESS_ATTACH:
 #ifdef HAVE_LIBXML2
         xmlInitParser();
+
+        /* Set the default indent character to a single tab,
+           for this thread and as default for new threads */
+        xmlTreeIndentString = "\t";
+        xmlThrDefTreeIndentString("\t");
+
+         /* Register callbacks for loading XML files */
+        if(xmlRegisterInputCallbacks(wineXmlMatchCallback, wineXmlOpenCallback,
+                            wineXmlReadCallback, wineXmlFileCloseCallback) == -1)
+            WARN("Failed to register callbacks\n");
+
 #endif
-#ifdef HAVE_XSLTINIT
-        xsltInit();
-#endif
-        hInstance = hInstDLL;
+        init_libxslt();
         DisableThreadLibraryCalls(hInstDLL);
         break;
     case DLL_PROCESS_DETACH:
-#ifdef HAVE_LIBXSLT
-        xsltCleanupGlobals();
+#ifdef SONAME_LIBXSLT
+        if (libxslt_handle)
+        {
+            pxsltCleanupGlobals();
+            wine_dlclose(libxslt_handle, NULL, 0);
+            libxslt_handle = NULL;
+        }
 #endif
 #ifdef HAVE_LIBXML2
+        /* Restore default Callbacks */
+        xmlCleanupInputCallbacks();
+        xmlRegisterDefaultInputCallbacks();
+
         xmlCleanupParser();
-        process_detach();
 #endif
+        release_typelib();
         break;
     }
     return TRUE;

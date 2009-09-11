@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <math.h>
 #include <float.h>
-#include <time.h>
 
 #define COBJMACROS
 #include "wine/test.h"
@@ -147,7 +146,7 @@ static const IRecordInfoVtbl IRecordInfoImpl_VTable =
   (PVOID)IRecordInfoImpl_Dummy,
   (PVOID)IRecordInfoImpl_Dummy,
   (PVOID)IRecordInfoImpl_Dummy,
-  (PVOID)IRecordInfoImpl_GetSize,
+  IRecordInfoImpl_GetSize,
   (PVOID)IRecordInfoImpl_Dummy,
   (PVOID)IRecordInfoImpl_Dummy,
   (PVOID)IRecordInfoImpl_Dummy,
@@ -276,7 +275,7 @@ static struct {
 static void test_safearray(void)
 {
 	SAFEARRAY 	*a, b, *c;
-	unsigned int 	i;
+	unsigned int 	i, diff;
 	LONG		indices[2];
 	HRESULT 	hres;
 	SAFEARRAYBOUND	bound, bounds[2];
@@ -435,19 +434,22 @@ static void test_safearray(void)
 	indices[1] = 23;
 	hres = SafeArrayPtrOfIndex(a, indices, (void**)&ptr2);
 	ok(S_OK == hres,"SAPOI failed [1,23], hres 0x%x\n",hres);
-	ok(ptr2 - ptr1 == 8,"ptr difference is not 8, but %d (%p vs %p)\n", ptr2-ptr1, ptr2, ptr1);
+        diff = ptr2 - ptr1;
+	ok(diff == 8,"ptr difference is not 8, but %d (%p vs %p)\n", diff, ptr2, ptr1);
 
 	indices[0] = 3;
 	indices[1] = 24;
 	hres = SafeArrayPtrOfIndex(a, indices, (void**)&ptr2);
 	ok(S_OK == hres,"SAPOI failed [5,24], hres 0x%x\n",hres);
-	ok(ptr2 - ptr1 == 176,"ptr difference is not 176, but %d (%p vs %p)\n", ptr2-ptr1, ptr2, ptr1);
+        diff = ptr2 - ptr1;
+	ok(diff == 176,"ptr difference is not 176, but %d (%p vs %p)\n", diff, ptr2, ptr1);
 
 	indices[0] = 20;
 	indices[1] = 23;
 	hres = SafeArrayPtrOfIndex(a, indices, (void**)&ptr2);
 	ok(S_OK == hres,"SAPOI failed [20,23], hres 0x%x\n",hres);
-	ok(ptr2 - ptr1 == 76,"ptr difference is not 76, but %d (%p vs %p)\n", ptr2-ptr1, ptr2, ptr1);
+        diff = ptr2 - ptr1;
+	ok(diff == 76,"ptr difference is not 76, but %d (%p vs %p)\n", diff, ptr2, ptr1);
 
 	hres = SafeArrayUnaccessData(a);
 	ok(S_OK == hres, "SAUAD failed with 0x%x\n", hres);
@@ -490,12 +492,8 @@ static void test_safearray(void)
         {
             hres = pSafeArrayGetVartype(a, &vt);
             ok(hres == S_OK, "SAGVT of arra y with vt %d failed with %x\n", vttypes[i].vt, hres);
-            if (vttypes[i].vt == VT_DISPATCH) {
-        		/* Special case. Checked against Windows. */
-		        ok(vt == VT_UNKNOWN, "SAGVT of a        rray with VT_DISPATCH returned not VT_UNKNOWN, but %d\n", vt);
-            } else {
-		        ok(vt == vttypes[i].vt, "SAGVT of array with vt %d returned %d\n", vttypes[i].vt, vt);
-            }
+            /* Windows prior to Vista returns VT_UNKNOWN instead of VT_DISPATCH */
+            ok(broken(vt == VT_UNKNOWN) || vt == vttypes[i].vt, "SAGVT of array with vt %d returned %d\n", vttypes[i].vt, vt);
         }
 
 		hres = SafeArrayCopy(a, &c);
@@ -509,12 +507,8 @@ static void test_safearray(void)
         if (pSafeArrayGetVartype) {
             hres = pSafeArrayGetVartype(c, &vt);
             ok(hres == S_OK, "SAGVT of array with vt %d failed with %x\n", vttypes[i].vt, hres);
-            if (vttypes[i].vt == VT_DISPATCH) {
-                /* Special case. Checked against Windows. */
-                ok(vt == VT_UNKNOWN, "SAGVT of array with VT_DISPATCH returned not VT_UNKNOWN, but %d\n", vt);
-            } else {
-                ok(vt == vttypes[i].vt, "SAGVT of array with vt %d returned %d\n", vttypes[i].vt, vt);
-            }
+            /* Windows prior to Vista returns VT_UNKNOWN instead of VT_DISPATCH */
+            ok(broken(vt == VT_UNKNOWN) || vt == vttypes[i].vt, "SAGVT of array with vt %d returned %d\n", vttypes[i].vt, vt);
         }
 
         if (pSafeArrayCopyData) {
@@ -1280,7 +1274,7 @@ static void test_SafeArrayCopyData(void)
   /* Fill the source array with some data; it doesn't matter what */
   for (dimension = 0; dimension < size; dimension++)
   {
-    int* data = (int*)sa->pvData;
+    int* data = sa->pvData;
     data[dimension] = dimension;
   }
 
@@ -1426,7 +1420,7 @@ static void test_SafeArrayCreateEx(void)
 
   /* Win32 doesn't care if GetSize fails */
   fail_GetSize = TRUE;
-  sa = pSafeArrayCreateEx(VT_RECORD, 1, sab, (LPVOID)iRec);
+  sa = pSafeArrayCreateEx(VT_RECORD, 1, sab, iRec);
   ok(sa != NULL, "CreateEx (Fail Size) failed\n");
   ok(iRec->ref == START_REF_COUNT + 1, "Wrong iRec refcount %d\n", iRec->ref);
   ok(iRec->sizeCalled == 1, "GetSize called %d times\n", iRec->sizeCalled);
@@ -1443,7 +1437,7 @@ static void test_SafeArrayCreateEx(void)
   iRec->ref = START_REF_COUNT;
   iRec->sizeCalled = 0;
   iRec->clearCalled = 0;
-  sa = pSafeArrayCreateEx(VT_RECORD, 1, sab, (LPVOID)iRec);
+  sa = pSafeArrayCreateEx(VT_RECORD, 1, sab, iRec);
   ok(sa != NULL, "CreateEx (Rec) failed\n");
   ok(iRec->ref == START_REF_COUNT + 1, "Wrong iRec refcount %d\n", iRec->ref);
   ok(iRec->sizeCalled == 1, "GetSize called %d times\n", iRec->sizeCalled);

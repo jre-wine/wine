@@ -82,15 +82,15 @@ typedef struct
 
 MediaCatMoniker * DEVENUM_IMediaCatMoniker_Construct(void);
 HRESULT DEVENUM_IEnumMoniker_Construct(HKEY hkey, IEnumMoniker ** ppEnumMoniker);
-HRESULT WINAPI DEVENUM_ICreateDevEnum_CreateClassEnumerator(
-    ICreateDevEnum * iface,
-    REFCLSID clsidDeviceClass,
-    IEnumMoniker **ppEnumMoniker,
-    DWORD dwFlags);
 
 extern ClassFactoryImpl DEVENUM_ClassFactory;
 extern CreateDevEnumImpl DEVENUM_CreateDevEnum;
 extern ParseDisplayNameImpl DEVENUM_ParseDisplayName;
+
+/**********************************************************************
+ * Private helper function to get AM filter category key location
+ */
+HRESULT DEVENUM_GetCategoryKey(REFCLSID clsidDeviceClass, HKEY *pBaseKey, WCHAR *wszRegKeyName, UINT maxLen);
 
 /**********************************************************************
  * Global string constant declarations

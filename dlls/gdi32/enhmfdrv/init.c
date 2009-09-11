@@ -114,7 +114,7 @@ static const DC_FUNCTIONS EMFDRV_Funcs =
     EMFDRV_SelectBrush,              /* pSelectBrush */
     EMFDRV_SelectClipPath,           /* pSelectClipPath */
     EMFDRV_SelectFont,               /* pSelectFont */
-    NULL,                            /* pSelectPalette */
+    EMFDRV_SelectPalette,            /* pSelectPalette */
     EMFDRV_SelectPen,                /* pSelectPen */
     EMFDRV_SetArcDirection,          /* pSetArcDirection */
     NULL,                            /* pSetBitmapBits */
@@ -130,7 +130,7 @@ static const DC_FUNCTIONS EMFDRV_Funcs =
     NULL,                            /* pSetDeviceGammaRamp */
     EMFDRV_SetMapMode,               /* pSetMapMode */
     EMFDRV_SetMapperFlags,           /* pSetMapperFlags */
-    NULL,                            /* pSetPixel */
+    EMFDRV_SetPixel,                 /* pSetPixel */
     NULL,                            /* pSetPixelFormat */
     EMFDRV_SetPolyFillMode,          /* pSetPolyFillMode */
     EMFDRV_SetROP2,                  /* pSetROP2 */
@@ -197,7 +197,7 @@ BOOL EMFDRV_WriteRecord( PHYSDEV dev, EMR *emr )
     physDev->emh->nRecords++;
 
     if(physDev->hFile) {
-	if (!WriteFile(physDev->hFile, (char *)emr, emr->nSize, NULL, NULL))
+        if (!WriteFile(physDev->hFile, emr, emr->nSize, NULL, NULL))
 	    return FALSE;
     } else {
         DWORD nEmfSize = HeapSize(GetProcessHeap(), 0, physDev->emh);
@@ -315,7 +315,7 @@ HDC WINAPI CreateEnhMetaFileW(
 
     TRACE("%s\n", debugstr_w(filename) );
 
-    if (!(dc = alloc_dc_ptr( &EMFDRV_Funcs, ENHMETAFILE_DC_MAGIC ))) return 0;
+    if (!(dc = alloc_dc_ptr( &EMFDRV_Funcs, OBJ_ENHMETADC ))) return 0;
 
     physDev = HeapAlloc(GetProcessHeap(),0,sizeof(*physDev));
     if (!physDev) {
@@ -356,6 +356,9 @@ HDC WINAPI CreateEnhMetaFileW(
     physDev->technology = GetDeviceCaps(hRefDC, TECHNOLOGY);
     physDev->planes = GetDeviceCaps(hRefDC, PLANES);
     physDev->numcolors = GetDeviceCaps(hRefDC, NUMCOLORS);
+    physDev->restoring = 0;
+
+    SetVirtualResolution(dc->hSelf, 0, 0, 0, 0);
 
     physDev->emh->iType = EMR_HEADER;
     physDev->emh->nSize = size;
@@ -407,7 +410,7 @@ HDC WINAPI CreateEnhMetaFileW(
             EMFDRV_DeleteDC( dc );
             return 0;
         }
-        if (!WriteFile( hFile, (LPSTR)physDev->emh, size, NULL, NULL )) {
+        if (!WriteFile( hFile, physDev->emh, size, NULL, NULL )) {
             EMFDRV_DeleteDC( dc );
             return 0;
 	}
@@ -438,7 +441,7 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
     TRACE("(%p)\n", hdc );
 
     if (!(dc = get_dc_ptr( hdc ))) return NULL;
-    if (GDIMAGIC(dc->header.wMagic) != ENHMETAFILE_DC_MAGIC)
+    if (dc->header.type != OBJ_ENHMETADC)
     {
         release_dc_ptr( dc );
         return NULL;
@@ -457,7 +460,7 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
     emr.emr.iType = EMR_EOF;
     emr.emr.nSize = sizeof(emr);
     emr.nPalEntries = 0;
-    emr.offPalEntries = 0;
+    emr.offPalEntries = FIELD_OFFSET(EMREOF, nSizeLast);
     emr.nSizeLast = emr.emr.nSize;
     EMFDRV_WriteRecord( dc->physDev, &emr.emr );
 
@@ -482,8 +485,8 @@ HENHMETAFILE WINAPI CloseEnhMetaFile(HDC hdc) /* [in] metafile DC */
             return 0;
         }
 
-        if (!WriteFile(physDev->hFile, (LPSTR)physDev->emh,
-                       sizeof(*physDev->emh), NULL, NULL))
+        if (!WriteFile(physDev->hFile, physDev->emh, sizeof(*physDev->emh),
+                       NULL, NULL))
         {
             CloseHandle( physDev->hFile );
             EMFDRV_DeleteDC( dc );

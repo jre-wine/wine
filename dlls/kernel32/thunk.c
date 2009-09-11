@@ -31,6 +31,8 @@
 # include <unistd.h>
 #endif
 
+#ifdef __i386__
+
 #include "windef.h"
 #include "winbase.h"
 #include "winerror.h"
@@ -147,11 +149,7 @@ struct SLApiDB
 SEGPTR CALL32_CBClient_RetAddr = 0;
 SEGPTR CALL32_CBClientEx_RetAddr = 0;
 
-#ifdef __i386__
 extern void __wine_call_from_16_thunk();
-#else
-static void __wine_call_from_16_thunk() { }
-#endif
 
 /* Push a DWORD on the 32-bit stack */
 static inline void stack32_push( CONTEXT86 *context, DWORD val )
@@ -191,9 +189,7 @@ void WINAPI __regs_LogApiThkLSF( LPSTR func, CONTEXT86 *context )
 {
     TRACE( "%s\n", debugstr_a(func) );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogApiThkLSF, 4, 4 )
-#endif
+DEFINE_REGS_ENTRYPOINT( LogApiThkLSF, 1 )
 
 /***********************************************************************
  *           LogApiThkSL    (KERNEL32.44)
@@ -204,9 +200,7 @@ void WINAPI __regs_LogApiThkSL( LPSTR func, CONTEXT86 *context )
 {
     TRACE( "%s\n", debugstr_a(func) );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogApiThkSL, 4, 4 )
-#endif
+DEFINE_REGS_ENTRYPOINT( LogApiThkSL, 1 )
 
 /***********************************************************************
  *           LogCBThkSL    (KERNEL32.47)
@@ -217,9 +211,7 @@ void WINAPI __regs_LogCBThkSL( LPSTR func, CONTEXT86 *context )
 {
     TRACE( "%s\n", debugstr_a(func) );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( LogCBThkSL, 4, 4 )
-#endif
+DEFINE_REGS_ENTRYPOINT( LogCBThkSL, 1 )
 
 /***********************************************************************
  * Generates a FT_Prolog call.
@@ -486,9 +478,7 @@ void WINAPI __regs_QT_Thunk( CONTEXT86 *context )
     context->Esp +=   LOWORD(context16.Esp) -
                         ( OFFSETOF(NtCurrentTeb()->WOW32Reserved) - argsize );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( QT_Thunk, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( QT_Thunk, 0 )
 
 
 /**********************************************************************
@@ -554,9 +544,7 @@ void WINAPI __regs_FT_Prolog( CONTEXT86 *context )
     *(DWORD *)(context->Ebp - 48) = context->Eax;
     *(DWORD *)(context->Ebp - 52) = context->Edx;
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_Prolog, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( FT_Prolog, 0 )
 
 /**********************************************************************
  * 		FT_Thunk			(KERNEL32.@)
@@ -622,11 +610,7 @@ void WINAPI __regs_FT_Thunk( CONTEXT86 *context )
     /* Copy modified buffers back to 32-bit stack */
     memcpy( oldstack, newstack, argsize );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0, 0 )
-#endif
-
-#ifdef __i386__
+DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0 )
 
 /***********************************************************************
  *		FT_Exit0 (KERNEL32.@)
@@ -661,7 +645,7 @@ DEFINE_REGS_ENTRYPOINT( FT_Thunk, 0, 0 )
     "leave\n\t"
 
 #define DEFINE_FT_Exit(n) \
-    __ASM_GLOBAL_FUNC( FT_Exit ## n, FT_EXIT_RESTORE_REGS "ret $" #n )
+    __ASM_STDCALL_FUNC( FT_Exit ## n, 0, FT_EXIT_RESTORE_REGS "ret $" #n )
 
 DEFINE_FT_Exit(0)
 DEFINE_FT_Exit(4)
@@ -678,8 +662,6 @@ DEFINE_FT_Exit(44)
 DEFINE_FT_Exit(48)
 DEFINE_FT_Exit(52)
 DEFINE_FT_Exit(56)
-
-#endif /* __i386__ */
 
 
 /***********************************************************************
@@ -778,9 +760,7 @@ void WINAPI __regs_Common32ThkLS( CONTEXT86 *context )
     /* Clean up caller's stack frame */
     context->Esp += LOBYTE(context16.Ebx);
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( Common32ThkLS, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( Common32ThkLS, 0 )
 
 /***********************************************************************
  *		OT_32ThkLSF	(KERNEL32.40)
@@ -835,9 +815,7 @@ void WINAPI __regs_OT_32ThkLSF( CONTEXT86 *context )
     context->Esp +=   LOWORD(context16.Esp) -
                         ( OFFSETOF(NtCurrentTeb()->WOW32Reserved) - argsize );
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( OT_32ThkLSF, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( OT_32ThkLSF, 0 )
 
 /***********************************************************************
  *		ThunkInitLSF		(KERNEL32.41)
@@ -937,9 +915,7 @@ void WINAPI __regs_FT_PrologPrime( CONTEXT86 *context )
     /* Jump to the call stub just created */
     context->Eip = (DWORD)relayCode;
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( FT_PrologPrime, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( FT_PrologPrime, 0 )
 
 /***********************************************************************
  *		QT_ThunkPrime			(KERNEL32.90)
@@ -969,9 +945,7 @@ void WINAPI __regs_QT_ThunkPrime( CONTEXT86 *context )
     /* Jump to the call stub just created */
     context->Eip = (DWORD)relayCode;
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( QT_ThunkPrime, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( QT_ThunkPrime, 0 )
 
 /***********************************************************************
  *		ThunkInitSL (KERNEL32.46)
@@ -1112,9 +1086,7 @@ void WINAPI __regs_W32S_BackTo32( CONTEXT86 *context )
 
     context->Eip = stack32_pop(context);
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( W32S_BackTo32, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( W32S_BackTo32, 0 )
 
 /**********************************************************************
  *			AllocSLCallback		(KERNEL32.@)
@@ -1185,6 +1157,74 @@ FreeSLCallback(
 	FIXME("(0x%08x): stub\n",x);
 }
 
+/**********************************************************************
+ * 		AllocMappedBuffer	(KERNEL32.38)
+ *
+ * This is an undocumented KERNEL32 function that
+ * SMapLS's a GlobalAlloc'ed buffer.
+ *
+ * RETURNS
+ *       EDI register: pointer to buffer
+ *
+ * NOTES
+ *       The buffer is preceded by 8 bytes:
+ *        ...
+ *       edi+0   buffer
+ *       edi-4   SEGPTR to buffer
+ *       edi-8   some magic Win95 needs for SUnMapLS
+ *               (we use it for the memory handle)
+ *
+ *       The SEGPTR is used by the caller!
+ */
+void WINAPI __regs_AllocMappedBuffer(
+              CONTEXT86 *context /* [in] EDI register: size of buffer to allocate */
+) {
+    HGLOBAL handle = GlobalAlloc(0, context->Edi + 8);
+    DWORD *buffer = GlobalLock(handle);
+    DWORD ptr = 0;
+
+    if (buffer)
+        if (!(ptr = MapLS(buffer + 2)))
+        {
+            GlobalUnlock(handle);
+            GlobalFree(handle);
+        }
+
+    if (!ptr)
+        context->Eax = context->Edi = 0;
+    else
+    {
+        buffer[0] = (DWORD)handle;
+        buffer[1] = ptr;
+
+        context->Eax = ptr;
+        context->Edi = (DWORD)(buffer + 2);
+    }
+}
+DEFINE_REGS_ENTRYPOINT( AllocMappedBuffer, 0 )
+
+/**********************************************************************
+ * 		FreeMappedBuffer	(KERNEL32.39)
+ *
+ * Free a buffer allocated by AllocMappedBuffer
+ *
+ * RETURNS
+ *  Nothing.
+ */
+void WINAPI __regs_FreeMappedBuffer(
+              CONTEXT86 *context /* [in] EDI register: pointer to buffer */
+) {
+    if (context->Edi)
+    {
+        DWORD *buffer = (DWORD *)context->Edi - 2;
+
+        UnMapLS(buffer[1]);
+
+        GlobalUnlock((HGLOBAL)buffer[0]);
+        GlobalFree((HGLOBAL)buffer[0]);
+    }
+}
+DEFINE_REGS_ENTRYPOINT( FreeMappedBuffer, 0 )
 
 /**********************************************************************
  * 		GetTEBSelectorFS	(KERNEL.475)
@@ -1264,7 +1304,7 @@ void WINAPI __regs_K32Thk1632Prolog( CONTEXT86 *context )
       DWORD argSize = context->Ebp - context->Esp;
       char *stack16 = (char *)context->Esp - 4;
       STACK16FRAME *frame16 = (STACK16FRAME *)stack16 - 1;
-      STACK32FRAME *frame32 = (STACK32FRAME *)NtCurrentTeb()->WOW32Reserved;
+      STACK32FRAME *frame32 = NtCurrentTeb()->WOW32Reserved;
       char *stack32 = (char *)frame32 - argSize;
       WORD  stackSel  = SELECTOROF(frame32->frame16);
       DWORD stackBase = GetSelectorBase(stackSel);
@@ -1290,9 +1330,7 @@ void WINAPI __regs_K32Thk1632Prolog( CONTEXT86 *context )
        been called.  Thus we re-use it to hold the Win16Lock count */
    ReleaseThunkLock(&CURRENT_STACK16->entry_point);
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( K32Thk1632Prolog, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( K32Thk1632Prolog, 0 )
 
 /***********************************************************************
  *           K32Thk1632Epilog			(KERNEL32.@)
@@ -1327,9 +1365,7 @@ void WINAPI __regs_K32Thk1632Epilog( CONTEXT86 *context )
             context->Ebp, context->Esp, NtCurrentTeb()->WOW32Reserved);
    }
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( K32Thk1632Epilog, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( K32Thk1632Epilog, 0 )
 
 /*********************************************************************
  *                   PK16FNF [KERNEL32.91]
@@ -2139,9 +2175,7 @@ void WINAPI __regs_CommonUnimpStub( CONTEXT86 *context )
 
     context->Esp += (context->Ecx & 0x0f) * 4;
 }
-#ifdef DEFINE_REGS_ENTRYPOINT
-DEFINE_REGS_ENTRYPOINT( CommonUnimpStub, 0, 0 )
-#endif
+DEFINE_REGS_ENTRYPOINT( CommonUnimpStub, 0 )
 
 /**********************************************************************
  *           HouseCleanLogicallyDeadHandles    (KERNEL32.33)
@@ -2254,3 +2288,235 @@ void WINAPI Throw16( LPCATCHBUF lpbuf, INT16 retval, CONTEXT86 *context )
     if (lpbuf[8] != context->SegSs)
         ERR("Switching stack segment with Throw() not supported; expect crash now\n" );
 }
+
+
+/*
+ *  16-bit WOW routines (in KERNEL)
+ */
+
+/**********************************************************************
+ *           GetVDMPointer32W      (KERNEL.516)
+ */
+DWORD WINAPI GetVDMPointer32W16( SEGPTR vp, UINT16 fMode )
+{
+    GlobalPageLock16(GlobalHandle16(SELECTOROF(vp)));
+    return (DWORD)K32WOWGetVDMPointer( vp, 0, (DWORD)fMode );
+}
+
+/***********************************************************************
+ *           LoadLibraryEx32W      (KERNEL.513)
+ */
+DWORD WINAPI LoadLibraryEx32W16( LPCSTR lpszLibFile, DWORD hFile, DWORD dwFlags )
+{
+    HMODULE hModule;
+    DWORD mutex_count;
+    OFSTRUCT ofs;
+    const char *p;
+
+    if (!lpszLibFile)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
+    /* if the file cannot be found, call LoadLibraryExA anyway, since it might be
+       a builtin module. This case is handled in MODULE_LoadLibraryExA */
+
+    if ((p = strrchr( lpszLibFile, '.' )) && !strchr( p, '\\' ))  /* got an extension */
+    {
+        if (OpenFile16( lpszLibFile, &ofs, OF_EXIST ) != HFILE_ERROR16)
+            lpszLibFile = ofs.szPathName;
+    }
+    else
+    {
+        char buffer[MAX_PATH+4];
+        strcpy( buffer, lpszLibFile );
+        strcat( buffer, ".dll" );
+        if (OpenFile16( buffer, &ofs, OF_EXIST ) != HFILE_ERROR16)
+            lpszLibFile = ofs.szPathName;
+    }
+
+    ReleaseThunkLock( &mutex_count );
+    hModule = LoadLibraryExA( lpszLibFile, (HANDLE)hFile, dwFlags );
+    RestoreThunkLock( mutex_count );
+
+    return (DWORD)hModule;
+}
+
+/***********************************************************************
+ *           GetProcAddress32W     (KERNEL.515)
+ */
+DWORD WINAPI GetProcAddress32W16( DWORD hModule, LPCSTR lpszProc )
+{
+    return (DWORD)GetProcAddress( (HMODULE)hModule, lpszProc );
+}
+
+/***********************************************************************
+ *           FreeLibrary32W        (KERNEL.514)
+ */
+DWORD WINAPI FreeLibrary32W16( DWORD hLibModule )
+{
+    BOOL retv;
+    DWORD mutex_count;
+
+    ReleaseThunkLock( &mutex_count );
+    retv = FreeLibrary( (HMODULE)hLibModule );
+    RestoreThunkLock( mutex_count );
+    return (DWORD)retv;
+}
+
+
+#define CPEX_DEST_STDCALL   0x00000000
+#define CPEX_DEST_CDECL     0x80000000
+
+/**********************************************************************
+ *           WOW_CallProc32W
+ */
+static DWORD WOW_CallProc32W16( FARPROC proc32, DWORD nrofargs, DWORD *args )
+{
+    DWORD ret;
+    DWORD mutex_count;
+
+    ReleaseThunkLock( &mutex_count );
+
+    /*
+     * FIXME:  If ( nrofargs & CPEX_DEST_CDECL ) != 0, we should call a
+     *         32-bit CDECL routine ...
+     */
+
+    if (!proc32) ret = 0;
+    else switch (nrofargs)
+    {
+    case 0: ret = proc32();
+            break;
+    case 1: ret = proc32(args[0]);
+            break;
+    case 2: ret = proc32(args[0],args[1]);
+            break;
+    case 3: ret = proc32(args[0],args[1],args[2]);
+            break;
+    case 4: ret = proc32(args[0],args[1],args[2],args[3]);
+            break;
+    case 5: ret = proc32(args[0],args[1],args[2],args[3],args[4]);
+            break;
+    case 6: ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5]);
+            break;
+    case 7: ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6]);
+            break;
+    case 8: ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7]);
+            break;
+    case 9: ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8]);
+            break;
+    case 10:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9]);
+            break;
+    case 11:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10]);
+            break;
+    case 12:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11]);
+            break;
+    case 13:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12]);
+            break;
+    case 14:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13]);
+            break;
+    case 15:ret = proc32(args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],args[9],args[10],args[11],args[12],args[13],args[14]);
+            break;
+    default:
+            /* FIXME: should go up to 32  arguments */
+            ERR("Unsupported number of arguments %d, please report.\n",nrofargs);
+            ret = 0;
+            break;
+    }
+
+    RestoreThunkLock( mutex_count );
+
+    TRACE("returns %08x\n",ret);
+    return ret;
+}
+
+/**********************************************************************
+ *           CallProc32W           (KERNEL.517)
+ */
+DWORD WINAPIV CallProc32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32, VA_LIST16 valist )
+{
+    DWORD args[32];
+    unsigned int i;
+
+    TRACE("(%d,%d,%p args[",nrofargs,argconvmask,proc32);
+
+    for (i=0;i<nrofargs;i++)
+    {
+        if (argconvmask & (1<<i))
+        {
+            SEGPTR ptr = VA_ARG16( valist, SEGPTR );
+            /* pascal convention, have to reverse the arguments order */
+            args[nrofargs - i - 1] = (DWORD)MapSL(ptr);
+            TRACE("%08x(%p),",ptr,MapSL(ptr));
+        }
+        else
+        {
+            DWORD arg = VA_ARG16( valist, DWORD );
+            /* pascal convention, have to reverse the arguments order */
+            args[nrofargs - i - 1] = arg;
+            TRACE("%d,", arg);
+        }
+    }
+    TRACE("])\n");
+
+    /* POP nrofargs DWORD arguments and 3 DWORD parameters */
+    stack16_pop( (3 + nrofargs) * sizeof(DWORD) );
+
+    return WOW_CallProc32W16( proc32, nrofargs, args );
+}
+
+/**********************************************************************
+ *           _CallProcEx32W         (KERNEL.518)
+ */
+DWORD WINAPIV CallProcEx32W16( DWORD nrofargs, DWORD argconvmask, FARPROC proc32, VA_LIST16 valist )
+{
+    DWORD args[32];
+    unsigned int i;
+
+    TRACE("(%d,%d,%p args[",nrofargs,argconvmask,proc32);
+
+    for (i=0;i<nrofargs;i++)
+    {
+        if (argconvmask & (1<<i))
+        {
+            SEGPTR ptr = VA_ARG16( valist, SEGPTR );
+            args[i] = (DWORD)MapSL(ptr);
+            TRACE("%08x(%p),",ptr,MapSL(ptr));
+        }
+        else
+        {
+            DWORD arg = VA_ARG16( valist, DWORD );
+            args[i] = arg;
+            TRACE("%d,", arg);
+        }
+    }
+    TRACE("])\n");
+    return WOW_CallProc32W16( proc32, nrofargs, args );
+}
+
+
+/**********************************************************************
+ *           WOW16Call               (KERNEL.500)
+ *
+ * FIXME!!!
+ *
+ */
+DWORD WINAPIV WOW16Call(WORD x, WORD y, WORD z, VA_LIST16 args)
+{
+        int     i;
+        DWORD   calladdr;
+        FIXME("(0x%04x,0x%04x,%d),calling (",x,y,z);
+
+        for (i=0;i<x/2;i++) {
+                WORD    a = VA_ARG16(args,WORD);
+                DPRINTF("%04x ",a);
+        }
+        calladdr = VA_ARG16(args,DWORD);
+        stack16_pop( 3*sizeof(WORD) + x + sizeof(DWORD) );
+        DPRINTF(") calling address was 0x%08x\n",calladdr);
+        return 0;
+}
+
+#endif /* __i386__ */

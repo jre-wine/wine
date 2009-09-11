@@ -32,7 +32,6 @@
 
 #include "msvcrt.h"
 #include "mtdll.h"
-#include "msvcrt/mbctype.h"
 
 #include "wine/debug.h"
 
@@ -43,23 +42,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
  */
 #define MAX_ELEM_LEN 64 /* Max length of country/language/CP string */
 #define MAX_LOCALE_LENGTH 256
-char MSVCRT_current_lc_all[MAX_LOCALE_LENGTH];
-LCID MSVCRT_current_lc_all_lcid;
-int MSVCRT___lc_codepage;
-int MSVCRT___lc_collate_cp;
-HANDLE MSVCRT___lc_handle[MSVCRT_LC_MAX - MSVCRT_LC_MIN + 1];
+char MSVCRT_current_lc_all[MAX_LOCALE_LENGTH] = { 0 };
+LCID MSVCRT_current_lc_all_lcid = 0;
+int MSVCRT___lc_codepage = 0;
+int MSVCRT___lc_collate_cp = 0;
+HANDLE MSVCRT___lc_handle[MSVCRT_LC_MAX - MSVCRT_LC_MIN + 1] = { 0 };
 
 /* MT */
 #define LOCK_LOCALE   _mlock(_SETLOCALE_LOCK);
 #define UNLOCK_LOCALE _munlock(_SETLOCALE_LOCK);
-
-/* ctype data modified when the locale changes */
-extern WORD MSVCRT__ctype [257];
-extern WORD MSVCRT_current_ctype[257];
-extern WORD* MSVCRT__pctype;
-
-/* mbctype data modified when the locale changes */
-extern int MSVCRT___mb_cur_max;
 
 #define MSVCRT_LEADBYTE  0x8000
 
@@ -87,7 +78,7 @@ static const char * const _country_synonyms[] =
 /* INTERNAL: Map a synonym to an ISO code */
 static void remap_synonym(char *name)
 {
-  size_t i;
+  unsigned int i;
   for (i = 0; i < sizeof(_country_synonyms)/sizeof(char*); i += 2 )
   {
     if (!strcasecmp(_country_synonyms[i],name))
@@ -189,7 +180,8 @@ find_best_locale_proc(HMODULE hModule, LPCSTR type, LPCSTR name, WORD LangID, LO
     res->match_flags = flags;
     res->found_lang_id = LangID;
   }
-  if (flags & (FOUND_LANGUAGE & FOUND_COUNTRY & FOUND_CODEPAGE))
+  if ((flags & (FOUND_LANGUAGE | FOUND_COUNTRY | FOUND_CODEPAGE)) ==
+        (FOUND_LANGUAGE | FOUND_COUNTRY | FOUND_CODEPAGE))
   {
     TRACE(":found exact locale match\n");
     return STOP_LOOKING;
@@ -273,7 +265,7 @@ static void msvcrt_set_ctype(unsigned int codepage, LCID lcid)
   {
     int i;
     char str[3];
-    unsigned char *traverse = (unsigned char *)cp.LeadByte;
+    unsigned char *traverse = cp.LeadByte;
 
     memset(MSVCRT_current_ctype, 0, sizeof(MSVCRT__ctype));
     MSVCRT___lc_codepage = codepage;
@@ -614,4 +606,28 @@ struct MSVCRT_lconv * CDECL MSVCRT_localeconv(void) {
 void CDECL __lconv_init(void)
 {
   FIXME(" stub\n");
+}
+
+/*********************************************************************
+ *      ___lc_handle_func (MSVCRT.@)
+ */
+HANDLE * CDECL ___lc_handle_func(void)
+{
+    return MSVCRT___lc_handle;
+}
+
+/*********************************************************************
+ *      ___lc_codepage_func (MSVCRT.@)
+ */
+int CDECL ___lc_codepage_func(void)
+{
+    return MSVCRT___lc_codepage;
+}
+
+/*********************************************************************
+ *      ___lc_collate_cp_func (MSVCRT.@)
+ */
+int CDECL ___lc_collate_cp_func(void)
+{
+    return MSVCRT___lc_collate_cp;
 }

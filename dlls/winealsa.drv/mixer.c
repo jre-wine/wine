@@ -607,7 +607,7 @@ static mixer* MIX_GetMix(UINT wDevID)
 {
     mixer *mmixer;
 
-    if (wDevID < 0 || wDevID >= cards)
+    if (wDevID >= cards)
     {
         WARN("Invalid mixer id: %d\n", wDevID);
         return NULL;
@@ -762,7 +762,7 @@ static DWORD MIX_Open(UINT wDevID, LPMIXEROPENDESC desc, DWORD_PTR flags)
 
 static DWORD MIX_Close(UINT wDevID)
 {
-    int x;
+    int x = 0;
     mixer *mmixer = MIX_GetMix(wDevID);
     if (!mmixer)
         return MMSYSERR_BADDEVICEID;
@@ -888,7 +888,7 @@ static DWORD MIX_GetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
     if (!mmixer)
         return MMSYSERR_BADDEVICEID;
 
-    if (line < 0 || line >= mmixer->chans || !mmixer->controls[ctrl].enabled)
+    if (line >= mmixer->chans || !mmixer->controls[ctrl].enabled)
         return MIXERR_INVALCONTROL;
 
     ct = &mmixer->controls[ctrl];
@@ -915,7 +915,7 @@ static DWORD MIX_GetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
 
             TRACE("%s MIXERCONTROLDETAILS_UNSIGNED[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
 
-            mcdu = (LPMIXERCONTROLDETAILS_UNSIGNED)mctrld->paDetails;
+            mcdu = mctrld->paDetails;
 
             if (mctrld->cChannels != 1 && mmixer->lines[line].chans != mctrld->cChannels)
             {
@@ -966,7 +966,7 @@ static DWORD MIX_GetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
 
             TRACE("%s MIXERCONTROLDETAILS_BOOLEAN[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
 
-            mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)mctrld->paDetails;
+            mcdb = mctrld->paDetails;
 
             if (line == 1)
                 for (chn = 0; chn <= SND_MIXER_SCHN_LAST; ++chn)
@@ -1009,7 +1009,7 @@ static DWORD MIX_GetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
 
             TRACE("%s MIXERCONTROLDETAILS_BOOLEAN[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
 
-            mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)mctrld->paDetails;
+            mcdb = mctrld->paDetails;
 
             for (x = 0; x<mmixer->chans; ++x)
                 if (line != x && mmixer->lines[x].dst == line)
@@ -1045,7 +1045,7 @@ static DWORD MIX_GetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
 
         if (ct->c.dwControlType == MIXERCONTROL_CONTROLTYPE_MUX || ct->c.dwControlType == MIXERCONTROL_CONTROLTYPE_MIXER)
         {
-            LPMIXERCONTROLDETAILS_LISTTEXTW mcdlt = (LPMIXERCONTROLDETAILS_LISTTEXTW)mctrld->paDetails;
+            LPMIXERCONTROLDETAILS_LISTTEXTW mcdlt = mctrld->paDetails;
             int i, j;
 
             for (i = j = 0; j < mmixer->chans; ++j)
@@ -1095,7 +1095,7 @@ static DWORD MIX_SetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
     if (!mmixer)
         return MMSYSERR_BADDEVICEID;
 
-    if (line < 0 || line >= mmixer->chans)
+    if (line >= mmixer->chans)
     {
         WARN("Invalid line id: %d not in range of 0-%d\n", line, mmixer->chans-1);
         return MMSYSERR_INVALPARAM;
@@ -1143,7 +1143,7 @@ static DWORD MIX_SetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
         }
 
         TRACE("%s MIXERCONTROLDETAILS_UNSIGNED[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
-        mcdu = (LPMIXERCONTROLDETAILS_UNSIGNED)mctrld->paDetails;
+        mcdu = mctrld->paDetails;
 
         for (chn=0; chn<mctrld->cChannels;++chn)
         {
@@ -1191,7 +1191,7 @@ static DWORD MIX_SetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
 
         TRACE("%s MIXERCONTROLDETAILS_BOOLEAN[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
 
-        mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)mctrld->paDetails;
+        mcdb = mctrld->paDetails;
         if (line == 1) /* Mute/unmute capturing */
             for (i = 0; i <= SND_MIXER_SCHN_LAST; ++i)
             {
@@ -1219,7 +1219,7 @@ static DWORD MIX_SetControlDetails(UINT wDevID, LPMIXERCONTROLDETAILS mctrld, DW
         }
 
         TRACE("%s MIXERCONTROLDETAILS_BOOLEAN[%u]\n", getControlType(ct->c.dwControlType), mctrld->cChannels);
-        mcdb = (LPMIXERCONTROLDETAILS_BOOLEAN)mctrld->paDetails;
+        mcdb = mctrld->paDetails;
 
         for (x=i=0; x < mmixer->chans; ++x)
             if (line != x && mmixer->lines[x].dst == line)
@@ -1343,7 +1343,7 @@ static DWORD MIX_GetLineInfo(UINT wDevID, LPMIXERLINEW Ml, DWORD_PTR flags)
     }
 
     case MIXER_GETLINEINFOF_LINEID:
-        if (Ml->dwLineID < 0 || Ml->dwLineID >= mmixer->chans)
+        if (Ml->dwLineID >= mmixer->chans)
             return MIXERR_INVALLINE;
 
         TRACE("MIXER_GETLINEINFOF_LINEID %d\n", Ml->dwLineID);
@@ -1363,7 +1363,7 @@ static DWORD MIX_GetLineInfo(UINT wDevID, LPMIXERLINEW Ml, DWORD_PTR flags)
         break;
 
     case MIXER_GETLINEINFOF_DESTINATION:
-        if (Ml->dwDestination < 0 || Ml->dwDestination >= mmixer->dests)
+        if (Ml->dwDestination >= mmixer->dests)
         {
             WARN("dest %d out of bounds\n", Ml->dwDestination);
             return MIXERR_INVALLINE;
@@ -1375,13 +1375,13 @@ static DWORD MIX_GetLineInfo(UINT wDevID, LPMIXERLINEW Ml, DWORD_PTR flags)
         break;
 
     case MIXER_GETLINEINFOF_SOURCE:
-        if (Ml->dwDestination < 0 || Ml->dwDestination >= mmixer->dests)
+        if (Ml->dwDestination >= mmixer->dests)
         {
             WARN("dest %d for source out of bounds\n", Ml->dwDestination);
             return MIXERR_INVALLINE;
         }
 
-        if (Ml->dwSource < 0 || Ml->dwSource >= getsrccntfromchan(mmixer, Ml->dwDestination))
+        if (Ml->dwSource >= getsrccntfromchan(mmixer, Ml->dwDestination))
         {
             WARN("src %d out of bounds\n", Ml->dwSource);
             return MIXERR_INVALLINE;
@@ -1455,7 +1455,7 @@ static DWORD MIX_GetLineControls(UINT wDevID, LPMIXERLINECONTROLSW mlc, DWORD_PT
     if (flags == MIXER_GETLINECONTROLSF_ONEBYID)
         mlc->dwLineID = mlc->u.dwControlID / CONTROLSPERLINE;
 
-    if (mlc->dwLineID < 0 || mlc->dwLineID >= mmixer->chans)
+    if (mlc->dwLineID >= mmixer->chans)
     {
         TRACE("Invalid dwLineID %d\n", mlc->dwLineID);
         return MIXERR_INVALLINE;

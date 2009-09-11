@@ -23,33 +23,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
 
-/**********************************************************************
- *	     PSDRV_CmpColor
- *
- * Return TRUE if col1 == col2
- */
-BOOL PSDRV_CmpColor(PSCOLOR *col1, PSCOLOR *col2)
-{
-    if(col1->type != col2->type)
-        return FALSE;
-
-    switch(col1->type) {
-    case PSCOLOR_GRAY:
-        if(col1->value.gray.i == col2->value.gray.i)
-	    return TRUE;
-	break;
-    case PSCOLOR_RGB:
-        if( col1->value.rgb.r == col2->value.rgb.r &&
-	    col1->value.rgb.g == col2->value.rgb.g &&
-	    col1->value.rgb.b == col2->value.rgb.b )
-	    return TRUE;
-	break;
-    default:
-        ERR("Unknown colour type %d\n", col1->type);
-    }
-    return FALSE;
-}
-
 
 /**********************************************************************
  *	     PSDRV_CopyColor
@@ -117,7 +90,7 @@ void PSDRV_CreateColor( PSDRV_PDEVICE *physDev, PSCOLOR *pscolor,
 /***********************************************************************
  *           PSDRV_SetBkColor
  */
-COLORREF PSDRV_SetBkColor( PSDRV_PDEVICE *physDev, COLORREF color )
+COLORREF CDECL PSDRV_SetBkColor( PSDRV_PDEVICE *physDev, COLORREF color )
 {
     PSDRV_CreateColor(physDev, &physDev->bkColor, color);
     return color;
@@ -127,7 +100,7 @@ COLORREF PSDRV_SetBkColor( PSDRV_PDEVICE *physDev, COLORREF color )
 /***********************************************************************
  *           PSDRV_SetTextColor
  */
-COLORREF PSDRV_SetTextColor( PSDRV_PDEVICE *physDev, COLORREF color )
+COLORREF CDECL PSDRV_SetTextColor( PSDRV_PDEVICE *physDev, COLORREF color )
 {
     PSDRV_CreateColor(physDev, &physDev->font.color, color);
     physDev->font.set = FALSE;

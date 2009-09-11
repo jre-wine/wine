@@ -22,23 +22,16 @@ ALL_LIBS     = $(IMPORTS:%=-l%) $(EXTRALIBS) $(LDFLAGS) $(LIBS)
 EXTRA_OBJS   = testlist.o
 
 CROSSTEST    = $(TESTDLL:%.dll=%)_crosstest.exe
-CROSSOBJS    = $(C_SRCS:.c=.cross.o) $(RC_SRCS:.rc=.res.cross.o) $(BISON_SRCS:.y=.tab.cross.o) $(LEX_SRCS:.l=.yy.cross.o) $(IDL_GEN_C_SRCS:.c=.cross.o) testlist.cross.o
 CROSSCC      = @CROSSCC@
-CROSSWINDRES = @CROSSWINDRES@
+CROSSWINEGCC = $(TOOLSDIR)/tools/winegcc/winegcc @CROSSTARGETFLAGS@ -B$(TOOLSDIR)/tools/winebuild --sysroot=$(TOPOBJDIR)
+MAKEDEPFLAGS = -xo -xcross.o
 
 @MAKE_RULES@
 
 all: $(TESTPROGRAM)
 
-# Rules for .so main module
-
-$(MODULE).so: $(OBJS) $(RC_SRCS:.rc=.res) Makefile.in
-	$(WINEGCC) -B$(TOOLSDIR)/tools/winebuild -mconsole $(OBJS) $(RC_SRCS:.rc=.res) -o $@ $(LIBPORT) $(ALL_LIBS)
-
-# Rules for .exe main module
-
-$(MODULE): $(OBJS) $(RCOBJS) Makefile.in
-	$(CC) $(OBJS) $(RCOBJS) -o $@ $(ALL_LIBS)
+$(MODULE) $(MODULE).so: $(OBJS) Makefile.in
+	$(WINEGCC) $(APPMODE) $(OBJS) -o $@ $(LIBPORT) $(ALL_LIBS)
 
 # Rules for building test list
 
@@ -55,18 +48,17 @@ $(TESTRESULTS): $(MODULE)$(DLLEXT) ../$(TESTDLL)$(DLLEXT)
 
 # Rules for cross-compiling tests
 
-.SUFFIXES: .cross.o .res.cross.o
+CROSSOBJS = $(OBJS:.o=.cross.o)
+
+.SUFFIXES: .cross.o
 
 .c.cross.o:
-	$(CROSSCC) -c $(ALLCFLAGS) -o $@ $<
-
-.res.res.cross.o:
-	$(CROSSWINDRES) -i $< -o $@
+	$(CROSSCC) -c $(INCLUDES) $(DEFS) $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
 crosstest:: @CROSSTEST@
 
 $(CROSSTEST): $(CROSSOBJS) Makefile.in
-	$(CROSSCC) $(CROSSOBJS) -o $@ $(ALL_LIBS)
+	$(CROSSWINEGCC) $(CROSSOBJS) -o $@ $(ALL_LIBS)
 
 $(CROSSOBJS): $(IDL_GEN_HEADERS)
 

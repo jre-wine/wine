@@ -122,7 +122,7 @@
 200  pascal   VcpOpen(segptr ptr) VcpOpen16
 201  pascal   VcpClose(word str) VcpClose16
 202  pascal -ret16 vcpDefCallbackProc(ptr word word long long) vcpDefCallbackProc16
-203  stub     vcpEnumFiles #(ptr long)
+203  pascal   VcpEnumFiles(ptr long)
 204  pascal -ret16 VcpQueueRename(str str str str word word long) VcpQueueRename16
 205  pascal -ret16 vsmGetStringName(word ptr word) vsmGetStringName16
 206  pascal -ret16 vsmStringDelete(word) vsmStringDelete16
@@ -154,7 +154,7 @@
 318  pascal -ret16 DiCreateDevRegKey (ptr ptr word str word) DiCreateDevRegKey16
 319  pascal -ret16 DiOpenDevRegKey (ptr ptr word) DiOpenDevRegKey16
 320  stub     DiInstallDrvSection #(str str str str long)
-321  stub     DiInstallClass #(str long)
+321  pascal -ret16 DiInstallClass (str long) DiInstallClass16
 322  stub     DiOpenClassRegKey #(ptr str)
 323  stub     Display_SetFontSize #(str)
 324  stub     Display_OpenFontSizeKey #(ptr)

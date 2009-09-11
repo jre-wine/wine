@@ -143,10 +143,7 @@ extern HWND hApplicationPageNewTaskButton;   /* Application New Task button */
 
 /* Forward declarations of functions included in this code module: */
 void FillSolidRect(HDC hDC, LPCRECT lpRect, COLORREF clr);
-void FillSolidRect2(HDC hDC, int x, int y, int cx, int cy, COLORREF clr);
-void Draw3dRect(HDC hDC, int x, int y, int cx, int cy, COLORREF clrTopLeft, COLORREF clrBottomRight);
-void Draw3dRect2(HDC hDC, LPRECT lpRect, COLORREF clrTopLeft, COLORREF clrBottomRight);
-void Font_DrawText(HDC hDC, LPCTSTR lpszText, int x, int y);
+void Font_DrawText(HDC hDC, LPWSTR lpwszText, int x, int y);
 
 #define OPTIONS_MENU_INDEX    1
 
@@ -156,7 +153,7 @@ void TaskManager_OnOptionsHideWhenMinimized(void);
 void TaskManager_OnOptionsShow16BitTasks(void);
 void TaskManager_OnFileNew(void);
 
-LPTSTR GetLastErrorText( LPTSTR lpszBuf, DWORD dwSize );
+LPWSTR GetLastErrorText( LPWSTR lpwszBuf, DWORD dwSize );
 
 void OnAbout(void);
 
@@ -176,7 +173,6 @@ void ProcessPage_OnDebugChannels(void);
 
 #define WM_ONTRAYICON   WM_USER + 5
 
-HICON TrayIcon_GetProcessorUsageIcon(void);
 BOOL TrayIcon_ShellAddTrayIcon(void);
 BOOL TrayIcon_ShellRemoveTrayIcon(void);
 BOOL TrayIcon_ShellUpdateTrayIcon(void);
@@ -199,7 +195,6 @@ void ApplicationPage_OnEndTask(void);
 void ApplicationPage_OnGotoProcess(void);
 
 void RefreshApplicationPage(void);
-void UpdateApplicationListControlViewSetting(void);
 void RefreshPerformancePage(void);
 void RefreshProcessPage(void);
 

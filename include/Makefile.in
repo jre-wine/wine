@@ -4,7 +4,11 @@ SRCDIR    = @srcdir@
 VPATH	  = @srcdir@
 MODULE	  = none
 
-IDL_H_SRCS = \
+PRIVATE_IDL_H_SRCS = \
+	wine/wined3d.idl \
+	wine/winedxgi.idl
+
+PUBLIC_IDL_H_SRCS = \
 	activaut.idl \
 	activdbg.idl \
 	activscp.idl \
@@ -14,7 +18,9 @@ IDL_H_SRCS = \
 	bits.idl \
 	bits1_5.idl \
 	comcat.idl \
+	commoncontrols.idl \
 	control.idl \
+	ctxtcall.idl \
 	d3d10.idl \
 	ddstream.idl \
 	dimm.idl \
@@ -38,11 +44,15 @@ IDL_H_SRCS = \
 	mlang.idl \
 	mmstream.idl \
 	mscoree.idl \
+	msctf.idl \
+	msdadc.idl \
 	mshtmhst.idl \
 	mshtml.idl \
 	msinkaut.idl \
+	mstask.idl \
 	msxml.idl \
 	msxml2.idl \
+	netcon.idl \
 	netfw.idl \
 	oaidl.idl \
 	objidl.idl \
@@ -53,6 +63,7 @@ IDL_H_SRCS = \
 	oledb.idl \
 	oleidl.idl \
 	optary.idl \
+	perhist.idl \
 	propidl.idl \
 	pstore.idl \
 	qedit.idl \
@@ -63,13 +74,18 @@ IDL_H_SRCS = \
 	shobjidl.idl \
 	shtypes.idl \
 	strmif.idl \
+	textstor.idl \
 	tom.idl \
 	unknwn.idl \
 	urlhist.idl \
 	urlmon.idl \
+	vmr9.idl \
+	wbemcli.idl \
+	wincodec.idl \
 	wine/itss.idl \
 	wine/svcctl.idl \
 	wtypes.idl \
+	wuapi.idl \
 	xmldom.idl \
 	xmldso.idl
 
@@ -78,11 +94,13 @@ IDL_TLB_SRCS = \
 
 SRCDIR_INCLUDES = \
 	$(IDL_TLB_SRCS) \
-	$(IDL_H_SRCS) \
+	$(PUBLIC_IDL_H_SRCS) \
 	accctrl.h \
 	aclapi.h \
+	aclui.h \
 	adshlp.h \
 	advpub.h \
+	af_irda.h \
 	appmgmt.h \
 	audevcod.h \
 	aviriff.h \
@@ -91,6 +109,7 @@ SRCDIR_INCLUDES = \
 	basetsd.h \
 	basetyps.h \
 	bcrypt.h \
+	binres.idl \
 	bitsmsg.h \
 	cderr.h \
 	cfgmgr32.h \
@@ -98,14 +117,22 @@ SRCDIR_INCLUDES = \
 	cierror.h \
 	clusapi.h \
 	commctrl.h \
+	commctrl.rh \
 	commdlg.h \
 	compobj.h \
 	cor.h \
 	corerror.h \
+	corhdr.h \
 	cpl.h \
+	crtrow.idl \
+	cryptdlg.h \
+	cryptuiapi.h \
 	custcntl.h \
 	cvconst.h \
 	d3d.h \
+	d3d10effect.h \
+	d3d10misc.h \
+	d3d10shader.h \
 	d3d8.h \
 	d3d8caps.h \
 	d3d8types.h \
@@ -116,18 +143,19 @@ SRCDIR_INCLUDES = \
 	d3dhal.h \
 	d3drm.h \
 	d3drmdef.h \
+	d3drmobj.h \
 	d3dtypes.h \
 	d3dvec.inl \
-	d3dx8.h \
-	d3dx8core.h \
-	d3dx8math.h \
-	d3dx8math.inl \
-	d3dx8mesh.h \
 	d3dx9.h \
 	d3dx9core.h \
 	d3dx9math.h \
 	d3dx9math.inl \
+	d3dx9mesh.h \
+	d3dx9shader.h \
 	d3dx9tex.h \
+	dbccmd.idl \
+	dbcses.idl \
+	dbdsad.idl \
 	dbghelp.h \
 	dbinit.idl \
 	dbprop.idl \
@@ -145,10 +173,15 @@ SRCDIR_INCLUDES = \
 	ddk/ntddk.h \
 	ddk/ntddser.h \
 	ddk/ntddtape.h \
+	ddk/usb.h \
+	ddk/usb100.h \
+	ddk/usb200.h \
+	ddk/usbdlib.h \
 	ddk/wdm.h \
 	ddk/winddiui.h \
 	ddk/winsplp.h \
 	ddraw.h \
+	ddrawgdi.h \
 	ddrawi.h \
 	devenum.idl \
 	devguid.h \
@@ -211,12 +244,14 @@ SRCDIR_INCLUDES = \
 	guiddef.h \
 	hlguids.h \
 	htmlhelp.h \
+	http.h \
 	i_cryptasn1tls.h \
 	icm.h \
 	icmpapi.h \
 	idispids.h \
 	imagehlp.h \
 	imm.h \
+	in6addr.h \
 	initguid.h \
 	intshcut.h \
 	ipexport.h \
@@ -242,6 +277,7 @@ SRCDIR_INCLUDES = \
 	lmuse.h \
 	lmuseflg.h \
 	lmwksta.h \
+	loadperf.h \
 	lzexpand.h \
 	mapi.h \
 	mapicode.h \
@@ -265,14 +301,17 @@ SRCDIR_INCLUDES = \
 	msacmdlg.h \
 	msacmdrv.h \
 	mscat.h \
+	msdaguid.h \
 	mshtmcid.h \
 	mshtmdid.h \
 	msi.h \
 	msidefs.h \
 	msiquery.h \
 	mssip.h \
+	mstcpip.h \
 	msvcrt/conio.h \
 	msvcrt/crtdbg.h \
+	msvcrt/crtdefs.h \
 	msvcrt/ctype.h \
 	msvcrt/direct.h \
 	msvcrt/dirent.h \
@@ -288,6 +327,7 @@ SRCDIR_INCLUDES = \
 	msvcrt/math.h \
 	msvcrt/mbctype.h \
 	msvcrt/mbstring.h \
+	msvcrt/memory.h \
 	msvcrt/process.h \
 	msvcrt/search.h \
 	msvcrt/setjmp.h \
@@ -315,6 +355,7 @@ SRCDIR_INCLUDES = \
 	npapi.h \
 	nspapi.h \
 	ntddcdrm.h \
+	ntddndis.h \
 	ntddscsi.h \
 	ntddstor.h \
 	ntdsapi.h \
@@ -330,6 +371,7 @@ SRCDIR_INCLUDES = \
 	oleauto.h \
 	olectl.h \
 	oledlg.h \
+	opnrst.idl \
 	pdh.h \
 	pdhmsg.h \
 	pktdef.h \
@@ -344,6 +386,7 @@ SRCDIR_INCLUDES = \
 	pshpack4.h \
 	pshpack8.h \
 	ras.h \
+	raserror.h \
 	reason.h \
 	regstr.h \
 	richedit.h \
@@ -355,6 +398,7 @@ SRCDIR_INCLUDES = \
 	rpcndr.h \
 	rpcnterr.h \
 	rpcproxy.h \
+	rtutils.h \
 	scarderr.h \
 	schannel.h \
 	schemadef.h \
@@ -363,8 +407,10 @@ SRCDIR_INCLUDES = \
 	secext.h \
 	security.h \
 	sensapi.h \
+	sesprp.idl \
 	setupapi.h \
 	sfc.h \
+	shdispid.h \
 	shellapi.h \
 	shlguid.h \
 	shlobj.h \
@@ -377,14 +423,18 @@ SRCDIR_INCLUDES = \
 	sql.h \
 	sqlext.h \
 	sqltypes.h \
+	srrestoreptapi.h \
 	sspi.h \
+	sti.h \
 	storage.h \
 	svrapi.h \
+	t2embapi.h \
 	tapi.h \
 	tchar.h \
 	textserv.h \
 	tlhelp32.h \
 	tmschema.h \
+	traffic.h \
 	twain.h \
 	userenv.h \
 	usp10.h \
@@ -394,6 +444,7 @@ SRCDIR_INCLUDES = \
 	ver.h \
 	vfw.h \
 	vfwmsgs.h \
+	vmrender.idl \
 	wfext.h \
 	winbase.h \
 	wincon.h \
@@ -421,6 +472,7 @@ SRCDIR_INCLUDES = \
 	winperf.h \
 	winreg.h \
 	winresrc.h \
+	winsafer.h \
 	winscard.h \
 	winsmcrd.h \
 	winsock.h \
@@ -432,10 +484,13 @@ SRCDIR_INCLUDES = \
 	winternl.h \
 	wintrust.h \
 	winuser.h \
+	winuser.rh \
 	winver.h \
 	wmistr.h \
 	wnaspi32.h \
 	wownt32.h \
+	ws2def.h \
+	ws2ipdef.h \
 	ws2spi.h \
 	ws2tcpip.h \
 	wshisotp.h \
@@ -443,6 +498,7 @@ SRCDIR_INCLUDES = \
 	wsnwlink.h \
 	wtsapi32.h \
 	xcmc.h \
+	xinput.h \
 	xmldomdid.h \
 	xmldsodid.h \
 	zmouse.h
@@ -456,13 +512,15 @@ INSTALLDIRS = \
 	$(DESTDIR)$(includedir)/msvcrt \
 	$(DESTDIR)$(includedir)
 
+IDL_H_SRCS = $(PUBLIC_IDL_H_SRCS) $(PRIVATE_IDL_H_SRCS)
+
 @MAKE_RULES@
 
-OBJDIR_INCLUDES = $(IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
+OBJDIR_INCLUDES = $(PUBLIC_IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
 
-all: $(OBJDIR_INCLUDES)
+all: $(IDL_H_SRCS:.idl=.h) $(IDL_TLB_SRCS:.idl=.tlb)
 
-install:: $(OBJDIR_INCLUDES) $(INSTALLDIRS)
+install install-dev:: $(OBJDIR_INCLUDES) $(INSTALLDIRS)
 	for f in $(SRCDIR_INCLUDES); do case $$f in \
 	  wine/*)   $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/`expr $$f : 'wine/\(.*\)'` ;; \
 	  msvcrt/*) $(INSTALL_DATA) $(SRCDIR)/$$f $(DESTDIR)$(includedir)/$$f ;; \

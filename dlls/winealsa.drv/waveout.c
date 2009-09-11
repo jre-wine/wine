@@ -69,9 +69,9 @@ DWORD            ALSA_WodNumDevs;
 /**************************************************************************
  * 			wodNotifyClient			[internal]
  */
-static DWORD wodNotifyClient(WINE_WAVEDEV* wwo, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
+static DWORD wodNotifyClient(WINE_WAVEDEV* wwo, WORD wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("wMsg = 0x%04x dwParm1 = %04X dwParam2 = %04X\n", wMsg, dwParam1, dwParam2);
+    TRACE("wMsg = 0x%04x dwParm1 = %lx dwParam2 = %lx\n", wMsg, dwParam1, dwParam2);
 
     switch (wMsg) {
     case WOM_OPEN:
@@ -97,18 +97,29 @@ static DWORD wodNotifyClient(WINE_WAVEDEV* wwo, WORD wMsg, DWORD dwParam1, DWORD
  */
 static BOOL wodUpdatePlayedTotal(WINE_WAVEDEV* wwo, snd_pcm_status_t* ps)
 {
-    snd_pcm_sframes_t delay = 0;
+    snd_pcm_sframes_t delay;
+    snd_pcm_sframes_t avail;
+    snd_pcm_uframes_t buf_size = 0;
     snd_pcm_state_t state;
 
     state = snd_pcm_state(wwo->pcm);
-    snd_pcm_delay(wwo->pcm, &delay);
+    avail = snd_pcm_avail_update(wwo->pcm);
+    snd_pcm_hw_params_get_buffer_size(wwo->hw_params, &buf_size);
+    delay = buf_size - avail;
 
-    /* A delay < 0 indicates an underrun; for our purposes that's 0.  */
-    if ( (state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED) || (delay < 0))
+    if (state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED)
     {
-        WARN("Unexpected state (%d) or delay (%ld) while updating Total Played, resetting\n", state, delay);
+        WARN("Unexpected state (%d) while updating Total Played, resetting\n", state);
         delay=0;
     }
+
+    /* A delay < 0 indicates an underrun; for our purposes that's 0.  */
+    if (delay < 0)
+    {
+        WARN("Unexpected delay (%ld) while updating Total Played, resetting\n", delay);
+        delay=0;
+    }
+
     InterlockedExchange((LONG*)&wwo->dwPlayedTotal, wwo->dwWrittenTotal - snd_pcm_frames_to_bytes(wwo->pcm, delay));
     return TRUE;
 }
@@ -281,16 +292,20 @@ static DWORD wodPlayer_NotifyCompletions(WINE_WAVEDEV* wwo, BOOL force)
         if (!lpWaveHdr) {TRACE("Empty queue\n"); break;}
         if (!force)
         {
+            snd_pcm_uframes_t frames;
+            snd_pcm_hw_params_get_period_size(wwo->hw_params, &frames, NULL);
+
             if (lpWaveHdr == wwo->lpPlayPtr) {TRACE("play %p\n", lpWaveHdr); break;}
             if (lpWaveHdr == wwo->lpLoopPtr) {TRACE("loop %p\n", lpWaveHdr); break;}
-            if (lpWaveHdr->reserved > wwo->dwPlayedTotal) {TRACE("still playing %p (%u/%u)\n", lpWaveHdr, lpWaveHdr->reserved, wwo->dwPlayedTotal);break;}
+            if (lpWaveHdr->reserved > wwo->dwPlayedTotal + frames) {TRACE("still playing %p (%lu/%u)\n", lpWaveHdr, lpWaveHdr->reserved, wwo->dwPlayedTotal);break;}
         }
+        wwo->dwPlayedTotal += lpWaveHdr->reserved - wwo->dwPlayedTotal;
 	wwo->lpQueuePtr = lpWaveHdr->lpNext;
 
 	lpWaveHdr->dwFlags &= ~WHDR_INQUEUE;
 	lpWaveHdr->dwFlags |= WHDR_DONE;
 
-	wodNotifyClient(wwo, WOM_DONE, (DWORD)lpWaveHdr, 0);
+	wodNotifyClient(wwo, WOM_DONE, (DWORD_PTR)lpWaveHdr, 0);
     }
     return  (lpWaveHdr && lpWaveHdr != wwo->lpPlayPtr && lpWaveHdr != wwo->lpLoopPtr) ?
         wodPlayer_NotifyWait(wwo, lpWaveHdr) : INFINITE;
@@ -325,7 +340,7 @@ static	void	wodPlayer_Reset(WINE_WAVEDEV* wwo, BOOL reset)
 
     if (reset) {
         enum win_wm_message	msg;
-        DWORD		        param;
+        DWORD_PTR	        param;
         HANDLE		        ev;
 
         /* remove any buffer */
@@ -358,7 +373,7 @@ static	void	wodPlayer_Reset(WINE_WAVEDEV* wwo, BOOL reset)
     } else {
         if (wwo->lpLoopPtr) {
             /* complicated case, not handled yet (could imply modifying the loop counter */
-            FIXME("Pausing while in loop isn't correctly handled yet, except strange results\n");
+            FIXME("Pausing while in loop isn't correctly handled yet, expect strange results\n");
             wwo->lpPlayPtr = wwo->lpLoopPtr;
             wwo->dwPartialOffset = 0;
             wwo->dwWrittenTotal = wwo->dwPlayedTotal; /* this is wrong !!! */
@@ -388,12 +403,12 @@ static void wodPlayer_ProcessMessages(WINE_WAVEDEV* wwo)
 {
     LPWAVEHDR           lpWaveHdr;
     enum win_wm_message	msg;
-    DWORD		param;
+    DWORD_PTR		param;
     HANDLE		ev;
     int                 err;
 
     while (ALSA_RetrieveRingMessage(&wwo->msgRing, &msg, &param, &ev)) {
-     TRACE("Received %s %x\n", ALSA_getCmdString(msg), param);
+     TRACE("Received %s %lx\n", ALSA_getCmdString(msg), param);
 
 	switch (msg) {
 	case WINE_WM_PAUSING:
@@ -504,8 +519,8 @@ static DWORD wodPlayer_FeedDSP(WINE_WAVEDEV* wwo)
  */
 static	DWORD	CALLBACK	wodPlayer(LPVOID pmt)
 {
-    WORD	  uDevID = (DWORD)pmt;
-    WINE_WAVEDEV* wwo = (WINE_WAVEDEV*)&WOutDev[uDevID];
+    WORD	  uDevID = (DWORD_PTR)pmt;
+    WINE_WAVEDEV* wwo = &WOutDev[uDevID];
     DWORD         dwNextFeedTime = INFINITE;   /* Time before DSP needs feeding */
     DWORD         dwNextNotifyTime = INFINITE; /* Time before next wave completion */
     DWORD         dwSleepTime;
@@ -537,6 +552,7 @@ static	DWORD	CALLBACK	wodPlayer(LPVOID pmt)
 	    dwNextFeedTime = dwNextNotifyTime = INFINITE;
 	}
     }
+    return 0;
 }
 
 /**************************************************************************
@@ -570,8 +586,8 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     snd_pcm_access_t            access;
     snd_pcm_format_t            format = -1;
     unsigned int                rate;
-    unsigned int                buffer_time = 500000;
-    unsigned int                period_time = 10000;
+    unsigned int                buffer_time = 120000;
+    unsigned int                period_time = 22000;
     snd_pcm_uframes_t           buffer_size;
     snd_pcm_uframes_t           period_size;
     int                         flags;
@@ -756,12 +772,11 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     err = snd_pcm_hw_params_get_buffer_size(hw_params, &buffer_size);
 
     snd_pcm_sw_params_current(pcm, sw_params);
+
     EXIT_ON_ERROR( snd_pcm_sw_params_set_start_threshold(pcm, sw_params, 1), MMSYSERR_ERROR, "unable to set start threshold");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_silence_size(pcm, sw_params, 0), MMSYSERR_ERROR, "unable to set silence size");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_avail_min(pcm, sw_params, period_size), MMSYSERR_ERROR, "unable to set avail min");
-    EXIT_ON_ERROR( snd_pcm_sw_params_set_xfer_align(pcm, sw_params, 1), MMSYSERR_ERROR, "unable to set xfer align");
     EXIT_ON_ERROR( snd_pcm_sw_params_set_silence_threshold(pcm, sw_params, 0), MMSYSERR_ERROR, "unable to set silence threshold");
-    EXIT_ON_ERROR( snd_pcm_sw_params_set_xrun_mode(pcm, sw_params, SND_PCM_XRUN_NONE), MMSYSERR_ERROR, "unable to set xrun mode");
     EXIT_ON_ERROR( snd_pcm_sw_params(pcm, sw_params), MMSYSERR_ERROR, "unable to set sw params for playback");
 #undef EXIT_ON_ERROR
 
@@ -780,7 +795,7 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     ALSA_InitRingMessage(&wwo->msgRing);
 
     wwo->hStartUpEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
-    wwo->hThread = CreateThread(NULL, 0, wodPlayer, (LPVOID)(DWORD)wDevID, 0, &(wwo->dwThreadID));
+    wwo->hThread = CreateThread(NULL, 0, wodPlayer, (LPVOID)(DWORD_PTR)wDevID, 0, &(wwo->dwThreadID));
     if (wwo->hThread)
         SetThreadPriority(wwo->hThread, THREAD_PRIORITY_TIME_CRITICAL);
     else
@@ -910,7 +925,7 @@ static DWORD wodWrite(WORD wDevID, LPWAVEHDR lpWaveHdr, DWORD dwSize)
     lpWaveHdr->dwFlags |= WHDR_INQUEUE;
     lpWaveHdr->lpNext = 0;
 
-    ALSA_AddRingMessage(&WOutDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD)lpWaveHdr, FALSE);
+    ALSA_AddRingMessage(&WOutDev[wDevID].msgRing, WINE_WM_HEADER, (DWORD_PTR)lpWaveHdr, FALSE);
 
     return MMSYSERR_NOERROR;
 }
@@ -1078,7 +1093,7 @@ static DWORD wodGetVolume(WORD wDevID, LPDWORD lpdwVol)
 /**************************************************************************
  * 				wodSetVolume			[internal]
  */
-DWORD wodSetVolume(WORD wDevID, DWORD dwParam)
+static DWORD wodSetVolume(WORD wDevID, DWORD dwParam)
 {
     WORD	       wleft, wright;
     WINE_WAVEDEV*      wwo;
@@ -1128,7 +1143,7 @@ static DWORD wodDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
 {
     TRACE("(%u, %p)\n", wDevID, dwParam1);
 
-    *dwParam1 = MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+    *dwParam1 = MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                                     NULL, 0 ) * sizeof(WCHAR);
     return MMSYSERR_NOERROR;
 }
@@ -1138,10 +1153,10 @@ static DWORD wodDevInterfaceSize(UINT wDevID, LPDWORD dwParam1)
  */
 static DWORD wodDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 {
-    if (dwParam2 >= MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+    if (dwParam2 >= MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                                         NULL, 0 ) * sizeof(WCHAR))
     {
-        MultiByteToWideChar(CP_ACP, 0, WOutDev[wDevID].interface_name, -1,
+        MultiByteToWideChar(CP_UNIXCP, 0, WOutDev[wDevID].interface_name, -1,
                             dwParam1, dwParam2 / sizeof(WCHAR));
 	return MMSYSERR_NOERROR;
     }
@@ -1151,10 +1166,10 @@ static DWORD wodDevInterface(UINT wDevID, PWCHAR dwParam1, DWORD dwParam2)
 /**************************************************************************
  * 				wodMessage (WINEALSA.@)
  */
-DWORD WINAPI ALSA_wodMessage(UINT wDevID, UINT wMsg, DWORD dwUser,
-                             DWORD dwParam1, DWORD dwParam2)
+DWORD WINAPI ALSA_wodMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
+                             DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    TRACE("(%u, %s, %08X, %08X, %08X);\n",
+    TRACE("(%u, %s, %08lX, %08lX, %08lX);\n",
 	  wDevID, ALSA_getMessage(wMsg), dwUser, dwParam1, dwParam2);
 
     switch (wMsg) {

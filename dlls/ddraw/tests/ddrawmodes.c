@@ -47,23 +47,22 @@ static void createwindow(void)
     wc.hInstance = GetModuleHandleA(0);
     wc.hIcon = LoadIconA(wc.hInstance, IDI_APPLICATION);
     wc.hCursor = LoadCursorA(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH) GetStockObject(BLACK_BRUSH);
+    wc.hbrBackground = GetStockObject(BLACK_BRUSH);
     wc.lpszMenuName = NULL;
     wc.lpszClassName = "TestWindowClass";
     if(!RegisterClassA(&wc))
         assert(0);
-    
+
     hwnd = CreateWindowExA(0, "TestWindowClass", "TestWindowClass",
         WS_POPUP, 0, 0,
         GetSystemMetrics(SM_CXSCREEN),
         GetSystemMetrics(SM_CYSCREEN),
         NULL, NULL, GetModuleHandleA(0), NULL);
     assert(hwnd != NULL);
-    
+
     ShowWindow(hwnd, SW_HIDE);
     UpdateWindow(hwnd);
     SetFocus(hwnd);
-    
 }
 
 static BOOL createdirectdraw(void)
@@ -91,17 +90,17 @@ static void releasedirectdraw(void)
 
 static void adddisplaymode(LPDDSURFACEDESC lpddsd)
 {
-    if (!modes) 
-	modes = malloc((modes_size = 2) * sizeof(DDSURFACEDESC));
-    if (modes_cnt == modes_size) 
-	    modes = realloc(modes, (modes_size *= 2) * sizeof(DDSURFACEDESC));
+    if (!modes)
+        modes = HeapAlloc(GetProcessHeap(), 0, (modes_size = 2) * sizeof(DDSURFACEDESC));
+    if (modes_cnt == modes_size)
+        modes = HeapReAlloc(GetProcessHeap(), 0, modes, (modes_size *= 2) * sizeof(DDSURFACEDESC));
     assert(modes);
     modes[modes_cnt++] = *lpddsd;
 }
 
 static void flushdisplaymodes(void)
 {
-    free(modes);
+    HeapFree(GetProcessHeap(), 0, modes);
     modes = 0;
     modes_cnt = modes_size = 0;
 }
@@ -196,7 +195,7 @@ static void createsurface(void)
     DDSURFACEDESC ddsd;
     DDSCAPS ddscaps;
     HRESULT rc;
-    
+
     ddsd.dwSize = sizeof(ddsd);
     ddsd.dwFlags = DDSD_CAPS | DDSD_BACKBUFFERCOUNT;
     ddsd.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE |
@@ -224,7 +223,7 @@ static void testsurface(void)
     const char* testMsg = "ddraw device context test";
     HDC hdc;
     HRESULT rc;
-    
+
     rc = IDirectDrawSurface_GetDC(lpDDSBack, &hdc);
     ok(rc==DD_OK, "IDirectDrawSurface_GetDC returned: %x\n",rc);
     SetBkColor(hdc, RGB(0, 0, 255));
@@ -232,7 +231,7 @@ static void testsurface(void)
     TextOut(hdc, 0, 0, testMsg, lstrlen(testMsg));
     IDirectDrawSurface_ReleaseDC(lpDDSBack, hdc);
     ok(rc==DD_OK, "IDirectDrawSurface_ReleaseDC returned: %x\n",rc);
-    
+
     while (1)
     {
         rc = IDirectDrawSurface_Flip(lpDDSPrimary, NULL, DDFLIP_WAIT);
@@ -284,13 +283,25 @@ static void testcooperativelevels_normal(void)
 
     /* Try creating a double buffered primary in normal mode */
     rc = IDirectDraw_CreateSurface(lpDD, &surfacedesc, &surface, NULL);
-    ok(rc == DDERR_NOEXCLUSIVEMODE, "IDirectDraw_CreateSurface returned %08x\n", rc);
-    ok(surface == NULL, "Returned surface pointer is %p\n", surface);
-    if(surface) IDirectDrawSurface_Release(surface);
+    if (rc == DDERR_UNSUPPORTEDMODE)
+        skip("Unsupported mode\n");
+    else
+    {
+        ok(rc == DDERR_NOEXCLUSIVEMODE, "IDirectDraw_CreateSurface returned %08x\n", rc);
+        ok(surface == NULL, "Returned surface pointer is %p\n", surface);
+    }
+    if(surface && surface != (IDirectDrawSurface *)0xdeadbeef) IDirectDrawSurface_Release(surface);
 
     /* Set the focus window */
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_SETFOCUSWINDOW);
+
+    if (rc == DDERR_INVALIDPARAMS)
+    {
+        win_skip("NT4/Win95 do not support cooperative levels DDSCL_SETDEVICEWINDOW and DDSCL_SETFOCUSWINDOW\n");
+        return;
+    }
+
     ok(rc==DD_OK,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
 
     /* Set the focus window a second time*/
@@ -341,7 +352,7 @@ static void testcooperativelevels_normal(void)
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_NORMAL | DDSCL_SETDEVICEWINDOW);
     ok(rc==DD_OK,"SetCooperativeLevel(DDSCL_NORMAL | DDSCL_SETDEVICEWINDOW) returned: %x\n",rc);
- 
+
     /* Also set the focus window. Should give an error */
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_ALLOWMODEX | DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN | DDSCL_SETDEVICEWINDOW | DDSCL_SETFOCUSWINDOW);
@@ -374,10 +385,26 @@ static void testcooperativelevels_exclusive(void)
     /* Set the focus window. Should fail */
     rc = IDirectDraw_SetCooperativeLevel(lpDD,
         hwnd, DDSCL_SETFOCUSWINDOW);
-    ok(rc==DDERR_HWNDALREADYSET,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
+    ok(rc==DDERR_HWNDALREADYSET ||
+       broken(rc==DDERR_INVALIDPARAMS) /* NT4/Win95 */,"SetCooperativeLevel(DDSCL_SETFOCUSWINDOW) returned: %x\n",rc);
 
 
     /* All done */
+}
+
+static void testddraw3(void)
+{
+    const GUID My_IID_IDirectDraw3 = {
+        0x618f8ad4,
+        0x8b7a,
+        0x11d0,
+        { 0x8f,0xcc,0x0,0xc0,0x4f,0xd9,0x18,0x9d }
+    };
+    IDirectDraw3 *dd3;
+    HRESULT hr;
+    hr = IDirectDraw_QueryInterface(lpDD, &My_IID_IDirectDraw3, (void **) &dd3);
+    ok(hr == E_NOINTERFACE, "QueryInterface for IID_IDirectDraw3 returned 0x%08x, expected E_NOINTERFACE\n", hr);
+    if(SUCCEEDED(hr) && dd3) IDirectDraw3_Release(dd3);
 }
 
 START_TEST(ddrawmodes)
@@ -389,6 +416,7 @@ START_TEST(ddrawmodes)
     if (winetest_interactive)
         testdisplaymodes();
     flushdisplaymodes();
+    testddraw3();
     releasedirectdraw();
 
     createdirectdraw();

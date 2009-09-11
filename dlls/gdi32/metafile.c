@@ -107,14 +107,13 @@ static int MF_AddHandle(HANDLETABLE *ht, UINT htlen, HGDIOBJ hobj)
  */
 HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh)
 {
-    HMETAFILE hmf = 0;
-    METAFILEOBJ *metaObj = GDI_AllocObject( sizeof(METAFILEOBJ), METAFILE_MAGIC,
-					    (HGDIOBJ *)&hmf, NULL );
-    if (metaObj)
-    {
-        metaObj->mh = mh;
-        GDI_ReleaseObj( hmf );
-    }
+    HMETAFILE hmf;
+    METAFILEOBJ *metaObj;
+
+    if (!(metaObj = HeapAlloc( GetProcessHeap(), 0, sizeof(*metaObj) ))) return 0;
+    metaObj->mh = mh;
+    if (!(hmf = alloc_gdi_handle( &metaObj->header, OBJ_METAFILE, NULL )))
+        HeapFree( GetProcessHeap(), 0, metaObj );
     return hmf;
 }
 
@@ -126,7 +125,7 @@ HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh)
 static METAHEADER *MF_GetMetaHeader( HMETAFILE hmf )
 {
     METAHEADER *ret = NULL;
-    METAFILEOBJ * metaObj = (METAFILEOBJ *)GDI_GetObjPtr( hmf, METAFILE_MAGIC );
+    METAFILEOBJ * metaObj = GDI_GetObjPtr( hmf, OBJ_METAFILE );
     if (metaObj)
     {
         ret = metaObj->mh;
@@ -164,11 +163,10 @@ static POINT *convert_points( UINT count, POINT16 *pt16 )
 
 BOOL WINAPI DeleteMetaFile( HMETAFILE hmf )
 {
-    METAFILEOBJ * metaObj = (METAFILEOBJ *)GDI_GetObjPtr( hmf, METAFILE_MAGIC );
+    METAFILEOBJ * metaObj = free_gdi_handle( hmf );
     if (!metaObj) return FALSE;
     HeapFree( GetProcessHeap(), 0, metaObj->mh );
-    GDI_FreeObject( hmf, metaObj );
-    return TRUE;
+    return HeapFree( GetProcessHeap(), 0, metaObj );
 }
 
 /******************************************************************
@@ -396,6 +394,8 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
     HPEN hPen;
     HBRUSH hBrush;
     HFONT hFont;
+    HPALETTE hPal;
+    HRGN hRgn;
     BOOL loaded = FALSE;
 
     if (!mh) return FALSE;
@@ -405,10 +405,18 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
 	loaded = TRUE;
     }
 
-    /* save the current pen, brush and font */
+    /* save DC */
     hPen = GetCurrentObject(hdc, OBJ_PEN);
     hBrush = GetCurrentObject(hdc, OBJ_BRUSH);
     hFont = GetCurrentObject(hdc, OBJ_FONT);
+    hPal = GetCurrentObject(hdc, OBJ_PAL);
+
+    hRgn = CreateRectRgn(0, 0, 0, 0);
+    if (!GetClipRgn(hdc, hRgn))
+    {
+        DeleteObject(hRgn);
+        hRgn = 0;
+    }
 
     /* create the handle table */
     ht = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY,
@@ -436,9 +444,12 @@ BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh)
 	PlayMetaFileRecord( hdc, ht, mr, mh->mtNoObjects );
     }
 
-    SelectObject(hdc, hBrush);
+    /* restore DC */
     SelectObject(hdc, hPen);
-    SelectObject(hdc, hFont);
+    SelectObject(hdc, hBrush);
+    SelectPalette(hdc, hPal, FALSE);
+    ExtSelectClipRgn(hdc, hRgn, RGN_COPY);
+    DeleteObject(hRgn);
 
     /* free objects in handle table */
     for(i = 0; i < mh->mtNoObjects; i++)
@@ -791,8 +802,8 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                       infohdr->biHeight,
                                       infohdr->biPlanes,
                                       infohdr->biBitCount,
-                                      (LPSTR)(mr->rdParm +
-                                      (sizeof(BITMAPINFOHEADER) / 2) + 4))));
+                                      mr->rdParm +
+                                      (sizeof(BITMAPINFOHEADER) / 2) + 4)));
             break;
 
         case BS_DIBPATTERN:
@@ -889,7 +900,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_STRETCHDIB:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[11]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, mr->rdParm[2] );
         StretchDIBits( hdc, (SHORT)mr->rdParm[10], (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8],
                        (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                        (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], bits, info,
@@ -900,7 +911,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_DIBSTRETCHBLT:
       {
         LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[10]);
-        LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize( info, mr->rdParm[2] );
+        LPSTR bits = (LPSTR)info + bitmap_info_size( info, DIB_RGB_COLORS );
         StretchDIBits( hdc, (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                        (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5], (SHORT)mr->rdParm[4],
                        (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2], bits, info,
@@ -915,7 +926,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                        mr->rdParm[11], /*Height*/
                                        mr->rdParm[13], /*Planes*/
                                        mr->rdParm[14], /*BitsPixel*/
-                                       (LPSTR)&mr->rdParm[15]);  /*bits*/
+                                       &mr->rdParm[15]); /*bits*/
         SelectObject(hdcSrc,hbitmap);
         StretchBlt(hdc, (SHORT)mr->rdParm[9], (SHORT)mr->rdParm[8],
                    (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6],
@@ -933,7 +944,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
                                         mr->rdParm[8]/*Height*/,
                                         mr->rdParm[10]/*Planes*/,
                                         mr->rdParm[11]/*BitsPixel*/,
-                                        (LPSTR)&mr->rdParm[12]/*bits*/);
+                                        &mr->rdParm[12]/*bits*/);
         SelectObject(hdcSrc,hbitmap);
         BitBlt(hdc,(SHORT)mr->rdParm[6],(SHORT)mr->rdParm[5],
                 (SHORT)mr->rdParm[4],(SHORT)mr->rdParm[3],
@@ -997,7 +1008,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
 
         if (mr->rdSize > 12) {
             LPBITMAPINFO info = (LPBITMAPINFO) &(mr->rdParm[8]);
-            LPSTR bits = (LPSTR)info + DIB_BitmapInfoSize(info, mr->rdParm[0]);
+            LPSTR bits = (LPSTR)info + bitmap_info_size(info, mr->rdParm[0]);
 
             StretchDIBits(hdc, (SHORT)mr->rdParm[7], (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                           (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3], (SHORT)mr->rdParm[2],
@@ -1027,7 +1038,7 @@ BOOL WINAPI PlayMetaFileRecord( HDC hdc,  HANDLETABLE *ht, METARECORD *mr, UINT 
     case META_SETDIBTODEV:
         {
             BITMAPINFO *info = (BITMAPINFO *) &(mr->rdParm[9]);
-            char *bits = (char *)info + DIB_BitmapInfoSize( info, mr->rdParm[0] );
+            char *bits = (char *)info + bitmap_info_size( info, mr->rdParm[0] );
             SetDIBitsToDevice(hdc, (SHORT)mr->rdParm[8], (SHORT)mr->rdParm[7],
                               (SHORT)mr->rdParm[6], (SHORT)mr->rdParm[5],
                               (SHORT)mr->rdParm[4], (SHORT)mr->rdParm[3],
@@ -1136,34 +1147,206 @@ UINT WINAPI GetMetaFileBitsEx( HMETAFILE hmf, UINT nSize, LPVOID buf )
     return mfSize;
 }
 
+#include <pshpack2.h>
+typedef struct
+{
+    DWORD magic;   /* WMFC */
+    WORD unk04;    /* 1 */
+    WORD unk06;    /* 0 */
+    WORD unk08;    /* 0 */
+    WORD unk0a;    /* 1 */
+    WORD checksum;
+    DWORD unk0e;   /* 0 */
+    DWORD num_chunks;
+    DWORD chunk_size;
+    DWORD remaining_size;
+    DWORD emf_size;
+    BYTE *emf_data;
+} mf_comment_chunk;
+#include <poppack.h>
+
+static const DWORD wmfc_magic = 0x43464d57;
+
+/******************************************************************
+ *         add_mf_comment
+ *
+ * Helper for GetWinMetaFileBits
+ *
+ * Add the MFCOMMENT record[s] which is essentially a copy
+ * of the original emf.
+ */
+static BOOL add_mf_comment(HDC hdc, HENHMETAFILE emf)
+{
+    DWORD size = GetEnhMetaFileBits(emf, 0, NULL), i;
+    BYTE *bits, *chunk_data;
+    mf_comment_chunk *chunk = NULL;
+    BOOL ret = FALSE;
+    static const DWORD max_chunk_size = 0x2000;
+
+    if(!size) return FALSE;
+    chunk_data = bits = HeapAlloc(GetProcessHeap(), 0, size);
+    if(!bits) return FALSE;
+    if(!GetEnhMetaFileBits(emf, size, bits)) goto end;
+
+    chunk = HeapAlloc(GetProcessHeap(), 0, max_chunk_size + FIELD_OFFSET(mf_comment_chunk, emf_data));
+    if(!chunk) goto end;
+
+    chunk->magic = wmfc_magic;
+    chunk->unk04 = 1;
+    chunk->unk06 = 0;
+    chunk->unk08 = 0;
+    chunk->unk0a = 1;
+    chunk->checksum = 0; /* We fixup the first chunk's checksum before returning from GetWinMetaFileBits */
+    chunk->unk0e = 0;
+    chunk->num_chunks = (size + max_chunk_size - 1) / max_chunk_size;
+    chunk->chunk_size = max_chunk_size;
+    chunk->remaining_size = size;
+    chunk->emf_size = size;
+
+    for(i = 0; i < chunk->num_chunks; i++)
+    {
+        if(i == chunk->num_chunks - 1) /* last chunk */
+            chunk->chunk_size = chunk->remaining_size;
+
+        chunk->remaining_size -= chunk->chunk_size;
+        memcpy(&chunk->emf_data, chunk_data, chunk->chunk_size);
+        chunk_data += chunk->chunk_size;
+
+        if(!Escape(hdc, MFCOMMENT, chunk->chunk_size + FIELD_OFFSET(mf_comment_chunk, emf_data), (char*)chunk, NULL))
+            goto end;
+    }
+    ret = TRUE;
+end:
+    HeapFree(GetProcessHeap(), 0, chunk);
+    HeapFree(GetProcessHeap(), 0, bits);
+    return ret;
+}
+
+/*******************************************************************
+ *        muldiv
+ *
+ * Behaves somewhat differently to MulDiv when the answer is -ve
+ * and also rounds n.5 towards zero
+ */
+static INT muldiv(INT m1, INT m2, INT d)
+{
+    LONGLONG ret;
+
+    ret = ((LONGLONG)m1 * m2 + d/2) / d; /* Always add d/2 even if ret will be -ve */
+
+    if((LONGLONG)m1 * m2 * 2 == (2 * ret - 1) * d) /* If the answer is exactly n.5 round towards zero */
+    {
+        if(ret > 0) ret--;
+        else ret++;
+    }
+    return ret;
+}
+
+/******************************************************************
+ *         set_window
+ *
+ * Helper for GetWinMetaFileBits
+ *
+ * Add the SetWindowOrg and SetWindowExt records
+ */
+static BOOL set_window(HDC hdc, HENHMETAFILE emf, HDC ref_dc, INT map_mode)
+{
+    ENHMETAHEADER header;
+    INT horz_res, vert_res, horz_size, vert_size;
+    POINT pt;
+
+    if(!GetEnhMetaFileHeader(emf, sizeof(header), &header)) return FALSE;
+
+    horz_res = GetDeviceCaps(ref_dc, HORZRES);
+    vert_res = GetDeviceCaps(ref_dc, VERTRES);
+    horz_size = GetDeviceCaps(ref_dc, HORZSIZE);
+    vert_size = GetDeviceCaps(ref_dc, VERTSIZE);
+
+    switch(map_mode)
+    {
+    case MM_TEXT:
+    case MM_ISOTROPIC:
+    case MM_ANISOTROPIC:
+        pt.y = muldiv(header.rclFrame.top, vert_res, vert_size * 100);
+        pt.x = muldiv(header.rclFrame.left, horz_res, horz_size * 100);
+        break;
+    case MM_LOMETRIC:
+        pt.y = muldiv(-header.rclFrame.top, 1, 10) + 1;
+        pt.x = muldiv( header.rclFrame.left, 1, 10);
+        break;
+    case MM_HIMETRIC:
+        pt.y = -header.rclFrame.top + 1;
+        pt.x = (header.rclFrame.left >= 0) ? header.rclFrame.left : header.rclFrame.left + 1; /* See the tests */
+        break;
+    case MM_LOENGLISH:
+        pt.y = muldiv(-header.rclFrame.top, 10, 254) + 1;
+        pt.x = muldiv( header.rclFrame.left, 10, 254);
+        break;
+    case MM_HIENGLISH:
+        pt.y = muldiv(-header.rclFrame.top, 100, 254) + 1;
+        pt.x = muldiv( header.rclFrame.left, 100, 254);
+        break;
+    case MM_TWIPS:
+        pt.y = muldiv(-header.rclFrame.top, 72 * 20, 2540) + 1;
+        pt.x = muldiv( header.rclFrame.left, 72 * 20, 2540);
+        break;
+    default:
+        WARN("Unknown map mode %d\n", map_mode);
+        return FALSE;
+    }
+    SetWindowOrgEx(hdc, pt.x, pt.y, NULL);
+
+    pt.x = muldiv(header.rclFrame.right - header.rclFrame.left, horz_res, horz_size * 100);
+    pt.y = muldiv(header.rclFrame.bottom - header.rclFrame.top, vert_res, vert_size * 100);
+    SetWindowExtEx(hdc, pt.x, pt.y, NULL);
+    return TRUE;
+}
+
 /******************************************************************
  *         GetWinMetaFileBits [GDI32.@]
  */
 UINT WINAPI GetWinMetaFileBits(HENHMETAFILE hemf,
                                 UINT cbBuffer, LPBYTE lpbBuffer,
-                                INT fnMapMode, HDC hdcRef)
+                                INT map_mode, HDC hdcRef)
 {
     HDC hdcmf;
     HMETAFILE hmf;
-    UINT ret;
+    UINT ret, full_size;
     RECT rc;
-    INT oldMapMode;
 
     GetClipBox(hdcRef, &rc);
-    oldMapMode = SetMapMode(hdcRef, fnMapMode);
 
     TRACE("(%p,%d,%p,%d,%p) rc=%s\n", hemf, cbBuffer, lpbBuffer,
-        fnMapMode, hdcRef, wine_dbgstr_rect(&rc));
+          map_mode, hdcRef, wine_dbgstr_rect(&rc));
 
-    hdcmf = CreateMetaFileA(NULL);
+    hdcmf = CreateMetaFileW(NULL);
+
+    add_mf_comment(hdcmf, hemf);
+    SetMapMode(hdcmf, map_mode);
+    if(!set_window(hdcmf, hemf, hdcRef, map_mode))
+        goto error;
+
     PlayEnhMetaFile(hdcmf, hemf, &rc);
     hmf = CloseMetaFile(hdcmf);
+    full_size = GetMetaFileBitsEx(hmf, 0, NULL);
     ret = GetMetaFileBitsEx(hmf, cbBuffer, lpbBuffer);
     DeleteMetaFile(hmf);
 
-    SetMapMode(hdcRef, oldMapMode);
+    if(ret && ret == full_size && lpbBuffer) /* fixup checksum, but only if retrieving all of the bits */
+    {
+        WORD checksum = 0;
+        METARECORD *comment_rec = (METARECORD*)(lpbBuffer + sizeof(METAHEADER));
+        UINT i;
 
+        for(i = 0; i < full_size / 2; i++)
+            checksum += ((WORD*)lpbBuffer)[i];
+        comment_rec->rdParm[8] = ~checksum + 1;
+    }
     return ret;
+
+error:
+    DeleteMetaFile(CloseMetaFile(hdcmf));
+    return 0;
 }
 
 /******************************************************************

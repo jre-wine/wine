@@ -200,11 +200,11 @@ static inline int pf_output_stringW( pf_output *out, LPCWSTR str, int len )
 
         if( space >= len )
         {
-            memcpy( p, str, len*sizeof(WCHAR) );
+            if (out->buf.W) memcpy( p, str, len*sizeof(WCHAR) );
             out->used += len;
             return len;
         }
-        if( space > 0 )
+        if( space > 0 && out->buf.W )
             memcpy( p, str, space*sizeof(WCHAR) );
         out->used += len;
     }
@@ -215,11 +215,11 @@ static inline int pf_output_stringW( pf_output *out, LPCWSTR str, int len )
 
         if( space >= n )
         {
-            WideCharToMultiByte( CP_ACP, 0, str, len, p, n, NULL, NULL );
+            if (out->buf.A) WideCharToMultiByte( CP_ACP, 0, str, len, p, n, NULL, NULL );
             out->used += n;
             return len;
         }
-        if( space > 0 )
+        if( space > 0 && out->buf.A )
             WideCharToMultiByte( CP_ACP, 0, str, len, p, space, NULL, NULL );
         out->used += n;
     }
@@ -238,11 +238,11 @@ static inline int pf_output_stringA( pf_output *out, LPCSTR str, int len )
 
         if( space >= len )
         {
-            memcpy( p, str, len );
+            if (out->buf.A) memcpy( p, str, len );
             out->used += len;
             return len;
         }
-        if( space > 0 )
+        if( space > 0 && out->buf.A )
             memcpy( p, str, space );
         out->used += len;
     }
@@ -253,11 +253,11 @@ static inline int pf_output_stringA( pf_output *out, LPCSTR str, int len )
 
         if( space >= n )
         {
-            MultiByteToWideChar( CP_ACP, 0, str, len, p, n );
+            if (out->buf.W) MultiByteToWideChar( CP_ACP, 0, str, len, p, n );
             out->used += n;
             return len;
         }
-        if( space > 0 )
+        if( space > 0 && out->buf.W )
             MultiByteToWideChar( CP_ACP, 0, str, len, p, space );
         out->used += n;
     }
@@ -481,12 +481,51 @@ static void pf_integer_conv( char *buf, int buf_len, pf_flags *flags,
     return;
 }
 
+/* pf_fixup_exponent: convert a string containing a 2 digit exponent
+   to 3 digits, accounting for padding, in place. Needed to match
+   the native printf's which always use 3 digits. */
+static void pf_fixup_exponent( char *buf )
+{
+    char* tmp = buf;
+
+    while (tmp[0] && toupper(tmp[0]) != 'E')
+        tmp++;
+
+    if (tmp[0] && (tmp[1] == '+' || tmp[1] == '-') &&
+        isdigit(tmp[2]) && isdigit(tmp[3]))
+    {
+        char final;
+
+        if (isdigit(tmp[4]))
+            return; /* Exponent already 3 digits */
+
+        /* We have a 2 digit exponent. Prepend '0' to make it 3 */
+        tmp += 2;
+        final = tmp[2];
+        tmp[2] = tmp[1];
+        tmp[1] = tmp[0];
+        tmp[0] = '0';
+        if (final == '\0')
+        {
+            /* We didn't expand into trailing space, so this string isn't left
+             * justified. Terminate the string and strip a ' ' at the start of
+             * the string if there is one (as there may be if the string is
+             * right justified).
+             */
+            tmp[3] = '\0';
+            if (buf[0] == ' ')
+                memmove(buf, buf + 1, (tmp - buf) + 3);
+        }
+        /* Otherwise, we expanded into trailing space -> nothing to do */
+    }
+}
+
 /*********************************************************************
  *  pf_vsnprintf  (INTERNAL)
  *
  *  implements both A and W vsnprintf functions
  */
-static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
+static int pf_vsnprintf( pf_output *out, const WCHAR *format, __ms_va_list valist )
 {
     int r;
     LPCWSTR q, p = format;
@@ -618,6 +657,11 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         flags.Format = *p;
         r = 0;
 
+        if (flags.Format == '$')
+        {
+            FIXME("Positional parameters are not supported (%s)\n", wine_dbgstr_w(format));
+            return -1;
+        }
         /* output a string */
         if(  flags.Format == 's' || flags.Format == 'S' )
             r = pf_handle_string_format( out, va_arg(valist, const void*), -1,
@@ -634,13 +678,14 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
         /* output a pointer */
         else if( flags.Format == 'p' )
         {
-            char pointer[11];
+            char pointer[32];
+            void *ptr = va_arg( valist, void * );
 
             flags.PadZero = 0;
             if( flags.Alternate )
-                sprintf(pointer, "0X%08lX", va_arg(valist, long));
+                sprintf(pointer, "0X%0*lX", 2 * (int)sizeof(ptr), (ULONG_PTR)ptr);
             else
-                sprintf(pointer, "%08lX", va_arg(valist, long));
+                sprintf(pointer, "%0*lX", 2 * (int)sizeof(ptr), (ULONG_PTR)ptr);
             r = pf_output_format_A( out, pointer, -1, &flags );
         }
 
@@ -693,7 +738,11 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
             pf_rebuild_format_string( fmt, &flags );
 
             if( pf_is_double_format( flags.Format ) )
+            {
                 sprintf( x, fmt, va_arg(valist, double) );
+                if (toupper(flags.Format) == 'E' || toupper(flags.Format) == 'G')
+                    pf_fixup_exponent( x );
+            }
             else
                 sprintf( x, fmt, va_arg(valist, int) );
 
@@ -720,7 +769,7 @@ static int pf_vsnprintf( pf_output *out, const WCHAR *format, va_list valist )
  *		_vsnprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
-                            const char *format, va_list valist )
+                            const char *format, __ms_va_list valist )
 {
     DWORD sz;
     LPWSTR formatW = NULL;
@@ -749,9 +798,17 @@ int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
 /*********************************************************************
  *		vsprintf (MSVCRT.@)
  */
-int CDECL MSVCRT_vsprintf( char *str, const char *format, va_list valist)
+int CDECL MSVCRT_vsprintf( char *str, const char *format, __ms_va_list valist)
 {
     return MSVCRT_vsnprintf(str, INT_MAX, format, valist);
+}
+
+/*********************************************************************
+ *		_vscprintf (MSVCRT.@)
+ */
+int CDECL _vscprintf( const char *format, __ms_va_list valist )
+{
+    return MSVCRT_vsnprintf( NULL, INT_MAX, format, valist );
 }
 
 /*********************************************************************
@@ -760,10 +817,10 @@ int CDECL MSVCRT_vsprintf( char *str, const char *format, va_list valist)
 int CDECL MSVCRT__snprintf(char *str, unsigned int len, const char *format, ...)
 {
     int retval;
-    va_list valist;
-    va_start(valist, format);
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
     retval = MSVCRT_vsnprintf(str, len, format, valist);
-    va_end(valist);
+    __ms_va_end(valist);
     return retval;
 }
 
@@ -771,7 +828,7 @@ int CDECL MSVCRT__snprintf(char *str, unsigned int len, const char *format, ...)
  *		_vsnwsprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf( MSVCRT_wchar_t *str, unsigned int len,
-                             const MSVCRT_wchar_t *format, va_list valist )
+                             const MSVCRT_wchar_t *format, __ms_va_list valist )
 {
     pf_output out;
 
@@ -789,10 +846,10 @@ int CDECL MSVCRT_vsnwprintf( MSVCRT_wchar_t *str, unsigned int len,
 int CDECL MSVCRT__snwprintf( MSVCRT_wchar_t *str, unsigned int len, const MSVCRT_wchar_t *format, ...)
 {
     int retval;
-    va_list valist;
-    va_start(valist, format);
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
     retval = MSVCRT_vsnwprintf(str, len, format, valist);
-    va_end(valist);
+    __ms_va_end(valist);
     return retval;
 }
 
@@ -801,12 +858,12 @@ int CDECL MSVCRT__snwprintf( MSVCRT_wchar_t *str, unsigned int len, const MSVCRT
  */
 int CDECL MSVCRT_sprintf( char *str, const char *format, ... )
 {
-    va_list ap;
+    __ms_va_list ap;
     int r;
 
-    va_start( ap, format );
+    __ms_va_start( ap, format );
     r = MSVCRT_vsnprintf( str, INT_MAX, format, ap );
-    va_end( ap );
+    __ms_va_end( ap );
     return r;
 }
 
@@ -815,21 +872,38 @@ int CDECL MSVCRT_sprintf( char *str, const char *format, ... )
  */
 int CDECL MSVCRT_swprintf( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *format, ... )
 {
-    va_list ap;
+    __ms_va_list ap;
     int r;
 
-    va_start( ap, format );
+    __ms_va_start( ap, format );
     r = MSVCRT_vsnwprintf( str, INT_MAX, format, ap );
-    va_end( ap );
+    __ms_va_end( ap );
     return r;
 }
 
 /*********************************************************************
  *		vswprintf (MSVCRT.@)
  */
-int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, va_list args )
+int CDECL MSVCRT_vswprintf( MSVCRT_wchar_t* str, const MSVCRT_wchar_t* format, __ms_va_list args )
 {
     return MSVCRT_vsnwprintf( str, INT_MAX, format, args );
+}
+
+/*********************************************************************
+ *		_vscwprintf (MSVCRT.@)
+ */
+int CDECL _vscwprintf( const MSVCRT_wchar_t *format, __ms_va_list args )
+{
+    return MSVCRT_vsnwprintf( NULL, INT_MAX, format, args );
+}
+
+/*********************************************************************
+ *		vswprintf_s (MSVCRT.@)
+ */
+int CDECL MSVCRT_vswprintf_s( MSVCRT_wchar_t* str, MSVCRT_size_t num, const MSVCRT_wchar_t* format, __ms_va_list args )
+{
+    /* FIXME: must handle positional arguments */
+    return MSVCRT_vsnwprintf( str, num, format, args );
 }
 
 /*********************************************************************
@@ -977,35 +1051,83 @@ INT CDECL MSVCRT_iswxdigit( MSVCRT_wchar_t wc )
  */
 INT CDECL MSVCRT_wcscpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, const  MSVCRT_wchar_t *wcSrc)
 {
-    INT size = 0;
+    MSVCRT_size_t size = 0;
 
-    if(!wcDest)
+    if(!wcDest || !numElement)
         return MSVCRT_EINVAL;
+
+    wcDest[0] = 0;
 
     if(!wcSrc)
     {
-        wcDest[0] = 0;
         return MSVCRT_EINVAL;
-    }
-
-    if(numElement == 0)
-    {
-        wcDest[0] = 0;
-        return MSVCRT_ERANGE;
     }
 
     size = strlenW(wcSrc) + 1;
 
     if(size > numElement)
     {
-        wcDest[0] = 0;
-        return MSVCRT_EINVAL;
+        return MSVCRT_ERANGE;
     }
-
-    if(size > numElement)
-        size = numElement;
 
     memcpy( wcDest, wcSrc, size*sizeof(WCHAR) );
 
     return 0;
+}
+
+/******************************************************************
+ *		wcsncpy_s (MSVCRT.@)
+ */
+INT CDECL MSVCRT_wcsncpy_s( MSVCRT_wchar_t* wcDest, MSVCRT_size_t numElement, const MSVCRT_wchar_t *wcSrc,
+                            MSVCRT_size_t count )
+{
+    MSVCRT_size_t size = 0;
+
+    if (!wcDest || !numElement)
+        return MSVCRT_EINVAL;
+
+    wcDest[0] = 0;
+
+    if (!wcSrc)
+    {
+        return MSVCRT_EINVAL;
+    }
+
+    size = min(strlenW(wcSrc), count);
+
+    if (size >= numElement)
+    {
+        return MSVCRT_ERANGE;
+    }
+
+    memcpy( wcDest, wcSrc, size*sizeof(WCHAR) );
+    wcDest[size] = '\0';
+
+    return 0;
+}
+
+/******************************************************************
+ *		wcscat_s (MSVCRT.@)
+ *
+ */
+INT CDECL MSVCRT_wcscat_s(MSVCRT_wchar_t* dst, MSVCRT_size_t elem, const MSVCRT_wchar_t* src)
+{
+    MSVCRT_wchar_t* ptr = dst;
+
+    if (!dst || elem == 0) return MSVCRT_EINVAL;
+    if (!src)
+    {
+        dst[0] = '\0';
+        return MSVCRT_EINVAL;
+    }
+
+    /* seek to end of dst string (or elem if no end of string is found */
+    while (ptr < dst + elem && *ptr != '\0') ptr++;
+    while (ptr < dst + elem)
+    {
+        if ((*ptr++ = *src++) == '\0') return 0;
+    }
+    /* not enough space */
+    dst[0] = '\0';
+    return MSVCRT_ERANGE;
 }

@@ -111,7 +111,7 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
         }
         argv[0]=(LPWSTR)(argv+1);
         if (numargs)
-            *numargs=2;
+            *numargs=1;
 
         return argv;
     }
@@ -350,8 +350,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
           (flags & SHGFI_PIDL)? "pidl" : debugstr_w(path), dwFileAttributes,
           psfi, psfi->dwAttributes, sizeofpsfi, flags);
 
-    if ( (flags & SHGFI_USEFILEATTRIBUTES) && 
-         (flags & (SHGFI_ATTRIBUTES|SHGFI_EXETYPE|SHGFI_PIDL)))
+    if (!path)
         return FALSE;
 
     /* windows initializes these values regardless of the flags */
@@ -430,7 +429,8 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
         {
             psfi->dwAttributes = 0xffffffff;
         }
-        IShellFolder_GetAttributesOf( psfParent, 1, (LPCITEMIDLIST*)&pidlLast,
+        if (psfParent)
+            IShellFolder_GetAttributesOf( psfParent, 1, (LPCITEMIDLIST*)&pidlLast,
                                       &(psfi->dwAttributes) );
     }
 
@@ -596,18 +596,22 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                     }
                     else 
                     {
-                        IconNotYetLoaded=FALSE;
+                        UINT ret;
                         if (flags & SHGFI_SMALLICON)
-                            PrivateExtractIconsW( sTemp,icon_idx,
+                            ret = PrivateExtractIconsW( sTemp,icon_idx,
                                 GetSystemMetrics( SM_CXSMICON ),
                                 GetSystemMetrics( SM_CYSMICON ),
                                 &psfi->hIcon, 0, 1, 0);
                         else
-                            PrivateExtractIconsW( sTemp, icon_idx,
+                            ret = PrivateExtractIconsW( sTemp, icon_idx,
                                 GetSystemMetrics( SM_CXICON),
                                 GetSystemMetrics( SM_CYICON),
                                 &psfi->hIcon, 0, 1, 0);
-                        psfi->iIcon = icon_idx;
+                        if (ret != 0 && ret != 0xFFFFFFFF)
+                        {
+                            IconNotYetLoaded=FALSE;
+                            psfi->iIcon = icon_idx;
+                        }
                     }
                 }
             }
@@ -620,7 +624,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
                 ret = FALSE;
             }
         }
-        if (ret)
+        if (ret && (flags & SHGFI_SYSICONINDEX))
         {
             if (flags & SHGFI_SMALLICON)
                 ret = (DWORD_PTR) ShellSmallIconList;
@@ -660,6 +664,11 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
 
 /*************************************************************************
  * SHGetFileInfoA            [SHELL32.@]
+ *
+ * Note:
+ *    MSVBVM60.__vbaNew2 expects this function to return a value in range
+ *    1 .. 0x7fff when the function succeeds and flags does not contain
+ *    SHGFI_EXETYPE or SHGFI_SYSICONINDEX (see bug 7701)
  */
 DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR path,DWORD dwFileAttributes,
                                 SHFILEINFOA *psfi, UINT sizeofpsfi,
@@ -867,61 +876,6 @@ static void paint_dropline( HDC hdc, HWND hWnd )
 }
 
 /*************************************************************************
- * SHAppBarMessage            [SHELL32.@]
- */
-UINT_PTR WINAPI SHAppBarMessage(DWORD msg, PAPPBARDATA data)
-{
-    int width=data->rc.right - data->rc.left;
-    int height=data->rc.bottom - data->rc.top;
-    RECT rec=data->rc;
-
-    FIXME("msg=%d, data={cb=%d, hwnd=%p, callback=%x, edge=%d, rc=%s, lparam=%lx}: stub\n",
-          msg, data->cbSize, data->hWnd, data->uCallbackMessage, data->uEdge,
-          wine_dbgstr_rect(&data->rc), data->lParam);
-
-    switch (msg)
-    {
-    case ABM_GETSTATE:
-        return ABS_ALWAYSONTOP | ABS_AUTOHIDE;
-    case ABM_GETTASKBARPOS:
-        /* FIXME: This is wrong.  It should return the taskbar co-ords and edge from the monitor
-           which contains data->hWnd */
-        GetWindowRect(data->hWnd, &rec);
-        data->rc=rec;
-        return TRUE;
-    case ABM_ACTIVATE:
-        SetActiveWindow(data->hWnd);
-        return TRUE;
-    case ABM_GETAUTOHIDEBAR:
-        return 0; /* pretend there is no autohide bar */
-    case ABM_NEW:
-        /* cbSize, hWnd, and uCallbackMessage are used. All other ignored */
-        SetWindowPos(data->hWnd,HWND_TOP,0,0,0,0,SWP_SHOWWINDOW|SWP_NOMOVE|SWP_NOSIZE);
-        return TRUE;
-    case ABM_QUERYPOS:
-        GetWindowRect(data->hWnd, &(data->rc));
-        return TRUE;
-    case ABM_REMOVE:
-        FIXME("ABM_REMOVE broken\n");
-        /* FIXME: this is wrong; should it be DestroyWindow instead? */
-        /*CloseHandle(data->hWnd);*/
-        return TRUE;
-    case ABM_SETAUTOHIDEBAR:
-        SetWindowPos(data->hWnd,HWND_TOP,rec.left+1000,rec.top,
-                         width,height,SWP_SHOWWINDOW);
-        return TRUE;
-    case ABM_SETPOS:
-        data->uEdge=(ABE_RIGHT | ABE_LEFT);
-        SetWindowPos(data->hWnd,HWND_TOP,data->rc.left,data->rc.top,
-                     width,height,SWP_SHOWWINDOW);
-        return TRUE;
-    case ABM_WINDOWPOSCHANGED:
-        return TRUE;
-    }
-    return FALSE;
-}
-
-/*************************************************************************
  * SHHelpShortcuts_RunDLLA        [SHELL32.@]
  *
  */
@@ -965,8 +919,8 @@ HRESULT WINAPI SHLoadInProc (REFCLSID rclsid)
 /*************************************************************************
  * AboutDlgProc            (internal)
  */
-INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
-                              LPARAM lParam )
+static INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
+                                      LPARAM lParam )
 {
     HWND hWndCtl;
 
@@ -1247,4 +1201,22 @@ HRESULT WINAPI DllCanUnloadNow(void)
 {
     FIXME("stub\n");
     return S_FALSE;
+}
+
+/***********************************************************************
+ *              ExtractVersionResource16W (SHELL32.@)
+ */
+BOOL WINAPI ExtractVersionResource16W(LPWSTR s, DWORD d)
+{
+    FIXME("(%s %x) stub!\n", debugstr_w(s), d);
+    return FALSE;
+}
+
+/***********************************************************************
+ *              InitNetworkAddressControl (SHELL32.@)
+ */
+BOOL WINAPI InitNetworkAddressControl(void)
+{
+    FIXME("stub\n");
+    return FALSE;
 }

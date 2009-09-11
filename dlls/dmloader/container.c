@@ -35,21 +35,61 @@ static ULONG WINAPI IDirectMusicContainerImpl_IPersistStream_AddRef (LPPERSISTST
  * IDirectMusicContainerImpl implementation
  */
 /* IUnknown/IDirectMusicContainer part: */
+
+static HRESULT DMUSIC_DestroyDirectMusicContainerImpl (LPDIRECTMUSICCONTAINER iface) {
+	ICOM_THIS_MULTI(IDirectMusicContainerImpl, ContainerVtbl, iface);
+	LPDIRECTMUSICLOADER pLoader;
+	LPDIRECTMUSICGETLOADER pGetLoader;
+	struct list *pEntry;
+	LPWINE_CONTAINER_ENTRY pContainedObject;
+
+	/* get loader (from stream we loaded from) */
+	TRACE(": getting loader\n");
+	IStream_QueryInterface (This->pStream, &IID_IDirectMusicGetLoader, (LPVOID*)&pGetLoader);
+	IDirectMusicGetLoader_GetLoader (pGetLoader, &pLoader);
+	IDirectMusicGetLoader_Release (pGetLoader);
+
+	/* release objects from loader's cache (if appropriate) */
+	TRACE(": releasing objects from loader's cache\n");
+	LIST_FOR_EACH (pEntry, This->pContainedObjects) {
+		pContainedObject = LIST_ENTRY (pEntry, WINE_CONTAINER_ENTRY, entry);
+		/* my tests indicate that container releases objects *only*
+		   if they were loaded at its load-time (makes sense, it doesn't
+		   have pointers to objects otherwise); BTW: native container seems
+		   to ignore the flags (I won't) */
+		if (pContainedObject->pObject && !(pContainedObject->dwFlags & DMUS_CONTAINED_OBJF_KEEP)) {
+			/* flags say it shouldn't be kept in loader's cache */
+			IDirectMusicLoader_ReleaseObject (pLoader, pContainedObject->pObject);
+		}
+	}
+	IDirectMusicLoader_Release (pLoader);
+
+	/* release stream we loaded from */
+	IStream_Release (This->pStream);
+
+	/* FIXME: release allocated entries */
+
+	/* decrease number of instances */
+	InterlockedDecrement (&dwDirectMusicContainer);
+
+	return S_OK;
+}
+
 static HRESULT WINAPI IDirectMusicContainerImpl_IDirectMusicContainer_QueryInterface (LPDIRECTMUSICCONTAINER iface, REFIID riid, LPVOID *ppobj) {
 	ICOM_THIS_MULTI(IDirectMusicContainerImpl, ContainerVtbl, iface);
 	
 	TRACE("(%p, %s, %p)\n", This, debugstr_dmguid(riid), ppobj);
 	if (IsEqualIID (riid, &IID_IUnknown) ||
 		IsEqualIID (riid, &IID_IDirectMusicContainer)) {
-		*ppobj = (LPVOID)&This->ContainerVtbl;
+		*ppobj = &This->ContainerVtbl;
 		IDirectMusicContainerImpl_IDirectMusicContainer_AddRef ((LPDIRECTMUSICCONTAINER)&This->ContainerVtbl);
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IDirectMusicObject)) {
-		*ppobj = (LPVOID)&This->ObjectVtbl;
+		*ppobj = &This->ObjectVtbl;
 		IDirectMusicContainerImpl_IDirectMusicObject_AddRef ((LPDIRECTMUSICOBJECT)&This->ObjectVtbl);		
 		return S_OK;
 	} else if (IsEqualIID (riid, &IID_IPersistStream)) {
-		*ppobj = (LPVOID)&This->PersistStreamVtbl;
+		*ppobj = &This->PersistStreamVtbl;
 		IDirectMusicContainerImpl_IPersistStream_AddRef ((LPPERSISTSTREAM)&This->PersistStreamVtbl);		
 		return S_OK;
 	}
@@ -85,29 +125,15 @@ static HRESULT WINAPI IDirectMusicContainerImpl_IDirectMusicContainer_EnumObject
 
 	TRACE("(%p, %s, %d, %p, %p)\n", This, debugstr_dmguid(rguidClass), dwIndex, pDesc, pwszAlias);
 
-	/* check if we can write to whole pDesc */
-	if (pDesc) {
-		if (IsBadReadPtr (pDesc, sizeof(DWORD))) {
-			ERR(": pDesc->dwSize bad read pointer\n");
-			return E_POINTER;
-		}
-		if (pDesc->dwSize != sizeof(DMUS_OBJECTDESC)) {
-			ERR(": invalid pDesc->dwSize\n");
-			return E_INVALIDARG;
-		}
-		if (IsBadWritePtr (pDesc, sizeof(DMUS_OBJECTDESC))) {
-			ERR(": pDesc bad write pointer\n");
-			return E_POINTER;
-		}
+	if (!pDesc)
+		return E_POINTER;
+	if (pDesc->dwSize != sizeof(DMUS_OBJECTDESC)) {
+		ERR(": invalid pDesc->dwSize %d\n", pDesc->dwSize);
+		return E_INVALIDARG;
 	}
-	/* check if wszAlias is big enough */
-	if (pwszAlias && IsBadWritePtr (pwszAlias, DMUS_MAX_FILENAME_SIZE)) {
-		ERR(": wszAlias bad write pointer\n");
-		return E_POINTER;		
-	}
-	
+
 	DM_STRUCT_INIT(pDesc);
-	
+
 	LIST_FOR_EACH (pEntry, This->pContainedObjects) {
 		pContainedObject = LIST_ENTRY (pEntry, WINE_CONTAINER_ENTRY, entry);
 		
@@ -615,7 +641,7 @@ static HRESULT WINAPI IDirectMusicContainerImpl_IPersistStream_Load (LPPERSISTST
 																		DMUS_IO_CONTAINED_OBJECT_HEADER tmpObjectHeader;
 																		TRACE_(dmfile)(": contained object header chunk\n");
 																		IStream_Read (pStm, &tmpObjectHeader, Chunk.dwSize, NULL);
-																		TRACE_(dmdump)(": contained object header: \n%s\n", debugstr_DMUS_IO_CONTAINED_OBJECT_HEADER(&tmpObjectHeader));
+																		TRACE_(dmdump)(": contained object header:\n%s\n", debugstr_DMUS_IO_CONTAINED_OBJECT_HEADER(&tmpObjectHeader));
 																		/* copy guidClass */
 																		pNewEntry->Desc.dwValidData |= DMUS_OBJ_CLASS;
 																		pNewEntry->Desc.guidClass = tmpObjectHeader.guidClassID;
@@ -903,43 +929,4 @@ HRESULT WINAPI DMUSIC_CreateDirectMusicContainerImpl (LPCGUID lpcGUID, LPVOID* p
 	InterlockedIncrement (&dwDirectMusicContainer);
 	
 	return IDirectMusicContainerImpl_IDirectMusicContainer_QueryInterface ((LPDIRECTMUSICCONTAINER)&obj->ContainerVtbl, lpcGUID, ppobj);
-}
-
-HRESULT WINAPI DMUSIC_DestroyDirectMusicContainerImpl (LPDIRECTMUSICCONTAINER iface) {
-	ICOM_THIS_MULTI(IDirectMusicContainerImpl, ContainerVtbl, iface);
-	LPDIRECTMUSICLOADER pLoader;
-	LPDIRECTMUSICGETLOADER pGetLoader;
-	struct list *pEntry;
-	LPWINE_CONTAINER_ENTRY pContainedObject;
-
-	/* get loader (from stream we loaded from) */
-	TRACE(": getting loader\n");
-	IStream_QueryInterface (This->pStream, &IID_IDirectMusicGetLoader, (LPVOID*)&pGetLoader);
-	IDirectMusicGetLoader_GetLoader (pGetLoader, &pLoader);
-	IDirectMusicGetLoader_Release (pGetLoader);
-	
-	/* release objects from loader's cache (if appropriate) */
-	TRACE(": releasing objects from loader's cache\n");
-	LIST_FOR_EACH (pEntry, This->pContainedObjects) {
-		pContainedObject = LIST_ENTRY (pEntry, WINE_CONTAINER_ENTRY, entry);
-		/* my tests indicate that container releases objects *only* 
-		   if they were loaded at its load-time (makes sense, it doesn't
-		   have pointers to objects otherwise); BTW: native container seems
-		   to ignore the flags (I won't) */
-		if (pContainedObject->pObject && !(pContainedObject->dwFlags & DMUS_CONTAINED_OBJF_KEEP)) {
-			/* flags say it shouldn't be kept in loader's cache */
-			IDirectMusicLoader_ReleaseObject (pLoader, pContainedObject->pObject);
-		}
-	}	
-	IDirectMusicLoader_Release (pLoader);
-	
-	/* release stream we loaded from */
-	IStream_Release (This->pStream);
-	
-	/* FIXME: release allocated entries */
-	
-	/* decrease number of instances */
-	InterlockedDecrement (&dwDirectMusicContainer);	
-	
-	return S_OK;
 }

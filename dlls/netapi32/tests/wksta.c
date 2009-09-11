@@ -51,7 +51,7 @@ static int init_wksta_tests(void)
     dwSize = sizeof(user_name)/sizeof(user_name[0]);
     rc=GetUserNameW(user_name, &dwSize);
     if (rc==FALSE && GetLastError()==ERROR_CALL_NOT_IMPLEMENTED) {
-        skip("GetUserNameW is not implemented\n");
+        win_skip("GetUserNameW is not implemented\n");
         return 0;
     }
     ok(rc, "User Name Retrieved\n");
@@ -80,7 +80,17 @@ static void run_wkstausergetinfo_tests(void)
 
     /* Level 0 */
     ok(pNetWkstaUserGetInfo(NULL, 0, (LPBYTE *)&ui0) == NERR_Success,
-       "NetWkstaUserGetInfo is successful\n");
+       "NetWkstaUserGetInfo is unsuccessful\n");
+
+    ok(ui0 != NULL, "ui0 is NULL\n");
+    /* This failure occurred when I ran sshd as service and didn't authenticate
+     * Since the test dereferences ui0, the rest of this test is worthless
+     */
+    if (!ui0)
+    {
+        return;
+    }
+
     ok(!lstrcmpW(user_name, ui0->wkui0_username), "This is really user name\n");
     pNetApiBufferSize(ui0, &dwSize);
     ok(dwSize >= (sizeof(WKSTA_USER_INFO_0) +
@@ -163,7 +173,8 @@ static void run_wkstatransportenum_tests(void)
 
         ok(bufPtr != NULL, "got data back\n");
         ok(entriesRead > 0, "read at least one transport\n");
-        ok(totalEntries > 0, "at least one transport\n");
+        ok(totalEntries > 0 || broken(totalEntries == 0) /* Win7 */,
+           "at least one transport\n");
         pNetApiBufferFree(bufPtr);
     }
 }
@@ -182,13 +193,16 @@ START_TEST(wksta)
      * if one is not available, none are.
      */
     if (!pNetApiBufferFree) {
-        skip("Needed functions are not available\n");
+        win_skip("Needed functions are not available\n");
         FreeLibrary(hnetapi32);
         return;
     }
 
     if (init_wksta_tests()) {
-        run_get_comp_name_tests();
+        if (pNetpGetComputerName)
+            run_get_comp_name_tests();
+        else
+            win_skip("Function NetpGetComputerName not available\n");
         run_wkstausergetinfo_tests();
         run_wkstatransportenum_tests();
     }

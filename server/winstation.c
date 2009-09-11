@@ -227,6 +227,7 @@ static struct desktop *create_desktop( const struct unicode_str *name, unsigned 
             desktop->flags = flags;
             desktop->winstation = (struct winstation *)grab_object( winstation );
             desktop->top_window = NULL;
+            desktop->msg_window = NULL;
             desktop->global_hooks = NULL;
             desktop->close_timeout = NULL;
             desktop->users = 0;
@@ -270,6 +271,7 @@ static void desktop_destroy( struct object *obj )
     struct desktop *desktop = (struct desktop *)obj;
 
     if (desktop->top_window) destroy_window( desktop->top_window );
+    if (desktop->msg_window) destroy_window( desktop->msg_window );
     if (desktop->global_hooks) release_object( desktop->global_hooks );
     if (desktop->close_timeout) remove_timeout_user( desktop->close_timeout );
     list_remove( &desktop->entry );
@@ -309,17 +311,18 @@ void set_process_default_desktop( struct process *process, struct desktop *deskt
     LIST_FOR_EACH_ENTRY( thread, &process->thread_list, struct thread, proc_entry )
         if (!thread->desktop) thread->desktop = handle;
 
-    desktop->users++;
-    if (desktop->close_timeout)
+    if (!process->is_system)
     {
-        remove_timeout_user( desktop->close_timeout );
-        desktop->close_timeout = NULL;
+        desktop->users++;
+        if (desktop->close_timeout)
+        {
+            remove_timeout_user( desktop->close_timeout );
+            desktop->close_timeout = NULL;
+        }
+        if (old_desktop) old_desktop->users--;
     }
-    if (old_desktop)
-    {
-        old_desktop->users--;
-        release_object( old_desktop );
-    }
+
+    if (old_desktop) release_object( old_desktop );
 }
 
 /* connect a process to its window station */

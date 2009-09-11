@@ -110,7 +110,7 @@ error:
 
 static DWORD CALLBACK DPL_MSG_ThreadMain( LPVOID lpContext )
 {
-  LPMSGTHREADINFO lpThreadInfo = (LPMSGTHREADINFO)lpContext;
+  LPMSGTHREADINFO lpThreadInfo = lpContext;
   DWORD dwWaitResult;
 
   TRACE( "Msg thread created. Waiting on app startup\n" );
@@ -233,11 +233,11 @@ HRESULT DP_MSG_SendRequestPlayerId( IDirectPlay2AImpl* This, DWORD dwFlags,
   }
 
   /* Need to examine the data and extract the new player id */
-  if( !FAILED(hr) )
+  if( SUCCEEDED(hr) )
   {
     LPCDPMSG_NEWPLAYERIDREPLY lpcReply;
 
-    lpcReply = (LPCDPMSG_NEWPLAYERIDREPLY)lpMsg;
+    lpcReply = lpMsg;
 
     *lpdpidAllocatedId = lpcReply->dpidNewPlayerId;
 
@@ -282,7 +282,7 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlay2AImpl* This, DPID dpidServer )
     DWORD  dwDataSize;
 
     /* SP Player remote data needs to be propagated at some point - is this the point? */
-    IDirectPlaySP_GetSPPlayerData( This->dp2->spData.lpISP, 0, (LPVOID*)&lpPData, &dwDataSize, DPSET_REMOTE );
+    IDirectPlaySP_GetSPPlayerData( This->dp2->spData.lpISP, 0, &lpPData, &dwDataSize, DPSET_REMOTE );
 
     ERR( "Player Data size is 0x%08lx\n"
          "[%02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %02x%02x]\n"
@@ -329,11 +329,7 @@ HRESULT DP_MSG_ForwardPlayerCreation( IDirectPlay2AImpl* This, DPID dpidServer )
   lpMsgBody->unknown4[5] =  0x0;
   lpMsgBody->unknown4[6] =  0x0;
 
-#if 0
-  lpMsgBody->unknown4[7] =  NS_GetOtherMagic( This->dp2->lpNameServerData )
-#else
   lpMsgBody->unknown4[7] =  NS_GetNsMagic( This->dp2->lpNameServerData );
-#endif
   TRACE( "Setting second magic to 0x%08x\n", lpMsgBody->unknown4[7] );
 
   lpMsgBody->unknown4[8] =  0x0;
@@ -502,7 +498,7 @@ void DP_MSG_ErrorReceived( IDirectPlay2AImpl* This, WORD wCommandId,
 {
   LPCDPMSG_FORWARDADDPLAYERNACK lpcErrorMsg;
 
-  lpcErrorMsg = (LPCDPMSG_FORWARDADDPLAYERNACK)lpMsgBody;
+  lpcErrorMsg = lpMsgBody;
 
   ERR( "Received error message %u. Error is %s\n",
        wCommandId, DPLAYX_HresultToString( lpcErrorMsg->errorCode) );

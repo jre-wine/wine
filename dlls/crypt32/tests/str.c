@@ -119,6 +119,7 @@ static char subjectStrSemicolon[] =
 static char subjectStrCRLF[] =
  "2.5.4.6=US\r\n2.5.4.8=Minnesota\r\n2.5.4.7=Minneapolis\r\n2.5.4.10=CodeWeavers\r\n2.5.4.11=Wine Development\r\n2.5.4.3=localhost\r\n1.2.840.113549.1.9.1=aric@codeweavers.com";
 static char x500SubjectStr[] = "C=US, S=Minnesota, L=Minneapolis, O=CodeWeavers, OU=Wine Development, CN=localhost, E=aric@codeweavers.com";
+static char x500SubjectStrSemicolonReverse[] = "E=aric@codeweavers.com; CN=localhost; OU=Wine Development; O=CodeWeavers; L=Minneapolis; S=Minnesota; C=US";
 static WCHAR issuerStrW[] = {
  'U','S',',',' ','M','i','n','n','e','s','o','t','a',',',' ','M','i','n','n',
  'e','a','p','o','l','i','s',',',' ','C','o','d','e','W','e','a','v','e','r',
@@ -167,6 +168,13 @@ static WCHAR subjectStrCRLFW[] = {
  'h','o','s','t','\r','\n','1','.','2','.','8','4','0','.','1','1','3','5','4',
  '9','.','1','.','9','.','1','=','a','r','i','c','@','c','o','d','e','w','e',
  'a','v','e','r','s','.','c','o','m',0 };
+static WCHAR x500SubjectStrSemicolonReverseW[] = {
+ 'E','=','a','r','i','c','@','c','o','d','e','w','e','a','v','e','r','s','.','c',
+ 'o','m',';',' ','C','N','=','l','o','c','a','l','h','o','s','t',';',' ','O','U',
+ '=','W','i','n','e',' ','D','e','v','e','l','o','p','m','e','n','t',';',' ','O',
+ '=','C','o','d','e','W','e','a','v','e','r','s',';',' ','L','=','M','i','n','n',
+ 'e','a','p','o','l','i','s',';',' ','S','=','M','i','n','n','e','s','o','t','a',
+ ';',' ','C','=','U','S',0 };
 
 typedef BOOL (WINAPI *CryptDecodeObjectFunc)(DWORD, LPCSTR, const BYTE *,
  DWORD, DWORD, void *, DWORD *);
@@ -196,19 +204,19 @@ static void test_CertRDNValueToStrA(void)
 {
     CertRDNAttrEncoding attrs[] = {
      { "2.5.4.6", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin1), (PBYTE)bin1 }, "US" },
+       { sizeof(bin1), bin1 }, "US" },
      { "2.5.4.8", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin2), (PBYTE)bin2 }, "Minnesota" },
+       { sizeof(bin2), bin2 }, "Minnesota" },
      { "2.5.4.7", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin3), (PBYTE)bin3 }, "Minneapolis" },
+       { sizeof(bin3), bin3 }, "Minneapolis" },
      { "2.5.4.10", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin4), (PBYTE)bin4 }, "CodeWeavers" },
+       { sizeof(bin4), bin4 }, "CodeWeavers" },
      { "2.5.4.11", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin5), (PBYTE)bin5 }, "Wine Development" },
+       { sizeof(bin5), bin5 }, "Wine Development" },
      { "2.5.4.3", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin6), (PBYTE)bin6 }, "localhost" },
+       { sizeof(bin6), bin6 }, "localhost" },
      { "1.2.840.113549.1.9.1", CERT_RDN_IA5_STRING,
-       { sizeof(bin7), (PBYTE)bin7 }, "aric@codeweavers.com" },
+       { sizeof(bin7), bin7 }, "aric@codeweavers.com" },
     };
     DWORD i, ret;
     char buffer[2000];
@@ -253,19 +261,19 @@ static void test_CertRDNValueToStrW(void)
      'a','v','e','r','s','.','c','o','m',0 };
     CertRDNAttrEncodingW attrs[] = {
      { "2.5.4.6", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin1), (PBYTE)bin1 }, usW },
+       { sizeof(bin1), bin1 }, usW },
      { "2.5.4.8", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin2), (PBYTE)bin2 }, minnesotaW },
+       { sizeof(bin2), bin2 }, minnesotaW },
      { "2.5.4.7", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin3), (PBYTE)bin3 }, minneapolisW },
+       { sizeof(bin3), bin3 }, minneapolisW },
      { "2.5.4.10", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin4), (PBYTE)bin4 }, codeweaversW },
+       { sizeof(bin4), bin4 }, codeweaversW },
      { "2.5.4.11", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin5), (PBYTE)bin5 }, wineDevW },
+       { sizeof(bin5), bin5 }, wineDevW },
      { "2.5.4.3", CERT_RDN_PRINTABLE_STRING,
-       { sizeof(bin6), (PBYTE)bin6 }, localhostW },
+       { sizeof(bin6), bin6 }, localhostW },
      { "1.2.840.113549.1.9.1", CERT_RDN_IA5_STRING,
-       { sizeof(bin7), (PBYTE)bin7 }, aricW },
+       { sizeof(bin7), bin7 }, aricW },
     };
     DWORD i, ret;
     WCHAR buffer[2000];
@@ -273,7 +281,7 @@ static void test_CertRDNValueToStrW(void)
 
     if (!pCertRDNValueToStrW)
     {
-        skip("CertRDNValueToStrW is not available\n");
+        win_skip("CertRDNValueToStrW is not available\n");
         return;
     }
 
@@ -325,7 +333,7 @@ static void test_CertNameToStrA(void)
 
     if (!pCertNameToStrA)
     {
-        skip("CertNameToStrA is not available\n");
+        win_skip("CertNameToStrA is not available\n");
         return;
     }
 
@@ -371,6 +379,8 @@ static void test_CertNameToStrA(void)
          subjectStrCRLF);
         test_NameToStrConversionA(&context->pCertInfo->Subject,
          CERT_X500_NAME_STR, x500SubjectStr);
+        test_NameToStrConversionA(&context->pCertInfo->Subject,
+         CERT_X500_NAME_STR | CERT_NAME_STR_SEMICOLON_FLAG | CERT_NAME_STR_REVERSE_FLAG, x500SubjectStrSemicolonReverse);
 
         CertFreeCertificateContext(context);
     }
@@ -402,7 +412,7 @@ static void test_CertNameToStrW(void)
 
     if (!pCertNameToStrW)
     {
-        skip("CertNameToStrW is not available\n");
+        win_skip("CertNameToStrW is not available\n");
         return;
     }
 
@@ -446,6 +456,8 @@ static void test_CertNameToStrW(void)
         test_NameToStrConversionW(&context->pCertInfo->Subject,
          CERT_OID_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
          subjectStrCRLFW);
+        test_NameToStrConversionW(&context->pCertInfo->Subject,
+         CERT_X500_NAME_STR | CERT_NAME_STR_SEMICOLON_FLAG | CERT_NAME_STR_REVERSE_FLAG, x500SubjectStrSemicolonReverseW);
 
         CertFreeCertificateContext(context);
     }
@@ -487,7 +499,7 @@ static void test_CertStrToNameA(void)
 
     if (!pCertStrToNameA)
     {
-        skip("CertStrToNameA is not available\n");
+        win_skip("CertStrToNameA is not available\n");
         return;
     }
 
@@ -572,7 +584,7 @@ static void test_CertStrToNameW(void)
 
     if (!pCertStrToNameW)
     {
-        skip("CertStrToNameW is not available\n");
+        win_skip("CertStrToNameW is not available\n");
         return;
     }
 

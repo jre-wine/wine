@@ -1,18 +1,30 @@
+EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ../..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 MODULE    = xcopy.exe
-APPMODE   = -mconsole -municode
-IMPORTS   = shell32 user32 msvcrt kernel32
-EXTRADEFS = -DUNICODE
+APPMODE   = -mconsole -municode -mno-cygwin
+IMPORTS   = shell32 user32 kernel32
 EXTRAINCL = -I$(TOPSRCDIR)/include/msvcrt
 MODCFLAGS = @BUILTINFLAG@
 
 C_SRCS = \
 	xcopy.c
 
-RC_SRCS = rsrc.rc
+RC_SRCS = \
+	Da.rc \
+	De.rc \
+	En.rc \
+	Fr.rc \
+	Ko.rc \
+	Lt.rc \
+	Nl.rc \
+	No.rc \
+	Pl.rc \
+	Pt.rc \
+	Ru.rc \
+	Si.rc
 
 @MAKE_PROG_RULES@
 
