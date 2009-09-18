@@ -3,6 +3,7 @@ cacls.exe
 clock.exe
 cmd.exe
 control.exe
+dxdiag.exe
 eject.exe
 expand.exe
 explorer.exe
