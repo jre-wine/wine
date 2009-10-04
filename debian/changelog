@@ -1,8 +1,16 @@
-wine-unstable (1.1.29-1) UNRELEASED; urgency=low
+wine-unstable (1.1.29-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.29, released Sep 2, 2009.
+    - Improved Gecko integration by using Wine's network layers.
+    - Use of external libmpg123 for mp3 decoding.
+    - Support for JPEG and PNG formats in WindowsCodecs.
+    - Many regression test fixes for Win64 and Windows 7.
+    - Various bug fixes.
+  * Added libmpg123-dev to Build-Depends, and made libwine recommend the
+    corresponding library.
+  * Installed the new dxdiag.exe application into libwine-bin.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 12 Sep 2009 00:31:28 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 04 Oct 2009 15:27:56 +0200
 
 wine-unstable (1.1.28-1) unstable; urgency=low
 
