@@ -77,7 +77,7 @@ static HRESULT exprval_value(script_ctx_t *ctx, exprval_t *val, jsexcept_t *ei, 
             return E_FAIL;
         }
 
-        return disp_propget(val->u.idref.disp, val->u.idref.id, ctx->lcid, ret, ei, NULL/*FIXME*/);
+        return disp_propget(ctx, val->u.idref.disp, val->u.idref.id, ret, ei, NULL/*FIXME*/);
     case EXPRVAL_NAMEREF:
         break;
     case EXPRVAL_INVALID:
@@ -242,7 +242,12 @@ static HRESULT put_value(script_ctx_t *ctx, exprval_t *ref, VARIANT *v, jsexcept
     if(ref->type != EXPRVAL_IDREF)
         return throw_reference_error(ctx, ei, IDS_ILLEGAL_ASSIGN, NULL);
 
-    return disp_propput(ref->u.idref.disp, ref->u.idref.id, ctx->lcid, v, ei, NULL/*FIXME*/);
+    return disp_propput(ctx, ref->u.idref.disp, ref->u.idref.id, v, ei, NULL/*FIXME*/);
+}
+
+static inline BOOL is_null(const VARIANT *v)
+{
+    return V_VT(v) == VT_NULL || (V_VT(v) == VT_DISPATCH && !V_DISPATCH(v));
 }
 
 static HRESULT disp_cmp(IDispatch *disp1, IDispatch *disp2, BOOL *ret)
@@ -253,6 +258,11 @@ static HRESULT disp_cmp(IDispatch *disp1, IDispatch *disp2, BOOL *ret)
 
     if(disp1 == disp2) {
         *ret = TRUE;
+        return S_OK;
+    }
+
+    if(!disp1 || !disp2) {
+        *ret = FALSE;
         return S_OK;
     }
 
@@ -290,12 +300,12 @@ static HRESULT equal2_values(VARIANT *lval, VARIANT *rval, BOOL *ret)
     TRACE("\n");
 
     if(V_VT(lval) != V_VT(rval)) {
-        if(is_num_vt(V_VT(lval)) && is_num_vt(V_VT(rval))) {
+        if(is_num_vt(V_VT(lval)) && is_num_vt(V_VT(rval)))
             *ret = num_val(lval) == num_val(rval);
-            return S_OK;
-        }
-
-        *ret = FALSE;
+        else if(is_null(lval))
+            *ret = is_null(rval);
+        else
+            *ret = FALSE;
         return S_OK;
     }
 
@@ -406,7 +416,7 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
 
         V_VT(&var) = VT_DISPATCH;
         V_DISPATCH(&var) = (IDispatch*)_IDispatchEx_(func_obj);
-        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, script->lcid, &var, ei, NULL);
+        hres = jsdisp_propput_name(ctx->var_disp, func->expr->identifier, &var, ei, NULL);
         jsdisp_release(func_obj);
         if(FAILED(hres))
             return hres;
@@ -606,7 +616,7 @@ static HRESULT variable_list_eval(exec_ctx_t *ctx, variable_declaration_t *var_l
         if(FAILED(hres))
             break;
 
-        hres = jsdisp_propput_name(ctx->var_disp, iter->identifier, ctx->parser->script->lcid, &val, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(ctx->var_disp, iter->identifier, &val, ei, NULL/*FIXME*/);
         VariantClear(&val);
         if(FAILED(hres))
             break;
@@ -1153,8 +1163,7 @@ static HRESULT catch_eval(exec_ctx_t *ctx, catch_block_t *block, return_type_t *
 
     hres = create_dispex(ctx->parser->script, NULL, NULL, &var_disp);
     if(SUCCEEDED(hres)) {
-        hres = jsdisp_propput_name(var_disp, block->identifier, ctx->parser->script->lcid,
-                &ex, &rt->ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_name(var_disp, block->identifier, &ex, &rt->ei, NULL/*FIXME*/);
         if(SUCCEEDED(hres)) {
             hres = scope_push(ctx->scope_chain, var_disp, &ctx->scope_chain);
             if(SUCCEEDED(hres)) {
@@ -1316,7 +1325,7 @@ HRESULT function_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD fla
     TRACE("\n");
 
     if(expr->identifier) {
-        hres = jsdisp_propget_name(ctx->var_disp, expr->identifier, ctx->parser->script->lcid, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propget_name(ctx->var_disp, expr->identifier, &var, ei, NULL/*FIXME*/);
         if(FAILED(hres))
             return hres;
     }else {
@@ -1540,7 +1549,7 @@ HRESULT new_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, j
         return E_FAIL;
     }
 
-    hres = disp_call(V_DISPATCH(&constr), DISPID_VALUE, ctx->parser->script->lcid,
+    hres = disp_call(ctx->parser->script, V_DISPATCH(&constr), DISPID_VALUE,
                      DISPATCH_CONSTRUCT, &dp, &var, ei, NULL/*FIXME*/);
     IDispatch_Release(V_DISPATCH(&constr));
     if(FAILED(hres))
@@ -1571,17 +1580,17 @@ HRESULT call_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, 
         switch(exprval.type) {
         case EXPRVAL_VARIANT:
             if(V_VT(&exprval.u.var) == VT_DISPATCH)
-                hres = disp_call(V_DISPATCH(&exprval.u.var), DISPID_VALUE, ctx->parser->script->lcid,
+                hres = disp_call(ctx->parser->script, V_DISPATCH(&exprval.u.var), DISPID_VALUE,
                         DISPATCH_METHOD, &dp, flags & EXPR_NOVAL ? NULL : &var, ei, NULL/*FIXME*/);
             else
-                hres = throw_type_error(ctx->var_disp->ctx, ei, IDS_NO_PROPERTY, NULL);
+                hres = throw_type_error(ctx->parser->script, ei, IDS_NO_PROPERTY, NULL);
             break;
         case EXPRVAL_IDREF:
-            hres = disp_call(exprval.u.idref.disp, exprval.u.idref.id, ctx->parser->script->lcid,
+            hres = disp_call(ctx->parser->script, exprval.u.idref.disp, exprval.u.idref.id,
                     DISPATCH_METHOD, &dp, flags & EXPR_NOVAL ? NULL : &var, ei, NULL/*FIXME*/);
             break;
         case EXPRVAL_INVALID:
-            hres = throw_type_error(ctx->var_disp->ctx, ei, IDS_OBJECT_EXPECTED, NULL);
+            hres = throw_type_error(ctx->parser->script, ei, IDS_OBJECT_EXPECTED, NULL);
             break;
         default:
             FIXME("unimplemented type %d\n", exprval.type);
@@ -1687,7 +1696,7 @@ HRESULT array_literal_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWOR
         if(FAILED(hres))
             break;
 
-        hres = jsdisp_propput_idx(array, i, ctx->parser->script->lcid, &val, ei, NULL/*FIXME*/);
+        hres = jsdisp_propput_idx(array, i, &val, ei, NULL/*FIXME*/);
         VariantClear(&val);
         if(FAILED(hres))
             break;
@@ -1738,7 +1747,7 @@ HRESULT property_value_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWO
             hres = exprval_to_value(ctx->parser->script, &exprval, ei, &val);
             exprval_release(&exprval);
             if(SUCCEEDED(hres)) {
-                hres = jsdisp_propput_name(obj, name, ctx->parser->script->lcid, &val, ei, NULL/*FIXME*/);
+                hres = jsdisp_propput_name(obj, name, &val, ei, NULL/*FIXME*/);
                 VariantClear(&val);
             }
         }
@@ -1979,7 +1988,7 @@ static HRESULT instanceof_eval(exec_ctx_t *ctx, VARIANT *inst, VARIANT *objv, js
     }
 
     if(is_class(obj, JSCLASS_FUNCTION)) {
-        hres = jsdisp_propget_name(obj, prototypeW, ctx->parser->script->lcid, &var, ei, NULL/*FIXME*/);
+        hres = jsdisp_propget_name(obj, prototypeW, &var, ei, NULL/*FIXME*/);
     }else {
         FIXME("throw TypeError\n");
         hres = E_FAIL;
@@ -2028,10 +2037,44 @@ HRESULT instanceof_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD f
 }
 
 /* ECMA-262 3rd Edition    11.8.7 */
-HRESULT in_expression_eval(exec_ctx_t *ctx, expression_t *expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
+static HRESULT in_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *obj, jsexcept_t *ei, VARIANT *retv)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    VARIANT_BOOL ret;
+    DISPID id;
+    BSTR str;
+    HRESULT hres;
+
+    if(V_VT(obj) != VT_DISPATCH) {
+        FIXME("throw TypeError\n");
+        return E_FAIL;
+    }
+
+    hres = to_string(ctx->parser->script, lval, ei, &str);
+    if(FAILED(hres))
+        return hres;
+
+    hres = disp_get_id(V_DISPATCH(obj), str, 0, &id);
+    SysFreeString(str);
+    if(SUCCEEDED(hres))
+        ret = VARIANT_TRUE;
+    else if(hres == DISP_E_UNKNOWNNAME)
+        ret = VARIANT_FALSE;
+    else
+        return hres;
+
+    V_VT(retv) = VT_BOOL;
+    V_BOOL(retv) = ret;
+    return S_OK;
+}
+
+/* ECMA-262 3rd Edition    11.8.7 */
+HRESULT in_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, jsexcept_t *ei, exprval_t *ret)
+{
+    binary_expression_t *expr = (binary_expression_t*)_expr;
+
+    TRACE("\n");
+
+    return binary_expr_eval(ctx, expr, in_eval, ei, ret);
 }
 
 /* ECMA-262 3rd Edition    11.6.1 */
@@ -2336,8 +2379,7 @@ static HRESULT typeof_exprval(exec_ctx_t *ctx, exprval_t *exprval, jsexcept_t *e
     case VT_DISPATCH: {
         DispatchEx *dispex;
 
-        dispex = iface_to_jsdisp((IUnknown*)V_DISPATCH(&val));
-        if(dispex) {
+        if(V_DISPATCH(&val) && (dispex = iface_to_jsdisp((IUnknown*)V_DISPATCH(&val)))) {
             *ret = is_class(dispex, JSCLASS_FUNCTION) ? functionW : objectW;
             jsdisp_release(dispex);
         }else {

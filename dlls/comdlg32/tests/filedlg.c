@@ -200,6 +200,11 @@ static UINT_PTR CALLBACK create_view_window2_hook(HWND dlg, UINT msg, WPARAM wPa
             view_params.hwndView = NULL;
 
             hr = IShellView2_CreateViewWindow2(shell_view2, &view_params);
+            if (hr == E_FAIL)
+            {
+                win_skip("CreateViewWindow2 is broken on Vista/W2K8\n");
+                goto cleanup;
+            }
             ok(SUCCEEDED(hr), "CreateViewWindow2 returned %#x\n", hr);
             if (FAILED(hr)) goto cleanup;
 
@@ -868,6 +873,67 @@ static void test_arrange(void)
     }
 }
 
+static CHAR WINDIR[MAX_PATH];
+
+static UINT_PTR CALLBACK path_hook_proc( HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    LPNMHDR nmh;
+
+    if( msg == WM_NOTIFY)
+    {
+        nmh = (LPNMHDR) lParam;
+        if( nmh->code == CDN_INITDONE)
+        {
+            PostMessage( GetParent(hDlg), WM_COMMAND, IDCANCEL, FALSE);
+        }
+        else if ( nmh->code == CDN_FOLDERCHANGE)
+        {
+            char buf[1024];
+            int ret;
+
+            memset(buf, 0x66, sizeof(buf));
+            ret = SendMessageA( GetParent(hDlg), CDM_GETFOLDERPATH, sizeof(buf), (LPARAM)buf);
+            ok(!lstrcmpA(WINDIR, buf), "Expected '%s', got '%s'\n", WINDIR, buf);
+            ok(lstrlenA(WINDIR) + 1 == ret, "Expected %d, got %d\n", lstrlenA(WINDIR) + 1, ret);
+        }
+    }
+
+    return 0;
+}
+
+static void test_getfolderpath(void)
+{
+    OPENFILENAMEA ofn;
+    BOOL result;
+    char szFileName[MAX_PATH] = "";
+    char szInitialDir[MAX_PATH];
+
+    GetWindowsDirectory(szInitialDir, MAX_PATH);
+    lstrcpyA(WINDIR, szInitialDir);
+
+    ZeroMemory(&ofn, sizeof(ofn));
+
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = NULL;
+    ofn.lpstrFilter = "Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFile = szFileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLEHOOK;
+    ofn.lpstrDefExt = "txt";
+    ofn.lpfnHook = path_hook_proc;
+    ofn.lpstrInitialDir = szInitialDir;
+
+    result = GetOpenFileNameA(&ofn);
+    ok(0 == result, "expected 0, got %d\n", result);
+    ok(0 == CommDlgExtendedError(), "expected 0, got %d\n",
+       CommDlgExtendedError());
+
+    result = GetSaveFileNameA(&ofn);
+    ok(0 == result, "expected 0, got %d\n", result);
+    ok(0 == CommDlgExtendedError(), "expected 0, got %d\n",
+       CommDlgExtendedError());
+}
+
 START_TEST(filedlg)
 {
     test_DialogCancel();
@@ -876,4 +942,5 @@ START_TEST(filedlg)
     test_arrange();
     test_resize();
     test_ok();
+    test_getfolderpath();
 }

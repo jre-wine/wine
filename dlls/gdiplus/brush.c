@@ -116,7 +116,7 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
         }
         case BrushTypeLinearGradient:{
             GpLineGradient *dest, *src;
-            INT count;
+            INT count, pcount;
 
             dest = GdipAlloc(sizeof(GpLineGradient));
             if(!dest)    return OutOfMemory;
@@ -130,11 +130,20 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
             count = dest->blendcount;
             dest->blendfac = GdipAlloc(count * sizeof(REAL));
             dest->blendpos = GdipAlloc(count * sizeof(REAL));
+            pcount = dest->pblendcount;
+            if (pcount)
+            {
+                dest->pblendcolor = GdipAlloc(pcount * sizeof(ARGB));
+                dest->pblendpos = GdipAlloc(pcount * sizeof(REAL));
+            }
 
-            if (!dest->blendfac || !dest->blendpos)
+            if (!dest->blendfac || !dest->blendpos ||
+                (pcount && (!dest->pblendcolor || !dest->pblendpos)))
             {
                 GdipFree(dest->blendfac);
                 GdipFree(dest->blendpos);
+                GdipFree(dest->pblendcolor);
+                GdipFree(dest->pblendpos);
                 DeleteObject(dest->brush.gdibrush);
                 GdipFree(dest);
                 return OutOfMemory;
@@ -142,6 +151,12 @@ GpStatus WINGDIPAPI GdipCloneBrush(GpBrush *brush, GpBrush **clone)
 
             memcpy(dest->blendfac, src->blendfac, count * sizeof(REAL));
             memcpy(dest->blendpos, src->blendpos, count * sizeof(REAL));
+
+            if (pcount)
+            {
+                memcpy(dest->pblendcolor, src->pblendcolor, pcount * sizeof(ARGB));
+                memcpy(dest->pblendpos, src->pblendpos, pcount * sizeof(REAL));
+            }
 
             *clone = &dest->brush;
             break;
@@ -288,6 +303,10 @@ GpStatus WINGDIPAPI GdipCreateLineBrush(GDIPCONST GpPointF* startpoint,
 
     (*line)->blendfac[0] = 1.0f;
     (*line)->blendpos[0] = 1.0f;
+
+    (*line)->pblendcolor = NULL;
+    (*line)->pblendpos = NULL;
+    (*line)->pblendcount = 0;
 
     return Ok;
 }
@@ -735,7 +754,7 @@ GpStatus WINGDIPAPI GdipCreateTextureIA(GpImage *image,
 
     /* image is flipped */
     if(pbmi->bmiHeader.biHeight > 0){
-        dibits += pbmi->bmiHeader.biSizeImage;
+        dibits += image_stride * (pbmi->bmiHeader.biHeight - 1);
         image_stride *= -1;
         textbits += stride * (n_height - 1);
         stride *= -1;
@@ -866,6 +885,8 @@ GpStatus WINGDIPAPI GdipDeleteBrush(GpBrush *brush)
         case BrushTypeLinearGradient:
             GdipFree(((GpLineGradient*)brush)->blendfac);
             GdipFree(((GpLineGradient*)brush)->blendpos);
+            GdipFree(((GpLineGradient*)brush)->pblendcolor);
+            GdipFree(((GpLineGradient*)brush)->pblendpos);
             break;
         case BrushTypeTextureFill:
             GdipDeleteMatrix(((GpTexture*)brush)->transform);
@@ -1574,6 +1595,69 @@ GpStatus WINGDIPAPI GdipSetLineLinearBlend(GpLineGradient *brush, REAL focus,
 GpStatus WINGDIPAPI GdipSetLinePresetBlend(GpLineGradient *brush,
     GDIPCONST ARGB *blend, GDIPCONST REAL* positions, INT count)
 {
+    ARGB *new_color;
+    REAL *new_pos;
+    TRACE("(%p,%p,%p,%i)\n", brush, blend, positions, count);
+
+    if (!brush || !blend || !positions || count < 2 ||
+        positions[0] != 0.0f || positions[count-1] != 1.0f)
+    {
+        return InvalidParameter;
+    }
+
+    new_color = GdipAlloc(count * sizeof(ARGB));
+    new_pos = GdipAlloc(count * sizeof(REAL));
+    if (!new_color || !new_pos)
+    {
+        GdipFree(new_color);
+        GdipFree(new_pos);
+        return OutOfMemory;
+    }
+
+    memcpy(new_color, blend, sizeof(ARGB) * count);
+    memcpy(new_pos, positions, sizeof(REAL) * count);
+
+    GdipFree(brush->pblendcolor);
+    GdipFree(brush->pblendpos);
+
+    brush->pblendcolor = new_color;
+    brush->pblendpos = new_pos;
+    brush->pblendcount = count;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetLinePresetBlend(GpLineGradient *brush,
+    ARGB *blend, REAL* positions, INT count)
+{
+    if (!brush || !blend || !positions || count < 2)
+        return InvalidParameter;
+
+    if (brush->pblendcount == 0)
+        return GenericError;
+
+    if (count < brush->pblendcount)
+        return InsufficientBuffer;
+
+    memcpy(blend, brush->pblendcolor, sizeof(ARGB) * brush->pblendcount);
+    memcpy(positions, brush->pblendpos, sizeof(REAL) * brush->pblendcount);
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipGetLinePresetBlendCount(GpLineGradient *brush,
+    INT *count)
+{
+    if (!brush || !count)
+        return InvalidParameter;
+
+    *count = brush->pblendcount;
+
+    return Ok;
+}
+
+GpStatus WINGDIPAPI GdipResetLineTransform(GpLineGradient *brush)
+{
     static int calls;
 
     if(!(calls++))
@@ -1584,6 +1668,17 @@ GpStatus WINGDIPAPI GdipSetLinePresetBlend(GpLineGradient *brush,
 
 GpStatus WINGDIPAPI GdipSetLineTransform(GpLineGradient *brush,
     GDIPCONST GpMatrix *matrix)
+{
+    static int calls;
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipScaleLineTransform(GpLineGradient *brush, REAL sx, REAL sy,
+    GpMatrixOrder order)
 {
     static int calls;
 

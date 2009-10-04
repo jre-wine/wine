@@ -42,7 +42,7 @@ static const WCHAR emptyW[] = {0};
 static const CLSID CLSID_JScript =
     {0xf414c260,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
 
-typedef struct {
+struct ScriptHost {
     const IActiveScriptSiteVtbl               *lpIActiveScriptSiteVtbl;
     const IActiveScriptSiteInterruptPollVtbl  *lpIActiveScriptSiteInterruptPollVtbl;
     const IActiveScriptSiteWindowVtbl         *lpIActiveScriptSiteWindowVtbl;
@@ -56,11 +56,11 @@ typedef struct {
 
     SCRIPTSTATE script_state;
 
-    HTMLDocument *doc;
+    HTMLWindow *window;
 
     GUID guid;
     struct list entry;
-} ScriptHost;
+};
 
 #define ACTSCPSITE(x)  ((IActiveScriptSite*)               &(x)->lpIActiveScriptSiteVtbl)
 #define ACTSCPPOLL(x)  (&(x)->lpIActiveScriptSiteInterruptPollVtbl)
@@ -206,11 +206,11 @@ static void release_script_engine(ScriptHost *This)
     This->script_state = SCRIPTSTATE_UNINITIALIZED;
 }
 
-void connect_scripts(HTMLDocument *doc)
+void connect_scripts(HTMLWindow *window)
 {
     ScriptHost *iter;
 
-    LIST_FOR_EACH_ENTRY(iter, &doc->script_hosts, ScriptHost, entry) {
+    LIST_FOR_EACH_ENTRY(iter, &window->script_hosts, ScriptHost, entry) {
         if(iter->script_state == SCRIPTSTATE_STARTED)
             IActiveScript_SetScriptState(iter->script, SCRIPTSTATE_CONNECTED);
     }
@@ -270,7 +270,7 @@ static ULONG WINAPI ActiveScriptSite_Release(IActiveScriptSite *iface)
 
     if(!ref) {
         release_script_engine(This);
-        if(This->doc)
+        if(This->window)
             list_remove(&This->entry);
         heap_free(This);
     }
@@ -305,11 +305,11 @@ static HRESULT WINAPI ActiveScriptSite_GetItemInfo(IActiveScriptSite *iface, LPC
     if(strcmpW(pstrName, windowW))
         return DISP_E_MEMBERNOTFOUND;
 
-    if(!This->doc)
+    if(!This->window)
         return E_FAIL;
 
     /* FIXME: Return proxy object */
-    *ppiunkItem = (IUnknown*)HTMLWINDOW2(This->doc->window);
+    *ppiunkItem = (IUnknown*)HTMLWINDOW2(This->window);
     IUnknown_AddRef(*ppiunkItem);
 
     return S_OK;
@@ -529,7 +529,7 @@ static const IActiveScriptSiteDebug32Vtbl ActiveScriptSiteDebug32Vtbl = {
     ActiveScriptSiteDebug32_OnScriptErrorDebug
 };
 
-static ScriptHost *create_script_host(HTMLDocument *doc, const GUID *guid)
+static ScriptHost *create_script_host(HTMLWindow *window, const GUID *guid)
 {
     ScriptHost *ret;
     HRESULT hres;
@@ -540,11 +540,11 @@ static ScriptHost *create_script_host(HTMLDocument *doc, const GUID *guid)
     ret->lpIActiveScriptSiteWindowVtbl         = &ActiveScriptSiteWindowVtbl;
     ret->lpIActiveScriptSiteDebug32Vtbl        = &ActiveScriptSiteDebug32Vtbl;
     ret->ref = 1;
-    ret->doc = doc;
+    ret->window = window;
     ret->script_state = SCRIPTSTATE_UNINITIALIZED;
 
     ret->guid = *guid;
-    list_add_tail(&doc->script_hosts, &ret->entry);
+    list_add_tail(&window->script_hosts, &ret->entry);
 
     hres = CoCreateInstance(&ret->guid, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IActiveScript, (void**)&ret->script);
@@ -593,7 +593,7 @@ static void parse_extern_script(ScriptHost *script_host, LPCWSTR src)
     if(FAILED(hres))
         return;
 
-    hres = bind_mon_to_buffer(script_host->doc, mon, (void**)&buf, &size);
+    hres = bind_mon_to_buffer(&script_host->window->doc_obj->basedoc, mon, (void**)&buf, &size);
     IMoniker_Release(mon);
     if(FAILED(hres))
         return;
@@ -727,24 +727,24 @@ static BOOL get_script_guid(nsIDOMHTMLScriptElement *nsscript, GUID *guid)
     return ret;
 }
 
-static ScriptHost *get_script_host(HTMLDocument *doc, const GUID *guid)
+static ScriptHost *get_script_host(HTMLWindow *window, const GUID *guid)
 {
     ScriptHost *iter;
 
-    if(IsEqualGUID(&CLSID_JScript, guid) && doc->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
+    if(IsEqualGUID(&CLSID_JScript, guid) && window->scriptmode != SCRIPTMODE_ACTIVESCRIPT) {
         TRACE("Ignoring JScript\n");
         return NULL;
     }
 
-    LIST_FOR_EACH_ENTRY(iter, &doc->script_hosts, ScriptHost, entry) {
+    LIST_FOR_EACH_ENTRY(iter, &window->script_hosts, ScriptHost, entry) {
         if(IsEqualGUID(guid, &iter->guid))
             return iter;
     }
 
-    return create_script_host(doc, guid);
+    return create_script_host(window, guid);
 }
 
-void doc_insert_script(HTMLDocument *doc, nsIDOMHTMLScriptElement *nsscript)
+void doc_insert_script(HTMLWindow *window, nsIDOMHTMLScriptElement *nsscript)
 {
     ScriptHost *script_host;
     GUID guid;
@@ -754,7 +754,7 @@ void doc_insert_script(HTMLDocument *doc, nsIDOMHTMLScriptElement *nsscript)
         return;
     }
 
-    script_host = get_script_host(doc, &guid);
+    script_host = get_script_host(window, &guid);
     if(!script_host)
         return;
 
@@ -762,7 +762,7 @@ void doc_insert_script(HTMLDocument *doc, nsIDOMHTMLScriptElement *nsscript)
         parse_script_elem(script_host, nsscript);
 }
 
-IDispatch *script_parse_event(HTMLDocument *doc, LPCWSTR text)
+IDispatch *script_parse_event(HTMLWindow *window, LPCWSTR text)
 {
     ScriptHost *script_host;
     GUID guid = CLSID_JScript;
@@ -795,7 +795,7 @@ IDispatch *script_parse_event(HTMLDocument *doc, LPCWSTR text)
         ptr = text;
     }
 
-    script_host = get_script_host(doc, &guid);
+    script_host = get_script_host(window, &guid);
     if(!script_host || !script_host->parse_proc)
         return NULL;
 
@@ -809,6 +809,52 @@ IDispatch *script_parse_event(HTMLDocument *doc, LPCWSTR text)
 
     TRACE("ret %p\n", disp);
     return disp;
+}
+
+IDispatch *get_script_disp(ScriptHost *script_host)
+{
+    IDispatch *disp;
+    HRESULT hres;
+
+    if(!script_host->script)
+        return NULL;
+
+    hres = IActiveScript_GetScriptDispatch(script_host->script, windowW, &disp);
+    if(FAILED(hres))
+        return NULL;
+
+    return disp;
+}
+
+BOOL find_global_prop(HTMLWindow *window, BSTR name, DWORD flags, ScriptHost **ret_host, DISPID *ret_id)
+{
+    IDispatchEx *dispex;
+    IDispatch *disp;
+    ScriptHost *iter;
+    HRESULT hres;
+
+    LIST_FOR_EACH_ENTRY(iter, &window->script_hosts, ScriptHost, entry) {
+        disp = get_script_disp(iter);
+        if(!disp)
+            continue;
+
+        hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
+        if(SUCCEEDED(hres)) {
+            hres = IDispatchEx_GetDispID(dispex, name, flags, ret_id);
+            IDispatchEx_Release(dispex);
+        }else {
+            FIXME("No IDispatchEx\n");
+            hres = E_NOTIMPL;
+        }
+
+        IDispatch_Release(disp);
+        if(SUCCEEDED(hres)) {
+            *ret_host = iter;
+            return TRUE;
+        }
+    }
+
+    return FALSE;
 }
 
 static BOOL is_jscript_available(void)
@@ -831,27 +877,27 @@ static BOOL is_jscript_available(void)
     return available;
 }
 
-void set_script_mode(HTMLDocument *doc, SCRIPTMODE mode)
+void set_script_mode(HTMLWindow *window, SCRIPTMODE mode)
 {
     nsIWebBrowserSetup *setup;
     nsresult nsres;
 
     if(mode == SCRIPTMODE_ACTIVESCRIPT && !is_jscript_available()) {
         TRACE("jscript.dll not available\n");
-        doc->scriptmode = SCRIPTMODE_GECKO;
+        window->scriptmode = SCRIPTMODE_GECKO;
         return;
     }
 
-    doc->scriptmode = mode;
+    window->scriptmode = mode;
 
-    if(!doc->nscontainer || !doc->nscontainer->webbrowser)
+    if(!window->doc_obj->nscontainer || !window->doc_obj->nscontainer->webbrowser)
         return;
 
-    nsres = nsIWebBrowser_QueryInterface(doc->nscontainer->webbrowser,
+    nsres = nsIWebBrowser_QueryInterface(window->doc_obj->nscontainer->webbrowser,
             &IID_nsIWebBrowserSetup, (void**)&setup);
     if(NS_SUCCEEDED(nsres)) {
         nsres = nsIWebBrowserSetup_SetProperty(setup, SETUP_ALLOW_JAVASCRIPT,
-                doc->scriptmode == SCRIPTMODE_GECKO);
+                window->scriptmode == SCRIPTMODE_GECKO);
         nsIWebBrowserSetup_Release(setup);
     }
 
@@ -859,16 +905,16 @@ void set_script_mode(HTMLDocument *doc, SCRIPTMODE mode)
         ERR("JavaScript setup failed: %08x\n", nsres);
 }
 
-void release_script_hosts(HTMLDocument *doc)
+void release_script_hosts(HTMLWindow *window)
 {
     ScriptHost *iter;
 
-    while(!list_empty(&doc->script_hosts)) {
-        iter = LIST_ENTRY(list_head(&doc->script_hosts), ScriptHost, entry);
+    while(!list_empty(&window->script_hosts)) {
+        iter = LIST_ENTRY(list_head(&window->script_hosts), ScriptHost, entry);
 
         release_script_engine(iter);
         list_remove(&iter->entry);
-        iter->doc = NULL;
+        iter->window = NULL;
         IActiveScript_Release(ACTSCPSITE(iter));
     }
 }

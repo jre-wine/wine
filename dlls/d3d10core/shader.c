@@ -27,7 +27,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10core);
 static HRESULT shdr_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
     struct d3d10_shader_info *shader_info = ctx;
-    char tag_str[5];
     HRESULT hr;
 
     switch(tag)
@@ -42,16 +41,14 @@ static HRESULT shdr_handler(const char *data, DWORD data_size, DWORD tag, void *
             break;
 
         default:
-            memcpy(tag_str, &tag, 4);
-            tag_str[4] = '\0';
-            FIXME("Unhandled chunk %s\n", tag_str);
+            FIXME("Unhandled chunk %s\n", debugstr_an((const char *)&tag, 4));
             break;
     }
 
     return S_OK;
 }
 
-HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, struct d3d10_shader_info *shader_info)
+static HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, struct d3d10_shader_info *shader_info)
 {
     HRESULT hr;
 
@@ -118,8 +115,8 @@ HRESULT shader_parse_signature(const char *data, DWORD data_size, struct wined3d
 
         TRACE("semantic: %s, semantic idx: %u, sysval_semantic %#x, "
                 "type %u, register idx: %u, use_mask %#x, input_mask %#x\n",
-                e[i].semantic_name, e[i].semantic_idx, e[i].sysval_semantic, e[i].component_type,
-                e[i].register_idx, (e[i].mask >> 8) & 0xff, e[i].mask & 0xff);
+                debugstr_a(e[i].semantic_name), e[i].semantic_idx, e[i].sysval_semantic,
+                e[i].component_type, e[i].register_idx, (e[i].mask >> 8) & 0xff, e[i].mask & 0xff);
     }
 
     s->elements = e;
@@ -164,6 +161,11 @@ static ULONG STDMETHODCALLTYPE d3d10_vertex_shader_AddRef(ID3D10VertexShader *if
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
 
+    if (refcount == 1)
+    {
+        IWineD3DVertexShader_AddRef(This->wined3d_shader);
+    }
+
     return refcount;
 }
 
@@ -177,8 +179,6 @@ static ULONG STDMETHODCALLTYPE d3d10_vertex_shader_Release(ID3D10VertexShader *i
     if (!refcount)
     {
         IWineD3DVertexShader_Release(This->wined3d_shader);
-        shader_free_signature(&This->output_signature);
-        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return refcount;
@@ -217,7 +217,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_vertex_shader_SetPrivateDataInterface(ID3
     return E_NOTIMPL;
 }
 
-const struct ID3D10VertexShaderVtbl d3d10_vertex_shader_vtbl =
+static const struct ID3D10VertexShaderVtbl d3d10_vertex_shader_vtbl =
 {
     /* IUnknown methods */
     d3d10_vertex_shader_QueryInterface,
@@ -229,6 +229,48 @@ const struct ID3D10VertexShaderVtbl d3d10_vertex_shader_vtbl =
     d3d10_vertex_shader_SetPrivateData,
     d3d10_vertex_shader_SetPrivateDataInterface,
 };
+
+static void STDMETHODCALLTYPE d3d10_vertex_shader_wined3d_object_destroyed(void *parent)
+{
+    struct d3d10_vertex_shader *shader = parent;
+    shader_free_signature(&shader->output_signature);
+    HeapFree(GetProcessHeap(), 0, shader);
+}
+
+static const struct wined3d_parent_ops d3d10_vertex_shader_wined3d_parent_ops =
+{
+    d3d10_vertex_shader_wined3d_object_destroyed,
+};
+
+HRESULT d3d10_vertex_shader_init(struct d3d10_vertex_shader *shader, struct d3d10_device *device,
+        const void *byte_code, SIZE_T byte_code_length)
+{
+    struct d3d10_shader_info shader_info;
+    HRESULT hr;
+
+    shader->vtbl = &d3d10_vertex_shader_vtbl;
+    shader->refcount = 1;
+
+    shader_info.output_signature = &shader->output_signature;
+    hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info);
+    if (FAILED(hr))
+    {
+        ERR("Failed to extract shader, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = IWineD3DDevice_CreateVertexShader(device->wined3d_device,
+            shader_info.shader_code, &shader->output_signature, &shader->wined3d_shader,
+            (IUnknown *)shader, &d3d10_vertex_shader_wined3d_parent_ops);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d vertex shader, hr %#x.\n", hr);
+        shader_free_signature(&shader->output_signature);
+        return hr;
+    }
+
+    return S_OK;
+}
 
 /* IUnknown methods */
 
@@ -352,6 +394,11 @@ static ULONG STDMETHODCALLTYPE d3d10_pixel_shader_AddRef(ID3D10PixelShader *ifac
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
 
+    if (refcount == 1)
+    {
+        IWineD3DPixelShader_AddRef(This->wined3d_shader);
+    }
+
     return refcount;
 }
 
@@ -365,8 +412,6 @@ static ULONG STDMETHODCALLTYPE d3d10_pixel_shader_Release(ID3D10PixelShader *ifa
     if (!refcount)
     {
         IWineD3DPixelShader_Release(This->wined3d_shader);
-        shader_free_signature(&This->output_signature);
-        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return refcount;
@@ -405,7 +450,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_pixel_shader_SetPrivateDataInterface(ID3D
     return E_NOTIMPL;
 }
 
-const struct ID3D10PixelShaderVtbl d3d10_pixel_shader_vtbl =
+static const struct ID3D10PixelShaderVtbl d3d10_pixel_shader_vtbl =
 {
     /* IUnknown methods */
     d3d10_pixel_shader_QueryInterface,
@@ -417,3 +462,45 @@ const struct ID3D10PixelShaderVtbl d3d10_pixel_shader_vtbl =
     d3d10_pixel_shader_SetPrivateData,
     d3d10_pixel_shader_SetPrivateDataInterface,
 };
+
+static void STDMETHODCALLTYPE d3d10_pixel_shader_wined3d_object_destroyed(void *parent)
+{
+    struct d3d10_pixel_shader *shader = parent;
+    shader_free_signature(&shader->output_signature);
+    HeapFree(GetProcessHeap(), 0, shader);
+}
+
+static const struct wined3d_parent_ops d3d10_pixel_shader_wined3d_parent_ops =
+{
+    d3d10_pixel_shader_wined3d_object_destroyed,
+};
+
+HRESULT d3d10_pixel_shader_init(struct d3d10_pixel_shader *shader, struct d3d10_device *device,
+        const void *byte_code, SIZE_T byte_code_length)
+{
+    struct d3d10_shader_info shader_info;
+    HRESULT hr;
+
+    shader->vtbl = &d3d10_pixel_shader_vtbl;
+    shader->refcount = 1;
+
+    shader_info.output_signature = &shader->output_signature;
+    hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info);
+    if (FAILED(hr))
+    {
+        ERR("Failed to extract shader, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = IWineD3DDevice_CreatePixelShader(device->wined3d_device,
+            shader_info.shader_code, &shader->output_signature, &shader->wined3d_shader,
+            (IUnknown *)shader, &d3d10_pixel_shader_wined3d_parent_ops);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d pixel shader, hr %#x.\n", hr);
+        shader_free_signature(&shader->output_signature);
+        return hr;
+    }
+
+    return S_OK;
+}

@@ -3,6 +3,7 @@
  *
  * Copyright 2006 Mike McCormack for CodeWeavers
  * Copyright 2007 George Gov
+ * Copyright 2009 Nikolay Sivov
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -262,6 +263,11 @@ static const struct message scroll_parent_seq[] = {
 
 static const struct message setredraw_seq[] = {
     { WM_SETREDRAW, sent|id|wparam, FALSE, 0, LISTVIEW_ID },
+    { 0 }
+};
+
+static const struct message lvs_ex_transparentbkgnd_seq[] = {
+    { WM_PRINTCLIENT, sent|lparam, 0, PRF_ERASEBKGND },
     { 0 }
 };
 
@@ -832,7 +838,12 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
-    ok(item.state == 0x1ccc, "state %x\n", item.state);
+    if (item.state != 0x1ccc)
+    {
+        win_skip("LVS_EX_CHECKBOXES style is unavailable. Skipping.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
 
     /* Now add an item without specifying a state and check that its state goes to 0x1000 */
     item.iItem = 2;
@@ -1279,6 +1290,15 @@ static void test_create(void)
     hList = CreateWindow("MyListView32", "Test", WS_VISIBLE, 0, 0, 100, 100, NULL, NULL, GetModuleHandle(NULL), 0);
     ok((HIMAGELIST)SendMessage(hList, LVM_GETIMAGELIST, 0, 0) == test_create_imagelist, "Image list not obtained\n");
     hHeader = (HWND)SendMessage(hList, LVM_GETHEADER, 0, 0);
+
+    if (!IsWindow(hHeader))
+    {
+        /* version 4.0 */
+        win_skip("LVM_GETHEADER not implemented. Skipping.\n");
+        DestroyWindow(hList);
+        return;
+    }
+
     ok(IsWindow(hHeader) && IsWindowVisible(hHeader), "Listview not in report mode\n");
     ok(hHeader == GetDlgItem(hList, 0), "Expected header as dialog item\n");
     DestroyWindow(hList);
@@ -1587,6 +1607,13 @@ static void test_icon_spacing(void)
        "Expected %d, got %d\n", MAKELONG(w, h), r);
 
     r = SendMessage(hwnd, LVM_SETICONSPACING, 0, MAKELPARAM(25, 35));
+    if (r == 0)
+    {
+        /* version 4.0 */
+        win_skip("LVM_SETICONSPACING unimplemented. Skipping.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
     expect(MAKELONG(20,30), r);
 
     r = SendMessage(hwnd, LVM_SETICONSPACING, 0, MAKELPARAM(-1,-1));
@@ -3950,6 +3977,50 @@ static void test_scrollnotify(void)
     DestroyWindow(hwnd);
 }
 
+static void test_LVS_EX_TRANSPARENTBKGND(void)
+{
+    HWND hwnd;
+    DWORD ret;
+    HDC hdc;
+
+    hwnd = create_listview_control(0);
+
+    ret = SendMessage(hwnd, LVM_SETBKCOLOR, 0, RGB(0, 0, 0));
+    expect(TRUE, ret);
+
+    SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_TRANSPARENTBKGND,
+                                                    LVS_EX_TRANSPARENTBKGND);
+
+    ret = SendMessage(hwnd, LVM_GETBKCOLOR, 0, 0);
+    if (ret != CLR_NONE)
+    {
+        win_skip("LVS_EX_TRANSPARENTBKGND unsupported\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    /* try to set some back color and check this style bit */
+    ret = SendMessage(hwnd, LVM_SETBKCOLOR, 0, RGB(0, 0, 0));
+    expect(TRUE, ret);
+    ret = SendMessage(hwnd, LVM_GETEXTENDEDLISTVIEWSTYLE, 0, 0);
+    ok(!(ret & LVS_EX_TRANSPARENTBKGND), "Expected LVS_EX_TRANSPARENTBKGND to unset\n");
+
+    /* now test what this style actually does */
+    SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_TRANSPARENTBKGND,
+                                                    LVS_EX_TRANSPARENTBKGND);
+
+    hdc = GetWindowDC(hwndparent);
+
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    SendMessageA(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, lvs_ex_transparentbkgnd_seq,
+                "LVS_EX_TRANSPARENTBKGND parent", FALSE);
+
+    ReleaseDC(hwndparent, hdc);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -4022,6 +4093,7 @@ START_TEST(listview)
     {
         win_skip("FIXME: failed to create ListView window.\n");
         unload_v6_module(ctx_cookie);
+        DestroyWindow(hwndparent);
         return;
     }
     else
@@ -4032,6 +4104,7 @@ START_TEST(listview)
     test_canceleditlabel();
     test_mapidindex();
     test_scrollnotify();
+    test_LVS_EX_TRANSPARENTBKGND();
 
     unload_v6_module(ctx_cookie);
 

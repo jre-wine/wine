@@ -34,15 +34,15 @@
 #include "wine/wined3d.h"
 #include "wine/winedxgi.h"
 
-extern CRITICAL_SECTION dxgi_cs;
+extern CRITICAL_SECTION dxgi_cs DECLSPEC_HIDDEN;
 
 /* TRACE helper functions */
-const char *debug_dxgi_format(DXGI_FORMAT format);
+const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
-WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format);
+WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
 /* IDXGIFactory */
-extern const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl;
+extern const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl DECLSPEC_HIDDEN;
 struct dxgi_factory
 {
     const struct IWineDXGIFactoryVtbl *vtbl;
@@ -53,7 +53,7 @@ struct dxgi_factory
 };
 
 /* IDXGIDevice */
-extern const struct IWineDXGIDeviceVtbl dxgi_device_vtbl;
+extern const struct IWineDXGIDeviceVtbl dxgi_device_vtbl DECLSPEC_HIDDEN;
 struct dxgi_device
 {
     const struct IWineDXGIDeviceVtbl *vtbl;
@@ -63,18 +63,29 @@ struct dxgi_device
     IWineDXGIFactory *factory;
 };
 
+/* IDXGIOutput */
+struct dxgi_output
+{
+    const struct IDXGIOutputVtbl *vtbl;
+    LONG refcount;
+};
+
+void dxgi_output_init(struct dxgi_output *output) DECLSPEC_HIDDEN;
+
 /* IDXGIAdapter */
-extern const struct IWineDXGIAdapterVtbl dxgi_adapter_vtbl;
 struct dxgi_adapter
 {
     const struct IWineDXGIAdapterVtbl *vtbl;
     IDXGIFactory *parent;
     LONG refcount;
     UINT ordinal;
+    IDXGIOutput *output;
 };
 
+HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IDXGIFactory *parent, UINT ordinal) DECLSPEC_HIDDEN;
+
 /* IDXGISwapChain */
-extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl;
+extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl DECLSPEC_HIDDEN;
 struct dxgi_swapchain
 {
     const struct IDXGISwapChainVtbl *vtbl;
@@ -83,8 +94,8 @@ struct dxgi_swapchain
 };
 
 /* IDXGISurface */
-extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl;
-extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl;
+extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl DECLSPEC_HIDDEN;
+extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl DECLSPEC_HIDDEN;
 struct dxgi_surface
 {
     const struct IDXGISurfaceVtbl *vtbl;

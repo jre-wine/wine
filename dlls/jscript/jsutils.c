@@ -31,11 +31,14 @@ WINE_DECLARE_DEBUG_CHANNEL(heap);
 
 const char *debugstr_variant(const VARIANT *v)
 {
+    if(!v)
+        return "(null)";
+
     switch(V_VT(v)) {
     case VT_EMPTY:
-        return wine_dbg_sprintf("{VT_EMPTY}");
+        return "{VT_EMPTY}";
     case VT_NULL:
-        return wine_dbg_sprintf("{VT_NULL}");
+        return "{VT_NULL}";
     case VT_I4:
         return wine_dbg_sprintf("{VT_I4: %d}", V_I4(v));
     case VT_R8:
@@ -198,10 +201,15 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
         static const WCHAR toStringW[] = {'t','o','S','t','r','i','n','g',0};
         static const WCHAR valueOfW[] = {'v','a','l','u','e','O','f',0};
 
+        if(!V_DISPATCH(v)) {
+            V_VT(ret) = VT_NULL;
+            break;
+        }
+
         jsdisp = iface_to_jsdisp((IUnknown*)V_DISPATCH(v));
         if(!jsdisp) {
             V_VT(ret) = VT_EMPTY;
-            return disp_propget(V_DISPATCH(v), DISPID_VALUE, ctx->lcid, ret, ei, NULL /*FIXME*/);
+            return disp_propget(ctx, V_DISPATCH(v), DISPID_VALUE, ret, ei, NULL /*FIXME*/);
         }
 
         if(hint == NO_HINT)
@@ -211,7 +219,7 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
 
         hres = jsdisp_get_id(jsdisp, hint == HINT_STRING ? toStringW : valueOfW, 0, &id);
         if(SUCCEEDED(hres)) {
-            hres = jsdisp_call(jsdisp, id, ctx->lcid, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
+            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
             if(FAILED(hres)) {
                 WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
@@ -227,7 +235,7 @@ HRESULT to_primitive(script_ctx_t *ctx, VARIANT *v, jsexcept_t *ei, VARIANT *ret
 
         hres = jsdisp_get_id(jsdisp, hint == HINT_STRING ? valueOfW : toStringW, 0, &id);
         if(SUCCEEDED(hres)) {
-            hres = jsdisp_call(jsdisp, id, ctx->lcid, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
+            hres = jsdisp_call(jsdisp, id, DISPATCH_METHOD, &dp, ret, ei, NULL /*FIXME*/);
             if(FAILED(hres)) {
                 WARN("call error - forwarding exception\n");
                 jsdisp_release(jsdisp);
@@ -595,8 +603,18 @@ HRESULT to_object(script_ctx_t *ctx, VARIANT *v, IDispatch **disp)
         *disp = (IDispatch*)_IDispatchEx_(dispex);
         break;
     case VT_DISPATCH:
-        IDispatch_AddRef(V_DISPATCH(v));
-        *disp = V_DISPATCH(v);
+        if(V_DISPATCH(v)) {
+            IDispatch_AddRef(V_DISPATCH(v));
+            *disp = V_DISPATCH(v);
+        }else {
+            DispatchEx *obj;
+
+            hres = create_object(ctx, NULL, &obj);
+            if(FAILED(hres))
+                return hres;
+
+            *disp = (IDispatch*)_IDispatchEx_(obj);
+        }
         break;
     case VT_BOOL:
         hres = create_bool(ctx, V_BOOL(v), &dispex);

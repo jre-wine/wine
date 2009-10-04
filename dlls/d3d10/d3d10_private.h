@@ -20,6 +20,7 @@
 #define __WINE_D3D10_PRIVATE_H
 
 #include "wine/debug.h"
+#include "wine/rbtree.h"
 
 #define COBJMACROS
 #include "winbase.h"
@@ -29,7 +30,13 @@
 #include "d3d10.h"
 
 /* TRACE helper functions */
-const char *debug_d3d10_driver_type(D3D10_DRIVER_TYPE driver_type);
+const char *debug_d3d10_driver_type(D3D10_DRIVER_TYPE driver_type) DECLSPEC_HIDDEN;
+const char *debug_d3d10_shader_variable_class(D3D10_SHADER_VARIABLE_CLASS c) DECLSPEC_HIDDEN;
+const char *debug_d3d10_shader_variable_type(D3D10_SHADER_VARIABLE_TYPE t) DECLSPEC_HIDDEN;
+
+void *d3d10_rb_alloc(size_t size) DECLSPEC_HIDDEN;
+void *d3d10_rb_realloc(void *ptr, size_t size) DECLSPEC_HIDDEN;
+void d3d10_rb_free(void *ptr) DECLSPEC_HIDDEN;
 
 enum d3d10_effect_object_type
 {
@@ -58,26 +65,54 @@ struct d3d10_effect_shader_variable
     } shader;
 };
 
+/* ID3D10EffectType */
+struct d3d10_effect_type
+{
+    const struct ID3D10EffectTypeVtbl *vtbl;
+
+    DWORD id;
+    struct wine_rb_entry entry;
+
+    char *name;
+    DWORD element_count;
+    DWORD size_unpacked;
+    DWORD stride;
+    DWORD size_packed;
+    DWORD member_count;
+    DWORD column_count;
+    DWORD row_count;
+    D3D10_SHADER_VARIABLE_TYPE basetype;
+    D3D10_SHADER_VARIABLE_CLASS type_class;
+};
+
 /* ID3D10EffectVariable */
 struct d3d10_effect_variable
 {
     const struct ID3D10EffectVariableVtbl *vtbl;
 
+    struct d3d10_effect_local_buffer *buffer;
+    struct d3d10_effect *effect;
+
     char *name;
+    char *semantic;
     DWORD buffer_offset;
     DWORD annotation_count;
     DWORD flag;
+    struct d3d10_effect_type *type;
+    struct d3d10_effect_variable *annotations;
 };
 
 struct d3d10_effect_local_buffer
 {
     const struct ID3D10EffectConstantBufferVtbl *vtbl;
 
+    struct d3d10_effect *effect;
     char *name;
     DWORD data_size;
     DWORD variable_count;
     DWORD annotation_count;
     struct d3d10_effect_variable *variables;
+    struct d3d10_effect_variable *annotations;
 };
 
 /* ID3D10EffectPass */
@@ -91,6 +126,7 @@ struct d3d10_effect_pass
     DWORD object_count;
     DWORD annotation_count;
     struct d3d10_effect_object *objects;
+    struct d3d10_effect_variable *annotations;
 };
 
 /* ID3D10EffectTechnique */
@@ -103,10 +139,11 @@ struct d3d10_effect_technique
     DWORD pass_count;
     DWORD annotation_count;
     struct d3d10_effect_pass *passes;
+    struct d3d10_effect_variable *annotations;
 };
 
 /* ID3D10Effect */
-extern const struct ID3D10EffectVtbl d3d10_effect_vtbl;
+extern const struct ID3D10EffectVtbl d3d10_effect_vtbl DECLSPEC_HIDDEN;
 struct d3d10_effect
 {
     const struct ID3D10EffectVtbl *vtbl;
@@ -131,11 +168,12 @@ struct d3d10_effect
     DWORD shader_call_count;
     DWORD shader_compile_count;
 
+    struct wine_rb_tree types;
     struct d3d10_effect_local_buffer *local_buffers;
     struct d3d10_effect_technique *techniques;
 };
 
-HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T data_size);
+HRESULT d3d10_effect_parse(struct d3d10_effect *This, const void *data, SIZE_T data_size) DECLSPEC_HIDDEN;
 
 /* D3D10Core */
 HRESULT WINAPI D3D10CoreCreateDevice(IDXGIFactory *factory, IDXGIAdapter *adapter,

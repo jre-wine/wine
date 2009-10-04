@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Jacek Caban for CodeWeavers
+ * Copyright 2008-2009 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,6 +33,7 @@
 #include "activdbg.h"
 #include "objsafe.h"
 #include "mshtmdid.h"
+#include "mshtml_test.h"
 
 DEFINE_GUID(CLSID_IdentityUnmarshal,0x0000001b,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 
@@ -107,8 +108,12 @@ DEFINE_EXPECT(AddNamedItem);
 DEFINE_EXPECT(ParseScriptText);
 DEFINE_EXPECT(GetScriptDispatch);
 DEFINE_EXPECT(funcDisp);
+DEFINE_EXPECT(script_testprop_d);
+DEFINE_EXPECT(script_testprop_i);
 
 #define TESTSCRIPT_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80746}"
+
+#define DISPID_SCRIPT_TESTPROP   0x100000
 
 static const GUID CLSID_TestScript =
     {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x07,0x46}};
@@ -116,6 +121,7 @@ static const GUID CLSID_TestScript =
 static IHTMLDocument2 *notif_doc;
 static IDispatchEx *window_dispex;
 static BOOL doc_complete;
+static IDispatch *script_disp;
 
 static const char *debugstr_guid(REFIID riid)
 {
@@ -343,6 +349,67 @@ static IDispatchExVtbl testObjVtbl = {
 };
 
 static IDispatchEx funcDisp = { &testObjVtbl };
+
+static HRESULT WINAPI scriptDisp_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
+{
+    if(!strcmp_wa(bstrName, "testProp")) {
+        CHECK_EXPECT(script_testprop_d);
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
+        *pid = DISPID_SCRIPT_TESTPROP;
+        return S_OK;
+    }
+
+    ok(0, "unexpected call\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI scriptDisp_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, WORD wFlags, DISPPARAMS *pdp,
+        VARIANT *pvarRes, EXCEPINFO *pei, IServiceProvider *pspCaller)
+{
+    switch(id) {
+    case DISPID_SCRIPT_TESTPROP:
+        CHECK_EXPECT(script_testprop_i);
+
+        ok(lcid == 0, "lcid = %x\n", lcid);
+        ok(wFlags == DISPATCH_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(pdp->cArgs == 0, "pdp->cArgs = %d\n", pdp->cArgs);
+        ok(pdp->cNamedArgs == 0, "pdp->cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(!pdp->rgdispidNamedArgs, "pdp->rgdispidNamedArgs != NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(pei != NULL, "pei == NULL\n");
+        ok(!pspCaller, "pspCaller != NULL\n");
+
+        V_VT(pvarRes) = VT_NULL;
+        break;
+    default:
+        ok(0, "unexpected call\n");
+        return E_NOTIMPL;
+    }
+
+    return S_OK;
+}
+
+static IDispatchExVtbl scriptDispVtbl = {
+    DispatchEx_QueryInterface,
+    DispatchEx_AddRef,
+    DispatchEx_Release,
+    DispatchEx_GetTypeInfoCount,
+    DispatchEx_GetTypeInfo,
+    DispatchEx_GetIDsOfNames,
+    DispatchEx_Invoke,
+    scriptDisp_GetDispID,
+    scriptDisp_InvokeEx,
+    DispatchEx_DeleteMemberByName,
+    DispatchEx_DeleteMemberByDispID,
+    DispatchEx_GetMemberProperties,
+    DispatchEx_GetMemberName,
+    DispatchEx_GetNextDispID,
+    DispatchEx_GetNameSpaceParent
+};
+
+static IDispatchEx scriptDisp = { &scriptDispVtbl };
 
 static IHTMLDocument2 *create_document(void)
 {
@@ -636,9 +703,18 @@ static HRESULT WINAPI ActiveScriptParse_AddScriptlet(IActiveScriptParse *iface,
     return E_NOTIMPL;
 }
 
+static HRESULT dispex_propput(IDispatchEx *obj, DISPID id, VARIANT *var)
+{
+    DISPID propput_arg = DISPID_PROPERTYPUT;
+    DISPPARAMS dp = {var, &propput_arg, 1, 1};
+    EXCEPINFO ei = {0};
+
+    return IDispatchEx_InvokeEx(obj, id, LOCALE_NEUTRAL, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, NULL);
+}
+
 static void test_func(IDispatchEx *obj)
 {
-    DISPID id, propput_arg = DISPID_PROPERTYPUT;
+    DISPID id;
     IDispatchEx *dispex;
     IDispatch *disp;
     EXCEPINFO ei;
@@ -679,16 +755,50 @@ static void test_func(IDispatchEx *obj)
         VariantClear(&var);
     }
 
-    dp.cArgs = 1;
-    dp.rgvarg = &var;
-    dp.cNamedArgs = 1;
-    dp.rgdispidNamedArgs = &propput_arg;
     V_VT(&var) = VT_I4;
     V_I4(&var) = 100;
-    hres = IDispatchEx_InvokeEx(obj, id, LOCALE_NEUTRAL, DISPATCH_PROPERTYPUT, &dp, NULL, &ei, NULL);
+    hres = dispex_propput(obj, id, &var);
     ok(hres == E_NOTIMPL, "InvokeEx failed: %08x\n", hres);
 
     IDispatchEx_Release(dispex);
+}
+
+static void test_nextdispid(IDispatchEx *dispex)
+{
+    DISPID last_id = DISPID_STARTENUM, id, dyn_id;
+    BSTR name;
+    VARIANT var;
+    HRESULT hres;
+
+    name = a2bstr("dynVal");
+    hres = IDispatchEx_GetDispID(dispex, name, fdexNameCaseSensitive|fdexNameEnsure, &dyn_id);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+    SysFreeString(name);
+
+    V_VT(&var) = VT_EMPTY;
+    hres = dispex_propput(dispex, dyn_id, &var);
+
+    while(last_id != dyn_id) {
+        hres = IDispatchEx_GetNextDispID(dispex, fdexEnumAll, last_id, &id);
+        ok(hres == S_OK, "GetNextDispID returned: %08x\n", hres);
+        ok(id != DISPID_STARTENUM, "id == DISPID_STARTENUM\n");
+        ok(id != DISPID_IOMNAVIGATOR_TOSTRING, "id == DISPID_IOMNAVIGATOR_TOSTRING\n");
+
+        hres = IDispatchEx_GetMemberName(dispex, id, &name);
+        ok(hres == S_OK, "GetMemberName failed: %08x\n", hres);
+
+        if(id == dyn_id)
+            ok(!strcmp_wa(name, "dynVal"), "name = %s\n", wine_dbgstr_w(name));
+        else if(id == DISPID_IOMNAVIGATOR_PLATFORM)
+            ok(!strcmp_wa(name, "platform"), "name = %s\n", wine_dbgstr_w(name));
+
+        SysFreeString(name);
+        last_id = id;
+    }
+
+    hres = IDispatchEx_GetNextDispID(dispex, 0, id, &id);
+    ok(hres == S_FALSE, "GetNextDispID returned: %08x\n", hres);
+    ok(id == DISPID_STARTENUM, "id != DISPID_STARTENUM\n");
 }
 
 static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *iface,
@@ -703,7 +813,7 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     VARIANT var, arg;
     DISPPARAMS dp;
     EXCEPINFO ei;
-    DISPID id, named_arg = DISPID_PROPERTYPUT;
+    DISPID id;
     BSTR tmp;
     HRESULT hres;
 
@@ -721,7 +831,7 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     ok(hres == S_OK, "GetDispID(document) failed: %08x\n", hres);
     ok(id == DISPID_IHTMLWINDOW2_DOCUMENT, "id=%x\n", id);
 
-    todo_wine CHECK_CALLED(GetScriptDispatch);
+    CHECK_CALLED(GetScriptDispatch);
 
     VariantInit(&var);
     memset(&dp, 0, sizeof(dp));
@@ -750,14 +860,9 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     ok(hres == S_OK, "GetDispID(document) failed: %08x\n", hres);
     ok(id, "id == 0\n");
 
-    dp.cArgs = 1;
-    dp.rgvarg = &var;
-    dp.cNamedArgs = 1;
-    dp.rgdispidNamedArgs = &named_arg;
     V_VT(&var) = VT_I4;
     V_I4(&var) = 100;
-
-    hres = IDispatchEx_InvokeEx(document, id, LOCALE_NEUTRAL, INVOKE_PROPERTYPUT, &dp, NULL, &ei, NULL);
+    hres = dispex_propput(document, id, &var);
     ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
 
     tmp = SysAllocString(testW);
@@ -791,7 +896,6 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     dp.rgdispidNamedArgs = NULL;
     V_VT(&var) = VT_DISPATCH;
     V_DISPATCH(&var) = (IDispatch*)&funcDisp;
-
     hres = IDispatchEx_InvokeEx(document, id, LOCALE_NEUTRAL, INVOKE_PROPERTYPUT, &dp, NULL, &ei, NULL);
     ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
 
@@ -825,7 +929,36 @@ static HRESULT WINAPI ActiveScriptParse_ParseScriptText(IActiveScriptParse *ifac
     ok(hres == S_OK, "Could not get IDispatchEx iface: %08x\n", hres);
 
     test_func(dispex);
+    test_nextdispid(dispex);
     IDispatchEx_Release(dispex);
+
+    script_disp = (IDispatch*)&scriptDisp;
+
+    SET_EXPECT(GetScriptDispatch);
+    SET_EXPECT(script_testprop_d);
+    tmp = a2bstr("testProp");
+    hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive, &id);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+    ok(id != DISPID_SCRIPT_TESTPROP, "id == DISPID_SCRIPT_TESTPROP\n");
+    CHECK_CALLED(GetScriptDispatch);
+    CHECK_CALLED(script_testprop_d);
+    SysFreeString(tmp);
+
+    tmp = a2bstr("testProp");
+    hres = IDispatchEx_GetDispID(window_dispex, tmp, fdexNameCaseSensitive, &id);
+    ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+    ok(id != DISPID_SCRIPT_TESTPROP, "id == DISPID_SCRIPT_TESTPROP\n");
+    SysFreeString(tmp);
+
+    SET_EXPECT(GetScriptDispatch);
+    SET_EXPECT(script_testprop_i);
+    memset(&ei, 0, sizeof(ei));
+    memset(&dp, 0, sizeof(dp));
+    hres = IDispatchEx_InvokeEx(window_dispex, id, 0, DISPATCH_PROPERTYGET, &dp, &var, &ei, NULL);
+    ok(hres == S_OK, "InvokeEx failed: %08x\n", hres);
+    ok(V_VT(&var) == VT_NULL, "V_VT(var) = %d\n", V_VT(&var));
+    CHECK_CALLED(GetScriptDispatch);
+    CHECK_CALLED(script_testprop_i);
 
     return S_OK;
 }
@@ -1021,7 +1154,14 @@ static HRESULT WINAPI ActiveScript_GetScriptDispatch(IActiveScript *iface, LPCOL
                                                 IDispatch **ppdisp)
 {
     CHECK_EXPECT(GetScriptDispatch);
-    return E_NOTIMPL;
+
+    ok(!strcmp_wa(pstrItemName, "window"), "pstrItemName = %s\n", wine_dbgstr_w(pstrItemName));
+
+    if(!script_disp)
+        return E_NOTIMPL;
+
+    *ppdisp = script_disp;
+    return S_OK;
 }
 
 static HRESULT WINAPI ActiveScript_GetCurrentScriptThreadID(IActiveScript *iface,
@@ -1263,27 +1403,6 @@ static void gecko_installer_workaround(BOOL disable)
     }
 
     RegCloseKey(hkey);
-}
-
-/* Check if Internet Explorer is configured to run in "Enhanced Security Configuration" (aka hardened mode) */
-/* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/sec_mgr.c */
-static BOOL is_ie_hardened(void)
-{
-    HKEY zone_map;
-    DWORD ie_harden, type, size;
-
-    ie_harden = 0;
-    if(RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap",
-                    0, KEY_QUERY_VALUE, &zone_map) == ERROR_SUCCESS) {
-        size = sizeof(DWORD);
-        if (RegQueryValueEx(zone_map, "IEHarden", NULL, &type, (LPBYTE) &ie_harden, &size) != ERROR_SUCCESS ||
-            type != REG_DWORD) {
-            ie_harden = 0;
-        }
-    RegCloseKey(zone_map);
-    }
-
-    return ie_harden != 0;
 }
 
 START_TEST(script)

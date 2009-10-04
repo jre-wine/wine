@@ -44,6 +44,15 @@ static ITextStoreACPSink *ACPSink;
 #define SINK_EXPECTED 1
 #define SINK_FIRED 2
 #define SINK_IGNORE 3
+#define SINK_OPTIONAL 4
+
+#define SINK_ACTION_MASK 0xff
+#define SINK_OPTION_MASK 0xff00
+#define SINK_EXPECTED_COUNT_MASK 0xff0000
+
+#define SINK_OPTION_TODO      0x0100
+
+#define FOCUS_IGNORE    (ITfDocumentMgr*)0xffffffff
 
 static BOOL test_ShouldActivate = FALSE;
 static BOOL test_ShouldDeactivate = FALSE;
@@ -68,6 +77,71 @@ static INT  test_ACP_InsertTextAtSelection = SINK_UNEXPECTED;
 static INT  test_ACP_SetSelection = SINK_UNEXPECTED;
 static INT  test_OnEndEdit = SINK_UNEXPECTED;
 
+
+static inline int expected_count(int *sink)
+{
+    return (*sink & SINK_EXPECTED_COUNT_MASK)>>16;
+}
+
+static inline void _sink_fire_ok(INT *sink, const CHAR* name)
+{
+    int count;
+    int todo = *sink & SINK_OPTION_TODO;
+    int action = *sink & SINK_ACTION_MASK;
+
+    if (winetest_interactive)
+        winetest_trace("firing %s\n",name);
+
+    switch (action)
+    {
+        case SINK_OPTIONAL:
+        case SINK_EXPECTED:
+            count = expected_count(sink);
+            if (count > 1)
+            {
+                count --;
+                *sink = (*sink & ~SINK_EXPECTED_COUNT_MASK) + (count << 16);
+                return;
+            }
+            break;
+        case SINK_IGNORE:
+            winetest_trace("Ignoring %s\n",name);
+            return;
+        default:
+            if (todo)
+                todo_wine winetest_ok(0, "Unexpected %s sink\n",name);
+            else
+                winetest_ok(0, "Unexpected %s sink\n",name);
+    }
+    *sink = SINK_FIRED;
+}
+
+#define sink_fire_ok(a,b) (winetest_set_location(__FILE__,__LINE__), 0) ? 0 : _sink_fire_ok(a,b)
+
+static inline void _sink_check_ok(INT *sink, const CHAR* name)
+{
+    int action = *sink & SINK_ACTION_MASK;
+    int todo = *sink & SINK_OPTION_TODO;
+
+    switch (action)
+    {
+        case SINK_OPTIONAL:
+            if (winetest_interactive)
+                winetest_trace("optional sink %s not fired\n",name);
+        case SINK_FIRED:
+            break;
+        case SINK_IGNORE:
+            return;
+        default:
+            if (todo)
+                todo_wine winetest_ok(0, "%s not fired as expected, in state %x\n",name,*sink);
+            else
+                winetest_ok(0, "%s not fired as expected, in state %x\n",name,*sink);
+    }
+    *sink = SINK_UNEXPECTED;
+}
+
+#define sink_check_ok(a,b) (winetest_set_location(__FILE__,__LINE__), 0) ? 0 : _sink_check_ok(a,b)
 
 /**********************************************************************
  * ITextStoreACP
@@ -125,8 +199,7 @@ static HRESULT WINAPI TextStoreACP_AdviseSink(ITextStoreACP *iface,
 {
     HRESULT hr;
 
-    ok(test_ACP_AdviseSink == SINK_EXPECTED, "Unexpected TextStoreACP_AdviseSink sink\n");
-    test_ACP_AdviseSink = SINK_FIRED;
+    sink_fire_ok(&test_ACP_AdviseSink,"TextStoreACP_AdviseSink");
 
     hr = IUnknown_QueryInterface(punk, &IID_ITextStoreACPSink,(LPVOID*)(&ACPSink));
     ok(SUCCEEDED(hr),"Unable to QueryInterface on sink\n");
@@ -143,19 +216,14 @@ static HRESULT WINAPI TextStoreACP_UnadviseSink(ITextStoreACP *iface,
 static HRESULT WINAPI TextStoreACP_RequestLock(ITextStoreACP *iface,
     DWORD dwLockFlags, HRESULT *phrSession)
 {
-    ok(test_ACP_RequestLock == SINK_EXPECTED,"Unexpected TextStoreACP_RequestLock\n");
-    test_ACP_RequestLock = SINK_FIRED;
+    sink_fire_ok(&test_ACP_RequestLock,"TextStoreACP_RequestLock");
     *phrSession = ITextStoreACPSink_OnLockGranted(ACPSink, dwLockFlags);
     return S_OK;
 }
 static HRESULT WINAPI TextStoreACP_GetStatus(ITextStoreACP *iface,
     TS_STATUS *pdcs)
 {
-    ok(test_ACP_GetStatus  == SINK_EXPECTED || test_ACP_GetStatus == SINK_IGNORE, "Unexpected TextStoreACP_GetStatus\n");
-    if (test_ACP_GetStatus  == SINK_EXPECTED)
-        test_ACP_GetStatus = SINK_FIRED;
-    else if (test_ACP_GetStatus == SINK_IGNORE)
-        trace("Ignoring fired TextStoreACP_GetStatus\n");
+    sink_fire_ok(&test_ACP_GetStatus,"TextStoreACP_GetStatus");
     pdcs->dwDynamicFlags = documentStatus;
     return S_OK;
 }
@@ -169,8 +237,7 @@ static HRESULT WINAPI TextStoreACP_QueryInsert(ITextStoreACP *iface,
 static HRESULT WINAPI TextStoreACP_GetSelection(ITextStoreACP *iface,
     ULONG ulIndex, ULONG ulCount, TS_SELECTION_ACP *pSelection, ULONG *pcFetched)
 {
-    ok(test_ACP_GetSelection == SINK_EXPECTED, "Unexpected TextStoreACP_GetSelection\n");
-    test_ACP_GetSelection = SINK_FIRED;
+    sink_fire_ok(&test_ACP_GetSelection,"TextStoreACP_GetSelection");
 
     pSelection->acpStart = 10;
     pSelection->acpEnd = 20;
@@ -183,8 +250,7 @@ static HRESULT WINAPI TextStoreACP_GetSelection(ITextStoreACP *iface,
 static HRESULT WINAPI TextStoreACP_SetSelection(ITextStoreACP *iface,
     ULONG ulCount, const TS_SELECTION_ACP *pSelection)
 {
-    ok(test_ACP_SetSelection == SINK_EXPECTED,"Unexpected TextStoreACP_SetSelection\n");
-    test_ACP_SetSelection = SINK_FIRED;
+    sink_fire_ok(&test_ACP_SetSelection,"TextStoreACP_SetSelection");
     return S_OK;
 }
 static HRESULT WINAPI TextStoreACP_GetText(ITextStoreACP *iface,
@@ -231,8 +297,7 @@ static HRESULT WINAPI TextStoreACP_InsertTextAtSelection(ITextStoreACP *iface,
     DWORD dwFlags, const WCHAR *pchText, ULONG cch, LONG *pacpStart,
     LONG *pacpEnd, TS_TEXTCHANGE *pChange)
 {
-    ok(test_ACP_InsertTextAtSelection == SINK_EXPECTED,"Unexpected TextStoreACP_InsertTextAtSelection\n");
-    test_ACP_InsertTextAtSelection = SINK_FIRED;
+    sink_fire_ok(&test_ACP_InsertTextAtSelection,"TextStoreACP_InsertTextAtSelection");
     return S_OK;
 }
 static HRESULT WINAPI TextStoreACP_InsertEmbeddedAtSelection(ITextStoreACP *iface,
@@ -278,8 +343,7 @@ static HRESULT WINAPI TextStoreACP_RetrieveRequestedAttrs(ITextStoreACP *iface,
 static HRESULT WINAPI TextStoreACP_GetEndACP(ITextStoreACP *iface,
     LONG *pacp)
 {
-    ok(test_ACP_GetEndACP == SINK_EXPECTED,"Unexpected TextStoreACP_GetEndACP\n");
-    test_ACP_GetEndACP = SINK_FIRED;
+    sink_fire_ok(&test_ACP_GetEndACP,"TextStoreACP_GetEndACP");
     return S_OK;
 }
 static HRESULT WINAPI TextStoreACP_GetActiveView(ITextStoreACP *iface,
@@ -419,8 +483,7 @@ static ULONG WINAPI ThreadMgrEventSink_Release(ITfThreadMgrEventSink *iface)
 static HRESULT WINAPI ThreadMgrEventSink_OnInitDocumentMgr(ITfThreadMgrEventSink *iface,
 ITfDocumentMgr *pdim)
 {
-    ok(test_OnInitDocumentMgr == SINK_EXPECTED, "Unexpected OnInitDocumentMgr sink\n");
-    test_OnInitDocumentMgr = SINK_FIRED;
+    sink_fire_ok(&test_OnInitDocumentMgr,"ThreadMgrEventSink_OnInitDocumentMgr");
     return S_OK;
 }
 
@@ -434,10 +497,11 @@ ITfDocumentMgr *pdim)
 static HRESULT WINAPI ThreadMgrEventSink_OnSetFocus(ITfThreadMgrEventSink *iface,
 ITfDocumentMgr *pdimFocus, ITfDocumentMgr *pdimPrevFocus)
 {
-    ok(test_OnSetFocus == SINK_EXPECTED, "Unexpected OnSetFocus sink\n");
-    ok(pdimFocus == test_CurrentFocus,"Sink reports wrong focus\n");
-    ok(pdimPrevFocus == test_PrevFocus,"Sink reports wrong previous focus\n");
-    test_OnSetFocus = SINK_FIRED;
+    sink_fire_ok(&test_OnSetFocus,"ThreadMgrEventSink_OnSetFocus");
+    if (test_CurrentFocus != FOCUS_IGNORE)
+        ok(pdimFocus == test_CurrentFocus,"Sink reports wrong focus\n");
+    if (test_PrevFocus != FOCUS_IGNORE)
+        ok(pdimPrevFocus == test_PrevFocus,"Sink reports wrong previous focus\n");
     return S_OK;
 }
 
@@ -458,8 +522,7 @@ ITfContext *pic)
     if (test)
         ITfContext_Release(test);
 
-    ok(test_OnPushContext == SINK_EXPECTED, "Unexpected OnPushContext sink\n");
-    test_OnPushContext = SINK_FIRED;
+    sink_fire_ok(&test_OnPushContext,"ThreadMgrEventSink_OnPushContext");
     return S_OK;
 }
 
@@ -480,8 +543,7 @@ ITfContext *pic)
     if (test)
         ITfContext_Release(test);
 
-    ok(test_OnPopContext == SINK_EXPECTED, "Unexpected OnPopContext sink\n");
-    test_OnPopContext = SINK_FIRED;
+    sink_fire_ok(&test_OnPopContext,"ThreadMgrEventSink_OnPopContext");
     return S_OK;
 }
 
@@ -984,8 +1046,7 @@ static ULONG WINAPI KeyEventSink_Release(ITfKeyEventSink *iface)
 static HRESULT WINAPI KeyEventSink_OnSetFocus(ITfKeyEventSink *iface,
         BOOL fForeground)
 {
-    ok(test_KEV_OnSetFocus == SINK_EXPECTED,"Unexpected KeyEventSink_OnSetFocus\n");
-    test_KEV_OnSetFocus = SINK_FIRED;
+    sink_fire_ok(&test_KEV_OnSetFocus,"KeyEventSink_OnSetFocus");
     return S_OK;
 }
 
@@ -1073,7 +1134,7 @@ static void test_KeystrokeMgr(void)
     test_KEV_OnSetFocus = SINK_EXPECTED;
     hr = ITfKeystrokeMgr_AdviseKeyEventSink(keymgr,tid,sink,TRUE);
     ok(SUCCEEDED(hr),"ITfKeystrokeMgr_AdviseKeyEventSink failed\n");
-    ok(test_KEV_OnSetFocus == SINK_FIRED, "KeyEventSink_OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_KEV_OnSetFocus,"KeyEventSink_OnSetFocus");
     hr = ITfKeystrokeMgr_AdviseKeyEventSink(keymgr,tid,sink,TRUE);
     ok(hr == CONNECT_E_ADVISELIMIT,"Wrong return, expected CONNECT_E_ADVISELIMIT\n");
     hr = ITfKeystrokeMgr_AdviseKeyEventSink(keymgr,cid,sink,TRUE);
@@ -1240,8 +1301,7 @@ static ULONG WINAPI TextEditSink_Release(ITfTextEditSink *iface)
 static HRESULT WINAPI TextEditSink_OnEndEdit(ITfTextEditSink *iface,
     ITfContext *pic, TfEditCookie ecReadOnly, ITfEditRecord *pEditRecord)
 {
-    ok(test_OnEndEdit == SINK_EXPECTED, "Unexpected OnEndEdit\n");
-    test_OnEndEdit = SINK_FIRED;
+    sink_fire_ok(&test_OnEndEdit,"TextEditSink_OnEndEdit");
     return S_OK;
 }
 
@@ -1320,8 +1380,7 @@ static void test_startSession(void)
     test_OnSetFocus  = SINK_EXPECTED;
     hr = ITfThreadMgr_SetFocus(g_tm,g_dm);
     ok(SUCCEEDED(hr),"SetFocus Failed\n");
-    ok(test_OnSetFocus == SINK_FIRED, "OnSetFocus sink not called\n");
-    test_OnSetFocus  = SINK_UNEXPECTED;
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
     hr = ITfThreadMgr_GetFocus(g_tm,&dmtest);
     ok(SUCCEEDED(hr),"GetFocus Failed\n");
@@ -1360,9 +1419,9 @@ static void test_startSession(void)
     hr = ITfDocumentMgr_Push(g_dm, cxt);
     ok(SUCCEEDED(hr),"Push Failed\n");
     ok(check_context_refcount(cxt) > cnt, "Ref count did not increase\n");
-    ok(test_OnPushContext == SINK_FIRED, "OnPushContext sink not fired\n");
-    ok(test_OnInitDocumentMgr == SINK_FIRED, "OnInitDocumentMgr sink not fired\n");
-    ok(test_ACP_AdviseSink == SINK_FIRED,"TextStoreACP_AdviseSink not fired\n");
+    sink_check_ok(&test_OnPushContext,"OnPushContext");
+    sink_check_ok(&test_OnInitDocumentMgr,"OnInitDocumentMgr");
+    sink_check_ok(&test_ACP_AdviseSink,"TextStoreACP_AdviseSink");
 
     test_EnumContexts(g_dm, cxt);
 
@@ -1382,7 +1441,7 @@ static void test_startSession(void)
     test_OnPushContext = SINK_EXPECTED;
     hr = ITfDocumentMgr_Push(g_dm, cxt2);
     ok(SUCCEEDED(hr),"Push Failed\n");
-    ok(test_OnPushContext == SINK_FIRED, "OnPushContext sink not fired\n");
+    sink_check_ok(&test_OnPushContext,"OnPushContext");
 
     cnt = check_context_refcount(cxt2);
     hr = ITfDocumentMgr_GetTop(g_dm, &cxtTest);
@@ -1422,7 +1481,7 @@ static void test_startSession(void)
     hr = ITfDocumentMgr_Pop(g_dm, 0);
     ok(SUCCEEDED(hr),"Pop Failed\n");
     ok(check_context_refcount(cxt2) < cnt, "Ref count did not decrease\n");
-    ok(test_OnPopContext == SINK_FIRED, "OnPopContext sink not fired\n");
+    sink_check_ok(&test_OnPopContext,"OnPopContext");
 
     dmtest = (void *)0xfeedface;
     hr = ITfContext_GetDocumentMgr(cxt2,&dmtest);
@@ -1466,7 +1525,7 @@ static void test_endSession(void)
     test_OnSetFocus  = SINK_EXPECTED;
     hr = ITfThreadMgr_Deactivate(g_tm);
     ok(SUCCEEDED(hr),"Failed to Deactivate\n");
-    ok(test_OnSetFocus == SINK_FIRED, "OnSetFocus sink not called\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
     test_OnSetFocus  = SINK_UNEXPECTED;
 }
 
@@ -1601,7 +1660,7 @@ static void test_InsertAtSelection(TfEditCookie ec, ITfContext *cxt)
     test_ACP_InsertTextAtSelection = SINK_EXPECTED;
     hr = ITfInsertAtSelection_InsertTextAtSelection(iis, ec, 0, txt, 11, &range);
     ok(SUCCEEDED(hr),"ITfInsertAtSelection_InsertTextAtSelection failed %x\n",hr);
-    ok(test_ACP_InsertTextAtSelection == SINK_FIRED,"expected InsertTextAtSelection not fired\n");
+    sink_check_ok(&test_ACP_InsertTextAtSelection,"InsertTextAtSelection");
     ok(range != NULL,"No range returned\n");
     ITfRange_Release(range);
     ITfInsertAtSelection_Release(iis);
@@ -1617,9 +1676,8 @@ TfEditCookie ec)
     ULONG fetched;
     HRESULT hr;
 
-    ok(test_DoEditSession == SINK_EXPECTED, "Unexpected DoEditSession\n");
-    ok(test_ACP_RequestLock == SINK_FIRED,"Expected RequestLock not fired\n");
-    test_DoEditSession = SINK_FIRED;
+    sink_fire_ok(&test_DoEditSession,"EditSession_DoEditSession");
+    sink_check_ok(&test_ACP_RequestLock,"RequestLock");
 
     ITfThreadMgr_GetFocus(g_tm, &dm);
     ITfDocumentMgr_GetTop(dm,&cxt);
@@ -1650,7 +1708,7 @@ TfEditCookie ec)
     hr = ITfContext_GetEnd(cxt,ec,&range);
     ok(SUCCEEDED(hr),"Unexpected return code %x\n",hr);
     ok(range != NULL,"Range set to NULL\n");
-    ok(test_ACP_GetEndACP == SINK_FIRED, "GetEndACP not fired as expected\n");
+    sink_check_ok(&test_ACP_GetEndACP,"GetEndACP");
 
     ITfRange_Release(range);
 
@@ -1660,7 +1718,7 @@ TfEditCookie ec)
     ok(SUCCEEDED(hr),"ITfContext_GetSelection failed\n");
     ok(fetched == 1,"fetched incorrect\n");
     ok(selection.range != NULL,"NULL range\n");
-    ok(test_ACP_GetSelection == SINK_FIRED," expected ACP_GetSepection not fired\n");
+    sink_check_ok(&test_ACP_GetSelection,"ACP_GetSepection");
     ITfRange_Release(selection.range);
 
     test_InsertAtSelection(ec, cxt);
@@ -1669,14 +1727,14 @@ TfEditCookie ec)
     hr = ITfContext_GetEnd(cxt,ec,&range);
     ok(SUCCEEDED(hr),"Unexpected return code %x\n",hr);
     ok(range != NULL,"Range set to NULL\n");
-    ok(test_ACP_GetEndACP == SINK_FIRED, "GetEndACP not fired as expected\n");
+    sink_check_ok(&test_ACP_GetEndACP,"GetEndACP");
 
     selection.range = range;
     selection.style.ase = TF_AE_NONE;
     selection.style.fInterimChar = FALSE;
     test_ACP_SetSelection = SINK_EXPECTED;
     hr = ITfContext_SetSelection(cxt, ec, 1, &selection);
-    ok(test_ACP_SetSelection == SINK_FIRED, "SetSelection not fired as expected\n");
+    sink_check_ok(&test_ACP_SetSelection,"SetSelection");
     ITfRange_Release(range);
 
     ITfContext_Release(cxt);
@@ -1745,13 +1803,13 @@ static void test_TStoApplicationText(void)
     hr = ITfContext_RequestEditSession(cxt, tid, es, TF_ES_SYNC|TF_ES_READWRITE, &hrSession);
     ok(SUCCEEDED(hr),"ITfContext_RequestEditSession failed\n");
     ok(hrSession == TS_E_READONLY,"Unexpected hrSession (%x)\n",hrSession);
-    ok(test_ACP_GetStatus == SINK_FIRED," expected GetStatus not fired\n");
+    sink_check_ok(&test_ACP_GetStatus,"GetStatus");
 
     /* signal a change to allow readwrite sessions */
     documentStatus = 0;
     test_ACP_RequestLock = SINK_EXPECTED;
     ITextStoreACPSink_OnStatusChange(ACPSink,documentStatus);
-    ok(test_ACP_RequestLock == SINK_FIRED," expected RequestLock not fired\n");
+    sink_check_ok(&test_ACP_RequestLock,"RequestLock");
 
     test_ACP_GetStatus = SINK_EXPECTED;
     test_ACP_RequestLock = SINK_EXPECTED;
@@ -1760,10 +1818,9 @@ static void test_TStoApplicationText(void)
     test_OnEndEdit = SINK_EXPECTED;
     hr = ITfContext_RequestEditSession(cxt, tid, es, TF_ES_SYNC|TF_ES_READWRITE, &hrSession);
     ok(SUCCEEDED(hr),"ITfContext_RequestEditSession failed\n");
-    ok(test_OnEndEdit == SINK_FIRED, "OnEndEdit not fired as expected\n");
-    ok(test_ACP_RequestLock == SINK_FIRED," expected RequestLock not fired\n");
-    ok(test_DoEditSession == SINK_FIRED," expected DoEditSession not fired\n");
-    ok(test_ACP_GetStatus == SINK_FIRED," expected GetStatus not fired\n");
+    sink_check_ok(&test_OnEndEdit,"OnEndEdit");
+    sink_check_ok(&test_DoEditSession,"DoEditSession");
+    sink_check_ok(&test_ACP_GetStatus,"GetStatus");
     ok(hrSession == 0xdeadcafe,"Unexpected hrSession (%x)\n",hrSession);
 
     if (source)
@@ -1879,7 +1936,7 @@ static void test_AssociateFocus(void)
     test_PrevFocus = dmorig;
     test_OnSetFocus  = SINK_EXPECTED;
     hr = ITfThreadMgr_SetFocus(g_tm,NULL);
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
     ITfDocumentMgr_Release(dmorig);
 
     hr = ITfThreadMgr_CreateDocumentMgr(g_tm,&dm1);
@@ -1888,24 +1945,35 @@ static void test_AssociateFocus(void)
     hr = ITfThreadMgr_CreateDocumentMgr(g_tm,&dm2);
     ok(SUCCEEDED(hr),"CreateDocumentMgr failed\n");
 
-    wnd1 = CreateWindow("edit",NULL,WS_POPUP|WS_VISIBLE,0,0,200,60,NULL,NULL,NULL,NULL);
+    wnd1 = CreateWindow("edit",NULL,WS_POPUP,0,0,200,60,NULL,NULL,NULL,NULL);
     ok(wnd1!=NULL,"Unable to create window 1\n");
-    wnd2 = CreateWindow("edit",NULL,WS_POPUP|WS_VISIBLE,0,0,200,60,NULL,NULL,NULL,NULL);
+    wnd2 = CreateWindow("edit",NULL,WS_POPUP,0,65,200,60,NULL,NULL,NULL,NULL);
     ok(wnd2!=NULL,"Unable to create window 2\n");
-    wnd3 = CreateWindow("edit",NULL,WS_POPUP|WS_VISIBLE,0,0,200,60,NULL,NULL,NULL,NULL);
+    wnd3 = CreateWindow("edit",NULL,WS_POPUP,0,130,200,60,NULL,NULL,NULL,NULL);
     ok(wnd3!=NULL,"Unable to create window 3\n");
 
     processPendingMessages();
 
+    test_OnInitDocumentMgr = SINK_OPTIONAL; /* Vista and greater */
+    test_OnPushContext = SINK_OPTIONAL; /* Vista and greater */
+
+    ShowWindow(wnd1,SW_SHOWNORMAL);
     SetFocus(wnd1);
+    sink_check_ok(&test_OnInitDocumentMgr,"OnInitDocumentMgr");
+    sink_check_ok(&test_OnPushContext,"OnPushContext");
+
+    test_OnSetFocus  = SINK_OPTIONAL; /* Vista and greater */
+    ITfThreadMgr_GetFocus(g_tm, &test_PrevFocus);
+    test_CurrentFocus = FOCUS_IGNORE; /* This is a default system context */
     processPendingMessages();
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
+
     test_CurrentFocus = dm1;
-    test_PrevFocus = NULL;
+    test_PrevFocus = FOCUS_IGNORE;
     test_OnSetFocus  = SINK_EXPECTED;
     hr = ITfThreadMgr_AssociateFocus(g_tm,wnd1,dm1,&olddm);
     ok(SUCCEEDED(hr),"AssociateFocus failed\n");
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
-    ok(olddm == NULL, "unexpected old DocumentMgr\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
     processPendingMessages();
 
@@ -1930,10 +1998,12 @@ static void test_AssociateFocus(void)
     test_CurrentFocus = dm2;
     test_PrevFocus = dm1;
     test_OnSetFocus  = SINK_EXPECTED;
+    ShowWindow(wnd2,SW_SHOWNORMAL);
     SetFocus(wnd2);
     processPendingMessages();
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
+    ShowWindow(wnd3,SW_SHOWNORMAL);
     SetFocus(wnd3);
     processPendingMessages();
 
@@ -1942,7 +2012,7 @@ static void test_AssociateFocus(void)
     test_OnSetFocus = SINK_EXPECTED;
     SetFocus(wnd1);
     processPendingMessages();
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
     hr = ITfThreadMgr_AssociateFocus(g_tm,wnd3,NULL,&olddm);
     ok(SUCCEEDED(hr),"AssociateFocus failed\n");
@@ -1954,14 +2024,14 @@ static void test_AssociateFocus(void)
     test_OnSetFocus  = SINK_EXPECTED;
     test_ACP_GetStatus = SINK_EXPECTED;
     ITfThreadMgr_SetFocus(g_tm,dmorig);
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
-    test_CurrentFocus = NULL;
+    test_CurrentFocus = FOCUS_IGNORE; /* NULL on XP, system default on Vista */
     test_PrevFocus = dmorig;
     test_OnSetFocus  = SINK_EXPECTED;
     SetFocus(wnd3);
     processPendingMessages();
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
 
     hr = ITfThreadMgr_AssociateFocus(g_tm,wnd2,NULL,&olddm);
     ok(SUCCEEDED(hr),"AssociateFocus failed\n");
@@ -1979,16 +2049,23 @@ static void test_AssociateFocus(void)
 
     ITfDocumentMgr_Release(dm1);
     ITfDocumentMgr_Release(dm2);
-    DestroyWindow(wnd1);
-    DestroyWindow(wnd2);
-    DestroyWindow(wnd3);
 
     test_CurrentFocus = dmorig;
-    test_PrevFocus = NULL;
+    test_PrevFocus = FOCUS_IGNORE;
     test_OnSetFocus  = SINK_EXPECTED;
     test_ACP_GetStatus = SINK_IGNORE;
     ITfThreadMgr_SetFocus(g_tm,dmorig);
-    ok(test_OnSetFocus == SINK_FIRED,"OnSetFocus not fired as expected\n");
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
+
+    DestroyWindow(wnd1);
+    DestroyWindow(wnd2);
+    test_OnPopContext = SINK_OPTIONAL; /* Vista and greater */
+    test_OnSetFocus = SINK_OPTIONAL; /* Vista and greater */
+    ITfThreadMgr_GetFocus(g_tm, &test_PrevFocus);
+    test_CurrentFocus = NULL;
+    DestroyWindow(wnd3);
+    sink_check_ok(&test_OnSetFocus,"OnSetFocus");
+    sink_check_ok(&test_OnPopContext,"OnPopContext");
 }
 
 START_TEST(inputprocessor)
@@ -1997,6 +2074,7 @@ START_TEST(inputprocessor)
     {
         test_Register();
         test_RegisterCategory();
+        test_EnumLanguageProfiles();
         test_EnumInputProcessorInfo();
         test_Enable();
         test_ThreadMgrAdviseSinks();
@@ -2009,7 +2087,6 @@ START_TEST(inputprocessor)
         test_Compartments();
         test_AssociateFocus();
         test_endSession();
-        test_EnumLanguageProfiles();
         test_FindClosestCategory();
         test_Disable();
         test_ThreadMgrUnadviseSinks();

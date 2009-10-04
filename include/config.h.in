@@ -14,6 +14,9 @@
 /* Define to 1 if you have the <alsa/asoundlib.h> header file. */
 #undef HAVE_ALSA_ASOUNDLIB_H
 
+/* Define to 1 if you have the <AL/al.h> header file. */
+#undef HAVE_AL_AL_H
+
 /* Define to 1 if you have the <arpa/inet.h> header file. */
 #undef HAVE_ARPA_INET_H
 
@@ -552,6 +555,9 @@
 /* Define if mkdir takes only one argument */
 #undef HAVE_ONE_ARG_MKDIR
 
+/* Define to 1 if you have the <OpenAL/al.h> header file. */
+#undef HAVE_OPENAL_AL_H
+
 /* Define if OpenGL is present on the system */
 #undef HAVE_OPENGL
 
@@ -1022,6 +1028,9 @@
 
 /* Define to 1 if you have the <X11/extensions/xf86vmode.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XF86VMODE_H
+
+/* Define to 1 if you have the <X11/extensions/xf86vmproto.h> header file. */
+#undef HAVE_X11_EXTENSIONS_XF86VMPROTO_H
 
 /* Define to 1 if you have the <X11/extensions/Xinerama.h> header file. */
 #undef HAVE_X11_EXTENSIONS_XINERAMA_H

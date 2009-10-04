@@ -153,8 +153,13 @@ static void STDMETHODCALLTYPE d3d10_device_VSSetShader(ID3D10Device *iface, ID3D
 static void STDMETHODCALLTYPE d3d10_device_DrawIndexed(ID3D10Device *iface,
         UINT index_count, UINT start_index_location, INT base_vertex_location)
 {
-    FIXME("iface %p, index_count %u, start_index_location %u, base_vertex_location %d stub!\n",
+    struct d3d10_device *This = (struct d3d10_device *)iface;
+
+    TRACE("iface %p, index_count %u, start_index_location %u, base_vertex_location %d.\n",
             iface, index_count, start_index_location, base_vertex_location);
+
+    IWineD3DDevice_SetBaseVertexIndex(This->wined3d_device, base_vertex_location);
+    IWineD3DDevice_DrawIndexedPrimitive(This->wined3d_device, start_index_location, index_count);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_Draw(ID3D10Device *iface,
@@ -205,8 +210,14 @@ static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device *ifac
 static void STDMETHODCALLTYPE d3d10_device_IASetIndexBuffer(ID3D10Device *iface,
         ID3D10Buffer *buffer, DXGI_FORMAT format, UINT offset)
 {
-    FIXME("iface %p, buffer %p, format %s, offset %u stub!\n",
+    struct d3d10_device *This = (struct d3d10_device *)iface;
+
+    TRACE("iface %p, buffer %p, format %s, offset %u.\n",
             iface, buffer, debug_dxgi_format(format), offset);
+
+    IWineD3DDevice_SetIndexBuffer(This->wined3d_device, buffer ? ((struct d3d10_buffer *)buffer)->wined3d_buffer : NULL,
+            wined3dformat_from_dxgi_format(format));
+    if (offset) FIXME("offset %u not supported.\n", offset);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_DrawIndexedInstanced(ID3D10Device *iface,
@@ -607,7 +618,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBuffer(ID3D10Device *iface,
         const D3D10_BUFFER_DESC *desc, const D3D10_SUBRESOURCE_DATA *data, ID3D10Buffer **buffer)
 {
     struct d3d10_device *This = (struct d3d10_device *)iface;
-    struct wined3d_buffer_desc wined3d_desc;
     struct d3d10_buffer *object;
     HRESULT hr;
 
@@ -620,22 +630,10 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBuffer(ID3D10Device *iface,
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_buffer_vtbl;
-    object->refcount = 1;
-
-    FIXME("Implement DXGI<->wined3d usage conversion\n");
-
-    wined3d_desc.byte_width = desc->ByteWidth;
-    wined3d_desc.usage = desc->Usage;
-    wined3d_desc.bind_flags = desc->BindFlags;
-    wined3d_desc.cpu_access_flags = desc->CPUAccessFlags;
-    wined3d_desc.misc_flags = desc->MiscFlags;
-
-    hr = IWineD3DDevice_CreateBuffer(This->wined3d_device, &wined3d_desc,
-            data ? data->pSysMem : NULL, (IUnknown *)object, &object->wined3d_buffer);
+    hr = d3d10_buffer_init(object, This, desc, data);
     if (FAILED(hr))
     {
-        ERR("CreateBuffer failed, returning %#x\n", hr);
+        WARN("Failed to initialize buffer, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
@@ -671,46 +669,12 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture2D(ID3D10Device *ifac
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_texture2d_vtbl;
-    object->refcount = 1;
-    object->desc = *desc;
-
-    if (desc->MipLevels == 1 && desc->ArraySize == 1)
+    hr = d3d10_texture2d_init(object, This, desc);
+    if (FAILED(hr))
     {
-        IWineDXGIDevice *wine_device;
-
-        hr = ID3D10Device_QueryInterface(iface, &IID_IWineDXGIDevice, (void **)&wine_device);
-        if (FAILED(hr))
-        {
-            ERR("Device should implement IWineDXGIDevice\n");
-            HeapFree(GetProcessHeap(), 0, object);
-            return E_FAIL;
-        }
-
-        hr = IWineDXGIDevice_create_surface(wine_device, NULL, 0, NULL,
-                (IUnknown *)object, (void **)&object->dxgi_surface);
-        IWineDXGIDevice_Release(wine_device);
-        if (FAILED(hr))
-        {
-            ERR("Failed to create DXGI surface, returning %#x\n", hr);
-            HeapFree(GetProcessHeap(), 0, object);
-            return hr;
-        }
-
-        FIXME("Implement DXGI<->wined3d usage conversion\n");
-
-        hr = IWineD3DDevice_CreateSurface(This->wined3d_device, desc->Width, desc->Height,
-                wined3dformat_from_dxgi_format(desc->Format), FALSE, FALSE, 0,
-                &object->wined3d_surface, desc->Usage, WINED3DPOOL_DEFAULT,
-                desc->SampleDesc.Count > 1 ? desc->SampleDesc.Count : WINED3DMULTISAMPLE_NONE,
-                desc->SampleDesc.Quality, SURFACE_OPENGL, (IUnknown *)object);
-        if (FAILED(hr))
-        {
-            ERR("CreateSurface failed, returning %#x\n", hr);
-            IDXGISurface_Release(object->dxgi_surface);
-            HeapFree(GetProcessHeap(), 0, object);
-            return hr;
-        }
+        WARN("Failed to initialize texture, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
     }
 
     *texture = (ID3D10Texture2D *)object;
@@ -937,8 +901,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device *if
 {
     struct d3d10_device *This = (struct d3d10_device *)iface;
     struct d3d10_input_layout *object;
-    WINED3DVERTEXELEMENT *wined3d_elements;
-    UINT wined3d_element_count;
     HRESULT hr;
 
     TRACE("iface %p, element_descs %p, element_count %u, shader_byte_code %p,"
@@ -953,22 +915,16 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device *if
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_input_layout_vtbl;
-    object->refcount = 1;
-
-    hr = d3d10_input_layout_to_wined3d_declaration(element_descs, element_count,
-            shader_byte_code, shader_byte_code_length, &wined3d_elements, &wined3d_element_count);
+    hr = d3d10_input_layout_init(object, This, element_descs, element_count,
+            shader_byte_code, shader_byte_code_length);
     if (FAILED(hr))
     {
+        WARN("Failed to initialize input layout, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 
-    IWineD3DDevice_CreateVertexDeclaration(This->wined3d_device, &object->wined3d_decl,
-            (IUnknown *)object, wined3d_elements, wined3d_element_count);
-
-    HeapFree(GetProcessHeap(), 0, wined3d_elements);
-
+    TRACE("Created input layout %p.\n", object);
     *input_layout = (ID3D10InputLayout *)object;
 
     return S_OK;
@@ -979,7 +935,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateVertexShader(ID3D10Device *i
 {
     struct d3d10_device *This = (struct d3d10_device *)iface;
     struct d3d10_vertex_shader *object;
-    struct d3d10_shader_info shader_info;
     HRESULT hr;
 
     TRACE("iface %p, byte_code %p, byte_code_length %lu, shader %p\n",
@@ -992,29 +947,15 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateVertexShader(ID3D10Device *i
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_vertex_shader_vtbl;
-    object->refcount = 1;
-
-    shader_info.output_signature = &object->output_signature;
-    hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info);
+    hr = d3d10_vertex_shader_init(object, This, byte_code, byte_code_length);
     if (FAILED(hr))
     {
-        ERR("Failed to extract shader, hr %#x\n", hr);
+        WARN("Failed to initialize vertex shader, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 
-    hr = IWineD3DDevice_CreateVertexShader(This->wined3d_device,
-            shader_info.shader_code, &object->output_signature,
-            &object->wined3d_shader, (IUnknown *)object);
-    if (FAILED(hr))
-    {
-        ERR("CreateVertexShader failed, hr %#x\n", hr);
-        shader_free_signature(&object->output_signature);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
-
+    TRACE("Created vertex shader %p.\n", object);
     *shader = (ID3D10VertexShader *)object;
 
     return S_OK;
@@ -1060,7 +1001,6 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device *if
 {
     struct d3d10_device *This = (struct d3d10_device *)iface;
     struct d3d10_pixel_shader *object;
-    struct d3d10_shader_info shader_info;
     HRESULT hr;
 
     TRACE("iface %p, byte_code %p, byte_code_length %lu, shader %p\n",
@@ -1073,29 +1013,15 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device *if
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_pixel_shader_vtbl;
-    object->refcount = 1;
-
-    shader_info.output_signature = &object->output_signature;
-    hr = shader_extract_from_dxbc(byte_code, byte_code_length, &shader_info);
+    hr = d3d10_pixel_shader_init(object, This, byte_code, byte_code_length);
     if (FAILED(hr))
     {
-        ERR("Failed to extract shader, hr %#x\n", hr);
+        WARN("Failed to initialize pixel shader, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 
-    hr = IWineD3DDevice_CreatePixelShader(This->wined3d_device,
-            shader_info.shader_code, &object->output_signature,
-            &object->wined3d_shader, (IUnknown *)object);
-    if (FAILED(hr))
-    {
-        ERR("CreatePixelShader failed, hr %#x\n", hr);
-        shader_free_signature(&object->output_signature);
-        HeapFree(GetProcessHeap(), 0, object);
-        return hr;
-    }
-
+    TRACE("Created pixel shader %p.\n", object);
     *shader = (ID3D10PixelShader *)object;
 
     return S_OK;
@@ -1402,6 +1328,8 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSurface(IWineD3DDeviceParen
     }
 
     *surface = texture->wined3d_surface;
+    IWineD3DSurface_AddRef(*surface);
+    ID3D10Texture2D_Release((ID3D10Texture2D *)texture);
 
     return S_OK;
 }
@@ -1441,6 +1369,8 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateRenderTarget(IWineD3DDevice
     }
 
     *surface = texture->wined3d_surface;
+    IWineD3DSurface_AddRef(*surface);
+    ID3D10Texture2D_Release((ID3D10Texture2D *)texture);
 
     return S_OK;
 }
@@ -1480,6 +1410,8 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateDepthStencilSurface(IWineD3
     }
 
     *surface = texture->wined3d_surface;
+    IWineD3DSurface_AddRef(*surface);
+    ID3D10Texture2D_Release((ID3D10Texture2D *)texture);
 
     return S_OK;
 }

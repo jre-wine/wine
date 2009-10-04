@@ -3387,16 +3387,12 @@ static UINT ACTION_CreateShortcuts(MSIPACKAGE *package)
         return ERROR_SUCCESS;
 
     res = CoInitialize( NULL );
-    if (FAILED (res))
-    {
-        ERR("CoInitialize failed\n");
-        return ERROR_FUNCTION_FAILED;
-    }
 
     rc = MSI_IterateRecords(view, NULL, ITERATE_CreateShortcuts, package);
     msiobj_release(&view->hdr);
 
-    CoUninitialize();
+    if (SUCCEEDED(res))
+        CoUninitialize();
 
     return rc;
 }
@@ -5317,8 +5313,7 @@ static LONG env_set_flags( LPCWSTR *name, LPCWSTR *value, DWORD *flags )
         }
     }
 
-    if (!*flags ||
-        check_flag_combo(*flags, ENV_ACT_SETALWAYS | ENV_ACT_SETABSENT) ||
+    if (check_flag_combo(*flags, ENV_ACT_SETALWAYS | ENV_ACT_SETABSENT) ||
         check_flag_combo(*flags, ENV_ACT_REMOVEMATCH | ENV_ACT_SETABSENT) ||
         check_flag_combo(*flags, ENV_ACT_REMOVEMATCH | ENV_ACT_SETALWAYS) ||
         check_flag_combo(*flags, ENV_ACT_SETABSENT | ENV_MOD_MASK))
@@ -5326,6 +5321,9 @@ static LONG env_set_flags( LPCWSTR *name, LPCWSTR *value, DWORD *flags )
         ERR("Invalid flags: %08x\n", *flags);
         return ERROR_FUNCTION_FAILED;
     }
+
+    if (!*flags)
+        *flags = ENV_ACT_SETALWAYS | ENV_ACT_REMOVE;
 
     return ERROR_SUCCESS;
 }
@@ -5353,6 +5351,8 @@ static UINT ITERATE_WriteEnvironmentString( MSIRECORD *rec, LPVOID param )
 
     name = MSI_RecordGetString(rec, 2);
     value = MSI_RecordGetString(rec, 3);
+
+    TRACE("name %s value %s\n", debugstr_w(name), debugstr_w(value));
 
     res = env_set_flags(&name, &value, &flags);
     if (res != ERROR_SUCCESS)

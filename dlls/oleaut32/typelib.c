@@ -4835,8 +4835,29 @@ static HRESULT WINAPI ITypeLibComp_fnBindType(
     ITypeInfo ** ppTInfo,
     ITypeComp ** ppTComp)
 {
-    FIXME("(%s, %x, %p, %p): stub\n", debugstr_w(szName), lHash, ppTInfo, ppTComp);
-    return E_NOTIMPL;
+    ITypeLibImpl *This = impl_from_ITypeComp(iface);
+    ITypeInfoImpl *pTypeInfo;
+
+    TRACE("(%s, %x, %p, %p)\n", debugstr_w(szName), lHash, ppTInfo, ppTComp);
+
+    for (pTypeInfo = This->pTypeInfo; pTypeInfo; pTypeInfo = pTypeInfo->next)
+    {
+        /* FIXME: should use lHash to do the search */
+        if (pTypeInfo->Name && !strcmpW(pTypeInfo->Name, szName))
+        {
+            TRACE("returning %p\n", pTypeInfo);
+            *ppTInfo = (ITypeInfo *)&pTypeInfo->lpVtbl;
+            ITypeInfo_AddRef(*ppTInfo);
+            *ppTComp = (ITypeComp *)&pTypeInfo->lpVtblTypeComp;
+            ITypeComp_AddRef(*ppTComp);
+            return S_OK;
+        }
+    }
+
+    TRACE("not found\n");
+    *ppTInfo = NULL;
+    *ppTComp = NULL;
+    return S_OK;
 }
 
 static const ITypeCompVtbl tlbtcvt =
@@ -6701,8 +6722,7 @@ static HRESULT WINAPI ITypeInfo_fnGetRefTypeInfo(
 	  result = S_OK;
 
     } else if ((hRefType != -1) && (hRefType & DISPATCH_HREF_MASK) &&
-        (This->TypeAttr.typekind   == TKIND_DISPATCH) &&
-	(This->TypeAttr.wTypeFlags &  TYPEFLAG_FDUAL))
+        (This->TypeAttr.typekind   == TKIND_DISPATCH))
     {
         HREFTYPE href_dispatch = hRefType;
         result = ITypeInfoImpl_GetDispatchRefTypeInfo((ITypeInfo *)iface, &href_dispatch, ppTInfo);

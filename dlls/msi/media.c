@@ -49,11 +49,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(msi);
 #define _O_TEXT        0x4000
 #define _O_BINARY      0x8000
 
-static BOOL source_matches_volume(MSIMEDIAINFO *mi, LPWSTR source_root)
+static BOOL source_matches_volume(MSIMEDIAINFO *mi, LPCWSTR source_root)
 {
     WCHAR volume_name[MAX_PATH + 1];
+    WCHAR root[MAX_PATH + 1];
 
-    if (!GetVolumeInformationW(source_root, volume_name, MAX_PATH + 1,
+    strcpyW(root, source_root);
+    PathStripToRootW(root);
+    PathAddBackslashW(root);
+
+    if (!GetVolumeInformationW(root, volume_name, MAX_PATH + 1,
                                NULL, NULL, NULL, NULL, 0))
     {
         ERR("Failed to get volume information\n");
@@ -80,7 +85,6 @@ static UINT msi_change_media(MSIPACKAGE *package, MSIMEDIAINFO *mi)
     error = generate_error_string(package, 1302, 1, mi->disk_prompt);
     error_dialog = msi_dup_property(package, error_prop);
     source_dir = msi_dup_property(package, cszSourceDir);
-    PathStripToRootW(source_dir);
 
     while (r == ERROR_SUCCESS &&
            !source_matches_volume(mi, source_dir))
@@ -333,11 +337,19 @@ static INT_PTR cabinet_copy_file(FDINOTIFICATIONTYPE fdint,
                          NULL, CREATE_ALWAYS, attrs, NULL);
     if (handle == INVALID_HANDLE_VALUE)
     {
-        if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES)
-            ERR("failed to create %s (error %d)\n",
-                debugstr_w(path), GetLastError());
+        DWORD err = GetLastError();
+        DWORD attrs = GetFileAttributesW(path);
 
-        goto done;
+        if (attrs == INVALID_FILE_ATTRIBUTES)
+            ERR("failed to create %s (error %d)\n", debugstr_w(path), err);
+        else if (err == ERROR_ACCESS_DENIED && (attrs & FILE_ATTRIBUTE_READONLY))
+        {
+            TRACE("removing read-only attribute on %s\n", debugstr_w(path));
+            SetFileAttributesW( path, attrs & ~FILE_ATTRIBUTE_READONLY );
+            handle = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, attrs, NULL);
+        }
+        else
+            WARN("failed to create %s (error %d)\n", debugstr_w(path), err);
     }
 
 done:
@@ -455,6 +467,17 @@ void msi_free_media_info(MSIMEDIAINFO *mi)
     msi_free(mi);
 }
 
+static UINT get_drive_type(const WCHAR *path)
+{
+    WCHAR root[MAX_PATH + 1];
+
+    strcpyW(root, path);
+    PathStripToRootW(root);
+    PathAddBackslashW(root);
+
+    return GetDriveTypeW(root);
+}
+
 static UINT msi_load_media_info(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi)
 {
     MSIRECORD *row;
@@ -494,9 +517,7 @@ static UINT msi_load_media_info(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO
 
     source_dir = msi_dup_property(package, cszSourceDir);
     lstrcpyW(mi->source, source_dir);
-
-    PathStripToRootW(source_dir);
-    mi->type = GetDriveTypeW(source_dir);
+    mi->type = get_drive_type(source_dir);
 
     if (file->IsCompressed && mi->cabinet)
     {
@@ -576,7 +597,6 @@ static UINT find_published_source(MSIPACKAGE *package, MSIMEDIAINFO *mi)
         {
             /* FIXME: what about SourceDir */
             lstrcpyW(mi->source, source);
-            lstrcatW(mi->source, mi->cabinet);
             return ERROR_SUCCESS;
         }
     }

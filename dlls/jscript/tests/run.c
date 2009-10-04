@@ -66,6 +66,8 @@ DEFINE_EXPECT(global_success_i);
 DEFINE_EXPECT(global_notexists_d);
 DEFINE_EXPECT(testobj_delete);
 DEFINE_EXPECT(testobj_value);
+DEFINE_EXPECT(testobj_prop_d);
+DEFINE_EXPECT(testobj_noprop_d);
 DEFINE_EXPECT(GetItemInfo_testVal);
 
 #define DISPID_GLOBAL_TESTPROPGET   0x1000
@@ -76,6 +78,9 @@ DEFINE_EXPECT(GetItemInfo_testVal);
 #define DISPID_GLOBAL_GETVT         0x1005
 #define DISPID_GLOBAL_TESTOBJ       0x1006
 #define DISPID_GLOBAL_NULL_BSTR     0x1007
+#define DISPID_GLOBAL_NULL_DISP     0x1008
+
+#define DISPID_TESTOBJ_PROP         0x2000
 
 static const WCHAR testW[] = {'t','e','s','t',0};
 static const CHAR testA[] = "test";
@@ -193,9 +198,21 @@ static HRESULT WINAPI DispatchEx_GetNameSpaceParent(IDispatchEx *iface, IUnknown
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
+static HRESULT WINAPI testObj_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
-    ok(0, "unexpected call\n");
+    if(!strcmp_wa(bstrName, "prop")) {
+        CHECK_EXPECT(testobj_prop_d);
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
+        *pid = DISPID_TESTOBJ_PROP;
+        return S_OK;
+    }
+    if(!strcmp_wa(bstrName, "noprop")) {
+        CHECK_EXPECT(testobj_noprop_d);
+        ok(grfdex == fdexNameCaseSensitive, "grfdex = %x\n", grfdex);
+        return DISP_E_UNKNOWNNAME;
+    }
+
+    ok(0, "unexpected name %s\n", wine_dbgstr_w(bstrName));
     return E_NOTIMPL;
 }
 
@@ -242,7 +259,7 @@ static IDispatchExVtbl testObjVtbl = {
     DispatchEx_GetTypeInfo,
     DispatchEx_GetIDsOfNames,
     DispatchEx_Invoke,
-    DispatchEx_GetDispID,
+    testObj_GetDispID,
     testObj_InvokeEx,
     testObj_DeleteMemberByName,
     DispatchEx_DeleteMemberByDispID,
@@ -296,6 +313,10 @@ static HRESULT WINAPI Global_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD 
     }
     if(!strcmp_wa(bstrName, "createNullBSTR")) {
         *pid = DISPID_GLOBAL_NULL_BSTR;
+        return S_OK;
+    }
+    if(!strcmp_wa(bstrName, "nullDisp")) {
+        *pid = DISPID_GLOBAL_NULL_DISP;
         return S_OK;
     }
     if(!strcmp_wa(bstrName, "notExists")) {
@@ -455,6 +476,21 @@ static HRESULT WINAPI Global_InvokeEx(IDispatchEx *iface, DISPID id, LCID lcid, 
             V_VT(pvarRes) = VT_BSTR;
             V_BSTR(pvarRes) = NULL;
         }
+        return S_OK;
+
+    case DISPID_GLOBAL_NULL_DISP:
+        ok(wFlags == INVOKE_PROPERTYGET, "wFlags = %x\n", wFlags);
+        ok(pdp != NULL, "pdp == NULL\n");
+        ok(!pdp->rgvarg, "rgvarg != NULL\n");
+        ok(!pdp->rgdispidNamedArgs, "rgdispidNamedArgs != NULL\n");
+        ok(!pdp->cArgs, "cArgs = %d\n", pdp->cArgs);
+        ok(!pdp->cNamedArgs, "cNamedArgs = %d\n", pdp->cNamedArgs);
+        ok(pvarRes != NULL, "pvarRes == NULL\n");
+        ok(V_VT(pvarRes) ==  VT_EMPTY, "V_VT(pvarRes) = %d\n", V_VT(pvarRes));
+        ok(pei != NULL, "pei == NULL\n");
+
+        V_VT(pvarRes) = VT_DISPATCH;
+        V_DISPATCH(pvarRes) = NULL;
         return S_OK;
     }
 
@@ -864,8 +900,20 @@ static void run_tests(void)
 
     parse_script_a("ok((testObj instanceof Object) === false, 'testObj is instance of Object');");
 
+    SET_EXPECT(testobj_prop_d);
+    parse_script_a("ok(('prop' in testObj) === true, 'prop is not in testObj');");
+    CHECK_CALLED(testobj_prop_d);
+
+    SET_EXPECT(testobj_noprop_d);
+    parse_script_a("ok(('noprop' in testObj) === false, 'noprop is in testObj');");
+    CHECK_CALLED(testobj_noprop_d);
+
     SET_EXPECT(testobj_value);
     parse_script_a("ok(String(testObj) === '1', 'wrong testObj value');");
+    CHECK_CALLED(testobj_value);
+
+    SET_EXPECT(testobj_value);
+    parse_script_a("ok(String.prototype.concat.call(testObj, ' OK') === '1 OK', 'wrong concat result');");
     CHECK_CALLED(testobj_value);
 
     run_from_res("lang.js");

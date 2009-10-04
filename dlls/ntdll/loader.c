@@ -116,6 +116,8 @@ static WINE_MODREF *last_failed_modref;
 
 static NTSTATUS load_dll( LPCWSTR load_path, LPCWSTR libname, DWORD flags, WINE_MODREF** pwm );
 static NTSTATUS process_attach( WINE_MODREF *wm, LPVOID lpReserved );
+static FARPROC find_ordinal_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
+                                    DWORD exp_size, DWORD ordinal, LPCWSTR load_path );
 static FARPROC find_named_export( HMODULE module, const IMAGE_EXPORT_DIRECTORY *exports,
                                   DWORD exp_size, const char *name, int hint, LPCWSTR load_path );
 
@@ -403,7 +405,13 @@ static FARPROC find_forwarded_export( HMODULE module, const char *forward, LPCWS
     }
     if ((exports = RtlImageDirectoryEntryToData( wm->ldr.BaseAddress, TRUE,
                                                  IMAGE_DIRECTORY_ENTRY_EXPORT, &exp_size )))
-        proc = find_named_export( wm->ldr.BaseAddress, exports, exp_size, end + 1, -1, load_path );
+    {
+        const char *name = end + 1;
+        if (*name == '#')  /* ordinal */
+            proc = find_ordinal_export( wm->ldr.BaseAddress, exports, exp_size, atoi(name+1), load_path );
+        else
+            proc = find_named_export( wm->ldr.BaseAddress, exports, exp_size, name, -1, load_path );
+    }
 
     if (!proc)
     {
@@ -809,8 +817,9 @@ static WINE_MODREF *alloc_module( HMODULE hModule, LPCWSTR filename )
 
     if (!(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
     {
+        ULONG flags = MEM_EXECUTE_OPTION_ENABLE;
         WARN( "disabling no-exec because of %s\n", debugstr_w(wm->ldr.BaseDllName.Buffer) );
-        VIRTUAL_SetForceExec( TRUE );
+        NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags, &flags, sizeof(flags) );
     }
     return wm;
 }
@@ -2521,10 +2530,25 @@ PVOID WINAPI RtlImageDirectoryEntryToData( HMODULE module, BOOL image, WORD dir,
         image = FALSE;
     }
     if (!(nt = RtlImageNtHeader( module ))) return NULL;
-    if (dir >= nt->OptionalHeader.NumberOfRvaAndSizes) return NULL;
-    if (!(addr = nt->OptionalHeader.DataDirectory[dir].VirtualAddress)) return NULL;
-    *size = nt->OptionalHeader.DataDirectory[dir].Size;
-    if (image || addr < nt->OptionalHeader.SizeOfHeaders) return (char *)module + addr;
+    if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+    {
+        const IMAGE_NT_HEADERS64 *nt64 = (IMAGE_NT_HEADERS64 *)nt;
+
+        if (dir >= nt64->OptionalHeader.NumberOfRvaAndSizes) return NULL;
+        if (!(addr = nt64->OptionalHeader.DataDirectory[dir].VirtualAddress)) return NULL;
+        *size = nt64->OptionalHeader.DataDirectory[dir].Size;
+        if (image || addr < nt64->OptionalHeader.SizeOfHeaders) return (char *)module + addr;
+    }
+    else if (nt->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
+    {
+        const IMAGE_NT_HEADERS32 *nt32 = (IMAGE_NT_HEADERS32 *)nt;
+
+        if (dir >= nt32->OptionalHeader.NumberOfRvaAndSizes) return NULL;
+        if (!(addr = nt32->OptionalHeader.DataDirectory[dir].VirtualAddress)) return NULL;
+        *size = nt32->OptionalHeader.DataDirectory[dir].Size;
+        if (image || addr < nt32->OptionalHeader.SizeOfHeaders) return (char *)module + addr;
+    }
+    else return NULL;
 
     /* not mapped as image, need to find the section containing the virtual address */
     return RtlImageRvaToVa( nt, module, addr, NULL );

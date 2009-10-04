@@ -1158,7 +1158,7 @@ void VGA_ShowMouse( BOOL show )
 void VGA_UpdatePalette(void)
 {
   /* Figure out which palette is used now */
-  if(vga_fb_bright == TRUE)
+  if(vga_fb_bright)
   {
     if(vga_fb_palette_index == 0)
     {
@@ -1210,7 +1210,7 @@ static void VGA_SetEnabled(BOOL enabled)
   TRACE("%i\n", enabled);
 
   /* Check if going from enabled to disabled */
-  if(vga_fb_enabled == TRUE && enabled == FALSE)
+  if(vga_fb_enabled && !enabled)
   {
     /* Clear frame buffer */
     memset(vga_fb_window_data, 0x00, vga_fb_window_size);
@@ -1824,7 +1824,7 @@ void VGA_ioport_out( WORD port, BYTE val )
               FIXME("Unsupported value, VGA register 0x3d8: 0x%02x (bit 5) - blink is not supported.\n", val);
            }
            /* Enable Video Signal (bit 3) - Set the enabled bit */
-           VGA_SetEnabled((val & 0x08) && 1);
+           VGA_SetEnabled((val & 0x08) != 0);
 
            /* xxx1x010 - Detect 160x200, 16 color mode (CGA composite) */
            if( (val & 0x17) == 0x12 )
@@ -1885,10 +1885,10 @@ void VGA_ioport_out( WORD port, BYTE val )
         /* Colour control register (CGA) */
         case 0x3d9:
            /* Set bright */
-           VGA_SetBright((val & 0x10) && 1);
+           VGA_SetBright((val & 0x10) != 0);
 
            /* Set palette index */
-           VGA_SetPaletteIndex((val & 0x20) && 1);
+           VGA_SetPaletteIndex((val & 0x20) != 0);
 
            /* Now update the palette */
            VGA_UpdatePalette();

@@ -27,7 +27,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d10core);
 static HRESULT isgn_handler(const char *data, DWORD data_size, DWORD tag, void *ctx)
 {
     struct wined3d_shader_signature *is = ctx;
-    char tag_str[5];
 
     switch(tag)
     {
@@ -35,14 +34,12 @@ static HRESULT isgn_handler(const char *data, DWORD data_size, DWORD tag, void *
             return shader_parse_signature(data, data_size, is);
 
         default:
-            memcpy(tag_str, &tag, 4);
-            tag_str[4] = '\0';
-            FIXME("Unhandled chunk %s\n", tag_str);
+            FIXME("Unhandled chunk %s.\n", debugstr_an((const char *)&tag, 4));
             return S_OK;
     }
 }
 
-HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEMENT_DESC *element_descs,
+static HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEMENT_DESC *element_descs,
         UINT element_count, const void *shader_byte_code, SIZE_T shader_byte_code_length,
         WINED3DVERTEXELEMENT **wined3d_elements, UINT *wined3d_element_count)
 {
@@ -132,6 +129,11 @@ static ULONG STDMETHODCALLTYPE d3d10_input_layout_AddRef(ID3D10InputLayout *ifac
 
     TRACE("%p increasing refcount to %u\n", This, refcount);
 
+    if (refcount == 1)
+    {
+        IWineD3DVertexDeclaration_AddRef(This->wined3d_decl);
+    }
+
     return refcount;
 }
 
@@ -145,7 +147,6 @@ static ULONG STDMETHODCALLTYPE d3d10_input_layout_Release(ID3D10InputLayout *ifa
     if (!refcount)
     {
         IWineD3DVertexDeclaration_Release(This->wined3d_decl);
-        HeapFree(GetProcessHeap(), 0, This);
     }
 
     return refcount;
@@ -184,7 +185,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_input_layout_SetPrivateDataInterface(ID3D
     return E_NOTIMPL;
 }
 
-const struct ID3D10InputLayoutVtbl d3d10_input_layout_vtbl =
+static const struct ID3D10InputLayoutVtbl d3d10_input_layout_vtbl =
 {
     /* IUnknown methods */
     d3d10_input_layout_QueryInterface,
@@ -196,3 +197,44 @@ const struct ID3D10InputLayoutVtbl d3d10_input_layout_vtbl =
     d3d10_input_layout_SetPrivateData,
     d3d10_input_layout_SetPrivateDataInterface,
 };
+
+static void STDMETHODCALLTYPE d3d10_input_layout_wined3d_object_destroyed(void *parent)
+{
+    HeapFree(GetProcessHeap(), 0, parent);
+}
+
+static const struct wined3d_parent_ops d3d10_input_layout_wined3d_parent_ops =
+{
+    d3d10_input_layout_wined3d_object_destroyed,
+};
+
+HRESULT d3d10_input_layout_init(struct d3d10_input_layout *layout, struct d3d10_device *device,
+        const D3D10_INPUT_ELEMENT_DESC *element_descs, UINT element_count,
+        const void *shader_byte_code, SIZE_T shader_byte_code_length)
+{
+    WINED3DVERTEXELEMENT *wined3d_elements;
+    UINT wined3d_element_count;
+    HRESULT hr;
+
+    layout->vtbl = &d3d10_input_layout_vtbl;
+    layout->refcount = 1;
+
+    hr = d3d10_input_layout_to_wined3d_declaration(element_descs, element_count,
+            shader_byte_code, shader_byte_code_length, &wined3d_elements, &wined3d_element_count);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d vertex declaration elements, hr %#x.\n", hr);
+        return hr;
+    }
+
+    hr = IWineD3DDevice_CreateVertexDeclaration(device->wined3d_device, &layout->wined3d_decl,
+            (IUnknown *)layout, &d3d10_input_layout_wined3d_parent_ops, wined3d_elements, wined3d_element_count);
+    HeapFree(GetProcessHeap(), 0, wined3d_elements);
+    if (FAILED(hr))
+    {
+        WARN("Failed to create wined3d vertex declaration, hr %#x.\n", hr);
+        return hr;
+    }
+
+    return S_OK;
+}

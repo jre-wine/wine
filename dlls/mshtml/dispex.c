@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Jacek Caban for CodeWeavers
+ * Copyright 2008-2009 Jacek Caban for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -318,11 +318,8 @@ static dispex_data_t *get_dispex_data(DispatchEx *This)
     return This->data->data;
 }
 
-void call_disp_func(HTMLDocument *doc, IDispatch *disp, IDispatch *this_obj)
+HRESULT call_disp_func(IDispatch *disp, DISPPARAMS *dp)
 {
-    DISPID named_arg = DISPID_THIS;
-    VARIANTARG arg;
-    DISPPARAMS params = {&arg, &named_arg, 1, 1};
     EXCEPINFO ei;
     IDispatchEx *dispex;
     VARIANT res;
@@ -331,20 +328,17 @@ void call_disp_func(HTMLDocument *doc, IDispatch *disp, IDispatch *this_obj)
     hres = IDispatch_QueryInterface(disp, &IID_IDispatchEx, (void**)&dispex);
     if(FAILED(hres)) {
         FIXME("Could not get IDispatchEx interface: %08x\n", hres);
-        return;
+        return hres;
     }
 
-    V_VT(&arg) = VT_DISPATCH;
-    V_DISPATCH(&arg) = this_obj;
     VariantInit(&res);
     memset(&ei, 0, sizeof(ei));
 
-    hres = IDispatchEx_InvokeEx(dispex, 0, GetUserDefaultLCID(), DISPATCH_METHOD, &params, &res, &ei, NULL);
+    hres = IDispatchEx_InvokeEx(dispex, 0, GetUserDefaultLCID(), DISPATCH_METHOD, dp, &res, &ei, NULL);
+
     IDispatchEx_Release(dispex);
-
-    TRACE("%p returned %08x\n", disp, hres);
-
     VariantClear(&res);
+    return hres;
 }
 
 static inline BOOL is_custom_dispid(DISPID id)
@@ -607,6 +601,34 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
     return hres;
 }
 
+static HRESULT get_builtin_func(dispex_data_t *data, DISPID id, func_info_t **ret)
+{
+    int min, max, n;
+
+    min = 0;
+    max = data->func_cnt-1;
+
+    while(min <= max) {
+        n = (min+max)/2;
+
+        if(data->funcs[n].id == id)
+            break;
+
+        if(data->funcs[n].id < id)
+            min = n+1;
+        else
+            max = n-1;
+    }
+
+    if(min > max) {
+        WARN("invalid id %x\n", id);
+        return DISP_E_UNKNOWNNAME;
+    }
+
+    *ret = data->funcs+n;
+    return S_OK;
+}
+
 #define DISPATCHEX_THIS(iface) DEFINE_THIS(DispatchEx, IDispatchEx, iface)
 
 static HRESULT WINAPI DispatchEx_QueryInterface(IDispatchEx *iface, REFIID riid, void **ppv)
@@ -748,7 +770,7 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
 {
     DispatchEx *This = DISPATCHEX_THIS(iface);
     dispex_data_t *data;
-    int min, max, n;
+    func_info_t *func;
     HRESULT hres;
 
     TRACE("(%p)->(%x %x %x %p %p %p %p)\n", This, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
@@ -828,30 +850,14 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
     if(!data)
         return E_FAIL;
 
-    min = 0;
-    max = data->func_cnt-1;
+    hres = get_builtin_func(data, id, &func);
+    if(FAILED(hres))
+        return hres;
 
-    while(min <= max) {
-        n = (min+max)/2;
-
-        if(data->funcs[n].id == id)
-            break;
-
-        if(data->funcs[n].id < id)
-            min = n+1;
-        else
-            max = n-1;
-    }
-
-    if(min > max) {
-        WARN("invalid id %x\n", id);
-        return DISP_E_UNKNOWNNAME;
-    }
-
-    if(data->funcs[n].func_disp_idx == -1)
-        hres = typeinfo_invoke(This, data->funcs+n, wFlags, pdp, pvarRes, pei);
+    if(func->func_disp_idx == -1)
+        hres = typeinfo_invoke(This, func, wFlags, pdp, pvarRes, pei);
     else
-        hres = function_invoke(This, data->funcs+n, wFlags, pdp, pvarRes, pei);
+        hres = function_invoke(This, func, wFlags, pdp, pvarRes, pei);
 
     return hres;
 }
@@ -880,15 +886,92 @@ static HRESULT WINAPI DispatchEx_GetMemberProperties(IDispatchEx *iface, DISPID 
 static HRESULT WINAPI DispatchEx_GetMemberName(IDispatchEx *iface, DISPID id, BSTR *pbstrName)
 {
     DispatchEx *This = DISPATCHEX_THIS(iface);
-    FIXME("(%p)->(%x %p)\n", This, id, pbstrName);
-    return E_NOTIMPL;
+    dispex_data_t *data;
+    func_info_t *func;
+    HRESULT hres;
+
+    TRACE("(%p)->(%x %p)\n", This, id, pbstrName);
+
+    if(is_dynamic_dispid(id)) {
+        DWORD idx = id - DISPID_DYNPROP_0;
+
+        if(!This->dynamic_data || This->dynamic_data->prop_cnt <= idx)
+            return DISP_E_UNKNOWNNAME;
+
+        *pbstrName = SysAllocString(This->dynamic_data->props[idx].name);
+        if(!*pbstrName)
+            return E_OUTOFMEMORY;
+
+        return S_OK;
+    }
+
+    data = get_dispex_data(This);
+    if(!data)
+        return E_FAIL;
+
+    hres = get_builtin_func(data, id, &func);
+    if(FAILED(hres))
+        return hres;
+
+    *pbstrName = SysAllocString(func->name);
+    if(!*pbstrName)
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI DispatchEx_GetNextDispID(IDispatchEx *iface, DWORD grfdex, DISPID id, DISPID *pid)
 {
     DispatchEx *This = DISPATCHEX_THIS(iface);
-    FIXME("(%p)->(%x %x %p)\n", This, grfdex, id, pid);
-    return E_NOTIMPL;
+    dispex_data_t *data;
+    func_info_t *func;
+    HRESULT hres;
+
+    TRACE("(%p)->(%x %x %p)\n", This, grfdex, id, pid);
+
+    if(is_dynamic_dispid(id)) {
+        DWORD idx = id - DISPID_DYNPROP_0;
+
+        if(!This->dynamic_data || This->dynamic_data->prop_cnt <= idx)
+            return DISP_E_UNKNOWNNAME;
+
+        if(idx+1 == This->dynamic_data->prop_cnt) {
+            *pid = DISPID_STARTENUM;
+            return S_FALSE;
+        }
+
+        *pid = id+1;
+        return S_OK;
+    }
+
+    data = get_dispex_data(This);
+    if(!data)
+        return E_FAIL;
+
+    if(id == DISPID_STARTENUM) {
+        func = data->funcs;
+    }else {
+        hres = get_builtin_func(data, id, &func);
+        if(FAILED(hres))
+            return hres;
+        func++;
+    }
+
+    while(func < data->funcs+data->func_cnt) {
+        /* FIXME: Skip hidden properties */
+        if(func->func_disp_idx == -1) {
+            *pid = func->id;
+            return S_OK;
+        }
+        func++;
+    }
+
+    if(This->dynamic_data && This->dynamic_data->prop_cnt) {
+        *pid = DISPID_DYNPROP_0;
+        return S_OK;
+    }
+
+    *pid = DISPID_STARTENUM;
+    return S_FALSE;
 }
 
 static HRESULT WINAPI DispatchEx_GetNameSpaceParent(IDispatchEx *iface, IUnknown **ppunk)

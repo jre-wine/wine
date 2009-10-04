@@ -143,10 +143,12 @@ static DWORD AUX_GetVolume(WORD wDevID, LPDWORD lpdwVol)
 	break;
     default:
 	WARN("invalid device id=%04X !\n", wDevID);
+	close(mixer);
 	return MMSYSERR_NOTENABLED;
     }
     if (ioctl(mixer, cmd, &volume) == -1) {
 	WARN("unable to read mixer !\n");
+	close(mixer);
 	return MMSYSERR_NOTENABLED;
     }
     close(mixer);
@@ -204,10 +206,12 @@ static DWORD AUX_SetVolume(WORD wDevID, DWORD dwParam)
 	break;
     default:
 	WARN("invalid device id=%04X !\n", wDevID);
+	close(mixer);
 	return MMSYSERR_NOTENABLED;
     }
     if (ioctl(mixer, cmd, &volume) == -1) {
 	WARN("unable to set mixer !\n");
+	close(mixer);
 	return MMSYSERR_NOTENABLED;
     }
     close(mixer);

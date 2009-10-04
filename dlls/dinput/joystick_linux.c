@@ -80,8 +80,9 @@ struct JoyDev
     char device[MAX_PATH];
     char name[MAX_PATH];
 
-    BYTE dev_axes_map[ABS_MAX + 1];
-    int  have_axes_map;
+    BYTE axis_count;
+    BYTE button_count;
+    int  *dev_axes_map;
 };
 
 typedef struct JoystickImpl JoystickImpl;
@@ -122,6 +123,7 @@ static INT find_joystick_devices(void)
     {
         int fd;
         struct JoyDev joydev, *new_joydevs;
+        BYTE axes_map[ABS_MAX + 1];
 
         snprintf(joydev.device, sizeof(joydev.device), "%s%d", JOYDEV_NEW, i);
         if ((fd = open(joydev.device, O_RDONLY)) < 0)
@@ -135,29 +137,43 @@ static INT find_joystick_devices(void)
         if (ioctl(fd, JSIOCGNAME(sizeof(joydev.name)), joydev.name) < 0)
             WARN("ioctl(%s,JSIOCGNAME) failed: %s\n", joydev.device, strerror(errno));
 #endif
+#ifdef JSIOCGAXES
+        if (ioctl(fd, JSIOCGAXES, &joydev.axis_count) < 0)
+        {
+            WARN("ioctl(%s,JSIOCGAXES) failed: %s, defauting to 2\n", joydev.device, strerror(errno));
+            joydev.axis_count = 2;
+        }
+#endif
+#ifdef JSIOCGBUTTONS
+        if (ioctl(fd, JSIOCGBUTTONS, &joydev.button_count) < 0)
+        {
+            WARN("ioctl(%s,JSIOCGBUTTONS) failed: %s, defauting to 2\n", joydev.device, strerror(errno));
+            joydev.button_count = 2;
+        }
+#endif
 
-        if (ioctl(fd, JSIOCGAXMAP, joydev.dev_axes_map) < 0)
+        if (ioctl(fd, JSIOCGAXMAP, axes_map) < 0)
         {
             WARN("ioctl(%s,JSIOCGNAME) failed: %s\n", joydev.device, strerror(errno));
-            joydev.have_axes_map = 0;
+            joydev.dev_axes_map = NULL;
         }
         else
-        {
-            INT j;
-            joydev.have_axes_map = 1;
+            if ((joydev.dev_axes_map = HeapAlloc(GetProcessHeap(), 0, joydev.axis_count * sizeof(int))))
+            {
+                INT j;
 
-            /* Remap to DI numbers */
-            for (j = 0; j < ABS_MAX; j++)
-                if (joydev.dev_axes_map[j] < 8)
-                    /* Axis match 1-to-1 */
-                    joydev.dev_axes_map[j] = j;
-                else if (joydev.dev_axes_map[j] == 16 ||
-                         joydev.dev_axes_map[j] == 17)
-                    /* POV axis */
-                    joydev.dev_axes_map[j] = 8;
-                else
-                    joydev.dev_axes_map[j] = -1;
-        }
+                /* Remap to DI numbers */
+                for (j = 0; j < joydev.axis_count; j++)
+                    if (axes_map[j] < 8)
+                        /* Axis match 1-to-1 */
+                        joydev.dev_axes_map[j] = j;
+                    else if (axes_map[j] == 16 ||
+                             axes_map[j] == 17)
+                        /* POV axis */
+                        joydev.dev_axes_map[j] = 8;
+                    else
+                        joydev.dev_axes_map[j] = -1;
+            }
 
         close(fd);
 
@@ -167,6 +183,9 @@ static INT find_joystick_devices(void)
             new_joydevs = HeapReAlloc(GetProcessHeap(), 0, joystick_devices,
                                       (joystick_devices_count + 1) * sizeof(struct JoyDev));
         if (!new_joydevs) continue;
+
+        TRACE("Found a joystick on %s: %s\n  with %d axes and %d buttons\n", joydev.device,
+              joydev.name, joydev.axis_count, joydev.button_count);
 
         joystick_devices = new_joydevs;
         joystick_devices[joystick_devices_count++] = joydev;
@@ -279,31 +298,14 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     }
 
     newDevice->joydev = &joystick_devices[index];
-    if ((newDevice->joyfd = open(newDevice->joydev->device, O_RDONLY)) < 0)
-    {
-        WARN("open(%s, O_RDONLY) failed: %s\n", newDevice->joydev->device, strerror(errno));
-        HeapFree(GetProcessHeap(), 0, newDevice);
-        return DIERR_DEVICENOTREG;
-    }
-
+    newDevice->joyfd = -1;
     newDevice->generic.guidInstance = DInput_Wine_Joystick_GUID;
     newDevice->generic.guidInstance.Data3 = index;
     newDevice->generic.guidProduct = DInput_Wine_Joystick_GUID;
     newDevice->generic.joy_polldev = joy_polldev;
     newDevice->generic.name        = newDevice->joydev->name;
-
-#ifdef JSIOCGAXES
-    if (ioctl(newDevice->joyfd, JSIOCGAXES, &newDevice->generic.device_axis_count) < 0) {
-        WARN("ioctl(%s,JSIOCGAXES) failed: %s, defauting to 2\n", newDevice->joydev->device, strerror(errno));
-        newDevice->generic.device_axis_count = 2;
-    }
-#endif
-#ifdef JSIOCGBUTTONS
-    if (ioctl(newDevice->joyfd, JSIOCGBUTTONS, &newDevice->generic.devcaps.dwButtons) < 0) {
-        WARN("ioctl(%s,JSIOCGBUTTONS) failed: %s, defauting to 2\n", newDevice->joydev->device, strerror(errno));
-        newDevice->generic.devcaps.dwButtons = 2;
-    }
-#endif
+    newDevice->generic.device_axis_count = newDevice->joydev->axis_count;
+    newDevice->generic.devcaps.dwButtons = newDevice->joydev->button_count;
 
     if (newDevice->generic.devcaps.dwButtons > 128)
     {
@@ -322,8 +324,7 @@ static HRESULT alloc_device(REFGUID rguid, const void *jvt, IDirectInputImpl *di
     newDevice->generic.deadzone = 0;
 
     /* do any user specified configuration */
-    hr = setup_dinput_options(&newDevice->generic, newDevice->joydev->have_axes_map ?
-                              newDevice->joydev->dev_axes_map : NULL);
+    hr = setup_dinput_options(&newDevice->generic, newDevice->joydev->dev_axes_map);
     if (hr != DI_OK)
         goto FAILED1;
 
@@ -581,7 +582,8 @@ static void joy_polldev(JoystickGenericImpl *This_in) {
             int number = This->generic.axis_map[jse.number];	/* wine format object index */
 
             if (number < 0) return;
-            inst_id = DIDFT_MAKEINSTANCE(number) | (number < 8 ? DIDFT_ABSAXIS : DIDFT_POV);
+            inst_id = number < 8 ?  DIDFT_MAKEINSTANCE(number) | DIDFT_ABSAXIS :
+                                    DIDFT_MAKEINSTANCE(number - 8) | DIDFT_POV;
             value = joystick_map_axis(&This->generic.props[id_to_object(This->generic.base.data_format.wine_df, inst_id)], jse.value);
 
             TRACE("changing axis %d => %d\n", jse.number, number);

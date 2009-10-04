@@ -1,5 +1,5 @@
 /*
- * Copyright 2008 Henri Verbeet for CodeWeavers
+ * Copyright 2008-2009 Henri Verbeet for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -40,4 +40,74 @@ const char *debug_d3d10_driver_type(D3D10_DRIVER_TYPE driver_type)
     }
 }
 
+const char *debug_d3d10_shader_variable_class(D3D10_SHADER_VARIABLE_CLASS c)
+{
+    switch (c)
+    {
+        WINE_D3D10_TO_STR(D3D10_SVC_SCALAR);
+        WINE_D3D10_TO_STR(D3D10_SVC_VECTOR);
+        WINE_D3D10_TO_STR(D3D10_SVC_MATRIX_ROWS);
+        WINE_D3D10_TO_STR(D3D10_SVC_MATRIX_COLUMNS);
+        WINE_D3D10_TO_STR(D3D10_SVC_OBJECT);
+        WINE_D3D10_TO_STR(D3D10_SVC_STRUCT);
+        default:
+            FIXME("Unrecognized D3D10_SHADER_VARIABLE_CLASS %#x.\n", c);
+            return "unrecognized";
+    }
+}
+
+const char *debug_d3d10_shader_variable_type(D3D10_SHADER_VARIABLE_TYPE t)
+{
+    switch (t)
+    {
+        WINE_D3D10_TO_STR(D3D10_SVT_VOID);
+        WINE_D3D10_TO_STR(D3D10_SVT_BOOL);
+        WINE_D3D10_TO_STR(D3D10_SVT_INT);
+        WINE_D3D10_TO_STR(D3D10_SVT_FLOAT);
+        WINE_D3D10_TO_STR(D3D10_SVT_STRING);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE1D);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE2D);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE3D);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURECUBE);
+        WINE_D3D10_TO_STR(D3D10_SVT_SAMPLER);
+        WINE_D3D10_TO_STR(D3D10_SVT_PIXELSHADER);
+        WINE_D3D10_TO_STR(D3D10_SVT_VERTEXSHADER);
+        WINE_D3D10_TO_STR(D3D10_SVT_UINT);
+        WINE_D3D10_TO_STR(D3D10_SVT_UINT8);
+        WINE_D3D10_TO_STR(D3D10_SVT_GEOMETRYSHADER);
+        WINE_D3D10_TO_STR(D3D10_SVT_RASTERIZER);
+        WINE_D3D10_TO_STR(D3D10_SVT_DEPTHSTENCIL);
+        WINE_D3D10_TO_STR(D3D10_SVT_BLEND);
+        WINE_D3D10_TO_STR(D3D10_SVT_BUFFER);
+        WINE_D3D10_TO_STR(D3D10_SVT_CBUFFER);
+        WINE_D3D10_TO_STR(D3D10_SVT_TBUFFER);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE1DARRAY);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE2DARRAY);
+        WINE_D3D10_TO_STR(D3D10_SVT_RENDERTARGETVIEW);
+        WINE_D3D10_TO_STR(D3D10_SVT_DEPTHSTENCILVIEW);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE2DMS);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURE2DMSARRAY);
+        WINE_D3D10_TO_STR(D3D10_SVT_TEXTURECUBEARRAY);
+        default:
+            FIXME("Unrecognized D3D10_SHADER_VARIABLE_TYPE %#x.\n", t);
+            return "unrecognized";
+    }
+}
+
 #undef WINE_D3D10_TO_STR
+
+void *d3d10_rb_alloc(size_t size)
+{
+    return HeapAlloc(GetProcessHeap(), 0, size);
+}
+
+void *d3d10_rb_realloc(void *ptr, size_t size)
+{
+    return HeapReAlloc(GetProcessHeap(), 0, ptr, size);
+}
+
+void d3d10_rb_free(void *ptr)
+{
+    HeapFree(GetProcessHeap(), 0, ptr);
+}

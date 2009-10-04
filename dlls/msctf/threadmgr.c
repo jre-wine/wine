@@ -88,7 +88,7 @@ typedef struct tagACLMulti {
     /* const ITfConfigureSystemKeystrokeFeedVtbl *ConfigureSystemKeystrokeFeedVtbl; */
     /* const ITfLangBarItemMgrVtbl *LangBarItemMgrVtbl; */
     /* const ITfUIElementMgrVtbl *UIElementMgrVtbl; */
-    /* const ITfSourceSingleVtbl *SourceSingleVtbl; */
+    const ITfSourceSingleVtbl *SourceSingleVtbl;
     LONG refCount;
 
     /* Aggregation */
@@ -126,7 +126,6 @@ typedef struct tagEnumTfDocumentMgr {
 } EnumTfDocumentMgr;
 
 static HRESULT EnumTfDocumentMgr_Constructor(struct list* head, IEnumTfDocumentMgrs **ppOut);
-LRESULT CALLBACK ThreadFocusHookProc(int nCode, WPARAM wParam, LPARAM lParam);
 
 static inline ThreadMgr *impl_from_ITfSourceVtbl(ITfSource *iface)
 {
@@ -153,20 +152,10 @@ static inline ThreadMgr *impl_from_ITfThreadMgrEventSink(ITfThreadMgrEventSink *
     return (ThreadMgr *)((char *)iface - FIELD_OFFSET(ThreadMgr,ThreadMgrEventSinkVtbl));
 }
 
-static HRESULT SetupWindowsHook(ThreadMgr *This)
+static inline ThreadMgr *impl_from_ITfSourceSingleVtbl(ITfSourceSingle* iface)
+
 {
-    if (!This->focusHook)
-    {
-        This->focusHook = SetWindowsHookExW(WH_CBT, ThreadFocusHookProc, 0,
-                             GetCurrentThreadId());
-        if (!This->focusHook)
-        {
-            ERR("Unable to set focus hook\n");
-            return E_FAIL;
-        }
-        return S_OK;
-    }
-    return S_FALSE;
+    return (ThreadMgr *)((char *)iface - FIELD_OFFSET(ThreadMgr,SourceSingleVtbl));
 }
 
 static void free_sink(ThreadMgrSink *sink)
@@ -282,6 +271,10 @@ static HRESULT WINAPI ThreadMgr_QueryInterface(ITfThreadMgr *iface, REFIID iid, 
     else if (IsEqualIID(iid, &IID_ITfCompartmentMgr))
     {
         *ppvOut = This->CompartmentMgr;
+    }
+    else if (IsEqualIID(iid, &IID_ITfSourceSingle))
+    {
+        *ppvOut = &This->SourceSingleVtbl;
     }
 
     if (*ppvOut)
@@ -441,6 +434,58 @@ static HRESULT WINAPI ThreadMgr_SetFocus( ITfThreadMgr* iface, ITfDocumentMgr *p
     return S_OK;
 }
 
+static LRESULT CALLBACK ThreadFocusHookProc(int nCode, WPARAM wParam, LPARAM lParam)
+{
+    ThreadMgr *This;
+
+    This = TlsGetValue(tlsIndex);
+    if (!This)
+    {
+        ERR("Hook proc but no ThreadMgr for this thread. Serious Error\n");
+        return 0;
+    }
+    if (!This->focusHook)
+    {
+        ERR("Hook proc but no ThreadMgr focus Hook. Serious Error\n");
+        return 0;
+    }
+
+    if (nCode == HCBT_SETFOCUS) /* focus change within our thread */
+    {
+        struct list *cursor;
+
+        LIST_FOR_EACH(cursor, &This->AssociatedFocusWindows)
+        {
+            AssociatedWindow *wnd = LIST_ENTRY(cursor,AssociatedWindow,entry);
+            if (wnd->hwnd == (HWND)wParam)
+            {
+                TRACE("Triggering Associated window focus\n");
+                if (This->focus != wnd->docmgr)
+                    ThreadMgr_SetFocus((ITfThreadMgr*)This, wnd->docmgr);
+                break;
+            }
+        }
+    }
+
+    return CallNextHookEx(This->focusHook, nCode, wParam, lParam);
+}
+
+static HRESULT SetupWindowsHook(ThreadMgr *This)
+{
+    if (!This->focusHook)
+    {
+        This->focusHook = SetWindowsHookExW(WH_CBT, ThreadFocusHookProc, 0,
+                             GetCurrentThreadId());
+        if (!This->focusHook)
+        {
+            ERR("Unable to set focus hook\n");
+            return E_FAIL;
+        }
+        return S_OK;
+    }
+    return S_FALSE;
+}
+
 static HRESULT WINAPI ThreadMgr_AssociateFocus( ITfThreadMgr* iface, HWND hwnd,
 ITfDocumentMgr *pdimNew, ITfDocumentMgr **ppdimPrev)
 {
@@ -572,7 +617,7 @@ static ULONG WINAPI Source_Release(ITfSource *iface)
 /*****************************************************
  * ITfSource functions
  *****************************************************/
-static WINAPI HRESULT ThreadMgrSource_AdviseSink(ITfSource *iface,
+static HRESULT WINAPI ThreadMgrSource_AdviseSink(ITfSource *iface,
         REFIID riid, IUnknown *punk, DWORD *pdwCookie)
 {
     ThreadMgrSink *tms;
@@ -607,7 +652,7 @@ static WINAPI HRESULT ThreadMgrSource_AdviseSink(ITfSource *iface,
     return S_OK;
 }
 
-static WINAPI HRESULT ThreadMgrSource_UnadviseSink(ITfSource *iface, DWORD pdwCookie)
+static HRESULT WINAPI ThreadMgrSource_UnadviseSink(ITfSource *iface, DWORD pdwCookie)
 {
     ThreadMgrSink *sink;
     ThreadMgr *This = impl_from_ITfSourceVtbl(iface);
@@ -1073,7 +1118,7 @@ static ULONG WINAPI ThreadMgrEventSink_Release(ITfThreadMgrEventSink *iface)
 }
 
 
-static WINAPI HRESULT ThreadMgrEventSink_OnInitDocumentMgr(
+static HRESULT WINAPI ThreadMgrEventSink_OnInitDocumentMgr(
         ITfThreadMgrEventSink *iface,ITfDocumentMgr *pdim)
 {
     struct list *cursor;
@@ -1090,7 +1135,7 @@ static WINAPI HRESULT ThreadMgrEventSink_OnInitDocumentMgr(
     return S_OK;
 }
 
-static WINAPI HRESULT ThreadMgrEventSink_OnUninitDocumentMgr(
+static HRESULT WINAPI ThreadMgrEventSink_OnUninitDocumentMgr(
         ITfThreadMgrEventSink *iface, ITfDocumentMgr *pdim)
 {
     struct list *cursor;
@@ -1107,7 +1152,7 @@ static WINAPI HRESULT ThreadMgrEventSink_OnUninitDocumentMgr(
     return S_OK;
 }
 
-static WINAPI HRESULT ThreadMgrEventSink_OnSetFocus(
+static HRESULT WINAPI ThreadMgrEventSink_OnSetFocus(
         ITfThreadMgrEventSink *iface, ITfDocumentMgr *pdimFocus,
         ITfDocumentMgr *pdimPrevFocus)
 {
@@ -1125,7 +1170,7 @@ static WINAPI HRESULT ThreadMgrEventSink_OnSetFocus(
     return S_OK;
 }
 
-static WINAPI HRESULT ThreadMgrEventSink_OnPushContext(
+static HRESULT WINAPI ThreadMgrEventSink_OnPushContext(
         ITfThreadMgrEventSink *iface, ITfContext *pic)
 {
     struct list *cursor;
@@ -1142,7 +1187,7 @@ static WINAPI HRESULT ThreadMgrEventSink_OnPushContext(
     return S_OK;
 }
 
-static WINAPI HRESULT ThreadMgrEventSink_OnPopContext(
+static HRESULT WINAPI ThreadMgrEventSink_OnPopContext(
         ITfThreadMgrEventSink *iface, ITfContext *pic)
 {
     struct list *cursor;
@@ -1172,6 +1217,53 @@ static const ITfThreadMgrEventSinkVtbl ThreadMgr_ThreadMgrEventSinkVtbl =
     ThreadMgrEventSink_OnPopContext
 };
 
+/*****************************************************
+ * ITfSourceSingle functions
+ *****************************************************/
+static HRESULT WINAPI ThreadMgrSourceSingle_QueryInterface(ITfSourceSingle *iface, REFIID iid, LPVOID *ppvOut)
+{
+    ThreadMgr *This = impl_from_ITfSourceSingleVtbl(iface);
+    return ThreadMgr_QueryInterface((ITfThreadMgr *)This, iid, *ppvOut);
+}
+
+static ULONG WINAPI ThreadMgrSourceSingle_AddRef(ITfSourceSingle *iface)
+{
+    ThreadMgr *This = impl_from_ITfSourceSingleVtbl(iface);
+    return ThreadMgr_AddRef((ITfThreadMgr *)This);
+}
+
+static ULONG WINAPI ThreadMgrSourceSingle_Release(ITfSourceSingle *iface)
+{
+    ThreadMgr *This = impl_from_ITfSourceSingleVtbl(iface);
+    return ThreadMgr_Release((ITfThreadMgr *)This);
+}
+
+static HRESULT WINAPI ThreadMgrSourceSingle_AdviseSingleSink( ITfSourceSingle *iface,
+    TfClientId tid, REFIID riid, IUnknown *punk)
+{
+    ThreadMgr *This = impl_from_ITfSourceSingleVtbl(iface);
+    FIXME("STUB:(%p) %i %s %p\n",This, tid, debugstr_guid(riid),punk);
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI ThreadMgrSourceSingle_UnadviseSingleSink( ITfSourceSingle *iface,
+    TfClientId tid, REFIID riid)
+{
+    ThreadMgr *This = impl_from_ITfSourceSingleVtbl(iface);
+    FIXME("STUB:(%p) %i %s\n",This, tid, debugstr_guid(riid));
+    return E_NOTIMPL;
+}
+
+static const ITfSourceSingleVtbl ThreadMgr_SourceSingleVtbl =
+{
+    ThreadMgrSourceSingle_QueryInterface,
+    ThreadMgrSourceSingle_AddRef,
+    ThreadMgrSourceSingle_Release,
+
+    ThreadMgrSourceSingle_AdviseSingleSink,
+    ThreadMgrSourceSingle_UnadviseSingleSink,
+};
+
 HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
 {
     ThreadMgr *This;
@@ -1197,6 +1289,7 @@ HRESULT ThreadMgr_Constructor(IUnknown *pUnkOuter, IUnknown **ppOut)
     This->MessagePumpVtbl= &ThreadMgr_MessagePumpVtbl;
     This->ClientIdVtbl = &ThreadMgr_ClientIdVtbl;
     This->ThreadMgrEventSinkVtbl = &ThreadMgr_ThreadMgrEventSinkVtbl;
+    This->SourceSingleVtbl = &ThreadMgr_SourceSingleVtbl;
     This->refCount = 1;
     TlsSetValue(tlsIndex,This);
 
@@ -1377,40 +1470,4 @@ void ThreadMgr_OnDocumentMgrDestruction(ITfThreadMgr *tm, ITfDocumentMgr *mgr)
         }
     }
     FIXME("ITfDocumenMgr %p not found in this thread\n",mgr);
-}
-
-LRESULT CALLBACK ThreadFocusHookProc(int nCode, WPARAM wParam, LPARAM lParam)
-{
-    ThreadMgr *This;
-
-    This = TlsGetValue(tlsIndex);
-    if (!This)
-    {
-        ERR("Hook proc but no ThreadMgr for this thread. Serious Error\n");
-        return 0;
-    }
-    if (!This->focusHook)
-    {
-        ERR("Hook proc but no ThreadMgr focus Hook. Serious Error\n");
-        return 0;
-    }
-
-    if (nCode == HCBT_SETFOCUS) /* focus change within our thread */
-    {
-        struct list *cursor;
-
-        LIST_FOR_EACH(cursor, &This->AssociatedFocusWindows)
-        {
-            AssociatedWindow *wnd = LIST_ENTRY(cursor,AssociatedWindow,entry);
-            if (wnd->hwnd == (HWND)wParam)
-            {
-                TRACE("Triggering Associated window focus\n");
-                if (This->focus != wnd->docmgr)
-                    ThreadMgr_SetFocus((ITfThreadMgr*)This, wnd->docmgr);
-                break;
-            }
-        }
-    }
-
-    return CallNextHookEx(This->focusHook, nCode, wParam, lParam);
 }

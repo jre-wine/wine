@@ -107,6 +107,7 @@ static void test_get_set(void)
 {
     HRESULT r;
     IShellLinkA *sl;
+    IShellLinkW *slW = NULL;
     char mypath[MAX_PATH];
     char buffer[INFOTIPSIZE];
     LPITEMIDLIST pidl, tmp_pidl;
@@ -155,6 +156,19 @@ static void test_get_set(void)
     r = IShellLinkA_GetPath(sl, buffer, sizeof(buffer), NULL, SLGP_RAWPATH);
     ok(SUCCEEDED(r), "GetPath failed (0x%08x)\n", r);
     ok(*buffer=='\0', "GetPath returned '%s'\n", buffer);
+
+    CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+                     &IID_IShellLinkW, (LPVOID*)&slW);
+    if (!slW)
+        skip("SetPath with NULL parameter crashes on Win9x\n");
+    else
+    {
+        IShellLinkW_Release(slW);
+        r = IShellLinkA_SetPath(sl, NULL);
+        ok(r==E_INVALIDARG ||
+           broken(r==S_OK), /* Some Win95 and NT4 */
+           "SetPath failed (0x%08x)\n", r);
+    }
 
     r = IShellLinkA_SetPath(sl, "");
     ok(r==S_OK, "SetPath failed (0x%08x)\n", r);
@@ -699,6 +713,9 @@ static void test_datalink(void)
     r = IShellLinkDataList_CopyDataBlock( dl, EXP_DARWIN_ID_SIG, (LPVOID*) &dar );
     ok( r == E_FAIL, "CopyDataBlock failed\n");
     ok( dar == NULL, "should be null\n");
+
+    r = IShellLinkW_SetPath(sl, NULL);
+    ok(r == E_INVALIDARG, "set path failed\n");
 
     r = IShellLinkW_SetPath(sl, lnk);
     ok(r == S_OK, "set path failed\n");

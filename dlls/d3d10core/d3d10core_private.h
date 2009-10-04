@@ -49,11 +49,11 @@ struct d3d10_shader_info
 };
 
 /* TRACE helper functions */
-const char *debug_d3d10_primitive_topology(D3D10_PRIMITIVE_TOPOLOGY topology);
-const char *debug_dxgi_format(DXGI_FORMAT format);
+const char *debug_d3d10_primitive_topology(D3D10_PRIMITIVE_TOPOLOGY topology) DECLSPEC_HIDDEN;
+const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
-DXGI_FORMAT dxgi_format_from_wined3dformat(WINED3DFORMAT format);
-WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format);
+DXGI_FORMAT dxgi_format_from_wined3dformat(WINED3DFORMAT format) DECLSPEC_HIDDEN;
+WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
 static inline void read_dword(const char **ptr, DWORD *d)
 {
@@ -61,22 +61,15 @@ static inline void read_dword(const char **ptr, DWORD *d)
     *ptr += sizeof(*d);
 }
 
-void skip_dword_unknown(const char **ptr, unsigned int count);
-
-static inline void read_tag(const char **ptr, DWORD *t, char t_str[5])
-{
-    read_dword(ptr, t);
-    memcpy(t_str, t, 4);
-    t_str[4] = '\0';
-}
+void skip_dword_unknown(const char **ptr, unsigned int count) DECLSPEC_HIDDEN;
 
 HRESULT parse_dxbc(const char *data, SIZE_T data_size,
-        HRESULT (*chunk_handler)(const char *data, DWORD data_size, DWORD tag, void *ctx), void *ctx);
+        HRESULT (*chunk_handler)(const char *data, DWORD data_size, DWORD tag, void *ctx), void *ctx) DECLSPEC_HIDDEN;
 
 /* IDirect3D10Device */
-extern const struct ID3D10DeviceVtbl d3d10_device_vtbl;
-extern const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl;
-extern const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl;
+extern const struct ID3D10DeviceVtbl d3d10_device_vtbl DECLSPEC_HIDDEN;
+extern const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl DECLSPEC_HIDDEN;
+extern const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl DECLSPEC_HIDDEN;
 struct d3d10_device
 {
     const struct ID3D10DeviceVtbl *vtbl;
@@ -89,7 +82,6 @@ struct d3d10_device
 };
 
 /* ID3D10Texture2D */
-extern const struct ID3D10Texture2DVtbl d3d10_texture2d_vtbl;
 struct d3d10_texture2d
 {
     const struct ID3D10Texture2DVtbl *vtbl;
@@ -100,8 +92,10 @@ struct d3d10_texture2d
     D3D10_TEXTURE2D_DESC desc;
 };
 
+HRESULT d3d10_texture2d_init(struct d3d10_texture2d *texture, struct d3d10_device *device,
+        const D3D10_TEXTURE2D_DESC *desc) DECLSPEC_HIDDEN;
+
 /* ID3D10Buffer */
-extern const struct ID3D10BufferVtbl d3d10_buffer_vtbl;
 struct d3d10_buffer
 {
     const struct ID3D10BufferVtbl *vtbl;
@@ -110,8 +104,11 @@ struct d3d10_buffer
     IWineD3DBuffer *wined3d_buffer;
 };
 
+HRESULT d3d10_buffer_init(struct d3d10_buffer *buffer, struct d3d10_device *device,
+        const D3D10_BUFFER_DESC *desc, const D3D10_SUBRESOURCE_DATA *data) DECLSPEC_HIDDEN;
+
 /* ID3D10RenderTargetView */
-extern const struct ID3D10RenderTargetViewVtbl d3d10_rendertarget_view_vtbl;
+extern const struct ID3D10RenderTargetViewVtbl d3d10_rendertarget_view_vtbl DECLSPEC_HIDDEN;
 struct d3d10_rendertarget_view
 {
     const struct ID3D10RenderTargetViewVtbl *vtbl;
@@ -122,7 +119,6 @@ struct d3d10_rendertarget_view
 };
 
 /* ID3D10InputLayout */
-extern const struct ID3D10InputLayoutVtbl d3d10_input_layout_vtbl;
 struct d3d10_input_layout
 {
     const struct ID3D10InputLayoutVtbl *vtbl;
@@ -131,12 +127,11 @@ struct d3d10_input_layout
     IWineD3DVertexDeclaration *wined3d_decl;
 };
 
-HRESULT d3d10_input_layout_to_wined3d_declaration(const D3D10_INPUT_ELEMENT_DESC *element_descs,
-        UINT element_count, const void *shader_byte_code, SIZE_T shader_byte_code_length,
-        WINED3DVERTEXELEMENT **wined3d_elements, UINT *wined3d_element_count);
+HRESULT d3d10_input_layout_init(struct d3d10_input_layout *layout, struct d3d10_device *device,
+        const D3D10_INPUT_ELEMENT_DESC *element_descs, UINT element_count,
+        const void *shader_byte_code, SIZE_T shader_byte_code_length) DECLSPEC_HIDDEN;
 
 /* ID3D10VertexShader */
-extern const struct ID3D10VertexShaderVtbl d3d10_vertex_shader_vtbl;
 struct d3d10_vertex_shader
 {
     const struct ID3D10VertexShaderVtbl *vtbl;
@@ -146,8 +141,11 @@ struct d3d10_vertex_shader
     struct wined3d_shader_signature output_signature;
 };
 
+HRESULT d3d10_vertex_shader_init(struct d3d10_vertex_shader *shader, struct d3d10_device *device,
+        const void *byte_code, SIZE_T byte_code_length) DECLSPEC_HIDDEN;
+
 /* ID3D10GeometryShader */
-extern const struct ID3D10GeometryShaderVtbl d3d10_geometry_shader_vtbl;
+extern const struct ID3D10GeometryShaderVtbl d3d10_geometry_shader_vtbl DECLSPEC_HIDDEN;
 struct d3d10_geometry_shader
 {
     const struct ID3D10GeometryShaderVtbl *vtbl;
@@ -155,7 +153,6 @@ struct d3d10_geometry_shader
 };
 
 /* ID3D10PixelShader */
-extern const struct ID3D10PixelShaderVtbl d3d10_pixel_shader_vtbl;
 struct d3d10_pixel_shader
 {
     const struct ID3D10PixelShaderVtbl *vtbl;
@@ -165,9 +162,11 @@ struct d3d10_pixel_shader
     struct wined3d_shader_signature output_signature;
 };
 
-HRESULT shader_extract_from_dxbc(const void *dxbc, SIZE_T dxbc_length, struct d3d10_shader_info *shader_info);
-HRESULT shader_parse_signature(const char *data, DWORD data_size, struct wined3d_shader_signature *s);
-void shader_free_signature(struct wined3d_shader_signature *s);
+HRESULT d3d10_pixel_shader_init(struct d3d10_pixel_shader *shader, struct d3d10_device *device,
+        const void *byte_code, SIZE_T byte_code_length) DECLSPEC_HIDDEN;
+
+HRESULT shader_parse_signature(const char *data, DWORD data_size, struct wined3d_shader_signature *s) DECLSPEC_HIDDEN;
+void shader_free_signature(struct wined3d_shader_signature *s) DECLSPEC_HIDDEN;
 
 /* Layered device */
 enum dxgi_device_layer_id

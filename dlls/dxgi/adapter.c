@@ -65,6 +65,7 @@ static ULONG STDMETHODCALLTYPE dxgi_adapter_Release(IWineDXGIAdapter *iface)
 
     if (!refcount)
     {
+        IDXGIOutput_Release(This->output);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -111,9 +112,22 @@ static HRESULT STDMETHODCALLTYPE dxgi_adapter_GetParent(IWineDXGIAdapter *iface,
 static HRESULT STDMETHODCALLTYPE dxgi_adapter_EnumOutputs(IWineDXGIAdapter *iface,
         UINT output_idx, IDXGIOutput **output)
 {
-    FIXME("iface %p, output_idx %u, output %p stub!\n", iface, output_idx, output);
+    struct dxgi_adapter *This = (struct dxgi_adapter *)iface;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, output_idx %u, output %p.\n", iface, output_idx, output);
+
+    if (output_idx > 0)
+    {
+        *output = NULL;
+        return DXGI_ERROR_NOT_FOUND;
+    }
+
+    *output = This->output;
+    IDXGIOutput_AddRef(*output);
+
+    TRACE("Returning output %p.\n", output);
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dxgi_adapter_GetDesc(IWineDXGIAdapter *iface, DXGI_ADAPTER_DESC *desc)
@@ -142,7 +156,7 @@ static UINT STDMETHODCALLTYPE dxgi_adapter_get_ordinal(IWineDXGIAdapter *iface)
     return This->ordinal;
 }
 
-const struct IWineDXGIAdapterVtbl dxgi_adapter_vtbl =
+static const struct IWineDXGIAdapterVtbl dxgi_adapter_vtbl =
 {
     /* IUnknown methods */
     dxgi_adapter_QueryInterface,
@@ -160,3 +174,23 @@ const struct IWineDXGIAdapterVtbl dxgi_adapter_vtbl =
     /* IWineDXGIAdapter methods */
     dxgi_adapter_get_ordinal,
 };
+
+HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IDXGIFactory *parent, UINT ordinal)
+{
+    struct dxgi_output *output;
+
+    adapter->vtbl = &dxgi_adapter_vtbl;
+    adapter->parent = parent;
+    adapter->refcount = 1;
+    adapter->ordinal = ordinal;
+
+    output = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*output));
+    if (!output)
+    {
+        return E_OUTOFMEMORY;
+    }
+    dxgi_output_init(output);
+    adapter->output = (IDXGIOutput *)output;
+
+    return S_OK;
+}

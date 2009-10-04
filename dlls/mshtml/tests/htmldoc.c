@@ -37,6 +37,7 @@
 #include "idispids.h"
 #include "shlguid.h"
 #include "perhist.h"
+#include "mshtml_test.h"
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 DEFINE_GUID(IID_IProxyManager,0x00000008,0x0000,0x0000,0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
@@ -104,6 +105,7 @@ DEFINE_EXPECT(Exec_ShellDocView_37);
 DEFINE_EXPECT(Exec_ShellDocView_84);
 DEFINE_EXPECT(Exec_ShellDocView_103);
 DEFINE_EXPECT(Exec_ShellDocView_105);
+DEFINE_EXPECT(Exec_ShellDocView_140);
 DEFINE_EXPECT(Exec_UPDATECOMMANDS);
 DEFINE_EXPECT(Exec_SETTITLE);
 DEFINE_EXPECT(Exec_HTTPEQUIV);
@@ -200,6 +202,13 @@ static const char *debugstr_guid(REFIID riid)
             riid->Data4[5], riid->Data4[6], riid->Data4[7]);
 
     return buf;
+}
+
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
 }
 
 static BOOL is_english(void)
@@ -2303,6 +2312,14 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
 
             return E_NOTIMPL;
 
+        case 140:
+            CHECK_EXPECT2(Exec_ShellDocView_140);
+
+            ok(pvaIn == NULL, "pvaIn != NULL\n");
+            ok(pvaOut == NULL, "pvaOut != NULL\n");
+
+            return E_NOTIMPL;
+
         default:
             ok(0, "unexpected command %d\n", nCmdID);
             return E_FAIL;
@@ -2492,9 +2509,10 @@ static const IServiceProviderVtbl ServiceProviderVtbl = {
 static IServiceProvider ServiceProvider = { &ServiceProviderVtbl };
 
 DEFINE_GUID(IID_unk1, 0xD48A6EC6,0x6A4A,0x11CF,0x94,0xA7,0x44,0x45,0x53,0x54,0x00,0x00); /* HTMLWindow2 ? */
-DEFINE_GUID(IID_unk2, 0x7BB0B520,0xB1A7,0x11D2,0xBB,0x23,0x00,0xC0,0x4F,0x79,0xAB,0xCD);
-DEFINE_GUID(IID_unk3, 0x000670BA,0x0000,0x0000,0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
+DEFINE_GUID(IID_IThumbnailView, 0x7BB0B520,0xB1A7,0x11D2,0xBB,0x23,0x00,0xC0,0x4F,0x79,0xAB,0xCD);
+DEFINE_GUID(IID_IRenMailEditor, 0x000670BA,0x0000,0x0000,0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46);
 DEFINE_GUID(IID_unk4, 0x305104a6,0x98b5,0x11cf,0xbb,0x82,0x00,0xaa,0x00,0xbd,0xce,0x0b);
+DEFINE_GUID(IID_IDocHostUIHandlerPriv, 0xf0d241d1,0x5d0e,0x4e85,0xbc,0xb4,0xfa,0xd7,0xf7,0xc5,0x52,0x8c);
 
 static HRESULT QueryInterface(REFIID riid, void **ppv)
 {
@@ -2526,11 +2544,13 @@ static HRESULT QueryInterface(REFIID riid, void **ppv)
         return E_NOINTERFACE; /* ? */
     else if(IsEqualGUID(&IID_unk1, riid))
         return E_NOINTERFACE; /* HTMLWindow2 ? */
-    else if(IsEqualGUID(&IID_unk2, riid))
+    else if(IsEqualGUID(&IID_IThumbnailView, riid))
         return E_NOINTERFACE; /* ? */
-    else if(IsEqualGUID(&IID_unk3, riid))
+    else if(IsEqualGUID(&IID_IRenMailEditor, riid))
         return E_NOINTERFACE; /* ? */
     else if(IsEqualGUID(&IID_unk4, riid))
+        return E_NOINTERFACE; /* ? */
+    else if(IsEqualGUID(&IID_IDocHostUIHandlerPriv, riid))
         return E_NOINTERFACE; /* ? */
     else
         ok(0, "unexpected riid %s\n", debugstr_guid(riid));
@@ -2553,18 +2573,13 @@ static void _test_readyState(unsigned line, IUnknown *unk)
     VARIANT out;
     HRESULT hres;
 
-    static const WCHAR wszUninitialized[] = {'u','n','i','n','i','t','i','a','l','i','z','e','d',0};
-    static const WCHAR wszLoading[] = {'l','o','a','d','i','n','g',0};
-    static const WCHAR wszInteractive[] = {'i','n','t','e','r','a','c','t','i','v','e',0};
-    static const WCHAR wszComplete[] = {'c','o','m','p','l','e','t','e',0};
-
-    static const LPCWSTR expected_state[] = {
-        wszUninitialized,
-        wszLoading,
+    static const LPCSTR expected_state[] = {
+        "uninitialized",
+        "loading",
         NULL,
-        wszInteractive,
-        wszComplete,
-        wszUninitialized
+        "interactive",
+        "complete",
+        "uninitialized"
     };
 
     if(!unk)
@@ -2581,11 +2596,11 @@ static void _test_readyState(unsigned line, IUnknown *unk)
     hres = IHTMLDocument2_get_readyState(htmldoc, &state);
     ok(hres == S_OK, "get_ReadyState failed: %08x\n", hres);
 
-    if(!lstrcmpW(state, wszInteractive) && load_state == LD_LOADING)
+    if(!strcmp_wa(state, "interactive") && load_state == LD_LOADING)
         load_state = LD_INTERACTIVE;
 
     ok_(__FILE__, line)
-        (!lstrcmpW(state, expected_state[load_state]), "unexpected state %s, expected %d\n",
+        (!strcmp_wa(state, expected_state[load_state]), "unexpected state %s, expected %d\n",
          wine_dbgstr_w(state), load_state);
     SysFreeString(state);
 
@@ -2761,7 +2776,12 @@ static void test_Load(IPersistMoniker *persist, IMoniker *mon)
     test_readyState((IUnknown*)persist);
 }
 
-static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
+#define DWL_VERBDONE  0x0001
+#define DWL_CSS       0x0002
+#define DWL_TRYCSS    0x0004
+#define DWL_HTTP      0x0008
+
+static void test_download(DWORD flags)
 {
     HWND hwnd;
     MSG msg;
@@ -2771,17 +2791,16 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
 
     test_readyState(NULL);
 
-    if(verb_done) {
+    if(flags & (DWL_VERBDONE|DWL_HTTP))
         SET_EXPECT(Exec_SETPROGRESSMAX);
-        if(!load_from_stream)
-            SET_EXPECT(GetHostInfo);
-    }
+    if((flags & DWL_VERBDONE) && !load_from_stream)
+        SET_EXPECT(GetHostInfo);
     SET_EXPECT(SetStatusText);
     SET_EXPECT(Exec_SETDOWNLOADSTATE_1);
     SET_EXPECT(GetDropTarget);
-    if(css_try_dwl)
+    if(flags & DWL_TRYCSS)
         SET_EXPECT(Exec_ShellDocView_84);
-    if(css_dwl) {
+    if(flags & DWL_CSS) {
         SET_EXPECT(CreateInstance);
         SET_EXPECT(Start);
         SET_EXPECT(LockRequest);
@@ -2805,6 +2824,7 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
     SET_EXPECT(Exec_SETDOWNLOADSTATE_0);
     SET_EXPECT(Exec_ShellDocView_103);
     SET_EXPECT(Exec_ShellDocView_105);
+    SET_EXPECT(Exec_ShellDocView_140);
     SET_EXPECT(Exec_MSHTML_PARSECOMPLETE);
     SET_EXPECT(Exec_HTTPEQUIV_DONE);
     SET_EXPECT(SetStatusText);
@@ -2815,17 +2835,18 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
         DispatchMessage(&msg);
     }
 
-    if(verb_done) {
+    if(flags & DWL_VERBDONE)
         CHECK_CALLED(Exec_SETPROGRESSMAX);
-        if(!load_from_stream)
-            CHECK_CALLED(GetHostInfo);
-    }
+    if(flags & DWL_HTTP)
+        SET_CALLED(Exec_SETPROGRESSMAX);
+    if((flags & DWL_VERBDONE) && !load_from_stream)
+        CHECK_CALLED(GetHostInfo);
     CHECK_CALLED(SetStatusText);
     CHECK_CALLED(Exec_SETDOWNLOADSTATE_1);
     CHECK_CALLED(GetDropTarget);
-    if(css_try_dwl)
+    if(flags & DWL_TRYCSS)
         SET_CALLED(Exec_ShellDocView_84);
-    if(css_dwl) {
+    if(flags & DWL_CSS) {
         if(called_CreateInstance) {
             CHECK_CALLED(CreateInstance);
             CHECK_CALLED(Start);
@@ -2863,6 +2884,7 @@ static void test_download(BOOL verb_done, BOOL css_dwl, BOOL css_try_dwl)
     CHECK_CALLED(Exec_SETDOWNLOADSTATE_0);
     SET_CALLED(Exec_ShellDocView_103);
     SET_CALLED(Exec_ShellDocView_105);
+    SET_CALLED(Exec_ShellDocView_140);
     CHECK_CALLED(Exec_MSHTML_PARSECOMPLETE);
     CHECK_CALLED(Exec_HTTPEQUIV_DONE);
     SET_CALLED(SetStatusText);
@@ -3876,7 +3898,7 @@ static void test_HTMLDocument(BOOL do_load)
     test_Activate(unk, CLIENTSITE_EXPECTPATH);
 
     if(do_load) {
-        test_download(FALSE, TRUE, TRUE);
+        test_download(DWL_CSS|DWL_TRYCSS);
         test_GetCurMoniker(unk, &Moniker, NULL);
     }
 
@@ -3971,7 +3993,7 @@ static void test_HTMLDocument_hlink(void)
         return;
     }
 
-    test_download(FALSE, TRUE, TRUE);
+    test_download(DWL_CSS|DWL_TRYCSS);
 
     test_IsDirty(unk, S_FALSE);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
@@ -4023,7 +4045,10 @@ static void test_HTMLDocument_http(void)
         return;
     }
 
-    test_download(FALSE, FALSE, FALSE);
+    if (winetest_interactive || ! is_ie_hardened())
+        test_download(DWL_HTTP);
+    else
+        win_skip("IE running in Enhanced Security Configuration\n");
 
     test_IsDirty(unk, S_FALSE);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
@@ -4075,7 +4100,7 @@ static void test_HTMLDocument_StreamLoad(void)
 
     test_GetCurMoniker(unk, NULL, NULL);
     test_StreamLoad(unk);
-    test_download(TRUE, FALSE, TRUE);
+    test_download(DWL_VERBDONE|DWL_TRYCSS);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
 
     test_UIDeactivate();
@@ -4156,7 +4181,7 @@ static void test_editing_mode(BOOL do_load)
     IOleObject_Release(oleobj);
 
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
-    test_download(TRUE, do_load, do_load);
+    test_download(DWL_VERBDONE | (do_load ? DWL_CSS|DWL_TRYCSS : 0));
 
     SET_EXPECT(SetStatusText); /* ignore race in native mshtml */
     test_timer(EXPECT_UPDATEUI);

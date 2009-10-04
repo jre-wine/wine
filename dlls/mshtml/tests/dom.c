@@ -31,6 +31,7 @@
 #include "mshtmhst.h"
 #include "docobj.h"
 #include "dispex.h"
+#include "mshtml_test.h"
 
 static const char doc_blank[] = "<html></html>";
 static const char doc_str1[] = "<html><body>test</body></html>";
@@ -91,6 +92,31 @@ typedef enum {
 
 static const IID * const none_iids[] = {
     &IID_IUnknown,
+    NULL
+};
+
+static const IID * const doc_node_iids[] = {
+    &IID_IHTMLDOMNode,
+    &IID_IHTMLDOMNode2,
+    &IID_IHTMLDocument,
+    &IID_IHTMLDocument2,
+    &IID_IHTMLDocument3,
+    &IID_IHTMLDocument4,
+    &IID_IHTMLDocument5,
+    &IID_IDispatchEx,
+    &IID_IConnectionPointContainer,
+    NULL
+};
+
+static const IID * const doc_obj_iids[] = {
+    &IID_IHTMLDocument,
+    &IID_IHTMLDocument2,
+    &IID_IHTMLDocument3,
+    &IID_IHTMLDocument4,
+    &IID_IHTMLDocument5,
+    &IID_IDispatchEx,
+    &IID_IConnectionPointContainer,
+    &IID_ICustomDoc,
     NULL
 };
 
@@ -387,7 +413,7 @@ static BOOL iface_cmp(IUnknown *iface1, IUnknown *iface2)
 
     IUnknown_QueryInterface(iface1, &IID_IUnknown, (void**)&unk1);
     IUnknown_Release(unk1);
-    IUnknown_QueryInterface(iface1, &IID_IUnknown, (void**)&unk2);
+    IUnknown_QueryInterface(iface2, &IID_IUnknown, (void**)&unk2);
     IUnknown_Release(unk2);
 
     return unk1 == unk2;
@@ -559,6 +585,17 @@ static IHTMLDOMNode *_get_node_iface(unsigned line, IUnknown *unk)
     return node;
 }
 
+#define get_node2_iface(u) _get_node2_iface(__LINE__,u)
+static IHTMLDOMNode2 *_get_node2_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLDOMNode2 *node;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDOMNode2, (void**)&node);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLDOMNode2: %08x\n", hres);
+    return node;
+}
+
 #define get_img_iface(u) _get_img_iface(__LINE__,u)
 static IHTMLImgElement *_get_img_iface(unsigned line, IUnknown *unk)
 {
@@ -583,6 +620,26 @@ static void _test_node_name(unsigned line, IUnknown *unk, const char *exname)
     ok_(__FILE__, line) (!strcmp_wa(name, exname), "got name: %s, expected %s\n", wine_dbgstr_w(name), exname);
 
     SysFreeString(name);
+}
+
+#define get_owner_doc(u) _get_owner_doc(__LINE__,u)
+static IHTMLDocument2 *_get_owner_doc(unsigned line, IUnknown *unk)
+{
+    IHTMLDOMNode2 *node = _get_node2_iface(line, unk);
+    IDispatch *disp = (void*)0xdeadbeef;
+    IHTMLDocument2 *doc;
+    HRESULT hres;
+
+    hres = IHTMLDOMNode2_get_ownerDocument(node, &disp);
+    IHTMLDOMNode2_Release(node);
+    ok_(__FILE__,line)(hres == S_OK, "get_ownerDocument failed: %08x\n", hres);
+    ok_(__FILE__,line)(disp != NULL, "disp = NULL\n");
+
+    hres = IDispatch_QueryInterface(disp, &IID_IHTMLDocument2, (void**)&doc);
+    IDispatch_Release(disp);
+    ok_(__FILE__,line)(hres == S_OK, "Could not get IHTMLDocument2 iface: %08x\n", hres);
+
+    return doc;
 }
 
 #define test_elem_tag(u,n) _test_elem_tag(__LINE__,u,n)
@@ -705,8 +762,26 @@ static void _test_elem_offset(unsigned line, IUnknown *unk)
     IHTMLElement_Release(elem);
 }
 
+#define get_doc_node(d) _get_doc_node(__LINE__,d)
+static IHTMLDocument2 *_get_doc_node(unsigned line, IHTMLDocument2 *doc)
+{
+    IHTMLWindow2 *window;
+    IHTMLDocument2 *ret;
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok_(__FILE__,line)(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
+
+    hres = IHTMLWindow2_get_document(window, &ret);
+    ok_(__FILE__,line)(hres == S_OK, "get_document failed: %08x\n", hres);
+    ok_(__FILE__,line)(ret != NULL, "document = NULL\n");
+
+    return ret;
+}
+
 static void test_doc_elem(IHTMLDocument2 *doc)
 {
+    IHTMLDocument2 *doc_node, *owner_doc;
     IHTMLElement *elem;
     IHTMLDocument3 *doc3;
     HRESULT hres;
@@ -720,6 +795,86 @@ static void test_doc_elem(IHTMLDocument2 *doc)
 
     test_node_name((IUnknown*)elem, "HTML");
     test_elem_tag((IUnknown*)elem, "HTML");
+
+    doc_node = get_doc_node(doc);
+    owner_doc = get_owner_doc((IUnknown*)elem);
+    ok(iface_cmp((IUnknown *)doc_node, (IUnknown *)owner_doc), "doc_node != owner_doc\n");
+    IHTMLDocument2_Release(doc_node);
+    IHTMLDocument2_Release(owner_doc);
+
+    IHTMLElement_Release(elem);
+}
+
+static void test_get_set_attr(IHTMLDocument2 *doc)
+{
+    IHTMLElement *elem;
+    IHTMLDocument3 *doc3;
+    HRESULT hres;
+    BSTR bstr;
+    VARIANT val;
+
+    /* grab an element to test with */
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument3, (void**)&doc3);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument3) failed: %08x\n", hres);
+
+    hres = IHTMLDocument3_get_documentElement(doc3, &elem);
+    IHTMLDocument3_Release(doc3);
+    ok(hres == S_OK, "get_documentElement failed: %08x\n", hres);
+
+    /* get a non-present attribute */
+    bstr = a2bstr("notAnAttribute");
+    hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&val) == VT_NULL, "variant type should have been VT_NULL (0x%x), was: 0x%x\n", VT_NULL, V_VT(&val));
+    VariantClear(&val);
+    SysFreeString(bstr);
+
+    /* get a present attribute */
+    bstr = a2bstr("scrollHeight");
+    hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&val) == VT_I4, "variant type should have been VT_I4 (0x%x), was: 0x%x\n", VT_I4, V_VT(&val));
+    VariantClear(&val);
+    SysFreeString(bstr);
+
+    /* create a new BSTR attribute */
+    bstr = a2bstr("newAttribute");
+
+    V_VT(&val) = VT_BSTR;
+    V_BSTR(&val) = a2bstr("the value");
+    hres = IHTMLElement_setAttribute(elem, bstr, val, 0);
+    ok(hres == S_OK, "setAttribute failed: %08x\n", hres);
+    VariantClear(&val);
+
+    hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&val) == VT_BSTR, "variant type should have been VT_BSTR (0x%x), was: 0x%x\n", VT_BSTR, V_VT(&val));
+    ok(strcmp_wa(V_BSTR(&val), "the value") == 0, "variant value should have been L\"the value\", was %s\n", wine_dbgstr_w(V_BSTR(&val)));
+    VariantClear(&val);
+
+    /* overwrite the attribute with a BOOL */
+    V_VT(&val) = VT_BOOL;
+    V_BOOL(&val) = VARIANT_TRUE;
+    hres = IHTMLElement_setAttribute(elem, bstr, val, 0);
+    ok(hres == S_OK, "setAttribute failed: %08x\n", hres);
+    VariantClear(&val);
+
+    hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    ok(V_VT(&val) == VT_BOOL, "variant type should have been VT_BOOL (0x%x), was: 0x%x\n", VT_BOOL, V_VT(&val));
+    ok(V_BOOL(&val) == VARIANT_TRUE, "variant value should have been VARIANT_TRUE (0x%x), was %d\n", VARIANT_TRUE, V_BOOL(&val));
+    VariantClear(&val);
+
+    SysFreeString(bstr);
+
+    /* case-insensitive */
+    bstr = a2bstr("newattribute");
+    hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
+    ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
+    todo_wine ok(V_VT(&val) == VT_BOOL, "variant type should have been VT_BOOL (0x%x), was: 0x%x\n", VT_BOOL, V_VT(&val));
+    todo_wine ok(V_BOOL(&val) == VARIANT_TRUE, "variant value should have been VARIANT_TRUE (0x%x), was %d\n", VARIANT_TRUE, V_BOOL(&val));
+    VariantClear(&val);
+    SysFreeString(bstr);
 
     IHTMLElement_Release(elem);
 }
@@ -1584,6 +1739,35 @@ static void _test_input_put_value(unsigned line, IUnknown *unk, const char *val)
     ok_(__FILE__,line) (hres == S_OK, "get_value failed: %08x\n", hres);
     SysFreeString(bstr);
     IHTMLInputElement_Release(input);
+}
+
+#define test_input_src(i,s) _test_input_src(__LINE__,i,s)
+static void _test_input_src(unsigned line, IHTMLInputElement *input, const char *exsrc)
+{
+    BSTR src;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_src(input, &src);
+    ok_(__FILE__,line) (hres == S_OK, "get_src failed: %08x\n", hres);
+    if(exsrc)
+        ok_(__FILE__,line) (!strcmp_wa(src, exsrc), "get_src returned %s expected %s\n", wine_dbgstr_w(src), exsrc);
+    else
+        ok_(__FILE__,line) (!src, "get_src returned %s expected NULL\n", wine_dbgstr_w(src));
+    SysFreeString(src);
+}
+
+#define test_input_set_src(u,s) _test_input_set_src(__LINE__,u,s)
+static void _test_input_set_src(unsigned line, IHTMLInputElement *input, const char *src)
+{
+    BSTR tmp;
+    HRESULT hres;
+
+    tmp = a2bstr(src);
+    hres = IHTMLInputElement_put_src(input, tmp);
+    SysFreeString(tmp);
+    ok_(__FILE__,line) (hres == S_OK, "put_src failed: %08x\n", hres);
+
+    _test_input_src(line, input, src);
 }
 
 #define test_elem_class(u,c) _test_elem_class(__LINE__,u,c)
@@ -2707,6 +2891,76 @@ static void test_current_style(IHTMLCurrentStyle *current_style)
     ok(hres == S_OK, "get_backgroundColor failed: %08x\n", hres);
     ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
     VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_borderLeftColor(current_style, &v);
+    ok(hres == S_OK, "get_borderLeftColor failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_borderTopColor(current_style, &v);
+    ok(hres == S_OK, "get_borderTopColor failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_borderRightColor(current_style, &v);
+    ok(hres == S_OK, "get_borderRightColor failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_borderBottomColor(current_style, &v);
+    ok(hres == S_OK, "get_borderBottomColor failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_paddingTop(current_style, &v);
+    ok(hres == S_OK, "get_paddingTop failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_paddingRight(current_style, &v);
+    ok(hres == S_OK, "get_paddingRight failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_paddingBottom(current_style, &v);
+    ok(hres == S_OK, "get_paddingRight failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_letterSpacing(current_style, &v);
+    ok(hres == S_OK, "get_letterSpacing failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_marginTop(current_style, &v);
+    ok(hres == S_OK, "get_marginTop failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_marginBottom(current_style, &v);
+    ok(hres == S_OK, "get_marginBottom failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_right(current_style, &v);
+    ok(hres == S_OK, "get_Right failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_bottom(current_style, &v);
+    ok(hres == S_OK, "get_bottom failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_lineHeight(current_style, &v);
+    ok(hres == S_OK, "get_lineHeight failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
+
+    hres = IHTMLCurrentStyle_get_textIndent(current_style, &v);
+    ok(hres == S_OK, "get_textIndent failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v) = %d\n", V_VT(&v));
+    VariantClear(&v);
 }
 
 static void test_style2(IHTMLStyle2 *style2)
@@ -3441,6 +3695,16 @@ static void test_default_style(IHTMLStyle *style)
     ok(!strcmp_wa(str, "auto"), "str=%s\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
+    str = a2bstr("");
+    hres = IHTMLStyle_put_overflow(style, str);
+    ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
+    SysFreeString(str);
+
+    hres = IHTMLStyle_get_overflow(style, &str);
+    ok(hres == S_OK, "get_overflow failed: %08x\n", hres);
+    ok(!str, "str=%s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
     /* restore overflow default */
     hres = IHTMLStyle_put_overflow(style, sOverflowDefault);
     ok(hres == S_OK, "put_overflow failed: %08x\n", hres);
@@ -3971,6 +4235,7 @@ static void test_window(IHTMLDocument2 *doc)
     IHTMLWindow2 *window, *window2, *self;
     IHTMLDocument2 *doc2 = NULL;
     IDispatch *disp;
+    IUnknown *unk;
     BSTR str;
     HRESULT hres;
 
@@ -3982,6 +4247,17 @@ static void test_window(IHTMLDocument2 *doc)
     hres = IHTMLWindow2_get_document(window, &doc2);
     ok(hres == S_OK, "get_document failed: %08x\n", hres);
     ok(doc2 != NULL, "doc2 == NULL\n");
+
+    test_ifaces((IUnknown*)doc2, doc_node_iids);
+    test_disp((IUnknown*)doc2, &DIID_DispHTMLDocument, "[object]");
+
+    test_ifaces((IUnknown*)doc, doc_obj_iids);
+    test_disp((IUnknown*)doc2, &DIID_DispHTMLDocument, "[object]");
+
+    unk = (void*)0xdeadbeef;
+    hres = IHTMLDocument2_QueryInterface(doc2, &IID_ICustomDoc, (void**)&unk);
+    ok(hres == E_NOINTERFACE, "QueryInterface(IID_ICustomDoc) returned: %08x\n", hres);
+    ok(!unk, "unk = %p\n", unk);
 
     IHTMLDocument_Release(doc2);
 
@@ -4513,6 +4789,7 @@ static void test_elems(IHTMLDocument2 *doc)
     elem = get_elem_by_id(doc, "s", TRUE);
     if(elem) {
         IHTMLSelectElement *select;
+        IHTMLDocument2 *doc_node;
 
         hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLSelectElement, (void**)&select);
         ok(hres == S_OK, "Could not get IHTMLSelectElement interface: %08x\n", hres);
@@ -4538,7 +4815,10 @@ static void test_elems(IHTMLDocument2 *doc)
 
         hres = IHTMLElement_get_document(elem, &disp);
         ok(hres == S_OK, "get_document failed: %08x\n", hres);
-        ok(iface_cmp((IUnknown*)disp, (IUnknown*)doc), "disp != doc\n");
+
+        doc_node = get_doc_node(doc);
+        ok(iface_cmp((IUnknown*)disp, (IUnknown*)doc_node), "disp != doc\n");
+        IHTMLDocument2_Release(doc_node);
 
         IHTMLElement_Release(elem);
     }
@@ -4611,6 +4891,9 @@ static void test_elems(IHTMLDocument2 *doc)
         test_input_get_checked(input, VARIANT_FALSE);
         test_input_set_checked(input, VARIANT_TRUE);
         test_input_set_checked(input, VARIANT_FALSE);
+
+        test_input_src(input, NULL);
+        test_input_set_src(input, "about:blank");
 
         IHTMLInputElement_Release(input);
         IHTMLElement_Release(elem);
@@ -4745,8 +5028,8 @@ static void test_elems(IHTMLDocument2 *doc)
             DISPID pid = -1;
             BSTR str = a2bstr("Testing");
             hres = IDispatchEx_GetDispID(dispex, str, 1, &pid);
-            todo_wine ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
-            todo_wine ok(pid != -1, "pid == -1\n");
+            ok(hres == S_OK, "GetDispID failed: %08x\n", hres);
+            ok(pid != -1, "pid == -1\n");
             SysFreeString(str);
             IDispatchEx_Release(dispex);
         }
@@ -5112,33 +5395,13 @@ static void gecko_installer_workaround(BOOL disable)
     RegCloseKey(hkey);
 }
 
-/* Check if Internet Explorer is configured to run in "Enhanced Security Configuration" (aka hardened mode) */
-/* Note: this code is duplicated in dlls/mshtml/tests/dom.c, dlls/mshtml/tests/script.c and dlls/urlmon/tests/sec_mgr.c */
-static BOOL is_ie_hardened(void)
-{
-    HKEY zone_map;
-    DWORD ie_harden, type, size;
-
-    ie_harden = 0;
-    if(RegOpenKeyEx(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings\\ZoneMap",
-                    0, KEY_QUERY_VALUE, &zone_map) == ERROR_SUCCESS) {
-        size = sizeof(DWORD);
-        if (RegQueryValueEx(zone_map, "IEHarden", NULL, &type, (LPBYTE) &ie_harden, &size) != ERROR_SUCCESS ||
-            type != REG_DWORD) {
-            ie_harden = 0;
-        }
-    RegCloseKey(zone_map);
-    }
-
-    return ie_harden != 0;
-}
-
 START_TEST(dom)
 {
     gecko_installer_workaround(TRUE);
     CoInitialize(NULL);
 
     run_domtest(doc_str1, test_doc_elem);
+    run_domtest(doc_str1, test_get_set_attr);
     run_domtest(range_test_str, test_txtrange);
     run_domtest(range_test2_str, test_txtrange2);
     if (winetest_interactive || ! is_ie_hardened()) {
