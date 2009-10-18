@@ -97,9 +97,6 @@ static HRESULT WINAPI sti_cf_CreateInstance( IClassFactory *iface, LPUNKNOWN pOu
 
     *ppobj = NULL;
 
-    if (pOuter)
-        return CLASS_E_NOAGGREGATION;
-
     r = This->pfnCreateInstance( riid, pOuter, (LPVOID *)&punk );
     if (FAILED(r))
         return r;
@@ -170,20 +167,4 @@ HRESULT WINAPI DllCanUnloadNow( void )
 {
     FIXME("\n");
     return S_FALSE;
-}
-
-/******************************************************************************
- *           StiCreateInstanceA   (STI.@)
- */
-HRESULT WINAPI StiCreateInstanceA( HINSTANCE hinst, DWORD dwVer, PSTIA *ppSti, LPUNKNOWN pUnkOuter )
-{
-    return STG_E_UNIMPLEMENTEDFUNCTION;
-}
-
-/******************************************************************************
- *           StiCreateInstanceW   (STI.@)
- */
-HRESULT WINAPI StiCreateInstanceW( HINSTANCE hinst, DWORD dwVer, PSTIW *ppSti, LPUNKNOWN pUnkOuter )
-{
-    return STG_E_UNIMPLEMENTEDFUNCTION;
 }

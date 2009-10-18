@@ -35,7 +35,6 @@
 
 #include "wine/winbase16.h"
 #include "wine/library.h"
-#include "toolhelp.h"
 #include "kernel_private.h"
 #include "kernel16_private.h"
 #include "console_private.h"
@@ -200,7 +199,7 @@ BOOL WINAPI DllMain( HINSTANCE hinst, DWORD reason, LPVOID reserved )
         thread_detach();
         break;
     case DLL_PROCESS_DETACH:
-        WriteOutProfiles16();
+        WritePrivateProfileSectionW( NULL, NULL, NULL );
         break;
     }
     return TRUE;

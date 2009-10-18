@@ -38,7 +38,7 @@
 #include "wine/winbase16.h"
 
 #include "kernel_private.h"
-#include "toolhelp.h"
+#include "kernel16_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(dosmem);
@@ -115,7 +115,6 @@ BOOL load_winedos(void)
                 GET_ADDR(outport);
                 GET_ADDR(EmulateInterruptPM);
                 GET_ADDR(CallBuiltinHandler);
-                GET_ADDR(BiosTick);
 #undef GET_ADDR
             }
             RtlRemoveVectoredExceptionHandler( dosmem_handler );

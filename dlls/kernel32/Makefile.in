@@ -9,10 +9,7 @@ IMPORTS   = ntdll
 EXTRALIBS = @COREFOUNDATIONLIB@ @LIBPOLL@
 EXTRADLLFLAGS = -Wb,-F,KERNEL32.dll -Wl,--image-base,0x7b800000
 
-SPEC_SRCS16 = \
-	krnl386.exe.spec \
-	system.drv.spec \
-	toolhelp.spec
+SPEC_SRCS16 = krnl386.exe.spec
 
 C_SRCS = \
 	actctx.c \
@@ -55,7 +52,6 @@ C_SRCS = \
 	string.c \
 	sync.c \
 	syslevel.c \
-	system.c \
 	tape.c \
 	task.c \
 	thread.c \
@@ -73,8 +69,7 @@ C_SRCS16 = \
 	atom16.c \
 	error16.c \
 	kernel16.c \
-	registry16.c \
-	toolhelp16.c
+	registry16.c
 
 RC_SRCS = \
 	locale_rc.rc \

@@ -68,6 +68,13 @@ static const BYTE secid10[] =
 static const BYTE secid10_2[] =
     {'f','i','l','e',':','s','o','m','e',' ','f','i','l','e','.','j','p','g',3,0,0,0};
 
+static const GUID CLSID_TestActiveX =
+    {0x178fc163,0xf585,0x4e24,{0x9c,0x13,0x4b,0xb7,0xfa,0xf8,0x06,0x46}};
+
+/* Defined as extern in urlmon.idl, but not exported by uuid.lib */
+const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
+    {0x10200490,0xfa38,0x11d0,{0xac,0x0e,0x00,0xa0,0xc9,0xf,0xff,0xc0}};
+
 static struct secmgr_test {
     LPCWSTR url;
     DWORD zone;
@@ -213,13 +220,15 @@ static void test_url_action(IInternetSecurityManager *secmgr, IInternetZoneManag
         policy = 0xdeadbeef;
         hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
                 sizeof(WCHAR), NULL, 0, 0, 0);
-        ok(hres == E_FAIL, "ProcessUrlAction(%x) failed: %08x, expected E_FAIL\n", action, hres);
+        ok(hres == E_FAIL || broken(hres == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)),
+            "(0x%x) got 0x%x (expected E_FAIL)\n", action, hres);
         ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
 
         policy = 0xdeadbeef;
         hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 3, action, (BYTE*)&policy,
                 sizeof(DWORD), URLZONEREG_DEFAULT);
-        ok(hres == E_FAIL, "GetZoneActionPolicy failed: %08x, expected E_FAIL\n", hres);
+        ok(hres == E_FAIL || broken(hres == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)),
+            "(0x%x) got 0x%x (expected E_FAIL)\n", action, hres);
         ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
         return;
     }
@@ -235,6 +244,33 @@ static void test_url_action(IInternetSecurityManager *secmgr, IInternetZoneManag
             policy = 0xdeadbeef;
             hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
                     sizeof(WCHAR), NULL, 0, 0, 0);
+            if(reg_policy == URLPOLICY_DISALLOW)
+                ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+            else
+                ok(hres == S_OK, "ProcessUrlAction(%x) failed: %08x\n", action, hres);
+            ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
+
+            policy = 0xdeadbeef;
+            hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
+                    2, NULL, 0, 0, 0);
+            if(reg_policy == URLPOLICY_DISALLOW)
+                ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+            else
+                ok(hres == S_OK, "ProcessUrlAction(%x) failed: %08x\n", action, hres);
+            ok(policy == 0xdeadbeef, "(%x) policy=%x\n", action, policy);
+
+            policy = 0xdeadbeef;
+            hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
+                    sizeof(DWORD), NULL, 0, 0, 0);
+            if(reg_policy == URLPOLICY_DISALLOW)
+                ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+            else
+                ok(hres == S_OK, "ProcessUrlAction(%x) failed: %08x\n", action, hres);
+            ok(policy == reg_policy, "(%x) policy=%x\n", action, policy);
+
+            policy = 0xdeadbeef;
+            hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url9, action, (BYTE*)&policy,
+                    sizeof(WCHAR), (BYTE*)0xdeadbeef, 16, 0, 0);
             if(reg_policy == URLPOLICY_DISALLOW)
                 ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
             else
@@ -261,6 +297,33 @@ static void test_special_url_action(IInternetSecurityManager *secmgr, IInternetZ
     hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url1, action, (BYTE*)&policy,
             sizeof(WCHAR), NULL, 0, 0, 0);
     ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+
+    policy = 0xdeadbeef;
+    hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url1, action, (BYTE*)&policy,
+            sizeof(DWORD), NULL, 0, 0, 0);
+    ok(hres == S_FALSE, "ProcessUrlAction(%x) failed: %08x, expected S_FALSE\n", action, hres);
+    ok(policy == URLPOLICY_DISALLOW, "policy = %x\n", policy);
+}
+
+static void test_activex(IInternetSecurityManager *secmgr)
+{
+    DWORD policy, policy_size;
+    struct CONFIRMSAFETY cs;
+    BYTE *ppolicy;
+    HRESULT hres;
+
+    policy = 0xdeadbeef;
+    hres = IInternetSecurityManager_ProcessUrlAction(secmgr, url1, URLACTION_ACTIVEX_RUN, (BYTE*)&policy,
+            sizeof(DWORD), (BYTE*)&CLSID_TestActiveX, sizeof(CLSID), 0, 0);
+    ok(hres == S_OK, "ProcessUrlAction(URLACTION_ACTIVEX_RUN) failed: %08x\n", hres);
+    ok(policy == URLPOLICY_ALLOW || policy == URLPOLICY_DISALLOW, "policy = %x\n", policy);
+
+    cs.clsid = CLSID_TestActiveX;
+    cs.pUnk = (IUnknown*)0xdeadbeef;
+    cs.dwFlags = 0;
+    hres = IInternetSecurityManager_QueryCustomPolicy(secmgr, url1, &GUID_CUSTOM_CONFIRMOBJECTSAFETY,
+            &ppolicy, &policy_size, (BYTE*)&cs, sizeof(cs), 0);
+    ok(hres == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "QueryCusromPolicy failed: %08x\n", hres);
 }
 
 static void test_polices(void)
@@ -275,11 +338,15 @@ static void test_polices(void)
     ok(hres == S_OK, "CoInternetCreateZoneManager failed: %08x\n", hres);
 
     test_url_action(secmgr, zonemgr, URLACTION_SCRIPT_RUN);
+    test_url_action(secmgr, zonemgr, URLACTION_ACTIVEX_RUN);
     test_url_action(secmgr, zonemgr, URLACTION_ACTIVEX_OVERRIDE_OBJECT_SAFETY);
     test_url_action(secmgr, zonemgr, URLACTION_CHANNEL_SOFTDIST_PERMISSIONS);
     test_url_action(secmgr, zonemgr, 0xdeadbeef);
 
     test_special_url_action(secmgr, zonemgr, URLACTION_SCRIPT_OVERRIDE_SAFETY);
+    test_special_url_action(secmgr, zonemgr, URLACTION_ACTIVEX_OVERRIDE_SCRIPT_SAFETY);
+
+    test_activex(secmgr);
 
     IInternetSecurityManager_Release(secmgr);
     IInternetZoneManager_Release(zonemgr);
@@ -425,7 +492,8 @@ static void test_GetZoneActionPolicy(void)
 
     hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 3, 0x1fff, buf,
             sizeof(DWORD), URLZONEREG_DEFAULT);
-    ok(hres == E_FAIL, "GetZoneActionPolicy failed: %08x, expected E_FAIL\n", hres);
+    ok(hres == E_FAIL || broken(hres == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)),
+            "(0x%x) got 0x%x (expected E_FAIL)\n", action, hres);
 
     hres = IInternetZoneManager_GetZoneActionPolicy(zonemgr, 13, action, buf,
             sizeof(DWORD), URLZONEREG_DEFAULT);

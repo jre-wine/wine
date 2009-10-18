@@ -141,7 +141,6 @@ NTSTATUS WINAPI NtQueryInformationProcess(
     UNIMPLEMENTED_INFO_CLASS(ProcessForegroundInformation);
     UNIMPLEMENTED_INFO_CLASS(ProcessLUIDDeviceMapsEnabled);
     UNIMPLEMENTED_INFO_CLASS(ProcessBreakOnTermination);
-    UNIMPLEMENTED_INFO_CLASS(ProcessDebugObjectHandle);
     UNIMPLEMENTED_INFO_CLASS(ProcessDebugFlags);
     UNIMPLEMENTED_INFO_CLASS(ProcessHandleTracing);
 
@@ -300,6 +299,22 @@ NTSTATUS WINAPI NtQueryInformationProcess(
         else
             ret = STATUS_INFO_LENGTH_MISMATCH;
         break;
+    case ProcessDebugObjectHandle:
+        /* "These are not the debuggers you are looking for." *
+         * set it to 0 aka "no debugger" to satisfy copy protections */
+        len = sizeof(HANDLE);
+        if (ProcessInformationLength == len)
+        {
+            if (!ProcessInformation)
+                ret = STATUS_ACCESS_VIOLATION;
+            else if (!ProcessHandle)
+                ret = STATUS_INVALID_HANDLE;
+            else
+                memset(ProcessInformation, 0, ProcessInformationLength);
+        }
+        else
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
     case ProcessHandleCount:
         if (ProcessInformationLength >= 4)
         {
@@ -403,6 +418,8 @@ NTSTATUS WINAPI NtSetInformationProcess(
     case ProcessAffinityMask:
         if (ProcessInformationLength != sizeof(DWORD_PTR)) return STATUS_INVALID_PARAMETER;
         if (*(PDWORD_PTR)ProcessInformation & ~(((DWORD_PTR)1 << NtCurrentTeb()->Peb->NumberOfProcessors) - 1))
+            return STATUS_INVALID_PARAMETER;
+        if (!*(PDWORD_PTR)ProcessInformation)
             return STATUS_INVALID_PARAMETER;
         SERVER_START_REQ( set_process_info )
         {

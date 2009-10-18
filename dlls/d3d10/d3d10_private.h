@@ -72,6 +72,7 @@ struct d3d10_effect_type
 
     DWORD id;
     struct wine_rb_entry entry;
+    struct d3d10_effect *effect;
 
     char *name;
     DWORD element_count;
@@ -83,6 +84,15 @@ struct d3d10_effect_type
     DWORD row_count;
     D3D10_SHADER_VARIABLE_TYPE basetype;
     D3D10_SHADER_VARIABLE_CLASS type_class;
+    struct d3d10_effect_type_member *members;
+};
+
+struct d3d10_effect_type_member
+{
+    char *name;
+    char *semantic;
+    DWORD buffer_offset;
+    struct d3d10_effect_type *type;
 };
 
 /* ID3D10EffectVariable */
@@ -90,7 +100,7 @@ struct d3d10_effect_variable
 {
     const struct ID3D10EffectVariableVtbl *vtbl;
 
-    struct d3d10_effect_local_buffer *buffer;
+    struct d3d10_effect_variable *buffer;
     struct d3d10_effect *effect;
 
     char *name;
@@ -98,20 +108,9 @@ struct d3d10_effect_variable
     DWORD buffer_offset;
     DWORD annotation_count;
     DWORD flag;
-    struct d3d10_effect_type *type;
-    struct d3d10_effect_variable *annotations;
-};
-
-struct d3d10_effect_local_buffer
-{
-    const struct ID3D10EffectConstantBufferVtbl *vtbl;
-
-    struct d3d10_effect *effect;
-    char *name;
     DWORD data_size;
-    DWORD variable_count;
-    DWORD annotation_count;
-    struct d3d10_effect_variable *variables;
+    struct d3d10_effect_type *type;
+    struct d3d10_effect_variable *members;
     struct d3d10_effect_variable *annotations;
 };
 
@@ -169,7 +168,7 @@ struct d3d10_effect
     DWORD shader_compile_count;
 
     struct wine_rb_tree types;
-    struct d3d10_effect_local_buffer *local_buffers;
+    struct d3d10_effect_variable *local_buffers;
     struct d3d10_effect_technique *techniques;
 };
 

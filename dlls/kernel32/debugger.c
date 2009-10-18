@@ -22,7 +22,6 @@
 #include <string.h>
 
 #include "winerror.h"
-#include "wine/winbase16.h"
 #include "wine/server.h"
 #include "kernel_private.h"
 #include "wine/debug.h"
@@ -118,7 +117,7 @@ BOOL WINAPI WaitForDebugEvent(
                 break;
             case OUTPUT_DEBUG_STRING_EVENT:
                 event->u.DebugString.lpDebugStringData  = wine_server_get_ptr( data.output_string.string );
-                event->u.DebugString.fUnicode           = data.output_string.unicode;
+                event->u.DebugString.fUnicode           = FALSE;
                 event->u.DebugString.nDebugStringLength = data.output_string.length;
                 break;
             case RIP_EVENT:
@@ -240,15 +239,93 @@ BOOL WINAPI DebugActiveProcessStop( DWORD pid )
  */
 void WINAPI OutputDebugStringA( LPCSTR str )
 {
+    static HANDLE DBWinMutex = NULL;
+    static BOOL mutex_inited = FALSE;
+
+    /* send string to attached debugger */
     SERVER_START_REQ( output_debug_string )
     {
         req->string  = wine_server_client_ptr( str );
-        req->unicode = 0;
         req->length  = strlen(str) + 1;
         wine_server_call( req );
     }
     SERVER_END_REQ;
+
     WARN("%s\n", str);
+
+    /* send string to a system-wide monitor */
+    /* FIXME should only send to monitor if no debuggers are attached */
+
+    if (!mutex_inited)
+    {
+        /* first call to OutputDebugString, initialize mutex handle */
+        static const WCHAR mutexname[] = {'D','B','W','i','n','M','u','t','e','x',0};
+        HANDLE mutex = CreateMutexExW( NULL, mutexname, 0, SYNCHRONIZE );
+        if (mutex)
+        {
+            if (InterlockedCompareExchangePointer( &DBWinMutex, mutex, 0 ) != 0)
+            {
+                /* someone beat us here... */
+                CloseHandle( mutex );
+            }
+        }
+        mutex_inited = TRUE;
+    }
+
+    if (DBWinMutex)
+    {
+        static const WCHAR shmname[] = {'D','B','W','I','N','_','B','U','F','F','E','R',0};
+        static const WCHAR eventbuffername[] = {'D','B','W','I','N','_','B','U','F','F','E','R','_','R','E','A','D','Y',0};
+        static const WCHAR eventdataname[] = {'D','B','W','I','N','_','D','A','T','A','_','R','E','A','D','Y',0};
+        HANDLE mapping;
+
+        mapping = OpenFileMappingW( FILE_MAP_WRITE, FALSE, shmname );
+        if (mapping)
+        {
+            LPVOID buffer;
+            HANDLE eventbuffer, eventdata;
+
+            buffer = MapViewOfFile( mapping, FILE_MAP_WRITE, 0, 0, 0 );
+            eventbuffer = OpenEventW( SYNCHRONIZE, FALSE, eventbuffername );
+            eventdata = OpenEventW( EVENT_MODIFY_STATE, FALSE, eventdataname );
+
+            if (buffer && eventbuffer && eventdata)
+            {
+                /* monitor is present, synchronize with other OutputDebugString invokations */
+                WaitForSingleObject( DBWinMutex, INFINITE );
+
+                /* acquire control over the buffer */
+                if (WaitForSingleObject( eventbuffer, 10000 ) == WAIT_OBJECT_0)
+                {
+                    int str_len;
+                    struct _mon_buffer_t {
+                        DWORD pid;
+                        char buffer[1];
+                    } *mon_buffer = (struct _mon_buffer_t*) buffer;
+
+                    str_len = strlen( str );
+                    if (str_len > (4096 - sizeof(DWORD) - 1))
+                        str_len = 4096 - sizeof(DWORD) - 1;
+
+                    mon_buffer->pid = GetCurrentProcessId();
+                    memcpy( mon_buffer->buffer, str, str_len );
+                    mon_buffer->buffer[str_len] = 0;
+
+                    /* signal data ready */
+                    SetEvent( eventdata );
+                }
+                ReleaseMutex( DBWinMutex );
+            }
+
+            if (buffer)
+                UnmapViewOfFile( buffer );
+            if (eventbuffer)
+                CloseHandle( eventbuffer );
+            if (eventdata)
+                CloseHandle( eventdata );
+            CloseHandle( mapping );
+        }
+    }
 }
 
 
@@ -267,32 +344,15 @@ void WINAPI OutputDebugStringA( LPCSTR str )
  */
 void WINAPI OutputDebugStringW( LPCWSTR str )
 {
-    SERVER_START_REQ( output_debug_string )
+    UNICODE_STRING strW;
+    STRING strA;
+
+    RtlInitUnicodeString( &strW, str );
+    if (!RtlUnicodeStringToAnsiString( &strA, &strW, TRUE ))
     {
-        req->string  = wine_server_client_ptr( str );
-        req->unicode = 1;
-        req->length  = (lstrlenW(str) + 1) * sizeof(WCHAR);
-        wine_server_call( req );
+        OutputDebugStringA( strA.Buffer );
+        RtlFreeAnsiString( &strA );
     }
-    SERVER_END_REQ;
-    WARN("%s\n", debugstr_w(str));
-}
-
-
-/***********************************************************************
- *           OutputDebugString   (KERNEL.115)
- *
- *  Output by a 16 bit application of an ascii string to a debugger (if attached)
- *  and program log.
- *
- * PARAMS
- *  str [I] The message to be logged and given to the debugger.
- *
- * RETURNS
- */
-void WINAPI OutputDebugString16( LPCSTR str )
-{
-    OutputDebugStringA( str );
 }
 
 
@@ -343,36 +403,6 @@ BOOL WINAPI DebugBreakProcess(HANDLE hProc)
 
 
 /***********************************************************************
- *           DebugBreak   (KERNEL.203)
- *
- *  Raises an exception in a 16 bit application so that a debugger (if attached)
- *  can take some action.
- *
- * PARAMS
- *
- * RETURNS
- *
- * BUGS
- *
- *  Only 386 compatible processors implemented.
- */
-void WINAPI DebugBreak16(
-    CONTEXT86 *context) /* [in/out] A pointer to the 386 compatible processor state. */
-{
-#ifdef __i386__
-    EXCEPTION_RECORD rec;
-
-    rec.ExceptionCode    = EXCEPTION_BREAKPOINT;
-    rec.ExceptionFlags   = 0;
-    rec.ExceptionRecord  = NULL;
-    rec.ExceptionAddress = (LPVOID)context->Eip;
-    rec.NumberParameters = 0;
-    NtRaiseException( &rec, context, TRUE );
-#endif  /* defined(__i386__) */
-}
-
-
-/***********************************************************************
  *           IsDebuggerPresent   (KERNEL32.@)
  *
  *  Allows a process to determine if there is a debugger attached.
@@ -402,6 +432,11 @@ BOOL WINAPI IsDebuggerPresent(void)
  */
 BOOL WINAPI CheckRemoteDebuggerPresent(HANDLE process, PBOOL DebuggerPresent)
 {
+    if(!process || !DebuggerPresent)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
     FIXME("(%p)->(%p): Stub!\n", process, DebuggerPresent);
     *DebuggerPresent = FALSE;
     return TRUE;

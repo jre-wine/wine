@@ -290,6 +290,8 @@ BOOL WINAPI DllMain (HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
         case DLL_PROCESS_DETACH:
 
+            NETCON_unload();
+
 	    URLCacheContainers_DeleteAll();
 
 	    if (g_dwTlsErrIndex != TLS_OUT_OF_INDEXES)
@@ -524,17 +526,36 @@ static DWORD APPINFO_QueryOption(object_header_t *hdr, DWORD option, void *buffe
         bufsize = *size;
 
         if (unicode) {
-            *size = (strlenW(ai->lpszAgent) + 1) * sizeof(WCHAR);
+            DWORD len = ai->lpszAgent ? strlenW(ai->lpszAgent) : 0;
+
+            *size = (len + 1) * sizeof(WCHAR);
             if(!buffer || bufsize < *size)
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            strcpyW(buffer, ai->lpszAgent);
+            if (ai->lpszAgent)
+                strcpyW(buffer, ai->lpszAgent);
+            else
+                *(WCHAR *)buffer = 0;
+            /* If the buffer is copied, the returned length doesn't include
+             * the NULL terminator.
+             */
+            *size = len * sizeof(WCHAR);
         }else {
-            *size = WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, NULL, 0, NULL, NULL);
+            if (ai->lpszAgent)
+                *size = WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, NULL, 0, NULL, NULL);
+            else
+                *size = 1;
             if(!buffer || bufsize < *size)
                 return ERROR_INSUFFICIENT_BUFFER;
 
-            WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, buffer, *size, NULL, NULL);
+            if (ai->lpszAgent)
+                WideCharToMultiByte(CP_ACP, 0, ai->lpszAgent, -1, buffer, *size, NULL, NULL);
+            else
+                *(char *)buffer = 0;
+            /* If the buffer is copied, the returned length doesn't include
+             * the NULL terminator.
+             */
+            *size -= 1;
         }
 
         return ERROR_SUCCESS;
@@ -1424,8 +1445,11 @@ BOOL WINAPI InternetCrackUrlW(LPCWSTR lpszUrl_orig, DWORD dwUrlLength_orig, DWOR
     lpUC->nPort = INTERNET_INVALID_PORT_NUMBER;
 
     /* Parse <params> */
-    if (!(lpszParam = memchrW(lpszap, ';', dwUrlLength - (lpszap - lpszUrl))))
+    lpszParam = memchrW(lpszap, ';', dwUrlLength - (lpszap - lpszUrl));
+    if(!lpszParam)
         lpszParam = memchrW(lpszap, '?', dwUrlLength - (lpszap - lpszUrl));
+    if(!lpszParam)
+        lpszParam = memchrW(lpszap, '#', dwUrlLength - (lpszap - lpszUrl));
 
     SetUrlComponentValueW(&lpUC->lpszExtraInfo, &lpUC->dwExtraInfoLength,
                           lpszParam, lpszParam ? dwUrlLength-(lpszParam-lpszUrl) : 0);
@@ -2138,6 +2162,8 @@ DWORD INET_QueryOption(DWORD option, void *buffer, DWORD *size, BOOL unicode)
 
         return res;
     }
+    case INTERNET_OPTION_USER_AGENT:
+        return ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
     }
 
     FIXME("Stub for %d\n", option);

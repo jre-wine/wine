@@ -52,7 +52,8 @@ static BOOL need_mova_const(IWineD3DBaseShader *shader, const struct wined3d_gl_
 /* Returns TRUE if result.clip from GL_NV_vertex_program2 should be used and FALSE otherwise */
 static inline BOOL use_nv_clip(const struct wined3d_gl_info *gl_info)
 {
-    return GL_SUPPORT(NV_VERTEX_PROGRAM2_OPTION);
+    return GL_SUPPORT(NV_VERTEX_PROGRAM2_OPTION) &&
+           !(GLINFO_LOCATION.quirks & WINED3D_QUIRK_NV_CLIP_BROKEN);
 }
 
 static BOOL need_helper_const(const struct wined3d_gl_info *gl_info)
@@ -157,7 +158,8 @@ struct arb_vs_compile_args
         struct
         {
             WORD                    bools;
-            char                    clip_control[2];
+            char                    clip_texcoord;
+            char                    clipplane_mask;
         }                           boolclip;
         DWORD                       boolclip_compare;
     };
@@ -646,8 +648,15 @@ static DWORD shader_generate_arb_declarations(IWineD3DBaseShader *iface, const s
                 if(reg_maps->constf[idx] & (1 << shift)) highest_constf = i;
             }
 
-            clip_limit = GL_LIMITS(clipplanes);
-            if(ctx->target_version == ARB) clip_limit = min(clip_limit, 4);
+            if(use_nv_clip(gl_info) && ctx->target_version >= NV2)
+            {
+                clip_limit = GL_LIMITS(clipplanes);
+            }
+            else
+            {
+                unsigned int mask = ctx->cur_vs_args->boolclip.clipplane_mask;
+                clip_limit = min(count_bits(mask), 4);
+            }
             *num_clipplanes = min(clip_limit, max_constantsF - highest_constf - 1);
             max_constantsF -= *num_clipplanes;
             if(*num_clipplanes < clip_limit)
@@ -1577,7 +1586,6 @@ static void shader_hw_map2gl(const struct wined3d_shader_instruction *ins)
         case WINED3DSIH_SLT: instruction = "SLT"; break;
         case WINED3DSIH_SUB: instruction = "SUB"; break;
         case WINED3DSIH_MOVA:instruction = "ARR"; break;
-        case WINED3DSIH_SGN: instruction = "SSG"; break;
         case WINED3DSIH_DSX: instruction = "DDX"; break;
         default: instruction = "";
             FIXME("Unhandled opcode %#x\n", ins->handler_idx);
@@ -2454,13 +2462,14 @@ static void shader_hw_sgn(const struct wined3d_shader_instruction *ins)
     char src_name[50];
     struct shader_arb_ctx_priv *ctx = ins->ctx->backend_data;
 
-    /* SGN is only valid in vertex shaders */
-    if(ctx->target_version == NV2) {
-        shader_hw_map2gl(ins);
-        return;
-    }
     shader_arb_get_dst_param(ins, &ins->dst[0], dst_name);
     shader_arb_get_src_param(ins, &ins->src[0], 0, src_name);
+
+    /* SGN is only valid in vertex shaders */
+    if(ctx->target_version >= NV2) {
+        shader_addline(buffer, "SSG%s %s, %s;\n", shader_arb_get_modifier(ins), dst_name, src_name);
+        return;
+    }
 
     /* If SRC > 0.0, -SRC < SRC = TRUE, otherwise false.
      * if SRC < 0.0,  SRC < -SRC = TRUE. If neither is true, src = 0.0
@@ -2925,14 +2934,14 @@ static void vshader_add_footer(IWineD3DVertexShaderImpl *This, struct wined3d_sh
             shader_addline(buffer, "DP4 result.clip[%u].x, TMP_OUT, state.clip[%u].plane;\n", i, i);
         }
     }
-    else if(args->boolclip.clip_control[0])
+    else if(args->boolclip.clip_texcoord)
     {
         unsigned int cur_clip = 0;
         char component[4] = {'x', 'y', 'z', 'w'};
 
         for(i = 0; i < GL_LIMITS(clipplanes); i++)
         {
-            if(args->boolclip.clip_control[1] & (1 << i))
+            if(args->boolclip.clipplane_mask & (1 << i))
             {
                 shader_addline(buffer, "DP4 TA.%c, TMP_OUT, state.clip[%u].plane;\n",
                                component[cur_clip++], i);
@@ -2954,7 +2963,7 @@ static void vshader_add_footer(IWineD3DVertexShaderImpl *This, struct wined3d_sh
                 break;
         }
         shader_addline(buffer, "MOV result.texcoord[%u], TA;\n",
-                       args->boolclip.clip_control[0] - 1);
+                       args->boolclip.clip_texcoord - 1);
     }
 
     /* Z coord [0;1]->[-1;1] mapping, see comment in transform_projection in state.c
@@ -3136,7 +3145,6 @@ static void arbfp_add_sRGB_correction(struct wined3d_shader_buffer *buffer, cons
         * not allocated from one of our registers that were used earlier.
         */
     }
-    shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
     /* [0.0;1.0] clamping. Not needed, this is done implicitly */
 }
 
@@ -3512,7 +3520,9 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
     if(args->super.srgb_correction) {
         arbfp_add_sRGB_correction(buffer, fragcolor, srgbtmp[0], srgbtmp[1], srgbtmp[2], srgbtmp[3],
                                   priv_ctx.target_version >= NV2);
-    } else if(reg_maps->shader_version.major < 2) {
+    }
+
+    if(strcmp(fragcolor, "result.color")) {
         shader_addline(buffer, "MOV result.color, %s;\n", fragcolor);
     }
     shader_addline(buffer, "END\n");
@@ -4190,25 +4200,25 @@ static inline void find_arb_vs_compile_args(IWineD3DVertexShaderImpl *shader, IW
         struct arb_pshader_private *shader_priv = ps->baseShader.backend_data;
         args->ps_signature = shader_priv->input_signature_idx;
 
-        args->boolclip.clip_control[0] = shader_priv->clipplane_emulation + 1;
+        args->boolclip.clip_texcoord = shader_priv->clipplane_emulation + 1;
     }
     else
     {
         args->ps_signature = ~0;
         if(!dev->vs_clipping)
         {
-            args->boolclip.clip_control[0] = ffp_clip_emul(stateblock) ? GL_LIMITS(texture_stages) : 0;
+            args->boolclip.clip_texcoord = ffp_clip_emul(stateblock) ? GL_LIMITS(texture_stages) : 0;
         }
-        /* Otherwise: Setting boolclip_compare set clip_control[0] to 0 */
+        /* Otherwise: Setting boolclip_compare set clip_texcoord to 0 */
     }
 
-    if(args->boolclip.clip_control[0])
+    if(args->boolclip.clip_texcoord)
     {
         if(stateblock->renderState[WINED3DRS_CLIPPING])
         {
-            args->boolclip.clip_control[1] = stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
+            args->boolclip.clipplane_mask = stateblock->renderState[WINED3DRS_CLIPPLANEENABLE];
         }
-        /* clip_control[1] was set to 0 by setting boolclip_compare to 0 */
+        /* clipplane_mask was set to 0 by setting boolclip_compare to 0 */
     }
 
     /* This forces all local boolean constants to 1 to make them stateblock independent */
@@ -5775,6 +5785,7 @@ static GLuint gen_arbfp_ffp_shader(const struct ffp_frag_settings *settings, IWi
     if(settings->sRGB_write) {
         shader_addline(&buffer, "MAD ret, fragment.color.secondary, specular_enable, %s;\n", final_combiner_src);
         arbfp_add_sRGB_correction(&buffer, "ret", "arg0", "arg1", "arg2", "tempreg", FALSE);
+        shader_addline(&buffer, "MOV result.color, ret;\n");
     } else {
         shader_addline(&buffer, "MAD result.color, fragment.color.secondary, specular_enable, %s;\n", final_combiner_src);
     }

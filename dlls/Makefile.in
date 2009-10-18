@@ -22,14 +22,7 @@ WIN16_FILES = \
 	gdi.exe16 \
 	krnl386.exe16 \
 	mmsystem.dll16 \
-	setupx.dll16 \
-	system.drv16 \
-	toolhelp.dll16 \
 	user.exe16 \
-	ver.dll16 \
-	wineps16.drv16 \
-	wing.dll16 \
-	winsock.dll16 \
 	wprocs.dll16
 
 @MAKE_RULES@
@@ -43,32 +36,20 @@ all: $(BUILDSUBDIRS) @WIN16_FILES@
 commdlg.dll16:
 	echo "comdlg32.dll" >$@
 
-gdi.exe16 wing.dll16:
+gdi.exe16:
 	echo "gdi32.dll" >$@
 
-krnl386.exe16 system.drv16 toolhelp.dll16:
+krnl386.exe16:
 	echo "kernel32.dll" >$@
-
-setupx.dll16:
-	echo "setupapi.dll" >$@
 
 user.exe16:
 	echo "user32.dll" >$@
 
-ver.dll16:
-	echo "version.dll" >$@
-
 wprocs.dll16:
 	echo "winedos.dll" >$@
 
-wineps16.drv16:
-	echo "wineps.drv" >$@
-
 mmsystem.dll16:
 	echo "winmm.dll" >$@
-
-winsock.dll16:
-	echo "ws2_32.dll" >$@
 
 # Import libraries
 

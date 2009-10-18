@@ -26,8 +26,7 @@
 #include "wine/winbase16.h"
 #include "wine/server.h"
 #include "wine/debug.h"
-#include "kernel_private.h"
-#include "toolhelp.h"
+#include "kernel16_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(selector);
 
@@ -418,41 +417,6 @@ BOOL16 WINAPI IsBadFlatReadWritePtr16( SEGPTR ptr, DWORD size, BOOL16 bWrite )
 }
 
 
-/***********************************************************************
- *           MemoryRead   (TOOLHELP.78)
- */
-DWORD WINAPI MemoryRead16( WORD sel, DWORD offset, void *buffer, DWORD count )
-{
-    LDT_ENTRY entry;
-    DWORD limit;
-
-    wine_ldt_get_entry( sel, &entry );
-    if (wine_ldt_is_empty( &entry )) return 0;
-    limit = wine_ldt_get_limit( &entry );
-    if (offset > limit) return 0;
-    if (offset + count > limit + 1) count = limit + 1 - offset;
-    memcpy( buffer, (char *)wine_ldt_get_base(&entry) + offset, count );
-    return count;
-}
-
-
-/***********************************************************************
- *           MemoryWrite   (TOOLHELP.79)
- */
-DWORD WINAPI MemoryWrite16( WORD sel, DWORD offset, void *buffer, DWORD count )
-{
-    LDT_ENTRY entry;
-    DWORD limit;
-
-    wine_ldt_get_entry( sel, &entry );
-    if (wine_ldt_is_empty( &entry )) return 0;
-    limit = wine_ldt_get_limit( &entry );
-    if (offset > limit) return 0;
-    if (offset + count > limit) count = limit + 1 - offset;
-    memcpy( (char *)wine_ldt_get_base(&entry) + offset, buffer, count );
-    return count;
-}
-
 /************************************* Win95 pointer mapping functions *
  *
  */
@@ -559,38 +523,14 @@ LPVOID WINAPI MapSLFix( SEGPTR sptr )
     return MapSL(sptr);
 }
 
+#ifdef __i386__
+
 /***********************************************************************
  *           UnMapSLFixArray   (KERNEL32.@)
  *
  * Must not change EAX, hence defined as asm function.
  */
-#ifdef __i386__
 __ASM_STDCALL_FUNC( UnMapSLFixArray, 8, "ret $8" )
-#endif
-
-
-/***********************************************************************
- *           GetThreadSelectorEntry   (KERNEL32.@)
- */
-BOOL WINAPI GetThreadSelectorEntry( HANDLE hthread, DWORD sel, LPLDT_ENTRY ldtent )
-{
-    THREAD_DESCRIPTOR_INFORMATION       tdi;
-    NTSTATUS                            status;
-
-    tdi.Selector = sel;
-    status = NtQueryInformationThread( hthread, ThreadDescriptorTableEntry,
-                                       &tdi, sizeof(tdi), NULL);
-    if (status)
-    {
-        SetLastError( RtlNtStatusToDosError(status) );
-        return FALSE;
-    }
-    *ldtent = tdi.Entry;
-    return TRUE;
-}
-
-
-#ifdef __i386__
 
 /***********************************************************************
  *		SMapLS (KERNEL32.@)

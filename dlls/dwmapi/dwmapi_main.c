@@ -111,6 +111,26 @@ HRESULT WINAPI DwmSetWindowAttribute(HWND hwnd, DWORD attributenum, LPCVOID attr
 }
 
 /**********************************************************************
+ *           DwmGetGraphicsStreamClient         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmGetGraphicsStreamClient(UINT uIndex, UUID *pClientUuid)
+{
+    FIXME("(%d, %p) stub\n", uIndex, pClientUuid);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmGetTransportAttributes         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmGetTransportAttributes(BOOL *pfIsRemoting, BOOL *pfIsConnected, DWORD *pDwGeneration)
+{
+    FIXME("(%p, %p, %p) stub\n", pfIsRemoting, pfIsConnected, pDwGeneration);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
  *           DwmUnregisterThumbnail         (DWMAPI.@)
  */
 HRESULT WINAPI DwmUnregisterThumbnail(HTHUMBNAIL thumbnail)

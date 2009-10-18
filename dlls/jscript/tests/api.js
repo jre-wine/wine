@@ -58,6 +58,17 @@ ok(tmp === "undefined", "encodeURI() = " + tmp);
 tmp = encodeURI("abc", "test");
 ok(tmp === "abc", "encodeURI('abc') = " + tmp);
 
+tmp = escape("abc");
+ok(tmp === "abc", "escape('abc') = " + tmp);
+tmp = escape("");
+ok(tmp === "", "escape('') = " + tmp);
+tmp = escape("a1b c!d+e@*-_+./,");
+ok(tmp === "a1b%20c%21d+e@*-_+./%2C", "escape('a1b c!d+e@*-_+./,') = " + tmp);
+tmp = escape();
+ok(tmp === "undefined", "escape() = " + tmp);
+tmp = escape('\u1234\123\xf3');
+ok(tmp == "%u1234S%F3", "escape('\u1234\123\xf3') = " + tmp);
+
 tmp = unescape("abc");
 ok(tmp === "abc", "unescape('abc') = " + tmp);
 tmp = unescape("");
@@ -68,6 +79,10 @@ tmp = unescape();
 ok(tmp === "undefined", "unescape() = " + tmp);
 tmp = unescape("%54%65s%u0074");
 ok(tmp === "Test", "unescape('%54%65s%u0074') = " + tmp);
+
+tmp = "aA1~`!@#$%^&*()_+=-][{}';:/.,<>?\|";
+ok(escape(tmp) === "aA1%7E%60%21@%23%24%25%5E%26*%28%29_+%3D-%5D%5B%7B%7D%27%3B%3A/.%2C%3C%3E%3F%7C", "escape('" + tmp + "') = " + escape(tmp));
+ok(unescape(escape(tmp)) === tmp, "unescape(escape('" + tmp + "')) = " + unescape(escape(tmp)));
 
 tmp = "" + new Object();
 ok(tmp === "[object Object]", "'' + new Object() = " + tmp);
@@ -188,6 +203,12 @@ tmp = "abc".charCodeAt(true);
 ok(tmp === 0x62, "'abc'.charCodeAt(true) = " + tmp);
 tmp = "abc".charCodeAt(0,2);
 ok(tmp === 0x61, "'abc'.charCodeAt(0,2) = " + tmp);
+tmp = "\u49F4".charCodeAt(0);
+ok(tmp === 0x49F4, "'\u49F4'.charCodeAt(0) = " + tmp);
+tmp = "\052".charCodeAt(0);
+ok(tmp === 0x2A, "'\052'.charCodeAt(0) = " + tmp);
+tmp = "\xa2".charCodeAt(0);
+ok(tmp === 0xA2, "'\xa2'.charCodeAt(0) = " + tmp);
 
 tmp = "abcd".substring(1,3);
 ok(tmp === "bc", "'abcd'.substring(1,3) = " + tmp);
@@ -1532,6 +1553,9 @@ ok(bool.toString() === "true", "bool.toString() = " + bool.toString());
 ok(bool.valueOf() === Boolean(1), "bool.valueOf() = " + bool.valueOf());
 ok(bool.toLocaleString() === bool.toString(), "bool.toLocaleString() = " + bool.toLocaleString());
 
+ok(ActiveXObject instanceof Function, "ActiveXObject is not instance of Function");
+ok(ActiveXObject.prototype instanceof Object, "ActiveXObject.prototype is not instance of Object");
+
 ok(Error.prototype !== TypeError.prototype, "Error.prototype === TypeError.prototype");
 ok(RangeError.prototype !== TypeError.prototype, "RangeError.prototype === TypeError.prototype");
 ok(Error.prototype.toLocaleString === Object.prototype.toLocaleString,
@@ -1858,6 +1882,7 @@ testFunctions(Date.prototype, [
         ["toString", 0],
         ["toTimeString", 0],
         ["toUTCString", 0],
+        ["toGMTString", 0],
         ["valueOf", 0]
     ]);
 

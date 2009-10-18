@@ -48,6 +48,7 @@
 #define WINED3D_QUIRK_SET_TEXCOORD_W            0x00000002
 #define WINED3D_QUIRK_GLSL_CLIP_VARYING         0x00000004
 #define WINED3D_QUIRK_ALLOWS_SPECULAR_ALPHA     0x00000008
+#define WINED3D_QUIRK_NV_CLIP_BROKEN            0x00000010
 
 /* Texture format fixups */
 
@@ -147,21 +148,6 @@ void wined3d_rb_free(void *ptr) DECLSPEC_HIDDEN;
 #define MAX_ACTIVE_LIGHTS       8
 #define MAX_CLIPPLANES          WINED3DMAXUSERCLIPPLANES
 
-/* Used for CreateStateBlock */
-#define NUM_SAVEDPIXELSTATES_R     35
-#define NUM_SAVEDPIXELSTATES_T     18
-#define NUM_SAVEDPIXELSTATES_S     12
-#define NUM_SAVEDVERTEXSTATES_R    34
-#define NUM_SAVEDVERTEXSTATES_T    2
-#define NUM_SAVEDVERTEXSTATES_S    1
-
-extern const DWORD SavedPixelStates_R[NUM_SAVEDPIXELSTATES_R] DECLSPEC_HIDDEN;
-extern const DWORD SavedPixelStates_T[NUM_SAVEDPIXELSTATES_T] DECLSPEC_HIDDEN;
-extern const DWORD SavedPixelStates_S[NUM_SAVEDPIXELSTATES_S] DECLSPEC_HIDDEN;
-extern const DWORD SavedVertexStates_R[NUM_SAVEDVERTEXSTATES_R] DECLSPEC_HIDDEN;
-extern const DWORD SavedVertexStates_T[NUM_SAVEDVERTEXSTATES_T] DECLSPEC_HIDDEN;
-extern const DWORD SavedVertexStates_S[NUM_SAVEDVERTEXSTATES_S] DECLSPEC_HIDDEN;
-
 typedef enum _WINELOOKUP {
     WINELOOKUP_WARPPARAM = 0,
     MAX_LOOKUPS          = 1
@@ -254,10 +240,6 @@ static inline float float_24_to_32(DWORD in)
 #define VBO_NONE   0
 #define VBO_HW     1
 
-#define NP2_NONE   0
-#define NP2_REPACK 1
-#define NP2_NATIVE 2
-
 #define ORM_BACKBUFFER  0
 #define ORM_PBUFFER     1
 #define ORM_FBO         2
@@ -339,13 +321,6 @@ enum wined3d_immconst_type
     WINED3D_IMMCONST_FLOAT4,
 };
 
-typedef enum _WINED3DVS_RASTOUT_OFFSETS
-{
-    WINED3DSRO_POSITION = 0,
-    WINED3DSRO_FOG = 1,
-    WINED3DSRO_POINT_SIZE = 2,
-} WINED3DVS_RASTOUT_OFFSETS;
-
 #define WINED3DSP_NOSWIZZLE (0 | (1 << 2) | (2 << 4) | (3 << 6))
 
 typedef enum _WINED3DSHADER_PARAM_SRCMOD_TYPE
@@ -379,97 +354,6 @@ typedef enum _WINED3DSHADER_PARAM_DSTMOD_TYPE
     WINED3DSPDM_PARTIALPRECISION = 2,
     WINED3DSPDM_MSAMPCENTROID = 4,
 } WINED3DSHADER_PARAM_DSTMOD_TYPE;
-
-typedef enum _WINED3DSHADER_INSTRUCTION_OPCODE_TYPE
-{
-    WINED3DSIO_NOP = 0,
-    WINED3DSIO_MOV = 1,
-    WINED3DSIO_ADD = 2,
-    WINED3DSIO_SUB = 3,
-    WINED3DSIO_MAD = 4,
-    WINED3DSIO_MUL = 5,
-    WINED3DSIO_RCP = 6,
-    WINED3DSIO_RSQ = 7,
-    WINED3DSIO_DP3 = 8,
-    WINED3DSIO_DP4 = 9,
-    WINED3DSIO_MIN = 10,
-    WINED3DSIO_MAX = 11,
-    WINED3DSIO_SLT = 12,
-    WINED3DSIO_SGE = 13,
-    WINED3DSIO_EXP = 14,
-    WINED3DSIO_LOG = 15,
-    WINED3DSIO_LIT = 16,
-    WINED3DSIO_DST = 17,
-    WINED3DSIO_LRP = 18,
-    WINED3DSIO_FRC = 19,
-    WINED3DSIO_M4x4 = 20,
-    WINED3DSIO_M4x3 = 21,
-    WINED3DSIO_M3x4 = 22,
-    WINED3DSIO_M3x3 = 23,
-    WINED3DSIO_M3x2 = 24,
-    WINED3DSIO_CALL = 25,
-    WINED3DSIO_CALLNZ = 26,
-    WINED3DSIO_LOOP = 27,
-    WINED3DSIO_RET = 28,
-    WINED3DSIO_ENDLOOP = 29,
-    WINED3DSIO_LABEL = 30,
-    WINED3DSIO_DCL = 31,
-    WINED3DSIO_POW = 32,
-    WINED3DSIO_CRS = 33,
-    WINED3DSIO_SGN = 34,
-    WINED3DSIO_ABS = 35,
-    WINED3DSIO_NRM = 36,
-    WINED3DSIO_SINCOS = 37,
-    WINED3DSIO_REP = 38,
-    WINED3DSIO_ENDREP = 39,
-    WINED3DSIO_IF = 40,
-    WINED3DSIO_IFC = 41,
-    WINED3DSIO_ELSE = 42,
-    WINED3DSIO_ENDIF = 43,
-    WINED3DSIO_BREAK = 44,
-    WINED3DSIO_BREAKC = 45,
-    WINED3DSIO_MOVA = 46,
-    WINED3DSIO_DEFB = 47,
-    WINED3DSIO_DEFI = 48,
-
-    WINED3DSIO_TEXCOORD = 64,
-    WINED3DSIO_TEXKILL = 65,
-    WINED3DSIO_TEX = 66,
-    WINED3DSIO_TEXBEM = 67,
-    WINED3DSIO_TEXBEML = 68,
-    WINED3DSIO_TEXREG2AR = 69,
-    WINED3DSIO_TEXREG2GB = 70,
-    WINED3DSIO_TEXM3x2PAD = 71,
-    WINED3DSIO_TEXM3x2TEX = 72,
-    WINED3DSIO_TEXM3x3PAD = 73,
-    WINED3DSIO_TEXM3x3TEX = 74,
-    WINED3DSIO_TEXM3x3DIFF = 75,
-    WINED3DSIO_TEXM3x3SPEC = 76,
-    WINED3DSIO_TEXM3x3VSPEC = 77,
-    WINED3DSIO_EXPP = 78,
-    WINED3DSIO_LOGP = 79,
-    WINED3DSIO_CND = 80,
-    WINED3DSIO_DEF = 81,
-    WINED3DSIO_TEXREG2RGB = 82,
-    WINED3DSIO_TEXDP3TEX = 83,
-    WINED3DSIO_TEXM3x2DEPTH = 84,
-    WINED3DSIO_TEXDP3 = 85,
-    WINED3DSIO_TEXM3x3 = 86,
-    WINED3DSIO_TEXDEPTH = 87,
-    WINED3DSIO_CMP = 88,
-    WINED3DSIO_BEM = 89,
-    WINED3DSIO_DP2ADD = 90,
-    WINED3DSIO_DSX = 91,
-    WINED3DSIO_DSY = 92,
-    WINED3DSIO_TEXLDD = 93,
-    WINED3DSIO_SETP = 94,
-    WINED3DSIO_TEXLDL = 95,
-    WINED3DSIO_BREAKP = 96,
-
-    WINED3DSIO_PHASE = 0xfffd,
-    WINED3DSIO_COMMENT = 0xfffe,
-    WINED3DSIO_END = 0Xffff,
-} WINED3DSHADER_INSTRUCTION_OPCODE_TYPE;
 
 /* Undocumented opcode control to identify projective texture lookups in ps 2.0 and later */
 #define WINED3DSI_TEXLD_PROJECT 1
@@ -871,7 +755,6 @@ extern int num_lock DECLSPEC_HIDDEN;
 #define GL_SUPPORT(ExtName)           (GLINFO_LOCATION.supported[ExtName] != 0)
 #define GL_LIMITS(ExtName)            (GLINFO_LOCATION.max_##ExtName)
 #define GL_EXTCALL(FuncName)          (GLINFO_LOCATION.FuncName)
-#define GL_VEND(_VendName)            (GLINFO_LOCATION.gl_vendor == VENDOR_##_VendName ? TRUE : FALSE)
 
 #define D3DCOLOR_B_R(dw) (((dw) >> 16) & 0xFF)
 #define D3DCOLOR_B_G(dw) (((dw) >>  8) & 0xFF)
@@ -893,8 +776,6 @@ extern int num_lock DECLSPEC_HIDDEN;
 /* DirectX Device Limits */
 /* --------------------- */
 #define MAX_MIP_LEVELS 32  /* Maximum number of mipmap levels. */
-#define MAX_STREAMS  16  /* Maximum possible streams - used for fixed size arrays
-                            See MaxStreams in MSDN under GetDeviceCaps */
 #define HIGHEST_TRANSFORMSTATE WINED3DTS_WORLDMATRIX(255) /* Highest value in WINED3DTRANSFORMSTATETYPE */
 
 /* Checking of API calls */
@@ -931,28 +812,11 @@ do {                                                                            
     memcpy(gl_mat, (mat), 16 * sizeof(float));                                              \
 } while (0)
 
-/* Macro to dump out the current state of the light chain */
-#define DUMP_LIGHT_CHAIN()                    \
-do {                                          \
-  PLIGHTINFOEL *el = This->stateBlock->lights;\
-  while (el) {                                \
-    TRACE("Light %p (glIndex %ld, d3dIndex %ld, enabled %d)\n", el, el->glIndex, el->OriginalIndex, el->lightEnabled);\
-    el = el->next;                            \
-  }                                           \
-} while(0)
-
 /* Trace vector and strided data information */
-#define TRACE_VECTOR(name) TRACE( #name "=(%f, %f, %f, %f)\n", name.x, name.y, name.z, name.w)
 #define TRACE_STRIDED(si, name) do { if (si->use_map & (1 << name)) \
         TRACE( #name "=(data:%p, stride:%d, format:%#x, vbo %d, stream %u)\n", \
         si->elements[name].data, si->elements[name].stride, si->elements[name].format_desc->format, \
         si->elements[name].buffer_object, si->elements[name].stream_idx); } while(0)
-
-/* Defines used for optimizations */
-
-/*    Only reapply what is necessary */
-#define REAPPLY_ALPHAOP  0x0001
-#define REAPPLY_ALL      0xFFFF
 
 /* Advance declaration of structures to satisfy compiler */
 typedef struct IWineD3DStateBlockImpl IWineD3DStateBlockImpl;
@@ -1335,9 +1199,6 @@ HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChain *
 #define WINE_D3D7_CAPABLE(gl_info) (gl_info->supported[ARB_TEXTURE_COMPRESSION] && gl_info->supported[ARB_TEXTURE_CUBE_MAP] && gl_info->supported[ARB_TEXTURE_ENV_DOT3])
 #define WINE_D3D8_CAPABLE(gl_info) WINE_D3D7_CAPABLE(gl_info) && (gl_info->supported[ARB_MULTISAMPLE] && gl_info->supported[ARB_TEXTURE_BORDER_CLAMP])
 #define WINE_D3D9_CAPABLE(gl_info) WINE_D3D8_CAPABLE(gl_info) && (gl_info->supported[ARB_FRAGMENT_PROGRAM] && gl_info->supported[ARB_VERTEX_SHADER])
-
-/* Default callbacks for implicit object destruction */
-extern ULONG WINAPI D3DCB_DefaultDestroyVolume(IWineD3DVolume *pSurface) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
  * Internal representation of a light
@@ -2171,7 +2032,6 @@ BOOL palette9_changed(IWineD3DSurfaceImpl *This) DECLSPEC_HIDDEN;
 /*****************************************************************************
  * IWineD3DVertexDeclaration implementation structure
  */
-#define MAX_ATTRIBS 16
 
 struct wined3d_vertex_declaration_element
 {
@@ -2292,7 +2152,7 @@ struct IWineD3DStateBlockImpl
     /* Light hashmap . Collisions are handled using standard wine double linked lists */
 #define LIGHTMAP_SIZE 43 /* Use of a prime number recommended. Set to 1 for a linked list! */
 #define LIGHTMAP_HASHFUNC(x) ((x) % LIGHTMAP_SIZE) /* Primitive and simple function */
-    struct list               lightMap[LIGHTMAP_SIZE]; /* Mashmap containing the lights */
+    struct list               lightMap[LIGHTMAP_SIZE]; /* Hash map containing the lights */
     PLIGHTINFOEL             *activeLights[MAX_ACTIVE_LIGHTS]; /* Map of opengl lights to d3d lights */
 
     /* Clipping */
@@ -2351,10 +2211,9 @@ struct IWineD3DStateBlockImpl
     unsigned int              num_contained_sampler_states;
 };
 
-extern void stateblock_savedstates_set(IWineD3DStateBlock *iface, SAVEDSTATES *states, BOOL value) DECLSPEC_HIDDEN;
-extern void stateblock_copy(IWineD3DStateBlock *destination, IWineD3DStateBlock *source) DECLSPEC_HIDDEN;
-
-extern const IWineD3DStateBlockVtbl IWineD3DStateBlock_Vtbl DECLSPEC_HIDDEN;
+HRESULT stateblock_init(IWineD3DStateBlockImpl *stateblock, IWineD3DDeviceImpl *device,
+        WINED3DSTATEBLOCKTYPE type, IUnknown *parent) DECLSPEC_HIDDEN;
+void stateblock_init_contained_states(IWineD3DStateBlockImpl *object) DECLSPEC_HIDDEN;
 
 /* Direct3D terminology with little modifications. We do not have an issued state
  * because only the driver knows about it, but we have a created state because d3d
@@ -2374,12 +2233,7 @@ typedef struct IWineD3DQueryImpl
     LONG                      ref;     /* Note: Ref counting not required */
 
     IUnknown                 *parent;
-    /*TODO: replace with iface usage */
-#if 0
-    IWineD3DDevice         *wineD3DDevice;
-#else
     IWineD3DDeviceImpl       *wineD3DDevice;
-#endif
 
     /* IWineD3DQuery fields */
     enum query_state         state;

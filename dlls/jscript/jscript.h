@@ -214,13 +214,13 @@ HRESULT create_builtin_function(script_ctx_t*,builtin_invoke_t,const WCHAR*,cons
 HRESULT Function_value(script_ctx_t*,vdisp_t*,WORD,DISPPARAMS*,VARIANT*,jsexcept_t*,IServiceProvider*);
 
 HRESULT throw_eval_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
+HRESULT throw_generic_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_range_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_reference_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_regexp_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_syntax_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_type_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
 HRESULT throw_uri_error(script_ctx_t*,jsexcept_t*,UINT,const WCHAR*);
-
 
 HRESULT create_object(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_math(script_ctx_t*,DispatchEx**);
@@ -260,13 +260,17 @@ struct _script_ctx_t {
     exec_ctx_t *exec_ctx;
     named_item_t *named_items;
     IActiveScriptSite *site;
+    IInternetHostSecurityManager *secmgr;
+    DWORD safeopt;
     LCID lcid;
 
     jsheap_t tmp_heap;
 
-    DispatchEx *script_disp;
+    IDispatch *host_global;
+
     DispatchEx *global;
     DispatchEx *function_constr;
+    DispatchEx *activex_constr;
     DispatchEx *array_constr;
     DispatchEx *bool_constr;
     DispatchEx *date_constr;
@@ -295,6 +299,7 @@ HRESULT init_global(script_ctx_t*);
 HRESULT init_function_constr(script_ctx_t*,DispatchEx*);
 HRESULT create_object_prototype(script_ctx_t*,DispatchEx**);
 
+HRESULT create_activex_constr(script_ctx_t*,DispatchEx**);
 HRESULT create_array_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_bool_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_date_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
@@ -303,6 +308,8 @@ HRESULT create_number_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_object_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_regexp_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
 HRESULT create_string_constr(script_ctx_t*,DispatchEx*,DispatchEx**);
+
+IUnknown *create_ax_site(script_ctx_t*);
 
 typedef struct {
     const WCHAR *str;
@@ -364,7 +371,7 @@ static inline void num_set_nan(VARIANT *v)
 #endif
 }
 
-static inline DOUBLE ret_nan()
+static inline DOUBLE ret_nan(void)
 {
     VARIANT v;
     num_set_nan(&v);

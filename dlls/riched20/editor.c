@@ -2035,14 +2035,14 @@ ME_FilterEvent(ME_TextEditor *editor, UINT msg, WPARAM* wParam, LPARAM* lParam)
 {
     MSGFILTER msgf;
 
-    if (!editor->hWnd) return FALSE;
+    if (!editor->hWnd || !editor->hwndParent) return FALSE;
     msgf.nmhdr.hwndFrom = editor->hWnd;
     msgf.nmhdr.idFrom = GetWindowLongW(editor->hWnd, GWLP_ID);
     msgf.nmhdr.code = EN_MSGFILTER;
     msgf.msg = msg;
     msgf.wParam = *wParam;
     msgf.lParam = *lParam;
-    if (SendMessageW(GetParent(editor->hWnd), WM_NOTIFY, msgf.nmhdr.idFrom, (LPARAM)&msgf))
+    if (SendMessageW(editor->hwndParent, WM_NOTIFY, msgf.nmhdr.idFrom, (LPARAM)&msgf))
         return FALSE;
     *wParam = msgf.wParam;
     *lParam = msgf.lParam;
@@ -2598,7 +2598,7 @@ static BOOL ME_ShowContextMenu(ME_TextEditor *editor, int x, int y)
   }
   if(SUCCEEDED(IRichEditOleCallback_GetContextMenu(editor->lpOleCallback, seltype, NULL, &selrange, &menu)))
   {
-    TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, GetParent(editor->hWnd), NULL);
+    TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_RIGHTBUTTON, x, y, 0, editor->hwndParent, NULL);
     DestroyMenu(menu);
   }
   return TRUE;
@@ -2612,6 +2612,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   LONG selbarwidth;
 
   ed->hWnd = NULL;
+  ed->hwndParent = NULL;
   ed->texthost = texthost;
   ed->bEmulateVersion10 = bEmulateVersion10;
   ITextHost_TxGetPropertyBits(texthost,
@@ -2941,8 +2942,8 @@ static void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM
   if (cursor.pRun->member.run.style->fmt.dwMask & CFM_LINK &&
       cursor.pRun->member.run.style->fmt.dwEffects & CFE_LINK)
   { /* The clicked run has CFE_LINK set */
-    info.nmhdr.hwndFrom = editor->hWnd;
-    info.nmhdr.idFrom = GetWindowLongW(editor->hWnd, GWLP_ID);
+    info.nmhdr.hwndFrom = NULL;
+    info.nmhdr.idFrom = 0;
     info.nmhdr.code = EN_LINK;
     info.msg = msg;
     info.wParam = wParam;
@@ -2950,7 +2951,7 @@ static void ME_LinkNotify(ME_TextEditor *editor, UINT msg, WPARAM wParam, LPARAM
     cursor.nOffset = 0;
     info.chrg.cpMin = ME_GetCursorOfs(&cursor);
     info.chrg.cpMax = info.chrg.cpMin + cursor.pRun->member.run.strText->nLen;
-    SendMessageW(GetParent(editor->hWnd), WM_NOTIFY,info.nmhdr.idFrom, (LPARAM)&info);
+    ITextHost_TxNotify(editor->texthost, info.nmhdr.code, &info);
   }
 }
 
@@ -4369,7 +4370,7 @@ static LRESULT RichEditWndProc_common(HWND hWnd, UINT msg, WPARAM wParam,
       ITextHost *texthost;
 
       TRACE("WM_NCCREATE: hWnd %p style 0x%08x\n", hWnd, pcs->style);
-      texthost = ME_CreateTextHost(hWnd, FALSE);
+      texthost = ME_CreateTextHost(hWnd, pcs, FALSE);
       return texthost != NULL;
     }
     else if (msg != WM_NCDESTROY)
@@ -4499,7 +4500,7 @@ LRESULT WINAPI RichEdit10ANSIWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM 
     CREATESTRUCTW *pcs = (CREATESTRUCTW *)lParam;
 
     TRACE("WM_NCCREATE: hWnd %p style 0x%08x\n", hWnd, pcs->style);
-    texthost = ME_CreateTextHost(hWnd, TRUE);
+    texthost = ME_CreateTextHost(hWnd, pcs, TRUE);
     return texthost != NULL;
   }
   return RichEditANSIWndProc(hWnd, msg, wParam, lParam);

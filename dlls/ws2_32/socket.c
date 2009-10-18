@@ -168,7 +168,14 @@
 WINE_DEFAULT_DEBUG_CHANNEL(winsock);
 
 /* critical section to protect some non-reentrant net function */
-extern CRITICAL_SECTION csWSgetXXXbyYYY;
+static CRITICAL_SECTION csWSgetXXXbyYYY;
+static CRITICAL_SECTION_DEBUG critsect_debug =
+{
+    0, 0, &csWSgetXXXbyYYY,
+    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": csWSgetXXXbyYYY") }
+};
+static CRITICAL_SECTION csWSgetXXXbyYYY = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 union generic_unix_sockaddr
 {
@@ -280,9 +287,6 @@ static struct WS_servent *WS_dup_se(const struct servent* p_se);
 
 int WSAIOCTL_GetInterfaceCount(void);
 int WSAIOCTL_GetInterfaceName(int intNumber, char *intName);
-
-UINT wsaErrno(void);
-UINT wsaHerrno(int errnr);
 
 #define MAP_OPTION(opt) { WS_##opt, opt }
 
@@ -407,6 +411,99 @@ static const int ws_eai_map[][2] =
 };
 
 static const char magic_loopback_addr[] = {127, 12, 34, 56};
+
+/* ----------------------------------- error handling */
+
+static UINT wsaErrno(void)
+{
+    int	loc_errno = errno;
+    WARN("errno %d, (%s).\n", loc_errno, strerror(loc_errno));
+
+    switch(loc_errno)
+    {
+	case EINTR:		return WSAEINTR;
+	case EBADF:		return WSAEBADF;
+	case EPERM:
+	case EACCES:		return WSAEACCES;
+	case EFAULT:		return WSAEFAULT;
+	case EINVAL:		return WSAEINVAL;
+	case EMFILE:		return WSAEMFILE;
+	case EWOULDBLOCK:	return WSAEWOULDBLOCK;
+	case EINPROGRESS:	return WSAEINPROGRESS;
+	case EALREADY:		return WSAEALREADY;
+	case ENOTSOCK:		return WSAENOTSOCK;
+	case EDESTADDRREQ:	return WSAEDESTADDRREQ;
+	case EMSGSIZE:		return WSAEMSGSIZE;
+	case EPROTOTYPE:	return WSAEPROTOTYPE;
+	case ENOPROTOOPT:	return WSAENOPROTOOPT;
+	case EPROTONOSUPPORT:	return WSAEPROTONOSUPPORT;
+	case ESOCKTNOSUPPORT:	return WSAESOCKTNOSUPPORT;
+	case EOPNOTSUPP:	return WSAEOPNOTSUPP;
+	case EPFNOSUPPORT:	return WSAEPFNOSUPPORT;
+	case EAFNOSUPPORT:	return WSAEAFNOSUPPORT;
+	case EADDRINUSE:	return WSAEADDRINUSE;
+	case EADDRNOTAVAIL:	return WSAEADDRNOTAVAIL;
+	case ENETDOWN:		return WSAENETDOWN;
+	case ENETUNREACH:	return WSAENETUNREACH;
+	case ENETRESET:		return WSAENETRESET;
+	case ECONNABORTED:	return WSAECONNABORTED;
+	case EPIPE:
+	case ECONNRESET:	return WSAECONNRESET;
+	case ENOBUFS:		return WSAENOBUFS;
+	case EISCONN:		return WSAEISCONN;
+	case ENOTCONN:		return WSAENOTCONN;
+	case ESHUTDOWN:		return WSAESHUTDOWN;
+	case ETOOMANYREFS:	return WSAETOOMANYREFS;
+	case ETIMEDOUT:		return WSAETIMEDOUT;
+	case ECONNREFUSED:	return WSAECONNREFUSED;
+	case ELOOP:		return WSAELOOP;
+	case ENAMETOOLONG:	return WSAENAMETOOLONG;
+	case EHOSTDOWN:		return WSAEHOSTDOWN;
+	case EHOSTUNREACH:	return WSAEHOSTUNREACH;
+	case ENOTEMPTY:		return WSAENOTEMPTY;
+#ifdef EPROCLIM
+	case EPROCLIM:		return WSAEPROCLIM;
+#endif
+#ifdef EUSERS
+	case EUSERS:		return WSAEUSERS;
+#endif
+#ifdef EDQUOT
+	case EDQUOT:		return WSAEDQUOT;
+#endif
+#ifdef ESTALE
+	case ESTALE:		return WSAESTALE;
+#endif
+#ifdef EREMOTE
+	case EREMOTE:		return WSAEREMOTE;
+#endif
+
+       /* just in case we ever get here and there are no problems */
+	case 0:			return 0;
+        default:
+		WARN("Unknown errno %d!\n", loc_errno);
+		return WSAEOPNOTSUPP;
+    }
+}
+
+static UINT wsaHerrno(int loc_errno)
+{
+
+    WARN("h_errno %d.\n", loc_errno);
+
+    switch(loc_errno)
+    {
+	case HOST_NOT_FOUND:	return WSAHOST_NOT_FOUND;
+	case TRY_AGAIN:		return WSATRY_AGAIN;
+	case NO_RECOVERY:	return WSANO_RECOVERY;
+	case NO_DATA:		return WSANO_DATA;
+	case ENOBUFS:		return WSAENOBUFS;
+
+	case 0:			return 0;
+        default:
+		WARN("Unknown h_errno %d!\n", loc_errno);
+		return WSAEOPNOTSUPP;
+    }
+}
 
 static inline DWORD NtStatusToWSAError( const DWORD status )
 {
@@ -815,7 +912,6 @@ INT WINAPI WSACleanup(void)
 
 
 /***********************************************************************
- *      WSAGetLastError		(WINSOCK.111)
  *      WSAGetLastError		(WS2_32.111)
  */
 INT WINAPI WSAGetLastError(void)
@@ -2137,7 +2233,6 @@ INT WINAPI WS_getsockopt(SOCKET s, INT level,
 }
 
 /***********************************************************************
- *		htonl			(WINSOCK.8)
  *		htonl			(WS2_32.8)
  */
 WS_u_long WINAPI WS_htonl(WS_u_long hostlong)
@@ -2147,7 +2242,6 @@ WS_u_long WINAPI WS_htonl(WS_u_long hostlong)
 
 
 /***********************************************************************
- *		htons			(WINSOCK.9)
  *		htons			(WS2_32.9)
  */
 WS_u_short WINAPI WS_htons(WS_u_short hostshort)
@@ -2194,7 +2288,6 @@ int WINAPI WSAHtons(SOCKET s, WS_u_short hostshort, WS_u_short *lpnetshort)
 
 
 /***********************************************************************
- *		inet_addr		(WINSOCK.10)
  *		inet_addr		(WS2_32.11)
  */
 WS_u_long WINAPI WS_inet_addr(const char *cp)
@@ -2205,7 +2298,6 @@ WS_u_long WINAPI WS_inet_addr(const char *cp)
 
 
 /***********************************************************************
- *		ntohl			(WINSOCK.14)
  *		ntohl			(WS2_32.14)
  */
 WS_u_long WINAPI WS_ntohl(WS_u_long netlong)
@@ -2215,7 +2307,6 @@ WS_u_long WINAPI WS_ntohl(WS_u_long netlong)
 
 
 /***********************************************************************
- *		ntohs			(WINSOCK.15)
  *		ntohs			(WS2_32.15)
  */
 WS_u_short WINAPI WS_ntohs(WS_u_short netshort)
@@ -4245,7 +4336,6 @@ int WINAPI __WSAFDIsSet(SOCKET s, WS_fd_set *set)
 }
 
 /***********************************************************************
- *      WSAIsBlocking			(WINSOCK.114)
  *      WSAIsBlocking			(WS2_32.114)
  */
 BOOL WINAPI WSAIsBlocking(void)
@@ -4263,7 +4353,6 @@ BOOL WINAPI WSAIsBlocking(void)
 }
 
 /***********************************************************************
- *      WSACancelBlockingCall		(WINSOCK.113)
  *      WSACancelBlockingCall		(WS2_32.113)
  */
 INT WINAPI WSACancelBlockingCall(void)
@@ -4422,99 +4511,6 @@ static struct WS_servent *WS_dup_se(const struct servent* p_se)
     p_to->s_aliases = (char **)p;
     list_dup(p_se->s_aliases, p_to->s_aliases, 0);
     return p_to;
-}
-
-/* ----------------------------------- error handling */
-
-UINT wsaErrno(void)
-{
-    int	loc_errno = errno;
-    WARN("errno %d, (%s).\n", loc_errno, strerror(loc_errno));
-
-    switch(loc_errno)
-    {
-	case EINTR:		return WSAEINTR;
-	case EBADF:		return WSAEBADF;
-	case EPERM:
-	case EACCES:		return WSAEACCES;
-	case EFAULT:		return WSAEFAULT;
-	case EINVAL:		return WSAEINVAL;
-	case EMFILE:		return WSAEMFILE;
-	case EWOULDBLOCK:	return WSAEWOULDBLOCK;
-	case EINPROGRESS:	return WSAEINPROGRESS;
-	case EALREADY:		return WSAEALREADY;
-	case ENOTSOCK:		return WSAENOTSOCK;
-	case EDESTADDRREQ:	return WSAEDESTADDRREQ;
-	case EMSGSIZE:		return WSAEMSGSIZE;
-	case EPROTOTYPE:	return WSAEPROTOTYPE;
-	case ENOPROTOOPT:	return WSAENOPROTOOPT;
-	case EPROTONOSUPPORT:	return WSAEPROTONOSUPPORT;
-	case ESOCKTNOSUPPORT:	return WSAESOCKTNOSUPPORT;
-	case EOPNOTSUPP:	return WSAEOPNOTSUPP;
-	case EPFNOSUPPORT:	return WSAEPFNOSUPPORT;
-	case EAFNOSUPPORT:	return WSAEAFNOSUPPORT;
-	case EADDRINUSE:	return WSAEADDRINUSE;
-	case EADDRNOTAVAIL:	return WSAEADDRNOTAVAIL;
-	case ENETDOWN:		return WSAENETDOWN;
-	case ENETUNREACH:	return WSAENETUNREACH;
-	case ENETRESET:		return WSAENETRESET;
-	case ECONNABORTED:	return WSAECONNABORTED;
-	case EPIPE:
-	case ECONNRESET:	return WSAECONNRESET;
-	case ENOBUFS:		return WSAENOBUFS;
-	case EISCONN:		return WSAEISCONN;
-	case ENOTCONN:		return WSAENOTCONN;
-	case ESHUTDOWN:		return WSAESHUTDOWN;
-	case ETOOMANYREFS:	return WSAETOOMANYREFS;
-	case ETIMEDOUT:		return WSAETIMEDOUT;
-	case ECONNREFUSED:	return WSAECONNREFUSED;
-	case ELOOP:		return WSAELOOP;
-	case ENAMETOOLONG:	return WSAENAMETOOLONG;
-	case EHOSTDOWN:		return WSAEHOSTDOWN;
-	case EHOSTUNREACH:	return WSAEHOSTUNREACH;
-	case ENOTEMPTY:		return WSAENOTEMPTY;
-#ifdef EPROCLIM
-	case EPROCLIM:		return WSAEPROCLIM;
-#endif
-#ifdef EUSERS
-	case EUSERS:		return WSAEUSERS;
-#endif
-#ifdef EDQUOT
-	case EDQUOT:		return WSAEDQUOT;
-#endif
-#ifdef ESTALE
-	case ESTALE:		return WSAESTALE;
-#endif
-#ifdef EREMOTE
-	case EREMOTE:		return WSAEREMOTE;
-#endif
-
-       /* just in case we ever get here and there are no problems */
-	case 0:			return 0;
-        default:
-		WARN("Unknown errno %d!\n", loc_errno);
-		return WSAEOPNOTSUPP;
-    }
-}
-
-UINT wsaHerrno(int loc_errno)
-{
-
-    WARN("h_errno %d.\n", loc_errno);
-
-    switch(loc_errno)
-    {
-	case HOST_NOT_FOUND:	return WSAHOST_NOT_FOUND;
-	case TRY_AGAIN:		return WSATRY_AGAIN;
-	case NO_RECOVERY:	return WSANO_RECOVERY;
-	case NO_DATA:		return WSANO_DATA;
-	case ENOBUFS:		return WSAENOBUFS;
-
-	case 0:			return 0;
-        default:
-		WARN("Unknown h_errno %d!\n", loc_errno);
-		return WSAEOPNOTSUPP;
-    }
 }
 
 

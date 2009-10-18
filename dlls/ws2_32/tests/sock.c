@@ -721,7 +721,7 @@ static void WINAPI event_client ( client_params *par )
     HANDLE event;
     WSANETWORKEVENTS wsa_events;
     char *send_last, *recv_last, *send_p, *recv_p;
-    long mask = FD_READ | FD_WRITE | FD_CLOSE;
+    LONG mask = FD_READ | FD_WRITE | FD_CLOSE;
 
     trace ( "event_client (%x): starting\n", id );
     client_start ( par );
@@ -2039,7 +2039,8 @@ static void test_accept(void)
     }
 
     WaitForSingleObject(thread_handle, 1000);
-    ok(thread_params.ReadKilled, "closesocket did not wakeup accept\n");
+    ok(thread_params.ReadKilled || broken(!thread_params.ReadKilled) /* Win98/ME, after accept */,
+       "closesocket did not wakeup accept\n");
 
 done:
     if (accepted != INVALID_SOCKET)

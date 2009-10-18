@@ -13,11 +13,6 @@ C_SRCS = \
 
 RC_SRCS = version.rc
 
-C_SRCS16 = \
-	ver16.c
-
-SPEC_SRCS16 = ver.spec
-
 @MAKE_DLL_RULES@
 
 @DEPENDENCIES@  # everything below this line is overwritten by make depend

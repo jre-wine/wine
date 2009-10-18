@@ -69,6 +69,9 @@ static const WCHAR ScriptEngineBuildVersionW[] =
 static const WCHAR CollectGarbageW[] = {'C','o','l','l','e','c','t','G','a','r','b','a','g','e',0};
 static const WCHAR MathW[] = {'M','a','t','h',0};
 static const WCHAR encodeURIW[] = {'e','n','c','o','d','e','U','R','I',0};
+static const WCHAR decodeURIW[] = {'d','e','c','o','d','e','U','R','I',0};
+static const WCHAR encodeURIComponentW[] = {'e','n','c','o','d','e','U','R','I','C','o','m','p','o','n','e','n','t',0};
+static const WCHAR decodeURIComponentW[] = {'d','e','c','o','d','e','U','R','I','C','o','m','p','o','n','e','n','t',0};
 
 static const WCHAR undefinedW[] = {'u','n','d','e','f','i','n','e','d',0};
 
@@ -274,8 +277,9 @@ static HRESULT JSGlobal_RegExp(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
 static HRESULT JSGlobal_ActiveXObject(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    TRACE("\n");
+
+    return constructor_call(ctx->activex_constr, flags, dp, retv, ei, sp);
 }
 
 static HRESULT JSGlobal_VBArray(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
@@ -295,8 +299,72 @@ static HRESULT JSGlobal_Enumerator(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
 static HRESULT JSGlobal_escape(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    FIXME("\n");
-    return E_NOTIMPL;
+    BSTR ret, str;
+    const WCHAR *ptr;
+    DWORD len = 0;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!arg_cnt(dp)) {
+        if(retv) {
+            ret = SysAllocString(undefinedW);
+            if(!ret)
+                return E_OUTOFMEMORY;
+
+            V_VT(retv) = VT_BSTR;
+            V_BSTR(retv) = ret;
+        }
+
+        return S_OK;
+    }
+
+    hres = to_string(ctx, get_arg(dp, 0), ei, &str);
+    if(FAILED(hres))
+        return hres;
+
+    for(ptr=str; *ptr; ptr++) {
+        if(*ptr > 0xff)
+            len += 6;
+        else if(isalnum((char)*ptr) || *ptr=='*' || *ptr=='@' || *ptr=='-'
+                || *ptr=='_' || *ptr=='+' || *ptr=='.' || *ptr=='/')
+            len++;
+        else
+            len += 3;
+    }
+
+    ret = SysAllocStringLen(NULL, len);
+    if(!ret)
+        return E_OUTOFMEMORY;
+
+    len = 0;
+    for(ptr=str; *ptr; ptr++) {
+        if(*ptr > 0xff) {
+            ret[len++] = '%';
+            ret[len++] = 'u';
+            ret[len++] = int_to_char(*ptr >> 12);
+            ret[len++] = int_to_char((*ptr >> 8) & 0xf);
+            ret[len++] = int_to_char((*ptr >> 4) & 0xf);
+            ret[len++] = int_to_char(*ptr & 0xf);
+        }
+        else if(isalnum((char)*ptr) || *ptr=='*' || *ptr=='@' || *ptr=='-'
+                || *ptr=='_' || *ptr=='+' || *ptr=='.' || *ptr=='/')
+            ret[len++] = *ptr;
+        else {
+            ret[len++] = '%';
+            ret[len++] = int_to_char(*ptr >> 4);
+            ret[len++] = int_to_char(*ptr & 0xf);
+        }
+    }
+
+    if(retv) {
+        V_VT(retv) = VT_BSTR;
+        V_BSTR(retv) = ret;
+    }
+    else
+        SysFreeString(ret);
+
+    return S_OK;
 }
 
 /* ECMA-262 3rd Edition    15.1.2.1 */
@@ -769,8 +837,29 @@ static HRESULT JSGlobal_encodeURI(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     return S_OK;
 }
 
+static HRESULT JSGlobal_decodeURI(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
+        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT JSGlobal_encodeURIComponent(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
+        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
+static HRESULT JSGlobal_decodeURIComponent(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
+        VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
+{
+    FIXME("\n");
+    return E_NOTIMPL;
+}
+
 static const builtin_prop_t JSGlobal_props[] = {
-    {ActiveXObjectW,             JSGlobal_ActiveXObject,             PROPF_METHOD},
+    {ActiveXObjectW,             JSGlobal_ActiveXObject,             PROPF_CONSTR},
     {ArrayW,                     JSGlobal_Array,                     PROPF_CONSTR},
     {BooleanW,                   JSGlobal_Boolean,                   PROPF_CONSTR},
     {CollectGarbageW,            JSGlobal_CollectGarbage,            PROPF_METHOD},
@@ -797,7 +886,10 @@ static const builtin_prop_t JSGlobal_props[] = {
     {TypeErrorW,                 JSGlobal_TypeError,                 PROPF_CONSTR},
     {URIErrorW,                  JSGlobal_URIError,                  PROPF_CONSTR},
     {VBArrayW,                   JSGlobal_VBArray,                   PROPF_METHOD},
+    {decodeURIW,                 JSGlobal_decodeURI,                 PROPF_METHOD},
+    {decodeURIComponentW,        JSGlobal_decodeURIComponent,        PROPF_METHOD},
     {encodeURIW,                 JSGlobal_encodeURI,                 PROPF_METHOD},
+    {encodeURIComponentW,        JSGlobal_encodeURIComponent,        PROPF_METHOD},
     {escapeW,                    JSGlobal_escape,                    PROPF_METHOD},
     {evalW,                      JSGlobal_eval,                      PROPF_METHOD|1},
     {isFiniteW,                  JSGlobal_isFinite,                  PROPF_METHOD},
@@ -825,6 +917,10 @@ static HRESULT init_constructors(script_ctx_t *ctx, DispatchEx *object_prototype
         return hres;
 
     hres = create_object_constr(ctx, object_prototype, &ctx->object_constr);
+    if(FAILED(hres))
+        return hres;
+
+    hres = create_activex_constr(ctx, &ctx->activex_constr);
     if(FAILED(hres))
         return hres;
 

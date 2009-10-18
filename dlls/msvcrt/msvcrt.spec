@@ -151,6 +151,7 @@
 @ cdecl __threadhandle() kernel32.GetCurrentThread
 @ cdecl __threadid() kernel32.GetCurrentThreadId
 @ cdecl __toascii(long) MSVCRT___toascii
+@ cdecl __uncaught_exception() MSVCRT___uncaught_exception
 @ cdecl __unDName(ptr str long ptr ptr long)
 @ cdecl __unDNameEx(ptr str long ptr ptr ptr long)
 @ extern __unguarded_readlc_active MSVCRT___unguarded_readlc_active
@@ -550,7 +551,7 @@
 @ cdecl _wctime(ptr) MSVCRT__wctime
 @ cdecl _wctime32(ptr) MSVCRT__wctime32
 @ cdecl _wctime64(ptr) MSVCRT__wctime64
-@ extern _wenviron
+@ extern _wenviron MSVCRT__wenviron
 @ varargs _wexecl(wstr wstr)
 @ varargs _wexecle(wstr wstr)
 @ varargs _wexeclp(wstr wstr)

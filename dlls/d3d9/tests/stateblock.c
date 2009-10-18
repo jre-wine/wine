@@ -103,7 +103,8 @@ static void test_begin_end_state_block(IDirect3DDevice9 *device_ptr)
 
 /* ============================ State Testing Framework ========================== */
 
-typedef struct state_test {
+struct state_test
+{
     const char* test_name;
 
     /* The initial data is usually the same
@@ -119,17 +120,10 @@ typedef struct state_test {
     /* The test data is the experiment data to try
      * in - what we want to write
      * out - what windows will actually write (not necessarily the same)  */
-    const void* test_data_in;
-    const void* test_data_out;
-
-    /* The poison data is the data to preinitialize the return buffer to */
-    const void* poison_data;
-
-    /* Return buffer */
-    void* return_data;
-
-    /* Size of the data samples above */
-    unsigned int data_size;
+    const void *test_data_in;
+    const void *test_data_out_all;
+    const void *test_data_out_vertex;
+    const void *test_data_out_pixel;
 
     /* Test resource management handlers */
     HRESULT (*setup_handler) (struct state_test* test);
@@ -137,118 +131,111 @@ typedef struct state_test {
 
     /* Test data handlers */
     void (*set_handler) (IDirect3DDevice9* device, const struct state_test* test, const void* data_in);
-    void (*get_handler) (IDirect3DDevice9* device, const struct state_test* test, void* data_out);
-    void (*print_handler) (const struct state_test* test, const void* data);
+    void (*check_data)(IDirect3DDevice9 *device, unsigned int chain_stage,
+            const struct state_test *test, const void *expected_data);
 
     /* Test arguments */
     const void* test_arg;
 
     /* Test-specific context data */
     void* test_context;
+};
 
-} state_test;
+#define EVENT_OK    0
+#define EVENT_ERROR -1
 
-/* See below for explanation of the flags */
-#define EVENT_OK             0x00
-#define EVENT_CHECK_DEFAULT  0x01
-#define EVENT_CHECK_INITIAL  0x02
-#define EVENT_CHECK_TEST     0x04
-#define EVENT_ERROR          0x08
-#define EVENT_APPLY_DATA     0x10
+struct event_data
+{
+    IDirect3DStateBlock9 *stateblock;
+    IDirect3DSurface9 *original_render_target;
+    IDirect3DSwapChain9 *new_swap_chain;
+};
 
-typedef struct event {
-   int (*event_fn) (IDirect3DDevice9* device, void* arg);
-   int status;
-} event;
+enum stateblock_data
+{
+    SB_DATA_NONE = 0,
+    SB_DATA_DEFAULT,
+    SB_DATA_INITIAL,
+    SB_DATA_TEST_IN,
+    SB_DATA_TEST_ALL,
+    SB_DATA_TEST_VERTEX,
+    SB_DATA_TEST_PIXEL,
+};
+
+struct event
+{
+    int (*event_fn)(IDirect3DDevice9 *device, struct event_data *event_data);
+    enum stateblock_data check;
+    enum stateblock_data apply;
+};
+
+static const void *get_event_data(const struct state_test *test, enum stateblock_data data)
+{
+    switch (data)
+    {
+        case SB_DATA_DEFAULT:
+            return test->default_data;
+
+        case SB_DATA_INITIAL:
+            return test->initial_data;
+
+        case SB_DATA_TEST_IN:
+            return test->test_data_in;
+
+        case SB_DATA_TEST_ALL:
+            return test->test_data_out_all;
+
+        case SB_DATA_TEST_VERTEX:
+            return test->test_data_out_vertex;
+
+        case SB_DATA_TEST_PIXEL:
+            return test->test_data_out_pixel;
+
+        default:
+            return NULL;
+    }
+}
 
 /* This is an event-machine, which tests things.
  * It tests get and set operations for a batch of states, based on
  * results from the event function, which directs what's to be done */
 
-static void execute_test_chain(
-    IDirect3DDevice9* device,
-    state_test* test,
-    unsigned int ntests,
-    event *event,
-    unsigned int nevents,
-    void* event_arg) {
-
-    int outcome;
-    unsigned int i = 0, j;
+static void execute_test_chain(IDirect3DDevice9 *device, struct state_test *test,
+        unsigned int ntests, struct event *event, unsigned int nevents, struct event_data *event_data)
+{
+    unsigned int i, j;
 
     /* For each queued event */
-    for (j=0; j < nevents; j++) {
+    for (j = 0; j < nevents; ++j)
+    {
+        const void *data;
 
-        /* Execute the next event handler (if available) or just set the supplied status */
-        outcome = event[j].status;
+        /* Execute the next event handler (if available). */
         if (event[j].event_fn)
-            outcome |= event[j].event_fn(device, event_arg);
-
-        /* Now verify correct outcome depending on what was signaled by the handler.
-         * An EVENT_CHECK_TEST signal means check the returned data against the test_data (out).
-         * An EVENT_CHECK_DEFAULT signal means check the returned data against the default_data.
-         * An EVENT_CHECK_INITIAL signal means check the returned data against the initial_data.
-         * An EVENT_ERROR signal means the test isn't going to work, exit the event loop.
-         * An EVENT_APPLY_DATA signal means load the test data (after checks) */
-
-        if (outcome & EVENT_ERROR) {
-            trace("Test %s, Stage %u in error state, aborting\n", test[i].test_name, j);
-            break;
-
-        } else if (outcome & EVENT_CHECK_TEST || outcome & EVENT_CHECK_DEFAULT || outcome & EVENT_CHECK_INITIAL) {
-
-            for (i=0; i < ntests; i++) {
-
-                memcpy(test[i].return_data, test[i].poison_data, test[i].data_size);
-                test[i].get_handler(device, &test[i], test[i].return_data);
-
-                if (outcome & EVENT_CHECK_TEST) {
-
-                    BOOL test_failed = memcmp(test[i].test_data_out, test[i].return_data, test[i].data_size);
-                    ok(!test_failed, "Test %s, Stage %u: returned data does not match test data [csize=%u]\n",
-                        test[i].test_name, j, test[i].data_size);
-
-                    if (test_failed && test[i].print_handler) {
-                        trace("Returned data was:\n");
-                        test[i].print_handler(&test[i], test[i].return_data);
-                        trace("Test data was:\n");
-                        test[i].print_handler(&test[i], test[i].test_data_out);
-                    }
-                }
-
-                else if (outcome & EVENT_CHECK_DEFAULT)
-                {
-                    BOOL test_failed = memcmp(test[i].default_data, test[i].return_data, test[i].data_size);
-                    ok (!test_failed, "Test %s, Stage %u: returned data does not match default data [csize=%u]\n",
-                        test[i].test_name, j, test[i].data_size);
-
-                    if (test_failed && test[i].print_handler) {
-                        trace("Returned data was:\n");
-                        test[i].print_handler(&test[i], test[i].return_data);
-                        trace("Default data was:\n");
-                        test[i].print_handler(&test[i], test[i].default_data);
-                    }
-                }
-
-                else if (outcome & EVENT_CHECK_INITIAL)
-                {
-                    BOOL test_failed = memcmp(test[i].initial_data, test[i].return_data, test[i].data_size);
-                    ok (!test_failed, "Test %s, Stage %u: returned data does not match initial data [csize=%u]\n",
-                        test[i].test_name, j, test[i].data_size);
-
-                    if (test_failed && test[i].print_handler) {
-                        trace("Returned data was:\n");
-                        test[i].print_handler(&test[i], test[i].return_data);
-                        trace("Initial data was:\n");
-                        test[i].print_handler(&test[i], test[i].initial_data);
-                    }
-                }
+        {
+            if (event[j].event_fn(device, event_data) == EVENT_ERROR)
+            {
+                trace("Stage %u in error state, aborting.\n", j);
+                break;
             }
         }
 
-        if (outcome & EVENT_APPLY_DATA) {
-            for (i=0; i < ntests; i++)
-                test[i].set_handler(device, &test[i], test[i].test_data_in);
+        if (event[j].check != SB_DATA_NONE)
+        {
+            for (i = 0; i < ntests; ++i)
+            {
+                data = get_event_data(&test[i], event[j].check);
+                test[i].check_data(device, j, &test[i], data);
+            }
+        }
+
+        if (event[j].apply != SB_DATA_NONE)
+        {
+            for (i = 0; i < ntests; ++i)
+            {
+                data = get_event_data(&test[i], event[j].apply);
+                test[i].set_handler(device, &test[i], data);
+            }
         }
      }
 
@@ -257,17 +244,10 @@ static void execute_test_chain(
          test[i].set_handler(device, &test[i], test[i].default_data);
 }
 
-typedef struct event_data {
-    IDirect3DStateBlock9* stateblock;
-    IDirect3DSurface9* original_render_target;
-    IDirect3DSwapChain9* new_swap_chain;
-} event_data;
-
-static int switch_render_target(IDirect3DDevice9 *device, void *data)
+static int switch_render_target(IDirect3DDevice9 *device, struct event_data *event_data)
 {
     HRESULT hret;
     D3DPRESENT_PARAMETERS present_parameters;
-    event_data* edata = data;
     IDirect3DSwapChain9* swapchain = NULL;
     IDirect3DSurface9* backbuffer = NULL;
 
@@ -287,7 +267,7 @@ static int switch_render_target(IDirect3DDevice9 *device, void *data)
     if (hret != D3D_OK) goto error;
 
     /* Save the current render target */
-    hret = IDirect3DDevice9_GetRenderTarget(device, 0, &edata->original_render_target);
+    hret = IDirect3DDevice9_GetRenderTarget(device, 0, &event_data->original_render_target);
     ok (hret == D3D_OK, "GetRenderTarget returned %#x.\n", hret);
     if (hret != D3D_OK) goto error;
 
@@ -297,7 +277,7 @@ static int switch_render_target(IDirect3DDevice9 *device, void *data)
     if (hret != D3D_OK) goto error;
 
     IUnknown_Release(backbuffer);
-    edata->new_swap_chain = swapchain;
+    event_data->new_swap_chain = swapchain;
     return EVENT_OK;
 
     error:
@@ -306,87 +286,101 @@ static int switch_render_target(IDirect3DDevice9 *device, void *data)
     return EVENT_ERROR;
 }
 
-static int revert_render_target(IDirect3DDevice9 *device, void *data)
+static int revert_render_target(IDirect3DDevice9 *device, struct event_data *event_data)
 {
     HRESULT hret;
-    event_data* edata = data;
 
     /* Reset the old render target */
-    hret = IDirect3DDevice9_SetRenderTarget(device, 0, edata->original_render_target);
+    hret = IDirect3DDevice9_SetRenderTarget(device, 0, event_data->original_render_target);
     ok (hret == D3D_OK, "SetRenderTarget returned %#x.\n", hret);
     if (hret != D3D_OK) {
-        IUnknown_Release(edata->original_render_target);
+        IUnknown_Release(event_data->original_render_target);
         return EVENT_ERROR;
     }
 
-    IUnknown_Release(edata->original_render_target);
+    IUnknown_Release(event_data->original_render_target);
+    IUnknown_Release(event_data->new_swap_chain);
 
-    IUnknown_Release(edata->new_swap_chain);
     return EVENT_OK;
 }
 
-static int begin_stateblock(
-    IDirect3DDevice9* device,
-    void* data) {
+static int create_stateblock_all(IDirect3DDevice9 *device, struct event_data *event_data)
+{
+    HRESULT hr;
 
+    hr = IDirect3DDevice9_CreateStateBlock(device, D3DSBT_ALL, &event_data->stateblock);
+    ok(SUCCEEDED(hr), "CreateStateBlock returned %#x.\n", hr);
+    if (FAILED(hr)) return EVENT_ERROR;
+    return EVENT_OK;
+}
+
+static int create_stateblock_vertex(IDirect3DDevice9 *device, struct event_data *event_data)
+{
+    HRESULT hr;
+
+    hr = IDirect3DDevice9_CreateStateBlock(device, D3DSBT_VERTEXSTATE, &event_data->stateblock);
+    ok(SUCCEEDED(hr), "CreateStateBlock returned %#x.\n", hr);
+    if (FAILED(hr)) return EVENT_ERROR;
+    return EVENT_OK;
+}
+
+static int create_stateblock_pixel(IDirect3DDevice9 *device, struct event_data *event_data)
+{
+    HRESULT hr;
+
+    hr = IDirect3DDevice9_CreateStateBlock(device, D3DSBT_PIXELSTATE, &event_data->stateblock);
+    ok(SUCCEEDED(hr), "CreateStateBlock returned %#x.\n", hr);
+    if (FAILED(hr)) return EVENT_ERROR;
+    return EVENT_OK;
+}
+
+static int begin_stateblock(IDirect3DDevice9 *device, struct event_data *event_data)
+{
     HRESULT hret;
 
-    data = NULL;
     hret = IDirect3DDevice9_BeginStateBlock(device);
     ok(hret == D3D_OK, "BeginStateBlock returned %#x.\n", hret);
     if (hret != D3D_OK) return EVENT_ERROR;
     return EVENT_OK;
 }
 
-static int end_stateblock(
-    IDirect3DDevice9* device,
-    void* data) {
-
+static int end_stateblock(IDirect3DDevice9 *device, struct event_data *event_data)
+{
     HRESULT hret;
-    event_data* edata = data;
 
-    hret = IDirect3DDevice9_EndStateBlock(device, &edata->stateblock);
+    hret = IDirect3DDevice9_EndStateBlock(device, &event_data->stateblock);
     ok(hret == D3D_OK, "EndStateBlock returned %#x.\n", hret);
     if (hret != D3D_OK) return EVENT_ERROR;
     return EVENT_OK;
 }
 
-static int abort_stateblock(
-    IDirect3DDevice9* device,
-    void* data) {
-
-    event_data* edata = data;
-
-    IUnknown_Release(edata->stateblock);
+static int release_stateblock(IDirect3DDevice9 *device, struct event_data *event_data)
+{
+    IUnknown_Release(event_data->stateblock);
     return EVENT_OK;
 }
 
-static int apply_stateblock(
-    IDirect3DDevice9* device,
-    void* data) {
-
-    event_data* edata = data;
+static int apply_stateblock(IDirect3DDevice9 *device, struct event_data *event_data)
+{
     HRESULT hret;
 
-    hret = IDirect3DStateBlock9_Apply(edata->stateblock);
+    hret = IDirect3DStateBlock9_Apply(event_data->stateblock);
     ok(hret == D3D_OK, "Apply returned %#x.\n", hret);
     if (hret != D3D_OK) {
-        IUnknown_Release(edata->stateblock);
+        IUnknown_Release(event_data->stateblock);
         return EVENT_ERROR;
     }
 
-    IUnknown_Release(edata->stateblock);
+    IUnknown_Release(event_data->stateblock);
+
     return EVENT_OK;
 }
 
-static int capture_stateblock(
-    IDirect3DDevice9* device,
-    void* data) {
-
+static int capture_stateblock(IDirect3DDevice9 *device, struct event_data *event_data)
+{
     HRESULT hret;
-    event_data* edata = data;
 
-    hret = IDirect3DStateBlock9_Capture(edata->stateblock);
+    hret = IDirect3DStateBlock9_Capture(event_data->stateblock);
     ok(hret == D3D_OK, "Capture returned %#x.\n", hret);
     if (hret != D3D_OK)
         return EVENT_ERROR;
@@ -394,54 +388,100 @@ static int capture_stateblock(
     return EVENT_OK;
 }
 
-static void execute_test_chain_all(
-    IDirect3DDevice9* device,
-    state_test* test,
-    unsigned int ntests) {
-
+static void execute_test_chain_all(IDirect3DDevice9 *device, struct state_test *test, unsigned int ntests)
+{
+    struct event_data arg;
     unsigned int i;
-    event_data arg;
 
-    event read_events[] = {
-        { NULL, EVENT_CHECK_INITIAL }
+    struct event read_events[] =
+    {
+        {NULL,                      SB_DATA_INITIAL,        SB_DATA_NONE},
     };
 
-    event write_read_events[] = {
-        { NULL, EVENT_APPLY_DATA },
-        { NULL, EVENT_CHECK_TEST }
+    struct event write_read_events[] =
+    {
+        {NULL,                      SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {NULL,                      SB_DATA_TEST_ALL,       SB_DATA_NONE},
     };
 
-    event abort_stateblock_events[] = {
-        { begin_stateblock, EVENT_APPLY_DATA },
-        { end_stateblock, EVENT_OK },
-        { abort_stateblock, EVENT_CHECK_DEFAULT }
+    struct event abort_stateblock_events[] =
+    {
+        {begin_stateblock,          SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {end_stateblock,            SB_DATA_NONE,           SB_DATA_NONE},
+        {release_stateblock,        SB_DATA_DEFAULT,        SB_DATA_NONE},
     };
 
-    event apply_stateblock_events[] = {
-        { begin_stateblock, EVENT_APPLY_DATA },
-        { end_stateblock, EVENT_OK },
-        { apply_stateblock, EVENT_CHECK_TEST }
+    struct event apply_stateblock_events[] =
+    {
+        {begin_stateblock,          SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {end_stateblock,            SB_DATA_NONE,           SB_DATA_NONE},
+        {apply_stateblock,          SB_DATA_TEST_ALL,       SB_DATA_NONE},
     };
 
-    event capture_reapply_stateblock_events[] = {
-          { begin_stateblock, EVENT_APPLY_DATA },
-          { end_stateblock, EVENT_OK },
-          { capture_stateblock, EVENT_CHECK_DEFAULT | EVENT_APPLY_DATA },
-          { apply_stateblock, EVENT_CHECK_DEFAULT }
+    struct event capture_reapply_stateblock_events[] =
+    {
+        {begin_stateblock,          SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {end_stateblock,            SB_DATA_NONE,           SB_DATA_NONE},
+        {capture_stateblock,        SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {apply_stateblock,          SB_DATA_DEFAULT,        SB_DATA_NONE},
     };
 
-    event rendertarget_switch_events[] = {
-          { NULL, EVENT_APPLY_DATA },
-          { switch_render_target, EVENT_CHECK_TEST },
-          { revert_render_target, EVENT_OK }
+    struct event create_stateblock_capture_apply_all_events[] =
+    {
+        {create_stateblock_all,     SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {capture_stateblock,        SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_ALL,       SB_DATA_NONE},
     };
 
-    event rendertarget_stateblock_events[] = {
-          { begin_stateblock, EVENT_APPLY_DATA },
-          { switch_render_target, EVENT_CHECK_DEFAULT },
-          { end_stateblock, EVENT_OK },
-          { revert_render_target, EVENT_OK },
-          { apply_stateblock, EVENT_CHECK_TEST }
+    struct event create_stateblock_apply_all_events[] =
+    {
+        {NULL,                      SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {create_stateblock_all,     SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_ALL,       SB_DATA_NONE},
+    };
+
+    struct event create_stateblock_capture_apply_vertex_events[] =
+    {
+        {create_stateblock_vertex,  SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {capture_stateblock,        SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_VERTEX,    SB_DATA_NONE},
+    };
+
+    struct event create_stateblock_apply_vertex_events[] =
+    {
+        {NULL,                      SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {create_stateblock_vertex,  SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_VERTEX,    SB_DATA_NONE},
+    };
+
+    struct event create_stateblock_capture_apply_pixel_events[] =
+    {
+        {create_stateblock_pixel,   SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {capture_stateblock,        SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_PIXEL,     SB_DATA_NONE},
+    };
+
+    struct event create_stateblock_apply_pixel_events[] =
+    {
+        {NULL,                      SB_DATA_DEFAULT,        SB_DATA_TEST_IN},
+        {create_stateblock_pixel,   SB_DATA_TEST_ALL,       SB_DATA_DEFAULT},
+        {apply_stateblock,          SB_DATA_TEST_PIXEL,     SB_DATA_NONE},
+    };
+
+    struct event rendertarget_switch_events[] =
+    {
+        {NULL,                      SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {switch_render_target,      SB_DATA_TEST_ALL,       SB_DATA_NONE},
+        {revert_render_target,      SB_DATA_NONE,           SB_DATA_NONE},
+    };
+
+    struct event rendertarget_stateblock_events[] =
+    {
+        {begin_stateblock,          SB_DATA_NONE,           SB_DATA_TEST_IN},
+        {switch_render_target,      SB_DATA_DEFAULT,        SB_DATA_NONE},
+        {end_stateblock,            SB_DATA_NONE,           SB_DATA_NONE},
+        {revert_render_target,      SB_DATA_NONE,           SB_DATA_NONE},
+        {apply_stateblock,          SB_DATA_TEST_ALL,       SB_DATA_NONE},
     };
 
     /* Setup each test for execution */
@@ -467,6 +507,24 @@ static void execute_test_chain_all(
     trace("Running stateblock capture/reapply state tests\n");
     execute_test_chain(device, test, ntests, capture_reapply_stateblock_events, 4, &arg);
 
+    trace("Running create stateblock capture/apply all state tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_capture_apply_all_events, 3, &arg);
+
+    trace("Running create stateblock apply state all tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_apply_all_events, 3, &arg);
+
+    trace("Running create stateblock capture/apply vertex state tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_capture_apply_vertex_events, 3, &arg);
+
+    trace("Running create stateblock apply vertex state tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_apply_vertex_events, 3, &arg);
+
+    trace("Running create stateblock capture/apply pixel state tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_capture_apply_pixel_events, 3, &arg);
+
+    trace("Running create stateblock apply pixel state tests\n");
+    execute_test_chain(device, test, ntests, create_stateblock_apply_pixel_events, 3, &arg);
+
     trace("Running rendertarget switch state tests\n");
     execute_test_chain(device, test, ntests, rendertarget_switch_events, 3, &arg);
 
@@ -480,46 +538,45 @@ static void execute_test_chain_all(
 
 /* =================== State test: Pixel and Vertex Shader constants ============ */
 
-typedef struct shader_constant_data {
+struct shader_constant_data
+{
     int int_constant[4];     /* 1x4 integer constant */
     float float_constant[4]; /* 1x4 float constant */
     BOOL bool_constant[4];   /* 4x1 boolean constants */
-} shader_constant_data;
+};
 
-typedef struct shader_constant_arg {
+struct shader_constant_arg
+{
     unsigned int idx;
     BOOL pshader;
-} shader_constant_arg;
+};
 
-typedef struct shader_constant_context {
-    shader_constant_data return_data_buffer;
-} shader_constant_context;
+static const struct shader_constant_data shader_constant_poison_data =
+{
+    {0x1337c0de, 0x1337c0de, 0x1337c0de, 0x1337c0de},
+    {1.0f, 2.0f, 3.0f, 4.0f},
+    {FALSE, TRUE, FALSE, TRUE},
+};
 
-static void shader_constant_print_handler(
-    const state_test* test,
-    const void* data) {
+static const struct shader_constant_data shader_constant_default_data =
+{
+    {0, 0, 0, 0},
+    {0.0f, 0.0f, 0.0f, 0.0f},
+    {0, 0, 0, 0},
+};
 
-    const shader_constant_data* scdata = data;
+static const struct shader_constant_data shader_constant_test_data =
+{
+    {0xdead0000, 0xdead0001, 0xdead0002, 0xdead0003},
+    {5.0f, 6.0f, 7.0f, 8.0f},
+    {TRUE, FALSE, FALSE, TRUE},
+};
 
-    trace("Integer constant = { %#x, %#x, %#x, %#x }\n",
-        scdata->int_constant[0], scdata->int_constant[1],
-        scdata->int_constant[2], scdata->int_constant[3]);
-
-    trace("Float constant = { %f, %f, %f, %f }\n",
-        scdata->float_constant[0], scdata->float_constant[1],
-        scdata->float_constant[2], scdata->float_constant[3]);
-
-    trace("Boolean constants = [ %#x, %#x, %#x, %#x ]\n",
-        scdata->bool_constant[0], scdata->bool_constant[1],
-        scdata->bool_constant[2], scdata->bool_constant[3]);
-}
-
-static void shader_constant_set_handler(
-    IDirect3DDevice9* device, const state_test* test, const void* data) {
-
+static void shader_constant_set_handler(IDirect3DDevice9 *device, const struct state_test *test, const void *data)
+{
+    const struct shader_constant_arg *scarg = test->test_arg;
+    const struct shader_constant_data *scdata = data;
     HRESULT hret;
-    const shader_constant_data* scdata = data;
-    const shader_constant_arg* scarg = test->test_arg;
     unsigned int index = scarg->idx;
 
     if (!scarg->pshader) {
@@ -540,141 +597,205 @@ static void shader_constant_set_handler(
     }
 }
 
-static void shader_constant_get_handler(
-    IDirect3DDevice9* device, const state_test* test, void* data) {
+static void shader_constant_check_data(IDirect3DDevice9 *device, unsigned int chain_stage,
+        const struct state_test *test, const void *expected_data)
+{
+    struct shader_constant_data value = shader_constant_poison_data;
+    const struct shader_constant_data *scdata = expected_data;
+    const struct shader_constant_arg *scarg = test->test_arg;
+    HRESULT hr;
 
-    HRESULT hret;
-    shader_constant_data* scdata = data;
-    const shader_constant_arg* scarg = test->test_arg;
-    unsigned int index = scarg->idx;
-
-    if (!scarg->pshader) {
-        hret = IDirect3DDevice9_GetVertexShaderConstantI(device, index, scdata->int_constant, 1);
-        ok(hret == D3D_OK, "GetVertexShaderConstantI returned %#x.\n", hret);
-        hret = IDirect3DDevice9_GetVertexShaderConstantF(device, index, scdata->float_constant, 1);
-        ok(hret == D3D_OK, "GetVertexShaderConstantF returned %#x.\n", hret);
-        hret = IDirect3DDevice9_GetVertexShaderConstantB(device, index, scdata->bool_constant, 4);
-        ok(hret == D3D_OK, "GetVertexShaderConstantB returned %#x.\n", hret);
-
-    } else {
-        hret = IDirect3DDevice9_GetPixelShaderConstantI(device, index, scdata->int_constant, 1);
-        ok(hret == D3D_OK, "GetPixelShaderConstantI returned %#x.\n", hret);
-        hret = IDirect3DDevice9_GetPixelShaderConstantF(device, index, scdata->float_constant, 1);
-        ok(hret == D3D_OK, "GetPixelShaderConstantF returned %#x.\n", hret);
-        hret = IDirect3DDevice9_GetPixelShaderConstantB(device, index, scdata->bool_constant, 4);
-        ok(hret == D3D_OK, "GetPixelShaderConstantB returned %#x.\n", hret);
+    if (!scarg->pshader)
+    {
+        hr = IDirect3DDevice9_GetVertexShaderConstantI(device, scarg->idx, value.int_constant, 1);
+        ok(SUCCEEDED(hr), "GetVertexShaderConstantI returned %#x.\n", hr);
+        hr = IDirect3DDevice9_GetVertexShaderConstantF(device, scarg->idx, value.float_constant, 1);
+        ok(SUCCEEDED(hr), "GetVertexShaderConstantF returned %#x.\n", hr);
+        hr = IDirect3DDevice9_GetVertexShaderConstantB(device, scarg->idx, value.bool_constant, 4);
+        ok(SUCCEEDED(hr), "GetVertexShaderConstantB returned %#x.\n", hr);
     }
+    else
+    {
+        hr = IDirect3DDevice9_GetPixelShaderConstantI(device, scarg->idx, value.int_constant, 1);
+        ok(SUCCEEDED(hr), "GetPixelShaderConstantI returned %#x.\n", hr);
+        hr = IDirect3DDevice9_GetPixelShaderConstantF(device, scarg->idx, value.float_constant, 1);
+        ok(SUCCEEDED(hr), "GetPixelShaderConstantF returned %#x.\n", hr);
+        hr = IDirect3DDevice9_GetPixelShaderConstantB(device, scarg->idx, value.bool_constant, 4);
+        ok(SUCCEEDED(hr), "GetPixelShaderConstantB returned %#x.\n", hr);
+    }
+
+    ok(!memcmp(scdata->int_constant, value.int_constant, sizeof(scdata->int_constant)),
+            "Chain stage %u, %s integer constant:\n"
+            "\t{%#x, %#x, %#x, %#x} expected\n"
+            "\t{%#x, %#x, %#x, %#x} received\n",
+            chain_stage, scarg->pshader ? "pixel shader" : "vertex_shader",
+            scdata->int_constant[0], scdata->int_constant[1],
+            scdata->int_constant[2], scdata->int_constant[3],
+            value.int_constant[0], value.int_constant[1],
+            value.int_constant[2], value.int_constant[3]);
+
+    ok(!memcmp(scdata->float_constant, value.float_constant, sizeof(scdata->float_constant)),
+            "Chain stage %u, %s float constant:\n"
+            "\t{%.8e, %.8e, %.8e, %.8e} expected\n"
+            "\t{%.8e, %.8e, %.8e, %.8e} received\n",
+            chain_stage, scarg->pshader ? "pixel shader" : "vertex_shader",
+            scdata->float_constant[0], scdata->float_constant[1],
+            scdata->float_constant[2], scdata->float_constant[3],
+            value.float_constant[0], value.float_constant[1],
+            value.float_constant[2], value.float_constant[3]);
+
+    ok(!memcmp(scdata->bool_constant, value.bool_constant, sizeof(scdata->bool_constant)),
+            "Chain stage %u, %s boolean constant:\n"
+            "\t{%#x, %#x, %#x, %#x} expected\n"
+            "\t{%#x, %#x, %#x, %#x} received\n",
+            chain_stage, scarg->pshader ? "pixel shader" : "vertex_shader",
+            scdata->bool_constant[0], scdata->bool_constant[1],
+            scdata->bool_constant[2], scdata->bool_constant[3],
+            value.bool_constant[0], value.bool_constant[1],
+            value.bool_constant[2], value.bool_constant[3]);
 }
 
-static const shader_constant_data shader_constant_poison_data = {
-    { 0x1337c0de, 0x1337c0de, 0x1337c0de, 0x1337c0de },
-    { 1.0f, 2.0f, 3.0f, 4.0f },
-    { FALSE, TRUE, FALSE, TRUE }
-};
+static HRESULT shader_constant_setup_handler(struct state_test *test)
+{
+    const struct shader_constant_arg *test_arg = test->test_arg;
 
-static const shader_constant_data shader_constant_default_data = {
-        { 0, 0, 0, 0 }, { 0.0f, 0.0f, 0.0f, 0.0f }, { 0, 0, 0, 0 }
-};
-
-static const shader_constant_data shader_constant_test_data = {
-    { 0xdead0000, 0xdead0001, 0xdead0002, 0xdead0003 },
-    { 5.0f, 6.0f, 7.0f, 8.0f },
-    { TRUE, FALSE, FALSE, TRUE }
-};
-
-static HRESULT shader_constant_setup_handler(
-    state_test* test) {
-
-    shader_constant_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(shader_constant_context));
-    if (ctx == NULL) return E_FAIL;
-    test->test_context = ctx;
-
-    test->return_data = &ctx->return_data_buffer;
+    test->test_context = NULL;
     test->test_data_in = &shader_constant_test_data;
-    test->test_data_out = &shader_constant_test_data;
+    test->test_data_out_all = &shader_constant_test_data;
+    if (test_arg->pshader)
+    {
+        test->test_data_out_vertex = &shader_constant_default_data;
+        test->test_data_out_pixel = &shader_constant_test_data;
+    }
+    else
+    {
+        test->test_data_out_vertex = &shader_constant_test_data;
+        test->test_data_out_pixel = &shader_constant_default_data;
+    }
     test->default_data = &shader_constant_default_data;
     test->initial_data = &shader_constant_default_data;
-    test->poison_data = &shader_constant_poison_data;
-
-    test->data_size = sizeof(shader_constant_data);
 
     return D3D_OK;
 }
 
-static void shader_constant_teardown_handler(state_test *test)
+static void shader_constant_teardown_handler(struct state_test *test)
 {
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
-static void shader_constants_queue_test(
-    state_test* test,
-    const shader_constant_arg* test_arg) {
-
+static void shader_constants_queue_test(struct state_test *test, const struct shader_constant_arg *test_arg)
+{
     test->setup_handler = shader_constant_setup_handler;
     test->teardown_handler = shader_constant_teardown_handler;
     test->set_handler = shader_constant_set_handler;
-    test->get_handler = shader_constant_get_handler;
-    test->print_handler = shader_constant_print_handler;
-    test->test_name = test_arg->pshader? "set_get_pshader_constants": "set_get_vshader_constants";
+    test->check_data = shader_constant_check_data;
+    test->test_name = test_arg->pshader ? "set_get_pshader_constants" : "set_get_vshader_constants";
     test->test_arg = test_arg;
 }
 
 /* =================== State test: Lights ===================================== */
 
-typedef struct light_data {
+struct light_data
+{
     D3DLIGHT9 light;
     BOOL enabled;
     HRESULT get_light_result;
     HRESULT get_enabled_result;
-} light_data;
+};
 
-typedef struct light_arg {
+struct light_arg
+{
     unsigned int idx;
-} light_arg;
+};
 
-typedef struct light_context {
-    light_data return_data_buffer;
-} light_context;
+static const struct light_data light_poison_data =
+{
+    {
+        0x1337c0de,
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {3.3f, 4.4f, 5.5f},
+        {6.6f, 7.7f, 8.8f},
+        12.12f, 13.13f, 14.14f, 15.15f, 16.16f, 17.17f, 18.18f,
+    },
+    TRUE,
+    0x1337c0de,
+    0x1337c0de,
+};
 
-static void light_print_handler(
-    const state_test* test,
-    const void* data) {
+static const struct light_data light_default_data =
+{
+    {
+        D3DLIGHT_DIRECTIONAL,
+        {1.0f, 1.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f},
+        0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+    },
+    FALSE,
+    D3D_OK,
+    D3D_OK,
+};
 
-    const light_data* ldata = data;
+/* This is used for the initial read state (before a write causes side effects).
+ * The proper return status is D3DERR_INVALIDCALL. */
+static const struct light_data light_initial_data =
+{
+    {
+        0x1337c0de,
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {7.0f, 4.0f, 2.0f, 1.0f},
+        {3.3f, 4.4f, 5.5f},
+        {6.6f, 7.7f, 8.8f},
+        12.12f, 13.13f, 14.14f, 15.15f, 16.16f, 17.17f, 18.18f,
+    },
+    TRUE,
+    D3DERR_INVALIDCALL,
+    D3DERR_INVALIDCALL,
+};
 
-    trace("Get Light return value: %#x\n", ldata->get_light_result);
-    trace("Get Light enable return value: %#x\n", ldata->get_enabled_result);
+static const struct light_data light_test_data_in =
+{
+    {
+        1,
+        {2.0f, 2.0f, 2.0f, 2.0f},
+        {3.0f, 3.0f, 3.0f, 3.0f},
+        {4.0f, 4.0f, 4.0f, 4.0f},
+        {5.0f, 5.0f, 5.0f},
+        {6.0f, 6.0f, 6.0f},
+        7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f,
+    },
+    TRUE,
+    D3D_OK,
+    D3D_OK
+};
 
-    trace("Light Enabled = %u\n", ldata->enabled);
-    trace("Light Type = %u\n", ldata->light.Type);
-    trace("Light Diffuse = { %f, %f, %f, %f }\n",
-        ldata->light.Diffuse.r, ldata->light.Diffuse.g,
-        ldata->light.Diffuse.b, ldata->light.Diffuse.a);
-    trace("Light Specular = { %f, %f, %f, %f}\n",
-        ldata->light.Specular.r, ldata->light.Specular.g,
-        ldata->light.Specular.b, ldata->light.Specular.a);
-    trace("Light Ambient = { %f, %f, %f, %f }\n",
-        ldata->light.Ambient.r, ldata->light.Ambient.g,
-        ldata->light.Ambient.b, ldata->light.Ambient.a);
-    trace("Light Position = { %f, %f, %f }\n",
-        ldata->light.Position.x, ldata->light.Position.y, ldata->light.Position.z);
-    trace("Light Direction = { %f, %f, %f }\n",
-        ldata->light.Direction.x, ldata->light.Direction.y, ldata->light.Direction.z);
-    trace("Light Range = %f\n", ldata->light.Range);
-    trace("Light Fallof = %f\n", ldata->light.Falloff);
-    trace("Light Attenuation0 = %f\n", ldata->light.Attenuation0);
-    trace("Light Attenuation1 = %f\n", ldata->light.Attenuation1);
-    trace("Light Attenuation2 = %f\n", ldata->light.Attenuation2);
-    trace("Light Theta = %f\n", ldata->light.Theta);
-    trace("Light Phi = %f\n", ldata->light.Phi);
-}
+/* SetLight will use 128 as the "enabled" value */
+static const struct light_data light_test_data_out =
+{
+    {
+        1,
+        {2.0f, 2.0f, 2.0f, 2.0f},
+        {3.0f, 3.0f, 3.0f, 3.0f},
+        {4.0f, 4.0f, 4.0f, 4.0f},
+        {5.0f, 5.0f, 5.0f},
+        {6.0f, 6.0f, 6.0f},
+        7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f,
+    },
+    128,
+    D3D_OK,
+    D3D_OK,
+};
 
-static void light_set_handler(
-    IDirect3DDevice9* device, const state_test* test, const void* data) {
-
+static void light_set_handler(IDirect3DDevice9 *device, const struct state_test *test, const void *data)
+{
+    const struct light_arg *larg = test->test_arg;
+    const struct light_data *ldata = data;
     HRESULT hret;
-    const light_data* ldata = data;
-    const light_arg* larg = test->test_arg;
     unsigned int index = larg->idx;
 
     hret = IDirect3DDevice9_SetLight(device, index, &ldata->light);
@@ -684,139 +805,247 @@ static void light_set_handler(
     ok(hret == D3D_OK, "SetLightEnable returned %#x.\n", hret);
 }
 
-static void light_get_handler(
-    IDirect3DDevice9* device, const state_test* test, void* data) {
+static void light_check_data(IDirect3DDevice9 *device, unsigned int chain_stage,
+        const struct state_test *test, const void *expected_data)
+{
+    const struct light_arg *larg = test->test_arg;
+    const struct light_data *ldata = expected_data;
+    struct light_data value;
 
-    HRESULT hret;
-    light_data* ldata = data;
-    const light_arg* larg = test->test_arg;
-    unsigned int index = larg->idx;
+    value = light_poison_data;
 
-    hret = IDirect3DDevice9_GetLightEnable(device, index, &ldata->enabled);
-    ldata->get_enabled_result = hret;
+    value.get_enabled_result = IDirect3DDevice9_GetLightEnable(device, larg->idx, &value.enabled);
+    value.get_light_result = IDirect3DDevice9_GetLight(device, larg->idx, &value.light);
 
-    hret = IDirect3DDevice9_GetLight(device, index, &ldata->light);
-    ldata->get_light_result = hret;
+    ok(value.get_enabled_result == ldata->get_enabled_result,
+            "Chain stage %u: expected get_enabled_result %#x, got %#x.\n",
+            chain_stage, ldata->get_enabled_result, value.get_enabled_result);
+    ok(value.get_light_result == ldata->get_light_result,
+            "Chain stage %u: expected get_light_result %#x, got %#x.\n",
+            chain_stage, ldata->get_light_result, value.get_light_result);
+
+    ok(value.enabled == ldata->enabled,
+            "Chain stage %u: expected enabled %#x, got %#x.\n",
+            chain_stage, ldata->enabled, value.enabled);
+    ok(value.light.Type == ldata->light.Type,
+            "Chain stage %u: expected light.Type %#x, got %#x.\n",
+            chain_stage, ldata->light.Type, value.light.Type);
+    ok(!memcmp(&value.light.Diffuse, &ldata->light.Diffuse, sizeof(value.light.Diffuse)),
+            "Chain stage %u, light.Diffuse:\n\t{%.8e, %.8e, %.8e, %.8e} expected\n"
+            "\t{%.8e, %.8e, %.8e, %.8e} received.\n", chain_stage,
+            ldata->light.Diffuse.r, ldata->light.Diffuse.g,
+            ldata->light.Diffuse.b, ldata->light.Diffuse.a,
+            value.light.Diffuse.r, value.light.Diffuse.g,
+            value.light.Diffuse.b, value.light.Diffuse.a);
+    ok(!memcmp(&value.light.Specular, &ldata->light.Specular, sizeof(value.light.Specular)),
+            "Chain stage %u, light.Specular:\n\t{%.8e, %.8e, %.8e, %.8e} expected\n"
+            "\t{%.8e, %.8e, %.8e, %.8e} received.\n", chain_stage,
+            ldata->light.Specular.r, ldata->light.Specular.g,
+            ldata->light.Specular.b, ldata->light.Specular.a,
+            value.light.Specular.r, value.light.Specular.g,
+            value.light.Specular.b, value.light.Specular.a);
+    ok(!memcmp(&value.light.Ambient, &ldata->light.Ambient, sizeof(value.light.Ambient)),
+            "Chain stage %u, light.Ambient:\n\t{%.8e, %.8e, %.8e, %.8e} expected\n"
+            "\t{%.8e, %.8e, %.8e, %.8e} received.\n", chain_stage,
+            ldata->light.Ambient.r, ldata->light.Ambient.g,
+            ldata->light.Ambient.b, ldata->light.Ambient.a,
+            value.light.Ambient.r, value.light.Ambient.g,
+            value.light.Ambient.b, value.light.Ambient.a);
+    ok(!memcmp(&value.light.Position, &ldata->light.Position, sizeof(value.light.Position)),
+            "Chain stage %u, light.Position:\n\t{%.8e, %.8e, %.8e} expected\n\t{%.8e, %.8e, %.8e} received.\n",
+            chain_stage, ldata->light.Position.x, ldata->light.Position.y, ldata->light.Position.z,
+            value.light.Position.x, value.light.Position.y, value.light.Position.z);
+    ok(!memcmp(&value.light.Direction, &ldata->light.Direction, sizeof(value.light.Direction)),
+            "Chain stage %u, light.Direction:\n\t{%.8e, %.8e, %.8e} expected\n\t{%.8e, %.8e, %.8e} received.\n",
+            chain_stage, ldata->light.Direction.x, ldata->light.Direction.y, ldata->light.Direction.z,
+            value.light.Direction.x, value.light.Direction.y, value.light.Direction.z);
+    ok(value.light.Range == ldata->light.Range,
+            "Chain stage %u: expected light.Range %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Range, value.light.Range);
+    ok(value.light.Falloff == ldata->light.Falloff,
+            "Chain stage %u: expected light.Falloff %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Falloff, value.light.Falloff);
+    ok(value.light.Attenuation0 == ldata->light.Attenuation0,
+            "Chain stage %u: expected light.Attenuation0 %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Attenuation0, value.light.Attenuation0);
+    ok(value.light.Attenuation1 == ldata->light.Attenuation1,
+            "Chain stage %u: expected light.Attenuation1 %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Attenuation1, value.light.Attenuation1);
+    ok(value.light.Attenuation2 == ldata->light.Attenuation2,
+            "Chain stage %u: expected light.Attenuation2 %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Attenuation2, value.light.Attenuation2);
+    ok(value.light.Theta == ldata->light.Theta,
+            "Chain stage %u: expected light.Theta %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Theta, value.light.Theta);
+    ok(value.light.Phi == ldata->light.Phi,
+            "Chain stage %u: expected light.Phi %.8e, got %.8e.\n",
+            chain_stage, ldata->light.Phi, value.light.Phi);
 }
 
-static const light_data light_poison_data =
-    { { 0x1337c0de,
-        { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 },
-        { 3.3f, 4.4f, 5.5f },{ 6.6f, 7.7f, 8.8f },
-        12.12f, 13.13f, 14.14f, 15.15f, 16.16f, 17.17f, 18.18f },
-        1, 0x1337c0de, 0x1337c0de };
-
-static const light_data light_default_data =
-    { { D3DLIGHT_DIRECTIONAL,
-        { 1.0, 1.0, 1.0, 0.0 }, { 0.0, 0.0, 0.0, 0.0 }, { 0.0, 0.0, 0.0, 0.0 },
-        { 0.0, 0.0, 0.0 }, { 0.0, 0.0, 1.0 },
-        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 }, 0, D3D_OK, D3D_OK };
-
-/* This is used for the initial read state (before a write causes side effects)
- * The proper return status is D3DERR_INVALIDCALL */
-static const light_data light_initial_data =
-    { { 0x1337c0de,
-        { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 }, { 7.0, 4.0, 2.0, 1.0 },
-        { 3.3f, 4.4f, 5.5f }, { 6.6f, 7.7f, 8.8f },
-        12.12f, 13.13f, 14.14f, 15.15f, 16.16f, 17.17f, 18.18f },
-        1, D3DERR_INVALIDCALL, D3DERR_INVALIDCALL };
-
-static const light_data light_test_data_in =
-    { { 1,
-        { 2.0, 2.0, 2.0, 2.0 }, { 3.0, 3.0, 3.0, 3.0 }, { 4.0, 4.0, 4.0, 4.0 },
-        { 5.0, 5.0, 5.0 }, { 6.0, 6.0, 6.0 },
-        7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0 }, 1, D3D_OK, D3D_OK};
-
-/* SetLight will use 128 as the "enabled" value */
-static const light_data light_test_data_out =
-    { { 1,
-        { 2.0, 2.0, 2.0, 2.0 }, { 3.0, 3.0, 3.0, 3.0 }, { 4.0, 4.0, 4.0, 4.0 },
-        { 5.0, 5.0, 5.0 }, { 6.0, 6.0, 6.0 },
-        7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0 }, 128, D3D_OK, D3D_OK};
-
-static HRESULT light_setup_handler(state_test *test)
+static HRESULT light_setup_handler(struct state_test *test)
 {
-    light_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(light_context));
-    if (ctx == NULL) return E_FAIL;
-    test->test_context = ctx;
-
-    test->return_data = &ctx->return_data_buffer;
+    test->test_context = NULL;
     test->test_data_in = &light_test_data_in;
-    test->test_data_out = &light_test_data_out;
+    test->test_data_out_all = &light_test_data_out;
+    test->test_data_out_vertex = &light_test_data_out;
+    test->test_data_out_pixel = &light_default_data;
     test->default_data = &light_default_data;
     test->initial_data = &light_initial_data;
-    test->poison_data = &light_poison_data;
-
-    test->data_size = sizeof(light_data);
 
     return D3D_OK;
 }
 
-static void light_teardown_handler(state_test *test)
+static void light_teardown_handler(struct state_test *test)
 {
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
-static void lights_queue_test(
-    state_test* test,
-    const light_arg* test_arg) {
-
+static void lights_queue_test(struct state_test *test, const struct light_arg *test_arg)
+{
     test->setup_handler = light_setup_handler;
     test->teardown_handler = light_teardown_handler;
     test->set_handler = light_set_handler;
-    test->get_handler = light_get_handler;
-    test->print_handler = light_print_handler;
+    test->check_data = light_check_data;
     test->test_name = "set_get_light";
     test->test_arg = test_arg;
 }
 
 /* =================== State test: Transforms ===================================== */
 
-typedef struct transform_data {
-
+struct transform_data
+{
     D3DMATRIX view;
     D3DMATRIX projection;
     D3DMATRIX texture0;
     D3DMATRIX texture7;
     D3DMATRIX world0;
     D3DMATRIX world255;
+};
 
-} transform_data;
+static const struct transform_data transform_default_data =
+{
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+    {{{
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    }}},
+};
 
-typedef struct transform_context {
-    transform_data return_data_buffer;
-} transform_context;
+static const struct transform_data transform_poison_data =
+{
+    {{{
+         1.0f,  2.0f,  3.0f,  4.0f,
+         5.0f,  6.0f,  7.0f,  8.0f,
+         9.0f, 10.0f, 11.0f, 12.0f,
+        13.0f, 14.0f, 15.0f, 16.0f,
+    }}},
+    {{{
+        17.0f, 18.0f, 19.0f, 20.0f,
+        21.0f, 22.0f, 23.0f, 24.0f,
+        25.0f, 26.0f, 27.0f, 28.0f,
+        29.0f, 30.0f, 31.0f, 32.0f,
+    }}},
+    {{{
+        33.0f, 34.0f, 35.0f, 36.0f,
+        37.0f, 38.0f, 39.0f, 40.0f,
+        41.0f, 42.0f, 43.0f, 44.0f,
+        45.0f, 46.0f, 47.0f, 48.0f
+    }}},
+    {{{
+        49.0f, 50.0f, 51.0f, 52.0f,
+        53.0f, 54.0f, 55.0f, 56.0f,
+        57.0f, 58.0f, 59.0f, 60.0f,
+        61.0f, 62.0f, 63.0f, 64.0f,
+    }}},
+    {{{
+        64.0f, 66.0f, 67.0f, 68.0f,
+        69.0f, 70.0f, 71.0f, 72.0f,
+        73.0f, 74.0f, 75.0f, 76.0f,
+        77.0f, 78.0f, 79.0f, 80.0f,
+    }}},
+    {{{
+        81.0f, 82.0f, 83.0f, 84.0f,
+        85.0f, 86.0f, 87.0f, 88.0f,
+        89.0f, 90.0f, 91.0f, 92.0f,
+        93.0f, 94.0f, 95.0f, 96.0f,
+    }}},
+};
 
-static inline void print_matrix(
-    const char* name, const D3DMATRIX* matrix) {
+static const struct transform_data transform_test_data =
+{
+    {{{
+          1.2f,     3.4f,  -5.6f,  7.2f,
+        10.11f,  -12.13f, 14.15f, -1.5f,
+        23.56f,   12.89f, 44.56f, -1.0f,
+          2.3f,     0.0f,   4.4f,  5.5f,
+    }}},
+    {{{
+          9.2f,    38.7f,  -6.6f,  7.2f,
+        10.11f,  -12.13f, 77.15f, -1.5f,
+        23.56f,   12.89f, 14.56f, -1.0f,
+         12.3f,     0.0f,   4.4f,  5.5f,
+    }}},
+    {{{
+         10.2f,     3.4f,   0.6f,  7.2f,
+        10.11f,  -12.13f, 14.15f, -1.5f,
+        23.54f,    12.9f, 44.56f, -1.0f,
+          2.3f,     0.0f,   4.4f,  5.5f,
+    }}},
+    {{{
+          1.2f,     3.4f,  -5.6f,  7.2f,
+        10.11f,  -12.13f, -14.5f, -1.5f,
+         2.56f,   12.89f, 23.56f, -1.0f,
+        112.3f,     0.0f,   4.4f,  2.5f,
+    }}},
+    {{{
+          1.2f,   31.41f,  58.6f,  7.2f,
+        10.11f,  -12.13f, -14.5f, -1.5f,
+         2.56f,   12.89f, 11.56f, -1.0f,
+        112.3f,     0.0f,  44.4f,  2.5f,
+    }}},
+    {{{
+         1.20f,     3.4f,  -5.6f,  7.0f,
+        10.11f, -12.156f, -14.5f, -1.5f,
+         2.56f,   1.829f,  23.6f, -1.0f,
+        112.3f,     0.0f,  41.4f,  2.5f,
+    }}},
+};
 
-    trace("%s Matrix = {\n", name);
-    trace("    %f %f %f %f\n", U(*matrix).m[0][0], U(*matrix).m[1][0], U(*matrix).m[2][0], U(*matrix).m[3][0]);
-    trace("    %f %f %f %f\n", U(*matrix).m[0][1], U(*matrix).m[1][1], U(*matrix).m[2][1], U(*matrix).m[3][1]);
-    trace("    %f %f %f %f\n", U(*matrix).m[0][2], U(*matrix).m[1][2], U(*matrix).m[2][2], U(*matrix).m[3][2]);
-    trace("    %f %f %f %f\n", U(*matrix).m[0][3], U(*matrix).m[1][3], U(*matrix).m[2][3], U(*matrix).m[3][3]);
-    trace("}\n");
-}
-
-static void transform_print_handler(
-    const state_test* test,
-    const void* data) {
-
-    const transform_data* tdata = data;
-
-    print_matrix("View", &tdata->view);
-    print_matrix("Projection", &tdata->projection);
-    print_matrix("Texture0", &tdata->texture0);
-    print_matrix("Texture7", &tdata->texture7);
-    print_matrix("World0", &tdata->world0);
-    print_matrix("World255", &tdata->world255);
-}
-
-static void transform_set_handler(
-    IDirect3DDevice9* device, const state_test* test, const void* data) {
-
+static void transform_set_handler(IDirect3DDevice9 *device, const struct state_test *test, const void *data)
+{
+    const struct transform_data *tdata = data;
     HRESULT hret;
-    const transform_data* tdata = data;
 
     hret = IDirect3DDevice9_SetTransform(device, D3DTS_VIEW, &tdata->view);
     ok(hret == D3D_OK, "SetTransform returned %#x.\n", hret);
@@ -837,121 +1066,104 @@ static void transform_set_handler(
     ok(hret == D3D_OK, "SetTransform returned %#x.\n", hret);
 }
 
-static void transform_get_handler(
-    IDirect3DDevice9* device, const state_test* test, void* data) {
-
-    HRESULT hret;
-    transform_data* tdata = data;
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_VIEW, &tdata->view);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_PROJECTION, &tdata->projection);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_TEXTURE0, &tdata->texture0);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_TEXTURE0 + texture_stages - 1, &tdata->texture7);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_WORLD, &tdata->world0);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
-
-    hret = IDirect3DDevice9_GetTransform(device, D3DTS_WORLDMATRIX(255), &tdata->world255);
-    ok(hret == D3D_OK, "GetTransform returned %#x.\n", hret);
+static void compare_matrix(const char *name, unsigned int chain_stage,
+        const D3DMATRIX *received, const D3DMATRIX *expected)
+{
+    ok(!memcmp(expected, received, sizeof(*expected)),
+            "Chain stage %u, matrix %s:\n"
+            "\t{\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t} expected\n"
+            "\t{\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t\t%.8e, %.8e, %.8e, %.8e,\n"
+            "\t} received\n",
+            chain_stage, name,
+            U(*expected).m[0][0], U(*expected).m[1][0], U(*expected).m[2][0], U(*expected).m[3][0],
+            U(*expected).m[0][1], U(*expected).m[1][1], U(*expected).m[2][1], U(*expected).m[3][1],
+            U(*expected).m[0][2], U(*expected).m[1][2], U(*expected).m[2][2], U(*expected).m[3][2],
+            U(*expected).m[0][3], U(*expected).m[1][3], U(*expected).m[2][3], U(*expected).m[3][3],
+            U(*received).m[0][0], U(*received).m[1][0], U(*received).m[2][0], U(*received).m[3][0],
+            U(*received).m[0][1], U(*received).m[1][1], U(*received).m[2][1], U(*received).m[3][1],
+            U(*received).m[0][2], U(*received).m[1][2], U(*received).m[2][2], U(*received).m[3][2],
+            U(*received).m[0][3], U(*received).m[1][3], U(*received).m[2][3], U(*received).m[3][3]);
 }
 
-static const transform_data transform_default_data = {
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } },
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } },
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } },
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } },
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } },
-      { { { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 } } }
-};
+static void transform_check_data(IDirect3DDevice9 *device, unsigned int chain_stage,
+        const struct state_test *test, const void *expected_data)
+{
+    const struct transform_data *tdata = expected_data;
+    D3DMATRIX value;
+    HRESULT hr;
 
-static const transform_data transform_poison_data = {
-      { { { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f,
-        9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f } } },
+    value = transform_poison_data.view;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_VIEW, &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("View", chain_stage, &value, &tdata->view);
 
-      { { { 17.0f, 18.0f, 19.0f, 20.0f, 21.0f, 22.0f, 23.0f, 24.0f,
-        25.0f, 26.0f, 27.0f, 28.0f, 29.0f, 30.0f, 31.0f, 32.0f } } },
+    value = transform_poison_data.projection;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_PROJECTION, &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("Projection", chain_stage, &value, &tdata->projection);
 
-      { { { 33.0f, 34.0f, 35.0f, 36.0f, 37.0f, 38.0f, 39.0f, 40.0f,
-        41.0f, 42.0f, 43.0f, 44.0f, 45.0f, 46.0f, 47.0f, 48.0f } } },
+    value = transform_poison_data.texture0;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_TEXTURE0, &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("Texture0", chain_stage, &value, &tdata->texture0);
 
-      { { { 49.0f, 50.0f, 51.0f, 52.0f, 53.0f, 54.0f, 55.0f, 56.0f,
-        57.0f, 58.0f, 59.0f, 60.0f, 61.0f, 62.0f, 63.0f, 64.0f } } },
+    value = transform_poison_data.texture7;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_TEXTURE0 + texture_stages - 1, &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("Texture7", chain_stage, &value, &tdata->texture7);
 
-      { { { 64.0f, 66.0f, 67.0f, 68.0f, 69.0f, 70.0f, 71.0f, 72.0f,
-        73.0f, 74.0f, 75.0f, 76.0f, 77.0f, 78.0f, 79.0f, 80.0f } } },
+    value = transform_poison_data.world0;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_WORLD, &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("World0", chain_stage, &value, &tdata->world0);
 
-      { { { 81.0f, 82.0f, 83.0f, 84.0f, 85.0f, 86.0f, 87.0f, 88.0f,
-        89.0f, 90.0f, 91.0f, 92.0f, 93.0f, 94.0f, 95.0f, 96.0f} } },
-};
+    value = transform_poison_data.world255;
+    hr = IDirect3DDevice9_GetTransform(device, D3DTS_WORLDMATRIX(255), &value);
+    ok(SUCCEEDED(hr), "GetTransform returned %#x.\n", hr);
+    compare_matrix("World255", chain_stage, &value, &tdata->world255);
+}
 
-static const transform_data transform_test_data = {
-      { { { 1.2f, 3.4f, -5.6f, 7.2f, 10.11f, -12.13f, 14.15f, -1.5f,
-        23.56f, 12.89f, 44.56f, -1.0f, 2.3f, 0.0f, 4.4f, 5.5f } } },
-
-      { { { 9.2f, 38.7f, -6.6f, 7.2f, 10.11f, -12.13f, 77.15f, -1.5f,
-        23.56f, 12.89f, 14.56f, -1.0f, 12.3f, 0.0f, 4.4f, 5.5f } } },
-
-      { { { 10.2f, 3.4f, 0.6f, 7.2f, 10.11f, -12.13f, 14.15f, -1.5f,
-        23.54f, 12.9f, 44.56f, -1.0f, 2.3f, 0.0f, 4.4f, 5.5f } } },
-
-      { { { 1.2f, 3.4f, -5.6f, 7.2f, 10.11f, -12.13f, -14.5f, -1.5f,
-        2.56f, 12.89f, 23.56f, -1.0f, 112.3f, 0.0f, 4.4f, 2.5f } } },
-
-      { { { 1.2f, 31.41f, 58.6f, 7.2f, 10.11f, -12.13f, -14.5f, -1.5f,
-        2.56f, 12.89f, 11.56f, -1.0f, 112.3f, 0.0f, 44.4f, 2.5f } } },
-
-      { { { 1.20f, 3.4f, -5.6f, 7.0f, 10.11f, -12.156f, -14.5f, -1.5f,
-        2.56f, 1.829f, 23.6f, -1.0f, 112.3f, 0.0f, 41.4f, 2.5f } } },
-};
-
-static HRESULT transform_setup_handler(
-    state_test* test) {
-
-    transform_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(transform_context));
-    if (ctx == NULL) return E_FAIL;
-    test->test_context = ctx;
-
-    test->return_data = &ctx->return_data_buffer;
+static HRESULT transform_setup_handler(struct state_test *test)
+{
+    test->test_context = NULL;
     test->test_data_in = &transform_test_data;
-    test->test_data_out = &transform_test_data;
+    test->test_data_out_all = &transform_test_data;
+    test->test_data_out_vertex = &transform_default_data;
+    test->test_data_out_pixel = &transform_default_data;
     test->default_data = &transform_default_data;
     test->initial_data = &transform_default_data;
-    test->poison_data = &transform_poison_data;
-
-    test->data_size = sizeof(transform_data);
 
     return D3D_OK;
 }
 
-static void transform_teardown_handler(state_test *test)
+static void transform_teardown_handler(struct state_test *test)
 {
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
-static void transform_queue_test(
-    state_test* test) {
-
+static void transform_queue_test(struct state_test *test)
+{
     test->setup_handler = transform_setup_handler;
     test->teardown_handler = transform_teardown_handler;
     test->set_handler = transform_set_handler;
-    test->get_handler = transform_get_handler;
-    test->print_handler = transform_print_handler;
+    test->check_data = transform_check_data;
     test->test_name = "set_get_transforms";
     test->test_arg = NULL;
 }
 
 /* =================== State test: Render States ===================================== */
 
-#define D3D9_RENDER_STATES 102
-const D3DRENDERSTATETYPE render_state_indices[] = {
-
+const D3DRENDERSTATETYPE render_state_indices[] =
+{
     D3DRS_ZENABLE,
     D3DRS_FILLMODE,
     D3DRS_SHADEMODE,
@@ -1004,7 +1216,7 @@ const D3DRENDERSTATETYPE render_state_indices[] = {
     D3DRS_EMISSIVEMATERIALSOURCE,
     D3DRS_VERTEXBLEND,
     D3DRS_CLIPPLANEENABLE,
-#if 0 /* Driver dependent, increase array size to enable */
+#if 0 /* Driver dependent */
     D3DRS_POINTSIZE,
 #endif
     D3DRS_POINTSIZE_MIN,
@@ -1016,7 +1228,9 @@ const D3DRENDERSTATETYPE render_state_indices[] = {
     D3DRS_MULTISAMPLEANTIALIAS,
     D3DRS_MULTISAMPLEMASK,
     D3DRS_PATCHEDGESTYLE,
+#if 0 /* Apparently not recorded in the stateblock */
     D3DRS_DEBUGMONITORTOKEN,
+#endif
     D3DRS_POINTSIZE_MAX,
     D3DRS_INDEXEDVERTEXBLENDENABLE,
     D3DRS_COLORWRITEENABLE,
@@ -1059,57 +1273,55 @@ const D3DRENDERSTATETYPE render_state_indices[] = {
     D3DRS_BLENDOPALPHA,
 };
 
-typedef struct render_state_data {
-    DWORD states[D3D9_RENDER_STATES];
-} render_state_data;
+struct render_state_data
+{
+    DWORD states[sizeof(render_state_indices) / sizeof(*render_state_indices)];
+};
 
-typedef struct render_state_arg {
-    D3DPRESENT_PARAMETERS* device_pparams;
+struct render_state_arg
+{
+    D3DPRESENT_PARAMETERS *device_pparams;
     float pointsize_max;
-} render_state_arg;
+};
 
-typedef struct render_state_context {
-   render_state_data return_data_buffer;
-   render_state_data default_data_buffer;
-   render_state_data test_data_buffer;
-   render_state_data poison_data_buffer;
-} render_state_context;
+struct render_state_context
+{
+    struct render_state_data default_data_buffer;
+    struct render_state_data test_data_all_buffer;
+    struct render_state_data test_data_vertex_buffer;
+    struct render_state_data test_data_pixel_buffer;
+    struct render_state_data poison_data_buffer;
+};
 
-static void render_state_set_handler(
-    IDirect3DDevice9* device, const state_test* test, const void* data) {
-
+static void render_state_set_handler(IDirect3DDevice9 *device, const struct state_test *test, const void *data)
+{
+    const struct render_state_data *rsdata = data;
     HRESULT hret;
-    const render_state_data* rsdata = data;
     unsigned int i;
 
-    for (i = 0; i < D3D9_RENDER_STATES; i++) {
+    for (i = 0; i < sizeof(render_state_indices) / sizeof(*render_state_indices); ++i)
+    {
         hret = IDirect3DDevice9_SetRenderState(device, render_state_indices[i], rsdata->states[i]);
         ok(hret == D3D_OK, "SetRenderState returned %#x.\n", hret);
     }
 }
 
-static void render_state_get_handler(
-    IDirect3DDevice9* device, const state_test* test, void* data) {
-
-    HRESULT hret;
-    render_state_data* rsdata = data;
-    unsigned int i = 0;
-
-    for (i = 0; i < D3D9_RENDER_STATES; i++) {
-        hret = IDirect3DDevice9_GetRenderState(device, render_state_indices[i], &rsdata->states[i]);
-        ok(hret == D3D_OK, "GetRenderState returned %#x.\n", hret);
-    }
-}
-
-static void render_state_print_handler(
-    const state_test* test,
-    const void* data) {
-
-    const render_state_data* rsdata = data;
-
+static void render_state_check_data(IDirect3DDevice9 *device, unsigned int chain_stage,
+        const struct state_test *test, const void *expected_data)
+{
+    const struct render_state_context *ctx = test->test_context;
+    const struct render_state_data *rsdata = expected_data;
     unsigned int i;
-    for (i = 0; i < D3D9_RENDER_STATES; i++)
-        trace("Index = %u, Value = %#x\n", i, rsdata->states[i]);
+    HRESULT hr;
+
+    for (i = 0; i < sizeof(render_state_indices) / sizeof(*render_state_indices); ++i)
+    {
+        DWORD value = ctx->poison_data_buffer.states[i];
+        hr = IDirect3DDevice9_GetRenderState(device, render_state_indices[i], &value);
+        ok(SUCCEEDED(hr), "GetRenderState returned %#x.\n", hr);
+        ok(value == rsdata->states[i], "Chain stage %u, render state %#x: expected %#x, got %#x.\n",
+                chain_stage, render_state_indices[i], rsdata->states[i], value);
+    }
 }
 
 static inline DWORD to_dword(float fl) {
@@ -1185,7 +1397,7 @@ static void render_state_default_data_init(const struct render_state_arg *rsarg,
    data->states[idx++] = TRUE;                  /* MULTISAMPLEANTIALIAS */
    data->states[idx++] = 0xFFFFFFFF;            /* MULTISAMPLEMASK */
    data->states[idx++] = D3DPATCHEDGE_DISCRETE; /* PATCHEDGESTYLE */
-   data->states[idx++] = 0xbaadcafe;            /* DEBUGMONITORTOKEN */
+   if (0) data->states[idx++] = 0xbaadcafe;     /* DEBUGMONITORTOKEN, not recorded in the stateblock */
    data->states[idx++] = to_dword(rsarg->pointsize_max); /* POINTSIZE_MAX */
    data->states[idx++] = FALSE;                 /* INDEXEDVERTEXBLENDENABLE */
    data->states[idx++] = 0x0000000F;            /* COLORWRITEENABLE */
@@ -1228,17 +1440,18 @@ static void render_state_default_data_init(const struct render_state_arg *rsarg,
    data->states[idx++] = TRUE;                  /* BLENDOPALPHA */
 }
 
-static void render_state_poison_data_init(
-    render_state_data* data) {
+static void render_state_poison_data_init(struct render_state_data *data)
+{
+    unsigned int i;
 
-   unsigned int i;
-   for (i = 0; i < D3D9_RENDER_STATES; i++)
+    for (i = 0; i < sizeof(render_state_indices) / sizeof(*render_state_indices); ++i)
+    {
        data->states[i] = 0x1337c0de;
+    }
 }
 
-static void render_state_test_data_init(
-    render_state_data* data) {
-
+static void render_state_test_data_init(struct render_state_data *data)
+{
    unsigned int idx = 0;
    data->states[idx++] = D3DZB_USEW;            /* ZENABLE */
    data->states[idx++] = D3DFILL_WIREFRAME;     /* FILLMODE */
@@ -1304,7 +1517,7 @@ static void render_state_test_data_init(
    data->states[idx++] = FALSE;                 /* MULTISAMPLEANTIALIAS */
    data->states[idx++] = 0xABCDDBCA;            /* MULTISAMPLEMASK */
    data->states[idx++] = D3DPATCHEDGE_CONTINUOUS; /* PATCHEDGESTYLE */
-   data->states[idx++] = D3DDMT_DISABLE;        /* DEBUGMONITORTOKEN */
+   if (0) data->states[idx++] = D3DDMT_DISABLE; /* DEBUGMONITORTOKEN, not recorded in the stateblock */
    data->states[idx++] = to_dword(77.0f);       /* POINTSIZE_MAX */
    data->states[idx++] = TRUE;                  /* INDEXEDVERTEXBLENDENABLE */
    data->states[idx++] = 0x00000009;            /* COLORWRITEENABLE */
@@ -1347,56 +1560,188 @@ static void render_state_test_data_init(
    data->states[idx++] = FALSE;                 /* BLENDOPALPHA */
 }
 
-static HRESULT render_state_setup_handler(
-    state_test* test) {
+static HRESULT render_state_setup_handler(struct state_test *test)
+{
+    static const DWORD states_vertex[] =
+    {
+        D3DRS_ADAPTIVETESS_W,
+        D3DRS_ADAPTIVETESS_X,
+        D3DRS_ADAPTIVETESS_Y,
+        D3DRS_ADAPTIVETESS_Z,
+        D3DRS_AMBIENT,
+        D3DRS_AMBIENTMATERIALSOURCE,
+        D3DRS_CLIPPING,
+        D3DRS_CLIPPLANEENABLE,
+        D3DRS_COLORVERTEX,
+        D3DRS_CULLMODE,
+        D3DRS_DIFFUSEMATERIALSOURCE,
+        D3DRS_EMISSIVEMATERIALSOURCE,
+        D3DRS_ENABLEADAPTIVETESSELLATION,
+        D3DRS_FOGCOLOR,
+        D3DRS_FOGDENSITY,
+        D3DRS_FOGENABLE,
+        D3DRS_FOGEND,
+        D3DRS_FOGSTART,
+        D3DRS_FOGTABLEMODE,
+        D3DRS_FOGVERTEXMODE,
+        D3DRS_INDEXEDVERTEXBLENDENABLE,
+        D3DRS_LIGHTING,
+        D3DRS_LOCALVIEWER,
+        D3DRS_MAXTESSELLATIONLEVEL,
+        D3DRS_MINTESSELLATIONLEVEL,
+        D3DRS_MULTISAMPLEANTIALIAS,
+        D3DRS_MULTISAMPLEMASK,
+        D3DRS_NORMALDEGREE,
+        D3DRS_NORMALIZENORMALS,
+        D3DRS_PATCHEDGESTYLE,
+        D3DRS_POINTSCALE_A,
+        D3DRS_POINTSCALE_B,
+        D3DRS_POINTSCALE_C,
+        D3DRS_POINTSCALEENABLE,
+        D3DRS_POINTSIZE,
+        D3DRS_POINTSIZE_MAX,
+        D3DRS_POINTSIZE_MIN,
+        D3DRS_POINTSPRITEENABLE,
+        D3DRS_POSITIONDEGREE,
+        D3DRS_RANGEFOGENABLE,
+        D3DRS_SHADEMODE,
+        D3DRS_SPECULARENABLE,
+        D3DRS_SPECULARMATERIALSOURCE,
+        D3DRS_TWEENFACTOR,
+        D3DRS_VERTEXBLEND,
+    };
 
-    const render_state_arg* rsarg = test->test_arg;
+    static const DWORD states_pixel[] =
+    {
+        D3DRS_ALPHABLENDENABLE,
+        D3DRS_ALPHAFUNC,
+        D3DRS_ALPHAREF,
+        D3DRS_ALPHATESTENABLE,
+        D3DRS_ANTIALIASEDLINEENABLE,
+        D3DRS_BLENDFACTOR,
+        D3DRS_BLENDOP,
+        D3DRS_BLENDOPALPHA,
+        D3DRS_CCW_STENCILFAIL,
+        D3DRS_CCW_STENCILPASS,
+        D3DRS_CCW_STENCILZFAIL,
+        D3DRS_COLORWRITEENABLE,
+        D3DRS_COLORWRITEENABLE1,
+        D3DRS_COLORWRITEENABLE2,
+        D3DRS_COLORWRITEENABLE3,
+        D3DRS_DEPTHBIAS,
+        D3DRS_DESTBLEND,
+        D3DRS_DESTBLENDALPHA,
+        D3DRS_DITHERENABLE,
+        D3DRS_FILLMODE,
+        D3DRS_FOGDENSITY,
+        D3DRS_FOGEND,
+        D3DRS_FOGSTART,
+        D3DRS_LASTPIXEL,
+        D3DRS_SCISSORTESTENABLE,
+        D3DRS_SEPARATEALPHABLENDENABLE,
+        D3DRS_SHADEMODE,
+        D3DRS_SLOPESCALEDEPTHBIAS,
+        D3DRS_SRCBLEND,
+        D3DRS_SRCBLENDALPHA,
+        D3DRS_SRGBWRITEENABLE,
+        D3DRS_STENCILENABLE,
+        D3DRS_STENCILFAIL,
+        D3DRS_STENCILFUNC,
+        D3DRS_STENCILMASK,
+        D3DRS_STENCILPASS,
+        D3DRS_STENCILREF,
+        D3DRS_STENCILWRITEMASK,
+        D3DRS_STENCILZFAIL,
+        D3DRS_TEXTUREFACTOR,
+        D3DRS_TWOSIDEDSTENCILMODE,
+        D3DRS_WRAP0,
+        D3DRS_WRAP1,
+        D3DRS_WRAP10,
+        D3DRS_WRAP11,
+        D3DRS_WRAP12,
+        D3DRS_WRAP13,
+        D3DRS_WRAP14,
+        D3DRS_WRAP15,
+        D3DRS_WRAP2,
+        D3DRS_WRAP3,
+        D3DRS_WRAP4,
+        D3DRS_WRAP5,
+        D3DRS_WRAP6,
+        D3DRS_WRAP7,
+        D3DRS_WRAP8,
+        D3DRS_WRAP9,
+        D3DRS_ZENABLE,
+        D3DRS_ZFUNC,
+        D3DRS_ZWRITEENABLE,
+    };
 
-    render_state_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(render_state_context));
+    const struct render_state_arg *rsarg = test->test_arg;
+    unsigned int i, j;
+
+    struct render_state_context *ctx = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ctx));
     if (ctx == NULL) return E_FAIL;
     test->test_context = ctx;
 
-    test->return_data = &ctx->return_data_buffer;
     test->default_data = &ctx->default_data_buffer;
     test->initial_data = &ctx->default_data_buffer;
-    test->test_data_in = &ctx->test_data_buffer;
-    test->test_data_out = &ctx->test_data_buffer;
-    test->poison_data = &ctx->poison_data_buffer;
+    test->test_data_in = &ctx->test_data_all_buffer;
+    test->test_data_out_all = &ctx->test_data_all_buffer;
+    test->test_data_out_vertex = &ctx->test_data_vertex_buffer;
+    test->test_data_out_pixel = &ctx->test_data_pixel_buffer;
 
     render_state_default_data_init(rsarg, &ctx->default_data_buffer);
-    render_state_test_data_init(&ctx->test_data_buffer);
+    render_state_test_data_init(&ctx->test_data_all_buffer);
     render_state_poison_data_init(&ctx->poison_data_buffer);
 
-    test->data_size = sizeof(render_state_data);
+    for (i = 0; i < sizeof(render_state_indices) / sizeof(*render_state_indices); ++i)
+    {
+        ctx->test_data_vertex_buffer.states[i] = ctx->default_data_buffer.states[i];
+        for (j = 0; j < sizeof(states_vertex) / sizeof(*states_vertex); ++j)
+        {
+            if (render_state_indices[i] == states_vertex[j])
+            {
+                ctx->test_data_vertex_buffer.states[i] = ctx->test_data_all_buffer.states[i];
+                break;
+            }
+        }
+
+        ctx->test_data_pixel_buffer.states[i] = ctx->default_data_buffer.states[i];
+        for (j = 0; j < sizeof(states_pixel) / sizeof(*states_pixel); ++j)
+        {
+            if (render_state_indices[i] == states_pixel[j])
+            {
+                ctx->test_data_pixel_buffer.states[i] = ctx->test_data_all_buffer.states[i];
+                break;
+            }
+        }
+    }
 
     return D3D_OK;
 }
 
-static void render_state_teardown_handler(
-    state_test* test) {
-
+static void render_state_teardown_handler(struct state_test *test)
+{
     HeapFree(GetProcessHeap(), 0, test->test_context);
 }
 
-static void render_states_queue_test(
-    state_test* test,
-    const render_state_arg* test_arg) {
-
+static void render_states_queue_test(struct state_test *test, const struct render_state_arg *test_arg)
+{
     test->setup_handler = render_state_setup_handler;
     test->teardown_handler = render_state_teardown_handler;
     test->set_handler = render_state_set_handler;
-    test->get_handler = render_state_get_handler;
-    test->print_handler = render_state_print_handler;
+    test->check_data = render_state_check_data;
     test->test_name = "set_get_render_states";
     test->test_arg = test_arg;
 }
 
 /* =================== Main state tests function =============================== */
 
-static void test_state_management(
-    IDirect3DDevice9 *device,
-    D3DPRESENT_PARAMETERS *device_pparams) {
-
+static void test_state_management(IDirect3DDevice9 *device, D3DPRESENT_PARAMETERS *device_pparams)
+{
+    struct shader_constant_arg pshader_constant_arg;
+    struct shader_constant_arg vshader_constant_arg;
+    struct render_state_arg render_state_arg;
+    struct light_arg light_arg;
     HRESULT hret;
     D3DCAPS9 caps;
 
@@ -1405,14 +1750,8 @@ static void test_state_management(
                    1 for transforms
                    1 for render states
      */
-    const int max_tests = 5;
-    state_test tests[5];
+    struct state_test tests[5];
     unsigned int tcount = 0;
-
-    shader_constant_arg pshader_constant_arg;
-    shader_constant_arg vshader_constant_arg;
-    render_state_arg render_state_arg;
-    light_arg light_arg;
 
     hret = IDirect3DDevice9_GetDeviceCaps(device, &caps);
     ok(hret == D3D_OK, "GetDeviceCaps returned %#x.\n", hret);
@@ -1421,7 +1760,7 @@ static void test_state_management(
     texture_stages = caps.MaxTextureBlendStages;
 
     /* Zero test memory */
-    memset(tests, 0, sizeof(state_test) * max_tests);
+    memset(tests, 0, sizeof(tests));
 
     if (caps.VertexShaderVersion & 0xffff) {
         vshader_constant_arg.idx = 0;

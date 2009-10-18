@@ -9754,11 +9754,11 @@ static void yuv_color_test(IDirect3DDevice9 *device) {
              * differently, so we need a max diff of 16
              */
             color = getPixelColor(device, 40, 240);
-            ok(color_match(color, ref_color_left, 16),
+            ok(color_match(color, ref_color_left, 18),
                "Input 0x%08x: Got color 0x%08x for pixel 1/1, expected 0x%08x, format %s\n",
                test_data[i].in, color, ref_color_left, fmt_string);
             color = getPixelColor(device, 600, 240);
-            ok(color_match(color, ref_color_right, 16),
+            ok(color_match(color, ref_color_right, 18),
                "Input 0x%08x: Got color 0x%08x for pixel 2/1, expected 0x%08x, format %s\n",
                test_data[i].in, color, ref_color_right, fmt_string);
         }
@@ -10351,7 +10351,7 @@ static void sgn_test(IDirect3DDevice9 *device) {
         0x05000051, 0xa00f0000, 0xbf000000, 0x00000000, 0x3f000000, 0x41400000, /* def c0, -0.5, 0.0, 0.5, 12.0 */
         0x05000051, 0xa00f0001, 0x3fc00000, 0x00000000, 0x00000000, 0x00000000, /* def c1, 1.5, 0.0, 0.0, 0.0   */
         0x02000001, 0xc00f0000, 0x90e40000,                                     /* mov oPos, v0                 */
-        0x02000022, 0x800f0000, 0xa0e40000,                                     /* sgn r0, c0                   */
+        0x04000022, 0x800f0000, 0xa0e40000, 0x80e40001, 0x80e40002,             /* sgn r0, c0, r1, r2           */
         0x03000002, 0xd00f0000, 0x80e40000, 0xa0e40001,                         /* add oD0, r0, c1              */
         0x0000ffff                                                              /* end                          */
     };
@@ -10393,6 +10393,76 @@ static void sgn_test(IDirect3DDevice9 *device) {
     hr = IDirect3DDevice9_SetVertexShader(device, NULL);
     ok(hr == D3D_OK, "IDirect3DDevice9_SetVertexShader failed with %08x\n", hr);
     IDirect3DVertexShader9_Release(shader);
+}
+
+static void viewport_test(IDirect3DDevice9 *device) {
+    HRESULT hr;
+    DWORD color;
+    D3DVIEWPORT9 vp, old_vp;
+    const float quad[] =
+    {
+        -0.5,   -0.5,   0.1,
+         0.5,   -0.5,   0.1,
+        -0.5,    0.5,   0.1,
+         0.5,    0.5,   0.1
+    };
+
+    memset(&old_vp, 0, sizeof(old_vp));
+    hr = IDirect3DDevice9_GetViewport(device, &old_vp);
+    ok(hr == D3D_OK, "IDirect3DDevice9_GetViewport failed with %08x\n", hr);
+
+    hr = IDirect3DDevice9_Clear(device, 0, NULL, D3DCLEAR_TARGET, 0x00ff0000, 0.0, 0);
+    ok(hr == D3D_OK, "IDirect3DDevice9_Clear returned %08x\n", hr);
+
+    /* Test a viewport with Width and Height bigger than the surface dimensions
+     *
+     * TODO: Test Width < surface.width, but X + Width > surface.width
+     * TODO: Test Width < surface.width, what happens with the height?
+     */
+    memset(&vp, 0, sizeof(vp));
+    vp.X = 0;
+    vp.Y = 0;
+    vp.Width = 10000;
+    vp.Height = 10000;
+    vp.MinZ = 0.0;
+    vp.MaxZ = 0.0;
+    hr = IDirect3DDevice9_SetViewport(device, &vp);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetViewport failed with %08x\n", hr);
+
+    hr = IDirect3DDevice9_SetFVF(device, D3DFVF_XYZ);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetFVF returned %08x\n", hr);
+    hr = IDirect3DDevice9_BeginScene(device);
+    ok(hr == D3D_OK, "IDirect3DDevice9_BeginScene returned %08x\n", hr);
+    if(SUCCEEDED(hr))
+    {
+        hr = IDirect3DDevice9_DrawPrimitiveUP(device, D3DPT_TRIANGLESTRIP, 2, quad, 3 * sizeof(float));
+        ok(hr == D3D_OK, "DrawPrimitiveUP failed (%08x)\n", hr);
+        hr = IDirect3DDevice9_EndScene(device);
+        ok(hr == D3D_OK, "IDirect3DDevice9_EndScene returned %08x\n", hr);
+    }
+    hr = IDirect3DDevice9_Present(device, NULL, NULL, NULL, NULL);
+
+    ok(hr == D3D_OK, "IDirect3DDevice9_Present failed with %08x\n", hr);
+    color = getPixelColor(device, 158, 118);
+    ok(color == 0x00ff0000, "viewport test: (158,118) has color %08x\n", color);
+    color = getPixelColor(device, 162, 118);
+    ok(color == 0x00ff0000, "viewport test: (162,118) has color %08x\n", color);
+    color = getPixelColor(device, 158, 122);
+    ok(color == 0x00ff0000, "viewport test: (158,122) has color %08x\n", color);
+    color = getPixelColor(device, 162, 122);
+    ok(color == 0x00ffffff, "viewport test: (162,122) has color %08x\n", color);
+
+    color = getPixelColor(device, 478, 358);
+    ok(color == 0x00ffffff, "viewport test: (478,358 has color %08x\n", color);
+    color = getPixelColor(device, 482, 358);
+    ok(color == 0x00ff0000, "viewport test: (482,358) has color %08x\n", color);
+    color = getPixelColor(device, 478, 362);
+    ok(color == 0x00ff0000, "viewport test: (478,362) has color %08x\n", color);
+    color = getPixelColor(device, 482, 362);
+    ok(color == 0x00ff0000, "viewport test: (482,362) has color %08x\n", color);
+
+    hr = IDirect3DDevice9_SetViewport(device, &old_vp);
+    ok(hr == D3D_OK, "IDirect3DDevice9_SetViewport failed with %08x\n", hr);
 }
 
 START_TEST(visual)
@@ -10493,6 +10563,7 @@ START_TEST(visual)
     yuv_color_test(device_ptr);
     zwriteenable_test(device_ptr);
     alphatest_test(device_ptr);
+    viewport_test(device_ptr);
 
     if (caps.VertexShaderVersion >= D3DVS_VERSION(1, 1))
     {

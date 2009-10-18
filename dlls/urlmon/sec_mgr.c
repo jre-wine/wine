@@ -238,6 +238,7 @@ static HRESULT get_action_policy(DWORD zone, DWORD action, BYTE *policy, DWORD s
 
     switch(action) {
     case URLACTION_SCRIPT_OVERRIDE_SAFETY:
+    case URLACTION_ACTIVEX_OVERRIDE_SCRIPT_SAFETY:
         *(DWORD*)policy = URLPOLICY_DISALLOW;
         return S_OK;
     }
@@ -536,7 +537,7 @@ static HRESULT WINAPI SecManagerImpl_ProcessUrlAction(IInternetSecurityManager *
             return hres;
     }
 
-    if(pContext || cbContext || dwFlags || dwReserved)
+    if(dwFlags || dwReserved)
         FIXME("Unsupported arguments\n");
 
     if(!pwszUrl)
@@ -551,6 +552,8 @@ static HRESULT WINAPI SecManagerImpl_ProcessUrlAction(IInternetSecurityManager *
         return hres;
 
     TRACE("policy %x\n", policy);
+    if(cbPolicy >= sizeof(DWORD))
+        *(DWORD*)pPolicy = policy;
 
     switch(GetUrlPolicyPermissions(policy)) {
     case URLPOLICY_ALLOW:
@@ -588,8 +591,8 @@ static HRESULT WINAPI SecManagerImpl_QueryCustomPolicy(IInternetSecurityManager 
             return hres;
     }
 
-    FIXME("Default action is not implemented\n");
-    return E_NOTIMPL;
+    WARN("Unknown guidKey %s\n", debugstr_guid(guidKey));
+    return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
 }
 
 static HRESULT WINAPI SecManagerImpl_SetZoneMapping(IInternetSecurityManager *iface,

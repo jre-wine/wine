@@ -28,6 +28,7 @@
 #include "winuser.h"
 #include "ole2.h"
 #include "perhist.h"
+#include "mshtmdid.h"
 
 #include "wine/debug.h"
 
@@ -1756,12 +1757,23 @@ static HRESULT HTMLDocumentNode_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
     if(htmldoc_qi(&This->basedoc, riid, ppv))
         return *ppv ? S_OK : E_NOINTERFACE;
 
-    return HTMLDOMNode_QI(&This->node, riid, ppv);
+    if(IsEqualGUID(&IID_IInternetHostSecurityManager, riid)) {
+        TRACE("(%p)->(IID_IInternetHostSecurityManager %p)\n", This, ppv);
+        *ppv = HOSTSECMGR(This);
+    }else {
+        return HTMLDOMNode_QI(&This->node, riid, ppv);
+    }
+
+    IUnknown_AddRef((IUnknown*)*ppv);
+    return S_OK;
 }
 
-void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
+static void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
 {
     HTMLDocumentNode *This = HTMLDOCNODE_NODE_THIS(iface);
+
+    if(This->secmgr)
+        IInternetSecurityManager_Release(This->secmgr);
 
     detach_selection(This);
     detach_ranges(This);
@@ -1796,6 +1808,7 @@ static dispex_static_data_t HTMLDocumentNode_dispex = {
 HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_obj, HTMLWindow *window, HTMLDocumentNode **ret)
 {
     HTMLDocumentNode *doc;
+    HRESULT hres;
 
     doc = heap_alloc_zero(sizeof(HTMLDocumentNode));
     if(!doc)
@@ -1806,6 +1819,7 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_ob
 
     init_dispex(&doc->node.dispex, (IUnknown*)HTMLDOMNODE(&doc->node), &HTMLDocumentNode_dispex);
     init_doc(&doc->basedoc, (IUnknown*)HTMLDOMNODE(&doc->node), DISPATCHEX(&doc->node.dispex));
+    HTMLDocumentNode_SecMgr_Init(doc);
     doc->ref = 1;
 
     nsIDOMHTMLDocument_AddRef(nsdoc);
@@ -1818,6 +1832,12 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_ob
 
     HTMLDOMNode_Init(doc, &doc->node, (nsIDOMNode*)nsdoc);
     doc->node.vtbl = &HTMLDocumentNodeImplVtbl;
+
+    hres = CoInternetCreateSecurityManager(NULL, &doc->secmgr, 0);
+    if(FAILED(hres)) {
+        htmldoc_release(&doc->basedoc);
+        return hres;
+    }
 
     *ret = doc;
     return S_OK;

@@ -98,6 +98,16 @@ WINE_DEFAULT_DEBUG_CHANNEL(wininet);
 
 #include <openssl/err.h>
 
+static CRITICAL_SECTION init_ssl_cs;
+static CRITICAL_SECTION_DEBUG init_ssl_cs_debug =
+{
+    0, 0, &init_ssl_cs,
+    { &init_ssl_cs_debug.ProcessLocksList,
+      &init_ssl_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": init_ssl_cs") }
+};
+static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
+
 static void *OpenSSL_ssl_handle;
 static void *OpenSSL_crypto_handle;
 
@@ -110,6 +120,7 @@ static SSL_CTX *ctx;
 MAKE_FUNCPTR(SSL_library_init);
 MAKE_FUNCPTR(SSL_load_error_strings);
 MAKE_FUNCPTR(SSLv23_method);
+MAKE_FUNCPTR(SSL_CTX_free);
 MAKE_FUNCPTR(SSL_CTX_new);
 MAKE_FUNCPTR(SSL_new);
 MAKE_FUNCPTR(SSL_free);
@@ -127,10 +138,28 @@ MAKE_FUNCPTR(SSL_CTX_set_default_verify_paths);
 
 /* OpenSSL's libcrypto functions that we use */
 MAKE_FUNCPTR(BIO_new_fp);
+MAKE_FUNCPTR(CRYPTO_num_locks);
+MAKE_FUNCPTR(CRYPTO_set_id_callback);
+MAKE_FUNCPTR(CRYPTO_set_locking_callback);
 MAKE_FUNCPTR(ERR_get_error);
 MAKE_FUNCPTR(ERR_error_string);
 MAKE_FUNCPTR(i2d_X509);
 #undef MAKE_FUNCPTR
+
+static CRITICAL_SECTION *ssl_locks;
+
+static unsigned long ssl_thread_id(void)
+{
+    return GetCurrentThreadId();
+}
+
+static void ssl_lock_callback(int mode, int type, const char *file, int line)
+{
+    if (mode & CRYPTO_LOCK)
+        EnterCriticalSection(&ssl_locks[type]);
+    else
+        LeaveCriticalSection(&ssl_locks[type]);
+}
 
 #endif
 
@@ -141,15 +170,22 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     if (useSSL)
     {
 #if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
+        int i;
+
         TRACE("using SSL connection\n");
+        EnterCriticalSection(&init_ssl_cs);
 	if (OpenSSL_ssl_handle) /* already initialized everything */
+        {
+            LeaveCriticalSection(&init_ssl_cs);
             return TRUE;
+        }
 	OpenSSL_ssl_handle = wine_dlopen(SONAME_LIBSSL, RTLD_NOW, NULL, 0);
 	if (!OpenSSL_ssl_handle)
 	{
 	    ERR("trying to use a SSL connection, but couldn't load %s. Expect trouble.\n",
 		SONAME_LIBSSL);
             INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
+            LeaveCriticalSection(&init_ssl_cs);
             return FALSE;
 	}
 	OpenSSL_crypto_handle = wine_dlopen(SONAME_LIBCRYPTO, RTLD_NOW, NULL, 0);
@@ -158,6 +194,7 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 	    ERR("trying to use a SSL connection, but couldn't load %s. Expect trouble.\n",
 		SONAME_LIBCRYPTO);
             INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
+            LeaveCriticalSection(&init_ssl_cs);
             return FALSE;
 	}
 
@@ -168,12 +205,14 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     { \
         ERR("failed to load symbol %s\n", #x); \
         INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR); \
+        LeaveCriticalSection(&init_ssl_cs); \
         return FALSE; \
     }
 
 	DYNSSL(SSL_library_init);
 	DYNSSL(SSL_load_error_strings);
 	DYNSSL(SSLv23_method);
+	DYNSSL(SSL_CTX_free);
 	DYNSSL(SSL_CTX_new);
 	DYNSSL(SSL_new);
 	DYNSSL(SSL_free);
@@ -196,9 +235,13 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     { \
         ERR("failed to load symbol %s\n", #x); \
         INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR); \
+        LeaveCriticalSection(&init_ssl_cs); \
         return FALSE; \
     }
 	DYNCRYPTO(BIO_new_fp);
+	DYNCRYPTO(CRYPTO_num_locks);
+	DYNCRYPTO(CRYPTO_set_id_callback);
+	DYNCRYPTO(CRYPTO_set_locking_callback);
 	DYNCRYPTO(ERR_get_error);
 	DYNCRYPTO(ERR_error_string);
 	DYNCRYPTO(i2d_X509);
@@ -209,6 +252,29 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 	pBIO_new_fp(stderr, BIO_NOCLOSE); /* FIXME: should use winedebug stuff */
 
 	meth = pSSLv23_method();
+        ctx = pSSL_CTX_new(meth);
+        if (!pSSL_CTX_set_default_verify_paths(ctx))
+        {
+            ERR("SSL_CTX_set_default_verify_paths failed: %s\n",
+                pERR_error_string(pERR_get_error(), 0));
+            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+            LeaveCriticalSection(&init_ssl_cs);
+            return FALSE;
+        }
+
+        pCRYPTO_set_id_callback(ssl_thread_id);
+        ssl_locks = HeapAlloc(GetProcessHeap(), 0,
+                pCRYPTO_num_locks() * sizeof(CRITICAL_SECTION));
+        if (!ssl_locks)
+        {
+            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+            LeaveCriticalSection(&init_ssl_cs);
+            return FALSE;
+        }
+        for (i = 0; i < pCRYPTO_num_locks(); i++)
+            InitializeCriticalSection(&ssl_locks[i]);
+        pCRYPTO_set_locking_callback(ssl_lock_callback);
+        LeaveCriticalSection(&init_ssl_cs);
 #else
 	FIXME("can't use SSL, not compiled in.\n");
         INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
@@ -216,6 +282,30 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 #endif
     }
     return TRUE;
+}
+
+void NETCON_unload(void)
+{
+#if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
+    if (OpenSSL_crypto_handle)
+    {
+        if (ssl_locks)
+        {
+            int i;
+
+            for (i = 0; i < pCRYPTO_num_locks(); i++)
+                DeleteCriticalSection(&ssl_locks[i]);
+            HeapFree(GetProcessHeap(), 0, ssl_locks);
+        }
+        wine_dlclose(OpenSSL_crypto_handle, NULL, 0);
+    }
+    if (OpenSSL_ssl_handle)
+    {
+        if (ctx)
+            pSSL_CTX_free(ctx);
+        wine_dlclose(OpenSSL_ssl_handle, NULL, 0);
+    }
+#endif
 }
 
 BOOL NETCON_connected(WININET_NETCONNECTION *connection)
@@ -371,14 +461,6 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
         return FALSE;
     }
 
-    ctx = pSSL_CTX_new(meth);
-    if (!pSSL_CTX_set_default_verify_paths(ctx))
-    {
-        ERR("SSL_CTX_set_default_verify_paths failed: %s\n",
-            pERR_error_string(pERR_get_error(), 0));
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-        return FALSE;
-    }
     connection->ssl_s = pSSL_new(ctx);
     if (!connection->ssl_s)
     {

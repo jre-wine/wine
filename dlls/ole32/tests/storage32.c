@@ -36,6 +36,14 @@ DEFINE_GUID( test_stg_cls, 0x88888888, 0x0425, 0x0000, 0,0,0,0,0,0,0,0);
 static CHAR filenameA[MAX_PATH];
 static WCHAR filename[MAX_PATH];
 
+static const WCHAR file1_name[] = {'c','o','p','y','t','e','s','t','A',0};
+static const WCHAR file2_name[] = {'c','o','p','y','t','e','s','t','B',0};
+static const WCHAR stgA_name[] = {'S','t','o','r','a','g','e','A',0};
+static const WCHAR stgB_name[] = {'S','t','o','r','a','g','e','B',0};
+static const WCHAR strmA_name[] = {'S','t','r','e','a','m','A',0};
+static const WCHAR strmB_name[] = {'S','t','r','e','a','m','B',0};
+static const WCHAR strmC_name[] = {'S','t','r','e','a','m','C',0};
+
 static void test_hglobal_storage_stat(void)
 {
     ILockBytes *ilb = NULL;
@@ -894,11 +902,13 @@ static void test_streamenum(void)
 
 static void test_transact(void)
 {
-    IStorage *stg = NULL, *stg2 = NULL;
+    IStorage *stg = NULL, *stg2 = NULL, *stg3 = NULL;
     HRESULT r;
     IStream *stm = NULL;
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
     static const WCHAR stmname2[] = { 'F','O','O',0 };
+    static const WCHAR stgname[] = { 'P','E','R','M','S','T','G',0 };
+    static const WCHAR stgname2[] = { 'T','E','M','P','S','T','G',0 };
 
     DeleteFileA(filenameA);
 
@@ -907,19 +917,40 @@ static void test_transact(void)
                             STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
     ok(r==S_OK, "StgCreateDocfile failed\n");
 
-    /* now create a stream, but don't commit it */
+    /* commit a new stream and storage */
     r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
     ok(r==S_OK, "IStorage->CreateStream failed\n");
 
     r = IStream_Write(stm, "this is stream 1\n", 16, NULL);
     ok(r==S_OK, "IStream->Write failed\n");
 
-    r = IStream_Release(stm);
+    IStream_Release(stm);
 
-    r = IStorage_Commit(stg, 0);
-    ok(r==S_OK, "IStorage->Commit failed\n");
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
 
-    /* now create a stream, but don't commit it */
+    if (r == S_OK)
+    {
+        /* Create two substorages but only commit one */
+        r = IStorage_CreateStorage(stg2, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
+        ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        r = IStorage_Commit(stg, 0);
+        ok(r==S_OK, "IStorage->Commit failed\n");
+
+        r = IStorage_CreateStorage(stg2, stgname2, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
+        ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        IStorage_Release(stg2);
+    }
+
+    /* now create a stream and storage, but don't commit them */
     stm = NULL;
     r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
     ok(r==S_OK, "IStorage->CreateStream failed\n");
@@ -927,10 +958,17 @@ static void test_transact(void)
     r = IStream_Write(stm, "this is stream 2\n", 16, NULL);
     ok(r==S_OK, "IStream->Write failed\n");
 
+    /* IStream::Commit does nothing for OLE storage streams */
     r = IStream_Commit(stm, STGC_ONLYIFCURRENT | STGC_DANGEROUSLYCOMMITMERELYTODISKCACHE);
     ok(r==S_OK, "IStream->Commit failed\n");
 
-    r = IStream_Release(stm);
+    r = IStorage_CreateStorage(stg, stgname2, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    if (r == S_OK)
+        IStorage_Release(stg2);
+
+    IStream_Release(stm);
 
     IStorage_Release(stg);
 
@@ -958,18 +996,299 @@ static void test_transact(void)
     r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
     ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream should fail %08x\n", r);
     }
-    if (stm)
-        r = IStream_Release(stm);
+    if (r == S_OK)
+        IStream_Release(stm);
+
+    todo_wine {
+    r = IStorage_OpenStorage(stg, stgname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStorage should fail %08x\n", r);
+    }
+    if (r == S_OK)
+        IStorage_Release(stg2);
 
     r = IStorage_OpenStorage(stg, stmname2, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
     ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream failed %08x\n", r);
 
     r = IStorage_OpenStream(stg, stmname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
-    ok(r==S_OK, "IStorage->OpenStream should fail %08x\n", r);
-    if (stm)
-        r = IStream_Release(stm);
+    ok(r==S_OK, "IStorage->OpenStream should succeed %08x\n", r);
+    if (r == S_OK)
+        IStream_Release(stm);
+
+    r = IStorage_OpenStorage(stg, stgname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==S_OK, "IStorage->OpenStorage should succeed %08x\n", r);
+    if (r == S_OK)
+    {
+        r = IStorage_OpenStorage(stg2, stgname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg3 );
+        ok(r==S_OK, "IStorage->OpenStorage should succeed %08x\n", r);
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        r = IStorage_OpenStorage(stg2, stgname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg3 );
+        todo_wine ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStorage should fail %08x\n", r);
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        IStorage_Release(stg2);
+    }
 
     IStorage_Release(stg);
+
+    r = DeleteFileA(filenameA);
+    ok( r == TRUE, "deleted file\n");
+}
+
+static void test_revert(void)
+{
+    IStorage *stg = NULL, *stg2 = NULL, *stg3 = NULL;
+    HRESULT r;
+    IStream *stm = NULL, *stm2 = NULL;
+    static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stmname2[] = { 'F','O','O',0 };
+    static const WCHAR stgname[] = { 'P','E','R','M','S','T','G',0 };
+    static const WCHAR stgname2[] = { 'T','E','M','P','S','T','G',0 };
+    STATSTG statstg;
+
+    DeleteFileA(filenameA);
+
+    /* create the file */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    /* commit a new stream and storage */
+    r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Write(stm, "this is stream 1\n", 16, NULL);
+    ok(r==S_OK, "IStream->Write failed\n");
+
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    if (r == S_OK)
+    {
+        /* Create two substorages but only commit one */
+        r = IStorage_CreateStorage(stg2, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
+        ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        r = IStorage_Commit(stg, 0);
+        ok(r==S_OK, "IStorage->Commit failed\n");
+
+        r = IStorage_CreateStorage(stg2, stgname2, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
+        ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+        if (r == S_OK)
+            IStorage_Release(stg3);
+    }
+
+    /* now create a stream and storage, then revert */
+    r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm2 );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Write(stm2, "this is stream 2\n", 16, NULL);
+    ok(r==S_OK, "IStream->Write failed\n");
+
+    r = IStorage_CreateStorage(stg, stgname2, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    r = IStorage_Revert(stg);
+
+    /* all open objects become invalid */
+    todo_wine {
+    r = IStream_Write(stm, "this shouldn't work\n", 20, NULL);
+    ok(r==STG_E_REVERTED, "IStream_Write should fail %08x\n", r);
+
+    r = IStream_Write(stm2, "this shouldn't work\n", 20, NULL);
+    ok(r==STG_E_REVERTED, "IStream_Write should fail %08x\n", r);
+
+    r = IStorage_Stat(stg2, &statstg, STATFLAG_NONAME);
+    ok(r==STG_E_REVERTED, "IStorage_Stat should fail %08x\n", r);
+
+    r = IStorage_Stat(stg3, &statstg, STATFLAG_NONAME);
+    ok(r==STG_E_REVERTED, "IStorage_Stat should fail %08x\n", r);
+    }
+
+    IStream_Release(stm);
+    IStream_Release(stm2);
+    IStorage_Release(stg2);
+    IStorage_Release(stg3);
+
+    r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_DENY_NONE|STGM_READ, 0, &stm );
+    ok(r==STG_E_INVALIDFLAG, "IStorage->OpenStream failed %08x\n", r);
+
+    r = IStorage_OpenStream(stg, stmname, NULL, STGM_DELETEONRELEASE|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+    ok(r==STG_E_INVALIDFUNCTION, "IStorage->OpenStream failed %08x\n", r);
+
+    r = IStorage_OpenStream(stg, stmname, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+    ok(r==STG_E_INVALIDFUNCTION, "IStorage->OpenStream failed %08x\n", r);
+
+    r = IStorage_OpenStorage(stg, stmname, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream failed %08x\n", r);
+
+    todo_wine {
+    r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream should fail %08x\n", r);
+    }
+    if (r == S_OK)
+        IStream_Release(stm);
+
+    todo_wine {
+    r = IStorage_OpenStorage(stg, stgname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStorage should fail %08x\n", r);
+    }
+    if (r == S_OK)
+        IStorage_Release(stg2);
+
+    r = IStorage_OpenStorage(stg, stmname2, NULL, STGM_TRANSACTED|STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream failed %08x\n", r);
+
+    r = IStorage_OpenStream(stg, stmname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+    ok(r==S_OK, "IStorage->OpenStream should succeed %08x\n", r);
+    if (r == S_OK)
+        IStream_Release(stm);
+
+    r = IStorage_OpenStorage(stg, stgname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg2 );
+    ok(r==S_OK, "IStorage->OpenStorage should succeed %08x\n", r);
+    if (r == S_OK)
+    {
+        r = IStorage_OpenStorage(stg2, stgname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg3 );
+        ok(r==S_OK, "IStorage->OpenStorage should succeed %08x\n", r);
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        r = IStorage_OpenStorage(stg2, stgname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, NULL, 0, &stg3 );
+        todo_wine ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStorage should fail %08x\n", r);
+        if (r == S_OK)
+            IStorage_Release(stg3);
+
+        IStorage_Release(stg2);
+    }
+
+    IStorage_Release(stg);
+
+    r = DeleteFileA(filenameA);
+    ok( r == TRUE, "deleted file\n");
+
+    /* Revert only invalidates objects in transacted mode */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStorage_Revert(stg);
+    todo_wine ok(r==S_OK, "IStorage->Revert failed %08x\n", r);
+
+    r = IStream_Write(stm, "this works\n", 11, NULL);
+    ok(r==S_OK, "IStream_Write should succeed %08x\n", r);
+
+    IStream_Release(stm);
+    IStream_Release(stg);
+
+    r = DeleteFileA(filenameA);
+    ok( r == TRUE, "deleted file\n");
+}
+
+static void test_nonroot_transacted(void)
+{
+    IStorage *stg = NULL, *stg2 = NULL;
+    HRESULT r;
+    IStream *stm = NULL;
+    static const WCHAR stgname[] = { 'P','E','R','M','S','T','G',0 };
+    static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stmname2[] = { 'F','O','O',0 };
+
+    DeleteFileA(filenameA);
+
+    /* create a transacted file */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    /* create a transacted substorage */
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_TRANSACTED, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    if (r == S_OK)
+    {
+        /* create and commit stmname */
+        r = IStorage_CreateStream(stg2, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+        ok(r==S_OK, "IStorage->CreateStream failed\n");
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Commit(stg2, 0);
+
+        /* create and revert stmname2 */
+        r = IStorage_CreateStream(stg2, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+        ok(r==S_OK, "IStorage->CreateStream failed\n");
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Revert(stg2);
+
+        /* check that Commit and Revert really worked */
+        r = IStorage_OpenStream(stg2, stmname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+        ok(r==S_OK, "IStorage->OpenStream should succeed %08x\n", r);
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        r = IStorage_OpenStream(stg2, stmname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+        todo_wine ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream should fail %08x\n", r);
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Release(stg2);
+    }
+
+    IStream_Release(stg);
+
+    /* create a non-transacted file */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    /* create a transacted substorage */
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_TRANSACTED, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    if (r == S_OK)
+    {
+        /* create and commit stmname */
+        r = IStorage_CreateStream(stg2, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+        ok(r==S_OK, "IStorage->CreateStream failed\n");
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Commit(stg2, 0);
+
+        /* create and revert stmname2 */
+        r = IStorage_CreateStream(stg2, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+        ok(r==S_OK, "IStorage->CreateStream failed\n");
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Revert(stg2);
+
+        /* check that Commit and Revert really worked */
+        r = IStorage_OpenStream(stg2, stmname, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+        ok(r==S_OK, "IStorage->OpenStream should succeed %08x\n", r);
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        r = IStorage_OpenStream(stg2, stmname2, NULL, STGM_SHARE_EXCLUSIVE|STGM_READWRITE, 0, &stm );
+        todo_wine ok(r==STG_E_FILENOTFOUND, "IStorage->OpenStream should fail %08x\n", r);
+        if (r == S_OK)
+            IStream_Release(stm);
+
+        IStorage_Release(stg2);
+    }
+
+    IStream_Release(stg);
 
     r = DeleteFileA(filenameA);
     ok( r == TRUE, "deleted file\n");
@@ -1470,6 +1789,298 @@ static void test_fmtusertypestg(void)
     }
 }
 
+static void test_references(void)
+{
+    IStorage *stg,*stg2;
+    HRESULT hr;
+    unsigned c1,c2;
+    static const WCHAR StorName[] = { 'D','a','t','a','S','p','a','c','e','I','n','f','o',0 };
+
+    DeleteFileA(filenameA);
+
+    hr = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
+    ok(hr==S_OK, "StgCreateDocfile failed\n");
+
+    if (SUCCEEDED(hr))
+    {
+        IStorage_Release(stg);
+
+        hr = StgOpenStorage( filename, NULL, STGM_TRANSACTED | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, NULL, 0, &stg);
+        ok(hr==S_OK, "StgOpenStorage failed (result=%x)\n",hr);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = IStorage_CreateStorage(stg,StorName,STGM_READWRITE | STGM_SHARE_EXCLUSIVE,0,0,&stg2);
+            ok(hr == S_OK, "IStorage_CreateStorage failed (result=%x)\n",hr);
+
+            if (SUCCEEDED(hr))
+            {
+                c1 = IStorage_AddRef(stg);
+                ok(c1 == 2, "creating internal storage added references to ancestor\n");
+                c1 = IStorage_AddRef(stg);
+                IStorage_Release(stg2);
+                c2 = IStorage_AddRef(stg) - 1;
+                ok(c1 == c2, "releasing internal storage removed references to ancestor\n");
+            }
+            c1 = IStorage_Release(stg);
+            while ( c1 ) c1 = IStorage_Release(stg);
+        }
+    }
+}
+
+/* dest
+ *  |-StorageA
+ *  |  `StreamA: "StreamA"
+ *  |-StorageB
+ *  |  `StreamB: "StreamB"
+ *  `StreamC: "StreamC"
+ */
+static HRESULT create_test_file(IStorage *dest)
+{
+    IStorage *stgA = NULL, *stgB = NULL;
+    IStream *strmA = NULL, *strmB = NULL, *strmC = NULL;
+    const ULONG strmA_name_size = lstrlenW(strmA_name) * sizeof(WCHAR);
+    const ULONG strmB_name_size = lstrlenW(strmB_name) * sizeof(WCHAR);
+    const ULONG strmC_name_size = lstrlenW(strmC_name) * sizeof(WCHAR);
+    ULONG bytes;
+    HRESULT hr;
+
+    hr = IStorage_CreateStorage(dest, stgA_name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stgA);
+    ok(hr == S_OK, "IStorage_CreateStorage failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = IStorage_CreateStream(stgA, strmA_name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &strmA);
+    ok(hr == S_OK, "IStorage_CreateStream failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = IStream_Write(strmA, strmA_name, strmA_name_size, &bytes);
+    ok(hr == S_OK && bytes == strmA_name_size, "IStream_Write failed: 0x%08x, %d of %d bytes written\n", hr, bytes, strmA_name_size);
+
+    hr = IStorage_CreateStorage(dest, stgB_name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stgB);
+    ok(hr == S_OK, "IStorage_CreateStorage failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = IStorage_CreateStream(stgB, strmB_name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &strmB);
+    ok(hr == S_OK, "IStorage_CreateStream failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = IStream_Write(strmB, strmB_name, strmB_name_size, &bytes);
+    ok(hr == S_OK && bytes == strmB_name_size, "IStream_Write failed: 0x%08x, %d of %d bytes written\n", hr, bytes, strmB_name_size);
+
+    hr = IStorage_CreateStream(dest, strmC_name, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &strmC);
+    ok(hr == S_OK, "IStorage_CreateStream failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = IStream_Write(strmC, strmC_name, strmC_name_size, &bytes);
+    ok(hr == S_OK && bytes == strmC_name_size, "IStream_Write failed: 0x%08x, %d of %d bytes written\n", hr, bytes, strmC_name_size);
+
+cleanup:
+    if(strmC)
+        IStream_Release(strmC);
+    if(strmB)
+        IStream_Release(strmB);
+    if(stgB)
+        IStorage_Release(stgB);
+    if(strmA)
+        IStream_Release(strmA);
+    if(stgA)
+        IStorage_Release(stgA);
+
+    return hr;
+}
+
+static void test_copyto(void)
+{
+    IStorage *file1 = NULL, *file2 = NULL, *stg_tmp;
+    IStream *strm_tmp;
+    WCHAR buf[64];
+    HRESULT hr;
+
+    /* create & populate file1 */
+    hr = StgCreateDocfile(file1_name, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &file1);
+    ok(hr == S_OK, "StgCreateDocfile failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = create_test_file(file1);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* create file2 */
+    hr = StgCreateDocfile(file2_name, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &file2);
+    ok(hr == S_OK, "StgCreateDocfile failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* copy file1 into file2 */
+    hr = IStorage_CopyTo(file1, 0, NULL, NULL, NULL);
+    ok(hr == STG_E_INVALIDPOINTER, "CopyTo should give STG_E_INVALIDPONITER, gave: 0x%08x\n", hr);
+
+    hr = IStorage_CopyTo(file1, 0, NULL, NULL, file2);
+    ok(hr == S_OK, "CopyTo failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* verify that all of file1 was copied */
+    hr = IStorage_OpenStorage(file2, stgA_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg_tmp);
+    ok(hr == S_OK, "OpenStorage failed: 0x%08x\n", hr);
+
+    if(SUCCEEDED(hr)){
+        hr = IStorage_OpenStream(stg_tmp, strmA_name, NULL,
+                STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+        ok(hr == S_OK, "OpenStream failed: 0x%08x\n", hr);
+
+        if(SUCCEEDED(hr)){
+            memset(buf, 0, sizeof(buf));
+            hr = IStream_Read(strm_tmp, buf, sizeof(buf), NULL);
+            ok(hr == S_OK, "Read failed: 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+                ok(lstrcmpW(buf, strmA_name) == 0,
+                        "Expected %s to be read, got %s\n", wine_dbgstr_w(strmA_name), wine_dbgstr_w(buf));
+
+            IStream_Release(strm_tmp);
+        }
+
+        IStorage_Release(stg_tmp);
+    }
+
+    hr = IStorage_OpenStorage(file2, stgB_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg_tmp);
+    ok(hr == S_OK, "OpenStorage failed: 0x%08x\n", hr);
+
+    if(SUCCEEDED(hr)){
+        hr = IStorage_OpenStream(stg_tmp, strmB_name, NULL,
+                STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+        ok(hr == S_OK, "OpenStream failed: 0x%08x\n", hr);
+
+        if(SUCCEEDED(hr)){
+            memset(buf, 0, sizeof(buf));
+            hr = IStream_Read(strm_tmp, buf, sizeof(buf), NULL);
+            ok(hr == S_OK, "Read failed: 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+                ok(lstrcmpW(buf, strmB_name) == 0,
+                        "Expected %s to be read, got %s\n", wine_dbgstr_w(strmB_name), wine_dbgstr_w(buf));
+
+            IStream_Release(strm_tmp);
+        }
+
+        IStorage_Release(stg_tmp);
+    }
+
+    hr = IStorage_OpenStream(file2, strmC_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+    ok(hr == S_OK, "OpenStream failed: 0x%08x\n", hr);
+
+    if(SUCCEEDED(hr)){
+        memset(buf, 0, sizeof(buf));
+        hr = IStream_Read(strm_tmp, buf, sizeof(buf), NULL);
+        ok(hr == S_OK, "Read failed: 0x%08x\n", hr);
+        if(SUCCEEDED(hr))
+            ok(lstrcmpW(buf, strmC_name) == 0,
+                    "Expected %s to be read, got %s\n", wine_dbgstr_w(strmC_name), wine_dbgstr_w(buf));
+
+        IStream_Release(strm_tmp);
+    }
+
+cleanup:
+    if(file1)
+        IStorage_Release(file1);
+    if(file2)
+        IStorage_Release(file2);
+
+    DeleteFileW(file1_name);
+    DeleteFileW(file2_name);
+}
+
+static void test_copyto_snbexclusions(void)
+{
+    static const WCHAR *snb_exclude[] = {stgA_name, strmB_name, strmC_name, 0};
+
+    IStorage *file1 = NULL, *file2 = NULL, *stg_tmp;
+    IStream *strm_tmp;
+    WCHAR buf[64];
+    HRESULT hr;
+
+    /* create & populate file1 */
+    hr = StgCreateDocfile(file1_name, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &file1);
+    ok(hr == S_OK, "StgCreateDocfile failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    hr = create_test_file(file1);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* create file2 */
+    hr = StgCreateDocfile(file2_name, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &file2);
+    ok(hr == S_OK, "StgCreateDocfile failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* copy file1 to file2 with name exclusions */
+    hr = IStorage_CopyTo(file1, 0, NULL, (SNB)snb_exclude, file2);
+    ok(hr == S_OK, "CopyTo failed: 0x%08x\n", hr);
+    if(FAILED(hr))
+        goto cleanup;
+
+    /* verify that file1 copied over, respecting exclusions */
+    hr = IStorage_OpenStorage(file2, stgA_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg_tmp);
+    ok(hr == STG_E_FILENOTFOUND, "OpenStorage should give STG_E_FILENOTFOUND, gave: 0x%08x\n", hr);
+    if(SUCCEEDED(hr))
+        IStorage_Release(stg_tmp);
+
+    hr = IStorage_OpenStream(file2, strmA_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+    ok(hr == STG_E_FILENOTFOUND, "OpenStream should give STG_E_FILENOTFOUND, gave: 0x%08x\n", hr);
+    if(SUCCEEDED(hr))
+        IStream_Release(strm_tmp);
+
+    hr = IStorage_OpenStorage(file2, stgB_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, NULL, 0, &stg_tmp);
+    ok(hr == S_OK, "OpenStorage failed: 0x%08x\n", hr);
+
+    if(SUCCEEDED(hr)){
+        hr = IStorage_OpenStream(stg_tmp, strmB_name, NULL,
+                STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+        ok(hr == S_OK, "OpenStream failed: 0x%08x\n", hr);
+
+        if(SUCCEEDED(hr)){
+            memset(buf, 0, sizeof(buf));
+            hr = IStream_Read(strm_tmp, buf, sizeof(buf), NULL);
+            ok(hr == S_OK, "Read failed: 0x%08x\n", hr);
+            if(SUCCEEDED(hr))
+                ok(lstrcmpW(buf, strmB_name) == 0,
+                        "Expected %s to be read, got %s\n", wine_dbgstr_w(strmB_name), wine_dbgstr_w(buf));
+
+            IStream_Release(strm_tmp);
+        }
+
+        IStorage_Release(stg_tmp);
+    }
+
+    hr = IStorage_OpenStream(file2, strmC_name, NULL,
+            STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &strm_tmp);
+    ok(hr == STG_E_FILENOTFOUND, "OpenStream should give STG_E_FILENOTFOUND, gave: 0x%08x\n", hr);
+    if(SUCCEEDED(hr))
+        IStream_Release(strm_tmp);
+
+cleanup:
+    if(file1)
+        IStorage_Release(file1);
+    if(file2)
+        IStorage_Release(file2);
+
+    DeleteFileW(file1_name);
+    DeleteFileW(file2_name);
+}
+
 START_TEST(storage32)
 {
     CHAR temp[MAX_PATH];
@@ -1491,10 +2102,15 @@ START_TEST(storage32)
     test_storage_refcount();
     test_streamenum();
     test_transact();
+    test_revert();
+    test_nonroot_transacted();
     test_ReadClassStm();
     test_access();
     test_writeclassstg();
     test_readonly();
     test_simple();
     test_fmtusertypestg();
+    test_references();
+    test_copyto();
+    test_copyto_snbexclusions();
 }

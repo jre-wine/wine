@@ -135,8 +135,11 @@ static int running_on_visible_desktop (void)
 {
     HWND desktop;
     HMODULE huser32 = GetModuleHandle("user32.dll");
-    FARPROC pGetProcessWindowStation = GetProcAddress(huser32, "GetProcessWindowStation");
-    FARPROC pGetUserObjectInformationA = GetProcAddress(huser32, "GetUserObjectInformationA");
+    HWINSTA (WINAPI *pGetProcessWindowStation)(void);
+    BOOL (WINAPI *pGetUserObjectInformationA)(HANDLE,INT,LPVOID,DWORD,LPDWORD);
+
+    pGetProcessWindowStation = (void *)GetProcAddress(huser32, "GetProcessWindowStation");
+    pGetUserObjectInformationA = (void *)GetProcAddress(huser32, "GetUserObjectInformationA");
 
     desktop = GetDesktopWindow();
     if (!GetWindowLongPtrW(desktop, GWLP_WNDPROC)) /* Win9x */
@@ -153,6 +156,20 @@ static int running_on_visible_desktop (void)
         return (uoflags.dwFlags & WSF_VISIBLE) != 0;
     }
     return IsWindowVisible(desktop);
+}
+
+/* check for wine fake dll module */
+static BOOL is_fake_dll( HMODULE module )
+{
+    static const char fakedll_signature[] = "Wine placeholder DLL";
+    const IMAGE_DOS_HEADER *dos;
+
+    if (!((ULONG_PTR)module & 1)) return FALSE;  /* not loaded as datafile */
+    dos = (const IMAGE_DOS_HEADER *)((const char *)module - 1);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return FALSE;
+    if (dos->e_lfanew >= sizeof(*dos) + sizeof(fakedll_signature) &&
+        !memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) )) return TRUE;
+    return FALSE;
 }
 
 /* check if Gecko is present, trying to trigger the install if not */
@@ -570,12 +587,13 @@ static BOOL get_main_clsid(const char *name, CLSID *clsid)
     return FALSE;
 }
 
-static HMODULE load_com_dll(const char *name)
+static HMODULE load_com_dll(const char *name, char **path, char *filename)
 {
     HMODULE dll = NULL;
     HKEY hkey;
     char keyname[100];
     char dllname[MAX_PATH];
+    char *p;
     CLSID clsid;
 
     if(!get_main_clsid(name, &clsid)) return NULL;
@@ -589,7 +607,15 @@ static HMODULE load_com_dll(const char *name)
     {
         LONG size = sizeof(dllname);
         if(RegQueryValueA(hkey, NULL, dllname, &size) == ERROR_SUCCESS)
-            dll = LoadLibraryA(dllname);
+        {
+            if ((dll = LoadLibraryExA(dllname, NULL, LOAD_LIBRARY_AS_DATAFILE)))
+            {
+                strcpy( filename, dllname );
+                p = strrchr(dllname, '\\');
+                if (p) *p = 0;
+                *path = heap_strdup( dllname );
+            }
+        }
         RegCloseKey(hkey);
     }
 
@@ -628,10 +654,17 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
     strcpy(filename, dllname);
     dll = LoadLibraryExA(dllname, NULL, LOAD_LIBRARY_AS_DATAFILE);
 
-    if(!dll)
+    if (!dll) dll = load_com_dll(dllname, &wine_tests[nr_of_files].maindllpath, filename);
+
+    if (dll && running_under_wine() && ((ULONG_PTR)dll & 1))
     {
-        dll = load_com_dll(dllname);
-        if(dll) get_dll_path(dll, &wine_tests[nr_of_files].maindllpath, filename);
+        /* builtin dlls can't be loaded as datafile, so we must have native or fake dll */
+        if (!is_fake_dll(dll))
+        {
+            FreeLibrary(dll);
+            xprintf ("    %s=load error Configured as native\n", dllname);
+            return TRUE;
+        }
     }
 
     if (!dll && pLoadLibraryShim)

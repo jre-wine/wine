@@ -168,6 +168,10 @@ static HRESULT WINAPI HTMLLocation_get_protocol(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -182,6 +186,10 @@ static HRESULT WINAPI HTMLLocation_get_host(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -196,6 +204,10 @@ static HRESULT WINAPI HTMLLocation_get_hostname(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -210,6 +222,10 @@ static HRESULT WINAPI HTMLLocation_get_port(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -230,6 +246,9 @@ static HRESULT WINAPI HTMLLocation_get_pathname(IHTMLLocation *iface, BSTR *p)
     HRESULT hres;
 
     TRACE("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
 
     hres = get_url(This, &doc_url);
     if(FAILED(hres))
@@ -271,6 +290,10 @@ static HRESULT WINAPI HTMLLocation_get_search(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -285,6 +308,10 @@ static HRESULT WINAPI HTMLLocation_get_hash(IHTMLLocation *iface, BSTR *p)
 {
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, p);
+
+    if(!p)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -314,34 +341,6 @@ static HRESULT WINAPI HTMLLocation_toString(IHTMLLocation *iface, BSTR *String)
     HTMLLocation *This = HTMLLOCATION_THIS(iface);
     FIXME("(%p)->(%p)\n", This, String);
     return E_NOTIMPL;
-}
-
-static HRESULT HTMLLocation_value(IUnknown *iface, LCID lcid, WORD flags, DISPPARAMS *params,
-        VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
-{
-    HTMLLocation *This = HTMLLOCATION_THIS(iface);
-    HRESULT hres;
-
-    TRACE("(%p)\n", This);
-
-    switch(flags) {
-    case DISPATCH_PROPERTYGET: {
-        BSTR str;
-
-        hres = IHTMLLocation_get_href(HTMLLOCATION(This), &str);
-        if(FAILED(hres))
-            return hres;
-
-        V_VT(res) = VT_BSTR;
-        V_BSTR(res) = str;
-        break;
-    }
-    default:
-        FIXME("unimplemented flags %x\n", flags);
-        return E_NOTIMPL;
-    }
-
-    return S_OK;
 }
 
 #undef HTMLLOCATION_THIS
@@ -376,18 +375,12 @@ static const IHTMLLocationVtbl HTMLLocationVtbl = {
     HTMLLocation_toString
 };
 
-static const dispex_static_data_vtbl_t HTMLLocation_dispex_vtbl = {
-    HTMLLocation_value,
-    NULL,
-    NULL
-};
-
 static const tid_t HTMLLocation_iface_tids[] = {
     IHTMLLocation_tid,
     0
 };
 static dispex_static_data_t HTMLLocation_dispex = {
-    &HTMLLocation_dispex_vtbl,
+    NULL,
     DispHTMLLocation_tid,
     NULL,
     HTMLLocation_iface_tids

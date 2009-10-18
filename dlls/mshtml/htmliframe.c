@@ -43,6 +43,40 @@ typedef struct {
 
 #define HTMLFRAMEBASE2(x)  (&(x)->lpIHTMLFrameBase2Vtbl)
 
+static HRESULT create_content_window(HTMLIFrame *This, nsIDOMHTMLDocument *nsdoc, HTMLWindow **ret)
+{
+    nsIDOMDocumentView *nsdocview;
+    nsIDOMAbstractView *nsview;
+    nsIDOMWindow *nswindow;
+    nsresult nsres;
+    HRESULT hres;
+
+    nsres = nsIDOMHTMLDocument_QueryInterface(nsdoc, &IID_nsIDOMDocumentView, (void**)&nsdocview);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMDocumentView: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMDocumentView_GetDefaultView(nsdocview, &nsview);
+    nsIDOMDocumentView_Release(nsdocview);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDefaultView failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMAbstractView_QueryInterface(nsview, &IID_nsIDOMWindow, (void**)&nswindow);
+    nsIDOMAbstractView_Release(nsview);
+    if(NS_FAILED(nsres)) {
+        ERR("Coult not get nsIDOMWindow iface: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hres = HTMLWindow_Create(This->element.node.doc->basedoc.doc_obj, nswindow, ret);
+
+    nsIDOMWindow_Release(nswindow);
+    return hres;
+}
+
 #define HTMLFRAMEBASE2_THIS(iface) DEFINE_THIS(HTMLIFrame, IHTMLFrameBase2, iface)
 
 static HRESULT WINAPI HTMLIFrameBase2_QueryInterface(IHTMLFrameBase2 *iface, REFIID riid, void **ppv)
@@ -130,10 +164,10 @@ static HRESULT WINAPI HTMLIFrameBase2_get_contentWindow(IHTMLFrameBase2 *iface, 
             return E_FAIL;
         }
 
-        hres = HTMLWindow_Create(This->element.node.doc->basedoc.doc_obj, NULL, &window);
+        hres = create_content_window(This, nshtmldoc, &window);
         if(FAILED(hres)) {
-            nsIDOMDocument_Release(nsdoc);
-            return hres;
+            nsIDOMHTMLDocument_Release(nshtmldoc);
+            return E_FAIL;
         }
 
         hres = create_doc_from_nsdoc(nshtmldoc, This->element.node.doc->basedoc.doc_obj, window, &content_doc);
@@ -288,8 +322,7 @@ HTMLElement *HTMLIFrame_Create(nsIDOMHTMLElement *nselem)
     ret->lpIHTMLFrameBase2Vtbl = &HTMLIFrameBase2Vtbl;
     ret->element.node.vtbl = &HTMLIFrameImplVtbl;
 
-    init_dispex(&ret->element.node.dispex, (IUnknown*)HTMLFRAMEBASE2(ret), &HTMLIFrame_dispex);
-    HTMLElement_Init(&ret->element);
+    HTMLElement_Init(&ret->element, &HTMLIFrame_dispex);
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLIFrameElement, (void**)&ret->nsiframe);
     if(NS_FAILED(nsres))

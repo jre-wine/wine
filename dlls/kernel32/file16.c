@@ -37,12 +37,114 @@
 #include "winbase.h"
 #include "winternl.h"
 #include "wine/winbase16.h"
-#include "kernel_private.h"
+#include "kernel16_private.h"
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(file);
 
+#define DOS_TABLE_SIZE 256
+
+static HANDLE dos_handles[DOS_TABLE_SIZE];
+
+/***********************************************************************
+ *           FILE_InitProcessDosHandles
+ *
+ * Allocates the default DOS handles for a process. Called either by
+ * Win32HandleToDosFileHandle below or by the DOSVM stuff.
+ */
+static void FILE_InitProcessDosHandles( void )
+{
+    static BOOL init_done /* = FALSE */;
+    HANDLE cp = GetCurrentProcess();
+
+    if (init_done) return;
+    init_done = TRUE;
+    DuplicateHandle(cp, GetStdHandle(STD_INPUT_HANDLE), cp, &dos_handles[0],
+                    0, TRUE, DUPLICATE_SAME_ACCESS);
+    DuplicateHandle(cp, GetStdHandle(STD_OUTPUT_HANDLE), cp, &dos_handles[1],
+                    0, TRUE, DUPLICATE_SAME_ACCESS);
+    DuplicateHandle(cp, GetStdHandle(STD_ERROR_HANDLE), cp, &dos_handles[2],
+                    0, TRUE, DUPLICATE_SAME_ACCESS);
+    DuplicateHandle(cp, GetStdHandle(STD_ERROR_HANDLE), cp, &dos_handles[3],
+                    0, TRUE, DUPLICATE_SAME_ACCESS);
+    DuplicateHandle(cp, GetStdHandle(STD_ERROR_HANDLE), cp, &dos_handles[4],
+                    0, TRUE, DUPLICATE_SAME_ACCESS);
+}
+
+/***********************************************************************
+ *           DosFileHandleToWin32Handle   (KERNEL32.20)
+ *
+ * Return the Win32 handle for a DOS handle.
+ *
+ * Note: this is not exactly right, since on Win95 the Win32 handles
+ *       are on top of DOS handles and we do it the other way
+ *       around. Should be good enough though.
+ */
+HANDLE WINAPI DosFileHandleToWin32Handle( HFILE handle )
+{
+    HFILE16 hfile = (HFILE16)handle;
+    if (hfile < 5) FILE_InitProcessDosHandles();
+    if ((hfile >= DOS_TABLE_SIZE) || !dos_handles[hfile])
+    {
+        SetLastError( ERROR_INVALID_HANDLE );
+        return INVALID_HANDLE_VALUE;
+    }
+    return dos_handles[hfile];
+}
+
+/***********************************************************************
+ *           Win32HandleToDosFileHandle   (KERNEL32.21)
+ *
+ * Allocate a DOS handle for a Win32 handle. The Win32 handle is no
+ * longer valid after this function (even on failure).
+ *
+ * Note: this is not exactly right, since on Win95 the Win32 handles
+ *       are on top of DOS handles and we do it the other way
+ *       around. Should be good enough though.
+ */
+HFILE WINAPI Win32HandleToDosFileHandle( HANDLE handle )
+{
+    int i;
+
+    if (!handle || (handle == INVALID_HANDLE_VALUE))
+        return HFILE_ERROR;
+
+    FILE_InitProcessDosHandles();
+    for (i = 0; i < DOS_TABLE_SIZE; i++)
+        if (!dos_handles[i])
+        {
+            dos_handles[i] = handle;
+            TRACE("Got %d for h32 %p\n", i, handle );
+            return (HFILE)i;
+        }
+    CloseHandle( handle );
+    SetLastError( ERROR_TOO_MANY_OPEN_FILES );
+    return HFILE_ERROR;
+}
+
+/***********************************************************************
+ *           DisposeLZ32Handle   (KERNEL32.22)
+ *
+ * Note: this is not entirely correct, we should only close the
+ *       32-bit handle and not the 16-bit one, but we cannot do
+ *       this because of the way our DOS handles are implemented.
+ *       It shouldn't break anything though.
+ */
+void WINAPI DisposeLZ32Handle( HANDLE handle )
+{
+    int i;
+
+    if (!handle || (handle == INVALID_HANDLE_VALUE)) return;
+
+    for (i = 5; i < DOS_TABLE_SIZE; i++)
+        if (dos_handles[i] == handle)
+        {
+            dos_handles[i] = 0;
+            CloseHandle( handle );
+            break;
+        }
+}
 
 /***********************************************************************
  *           GetProfileInt   (KERNEL.57)
@@ -428,6 +530,81 @@ UINT16 WINAPI GetPrivateProfileInt16( LPCSTR section, LPCSTR entry,
 
 
 /***********************************************************************
+ *           GetPrivateProfileString   (KERNEL.128)
+ */
+INT16 WINAPI GetPrivateProfileString16( LPCSTR section, LPCSTR entry,
+                                        LPCSTR def_val, LPSTR buffer,
+                                        UINT16 len, LPCSTR filename )
+{
+    if (!section)
+    {
+        if (buffer && len) buffer[0] = 0;
+        return 0;
+    }
+    if (!entry)
+    {
+        /* We have to return the list of keys in the section but without the values
+         * so we need to massage the results of GetPrivateProfileSectionA.
+         */
+        UINT ret, oldlen = len, size = min( len, 1024 );
+        LPSTR data, src;
+
+        for (;;)
+        {
+            if (!(data = HeapAlloc(GetProcessHeap(), 0, size ))) return 0;
+            ret = GetPrivateProfileSectionA( section, data, size, filename );
+            if (!ret)
+            {
+                HeapFree( GetProcessHeap(), 0, data );
+                return 0;
+            }
+            if (ret != size - 2) break;
+            /* overflow, try again */
+            size *= 2;
+            HeapFree( GetProcessHeap(), 0, data );
+        }
+
+        src = data;
+        while (len && *src)
+        {
+            char *p = strchr( src, '=' );
+
+            if (!p) p = src + strlen(src);
+            if (p - src < len)
+            {
+                memcpy( buffer, src, p - src );
+                buffer += p - src;
+                *buffer++ = 0;
+                len -= (p - src) + 1;
+                src += strlen(src) + 1;
+            }
+            else  /* overflow */
+            {
+                memcpy( buffer, src, len );
+                buffer += len;
+                len = 0;
+            }
+        }
+        HeapFree( GetProcessHeap(), 0, data );
+
+        if (len)
+        {
+            *buffer = 0;
+            return oldlen - len;
+        }
+        if (oldlen > 2)
+        {
+            buffer[-2] = 0;
+            buffer[-1] = 0;
+            return oldlen - 2;
+        }
+        return 0;
+    }
+    return GetPrivateProfileStringA( section, entry, def_val, buffer, len, filename );
+}
+
+
+/***********************************************************************
  *           WritePrivateProfileString   (KERNEL.129)
  */
 BOOL16 WINAPI WritePrivateProfileString16( LPCSTR section, LPCSTR entry,
@@ -545,6 +722,15 @@ UINT16 WINAPI SetHandleCount16( UINT16 count )
 WORD WINAPI GetShortPathName16( LPCSTR longpath, LPSTR shortpath, WORD len )
 {
     return GetShortPathNameA( longpath, shortpath, len );
+}
+
+
+/***********************************************************************
+ *           WriteOutProfiles   (KERNEL.315)
+ */
+void WINAPI WriteOutProfiles16(void)
+{
+    WritePrivateProfileSectionW( NULL, NULL, NULL );
 }
 
 

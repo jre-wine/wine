@@ -118,7 +118,7 @@ static void msg_spy_init(HWND hwnd) {
     msg_spy_flush_msgs();
 }
 
-static void msg_spy_cleanup() {
+static void msg_spy_cleanup(void) {
     if (msg_spy.get_msg_hook)
         UnhookWindowsHookEx(msg_spy.get_msg_hook);
     if (msg_spy.call_wnd_proc_hook)
@@ -274,17 +274,18 @@ static void test_ImmSetCompositionString(void)
 
     ret = ImmSetCompositionStringW(imc, SCS_SETSTR | SCS_CHANGEATTR,
         NULL, 0, NULL, 0);
-    todo_wine
     ok(!ret, "ImmSetCompositionStringW() succeeded.\n");
 
     ret = ImmSetCompositionStringW(imc, SCS_SETSTR | SCS_CHANGECLAUSE,
         NULL, 0, NULL, 0);
-    todo_wine
     ok(!ret, "ImmSetCompositionStringW() succeeded.\n");
 
     ret = ImmSetCompositionStringW(imc, SCS_CHANGEATTR | SCS_CHANGECLAUSE,
         NULL, 0, NULL, 0);
-    todo_wine
+    ok(!ret, "ImmSetCompositionStringW() succeeded.\n");
+
+    ret = ImmSetCompositionStringW(imc, SCS_SETSTR | SCS_CHANGEATTR | SCS_CHANGECLAUSE,
+        NULL, 0, NULL, 0);
     ok(!ret, "ImmSetCompositionStringW() succeeded.\n");
 
     ImmReleaseContext(hwnd, imc);

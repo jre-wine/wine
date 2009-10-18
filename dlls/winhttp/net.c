@@ -76,6 +76,16 @@ static CRITICAL_SECTION cs_gethostbyname = { &critsect_debug, -1, 0, 0, 0, 0 };
 
 #include <openssl/err.h>
 
+static CRITICAL_SECTION init_ssl_cs;
+static CRITICAL_SECTION_DEBUG init_ssl_cs_debug =
+{
+    0, 0, &init_ssl_cs,
+    { &init_ssl_cs_debug.ProcessLocksList,
+      &init_ssl_cs_debug.ProcessLocksList },
+    0, 0, { (DWORD_PTR)(__FILE__ ": init_ssl_cs") }
+};
+static CRITICAL_SECTION init_ssl_cs = { &init_ssl_cs_debug, -1, 0, 0, 0, 0 };
+
 static void *libssl_handle;
 static void *libcrypto_handle;
 
@@ -87,6 +97,7 @@ static SSL_CTX *ctx;
 MAKE_FUNCPTR( SSL_library_init );
 MAKE_FUNCPTR( SSL_load_error_strings );
 MAKE_FUNCPTR( SSLv23_method );
+MAKE_FUNCPTR( SSL_CTX_free );
 MAKE_FUNCPTR( SSL_CTX_new );
 MAKE_FUNCPTR( SSL_new );
 MAKE_FUNCPTR( SSL_free );
@@ -100,10 +111,28 @@ MAKE_FUNCPTR( SSL_get_peer_certificate );
 MAKE_FUNCPTR( SSL_CTX_set_default_verify_paths );
 
 MAKE_FUNCPTR( BIO_new_fp );
+MAKE_FUNCPTR( CRYPTO_num_locks );
+MAKE_FUNCPTR( CRYPTO_set_id_callback );
+MAKE_FUNCPTR( CRYPTO_set_locking_callback );
 MAKE_FUNCPTR( ERR_get_error );
 MAKE_FUNCPTR( ERR_error_string );
 MAKE_FUNCPTR( i2d_X509 );
 #undef MAKE_FUNCPTR
+
+static CRITICAL_SECTION *ssl_locks;
+
+static unsigned long ssl_thread_id(void)
+{
+    return GetCurrentThreadId();
+}
+
+static void ssl_lock_callback(int mode, int type, const char *file, int line)
+{
+    if (mode & CRYPTO_LOCK)
+        EnterCriticalSection( &ssl_locks[type] );
+    else
+        LeaveCriticalSection( &ssl_locks[type] );
+}
 
 #endif
 
@@ -176,21 +205,32 @@ static int sock_get_error( int err )
 
 BOOL netconn_init( netconn_t *conn, BOOL secure )
 {
+#if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
+    int i;
+#endif
+
     conn->socket = -1;
     if (!secure) return TRUE;
 
 #if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
-    if (libssl_handle) return TRUE;
+    EnterCriticalSection( &init_ssl_cs );
+    if (libssl_handle)
+    {
+        LeaveCriticalSection( &init_ssl_cs );
+        return TRUE;
+    }
     if (!(libssl_handle = wine_dlopen( SONAME_LIBSSL, RTLD_NOW, NULL, 0 )))
     {
         ERR("Trying to use SSL but couldn't load %s. Expect trouble.\n", SONAME_LIBSSL);
         set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
+        LeaveCriticalSection( &init_ssl_cs );
         return FALSE;
     }
     if (!(libcrypto_handle = wine_dlopen( SONAME_LIBCRYPTO, RTLD_NOW, NULL, 0 )))
     {
         ERR("Trying to use SSL but couldn't load %s. Expect trouble.\n", SONAME_LIBCRYPTO);
         set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
+        LeaveCriticalSection( &init_ssl_cs );
         return FALSE;
     }
 #define LOAD_FUNCPTR(x) \
@@ -198,11 +238,13 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     { \
         ERR("Failed to load symbol %s\n", #x); \
         set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR ); \
+        LeaveCriticalSection( &init_ssl_cs ); \
         return FALSE; \
     }
     LOAD_FUNCPTR( SSL_library_init );
     LOAD_FUNCPTR( SSL_load_error_strings );
     LOAD_FUNCPTR( SSLv23_method );
+    LOAD_FUNCPTR( SSL_CTX_free );
     LOAD_FUNCPTR( SSL_CTX_new );
     LOAD_FUNCPTR( SSL_new );
     LOAD_FUNCPTR( SSL_free );
@@ -221,9 +263,13 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     { \
         ERR("Failed to load symbol %s\n", #x); \
         set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR ); \
+        LeaveCriticalSection( &init_ssl_cs ); \
         return FALSE; \
     }
     LOAD_FUNCPTR( BIO_new_fp );
+    LOAD_FUNCPTR( CRYPTO_num_locks );
+    LOAD_FUNCPTR( CRYPTO_set_id_callback );
+    LOAD_FUNCPTR( CRYPTO_set_locking_callback );
     LOAD_FUNCPTR( ERR_get_error );
     LOAD_FUNCPTR( ERR_error_string );
     LOAD_FUNCPTR( i2d_X509 );
@@ -234,12 +280,59 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     pBIO_new_fp( stderr, BIO_NOCLOSE );
 
     method = pSSLv23_method();
+    ctx = pSSL_CTX_new( method );
+    if (!pSSL_CTX_set_default_verify_paths( ctx ))
+    {
+        ERR("SSL_CTX_set_default_verify_paths failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
+        set_last_error( ERROR_OUTOFMEMORY );
+        LeaveCriticalSection( &init_ssl_cs );
+        return FALSE;
+    }
+
+    pCRYPTO_set_id_callback(ssl_thread_id);
+    ssl_locks = HeapAlloc(GetProcessHeap(), 0,
+            pCRYPTO_num_locks() * sizeof(HANDLE));
+    if (!ssl_locks)
+    {
+        set_last_error( ERROR_OUTOFMEMORY );
+        LeaveCriticalSection( &init_ssl_cs );
+        return FALSE;
+    }
+    for (i = 0; i < pCRYPTO_num_locks(); i++)
+        InitializeCriticalSection( &ssl_locks[i] );
+    pCRYPTO_set_locking_callback(ssl_lock_callback);
+
+    LeaveCriticalSection( &init_ssl_cs );
 #else
     WARN("SSL support not compiled in.\n");
     set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
     return FALSE;
 #endif
     return TRUE;
+}
+
+void netconn_unload( void )
+{
+#if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
+    if (libcrypto_handle)
+    {
+        if (ssl_locks)
+        {
+            int i;
+
+            for (i = 0; i < pCRYPTO_num_locks(); i++)
+                DeleteCriticalSection( &ssl_locks[i] );
+            HeapFree( GetProcessHeap(), 0, ssl_locks );
+        }
+        wine_dlclose( libcrypto_handle, NULL, 0 );
+    }
+    if (libssl_handle)
+    {
+        if (ctx)
+            pSSL_CTX_free( ctx );
+        wine_dlclose( libssl_handle, NULL, 0 );
+    }
+#endif
 }
 
 BOOL netconn_connected( netconn_t *conn )
@@ -333,13 +426,6 @@ BOOL netconn_secure_connect( netconn_t *conn )
     X509 *cert;
     long res;
 
-    ctx = pSSL_CTX_new( method );
-    if (!pSSL_CTX_set_default_verify_paths( ctx ))
-    {
-        ERR("SSL_CTX_set_default_verify_paths failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
-        set_last_error( ERROR_OUTOFMEMORY );
-        return FALSE;
-    }
     if (!(conn->ssl_conn = pSSL_new( ctx )))
     {
         ERR("SSL_new failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));

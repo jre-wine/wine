@@ -59,6 +59,7 @@ typedef enum {
     NULL_tid,
     DispCEventObj_tid,
     DispDOMChildrenCollection_tid,
+    DispHTMLAnchorElement_tid,
     DispHTMLBody_tid,
     DispHTMLCommentElement_tid,
     DispHTMLCurrentStyle_tid,
@@ -78,6 +79,7 @@ typedef enum {
     DispHTMLTableRow_tid,
     DispHTMLUnknownElement_tid,
     DispHTMLWindow2_tid,
+    IHTMLAnchorElement_tid,
     IHTMLBodyElement_tid,
     IHTMLBodyElement2_tid,
     IHTMLCommentElement_tid,
@@ -465,9 +467,13 @@ struct HTMLDocumentNode {
     HTMLDOMNode node;
     HTMLDocument basedoc;
 
+    const IInternetHostSecurityManagerVtbl *lpIInternetHostSecurityManagerVtbl;
+
     LONG ref;
 
     HTMLDOMNode *nodes;
+
+    IInternetSecurityManager *secmgr;
 
     struct list selection_list;
     struct list range_list;
@@ -540,6 +546,8 @@ struct HTMLDocumentNode {
 
 #define SUPPERRINFO(x)   ((ISupportErrorInfo*) &(x)->lpSupportErrorInfoVtbl)
 
+#define HOSTSECMGR(x)    ((IInternetHostSecurityManager*)  &(x)->lpIInternetHostSecurityManagerVtbl)
+
 #define DEFINE_THIS2(cls,ifc,iface) ((cls*)((BYTE*)(iface)-offsetof(cls,ifc)))
 #define DEFINE_THIS(cls,ifc,iface) DEFINE_THIS2(cls,lp ## ifc ## Vtbl,iface)
 
@@ -563,6 +571,8 @@ void HTMLDocument_View_Init(HTMLDocument*);
 void HTMLDocument_Window_Init(HTMLDocument*);
 void HTMLDocument_Service_Init(HTMLDocument*);
 void HTMLDocument_Hlink_Init(HTMLDocument*);
+
+void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode*);
 
 HRESULT HTMLCurrentStyle_Create(HTMLElement*,IHTMLCurrentStyle**);
 
@@ -661,10 +671,10 @@ HTMLElement *HTMLTextAreaElement_Create(nsIDOMHTMLElement*);
 HTMLElement *HTMLGenericElement_Create(nsIDOMHTMLElement*);
 
 void HTMLDOMNode_Init(HTMLDocumentNode*,HTMLDOMNode*,nsIDOMNode*);
-void HTMLElement_Init(HTMLElement*);
+void HTMLElement_Init(HTMLElement*,dispex_static_data_t*);
 void HTMLElement2_Init(HTMLElement*);
 void HTMLElement3_Init(HTMLElement*);
-void HTMLTextContainer_Init(HTMLTextContainer*);
+void HTMLTextContainer_Init(HTMLTextContainer*,dispex_static_data_t*);
 
 HRESULT HTMLDOMNode_QI(HTMLDOMNode*,REFIID,void**);
 void HTMLDOMNode_destructor(HTMLDOMNode*);
