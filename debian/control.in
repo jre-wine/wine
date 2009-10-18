@@ -17,7 +17,7 @@ Build-Depends: debhelper (>= 5), flex | flex-old, bison,
  freeglut3-dev | libglut-dev | glutg3-dev, libxmu-dev | xlibs-dev (<< 4.3),
  libxcursor-dev | xlibs-dev (<< 4.3), libncurses5-dev, libcups2-dev | libcupsys2-dev,
  libjpeg62-dev | libjpeg-dev, libpng12-dev | libpng3-dev | libpng-dev,
- libfreetype6-dev, libfontconfig1-dev,
+ libfreetype6-dev, libfontconfig1-dev, libopenal-dev,
  libasound2-dev [i386 amd64 powerpc sparc],
  libjack-dev | libjack0.100.0-dev | libjack0.80.0-dev | libjack0.71.2-dev | libjack0.50.0-dev,
  libaudio-dev | nas-dev, libesd0-dev, libsane-dev, libusb-dev, libgsm1-dev, libmpg123-dev,
@@ -40,7 +40,8 @@ Multi-Arch: foreign
 Depends: wine-bin (= ${binary:Version}),
  libwine-alsa (= ${binary:Version}) [i386 amd64 powerpc sparc] | libwine-oss (= ${binary:Version}) | libwine-esd (= ${binary:Version}) | libwine-jack (= ${binary:Version}) | libwine-nas (= ${binary:Version}),
  libwine-gl (= ${binary:Version}), libwine-print (= ${binary:Version}), libwine-sane (= ${binary:Version}),
- libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version})
+ libwine-cms (= ${binary:Version}), libwine-gphoto2 (= ${binary:Version}), libwine-ldap (= ${binary:Version}),
+ libwine-openal (= ${binary:Version})
 Recommends: ttf-liberation
 Suggests: wine-doc, binfmt-support, ttf-mscorefonts-installer, winbind, avscan | klamav | clamav
 Description: Windows API implementation - standard suite
@@ -222,6 +223,18 @@ Description: Windows API implementation - NAS sound module
  This is still a work in progress and many applications may still not work.
  .
  This package contains a Network Audio System sound driver.
+
+Package: libwine-openal
+Section: libs
+Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
+Multi-Arch: same
+Depends: ${shlibs:Depends}
+Description: Windows API implementation - OpenAL module
+ Wine is a free MS-Windows API implementation.
+ This is still a work in progress and many applications may still not work.
+ .
+ This package contains the OpenAL module, which allows Windows applications
+ to use advanced 3D sound effects.
 
 Package: libwine-oss
 Section: libs

@@ -17,6 +17,7 @@ libwine-gphoto2	gphoto2.ds
 libwine-jack	winejack.drv
 libwine-ldap	wldap32.dll
 libwine-nas	winenas.drv
+libwine-openal	openal32.dll
 libwine-oss	wineoss.drv
 libwine-print	wineps.drv
 libwine-sane	sane.ds
