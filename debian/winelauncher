@@ -60,4 +60,5 @@ fi # nss_mdns4
 fi # amd64
 
 # Launch Wine
-exec /usr/lib/wine/wine.bin "$@"
+export WINELOADER="/usr/lib/wine/wine.bin"
+exec "$WINELOADER" "$@"
