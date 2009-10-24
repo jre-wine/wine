@@ -2145,6 +2145,31 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
       ME_SendRequestResize(editor, FALSE);
       return TRUE;
     case VK_RETURN:
+      if (editor->bDialogMode)
+      {
+        if (ctrl_is_down)
+          return TRUE;
+
+        if (!(editor->styleFlags & ES_WANTRETURN))
+        {
+          if (editor->hwndParent)
+          {
+            DWORD dw;
+            dw = SendMessageW(editor->hwndParent, DM_GETDEFID, 0, 0);
+            if (HIWORD(dw) == DC_HASDEFID)
+            {
+                HWND hwDefCtrl = GetDlgItem(editor->hwndParent, LOWORD(dw));
+                if (hwDefCtrl)
+                {
+                    SendMessageW(editor->hwndParent, WM_NEXTDLGCTL, (WPARAM)hwDefCtrl, (LPARAM)TRUE);
+                    PostMessageW(hwDefCtrl, WM_KEYDOWN, VK_RETURN, 0);
+                }
+            }
+          }
+          return TRUE;
+        }
+      }
+
       if (editor->styleFlags & ES_MULTILINE)
       {
         ME_Cursor cursor = editor->pCursors[0];
@@ -2264,6 +2289,14 @@ ME_KeyDown(ME_TextEditor *editor, WORD nKey)
         return TRUE;
       }
       break;
+    case VK_ESCAPE:
+      if (editor->bDialogMode && editor->hwndParent)
+        PostMessageW(editor->hwndParent, WM_CLOSE, 0, 0);
+      return TRUE;
+    case VK_TAB:
+      if (editor->bDialogMode && editor->hwndParent)
+        SendMessageW(editor->hwndParent, WM_NEXTDLGCTL, shift_is_down, 0);
+      return TRUE;
     case 'A':
       if (ctrl_is_down)
       {
@@ -2665,6 +2698,7 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
   ed->mode |= (props & TXTBIT_RICHTEXT) ? TM_RICHTEXT : TM_PLAINTEXT;
   ed->AutoURLDetect_bEnable = FALSE;
   ed->bHaveFocus = FALSE;
+  ed->bDialogMode = FALSE;
   ed->bMouseCaptured = FALSE;
   for (i=0; i<HFONT_CACHE_SIZE; i++)
   {
@@ -3008,6 +3042,8 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
   case WM_GETDLGCODE:
   {
     UINT code = DLGC_WANTCHARS|DLGC_WANTTAB|DLGC_WANTARROWS|DLGC_HASSETSEL;
+    if (lParam)
+      editor->bDialogMode = TRUE;
     if (editor->styleFlags & ES_MULTILINE)
       code |= DLGC_WANTMESSAGE;
     return code;

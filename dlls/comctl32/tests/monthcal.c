@@ -39,11 +39,6 @@
 #define PARENT_SEQ_INDEX    0
 #define MONTHCAL_SEQ_INDEX  1
 
-struct subclass_info
-{
-    WNDPROC oldproc;
-};
-
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
 static HWND parent_wnd;
@@ -224,7 +219,7 @@ static const struct message monthcal_todaylink_seq[] = {
     { MCM_SETTODAY, sent|wparam, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
     { MCM_GETTODAY, sent|wparam, 0},
-    { WM_LBUTTONDOWN, sent|wparam|lparam, MK_LBUTTON, MAKELONG(70, 370)},
+    { WM_LBUTTONDOWN, sent|wparam, MK_LBUTTON},
     { WM_CAPTURECHANGED, sent|wparam|lparam|defwinproc, 0, 0},
     { WM_PAINT, sent|wparam|lparam|defwinproc, 0, 0},
     { MCM_GETCURSEL, sent|wparam, 0},
@@ -581,7 +576,7 @@ static HWND create_parent_window(void)
 
 static LRESULT WINAPI monthcal_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    WNDPROC oldproc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
     static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
@@ -602,7 +597,7 @@ static LRESULT WINAPI monthcal_subclass_proc(HWND hwnd, UINT message, WPARAM wPa
     }
 
     defwndproc_counter++;
-    ret = CallWindowProcA(info->oldproc, hwnd, message, wParam, lParam);
+    ret = CallWindowProcA(oldproc, hwnd, message, wParam, lParam);
     defwndproc_counter--;
 
     return ret;
@@ -610,12 +605,8 @@ static LRESULT WINAPI monthcal_subclass_proc(HWND hwnd, UINT message, WPARAM wPa
 
 static HWND create_monthcal_control(DWORD style)
 {
-    struct subclass_info *info;
+    WNDPROC oldproc;
     HWND hwnd;
-
-    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
-    if (!info)
-        return NULL;
 
     hwnd = CreateWindowEx(0,
                     MONTHCAL_CLASS,
@@ -624,15 +615,11 @@ static HWND create_monthcal_control(DWORD style)
                     0, 0, 300, 400,
                     parent_wnd, NULL, GetModuleHandleA(NULL), NULL);
 
-    if (!hwnd)
-    {
-        HeapFree(GetProcessHeap(), 0, info);
-        return NULL;
-    }
+    if (!hwnd) return NULL;
 
-    info->oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
-                                            (LONG_PTR)monthcal_subclass_proc);
-    SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)info);
+    oldproc = (WNDPROC)SetWindowLongPtrA(hwnd, GWLP_WNDPROC,
+                                        (LONG_PTR)monthcal_subclass_proc);
+    SetWindowLongPtrA(hwnd, GWLP_USERDATA, (LONG_PTR)oldproc);
 
     SendMessage(hwnd, WM_SETFONT, (WPARAM)GetStockObject(SYSTEM_FONT), 0);
 
@@ -914,14 +901,12 @@ static void test_monthcal_unicode(void)
 
     /* current setting is 1, so, should return 1 */
     res = SendMessage(hwnd, MCM_GETUNICODEFORMAT, 0, 0);
-    todo_wine
     ok(1 == res ||
        broken(0 == res), /* comctl32 <= 4.70 */
        "Expected 1, got %d\n", res);
 
     /* setting to 0, should return previous settings */
     res = SendMessage(hwnd, MCM_SETUNICODEFORMAT, 0, 0);
-    todo_wine
     ok(1 == res ||
        broken(0 == res), /* comctl32 <= 4.70 */
        "Expected 1, got %d\n", res);
@@ -1194,54 +1179,46 @@ static void test_monthcal_todaylink(void)
 {
     MCHITTESTINFO mchit;
     SYSTEMTIME st_test, st_new;
-    BOOL error = FALSE;
     UINT res;
     HWND hwnd;
+    RECT r;
 
     memset(&mchit, 0, sizeof(MCHITTESTINFO));
 
     hwnd = create_monthcal_control(0);
 
+    res = SendMessage(hwnd, MCM_GETMINREQRECT, 0, (LPARAM)&r);
+    MoveWindow(hwnd, 0, 0, r.right, r.bottom, FALSE);
+
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    /* (70, 370) is in active area - today link */
+    /* hit active area - today link */
     mchit.cbSize = MCHITTESTINFO_V1_SIZE;
-    mchit.pt.x = 70;
-    mchit.pt.y = 370;
+    mchit.pt.x = r.right / 14;
+    mchit.pt.y = 18 * r.bottom / 19;
     res = SendMessage(hwnd, MCM_HITTEST, 0, (LPARAM) & mchit);
-    expect(70, mchit.pt.x);
-    expect(370, mchit.pt.y);
+    expect(r.right / 14, mchit.pt.x);
+    expect(18 * r.bottom / 19, mchit.pt.y);
     expect(mchit.uHit, res);
-    todo_wine {expect(MCHT_TODAYLINK, res);}
-    if (70 != mchit.pt.x || 370 != mchit.pt.y || mchit.uHit != res
-        || MCHT_TODAYLINK != res)
-        error = TRUE;
+    expect(MCHT_TODAYLINK, res);
 
     st_test.wDay = 1;
     st_test.wMonth = 1;
     st_test.wYear = 2005;
-    memset(&st_new, 0, sizeof(SYSTEMTIME));
 
     SendMessage(hwnd, MCM_SETTODAY, 0, (LPARAM)&st_test);
 
+    memset(&st_new, 0, sizeof(st_new));
     res = SendMessage(hwnd, MCM_GETTODAY, 0, (LPARAM)&st_new);
     expect(1, res);
     expect(1, st_new.wDay);
     expect(1, st_new.wMonth);
     expect(2005, st_new.wYear);
-    if (1 != res || 1 != st_new.wDay || 1 != st_new.wMonth
-        || 2005 != st_new.wYear)
-        error = TRUE;
 
-    if (error) {
-        skip("cannot perform today link test\n");
-        return;
-    }
-
-    res = SendMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELONG(70, 370));
+    res = SendMessage(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELONG(mchit.pt.x, mchit.pt.y));
     expect(0, res);
 
-    memset(&st_new, 0, sizeof(SYSTEMTIME));
+    memset(&st_new, 0, sizeof(st_new));
     res = SendMessage(hwnd, MCM_GETCURSEL, 0, (LPARAM)&st_new);
     expect(1, res);
     expect(1, st_new.wDay);
@@ -1350,6 +1327,7 @@ static void test_monthcal_monthrange(void)
     int res;
     SYSTEMTIME st_visible[2], st_daystate[2], st;
     HWND hwnd;
+    RECT r;
 
     hwnd = create_monthcal_control(0);
 
@@ -1372,6 +1350,11 @@ static void test_monthcal_monthrange(void)
 
     /* to be locale independent */
     SendMessage(hwnd, MCM_SETFIRSTDAYOFWEEK, 0, (LPARAM)6);
+
+    res = SendMessage(hwnd, MCM_GETMINREQRECT, 0, (LPARAM)&r);
+    expect(TRUE, res);
+    /* resize control to display two Calendars */
+    MoveWindow(hwnd, 0, 0, r.right, (5/2)*r.bottom, FALSE);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -1403,6 +1386,31 @@ static void test_monthcal_monthrange(void)
     }
 
     ok_sequence(sequences, MONTHCAL_SEQ_INDEX, monthcal_monthrange_seq, "monthcal monthrange", FALSE);
+
+    /* resize control to display single Calendar */
+    MoveWindow(hwnd, 0, 0, r.right, r.bottom, FALSE);
+
+    memset(&st, 0, sizeof(st));
+    st.wMonth = 9;
+    st.wYear  = 1752;
+    st.wDay   = 14;
+
+    res = SendMessage(hwnd, MCM_SETCURSEL, 0, (LPARAM)&st);
+    expect(1, res);
+
+    /* September 1752 has 19 days */
+    res = SendMessage(hwnd, MCM_GETMONTHRANGE, GMR_VISIBLE, (LPARAM)st_visible);
+    expect(1, res);
+
+    expect(1752, st_visible[0].wYear);
+    expect(9, st_visible[0].wMonth);
+    ok(14 == st_visible[0].wDay ||
+       broken(1 == st_visible[0].wDay), /* comctl32 <= 4.72 */
+       "Expected 14, got %d\n", st_visible[0].wDay);
+
+    expect(1752, st_visible[1].wYear);
+    expect(9, st_visible[1].wMonth);
+    expect(19, st_visible[1].wDay);
 
     DestroyWindow(hwnd);
 }
@@ -1559,18 +1567,18 @@ static void test_monthcal_selrange(void)
     expect(st.wYear,      range[0].wYear);
     expect(st.wMonth,     range[0].wMonth);
     expect(st.wDay,       range[0].wDay);
-    if (range[0].wDayOfWeek == 0)
+    if (range[0].wDayOfWeek != st.wDayOfWeek)
     {
         win_skip("comctl32 <= 4.70 doesn't set some values\n");
         old_comctl32 = TRUE;
     }
     else
     {
-         expect(st.wDayOfWeek, range[0].wDayOfWeek);
-         expect(st.wHour,      range[0].wHour);
-         expect(st.wMinute,    range[0].wMinute);
-         expect(st.wSecond,    range[0].wSecond);
-         expect(st.wMilliseconds, range[0].wMilliseconds);
+        expect(st.wDayOfWeek, range[0].wDayOfWeek);
+        expect(st.wHour,      range[0].wHour);
+        expect(st.wMinute,    range[0].wMinute);
+        expect(st.wSecond,    range[0].wSecond);
+        expect(st.wMilliseconds, range[0].wMilliseconds);
     }
 
     expect(st.wYear,      range[1].wYear);
@@ -1647,6 +1655,28 @@ static void test_monthcal_selrange(void)
     DestroyWindow(hwnd);
 }
 
+static void test_killfocus(void)
+{
+    HWND hwnd;
+    DWORD style;
+
+    hwnd = create_monthcal_control(0);
+
+    /* make parent invisible */
+    style = GetWindowLong(parent_wnd, GWL_STYLE);
+    SetWindowLong(parent_wnd, GWL_STYLE, style &~ WS_VISIBLE);
+
+    SendMessage(hwnd, WM_KILLFOCUS, (WPARAM)GetDesktopWindow(), 0);
+
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    ok(style & WS_VISIBLE, "Expected WS_VISIBLE to be set\n");
+
+    style = GetWindowLong(parent_wnd, GWL_STYLE);
+    SetWindowLong(parent_wnd, GWL_STYLE, style | WS_VISIBLE);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(monthcal)
 {
     HMODULE hComctl32;
@@ -1684,6 +1714,7 @@ START_TEST(monthcal)
     test_monthcal_size();
     test_monthcal_maxselday();
     test_monthcal_selrange();
+    test_killfocus();
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
     DestroyWindow(parent_wnd);

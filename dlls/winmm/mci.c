@@ -67,11 +67,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mci);
 
-WINMM_MapType  (*pFnMciMapMsg16To32W)  (WORD,WORD,DWORD,DWORD_PTR*) = NULL;
-WINMM_MapType  (*pFnMciUnMapMsg16To32W)(WORD,WORD,DWORD,DWORD_PTR) = NULL;
-WINMM_MapType  (*pFnMciMapMsg32WTo16)  (WORD,WORD,DWORD,DWORD_PTR*) = NULL;
-WINMM_MapType  (*pFnMciUnMapMsg32WTo16)(WORD,WORD,DWORD,DWORD_PTR) = NULL;
-
 /* First MCI valid device ID (0 means error) */
 #define MCI_MAGIC 0x0001
 
@@ -86,6 +81,7 @@ static const WCHAR wszSystemIni[] = {'s','y','s','t','e','m','.','i','n','i',0};
 static WINE_MCIDRIVER *MciDrivers;
 
 static UINT WINAPI MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data);
+static UINT MCI_SetCommandTable(HGLOBAL hMem, UINT uDevType);
 
 /* dup a string and uppercase it */
 static inline LPWSTR str_dup_upper( LPCWSTR str )
@@ -103,7 +99,7 @@ static inline LPWSTR str_dup_upper( LPCWSTR str )
 /**************************************************************************
  * 				MCI_GetDriver			[internal]
  */
-LPWINE_MCIDRIVER	MCI_GetDriver(UINT16 wDevID)
+static LPWINE_MCIDRIVER	MCI_GetDriver(UINT16 wDevID)
 {
     LPWINE_MCIDRIVER	wmd = 0;
 
@@ -583,6 +579,7 @@ static	DWORD	MCI_GetDevTypeFromFileName(LPCWSTR fileName, LPWSTR buf, UINT len)
 
 typedef struct tagWINE_MCICMDTABLE {
     UINT		uDevType;
+    HGLOBAL             hMem;
     const BYTE*		lpTable;
     UINT		nVerbs;		/* number of verbs in command table */
     LPCWSTR*		aVerbs;		/* array of verbs to speed up the verb look up process */
@@ -696,7 +693,7 @@ static	UINT		MCI_GetCommandTable(UINT uDevType)
 
 	if (hRsrc) hMem = LoadResource(hWinMM32Instance, hRsrc);
 	if (hMem) {
-	    uTbl = MCI_SetCommandTable(LockResource(hMem), uDevType);
+	    uTbl = MCI_SetCommandTable(hMem, uDevType);
 	} else {
 	    WARN("No command table found in resource %p[%s]\n",
 		 hWinMM32Instance, debugstr_w(str));
@@ -709,7 +706,7 @@ static	UINT		MCI_GetCommandTable(UINT uDevType)
 /**************************************************************************
  * 				MCI_SetCommandTable		[internal]
  */
-UINT MCI_SetCommandTable(void *table, UINT uDevType)
+static UINT MCI_SetCommandTable(HGLOBAL hMem, UINT uDevType)
 {
     int		        uTbl;
     static	BOOL	bInitDone = FALSE;
@@ -723,7 +720,7 @@ UINT MCI_SetCommandTable(void *table, UINT uDevType)
 	bInitDone = TRUE;
 	MCI_GetCommandTable(0);
     }
-    TRACE("(%p, %u)\n", table, uDevType);
+    TRACE("(%p, %u)\n", hMem, uDevType);
     for (uTbl = 0; uTbl < MAX_MCICMDTABLE; uTbl++) {
 	if (!S_MciCmdTable[uTbl].lpTable) {
 	    const BYTE* lmem;
@@ -732,7 +729,8 @@ UINT MCI_SetCommandTable(void *table, UINT uDevType)
 	    WORD	count;
 
 	    S_MciCmdTable[uTbl].uDevType = uDevType;
-	    S_MciCmdTable[uTbl].lpTable = table;
+	    S_MciCmdTable[uTbl].lpTable = LockResource(hMem);
+	    S_MciCmdTable[uTbl].hMem = hMem;
 
 	    if (TRACE_ON(mci)) {
 		MCI_DumpCommandTable(uTbl);
@@ -770,21 +768,6 @@ UINT MCI_SetCommandTable(void *table, UINT uDevType)
     }
 
     return MCI_NO_COMMAND_TABLE;
-}
-
-/**************************************************************************
- * 				MCI_DeleteCommandTable		[internal]
- */
-BOOL	MCI_DeleteCommandTable(UINT uTbl, BOOL delete)
-{
-    if (uTbl >= MAX_MCICMDTABLE || !S_MciCmdTable[uTbl].lpTable)
-	return FALSE;
-
-    if (delete) HeapFree(GetProcessHeap(), 0, (void*)S_MciCmdTable[uTbl].lpTable);
-    S_MciCmdTable[uTbl].lpTable = NULL;
-    HeapFree(GetProcessHeap(), 0, S_MciCmdTable[uTbl].aVerbs);
-    S_MciCmdTable[uTbl].aVerbs = 0;
-    return TRUE;
 }
 
 /**************************************************************************
@@ -829,30 +812,9 @@ static	BOOL	MCI_OpenMciDriver(LPWINE_MCIDRIVER wmd, LPCWSTR drvTyp, DWORD_PTR lp
     if (!DRIVER_GetLibName(drvTyp, wszMci, libName, sizeof(libName)))
 	return FALSE;
 
-    wmd->bIs32 = 0xFFFF;
     /* First load driver */
-    if ((wmd->hDriver = (HDRVR)DRIVER_TryOpenDriver32(libName, lp))) {
-	wmd->bIs32 = TRUE;
-    } else if (WINMM_CheckForMMSystem() && pFnMciMapMsg32WTo16) {
-	WINMM_MapType 	res;
-
-	switch (res = pFnMciMapMsg32WTo16(0, DRV_OPEN, 0, &lp)) {
-	case WINMM_MAP_MSGERROR:
-	    TRACE("Not handled yet (DRV_OPEN)\n");
-	    break;
-	case WINMM_MAP_NOMEM:
-	    TRACE("Problem mapping msg=DRV_OPEN from 32W to 16\n");
-	    break;
-	case WINMM_MAP_OK:
-	case WINMM_MAP_OKMEM:
-	    if ((wmd->hDriver = OpenDriver(drvTyp, wszMci, lp)))
-		wmd->bIs32 = FALSE;
-	    if (res == WINMM_MAP_OKMEM)
-		pFnMciUnMapMsg32WTo16(0, DRV_OPEN, 0, lp);
-	    break;
-	}
-    }
-    return (wmd->bIs32 == 0xFFFF) ? FALSE : TRUE;
+    wmd->hDriver = (HDRVR)DRIVER_TryOpenDriver32(libName, lp);
+    return wmd->hDriver != NULL;
 }
 
 /**************************************************************************
@@ -941,28 +903,7 @@ static DWORD MCI_SendCommandFrom32(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dw
     LPWINE_MCIDRIVER	wmd = MCI_GetDriver(wDevID);
 
     if (wmd) {
-	if (wmd->bIs32) {
-	    dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-	} else if (pFnMciMapMsg32WTo16) {
-	    WINMM_MapType	res;
-
-	    switch (res = pFnMciMapMsg32WTo16(wmd->wType, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_MSGERROR:
-		TRACE("Not handled yet (%s)\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_DRIVER_INTERNAL;
-		break;
-	    case WINMM_MAP_NOMEM:
-		TRACE("Problem mapping msg=%s from 32a to 16\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_OUT_OF_MEMORY;
-		break;
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-		if (res == WINMM_MAP_OKMEM)
-		    pFnMciUnMapMsg32WTo16(wmd->wType, wMsg, dwParam1, dwParam2);
-		break;
-	    }
-	}
+        dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
     }
     return dwRet;
 }
@@ -1433,12 +1374,6 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	goto errCleanUp;
     }
 
-    /* set up call back */
-    if (hwndCallback != 0) {
-	dwFlags |= MCI_NOTIFY;
-	data[0] = (DWORD)hwndCallback;
-    }
-
     /* set return information */
     switch (retType = MCI_GetReturnType(lpCmd)) {
     case 0:		offset = 1;	break;
@@ -1453,6 +1388,11 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 
     if ((dwRet = MCI_ParseOptArgs(data, offset, lpCmd, args, &dwFlags)))
 	goto errCleanUp;
+
+    /* set up call back */
+    if (dwFlags & MCI_NOTIFY) {
+	data[0] = (DWORD)hwndCallback;
+    }
 
     /* FIXME: the command should get it's own notification window set up and
      * ask for device closing while processing the notification mechanism
@@ -1470,7 +1410,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	    MCI_UnLoadMciDriver(wmd);
 	/* FIXME: notification is not properly shared across two opens */
     } else {
-	dwRet = MCI_SendCommand(wmd->wDeviceID, MCI_GetMessage(lpCmd), dwFlags, (DWORD_PTR)data, TRUE);
+	dwRet = MCI_SendCommand(wmd->wDeviceID, MCI_GetMessage(lpCmd), dwFlags, (DWORD_PTR)data);
     }
     TRACE("=> 1/ %x (%s)\n", dwRet, debugstr_w(lpstrRet));
     dwRet = MCI_HandleReturnValues(dwRet, wmd, retType, data, lpstrRet, uRetLen);
@@ -1515,7 +1455,6 @@ DWORD WINAPI mciSendStringA(LPCSTR lpstrCommand, LPSTR lpstrRet,
 
 /**************************************************************************
  * 				mciExecute			[WINMM.@]
- * 				mciExecute			[MMSYSTEM.712]
  */
 BOOL WINAPI mciExecute(LPCSTR lpstrCommand)
 {
@@ -1542,9 +1481,9 @@ BOOL WINAPI mciExecute(LPCSTR lpstrCommand)
  */
 UINT WINAPI mciLoadCommandResource(HINSTANCE hInst, LPCWSTR resNameW, UINT type)
 {
-    HRSRC	        hRsrc = 0;
-    HGLOBAL      	hMem;
-    UINT16		ret = MCI_NO_COMMAND_TABLE;
+    UINT        ret = MCI_NO_COMMAND_TABLE;
+    HRSRC	hRsrc = 0;
+    HGLOBAL     hMem;
 
     TRACE("(%p, %s, %d)!\n", hInst, debugstr_w(resNameW), type);
 
@@ -1566,13 +1505,13 @@ UINT WINAPI mciLoadCommandResource(HINSTANCE hInst, LPCWSTR resNameW, UINT type)
 	}
 #endif
     }
-    if (!(hRsrc = FindResourceW(hInst, resNameW, (LPWSTR)RT_RCDATA))) {
-	WARN("No command table found in resource\n");
-    } else if ((hMem = LoadResource(hInst, hRsrc))) {
-	ret = MCI_SetCommandTable(LockResource(hMem), type);
-    } else {
-	WARN("Couldn't load resource.\n");
+    if ((hRsrc = FindResourceW(hInst, resNameW, (LPWSTR)RT_RCDATA)) &&
+        (hMem = LoadResource(hInst, hRsrc))) {
+        ret = MCI_SetCommandTable(hMem, type);
+        FreeResource(hMem);
     }
+    else WARN("No command table found in module for %s\n", debugstr_w(resNameW));
+
     TRACE("=> %04x\n", ret);
     return ret;
 }
@@ -1584,44 +1523,16 @@ BOOL WINAPI mciFreeCommandResource(UINT uTable)
 {
     TRACE("(%08x)!\n", uTable);
 
-    return MCI_DeleteCommandTable(uTable, FALSE);
-}
+    if (uTable >= MAX_MCICMDTABLE || !S_MciCmdTable[uTable].lpTable)
+	return FALSE;
 
-/**************************************************************************
- * 			MCI_SendCommandFrom16			[internal]
- */
-static DWORD MCI_SendCommandFrom16(MCIDEVICEID wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
-{
-    DWORD		dwRet = MCIERR_INVALID_DEVICE_ID;
-    LPWINE_MCIDRIVER	wmd = MCI_GetDriver(wDevID);
-
-    if (wmd) {
-	dwRet = MCIERR_INVALID_DEVICE_ID;
-
-	if (wmd->bIs32 && pFnMciMapMsg16To32W) {
-	    WINMM_MapType		res;
-
-	    switch (res = pFnMciMapMsg16To32W(wmd->wType, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_MSGERROR:
-		TRACE("Not handled yet (%s)\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_DRIVER_INTERNAL;
-		break;
-	    case WINMM_MAP_NOMEM:
-		TRACE("Problem mapping msg=%s from 16 to 32a\n", MCI_MessageToString(wMsg));
-		dwRet = MCIERR_OUT_OF_MEMORY;
-		break;
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-		if (res == WINMM_MAP_OKMEM)
-		    pFnMciUnMapMsg16To32W(wmd->wType, wMsg, dwParam1, dwParam2);
-		break;
-	    }
-	} else {
-	    dwRet = SendDriverMessage(wmd->hDriver, wMsg, dwParam1, dwParam2);
-	}
-    }
-    return dwRet;
+    FreeResource(S_MciCmdTable[uTable].hMem);
+    S_MciCmdTable[uTable].hMem = NULL;
+    S_MciCmdTable[uTable].lpTable = NULL;
+    HeapFree(GetProcessHeap(), 0, S_MciCmdTable[uTable].aVerbs);
+    S_MciCmdTable[uTable].aVerbs = 0;
+    S_MciCmdTable[uTable].nVerbs = 0;
+    return TRUE;
 }
 
 /**************************************************************************
@@ -1835,7 +1746,8 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
     LPWINE_MCIDRIVER	wmd;
     HKEY		hKey;
 
-    if (lpParms == NULL)			return MCIERR_NULL_PARAMETER_BLOCK;
+    if (lpParms == NULL || lpParms->lpstrReturn == NULL)
+        return MCIERR_NULL_PARAMETER_BLOCK;
 
     TRACE("(%08x, %08X, %p[num=%d, wDevTyp=%u])\n",
 	  uDevID, dwFlags, lpParms, lpParms->dwNumber, lpParms->wDeviceType);
@@ -1969,90 +1881,32 @@ static	DWORD MCI_Sound(UINT wDevID, DWORD dwFlags, LPMCI_SOUND_PARMSW lpParms)
 /**************************************************************************
  * 			MCI_SendCommand				[internal]
  */
-DWORD	MCI_SendCommand(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1,
-			DWORD_PTR dwParam2, BOOL bFrom32)
+DWORD	MCI_SendCommand(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
     DWORD		dwRet = MCIERR_UNRECOGNIZED_COMMAND;
 
     switch (wMsg) {
     case MCI_OPEN:
-	if (bFrom32) {
-	    dwRet = MCI_Open(dwParam1, (LPMCI_OPEN_PARMSW)dwParam2);
-	} else if (pFnMciMapMsg16To32W) {
-	    switch (pFnMciMapMsg16To32W(0, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = MCI_Open(dwParam1, (LPMCI_OPEN_PARMSW)dwParam2);
-		pFnMciUnMapMsg16To32W(0, wMsg, dwParam1, dwParam2);
-		break;
-	    default: break; /* so that gcc does not bark */
-	    }
-	}
+        dwRet = MCI_Open(dwParam1, (LPMCI_OPEN_PARMSW)dwParam2);
 	break;
     case MCI_CLOSE:
-	if (bFrom32) {
-	    dwRet = MCI_Close(wDevID, dwParam1, (LPMCI_GENERIC_PARMS)dwParam2);
-	} else if (pFnMciMapMsg16To32W) {
-	    switch (pFnMciMapMsg16To32W(0, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = MCI_Close(wDevID, dwParam1, (LPMCI_GENERIC_PARMS)dwParam2);
-		pFnMciUnMapMsg16To32W(0, wMsg, dwParam1, dwParam2);
-		break;
-	    default: break; /* so that gcc does not bark */
-	    }
-	}
+        dwRet = MCI_Close(wDevID, dwParam1, (LPMCI_GENERIC_PARMS)dwParam2);
 	break;
     case MCI_SYSINFO:
-	if (bFrom32) {
-	    dwRet = MCI_SysInfo(wDevID, dwParam1, (LPMCI_SYSINFO_PARMSW)dwParam2);
-	} else if (pFnMciMapMsg16To32W) {
-	    switch (pFnMciMapMsg16To32W(0, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = MCI_SysInfo(wDevID, dwParam1, (LPMCI_SYSINFO_PARMSW)dwParam2);
-		pFnMciUnMapMsg16To32W(0, wMsg, dwParam1, dwParam2);
-		break;
-	    default: break; /* so that gcc does not bark */
-	    }
-	}
+        dwRet = MCI_SysInfo(wDevID, dwParam1, (LPMCI_SYSINFO_PARMSW)dwParam2);
 	break;
     case MCI_BREAK:
-	if (bFrom32) {
-	    dwRet = MCI_Break(wDevID, dwParam1, (LPMCI_BREAK_PARMS)dwParam2);
-	} else if (pFnMciMapMsg16To32W) {
-	    switch (pFnMciMapMsg16To32W(0, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = MCI_Break(wDevID, dwParam1, (LPMCI_BREAK_PARMS)dwParam2);
-		pFnMciUnMapMsg16To32W(0, wMsg, dwParam1, dwParam2);
-		break;
-	    default: break; /* so that gcc does not bark */
-	    }
-	}
+        dwRet = MCI_Break(wDevID, dwParam1, (LPMCI_BREAK_PARMS)dwParam2);
 	break;
     case MCI_SOUND:
-	if (bFrom32) {
-	    dwRet = MCI_Sound(wDevID, dwParam1, (LPMCI_SOUND_PARMSW)dwParam2);
-	} else if (pFnMciMapMsg16To32W) {
-	    switch (pFnMciMapMsg16To32W(0, wMsg, dwParam1, &dwParam2)) {
-	    case WINMM_MAP_OK:
-	    case WINMM_MAP_OKMEM:
-		dwRet = MCI_Sound(wDevID, dwParam1, (LPMCI_SOUND_PARMSW)dwParam2);
-		pFnMciUnMapMsg16To32W(0, wMsg, dwParam1, dwParam2);
-		break;
-	    default: break; /* so that gcc does not bark */
-	    }
-	}
+        dwRet = MCI_Sound(wDevID, dwParam1, (LPMCI_SOUND_PARMSW)dwParam2);
 	break;
     default:
 	if (wDevID == MCI_ALL_DEVICE_ID) {
 	    FIXME("unhandled MCI_ALL_DEVICE_ID\n");
 	    dwRet = MCIERR_CANNOT_USE_ALL;
 	} else {
-	    dwRet = (bFrom32) ?
-		MCI_SendCommandFrom32(wDevID, wMsg, dwParam1, dwParam2) :
-		MCI_SendCommandFrom16(wDevID, wMsg, dwParam1, dwParam2);
+	    dwRet = MCI_SendCommandFrom32(wDevID, wMsg, dwParam1, dwParam2);
 	}
 	break;
     }
@@ -2066,7 +1920,7 @@ DWORD	MCI_SendCommand(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1,
  * mciSendString), because MCI drivers return extra information for string
  * transformation. This function gets rid of them.
  */
-LRESULT		MCI_CleanUp(LRESULT dwRet, UINT wMsg, DWORD_PTR dwParam2)
+static LRESULT	MCI_CleanUp(LRESULT dwRet, UINT wMsg, DWORD_PTR dwParam2)
 {
     if (LOWORD(dwRet))
 	return LOWORD(dwRet);
@@ -2232,7 +2086,7 @@ DWORD WINAPI mciSendCommandW(MCIDEVICEID wDevID, UINT wMsg, DWORD_PTR dwParam1, 
     TRACE("(%08x, %s, %08lx, %08lx)\n",
 	  wDevID, MCI_MessageToString(wMsg), dwParam1, dwParam2);
 
-    dwRet = MCI_SendCommand(wDevID, wMsg, dwParam1, dwParam2, TRUE);
+    dwRet = MCI_SendCommand(wDevID, wMsg, dwParam1, dwParam2);
     dwRet = MCI_CleanUp(dwRet, wMsg, dwParam2);
     TRACE("=> %08x\n", dwRet);
     return dwRet;
@@ -2339,7 +2193,6 @@ BOOL WINAPI mciSetYieldProc(MCIDEVICEID uDeviceID, YIELDPROC fpYieldProc, DWORD 
 
     wmd->lpfnYieldProc = fpYieldProc;
     wmd->dwYieldData   = dwYieldData;
-    wmd->bIs32         = TRUE;
 
     return TRUE;
 }
@@ -2389,10 +2242,6 @@ YIELDPROC WINAPI mciGetYieldProc(MCIDEVICEID uDeviceID, DWORD* lpdwYieldData)
 	WARN("No proc set\n");
 	return NULL;
     }
-    if (!wmd->bIs32) {
-	WARN("Proc is 32 bit\n");
-	return NULL;
-    }
     if (lpdwYieldData) *lpdwYieldData = wmd->dwYieldData;
     return wmd->lpfnYieldProc;
 }
@@ -2421,7 +2270,7 @@ UINT WINAPI mciDriverYield(MCIDEVICEID uDeviceID)
 
     TRACE("(%04x)\n", uDeviceID);
 
-    if (!(wmd = MCI_GetDriver(uDeviceID)) || !wmd->lpfnYieldProc || !wmd->bIs32) {
+    if (!(wmd = MCI_GetDriver(uDeviceID)) || !wmd->lpfnYieldProc) {
 	MyUserYield();
     } else {
 	ret = wmd->lpfnYieldProc(uDeviceID, wmd->dwYieldData);

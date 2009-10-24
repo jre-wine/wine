@@ -759,6 +759,7 @@ static BOOL build_command_line( WCHAR **argv )
 static void init_current_directory( CURDIR *cur_dir )
 {
     UNICODE_STRING dir_str;
+    const char *pwd;
     char *cwd;
     int size;
 
@@ -781,13 +782,25 @@ static void init_current_directory( CURDIR *cur_dir )
         break;
     }
 
+    /* try to use PWD if it is valid, so that we don't resolve symlinks */
+
+    pwd = getenv( "PWD" );
     if (cwd)
     {
+        struct stat st1, st2;
+
+        if (!pwd || stat( pwd, &st1 ) == -1 ||
+            (!stat( cwd, &st2 ) && (st1.st_dev != st2.st_dev || st1.st_ino != st2.st_ino)))
+            pwd = cwd;
+    }
+
+    if (pwd)
+    {
         WCHAR *dirW;
-        int lenW = MultiByteToWideChar( CP_UNIXCP, 0, cwd, -1, NULL, 0 );
+        int lenW = MultiByteToWideChar( CP_UNIXCP, 0, pwd, -1, NULL, 0 );
         if ((dirW = HeapAlloc( GetProcessHeap(), 0, lenW * sizeof(WCHAR) )))
         {
-            MultiByteToWideChar( CP_UNIXCP, 0, cwd, -1, dirW, lenW );
+            MultiByteToWideChar( CP_UNIXCP, 0, pwd, -1, dirW, lenW );
             RtlInitUnicodeString( &dir_str, dirW );
             RtlSetCurrentDirectory_U( &dir_str );
             RtlFreeUnicodeString( &dir_str );
@@ -850,6 +863,13 @@ static void init_windows_dirs(void)
         DIR_System = buffer;
     }
 
+    if (!CreateDirectoryW( DIR_Windows, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_Windows), GetLastError() );
+    if (!CreateDirectoryW( DIR_System, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+        ERR( "directory %s could not be created, error %u\n",
+             debugstr_w(DIR_System), GetLastError() );
+
 #ifndef _WIN64  /* SysWow64 is always defined on 64-bit */
     if (is_wow64)
 #endif
@@ -859,14 +879,10 @@ static void init_windows_dirs(void)
         memcpy( buffer, DIR_Windows, len * sizeof(WCHAR) );
         memcpy( buffer + len, default_syswow64W, sizeof(default_syswow64W) );
         DIR_SysWow64 = buffer;
+        if (!CreateDirectoryW( DIR_SysWow64, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
+            ERR( "directory %s could not be created, error %u\n",
+                 debugstr_w(DIR_SysWow64), GetLastError() );
     }
-
-    if (!CreateDirectoryW( DIR_Windows, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
-        ERR( "directory %s could not be created, error %u\n",
-             debugstr_w(DIR_Windows), GetLastError() );
-    if (!CreateDirectoryW( DIR_System, NULL ) && GetLastError() != ERROR_ALREADY_EXISTS)
-        ERR( "directory %s could not be created, error %u\n",
-             debugstr_w(DIR_System), GetLastError() );
 
     TRACE_(file)( "WindowsDir = %s\n", debugstr_w(DIR_Windows) );
     TRACE_(file)( "SystemDir  = %s\n", debugstr_w(DIR_System) );
@@ -893,10 +909,15 @@ static void start_wineboot( HANDLE handles[2] )
     }
     if (GetLastError() != ERROR_ALREADY_EXISTS)  /* we created it */
     {
-        static const WCHAR command_line[] = {'\\','w','i','n','e','b','o','o','t','.','e','x','e',' ','-','-','i','n','i','t',0};
+        static const WCHAR wineboot[] = {'\\','w','i','n','e','b','o','o','t','.','e','x','e',0};
+        static const WCHAR args[] = {' ','-','-','i','n','i','t',0};
+        const DWORD expected_type = (sizeof(void*) > sizeof(int) || is_wow64) ?
+                                     SCS_64BIT_BINARY : SCS_32BIT_BINARY;
         STARTUPINFOW si;
         PROCESS_INFORMATION pi;
-        WCHAR cmdline[MAX_PATH + sizeof(command_line)/sizeof(WCHAR)];
+        DWORD type;
+        void *redir;
+        WCHAR cmdline[MAX_PATH + (sizeof(wineboot) + sizeof(args)) / sizeof(WCHAR)];
 
         memset( &si, 0, sizeof(si) );
         si.cb = sizeof(si);
@@ -906,7 +927,21 @@ static void start_wineboot( HANDLE handles[2] )
         si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
 
         GetSystemDirectoryW( cmdline, MAX_PATH );
-        lstrcatW( cmdline, command_line );
+        lstrcatW( cmdline, wineboot );
+
+        Wow64DisableWow64FsRedirection( &redir );
+        if (GetBinaryTypeW( cmdline, &type ) && type != expected_type)
+        {
+            if (type == SCS_64BIT_BINARY)
+                MESSAGE( "wine: '%s' is a 64-bit prefix, it cannot be used with 32-bit Wine.\n",
+                     wine_get_config_dir() );
+            else
+                MESSAGE( "wine: '%s' is a 32-bit prefix, it cannot be used with %s Wine.\n",
+                     wine_get_config_dir(), is_wow64 ? "wow64" : "64-bit" );
+            ExitProcess( 1 );
+        }
+
+        lstrcatW( cmdline, args );
         if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
         {
             TRACE( "started wineboot pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
@@ -919,6 +954,7 @@ static void start_wineboot( HANDLE handles[2] )
             CloseHandle( handles[0] );
             handles[0] = 0;
         }
+        Wow64RevertWow64FsRedirection( redir );
     }
 }
 
@@ -1895,10 +1931,10 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
 /**********************************************************************
  *       CreateProcessA          (KERNEL32.@)
  */
-BOOL WINAPI CreateProcessA( LPCSTR app_name, LPSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
-                            LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit,
-                            DWORD flags, LPVOID env, LPCSTR cur_dir,
-                            LPSTARTUPINFOA startup_info, LPPROCESS_INFORMATION info )
+BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessA( LPCSTR app_name, LPSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
+                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit,
+                                              DWORD flags, LPVOID env, LPCSTR cur_dir,
+                                              LPSTARTUPINFOA startup_info, LPPROCESS_INFORMATION info )
 {
     BOOL ret = FALSE;
     WCHAR *app_nameW = NULL, *cmd_lineW = NULL, *cur_dirW = NULL;
@@ -1937,10 +1973,10 @@ done:
 /**********************************************************************
  *       CreateProcessW          (KERNEL32.@)
  */
-BOOL WINAPI CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
-                            LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit, DWORD flags,
-                            LPVOID env, LPCWSTR cur_dir, LPSTARTUPINFOW startup_info,
-                            LPPROCESS_INFORMATION info )
+BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line, LPSECURITY_ATTRIBUTES process_attr,
+                                              LPSECURITY_ATTRIBUTES thread_attr, BOOL inherit, DWORD flags,
+                                              LPVOID env, LPCWSTR cur_dir, LPSTARTUPINFOW startup_info,
+                                              LPPROCESS_INFORMATION info )
 {
     BOOL retv = FALSE;
     HANDLE hFile = 0;

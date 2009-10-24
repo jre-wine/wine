@@ -110,8 +110,16 @@ static const WCHAR fmt_driversW[] = { 'S','y','s','t','e','m','\\',
                                   'P','r','i','n','t','\\',
                                   'E','n','v','i','r','o','n','m','e','n','t','s','\\',
                                   '%','s','\\','D','r','i','v','e','r','s','%','s',0 };
+static const WCHAR fmt_printprocessorsW[] = { 'S','y','s','t','e','m','\\',
+                                  'C','u', 'r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+                                  'C','o','n','t','r','o','l','\\',
+                                  'P','r','i','n','t','\\',
+                                  'E','n','v','i','r','o','n','m','e','n','t','s','\\','%','s','\\',
+                                  'P','r','i','n','t',' ','P','r','o','c','e','s','s','o','r','s',0 };
 static const WCHAR hardwareidW[] = {'H','a','r','d','w','a','r','e','I','D',0};
 static const WCHAR help_fileW[] = {'H','e','l','p',' ','F','i','l','e',0};
+static const WCHAR ia64_envnameW[] = {'W','i','n','d','o','w','s',' ','I','A','6','4',0};
+static const WCHAR ia64_subdirW[] = {'i','a','6','4',0};
 static const WCHAR localportW[] = {'L','o','c','a','l',' ','P','o','r','t',0};
 static const WCHAR locationW[] = {'L','o','c','a','t','i','o','n',0};
 static const WCHAR manufacturerW[] = {'M','a','n','u','f','a','c','t','u','r','e','r',0};
@@ -133,6 +141,7 @@ static const WCHAR printersW[] = {'S','y','s','t','e','m','\\',
                                   'P','r','i','n','t','\\',
                                   'P','r','i','n','t','e','r','s',0};
 static const WCHAR spooldriversW[] = {'\\','s','p','o','o','l','\\','d','r','i','v','e','r','s','\\',0};
+static const WCHAR spoolprtprocsW[] = {'\\','s','p','o','o','l','\\','p','r','t','p','r','o','c','s','\\',0};
 static const WCHAR version0_regpathW[] = {'\\','V','e','r','s','i','o','n','-','0',0};
 static const WCHAR version0_subdirW[] = {'\\','0',0};
 static const WCHAR version3_regpathW[] = {'\\','V','e','r','s','i','o','n','-','3',0};
@@ -145,6 +154,7 @@ static const WCHAR winnt_cv_portsW[] = {'S','o','f','t','w','a','r','e','\\',
                                         'W','i','n','d','o','w','s',' ','N','T','\\',
                                         'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
                                         'P','o','r','t','s',0};
+static const WCHAR winprintW[] = {'w','i','n','p','r','i','n','t',0};
 static const WCHAR x64_envnameW[] = {'W','i','n','d','o','w','s',' ','x','6','4',0};
 static const WCHAR x64_subdirW[] = {'x','6','4',0};
 static const WCHAR x86_envnameW[] = {'W','i','n','d','o','w','s',' ','N','T',' ','x','8','6',0};
@@ -152,6 +162,9 @@ static const WCHAR x86_subdirW[] = {'w','3','2','x','8','6',0};
 static const WCHAR XcvMonitorW[] = {',','X','c','v','M','o','n','i','t','o','r',' ',0};
 static const WCHAR XcvPortW[] = {',','X','c','v','P','o','r','t',' ',0};
 
+
+static const printenv_t env_ia64 =  {ia64_envnameW, ia64_subdirW, 3,
+                                     version3_regpathW, version3_subdirW};
 
 static const printenv_t env_x86 =   {x86_envnameW, x86_subdirW, 3,
                                      version3_regpathW, version3_subdirW};
@@ -162,7 +175,7 @@ static const printenv_t env_x64 =   {x64_envnameW, x64_subdirW, 3,
 static const printenv_t env_win40 = {win40_envnameW, win40_subdirW, 0,
                                      version0_regpathW, version0_subdirW};
 
-static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_win40};
+static const printenv_t * const all_printenv[] = {&env_x86, &env_x64, &env_ia64, &env_win40};
 
 
 static const DWORD di_sizeof[] = {0, sizeof(DRIVER_INFO_1W), sizeof(DRIVER_INFO_2W),
@@ -185,7 +198,7 @@ static LPWSTR strdupW(LPCWSTR p)
     if(!p) return NULL;
     len = (lstrlenW(p) + 1) * sizeof(WCHAR);
     ret = heap_alloc(len);
-    memcpy(ret, p, len);
+    if (ret) memcpy(ret, p, len);
     return ret;
 }
 
@@ -806,6 +819,92 @@ static DWORD get_local_monitors(DWORD level, LPBYTE pMonitors, DWORD cbBuf, LPDW
                         lstrcpyW(ptr, dllname);         /* Name of the Driver-DLL */
                         ptr += (dllsize / sizeof(WCHAR));
                     }
+                }
+            }
+            index++;
+            len = sizeof(buffer)/sizeof(buffer[0]);
+            buffer[0] = '\0';
+        }
+        RegCloseKey(hroot);
+    }
+    *lpreturned = numentries;
+    TRACE("need %d byte for %d entries\n", needed, numentries);
+    return needed;
+}
+
+/*****************************************************************************
+ * enumerate the local print processors (INTERNAL)
+ *
+ * returns the needed size (in bytes) for pPPInfo
+ * and  *lpreturned is set to number of entries returned in pPPInfo
+ *
+ */
+static DWORD get_local_printprocessors(LPWSTR regpathW, LPBYTE pPPInfo, DWORD cbBuf, LPDWORD lpreturned)
+{
+    HKEY    hroot = NULL;
+    HKEY    hentry = NULL;
+    LPWSTR  ptr;
+    PPRINTPROCESSOR_INFO_1W ppi;
+    WCHAR   buffer[MAX_PATH];
+    WCHAR   dllname[MAX_PATH];
+    DWORD   dllsize;
+    DWORD   len;
+    DWORD   index = 0;
+    DWORD   needed = 0;
+    DWORD   numentries;
+
+    numentries = *lpreturned;       /* this is 0, when we scan the registry */
+    len = numentries * sizeof(PRINTPROCESSOR_INFO_1W);
+    ptr = (LPWSTR) &pPPInfo[len];
+
+    numentries = 0;
+    len = sizeof(buffer)/sizeof(buffer[0]);
+    buffer[0] = '\0';
+
+    if (RegCreateKeyW(HKEY_LOCAL_MACHINE, regpathW, &hroot) == ERROR_SUCCESS) {
+        /* add "winprint" first */
+        numentries++;
+        needed = sizeof(PRINTPROCESSOR_INFO_1W) + sizeof(winprintW);
+        if (pPPInfo && (cbBuf >= needed)){
+            ppi = (PPRINTPROCESSOR_INFO_1W) pPPInfo;
+            pPPInfo += sizeof(PRINTPROCESSOR_INFO_1W);
+
+            TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%d\n", ppi, numentries);
+            ppi->pName = ptr;
+            lstrcpyW(ptr, winprintW);      /* Name of the Print Processor */
+            ptr += sizeof(winprintW) / sizeof(WCHAR);
+        }
+
+        /* Scan all Printprocessor Keys */
+        while ((RegEnumKeyExW(hroot, index, buffer, &len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) &&
+            (lstrcmpiW(buffer, winprintW) != 0)) {
+            TRACE("PrintProcessor_%d: %s\n", numentries, debugstr_w(buffer));
+            dllsize = sizeof(dllname);
+            dllname[0] = '\0';
+
+            /* The Print Processor must have a Driver-DLL */
+            if (RegOpenKeyExW(hroot, buffer, 0, KEY_READ, &hentry) == ERROR_SUCCESS) {
+                if (RegQueryValueExW(hentry, driverW, NULL, NULL, (LPBYTE) dllname, &dllsize) == ERROR_SUCCESS) {
+                    /* We found a valid DLL for this Print Processor */
+                    TRACE("using Driver: %s\n", debugstr_w(dllname));
+                }
+                RegCloseKey(hentry);
+            }
+
+            if (dllname[0]) {
+                numentries++;
+                needed += sizeof(PRINTPROCESSOR_INFO_1W);
+                needed += (len+1) * sizeof(WCHAR);  /* len is lstrlenW(printprocessor name) */
+
+                /* required size is calculated. Now fill the user-buffer */
+                if (pPPInfo && (cbBuf >= needed)){
+                    ppi = (PPRINTPROCESSOR_INFO_1W) pPPInfo;
+                    pPPInfo += sizeof(PRINTPROCESSOR_INFO_1W);
+
+                    TRACE("%p: writing PRINTPROCESSOR_INFO_1W #%d\n", ppi, numentries);
+                    ppi->pName = ptr;
+                    lstrcpyW(ptr, buffer);      /* Name of the Print Processor */
+                    ptr += (len+1);             /* len is lstrlenW(printprosessor name) */
                 }
             }
             index++;
@@ -2000,6 +2099,156 @@ emP_cleanup:
     return (res);
 }
 
+/*****************************************************************************
+ * fpEnumPrintProcessors [exported through PRINTPROVIDOR]
+ *
+ * Enumerate available Print Processors
+ *
+ * PARAMS
+ *  pName        [I] Servername or NULL (local Computer)
+ *  pEnvironment [I] Printing-Environment or NULL (Default)
+ *  Level        [I] Structure-Level (Only 1 is allowed)
+ *  pPPInfo      [O] PTR to Buffer that receives the Result
+ *  cbBuf        [I] Size of Buffer at pMonitors
+ *  pcbNeeded    [O] PTR to DWORD that receives the size in Bytes used / required for pPPInfo
+ *  pcReturned   [O] PTR to DWORD that receives the number of Print Processors in pPPInfo
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE and in pcbNeeded the Bytes required for pPPInfo, if cbBuf is too small
+ *
+ */
+static BOOL WINAPI fpEnumPrintProcessors(LPWSTR pName, LPWSTR pEnvironment, DWORD Level,
+                            LPBYTE pPPInfo, DWORD cbBuf, LPDWORD pcbNeeded, LPDWORD pcReturned)
+{
+    const printenv_t * env;
+    LPWSTR  regpathW = NULL;
+    DWORD   numentries = 0;
+    DWORD   needed = 0;
+    LONG    lres;
+    BOOL    res = FALSE;
+
+    TRACE("(%s, %s, %d, %p, %d, %p, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
+                                Level, pPPInfo, cbBuf, pcbNeeded, pcReturned);
+
+    lres = copy_servername_from_name(pName, NULL);
+    if (lres) {
+        FIXME("server %s not supported\n", debugstr_w(pName));
+        SetLastError(ERROR_INVALID_NAME);
+        goto epp_cleanup;
+    }
+
+    if (Level != 1) {
+        SetLastError(ERROR_INVALID_LEVEL);
+        goto epp_cleanup;
+    }
+
+    env = validate_envW(pEnvironment);
+    if (!env)
+        goto epp_cleanup;   /* ERROR_INVALID_ENVIRONMENT */
+
+    regpathW = heap_alloc(sizeof(fmt_printprocessorsW) +
+                            (lstrlenW(env->envname) * sizeof(WCHAR)));
+
+    if (!regpathW)
+        goto epp_cleanup;
+
+    wsprintfW(regpathW, fmt_printprocessorsW, env->envname);
+
+    /* Scan all Printprocessor-Keys */
+    numentries = 0;
+    needed = get_local_printprocessors(regpathW, NULL, 0, &numentries);
+
+    /* we calculated the needed buffersize. now do more error-checks */
+    if (cbBuf < needed) {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        goto epp_cleanup;
+    }
+
+    /* fill the Buffer with the Printprocessor Infos */
+    needed = get_local_printprocessors(regpathW, pPPInfo, cbBuf, &numentries);
+    res = TRUE;
+
+epp_cleanup:
+    heap_free(regpathW);
+    if (pcbNeeded)  *pcbNeeded = needed;
+    if (pcReturned) *pcReturned = numentries;
+
+    TRACE("returning %d with %d (%d byte for %d entries)\n",
+            res, GetLastError(), needed, numentries);
+
+    return (res);
+}
+
+/******************************************************************************
+ * fpGetPrintProcessorDirectory [exported through PRINTPROVIDOR]
+ *
+ * Return the PATH for the Print-Processors
+ *
+ * PARAMS
+ *  pName        [I] Servername or NULL (this computer)
+ *  pEnvironment [I] Printing-Environment or NULL (Default)
+ *  level        [I] Structure-Level (must be 1)
+ *  pPPInfo      [O] PTR to Buffer that receives the Result
+ *  cbBuf        [I] Size of Buffer at pPPInfo
+ *  pcbNeeded    [O] PTR to DWORD that receives the size in Bytes used / required for pPPInfo
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE and in pcbNeeded the Bytes required for pPPInfo, if cbBuf is too small
+ *
+ *  Native Values returned in pPPInfo on Success for this computer:
+ *| NT(Windows x64):    "%winsysdir%\\spool\\PRTPROCS\\x64"
+ *| NT(Windows NT x86): "%winsysdir%\\spool\\PRTPROCS\\w32x86"
+ *| NT(Windows 4.0):    "%winsysdir%\\spool\\PRTPROCS\\win40"
+ *
+ *  "%winsysdir%" is the Value from GetSystemDirectoryW()
+ *
+ */
+static BOOL WINAPI fpGetPrintProcessorDirectory(LPWSTR pName, LPWSTR pEnvironment, DWORD level,
+                                                LPBYTE pPPInfo, DWORD cbBuf, LPDWORD pcbNeeded)
+{
+    const printenv_t * env;
+    DWORD needed;
+    LONG  lres;
+
+    TRACE("(%s, %s, %d, %p, %d, %p)\n", debugstr_w(pName), debugstr_w(pEnvironment),
+                                        level, pPPInfo, cbBuf, pcbNeeded);
+
+    *pcbNeeded = 0;
+    lres = copy_servername_from_name(pName, NULL);
+    if (lres) {
+        FIXME("server %s not supported\n", debugstr_w(pName));
+        SetLastError(RPC_S_SERVER_UNAVAILABLE);
+        return FALSE;
+    }
+
+    env = validate_envW(pEnvironment);
+    if (!env)
+        return FALSE;   /* ERROR_INVALID_ENVIRONMENT */
+
+    /* GetSystemDirectoryW returns number of WCHAR including the '\0' */
+    needed = GetSystemDirectoryW(NULL, 0);
+    /* add the Size for the Subdirectories */
+    needed += lstrlenW(spoolprtprocsW);
+    needed += lstrlenW(env->subdir);
+    needed *= sizeof(WCHAR);  /* return-value is size in Bytes */
+
+    *pcbNeeded = needed;
+
+    if (needed > cbBuf) {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
+
+    GetSystemDirectoryW((LPWSTR) pPPInfo, cbBuf/sizeof(WCHAR));
+    /* add the Subdirectories */
+    lstrcatW((LPWSTR) pPPInfo, spoolprtprocsW);
+    lstrcatW((LPWSTR) pPPInfo, env->subdir);
+    TRACE("==> %s\n", debugstr_w((LPWSTR) pPPInfo));
+    return TRUE;
+}
+
 /******************************************************************************
  * fpOpenPrinter [exported through PRINTPROVIDOR]
  *
@@ -2123,8 +2372,8 @@ void setup_provider(void)
         fpGetPrinterDriverDirectory,
         NULL,   /* fpDeletePrinterDriver */
         NULL,   /* fpAddPrintProcessor */
-        NULL,   /* fpEnumPrintProcessors */
-        NULL,   /* fpGetPrintProcessorDirectory */
+        fpEnumPrintProcessors,
+        fpGetPrintProcessorDirectory,
         NULL,   /* fpDeletePrintProcessor */
         NULL,   /* fpEnumPrintProcessorDatatypes */
         NULL,   /* fpStartDocPrinter */

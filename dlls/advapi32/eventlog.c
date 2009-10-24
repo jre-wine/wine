@@ -116,6 +116,30 @@ BOOL WINAPI CloseEventLog( HANDLE hEventLog )
 }
 
 /******************************************************************************
+ * ControlTraceW [ADVAPI32.@]
+ *
+ * Control a givel event trace session
+ *
+ */
+ULONG WINAPI ControlTraceW( TRACEHANDLE hSession, LPCWSTR SessionName, PEVENT_TRACE_PROPERTIES Properties, ULONG control )
+{
+    FIXME("(%s, %s, %p, %d) stub\n", wine_dbgstr_longlong(hSession), debugstr_w(SessionName), Properties, control);
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * ControlTraceA [ADVAPI32.@]
+ *
+ * See ControlTraceW.
+ *
+ */
+ULONG WINAPI ControlTraceA( TRACEHANDLE hSession, LPCSTR SessionName, PEVENT_TRACE_PROPERTIES Properties, ULONG control )
+{
+    FIXME("(%s, %s, %p, %d) stub\n", wine_dbgstr_longlong(hSession), debugstr_a(SessionName), Properties, control);
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
  * DeregisterEventSource [ADVAPI32.@]
  * 
  * Closes a write handle to an event log
@@ -131,6 +155,17 @@ BOOL WINAPI DeregisterEventSource( HANDLE hEventLog )
 {
     FIXME("(%p) stub\n", hEventLog);
     return TRUE;
+}
+
+/******************************************************************************
+ * EnableTrace [ADVAPI32.@]
+ */
+ULONG WINAPI EnableTrace( ULONG enable, ULONG flag, ULONG level, LPCGUID guid, TRACEHANDLE hSession )
+{
+    FIXME("(%d, 0x%x, %d, %s, %s): stub\n", enable, flag, level,
+            debugstr_guid(guid), wine_dbgstr_longlong(hSession));
+
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -261,6 +296,33 @@ HANDLE WINAPI OpenEventLogW( LPCWSTR uncname, LPCWSTR source )
 {
 	FIXME("(%s,%s) stub\n", debugstr_w(uncname), debugstr_w(source));
 	return (HANDLE)0xcafe4242;
+}
+
+/******************************************************************************
+ * QueryAllTracesW [ADVAPI32.@]
+ *
+ * Query informations for started event trace sessions
+ *
+ */
+ULONG WINAPI QueryAllTracesW( PEVENT_TRACE_PROPERTIES * parray, ULONG arraycount, PULONG psessioncount )
+{
+    FIXME("(%p, %d, %p) stub\n", parray, arraycount, psessioncount);
+
+    if (psessioncount) *psessioncount = 0;
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * QueryAllTracesA [ADVAPI32.@]
+ *
+ * See QueryAllTracesW.
+ */
+ULONG WINAPI QueryAllTracesA( PEVENT_TRACE_PROPERTIES * parray, ULONG arraycount, PULONG psessioncount )
+{
+    FIXME("(%p, %d, %p) stub\n", parray, arraycount, psessioncount);
+
+    if (psessioncount) *psessioncount = 0;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -489,6 +551,32 @@ ULONG WINAPI RegisterTraceGuidsA( WMIDPREQUEST RequestAddress,
           ControlGuid, GuidCount, TraceGuidReg, debugstr_a(MofImagePath),
           debugstr_a(MofResourceName), RegistrationHandle);
     return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * StartTraceW [ADVAPI32.@]
+ *
+ * Register and start an event trace session
+ *
+ */
+ULONG WINAPI StartTraceW( PTRACEHANDLE pSessionHandle, LPCWSTR SessionName, PEVENT_TRACE_PROPERTIES Properties )
+{
+    FIXME("(%p, %s, %p) stub\n", pSessionHandle, debugstr_w(SessionName), Properties);
+    if (pSessionHandle) *pSessionHandle = 0xcafe4242;
+    return ERROR_SUCCESS;
+}
+
+/******************************************************************************
+ * StartTraceA [ADVAPI32.@]
+ *
+ * See StartTraceW.
+ *
+ */
+ULONG WINAPI StartTraceA( PTRACEHANDLE pSessionHandle, LPCSTR SessionName, PEVENT_TRACE_PROPERTIES Properties )
+{
+    FIXME("(%p, %s, %p) stub\n", pSessionHandle, debugstr_a(SessionName), Properties);
+    if (pSessionHandle) *pSessionHandle = 0xcafe4242;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************

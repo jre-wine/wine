@@ -415,7 +415,7 @@ static BOOL WINAPI CRYPT_AsnEncodePubKeyInfo(DWORD dwCertEncodingType,
     {
         const CERT_PUBLIC_KEY_INFO *info = pvStructInfo;
         struct AsnEncodeSequenceItem items[] = {
-         { &info->Algorithm, CRYPT_AsnEncodeAlgorithmId, 0 },
+         { &info->Algorithm, CRYPT_AsnEncodeAlgorithmIdWithNullParams, 0 },
          { &info->PublicKey, CRYPT_AsnEncodeBits, 0 },
         };
 
@@ -464,6 +464,25 @@ static BOOL WINAPI CRYPT_AsnEncodeCert(DWORD dwCertEncodingType,
     return ret;
 }
 
+BOOL WINAPI CRYPT_AsnEncodePubKeyInfoNoNull(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
+ PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
+{
+    BOOL ret;
+    const CERT_PUBLIC_KEY_INFO *info = pvStructInfo;
+    struct AsnEncodeSequenceItem items[] = {
+     { &info->Algorithm, CRYPT_AsnEncodeAlgorithmId, 0 },
+     { &info->PublicKey, CRYPT_AsnEncodeBits, 0 },
+    };
+
+    TRACE("Encoding public key with OID %s\n",
+     debugstr_a(info->Algorithm.pszObjId));
+    ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items,
+     sizeof(items) / sizeof(items[0]), dwFlags, pEncodePara, pbEncoded,
+     pcbEncoded);
+    return ret;
+}
+
 /* Like in Windows, this blithely ignores the validity of the passed-in
  * CERT_INFO, and just encodes it as-is.  The resulting encoded data may not
  * decode properly, see CRYPT_AsnDecodeCertInfo.
@@ -484,7 +503,7 @@ static BOOL WINAPI CRYPT_AsnEncodeCertInfo(DWORD dwCertEncodingType,
          { &info->Issuer,               CRYPT_CopyEncodedBlob, 0 },
          { &info->NotBefore,            CRYPT_AsnEncodeValidity, 0 },
          { &info->Subject,              CRYPT_CopyEncodedBlob, 0 },
-         { &info->SubjectPublicKeyInfo, CRYPT_AsnEncodePubKeyInfo, 0 },
+         { &info->SubjectPublicKeyInfo, CRYPT_AsnEncodePubKeyInfoNoNull, 0 },
          { 0 }
         };
         struct AsnConstructedItem constructed[3] = { { 0 } };
@@ -2800,13 +2819,10 @@ static BOOL WINAPI CRYPT_AsnEncodeCertPolicyQualifiers(DWORD dwCertEncodingType,
  LPCSTR lpszStructType, const void *pvStructInfo, DWORD dwFlags,
  PCRYPT_ENCODE_PARA pEncodePara, BYTE *pbEncoded, DWORD *pcbEncoded)
 {
-    DWORD cPolicyQualifier = *(DWORD *)pvStructInfo;
-    const CERT_POLICY_QUALIFIER_INFO *rgPolicyQualifier =
-     *(const CERT_POLICY_QUALIFIER_INFO **)
-     ((LPBYTE)pvStructInfo + sizeof(DWORD));
+    const CERT_POLICY_INFO *info = pvStructInfo;
     BOOL ret;
 
-    if (!cPolicyQualifier)
+    if (!info->cPolicyQualifier)
     {
         *pcbEncoded = 0;
         ret = TRUE;
@@ -2820,10 +2836,11 @@ static BOOL WINAPI CRYPT_AsnEncodeCertPolicyQualifiers(DWORD dwCertEncodingType,
         DWORD bytesNeeded = 0, lenBytes, size, i;
 
         ret = TRUE;
-        for (i = 0; ret && i < cPolicyQualifier; i++)
+        for (i = 0; ret && i < info->cPolicyQualifier; i++)
         {
-            items[0].pvStructInfo = rgPolicyQualifier[i].pszPolicyQualifierId;
-            items[1].pvStructInfo = &rgPolicyQualifier[i].Qualifier;
+            items[0].pvStructInfo =
+             info->rgPolicyQualifier[i].pszPolicyQualifierId;
+            items[1].pvStructInfo = &info->rgPolicyQualifier[i].Qualifier;
             ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items,
              sizeof(items) / sizeof(items[0]),
              dwFlags & ~CRYPT_ENCODE_ALLOC_FLAG, NULL, NULL, &size);
@@ -2847,12 +2864,12 @@ static BOOL WINAPI CRYPT_AsnEncodeCertPolicyQualifiers(DWORD dwCertEncodingType,
                     CRYPT_EncodeLen(bytesNeeded - lenBytes - 1, pbEncoded,
                      &lenBytes);
                     pbEncoded += lenBytes;
-                    for (i = 0; ret && i < cPolicyQualifier; i++)
+                    for (i = 0; ret && i < info->cPolicyQualifier; i++)
                     {
                         items[0].pvStructInfo =
-                         rgPolicyQualifier[i].pszPolicyQualifierId;
+                         info->rgPolicyQualifier[i].pszPolicyQualifierId;
                         items[1].pvStructInfo =
-                         &rgPolicyQualifier[i].Qualifier;
+                         &info->rgPolicyQualifier[i].Qualifier;
                         size = bytesNeeded;
                         ret = CRYPT_AsnEncodeSequence(dwCertEncodingType, items,
                          sizeof(items) / sizeof(items[0]),
@@ -2877,7 +2894,7 @@ static BOOL CRYPT_AsnEncodeCertPolicy(DWORD dwCertEncodingType,
 {
     struct AsnEncodeSequenceItem items[2] = {
      { info->pszPolicyIdentifier, CRYPT_AsnEncodeOid, 0 },
-     { &info->cPolicyQualifier,   CRYPT_AsnEncodeCertPolicyQualifiers, 0 },
+     { info,                      CRYPT_AsnEncodeCertPolicyQualifiers, 0 },
     };
     BOOL ret;
 
@@ -4567,6 +4584,7 @@ static BOOL WINAPI CRYPT_ExportRsaPublicKeyInfoEx(HCRYPTPROV_OR_NCRYPT_KEY_HANDL
                         }
                         else
                         {
+                            *pcbInfo = sizeNeeded;
                             pInfo->Algorithm.pszObjId = (char *)pInfo +
                              sizeof(CERT_PUBLIC_KEY_INFO);
                             lstrcpyA(pInfo->Algorithm.pszObjId,

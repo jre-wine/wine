@@ -883,6 +883,8 @@ static ALG_ID schannel_get_cipher_algid(gnutls_cipher_algorithm_t cipher)
     {
     case GNUTLS_CIPHER_UNKNOWN:
     case GNUTLS_CIPHER_NULL: return 0;
+    case GNUTLS_CIPHER_ARCFOUR_40:
+    case GNUTLS_CIPHER_ARCFOUR_128: return CALG_RC4;
     case GNUTLS_CIPHER_DES_CBC:
     case GNUTLS_CIPHER_3DES_CBC: return CALG_DES;
     case GNUTLS_CIPHER_AES_128_CBC:
@@ -1384,7 +1386,7 @@ void SECUR32_initSchannelSP(void)
         pgnutls_global_set_log_function(schan_gnutls_log);
     }
 
-    schan_handle_table = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 64 * sizeof(*schan_handle_table));
+    schan_handle_table = HeapAlloc(GetProcessHeap(), 0, 64 * sizeof(*schan_handle_table));
     if (!schan_handle_table)
     {
         ERR("Failed to allocate schannel handle table.\n");
@@ -1413,13 +1415,13 @@ fail:
 
 void SECUR32_deinitSchannelSP(void)
 {
-    int i = schan_handle_table_size;
+    SIZE_T i = schan_handle_count;
 
     if (!libgnutls_handle) return;
 
     /* deinitialized sessions first because a pointer to the credentials
      * are stored for the session by calling gnutls_credentials_set. */
-    while (--i)
+    while (i--)
     {
         if (schan_handle_table[i].type == SCHAN_HANDLE_CTX)
         {
@@ -1428,8 +1430,8 @@ void SECUR32_deinitSchannelSP(void)
             HeapFree(GetProcessHeap(), 0, ctx);
         }
     }
-    i = schan_handle_table_size;
-    while (--i)
+    i = schan_handle_count;
+    while (i--)
     {
         if (schan_handle_table[i].type != SCHAN_HANDLE_FREE)
         {

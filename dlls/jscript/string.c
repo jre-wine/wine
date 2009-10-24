@@ -656,7 +656,7 @@ static HRESULT String_match(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
         if(FAILED(hres))
             return hres;
 
-        hres = create_regexp_str(ctx, match_str, SysStringLen(match_str), NULL, 0, &regexp);
+        hres = create_regexp(ctx, match_str, SysStringLen(match_str), 0, &regexp);
         SysFreeString(match_str);
         if(FAILED(hres))
             return hres;
@@ -965,7 +965,7 @@ static HRESULT String_replace(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
                         }
 
                         idx = ptr2[1] - '0';
-                        if(isdigitW(ptr[3]) && idx*10 + (ptr[2]-'0') <= parens_cnt) {
+                        if(isdigitW(ptr2[2]) && idx*10 + (ptr2[2]-'0') <= parens_cnt) {
                             idx = idx*10 + (ptr[2]-'0');
                             ptr = ptr2+3;
                         }else if(idx && idx <= parens_cnt) {
@@ -1705,7 +1705,7 @@ HRESULT create_string_constr(script_ctx_t *ctx, DispatchEx *object_prototype, Di
         return hres;
 
     hres = create_builtin_function(ctx, StringConstr_value, StringW, &StringConstr_info,
-            PROPF_CONSTR, &string->dispex, ret);
+            PROPF_CONSTR|1, &string->dispex, ret);
 
     jsdisp_release(&string->dispex);
     return hres;

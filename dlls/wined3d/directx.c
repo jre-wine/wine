@@ -155,23 +155,12 @@ static const struct {
  **********************************************************/
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat, WINED3DSURFTYPE SurfaceType);
-static const struct fragment_pipeline *select_fragment_implementation(struct WineD3DAdapter *adapter,
+static const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType);
-static const shader_backend_t *select_shader_backend(struct WineD3DAdapter *adapter, WINED3DDEVTYPE DeviceType);
-static const struct blit_shader *select_blit_implementation(struct WineD3DAdapter *adapter, WINED3DDEVTYPE DeviceType);
+static const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter, WINED3DDEVTYPE DeviceType);
+static const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter, WINED3DDEVTYPE DeviceType);
 
-/* lookup tables */
-const int minLookup[MAX_LOOKUPS] =
-{
-    WINED3DTADDRESS_WRAP, /* WINELOOKUP_WARPPARAM */
-};
-
-const int maxLookup[MAX_LOOKUPS] =
-{
-    WINED3DTADDRESS_MIRRORONCE, /* WINELOOKUP_WARPPARAM */
-};
-
-DWORD *stateLookup[MAX_LOOKUPS];
+GLint wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP + 1];
 
 const struct min_lookup minMipLookup[] =
 {
@@ -325,12 +314,19 @@ fail:
 }
 
 /* Adjust the amount of used texture memory */
-long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, long glram){
-    struct WineD3DAdapter *adapter = D3DDevice->adapter;
+long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, long glram)
+{
+    struct wined3d_adapter *adapter = D3DDevice->adapter;
 
     adapter->UsedTextureRam += glram;
     TRACE("Adjusted gl ram by %ld to %d\n", glram, adapter->UsedTextureRam);
     return adapter->UsedTextureRam;
+}
+
+static void wined3d_adapter_cleanup(struct wined3d_adapter *adapter)
+{
+    HeapFree(GetProcessHeap(), 0, adapter->gl_info.gl_formats);
+    HeapFree(GetProcessHeap(), 0, adapter->cfgs);
 }
 
 /**********************************************************
@@ -371,7 +367,7 @@ static ULONG WINAPI IWineD3DImpl_Release(IWineD3D *iface) {
 
         for (i = 0; i < This->adapter_count; ++i)
         {
-            HeapFree(GetProcessHeap(), 0, This->adapters[i].cfgs);
+            wined3d_adapter_cleanup(&This->adapters[i]);
         }
         HeapFree(GetProcessHeap(), 0, This);
     }
@@ -417,10 +413,10 @@ static void select_shader_max_constants(int ps_selected_mode, int vs_selected_mo
 {
     switch (vs_selected_mode) {
         case SHADER_GLSL:
-            gl_info->max_vshader_constantsF = gl_info->vs_glsl_constantsF;
+            gl_info->max_vshader_constantsF = gl_info->max_vs_glsl_constantsF;
             break;
         case SHADER_ARB:
-            gl_info->max_vshader_constantsF = gl_info->vs_arb_constantsF;
+            gl_info->max_vshader_constantsF = gl_info->max_vs_arb_constantsF;
             break;
         default:
             gl_info->max_vshader_constantsF = 0;
@@ -429,10 +425,10 @@ static void select_shader_max_constants(int ps_selected_mode, int vs_selected_mo
 
     switch (ps_selected_mode) {
         case SHADER_GLSL:
-            gl_info->max_pshader_constantsF = gl_info->ps_glsl_constantsF;
+            gl_info->max_pshader_constantsF = gl_info->max_ps_glsl_constantsF;
             break;
         case SHADER_ARB:
-            gl_info->max_pshader_constantsF = gl_info->ps_arb_constantsF;
+            gl_info->max_pshader_constantsF = gl_info->max_ps_arb_constantsF;
             break;
         default:
             gl_info->max_pshader_constantsF = 0;
@@ -720,10 +716,10 @@ static BOOL match_broken_nv_clip(const struct wined3d_gl_info *gl_info, const ch
 
 static void quirk_arb_constants(struct wined3d_gl_info *gl_info)
 {
-    TRACE_(d3d_caps)("Using ARB vs constant limit(=%u) for GLSL.\n", gl_info->vs_arb_constantsF);
-    gl_info->vs_glsl_constantsF = gl_info->vs_arb_constantsF;
-    TRACE_(d3d_caps)("Using ARB ps constant limit(=%u) for GLSL.\n", gl_info->ps_arb_constantsF);
-    gl_info->ps_glsl_constantsF = gl_info->ps_arb_constantsF;
+    TRACE_(d3d_caps)("Using ARB vs constant limit(=%u) for GLSL.\n", gl_info->max_vs_arb_constantsF);
+    gl_info->max_vs_glsl_constantsF = gl_info->max_vs_arb_constantsF;
+    TRACE_(d3d_caps)("Using ARB ps constant limit(=%u) for GLSL.\n", gl_info->max_ps_arb_constantsF);
+    gl_info->max_ps_glsl_constantsF = gl_info->max_ps_arb_constantsF;
 }
 
 static void quirk_apple_glsl_constants(struct wined3d_gl_info *gl_info)
@@ -1611,15 +1607,15 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     gl_info->max_vertex_samplers = 0;
     gl_info->max_combined_samplers = gl_info->max_fragment_samplers + gl_info->max_vertex_samplers;
     gl_info->max_sampler_stages = 1;
-    gl_info->ps_arb_max_temps = 0;
-    gl_info->ps_arb_max_instructions = 0;
-    gl_info->vs_arb_max_temps = 0;
-    gl_info->vs_arb_max_instructions = 0;
-    gl_info->vs_glsl_constantsF = 0;
-    gl_info->ps_glsl_constantsF = 0;
-    gl_info->vs_arb_constantsF = 0;
-    gl_info->ps_arb_constantsF = 0;
-    gl_info->ps_arb_max_local_constants = 0;
+    gl_info->max_ps_arb_temps = 0;
+    gl_info->max_ps_arb_instructions = 0;
+    gl_info->max_vs_arb_temps = 0;
+    gl_info->max_vs_arb_instructions = 0;
+    gl_info->max_vs_glsl_constantsF = 0;
+    gl_info->max_ps_glsl_constantsF = 0;
+    gl_info->max_vs_arb_constantsF = 0;
+    gl_info->max_ps_arb_constantsF = 0;
+    gl_info->max_ps_arb_local_constants = 0;
 
     /* Retrieve opengl defaults */
     glGetIntegerv(GL_MAX_CLIP_PLANES, &gl_max);
@@ -1860,43 +1856,43 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
     {
         GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_ENV_PARAMETERS_ARB, &gl_max));
-        gl_info->ps_arb_constantsF = gl_max;
-        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM float constants: %d.\n", gl_info->ps_arb_constantsF);
+        gl_info->max_ps_arb_constantsF = gl_max;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM float constants: %d.\n", gl_info->max_ps_arb_constantsF);
         GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_TEMPORARIES_ARB, &gl_max));
-        gl_info->ps_arb_max_temps = gl_max;
-        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native temporaries: %d.\n", gl_info->ps_arb_max_temps);
+        gl_info->max_ps_arb_temps = gl_max;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native temporaries: %d.\n", gl_info->max_ps_arb_temps);
         GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB, &gl_max));
-        gl_info->ps_arb_max_instructions = gl_max;
-        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native instructions: %d.\n", gl_info->ps_arb_max_instructions);
+        gl_info->max_ps_arb_instructions = gl_max;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM native instructions: %d.\n", gl_info->max_ps_arb_instructions);
         GL_EXTCALL(glGetProgramivARB(GL_FRAGMENT_PROGRAM_ARB, GL_MAX_PROGRAM_LOCAL_PARAMETERS_ARB, &gl_max));
-        gl_info->ps_arb_max_local_constants = gl_max;
-        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM local parameters: %d.\n", gl_info->ps_arb_max_instructions);
+        gl_info->max_ps_arb_local_constants = gl_max;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_PROGRAM local parameters: %d.\n", gl_info->max_ps_arb_instructions);
     }
     if (gl_info->supported[ARB_VERTEX_PROGRAM])
     {
         GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_ENV_PARAMETERS_ARB, &gl_max));
-        gl_info->vs_arb_constantsF = gl_max;
-        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM float constants: %d.\n", gl_info->vs_arb_constantsF);
+        gl_info->max_vs_arb_constantsF = gl_max;
+        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM float constants: %d.\n", gl_info->max_vs_arb_constantsF);
         GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_TEMPORARIES_ARB, &gl_max));
-        gl_info->vs_arb_max_temps = gl_max;
-        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native temporaries: %d.\n", gl_info->vs_arb_max_temps);
+        gl_info->max_vs_arb_temps = gl_max;
+        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native temporaries: %d.\n", gl_info->max_vs_arb_temps);
         GL_EXTCALL(glGetProgramivARB(GL_VERTEX_PROGRAM_ARB, GL_MAX_PROGRAM_NATIVE_INSTRUCTIONS_ARB, &gl_max));
-        gl_info->vs_arb_max_instructions = gl_max;
-        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native instructions: %d.\n", gl_info->vs_arb_max_instructions);
+        gl_info->max_vs_arb_instructions = gl_max;
+        TRACE_(d3d_caps)("Max ARB_VERTEX_PROGRAM native instructions: %d.\n", gl_info->max_vs_arb_instructions);
 
         if (test_arb_vs_offset_limit(gl_info)) gl_info->quirks |= WINED3D_QUIRK_ARB_VS_OFFSET_LIMIT;
     }
     if (gl_info->supported[ARB_VERTEX_SHADER])
     {
         glGetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS_ARB, &gl_max);
-        gl_info->vs_glsl_constantsF = gl_max / 4;
-        TRACE_(d3d_caps)("Max ARB_VERTEX_SHADER float constants: %u.\n", gl_info->vs_glsl_constantsF);
+        gl_info->max_vs_glsl_constantsF = gl_max / 4;
+        TRACE_(d3d_caps)("Max ARB_VERTEX_SHADER float constants: %u.\n", gl_info->max_vs_glsl_constantsF);
     }
     if (gl_info->supported[ARB_FRAGMENT_SHADER])
     {
         glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_COMPONENTS_ARB, &gl_max);
-        gl_info->ps_glsl_constantsF = gl_max / 4;
-        TRACE_(d3d_caps)("Max ARB_FRAGMENT_SHADER float constants: %u.\n", gl_info->ps_glsl_constantsF);
+        gl_info->max_ps_glsl_constantsF = gl_max / 4;
+        TRACE_(d3d_caps)("Max ARB_FRAGMENT_SHADER float constants: %u.\n", gl_info->max_ps_glsl_constantsF);
         glGetIntegerv(GL_MAX_VARYING_FLOATS_ARB, &gl_max);
         gl_info->max_glsl_varyings = gl_max;
         TRACE_(d3d_caps)("Max GLSL varyings: %u (%u 4 component varyings).\n", gl_max, gl_max / 4);
@@ -2024,21 +2020,14 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_gl_info *gl_info)
     else
         gl_info->vidmem = WINE_DEFAULT_VIDMEM;
 
-    /* Load all the lookup tables */
-    for (i = 0; i < MAX_LOOKUPS; i++) {
-        stateLookup[i] = HeapAlloc(GetProcessHeap(), 0, sizeof(*stateLookup[i]) * (1 + maxLookup[i] - minLookup[i]) );
-    }
-
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_WRAP   - minLookup[WINELOOKUP_WARPPARAM]] = GL_REPEAT;
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_CLAMP  - minLookup[WINELOOKUP_WARPPARAM]] = GL_CLAMP_TO_EDGE;
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_BORDER - minLookup[WINELOOKUP_WARPPARAM]] =
-             gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_BORDER - minLookup[WINELOOKUP_WARPPARAM]] =
-             gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_MIRROR - minLookup[WINELOOKUP_WARPPARAM]] =
-             gl_info->supported[ARB_TEXTURE_MIRRORED_REPEAT] ? GL_MIRRORED_REPEAT_ARB : GL_REPEAT;
-    stateLookup[WINELOOKUP_WARPPARAM][WINED3DTADDRESS_MIRRORONCE - minLookup[WINELOOKUP_WARPPARAM]] =
-             gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
+    wrap_lookup[WINED3DTADDRESS_WRAP - WINED3DTADDRESS_WRAP] = GL_REPEAT;
+    wrap_lookup[WINED3DTADDRESS_MIRROR - WINED3DTADDRESS_WRAP] =
+            gl_info->supported[ARB_TEXTURE_MIRRORED_REPEAT] ? GL_MIRRORED_REPEAT_ARB : GL_REPEAT;
+    wrap_lookup[WINED3DTADDRESS_CLAMP - WINED3DTADDRESS_WRAP] = GL_CLAMP_TO_EDGE;
+    wrap_lookup[WINED3DTADDRESS_BORDER - WINED3DTADDRESS_WRAP] =
+            gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
+    wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP] =
+            gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
 
     /* Make sure there's an active HDC else the WGL extensions will fail */
     hdc = pwglGetCurrentDC();
@@ -2468,7 +2457,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
     int nCfgs;
     const WineD3D_PixelFormat *cfgs;
-    const struct WineD3DAdapter *adapter;
+    const struct wined3d_adapter *adapter;
     const struct GlPixelFormatDesc *rt_format_desc;
     const struct GlPixelFormatDesc *ds_format_desc;
     int it;
@@ -2510,7 +2499,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
 {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
     const struct GlPixelFormatDesc *glDesc;
-    const struct WineD3DAdapter *adapter;
+    const struct wined3d_adapter *adapter;
 
     TRACE_(d3d_caps)("(%p)-> (Adptr:%d, DevType:(%x,%s), SurfFmt:(%x,%s), Win?%d, MultiSamp:%x, pQual:%p)\n",
           This,
@@ -2690,7 +2679,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
 
 
 /* Check if we support bumpmapping for a format */
-static BOOL CheckBumpMapCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckBumpMapCapability(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *format_desc)
 {
     const struct fragment_pipeline *fp;
@@ -2721,7 +2710,7 @@ static BOOL CheckBumpMapCapability(struct WineD3DAdapter *adapter,
 }
 
 /* Check if the given DisplayFormat + DepthStencilFormat combination is valid for the Adapter */
-static BOOL CheckDepthStencilCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckDepthStencilCapability(struct wined3d_adapter *adapter,
         const struct GlPixelFormatDesc *display_format_desc, const struct GlPixelFormatDesc *ds_format_desc)
 {
     int it=0;
@@ -2745,7 +2734,7 @@ static BOOL CheckDepthStencilCapability(struct WineD3DAdapter *adapter,
     return FALSE;
 }
 
-static BOOL CheckFilterCapability(struct WineD3DAdapter *adapter, const struct GlPixelFormatDesc *format_desc)
+static BOOL CheckFilterCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *format_desc)
 {
     /* The flags entry of a format contains the filtering capability */
     if (format_desc->Flags & WINED3DFMT_FLAG_FILTERING) return TRUE;
@@ -2754,7 +2743,7 @@ static BOOL CheckFilterCapability(struct WineD3DAdapter *adapter, const struct G
 }
 
 /* Check the render target capabilities of a format */
-static BOOL CheckRenderTargetCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckRenderTargetCapability(struct wined3d_adapter *adapter,
         const struct GlPixelFormatDesc *adapter_format_desc, const struct GlPixelFormatDesc *check_format_desc)
 {
     /* Filter out non-RT formats */
@@ -2812,7 +2801,7 @@ static BOOL CheckRenderTargetCapability(struct WineD3DAdapter *adapter,
     return FALSE;
 }
 
-static BOOL CheckSrgbReadCapability(struct WineD3DAdapter *adapter, const struct GlPixelFormatDesc *format_desc)
+static BOOL CheckSrgbReadCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *format_desc)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
 
@@ -2844,7 +2833,7 @@ static BOOL CheckSrgbReadCapability(struct WineD3DAdapter *adapter, const struct
     return FALSE;
 }
 
-static BOOL CheckSrgbWriteCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckSrgbWriteCapability(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *format_desc)
 {
     /* Only offer SRGB writing on X8R8G8B8/A8R8G8B8 when we use ARB or GLSL shaders as we are
@@ -2867,7 +2856,7 @@ static BOOL CheckSrgbWriteCapability(struct WineD3DAdapter *adapter,
 }
 
 /* Check if a format support blending in combination with pixel shaders */
-static BOOL CheckPostPixelShaderBlendingCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckPostPixelShaderBlendingCapability(struct wined3d_adapter *adapter,
         const struct GlPixelFormatDesc *format_desc)
 {
     /* The flags entry of a format contains the post pixel shader blending capability */
@@ -2876,7 +2865,7 @@ static BOOL CheckPostPixelShaderBlendingCapability(struct WineD3DAdapter *adapte
     return FALSE;
 }
 
-static BOOL CheckWrapAndMipCapability(struct WineD3DAdapter *adapter, const struct GlPixelFormatDesc *format_desc)
+static BOOL CheckWrapAndMipCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *format_desc)
 {
     /* OpenGL supports mipmapping on all formats basically. Wrapping is unsupported,
      * but we have to report mipmapping so we cannot reject this flag. Tests show that
@@ -2891,7 +2880,7 @@ static BOOL CheckWrapAndMipCapability(struct WineD3DAdapter *adapter, const stru
 }
 
 /* Check if a texture format is supported on the given adapter */
-static BOOL CheckTextureCapability(struct WineD3DAdapter *adapter,
+static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *format_desc)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
@@ -3120,7 +3109,7 @@ static BOOL CheckTextureCapability(struct WineD3DAdapter *adapter,
     return FALSE;
 }
 
-static BOOL CheckSurfaceCapability(struct WineD3DAdapter *adapter, const struct GlPixelFormatDesc *adapter_format_desc,
+static BOOL CheckSurfaceCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *adapter_format_desc,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *check_format_desc, WINED3DSURFTYPE SurfaceType)
 {
     const struct blit_shader *blitter;
@@ -3172,11 +3161,12 @@ static BOOL CheckSurfaceCapability(struct WineD3DAdapter *adapter, const struct 
     return FALSE;
 }
 
-static BOOL CheckVertexTextureCapability(struct WineD3DAdapter *adapter, const struct GlPixelFormatDesc *format_desc)
+static BOOL CheckVertexTextureCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *format_desc)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
 
-    if (!GL_LIMITS(vertex_samplers)) {
+    if (!gl_info->max_vertex_samplers)
+    {
         TRACE_(d3d_caps)("[FAILED]\n");
         return FALSE;
     }
@@ -3203,7 +3193,7 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
         WINED3DSURFTYPE SurfaceType)
 {
     IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    struct WineD3DAdapter *adapter = &This->adapters[Adapter];
+    struct wined3d_adapter *adapter = &This->adapters[Adapter];
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
     const struct GlPixelFormatDesc *format_desc = getFormatDescEntry(CheckFormat, gl_info);
     const struct GlPixelFormatDesc *adapter_format_desc = getFormatDescEntry(AdapterFormat, gl_info);
@@ -3709,7 +3699,7 @@ static HRESULT  WINAPI IWineD3DImpl_CheckDeviceFormatConversion(IWineD3D *iface,
     return WINED3D_OK;
 }
 
-static const shader_backend_t *select_shader_backend(struct WineD3DAdapter *adapter, WINED3DDEVTYPE DeviceType)
+static const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter, WINED3DDEVTYPE DeviceType)
 {
     const shader_backend_t *ret;
     int vs_selected_mode;
@@ -3726,7 +3716,7 @@ static const shader_backend_t *select_shader_backend(struct WineD3DAdapter *adap
     return ret;
 }
 
-static const struct fragment_pipeline *select_fragment_implementation(struct WineD3DAdapter *adapter,
+static const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
@@ -3747,7 +3737,7 @@ static const struct fragment_pipeline *select_fragment_implementation(struct Win
     }
 }
 
-static const struct blit_shader *select_blit_implementation(struct WineD3DAdapter *adapter, WINED3DDEVTYPE DeviceType)
+static const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter, WINED3DDEVTYPE DeviceType)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
     int vs_selected_mode;
@@ -3767,7 +3757,7 @@ static const struct blit_shader *select_blit_implementation(struct WineD3DAdapte
 static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DCAPS* pCaps) {
 
     IWineD3DImpl    *This = (IWineD3DImpl *)iface;
-    struct WineD3DAdapter *adapter = &This->adapters[Adapter];
+    struct wined3d_adapter *adapter = &This->adapters[Adapter];
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
     int vs_selected_mode;
     int ps_selected_mode;
@@ -4060,16 +4050,16 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
      * idea how generating the smoothing alpha values works; the result is different
      */
 
-    pCaps->MaxTextureWidth  = GL_LIMITS(texture_size);
-    pCaps->MaxTextureHeight = GL_LIMITS(texture_size);
+    pCaps->MaxTextureWidth = gl_info->max_texture_size;
+    pCaps->MaxTextureHeight = gl_info->max_texture_size;
 
     if(GL_SUPPORT(EXT_TEXTURE3D))
-        pCaps->MaxVolumeExtent = GL_LIMITS(texture3d_size);
+        pCaps->MaxVolumeExtent = gl_info->max_texture3d_size;
     else
         pCaps->MaxVolumeExtent = 0;
 
     pCaps->MaxTextureRepeat = 32768;
-    pCaps->MaxTextureAspectRatio = GL_LIMITS(texture_size);
+    pCaps->MaxTextureAspectRatio = gl_info->max_texture_size;
     pCaps->MaxVertexW = 1.0f;
 
     pCaps->GuardBandLeft = 0.0f;
@@ -4095,14 +4085,14 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
 
     pCaps->FVFCaps = WINED3DFVFCAPS_PSIZE | 0x0008; /* 8 texture coords */
 
-    pCaps->MaxUserClipPlanes       = GL_LIMITS(clipplanes);
-    pCaps->MaxActiveLights         = GL_LIMITS(lights);
+    pCaps->MaxUserClipPlanes = gl_info->max_clipplanes;
+    pCaps->MaxActiveLights = gl_info->max_lights;
 
-    pCaps->MaxVertexBlendMatrices      = GL_LIMITS(blends);
+    pCaps->MaxVertexBlendMatrices = gl_info->max_blends;
     pCaps->MaxVertexBlendMatrixIndex   = 0;
 
-    pCaps->MaxAnisotropy   = GL_LIMITS(anisotropy);
-    pCaps->MaxPointSize    = GL_LIMITS(pointsize);
+    pCaps->MaxAnisotropy = gl_info->max_anisotropy;
+    pCaps->MaxPointSize = gl_info->max_pointsize;
 
 
     /* FIXME: Add D3DVTXPCAPS_TWEENING, D3DVTXPCAPS_TEXGEN_SPHEREMAP */
@@ -4126,7 +4116,7 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     pCaps->AdapterOrdinalInGroup             = 0;
     pCaps->NumberOfAdaptersInGroup           = 1;
 
-    pCaps->NumSimultaneousRTs = GL_LIMITS(buffers);
+    pCaps->NumSimultaneousRTs = gl_info->max_buffers;
 
     pCaps->StretchRectFilterCaps             = WINED3DPTFILTERCAPS_MINFPOINT  |
                                                 WINED3DPTFILTERCAPS_MAGFPOINT  |
@@ -4186,15 +4176,15 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
         use the VS 3.0 from MSDN or else if there's OpenGL spec use a hardcoded value minimum VS3.0 value. */
         pCaps->VS20Caps.Caps                     = WINED3DVS20CAPS_PREDICATION;
         pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* VS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
-        pCaps->VS20Caps.NumTemps                 = max(32, adapter->gl_info.vs_arb_max_temps);
+        pCaps->VS20Caps.NumTemps                 = max(32, adapter->gl_info.max_vs_arb_temps);
         pCaps->VS20Caps.StaticFlowControlDepth   = WINED3DVS20_MAX_STATICFLOWCONTROLDEPTH ; /* level of nesting in loops / if-statements; VS 3.0 requires MAX (4) */
 
         pCaps->MaxVShaderInstructionsExecuted    = 65535; /* VS 3.0 needs at least 65535, some cards even use 2^32-1 */
-        pCaps->MaxVertexShader30InstructionSlots = max(512, adapter->gl_info.vs_arb_max_instructions);
+        pCaps->MaxVertexShader30InstructionSlots = max(512, adapter->gl_info.max_vs_arb_instructions);
     } else if(pCaps->VertexShaderVersion == WINED3DVS_VERSION(2,0)) {
         pCaps->VS20Caps.Caps                     = 0;
         pCaps->VS20Caps.DynamicFlowControlDepth  = WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH;
-        pCaps->VS20Caps.NumTemps                 = max(12, adapter->gl_info.vs_arb_max_temps);
+        pCaps->VS20Caps.NumTemps                 = max(12, adapter->gl_info.max_vs_arb_temps);
         pCaps->VS20Caps.StaticFlowControlDepth   = 1;
 
         pCaps->MaxVShaderInstructionsExecuted    = 65535;
@@ -4220,17 +4210,17 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                 WINED3DPS20CAPS_NODEPENDENTREADLIMIT |
                 WINED3DPS20CAPS_NOTEXINSTRUCTIONLIMIT;
         pCaps->PS20Caps.DynamicFlowControlDepth  = WINED3DPS20_MAX_DYNAMICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_DYNAMICFLOWCONTROLDEPTH (24) */
-        pCaps->PS20Caps.NumTemps                 = max(32, adapter->gl_info.ps_arb_max_temps);
+        pCaps->PS20Caps.NumTemps                 = max(32, adapter->gl_info.max_ps_arb_temps);
         pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MAX_STATICFLOWCONTROLDEPTH; /* PS 3.0 requires MAX_STATICFLOWCONTROLDEPTH (4) */
         pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MAX_NUMINSTRUCTIONSLOTS; /* PS 3.0 requires MAX_NUMINSTRUCTIONSLOTS (512) */
 
         pCaps->MaxPShaderInstructionsExecuted    = 65535;
-        pCaps->MaxPixelShader30InstructionSlots  = max(WINED3DMIN30SHADERINSTRUCTIONS, adapter->gl_info.ps_arb_max_instructions);
+        pCaps->MaxPixelShader30InstructionSlots  = max(WINED3DMIN30SHADERINSTRUCTIONS, adapter->gl_info.max_ps_arb_instructions);
     } else if(pCaps->PixelShaderVersion == WINED3DPS_VERSION(2,0)) {
         /* Below we assume PS2.0 specs, not extended 2.0a(GeforceFX)/2.0b(Radeon R3xx) ones */
         pCaps->PS20Caps.Caps                     = 0;
         pCaps->PS20Caps.DynamicFlowControlDepth  = 0; /* WINED3DVS20_MIN_DYNAMICFLOWCONTROLDEPTH = 0 */
-        pCaps->PS20Caps.NumTemps                 = max(12, adapter->gl_info.ps_arb_max_temps);
+        pCaps->PS20Caps.NumTemps                 = max(12, adapter->gl_info.max_ps_arb_temps);
         pCaps->PS20Caps.StaticFlowControlDepth   = WINED3DPS20_MIN_STATICFLOWCONTROLDEPTH; /* Minimum: 1 */
         pCaps->PS20Caps.NumInstructionSlots      = WINED3DPS20_MIN_NUMINSTRUCTIONSLOTS; /* Minimum number (64 ALU + 32 Texture), a GeforceFX uses 512 */
 
@@ -4344,7 +4334,7 @@ static HRESULT WINAPI IWineD3DImpl_CreateDevice(IWineD3D *iface, UINT Adapter,
 {
     IWineD3DDeviceImpl *object  = NULL;
     IWineD3DImpl       *This    = (IWineD3DImpl *)iface;
-    struct WineD3DAdapter *adapter = &This->adapters[Adapter];
+    struct wined3d_adapter *adapter = &This->adapters[Adapter];
     WINED3DDISPLAYMODE  mode;
     const struct fragment_pipeline *frag_pipeline = NULL;
     int i;
@@ -4691,7 +4681,7 @@ BOOL InitAdapters(IWineD3DImpl *This)
 
     /* For now only one default adapter */
     {
-        struct WineD3DAdapter *adapter = &This->adapters[0];
+        struct wined3d_adapter *adapter = &This->adapters[0];
         const struct wined3d_gl_info *gl_info = &adapter->gl_info;
         struct wined3d_fake_gl_ctx fake_gl_ctx = {0};
         int iPixelFormat;

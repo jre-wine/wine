@@ -32,10 +32,24 @@
 
 #undef DPRINTF
 #undef STDMETHODCALLTYPE
+#include "coreaudio.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wave);
 WINE_DECLARE_DEBUG_CHANNEL(midi);
+
+static const char *streamDescription(const AudioStreamBasicDescription* stream)
+{
+    return wine_dbg_sprintf("\n mSampleRate : %f\n mFormatID : %s\n mFormatFlags : %lX\n mBytesPerPacket : %lu\n mFramesPerPacket : %lu\n mBytesPerFrame : %lu\n mChannelsPerFrame : %lu\n mBitsPerChannel : %lu\n",
+        stream->mSampleRate,
+        wine_dbgstr_fourcc(stream->mFormatID),
+        stream->mFormatFlags,
+        stream->mBytesPerPacket,
+        stream->mFramesPerPacket,
+        stream->mBytesPerFrame,
+        stream->mChannelsPerFrame,
+        stream->mBitsPerChannel);
+}
 
 extern OSStatus CoreAudio_woAudioUnitIOProc(void *inRefCon, 
 				AudioUnitRenderActionFlags *ioActionFlags, 
@@ -57,6 +71,8 @@ int AudioUnit_CreateDefaultAudioUnit(void *wwo, AudioUnit *au)
     Component comp;
     ComponentDescription desc;
     AURenderCallbackStruct callbackStruct;
+
+    TRACE("\n");
     
     desc.componentType = kAudioUnitType_Output;
     desc.componentSubType = kAudioUnitSubType_DefaultOutput;
@@ -69,7 +85,7 @@ int AudioUnit_CreateDefaultAudioUnit(void *wwo, AudioUnit *au)
         return 0;
     
     err = OpenAComponent(comp, au);
-    if (comp == NULL)
+    if (err != noErr || *au == NULL)
         return 0;
         
     callbackStruct.inputProc = CoreAudio_woAudioUnitIOProc;
@@ -94,19 +110,21 @@ int AudioUnit_InitializeWithStreamDescription(AudioUnit au, AudioStreamBasicDesc
 {
     OSStatus err = noErr;
         
+    TRACE("input format: %s\n", streamDescription(stream));
+
     err = AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input,
                                 0, stream, sizeof(*stream));
 
     if (err != noErr)
     {
-        ERR("AudioUnitSetProperty return an error %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR("AudioUnitSetProperty return an error %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
     
     err = AudioUnitInitialize(au);
     if (err != noErr)
     {
-        ERR("AudioUnitInitialize return an error %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR("AudioUnitInitialize return an error %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
     return 1;
@@ -115,12 +133,15 @@ int AudioUnit_InitializeWithStreamDescription(AudioUnit au, AudioStreamBasicDesc
 int AudioUnit_SetVolume(AudioUnit au, float left, float right)
 {
     OSStatus err = noErr;
+    static int once;
+
+    if (!once++) FIXME("independent left/right volume not implemented (%f, %f)\n", left, right);
    
     err = AudioUnitSetParameter(au, kHALOutputParam_Volume, kAudioUnitParameterFlag_Output, 0, left, 0);
                                 
     if (err != noErr)
     {
-        ERR("AudioUnitSetParameter return an error %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR("AudioUnitSetParameter return an error %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
     return 1;
@@ -129,11 +150,14 @@ int AudioUnit_SetVolume(AudioUnit au, float left, float right)
 int AudioUnit_GetVolume(AudioUnit au, float *left, float *right)
 {
     OSStatus err = noErr;
+    static int once;
+
+    if (!once++) FIXME("independent left/right volume not implemented\n");
     
     err = AudioUnitGetParameter(au, kHALOutputParam_Volume, kAudioUnitParameterFlag_Output, 0, left);
     if (err != noErr)
     {
-        ERR("AudioUnitGetParameter return an error %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR("AudioUnitGetParameter return an error %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
     *right = *left;
@@ -336,7 +360,7 @@ int SynthUnit_CreateDefaultSynthUnit(AUGraph *graph, AudioUnit *synth)
     err = NewAUGraph(graph);
     if (err != noErr)
     {
-        ERR_(midi)("NewAUGraph return %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("NewAUGraph return %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -351,7 +375,7 @@ int SynthUnit_CreateDefaultSynthUnit(AUGraph *graph, AudioUnit *synth)
     err = AUGraphNewNode(*graph, &desc, 0, NULL, &synthNode);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphNewNode cannot create synthNode : %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphNewNode cannot create synthNode : %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -362,14 +386,14 @@ int SynthUnit_CreateDefaultSynthUnit(AUGraph *graph, AudioUnit *synth)
     err = AUGraphNewNode(*graph, &desc, 0, NULL, &outNode);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphNewNode cannot create outNode %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphNewNode cannot create outNode %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
     err = AUGraphOpen(*graph);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphOpen return %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphOpen return %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -377,7 +401,7 @@ int SynthUnit_CreateDefaultSynthUnit(AUGraph *graph, AudioUnit *synth)
     err = AUGraphConnectNodeInput(*graph, synthNode, 0, outNode, 0);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphConnectNodeInput cannot connect synthNode to outNode : %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphConnectNodeInput cannot connect synthNode to outNode : %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -385,7 +409,7 @@ int SynthUnit_CreateDefaultSynthUnit(AUGraph *graph, AudioUnit *synth)
     err = AUGraphGetNodeInfo(*graph, synthNode, 0, 0, 0, synth);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphGetNodeInfo return %c%c%c%c\n", (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphGetNodeInfo return %s\n", wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -399,14 +423,14 @@ int SynthUnit_Initialize(AudioUnit synth, AUGraph graph)
     err = AUGraphInitialize(graph);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphInitialize(%p) return %c%c%c%c\n", graph, (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphInitialize(%p) return %s\n", graph, wine_dbgstr_fourcc(err));
         return 0;
     }
 
     err = AUGraphStart(graph);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphStart(%p) return %c%c%c%c\n", graph, (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphStart(%p) return %s\n", graph, wine_dbgstr_fourcc(err));
         return 0;
     }
 
@@ -420,14 +444,14 @@ int SynthUnit_Close(AUGraph graph)
     err = AUGraphStop(graph);
     if (err != noErr)
     {
-        ERR_(midi)("AUGraphStop(%p) return %c%c%c%c\n", graph, (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("AUGraphStop(%p) return %s\n", graph, wine_dbgstr_fourcc(err));
         return 0;
     }
 
     err = DisposeAUGraph(graph);
     if (err != noErr)
     {
-        ERR_(midi)("DisposeAUGraph(%p) return %c%c%c%c\n", graph, (char) (err >> 24), (char) (err >> 16), (char) (err >> 8), (char) err);
+        ERR_(midi)("DisposeAUGraph(%p) return %s\n", graph, wine_dbgstr_fourcc(err));
         return 0;
     }
 

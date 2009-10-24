@@ -23,6 +23,9 @@
 
 #include <stdarg.h>
 #include <fcntl.h>
+#ifdef HAVE_DIRENT_H
+# include <dirent.h>
+#endif
 #ifdef HAVE_SYS_STAT_H
 # include <sys/stat.h>
 #endif
@@ -49,6 +52,13 @@ static const char fakedll_signature[] = "Wine placeholder DLL";
 
 static const unsigned int file_alignment = 512;
 static const unsigned int section_alignment = 4096;
+static const unsigned int max_dll_name_len = 64;
+
+static void *file_buffer;
+static size_t file_buffer_size;
+static unsigned int handled_count;
+static unsigned int handled_total;
+static char **handled_dlls;
 
 struct dll_info
 {
@@ -105,82 +115,139 @@ static inline void add_directory( struct dll_info *info, unsigned int idx, DWORD
     info->nt->OptionalHeader.DataDirectory[idx].Size = size;
 }
 
-/* find the limits of the resource data */
-static void get_resource_data( const IMAGE_RESOURCE_DIRECTORY *dir, const BYTE *root,
-                               DWORD *rva_start, DWORD *rva_end )
+/* convert a dll name W->A without depending on the current codepage */
+static char *dll_name_WtoA( char *nameA, const WCHAR *nameW, unsigned int len )
 {
-    const IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
-    int i;
+    unsigned int i;
 
-    entry = (const IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    for (i = 0; i < dir->NumberOfNamedEntries + dir->NumberOfIdEntries; i++, entry++)
+    for (i = 0; i < len; i++)
     {
-        const void *ptr = root + entry->u2.s3.OffsetToDirectory;
-        if (entry->u2.s3.DataIsDirectory) get_resource_data( ptr, root, rva_start, rva_end );
-        else
-        {
-            const IMAGE_RESOURCE_DATA_ENTRY *data = ptr;
-            *rva_start = min( *rva_start, data->OffsetToData );
-            *rva_end = max( *rva_end, data->OffsetToData + data->Size );
-        }
+        char c = nameW[i];
+        if (nameW[i] > 127) return NULL;
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+        nameA[i] = c;
     }
+    nameA[i] = 0;
+    return nameA;
 }
 
-/* fixup RVAs of resource data */
-static void fixup_resources( IMAGE_RESOURCE_DIRECTORY *dir, BYTE *root, int delta )
+/* convert a dll name A->W without depending on the current codepage */
+static WCHAR *dll_name_AtoW( WCHAR *nameW, const char *nameA, unsigned int len )
 {
-    IMAGE_RESOURCE_DIRECTORY_ENTRY *entry;
-    int i;
+    unsigned int i;
 
-    entry = (IMAGE_RESOURCE_DIRECTORY_ENTRY *)(dir + 1);
-    for (i = 0; i < dir->NumberOfNamedEntries + dir->NumberOfIdEntries; i++, entry++)
-    {
-        void *ptr = root + entry->u2.s3.OffsetToDirectory;
-        if (entry->u2.s3.DataIsDirectory) fixup_resources( ptr, root, delta );
-        else
-        {
-            IMAGE_RESOURCE_DATA_ENTRY *data = ptr;
-            if (data->OffsetToData) data->OffsetToData += delta;
-        }
-    }
+    for (i = 0; i < len; i++) nameW[i] = nameA[i];
+    nameW[i] = 0;
+    return nameW;
 }
 
-/* add version resources to the dll by copying them from the source module */
-static BOOL add_version_resource( HMODULE module, struct dll_info *dll_info )
+/* add a dll to the list of dll that have been taken care of */
+static BOOL add_handled_dll( const WCHAR *name )
 {
-    BOOL ret = FALSE;
-    DWORD rva_start = ~0U, rva_end = 0, dir_size, total_size;
-    const IMAGE_RESOURCE_DIRECTORY *basedir;
-    const BYTE *data_start, *root;
-    BYTE *buffer;
+    unsigned int len = strlenW( name );
+    int i, min, max, pos, res;
+    char *nameA;
 
-    if (!module) return TRUE;
-    if (LdrFindResourceDirectory_U( module, NULL, 0, &basedir ) != STATUS_SUCCESS) return TRUE;
-    root = (const BYTE *)basedir;
-    get_resource_data( basedir, root, &rva_start, &rva_end );
-    data_start = (const BYTE *)module + rva_start;
-    if (data_start <= root) return FALSE;
-    dir_size = data_start - root;
-    if (!(buffer = HeapAlloc( GetProcessHeap(), 0, dir_size ))) return FALSE;
-    memcpy( buffer, root, dir_size );
-    fixup_resources( (IMAGE_RESOURCE_DIRECTORY *)buffer, buffer, dll_info->mem_pos + dir_size - rva_start );
-    if (!xwrite( dll_info, buffer, dir_size, dll_info->file_pos )) goto done;
-    if (!xwrite( dll_info, data_start, rva_end - rva_start, dll_info->file_pos + dir_size )) goto done;
-    total_size = dir_size + rva_end - rva_start;
-    add_directory( dll_info, IMAGE_DIRECTORY_ENTRY_RESOURCE, dll_info->mem_pos, total_size );
-    add_section( dll_info, ".rsrc", total_size, IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ );
-    ret = TRUE;
+    if (!(nameA = HeapAlloc( GetProcessHeap(), 0, len + 1 ))) return FALSE;
+    if (!dll_name_WtoA( nameA, name, len )) goto failed;
+
+    min = 0;
+    max = handled_count - 1;
+    while (min <= max)
+    {
+        pos = (min + max) / 2;
+        res = strcmp( handled_dlls[pos], nameA );
+        if (!res) goto failed;  /* already in the list */
+        if (res < 0) min = pos + 1;
+        else max = pos - 1;
+    }
+
+    if (handled_count >= handled_total)
+    {
+        char **new_dlls;
+        unsigned int new_count = max( 64, handled_total * 2 );
+
+        if (handled_dlls) new_dlls = HeapReAlloc( GetProcessHeap(), 0, handled_dlls,
+                                                  new_count * sizeof(*handled_dlls) );
+        else new_dlls = HeapAlloc( GetProcessHeap(), 0, new_count * sizeof(*handled_dlls) );
+        if (!new_dlls) goto failed;
+        handled_dlls = new_dlls;
+        handled_total = new_count;
+    }
+
+    for (i = handled_count; i > min; i--) handled_dlls[i] = handled_dlls[i - 1];
+    handled_dlls[i] = nameA;
+    handled_count++;
+    return TRUE;
+
+failed:
+    HeapFree( GetProcessHeap(), 0, nameA );
+    return FALSE;
+}
+
+/* read in the contents of a file into the global file buffer */
+/* return 1 on success, 0 on nonexistent file, -1 on other error */
+static int read_file( const char *name, void **data, size_t *size )
+{
+    static char static_file_buffer[4096];
+    struct stat st;
+    void *buffer = static_file_buffer;
+    int fd, ret = -1;
+    size_t header_size;
+    IMAGE_DOS_HEADER *dos;
+    IMAGE_NT_HEADERS *nt;
+    const size_t min_size = sizeof(*dos) + sizeof(fakedll_signature) +
+        FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader.MajorLinkerVersion );
+
+    if ((fd = open( name, O_RDONLY | O_BINARY )) == -1) return 0;
+    if (fstat( fd, &st ) == -1) goto done;
+    *size = st.st_size;
+    if (st.st_size > sizeof(static_file_buffer))
+    {
+        if (!file_buffer || st.st_size > file_buffer_size)
+        {
+            HeapFree( GetProcessHeap(), 0, file_buffer );
+            if (!(file_buffer = HeapAlloc( GetProcessHeap(), 0, st.st_size ))) goto done;
+            file_buffer_size = st.st_size;
+        }
+        buffer = file_buffer;
+    }
+
+    /* check for valid fake dll file */
+
+    if (st.st_size < min_size) goto done;
+    header_size = min( st.st_size, 4096 );
+    if (pread( fd, buffer, header_size, 0 ) != header_size) goto done;
+    dos = buffer;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) goto done;
+    if (dos->e_lfanew < sizeof(fakedll_signature)) goto done;
+    if (memcmp( dos + 1, fakedll_signature, sizeof(fakedll_signature) )) goto done;
+    if (dos->e_lfanew + FIELD_OFFSET(IMAGE_NT_HEADERS,OptionalHeader.MajorLinkerVersion) > header_size)
+        goto done;
+    nt = (IMAGE_NT_HEADERS *)((char *)buffer + dos->e_lfanew);
+    if (nt->Signature == IMAGE_NT_SIGNATURE && nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
+    {
+        /* wrong 32/64 type, pretend it doesn't exist */
+        ret = 0;
+        goto done;
+    }
+    if (st.st_size == header_size ||
+        pread( fd, (char *)buffer + header_size,
+               st.st_size - header_size, header_size ) == st.st_size - header_size)
+    {
+        *data = buffer;
+        ret = 1;
+    }
 done:
-    HeapFree( GetProcessHeap(), 0, buffer );
+    close( fd );
     return ret;
 }
 
-/* build a complete fake dll, optionally using module as a source */
-static BOOL build_fake_dll( HANDLE file, HMODULE module )
+/* build a complete fake dll from scratch */
+static BOOL build_fake_dll( HANDLE file )
 {
     IMAGE_DOS_HEADER *dos;
     IMAGE_NT_HEADERS *nt;
-    const IMAGE_NT_HEADERS *src_nt = NULL;
     struct dll_info info;
     BYTE *buffer;
     BOOL ret = FALSE;
@@ -204,28 +271,25 @@ static BOOL build_fake_dll( HANDLE file, HMODULE module )
     memcpy( dos + 1, fakedll_signature, sizeof(fakedll_signature) );
 
     nt = info.nt = (IMAGE_NT_HEADERS *)(buffer + lfanew);
-    if (module) src_nt = RtlImageNtHeader( module );
     /* some fields are copied from the source dll */
-#define SET(field,def) nt->field = src_nt ? src_nt->field : def
-    SET( FileHeader.Machine, IMAGE_FILE_MACHINE_I386 );
-    SET( FileHeader.TimeDateStamp, 0 );
-    SET( FileHeader.Characteristics, IMAGE_FILE_DLL );
-    SET( OptionalHeader.MajorLinkerVersion, 1 );
-    SET( OptionalHeader.MinorLinkerVersion, 0 );
-    SET( OptionalHeader.MajorOperatingSystemVersion, 1 );
-    SET( OptionalHeader.MinorOperatingSystemVersion, 0 );
-    SET( OptionalHeader.MajorImageVersion, 1 );
-    SET( OptionalHeader.MinorImageVersion, 0 );
-    SET( OptionalHeader.MajorSubsystemVersion, 4 );
-    SET( OptionalHeader.MinorSubsystemVersion, 0 );
-    SET( OptionalHeader.Win32VersionValue, 0 );
-    SET( OptionalHeader.Subsystem, IMAGE_SUBSYSTEM_WINDOWS_GUI );
-    SET( OptionalHeader.DllCharacteristics, 0 );
-    SET( OptionalHeader.SizeOfStackReserve, 0 );
-    SET( OptionalHeader.SizeOfStackCommit, 0 );
-    SET( OptionalHeader.SizeOfHeapReserve, 0 );
-    SET( OptionalHeader.SizeOfHeapCommit, 0 );
-#undef SET
+    nt->FileHeader.Machine = IMAGE_FILE_MACHINE_I386;
+    nt->FileHeader.TimeDateStamp = 0;
+    nt->FileHeader.Characteristics = IMAGE_FILE_DLL;
+    nt->OptionalHeader.MajorLinkerVersion = 1;
+    nt->OptionalHeader.MinorLinkerVersion = 0;
+    nt->OptionalHeader.MajorOperatingSystemVersion = 1;
+    nt->OptionalHeader.MinorOperatingSystemVersion = 0;
+    nt->OptionalHeader.MajorImageVersion = 1;
+    nt->OptionalHeader.MinorImageVersion = 0;
+    nt->OptionalHeader.MajorSubsystemVersion = 4;
+    nt->OptionalHeader.MinorSubsystemVersion = 0;
+    nt->OptionalHeader.Win32VersionValue = 0;
+    nt->OptionalHeader.Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
+    nt->OptionalHeader.DllCharacteristics = 0;
+    nt->OptionalHeader.SizeOfStackReserve = 0;
+    nt->OptionalHeader.SizeOfStackCommit = 0;
+    nt->OptionalHeader.SizeOfHeapReserve = 0;
+    nt->OptionalHeader.SizeOfHeapCommit = 0;
     /* other fields have fixed values */
     nt->Signature                              = IMAGE_NT_SIGNATURE;
     nt->FileHeader.NumberOfSections            = 0;
@@ -260,8 +324,6 @@ static BOOL build_fake_dll( HANDLE file, HMODULE module )
     add_directory( &info, IMAGE_DIRECTORY_ENTRY_BASERELOC, info.mem_pos, sizeof(reloc_section) );
     add_section( &info, ".reloc", sizeof(reloc_section),
                  IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_DISCARDABLE | IMAGE_SCN_MEM_READ );
-
-    if (!add_version_resource( module, &info )) goto done;
 
     header_size += nt->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
     nt->OptionalHeader.SizeOfHeaders = ALIGN( header_size, file_alignment );
@@ -314,15 +376,15 @@ static inline char *prepend( char *buffer, const char *str, size_t len )
 }
 
 /* try to load a pre-compiled fake dll */
-static void *load_fake_dll( const WCHAR *name, unsigned int *size, void *buf, unsigned int buf_size )
+static void *load_fake_dll( const WCHAR *name, size_t *size )
 {
     const char *build_dir = wine_get_build_dir();
     const char *path;
-    struct stat st;
-    char *file, *ptr, *buffer = NULL;
+    char *file, *ptr;
+    void *data = NULL;
     unsigned int i, pos, len, namelen, maxlen = 0;
     WCHAR *p;
-    int fd;
+    int res = 0;
 
     if ((p = strrchrW( name, '\\' ))) name = p + 1;
 
@@ -335,14 +397,7 @@ static void *load_fake_dll( const WCHAR *name, unsigned int *size, void *buf, un
 
     len = strlenW( name );
     pos = maxlen - len - sizeof(".fake");
-    for (i = 0; i < len; i++)
-    {
-        /* we don't want to depend on the current codepage here */
-        char c = name[i];
-        if (name[i] > 127) goto done;
-        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-        file[pos + i] = c;
-    }
+    if (!dll_name_WtoA( file + pos, name, len )) goto done;
     file[--pos] = '/';
 
     if (build_dir)
@@ -356,7 +411,7 @@ static void *load_fake_dll( const WCHAR *name, unsigned int *size, void *buf, un
         ptr = prepend( ptr, ptr, namelen );
         ptr = prepend( ptr, "/dlls", sizeof("/dlls") - 1 );
         ptr = prepend( ptr, build_dir, strlen(build_dir) );
-        if ((fd = open( ptr, O_RDONLY | O_BINARY )) != -1) goto found;
+        if ((res = read_file( ptr, &data, size ))) goto done;
 
         /* now as a program */
         ptr = file + pos;
@@ -365,7 +420,7 @@ static void *load_fake_dll( const WCHAR *name, unsigned int *size, void *buf, un
         ptr = prepend( ptr, ptr, namelen );
         ptr = prepend( ptr, "/programs", sizeof("/programs") - 1 );
         ptr = prepend( ptr, build_dir, strlen(build_dir) );
-        if ((fd = open( ptr, O_RDONLY | O_BINARY )) != -1) goto found;
+        if ((res = read_file( ptr, &data, size ))) goto done;
     }
 
     file[pos + len + 1] = 0;
@@ -373,60 +428,27 @@ static void *load_fake_dll( const WCHAR *name, unsigned int *size, void *buf, un
     {
         ptr = prepend( file + pos, "/fakedlls", sizeof("/fakedlls") - 1 );
         ptr = prepend( ptr, path, strlen(path) );
-        if ((fd = open( ptr, O_RDONLY | O_BINARY )) != -1) goto found;
+        if ((res = read_file( ptr, &data, size ))) break;
     }
-    goto done;
-
-found:
-    if (!fstat( fd, &st ))
-    {
-        *size = st.st_size;
-        if (st.st_size <= buf_size) buffer = buf;
-        else buffer = HeapAlloc( GetProcessHeap(), 0, st.st_size );
-        if (buffer)
-        {
-            if (read( fd, buffer, st.st_size ) != st.st_size)
-            {
-                if (buffer != buf) HeapFree( GetProcessHeap(), 0, buffer );
-                buffer = NULL;
-            }
-            else TRACE( "found %s %u bytes\n", ptr, *size);
-        }
-    }
-    close( fd );
 
 done:
     HeapFree( GetProcessHeap(), 0, file );
-    return buffer;
+    if (res == 1) return data;
+    return NULL;
 }
 
-/***********************************************************************
- *            create_fake_dll
- */
-BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
+/* create the fake dll destination file */
+static HANDLE create_dest_file( const WCHAR *name )
 {
-    HANDLE h;
-    BOOL ret;
-    unsigned int size = 0;
-    char *temp_buffer[4096];
-    void *buffer;
-
-    /* check for empty name which means to only create the directory */
-    if (name[strlenW(name) - 1] == '\\')
-    {
-        create_directories( name );
-        return TRUE;
-    }
-
     /* first check for an existing file */
-    h = CreateFileW( name, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL );
+    HANDLE h = CreateFileW( name, GENERIC_READ|GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL );
     if (h != INVALID_HANDLE_VALUE)
     {
         if (!is_fake_dll( h ))
         {
             TRACE( "%s is not a fake dll, not overwriting it\n", debugstr_w(name) );
             CloseHandle( h );
-            return TRUE;
+            return 0;
         }
         /* truncate the file */
         SetFilePointer( h, 0, NULL, FILE_BEGIN );
@@ -438,29 +460,175 @@ BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
 
         h = CreateFileW( name, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL );
         if (h == INVALID_HANDLE_VALUE)
-        {
             ERR( "failed to create %s (error=%u)\n", debugstr_w(name), GetLastError() );
-            return FALSE;
+    }
+    return h;
+}
+
+/* copy a fake dll file to the dest directory */
+static void install_fake_dll( WCHAR *dest, char *file, const char *ext )
+{
+    int ret;
+    size_t size;
+    void *data;
+    DWORD written;
+    WCHAR *destname = dest + strlenW(dest);
+    char *name = strrchr( file, '/' ) + 1;
+    char *end = name + strlen(name);
+
+    if (ext) strcpy( end, ext );
+    if (!(ret = read_file( file, &data, &size ))) return;
+
+    if (end > name + 2 && !strncmp( end - 2, "16", 2 )) end -= 2;  /* remove "16" suffix */
+    dll_name_AtoW( destname, name, end - name );
+    if (!add_handled_dll( destname )) ret = -1;
+
+    if (ret != -1)
+    {
+        HANDLE h = create_dest_file( dest );
+
+        if (h && h != INVALID_HANDLE_VALUE)
+        {
+            TRACE( "%s -> %s\n", debugstr_a(file), debugstr_w(dest) );
+
+            ret = (WriteFile( h, data, size, &written, NULL ) && written == size);
+            if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(dest), GetLastError() );
+            CloseHandle( h );
+            if (!ret) DeleteFileW( dest );
         }
     }
+    *destname = 0;  /* restore it for next file */
+}
 
-    if ((buffer = load_fake_dll( source, &size, temp_buffer, sizeof(temp_buffer) )))
+/* find and install all fake dlls in a given lib directory */
+static void install_lib_dir( WCHAR *dest, char *file, const char *default_ext )
+{
+    DIR *dir;
+    struct dirent *de;
+    char *name;
+
+    if (!(dir = opendir( file ))) return;
+    name = file + strlen(file);
+    *name++ = '/';
+    while ((de = readdir( dir )))
+    {
+        if (strlen( de->d_name ) > max_dll_name_len) continue;
+        if (!strcmp( de->d_name, "." )) continue;
+        if (!strcmp( de->d_name, ".." )) continue;
+        strcpy( name, de->d_name );
+        if (default_ext)  /* inside build dir */
+        {
+            strcat( name, "/" );
+            strcat( name, de->d_name );
+            if (!strchr( de->d_name, '.' )) strcat( name, default_ext );
+            install_fake_dll( dest, file, ".fake" );
+        }
+        else install_fake_dll( dest, file, NULL );
+    }
+    closedir( dir );
+}
+
+/* create fake dlls in dirname for all the files we can find */
+static BOOL create_wildcard_dlls( const WCHAR *dirname )
+{
+    const char *build_dir = wine_get_build_dir();
+    const char *path;
+    unsigned int i, maxlen = 0;
+    char *file;
+    WCHAR *dest;
+
+    if (build_dir) maxlen = strlen(build_dir) + sizeof("/programs/");
+    for (i = 0; (path = wine_dll_enum_load_path(i)); i++) maxlen = max( maxlen, strlen(path) );
+    maxlen += 2 * max_dll_name_len + 2 + sizeof(".dll.fake");
+    if (!(file = HeapAlloc( GetProcessHeap(), 0, maxlen ))) return FALSE;
+
+    if (!(dest = HeapAlloc( GetProcessHeap(), 0, (strlenW(dirname) + max_dll_name_len) * sizeof(WCHAR) )))
+    {
+        HeapFree( GetProcessHeap(), 0, file );
+        return FALSE;
+    }
+    strcpyW( dest, dirname );
+    dest[strlenW(dest) - 1] = 0;  /* remove wildcard */
+
+    if (build_dir)
+    {
+        strcpy( file, build_dir );
+        strcat( file, "/dlls" );
+        install_lib_dir( dest, file, ".dll" );
+        strcpy( file, build_dir );
+        strcat( file, "/programs" );
+        install_lib_dir( dest, file, ".exe" );
+    }
+    for (i = 0; (path = wine_dll_enum_load_path( i )); i++)
+    {
+        strcpy( file, path );
+        strcat( file, "/fakedlls" );
+        install_lib_dir( dest, file, NULL );
+    }
+    HeapFree( GetProcessHeap(), 0, file );
+    HeapFree( GetProcessHeap(), 0, dest );
+    return TRUE;
+}
+
+/***********************************************************************
+ *            create_fake_dll
+ */
+BOOL create_fake_dll( const WCHAR *name, const WCHAR *source )
+{
+    HANDLE h;
+    BOOL ret;
+    size_t size;
+    const WCHAR *filename;
+    void *buffer;
+
+    if (!(filename = strrchrW( name, '\\' ))) filename = name;
+    else filename++;
+
+    /* check for empty name which means to only create the directory */
+    if (!filename[0])
+    {
+        create_directories( name );
+        return TRUE;
+    }
+    if (filename[0] == '*' && !filename[1]) return create_wildcard_dlls( name );
+
+    add_handled_dll( filename );
+
+    if (!(h = create_dest_file( name ))) return TRUE;  /* not a fake dll */
+    if (h == INVALID_HANDLE_VALUE) return FALSE;
+
+    if (source[0] == '-' && !source[1])
+    {
+        /* '-' source means delete the file */
+        TRACE( "deleting %s\n", debugstr_w(name) );
+        ret = FALSE;
+    }
+    else if ((buffer = load_fake_dll( source, &size )))
     {
         DWORD written;
 
         ret = (WriteFile( h, buffer, size, &written, NULL ) && written == size);
         if (!ret) ERR( "failed to write to %s (error=%u)\n", debugstr_w(name), GetLastError() );
-        if (buffer != temp_buffer) HeapFree( GetProcessHeap(), 0, buffer );
     }
     else
     {
-        HMODULE module = LoadLibraryW( source );
         WARN( "fake dll %s not found for %s\n", debugstr_w(source), debugstr_w(name) );
-        ret = build_fake_dll( h, module );
-        if (module) FreeLibrary( module );
+        ret = build_fake_dll( h );
     }
 
     CloseHandle( h );
     if (!ret) DeleteFileW( name );
     return ret;
+}
+
+
+/***********************************************************************
+ *            cleanup_fake_dlls
+ */
+void cleanup_fake_dlls(void)
+{
+    HeapFree( GetProcessHeap(), 0, file_buffer );
+    file_buffer = NULL;
+    HeapFree( GetProcessHeap(), 0, handled_dlls );
+    handled_count = handled_total = 0;
 }

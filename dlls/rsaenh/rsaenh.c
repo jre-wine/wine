@@ -777,6 +777,8 @@ static HCRYPTKEY new_key(HCRYPTPROV hProv, ALG_ID aiAlgid, DWORD dwFlags, CRYPTK
     peaAlgidInfo = get_algid_info(hProv, aiAlgid);
     if (!peaAlgidInfo) return (HCRYPTKEY)INVALID_HANDLE_VALUE;
 
+    TRACE("alg = %s, dwKeyLen = %d\n", debugstr_a(peaAlgidInfo->szName),
+          dwKeyLen);
     /*
      * Assume the default key length, if none is specified explicitly
      */
@@ -822,7 +824,9 @@ static HCRYPTKEY new_key(HCRYPTPROV hProv, ALG_ID aiAlgid, DWORD dwFlags, CRYPTK
                 dwKeyLen > peaAlgidInfo->dwMaxLen || 
                 dwKeyLen < peaAlgidInfo->dwMinLen) 
             {
-                SetLastError(NTE_BAD_FLAGS);
+                TRACE("key len %d out of bounds (%d, %d)\n", dwKeyLen,
+                      peaAlgidInfo->dwMinLen, peaAlgidInfo->dwMaxLen);
+                SetLastError(NTE_BAD_DATA);
                 return (HCRYPTKEY)INVALID_HANDLE_VALUE;
             }
     }
@@ -2948,6 +2952,8 @@ static BOOL import_key(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDataLen,
         pBlobHeader->bVersion != CUR_BLOB_VERSION ||
         pBlobHeader->reserved != 0) 
     {
+        TRACE("bVersion = %d, reserved = %d\n", pBlobHeader->bVersion,
+              pBlobHeader->reserved);
         SetLastError(NTE_BAD_DATA);
         return FALSE;
     }
@@ -2956,6 +2962,7 @@ static BOOL import_key(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDataLen,
      * fStoreKey's original value.
      */
     fStoreKey = fStoreKey && !(dwFlags & CRYPT_VERIFYCONTEXT);
+    TRACE("blob type: %x\n", pBlobHeader->bType);
     switch (pBlobHeader->bType)
     {
         case PRIVATEKEYBLOB:    
@@ -3004,6 +3011,12 @@ BOOL WINAPI RSAENH_CPImportKey(HCRYPTPROV hProv, CONST BYTE *pbData, DWORD dwDat
     TRACE("(hProv=%08lx, pbData=%p, dwDataLen=%d, hPubKey=%08lx, dwFlags=%08x, phKey=%p)\n",
         hProv, pbData, dwDataLen, hPubKey, dwFlags, phKey);
 
+    if (dwFlags & CRYPT_IPSEC_HMAC_KEY)
+    {
+        FIXME("unimplemented for CRYPT_IPSEC_HMAC_KEY\n");
+        SetLastError(NTE_BAD_FLAGS);
+        return FALSE;
+    }
     return import_key(hProv, pbData, dwDataLen, hPubKey, dwFlags, TRUE, phKey);
 }
 
@@ -3052,11 +3065,9 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
             if (pCryptKey) { 
                 new_key_impl(pCryptKey->aiAlgid, &pCryptKey->context, pCryptKey->dwKeyLen);
                 setup_key(pCryptKey);
-                if (Algid == AT_SIGNATURE) {
-                    RSAENH_CPDestroyKey(hProv, pKeyContainer->hSignatureKeyPair);
-                    copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                &pKeyContainer->hSignatureKeyPair);
-                }
+                RSAENH_CPDestroyKey(hProv, pKeyContainer->hSignatureKeyPair);
+                copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
+                            &pKeyContainer->hSignatureKeyPair);
             }
             break;
 
@@ -3066,11 +3077,9 @@ BOOL WINAPI RSAENH_CPGenKey(HCRYPTPROV hProv, ALG_ID Algid, DWORD dwFlags, HCRYP
             if (pCryptKey) { 
                 new_key_impl(pCryptKey->aiAlgid, &pCryptKey->context, pCryptKey->dwKeyLen);
                 setup_key(pCryptKey);
-                if (Algid == AT_KEYEXCHANGE) {
-                    RSAENH_CPDestroyKey(hProv, pKeyContainer->hKeyExchangeKeyPair);
-                    copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
-                                &pKeyContainer->hKeyExchangeKeyPair);
-                }
+                RSAENH_CPDestroyKey(hProv, pKeyContainer->hKeyExchangeKeyPair);
+                copy_handle(&handle_table, *phKey, RSAENH_MAGIC_KEY,
+                            &pKeyContainer->hKeyExchangeKeyPair);
             }
             break;
             
@@ -4452,7 +4461,8 @@ HRESULT WINAPI DllRegisterServer(void)
             {
                 static const WCHAR szName[] = { 'N','a','m','e',0 };
                 static const WCHAR szRSAName[3][54] = {
-                  { 'M','i','c','r','o','s','o','f','t',' ', 'B','a','s','e',' ',
+                  { 'M','i','c','r','o','s','o','f','t',' ',
+                    'E','n','h','a','n','c','e','d',' ',
                     'C','r','y','p','t','o','g','r','a','p','h','i','c',' ', 
                     'P','r','o','v','i','d','e','r',' ','v','1','.','0',0 },
                   { 'M','i','c','r','o','s','o','f','t',' ','R','S','A',' ',

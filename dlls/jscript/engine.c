@@ -223,7 +223,7 @@ void exec_release(exec_ctx_t *ctx)
     heap_free(ctx);
 }
 
-static HRESULT disp_get_id(IDispatch *disp, BSTR name, DWORD flags, DISPID *id)
+static HRESULT disp_get_id(script_ctx_t *ctx, IDispatch *disp, BSTR name, DWORD flags, DISPID *id)
 {
     IDispatchEx *dispex;
     HRESULT hres;
@@ -237,7 +237,7 @@ static HRESULT disp_get_id(IDispatch *disp, BSTR name, DWORD flags, DISPID *id)
     }
 
     *id = 0;
-    hres = IDispatchEx_GetDispID(dispex, name, flags|fdexNameCaseSensitive, id);
+    hres = IDispatchEx_GetDispID(dispex, name, make_grfdex(ctx, flags|fdexNameCaseSensitive), id);
     IDispatchEx_Release(dispex);
     return hres;
 }
@@ -347,33 +347,48 @@ static HRESULT equal2_values(VARIANT *lval, VARIANT *rval, BOOL *ret)
     return S_OK;
 }
 
-static HRESULT literal_to_var(literal_t *literal, VARIANT *v)
+static HRESULT literal_to_var(script_ctx_t *ctx, literal_t *literal, VARIANT *v)
 {
-    V_VT(v) = literal->vt;
-
-    switch(V_VT(v)) {
-    case VT_EMPTY:
-    case VT_NULL:
+    switch(literal->type) {
+    case LT_UNDEFINED:
+        V_VT(v) = VT_EMPTY;
         break;
-    case VT_I4:
+    case LT_NULL:
+        V_VT(v) = VT_NULL;
+        break;
+    case LT_INT:
+        V_VT(v) = VT_I4;
         V_I4(v) = literal->u.lval;
         break;
-    case VT_R8:
+    case LT_DOUBLE:
+        V_VT(v) = VT_R8;
         V_R8(v) = literal->u.dval;
         break;
-    case VT_BSTR:
-        V_BSTR(v) = SysAllocString(literal->u.wstr);
+    case LT_STRING: {
+        BSTR str = SysAllocString(literal->u.wstr);
+        if(!str)
+            return E_OUTOFMEMORY;
+
+        V_VT(v) = VT_BSTR;
+        V_BSTR(v) = str;
         break;
-    case VT_BOOL:
+    }
+    case LT_BOOL:
+        V_VT(v) = VT_BOOL;
         V_BOOL(v) = literal->u.bval;
         break;
-    case VT_DISPATCH:
-        IDispatch_AddRef(literal->u.disp);
-        V_DISPATCH(v) = literal->u.disp;
-        break;
-    default:
-        ERR("wrong type %d\n", V_VT(v));
-        return E_NOTIMPL;
+    case LT_REGEXP: {
+        DispatchEx *regexp;
+        HRESULT hres;
+
+        hres = create_regexp(ctx, literal->u.regexp.str, literal->u.regexp.str_len,
+                             literal->u.regexp.flags, &regexp);
+        if(FAILED(hres))
+            return hres;
+
+        V_VT(v) = VT_DISPATCH;
+        V_DISPATCH(v) = (IDispatch*)_IDispatchEx_(regexp);
+    }
     }
 
     return S_OK;
@@ -387,7 +402,7 @@ static BOOL lookup_global_members(script_ctx_t *ctx, BSTR identifier, exprval_t 
 
     for(item = ctx->named_items; item; item = item->next) {
         if(item->flags & SCRIPTITEM_GLOBALMEMBERS) {
-            hres = disp_get_id(item->disp, identifier, 0, &id);
+            hres = disp_get_id(ctx, item->disp, identifier, 0, &id);
             if(SUCCEEDED(hres)) {
                 if(ret)
                     exprval_set_idref(ret, item->disp, id);
@@ -1408,7 +1423,7 @@ HRESULT array_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags,
                 return S_OK;
             }
 
-            hres = disp_get_id(obj, str, flags & EXPR_NEWREF ? fdexNameEnsure : 0, &id);
+            hres = disp_get_id(ctx->parser->script, obj, str, flags & EXPR_NEWREF ? fdexNameEnsure : 0, &id);
         }
 
         if(SUCCEEDED(hres)) {
@@ -1459,7 +1474,7 @@ HRESULT member_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
         return S_OK;
     }
 
-    hres = disp_get_id(obj, str, flags & EXPR_NEWREF ? fdexNameEnsure : 0, &id);
+    hres = disp_get_id(ctx->parser->script, obj, str, flags & EXPR_NEWREF ? fdexNameEnsure : 0, &id);
     SysFreeString(str);
     if(SUCCEEDED(hres)) {
         exprval_set_idref(ret, obj, id);
@@ -1654,7 +1669,7 @@ HRESULT literal_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flag
 
     TRACE("\n");
 
-    hres = literal_to_var(expr->literal, &var);
+    hres = literal_to_var(ctx->parser->script, expr->literal, &var);
     if(FAILED(hres))
         return hres;
 
@@ -1733,7 +1748,7 @@ HRESULT property_value_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWO
         return hres;
 
     for(iter = expr->property_list; iter; iter = iter->next) {
-        hres = literal_to_var(iter->name, &tmp);
+        hres = literal_to_var(ctx->parser->script, iter->name, &tmp);
         if(FAILED(hres))
             break;
 
@@ -2053,7 +2068,7 @@ static HRESULT in_eval(exec_ctx_t *ctx, VARIANT *lval, VARIANT *obj, jsexcept_t 
     if(FAILED(hres))
         return hres;
 
-    hres = disp_get_id(V_DISPATCH(obj), str, 0, &id);
+    hres = disp_get_id(ctx->parser->script, V_DISPATCH(obj), str, 0, &id);
     SysFreeString(str);
     if(SUCCEEDED(hres))
         ret = VARIANT_TRUE;
@@ -2293,7 +2308,8 @@ HRESULT delete_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
 
         hres = IDispatch_QueryInterface(exprval.u.nameref.disp, &IID_IDispatchEx, (void**)&dispex);
         if(SUCCEEDED(hres)) {
-            hres = IDispatchEx_DeleteMemberByName(dispex, exprval.u.nameref.name, fdexNameCaseSensitive);
+            hres = IDispatchEx_DeleteMemberByName(dispex, exprval.u.nameref.name,
+                    make_grfdex(ctx->parser->script, fdexNameCaseSensitive));
             b = VARIANT_TRUE;
             IDispatchEx_Release(dispex);
         }

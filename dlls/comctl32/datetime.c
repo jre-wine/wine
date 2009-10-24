@@ -31,7 +31,6 @@
  * TODO:
  *    -- DTS_APPCANPARSE
  *    -- DTS_SHORTDATECENTURYFORMAT
- *    -- DTN_CLOSEUP
  *    -- DTN_FORMAT
  *    -- DTN_FORMATQUERY
  *    -- DTN_USERSTRING
@@ -88,7 +87,7 @@ typedef struct
 
 /* in monthcal.c */
 extern int MONTHCAL_MonthLength(int month, int year);
-extern int MONTHCAL_CalculateDayOfWeek(WORD day, WORD month, WORD year);
+extern int MONTHCAL_CalculateDayOfWeek(SYSTEMTIME *date, BOOL inplace);
 
 /* this list of defines is closely related to `allowedformatchars' defined
  * in datetime.c; the high nibble indicates the `base type' of the format
@@ -177,9 +176,7 @@ DATETIME_SetSystemTime (DATETIME_INFO *infoPtr, DWORD flag, const SYSTEMTIME *sy
         infoPtr->dateValid = TRUE;
         infoPtr->date = *systime;
         /* always store a valid day of week */
-        infoPtr->date.wDayOfWeek =
-            MONTHCAL_CalculateDayOfWeek(infoPtr->date.wDay, infoPtr->date.wMonth,
-                                                            infoPtr->date.wYear);
+        MONTHCAL_CalculateDayOfWeek(&infoPtr->date, TRUE);
 
         SendMessageW (infoPtr->hMonthCal, MCM_SETCURSEL, 0, (LPARAM)(&infoPtr->date));
         SendMessageW (infoPtr->hwndCheckbut, BM_SETCHECK, BST_CHECKED, 0);
@@ -450,19 +447,6 @@ DATETIME_ReturnTxt (const DATETIME_INFO *infoPtr, int count, LPWSTR result, int 
     TRACE ("arg%d=%x->[%s]\n", count, infoPtr->fieldspec[count], debugstr_w(result));
 }
 
-/* Offsets of days in the week to the weekday of january 1 in a leap year. */
-static const int DayOfWeekTable[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-
-/* returns the day in the week(0 == sunday, 6 == saturday) */
-/* day(1 == 1st, 2 == 2nd... etc), year is the  year value */
-static int DATETIME_CalculateDayOfWeek(DWORD day, DWORD month, DWORD year)
-{
-    year-=(month < 3);
-    
-    return((year + year/4 - year/100 + year/400 +
-         DayOfWeekTable[month-1] + day ) % 7);
-}
-
 static int wrap(int val, int delta, int minVal, int maxVal)
 {
     val += delta;
@@ -486,14 +470,14 @@ DATETIME_IncreaseField (DATETIME_INFO *infoPtr, int number, int delta)
 	case TWODIGITYEAR:
 	case FULLYEAR:
 	    date->wYear = wrap(date->wYear, delta, 1752, 9999);
-	    date->wDayOfWeek = DATETIME_CalculateDayOfWeek(date->wDay,date->wMonth,date->wYear);
+	    MONTHCAL_CalculateDayOfWeek(date, TRUE);
 	    break;
 	case ONEDIGITMONTH:
 	case TWODIGITMONTH:
 	case THREECHARMONTH:
 	case FULLMONTH:
 	    date->wMonth = wrap(date->wMonth, delta, 1, 12);
-	    date->wDayOfWeek = DATETIME_CalculateDayOfWeek(date->wDay,date->wMonth,date->wYear);
+	    MONTHCAL_CalculateDayOfWeek(date, TRUE);
 	    delta = 0;
 	    /* fall through */
 	case ONEDIGITDAY:
@@ -501,7 +485,7 @@ DATETIME_IncreaseField (DATETIME_INFO *infoPtr, int number, int delta)
 	case THREECHARDAY:
 	case FULLDAY:
 	    date->wDay = wrap(date->wDay, delta, 1, MONTHCAL_MonthLength(date->wMonth, date->wYear));
-	    date->wDayOfWeek = DATETIME_CalculateDayOfWeek(date->wDay,date->wMonth,date->wYear);
+	    MONTHCAL_CalculateDayOfWeek(date, TRUE);
 	    break;
 	case ONELETTERAMPM:
 	case TWOLETTERAMPM:
@@ -826,20 +810,23 @@ DATETIME_LButtonDown (DATETIME_INFO *infoPtr, INT x, INT y)
 
         if(IsWindowVisible(infoPtr->hMonthCal)) {
             ShowWindow(infoPtr->hMonthCal, SW_HIDE);
+            infoPtr->bDropdownEnabled = FALSE;
+            DATETIME_SendSimpleNotify (infoPtr, DTN_CLOSEUP);
         } else {
             const SYSTEMTIME *lprgSysTimeArray = &infoPtr->date;
             TRACE("update calendar %04d/%02d/%02d\n", 
             lprgSysTimeArray->wYear, lprgSysTimeArray->wMonth, lprgSysTimeArray->wDay);
             SendMessageW(infoPtr->hMonthCal, MCM_SETCURSEL, 0, (LPARAM)(&infoPtr->date));
 
-            if (infoPtr->bDropdownEnabled)
+            if (infoPtr->bDropdownEnabled) {
                 ShowWindow(infoPtr->hMonthCal, SW_SHOW);
+                DATETIME_SendSimpleNotify (infoPtr, DTN_DROPDOWN);
+            }
             infoPtr->bDropdownEnabled = TRUE;
         }
 
         TRACE ("dt:%p mc:%p mc parent:%p, desktop:%p\n",
                infoPtr->hwndSelf, infoPtr->hMonthCal, infoPtr->hwndNotify, GetDesktopWindow ());
-        DATETIME_SendSimpleNotify (infoPtr, DTN_DROPDOWN);
     }
 
     InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
@@ -945,7 +932,7 @@ DATETIME_EraseBackground (const DATETIME_INFO *infoPtr, HDC hdc)
 
 
 static LRESULT
-DATETIME_Notify (DATETIME_INFO *infoPtr, LPNMHDR lpnmh)
+DATETIME_Notify (DATETIME_INFO *infoPtr, const NMHDR *lpnmh)
 {
     TRACE ("Got notification %x from %p\n", lpnmh->code, lpnmh->hwndFrom);
     TRACE ("info: %p %p %p\n", infoPtr->hwndSelf, infoPtr->hMonthCal, infoPtr->hUpdown);
@@ -959,6 +946,7 @@ DATETIME_Notify (DATETIME_INFO *infoPtr, LPNMHDR lpnmh)
         SendMessageW (infoPtr->hwndCheckbut, BM_SETCHECK, BST_CHECKED, 0);
         InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
         DATETIME_SendDateTimeChangeNotify (infoPtr);
+        DATETIME_SendSimpleNotify(infoPtr, DTN_CLOSEUP);
     }
     if ((lpnmh->hwndFrom == infoPtr->hUpdown) && (lpnmh->code == UDN_DELTAPOS)) {
         LPNMUPDOWN lpnmud = (LPNMUPDOWN)lpnmh;
@@ -1044,16 +1032,14 @@ DATETIME_Char (DATETIME_INFO *infoPtr, WPARAM vkCode)
             case TWODIGITYEAR:
                 date->wYear = date->wYear - (date->wYear%100) +
                         (date->wYear%10)*10 + num;
-                date->wDayOfWeek = DATETIME_CalculateDayOfWeek(
-                        date->wDay,date->wMonth,date->wYear);
+                MONTHCAL_CalculateDayOfWeek(date, TRUE);
                 DATETIME_SendDateTimeChangeNotify (infoPtr);
                 break;
             case INVALIDFULLYEAR:
             case FULLYEAR:
                 /* reset current year initialy */
                 date->wYear = ((date->wYear/1000) ? 0 : 1)*(date->wYear%1000)*10 + num;
-                date->wDayOfWeek = DATETIME_CalculateDayOfWeek(
-                        date->wDay,date->wMonth,date->wYear);
+                MONTHCAL_CalculateDayOfWeek(date, TRUE);
                 DATETIME_SendDateTimeChangeNotify (infoPtr);
                 break;
             case ONEDIGITMONTH:
@@ -1062,8 +1048,7 @@ DATETIME_Char (DATETIME_INFO *infoPtr, WPARAM vkCode)
                     date->wMonth = num;
                 else
                     date->wMonth = (date->wMonth%10)*10+num;
-                date->wDayOfWeek = DATETIME_CalculateDayOfWeek(
-                        date->wDay,date->wMonth,date->wYear);
+                MONTHCAL_CalculateDayOfWeek(date, TRUE);
                 DATETIME_SendDateTimeChangeNotify (infoPtr);
                 break;
             case ONEDIGITDAY:
@@ -1073,8 +1058,7 @@ DATETIME_Char (DATETIME_INFO *infoPtr, WPARAM vkCode)
                     date->wDay = num;
                 else
                     date->wDay = newDays;
-                date->wDayOfWeek = DATETIME_CalculateDayOfWeek(
-                        date->wDay,date->wMonth,date->wYear);
+                MONTHCAL_CalculateDayOfWeek(date, TRUE);
                 DATETIME_SendDateTimeChangeNotify (infoPtr);
                 break;
             case ONEDIGIT12HOUR:
@@ -1207,7 +1191,7 @@ DATETIME_SendDateTimeChangeNotify (const DATETIME_INFO *infoPtr)
     dtdtc.nmhdr.idFrom   = GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_ID);
     dtdtc.nmhdr.code     = DTN_DATETIMECHANGE;
 
-    dtdtc.dwFlags = (infoPtr->dwStyle & DTS_SHOWNONE) ? GDT_NONE : GDT_VALID;
+    dtdtc.dwFlags = infoPtr->dateValid ? GDT_VALID : GDT_NONE;
 
     dtdtc.st = infoPtr->date;
     return (BOOL) SendMessageW (infoPtr->hwndNotify, WM_NOTIFY,
@@ -1267,12 +1251,27 @@ DATETIME_Size (DATETIME_INFO *infoPtr, INT width, INT height)
     return 0;
 }
 
+static LRESULT
+DATETIME_StyleChanging(DATETIME_INFO *infoPtr, WPARAM wStyleType, STYLESTRUCT *lpss)
+{
+    TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
+          wStyleType, lpss->styleOld, lpss->styleNew);
+
+    /* block DTS_SHOWNONE change */
+    if ((lpss->styleNew ^ lpss->styleOld) & DTS_SHOWNONE)
+    {
+        if (lpss->styleOld & DTS_SHOWNONE)
+            lpss->styleNew |= DTS_SHOWNONE;
+        else
+            lpss->styleNew &= ~DTS_SHOWNONE;
+    }
+
+    return 0;
+}
 
 static LRESULT 
 DATETIME_StyleChanged(DATETIME_INFO *infoPtr, WPARAM wStyleType, const STYLESTRUCT *lpss)
 {
-    static const WCHAR buttonW[] = { 'b', 'u', 't', 't', 'o', 'n', 0 };
-
     TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
           wStyleType, lpss->styleOld, lpss->styleNew);
 
@@ -1281,7 +1280,7 @@ DATETIME_StyleChanged(DATETIME_INFO *infoPtr, WPARAM wStyleType, const STYLESTRU
     infoPtr->dwStyle = lpss->styleNew;
 
     if ( !(lpss->styleOld & DTS_SHOWNONE) && (lpss->styleNew & DTS_SHOWNONE) ) {
-        infoPtr->hwndCheckbut = CreateWindowExW (0, buttonW, 0, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+        infoPtr->hwndCheckbut = CreateWindowExW (0, WC_BUTTONW, 0, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
          					 2, 2, 13, 13, infoPtr->hwndSelf, 0, 
 						(HINSTANCE)GetWindowLongPtrW (infoPtr->hwndSelf, GWLP_HINSTANCE), 0);
         SendMessageW (infoPtr->hwndCheckbut, BM_SETCHECK, 1, 0);
@@ -1464,6 +1463,9 @@ DATETIME_WindowProc (HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     case WM_COMMAND:
         return DATETIME_Command (infoPtr, wParam, lParam);
+
+    case WM_STYLECHANGING:
+        return DATETIME_StyleChanging(infoPtr, wParam, (LPSTYLESTRUCT)lParam);
 
     case WM_STYLECHANGED:
         return DATETIME_StyleChanged(infoPtr, wParam, (LPSTYLESTRUCT)lParam);

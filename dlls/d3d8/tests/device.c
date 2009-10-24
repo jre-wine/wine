@@ -1248,7 +1248,9 @@ static void test_lights(void)
        broken(hr == D3DERR_INVALIDCALL), /* Some Win9x and WinME */
        "Enabling one light more than supported returned %08x\n", hr);
     hr = IDirect3DDevice8_GetLightEnable(device, i + 1, &enabled);
-    ok(hr == D3D_OK, "GetLightEnable on light %u failed with %08x\n", i + 1, hr);
+    ok(hr == D3D_OK ||
+       broken(hr == D3DERR_INVALIDCALL), /* Some Win9x and WinME */
+       "GetLightEnable on light %u failed with %08x\n", i + 1, hr);
     ok(enabled, "Light %d is %s\n", i + 1, enabled ? "enabled" : "disabled");
     hr = IDirect3DDevice8_LightEnable(device, i + 1, FALSE);
     ok(hr == D3D_OK, "Disabling the additional returned %08x\n", hr);
@@ -1348,6 +1350,7 @@ static void test_depth_stencil_reset(void)
     IDirect3DSurface8 *surface;
     IDirect3DDevice8 *device = NULL;
     IDirect3D8 *d3d8;
+    UINT refcount;
     HRESULT hr;
     HWND hwnd;
 
@@ -1406,7 +1409,10 @@ static void test_depth_stencil_reset(void)
     ok(hr == D3DERR_NOTFOUND, "GetDepthStencilSurface returned 0x%08x, expected D3DERR_NOTFOUND\n", hr);
     ok(surface == NULL, "Depth stencil should be NULL\n");
 
+    refcount = IDirect3DDevice8_Release(device);
+    ok(!refcount, "Device has %u references left.\n", refcount);
     device = NULL;
+
     IDirect3D8_GetAdapterDisplayMode( d3d8, D3DADAPTER_DEFAULT, &display_mode );
 
     ZeroMemory( &present_parameters, sizeof(present_parameters) );
@@ -1448,7 +1454,7 @@ static void test_depth_stencil_reset(void)
 cleanup:
     if (device)
     {
-        UINT refcount = IDirect3DDevice8_Release(device);
+        refcount = IDirect3DDevice8_Release(device);
         ok(!refcount, "Device has %u references left.\n", refcount);
     }
     if (d3d8) IDirect3D8_Release(d3d8);

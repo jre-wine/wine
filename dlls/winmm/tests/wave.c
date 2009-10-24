@@ -59,12 +59,16 @@ static void test_multiple_waveopens(void)
     }
 
     ret = waveOutOpen(&handle2, 0, &wfx, 0, 0, 0);
-    /* In windows this is most likely allowed, in wine an application can use the waveout
-     * interface, but so can directsound.. this causes problems if directsound goes active
+    /* Modern Windows allows for wave-out devices to be opened multiple times.
+     * Some Wine audio drivers allow that and some don't.  To avoid false alarms
+     * for those that do, don't "todo_wine ok(...)" on success.
      */
-    todo_wine ok(ret == MMSYSERR_NOERROR || broken(ret == MMSYSERR_ALLOCATED), /* winME */
-                 "waveOutOpen returns: %x\n", ret);
-    if (ret == MMSYSERR_NOERROR)
+    if (ret != MMSYSERR_NOERROR)
+    {
+        todo_wine ok(ret == MMSYSERR_NOERROR || broken(ret == MMSYSERR_ALLOCATED), /* winME */
+                     "second waveOutOpen returns: %x\n", ret);
+    }
+    else
         waveOutClose(handle2);
 
     waveOutClose(handle1);
@@ -791,9 +795,11 @@ static void wave_out_test_deviceOut(int device, double duration,
         }
 
         for (i = 0; i < headers; i++) {
-            ok(frags[i].dwFlags==(WHDR_DONE|WHDR_PREPARED),
-               "WHDR_DONE WHDR_PREPARED expected, got %s\n",
-               wave_header_flags(frags[i].dwFlags));
+            ok(frags[i].dwFlags==(WHDR_DONE|WHDR_PREPARED) ||
+               broken((flags & CALLBACK_TYPEMASK)==CALLBACK_EVENT &&
+                       frags[i].dwFlags==(WHDR_DONE|WHDR_PREPARED|0x1000)), /* < NT4 */
+               "(%02d) WHDR_DONE WHDR_PREPARED expected, got %s\n",
+               i, wave_header_flags(frags[i].dwFlags));
         }
         check_position(device, wout, length * (loops + 1), pwfx);
     }

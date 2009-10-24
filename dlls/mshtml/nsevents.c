@@ -137,7 +137,6 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     if(!This->doc)
         return NS_OK;
 
-    update_nsdocument(This->doc);
     connect_scripts(This->doc->basedoc.window);
 
     if(This->editor_controller) {
@@ -148,12 +147,12 @@ static nsresult NSAPI handle_load(nsIDOMEventListener *iface, nsIDOMEvent *event
     if(This->doc->usermode == EDITMODE)
         handle_edit_load(&This->doc->basedoc);
 
-    if(!This->doc->basedoc.nsdoc) {
+    if(!This->doc->basedoc.doc_node->nsdoc) {
         ERR("NULL nsdoc\n");
         return NS_ERROR_FAILURE;
     }
 
-    nsIDOMHTMLDocument_GetBody(This->doc->basedoc.nsdoc, &nsbody);
+    nsIDOMHTMLDocument_GetBody(This->doc->basedoc.doc_node->nsdoc, &nsbody);
     if(nsbody) {
         fire_event(This->doc->basedoc.doc_node, EVENTID_LOAD, (nsIDOMNode*)nsbody, event);
         nsIDOMHTMLElement_Release(nsbody);

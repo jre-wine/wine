@@ -669,7 +669,7 @@
 @ stdcall GetVolumePathNameA(str ptr long)
 @ stdcall GetVolumePathNameW(wstr ptr long)
 # @ stub GetVolumePathNamesForVolumeNameA
-# @ stub GetVolumePathNamesForVolumeNameW
+@ stdcall GetVolumePathNamesForVolumeNameW(wstr ptr long ptr)
 @ stdcall GetWindowsDirectoryA(ptr long)
 @ stdcall GetWindowsDirectoryW(ptr long)
 @ stdcall GetWriteWatch(long ptr long ptr ptr ptr)
@@ -707,7 +707,7 @@
 @ stub HeapExtend
 @ stdcall HeapFree(long long long) ntdll.RtlFreeHeap
 @ stdcall HeapLock(long)
-# @ stub HeapQueryInformation
+@ stdcall HeapQueryInformation(long long ptr long ptr)
 @ stub HeapQueryTagW
 @ stdcall HeapReAlloc(long long ptr long) ntdll.RtlReAllocateHeap
 @ stub HeapSetFlags

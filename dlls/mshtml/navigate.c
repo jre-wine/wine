@@ -41,6 +41,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 #define CONTENT_LENGTH "Content-Length"
 #define UTF16_STR "utf-16"
 
+static WCHAR emptyW[] = {0};
+
 typedef struct {
     const nsIInputStreamVtbl *lpInputStreamVtbl;
 
@@ -950,7 +952,7 @@ static HRESULT read_stream_data(nsChannelBSC *This, IStream *stream)
 
             /* events are reset when a new document URI is loaded, so re-initialise them here */
             if(This->bsc.doc && This->bsc.doc->doc_obj->bscallback == This && This->bsc.doc->doc_obj->nscontainer) {
-                update_nsdocument(This->bsc.doc->doc_obj);
+                update_window_doc(This->bsc.doc->window);
                 init_nsevents(This->bsc.doc->doc_obj->nscontainer);
             }
         }
@@ -1160,14 +1162,27 @@ void channelbsc_set_channel(nsChannelBSC *This, nsChannel *channel, nsIStreamLis
     }
 }
 
-void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
-                          LPCWSTR uri, nsIInputStream *post_data_stream, DWORD hlnf)
+HRESULT hlink_frame_navigate(HTMLDocument *doc, LPCWSTR url,
+        nsIInputStream *post_data_stream, DWORD hlnf)
 {
+    IHlinkFrame *hlink_frame;
+    IServiceProvider *sp;
     BSCallback *callback;
     IBindCtx *bindctx;
     IMoniker *mon;
     IHlink *hlink;
-    HRESULT hr;
+    HRESULT hres;
+
+    hres = IOleClientSite_QueryInterface(doc->doc_obj->client, &IID_IServiceProvider,
+            (void**)&sp);
+    if(FAILED(hres))
+        return hres;
+
+    hres = IServiceProvider_QueryService(sp, &IID_IHlinkFrame, &IID_IHlinkFrame,
+            (void**)&hlink_frame);
+    IServiceProvider_Release(sp);
+    if(FAILED(hres))
+        return hres;
 
     callback = &create_channelbsc(NULL)->bsc;
 
@@ -1178,33 +1193,52 @@ void hlink_frame_navigate(HTMLDocument *doc, IHlinkFrame *hlink_frame,
               debugstr_an(callback->post_data, callback->post_data_len));
     }
 
-    hr = CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
-    if (FAILED(hr)) {
-        IBindStatusCallback_Release(STATUSCLB(callback));
-        return;
-    }
+    hres = CreateAsyncBindCtx(0, STATUSCLB(callback), NULL, &bindctx);
+    if(SUCCEEDED(hres))
+        hres = CoCreateInstance(&CLSID_StdHlink, NULL, CLSCTX_INPROC_SERVER,
+                &IID_IHlink, (LPVOID*)&hlink);
 
-    hr = CoCreateInstance(&CLSID_StdHlink, NULL, CLSCTX_INPROC_SERVER, &IID_IHlink, (LPVOID*)&hlink);
-    if (FAILED(hr)) {
-        IBindCtx_Release(bindctx);
-        IBindStatusCallback_Release(STATUSCLB(callback));
-        return;
-    }
+    if(SUCCEEDED(hres))
+        hres = CreateURLMoniker(NULL, url, &mon);
 
-    hr = CreateURLMoniker(NULL, uri, &mon);
-    if (SUCCEEDED(hr)) {
-        IHlink_SetMonikerReference(hlink, 0, mon, NULL);
+    if(SUCCEEDED(hres)) {
+        IHlink_SetMonikerReference(hlink, HLINKSETF_TARGET, mon, NULL);
 
         if(hlnf & HLNF_OPENINNEWWINDOW) {
             static const WCHAR wszBlank[] = {'_','b','l','a','n','k',0};
             IHlink_SetTargetFrameName(hlink, wszBlank); /* FIXME */
         }
 
-        IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
+        hres = IHlinkFrame_Navigate(hlink_frame, hlnf, bindctx, STATUSCLB(callback), hlink);
 
         IMoniker_Release(mon);
     }
 
+    IHlinkFrame_Release(hlink_frame);
     IBindCtx_Release(bindctx);
     IBindStatusCallback_Release(STATUSCLB(callback));
+    return hres;
+}
+
+HRESULT navigate_url(HTMLDocumentNode *doc, OLECHAR *url)
+{
+    OLECHAR *translated_url = NULL;
+    HRESULT hres;
+
+    if(!url)
+        url = emptyW;
+
+    if(doc->basedoc.doc_obj->hostui) {
+        hres = IDocHostUIHandler_TranslateUrl(doc->basedoc.doc_obj->hostui, 0, url,
+                &translated_url);
+        if(hres == S_OK)
+            url = translated_url;
+    }
+
+    hres = hlink_frame_navigate(&doc->basedoc, url, NULL, 0);
+    if(FAILED(hres))
+        FIXME("hlink_frame_navigate failed: %08x\n", hres);
+
+    CoTaskMemFree(translated_url);
+    return hres;
 }

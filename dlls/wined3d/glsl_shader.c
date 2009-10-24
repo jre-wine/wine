@@ -254,7 +254,7 @@ static void shader_glsl_load_psamplers(const struct wined3d_gl_info *gl_info,
         name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
         if (name_loc != -1) {
             DWORD mapped_unit = tex_unit_map[i];
-            if (mapped_unit != WINED3D_UNMAPPED_STAGE && mapped_unit < GL_LIMITS(fragment_samplers))
+            if (mapped_unit != WINED3D_UNMAPPED_STAGE && mapped_unit < gl_info->max_fragment_samplers)
             {
                 TRACE("Loading %s for texture %d\n", sampler_name, mapped_unit);
                 GL_EXTCALL(glUniform1iARB(name_loc, mapped_unit));
@@ -279,7 +279,7 @@ static void shader_glsl_load_vsamplers(const struct wined3d_gl_info *gl_info,
         name_loc = GL_EXTCALL(glGetUniformLocationARB(programId, sampler_name));
         if (name_loc != -1) {
             DWORD mapped_unit = tex_unit_map[MAX_FRAGMENT_SAMPLERS + i];
-            if (mapped_unit != WINED3D_UNMAPPED_STAGE && mapped_unit < GL_LIMITS(combined_samplers))
+            if (mapped_unit != WINED3D_UNMAPPED_STAGE && mapped_unit < gl_info->max_combined_samplers)
             {
                 TRACE("Loading %s for texture %d\n", sampler_name, mapped_unit);
                 GL_EXTCALL(glUniform1iARB(name_loc, mapped_unit));
@@ -794,7 +794,7 @@ static void shader_glsl_update_float_pixel_constants(IWineD3DDevice *iface, UINT
 
 static unsigned int vec4_varyings(DWORD shader_major, const struct wined3d_gl_info *gl_info)
 {
-    unsigned int ret = GL_LIMITS(glsl_varyings) / 4;
+    unsigned int ret = gl_info->max_glsl_varyings / 4;
     /* 4.0 shaders do not write clip coords because d3d10 does not support user clipplanes */
     if(shader_major > 3) return ret;
 
@@ -844,8 +844,10 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
          */
         if(pshader) {
             /* No indirect addressing here */
-            max_constantsF = GL_LIMITS(pshader_constantsF);
-        } else {
+            max_constantsF = gl_info->max_ps_glsl_constantsF;
+        }
+        else
+        {
             if(This->baseShader.reg_maps.usesrelconstF) {
                 /* Subtract the other potential uniforms from the max available (bools, ints, and 1 row of projection matrix).
                  * Subtract another uniform for immediate values, which have to be loaded via uniform by the driver as well.
@@ -854,7 +856,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
                  *
                  * Writing gl_ClipPos requires one uniform for each clipplane as well.
                  */
-                max_constantsF = GL_LIMITS(vshader_constantsF) - 3 - GL_LIMITS(clipplanes);
+                max_constantsF = gl_info->max_vs_glsl_constantsF - 3 - gl_info->max_clipplanes;
                 max_constantsF -= count_bits(This->baseShader.reg_maps.integer_constants);
                 /* Strictly speaking a bool only uses one scalar, but the nvidia(Linux) compiler doesn't pack them properly,
                  * so each scalar requires a full vec4. We could work around this by packing the booleans ourselves, but
@@ -862,9 +864,11 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
                  */
                 max_constantsF -= count_bits(This->baseShader.reg_maps.boolean_constants);
                 /* Set by driver quirks in directx.c */
-                max_constantsF -= GLINFO_LOCATION.reserved_glsl_constants;
-            } else {
-                max_constantsF = GL_LIMITS(vshader_constantsF);
+                max_constantsF -= gl_info->reserved_glsl_constants;
+            }
+            else
+            {
+                max_constantsF = gl_info->max_vs_glsl_constantsF;
             }
         }
         max_constantsF = min(This->baseShader.limits.constant_float, max_constantsF);
@@ -922,8 +926,10 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
             shader_addline(buffer, "const vec4 srgb_const1 = vec4(%.8e, 0.0, 0.0, 0.0);\n",
                     srgb_cmp);
         }
-        if(reg_maps->vpos || reg_maps->usesdsy) {
-            if(This->baseShader.limits.constant_float + extra_constants_needed + 1 < GL_LIMITS(pshader_constantsF)) {
+        if (reg_maps->vpos || reg_maps->usesdsy)
+        {
+            if (This->baseShader.limits.constant_float + extra_constants_needed + 1 < gl_info->max_ps_glsl_constantsF)
+            {
                 shader_addline(buffer, "uniform vec4 ycorrection;\n");
                 ((IWineD3DPixelShaderImpl *) This)->vpos_uniform = 1;
                 extra_constants_needed++;
@@ -1308,8 +1314,8 @@ static void shader_glsl_get_register_name(const struct wined3d_shader_register *
             break;
 
         case WINED3DSPR_COLOROUT:
-            if (reg->idx >= GL_LIMITS(buffers))
-                WARN("Write to render target %u, only %d supported\n", reg->idx, GL_LIMITS(buffers));
+            if (reg->idx >= gl_info->max_buffers)
+                WARN("Write to render target %u, only %d supported\n", reg->idx, gl_info->max_buffers);
 
             sprintf(register_name, "gl_FragData[%u]", reg->idx);
             break;
@@ -3575,7 +3581,7 @@ static GLhandleARB generate_param_reorder_function(struct wined3d_shader_buffer 
          * Take care about the texcoord .w fixup though if we're using the fixed function fragment pipeline
          */
         device = (IWineD3DDeviceImpl *) vs->baseShader.device;
-        if (((GLINFO_LOCATION).quirks & WINED3D_QUIRK_SET_TEXCOORD_W)
+        if ((gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W)
                 && ps_major == 0 && vs_major > 0 && !device->frag_pipe->ffp_proj_control)
         {
             shader_addline(buffer, "void order_ps_input() {\n");
@@ -3622,7 +3628,7 @@ static GLhandleARB generate_param_reorder_function(struct wined3d_shader_buffer 
             {
                 if (semantic_idx < 8)
                 {
-                    if (!((GLINFO_LOCATION).quirks & WINED3D_QUIRK_SET_TEXCOORD_W) || ps_major > 0)
+                    if (!(gl_info->quirks & WINED3D_QUIRK_SET_TEXCOORD_W) || ps_major > 0)
                         write_mask |= WINED3DSP_WRITEMASK_3;
 
                     shader_addline(buffer, "gl_TexCoord[%u]%s = OUT[%u]%s;\n",
@@ -3809,7 +3815,7 @@ static GLuint shader_glsl_generate_pshader(const struct wined3d_context *context
     TRACE("Compiling shader object %u\n", shader_obj);
     GL_EXTCALL(glShaderSourceARB(shader_obj, 1, (const char**)&buffer->buffer, NULL));
     GL_EXTCALL(glCompileShaderARB(shader_obj));
-    print_glsl_info_log(&GLINFO_LOCATION, shader_obj);
+    print_glsl_info_log(gl_info, shader_obj);
 
     /* Store the shader object */
     return shader_obj;
@@ -3878,7 +3884,7 @@ static GLuint shader_glsl_generate_vshader(const struct wined3d_context *context
     TRACE("Compiling shader object %u\n", shader_obj);
     GL_EXTCALL(glShaderSourceARB(shader_obj, 1, (const char**)&buffer->buffer, NULL));
     GL_EXTCALL(glCompileShaderARB(shader_obj));
-    print_glsl_info_log(&GLINFO_LOCATION, shader_obj);
+    print_glsl_info_log(gl_info, shader_obj);
 
     return shader_obj;
 }
@@ -4130,23 +4136,27 @@ static void set_glsl_shader_program(const struct wined3d_context *context,
     /* Link the program */
     TRACE("Linking GLSL shader program %u\n", programId);
     GL_EXTCALL(glLinkProgramARB(programId));
-    print_glsl_info_log(&GLINFO_LOCATION, programId);
+    print_glsl_info_log(gl_info, programId);
 
-    entry->vuniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(vshader_constantsF));
-    for (i = 0; i < GL_LIMITS(vshader_constantsF); ++i) {
+    entry->vuniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * gl_info->max_vs_glsl_constantsF);
+    for (i = 0; i < gl_info->max_vs_glsl_constantsF; ++i)
+    {
         snprintf(glsl_name, sizeof(glsl_name), "VC[%i]", i);
         entry->vuniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
     }
-    for (i = 0; i < MAX_CONST_I; ++i) {
+    for (i = 0; i < MAX_CONST_I; ++i)
+    {
         snprintf(glsl_name, sizeof(glsl_name), "VI[%i]", i);
         entry->vuniformI_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
     }
-    entry->puniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * GL_LIMITS(pshader_constantsF));
-    for (i = 0; i < GL_LIMITS(pshader_constantsF); ++i) {
+    entry->puniformF_locations = HeapAlloc(GetProcessHeap(), 0, sizeof(GLhandleARB) * gl_info->max_ps_glsl_constantsF);
+    for (i = 0; i < gl_info->max_ps_glsl_constantsF; ++i)
+    {
         snprintf(glsl_name, sizeof(glsl_name), "PC[%i]", i);
         entry->puniformF_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
     }
-    for (i = 0; i < MAX_CONST_I; ++i) {
+    for (i = 0; i < MAX_CONST_I; ++i)
+    {
         snprintf(glsl_name, sizeof(glsl_name), "PI[%i]", i);
         entry->puniformI_locations[i] = GL_EXTCALL(glGetUniformLocationARB(programId, glsl_name));
     }
@@ -4278,7 +4288,7 @@ static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info,
     GL_EXTCALL(glAttachObjectARB(program_id, pshader_id));
     GL_EXTCALL(glLinkProgramARB(program_id));
 
-    print_glsl_info_log(&GLINFO_LOCATION, program_id);
+    print_glsl_info_log(gl_info, program_id);
 
     /* Once linked we can mark the shaders for deletion. They will be deleted once the program
      * is destroyed
@@ -4521,7 +4531,7 @@ static HRESULT shader_glsl_alloc(IWineD3DDevice *iface) {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     const struct wined3d_gl_info *gl_info = &This->adapter->gl_info;
     struct shader_glsl_priv *priv = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(struct shader_glsl_priv));
-    SIZE_T stack_size = wined3d_log2i(max(GL_LIMITS(vshader_constantsF), GL_LIMITS(pshader_constantsF))) + 1;
+    SIZE_T stack_size = wined3d_log2i(max(gl_info->max_vs_glsl_constantsF, gl_info->max_ps_glsl_constantsF)) + 1;
 
     if (!shader_buffer_init(&priv->shader_buffer))
     {
@@ -4536,13 +4546,13 @@ static HRESULT shader_glsl_alloc(IWineD3DDevice *iface) {
         goto fail;
     }
 
-    if (!constant_heap_init(&priv->vconst_heap, GL_LIMITS(vshader_constantsF)))
+    if (!constant_heap_init(&priv->vconst_heap, gl_info->max_vs_glsl_constantsF))
     {
         ERR("Failed to initialize vertex shader constant heap\n");
         goto fail;
     }
 
-    if (!constant_heap_init(&priv->pconst_heap, GL_LIMITS(pshader_constantsF)))
+    if (!constant_heap_init(&priv->pconst_heap, gl_info->max_ps_glsl_constantsF))
     {
         ERR("Failed to initialize pixel shader constant heap\n");
         goto fail;
@@ -4589,6 +4599,7 @@ static void shader_glsl_free(IWineD3DDevice *iface) {
     constant_heap_free(&priv->pconst_heap);
     constant_heap_free(&priv->vconst_heap);
     HeapFree(GetProcessHeap(), 0, priv->stack);
+    shader_buffer_free(&priv->shader_buffer);
 
     HeapFree(GetProcessHeap(), 0, This->shader_priv);
     This->shader_priv = NULL;
@@ -4611,12 +4622,12 @@ static void shader_glsl_get_caps(WINED3DDEVTYPE devtype,
      * of native instructions, so use that here. For more info see the pixel shader versioning code below.
      */
     if ((gl_info->supported[NV_VERTEX_PROGRAM2] && !gl_info->supported[NV_VERTEX_PROGRAM3])
-            || gl_info->ps_arb_max_instructions <= 512)
+            || gl_info->max_ps_arb_instructions <= 512)
         pCaps->VertexShaderVersion = WINED3DVS_VERSION(2,0);
     else
         pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
     TRACE_(d3d_caps)("Hardware vertex shader version %d.%d enabled (GLSL)\n", (pCaps->VertexShaderVersion >> 8) & 0xff, pCaps->VertexShaderVersion & 0xff);
-    pCaps->MaxVertexShaderConst = GL_LIMITS(vshader_constantsF);
+    pCaps->MaxVertexShaderConst = gl_info->max_vs_glsl_constantsF;
 
     /* Older DX9-class videocards (GeforceFX / Radeon >9500/X*00) only support pixel shader 2.0/2.0a/2.0b.
      * In OpenGL the extensions related to GLSL abstract lowlevel GL info away which is needed
@@ -4630,12 +4641,12 @@ static void shader_glsl_get_caps(WINED3DDEVTYPE devtype,
      * NOTE: ps3.0 hardware requires 512 or more instructions but ati and nvidia offer 'enough' (1024 vs 4096) on their most basic ps3.0 hardware.
      */
     if ((gl_info->supported[NV_FRAGMENT_PROGRAM] && !gl_info->supported[NV_FRAGMENT_PROGRAM2])
-            || (gl_info->ps_arb_max_instructions <= 512))
+            || (gl_info->max_ps_arb_instructions <= 512))
         pCaps->PixelShaderVersion = WINED3DPS_VERSION(2,0);
     else
         pCaps->PixelShaderVersion = WINED3DPS_VERSION(3,0);
 
-    pCaps->MaxPixelShaderConst = GL_LIMITS(pshader_constantsF);
+    pCaps->MaxPixelShaderConst = gl_info->max_ps_glsl_constantsF;
 
     /* FIXME: The following line is card dependent. -8.0 to 8.0 is the
      * Direct3D minimum requirement.

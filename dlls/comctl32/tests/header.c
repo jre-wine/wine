@@ -396,14 +396,9 @@ static WCHAR pszUniTestW[] = {'T','S','T',0};
     ok(res == i, "Got Item Count as %d\n", res);\
 }
 
-struct subclass_info
-{
-    WNDPROC oldproc;
-};
-
 static LRESULT WINAPI header_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    WNDPROC oldproc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
     static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
@@ -417,7 +412,7 @@ static LRESULT WINAPI header_subclass_proc(HWND hwnd, UINT message, WPARAM wPara
     add_message(sequences, HEADER_SEQ_INDEX, &msg);
 
     defwndproc_counter++;
-    ret = CallWindowProcA(info->oldproc, hwnd, message, wParam, lParam);
+    ret = CallWindowProcA(oldproc, hwnd, message, wParam, lParam);
     defwndproc_counter--;
 
     return ret;
@@ -487,7 +482,7 @@ static HWND create_custom_parent_window(void)
 
 static HWND create_custom_header_control(HWND hParent, BOOL preloadHeaderItems)
 {
-    struct subclass_info *info;
+    WNDPROC oldproc;
     HWND childHandle;
     HDLAYOUT hlayout;
     RECT rectwin;
@@ -505,9 +500,6 @@ static HWND create_custom_header_control(HWND hParent, BOOL preloadHeaderItems)
 
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
-    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
-    if (!info)
-         return NULL;
 
     childHandle = CreateWindowEx(0, WC_HEADER, NULL,
                            WS_CHILD|WS_BORDER|WS_VISIBLE|HDS_BUTTONS|HDS_HORZ,
@@ -534,9 +526,9 @@ static HWND create_custom_header_control(HWND hParent, BOOL preloadHeaderItems)
     SetWindowPos(childHandle, winpos.hwndInsertAfter, winpos.x, winpos.y,
                  winpos.cx, winpos.cy, 0);
 
-    info->oldproc = (WNDPROC)SetWindowLongPtrA(childHandle, GWLP_WNDPROC,
-                                               (LONG_PTR)header_subclass_proc);
-    SetWindowLongPtrA(childHandle, GWLP_USERDATA, (LONG_PTR)info);
+    oldproc = (WNDPROC)SetWindowLongPtrA(childHandle, GWLP_WNDPROC,
+                                         (LONG_PTR)header_subclass_proc);
+    SetWindowLongPtrA(childHandle, GWLP_USERDATA, (LONG_PTR)oldproc);
     return childHandle;
 }
 
@@ -962,7 +954,7 @@ static void test_hdm_sethotdivider(HWND hParent)
 static void test_hdm_imageMessages(HWND hParent)
 {
     HIMAGELIST hImageList = ImageList_Create (4, 4, 0, 1, 0);
-    HIMAGELIST hImageListRetVal;
+    HIMAGELIST hIml;
     HWND hChild;
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
@@ -972,14 +964,15 @@ static void test_hdm_imageMessages(HWND hParent)
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    hImageListRetVal = (HIMAGELIST) SendMessage(hChild, HDM_SETIMAGELIST, 0, (LPARAM) hImageList);
-    ok(hImageListRetVal == NULL, "Expected NULL, got %p\n", hImageListRetVal);
+    hIml = (HIMAGELIST) SendMessage(hChild, HDM_SETIMAGELIST, 0, (LPARAM) hImageList);
+    ok(hIml == NULL, "Expected NULL, got %p\n", hIml);
 
-    hImageListRetVal = (HIMAGELIST) SendMessage(hChild, HDM_GETIMAGELIST, 0, 0);
-    ok(hImageListRetVal != NULL, "Expected non-NULL handle, got %p\n", hImageListRetVal);
+    hIml = (HIMAGELIST) SendMessage(hChild, HDM_GETIMAGELIST, 0, 0);
+    ok(hIml != NULL, "Expected non-NULL handle, got %p\n", hIml);
 
-    hImageListRetVal = (HIMAGELIST) SendMessage(hChild, HDM_CREATEDRAGIMAGE, 0, 0);
-    ok(hImageListRetVal != NULL, "Expected non-NULL handle, got %p\n", hImageListRetVal);
+    hIml = (HIMAGELIST) SendMessage(hChild, HDM_CREATEDRAGIMAGE, 0, 0);
+    ok(hIml != NULL, "Expected non-NULL handle, got %p\n", hIml);
+    ImageList_Destroy(hIml);
 
     ok_sequence(sequences, HEADER_SEQ_INDEX, imageMessages_seq, "imageMessages sequence testing", FALSE);
 
@@ -1697,10 +1690,131 @@ static int init(void)
     return 1;
 }
 
+/* maximum 8 items allowed */
+static void check_orderarray(HWND hwnd, DWORD start, DWORD set, DWORD expected,
+                             int todo, int line)
+{
+    int count, i;
+    INT order[8];
+    DWORD ret, array = 0;
+
+    count = SendMessage(hwnd, HDM_GETITEMCOUNT, 0, 0);
+
+    /* initial order */
+    for(i = 1; i<=count; i++)
+        order[i-1] = start>>(4*(count-i)) & 0xf;
+
+    ret = SendMessage(hwnd, HDM_SETORDERARRAY, count, (LPARAM)order);
+    ok_(__FILE__, line)(ret, "Expected HDM_SETORDERARAY to succeed, got %d\n", ret);
+
+    /* new order */
+    for(i = 1; i<=count; i++)
+        order[i-1] = set>>(4*(count-i)) & 0xf;
+    ret = SendMessage(hwnd, HDM_SETORDERARRAY, count, (LPARAM)order);
+    ok_(__FILE__, line)(ret, "Expected HDM_SETORDERARAY to succeed, got %d\n", ret);
+
+    /* check actual order */
+    ret = SendMessage(hwnd, HDM_GETORDERARRAY, count, (LPARAM)order);
+    ok_(__FILE__, line)(ret, "Expected HDM_GETORDERARAY to succeed, got %d\n", ret);
+    for(i = 1; i<=count; i++)
+        array |= order[i-1]<<(4*(count-i));
+
+    if (todo) {
+    todo_wine
+        ok_(__FILE__, line)(array == expected, "Expected %x, got %x\n", expected, array);
+    }
+    else
+        ok_(__FILE__, line)(array == expected, "Expected %x, got %x\n", expected, array);
+}
+
+static void test_hdm_orderarray(void)
+{
+    HWND hwnd;
+    INT order[5];
+    DWORD ret;
+
+    hwnd = create_header_control();
+
+    /* three items */
+    addItem(hwnd, 0, NULL);
+    addItem(hwnd, 1, NULL);
+    addItem(hwnd, 2, NULL);
+
+    ret = SendMessage(hwnd, HDM_GETORDERARRAY, 3, (LPARAM)order);
+    if (!ret)
+    {
+        win_skip("HDM_GETORDERARRAY not implemented.\n");
+        DestroyWindow(hwnd);
+        return;
+    }
+
+    expect(0, order[0]);
+    expect(1, order[1]);
+    expect(2, order[2]);
+
+if (0)
+{
+    /* null pointer, crashes native */
+    ret = SendMessage(hwnd, HDM_SETORDERARRAY, 3, (LPARAM)NULL);
+    expect(FALSE, ret);
+}
+    /* count out of limits */
+    ret = SendMessage(hwnd, HDM_SETORDERARRAY, 5, (LPARAM)order);
+    expect(FALSE, ret);
+    /* count out of limits */
+    ret = SendMessage(hwnd, HDM_SETORDERARRAY, 2, (LPARAM)order);
+    expect(FALSE, ret);
+
+    /* try with out of range item index */
+    /* (0,1,2)->(1,0,3) => (1,0,2) */
+    check_orderarray(hwnd, 0x120, 0x103, 0x102, FALSE, __LINE__);
+    /* (1,0,2)->(3,0,1) => (0,2,1) */
+    check_orderarray(hwnd, 0x102, 0x301, 0x021, TRUE, __LINE__);
+    /* (0,2,1)->(2,3,1) => (2,0,1) */
+    check_orderarray(hwnd, 0x021, 0x231, 0x201, FALSE, __LINE__);
+
+    /* (0,1,2)->(0,2,2) => (0,1,2) */
+    check_orderarray(hwnd, 0x012, 0x022, 0x012, FALSE, __LINE__);
+
+    addItem(hwnd, 3, NULL);
+
+    /* (0,1,2,3)->(0,1,2,2) => (0,1,3,2) */
+    check_orderarray(hwnd, 0x0123, 0x0122, 0x0132, FALSE, __LINE__);
+    /* (0,1,2,3)->(0,1,3,3) => (0,1,2,3) */
+    check_orderarray(hwnd, 0x0123, 0x0133, 0x0123, FALSE, __LINE__);
+    /* (0,1,2,3)->(0,4,2,3) => (0,1,2,3) */
+    check_orderarray(hwnd, 0x0123, 0x0423, 0x0123, FALSE, __LINE__);
+    /* (0,1,2,3)->(4,0,1,2) => (0,1,3,2) */
+    check_orderarray(hwnd, 0x0123, 0x4012, 0x0132, TRUE, __LINE__);
+    /* (0,1,3,2)->(4,0,1,4) => (0,3,1,2) */
+    check_orderarray(hwnd, 0x0132, 0x4014, 0x0312, TRUE, __LINE__);
+    /* (0,1,2,3)->(4,1,0,2) => (1,0,3,2) */
+    check_orderarray(hwnd, 0x0123, 0x4102, 0x1032, TRUE, __LINE__);
+    /* (0,1,2,3)->(0,1,4,2) => (0,1,2,3) */
+    check_orderarray(hwnd, 0x0123, 0x0142, 0x0132, FALSE, __LINE__);
+    /* (0,1,2,3)->(4,4,4,4) => (0,1,2,3) */
+    check_orderarray(hwnd, 0x0123, 0x4444, 0x0123, FALSE, __LINE__);
+    /* (0,1,2,3)->(4,4,1,2) => (0,1,3,2) */
+    check_orderarray(hwnd, 0x0123, 0x4412, 0x0132, TRUE, __LINE__);
+    /* (0,1,2,3)->(4,4,4,1) => (0,2,3,1) */
+    check_orderarray(hwnd, 0x0123, 0x4441, 0x0231, TRUE, __LINE__);
+    /* (0,1,2,3)->(1,4,4,4) => (1,0,2,3) */
+    check_orderarray(hwnd, 0x0123, 0x1444, 0x1023, FALSE, __LINE__);
+    /* (0,1,2,3)->(4,2,4,1) => (0,2,3,1) */
+    check_orderarray(hwnd, 0x0123, 0x4241, 0x0231, FALSE, __LINE__);
+    /* (0,1,2,3)->(4,2,0,1) => (2,0,3,1) */
+    check_orderarray(hwnd, 0x0123, 0x4201, 0x2031, TRUE, __LINE__);
+    /* (3,2,1,0)->(4,2,0,1) => (3,2,0,1) */
+    check_orderarray(hwnd, 0x3210, 0x4201, 0x3201, FALSE, __LINE__);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(header)
 {
     HWND parent_hwnd;
     ULONG_PTR ctx_cookie;
+    HANDLE hCtx;
     HWND hwnd;
 
     if (!init())
@@ -1708,6 +1822,7 @@ START_TEST(header)
 
     test_header_control();
     test_header_order();
+    test_hdm_orderarray();
     test_customdraw();
 
     DestroyWindow(hHeaderParentWnd);
@@ -1727,7 +1842,7 @@ START_TEST(header)
     test_hdm_unicodeformatMessages(parent_hwnd);
     test_hdm_bitmapmarginMessages(parent_hwnd);
 
-    if (!load_v6_module(&ctx_cookie))
+    if (!load_v6_module(&ctx_cookie, &hCtx))
     {
         DestroyWindow(parent_hwnd);
         return;
@@ -1742,7 +1857,7 @@ START_TEST(header)
     if (!IsWindow(hwnd))
     {
         win_skip("FIXME: failed to create Header window.\n");
-        unload_v6_module(ctx_cookie);
+        unload_v6_module(ctx_cookie, hCtx);
         DestroyWindow(parent_hwnd);
         return;
     }
@@ -1753,7 +1868,7 @@ START_TEST(header)
     test_hdf_fixedwidth(parent_hwnd);
     test_hds_nosizing(parent_hwnd);
 
-    unload_v6_module(ctx_cookie);
+    unload_v6_module(ctx_cookie, hCtx);
 
     DestroyWindow(parent_hwnd);
 }

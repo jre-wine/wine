@@ -3620,12 +3620,6 @@ static LRESULT LISTVIEW_MouseMove(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, IN
         if (y > infoPtr->rcList.bottom)
             y = infoPtr->rcList.bottom;
 
-        tmp.x = x;
-        tmp.y = y;
-
-        lvHitTestInfo.pt = tmp;
-        LISTVIEW_HitTest(infoPtr, &lvHitTestInfo, TRUE, TRUE);
-
         if (infoPtr->bMarqueeSelect)
         {
             LVITEMW item;
@@ -3707,6 +3701,12 @@ static LRESULT LISTVIEW_MouseMove(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, IN
         rect.right = infoPtr->ptClickPos.x + wDragWidth;
         rect.top = infoPtr->ptClickPos.y - wDragHeight;
         rect.bottom = infoPtr->ptClickPos.y + wDragHeight;
+
+        tmp.x = x;
+        tmp.y = y;
+
+        lvHitTestInfo.pt = tmp;
+        LISTVIEW_HitTest(infoPtr, &lvHitTestInfo, TRUE, TRUE);
 
         /* reset item marker */
         if (infoPtr->nLButtonDownItem != lvHitTestInfo.iItem)
@@ -5004,6 +5004,8 @@ static BOOL LISTVIEW_DeleteAllItems(LISTVIEW_INFO *infoPtr, BOOL destroy)
     HDPA hdpaSubItems = NULL;
     BOOL bSuppress;
     ITEMHDR *hdrItem;
+    ITEM_INFO *lpItem;
+    ITEM_ID *lpID;
     INT i, j;
 
     TRACE("()\n");
@@ -5025,13 +5027,20 @@ static BOOL LISTVIEW_DeleteAllItems(LISTVIEW_INFO *infoPtr, BOOL destroy)
     {
 	if (!(infoPtr->dwStyle & LVS_OWNERDATA))
 	{
-            /* send LVN_DELETEITEM notification, if not suppressed
-               and if it is not a virtual listview */
-            if (!bSuppress) notify_deleteitem(infoPtr, i);
-            hdpaSubItems = DPA_GetPtr(infoPtr->hdpaItems, i);
+	    /* send LVN_DELETEITEM notification, if not suppressed
+	       and if it is not a virtual listview */
+	    if (!bSuppress) notify_deleteitem(infoPtr, i);
+	    hdpaSubItems = DPA_GetPtr(infoPtr->hdpaItems, i);
+	    lpItem = DPA_GetPtr(hdpaSubItems, 0);
+	    /* free id struct */
+	    j = DPA_GetPtrIndex(infoPtr->hdpaItemIds, lpItem->id);
+	    lpID = DPA_GetPtr(infoPtr->hdpaItemIds, j);
+	    DPA_DeletePtr(infoPtr->hdpaItemIds, j);
+	    Free(lpID);
+	    /* both item and subitem start with ITEMHDR header */
 	    for (j = 0; j < DPA_GetPtrCount(hdpaSubItems); j++)
 	    {
-                hdrItem = DPA_GetPtr(hdpaSubItems, j);
+	        hdrItem = DPA_GetPtr(hdpaSubItems, j);
 		if (is_textW(hdrItem->pszText)) Free(hdrItem->pszText);
 		Free(hdrItem);
 	    }
@@ -7923,10 +7932,18 @@ static DWORD LISTVIEW_SetExtendedListViewStyle(LISTVIEW_INFO *infoPtr, DWORD dwM
             LISTVIEW_SetItemState(infoPtr, -1, &item);
 
             himl = LISTVIEW_CreateCheckBoxIL(infoPtr);
+            if(!(infoPtr->dwStyle & LVS_SHAREIMAGELISTS))
+                ImageList_Destroy(infoPtr->himlState);
         }
-        LISTVIEW_SetImageList(infoPtr, LVSIL_STATE, himl);
+        himl = LISTVIEW_SetImageList(infoPtr, LVSIL_STATE, himl);
+        /*   checkbox list replaces prevous custom list or... */
+        if(((infoPtr->dwLvExStyle & LVS_EX_CHECKBOXES) &&
+           !(infoPtr->dwStyle & LVS_SHAREIMAGELISTS)) ||
+            /* ...previous was checkbox list */
+            (dwOldExStyle & LVS_EX_CHECKBOXES))
+            ImageList_Destroy(himl);
     }
-    
+
     if((infoPtr->dwLvExStyle ^ dwOldExStyle) & LVS_EX_HEADERDRAGDROP)
     {
         DWORD dwStyle;
@@ -9539,6 +9556,9 @@ static LRESULT LISTVIEW_LButtonDown(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, IN
   }
   else
   {
+    if (!infoPtr->bFocus)
+        SetFocus(infoPtr->hwndSelf);
+
     /* remove all selections */
     if (!(wKey & MK_CONTROL) && !(wKey & MK_SHIFT))
         LISTVIEW_DeselectAll(infoPtr);
@@ -9631,6 +9651,8 @@ static LRESULT LISTVIEW_LButtonUp(LISTVIEW_INFO *infoPtr, WORD wKey, INT x, INT 
  */
 static LRESULT LISTVIEW_NCDestroy(LISTVIEW_INFO *infoPtr)
 {
+  INT i;
+
   TRACE("()\n");
 
   /* delete all items */
@@ -9641,18 +9663,18 @@ static LRESULT LISTVIEW_NCDestroy(LISTVIEW_INFO *infoPtr)
   DPA_Destroy(infoPtr->hdpaItemIds);
   DPA_Destroy(infoPtr->hdpaPosX);
   DPA_Destroy(infoPtr->hdpaPosY);
+  /* columns */
+  for (i = 0; i < DPA_GetPtrCount(infoPtr->hdpaColumns); i++)
+      Free(DPA_GetPtr(infoPtr->hdpaColumns, i));
   DPA_Destroy(infoPtr->hdpaColumns);
   ranges_destroy(infoPtr->selectionRanges);
 
   /* destroy image lists */
   if (!(infoPtr->dwStyle & LVS_SHAREIMAGELISTS))
   {
-      if (infoPtr->himlNormal)
-	  ImageList_Destroy(infoPtr->himlNormal);
-      if (infoPtr->himlSmall)
-	  ImageList_Destroy(infoPtr->himlSmall);
-      if (infoPtr->himlState)
-	  ImageList_Destroy(infoPtr->himlState);
+      ImageList_Destroy(infoPtr->himlNormal);
+      ImageList_Destroy(infoPtr->himlSmall);
+      ImageList_Destroy(infoPtr->himlState);
   }
 
   /* destroy font, bkgnd brush */
@@ -10323,19 +10345,23 @@ static void LISTVIEW_UpdateSize(LISTVIEW_INFO *infoPtr)
     }
     else if (infoPtr->uView == LV_VIEW_DETAILS)
     {
-	HDLAYOUT hl;
-	WINDOWPOS wp;
+	/* if control created invisible header isn't created */
+	if (infoPtr->hwndHeader)
+	{
+	    HDLAYOUT hl;
+	    WINDOWPOS wp;
 
-	hl.prc = &infoPtr->rcList;
-	hl.pwpos = &wp;
-	SendMessageW( infoPtr->hwndHeader, HDM_LAYOUT, 0, (LPARAM)&hl );
-        TRACE("  wp.flags=0x%08x, wp=%d,%d (%dx%d)\n", wp.flags, wp.x, wp.y, wp.cx, wp.cy);
-	SetWindowPos(wp.hwnd, wp.hwndInsertAfter, wp.x, wp.y, wp.cx, wp.cy,
-                    wp.flags | ((infoPtr->dwStyle & LVS_NOCOLUMNHEADER)
-                        ? SWP_HIDEWINDOW : SWP_SHOWWINDOW));
-        TRACE("  after SWP wp=%d,%d (%dx%d)\n", wp.x, wp.y, wp.cx, wp.cy);
+	    hl.prc = &infoPtr->rcList;
+	    hl.pwpos = &wp;
+	    SendMessageW( infoPtr->hwndHeader, HDM_LAYOUT, 0, (LPARAM)&hl );
+            TRACE("  wp.flags=0x%08x, wp=%d,%d (%dx%d)\n", wp.flags, wp.x, wp.y, wp.cx, wp.cy);
+	    SetWindowPos(wp.hwnd, wp.hwndInsertAfter, wp.x, wp.y, wp.cx, wp.cy,
+                         wp.flags | ((infoPtr->dwStyle & LVS_NOCOLUMNHEADER)
+                         ? SWP_HIDEWINDOW : SWP_SHOWWINDOW));
+	    TRACE("  after SWP wp=%d,%d (%dx%d)\n", wp.x, wp.y, wp.cx, wp.cy);
 
-	infoPtr->rcList.top = max(wp.cy, 0);
+	    infoPtr->rcList.top = max(wp.cy, 0);
+	}
         infoPtr->rcList.top += (infoPtr->dwLvExStyle & LVS_EX_GRIDLINES) ? 2 : 0;
     }
 

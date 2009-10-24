@@ -54,3 +54,46 @@ typedef LONG			(*MCIPROC16)(DWORD, HDRVR16, WORD, DWORD, DWORD);
 #define HWAVE_16(h32)		(LOWORD(h32))
 #define HWAVEIN_16(h32)		(LOWORD(h32))
 #define HWAVEOUT_16(h32)	(LOWORD(h32))
+
+typedef enum {
+    MMSYSTEM_MAP_NOMEM, 	/* ko, memory problem */
+    MMSYSTEM_MAP_MSGERROR,      /* ko, unknown message */
+    MMSYSTEM_MAP_OK, 	        /* ok, no memory allocated. to be sent to the proc. */
+    MMSYSTEM_MAP_OKMEM, 	/* ok, some memory allocated, need to call UnMapMsg. to be sent to the proc. */
+} MMSYSTEM_MapType;
+
+extern  CRITICAL_SECTION        mmdrv_cs;
+
+enum MMSYSTEM_DriverType
+{
+    MMSYSTDRV_MIXER,
+    MMSYSTDRV_MIDIIN,
+    MMSYSTDRV_MIDIOUT,
+    MMSYSTDRV_WAVEIN,
+    MMSYSTDRV_WAVEOUT,
+    MMSYSTDRV_MAX
+};
+
+extern  struct mmsystdrv_thunk* MMSYSTDRV_AddThunk(DWORD pfn16, enum MMSYSTEM_DriverType kind);
+extern  void                    MMSYSTDRV_DeleteThunk(struct mmsystdrv_thunk* thunk);
+extern  void                    MMSYSTDRV_SetHandle(struct mmsystdrv_thunk* thunk, void* h);
+extern  void                    MMSYSTDRV_CloseHandle(void* h);
+extern  DWORD                   MMSYSTDRV_Message(void* h, UINT msg, DWORD_PTR param1, DWORD_PTR param2);
+
+#define WINE_MMTHREAD_CREATED	0x4153494C	/* "BSIL" */
+#define WINE_MMTHREAD_DELETED	0xDEADDEAD
+
+typedef struct {
+       DWORD			dwSignature;		/* 00 "BSIL" when ok, 0xDEADDEAD when being deleted */
+       DWORD			dwCounter;		/* 04 > 1 when in mmThread functions */
+       HANDLE			hThread;		/* 08 hThread */
+       DWORD                    dwThreadID;     	/* 0C */
+       DWORD    		fpThread;		/* 10 address of thread proc (segptr or lin depending on dwFlags) */
+       DWORD			dwThreadPmt;    	/* 14 parameter to be passed upon thread creation to fpThread */
+       LONG                     dwSignalCount;	     	/* 18 counter used for signaling */
+       HANDLE                   hEvent;     		/* 1C event */
+       HANDLE                   hVxD;		     	/* 20 return from OpenVxDHandle */
+       DWORD                    dwStatus;       	/* 24 0x00, 0x10, 0x20, 0x30 */
+       DWORD			dwFlags;		/* 28 dwFlags upon creation */
+       UINT16			hTask;          	/* 2C handle to created task */
+} WINE_MMTHREAD;

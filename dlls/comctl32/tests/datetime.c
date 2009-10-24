@@ -121,14 +121,9 @@ static const struct message test_dtm_set_and_get_system_time_seq[] = {
     { 0 }
 };
 
-struct subclass_info
-{
-    WNDPROC oldproc;
-};
-
 static LRESULT WINAPI datetime_subclass_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    struct subclass_info *info = (struct subclass_info *)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
+    WNDPROC oldproc = (WNDPROC)GetWindowLongPtrA(hwnd, GWLP_USERDATA);
     static LONG defwndproc_counter = 0;
     LRESULT ret;
     struct message msg;
@@ -143,7 +138,7 @@ static LRESULT WINAPI datetime_subclass_proc(HWND hwnd, UINT message, WPARAM wPa
     add_message(sequences, DATETIME_SEQ_INDEX, &msg);
 
     defwndproc_counter++;
-    ret = CallWindowProcA(info->oldproc, hwnd, message, wParam, lParam);
+    ret = CallWindowProcA(oldproc, hwnd, message, wParam, lParam);
     defwndproc_counter--;
 
     return ret;
@@ -151,12 +146,8 @@ static LRESULT WINAPI datetime_subclass_proc(HWND hwnd, UINT message, WPARAM wPa
 
 static HWND create_datetime_control(DWORD style)
 {
-    struct subclass_info *info;
+    WNDPROC oldproc;
     HWND hWndDateTime = NULL;
-
-    info = HeapAlloc(GetProcessHeap(), 0, sizeof(struct subclass_info));
-    if (!info)
-        return NULL;
 
     hWndDateTime = CreateWindowEx(0,
         DATETIMEPICK_CLASS,
@@ -168,14 +159,11 @@ static HWND create_datetime_control(DWORD style)
         NULL,
         NULL);
 
-    if (!hWndDateTime) {
-        HeapFree(GetProcessHeap(), 0, info);
-        return NULL;
-    }
+    if (!hWndDateTime) return NULL;
 
-    info->oldproc = (WNDPROC)SetWindowLongPtrA(hWndDateTime, GWLP_WNDPROC,
-                                            (LONG_PTR)datetime_subclass_proc);
-    SetWindowLongPtrA(hWndDateTime, GWLP_USERDATA, (LONG_PTR)info);
+    oldproc = (WNDPROC)SetWindowLongPtrA(hWndDateTime, GWLP_WNDPROC,
+                                         (LONG_PTR)datetime_subclass_proc);
+    SetWindowLongPtrA(hWndDateTime, GWLP_USERDATA, (LONG_PTR)oldproc);
 
     return hWndDateTime;
 }
@@ -678,13 +666,36 @@ static void test_wm_set_get_text(void)
     hWnd = create_datetime_control(0);
 
     ret = SendMessage(hWnd, WM_SETTEXT, 0, (LPARAM)a_str);
-    expect(CB_ERR, ret);
+    ok(CB_ERR == ret ||
+       broken(1 == ret), /* comctl32 <= 4.72 */
+       "Expected CB_ERR, got %ld\n", ret);
 
     buff[0] = 0;
     ret = SendMessage(hWnd, WM_GETTEXT, sizeof(buff), (LPARAM)buff);
     ok(strcmp(buff, a_str) != 0, "Expected text not to change, got %s\n", buff);
 
     DestroyWindow(hWnd);
+}
+
+static void test_dts_shownone(void)
+{
+    HWND hwnd;
+    DWORD style;
+
+    /* it isn't allowed to change DTS_SHOWNONE after creation */
+    hwnd = create_datetime_control(0);
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    SetWindowLong(hwnd, GWL_STYLE, style | DTS_SHOWNONE);
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    ok(!(style & DTS_SHOWNONE), "Expected DTS_SHOWNONE not to be set\n");
+    DestroyWindow(hwnd);
+
+    hwnd = create_datetime_control(DTS_SHOWNONE);
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    SetWindowLong(hwnd, GWL_STYLE, style & ~DTS_SHOWNONE);
+    style = GetWindowLong(hwnd, GWL_STYLE);
+    ok(style & DTS_SHOWNONE, "Expected DTS_SHOWNONE to be set\n");
+    DestroyWindow(hwnd);
 }
 
 START_TEST(datetime)
@@ -714,4 +725,5 @@ START_TEST(datetime)
     test_dtm_set_range_swap_min_max();
     test_dtm_set_and_get_system_time();
     test_wm_set_get_text();
+    test_dts_shownone();
 }

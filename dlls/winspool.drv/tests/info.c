@@ -50,7 +50,7 @@ static CHAR LocalPortA[]        = "Local Port";
 static CHAR portname_com1[]     = "COM1:";
 static CHAR portname_file[]     = "FILE:";
 static CHAR portname_lpt1[]     = "LPT1:";
-static CHAR server_does_not_exist[] = "\\does_not_exist";
+static CHAR server_does_not_exist[] = "\\\\does_not_exist";
 static CHAR version_dll[]       = "version.dll";
 static CHAR winetest[]          = "winetest";
 static CHAR xcv_localport[]     = ",XcvMonitor Local Port";
@@ -1238,6 +1238,127 @@ static void test_EnumPrinterDrivers(void)
 
 /* ########################### */
 
+static void test_EnumPrintProcessors(void)
+{
+    DWORD   res;
+    LPBYTE  buffer;
+    DWORD   cbBuf;
+    DWORD   pcbNeeded;
+    DWORD   pcReturned;
+
+
+    cbBuf = 0xdeadbeef;
+    pcReturned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = EnumPrintProcessorsA(NULL, NULL, 1, NULL, 0, &cbBuf, &pcReturned);
+    RETURN_ON_DEACTIVATED_SPOOLER(res)
+
+    if (res && !cbBuf) {
+        skip("No Printprocessor installed\n");
+        return;
+    }
+
+    ok((!res) && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
+        "got %u with %u (expected '0' with ERROR_INSUFFICIENT_BUFFER)\n",
+        res, GetLastError());
+
+    buffer = HeapAlloc(GetProcessHeap(), 0, cbBuf + 4);
+    if (buffer == NULL)
+        return;
+
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, NULL, 1, buffer, cbBuf, &pcbNeeded, &pcReturned);
+    ok(res, "got %u with %u (expected '!=0')\n", res, GetLastError());
+    /* validate the returned Data here. */
+
+
+    SetLastError(0xdeadbeef);
+    pcReturned = 0xdeadbeef;
+    pcbNeeded = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, NULL, 1, buffer, cbBuf+1, &pcbNeeded, &pcReturned);
+    ok(res, "got %u with %u (expected '!=0')\n", res, GetLastError());
+
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, NULL, 1, buffer, cbBuf-1, &pcbNeeded, &pcReturned);
+    ok( !res && (GetLastError() == ERROR_INSUFFICIENT_BUFFER),
+        "got %u with %u (expected '0' with ERROR_INSUFFICIENT_BUFFER)\n",
+        res, GetLastError());
+
+    /* only level 1 is valid */
+    if (0) {
+        /* both tests crash on win98se */
+        SetLastError(0xdeadbeef);
+        pcbNeeded = 0xdeadbeef;
+        pcReturned = 0xdeadbeef;
+        res = EnumPrintProcessorsA(NULL, NULL, 0, buffer, cbBuf, &pcbNeeded, &pcReturned);
+        ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
+            "got %u with %u (expected '0' with ERROR_INVALID_LEVEL)\n",
+            res, GetLastError());
+
+        SetLastError(0xdeadbeef);
+        pcbNeeded = 0xdeadbeef;
+        res = EnumPrintProcessorsA(NULL, NULL, 2, buffer, cbBuf, &pcbNeeded, &pcReturned);
+        ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
+            "got %u with %u (expected '0' with ERROR_INVALID_LEVEL)\n",
+            res, GetLastError());
+    }
+
+    /* an empty environment is ignored */
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, empty, 1, buffer, cbBuf, &pcbNeeded, &pcReturned);
+    ok(res, "got %u with %u (expected '!=0')\n", res, GetLastError());
+
+    /* the environment is checked */
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, invalid_env, 1, buffer, cbBuf, &pcbNeeded, &pcReturned);
+    /* NT5: ERROR_INVALID_ENVIRONMENT, NT4: res != 0, 9x: ERROR_INVALID_PARAMETER */
+    ok( broken(res) || /* NT4 */
+        (GetLastError() == ERROR_INVALID_ENVIRONMENT) ||
+        (GetLastError() == ERROR_INVALID_PARAMETER),
+        "got %u with %u (expected '0' with ERROR_INVALID_ENVIRONMENT or "
+        "ERROR_INVALID_PARAMETER)\n", res, GetLastError());
+
+
+    /* failure-Codes for NULL */
+    if (0) {
+        /* this test crash on win98se */
+        SetLastError(0xdeadbeef);
+        pcbNeeded = 0xdeadbeef;
+        pcReturned = 0xdeadbeef;
+        res = EnumPrintProcessorsA(NULL, NULL, 1, NULL, cbBuf, &pcbNeeded, &pcReturned);
+        ok( !res && (GetLastError() == ERROR_INVALID_USER_BUFFER) ,
+            "got %u with %u (expected '0' with ERROR_INVALID_USER_BUFFER)\n",
+            res, GetLastError());
+    }
+
+    SetLastError(0xdeadbeef);
+    pcbNeeded = 0xdeadbeef;
+    pcReturned = 0xdeadbeef;
+    res = EnumPrintProcessorsA(NULL, NULL, 1, buffer, cbBuf, NULL, &pcReturned);
+    /* the NULL is ignored on win9x */
+    ok( broken(res) || (!res && (GetLastError() == RPC_X_NULL_REF_POINTER)),
+        "got %u with %u (expected '0' with RPC_X_NULL_REF_POINTER)\n",
+        res, GetLastError());
+
+    pcbNeeded = 0xdeadbeef;
+    pcReturned = 0xdeadbeef;
+    SetLastError(0xdeadbeef);
+    res = EnumPrintProcessorsA(NULL, NULL, 1, buffer, cbBuf, &pcbNeeded, NULL);
+    /* the NULL is ignored on win9x */
+    ok( broken(res) || (!res && (GetLastError() == RPC_X_NULL_REF_POINTER)),
+        "got %u with %u (expected '0' with RPC_X_NULL_REF_POINTER)\n",
+        res, GetLastError());
+
+    HeapFree(GetProcessHeap(), 0, buffer);
+
+}
+
+/* ########################### */
+
 static void test_GetDefaultPrinter(void)
 {
     BOOL    retval;
@@ -1508,41 +1629,49 @@ static void test_GetPrintProcessorDirectory(void)
     pcbNeeded = 0;
     SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA( NULL, NULL, 1, NULL, cbBuf, &pcbNeeded);
+    /* NT: ERROR_INVALID_USER_BUFFER, 9x: res != 0  */
+    ok( (!res && (GetLastError() == ERROR_INVALID_USER_BUFFER)) ||
+        broken(res),
+        "returned %d with %d (expected '0' with ERROR_INVALID_USER_BUFFER)\n",
+        res, GetLastError());
     }
 
     buffer[0] = '\0';
     SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA( NULL, NULL, 1, buffer, cbBuf, NULL);
     /* NT: RPC_X_NULL_REF_POINTER, 9x: res != 0  */
-    ok( res || (GetLastError() == RPC_X_NULL_REF_POINTER),
-        "returned %d with %d (expected '!= 0' or '0' with "
-        "RPC_X_NULL_REF_POINTER)\n", res, GetLastError());
-
+    ok( (!res && (GetLastError() == RPC_X_NULL_REF_POINTER)) ||
+        broken(res),
+        "returned %d with %d (expected '0' with RPC_X_NULL_REF_POINTER)\n",
+        res, GetLastError());
 
     buffer[0] = '\0';
     SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA( NULL, NULL, 1, NULL, cbBuf, NULL);
     /* NT: RPC_X_NULL_REF_POINTER, 9x: res != 0  */
-    ok( res || (GetLastError() == RPC_X_NULL_REF_POINTER),
-        "returned %d with %d (expected '!= 0' or '0' with "
-        "RPC_X_NULL_REF_POINTER)\n", res, GetLastError());
+    ok( (!res && (GetLastError() == RPC_X_NULL_REF_POINTER)) ||
+        broken(res),
+        "returned %d with %d (expected '0' with RPC_X_NULL_REF_POINTER)\n",
+        res, GetLastError());
 
- 
     /* with a valid buffer, but level is invalid */
     buffer[0] = '\0';
     SetLastError(0xdeadbeef);
+    res = GetPrintProcessorDirectoryA(NULL, NULL, 0, buffer, cbBuf, &pcbNeeded);
+    /* Level is ignored in win9x*/
+    ok( (!res && (GetLastError() == ERROR_INVALID_LEVEL)) ||
+        broken(res && buffer[0]),
+        "returned %d with %d (expected '0' with ERROR_INVALID_LEVEL)\n",
+        res, GetLastError());
+
+    buffer[0] = '\0';
+    SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA(NULL, NULL, 2, buffer, cbBuf, &pcbNeeded);
-    if (res && buffer[0])
-    {
-        /* Level is ignored in win9x*/
-        trace("invalid level (2) was ignored\n");
-    }
-    else
-    {
-        ok( !res && (GetLastError() == ERROR_INVALID_LEVEL),
-            "returned %d with %d (expected '0' with ERROR_INVALID_LEVEL)\n",
-            res, GetLastError());
-    }
+    /* Level is ignored in win9x*/
+    ok( (!res && (GetLastError() == ERROR_INVALID_LEVEL)) ||
+        broken(res && buffer[0]),
+        "returned %d with %d (expected '0' with ERROR_INVALID_LEVEL)\n",
+        res, GetLastError());
 
     /* Empty environment is the same as the default environment */
     buffer[0] = '\0';
@@ -1583,9 +1712,11 @@ static void test_GetPrintProcessorDirectory(void)
     buffer[0] = '\0';
     SetLastError(0xdeadbeef);
     res = GetPrintProcessorDirectoryA(server_does_not_exist, NULL, 1, buffer, cbBuf*2, &pcbNeeded);
-    ok( !res && (GetLastError() == ERROR_INVALID_PARAMETER), 
-        "returned %d with %d (expected '0' with ERROR_INVALID_PARAMETER)\n",
-        res, GetLastError());
+    ok( !res, "expected failure\n");
+    ok( GetLastError() == RPC_S_SERVER_UNAVAILABLE || /* NT */
+        GetLastError() == ERROR_INVALID_PARAMETER ||  /* 9x */
+        GetLastError() == RPC_S_INVALID_NET_ADDR,     /* Some Vista */
+        "unexpected last error %d\n", GetLastError());
 
     HeapFree(GetProcessHeap(), 0, buffer);
 }
@@ -2426,6 +2557,7 @@ START_TEST(info)
     test_EnumPorts();
     test_EnumPrinterDrivers();
     test_EnumPrinters();
+    test_EnumPrintProcessors();
     test_GetDefaultPrinter();
     test_GetPrinterDriverDirectory();
     test_GetPrintProcessorDirectory();

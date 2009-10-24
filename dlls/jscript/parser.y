@@ -841,7 +841,7 @@ static literal_t *new_string_literal(parser_ctx_t *ctx, const WCHAR *str)
 {
     literal_t *ret = parser_alloc(ctx, sizeof(literal_t));
 
-    ret->vt = VT_BSTR;
+    ret->type = LT_STRING;
     ret->u.wstr = str;
 
     return ret;
@@ -851,7 +851,7 @@ static literal_t *new_null_literal(parser_ctx_t *ctx)
 {
     literal_t *ret = parser_alloc(ctx, sizeof(literal_t));
 
-    ret->vt = VT_NULL;
+    ret->type = LT_NULL;
 
     return ret;
 }
@@ -860,7 +860,7 @@ static literal_t *new_undefined_literal(parser_ctx_t *ctx)
 {
     literal_t *ret = parser_alloc(ctx, sizeof(literal_t));
 
-    ret->vt = VT_EMPTY;
+    ret->type = LT_UNDEFINED;
 
     return ret;
 }
@@ -869,7 +869,7 @@ static literal_t *new_boolean_literal(parser_ctx_t *ctx, VARIANT_BOOL bval)
 {
     literal_t *ret = parser_alloc(ctx, sizeof(literal_t));
 
-    ret->vt = VT_BOOL;
+    ret->type = LT_BOOL;
     ret->u.bval = bval;
 
     return ret;
@@ -1591,13 +1591,8 @@ static void program_parsed(parser_ctx_t *ctx, source_elements_t *source)
 
 void parser_release(parser_ctx_t *ctx)
 {
-    obj_literal_t *iter;
-
     if(--ctx->ref)
         return;
-
-    for(iter = ctx->obj_literals; iter; iter = iter->next)
-        jsdisp_release(iter->obj);
 
     jsheap_free(&ctx->heap);
     heap_free(ctx);

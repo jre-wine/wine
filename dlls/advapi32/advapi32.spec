@@ -65,8 +65,8 @@
 @ stdcall CommandLineFromMsiDescriptor(wstr ptr ptr)
 # @ stub ComputeAccessTokenFromCodeAuthzLevel
 @ stdcall ControlService(long long ptr)
-# @ stub ControlTraceA
-# @ stub ControlTraceW
+@ stdcall ControlTraceA(double str ptr long)
+@ stdcall ControlTraceW(double wstr ptr long)
 # @ stub ConvertAccessToSecurityDescriptorA
 # @ stub ConvertAccessToSecurityDescriptorW
 # @ stub ConvertSDToStringSDRootDomainA
@@ -200,7 +200,7 @@
 @ stub ElfRegisterEventSourceW
 # @ stub ElfReportEventA
 @ stub ElfReportEventW
-# @ stub EnableTrace
+@ stdcall EnableTrace(long long long ptr double)
 @ stdcall EncryptFileA(str)
 @ stdcall EncryptFileW(wstr)
 # @ stub EncryptedFileKeyInfo
@@ -445,8 +445,8 @@
 @ stdcall PrivilegedServiceAuditAlarmW(wstr wstr long ptr long)
 # @ stub ProcessIdleTasks
 # @ stub ProcessTrace
-# @ stub QueryAllTracesA
-# @ stub QueryAllTracesW
+@ stdcall QueryAllTracesA(ptr long ptr)
+@ stdcall QueryAllTracesW(ptr long ptr)
 # @ stub QueryRecoveryAgentsOnEncryptedFile
 @ stdcall QueryServiceConfig2A(long long ptr long ptr)
 @ stdcall QueryServiceConfig2W(long long ptr long ptr)
@@ -592,8 +592,8 @@
 @ stdcall StartServiceCtrlDispatcherA(ptr)
 @ stdcall StartServiceCtrlDispatcherW(ptr)
 @ stdcall StartServiceW(long long ptr)
-# @ stub StartTraceA
-# @ stub StartTraceW
+@ stdcall StartTraceA(ptr str ptr)
+@ stdcall StartTraceW(ptr wstr ptr)
 # @ stub StopTraceA
 # @ stub StopTraceW
 @ stdcall SynchronizeWindows31FilesAndWindowsNTRegistry(long long long long)

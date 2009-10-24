@@ -38,8 +38,8 @@
 #include "wownt32.h"
 #include "winnls.h"
 
+#include "wine/list.h"
 #include "wine/winuser16.h"
-#include "winemm.h"
 #include "winemm16.h"
 
 #include "wine/debug.h"
@@ -47,10 +47,14 @@
 WINE_DEFAULT_DEBUG_CHANNEL(mmsys);
 
 static WINE_MMTHREAD*   WINMM_GetmmThread(HANDLE16);
-static LPWINE_DRIVER    DRIVER_OpenDriver16(LPCWSTR, LPCWSTR, LPARAM);
-static LRESULT          DRIVER_CloseDriver16(HDRVR16, LPARAM, LPARAM);
-static LRESULT          DRIVER_SendMessage16(HDRVR16, UINT, LPARAM, LPARAM);
-static LRESULT          MMIO_Callback16(SEGPTR, LPMMIOINFO, UINT, LPARAM, LPARAM);
+
+static CRITICAL_SECTION_DEBUG mmdrv_critsect_debug =
+{
+    0, 0, &mmdrv_cs,
+    { &mmdrv_critsect_debug.ProcessLocksList, &mmdrv_critsect_debug.ProcessLocksList },
+      0, 0, { (DWORD_PTR)(__FILE__ ": mmsystem_mmdrv_cs") }
+};
+CRITICAL_SECTION mmdrv_cs = { &mmdrv_critsect_debug, -1, 0, 0, 0, 0 };
 
 /* ###################################################
  * #                  LIBRARY                        #
@@ -68,40 +72,6 @@ BOOL WINAPI MMSYSTEM_LibMain(DWORD fdwReason, HINSTANCE hinstDLL, WORD ds,
 {
     TRACE("%p 0x%x\n", hinstDLL, fdwReason);
 
-    switch (fdwReason) {
-    case DLL_PROCESS_ATTACH:
-	/* need to load WinMM in order to:
-	 * - initiate correctly shared variables (WINMM_Init())
-	 */
-        if (!GetModuleHandleA("WINMM.DLL"))
-        {
-            ERR("Could not load sibling WinMM.dll\n");
-            return FALSE;
-	}
-        /* hook in our 16 bit function pointers */
-        pFnGetMMThread16    = WINMM_GetmmThread;
-        pFnOpenDriver16     = DRIVER_OpenDriver16;
-        pFnCloseDriver16    = DRIVER_CloseDriver16;
-        pFnSendMessage16    = DRIVER_SendMessage16;
-        pFnMmioCallback16   = MMIO_Callback16;
-        pFnReleaseThunkLock = ReleaseThunkLock;
-        pFnRestoreThunkLock = RestoreThunkLock;
-        MMDRV_Init16();
-	break;
-    case DLL_PROCESS_DETACH:
-        pFnGetMMThread16    = NULL;
-        pFnOpenDriver16     = NULL;
-        pFnCloseDriver16    = NULL;
-        pFnSendMessage16    = NULL;
-        pFnMmioCallback16   = NULL;
-        pFnReleaseThunkLock = NULL;
-        pFnRestoreThunkLock = NULL;
-        /* FIXME: add equivalent for MMDRV_Init16() */
-	break;
-    case DLL_THREAD_ATTACH:
-    case DLL_THREAD_DETACH:
-	break;
-    }
     return TRUE;
 }
 
@@ -194,7 +164,6 @@ void WINAPI OutputDebugStr16(LPCSTR str)
     OutputDebugStringA( str );
 }
 
-
 /* ###################################################
  * #                    MIXER                        #
  * ###################################################
@@ -243,11 +212,26 @@ UINT16 WINAPI mixerGetDevCaps16(UINT16 uDeviceID, LPMIXERCAPS16 lpCaps,
 UINT16 WINAPI mixerOpen16(LPHMIXER16 lphmix, UINT16 uDeviceID, DWORD dwCallback,
 			  DWORD dwInstance, DWORD fdwOpen)
 {
-    HMIXER	hmix;
-    UINT	ret;
+    HMIXER	                hmix;
+    UINT	                ret;
+    struct mmsystdrv_thunk*     thunk;
 
-    ret = MIXER_Open(&hmix, uDeviceID, dwCallback, dwInstance, fdwOpen, FALSE);
-    if (lphmix) *lphmix = HMIXER_16(hmix);
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_MIXER)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((fdwOpen & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
+
+    ret = mixerOpen(&hmix, uDeviceID, dwCallback, dwInstance, fdwOpen);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        if (lphmix) *lphmix = HMIXER_16(hmix);
+        if (thunk) MMSYSTDRV_SetHandle(thunk, hmix);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -256,7 +240,11 @@ UINT16 WINAPI mixerOpen16(LPHMIXER16 lphmix, UINT16 uDeviceID, DWORD dwCallback,
  */
 UINT16 WINAPI mixerClose16(HMIXER16 hMix)
 {
-    return mixerClose(HMIXER_32(hMix));
+    UINT        ret = mixerClose(HMIXER_32(hMix));
+
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HMIXER_32(hMix));
+    return ret;
 }
 
 /**************************************************************************
@@ -438,6 +426,11 @@ DWORD WINAPI mixerMessage16(HMIXER16 hmix, UINT16 uMsg, DWORD dwParam1,
     return mixerMessage(HMIXER_32(hmix), uMsg, dwParam1, dwParam2);
 }
 
+/* ###################################################
+ * #                     AUX                         #
+ * ###################################################
+ */
+
 /**************************************************************************
  * 				auxGetNumDevs		[MMSYSTEM.350]
  */
@@ -445,11 +438,6 @@ UINT16 WINAPI auxGetNumDevs16(void)
 {
     return auxGetNumDevs();
 }
-
-/* ###################################################
- * #                     AUX                         #
- * ###################################################
- */
 
 /**************************************************************************
  * 				auxGetDevCaps		[MMSYSTEM.351]
@@ -464,12 +452,12 @@ UINT16 WINAPI auxGetDevCaps16(UINT16 uDeviceID, LPAUXCAPS16 lpCaps, UINT16 uSize
     ret = auxGetDevCapsA(uDeviceID, &acA, sizeof(acA));
     if (ret == MMSYSERR_NOERROR) {
 	AUXCAPS16 ac16;
-	ac16.wMid           = acA.wMid; 
-	ac16.wPid           = acA.wPid; 
-	ac16.vDriverVersion = acA.vDriverVersion; 
-	strcpy(ac16.szPname, acA.szPname); 
-	ac16.wTechnology    = acA.wTechnology; 
-	ac16.dwSupport      = acA.dwSupport; 
+	ac16.wMid           = acA.wMid;
+	ac16.wPid           = acA.wPid;
+	ac16.vDriverVersion = acA.vDriverVersion;
+	strcpy(ac16.szPname, acA.szPname);
+	ac16.wTechnology    = acA.wTechnology;
+	ac16.dwSupport      = acA.dwSupport;
 	memcpy(lpCaps, &ac16, min(uSize, sizeof(ac16)));
     }
     return ret;
@@ -504,7 +492,7 @@ DWORD WINAPI auxOutMessage16(UINT16 uDeviceID, UINT16 uMessage, DWORD dw1, DWORD
 	/* no argument conversion needed */
 	break;
     case AUXDM_GETVOLUME:
-	return auxGetVolume16(uDeviceID, MapSL(dw1));
+	return auxGetVolume(uDeviceID, MapSL(dw1));
     case AUXDM_GETDEVCAPS:
 	return auxGetDevCaps16(uDeviceID, MapSL(dw1), dw2);
     default:
@@ -513,153 +501,6 @@ DWORD WINAPI auxOutMessage16(UINT16 uDeviceID, UINT16 uMessage, DWORD dw1, DWORD
 	break;
     }
     return auxOutMessage(uDeviceID, uMessage, dw1, dw2);
-}
-
-/* ###################################################
- * #                     MCI                         #
- * ###################################################
- */
-
-/**************************************************************************
- * 				mciGetErrorString		[MMSYSTEM.706]
- */
-BOOL16 WINAPI mciGetErrorString16(DWORD wError, LPSTR lpstrBuffer, UINT16 uLength)
-{
-    return mciGetErrorStringA(wError, lpstrBuffer, uLength);
-}
-
-/**************************************************************************
- * 				mciDriverNotify			[MMSYSTEM.711]
- */
-BOOL16 WINAPI mciDriverNotify16(HWND16 hWndCallBack, UINT16 wDevID, UINT16 wStatus)
-{
-    TRACE("(%04X, %04x, %04X)\n", hWndCallBack, wDevID, wStatus);
-
-    return PostMessageA(HWND_32(hWndCallBack), MM_MCINOTIFY, wStatus, wDevID);
-}
-
-/**************************************************************************
- * 			mciGetDriverData			[MMSYSTEM.708]
- */
-DWORD WINAPI mciGetDriverData16(UINT16 uDeviceID)
-{
-    return mciGetDriverData(uDeviceID);
-}
-
-/**************************************************************************
- * 			mciSetDriverData			[MMSYSTEM.707]
- */
-BOOL16 WINAPI mciSetDriverData16(UINT16 uDeviceID, DWORD data)
-{
-    return mciSetDriverData(uDeviceID, data);
-}
-
-/**************************************************************************
- * 				mciSendCommand			[MMSYSTEM.701]
- */
-DWORD WINAPI mciSendCommand16(UINT16 wDevID, UINT16 wMsg, DWORD dwParam1, DWORD dwParam2)
-{
-    DWORD		dwRet;
-
-    TRACE("(%04X, %s, %08X, %08X)\n",
-	  wDevID, MCI_MessageToString(wMsg), dwParam1, dwParam2);
-
-    dwRet = MCI_SendCommand(wDevID, wMsg, dwParam1, dwParam2, FALSE);
-    dwRet = MCI_CleanUp(dwRet, wMsg, (DWORD)MapSL(dwParam2));
-    TRACE("=> %d\n", dwRet);
-    return dwRet;
-}
-
-/**************************************************************************
- * 				mciGetDeviceID		       	[MMSYSTEM.703]
- */
-UINT16 WINAPI mciGetDeviceID16(LPCSTR lpstrName)
-{
-    TRACE("(\"%s\")\n", lpstrName);
-
-    return mciGetDeviceIDA(lpstrName);
-}
-
-/**************************************************************************
- * 				mciSetYieldProc			[MMSYSTEM.714]
- */
-BOOL16 WINAPI mciSetYieldProc16(UINT16 uDeviceID, YIELDPROC16 fpYieldProc, DWORD dwYieldData)
-{
-    LPWINE_MCIDRIVER	wmd;
-
-    TRACE("(%u, %p, %08x)\n", uDeviceID, fpYieldProc, dwYieldData);
-
-    if (!(wmd = MCI_GetDriver(uDeviceID))) {
-	WARN("Bad uDeviceID\n");
-	return FALSE;
-    }
-
-    wmd->lpfnYieldProc = (YIELDPROC)fpYieldProc;
-    wmd->dwYieldData   = dwYieldData;
-    wmd->bIs32         = FALSE;
-
-    return TRUE;
-}
-
-/**************************************************************************
- * 				mciGetDeviceIDFromElementID	[MMSYSTEM.715]
- */
-UINT16 WINAPI mciGetDeviceIDFromElementID16(DWORD dwElementID, LPCSTR lpstrType)
-{
-    FIXME("(%u, %s) stub\n", dwElementID, lpstrType);
-    return 0;
-}
-
-/**************************************************************************
- * 				mciGetYieldProc			[MMSYSTEM.716]
- */
-YIELDPROC16 WINAPI mciGetYieldProc16(UINT16 uDeviceID, DWORD* lpdwYieldData)
-{
-    LPWINE_MCIDRIVER	wmd;
-
-    TRACE("(%u, %p)\n", uDeviceID, lpdwYieldData);
-
-    if (!(wmd = MCI_GetDriver(uDeviceID))) {
-	WARN("Bad uDeviceID\n");
-	return NULL;
-    }
-    if (!wmd->lpfnYieldProc) {
-	WARN("No proc set\n");
-	return NULL;
-    }
-    if (wmd->bIs32) {
-	WARN("Proc is 32 bit\n");
-	return NULL;
-    }
-    if (lpdwYieldData) *lpdwYieldData = wmd->dwYieldData;
-    return (YIELDPROC16)wmd->lpfnYieldProc;
-}
-
-/**************************************************************************
- * 				mciGetCreatorTask		[MMSYSTEM.717]
- */
-HTASK16 WINAPI mciGetCreatorTask16(UINT16 uDeviceID)
-{
-    return HTASK_16(mciGetCreatorTask(uDeviceID));
-}
-
-/**************************************************************************
- * 				mciDriverYield			[MMSYSTEM.710]
- */
-UINT16 WINAPI mciDriverYield16(UINT16 uDeviceID)
-{
-    LPWINE_MCIDRIVER	wmd;
-    UINT16		ret = 0;
-
-    /*    TRACE("(%04x)\n", uDeviceID); */
-
-    if (!(wmd = MCI_GetDriver(uDeviceID)) || !wmd->lpfnYieldProc || wmd->bIs32) {
-	UserYield16();
-    } else {
-	ret = wmd->lpfnYieldProc(uDeviceID, wmd->dwYieldData);
-    }
-
-    return ret;
 }
 
 /* ###################################################
@@ -718,12 +559,25 @@ UINT16 WINAPI midiOutGetErrorText16(UINT16 uError, LPSTR lpText, UINT16 uSize)
 UINT16 WINAPI midiOutOpen16(HMIDIOUT16* lphMidiOut, UINT16 uDeviceID,
                             DWORD dwCallback, DWORD dwInstance, DWORD dwFlags)
 {
-    HMIDIOUT	hmo;
-    UINT	ret;
+    HMIDIOUT	                hmo;
+    UINT	                ret;
+    struct mmsystdrv_thunk*     thunk;
 
-    ret = MIDI_OutOpen(&hmo, uDeviceID, dwCallback, dwInstance, dwFlags, FALSE);
-
-    if (lphMidiOut != NULL) *lphMidiOut = HMIDIOUT_16(hmo);
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_MIDIOUT)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((dwFlags & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
+    ret = midiOutOpen(&hmo, uDeviceID, dwCallback, dwInstance, dwFlags);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        if (lphMidiOut != NULL) *lphMidiOut = HMIDIOUT_16(hmo);
+        MMSYSTDRV_SetHandle(thunk, (void*)hmo);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -732,7 +586,11 @@ UINT16 WINAPI midiOutOpen16(HMIDIOUT16* lphMidiOut, UINT16 uDeviceID,
  */
 UINT16 WINAPI midiOutClose16(HMIDIOUT16 hMidiOut)
 {
-    return midiOutClose(HMIDIOUT_32(hMidiOut));
+    UINT        ret = midiOutClose(HMIDIOUT_32(hMidiOut));
+
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HMIDIOUT_32(hMidiOut));
+    return ret;
 }
 
 /**************************************************************************
@@ -742,14 +600,9 @@ UINT16 WINAPI midiOutPrepareHeader16(HMIDIOUT16 hMidiOut,         /* [in] */
                                      SEGPTR lpsegMidiOutHdr,      /* [???] */
 				     UINT16 uSize)                /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %08x, %d)\n", hMidiOut, lpsegMidiOutHdr, uSize);
 
-    if ((wmld = MMDRV_Get(HMIDIOUT_32(hMidiOut), MMDRV_MIDIOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MODM_PREPARE, lpsegMidiOutHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIOUT_32(hMidiOut), MODM_PREPARE, lpsegMidiOutHdr, uSize);
 }
 
 /**************************************************************************
@@ -759,7 +612,6 @@ UINT16 WINAPI midiOutUnprepareHeader16(HMIDIOUT16 hMidiOut,         /* [in] */
 				       SEGPTR lpsegMidiOutHdr,      /* [???] */
 				       UINT16 uSize)                /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPMIDIHDR16		lpMidiOutHdr = MapSL(lpsegMidiOutHdr);
 
     TRACE("(%04X, %08x, %d)\n", hMidiOut, lpsegMidiOutHdr, uSize);
@@ -768,10 +620,7 @@ UINT16 WINAPI midiOutUnprepareHeader16(HMIDIOUT16 hMidiOut,         /* [in] */
 	return MMSYSERR_NOERROR;
     }
 
-    if ((wmld = MMDRV_Get(HMIDIOUT_32(hMidiOut), MMDRV_MIDIOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MODM_UNPREPARE, lpsegMidiOutHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIOUT_32(hMidiOut), MODM_UNPREPARE, lpsegMidiOutHdr, uSize);
 }
 
 /**************************************************************************
@@ -789,14 +638,9 @@ UINT16 WINAPI midiOutLongMsg16(HMIDIOUT16 hMidiOut,          /* [in] */
                                LPMIDIHDR16 lpsegMidiOutHdr,  /* [???] NOTE: SEGPTR */
 			       UINT16 uSize)                 /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %p, %d)\n", hMidiOut, lpsegMidiOutHdr, uSize);
 
-    if ((wmld = MMDRV_Get(HMIDIOUT_32(hMidiOut), MMDRV_MIDIOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MODM_LONGDATA, (DWORD_PTR)lpsegMidiOutHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIOUT_32(hMidiOut), MODM_LONGDATA, (DWORD_PTR)lpsegMidiOutHdr, uSize);
 }
 
 /**************************************************************************
@@ -862,12 +706,7 @@ UINT16 WINAPI midiOutGetID16(HMIDIOUT16 hMidiOut, UINT16* lpuDeviceID)
 DWORD WINAPI midiOutMessage16(HMIDIOUT16 hMidiOut, UINT16 uMessage,
                               DWORD dwParam1, DWORD dwParam2)
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %04X, %08X, %08X)\n", hMidiOut, uMessage, dwParam1, dwParam2);
-
-    if ((wmld = MMDRV_Get(HMIDIOUT_32(hMidiOut), MMDRV_MIDIOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
 
     switch (uMessage) {
     case MODM_OPEN:
@@ -885,7 +724,7 @@ DWORD WINAPI midiOutMessage16(HMIDIOUT16 hMidiOut, UINT16 uMessage,
     case MODM_UNPREPARE:
         return midiOutUnprepareHeader16(hMidiOut, dwParam1, dwParam2);
     }
-    return MMDRV_Message(wmld, uMessage, dwParam1, dwParam2, TRUE);
+    return MMSYSTDRV_Message(HMIDIOUT_32(hMidiOut), uMessage, dwParam1, dwParam2);
 }
 
 /**************************************************************************
@@ -926,12 +765,25 @@ UINT16 WINAPI midiInGetDevCaps16(UINT16 uDeviceID, LPMIDIINCAPS16 lpCaps,
 UINT16 WINAPI midiInOpen16(HMIDIIN16* lphMidiIn, UINT16 uDeviceID,
 			   DWORD dwCallback, DWORD dwInstance, DWORD dwFlags)
 {
-    HMIDIIN	xhmid;
+    HMIDIIN	hmid;
     UINT 	ret;
+    struct mmsystdrv_thunk*     thunk;
 
-    ret = MIDI_InOpen(&xhmid, uDeviceID, dwCallback, dwInstance, dwFlags, FALSE);
-
-    if (lphMidiIn) *lphMidiIn = HMIDIIN_16(xhmid);
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_MIDIIN)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((dwFlags & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
+    ret = midiInOpen(&hmid, uDeviceID, dwCallback, dwInstance, dwFlags);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        if (lphMidiIn) *lphMidiIn = HMIDIIN_16(hmid);
+        MMSYSTDRV_SetHandle(thunk, (void*)hmid);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -940,7 +792,11 @@ UINT16 WINAPI midiInOpen16(HMIDIIN16* lphMidiIn, UINT16 uDeviceID,
  */
 UINT16 WINAPI midiInClose16(HMIDIIN16 hMidiIn)
 {
-    return midiInClose(HMIDIIN_32(hMidiIn));
+    UINT        ret = midiInClose(HMIDIIN_32(hMidiIn));
+
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HMIDIIN_32(hMidiIn));
+    return ret;
 }
 
 /**************************************************************************
@@ -950,14 +806,9 @@ UINT16 WINAPI midiInPrepareHeader16(HMIDIIN16 hMidiIn,         /* [in] */
                                     SEGPTR lpsegMidiInHdr,     /* [???] */
 				    UINT16 uSize)              /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %08x, %d)\n", hMidiIn, lpsegMidiInHdr, uSize);
 
-    if ((wmld = MMDRV_Get(HMIDIIN_32(hMidiIn), MMDRV_MIDIIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MIDM_PREPARE, lpsegMidiInHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIIN_32(hMidiIn), MIDM_PREPARE, lpsegMidiInHdr, uSize);
 }
 
 /**************************************************************************
@@ -967,7 +818,6 @@ UINT16 WINAPI midiInUnprepareHeader16(HMIDIIN16 hMidiIn,         /* [in] */
                                       SEGPTR lpsegMidiInHdr,     /* [???] */
 				      UINT16 uSize)              /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPMIDIHDR16		lpMidiInHdr = MapSL(lpsegMidiInHdr);
 
     TRACE("(%04X, %08x, %d)\n", hMidiIn, lpsegMidiInHdr, uSize);
@@ -976,10 +826,7 @@ UINT16 WINAPI midiInUnprepareHeader16(HMIDIIN16 hMidiIn,         /* [in] */
 	return MMSYSERR_NOERROR;
     }
 
-    if ((wmld = MMDRV_Get(HMIDIIN_32(hMidiIn), MMDRV_MIDIIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MIDM_UNPREPARE, lpsegMidiInHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIIN_32(hMidiIn), MIDM_UNPREPARE, lpsegMidiInHdr, uSize);
 }
 
 /**************************************************************************
@@ -989,14 +836,9 @@ UINT16 WINAPI midiInAddBuffer16(HMIDIIN16 hMidiIn,         /* [in] */
                                 MIDIHDR16* lpsegMidiInHdr, /* [???] NOTE: SEGPTR */
 				UINT16 uSize)              /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %p, %d)\n", hMidiIn, lpsegMidiInHdr, uSize);
 
-    if ((wmld = MMDRV_Get(HMIDIIN_32(hMidiIn), MMDRV_MIDIIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, MIDM_ADDBUFFER, (DWORD_PTR)lpsegMidiInHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HMIDIIN_32(hMidiIn), MIDM_ADDBUFFER, (DWORD_PTR)lpsegMidiInHdr, uSize);
 }
 
 /**************************************************************************
@@ -1043,8 +885,6 @@ UINT16 WINAPI midiInGetID16(HMIDIIN16 hMidiIn, UINT16* lpuDeviceID)
 DWORD WINAPI midiInMessage16(HMIDIIN16 hMidiIn, UINT16 uMessage,
                              DWORD dwParam1, DWORD dwParam2)
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %04X, %08X, %08X)\n", hMidiIn, uMessage, dwParam1, dwParam2);
 
     switch (uMessage) {
@@ -1062,11 +902,7 @@ DWORD WINAPI midiInMessage16(HMIDIIN16 hMidiIn, UINT16 uMessage,
     case MIDM_ADDBUFFER:
         return midiInAddBuffer16(hMidiIn, MapSL(dwParam1), dwParam2);
     }
-
-    if ((wmld = MMDRV_Get(HMIDIIN_32(hMidiIn), MMDRV_MIDIIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, uMessage, dwParam1, dwParam2, FALSE);
+    return MMSYSTDRV_Message(HMIDIIN_32(hMidiIn), uMessage, dwParam1, dwParam2);
 }
 
 /**************************************************************************
@@ -1074,7 +910,10 @@ DWORD WINAPI midiInMessage16(HMIDIIN16 hMidiIn, UINT16 uMessage,
  */
 MMRESULT16 WINAPI midiStreamClose16(HMIDISTRM16 hMidiStrm)
 {
-    return midiStreamClose(HMIDISTRM_32(hMidiStrm));
+    UINT        ret = midiStreamClose(HMIDISTRM_32(hMidiStrm));
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HMIDISTRM_32(hMidiStrm));
+    return ret;
 }
 
 /**************************************************************************
@@ -1084,17 +923,31 @@ MMRESULT16 WINAPI midiStreamOpen16(HMIDISTRM16* phMidiStrm, LPUINT16 devid,
 				   DWORD cMidi, DWORD dwCallback,
 				   DWORD dwInstance, DWORD fdwOpen)
 {
-    HMIDISTRM	hMidiStrm32;
-    MMRESULT 	ret;
-    UINT	devid32;
+    HMIDISTRM	                hMidiStrm32;
+    MMRESULT 	                ret;
+    UINT	                devid32;
+    struct mmsystdrv_thunk*     thunk;
 
     if (!phMidiStrm || !devid)
 	return MMSYSERR_INVALPARAM;
     devid32 = *devid;
-    ret = MIDI_StreamOpen(&hMidiStrm32, &devid32, cMidi, dwCallback,
-                          dwInstance, fdwOpen, FALSE);
-    *phMidiStrm = HMIDISTRM_16(hMidiStrm32);
-    *devid = devid32;
+
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_MIDIOUT)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((fdwOpen & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
+    ret = midiStreamOpen(&hMidiStrm32, &devid32, cMidi, dwCallback, dwInstance, fdwOpen);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        *phMidiStrm = HMIDISTRM_16(hMidiStrm32);
+        *devid = devid32;
+        MMSYSTDRV_SetHandle(thunk, hMidiStrm32);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -1211,18 +1064,32 @@ UINT16 WINAPI waveOutOpen16(HWAVEOUT16* lphWaveOut, UINT16 uDeviceID,
                             LPCWAVEFORMATEX lpFormat, DWORD dwCallback,
 			    DWORD dwInstance, DWORD dwFlags)
 {
-    HANDLE		hWaveOut;
-    UINT		ret;
+    HWAVEOUT		        hWaveOut;
+    UINT		        ret;
+    struct mmsystdrv_thunk*     thunk;
 
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_WAVEOUT)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((dwFlags & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
     /* since layout of WAVEFORMATEX is the same for 16/32 bits, we directly
      * call the 32 bit version
      * however, we need to promote correctly the wave mapper id
      * (0xFFFFFFFF and not 0x0000FFFF)
      */
-    ret = WAVE_Open(&hWaveOut, (uDeviceID == (UINT16)-1) ? (UINT)-1 : uDeviceID,
-                    MMDRV_WAVEOUT, lpFormat, dwCallback, dwInstance, dwFlags, FALSE);
+    ret = waveOutOpen(&hWaveOut, (uDeviceID == (UINT16)-1) ? (UINT)-1 : uDeviceID,
+                      lpFormat, dwCallback, dwInstance, dwFlags);
 
-    if (lphWaveOut != NULL) *lphWaveOut = HWAVEOUT_16(hWaveOut);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        if (lphWaveOut != NULL) *lphWaveOut = HWAVEOUT_16(hWaveOut);
+        MMSYSTDRV_SetHandle(thunk, (void*)hWaveOut);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -1237,6 +1104,8 @@ UINT16 WINAPI waveOutClose16(HWAVEOUT16 hWaveOut)
     ReleaseThunkLock(&level);
     ret = waveOutClose(HWAVEOUT_32(hWaveOut));
     RestoreThunkLock(level);
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HWAVEOUT_32(hWaveOut));
     return ret;
 }
 
@@ -1247,7 +1116,6 @@ UINT16 WINAPI waveOutPrepareHeader16(HWAVEOUT16 hWaveOut,      /* [in] */
                                      SEGPTR lpsegWaveOutHdr,   /* [???] */
 				     UINT16 uSize)             /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPWAVEHDR		lpWaveOutHdr = MapSL(lpsegWaveOutHdr);
     UINT16		result;
 
@@ -1255,11 +1123,8 @@ UINT16 WINAPI waveOutPrepareHeader16(HWAVEOUT16 hWaveOut,      /* [in] */
 
     if (lpWaveOutHdr == NULL) return MMSYSERR_INVALPARAM;
 
-    if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, FALSE)) == NULL)
-        return MMSYSERR_INVALHANDLE;
-
-    if ((result = MMDRV_Message(wmld, WODM_PREPARE, lpsegWaveOutHdr,
-                                uSize, FALSE)) != MMSYSERR_NOTSUPPORTED)
+    if ((result = MMSYSTDRV_Message(HWAVEOUT_32(hWaveOut), WODM_PREPARE, lpsegWaveOutHdr,
+                                    uSize)) != MMSYSERR_NOTSUPPORTED)
         return result;
 
     if (lpWaveOutHdr->dwFlags & WHDR_INQUEUE)
@@ -1278,7 +1143,6 @@ UINT16 WINAPI waveOutUnprepareHeader16(HWAVEOUT16 hWaveOut,       /* [in] */
 				       SEGPTR lpsegWaveOutHdr,    /* [???] */
 				       UINT16 uSize)              /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPWAVEHDR		lpWaveOutHdr = MapSL(lpsegWaveOutHdr);
 
     TRACE("(%04X, %08x, %u);\n", hWaveOut, lpsegWaveOutHdr, uSize);
@@ -1287,10 +1151,7 @@ UINT16 WINAPI waveOutUnprepareHeader16(HWAVEOUT16 hWaveOut,       /* [in] */
 	return MMSYSERR_NOERROR;
     }
 
-    if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, WODM_UNPREPARE, lpsegWaveOutHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HWAVEOUT_32(hWaveOut), WODM_UNPREPARE, lpsegWaveOutHdr, uSize);
 }
 
 /**************************************************************************
@@ -1300,14 +1161,9 @@ UINT16 WINAPI waveOutWrite16(HWAVEOUT16 hWaveOut,       /* [in] */
 			     LPWAVEHDR lpsegWaveOutHdr, /* [???] NOTE: SEGPTR */
 			     UINT16 uSize)              /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %p, %u);\n", hWaveOut, lpsegWaveOutHdr, uSize);
 
-    if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, WODM_WRITE, (DWORD_PTR)lpsegWaveOutHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HWAVEOUT_32(hWaveOut), WODM_WRITE, (DWORD_PTR)lpsegWaveOutHdr, uSize);
 }
 
 /**************************************************************************
@@ -1449,24 +1305,18 @@ UINT16 WINAPI waveOutGetID16(HWAVEOUT16 hWaveOut, UINT16* lpuDeviceID)
 DWORD WINAPI waveOutMessage16(HWAVEOUT16 hWaveOut, UINT16 uMessage,
                               DWORD dwParam1, DWORD dwParam2)
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04x, %u, %d, %d)\n", hWaveOut, uMessage, dwParam1, dwParam2);
 
-    if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, FALSE)) == NULL) {
-	if ((wmld = MMDRV_Get(HWAVEOUT_32(hWaveOut), MMDRV_WAVEOUT, TRUE)) != NULL) {
-            if (uMessage == DRV_QUERYDRVENTRY || uMessage == DRV_QUERYDEVNODE)
-                dwParam1 = (DWORD)MapSL(dwParam1);
-	    return MMDRV_PhysicalFeatures(wmld, uMessage, dwParam1, dwParam2);
-	}
-	return MMSYSERR_INVALHANDLE;
+    if ((DWORD_PTR)hWaveOut < waveOutGetNumDevs())
+    {
+        if (uMessage == DRV_QUERYDRVENTRY || uMessage == DRV_QUERYDEVNODE)
+            dwParam1 = (DWORD)MapSL(dwParam1);
     }
-
-    /* from M$ KB */
-    if (uMessage < DRVM_IOCTL || (uMessage >= DRVM_IOCTL_LAST && uMessage < DRVM_MAPPER))
+    else if (uMessage < DRVM_IOCTL || (uMessage >= DRVM_IOCTL_LAST && uMessage < DRVM_MAPPER))
+        /* from M$ KB */
 	return MMSYSERR_INVALPARAM;
 
-    return MMDRV_Message(wmld, uMessage, dwParam1, dwParam2, FALSE);
+    return MMSYSTDRV_Message(HWAVEOUT_32(hWaveOut), uMessage, dwParam1, dwParam2);
 }
 
 /**************************************************************************
@@ -1509,18 +1359,32 @@ UINT16 WINAPI waveInOpen16(HWAVEIN16* lphWaveIn, UINT16 uDeviceID,
                            LPCWAVEFORMATEX lpFormat, DWORD dwCallback,
                            DWORD dwInstance, DWORD dwFlags)
 {
-    HANDLE		hWaveIn;
-    UINT		ret;
+    HWAVEIN                     hWaveIn;
+    UINT		        ret;
+    struct mmsystdrv_thunk*     thunk;
 
+    if (!(thunk = MMSYSTDRV_AddThunk(dwCallback, MMSYSTDRV_WAVEIN)))
+    {
+        return MMSYSERR_NOMEM;
+    }
+    if ((dwFlags & CALLBACK_TYPEMASK) == CALLBACK_FUNCTION)
+    {
+        dwCallback = (DWORD)thunk;
+    }
     /* since layout of WAVEFORMATEX is the same for 16/32 bits, we directly
      * call the 32 bit version
      * however, we need to promote correctly the wave mapper id
      * (0xFFFFFFFF and not 0x0000FFFF)
      */
-    ret = WAVE_Open(&hWaveIn, (uDeviceID == (UINT16)-1) ? (UINT)-1 : uDeviceID,
-                    MMDRV_WAVEIN, lpFormat, dwCallback, dwInstance, dwFlags, FALSE);
+    ret = waveInOpen(&hWaveIn, (uDeviceID == (UINT16)-1) ? (UINT)-1 : uDeviceID,
+                     lpFormat, dwCallback, dwInstance, dwFlags);
 
-    if (lphWaveIn != NULL) *lphWaveIn = HWAVEIN_16(hWaveIn);
+    if (ret == MMSYSERR_NOERROR)
+    {
+        if (lphWaveIn != NULL) *lphWaveIn = HWAVEIN_16(hWaveIn);
+        MMSYSTDRV_SetHandle(thunk, (void*)hWaveIn);
+    }
+    else MMSYSTDRV_DeleteThunk(thunk);
     return ret;
 }
 
@@ -1535,6 +1399,8 @@ UINT16 WINAPI waveInClose16(HWAVEIN16 hWaveIn)
     ReleaseThunkLock(&level);
     ret = waveInClose(HWAVEIN_32(hWaveIn));
     RestoreThunkLock(level);
+    if (ret == MMSYSERR_NOERROR)
+        MMSYSTDRV_CloseHandle((void*)HWAVEIN_32(hWaveIn));
     return ret;
 }
 
@@ -1545,19 +1411,15 @@ UINT16 WINAPI waveInPrepareHeader16(HWAVEIN16 hWaveIn,       /* [in] */
 				    SEGPTR lpsegWaveInHdr,   /* [???] */
 				    UINT16 uSize)            /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPWAVEHDR		lpWaveInHdr = MapSL(lpsegWaveInHdr);
     UINT16		ret;
 
     TRACE("(%04X, %p, %u);\n", hWaveIn, lpWaveInHdr, uSize);
 
     if (lpWaveInHdr == NULL) return MMSYSERR_INVALHANDLE;
-    if ((wmld = MMDRV_Get(HWAVEIN_32(hWaveIn), MMDRV_WAVEIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
     lpWaveInHdr->dwBytesRecorded = 0;
 
-    ret = MMDRV_Message(wmld, WIDM_PREPARE, lpsegWaveInHdr, uSize, FALSE);
+    ret = MMSYSTDRV_Message(HWAVEIN_32(hWaveIn), WIDM_PREPARE, lpsegWaveInHdr, uSize);
     return ret;
 }
 
@@ -1568,7 +1430,6 @@ UINT16 WINAPI waveInUnprepareHeader16(HWAVEIN16 hWaveIn,       /* [in] */
 				      SEGPTR lpsegWaveInHdr,   /* [???] */
 				      UINT16 uSize)            /* [in] */
 {
-    LPWINE_MLD		wmld;
     LPWAVEHDR		lpWaveInHdr = MapSL(lpsegWaveInHdr);
 
     TRACE("(%04X, %08x, %u);\n", hWaveIn, lpsegWaveInHdr, uSize);
@@ -1579,10 +1440,7 @@ UINT16 WINAPI waveInUnprepareHeader16(HWAVEIN16 hWaveIn,       /* [in] */
 	return MMSYSERR_NOERROR;
     }
 
-    if ((wmld = MMDRV_Get(HWAVEIN_32(hWaveIn), MMDRV_WAVEIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    return MMDRV_Message(wmld, WIDM_UNPREPARE, lpsegWaveInHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HWAVEIN_32(hWaveIn), WIDM_UNPREPARE, lpsegWaveInHdr, uSize);
 }
 
 /**************************************************************************
@@ -1592,15 +1450,11 @@ UINT16 WINAPI waveInAddBuffer16(HWAVEIN16 hWaveIn,       /* [in] */
 				WAVEHDR* lpsegWaveInHdr, /* [???] NOTE: SEGPTR */
 				UINT16 uSize)            /* [in] */
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04X, %p, %u);\n", hWaveIn, lpsegWaveInHdr, uSize);
 
     if (lpsegWaveInHdr == NULL) return MMSYSERR_INVALPARAM;
-    if ((wmld = MMDRV_Get(HWAVEIN_32(hWaveIn), MMDRV_WAVEIN, FALSE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
 
-    return MMDRV_Message(wmld, WIDM_ADDBUFFER, (DWORD_PTR)lpsegWaveInHdr, uSize, FALSE);
+    return MMSYSTDRV_Message(HWAVEIN_32(hWaveIn), WIDM_ADDBUFFER, (DWORD_PTR)lpsegWaveInHdr, uSize);
 }
 
 /**************************************************************************
@@ -1680,24 +1534,18 @@ UINT16 WINAPI waveInGetID16(HWAVEIN16 hWaveIn, UINT16* lpuDeviceID)
 DWORD WINAPI waveInMessage16(HWAVEIN16 hWaveIn, UINT16 uMessage,
                              DWORD dwParam1, DWORD dwParam2)
 {
-    LPWINE_MLD		wmld;
-
     TRACE("(%04x, %u, %d, %d)\n", hWaveIn, uMessage, dwParam1, dwParam2);
 
-    if ((wmld = MMDRV_Get(HWAVEIN_32(hWaveIn), MMDRV_WAVEIN, FALSE)) == NULL) {
-	if ((wmld = MMDRV_Get(HWAVEIN_32(hWaveIn), MMDRV_WAVEIN, TRUE)) != NULL) {
-            if (uMessage == DRV_QUERYDRVENTRY || uMessage == DRV_QUERYDEVNODE)
-                dwParam1 = (DWORD)MapSL(dwParam1);
-	    return MMDRV_PhysicalFeatures(wmld, uMessage, dwParam1, dwParam2);
-	}
-	return MMSYSERR_INVALHANDLE;
+    if ((DWORD_PTR)hWaveIn < waveInGetNumDevs())
+    {
+        if (uMessage == DRV_QUERYDRVENTRY || uMessage == DRV_QUERYDEVNODE)
+            dwParam1 = (DWORD)MapSL(dwParam1);
     }
+    else if (uMessage < DRVM_IOCTL || (uMessage >= DRVM_IOCTL_LAST && uMessage < DRVM_MAPPER))
+        /* from M$ KB */
+        return MMSYSERR_INVALPARAM;
 
-    /* from M$ KB */
-    if (uMessage < DRVM_IOCTL || (uMessage >= DRVM_IOCTL_LAST && uMessage < DRVM_MAPPER))
-	return MMSYSERR_INVALPARAM;
-
-    return MMDRV_Message(wmld, uMessage, dwParam1, dwParam2, FALSE);
+    return MMSYSTDRV_Message(HWAVEIN_32(hWaveIn), uMessage, dwParam1, dwParam2);
 }
 
 /* ###################################################
@@ -2191,234 +2039,6 @@ void WINAPI WMMMidiRunOnce16(void)
     FIXME("(), stub!\n");
 }
 
-/* ###################################################
- * #                    DRIVER                       #
- * ###################################################
- */
-
-/**************************************************************************
- *				DRIVER_MapMsg32To16		[internal]
- *
- * Map a 32 bit driver message to a 16 bit driver message.
- */
-static WINMM_MapType DRIVER_MapMsg32To16(WORD wMsg, LPARAM *lParam1, LPARAM *lParam2)
-{
-    WINMM_MapType       ret = WINMM_MAP_MSGERROR;
-
-    switch (wMsg) {
-    case DRV_LOAD:
-    case DRV_ENABLE:
-    case DRV_DISABLE:
-    case DRV_FREE:
-    case DRV_QUERYCONFIGURE:
-    case DRV_REMOVE:
-    case DRV_EXITSESSION:
-    case DRV_EXITAPPLICATION:
-    case DRV_POWER:
-    case DRV_CLOSE:	/* should be 0/0 */
-    case DRV_OPEN:	/* pass through */
-	/* lParam1 and lParam2 are not used */
-	ret = WINMM_MAP_OK;
-	break;
-    case DRV_CONFIGURE:
-    case DRV_INSTALL:
-	/* lParam1 is a handle to a window (conf) or to a driver (inst) or not used,
-	 * lParam2 is a pointer to DRVCONFIGINFO
-	 */
-	if (*lParam2) {
-            LPDRVCONFIGINFO16 dci16 = HeapAlloc( GetProcessHeap(), 0, sizeof(*dci16) );
-            LPDRVCONFIGINFO	dci32 = (LPDRVCONFIGINFO)(*lParam2);
-
-	    if (dci16) {
-		LPSTR str1 = NULL,str2;
-                INT len;
-		dci16->dwDCISize = sizeof(DRVCONFIGINFO16);
-
-                if (dci32->lpszDCISectionName) {
-                    len = WideCharToMultiByte( CP_ACP, 0, dci32->lpszDCISectionName, -1, NULL, 0, NULL, NULL );
-                    str1 = HeapAlloc( GetProcessHeap(), 0, len );
-                    if (str1) {
-                        WideCharToMultiByte( CP_ACP, 0, dci32->lpszDCISectionName, -1, str1, len, NULL, NULL );
-                        dci16->lpszDCISectionName = MapLS( str1 );
-                    } else {
-                        HeapFree( GetProcessHeap(), 0, dci16);
-                        return WINMM_MAP_NOMEM;
-                    }
-		} else {
-		    dci16->lpszDCISectionName = 0L;
-		}
-                if (dci32->lpszDCIAliasName) {
-                    len = WideCharToMultiByte( CP_ACP, 0, dci32->lpszDCIAliasName, -1, NULL, 0, NULL, NULL );
-                    str2 = HeapAlloc( GetProcessHeap(), 0, len );
-                    if (str2) {
-                        WideCharToMultiByte( CP_ACP, 0, dci32->lpszDCIAliasName, -1, str2, len, NULL, NULL );
-                        dci16->lpszDCIAliasName = MapLS( str2 );
-                    } else {
-                        HeapFree( GetProcessHeap(), 0, str1);
-                        HeapFree( GetProcessHeap(), 0, dci16);
-                        return WINMM_MAP_NOMEM;
-                    }
-		} else {
-		    dci16->lpszDCISectionName = 0L;
-		}
-	    } else {
-		return WINMM_MAP_NOMEM;
-	    }
-	    *lParam2 = MapLS( dci16 );
-	    ret = WINMM_MAP_OKMEM;
-	} else {
-	    ret = WINMM_MAP_OK;
-	}
-	break;
-    default:
-	if (!((wMsg >= 0x800 && wMsg < 0x900) || (wMsg >= 0x4000 && wMsg < 0x4100))) {
-	   FIXME("Unknown message 0x%04x\n", wMsg);
-	}
-	ret = WINMM_MAP_OK;
-    }
-    return ret;
-}
-
-/**************************************************************************
- *				DRIVER_UnMapMsg32To16		[internal]
- *
- * UnMap a 32 bit driver message to a 16 bit driver message.
- */
-static WINMM_MapType DRIVER_UnMapMsg32To16(WORD wMsg, DWORD lParam1, DWORD lParam2)
-{
-    WINMM_MapType	ret = WINMM_MAP_MSGERROR;
-
-    switch (wMsg) {
-    case DRV_LOAD:
-    case DRV_ENABLE:
-    case DRV_DISABLE:
-    case DRV_FREE:
-    case DRV_QUERYCONFIGURE:
-    case DRV_REMOVE:
-    case DRV_EXITSESSION:
-    case DRV_EXITAPPLICATION:
-    case DRV_POWER:
-    case DRV_OPEN:
-    case DRV_CLOSE:
-	/* lParam1 and lParam2 are not used */
-	break;
-    case DRV_CONFIGURE:
-    case DRV_INSTALL:
-	/* lParam1 is a handle to a window (or not used), lParam2 is a pointer to DRVCONFIGINFO, lParam2 */
-	if (lParam2) {
-	    LPDRVCONFIGINFO16	dci16 = MapSL(lParam2);
-            HeapFree( GetProcessHeap(), 0, MapSL(dci16->lpszDCISectionName) );
-            HeapFree( GetProcessHeap(), 0, MapSL(dci16->lpszDCIAliasName) );
-            UnMapLS( lParam2 );
-            UnMapLS( dci16->lpszDCISectionName );
-            UnMapLS( dci16->lpszDCIAliasName );
-            HeapFree( GetProcessHeap(), 0, dci16 );
-	}
-	ret = WINMM_MAP_OK;
-	break;
-    default:
-	if (!((wMsg >= 0x800 && wMsg < 0x900) || (wMsg >= 0x4000 && wMsg < 0x4100))) {
-	    FIXME("Unknown message 0x%04x\n", wMsg);
-	}
-	ret = WINMM_MAP_OK;
-    }
-    return ret;
-}
-
-/**************************************************************************
- *				DRIVER_TryOpenDriver16		[internal]
- *
- * Tries to load a 16 bit driver whose DLL's (module) name is lpFileName.
- */
-static	LPWINE_DRIVER	DRIVER_OpenDriver16(LPCWSTR fn, LPCWSTR sn, LPARAM lParam2)
-{
-    LPWINE_DRIVER 	lpDrv = NULL;
-    LPCSTR		cause = NULL;
-    LPSTR               fnA = NULL, snA = NULL;
-    unsigned            len;
-
-    TRACE("(%s, %s, %08lX);\n", debugstr_w(fn), debugstr_w(sn), lParam2);
-
-    lpDrv = HeapAlloc(GetProcessHeap(), 0, sizeof(WINE_DRIVER));
-    if (lpDrv == NULL) {cause = "OOM"; goto exit;}
-
-    if (fn)
-    {
-        len = WideCharToMultiByte( CP_ACP, 0, fn, -1, NULL, 0, NULL, NULL );
-        fnA = HeapAlloc(GetProcessHeap(), 0, len);
-        if (fnA == NULL) {cause = "OOM"; goto exit;}
-        WideCharToMultiByte( CP_ACP, 0, fn, -1, fnA, len, NULL, NULL );
-    }
-
-    if (sn)
-    {
-        len = WideCharToMultiByte( CP_ACP, 0, sn, -1, NULL, 0, NULL, NULL );
-        snA = HeapAlloc(GetProcessHeap(), 0, len);
-        if (snA == NULL) {cause = "OOM"; goto exit;}
-        WideCharToMultiByte( CP_ACP, 0, sn, -1, snA, len, NULL, NULL );
-    }
-
-    /* FIXME: shall we do some black magic here on sn ?
-     *	drivers32 => drivers
-     *	mci32 => mci
-     * ...
-     */
-    lpDrv->d.d16.hDriver16 = OpenDriver16(fnA, snA, lParam2);
-    if (lpDrv->d.d16.hDriver16 == 0) {cause = "Not a 16 bit driver"; goto exit;}
-    lpDrv->dwFlags = WINE_GDF_16BIT;
-
-exit:
-    HeapFree(GetProcessHeap(), 0, fnA);
-    HeapFree(GetProcessHeap(), 0, snA);
-
-    if (cause)
-    {
-        TRACE("Unable to load 16 bit module %s[%s]: %s\n",
-            debugstr_w(fn), debugstr_w(sn), cause);
-        HeapFree(GetProcessHeap(), 0, lpDrv);
-        return NULL;
-    }
-
-    TRACE("=> %p\n", lpDrv);
-    return lpDrv;
-}
-
-/******************************************************************
- *		DRIVER_SendMessage16
- *
- *
- */
-static LRESULT  DRIVER_SendMessage16(HDRVR16 hDrv16, UINT msg, 
-                                     LPARAM lParam1, LPARAM lParam2)
-{
-    LRESULT             ret = 0;
-    WINMM_MapType	map;
-
-    TRACE("Before sdm16 call hDrv=%04x wMsg=%04x p1=%08lx p2=%08lx\n",
-          hDrv16, msg, lParam1, lParam2);
-
-    switch (map = DRIVER_MapMsg32To16(msg, &lParam1, &lParam2)) {
-    case WINMM_MAP_OKMEM:
-    case WINMM_MAP_OK:
-        ret = SendDriverMessage16(hDrv16, msg, lParam1, lParam2);
-        if (map == WINMM_MAP_OKMEM)
-            DRIVER_UnMapMsg32To16(msg, lParam1, lParam2);
-    default:
-        break;
-    }
-    return ret;
-}
-
-/******************************************************************
- *		DRIVER_CloseDriver16
- *
- *
- */
-static LRESULT DRIVER_CloseDriver16(HDRVR16 hDrv16, LPARAM lParam1, LPARAM lParam2)
-{
-    return CloseDriver16(hDrv16, lParam1, lParam2);
-}
-
 /**************************************************************************
  * 				DrvOpen	       		[MMSYSTEM.1100]
  */
@@ -2521,17 +2141,66 @@ MMRESULT16 WINAPI timeGetSystemTime16(LPMMTIME16 lpTime, UINT16 wSize)
     return 0;
 }
 
+struct timer_entry {
+    struct list         entry;
+    UINT                id;
+    LPTIMECALLBACK16    func16;
+    DWORD               user;
+};
+
+static struct list timer_list = LIST_INIT(timer_list);
+
+static void CALLBACK timeCB3216(UINT id, UINT uMsg, DWORD_PTR user, DWORD_PTR dw1, DWORD_PTR dw2)
+{
+    struct timer_entry* te = (void*)user;
+    WORD                args[8];
+    DWORD               ret;
+
+    args[7] = LOWORD(id);
+    args[6] = LOWORD(uMsg);
+    args[5] = HIWORD(te->user);
+    args[4] = LOWORD(te->user);
+    args[3] = HIWORD(dw1);
+    args[2] = LOWORD(dw2);
+    args[1] = HIWORD(dw2);
+    args[0] = LOWORD(dw2);
+    WOWCallback16Ex((DWORD)te->func16, WCB16_PASCAL, sizeof(args), args, &ret);
+}
+
 /**************************************************************************
  * 				timeSetEvent		[MMSYSTEM.602]
  */
 MMRESULT16 WINAPI timeSetEvent16(UINT16 wDelay, UINT16 wResol, LPTIMECALLBACK16 lpFunc,
 				 DWORD dwUser, UINT16 wFlags)
 {
-    if (wFlags & WINE_TIMER_IS32)
-	WARN("Unknown windows flag... wine internally used.. ooch\n");
+    MMRESULT16          id;
+    struct timer_entry* te;
 
-    return TIME_SetEventInternal(wDelay, wResol, (LPTIMECALLBACK)lpFunc,
-                                 dwUser, wFlags & ~WINE_TIMER_IS32);
+    switch (wFlags & (TIME_CALLBACK_EVENT_SET|TIME_CALLBACK_EVENT_PULSE))
+    {
+    case TIME_CALLBACK_EVENT_SET:
+    case TIME_CALLBACK_EVENT_PULSE:
+        id = timeSetEvent(wDelay, wResol, (LPTIMECALLBACK)lpFunc, dwUser, wFlags);
+        break;
+    case TIME_CALLBACK_FUNCTION:
+        te = HeapAlloc(GetProcessHeap(), 0, sizeof(*te));
+        if (!te) return 0;
+        te->func16 = lpFunc;
+        te->user = dwUser;
+        id = te->id = timeSetEvent(wDelay, wResol, timeCB3216, (DWORD_PTR)te, wFlags);
+        if (id)
+        {
+            EnterCriticalSection(&mmdrv_cs);
+            list_add_tail(&timer_list, &te->entry);
+            LeaveCriticalSection(&mmdrv_cs);
+        }
+        else HeapFree(GetProcessHeap(), 0, te);
+        break;
+    default:
+        id = 0;
+        break;
+    }
+    return id;
 }
 
 /**************************************************************************
@@ -2539,7 +2208,24 @@ MMRESULT16 WINAPI timeSetEvent16(UINT16 wDelay, UINT16 wResol, LPTIMECALLBACK16 
  */
 MMRESULT16 WINAPI timeKillEvent16(UINT16 wID)
 {
-    return timeKillEvent(wID);
+    MMRESULT16  ret = timeKillEvent(wID);
+    struct timer_entry* te;
+
+    if (ret == TIMERR_NOERROR)
+    {
+        EnterCriticalSection(&mmdrv_cs);
+        LIST_FOR_EACH_ENTRY(te, &timer_list, struct timer_entry, entry)
+        {
+            if (wID == te->id)
+            {
+                list_remove(&te->entry);
+                HeapFree(GetProcessHeap(), 0, te);
+                break;
+            }
+        }
+        LeaveCriticalSection(&mmdrv_cs);
+    }
+    return ret;
 }
 
 /**************************************************************************
@@ -2584,477 +2270,11 @@ MMRESULT16 WINAPI timeEndPeriod16(UINT16 wPeriod)
 }
 
 /**************************************************************************
- * 				mciSendString			[MMSYSTEM.702]
+ * 				timeGetTime    [MMSYSTEM.607]
  */
-DWORD WINAPI mciSendString16(LPCSTR lpstrCommand, LPSTR lpstrRet,
-			     UINT16 uRetLen, HWND16 hwndCallback)
+DWORD WINAPI timeGetTime16(void)
 {
-    return mciSendStringA(lpstrCommand, lpstrRet, uRetLen, HWND_32(hwndCallback));
-}
-
-/**************************************************************************
- *                    	mciLoadCommandResource			[MMSYSTEM.705]
- */
-UINT16 WINAPI mciLoadCommandResource16(HINSTANCE16 hInst, LPCSTR resname, UINT16 type)
-{
-    HRSRC16     res;
-    HGLOBAL16   handle;
-    const BYTE* ptr16;
-    BYTE*       ptr32;
-    unsigned    pos = 0, size = 1024, len;
-    const char* str;
-    DWORD	flg;
-    WORD	eid;
-    UINT16      ret = MCIERR_OUT_OF_MEMORY;
-
-    if (!(res = FindResource16( hInst, resname, (LPSTR)RT_RCDATA))) return MCI_NO_COMMAND_TABLE;
-    if (!(handle = LoadResource16( hInst, res ))) return MCI_NO_COMMAND_TABLE;
-    ptr16 = LockResource16(handle);
-    /* converting the 16 bit resource table into a 32W one */
-    if ((ptr32 = HeapAlloc(GetProcessHeap(), 0, size)))
-    {
-        do {
-            str = (LPCSTR)ptr16;
-            ptr16 += strlen(str) + 1;
-            flg = *(const DWORD*)ptr16;
-            eid = *(const WORD*)(ptr16 + sizeof(DWORD));
-            ptr16 += sizeof(DWORD) + sizeof(WORD);
-            len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0) * sizeof(WCHAR);
-            if (pos + len + sizeof(DWORD) + sizeof(WORD) > size)
-            {
-                while (pos + len * sizeof(WCHAR) + sizeof(DWORD) + sizeof(WORD) > size) size += 1024;
-                ptr32 = HeapReAlloc(GetProcessHeap(), 0, ptr32, size);
-                if (!ptr32) goto the_end;
-            }
-            MultiByteToWideChar(CP_ACP, 0, str, -1, (LPWSTR)(ptr32 + pos), len / sizeof(WCHAR));
-            *(DWORD*)(ptr32 + pos + len) = flg;
-            *(WORD*)(ptr32 + pos + len + sizeof(DWORD)) = eid;
-            pos += len + sizeof(DWORD) + sizeof(WORD);
-        } while (eid != MCI_END_COMMAND_LIST);
-    }
-the_end:
-    FreeResource16( handle );
-    if (ptr32) ret = MCI_SetCommandTable(ptr32, type);
-    return ret;
-}
-
-/**************************************************************************
- *                    	mciFreeCommandResource			[MMSYSTEM.713]
- */
-BOOL16 WINAPI mciFreeCommandResource16(UINT16 uTable)
-{
-    TRACE("(%04x)!\n", uTable);
-
-    return MCI_DeleteCommandTable(uTable, TRUE);
-}
-
-/* ###################################################
- * #                     MMIO                        #
- * ###################################################
- */
-
-/****************************************************************
- *       		MMIO_Map32To16			[INTERNAL]
- */
-static LRESULT	MMIO_Map32To16(DWORD wMsg, LPARAM* lp1, LPARAM* lp2)
-{
-    switch (wMsg) {
-    case MMIOM_CLOSE:
-    case MMIOM_SEEK:
-	/* nothing to do */
-	break;
-    case MMIOM_OPEN:
-    case MMIOM_READ:
-    case MMIOM_WRITE:
-    case MMIOM_WRITEFLUSH:
-        *lp1 = MapLS( (void *)*lp1 );
-	break;
-    case MMIOM_RENAME:
-        *lp1 = MapLS( (void *)*lp1 );
-        *lp2 = MapLS( (void *)*lp2 );
-        break;
-    default:
-        if (wMsg < MMIOM_USER)
-            TRACE("Not a mappable message (%d)\n", wMsg);
-    }
-    return MMSYSERR_NOERROR;
-}
-
-/****************************************************************
- *       	MMIO_UnMap32To16 			[INTERNAL]
- */
-static LRESULT	MMIO_UnMap32To16(DWORD wMsg, LPARAM lParam1, LPARAM lParam2,
-				 LPARAM lp1, LPARAM lp2)
-{
-    switch (wMsg) {
-    case MMIOM_CLOSE:
-    case MMIOM_SEEK:
-	/* nothing to do */
-	break;
-    case MMIOM_OPEN:
-    case MMIOM_READ:
-    case MMIOM_WRITE:
-    case MMIOM_WRITEFLUSH:
-        UnMapLS( lp1 );
-	break;
-    case MMIOM_RENAME:
-        UnMapLS( lp1 );
-        UnMapLS( lp2 );
-	break;
-    default:
-        if (wMsg < MMIOM_USER)
-            TRACE("Not a mappable message (%d)\n", wMsg);
-    }
-    return MMSYSERR_NOERROR;
-}
-
-/******************************************************************
- *		MMIO_Callback16
- *
- *
- */
-static LRESULT MMIO_Callback16(SEGPTR cb16, LPMMIOINFO lpmmioinfo, UINT uMessage,
-                               LPARAM lParam1, LPARAM lParam2)
-{
-    DWORD 		result;
-    MMIOINFO16          mmioInfo16;
-    SEGPTR		segmmioInfo16;
-    LPARAM		lp1 = lParam1, lp2 = lParam2;
-    WORD args[7];
-
-    memset(&mmioInfo16, 0, sizeof(MMIOINFO16));
-    mmioInfo16.lDiskOffset = lpmmioinfo->lDiskOffset;
-    mmioInfo16.adwInfo[0]  = lpmmioinfo->adwInfo[0];
-    mmioInfo16.adwInfo[1]  = lpmmioinfo->adwInfo[1];
-    mmioInfo16.adwInfo[2]  = lpmmioinfo->adwInfo[2];
-    /* map (lParam1, lParam2) into (lp1, lp2) 32=>16 */
-    if ((result = MMIO_Map32To16(uMessage, &lp1, &lp2)) != MMSYSERR_NOERROR)
-        return result;
-
-    segmmioInfo16 = MapLS(&mmioInfo16);
-    args[6] = HIWORD(segmmioInfo16);
-    args[5] = LOWORD(segmmioInfo16);
-    args[4] = uMessage;
-    args[3] = HIWORD(lp1);
-    args[2] = LOWORD(lp1);
-    args[1] = HIWORD(lp2);
-    args[0] = LOWORD(lp2);
-    WOWCallback16Ex( cb16, WCB16_PASCAL, sizeof(args), args, &result );
-    UnMapLS(segmmioInfo16);
-    MMIO_UnMap32To16(uMessage, lParam1, lParam2, lp1, lp2);
-
-    lpmmioinfo->lDiskOffset = mmioInfo16.lDiskOffset;
-    lpmmioinfo->adwInfo[0]  = mmioInfo16.adwInfo[0];
-    lpmmioinfo->adwInfo[1]  = mmioInfo16.adwInfo[1];
-    lpmmioinfo->adwInfo[2]  = mmioInfo16.adwInfo[2];
-
-    return result;
-}
-
-/******************************************************************
- *             MMIO_ResetSegmentedData
- *
- */
-static LRESULT     MMIO_SetSegmentedBuffer(HMMIO hmmio, SEGPTR ptr, BOOL release)
-{
-    LPWINE_MMIO		wm;
-
-    if ((wm = MMIO_Get(hmmio)) == NULL)
-	return MMSYSERR_INVALHANDLE;
-    if (release) UnMapLS(wm->segBuffer16);
-    wm->segBuffer16 = ptr;
-    return MMSYSERR_NOERROR;
-}
-
-/**************************************************************************
- * 				mmioOpen       		[MMSYSTEM.1210]
- */
-HMMIO16 WINAPI mmioOpen16(LPSTR szFileName, MMIOINFO16* lpmmioinfo16,
-			  DWORD dwOpenFlags)
-{
-    HMMIO 	ret;
-
-    if (lpmmioinfo16) {
-	MMIOINFO	mmioinfo;
-
-	memset(&mmioinfo, 0, sizeof(mmioinfo));
-
-	mmioinfo.dwFlags     = lpmmioinfo16->dwFlags;
-	mmioinfo.fccIOProc   = lpmmioinfo16->fccIOProc;
-	mmioinfo.pIOProc     = (LPMMIOPROC)lpmmioinfo16->pIOProc;
-	mmioinfo.cchBuffer   = lpmmioinfo16->cchBuffer;
-	mmioinfo.pchBuffer   = MapSL((DWORD)lpmmioinfo16->pchBuffer);
-        mmioinfo.adwInfo[0]  = lpmmioinfo16->adwInfo[0];
-        /* if we don't have a file name, it's likely a passed open file descriptor */
-        if (!szFileName) 
-            mmioinfo.adwInfo[0] = (DWORD)DosFileHandleToWin32Handle(mmioinfo.adwInfo[0]);
-	mmioinfo.adwInfo[1]  = lpmmioinfo16->adwInfo[1];
-	mmioinfo.adwInfo[2]  = lpmmioinfo16->adwInfo[2];
-
-	ret = MMIO_Open(szFileName, &mmioinfo, dwOpenFlags, MMIO_PROC_16);
-        MMIO_SetSegmentedBuffer(mmioinfo.hmmio, (SEGPTR)lpmmioinfo16->pchBuffer, FALSE);
-
-	lpmmioinfo16->wErrorRet = mmioinfo.wErrorRet;
-        lpmmioinfo16->hmmio     = HMMIO_16(mmioinfo.hmmio);
-    } else {
-	ret = MMIO_Open(szFileName, NULL, dwOpenFlags, MMIO_PROC_32A);
-    }
-    return HMMIO_16(ret);
-}
-
-/**************************************************************************
- * 				mmioClose      		[MMSYSTEM.1211]
- */
-MMRESULT16 WINAPI mmioClose16(HMMIO16 hmmio, UINT16 uFlags)
-{
-    MMIO_SetSegmentedBuffer(HMMIO_32(hmmio), 0, TRUE);
-    return mmioClose(HMMIO_32(hmmio), uFlags);
-}
-
-/**************************************************************************
- * 				mmioRead	       	[MMSYSTEM.1212]
- */
-LONG WINAPI mmioRead16(HMMIO16 hmmio, HPSTR pch, LONG cch)
-{
-    return mmioRead(HMMIO_32(hmmio), pch, cch);
-}
-
-/**************************************************************************
- * 				mmioWrite      		[MMSYSTEM.1213]
- */
-LONG WINAPI mmioWrite16(HMMIO16 hmmio, HPCSTR pch, LONG cch)
-{
-    return mmioWrite(HMMIO_32(hmmio),pch,cch);
-}
-
-/**************************************************************************
- * 				mmioSeek       		[MMSYSTEM.1214]
- */
-LONG WINAPI mmioSeek16(HMMIO16 hmmio, LONG lOffset, INT16 iOrigin)
-{
-    return mmioSeek(HMMIO_32(hmmio), lOffset, iOrigin);
-}
-
-/**************************************************************************
- * 				mmioGetInfo	       	[MMSYSTEM.1215]
- */
-MMRESULT16 WINAPI mmioGetInfo16(HMMIO16 hmmio, MMIOINFO16* lpmmioinfo, UINT16 uFlags)
-{
-    MMIOINFO            mmioinfo;
-    MMRESULT            ret;
-    LPWINE_MMIO		wm;
-
-    TRACE("(0x%04x,%p,0x%08x)\n", hmmio, lpmmioinfo, uFlags);
-
-    if ((wm = MMIO_Get(HMMIO_32(hmmio))) == NULL)
-	return MMSYSERR_INVALHANDLE;
-
-    ret = mmioGetInfo(HMMIO_32(hmmio), &mmioinfo, uFlags);
-    if (ret != MMSYSERR_NOERROR) return ret;
-
-    lpmmioinfo->dwFlags     = mmioinfo.dwFlags;
-    lpmmioinfo->fccIOProc   = mmioinfo.fccIOProc;
-    lpmmioinfo->pIOProc     = (wm->ioProc->type == MMIO_PROC_16) ?
-        (LPMMIOPROC16)wm->ioProc->pIOProc : NULL;
-    lpmmioinfo->wErrorRet   = mmioinfo.wErrorRet;
-    lpmmioinfo->hTask       = HTASK_16(mmioinfo.hTask);
-    lpmmioinfo->cchBuffer   = mmioinfo.cchBuffer;
-    lpmmioinfo->pchBuffer   = (void*)wm->segBuffer16;
-    lpmmioinfo->pchNext     = (void*)(wm->segBuffer16 + (mmioinfo.pchNext - mmioinfo.pchBuffer));
-    lpmmioinfo->pchEndRead  = (void*)(wm->segBuffer16 + (mmioinfo.pchEndRead - mmioinfo.pchBuffer));
-    lpmmioinfo->pchEndWrite = (void*)(wm->segBuffer16 + (mmioinfo.pchEndWrite - mmioinfo.pchBuffer));
-    lpmmioinfo->lBufOffset  = mmioinfo.lBufOffset;
-    lpmmioinfo->lDiskOffset = mmioinfo.lDiskOffset;
-    lpmmioinfo->adwInfo[0]  = mmioinfo.adwInfo[0];
-    lpmmioinfo->adwInfo[1]  = mmioinfo.adwInfo[1];
-    lpmmioinfo->adwInfo[2]  = mmioinfo.adwInfo[2];
-    lpmmioinfo->dwReserved1 = 0;
-    lpmmioinfo->dwReserved2 = 0;
-    lpmmioinfo->hmmio = HMMIO_16(mmioinfo.hmmio);
-
-    return MMSYSERR_NOERROR;
-}
-
-/**************************************************************************
- * 				mmioSetInfo  		[MMSYSTEM.1216]
- */
-MMRESULT16 WINAPI mmioSetInfo16(HMMIO16 hmmio, const MMIOINFO16* lpmmioinfo, UINT16 uFlags)
-{
-    MMIOINFO            mmioinfo;
-    MMRESULT            ret;
-
-    TRACE("(0x%04x,%p,0x%08x)\n",hmmio,lpmmioinfo,uFlags);
-
-    ret = mmioGetInfo(HMMIO_32(hmmio), &mmioinfo, 0);
-    if (ret != MMSYSERR_NOERROR) return ret;
-
-    /* check if seg and lin buffers are the same */
-    if (mmioinfo.cchBuffer != lpmmioinfo->cchBuffer  ||
-        mmioinfo.pchBuffer != MapSL((DWORD)lpmmioinfo->pchBuffer)) 
-	return MMSYSERR_INVALPARAM;
-
-    /* check pointers coherence */
-    if (lpmmioinfo->pchNext < lpmmioinfo->pchBuffer ||
-	lpmmioinfo->pchNext > lpmmioinfo->pchBuffer + lpmmioinfo->cchBuffer ||
-	lpmmioinfo->pchEndRead < lpmmioinfo->pchBuffer ||
-	lpmmioinfo->pchEndRead > lpmmioinfo->pchBuffer + lpmmioinfo->cchBuffer ||
-	lpmmioinfo->pchEndWrite < lpmmioinfo->pchBuffer ||
-	lpmmioinfo->pchEndWrite > lpmmioinfo->pchBuffer + lpmmioinfo->cchBuffer)
-	return MMSYSERR_INVALPARAM;
-
-    mmioinfo.pchNext     = mmioinfo.pchBuffer + (lpmmioinfo->pchNext     - lpmmioinfo->pchBuffer);
-    mmioinfo.pchEndRead  = mmioinfo.pchBuffer + (lpmmioinfo->pchEndRead  - lpmmioinfo->pchBuffer);
-    mmioinfo.pchEndWrite = mmioinfo.pchBuffer + (lpmmioinfo->pchEndWrite - lpmmioinfo->pchBuffer);
-
-    return mmioSetInfo(HMMIO_32(hmmio), &mmioinfo, uFlags);
-}
-
-/**************************************************************************
- * 				mmioSetBuffer		[MMSYSTEM.1217]
- */
-MMRESULT16 WINAPI mmioSetBuffer16(HMMIO16 hmmio, LPSTR pchBuffer,
-                                  LONG cchBuffer, UINT16 uFlags)
-{
-    MMRESULT    ret = mmioSetBuffer(HMMIO_32(hmmio), MapSL((DWORD)pchBuffer), 
-                                    cchBuffer, uFlags);
-
-    if (ret == MMSYSERR_NOERROR)
-        MMIO_SetSegmentedBuffer(HMMIO_32(hmmio), (DWORD)pchBuffer, TRUE);
-    else
-        UnMapLS((DWORD)pchBuffer);
-    return ret;
-}
-
-/**************************************************************************
- * 				mmioFlush      		[MMSYSTEM.1218]
- */
-MMRESULT16 WINAPI mmioFlush16(HMMIO16 hmmio, UINT16 uFlags)
-{
-    return mmioFlush(HMMIO_32(hmmio), uFlags);
-}
-
-/***********************************************************************
- * 				mmioAdvance    		[MMSYSTEM.1219]
- */
-MMRESULT16 WINAPI mmioAdvance16(HMMIO16 hmmio, MMIOINFO16* lpmmioinfo, UINT16 uFlags)
-{
-    MMIOINFO    mmioinfo;
-    LRESULT     ret;
-
-    /* WARNING: this heavily relies on mmioAdvance implementation (for choosing which
-     * fields to init
-     */
-    if (lpmmioinfo)
-    {
-        mmioinfo.pchBuffer = MapSL((DWORD)lpmmioinfo->pchBuffer);
-        mmioinfo.pchNext = MapSL((DWORD)lpmmioinfo->pchNext);
-        mmioinfo.dwFlags = lpmmioinfo->dwFlags;
-        mmioinfo.lBufOffset = lpmmioinfo->lBufOffset;
-        ret = mmioAdvance(HMMIO_32(hmmio), &mmioinfo, uFlags);
-    }
-    else
-        ret = mmioAdvance(HMMIO_32(hmmio), NULL, uFlags);
-        
-    if (ret != MMSYSERR_NOERROR) return ret;
-
-    if (lpmmioinfo)
-    {
-        lpmmioinfo->dwFlags = mmioinfo.dwFlags;
-        lpmmioinfo->pchNext     = (void*)(lpmmioinfo->pchBuffer + (mmioinfo.pchNext - mmioinfo.pchBuffer));
-        lpmmioinfo->pchEndRead  = (void*)(lpmmioinfo->pchBuffer + (mmioinfo.pchEndRead - mmioinfo.pchBuffer));
-        lpmmioinfo->pchEndWrite = (void*)(lpmmioinfo->pchBuffer + (mmioinfo.pchEndWrite - mmioinfo.pchBuffer));
-        lpmmioinfo->lBufOffset  = mmioinfo.lBufOffset;
-        lpmmioinfo->lDiskOffset = mmioinfo.lDiskOffset;
-    }
-
-    return MMSYSERR_NOERROR;
-}
-
-/**************************************************************************
- * 				mmioStringToFOURCC	[MMSYSTEM.1220]
- */
-FOURCC WINAPI mmioStringToFOURCC16(LPCSTR sz, UINT16 uFlags)
-{
-    return mmioStringToFOURCCA(sz, uFlags);
-}
-
-/**************************************************************************
- *              mmioInstallIOProc    [MMSYSTEM.1221]
- */
-LPMMIOPROC16 WINAPI mmioInstallIOProc16(FOURCC fccIOProc, LPMMIOPROC16 pIOProc,
-                                        DWORD dwFlags)
-{
-    return (LPMMIOPROC16)MMIO_InstallIOProc(fccIOProc, (LPMMIOPROC)pIOProc,
-                                            dwFlags, MMIO_PROC_16);
-}
-
-/**************************************************************************
- * 				mmioSendMessage	[MMSYSTEM.1222]
- */
-LRESULT WINAPI mmioSendMessage16(HMMIO16 hmmio, UINT16 uMessage,
-				 LPARAM lParam1, LPARAM lParam2)
-{
-    return MMIO_SendMessage(HMMIO_32(hmmio), uMessage, 
-                            lParam1, lParam2, MMIO_PROC_16);
-}
-
-/**************************************************************************
- * 				mmioDescend	       	[MMSYSTEM.1223]
- */
-MMRESULT16 WINAPI mmioDescend16(HMMIO16 hmmio, LPMMCKINFO lpck,
-                                const MMCKINFO* lpckParent, UINT16 uFlags)
-{
-    return mmioDescend(HMMIO_32(hmmio), lpck, lpckParent, uFlags);
-}
-
-/**************************************************************************
- * 				mmioAscend     		[MMSYSTEM.1224]
- */
-MMRESULT16 WINAPI mmioAscend16(HMMIO16 hmmio, MMCKINFO* lpck, UINT16 uFlags)
-{
-    return mmioAscend(HMMIO_32(hmmio),lpck,uFlags);
-}
-
-/**************************************************************************
- * 				mmioCreateChunk		[MMSYSTEM.1225]
- */
-MMRESULT16 WINAPI mmioCreateChunk16(HMMIO16 hmmio, MMCKINFO* lpck, UINT16 uFlags)
-{
-    return mmioCreateChunk(HMMIO_32(hmmio), lpck, uFlags);
-}
-
-/**************************************************************************
- * 				mmioRename     		[MMSYSTEM.1226]
- */
-MMRESULT16 WINAPI mmioRename16(LPCSTR szFileName, LPCSTR szNewFileName,
-                               MMIOINFO16* lpmmioinfo, DWORD dwRenameFlags)
-{
-    BOOL        inst = FALSE;
-    MMRESULT    ret;
-    MMIOINFO    mmioinfo;
-
-    if (lpmmioinfo != NULL && lpmmioinfo->pIOProc != NULL && 
-        lpmmioinfo->fccIOProc == 0) {
-        FIXME("Can't handle this case yet\n");
-        return MMSYSERR_ERROR;
-    }
-     
-    /* this is a bit hacky, but it'll work if we get a fourCC code or nothing.
-     * but a non installed ioproc without a fourcc won't do
-     */
-    if (lpmmioinfo && lpmmioinfo->fccIOProc && lpmmioinfo->pIOProc) {
-        MMIO_InstallIOProc(lpmmioinfo->fccIOProc, (LPMMIOPROC)lpmmioinfo->pIOProc,
-                           MMIO_INSTALLPROC, MMIO_PROC_16);
-        inst = TRUE;
-    }
-    memset(&mmioinfo, 0, sizeof(mmioinfo));
-    mmioinfo.fccIOProc = lpmmioinfo->fccIOProc;
-    ret = mmioRenameA(szFileName, szNewFileName, &mmioinfo, dwRenameFlags);
-    if (inst) {
-        MMIO_InstallIOProc(lpmmioinfo->fccIOProc, NULL,
-                           MMIO_REMOVEPROC, MMIO_PROC_16);
-    }
-    return ret;
+    return timeGetTime();
 }
 
 /* ###################################################

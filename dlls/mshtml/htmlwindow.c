@@ -36,7 +36,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 static struct list window_list = LIST_INIT(window_list);
 
-void window_set_docnode(HTMLWindow *window, HTMLDocumentNode *doc_node)
+static void window_set_docnode(HTMLWindow *window, HTMLDocumentNode *doc_node)
 {
     if(window->doc) {
         window->doc->basedoc.window = NULL;
@@ -45,6 +45,58 @@ void window_set_docnode(HTMLWindow *window, HTMLDocumentNode *doc_node)
     window->doc = doc_node;
     if(doc_node)
         htmldoc_addref(&doc_node->basedoc);
+
+    if(window->doc_obj && window->doc_obj->basedoc.window == window) {
+        if(window->doc_obj->basedoc.doc_node)
+            htmldoc_release(&window->doc_obj->basedoc.doc_node->basedoc);
+        window->doc_obj->basedoc.doc_node = doc_node;
+        if(doc_node)
+            htmldoc_addref(&doc_node->basedoc);
+    }
+}
+
+nsIDOMWindow *get_nsdoc_window(nsIDOMDocument *nsdoc)
+{
+    nsIDOMDocumentView *nsdocview;
+    nsIDOMAbstractView *nsview;
+    nsIDOMWindow *nswindow;
+    nsresult nsres;
+
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMDocumentView, (void**)&nsdocview);
+    nsIDOMDocument_Release(nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMDocumentView iface: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIDOMDocumentView_GetDefaultView(nsdocview, &nsview);
+    nsIDOMDocumentView_Release(nsview);
+    if(NS_FAILED(nsres)) {
+        ERR("GetDefaultView failed: %08x\n", nsres);
+        return NULL;
+    }
+
+    nsres = nsIDOMAbstractView_QueryInterface(nsview, &IID_nsIDOMWindow, (void**)&nswindow);
+    nsIDOMAbstractView_Release(nsview);
+    if(NS_FAILED(nsres)) {
+        ERR("Coult not get nsIDOMWindow iface: %08x\n", nsres);
+        return NULL;
+    }
+
+    return nswindow;
+}
+
+static void release_children(HTMLWindow *This)
+{
+    HTMLWindow *child;
+
+    while(!list_empty(&This->children)) {
+        child = LIST_ENTRY(list_tail(&This->children), HTMLWindow, sibling_entry);
+
+        list_remove(&child->sibling_entry);
+        child->parent = NULL;
+        IHTMLWindow2_Release(HTMLWINDOW2(child));
+    }
 }
 
 #define HTMLWINDOW2_THIS(iface) DEFINE_THIS(HTMLWindow, HTMLWindow2, iface)
@@ -107,10 +159,16 @@ static ULONG WINAPI HTMLWindow2_Release(IHTMLWindow2 *iface)
         DWORD i;
 
         window_set_docnode(This, NULL);
+        release_children(This);
 
         if(This->option_factory) {
             This->option_factory->window = NULL;
             IHTMLOptionElementFactory_Release(HTMLOPTFACTORY(This->option_factory));
+        }
+
+        if(This->image_factory) {
+            This->image_factory->window = NULL;
+            IHTMLImageElementFactory_Release(HTMLIMGFACTORY(This->image_factory));
         }
 
         if(This->location) {
@@ -177,8 +235,27 @@ static HRESULT WINAPI HTMLWindow2_item(IHTMLWindow2 *iface, VARIANT *pvarIndex, 
 static HRESULT WINAPI HTMLWindow2_get_length(IHTMLWindow2 *iface, LONG *p)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsIDOMWindowCollection *nscollection;
+    PRUint32 length;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsres = nsIDOMWindow_GetFrames(This->nswindow, &nscollection);
+    if(NS_FAILED(nsres)) {
+        ERR("GetFrames failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMWindowCollection_GetLength(nscollection, &length);
+    nsIDOMWindowCollection_Release(nscollection);
+    if(NS_FAILED(nsres)) {
+        ERR("GetLength failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    *p = length;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLWindow2_get_frames(IHTMLWindow2 *iface, IHTMLFramesCollection2 **p)
@@ -373,8 +450,16 @@ static HRESULT WINAPI HTMLWindow2_prompt(IHTMLWindow2 *iface, BSTR message,
 static HRESULT WINAPI HTMLWindow2_get_Image(IHTMLWindow2 *iface, IHTMLImageElementFactory **p)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(!This->image_factory)
+        This->image_factory = HTMLImageElementFactory_Create(This);
+
+    *p = HTMLIMGFACTORY(This->image_factory);
+    IHTMLImageElementFactory_AddRef(*p);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLWindow2_get_location(IHTMLWindow2 *iface, IHTMLLocation **p)
@@ -438,15 +523,49 @@ static HRESULT WINAPI HTMLWindow2_get_navigator(IHTMLWindow2 *iface, IOmNavigato
 static HRESULT WINAPI HTMLWindow2_put_name(IHTMLWindow2 *iface, BSTR v)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString name_str;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsAString_Init(&name_str, v);
+    nsres = nsIDOMWindow_SetName(This->nswindow, &name_str);
+    nsAString_Finish(&name_str);
+    if(NS_FAILED(nsres))
+        ERR("SetName failed: %08x\n", nsres);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLWindow2_get_name(IHTMLWindow2 *iface, BSTR *p)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString name_str;
+    nsresult nsres;
+    HRESULT hres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    nsAString_Init(&name_str, NULL);
+    nsres = nsIDOMWindow_GetName(This->nswindow, &name_str);
+    if(NS_SUCCEEDED(nsres)) {
+        const PRUnichar *name;
+
+        nsAString_GetData(&name_str, &name);
+        if(*name) {
+            *p = SysAllocString(name);
+            hres = *p ? S_OK : E_OUTOFMEMORY;
+        }else {
+            *p = NULL;
+            hres = S_OK;
+        }
+    }else {
+        ERR("GetName failed: %08x\n", nsres);
+        hres = E_FAIL;
+    }
+    nsAString_Finish(&name_str);
+
+    return hres;
 }
 
 static HRESULT WINAPI HTMLWindow2_get_parent(IHTMLWindow2 *iface, IHTMLWindow2 **p)
@@ -1426,7 +1545,7 @@ static dispex_static_data_t HTMLWindow_dispex = {
     HTMLWindow_iface_tids
 };
 
-HRESULT HTMLWindow_Create(HTMLDocumentObj *doc_obj, nsIDOMWindow *nswindow, HTMLWindow **ret)
+HRESULT HTMLWindow_Create(HTMLDocumentObj *doc_obj, nsIDOMWindow *nswindow, HTMLWindow *parent, HTMLWindow **ret)
 {
     HTMLWindow *window;
 
@@ -1450,10 +1569,55 @@ HRESULT HTMLWindow_Create(HTMLDocumentObj *doc_obj, nsIDOMWindow *nswindow, HTML
     window->scriptmode = SCRIPTMODE_GECKO;
     list_init(&window->script_hosts);
 
+    update_window_doc(window);
+
+    list_init(&window->children);
     list_add_head(&window_list, &window->entry);
+
+    if(parent) {
+        IHTMLWindow2_AddRef(HTMLWINDOW2(window));
+
+        window->parent = parent;
+        list_add_tail(&parent->children, &window->sibling_entry);
+    }
 
     *ret = window;
     return S_OK;
+}
+
+void update_window_doc(HTMLWindow *window)
+{
+    nsIDOMHTMLDocument *nshtmldoc;
+    nsIDOMDocument *nsdoc;
+    nsresult nsres;
+
+    nsres = nsIDOMWindow_GetDocument(window->nswindow, &nsdoc);
+    if(NS_FAILED(nsres) || !nsdoc) {
+        ERR("GetDocument failed: %08x\n", nsres);
+        return;
+    }
+
+    nsres = nsIDOMDocument_QueryInterface(nsdoc, &IID_nsIDOMHTMLDocument, (void**)&nshtmldoc);
+    nsIDOMDocument_Release(nsdoc);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMHTMLDocument iface: %08x\n", nsres);
+        return;
+    }
+
+    if(!window->doc || window->doc->nsdoc != nshtmldoc) {
+        HTMLDocumentNode *doc;
+        HRESULT hres;
+
+        hres = create_doc_from_nsdoc(nshtmldoc, window->doc_obj, window, &doc);
+        if(SUCCEEDED(hres)) {
+            window_set_docnode(window, doc);
+            htmldoc_release(&doc->basedoc);
+        }else {
+            ERR("create_doc_from_nsdoc failed: %08x\n", hres);
+        }
+    }
+
+    nsIDOMHTMLDocument_Release(nshtmldoc);
 }
 
 HTMLWindow *nswindow_to_window(const nsIDOMWindow *nswindow)

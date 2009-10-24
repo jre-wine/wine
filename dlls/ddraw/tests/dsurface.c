@@ -325,6 +325,37 @@ static void SrcColorKey32BlitTest(void)
     ok(ddsd.ddckCKSrcBlt.dwColorSpaceLowValue == 0x00FF00 && ddsd.ddckCKSrcBlt.dwColorSpaceHighValue == 0x00FF00,
        "GetSurfaceDesc does not return the colorkey set with SetColorKey\n");
 
+    /* Test SetColorKey with dwColorSpaceHighValue < dwColorSpaceLowValue */
+    DDColorKey.dwColorSpaceLowValue = 0x0000FF;
+    DDColorKey.dwColorSpaceHighValue = 0x000000;
+    IDirectDrawSurface_SetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+
+    DDColorKey.dwColorSpaceLowValue = 0;
+    DDColorKey.dwColorSpaceHighValue = 0;
+    IDirectDrawSurface_GetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+    ok(DDColorKey.dwColorSpaceLowValue == 0x0000FF && DDColorKey.dwColorSpaceHighValue == 0x0000FF,
+       "GetColorKey does not return the colorkey set with SetColorKey (%x %x)\n", DDColorKey.dwColorSpaceLowValue, DDColorKey.dwColorSpaceHighValue);
+
+    DDColorKey.dwColorSpaceLowValue = 0x0000FF;
+    DDColorKey.dwColorSpaceHighValue = 0x000001;
+    IDirectDrawSurface_SetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+
+    DDColorKey.dwColorSpaceLowValue = 0;
+    DDColorKey.dwColorSpaceHighValue = 0;
+    IDirectDrawSurface_GetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+    ok(DDColorKey.dwColorSpaceLowValue == 0x0000FF && DDColorKey.dwColorSpaceHighValue == 0x0000FF,
+       "GetColorKey does not return the colorkey set with SetColorKey (%x %x)\n", DDColorKey.dwColorSpaceLowValue, DDColorKey.dwColorSpaceHighValue);
+
+    DDColorKey.dwColorSpaceLowValue = 0x0000FF;
+    DDColorKey.dwColorSpaceHighValue = 0x0000FE;
+    IDirectDrawSurface_SetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+
+    DDColorKey.dwColorSpaceLowValue = 0;
+    DDColorKey.dwColorSpaceHighValue = 0;
+    IDirectDrawSurface_GetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
+    ok(DDColorKey.dwColorSpaceLowValue == 0x0000FF && DDColorKey.dwColorSpaceHighValue == 0x0000FF,
+       "GetColorKey does not return the colorkey set with SetColorKey (%x %x)\n", DDColorKey.dwColorSpaceLowValue, DDColorKey.dwColorSpaceHighValue);
+
     IDirectDrawSurface_Release(lpSrc);
     IDirectDrawSurface_Release(lpDst);
 
@@ -2402,6 +2433,7 @@ static void PrivateDataTest(void)
     ref2 = getref((IUnknown *) lpDD);
     ok(ref2 == ref + 1, "Object reference is %d, expected %d\n", ref2, ref + 1);
     hr = IDirectDrawSurface7_FreePrivateData(surface7, &IID_IDirectDrawSurface7);
+    ok(SUCCEEDED(hr), "IDirectDrawSurface7_FreePrivateData returned %#x.\n", hr);
     ref2 = getref((IUnknown *) lpDD);
     ok(ref2 == ref, "Object reference is %d, expected %d\n", ref2, ref);
 
@@ -3188,11 +3220,10 @@ static void GetDCFormatTest(void)
         ddsd.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT | DDSD_PIXELFORMAT;
         ddsd.dwWidth = 64;
         ddsd.dwHeight = 64;
-        ddsd.ddpfPixelFormat = testdata[i].fmt;
+        U4(ddsd).ddpfPixelFormat = testdata[i].fmt;
         ddsd.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
 
         hr = IDirectDraw7_CreateSurface(dd7, &ddsd, &surface, NULL);
-        hr = E_FAIL;
         if(FAILED(hr))
         {
             ddsd.ddsCaps.dwCaps = DDSCAPS_TEXTURE;

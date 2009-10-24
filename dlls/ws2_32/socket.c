@@ -1219,13 +1219,16 @@ static int ws_sockaddr_u2ws(const struct sockaddr* uaddr, struct WS_sockaddr* ws
         win6old->sin6_port     = uin6->sin6_port;
         win6old->sin6_flowinfo = uin6->sin6_flowinfo;
         memcpy(&win6old->sin6_addr,&uin6->sin6_addr,16); /* 16 bytes = 128 address bits */
-        *wsaddrlen = sizeof(struct WS_sockaddr_in6_old);
 #ifdef HAVE_STRUCT_SOCKADDR_IN6_SIN6_SCOPE_ID
         if (*wsaddrlen >= sizeof(struct WS_sockaddr_in6)) {
             struct WS_sockaddr_in6* win6 = (struct WS_sockaddr_in6*)wsaddr;
             win6->sin6_scope_id = uin6->sin6_scope_id;
             *wsaddrlen = sizeof(struct WS_sockaddr_in6);
         }
+        else
+            *wsaddrlen = sizeof(struct WS_sockaddr_in6_old);
+#else
+        *wsaddrlen = sizeof(struct WS_sockaddr_in6_old);
 #endif
         return 0;
     }
@@ -1503,6 +1506,7 @@ static NTSTATUS WS2_async_shutdown( void* user, PIO_STATUS_BLOCK iosb, NTSTATUS 
         break;
     }
     iosb->u.Status = status;
+    iosb->Information = 0;
     *apc = ws2_async_apc;
     return status;
 }
@@ -2879,6 +2883,8 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
                      const struct WS_timeval* ws_timeout)
 {
     struct pollfd *pollfds;
+    struct timeval tv1, tv2;
+    int torig = 0;
     int count, ret, timeout = -1;
 
     TRACE("read %p, write %p, excp %p timeout %p\n",
@@ -2890,9 +2896,32 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
         return SOCKET_ERROR;
     }
 
-    if (ws_timeout) timeout = (ws_timeout->tv_sec * 1000) + (ws_timeout->tv_usec + 999) / 1000;
+    if (ws_timeout)
+    {
+        torig = (ws_timeout->tv_sec * 1000) + (ws_timeout->tv_usec + 999) / 1000;
+        timeout = torig;
+        gettimeofday( &tv1, 0 );
+    }
 
-    ret = poll( pollfds, count, timeout );
+    while ((ret = poll( pollfds, count, timeout )) < 0)
+    {
+        if (errno == EINTR)
+        {
+            if (!ws_timeout) continue;
+            gettimeofday( &tv2, 0 );
+
+            tv2.tv_sec  -= tv1.tv_sec;
+            tv2.tv_usec -= tv1.tv_usec;
+            if (tv2.tv_usec < 0)
+            {
+                tv2.tv_usec += 1000000;
+                tv2.tv_sec  -= 1;
+            }
+
+            timeout = torig - (tv2.tv_sec * 1000) - (tv2.tv_usec + 999) / 1000;
+            if (timeout <= 0) break;
+        } else break;
+    }
     release_poll_fds( ws_readfds, ws_writefds, ws_exceptfds, pollfds );
 
     if (ret == -1) SetLastError(wsaErrno());

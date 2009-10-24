@@ -148,14 +148,7 @@ void wined3d_rb_free(void *ptr) DECLSPEC_HIDDEN;
 #define MAX_ACTIVE_LIGHTS       8
 #define MAX_CLIPPLANES          WINED3DMAXUSERCLIPPLANES
 
-typedef enum _WINELOOKUP {
-    WINELOOKUP_WARPPARAM = 0,
-    MAX_LOOKUPS          = 1
-} WINELOOKUP;
-
-extern const int minLookup[MAX_LOOKUPS] DECLSPEC_HIDDEN;
-extern const int maxLookup[MAX_LOOKUPS] DECLSPEC_HIDDEN;
-extern DWORD *stateLookup[MAX_LOOKUPS] DECLSPEC_HIDDEN;
+extern GLint wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP + 1] DECLSPEC_HIDDEN;
 
 struct min_lookup
 {
@@ -753,7 +746,6 @@ extern int num_lock DECLSPEC_HIDDEN;
 /* GL related defines */
 /* ------------------ */
 #define GL_SUPPORT(ExtName)           (GLINFO_LOCATION.supported[ExtName] != 0)
-#define GL_LIMITS(ExtName)            (GLINFO_LOCATION.max_##ExtName)
 #define GL_EXTCALL(FuncName)          (GLINFO_LOCATION.FuncName)
 
 #define D3DCOLOR_B_R(dw) (((dw) >> 16) & 0xFF)
@@ -1051,11 +1043,11 @@ struct wined3d_context
     WORD last_was_blit : 1;
     WORD last_was_ckey : 1;
     WORD fog_coord : 1;
-    WORD isPBuffer : 1;
     WORD fog_enabled : 1;
     WORD num_untracked_materials : 2;   /* Max value 2 */
     WORD current : 1;
     WORD destroyed : 1;
+    WORD valid : 1;
     BYTE texShaderBumpMap;              /* MAX_TEXTURES, 8 */
     BYTE lastWasPow2Texture;            /* MAX_TEXTURES, 8 */
     DWORD                   numbered_array_mask;
@@ -1076,6 +1068,7 @@ struct wined3d_context
     /* FBOs */
     UINT                    fbo_entry_count;
     struct list             fbo_list;
+    struct list             fbo_destroy_list;
     struct fbo_entry        *current_fbo;
     GLuint                  src_fbo;
     GLuint                  dst_fbo;
@@ -1203,13 +1196,11 @@ HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChain *
 /*****************************************************************************
  * Internal representation of a light
  */
-typedef struct PLIGHTINFOEL PLIGHTINFOEL;
-struct PLIGHTINFOEL {
+struct wined3d_light_info
+{
     WINED3DLIGHT OriginalParms; /* Note D3D8LIGHT == D3D9LIGHT */
     DWORD        OriginalIndex;
     LONG         glIndex;
-    BOOL         changed;
-    BOOL         enabledChanged;
     BOOL         enabled;
 
     /* Converted parms to speed up swapping lights */
@@ -1238,7 +1229,7 @@ typedef struct WineD3D_PixelFormat
 } WineD3D_PixelFormat;
 
 /* The adapter structure */
-struct WineD3DAdapter
+struct wined3d_adapter
 {
     UINT                    num;
     BOOL                    opengl;
@@ -1348,7 +1339,7 @@ typedef struct IWineD3DImpl
     UINT                    dxVersion;
 
     UINT adapter_count;
-    struct WineD3DAdapter adapters[1];
+    struct wined3d_adapter adapters[1];
 } IWineD3DImpl;
 
 extern const IWineD3DVtbl IWineD3D_Vtbl DECLSPEC_HIDDEN;
@@ -1376,7 +1367,7 @@ struct IWineD3DDeviceImpl
     IUnknown               *parent;
     IWineD3DDeviceParent   *device_parent;
     IWineD3D               *wineD3D;
-    struct WineD3DAdapter  *adapter;
+    struct wined3d_adapter *adapter;
 
     /* Window styles to restore when switching fullscreen mode */
     LONG                    style;
@@ -2081,7 +2072,6 @@ typedef struct SAVEDSTATES {
     DWORD renderState[(WINEHIGHEST_RENDER_STATE >> 5) + 1];
     DWORD textureState[MAX_TEXTURES];           /* WINED3D_HIGHEST_TEXTURE_STATE + 1, 18 */
     WORD samplerState[MAX_COMBINED_SAMPLERS];   /* WINED3D_HIGHEST_SAMPLER_STATE + 1, 14 */
-    DWORD textures;                             /* MAX_COMBINED_SAMPLERS, 20 */
     DWORD clipplane;                            /* WINED3DMAXUSERCLIPPLANES, 32 */
     WORD pixelShaderConstantsB;                 /* MAX_CONST_B, 16 */
     WORD pixelShaderConstantsI;                 /* MAX_CONST_I, 16 */
@@ -2089,15 +2079,16 @@ typedef struct SAVEDSTATES {
     WORD vertexShaderConstantsB;                /* MAX_CONST_B, 16 */
     WORD vertexShaderConstantsI;                /* MAX_CONST_I, 16 */
     BOOL *vertexShaderConstantsF;
-    WORD primitive_type : 1;
-    WORD indices : 1;
-    WORD material : 1;
-    WORD viewport : 1;
-    WORD vertexDecl : 1;
-    WORD pixelShader : 1;
-    WORD vertexShader : 1;
-    WORD scissorRect : 1;
-    WORD padding : 1;
+    DWORD textures : 20;                        /* MAX_COMBINED_SAMPLERS, 20 */
+    DWORD primitive_type : 1;
+    DWORD indices : 1;
+    DWORD material : 1;
+    DWORD viewport : 1;
+    DWORD vertexDecl : 1;
+    DWORD pixelShader : 1;
+    DWORD vertexShader : 1;
+    DWORD scissorRect : 1;
+    DWORD padding : 4;
 } SAVEDSTATES;
 
 struct StageState {
@@ -2153,7 +2144,7 @@ struct IWineD3DStateBlockImpl
 #define LIGHTMAP_SIZE 43 /* Use of a prime number recommended. Set to 1 for a linked list! */
 #define LIGHTMAP_HASHFUNC(x) ((x) % LIGHTMAP_SIZE) /* Primitive and simple function */
     struct list               lightMap[LIGHTMAP_SIZE]; /* Hash map containing the lights */
-    PLIGHTINFOEL             *activeLights[MAX_ACTIVE_LIGHTS]; /* Map of opengl lights to d3d lights */
+    const struct wined3d_light_info *activeLights[MAX_ACTIVE_LIGHTS]; /* Map of opengl lights to d3d lights */
 
     /* Clipping */
     double                    clipplane[MAX_CLIPPLANES][4];
@@ -2405,7 +2396,7 @@ BOOL is_invalid_op(IWineD3DDeviceImpl *This, int stage, WINED3DTEXTUREOP op,
 void set_tex_op_nvrc(IWineD3DDevice *iface, BOOL is_alpha, int stage, WINED3DTEXTUREOP op,
         DWORD arg1, DWORD arg2, DWORD arg3, INT texture_idx, DWORD dst) DECLSPEC_HIDDEN;
 void set_texture_matrix(const float *smat, DWORD flags, BOOL calculatedCoords,
-        BOOL transformed, DWORD coordtype, BOOL ffp_can_disable_proj) DECLSPEC_HIDDEN;
+        BOOL transformed, WINED3DFORMAT coordtype, BOOL ffp_can_disable_proj) DECLSPEC_HIDDEN;
 void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock,
         struct wined3d_context *context) DECLSPEC_HIDDEN;
 void sampler_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock,

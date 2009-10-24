@@ -304,6 +304,7 @@ static const IID * const iframe_iids[] = {
     &IID_IHTMLElement,
     &IID_IHTMLElement2,
     &IID_IHTMLElement3,
+    &IID_IHTMLFrameBase,
     &IID_IHTMLFrameBase2,
     &IID_IDispatchEx,
     &IID_IConnectionPointContainer,
@@ -338,6 +339,14 @@ static const IID * const cstyle_iids[] = {
     &IID_IDispatch,
     &IID_IDispatchEx,
     &IID_IHTMLCurrentStyle,
+    NULL
+};
+
+static const IID * const img_factory_iids[] = {
+    &IID_IUnknown,
+    &IID_IDispatch,
+    &IID_IDispatchEx,
+    &IID_IHTMLImageElementFactory,
     NULL
 };
 
@@ -656,6 +665,20 @@ static IHTMLDocument2 *_get_owner_doc(unsigned line, IUnknown *unk)
     return doc;
 }
 
+#define get_doc_window(d) _get_doc_window(__LINE__,d)
+static IHTMLWindow2 *_get_doc_window(unsigned line, IHTMLDocument2 *doc)
+{
+    IHTMLWindow2 *window;
+    HRESULT hres;
+
+    window = NULL;
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok_(__FILE__,line)(hres == S_OK, "get_parentWindow failed: %08x\n", hres);
+    ok_(__FILE__,line)(window != NULL, "window == NULL\n");
+
+    return window;
+}
+
 #define clone_node(n,d) _clone_node(__LINE__,n,d)
 static IHTMLDOMNode *_clone_node(unsigned line, IUnknown *unk, VARIANT_BOOL deep)
 {
@@ -807,6 +830,45 @@ static IHTMLDocument2 *_get_doc_node(unsigned line, IHTMLDocument2 *doc)
     ok_(__FILE__,line)(ret != NULL, "document = NULL\n");
 
     return ret;
+}
+
+#define test_window_name(d,e) _test_window_name(__LINE__,d,e)
+static void _test_window_name(unsigned line, IHTMLWindow2 *window, const char *exname)
+{
+    BSTR name;
+    HRESULT hres;
+
+    hres = IHTMLWindow2_get_name(window, &name);
+    ok_(__FILE__,line)(hres == S_OK, "get_name failed: %08x\n", hres);
+    if(exname)
+        ok_(__FILE__,line)(!strcmp_wa(name, exname), "name = %s\n", wine_dbgstr_w(name));
+    else
+        ok_(__FILE__,line)(!name, "name = %s\n", wine_dbgstr_w(name));
+}
+
+#define set_window_name(w,n) _set_window_name(__LINE__,w,n)
+static void _set_window_name(unsigned line, IHTMLWindow2 *window, const char *name)
+{
+    BSTR str;
+    HRESULT hres;
+
+    str = a2bstr(name);
+    hres = IHTMLWindow2_put_name(window, str);
+    SysFreeString(str);
+    ok_(__FILE__,line)(hres == S_OK, "put_name failed: %08x\n", hres);
+
+    _test_window_name(line, window, name);
+}
+
+#define test_window_length(w,l) _test_window_length(__LINE__,w,l)
+static void _test_window_length(unsigned line, IHTMLWindow2 *window, LONG exlen)
+{
+    LONG length = -1;
+    HRESULT hres;
+
+    hres = IHTMLWindow2_get_length(window, &length);
+    ok_(__FILE__,line)(hres == S_OK, "get_length failed: %08x\n", hres);
+    ok_(__FILE__,line)(length == exlen, "length = %d, expected %d\n", length, exlen);
 }
 
 static void test_get_set_attr(IHTMLDocument2 *doc)
@@ -1000,6 +1062,105 @@ static IHTMLOptionElement *_create_option_elem(unsigned line, IHTMLDocument2 *do
     _test_option_value(line, option, val);
 
     return option;
+}
+
+#define test_img_width(o,w) _test_img_width(__LINE__,o,w)
+static void _test_img_width(unsigned line, IHTMLImgElement *img, const long exp)
+{
+    LONG found = -1;
+    HRESULT hres;
+
+    hres = IHTMLImgElement_get_width(img, &found);
+    todo_wine ok_(__FILE__,line) (hres == S_OK, "get_width failed: %08x\n", hres);
+    todo_wine ok_(__FILE__,line) (found == exp, "width=%d\n", found);
+}
+
+#define test_img_put_width(o,w) _test_img_put_width(__LINE__,o,w)
+static void _test_img_put_width(unsigned line, IHTMLImgElement *img, const long width)
+{
+    HRESULT hres;
+
+    hres = IHTMLImgElement_put_width(img, width);
+    todo_wine ok(hres == S_OK, "put_width failed: %08x\n", hres);
+
+    _test_img_width(line, img, width);
+}
+
+#define test_img_height(o,h) _test_img_height(__LINE__,o,h)
+static void _test_img_height(unsigned line, IHTMLImgElement *img, const long exp)
+{
+    LONG found = -1;
+    HRESULT hres;
+
+    hres = IHTMLImgElement_get_height(img, &found);
+    todo_wine ok_(__FILE__,line) (hres == S_OK, "get_height failed: %08x\n", hres);
+    todo_wine ok_(__FILE__,line) (found == exp, "height=%d\n", found);
+}
+
+#define test_img_put_height(o,w) _test_img_put_height(__LINE__,o,w)
+static void _test_img_put_height(unsigned line, IHTMLImgElement *img, const long height)
+{
+    HRESULT hres;
+
+    hres = IHTMLImgElement_put_height(img, height);
+    todo_wine ok(hres == S_OK, "put_height failed: %08x\n", hres);
+
+    _test_img_height(line, img, height);
+}
+
+#define create_img_elem(d,t,v) _create_img_elem(__LINE__,d,t,v)
+static IHTMLImgElement *_create_img_elem(unsigned line, IHTMLDocument2 *doc,
+        LONG wdth, LONG hght)
+{
+    IHTMLImageElementFactory *factory;
+    IHTMLImgElement *img;
+    IHTMLWindow2 *window;
+    VARIANT width, height;
+    char buf[16];
+    HRESULT hres;
+
+    hres = IHTMLDocument2_get_parentWindow(doc, &window);
+    ok_(__FILE__,line) (hres == S_OK, "get_parentElement failed: %08x\n", hres);
+
+    hres = IHTMLWindow2_get_Image(window, &factory);
+    IHTMLWindow2_Release(window);
+    ok_(__FILE__,line) (hres == S_OK, "get_Image failed: %08x\n", hres);
+
+    test_ifaces((IUnknown*)factory, img_factory_iids);
+    test_disp((IUnknown*)factory, &IID_IHTMLImageElementFactory, "[object]");
+
+    if(wdth >= 0){
+        snprintf(buf, 16, "%d", wdth);
+        V_VT(&width) = VT_BSTR;
+        V_BSTR(&width) = a2bstr(buf);
+    }else{
+        V_VT(&width) = VT_EMPTY;
+        wdth = 0;
+    }
+
+    if(hght >= 0){
+        snprintf(buf, 16, "%d", hght);
+        V_VT(&height) = VT_BSTR;
+        V_BSTR(&height) = a2bstr(buf);
+    }else{
+        V_VT(&height) = VT_EMPTY;
+        hght = 0;
+    }
+
+    hres = IHTMLImageElementFactory_create(factory, width, height, &img);
+    ok_(__FILE__,line) (hres == S_OK, "create failed: %08x\n", hres);
+
+    IHTMLImageElementFactory_Release(factory);
+    VariantClear(&width);
+    VariantClear(&height);
+
+    if(SUCCEEDED(hres)) {
+        _test_img_width(line, img, wdth);
+        _test_img_height(line, img, hght);
+        return img;
+    }
+
+    return NULL;
 }
 
 #define test_select_length(s,l) _test_select_length(__LINE__,s,l)
@@ -2376,6 +2537,30 @@ static void test_create_option_elem(IHTMLDocument2 *doc)
     test_option_put_value(option, "new value");
 
     IHTMLOptionElement_Release(option);
+}
+
+static void test_create_img_elem(IHTMLDocument2 *doc)
+{
+    IHTMLImgElement *img;
+
+    img = create_img_elem(doc, 10, 15);
+
+    if(img){
+        test_img_put_width(img, 5);
+        test_img_put_height(img, 20);
+
+        IHTMLImgElement_Release(img);
+        img = NULL;
+    }
+
+    img = create_img_elem(doc, -1, -1);
+
+    if(img){
+        test_img_put_width(img, 5);
+        test_img_put_height(img, 20);
+
+        IHTMLImgElement_Release(img);
+    }
 }
 
 static IHTMLTxtRange *test_create_body_range(IHTMLDocument2 *doc)
@@ -4369,6 +4554,10 @@ static void test_window(IHTMLDocument2 *doc)
     ok(!strcmp_wa(str, "[object]"), "toString returned %s\n", wine_dbgstr_w(str));
     SysFreeString(str);
 
+    test_window_name(window, NULL);
+    set_window_name(window, "test");
+    test_window_length(window, 0);
+
     IHTMLWindow2_Release(window);
 }
 
@@ -4602,6 +4791,8 @@ static void test_iframe_elem(IHTMLElement *elem)
     ok(hres == S_OK, "get_contentWindow failed: %08x\n", hres);
     ok(content_window != NULL, "contentWindow = NULL\n");
 
+    test_window_length(content_window, 0);
+
     content_doc = NULL;
     hres = IHTMLWindow2_get_document(content_window, &content_doc);
     IHTMLWindow2_Release(content_window);
@@ -4738,6 +4929,7 @@ static void test_elems(IHTMLDocument2 *doc)
     IHTMLDOMChildrenCollection *child_col;
     IHTMLElement *elem, *elem2, *elem3;
     IHTMLDOMNode *node, *node2;
+    IHTMLWindow2 *window;
     IDispatch *disp;
     LONG type;
     HRESULT hres;
@@ -5097,6 +5289,7 @@ static void test_elems(IHTMLDocument2 *doc)
 
     test_stylesheets(doc);
     test_create_option_elem(doc);
+    test_create_img_elem(doc);
 
     elem = get_doc_elem_by_id(doc, "tbl");
     ok(elem != NULL, "elem = NULL\n");
@@ -5151,6 +5344,12 @@ static void test_elems(IHTMLDocument2 *doc)
     IHTMLElement_Release(elem);
 
     IHTMLDocument3_Release(doc3);
+
+    window = get_doc_window(doc);
+    test_window_name(window, NULL);
+    set_window_name(window, "test name");
+    test_window_length(window, 1);
+    IHTMLWindow2_Release(window);
 }
 
 static void test_create_elems(IHTMLDocument2 *doc)

@@ -73,6 +73,8 @@ struct dispex_dynamic_data_t {
 #define DISPID_DYNPROP_0    0x50000000
 #define DISPID_DYNPROP_MAX  0x5fffffff
 
+#define FDEX_VERSION_MASK 0xf0000000
+
 static ITypeLib *typelib;
 static ITypeInfo *typeinfos[LAST_tid];
 static struct list dispex_data_list = LIST_INIT(dispex_data_list);
@@ -123,8 +125,10 @@ static REFIID tid_ids[] = {
     &IID_IHTMLElement4,
     &IID_IHTMLElementCollection,
     &IID_IHTMLEventObj,
+    &IID_IHTMLFrameBase,
     &IID_IHTMLFrameBase2,
     &IID_IHTMLGenericElement,
+    &IID_IHTMLImageElementFactory,
     &IID_IHTMLImgElement,
     &IID_IHTMLInputElement,
     &IID_IHTMLLocation,
@@ -220,7 +224,7 @@ static void add_func_info(dispex_data_t *data, DWORD *size, tid_t tid, const FUN
 
     data->funcs[data->func_cnt].id = desc->memid;
     data->funcs[data->func_cnt].tid = tid;
-    data->funcs[data->func_cnt].func_disp_idx = desc->invkind == INVOKE_FUNC ? data->func_disp_cnt++ : -1;
+    data->funcs[data->func_cnt].func_disp_idx = (desc->invkind & DISPATCH_METHOD) ? data->func_disp_cnt++ : -1;
 
     data->func_cnt++;
 }
@@ -514,6 +518,9 @@ static HRESULT function_value(IUnknown *iface, LCID lcid, WORD flags, DISPPARAMS
     HRESULT hres;
 
     switch(flags) {
+    case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
+        if(!res)
+            return E_INVALIDARG;
     case DISPATCH_METHOD:
         hres = typeinfo_invoke(This->obj, This->info, flags, params, res, ei);
         break;
@@ -570,6 +577,9 @@ static HRESULT function_invoke(DispatchEx *This, func_info_t *func, WORD flags, 
     HRESULT hres;
 
     switch(flags) {
+    case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
+        if(!res)
+            return E_INVALIDARG;
     case DISPATCH_METHOD:
         hres = typeinfo_invoke(This, func, flags, dp, res, ei);
         break;
@@ -736,7 +746,7 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
 
     TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(bstrName), grfdex, pid);
 
-    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit))
+    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK))
         FIXME("Unsupported grfdex %x\n", grfdex);
 
     data = get_dispex_data(This);
@@ -794,8 +804,16 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         return This->data->vtbl->invoke(This->outer, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller);
 
     if(wFlags == DISPATCH_CONSTRUCT) {
-        FIXME("DISPATCH_CONSTRUCT not implemented\n");
-        return E_NOTIMPL;
+        if(id == DISPID_VALUE) {
+            if(This->data->vtbl && This->data->vtbl->value) {
+                return This->data->vtbl->value(This->outer, lcid, wFlags, pdp,
+                        pvarRes, pei, pspCaller);
+            }
+            FIXME("DISPATCH_CONSTRUCT flag but missing value function\n");
+            return E_FAIL;
+        }
+        FIXME("DISPATCH_CONSTRUCT flag without DISPID_VALUE\n");
+        return E_FAIL;
     }
 
     if(is_dynamic_dispid(id)) {
@@ -808,7 +826,10 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         var = &This->dynamic_data->props[idx].var;
 
         switch(wFlags) {
-        case INVOKE_FUNC: {
+        case DISPATCH_METHOD|DISPATCH_PROPERTYGET:
+            if(!pvarRes)
+                return E_INVALIDARG;
+        case DISPATCH_METHOD: {
             DISPID named_arg = DISPID_THIS;
             DISPPARAMS dp = {NULL, &named_arg, 0, 1};
             IDispatchEx *dispex;
@@ -847,9 +868,9 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
             heap_free(dp.rgvarg);
             return hres;
         }
-        case INVOKE_PROPERTYGET:
+        case DISPATCH_PROPERTYGET:
             return VariantCopy(pvarRes, var);
-        case INVOKE_PROPERTYPUT:
+        case DISPATCH_PROPERTYPUT:
             VariantClear(var);
             return VariantCopy(var, pdp->rgvarg);
         default:

@@ -1020,7 +1020,6 @@ static BOOL parse_object_members_list(parse_buffer * buf)
   DWORD token;
   int i;
   xtemplate* pt = buf->pxt[buf->level];
-  DWORD last_dword = 0;
 
   for (i = 0; i < pt->nb_members; i++)
   {
@@ -1092,7 +1091,6 @@ static BOOL parse_object_members_list(parse_buffer * buf)
         if (token == TOKEN_INTEGER)
         {
           get_TOKEN(buf);
-          last_dword = *(DWORD*)buf->value;
           TRACE("%s = %d\n", pt->members[i].name, *(DWORD*)buf->value);
           /* Assume larger size */
           if (!check_buffer(buf, 4))
@@ -1176,6 +1174,8 @@ static BOOL parse_object_members_list(parse_buffer * buf)
 
 static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
 {
+  buf->pxo->nb_childs = 0;
+
   if (!parse_object_members_list(buf))
     return FALSE;
 
