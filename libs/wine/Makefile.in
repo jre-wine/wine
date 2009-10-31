@@ -106,12 +106,12 @@ all: $(MODULE) $(MODULE:.dll=.a)
 # Special defines needed for config.c
 
 CONFIGDIRS = \
-	-DBINDIR='"$(libdir)/wine"' \
+	-DBINDIR='"$(dlldir)"' \
 	-DDLLDIR='"$(dlldir)"' \
-	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(libdir)/wine`\" \
+	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
 	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
-	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(libdir)/wine $(dlldir)`\" \
-	-DBIN_TO_DATADIR=\"`$(RELPATH) $(libdir)/wine $(datadir)/wine$(DATASUFFIX)`\"
+	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(dlldir) $(dlldir)`\" \
+	-DBIN_TO_DATADIR=\"`$(RELPATH) $(dlldir) $(datadir)/wine$(DATASUFFIX)`\"
 
 config.o: config.c $(RELPATH)
 	$(CC) -c $(ALLCFLAGS) -o $@ $(SRCDIR)/config.c $(CONFIGDIRS)
