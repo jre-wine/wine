@@ -45,7 +45,7 @@ EXTRASUBDIRS = winapi
 INSTALLDIRS = \
 	$(DESTDIR)$(bindir) \
 	$(DESTDIR)$(datadir)/applications \
-	$(DESTDIR)$(datadir)/wine \
+	$(DESTDIR)$(datadir)/wine$(DATASUFFIX) \
 	$(DESTDIR)$(mandir)/man$(prog_manext)
 
 UPDATE_DESKTOP_DATABASE = update-desktop-database
@@ -76,12 +76,12 @@ wine.inf: wine.inf.in
 	LC_ALL=C sed -e 's,@PACKAGE_STRING\@,@PACKAGE_STRING@,g' $(SRCDIR)/wine.inf.in >$@ || ($(RM) $@ && false)
 
 wineprefixcreate: wineprefixcreate.in relpath$(EXEEXT)
-	sed -e "s,@bintodlldir\@,`$(RELPATH) $(bindir) $(dlldir)`,g" -e "s,@bintodatadir\@,`$(RELPATH) $(bindir) $(datadir)/wine`,g" $(SRCDIR)/wineprefixcreate.in >$@ || ($(RM) $@ && false)
+	sed -e "s,@bintodlldir\@,`$(RELPATH) $(bindir) $(dlldir)`,g" -e "s,@bintodatadir\@,`$(RELPATH) $(bindir) $(datadir)/wine$(DATASUFFIX)`,g" $(SRCDIR)/wineprefixcreate.in >$@ || ($(RM) $@ && false)
 	chmod +x wineprefixcreate
 
 install install-lib:: wine.inf wineprefixcreate $(INSTALLDIRS)
 	$(INSTALL_SCRIPT) wineprefixcreate $(DESTDIR)$(bindir)/wineprefixcreate
-	$(INSTALL_DATA) wine.inf $(DESTDIR)$(datadir)/wine/wine.inf
+	$(INSTALL_DATA) wine.inf $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/wine.inf
 	$(INSTALL_DATA) $(SRCDIR)/wine.desktop $(DESTDIR)$(datadir)/applications/wine.desktop
 	$(INSTALL_DATA) wineprefixcreate.man $(DESTDIR)$(mandir)/man$(prog_manext)/wineprefixcreate.$(prog_manext)
 	-$(UPDATE_DESKTOP_DATABASE)
@@ -91,7 +91,7 @@ install install-dev:: $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
 	$(INSTALL_DATA) winemaker.man $(DESTDIR)$(mandir)/man$(prog_manext)/winemaker.$(prog_manext)
 
 uninstall::
-	$(RM) $(DESTDIR)$(bindir)/winemaker $(DESTDIR)$(bindir)/wineprefixcreate $(DESTDIR)$(mandir)/man$(prog_manext)/winemaker.$(prog_manext) $(DESTDIR)$(mandir)/man$(prog_manext)/wineprefixcreate.$(prog_manext) $(DESTDIR)$(datadir)/wine/wine.inf $(DESTDIR)$(datadir)/applications/wine.desktop
+	$(RM) $(DESTDIR)$(bindir)/winemaker $(DESTDIR)$(bindir)/wineprefixcreate $(DESTDIR)$(mandir)/man$(prog_manext)/winemaker.$(prog_manext) $(DESTDIR)$(mandir)/man$(prog_manext)/wineprefixcreate.$(prog_manext) $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/wine.inf $(DESTDIR)$(datadir)/applications/wine.desktop
 	-$(UPDATE_DESKTOP_DATABASE)
 
 wmc wrc: relpath$(EXEEXT)

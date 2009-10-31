@@ -111,7 +111,7 @@ CONFIGDIRS = \
 	-DLIB_TO_BINDIR=\"`$(RELPATH) $(libdir) $(libdir)/wine`\" \
 	-DLIB_TO_DLLDIR=\"`$(RELPATH) $(libdir) $(dlldir)`\" \
 	-DBIN_TO_DLLDIR=\"`$(RELPATH) $(libdir)/wine $(dlldir)`\" \
-	-DBIN_TO_DATADIR=\"`$(RELPATH) $(libdir)/wine $(datadir)/wine`\"
+	-DBIN_TO_DATADIR=\"`$(RELPATH) $(libdir)/wine $(datadir)/wine$(DATASUFFIX)`\"
 
 config.o: config.c $(RELPATH)
 	$(CC) -c $(ALLCFLAGS) -o $@ $(SRCDIR)/config.c $(CONFIGDIRS)
