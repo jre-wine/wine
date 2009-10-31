@@ -7,7 +7,8 @@ function replace_paths_full
   sed "s,/usr/lib,/$1," | \
   sed "s,/$1/wine,&$SUFFIX," | \
   sed "s,/usr/share/wine,&$SUFFIX," | \
-  sed "s,usr/share/doc/$package,&$SUFFIX,"
+  sed "s,usr/share/doc/$package,&$SUFFIX," | \
+  ([ "$ext" != "lintian-overrides" ] && cat || sed "s,^$package,&$SUFFIX," )
 }
 
 function replace_paths_partial
