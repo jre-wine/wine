@@ -83,7 +83,7 @@ install-aclocal: $(DESTDIR)$(datadir)/aclocal dummy
 
 uninstall::
 	$(RM) $(DESTDIR)$(datadir)/aclocal/wine.m4
-	-rmdir $(DESTDIR)$(datadir)/wine $(DESTDIR)$(datadir)/aclocal
+	-rmdir $(DESTDIR)$(datadir)/wine$(DATASUFFIX) $(DESTDIR)$(datadir)/aclocal
 
 # Dependencies between directories
 

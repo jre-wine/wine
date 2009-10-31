@@ -2,7 +2,7 @@ TOPSRCDIR = @top_srcdir@
 TOPOBJDIR = ..
 SRCDIR    = @srcdir@
 MODULE    = none
-fontdir   = $(datadir)/wine/fonts
+fontdir   = $(datadir)/wine$(DATASUFFIX)/fonts
 INSTALLDIRS = $(DESTDIR)$(fontdir)
 
 BITMAP_FONTS  = \
