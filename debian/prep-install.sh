@@ -2,14 +2,25 @@
 SUFFIX="$1"
 LIBDIRS="$2"
 
+function replace_paths_full
+{
+  sed "s,/usr/lib,/$1," | \
+  sed "s,/$1/wine,&$SUFFIX," | \
+  sed "s,usr/share/doc/$package,&$SUFFIX,"
+}
+
+function replace_paths_partial
+{
+  sed -n "s,/usr/lib,/$1,p" | \
+  sed "s,/$1/wine,&$SUFFIX,"
+}
+
 function expand_common
 {
-  sed "s,/usr/lib,/$1," debian/$package.${ext}-common | \
-  sed "s,usr/share/doc/$package,&$SUFFIX," \
-   > debian/$package$SUFFIX.${ext}
+  replace_paths_full $1 < debian/$package.${ext}-common > debian/$package$SUFFIX.${ext}
   shift
   while [ -n "$1" ]; do
-    sed -n "s,/usr/lib,/$1,p" debian/$package.${ext}-common >> debian/$package$SUFFIX.${ext}
+    replace_paths_partial $1 < debian/$package.${ext}-common >> debian/$package$SUFFIX.${ext}
     shift
   done
 }
@@ -21,12 +32,12 @@ function expand_platform
   if [ ! -f debian/$package.${ext}-platform ]; then
     return
   fi
-  for bin in $(sed "s,/usr/lib,/$1," debian/$package.${ext}-platform); do
+  for bin in $(replace_paths_full $1 < debian/$package.${ext}-platform); do
     [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
   done
   shift
   while [ -n "$1" ]; do
-    for bin in $(sed -n "s,/usr/lib,/$1,p" debian/$package.${ext}-platform); do
+    for bin in $(replace_paths_partial $1 < debian/$package.${ext}-platform); do
       [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
     done
     shift
@@ -40,7 +51,7 @@ function expand_modules
   fi
   while [ -n "$1" ]; do
     for mod in $(cat debian/$package.${ext}-modules); do
-      for bin in debian/tmp/$1/wine/$mod.so debian/tmp/$1/wine/$mod debian/tmp/$1/wine/fakedlls/$mod; do
+      for bin in debian/tmp/$1/wine$SUFFIX/$mod.so debian/tmp/$1/wine$SUFFIX/$mod debian/tmp/$1/wine$SUFFIX/fakedlls/$mod; do
         [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
       done
     done

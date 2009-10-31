@@ -103,6 +103,11 @@ BUILDS = build32
 
 endif # x86_64
 
+IA32_WINEDIR = $(IA32_LIBDIR)/wine$(VERSUFFIX)
+IA32_OVERRIDES = LIBSUFFIX="$(VERSUFFIX)" dlldir="/$(IA32_WINEDIR)"
+AMD64_WINEDIR = $(AMD64_LIBDIR)/wine$(VERSUFFIX)
+AMD64_OVERRIDES = LIBSUFFIX="$(VERSUFFIX)" dlldir="/$(AMD64_WINEDIR)"
+
 LOADERS = wine-kthread wine-pthread wine-preloader
 
 empty:=
@@ -183,11 +188,11 @@ build-arch32-stamp: configure-arch32-stamp
 	dh_testdir
 
 ifeq (,$(DEB_SAVEBUILD))
-	$(MAKE) -C build32 LIBSUFFIX="$(VERSUFFIX)" depend
+	$(MAKE) -C build32 $(IA32_OVERRIDES) depend
 	# build wine & tools
-	$(MAKE) -C build32 LIBSUFFIX="$(VERSUFFIX)" $(BUILDOPTS)
+	$(MAKE) -C build32 $(IA32_OVERRIDES) $(BUILDOPTS)
 	# build winelib programs
-	$(MAKE) -C build32/programs LIBSUFFIX="$(VERSUFFIX)"
+	$(MAKE) -C build32/programs $(IA32_OVERRIDES)
 endif
 
 	touch build-arch32-stamp
@@ -197,11 +202,11 @@ build-arch64-stamp: configure-arch64-stamp
 	dh_testdir
 
 ifeq (,$(DEB_SAVEBUILD))
-	$(MAKE) -C build64 LIBSUFFIX="$(VERSUFFIX)" depend
+	$(MAKE) -C build64 $(AMD64_OVERRIDES) depend
 	# build wine & tools
-	$(MAKE) -C build64 LIBSUFFIX="$(VERSUFFIX)" $(BUILDOPTS)
+	$(MAKE) -C build64 $(AMD64_OVERRIDES) $(BUILDOPTS)
 	# build winelib programs
-	$(MAKE) -C build64/programs LIBSUFFIX="$(VERSUFFIX)"
+	$(MAKE) -C build64/programs $(AMD64_OVERRIDES)
 endif
 
 	touch build-arch64-stamp
@@ -249,22 +254,22 @@ install-arch32-stamp: build-arch32-stamp
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build32 install LIBSUFFIX="$(VERSUFFIX)" DESTDIR=$(CURDIR)/debian/tmp
-	# move the real binaries into /$(IA32_LIBDIR)/wine
-	mv debian/tmp/usr/bin/wine debian/tmp/$(IA32_LIBDIR)/wine/wine.bin
+	$(MAKE) -C build32 install $(IA32_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp
+	# move the real binaries into /$(IA32_WINEDIR)
+	mv debian/tmp/usr/bin/wine debian/tmp/$(IA32_WINEDIR)/wine.bin
 	for ldr in $(LOADERS); do \
 	 [ ! -f debian/tmp/usr/bin/$$ldr ] || \
-	 mv debian/tmp/usr/bin/$$ldr debian/tmp/$(IA32_LIBDIR)/wine; \
+	 mv debian/tmp/usr/bin/$$ldr debian/tmp/$(IA32_WINEDIR); \
 	done
-	mv debian/tmp/usr/bin/wineserver debian/tmp/$(IA32_LIBDIR)/wine/wineserver
+	mv debian/tmp/usr/bin/wineserver debian/tmp/$(IA32_WINEDIR)/wineserver
 	# install manpages
 	$(MAKE) -C build32/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
-	$(MAKE) -C build32/programs install LIBSUFFIX="$(VERSUFFIX)" DESTDIR=$(CURDIR)/debian/tmp
+	$(MAKE) -C build32/programs install $(IA32_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp
 	install build32/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
-	sed "s,usr/lib/wine,$(IA32_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
+	sed "s,usr/lib/wine,$(IA32_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
 
 	touch install-arch32-stamp
 
@@ -276,18 +281,18 @@ install-arch64-stamp: build-arch64-stamp $(patsubst build%,install-arch%-stamp,$
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build64 install LIBSUFFIX="$(VERSUFFIX)" DESTDIR=$(CURDIR)/debian/tmp/usr
-	# move the real binaries into /$(AMD64_LIBDIR)/wine
-	mv debian/tmp/usr/bin/wine debian/tmp/$(AMD64_LIBDIR)/wine/wine.bin
-	mv debian/tmp/usr/bin/wineserver debian/tmp/$(AMD64_LIBDIR)/wine/wineserver
+	$(MAKE) -C build64 install $(AMD64_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp/usr
+	# move the real binaries into /$(AMD64_WINEDIR)
+	mv debian/tmp/usr/bin/wine debian/tmp/$(AMD64_WINEDIR)/wine.bin
+	mv debian/tmp/usr/bin/wineserver debian/tmp/$(AMD64_WINEDIR)/wineserver
 	# install manpages
 	$(MAKE) -C build64/documentation install-man DESTDIR=$(CURDIR)/debian/tmp
 	mv debian/tmp/usr/share/man/man3w debian/tmp/usr/share/man/man3
 	# install winelib programs
-	$(MAKE) -C build64/programs install LIBSUFFIX="$(VERSUFFIX)" DESTDIR=$(CURDIR)/debian/tmp
+	$(MAKE) -C build64/programs install $(AMD64_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
-	sed "s,usr/lib/wine,$(AMD64_LIBDIR)/wine," debian/winelauncher > debian/tmp/usr/bin/wine
+	sed "s,usr/lib/wine,$(AMD64_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
 
 	touch install-arch64-stamp
 
@@ -348,7 +353,7 @@ binary-arch: install-arch-stamp
 	#rm -f debian/libwine$(VERSUFFIX)/usr/share/wine/fonts/marlett.ttf~
 
 	# split up libwine
-	bash debian/split.sh "$(VERSUFFIX)" libwine $(patsubst %,%/wine,$(LIBDIRS))
+	bash debian/split.sh "$(VERSUFFIX)" libwine $(patsubst %,%/wine$(VERSUFFIX),$(LIBDIRS))
 
 	dh_installdocs -plibwine$(VERSUFFIX)
 	dh_installchangelogs -plibwine$(VERSUFFIX)
