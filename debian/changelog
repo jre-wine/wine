@@ -1,8 +1,36 @@
-wine-unstable (1.1.32-1) UNRELEASED; urgency=low
+wine-unstable (1.1.32-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.32, released Oct 23, 2009.
+    - Many crypto fixes, particularly on 64-bit.
+    - Improved DVD access on Mac OS.
+    - Several common controls improvements.
+    - Various HTML support improvements.
+    - More DIB optimizations.
+    - Various bug fixes.
+  * Installed the new extrac32.exe utility into libwine-bin.
+  * Install upstream's wine.desktop instead of maintaining our own
+    (these days, their version is not as bad as it used to be).
+  * Patched libs/wine/Makefile.in to make it possible to add a suffix
+    to the name of libwine.so.
+  * The suffix given to the package names is now also given to
+    libwine.so. (This is intended as a step towards making libwine and
+    libwine-unstable coinstallable.)
+  * Replaced $(libdir)/wine with $(dlldir) in libs/wine/Makefile.in.
+  * The suffix given to the package names is now also given to
+    /usr/lib/wine.
+  * Patched makefiles to make it possible to add a suffix to the name
+    of /usr/share/wine.
+  * The suffix given to the package names is now also given to
+    /usr/share/wine.
+  * Substitute the correct package name (with suffix) into the lintian
+    overrides.
+  * Override lintian error usr-share-doc-symlink-without-dependency,
+    reported on packages wine and wine-bin. (The dependency isn't
+    missing, these packages just depend on libwine through other
+    libwine-* packages. I did not want to add redundant dependencies for
+    lintian's sake, so I've added overrides instead.)
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 24 Oct 2009 15:16:09 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 02 Nov 2009 20:50:12 +0100
 
 wine-unstable (1.1.31-1) unstable; urgency=low
 
