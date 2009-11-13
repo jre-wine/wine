@@ -438,6 +438,8 @@ static IHTMLDocument2 *create_document(void)
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IHTMLDocument2, (void**)&doc);
     ok(hres == S_OK, "CoCreateInstance failed: %08x\n", hres);
+    if(FAILED(hres))
+        return NULL;
 
     hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument5, (void**)&doc5);
     if(FAILED(hres)) {
@@ -650,17 +652,18 @@ static IHTMLDocument2 *_get_owner_doc(unsigned line, IUnknown *unk)
 {
     IHTMLDOMNode2 *node = _get_node2_iface(line, unk);
     IDispatch *disp = (void*)0xdeadbeef;
-    IHTMLDocument2 *doc;
+    IHTMLDocument2 *doc = NULL;
     HRESULT hres;
 
     hres = IHTMLDOMNode2_get_ownerDocument(node, &disp);
     IHTMLDOMNode2_Release(node);
     ok_(__FILE__,line)(hres == S_OK, "get_ownerDocument failed: %08x\n", hres);
-    ok_(__FILE__,line)(disp != NULL, "disp = NULL\n");
 
-    hres = IDispatch_QueryInterface(disp, &IID_IHTMLDocument2, (void**)&doc);
-    IDispatch_Release(disp);
-    ok_(__FILE__,line)(hres == S_OK, "Could not get IHTMLDocument2 iface: %08x\n", hres);
+    if(disp) {
+        hres = IDispatch_QueryInterface(disp, &IID_IHTMLDocument2, (void**)&doc);
+        IDispatch_Release(disp);
+        ok_(__FILE__,line)(hres == S_OK, "Could not get IHTMLDocument2 iface: %08x\n", hres);
+    }
 
     return doc;
 }
@@ -937,8 +940,8 @@ static void test_get_set_attr(IHTMLDocument2 *doc)
     bstr = a2bstr("newattribute");
     hres = IHTMLElement_getAttribute(elem, bstr, 0, &val);
     ok(hres == S_OK, "getAttribute failed: %08x\n", hres);
-    todo_wine ok(V_VT(&val) == VT_BOOL, "variant type should have been VT_BOOL (0x%x), was: 0x%x\n", VT_BOOL, V_VT(&val));
-    todo_wine ok(V_BOOL(&val) == VARIANT_TRUE, "variant value should have been VARIANT_TRUE (0x%x), was %d\n", VARIANT_TRUE, V_BOOL(&val));
+    ok(V_VT(&val) == VT_BOOL, "variant type should have been VT_BOOL (0x%x), was: 0x%x\n", VT_BOOL, V_VT(&val));
+    ok(V_BOOL(&val) == VARIANT_TRUE, "variant value should have been VARIANT_TRUE (0x%x), was %d\n", VARIANT_TRUE, V_BOOL(&val));
     VariantClear(&val);
     SysFreeString(bstr);
 
@@ -1605,6 +1608,20 @@ static IHTMLDOMNode *_test_node_get_parent(unsigned line, IUnknown *unk)
     ok_(__FILE__,line) (hres == S_OK, "get_parentNode failed: %08x\n", hres);
 
     return parent;
+}
+
+#define node_get_next(u) _node_get_next(__LINE__,u)
+static IHTMLDOMNode *_node_get_next(unsigned line, IUnknown *unk)
+{
+    IHTMLDOMNode *node = _get_node_iface(line, unk);
+    IHTMLDOMNode *next;
+    HRESULT hres;
+
+    hres = IHTMLDOMNode_get_nextSibling(node, &next);
+    IHTMLDOMNode_Release(node);
+    ok_(__FILE__,line) (hres == S_OK, "get_nextSiblibg failed: %08x\n", hres);
+
+    return next;
 }
 
 #define test_elem_get_parent(u) _test_elem_get_parent(__LINE__,u)
@@ -4400,8 +4417,11 @@ static void test_doc_elem(IHTMLDocument2 *doc)
     doc_node = get_doc_node(doc);
     owner_doc = get_owner_doc((IUnknown*)elem);
     ok(iface_cmp((IUnknown *)doc_node, (IUnknown *)owner_doc), "doc_node != owner_doc\n");
-    IHTMLDocument2_Release(doc_node);
     IHTMLDocument2_Release(owner_doc);
+
+    owner_doc = get_owner_doc((IUnknown*)doc_node);
+    ok(!owner_doc, "owner_doc = %p\n", owner_doc);
+    IHTMLDocument2_Release(doc_node);
 
     test_elem_client_rect((IUnknown*)elem);
 
@@ -4764,8 +4784,8 @@ static void doc_write(IHTMLDocument2 *doc, BOOL ln, const char *text)
 
 static void test_iframe_elem(IHTMLElement *elem)
 {
+    IHTMLDocument2 *content_doc, *owner_doc;
     IHTMLElementCollection *col;
-    IHTMLDocument2 *content_doc;
     IHTMLWindow2 *content_window;
     IHTMLFrameBase2 *base2;
     IDispatch *disp;
@@ -4819,6 +4839,9 @@ static void test_iframe_elem(IHTMLElement *elem)
 
     hres = IHTMLDocument2_close(content_doc);
     ok(hres == S_OK, "close failed: %08x\n", hres);
+
+    owner_doc = get_owner_doc((IUnknown*)content_doc);
+    ok(!owner_doc, "owner_doc = %p\n", owner_doc);
 
     IHTMLDocument2_Release(content_doc);
 }
@@ -5246,11 +5269,13 @@ static void test_elems(IHTMLDocument2 *doc)
         ok(hres == S_OK, "get_length failed: %08x\n", hres);
         ok(length, "length=0\n");
 
+        node2 = NULL;
         node = get_child_item(child_col, 0);
         ok(node != NULL, "node == NULL\n");
         if(node) {
             type = get_node_type((IUnknown*)node);
             ok(type == 3, "type=%d\n", type);
+            node2 = node_get_next((IUnknown*)node);
             IHTMLDOMNode_Release(node);
         }
 
@@ -5261,6 +5286,8 @@ static void test_elems(IHTMLDocument2 *doc)
             ok(type == 8, "type=%d\n", type);
 
             test_elem_id((IUnknown*)node, NULL);
+            ok(iface_cmp((IUnknown*)node2, (IUnknown*)node), "node2 != node\n");
+            IHTMLDOMNode_Release(node2);
             IHTMLDOMNode_Release(node);
         }
 
@@ -5341,6 +5368,13 @@ static void test_elems(IHTMLDocument2 *doc)
     test_elem_innerhtml((IUnknown*)elem, "inner html");
     test_elem_set_innerhtml((IUnknown*)elem, "");
     test_elem_innerhtml((IUnknown*)elem, NULL);
+    node = node_get_next((IUnknown*)elem);
+    ok(!node, "node = %p\n", node);
+
+    elem2 = get_doc_elem_by_id(doc, "x");
+    node = node_get_next((IUnknown*)elem2);
+    IHTMLDOMNode_Release(node);
+    IHTMLElement_Release(elem2);
     IHTMLElement_Release(elem);
 
     IHTMLDocument3_Release(doc3);

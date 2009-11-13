@@ -26,7 +26,6 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
-#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 HRESULT basetexture_init(IWineD3DBaseTextureImpl *texture, UINT levels, WINED3DRESOURCETYPE resource_type,
         IWineD3DDeviceImpl *device, UINT size, DWORD usage, const struct GlPixelFormatDesc *format_desc,
@@ -83,10 +82,11 @@ void basetexture_unload(IWineD3DBaseTexture *iface)
 {
     IWineD3DTextureImpl *This = (IWineD3DTextureImpl *)iface;
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    struct wined3d_context *context = NULL;
 
-    if(This->baseTexture.texture_rgb.name ||
-       This->baseTexture.texture_srgb.name) {
-        ActivateContext(device, NULL, CTXUSAGE_RESOURCELOAD);
+    if (This->baseTexture.texture_rgb.name || This->baseTexture.texture_srgb.name)
+    {
+        context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
     }
 
     if(This->baseTexture.texture_rgb.name) {
@@ -95,6 +95,9 @@ void basetexture_unload(IWineD3DBaseTexture *iface)
     if(This->baseTexture.texture_srgb.name) {
         gltexture_delete(&This->baseTexture.texture_srgb);
     }
+
+    if (context) context_release(context);
+
     This->baseTexture.texture_rgb.dirty = TRUE;
     This->baseTexture.texture_srgb.dirty = TRUE;
 }
@@ -161,7 +164,8 @@ HRESULT basetexture_set_autogen_filter_type(IWineD3DBaseTexture *iface, WINED3DT
        * Or should we delay the applying until the texture is used for drawing? For now, apply
        * immediately.
        */
-      ActivateContext(device, NULL, CTXUSAGE_RESOURCELOAD);
+      struct wined3d_context *context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+
       ENTER_GL();
       glBindTexture(textureDimensions, This->baseTexture.texture_rgb.name);
       checkGLcall("glBindTexture");
@@ -183,6 +187,8 @@ HRESULT basetexture_set_autogen_filter_type(IWineD3DBaseTexture *iface, WINED3DT
               checkGLcall("glTexParameteri(textureDimensions, GL_GENERATE_MIPMAP_HINT_SGIS, GL_NICEST)");
       }
       LEAVE_GL();
+
+      context_release(context);
   }
   This->baseTexture.filterType = FilterType;
   TRACE("(%p) :\n", This);
@@ -471,7 +477,10 @@ void basetexture_apply_state_changes(IWineD3DBaseTexture *iface,
 
     if (gl_tex->states[WINED3DTEXSTA_MAXANISOTROPY] != aniso)
     {
-        if (GL_SUPPORT(EXT_TEXTURE_FILTER_ANISOTROPIC))
+        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+        const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+
+        if (gl_info->supported[EXT_TEXTURE_FILTER_ANISOTROPIC])
         {
             glTexParameteri(textureDimensions, GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso);
             checkGLcall("glTexParameteri(GL_TEXTURE_MAX_ANISOTROPY_EXT, aniso)");

@@ -33,8 +33,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_shader);
 
-#define GLINFO_LOCATION ((IWineD3DDeviceImpl *) This->baseShader.device)->adapter->gl_info
-
 static HRESULT  WINAPI IWineD3DPixelShaderImpl_QueryInterface(IWineD3DPixelShader *iface, REFIID riid, LPVOID *ppobj) {
     TRACE("iface %p, riid %s, ppobj %p\n", iface, debugstr_guid(riid), ppobj);
 
@@ -247,7 +245,7 @@ static HRESULT pixelshader_set_function(IWineD3DPixelShaderImpl *shader,
     /* Second pass: figure out which registers are used, what the semantics are, etc.. */
     hr = shader_get_registers_used((IWineD3DBaseShader *)shader, fe,
             reg_maps, NULL, shader->input_signature, NULL,
-            byte_code, gl_info->max_pshader_constantsF);
+            byte_code, device->d3d_pshader_constantF);
     if (FAILED(hr)) return hr;
 
     pshader_set_limits(shader);
@@ -263,10 +261,10 @@ static HRESULT pixelshader_set_function(IWineD3DPixelShaderImpl *shader,
 
     /* Don't do any register mapping magic if it is not needed, or if we can't
      * achieve anything anyway */
-    if (highest_reg_used < (gl_info->max_glsl_varyings / 4)
-            || num_regs_used > (gl_info->max_glsl_varyings / 4))
+    if (highest_reg_used < (gl_info->limits.glsl_varyings / 4)
+            || num_regs_used > (gl_info->limits.glsl_varyings / 4))
     {
-        if (num_regs_used > (gl_info->max_glsl_varyings / 4))
+        if (num_regs_used > (gl_info->limits.glsl_varyings / 4))
         {
             /* This happens with relative addressing. The input mapper function
              * warns about this if the higher registers are declared too, so

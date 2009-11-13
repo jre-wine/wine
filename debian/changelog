@@ -1,3 +1,9 @@
+wine-unstable (1.1.33-1) UNRELEASED; urgency=low
+
+  * UNRELEASED
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Fri, 13 Nov 2009 21:14:45 +0100
+
 wine-unstable (1.1.32-1) unstable; urgency=low
 
   * New upstream release 1.1.32, released Oct 23, 2009.

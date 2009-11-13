@@ -27,6 +27,7 @@
 #include "winuser.h"
 #include "winreg.h"
 #include "ole2.h"
+#include "shlguid.h"
 
 #include "mshtml_private.h"
 #include "htmlevent.h"
@@ -37,6 +38,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 enum {
     MUTATION_COMMENT,
+    MUTATION_ENDLOAD,
+    MUTATION_FRAME,
     MUTATION_IFRAME,
     MUTATION_SCRIPT
 };
@@ -230,6 +233,28 @@ static nsrefcnt NSAPI nsRunnable_Release(nsIRunnable *iface)
     return htmldoc_release(&This->basedoc);
 }
 
+static void push_mutation_queue(HTMLDocumentNode *doc, DWORD type, nsISupports *nsiface)
+{
+    mutation_queue_t *elem;
+
+    elem = heap_alloc(sizeof(mutation_queue_t));
+    if(!elem)
+        return;
+
+    elem->next = NULL;
+    elem->type = type;
+    elem->nsiface = nsiface;
+    if(nsiface)
+        nsISupports_AddRef(nsiface);
+
+    if(doc->mutation_queue_tail) {
+        doc->mutation_queue_tail = doc->mutation_queue_tail->next = elem;
+    }else {
+        doc->mutation_queue = doc->mutation_queue_tail = elem;
+        add_script_runner(doc);
+    }
+}
+
 static void pop_mutation_queue(HTMLDocumentNode *doc)
 {
     mutation_queue_t *tmp = doc->mutation_queue;
@@ -241,14 +266,36 @@ static void pop_mutation_queue(HTMLDocumentNode *doc)
     if(!tmp->next)
         doc->mutation_queue_tail = NULL;
 
-    nsISupports_Release(tmp->nsiface);
+    if(tmp->nsiface)
+        nsISupports_Release(tmp->nsiface);
     heap_free(tmp);
+}
+
+static nsresult init_nsdoc_window(HTMLDocumentNode *doc, nsIDOMDocument *nsdoc, HTMLWindow **ret)
+{
+    nsIDOMWindow *nswindow;
+
+    nswindow = get_nsdoc_window(nsdoc);
+    if(!nswindow)
+        return NS_ERROR_FAILURE;
+
+    if(!nswindow_to_window(nswindow)) {
+        HTMLWindow *window;
+        HRESULT hres;
+
+        hres = HTMLWindow_Create(doc->basedoc.doc_obj, nswindow, doc->basedoc.window, &window);
+        if(SUCCEEDED(hres))
+            *ret = window;
+    }
+
+    nsIDOMWindow_Release(nswindow);
+    return NS_OK;
 }
 
 static nsresult init_iframe_window(HTMLDocumentNode *doc, nsISupports *nsunk)
 {
     nsIDOMHTMLIFrameElement *nsiframe;
-    nsIDOMWindow *nswindow;
+    HTMLWindow *window = NULL;
     nsIDOMDocument *nsdoc;
     nsresult nsres;
 
@@ -265,22 +312,109 @@ static nsresult init_iframe_window(HTMLDocumentNode *doc, nsISupports *nsunk)
         return nsres;
     }
 
-    nswindow = get_nsdoc_window(nsdoc);
-    nsIDOMDocument_Release(nsdoc);
-    if(!nswindow)
-        return NS_ERROR_FAILURE;
+    nsres = init_nsdoc_window(doc, nsdoc, &window);
 
-    if(!nswindow_to_window(nswindow)) {
-        HTMLWindow *window;
-        HRESULT hres;
-
-        hres = HTMLWindow_Create(doc->basedoc.doc_obj, nswindow, doc->basedoc.window, &window);
-        if(SUCCEEDED(hres))
-            IHTMLWindow2_Release(HTMLWINDOW2(window));
+    if(window) {
+        HTMLIFrame_Create(doc, (nsIDOMHTMLElement*)nsiframe, window);
+        IHTMLWindow2_Release(HTMLWINDOW2(window));
     }
 
-    nsIDOMWindow_Release(nswindow);
-    return NS_OK;
+    nsIDOMDocument_Release(nsdoc);
+    return nsres;
+}
+
+static nsresult init_frame_window(HTMLDocumentNode *doc, nsISupports *nsunk)
+{
+    nsIDOMHTMLFrameElement *nsframe;
+    HTMLWindow *window = NULL;
+    nsIDOMDocument *nsdoc;
+    nsresult nsres;
+
+    nsres = nsISupports_QueryInterface(nsunk, &IID_nsIDOMHTMLFrameElement, (void**)&nsframe);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMHTMLFrameElement: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = nsIDOMHTMLFrameElement_GetContentDocument(nsframe, &nsdoc);
+    nsIDOMHTMLFrameElement_Release(nsframe);
+    if(NS_FAILED(nsres) || !nsdoc) {
+        ERR("GetContentDocument failed: %08x\n", nsres);
+        return nsres;
+    }
+
+    nsres = init_nsdoc_window(doc, nsdoc, &window);
+
+    if(window) {
+        HTMLFrameElement_Create(doc, (nsIDOMHTMLElement*)nsframe, window);
+        IHTMLWindow2_Release(HTMLWINDOW2(window));
+    }
+
+    nsIDOMDocument_Release(nsdoc);
+    return nsres;
+}
+
+/* Calls undocumented 69 cmd of CGID_Explorer */
+static void call_explorer_69(HTMLDocumentObj *doc)
+{
+    IOleCommandTarget *olecmd;
+    VARIANT var;
+    HRESULT hres;
+
+    if(!doc->client)
+        return;
+
+    hres = IOleClientSite_QueryInterface(doc->client, &IID_IOleCommandTarget, (void**)&olecmd);
+    if(FAILED(hres))
+        return;
+
+    VariantInit(&var);
+    hres = IOleCommandTarget_Exec(olecmd, &CGID_Explorer, 69, 0, NULL, &var);
+    IOleCommandTarget_Release(olecmd);
+    if(SUCCEEDED(hres) && V_VT(&var) != VT_NULL)
+        FIXME("handle result\n");
+}
+
+static void parse_complete_proc(task_t *task)
+{
+    HTMLDocumentObj *doc = ((docobj_task_t*)task)->doc;
+
+    TRACE("(%p)\n", doc);
+
+    if(doc->usermode == EDITMODE)
+        init_editor(&doc->basedoc);
+
+    call_explorer_69(doc);
+    call_property_onchanged(&doc->basedoc.cp_propnotif, 1005);
+    call_explorer_69(doc);
+
+    /* FIXME: IE7 calls EnableModelless(TRUE), EnableModelless(FALSE) and sets interactive state here */
+
+    set_ready_state(doc->basedoc.window, READYSTATE_INTERACTIVE);
+}
+
+static void handle_end_load(HTMLDocumentNode *This)
+{
+    docobj_task_t *task;
+
+    TRACE("\n");
+
+    if(This != This->basedoc.doc_obj->basedoc.doc_node) {
+        set_ready_state(This->basedoc.window, READYSTATE_INTERACTIVE);
+        return;
+    }
+
+    task = heap_alloc(sizeof(docobj_task_t));
+    if(!task)
+        return;
+
+    task->doc = This->basedoc.doc_obj;
+
+    /*
+     * This should be done in the worker thread that parses HTML,
+     * but we don't have such thread (Gecko parses HTML for us).
+     */
+    push_task(&task->header, &parse_complete_proc, This->basedoc.doc_obj->basedoc.task_magic);
 }
 
 static nsresult NSAPI nsRunnable_Run(nsIRunnable *iface)
@@ -338,6 +472,14 @@ static nsresult NSAPI nsRunnable_Run(nsIRunnable *iface)
             nsIDOMComment_Release(nscomment);
             break;
         }
+
+        case MUTATION_ENDLOAD:
+            handle_end_load(This);
+            break;
+
+        case MUTATION_FRAME:
+            init_frame_window(This, This->mutation_queue->nsiface);
+            break;
 
         case MUTATION_IFRAME:
             init_iframe_window(This, This->mutation_queue->nsiface);
@@ -479,21 +621,7 @@ static void NSAPI nsDocumentObserver_EndLoad(nsIDocumentObserver *iface, nsIDocu
     TRACE("\n");
 
     This->content_ready = TRUE;
-
-    if(This == This->basedoc.doc_obj->basedoc.doc_node) {
-        task_t *task;
-        task = heap_alloc(sizeof(task_t));
-
-        task->doc = &This->basedoc.doc_obj->basedoc;
-        task->task_id = TASK_PARSECOMPLETE;
-        task->next = NULL;
-
-        /*
-         * This should be done in the worker thread that parses HTML,
-         * but we don't have such thread (Gecko parses HTML for us).
-         */
-        push_task(task);
-    }
+    push_mutation_queue(This, MUTATION_ENDLOAD, NULL);
 }
 
 static void NSAPI nsDocumentObserver_ContentStatesChanged(nsIDocumentObserver *iface, nsIDocument *aDocument,
@@ -531,30 +659,12 @@ static void NSAPI nsDocumentObserver_StyleRuleRemoved(nsIDocumentObserver *iface
 {
 }
 
-static void push_mutation_queue(HTMLDocumentNode *doc, DWORD type, nsISupports *nsiface)
-{
-    mutation_queue_t *elem;
-
-    elem = heap_alloc(sizeof(mutation_queue_t));
-    if(!elem)
-        return;
-
-    elem->next = NULL;
-    elem->type = type;
-    elem->nsiface = nsiface;
-    nsISupports_AddRef(nsiface);
-
-    if(doc->mutation_queue_tail)
-        doc->mutation_queue_tail = doc->mutation_queue_tail->next = elem;
-    else
-        doc->mutation_queue = doc->mutation_queue_tail = elem;
-}
-
 static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, nsIDocument *aDocument,
         nsIContent *aContent)
 {
     HTMLDocumentNode *This = NSDOCOBS_THIS(iface);
     nsIDOMHTMLIFrameElement *nsiframe;
+    nsIDOMHTMLFrameElement *nsframe;
     nsIDOMComment *nscomment;
     nsIDOMElement *nselem;
     nsresult nsres;
@@ -573,7 +683,6 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 
         push_mutation_queue(This, MUTATION_COMMENT, (nsISupports*)nscomment);
         nsIDOMComment_Release(nscomment);
-        add_script_runner(This);
     }
 
     nsres = nsISupports_QueryInterface(aContent, &IID_nsIDOMHTMLIFrameElement, (void**)&nsiframe);
@@ -582,7 +691,14 @@ static void NSAPI nsDocumentObserver_BindToDocument(nsIDocumentObserver *iface, 
 
         push_mutation_queue(This, MUTATION_IFRAME, (nsISupports*)nsiframe);
         nsIDOMHTMLIFrameElement_Release(nsiframe);
-        add_script_runner(This);
+    }
+
+    nsres = nsISupports_QueryInterface(aContent, &IID_nsIDOMHTMLFrameElement, (void**)&nsframe);
+    if(NS_SUCCEEDED(nsres)) {
+        TRACE("frame node\n");
+
+        push_mutation_queue(This, MUTATION_FRAME, (nsISupports*)nsframe);
+        nsIDOMHTMLFrameElement_Release(nsframe);
     }
 }
 
@@ -601,7 +717,6 @@ static void NSAPI nsDocumentObserver_DoneAddingChildren(nsIDocumentObserver *ifa
 
         push_mutation_queue(This, MUTATION_SCRIPT, (nsISupports*)nsscript);
         nsIDOMHTMLScriptElement_Release(nsscript);
-        add_script_runner(This);
     }
 }
 

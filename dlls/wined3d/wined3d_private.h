@@ -695,7 +695,8 @@ enum fog_src_type {
 };
 
 struct vs_compile_args {
-    WORD                        fog_src;
+    BYTE                        fog_src;
+    BYTE                        clip_enabled;
     WORD                        swizzle_map;   /* MAX_ATTRIBS, 16 */
 };
 
@@ -745,7 +746,6 @@ extern int num_lock DECLSPEC_HIDDEN;
 
 /* GL related defines */
 /* ------------------ */
-#define GL_SUPPORT(ExtName)           (GLINFO_LOCATION.supported[ExtName] != 0)
 #define GL_EXTCALL(FuncName)          (GLINFO_LOCATION.FuncName)
 
 #define D3DCOLOR_B_R(dw) (((dw) >> 16) & 0xFF)
@@ -1059,6 +1059,9 @@ struct wined3d_context
     char                    *vshader_const_dirty, *pshader_const_dirty;
 
     /* The actual opengl context */
+    UINT level;
+    HGLRC restore_ctx;
+    HDC restore_dc;
     HGLRC                   glCtx;
     HWND                    win_handle;
     HDC                     hdc;
@@ -1161,11 +1164,8 @@ typedef enum ContextUsage {
     CTXUSAGE_CLEAR              = 4,    /* Drawable and states are set up for clearing */
 } ContextUsage;
 
-struct wined3d_context *ActivateContext(IWineD3DDeviceImpl *This,
+struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This,
         IWineD3DSurface *target, enum ContextUsage usage) DECLSPEC_HIDDEN;
-struct wined3d_context *CreateContext(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win,
-        BOOL create_pbuffer, const WINED3DPRESENT_PARAMETERS *pPresentParms) DECLSPEC_HIDDEN;
-void DestroyContext(IWineD3DDeviceImpl *This, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void context_alloc_event_query(struct wined3d_context *context,
         struct wined3d_event_query *query) DECLSPEC_HIDDEN;
 void context_alloc_occlusion_query(struct wined3d_context *context,
@@ -1177,10 +1177,14 @@ void context_attach_depth_stencil_fbo(struct wined3d_context *context,
         GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer) DECLSPEC_HIDDEN;
 void context_attach_surface_fbo(const struct wined3d_context *context,
         GLenum fbo_target, DWORD idx, IWineD3DSurface *surface) DECLSPEC_HIDDEN;
+struct wined3d_context *context_create(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, HWND win,
+        BOOL create_pbuffer, const WINED3DPRESENT_PARAMETERS *present_parameters) DECLSPEC_HIDDEN;
+void context_destroy(IWineD3DDeviceImpl *This, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void context_free_event_query(struct wined3d_event_query *query) DECLSPEC_HIDDEN;
 void context_free_occlusion_query(struct wined3d_occlusion_query *query) DECLSPEC_HIDDEN;
 struct wined3d_context *context_get_current(void) DECLSPEC_HIDDEN;
 DWORD context_get_tls_idx(void) DECLSPEC_HIDDEN;
+void context_release(struct wined3d_context *context) DECLSPEC_HIDDEN;
 BOOL context_set_current(struct wined3d_context *ctx) DECLSPEC_HIDDEN;
 void context_set_tls_idx(DWORD idx) DECLSPEC_HIDDEN;
 
@@ -1228,6 +1232,95 @@ typedef struct WineD3D_PixelFormat
     int numSamples;
 } WineD3D_PixelFormat;
 
+enum wined3d_pci_vendor
+{
+    VENDOR_WINE                     = 0x0000,
+    VENDOR_MESA                     = 0x0001,
+    VENDOR_ATI                      = 0x1002,
+    VENDOR_NVIDIA                   = 0x10de,
+    VENDOR_INTEL                    = 0x8086,
+};
+
+enum wined3d_pci_device
+{
+    CARD_WINE                       = 0x0000,
+
+    CARD_ATI_RAGE_128PRO            = 0x5246,
+    CARD_ATI_RADEON_7200            = 0x5144,
+    CARD_ATI_RADEON_8500            = 0x514c,
+    CARD_ATI_RADEON_9500            = 0x4144,
+    CARD_ATI_RADEON_XPRESS_200M     = 0x5955,
+    CARD_ATI_RADEON_X700            = 0x5e4c,
+    CARD_ATI_RADEON_X1600           = 0x71c2,
+    CARD_ATI_RADEON_HD2300          = 0x7210,
+    CARD_ATI_RADEON_HD2600          = 0x9581,
+    CARD_ATI_RADEON_HD2900          = 0x9400,
+    CARD_ATI_RADEON_HD3200          = 0x9620,
+    CARD_ATI_RADEON_HD4350          = 0x954f,
+    CARD_ATI_RADEON_HD4550          = 0x9540,
+    CARD_ATI_RADEON_HD4600          = 0x9495,
+    CARD_ATI_RADEON_HD4650          = 0x9498,
+    CARD_ATI_RADEON_HD4670          = 0x9490,
+    CARD_ATI_RADEON_HD4700          = 0x944e,
+    CARD_ATI_RADEON_HD4770          = 0x94b3,
+    CARD_ATI_RADEON_HD4800          = 0x944c, /* Picked one value between 9440, 944c, 9442, 9460 */
+    CARD_ATI_RADEON_HD4830          = 0x944c,
+    CARD_ATI_RADEON_HD4850          = 0x9442,
+    CARD_ATI_RADEON_HD4870          = 0x9440,
+    CARD_ATI_RADEON_HD4890          = 0x9460,
+
+    CARD_NVIDIA_RIVA_128            = 0x0018,
+    CARD_NVIDIA_RIVA_TNT            = 0x0020,
+    CARD_NVIDIA_RIVA_TNT2           = 0x0028,
+    CARD_NVIDIA_GEFORCE             = 0x0100,
+    CARD_NVIDIA_GEFORCE2_MX         = 0x0110,
+    CARD_NVIDIA_GEFORCE2            = 0x0150,
+    CARD_NVIDIA_GEFORCE3            = 0x0200,
+    CARD_NVIDIA_GEFORCE4_MX         = 0x0170,
+    CARD_NVIDIA_GEFORCE4_TI4200     = 0x0253,
+    CARD_NVIDIA_GEFORCEFX_5200      = 0x0320,
+    CARD_NVIDIA_GEFORCEFX_5600      = 0x0312,
+    CARD_NVIDIA_GEFORCEFX_5800      = 0x0302,
+    CARD_NVIDIA_GEFORCE_6200        = 0x014f,
+    CARD_NVIDIA_GEFORCE_6600GT      = 0x0140,
+    CARD_NVIDIA_GEFORCE_6800        = 0x0041,
+    CARD_NVIDIA_GEFORCE_7400        = 0x01d8,
+    CARD_NVIDIA_GEFORCE_7300        = 0x01d7, /* GeForce Go 7300 */
+    CARD_NVIDIA_GEFORCE_7600        = 0x0391,
+    CARD_NVIDIA_GEFORCE_7800GT      = 0x0092,
+    CARD_NVIDIA_GEFORCE_8300GS      = 0x0423,
+    CARD_NVIDIA_GEFORCE_8600GT      = 0x0402,
+    CARD_NVIDIA_GEFORCE_8600MGT     = 0x0407,
+    CARD_NVIDIA_GEFORCE_8800GTS     = 0x0193,
+    CARD_NVIDIA_GEFORCE_9200        = 0x086d,
+    CARD_NVIDIA_GEFORCE_9400GT      = 0x042c,
+    CARD_NVIDIA_GEFORCE_9500GT      = 0x0640,
+    CARD_NVIDIA_GEFORCE_9600GT      = 0x0622,
+    CARD_NVIDIA_GEFORCE_9800GT      = 0x0614,
+    CARD_NVIDIA_GEFORCE_GTX260      = 0x05e2,
+    CARD_NVIDIA_GEFORCE_GTX275      = 0x05e6,
+    CARD_NVIDIA_GEFORCE_GTX280      = 0x05e1,
+
+    CARD_INTEL_845G                 = 0x2562,
+    CARD_INTEL_I830G                = 0x3577,
+    CARD_INTEL_I855G                = 0x3582,
+    CARD_INTEL_I865G                = 0x2572,
+    CARD_INTEL_I915G                = 0x2582,
+    CARD_INTEL_I915GM               = 0x2592,
+    CARD_INTEL_I945GM               = 0x27a2, /* Same as GMA 950? */
+    CARD_INTEL_X3100                = 0x2a02, /* Found in Macs. Same as GMA 965? */
+};
+
+struct wined3d_driver_info
+{
+    enum wined3d_pci_vendor vendor;
+    enum wined3d_pci_device device;
+    const char *name;
+    const char *description;
+    DWORD version_high;
+    DWORD version_low;
+};
+
 /* The adapter structure */
 struct wined3d_adapter
 {
@@ -1235,8 +1328,7 @@ struct wined3d_adapter
     BOOL                    opengl;
     POINT                   monitorPoint;
     struct wined3d_gl_info  gl_info;
-    const char              *driver;
-    const char              *description;
+    struct wined3d_driver_info driver_info;
     WCHAR                   DeviceName[CCHDEVICENAME]; /* DeviceName for use with e.g. ChangeDisplaySettings */
     int                     nCfgs;
     WineD3D_PixelFormat     *cfgs;
@@ -1245,7 +1337,7 @@ struct wined3d_adapter
     unsigned int            UsedTextureRam;
 };
 
-extern BOOL initPixelFormats(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor) DECLSPEC_HIDDEN;
 BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 extern long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, long glram) DECLSPEC_HIDDEN;
 extern void add_gl_compat_wrappers(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
@@ -1500,7 +1592,7 @@ void device_resource_add(IWineD3DDeviceImpl *This, IWineD3DResource *resource) D
 void device_resource_released(IWineD3DDeviceImpl *This, IWineD3DResource *resource) DECLSPEC_HIDDEN;
 void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         BOOL use_vshader, struct wined3d_stream_info *stream_info, BOOL *fixup) DECLSPEC_HIDDEN;
-void device_stream_info_from_strided(IWineD3DDeviceImpl *This,
+void device_stream_info_from_strided(const struct wined3d_gl_info *gl_info,
         const struct WineDirect3DVertexStridedData *strided, struct wined3d_stream_info *stream_info) DECLSPEC_HIDDEN;
 HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, DWORD Count,
         const WINED3DRECT *pRects, DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) DECLSPEC_HIDDEN;
@@ -2357,7 +2449,7 @@ HRESULT WINAPI IWineD3DBaseSwapChainImpl_SetGammaRamp(IWineD3DSwapChain *iface,
 HRESULT WINAPI IWineD3DBaseSwapChainImpl_GetGammaRamp(IWineD3DSwapChain *iface,
         WINED3DGAMMARAMP *pRamp) DECLSPEC_HIDDEN;
 
-struct wined3d_context *IWineD3DSwapChainImpl_CreateContextForThread(IWineD3DSwapChain *iface) DECLSPEC_HIDDEN;
+struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *iface) DECLSPEC_HIDDEN;
 
 #define DEFAULT_REFRESH_RATE 0
 

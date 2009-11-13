@@ -368,11 +368,13 @@ static inline dispex_dynamic_data_t *get_dynamic_data(DispatchEx *This, BOOL all
         : (This->dynamic_data = heap_alloc_zero(sizeof(dispex_dynamic_data_t)));
 }
 
-static HRESULT get_dynamic_prop(DispatchEx *This, const WCHAR *name, BOOL alloc, dynamic_prop_t **ret)
+static HRESULT get_dynamic_prop(DispatchEx *This, const WCHAR *name, DWORD flags, dynamic_prop_t **ret)
 {
-    dispex_dynamic_data_t *data = get_dynamic_data(This, alloc);
+    const BOOL alloc = flags & fdexNameEnsure;
+    dispex_dynamic_data_t *data;
     unsigned i;
 
+    data = get_dynamic_data(This, alloc);
     if(!data) {
         if(alloc)
             return E_OUTOFMEMORY;
@@ -382,11 +384,14 @@ static HRESULT get_dynamic_prop(DispatchEx *This, const WCHAR *name, BOOL alloc,
     }
 
     for(i=0; i < data->prop_cnt; i++) {
-        if(!strcmpW(data->props[i].name, name)) {
+        if(flags & fdexNameCaseInsensitive ? !strcmpiW(data->props[i].name, name) : !strcmpW(data->props[i].name, name)) {
             *ret = data->props+i;
             return S_OK;
         }
     }
+
+    if(!alloc)
+        return DISP_E_UNKNOWNNAME;
 
     TRACE("creating dynamic prop %s\n", debugstr_w(name));
 
@@ -418,7 +423,7 @@ HRESULT dispex_get_dprop_ref(DispatchEx *This, const WCHAR *name, BOOL alloc, VA
     dynamic_prop_t *prop;
     HRESULT hres;
 
-    hres = get_dynamic_prop(This, name, alloc, &prop);
+    hres = get_dynamic_prop(This, name, alloc ? fdexNameEnsure : 0, &prop);
     if(FAILED(hres))
         return hres;
 
@@ -746,7 +751,7 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
 
     TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(bstrName), grfdex, pid);
 
-    if(grfdex & ~(fdexNameCaseSensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK))
+    if(grfdex & ~(fdexNameCaseSensitive|fdexNameCaseInsensitive|fdexNameEnsure|fdexNameImplicit|FDEX_VERSION_MASK))
         FIXME("Unsupported grfdex %x\n", grfdex);
 
     data = get_dispex_data(This);
@@ -782,7 +787,7 @@ static HRESULT WINAPI DispatchEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DW
             return hres;
     }
 
-    hres = get_dynamic_prop(This, bstrName, grfdex&fdexNameEnsure, &dprop);
+    hres = get_dynamic_prop(This, bstrName, grfdex, &dprop);
     if(FAILED(hres))
         return hres;
 
@@ -870,7 +875,15 @@ static HRESULT WINAPI DispatchEx_InvokeEx(IDispatchEx *iface, DISPID id, LCID lc
         }
         case DISPATCH_PROPERTYGET:
             return VariantCopy(pvarRes, var);
+        case DISPATCH_PROPERTYPUT|DISPATCH_PROPERTYPUTREF:
         case DISPATCH_PROPERTYPUT:
+            if(pdp->cArgs != 1 || (pdp->cNamedArgs == 1 && *pdp->rgdispidNamedArgs != DISPID_PROPERTYPUT)
+               || pdp->cNamedArgs > 1) {
+                FIXME("invalid args\n");
+                return E_INVALIDARG;
+            }
+
+            TRACE("put %s\n", debugstr_variant(pdp->rgvarg));
             VariantClear(var);
             return VariantCopy(var, pdp->rgvarg);
         default:

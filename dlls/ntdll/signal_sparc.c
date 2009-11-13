@@ -779,7 +779,7 @@ void signal_init_process(void)
        the process.  wine-devel did not reach a conclusion on whether
        this is correct, because that is what x86 does, or it is harmful 
        because it could obscure problems in user code */
-    asm("ta 6"); /* 6 == ST_FIX_ALIGN defined in sys/trap.h */
+    __asm__("ta 6"); /* 6 == ST_FIX_ALIGN defined in sys/trap.h */
     return;
 
  error:
@@ -826,6 +826,15 @@ void WINAPI RtlRaiseException( EXCEPTION_RECORD *rec )
     rec->ExceptionAddress = (void *)context.pc;
     status = raise_exception( rec, &context, TRUE );
     if (status) raise_status( status, rec );
+}
+
+/*************************************************************************
+ *		RtlCaptureStackBackTrace (NTDLL.@)
+ */
+USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, ULONG *hash )
+{
+    FIXME( "(%d, %d, %p, %p) stub!\n", skip, count, buffer, hash );
+    return 0;
 }
 
 /***********************************************************************

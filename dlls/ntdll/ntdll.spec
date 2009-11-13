@@ -636,6 +636,7 @@
 @ stdcall RtlGetNtProductType(ptr)
 @ stdcall RtlGetNtVersionNumbers(ptr ptr ptr)
 @ stdcall RtlGetOwnerSecurityDescriptor(ptr ptr ptr)
+@ stdcall RtlGetProductInfo(long long long long ptr)
 @ stdcall RtlGetProcessHeaps(long ptr)
 @ stdcall RtlGetSaclSecurityDescriptor(ptr ptr ptr ptr)
 # @ stub RtlGetSecurityDescriptorRMControl
@@ -749,7 +750,7 @@
 # @ stub RtlNtPathNameToDosPathName
 @ stdcall RtlNtStatusToDosError(long)
 @ stdcall RtlNtStatusToDosErrorNoTeb(long)
-@ stub RtlNumberGenericTableElements
+@ stdcall RtlNumberGenericTableElements(ptr)
 # @ stub RtlNumberGenericTableElementsAvl
 @ stdcall RtlNumberOfClearBits(ptr)
 @ stdcall RtlNumberOfSetBits(ptr)

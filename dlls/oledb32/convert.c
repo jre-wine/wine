@@ -122,12 +122,19 @@ static int get_length(DBTYPE type)
         return 2;
     case DBTYPE_I4:
     case DBTYPE_UI4:
+    case DBTYPE_R4:
         return 4;
     case DBTYPE_I8:
     case DBTYPE_UI8:
         return 8;
+    case DBTYPE_CY:
+        return sizeof(CY);
     case DBTYPE_BSTR:
         return sizeof(BSTR);
+    case DBTYPE_FILETIME:
+        return sizeof(FILETIME);
+    case DBTYPE_GUID:
+        return sizeof(GUID);
     case DBTYPE_WSTR:
     case DBTYPE_BYREF | DBTYPE_WSTR:
         return 0;
@@ -255,6 +262,58 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         break;
     }
 
+    case DBTYPE_R4:
+    {
+        FLOAT *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
+        case DBTYPE_I2:          hr = VarR4FromI2(*(signed short*)src, d);       break;
+        case DBTYPE_I4:          hr = VarR4FromI4(*(signed int*)src, d);         break;
+        case DBTYPE_R4:          *d = *(FLOAT*)src; hr = S_OK;                   break;
+        case DBTYPE_R8:          hr = VarR4FromR8(*(double*)src, d);             break;
+        case DBTYPE_CY:          hr = VarR4FromCy(*(CY*)src, d);                 break;
+        case DBTYPE_DATE:        hr = VarR4FromDate(*(DATE*)src, d);             break;
+        case DBTYPE_BSTR:        hr = VarR4FromStr(*(WCHAR**)src, LOCALE_USER_DEFAULT, 0, d); break;
+        case DBTYPE_BOOL:        hr = VarR4FromBool(*(VARIANT_BOOL*)src, d);     break;
+        case DBTYPE_DECIMAL:     hr = VarR4FromDec((DECIMAL*)src, d);            break;
+        case DBTYPE_I1:          hr = VarR4FromI1(*(signed char*)src, d);        break;
+        case DBTYPE_UI1:         hr = VarR4FromUI1(*(BYTE*)src, d);              break;
+        case DBTYPE_UI2:         hr = VarR4FromUI2(*(WORD*)src, d);              break;
+        case DBTYPE_UI4:         hr = VarR4FromUI4(*(DWORD*)src, d);             break;
+        case DBTYPE_I8:          hr = VarR4FromI8(*(LONGLONG*)src, d);           break;
+        case DBTYPE_UI8:         hr = VarR4FromUI8(*(ULONGLONG*)src, d);         break;
+        default: FIXME("Unimplemented conversion %04x -> R4\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_CY:
+    {
+        CY *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       d->int64 = 0; hr = S_OK;                              break;
+        case DBTYPE_I2:          hr = VarCyFromI2(*(signed short*)src, d);       break;
+        case DBTYPE_I4:          hr = VarCyFromI4(*(signed int*)src, d);         break;
+        case DBTYPE_R4:          hr = VarCyFromR4(*(FLOAT*)src, d);              break;
+        case DBTYPE_R8:          hr = VarCyFromR8(*(double*)src, d);             break;
+        case DBTYPE_CY:          *d = *(CY*)src; hr = S_OK;                      break;
+        case DBTYPE_DATE:        hr = VarCyFromDate(*(DATE*)src, d);             break;
+        case DBTYPE_BSTR:        hr = VarCyFromStr(*(WCHAR**)src, LOCALE_USER_DEFAULT, 0, d); break;
+        case DBTYPE_BOOL:        hr = VarCyFromBool(*(VARIANT_BOOL*)src, d);     break;
+        case DBTYPE_DECIMAL:     hr = VarCyFromDec((DECIMAL*)src, d);            break;
+        case DBTYPE_I1:          hr = VarCyFromI1(*(signed char*)src, d);        break;
+        case DBTYPE_UI1:         hr = VarCyFromUI1(*(BYTE*)src, d);              break;
+        case DBTYPE_UI2:         hr = VarCyFromUI2(*(WORD*)src, d);              break;
+        case DBTYPE_UI4:         hr = VarCyFromUI4(*(DWORD*)src, d);             break;
+        case DBTYPE_I8:          hr = VarCyFromI8(*(LONGLONG*)src, d);           break;
+        case DBTYPE_UI8:         hr = VarCyFromUI8(*(ULONGLONG*)src, d);         break;
+        default: FIXME("Unimplemented conversion %04x -> CY\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
     case DBTYPE_BSTR:
     {
         BSTR *d = dst;
@@ -277,6 +336,108 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_I8:          hr = VarBstrFromI8(*(LONGLONG*)src, LOCALE_USER_DEFAULT, 0, d);       break;
         case DBTYPE_UI8:         hr = VarBstrFromUI8(*(ULONGLONG*)src, LOCALE_USER_DEFAULT, 0, d);     break;
         default: FIXME("Unimplemented conversion %04x -> BSTR\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_UI1:
+    {
+        BYTE *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
+        case DBTYPE_I2:          hr = VarUI1FromI2(*(signed short*)src, d);      break;
+        case DBTYPE_I4:          hr = VarUI1FromI4(*(signed int*)src, d);        break;
+        case DBTYPE_R4:          hr = VarUI1FromR4(*(FLOAT*)src, d);             break;
+        case DBTYPE_R8:          hr = VarUI1FromR8(*(double*)src, d);            break;
+        case DBTYPE_CY:          hr = VarUI1FromCy(*(CY*)src, d);                break;
+        case DBTYPE_DATE:        hr = VarUI1FromDate(*(DATE*)src, d);            break;
+        case DBTYPE_BSTR:        hr = VarUI1FromStr(*(WCHAR**)src, LOCALE_USER_DEFAULT, 0, d); break;
+        case DBTYPE_BOOL:        hr = VarUI1FromBool(*(VARIANT_BOOL*)src, d);    break;
+        case DBTYPE_DECIMAL:     hr = VarUI1FromDec((DECIMAL*)src, d);           break;
+        case DBTYPE_I1:          hr = VarUI1FromI1(*(signed char*)src, d);       break;
+        case DBTYPE_UI1:         *d = *(BYTE*)src; hr = S_OK;                    break;
+        case DBTYPE_UI2:         hr = VarUI1FromUI2(*(WORD*)src, d);             break;
+        case DBTYPE_UI4:         hr = VarUI1FromUI4(*(DWORD*)src, d);            break;
+        case DBTYPE_I8:          hr = VarUI1FromI8(*(LONGLONG*)src, d);          break;
+        case DBTYPE_UI8:         hr = VarUI1FromUI8(*(ULONGLONG*)src, d);        break;
+        default: FIXME("Unimplemented conversion %04x -> UI1\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_UI4:
+    {
+        DWORD *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
+        case DBTYPE_I2:          hr = VarUI4FromI2(*(signed short*)src, d);      break;
+        case DBTYPE_I4:          hr = VarUI4FromI4(*(signed int*)src, d);        break;
+        case DBTYPE_R4:          hr = VarUI4FromR4(*(FLOAT*)src, d);             break;
+        case DBTYPE_R8:          hr = VarUI4FromR8(*(double*)src, d);            break;
+        case DBTYPE_CY:          hr = VarUI4FromCy(*(CY*)src, d);                break;
+        case DBTYPE_DATE:        hr = VarUI4FromDate(*(DATE*)src, d);            break;
+        case DBTYPE_BSTR:        hr = VarUI4FromStr(*(WCHAR**)src, LOCALE_USER_DEFAULT, 0, d); break;
+        case DBTYPE_BOOL:        hr = VarUI4FromBool(*(VARIANT_BOOL*)src, d);    break;
+        case DBTYPE_DECIMAL:     hr = VarUI4FromDec((DECIMAL*)src, d);           break;
+        case DBTYPE_I1:          hr = VarUI4FromI1(*(signed char*)src, d);       break;
+        case DBTYPE_UI1:         hr = VarUI4FromUI1(*(BYTE*)src, d);             break;
+        case DBTYPE_UI2:         hr = VarUI4FromUI2(*(WORD*)src, d);             break;
+        case DBTYPE_UI4:         *d = *(DWORD*)src; hr = S_OK;                   break;
+        case DBTYPE_I8:          hr = VarUI4FromI8(*(LONGLONG*)src, d);          break;
+        case DBTYPE_UI8:         hr = VarUI4FromUI8(*(ULONGLONG*)src, d);        break;
+        default: FIXME("Unimplemented conversion %04x -> UI4\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_UI8:
+    {
+        ULONGLONG *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
+        case DBTYPE_I2:          hr = VarUI8FromI2(*(signed short*)src, d);      break;
+        case DBTYPE_I4:          {LONGLONG s = *(signed int*)src; hr = VarUI8FromI8(s, d);        break;}
+        case DBTYPE_R4:          hr = VarUI8FromR4(*(FLOAT*)src, d);             break;
+        case DBTYPE_R8:          hr = VarUI8FromR8(*(double*)src, d);            break;
+        case DBTYPE_CY:          hr = VarUI8FromCy(*(CY*)src, d);                break;
+        case DBTYPE_DATE:        hr = VarUI8FromDate(*(DATE*)src, d);            break;
+        case DBTYPE_BSTR:        hr = VarUI8FromStr(*(WCHAR**)src, LOCALE_USER_DEFAULT, 0, d); break;
+        case DBTYPE_BOOL:        hr = VarUI8FromBool(*(VARIANT_BOOL*)src, d);    break;
+        case DBTYPE_DECIMAL:     hr = VarUI8FromDec((DECIMAL*)src, d);           break;
+        case DBTYPE_I1:          hr = VarUI8FromI1(*(signed char*)src, d);       break;
+        case DBTYPE_UI1:         hr = VarUI8FromUI1(*(BYTE*)src, d);             break;
+        case DBTYPE_UI2:         hr = VarUI8FromUI2(*(WORD*)src, d);             break;
+        case DBTYPE_UI4:         hr = VarUI8FromUI4(*(DWORD*)src, d);            break;
+        case DBTYPE_I8:          hr = VarUI8FromI8(*(LONGLONG*)src, d);          break;
+        case DBTYPE_UI8:         *d = *(ULONGLONG*)src; hr = S_OK;               break;
+        default: FIXME("Unimplemented conversion %04x -> UI8\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_FILETIME:
+    {
+        FILETIME *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       d->dwLowDateTime = d->dwHighDateTime = 0; hr = S_OK;    break;
+        case DBTYPE_FILETIME:    *d = *(FILETIME*)src; hr = S_OK;                        break;
+        default: FIXME("Unimplemented conversion %04x -> FILETIME\n", src_type); return E_NOTIMPL;
+        }
+        break;
+    }
+
+    case DBTYPE_GUID:
+    {
+        GUID *d = dst;
+        switch(src_type)
+        {
+        case DBTYPE_EMPTY:       *d = GUID_NULL; hr = S_OK; break;
+        case DBTYPE_GUID:        *d = *(GUID*)src; hr = S_OK; break;
+        default: FIXME("Unimplemented conversion %04x -> GUID\n", src_type); return E_NOTIMPL;
         }
         break;
     }
@@ -452,6 +613,7 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         {
         case DBTYPE_DATE:
         case DBTYPE_GUID:
+        case DBTYPE_FILETIME:
             return S_OK;
         default:
             if(dst_base_type == DBTYPE_DBTIMESTAMP) return S_OK;
@@ -462,7 +624,8 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         switch(dst_base_type)
         {
         case DBTYPE_NULL:
-        case DBTYPE_VARIANT: return S_OK;
+        case DBTYPE_VARIANT:
+        case DBTYPE_FILETIME: return S_OK;
         default: return S_FALSE;
         }
 
@@ -486,8 +649,12 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
 
     case DBTYPE_I8:
         if(common_class(dst_class)) return S_OK;
-        if(dst_base_type == DBTYPE_BYTES) return S_OK;
-        return S_FALSE;
+        switch(dst_base_type)
+        {
+        case DBTYPE_BYTES:
+        case DBTYPE_FILETIME: return S_OK;
+        default: return S_FALSE;
+        }
 
     case DBTYPE_DATE:
         switch(dst_class)
@@ -502,6 +669,7 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         case DBTYPE_I8:
         case DBTYPE_DATE:
         case DBTYPE_DBDATE:
+        case DBTYPE_FILETIME:
             return S_OK;
         default: return S_FALSE;
         }
@@ -524,6 +692,7 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         case DBTYPE_GUID:
         case DBTYPE_BYTES:
         case DBTYPE_DBDATE:
+        case DBTYPE_FILETIME:
             return S_OK;
         default: return S_FALSE;
         }
@@ -567,6 +736,9 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         default: return S_FALSE;
         }
 
+    case DBTYPE_FILETIME:
+        if(dst_class == DBTYPE_I8) return S_OK;
+        /* fall through */
     case DBTYPE_DBDATE:
         switch(dst_class)
         {
@@ -576,6 +748,7 @@ static HRESULT WINAPI convert_CanConvert(IDataConvert* iface,
         case DBTYPE_BSTR:
         case DBTYPE_VARIANT:
         case DBTYPE_DBDATE:
+        case DBTYPE_FILETIME:
             return S_OK;
         default: return S_FALSE;
         }

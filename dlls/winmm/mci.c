@@ -1155,8 +1155,8 @@ static	DWORD	MCI_HandleReturnValues(DWORD dwRet, LPWINE_MCIDRIVER wmd, DWORD ret
 {
     static const WCHAR wszLd  [] = {'%','l','d',0};
     static const WCHAR wszLd4 [] = {'%','l','d',' ','%','l','d',' ','%','l','d',' ','%','l','d',0};
-    static const WCHAR wszCol3[] = {'%','d',':','%','d',':','%','d',0};
-    static const WCHAR wszCol4[] = {'%','d',':','%','d',':','%','d',':','%','d',0};
+    static const WCHAR wszCol3[] = {'%','0','2','d',':','%','0','2','d',':','%','0','2','d',0};
+    static const WCHAR wszCol4[] = {'%','0','2','d',':','%','0','2','d',':','%','0','2','d',':','%','0','2','d',0};
 
     if (lpstrRet) {
 	switch (retType) {
@@ -1676,11 +1676,8 @@ static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms
 
     TRACE("(%04x, %08X, %p)\n", wDevID, dwParam, lpParms);
 
+    /* Every device must handle MCI_NOTIFY on its own. */
     if (wDevID == MCI_ALL_DEVICE_ID) {
-	/* FIXME: shall I notify once after all is done, or for
-	 * each of the open drivers ? if the latest, which notif
-	 * to return when only one fails ?
-	 */
 	while (MciDrivers) {
             /* Retrieve the device ID under lock, but send the message without,
              * the driver might be calling some winmm functions from another
@@ -1706,11 +1703,6 @@ static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms
     dwRet = MCI_SendCommandFrom32(wDevID, MCI_CLOSE_DRIVER, dwParam, (DWORD_PTR)lpParms);
 
     MCI_UnLoadMciDriver(wmd);
-
-    if (dwParam & MCI_NOTIFY)
-        mciDriverNotify(lpParms ? (HWND)lpParms->dwCallback : 0,
-                        wDevID,
-                        dwRet ? MCI_NOTIFY_FAILURE : MCI_NOTIFY_SUCCESSFUL);
 
     return dwRet;
 }
@@ -1746,8 +1738,8 @@ static	DWORD MCI_SysInfo(UINT uDevID, DWORD dwFlags, LPMCI_SYSINFO_PARMSW lpParm
     LPWINE_MCIDRIVER	wmd;
     HKEY		hKey;
 
-    if (lpParms == NULL || lpParms->lpstrReturn == NULL)
-        return MCIERR_NULL_PARAMETER_BLOCK;
+    if (lpParms == NULL)			return MCIERR_NULL_PARAMETER_BLOCK;
+    if (lpParms->lpstrReturn == NULL)		return MCIERR_PARAM_OVERFLOW;
 
     TRACE("(%08x, %08X, %p[num=%d, wDevTyp=%u])\n",
 	  uDevID, dwFlags, lpParms, lpParms->dwNumber, lpParms->wDeviceType);
@@ -2139,37 +2131,21 @@ UINT WINAPI mciGetDeviceIDW(LPCWSTR lpwstrName)
     return MCI_GetDriverFromString(lpwstrName); 
 }
 
-/******************************************************************
- *		MyUserYield
- *
- * Internal wrapper to call USER.UserYield16 (in fact through a Wine only export from USER32).
- */
-static void MyUserYield(void)
-{
-    HMODULE mod = GetModuleHandleA( "user32.dll" );
-    if (mod)
-    {
-        FARPROC proc = GetProcAddress( mod, "UserYield16" );
-        if (proc) proc();
-    }
-}
-
 /**************************************************************************
  * 				MCI_DefYieldProc	       	[internal]
  */
 static UINT WINAPI MCI_DefYieldProc(MCIDEVICEID wDevID, DWORD data)
 {
     INT16	ret;
+    MSG		msg;
 
     TRACE("(0x%04x, 0x%08x)\n", wDevID, data);
 
     if ((HIWORD(data) != 0 && HWND_16(GetActiveWindow()) != HIWORD(data)) ||
 	(GetAsyncKeyState(LOWORD(data)) & 1) == 0) {
-	MyUserYield();
+        PeekMessageW(&msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE);
 	ret = 0;
     } else {
-	MSG		msg;
-
 	msg.hwnd = HWND_32(HIWORD(data));
 	while (!PeekMessageW(&msg, msg.hwnd, WM_KEYFIRST, WM_KEYLAST, PM_REMOVE));
 	ret = -1;
@@ -2271,7 +2247,8 @@ UINT WINAPI mciDriverYield(MCIDEVICEID uDeviceID)
     TRACE("(%04x)\n", uDeviceID);
 
     if (!(wmd = MCI_GetDriver(uDeviceID)) || !wmd->lpfnYieldProc) {
-	MyUserYield();
+        MSG msg;
+        PeekMessageW(&msg, 0, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE);
     } else {
 	ret = wmd->lpfnYieldProc(uDeviceID, wmd->dwYieldData);
     }

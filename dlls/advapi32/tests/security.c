@@ -79,6 +79,7 @@ typedef LPSTR (WINAPI *fnGetTrusteeNameA)( PTRUSTEEA pTrustee );
 typedef BOOL (WINAPI *fnMakeSelfRelativeSD)( PSECURITY_DESCRIPTOR, PSECURITY_DESCRIPTOR, LPDWORD );
 typedef BOOL (WINAPI *fnConvertSidToStringSidA)( PSID pSid, LPSTR *str );
 typedef BOOL (WINAPI *fnConvertStringSidToSidA)( LPCSTR str, PSID pSid );
+static BOOL (WINAPI *pCheckTokenMembership)(HANDLE, PSID, PBOOL);
 static BOOL (WINAPI *pConvertStringSecurityDescriptorToSecurityDescriptorA)(LPCSTR, DWORD,
                                                                             PSECURITY_DESCRIPTOR*, PULONG );
 static BOOL (WINAPI *pConvertStringSecurityDescriptorToSecurityDescriptorW)(LPCWSTR, DWORD,
@@ -153,6 +154,7 @@ static void init(void)
     pAddAccessAllowedAceEx = (void *)GetProcAddress(hmod, "AddAccessAllowedAceEx");
     pAddAccessDeniedAceEx = (void *)GetProcAddress(hmod, "AddAccessDeniedAceEx");
     pAddAuditAccessAceEx = (void *)GetProcAddress(hmod, "AddAuditAccessAceEx");
+    pCheckTokenMembership = (void *)GetProcAddress(hmod, "CheckTokenMembership");
     pConvertStringSecurityDescriptorToSecurityDescriptorA =
         (void *)GetProcAddress(hmod, "ConvertStringSecurityDescriptorToSecurityDescriptorA" );
     pConvertStringSecurityDescriptorToSecurityDescriptorW =
@@ -2047,7 +2049,8 @@ static void test_LookupAccountName(void)
         domain = HeapAlloc(GetProcessHeap(), 0, domain_size);
         ret = LookupAccountNameA(NULL, computer_name, psid, &sid_size, domain, &domain_size, &sid_use);
         ok(ret, "LookupAccountNameA failed: %d\n", GetLastError());
-        ok(sid_use == SidTypeDomain, "expected SidTypeDomain, got %d\n", sid_use);
+        ok(sid_use == SidTypeDomain ||
+           (sid_use == SidTypeUser && ! strcmp(computer_name, user_name)), "expected SidTypeDomain for %s, got %d\n", computer_name, sid_use);
         HeapFree(GetProcessHeap(), 0, domain);
         HeapFree(GetProcessHeap(), 0, psid);
     }
@@ -3199,6 +3202,70 @@ static void test_GetSidSubAuthority(void)
     LocalFree(psid);
 }
 
+static void test_CheckTokenMembership(void)
+{
+    PTOKEN_GROUPS token_groups;
+    DWORD size;
+    HANDLE process_token, token;
+    BOOL is_member;
+    BOOL ret;
+    DWORD i;
+
+    if (!pCheckTokenMembership)
+    {
+        win_skip("CheckTokenMembership is not available\n");
+        return;
+    }
+    ret = OpenProcessToken(GetCurrentProcess(), TOKEN_DUPLICATE|TOKEN_QUERY, &process_token);
+    ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
+
+    ret = DuplicateToken(process_token, SecurityImpersonation, &token);
+    ok(ret, "DuplicateToken failed with error %d\n", GetLastError());
+
+    /* groups */
+    ret = GetTokenInformation(token, TokenGroups, NULL, 0, &size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "GetTokenInformation(TokenGroups) %s with error %d\n",
+        ret ? "succeeded" : "failed", GetLastError());
+    token_groups = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = GetTokenInformation(token, TokenGroups, token_groups, size, &size);
+    ok(ret, "GetTokenInformation(TokenGroups) failed with error %d\n", GetLastError());
+
+    for (i = 0; i < token_groups->GroupCount; i++)
+    {
+        if (token_groups->Groups[i].Attributes & SE_GROUP_ENABLED)
+            break;
+    }
+
+    if (i == token_groups->GroupCount)
+    {
+        HeapFree(GetProcessHeap(), 0, token_groups);
+        CloseHandle(token);
+        skip("user not a member of any group\n");
+        return;
+    }
+
+    ret = pCheckTokenMembership(token, token_groups->Groups[i].Sid, &is_member);
+    ok(ret, "CheckTokenMembership failed with error %d\n", GetLastError());
+    ok(is_member, "CheckTokenMembership should have detected sid as member\n");
+
+    ret = pCheckTokenMembership(NULL, token_groups->Groups[i].Sid, &is_member);
+    ok(ret, "CheckTokenMembership failed with error %d\n", GetLastError());
+    ok(is_member, "CheckTokenMembership should have detected sid as member\n");
+
+    ret = pCheckTokenMembership(process_token, token_groups->Groups[i].Sid, &is_member);
+todo_wine {
+    ok(!ret && GetLastError() == ERROR_NO_IMPERSONATION_TOKEN,
+        "CheckTokenMembership with process token %s with error %d\n",
+        ret ? "succeeded" : "failed", GetLastError());
+    ok(!is_member, "CheckTokenMembership should have cleared is_member\n");
+}
+
+    HeapFree(GetProcessHeap(), 0, token_groups);
+    CloseHandle(token);
+    CloseHandle(process_token);
+}
+
 START_TEST(security)
 {
     init();
@@ -3229,4 +3296,5 @@ START_TEST(security)
     test_acls();
     test_GetSecurityInfo();
     test_GetSidSubAuthority();
+    test_CheckTokenMembership();
 }

@@ -1615,7 +1615,7 @@ NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
     NSContainer *ret;
     nsresult nsres;
 
-    if(!load_gecko(FALSE))
+    if(!load_gecko(TRUE))
         return NULL;
 
     ret = heap_alloc_zero(sizeof(NSContainer));
@@ -1696,8 +1696,6 @@ NSContainer *NSContainer_Create(HTMLDocumentObj *doc, NSContainer *parent)
     nsres = nsIWebBrowser_SetParentURIContentListener(ret->webbrowser, NSURICL(ret));
     if(NS_FAILED(nsres))
         ERR("SetParentURIContentListener failed: %08x\n", nsres);
-
-    init_nsevents(ret);
 
     nsres = nsIWebBrowser_QueryInterface(ret->webbrowser, &IID_nsIScrollable, (void**)&scrollable);
     if(NS_SUCCEEDED(nsres)) {

@@ -27,13 +27,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_texture);
 
-#define GLINFO_LOCATION (*gl_info)
-
 static void texture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRGB srgb)
 {
     /* Override the IWineD3DResource PreLoad method. */
     IWineD3DTextureImpl *This = (IWineD3DTextureImpl *)iface;
     IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    struct wined3d_context *context = NULL;
     unsigned int i;
     BOOL srgb_mode;
     BOOL *dirty;
@@ -62,9 +61,9 @@ static void texture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRG
 
     if (!device->isInDraw)
     {
-        /* ActivateContext sets isInDraw to TRUE when loading a pbuffer into a texture,
+        /* context_acquire() sets isInDraw to TRUE when loading a pbuffer into a texture,
          * thus no danger of recursive calls. */
-        ActivateContext(device, NULL, CTXUSAGE_RESOURCELOAD);
+        context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
     }
 
     if (This->resource.format_desc->format == WINED3DFMT_P8_UINT
@@ -97,6 +96,8 @@ static void texture_internal_preload(IWineD3DBaseTexture *iface, enum WINED3DSRG
         TRACE("(%p) Texture not dirty, nothing to do.\n", iface);
     }
 
+    if (context) context_release(context);
+
     /* No longer dirty. */
     *dirty = FALSE;
 }
@@ -125,13 +126,9 @@ static void texture_cleanup(IWineD3DTextureImpl *This)
     basetexture_cleanup((IWineD3DBaseTexture *)This);
 }
 
-#undef GLINFO_LOCATION
-
 /* *******************************************
    IWineD3DTexture IUnknown parts follow
    ******************************************* */
-
-#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
 
 static HRESULT WINAPI IWineD3DTextureImpl_QueryInterface(IWineD3DTexture *iface, REFIID riid, LPVOID *ppobj)
 {

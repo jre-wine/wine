@@ -187,7 +187,7 @@ static ULONG WINAPI StgStreamImpl_Release(
 static void StgStreamImpl_OpenBlockChain(
         StgStreamImpl* This)
 {
-  StgProperty    curProperty;
+  DirEntry     curProperty;
   BOOL         readSuccessful;
 
   /*
@@ -208,7 +208,7 @@ static void StgStreamImpl_OpenBlockChain(
   /*
    * Read the information from the property.
    */
-  readSuccessful = StorageImpl_ReadProperty(This->parentStorage->ancestorStorage,
+  readSuccessful = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
 					     This->ownerProperty,
 					     &curProperty);
 
@@ -545,7 +545,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
 {
   StgStreamImpl* const This=(StgStreamImpl*)iface;
 
-  StgProperty    curProperty;
+  DirEntry     curProperty;
   BOOL         Success;
 
   TRACE("(%p, %d)\n", iface, libNewSize.u.LowPart);
@@ -605,7 +605,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
   /*
    * Read this stream's property to see if it's small blocks or big blocks
    */
-  Success = StorageImpl_ReadProperty(This->parentStorage->ancestorStorage,
+  Success = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
                                        This->ownerProperty,
                                        &curProperty);
   /*
@@ -650,7 +650,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
   /*
    * Write the new information about this stream to the property
    */
-  Success = StorageImpl_ReadProperty(This->parentStorage->ancestorStorage,
+  Success = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
                                        This->ownerProperty,
                                        &curProperty);
 
@@ -659,7 +659,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
 
   if (Success)
   {
-    StorageImpl_WriteProperty(This->parentStorage->ancestorStorage,
+    StorageImpl_WriteDirEntry(This->parentStorage->ancestorStorage,
 				This->ownerProperty,
 				&curProperty);
   }
@@ -834,7 +834,7 @@ static HRESULT WINAPI StgStreamImpl_Stat(
 {
   StgStreamImpl* const This=(StgStreamImpl*)iface;
 
-  StgProperty    curProperty;
+  DirEntry     curProperty;
   BOOL         readSuccessful;
 
   TRACE("%p %p %d\n", This, pstatstg, grfStatFlag);
@@ -852,7 +852,7 @@ static HRESULT WINAPI StgStreamImpl_Stat(
   /*
    * Read the information from the property.
    */
-  readSuccessful = StorageImpl_ReadProperty(This->parentStorage->ancestorStorage,
+  readSuccessful = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
 					     This->ownerProperty,
 					     &curProperty);
 
@@ -860,7 +860,7 @@ static HRESULT WINAPI StgStreamImpl_Stat(
   {
     StorageImpl *root = This->parentStorage->ancestorStorage;
 
-    StorageUtl_CopyPropertyToSTATSTG(pstatstg,
+    StorageUtl_CopyDirEntryToSTATSTG(pstatstg,
 				     &curProperty,
 				     grfStatFlag);
 

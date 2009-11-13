@@ -125,15 +125,34 @@ static inline int is_special_env_var( const char *var )
 }
 
 
+/***********************************************************************
+ *           is_path_prefix
+ */
+static inline unsigned int is_path_prefix( const WCHAR *prefix, const WCHAR *filename )
+{
+    unsigned int len = strlenW( prefix );
+
+    if (strncmpiW( filename, prefix, len ) || filename[len] != '\\') return 0;
+    while (filename[len] == '\\') len++;
+    return len;
+}
+
+
 /***************************************************************************
  *	get_builtin_path
  *
  * Get the path of a builtin module when the native file does not exist.
  */
-static BOOL get_builtin_path( const WCHAR *libname, const WCHAR *ext, WCHAR *filename, UINT size )
+static BOOL get_builtin_path( const WCHAR *libname, const WCHAR *ext, WCHAR *filename,
+                              UINT size, struct binary_info *binary_info )
 {
     WCHAR *file_part;
-    UINT len = strlenW( DIR_System );
+    UINT len;
+    void *redir_disabled = 0;
+    unsigned int flags = (sizeof(void*) > sizeof(int) ? BINARY_FLAG_64BIT : 0);
+
+    if (is_wow64 && Wow64DisableWow64FsRedirection( &redir_disabled ))
+        Wow64RevertWow64FsRedirection( redir_disabled );
 
     if (contains_path( libname ))
     {
@@ -141,18 +160,27 @@ static BOOL get_builtin_path( const WCHAR *libname, const WCHAR *ext, WCHAR *fil
                                   filename, &file_part ) > size * sizeof(WCHAR))
             return FALSE;  /* too long */
 
-        if (strncmpiW( filename, DIR_System, len ) || filename[len] != '\\')
-            return FALSE;
-        while (filename[len] == '\\') len++;
+        if ((len = is_path_prefix( DIR_System, filename )))
+        {
+            if (is_wow64 && redir_disabled) flags = BINARY_FLAG_64BIT;
+        }
+        else if (DIR_SysWow64 && (len = is_path_prefix( DIR_SysWow64, filename )))
+        {
+            flags = 0;
+        }
+        else return FALSE;
+
         if (filename + len != file_part) return FALSE;
     }
     else
     {
+        len = strlenW( DIR_System );
         if (strlenW(libname) + len + 2 >= size) return FALSE;  /* too long */
         memcpy( filename, DIR_System, len * sizeof(WCHAR) );
         file_part = filename + len;
         if (file_part > filename && file_part[-1] != '\\') *file_part++ = '\\';
         strcpyW( file_part, libname );
+        if (is_wow64 && redir_disabled) flags = BINARY_FLAG_64BIT;
     }
     if (ext && !strchrW( file_part, '.' ))
     {
@@ -160,6 +188,10 @@ static BOOL get_builtin_path( const WCHAR *libname, const WCHAR *ext, WCHAR *fil
             return FALSE;  /* too long */
         strcatW( file_part, ext );
     }
+    binary_info->type = BINARY_UNIX_LIB;
+    binary_info->flags = flags;
+    binary_info->res_start = NULL;
+    binary_info->res_end = NULL;
     return TRUE;
 }
 
@@ -199,7 +231,7 @@ static void *open_builtin_exe_file( const WCHAR *name, char *error, int error_si
  * Open a specific exe file, taking load order into account.
  * Returns the file handle or 0 for a builtin exe.
  */
-static HANDLE open_exe_file( const WCHAR *name )
+static HANDLE open_exe_file( const WCHAR *name, struct binary_info *binary_info )
 {
     HANDLE handle;
 
@@ -210,9 +242,11 @@ static HANDLE open_exe_file( const WCHAR *name )
     {
         WCHAR buffer[MAX_PATH];
         /* file doesn't exist, check for builtin */
-        if (contains_path( name ) && get_builtin_path( name, NULL, buffer, sizeof(buffer) ))
+        if (contains_path( name ) && get_builtin_path( name, NULL, buffer, sizeof(buffer), binary_info ))
             handle = 0;
     }
+    else MODULE_get_binary_info( handle, binary_info );
+
     return handle;
 }
 
@@ -225,41 +259,40 @@ static HANDLE open_exe_file( const WCHAR *name )
  * If file exists but cannot be opened, returns TRUE and set handle to INVALID_HANDLE_VALUE.
  * If file is a builtin exe, returns TRUE and sets handle to 0.
  */
-static BOOL find_exe_file( const WCHAR *name, WCHAR *buffer, int buflen, HANDLE *handle )
+static BOOL find_exe_file( const WCHAR *name, WCHAR *buffer, int buflen,
+                           HANDLE *handle, struct binary_info *binary_info )
 {
     static const WCHAR exeW[] = {'.','e','x','e',0};
     int file_exists;
 
     TRACE("looking for %s\n", debugstr_w(name) );
 
-    if (!SearchPathW( NULL, name, exeW, buflen, buffer, NULL ) &&
-        !get_builtin_path( name, exeW, buffer, buflen ))
+    if (!SearchPathW( NULL, name, exeW, buflen, buffer, NULL ))
     {
+        if (get_builtin_path( name, exeW, buffer, buflen, binary_info ))
+        {
+            TRACE( "Trying built-in exe %s\n", debugstr_w(buffer) );
+            open_builtin_exe_file( buffer, NULL, 0, 1, &file_exists );
+            if (file_exists)
+            {
+                *handle = 0;
+                return TRUE;
+            }
+            return FALSE;
+        }
+
         /* no builtin found, try native without extension in case it is a Unix app */
 
-        if (SearchPathW( NULL, name, NULL, buflen, buffer, NULL ))
-        {
-            TRACE( "Trying native/Unix binary %s\n", debugstr_w(buffer) );
-            if ((*handle = CreateFileW( buffer, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_DELETE,
-                                        NULL, OPEN_EXISTING, 0, 0 )) != INVALID_HANDLE_VALUE)
-                return TRUE;
-        }
-        return FALSE;
+        if (!SearchPathW( NULL, name, NULL, buflen, buffer, NULL )) return FALSE;
     }
 
     TRACE( "Trying native exe %s\n", debugstr_w(buffer) );
     if ((*handle = CreateFileW( buffer, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_DELETE,
                                 NULL, OPEN_EXISTING, 0, 0 )) != INVALID_HANDLE_VALUE)
-        return TRUE;
-
-    TRACE( "Trying built-in exe %s\n", debugstr_w(buffer) );
-    open_builtin_exe_file( buffer, NULL, 0, 1, &file_exists );
-    if (file_exists)
     {
-        *handle = 0;
+        MODULE_get_binary_info( *handle, binary_info );
         return TRUE;
     }
-
     return FALSE;
 }
 
@@ -917,6 +950,7 @@ static void start_wineboot( HANDLE handles[2] )
         PROCESS_INFORMATION pi;
         DWORD type;
         void *redir;
+        WCHAR app[MAX_PATH];
         WCHAR cmdline[MAX_PATH + (sizeof(wineboot) + sizeof(args)) / sizeof(WCHAR)];
 
         memset( &si, 0, sizeof(si) );
@@ -926,11 +960,11 @@ static void start_wineboot( HANDLE handles[2] )
         si.hStdOutput = 0;
         si.hStdError  = GetStdHandle( STD_ERROR_HANDLE );
 
-        GetSystemDirectoryW( cmdline, MAX_PATH );
-        lstrcatW( cmdline, wineboot );
+        GetSystemDirectoryW( app, MAX_PATH - sizeof(wineboot)/sizeof(WCHAR) );
+        lstrcatW( app, wineboot );
 
         Wow64DisableWow64FsRedirection( &redir );
-        if (GetBinaryTypeW( cmdline, &type ) && type != expected_type)
+        if (GetBinaryTypeW( app, &type ) && type != expected_type)
         {
             if (type == SCS_64BIT_BINARY)
                 MESSAGE( "wine: '%s' is a 64-bit prefix, it cannot be used with 32-bit Wine.\n",
@@ -941,8 +975,9 @@ static void start_wineboot( HANDLE handles[2] )
             ExitProcess( 1 );
         }
 
-        lstrcatW( cmdline, args );
-        if (CreateProcessW( NULL, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
+        strcpyW( cmdline, app );
+        strcatW( cmdline, args );
+        if (CreateProcessW( app, cmdline, NULL, NULL, FALSE, DETACHED_PROCESS, NULL, NULL, &si, &pi ))
         {
             TRACE( "started wineboot pid %04x tid %04x\n", pi.dwProcessId, pi.dwThreadId );
             CloseHandle( pi.hThread );
@@ -1081,8 +1116,10 @@ void CDECL __wine_kernel_init(void)
     }
     else
     {
+        struct binary_info binary_info;
+
         if (!SearchPathW( NULL, __wine_main_wargv[0], exeW, MAX_PATH, main_exe_name, NULL ) &&
-            !get_builtin_path( __wine_main_wargv[0], exeW, main_exe_name, MAX_PATH ))
+            !get_builtin_path( __wine_main_wargv[0], exeW, main_exe_name, MAX_PATH, &binary_info ))
         {
             MESSAGE( "wine: cannot find '%s'\n", __wine_main_argv[0] );
             ExitProcess( GetLastError() );
@@ -1587,7 +1624,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
                             LPCWSTR cur_dir, LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                             BOOL inherit, DWORD flags, LPSTARTUPINFOW startup,
                             LPPROCESS_INFORMATION info, LPCSTR unixdir,
-                            void *res_start, void *res_end, DWORD binary_type, int exec_only )
+                            const struct binary_info *binary_info, int exec_only )
 {
     BOOL ret, success = FALSE;
     HANDLE process_info;
@@ -1600,7 +1637,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
     pid_t pid;
     int err;
 
-    if (sizeof(void *) == sizeof(int) && !is_wow64 && (binary_type & BINARY_FLAG_64BIT))
+    if (sizeof(void *) == sizeof(int) && !is_wow64 && (binary_info->flags & BINARY_FLAG_64BIT))
     {
         ERR( "starting 64-bit process %s not supported on this platform\n", debugstr_w(filename) );
         SetLastError( ERROR_BAD_EXE_FORMAT );
@@ -1728,7 +1765,7 @@ static BOOL create_process( HANDLE hFile, LPCWSTR filename, LPWSTR cmd_line, LPW
 
         sprintf( socket_env, "WINESERVERSOCKET=%u", socketfd[0] );
         sprintf( preloader_reserve, "WINEPRELOADRESERVE=%lx-%lx",
-                 (unsigned long)res_start, (unsigned long)res_end );
+                 (unsigned long)binary_info->res_start, (unsigned long)binary_info->res_end );
 
         putenv( preloader_reserve );
         putenv( socket_env );
@@ -1791,7 +1828,7 @@ static BOOL create_vdm_process( LPCWSTR filename, LPWSTR cmd_line, LPWSTR env, L
                                 LPSECURITY_ATTRIBUTES psa, LPSECURITY_ATTRIBUTES tsa,
                                 BOOL inherit, DWORD flags, LPSTARTUPINFOW startup,
                                 LPPROCESS_INFORMATION info, LPCSTR unixdir,
-                                DWORD binary_type, int exec_only )
+                                const struct binary_info *binary_info, int exec_only )
 {
     static const WCHAR argsW[] = {'%','s',' ','-','-','a','p','p','-','n','a','m','e',' ','"','%','s','"',' ','%','s',0};
 
@@ -1806,7 +1843,7 @@ static BOOL create_vdm_process( LPCWSTR filename, LPWSTR cmd_line, LPWSTR env, L
     }
     sprintfW( new_cmd_line, argsW, winevdmW, filename, cmd_line );
     ret = create_process( 0, winevdmW, new_cmd_line, env, cur_dir, psa, tsa, inherit,
-                          flags, startup, info, unixdir, NULL, NULL, binary_type, exec_only );
+                          flags, startup, info, unixdir, binary_info, exec_only );
     HeapFree( GetProcessHeap(), 0, new_cmd_line );
     return ret;
 }
@@ -1854,7 +1891,7 @@ static BOOL create_cmd_process( LPCWSTR filename, LPWSTR cmd_line, LPVOID env, L
  * Also returns a handle to the opened file if it's a Windows binary.
  */
 static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
-                             int buflen, HANDLE *handle )
+                             int buflen, HANDLE *handle, struct binary_info *binary_info )
 {
     static const WCHAR quotesW[] = {'"','%','s','"',0};
 
@@ -1868,7 +1905,7 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
     {
         /* use the unmodified app name as file name */
         lstrcpynW( buffer, appname, buflen );
-        *handle = open_exe_file( buffer );
+        *handle = open_exe_file( buffer, binary_info );
         if (!(ret = cmdline) || !cmdline[0])
         {
             /* no command-line, create one */
@@ -1888,7 +1925,7 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
         memcpy( name, cmdline + 1, len * sizeof(WCHAR) );
         name[len] = 0;
 
-        if (find_exe_file( name, buffer, buflen, handle ))
+        if (find_exe_file( name, buffer, buflen, handle, binary_info ))
             ret = cmdline;  /* no change necessary */
         goto done;
     }
@@ -1905,7 +1942,7 @@ static LPWSTR get_file_name( LPCWSTR appname, LPWSTR cmdline, LPWSTR buffer,
     {
         do *pos++ = *p++; while (*p && *p != ' ' && *p != '\t');
         *pos = 0;
-        if (find_exe_file( name, buffer, buflen, handle ))
+        if (find_exe_file( name, buffer, buflen, handle, binary_info ))
         {
             ret = cmdline;
             break;
@@ -1983,14 +2020,14 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line,
     char *unixdir = NULL;
     WCHAR name[MAX_PATH];
     WCHAR *tidy_cmdline, *p, *envW = env;
-    void *res_start, *res_end;
-    DWORD binary_type;
+    struct binary_info binary_info;
 
     /* Process the AppName and/or CmdLine to get module name and path */
 
     TRACE("app %s cmdline %s\n", debugstr_w(app_name), debugstr_w(cmd_line) );
 
-    if (!(tidy_cmdline = get_file_name( app_name, cmd_line, name, sizeof(name)/sizeof(WCHAR), &hFile )))
+    if (!(tidy_cmdline = get_file_name( app_name, cmd_line, name, sizeof(name)/sizeof(WCHAR),
+                                        &hFile, &binary_info )))
         return FALSE;
     if (hFile == INVALID_HANDLE_VALUE) goto done;
 
@@ -2032,43 +2069,30 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line,
     info->hThread = info->hProcess = 0;
     info->dwProcessId = info->dwThreadId = 0;
 
-    /* Determine executable type */
-
-    if (!hFile)  /* builtin exe */
-    {
-        TRACE( "starting %s as Winelib app\n", debugstr_w(name) );
-        retv = create_process( 0, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir, NULL, NULL,
-                               BINARY_UNIX_LIB, FALSE );
-        goto done;
-    }
-
-    binary_type = MODULE_GetBinaryType( hFile, &res_start, &res_end );
-    if (binary_type & BINARY_FLAG_DLL)
+    if (binary_info.flags & BINARY_FLAG_DLL)
     {
         TRACE( "not starting %s since it is a dll\n", debugstr_w(name) );
         SetLastError( ERROR_BAD_EXE_FORMAT );
     }
-    else switch (binary_type & BINARY_TYPE_MASK)
+    else switch (binary_info.type)
     {
     case BINARY_PE:
-        TRACE( "starting %s as Win32 binary (%p-%p)\n", debugstr_w(name), res_start, res_end );
+        TRACE( "starting %s as Win32 binary (%p-%p)\n",
+               debugstr_w(name), binary_info.res_start, binary_info.res_end );
         retv = create_process( hFile, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir,
-                               res_start, res_end, binary_type, FALSE );
+                               inherit, flags, startup_info, info, unixdir, &binary_info, FALSE );
         break;
     case BINARY_OS216:
     case BINARY_WIN16:
     case BINARY_DOS:
         TRACE( "starting %s as Win16/DOS binary\n", debugstr_w(name) );
         retv = create_vdm_process( name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                                   inherit, flags, startup_info, info, unixdir, binary_type, FALSE );
+                                   inherit, flags, startup_info, info, unixdir, &binary_info, FALSE );
         break;
     case BINARY_UNIX_LIB:
-        TRACE( "%s is a Unix library, starting as Winelib app\n", debugstr_w(name) );
+        TRACE( "starting %s as Winelib app\n", debugstr_w(name) );
         retv = create_process( hFile, name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
-                               inherit, flags, startup_info, info, unixdir,
-                               NULL, NULL, binary_type, FALSE );
+                               inherit, flags, startup_info, info, unixdir, &binary_info, FALSE );
         break;
     case BINARY_UNKNOWN:
         /* check for .com or .bat extension */
@@ -2079,7 +2103,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line,
                 TRACE( "starting %s as DOS binary\n", debugstr_w(name) );
                 retv = create_vdm_process( name, tidy_cmdline, envW, cur_dir, process_attr, thread_attr,
                                            inherit, flags, startup_info, info, unixdir,
-                                           binary_type, FALSE );
+                                           &binary_info, FALSE );
                 break;
             }
             if (!strcmpiW( p, batW ) || !strcmpiW( p, cmdW ) )
@@ -2106,7 +2130,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessW( LPCWSTR app_name, LPWSTR cmd_line,
         }
         break;
     }
-    CloseHandle( hFile );
+    if (hFile) CloseHandle( hFile );
 
  done:
     if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
@@ -2125,12 +2149,11 @@ static void exec_process( LPCWSTR name )
 {
     HANDLE hFile;
     WCHAR *p;
-    void *res_start, *res_end;
     STARTUPINFOW startup_info;
     PROCESS_INFORMATION info;
-    DWORD binary_type;
+    struct binary_info binary_info;
 
-    hFile = open_exe_file( name );
+    hFile = open_exe_file( name, &binary_info );
     if (!hFile || hFile == INVALID_HANDLE_VALUE) return;
 
     memset( &startup_info, 0, sizeof(startup_info) );
@@ -2138,19 +2161,19 @@ static void exec_process( LPCWSTR name )
 
     /* Determine executable type */
 
-    binary_type = MODULE_GetBinaryType( hFile, &res_start, &res_end );
-    if (binary_type & BINARY_FLAG_DLL) return;
-    switch (binary_type & BINARY_TYPE_MASK)
+    if (binary_info.flags & BINARY_FLAG_DLL) return;
+    switch (binary_info.type)
     {
     case BINARY_PE:
-        TRACE( "starting %s as Win32 binary (%p-%p)\n", debugstr_w(name), res_start, res_end );
+        TRACE( "starting %s as Win32 binary (%p-%p)\n",
+               debugstr_w(name), binary_info.res_start, binary_info.res_end );
         create_process( hFile, name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                        FALSE, 0, &startup_info, &info, NULL, res_start, res_end, binary_type, TRUE );
+                        FALSE, 0, &startup_info, &info, NULL, &binary_info, TRUE );
         break;
     case BINARY_UNIX_LIB:
         TRACE( "%s is a Unix library, starting as Winelib app\n", debugstr_w(name) );
         create_process( hFile, name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                        FALSE, 0, &startup_info, &info, NULL, NULL, NULL, binary_type, TRUE );
+                        FALSE, 0, &startup_info, &info, NULL, &binary_info, TRUE );
         break;
     case BINARY_UNKNOWN:
         /* check for .com or .pif extension */
@@ -2162,7 +2185,7 @@ static void exec_process( LPCWSTR name )
     case BINARY_DOS:
         TRACE( "starting %s as Win16/DOS binary\n", debugstr_w(name) );
         create_vdm_process( name, GetCommandLineW(), NULL, NULL, NULL, NULL,
-                            FALSE, 0, &startup_info, &info, NULL, binary_type, TRUE );
+                            FALSE, 0, &startup_info, &info, NULL, &binary_info, TRUE );
         break;
     default:
         break;

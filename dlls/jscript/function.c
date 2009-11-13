@@ -216,7 +216,7 @@ static HRESULT invoke_source(script_ctx_t *ctx, FunctionInstance *function, IDis
     if(FAILED(hres))
         return hres;
 
-    hres = exec_source(exec_ctx, function->parser, function->source, ei, retv);
+    hres = exec_source(exec_ctx, function->parser, function->source, EXECT_FUNCTION, ei, retv);
     exec_release(exec_ctx);
 
     return hres;
@@ -403,9 +403,13 @@ static HRESULT Function_apply(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
 
     argc = arg_cnt(dp);
     if(argc) {
-        hres = to_object(ctx, get_arg(dp,0), &this_obj);
-        if(FAILED(hres))
-            return hres;
+        VARIANT *v = get_arg(dp,0);
+
+        if(V_VT(v) != VT_EMPTY && V_VT(v) != VT_NULL) {
+            hres = to_object(ctx, v, &this_obj);
+            if(FAILED(hres))
+                return hres;
+        }
     }
 
     if(argc >= 2) {
@@ -413,8 +417,8 @@ static HRESULT Function_apply(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
 
         if(V_VT(get_arg(dp,1)) == VT_DISPATCH) {
             arg_array = iface_to_jsdisp((IUnknown*)V_DISPATCH(get_arg(dp,1)));
-            if(arg_array && (
-                !is_class(arg_array, JSCLASS_ARRAY) && !is_class(arg_array, JSCLASS_ARGUMENTS) )) {
+            if(arg_array &&
+               (!is_class(arg_array, JSCLASS_ARRAY) && !is_class(arg_array, JSCLASS_ARGUMENTS) )) {
                 jsdisp_release(arg_array);
                 arg_array = NULL;
             }
@@ -455,9 +459,14 @@ static HRESULT Function_call(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
 
     argc = arg_cnt(dp);
     if(argc) {
-        hres = to_object(ctx, get_arg(dp,0), &this_obj);
-        if(FAILED(hres))
-            return hres;
+        VARIANT *v = get_arg(dp,0);
+
+        if(V_VT(v) != VT_EMPTY && V_VT(v) != VT_NULL) {
+            hres = to_object(ctx, v, &this_obj);
+            if(FAILED(hres))
+                return hres;
+        }
+
         args.cArgs = argc-1;
     }
 

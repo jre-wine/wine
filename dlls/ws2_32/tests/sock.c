@@ -987,7 +987,7 @@ static void test_set_getsockopt(void)
     ok( !err, "get/setsockopt(SO_RCVTIMEO) failed error: %d\n", WSAGetLastError());
     ok( timeout == SOCKTIMEOUT1, "getsockopt(SO_RCVTIMEO) returned wrong value %d\n", timeout);
     /* SO_SNDTIMEO */
-    timeout = SOCKTIMEOUT2; /* 54 seconds. See remark above */ 
+    timeout = SOCKTIMEOUT2; /* 997 seconds. See remark above */
     size = sizeof(timeout);
     err = setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char *) &timeout, size); 
     if( !err)
@@ -2443,7 +2443,7 @@ static void test_addr_to_print(void)
     /* Test longer length is ok */
     WSASetLastError(0);
     pdst = NULL;
-    pdst = pInetNtop(AF_INET6, (void*)&in6.s6_addr, dst, 18);
+    pdst = pInetNtop(AF_INET6, (void*)&in6.s6_addr, dst6, 18);
     ok(pdst != NULL, "The pointer should be returned (%p)\n", pdst);
 }
 
@@ -2453,6 +2453,7 @@ static void test_ioctlsocket(void)
     int ret;
     static const LONG cmds[] = {FIONBIO, FIONREAD, SIOCATMARK};
     UINT i;
+    u_long arg = 0;
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     ok(sock != INVALID_SOCKET, "Creating the socket failed: %d\n", WSAGetLastError());
@@ -2470,6 +2471,13 @@ static void test_ioctlsocket(void)
         ret = WSAGetLastError();
         ok(ret == WSAEFAULT, "expected WSAEFAULT, got %d instead\n", ret);
     }
+
+    /* A fresh and not connected socket has no urgent data, this test shows
+     * that normal(not urgent) data returns a non-zero value for SIOCATMARK. */
+
+    ret = ioctlsocket(sock, SIOCATMARK, &arg);
+    if(ret != SOCKET_ERROR)
+        todo_wine ok(arg, "expected a non-zero value\n");
 }
 
 static int drain_pause=0;
@@ -2764,6 +2772,7 @@ static void test_WSASendTo(void)
 static void test_GetAddrInfoW(void)
 {
     static const WCHAR port[] = {'8','0',0};
+    static const WCHAR empty[] = {0};
     static const WCHAR localhost[] = {'l','o','c','a','l','h','o','s','t',0};
 
     int ret;
@@ -2779,6 +2788,15 @@ static void test_GetAddrInfoW(void)
 
     ret = pGetAddrInfoW(NULL, NULL, NULL, &result);
     ok(ret == WSAHOST_NOT_FOUND, "got %d expected WSAHOST_NOT_FOUND\n", ret);
+
+    result = NULL;
+    ret = pGetAddrInfoW(empty, NULL, NULL, &result);
+    todo_wine
+    {
+    ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());
+    ok(result != NULL, "GetAddrInfoW failed\n");
+    }
+    pFreeAddrInfoW(result);
 
     ret = pGetAddrInfoW(localhost, NULL, NULL, &result);
     ok(!ret, "GetAddrInfoW failed with %d\n", WSAGetLastError());

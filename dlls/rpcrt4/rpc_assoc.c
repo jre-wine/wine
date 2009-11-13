@@ -84,6 +84,15 @@ static RPC_STATUS RpcAssoc_Alloc(LPCSTR Protseq, LPCSTR NetworkAddr,
     return RPC_S_OK;
 }
 
+static BOOL compare_networkoptions(LPCWSTR opts1, LPCWSTR opts2)
+{
+    if ((opts1 == NULL) && (opts2 == NULL))
+        return TRUE;
+    if ((opts1 == NULL) || (opts2 == NULL))
+        return FALSE;
+    return !strcmpW(opts1, opts2);
+}
+
 RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
                                  LPCSTR Endpoint, LPCWSTR NetworkOptions,
                                  RpcAssoc **assoc_out)
@@ -97,7 +106,7 @@ RPC_STATUS RPCRT4_GetAssociation(LPCSTR Protseq, LPCSTR NetworkAddr,
         if (!strcmp(Protseq, assoc->Protseq) &&
             !strcmp(NetworkAddr, assoc->NetworkAddr) &&
             !strcmp(Endpoint, assoc->Endpoint) &&
-            ((!assoc->NetworkOptions && !NetworkOptions) || !strcmpW(NetworkOptions, assoc->NetworkOptions)))
+            compare_networkoptions(NetworkOptions, assoc->NetworkOptions))
         {
             assoc->refs++;
             *assoc_out = assoc;
@@ -254,9 +263,10 @@ static RPC_STATUS RpcAssoc_BindConnection(const RpcAssoc *assoc, RpcConnection *
         {
             unsigned short remaining = msg.BufferLength -
             ROUND_UP(FIELD_OFFSET(RpcAddressString, string[server_address->length]), 4);
-            RpcResults *results = (RpcResults*)((ULONG_PTR)server_address +
-                                                ROUND_UP(FIELD_OFFSET(RpcAddressString, string[server_address->length]), 4));
-            if ((results->num_results == 1) && (remaining >= sizeof(*results)))
+            RpcResultList *results = (RpcResultList*)((ULONG_PTR)server_address +
+                ROUND_UP(FIELD_OFFSET(RpcAddressString, string[server_address->length]), 4));
+            if ((results->num_results == 1) &&
+                (remaining >= FIELD_OFFSET(RpcResultList, results[results->num_results])))
             {
                 switch (results->results[0].result)
                 {

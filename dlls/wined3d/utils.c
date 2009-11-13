@@ -118,7 +118,7 @@ static const struct StaticPixelFormatDesc formats[] =
     {WINED3DFMT_D16_LOCKABLE,           0x0,        0x0,        0x0,        0x0,        2,      16,     0,      FALSE},
     {WINED3DFMT_D32_UNORM,              0x0,        0x0,        0x0,        0x0,        4,      32,     0,      FALSE},
     {WINED3DFMT_S1_UINT_D15_UNORM,      0x0,        0x0,        0x0,        0x0,        2,      15,     1,      FALSE},
-    {WINED3DFMT_S8_UINT_D24_UNORM,      0x0,        0x0,        0x0,        0x0,        4,      24,     8,      FALSE},
+    {WINED3DFMT_D24_UNORM_S8_UINT,      0x0,        0x0,        0x0,        0x0,        4,      24,     8,      FALSE},
     {WINED3DFMT_X8D24_UNORM,            0x0,        0x0,        0x0,        0x0,        4,      24,     0,      FALSE},
     {WINED3DFMT_S4X4_UINT_D24_UNORM,    0x0,        0x0,        0x0,        0x0,        4,      24,     4,      FALSE},
     {WINED3DFMT_D16_UNORM,              0x0,        0x0,        0x0,        0x0,        2,      16,     0,      FALSE},
@@ -447,15 +447,15 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,
             WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
             ARB_FRAMEBUFFER_OBJECT},
-    {WINED3DFMT_S8_UINT_D24_UNORM,      GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
+    {WINED3DFMT_D24_UNORM_S8_UINT,      GL_DEPTH_COMPONENT24_ARB,         GL_DEPTH_COMPONENT24_ARB,               0,
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_INT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH,
             ARB_DEPTH_TEXTURE},
-    {WINED3DFMT_S8_UINT_D24_UNORM,      GL_DEPTH24_STENCIL8_EXT,          GL_DEPTH24_STENCIL8_EXT,                0,
+    {WINED3DFMT_D24_UNORM_S8_UINT,      GL_DEPTH24_STENCIL8_EXT,          GL_DEPTH24_STENCIL8_EXT,                0,
             GL_DEPTH_STENCIL_EXT,       GL_UNSIGNED_INT_24_8_EXT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
             EXT_PACKED_DEPTH_STENCIL},
-    {WINED3DFMT_S8_UINT_D24_UNORM,      GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
+    {WINED3DFMT_D24_UNORM_S8_UINT,      GL_DEPTH24_STENCIL8,              GL_DEPTH24_STENCIL8,                    0,
             GL_DEPTH_STENCIL,           GL_UNSIGNED_INT_24_8,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL,
             ARB_FRAMEBUFFER_OBJECT},
@@ -574,8 +574,6 @@ static BOOL init_format_compression_info(struct wined3d_gl_info *gl_info)
     return TRUE;
 }
 
-#define GLINFO_LOCATION (*gl_info)
-
 /* Context activation is done by the caller. */
 static void check_fbo_compat(const struct wined3d_gl_info *gl_info, struct GlPixelFormatDesc *format_desc)
 {
@@ -663,8 +661,8 @@ static void check_fbo_compat(const struct wined3d_gl_info *gl_info, struct GlPix
     {
         GLuint rb;
 
-        if (GL_SUPPORT(ARB_FRAMEBUFFER_OBJECT)
-                || GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+        if (gl_info->supported[ARB_FRAMEBUFFER_OBJECT]
+                || gl_info->supported[EXT_PACKED_DEPTH_STENCIL])
         {
             gl_info->fbo_ops.glGenRenderbuffers(1, &rb);
             gl_info->fbo_ops.glBindRenderbuffer(GL_RENDERBUFFER, rb);
@@ -683,8 +681,8 @@ static void check_fbo_compat(const struct wined3d_gl_info *gl_info, struct GlPix
             format_desc->Flags &= ~WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING;
         }
 
-        if (GL_SUPPORT(ARB_FRAMEBUFFER_OBJECT)
-                || GL_SUPPORT(EXT_PACKED_DEPTH_STENCIL))
+        if (gl_info->supported[ARB_FRAMEBUFFER_OBJECT]
+                || gl_info->supported[EXT_PACKED_DEPTH_STENCIL])
         {
             gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
             gl_info->fbo_ops.glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, 0);
@@ -771,7 +769,7 @@ static BOOL init_format_texture_info(struct wined3d_gl_info *gl_info)
             return FALSE;
         }
 
-        if (!GL_SUPPORT(gl_formats_template[i].extension)) continue;
+        if (!gl_info->supported[gl_formats_template[i].extension]) continue;
 
         desc = &gl_info->gl_formats[fmt_idx];
         desc->glInternal = gl_formats_template[i].glInternal;
@@ -897,7 +895,7 @@ static BOOL check_filter(const struct wined3d_gl_info *gl_info, GLenum internal)
     return ret;
 }
 
-static void init_format_filter_info(struct wined3d_gl_info *gl_info)
+static void init_format_filter_info(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor)
 {
     unsigned int fmt_idx, i;
     WINED3DFORMAT fmts16[] = {
@@ -911,12 +909,12 @@ static void init_format_filter_info(struct wined3d_gl_info *gl_info)
     if(wined3d_settings.offscreen_rendering_mode != ORM_FBO)
     {
         WARN("No FBO support, or no FBO ORM, guessing filter info from GL caps\n");
-        if(gl_info->gl_vendor == VENDOR_NVIDIA && GL_SUPPORT(ARB_TEXTURE_FLOAT))
+        if (vendor == VENDOR_NVIDIA && gl_info->supported[ARB_TEXTURE_FLOAT])
         {
             TRACE("Nvidia card with texture_float support: Assuming float16 blending\n");
             filtered = TRUE;
         }
-        else if (gl_info->max_glsl_varyings > 44)
+        else if (gl_info->limits.glsl_varyings > 44)
         {
             TRACE("More than 44 GLSL varyings - assuming d3d10 card with float16 blending\n");
             filtered = TRUE;
@@ -990,7 +988,7 @@ static void apply_format_fixups(struct wined3d_gl_info *gl_info)
      * returns 0.0 when sampling from it, DirectX 1.0. So we always have in-shader
      * conversion for this format.
      */
-    if (!GL_SUPPORT(NV_TEXTURE_SHADER))
+    if (!gl_info->supported[NV_TEXTURE_SHADER])
     {
         idx = getFmtIdx(WINED3DFMT_R8G8_SNORM);
         gl_info->gl_formats[idx].color_fixup = create_color_fixup_desc(
@@ -1009,7 +1007,7 @@ static void apply_format_fixups(struct wined3d_gl_info *gl_info)
                 0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
     }
 
-    if (!GL_SUPPORT(NV_TEXTURE_SHADER))
+    if (!gl_info->supported[NV_TEXTURE_SHADER])
     {
         /* If GL_NV_texture_shader is not supported, those formats are converted, incompatibly
          * with each other
@@ -1033,20 +1031,20 @@ static void apply_format_fixups(struct wined3d_gl_info *gl_info)
          */
     }
 
-    if (GL_SUPPORT(EXT_TEXTURE_COMPRESSION_RGTC))
+    if (gl_info->supported[EXT_TEXTURE_COMPRESSION_RGTC])
     {
         idx = getFmtIdx(WINED3DFMT_ATI2N);
         gl_info->gl_formats[idx].color_fixup = create_color_fixup_desc(
                 0, CHANNEL_SOURCE_Y, 0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
     }
-    else if (GL_SUPPORT(ATI_TEXTURE_COMPRESSION_3DC))
+    else if (gl_info->supported[ATI_TEXTURE_COMPRESSION_3DC])
     {
         idx = getFmtIdx(WINED3DFMT_ATI2N);
         gl_info->gl_formats[idx].color_fixup= create_color_fixup_desc(
                 0, CHANNEL_SOURCE_X, 0, CHANNEL_SOURCE_W, 0, CHANNEL_SOURCE_ONE, 0, CHANNEL_SOURCE_ONE);
     }
 
-    if (!GL_SUPPORT(APPLE_YCBCR_422))
+    if (!gl_info->supported[APPLE_YCBCR_422])
     {
         idx = getFmtIdx(WINED3DFMT_YUY2);
         gl_info->gl_formats[idx].color_fixup = create_yuv_fixup_desc(YUV_FIXUP_YUY2);
@@ -1059,13 +1057,13 @@ static void apply_format_fixups(struct wined3d_gl_info *gl_info)
     gl_info->gl_formats[idx].heightscale = 1.5f;
     gl_info->gl_formats[idx].color_fixup = create_yuv_fixup_desc(YUV_FIXUP_YV12);
 
-    if (GL_SUPPORT(EXT_VERTEX_ARRAY_BGRA))
+    if (gl_info->supported[EXT_VERTEX_ARRAY_BGRA])
     {
         idx = getFmtIdx(WINED3DFMT_B8G8R8A8_UNORM);
         gl_info->gl_formats[idx].gl_vtx_format = GL_BGRA;
     }
 
-    if (GL_SUPPORT(ARB_HALF_FLOAT_VERTEX))
+    if (gl_info->supported[ARB_HALF_FLOAT_VERTEX])
     {
         /* Do not change the size of the type, it is CPU side. We have to change the GPU-side information though.
          * It is the job of the vertex buffer code to make sure that the vbos have the right format */
@@ -1120,7 +1118,7 @@ BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info)
 }
 
 /* Context activation is done by the caller. */
-BOOL initPixelFormats(struct wined3d_gl_info *gl_info)
+BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor)
 {
     if (!init_format_base_info(gl_info)) return FALSE;
 
@@ -1130,7 +1128,7 @@ BOOL initPixelFormats(struct wined3d_gl_info *gl_info)
 
     apply_format_fixups(gl_info);
     init_format_fbo_compat_info(gl_info);
-    init_format_filter_info(gl_info);
+    init_format_filter_info(gl_info, vendor);
 
     return TRUE;
 
@@ -1191,7 +1189,6 @@ const char* debug_d3dformat(WINED3DFORMAT fmt) {
     FMT_TO_STR(WINED3DFMT_D16_LOCKABLE);
     FMT_TO_STR(WINED3DFMT_D32_UNORM);
     FMT_TO_STR(WINED3DFMT_S1_UINT_D15_UNORM);
-    FMT_TO_STR(WINED3DFMT_S8_UINT_D24_UNORM);
     FMT_TO_STR(WINED3DFMT_X8D24_UNORM);
     FMT_TO_STR(WINED3DFMT_S4X4_UINT_D24_UNORM);
     FMT_TO_STR(WINED3DFMT_L16_UNORM);
@@ -2085,7 +2082,7 @@ BOOL getDepthStencilBits(const struct GlPixelFormatDesc *format_desc, short *dep
         case WINED3DFMT_S1_UINT_D15_UNORM:
         case WINED3DFMT_X8D24_UNORM:
         case WINED3DFMT_S4X4_UINT_D24_UNORM:
-        case WINED3DFMT_S8_UINT_D24_UNORM:
+        case WINED3DFMT_D24_UNORM_S8_UINT:
         case WINED3DFMT_S8_UINT_D24_FLOAT:
         case WINED3DFMT_D32_UNORM:
         case WINED3DFMT_D32_FLOAT:
@@ -2192,7 +2189,7 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
     const struct wined3d_gl_info *gl_info = &This->resource.wineD3DDevice->adapter->gl_info;
     int x1 = Rect->left, x2 = Rect->right;
     int y1 = Rect->top, y2 = Rect->bottom;
-    GLint maxSize = gl_info->max_texture_size;
+    GLint maxSize = gl_info->limits.texture_size;
 
     TRACE("(%p)->(%d,%d)-(%d,%d)\n", This,
           Rect->left, Rect->top, Rect->right, Rect->bottom);
@@ -2275,8 +2272,9 @@ BOOL CalculateTexRect(IWineD3DSurfaceImpl *This, RECT *Rect, float glTexCoord[4]
                 This->glRect.right = This->pow2Width;
             }
 
-            if(This->pow2Height > maxSize) {
-                This->glRect.top = x1 - gl_info->max_texture_size / 2;
+            if (This->pow2Height > maxSize)
+            {
+                This->glRect.top = x1 - gl_info->limits.texture_size / 2;
                 if(This->glRect.top < 0) This->glRect.top = 0;
                 This->glRect.bottom = This->glRect.left + maxSize;
                 if(This->glRect.bottom > This->currentDesc.Height) {
@@ -2350,7 +2348,7 @@ void gen_ffp_frag_op(IWineD3DStateBlockImpl *stateblock, struct ffp_frag_setting
     IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
-    for (i = 0; i < gl_info->max_texture_stages; ++i)
+    for (i = 0; i < gl_info->limits.texture_stages; ++i)
     {
         IWineD3DBaseTextureImpl *texture;
         settings->op[i].padding = 0;
@@ -2585,11 +2583,13 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
             case GL_TEXTURE_2D:
                 glDisable(GL_TEXTURE_3D);
                 checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
+                {
                     glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
                 }
-                if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
+                {
                     glDisable(GL_TEXTURE_RECTANGLE_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
                 }
@@ -2601,7 +2601,8 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
                 checkGLcall("glDisable(GL_TEXTURE_2D)");
                 glDisable(GL_TEXTURE_3D);
                 checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
+                {
                     glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
                 }
@@ -2609,11 +2610,13 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
                 checkGLcall("glEnable(GL_TEXTURE_RECTANGLE_ARB)");
                 break;
             case GL_TEXTURE_3D:
-                if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+                if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
+                {
                     glDisable(GL_TEXTURE_CUBE_MAP_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
                 }
-                if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
+                {
                     glDisable(GL_TEXTURE_RECTANGLE_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
                 }
@@ -2627,7 +2630,8 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
                 checkGLcall("glDisable(GL_TEXTURE_2D)");
                 glDisable(GL_TEXTURE_3D);
                 checkGLcall("glDisable(GL_TEXTURE_3D)");
-                if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+                if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
+                {
                     glDisable(GL_TEXTURE_RECTANGLE_ARB);
                     checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
                 }
@@ -2640,11 +2644,13 @@ void texture_activate_dimensions(DWORD stage, IWineD3DStateBlockImpl *stateblock
         checkGLcall("glEnable(GL_TEXTURE_2D)");
         glDisable(GL_TEXTURE_3D);
         checkGLcall("glDisable(GL_TEXTURE_3D)");
-        if(GL_SUPPORT(ARB_TEXTURE_CUBE_MAP)) {
+        if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
+        {
             glDisable(GL_TEXTURE_CUBE_MAP_ARB);
             checkGLcall("glDisable(GL_TEXTURE_CUBE_MAP_ARB)");
         }
-        if(GL_SUPPORT(ARB_TEXTURE_RECTANGLE)) {
+        if (gl_info->supported[ARB_TEXTURE_RECTANGLE])
+        {
             glDisable(GL_TEXTURE_RECTANGLE_ARB);
             checkGLcall("glDisable(GL_TEXTURE_RECTANGLE_ARB)");
         }
@@ -2662,7 +2668,7 @@ void sampler_texdim(DWORD state, IWineD3DStateBlockImpl *stateblock, struct wine
     * handler takes care. Also no action is needed with pixel shaders, or if tex_colorop
     * will take care of this business
     */
-    if (mapped_stage == WINED3D_UNMAPPED_STAGE || mapped_stage >= context->gl_info->max_textures) return;
+    if (mapped_stage == WINED3D_UNMAPPED_STAGE || mapped_stage >= context->gl_info->limits.textures) return;
     if(sampler >= stateblock->lowest_disabled_stage) return;
     if(isStateDirty(context, STATE_TEXTURESTAGE(sampler, WINED3DTSS_COLOROP))) return;
 

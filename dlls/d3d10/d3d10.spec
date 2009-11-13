@@ -8,14 +8,14 @@
 @ stub D3D10CreateStateBlock
 @ stub D3D10DisassembleEffect
 @ stub D3D10DisassembleShader
-@ stub D3D10GetGeometryShaderProfile
+@ stdcall D3D10GetGeometryShaderProfile(ptr)
 @ stub D3D10GetInputAndOutputSignatureBlob
 @ stub D3D10GetInputSignatureBlob
 @ stub D3D10GetOutputSignatureBlob
-@ stub D3D10GetPixelShaderProfile
+@ stdcall D3D10GetPixelShaderProfile(ptr)
 @ stub D3D10GetShaderDebugInfo
 @ stub D3D10GetVersion
-@ stub D3D10GetVertexShaderProfile
+@ stdcall D3D10GetVertexShaderProfile(ptr)
 @ stub D3D10PreprocessShader
 @ stub D3D10ReflectShader
 @ stub D3D10RegisterLayers

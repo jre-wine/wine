@@ -1223,6 +1223,15 @@ typedef struct tagHW_PROFILE_INFOW {
 DECL_WINELIB_TYPE_AW(HW_PROFILE_INFO)
 DECL_WINELIB_TYPE_AW(LPHW_PROFILE_INFO)
 
+/* Event Logging */
+
+#define EVENTLOG_FULL_INFO          0
+
+typedef struct _EVENTLOG_FULL_INFORMATION {
+    DWORD dwFull;
+} EVENTLOG_FULL_INFORMATION, *LPEVENTLOG_FULL_INFORMATION;
+
+
 /* Stream data structures and defines */
 /*the types of backup data -- WIN32_STREAM_ID.dwStreamId below*/
 #define BACKUP_INVALID        0
@@ -1615,6 +1624,7 @@ WINBASEAPI DWORD       WINAPI GetEnvironmentVariableA(LPCSTR,LPSTR,DWORD);
 WINBASEAPI DWORD       WINAPI GetEnvironmentVariableW(LPCWSTR,LPWSTR,DWORD);
 #define                       GetEnvironmentVariable WINELIB_NAME_AW(GetEnvironmentVariable)
 WINBASEAPI UINT        WINAPI GetErrorMode(void);
+WINADVAPI  BOOL        WINAPI GetEventLogInformation(HANDLE,DWORD,LPVOID,DWORD,LPDWORD);
 WINBASEAPI BOOL        WINAPI GetExitCodeProcess(HANDLE,LPDWORD);
 WINBASEAPI BOOL        WINAPI GetExitCodeThread(HANDLE,LPDWORD);
 WINBASEAPI DWORD       WINAPI GetFileAttributesA(LPCSTR);
@@ -1691,6 +1701,7 @@ WINBASEAPI BOOL        WINAPI GetProcessShutdownParameters(LPDWORD,LPDWORD);
 WINBASEAPI BOOL        WINAPI GetProcessTimes(HANDLE,LPFILETIME,LPFILETIME,LPFILETIME,LPFILETIME);
 WINBASEAPI DWORD       WINAPI GetProcessVersion(DWORD);
 WINBASEAPI BOOL        WINAPI GetProcessWorkingSetSize(HANDLE,PSIZE_T,PSIZE_T);
+WINBASEAPI BOOL        WINAPI GetProductInfo(DWORD,DWORD,DWORD,DWORD,PDWORD);
 WINBASEAPI UINT        WINAPI GetProfileIntA(LPCSTR,LPCSTR,INT);
 WINBASEAPI UINT        WINAPI GetProfileIntW(LPCWSTR,LPCWSTR,INT);
 #define                       GetProfileInt WINELIB_NAME_AW(GetProfileInt)

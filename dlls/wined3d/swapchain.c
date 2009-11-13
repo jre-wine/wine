@@ -76,7 +76,7 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface)
 
     for (i = 0; i < This->num_contexts; ++i)
     {
-        DestroyContext(This->wineD3DDevice, This->context[i]);
+        context_destroy(This->wineD3DDevice, This->context[i]);
     }
     /* Restore the screen resolution if we rendered in fullscreen
      * This will restore the screen resolution to what it was before creating the swapchain. In case of d3d8 and d3d9
@@ -97,11 +97,11 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface)
 
 static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
+    struct wined3d_context *context;
     unsigned int sync;
     int retval;
 
-
-    ActivateContext(This->wineD3DDevice, This->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+    context = context_acquire(This->wineD3DDevice, This->backBuffer[0], CTXUSAGE_RESOURCELOAD);
 
     /* Render the cursor onto the back buffer, using our nifty directdraw blitting code :-) */
     if(This->wineD3DDevice->bCursorVisible && This->wineD3DDevice->cursorTexture) {
@@ -279,7 +279,9 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         }
     }
 
-    if(This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE && GL_SUPPORT(SGI_VIDEO_SYNC)) {
+    if (This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE
+            && context->gl_info->supported[SGI_VIDEO_SYNC])
+    {
         retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync));
         if(retval != 0) {
             ERR("glXGetVideoSyncSGI failed(retval = %d\n", retval);
@@ -320,6 +322,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         }
     }
 
+    context_release(context);
+
     TRACE("returning\n");
     return WINED3D_OK;
 }
@@ -352,8 +356,10 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_SetDestWindowOverride(IWineD3DSwapCh
         memcpy(mem, r.pBits, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
         IWineD3DSurface_UnlockRect(This->backBuffer[0]);
 
-        DestroyContext(This->wineD3DDevice, This->context[0]);
-        This->context[0] = CreateContext(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer, This->win_handle, FALSE /* pbuffer */, &This->presentParms);
+        context_destroy(This->wineD3DDevice, This->context[0]);
+        This->context[0] = context_create(This->wineD3DDevice, (IWineD3DSurfaceImpl *)This->frontBuffer,
+                This->win_handle, FALSE /* pbuffer */, &This->presentParms);
+        context_release(This->context[0]);
 
         IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_DISCARD);
         memcpy(r.pBits, mem, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
@@ -384,7 +390,7 @@ const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl =
     IWineD3DBaseSwapChainImpl_GetGammaRamp
 };
 
-struct wined3d_context *IWineD3DSwapChainImpl_CreateContextForThread(IWineD3DSwapChain *iface)
+struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *iface)
 {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *) iface;
     struct wined3d_context **newArray;
@@ -392,17 +398,19 @@ struct wined3d_context *IWineD3DSwapChainImpl_CreateContextForThread(IWineD3DSwa
 
     TRACE("Creating a new context for swapchain %p, thread %d\n", This, GetCurrentThreadId());
 
-    ctx = CreateContext(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer,
-                        This->context[0]->win_handle, FALSE /* pbuffer */, &This->presentParms);
-    if(!ctx) {
+    ctx = context_create(This->wineD3DDevice, (IWineD3DSurfaceImpl *) This->frontBuffer,
+            This->context[0]->win_handle, FALSE /* pbuffer */, &This->presentParms);
+    if (!ctx)
+    {
         ERR("Failed to create a new context for the swapchain\n");
         return NULL;
     }
+    context_release(ctx);
 
     newArray = HeapAlloc(GetProcessHeap(), 0, sizeof(*newArray) * This->num_contexts + 1);
     if(!newArray) {
         ERR("Out of memory when trying to allocate a new context array\n");
-        DestroyContext(This->wineD3DDevice, ctx);
+        context_destroy(This->wineD3DDevice, ctx);
         return NULL;
     }
     memcpy(newArray, This->context, sizeof(*newArray) * This->num_contexts);

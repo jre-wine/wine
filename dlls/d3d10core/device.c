@@ -20,7 +20,6 @@
 #include "config.h"
 #include "wine/port.h"
 
-#define NONAMELESSUNION
 #include "d3d10core_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d10core);
@@ -695,156 +694,37 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateTexture3D(ID3D10Device *ifac
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateShaderResourceView(ID3D10Device *iface,
         ID3D10Resource *resource, const D3D10_SHADER_RESOURCE_VIEW_DESC *desc, ID3D10ShaderResourceView **view)
 {
-    FIXME("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
-
-    return E_NOTIMPL;
-}
-
-static IWineD3DResource *d3d10_device_wined3d_resource_from_resource(ID3D10Resource *resource)
-{
-    D3D10_RESOURCE_DIMENSION dimension;
-
-    ID3D10Resource_GetType(resource, &dimension);
-
-    switch(dimension)
-    {
-        case D3D10_RESOURCE_DIMENSION_BUFFER:
-            return (IWineD3DResource *)((struct d3d10_buffer *)resource)->wined3d_buffer;
-
-        case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
-            return (IWineD3DResource *)((struct d3d10_texture2d *)resource)->wined3d_surface;
-
-        default:
-            FIXME("Unhandled resource dimension %#x\n", dimension);
-            return NULL;
-    }
-}
-
-static HRESULT d3d10_device_set_rtdesc_from_resource(D3D10_RENDER_TARGET_VIEW_DESC *desc, ID3D10Resource *resource)
-{
-    D3D10_RESOURCE_DIMENSION dimension;
+    struct d3d10_shader_resource_view *object;
     HRESULT hr;
 
-    ID3D10Resource_GetType(resource, &dimension);
+    TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
 
-    switch(dimension)
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
     {
-        case D3D10_RESOURCE_DIMENSION_TEXTURE1D:
-        {
-            ID3D10Texture1D *texture;
-            D3D10_TEXTURE1D_DESC texture_desc;
-
-            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture1D, (void **)&texture);
-            if (FAILED(hr))
-            {
-                ERR("Resource of type TEXTURE1D doesn't implement ID3D10Texture1D?\n");
-                return E_INVALIDARG;
-            }
-
-            ID3D10Texture1D_GetDesc(texture, &texture_desc);
-            ID3D10Texture1D_Release(texture);
-
-            desc->Format = texture_desc.Format;
-            if (texture_desc.ArraySize == 1)
-            {
-                desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE1D;
-                desc->u.Texture1D.MipSlice = 0;
-            }
-            else
-            {
-                desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE1DARRAY;
-                desc->u.Texture1DArray.MipSlice = 0;
-                desc->u.Texture1DArray.FirstArraySlice = 0;
-                desc->u.Texture1DArray.ArraySize = 1;
-            }
-
-            return S_OK;
-        }
-
-        case D3D10_RESOURCE_DIMENSION_TEXTURE2D:
-        {
-            ID3D10Texture2D *texture;
-            D3D10_TEXTURE2D_DESC texture_desc;
-
-            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture2D, (void **)&texture);
-            if (FAILED(hr))
-            {
-                ERR("Resource of type TEXTURE2D doesn't implement ID3D10Texture2D?\n");
-                return E_INVALIDARG;
-            }
-
-            ID3D10Texture2D_GetDesc(texture, &texture_desc);
-            ID3D10Texture2D_Release(texture);
-
-            desc->Format = texture_desc.Format;
-            if (texture_desc.ArraySize == 1)
-            {
-                if (texture_desc.SampleDesc.Count == 1)
-                {
-                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2D;
-                    desc->u.Texture2D.MipSlice = 0;
-                }
-                else
-                {
-                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DMS;
-                }
-            }
-            else
-            {
-                if (texture_desc.SampleDesc.Count == 1)
-                {
-                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DARRAY;
-                    desc->u.Texture2DArray.MipSlice = 0;
-                    desc->u.Texture2DArray.FirstArraySlice = 0;
-                    desc->u.Texture2DArray.ArraySize = 1;
-                }
-                else
-                {
-                    desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE2DMSARRAY;
-                    desc->u.Texture2DMSArray.FirstArraySlice = 0;
-                    desc->u.Texture2DMSArray.ArraySize = 1;
-                }
-            }
-
-            return S_OK;
-        }
-
-        case D3D10_RESOURCE_DIMENSION_TEXTURE3D:
-        {
-            ID3D10Texture3D *texture;
-            D3D10_TEXTURE3D_DESC texture_desc;
-
-            hr = ID3D10Resource_QueryInterface(resource, &IID_ID3D10Texture3D, (void **)&texture);
-            if (FAILED(hr))
-            {
-                ERR("Resource of type TEXTURE3D doesn't implement ID3D10Texture3D?\n");
-                return E_INVALIDARG;
-            }
-
-            ID3D10Texture3D_GetDesc(texture, &texture_desc);
-            ID3D10Texture3D_Release(texture);
-
-            desc->Format = texture_desc.Format;
-            desc->ViewDimension = D3D10_RTV_DIMENSION_TEXTURE3D;
-            desc->u.Texture3D.MipSlice = 0;
-            desc->u.Texture3D.FirstWSlice = 0;
-            desc->u.Texture3D.WSize = 1;
-
-            return S_OK;
-        }
-
-        default:
-            FIXME("Unhandled resource dimension %#x\n", dimension);
-            return E_INVALIDARG;
+        ERR("Failed to allocate D3D10 shader resource view object memory.\n");
+        return E_OUTOFMEMORY;
     }
+
+    hr = d3d10_shader_resource_view_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize shader resource view, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created shader resource view %p.\n", object);
+    *view = (ID3D10ShaderResourceView *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Device *iface,
         ID3D10Resource *resource, const D3D10_RENDER_TARGET_VIEW_DESC *desc, ID3D10RenderTargetView **view)
 {
-    struct d3d10_device *This = (struct d3d10_device *)iface;
     struct d3d10_rendertarget_view *object;
-    IWineD3DResource *wined3d_resource;
+    HRESULT hr;
 
     TRACE("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
 
@@ -855,33 +735,15 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Devic
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_rendertarget_view_vtbl;
-    object->refcount = 1;
-
-    if (!desc)
+    hr = d3d10_rendertarget_view_init(object, (struct d3d10_device *)iface, resource, desc);
+    if (FAILED(hr))
     {
-        HRESULT hr = d3d10_device_set_rtdesc_from_resource(&object->desc, resource);
-        if (FAILED(hr))
-        {
-            HeapFree(GetProcessHeap(), 0, object);
-            return hr;
-        }
-    }
-    else
-    {
-        object->desc = *desc;
-    }
-
-    wined3d_resource = d3d10_device_wined3d_resource_from_resource(resource);
-    if (!wined3d_resource)
-    {
-        FIXME("Failed to get wined3d resource for d3d10 resource %p\n", resource);
+        WARN("Failed to initialize rendertarget view, hr %#x.\n", hr);
         HeapFree(GetProcessHeap(), 0, object);
-        return E_FAIL;
+        return hr;
     }
-    IWineD3DDevice_CreateRendertargetView(This->wined3d_device,
-            wined3d_resource, (IUnknown *)object, &object->wined3d_view);
 
+    TRACE("Created rendertarget view %p.\n", object);
     *view = (ID3D10RenderTargetView *)object;
 
     return S_OK;
@@ -890,9 +752,30 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRenderTargetView(ID3D10Devic
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilView(ID3D10Device *iface,
         ID3D10Resource *resource, const D3D10_DEPTH_STENCIL_VIEW_DESC *desc, ID3D10DepthStencilView **view)
 {
-    FIXME("iface %p, resource %p, desc %p, view %p stub!\n", iface, resource, desc, view);
+    struct d3d10_depthstencil_view *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, resource %p, desc %p, view %p.\n", iface, resource, desc, view);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 depthstencil view object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_depthstencil_view_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize depthstencil view, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created depthstencil view %p.\n", object);
+    *view = (ID3D10DepthStencilView *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateInputLayout(ID3D10Device *iface,
@@ -965,6 +848,7 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShader(ID3D10Device 
         const void *byte_code, SIZE_T byte_code_length, ID3D10GeometryShader **shader)
 {
     struct d3d10_geometry_shader *object;
+    HRESULT hr;
 
     FIXME("iface %p, byte_code %p, byte_code_length %lu, shader %p stub!\n",
             iface, byte_code, byte_code_length, shader);
@@ -976,9 +860,14 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreateGeometryShader(ID3D10Device 
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &d3d10_geometry_shader_vtbl;
-    object->refcount = 1;
+    hr = d3d10_geometry_shader_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize geometry shader, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+    }
 
+    TRACE("Created geometry shader %p.\n", object);
     *shader = (ID3D10GeometryShader *)object;
 
     return S_OK;
@@ -1030,33 +919,117 @@ static HRESULT STDMETHODCALLTYPE d3d10_device_CreatePixelShader(ID3D10Device *if
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateBlendState(ID3D10Device *iface,
         const D3D10_BLEND_DESC *desc, ID3D10BlendState **blend_state)
 {
-    FIXME("iface %p, desc %p, blend_state %p stub!\n", iface, desc, blend_state);
+    struct d3d10_blend_state *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p, blend_state %p.\n", iface, desc, blend_state);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 blend state object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_blend_state_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize blend state, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created blend state %p.\n", object);
+    *blend_state = (ID3D10BlendState *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateDepthStencilState(ID3D10Device *iface,
         const D3D10_DEPTH_STENCIL_DESC *desc, ID3D10DepthStencilState **depth_stencil_state)
 {
-    FIXME("iface %p, desc %p, depth_stencil_state %p stub!\n", iface, desc, depth_stencil_state);
+    struct d3d10_depthstencil_state *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p, depth_stencil_state %p.\n", iface, desc, depth_stencil_state);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 depthstencil state object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_depthstencil_state_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize depthstencil state, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created depthstencil state %p.\n", object);
+    *depth_stencil_state = (ID3D10DepthStencilState *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateRasterizerState(ID3D10Device *iface,
         const D3D10_RASTERIZER_DESC *desc, ID3D10RasterizerState **rasterizer_state)
 {
-    FIXME("iface %p, desc %p, rasterizer_state %p stub!\n", iface, desc, rasterizer_state);
+    struct d3d10_rasterizer_state *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, desc %p, rasterizer_state %p.\n", iface, desc, rasterizer_state);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 rasterizer state object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_rasterizer_state_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize rasterizer state, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created rasterizer state %p.\n", object);
+    *rasterizer_state = (ID3D10RasterizerState *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateSamplerState(ID3D10Device *iface,
         const D3D10_SAMPLER_DESC *desc, ID3D10SamplerState **sampler_state)
 {
-    FIXME("iface %p, desc %p, sampler_state %p stub!\n", iface, desc, sampler_state);
+    struct d3d10_sampler_state *object;
+    HRESULT hr;
 
-    return E_NOTIMPL;
+    FIXME("iface %p, desc %p, sampler_state %p.\n", iface, desc, sampler_state);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate D3D10 sampler state object memory.\n");
+        return E_OUTOFMEMORY;
+    }
+
+    hr = d3d10_sampler_state_init(object);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize sampler state, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
+        return hr;
+    }
+
+    TRACE("Created sampler state %p.\n", object);
+    *sampler_state = (ID3D10SamplerState *)object;
+
+    return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE d3d10_device_CreateQuery(ID3D10Device *iface,

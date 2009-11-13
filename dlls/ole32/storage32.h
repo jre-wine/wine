@@ -53,15 +53,15 @@ static const ULONG OFFSET_EXTBBDEPOTCOUNT    = 0x00000048;
 static const ULONG OFFSET_BBDEPOTSTART	     = 0x0000004C;
 static const ULONG OFFSET_PS_NAME            = 0x00000000;
 static const ULONG OFFSET_PS_NAMELENGTH	     = 0x00000040;
-static const ULONG OFFSET_PS_PROPERTYTYPE    = 0x00000042;
-static const ULONG OFFSET_PS_PREVIOUSPROP    = 0x00000044;
-static const ULONG OFFSET_PS_NEXTPROP        = 0x00000048;
-static const ULONG OFFSET_PS_DIRPROP	     = 0x0000004C;
+static const ULONG OFFSET_PS_STGTYPE         = 0x00000042;
+static const ULONG OFFSET_PS_LEFTCHILD       = 0x00000044;
+static const ULONG OFFSET_PS_RIGHTCHILD      = 0x00000048;
+static const ULONG OFFSET_PS_DIRROOT	     = 0x0000004C;
 static const ULONG OFFSET_PS_GUID            = 0x00000050;
-static const ULONG OFFSET_PS_TSS1	     = 0x00000064;
-static const ULONG OFFSET_PS_TSD1            = 0x00000068;
-static const ULONG OFFSET_PS_TSS2            = 0x0000006C;
-static const ULONG OFFSET_PS_TSD2            = 0x00000070;
+static const ULONG OFFSET_PS_CTIMELOW        = 0x00000064;
+static const ULONG OFFSET_PS_CTIMEHIGH       = 0x00000068;
+static const ULONG OFFSET_PS_MTIMELOW        = 0x0000006C;
+static const ULONG OFFSET_PS_MTIMEHIGH       = 0x00000070;
 static const ULONG OFFSET_PS_STARTBLOCK	     = 0x00000074;
 static const ULONG OFFSET_PS_SIZE	     = 0x00000078;
 static const WORD  DEF_BIG_BLOCK_SIZE_BITS   = 0x0009;
@@ -72,26 +72,24 @@ static const ULONG BLOCK_EXTBBDEPOT          = 0xFFFFFFFC;
 static const ULONG BLOCK_SPECIAL             = 0xFFFFFFFD;
 static const ULONG BLOCK_END_OF_CHAIN        = 0xFFFFFFFE;
 static const ULONG BLOCK_UNUSED              = 0xFFFFFFFF;
-static const ULONG PROPERTY_NULL             = 0xFFFFFFFF;
+static const ULONG DIRENTRY_NULL             = 0xFFFFFFFF;
 
-#define PROPERTY_NAME_MAX_LEN    0x20
-#define PROPERTY_NAME_BUFFER_LEN 0x40
+#define DIRENTRY_NAME_MAX_LEN    0x20
+#define DIRENTRY_NAME_BUFFER_LEN 0x40
 
-#define PROPSET_BLOCK_SIZE 0x00000080
-
-/*
- * Property type of relation
- */
-#define PROPERTY_RELATION_PREVIOUS 0
-#define PROPERTY_RELATION_NEXT     1
-#define PROPERTY_RELATION_DIR      2
+#define RAW_DIRENTRY_SIZE 0x00000080
 
 /*
- * Property type constants
+ * Type of child entry link
  */
-#define PROPTYPE_STORAGE 0x01
-#define PROPTYPE_STREAM  0x02
-#define PROPTYPE_ROOT    0x05
+#define DIRENTRY_RELATION_PREVIOUS 0
+#define DIRENTRY_RELATION_NEXT     1
+#define DIRENTRY_RELATION_DIR      2
+
+/*
+ * type constant used in files for the root storage
+ */
+#define STGTY_ROOT 0x05
 
 /*
  * These defines assume a hardcoded blocksize. The code will assert
@@ -120,26 +118,24 @@ typedef struct StorageImpl         StorageImpl;
 typedef struct BlockChainStream      BlockChainStream;
 typedef struct SmallBlockChainStream SmallBlockChainStream;
 typedef struct IEnumSTATSTGImpl      IEnumSTATSTGImpl;
-typedef struct StgProperty           StgProperty;
+typedef struct DirEntry              DirEntry;
 typedef struct StgStreamImpl         StgStreamImpl;
 
 /*
- * This utility structure is used to read/write the information in a storage
- * property.
+ * This utility structure is used to read/write the information in a directory
+ * entry.
  */
-struct StgProperty
+struct DirEntry
 {
-  WCHAR	         name[PROPERTY_NAME_MAX_LEN];
+  WCHAR	         name[DIRENTRY_NAME_MAX_LEN];
   WORD	         sizeOfNameString;
   BYTE	         propertyType;
-  ULONG	         previousProperty;
-  ULONG	         nextProperty;
-  ULONG          dirProperty;
+  ULONG          leftChild;
+  ULONG          rightChild;
+  ULONG          dirRootEntry;
   GUID           propertyUniqueID;
-  ULONG          timeStampS1;
-  ULONG          timeStampD1;
-  ULONG          timeStampS2;
-  ULONG          timeStampD2;
+  FILETIME       ctime;
+  FILETIME       mtime;
   ULONG          startingBlock;
   ULARGE_INTEGER size;
 };
@@ -259,7 +255,7 @@ struct StorageImpl
                                   The behaviour of STGM_SIMPLE depends on this */
 
   /* FIXME: should this be in Storage32BaseImpl ? */
-  WCHAR            filename[PROPERTY_NAME_BUFFER_LEN];
+  WCHAR            filename[DIRENTRY_NAME_BUFFER_LEN];
 
   /*
    * File header
@@ -292,15 +288,29 @@ struct StorageImpl
   BigBlockFile* bigBlockFile;
 };
 
-BOOL StorageImpl_ReadProperty(
+HRESULT StorageImpl_ReadRawDirEntry(
+            StorageImpl *This,
+            ULONG index,
+            BYTE *buffer);
+
+void UpdateRawDirEntry(
+    BYTE *buffer,
+    const DirEntry *newData);
+
+HRESULT StorageImpl_WriteRawDirEntry(
+            StorageImpl *This,
+            ULONG index,
+            const BYTE *buffer);
+
+BOOL StorageImpl_ReadDirEntry(
             StorageImpl*    This,
             ULONG           index,
-            StgProperty*    buffer);
+            DirEntry*       buffer);
 
-BOOL StorageImpl_WriteProperty(
+BOOL StorageImpl_WriteDirEntry(
             StorageImpl*        This,
             ULONG               index,
-            const StgProperty*  buffer);
+            const DirEntry*     buffer);
 
 BlockChainStream* Storage32Impl_SmallBlocksToBigBlocks(
                       StorageImpl* This,
@@ -409,7 +419,7 @@ void StorageUtl_WriteULargeInteger(BYTE* buffer, ULONG offset,
  const ULARGE_INTEGER *value);
 void StorageUtl_ReadGUID(const BYTE* buffer, ULONG offset, GUID* value);
 void StorageUtl_WriteGUID(BYTE* buffer, ULONG offset, const GUID* value);
-void StorageUtl_CopyPropertyToSTATSTG(STATSTG* destination, const StgProperty* source,
+void StorageUtl_CopyDirEntryToSTATSTG(STATSTG* destination, const DirEntry* source,
  int statFlags);
 
 /****************************************************************************

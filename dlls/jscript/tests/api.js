@@ -1395,10 +1395,16 @@ callTest2.apply(tmp);
 (function () { callTest2.apply(tmp, arguments); })();
 
 function callTest3() {
+    testThis(this);
     ok(arguments.length === 0, "arguments.length = " + arguments.length + " expected 0");
 }
 
 callTest3.call();
+callTest3.call(undefined);
+callTest3.call(null);
+callTest3.apply();
+callTest3.apply(undefined);
+callTest3.apply(null);
 
 tmp = Number.prototype.toString.call(3);
 ok(tmp === "3", "Number.prototype.toString.call(3) = " + tmp);
@@ -1595,7 +1601,7 @@ ok(err.toString === Error.prototype.toString, "err.toString !== Error.prototype.
 ok(err.message === "", "err.message != ''");
 err.message = date;
 ok(err.message === date, "err.message != date");
-ok(err.toString().substring(0,21) === (invokeVersion < 2 ? "[object Error]" : "EvalError: Fri Aug 17"),
+ok(err.toString() === (invokeVersion < 2 ? "[object Error]" : "EvalError: "+err.message),
    "err.toString() = " + err.toString());
 ok(err.toString !== Object.prototype.toString, "err.toString === Object.prototype.toString");
 err = new RangeError();
@@ -1699,6 +1705,7 @@ exception_test(function() {eval("if(")}, "SyntaxError", -2146827286);
 exception_test(function() {eval("'unterminated")}, "SyntaxError", -2146827273);
 exception_test(function() {eval("nonexistingfunc()")}, "TypeError", -2146823281);
 exception_test(function() {RegExp(/a/, "g");}, "RegExpError", -2146823271);
+exception_test(function() {encodeURI('\udcaa');}, "URIError", -2146823264);
 
 function testThisExcept(func, number) {
     exception_test(function() {func.call(new Object())}, "TypeError", number);

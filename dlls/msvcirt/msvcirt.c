@@ -68,8 +68,19 @@ void * __stdcall MSVCIRT_operator_sl_int(class_ostream * _this, int integer)
 DEFINE_THISCALL_WRAPPER(MSVCIRT_operator_sl_pchar,8)
 void * __stdcall MSVCIRT_operator_sl_pchar(class_ostream * _this, const char * string)
 {
-   FIXME("(%p)->(%s) stub\n", _this, string);
+   FIXME("(%p)->(%s) stub\n", _this, debugstr_a(string));
    return _this;
+}
+
+/******************************************************************
+ *		??6ostream@@QAEAAV0@P6AAAV0@AAV0@@Z@Z (MSVCRTI.@)
+ *    class ostream & __thiscall ostream::operator<<(class ostream & (__cdecl*)(class ostream &))
+ */
+DEFINE_THISCALL_WRAPPER(MSVCIRT_operator_sl_callback,8)
+void * __stdcall MSVCIRT_operator_sl_callback(class_ostream * _this, class_ostream * (__cdecl*func)(class_ostream*))
+{
+   TRACE("%p, %p\n", _this, func);
+   return func(_this);
 }
 
 /******************************************************************

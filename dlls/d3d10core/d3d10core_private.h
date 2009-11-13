@@ -107,8 +107,16 @@ struct d3d10_buffer
 HRESULT d3d10_buffer_init(struct d3d10_buffer *buffer, struct d3d10_device *device,
         const D3D10_BUFFER_DESC *desc, const D3D10_SUBRESOURCE_DATA *data) DECLSPEC_HIDDEN;
 
+/* ID3D10DepthStencilView */
+struct d3d10_depthstencil_view
+{
+    const struct ID3D10DepthStencilViewVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_depthstencil_view_init(struct d3d10_depthstencil_view *view) DECLSPEC_HIDDEN;
+
 /* ID3D10RenderTargetView */
-extern const struct ID3D10RenderTargetViewVtbl d3d10_rendertarget_view_vtbl DECLSPEC_HIDDEN;
 struct d3d10_rendertarget_view
 {
     const struct ID3D10RenderTargetViewVtbl *vtbl;
@@ -117,6 +125,18 @@ struct d3d10_rendertarget_view
     IWineD3DRendertargetView *wined3d_view;
     D3D10_RENDER_TARGET_VIEW_DESC desc;
 };
+
+HRESULT d3d10_rendertarget_view_init(struct d3d10_rendertarget_view *view, struct d3d10_device *device,
+        ID3D10Resource *resource, const D3D10_RENDER_TARGET_VIEW_DESC *desc) DECLSPEC_HIDDEN;
+
+/* ID3D10ShaderResourceView */
+struct d3d10_shader_resource_view
+{
+    const struct ID3D10ShaderResourceViewVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_shader_resource_view_init(struct d3d10_shader_resource_view *view) DECLSPEC_HIDDEN;
 
 /* ID3D10InputLayout */
 struct d3d10_input_layout
@@ -145,12 +165,13 @@ HRESULT d3d10_vertex_shader_init(struct d3d10_vertex_shader *shader, struct d3d1
         const void *byte_code, SIZE_T byte_code_length) DECLSPEC_HIDDEN;
 
 /* ID3D10GeometryShader */
-extern const struct ID3D10GeometryShaderVtbl d3d10_geometry_shader_vtbl DECLSPEC_HIDDEN;
 struct d3d10_geometry_shader
 {
     const struct ID3D10GeometryShaderVtbl *vtbl;
     LONG refcount;
 };
+
+HRESULT d3d10_geometry_shader_init(struct d3d10_geometry_shader *shader);
 
 /* ID3D10PixelShader */
 struct d3d10_pixel_shader
@@ -167,6 +188,42 @@ HRESULT d3d10_pixel_shader_init(struct d3d10_pixel_shader *shader, struct d3d10_
 
 HRESULT shader_parse_signature(const char *data, DWORD data_size, struct wined3d_shader_signature *s) DECLSPEC_HIDDEN;
 void shader_free_signature(struct wined3d_shader_signature *s) DECLSPEC_HIDDEN;
+
+/* ID3D10BlendState */
+struct d3d10_blend_state
+{
+    const struct ID3D10BlendStateVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_blend_state_init(struct d3d10_blend_state *state) DECLSPEC_HIDDEN;
+
+/* ID3D10DepthStencilState */
+struct d3d10_depthstencil_state
+{
+    const struct ID3D10DepthStencilStateVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_depthstencil_state_init(struct d3d10_depthstencil_state *state) DECLSPEC_HIDDEN;
+
+/* ID3D10RasterizerState */
+struct d3d10_rasterizer_state
+{
+    const struct ID3D10RasterizerStateVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_rasterizer_state_init(struct d3d10_rasterizer_state *state) DECLSPEC_HIDDEN;
+
+/* ID3D10SamplerState */
+struct d3d10_sampler_state
+{
+    const struct ID3D10SamplerStateVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state) DECLSPEC_HIDDEN;
 
 /* Layered device */
 enum dxgi_device_layer_id

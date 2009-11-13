@@ -455,7 +455,7 @@ static HRESULT WINAPI HTMLDocument_get_readyState(IHTMLDocument2 *iface, BSTR *p
     if(!p)
         return E_POINTER;
 
-    *p = SysAllocString(readystate_str[This->doc_obj->readystate]);
+    *p = SysAllocString(readystate_str[This->window->readystate]);
     return S_OK;
 }
 
@@ -589,7 +589,7 @@ static HRESULT WINAPI HTMLDocument_get_URL(IHTMLDocument2 *iface, BSTR *p)
 
     TRACE("(%p)->(%p)\n", iface, p);
 
-    *p = SysAllocString(This->doc_obj->url ? This->doc_obj->url : about_blank_url);
+    *p = SysAllocString(This->window->url ? This->window->url : about_blank_url);
     return *p ? S_OK : E_OUTOFMEMORY;
 }
 
@@ -1503,7 +1503,7 @@ static HRESULT WINAPI DocDispatchEx_Invoke(IDispatchEx *iface, DISPID dispIdMemb
             return E_INVALIDARG;
 
         V_VT(pVarResult) = VT_I4;
-        V_I4(pVarResult) = This->doc_obj->readystate;
+        V_I4(pVarResult) = This->window->readystate;
         return S_OK;
     }
 
@@ -1714,6 +1714,7 @@ static void init_doc(HTMLDocument *doc, IUnknown *unk_impl, IDispatchEx *dispex)
 
     doc->unk_impl = unk_impl;
     doc->dispex = dispex;
+    doc->task_magic = get_task_target_magic();
 
     HTMLDocument_HTMLDocument3_Init(doc);
     HTMLDocument_HTMLDocument5_Init(doc);
@@ -1733,7 +1734,7 @@ static void init_doc(HTMLDocument *doc, IUnknown *unk_impl, IDispatchEx *dispex)
 
 static void destroy_htmldoc(HTMLDocument *This)
 {
-    remove_doc_tasks(This);
+    remove_target_tasks(This->task_magic);
 
     ConnectionPointContainer_Destroy(&This->cp_container);
 }
@@ -1762,6 +1763,8 @@ static void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
 {
     HTMLDocumentNode *This = HTMLDOCNODE_NODE_THIS(iface);
 
+    if(This->nsevent_listener)
+        release_nsevents(This);
     if(This->secmgr)
         IInternetSecurityManager_Release(This->secmgr);
 
@@ -1774,6 +1777,7 @@ static void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
         nsIDOMHTMLDocument_Release(This->nsdoc);
     }
 
+    heap_free(This->event_vector);
     destroy_htmldoc(&This->basedoc);
 }
 
@@ -1818,12 +1822,14 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_ob
     HTMLDocumentNode_SecMgr_Init(doc);
     doc->ref = 1;
 
+    doc->basedoc.window = window;
+
     nsIDOMHTMLDocument_AddRef(nsdoc);
     doc->nsdoc = nsdoc;
     init_mutation(doc);
+    init_nsevents(doc);
 
-    doc->basedoc.window = window;
-
+    list_init(&doc->bindings);
     list_init(&doc->selection_list);
     list_init(&doc->range_list);
 
@@ -1886,8 +1892,6 @@ static ULONG WINAPI CustomDoc_Release(ICustomDoc *iface)
     TRACE("(%p) ref = %u\n", This, ref);
 
     if(!ref) {
-        set_document_bscallback(&This->basedoc, NULL);
-        set_current_mon(&This->basedoc, NULL);
         if(This->basedoc.doc_node) {
             This->basedoc.doc_node->basedoc.doc_obj = NULL;
             IHTMLDocument2_Release(HTMLDOC(&This->basedoc.doc_node->basedoc));
@@ -1957,6 +1961,7 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
 {
     HTMLDocumentObj *doc;
     nsIDOMWindow *nswindow = NULL;
+    nsresult nsres;
     HRESULT hres;
 
     TRACE("(%p %s %p)\n", pUnkOuter, debugstr_guid(riid), ppvObject);
@@ -1972,23 +1977,24 @@ HRESULT HTMLDocument_Create(IUnknown *pUnkOuter, REFIID riid, void** ppvObject)
     doc->ref = 1;
     doc->basedoc.doc_obj = doc;
 
+    doc->usermode = UNKNOWN_USERMODE;
+
+    doc->nscontainer = NSContainer_Create(doc, NULL);
+    if(!doc->nscontainer) {
+        ERR("Failed to init Gecko, returning CLASS_E_CLASSNOTAVAILABLE\n");
+        htmldoc_release(&doc->basedoc);
+        return CLASS_E_CLASSNOTAVAILABLE;
+    }
+
     hres = htmldoc_query_interface(&doc->basedoc, riid, ppvObject);
     htmldoc_release(&doc->basedoc);
     if(FAILED(hres))
         return hres;
 
-    doc->nscontainer = NSContainer_Create(doc, NULL);
-    list_init(&doc->bindings);
-    doc->usermode = UNKNOWN_USERMODE;
-    doc->readystate = READYSTATE_UNINITIALIZED;
 
-    if(doc->nscontainer) {
-        nsresult nsres;
-
-        nsres = nsIWebBrowser_GetContentDOMWindow(doc->nscontainer->webbrowser, &nswindow);
-        if(NS_FAILED(nsres))
-            ERR("GetContentDOMWindow failed: %08x\n", nsres);
-    }
+    nsres = nsIWebBrowser_GetContentDOMWindow(doc->nscontainer->webbrowser, &nswindow);
+    if(NS_FAILED(nsres))
+        ERR("GetContentDOMWindow failed: %08x\n", nsres);
 
     hres = HTMLWindow_Create(doc, nswindow, NULL /* FIXME */, &doc->basedoc.window);
     if(nswindow)

@@ -71,6 +71,53 @@ BOOL WINAPI CertAddEncodedCertificateToStore(HCERTSTORE hCertStore,
     return ret;
 }
 
+BOOL WINAPI CertAddEncodedCertificateToSystemStoreA(LPCSTR pszCertStoreName,
+ const BYTE *pbCertEncoded, DWORD cbCertEncoded)
+{
+    HCERTSTORE store;
+    BOOL ret = FALSE;
+
+    TRACE("(%s, %p, %d)\n", debugstr_a(pszCertStoreName), pbCertEncoded,
+     cbCertEncoded);
+
+    store = CertOpenSystemStoreA(0, pszCertStoreName);
+    if (store)
+    {
+        ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
+         pbCertEncoded, cbCertEncoded, CERT_STORE_ADD_USE_EXISTING, NULL);
+        CertCloseStore(store, 0);
+    }
+    return ret;
+}
+
+BOOL WINAPI CertAddEncodedCertificateToSystemStoreW(LPCWSTR pszCertStoreName,
+ const BYTE *pbCertEncoded, DWORD cbCertEncoded)
+{
+    HCERTSTORE store;
+    BOOL ret = FALSE;
+
+    TRACE("(%s, %p, %d)\n", debugstr_w(pszCertStoreName), pbCertEncoded,
+     cbCertEncoded);
+
+    store = CertOpenSystemStoreW(0, pszCertStoreName);
+    if (store)
+    {
+        ret = CertAddEncodedCertificateToStore(store, X509_ASN_ENCODING,
+         pbCertEncoded, cbCertEncoded, CERT_STORE_ADD_USE_EXISTING, NULL);
+        CertCloseStore(store, 0);
+    }
+    return ret;
+}
+
+BOOL WINAPI CertAddCertificateLinkToStore(HCERTSTORE hCertStore,
+ PCCERT_CONTEXT pCertContext, DWORD dwAddDisposition,
+ PCCERT_CONTEXT *ppCertContext)
+{
+    FIXME("(%p, %p, %08x, %p)\n", hCertStore, pCertContext, dwAddDisposition,
+     ppCertContext);
+    return FALSE;
+}
+
 PCCERT_CONTEXT WINAPI CertCreateCertificateContext(DWORD dwCertEncodingType,
  const BYTE *pbCertEncoded, DWORD cbCertEncoded)
 {
@@ -133,12 +180,14 @@ static void CertDataContext_Free(void *context)
 
 BOOL WINAPI CertFreeCertificateContext(PCCERT_CONTEXT pCertContext)
 {
+    BOOL ret = TRUE;
+
     TRACE("(%p)\n", pCertContext);
 
     if (pCertContext)
-        Context_Release((void *)pCertContext, sizeof(CERT_CONTEXT),
+        ret = Context_Release((void *)pCertContext, sizeof(CERT_CONTEXT),
          CertDataContext_Free);
-    return TRUE;
+    return ret;
 }
 
 DWORD WINAPI CertEnumCertificateContextProperties(PCCERT_CONTEXT pCertContext,
@@ -2197,6 +2246,43 @@ BOOL WINAPI CryptVerifyCertificateSignatureEx(HCRYPTPROV_LEGACY hCryptProv,
     return ret;
 }
 
+BOOL WINAPI CertGetIntendedKeyUsage(DWORD dwCertEncodingType,
+ PCERT_INFO pCertInfo, BYTE *pbKeyUsage, DWORD cbKeyUsage)
+{
+    PCERT_EXTENSION ext;
+    BOOL ret = FALSE;
+
+    TRACE("(%08x, %p, %p, %d)\n", dwCertEncodingType, pCertInfo, pbKeyUsage,
+     cbKeyUsage);
+
+    ext = CertFindExtension(szOID_KEY_USAGE, pCertInfo->cExtension,
+     pCertInfo->rgExtension);
+    if (ext)
+    {
+        CRYPT_BIT_BLOB usage;
+        DWORD size = sizeof(usage);
+
+        ret = CryptDecodeObjectEx(dwCertEncodingType, X509_BITS,
+         ext->Value.pbData, ext->Value.cbData, CRYPT_DECODE_NOCOPY_FLAG, NULL,
+         &usage, &size);
+        if (ret)
+        {
+            if (cbKeyUsage < usage.cbData)
+                ret = FALSE;
+            else
+            {
+                memcpy(pbKeyUsage, usage.pbData, usage.cbData);
+                if (cbKeyUsage > usage.cbData)
+                    memset(pbKeyUsage + usage.cbData, 0,
+                     cbKeyUsage - usage.cbData);
+            }
+        }
+    }
+    else
+        SetLastError(0);
+    return ret;
+}
+
 BOOL WINAPI CertGetEnhancedKeyUsage(PCCERT_CONTEXT pCertContext, DWORD dwFlags,
  PCERT_ENHKEY_USAGE pUsage, DWORD *pcbUsage)
 {
@@ -2807,7 +2893,10 @@ static void CRYPT_MakeCertInfo(PCERT_INFO info, const CRYPT_DATA_BLOB *pSerialNu
     assert(pSubjectIssuerBlob);
     assert(pubKey);
 
-    info->dwVersion = CERT_V3;
+    if (pExtensions && pExtensions->cExtension)
+        info->dwVersion = CERT_V3;
+    else
+        info->dwVersion = CERT_V1;
     info->SerialNumber.cbData = pSerialNumber->cbData;
     info->SerialNumber.pbData = pSerialNumber->pbData;
     if (pSignatureAlgorithm)

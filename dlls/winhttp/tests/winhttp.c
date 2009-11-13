@@ -221,6 +221,30 @@ static void test_OpenRequest (void)
 
 }
 
+static void test_empty_headers_param(void)
+{
+    static const WCHAR winehq[] = {'w','i','n','e','h','q','.','o','r','g',0};
+    static const WCHAR empty[]  = {0};
+    HANDLE ses, con, req;
+    BOOL ret;
+
+    ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
+    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+
+    con = WinHttpConnect(ses, winehq, 80, 0);
+    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+
+    req = WinHttpOpenRequest(con, NULL, NULL, NULL, NULL, NULL, 0);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    ret = WinHttpSendRequest(req, empty, 0, NULL, 0, 0, 0);
+    ok(ret, "failed to send request %u\n", GetLastError());
+
+    WinHttpCloseHandle(req);
+    WinHttpCloseHandle(con);
+    WinHttpCloseHandle(ses);
+}
+
 static void test_SendRequest (void)
 {
     HINTERNET session, request, connection;
@@ -792,7 +816,8 @@ static void test_request_parameter_defaults(void)
     static const WCHAR codeweavers[] = {'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m',0};
 
     HANDLE ses, con, req;
-    DWORD size, status;
+    DWORD size, status, error;
+    WCHAR *version;
     BOOL ret;
 
     ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
@@ -825,6 +850,19 @@ static void test_request_parameter_defaults(void)
 
     ret = WinHttpReceiveResponse(req, NULL);
     ok(ret, "failed to receive response %u\n", GetLastError());
+
+    size = 0;
+    SetLastError(0xdeadbeef);
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_VERSION, NULL, NULL, &size, NULL);
+    error = GetLastError();
+    ok(!ret, "succeeded unexpectedly\n");
+    ok(error == ERROR_INSUFFICIENT_BUFFER, "expected ERROR_INSUFFICIENT_BUFFER, got %u\n", error);
+
+    version = HeapAlloc(GetProcessHeap(), 0, size);
+    ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_VERSION, NULL, version, &size, NULL);
+    ok(ret, "failed unexpectedly %u\n", GetLastError());
+    ok(lstrlenW(version) == size / sizeof(WCHAR), "unexpected size %u\n", size);
+    HeapFree(GetProcessHeap(), 0, version);
 
     size = sizeof(status);
     ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &status, &size, NULL);
@@ -978,4 +1016,5 @@ START_TEST (winhttp)
     test_request_parameter_defaults();
     test_QueryOption();
     test_set_default_proxy_config();
+    test_empty_headers_param();
 }

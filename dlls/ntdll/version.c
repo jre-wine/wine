@@ -53,6 +53,7 @@ typedef enum
     WIN2K3,  /* Windows 2003 */
     WINVISTA,/* Windows Vista */
     WIN2K8,  /* Windows 2008 */
+    WIN7,    /* Windows 7 */
     NB_WINDOWS_VERSIONS
 } WINDOWS_VERSION;
 
@@ -148,6 +149,12 @@ static const RTL_OSVERSIONINFOEXW VersionData[NB_WINDOWS_VERSIONS] =
         sizeof(RTL_OSVERSIONINFOEXW), 6, 0, 0x1771, VER_PLATFORM_WIN32_NT,
         {'S','e','r','v','i','c','e',' ','P','a','c','k',' ','1',0},
         0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_SERVER, 0
+    },
+    /* WIN7 */
+    {
+        sizeof(RTL_OSVERSIONINFOEXW), 6, 1, 0x1DB0, VER_PLATFORM_WIN32_NT,
+        {' ',0},
+        0, 0, VER_SUITE_SINGLEUSERTS, VER_NT_WORKSTATION, 0
     }
 };
 
@@ -166,6 +173,7 @@ static const char * const WinVersionNames[NB_WINDOWS_VERSIONS] =
     "win2003,win2k3",             /* WIN2K3 */
     "vista,winvista",             /* WINVISTA*/
     "win2008,win2k8",             /* WIN2K8 */
+    "win7",                       /* WIN7 */
 };
 
 
@@ -527,6 +535,24 @@ done:
            current_version->wProductType );
 }
 
+/***********************************************************************
+ *           GetProductInfo       (NTDLL.@)
+ *
+ * Gives info about the current Windows product type, in a format compatible
+ * with the given Windows version
+ *
+ * Returns TRUE if the input is valid, FALSE otherwise
+ */
+BOOLEAN WINAPI RtlGetProductInfo(DWORD dwOSMajorVersion, DWORD dwOSMinorVersion, DWORD dwSpMajorVersion,
+                                 DWORD dwSpMinorVersion, PDWORD pdwReturnedProductType)
+{
+    FIXME("(%d,%d,%d,%d,%p): stub\n", dwOSMajorVersion, dwOSMinorVersion,
+          dwSpMajorVersion, dwSpMinorVersion, pdwReturnedProductType);
+
+    *pdwReturnedProductType = PRODUCT_ULTIMATE_N;
+
+    return TRUE;
+}
 
 /***********************************************************************
  *         RtlGetVersion   (NTDLL.@)

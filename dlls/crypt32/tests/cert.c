@@ -1089,7 +1089,7 @@ static void testFindCert(void)
      * the issuer, not the subject
      */
     context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
-     CERT_FIND_SUBJECT_CERT, &certInfo.Subject, NULL);
+     CERT_FIND_SUBJECT_CERT, &certInfo, NULL);
     ok(context == NULL, "Expected no certificate\n");
     certInfo.Subject.pbData = NULL;
     certInfo.Subject.cbData = 0;
@@ -1102,7 +1102,7 @@ static void testFindCert(void)
     if (context)
     {
         context = CertFindCertificateInStore(store, X509_ASN_ENCODING, 0,
-         CERT_FIND_SUBJECT_CERT, &certInfo.Subject, context);
+         CERT_FIND_SUBJECT_CERT, &certInfo, context);
         ok(context == NULL, "Expected one cert only\n");
     }
     /* A non-matching serial number will not match. */
@@ -2063,6 +2063,54 @@ static void testCreateSelfSignCert(void)
 
     pCryptAcquireContextA(&csp, cspNameA, MS_DEF_PROV_A, PROV_RSA_FULL,
         CRYPT_DELETEKEYSET);
+}
+
+static void testIntendedKeyUsage(void)
+{
+    BOOL ret;
+    CERT_INFO info = { 0 };
+    static char oid_key_usage[] = szOID_KEY_USAGE;
+    /* A couple "key usages".  Really they're just encoded bits which aren't
+     * necessarily restricted to the defined key usage values.
+     */
+    static BYTE usage1[] = { 0x03,0x03,0x00,0xff,0xff };
+    static BYTE usage2[] = { 0x03,0x03,0x01,0xff,0xfe };
+    static const BYTE expected_usage1[] = { 0xff,0xff,0x00,0x00 };
+    static const BYTE expected_usage2[] = { 0xff,0xfe,0x00,0x00 };
+    CERT_EXTENSION ext = { oid_key_usage, TRUE, { sizeof(usage1), usage1 } };
+    BYTE usage_bytes[4];
+
+    if (0)
+    {
+        /* Crash */
+        ret = CertGetIntendedKeyUsage(0, NULL, NULL, 0);
+    }
+    ret = CertGetIntendedKeyUsage(0, &info, NULL, 0);
+    ok(!ret, "expected failure\n");
+    ret = CertGetIntendedKeyUsage(0, &info, usage_bytes, sizeof(usage_bytes));
+    ok(!ret, "expected failure\n");
+    ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, NULL, 0);
+    ok(!ret, "expected failure\n");
+    ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, usage_bytes,
+     sizeof(usage_bytes));
+    info.cExtension = 1;
+    info.rgExtension = &ext;
+    ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, NULL, 0);
+    ok(!ret, "expected failure\n");
+    /* The unused bytes are filled with 0. */
+    ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, usage_bytes,
+     sizeof(usage_bytes));
+    ok(ret, "CertGetIntendedKeyUsage failed: %08x\n", GetLastError());
+    ok(!memcmp(usage_bytes, expected_usage1, sizeof(expected_usage1)),
+     "unexpected value\n");
+    /* The usage bytes are copied in big-endian order. */
+    ext.Value.cbData = sizeof(usage2);
+    ext.Value.pbData = usage2;
+    ret = CertGetIntendedKeyUsage(X509_ASN_ENCODING, &info, usage_bytes,
+     sizeof(usage_bytes));
+    ok(ret, "CertGetIntendedKeyUsage failed: %08x\n", GetLastError());
+    ok(!memcmp(usage_bytes, expected_usage2, sizeof(expected_usage2)),
+     "unexpected value\n");
 }
 
 static const LPCSTR keyUsages[] = { szOID_PKIX_KP_CODE_SIGNING,
@@ -3222,6 +3270,7 @@ START_TEST(cert)
     testCertSigs();
     testSignAndEncodeCert();
     testCreateSelfSignCert();
+    testIntendedKeyUsage();
     testKeyUsage();
     testGetValidUsages();
     testCompareCertName();

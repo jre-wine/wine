@@ -65,6 +65,7 @@ PUBLIC_IDL_H_SRCS = \
 	optary.idl \
 	perhist.idl \
 	propidl.idl \
+	propsys.idl \
 	pstore.idl \
 	qedit.idl \
 	richole.idl \
@@ -74,6 +75,7 @@ PUBLIC_IDL_H_SRCS = \
 	shobjidl.idl \
 	shtypes.idl \
 	strmif.idl \
+	structuredquerycondition.idl \
 	textstor.idl \
 	tom.idl \
 	unknwn.idl \
@@ -81,6 +83,8 @@ PUBLIC_IDL_H_SRCS = \
 	urlmon.idl \
 	vmr9.idl \
 	wbemcli.idl \
+	wia_lh.idl \
+	wia_xp.idl \
 	wincodec.idl \
 	wine/itss.idl \
 	wine/svcctl.idl \
@@ -96,14 +100,19 @@ SRCDIR_INCLUDES = \
 	$(IDL_TLB_SRCS) \
 	$(PUBLIC_IDL_H_SRCS) \
 	accctrl.h \
+	access.idl \
 	aclapi.h \
 	aclui.h \
 	adshlp.h \
 	advpub.h \
 	af_irda.h \
 	appmgmt.h \
+	asynot.idl \
+	asysta.idl \
 	audevcod.h \
+	audiosessiontypes.h \
 	aviriff.h \
+	avrt.h \
 	axcore.idl \
 	axextend.idl \
 	basetsd.h \
@@ -116,6 +125,8 @@ SRCDIR_INCLUDES = \
 	cguid.h \
 	cierror.h \
 	clusapi.h \
+	cmdbas.idl \
+	cmdtxt.idl \
 	commctrl.h \
 	commctrl.rh \
 	commdlg.h \
@@ -379,6 +390,7 @@ SRCDIR_INCLUDES = \
 	poppack.h \
 	powrprof.h \
 	profinfo.h \
+	propkeydef.h \
 	propvarutil.h \
 	prsht.h \
 	psapi.h \
@@ -392,6 +404,8 @@ SRCDIR_INCLUDES = \
 	regstr.h \
 	richedit.h \
 	rmxfguid.h \
+	row.idl \
+	rowchg.idl \
 	rpc.h \
 	rpcasync.h \
 	rpcdce.h \
@@ -399,6 +413,9 @@ SRCDIR_INCLUDES = \
 	rpcndr.h \
 	rpcnterr.h \
 	rpcproxy.h \
+	rstbas.idl \
+	rstinf.idl \
+	rstloc.idl \
 	rtutils.h \
 	scarderr.h \
 	schannel.h \
@@ -447,6 +464,7 @@ SRCDIR_INCLUDES = \
 	vfwmsgs.h \
 	vmrender.idl \
 	wfext.h \
+	wia.h \
 	winbase.h \
 	wincon.h \
 	wincred.h \

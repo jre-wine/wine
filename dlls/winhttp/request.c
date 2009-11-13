@@ -411,6 +411,7 @@ BOOL add_request_headers( request_t *request, LPCWSTR headers, DWORD len, DWORD 
     header_t *header;
 
     if (len == ~0u) len = strlenW( headers );
+    if (!len) return TRUE;
     if (!(buffer = heap_alloc( (len + 1) * sizeof(WCHAR) ))) return FALSE;
     strcpyW( buffer, headers );
 
@@ -649,6 +650,24 @@ static BOOL query_headers( request_t *request, DWORD level, LPCWSTR name, LPVOID
         }
         *buflen = len;
         if (request_only) heap_free( headers );
+        return ret;
+    }
+    case WINHTTP_QUERY_VERSION:
+    {
+        DWORD len = (strlenW( request->version ) + 1) * sizeof(WCHAR);
+        if (len > *buflen)
+        {
+            set_last_error( ERROR_INSUFFICIENT_BUFFER );
+            *buflen = len;
+            return FALSE;
+        }
+        else if (buffer)
+        {
+            strcpyW( buffer, request->version );
+            TRACE("returning string: %s\n", debugstr_w(buffer));
+            ret = TRUE;
+        }
+        *buflen = len - sizeof(WCHAR);
         return ret;
     }
     default:

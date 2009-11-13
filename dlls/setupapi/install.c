@@ -1082,10 +1082,10 @@ BOOL WINAPI SetupInstallFromInfSectionW( HWND owner, HINF hinf, PCWSTR section, 
         }
         else info.callback = NULL;
 
-        if (!iterate_section_fields( hinf, section, RegisterDlls, register_dlls_callback, &info ))
+        if (!iterate_section_fields( hinf, section, WineFakeDlls, fake_dlls_callback, NULL ))
             return FALSE;
 
-        if (!iterate_section_fields( hinf, section, WineFakeDlls, fake_dlls_callback, NULL ))
+        if (!iterate_section_fields( hinf, section, RegisterDlls, register_dlls_callback, &info ))
             return FALSE;
     }
     if (flags & SPINST_UNREGSVR)
@@ -1445,4 +1445,17 @@ BOOL WINAPI SetupInstallServicesFromInfSectionA( HINF Inf, PCSTR SectionName, DW
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
 
     return ret;
+}
+
+
+/***********************************************************************
+ *              SetupGetInfFileListW  (SETUPAPI.@)
+ */
+BOOL WINAPI SetupGetInfFileListW(PCWSTR dir, DWORD style, PWSTR buffer,
+                                 DWORD insize, PDWORD outsize)
+{
+    FIXME("(%s %d %p %d %p) stub\n", debugstr_w(dir), style, buffer, insize, outsize);
+    if(buffer) buffer[0] = 0;
+    if(outsize) *outsize = 1;
+    return TRUE;
 }

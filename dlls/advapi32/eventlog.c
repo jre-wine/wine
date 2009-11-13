@@ -29,10 +29,24 @@
 #include "wmistr.h"
 #include "evntrace.h"
 
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(advapi);
 WINE_DECLARE_DEBUG_CHANNEL(eventlog);
+
+static inline LPWSTR SERV_dup( LPCSTR str )
+{
+    UINT len;
+    LPWSTR wstr;
+
+    if( !str )
+        return NULL;
+    len = MultiByteToWideChar( CP_ACP, 0, str, -1, NULL, 0 );
+    wstr = HeapAlloc( GetProcessHeap(), 0, len*sizeof (WCHAR) );
+    MultiByteToWideChar( CP_ACP, 0, str, -1, wstr, len );
+    return wstr;
+}
 
 /******************************************************************************
  * BackupEventLogA [ADVAPI32.@]
@@ -50,8 +64,14 @@ WINE_DECLARE_DEBUG_CHANNEL(eventlog);
  */
 BOOL WINAPI BackupEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
 {
-	FIXME("(%p,%s) stub\n", hEventLog, debugstr_a(lpBackupFileName));
-	return TRUE;
+    LPWSTR backupW;
+    BOOL ret;
+
+    backupW = SERV_dup(lpBackupFileName);
+    ret = BackupEventLogW(hEventLog, backupW);
+    HeapFree(GetProcessHeap(), 0, backupW);
+
+    return ret;
 }
 
 /******************************************************************************
@@ -61,14 +81,33 @@ BOOL WINAPI BackupEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
  */
 BOOL WINAPI BackupEventLogW( HANDLE hEventLog, LPCWSTR lpBackupFileName )
 {
-	FIXME("(%p,%s) stub\n", hEventLog, debugstr_w(lpBackupFileName));
-	return TRUE;
+    FIXME("(%p,%s) stub\n", hEventLog, debugstr_w(lpBackupFileName));
+
+    if (!lpBackupFileName)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (GetFileAttributesW(lpBackupFileName) != INVALID_FILE_ATTRIBUTES)
+    {
+        SetLastError(ERROR_ALREADY_EXISTS);
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /******************************************************************************
  * ClearEventLogA [ADVAPI32.@]
  *
- * Clears the event log and/or saves the log to a backup file.
+ * Clears the event log and optionally saves the log to a backup file.
  *
  * PARAMS
  *  hEvenLog         [I] Handle to event log to clear.
@@ -82,8 +121,14 @@ BOOL WINAPI BackupEventLogW( HANDLE hEventLog, LPCWSTR lpBackupFileName )
  */
 BOOL WINAPI ClearEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
 {
-	FIXME("(%p,%s) stub\n", hEventLog, debugstr_a(lpBackupFileName));
-	return TRUE;
+    LPWSTR backupW;
+    BOOL ret;
+
+    backupW = SERV_dup(lpBackupFileName);
+    ret = ClearEventLogW(hEventLog, backupW);
+    HeapFree(GetProcessHeap(), 0, backupW);
+
+    return ret;
 }
 
 /******************************************************************************
@@ -93,8 +138,15 @@ BOOL WINAPI ClearEventLogA( HANDLE hEventLog, LPCSTR lpBackupFileName )
  */
 BOOL WINAPI ClearEventLogW( HANDLE hEventLog, LPCWSTR lpBackupFileName )
 {
-	FIXME("(%p,%s) stub\n", hEventLog, debugstr_w(lpBackupFileName));
-	return TRUE;
+    FIXME("(%p,%s) stub\n", hEventLog, debugstr_w(lpBackupFileName));
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /******************************************************************************
@@ -111,8 +163,15 @@ BOOL WINAPI ClearEventLogW( HANDLE hEventLog, LPCWSTR lpBackupFileName )
  */
 BOOL WINAPI CloseEventLog( HANDLE hEventLog )
 {
-	FIXME("(%p) stub\n", hEventLog);
-	return TRUE;
+    FIXME("(%p) stub\n", hEventLog);
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    return TRUE;
 }
 
 /******************************************************************************
@@ -169,6 +228,64 @@ ULONG WINAPI EnableTrace( ULONG enable, ULONG flag, ULONG level, LPCGUID guid, T
 }
 
 /******************************************************************************
+ * GetEventLogInformation [ADVAPI32.@]
+ *
+ * Retrieve some information about an event log.
+ *
+ * PARAMS
+ *  hEventLog      [I]   Handle to an open event log.
+ *  dwInfoLevel    [I]   Level of information (only EVENTLOG_FULL_INFO)
+ *  lpBuffer       [I/O] The buffer for the returned information
+ *  cbBufSize      [I]   The size of the buffer
+ *  pcbBytesNeeded [O]   The needed bytes to hold the information
+ *
+ * RETURNS
+ *  Success: TRUE. lpBuffer will hold the information and pcbBytesNeeded shows
+ *           the needed buffer size.
+ *  Failure: FALSE.
+ */
+BOOL WINAPI GetEventLogInformation( HANDLE hEventLog, DWORD dwInfoLevel, LPVOID lpBuffer, DWORD cbBufSize, LPDWORD pcbBytesNeeded)
+{
+    EVENTLOG_FULL_INFORMATION *efi;
+
+    FIXME("(%p, %d, %p, %d, %p) stub\n", hEventLog, dwInfoLevel, lpBuffer, cbBufSize, pcbBytesNeeded);
+
+    if (dwInfoLevel != EVENTLOG_FULL_INFO)
+    {
+        SetLastError(ERROR_INVALID_LEVEL);
+        return FALSE;
+    }
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
+    if (!lpBuffer || !pcbBytesNeeded)
+    {
+        /* FIXME: This will be handled properly when eventlog is moved
+         * to a higher level
+         */
+        SetLastError(RPC_X_NULL_REF_POINTER);
+        return FALSE;
+    }
+
+    *pcbBytesNeeded = sizeof(EVENTLOG_FULL_INFORMATION);
+    if (cbBufSize < sizeof(EVENTLOG_FULL_INFORMATION))
+    {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return FALSE;
+    }
+
+    /* Pretend the log is not full */
+    efi = (EVENTLOG_FULL_INFORMATION *)lpBuffer;
+    efi->dwFull = 0;
+
+    return TRUE;
+}
+
+/******************************************************************************
  * GetNumberOfEventLogRecords [ADVAPI32.@]
  *
  * Retrieves the number of records in an event log.
@@ -186,7 +303,18 @@ BOOL WINAPI GetNumberOfEventLogRecords( HANDLE hEventLog, PDWORD NumberOfRecords
 {
     FIXME("(%p,%p) stub\n", hEventLog, NumberOfRecords);
 
-    if (!NumberOfRecords) return FALSE;
+    if (!NumberOfRecords)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
     *NumberOfRecords = 0;
 
     return TRUE;
@@ -210,7 +338,18 @@ BOOL WINAPI GetOldestEventLogRecord( HANDLE hEventLog, PDWORD OldestRecord )
 {
     FIXME("(%p,%p) stub\n", hEventLog, OldestRecord);
 
-    if (!OldestRecord) return FALSE;
+    if (!OldestRecord)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    if (!hEventLog)
+    {
+        SetLastError(ERROR_INVALID_HANDLE);
+        return FALSE;
+    }
+
     *OldestRecord = 0;
 
     return TRUE;
@@ -252,8 +391,16 @@ BOOL WINAPI NotifyChangeEventLog( HANDLE hEventLog, HANDLE hEvent )
  */
 HANDLE WINAPI OpenBackupEventLogA( LPCSTR lpUNCServerName, LPCSTR lpFileName )
 {
-	FIXME("(%s,%s) stub\n", debugstr_a(lpUNCServerName), debugstr_a(lpFileName));
-	return (HANDLE)0xcafe4242;
+    LPWSTR uncnameW, filenameW;
+    HANDLE handle;
+
+    uncnameW = SERV_dup(lpUNCServerName);
+    filenameW = SERV_dup(lpFileName);
+    handle = OpenBackupEventLogW(uncnameW, filenameW);
+    HeapFree(GetProcessHeap(), 0, uncnameW);
+    HeapFree(GetProcessHeap(), 0, filenameW);
+
+    return handle;
 }
 
 /******************************************************************************
@@ -263,8 +410,28 @@ HANDLE WINAPI OpenBackupEventLogA( LPCSTR lpUNCServerName, LPCSTR lpFileName )
  */
 HANDLE WINAPI OpenBackupEventLogW( LPCWSTR lpUNCServerName, LPCWSTR lpFileName )
 {
-	FIXME("(%s,%s) stub\n", debugstr_w(lpUNCServerName), debugstr_w(lpFileName));
-	return (HANDLE)0xcafe4242;
+    FIXME("(%s,%s) stub\n", debugstr_w(lpUNCServerName), debugstr_w(lpFileName));
+
+    if (!lpFileName)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    if (lpUNCServerName && lpUNCServerName[0])
+    {
+        FIXME("Remote server not supported\n");
+        SetLastError(RPC_S_SERVER_UNAVAILABLE);
+        return NULL;
+    }
+
+    if (GetFileAttributesW(lpFileName) == INVALID_FILE_ATTRIBUTES)
+    {
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return NULL;
+    }
+
+    return (HANDLE)0xcafe4242;
 }
 
 /******************************************************************************
@@ -283,8 +450,16 @@ HANDLE WINAPI OpenBackupEventLogW( LPCWSTR lpUNCServerName, LPCWSTR lpFileName )
  */
 HANDLE WINAPI OpenEventLogA( LPCSTR uncname, LPCSTR source )
 {
-	FIXME("(%s,%s) stub\n", debugstr_a(uncname), debugstr_a(source));
-	return (HANDLE)0xcafe4242;
+    LPWSTR uncnameW, sourceW;
+    HANDLE handle;
+
+    uncnameW = SERV_dup(uncname);
+    sourceW = SERV_dup(source);
+    handle = OpenEventLogW(uncnameW, sourceW);
+    HeapFree(GetProcessHeap(), 0, uncnameW);
+    HeapFree(GetProcessHeap(), 0, sourceW);
+
+    return handle;
 }
 
 /******************************************************************************
@@ -294,14 +469,28 @@ HANDLE WINAPI OpenEventLogA( LPCSTR uncname, LPCSTR source )
  */
 HANDLE WINAPI OpenEventLogW( LPCWSTR uncname, LPCWSTR source )
 {
-	FIXME("(%s,%s) stub\n", debugstr_w(uncname), debugstr_w(source));
-	return (HANDLE)0xcafe4242;
+    FIXME("(%s,%s) stub\n", debugstr_w(uncname), debugstr_w(source));
+
+    if (!source)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
+
+    if (uncname && uncname[0])
+    {
+        FIXME("Remote server not supported\n");
+        SetLastError(RPC_S_SERVER_UNAVAILABLE);
+        return NULL;
+    }
+
+    return (HANDLE)0xcafe4242;
 }
 
 /******************************************************************************
  * QueryAllTracesW [ADVAPI32.@]
  *
- * Query informations for started event trace sessions
+ * Query information for started event trace sessions
  *
  */
 ULONG WINAPI QueryAllTracesW( PEVENT_TRACE_PROPERTIES * parray, ULONG arraycount, PULONG psessioncount )

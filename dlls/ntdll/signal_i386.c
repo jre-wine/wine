@@ -2280,6 +2280,38 @@ void WINAPI __regs_RtlRaiseException( EXCEPTION_RECORD *rec, CONTEXT *context )
 DEFINE_REGS_ENTRYPOINT( RtlRaiseException, 1 )
 
 
+/*************************************************************************
+ *		RtlCaptureStackBackTrace (NTDLL.@)
+ */
+USHORT WINAPI RtlCaptureStackBackTrace( ULONG skip, ULONG count, PVOID *buffer, ULONG *hash )
+{
+    CONTEXT context;
+    ULONG i;
+    ULONG *frame;
+
+    RtlCaptureContext( &context );
+    if (hash) *hash = 0;
+    frame = (ULONG *)context.Ebp;
+
+    while (skip--)
+    {
+        if (((void *)frame < NtCurrentTeb()->Tib.StackLimit) ||
+            ((void *)(frame + 1) >= NtCurrentTeb()->Tib.StackBase)) return 0;
+        frame = (ULONG *)*frame;
+    }
+
+    for (i = 0; i < count; i++)
+    {
+        if (((void *)frame < NtCurrentTeb()->Tib.StackLimit) ||
+            ((void *)(frame + 1) >= NtCurrentTeb()->Tib.StackBase)) break;
+        buffer[i] = (void *)frame[1];
+        if (hash) *hash += frame[1];
+        frame = (ULONG *)*frame;
+    }
+    return i;
+}
+
+
 /* wrapper for apps that don't declare the thread function correctly */
 extern void DECLSPEC_NORETURN call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg );
 __ASM_GLOBAL_FUNC(call_thread_func,

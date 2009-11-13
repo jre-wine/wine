@@ -1002,10 +1002,10 @@ static BOOL CRYPT_AsnDecodeCertInfo(DWORD dwCertEncodingType,
        CRYPT_AsnDecodePubKeyInfoInternal, sizeof(CERT_PUBLIC_KEY_INFO),
        FALSE, TRUE, offsetof(CERT_INFO,
        SubjectPublicKeyInfo.Algorithm.Parameters.pbData), 0 },
-     { ASN_BITSTRING, offsetof(CERT_INFO, IssuerUniqueId),
+     { ASN_CONTEXT | 1, offsetof(CERT_INFO, IssuerUniqueId),
        CRYPT_AsnDecodeBitsInternal, sizeof(CRYPT_BIT_BLOB), TRUE, TRUE,
        offsetof(CERT_INFO, IssuerUniqueId.pbData), 0 },
-     { ASN_BITSTRING, offsetof(CERT_INFO, SubjectUniqueId),
+     { ASN_CONTEXT | 2, offsetof(CERT_INFO, SubjectUniqueId),
        CRYPT_AsnDecodeBitsInternal, sizeof(CRYPT_BIT_BLOB), TRUE, TRUE,
        offsetof(CERT_INFO, SubjectUniqueId.pbData), 0 },
      { ASN_CONTEXT | ASN_CONSTRUCTOR | 3, offsetof(CERT_INFO, cExtension),
@@ -1906,9 +1906,30 @@ static BOOL WINAPI CRYPT_AsnDecodeName(DWORD dwCertEncodingType,
          sizeof(CERT_NAME_INFO),
          CRYPT_AsnDecodeRdn, sizeof(CERT_RDN), TRUE,
          offsetof(CERT_RDN, rgRDNAttr) };
+        DWORD bytesNeeded;
 
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
-         dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
+         dwFlags & ~CRYPT_DECODE_ALLOC_FLAG, NULL, NULL, &bytesNeeded,
+         NULL);
+        if (ret)
+        {
+            if (!pvStructInfo)
+                *pcbStructInfo = bytesNeeded;
+            else if ((ret = CRYPT_DecodeEnsureSpace(dwFlags, pDecodePara,
+             pvStructInfo, pcbStructInfo, bytesNeeded)))
+            {
+                CERT_NAME_INFO *info;
+
+                if (dwFlags & CRYPT_DECODE_ALLOC_FLAG)
+                    pvStructInfo = *(BYTE **)pvStructInfo;
+                info = pvStructInfo;
+                info->rgRDN = (CERT_RDN *)((BYTE *)pvStructInfo +
+                 sizeof(CERT_NAME_INFO));
+                ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
+                 dwFlags & ~CRYPT_DECODE_ALLOC_FLAG, NULL, pvStructInfo,
+                 &bytesNeeded, NULL);
+            }
+        }
     }
     __EXCEPT_PAGE_FAULT
     {
@@ -1980,9 +2001,30 @@ static BOOL WINAPI CRYPT_AsnDecodeUnicodeName(DWORD dwCertEncodingType,
          sizeof(CERT_NAME_INFO),
          CRYPT_AsnDecodeUnicodeRdn, sizeof(CERT_RDN), TRUE,
          offsetof(CERT_RDN, rgRDNAttr) };
+        DWORD bytesNeeded;
 
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
-         dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
+         dwFlags & ~CRYPT_DECODE_ALLOC_FLAG, NULL, NULL, &bytesNeeded,
+         NULL);
+        if (ret)
+        {
+            if (!pvStructInfo)
+                *pcbStructInfo = bytesNeeded;
+            else if ((ret = CRYPT_DecodeEnsureSpace(dwFlags, pDecodePara,
+             pvStructInfo, pcbStructInfo, bytesNeeded)))
+            {
+                CERT_NAME_INFO *info;
+
+                if (dwFlags & CRYPT_DECODE_ALLOC_FLAG)
+                    pvStructInfo = *(BYTE **)pvStructInfo;
+                info = pvStructInfo;
+                info->rgRDN = (CERT_RDN *)((BYTE *)pvStructInfo +
+                 sizeof(CERT_NAME_INFO));
+                ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
+                 dwFlags & ~CRYPT_DECODE_ALLOC_FLAG, NULL, pvStructInfo,
+                 &bytesNeeded, NULL);
+            }
+        }
     }
     __EXCEPT_PAGE_FAULT
     {
@@ -2948,7 +2990,13 @@ static BOOL CRYPT_AsnDecodeAltNameEntry(const BYTE *pbEncoded, DWORD cbEncoded,
         case 1: /* rfc822Name */
         case 2: /* dNSName */
         case 6: /* uniformResourceIdentifier */
-            bytesNeeded += (dataLen + 1) * sizeof(WCHAR);
+            if (memchr(pbEncoded + 1 + lenBytes, 0, dataLen))
+            {
+                SetLastError(CRYPT_E_ASN1_RULE);
+                ret = FALSE;
+            }
+            else
+                bytesNeeded += (dataLen + 1) * sizeof(WCHAR);
             break;
         case 4: /* directoryName */
         case 7: /* iPAddress */
@@ -3623,6 +3671,192 @@ static BOOL WINAPI CRYPT_AsnDecodeCertPolicies(DWORD dwCertEncodingType,
 
         ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
          dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+    }
+    __ENDTRY
+    return ret;
+}
+
+static BOOL CRYPT_AsnDecodeCertPolicyMapping(const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
+ DWORD *pcbDecoded)
+{
+    struct AsnDecodeSequenceItem items[] = {
+     { ASN_OBJECTIDENTIFIER, offsetof(CERT_POLICY_MAPPING,
+       pszIssuerDomainPolicy), CRYPT_AsnDecodeOidInternal, sizeof(LPSTR),
+       FALSE, TRUE, offsetof(CERT_POLICY_MAPPING, pszIssuerDomainPolicy), 0 },
+     { ASN_OBJECTIDENTIFIER, offsetof(CERT_POLICY_MAPPING,
+       pszSubjectDomainPolicy), CRYPT_AsnDecodeOidInternal, sizeof(LPSTR),
+       FALSE, TRUE, offsetof(CERT_POLICY_MAPPING, pszSubjectDomainPolicy), 0 },
+    };
+    CERT_POLICY_MAPPING *mapping = pvStructInfo;
+    BOOL ret;
+
+    TRACE("%p, %d, %08x, %p, %d\n", pbEncoded, cbEncoded, dwFlags,
+     pvStructInfo, pvStructInfo ? *pcbStructInfo : 0);
+
+    ret = CRYPT_AsnDecodeSequence(items, sizeof(items) / sizeof(items[0]),
+     pbEncoded, cbEncoded, dwFlags, NULL, pvStructInfo, pcbStructInfo,
+     pcbDecoded, mapping ? mapping->pszIssuerDomainPolicy : NULL);
+    return ret;
+}
+
+static BOOL WINAPI CRYPT_AsnDecodeCertPolicyMappings(DWORD dwCertEncodingType,
+ LPCSTR lpszStructType, const BYTE *pbEncoded, DWORD cbEncoded, DWORD dwFlags,
+ PCRYPT_DECODE_PARA pDecodePara, void *pvStructInfo, DWORD *pcbStructInfo)
+{
+    BOOL ret = FALSE;
+
+    TRACE("%p, %d, %08x, %p, %p, %d\n", pbEncoded, cbEncoded, dwFlags,
+     pDecodePara, pvStructInfo, pvStructInfo ? *pcbStructInfo : 0);
+
+    __TRY
+    {
+        struct AsnArrayDescriptor arrayDesc = { ASN_SEQUENCEOF,
+         offsetof(CERT_POLICY_MAPPINGS_INFO, cPolicyMapping),
+         offsetof(CERT_POLICY_MAPPINGS_INFO, rgPolicyMapping),
+         sizeof(CERT_POLICY_MAPPING),
+         CRYPT_AsnDecodeCertPolicyMapping, sizeof(CERT_POLICY_MAPPING), TRUE,
+         offsetof(CERT_POLICY_MAPPING, pszIssuerDomainPolicy) };
+
+        ret = CRYPT_AsnDecodeArray(&arrayDesc, pbEncoded, cbEncoded,
+         dwFlags, pDecodePara, pvStructInfo, pcbStructInfo, NULL);
+    }
+    __EXCEPT_PAGE_FAULT
+    {
+        SetLastError(STATUS_ACCESS_VIOLATION);
+    }
+    __ENDTRY
+    return ret;
+}
+
+static BOOL CRYPT_AsnDecodeRequireExplicit(const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
+ DWORD *pcbDecoded)
+{
+    BOOL ret;
+    DWORD skip, size = sizeof(skip);
+
+    if (!cbEncoded)
+    {
+        SetLastError(CRYPT_E_ASN1_EOD);
+        return FALSE;
+    }
+    if (pbEncoded[0] != (ASN_CONTEXT | 0))
+    {
+        SetLastError(CRYPT_E_ASN1_BADTAG);
+        return FALSE;
+    }
+    if ((ret = CRYPT_AsnDecodeIntInternal(pbEncoded, cbEncoded, dwFlags,
+     &skip, &size, pcbDecoded)))
+    {
+        DWORD bytesNeeded = MEMBERSIZE(CERT_POLICY_CONSTRAINTS_INFO,
+         fRequireExplicitPolicy, fInhibitPolicyMapping);
+
+        if (!pvStructInfo)
+            *pcbStructInfo = bytesNeeded;
+        else if (*pcbStructInfo < bytesNeeded)
+        {
+            *pcbStructInfo = bytesNeeded;
+            SetLastError(ERROR_MORE_DATA);
+            ret = FALSE;
+        }
+        else
+        {
+            CERT_POLICY_CONSTRAINTS_INFO *info =
+             (CERT_POLICY_CONSTRAINTS_INFO *)((BYTE *)pvStructInfo -
+             offsetof(CERT_POLICY_CONSTRAINTS_INFO, fRequireExplicitPolicy));
+
+            *pcbStructInfo = bytesNeeded;
+            /* The BOOL is implicit:  if the integer is present, then it's
+             * TRUE.
+             */
+            info->fRequireExplicitPolicy = TRUE;
+            info->dwRequireExplicitPolicySkipCerts = skip;
+        }
+    }
+    return ret;
+}
+
+static BOOL CRYPT_AsnDecodeInhibitMapping(const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, void *pvStructInfo, DWORD *pcbStructInfo,
+ DWORD *pcbDecoded)
+{
+    BOOL ret;
+    DWORD skip, size = sizeof(skip);
+
+    if (!cbEncoded)
+    {
+        SetLastError(CRYPT_E_ASN1_EOD);
+        return FALSE;
+    }
+    if (pbEncoded[0] != (ASN_CONTEXT | 1))
+    {
+        SetLastError(CRYPT_E_ASN1_BADTAG);
+        return FALSE;
+    }
+    if ((ret = CRYPT_AsnDecodeIntInternal(pbEncoded, cbEncoded, dwFlags,
+     &skip, &size, pcbDecoded)))
+    {
+        DWORD bytesNeeded = FINALMEMBERSIZE(CERT_POLICY_CONSTRAINTS_INFO,
+         fInhibitPolicyMapping);
+
+        if (!pvStructInfo)
+            *pcbStructInfo = bytesNeeded;
+        else if (*pcbStructInfo < bytesNeeded)
+        {
+            *pcbStructInfo = bytesNeeded;
+            SetLastError(ERROR_MORE_DATA);
+            ret = FALSE;
+        }
+        else
+        {
+            CERT_POLICY_CONSTRAINTS_INFO *info =
+             (CERT_POLICY_CONSTRAINTS_INFO *)((BYTE *)pvStructInfo -
+             offsetof(CERT_POLICY_CONSTRAINTS_INFO, fInhibitPolicyMapping));
+
+            *pcbStructInfo = bytesNeeded;
+            /* The BOOL is implicit:  if the integer is present, then it's
+             * TRUE.
+             */
+            info->fInhibitPolicyMapping = TRUE;
+            info->dwInhibitPolicyMappingSkipCerts = skip;
+        }
+    }
+    return ret;
+}
+
+static BOOL WINAPI CRYPT_AsnDecodeCertPolicyConstraints(
+ DWORD dwCertEncodingType, LPCSTR lpszStructType, const BYTE *pbEncoded,
+ DWORD cbEncoded, DWORD dwFlags, PCRYPT_DECODE_PARA pDecodePara,
+ void *pvStructInfo, DWORD *pcbStructInfo)
+{
+    BOOL ret = FALSE;
+
+    TRACE("%p, %d, %08x, %p, %p, %d\n", pbEncoded, cbEncoded, dwFlags,
+     pDecodePara, pvStructInfo, pvStructInfo ? *pcbStructInfo : 0);
+
+    __TRY
+    {
+        struct AsnDecodeSequenceItem items[] = {
+         { ASN_CONTEXT | 0,
+           offsetof(CERT_POLICY_CONSTRAINTS_INFO, fRequireExplicitPolicy),
+           CRYPT_AsnDecodeRequireExplicit,
+           MEMBERSIZE(CERT_POLICY_CONSTRAINTS_INFO, fRequireExplicitPolicy,
+           fInhibitPolicyMapping), TRUE, FALSE, 0, 0 },
+         { ASN_CONTEXT | 1,
+           offsetof(CERT_POLICY_CONSTRAINTS_INFO, fInhibitPolicyMapping),
+           CRYPT_AsnDecodeInhibitMapping,
+           FINALMEMBERSIZE(CERT_POLICY_CONSTRAINTS_INFO, fInhibitPolicyMapping),
+           TRUE, FALSE, 0, 0 },
+        };
+
+        ret = CRYPT_AsnDecodeSequence(items, sizeof(items) / sizeof(items[0]),
+         pbEncoded, cbEncoded, dwFlags, pDecodePara, pvStructInfo,
+         pcbStructInfo, NULL, NULL);
     }
     __EXCEPT_PAGE_FAULT
     {
@@ -5494,6 +5728,12 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
         case LOWORD(X509_NAME_CONSTRAINTS):
             decodeFunc = CRYPT_AsnDecodeNameConstraints;
             break;
+        case LOWORD(X509_POLICY_MAPPINGS):
+            decodeFunc = CRYPT_AsnDecodeCertPolicyMappings;
+            break;
+        case LOWORD(X509_POLICY_CONSTRAINTS):
+            decodeFunc = CRYPT_AsnDecodeCertPolicyConstraints;
+            break;
         case LOWORD(PKCS7_SIGNER_INFO):
             decodeFunc = CRYPT_AsnDecodePKCSSignerInfo;
             break;
@@ -5510,6 +5750,8 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
         decodeFunc = CRYPT_AsnDecodeSMIMECapabilities;
     else if (!strcmp(lpszStructType, szOID_AUTHORITY_KEY_IDENTIFIER))
         decodeFunc = CRYPT_AsnDecodeAuthorityKeyId;
+    else if (!strcmp(lpszStructType, szOID_LEGACY_POLICY_MAPPINGS))
+        decodeFunc = CRYPT_AsnDecodeCertPolicyMappings;
     else if (!strcmp(lpszStructType, szOID_AUTHORITY_KEY_IDENTIFIER2))
         decodeFunc = CRYPT_AsnDecodeAuthorityKeyId2;
     else if (!strcmp(lpszStructType, szOID_CRL_REASON_CODE))
@@ -5536,6 +5778,10 @@ static CryptDecodeObjectExFunc CRYPT_GetBuiltinDecoder(DWORD dwCertEncodingType,
         decodeFunc = CRYPT_AsnDecodeCRLDistPoints;
     else if (!strcmp(lpszStructType, szOID_CERT_POLICIES))
         decodeFunc = CRYPT_AsnDecodeCertPolicies;
+    else if (!strcmp(lpszStructType, szOID_POLICY_MAPPINGS))
+        decodeFunc = CRYPT_AsnDecodeCertPolicyMappings;
+    else if (!strcmp(lpszStructType, szOID_POLICY_CONSTRAINTS))
+        decodeFunc = CRYPT_AsnDecodeCertPolicyConstraints;
     else if (!strcmp(lpszStructType, szOID_ENHANCED_KEY_USAGE))
         decodeFunc = CRYPT_AsnDecodeEnhancedKeyUsage;
     else if (!strcmp(lpszStructType, szOID_ISSUING_DIST_POINT))

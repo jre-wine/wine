@@ -96,31 +96,15 @@ FontSubStr="Software\Microsoft\Windows NT\CurrentVersion\FontSubstitutes"
 Control="System\CurrentControlSet\Control"
 
 [Classes]
-HKCR,.avi,"Content Type",2,"video/avi"
 HKCR,.chm,,2,"chm.file"
 HKCR,.cpl,,2,"cplfile"
-HKCR,.dll,"Content Type",2,"application/x-msdownload"
-HKCR,.exe,,2,"exefile"
-HKCR,.exe,"Content Type",2,"application/x-msdownload"
 HKCR,.hlp,,2,"hlpfile"
-HKCR,.htm,,2,"htmlfile"
-HKCR,.htm,"Content Type",2,"text/html"
-HKCR,.html,,2,"htmlfile"
-HKCR,.html,"Content Type",2,"text/html"
 HKCR,.inf,,2,"inffile"
 HKCR,.ini,,2,"inifile"
-HKCR,.jfif,"Content Type",2,"image/jpeg"
 HKCR,.lnk,,2,"lnkfile"
 HKCR,.msi,,2,"Msi.Package" 
 HKCR,.rtf,,2,"rtffile"
-HKCR,.tif,"Content Type",2,"image/tiff"
-HKCR,.tiff,"Content Type",2,"image/tiff"
-HKCR,.txt,,2,"txtfile"
 HKCR,.wri,,2,"wrifile"
-HKCR,.wav,"Content Type",2,"audio/wav"
-HKCR,.xml,,2,"xmlfile"
-HKCR,.xml,"Content Type",2,"text/xml"
-HKCR,.xsl,"Content Type",2,"text/xsl"
 HKCR,chm.file,,2,"Compiled HTML Help File"
 HKCR,chm.file\shell\open\command,,2,"%10%\hh.exe %1"
 HKCR,cplfile,,2,"Control Panel Item"
@@ -400,7 +384,7 @@ HKLM,%CurrentVersion%,"RegisteredOwner",2,""
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"DiskSpinDownMax",,"3600"
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"DiskSpinDownMin",,"3"
 HKLM,%CurrentVersion%\Controls Folder\PowerCfg,"LastID",,"5"
-HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"winemenubuilder -a -r"
+HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
 HKLM,%CurrentVersion%\Setup,"BootDir",,"%30%"
 HKLM,%CurrentVersion%\Setup,"SharedDir",,"%25%"
 HKLM,%CurrentVersion%\Uninstall,,,""
@@ -556,7 +540,6 @@ HKLM,System\CurrentControlSet\Control\Session Manager,,,""
 HKLM,System\CurrentControlSet\Control\VMM32Files,,,""
 HKCU,AppEvents\Schemes\Apps\Explorer\Navigating\.Current,,,""
 HKCU,Software\Microsoft\Protected Storage System Provider,,,""
-HKCU,Software\Wine\MSHTML,"GeckoUrl",,"http://source.winehq.org/winegecko.php"
 HKLM,HARDWARE\DEVICEMAP\PARALLEL PORTS,,,""
 HKLM,HARDWARE\DEVICEMAP\SERIALCOMM,,,""
 ; Some apps requires at least four subkeys of Active Setup\Installed Components
@@ -584,10 +567,6 @@ HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{de5aed00-a4bf-11d1-99
 
 [Nls]
 HKLM,System\CurrentControlSet\Control\Nls\Codepage,"37",,""
-HKLM,System\CurrentControlSet\Control\Nls\Codepage,"ACP",,"1252"
-HKLM,System\CurrentControlSet\Control\Nls\Codepage,"MACCP",,"10000"
-HKLM,System\CurrentControlSet\Control\Nls\Codepage,"OEMCP",,"437"
-
 HKLM,System\CurrentControlSet\Control\Nls\Language,"0401",,""
 HKLM,System\CurrentControlSet\Control\Nls\Language,"0402",,""
 HKLM,System\CurrentControlSet\Control\Nls\Language,"0403",,""
@@ -2402,7 +2381,6 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,hhctrl.ocx,1
 11,,hlink.dll,1
 11,,hnetcfg.dll,1
-11,,iexplore.exe,1
 11,,inetcomm.dll,1
 11,,infosoft.dll,1
 11,,inseng.dll,1
@@ -2430,16 +2408,19 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,sti.dll,1
 11,,urlmon.dll,1
 11,,wbemprox.dll,1
+11,,wiaservc.dll,1
 11,,windowscodecs.dll,1
 11,,wintrust.dll,1
 11,,wmiutils.dll,1
 11,,wuapi.dll,1
+16422,Internet Explorer,iexplore.exe,1
 
 [FakeDllsSection]
 ; create some directories first
 10,inf,
 10,system,
 10,temp,
+11,mui,
 11,spool\drivers\color,
 11,spool\printers,
 10,,explorer.exe

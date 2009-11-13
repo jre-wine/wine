@@ -2947,7 +2947,7 @@ static ITypeLib2* ITypeLib2_Constructor_MSFT(LPVOID pLib, DWORD dwTLBLength)
                 if(td[1]<0)
                     pTypeLibImpl->pTypeDesc[i].u.lpadesc->tdescElem.vt = td[0] & VT_TYPEMASK;
                 else
-                    pTypeLibImpl->pTypeDesc[i].u.lpadesc->tdescElem = stndTypeDesc[td[0]/8];
+                    pTypeLibImpl->pTypeDesc[i].u.lpadesc->tdescElem = cx.pLibInfo->pTypeDesc[td[0]/(2*sizeof(INT))];
 
                 pTypeLibImpl->pTypeDesc[i].u.lpadesc->cDims = td[2];
 
@@ -3676,6 +3676,9 @@ static void SLTG_ProcessDispatch(char *pBlk, ITypeInfoImpl *pTI,
   if (pTITail->funcs_off != 0xffff)
     SLTG_DoFuncs(pBlk, pBlk + pTITail->funcs_off, pTI, pTITail->cFuncs, pNameTable, ref_lookup);
 
+  if (pTITail->impls_off != 0xffff)
+    SLTG_DoImpls(pBlk + pTITail->impls_off, pTI, FALSE, ref_lookup);
+
   /* this is necessary to cope with MSFT typelibs that set cFuncs to the number
    * of dispinterface functions including the IDispatch ones, so
    * ITypeInfo::GetFuncDesc takes the real value for cFuncs from cbSizeVft */
@@ -3934,6 +3937,9 @@ static ITypeLib2* ITypeLib2_Constructor_SLTG(LPVOID pLib, DWORD dwTLBLength)
       (*ppTypeInfoImpl)->TypeAttr.wMinorVerNum = pTIHeader->minor_version;
       (*ppTypeInfoImpl)->TypeAttr.wTypeFlags =
 	(pTIHeader->typeflags1 >> 3) | (pTIHeader->typeflags2 << 5);
+
+      if((*ppTypeInfoImpl)->TypeAttr.wTypeFlags & TYPEFLAG_FDUAL)
+	(*ppTypeInfoImpl)->TypeAttr.typekind = TKIND_DISPATCH;
 
       if((pTIHeader->typeflags1 & 7) != 2)
 	FIXME_(typelib)("typeflags1 = %02x\n", pTIHeader->typeflags1);
@@ -5497,8 +5503,7 @@ static HRESULT WINAPI ITypeInfo_fnGetRefTypeOfImplType(
       */
       if( This->TypeAttr.typekind != TKIND_DISPATCH) return E_INVALIDARG;
 
-      if (This->TypeAttr.wTypeFlags & TYPEFLAG_FDISPATCHABLE &&
-          This->TypeAttr.wTypeFlags & TYPEFLAG_FDUAL )
+      if (This->TypeAttr.wTypeFlags & TYPEFLAG_FDUAL)
       {
         *pRefType = -1;
       }
