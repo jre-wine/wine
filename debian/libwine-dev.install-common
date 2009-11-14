@@ -20,5 +20,5 @@ debian/tmp/usr/share/man/man1/winemaker.1
 debian/tmp/usr/share/man/man1/wmc.1
 debian/tmp/usr/share/man/man1/wrc.1
 debian/tmp/usr/share/man/man3
+debian/tmp/usr/share/wine/function_grep.pl
 debian/tmp/usr/share/doc/wine/README.winedump usr/share/doc/libwine-dev
-debian/tmp/usr/bin/function_grep.pl usr/share/wine
