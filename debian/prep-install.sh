@@ -4,17 +4,18 @@ LIBDIRS="$2"
 
 function replace_paths_full
 {
-  sed "s,/usr/lib,/$1," | \
-  sed "s,/$1/wine,&$SUFFIX," | \
-  sed "s,/usr/share/wine,&$SUFFIX," | \
-  sed "s,usr/share/doc/$package,&$SUFFIX," | \
-  ([ "$ext" != "lintian-overrides" ] && cat || sed "s,^$package,&$SUFFIX," )
+  sed "s,/usr/lib,/$1,g" | \
+  sed "s,/$1/wine,&$SUFFIX,g" | \
+  sed "s,/usr/share/wine,&$SUFFIX,g" | \
+  sed "s,usr/share/doc/$package,&$SUFFIX,g" | \
+  ([ "$ext" != "lintian-overrides" ] && cat || sed "s,^$package,&$SUFFIX,g" ) | \
+  sed "s,@SUFFIX@,$SUFFIX,g"
 }
 
 function replace_paths_partial
 {
-  sed -n "s,/usr/lib,/$1,p" | \
-  sed "s,/$1/wine,&$SUFFIX,"
+  sed -n "s,/usr/lib,/$1,gp" | \
+  sed "s,/$1/wine,&$SUFFIX,g"
 }
 
 function expand_common
