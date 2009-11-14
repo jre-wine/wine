@@ -381,6 +381,12 @@ binary-arch: install-arch-stamp
 	 install -D -m 644 "$$fn" "debian/$$sfn/usr/share/lintian/overrides/$$sfn"; \
 	done
 
+	# install reportbug control files
+	for fn in debian/*.bugcontrol; do \
+	 sfn="`basename "$$fn" .bugcontrol`"; \
+	 install -D -m 644 "$$fn" "debian/$$sfn/usr/share/bug/$$sfn/control"; \
+	done
+
 	dh_desktop -s
 
 	dh_compress -s
