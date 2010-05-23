@@ -1,3 +1,19 @@
+wine (1.0.1-3) unstable; urgency=low
+
+  * Updated winelauncher for new amd64 library paths.
+    Closes: #535097, #569487.
+  * Removed PowerPC and Sparc from supported architectures for Wine's
+    1.0 branch, which apparently only builds on i386 and amd64.
+    (This does not affect the 1.1 branch of Wine.)
+    Closes: #511718, #551371.
+  * Set the WINELOADER environment variable in the wine wrapper script,
+    to ensure the debugger finds the expected binary.
+    Closes: #531709.
+  * Wrapper script output is now directed to stderr.
+    Closes: #551372.
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 23 May 2010 17:10:49 +0200
+
 wine (1.0.1-2) unstable; urgency=low
 
   * Merged upstream's adjustment for FT_MulFix change in freetype 2.3.8
