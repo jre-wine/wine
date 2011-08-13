@@ -54,7 +54,7 @@ Description: Windows API implementation - standard suite
 Package: wine-bin
 Architecture: i386 hurd-i386 kfreebsd-i386 netbsd-i386 amd64 kfreebsd-amd64 powerpc hurd-powerpc kfreebsd-powerpc netbsd-powerpc sparc hurd-sparc kfreebsd-sparc netbsd-sparc
 Multi-Arch: foreign
-Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), x11-utils | xbase-clients (>= 4.0) | xcontrib
+Depends: ${shlibs:Depends}, libwine-bin (= ${binary:Version}), libwine-gecko, x11-utils | xbase-clients (>= 4.0) | xcontrib
 Suggests: libwine-print, libwine-gl
 Conflicts: binfmt-support (<< 1.1.2)
 Replaces: libwine (<< 0.0.20010216), wine-utils (<< 1.1.25-1), wine (<< 0.9.35)
