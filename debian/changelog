@@ -1,3 +1,10 @@
+wine-unstable (1.1.33-2) unstable; urgency=low
+
+  * Updated paths in lintian overrides, apparently they should no
+    longer start with "./"
+
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 14 Aug 2011 20:14:25 +0200
+
 wine-unstable (1.1.33-1) unstable; urgency=low
 
   * New upstream release 1.1.33, released Nov 13, 2009.
