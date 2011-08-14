@@ -586,15 +586,8 @@ static struct symt* codeview_add_type_array(struct codeview_type_parse* ctp,
 {
     struct symt*        elem = codeview_fetch_type(ctp, elemtype, FALSE);
     struct symt*        index = codeview_fetch_type(ctp, indextype, FALSE);
-    DWORD               arr_max = 0;
 
-    if (elem)
-    {
-        DWORD64 elem_size;
-        symt_get_info(elem, TI_GET_LENGTH, &elem_size);
-        if (elem_size) arr_max = arr_len / (DWORD)elem_size;
-    }
-    return &symt_new_array(ctp->module, 0, arr_max, elem, index)->symt;
+    return &symt_new_array(ctp->module, 0, -arr_len, elem, index)->symt;
 }
 
 static int codeview_add_type_enum_field_list(struct module* module,
@@ -1417,7 +1410,7 @@ static void codeview_snarf_linetab2(const struct msc_debug_info* msc_dbg, const 
             {
                 symt_add_func_line(msc_dbg->module, func, source,
                                    lines_blk->l[i].lineno ^ 0x80000000,
-                                   lines_blk->l[i].offset - lines_blk->start);
+                                   lines_blk->l[i].offset);
             }
             break;
         case LT2_FILES_BLOCK: /* skip */

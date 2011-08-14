@@ -432,7 +432,7 @@ static BOOL set_registry_environment(void)
 
     /* first the system environment variables */
     RtlInitUnicodeString( &nameW, env_keyW );
-    if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ) == STATUS_SUCCESS)
+    if (NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
     {
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
@@ -441,9 +441,9 @@ static BOOL set_registry_environment(void)
     }
 
     /* then the ones for the current user */
-    if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
+    if (RtlOpenCurrentUser( KEY_READ, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
     RtlInitUnicodeString( &nameW, envW );
-    if (NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ) == STATUS_SUCCESS)
+    if (NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
     {
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
@@ -542,7 +542,7 @@ static void set_additional_environment(void)
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
     RtlInitUnicodeString( &nameW, profile_keyW );
-    if (!NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr ))
+    if (!NtOpenKey( &hkey, KEY_READ, &attr ))
     {
         profile_dir = get_reg_value( hkey, profiles_valueW );
         all_users_dir = get_reg_value( hkey, all_users_valueW );
@@ -829,14 +829,16 @@ static void init_current_directory( CURDIR *cur_dir )
 
     if (pwd)
     {
-        WCHAR *dirW;
-        int lenW = MultiByteToWideChar( CP_UNIXCP, 0, pwd, -1, NULL, 0 );
-        if ((dirW = HeapAlloc( GetProcessHeap(), 0, lenW * sizeof(WCHAR) )))
+        ANSI_STRING unix_name;
+        UNICODE_STRING nt_name;
+        RtlInitAnsiString( &unix_name, pwd );
+        if (!wine_unix_to_nt_file_name( &unix_name, &nt_name ))
         {
-            MultiByteToWideChar( CP_UNIXCP, 0, pwd, -1, dirW, lenW );
-            RtlInitUnicodeString( &dir_str, dirW );
-            RtlSetCurrentDirectory_U( &dir_str );
-            RtlFreeUnicodeString( &dir_str );
+            UNICODE_STRING dos_path;
+            /* skip the \??\ prefix, nt_name is 0 terminated */
+            RtlInitUnicodeString( &dos_path, nt_name.Buffer + 4 );
+            RtlSetCurrentDirectory_U( &dos_path );
+            RtlFreeUnicodeString( &nt_name );
         }
     }
 
@@ -1159,6 +1161,8 @@ void CDECL __wine_kernel_init(void)
 
     if (!(peb->ImageBaseAddress = LoadLibraryExW( main_exe_name, 0, DONT_RESOLVE_DLL_REFERENCES )))
     {
+        DWORD_PTR args[1];
+        WCHAR msgW[1024];
         char msg[1024];
         DWORD error = GetLastError();
 
@@ -1182,8 +1186,11 @@ void CDECL __wine_kernel_init(void)
                 ExitProcess( ERROR_BAD_EXE_FORMAT );
             }
         }
-        FormatMessageA( FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, 0, msg, sizeof(msg), NULL );
-        MESSAGE( "wine: could not load %s: %s", debugstr_w(main_exe_name), msg );
+        args[0] = (DWORD_PTR)main_exe_name;
+        FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ARGUMENT_ARRAY,
+                        NULL, error, 0, msgW, sizeof(msgW)/sizeof(WCHAR), (__ms_va_list *)args );
+        WideCharToMultiByte( CP_ACP, 0, msgW, -1, msg, sizeof(msg), NULL, NULL );
+        MESSAGE( "wine: %s", msg );
         ExitProcess( error );
     }
 

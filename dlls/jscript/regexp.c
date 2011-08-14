@@ -32,6 +32,7 @@
  */
 
 #include <assert.h>
+#include <math.h>
 
 #include "jscript.h"
 
@@ -82,7 +83,8 @@ typedef struct {
 
     JSRegExp *jsregexp;
     BSTR str;
-    DWORD last_index;
+    INT last_index;
+    VARIANT last_index_var;
 } RegExpInstance;
 
 static const WCHAR sourceW[] = {'s','o','u','r','c','e',0};
@@ -3347,8 +3349,13 @@ static HRESULT do_regexp_match_next(script_ctx_t *ctx, RegExpInstance *regexp, c
         *parens_cnt = regexp->jsregexp->parenCount;
 
         for(i=0; i < regexp->jsregexp->parenCount; i++) {
-            (*parens)[i].str = *cp + result->parens[i].index;
-            (*parens)[i].len = result->parens[i].length;
+            if(result->parens[i].index == -1) {
+                (*parens)[i].str = NULL;
+                (*parens)[i].len = 0;
+            }else {
+                (*parens)[i].str = *cp + result->parens[i].index;
+                (*parens)[i].len = result->parens[i].length;
+            }
         }
     }
 
@@ -3430,6 +3437,13 @@ HRESULT regexp_match(script_ctx_t *ctx, DispatchEx *dispex, const WCHAR *str, DW
     return S_OK;
 }
 
+static void set_last_index(RegExpInstance *This, DWORD last_index)
+{
+    This->last_index = last_index;
+    VariantClear(&This->last_index_var);
+    num_set_val(&This->last_index_var, last_index);
+}
+
 static HRESULT RegExp_source(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
@@ -3474,6 +3488,27 @@ static HRESULT RegExp_multiline(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     return E_NOTIMPL;
 }
 
+static INT index_from_var(script_ctx_t *ctx, VARIANT *v)
+{
+    jsexcept_t ei;
+    VARIANT num;
+    HRESULT hres;
+
+    memset(&ei, 0, sizeof(ei));
+    hres = to_number(ctx, v, &ei, &num);
+    if(FAILED(hres)) { /* FIXME: Move ignoring exceptions to to_promitive */
+        VariantClear(&ei.var);
+        return 0;
+    }
+
+    if(V_VT(&num) == VT_R8) {
+        DOUBLE d = floor(V_R8(&num));
+        return (DOUBLE)(INT)d == d ? d : 0;
+    }
+
+    return V_I4(&num);
+}
+
 static HRESULT RegExp_lastIndex(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
@@ -3482,8 +3517,21 @@ static HRESULT RegExp_lastIndex(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     switch(flags) {
     case DISPATCH_PROPERTYGET: {
         RegExpInstance *regexp = regexp_from_vdisp(jsthis);
-        V_VT(retv) = VT_I4;
-        V_I4(retv) = regexp->last_index;
+
+        V_VT(retv) = VT_EMPTY;
+        return VariantCopy(retv, &regexp->last_index_var);
+    }
+    case DISPATCH_PROPERTYPUT: {
+        RegExpInstance *regexp = regexp_from_vdisp(jsthis);
+        VARIANT *arg;
+        HRESULT hres;
+
+        arg = get_arg(dp,0);
+        hres = VariantCopy(&regexp->last_index_var, arg);
+        if(FAILED(hres))
+            return hres;
+
+        regexp->last_index = index_from_var(ctx, arg);
         break;
     }
     default:
@@ -3589,6 +3637,13 @@ static HRESULT run_exec(script_ctx_t *ctx, vdisp_t *jsthis, VARIANT *arg, jsexce
             return E_OUTOFMEMORY;
     }
 
+    if(regexp->last_index < 0) {
+        SysFreeString(string);
+        set_last_index(regexp, 0);
+        *ret = VARIANT_FALSE;
+        return S_OK;
+    }
+
     length = SysStringLen(string);
     if(regexp->jsregexp->flags & JSREG_GLOB)
         last_index = regexp->last_index;
@@ -3602,10 +3657,10 @@ static HRESULT run_exec(script_ctx_t *ctx, vdisp_t *jsthis, VARIANT *arg, jsexce
     }
 
     if(hres == S_OK) {
-        regexp->last_index = cp-string;
+        set_last_index(regexp, cp-string);
         *ret = VARIANT_TRUE;
     }else {
-        regexp->last_index = 0;
+        set_last_index(regexp, 0);
         *ret = VARIANT_FALSE;
     }
 
@@ -3690,6 +3745,7 @@ static void RegExp_destructor(DispatchEx *dispex)
 
     if(This->jsregexp)
         js_DestroyRegExp(This->jsregexp);
+    VariantClear(&This->last_index_var);
     SysFreeString(This->str);
     heap_free(This);
 }
@@ -3763,6 +3819,9 @@ HRESULT create_regexp(script_ctx_t *ctx, const WCHAR *exp, int len, DWORD flags,
         jsdisp_release(&regexp->dispex);
         return E_FAIL;
     }
+
+    V_VT(&regexp->last_index_var) = VT_I4;
+    V_I4(&regexp->last_index_var) = 0;
 
     *ret = &regexp->dispex;
     return S_OK;

@@ -99,7 +99,7 @@ static inline LPWSTR str_dup_upper( LPCWSTR str )
 /**************************************************************************
  * 				MCI_GetDriver			[internal]
  */
-static LPWINE_MCIDRIVER	MCI_GetDriver(UINT16 wDevID)
+static LPWINE_MCIDRIVER	MCI_GetDriver(UINT wDevID)
 {
     LPWINE_MCIDRIVER	wmd = 0;
 
@@ -151,8 +151,6 @@ static UINT MCI_GetDriverFromString(LPCWSTR lpstrName)
  */
 const char* MCI_MessageToString(UINT wMsg)
 {
-    static char buffer[100];
-
 #define CASE(s) case (s): return #s
 
     switch (wMsg) {
@@ -216,8 +214,7 @@ const char* MCI_MessageToString(UINT wMsg)
 	CASE(MCI_RESTORE);
 #undef CASE
     default:
-	sprintf(buffer, "MCI_<<%04X>>", wMsg);
-	return buffer;
+        return wine_dbg_sprintf("MCI_<<%04X>>", wMsg);
     }
 }
 
@@ -1232,7 +1229,6 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
     DWORD		data[MCI_DATA_SIZE];
     DWORD		retType;
     LPCWSTR		lpCmd = 0;
-    LPWSTR		devAlias = NULL;
     static const WCHAR  wszNew[] = {'n','e','w',0};
     static const WCHAR  wszSAliasS[] = {' ','a','l','i','a','s',' ',0};
     static const WCHAR wszTypeS[] = {'t','y','p','e',' ',0};
@@ -1311,19 +1307,7 @@ DWORD WINAPI mciSendStringW(LPCWSTR lpstrCommand, LPWSTR lpstrRet,
 	    dwFlags |= MCI_OPEN_ELEMENT;
 	    data[3] = (DWORD)dev;
 	}
-	if ((devAlias = strstrW(args, wszSAliasS))) {
-            WCHAR*      tmp2;
-	    devAlias += 7;
-	    if (!(tmp = strchrW(devAlias,' '))) tmp = devAlias + strlenW(devAlias);
-	    if (tmp) *tmp = '\0';
-            tmp2 = HeapAlloc(GetProcessHeap(), 0, (tmp - devAlias + 1) * sizeof(WCHAR) );
-            memcpy( tmp2, devAlias, (tmp - devAlias) * sizeof(WCHAR) );
-            tmp2[tmp - devAlias] = 0;
-            data[4] = (DWORD)tmp2;
-	    /* should be done in regular options parsing */
-	    /* dwFlags |= MCI_OPEN_ALIAS; */
-	} else if (dev == 0) {
-	    /* "open new" requires alias */
+	if (!strstrW(args, wszSAliasS) && !dev) {
 	    dwRet = MCIERR_NEW_REQUIRES_ALIAS;
 	    goto errCleanUp;
 	}
@@ -1669,7 +1653,7 @@ errCleanUp:
 /**************************************************************************
  * 			MCI_Close				[internal]
  */
-static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms)
+static	DWORD MCI_Close(UINT wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms)
 {
     DWORD		dwRet;
     LPWINE_MCIDRIVER	wmd;
@@ -1677,7 +1661,7 @@ static	DWORD MCI_Close(UINT16 wDevID, DWORD dwParam, LPMCI_GENERIC_PARMS lpParms
     TRACE("(%04x, %08X, %p)\n", wDevID, dwParam, lpParms);
 
     /* Every device must handle MCI_NOTIFY on its own. */
-    if (wDevID == MCI_ALL_DEVICE_ID) {
+    if ((UINT16)wDevID == (UINT16)MCI_ALL_DEVICE_ID) {
 	while (MciDrivers) {
             /* Retrieve the device ID under lock, but send the message without,
              * the driver might be calling some winmm functions from another
@@ -1894,7 +1878,7 @@ DWORD	MCI_SendCommand(UINT wDevID, UINT16 wMsg, DWORD_PTR dwParam1, DWORD_PTR dw
         dwRet = MCI_Sound(wDevID, dwParam1, (LPMCI_SOUND_PARMSW)dwParam2);
 	break;
     default:
-	if (wDevID == MCI_ALL_DEVICE_ID) {
+      if ((UINT16)wDevID == (UINT16)MCI_ALL_DEVICE_ID) {
 	    FIXME("unhandled MCI_ALL_DEVICE_ID\n");
 	    dwRet = MCIERR_CANNOT_USE_ALL;
 	} else {

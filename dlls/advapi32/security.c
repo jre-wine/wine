@@ -1055,7 +1055,9 @@ IsValidSid( PSID pSid )
 BOOL WINAPI
 EqualSid( PSID pSid1, PSID pSid2 )
 {
-	return RtlEqualSid( pSid1, pSid2 );
+	BOOL ret = RtlEqualSid( pSid1, pSid2 );
+	SetLastError(ERROR_SUCCESS);
+	return ret;
 }
 
 /******************************************************************************
@@ -1098,7 +1100,8 @@ GetEffectiveRightsFromAclA( PACL pacl, PTRUSTEEA pTrustee, PACCESS_MASK pAccessR
 {
     FIXME("%p %p %p - stub\n", pacl, pTrustee, pAccessRights);
 
-    return 1;
+    *pAccessRights = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
+    return 0;
 }
 
 DWORD WINAPI

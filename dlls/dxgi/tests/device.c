@@ -98,6 +98,36 @@ static void test_device_interfaces(IDXGIDevice *device)
     ok(SUCCEEDED(hr), "IDXGIDevice does not implement ID3D10Device\n");
 }
 
+static void test_adapter_desc(IDXGIDevice *device)
+{
+    DXGI_ADAPTER_DESC desc;
+    IDXGIAdapter *adapter;
+    HRESULT hr;
+
+    hr = IDXGIDevice_GetAdapter(device, &adapter);
+    ok(SUCCEEDED(hr), "GetAdapter failed, hr %#x.\n", hr);
+
+    hr = IDXGIAdapter_GetDesc(adapter, NULL);
+    ok(hr == E_INVALIDARG, "GetDesc returned %#x, expected %#x.\n",
+            hr, E_INVALIDARG);
+
+    hr = IDXGIAdapter_GetDesc(adapter, &desc);
+    ok(SUCCEEDED(hr), "GetDesc failed, hr %#x.\n", hr);
+
+    trace("%s.\n", wine_dbgstr_w(desc.Description));
+    trace("%04x: %04x:%04x (rev %02x).\n",
+            desc.SubSysId, desc.VendorId, desc.DeviceId, desc.Revision);
+    trace("Dedicated video memory: %lu (%lu MB).\n",
+            desc.DedicatedVideoMemory, desc.DedicatedVideoMemory / (1024 * 1024));
+    trace("Dedicated system memory: %lu (%lu MB).\n",
+            desc.DedicatedSystemMemory, desc.DedicatedSystemMemory / (1024 * 1024));
+    trace("Shared system memory: %lu (%lu MB).\n",
+            desc.SharedSystemMemory, desc.SharedSystemMemory / (1024 * 1024));
+    trace("LUID: %08x:%08x.\n", desc.AdapterLuid.HighPart, desc.AdapterLuid.LowPart);
+
+    IDXGIAdapter_Release(adapter);
+}
+
 static void test_create_surface(IDXGIDevice *device)
 {
     ID3D10Texture2D *texture;
@@ -121,6 +151,49 @@ static void test_create_surface(IDXGIDevice *device)
     IDXGISurface_Release(surface);
 }
 
+static void test_parents(IDXGIDevice *device)
+{
+    IDXGIFactory *factory;
+    IDXGIAdapter *adapter;
+    IDXGIOutput *output;
+    IUnknown *parent;
+    HRESULT hr;
+
+    hr = IDXGIDevice_GetAdapter(device, &adapter);
+    ok(SUCCEEDED(hr), "GetAdapter failed, hr %#x.\n", hr);
+
+    hr = IDXGIAdapter_EnumOutputs(adapter, 0, &output);
+    if (hr == DXGI_ERROR_NOT_FOUND)
+    {
+        skip("Adapter has not outputs, skipping output tests.\n");
+    }
+    else
+    {
+        ok(SUCCEEDED(hr), "EnumOutputs failed, hr %#x.\n", hr);
+
+        hr = IDXGIOutput_GetParent(output, &IID_IDXGIAdapter, (void **)&parent);
+        IDXGIOutput_Release(output);
+        ok(SUCCEEDED(hr), "GetParent failed, hr %#x.\n", hr);
+        ok(parent == (IUnknown *)adapter, "Got parent %p, expected %p.\n", parent, adapter);
+        IUnknown_Release(parent);
+    }
+
+    hr = IDXGIAdapter_GetParent(adapter, &IID_IDXGIFactory, (void **)&factory);
+    ok(SUCCEEDED(hr), "GetParent failed, hr %#x.\n", hr);
+
+    hr = IDXGIFactory_GetParent(factory, &IID_IUnknown, (void **)&parent);
+    ok(hr == E_NOINTERFACE, "GetParent returned %#x, expected %#x.\n", hr, E_NOINTERFACE);
+    ok(parent == NULL, "Got parent %p, expected %p.\n", parent, NULL);
+    IDXGIFactory_Release(factory);
+
+    hr = IDXGIDevice_GetParent(device, &IID_IDXGIAdapter, (void **)&parent);
+    ok(SUCCEEDED(hr), "GetParent failed, hr %#x.\n", hr);
+    ok(parent == (IUnknown *)adapter, "Got parent %p, expected %p.\n", parent, adapter);
+    IUnknown_Release(parent);
+
+    IDXGIAdapter_Release(adapter);
+}
+
 START_TEST(device)
 {
     HMODULE d3d10core = LoadLibraryA("d3d10core.dll");
@@ -141,8 +214,10 @@ START_TEST(device)
         return;
     }
 
+    test_adapter_desc(device);
     test_device_interfaces(device);
     test_create_surface(device);
+    test_parents(device);
 
     refcount = IDXGIDevice_Release(device);
     ok(!refcount, "Device has %u references left\n", refcount);

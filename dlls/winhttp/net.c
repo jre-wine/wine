@@ -91,6 +91,7 @@ static void *libcrypto_handle;
 
 static SSL_METHOD *method;
 static SSL_CTX *ctx;
+static int hostname_idx;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 
@@ -106,9 +107,15 @@ MAKE_FUNCPTR( SSL_connect );
 MAKE_FUNCPTR( SSL_shutdown );
 MAKE_FUNCPTR( SSL_write );
 MAKE_FUNCPTR( SSL_read );
+MAKE_FUNCPTR( SSL_get_ex_new_index );
+MAKE_FUNCPTR( SSL_get_ex_data );
+MAKE_FUNCPTR( SSL_set_ex_data );
+MAKE_FUNCPTR( SSL_get_ex_data_X509_STORE_CTX_idx );
 MAKE_FUNCPTR( SSL_get_verify_result );
 MAKE_FUNCPTR( SSL_get_peer_certificate );
 MAKE_FUNCPTR( SSL_CTX_set_default_verify_paths );
+MAKE_FUNCPTR( SSL_CTX_set_verify );
+MAKE_FUNCPTR( X509_STORE_CTX_get_ex_data );
 
 MAKE_FUNCPTR( BIO_new_fp );
 MAKE_FUNCPTR( CRYPTO_num_locks );
@@ -204,6 +211,160 @@ static int sock_get_error( int err )
     return err;
 }
 
+#ifdef SONAME_LIBSSL
+static PCCERT_CONTEXT X509_to_cert_context(X509 *cert)
+{
+    unsigned char *buffer, *p;
+    int len;
+    BOOL malloc = FALSE;
+    PCCERT_CONTEXT ret;
+
+    p = NULL;
+    if ((len = pi2d_X509( cert, &p )) < 0) return NULL;
+    /*
+     * SSL 0.9.7 and above malloc the buffer if it is null.
+     * however earlier version do not and so we would need to alloc the buffer.
+     *
+     * see the i2d_X509 man page for more details.
+     */
+    if (!p)
+    {
+        if (!(buffer = heap_alloc( len ))) return NULL;
+        p = buffer;
+        len = pi2d_X509( cert, &p );
+    }
+    else
+    {
+        buffer = p;
+        malloc = TRUE;
+    }
+
+    ret = CertCreateCertificateContext( X509_ASN_ENCODING, buffer, len );
+
+    if (malloc) free( buffer );
+    else heap_free( buffer );
+
+    return ret;
+}
+
+static BOOL netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
+                                 WCHAR *server )
+{
+    BOOL ret;
+    CERT_CHAIN_PARA chainPara = { sizeof(chainPara), { 0 } };
+    PCCERT_CHAIN_CONTEXT chain;
+    char oid_server_auth[] = szOID_PKIX_KP_SERVER_AUTH;
+    char *server_auth[] = { oid_server_auth };
+    DWORD err;
+
+    TRACE("verifying %s\n", debugstr_w( server ));
+    chainPara.RequestedUsage.Usage.cUsageIdentifier = 1;
+    chainPara.RequestedUsage.Usage.rgpszUsageIdentifier = server_auth;
+    if ((ret = CertGetCertificateChain( NULL, cert, NULL, store, &chainPara, 0,
+                                        NULL, &chain )))
+    {
+        if (chain->TrustStatus.dwErrorStatus)
+        {
+            if (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_NOT_TIME_VALID)
+                err = ERROR_WINHTTP_SECURE_CERT_DATE_INVALID;
+            else if (chain->TrustStatus.dwErrorStatus &
+                     CERT_TRUST_IS_UNTRUSTED_ROOT)
+                err = ERROR_WINHTTP_SECURE_INVALID_CA;
+            else if ((chain->TrustStatus.dwErrorStatus &
+                      CERT_TRUST_IS_OFFLINE_REVOCATION) ||
+                     (chain->TrustStatus.dwErrorStatus &
+                      CERT_TRUST_REVOCATION_STATUS_UNKNOWN))
+                err = ERROR_WINHTTP_SECURE_CERT_REV_FAILED;
+            else if (chain->TrustStatus.dwErrorStatus & CERT_TRUST_IS_REVOKED)
+                err = ERROR_WINHTTP_SECURE_CERT_REVOKED;
+            else if (chain->TrustStatus.dwErrorStatus &
+                CERT_TRUST_IS_NOT_VALID_FOR_USAGE)
+                err = ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE;
+            else
+                err = ERROR_WINHTTP_SECURE_INVALID_CERT;
+            set_last_error( err );
+            ret = FALSE;
+        }
+        else
+        {
+            CERT_CHAIN_POLICY_PARA policyPara;
+            SSL_EXTRA_CERT_CHAIN_POLICY_PARA sslExtraPolicyPara;
+            CERT_CHAIN_POLICY_STATUS policyStatus;
+
+            sslExtraPolicyPara.cbSize = sizeof(sslExtraPolicyPara);
+            sslExtraPolicyPara.dwAuthType = AUTHTYPE_SERVER;
+            sslExtraPolicyPara.pwszServerName = server;
+            policyPara.cbSize = sizeof(policyPara);
+            policyPara.dwFlags = 0;
+            policyPara.pvExtraPolicyPara = &sslExtraPolicyPara;
+            ret = CertVerifyCertificateChainPolicy( CERT_CHAIN_POLICY_SSL,
+                                                    chain, &policyPara,
+                                                    &policyStatus );
+            /* Any error in the policy status indicates that the
+             * policy couldn't be verified.
+             */
+            if (ret && policyStatus.dwError)
+            {
+                if (policyStatus.dwError == CERT_E_CN_NO_MATCH)
+                    err = ERROR_WINHTTP_SECURE_CERT_CN_INVALID;
+                else
+                    err = ERROR_WINHTTP_SECURE_INVALID_CERT;
+                set_last_error( err );
+                ret = FALSE;
+            }
+        }
+        CertFreeCertificateChain( chain );
+    }
+    TRACE("returning %d\n", ret);
+    return ret;
+}
+
+static int netconn_secure_verify( int preverify_ok, X509_STORE_CTX *ctx )
+{
+    SSL *ssl;
+    WCHAR *server;
+    BOOL ret = FALSE;
+
+    ssl = pX509_STORE_CTX_get_ex_data( ctx, pSSL_get_ex_data_X509_STORE_CTX_idx() );
+    server = pSSL_get_ex_data( ssl, hostname_idx );
+    if (preverify_ok)
+    {
+        HCERTSTORE store = CertOpenStore( CERT_STORE_PROV_MEMORY, 0, 0,
+         CERT_STORE_CREATE_NEW_FLAG, NULL );
+
+        if (store)
+        {
+            X509 *cert;
+            int i;
+            PCCERT_CONTEXT endCert = NULL;
+
+            ret = TRUE;
+            for (i = 0; ret && i < ctx->chain->num; i++)
+            {
+                PCCERT_CONTEXT context;
+
+                cert = (X509 *)ctx->chain->data[i];
+                if ((context = X509_to_cert_context( cert )))
+                {
+                    if (i == 0)
+                        ret = CertAddCertificateContextToStore( store, context,
+                            CERT_STORE_ADD_ALWAYS, &endCert );
+                    else
+                        ret = CertAddCertificateContextToStore( store, context,
+                            CERT_STORE_ADD_ALWAYS, NULL );
+                    CertFreeCertificateContext( context );
+                }
+            }
+            if (ret)
+                ret = netconn_verify_cert( endCert, store, server );
+            CertFreeCertificateContext( endCert );
+            CertCloseStore( store, 0 );
+        }
+    }
+    return ret;
+}
+#endif
+
 BOOL netconn_init( netconn_t *conn, BOOL secure )
 {
 #if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
@@ -254,9 +415,15 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     LOAD_FUNCPTR( SSL_shutdown );
     LOAD_FUNCPTR( SSL_write );
     LOAD_FUNCPTR( SSL_read );
+    LOAD_FUNCPTR( SSL_get_ex_new_index );
+    LOAD_FUNCPTR( SSL_get_ex_data );
+    LOAD_FUNCPTR( SSL_set_ex_data );
+    LOAD_FUNCPTR( SSL_get_ex_data_X509_STORE_CTX_idx );
     LOAD_FUNCPTR( SSL_get_verify_result );
     LOAD_FUNCPTR( SSL_get_peer_certificate );
     LOAD_FUNCPTR( SSL_CTX_set_default_verify_paths );
+    LOAD_FUNCPTR( SSL_CTX_set_verify );
+    LOAD_FUNCPTR( X509_STORE_CTX_get_ex_data );
 #undef LOAD_FUNCPTR
 
 #define LOAD_FUNCPTR(x) \
@@ -289,6 +456,15 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
         LeaveCriticalSection( &init_ssl_cs );
         return FALSE;
     }
+    hostname_idx = pSSL_get_ex_new_index( 0, (void *)"hostname index", NULL, NULL, NULL );
+    if (hostname_idx == -1)
+    {
+        ERR("SSL_get_ex_new_index failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
+        set_last_error( ERROR_OUTOFMEMORY );
+        LeaveCriticalSection( &init_ssl_cs );
+        return FALSE;
+    }
+    pSSL_CTX_set_verify( ctx, SSL_VERIFY_PEER, netconn_secure_verify );
 
     pCRYPTO_set_id_callback(ssl_thread_id);
     num_ssl_locks = pCRYPTO_num_locks();
@@ -418,16 +594,21 @@ BOOL netconn_connect( netconn_t *conn, const struct sockaddr *sockaddr, unsigned
     return ret;
 }
 
-BOOL netconn_secure_connect( netconn_t *conn )
+BOOL netconn_secure_connect( netconn_t *conn, WCHAR *hostname )
 {
 #ifdef SONAME_LIBSSL
-    X509 *cert;
     long res;
 
     if (!(conn->ssl_conn = pSSL_new( ctx )))
     {
         ERR("SSL_new failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
         set_last_error( ERROR_OUTOFMEMORY );
+        goto fail;
+    }
+    if (!pSSL_set_ex_data( conn->ssl_conn, hostname_idx, hostname ))
+    {
+        ERR("SSL_set_ex_data failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
+        set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
         goto fail;
     }
     if (!pSSL_set_fd( conn->ssl_conn, conn->socket ))
@@ -439,12 +620,6 @@ BOOL netconn_secure_connect( netconn_t *conn )
     if (pSSL_connect( conn->ssl_conn ) <= 0)
     {
         ERR("SSL_connect failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
-        set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
-        goto fail;
-    }
-    if (!(cert = pSSL_get_peer_certificate( conn->ssl_conn )))
-    {
-        ERR("No certificate for server: %s\n", pERR_error_string( pERR_get_error(), 0 ));
         set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
         goto fail;
     }
@@ -760,39 +935,12 @@ const void *netconn_get_certificate( netconn_t *conn )
 {
 #ifdef SONAME_LIBSSL
     X509 *cert;
-    unsigned char *buffer, *p;
-    int len;
-    BOOL malloc = FALSE;
     const CERT_CONTEXT *ret;
 
     if (!conn->secure) return NULL;
 
     if (!(cert = pSSL_get_peer_certificate( conn->ssl_conn ))) return NULL;
-    p = NULL;
-    if ((len = pi2d_X509( cert, &p )) < 0) return NULL;
-    /*
-     * SSL 0.9.7 and above malloc the buffer if it is null.
-     * however earlier version do not and so we would need to alloc the buffer.
-     *
-     * see the i2d_X509 man page for more details.
-     */
-    if (!p)
-    {
-        if (!(buffer = heap_alloc( len ))) return NULL;
-        p = buffer;
-        len = pi2d_X509( cert, &p );
-    }
-    else
-    {
-        buffer = p;
-        malloc = TRUE;
-    }
-
-    ret = CertCreateCertificateContext( X509_ASN_ENCODING, buffer, len );
-
-    if (malloc) free( buffer );
-    else heap_free( buffer );
-
+    ret = X509_to_cert_context( cert );
     return ret;
 #else
     return NULL;

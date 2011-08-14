@@ -952,6 +952,117 @@ static void test_GetTempPath(void)
     SetEnvironmentVariableA("TMP", save_TMP);
 }
 
+static void test_GetLongPathNameA(void)
+{
+    DWORD length, explength, hostsize;
+    char tempfile[MAX_PATH];
+    char longpath[MAX_PATH];
+    char unc_prefix[MAX_PATH];
+    char unc_short[MAX_PATH], unc_long[MAX_PATH];
+    char temppath[MAX_PATH], temppath2[MAX_PATH];
+    HANDLE file;
+
+    if (!pGetLongPathNameA)
+        return;
+
+    GetTempPathA(MAX_PATH, tempfile);
+    lstrcatA(tempfile, "longfilename.longext");
+
+    file = CreateFileA(tempfile, GENERIC_READ|GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    CloseHandle(file);
+
+    /* Test a normal path with a small buffer size */
+    memset(temppath, 0, MAX_PATH);
+    length = pGetLongPathNameA(tempfile, temppath, 4);
+    /* We have a failure so length should be the minumum plus the terminating '0'  */
+    ok(length >= lstrlen(tempfile) + 1, "Wrong length\n");
+    ok(temppath[0] == 0, "Buffer should not have been touched\n");
+
+    /* Some UNC syntax tests */
+
+    memset(temppath, 0, MAX_PATH);
+    memset(temppath2, 0, MAX_PATH);
+    lstrcpyA(temppath2, "\\\\?\\");
+    lstrcatA(temppath2, tempfile);
+    explength = length + 4;
+
+    SetLastError(0xdeadbeef);
+    length = pGetLongPathNameA(temppath2, NULL, 0);
+    if (length == 0 && GetLastError() == ERROR_BAD_NET_NAME)
+    {
+        win_skip("UNC syntax tests don't work on Win98/WinMe\n");
+        DeleteFileA(tempfile);
+        return;
+    }
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+
+    length = pGetLongPathNameA(temppath2, NULL, MAX_PATH);
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+
+    length = pGetLongPathNameA(temppath2, temppath, 4);
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+    ok(temppath[0] == 0, "Buffer should not have been touched\n");
+
+    /* Now an UNC path with the computername */
+    lstrcpyA(unc_prefix, "\\\\");
+    hostsize = sizeof(unc_prefix) - 2;
+    GetComputerName(unc_prefix + 2, &hostsize);
+    lstrcatA(unc_prefix, "\\");
+
+    /* Create a short syntax for the whole unc path */
+    memset(unc_short, 0, MAX_PATH);
+    GetShortPathNameA(tempfile, temppath, MAX_PATH);
+    lstrcpyA(unc_short, unc_prefix);
+    unc_short[lstrlenA(unc_short)] = temppath[0];
+    lstrcatA(unc_short, "$\\");
+    lstrcatA(unc_short, strchr(temppath, '\\') + 1);
+
+    /* Create a long syntax for reference */
+    memset(longpath, 0, MAX_PATH);
+    pGetLongPathNameA(tempfile, temppath, MAX_PATH);
+    lstrcpyA(longpath, unc_prefix);
+    longpath[lstrlenA(longpath)] = temppath[0];
+    lstrcatA(longpath, "$\\");
+    lstrcatA(longpath, strchr(temppath, '\\') + 1);
+
+    /* NULL test */
+    SetLastError(0xdeadbeef);
+    length = pGetLongPathNameA(unc_short, NULL, 0);
+    if (length == 0 && GetLastError() == ERROR_BAD_NETPATH)
+    {
+        /* Seen on Window XP Home */
+        win_skip("UNC with computername is not supported\n");
+        DeleteFileA(tempfile);
+        return;
+    }
+    explength = lstrlenA(longpath) + 1;
+    todo_wine
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+
+    length = pGetLongPathNameA(unc_short, NULL, MAX_PATH);
+    todo_wine
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+
+    memset(unc_long, 0, MAX_PATH);
+    length = pGetLongPathNameA(unc_short, unc_long, lstrlenA(unc_short));
+    /* length will include terminating '0' on failure */
+    todo_wine
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+    ok(unc_long[0] == 0, "Buffer should not have been touched\n");
+
+    memset(unc_long, 0, MAX_PATH);
+    length = pGetLongPathNameA(unc_short, unc_long, length);
+    /* length doesn't include terminating '0' on success */
+    explength--;
+    todo_wine
+    {
+    ok(length == explength, "Wrong length %d, expected %d\n", length, explength);
+    ok(!lstrcmpiA(unc_long, longpath), "Expected (%s), got (%s)\n", longpath, unc_long);
+    }
+
+    DeleteFileA(tempfile);
+}
+
 static void test_GetLongPathNameW(void)
 {
     DWORD length; 
@@ -1273,11 +1384,18 @@ START_TEST(path)
         (void*)GetProcAddress( GetModuleHandleA("kernel32.dll"),
                                "NeedCurrentDirectoryForExePathW" );
 
+    /* Report only once */
+    if (!pGetLongPathNameA)
+        win_skip("GetLongPathNameA is not available\n");
+    if (!pGetLongPathNameW)
+        win_skip("GetLongPathNameW is not available\n");
+
     test_InitPathA(curdir, &curDrive, &otherDrive);
     test_CurrentDirectoryA(origdir,curdir);
     test_PathNameA(curdir, curDrive, otherDrive);
     test_CleanupPathA(origdir,curdir);
     test_GetTempPath();
+    test_GetLongPathNameA();
     test_GetLongPathNameW();
     test_GetShortPathNameW();
     test_GetSystemDirectory();

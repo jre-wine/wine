@@ -109,11 +109,8 @@ static HRESULT IDirectSoundImpl_Create(LPDIRECTSOUND8 * ppds);
 static ULONG WINAPI IDirectSound_IUnknown_AddRef(LPUNKNOWN iface);
 static ULONG WINAPI IDirectSound_IDirectSound_AddRef(LPDIRECTSOUND iface);
 
-static HRESULT DirectSoundDevice_VerifyCertification(DirectSoundDevice * device, LPDWORD pdwCertified);
-
 const char * dumpCooperativeLevel(DWORD level)
 {
-    static char unknown[32];
 #define LE(x) case x: return #x
     switch (level) {
         LE(DSSCL_NORMAL);
@@ -122,8 +119,7 @@ const char * dumpCooperativeLevel(DWORD level)
         LE(DSSCL_WRITEPRIMARY);
     }
 #undef LE
-    sprintf(unknown, "Unknown(%08x)", level);
-    return unknown;
+    return wine_dbg_sprintf("Unknown(%08x)", level);
 }
 
 static void _dump_DSCAPS(DWORD xmask) {
@@ -1775,7 +1771,7 @@ HRESULT DirectSoundDevice_SetSpeakerConfig(
     return DS_OK;
 }
 
-static HRESULT DirectSoundDevice_VerifyCertification(
+HRESULT DirectSoundDevice_VerifyCertification(
     DirectSoundDevice * device,
     LPDWORD pdwCertified)
 {

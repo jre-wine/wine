@@ -175,21 +175,6 @@ static BOOL is_native_dll( HMODULE module )
     return TRUE;
 }
 
-/* check if Gecko is present, trying to trigger the install if not */
-static BOOL gecko_check(void)
-{
-    IHTMLDocument2 *doc;
-    IHTMLElement *body;
-    BOOL ret = FALSE;
-
-    CoInitialize( NULL );
-    if (FAILED( CoCreateInstance( &CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER,
-                                  &IID_IHTMLDocument2, (void **)&doc ))) return FALSE;
-    if ((ret = SUCCEEDED( IHTMLDocument2_get_body( doc, &body )))) IHTMLElement_Release( body );
-    IHTMLDocument_Release( doc );
-    return ret;
-}
-
 static void print_version (void)
 {
 #ifdef __i386__
@@ -209,6 +194,7 @@ static void print_version (void)
     const char *(CDECL *wine_get_build_id)(void);
     void (CDECL *wine_get_host_version)( const char **sysname, const char **release );
     BOOL (WINAPI *pIsWow64Process)(HANDLE hProcess, PBOOL Wow64Process);
+    BOOL (WINAPI *pGetProductInfo)(DWORD, DWORD, DWORD, DWORD, DWORD *);
 
     ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
     if (!(ext = GetVersionEx ((OSVERSIONINFO *) &ver)))
@@ -247,6 +233,15 @@ static void print_version (void)
              "    wSuiteMask=%d\n    wProductType=%d\n    wReserved=%d\n",
              ver.wServicePackMajor, ver.wServicePackMinor, ver.wSuiteMask,
              ver.wProductType, ver.wReserved);
+
+    pGetProductInfo = (void *)GetProcAddress(GetModuleHandleA("kernel32.dll"),"GetProductInfo");
+    if (pGetProductInfo && !running_under_wine())
+    {
+        DWORD prodtype = 0;
+
+        pGetProductInfo(ver.dwMajorVersion, ver.dwMinorVersion, ver.wServicePackMajor, ver.wServicePackMinor, &prodtype);
+        xprintf("    dwProductInfo=%u\n", prodtype);
+    }
 }
 
 static inline int is_dot_dir(const char* x)
@@ -681,12 +676,6 @@ extract_test_proc (HMODULE hModule, LPCTSTR lpszType,
         FreeLibrary(dll);
         xprintf ("    %s=load error Configured as native\n", dllname);
         nr_native_dlls++;
-        return TRUE;
-    }
-    if (!strcmp( dllname, "mshtml" ) && running_under_wine() && !gecko_check())
-    {
-        FreeLibrary(dll);
-        xprintf ("    %s=load error Gecko is not installed\n", dllname);
         return TRUE;
     }
     FreeLibrary(dll);

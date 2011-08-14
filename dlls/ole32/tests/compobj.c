@@ -261,6 +261,17 @@ static void test_CoCreateInstance(void)
     ok(pUnk == NULL, "CoCreateInstance should have changed the passed in pointer to NULL, instead of %p\n", pUnk);
 
     OleInitialize(NULL);
+
+    /* test errors returned for non-registered clsids */
+    hr = CoCreateInstance(&CLSID_non_existent, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
+    ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance for non-registered inproc server should have returned REGDB_E_CLASSNOTREG instead of 0x%08x\n", hr);
+    hr = CoCreateInstance(&CLSID_non_existent, NULL, CLSCTX_INPROC_HANDLER, &IID_IUnknown, (void **)&pUnk);
+    ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance for non-registered inproc handler should have returned REGDB_E_CLASSNOTREG instead of 0x%08x\n", hr);
+    hr = CoCreateInstance(&CLSID_non_existent, NULL, CLSCTX_LOCAL_SERVER, &IID_IUnknown, (void **)&pUnk);
+    ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance for non-registered local server should have returned REGDB_E_CLASSNOTREG instead of 0x%08x\n", hr);
+    hr = CoCreateInstance(&CLSID_non_existent, NULL, CLSCTX_REMOTE_SERVER, &IID_IUnknown, (void **)&pUnk);
+    ok(hr == REGDB_E_CLASSNOTREG, "CoCreateInstance for non-registered remote server should have returned REGDB_E_CLASSNOTREG instead of 0x%08x\n", hr);
+
     hr = CoCreateInstance(rclsid, NULL, CLSCTX_INPROC_SERVER, &IID_IUnknown, (void **)&pUnk);
     if(hr == REGDB_E_CLASSNOTREG)
     {
@@ -833,6 +844,14 @@ static void test_CoRegisterClassObject(void)
     /* CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER */
     hr = CoRegisterClassObject(&CLSID_WineOOPTest, (IUnknown *)&Test_ClassFactory,
                                CLSCTX_INPROC_SERVER|CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
+    ok_ole_success(hr, "CoRegisterClassObject");
+    hr = CoRevokeClassObject(cookie);
+    ok_ole_success(hr, "CoRevokeClassObject");
+
+    /* test whether an object that doesn't support IClassFactory can be
+     * registered for CLSCTX_LOCAL_SERVER */
+    hr = CoRegisterClassObject(&CLSID_WineOOPTest, &Test_Unknown,
+                               CLSCTX_LOCAL_SERVER, REGCLS_SINGLEUSE, &cookie);
     ok_ole_success(hr, "CoRegisterClassObject");
     hr = CoRevokeClassObject(cookie);
     ok_ole_success(hr, "CoRevokeClassObject");
@@ -1415,7 +1434,7 @@ static void test_CoInitializeEx(void)
     /* Calling OleInitialize for the first time should yield S_OK even with
      * apartment already initialized by previous CoInitialize(Ex) calls. */
     hr = OleInitialize(NULL);
-    todo_wine ok(hr == S_OK, "OleInitialize failed with error 0x%08x\n", hr);
+    ok(hr == S_OK, "OleInitialize failed with error 0x%08x\n", hr);
 
     /* Subsequent calls to OleInitialize should return S_FALSE */
     hr = OleInitialize(NULL);

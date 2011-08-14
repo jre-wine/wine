@@ -115,7 +115,7 @@ static inline int is_overlapped( const struct file *file )
 
 /* create a file from a file descriptor */
 /* if the function fails the fd is closed */
-static struct file *create_file_for_fd( int fd, unsigned int access, unsigned int sharing )
+struct file *create_file_for_fd( int fd, unsigned int access, unsigned int sharing )
 {
     struct file *file;
     struct stat st;
@@ -154,9 +154,10 @@ static struct object *create_file_obj( struct fd *fd, unsigned int access, mode_
     return &file->obj;
 }
 
-static struct object *create_file( const char *nameptr, data_size_t len, unsigned int access,
-                                   unsigned int sharing, int create, unsigned int options,
-                                   unsigned int attrs, const struct security_descriptor *sd )
+static struct object *create_file( struct fd *root, const char *nameptr, data_size_t len,
+                                   unsigned int access, unsigned int sharing, int create,
+                                   unsigned int options, unsigned int attrs,
+                                   const struct security_descriptor *sd )
 {
     struct object *obj = NULL;
     struct fd *fd;
@@ -164,6 +165,11 @@ static struct object *create_file( const char *nameptr, data_size_t len, unsigne
     char *name;
     mode_t mode;
 
+    if (!len || ((nameptr[0] == '/') ^ !root))
+    {
+        set_error( STATUS_OBJECT_PATH_SYNTAX_BAD );
+        return NULL;
+    }
     if (!(name = mem_alloc( len + 1 ))) return NULL;
     memcpy( name, nameptr, len );
     name[len] = 0;
@@ -203,7 +209,7 @@ static struct object *create_file( const char *nameptr, data_size_t len, unsigne
     access = generic_file_map_access( access );
 
     /* FIXME: should set error to STATUS_OBJECT_NAME_COLLISION if file existed before */
-    fd = open_fd( name, flags | O_NONBLOCK | O_LARGEFILE, &mode, access, sharing, options );
+    fd = open_fd( root, name, flags | O_NONBLOCK | O_LARGEFILE, &mode, access, sharing, options );
     if (!fd) goto done;
 
     if (S_ISDIR(mode))
@@ -224,23 +230,6 @@ done:
 int is_same_file( struct file *file1, struct file *file2 )
 {
     return is_same_file_fd( file1->fd, file2->fd );
-}
-
-/* create a temp file for anonymous mappings */
-struct file *create_temp_file( int access )
-{
-    char tmpfn[16];
-    int fd;
-
-    sprintf( tmpfn, "anonmap.XXXXXX" );  /* create it in the server directory */
-    fd = mkstemps( tmpfn, 0 );
-    if (fd == -1)
-    {
-        file_set_error();
-        return NULL;
-    }
-    unlink( tmpfn );
-    return create_file_for_fd( fd, access, 0 );
 }
 
 static void file_dump( struct object *obj, int verbose )
@@ -641,52 +630,11 @@ struct file *grab_file_unless_removable( struct file *file )
     return (struct file *)grab_object( file );
 }
 
-/* extend a file beyond the current end of file */
-static int extend_file( struct file *file, file_pos_t new_size )
-{
-    static const char zero;
-    int unix_fd = get_file_unix_fd( file );
-    off_t size = new_size;
-
-    if (unix_fd == -1) return 0;
-
-    if (sizeof(new_size) > sizeof(size) && size != new_size)
-    {
-        set_error( STATUS_INVALID_PARAMETER );
-        return 0;
-    }
-    /* extend the file one byte beyond the requested size and then truncate it */
-    /* this should work around ftruncate implementations that can't extend files */
-    if (pwrite( unix_fd, &zero, 1, size ) != -1)
-    {
-        ftruncate( unix_fd, size );
-        return 1;
-    }
-    file_set_error();
-    return 0;
-}
-
-/* try to grow the file to the specified size */
-int grow_file( struct file *file, file_pos_t size )
-{
-    struct stat st;
-    int unix_fd = get_file_unix_fd( file );
-
-    if (unix_fd == -1) return 0;
-
-    if (fstat( unix_fd, &st ) == -1)
-    {
-        file_set_error();
-        return 0;
-    }
-    if (st.st_size >= size) return 1;  /* already large enough */
-    return extend_file( file, size );
-}
-
 /* create a file */
 DECL_HANDLER(create_file)
 {
     struct object *file;
+    struct fd *root_fd = NULL;
     const struct object_attributes *objattr = get_req_data();
     const struct security_descriptor *sd;
     const char *name;
@@ -703,19 +651,29 @@ DECL_HANDLER(create_file)
         return;
     }
 
+    if (objattr->rootdir)
+    {
+        struct dir *root;
+
+        if (!(root = get_dir_obj( current->process, objattr->rootdir, 0 ))) return;
+        root_fd = get_obj_fd( (struct object *)root );
+        release_object( root );
+        if (!root_fd) return;
+    }
+
     sd = objattr->sd_len ? (const struct security_descriptor *)(objattr + 1) : NULL;
 
     name = (const char *)get_req_data() + sizeof(*objattr) + objattr->sd_len;
     name_len = get_req_data_size() - sizeof(*objattr) - objattr->sd_len;
 
     reply->handle = 0;
-    if ((file = create_file( name, name_len, req->access,
-                             req->sharing, req->create, req->options,
-                             req->attrs, sd )))
+    if ((file = create_file( root_fd, name, name_len, req->access, req->sharing,
+                             req->create, req->options, req->attrs, sd )))
     {
         reply->handle = alloc_handle( current->process, file, req->access, req->attributes );
         release_object( file );
     }
+    if (root_fd) release_object( root_fd );
 }
 
 /* allocate a file handle for a Unix fd */

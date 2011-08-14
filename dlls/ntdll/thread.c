@@ -64,8 +64,6 @@ static RTL_BITMAP tls_bitmap;
 static RTL_BITMAP tls_expansion_bitmap;
 static RTL_BITMAP fls_bitmap;
 static LIST_ENTRY tls_links;
-static size_t sigstack_total_size;
-static ULONG sigstack_zero_bits;
 static int nb_threads = 1;
 
 static RTL_CRITICAL_SECTION ldt_section;
@@ -99,29 +97,6 @@ static void ldt_unlock(void)
         pthread_sigmask( SIG_SETMASK, &sigset, NULL );
     }
     else RtlLeaveCriticalSection( &ldt_section );
-}
-
-
-/***********************************************************************
- *           init_teb
- */
-static inline NTSTATUS init_teb( TEB *teb )
-{
-    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
-
-    teb->Tib.ExceptionList = (void *)~0UL;
-    teb->Tib.StackBase     = (void *)~0UL;
-    teb->Tib.Self          = &teb->Tib;
-    teb->StaticUnicodeString.Buffer        = teb->StaticUnicodeBuffer;
-    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
-
-    if (!(thread_data->fs = wine_ldt_alloc_fs())) return STATUS_TOO_MANY_THREADS;
-    thread_data->request_fd = -1;
-    thread_data->reply_fd   = -1;
-    thread_data->wait_fd[0] = -1;
-    thread_data->wait_fd[1] = -1;
-
-    return STATUS_SUCCESS;
 }
 
 
@@ -241,6 +216,53 @@ done:
     return status;
 }
 
+/***********************************************************************
+ *           get_global_flag
+ *
+ * This is called before the process heap is created,
+ * but after the connection to the server is established.
+ * No windows heap allocation is permitted.
+ */
+static DWORD get_global_flag(void)
+{
+    static const WCHAR sessionman_keyW[] = {'M','a','c','h','i','n','e','\\',
+                                            'S','y','s','t','e','m','\\',
+                                            'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+                                            'C','o','n','t','r','o','l','\\',
+                                            'S','e','s','s','i','o','n',' ','M','a','n','a','g','e','r',0};
+    static const WCHAR global_flagW[] = {'G','l','o','b','a','l','F','l','a','g',0};
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING nameW, valueW;
+    HANDLE hkey;
+    char tmp[32];
+    DWORD count;
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
+    NTSTATUS status;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = 0;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &nameW, sessionman_keyW );
+
+    status = NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr );
+    if (status != STATUS_SUCCESS)
+        return 0;
+
+    RtlInitUnicodeString( &valueW, global_flagW );
+    status = NtQueryValueKey( hkey, &valueW, KeyValuePartialInformation, tmp, sizeof(tmp)-1, &count );
+    if (status != STATUS_SUCCESS)
+        return 0;
+
+    /* Some documents say this can be a string, so handle either type */
+    if (info->Type == REG_DWORD)
+        return *(DWORD *)info->Data;
+    if (info->Type == REG_SZ)
+        return strtol((char *)info->Data, NULL, 16);
+    return 0;
+}
 
 /***********************************************************************
  *           thread_init
@@ -297,19 +319,17 @@ HANDLE thread_init(void)
 
     /* allocate and initialize the initial TEB */
 
-    sigstack_total_size = get_signal_stack_total_size();
-    while (1U << sigstack_zero_bits < sigstack_total_size) sigstack_zero_bits++;
-    assert( 1U << sigstack_zero_bits == sigstack_total_size );  /* must be a power of 2 */
-    assert( sigstack_total_size >= sizeof(TEB) + sizeof(struct startup_info) );
-
-    addr = NULL;
-    size = sigstack_total_size;
-    NtAllocateVirtualMemory( NtCurrentProcess(), &addr, sigstack_zero_bits,
-                             &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE );
-    teb = addr;
+    signal_alloc_thread( &teb );
     teb->Peb = peb;
-    init_teb( teb );
-    thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
+    teb->Tib.StackBase = (void *)~0UL;
+    teb->StaticUnicodeString.Buffer = teb->StaticUnicodeBuffer;
+    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
+
+    thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
+    thread_data->request_fd = -1;
+    thread_data->reply_fd   = -1;
+    thread_data->wait_fd[0] = -1;
+    thread_data->wait_fd[1] = -1;
     thread_data->debug_info = &debug_info;
     InsertHeadList( &tls_links, &teb->TlsLinks );
 
@@ -323,6 +343,9 @@ HANDLE thread_init(void)
     /* setup the server connection */
     server_init_process();
     info_size = server_init_thread( peb );
+
+    /* retrieve the global flags settings from the registry */
+    peb->NtGlobalFlag = get_global_flag();
 
     /* create the process heap */
     if (!(peb->ProcessHeap = RtlCreateHeap( HEAP_GROWABLE, NULL, 0, 0, NULL, NULL )))
@@ -416,15 +439,10 @@ void exit_thread( int status )
 
     if ((teb = interlocked_xchg_ptr( &prev_teb, NtCurrentTeb() )))
     {
-        struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
-        SIZE_T size;
+        struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
 
         pthread_join( thread_data->pthread_id, NULL );
-        wine_ldt_free_fs( thread_data->fs );
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
-        size = 0;
-        NtFreeVirtualMemory( GetCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
+        signal_free_thread( teb );
     }
 
     close( ntdll_get_thread_data()->wait_fd[0] );
@@ -443,7 +461,7 @@ void exit_thread( int status )
 static void start_thread( struct startup_info *info )
 {
     TEB *teb = info->teb;
-    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
+    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
     PRTL_THREAD_START_ROUTINE func = info->entry_point;
     void *arg = info->entry_arg;
     struct debug_info debug_info;
@@ -482,16 +500,13 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     sigset_t sigset;
     pthread_t pthread_id;
     pthread_attr_t attr;
-    struct ntdll_thread_data *thread_data = NULL;
-    struct ntdll_thread_regs *thread_regs;
+    struct ntdll_thread_data *thread_data;
     struct startup_info *info = NULL;
-    void *addr = NULL;
     HANDLE handle = 0;
-    TEB *teb;
+    TEB *teb = NULL;
     DWORD tid = 0;
     int request_pipe[2];
     NTSTATUS status;
-    SIZE_T size;
 
     if (process != NtCurrentProcess())
     {
@@ -544,34 +559,24 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
 
     pthread_sigmask( SIG_BLOCK, &server_block_set, &sigset );
 
-    addr = NULL;
-    size = sigstack_total_size;
-    if ((status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr, sigstack_zero_bits,
-                                           &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE )))
-        goto error;
-    teb = addr;
+    if ((status = signal_alloc_thread( &teb ))) goto error;
+
     teb->Peb = NtCurrentTeb()->Peb;
+    teb->ClientId.UniqueProcess = ULongToHandle(GetCurrentProcessId());
+    teb->ClientId.UniqueThread  = ULongToHandle(tid);
+    teb->StaticUnicodeString.Buffer        = teb->StaticUnicodeBuffer;
+    teb->StaticUnicodeString.MaximumLength = sizeof(teb->StaticUnicodeBuffer);
+
     info = (struct startup_info *)(teb + 1);
     info->teb         = teb;
     info->entry_point = start;
     info->entry_arg   = param;
 
-    if ((status = init_teb( teb ))) goto error;
-
-    teb->ClientId.UniqueProcess = ULongToHandle(GetCurrentProcessId());
-    teb->ClientId.UniqueThread  = ULongToHandle(tid);
-
-    thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
-    thread_regs = (struct ntdll_thread_regs *)teb->SpareBytes1;
+    thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
     thread_data->request_fd  = request_pipe[1];
-
-    /* inherit debug registers from parent thread */
-    thread_regs->dr0 = ntdll_get_thread_regs()->dr0;
-    thread_regs->dr1 = ntdll_get_thread_regs()->dr1;
-    thread_regs->dr2 = ntdll_get_thread_regs()->dr2;
-    thread_regs->dr3 = ntdll_get_thread_regs()->dr3;
-    thread_regs->dr6 = ntdll_get_thread_regs()->dr6;
-    thread_regs->dr7 = ntdll_get_thread_regs()->dr7;
+    thread_data->reply_fd    = -1;
+    thread_data->wait_fd[0]  = -1;
+    thread_data->wait_fd[1]  = -1;
 
     if ((status = virtual_alloc_thread_stack( teb, stack_reserve, stack_commit ))) goto error;
 
@@ -584,8 +589,6 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     {
         interlocked_xchg_add( &nb_threads, -1 );
         pthread_attr_destroy( &attr );
-        size = 0;
-        NtFreeVirtualMemory( NtCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
         status = STATUS_NO_MEMORY;
         goto error;
     }
@@ -599,12 +602,7 @@ NTSTATUS WINAPI RtlCreateUserThread( HANDLE process, const SECURITY_DESCRIPTOR *
     return STATUS_SUCCESS;
 
 error:
-    if (thread_data) wine_ldt_free_fs( thread_data->fs );
-    if (addr)
-    {
-        size = 0;
-        NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
-    }
+    if (teb) signal_free_thread( teb );
     if (handle) NtClose( handle );
     pthread_sigmask( SIG_SETMASK, &sigset, NULL );
     close( request_pipe[1] );
@@ -756,10 +754,12 @@ NTSTATUS WINAPI NtSetContextThread( HANDLE handle, const CONTEXT *context )
     self = (handle == GetCurrentThread());
     if (self && (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_i386)))
     {
-        struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
-        self = (regs->dr0 == context->Dr0 && regs->dr1 == context->Dr1 &&
-                regs->dr2 == context->Dr2 && regs->dr3 == context->Dr3 &&
-                regs->dr6 == context->Dr6 && regs->dr7 == context->Dr7);
+        self = (ntdll_get_thread_data()->dr0 == context->Dr0 &&
+                ntdll_get_thread_data()->dr1 == context->Dr1 &&
+                ntdll_get_thread_data()->dr2 == context->Dr2 &&
+                ntdll_get_thread_data()->dr3 == context->Dr3 &&
+                ntdll_get_thread_data()->dr6 == context->Dr6 &&
+                ntdll_get_thread_data()->dr7 == context->Dr7);
     }
 #endif
 
@@ -914,13 +914,12 @@ NTSTATUS WINAPI NtGetContextThread( HANDLE handle, CONTEXT *context )
         /* update the cached version of the debug registers */
         if (context->ContextFlags & (CONTEXT_DEBUG_REGISTERS & ~CONTEXT_i386))
         {
-            struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
-            regs->dr0 = context->Dr0;
-            regs->dr1 = context->Dr1;
-            regs->dr2 = context->Dr2;
-            regs->dr3 = context->Dr3;
-            regs->dr6 = context->Dr6;
-            regs->dr7 = context->Dr7;
+            ntdll_get_thread_data()->dr0 = context->Dr0;
+            ntdll_get_thread_data()->dr1 = context->Dr1;
+            ntdll_get_thread_data()->dr2 = context->Dr2;
+            ntdll_get_thread_data()->dr3 = context->Dr3;
+            ntdll_get_thread_data()->dr6 = context->Dr6;
+            ntdll_get_thread_data()->dr7 = context->Dr7;
         }
 #endif
     }

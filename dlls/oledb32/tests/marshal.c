@@ -165,7 +165,6 @@ static HRESULT WINAPI Test_DBProperties_GetProperties(
         DBPROPSET **prgPropertySets)
 {
     ok(cPropertyIDSets == 0, "Expected cPropertyIDSets to be 0 instead of %d\n", cPropertyIDSets);
-    todo_wine
     ok(*pcPropertySets == 0, "Expected *pcPropertySets to be 0 instead of %d\n", *pcPropertySets);
     *pcPropertySets = 1;
     *prgPropertySets = CoTaskMemAlloc(sizeof(DBPROPSET));
@@ -243,7 +242,7 @@ static void test_IDBProperties(void)
 
     propset_count = 1;
     hr = IDBProperties_GetProperties(pProxy, 0, NULL, &propset_count, &propsets);
-    ok(hr == S_OK, "IDBProperties_GetProperties failed with error 0x%08x", hr);
+    ok(hr == S_OK, "IDBProperties_GetProperties failed with error 0x%08x\n", hr);
 
     ok(propset_count == 1, "Expected propset_count of 1 but got %d\n", propset_count);
     ok(propsets->rgProperties[0].dwPropertyID == TEST_PROPID, "Expected property ID of 0x%x, but got 0x%x\n", TEST_PROPID, propsets->rgProperties[0].dwPropertyID);

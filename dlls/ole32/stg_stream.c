@@ -180,14 +180,14 @@ static ULONG WINAPI StgStreamImpl_Release(
 }
 
 /***
- * This method will open the block chain pointed by the property
+ * This method will open the block chain pointed by the directory entry
  * that describes the stream.
  * If the stream's size is null, no chain is opened.
  */
 static void StgStreamImpl_OpenBlockChain(
         StgStreamImpl* This)
 {
-  DirEntry     curProperty;
+  DirEntry     currentEntry;
   BOOL         readSuccessful;
 
   /*
@@ -206,22 +206,22 @@ static void StgStreamImpl_OpenBlockChain(
   }
 
   /*
-   * Read the information from the property.
+   * Read the information from the directory entry.
    */
   readSuccessful = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
-					     This->ownerProperty,
-					     &curProperty);
+					     This->dirEntry,
+					     &currentEntry);
 
   if (readSuccessful)
   {
-    This->streamSize = curProperty.size;
+    This->streamSize = currentEntry.size;
 
     /*
      * This code supports only streams that are <32 bits in size.
      */
     assert(This->streamSize.u.HighPart == 0);
 
-    if(curProperty.startingBlock == BLOCK_END_OF_CHAIN)
+    if(currentEntry.startingBlock == BLOCK_END_OF_CHAIN)
     {
       assert( (This->streamSize.u.HighPart == 0) && (This->streamSize.u.LowPart == 0) );
     }
@@ -233,14 +233,14 @@ static void StgStreamImpl_OpenBlockChain(
 	This->smallBlockChain = SmallBlockChainStream_Construct(
 								This->parentStorage->ancestorStorage,
 								NULL,
-								This->ownerProperty);
+								This->dirEntry);
       }
       else
       {
 	This->bigBlockChain = BlockChainStream_Construct(
 							 This->parentStorage->ancestorStorage,
 							 NULL,
-							 This->ownerProperty);
+							 This->dirEntry);
       }
     }
   }
@@ -545,7 +545,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
 {
   StgStreamImpl* const This=(StgStreamImpl*)iface;
 
-  DirEntry     curProperty;
+  DirEntry     currentEntry;
   BOOL         Success;
 
   TRACE("(%p, %d)\n", iface, libNewSize.u.LowPart);
@@ -575,7 +575,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
   }
 
   /* In simple mode keep the stream size above the small block limit */
-  if (This->parentStorage->ancestorStorage->base.openFlags & STGM_SIMPLE)
+  if (This->parentStorage->openFlags & STGM_SIMPLE)
     libNewSize.u.LowPart = max(libNewSize.u.LowPart, LIMIT_TO_USE_SMALL_BLOCK);
 
   if (This->streamSize.u.LowPart == libNewSize.u.LowPart)
@@ -591,28 +591,28 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
       This->smallBlockChain = SmallBlockChainStream_Construct(
                                     This->parentStorage->ancestorStorage,
                                     NULL,
-                                    This->ownerProperty);
+                                    This->dirEntry);
     }
     else
     {
       This->bigBlockChain = BlockChainStream_Construct(
                                 This->parentStorage->ancestorStorage,
                                 NULL,
-                                This->ownerProperty);
+                                This->dirEntry);
     }
   }
 
   /*
-   * Read this stream's property to see if it's small blocks or big blocks
+   * Read this stream's size to see if it's small blocks or big blocks
    */
   Success = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
-                                       This->ownerProperty,
-                                       &curProperty);
+                                       This->dirEntry,
+                                       &currentEntry);
   /*
    * Determine if we have to switch from small to big blocks or vice versa
    */
   if ( (This->smallBlockChain!=0) &&
-       (curProperty.size.u.LowPart < LIMIT_TO_USE_SMALL_BLOCK) )
+       (currentEntry.size.u.LowPart < LIMIT_TO_USE_SMALL_BLOCK) )
   {
     if (libNewSize.u.LowPart >= LIMIT_TO_USE_SMALL_BLOCK)
     {
@@ -625,7 +625,7 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
     }
   }
   else if ( (This->bigBlockChain!=0) &&
-            (curProperty.size.u.LowPart >= LIMIT_TO_USE_SMALL_BLOCK) )
+            (currentEntry.size.u.LowPart >= LIMIT_TO_USE_SMALL_BLOCK) )
   {
     if (libNewSize.u.LowPart < LIMIT_TO_USE_SMALL_BLOCK)
     {
@@ -648,20 +648,20 @@ static HRESULT WINAPI StgStreamImpl_SetSize(
   }
 
   /*
-   * Write the new information about this stream to the property
+   * Write the new information about this stream to the directory entry
    */
   Success = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
-                                       This->ownerProperty,
-                                       &curProperty);
+                                       This->dirEntry,
+                                       &currentEntry);
 
-  curProperty.size.u.HighPart = libNewSize.u.HighPart;
-  curProperty.size.u.LowPart = libNewSize.u.LowPart;
+  currentEntry.size.u.HighPart = libNewSize.u.HighPart;
+  currentEntry.size.u.LowPart = libNewSize.u.LowPart;
 
   if (Success)
   {
     StorageImpl_WriteDirEntry(This->parentStorage->ancestorStorage,
-				This->ownerProperty,
-				&curProperty);
+				This->dirEntry,
+				&currentEntry);
   }
 
   This->streamSize = libNewSize;
@@ -834,7 +834,7 @@ static HRESULT WINAPI StgStreamImpl_Stat(
 {
   StgStreamImpl* const This=(StgStreamImpl*)iface;
 
-  DirEntry     curProperty;
+  DirEntry     currentEntry;
   BOOL         readSuccessful;
 
   TRACE("%p %p %d\n", This, pstatstg, grfStatFlag);
@@ -850,30 +850,29 @@ static HRESULT WINAPI StgStreamImpl_Stat(
   }
 
   /*
-   * Read the information from the property.
+   * Read the information from the directory entry.
    */
   readSuccessful = StorageImpl_ReadDirEntry(This->parentStorage->ancestorStorage,
-					     This->ownerProperty,
-					     &curProperty);
+					     This->dirEntry,
+					     &currentEntry);
 
   if (readSuccessful)
   {
-    StorageImpl *root = This->parentStorage->ancestorStorage;
-
-    StorageUtl_CopyDirEntryToSTATSTG(pstatstg,
-				     &curProperty,
+    StorageUtl_CopyDirEntryToSTATSTG(This->parentStorage,
+                     pstatstg,
+				     &currentEntry,
 				     grfStatFlag);
 
     pstatstg->grfMode = This->grfMode;
 
     /* In simple create mode cbSize is the current pos */
-    if((root->base.openFlags & STGM_SIMPLE) && root->create)
+    if((This->parentStorage->openFlags & STGM_SIMPLE) && This->parentStorage->create)
       pstatstg->cbSize = This->currentPosition;
 
     return S_OK;
   }
 
-  WARN("failed to read properties\n");
+  WARN("failed to read entry\n");
   return E_FAIL;
 }
 
@@ -910,7 +909,7 @@ static HRESULT WINAPI StgStreamImpl_Clone(
   if ( ppstm == 0 )
     return STG_E_INVALIDPOINTER;
 
-  new_stream = StgStreamImpl_Construct (This->parentStorage, This->grfMode, This->ownerProperty);
+  new_stream = StgStreamImpl_Construct (This->parentStorage, This->grfMode, This->dirEntry);
 
   if (!new_stream)
     return STG_E_INSUFFICIENTMEMORY; /* Currently the only reason for new_stream=0 */
@@ -957,12 +956,12 @@ static const IStreamVtbl StgStreamImpl_Vtbl =
  *
  * Params:
  *    parentStorage - Pointer to the storage that contains the stream to open
- *    ownerProperty - Index of the property that points to this stream.
+ *    dirEntry      - Index of the directory entry that points to this stream.
  */
 StgStreamImpl* StgStreamImpl_Construct(
 		StorageBaseImpl* parentStorage,
     DWORD            grfMode,
-    ULONG            ownerProperty)
+    DirRef           dirEntry)
 {
   StgStreamImpl* newStream;
 
@@ -991,7 +990,7 @@ StgStreamImpl* StgStreamImpl_Construct(
      */
 
     newStream->grfMode = grfMode;
-    newStream->ownerProperty = ownerProperty;
+    newStream->dirEntry = dirEntry;
 
     /*
      * Start the stream at the beginning.
@@ -1008,7 +1007,7 @@ StgStreamImpl* StgStreamImpl_Construct(
     newStream->smallBlockChain     = 0;
 
     /*
-     * Read the size from the property and determine if the blocks forming
+     * Read the size from the directory entry and determine if the blocks forming
      * this stream are large or small.
      */
     StgStreamImpl_OpenBlockChain(newStream);

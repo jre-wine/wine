@@ -31,13 +31,19 @@
 
 static BOOL (WINAPI *pCreateWellKnownSid)(WELL_KNOWN_SID_TYPE,PSID,PSID,DWORD*);
 static BOOL (WINAPI *pGetEventLogInformation)(HANDLE,DWORD,LPVOID,DWORD,LPDWORD);
+static BOOL (WINAPI *pWow64DisableWow64FsRedirection)(PVOID *);
+static BOOL (WINAPI *pWow64RevertWow64FsRedirection)(PVOID);
 
 static void init_function_pointers(void)
 {
     HMODULE hadvapi32 = GetModuleHandleA("advapi32.dll");
+    HMODULE hkernel32 = GetModuleHandleA("kernel32.dll");
 
     pCreateWellKnownSid = (void*)GetProcAddress(hadvapi32, "CreateWellKnownSid");
     pGetEventLogInformation = (void*)GetProcAddress(hadvapi32, "GetEventLogInformation");
+
+    pWow64DisableWow64FsRedirection = (void*)GetProcAddress(hkernel32, "Wow64DisableWow64FsRedirection");
+    pWow64RevertWow64FsRedirection = (void*)GetProcAddress(hkernel32, "Wow64RevertWow64FsRedirection");
 }
 
 static void create_backup(const char *filename)
@@ -701,7 +707,7 @@ static void test_readwrite(void)
     PSID user;
     DWORD sidsize, count;
     BOOL ret, sidavailable;
-    BOOL on_vista = FALSE; /* Used to indicate Vista or higher */
+    BOOL on_vista = FALSE; /* Used to indicate Vista, W2K8 or Win7 */
     int i;
     char localcomputer[MAX_COMPUTERNAME_LENGTH + 1];
     DWORD len = sizeof(localcomputer);
@@ -727,6 +733,34 @@ static void test_readwrite(void)
      * but succeed on all others, hence it's not part of the struct.
      */
     handle = OpenEventLogA(NULL, eventlogname);
+    if (!handle)
+    {
+        /* Intermittently seen on NT4 when tests are run immediately after boot */
+        win_skip("Could not get a handle to the eventlog\n");
+        HeapFree(GetProcessHeap(), 0, user);
+        return;
+    }
+
+    count = 0xdeadbeef;
+    GetNumberOfEventLogRecords(handle, &count);
+    if (count != 0)
+    {
+        /* Needed for W2K3 without a service pack */
+        win_skip("We most likely opened the Application eventlog\n");
+        CloseEventLog(handle);
+        Sleep(2000);
+
+        handle = OpenEventLogA(NULL, eventlogname);
+        count = 0xdeadbeef;
+        GetNumberOfEventLogRecords(handle, &count);
+        if (count != 0)
+        {
+            win_skip("We didn't open our new eventlog\n");
+            HeapFree(GetProcessHeap(), 0, user);
+            CloseEventLog(handle);
+            return;
+        }
+    }
 
     SetLastError(0xdeadbeef);
     ret = ReportEvent(handle, 0x20, 0, 0, NULL, 0, 0, NULL, NULL);
@@ -735,12 +769,38 @@ static void test_readwrite(void)
         win_skip("Win7 fails when using incorrect event types\n");
         ret = ReportEvent(handle, 0, 0, 0, NULL, 0, 0, NULL, NULL);
     }
+    else
+    {
+        void *buf;
+        DWORD read, needed;
+        EVENTLOGRECORD *record;
+
+        /* Needed to catch earlier Vista (with no ServicePack for example) */
+        buf = HeapAlloc(GetProcessHeap(), 0, sizeof(EVENTLOGRECORD));
+        ReadEventLogA(handle, EVENTLOG_SEQUENTIAL_READ | EVENTLOG_FORWARDS_READ,
+                      0, buf, sizeof(EVENTLOGRECORD), &read, &needed);
+
+        buf = HeapReAlloc(GetProcessHeap(), 0, buf, needed);
+        ReadEventLogA(handle, EVENTLOG_SEQUENTIAL_READ | EVENTLOG_FORWARDS_READ,
+                      0, buf, needed, &read, &needed);
+
+        record = (EVENTLOGRECORD *)buf;
+
+        /* Vista and W2K8 return EVENTLOG_SUCCESS, Windows versions before return
+         * the written eventtype (0x20 in this case).
+         */
+        if (record->EventType == EVENTLOG_SUCCESS)
+            on_vista = TRUE;
+
+        HeapFree(GetProcessHeap(), 0, buf);
+    }
     ok(ret, "Expected success : %d\n", GetLastError());
 
     /* This will clear the eventlog. The record numbering for new
-     * events however differs on Vista+. Before Vista the first
-     * event would be numbered 1, on Vista+ it's now 2 as we already
-     * had one event.
+     * events however differs on Vista SP1+. Before Vista the first
+     * event would be numbered 1, on Vista SP1+ it's higher as we already
+     * had at least one event (more in case of multiple test runs without
+     * a reboot).
      */
     ClearEventLogA(handle, NULL);
     CloseEventLog(handle);
@@ -772,9 +832,9 @@ static void test_readwrite(void)
         ret = GetOldestEventLogRecord(handle, &oldest);
         ok(ret, "Expected success\n");
         ok(oldest == 1 ||
-           oldest == 2, /* Vista+ */
-           "Expected oldest to be 1 or 2, got %d\n", oldest);
-        if (oldest == 2)
+           (oldest > 1 && oldest != 0xdeadbeef), /* Vista SP1+, W2K8 and Win7 */
+           "Expected oldest to be 1 or higher, got %d\n", oldest);
+        if (oldest > 1 && oldest != 0xdeadbeef)
             on_vista = TRUE;
 
         if (i % 2)
@@ -799,7 +859,7 @@ static void test_readwrite(void)
 
     /* Report only once */
     if (on_vista)
-        skip("There is no DWORD alignment for UserSid on Vista or higher\n");
+        skip("There is no DWORD alignment enforced for UserSid on Vista, W2K8 or Win7\n");
 
     /* Read all events from our created eventlog, one by one */
     handle = OpenEventLogA(NULL, eventlogname);
@@ -839,8 +899,8 @@ static void test_readwrite(void)
         ok(record->Reserved == 0x654c664c,
            "Expected 0x654c664c, got %d\n", record->Reserved);
         ok(record->RecordNumber == i + 1 ||
-           (on_vista && (record->RecordNumber == i + 2)),
-           "Expected %d or %d, got %d\n", i + 1, i + 2, record->RecordNumber);
+           (on_vista && (record->RecordNumber > i + 1)),
+           "Expected %d or higher, got %d\n", i + 1, record->RecordNumber);
         ok(record->EventID == read_write[i].evt_id,
            "Expected %d, got %d\n", read_write[i].evt_id, record->EventID);
         ok(record->EventType == read_write[i].evt_type,
@@ -870,7 +930,7 @@ static void test_readwrite(void)
 
             /* We are already DWORD aligned, there should still be some padding */
             if ((((UINT_PTR)buf + calculated_sidoffset) % sizeof(DWORD)) == 0)
-                ok(*(DWORD_PTR *)((BYTE *)buf + calculated_sidoffset) == 0, "Expected 0\n");
+                ok(*(DWORD *)((BYTE *)buf + calculated_sidoffset) == 0, "Expected 0\n");
 
             ok((((UINT_PTR)buf + record->UserSidOffset) % sizeof(DWORD)) == 0, "Expected DWORD alignment\n");
         }
@@ -894,7 +954,7 @@ static void test_readwrite(void)
             ptr += lstrlenA(ptr) + 1;
         }
 
-        ok(record->Length == *(DWORD_PTR *)((BYTE *)buf + record->Length - sizeof(DWORD)),
+        ok(record->Length == *(DWORD *)((BYTE *)buf + record->Length - sizeof(DWORD)),
            "Expected the closing DWORD to contain the length of the record\n");
 
         HeapFree(GetProcessHeap(), 0, buf);
@@ -945,6 +1005,7 @@ static void test_autocreation(void)
     char *p;
     char sources[sizeof(eventsources)];
     char sysdir[MAX_PATH];
+    void *redir = 0;
 
     RegOpenKeyA(HKEY_LOCAL_MACHINE, eventlogsvc, &key);
     RegOpenKeyA(key, eventlogname, &eventkey);
@@ -968,11 +1029,16 @@ static void test_autocreation(void)
         }
         lstrcpyA(p, eventlogname);
 
-        ok(!memcmp(sources, sources_verify, size), "Expected a correct 'Sources' value\n");
+        ok(!memcmp(sources, sources_verify, size),
+           "Expected a correct 'Sources' value (size : %d)\n", size);
     }
 
     RegCloseKey(eventkey);
     RegCloseKey(key);
+
+    /* The directory that holds the eventlog files could be redirected */
+    if (pWow64DisableWow64FsRedirection)
+        pWow64DisableWow64FsRedirection(&redir);
 
     /* On Windows we also automatically get an eventlog file */
     GetSystemDirectoryA(sysdir, sizeof(sysdir));
@@ -994,6 +1060,9 @@ static void test_autocreation(void)
 
     ok(GetFileAttributesA(eventlogfile) != INVALID_FILE_ATTRIBUTES,
        "Expected an eventlog file\n");
+
+    if (pWow64RevertWow64FsRedirection)
+        pWow64RevertWow64FsRedirection(redir);
 }
 
 static void cleanup_eventlog(void)

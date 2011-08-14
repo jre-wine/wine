@@ -41,12 +41,16 @@
 #endif
 
 static BOOL     (WINAPI * pGetVolumePathNameW)(LPCWSTR, LPWSTR, DWORD);
+static UINT     (WINAPI *pGetSystemWow64DirectoryW)( LPWSTR, UINT );
 
 static NTSTATUS (WINAPI *pRtlFreeUnicodeString)( PUNICODE_STRING );
 static VOID     (WINAPI *pRtlInitUnicodeString)( PUNICODE_STRING, LPCWSTR );
 static BOOL     (WINAPI *pRtlDosPathNameToNtPathName_U)( LPCWSTR, PUNICODE_STRING, PWSTR*, CURDIR* );
+static NTSTATUS (WINAPI *pRtlWow64EnableFsRedirectionEx)( ULONG, ULONG * );
+
 static NTSTATUS (WINAPI *pNtCreateMailslotFile)( PHANDLE, ULONG, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
                                        ULONG, ULONG, ULONG, PLARGE_INTEGER );
+static NTSTATUS (WINAPI *pNtOpenFile)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 static NTSTATUS (WINAPI *pNtDeleteFile)(POBJECT_ATTRIBUTES ObjectAttributes);
 static NTSTATUS (WINAPI *pNtReadFile)(HANDLE hFile, HANDLE hEvent,
                                       PIO_APC_ROUTINE apc, void* apc_user,
@@ -68,6 +72,8 @@ static NTSTATUS (WINAPI *pNtRemoveIoCompletion)(HANDLE, PULONG_PTR, PULONG_PTR, 
 static NTSTATUS (WINAPI *pNtSetIoCompletion)(HANDLE, ULONG_PTR, ULONG_PTR, NTSTATUS, ULONG);
 static NTSTATUS (WINAPI *pNtSetInformationFile)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
 static NTSTATUS (WINAPI *pNtQueryInformationFile)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
+static NTSTATUS (WINAPI *pNtQueryDirectoryFile)(HANDLE,HANDLE,PIO_APC_ROUTINE,PVOID,PIO_STATUS_BLOCK,
+                                                PVOID,ULONG,FILE_INFORMATION_CLASS,BOOLEAN,PUNICODE_STRING,BOOLEAN);
 
 static inline BOOL is_signaled( HANDLE obj )
 {
@@ -144,6 +150,114 @@ static void WINAPI apc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
            iosb, U(*iosb).Status, iosb->Information );
     (*count)++;
     ok( !reserved, "reserved is not 0: %x\n", reserved );
+}
+
+static void open_file_test(void)
+{
+    NTSTATUS status;
+    HANDLE dir, handle;
+    WCHAR path[MAX_PATH];
+    BYTE data[8192];
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
+    UNICODE_STRING nameW;
+    UINT i, len;
+    BOOL restart = TRUE;
+
+    len = GetWindowsDirectoryW( path, MAX_PATH );
+    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    status = pNtOpenFile( &dir, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    /* test opening system dir with RootDirectory set to windows dir */
+    GetSystemDirectoryW( path, MAX_PATH );
+    while (path[len] == '\\') len++;
+    nameW.Buffer = path + len;
+    nameW.Length = lstrlenW(path + len) * sizeof(WCHAR);
+    attr.RootDirectory = dir;
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( handle );
+
+    /* try uppercase name */
+    for (i = len; path[i]; i++) if (path[i] >= 'a' && path[i] <= 'z') path[i] -= 'a' - 'A';
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( handle );
+
+    /* try with leading backslash */
+    nameW.Buffer--;
+    nameW.Length += sizeof(WCHAR);
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( status == STATUS_INVALID_PARAMETER ||
+        status == STATUS_OBJECT_NAME_INVALID ||
+        status == STATUS_OBJECT_PATH_SYNTAX_BAD,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    if (!status) CloseHandle( handle );
+
+    /* try with empty name */
+    nameW.Length = 0;
+    status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( handle );
+
+    /* try open by file id */
+
+    while (!pNtQueryDirectoryFile( dir, NULL, NULL, NULL, &io, data, sizeof(data),
+                                   FileIdBothDirectoryInformation, FALSE, NULL, restart ))
+    {
+        FILE_ID_BOTH_DIRECTORY_INFORMATION *info = (FILE_ID_BOTH_DIRECTORY_INFORMATION *)data;
+
+        restart = FALSE;
+        for (;;)
+        {
+            if (!info->FileId.QuadPart) goto next;
+            nameW.Buffer = (WCHAR *)&info->FileId;
+            nameW.Length = sizeof(info->FileId);
+            info->FileName[info->FileNameLength/sizeof(WCHAR)] = 0;
+            status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                                  FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                  FILE_OPEN_BY_FILE_ID |
+                                  ((info->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_DIRECTORY_FILE : 0) );
+            ok( status == STATUS_SUCCESS || status == STATUS_ACCESS_DENIED || status == STATUS_NOT_IMPLEMENTED,
+                "open %s failed %x\n", wine_dbgstr_w(info->FileName), status );
+            if (status == STATUS_NOT_IMPLEMENTED)
+            {
+                win_skip( "FILE_OPEN_BY_FILE_ID not supported\n" );
+                break;
+            }
+            if (!status)
+            {
+                FILE_ALL_INFORMATION all_info;
+
+                if (!pNtQueryInformationFile( handle, &io, &all_info, sizeof(all_info), FileAllInformation ))
+                {
+                    /* check that it's the same file */
+                    ok( info->EndOfFile.QuadPart == all_info.StandardInformation.EndOfFile.QuadPart,
+                        "mismatched file size for %s\n", wine_dbgstr_w(info->FileName));
+                    ok( info->LastWriteTime.QuadPart == all_info.BasicInformation.LastWriteTime.QuadPart,
+                        "mismatched write time for %s\n", wine_dbgstr_w(info->FileName));
+                }
+                CloseHandle( handle );
+            }
+        next:
+            if (!info->NextEntryOffset) break;
+            info = (FILE_ID_BOTH_DIRECTORY_INFORMATION *)((char *)info + info->NextEntryOffset);
+        }
+    }
+
+    CloseHandle( dir );
 }
 
 static void delete_file_test(void)
@@ -945,6 +1059,7 @@ static void test_file_name_information(void)
 {
     WCHAR *file_name, *volume_prefix, *expected;
     FILE_NAME_INFORMATION *info;
+    ULONG old_redir = 1, tmp;
     UINT file_name_size;
     IO_STATUS_BLOCK io;
     UINT info_size;
@@ -980,9 +1095,11 @@ static void test_file_name_information(void)
     info_size = sizeof(*info) + (file_name_size * sizeof(WCHAR));
     info = HeapAlloc( GetProcessHeap(), 0, info_size );
 
+    if (pRtlWow64EnableFsRedirectionEx) pRtlWow64EnableFsRedirectionEx( TRUE, &old_redir );
     h = CreateFileW( file_name, GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
+    if (pRtlWow64EnableFsRedirectionEx) pRtlWow64EnableFsRedirectionEx( old_redir, &tmp );
     ok(h != INVALID_HANDLE_VALUE, "Failed to open file.\n");
 
     hr = pNtQueryInformationFile( h, &io, info, sizeof(*info) - 1, FileNameInformation );
@@ -1021,6 +1138,191 @@ static void test_file_name_information(void)
     HeapFree( GetProcessHeap(), 0, info );
     HeapFree( GetProcessHeap(), 0, expected );
     HeapFree( GetProcessHeap(), 0, volume_prefix );
+
+    if (old_redir || !pGetSystemWow64DirectoryW || !(file_name_size = pGetSystemWow64DirectoryW( NULL, 0 )))
+    {
+        skip("Not running on WoW64, skipping test.\n");
+        HeapFree( GetProcessHeap(), 0, file_name );
+        return;
+    }
+
+    h = CreateFileW( file_name, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
+    ok(h != INVALID_HANDLE_VALUE, "Failed to open file.\n");
+    HeapFree( GetProcessHeap(), 0, file_name );
+
+    file_name = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*file_name) );
+    volume_prefix = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*volume_prefix) );
+    expected = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*expected) );
+
+    len = pGetSystemWow64DirectoryW( file_name, file_name_size );
+    ok(len == file_name_size - 1,
+            "GetSystemWow64DirectoryW returned %u, expected %u.\n",
+            len, file_name_size - 1);
+
+    len = pGetVolumePathNameW( file_name, volume_prefix, file_name_size );
+    ok(len, "GetVolumePathNameW failed.\n");
+
+    len = lstrlenW( volume_prefix );
+    if (len && volume_prefix[len - 1] == '\\') --len;
+    memcpy( expected, file_name + len, (file_name_size - len - 1) * sizeof(WCHAR) );
+    expected[file_name_size - len - 1] = '\0';
+
+    info_size = sizeof(*info) + (file_name_size * sizeof(WCHAR));
+    info = HeapAlloc( GetProcessHeap(), 0, info_size );
+
+    memset( info, 0xcc, info_size );
+    hr = pNtQueryInformationFile( h, &io, info, info_size, FileNameInformation );
+    ok(hr == STATUS_SUCCESS, "NtQueryInformationFile returned %#x, expected %#x.\n", hr, STATUS_SUCCESS);
+    info->FileName[info->FileNameLength / sizeof(WCHAR)] = '\0';
+    ok(!lstrcmpiW( info->FileName, expected ), "info->FileName is %s, expected %s.\n",
+            wine_dbgstr_w( info->FileName ), wine_dbgstr_w( expected ));
+
+    CloseHandle( h );
+    HeapFree( GetProcessHeap(), 0, info );
+    HeapFree( GetProcessHeap(), 0, expected );
+    HeapFree( GetProcessHeap(), 0, volume_prefix );
+    HeapFree( GetProcessHeap(), 0, file_name );
+}
+
+static void test_file_all_name_information(void)
+{
+    WCHAR *file_name, *volume_prefix, *expected;
+    FILE_ALL_INFORMATION *info;
+    ULONG old_redir = 1, tmp;
+    UINT file_name_size;
+    IO_STATUS_BLOCK io;
+    UINT info_size;
+    HRESULT hr;
+    HANDLE h;
+    UINT len;
+
+    /* GetVolumePathName is not present before w2k */
+    if (!pGetVolumePathNameW) {
+        win_skip("GetVolumePathNameW not found\n");
+        return;
+    }
+
+    file_name_size = GetSystemDirectoryW( NULL, 0 );
+    file_name = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*file_name) );
+    volume_prefix = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*volume_prefix) );
+    expected = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*volume_prefix) );
+
+    len = GetSystemDirectoryW( file_name, file_name_size );
+    ok(len == file_name_size - 1,
+            "GetSystemDirectoryW returned %u, expected %u.\n",
+            len, file_name_size - 1);
+
+    len = pGetVolumePathNameW( file_name, volume_prefix, file_name_size );
+    ok(len, "GetVolumePathNameW failed.\n");
+
+    len = lstrlenW( volume_prefix );
+    if (len && volume_prefix[len - 1] == '\\') --len;
+    memcpy( expected, file_name + len, (file_name_size - len - 1) * sizeof(WCHAR) );
+    expected[file_name_size - len - 1] = '\0';
+
+    /* A bit more than we actually need, but it keeps the calculation simple. */
+    info_size = sizeof(*info) + (file_name_size * sizeof(WCHAR));
+    info = HeapAlloc( GetProcessHeap(), 0, info_size );
+
+    if (pRtlWow64EnableFsRedirectionEx) pRtlWow64EnableFsRedirectionEx( TRUE, &old_redir );
+    h = CreateFileW( file_name, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
+    if (pRtlWow64EnableFsRedirectionEx) pRtlWow64EnableFsRedirectionEx( old_redir, &tmp );
+    ok(h != INVALID_HANDLE_VALUE, "Failed to open file.\n");
+
+    hr = pNtQueryInformationFile( h, &io, info, sizeof(*info) - 1, FileAllInformation );
+    ok(hr == STATUS_INFO_LENGTH_MISMATCH, "NtQueryInformationFile returned %#x, expected %#x.\n",
+            hr, STATUS_INFO_LENGTH_MISMATCH);
+
+    memset( info, 0xcc, info_size );
+    hr = pNtQueryInformationFile( h, &io, info, sizeof(*info), FileAllInformation );
+    ok(hr == STATUS_BUFFER_OVERFLOW, "NtQueryInformationFile returned %#x, expected %#x.\n",
+            hr, STATUS_BUFFER_OVERFLOW);
+    ok(U(io).Status == STATUS_BUFFER_OVERFLOW, "io.Status is %#x, expected %#x.\n",
+            U(io).Status, STATUS_BUFFER_OVERFLOW);
+    ok(info->NameInformation.FileNameLength == lstrlenW( expected ) * sizeof(WCHAR),
+            "info->NameInformation.FileNameLength is %u, expected %u.\n",
+            info->NameInformation.FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
+    ok(info->NameInformation.FileName[2] == 0xcccc,
+            "info->NameInformation.FileName[2] is %#x, expected 0xcccc.\n", info->NameInformation.FileName[2]);
+    ok(CharLowerW((LPWSTR)(UINT_PTR)info->NameInformation.FileName[1]) == CharLowerW((LPWSTR)(UINT_PTR)expected[1]),
+            "info->NameInformation.FileName[1] is %p, expected %p.\n",
+            CharLowerW((LPWSTR)(UINT_PTR)info->NameInformation.FileName[1]), CharLowerW((LPWSTR)(UINT_PTR)expected[1]));
+    ok(io.Information == sizeof(*info), "io.Information is %lu, expected %u.\n", io.Information, sizeof(*info));
+
+    memset( info, 0xcc, info_size );
+    hr = pNtQueryInformationFile( h, &io, info, info_size, FileAllInformation );
+    ok(hr == STATUS_SUCCESS, "NtQueryInformationFile returned %#x, expected %#x.\n", hr, STATUS_SUCCESS);
+    ok(U(io).Status == STATUS_SUCCESS, "io.Status is %#x, expected %#x.\n", U(io).Status, STATUS_SUCCESS);
+    ok(info->NameInformation.FileNameLength == lstrlenW( expected ) * sizeof(WCHAR),
+            "info->NameInformation.FileNameLength is %u, expected %u.\n",
+            info->NameInformation.FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
+    ok(info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)] == 0xcccc,
+            "info->NameInformation.FileName[%u] is %#x, expected 0xcccc.\n",
+            info->NameInformation.FileNameLength / sizeof(WCHAR),
+            info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)]);
+    info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)] = '\0';
+    ok(!lstrcmpiW( info->NameInformation.FileName, expected ),
+            "info->NameInformation.FileName is %s, expected %s.\n",
+            wine_dbgstr_w( info->NameInformation.FileName ), wine_dbgstr_w( expected ));
+    ok(io.Information == FIELD_OFFSET(FILE_ALL_INFORMATION, NameInformation.FileName)
+            + info->NameInformation.FileNameLength,
+            "io.Information is %lu, expected %u.\n",
+            io.Information,
+            FIELD_OFFSET(FILE_ALL_INFORMATION, NameInformation.FileName) + info->NameInformation.FileNameLength);
+
+    CloseHandle( h );
+    HeapFree( GetProcessHeap(), 0, info );
+    HeapFree( GetProcessHeap(), 0, expected );
+    HeapFree( GetProcessHeap(), 0, volume_prefix );
+
+    if (old_redir || !pGetSystemWow64DirectoryW || !(file_name_size = pGetSystemWow64DirectoryW( NULL, 0 )))
+    {
+        skip("Not running on WoW64, skipping test.\n");
+        HeapFree( GetProcessHeap(), 0, file_name );
+        return;
+    }
+
+    h = CreateFileW( file_name, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0 );
+    ok(h != INVALID_HANDLE_VALUE, "Failed to open file.\n");
+    HeapFree( GetProcessHeap(), 0, file_name );
+
+    file_name = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*file_name) );
+    volume_prefix = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*volume_prefix) );
+    expected = HeapAlloc( GetProcessHeap(), 0, file_name_size * sizeof(*expected) );
+
+    len = pGetSystemWow64DirectoryW( file_name, file_name_size );
+    ok(len == file_name_size - 1,
+            "GetSystemWow64DirectoryW returned %u, expected %u.\n",
+            len, file_name_size - 1);
+
+    len = pGetVolumePathNameW( file_name, volume_prefix, file_name_size );
+    ok(len, "GetVolumePathNameW failed.\n");
+
+    len = lstrlenW( volume_prefix );
+    if (len && volume_prefix[len - 1] == '\\') --len;
+    memcpy( expected, file_name + len, (file_name_size - len - 1) * sizeof(WCHAR) );
+    expected[file_name_size - len - 1] = '\0';
+
+    info_size = sizeof(*info) + (file_name_size * sizeof(WCHAR));
+    info = HeapAlloc( GetProcessHeap(), 0, info_size );
+
+    memset( info, 0xcc, info_size );
+    hr = pNtQueryInformationFile( h, &io, info, info_size, FileAllInformation );
+    ok(hr == STATUS_SUCCESS, "NtQueryInformationFile returned %#x, expected %#x.\n", hr, STATUS_SUCCESS);
+    info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)] = '\0';
+    ok(!lstrcmpiW( info->NameInformation.FileName, expected ), "info->NameInformation.FileName is %s, expected %s.\n",
+            wine_dbgstr_w( info->NameInformation.FileName ), wine_dbgstr_w( expected ));
+
+    CloseHandle( h );
+    HeapFree( GetProcessHeap(), 0, info );
+    HeapFree( GetProcessHeap(), 0, expected );
+    HeapFree( GetProcessHeap(), 0, volume_prefix );
     HeapFree( GetProcessHeap(), 0, file_name );
 }
 
@@ -1035,11 +1337,14 @@ START_TEST(file)
     }
 
     pGetVolumePathNameW = (void *)GetProcAddress(hkernel32, "GetVolumePathNameW");
+    pGetSystemWow64DirectoryW = (void *)GetProcAddress(hkernel32, "GetSystemWow64DirectoryW");
 
     pRtlFreeUnicodeString   = (void *)GetProcAddress(hntdll, "RtlFreeUnicodeString");
     pRtlInitUnicodeString   = (void *)GetProcAddress(hntdll, "RtlInitUnicodeString");
     pRtlDosPathNameToNtPathName_U = (void *)GetProcAddress(hntdll, "RtlDosPathNameToNtPathName_U");
+    pRtlWow64EnableFsRedirectionEx = (void *)GetProcAddress(hntdll, "RtlWow64EnableFsRedirectionEx");
     pNtCreateMailslotFile   = (void *)GetProcAddress(hntdll, "NtCreateMailslotFile");
+    pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
     pNtDeleteFile           = (void *)GetProcAddress(hntdll, "NtDeleteFile");
     pNtReadFile             = (void *)GetProcAddress(hntdll, "NtReadFile");
     pNtWriteFile            = (void *)GetProcAddress(hntdll, "NtWriteFile");
@@ -1053,7 +1358,9 @@ START_TEST(file)
     pNtSetIoCompletion      = (void *)GetProcAddress(hntdll, "NtSetIoCompletion");
     pNtSetInformationFile   = (void *)GetProcAddress(hntdll, "NtSetInformationFile");
     pNtQueryInformationFile = (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
+    pNtQueryDirectoryFile   = (void *)GetProcAddress(hntdll, "NtQueryDirectoryFile");
 
+    open_file_test();
     delete_file_test();
     read_file_test();
     nt_mailslot_test();
@@ -1062,4 +1369,5 @@ START_TEST(file)
     test_file_all_information();
     test_file_both_information();
     test_file_name_information();
+    test_file_all_name_information();
 }

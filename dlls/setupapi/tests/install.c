@@ -35,6 +35,7 @@
 #include "wine/test.h"
 
 static const char inffile[] = "test.inf";
+static const WCHAR inffileW[] = {'t','e','s','t','.','i','n','f',0};
 static char CURR_DIR[MAX_PATH];
 
 /* Notes on InstallHinfSectionA/W:
@@ -470,12 +471,14 @@ cleanup:
 static void test_inffilelist(void)
 {
     static const char inffile2[] = "test2.inf";
+    static const WCHAR inffile2W[] = {'t','e','s','t','2','.','i','n','f',0};
     static const char invalid_inf[] = "invalid.inf";
     static const char *inf =
         "[Version]\n"
         "Signature=\"$Chicago$\"";
 
-    WCHAR *ptr;
+    WCHAR *p, *ptr;
+    char dirA[MAX_PATH];
     WCHAR dir[MAX_PATH] = { 0 };
     WCHAR buffer[MAX_PATH] = { 0 };
     DWORD expected, outsize;
@@ -508,9 +511,29 @@ static void test_inffilelist(void)
     todo_wine
     ok(!ret, "expected SetupGetInfFileListW to fail!\n");
 
+    /* create a private directory, the temp directory may contain some
+     * inf files left over from old installations
+     */
+    if (!GetTempFileNameA(CURR_DIR, "inftest", 1, dirA))
+    {
+        win_skip("GetTempFileNameA failed with error %d\n", GetLastError());
+        return;
+    }
+    if (!CreateDirectoryA(dirA, NULL ))
+    {
+        win_skip("CreateDirectoryA failed with error %d\n", GetLastError());
+        return;
+    }
+    if (!SetCurrentDirectoryA(dirA))
+    {
+        win_skip("SetCurrentDirectoryA failed with error %d\n", GetLastError());
+        RemoveDirectoryA(dirA);
+        return;
+    }
+
+    MultiByteToWideChar(CP_ACP, 0, dirA, -1, dir, MAX_PATH);
     /* check a not existing directory
      */
-    MultiByteToWideChar(CP_ACP, 0, CURR_DIR, -1, dir, MAX_PATH);
     ptr = dir + lstrlenW(dir);
     MultiByteToWideChar(CP_ACP, 0, "\\not_existent", -1, ptr, MAX_PATH - lstrlenW(dir));
     outsize = 0xffffffff;
@@ -560,11 +583,15 @@ static void test_inffilelist(void)
     todo_wine
     ok(expected == outsize, "expected required buffersize to be %d, got %d\n",
          expected, outsize);
-    
+    for(p = buffer; lstrlenW(p) && (outsize > (p - buffer)); p+=lstrlenW(p) + 1)
+        ok(!lstrcmpW(p,inffile2W) || !lstrcmpW(p,inffileW),
+            "unexpected filename %s\n",wine_dbgstr_w(p));
 
     DeleteFile(inffile);
     DeleteFile(inffile2);
     DeleteFile(invalid_inf);
+    SetCurrentDirectoryA(CURR_DIR);
+    RemoveDirectoryA(dirA);
 }
 
 START_TEST(install)

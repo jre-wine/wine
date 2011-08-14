@@ -198,17 +198,16 @@ static CRITICAL_SECTION_DEBUG critsect_debug =
 };
 static CRITICAL_SECTION authcache_cs = { &critsect_debug, -1, 0, 0, 0, 0 };
 
-static BOOL HTTP_OpenConnection(http_request_t *req);
+static DWORD HTTP_OpenConnection(http_request_t *req);
 static BOOL HTTP_GetResponseHeaders(http_request_t *req, BOOL clear);
-static BOOL HTTP_ProcessHeader(http_request_t *req, LPCWSTR field, LPCWSTR value, DWORD dwModifier);
+static DWORD HTTP_ProcessHeader(http_request_t *req, LPCWSTR field, LPCWSTR value, DWORD dwModifier);
 static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer);
-static BOOL HTTP_InsertCustomHeader(http_request_t *req, LPHTTPHEADERW lpHdr);
+static DWORD HTTP_InsertCustomHeader(http_request_t *req, LPHTTPHEADERW lpHdr);
 static INT HTTP_GetCustomHeaderIndex(http_request_t *req, LPCWSTR lpszField, INT index, BOOL Request);
 static BOOL HTTP_DeleteCustomHeader(http_request_t *req, DWORD index);
 static LPWSTR HTTP_build_req( LPCWSTR *list, int len );
 static BOOL HTTP_HttpQueryInfoW(http_request_t*, DWORD, LPVOID, LPDWORD, LPDWORD);
 static LPWSTR HTTP_GetRedirectURL(http_request_t *req, LPCWSTR lpszUrl);
-static BOOL HTTP_HandleRedirect(http_request_t *req, LPCWSTR lpszUrl);
 static UINT HTTP_DecodeBase64(LPCWSTR base64, LPSTR bin);
 static BOOL HTTP_VerifyValidHeader(http_request_t *req, LPCWSTR field);
 static void HTTP_DrainContent(http_request_t *req);
@@ -372,25 +371,6 @@ static void HTTP_FreeTokens(LPWSTR * token_array)
     for (i = 0; token_array[i]; i++)
         HeapFree(GetProcessHeap(), 0, token_array[i]);
     HeapFree(GetProcessHeap(), 0, token_array);
-}
-
-/* **********************************************************************
- * 
- * Helper functions for the HttpSendRequest(Ex) functions
- * 
- */
-static void AsyncHttpSendRequestProc(WORKREQUEST *workRequest)
-{
-    struct WORKREQ_HTTPSENDREQUESTW const *req = &workRequest->u.HttpSendRequestW;
-    http_request_t *lpwhr = (http_request_t*) workRequest->hdr;
-
-    TRACE("%p\n", lpwhr);
-
-    HTTP_HttpSendRequestW(lpwhr, req->lpszHeader,
-            req->dwHeaderLength, req->lpOptional, req->dwOptionalLength,
-            req->dwContentLength, req->bEndRequest);
-
-    HeapFree(GetProcessHeap(), 0, req->lpszHeader);
 }
 
 static void HTTP_FixURL(http_request_t *lpwhr)
@@ -884,14 +864,13 @@ static BOOL HTTP_DoAuthorization( http_request_t *lpwhr, LPCWSTR pszAuthValue,
 /***********************************************************************
  *           HTTP_HttpAddRequestHeadersW (internal)
  */
-static BOOL HTTP_HttpAddRequestHeadersW(http_request_t *lpwhr,
+static DWORD HTTP_HttpAddRequestHeadersW(http_request_t *lpwhr,
 	LPCWSTR lpszHeader, DWORD dwHeaderLength, DWORD dwModifier)
 {
     LPWSTR lpszStart;
     LPWSTR lpszEnd;
     LPWSTR buffer;
-    BOOL bSuccess = FALSE;
-    DWORD len;
+    DWORD len, res = ERROR_HTTP_INVALID_HEADER;
 
     TRACE("copying header: %s\n", debugstr_wn(lpszHeader, dwHeaderLength));
 
@@ -930,25 +909,25 @@ static BOOL HTTP_HttpAddRequestHeadersW(http_request_t *lpwhr,
         {
             /* Skip 0-length headers */
             lpszStart = lpszEnd;
-            bSuccess = TRUE;
+            res = ERROR_SUCCESS;
             continue;
         }
         pFieldAndValue = HTTP_InterpretHttpHeader(lpszStart);
         if (pFieldAndValue)
         {
-            bSuccess = HTTP_VerifyValidHeader(lpwhr, pFieldAndValue[0]);
-            if (bSuccess)
-                bSuccess = HTTP_ProcessHeader(lpwhr, pFieldAndValue[0],
+            res = HTTP_VerifyValidHeader(lpwhr, pFieldAndValue[0]);
+            if (res == ERROR_SUCCESS)
+                res = HTTP_ProcessHeader(lpwhr, pFieldAndValue[0],
                     pFieldAndValue[1], dwModifier | HTTP_ADDHDR_FLAG_REQ);
             HTTP_FreeTokens(pFieldAndValue);
         }
 
         lpszStart = lpszEnd;
-    } while (bSuccess);
+    } while (res == ERROR_SUCCESS);
 
     HeapFree(GetProcessHeap(), 0, buffer);
 
-    return bSuccess;
+    return res;
 }
 
 /***********************************************************************
@@ -970,8 +949,8 @@ static BOOL HTTP_HttpAddRequestHeadersW(http_request_t *lpwhr,
 BOOL WINAPI HttpAddRequestHeadersW(HINTERNET hHttpRequest,
 	LPCWSTR lpszHeader, DWORD dwHeaderLength, DWORD dwModifier)
 {
-    BOOL bSuccess = FALSE;
     http_request_t *lpwhr;
+    DWORD res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
 
     TRACE("%p, %s, %i, %i\n", hHttpRequest, debugstr_wn(lpszHeader, dwHeaderLength), dwHeaderLength, dwModifier);
 
@@ -979,17 +958,14 @@ BOOL WINAPI HttpAddRequestHeadersW(HINTERNET hHttpRequest,
       return TRUE;
 
     lpwhr = (http_request_t*) WININET_GetObject( hHttpRequest );
-    if (NULL == lpwhr ||  lpwhr->hdr.htype != WH_HHTTPREQ)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-        goto lend;
-    }
-    bSuccess = HTTP_HttpAddRequestHeadersW( lpwhr, lpszHeader, dwHeaderLength, dwModifier );
-lend:
+    if (lpwhr && lpwhr->hdr.htype == WH_HHTTPREQ)
+        res = HTTP_HttpAddRequestHeadersW( lpwhr, lpszHeader, dwHeaderLength, dwModifier );
     if( lpwhr )
         WININET_Release( &lpwhr->hdr );
 
-    return bSuccess;
+    if(res != ERROR_SUCCESS)
+        SetLastError(res);
+    return res == ERROR_SUCCESS;
 }
 
 /***********************************************************************
@@ -1023,212 +999,6 @@ BOOL WINAPI HttpAddRequestHeadersA(HINTERNET hHttpRequest,
 
     return r;
 }
-
-/***********************************************************************
- *           HttpEndRequestA (WININET.@)
- *
- * Ends an HTTP request that was started by HttpSendRequestEx
- *
- * RETURNS
- *    TRUE	if successful
- *    FALSE	on failure
- *
- */
-BOOL WINAPI HttpEndRequestA(HINTERNET hRequest, 
-        LPINTERNET_BUFFERSA lpBuffersOut, DWORD dwFlags, DWORD_PTR dwContext)
-{
-    TRACE("(%p, %p, %08x, %08lx)\n", hRequest, lpBuffersOut, dwFlags, dwContext);
-
-    if (lpBuffersOut)
-    {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    return HttpEndRequestW(hRequest, NULL, dwFlags, dwContext);
-}
-
-static BOOL HTTP_HttpEndRequestW(http_request_t *lpwhr, DWORD dwFlags, DWORD_PTR dwContext)
-{
-    BOOL rc = FALSE;
-    INT responseLen;
-    DWORD dwBufferSize;
-    INTERNET_ASYNC_RESULT iar;
-
-    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
-                  INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
-
-    responseLen = HTTP_GetResponseHeaders(lpwhr, TRUE);
-    if (responseLen)
-        rc = TRUE;
-
-    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
-                  INTERNET_STATUS_RESPONSE_RECEIVED, &responseLen, sizeof(DWORD));
-
-    /* process cookies here. Is this right? */
-    HTTP_ProcessCookies(lpwhr);
-
-    if (!set_content_length( lpwhr )) HTTP_FinishedReading(lpwhr);
-
-    if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTO_REDIRECT))
-    {
-        DWORD dwCode,dwCodeLength = sizeof(DWORD);
-        if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_FLAG_NUMBER|HTTP_QUERY_STATUS_CODE, &dwCode, &dwCodeLength, NULL) &&
-            (dwCode == 302 || dwCode == 301 || dwCode == 303))
-        {
-            WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
-            dwBufferSize=sizeof(szNewLocation);
-            if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_LOCATION, szNewLocation, &dwBufferSize, NULL))
-            {
-                if (strcmpW(lpwhr->lpszVerb, szGET) && strcmpW(lpwhr->lpszVerb, szHEAD))
-                {
-                    HeapFree(GetProcessHeap(), 0, lpwhr->lpszVerb);
-                    lpwhr->lpszVerb = heap_strdupW(szGET);
-                }
-                HTTP_DrainContent(lpwhr);
-                if ((new_url = HTTP_GetRedirectURL( lpwhr, szNewLocation )))
-                {
-                    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext, INTERNET_STATUS_REDIRECT,
-                                          new_url, (strlenW(new_url) + 1) * sizeof(WCHAR));
-                    rc = HTTP_HandleRedirect(lpwhr, new_url);
-                    if (rc)
-                        rc = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, TRUE);
-                    HeapFree( GetProcessHeap(), 0, new_url );
-                }
-            }
-        }
-    }
-
-    iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
-    iar.dwError = rc ? 0 : INTERNET_GetLastError();
-
-    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
-                          INTERNET_STATUS_REQUEST_COMPLETE, &iar,
-                          sizeof(INTERNET_ASYNC_RESULT));
-    return rc;
-}
-
-static void AsyncHttpEndRequestProc(WORKREQUEST *work)
-{
-    struct WORKREQ_HTTPENDREQUESTW const *req = &work->u.HttpEndRequestW;
-    http_request_t *lpwhr = (http_request_t*)work->hdr;
-
-    TRACE("%p\n", lpwhr);
-
-    HTTP_HttpEndRequestW(lpwhr, req->dwFlags, req->dwContext);
-}
-
-/***********************************************************************
- *           HttpEndRequestW (WININET.@)
- *
- * Ends an HTTP request that was started by HttpSendRequestEx
- *
- * RETURNS
- *    TRUE	if successful
- *    FALSE	on failure
- *
- */
-BOOL WINAPI HttpEndRequestW(HINTERNET hRequest, 
-        LPINTERNET_BUFFERSW lpBuffersOut, DWORD dwFlags, DWORD_PTR dwContext)
-{
-    BOOL rc = FALSE;
-    http_request_t *lpwhr;
-
-    TRACE("-->\n");
-
-    if (lpBuffersOut)
-    {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-        return FALSE;
-    }
-
-    lpwhr = (http_request_t*) WININET_GetObject( hRequest );
-
-    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-        if (lpwhr)
-            WININET_Release( &lpwhr->hdr );
-        return FALSE;
-    }
-    lpwhr->hdr.dwFlags |= dwFlags;
-
-    if (lpwhr->lpHttpSession->lpAppInfo->hdr.dwFlags & INTERNET_FLAG_ASYNC)
-    {
-        WORKREQUEST work;
-        struct WORKREQ_HTTPENDREQUESTW *request;
-
-        work.asyncproc = AsyncHttpEndRequestProc;
-        work.hdr = WININET_AddRef( &lpwhr->hdr );
-
-        request = &work.u.HttpEndRequestW;
-        request->dwFlags = dwFlags;
-        request->dwContext = dwContext;
-
-        INTERNET_AsyncCall(&work);
-        INTERNET_SetLastError(ERROR_IO_PENDING);
-    }
-    else
-        rc = HTTP_HttpEndRequestW(lpwhr, dwFlags, dwContext);
-
-    WININET_Release( &lpwhr->hdr );
-    TRACE("%i <--\n",rc);
-    return rc;
-}
-
-/***********************************************************************
- *           HttpOpenRequestW (WININET.@)
- *
- * Open a HTTP request handle
- *
- * RETURNS
- *    HINTERNET  a HTTP request handle on success
- *    NULL 	 on failure
- *
- */
-HINTERNET WINAPI HttpOpenRequestW(HINTERNET hHttpSession,
-	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
-	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
-	DWORD dwFlags, DWORD_PTR dwContext)
-{
-    http_session_t *lpwhs;
-    HINTERNET handle = NULL;
-
-    TRACE("(%p, %s, %s, %s, %s, %p, %08x, %08lx)\n", hHttpSession,
-          debugstr_w(lpszVerb), debugstr_w(lpszObjectName),
-          debugstr_w(lpszVersion), debugstr_w(lpszReferrer), lpszAcceptTypes,
-          dwFlags, dwContext);
-    if(lpszAcceptTypes!=NULL)
-    {
-        int i;
-        for(i=0;lpszAcceptTypes[i]!=NULL;i++)
-            TRACE("\taccept type: %s\n",debugstr_w(lpszAcceptTypes[i]));
-    }    
-
-    lpwhs = (http_session_t*) WININET_GetObject( hHttpSession );
-    if (NULL == lpwhs ||  lpwhs->hdr.htype != WH_HHTTPSESSION)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-	goto lend;
-    }
-
-    /*
-     * My tests seem to show that the windows version does not
-     * become asynchronous until after this point. And anyhow
-     * if this call was asynchronous then how would you get the
-     * necessary HINTERNET pointer returned by this function.
-     *
-     */
-    handle = HTTP_HttpOpenRequestW(lpwhs, lpszVerb, lpszObjectName,
-                                   lpszVersion, lpszReferrer, lpszAcceptTypes,
-                                   dwFlags, dwContext);
-lend:
-    if( lpwhs )
-        WININET_Release( &lpwhs->hdr );
-    TRACE("returning %p\n", handle);
-    return handle;
-}
-
 
 /***********************************************************************
  *           HttpOpenRequestA (WININET.@)
@@ -1610,7 +1380,7 @@ static BOOL HTTP_DealWithProxy(appinfo_t *hIC, http_session_t *lpwhs, http_reque
 #define INET6_ADDRSTRLEN 46
 #endif
 
-static BOOL HTTP_ResolveName(http_request_t *lpwhr)
+static DWORD HTTP_ResolveName(http_request_t *lpwhr)
 {
     char szaddr[INET6_ADDRSTRLEN];
     http_session_t *lpwhs = lpwhr->lpHttpSession;
@@ -1619,15 +1389,12 @@ static BOOL HTTP_ResolveName(http_request_t *lpwhr)
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                           INTERNET_STATUS_RESOLVING_NAME,
                           lpwhs->lpszServerName,
-                          strlenW(lpwhs->lpszServerName)+1);
+                          (strlenW(lpwhs->lpszServerName)+1) * sizeof(WCHAR));
 
     lpwhs->sa_len = sizeof(lpwhs->socketAddress);
     if (!GetAddress(lpwhs->lpszServerName, lpwhs->nServerPort,
                     (struct sockaddr *)&lpwhs->socketAddress, &lpwhs->sa_len))
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_NAME_NOT_RESOLVED);
-        return FALSE;
-    }
+        return ERROR_INTERNET_NAME_NOT_RESOLVED;
 
     switch (lpwhs->socketAddress.ss_family)
     {
@@ -1639,8 +1406,7 @@ static BOOL HTTP_ResolveName(http_request_t *lpwhr)
         break;
     default:
         WARN("unsupported family %d\n", lpwhs->socketAddress.ss_family);
-        INTERNET_SetLastError(ERROR_INTERNET_NAME_NOT_RESOLVED);
-        return FALSE;
+        return ERROR_INTERNET_NAME_NOT_RESOLVED;
     }
     inet_ntop(lpwhs->socketAddress.ss_family, addr, szaddr, sizeof(szaddr));
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
@@ -1648,7 +1414,7 @@ static BOOL HTTP_ResolveName(http_request_t *lpwhr)
                           szaddr, strlen(szaddr)+1);
 
     TRACE("resolved %s to %s\n", debugstr_w(lpwhs->lpszServerName), szaddr);
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 
@@ -2020,8 +1786,9 @@ static DWORD HTTPREQ_SetOption(object_header_t *hdr, DWORD option, void *buffer,
 }
 
 /* read some more data into the read buffer (the read section must be held) */
-static BOOL read_more_data( http_request_t *req, int maxlen )
+static DWORD read_more_data( http_request_t *req, int maxlen )
 {
+    DWORD res;
     int len;
 
     if (req->read_pos)
@@ -2034,12 +1801,12 @@ static BOOL read_more_data( http_request_t *req, int maxlen )
 
     if (maxlen == -1) maxlen = sizeof(req->read_buf);
 
-    if(!NETCON_recv( &req->netConnection, req->read_buf + req->read_size,
-                     maxlen - req->read_size, 0, &len ))
-        return FALSE;
+    res = NETCON_recv( &req->netConnection, req->read_buf + req->read_size,
+                       maxlen - req->read_size, 0, &len );
+    if(res == ERROR_SUCCESS)
+        req->read_size += len;
 
-    req->read_size += len;
-    return TRUE;
+    return res;
 }
 
 /* remove some amount of data from the read buffer (the read section must be held) */
@@ -2052,6 +1819,7 @@ static void remove_data( http_request_t *req, int count )
 static BOOL read_line( http_request_t *req, LPSTR buffer, DWORD *len )
 {
     int count, bytes_read, pos = 0;
+    DWORD res;
 
     EnterCriticalSection( &req->read_section );
     for (;;)
@@ -2071,11 +1839,12 @@ static BOOL read_line( http_request_t *req, LPSTR buffer, DWORD *len )
         remove_data( req, bytes_read );
         if (eol) break;
 
-        if (!read_more_data( req, -1 ) || !req->read_size)
+        if ((res = read_more_data( req, -1 )) != ERROR_SUCCESS || !req->read_size)
         {
             *len = 0;
             TRACE( "returning empty string\n" );
             LeaveCriticalSection( &req->read_section );
+            INTERNET_SetLastError(res);
             return FALSE;
         }
     }
@@ -2092,8 +1861,10 @@ static BOOL read_line( http_request_t *req, LPSTR buffer, DWORD *len )
 }
 
 /* discard data contents until we reach end of line (the read section must be held) */
-static BOOL discard_eol( http_request_t *req )
+static DWORD discard_eol( http_request_t *req )
 {
+    DWORD res;
+
     do
     {
         BYTE *eol = memchr( req->read_buf + req->read_pos, '\n', req->read_size );
@@ -2103,21 +1874,21 @@ static BOOL discard_eol( http_request_t *req )
             break;
         }
         req->read_pos = req->read_size = 0;  /* discard everything */
-        if (!read_more_data( req, -1 )) return FALSE;
+        if ((res = read_more_data( req, -1 )) != ERROR_SUCCESS) return res;
     } while (req->read_size);
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 /* read the size of the next chunk (the read section must be held) */
-static BOOL start_next_chunk( http_request_t *req )
+static DWORD start_next_chunk( http_request_t *req )
 {
-    DWORD chunk_size = 0;
+    DWORD chunk_size = 0, res;
 
-    if (!req->dwContentLength) return TRUE;
+    if (!req->dwContentLength) return ERROR_SUCCESS;
     if (req->dwContentLength == req->dwContentRead)
     {
         /* read terminator for the previous chunk */
-        if (!discard_eol( req )) return FALSE;
+        if ((res = discard_eol( req )) != ERROR_SUCCESS) return res;
         req->dwContentLength = ~0u;
         req->dwContentRead = 0;
     }
@@ -2134,16 +1905,15 @@ static BOOL start_next_chunk( http_request_t *req )
                 TRACE( "reading %u byte chunk\n", chunk_size );
                 req->dwContentLength = chunk_size;
                 req->dwContentRead = 0;
-                if (!discard_eol( req )) return FALSE;
-                return TRUE;
+                return discard_eol( req );
             }
             remove_data( req, 1 );
         }
-        if (!read_more_data( req, -1 )) return FALSE;
+        if ((res = read_more_data( req, -1 )) != ERROR_SUCCESS) return res;
         if (!req->read_size)
         {
             req->dwContentLength = req->dwContentRead = 0;
-            return TRUE;
+            return ERROR_SUCCESS;
         }
     }
 }
@@ -2158,21 +1928,22 @@ static BOOL end_of_read_data( http_request_t *req )
 }
 
 /* fetch some more data into the read buffer (the read section must be held) */
-static BOOL refill_buffer( http_request_t *req )
+static DWORD refill_buffer( http_request_t *req )
 {
     int len = sizeof(req->read_buf);
+    DWORD res;
 
     if (req->read_chunked && (req->dwContentLength == ~0u || req->dwContentLength == req->dwContentRead))
     {
-        if (!start_next_chunk( req )) return FALSE;
+        if ((res = start_next_chunk( req )) != ERROR_SUCCESS) return res;
     }
 
     if (req->dwContentLength != ~0u) len = min( len, req->dwContentLength - req->dwContentRead );
-    if (len <= req->read_size) return TRUE;
+    if (len <= req->read_size) return ERROR_SUCCESS;
 
-    if (!read_more_data( req, len )) return FALSE;
+    if ((res = read_more_data( req, len )) != ERROR_SUCCESS) return res;
     if (!req->read_size) req->dwContentLength = req->dwContentRead = 0;
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 static DWORD read_gzip_data(http_request_t *req, BYTE *buf, int size, BOOL sync, int *read_ret)
@@ -2186,7 +1957,7 @@ static DWORD read_gzip_data(http_request_t *req, BYTE *buf, int size, BOOL sync,
 
     while(read < size && !req->gzip_stream->end_of_data) {
         if(!req->read_size) {
-            if(!sync || !refill_buffer(req))
+            if(!sync || refill_buffer(req) != ERROR_SUCCESS)
                 break;
         }
 
@@ -2249,16 +2020,17 @@ static DWORD get_avail_data( http_request_t *req )
 static void HTTP_ReceiveRequestData(http_request_t *req, BOOL first_notif)
 {
     INTERNET_ASYNC_RESULT iar;
+    DWORD res;
 
     TRACE("%p\n", req);
 
     EnterCriticalSection( &req->read_section );
-    if (refill_buffer( req )) {
+    if ((res = refill_buffer( req )) == ERROR_SUCCESS) {
         iar.dwResult = (DWORD_PTR)req->hdr.hInternet;
         iar.dwError = first_notif ? 0 : get_avail_data(req);
     }else {
         iar.dwResult = 0;
-        iar.dwError = INTERNET_GetLastError();
+        iar.dwError = res;
     }
     LeaveCriticalSection( &req->read_section );
 
@@ -2277,7 +2049,7 @@ static DWORD HTTPREQ_Read(http_request_t *req, void *buffer, DWORD size, DWORD *
 
     if (req->read_chunked && (req->dwContentLength == ~0u || req->dwContentLength == req->dwContentRead))
     {
-        if (!start_next_chunk( req )) goto done;
+        if (start_next_chunk( req ) != ERROR_SUCCESS) goto done;
     }
 
     if(req->gzip_stream) {
@@ -2308,7 +2080,7 @@ static DWORD HTTPREQ_Read(http_request_t *req, void *buffer, DWORD size, DWORD *
 
         if (size > bytes_read && (!bytes_read || sync)) {
             if (NETCON_recv( &req->netConnection, (char *)buffer + bytes_read, size - bytes_read,
-                             sync ? MSG_WAITALL : 0, &len))
+                             sync ? MSG_WAITALL : 0, &len) == ERROR_SUCCESS)
                 bytes_read += len;
             /* always return success, even if the network layer returns an error */
         }
@@ -2489,19 +2261,20 @@ done:
     return res;
 }
 
-static BOOL HTTPREQ_WriteFile(object_header_t *hdr, const void *buffer, DWORD size, DWORD *written)
+static DWORD HTTPREQ_WriteFile(object_header_t *hdr, const void *buffer, DWORD size, DWORD *written)
 {
-    BOOL ret;
+    DWORD res;
     http_request_t *lpwhr = (http_request_t*)hdr;
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext, INTERNET_STATUS_SENDING_REQUEST, NULL, 0);
 
     *written = 0;
-    if ((ret = NETCON_send(&lpwhr->netConnection, buffer, size, 0, (LPINT)written)))
+    res = NETCON_send(&lpwhr->netConnection, buffer, size, 0, (LPINT)written);
+    if (res == ERROR_SUCCESS)
         lpwhr->dwBytesWritten += *written;
 
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext, INTERNET_STATUS_REQUEST_SENT, written, sizeof(DWORD));
-    return ret;
+    return res;
 }
 
 static void HTTPREQ_AsyncQueryDataAvailableProc(WORKREQUEST *workRequest)
@@ -2581,17 +2354,17 @@ static const object_vtbl_t HTTPREQVtbl = {
  *    NULL 	 on failure
  *
  */
-HINTERNET WINAPI HTTP_HttpOpenRequestW(http_session_t *lpwhs,
-	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
-	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
-	DWORD dwFlags, DWORD_PTR dwContext)
+static DWORD HTTP_HttpOpenRequestW(http_session_t *lpwhs,
+        LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
+        LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
+        DWORD dwFlags, DWORD_PTR dwContext, HINTERNET *ret)
 {
     appinfo_t *hIC = NULL;
     http_request_t *lpwhr;
     LPWSTR lpszHostName = NULL;
     HINTERNET handle = NULL;
     static const WCHAR szHostForm[] = {'%','s',':','%','u',0};
-    DWORD len;
+    DWORD len, res;
 
     TRACE("-->\n");
 
@@ -2601,7 +2374,7 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(http_session_t *lpwhs,
     lpwhr = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(http_request_t));
     if (NULL == lpwhr)
     {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        res = ERROR_OUTOFMEMORY;
         goto lend;
     }
     lpwhr->hdr.htype = WH_HHTTPREQ;
@@ -2622,18 +2395,18 @@ HINTERNET WINAPI HTTP_HttpOpenRequestW(http_session_t *lpwhs,
             (strlenW(lpwhs->lpszHostName) + 7 /* length of ":65535" + 1 */));
     if (NULL == lpszHostName)
     {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        res = ERROR_OUTOFMEMORY;
         goto lend;
     }
 
     handle = WININET_AllocHandle( &lpwhr->hdr );
     if (NULL == handle)
     {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        res = ERROR_OUTOFMEMORY;
         goto lend;
     }
 
-    if (!NETCON_init(&lpwhr->netConnection, dwFlags & INTERNET_FLAG_SECURE))
+    if ((res = NETCON_init(&lpwhr->netConnection, dwFlags & INTERNET_FLAG_SECURE)) != ERROR_SUCCESS)
     {
         InternetCloseHandle( handle );
         handle = NULL;
@@ -2715,6 +2488,63 @@ lend:
         WININET_Release( &lpwhr->hdr );
 
     TRACE("<-- %p (%p)\n", handle, lpwhr);
+    *ret = handle;
+    return res;
+}
+
+/***********************************************************************
+ *           HttpOpenRequestW (WININET.@)
+ *
+ * Open a HTTP request handle
+ *
+ * RETURNS
+ *    HINTERNET  a HTTP request handle on success
+ *    NULL 	 on failure
+ *
+ */
+HINTERNET WINAPI HttpOpenRequestW(HINTERNET hHttpSession,
+	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
+	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
+	DWORD dwFlags, DWORD_PTR dwContext)
+{
+    http_session_t *lpwhs;
+    HINTERNET handle = NULL;
+    DWORD res;
+
+    TRACE("(%p, %s, %s, %s, %s, %p, %08x, %08lx)\n", hHttpSession,
+          debugstr_w(lpszVerb), debugstr_w(lpszObjectName),
+          debugstr_w(lpszVersion), debugstr_w(lpszReferrer), lpszAcceptTypes,
+          dwFlags, dwContext);
+    if(lpszAcceptTypes!=NULL)
+    {
+        int i;
+        for(i=0;lpszAcceptTypes[i]!=NULL;i++)
+            TRACE("\taccept type: %s\n",debugstr_w(lpszAcceptTypes[i]));
+    }
+
+    lpwhs = (http_session_t*) WININET_GetObject( hHttpSession );
+    if (NULL == lpwhs ||  lpwhs->hdr.htype != WH_HHTTPSESSION)
+    {
+        res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+        goto lend;
+    }
+
+    /*
+     * My tests seem to show that the windows version does not
+     * become asynchronous until after this point. And anyhow
+     * if this call was asynchronous then how would you get the
+     * necessary HINTERNET pointer returned by this function.
+     *
+     */
+    res = HTTP_HttpOpenRequestW(lpwhs, lpszVerb, lpszObjectName,
+                                lpszVersion, lpszReferrer, lpszAcceptTypes,
+                                dwFlags, dwContext, &handle);
+lend:
+    if( lpwhs )
+        WININET_Release( &lpwhs->hdr );
+    TRACE("returning %p\n", handle);
+    if(res != ERROR_SUCCESS)
+        SetLastError(res);
     return handle;
 }
 
@@ -3237,275 +3067,6 @@ BOOL WINAPI HttpQueryInfoA(HINTERNET hHttpRequest, DWORD dwInfoLevel,
 }
 
 /***********************************************************************
- *           HttpSendRequestExA (WININET.@)
- *
- * Sends the specified request to the HTTP server and allows chunked
- * transfers.
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE, call GetLastError() for more information.
- */
-BOOL WINAPI HttpSendRequestExA(HINTERNET hRequest,
-			       LPINTERNET_BUFFERSA lpBuffersIn,
-			       LPINTERNET_BUFFERSA lpBuffersOut,
-			       DWORD dwFlags, DWORD_PTR dwContext)
-{
-    INTERNET_BUFFERSW BuffersInW;
-    BOOL rc = FALSE;
-    DWORD headerlen;
-    LPWSTR header = NULL;
-
-    TRACE("(%p, %p, %p, %08x, %08lx)\n", hRequest, lpBuffersIn,
-	    lpBuffersOut, dwFlags, dwContext);
-
-    if (lpBuffersIn)
-    {
-        BuffersInW.dwStructSize = sizeof(LPINTERNET_BUFFERSW);
-        if (lpBuffersIn->lpcszHeader)
-        {
-            headerlen = MultiByteToWideChar(CP_ACP,0,lpBuffersIn->lpcszHeader,
-                    lpBuffersIn->dwHeadersLength,0,0);
-            header = HeapAlloc(GetProcessHeap(),0,headerlen*sizeof(WCHAR));
-            if (!(BuffersInW.lpcszHeader = header))
-            {
-                INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-                return FALSE;
-            }
-            BuffersInW.dwHeadersLength = MultiByteToWideChar(CP_ACP, 0,
-                    lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
-                    header, headerlen);
-        }
-        else
-            BuffersInW.lpcszHeader = NULL;
-        BuffersInW.dwHeadersTotal = lpBuffersIn->dwHeadersTotal;
-        BuffersInW.lpvBuffer = lpBuffersIn->lpvBuffer;
-        BuffersInW.dwBufferLength = lpBuffersIn->dwBufferLength;
-        BuffersInW.dwBufferTotal = lpBuffersIn->dwBufferTotal;
-        BuffersInW.Next = NULL;
-    }
-
-    rc = HttpSendRequestExW(hRequest, lpBuffersIn ? &BuffersInW : NULL, NULL, dwFlags, dwContext);
-
-    HeapFree(GetProcessHeap(),0,header);
-
-    return rc;
-}
-
-/***********************************************************************
- *           HttpSendRequestExW (WININET.@)
- *
- * Sends the specified request to the HTTP server and allows chunked
- * transfers
- *
- * RETURNS
- *  Success: TRUE
- *  Failure: FALSE, call GetLastError() for more information.
- */
-BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
-                   LPINTERNET_BUFFERSW lpBuffersIn,
-                   LPINTERNET_BUFFERSW lpBuffersOut,
-                   DWORD dwFlags, DWORD_PTR dwContext)
-{
-    BOOL ret = FALSE;
-    http_request_t *lpwhr;
-    http_session_t *lpwhs;
-    appinfo_t *hIC;
-
-    TRACE("(%p, %p, %p, %08x, %08lx)\n", hRequest, lpBuffersIn,
-            lpBuffersOut, dwFlags, dwContext);
-
-    lpwhr = (http_request_t*) WININET_GetObject( hRequest );
-
-    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-        goto lend;
-    }
-
-    lpwhs = lpwhr->lpHttpSession;
-    assert(lpwhs->hdr.htype == WH_HHTTPSESSION);
-    hIC = lpwhs->lpAppInfo;
-    assert(hIC->hdr.htype == WH_HINIT);
-
-    if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
-    {
-        WORKREQUEST workRequest;
-        struct WORKREQ_HTTPSENDREQUESTW *req;
-
-        workRequest.asyncproc = AsyncHttpSendRequestProc;
-        workRequest.hdr = WININET_AddRef( &lpwhr->hdr );
-        req = &workRequest.u.HttpSendRequestW;
-        if (lpBuffersIn)
-        {
-            DWORD size;
-
-            if (lpBuffersIn->dwHeadersLength == ~0u)
-                size = (strlenW( lpBuffersIn->lpcszHeader ) + 1) * sizeof(WCHAR);
-            else
-                size = lpBuffersIn->dwHeadersLength * sizeof(WCHAR);
-
-            req->lpszHeader = HeapAlloc( GetProcessHeap(), 0, size );
-            memcpy( req->lpszHeader, lpBuffersIn->lpcszHeader, size );
-
-            req->dwHeaderLength = lpBuffersIn->dwHeadersLength;
-            req->lpOptional = lpBuffersIn->lpvBuffer;
-            req->dwOptionalLength = lpBuffersIn->dwBufferLength;
-            req->dwContentLength = lpBuffersIn->dwBufferTotal;
-        }
-        else
-        {
-            req->lpszHeader = NULL;
-            req->dwHeaderLength = 0;
-            req->lpOptional = NULL;
-            req->dwOptionalLength = 0;
-            req->dwContentLength = 0;
-        }
-
-        req->bEndRequest = FALSE;
-
-        INTERNET_AsyncCall(&workRequest);
-        /*
-         * This is from windows.
-         */
-        INTERNET_SetLastError(ERROR_IO_PENDING);
-    }
-    else
-    {
-        if (lpBuffersIn)
-            ret = HTTP_HttpSendRequestW(lpwhr, lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
-                                        lpBuffersIn->lpvBuffer, lpBuffersIn->dwBufferLength,
-                                        lpBuffersIn->dwBufferTotal, FALSE);
-        else
-            ret = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, FALSE);
-    }
-
-lend:
-    if ( lpwhr )
-        WININET_Release( &lpwhr->hdr );
-
-    TRACE("<---\n");
-    return ret;
-}
-
-/***********************************************************************
- *           HttpSendRequestW (WININET.@)
- *
- * Sends the specified request to the HTTP server
- *
- * RETURNS
- *    TRUE  on success
- *    FALSE on failure
- *
- */
-BOOL WINAPI HttpSendRequestW(HINTERNET hHttpRequest, LPCWSTR lpszHeaders,
-	DWORD dwHeaderLength, LPVOID lpOptional ,DWORD dwOptionalLength)
-{
-    http_request_t *lpwhr;
-    http_session_t *lpwhs = NULL;
-    appinfo_t *hIC = NULL;
-    BOOL r;
-
-    TRACE("%p, %s, %i, %p, %i)\n", hHttpRequest,
-            debugstr_wn(lpszHeaders, dwHeaderLength), dwHeaderLength, lpOptional, dwOptionalLength);
-
-    lpwhr = (http_request_t*) WININET_GetObject( hHttpRequest );
-    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-	r = FALSE;
-        goto lend;
-    }
-
-    lpwhs = lpwhr->lpHttpSession;
-    if (NULL == lpwhs ||  lpwhs->hdr.htype != WH_HHTTPSESSION)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-	r = FALSE;
-        goto lend;
-    }
-
-    hIC = lpwhs->lpAppInfo;
-    if (NULL == hIC ||  hIC->hdr.htype != WH_HINIT)
-    {
-        INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
-	r = FALSE;
-        goto lend;
-    }
-
-    if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
-    {
-        WORKREQUEST workRequest;
-        struct WORKREQ_HTTPSENDREQUESTW *req;
-
-        workRequest.asyncproc = AsyncHttpSendRequestProc;
-        workRequest.hdr = WININET_AddRef( &lpwhr->hdr );
-        req = &workRequest.u.HttpSendRequestW;
-        if (lpszHeaders)
-        {
-            DWORD size;
-
-            if (dwHeaderLength == ~0u) size = (strlenW(lpszHeaders) + 1) * sizeof(WCHAR);
-            else size = dwHeaderLength * sizeof(WCHAR);
-
-            req->lpszHeader = HeapAlloc(GetProcessHeap(), 0, size);
-            memcpy(req->lpszHeader, lpszHeaders, size);
-        }
-        else
-            req->lpszHeader = 0;
-        req->dwHeaderLength = dwHeaderLength;
-        req->lpOptional = lpOptional;
-        req->dwOptionalLength = dwOptionalLength;
-        req->dwContentLength = dwOptionalLength;
-        req->bEndRequest = TRUE;
-
-        INTERNET_AsyncCall(&workRequest);
-        /*
-         * This is from windows.
-         */
-        INTERNET_SetLastError(ERROR_IO_PENDING);
-        r = FALSE;
-    }
-    else
-    {
-	r = HTTP_HttpSendRequestW(lpwhr, lpszHeaders,
-		dwHeaderLength, lpOptional, dwOptionalLength,
-		dwOptionalLength, TRUE);
-    }
-lend:
-    if( lpwhr )
-        WININET_Release( &lpwhr->hdr );
-    return r;
-}
-
-/***********************************************************************
- *           HttpSendRequestA (WININET.@)
- *
- * Sends the specified request to the HTTP server
- *
- * RETURNS
- *    TRUE  on success
- *    FALSE on failure
- *
- */
-BOOL WINAPI HttpSendRequestA(HINTERNET hHttpRequest, LPCSTR lpszHeaders,
-	DWORD dwHeaderLength, LPVOID lpOptional ,DWORD dwOptionalLength)
-{
-    BOOL result;
-    LPWSTR szHeaders=NULL;
-    DWORD nLen=dwHeaderLength;
-    if(lpszHeaders!=NULL)
-    {
-        nLen=MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,NULL,0);
-        szHeaders=HeapAlloc(GetProcessHeap(),0,nLen*sizeof(WCHAR));
-        MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,szHeaders,nLen);
-    }
-    result=HttpSendRequestW(hHttpRequest, szHeaders, nLen, lpOptional, dwOptionalLength);
-    HeapFree(GetProcessHeap(),0,szHeaders);
-    return result;
-}
-
-/***********************************************************************
  *           HTTP_GetRedirectURL (internal)
  */
 static LPWSTR HTTP_GetRedirectURL(http_request_t *lpwhr, LPCWSTR lpszUrl)
@@ -3570,7 +3131,7 @@ static LPWSTR HTTP_GetRedirectURL(http_request_t *lpwhr, LPCWSTR lpszUrl)
 /***********************************************************************
  *           HTTP_HandleRedirect (internal)
  */
-static BOOL HTTP_HandleRedirect(http_request_t *lpwhr, LPCWSTR lpszUrl)
+static DWORD HTTP_HandleRedirect(http_request_t *lpwhr, LPCWSTR lpszUrl)
 {
     http_session_t *lpwhs = lpwhr->lpHttpSession;
     appinfo_t *hIC = lpwhs->lpAppInfo;
@@ -3608,7 +3169,7 @@ static BOOL HTTP_HandleRedirect(http_request_t *lpwhr, LPCWSTR lpszUrl)
         urlComponents.lpszExtraInfo = NULL;
         urlComponents.dwExtraInfoLength = 0;
         if(!InternetCrackUrlW(lpszUrl, strlenW(lpszUrl), 0, &urlComponents))
-            return FALSE;
+            return INTERNET_GetLastError();
 
         if (!strncmpW(szHttp, urlComponents.lpszScheme, strlenW(szHttp)) &&
             (lpwhr->hdr.dwFlags & INTERNET_FLAG_SECURE))
@@ -3675,13 +3236,20 @@ static BOOL HTTP_HandleRedirect(http_request_t *lpwhr, LPCWSTR lpszUrl)
         {
             if (strcmpiW(lpwhs->lpszServerName, hostName) || lpwhs->nServerPort != urlComponents.nPort)
             {
+                DWORD res;
+
                 HeapFree(GetProcessHeap(), 0, lpwhs->lpszServerName);
                 lpwhs->lpszServerName = heap_strdupW(hostName);
                 lpwhs->nServerPort = urlComponents.nPort;
 
                 NETCON_close(&lpwhr->netConnection);
-                if (!HTTP_ResolveName(lpwhr)) return FALSE;
-                if (!NETCON_init(&lpwhr->netConnection, lpwhr->hdr.dwFlags & INTERNET_FLAG_SECURE)) return FALSE;
+                if ((res = HTTP_ResolveName(lpwhr)) != ERROR_SUCCESS)
+                    return res;
+
+                res = NETCON_init(&lpwhr->netConnection, lpwhr->hdr.dwFlags & INTERNET_FLAG_SECURE);
+                if (res != ERROR_SUCCESS)
+                    return res;
+
                 lpwhr->read_pos = lpwhr->read_size = 0;
                 lpwhr->read_chunked = FALSE;
             }
@@ -3718,7 +3286,7 @@ static BOOL HTTP_HandleRedirect(http_request_t *lpwhr, LPCWSTR lpszUrl)
     if (0 <= index)
         HTTP_DeleteCustomHeader(lpwhr, index);
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 /***********************************************************************
@@ -3744,7 +3312,7 @@ static LPWSTR HTTP_build_req( LPCWSTR *list, int len )
     return str;
 }
 
-static BOOL HTTP_SecureProxyConnect(http_request_t *lpwhr)
+static DWORD HTTP_SecureProxyConnect(http_request_t *lpwhr)
 {
     LPWSTR lpszPath;
     LPWSTR requestString;
@@ -3752,7 +3320,7 @@ static BOOL HTTP_SecureProxyConnect(http_request_t *lpwhr)
     INT cnt;
     INT responseLen;
     char *ascii_req;
-    BOOL ret;
+    DWORD res;
     static const WCHAR szConnect[] = {'C','O','N','N','E','C','T',0};
     static const WCHAR szFormat[] = {'%','s',':','%','d',0};
     http_session_t *lpwhs = lpwhr->lpHttpSession;
@@ -3774,16 +3342,16 @@ static BOOL HTTP_SecureProxyConnect(http_request_t *lpwhr)
 
     TRACE("full request -> %s\n", debugstr_an( ascii_req, len ) );
 
-    ret = NETCON_send( &lpwhr->netConnection, ascii_req, len, 0, &cnt );
+    res = NETCON_send( &lpwhr->netConnection, ascii_req, len, 0, &cnt );
     HeapFree( GetProcessHeap(), 0, ascii_req );
-    if (!ret || cnt < 0)
-        return FALSE;
+    if (res != ERROR_SUCCESS)
+        return res;
 
     responseLen = HTTP_GetResponseHeaders( lpwhr, TRUE );
     if (!responseLen)
-        return FALSE;
+        return ERROR_HTTP_INVALID_HEADER;
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 static void HTTP_InsertCookies(http_request_t *lpwhr)
@@ -3826,12 +3394,12 @@ static void HTTP_InsertCookies(http_request_t *lpwhr)
  *    FALSE on failure
  *
  */
-BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
+static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
 	DWORD dwHeaderLength, LPVOID lpOptional, DWORD dwOptionalLength,
 	DWORD dwContentLength, BOOL bEndRequest)
 {
     INT cnt;
-    BOOL bSuccess = FALSE, redirected = FALSE;
+    BOOL redirected = FALSE;
     LPWSTR requestString = NULL;
     INT responseLen;
     BOOL loop_next;
@@ -3840,6 +3408,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
     static const WCHAR szContentLength[] =
         { 'C','o','n','t','e','n','t','-','L','e','n','g','t','h',':',' ','%','l','i','\r','\n',0 };
     WCHAR contentLengthStr[sizeof szContentLength/2 /* includes \r\n */ + 20 /* int */ ];
+    DWORD res;
 
     TRACE("--> %p\n", lpwhr);
 
@@ -3929,7 +3498,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
         TRACE("Request header -> %s\n", debugstr_w(requestString) );
 
         /* Send the request and store the results */
-        if (!HTTP_OpenConnection(lpwhr))
+        if ((res = HTTP_OpenConnection(lpwhr)) != ERROR_SUCCESS)
             goto lend;
 
         /* send the request as ASCII, tack on the optional data */
@@ -3949,7 +3518,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
         INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                               INTERNET_STATUS_SENDING_REQUEST, NULL, 0);
 
-        NETCON_send(&lpwhr->netConnection, ascii_req, len, 0, &cnt);
+        res = NETCON_send(&lpwhr->netConnection, ascii_req, len, 0, &cnt);
         HeapFree( GetProcessHeap(), 0, ascii_req );
 
         lpwhr->dwBytesWritten = dwOptionalLength;
@@ -3966,12 +3535,10 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
             INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                                 INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
     
-            if (cnt < 0)
+            if (res != ERROR_SUCCESS)
                 goto lend;
     
             responseLen = HTTP_GetResponseHeaders(lpwhr, TRUE);
-            if (responseLen)
-                bSuccess = TRUE;
     
             INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                                 INTERNET_STATUS_RESPONSE_RECEIVED, &responseLen,
@@ -3986,7 +3553,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                                      &dwStatusCode,&dwBufferSize,NULL))
                 dwStatusCode = 0;
 
-            if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTO_REDIRECT) && bSuccess)
+            if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTO_REDIRECT) && responseLen)
             {
                 WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
                 dwBufferSize=sizeof(szNewLocation);
@@ -4003,8 +3570,8 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                     {
                         INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext, INTERNET_STATUS_REDIRECT,
                                               new_url, (strlenW(new_url) + 1) * sizeof(WCHAR));
-                        bSuccess = HTTP_HandleRedirect(lpwhr, new_url);
-                        if (bSuccess)
+                        res = HTTP_HandleRedirect(lpwhr, new_url);
+                        if (res == ERROR_SUCCESS)
                         {
                             HeapFree(GetProcessHeap(), 0, requestString);
                             loop_next = TRUE;
@@ -4014,7 +3581,7 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                     redirected = TRUE;
                 }
             }
-            if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTH) && bSuccess)
+            if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTH) && res == ERROR_SUCCESS)
             {
                 WCHAR szAuthValue[2048];
                 dwBufferSize=2048;
@@ -4054,11 +3621,11 @@ BOOL WINAPI HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
             }
         }
         else
-            bSuccess = TRUE;
+            res = ERROR_SUCCESS;
     }
     while (loop_next);
 
-    if(bSuccess) {
+    if(res == ERROR_SUCCESS) {
         WCHAR url[INTERNET_MAX_URL_LENGTH];
         WCHAR cacheFileName[MAX_PATH+1];
         BOOL b;
@@ -4091,23 +3658,12 @@ lend:
 
     if (lpwhr->lpHttpSession->lpAppInfo->hdr.dwFlags & INTERNET_FLAG_ASYNC)
     {
-        if (bSuccess)
-        {
-            if (lpwhr->dwBytesWritten == lpwhr->dwBytesToWrite) HTTP_ReceiveRequestData(lpwhr, TRUE);
-            else
-            {
-                iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
-                iar.dwError = 0;
-
-                INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
-                                  INTERNET_STATUS_REQUEST_COMPLETE, &iar,
-                                  sizeof(INTERNET_ASYNC_RESULT));
-            }
-        }
+        if (res == ERROR_SUCCESS && lpwhr->dwBytesWritten == lpwhr->dwBytesToWrite)
+            HTTP_ReceiveRequestData(lpwhr, TRUE);
         else
         {
             iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
-            iar.dwError = INTERNET_GetLastError();
+            iar.dwError = res;
 
             INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
                                   INTERNET_STATUS_REQUEST_COMPLETE, &iar,
@@ -4116,8 +3672,455 @@ lend:
     }
 
     TRACE("<--\n");
-    if (bSuccess) INTERNET_SetLastError(ERROR_SUCCESS);
-    return bSuccess;
+    return res;
+}
+
+/***********************************************************************
+ *
+ * Helper functions for the HttpSendRequest(Ex) functions
+ *
+ */
+static void AsyncHttpSendRequestProc(WORKREQUEST *workRequest)
+{
+    struct WORKREQ_HTTPSENDREQUESTW const *req = &workRequest->u.HttpSendRequestW;
+    http_request_t *lpwhr = (http_request_t*) workRequest->hdr;
+
+    TRACE("%p\n", lpwhr);
+
+    HTTP_HttpSendRequestW(lpwhr, req->lpszHeader,
+            req->dwHeaderLength, req->lpOptional, req->dwOptionalLength,
+            req->dwContentLength, req->bEndRequest);
+
+    HeapFree(GetProcessHeap(), 0, req->lpszHeader);
+}
+
+
+static DWORD HTTP_HttpEndRequestW(http_request_t *lpwhr, DWORD dwFlags, DWORD_PTR dwContext)
+{
+    INT responseLen;
+    DWORD dwBufferSize;
+    INTERNET_ASYNC_RESULT iar;
+    DWORD res = ERROR_SUCCESS;
+
+    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
+                  INTERNET_STATUS_RECEIVING_RESPONSE, NULL, 0);
+
+    responseLen = HTTP_GetResponseHeaders(lpwhr, TRUE);
+    if (!responseLen)
+        res = ERROR_HTTP_HEADER_NOT_FOUND;
+
+    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
+                  INTERNET_STATUS_RESPONSE_RECEIVED, &responseLen, sizeof(DWORD));
+
+    /* process cookies here. Is this right? */
+    HTTP_ProcessCookies(lpwhr);
+
+    if (!set_content_length( lpwhr )) HTTP_FinishedReading(lpwhr);
+
+    if (!(lpwhr->hdr.dwFlags & INTERNET_FLAG_NO_AUTO_REDIRECT))
+    {
+        DWORD dwCode,dwCodeLength = sizeof(DWORD);
+        if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_FLAG_NUMBER|HTTP_QUERY_STATUS_CODE, &dwCode, &dwCodeLength, NULL) &&
+            (dwCode == 302 || dwCode == 301 || dwCode == 303))
+        {
+            WCHAR *new_url, szNewLocation[INTERNET_MAX_URL_LENGTH];
+            dwBufferSize=sizeof(szNewLocation);
+            if (HTTP_HttpQueryInfoW(lpwhr, HTTP_QUERY_LOCATION, szNewLocation, &dwBufferSize, NULL))
+            {
+                if (strcmpW(lpwhr->lpszVerb, szGET) && strcmpW(lpwhr->lpszVerb, szHEAD))
+                {
+                    HeapFree(GetProcessHeap(), 0, lpwhr->lpszVerb);
+                    lpwhr->lpszVerb = heap_strdupW(szGET);
+                }
+                HTTP_DrainContent(lpwhr);
+                if ((new_url = HTTP_GetRedirectURL( lpwhr, szNewLocation )))
+                {
+                    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext, INTERNET_STATUS_REDIRECT,
+                                          new_url, (strlenW(new_url) + 1) * sizeof(WCHAR));
+                    res = HTTP_HandleRedirect(lpwhr, new_url);
+                    if (res == ERROR_SUCCESS)
+                        res = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, TRUE);
+                    HeapFree( GetProcessHeap(), 0, new_url );
+                }
+            }
+        }
+    }
+
+    iar.dwResult = (DWORD_PTR)lpwhr->hdr.hInternet;
+    iar.dwError = res;
+
+    INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
+                          INTERNET_STATUS_REQUEST_COMPLETE, &iar,
+                          sizeof(INTERNET_ASYNC_RESULT));
+    return res;
+}
+
+/***********************************************************************
+ *           HttpEndRequestA (WININET.@)
+ *
+ * Ends an HTTP request that was started by HttpSendRequestEx
+ *
+ * RETURNS
+ *    TRUE	if successful
+ *    FALSE	on failure
+ *
+ */
+BOOL WINAPI HttpEndRequestA(HINTERNET hRequest,
+        LPINTERNET_BUFFERSA lpBuffersOut, DWORD dwFlags, DWORD_PTR dwContext)
+{
+    TRACE("(%p, %p, %08x, %08lx)\n", hRequest, lpBuffersOut, dwFlags, dwContext);
+
+    if (lpBuffersOut)
+    {
+        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    return HttpEndRequestW(hRequest, NULL, dwFlags, dwContext);
+}
+
+static void AsyncHttpEndRequestProc(WORKREQUEST *work)
+{
+    struct WORKREQ_HTTPENDREQUESTW const *req = &work->u.HttpEndRequestW;
+    http_request_t *lpwhr = (http_request_t*)work->hdr;
+
+    TRACE("%p\n", lpwhr);
+
+    HTTP_HttpEndRequestW(lpwhr, req->dwFlags, req->dwContext);
+}
+
+/***********************************************************************
+ *           HttpEndRequestW (WININET.@)
+ *
+ * Ends an HTTP request that was started by HttpSendRequestEx
+ *
+ * RETURNS
+ *    TRUE	if successful
+ *    FALSE	on failure
+ *
+ */
+BOOL WINAPI HttpEndRequestW(HINTERNET hRequest,
+        LPINTERNET_BUFFERSW lpBuffersOut, DWORD dwFlags, DWORD_PTR dwContext)
+{
+    http_request_t *lpwhr;
+    DWORD res;
+
+    TRACE("-->\n");
+
+    if (lpBuffersOut)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+
+    lpwhr = (http_request_t*) WININET_GetObject( hRequest );
+
+    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
+    {
+        SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+        if (lpwhr)
+            WININET_Release( &lpwhr->hdr );
+        return FALSE;
+    }
+    lpwhr->hdr.dwFlags |= dwFlags;
+
+    if (lpwhr->lpHttpSession->lpAppInfo->hdr.dwFlags & INTERNET_FLAG_ASYNC)
+    {
+        WORKREQUEST work;
+        struct WORKREQ_HTTPENDREQUESTW *request;
+
+        work.asyncproc = AsyncHttpEndRequestProc;
+        work.hdr = WININET_AddRef( &lpwhr->hdr );
+
+        request = &work.u.HttpEndRequestW;
+        request->dwFlags = dwFlags;
+        request->dwContext = dwContext;
+
+        INTERNET_AsyncCall(&work);
+        res = ERROR_IO_PENDING;
+    }
+    else
+        res = HTTP_HttpEndRequestW(lpwhr, dwFlags, dwContext);
+
+    WININET_Release( &lpwhr->hdr );
+    TRACE("%u <--\n", res);
+    if(res != ERROR_SUCCESS)
+        SetLastError(res);
+    return res == ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           HttpSendRequestExA (WININET.@)
+ *
+ * Sends the specified request to the HTTP server and allows chunked
+ * transfers.
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE, call GetLastError() for more information.
+ */
+BOOL WINAPI HttpSendRequestExA(HINTERNET hRequest,
+			       LPINTERNET_BUFFERSA lpBuffersIn,
+			       LPINTERNET_BUFFERSA lpBuffersOut,
+			       DWORD dwFlags, DWORD_PTR dwContext)
+{
+    INTERNET_BUFFERSW BuffersInW;
+    BOOL rc = FALSE;
+    DWORD headerlen;
+    LPWSTR header = NULL;
+
+    TRACE("(%p, %p, %p, %08x, %08lx)\n", hRequest, lpBuffersIn,
+	    lpBuffersOut, dwFlags, dwContext);
+
+    if (lpBuffersIn)
+    {
+        BuffersInW.dwStructSize = sizeof(LPINTERNET_BUFFERSW);
+        if (lpBuffersIn->lpcszHeader)
+        {
+            headerlen = MultiByteToWideChar(CP_ACP,0,lpBuffersIn->lpcszHeader,
+                    lpBuffersIn->dwHeadersLength,0,0);
+            header = HeapAlloc(GetProcessHeap(),0,headerlen*sizeof(WCHAR));
+            if (!(BuffersInW.lpcszHeader = header))
+            {
+                INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+                return FALSE;
+            }
+            BuffersInW.dwHeadersLength = MultiByteToWideChar(CP_ACP, 0,
+                    lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
+                    header, headerlen);
+        }
+        else
+            BuffersInW.lpcszHeader = NULL;
+        BuffersInW.dwHeadersTotal = lpBuffersIn->dwHeadersTotal;
+        BuffersInW.lpvBuffer = lpBuffersIn->lpvBuffer;
+        BuffersInW.dwBufferLength = lpBuffersIn->dwBufferLength;
+        BuffersInW.dwBufferTotal = lpBuffersIn->dwBufferTotal;
+        BuffersInW.Next = NULL;
+    }
+
+    rc = HttpSendRequestExW(hRequest, lpBuffersIn ? &BuffersInW : NULL, NULL, dwFlags, dwContext);
+
+    HeapFree(GetProcessHeap(),0,header);
+
+    return rc;
+}
+
+/***********************************************************************
+ *           HttpSendRequestExW (WININET.@)
+ *
+ * Sends the specified request to the HTTP server and allows chunked
+ * transfers
+ *
+ * RETURNS
+ *  Success: TRUE
+ *  Failure: FALSE, call GetLastError() for more information.
+ */
+BOOL WINAPI HttpSendRequestExW(HINTERNET hRequest,
+                   LPINTERNET_BUFFERSW lpBuffersIn,
+                   LPINTERNET_BUFFERSW lpBuffersOut,
+                   DWORD dwFlags, DWORD_PTR dwContext)
+{
+    http_request_t *lpwhr;
+    http_session_t *lpwhs;
+    appinfo_t *hIC;
+    DWORD res;
+
+    TRACE("(%p, %p, %p, %08x, %08lx)\n", hRequest, lpBuffersIn,
+            lpBuffersOut, dwFlags, dwContext);
+
+    lpwhr = (http_request_t*) WININET_GetObject( hRequest );
+
+    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
+    {
+        res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+        goto lend;
+    }
+
+    lpwhs = lpwhr->lpHttpSession;
+    assert(lpwhs->hdr.htype == WH_HHTTPSESSION);
+    hIC = lpwhs->lpAppInfo;
+    assert(hIC->hdr.htype == WH_HINIT);
+
+    if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
+    {
+        WORKREQUEST workRequest;
+        struct WORKREQ_HTTPSENDREQUESTW *req;
+
+        workRequest.asyncproc = AsyncHttpSendRequestProc;
+        workRequest.hdr = WININET_AddRef( &lpwhr->hdr );
+        req = &workRequest.u.HttpSendRequestW;
+        if (lpBuffersIn)
+        {
+            DWORD size = 0;
+
+            if (lpBuffersIn->lpcszHeader)
+            {
+                if (lpBuffersIn->dwHeadersLength == ~0u)
+                    size = (strlenW( lpBuffersIn->lpcszHeader ) + 1) * sizeof(WCHAR);
+                else
+                    size = lpBuffersIn->dwHeadersLength * sizeof(WCHAR);
+
+                req->lpszHeader = HeapAlloc( GetProcessHeap(), 0, size );
+                memcpy( req->lpszHeader, lpBuffersIn->lpcszHeader, size );
+            }
+            else req->lpszHeader = NULL;
+
+            req->dwHeaderLength = size / sizeof(WCHAR);
+            req->lpOptional = lpBuffersIn->lpvBuffer;
+            req->dwOptionalLength = lpBuffersIn->dwBufferLength;
+            req->dwContentLength = lpBuffersIn->dwBufferTotal;
+        }
+        else
+        {
+            req->lpszHeader = NULL;
+            req->dwHeaderLength = 0;
+            req->lpOptional = NULL;
+            req->dwOptionalLength = 0;
+            req->dwContentLength = 0;
+        }
+
+        req->bEndRequest = FALSE;
+
+        INTERNET_AsyncCall(&workRequest);
+        /*
+         * This is from windows.
+         */
+        res = ERROR_IO_PENDING;
+    }
+    else
+    {
+        if (lpBuffersIn)
+            res = HTTP_HttpSendRequestW(lpwhr, lpBuffersIn->lpcszHeader, lpBuffersIn->dwHeadersLength,
+                                        lpBuffersIn->lpvBuffer, lpBuffersIn->dwBufferLength,
+                                        lpBuffersIn->dwBufferTotal, FALSE);
+        else
+            res = HTTP_HttpSendRequestW(lpwhr, NULL, 0, NULL, 0, 0, FALSE);
+    }
+
+lend:
+    if ( lpwhr )
+        WININET_Release( &lpwhr->hdr );
+
+    TRACE("<---\n");
+    if(res != ERROR_SUCCESS)
+        SetLastError(res);
+    return res == ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           HttpSendRequestW (WININET.@)
+ *
+ * Sends the specified request to the HTTP server
+ *
+ * RETURNS
+ *    TRUE  on success
+ *    FALSE on failure
+ *
+ */
+BOOL WINAPI HttpSendRequestW(HINTERNET hHttpRequest, LPCWSTR lpszHeaders,
+	DWORD dwHeaderLength, LPVOID lpOptional ,DWORD dwOptionalLength)
+{
+    http_request_t *lpwhr;
+    http_session_t *lpwhs = NULL;
+    appinfo_t *hIC = NULL;
+    DWORD res = ERROR_SUCCESS;
+
+    TRACE("%p, %s, %i, %p, %i)\n", hHttpRequest,
+            debugstr_wn(lpszHeaders, dwHeaderLength), dwHeaderLength, lpOptional, dwOptionalLength);
+
+    lpwhr = (http_request_t*) WININET_GetObject( hHttpRequest );
+    if (NULL == lpwhr || lpwhr->hdr.htype != WH_HHTTPREQ)
+    {
+        res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+        goto lend;
+    }
+
+    lpwhs = lpwhr->lpHttpSession;
+    if (NULL == lpwhs ||  lpwhs->hdr.htype != WH_HHTTPSESSION)
+    {
+        res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+        goto lend;
+    }
+
+    hIC = lpwhs->lpAppInfo;
+    if (NULL == hIC ||  hIC->hdr.htype != WH_HINIT)
+    {
+        res = ERROR_INTERNET_INCORRECT_HANDLE_TYPE;
+        goto lend;
+    }
+
+    if (hIC->hdr.dwFlags & INTERNET_FLAG_ASYNC)
+    {
+        WORKREQUEST workRequest;
+        struct WORKREQ_HTTPSENDREQUESTW *req;
+
+        workRequest.asyncproc = AsyncHttpSendRequestProc;
+        workRequest.hdr = WININET_AddRef( &lpwhr->hdr );
+        req = &workRequest.u.HttpSendRequestW;
+        if (lpszHeaders)
+        {
+            DWORD size;
+
+            if (dwHeaderLength == ~0u) size = (strlenW(lpszHeaders) + 1) * sizeof(WCHAR);
+            else size = dwHeaderLength * sizeof(WCHAR);
+
+            req->lpszHeader = HeapAlloc(GetProcessHeap(), 0, size);
+            memcpy(req->lpszHeader, lpszHeaders, size);
+        }
+        else
+            req->lpszHeader = 0;
+        req->dwHeaderLength = dwHeaderLength;
+        req->lpOptional = lpOptional;
+        req->dwOptionalLength = dwOptionalLength;
+        req->dwContentLength = dwOptionalLength;
+        req->bEndRequest = TRUE;
+
+        INTERNET_AsyncCall(&workRequest);
+        /*
+         * This is from windows.
+         */
+        res = ERROR_IO_PENDING;
+    }
+    else
+    {
+	res = HTTP_HttpSendRequestW(lpwhr, lpszHeaders,
+		dwHeaderLength, lpOptional, dwOptionalLength,
+		dwOptionalLength, TRUE);
+    }
+lend:
+    if( lpwhr )
+        WININET_Release( &lpwhr->hdr );
+
+    if(res != ERROR_SUCCESS)
+        SetLastError(res);
+    return res == ERROR_SUCCESS;
+}
+
+/***********************************************************************
+ *           HttpSendRequestA (WININET.@)
+ *
+ * Sends the specified request to the HTTP server
+ *
+ * RETURNS
+ *    TRUE  on success
+ *    FALSE on failure
+ *
+ */
+BOOL WINAPI HttpSendRequestA(HINTERNET hHttpRequest, LPCSTR lpszHeaders,
+	DWORD dwHeaderLength, LPVOID lpOptional ,DWORD dwOptionalLength)
+{
+    BOOL result;
+    LPWSTR szHeaders=NULL;
+    DWORD nLen=dwHeaderLength;
+    if(lpszHeaders!=NULL)
+    {
+        nLen=MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,NULL,0);
+        szHeaders=HeapAlloc(GetProcessHeap(),0,nLen*sizeof(WCHAR));
+        MultiByteToWideChar(CP_ACP,0,lpszHeaders,dwHeaderLength,szHeaders,nLen);
+    }
+    result=HttpSendRequestW(hHttpRequest, szHeaders, nLen, lpOptional, dwOptionalLength);
+    HeapFree(GetProcessHeap(),0,szHeaders);
+    return result;
 }
 
 /***********************************************************************
@@ -4303,29 +4306,26 @@ lerror:
  *   TRUE  on success
  *   FALSE on failure
  */
-static BOOL HTTP_OpenConnection(http_request_t *lpwhr)
+static DWORD HTTP_OpenConnection(http_request_t *lpwhr)
 {
-    BOOL bSuccess = FALSE;
     http_session_t *lpwhs;
     appinfo_t *hIC = NULL;
     char szaddr[INET6_ADDRSTRLEN];
     const void *addr;
+    DWORD res = ERROR_SUCCESS;
 
     TRACE("-->\n");
 
 
     if (lpwhr->hdr.htype != WH_HHTTPREQ)
     {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        res = ERROR_INVALID_PARAMETER;
         goto lend;
     }
 
     if (NETCON_connected(&lpwhr->netConnection))
-    {
-        bSuccess = TRUE;
         goto lend;
-    }
-    if (!HTTP_ResolveName(lpwhr)) goto lend;
+    if ((res = HTTP_ResolveName(lpwhr)) != ERROR_SUCCESS) goto lend;
 
     lpwhs = lpwhr->lpHttpSession;
 
@@ -4340,8 +4340,7 @@ static BOOL HTTP_OpenConnection(http_request_t *lpwhr)
         break;
     default:
         WARN("unsupported family %d\n", lpwhs->socketAddress.ss_family);
-        INTERNET_SetLastError(ERROR_INTERNET_NAME_NOT_RESOLVED);
-        return FALSE;
+        return ERROR_INTERNET_NAME_NOT_RESOLVED;
     }
     inet_ntop(lpwhs->socketAddress.ss_family, addr, szaddr, sizeof(szaddr));
     INTERNET_SendCallback(&lpwhr->hdr, lpwhr->hdr.dwContext,
@@ -4349,15 +4348,16 @@ static BOOL HTTP_OpenConnection(http_request_t *lpwhr)
                           szaddr,
                           strlen(szaddr)+1);
 
-    if (!NETCON_create(&lpwhr->netConnection, lpwhs->socketAddress.ss_family,
-                         SOCK_STREAM, 0))
+    res = NETCON_create(&lpwhr->netConnection, lpwhs->socketAddress.ss_family, SOCK_STREAM, 0);
+    if (res != ERROR_SUCCESS)
     {
-        WARN("Socket creation failed: %u\n", INTERNET_GetLastError());
+        WARN("Socket creation failed: %u\n", res);
         goto lend;
     }
 
-    if (!NETCON_connect(&lpwhr->netConnection, (struct sockaddr *)&lpwhs->socketAddress,
-                      lpwhs->sa_len))
+    res = NETCON_connect(&lpwhr->netConnection, (struct sockaddr *)&lpwhs->socketAddress,
+                         lpwhs->sa_len);
+    if(res != ERROR_SUCCESS)
        goto lend;
 
     if (lpwhr->hdr.dwFlags & INTERNET_FLAG_SECURE)
@@ -4368,10 +4368,11 @@ static BOOL HTTP_OpenConnection(http_request_t *lpwhr)
          * behaviour to be more correct and to not cause any incompatibilities
          * because using a secure connection through a proxy server is a rare
          * case that would be hard for anyone to depend on */
-        if (hIC->lpszProxy && !HTTP_SecureProxyConnect(lpwhr))
+        if (hIC->lpszProxy && (res = HTTP_SecureProxyConnect(lpwhr)) != ERROR_SUCCESS)
             goto lend;
 
-        if (!NETCON_secure_connect(&lpwhr->netConnection, lpwhs->lpszHostName))
+        res = NETCON_secure_connect(&lpwhr->netConnection, lpwhs->lpszHostName);
+        if(res != ERROR_SUCCESS)
         {
             WARN("Couldn't connect securely to host\n");
             goto lend;
@@ -4382,14 +4383,12 @@ static BOOL HTTP_OpenConnection(http_request_t *lpwhr)
                           INTERNET_STATUS_CONNECTED_TO_SERVER,
                           szaddr, strlen(szaddr)+1);
 
-    bSuccess = TRUE;
-
 lend:
     lpwhr->read_pos = lpwhr->read_size = 0;
     lpwhr->read_chunked = FALSE;
 
-    TRACE("%d <--\n", bSuccess);
-    return bSuccess;
+    TRACE("%d <--\n", res);
+    return res;
 }
 
 
@@ -4646,12 +4645,12 @@ static LPWSTR * HTTP_InterpretHttpHeader(LPCWSTR buffer)
 
 #define COALESCEFLAGS (HTTP_ADDHDR_FLAG_COALESCE|HTTP_ADDHDR_FLAG_COALESCE_WITH_COMMA|HTTP_ADDHDR_FLAG_COALESCE_WITH_SEMICOLON)
 
-static BOOL HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
+static DWORD HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR value, DWORD dwModifier)
 {
     LPHTTPHEADERW lphttpHdr = NULL;
-    BOOL bSuccess = FALSE;
     INT index = -1;
     BOOL request_only = dwModifier & HTTP_ADDHDR_FLAG_REQ;
+    DWORD res = ERROR_HTTP_INVALID_HEADER;
 
     TRACE("--> %s: %s - 0x%08x\n", debugstr_w(field), debugstr_w(value), dwModifier);
 
@@ -4667,9 +4666,7 @@ static BOOL HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR val
     if (index >= 0)
     {
         if (dwModifier & HTTP_ADDHDR_FLAG_ADD_IF_NEW)
-        {
-            return FALSE;
-        }
+            return ERROR_HTTP_INVALID_HEADER;
         lphttpHdr = &lpwhr->pCustHeaders[index];
     }
     else if (value)
@@ -4686,7 +4683,7 @@ static BOOL HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR val
         return HTTP_InsertCustomHeader(lpwhr, &hdr);
     }
     /* no value to delete */
-    else return TRUE;
+    else return ERROR_SUCCESS;
 
     if (dwModifier & HTTP_ADDHDR_FLAG_REQ)
 	    lphttpHdr->wFlags |= HDR_ISREQUEST;
@@ -4711,7 +4708,7 @@ static BOOL HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR val
             return HTTP_InsertCustomHeader(lpwhr, &hdr);
         }
 
-        return TRUE;
+        return ERROR_SUCCESS;
     }
     else if (dwModifier & COALESCEFLAGS)
     {
@@ -4749,16 +4746,16 @@ static BOOL HTTP_ProcessHeader(http_request_t *lpwhr, LPCWSTR field, LPCWSTR val
 
             memcpy(&lphttpHdr->lpszValue[origlen], value, valuelen*sizeof(WCHAR));
             lphttpHdr->lpszValue[len] = '\0';
-            bSuccess = TRUE;
+            res = ERROR_SUCCESS;
         }
         else
         {
             WARN("HeapReAlloc (%d bytes) failed\n",len+1);
-            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+            res = ERROR_OUTOFMEMORY;
         }
     }
-    TRACE("<-- %d\n",bSuccess);
-    return bSuccess;
+    TRACE("<-- %d\n", res);
+    return res;
 }
 
 
@@ -4829,11 +4826,10 @@ static INT HTTP_GetCustomHeaderIndex(http_request_t *lpwhr, LPCWSTR lpszField,
  * Insert header into array
  *
  */
-static BOOL HTTP_InsertCustomHeader(http_request_t *lpwhr, LPHTTPHEADERW lpHdr)
+static DWORD HTTP_InsertCustomHeader(http_request_t *lpwhr, LPHTTPHEADERW lpHdr)
 {
     INT count;
     LPHTTPHEADERW lph = NULL;
-    BOOL r = FALSE;
 
     TRACE("--> %s: %s\n", debugstr_w(lpHdr->lpszField), debugstr_w(lpHdr->lpszValue));
     count = lpwhr->nCustHeaders + 1;
@@ -4842,22 +4838,17 @@ static BOOL HTTP_InsertCustomHeader(http_request_t *lpwhr, LPHTTPHEADERW lpHdr)
     else
 	lph = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(HTTPHEADERW) * count);
 
-    if (NULL != lph)
-    {
-	lpwhr->pCustHeaders = lph;
-        lpwhr->pCustHeaders[count-1].lpszField = heap_strdupW(lpHdr->lpszField);
-        lpwhr->pCustHeaders[count-1].lpszValue = heap_strdupW(lpHdr->lpszValue);
-        lpwhr->pCustHeaders[count-1].wFlags = lpHdr->wFlags;
-        lpwhr->pCustHeaders[count-1].wCount= lpHdr->wCount;
-	lpwhr->nCustHeaders++;
-        r = TRUE;
-    }
-    else
-    {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-    }
+    if (!lph)
+        return ERROR_OUTOFMEMORY;
 
-    return r;
+    lpwhr->pCustHeaders = lph;
+    lpwhr->pCustHeaders[count-1].lpszField = heap_strdupW(lpHdr->lpszField);
+    lpwhr->pCustHeaders[count-1].lpszValue = heap_strdupW(lpHdr->lpszValue);
+    lpwhr->pCustHeaders[count-1].wFlags = lpHdr->wFlags;
+    lpwhr->pCustHeaders[count-1].wCount= lpHdr->wCount;
+    lpwhr->nCustHeaders++;
+
+    return ERROR_SUCCESS;
 }
 
 
@@ -4896,9 +4887,9 @@ static BOOL HTTP_VerifyValidHeader(http_request_t *lpwhr, LPCWSTR field)
 {
     /* Accept-Encoding is stripped from HTTP/1.0 requests. It is invalid */
     if (!strcmpW(lpwhr->lpszVersion, g_szHttp1_0) && !strcmpiW(field, szAccept_Encoding))
-        return FALSE;
+        return ERROR_HTTP_INVALID_HEADER;
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 /***********************************************************************

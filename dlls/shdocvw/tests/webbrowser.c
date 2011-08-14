@@ -139,6 +139,13 @@ static IWebBrowser2 *wb;
 static HWND container_hwnd, shell_embedding_hwnd;
 static BOOL is_downloading = FALSE;
 
+static int strcmp_wa(LPCWSTR strw, const char *stra)
+{
+    CHAR buf[512];
+    WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
+    return lstrcmpA(stra, buf);
+}
+
 static const char *debugstr_guid(REFIID riid)
 {
     static char buf[50];
@@ -1588,6 +1595,7 @@ static void test_ie_funcs(IUnknown *unk)
     int i;
     LONG hwnd;
     HRESULT hres;
+    BSTR sName;
 
     hres = IUnknown_QueryInterface(unk, &IID_IWebBrowser2, (void**)&wb);
     ok(hres == S_OK, "Could not get IWebBrowser2 interface: %08x\n", hres);
@@ -1806,6 +1814,12 @@ static void test_ie_funcs(IUnknown *unk)
 
     hres = IWebBrowser2_get_Application(wb, NULL);
     ok(hres == E_POINTER, "get_Application failed: %08x, expected E_POINTER\n", hres);
+
+    /* Name */
+    hres = IWebBrowser2_get_Name(wb, &sName);
+    ok(hres == S_OK, "getName failed: %08x, expected S_OK\n", hres);
+    ok(!strcmp_wa(sName, "Microsoft Web Browser Control"), "got '%s', expected 'Microsoft Web Browser Control'\n", wine_dbgstr_w(sName));
+    SysFreeString(sName);
 
     /* Quit */
 
@@ -2368,40 +2382,8 @@ static void test_WebBrowser(BOOL do_download)
     ok(ref == 0, "ref=%d, expected 0\n", ref);
 }
 
-static void gecko_installer_workaround(BOOL disable)
-{
-    HKEY hkey;
-    DWORD res;
-
-    static BOOL has_url = FALSE;
-    static char url[2048];
-
-    if(!disable && !has_url)
-        return;
-
-    res = RegOpenKey(HKEY_CURRENT_USER, "Software\\Wine\\MSHTML", &hkey);
-    if(res != ERROR_SUCCESS)
-        return;
-
-    if(disable) {
-        DWORD type, size = sizeof(url);
-
-        res = RegQueryValueEx(hkey, "GeckoUrl", NULL, &type, (PVOID)url, &size);
-        if(res == ERROR_SUCCESS && type == REG_SZ)
-            has_url = TRUE;
-
-        RegDeleteValue(hkey, "GeckoUrl");
-    }else {
-        RegSetValueEx(hkey, "GeckoUrl", 0, REG_SZ, (PVOID)url, lstrlenA(url)+1);
-    }
-
-    RegCloseKey(hkey);
-}
-
 START_TEST(webbrowser)
 {
-    gecko_installer_workaround(TRUE);
-
     container_hwnd = create_container_window();
 
     OleInitialize(NULL);
@@ -2412,6 +2394,4 @@ START_TEST(webbrowser)
     test_WebBrowser(TRUE);
 
     OleUninitialize();
-
-    gecko_installer_workaround(FALSE);
 }

@@ -90,6 +90,35 @@ MSVCRT_wchar_t* CDECL _wcsset( MSVCRT_wchar_t* str, MSVCRT_wchar_t c )
   return ret;
 }
 
+/******************************************************************
+ *		_wcsupr_s (MSVCRT.@)
+ *
+ */
+INT CDECL MSVCRT__wcsupr_s( MSVCRT_wchar_t* str, MSVCRT_size_t n )
+{
+  MSVCRT_wchar_t* ptr = str;
+
+  if (!str || !n)
+  {
+    if (str) *str = '\0';
+    *MSVCRT__errno() = MSVCRT_EINVAL;
+    return MSVCRT_EINVAL;
+  }
+
+  while (n--)
+  {
+    if (!*ptr) return 0;
+    *ptr = toupperW(*ptr);
+    ptr++;
+  }
+
+  /* MSDN claims that the function should return and set errno to
+   * ERANGE, which doesn't seem to be true based on the tests. */
+  *str = '\0';
+  *MSVCRT__errno() = MSVCRT_EINVAL;
+  return MSVCRT_EINVAL;
+}
+
 /*********************************************************************
  *		wcstod (MSVCRT.@)
  */
@@ -781,12 +810,9 @@ int CDECL MSVCRT_vsnprintf( char *str, unsigned int len,
     out.used = 0;
     out.len = len;
 
-    if( format )
-    {
-        sz = MultiByteToWideChar( CP_ACP, 0, format, -1, NULL, 0 );
-        formatW = HeapAlloc( GetProcessHeap(), 0, sz*sizeof(WCHAR) );
-        MultiByteToWideChar( CP_ACP, 0, format, -1, formatW, sz );
-    }
+    sz = MultiByteToWideChar( CP_ACP, 0, format, -1, NULL, 0 );
+    formatW = HeapAlloc( GetProcessHeap(), 0, sz*sizeof(WCHAR) );
+    MultiByteToWideChar( CP_ACP, 0, format, -1, formatW, sz );
 
     r = pf_vsnprintf( &out, formatW, valist );
 

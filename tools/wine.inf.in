@@ -456,7 +456,7 @@ HKLM,Software\Microsoft\DirectPlay\Service Providers\Serial Connection For Direc
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"APPDATA",,"%16410%"
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"ComSpec",0x00020000,"%11%\cmd.exe"
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"LOCALAPPDATA",,"%16412%"
-HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"PATH",0x00020002,"%11%;%10%"
+HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"PATH",0x00020002,"%11%;%10%;%11%\wbem"
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"ProgramFiles",,"%16422%"
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"SystemDrive",2,"c:"
 HKLM,System\CurrentControlSet\Control\Session Manager\Environment,"SYSTEMROOT",,"%10%"
@@ -540,8 +540,6 @@ HKLM,System\CurrentControlSet\Control\Session Manager,,,""
 HKLM,System\CurrentControlSet\Control\VMM32Files,,,""
 HKCU,AppEvents\Schemes\Apps\Explorer\Navigating\.Current,,,""
 HKCU,Software\Microsoft\Protected Storage System Provider,,,""
-HKLM,HARDWARE\DEVICEMAP\PARALLEL PORTS,,,""
-HKLM,HARDWARE\DEVICEMAP\SERIALCOMM,,,""
 ; Some apps requires at least four subkeys of Active Setup\Installed Components
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{44BBA855-CC51-11CF-AAFA-00AA00B6015F},,2,"DirectDrawEx"
 HKLM,SOFTWARE\Microsoft\Active Setup\Installed Components\{44BBA855-CC51-11CF-AAFA-00AA00B6015F},"ComponentID",2,"DirectDrawEx"
@@ -2423,6 +2421,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,mui,
 11,spool\drivers\color,
 11,spool\printers,
+11,wbem,
 10,,explorer.exe
 10,,hh.exe
 10,,notepad.exe

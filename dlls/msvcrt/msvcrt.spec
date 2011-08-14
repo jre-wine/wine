@@ -271,6 +271,7 @@
 @ cdecl _ftime32(ptr) MSVCRT__ftime32
 @ cdecl _ftime64(ptr) MSVCRT__ftime64
 @ cdecl -ret64 _ftol() ntdll._ftol
+@ cdecl -ret64 _ftol2_sse() ntdll._ftol #FIXME: SSE variant should be implemented
 @ cdecl _fullpath(ptr str long)
 @ cdecl _futime(long ptr)
 @ cdecl _futime32(long ptr)
@@ -548,6 +549,7 @@
 @ cdecl _wcsrev(wstr)
 @ cdecl _wcsset(wstr long)
 @ cdecl _wcsupr(wstr) ntdll._wcsupr
+@ cdecl _wcsupr_s(wstr long) MSVCRT__wcsupr_s
 @ cdecl _wctime(ptr) MSVCRT__wctime
 @ cdecl _wctime32(ptr) MSVCRT__wctime32
 @ cdecl _wctime64(ptr) MSVCRT__wctime64

@@ -287,7 +287,7 @@ static HWND create_updown_control(DWORD style)
     RECT rect;
 
     GetClientRect(parent_wnd, &rect);
-    updown = CreateUpDownControl(WS_CHILD | WS_BORDER | WS_VISIBLE | UDS_ALIGNRIGHT | style,
+    updown = CreateUpDownControl(WS_CHILD | WS_BORDER | WS_VISIBLE | style,
                                  0, 0, rect.right, rect.bottom, parent_wnd, 1, GetModuleHandleA(NULL), edit,
                                  100, 0, 50);
     if (!updown) return NULL;
@@ -304,7 +304,7 @@ static void test_updown_pos(void)
     HWND updown;
     int r;
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -365,7 +365,7 @@ static void test_updown_pos32(void)
     int r;
     int low, high;
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -437,7 +437,7 @@ static void test_updown_buddy(void)
 {
     HWND updown, buddyReturn;
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -462,7 +462,7 @@ static void test_updown_base(void)
     int r;
     CHAR text[10];
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -499,7 +499,7 @@ static void test_updown_base(void)
     DestroyWindow(updown);
 
     /* switch base with buddy attached */
-    updown = create_updown_control(UDS_SETBUDDYINT);
+    updown = create_updown_control(UDS_SETBUDDYINT | UDS_ALIGNRIGHT);
 
     r = SendMessage(updown, UDM_SETPOS, 0, 10);
     expect(50, r);
@@ -523,7 +523,7 @@ static void test_updown_unicode(void)
     HWND updown;
     int r;
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -559,10 +559,11 @@ static void test_updown_create(void)
 {
     CHAR text[MAX_PATH];
     HWND updown;
+    RECT r;
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
     ok(updown != NULL, "Failed to create updown control\n");
     ok_sequence(sequences, PARENT_SEQ_INDEX, add_updown_to_parent_seq, "add updown control to parent", TRUE);
     ok_sequence(sequences, EDIT_SEQ_INDEX, add_updown_with_edit_seq, "add updown control with edit", FALSE);
@@ -573,6 +574,55 @@ static void test_updown_create(void)
     ok(lstrlenA(text) == 0, "Expected empty string\n");
     ok_sequence(sequences, EDIT_SEQ_INDEX, get_edit_text_seq, "get edit text", FALSE);
 
+    DestroyWindow(updown);
+
+    /* create with zero width */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 0, 0,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.right = 0;
+    GetClientRect(updown, &r);
+    ok(r.right > 0, "Expected default width, got %d\n", r.right);
+    DestroyWindow(updown);
+    /* create with really small width */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 2, 0,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.right = 0;
+    GetClientRect(updown, &r);
+    ok(r.right != 2 && r.right > 0, "Expected default width, got %d\n", r.right);
+    DestroyWindow(updown);
+    /* create with width greater than default */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 100, 0,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.right = 0;
+    GetClientRect(updown, &r);
+    ok(r.right < 100 && r.right > 0, "Expected default width, got %d\n", r.right);
+    DestroyWindow(updown);
+    /* create with zero height, UDS_HORZ */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, UDS_HORZ | WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 0, 0,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.bottom = 0;
+    GetClientRect(updown, &r);
+    ok(r.bottom == 0, "Expected zero height, got %d\n", r.bottom);
+    DestroyWindow(updown);
+    /* create with really small height, UDS_HORZ */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, UDS_HORZ | WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 0, 2,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.bottom = 0;
+    GetClientRect(updown, &r);
+    ok(r.bottom == 0, "Expected zero height, got %d\n", r.bottom);
+    DestroyWindow(updown);
+    /* create with height greater than default, UDS_HORZ */
+    updown = CreateWindowA (UPDOWN_CLASSA, 0, UDS_HORZ | WS_CHILD | WS_BORDER | WS_VISIBLE, 0, 0, 0, 100,
+                   parent_wnd, (HMENU)(DWORD_PTR)1, GetModuleHandleA(NULL), 0);
+    ok(updown != NULL, "Failed to create updown control\n");
+    r.bottom = 0;
+    GetClientRect(updown, &r);
+    ok(r.bottom < 100 && r.bottom > 0, "Expected default height, got %d\n", r.bottom);
     DestroyWindow(updown);
 }
 
@@ -587,7 +637,7 @@ static void test_UDS_SETBUDDYINT(void)
     SetWindowTextA(edit, text);
 
     /* creating without UDS_SETBUDDYINT */
-    updown = create_updown_control(0);
+    updown = create_updown_control(UDS_ALIGNRIGHT);
     /* try to set UDS_SETBUDDYINT after creation */
     style = GetWindowLongA(updown, GWL_STYLE);
     SetWindowLongA(updown, GWL_STYLE, style | UDS_SETBUDDYINT);
@@ -599,7 +649,7 @@ static void test_UDS_SETBUDDYINT(void)
     DestroyWindow(updown);
 
     /* creating with UDS_SETBUDDYINT */
-    updown = create_updown_control(UDS_SETBUDDYINT);
+    updown = create_updown_control(UDS_SETBUDDYINT | UDS_ALIGNRIGHT);
     GetWindowTextA(edit, text, sizeof(text)/sizeof(CHAR));
     /* 50 is initial value here */
     ok(lstrcmpA(text, "50") == 0, "Expected '50', got '%s'\n", text);

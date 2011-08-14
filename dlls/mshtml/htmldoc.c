@@ -26,6 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "wininet.h"
 #include "ole2.h"
 #include "perhist.h"
 #include "mshtmdid.h"
@@ -610,15 +611,58 @@ static HRESULT WINAPI HTMLDocument_get_domain(IHTMLDocument2 *iface, BSTR *p)
 static HRESULT WINAPI HTMLDocument_put_cookie(IHTMLDocument2 *iface, BSTR v)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    BOOL bret;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    bret = InternetSetCookieExW(This->window->url, NULL, v, 0, 0);
+    if(!bret) {
+        FIXME("InternetSetCookieExW failed: %u\n", GetLastError());
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_get_cookie(IHTMLDocument2 *iface, BSTR *p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    DWORD size;
+    BOOL bret;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    size = 0;
+    bret = InternetGetCookieExW(This->window->url, NULL, NULL, &size, 0, NULL);
+    if(!bret) {
+        switch(GetLastError()) {
+        case ERROR_INSUFFICIENT_BUFFER:
+            break;
+        case ERROR_NO_MORE_ITEMS:
+            *p = NULL;
+            return S_OK;
+        default:
+            FIXME("InternetGetCookieExW failed: %u\n", GetLastError());
+            return HRESULT_FROM_WIN32(GetLastError());
+        }
+    }
+
+    if(!size) {
+        *p = NULL;
+        return S_OK;
+    }
+
+    *p = SysAllocStringLen(NULL, size-1);
+    if(!*p)
+        return E_OUTOFMEMORY;
+
+    bret = InternetGetCookieExW(This->window->url, NULL, *p, &size, 0, NULL);
+    if(!bret) {
+        ERR("InternetGetCookieExW failed: %u\n", GetLastError());
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLDocument_put_expando(IHTMLDocument2 *iface, VARIANT_BOOL v)
@@ -1706,6 +1750,8 @@ static BOOL htmldoc_qi(HTMLDocument *This, REFIID riid, void **ppv)
     return TRUE;
 }
 
+static cp_static_data_t HTMLDocumentEvents_data = { HTMLDocumentEvents_tid };
+
 static void init_doc(HTMLDocument *doc, IUnknown *unk_impl, IDispatchEx *dispex)
 {
     doc->lpHTMLDocument2Vtbl = &HTMLDocumentVtbl;
@@ -1727,9 +1773,9 @@ static void init_doc(HTMLDocument *doc, IUnknown *unk_impl, IDispatchEx *dispex)
     HTMLDocument_Hlink_Init(doc);
 
     ConnectionPointContainer_Init(&doc->cp_container, (IUnknown*)HTMLDOC(doc));
-    ConnectionPoint_Init(&doc->cp_propnotif, &doc->cp_container, &IID_IPropertyNotifySink);
-    ConnectionPoint_Init(&doc->cp_htmldocevents, &doc->cp_container, &DIID_HTMLDocumentEvents);
-    ConnectionPoint_Init(&doc->cp_htmldocevents2, &doc->cp_container, &DIID_HTMLDocumentEvents2);
+    ConnectionPoint_Init(&doc->cp_propnotif, &doc->cp_container, &IID_IPropertyNotifySink, NULL);
+    ConnectionPoint_Init(&doc->cp_htmldocevents, &doc->cp_container, &DIID_HTMLDocumentEvents, &HTMLDocumentEvents_data);
+    ConnectionPoint_Init(&doc->cp_htmldocevents2, &doc->cp_container, &DIID_HTMLDocumentEvents2, NULL);
 }
 
 static void destroy_htmldoc(HTMLDocument *This)
@@ -1765,6 +1811,8 @@ static void HTMLDocumentNode_destructor(HTMLDOMNode *iface)
 
     if(This->nsevent_listener)
         release_nsevents(This);
+    if(This->catmgr)
+        ICatInformation_Release(This->catmgr);
     if(This->secmgr)
         IInternetSecurityManager_Release(This->secmgr);
 
@@ -1823,6 +1871,8 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_ob
     doc->ref = 1;
 
     doc->basedoc.window = window;
+    if(window == doc_obj->basedoc.window)
+        doc->basedoc.cp_container.forward_container = &doc_obj->basedoc.cp_container;
 
     nsIDOMHTMLDocument_AddRef(nsdoc);
     doc->nsdoc = nsdoc;
@@ -1835,6 +1885,7 @@ HRESULT create_doc_from_nsdoc(nsIDOMHTMLDocument *nsdoc, HTMLDocumentObj *doc_ob
 
     HTMLDOMNode_Init(doc, &doc->node, (nsIDOMNode*)nsdoc);
     doc->node.vtbl = &HTMLDocumentNodeImplVtbl;
+    doc->node.cp_container = &doc->basedoc.cp_container;
 
     hres = CoInternetCreateSecurityManager(NULL, &doc->secmgr, 0);
     if(FAILED(hres)) {

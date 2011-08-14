@@ -114,12 +114,18 @@ static const ULONG DIRENTRY_NULL             = 0xFFFFFFFF;
  * module.
  */
 typedef struct StorageBaseImpl     StorageBaseImpl;
+typedef struct StorageBaseImplVtbl StorageBaseImplVtbl;
 typedef struct StorageImpl         StorageImpl;
 typedef struct BlockChainStream      BlockChainStream;
 typedef struct SmallBlockChainStream SmallBlockChainStream;
 typedef struct IEnumSTATSTGImpl      IEnumSTATSTGImpl;
 typedef struct DirEntry              DirEntry;
 typedef struct StgStreamImpl         StgStreamImpl;
+
+/*
+ * A reference to a directory entry in the file or a transacted cache.
+ */
+typedef ULONG DirRef;
 
 /*
  * This utility structure is used to read/write the information in a directory
@@ -129,11 +135,11 @@ struct DirEntry
 {
   WCHAR	         name[DIRENTRY_NAME_MAX_LEN];
   WORD	         sizeOfNameString;
-  BYTE	         propertyType;
-  ULONG          leftChild;
-  ULONG          rightChild;
-  ULONG          dirRootEntry;
-  GUID           propertyUniqueID;
+  BYTE	         stgType;
+  DirRef         leftChild;
+  DirRef         rightChild;
+  DirRef         dirRootEntry;
+  GUID           clsid;
   FILETIME       ctime;
   FILETIME       mtime;
   ULONG          startingBlock;
@@ -174,6 +180,7 @@ HRESULT        BIGBLOCKFILE_WriteAt(LPBIGBLOCKFILE This, ULARGE_INTEGER offset,
 void OLECONVERT_CreateOleStream(LPSTORAGE pStorage);
 HRESULT OLECONVERT_CreateCompObjStream(LPSTORAGE pStorage, LPCSTR strOleTypeName);
 
+
 /****************************************************************************
  * Storage32BaseImpl definitions.
  *
@@ -197,6 +204,11 @@ struct StorageBaseImpl
   struct list strmHead;
 
   /*
+   * Storage tracking list
+   */
+  struct list storageHead;
+
+  /*
    * Reference count of this object
    */
   LONG ref;
@@ -207,15 +219,14 @@ struct StorageBaseImpl
   StorageImpl* ancestorStorage;
 
   /*
-   * Index of the property for the root of
-   * this storage
+   * Index of the directory entry of this storage
    */
-  ULONG rootPropertySetIndex;
+  DirRef storageDirEntry;
 
   /*
-   * virtual Destructor method.
+   * virtual methods.
    */
-  void (*v_destructor)(StorageBaseImpl*);
+  const StorageBaseImplVtbl *baseVtbl;
 
   /*
    * flags that this storage was opened or created with
@@ -226,7 +237,23 @@ struct StorageBaseImpl
    * State bits appear to only be preserved while running. No in the stream
    */
   DWORD stateBits;
+
+  /* If set, this overrides the root storage name returned by IStorage_Stat */
+  WCHAR            filename[DIRENTRY_NAME_BUFFER_LEN];
+
+  BOOL             create;     /* Was the storage created or opened.
+                                  The behaviour of STGM_SIMPLE depends on this */
 };
+
+/* virtual methods for StorageBaseImpl objects */
+struct StorageBaseImplVtbl {
+  void (*Destroy)(StorageBaseImpl*);
+};
+
+static inline void StorageBaseImpl_Destroy(StorageBaseImpl *This)
+{
+  This->baseVtbl->Destroy(This);
+}
 
 /****************************************************************************
  * StorageBaseImpl stream list handlers
@@ -251,11 +278,6 @@ struct StorageImpl
    */
   HANDLE           hFile;      /* Physical support for the Docfile */
   LPOLESTR         pwcsName;   /* Full path of the document file */
-  BOOL             create;     /* Was the storage created or opened.
-                                  The behaviour of STGM_SIMPLE depends on this */
-
-  /* FIXME: should this be in Storage32BaseImpl ? */
-  WCHAR            filename[DIRENTRY_NAME_BUFFER_LEN];
 
   /*
    * File header
@@ -304,12 +326,12 @@ HRESULT StorageImpl_WriteRawDirEntry(
 
 BOOL StorageImpl_ReadDirEntry(
             StorageImpl*    This,
-            ULONG           index,
+            DirRef          index,
             DirEntry*       buffer);
 
 BOOL StorageImpl_WriteDirEntry(
             StorageImpl*        This,
-            ULONG               index,
+            DirRef              index,
             const DirEntry*     buffer);
 
 BlockChainStream* Storage32Impl_SmallBlocksToBigBlocks(
@@ -353,9 +375,9 @@ struct StgStreamImpl
   DWORD grfMode;
 
   /*
-   * Index of the property that owns (points to) this stream.
+   * Index of the directory entry that owns (points to) this stream.
    */
-  ULONG              ownerProperty;
+  DirRef             dirEntry;
 
   /*
    * Helper variable that contains the size of the stream
@@ -382,7 +404,7 @@ struct StgStreamImpl
 StgStreamImpl* StgStreamImpl_Construct(
 		StorageBaseImpl* parentStorage,
     DWORD            grfMode,
-    ULONG            ownerProperty);
+    DirRef           dirEntry);
 
 
 /******************************************************************************
@@ -419,8 +441,8 @@ void StorageUtl_WriteULargeInteger(BYTE* buffer, ULONG offset,
  const ULARGE_INTEGER *value);
 void StorageUtl_ReadGUID(const BYTE* buffer, ULONG offset, GUID* value);
 void StorageUtl_WriteGUID(BYTE* buffer, ULONG offset, const GUID* value);
-void StorageUtl_CopyDirEntryToSTATSTG(STATSTG* destination, const DirEntry* source,
- int statFlags);
+void StorageUtl_CopyDirEntryToSTATSTG(StorageBaseImpl *storage,STATSTG* destination,
+ const DirEntry* source, int statFlags);
 
 /****************************************************************************
  * BlockChainStream definitions.
@@ -432,7 +454,7 @@ struct BlockChainStream
 {
   StorageImpl* parentStorage;
   ULONG*       headOfStreamPlaceHolder;
-  ULONG        ownerPropertyIndex;
+  DirRef       ownerDirEntry;
   ULONG        lastBlockNoInSequence;
   ULONG        lastBlockNoInSequenceIndex;
   ULONG        tailIndex;
@@ -445,7 +467,7 @@ struct BlockChainStream
 BlockChainStream* BlockChainStream_Construct(
 		StorageImpl* parentStorage,
 		ULONG*         headOfStreamPlaceHolder,
-		ULONG          propertyIndex);
+		DirRef         dirEntry);
 
 void BlockChainStream_Destroy(
 		BlockChainStream* This);
@@ -477,7 +499,7 @@ BOOL BlockChainStream_SetSize(
 struct SmallBlockChainStream
 {
   StorageImpl* parentStorage;
-  ULONG          ownerPropertyIndex;
+  DirRef         ownerDirEntry;
   ULONG*         headOfStreamPlaceHolder;
 };
 
@@ -487,7 +509,7 @@ struct SmallBlockChainStream
 SmallBlockChainStream* SmallBlockChainStream_Construct(
            StorageImpl*   parentStorage,
            ULONG*         headOfStreamPlaceHolder,
-           ULONG          propertyIndex);
+           DirRef         dirEntry);
 
 void SmallBlockChainStream_Destroy(
 	       SmallBlockChainStream* This);

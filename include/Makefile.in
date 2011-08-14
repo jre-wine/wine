@@ -14,6 +14,8 @@ PUBLIC_IDL_H_SRCS = \
 	activscp.idl \
 	amstream.idl \
 	amvideo.idl \
+	audioclient.idl \
+	audiopolicy.idl \
 	austream.idl \
 	bits.idl \
 	bits1_5.idl \
@@ -23,6 +25,7 @@ PUBLIC_IDL_H_SRCS = \
 	ctxtcall.idl \
 	d3d10.idl \
 	ddstream.idl \
+	devicetopology.idl \
 	dimm.idl \
 	dispex.idl \
 	docobj.idl \

@@ -26,6 +26,7 @@
 #include "wingdi.h"
 #include "winuser.h"
 #include "objbase.h"
+#include "winnls.h"
 
 #include "dxgi.h"
 #ifdef DXGI_INIT_GUID
@@ -35,74 +36,6 @@
 #include "wine/winedxgi.h"
 
 extern CRITICAL_SECTION dxgi_cs DECLSPEC_HIDDEN;
-
-/* TRACE helper functions */
-const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
-
-WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
-
-/* IDXGIFactory */
-extern const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl DECLSPEC_HIDDEN;
-struct dxgi_factory
-{
-    const struct IWineDXGIFactoryVtbl *vtbl;
-    LONG refcount;
-    IWineD3D *wined3d;
-    UINT adapter_count;
-    IDXGIAdapter **adapters;
-};
-
-/* IDXGIDevice */
-extern const struct IWineDXGIDeviceVtbl dxgi_device_vtbl DECLSPEC_HIDDEN;
-struct dxgi_device
-{
-    const struct IWineDXGIDeviceVtbl *vtbl;
-    IUnknown *child_layer;
-    LONG refcount;
-    IWineD3DDevice *wined3d_device;
-    IWineDXGIFactory *factory;
-};
-
-/* IDXGIOutput */
-struct dxgi_output
-{
-    const struct IDXGIOutputVtbl *vtbl;
-    LONG refcount;
-};
-
-void dxgi_output_init(struct dxgi_output *output) DECLSPEC_HIDDEN;
-
-/* IDXGIAdapter */
-struct dxgi_adapter
-{
-    const struct IWineDXGIAdapterVtbl *vtbl;
-    IDXGIFactory *parent;
-    LONG refcount;
-    UINT ordinal;
-    IDXGIOutput *output;
-};
-
-HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IDXGIFactory *parent, UINT ordinal) DECLSPEC_HIDDEN;
-
-/* IDXGISwapChain */
-extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl DECLSPEC_HIDDEN;
-struct dxgi_swapchain
-{
-    const struct IDXGISwapChainVtbl *vtbl;
-    LONG refcount;
-    IWineD3DSwapChain *wined3d_swapchain;
-};
-
-/* IDXGISurface */
-extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl DECLSPEC_HIDDEN;
-extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl DECLSPEC_HIDDEN;
-struct dxgi_surface
-{
-    const struct IDXGISurfaceVtbl *vtbl;
-    const struct IUnknownVtbl *inner_unknown_vtbl;
-    IUnknown *outer_unknown;
-    LONG refcount;
-};
 
 /* Layered device */
 enum dxgi_device_layer_id
@@ -134,6 +67,77 @@ struct dxgi_device_layer
     UINT (WINAPI *get_size)(enum dxgi_device_layer_id id, struct layer_get_size_args *args, DWORD unknown0);
     HRESULT (WINAPI *create)(enum dxgi_device_layer_id id, void **layer_base, DWORD unknown0,
             void *device_object, REFIID riid, void **device_layer);
+};
+
+/* TRACE helper functions */
+const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
+
+WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
+
+/* IDXGIFactory */
+extern const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl DECLSPEC_HIDDEN;
+struct dxgi_factory
+{
+    const struct IWineDXGIFactoryVtbl *vtbl;
+    LONG refcount;
+    IWineD3D *wined3d;
+    UINT adapter_count;
+    IDXGIAdapter **adapters;
+};
+
+/* IDXGIDevice */
+struct dxgi_device
+{
+    const struct IWineDXGIDeviceVtbl *vtbl;
+    IUnknown *child_layer;
+    LONG refcount;
+    IWineD3DDevice *wined3d_device;
+    IWineDXGIFactory *factory;
+};
+
+HRESULT dxgi_device_init(struct dxgi_device *device, struct dxgi_device_layer *layer,
+        IDXGIFactory *factory, IDXGIAdapter *adapter) DECLSPEC_HIDDEN;
+
+/* IDXGIOutput */
+struct dxgi_output
+{
+    const struct IDXGIOutputVtbl *vtbl;
+    LONG refcount;
+    struct dxgi_adapter *adapter;
+};
+
+void dxgi_output_init(struct dxgi_output *output, struct dxgi_adapter *adapter) DECLSPEC_HIDDEN;
+
+/* IDXGIAdapter */
+struct dxgi_adapter
+{
+    const struct IWineDXGIAdapterVtbl *vtbl;
+    IWineDXGIFactory *parent;
+    LONG refcount;
+    UINT ordinal;
+    IDXGIOutput *output;
+};
+
+HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IWineDXGIFactory *parent, UINT ordinal) DECLSPEC_HIDDEN;
+
+/* IDXGISwapChain */
+extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl DECLSPEC_HIDDEN;
+struct dxgi_swapchain
+{
+    const struct IDXGISwapChainVtbl *vtbl;
+    LONG refcount;
+    IWineD3DSwapChain *wined3d_swapchain;
+};
+
+/* IDXGISurface */
+extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl DECLSPEC_HIDDEN;
+extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl DECLSPEC_HIDDEN;
+struct dxgi_surface
+{
+    const struct IDXGISurfaceVtbl *vtbl;
+    const struct IUnknownVtbl *inner_unknown_vtbl;
+    IUnknown *outer_unknown;
+    LONG refcount;
 };
 
 #endif /* __WINE_DXGI_PRIVATE_H */

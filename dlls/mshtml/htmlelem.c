@@ -569,9 +569,11 @@ static HRESULT WINAPI HTMLElement_get_document(IHTMLElement *iface, IDispatch **
     if(!p)
         return E_POINTER;
 
+    if(This->node.vtbl->get_document)
+        return This->node.vtbl->get_document(&This->node, p);
+
     *p = (IDispatch*)HTMLDOC(&This->node.doc->basedoc);
     IDispatch_AddRef(*p);
-
     return S_OK;
 }
 
@@ -908,8 +910,63 @@ static HRESULT WINAPI HTMLElement_get_innerText(IHTMLElement *iface, BSTR *p)
 static HRESULT WINAPI HTMLElement_put_outerHTML(IHTMLElement *iface, BSTR v)
 {
     HTMLElement *This = HTMLELEM_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsIDOMDocumentFragment *nsfragment;
+    nsIDOMDocumentRange *nsdocrange;
+    nsIDOMNSRange *nsrange;
+    nsIDOMNode *nsparent;
+    nsIDOMRange *range;
+    nsAString html_str;
+    nsresult nsres;
+    HRESULT hres = S_OK;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    nsres = nsIDOMHTMLDocument_QueryInterface(This->node.doc->nsdoc, &IID_nsIDOMDocumentRange, (void**)&nsdocrange);
+    if(NS_FAILED(nsres))
+        return E_FAIL;
+
+    nsres = nsIDOMDocumentRange_CreateRange(nsdocrange, &range);
+    nsIDOMDocumentRange_Release(nsdocrange);
+    if(NS_FAILED(nsres)) {
+        ERR("CreateRange failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMRange_QueryInterface(range, &IID_nsIDOMNSRange, (void**)&nsrange);
+    nsIDOMRange_Release(range);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDOMNSRange: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsAString_Init(&html_str, v);
+    nsIDOMNSRange_CreateContextualFragment(nsrange, &html_str, &nsfragment);
+    nsIDOMNSRange_Release(nsrange);
+    nsAString_Finish(&html_str);
+    if(NS_FAILED(nsres)) {
+        ERR("CreateContextualFragment failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMNode_GetParentNode(This->node.nsnode, &nsparent);
+    if(NS_SUCCEEDED(nsres) && nsparent) {
+        nsIDOMNode *nstmp;
+
+        nsres = nsIDOMNode_ReplaceChild(nsparent, (nsIDOMNode*)nsfragment, This->node.nsnode, &nstmp);
+        nsIDOMNode_Release(nsparent);
+        if(NS_FAILED(nsres)) {
+            ERR("ReplaceChild failed: %08x\n", nsres);
+            hres = E_FAIL;
+        }else if(nstmp) {
+            nsIDOMNode_Release(nstmp);
+        }
+    }else {
+        ERR("GetParentNode failed: %08x\n", nsres);
+        hres = E_FAIL;
+    }
+
+    nsIDOMDocumentFragment_Release(nsfragment);
+    return hres;
 }
 
 static HRESULT WINAPI HTMLElement_get_outerHTML(IHTMLElement *iface, BSTR *p)
@@ -959,19 +1016,13 @@ static HRESULT HTMLElement_InsertAdjacentNode(HTMLElement *This, BSTR where, nsI
     static const WCHAR wszAfterEnd[] = {'a','f','t','e','r','E','n','d',0};
     nsresult nsres;
 
-    if(!This->nselem) {
-        FIXME("NULL nselem\n");
-        return E_NOTIMPL;
-    }
-
     if (!strcmpiW(where, wszBeforeBegin))
     {
         nsIDOMNode *unused;
         nsIDOMNode *parent;
-        nsres = nsIDOMNode_GetParentNode(This->nselem, &parent);
+        nsres = nsIDOMNode_GetParentNode(This->node.nsnode, &parent);
         if (!parent) return E_INVALIDARG;
-        nsres = nsIDOMNode_InsertBefore(parent, nsnode,
-                                        (nsIDOMNode *)This->nselem, &unused);
+        nsres = nsIDOMNode_InsertBefore(parent, nsnode, This->node.nsnode, &unused);
         if (unused) nsIDOMNode_Release(unused);
         nsIDOMNode_Release(parent);
     }
@@ -979,15 +1030,15 @@ static HRESULT HTMLElement_InsertAdjacentNode(HTMLElement *This, BSTR where, nsI
     {
         nsIDOMNode *unused;
         nsIDOMNode *first_child;
-        nsIDOMNode_GetFirstChild(This->nselem, &first_child);
-        nsres = nsIDOMNode_InsertBefore(This->nselem, nsnode, first_child, &unused);
+        nsIDOMNode_GetFirstChild(This->node.nsnode, &first_child);
+        nsres = nsIDOMNode_InsertBefore(This->node.nsnode, nsnode, first_child, &unused);
         if (unused) nsIDOMNode_Release(unused);
         if (first_child) nsIDOMNode_Release(first_child);
     }
     else if (!strcmpiW(where, wszBeforeEnd))
     {
         nsIDOMNode *unused;
-        nsres = nsIDOMNode_AppendChild(This->nselem, nsnode, &unused);
+        nsres = nsIDOMNode_AppendChild(This->node.nsnode, nsnode, &unused);
         if (unused) nsIDOMNode_Release(unused);
     }
     else if (!strcmpiW(where, wszAfterEnd))
@@ -995,10 +1046,10 @@ static HRESULT HTMLElement_InsertAdjacentNode(HTMLElement *This, BSTR where, nsI
         nsIDOMNode *unused;
         nsIDOMNode *next_sibling;
         nsIDOMNode *parent;
-        nsIDOMNode_GetParentNode(This->nselem, &parent);
+        nsIDOMNode_GetParentNode(This->node.nsnode, &parent);
         if (!parent) return E_INVALIDARG;
 
-        nsIDOMNode_GetNextSibling(This->nselem, &next_sibling);
+        nsIDOMNode_GetNextSibling(This->node.nsnode, &next_sibling);
         if (next_sibling)
         {
             nsres = nsIDOMNode_InsertBefore(parent, nsnode, next_sibling, &unused);
@@ -1054,7 +1105,7 @@ static HRESULT WINAPI HTMLElement_insertAdjacentHTML(IHTMLElement *iface, BSTR w
         return E_FAIL;
     }
 
-    nsIDOMRange_SetStartBefore(range, (nsIDOMNode *)This->nselem);
+    nsIDOMRange_SetStartBefore(range, This->node.nsnode);
 
     nsIDOMRange_QueryInterface(range, &IID_nsIDOMNSRange, (void **)&nsrange);
     nsIDOMRange_Release(range);
@@ -1323,6 +1374,31 @@ static HRESULT WINAPI HTMLElement_get_all(IHTMLElement *iface, IDispatch **p)
     return S_OK;
 }
 
+static HRESULT HTMLElement_get_dispid(IUnknown *iface, BSTR name,
+        DWORD grfdex, DISPID *pid)
+{
+    HTMLElement *This = HTMLELEM_THIS(iface);
+
+    if(This->node.vtbl->get_dispid)
+        return This->node.vtbl->get_dispid(&This->node, name, grfdex, pid);
+
+    return DISP_E_UNKNOWNNAME;
+}
+
+static HRESULT HTMLElement_invoke(IUnknown *iface, DISPID id, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei,
+        IServiceProvider *caller)
+{
+    HTMLElement *This = HTMLELEM_THIS(iface);
+
+    if(This->node.vtbl->invoke)
+        return This->node.vtbl->invoke(&This->node, id, lcid, flags,
+                params, res, ei, caller);
+
+    ERR("(%p): element has no invoke method\n", This);
+    return E_NOTIMPL;
+}
+
 #undef HTMLELEM_THIS
 
 static const IHTMLElementVtbl HTMLElementVtbl = {
@@ -1482,8 +1558,14 @@ static const tid_t HTMLElement_iface_tids[] = {
     0
 };
 
-static dispex_static_data_t HTMLElement_dispex = {
+static dispex_static_data_vtbl_t HTMLElement_dispex_vtbl = {
     NULL,
+    HTMLElement_get_dispid,
+    HTMLElement_invoke
+};
+
+static dispex_static_data_t HTMLElement_dispex = {
+    &HTMLElement_dispex_vtbl,
     DispHTMLUnknownElement_tid,
     NULL,
     HTMLElement_iface_tids
@@ -1496,6 +1578,8 @@ void HTMLElement_Init(HTMLElement *This, HTMLDocumentNode *doc, nsIDOMHTMLElemen
     HTMLElement2_Init(This);
     HTMLElement3_Init(This);
 
+    if(dispex_data && !dispex_data->vtbl)
+        dispex_data->vtbl = &HTMLElement_dispex_vtbl;
     init_dispex(&This->node.dispex, (IUnknown*)HTMLELEM(This), dispex_data ? dispex_data : &HTMLElement_dispex);
 
     if(nselem)
@@ -1517,6 +1601,8 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
 
     static const WCHAR wszA[]        = {'A',0};
     static const WCHAR wszBODY[]     = {'B','O','D','Y',0};
+    static const WCHAR wszFORM[]     = {'F','O','R','M',0};
+    static const WCHAR wszFRAME[]    = {'F','R','A','M','E',0};
     static const WCHAR wszIFRAME[]   = {'I','F','R','A','M','E',0};
     static const WCHAR wszIMG[]      = {'I','M','G',0};
     static const WCHAR wszINPUT[]    = {'I','N','P','U','T',0};
@@ -1540,8 +1626,12 @@ HTMLElement *HTMLElement_Create(HTMLDocumentNode *doc, nsIDOMNode *nsnode, BOOL 
         ret = HTMLAnchorElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszBODY))
         ret = HTMLBodyElement_Create(doc, nselem);
+    else if(!strcmpW(class_name, wszFORM))
+        ret = HTMLFormElement_Create(doc, nselem);
+    else if(!strcmpW(class_name, wszFRAME))
+        ret = HTMLFrameElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszIFRAME))
-        ret = HTMLIFrame_Create(doc, nselem, NULL);
+        ret = HTMLIFrame_Create(doc, nselem);
     else if(!strcmpW(class_name, wszIMG))
         ret = HTMLImgElement_Create(doc, nselem);
     else if(!strcmpW(class_name, wszINPUT))

@@ -552,14 +552,29 @@ unsigned char * WINAPI VARIANT_UserUnmarshal(ULONG *pFlags, unsigned char *Buffe
 
     if(header->vt & VT_BYREF)
     {
+        ULONG mem_size;
         Pos += 4;
+
+        switch (header->vt & ~VT_BYREF)
+        {
+        /* these types have a different memory size compared to wire size */
+        case VT_UNKNOWN:
+        case VT_DISPATCH:
+        case VT_BSTR:
+            mem_size = sizeof(void *);
+            break;
+        default:
+            mem_size = type_size;
+            break;
+        }
+
         if (V_VT(pvar) != header->vt)
         {
             VariantClear(pvar);
-            V_BYREF(pvar) = CoTaskMemAlloc(type_size);
+            V_BYREF(pvar) = CoTaskMemAlloc(mem_size);
         }
         else if (!V_BYREF(pvar))
-            V_BYREF(pvar) = CoTaskMemAlloc(type_size);
+            V_BYREF(pvar) = CoTaskMemAlloc(mem_size);
         memcpy(V_BYREF(pvar), Pos, type_size);
         if((header->vt & VT_TYPEMASK) != VT_VARIANT)
             Pos += type_size;
@@ -1180,6 +1195,8 @@ HRESULT CALLBACK IDispatch_Invoke_Proxy(
       if (V_ISBYREF(arg)) {
 	rgVarRefIdx[cVarRef] = u;
 	VariantInit(&rgVarRef[cVarRef]);
+	VariantCopy(&rgVarRef[cVarRef], arg);
+	VariantClear(arg);
 	cVarRef++;
       }
     }
@@ -1265,6 +1282,12 @@ HRESULT __RPC_STUB IDispatch_Invoke_Stub(
   }
 
   if (SUCCEEDED(hr)) {
+    /* copy ref args to arg array */
+    for (u=0; u<cVarRef; u++) {
+      unsigned i = rgVarRefIdx[u];
+      VariantCopy(&arg[i], &rgVarRef[u]);
+    }
+
     pDispParams->rgvarg = arg;
 
     hr = IDispatch_Invoke(This,
@@ -1277,14 +1300,10 @@ HRESULT __RPC_STUB IDispatch_Invoke_Stub(
 			  pExcepInfo,
 			  pArgErr);
 
-    /* copy ref args to out list */
+    /* copy ref args from arg array */
     for (u=0; u<cVarRef; u++) {
       unsigned i = rgVarRefIdx[u];
-      VariantInit(&rgVarRef[u]);
       VariantCopy(&rgVarRef[u], &arg[i]);
-      /* clear original if equal, to avoid double-free */
-      if (V_BYREF(&rgVarRef[u]) == V_BYREF(&rgvarg[i]))
-        VariantClear(&rgvarg[i]);
     }
   }
 

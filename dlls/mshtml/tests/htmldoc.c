@@ -29,6 +29,7 @@
 #include "ole2.h"
 #include "mshtml.h"
 #include "docobj.h"
+#include "wininet.h"
 #include "mshtmhst.h"
 #include "mshtmdid.h"
 #include "mshtmcid.h"
@@ -179,12 +180,14 @@ static const char html_page[] =
 
 static const char css_data[] = "body {color: red}";
 
+static const WCHAR http_urlW[] =
+    {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g',0};
+
 static const WCHAR doc_url[] = {'w','i','n','e','t','e','s','t',':','d','o','c',0};
 static const WCHAR about_blank_url[] = {'a','b','o','u','t',':','b','l','a','n','k',0};
 
 static HRESULT QueryInterface(REFIID riid, void **ppv);
 static void test_MSHTML_QueryStatus(IUnknown*,DWORD);
-static BOOL nogecko = FALSE;
 
 #define test_readyState(u) _test_readyState(__LINE__,u)
 static void _test_readyState(unsigned,IUnknown*);
@@ -211,6 +214,18 @@ static int strcmp_wa(LPCWSTR strw, const char *stra)
     CHAR buf[512];
     WideCharToMultiByte(CP_ACP, 0, strw, -1, buf, sizeof(buf), NULL, NULL);
     return lstrcmpA(stra, buf);
+}
+
+static const WCHAR *strstrW( const WCHAR *str, const WCHAR *sub )
+{
+    while (*str)
+    {
+        const WCHAR *p1 = str, *p2 = sub;
+        while (*p1 && *p2 && *p1 == *p2) { p1++; p2++; }
+        if (!*p2) return str;
+        str++;
+    }
+    return NULL;
 }
 
 static BSTR a2bstr(const char *str)
@@ -765,6 +780,7 @@ static HRESULT WINAPI PropertyNotifySink_OnChanged(IPropertyNotifySink *iface, D
     case 1012:
         CHECK_EXPECT(OnChanged_1012);
         return S_OK;
+    case 1030:
     case 3000029:
     case 3000030:
         /* TODO */
@@ -2639,6 +2655,7 @@ static void _test_readyState(unsigned line, IUnknown *unk)
 {
     IHTMLDocument2 *htmldoc;
     DISPPARAMS dispparams;
+    IHTMLElement *elem;
     BSTR state;
     VARIANT out;
     HRESULT hres;
@@ -2673,6 +2690,26 @@ static void _test_readyState(unsigned line, IUnknown *unk)
         (!strcmp_wa(state, expected_state[load_state]), "unexpected state %s, expected %d\n",
          wine_dbgstr_w(state), load_state);
     SysFreeString(state);
+
+    hres = IHTMLDocument2_get_body(htmldoc, &elem);
+    ok_(__FILE__,line)(hres == S_OK, "get_body failed: %08x\n", hres);
+    if(elem) {
+        IHTMLElement2 *elem2;
+        VARIANT var;
+
+        hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLElement2, (void**)&elem2);
+        IHTMLElement_Release(elem);
+        ok(hres == S_OK, "Could not get IHTMLElement2 iface: %08x\n", hres);
+
+        hres = IHTMLElement2_get_readyState(elem2, &var);
+        IHTMLElement2_Release(elem2);
+        ok(hres == S_OK, "get_readyState failed: %08x\n", hres);
+        ok(V_VT(&var) == VT_BSTR, "V_VT(state) = %d\n", V_VT(&var));
+        ok(!strcmp_wa(V_BSTR(&var), "complete"), "unexpected body state %s\n", wine_dbgstr_w(V_BSTR(&var)));
+        VariantClear(&var);
+    }else {
+        ok_(__FILE__,line)(load_state != LD_COMPLETE, "body is NULL in complete state\n");
+    }
 
     dispparams.cArgs = 0;
     dispparams.cNamedArgs = 0;
@@ -2919,26 +2956,12 @@ static void test_download(DWORD flags)
     if(flags & DWL_TRYCSS)
         SET_CALLED(Exec_ShellDocView_84);
     if(flags & DWL_CSS) {
-        if(called_CreateInstance) {
-            CHECK_CALLED(CreateInstance);
-            CHECK_CALLED(Start);
-            CHECK_CALLED(LockRequest);
-            CHECK_CALLED(Terminate);
-            CHECK_CALLED(Protocol_Read);
-            CHECK_CALLED(UnlockRequest);
-        }else {
-            skip("CreateInstance not called. Assuming no Gecko installed.\n");
-
-            SET_CALLED(Exec_ShellDocView_84);
-            SET_CALLED(CreateInstance);
-            SET_CALLED(Start);
-            SET_CALLED(LockRequest);
-            SET_CALLED(Terminate);
-            SET_CALLED(Protocol_Read);
-            SET_CALLED(UnlockRequest);
-
-            nogecko = TRUE;
-        }
+        CHECK_CALLED(CreateInstance);
+        CHECK_CALLED(Start);
+        CHECK_CALLED(LockRequest);
+        CHECK_CALLED(Terminate);
+        CHECK_CALLED(Protocol_Read);
+        CHECK_CALLED(UnlockRequest);
     }
     SET_CALLED(Exec_Explorer_69);
     SET_CALLED(EnableModeless_TRUE); /* IE7 */
@@ -3327,13 +3350,12 @@ static void test_exec_fontname(IUnknown *unk, LPCWSTR name, LPCWSTR exname)
    }
 
    hres = IOleCommandTarget_Exec(cmdtrg, &CGID_MSHTML, IDM_FONTNAME, 0, in, out);
-   if(!nogecko)
-       ok(hres == S_OK, "Exec(IDM_FONTNAME) failed: %08x\n", hres);
+   ok(hres == S_OK, "Exec(IDM_FONTNAME) failed: %08x\n", hres);
 
    if(in)
        VariantClear(in);
 
-   if(out && !nogecko) {
+   if(out) {
        ok(V_VT(out) == VT_BSTR, "V_VT(out) = %x\n", V_VT(out));
        if(V_VT(out) == VT_BSTR) {
            if(exname)
@@ -4114,15 +4136,69 @@ static void test_HTMLDocument_hlink(void)
     ok(ref == 0, "ref=%d, expected 0\n", ref);
 }
 
+static void test_cookies(IUnknown *unk)
+{
+    WCHAR buf[1024];
+    IHTMLDocument2 *doc;
+    DWORD size;
+    BSTR str, str2;
+    BOOL b;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLDocument2, (void**)&doc);
+    ok(hres == S_OK, "QueryInterface(IID_IHTMLDocument2) failed: %08x\n", hres);
+
+    hres = IHTMLDocument2_get_cookie(doc, &str);
+    ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
+    if(str) {
+        size = sizeof(buf)/sizeof(WCHAR);
+        b = InternetGetCookieW(http_urlW, NULL, buf, &size);
+        ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
+        ok(!lstrcmpW(buf, str), "cookie = %s, expected %s\n", wine_dbgstr_w(str), wine_dbgstr_w(buf));
+        SysFreeString(str);
+    }
+
+    str = a2bstr("test=testval");
+    hres = IHTMLDocument2_put_cookie(doc, str);
+    ok(hres == S_OK, "put_cookie failed: %08x\n", hres);
+
+    str2 = NULL;
+    hres = IHTMLDocument2_get_cookie(doc, &str2);
+    ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
+    ok(str2 != NULL, "cookie = NULL\n");
+    size = sizeof(buf)/sizeof(WCHAR);
+    b = InternetGetCookieW(http_urlW, NULL, buf, &size);
+    ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
+    ok(!lstrcmpW(buf, str2), "cookie = %s, expected %s\n", wine_dbgstr_w(str2), wine_dbgstr_w(buf));
+    ok(strstrW(str2, str) != NULL, "could not find %s in %s\n", wine_dbgstr_w(str), wine_dbgstr_w(str2));
+    SysFreeString(str);
+    SysFreeString(str2);
+
+    str = a2bstr("test=testval2");
+    hres = IHTMLDocument2_put_cookie(doc, str);
+    ok(hres == S_OK, "put_cookie failed: %08x\n", hres);
+
+    str2 = NULL;
+    hres = IHTMLDocument2_get_cookie(doc, &str2);
+    ok(hres == S_OK, "get_cookie failed: %08x\n", hres);
+    ok(str2 != NULL, "cookie = NULL\n");
+    size = sizeof(buf)/sizeof(WCHAR);
+    b = InternetGetCookieW(http_urlW, NULL, buf, &size);
+    ok(b, "InternetGetCookieW failed: %08x\n", GetLastError());
+    ok(!lstrcmpW(buf, str2), "cookie = %s, expected %s\n", wine_dbgstr_w(str2), wine_dbgstr_w(buf));
+    ok(strstrW(str2, str) != NULL, "could not find %s in %s\n", wine_dbgstr_w(str), wine_dbgstr_w(str2));
+    SysFreeString(str);
+    SysFreeString(str2);
+
+    IHTMLDocument2_Release(doc);
+}
+
 static void test_HTMLDocument_http(void)
 {
     IMoniker *http_mon;
     IUnknown *unk;
     ULONG ref;
     HRESULT hres;
-
-    static const WCHAR http_urlW[] =
-        {'h','t','t','p',':','/','/','w','w','w','.','w','i','n','e','h','q','.','o','r','g',0};
 
     trace("Testing HTMLDocument (http)...\n");
 
@@ -4151,6 +4227,7 @@ static void test_HTMLDocument_http(void)
     else
         win_skip("IE running in Enhanced Security Configuration\n");
 
+    test_cookies(unk);
     test_IsDirty(unk, S_FALSE);
     test_MSHTML_QueryStatus(unk, OLECMDF_SUPPORTED);
 
@@ -4300,17 +4377,15 @@ static void test_editing_mode(BOOL do_load)
 
         test_exec_noargs(unk, IDM_JUSTIFYRIGHT);
         test_timer(EXPECT_UPDATEUI);
-        if(!nogecko)
-            test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT,
-                             OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
+        test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT,
+                         OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
 
         test_exec_noargs(unk, IDM_JUSTIFYCENTER);
         test_timer(EXPECT_UPDATEUI);
         test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYRIGHT,
                          OLECMDF_SUPPORTED|OLECMDF_ENABLED);
-        if(!nogecko)
-            test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYCENTER,
-                             OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
+        test_QueryStatus(unk, &CGID_MSHTML, IDM_JUSTIFYCENTER,
+                         OLECMDF_SUPPORTED|OLECMDF_ENABLED|OLECMDF_LATCHED);
 
         test_exec_noargs(unk, IDM_HORIZONTALLINE);
         test_timer(EXPECT_UPDATEUI);
@@ -4346,36 +4421,6 @@ static void register_protocol(void)
     ok(hres == S_OK, "RegisterNameSpace failed: %08x\n", hres);
 
     IInternetSession_Release(session);
-}
-
-static void gecko_installer_workaround(BOOL disable)
-{
-    HKEY hkey;
-    DWORD res;
-
-    static BOOL has_url = FALSE;
-    static char url[2048];
-
-    if(!disable && !has_url)
-        return;
-
-    res = RegOpenKey(HKEY_CURRENT_USER, "Software\\Wine\\MSHTML", &hkey);
-    if(res != ERROR_SUCCESS)
-        return;
-
-    if(disable) {
-        DWORD type, size = sizeof(url);
-
-        res = RegQueryValueEx(hkey, "GeckoUrl", NULL, &type, (PVOID)url, &size);
-        if(res == ERROR_SUCCESS && type == REG_SZ)
-            has_url = TRUE;
-
-        RegDeleteValue(hkey, "GeckoUrl");
-    }else {
-        RegSetValueEx(hkey, "GeckoUrl", 0, REG_SZ, (PVOID)url, lstrlenA(url)+1);
-    }
-
-    RegCloseKey(hkey);
 }
 
 static void test_HTMLDoc_ISupportErrorInfo(void)
@@ -4425,8 +4470,6 @@ static void test_IPersistHistory(void)
 
 START_TEST(htmldoc)
 {
-    gecko_installer_workaround(TRUE);
-
     CoInitialize(NULL);
     container_hwnd = create_container_window();
     register_protocol();
@@ -4445,6 +4488,4 @@ START_TEST(htmldoc)
 
     DestroyWindow(container_hwnd);
     CoUninitialize();
-
-    gecko_installer_workaround(FALSE);
 }

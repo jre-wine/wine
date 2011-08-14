@@ -25,7 +25,6 @@
 #include "wingdi.h"
 #include "wownt32.h"
 #include "wine/wingdi16.h"
-#include "gdi_private.h"
 #include "wine/list.h"
 #include "wine/debug.h"
 
@@ -33,6 +32,160 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdi);
 
 #define HGDIOBJ_32(handle16)    ((HGDIOBJ)(ULONG_PTR)(handle16))
 #define HGDIOBJ_16(handle32)    ((HGDIOBJ16)(ULONG_PTR)(handle32))
+
+struct saved_visrgn
+{
+    struct list entry;
+    HDC         hdc;
+    HRGN        hrgn;
+};
+
+static struct list saved_regions = LIST_INIT( saved_regions );
+
+static HPALETTE16 hPrimaryPalette;
+
+/*
+ * ############################################################################
+ */
+
+#include <pshpack1.h>
+#define GDI_MAX_THUNKS      32
+
+static struct gdi_thunk
+{
+    BYTE                        popl_eax;       /* popl  %eax (return address) */
+    BYTE                        pushl_pfn16;    /* pushl pfn16 */
+    DWORD                       pfn16;          /* pfn16 */
+    BYTE                        pushl_eax;      /* pushl %eax */
+    BYTE                        jmp;            /* ljmp GDI_Callback3216 */
+    DWORD                       callback;
+    HDC16                       hdc;
+} *GDI_Thunks;
+
+#include <poppack.h>
+
+/**********************************************************************
+ *           GDI_Callback3216
+ */
+static BOOL CALLBACK GDI_Callback3216( DWORD pfn16, HDC hdc, INT code )
+{
+    if (pfn16)
+    {
+        WORD args[2];
+        DWORD ret;
+
+        args[1] = HDC_16(hdc);
+        args[0] = code;
+        WOWCallback16Ex( pfn16, WCB16_PASCAL, sizeof(args), args, &ret );
+        return LOWORD(ret);
+    }
+    return TRUE;
+}
+
+
+/******************************************************************
+ *		GDI_AddThunk
+ *
+ */
+static struct gdi_thunk* GDI_AddThunk(HDC16 dc16, ABORTPROC16 pfn16)
+{
+    struct gdi_thunk* thunk;
+
+    if (!GDI_Thunks)
+    {
+        GDI_Thunks = VirtualAlloc(NULL, GDI_MAX_THUNKS * sizeof(*GDI_Thunks),
+                                        MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+        if (!GDI_Thunks)
+        {
+            return NULL;
+        }
+        for (thunk = GDI_Thunks; thunk < &GDI_Thunks[GDI_MAX_THUNKS]; thunk++)
+        {
+            thunk->popl_eax     = 0x58;   /* popl  %eax */
+            thunk->pushl_pfn16  = 0x68;   /* pushl pfn16 */
+            thunk->pfn16        = 0;
+            thunk->pushl_eax    = 0x50;   /* pushl %eax */
+            thunk->jmp          = 0xe9;   /* jmp GDI_Callback3216 */
+            thunk->callback     = (char *)GDI_Callback3216 - (char *)(&thunk->callback + 1);
+        }
+    }
+    for (thunk = GDI_Thunks; thunk < &GDI_Thunks[GDI_MAX_THUNKS]; thunk++)
+    {
+        if (thunk->pfn16 == 0)
+        {
+            thunk->pfn16 = (DWORD)pfn16;
+            thunk->hdc   = dc16;
+            return thunk;
+        }
+    }
+    FIXME("Out of mmdrv-thunks. Bump GDI_MAX_THUNKS\n");
+    return NULL;
+}
+
+/******************************************************************
+ *		GDI_DeleteThunk
+ */
+static void    GDI_DeleteThunk(struct gdi_thunk* thunk)
+{
+    thunk->pfn16 = 0;
+}
+
+/******************************************************************
+ *		GDI_FindThunk
+ */
+static struct gdi_thunk*        GDI_FindThunk(HDC16 hdc)
+{
+    struct gdi_thunk* thunk;
+
+    if (!GDI_Thunks) return NULL;
+    for (thunk = GDI_Thunks; thunk < &GDI_Thunks[GDI_MAX_THUNKS]; thunk++)
+    {
+        if (thunk->hdc == hdc)  return thunk;
+    }
+    return NULL;
+}
+
+/**********************************************************************
+ *           QueryAbort   (GDI.155)
+ *
+ *  Calls the app's AbortProc function if avail.
+ *
+ * RETURNS
+ * TRUE if no AbortProc avail or AbortProc wants to continue printing.
+ * FALSE if AbortProc wants to abort printing.
+ */
+BOOL16 WINAPI QueryAbort16(HDC16 hdc16, INT16 reserved)
+{
+    struct gdi_thunk* thunk = GDI_FindThunk(hdc16);
+
+    if (!thunk) {
+        ERR("Invalid hdc 0x%x\n", hdc16);
+	return FALSE;
+    }
+    return GDI_Callback3216( thunk->pfn16, HDC_32(hdc16), 0 );
+}
+
+
+/**********************************************************************
+ *           SetAbortProc   (GDI.381)
+ */
+INT16 WINAPI SetAbortProc16(HDC16 hdc16, ABORTPROC16 abrtprc)
+{
+    struct gdi_thunk*   thunk;
+
+    thunk = GDI_AddThunk(hdc16, abrtprc);
+    if (!thunk) return FALSE;
+    if (!SetAbortProc(HDC_32( hdc16 ), (ABORTPROC)thunk))
+    {
+        GDI_DeleteThunk(thunk);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+/*
+ * ############################################################################
+ */
 
 struct callback16_info
 {
@@ -1167,7 +1320,23 @@ HBRUSH16 WINAPI CreateSolidBrush16( COLORREF color )
  */
 BOOL16 WINAPI DeleteDC16( HDC16 hdc )
 {
-    return DeleteDC( HDC_32(hdc) );
+    if (DeleteDC( HDC_32(hdc) ))
+    {
+        struct saved_visrgn *saved, *next;
+        struct gdi_thunk* thunk;
+
+        if ((thunk = GDI_FindThunk(hdc))) GDI_DeleteThunk(thunk);
+
+        LIST_FOR_EACH_ENTRY_SAFE( saved, next, &saved_regions, struct saved_visrgn, entry )
+        {
+            if (saved->hdc != HDC_32(hdc)) continue;
+            list_remove( &saved->entry );
+            DeleteObject( saved->hrgn );
+            HeapFree( GetProcessHeap(), 0, saved );
+        }
+        return TRUE;
+    }
+    return FALSE;
 }
 
 
@@ -2253,7 +2422,9 @@ HPALETTE16 WINAPI CreatePalette16( const LOGPALETTE* palette )
  */
 HPALETTE16 WINAPI GDISelectPalette16( HDC16 hdc, HPALETTE16 hpalette, WORD wBkg )
 {
-    return HPALETTE_16( GDISelectPalette( HDC_32(hdc), HPALETTE_32(hpalette), wBkg ));
+    HPALETTE16 ret = HPALETTE_16( SelectPalette( HDC_32(hdc), HPALETTE_32(hpalette), wBkg ));
+    if (ret && !wBkg) hPrimaryPalette = hpalette;
+    return ret;
 }
 
 
@@ -2262,7 +2433,7 @@ HPALETTE16 WINAPI GDISelectPalette16( HDC16 hdc, HPALETTE16 hpalette, WORD wBkg 
  */
 UINT16 WINAPI GDIRealizePalette16( HDC16 hdc )
 {
-    return GDIRealizePalette( HDC_32(hdc) );
+    return RealizePalette( HDC_32(hdc) );
 }
 
 
@@ -3353,9 +3524,8 @@ BOOL16 WINAPI SetLayout16( HDC16 hdc, DWORD layout )
  */
 BOOL16 WINAPI SetSolidBrush16(HBRUSH16 hBrush, COLORREF newColor )
 {
-    TRACE("(hBrush %04x, newColor %08x)\n", hBrush, newColor);
-
-    return BRUSH_SetSolid( HBRUSH_32(hBrush), newColor );
+    FIXME( "%04x %08x no longer supported\n", hBrush, newColor );
+    return FALSE;
 }
 
 
@@ -3372,16 +3542,8 @@ void WINAPI Copy16( LPVOID src, LPVOID dst, WORD size )
  */
 UINT16 WINAPI RealizeDefaultPalette16( HDC16 hdc )
 {
-    UINT16 ret = 0;
-    DC          *dc;
-
-    TRACE("%04x\n", hdc );
-
-    if (!(dc = get_dc_ptr( HDC_32(hdc) ))) return 0;
-
-    if (dc->funcs->pRealizeDefaultPalette) ret = dc->funcs->pRealizeDefaultPalette( dc->physDev );
-    release_dc_ptr( dc );
-    return ret;
+    FIXME( "%04x semi-stub\n", hdc );
+    return GDIRealizePalette16( hdc );
 }
 
 /***********************************************************************
@@ -3389,14 +3551,7 @@ UINT16 WINAPI RealizeDefaultPalette16( HDC16 hdc )
  */
 BOOL16 WINAPI IsDCCurrentPalette16(HDC16 hDC)
 {
-    DC *dc = get_dc_ptr( HDC_32(hDC) );
-    if (dc)
-    {
-      BOOL bRet = dc->hPalette == hPrimaryPalette;
-      release_dc_ptr( dc );
-      return bRet;
-    }
-    return FALSE;
+    return HPALETTE_16( GetCurrentObject( HDC_32(hDC), OBJ_PAL )) == hPrimaryPalette;
 }
 
 /*********************************************************************
@@ -3414,17 +3569,29 @@ VOID WINAPI SetMagicColors16(HDC16 hDC, COLORREF color, UINT16 index)
  */
 BOOL16 WINAPI DPtoLP16( HDC16 hdc, LPPOINT16 points, INT16 count )
 {
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (!dc) return FALSE;
+    POINT points32[8], *pt32 = points32;
+    int i;
+    BOOL ret;
 
-    while (count--)
+    if (count > 8)
     {
-        points->x = MulDiv( points->x - dc->vportOrgX, dc->wndExtX, dc->vportExtX ) + dc->wndOrgX;
-        points->y = MulDiv( points->y - dc->vportOrgY, dc->wndExtY, dc->vportExtY ) + dc->wndOrgY;
-        points++;
+        if (!(pt32 = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*pt32) ))) return FALSE;
     }
-    release_dc_ptr( dc );
-    return TRUE;
+    for (i = 0; i < count; i++)
+    {
+        pt32[i].x = points[i].x;
+        pt32[i].y = points[i].y;
+    }
+    if ((ret = DPtoLP( HDC_32(hdc), pt32, count )))
+    {
+        for (i = 0; i < count; i++)
+        {
+            points[i].x = pt32[i].x;
+            points[i].y = pt32[i].y;
+        }
+    }
+    if (pt32 != points32) HeapFree( GetProcessHeap(), 0, pt32 );
+    return ret;
 }
 
 
@@ -3433,17 +3600,29 @@ BOOL16 WINAPI DPtoLP16( HDC16 hdc, LPPOINT16 points, INT16 count )
  */
 BOOL16 WINAPI LPtoDP16( HDC16 hdc, LPPOINT16 points, INT16 count )
 {
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (!dc) return FALSE;
+    POINT points32[8], *pt32 = points32;
+    int i;
+    BOOL ret;
 
-    while (count--)
+    if (count > 8)
     {
-        points->x = MulDiv( points->x - dc->wndOrgX, dc->vportExtX, dc->wndExtX ) + dc->vportOrgX;
-        points->y = MulDiv( points->y - dc->wndOrgY, dc->vportExtY, dc->wndExtY ) + dc->vportOrgY;
-        points++;
+        if (!(pt32 = HeapAlloc( GetProcessHeap(), 0, count * sizeof(*pt32) ))) return FALSE;
     }
-    release_dc_ptr( dc );
-    return TRUE;
+    for (i = 0; i < count; i++)
+    {
+        pt32[i].x = points[i].x;
+        pt32[i].y = points[i].y;
+    }
+    if ((ret = LPtoDP( HDC_32(hdc), pt32, count )))
+    {
+        for (i = 0; i < count; i++)
+        {
+            points[i].x = pt32[i].x;
+            points[i].y = pt32[i].y;
+        }
+    }
+    if (pt32 != points32) HeapFree( GetProcessHeap(), 0, pt32 );
+    return ret;
 }
 
 
@@ -3470,13 +3649,8 @@ void WINAPI SetDCState16( HDC16 hdc, HDC16 hdcs )
  */
 DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
 {
-    DWORD prevOrg = 0;
-    HDC hdc = HDC_32( hdc16 );
-    DC *dc = get_dc_ptr( hdc );
-    if (!dc) return 0;
-    if (dc->funcs->pSetDCOrg) prevOrg = dc->funcs->pSetDCOrg( dc->physDev, x, y );
-    release_dc_ptr( dc );
-    return prevOrg;
+    FIXME( "%04x %d,%d no longer supported\n", hdc16, x, y );
+    return 0;
 }
 
 
@@ -3485,14 +3659,11 @@ DWORD WINAPI SetDCOrg16( HDC16 hdc16, INT16 x, INT16 y )
  */
 HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
 {
-    HRGN16 ret = 0;
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (dc)
-    {
-        ret = HRGN_16(dc->hVisRgn);
-        release_dc_ptr( dc );
-    }
-    return ret;
+    static HRGN hrgn;
+
+    if (!hrgn) hrgn = CreateRectRgn( 0, 0, 0, 0 );
+    GetRandomRgn( HDC_32(hdc), hrgn, SYSRGN );
+    return HRGN_16(hrgn);
 }
 
 
@@ -3501,17 +3672,8 @@ HRGN16 WINAPI InquireVisRgn16( HDC16 hdc )
  */
 INT16 WINAPI OffsetVisRgn16( HDC16 hdc16, INT16 x, INT16 y )
 {
-    INT16 retval;
-    HDC hdc = HDC_32( hdc16 );
-    DC * dc = get_dc_ptr( hdc );
-
-    if (!dc) return ERROR;
-    TRACE("%p %d,%d\n", hdc, x, y );
-    update_dc( dc );
-    retval = OffsetRgn( dc->hVisRgn, x, y );
-    CLIPPING_UpdateGCRegion( dc );
-    release_dc_ptr( dc );
-    return retval;
+    FIXME( "%04x %d,%d no longer supported\n", hdc16, x, y );
+    return ERROR;
 }
 
 
@@ -3520,32 +3682,8 @@ INT16 WINAPI OffsetVisRgn16( HDC16 hdc16, INT16 x, INT16 y )
  */
 INT16 WINAPI ExcludeVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, INT16 bottom )
 {
-    HRGN tempRgn;
-    INT16 ret;
-    POINT pt[2];
-    HDC hdc = HDC_32( hdc16 );
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return ERROR;
-
-    pt[0].x = left;
-    pt[0].y = top;
-    pt[1].x = right;
-    pt[1].y = bottom;
-
-    LPtoDP( hdc, pt, 2 );
-
-    TRACE("%p %d,%d - %d,%d\n", hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
-
-    if (!(tempRgn = CreateRectRgn( pt[0].x, pt[0].y, pt[1].x, pt[1].y ))) ret = ERROR;
-    else
-    {
-        update_dc( dc );
-        ret = CombineRgn( dc->hVisRgn, dc->hVisRgn, tempRgn, RGN_DIFF );
-        DeleteObject( tempRgn );
-    }
-    if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
-    release_dc_ptr( dc );
-    return ret;
+    FIXME( "%04x %d,%d-%d,%d no longer supported\n", hdc16, left, top, right, bottom );
+    return ERROR;
 }
 
 
@@ -3554,32 +3692,8 @@ INT16 WINAPI ExcludeVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, 
  */
 INT16 WINAPI IntersectVisRect16( HDC16 hdc16, INT16 left, INT16 top, INT16 right, INT16 bottom )
 {
-    HRGN tempRgn;
-    INT16 ret;
-    POINT pt[2];
-    HDC hdc = HDC_32( hdc16 );
-    DC * dc = get_dc_ptr( hdc );
-    if (!dc) return ERROR;
-
-    pt[0].x = left;
-    pt[0].y = top;
-    pt[1].x = right;
-    pt[1].y = bottom;
-
-    LPtoDP( hdc, pt, 2 );
-
-    TRACE("%p %d,%d - %d,%d\n", hdc, pt[0].x, pt[0].y, pt[1].x, pt[1].y);
-
-    if (!(tempRgn = CreateRectRgn( pt[0].x, pt[0].y, pt[1].x, pt[1].y ))) ret = ERROR;
-    else
-    {
-        update_dc( dc );
-        ret = CombineRgn( dc->hVisRgn, dc->hVisRgn, tempRgn, RGN_AND );
-        DeleteObject( tempRgn );
-    }
-    if (ret != ERROR) CLIPPING_UpdateGCRegion( dc );
-    release_dc_ptr( dc );
-    return ret;
+    FIXME( "%04x %d,%d-%d,%d no longer supported\n", hdc16, left, top, right, bottom );
+    return ERROR;
 }
 
 
@@ -3590,24 +3704,19 @@ HRGN16 WINAPI SaveVisRgn16( HDC16 hdc16 )
 {
     struct saved_visrgn *saved;
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = get_dc_ptr( hdc );
 
-    if (!dc) return 0;
     TRACE("%p\n", hdc );
 
-    update_dc( dc );
-    if (!(saved = HeapAlloc( GetProcessHeap(), 0, sizeof(*saved) ))) goto error;
-    if (!(saved->hrgn = CreateRectRgn( 0, 0, 0, 0 ))) goto error;
-    CombineRgn( saved->hrgn, dc->hVisRgn, 0, RGN_COPY );
-    saved->next = dc->saved_visrgn;
-    dc->saved_visrgn = saved;
-    release_dc_ptr( dc );
+    if (!(saved = HeapAlloc( GetProcessHeap(), 0, sizeof(*saved) ))) return 0;
+    if (!(saved->hrgn = CreateRectRgn( 0, 0, 0, 0 )))
+    {
+        HeapFree( GetProcessHeap(), 0, saved );
+        return 0;
+    }
+    saved->hdc = hdc;
+    GetRandomRgn( hdc, saved->hrgn, SYSRGN );
+    list_add_head( &saved_regions, &saved->entry );
     return HRGN_16(saved->hrgn);
-
-error:
-    release_dc_ptr( dc );
-    HeapFree( GetProcessHeap(), 0, saved );
-    return 0;
 }
 
 
@@ -3618,22 +3727,19 @@ INT16 WINAPI RestoreVisRgn16( HDC16 hdc16 )
 {
     struct saved_visrgn *saved;
     HDC hdc = HDC_32( hdc16 );
-    DC *dc = get_dc_ptr( hdc );
     INT16 ret = ERROR;
-
-    if (!dc) return ERROR;
 
     TRACE("%p\n", hdc );
 
-    if (!(saved = dc->saved_visrgn)) goto done;
-
-    ret = CombineRgn( dc->hVisRgn, saved->hrgn, 0, RGN_COPY );
-    dc->saved_visrgn = saved->next;
-    DeleteObject( saved->hrgn );
-    HeapFree( GetProcessHeap(), 0, saved );
-    CLIPPING_UpdateGCRegion( dc );
- done:
-    release_dc_ptr( dc );
+    LIST_FOR_EACH_ENTRY( saved, &saved_regions, struct saved_visrgn, entry )
+    {
+        if (saved->hdc != hdc) continue;
+        ret = SelectVisRgn( hdc, saved->hrgn );
+        list_remove( &saved->entry );
+        DeleteObject( saved->hrgn );
+        HeapFree( GetProcessHeap(), 0, saved );
+        break;
+    }
     return ret;
 }
 
@@ -3643,14 +3749,11 @@ INT16 WINAPI RestoreVisRgn16( HDC16 hdc16 )
  */
 HRGN16 WINAPI GetClipRgn16( HDC16 hdc )
 {
-    HRGN16 ret = 0;
-    DC * dc = get_dc_ptr( HDC_32(hdc) );
-    if (dc)
-    {
-        ret = HRGN_16(dc->hClipRgn);
-        release_dc_ptr( dc );
-    }
-    return ret;
+    static HRGN hrgn;
+
+    if (!hrgn) hrgn = CreateRectRgn( 0, 0, 0, 0 );
+    GetClipRgn( HDC_32(hdc), hrgn );
+    return HRGN_16(hrgn);
 }
 
 

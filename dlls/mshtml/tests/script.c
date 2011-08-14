@@ -121,6 +121,7 @@ DEFINE_EXPECT(AXGetInterfaceSafetyOptions);
 DEFINE_EXPECT(AXSetInterfaceSafetyOptions);
 
 #define TESTSCRIPT_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80746}"
+#define TESTACTIVEX_CLSID "{178fc163-f585-4e24-9c13-4bb7faf80646}"
 
 #define DISPID_SCRIPT_TESTPROP   0x100000
 
@@ -133,6 +134,7 @@ static IHTMLDocument2 *notif_doc;
 static IDispatchEx *window_dispex;
 static BOOL doc_complete;
 static IDispatch *script_disp;
+static BOOL ax_objsafe;
 
 static const char *debugstr_guid(REFIID riid)
 {
@@ -163,6 +165,28 @@ static BSTR a2bstr(const char *str)
     MultiByteToWideChar(CP_ACP, 0, str, -1, ret, len);
 
     return ret;
+}
+
+static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
+{
+    HKEY hkey;
+    DWORD res;
+
+    if(!init) {
+        RegDeleteKey(HKEY_CLASSES_ROOT, key_name);
+        return TRUE;
+    }
+
+    res = RegCreateKeyA(HKEY_CLASSES_ROOT, key_name, &hkey);
+    if(res != ERROR_SUCCESS)
+        return FALSE;
+
+    if(def_value)
+        res = RegSetValueA(hkey, NULL, REG_SZ, def_value, strlen(def_value));
+
+    RegCloseKey(hkey);
+
+    return res == ERROR_SUCCESS;
 }
 
 static HRESULT WINAPI PropertyNotifySink_QueryInterface(IPropertyNotifySink *iface,
@@ -492,7 +516,6 @@ static IHTMLDocument2 *create_and_load_doc(const char *str)
 {
     IHTMLDocument2 *doc;
     IHTMLElement *body = NULL;
-    ULONG ref;
     MSG msg;
     HRESULT hres;
     static const WCHAR ucPtr[] = {'b','a','c','k','g','r','o','u','n','d',0};
@@ -510,13 +533,6 @@ static IHTMLDocument2 *create_and_load_doc(const char *str)
 
     hres = IHTMLDocument2_get_body(doc, &body);
     ok(hres == S_OK, "get_body failed: %08x\n", hres);
-
-    if(!body) {
-        skip("Could not get document body. Assuming no Gecko installed.\n");
-        ref = IHTMLDocument2_Release(doc);
-        ok(!ref, "ref = %d\n", ref);
-        return NULL;
-    }
 
     /* Check we can query for function on the IHTMLElementBody interface */
     name = (WCHAR*)ucPtr;
@@ -599,6 +615,8 @@ static HRESULT WINAPI AXObjectSafety_QueryInterface(IObjectSafety *iface, REFIID
 
     if(IsEqualGUID(&IID_IObjectSafety, riid)) {
         CHECK_EXPECT(AXQueryInterface_IObjectSafety);
+        if(!ax_objsafe)
+            return E_NOINTERFACE;
         *ppv = iface;
         return S_OK;
     }
@@ -647,6 +665,12 @@ static const IObjectSafetyVtbl AXObjectSafetyVtbl = {
 
 static IObjectSafety AXObjectSafety = { &AXObjectSafetyVtbl };
 
+static BOOL set_safe_reg(BOOL init)
+{
+    return init_key("CLSID\\"TESTACTIVEX_CLSID"\\Implemented Categories\\{7dd95801-9882-11cf-9fa9-00aa006c42c4}",
+                    NULL, init);
+}
+
 static void test_security(void)
 {
     IInternetHostSecurityManager *sec_mgr;
@@ -673,6 +697,7 @@ static void test_security(void)
     cs.pUnk = (IUnknown*)&AXObjectSafety;
     cs.dwFlags = 0;
 
+    ax_objsafe = TRUE;
     SET_EXPECT(AXQueryInterface_IActiveScript);
     SET_EXPECT(AXQueryInterface_IObjectSafety);
     SET_EXPECT(AXGetInterfaceSafetyOptions);
@@ -688,6 +713,55 @@ static void test_security(void)
     ok(policy_size == sizeof(DWORD), "policy_size = %d\n", policy_size);
     ok(*(DWORD*)ppolicy == URLPOLICY_ALLOW, "policy = %x\n", *(DWORD*)ppolicy);
     CoTaskMemFree(ppolicy);
+
+    ax_objsafe = FALSE;
+    SET_EXPECT(AXQueryInterface_IActiveScript);
+    SET_EXPECT(AXQueryInterface_IObjectSafety);
+    hres = IInternetHostSecurityManager_QueryCustomPolicy(sec_mgr, &GUID_CUSTOM_CONFIRMOBJECTSAFETY,
+            &ppolicy, &policy_size, (BYTE*)&cs, sizeof(cs), 0);
+    CHECK_CALLED(AXQueryInterface_IActiveScript);
+    CHECK_CALLED(AXQueryInterface_IObjectSafety);
+
+    ok(hres == S_OK, "QueryCusromPolicy failed: %08x\n", hres);
+    ok(policy_size == sizeof(DWORD), "policy_size = %d\n", policy_size);
+    ok(*(DWORD*)ppolicy == URLPOLICY_DISALLOW, "policy = %x\n", *(DWORD*)ppolicy);
+    CoTaskMemFree(ppolicy);
+
+    if(set_safe_reg(TRUE)) {
+        ax_objsafe = FALSE;
+        SET_EXPECT(AXQueryInterface_IActiveScript);
+        SET_EXPECT(AXQueryInterface_IObjectSafety);
+        hres = IInternetHostSecurityManager_QueryCustomPolicy(sec_mgr, &GUID_CUSTOM_CONFIRMOBJECTSAFETY,
+                 &ppolicy, &policy_size, (BYTE*)&cs, sizeof(cs), 0);
+        CHECK_CALLED(AXQueryInterface_IActiveScript);
+        CHECK_CALLED(AXQueryInterface_IObjectSafety);
+
+        ok(hres == S_OK, "QueryCusromPolicy failed: %08x\n", hres);
+        ok(policy_size == sizeof(DWORD), "policy_size = %d\n", policy_size);
+        ok(*(DWORD*)ppolicy == URLPOLICY_ALLOW, "policy = %x\n", *(DWORD*)ppolicy);
+        CoTaskMemFree(ppolicy);
+
+        ax_objsafe = TRUE;
+        SET_EXPECT(AXQueryInterface_IActiveScript);
+        SET_EXPECT(AXQueryInterface_IObjectSafety);
+        SET_EXPECT(AXGetInterfaceSafetyOptions);
+        SET_EXPECT(AXSetInterfaceSafetyOptions);
+        hres = IInternetHostSecurityManager_QueryCustomPolicy(sec_mgr, &GUID_CUSTOM_CONFIRMOBJECTSAFETY,
+                &ppolicy, &policy_size, (BYTE*)&cs, sizeof(cs), 0);
+        CHECK_CALLED(AXQueryInterface_IActiveScript);
+        CHECK_CALLED(AXQueryInterface_IObjectSafety);
+        CHECK_CALLED(AXGetInterfaceSafetyOptions);
+        CHECK_CALLED(AXSetInterfaceSafetyOptions);
+
+        ok(hres == S_OK, "QueryCusromPolicy failed: %08x\n", hres);
+        ok(policy_size == sizeof(DWORD), "policy_size = %d\n", policy_size);
+        ok(*(DWORD*)ppolicy == URLPOLICY_ALLOW, "policy = %x\n", *(DWORD*)ppolicy);
+        CoTaskMemFree(ppolicy);
+
+        set_safe_reg(FALSE);
+    }else {
+        skip("Could not set safety registry\n");
+    }
 
     IInternetHostSecurityManager_Release(sec_mgr);
 }
@@ -1510,28 +1584,6 @@ static void test_simple_script(void)
     CHECK_CALLED(Close);
 }
 
-static BOOL init_key(const char *key_name, const char *def_value, BOOL init)
-{
-    HKEY hkey;
-    DWORD res;
-
-    if(!init) {
-        RegDeleteKey(HKEY_CLASSES_ROOT, key_name);
-        return TRUE;
-    }
-
-    res = RegCreateKeyA(HKEY_CLASSES_ROOT, key_name, &hkey);
-    if(res != ERROR_SUCCESS)
-        return FALSE;
-
-    if(def_value)
-        res = RegSetValueA(hkey, NULL, REG_SZ, def_value, strlen(def_value));
-
-    RegCloseKey(hkey);
-
-    return res == ERROR_SUCCESS;
-}
-
 static BOOL init_registry(BOOL init)
 {
     return init_key("TestScript\\CLSID", TESTSCRIPT_CLSID, init)
@@ -1558,39 +1610,8 @@ static BOOL register_script_engine(void)
     return TRUE;
 }
 
-static void gecko_installer_workaround(BOOL disable)
-{
-    HKEY hkey;
-    DWORD res;
-
-    static BOOL has_url = FALSE;
-    static char url[2048];
-
-    if(!disable && !has_url)
-        return;
-
-    res = RegOpenKey(HKEY_CURRENT_USER, "Software\\Wine\\MSHTML", &hkey);
-    if(res != ERROR_SUCCESS)
-        return;
-
-    if(disable) {
-        DWORD type, size = sizeof(url);
-
-        res = RegQueryValueEx(hkey, "GeckoUrl", NULL, &type, (PVOID)url, &size);
-        if(res == ERROR_SUCCESS && type == REG_SZ)
-            has_url = TRUE;
-
-        RegDeleteValue(hkey, "GeckoUrl");
-    }else {
-        RegSetValueEx(hkey, "GeckoUrl", 0, REG_SZ, (PVOID)url, lstrlenA(url)+1);
-    }
-
-    RegCloseKey(hkey);
-}
-
 START_TEST(script)
 {
-    gecko_installer_workaround(TRUE);
     CoInitialize(NULL);
 
     if(winetest_interactive || ! is_ie_hardened()) {
@@ -1605,5 +1626,4 @@ START_TEST(script)
     }
 
     CoUninitialize();
-    gecko_installer_workaround(FALSE);
 }

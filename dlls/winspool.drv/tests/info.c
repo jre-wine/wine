@@ -70,6 +70,9 @@ static BOOL  (WINAPI * pGetDefaultPrinterA)(LPSTR, LPDWORD);
 static BOOL  (WINAPI * pSetDefaultPrinterA)(LPCSTR);
 static DWORD (WINAPI * pXcvDataW)(HANDLE, LPCWSTR, PBYTE, DWORD, PBYTE, DWORD, PDWORD, PDWORD);
 static BOOL  (WINAPI * pAddPortExA)(LPSTR, DWORD, LPBYTE, LPSTR);
+static BOOL  (WINAPI * pGetPrinterDriverW)(HANDLE, LPWSTR, DWORD, LPBYTE, DWORD, LPDWORD);
+static BOOL  (WINAPI * pGetPrinterW)(HANDLE, DWORD, LPBYTE, DWORD, LPDWORD);
+static BOOL  (WINAPI * pEnumPrinterDriversW)(LPWSTR, LPWSTR, DWORD, LPBYTE, DWORD, LPDWORD, LPDWORD);
 
 
 /* ################################ */
@@ -1152,6 +1155,15 @@ static void test_EnumPrinterDrivers(void)
             continue;
         }
 
+        /* EnumPrinterDriversA returns the same number of bytes as EnumPrinterDriversW */
+        if (pEnumPrinterDriversW)
+        {
+            DWORD double_needed;
+            DWORD double_returned;
+            pEnumPrinterDriversW(NULL, NULL, level, NULL, 0, &double_needed, &double_returned);
+            ok(double_needed == cbBuf, "level %d: EnumPrinterDriversA returned different size %d than EnumPrinterDriversW (%d)\n", level, cbBuf, double_needed);
+        }
+
         buffer = HeapAlloc(GetProcessHeap(), 0, cbBuf + 4);
         if (buffer == NULL) continue;
 
@@ -1232,6 +1244,14 @@ static void test_EnumPrinterDrivers(void)
     buffer = HeapAlloc(GetProcessHeap(), 0, pcbNeeded);
     res = EnumPrinterDriversA(NULL, env_all, 1, buffer, pcbNeeded, &pcbNeeded, &pcReturned);
     ok(res, "EnumPrinterDriversA failed %u\n", GetLastError());
+    if (res && pcReturned > 0)
+    {
+        DRIVER_INFO_1 *di_1 = (DRIVER_INFO_1 *)buffer;
+        ok((LPBYTE) di_1->pName == NULL || (LPBYTE) di_1->pName < buffer ||
+            (LPBYTE) di_1->pName >= (LPBYTE)(di_1 + pcReturned),
+            "Driver Information not in sequence; pName %p, top of data %p\n",
+            di_1->pName, di_1 + pcReturned);
+    }
 
     HeapFree(GetProcessHeap(), 0, buffer);
 }
@@ -2211,6 +2231,76 @@ static void test_XcvDataW_PortIsValid(void)
 
 /* ########################### */
 
+static void test_GetPrinter(void)
+{
+    HANDLE hprn;
+    BOOL ret;
+    BYTE *buf;
+    INT level;
+    DWORD needed, filled;
+
+    if (!default_printer)
+    {
+        skip("There is no default printer installed\n");
+        return;
+    }
+
+    hprn = 0;
+    ret = OpenPrinter(default_printer, &hprn, NULL);
+    if (!ret)
+    {
+        skip("Unable to open the default printer (%s)\n", default_printer);
+        return;
+    }
+    ok(hprn != 0, "wrong hprn %p\n", hprn);
+
+    for (level = 1; level <= 9; level++)
+    {
+        SetLastError(0xdeadbeef);
+        needed = (DWORD)-1;
+        ret = GetPrinter(hprn, level, NULL, 0, &needed);
+        ok(!ret, "level %d: GetPrinter should fail\n", level);
+        /* Not all levels are supported on all Windows-Versions */
+        if(GetLastError() == ERROR_INVALID_LEVEL) continue;
+        ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "wrong error %d\n", GetLastError());
+        ok(needed > 0,"not expected needed buffer size %d\n", needed);
+
+        /* GetPrinterA returns the same number of bytes as GetPrinterW */
+        if (! ret && pGetPrinterW && level != 6 && level != 7)
+        {
+            DWORD double_needed;
+            ret = pGetPrinterW(hprn, level, NULL, 0, &double_needed);
+            ok(double_needed == needed, "level %d: GetPrinterA returned different size %d than GetPrinterW (%d)\n", level, needed, double_needed);
+        }
+
+        buf = HeapAlloc(GetProcessHeap(), 0, needed);
+
+        SetLastError(0xdeadbeef);
+        filled = -1;
+        ret = GetPrinter(hprn, level, buf, needed, &filled);
+        ok(needed == filled, "needed %d != filled %d\n", needed, filled);
+
+        if (level == 2)
+        {
+            PRINTER_INFO_2 *pi_2 = (PRINTER_INFO_2 *)buf;
+
+            ok(pi_2->pPrinterName!= NULL, "not expected NULL ptr\n");
+            ok(pi_2->pDriverName!= NULL, "not expected NULL ptr\n");
+
+            trace("pPrinterName %s\n", pi_2->pPrinterName);
+            trace("pDriverName %s\n", pi_2->pDriverName);
+        }
+
+        HeapFree(GetProcessHeap(), 0, buf);
+    }
+
+    SetLastError(0xdeadbeef);
+    ret = ClosePrinter(hprn);
+    ok(ret, "ClosePrinter error %d\n", GetLastError());
+}
+
+/* ########################### */
+
 static void test_GetPrinterDriver(void)
 {
     HANDLE hprn;
@@ -2258,6 +2348,14 @@ static void test_GetPrinterDriver(void)
             /* needed is modified in win9x. The modified Value depends on the
                default Printer. testing for "needed == (DWORD)-1" will fail */
             continue;
+        }
+
+        /* GetPrinterDriverA returns the same number of bytes as GetPrinterDriverW */
+        if (! ret && pGetPrinterDriverW)
+        {
+            DWORD double_needed;
+            ret = pGetPrinterDriverW(hprn, NULL, level, NULL, 0, &double_needed);
+            ok(double_needed == needed, "GetPrinterDriverA returned different size %d than GetPrinterDriverW (%d)\n", needed, double_needed);
         }
 
         buf = HeapAlloc(GetProcessHeap(), 0, needed);
@@ -2471,7 +2569,7 @@ static void test_DeviceCapabilities(void)
     papers = HeapAlloc(GetProcessHeap(), 0, sizeof(*papers) * n_papers);
     ret = DeviceCapabilities(device, port, DC_PAPERS, (LPSTR)papers, NULL);
     ok(ret == n_papers, "expected %d, got %d\n", n_papers, ret);
-#if VERBOSE
+#ifdef VERBOSE
     for (ret = 0; ret < n_papers; ret++)
         trace("papers[%d] = %d\n", ret, papers[ret]);
 #endif
@@ -2483,7 +2581,7 @@ static void test_DeviceCapabilities(void)
     paper_size = HeapAlloc(GetProcessHeap(), 0, sizeof(*paper_size) * n_paper_size);
     ret = DeviceCapabilities(device, port, DC_PAPERSIZE, (LPSTR)paper_size, NULL);
     ok(ret == n_paper_size, "expected %d, got %d\n", n_paper_size, ret);
-#if VERBOSE
+#ifdef VERBOSE
     for (ret = 0; ret < n_paper_size; ret++)
         trace("paper_size[%d] = %d x %d\n", ret, paper_size[ret].x, paper_size[ret].y);
 #endif
@@ -2495,7 +2593,7 @@ static void test_DeviceCapabilities(void)
     paper_name = HeapAlloc(GetProcessHeap(), 0, sizeof(*paper_name) * n_paper_names);
     ret = DeviceCapabilities(device, port, DC_PAPERNAMES, (LPSTR)paper_name, NULL);
     ok(ret == n_paper_names, "expected %d, got %d\n", n_paper_names, ret);
-#if VERBOSE
+#ifdef VERBOSE
     for (ret = 0; ret < n_paper_names; ret++)
         trace("paper_name[%u] = %s\n", ret, paper_name[ret].name);
 #endif
@@ -2536,6 +2634,9 @@ START_TEST(info)
     hwinspool = GetModuleHandleA("winspool.drv");
     pGetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "GetDefaultPrinterA");
     pSetDefaultPrinterA = (void *) GetProcAddress(hwinspool, "SetDefaultPrinterA");
+    pGetPrinterDriverW = (void *) GetProcAddress(hwinspool, "GetPrinterDriverW");
+    pEnumPrinterDriversW = (void *) GetProcAddress(hwinspool, "EnumPrinterDriversW");
+    pGetPrinterW = (void *) GetProcAddress(hwinspool, "GetPrinterW");
     pXcvDataW = (void *) GetProcAddress(hwinspool, "XcvDataW");
     pAddPortExA = (void *) GetProcAddress(hwinspool, "AddPortExA");
 
@@ -2562,6 +2663,7 @@ START_TEST(info)
     test_GetPrinterDriverDirectory();
     test_GetPrintProcessorDirectory();
     test_OpenPrinter();
+    test_GetPrinter();
     test_GetPrinterDriver();
     test_SetDefaultPrinter();
     test_XcvDataW_MonitorUI();

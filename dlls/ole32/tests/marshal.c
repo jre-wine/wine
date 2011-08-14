@@ -1257,7 +1257,7 @@ static void test_lock_object_external(void)
     IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
     hr = CoReleaseMarshalData(pStream);
     ok_ole_success(hr, CoReleaseMarshalData);
-    IStream_Release(pStream);
+    IStream_Seek(pStream, ullZero, STREAM_SEEK_SET, NULL);
 
     ok_more_than_one_lock();
 
@@ -1268,6 +1268,39 @@ static void test_lock_object_external(void)
     CoLockObjectExternal((IUnknown*)&Test_ClassFactory, FALSE, TRUE);
 
     ok_no_locks();
+
+    /* test CoLockObjectExternal releases reference to object with
+     * fLastUnlockReleases as TRUE and there are only strong references on
+     * the object */
+    CoLockObjectExternal((IUnknown*)&Test_ClassFactory, TRUE, FALSE);
+
+    ok_more_than_one_lock();
+
+    CoLockObjectExternal((IUnknown*)&Test_ClassFactory, FALSE, FALSE);
+
+    ok_no_locks();
+
+    /* test CoLockObjectExternal doesn't release the last reference to an
+     * object with fLastUnlockReleases as TRUE and there is a weak reference
+     * on the object */
+    hr = CoMarshalInterface(pStream, &IID_IClassFactory, (IUnknown*)&Test_ClassFactory, MSHCTX_INPROC, NULL, MSHLFLAGS_TABLEWEAK);
+    ok_ole_success(hr, CoMarshalInterface);
+
+    ok_more_than_one_lock();
+
+    CoLockObjectExternal((IUnknown*)&Test_ClassFactory, TRUE, FALSE);
+
+    ok_more_than_one_lock();
+
+    CoLockObjectExternal((IUnknown*)&Test_ClassFactory, FALSE, FALSE);
+
+    ok_more_than_one_lock();
+
+    CoDisconnectObject((IUnknown*)&Test_ClassFactory, 0);
+
+    ok_no_locks();
+
+    IStream_Release(pStream);
 }
 
 /* tests disconnecting stubs */
@@ -2260,7 +2293,7 @@ static void reg_unreg_wine_test_class(BOOL Register)
     {
         error = RegCreateKeyEx(HKEY_CLASSES_ROOT, buffer, 0, NULL, 0, KEY_SET_VALUE, NULL, &hkey, &dwDisposition);
         ok(error == ERROR_SUCCESS, "RegCreateKeyEx failed with error %d\n", error);
-        error = RegSetValueEx(hkey, NULL, 0, REG_SZ, (const unsigned char *)"ole32.dll", strlen("ole32.dll") + 1);
+        error = RegSetValueEx(hkey, NULL, 0, REG_SZ, (const unsigned char *)"\"ole32.dll\"", strlen("\"ole32.dll\"") + 1);
         ok(error == ERROR_SUCCESS, "RegSetValueEx failed with error %d\n", error);
         RegCloseKey(hkey);
     }
@@ -2281,7 +2314,6 @@ static void test_inproc_handler(void)
     reg_unreg_wine_test_class(TRUE);
 
     hr = CoCreateInstance(&CLSID_WineTest, NULL, CLSCTX_INPROC_HANDLER, &IID_IUnknown, (void **)&pObject);
-    todo_wine
     ok_ole_success(hr, "CoCreateInstance");
 
     if (SUCCEEDED(hr))

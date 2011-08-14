@@ -65,7 +65,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(storage);
 static const BYTE STORAGE_magic[8]    ={0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1};
 static const BYTE STORAGE_oldmagic[8] ={0xd0,0xcf,0x11,0xe0,0x0e,0x11,0xfc,0x0d};
 
-static const char rootPropertyName[] = "Root Entry";
+static const char rootEntryName[] = "Root Entry";
 
 /****************************************************************************
  * Storage32InternalImpl definitions.
@@ -77,15 +77,17 @@ static const char rootPropertyName[] = "Root Entry";
 struct StorageInternalImpl
 {
   struct StorageBaseImpl base;
+
   /*
-   * There is no specific data for this class.
+   * Entry in the parent's stream tracking list
    */
+  struct list ParentListEntry;
 };
 typedef struct StorageInternalImpl StorageInternalImpl;
 
 /* Method definitions for the Storage32InternalImpl class. */
 static StorageInternalImpl* StorageInternalImpl_Construct(StorageImpl* ancestorStorage,
-                                                          DWORD openFlags, ULONG rootTropertyIndex);
+                                                          DWORD openFlags, DirRef storageDirEntry);
 static void StorageImpl_Destroy(StorageBaseImpl* iface);
 static BOOL StorageImpl_ReadBigBlock(StorageImpl* This, ULONG blockIndex, void* buffer);
 static BOOL StorageImpl_WriteBigBlock(StorageImpl* This, ULONG blockIndex, const void* buffer);
@@ -109,6 +111,10 @@ static BOOL StorageImpl_WriteDWordToBigBlock( StorageImpl* This,
     ULONG blockIndex, ULONG offset, DWORD value);
 static BOOL StorageImpl_ReadDWordFromBigBlock( StorageImpl*  This,
     ULONG blockIndex, ULONG offset, DWORD* value);
+
+static BOOL StorageBaseImpl_IsStreamOpen(StorageBaseImpl * stg, DirRef streamEntry);
+static BOOL StorageBaseImpl_IsStorageOpen(StorageBaseImpl * stg, DirRef storageEntry);
+static void StorageInternalImpl_Invalidate( StorageInternalImpl *This );
 
 /* OLESTREAM memory structure to use for Get and Put Routines */
 /* Used for OleConvertIStorageToOLESTREAM and OleConvertOLESTREAMToIStorage */
@@ -159,20 +165,20 @@ typedef struct
 /***********************************************************************
  * Forward declaration of internal functions used by the method DestroyElement
  */
-static HRESULT deleteStorageProperty(
+static HRESULT deleteStorageContents(
   StorageBaseImpl *parentStorage,
-  ULONG        foundPropertyIndexToDelete,
-  DirEntry     propertyToDelete);
+  DirRef       indexToDelete,
+  DirEntry     entryDataToDelete);
 
-static HRESULT deleteStreamProperty(
+static HRESULT deleteStreamContents(
   StorageBaseImpl *parentStorage,
-  ULONG         foundPropertyIndexToDelete,
-  DirEntry      propertyToDelete);
+  DirRef        indexToDelete,
+  DirEntry      entryDataToDelete);
 
 static HRESULT removeFromTree(
   StorageImpl *This,
-  ULONG         parentStorageIndex,
-  ULONG         deletedIndex);
+  DirRef        parentStorageIndex,
+  DirRef        deletedIndex);
 
 /***********************************************************************
  * Declaration of the functions used to manipulate DirEntry
@@ -181,33 +187,33 @@ static HRESULT removeFromTree(
 static HRESULT createDirEntry(
   StorageImpl *storage,
   const DirEntry *newData,
-  ULONG *index);
+  DirRef *index);
 
 static HRESULT destroyDirEntry(
   StorageImpl *storage,
-  ULONG index);
+  DirRef index);
 
 static HRESULT insertIntoTree(
   StorageImpl *This,
-  ULONG         parentStorageIndex,
-  ULONG         newPropertyIndex);
+  DirRef        parentStorageIndex,
+  DirRef        newEntryIndex);
 
-static LONG propertyNameCmp(
-    const OLECHAR *newProperty,
-    const OLECHAR *currentProperty);
+static LONG entryNameCmp(
+    const OLECHAR *name1,
+    const OLECHAR *name2);
 
-static ULONG findElement(
+static DirRef findElement(
     StorageImpl *storage,
-    ULONG storageEntry,
+    DirRef storageEntry,
     const OLECHAR *name,
     DirEntry *data);
 
 static HRESULT findTreeParent(
     StorageImpl *storage,
-    ULONG storageEntry,
+    DirRef storageEntry,
     const OLECHAR *childName,
     DirEntry *parentData,
-    ULONG *parentEntry,
+    DirRef *parentEntry,
     ULONG *relation);
 
 /***********************************************************************
@@ -236,25 +242,25 @@ struct IEnumSTATSTGImpl
 
   LONG           ref;                   /* Reference count */
   StorageImpl*   parentStorage;         /* Reference to the parent storage */
-  ULONG          firstPropertyNode;     /* Index of the root of the storage to enumerate */
+  DirRef         storageDirEntry;     /* Directory entry of the storage to enumerate */
 
   /*
    * The current implementation of the IEnumSTATSTGImpl class uses a stack
-   * to walk the property sets to get the content of a storage. This stack
+   * to walk the directory entries to get the content of a storage. This stack
    * is implemented by the following 3 data members
    */
   ULONG          stackSize;
   ULONG          stackMaxSize;
-  ULONG*         stackToVisit;
+  DirRef*        stackToVisit;
 
 #define ENUMSTATSGT_SIZE_INCREMENT 10
 };
 
 
-static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(StorageImpl* This, ULONG firstPropertyNode);
+static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(StorageImpl* This, DirRef storageDirEntry);
 static void IEnumSTATSTGImpl_Destroy(IEnumSTATSTGImpl* This);
-static void IEnumSTATSTGImpl_PushSearchNode(IEnumSTATSTGImpl* This, ULONG nodeToPush);
-static ULONG IEnumSTATSTGImpl_PopSearchNode(IEnumSTATSTGImpl* This, BOOL remove);
+static void IEnumSTATSTGImpl_PushSearchNode(IEnumSTATSTGImpl* This, DirRef nodeToPush);
+static DirRef IEnumSTATSTGImpl_PopSearchNode(IEnumSTATSTGImpl* This, BOOL remove);
 
 /************************************************************************
 ** Block Functions
@@ -372,7 +378,7 @@ static ULONG WINAPI StorageBaseImpl_Release(
      * destructor of the appropriate derived class. To do this, we are
      * using virtual functions to implement the destructor.
      */
-    This->v_destructor(This);
+    StorageBaseImpl_Destroy(This);
   }
 
   return ref;
@@ -395,8 +401,8 @@ static HRESULT WINAPI StorageBaseImpl_OpenStream(
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
   StgStreamImpl*    newStream;
-  DirEntry          currentProperty;
-  ULONG             foundPropertyIndex;
+  DirEntry          currentEntry;
+  DirRef            streamEntryRef;
   HRESULT           res = STG_E_UNKNOWN;
 
   TRACE("(%p, %s, %p, %x, %d, %p)\n",
@@ -426,6 +432,12 @@ static HRESULT WINAPI StorageBaseImpl_OpenStream(
     goto end;
   }
 
+  if (!This->ancestorStorage)
+  {
+    res = STG_E_REVERTED;
+    goto end;
+  }
+
   /*
    * Check that we're compatible with the parent's storage mode, but
    * only if we are not in transacted mode
@@ -441,19 +453,26 @@ static HRESULT WINAPI StorageBaseImpl_OpenStream(
   /*
    * Search for the element with the given name
    */
-  foundPropertyIndex = findElement(
+  streamEntryRef = findElement(
     This->ancestorStorage,
-    This->rootPropertySetIndex,
+    This->storageDirEntry,
     pwcsName,
-    &currentProperty);
+    &currentEntry);
 
   /*
    * If it was found, construct the stream object and return a pointer to it.
    */
-  if ( (foundPropertyIndex!=DIRENTRY_NULL) &&
-       (currentProperty.propertyType==STGTY_STREAM) )
+  if ( (streamEntryRef!=DIRENTRY_NULL) &&
+       (currentEntry.stgType==STGTY_STREAM) )
   {
-    newStream = StgStreamImpl_Construct(This, grfMode, foundPropertyIndex);
+    if (StorageBaseImpl_IsStreamOpen(This, streamEntryRef))
+    {
+      /* A single stream cannot be opened a second time. */
+      res = STG_E_ACCESSDENIED;
+      goto end;
+    }
+
+    newStream = StgStreamImpl_Construct(This, grfMode, streamEntryRef);
 
     if (newStream!=0)
     {
@@ -497,8 +516,8 @@ static HRESULT WINAPI StorageBaseImpl_OpenStorage(
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
   StorageInternalImpl* newStorage;
-  DirEntry               currentProperty;
-  ULONG                  foundPropertyIndex;
+  DirEntry               currentEntry;
+  DirRef                 storageEntryRef;
   HRESULT                res = STG_E_UNKNOWN;
 
   TRACE("(%p, %s, %p, %x, %p, %d, %p)\n",
@@ -508,6 +527,12 @@ static HRESULT WINAPI StorageBaseImpl_OpenStorage(
   if ( (This==0) || (pwcsName==NULL) || (ppstg==0) )
   {
     res = E_INVALIDARG;
+    goto end;
+  }
+
+  if (This->openFlags & STGM_SIMPLE)
+  {
+    res = STG_E_INVALIDFUNCTION;
     goto end;
   }
 
@@ -535,6 +560,9 @@ static HRESULT WINAPI StorageBaseImpl_OpenStorage(
     goto end;
   }
 
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   /*
    * Check that we're compatible with the parent's storage mode,
    * but only if we are not transacted
@@ -549,25 +577,34 @@ static HRESULT WINAPI StorageBaseImpl_OpenStorage(
 
   *ppstg = NULL;
 
-  foundPropertyIndex = findElement(
+  storageEntryRef = findElement(
                          This->ancestorStorage,
-                         This->rootPropertySetIndex,
+                         This->storageDirEntry,
                          pwcsName,
-                         &currentProperty);
+                         &currentEntry);
 
-  if ( (foundPropertyIndex!=DIRENTRY_NULL) &&
-       (currentProperty.propertyType==STGTY_STORAGE) )
+  if ( (storageEntryRef!=DIRENTRY_NULL) &&
+       (currentEntry.stgType==STGTY_STORAGE) )
   {
+    if (StorageBaseImpl_IsStorageOpen(This, storageEntryRef))
+    {
+      /* A single storage cannot be opened a second time. */
+      res = STG_E_ACCESSDENIED;
+      goto end;
+    }
+
     newStorage = StorageInternalImpl_Construct(
                    This->ancestorStorage,
                    grfMode,
-                   foundPropertyIndex);
+                   storageEntryRef);
 
     if (newStorage != 0)
     {
       *ppstg = (IStorage*)newStorage;
 
       StorageBaseImpl_AddRef(*ppstg);
+
+      list_add_tail(&This->storageHead, &newStorage->ParentListEntry);
 
       res = S_OK;
       goto end;
@@ -588,7 +625,7 @@ end:
  * Storage32BaseImpl_EnumElements (IStorage)
  *
  * This method will create an enumerator object that can be used to
- * retrieve information about all the properties in the storage object.
+ * retrieve information about all the elements in the storage object.
  *
  * See Windows documentation for more details on IStorage methods.
  */
@@ -608,9 +645,12 @@ static HRESULT WINAPI StorageBaseImpl_EnumElements(
   if ( (This==0) || (ppenum==0))
     return E_INVALIDARG;
 
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   newEnum = IEnumSTATSTGImpl_Construct(
               This->ancestorStorage,
-              This->rootPropertySetIndex);
+              This->storageDirEntry);
 
   if (newEnum!=0)
   {
@@ -637,7 +677,7 @@ static HRESULT WINAPI StorageBaseImpl_Stat(
   DWORD            grfStatFlag)  /* [in] */
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
-  DirEntry       curProperty;
+  DirEntry       currentEntry;
   BOOL           readSuccessful;
   HRESULT        res = STG_E_UNKNOWN;
 
@@ -650,16 +690,23 @@ static HRESULT WINAPI StorageBaseImpl_Stat(
     goto end;
   }
 
+  if (!This->ancestorStorage)
+  {
+    res = STG_E_REVERTED;
+    goto end;
+  }
+
   readSuccessful = StorageImpl_ReadDirEntry(
                     This->ancestorStorage,
-                    This->rootPropertySetIndex,
-                    &curProperty);
+                    This->storageDirEntry,
+                    &currentEntry);
 
   if (readSuccessful)
   {
     StorageUtl_CopyDirEntryToSTATSTG(
+      This,
       pstatstg,
-      &curProperty,
+      &currentEntry,
       grfStatFlag);
 
     pstatstg->grfMode = This->openFlags;
@@ -693,21 +740,24 @@ static HRESULT WINAPI StorageBaseImpl_RenameElement(
             const OLECHAR*   pwcsNewName)  /* [in] */
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
-  DirEntry          currentProperty;
-  ULONG             foundPropertyIndex;
+  DirEntry          currentEntry;
+  DirRef            currentEntryRef;
 
   TRACE("(%p, %s, %s)\n",
 	iface, debugstr_w(pwcsOldName), debugstr_w(pwcsNewName));
 
-  foundPropertyIndex = findElement(This->ancestorStorage,
-                                   This->rootPropertySetIndex,
-                                   pwcsNewName,
-                                   &currentProperty);
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
 
-  if (foundPropertyIndex != DIRENTRY_NULL)
+  currentEntryRef = findElement(This->ancestorStorage,
+                                   This->storageDirEntry,
+                                   pwcsNewName,
+                                   &currentEntry);
+
+  if (currentEntryRef != DIRENTRY_NULL)
   {
     /*
-     * There is already a property with the new name
+     * There is already an element with the new name
      */
     return STG_E_FILEALREADYEXISTS;
   }
@@ -715,31 +765,38 @@ static HRESULT WINAPI StorageBaseImpl_RenameElement(
   /*
    * Search for the old element name
    */
-  foundPropertyIndex = findElement(This->ancestorStorage,
-                                   This->rootPropertySetIndex,
+  currentEntryRef = findElement(This->ancestorStorage,
+                                   This->storageDirEntry,
                                    pwcsOldName,
-                                   &currentProperty);
+                                   &currentEntry);
 
-  if (foundPropertyIndex != DIRENTRY_NULL)
+  if (currentEntryRef != DIRENTRY_NULL)
   {
+    if (StorageBaseImpl_IsStreamOpen(This, currentEntryRef) ||
+        StorageBaseImpl_IsStorageOpen(This, currentEntryRef))
+    {
+      WARN("Element is already open; cannot rename.\n");
+      return STG_E_ACCESSDENIED;
+    }
+
     /* Remove the element from its current position in the tree */
-    removeFromTree(This->ancestorStorage, This->rootPropertySetIndex,
-        foundPropertyIndex);
+    removeFromTree(This->ancestorStorage, This->storageDirEntry,
+        currentEntryRef);
 
     /* Change the name of the element */
-    strcpyW(currentProperty.name, pwcsNewName);
+    strcpyW(currentEntry.name, pwcsNewName);
 
-    StorageImpl_WriteDirEntry(This->ancestorStorage, foundPropertyIndex,
-        &currentProperty);
+    StorageImpl_WriteDirEntry(This->ancestorStorage, currentEntryRef,
+        &currentEntry);
 
     /* Insert the element in a new position in the tree */
-    insertIntoTree(This->ancestorStorage, This->rootPropertySetIndex,
-        foundPropertyIndex);
+    insertIntoTree(This->ancestorStorage, This->storageDirEntry,
+        currentEntryRef);
   }
   else
   {
     /*
-     * There is no property with the old name
+     * There is no element with the old name
      */
     return STG_E_FILENOTFOUND;
   }
@@ -764,8 +821,8 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
   StgStreamImpl*    newStream;
-  DirEntry          currentProperty, newStreamProperty;
-  ULONG             foundPropertyIndex, newPropertyIndex;
+  DirEntry          currentEntry, newStreamEntry;
+  DirRef            currentEntryRef, newStreamEntryRef;
 
   TRACE("(%p, %s, %x, %d, %d, %p)\n",
 	iface, debugstr_w(pwcsName), grfMode,
@@ -785,6 +842,9 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
 
   if (STGM_SHARE_MODE(grfMode) != STGM_SHARE_EXCLUSIVE) 
     return STG_E_INVALIDFLAG;
+
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
 
   /*
    * As documented.
@@ -806,34 +866,23 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
       return STG_E_ACCESSDENIED;
   }
 
-  if(This->ancestorStorage->base.openFlags & STGM_SIMPLE)
+  if(This->openFlags & STGM_SIMPLE)
     if(grfMode & STGM_CREATE) return STG_E_INVALIDFLAG;
 
   *ppstm = 0;
 
-  foundPropertyIndex = findElement(This->ancestorStorage,
-                                   This->rootPropertySetIndex,
+  currentEntryRef = findElement(This->ancestorStorage,
+                                   This->storageDirEntry,
                                    pwcsName,
-                                   &currentProperty);
+                                   &currentEntry);
 
-  if (foundPropertyIndex != DIRENTRY_NULL)
+  if (currentEntryRef != DIRENTRY_NULL)
   {
     /*
      * An element with this name already exists
      */
     if (STGM_CREATE_MODE(grfMode) == STGM_CREATE)
     {
-      StgStreamImpl *strm;
-
-      LIST_FOR_EACH_ENTRY(strm, &This->strmHead, StgStreamImpl, StrmListEntry)
-      {
-        if (strm->ownerProperty == foundPropertyIndex)
-        {
-          TRACE("Stream deleted %p\n", strm);
-          strm->parentStorage = NULL;
-          list_remove(&strm->StrmListEntry);
-        }
-      }
       IStorage_DestroyElement(iface, pwcsName);
     }
     else
@@ -846,51 +895,51 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
   }
 
   /*
-   * memset the empty property
+   * memset the empty entry
    */
-  memset(&newStreamProperty, 0, sizeof(DirEntry));
+  memset(&newStreamEntry, 0, sizeof(DirEntry));
 
-  newStreamProperty.sizeOfNameString =
+  newStreamEntry.sizeOfNameString =
       ( lstrlenW(pwcsName)+1 ) * sizeof(WCHAR);
 
-  if (newStreamProperty.sizeOfNameString > DIRENTRY_NAME_BUFFER_LEN)
+  if (newStreamEntry.sizeOfNameString > DIRENTRY_NAME_BUFFER_LEN)
     return STG_E_INVALIDNAME;
 
-  strcpyW(newStreamProperty.name, pwcsName);
+  strcpyW(newStreamEntry.name, pwcsName);
 
-  newStreamProperty.propertyType  = STGTY_STREAM;
-  newStreamProperty.startingBlock = BLOCK_END_OF_CHAIN;
-  newStreamProperty.size.u.LowPart  = 0;
-  newStreamProperty.size.u.HighPart = 0;
+  newStreamEntry.stgType       = STGTY_STREAM;
+  newStreamEntry.startingBlock = BLOCK_END_OF_CHAIN;
+  newStreamEntry.size.u.LowPart  = 0;
+  newStreamEntry.size.u.HighPart = 0;
 
-  newStreamProperty.leftChild        = DIRENTRY_NULL;
-  newStreamProperty.rightChild       = DIRENTRY_NULL;
-  newStreamProperty.dirRootEntry     = DIRENTRY_NULL;
+  newStreamEntry.leftChild        = DIRENTRY_NULL;
+  newStreamEntry.rightChild       = DIRENTRY_NULL;
+  newStreamEntry.dirRootEntry     = DIRENTRY_NULL;
 
   /* call CoFileTime to get the current time
-  newStreamProperty.ctime
-  newStreamProperty.mtime
+  newStreamEntry.ctime
+  newStreamEntry.mtime
   */
 
-  /*  newStreamProperty.propertyUniqueID */
+  /*  newStreamEntry.clsid */
 
   /*
-   * Save the new property into a new property spot
+   * Create an entry with the new data
    */
-  createDirEntry(This->ancestorStorage, &newStreamProperty, &newPropertyIndex);
+  createDirEntry(This->ancestorStorage, &newStreamEntry, &newStreamEntryRef);
 
   /*
-   * Find a spot in the property chain for our newly created property.
+   * Insert the new entry in the parent storage's tree.
    */
   insertIntoTree(
     This->ancestorStorage,
-    This->rootPropertySetIndex,
-    newPropertyIndex);
+    This->storageDirEntry,
+    newStreamEntryRef);
 
   /*
    * Open the stream to return it.
    */
-  newStream = StgStreamImpl_Construct(This, grfMode, newPropertyIndex);
+  newStream = StgStreamImpl_Construct(This, grfMode, newStreamEntryRef);
 
   if (newStream != 0)
   {
@@ -909,7 +958,7 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
 /************************************************************************
  * Storage32BaseImpl_SetClass (IStorage)
  *
- * This method will write the specified CLSID in the property of this
+ * This method will write the specified CLSID in the directory entry of this
  * storage.
  *
  * See Windows documentation for more details on IStorage methods.
@@ -920,21 +969,24 @@ static HRESULT WINAPI StorageBaseImpl_SetClass(
 {
   StorageBaseImpl *This = (StorageBaseImpl *)iface;
   HRESULT hRes = E_FAIL;
-  DirEntry curProperty;
+  DirEntry currentEntry;
   BOOL success;
 
   TRACE("(%p, %p)\n", iface, clsid);
 
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   success = StorageImpl_ReadDirEntry(This->ancestorStorage,
-                                       This->rootPropertySetIndex,
-                                       &curProperty);
+                                       This->storageDirEntry,
+                                       &currentEntry);
   if (success)
   {
-    curProperty.propertyUniqueID = *clsid;
+    currentEntry.clsid = *clsid;
 
     success =  StorageImpl_WriteDirEntry(This->ancestorStorage,
-                                           This->rootPropertySetIndex,
-                                           &curProperty);
+                                           This->storageDirEntry,
+                                           &currentEntry);
     if (success)
       hRes = S_OK;
   }
@@ -963,10 +1015,10 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
 {
   StorageBaseImpl* const This=(StorageBaseImpl*)iface;
 
-  DirEntry         currentProperty;
-  DirEntry         newProperty;
-  ULONG            foundPropertyIndex;
-  ULONG            newPropertyIndex;
+  DirEntry         currentEntry;
+  DirEntry         newEntry;
+  DirRef           currentEntryRef;
+  DirRef           newEntryRef;
   HRESULT          hr;
 
   TRACE("(%p, %s, %x, %d, %d, %p)\n",
@@ -975,6 +1027,11 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
 
   if (ppstg == 0)
     return STG_E_INVALIDPOINTER;
+
+  if (This->openFlags & STGM_SIMPLE)
+  {
+    return STG_E_INVALIDFUNCTION;
+  }
 
   if (pwcsName == 0)
     return STG_E_INVALIDNAME;
@@ -988,6 +1045,9 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
     return STG_E_INVALIDFLAG;
   }
 
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   /*
    * Check that we're compatible with the parent's storage mode
    */
@@ -997,12 +1057,12 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
     return STG_E_ACCESSDENIED;
   }
 
-  foundPropertyIndex = findElement(This->ancestorStorage,
-                                   This->rootPropertySetIndex,
+  currentEntryRef = findElement(This->ancestorStorage,
+                                   This->storageDirEntry,
                                    pwcsName,
-                                   &currentProperty);
+                                   &currentEntry);
 
-  if (foundPropertyIndex != DIRENTRY_NULL)
+  if (currentEntryRef != DIRENTRY_NULL)
   {
     /*
      * An element with this name already exists
@@ -1026,49 +1086,46 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
     return STG_E_ACCESSDENIED;
   }
 
-  /*
-   * memset the empty property
-   */
-  memset(&newProperty, 0, sizeof(DirEntry));
+  memset(&newEntry, 0, sizeof(DirEntry));
 
-  newProperty.sizeOfNameString = (lstrlenW(pwcsName)+1)*sizeof(WCHAR);
+  newEntry.sizeOfNameString = (lstrlenW(pwcsName)+1)*sizeof(WCHAR);
 
-  if (newProperty.sizeOfNameString > DIRENTRY_NAME_BUFFER_LEN)
+  if (newEntry.sizeOfNameString > DIRENTRY_NAME_BUFFER_LEN)
   {
     FIXME("name too long\n");
     return STG_E_INVALIDNAME;
   }
 
-  strcpyW(newProperty.name, pwcsName);
+  strcpyW(newEntry.name, pwcsName);
 
-  newProperty.propertyType  = STGTY_STORAGE;
-  newProperty.startingBlock = BLOCK_END_OF_CHAIN;
-  newProperty.size.u.LowPart  = 0;
-  newProperty.size.u.HighPart = 0;
+  newEntry.stgType       = STGTY_STORAGE;
+  newEntry.startingBlock = BLOCK_END_OF_CHAIN;
+  newEntry.size.u.LowPart  = 0;
+  newEntry.size.u.HighPart = 0;
 
-  newProperty.leftChild        = DIRENTRY_NULL;
-  newProperty.rightChild       = DIRENTRY_NULL;
-  newProperty.dirRootEntry     = DIRENTRY_NULL;
+  newEntry.leftChild        = DIRENTRY_NULL;
+  newEntry.rightChild       = DIRENTRY_NULL;
+  newEntry.dirRootEntry     = DIRENTRY_NULL;
 
   /* call CoFileTime to get the current time
-  newProperty.ctime
-  newProperty.mtime
+  newEntry.ctime
+  newEntry.mtime
   */
 
-  /*  newStorageProperty.propertyUniqueID */
+  /*  newEntry.clsid */
 
   /*
-   * Save the new property into a new property spot
+   * Create a new directory entry for the storage
    */
-  createDirEntry(This->ancestorStorage, &newProperty, &newPropertyIndex);
+  createDirEntry(This->ancestorStorage, &newEntry, &newEntryRef);
 
   /*
-   * Find a spot in the property chain for our newly created property.
+   * Insert the new directory entry into the parent storage's tree
    */
   insertIntoTree(
     This->ancestorStorage,
-    This->rootPropertySetIndex,
-    newPropertyIndex);
+    This->storageDirEntry,
+    newEntryRef);
 
   /*
    * Open it to get a pointer to return.
@@ -1094,10 +1151,10 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
 static HRESULT createDirEntry(
   StorageImpl *storage,
   const DirEntry *newData,
-  ULONG *index)
+  DirRef *index)
 {
-  ULONG       currentPropertyIndex = 0;
-  ULONG       newPropertyIndex     = DIRENTRY_NULL;
+  ULONG       currentEntryIndex    = 0;
+  ULONG       newEntryIndex        = DIRENTRY_NULL;
   HRESULT hr = S_OK;
   BYTE currentData[RAW_DIRENTRY_SIZE];
   WORD sizeOfNameString;
@@ -1105,7 +1162,7 @@ static HRESULT createDirEntry(
   do
   {
     hr = StorageImpl_ReadRawDirEntry(storage,
-                                     currentPropertyIndex,
+                                     currentEntryIndex,
                                      currentData);
 
     if (SUCCEEDED(hr))
@@ -1118,79 +1175,79 @@ static HRESULT createDirEntry(
       if (sizeOfNameString == 0)
       {
         /*
-         * The property existis and is available, we found it.
+         * The entry exists and is available, we found it.
          */
-        newPropertyIndex = currentPropertyIndex;
+        newEntryIndex = currentEntryIndex;
       }
     }
     else
     {
       /*
-       * We exhausted the property list, we will create more space below
+       * We exhausted the directory entries, we will create more space below
        */
-      newPropertyIndex = currentPropertyIndex;
+      newEntryIndex = currentEntryIndex;
     }
-    currentPropertyIndex++;
+    currentEntryIndex++;
 
-  } while (newPropertyIndex == DIRENTRY_NULL);
+  } while (newEntryIndex == DIRENTRY_NULL);
 
   /*
-   * grow the property chain
+   * grow the directory stream
    */
   if (FAILED(hr))
   {
     BYTE           emptyData[RAW_DIRENTRY_SIZE];
     ULARGE_INTEGER newSize;
-    ULONG          propertyIndex;
-    ULONG          lastProperty  = 0;
+    ULONG          entryIndex;
+    ULONG          lastEntry     = 0;
     ULONG          blockCount    = 0;
 
     /*
-     * obtain the new count of property blocks
+     * obtain the new count of blocks in the directory stream
      */
     blockCount = BlockChainStream_GetCount(
                    storage->rootBlockChain)+1;
 
     /*
-     * initialize the size used by the property stream
+     * initialize the size used by the directory stream
      */
     newSize.u.HighPart = 0;
     newSize.u.LowPart  = storage->bigBlockSize * blockCount;
 
     /*
-     * add a property block to the property chain
+     * add a block to the directory stream
      */
     BlockChainStream_SetSize(storage->rootBlockChain, newSize);
 
     /*
-     * memset the empty property in order to initialize the unused newly
-     * created property
+     * memset the empty entry in order to initialize the unused newly
+     * created entries
      */
     memset(&emptyData, 0, RAW_DIRENTRY_SIZE);
 
     /*
      * initialize them
      */
-    lastProperty = storage->bigBlockSize / RAW_DIRENTRY_SIZE * blockCount;
+    lastEntry = storage->bigBlockSize / RAW_DIRENTRY_SIZE * blockCount;
 
     for(
-      propertyIndex = newPropertyIndex + 1;
-      propertyIndex < lastProperty;
-      propertyIndex++)
+      entryIndex = newEntryIndex + 1;
+      entryIndex < lastEntry;
+      entryIndex++)
     {
       StorageImpl_WriteRawDirEntry(
         storage,
-        propertyIndex,
+        entryIndex,
         emptyData);
     }
   }
 
   UpdateRawDirEntry(currentData, newData);
 
-  hr = StorageImpl_WriteRawDirEntry(storage, newPropertyIndex, currentData);
+  hr = StorageImpl_WriteRawDirEntry(storage, newEntryIndex, currentData);
 
   if (SUCCEEDED(hr))
-    *index = newPropertyIndex;
+    *index = newEntryIndex;
 
   return hr;
 }
@@ -1203,7 +1260,7 @@ static HRESULT createDirEntry(
  */
 static HRESULT destroyDirEntry(
   StorageImpl *storage,
-  ULONG index)
+  DirRef index)
 {
   HRESULT hr;
   BYTE emptyData[RAW_DIRENTRY_SIZE];
@@ -1223,22 +1280,22 @@ static HRESULT destroyDirEntry(
  * Case insensitive comparison of DirEntry.name by first considering
  * their size.
  *
- * Returns <0 when newProperty < currentProperty
- *         >0 when newProperty > currentProperty
- *          0 when newProperty == currentProperty
+ * Returns <0 when name1 < name2
+ *         >0 when name1 > name2
+ *          0 when name1 == name2
  */
-static LONG propertyNameCmp(
-    const OLECHAR *newProperty,
-    const OLECHAR *currentProperty)
+static LONG entryNameCmp(
+    const OLECHAR *name1,
+    const OLECHAR *name2)
 {
-  LONG diff      = lstrlenW(newProperty) - lstrlenW(currentProperty);
+  LONG diff      = lstrlenW(name1) - lstrlenW(name2);
 
   if (diff == 0)
   {
     /*
      * We compare the string themselves only when they are of the same length
      */
-    diff = lstrcmpiW( newProperty, currentProperty);
+    diff = lstrcmpiW( name1, name2);
   }
 
   return diff;
@@ -1248,58 +1305,58 @@ static LONG propertyNameCmp(
  *
  * Internal Method
  *
- * Properly link this new element in the property chain.
+ * Add a directory entry to a storage
  */
 static HRESULT insertIntoTree(
   StorageImpl *This,
-  ULONG         parentStorageIndex,
-  ULONG         newPropertyIndex)
+  DirRef        parentStorageIndex,
+  DirRef        newEntryIndex)
 {
-  DirEntry currentProperty;
-  DirEntry newProperty;
+  DirEntry currentEntry;
+  DirEntry newEntry;
 
   /*
-   * Read the inserted property
+   * Read the inserted entry
    */
   StorageImpl_ReadDirEntry(This,
-                           newPropertyIndex,
-                           &newProperty);
+                           newEntryIndex,
+                           &newEntry);
 
   /*
-   * Read the root property
+   * Read the storage entry
    */
   StorageImpl_ReadDirEntry(This,
                              parentStorageIndex,
-                             &currentProperty);
+                             &currentEntry);
 
-  if (currentProperty.dirRootEntry != DIRENTRY_NULL)
+  if (currentEntry.dirRootEntry != DIRENTRY_NULL)
   {
     /*
      * The root storage contains some element, therefore, start the research
      * for the appropriate location.
      */
     BOOL found = 0;
-    ULONG  current, next, previous, currentPropertyId;
+    DirRef current, next, previous, currentEntryId;
 
     /*
-     * Keep the DirEntry sequence number of the storage first property
+     * Keep a reference to the root of the storage's element tree
      */
-    currentPropertyId = currentProperty.dirRootEntry;
+    currentEntryId = currentEntry.dirRootEntry;
 
     /*
      * Read
      */
     StorageImpl_ReadDirEntry(This,
-                               currentProperty.dirRootEntry,
-                               &currentProperty);
+                               currentEntry.dirRootEntry,
+                               &currentEntry);
 
-    previous = currentProperty.leftChild;
-    next     = currentProperty.rightChild;
-    current  = currentPropertyId;
+    previous = currentEntry.leftChild;
+    next     = currentEntry.rightChild;
+    current  = currentEntryId;
 
     while (found == 0)
     {
-      LONG diff = propertyNameCmp( newProperty.name, currentProperty.name);
+      LONG diff = entryNameCmp( newEntry.name, currentEntry.name);
 
       if (diff < 0)
       {
@@ -1307,15 +1364,15 @@ static HRESULT insertIntoTree(
         {
           StorageImpl_ReadDirEntry(This,
                                      previous,
-                                     &currentProperty);
+                                     &currentEntry);
           current = previous;
         }
         else
         {
-          currentProperty.leftChild = newPropertyIndex;
+          currentEntry.leftChild = newEntryIndex;
           StorageImpl_WriteDirEntry(This,
                                       current,
-                                      &currentProperty);
+                                      &currentEntry);
           found = 1;
         }
       }
@@ -1325,15 +1382,15 @@ static HRESULT insertIntoTree(
         {
           StorageImpl_ReadDirEntry(This,
                                      next,
-                                     &currentProperty);
+                                     &currentEntry);
           current = next;
         }
         else
         {
-          currentProperty.rightChild = newPropertyIndex;
+          currentEntry.rightChild = newEntryIndex;
           StorageImpl_WriteDirEntry(This,
                                       current,
-                                      &currentProperty);
+                                      &currentEntry);
           found = 1;
         }
       }
@@ -1346,19 +1403,19 @@ static HRESULT insertIntoTree(
 	return STG_E_FILEALREADYEXISTS;
       }
 
-      previous = currentProperty.leftChild;
-      next     = currentProperty.rightChild;
+      previous = currentEntry.leftChild;
+      next     = currentEntry.rightChild;
     }
   }
   else
   {
     /*
-     * The root storage is empty, link the new property to its dir property
+     * The storage is empty, make the new entry the root of its element tree
      */
-    currentProperty.dirRootEntry = newPropertyIndex;
+    currentEntry.dirRootEntry = newEntryIndex;
     StorageImpl_WriteDirEntry(This,
                                 parentStorageIndex,
-                                &currentProperty);
+                                &currentEntry);
   }
 
   return S_OK;
@@ -1370,10 +1427,10 @@ static HRESULT insertIntoTree(
  *
  * Find and read the element of a storage with the given name.
  */
-static ULONG findElement(StorageImpl *storage, ULONG storageEntry,
+static DirRef findElement(StorageImpl *storage, DirRef storageEntry,
     const OLECHAR *name, DirEntry *data)
 {
-  ULONG currentEntry;
+  DirRef currentEntry;
 
   /* Read the storage entry to find the root of the tree. */
   StorageImpl_ReadDirEntry(storage, storageEntry, data);
@@ -1386,7 +1443,7 @@ static ULONG findElement(StorageImpl *storage, ULONG storageEntry,
 
     StorageImpl_ReadDirEntry(storage, currentEntry, data);
 
-    cmp = propertyNameCmp(name, data->name);
+    cmp = entryNameCmp(name, data->name);
 
     if (cmp == 0)
       /* found it */
@@ -1411,11 +1468,11 @@ static ULONG findElement(StorageImpl *storage, ULONG storageEntry,
  * If there is no such element, find a place where it could be inserted and
  * return STG_E_FILENOTFOUND.
  */
-static HRESULT findTreeParent(StorageImpl *storage, ULONG storageEntry,
-    const OLECHAR *childName, DirEntry *parentData, ULONG *parentEntry,
+static HRESULT findTreeParent(StorageImpl *storage, DirRef storageEntry,
+    const OLECHAR *childName, DirEntry *parentData, DirRef *parentEntry,
     ULONG *relation)
 {
-  ULONG childEntry;
+  DirRef childEntry;
   DirEntry childData;
 
   /* Read the storage entry to find the root of the tree. */
@@ -1432,7 +1489,7 @@ static HRESULT findTreeParent(StorageImpl *storage, ULONG storageEntry,
 
     StorageImpl_ReadDirEntry(storage, childEntry, &childData);
 
-    cmp = propertyNameCmp(childName, childData.name);
+    cmp = entryNameCmp(childName, childData.name);
 
     if (cmp == 0)
       /* found it */
@@ -1721,8 +1778,8 @@ static HRESULT WINAPI StorageBaseImpl_DestroyElement(
   StorageBaseImpl* const This=(StorageBaseImpl*)iface;
 
   HRESULT           hr = S_OK;
-  DirEntry          propertyToDelete;
-  ULONG             foundPropertyIndexToDelete;
+  DirEntry          entryToDelete;
+  DirRef            entryToDeleteRef;
 
   TRACE("(%p, %s)\n",
 	iface, debugstr_w(pwcsName));
@@ -1730,80 +1787,59 @@ static HRESULT WINAPI StorageBaseImpl_DestroyElement(
   if (pwcsName==NULL)
     return STG_E_INVALIDPOINTER;
 
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   if ( STGM_ACCESS_MODE( This->openFlags ) == STGM_READ )
     return STG_E_ACCESSDENIED;
 
-  foundPropertyIndexToDelete = findElement(
+  entryToDeleteRef = findElement(
     This->ancestorStorage,
-    This->rootPropertySetIndex,
+    This->storageDirEntry,
     pwcsName,
-    &propertyToDelete);
+    &entryToDelete);
 
-  if ( foundPropertyIndexToDelete == DIRENTRY_NULL )
+  if ( entryToDeleteRef == DIRENTRY_NULL )
   {
     return STG_E_FILENOTFOUND;
   }
 
-  if ( propertyToDelete.propertyType == STGTY_STORAGE )
+  if ( entryToDelete.stgType == STGTY_STORAGE )
   {
-    hr = deleteStorageProperty(
+    hr = deleteStorageContents(
            This,
-           foundPropertyIndexToDelete,
-           propertyToDelete);
+           entryToDeleteRef,
+           entryToDelete);
   }
-  else if ( propertyToDelete.propertyType == STGTY_STREAM )
+  else if ( entryToDelete.stgType == STGTY_STREAM )
   {
-    hr = deleteStreamProperty(
+    hr = deleteStreamContents(
            This,
-           foundPropertyIndexToDelete,
-           propertyToDelete);
+           entryToDeleteRef,
+           entryToDelete);
   }
 
   if (hr!=S_OK)
     return hr;
 
   /*
-   * Adjust the property chain
+   * Remove the entry from its parent storage
    */
   hr = removeFromTree(
         This->ancestorStorage,
-        This->rootPropertySetIndex,
-        foundPropertyIndexToDelete);
+        This->storageDirEntry,
+        entryToDeleteRef);
 
   /*
-   * Invalidate the property
+   * Invalidate the entry
    */
   if (SUCCEEDED(hr))
     destroyDirEntry(This->ancestorStorage,
-                    foundPropertyIndexToDelete);
+                    entryToDeleteRef);
 
   return hr;
 }
 
-
-/************************************************************************
- * StorageImpl_Stat (IStorage)
- *
- * This method will retrieve information about this storage object.
- *
- * See Windows documentation for more details on IStorage methods.
- */
-static HRESULT WINAPI StorageImpl_Stat( IStorage* iface,
-                                 STATSTG*  pstatstg,     /* [out] */
-                                 DWORD     grfStatFlag)  /* [in] */
-{
-  StorageImpl* const This = (StorageImpl*)iface;
-  HRESULT result = StorageBaseImpl_Stat( iface, pstatstg, grfStatFlag );
-
-  if ( SUCCEEDED(result) && ((grfStatFlag & STATFLAG_NONAME) == 0) && This->pwcsName )
-  {
-      CoTaskMemFree(pstatstg->pwcsName);
-      pstatstg->pwcsName = CoTaskMemAlloc((lstrlenW(This->pwcsName)+1)*sizeof(WCHAR));
-      strcpyW(pstatstg->pwcsName, This->pwcsName);
-  }
-
-  return result;
-}
 
 /******************************************************************************
  * Internal stream list handlers
@@ -1821,16 +1857,52 @@ void StorageBaseImpl_RemoveStream(StorageBaseImpl * stg, StgStreamImpl * strm)
   list_remove(&(strm->StrmListEntry));
 }
 
+static BOOL StorageBaseImpl_IsStreamOpen(StorageBaseImpl * stg, DirRef streamEntry)
+{
+  StgStreamImpl *strm;
+
+  LIST_FOR_EACH_ENTRY(strm, &stg->strmHead, StgStreamImpl, StrmListEntry)
+  {
+    if (strm->dirEntry == streamEntry)
+    {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+static BOOL StorageBaseImpl_IsStorageOpen(StorageBaseImpl * stg, DirRef storageEntry)
+{
+  StorageInternalImpl *childstg;
+
+  LIST_FOR_EACH_ENTRY(childstg, &stg->storageHead, StorageInternalImpl, ParentListEntry)
+  {
+    if (childstg->base.storageDirEntry == storageEntry)
+    {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
 static void StorageBaseImpl_DeleteAll(StorageBaseImpl * stg)
 {
   struct list *cur, *cur2;
   StgStreamImpl *strm=NULL;
+  StorageInternalImpl *childstg=NULL;
 
   LIST_FOR_EACH_SAFE(cur, cur2, &stg->strmHead) {
     strm = LIST_ENTRY(cur,StgStreamImpl,StrmListEntry);
-    TRACE("Streams deleted (stg=%p strm=%p next=%p prev=%p)\n", stg,strm,cur->next,cur->prev);
+    TRACE("Streams invalidated (stg=%p strm=%p next=%p prev=%p)\n", stg,strm,cur->next,cur->prev);
     strm->parentStorage = NULL;
     list_remove(cur);
+  }
+
+  LIST_FOR_EACH_SAFE(cur, cur2, &stg->storageHead) {
+    childstg = LIST_ENTRY(cur,StorageInternalImpl,ParentListEntry);
+    StorageInternalImpl_Invalidate( childstg );
   }
 }
 
@@ -1839,26 +1911,36 @@ static void StorageBaseImpl_DeleteAll(StorageBaseImpl * stg)
  *
  * Internal Method
  *
- * Perform the deletion of a complete storage node
+ * Delete the contents of a storage entry.
  *
  */
-static HRESULT deleteStorageProperty(
+static HRESULT deleteStorageContents(
   StorageBaseImpl *parentStorage,
-  ULONG        indexOfPropertyToDelete,
-  DirEntry     propertyToDelete)
+  DirRef       indexToDelete,
+  DirEntry     entryDataToDelete)
 {
   IEnumSTATSTG *elements     = 0;
   IStorage   *childStorage = 0;
   STATSTG      currentElement;
   HRESULT      hr;
   HRESULT      destroyHr = S_OK;
+  StorageInternalImpl *stg, *stg2;
+
+  /* Invalidate any open storage objects. */
+  LIST_FOR_EACH_ENTRY_SAFE(stg, stg2, &parentStorage->storageHead, StorageInternalImpl, ParentListEntry)
+  {
+    if (stg->base.storageDirEntry == indexToDelete)
+    {
+      StorageInternalImpl_Invalidate(stg);
+    }
+  }
 
   /*
    * Open the storage and enumerate it
    */
   hr = StorageBaseImpl_OpenStorage(
         (IStorage*)parentStorage,
-        propertyToDelete.name,
+        entryDataToDelete.name,
         0,
         STGM_WRITE | STGM_SHARE_EXCLUSIVE,
         0,
@@ -1906,23 +1988,35 @@ static HRESULT deleteStorageProperty(
  *
  * Internal Method
  *
- * Perform the deletion of a stream node
+ * Perform the deletion of a stream's data
  *
  */
-static HRESULT deleteStreamProperty(
+static HRESULT deleteStreamContents(
   StorageBaseImpl *parentStorage,
-  ULONG         indexOfPropertyToDelete,
-  DirEntry      propertyToDelete)
+  DirRef        indexToDelete,
+  DirEntry      entryDataToDelete)
 {
   IStream      *pis;
   HRESULT        hr;
   ULARGE_INTEGER size;
+  StgStreamImpl *strm, *strm2;
+
+  /* Invalidate any open stream objects. */
+  LIST_FOR_EACH_ENTRY_SAFE(strm, strm2, &parentStorage->strmHead, StgStreamImpl, StrmListEntry)
+  {
+    if (strm->dirEntry == indexToDelete)
+    {
+      TRACE("Stream deleted %p\n", strm);
+      strm->parentStorage = NULL;
+      list_remove(&strm->StrmListEntry);
+    }
+  }
 
   size.u.HighPart = 0;
   size.u.LowPart = 0;
 
   hr = StorageBaseImpl_OpenStream((IStorage*)parentStorage,
-        propertyToDelete.name, NULL, STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, &pis);
+        entryDataToDelete.name, NULL, STGM_WRITE | STGM_SHARE_EXCLUSIVE, 0, &pis);
 
   if (hr!=S_OK)
   {
@@ -1947,18 +2041,18 @@ static HRESULT deleteStreamProperty(
   return S_OK;
 }
 
-static void setPropertyLink(DirEntry *property, ULONG relation, ULONG new_target)
+static void setEntryLink(DirEntry *entry, ULONG relation, DirRef new_target)
 {
   switch (relation)
   {
     case DIRENTRY_RELATION_PREVIOUS:
-      property->leftChild = new_target;
+      entry->leftChild = new_target;
       break;
     case DIRENTRY_RELATION_NEXT:
-      property->rightChild = new_target;
+      entry->rightChild = new_target;
       break;
     case DIRENTRY_RELATION_DIR:
-      property->dirRootEntry = new_target;
+      entry->dirRootEntry = new_target;
       break;
     default:
       assert(0);
@@ -1974,74 +2068,74 @@ static void setPropertyLink(DirEntry *property, ULONG relation, ULONG new_target
  */
 static HRESULT removeFromTree(
   StorageImpl *This,
-  ULONG         parentStorageIndex,
-  ULONG         deletedIndex)
+  DirRef        parentStorageIndex,
+  DirRef        deletedIndex)
 {
   HRESULT hr                     = S_OK;
   BOOL  res                    = TRUE;
-  DirEntry   propertyToDelete;
-  DirEntry   parentProperty;
-  ULONG parentPropertyId;
+  DirEntry   entryToDelete;
+  DirEntry   parentEntry;
+  DirRef parentEntryRef;
   ULONG typeOfRelation;
 
-  res = StorageImpl_ReadDirEntry(This, deletedIndex, &propertyToDelete);
+  res = StorageImpl_ReadDirEntry(This, deletedIndex, &entryToDelete);
 
   /*
-   * Find the property that links to the one we want to delete.
+   * Find the element that links to the one we want to delete.
    */
-  hr = findTreeParent(This, parentStorageIndex, propertyToDelete.name,
-    &parentProperty, &parentPropertyId, &typeOfRelation);
+  hr = findTreeParent(This, parentStorageIndex, entryToDelete.name,
+    &parentEntry, &parentEntryRef, &typeOfRelation);
 
   if (hr != S_OK)
     return hr;
 
-  if (propertyToDelete.leftChild != DIRENTRY_NULL)
+  if (entryToDelete.leftChild != DIRENTRY_NULL)
   {
     /*
      * Replace the deleted entry with its left child
      */
-    setPropertyLink(&parentProperty, typeOfRelation, propertyToDelete.leftChild);
+    setEntryLink(&parentEntry, typeOfRelation, entryToDelete.leftChild);
 
     res = StorageImpl_WriteDirEntry(
             This,
-            parentPropertyId,
-            &parentProperty);
+            parentEntryRef,
+            &parentEntry);
     if(!res)
     {
       return E_FAIL;
     }
 
-    if (propertyToDelete.rightChild != DIRENTRY_NULL)
+    if (entryToDelete.rightChild != DIRENTRY_NULL)
     {
       /*
        * We need to reinsert the right child somewhere. We already know it and
        * its children are greater than everything in the left tree, so we
        * insert it at the rightmost point in the left tree.
        */
-      ULONG newRightChildParent = propertyToDelete.leftChild;
-      DirEntry newRightChildParentProperty;
+      DirRef newRightChildParent = entryToDelete.leftChild;
+      DirEntry newRightChildParentEntry;
 
       do
       {
         res = StorageImpl_ReadDirEntry(
                 This,
                 newRightChildParent,
-                &newRightChildParentProperty);
+                &newRightChildParentEntry);
         if (!res)
         {
           return E_FAIL;
         }
 
-        if (newRightChildParentProperty.rightChild != DIRENTRY_NULL)
-          newRightChildParent = newRightChildParentProperty.rightChild;
-      } while (newRightChildParentProperty.rightChild != DIRENTRY_NULL);
+        if (newRightChildParentEntry.rightChild != DIRENTRY_NULL)
+          newRightChildParent = newRightChildParentEntry.rightChild;
+      } while (newRightChildParentEntry.rightChild != DIRENTRY_NULL);
 
-      newRightChildParentProperty.rightChild = propertyToDelete.rightChild;
+      newRightChildParentEntry.rightChild = entryToDelete.rightChild;
 
       res = StorageImpl_WriteDirEntry(
               This,
               newRightChildParent,
-              &newRightChildParentProperty);
+              &newRightChildParentEntry);
       if (!res)
       {
         return E_FAIL;
@@ -2053,12 +2147,12 @@ static HRESULT removeFromTree(
     /*
      * Replace the deleted entry with its right child
      */
-    setPropertyLink(&parentProperty, typeOfRelation, propertyToDelete.rightChild);
+    setEntryLink(&parentEntry, typeOfRelation, entryToDelete.rightChild);
 
     res = StorageImpl_WriteDirEntry(
             This,
-            parentPropertyId,
-            &parentProperty);
+            parentEntryRef,
+            &parentEntry);
     if(!res)
     {
       return E_FAIL;
@@ -2092,6 +2186,10 @@ static HRESULT WINAPI StorageBaseImpl_SetStateBits(
   DWORD         grfMask)     /* [in] */
 {
   StorageBaseImpl* const This = (StorageBaseImpl*)iface;
+
+  if (!This->ancestorStorage)
+    return STG_E_REVERTED;
+
   This->stateBits = (This->stateBits & ~grfMask) | (grfStateBits & grfMask);
   return S_OK;
 }
@@ -2118,35 +2216,48 @@ static const IStorageVtbl Storage32Impl_Vtbl =
     StorageBaseImpl_SetElementTimes,
     StorageBaseImpl_SetClass,
     StorageBaseImpl_SetStateBits,
-    StorageImpl_Stat
+    StorageBaseImpl_Stat
+};
+
+static const StorageBaseImplVtbl StorageImpl_BaseVtbl =
+{
+  StorageImpl_Destroy
 };
 
 static HRESULT StorageImpl_Construct(
-  StorageImpl* This,
   HANDLE       hFile,
   LPCOLESTR    pwcsName,
   ILockBytes*  pLkbyt,
   DWORD        openFlags,
   BOOL         fileBased,
-  BOOL         create)
+  BOOL         create,
+  StorageImpl** result)
 {
+  StorageImpl* This;
   HRESULT     hr = S_OK;
-  DirEntry currentProperty;
+  DirEntry currentEntry;
   BOOL      readSuccessful;
-  ULONG       currentPropertyIndex;
+  DirRef      currentEntryRef;
 
   if ( FAILED( validateSTGM(openFlags) ))
     return STG_E_INVALIDFLAG;
+
+  This = HeapAlloc(GetProcessHeap(), 0, sizeof(StorageImpl));
+  if (!This)
+    return E_OUTOFMEMORY;
 
   memset(This, 0, sizeof(StorageImpl));
 
   list_init(&This->base.strmHead);
 
+  list_init(&This->base.storageHead);
+
   This->base.lpVtbl = &Storage32Impl_Vtbl;
   This->base.pssVtbl = &IPropertySetStorage_Vtbl;
-  This->base.v_destructor = StorageImpl_Destroy;
+  This->base.baseVtbl = &StorageImpl_BaseVtbl;
   This->base.openFlags = (openFlags & ~STGM_CREATE);
-  This->create = create;
+  This->base.ref = 1;
+  This->base.create = create;
 
   /*
    * This is the top-level storage so initialize the ancestor pointer
@@ -2160,8 +2271,14 @@ static HRESULT StorageImpl_Construct(
       This->pwcsName = HeapAlloc(GetProcessHeap(), 0,
                                 (lstrlenW(pwcsName)+1)*sizeof(WCHAR));
       if (!This->pwcsName)
-         return STG_E_INSUFFICIENTMEMORY;
+      {
+         hr = STG_E_INSUFFICIENTMEMORY;
+         goto end;
+      }
       strcpyW(This->pwcsName, pwcsName);
+
+      memcpy(This->base.filename, pwcsName, DIRENTRY_NAME_BUFFER_LEN-1);
+      This->base.filename[DIRENTRY_NAME_BUFFER_LEN-1] = 0;
   }
 
   /*
@@ -2176,7 +2293,10 @@ static HRESULT StorageImpl_Construct(
                                                 fileBased);
 
   if (This->bigBlockFile == 0)
-    return E_FAIL;
+  {
+    hr = E_FAIL;
+    goto end;
+  }
 
   if (create)
   {
@@ -2186,7 +2306,7 @@ static HRESULT StorageImpl_Construct(
     /*
      * Initialize all header variables:
      * - The big block depot consists of one block and it is at block 0
-     * - The properties start at block 1
+     * - The directory table starts at block 1
      * - There is no small block depot
      */
     memset( This->bigBlockDepotStart,
@@ -2205,7 +2325,7 @@ static HRESULT StorageImpl_Construct(
     StorageImpl_SaveFileHeader(This);
 
     /*
-     * Add one block for the big block depot and one block for the properties
+     * Add one block for the big block depot and one block for the directory table
      */
     size.u.HighPart = 0;
     size.u.LowPart  = This->bigBlockSize * 3;
@@ -2228,9 +2348,7 @@ static HRESULT StorageImpl_Construct(
 
     if (FAILED(hr))
     {
-      BIGBLOCKFILE_Destructor(This->bigBlockFile);
-
-      return hr;
+      goto end;
     }
   }
 
@@ -2249,74 +2367,91 @@ static HRESULT StorageImpl_Construct(
    */
   if(!(This->rootBlockChain =
        BlockChainStream_Construct(This, &This->rootStartBlock, DIRENTRY_NULL)))
-    return STG_E_READFAULT;
+  {
+    hr = STG_E_READFAULT;
+    goto end;
+  }
 
   if(!(This->smallBlockDepotChain =
        BlockChainStream_Construct(This, &This->smallBlockDepotStart,
 				  DIRENTRY_NULL)))
-    return STG_E_READFAULT;
-
-  /*
-   * Write the root property (memory only)
-   */
-  if (create)
   {
-    DirEntry rootProp;
-    /*
-     * Initialize the property chain
-     */
-    memset(&rootProp, 0, sizeof(rootProp));
-    MultiByteToWideChar( CP_ACP, 0, rootPropertyName, -1, rootProp.name,
-                         sizeof(rootProp.name)/sizeof(WCHAR) );
-    rootProp.sizeOfNameString = (strlenW(rootProp.name)+1) * sizeof(WCHAR);
-    rootProp.propertyType     = STGTY_ROOT;
-    rootProp.leftChild = DIRENTRY_NULL;
-    rootProp.rightChild     = DIRENTRY_NULL;
-    rootProp.dirRootEntry     = DIRENTRY_NULL;
-    rootProp.startingBlock    = BLOCK_END_OF_CHAIN;
-    rootProp.size.u.HighPart    = 0;
-    rootProp.size.u.LowPart     = 0;
-
-    StorageImpl_WriteDirEntry(This, 0, &rootProp);
+    hr = STG_E_READFAULT;
+    goto end;
   }
 
   /*
-   * Find the ID of the root in the property sets.
+   * Write the root storage entry (memory only)
    */
-  currentPropertyIndex = 0;
+  if (create)
+  {
+    DirEntry rootEntry;
+    /*
+     * Initialize the directory table
+     */
+    memset(&rootEntry, 0, sizeof(rootEntry));
+    MultiByteToWideChar( CP_ACP, 0, rootEntryName, -1, rootEntry.name,
+                         sizeof(rootEntry.name)/sizeof(WCHAR) );
+    rootEntry.sizeOfNameString = (strlenW(rootEntry.name)+1) * sizeof(WCHAR);
+    rootEntry.stgType          = STGTY_ROOT;
+    rootEntry.leftChild = DIRENTRY_NULL;
+    rootEntry.rightChild     = DIRENTRY_NULL;
+    rootEntry.dirRootEntry     = DIRENTRY_NULL;
+    rootEntry.startingBlock    = BLOCK_END_OF_CHAIN;
+    rootEntry.size.u.HighPart    = 0;
+    rootEntry.size.u.LowPart     = 0;
+
+    StorageImpl_WriteDirEntry(This, 0, &rootEntry);
+  }
+
+  /*
+   * Find the ID of the root storage.
+   */
+  currentEntryRef = 0;
 
   do
   {
     readSuccessful = StorageImpl_ReadDirEntry(
                       This,
-                      currentPropertyIndex,
-                      &currentProperty);
+                      currentEntryRef,
+                      &currentEntry);
 
     if (readSuccessful)
     {
-      if ( (currentProperty.sizeOfNameString != 0 ) &&
-           (currentProperty.propertyType     == STGTY_ROOT) )
+      if ( (currentEntry.sizeOfNameString != 0 ) &&
+           (currentEntry.stgType          == STGTY_ROOT) )
       {
-        This->base.rootPropertySetIndex = currentPropertyIndex;
+        This->base.storageDirEntry = currentEntryRef;
       }
     }
 
-    currentPropertyIndex++;
+    currentEntryRef++;
 
-  } while (readSuccessful && (This->base.rootPropertySetIndex == DIRENTRY_NULL) );
+  } while (readSuccessful && (This->base.storageDirEntry == DIRENTRY_NULL) );
 
   if (!readSuccessful)
   {
-    /* TODO CLEANUP */
-    return STG_E_READFAULT;
+    hr = STG_E_READFAULT;
+    goto end;
   }
 
   /*
    * Create the block chain abstraction for the small block root chain.
    */
   if(!(This->smallBlockRootChain =
-       BlockChainStream_Construct(This, NULL, This->base.rootPropertySetIndex)))
-    return STG_E_READFAULT;
+       BlockChainStream_Construct(This, NULL, This->base.storageDirEntry)))
+  {
+    hr = STG_E_READFAULT;
+  }
+
+end:
+  if (FAILED(hr))
+  {
+    IStorage_Release((IStorage*)This);
+    *result = NULL;
+  }
+  else
+    *result = This;
 
   return hr;
 }
@@ -2334,7 +2469,8 @@ static void StorageImpl_Destroy(StorageBaseImpl* iface)
   BlockChainStream_Destroy(This->rootBlockChain);
   BlockChainStream_Destroy(This->smallBlockDepotChain);
 
-  BIGBLOCKFILE_Destructor(This->bigBlockFile);
+  if (This->bigBlockFile)
+    BIGBLOCKFILE_Destructor(This->bigBlockFile);
   HeapFree(GetProcessHeap(), 0, This);
 }
 
@@ -2991,7 +3127,7 @@ static void StorageImpl_SaveFileHeader(
  *
  * This method will read the raw data from a directory entry in the file.
  *
- * buffer must be PROPSET_BLOCK_SIZE bytes long.
+ * buffer must be RAW_DIRENTRY_SIZE bytes long.
  */
 HRESULT StorageImpl_ReadRawDirEntry(StorageImpl *This, ULONG index, BYTE *buffer)
 {
@@ -3017,7 +3153,7 @@ HRESULT StorageImpl_ReadRawDirEntry(StorageImpl *This, ULONG index, BYTE *buffer
  *
  * This method will write the raw data from a directory entry in the file.
  *
- * buffer must be PROPSET_BLOCK_SIZE bytes long.
+ * buffer must be RAW_DIRENTRY_SIZE bytes long.
  */
 HRESULT StorageImpl_WriteRawDirEntry(StorageImpl *This, ULONG index, const BYTE *buffer)
 {
@@ -3043,7 +3179,7 @@ HRESULT StorageImpl_WriteRawDirEntry(StorageImpl *This, ULONG index, const BYTE 
  *
  * Update raw directory entry data from the fields in newData.
  *
- * buffer must be PROPSET_BLOCK_SIZE bytes long.
+ * buffer must be RAW_DIRENTRY_SIZE bytes long.
  */
 void UpdateRawDirEntry(BYTE *buffer, const DirEntry *newData)
 {
@@ -3054,7 +3190,7 @@ void UpdateRawDirEntry(BYTE *buffer, const DirEntry *newData)
     newData->name,
     DIRENTRY_NAME_BUFFER_LEN );
 
-  memcpy(buffer + OFFSET_PS_STGTYPE, &newData->propertyType, 1);
+  memcpy(buffer + OFFSET_PS_STGTYPE, &newData->stgType, 1);
 
   StorageUtl_WriteWord(
     buffer,
@@ -3079,7 +3215,7 @@ void UpdateRawDirEntry(BYTE *buffer, const DirEntry *newData)
   StorageUtl_WriteGUID(
     buffer,
       OFFSET_PS_GUID,
-      &newData->propertyUniqueID);
+      &newData->clsid);
 
   StorageUtl_WriteDWord(
     buffer,
@@ -3113,87 +3249,83 @@ void UpdateRawDirEntry(BYTE *buffer, const DirEntry *newData)
 }
 
 /******************************************************************************
- *      Storage32Impl_ReadProperty
+ *      Storage32Impl_ReadDirEntry
  *
- * This method will read the specified property from the property chain.
+ * This method will read the specified directory entry.
  */
 BOOL StorageImpl_ReadDirEntry(
   StorageImpl* This,
-  ULONG          index,
+  DirRef         index,
   DirEntry*      buffer)
 {
-  BYTE           currentProperty[RAW_DIRENTRY_SIZE];
+  BYTE           currentEntry[RAW_DIRENTRY_SIZE];
   HRESULT        readRes;
 
-  readRes = StorageImpl_ReadRawDirEntry(This, index, currentProperty);
+  readRes = StorageImpl_ReadRawDirEntry(This, index, currentEntry);
 
   if (SUCCEEDED(readRes))
   {
-    /* replace the name of root entry (often "Root Entry") by the file name */
-    WCHAR *propName = (index == This->base.rootPropertySetIndex) ?
-	    		This->filename : (WCHAR *)currentProperty+OFFSET_PS_NAME;
-
     memset(buffer->name, 0, sizeof(buffer->name));
     memcpy(
       buffer->name,
-      propName,
+      (WCHAR *)currentEntry+OFFSET_PS_NAME,
       DIRENTRY_NAME_BUFFER_LEN );
     TRACE("storage name: %s\n", debugstr_w(buffer->name));
 
-    memcpy(&buffer->propertyType, currentProperty + OFFSET_PS_STGTYPE, 1);
+    memcpy(&buffer->stgType, currentEntry + OFFSET_PS_STGTYPE, 1);
 
     StorageUtl_ReadWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_NAMELENGTH,
       &buffer->sizeOfNameString);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_LEFTCHILD,
       &buffer->leftChild);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_RIGHTCHILD,
       &buffer->rightChild);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_DIRROOT,
       &buffer->dirRootEntry);
 
     StorageUtl_ReadGUID(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_GUID,
-      &buffer->propertyUniqueID);
+      &buffer->clsid);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_CTIMELOW,
       &buffer->ctime.dwLowDateTime);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_CTIMEHIGH,
       &buffer->ctime.dwHighDateTime);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_MTIMELOW,
       &buffer->mtime.dwLowDateTime);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_MTIMEHIGH,
       &buffer->mtime.dwHighDateTime);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_STARTBLOCK,
       &buffer->startingBlock);
 
     StorageUtl_ReadDWord(
-      currentProperty,
+      currentEntry,
       OFFSET_PS_SIZE,
       &buffer->size.u.LowPart);
 
@@ -3204,19 +3336,19 @@ BOOL StorageImpl_ReadDirEntry(
 }
 
 /*********************************************************************
- * Write the specified property into the property chain
+ * Write the specified directory entry to the file
  */
 BOOL StorageImpl_WriteDirEntry(
   StorageImpl*          This,
-  ULONG                 index,
+  DirRef                index,
   const DirEntry*       buffer)
 {
-  BYTE           currentProperty[RAW_DIRENTRY_SIZE];
+  BYTE           currentEntry[RAW_DIRENTRY_SIZE];
   HRESULT        writeRes;
 
-  UpdateRawDirEntry(currentProperty, buffer);
+  UpdateRawDirEntry(currentEntry, buffer);
 
-  writeRes = StorageImpl_WriteRawDirEntry(This, index, currentProperty);
+  writeRes = StorageImpl_WriteRawDirEntry(This, index, currentEntry);
   return SUCCEEDED(writeRes) ? TRUE : FALSE;
 }
 
@@ -3301,17 +3433,17 @@ BlockChainStream* Storage32Impl_SmallBlocksToBigBlocks(
   ULARGE_INTEGER size, offset;
   ULONG cbRead, cbWritten;
   ULARGE_INTEGER cbTotalRead;
-  ULONG propertyIndex;
+  DirRef streamEntryRef;
   HRESULT resWrite = S_OK;
   HRESULT resRead;
-  DirEntry chainProperty;
+  DirEntry streamEntry;
   BYTE *buffer;
   BlockChainStream *bbTempChain = NULL;
   BlockChainStream *bigBlockChain = NULL;
 
   /*
    * Create a temporary big block chain that doesn't have
-   * an associated property. This temporary chain will be
+   * an associated directory entry. This temporary chain will be
    * used to copy data from small blocks to big blocks.
    */
   bbTempChain = BlockChainStream_Construct(This,
@@ -3375,29 +3507,29 @@ BlockChainStream* Storage32Impl_SmallBlocksToBigBlocks(
   /*
    * Destroy the small block chain.
    */
-  propertyIndex = (*ppsbChain)->ownerPropertyIndex;
+  streamEntryRef = (*ppsbChain)->ownerDirEntry;
   SmallBlockChainStream_SetSize(*ppsbChain, size);
   SmallBlockChainStream_Destroy(*ppsbChain);
   *ppsbChain = 0;
 
   /*
-   * Change the property information. This chain is now a big block chain
+   * Change the directory entry. This chain is now a big block chain
    * and it doesn't reside in the small blocks chain anymore.
    */
-  StorageImpl_ReadDirEntry(This, propertyIndex, &chainProperty);
+  StorageImpl_ReadDirEntry(This, streamEntryRef, &streamEntry);
 
-  chainProperty.startingBlock = bbHeadOfChain;
+  streamEntry.startingBlock = bbHeadOfChain;
 
-  StorageImpl_WriteDirEntry(This, propertyIndex, &chainProperty);
+  StorageImpl_WriteDirEntry(This, streamEntryRef, &streamEntry);
 
   /*
-   * Destroy the temporary propertyless big block chain.
-   * Create a new big block chain associated with this property.
+   * Destroy the temporary entryless big block chain.
+   * Create a new big block chain associated with this entry.
    */
   BlockChainStream_Destroy(bbTempChain);
   bigBlockChain = BlockChainStream_Construct(This,
                                              NULL,
-                                             propertyIndex);
+                                             streamEntryRef);
 
   return bigBlockChain;
 }
@@ -3413,9 +3545,10 @@ SmallBlockChainStream* Storage32Impl_BigBlocksToSmallBlocks(
                            BlockChainStream** ppbbChain)
 {
     ULARGE_INTEGER size, offset, cbTotalRead;
-    ULONG cbRead, cbWritten, propertyIndex, sbHeadOfChain = BLOCK_END_OF_CHAIN;
+    ULONG cbRead, cbWritten, sbHeadOfChain = BLOCK_END_OF_CHAIN;
+    DirRef streamEntryRef;
     HRESULT resWrite = S_OK, resRead;
-    DirEntry chainProperty;
+    DirEntry streamEntry;
     BYTE* buffer;
     SmallBlockChainStream* sbTempChain;
 
@@ -3470,22 +3603,38 @@ SmallBlockChainStream* Storage32Impl_BigBlocksToSmallBlocks(
     }
 
     /* destroy the original big block chain */
-    propertyIndex = (*ppbbChain)->ownerPropertyIndex;
+    streamEntryRef = (*ppbbChain)->ownerDirEntry;
     BlockChainStream_SetSize(*ppbbChain, size);
     BlockChainStream_Destroy(*ppbbChain);
     *ppbbChain = NULL;
 
-    StorageImpl_ReadDirEntry(This, propertyIndex, &chainProperty);
-    chainProperty.startingBlock = sbHeadOfChain;
-    StorageImpl_WriteDirEntry(This, propertyIndex, &chainProperty);
+    StorageImpl_ReadDirEntry(This, streamEntryRef, &streamEntry);
+    streamEntry.startingBlock = sbHeadOfChain;
+    StorageImpl_WriteDirEntry(This, streamEntryRef, &streamEntry);
 
     SmallBlockChainStream_Destroy(sbTempChain);
-    return SmallBlockChainStream_Construct(This, NULL, propertyIndex);
+    return SmallBlockChainStream_Construct(This, NULL, streamEntryRef);
+}
+
+static void StorageInternalImpl_Invalidate( StorageInternalImpl *This )
+{
+  if (This->base.ancestorStorage)
+  {
+    TRACE("Storage invalidated (stg=%p)\n", This);
+
+    This->base.ancestorStorage = NULL;
+
+    StorageBaseImpl_DeleteAll(&This->base);
+
+    list_remove(&This->ParentListEntry);
+  }
 }
 
 static void StorageInternalImpl_Destroy( StorageBaseImpl *iface)
 {
   StorageInternalImpl* This = (StorageInternalImpl*) iface;
+
+  StorageInternalImpl_Invalidate(This);
 
   HeapFree(GetProcessHeap(), 0, This);
 }
@@ -3577,10 +3726,10 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Next(
 {
   IEnumSTATSTGImpl* const This=(IEnumSTATSTGImpl*)iface;
 
-  DirEntry    currentProperty;
+  DirEntry    currentEntry;
   STATSTG*    currentReturnStruct = rgelt;
   ULONG       objectFetched       = 0;
-  ULONG      currentSearchNode;
+  DirRef      currentSearchNode;
 
   if ( (rgelt==0) || ( (celt!=1) && (pceltFetched==0) ) )
     return E_INVALIDARG;
@@ -3612,17 +3761,18 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Next(
     IEnumSTATSTGImpl_PopSearchNode(This, TRUE);
 
     /*
-     * Read the property from the storage.
+     * Read the entry from the storage.
      */
     StorageImpl_ReadDirEntry(This->parentStorage,
       currentSearchNode,
-      &currentProperty);
+      &currentEntry);
 
     /*
      * Copy the information to the return buffer.
      */
-    StorageUtl_CopyDirEntryToSTATSTG(currentReturnStruct,
-      &currentProperty,
+    StorageUtl_CopyDirEntryToSTATSTG(&This->parentStorage->base,
+      currentReturnStruct,
+      &currentEntry,
       STATFLAG_DEFAULT);
 
     /*
@@ -3634,7 +3784,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Next(
     /*
      * Push the next search node in the search stack.
      */
-    IEnumSTATSTGImpl_PushSearchNode(This, currentProperty.rightChild);
+    IEnumSTATSTGImpl_PushSearchNode(This, currentEntry.rightChild);
 
     /*
      * continue the iteration.
@@ -3655,9 +3805,9 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Skip(
 {
   IEnumSTATSTGImpl* const This=(IEnumSTATSTGImpl*)iface;
 
-  DirEntry    currentProperty;
+  DirEntry    currentEntry;
   ULONG       objectFetched       = 0;
-  ULONG       currentSearchNode;
+  DirRef      currentSearchNode;
 
   /*
    * Start with the node at the top of the stack.
@@ -3673,11 +3823,11 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Skip(
     IEnumSTATSTGImpl_PopSearchNode(This, TRUE);
 
     /*
-     * Read the property from the storage.
+     * Read the entry from the storage.
      */
     StorageImpl_ReadDirEntry(This->parentStorage,
       currentSearchNode,
-      &currentProperty);
+      &currentEntry);
 
     /*
      * Step to the next item in the iteration
@@ -3687,7 +3837,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Skip(
     /*
      * Push the next search node in the search stack.
      */
-    IEnumSTATSTGImpl_PushSearchNode(This, currentProperty.rightChild);
+    IEnumSTATSTGImpl_PushSearchNode(This, currentEntry.rightChild);
 
     /*
      * continue the iteration.
@@ -3706,7 +3856,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Reset(
 {
   IEnumSTATSTGImpl* const This=(IEnumSTATSTGImpl*)iface;
 
-  DirEntry  rootProperty;
+  DirEntry  storageEntry;
   BOOL      readSuccessful;
 
   /*
@@ -3715,21 +3865,21 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Reset(
   This->stackSize = 0;
 
   /*
-   * Read the root property from the storage.
+   * Read the storage entry from the top-level storage.
    */
   readSuccessful = StorageImpl_ReadDirEntry(
                     This->parentStorage,
-                    This->firstPropertyNode,
-                    &rootProperty);
+                    This->storageDirEntry,
+                    &storageEntry);
 
   if (readSuccessful)
   {
-    assert(rootProperty.sizeOfNameString!=0);
+    assert(storageEntry.sizeOfNameString!=0);
 
     /*
      * Push the search node in the search stack.
      */
-    IEnumSTATSTGImpl_PushSearchNode(This, rootProperty.dirRootEntry);
+    IEnumSTATSTGImpl_PushSearchNode(This, storageEntry.dirRootEntry);
   }
 
   return S_OK;
@@ -3750,7 +3900,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Clone(
     return E_INVALIDARG;
 
   newClone = IEnumSTATSTGImpl_Construct(This->parentStorage,
-               This->firstPropertyNode);
+               This->storageDirEntry);
 
 
   /*
@@ -3765,7 +3915,7 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Clone(
   memcpy(
     newClone->stackToVisit,
     This->stackToVisit,
-    sizeof(ULONG) * newClone->stackSize);
+    sizeof(DirRef) * newClone->stackSize);
 
   *ppenum = (IEnumSTATSTG*)newClone;
 
@@ -3780,9 +3930,9 @@ static HRESULT WINAPI IEnumSTATSTGImpl_Clone(
 
 static void IEnumSTATSTGImpl_PushSearchNode(
   IEnumSTATSTGImpl* This,
-  ULONG             nodeToPush)
+  DirRef            nodeToPush)
 {
-  DirEntry  rootProperty;
+  DirEntry  storageEntry;
   BOOL      readSuccessful;
 
   /*
@@ -3802,36 +3952,36 @@ static void IEnumSTATSTGImpl_PushSearchNode(
                            GetProcessHeap(),
                            0,
                            This->stackToVisit,
-                           sizeof(ULONG) * This->stackMaxSize);
+                           sizeof(DirRef) * This->stackMaxSize);
   }
 
   This->stackToVisit[This->stackSize] = nodeToPush;
   This->stackSize++;
 
   /*
-   * Read the root property from the storage.
+   * Read the storage entry from the top-level storage.
    */
   readSuccessful = StorageImpl_ReadDirEntry(
                     This->parentStorage,
                     nodeToPush,
-                    &rootProperty);
+                    &storageEntry);
 
   if (readSuccessful)
   {
-    assert(rootProperty.sizeOfNameString!=0);
+    assert(storageEntry.sizeOfNameString!=0);
 
     /*
      * Push the previous search node in the search stack.
      */
-    IEnumSTATSTGImpl_PushSearchNode(This, rootProperty.leftChild);
+    IEnumSTATSTGImpl_PushSearchNode(This, storageEntry.leftChild);
   }
 }
 
-static ULONG IEnumSTATSTGImpl_PopSearchNode(
+static DirRef IEnumSTATSTGImpl_PopSearchNode(
   IEnumSTATSTGImpl* This,
   BOOL            remove)
 {
-  ULONG topNode;
+  DirRef topNode;
 
   if (This->stackSize == 0)
     return DIRENTRY_NULL;
@@ -3864,7 +4014,7 @@ static const IEnumSTATSTGVtbl IEnumSTATSTGImpl_Vtbl =
 
 static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(
   StorageImpl* parentStorage,
-  ULONG          firstPropertyNode)
+  DirRef         storageDirEntry)
 {
   IEnumSTATSTGImpl* newEnumeration;
 
@@ -3885,7 +4035,7 @@ static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(
     newEnumeration->parentStorage = parentStorage;
     IStorage_AddRef((IStorage*)newEnumeration->parentStorage);
 
-    newEnumeration->firstPropertyNode   = firstPropertyNode;
+    newEnumeration->storageDirEntry   = storageDirEntry;
 
     /*
      * Initialize the search stack
@@ -3893,7 +4043,7 @@ static IEnumSTATSTGImpl* IEnumSTATSTGImpl_Construct(
     newEnumeration->stackSize    = 0;
     newEnumeration->stackMaxSize = ENUMSTATSGT_SIZE_INCREMENT;
     newEnumeration->stackToVisit =
-      HeapAlloc(GetProcessHeap(), 0, sizeof(ULONG)*ENUMSTATSGT_SIZE_INCREMENT);
+      HeapAlloc(GetProcessHeap(), 0, sizeof(DirRef)*ENUMSTATSGT_SIZE_INCREMENT);
 
     /*
      * Make sure the current node of the iterator is the first one.
@@ -3929,6 +4079,11 @@ static const IStorageVtbl Storage32InternalImpl_Vtbl =
     StorageBaseImpl_Stat
 };
 
+static const StorageBaseImplVtbl StorageInternalImpl_BaseVtbl =
+{
+  StorageInternalImpl_Destroy
+};
+
 /******************************************************************************
 ** Storage32InternalImpl implementation
 */
@@ -3936,7 +4091,7 @@ static const IStorageVtbl Storage32InternalImpl_Vtbl =
 static StorageInternalImpl* StorageInternalImpl_Construct(
   StorageImpl* ancestorStorage,
   DWORD        openFlags,
-  ULONG        rootPropertyIndex)
+  DirRef       storageDirEntry)
 {
   StorageInternalImpl* newStorage;
 
@@ -3944,16 +4099,15 @@ static StorageInternalImpl* StorageInternalImpl_Construct(
 
   if (newStorage!=0)
   {
-    /*
-     * Initialize the stream list
-     */
     list_init(&newStorage->base.strmHead);
+
+    list_init(&newStorage->base.storageHead);
 
     /*
      * Initialize the virtual function table.
      */
     newStorage->base.lpVtbl = &Storage32InternalImpl_Vtbl;
-    newStorage->base.v_destructor = StorageInternalImpl_Destroy;
+    newStorage->base.baseVtbl = &StorageInternalImpl_BaseVtbl;
     newStorage->base.openFlags = (openFlags & ~STGM_CREATE);
 
     /*
@@ -3962,9 +4116,11 @@ static StorageInternalImpl* StorageInternalImpl_Construct(
     newStorage->base.ancestorStorage = ancestorStorage;
 
     /*
-     * Keep the index of the root property set for this storage,
+     * Keep a reference to the directory entry of this storage
      */
-    newStorage->base.rootPropertySetIndex = rootPropertyIndex;
+    newStorage->base.storageDirEntry = storageDirEntry;
+
+    newStorage->base.create = 0;
 
     return newStorage;
   }
@@ -4051,28 +4207,41 @@ void StorageUtl_WriteGUID(BYTE* buffer, ULONG offset, const GUID* value)
 }
 
 void StorageUtl_CopyDirEntryToSTATSTG(
+  StorageBaseImpl*      storage,
   STATSTG*              destination,
   const DirEntry*       source,
   int                   statFlags)
 {
+  LPCWSTR entryName;
+
+  if (source->stgType == STGTY_ROOT)
+  {
+    /* replace the name of root entry (often "Root Entry") by the file name */
+    entryName = storage->filename;
+  }
+  else
+  {
+    entryName = source->name;
+  }
+
   /*
    * The copy of the string occurs only when the flag is not set
    */
   if( ((statFlags & STATFLAG_NONAME) != 0) || 
-       (source->name == NULL) || 
-       (source->name[0] == 0) )
+       (entryName == NULL) ||
+       (entryName[0] == 0) )
   {
     destination->pwcsName = 0;
   }
   else
   {
     destination->pwcsName =
-      CoTaskMemAlloc((lstrlenW(source->name)+1)*sizeof(WCHAR));
+      CoTaskMemAlloc((lstrlenW(entryName)+1)*sizeof(WCHAR));
 
-    strcpyW(destination->pwcsName, source->name);
+    strcpyW(destination->pwcsName, entryName);
   }
 
-  switch (source->propertyType)
+  switch (source->stgType)
   {
     case STGTY_STORAGE:
     case STGTY_ROOT:
@@ -4094,7 +4263,7 @@ void StorageUtl_CopyDirEntryToSTATSTG(
 */
   destination->grfMode           = 0;
   destination->grfLocksSupported = 0;
-  destination->clsid             = source->propertyUniqueID;
+  destination->clsid             = source->clsid;
   destination->grfStateBits      = 0;
   destination->reserved          = 0;
 }
@@ -4106,7 +4275,7 @@ void StorageUtl_CopyDirEntryToSTATSTG(
 BlockChainStream* BlockChainStream_Construct(
   StorageImpl* parentStorage,
   ULONG*         headOfStreamPlaceHolder,
-  ULONG          propertyIndex)
+  DirRef         dirEntry)
 {
   BlockChainStream* newStream;
   ULONG blockIndex;
@@ -4115,7 +4284,7 @@ BlockChainStream* BlockChainStream_Construct(
 
   newStream->parentStorage           = parentStorage;
   newStream->headOfStreamPlaceHolder = headOfStreamPlaceHolder;
-  newStream->ownerPropertyIndex      = propertyIndex;
+  newStream->ownerDirEntry           = dirEntry;
   newStream->lastBlockNoInSequence   = 0xFFFFFFFF;
   newStream->tailIndex               = BLOCK_END_OF_CHAIN;
   newStream->numBlocks               = 0;
@@ -4149,28 +4318,28 @@ void BlockChainStream_Destroy(BlockChainStream* This)
  *      BlockChainStream_GetHeadOfChain
  *
  * Returns the head of this stream chain.
- * Some special chains don't have properties, their heads are kept in
+ * Some special chains don't have directory entries, their heads are kept in
  * This->headOfStreamPlaceHolder.
  *
  */
 static ULONG BlockChainStream_GetHeadOfChain(BlockChainStream* This)
 {
-  DirEntry  chainProperty;
+  DirEntry  chainEntry;
   BOOL      readSuccessful;
 
   if (This->headOfStreamPlaceHolder != 0)
     return *(This->headOfStreamPlaceHolder);
 
-  if (This->ownerPropertyIndex != DIRENTRY_NULL)
+  if (This->ownerDirEntry != DIRENTRY_NULL)
   {
     readSuccessful = StorageImpl_ReadDirEntry(
                       This->parentStorage,
-                      This->ownerPropertyIndex,
-                      &chainProperty);
+                      This->ownerDirEntry,
+                      &chainEntry);
 
     if (readSuccessful)
     {
-      return chainProperty.startingBlock;
+      return chainEntry.startingBlock;
     }
   }
 
@@ -4497,20 +4666,20 @@ static BOOL BlockChainStream_Enlarge(BlockChainStream* This,
     }
     else
     {
-      DirEntry chainProp;
-      assert(This->ownerPropertyIndex != DIRENTRY_NULL);
+      DirEntry chainEntry;
+      assert(This->ownerDirEntry != DIRENTRY_NULL);
 
       StorageImpl_ReadDirEntry(
         This->parentStorage,
-        This->ownerPropertyIndex,
-        &chainProp);
+        This->ownerDirEntry,
+        &chainEntry);
 
-      chainProp.startingBlock = blockIndex;
+      chainEntry.startingBlock = blockIndex;
 
       StorageImpl_WriteDirEntry(
         This->parentStorage,
-        This->ownerPropertyIndex,
-        &chainProp);
+        This->ownerDirEntry,
+        &chainEntry);
     }
 
     This->tailIndex = blockIndex;
@@ -4613,29 +4782,28 @@ BOOL BlockChainStream_SetSize(
  *      BlockChainStream_GetSize
  *
  * Returns the size of this chain.
- * Will return the block count if this chain doesn't have a property.
+ * Will return the block count if this chain doesn't have a directory entry.
  */
 static ULARGE_INTEGER BlockChainStream_GetSize(BlockChainStream* This)
 {
-  DirEntry chainProperty;
+  DirEntry chainEntry;
 
   if(This->headOfStreamPlaceHolder == NULL)
   {
     /*
-     * This chain is a data stream read the property and return
-     * the appropriate size
+     * This chain has a directory entry so use the size value from there.
      */
     StorageImpl_ReadDirEntry(
       This->parentStorage,
-      This->ownerPropertyIndex,
-      &chainProperty);
+      This->ownerDirEntry,
+      &chainEntry);
 
-    return chainProperty.size;
+    return chainEntry.size;
   }
   else
   {
     /*
-     * this chain is a chain that does not have a property, figure out the
+     * this chain is a chain that does not have a directory entry, figure out the
      * size by making the product number of used blocks times the
      * size of them
      */
@@ -4657,7 +4825,7 @@ static ULARGE_INTEGER BlockChainStream_GetSize(BlockChainStream* This)
 SmallBlockChainStream* SmallBlockChainStream_Construct(
   StorageImpl* parentStorage,
   ULONG*         headOfStreamPlaceHolder,
-  ULONG          propertyIndex)
+  DirRef         dirEntry)
 {
   SmallBlockChainStream* newStream;
 
@@ -4665,7 +4833,7 @@ SmallBlockChainStream* SmallBlockChainStream_Construct(
 
   newStream->parentStorage      = parentStorage;
   newStream->headOfStreamPlaceHolder = headOfStreamPlaceHolder;
-  newStream->ownerPropertyIndex = propertyIndex;
+  newStream->ownerDirEntry      = dirEntry;
 
   return newStream;
 }
@@ -4684,22 +4852,22 @@ void SmallBlockChainStream_Destroy(
 static ULONG SmallBlockChainStream_GetHeadOfChain(
   SmallBlockChainStream* This)
 {
-  DirEntry  chainProperty;
+  DirEntry  chainEntry;
   BOOL      readSuccessful;
 
   if (This->headOfStreamPlaceHolder != NULL)
     return *(This->headOfStreamPlaceHolder);
 
-  if (This->ownerPropertyIndex)
+  if (This->ownerDirEntry)
   {
     readSuccessful = StorageImpl_ReadDirEntry(
                       This->parentStorage,
-                      This->ownerPropertyIndex,
-                      &chainProperty);
+                      This->ownerDirEntry,
+                      &chainEntry);
 
     if (readSuccessful)
     {
-      return chainProperty.startingBlock;
+      return chainEntry.startingBlock;
     }
 
   }
@@ -4878,7 +5046,7 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
         /*
          * We have just created the small block depot.
          */
-        DirEntry rootProp;
+        DirEntry rootEntry;
         ULONG sbStartIndex;
 
         /*
@@ -4900,17 +5068,17 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
 
         StorageImpl_ReadDirEntry(
           This->parentStorage,
-          This->parentStorage->base.rootPropertySetIndex,
-          &rootProp);
+          This->parentStorage->base.storageDirEntry,
+          &rootEntry);
 
-        rootProp.startingBlock = sbStartIndex;
-        rootProp.size.u.HighPart = 0;
-        rootProp.size.u.LowPart  = This->parentStorage->bigBlockSize;
+        rootEntry.startingBlock = sbStartIndex;
+        rootEntry.size.u.HighPart = 0;
+        rootEntry.size.u.LowPart  = This->parentStorage->bigBlockSize;
 
         StorageImpl_WriteDirEntry(
           This->parentStorage,
-          This->parentStorage->base.rootPropertySetIndex,
-          &rootProp);
+          This->parentStorage->base.storageDirEntry,
+          &rootEntry);
       }
       else
         StorageImpl_SaveFileHeader(This->parentStorage);
@@ -4925,27 +5093,27 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
    */
   if (blockIndex % smallBlocksPerBigBlock == 0)
   {
-    DirEntry rootProp;
+    DirEntry rootEntry;
     ULONG blocksRequired = (blockIndex / smallBlocksPerBigBlock) + 1;
 
     StorageImpl_ReadDirEntry(
       This->parentStorage,
-      This->parentStorage->base.rootPropertySetIndex,
-      &rootProp);
+      This->parentStorage->base.storageDirEntry,
+      &rootEntry);
 
-    if (rootProp.size.u.LowPart <
+    if (rootEntry.size.u.LowPart <
        (blocksRequired * This->parentStorage->bigBlockSize))
     {
-      rootProp.size.u.LowPart += This->parentStorage->bigBlockSize;
+      rootEntry.size.u.LowPart += This->parentStorage->bigBlockSize;
 
       BlockChainStream_SetSize(
         This->parentStorage->smallBlockRootChain,
-        rootProp.size);
+        rootEntry.size);
 
       StorageImpl_WriteDirEntry(
         This->parentStorage,
-        This->parentStorage->base.rootPropertySetIndex,
-        &rootProp);
+        This->parentStorage->base.storageDirEntry,
+        &rootEntry);
     }
   }
 
@@ -5175,17 +5343,17 @@ static BOOL SmallBlockChainStream_Shrink(
    */
   if (count == 0)
   {
-    DirEntry chainProp;
+    DirEntry chainEntry;
 
     StorageImpl_ReadDirEntry(This->parentStorage,
-			     This->ownerPropertyIndex,
-			     &chainProp);
+			     This->ownerDirEntry,
+			     &chainEntry);
 
-    chainProp.startingBlock = BLOCK_END_OF_CHAIN;
+    chainEntry.startingBlock = BLOCK_END_OF_CHAIN;
 
     StorageImpl_WriteDirEntry(This->parentStorage,
-			      This->ownerPropertyIndex,
-			      &chainProp);
+			      This->ownerDirEntry,
+			      &chainEntry);
 
     /*
      * We start freeing the chain at the head block.
@@ -5253,15 +5421,15 @@ static BOOL SmallBlockChainStream_Enlarge(
     }
     else
     {
-      DirEntry chainProp;
+      DirEntry chainEntry;
 
-      StorageImpl_ReadDirEntry(This->parentStorage, This->ownerPropertyIndex,
-                                   &chainProp);
+      StorageImpl_ReadDirEntry(This->parentStorage, This->ownerDirEntry,
+                                   &chainEntry);
 
-      chainProp.startingBlock = blockIndex;
+      chainEntry.startingBlock = blockIndex;
 
-      StorageImpl_WriteDirEntry(This->parentStorage, This->ownerPropertyIndex,
-                                  &chainProp);
+      StorageImpl_WriteDirEntry(This->parentStorage, This->ownerDirEntry,
+                                  &chainEntry);
     }
   }
 
@@ -5370,7 +5538,7 @@ static ULONG SmallBlockChainStream_GetCount(SmallBlockChainStream* This)
  */
 static ULARGE_INTEGER SmallBlockChainStream_GetSize(SmallBlockChainStream* This)
 {
-  DirEntry chainProperty;
+  DirEntry chainEntry;
 
   if(This->headOfStreamPlaceHolder != NULL)
   {
@@ -5385,10 +5553,10 @@ static ULARGE_INTEGER SmallBlockChainStream_GetSize(SmallBlockChainStream* This)
 
   StorageImpl_ReadDirEntry(
     This->parentStorage,
-    This->ownerPropertyIndex,
-    &chainProperty);
+    This->ownerDirEntry,
+    &chainEntry);
 
-  return chainProperty.size;
+  return chainEntry.size;
 }
 
 /******************************************************************************
@@ -5525,36 +5693,25 @@ HRESULT WINAPI StgCreateDocfile(
   /*
    * Allocate and initialize the new IStorage32object.
    */
-  newStorage = HeapAlloc(GetProcessHeap(), 0, sizeof(StorageImpl));
-
-  if (newStorage == 0)
-  {
-    hr = STG_E_INSUFFICIENTMEMORY;
-    goto end;
-  }
-
   hr = StorageImpl_Construct(
-         newStorage,
          hFile,
         pwcsName,
          NULL,
          grfMode,
          TRUE,
-         TRUE);
+         TRUE,
+         &newStorage);
 
   if (FAILED(hr))
   {
-    HeapFree(GetProcessHeap(), 0, newStorage);
     goto end;
   }
 
   /*
    * Get an "out" pointer for the caller.
    */
-  hr = StorageBaseImpl_QueryInterface(
-         (IStorage*)newStorage,
-         &IID_IStorage,
-         (void**)ppstgOpen);
+  *ppstgOpen = (IStorage*)newStorage;
+
 end:
   TRACE("<-- %p  r = %08x\n", *ppstgOpen, hr);
 
@@ -5809,27 +5966,17 @@ HRESULT WINAPI StgOpenStorage(
   /*
    * Allocate and initialize the new IStorage32object.
    */
-  newStorage = HeapAlloc(GetProcessHeap(), 0, sizeof(StorageImpl));
-
-  if (newStorage == 0)
-  {
-    hr = STG_E_INSUFFICIENTMEMORY;
-    goto end;
-  }
-
-  /* Initialize the storage */
   hr = StorageImpl_Construct(
-         newStorage,
          hFile,
          pwcsName,
          NULL,
          grfMode,
          TRUE,
-         FALSE );
+         FALSE,
+         &newStorage);
 
   if (FAILED(hr))
   {
-    HeapFree(GetProcessHeap(), 0, newStorage);
     /*
      * According to the docs if the file is not a storage, return STG_E_FILEALREADYEXISTS
      */
@@ -5840,16 +5987,13 @@ HRESULT WINAPI StgOpenStorage(
 
   /* prepare the file name string given in lieu of the root property name */
   GetFullPathNameW(pwcsName, MAX_PATH, fullname, NULL);
-  memcpy(newStorage->filename, fullname, DIRENTRY_NAME_BUFFER_LEN);
-  newStorage->filename[DIRENTRY_NAME_BUFFER_LEN-1] = '\0';
+  memcpy(newStorage->base.filename, fullname, DIRENTRY_NAME_BUFFER_LEN);
+  newStorage->base.filename[DIRENTRY_NAME_BUFFER_LEN-1] = '\0';
 
   /*
    * Get an "out" pointer for the caller.
    */
-  hr = StorageBaseImpl_QueryInterface(
-         (IStorage*)newStorage,
-         &IID_IStorage,
-         (void**)ppstgOpen);
+  *ppstgOpen = (IStorage*)newStorage;
 
 end:
   TRACE("<-- %08x, IStorage %p\n", hr, ppstgOpen ? *ppstgOpen : NULL);
@@ -5874,33 +6018,24 @@ HRESULT WINAPI StgCreateDocfileOnILockBytes(
   /*
    * Allocate and initialize the new IStorage object.
    */
-  newStorage = HeapAlloc(GetProcessHeap(), 0, sizeof(StorageImpl));
-
-  if (newStorage == 0)
-    return STG_E_INSUFFICIENTMEMORY;
-
   hr = StorageImpl_Construct(
-         newStorage,
          0,
         0,
          plkbyt,
          grfMode,
          FALSE,
-         TRUE);
+         TRUE,
+         &newStorage);
 
   if (FAILED(hr))
   {
-    HeapFree(GetProcessHeap(), 0, newStorage);
     return hr;
   }
 
   /*
    * Get an "out" pointer for the caller.
    */
-  hr = StorageBaseImpl_QueryInterface(
-         (IStorage*)newStorage,
-         &IID_IStorage,
-         (void**)ppstgOpen);
+  *ppstgOpen = (IStorage*)newStorage;
 
   return hr;
 }
@@ -5930,33 +6065,24 @@ HRESULT WINAPI StgOpenStorageOnILockBytes(
   /*
    * Allocate and initialize the new IStorage object.
    */
-  newStorage = HeapAlloc(GetProcessHeap(), 0, sizeof(StorageImpl));
-
-  if (newStorage == 0)
-    return STG_E_INSUFFICIENTMEMORY;
-
   hr = StorageImpl_Construct(
-         newStorage,
          0,
          0,
          plkbyt,
          grfMode,
          FALSE,
-         FALSE);
+         FALSE,
+         &newStorage);
 
   if (FAILED(hr))
   {
-    HeapFree(GetProcessHeap(), 0, newStorage);
     return hr;
   }
 
   /*
    * Get an "out" pointer for the caller.
    */
-  hr = StorageBaseImpl_QueryInterface(
-         (IStorage*)newStorage,
-         &IID_IStorage,
-         (void**)ppstgOpen);
+  *ppstgOpen = (IStorage*)newStorage;
 
   return hr;
 }

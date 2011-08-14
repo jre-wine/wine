@@ -81,11 +81,7 @@ static INTERNALDRAG InternalDrag = { 0, 0, 0, 0, 0, 0, FALSE, 0 };
 
 static HBITMAP ImageList_CreateImage(HDC hdc, HIMAGELIST himl, UINT count, UINT width);
 static HRESULT ImageListImpl_CreateInstance(const IUnknown *pUnkOuter, REFIID iid, void** ppv);
-
-static inline BOOL is_valid(HIMAGELIST himl)
-{
-    return himl && himl->magic == IMAGELIST_MAGIC;
-}
+static inline BOOL is_valid(HIMAGELIST himl);
 
 /*
  * An imagelist with N images is tiled like this:
@@ -602,12 +598,11 @@ ImageList_Create (INT cx, INT cy, UINT flags,
     TRACE("(%d %d 0x%x %d %d)\n", cx, cy, flags, cInitial, cGrow);
 
     /* Create the IImageList interface for the image list */
-    if (!SUCCEEDED(ImageListImpl_CreateInstance(NULL, &IID_IImageList, (void **) &himl)))
+    if (FAILED(ImageListImpl_CreateInstance(NULL, &IID_IImageList, (void **)&himl)))
         return NULL;
 
     cGrow = (cGrow < 4) ? 4 : (cGrow + 3) & ~3;
 
-    himl->magic     = IMAGELIST_MAGIC;
     himl->cx        = cx;
     himl->cy        = cy;
     himl->flags     = flags;
@@ -673,7 +668,7 @@ ImageList_Create (INT cx, INT cy, UINT flags,
     return himl;
 
 cleanup:
-    if (himl) ImageList_Destroy(himl);
+    ImageList_Destroy(himl);
     return NULL;
 }
 
@@ -697,25 +692,6 @@ ImageList_Destroy (HIMAGELIST himl)
     if (!is_valid(himl))
 	return FALSE;
 
-    /* delete image bitmaps */
-    if (himl->hbmImage)
-        DeleteObject (himl->hbmImage);
-    if (himl->hbmMask)
-        DeleteObject (himl->hbmMask);
-
-    /* delete image & mask DCs */
-    if (himl->hdcImage)
-        DeleteDC(himl->hdcImage);
-    if (himl->hdcMask)
-        DeleteDC(himl->hdcMask);
-
-    /* delete blending brushes */
-    if (himl->hbrBlend25)
-        DeleteObject (himl->hbrBlend25);
-    if (himl->hbrBlend50)
-        DeleteObject (himl->hbrBlend50);
-
-    /* Free the IImageList instance */
     IImageList_Release((IImageList *) himl);
     return TRUE;
 }
@@ -2977,7 +2953,22 @@ static ULONG WINAPI ImageListImpl_Release(IImageList *iface)
     TRACE("(%p) refcount=%u\n", iface, ref);
 
     if (ref == 0)
+    {
+        /* delete image bitmaps */
+        if (This->hbmImage) DeleteObject (This->hbmImage);
+        if (This->hbmMask)  DeleteObject (This->hbmMask);
+
+        /* delete image & mask DCs */
+        if (This->hdcImage) DeleteDC (This->hdcImage);
+        if (This->hdcMask)  DeleteDC (This->hdcMask);
+
+        /* delete blending brushes */
+        if (This->hbrBlend25) DeleteObject (This->hbrBlend25);
+        if (This->hbrBlend50) DeleteObject (This->hbrBlend50);
+
+        This->lpVtbl = NULL;
         HeapFree(GetProcessHeap(), 0, This);
+    }
 
     return ref;
 }
@@ -2985,185 +2976,323 @@ static ULONG WINAPI ImageListImpl_Release(IImageList *iface)
 static HRESULT WINAPI ImageListImpl_Add(IImageList *iface, HBITMAP hbmImage,
     HBITMAP hbmMask, int *pi)
 {
-    FIXME("STUB: %p %p %p %p\n", iface, hbmImage, hbmMask, pi);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    int ret;
+
+    if (!pi)
+        return E_FAIL;
+
+    ret = ImageList_Add(This, hbmImage, hbmMask);
+
+    if (ret == -1)
+        return E_FAIL;
+
+    *pi = ret;
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_ReplaceIcon(IImageList *iface, int i,
     HICON hicon, int *pi)
 {
-    FIXME("STUB: %p %d %p %p\n", iface, i, hicon, pi);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    int ret;
+
+    if (!pi)
+        return E_FAIL;
+
+    ret = ImageList_ReplaceIcon(This, i, hicon);
+
+    if (ret == -1)
+        return E_FAIL;
+
+    *pi = ret;
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_SetOverlayImage(IImageList *iface,
     int iImage, int iOverlay)
 {
-    FIXME("STUB: %p %d %d\n", iface, iImage, iOverlay);
-    return E_NOTIMPL;
+    return ImageList_SetOverlayImage((HIMAGELIST) iface, iImage, iOverlay)
+        ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_Replace(IImageList *iface, int i,
     HBITMAP hbmImage, HBITMAP hbmMask)
 {
-    FIXME("STUB: %p %d %p %p\n", iface, i, hbmImage, hbmMask);
-    return E_NOTIMPL;
+    return ImageList_Replace((HIMAGELIST) iface, i, hbmImage, hbmMask) ? S_OK :
+        E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_AddMasked(IImageList *iface, HBITMAP hbmImage,
     COLORREF crMask, int *pi)
 {
-    FIXME("STUB: %p %p %x %p\n", iface, hbmImage, crMask, pi);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    int ret;
+
+    if (!pi)
+        return E_FAIL;
+
+    ret = ImageList_AddMasked(This, hbmImage, crMask);
+
+    if (ret == -1)
+        return E_FAIL;
+
+    *pi = ret;
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_Draw(IImageList *iface,
     IMAGELISTDRAWPARAMS *pimldp)
 {
-    FIXME("STUB: %p %p\n", iface, pimldp);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    HIMAGELIST old_himl = 0;
+    int ret = 0;
+
+    if (!pimldp)
+        return E_FAIL;
+
+    /* As far as I can tell, Windows simply ignores the contents of pimldp->himl
+       so we shall simulate the same */
+    old_himl = pimldp->himl;
+    pimldp->himl = This;
+
+    ret = ImageList_DrawIndirect(pimldp);
+
+    pimldp->himl = old_himl;
+    return ret ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_Remove(IImageList *iface, int i)
 {
-    FIXME("STUB: %p %d\n", iface, i);
-    return E_NOTIMPL;
+    return (ImageList_Remove((HIMAGELIST) iface, i) == 0) ? E_FAIL : S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_GetIcon(IImageList *iface, int i, UINT flags,
     HICON *picon)
 {
-    FIXME("STUB: %p %d %x %p\n", iface, i, flags, picon);
-    return E_NOTIMPL;
+    HICON hIcon;
+
+    if (!picon)
+        return E_FAIL;
+
+    hIcon = ImageList_GetIcon((HIMAGELIST) iface, i, flags);
+
+    if (hIcon == NULL)
+        return E_FAIL;
+
+    *picon = hIcon;
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_GetImageInfo(IImageList *iface, int i,
     IMAGEINFO *pImageInfo)
 {
-    FIXME("STUB: %p %d %p\n", iface, i, pImageInfo);
-    return E_NOTIMPL;
+    return ImageList_GetImageInfo((HIMAGELIST) iface, i, pImageInfo) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_Copy(IImageList *iface, int iDst,
     IUnknown *punkSrc, int iSrc, UINT uFlags)
 {
-    FIXME("STUB: %p %d %p %d %x\n", iface, iDst, punkSrc, iSrc, uFlags);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    IImageList *src = NULL;
+    HRESULT ret;
+
+    if (!punkSrc)
+        return E_FAIL;
+
+    /* TODO: Add test for IID_ImageList2 too */
+    if (FAILED(IImageList_QueryInterface(punkSrc, &IID_IImageList,
+            (void **) &src)))
+        return E_FAIL;
+
+    if (ImageList_Copy(This, iDst, (HIMAGELIST) src, iSrc, uFlags))
+        ret = S_OK;
+    else
+        ret = E_FAIL;
+
+    IImageList_Release(src);
+    return ret;
 }
 
 static HRESULT WINAPI ImageListImpl_Merge(IImageList *iface, int i1,
     IUnknown *punk2, int i2, int dx, int dy, REFIID riid, PVOID *ppv)
 {
-    FIXME("STUB: %p %d %p %d %d %d %s %p\n", iface, i1, punk2, i2, dx, dy,
-        debugstr_guid(riid), ppv);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    IImageList *iml2 = NULL;
+    HIMAGELIST hNew;
+    HRESULT ret = E_FAIL;
+
+    if (!punk2 || !ppv)
+        return E_FAIL;
+
+    /* TODO: Add test for IID_ImageList2 too */
+    if (FAILED(IImageList_QueryInterface(punk2, &IID_IImageList,
+            (void **) &iml2)))
+        return E_FAIL;
+
+    hNew = ImageList_Merge(This, i1, (HIMAGELIST) iml2, i2, dx, dy);
+
+    /* Get the interface for the new image list */
+    if (hNew)
+        ret = HIMAGELIST_QueryInterface(hNew, riid, ppv);
+
+    IImageList_Release(iml2);
+    return ret;
 }
 
 static HRESULT WINAPI ImageListImpl_Clone(IImageList *iface, REFIID riid,
     PVOID *ppv)
 {
-    FIXME("STUB: %p %s %p\n", iface, debugstr_guid(riid), ppv);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    HIMAGELIST hNew;
+    HRESULT ret = E_FAIL;
+
+    if (!ppv)
+        return E_FAIL;
+
+    hNew = ImageList_Duplicate(This);
+
+    /* Get the interface for the new image list */
+    if (hNew)
+        ret = HIMAGELIST_QueryInterface(hNew, riid, ppv);
+
+    return ret;
 }
 
 static HRESULT WINAPI ImageListImpl_GetImageRect(IImageList *iface, int i,
     RECT *prc)
 {
-    FIXME("STUB: %p %d %p\n", iface, i, prc);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    IMAGEINFO info;
+
+    if (!prc)
+        return E_FAIL;
+
+    if (!ImageList_GetImageInfo(This, i, &info))
+        return E_FAIL;
+
+    return CopyRect(prc, &info.rcImage) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_GetIconSize(IImageList *iface, int *cx,
     int *cy)
 {
-    FIXME("STUB: %p %p %p\n", iface, cx, cy);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+
+    return ImageList_GetIconSize(This, cx, cy) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_SetIconSize(IImageList *iface, int cx,
     int cy)
 {
-    FIXME("STUB: %p %d %d\n", iface, cx, cy);
-    return E_NOTIMPL;
+    return ImageList_SetIconSize((HIMAGELIST) iface, cx, cy) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_GetImageCount(IImageList *iface, int *pi)
 {
-    FIXME("STUB: %p %p\n", iface, pi);
-    return E_NOTIMPL;
+    if (!pi)
+        return E_FAIL;
+
+    *pi = ImageList_GetImageCount((HIMAGELIST) iface);
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_SetImageCount(IImageList *iface,
     UINT uNewCount)
 {
-    FIXME("STUB: %p %d\n", iface, uNewCount);
-    return E_NOTIMPL;
+    return ImageList_SetImageCount((HIMAGELIST) iface, uNewCount) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_SetBkColor(IImageList *iface, COLORREF clrBk,
     COLORREF *pclr)
 {
-    FIXME("STUB: %p %x %p\n", iface, clrBk, pclr);
-    return E_NOTIMPL;
+    if (!pclr)
+        return E_FAIL;
+
+    *pclr = ImageList_SetBkColor((HIMAGELIST) iface, clrBk);
+    return *pclr == CLR_NONE ? E_FAIL : S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_GetBkColor(IImageList *iface, COLORREF *pclr)
 {
-    FIXME("STUB: %p %p\n", iface, pclr);
-    return E_NOTIMPL;
+    if (!pclr)
+        return E_FAIL;
+
+    *pclr = ImageList_GetBkColor((HIMAGELIST) iface);
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_BeginDrag(IImageList *iface, int iTrack,
     int dxHotspot, int dyHotspot)
 {
-    FIXME("STUB: %p %d %d %d\n", iface, iTrack, dxHotspot, dyHotspot);
-    return E_NOTIMPL;
+    return ImageList_BeginDrag((HIMAGELIST) iface, iTrack, dxHotspot, dyHotspot) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_EndDrag(IImageList *iface)
 {
-    FIXME("STUB: %p\n", iface);
-    return E_NOTIMPL;
+    ImageList_EndDrag();
+    return S_OK;
 }
 
 static HRESULT WINAPI ImageListImpl_DragEnter(IImageList *iface, HWND hwndLock,
     int x, int y)
 {
-    FIXME("STUB: %p %p %d %d\n", iface, hwndLock, x, y);
-    return E_NOTIMPL;
+    return ImageList_DragEnter(hwndLock, x, y) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_DragLeave(IImageList *iface, HWND hwndLock)
 {
-    FIXME("STUB: %p %p\n", iface, hwndLock);
-    return E_NOTIMPL;
+    return ImageList_DragLeave(hwndLock) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_DragMove(IImageList *iface, int x, int y)
 {
-    FIXME("STUB: %p %d %d\n", iface, x, y);
-    return E_NOTIMPL;
+    return ImageList_DragMove(x, y) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_SetDragCursorImage(IImageList *iface,
     IUnknown *punk, int iDrag, int dxHotspot, int dyHotspot)
 {
-    FIXME("STUB: %p %p %d %d %d\n", iface, punk, iDrag, dxHotspot, dyHotspot);
-    return E_NOTIMPL;
+    IImageList *iml2 = NULL;
+    HRESULT ret;
+
+    if (!punk)
+        return E_FAIL;
+
+    /* TODO: Add test for IID_ImageList2 too */
+    if (FAILED(IImageList_QueryInterface(punk, &IID_IImageList,
+            (void **) &iml2)))
+        return E_FAIL;
+
+    ret = ImageList_SetDragCursorImage((HIMAGELIST) iml2, iDrag, dxHotspot,
+        dyHotspot);
+
+    IImageList_Release(iml2);
+
+    return ret ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_DragShowNolock(IImageList *iface, BOOL fShow)
 {
-    FIXME("STUB: %p %d\n", iface, fShow);
-    return E_NOTIMPL;
+    return ImageList_DragShowNolock(fShow) ? S_OK : E_FAIL;
 }
 
 static HRESULT WINAPI ImageListImpl_GetDragImage(IImageList *iface, POINT *ppt,
     POINT *pptHotspot, REFIID riid, PVOID *ppv)
 {
-    FIXME("STUB: %p %p %p %s %p\n", iface, ppt, pptHotspot, debugstr_guid(riid),
-        ppv);
-    return E_NOTIMPL;
+    HRESULT ret = E_FAIL;
+    HIMAGELIST hNew;
+
+    if (!ppv)
+        return E_FAIL;
+
+    hNew = ImageList_GetDragImage(ppt, pptHotspot);
+
+    /* Get the interface for the new image list */
+    if (hNew)
+        ret = HIMAGELIST_QueryInterface(hNew, riid, ppv);
+
+    return ret;
 }
 
 static HRESULT WINAPI ImageListImpl_GetItemFlags(IImageList *iface, int i,
@@ -3176,8 +3305,22 @@ static HRESULT WINAPI ImageListImpl_GetItemFlags(IImageList *iface, int i,
 static HRESULT WINAPI ImageListImpl_GetOverlayImage(IImageList *iface, int iOverlay,
     int *piIndex)
 {
-    FIXME("STUB: %p %d %p\n", iface, iOverlay, piIndex);
-    return E_NOTIMPL;
+    HIMAGELIST This = (HIMAGELIST) iface;
+    int i;
+
+    if ((iOverlay < 0) || (iOverlay > This->cCurImage))
+        return E_FAIL;
+
+    for (i = 0; i < MAX_OVERLAYIMAGE; i++)
+    {
+        if (This->nOvlIdx[i] == iOverlay)
+        {
+            *piIndex = i + 1;
+            return S_OK;
+        }
+    }
+
+    return E_FAIL;
 }
 
 
@@ -3215,6 +3358,11 @@ static const IImageListVtbl ImageListImpl_Vtbl = {
     ImageListImpl_GetItemFlags,
     ImageListImpl_GetOverlayImage
 };
+
+static inline BOOL is_valid(HIMAGELIST himl)
+{
+    return himl && himl->lpVtbl == &ImageListImpl_Vtbl;
+}
 
 /*************************************************************************
  * HIMAGELIST_QueryInterface [COMCTL32.@]

@@ -52,7 +52,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(nls);
  *
  * Our cache takes the form of a singly linked list, whose node is below:
  */
-#define NLS_NUM_CACHED_STRINGS 45
+#define NLS_NUM_CACHED_STRINGS 57
 
 typedef struct _NLS_FORMAT_NODE
 {
@@ -72,14 +72,15 @@ typedef struct _NLS_FORMAT_NODE
 #define GetLongDate(fmt)  fmt->lppszStrings[1]
 #define GetShortDate(fmt) fmt->lppszStrings[2]
 #define GetTime(fmt)      fmt->lppszStrings[3]
-#define GetAM(fmt)        fmt->lppszStrings[42]
-#define GetPM(fmt)        fmt->lppszStrings[43]
-#define GetYearMonth(fmt) fmt->lppszStrings[44]
+#define GetAM(fmt)        fmt->lppszStrings[54]
+#define GetPM(fmt)        fmt->lppszStrings[55]
+#define GetYearMonth(fmt) fmt->lppszStrings[56]
 
-#define GetLongDay(fmt,day)    fmt->lppszStrings[4 + day]
-#define GetShortDay(fmt,day)   fmt->lppszStrings[11 + day]
-#define GetLongMonth(fmt,mth)  fmt->lppszStrings[18 + mth]
-#define GetShortMonth(fmt,mth) fmt->lppszStrings[30 + mth]
+#define GetLongDay(fmt,day)       fmt->lppszStrings[4 + day]
+#define GetShortDay(fmt,day)      fmt->lppszStrings[11 + day]
+#define GetLongMonth(fmt,mth)     fmt->lppszStrings[18 + mth]
+#define GetGenitiveMonth(fmt,mth) fmt->lppszStrings[30 + mth]
+#define GetShortMonth(fmt,mth)    fmt->lppszStrings[42 + mth]
 
 /* Write access to the cache is protected by this critical section */
 static CRITICAL_SECTION NLS_FormatsCS;
@@ -150,7 +151,7 @@ static WCHAR* NLS_GetLocaleString(LCID lcid, DWORD dwFlags)
 static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
 {
   /* GetLocaleInfo() identifiers for cached formatting strings */
-  static const USHORT NLS_LocaleIndices[] = {
+  static const LCTYPE NLS_LocaleIndices[] = {
     LOCALE_SNEGATIVESIGN,
     LOCALE_SLONGDATE,   LOCALE_SSHORTDATE,
     LOCALE_STIMEFORMAT,
@@ -163,6 +164,18 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
     LOCALE_SMONTHNAME4, LOCALE_SMONTHNAME5, LOCALE_SMONTHNAME6,
     LOCALE_SMONTHNAME7, LOCALE_SMONTHNAME8, LOCALE_SMONTHNAME9,
     LOCALE_SMONTHNAME10, LOCALE_SMONTHNAME11, LOCALE_SMONTHNAME12,
+    LOCALE_SMONTHNAME1  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME2  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME3  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME4  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME5  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME6  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME7  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME8  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME9  | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME10 | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME11 | LOCALE_RETURN_GENITIVE_NAMES,
+    LOCALE_SMONTHNAME12 | LOCALE_RETURN_GENITIVE_NAMES,
     LOCALE_SABBREVMONTHNAME1, LOCALE_SABBREVMONTHNAME2, LOCALE_SABBREVMONTHNAME3,
     LOCALE_SABBREVMONTHNAME4, LOCALE_SABBREVMONTHNAME5, LOCALE_SABBREVMONTHNAME6,
     LOCALE_SABBREVMONTHNAME7, LOCALE_SABBREVMONTHNAME8, LOCALE_SABBREVMONTHNAME9,
@@ -249,6 +262,16 @@ static const NLS_FORMAT_NODE *NLS_GetFormats(LCID lcid, DWORD dwFlags)
     {
       GET_LOCALE_STRING(new_node->lppszStrings[i], NLS_LocaleIndices[i]);
     }
+    /* Save some memory if month genitive name is the same or not present */
+    for (i = 0; i < 12; i++)
+    {
+      if (strcmpW(GetLongMonth(new_node, i), GetGenitiveMonth(new_node, i)) == 0)
+      {
+        HeapFree(GetProcessHeap(), 0, GetGenitiveMonth(new_node, i));
+        GetGenitiveMonth(new_node, i) = NULL;
+      }
+    }
+
     new_node->szShortAM[0] = GetAM(new_node)[0]; new_node->szShortAM[1] = '\0';
     new_node->szShortPM[0] = GetPM(new_node)[0]; new_node->szShortPM[1] = '\0';
 
@@ -352,14 +375,11 @@ static INT NLS_GetDateTimeFormatW(LCID lcid, DWORD dwFlags,
   INT cchWritten = 0;
   INT lastFormatPos = 0;
   BOOL bSkipping = FALSE; /* Skipping text around marker? */
+  BOOL d_dd_formatted = FALSE; /* previous formatted part was for d or dd */
 
   /* Verify our arguments */
   if ((cchOut && !lpStr) || !(node = NLS_GetFormats(lcid, dwFlags)))
-  {
-NLS_GetDateTimeFormatW_InvalidParameter:
-    SetLastError(ERROR_INVALID_PARAMETER);
-    return 0;
-  }
+    goto invalid_parameter;
 
   if (dwFlags & ~(DATE_DATEVARSONLY|TIME_TIMEVARSONLY))
   {
@@ -367,15 +387,13 @@ NLS_GetDateTimeFormatW_InvalidParameter:
         ((dwFlags & DATE_DATEVARSONLY && dwFlags & ~DATE_FORMAT_FLAGS) ||
          (dwFlags & TIME_TIMEVARSONLY && dwFlags & ~TIME_FORMAT_FLAGS)))
     {
-NLS_GetDateTimeFormatW_InvalidFlags:
-      SetLastError(ERROR_INVALID_FLAGS);
-      return 0;
+      goto invalid_flags;
     }
 
     if (dwFlags & DATE_DATEVARSONLY)
     {
       if ((dwFlags & (DATE_LTRREADING|DATE_RTLREADING)) == (DATE_LTRREADING|DATE_RTLREADING))
-        goto NLS_GetDateTimeFormatW_InvalidFlags;
+        goto invalid_flags;
       else if (dwFlags & (DATE_LTRREADING|DATE_RTLREADING))
         FIXME("Unsupported flags: DATE_LTRREADING/DATE_RTLREADING\n");
 
@@ -387,10 +405,10 @@ NLS_GetDateTimeFormatW_InvalidFlags:
       case DATE_LONGDATE:
       case DATE_YEARMONTH:
         if (lpFormat)
-          goto NLS_GetDateTimeFormatW_InvalidFlags;
+          goto invalid_flags;
         break;
       default:
-        goto NLS_GetDateTimeFormatW_InvalidFlags;
+        goto invalid_flags;
       }
     }
   }
@@ -429,7 +447,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
       st.wDay = lpTime->wDay;
 
       if (st.wDay > 31 || st.wMonth > 12 || !SystemTimeToFileTime(&st, &ftTmp))
-        goto NLS_GetDateTimeFormatW_InvalidParameter;
+        goto invalid_parameter;
 
       FileTimeToSystemTime(&ftTmp, &st);
       lpTime = &st;
@@ -439,7 +457,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
     {
       /* Verify the time */
       if (lpTime->wHour > 24 || lpTime->wMinute > 59 || lpTime->wSecond > 59)
-        goto NLS_GetDateTimeFormatW_InvalidParameter;
+        goto invalid_parameter;
     }
   }
 
@@ -464,7 +482,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
         if (!cchOut)
           cchWritten++;   /* Count size only */
         else if (cchWritten >= cchOut)
-          goto NLS_GetDateTimeFormatW_Overrun;
+          goto overrun;
         else if (!bSkipping)
         {
           lpStr[cchWritten] = *lpFormat;
@@ -476,7 +494,6 @@ NLS_GetDateTimeFormatW_InvalidFlags:
     else if ((dwFlags & DATE_DATEVARSONLY && IsDateFmtChar(*lpFormat)) ||
              (dwFlags & TIME_TIMEVARSONLY && IsTimeFmtChar(*lpFormat)))
     {
-      char  buffA[32];
       WCHAR buff[32], fmtChar;
       LPCWSTR szAdd = NULL;
       DWORD dwVal = 0;
@@ -492,6 +509,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
       }
       buff[0] = '\0';
 
+      if (fmtChar != 'M') d_dd_formatted = FALSE;
       switch(fmtChar)
       {
       case 'd':
@@ -503,12 +521,59 @@ NLS_GetDateTimeFormatW_InvalidFlags:
         {
           dwVal = lpTime->wDay;
           szAdd = buff;
+          d_dd_formatted = TRUE;
         }
         break;
 
       case 'M':
         if (count >= 4)
+        {
+          LPCWSTR genitive = GetGenitiveMonth(node, lpTime->wMonth - 1);
+          if (genitive)
+          {
+            if (d_dd_formatted)
+            {
+              szAdd = genitive;
+              break;
+            }
+            else
+            {
+              LPCWSTR format = lpFormat;
+              /* Look forward now, if next format pattern is for day genitive
+                 name should be used */
+              while (*format)
+              {
+                /* Skip parts within markers */
+                if (IsLiteralMarker(*format))
+                {
+                  ++format;
+                  while (*format)
+                  {
+                    if (IsLiteralMarker(*format))
+                    {
+                      ++format;
+                      if (!IsLiteralMarker(*format)) break;
+                    }
+                  }
+                }
+                if (*format != ' ') break;
+                ++format;
+              }
+              /* Only numeric day form matters */
+              if (*format && *format == 'd')
+              {
+                INT dcount = 1;
+                while (*++format == 'd') dcount++;
+                if (dcount < 3)
+                {
+                  szAdd = genitive;
+                  break;
+                }
+              }
+            }
+          }
           szAdd = GetLongMonth(node, lpTime->wMonth - 1);
+        }
         else if (count == 3)
           szAdd = GetShortMonth(node, lpTime->wMonth - 1);
         else
@@ -610,9 +675,9 @@ NLS_GetDateTimeFormatW_InvalidFlags:
 
       if (szAdd == buff && buff[0] == '\0')
       {
+        static const WCHAR fmtW[] = {'%','.','*','d',0};
         /* We have a numeric value to add */
-        sprintf(buffA, "%.*d", count, dwVal);
-        MultiByteToWideChar(CP_ACP, 0, buffA, -1, buff, sizeof(buff)/sizeof(WCHAR));
+        snprintfW(buff, sizeof(buff)/sizeof(WCHAR), fmtW, count, dwVal);
       }
 
       dwLen = szAdd ? strlenW(szAdd) : 0;
@@ -624,7 +689,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
         else
         {
           memcpy(lpStr + cchWritten, szAdd, (cchOut - cchWritten) * sizeof(WCHAR));
-          goto NLS_GetDateTimeFormatW_Overrun;
+          goto overrun;
         }
       }
       cchWritten += dwLen;
@@ -636,7 +701,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
       if (!cchOut)
         cchWritten++;   /* Count size only */
       else if (cchWritten >= cchOut)
-        goto NLS_GetDateTimeFormatW_Overrun;
+        goto overrun;
       else if (!bSkipping || *lpFormat == ' ')
       {
         lpStr[cchWritten] = *lpFormat;
@@ -650,7 +715,7 @@ NLS_GetDateTimeFormatW_InvalidFlags:
   if (cchOut)
   {
    if (cchWritten >= cchOut)
-     goto NLS_GetDateTimeFormatW_Overrun;
+     goto overrun;
    else
      lpStr[cchWritten] = '\0';
   }
@@ -659,9 +724,17 @@ NLS_GetDateTimeFormatW_InvalidFlags:
   TRACE("returning length=%d, ouput=%s\n", cchWritten, debugstr_w(lpStr));
   return cchWritten;
 
-NLS_GetDateTimeFormatW_Overrun:
+overrun:
   TRACE("returning 0, (ERROR_INSUFFICIENT_BUFFER)\n");
   SetLastError(ERROR_INSUFFICIENT_BUFFER);
+  return 0;
+
+invalid_parameter:
+  SetLastError(ERROR_INVALID_PARAMETER);
+  return 0;
+
+invalid_flags:
+  SetLastError(ERROR_INVALID_FLAGS);
   return 0;
 }
 

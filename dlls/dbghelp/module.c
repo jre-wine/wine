@@ -455,6 +455,15 @@ enum module_type module_get_type_by_name(const WCHAR* name)
     return DMT_PE;
 }
 
+/******************************************************************
+ *		                refresh_module_list
+ */
+static BOOL refresh_module_list(struct process* pcs)
+{
+    /* force transparent ELF and Mach-O loading / unloading */
+    return elf_synchronize_module_list(pcs) || macho_synchronize_module_list(pcs);
+}
+
 /***********************************************************************
  *			SymLoadModule (DBGHELP.@)
  */
@@ -525,6 +534,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
 
     if (Flags & SLMFLAG_VIRTUAL)
     {
+        if (!wImageName) return FALSE;
         module = module_new(pcs, wImageName, module_get_type_by_name(wImageName),
                             TRUE, (DWORD)BaseOfDll, SizeOfDll, 0, 0);
         if (!module) return FALSE;
@@ -536,9 +546,7 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
     if (Flags & ~(SLMFLAG_VIRTUAL))
         FIXME("Unsupported Flags %08x for %s\n", Flags, debugstr_w(wImageName));
 
-    /* force transparent ELF and Mach-O loading / unloading */
-    elf_synchronize_module_list(pcs);
-    macho_synchronize_module_list(pcs);
+    refresh_module_list(pcs);
 
     /* this is a Wine extension to the API just to redo the synchronisation */
     if (!wImageName && !hFile) return 0;
@@ -587,7 +595,8 @@ DWORD64 WINAPI  SymLoadModuleExW(HANDLE hProcess, HANDLE hFile, PCWSTR wImageNam
      */
     if (wModuleName)
         module_set_module(module, wModuleName);
-    lstrcpynW(module->module.ImageName, wImageName,
+    if (wImageName)
+        lstrcpynW(module->module.ImageName, wImageName,
               sizeof(module->module.ImageName) / sizeof(WCHAR));
 
     return module->module.BaseOfImage;
@@ -1051,4 +1060,18 @@ void module_reset_debug_info(struct module* module)
     hash_table_destroy(&module->ht_symbols);
     module->sources_used = module->sources_alloc = 0;
     module->sources = NULL;
+}
+
+/******************************************************************
+ *              SymRefreshModuleList (DBGHELP.@)
+ */
+BOOL WINAPI SymRefreshModuleList(HANDLE hProcess)
+{
+    struct process*     pcs;
+
+    TRACE("(%p)\n", hProcess);
+
+    if (!(pcs = process_find_by_handle(hProcess))) return FALSE;
+
+    return refresh_module_list(pcs);
 }

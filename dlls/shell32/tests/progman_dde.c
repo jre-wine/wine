@@ -26,6 +26,13 @@
  *           as documented
  *         Better AddItem Tests (Lots of parameters to test)
  *         Tests for Invalid Characters in Names / Invalid Parameters
+ * - Technically, calling as an administrator creates groups in the CSIDL_COMMON_PROGRAMS
+ *   directory.  Win 9x and non-administrator calls us CSIDL_PROGRAMS directory.
+ *   Original plans were to check that items/groups were created in appropriate
+ *   places.  As of this writing and in order to simplify the test code, it now
+ *   checks for existence in either place.  From web searches, it is not at all
+ *   obvious or trivial to detect if the call is coming from an administrator or
+ *   non-administrator. IsUserAnAdmin
  */
 
 #include <stdio.h>
@@ -39,9 +46,9 @@
 /* Timeout on DdeClientTransaction Call */
 #define MS_TIMEOUT_VAL 1000
 /* # of times to poll for window creation */
-#define PDDE_POLL_NUM 50
+#define PDDE_POLL_NUM 150
 /* time to sleep between polls */
-#define PDDE_POLL_TIME 200
+#define PDDE_POLL_TIME 300
 
 /* Call Info */
 #define DDE_TEST_MISC            0x00010000
@@ -60,6 +67,7 @@
 #define DDE_TEST_NUMMASK           0x0000ffff
 
 static BOOL (WINAPI *pSHGetSpecialFolderPathA)(HWND, LPSTR, int, BOOL);
+static BOOL (WINAPI *pReadCabinetState)(CABINETSTATE *, int);
 
 static void init_function_pointers(void)
 {
@@ -67,6 +75,87 @@ static void init_function_pointers(void)
 
     hmod = GetModuleHandleA("shell32.dll");
     pSHGetSpecialFolderPathA = (void*)GetProcAddress(hmod, "SHGetSpecialFolderPathA");
+    pReadCabinetState = (void*)GetProcAddress(hmod, "ReadCabinetState");
+    if (!pReadCabinetState)
+        pReadCabinetState = (void*)GetProcAddress(hmod, (LPSTR)651);
+}
+
+static char CommonPrograms[MAX_PATH];
+static char Programs[MAX_PATH];
+
+static char Group1Title[MAX_PATH]  = "Group1";
+static char Group2Title[MAX_PATH]  = "Group2";
+static char Group3Title[MAX_PATH]  = "Group3";
+static char Startup[MAX_PATH]      = "Startup";
+static char StartupTitle[MAX_PATH] = "Startup";
+
+static void init_strings(void)
+{
+    char startup[MAX_PATH];
+    CABINETSTATE cs;
+
+    if (pSHGetSpecialFolderPathA)
+    {
+        pSHGetSpecialFolderPathA(NULL, Programs, CSIDL_PROGRAMS, FALSE);
+        if (!pSHGetSpecialFolderPathA(NULL, CommonPrograms, CSIDL_COMMON_PROGRAMS, FALSE))
+        {
+            /* Win9x */
+            lstrcpyA(CommonPrograms, Programs);
+        }
+        if (GetProcAddress(GetModuleHandleA("shell32.dll"), "SHGetKnownFolderPath"))
+        {
+            /* Vista and higher use CSIDL_PROGRAMS for these tests.
+             * Wine doesn't have SHGetKnownFolderPath yet but should most likely follow
+             * this new ProgMan DDE behavior once implemented.
+             */
+            lstrcpyA(CommonPrograms, Programs);
+        }
+        pSHGetSpecialFolderPathA(NULL, startup, CSIDL_STARTUP, FALSE);
+        lstrcpyA(Startup, (strrchr(startup, '\\') + 1));
+    }
+    else
+    {
+        HKEY key;
+        DWORD size;
+        LONG res;
+
+        /* Older Win9x and NT4 */
+        RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", &key);
+        size = sizeof(Programs);
+        RegQueryValueExA(key, "Programs", NULL, NULL, (LPBYTE)&Programs, &size);
+        size = sizeof(startup);
+        RegQueryValueExA(key, "Startup", NULL, NULL, (LPBYTE)&startup, &size);
+        lstrcpyA(Startup, (strrchr(startup, '\\') + 1));
+        RegCloseKey(key);
+
+        RegOpenKeyA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", &key);
+        size = sizeof(CommonPrograms);
+        res = RegQueryValueExA(key, "Common Programs", NULL, NULL, (LPBYTE)&CommonPrograms, &size);
+        RegCloseKey(key);
+        if (res != ERROR_SUCCESS)
+        {
+            /* Win9x */
+            lstrcpyA(CommonPrograms, Programs);
+        }
+    }
+
+    memset(&cs, 0, sizeof(cs));
+    pReadCabinetState(&cs, sizeof(cs));
+    if (cs.fFullPathTitle == -1)
+    {
+        lstrcpyA(Group1Title, CommonPrograms);
+        lstrcatA(Group1Title, "\\Group1");
+        lstrcpyA(Group2Title, CommonPrograms);
+        lstrcatA(Group2Title, "\\Group2");
+        lstrcpyA(Group3Title, CommonPrograms);
+        lstrcatA(Group3Title, "\\Group3");
+
+        lstrcpyA(StartupTitle, startup);
+    }
+    else
+    {
+        lstrcpyA(StartupTitle, Startup);
+    }
 }
 
 static HDDEDATA CALLBACK DdeCallback(UINT type, UINT format, HCONV hConv, HSZ hsz1, HSZ hsz2,
@@ -121,7 +210,6 @@ static const char * GetStringFromTestParams(int testParams)
 #define DMLERR_TO_STR(x) case x: return#x;
 static const char * GetStringFromError(UINT err)
 {
-    const char * retstr;
     switch (err)
     {
     DMLERR_TO_STR(DMLERR_NO_ERROR);
@@ -144,11 +232,8 @@ static const char * GetStringFromError(UINT err)
     DMLERR_TO_STR(DMLERR_UNADVACKTIMEOUT);
     DMLERR_TO_STR(DMLERR_UNFOUND_QUEUE_ID);
     default:
-        retstr = "Unknown DML Error";
-        break;
+        return "Unknown DML Error";
     }
-
-    return retstr;
 }
 
 /* Helper Function to Transfer DdeGetLastError into a String */
@@ -196,6 +281,7 @@ static void DdeExecuteCommand(DWORD instance, HCONV hConv, const char *strCmd, H
                *hData, GetStringFromTestParams(testParams));
         }
     }
+    DdeFreeDataHandle(command);
 }
 
 /*
@@ -238,70 +324,47 @@ static void CheckWindowCreated(const char *winName, int closeWindow, int testPar
 static void CheckFileExistsInProgramGroups(const char *nameToCheck, int shouldExist, int isGroup,
                                            const char *groupName, int testParams)
 {
-    char *path;
-    int err;
+    char path[MAX_PATH];
     DWORD attributes;
     int len;
 
-    if (!pSHGetSpecialFolderPathA)
-        return;
+    if (testParams & DDE_TEST_COMMON)
+        lstrcpyA(path, CommonPrograms);
+    else
+        lstrcpyA(path, Programs);
 
-    path = HeapAlloc(GetProcessHeap(), 0, MAX_PATH);
-    if (path != NULL)
+    len = strlen(path) + strlen(nameToCheck)+1;
+    if (groupName != NULL)
     {
-        int specialFolder;
-
-        err = FALSE;
-        /* Win 9x doesn't support common */
-        if (testParams & DDE_TEST_COMMON)
-        {
-            specialFolder = CSIDL_COMMON_PROGRAMS;
-            err = pSHGetSpecialFolderPathA(NULL, path, specialFolder, FALSE);
-            /* Win 9x fails, use CSIDL_PROGRAMS (err == FALSE) */
-        }
-        if (err == FALSE)
-        {
-            specialFolder = CSIDL_PROGRAMS;
-            err = pSHGetSpecialFolderPathA(NULL, path, specialFolder, FALSE);
-        }
-        len = strlen(path) + strlen(nameToCheck)+1;
+        len += strlen(groupName)+1;
+    }
+    ok (len <= MAX_PATH, "Path Too Long.%s\n", GetStringFromTestParams(testParams));
+    if (len <= MAX_PATH)
+    {
         if (groupName != NULL)
         {
-            len += strlen(groupName)+1;
-        }
-        ok (len <= MAX_PATH, "Path Too Long.%s\n", GetStringFromTestParams(testParams));
-        if (len <= MAX_PATH)
-        {
-            if (groupName != NULL)
-            {
-                strcat(path, "\\");
-                strcat(path, groupName);
-            }
             strcat(path, "\\");
-            strcat(path, nameToCheck);
-            attributes = GetFileAttributes(path);
-            if (!shouldExist)
+            strcat(path, groupName);
+        }
+        strcat(path, "\\");
+        strcat(path, nameToCheck);
+        attributes = GetFileAttributes(path);
+        if (!shouldExist)
+        {
+            ok (attributes == INVALID_FILE_ATTRIBUTES , "File exists and shouldn't %s.%s\n",
+                path, GetStringFromTestParams(testParams));
+        } else {
+            if (attributes == INVALID_FILE_ATTRIBUTES)
             {
-                ok (attributes == INVALID_FILE_ATTRIBUTES , "File exists and shouldn't %s.%s\n",
-                    path, GetStringFromTestParams(testParams));
+                ok (FALSE, "Created File %s doesn't exist.%s\n", path, GetStringFromTestParams(testParams));
+            } else if (isGroup) {
+                ok (attributes & FILE_ATTRIBUTE_DIRECTORY, "%s is not a folder (attr=%x).%s\n",
+                    path, attributes, GetStringFromTestParams(testParams));
             } else {
-                if (attributes == INVALID_FILE_ATTRIBUTES)
-                {
-                    ok (FALSE, "Created File %s doesn't exist.%s\n", path, GetStringFromTestParams(testParams));
-                } else if (isGroup) {
-                    ok (attributes & FILE_ATTRIBUTE_DIRECTORY, "%s is not a folder (attr=%x).%s\n",
-                        path, attributes, GetStringFromTestParams(testParams));
-                } else {
-                    ok (attributes & FILE_ATTRIBUTE_ARCHIVE, "Created File %s has wrong attributes (%x).%s\n",
-                        path, attributes, GetStringFromTestParams(testParams));
-                }
+                ok (attributes & FILE_ATTRIBUTE_ARCHIVE, "Created File %s has wrong attributes (%x).%s\n",
+                    path, attributes, GetStringFromTestParams(testParams));
             }
         }
-        HeapFree(GetProcessHeap(), 0, path);
-    }
-    else
-    {
-        ok (FALSE, "Could not Allocate Path Buffer\n");
     }
 }
 
@@ -312,7 +375,7 @@ static void CheckFileExistsInProgramGroups(const char *nameToCheck, int shouldEx
  *        2. window is open
  */
 static void CreateGroupTest(DWORD instance, HCONV hConv, const char *command, UINT expected_result,
-                            const char *groupName, int testParams)
+                            const char *groupName, const char *windowTitle, int testParams)
 {
     HDDEDATA hData;
     UINT error;
@@ -333,7 +396,7 @@ static void CreateGroupTest(DWORD instance, HCONV hConv, const char *command, UI
         /* Check if Group Now Exists */
         CheckFileExistsInProgramGroups(groupName, TRUE, TRUE, NULL, testParams);
         /* Check if Window is Open (polling) */
-        CheckWindowCreated(groupName, TRUE, testParams);
+        CheckWindowCreated(windowTitle, TRUE, testParams);
     }
 }
 
@@ -343,7 +406,7 @@ static void CreateGroupTest(DWORD instance, HCONV hConv, const char *command, UI
  *        1. window is open
  */
 static void ShowGroupTest(DWORD instance, HCONV hConv, const char *command, UINT expected_result,
-                          const char *groupName, int closeAfterShowing, int testParams)
+                          const char *groupName, const char *windowTitle, int closeAfterShowing, int testParams)
 {
     HDDEDATA hData;
     UINT error;
@@ -368,7 +431,7 @@ static void ShowGroupTest(DWORD instance, HCONV hConv, const char *command, UINT
     if (error == DMLERR_NO_ERROR)
     {
         /* Check if Window is Open (polling) */
-        CheckWindowCreated(groupName, closeAfterShowing, testParams);
+        CheckWindowCreated(windowTitle, closeAfterShowing, testParams);
     }
 }
 
@@ -457,7 +520,7 @@ static void DeleteItemTest(DWORD instance, HCONV hConv, const char *command, UIN
  *   AddItems) so this covers minimum expected functionality.
  */
 static void CompoundCommandTest(DWORD instance, HCONV hConv, const char *command, UINT expected_result,
-                                const char *groupName, const char *fileName1,
+                                const char *groupName, const char *windowTitle, const char *fileName1,
                                 const char *fileName2, int testParams)
 {
     HDDEDATA hData;
@@ -475,10 +538,19 @@ static void CompoundCommandTest(DWORD instance, HCONV hConv, const char *command
     {
         /* Check that File exists */
         CheckFileExistsInProgramGroups(groupName, TRUE, TRUE, NULL, testParams);
-        CheckWindowCreated(groupName, FALSE, testParams);
+        CheckWindowCreated(windowTitle, FALSE, testParams);
         CheckFileExistsInProgramGroups(fileName1, TRUE, FALSE, groupName, testParams);
         CheckFileExistsInProgramGroups(fileName2, TRUE, FALSE, groupName, testParams);
     }
+}
+
+static void CreateAddItemText(char *itemtext, const char *cmdline, const char *name)
+{
+    lstrcpyA(itemtext, "[AddItem(");
+    lstrcatA(itemtext, cmdline);
+    lstrcatA(itemtext, ",");
+    lstrcatA(itemtext, name);
+    lstrcatA(itemtext, ")]");
 }
 
 /* 1st set of tests */
@@ -487,6 +559,10 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
     HDDEDATA hData;
     UINT error;
     int testnum;
+    char temppath[MAX_PATH];
+    char f1g1[MAX_PATH], f2g1[MAX_PATH], f3g1[MAX_PATH], f1g3[MAX_PATH], f2g3[MAX_PATH];
+    char itemtext[MAX_PATH + 20];
+    char comptext[2 * (MAX_PATH + 20) + 21];
 
     testnum = 1;
     /* Invalid Command */
@@ -494,31 +570,54 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
     ok (error == DMLERR_NOTPROCESSED, "InvalidCommand(), expected error %s, received %s.\n",
         GetStringFromError(DMLERR_NOTPROCESSED), GetStringFromError(error));
 
+    /* On Vista+ the files have to exist when adding a link */
+    GetTempPathA(MAX_PATH, temppath);
+    GetTempFileNameA(temppath, "dde", 0, f1g1);
+    GetTempFileNameA(temppath, "dde", 0, f2g1);
+    GetTempFileNameA(temppath, "dde", 0, f3g1);
+    GetTempFileNameA(temppath, "dde", 0, f1g3);
+    GetTempFileNameA(temppath, "dde", 0, f2g3);
+
     /* CreateGroup Tests (including AddItem, DeleteItem) */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
-    AddItemTest(instance, hConv, "[AddItem(c:\\f1g1,f1g1Name)]", DMLERR_NO_ERROR, "f1g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
-    AddItemTest(instance, hConv, "[AddItem(c:\\f2g1,f2g1Name)]", DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateAddItemText(itemtext, f1g1, "f1g1Name");
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f1g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
+    CreateAddItemText(itemtext, f2g1, "f2g1Name");
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
     DeleteItemTest(instance, hConv, "[DeleteItem(f2g1Name)]", DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_DELETEITEM|testnum++);
-    AddItemTest(instance, hConv, "[AddItem(c:\\f3g1,f3g1Name)]", DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateAddItemText(itemtext, f3g1, "f3g1Name");
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
     /* Create Group that already exists - same instance */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
 
     /* ShowGroup Tests */
-    ShowGroupTest(instance, hConv, "[ShowGroup(Group1)]", DMLERR_NOTPROCESSED, "Startup", TRUE, DDE_TEST_SHOWGROUP|testnum++);
+    ShowGroupTest(instance, hConv, "[ShowGroup(Group1)]", DMLERR_NOTPROCESSED, Startup, StartupTitle, TRUE, DDE_TEST_SHOWGROUP|testnum++);
     DeleteItemTest(instance, hConv, "[DeleteItem(f3g1Name)]", DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_DELETEITEM|testnum++);
-    ShowGroupTest(instance, hConv, "[ShowGroup(Startup,0)]", DMLERR_NO_ERROR, "Startup", TRUE, DDE_TEST_SHOWGROUP|testnum++);
-    ShowGroupTest(instance, hConv, "[ShowGroup(Group1,0)]", DMLERR_NO_ERROR, "Group1", FALSE, DDE_TEST_SHOWGROUP|testnum++);
+    ShowGroupTest(instance, hConv, "[ShowGroup(Startup,0)]", DMLERR_NO_ERROR, Startup, StartupTitle, TRUE, DDE_TEST_SHOWGROUP|testnum++);
+    ShowGroupTest(instance, hConv, "[ShowGroup(Group1,0)]", DMLERR_NO_ERROR, "Group1", Group1Title, FALSE, DDE_TEST_SHOWGROUP|testnum++);
 
     /* DeleteGroup Test - Note that Window is Open for this test */
     DeleteGroupTest(instance, hConv, "[DeleteGroup(Group1)]", DMLERR_NO_ERROR, "Group1", DDE_TEST_DELETEGROUP|testnum++);
 
     /* Compound Execute String Command */
-    CompoundCommandTest(instance, hConv, "[CreateGroup(Group3)][AddItem(c:\\f1g3,f1g3Name)][AddItem(c:\\f2g3,f2g3Name)]", DMLERR_NO_ERROR, "Group3", "f1g3Name.lnk", "f2g3Name.lnk", DDE_TEST_COMMON|DDE_TEST_COMPOUND|testnum++);
+    lstrcpyA(comptext, "[CreateGroup(Group3)]");
+    CreateAddItemText(itemtext, f1g3, "f1g3Name");
+    lstrcatA(comptext, itemtext);
+    CreateAddItemText(itemtext, f2g3, "f2g3Name");
+    lstrcatA(comptext, itemtext);
+    CompoundCommandTest(instance, hConv, comptext, DMLERR_NO_ERROR, "Group3", Group3Title, "f1g3Name.lnk", "f2g3Name.lnk", DDE_TEST_COMMON|DDE_TEST_COMPOUND|testnum++);
+
     DeleteGroupTest(instance, hConv, "[DeleteGroup(Group3)]", DMLERR_NO_ERROR, "Group3", DDE_TEST_DELETEGROUP|testnum++);
 
     /* Full Parameters of Add Item */
     /* AddItem(CmdLine[,Name[,IconPath[,IconIndex[,xPos,yPos[,DefDir[,HotKey[,fMinimize[fSeparateSpace]]]]]]]) */
+
+    DeleteFileA(f1g1);
+    DeleteFileA(f2g1);
+    DeleteFileA(f3g1);
+    DeleteFileA(f1g3);
+    DeleteFileA(f2g3);
 
     return testnum;
 }
@@ -527,7 +626,7 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
 static void DdeTestProgman2(DWORD instance, HCONV hConv, int testnum)
 {
     /* Create Group that already exists on a separate connection */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
     DeleteGroupTest(instance, hConv, "[DeleteGroup(Group2)]", DMLERR_NO_ERROR, "Group2", DDE_TEST_COMMON|DDE_TEST_DELETEGROUP|testnum++);
 }
 
@@ -540,10 +639,7 @@ START_TEST(progman_dde)
     int testnum;
 
     init_function_pointers();
-
-    /* Only report this once */
-    if (!pSHGetSpecialFolderPathA)
-        win_skip("SHGetSpecialFolderPathA is not available\n");
+    init_strings();
 
     /* Initialize DDE Instance */
     err = DdeInitialize(&instance, DdeCallback, APPCMD_CLIENTONLY, 0);
@@ -553,8 +649,13 @@ START_TEST(progman_dde)
     hszProgman = DdeCreateStringHandle(instance, "PROGMAN", CP_WINANSI);
     ok (hszProgman != NULL, "DdeCreateStringHandle Error %s\n", GetDdeLastErrorStr(instance));
     hConv = DdeConnect(instance, hszProgman, hszProgman, NULL);
-    ok (hConv != NULL, "DdeConnect Error %s\n", GetDdeLastErrorStr(instance));
     ok (DdeFreeStringHandle(instance, hszProgman), "DdeFreeStringHandle failure\n");
+    /* Seeing failures on early versions of Windows Connecting to progman, exit if connection fails */
+    if (hConv == NULL)
+    {
+        ok (DdeUninitialize(instance), "DdeUninitialize failed\n");
+        return;
+    }
 
     /* Run Tests */
     testnum = DdeTestProgman(instance, hConv);

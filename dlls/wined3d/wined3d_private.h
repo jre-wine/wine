@@ -1335,6 +1335,7 @@ struct wined3d_adapter
     BOOL                    brokenStencil; /* Set on cards which only offer mixed depth+stencil */
     unsigned int            TextureRam; /* Amount of texture memory both video ram + AGP/TurboCache/HyperMemory/.. */
     unsigned int            UsedTextureRam;
+    LUID luid;
 };
 
 BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor) DECLSPEC_HIDDEN;
@@ -1555,9 +1556,6 @@ struct IWineD3DDeviceImpl
     /* Textures for when no other textures are mapped */
     UINT                          dummyTextureName[MAX_TEXTURES];
 
-    /* Device state management */
-    HRESULT                 state;
-
     /* DirectDraw stuff */
     DWORD ddraw_width, ddraw_height;
     WINED3DFORMAT ddraw_format;
@@ -1586,8 +1584,9 @@ struct IWineD3DDeviceImpl
     struct WineD3DRectPatch *currentPatch;
 };
 
-extern const IWineD3DDeviceVtbl IWineD3DDevice_Vtbl DECLSPEC_HIDDEN;
-
+HRESULT device_init(IWineD3DDeviceImpl *device, IWineD3DImpl *wined3d,
+        UINT adapter_idx, WINED3DDEVTYPE device_type, HWND focus_window, DWORD flags,
+        IUnknown *parent, IWineD3DDeviceParent *device_parent) DECLSPEC_HIDDEN;
 void device_resource_add(IWineD3DDeviceImpl *This, IWineD3DResource *resource) DECLSPEC_HIDDEN;
 void device_resource_released(IWineD3DDeviceImpl *This, IWineD3DResource *resource) DECLSPEC_HIDDEN;
 void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
@@ -2195,7 +2194,6 @@ struct IWineD3DStateBlockImpl
     LONG                      ref;     /* Note: Ref counting not required */
 
     /* IWineD3DStateBlock information */
-    IUnknown                 *parent;
     IWineD3DDeviceImpl       *wineD3DDevice;
     WINED3DSTATEBLOCKTYPE     blockType;
 
@@ -2294,8 +2292,8 @@ struct IWineD3DStateBlockImpl
     unsigned int              num_contained_sampler_states;
 };
 
-HRESULT stateblock_init(IWineD3DStateBlockImpl *stateblock, IWineD3DDeviceImpl *device,
-        WINED3DSTATEBLOCKTYPE type, IUnknown *parent) DECLSPEC_HIDDEN;
+HRESULT stateblock_init(IWineD3DStateBlockImpl *stateblock,
+        IWineD3DDeviceImpl *device, WINED3DSTATEBLOCKTYPE type) DECLSPEC_HIDDEN;
 void stateblock_init_contained_states(IWineD3DStateBlockImpl *object) DECLSPEC_HIDDEN;
 
 /* Direct3D terminology with little modifications. We do not have an issued state
@@ -2524,6 +2522,14 @@ BOOL getDepthStencilBits(const struct GlPixelFormatDesc *format_desc,
 void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED3DMATRIX *src2) DECLSPEC_HIDDEN;
 UINT wined3d_log2i(UINT32 x) DECLSPEC_HIDDEN;
 unsigned int count_bits(unsigned int mask) DECLSPEC_HIDDEN;
+
+const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter,
+        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
+const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter,
+        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
+const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter,
+        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
+void select_shader_mode(const struct wined3d_gl_info *gl_info, int *ps_selected, int *vs_selected) DECLSPEC_HIDDEN;
 
 typedef struct local_constant {
     struct list entry;

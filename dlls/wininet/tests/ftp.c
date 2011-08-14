@@ -42,6 +42,7 @@
 
 
 static BOOL (WINAPI *pFtpCommandA)(HINTERNET,BOOL,DWORD,LPCSTR,DWORD_PTR,HINTERNET*);
+static INTERNET_STATUS_CALLBACK (WINAPI *pInternetSetStatusCallbackA)(HINTERNET,INTERNET_STATUS_CALLBACK);
 
 
 static void test_getfile_no_open(void)
@@ -360,6 +361,20 @@ static void test_getfile(HINTERNET hFtp, HINTERNET hConnect)
         "Expected ERROR_INTERNET_INCORRECT_HANDLE_TYPE, got %d\n", GetLastError());
 }
 
+static void trace_extended_error(DWORD error)
+{
+    DWORD code, buflen = 0;
+
+    if (error != ERROR_INTERNET_EXTENDED_ERROR) return;
+    if (!InternetGetLastResponseInfoA(&code, NULL, &buflen) && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+    {
+        char *text = HeapAlloc(GetProcessHeap(), 0, ++buflen);
+        InternetGetLastResponseInfoA(&code, text, &buflen);
+        trace("%u %s\n", code, text);
+        HeapFree(GetProcessHeap(), 0, text);
+    }
+}
+
 static void test_openfile(HINTERNET hFtp, HINTERNET hConnect)
 {
     HINTERNET hOpenFile;
@@ -414,21 +429,26 @@ static void test_openfile(HINTERNET hFtp, HINTERNET hConnect)
     if (hOpenFile)
     {
         BOOL bRet;
+        DWORD error;
         HINTERNET hOpenFile2;
         HANDLE    hFile;
 
         /* We have a handle so all ftp calls should fail (TODO: Put all ftp-calls in here) */
         SetLastError(0xdeadbeef);
         bRet = FtpCreateDirectoryA(hFtp, "new_directory_deadbeef");
+        error = GetLastError();
         ok ( bRet == FALSE, "Expected FtpCreateDirectoryA to fail\n");
-        ok ( GetLastError() == ERROR_FTP_TRANSFER_IN_PROGRESS,
-            "Expected ERROR_FTP_TRANSFER_IN_PROGRESS, got %d\n", GetLastError());
+        ok ( error == ERROR_FTP_TRANSFER_IN_PROGRESS,
+            "Expected ERROR_FTP_TRANSFER_IN_PROGRESS, got %d\n", error);
+        trace_extended_error(error);
 
         SetLastError(0xdeadbeef);
         bRet = FtpDeleteFileA(hFtp, "non_existent_file_deadbeef");
+        error = GetLastError();
         ok ( bRet == FALSE, "Expected FtpDeleteFileA to fail\n");
-        ok ( GetLastError() == ERROR_FTP_TRANSFER_IN_PROGRESS,
-            "Expected ERROR_FTP_TRANSFER_IN_PROGRESS, got %d\n", GetLastError());
+        ok ( error == ERROR_FTP_TRANSFER_IN_PROGRESS,
+            "Expected ERROR_FTP_TRANSFER_IN_PROGRESS, got %d\n", error);
+        trace_extended_error(error);
 
         SetLastError(0xdeadbeef);
         bRet = FtpGetFileA(hFtp, "welcome.msg", "should_be_non_existing_deadbeef", FALSE, FILE_ATTRIBUTE_NORMAL, FTP_TRANSFER_TYPE_UNKNOWN, 0);
@@ -889,6 +909,51 @@ static void test_get_current_dir(HINTERNET hFtp, HINTERNET hConnect)
     ok ( GetLastError() == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got: %d\n", GetLastError());
 }
 
+static void WINAPI status_callback(HINTERNET handle, DWORD_PTR ctx, DWORD status, LPVOID info, DWORD info_len)
+{
+    switch (status)
+    {
+    case INTERNET_STATUS_RESOLVING_NAME:
+    case INTERNET_STATUS_NAME_RESOLVED:
+    case INTERNET_STATUS_CONNECTING_TO_SERVER:
+    case INTERNET_STATUS_CONNECTED_TO_SERVER:
+        trace("%p %lx %u %s %u\n", handle, ctx, status, (char *)info, info_len);
+        break;
+    default:
+        break;
+    }
+}
+
+static void test_status_callbacks(HINTERNET hInternet)
+{
+    INTERNET_STATUS_CALLBACK cb;
+    HINTERNET hFtp;
+    BOOL ret;
+
+    if (!pInternetSetStatusCallbackA)
+    {
+        win_skip("InternetSetStatusCallbackA() is not available, skipping test\n");
+        return;
+    }
+
+    cb = pInternetSetStatusCallbackA(hInternet, status_callback);
+    ok(cb == NULL, "expected NULL got %p\n", cb);
+
+    hFtp = InternetConnect(hInternet, "ftp.winehq.org", INTERNET_DEFAULT_FTP_PORT, "anonymous", NULL,
+                           INTERNET_SERVICE_FTP, INTERNET_FLAG_PASSIVE, 1);
+    if (!hFtp)
+    {
+        skip("No ftp connection could be made to ftp.winehq.org %u\n", GetLastError());
+        return;
+    }
+
+    ret = InternetCloseHandle(hFtp);
+    ok(ret, "InternetCloseHandle failed %u\n", GetLastError());
+
+    cb = pInternetSetStatusCallbackA(hInternet, NULL);
+    ok(cb == status_callback, "expected check_status got %p\n", cb);
+}
+
 START_TEST(ftp)
 {
     HMODULE hWininet;
@@ -896,6 +961,7 @@ START_TEST(ftp)
 
     hWininet = GetModuleHandleA("wininet.dll");
     pFtpCommandA = (void*)GetProcAddress(hWininet, "FtpCommandA");
+    pInternetSetStatusCallbackA = (void*)GetProcAddress(hWininet, "InternetSetStatusCallbackA");
 
     SetLastError(0xdeadbeef);
     hInternet = InternetOpen("winetest", 0, NULL, NULL, 0);
@@ -937,6 +1003,7 @@ START_TEST(ftp)
     test_command(hFtp, hHttp);
     test_find_first_file(hFtp, hHttp);
     test_get_current_dir(hFtp, hHttp);
+    test_status_callbacks(hInternet);
 
     InternetCloseHandle(hHttp);
     InternetCloseHandle(hFtp);

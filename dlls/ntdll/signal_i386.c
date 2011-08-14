@@ -847,7 +847,7 @@ static void wine_sigacthandler( int signal, siginfo_t *siginfo, void *sigcontext
 
     __asm__ __volatile__("mov %ss,%ax; mov %ax,%ds; mov %ax,%es");
 
-    thread_data = (struct ntdll_thread_data *)get_current_teb()->SystemReserved2;
+    thread_data = (struct ntdll_thread_data *)get_current_teb()->SpareBytes1;
     wine_set_fs( thread_data->fs );
     wine_set_gs( thread_data->gs );
 
@@ -898,7 +898,7 @@ static inline void *init_handler( const SIGCONTEXT *sigcontext, WORD *fs, WORD *
 
 #ifndef __sun  /* see above for Solaris handling */
     {
-        struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
+        struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
         wine_set_fs( thread_data->fs );
         wine_set_gs( thread_data->gs );
     }
@@ -1042,7 +1042,7 @@ static void fpux_to_fpu( FLOATING_SAVE_AREA *fpu, const XMM_SAVE_AREA32 *fpux )
  */
 static inline void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext, WORD fs, WORD gs )
 {
-    struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
+    struct ntdll_thread_data * const regs = ntdll_get_thread_data();
     FLOATING_SAVE_AREA *fpu = FPU_sig(sigcontext);
     XMM_SAVE_AREA32 *fpux = FPUX_sig(sigcontext);
 
@@ -1094,7 +1094,7 @@ static inline void save_context( CONTEXT *context, const SIGCONTEXT *sigcontext,
  */
 static inline void restore_context( const CONTEXT *context, SIGCONTEXT *sigcontext )
 {
-    struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
+    struct ntdll_thread_data * const regs = ntdll_get_thread_data();
     FLOATING_SAVE_AREA *fpu = FPU_sig(sigcontext);
     XMM_SAVE_AREA32 *fpux = FPUX_sig(sigcontext);
 
@@ -1161,13 +1161,12 @@ void set_cpu_context( const CONTEXT *context )
 
     if (flags & CONTEXT_DEBUG_REGISTERS)
     {
-        struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
-        regs->dr0 = context->Dr0;
-        regs->dr1 = context->Dr1;
-        regs->dr2 = context->Dr2;
-        regs->dr3 = context->Dr3;
-        regs->dr6 = context->Dr6;
-        regs->dr7 = context->Dr7;
+        ntdll_get_thread_data()->dr0 = context->Dr0;
+        ntdll_get_thread_data()->dr1 = context->Dr1;
+        ntdll_get_thread_data()->dr2 = context->Dr2;
+        ntdll_get_thread_data()->dr3 = context->Dr3;
+        ntdll_get_thread_data()->dr6 = context->Dr6;
+        ntdll_get_thread_data()->dr7 = context->Dr7;
     }
     if (flags & CONTEXT_FULL)
     {
@@ -1694,13 +1693,11 @@ static void WINAPI raise_trap_exception( EXCEPTION_RECORD *rec, CONTEXT *context
 
     if (rec->ExceptionCode == EXCEPTION_SINGLE_STEP)
     {
-        struct ntdll_thread_regs * const regs = ntdll_get_thread_regs();
-
         /* when single stepping can't tell whether this is a hw bp or a
          * single step interrupt. try to avoid as much overhead as possible
          * and only do a server call if there is any hw bp enabled. */
 
-        if( !(context->EFlags & 0x100) || (regs->dr7 & 0xff) )
+        if( !(context->EFlags & 0x100) || (ntdll_get_thread_data()->dr7 & 0xff) )
         {
             /* (possible) hardware breakpoint, fetch the debug registers */
             context->ContextFlags = CONTEXT_DEBUG_REGISTERS;
@@ -1995,26 +1992,6 @@ static void usr1_handler( int signal, siginfo_t *siginfo, void *sigcontext )
 }
 
 
-/**********************************************************************
- *		get_signal_stack_total_size
- *
- * Retrieve the size to allocate for the signal stack, including the TEB at the bottom.
- * Must be a power of two.
- */
-size_t get_signal_stack_total_size(void)
-{
-    if (!signal_stack_size)
-    {
-        size_t size = 8192, min_size = teb_size + max( MINSIGSTKSZ, 8192 );
-        /* find the first power of two not smaller than min_size */
-        while (size < min_size) size *= 2;
-        signal_stack_mask = size - 1;
-        signal_stack_size = size - teb_size;
-    }
-    return signal_stack_size + teb_size;
-}
-
-
 /***********************************************************************
  *           __wine_set_signal_handler   (NTDLL.@)
  */
@@ -2028,11 +2005,83 @@ int CDECL __wine_set_signal_handler(unsigned int sig, wine_signal_handler wsh)
 
 
 /**********************************************************************
+ *		signal_alloc_thread
+ */
+NTSTATUS signal_alloc_thread( TEB **teb )
+{
+    static size_t sigstack_zero_bits;
+    struct ntdll_thread_data *thread_data;
+    struct ntdll_thread_data *parent_data = NULL;
+    SIZE_T size;
+    void *addr = NULL;
+    NTSTATUS status;
+
+    if (!sigstack_zero_bits)
+    {
+        size_t min_size = teb_size + max( MINSIGSTKSZ, 8192 );
+        /* find the first power of two not smaller than min_size */
+        sigstack_zero_bits = 12;
+        while ((1u << sigstack_zero_bits) < min_size) sigstack_zero_bits++;
+        signal_stack_mask = (1 << sigstack_zero_bits) - 1;
+        signal_stack_size = (1 << sigstack_zero_bits) - teb_size;
+    }
+    else parent_data = ntdll_get_thread_data();
+
+    size = signal_stack_mask + 1;
+    if (!(status = NtAllocateVirtualMemory( NtCurrentProcess(), &addr, sigstack_zero_bits,
+                                            &size, MEM_COMMIT | MEM_TOP_DOWN, PAGE_READWRITE )))
+    {
+        *teb = addr;
+        (*teb)->Tib.Self = &(*teb)->Tib;
+        (*teb)->Tib.ExceptionList = (void *)~0UL;
+        thread_data = (struct ntdll_thread_data *)(*teb)->SpareBytes1;
+        if (!(thread_data->fs = wine_ldt_alloc_fs()))
+        {
+            size = 0;
+            NtFreeVirtualMemory( NtCurrentProcess(), &addr, &size, MEM_RELEASE );
+            status = STATUS_TOO_MANY_THREADS;
+        }
+        if (parent_data)
+        {
+            /* inherit debug registers from parent thread */
+            thread_data->dr0 = parent_data->dr0;
+            thread_data->dr1 = parent_data->dr1;
+            thread_data->dr2 = parent_data->dr2;
+            thread_data->dr3 = parent_data->dr3;
+            thread_data->dr6 = parent_data->dr6;
+            thread_data->dr7 = parent_data->dr7;
+        }
+
+    }
+    return status;
+}
+
+
+/**********************************************************************
+ *		signal_free_thread
+ */
+void signal_free_thread( TEB *teb )
+{
+    SIZE_T size;
+    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
+
+    if (thread_data) wine_ldt_free_fs( thread_data->fs );
+    if (teb->DeallocationStack)
+    {
+        size = 0;
+        NtFreeVirtualMemory( GetCurrentProcess(), &teb->DeallocationStack, &size, MEM_RELEASE );
+    }
+    size = 0;
+    NtFreeVirtualMemory( NtCurrentProcess(), (void **)&teb, &size, MEM_RELEASE );
+}
+
+
+/**********************************************************************
  *		signal_init_thread
  */
 void signal_init_thread( TEB *teb )
 {
-    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SystemReserved2;
+    struct ntdll_thread_data *thread_data = (struct ntdll_thread_data *)teb->SpareBytes1;
     LDT_ENTRY fs_entry;
     stack_t ss;
 

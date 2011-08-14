@@ -272,6 +272,22 @@ HRESULT WINAPI GetDeviceID(LPCGUID pGuidSrc, LPGUID pGuidDest)
     return DS_OK;
 }
 
+struct morecontext
+{
+    LPDSENUMCALLBACKA callA;
+    LPVOID data;
+};
+
+static BOOL CALLBACK a_to_w_callback(LPGUID guid, LPCWSTR descW, LPCWSTR modW, LPVOID data)
+{
+    struct morecontext *context = data;
+    char descA[MAXPNAMELEN], modA[MAXPNAMELEN];
+
+    WideCharToMultiByte(CP_ACP, 0, descW, -1, descA, sizeof(descA), NULL, NULL);
+    WideCharToMultiByte(CP_ACP, 0, modW, -1, modA, sizeof(modA), NULL, NULL);
+
+    return context->callA(guid, descA, modA, context->data);
+}
 
 /***************************************************************************
  * DirectSoundEnumerateA [DSOUND.2]
@@ -290,46 +306,17 @@ HRESULT WINAPI DirectSoundEnumerateA(
     LPDSENUMCALLBACKA lpDSEnumCallback,
     LPVOID lpContext)
 {
-    unsigned devs, wod;
-    DSDRIVERDESC desc;
-    GUID guid;
-    int err;
-
-    TRACE("lpDSEnumCallback = %p, lpContext = %p\n",
-	lpDSEnumCallback, lpContext);
+    struct morecontext context;
 
     if (lpDSEnumCallback == NULL) {
-	WARN("invalid parameter: lpDSEnumCallback == NULL\n");
-	return DSERR_INVALIDPARAM;
+        WARN("invalid parameter: lpDSEnumCallback == NULL\n");
+        return DSERR_INVALIDPARAM;
     }
 
-    devs = waveOutGetNumDevs();
-    if (devs > 0) {
-	if (GetDeviceID(&DSDEVID_DefaultPlayback, &guid) == DS_OK) {
-	    for (wod = 0; wod < devs; ++wod) {
-                if (IsEqualGUID( &guid, &DSOUND_renderer_guids[wod]) ) {
-                    err = mmErr(waveOutMessage(UlongToHandle(wod),DRV_QUERYDSOUNDDESC,(DWORD_PTR)&desc,0));
-                    if (err == DS_OK) {
-                        TRACE("calling lpDSEnumCallback(NULL,\"%s\",\"%s\",%p)\n",
-                              "Primary Sound Driver","",lpContext);
-                        if (lpDSEnumCallback(NULL, "Primary Sound Driver", "", lpContext) == FALSE)
-                            return DS_OK;
-		    }
-		}
-	    }
-	}
-    }
+    context.callA = lpDSEnumCallback;
+    context.data = lpContext;
 
-    for (wod = 0; wod < devs; ++wod) {
-        err = mmErr(waveOutMessage(UlongToHandle(wod),DRV_QUERYDSOUNDDESC,(DWORD_PTR)&desc,0));
-	if (err == DS_OK) {
-            TRACE("calling lpDSEnumCallback(%s,\"%s\",\"%s\",%p)\n",
-                  debugstr_guid(&DSOUND_renderer_guids[wod]),desc.szDesc,desc.szDrvname,lpContext);
-            if (lpDSEnumCallback(&DSOUND_renderer_guids[wod], desc.szDesc, desc.szDrvname, lpContext) == FALSE)
-                return DS_OK;
-	}
-    }
-    return DS_OK;
+    return DirectSoundEnumerateW(a_to_w_callback, &context);
 }
 
 /***************************************************************************
@@ -397,6 +384,106 @@ HRESULT WINAPI DirectSoundEnumerateW(
                 return DS_OK;
 	}
     }
+    return DS_OK;
+}
+
+/***************************************************************************
+ * DirectSoundCaptureEnumerateA [DSOUND.7]
+ *
+ * Enumerate all DirectSound drivers installed in the system.
+ *
+ * PARAMS
+ *    lpDSEnumCallback  [I] Address of callback function.
+ *    lpContext         [I] Address of user defined context passed to callback function.
+ *
+ * RETURNS
+ *    Success: DS_OK
+ *    Failure: DSERR_INVALIDPARAM
+ */
+HRESULT WINAPI DirectSoundCaptureEnumerateA(
+    LPDSENUMCALLBACKA lpDSEnumCallback,
+    LPVOID lpContext)
+{
+    struct morecontext context;
+
+    if (lpDSEnumCallback == NULL) {
+        WARN("invalid parameter: lpDSEnumCallback == NULL\n");
+        return DSERR_INVALIDPARAM;
+    }
+
+    context.callA = lpDSEnumCallback;
+    context.data = lpContext;
+
+    return DirectSoundCaptureEnumerateW(a_to_w_callback, &context);
+}
+
+/***************************************************************************
+ * DirectSoundCaptureEnumerateW [DSOUND.8]
+ *
+ * Enumerate all DirectSound drivers installed in the system.
+ *
+ * PARAMS
+ *    lpDSEnumCallback  [I] Address of callback function.
+ *    lpContext         [I] Address of user defined context passed to callback function.
+ *
+ * RETURNS
+ *    Success: DS_OK
+ *    Failure: DSERR_INVALIDPARAM
+ */
+HRESULT WINAPI
+DirectSoundCaptureEnumerateW(
+    LPDSENUMCALLBACKW lpDSEnumCallback,
+    LPVOID lpContext)
+{
+    unsigned devs, wid;
+    DSDRIVERDESC desc;
+    GUID guid;
+    int err;
+    WCHAR wDesc[MAXPNAMELEN];
+    WCHAR wName[MAXPNAMELEN];
+
+    TRACE("(%p,%p)\n", lpDSEnumCallback, lpContext );
+
+    if (lpDSEnumCallback == NULL) {
+	WARN("invalid parameter: lpDSEnumCallback == NULL\n");
+        return DSERR_INVALIDPARAM;
+    }
+
+    devs = waveInGetNumDevs();
+    if (devs > 0) {
+	if (GetDeviceID(&DSDEVID_DefaultCapture, &guid) == DS_OK) {
+	    for (wid = 0; wid < devs; ++wid) {
+                if (IsEqualGUID( &guid, &DSOUND_capture_guids[wid] ) ) {
+                    err = mmErr(waveInMessage(UlongToHandle(wid),DRV_QUERYDSOUNDDESC,(DWORD_PTR)&desc,0));
+                    if (err == DS_OK) {
+                        TRACE("calling lpDSEnumCallback(NULL,\"%s\",\"%s\",%p)\n",
+                              "Primary Sound Capture Driver",desc.szDrvname,lpContext);
+                        MultiByteToWideChar( CP_ACP, 0, "Primary Sound Capture Driver", -1,
+                                             wDesc, sizeof(wDesc)/sizeof(WCHAR) );
+                        MultiByteToWideChar( CP_ACP, 0, desc.szDrvname, -1,
+                                             wName, sizeof(wName)/sizeof(WCHAR) );
+                        if (lpDSEnumCallback(NULL, wDesc, wName, lpContext) == FALSE)
+                            return DS_OK;
+                    }
+                }
+	    }
+	}
+    }
+
+    for (wid = 0; wid < devs; ++wid) {
+        err = mmErr(waveInMessage(UlongToHandle(wid),DRV_QUERYDSOUNDDESC,(DWORD_PTR)&desc,0));
+	if (err == DS_OK) {
+            TRACE("calling lpDSEnumCallback(%s,\"%s\",\"%s\",%p)\n",
+                  debugstr_guid(&DSOUND_capture_guids[wid]),desc.szDesc,desc.szDrvname,lpContext);
+            MultiByteToWideChar( CP_ACP, 0, desc.szDesc, -1,
+                                 wDesc, sizeof(wDesc)/sizeof(WCHAR) );
+            MultiByteToWideChar( CP_ACP, 0, desc.szDrvname, -1,
+                                 wName, sizeof(wName)/sizeof(WCHAR) );
+            if (lpDSEnumCallback(&DSOUND_capture_guids[wid], wDesc, wName, lpContext) == FALSE)
+                return DS_OK;
+	}
+    }
+
     return DS_OK;
 }
 

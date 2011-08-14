@@ -163,7 +163,7 @@ static void ssl_lock_callback(int mode, int type, const char *file, int line)
 
 #endif
 
-BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
+DWORD NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 {
     connection->useSSL = FALSE;
     connection->socketFD = -1;
@@ -177,25 +177,23 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
 	if (OpenSSL_ssl_handle) /* already initialized everything */
         {
             LeaveCriticalSection(&init_ssl_cs);
-            return TRUE;
+            return ERROR_SUCCESS;
         }
 	OpenSSL_ssl_handle = wine_dlopen(SONAME_LIBSSL, RTLD_NOW, NULL, 0);
 	if (!OpenSSL_ssl_handle)
 	{
 	    ERR("trying to use a SSL connection, but couldn't load %s. Expect trouble.\n",
 		SONAME_LIBSSL);
-            INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
             LeaveCriticalSection(&init_ssl_cs);
-            return FALSE;
+            return ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
 	}
 	OpenSSL_crypto_handle = wine_dlopen(SONAME_LIBCRYPTO, RTLD_NOW, NULL, 0);
 	if (!OpenSSL_crypto_handle)
 	{
 	    ERR("trying to use a SSL connection, but couldn't load %s. Expect trouble.\n",
 		SONAME_LIBCRYPTO);
-            INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
             LeaveCriticalSection(&init_ssl_cs);
-            return FALSE;
+            return ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
 	}
 
         /* mmm nice ugly macroness */
@@ -204,9 +202,8 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     if (!p##x) \
     { \
         ERR("failed to load symbol %s\n", #x); \
-        INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR); \
         LeaveCriticalSection(&init_ssl_cs); \
-        return FALSE; \
+        return ERROR_INTERNET_SECURITY_CHANNEL_ERROR; \
     }
 
 	DYNSSL(SSL_library_init);
@@ -234,9 +231,8 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
     if (!p##x) \
     { \
         ERR("failed to load symbol %s\n", #x); \
-        INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR); \
         LeaveCriticalSection(&init_ssl_cs); \
-        return FALSE; \
+        return ERROR_INTERNET_SECURITY_CHANNEL_ERROR; \
     }
 	DYNCRYPTO(BIO_new_fp);
 	DYNCRYPTO(CRYPTO_num_locks);
@@ -257,9 +253,8 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
         {
             ERR("SSL_CTX_set_default_verify_paths failed: %s\n",
                 pERR_error_string(pERR_get_error(), 0));
-            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
             LeaveCriticalSection(&init_ssl_cs);
-            return FALSE;
+            return ERROR_OUTOFMEMORY;
         }
 
         pCRYPTO_set_id_callback(ssl_thread_id);
@@ -267,9 +262,8 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
                 pCRYPTO_num_locks() * sizeof(CRITICAL_SECTION));
         if (!ssl_locks)
         {
-            INTERNET_SetLastError(ERROR_OUTOFMEMORY);
             LeaveCriticalSection(&init_ssl_cs);
-            return FALSE;
+            return ERROR_OUTOFMEMORY;
         }
         for (i = 0; i < pCRYPTO_num_locks(); i++)
             InitializeCriticalSection(&ssl_locks[i]);
@@ -277,11 +271,10 @@ BOOL NETCON_init(WININET_NETCONNECTION *connection, BOOL useSSL)
         LeaveCriticalSection(&init_ssl_cs);
 #else
 	FIXME("can't use SSL, not compiled in.\n");
-        INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
-        return FALSE;
+        return ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
 #endif
     }
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 void NETCON_unload(void)
@@ -315,7 +308,7 @@ BOOL NETCON_connected(WININET_NETCONNECTION *connection)
 }
 
 /* translate a unix error code into a winsock one */
-static int sock_get_error( int err )
+int sock_get_error( int err )
 {
 #if !defined(__MINGW32__) && !defined (_MSC_VER)
     switch (err)
@@ -385,32 +378,30 @@ static int sock_get_error( int err )
  * NETCON_create
  * Basically calls 'socket()'
  */
-BOOL NETCON_create(WININET_NETCONNECTION *connection, int domain,
+DWORD NETCON_create(WININET_NETCONNECTION *connection, int domain,
 	      int type, int protocol)
 {
 #ifdef SONAME_LIBSSL
     if (connection->useSSL)
-        return FALSE;
+        return ERROR_NOT_SUPPORTED;
 #endif
 
     connection->socketFD = socket(domain, type, protocol);
     if (connection->socketFD == -1)
-    {
-        INTERNET_SetLastError(sock_get_error(errno));
-        return FALSE;
-    }
-    return TRUE;
+        return sock_get_error(errno);
+
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
  * NETCON_close
  * Basically calls 'close()' unless we should use SSL
  */
-BOOL NETCON_close(WININET_NETCONNECTION *connection)
+DWORD NETCON_close(WININET_NETCONNECTION *connection)
 {
     int result;
 
-    if (!NETCON_connected(connection)) return FALSE;
+    if (!NETCON_connected(connection)) return ERROR_SUCCESS;
 
 #ifdef SONAME_LIBSSL
     if (connection->useSSL)
@@ -427,11 +418,8 @@ BOOL NETCON_close(WININET_NETCONNECTION *connection)
     connection->socketFD = -1;
 
     if (result == -1)
-    {
-        INTERNET_SetLastError(sock_get_error(errno));
-        return FALSE;
-    }
-    return TRUE;
+        return sock_get_error(errno);
+    return ERROR_SUCCESS;
 }
 #ifdef SONAME_LIBSSL
 static BOOL check_hostname(X509 *cert, char *hostname)
@@ -444,8 +432,9 @@ static BOOL check_hostname(X509 *cert, char *hostname)
  * NETCON_secure_connect
  * Initiates a secure connection over an existing plaintext connection.
  */
-BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
+DWORD NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
 {
+    DWORD res = ERROR_NOT_SUPPORTED;
 #ifdef SONAME_LIBSSL
     long verify_res;
     X509 *cert;
@@ -456,7 +445,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     if (connection->useSSL)
     {
         ERR("already connected\n");
-        return FALSE;
+        return ERROR_INTERNET_CANNOT_CONNECT;
     }
 
     connection->ssl_s = pSSL_new(ctx);
@@ -464,7 +453,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     {
         ERR("SSL_new failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        res = ERROR_OUTOFMEMORY;
         goto fail;
     }
 
@@ -472,7 +461,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     {
         ERR("SSL_set_fd failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
-        INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
+        res = ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
         goto fail;
     }
 
@@ -480,7 +469,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     {
         ERR("SSL_connect failed: %s\n",
             pERR_error_string(pERR_get_error(), 0));
-        INTERNET_SetLastError(ERROR_INTERNET_SECURITY_CHANNEL_ERROR);
+        res = ERROR_INTERNET_SECURITY_CHANNEL_ERROR;
         goto fail;
     }
     cert = pSSL_get_peer_certificate(connection->ssl_s);
@@ -488,7 +477,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     {
         ERR("no certificate for server %s\n", debugstr_w(hostname));
         /* FIXME: is this the best error? */
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_CA);
+        res = ERROR_INTERNET_INVALID_CA;
         goto fail;
     }
     verify_res = pSSL_get_verify_result(connection->ssl_s);
@@ -503,7 +492,7 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     hostname_unix = HeapAlloc(GetProcessHeap(), 0, len);
     if (!hostname_unix)
     {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+        res = ERROR_OUTOFMEMORY;
         goto fail;
     }
     WideCharToMultiByte(CP_UNIXCP, 0, hostname, -1, hostname_unix, len, NULL, NULL);
@@ -511,13 +500,13 @@ BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname)
     if (!check_hostname(cert, hostname_unix))
     {
         HeapFree(GetProcessHeap(), 0, hostname_unix);
-        INTERNET_SetLastError(ERROR_INTERNET_SEC_CERT_CN_INVALID);
+        res = ERROR_INTERNET_SEC_CERT_CN_INVALID;
         goto fail;
     }
 
     HeapFree(GetProcessHeap(), 0, hostname_unix);
     connection->useSSL = TRUE;
-    return TRUE;
+    return ERROR_SUCCESS;
 
 fail:
     if (connection->ssl_s)
@@ -527,32 +516,29 @@ fail:
         connection->ssl_s = NULL;
     }
 #endif
-    return FALSE;
+    return res;
 }
 
 /******************************************************************************
  * NETCON_connect
  * Connects to the specified address.
  */
-BOOL NETCON_connect(WININET_NETCONNECTION *connection, const struct sockaddr *serv_addr,
+DWORD NETCON_connect(WININET_NETCONNECTION *connection, const struct sockaddr *serv_addr,
 		    unsigned int addrlen)
 {
     int result;
-
-    if (!NETCON_connected(connection)) return FALSE;
 
     result = connect(connection->socketFD, serv_addr, addrlen);
     if (result == -1)
     {
         WARN("Unable to connect to host (%s)\n", strerror(errno));
-        INTERNET_SetLastError(sock_get_error(errno));
 
         closesocket(connection->socketFD);
         connection->socketFD = -1;
-        return FALSE;
+        return sock_get_error(errno);
     }
 
-    return TRUE;
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -560,19 +546,16 @@ BOOL NETCON_connect(WININET_NETCONNECTION *connection, const struct sockaddr *se
  * Basically calls 'send()' unless we should use SSL
  * number of chars send is put in *sent
  */
-BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len, int flags,
+DWORD NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len, int flags,
 		int *sent /* out */)
 {
-    if (!NETCON_connected(connection)) return FALSE;
+    if (!NETCON_connected(connection)) return ERROR_INTERNET_CONNECTION_ABORTED;
     if (!connection->useSSL)
     {
 	*sent = send(connection->socketFD, msg, len, flags);
 	if (*sent == -1)
-	{
-	    INTERNET_SetLastError(sock_get_error(errno));
-	    return FALSE;
-	}
-        return TRUE;
+	    return sock_get_error(errno);
+        return ERROR_SUCCESS;
     }
     else
     {
@@ -581,10 +564,10 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
             FIXME("SSL_write doesn't support any flags (%08x)\n", flags);
 	*sent = pSSL_write(connection->ssl_s, msg, len);
 	if (*sent < 1 && len)
-	    return FALSE;
-        return TRUE;
+	    return ERROR_INTERNET_CONNECTION_ABORTED;
+        return ERROR_SUCCESS;
 #else
-	return FALSE;
+	return ERROR_NOT_SUPPORTED;
 #endif
     }
 }
@@ -594,30 +577,25 @@ BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len,
  * Basically calls 'recv()' unless we should use SSL
  * number of chars received is put in *recvd
  */
-BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
+DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */)
 {
     *recvd = 0;
-    if (!NETCON_connected(connection)) return FALSE;
+    if (!NETCON_connected(connection)) return ERROR_INTERNET_CONNECTION_ABORTED;
     if (!len)
-        return TRUE;
+        return ERROR_SUCCESS;
     if (!connection->useSSL)
     {
 	*recvd = recv(connection->socketFD, buf, len, flags);
-	if (*recvd == -1)
-	{
-	    INTERNET_SetLastError(sock_get_error(errno));
-	    return FALSE;
-	}
-        return TRUE;
+	return *recvd == -1 ? sock_get_error(errno) :  ERROR_SUCCESS;
     }
     else
     {
 #ifdef SONAME_LIBSSL
 	*recvd = pSSL_read(connection->ssl_s, buf, len);
-	return *recvd > 0 || !len;
+        return *recvd > 0 ? ERROR_SUCCESS : ERROR_INTERNET_CONNECTION_ABORTED;
 #else
-	return FALSE;
+	return ERROR_NOT_SUPPORTED;
 #endif
     }
 }

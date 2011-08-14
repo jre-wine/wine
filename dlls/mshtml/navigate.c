@@ -27,9 +27,12 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
+#include "winreg.h"
 #include "ole2.h"
 #include "hlguids.h"
 #include "shlguid.h"
+#include "wininet.h"
+#include "shlwapi.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -40,8 +43,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
 #define CONTENT_LENGTH "Content-Length"
 #define UTF16_STR "utf-16"
-
-static WCHAR emptyW[] = {0};
 
 typedef struct {
     const nsIInputStreamVtbl *lpInputStreamVtbl;
@@ -1231,25 +1232,72 @@ HRESULT hlink_frame_navigate(HTMLDocument *doc, LPCWSTR url,
     return hres;
 }
 
-HRESULT navigate_url(HTMLDocumentNode *doc, OLECHAR *url)
+
+HRESULT navigate_url(HTMLWindow *window, const WCHAR *new_url, const WCHAR *base_url)
 {
-    OLECHAR *translated_url = NULL;
+    WCHAR url[INTERNET_MAX_URL_LENGTH];
+    nsIWebNavigation *web_navigation;
+    nsIDocShell *doc_shell;
+    nsIWineURI *uri;
+    nsresult nsres;
     HRESULT hres;
 
-    if(!url)
-        url = emptyW;
+    if(!new_url) {
+        *url = 0;
+    }else if(base_url) {
+        DWORD len = 0;
 
-    if(doc->basedoc.doc_obj->hostui) {
-        hres = IDocHostUIHandler_TranslateUrl(doc->basedoc.doc_obj->hostui, 0, url,
-                &translated_url);
-        if(hres == S_OK)
-            url = translated_url;
+        hres = CoInternetCombineUrl(base_url, new_url, URL_ESCAPE_SPACES_ONLY|URL_DONT_ESCAPE_EXTRA_INFO,
+                url, sizeof(url)/sizeof(WCHAR), &len, 0);
+        if(FAILED(hres))
+            return hres;
+    }else {
+        strcpyW(url, new_url);
     }
 
-    hres = hlink_frame_navigate(&doc->basedoc, url, NULL, 0);
-    if(FAILED(hres))
-        FIXME("hlink_frame_navigate failed: %08x\n", hres);
+    if(window->doc_obj && window->doc_obj->hostui) {
+        OLECHAR *translated_url = NULL;
 
-    CoTaskMemFree(translated_url);
-    return hres;
+        hres = IDocHostUIHandler_TranslateUrl(window->doc_obj->hostui, 0, url,
+                &translated_url);
+        if(hres == S_OK) {
+            strcpyW(url, translated_url);
+            CoTaskMemFree(translated_url);
+        }
+    }
+
+    if(window->doc_obj && window == window->doc_obj->basedoc.window) {
+        hres = hlink_frame_navigate(&window->doc->basedoc, url, NULL, 0);
+        if(SUCCEEDED(hres))
+            return S_OK;
+        TRACE("hlink_frame_navigate failed: %08x\n", hres);
+    }
+
+    nsres = get_nsinterface((nsISupports*)window->nswindow, &IID_nsIWebNavigation, (void**)&web_navigation);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIWebNavigation interface: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIWebNavigation_QueryInterface(web_navigation, &IID_nsIDocShell, (void**)&doc_shell);
+    nsIWebNavigation_Release(web_navigation);
+    if(NS_FAILED(nsres)) {
+        ERR("Could not get nsIDocShell: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    hres = create_doc_uri(window, url, &uri);
+    if(FAILED(hres)) {
+        nsIDocShell_Release(doc_shell);
+        return hres;
+    }
+
+    nsres = nsIDocShell_LoadURI(doc_shell, (nsIURI*)uri, NULL, 0, FALSE);
+    nsIDocShell_Release(doc_shell);
+    if(NS_FAILED(nsres)) {
+        WARN("LoadURI failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }

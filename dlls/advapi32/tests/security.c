@@ -256,6 +256,7 @@ static void test_sid(void)
     ok(pisid->SubAuthority[0] == 21, "Invalid subauthority 0 - expceted 21, got %d\n", pisid->SubAuthority[0]);
     ok(pisid->SubAuthority[3] == 4576, "Invalid subauthority 0 - expceted 4576, got %d\n", pisid->SubAuthority[3]);
     LocalFree(str);
+    LocalFree(psid);
 
     for( i = 0; i < sizeof(refs) / sizeof(refs[0]); i++ )
     {
@@ -1228,10 +1229,18 @@ static void test_token_attr(void)
     ok(ret, "OpenProcessToken failed with error %d\n", GetLastError());
 
     /* groups */
+    SetLastError(0xdeadbeef);
     ret = GetTokenInformation(Token, TokenGroups, NULL, 0, &Size);
+    ok(!ret && GetLastError() == ERROR_INSUFFICIENT_BUFFER,
+        "GetTokenInformation(TokenGroups) %s with error %d\n",
+        ret ? "succeeded" : "failed", GetLastError());
     Groups = HeapAlloc(GetProcessHeap(), 0, Size);
+    SetLastError(0xdeadbeef);
     ret = GetTokenInformation(Token, TokenGroups, Groups, Size, &Size);
     ok(ret, "GetTokenInformation(TokenGroups) failed with error %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef,
+       "GetTokenInformation shouldn't have set last error to %d\n",
+       GetLastError());
     trace("TokenGroups:\n");
     for (i = 0; i < Groups->GroupCount; i++)
     {
@@ -1240,12 +1249,12 @@ static void test_token_attr(void)
         DWORD DomainLength = 255;
         TCHAR Domain[255];
         SID_NAME_USE SidNameUse;
-        pConvertSidToStringSidA(Groups->Groups[i].Sid, &SidString);
         Name[0] = '\0';
         Domain[0] = '\0';
         ret = LookupAccountSid(NULL, Groups->Groups[i].Sid, Name, &NameLength, Domain, &DomainLength, &SidNameUse);
         if (ret)
         {
+            pConvertSidToStringSidA(Groups->Groups[i].Sid, &SidString);
             trace("%s, %s\\%s use: %d attr: 0x%08x\n", SidString, Domain, Name, SidNameUse, Groups->Groups[i].Attributes);
             LocalFree(SidString);
         }
@@ -1480,6 +1489,8 @@ static void test_CreateWellKnownSid(void)
             ok(memcmp(buf2, sid_buffer, cb) == 0, "SID create with domain is different than without (%d)\n", i);
         }
     }
+
+    LocalFree(domainsid);
 }
 
 static void test_LookupAccountSid(void)
@@ -2765,7 +2776,7 @@ static void test_ConvertStringSecurityDescriptor(void)
     ret = pConvertStringSecurityDescriptorToSecurityDescriptorW(
         Blank, SDDL_REVISION_1, &pSD, NULL);
     ok(ret, "ConvertStringSecurityDescriptorToSecurityDescriptor failed with error %d\n", GetLastError());
-
+    LocalFree(pSD);
 }
 
 static void test_ConvertSecurityDescriptorToString(void)
@@ -2877,6 +2888,9 @@ static void test_ConvertSecurityDescriptorToString(void)
         CHECK_ONE_OF_AND_FREE("O:SYG:S-1-5-21-93476-23408-4576D:S:(AU;OICINPIOIDSAFA;CCDCLCSWRPRC;;;SU)(AU;NPSA;0x12019f;;;SU)", /* XP */
             "O:SYG:S-1-5-21-93476-23408-4576D:NO_ACCESS_CONTROLS:(AU;OICINPIOIDSAFA;CCDCLCSWRPRC;;;SU)(AU;NPSA;0x12019f;;;SU)" /* Vista */);
     }
+
+    LocalFree(psid2);
+    LocalFree(psid);
 }
 
 static void test_SetSecurityDescriptorControl (PSECURITY_DESCRIPTOR sec)
@@ -3148,8 +3162,10 @@ static void test_GetSecurityInfo(void)
     ok(sd != NULL, "GetSecurityInfo\n");
     ok(owner != NULL, "GetSecurityInfo\n");
     ok(group != NULL, "GetSecurityInfo\n");
-    ok(dacl != NULL, "GetSecurityInfo\n");
-    ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+    if (dacl != NULL)
+        ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+    else
+        win_skip("No ACL information returned\n");
 
     LocalFree(sd);
 
@@ -3168,8 +3184,10 @@ static void test_GetSecurityInfo(void)
     ok(ret == ERROR_SUCCESS, "GetSecurityInfo returned %d\n", ret);
     ok(owner != NULL, "GetSecurityInfo\n");
     ok(group != NULL, "GetSecurityInfo\n");
-    ok(dacl != NULL, "GetSecurityInfo\n");
-    ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+    if (dacl != NULL)
+        ok(IsValidAcl(dacl), "GetSecurityInfo\n");
+    else
+        win_skip("No ACL information returned\n");
 
     CloseHandle(obj);
 }
@@ -3197,7 +3215,7 @@ static void test_GetSidSubAuthority(void)
     ok(*pGetSidSubAuthority(psid,1) == 93476,"GetSidSubAuthority gave %d expected 93476\n",*pGetSidSubAuthority(psid,1));
     ok(GetLastError() == 0,"GetLastError returned %d instead of 0\n",GetLastError());
     SetLastError(0xbebecaca);
-    todo_wine ok(*pGetSidSubAuthority(psid,4) == 0,"GetSidSubAuthority gave %d,expected 0\n",*pGetSidSubAuthority(psid,4));
+    ok(pGetSidSubAuthority(psid,4) != NULL,"Expected out of bounds GetSidSubAuthority to return a non-NULL pointer\n");
     ok(GetLastError() == 0,"GetLastError returned %d instead of 0\n",GetLastError());
     LocalFree(psid);
 }
@@ -3266,6 +3284,71 @@ todo_wine {
     CloseHandle(process_token);
 }
 
+static void test_EqualSid(void)
+{
+    PSID sid1, sid2;
+    BOOL ret;
+    SID_IDENTIFIER_AUTHORITY SIDAuthWorld = { SECURITY_WORLD_SID_AUTHORITY };
+    SID_IDENTIFIER_AUTHORITY SIDAuthNT = { SECURITY_NT_AUTHORITY };
+
+    SetLastError(0xdeadbeef);
+    ret = AllocateAndInitializeSid(&SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &sid1);
+    if (!ret && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("AllocateAndInitializeSid is not implemented\n");
+        return;
+    }
+    ok(ret, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+    ok(GetLastError() == 0xdeadbeef,
+       "AllocateAndInitializeSid shouldn't have set last error to %d\n",
+       GetLastError());
+
+    ret = AllocateAndInitializeSid(&SIDAuthWorld, 1, SECURITY_WORLD_RID,
+        0, 0, 0, 0, 0, 0, 0, &sid2);
+    ok(ret, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EqualSid(sid1, sid2);
+    ok(!ret, "World and domain admins sids shouldn't have been equal\n");
+    ok(GetLastError() == ERROR_SUCCESS ||
+       broken(GetLastError() == 0xdeadbeef), /* NT4 */
+       "EqualSid should have set last error to ERROR_SUCCESS instead of %d\n",
+       GetLastError());
+
+    SetLastError(0xdeadbeef);
+    sid2 = FreeSid(sid2);
+    ok(!sid2, "FreeSid should have returned NULL instead of %p\n", sid2);
+    ok(GetLastError() == 0xdeadbeef,
+       "FreeSid shouldn't have set last error to %d\n",
+       GetLastError());
+
+    ret = AllocateAndInitializeSid(&SIDAuthNT, 2, SECURITY_BUILTIN_DOMAIN_RID,
+        DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &sid2);
+    ok(ret, "AllocateAndInitializeSid failed with error %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = EqualSid(sid1, sid2);
+    ok(ret, "Same sids should have been equal\n");
+    ok(GetLastError() == ERROR_SUCCESS ||
+       broken(GetLastError() == 0xdeadbeef), /* NT4 */
+       "EqualSid should have set last error to ERROR_SUCCESS instead of %d\n",
+       GetLastError());
+
+    ((SID *)sid2)->Revision = 2;
+    SetLastError(0xdeadbeef);
+    ret = EqualSid(sid1, sid2);
+    ok(!ret, "EqualSid with invalid sid should have returned FALSE\n");
+    ok(GetLastError() == ERROR_SUCCESS ||
+       broken(GetLastError() == 0xdeadbeef), /* NT4 */
+       "EqualSid should have set last error to ERROR_SUCCESS instead of %d\n",
+       GetLastError());
+    ((SID *)sid2)->Revision = SID_REVISION;
+
+    FreeSid(sid1);
+    FreeSid(sid2);
+}
+
 START_TEST(security)
 {
     init();
@@ -3297,4 +3380,5 @@ START_TEST(security)
     test_GetSecurityInfo();
     test_GetSidSubAuthority();
     test_CheckTokenMembership();
+    test_EqualSid();
 }

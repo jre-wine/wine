@@ -186,7 +186,7 @@ static void STDMETHODCALLTYPE d3d10_device_IASetInputLayout(ID3D10Device *iface,
     TRACE("iface %p, input_layout %p\n", iface, input_layout);
 
     IWineD3DDevice_SetVertexDeclaration(This->wined3d_device,
-            ((struct d3d10_input_layout *)input_layout)->wined3d_decl);
+            input_layout ? ((struct d3d10_input_layout *)input_layout)->wined3d_decl : NULL);
 }
 
 static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device *iface,
@@ -202,7 +202,8 @@ static void STDMETHODCALLTYPE d3d10_device_IASetVertexBuffers(ID3D10Device *ifac
     for (i = 0; i < buffer_count; ++i)
     {
         IWineD3DDevice_SetStreamSource(This->wined3d_device, start_slot,
-                ((struct d3d10_buffer *)buffers[i])->wined3d_buffer, offsets[i], strides[i]);
+                buffers[i] ? ((struct d3d10_buffer *)buffers[i])->wined3d_buffer : NULL,
+                offsets[i], strides[i]);
     }
 }
 
@@ -1117,7 +1118,7 @@ static void STDMETHODCALLTYPE d3d10_device_GetTextFilterSize(ID3D10Device *iface
     FIXME("iface %p, width %p, height %p stub!\n", iface, width, height);
 }
 
-const struct ID3D10DeviceVtbl d3d10_device_vtbl =
+static const struct ID3D10DeviceVtbl d3d10_device_vtbl =
 {
     /* IUnknown methods */
     d3d10_device_QueryInterface,
@@ -1221,7 +1222,7 @@ const struct ID3D10DeviceVtbl d3d10_device_vtbl =
     d3d10_device_GetTextFilterSize,
 };
 
-const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl =
+static const struct IUnknownVtbl d3d10_device_inner_unknown_vtbl =
 {
     /* IUnknown methods */
     d3d10_device_inner_QueryInterface,
@@ -1425,7 +1426,7 @@ static HRESULT STDMETHODCALLTYPE device_parent_CreateSwapChain(IWineD3DDevicePar
     return S_OK;
 }
 
-const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl =
+static const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl =
 {
     /* IUnknown methods */
     device_parent_QueryInterface,
@@ -1439,3 +1440,12 @@ const struct IWineD3DDeviceParentVtbl d3d10_wined3d_device_parent_vtbl =
     device_parent_CreateVolume,
     device_parent_CreateSwapChain,
 };
+
+void d3d10_device_init(struct d3d10_device *device, void *outer_unknown)
+{
+    device->vtbl = &d3d10_device_vtbl;
+    device->inner_unknown_vtbl = &d3d10_device_inner_unknown_vtbl;
+    device->device_parent_vtbl = &d3d10_wined3d_device_parent_vtbl;
+    device->refcount = 1;
+    device->outer_unknown = outer_unknown;
+}

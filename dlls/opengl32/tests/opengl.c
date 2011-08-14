@@ -314,7 +314,7 @@ static void test_sharelists(HDC winhdc)
         res = wglMakeCurrent(winhdc, hglrc2);
         ok(res, "Make current failed\n");
         res = wglShareLists(hglrc1, hglrc2);
-        todo_wine ok(res, "Sharing display lists with a destination context which has been made current passed\n");
+        todo_wine ok(res, "Sharing display lists with a destination context which has been made current failed\n");
         wglMakeCurrent(0, 0);
         wglDeleteContext(hglrc2);
     }
@@ -325,7 +325,7 @@ static void test_sharelists(HDC winhdc)
     if(hglrc3)
     {
         res = wglShareLists(hglrc3, hglrc1);
-        ok(res == FALSE, "Sharing of display lists failed for a context which already shared lists before\n");
+        ok(res == FALSE, "Sharing of display lists passed for a context which already shared lists before\n");
         wglDeleteContext(hglrc3);
     }
 
@@ -336,7 +336,7 @@ static void test_sharelists(HDC winhdc)
         res = wglMakeCurrent(winhdc, hglrc1);
         ok(res, "Make current failed\n");
         res = wglShareLists(hglrc1, hglrc2);
-        ok(res, "Sharing display lists with a source context which has been made current passed\n");
+        ok(res, "Sharing display lists with a source context which has been made current failed\n");
         wglMakeCurrent(0, 0);
         wglDeleteContext(hglrc2);
     }
@@ -551,20 +551,10 @@ static void test_dc(HWND hwnd, HDC hdc)
     }
 }
 
+/* Nvidia converts win32 error codes to (0xc007 << 16) | win32_error_code */
+#define NVIDIA_HRESULT_FROM_WIN32(x) (HRESULT_FROM_WIN32(x) | 0x40000000)
 static void test_opengl3(HDC hdc)
 {
-    /* Try to create a context using an invalid OpenGL version namely 0.x */
-    {
-        HGLRC gl3Ctx;
-        int attribs[] = {WGL_CONTEXT_MAJOR_VERSION_ARB, 0, 0};
-
-        gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
-        ok(gl3Ctx == 0, "wglCreateContextAttribs with major version=0 should fail!\n");
-
-        if(gl3Ctx)
-            wglDeleteContext(gl3Ctx);
-    }
-
     /* Try to create a context compatible with OpenGL 1.x; 1.0-2.1 is allowed */
     {
         HGLRC gl3Ctx;
@@ -582,7 +572,9 @@ static void test_opengl3(HDC hdc)
         gl3Ctx = pwglCreateContextAttribsARB((HDC)0xdeadbeef, 0, 0);
         ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid HDC passed\n");
         error = GetLastError();
-        todo_wine ok(error == ERROR_DC_NOT_FOUND, "Expected ERROR_DC_NOT_FOUND, got error=%x\n", error);
+        todo_wine ok(error == ERROR_DC_NOT_FOUND ||
+                     broken(error == NVIDIA_HRESULT_FROM_WIN32(ERROR_INVALID_DATA)), /* Nvidia Vista + Win7 */
+                     "Expected ERROR_DC_NOT_FOUND, got error=%x\n", error);
         wglDeleteContext(gl3Ctx);
     }
 
@@ -591,9 +583,11 @@ static void test_opengl3(HDC hdc)
         HGLRC gl3Ctx;
         DWORD error;
         gl3Ctx = pwglCreateContextAttribsARB(hdc, (HGLRC)0xdeadbeef, 0);
-        ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
+        todo_wine ok(gl3Ctx == 0, "pwglCreateContextAttribsARB using an invalid shareList passed\n");
         error = GetLastError();
-        todo_wine ok(error == ERROR_INVALID_OPERATION, "Expected ERROR_INVALID_OPERATION, got error=%x\n", error);
+        /* The Nvidia implementation seems to return hresults instead of win32 error codes */
+        todo_wine ok(error == ERROR_INVALID_OPERATION ||
+                     error == NVIDIA_HRESULT_FROM_WIN32(ERROR_INVALID_OPERATION), "Expected ERROR_INVALID_OPERATION, got error=%x\n", error);
         wglDeleteContext(gl3Ctx);
     }
 
@@ -641,10 +635,13 @@ static void test_opengl3(HDC hdc)
         gl3Ctx = pwglCreateContextAttribsARB(hdc, 0, attribs);
         ok(gl3Ctx != 0, "pwglCreateContextAttribsARB for a 3.0 context failed!\n");
 
-        /* OpenGL 3.0 allows offscreen rendering WITHOUT a drawable */
-        /* NOTE: Nvidia's 177.89 beta drivers don't allow this yet */
+        /* OpenGL 3.0 allows offscreen rendering WITHOUT a drawable
+         * Neither AMD or Nvidia support it at this point. The WGL_ARB_create_context specs also say that
+         * it is hard because drivers use the HDC to enter the display driver and it sounds like they don't
+         * expect drivers to ever offer it.
+         */
         res = wglMakeCurrent(0, gl3Ctx);
-        todo_wine ok(res == TRUE, "OpenGL 3.0 should allow windowless rendering, but the test failed!\n");
+        ok(res == FALSE, "Wow, OpenGL 3.0 windowless rendering passed while it was expected not to!\n");
         if(res)
             wglMakeCurrent(0, 0);
 

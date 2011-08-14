@@ -52,11 +52,6 @@ typedef struct IDirectSound8_IDirectSound8   IDirectSound8_IDirectSound8;
 typedef struct IDirectSoundBufferImpl        IDirectSoundBufferImpl;
 typedef struct IDirectSoundCaptureImpl       IDirectSoundCaptureImpl;
 typedef struct IDirectSoundCaptureBufferImpl IDirectSoundCaptureBufferImpl;
-typedef struct IDirectSoundFullDuplexImpl    IDirectSoundFullDuplexImpl;
-typedef struct IDirectSoundFullDuplex_IUnknown IDirectSoundFullDuplex_IUnknown;
-typedef struct IDirectSoundFullDuplex_IDirectSound IDirectSoundFullDuplex_IDirectSound;
-typedef struct IDirectSoundFullDuplex_IDirectSound8 IDirectSoundFullDuplex_IDirectSound8;
-typedef struct IDirectSoundFullDuplex_IDirectSoundCapture IDirectSoundFullDuplex_IDirectSoundCapture;
 typedef struct IDirectSoundNotifyImpl        IDirectSoundNotifyImpl;
 typedef struct IDirectSoundCaptureNotifyImpl IDirectSoundCaptureNotifyImpl;
 typedef struct IDirectSound3DListenerImpl    IDirectSound3DListenerImpl;
@@ -157,6 +152,8 @@ HRESULT DirectSoundDevice_GetSpeakerConfig(
 HRESULT DirectSoundDevice_SetSpeakerConfig(
     DirectSoundDevice * device,
     DWORD config);
+HRESULT DirectSoundDevice_VerifyCertification(DirectSoundDevice * device,
+    LPDWORD pdwCertified);
 
 /*****************************************************************************
  * IDirectSoundBuffer implementation structure
@@ -276,12 +273,6 @@ struct DirectSoundCaptureDevice
     CRITICAL_SECTION                   lock;
 };
 
-HRESULT DirectSoundCaptureDevice_Initialize(
-    DirectSoundCaptureDevice ** ppDevice,
-    LPCGUID lpcGUID);
-ULONG DirectSoundCaptureDevice_Release(
-    DirectSoundCaptureDevice * device);
-
 /*****************************************************************************
  * IDirectSoundCaptureBuffer implementation structure
  */
@@ -302,57 +293,6 @@ struct IDirectSoundCaptureBufferImpl
     LPDSBPOSITIONNOTIFY                 notifies;
     int                                 nrofnotifies;
     PIDSDRIVERNOTIFY                    hwnotify;
-};
-
-HRESULT IDirectSoundCaptureBufferImpl_Create(
-    DirectSoundCaptureDevice *device,
-    IDirectSoundCaptureBufferImpl ** ppobj,
-    LPCDSCBUFFERDESC lpcDSCBufferDesc);
-
-/*****************************************************************************
- * IDirectSoundFullDuplex implementation structure
- */
-struct IDirectSoundFullDuplexImpl
-{
-    /* IUnknown fields */
-    const IDirectSoundFullDuplexVtbl *lpVtbl;
-    LONG                              ref;
-
-    /* IDirectSoundFullDuplexImpl fields */
-    DirectSoundDevice                *renderer_device;
-    DirectSoundCaptureDevice         *capture_device;
-
-    LPUNKNOWN                         pUnknown;
-    LPDIRECTSOUND                     pDS;
-    LPDIRECTSOUND8                    pDS8;
-    LPDIRECTSOUNDCAPTURE              pDSC;
-};
-
-/*****************************************************************************
- * IDirectSoundFullDuplex COM components
- */
-struct IDirectSoundFullDuplex_IUnknown {
-    const IUnknownVtbl         *lpVtbl;
-    LONG                        ref;
-    IDirectSoundFullDuplexImpl *pdsfd;
-};
-
-struct IDirectSoundFullDuplex_IDirectSound {
-    const IDirectSoundVtbl     *lpVtbl;
-    LONG                        ref;
-    IDirectSoundFullDuplexImpl *pdsfd;
-};
-
-struct IDirectSoundFullDuplex_IDirectSound8 {
-    const IDirectSound8Vtbl    *lpVtbl;
-    LONG                        ref;
-    IDirectSoundFullDuplexImpl *pdsfd;
-};
-
-struct IDirectSoundFullDuplex_IDirectSoundCapture {
-    const IDirectSoundCaptureVtbl *lpVtbl;
-    LONG                           ref;
-    IDirectSoundFullDuplexImpl    *pdsfd;
 };
 
 /*****************************************************************************
@@ -438,7 +378,6 @@ HRESULT DSOUND_PrimaryPlay(DirectSoundDevice *device);
 HRESULT DSOUND_PrimaryStop(DirectSoundDevice *device);
 HRESULT DSOUND_PrimaryGetPosition(DirectSoundDevice *device, LPDWORD playpos, LPDWORD writepos);
 LPWAVEFORMATEX DSOUND_CopyFormat(LPCWAVEFORMATEX wfex);
-HRESULT DSOUND_PrimarySetFormat(DirectSoundDevice *device, LPCWAVEFORMATEX wfex, BOOL forced);
 HRESULT DSOUND_ReopenDevice(DirectSoundDevice *device, BOOL forcewave);
 
 /* duplex.c */
@@ -465,17 +404,6 @@ void DSOUND_Calc3DBuffer(IDirectSoundBufferImpl *dsb);
  
 HRESULT DSOUND_CaptureCreate(REFIID riid, LPDIRECTSOUNDCAPTURE *ppDSC);
 HRESULT DSOUND_CaptureCreate8(REFIID riid, LPDIRECTSOUNDCAPTURE8 *ppDSC8);
-HRESULT WINAPI IDirectSoundCaptureImpl_CreateCaptureBuffer(
-    LPDIRECTSOUNDCAPTURE iface,
-    LPCDSCBUFFERDESC lpcDSCBufferDesc,
-    LPDIRECTSOUNDCAPTUREBUFFER* lplpDSCaptureBuffer,
-    LPUNKNOWN pUnk);
-HRESULT WINAPI IDirectSoundCaptureImpl_GetCaps(
-    LPDIRECTSOUNDCAPTURE iface,
-    LPDSCCAPS lpDSCCaps);
-HRESULT WINAPI IDirectSoundCaptureImpl_Initialize(
-    LPDIRECTSOUNDCAPTURE iface,
-    LPCGUID lpcGUID);
 
 #define STATE_STOPPED   0
 #define STATE_STARTING  1

@@ -587,6 +587,13 @@ static HRESULT WINAPI Widget_get_prop_uint(
     return S_OK;
 }
 
+static HRESULT WINAPI Widget_ByRefUInt(
+    IWidget* iface, UINT *i)
+{
+    *i = 42;
+    return S_OK;
+}
+
 static const struct IWidgetVtbl Widget_VTable =
 {
     Widget_QueryInterface,
@@ -618,7 +625,8 @@ static const struct IWidgetVtbl Widget_VTable =
     Widget_put_prop_with_lcid,
     Widget_get_prop_with_lcid,
     Widget_get_prop_int,
-    Widget_get_prop_uint
+    Widget_get_prop_uint,
+    Widget_ByRefUInt,
 };
 
 static HRESULT WINAPI StaticWidget_QueryInterface(IStaticWidget *iface, REFIID riid, void **ppvObject)
@@ -907,6 +915,7 @@ static ITypeInfo *NonOleAutomation_GetTypeInfo(void)
         ITypeInfo *pTypeInfo;
         hr = ITypeLib_GetTypeInfoOfGuid(pTypeLib, &IID_INonOleAutomation, &pTypeInfo);
         ok_ole_success(hr, ITypeLib_GetTypeInfoOfGuid);
+        ITypeLib_Release(pTypeLib);
         return pTypeInfo;
     }
     return NULL;
@@ -935,6 +944,7 @@ static void test_typelibmarshal(void)
     ITypeInfo *pTypeInfo;
     MYSTRUCT mystruct;
     MYSTRUCT mystructArray[5];
+    UINT uval;
 
     ok(pKEW != NULL, "Widget creation failed\n");
 
@@ -1251,10 +1261,8 @@ static void test_typelibmarshal(void)
     dispparams.cArgs = 1;
     dispparams.rgvarg = vararg;
     VariantInit(&varresult);
-#if 0 /* NULL unknown not currently marshaled correctly */
     hr = IDispatch_Invoke(pDispatch, DISPID_TM_NAME, &IID_NULL, LOCALE_NEUTRAL, DISPATCH_PROPERTYPUT, &dispparams, &varresult, &excepinfo, NULL);
     ok(hr == DISP_E_TYPEMISMATCH, "IDispatch_Invoke should have returned DISP_E_TYPEMISMATCH instead of 0x%08x\n", hr);
-#endif
     VariantClear(&varresult);
 
     /* tests bad param type */
@@ -1342,6 +1350,24 @@ static void test_typelibmarshal(void)
     ok(V_UI4(&varresult) == 42, "got %x\n", V_UI4(&varresult));
     VariantClear(&varresult);
 
+    /* test byref marshalling */
+    uval = 666;
+    VariantInit(&vararg[0]);
+    V_VT(&vararg[0]) = VT_UI4|VT_BYREF;
+    V_UI4REF(&vararg[0]) = &uval;
+    dispparams.cNamedArgs = 0;
+    dispparams.cArgs = 1;
+    dispparams.rgvarg = vararg;
+    dispparams.rgdispidNamedArgs = NULL;
+    hr = IDispatch_Invoke(pDispatch, DISPID_TM_BYREF_UINT, &IID_NULL, LOCALE_NEUTRAL, DISPATCH_METHOD, &dispparams, &varresult, &excepinfo, NULL);
+    ok_ole_success(hr, ITypeInfo_Invoke);
+    ok(V_VT(&varresult) == VT_EMPTY, "varresult should be VT_EMPTY\n");
+    ok(V_VT(&vararg[0]) == (VT_UI4|VT_BYREF), "arg VT not unmarshalled correctly: %x\n", V_VT(&vararg[0]));
+    ok(V_UI4REF(&vararg[0]) == &uval, "Byref pointer not preserved: %p/%p\n", &uval, V_UI4REF(&vararg[0]));
+    ok(*V_UI4REF(&vararg[0]) == 42, "Expected 42 to be returned instead of %u\n", *V_UI4REF(&vararg[0]));
+    VariantClear(&varresult);
+    VariantClear(&vararg[0]);
+
     IDispatch_Release(pDispatch);
     IWidget_Release(pWidget);
 
@@ -1362,7 +1388,7 @@ static void test_DispCallFunc(void)
     V_VT(&vararg[0]) = VT_R8;
     V_R8(&vararg[0]) = 3.141;
     V_VT(&vararg[1]) = VT_BSTR;
-    V_BSTR(&vararg[1]) = SysAllocString(szEmpty);
+    V_BSTRREF(&vararg[1]) = CoTaskMemAlloc(sizeof(BSTR));
     V_VT(&vararg[2]) = VT_BSTR;
     V_BSTR(&vararg[2]) = SysAllocString(szEmpty);
     V_VT(&vararg[3]) = VT_VARIANT|VT_BYREF;
@@ -1373,7 +1399,8 @@ static void test_DispCallFunc(void)
     hr = DispCallFunc(pWidget, 9*sizeof(void*), CC_STDCALL, VT_UI4, 4, rgvt, rgpvarg, &varresult);
     ok_ole_success(hr, DispCallFunc);
     VariantClear(&varresult);
-    VariantClear(&vararg[1]);
+    SysFreeString(*V_BSTRREF(&vararg[1]));
+    CoTaskMemFree(V_BSTRREF(&vararg[1]));
     VariantClear(&vararg[2]);
     IWidget_Release(pWidget);
 }

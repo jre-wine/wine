@@ -1060,35 +1060,31 @@ static void test_substorage_share(void)
     if (r == S_OK)
     {
         r = IStorage_OpenStorage(stg, stgname, NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStorage should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStorage should fail %08x\n", r);
 
         if (r == S_OK)
             IStorage_Release(stg3);
 
         r = IStorage_OpenStorage(stg, stgname, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStorage should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStorage should fail %08x\n", r);
 
         if (r == S_OK)
             IStorage_Release(stg3);
 
         /* cannot rename the storage while it's open */
         r = IStorage_RenameElement(stg, stgname, othername);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->RenameElement should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->RenameElement should fail %08x\n", r);
         if (SUCCEEDED(r)) IStorage_RenameElement(stg, othername, stgname);
-
-#if 0
-        /* This crashes on Wine. */
 
         /* destroying an object while it's open invalidates it */
         r = IStorage_DestroyElement(stg, stgname);
         ok(r==S_OK, "IStorage->DestroyElement failed, hr=%08x\n", r);
 
         r = IStorage_CreateStream(stg2, stmname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stm);
-        todo_wine ok(r==STG_E_REVERTED, "IStorage->CreateStream failed, hr=%08x\n", r);
+        ok(r==STG_E_REVERTED, "IStorage->CreateStream failed, hr=%08x\n", r);
 
         if (r == S_OK)
             IStorage_Release(stm);
-#endif
 
         IStorage_Release(stg2);
     }
@@ -1100,20 +1096,20 @@ static void test_substorage_share(void)
     if (r == S_OK)
     {
         r = IStorage_OpenStream(stg, stmname, NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, &stm2);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStream should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStream should fail %08x\n", r);
 
         if (r == S_OK)
             IStorage_Release(stm2);
 
         r = IStorage_OpenStream(stg, stmname, NULL, STGM_READ | STGM_SHARE_EXCLUSIVE, 0, &stm2);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStream should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStream should fail %08x\n", r);
 
         if (r == S_OK)
             IStorage_Release(stm2);
 
         /* cannot rename the stream while it's open */
         r = IStorage_RenameElement(stg, stmname, othername);
-        todo_wine ok(r==STG_E_ACCESSDENIED, "IStorage->RenameElement should fail %08x\n", r);
+        ok(r==STG_E_ACCESSDENIED, "IStorage->RenameElement should fail %08x\n", r);
         if (SUCCEEDED(r)) IStorage_RenameElement(stg, othername, stmname);
 
         /* destroying an object while it's open invalidates it */
@@ -1121,7 +1117,7 @@ static void test_substorage_share(void)
         ok(r==S_OK, "IStorage->DestroyElement failed, hr=%08x\n", r);
 
         r = IStream_Write(stm, "this shouldn't work\n", 20, NULL);
-        todo_wine ok(r==STG_E_REVERTED, "IStream_Write should fail %08x\n", r);
+        ok(r==STG_E_REVERTED, "IStream_Write should fail %08x\n", r);
 
         IStorage_Release(stm);
     }
@@ -1283,6 +1279,68 @@ static void test_revert(void)
 
     IStream_Release(stm);
     IStream_Release(stg);
+
+    r = DeleteFileA(filenameA);
+    ok( r == TRUE, "deleted file\n");
+}
+
+static void test_parent_free(void)
+{
+    IStorage *stg = NULL, *stg2 = NULL, *stg3 = NULL;
+    HRESULT r;
+    IStream *stm = NULL;
+    static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stgname[] = { 'P','E','R','M','S','T','G',0 };
+    ULONG ref;
+    STATSTG statstg;
+
+    DeleteFileA(filenameA);
+
+    /* create the file */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE |STGM_TRANSACTED, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    /* create a new storage */
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    if (r == S_OK)
+    {
+        /* now create a stream inside the new storage */
+        r = IStorage_CreateStream(stg2, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+        ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+        if (r == S_OK)
+        {
+            /* create a storage inside the new storage */
+            r = IStorage_CreateStorage(stg2, stgname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stg3 );
+            ok(r==S_OK, "IStorage->CreateStorage failed\n");
+        }
+
+        /* free the parent */
+        ref = IStorage_Release(stg2);
+        ok(ref == 0, "IStorage still has %u references\n", ref);
+
+        /* child objects are invalid */
+        if (r == S_OK)
+        {
+            r = IStream_Write(stm, "this should fail\n", 17, NULL);
+            ok(r==STG_E_REVERTED, "IStream->Write sould fail, hr=%x\n", r);
+
+            IStream_Release(stm);
+
+            r = IStorage_Stat(stg3, &statstg, STATFLAG_NONAME);
+            ok(r==STG_E_REVERTED, "IStorage_Stat should fail %08x\n", r);
+
+            r = IStorage_SetStateBits(stg3, 1, 1);
+            ok(r==STG_E_REVERTED, "IStorage_Stat should fail %08x\n", r);
+
+            IStorage_Release(stg3);
+        }
+    }
+
+    IStorage_Release(stg);
 
     r = DeleteFileA(filenameA);
     ok( r == TRUE, "deleted file\n");
@@ -1716,9 +1774,10 @@ static void test_simple(void)
 {
     /* Tests for STGM_SIMPLE mode */
 
-    IStorage *stg;
+    IStorage *stg, *stg2;
     HRESULT r;
     IStream *stm;
+    static const WCHAR stgname[] = { 'S','t','g',0 };
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
     static const WCHAR stmname2[] = { 'S','m','a','l','l',0 };
     LARGE_INTEGER pos;
@@ -1730,6 +1789,10 @@ static void test_simple(void)
 
     r = StgCreateDocfile( filename, STGM_SIMPLE | STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stg);
     ok(r == S_OK, "got %08x\n", r);
+
+    r = IStorage_CreateStorage(stg, stgname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stg2);
+    ok(r == STG_E_INVALIDFUNCTION, "got %08x\n", r);
+    if (SUCCEEDED(r)) IStorage_Release(stg2);
 
     r = IStorage_CreateStream(stg, stmname, STGM_CREATE | STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm);
     ok(r == STG_E_INVALIDFLAG, "got %08x\n", r);
@@ -1794,6 +1857,10 @@ static void test_simple(void)
         return;
     }
     ok(r == S_OK, "got %08x\n", r);
+
+    r = IStorage_OpenStorage(stg, stgname, NULL, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, NULL, 0, &stg2);
+    ok(r == STG_E_INVALIDFUNCTION, "got %08x\n", r);
+    if (SUCCEEDED(r)) IStorage_Release(stg2);
 
     r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stm);
     ok(r == S_OK, "got %08x\n", r);
@@ -2422,6 +2489,7 @@ START_TEST(storage32)
     test_transact();
     test_substorage_share();
     test_revert();
+    test_parent_free();
     test_nonroot_transacted();
     test_ReadClassStm();
     test_access();

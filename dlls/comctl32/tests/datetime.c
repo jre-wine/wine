@@ -197,7 +197,7 @@ static void test_dtm_set_format(void)
     r = SendMessage(hWnd, DTM_SETSYSTEMTIME, 0, (LPARAM)&systime);
     expect(1, r);
     GetWindowText(hWnd, txt, 256);
-    todo_wine ok(strcmp(txt, "hh 12") == 0, "String mismatch (\"%s\" vs \"hh 12\")\n", txt);
+    ok(strcmp(txt, "hh 12") == 0, "String mismatch (\"%s\" vs \"hh 12\")\n", txt);
 
     DestroyWindow(hWnd);
 }
@@ -659,7 +659,7 @@ static void test_dtm_set_and_get_system_time(void)
 static void test_wm_set_get_text(void)
 {
     static const CHAR a_str[] = "a";
-    char buff[10];
+    char buff[16], time[16];
     HWND hWnd;
     LRESULT ret;
 
@@ -673,6 +673,9 @@ static void test_wm_set_get_text(void)
     buff[0] = 0;
     ret = SendMessage(hWnd, WM_GETTEXT, sizeof(buff), (LPARAM)buff);
     ok(strcmp(buff, a_str) != 0, "Expected text not to change, got %s\n", buff);
+
+    GetDateFormat(LOCALE_USER_DEFAULT, 0, NULL, NULL, time, sizeof(time));
+    ok(!strcmp(buff, time), "Expected %s, got %s\n", time, buff);
 
     DestroyWindow(hWnd);
 }

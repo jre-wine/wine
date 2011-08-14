@@ -59,9 +59,10 @@ extern NTSTATUS NTDLL_wait_for_multiple_objects( UINT count, const HANDLE *handl
                                                  const LARGE_INTEGER *timeout, HANDLE signal_object );
 
 /* init routines */
+extern NTSTATUS signal_alloc_thread( TEB **teb );
+extern void signal_free_thread( TEB *teb );
 extern void signal_init_thread( TEB *teb );
 extern void signal_init_process(void);
-extern size_t get_signal_stack_total_size(void);
 extern void version_init( const WCHAR *appname );
 extern void debug_init(void);
 extern HANDLE thread_init(void);
@@ -138,12 +139,17 @@ extern NTSTATUS TAPE_DeviceIoControl(HANDLE hDevice,
                                      LPVOID lpOutBuffer, DWORD nOutBufferSize);
 
 /* file I/O */
+struct stat;
 extern NTSTATUS FILE_GetNtStatus(void);
+extern NTSTATUS fill_stat_info( const struct stat *st, void *ptr, FILE_INFORMATION_CLASS class );
 extern void DIR_init_windows_dir( const WCHAR *windir, const WCHAR *sysdir );
 extern BOOL DIR_is_hidden_file( const UNICODE_STRING *name );
 extern NTSTATUS DIR_unmount_device( HANDLE handle );
 extern NTSTATUS DIR_get_unix_cwd( char **cwd );
 extern unsigned int DIR_get_drives_info( struct drive_info info[MAX_DOS_DRIVES] );
+extern NTSTATUS file_id_to_unix_file_name( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *unix_name_ret );
+extern NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *unix_name_ret,
+                                           UINT disposition );
 
 /* virtual memory */
 extern void virtual_get_system_info( SYSTEM_BASIC_INFORMATION *info );
@@ -196,40 +202,30 @@ struct debug_info
 /* thread private data, stored in NtCurrentTeb()->SystemReserved2 */
 struct ntdll_thread_data
 {
-    DWORD              fs;            /* 1d4/300 TEB selector */
-    DWORD              gs;            /* 1d8/304 libc selector; update winebuild if you move this! */
-    struct debug_info *debug_info;    /* 1dc/308 info for debugstr functions */
-    int                request_fd;    /* 1e0/310 fd for sending server requests */
-    int                reply_fd;      /* 1e4/314 fd for receiving server replies */
-    int                wait_fd[2];    /* 1e8/318 fd for sleeping server requests */
-    BOOL               wow64_redir;   /* 1f0/320 Wow64 filesystem redirection flag */
 #ifdef __i386__
-    void              *vm86_ptr;      /* 1f4/328 data for vm86 mode */
+    DWORD              dr0;           /* 1bc Debug registers */
+    DWORD              dr1;           /* 1c0 */
+    DWORD              dr2;           /* 1c4 */
+    DWORD              dr3;           /* 1c8 */
+    DWORD              dr6;           /* 1cc */
+    DWORD              dr7;           /* 1d0 */
+    DWORD              fs;            /* 1d4 TEB selector */
+    DWORD              gs;            /* 1d8 libc selector; update winebuild if you move this! */
+    void              *vm86_ptr;      /* 1dc data for vm86 mode */
 #else
-    void              *exit_frame;    /* 1f4/328 exit frame pointer */
+    void              *exit_frame;    /*    /2e8 exit frame pointer */
 #endif
-    pthread_t          pthread_id;    /* 1f8/330 pthread thread id */
+    struct debug_info *debug_info;    /* 1e0/2f0 info for debugstr functions */
+    int                request_fd;    /* 1e4/2f8 fd for sending server requests */
+    int                reply_fd;      /* 1e8/2fc fd for receiving server replies */
+    int                wait_fd[2];    /* 1ec/300 fd for sleeping server requests */
+    BOOL               wow64_redir;   /* 1f4/308 Wow64 filesystem redirection flag */
+    pthread_t          pthread_id;    /* 1f8/310 pthread thread id */
 };
 
 static inline struct ntdll_thread_data *ntdll_get_thread_data(void)
 {
-    return (struct ntdll_thread_data *)NtCurrentTeb()->SystemReserved2;
-}
-
-/* thread debug_registers, stored in NtCurrentTeb()->SpareBytes1 */
-struct ntdll_thread_regs
-{
-    DWORD dr0;
-    DWORD dr1;
-    DWORD dr2;
-    DWORD dr3;
-    DWORD dr6;
-    DWORD dr7;
-};
-
-static inline struct ntdll_thread_regs *ntdll_get_thread_regs(void)
-{
-    return (struct ntdll_thread_regs *)NtCurrentTeb()->SpareBytes1;
+    return (struct ntdll_thread_data *)NtCurrentTeb()->SpareBytes1;
 }
 
 /* Register functions */

@@ -699,10 +699,20 @@ static BOOL SYSPARAMS_Save( LPCWSTR lpRegKey, LPCWSTR lpValName, LPCWSTR lpValue
 
 /* Convenience function to save logical fonts */
 static BOOL SYSPARAMS_SaveLogFont( LPCWSTR lpRegKey, LPCWSTR lpValName,
-                                    LPLOGFONTW plf, UINT fWinIni )
+                                   const LOGFONTW *plf, UINT fWinIni )
 {
-    return SYSPARAMS_SaveRaw( lpRegKey, lpValName, (const BYTE*)plf, 
-        sizeof( LOGFONTW), REG_BINARY, fWinIni );
+    LOGFONTW lf = *plf;
+    int len;
+
+    /* Zero pad the end of lfFaceName so we don't write uninitialised
+       data to the registry */
+    lf.lfFaceName[LF_FACESIZE-1] = 0;
+    len = strlenW(lf.lfFaceName);
+    if(len < LF_FACESIZE-1)
+        memset(lf.lfFaceName + len, 0, (LF_FACESIZE - 1 - len) * sizeof(WCHAR));
+
+    return SYSPARAMS_SaveRaw( lpRegKey, lpValName, (const BYTE*)&lf,
+                              sizeof(LOGFONTW), REG_BINARY, fWinIni );
 }
 
 
@@ -2352,6 +2362,16 @@ BOOL WINAPI SystemParametersInfoW( UINT uiAction, UINT uiParam,
         /* FIXME: this probably should mask other UI effect values when unset */
         ret = set_user_pref_param( 3, 0x80, PtrToUlong(pvParam), fWinIni );
         break;
+
+    /* _WIN32_WINNT >= 0x600 */
+    WINE_SPI_FIXME(SPI_GETDISABLEOVERLAPPEDCONTENT);
+    WINE_SPI_FIXME(SPI_SETDISABLEOVERLAPPEDCONTENT);
+    WINE_SPI_FIXME(SPI_GETCLIENTAREAANIMATION);
+    WINE_SPI_FIXME(SPI_SETCLIENTAREAANIMATION);
+    WINE_SPI_FIXME(SPI_GETCLEARTYPE);
+    WINE_SPI_FIXME(SPI_SETCLEARTYPE);
+    WINE_SPI_FIXME(SPI_GETSPEECHRECOGNITION);
+    WINE_SPI_FIXME(SPI_SETSPEECHRECOGNITION);
 
     case SPI_GETFOREGROUNDLOCKTIMEOUT:          /* 0x2000  _WIN32_WINNT >= 0x500 || _WIN32_WINDOW > 0x400 */
         ret = get_uint_param( SPI_SETFOREGROUNDLOCKTIMEOUT_IDX,

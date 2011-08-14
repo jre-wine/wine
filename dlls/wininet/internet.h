@@ -143,7 +143,7 @@ typedef struct {
     DWORD (*ReadFile)(object_header_t*,void*,DWORD,DWORD*);
     DWORD (*ReadFileExA)(object_header_t*,INTERNET_BUFFERSA*,DWORD,DWORD_PTR);
     DWORD (*ReadFileExW)(object_header_t*,INTERNET_BUFFERSW*,DWORD,DWORD_PTR);
-    BOOL (*WriteFile)(object_header_t*,const void*,DWORD,DWORD*);
+    DWORD (*WriteFile)(object_header_t*,const void*,DWORD,DWORD*);
     DWORD (*QueryDataAvailable)(object_header_t*,DWORD*,DWORD,DWORD_PTR);
     DWORD (*FindNextFileW)(object_header_t*,void*);
 } object_vtbl_t;
@@ -411,14 +411,6 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest);
 LPSTR INTERNET_GetResponseBuffer(void);
 LPSTR INTERNET_GetNextLine(INT nSocket, LPDWORD dwLen);
 
-BOOLAPI HTTP_HttpSendRequestW(http_request_t *req, LPCWSTR lpszHeaders,
-	DWORD dwHeaderLength, LPVOID lpOptional, DWORD dwOptionalLength,
-	DWORD dwContentLength, BOOL bEndRequest);
-INTERNETAPI HINTERNET WINAPI HTTP_HttpOpenRequestW(http_session_t *session,
-	LPCWSTR lpszVerb, LPCWSTR lpszObjectName, LPCWSTR lpszVersion,
-	LPCWSTR lpszReferrer , LPCWSTR *lpszAcceptTypes,
-	DWORD dwFlags, DWORD_PTR dwContext);
-
 VOID SendAsyncCallback(object_header_t *hdr, DWORD_PTR dwContext,
                        DWORD dwInternetStatus, LPVOID lpvStatusInfo,
                        DWORD dwStatusInfoLength);
@@ -428,21 +420,22 @@ VOID INTERNET_SendCallback(object_header_t *hdr, DWORD_PTR dwContext,
                            DWORD dwStatusInfoLength);
 
 BOOL NETCON_connected(WININET_NETCONNECTION *connection);
-BOOL NETCON_init(WININET_NETCONNECTION *connnection, BOOL useSSL);
+DWORD NETCON_init(WININET_NETCONNECTION *connnection, BOOL useSSL);
 void NETCON_unload(void);
-BOOL NETCON_create(WININET_NETCONNECTION *connection, int domain,
+DWORD NETCON_create(WININET_NETCONNECTION *connection, int domain,
 	      int type, int protocol);
-BOOL NETCON_close(WININET_NETCONNECTION *connection);
-BOOL NETCON_connect(WININET_NETCONNECTION *connection, const struct sockaddr *serv_addr,
+DWORD NETCON_close(WININET_NETCONNECTION *connection);
+DWORD NETCON_connect(WININET_NETCONNECTION *connection, const struct sockaddr *serv_addr,
 		    unsigned int addrlen);
-BOOL NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname);
-BOOL NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len, int flags,
+DWORD NETCON_secure_connect(WININET_NETCONNECTION *connection, LPCWSTR hostname);
+DWORD NETCON_send(WININET_NETCONNECTION *connection, const void *msg, size_t len, int flags,
 		int *sent /* out */);
-BOOL NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
+DWORD NETCON_recv(WININET_NETCONNECTION *connection, void *buf, size_t len, int flags,
 		int *recvd /* out */);
 BOOL NETCON_query_data_available(WININET_NETCONNECTION *connection, DWORD *available);
 LPCVOID NETCON_GetCert(WININET_NETCONNECTION *connection);
 DWORD NETCON_set_timeout(WININET_NETCONNECTION *connection, BOOL send, int value);
+int sock_get_error(int);
 
 extern void URLCacheContainers_CreateDefaults(void);
 extern void URLCacheContainers_DeleteAll(void);

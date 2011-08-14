@@ -161,7 +161,6 @@ typedef struct tagDC_FUNCS
     COLORREF (CDECL *pSetBkColor)(PHYSDEV,COLORREF);
     INT      (CDECL *pSetBkMode)(PHYSDEV,INT);
     COLORREF (CDECL *pSetDCBrushColor)(PHYSDEV, COLORREF);
-    DWORD    (CDECL *pSetDCOrg)(PHYSDEV,INT,INT);
     COLORREF (CDECL *pSetDCPenColor)(PHYSDEV, COLORREF);
     UINT     (CDECL *pSetDIBColorTable)(PHYSDEV,UINT,UINT,const RGBQUAD*);
     INT      (CDECL *pSetDIBits)(PHYSDEV,HBITMAP,UINT,UINT,LPCVOID,const BITMAPINFO*,UINT);
@@ -200,6 +199,7 @@ typedef struct tagDC_FUNCS
     /* OpenGL32 */
     BOOL     (CDECL *pwglCopyContext)(HGLRC, HGLRC, UINT);
     HGLRC    (CDECL *pwglCreateContext)(PHYSDEV);
+    HGLRC    (CDECL *pwglCreateContextAttribsARB)(PHYSDEV, HGLRC, const int*);
     BOOL     (CDECL *pwglDeleteContext)(HGLRC);
     PROC     (CDECL *pwglGetProcAddress)(LPCSTR);
     HDC      (CDECL *pwglGetPbufferDCARB)(PHYSDEV, void*);
@@ -233,12 +233,6 @@ typedef struct tagGdiPath
 } GdiPath;
 
 typedef struct tagGdiFont GdiFont;
-
-struct saved_visrgn
-{
-    struct saved_visrgn *next;
-    HRGN                 hrgn;
-};
 
 typedef struct tagDC
 {
@@ -302,7 +296,6 @@ typedef struct tagDC
     INT           MapMode;
     INT           GraphicsMode;      /* Graphics mode */
     ABORTPROC     pAbortProc;        /* AbortProc for Printing */
-    ABORTPROC16   pAbortProc16;
     INT           CursPosX;          /* Current position */
     INT           CursPosY;
     INT           ArcDirection;
@@ -311,8 +304,6 @@ typedef struct tagDC
     XFORM         xformVport2World;  /* Inverse of the above transformation */
     BOOL          vport2WorldValid;  /* Is xformVport2World valid? */
     RECT          BoundsRect;        /* Current bounding rect */
-
-    struct saved_visrgn *saved_visrgn;
 } DC;
 
   /* DC flags */
@@ -368,9 +359,6 @@ extern BOOL BIDI_Reorder( LPCWSTR lpString, INT uCount, DWORD dwFlags, DWORD dwW
 extern HBITMAP BITMAP_CopyBitmap( HBITMAP hbitmap ) DECLSPEC_HIDDEN;
 extern BOOL BITMAP_SetOwnerDC( HBITMAP hbitmap, DC *dc ) DECLSPEC_HIDDEN;
 extern INT BITMAP_GetWidthBytes( INT bmWidth, INT bpp ) DECLSPEC_HIDDEN;
-
-/* brush.c */
-extern BOOL BRUSH_SetSolid( HGDIOBJ handle, COLORREF new_color ) DECLSPEC_HIDDEN;
 
 /* clipping.c */
 extern void CLIPPING_UpdateGCRegion( DC * dc ) DECLSPEC_HIDDEN;
@@ -459,9 +447,6 @@ extern BOOL GDI_hdc_not_using_object(HGDIOBJ obj, HDC hdc) DECLSPEC_HIDDEN;
 /* metafile.c */
 extern HMETAFILE MF_Create_HMETAFILE(METAHEADER *mh) DECLSPEC_HIDDEN;
 extern METAHEADER *MF_CreateMetaHeaderDisk(METAHEADER *mr, LPCVOID filename, BOOL unicode ) DECLSPEC_HIDDEN;
-extern METAHEADER *MF_ReadMetaFile(HANDLE hfile) DECLSPEC_HIDDEN;
-extern METAHEADER *MF_LoadDiskBasedMetaFile(METAHEADER *mh) DECLSPEC_HIDDEN;
-extern BOOL MF_PlayMetaFile( HDC hdc, METAHEADER *mh) DECLSPEC_HIDDEN;
 
 /* path.c */
 
@@ -500,7 +485,6 @@ extern POINT *GDI_Bezier( const POINT *Points, INT count, INT *nPtsOut ) DECLSPE
 extern HPALETTE WINAPI GDISelectPalette( HDC hdc, HPALETTE hpal, WORD wBkg);
 extern UINT WINAPI GDIRealizePalette( HDC hdc );
 extern HPALETTE PALETTE_Init(void) DECLSPEC_HIDDEN;
-extern HPALETTE hPrimaryPalette DECLSPEC_HIDDEN;
 
 /* region.c */
 extern BOOL REGION_FrameRgn( HRGN dest, HRGN src, INT x, INT y ) DECLSPEC_HIDDEN;

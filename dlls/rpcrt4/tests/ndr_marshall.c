@@ -258,7 +258,7 @@ static void test_pointer_marshal(const unsigned char *formattypes,
 
     StubMsg.Buffer = StubMsg.BufferStart;
     StubMsg.MemorySize = 0;
-    mem_orig = mem = HeapAlloc(GetProcessHeap(), 0, size); 
+    mem_orig = mem = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size);
 
     if(formattypes[1] & 0x10 /* FC_POINTER_DEREF */)
         *(void**)mem = NULL;
@@ -1045,6 +1045,9 @@ static void test_fullpointer_xlat(void)
     ok(RefId == 0, "RefId should be 0 instead of 0x%x\n", RefId);
 
     /* "unmarshaling" phase */
+
+    ret = NdrFullPointerQueryRefId(pXlatTables, 0x0, 0, &Pointer);
+    ok(ret == 1, "ret should be 1 instead of 0x%x\n", ret);
 
     ret = NdrFullPointerQueryRefId(pXlatTables, 0x2, 0, &Pointer);
     ok(ret == 0, "ret should be 0 instead of 0x%x\n", ret);
@@ -1876,6 +1879,7 @@ static void test_conf_complex_struct(void)
     StubMsg.pfnFree(mem);
 
     HeapFree(GetProcessHeap(), 0, StubMsg.RpcMsg->Buffer);
+    HeapFree(GetProcessHeap(), 0, memsrc);
 }
 
 static void test_ndr_buffer(void)
