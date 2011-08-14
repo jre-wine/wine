@@ -1,8 +1,24 @@
-wine-unstable (1.1.33-1) UNRELEASED; urgency=low
+wine-unstable (1.1.33-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.33, released Nov 13, 2009.
+    - Gecko now installed at wineprefix creation time.
+    - Better support for certificates in crypt32.
+    - Improved sound support in mciwave.
+    - Some more Direct3D 10 functions.
+    - Many cleanups for issues spotted by Valgrind.
+    - Various bug fixes.
+  * Make wine-bin depend on libwine-gecko.
+  * Updated mime-info.keys to use "wine-safe start /unix" as the MIME
+    handler for .exe files.
+  * Add proper package suffixes to the installed reportbug control files.
+  * On amd64, build-depend on ia32-libs-dev. Closes: #618224.
+  * Installed mshta.exe.so into libwine-bin.
+  * Installed function_grep.pl into libwine-dev (in /usr/share/wine).
+  * Clean up leftover file debian/noexec.diff.
+  * Temporarily force gcc 4.4 until packaging a release that works with
+    newer gcc versions.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Fri, 13 Nov 2009 21:14:45 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sun, 14 Aug 2011 14:45:42 +0200
 
 wine-unstable (1.1.32-1) unstable; urgency=low
 
