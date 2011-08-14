@@ -40,7 +40,7 @@ MULTIARCH=n
 # Win64 is not ready yet
 ENABLE_WIN64=n
 
-CC=gcc
+CC=gcc-4.4
 ifneq (n,$(MULTIARCH))
 LIBDIR=usr/lib/$(DEB_HOST_GNU_TYPE)
 else
