@@ -285,7 +285,7 @@ install-arch64-stamp: build-arch64-stamp $(patsubst build%,install-arch%-stamp,$
 	dh_testroot
 
 	# install wine, libwine, fonts, and tools
-	$(MAKE) -C build64 install $(AMD64_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp/usr
+	$(MAKE) -C build64 install $(AMD64_OVERRIDES) DESTDIR=$(CURDIR)/debian/tmp
 	# move the real binaries into /$(AMD64_WINEDIR)
 	mv debian/tmp/usr/bin/wine debian/tmp/$(AMD64_WINEDIR)/wine.bin
 	mv debian/tmp/usr/bin/wineserver debian/tmp/$(AMD64_WINEDIR)/wineserver
