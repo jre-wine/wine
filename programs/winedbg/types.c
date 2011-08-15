@@ -561,13 +561,13 @@ static BOOL CALLBACK print_types_cb(PSYMBOL_INFO sym, ULONG size, void* ctx)
     struct dbg_type     type;
     type.module = sym->ModBase;
     type.id = sym->TypeIndex;
-    dbg_printf("Mod: %08x ID: %08lx\n", type.module, type.id);
+    dbg_printf("Mod: %08lx ID: %08lx\n", type.module, type.id);
     types_print_type(&type, TRUE);
     dbg_printf("\n");
     return TRUE;
 }
 
-static BOOL CALLBACK print_types_mod_cb(PCSTR mod_name, ULONG base, PVOID ctx)
+static BOOL CALLBACK print_types_mod_cb(PCSTR mod_name, DWORD64 base, PVOID ctx)
 {
     return SymEnumTypes(dbg_curr_process->handle, base, print_types_cb, ctx);
 }
@@ -579,7 +579,7 @@ int print_types(void)
         dbg_printf("No known process, cannot print types\n");
         return 0;
     }
-    SymEnumerateModules(dbg_curr_process->handle, print_types_mod_cb, NULL);
+    SymEnumerateModules64(dbg_curr_process->handle, print_types_mod_cb, NULL);
     return 0;
 }
 
@@ -784,6 +784,24 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
 
     switch (type->id)
     {
+    case dbg_itype_unsigned_long_int:
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
+        case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
+        case TI_GET_BASETYPE:   X(DWORD)   = btUInt; break;
+        default: WINE_FIXME("unsupported %u for u-long int\n", ti); return FALSE;
+        }
+        break;
+    case dbg_itype_signed_long_int:
+        switch (ti)
+        {
+        case TI_GET_SYMTAG:     X(DWORD)   = SymTagBaseType; break;
+        case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
+        case TI_GET_BASETYPE:   X(DWORD)   = btInt; break;
+        default: WINE_FIXME("unsupported %u for s-long int\n", ti); return FALSE;
+        }
+        break;
     case dbg_itype_unsigned_int:
         switch (ti)
         {
@@ -851,7 +869,7 @@ BOOL types_get_info(const struct dbg_type* type, IMAGEHLP_SYMBOL_TYPE_INFO ti, v
         switch (ti)
         {
         case TI_GET_SYMTAG:     X(DWORD)   = SymTagPointerType; break;
-        case TI_GET_LENGTH:     X(DWORD64) = 4; break;
+        case TI_GET_LENGTH:     X(DWORD64) = ADDRSIZE; break;
         case TI_GET_TYPE:       X(DWORD)   = dbg_itype_char; break;
         default: WINE_FIXME("unsupported %u for a string\n", ti); return FALSE;
         }

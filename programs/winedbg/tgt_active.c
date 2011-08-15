@@ -196,14 +196,14 @@ static unsigned dbg_exception_prolog(BOOL is_debug, BOOL first_chance, const EXC
         SYMBOL_INFO*        si = (SYMBOL_INFO*)buffer;
         void*               lin = memory_to_linear_addr(&addr);
         DWORD64             disp64;
-        IMAGEHLP_LINE       il;
+        IMAGEHLP_LINE64     il;
         DWORD               disp;
 
         si->SizeOfStruct = sizeof(*si);
         si->MaxNameLen   = 256;
         il.SizeOfStruct = sizeof(il);
         if (SymFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp64, si) &&
-            SymGetLineFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
+            SymGetLineFromAddr64(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
         {
             if ((!last_name || strcmp(last_name, si->Name)) ||
                 (!last_file || strcmp(last_file, il.FileName)))
@@ -616,8 +616,8 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         break_set_xpoints(TRUE);
         if (DBG_IVAR(BreakOnDllLoad))
         {
-            dbg_printf("Stopping on DLL %s loading at 0x%08lx\n",
-                       dbg_W2A(u.buffer, -1), (unsigned long)de->u.LoadDll.lpBaseOfDll);
+            dbg_printf("Stopping on DLL %s loading at %p\n",
+                       dbg_W2A(u.buffer, -1), de->u.LoadDll.lpBaseOfDll);
             if (dbg_fetch_context()) cont = 0;
         }
         break;
@@ -626,9 +626,8 @@ static unsigned dbg_handle_debug_event(DEBUG_EVENT* de)
         WINE_TRACE("%04x:%04x: unload DLL @%p\n",
                    de->dwProcessId, de->dwThreadId,
                    de->u.UnloadDll.lpBaseOfDll);
-        break_delete_xpoints_from_module((unsigned long)de->u.UnloadDll.lpBaseOfDll);
-        SymUnloadModule(dbg_curr_process->handle, 
-                        (unsigned long)de->u.UnloadDll.lpBaseOfDll);
+        break_delete_xpoints_from_module((DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
+        SymUnloadModule64(dbg_curr_process->handle, (DWORD_PTR)de->u.UnloadDll.lpBaseOfDll);
         break;
 
     case OUTPUT_DEBUG_STRING_EVENT:
@@ -676,12 +675,12 @@ static void dbg_resume_debuggee(DWORD cont)
         if (dbg_curr_thread)
         {
             if (!SetThreadContext(dbg_curr_thread->handle, &dbg_context))
-                dbg_printf("Cannot set ctx on %04x\n", dbg_curr_tid);
+                dbg_printf("Cannot set ctx on %04lx\n", dbg_curr_tid);
         }
     }
     dbg_interactiveP = FALSE;
     if (!ContinueDebugEvent(dbg_curr_pid, dbg_curr_tid, cont))
-        dbg_printf("Cannot continue on %04x (%08x)\n", dbg_curr_tid, cont);
+        dbg_printf("Cannot continue on %04lx (%08x)\n", dbg_curr_tid, cont);
 }
 
 static void wait_exception(void)
@@ -745,8 +744,8 @@ static	unsigned dbg_start_debuggee(LPSTR cmdLine)
     flags = DEBUG_PROCESS | CREATE_NEW_CONSOLE;
     if (!DBG_IVAR(AlsoDebugProcChild)) flags |= DEBUG_ONLY_THIS_PROCESS;
 
-    if (!CreateProcess(NULL, cmdLine, NULL, NULL, FALSE, flags,
-                       NULL, NULL, &startup, &info))
+    if (!CreateProcessA(NULL, cmdLine, NULL, NULL, FALSE, flags,
+                        NULL, NULL, &startup, &info))
     {
 	dbg_printf("Couldn't start process '%s'\n", cmdLine);
 	return FALSE;
@@ -796,7 +795,7 @@ void	dbg_run_debuggee(const char* args)
     }
 }
 
-static BOOL     str2int(const char* str, DWORD* val)
+static BOOL str2int(const char* str, DWORD_PTR* val)
 {
     char*   ptr;
 
@@ -813,7 +812,7 @@ static BOOL     str2int(const char* str, DWORD* val)
  */
 enum dbg_start  dbg_active_attach(int argc, char* argv[])
 {
-    DWORD       pid, evt;
+    DWORD_PTR pid, evt;
 
     /* try the form <myself> pid */
     if (argc == 1 && str2int(argv[0], &pid) && pid != 0)
@@ -833,7 +832,7 @@ enum dbg_start  dbg_active_attach(int argc, char* argv[])
         }
         if (!SetEvent((HANDLE)evt))
         {
-            WINE_ERR("Invalid event handle: %x\n", evt);
+            WINE_ERR("Invalid event handle: %lx\n", evt);
             return start_error_init;
         }
         CloseHandle((HANDLE)evt);
@@ -950,8 +949,8 @@ enum dbg_start dbg_active_auto(int argc, char* argv[])
         {
             char        path[MAX_PATH];
 
-            GetTempPath(sizeof(path), path);
-            GetTempFileName(path, "WD", 0, tmp + 10);
+            GetTempPathA(sizeof(path), path);
+            GetTempFileNameA(path, "WD", 0, tmp + 10);
         }
         else strcpy(tmp + 10, file);
         strcat(tmp, "\"");

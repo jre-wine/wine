@@ -31,6 +31,10 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 
+static const WCHAR autoW[] = {'a','u','t','o',0};
+static const WCHAR yesW[] = {'y','e','s',0};
+static const WCHAR noW[] = {'n','o',0};
+
 HRESULT set_frame_doc(HTMLFrameBase *frame, nsIDOMDocument *nsdoc)
 {
     nsIDOMWindow *nswindow;
@@ -145,8 +149,42 @@ static HRESULT WINAPI HTMLFrameBase_put_name(IHTMLFrameBase *iface, BSTR v)
 static HRESULT WINAPI HTMLFrameBase_get_name(IHTMLFrameBase *iface, BSTR *p)
 {
     HTMLFrameBase *This = HTMLFRAMEBASE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString nsstr;
+    const PRUnichar *strdata;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->nsframe) {
+        nsAString_Init(&nsstr, NULL);
+        nsres = nsIDOMHTMLFrameElement_GetName(This->nsframe, &nsstr);
+    }else if(This->nsiframe) {
+        nsAString_Init(&nsstr, NULL);
+        nsres = nsIDOMHTMLIFrameElement_GetName(This->nsiframe, &nsstr);
+    }else {
+        ERR("No attached ns frame object\n");
+        return E_UNEXPECTED;
+    }
+
+    if(NS_FAILED(nsres)) {
+        ERR("GetName failed: 0x%08x\n", nsres);
+        nsAString_Finish(&nsstr);
+        return E_FAIL;
+    }
+
+    nsAString_GetData(&nsstr, &strdata);
+    if(*strdata) {
+        *p = SysAllocString(strdata);
+        if(!*p) {
+            nsAString_Finish(&nsstr);
+            return E_OUTOFMEMORY;
+        }
+    }else
+        *p = NULL;
+
+    nsAString_Finish(&nsstr);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFrameBase_put_border(IHTMLFrameBase *iface, VARIANT v)
@@ -236,15 +274,70 @@ static HRESULT WINAPI HTMLFrameBase_get_noResize(IHTMLFrameBase *iface, VARIANT_
 static HRESULT WINAPI HTMLFrameBase_put_scrolling(IHTMLFrameBase *iface, BSTR v)
 {
     HTMLFrameBase *This = HTMLFRAMEBASE_THIS(iface);
-    FIXME("(%p)->(%s)\n", This, debugstr_w(v));
-    return E_NOTIMPL;
+    nsAString nsstr;
+    nsresult nsres;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_w(v));
+
+    if(!(!strcmpiW(v, yesW) || !strcmpiW(v, noW) || !strcmpiW(v, autoW)))
+        return E_INVALIDARG;
+
+    if(This->nsframe) {
+        nsAString_Init(&nsstr, v);
+        nsres = nsIDOMHTMLFrameElement_SetScrolling(This->nsframe, &nsstr);
+    }else if(This->nsiframe) {
+        nsAString_Init(&nsstr, v);
+        nsres = nsIDOMHTMLIFrameElement_SetScrolling(This->nsiframe, &nsstr);
+    }else {
+        ERR("No attached ns frame object\n");
+        return E_UNEXPECTED;
+    }
+    nsAString_Finish(&nsstr);
+
+    if(NS_FAILED(nsres)) {
+        ERR("SetScrolling failed: 0x%08x\n", nsres);
+        return E_FAIL;
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLFrameBase_get_scrolling(IHTMLFrameBase *iface, BSTR *p)
 {
     HTMLFrameBase *This = HTMLFRAMEBASE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    nsAString nsstr;
+    const PRUnichar *strdata;
+    nsresult nsres;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    if(This->nsframe) {
+        nsAString_Init(&nsstr, NULL);
+        nsres = nsIDOMHTMLFrameElement_GetScrolling(This->nsframe, &nsstr);
+    }else if(This->nsiframe) {
+        nsAString_Init(&nsstr, NULL);
+        nsres = nsIDOMHTMLIFrameElement_GetScrolling(This->nsiframe, &nsstr);
+    }else {
+        ERR("No attached ns frame object\n");
+        return E_UNEXPECTED;
+    }
+
+    if(NS_FAILED(nsres)) {
+        ERR("GetScrolling failed: 0x%08x\n", nsres);
+        nsAString_Finish(&nsstr);
+        return E_FAIL;
+    }
+
+    nsAString_GetData(&nsstr, &strdata);
+
+    if(*strdata)
+        *p = SysAllocString(strdata);
+    else
+        *p = SysAllocString(autoW);
+
+    nsAString_Finish(&nsstr);
+
+    return *p ? S_OK : E_OUTOFMEMORY;
 }
 
 static const IHTMLFrameBaseVtbl HTMLFrameBaseVtbl = {
@@ -443,16 +536,31 @@ void HTMLFrameBase_destructor(HTMLFrameBase *This)
     if(This->content_window)
         This->content_window->frame_element = NULL;
 
+    if(This->nsframe)
+        nsIDOMHTMLFrameElement_Release(This->nsframe);
+    if(This->nsiframe)
+        nsIDOMHTMLIFrameElement_Release(This->nsiframe);
+
     HTMLElement_destructor(&This->element.node);
 }
 
 void HTMLFrameBase_Init(HTMLFrameBase *This, HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem,
         dispex_static_data_t *dispex_data)
 {
+    nsresult nsres;
+
     This->lpIHTMLFrameBaseVtbl = &HTMLFrameBaseVtbl;
     This->lpIHTMLFrameBase2Vtbl = &HTMLFrameBase2Vtbl;
 
     HTMLElement_Init(&This->element, doc, nselem, dispex_data);
+
+    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLFrameElement, (void**)&This->nsframe);
+    if(NS_FAILED(nsres)) {
+        nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLIFrameElement, (void**)&This->nsiframe);
+        if(NS_FAILED(nsres))
+            ERR("Could not get nsIDOMHTML[I]Frame interface\n");
+    }else
+        This->nsiframe = NULL;
 }
 
 typedef struct {
@@ -489,20 +597,38 @@ static HRESULT HTMLFrameElement_get_document(HTMLDOMNode *iface, IDispatch **p)
     return S_OK;
 }
 
+static HRESULT HTMLFrameElement_get_dispid(HTMLDOMNode *iface, BSTR name,
+        DWORD grfdex, DISPID *pid)
+{
+    HTMLFrameElement *This = HTMLFRAME_NODE_THIS(iface);
+
+    if(!This->framebase.content_window)
+        return DISP_E_UNKNOWNNAME;
+
+    return search_window_props(This->framebase.content_window, name, grfdex, pid);
+}
+
+static HRESULT HTMLFrameElement_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid,
+        WORD flags, DISPPARAMS *params, VARIANT *res, EXCEPINFO *ei, IServiceProvider *caller)
+{
+    HTMLFrameElement *This = HTMLFRAME_NODE_THIS(iface);
+
+    if(!This->framebase.content_window) {
+        ERR("no content window to invoke on\n");
+        return E_FAIL;
+    }
+
+    return IDispatchEx_InvokeEx(DISPATCHEX(This->framebase.content_window), id, lcid, flags, params, res, ei, caller);
+}
+
 static HRESULT HTMLFrameElement_bind_to_tree(HTMLDOMNode *iface)
 {
     HTMLFrameElement *This = HTMLFRAME_NODE_THIS(iface);
-    nsIDOMHTMLFrameElement *nsframe;
     nsIDOMDocument *nsdoc;
     nsresult nsres;
     HRESULT hres;
 
-    nsres = nsIDOMHTMLElement_QueryInterface(This->framebase.element.nselem, &IID_nsIDOMHTMLFrameElement, (void**)&nsframe);
-    if(NS_FAILED(nsres))
-        return E_FAIL;
-
-    nsres = nsIDOMHTMLFrameElement_GetContentDocument(nsframe, &nsdoc);
-    nsIDOMHTMLFrameElement_Release(nsframe);
+    nsres = nsIDOMHTMLFrameElement_GetContentDocument(This->framebase.nsframe, &nsdoc);
     if(NS_FAILED(nsres) || !nsdoc) {
         ERR("GetContentDocument failed: %08x\n", nsres);
         return E_FAIL;
@@ -524,24 +650,18 @@ static const NodeImplVtbl HTMLFrameElementImplVtbl = {
     NULL,
     HTMLFrameElement_get_document,
     NULL,
-    NULL,
-    NULL,
+    HTMLFrameElement_get_dispid,
+    HTMLFrameElement_invoke,
     HTMLFrameElement_bind_to_tree
 };
 
 HTMLElement *HTMLFrameElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem)
 {
-    nsIDOMHTMLFrameElement *nsframe;
     HTMLFrameElement *ret;
-    nsresult nsres;
 
     ret = heap_alloc_zero(sizeof(HTMLFrameElement));
 
     ret->framebase.element.node.vtbl = &HTMLFrameElementImplVtbl;
-
-    nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLFrameElement, (void**)&nsframe);
-    if(NS_FAILED(nsres))
-        ERR("Could not get nsIDOMHTMLFrameElement iface: %08x\n", nsres);
 
     HTMLFrameBase_Init(&ret->framebase, doc, nselem, NULL);
 

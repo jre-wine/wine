@@ -216,15 +216,24 @@ void memory_examine(const struct dbg_lvalue *lvalue, int count, char format)
                 }                                                       \
             }                                                           \
             dbg_printf("\n");                                           \
-        }                                                               \
-	return
+        }
 #define DO_DUMP(_t,_l,_f) DO_DUMP2(_t,_l,_f,_v)
 
-    case 'x': DO_DUMP(int, 4, " %8.8x");
-    case 'd': DO_DUMP(unsigned int, 4, " %4.4d");
-    case 'w': DO_DUMP(unsigned short, 8, " %04x");
-    case 'c': DO_DUMP2(char, 32, " %c", (_v < 0x20) ? ' ' : _v);
-    case 'b': DO_DUMP2(char, 16, " %02x", (_v) & 0xff);
+    case 'x': DO_DUMP(int, 4, " %8.8x"); break;
+    case 'd': DO_DUMP(unsigned int, 4, " %4.4d"); break;
+    case 'w': DO_DUMP(unsigned short, 8, " %04x"); break;
+    case 'a':
+        if (sizeof(DWORD_PTR) == 4)
+        {
+            DO_DUMP(DWORD_PTR, 4, " %8.8lx");
+        }
+        else
+        {
+            DO_DUMP(DWORD_PTR, 2, " %16.16lx");
+        }
+        break;
+    case 'c': DO_DUMP2(char, 32, " %c", (_v < 0x20) ? ' ' : _v); break;
+    case 'b': DO_DUMP2(char, 16, " %02x", (_v) & 0xff); break;
     }
 }
 
@@ -588,11 +597,11 @@ void print_address(const ADDRESS64* addr, BOOLEAN with_line)
     if (disp64) dbg_printf("+0x%lx", (DWORD_PTR)disp64);
     if (with_line)
     {
-        IMAGEHLP_LINE               il;
+        IMAGEHLP_LINE64             il;
         IMAGEHLP_MODULE             im;
 
         il.SizeOfStruct = sizeof(il);
-        if (SymGetLineFromAddr(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
+        if (SymGetLineFromAddr64(dbg_curr_process->handle, (DWORD_PTR)lin, &disp, &il))
             dbg_printf(" [%s:%u]", il.FileName, il.LineNumber);
         im.SizeOfStruct = sizeof(im);
         if (SymGetModuleInfo(dbg_curr_process->handle, (DWORD_PTR)lin, &im))
@@ -639,7 +648,7 @@ void memory_disassemble(const struct dbg_lvalue* xstart,
         memory_disasm_one_insn(&last);
 }
 
-BOOL memory_get_register(DWORD regno, DWORD** value, char* buffer, int len)
+BOOL memory_get_register(DWORD regno, DWORD_PTR** value, char* buffer, int len)
 {
     const struct dbg_internal_var*  div;
 

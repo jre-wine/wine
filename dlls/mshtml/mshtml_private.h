@@ -314,7 +314,7 @@ struct HTMLDocument {
     const IOleDocumentVtbl                *lpOleDocumentVtbl;
     const IOleDocumentViewVtbl            *lpOleDocumentViewVtbl;
     const IOleInPlaceActiveObjectVtbl     *lpOleInPlaceActiveObjectVtbl;
-    const IViewObject2Vtbl                *lpViewObject2Vtbl;
+    const IViewObjectExVtbl               *lpViewObjectExVtbl;
     const IOleInPlaceObjectWindowlessVtbl *lpOleInPlaceObjectWindowlessVtbl;
     const IServiceProviderVtbl            *lpServiceProviderVtbl;
     const IOleCommandTargetVtbl           *lpOleCommandTargetVtbl;
@@ -323,6 +323,7 @@ struct HTMLDocument {
     const IPersistStreamInitVtbl          *lpPersistStreamInitVtbl;
     const IDispatchExVtbl                 *lpIDispatchExVtbl;
     const ISupportErrorInfoVtbl           *lpSupportErrorInfoVtbl;
+    const IObjectWithSiteVtbl             *lpObjectWithSiteVtbl;
 
     IUnknown *unk_impl;
     IDispatchEx *dispex;
@@ -338,6 +339,8 @@ struct HTMLDocument {
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
     ConnectionPoint cp_propnotif;
+
+    IOleAdviseHolder *advise_holder;
 };
 
 static inline HRESULT htmldoc_query_interface(HTMLDocument *This, REFIID riid, void **ppv)
@@ -377,12 +380,14 @@ struct HTMLDocumentObj {
     HWND hwnd;
     HWND tooltips_hwnd;
 
+    BOOL request_uiactivate;
     BOOL in_place_active;
     BOOL ui_active;
     BOOL window_active;
     BOOL has_key_path;
     BOOL container_locked;
     BOOL focus;
+    INT download_state;
 
     USERMODE usermode;
     LPWSTR mime;
@@ -430,7 +435,6 @@ typedef struct {
 
     nsIChannel *channel;
     nsIHttpChannel *http_channel;
-    nsIHttpChannelInternal *http_channel_internal;
     nsIWineURI *uri;
     nsIInputStream *post_data_stream;
     nsILoadGroup *load_group;
@@ -500,6 +504,9 @@ struct HTMLFrameBase {
     const IHTMLFrameBase2Vtbl  *lpIHTMLFrameBase2Vtbl;
 
     HTMLWindow *content_window;
+
+    nsIDOMHTMLFrameElement *nsframe;
+    nsIDOMHTMLIFrameElement *nsiframe;
 };
 
 typedef struct _mutation_queue_t {
@@ -557,8 +564,9 @@ struct HTMLDocumentNode {
 #define DOCVIEW(x)       ((IOleDocumentView*)             &(x)->lpOleDocumentViewVtbl)
 #define OLEWIN(x)        ((IOleWindow*)                   &(x)->lpOleInPlaceActiveObjectVtbl)
 #define ACTOBJ(x)        ((IOleInPlaceActiveObject*)      &(x)->lpOleInPlaceActiveObjectVtbl)
-#define VIEWOBJ(x)       ((IViewObject*)                  &(x)->lpViewObject2Vtbl)
-#define VIEWOBJ2(x)      ((IViewObject2*)                 &(x)->lpViewObject2Vtbl)
+#define VIEWOBJ(x)       ((IViewObject*)                  &(x)->lpViewObjectExVtbl)
+#define VIEWOBJ2(x)      ((IViewObject2*)                 &(x)->lpViewObjectExVtbl)
+#define VIEWOBJEX(x)      ((IViewObjectEx*)               &(x)->lpViewObjectExVtbl)
 #define INPLACEOBJ(x)    ((IOleInPlaceObject*)            &(x)->lpOleInPlaceObjectWindowlessVtbl)
 #define INPLACEWIN(x)    ((IOleInPlaceObjectWindowless*)  &(x)->lpOleInPlaceObjectWindowlessVtbl)
 #define SERVPROV(x)      ((IServiceProvider*)             &(x)->lpServiceProviderVtbl)
@@ -569,6 +577,7 @@ struct HTMLDocumentNode {
 #define PERSTRINIT(x)    ((IPersistStreamInit*)           &(x)->lpPersistStreamInitVtbl)
 #define PERSISTHIST(x)   ((IPersistHistory*)              &(x)->lpPersistHistoryVtbl)
 #define CUSTOMDOC(x)     ((ICustomDoc*)                   &(x)->lpCustomDocVtbl)
+#define OBJSITE(x)       ((IObjectWithSite*)              &(x)->lpObjectWithSiteVtbl)
 
 #define NSWBCHROME(x)    ((nsIWebBrowserChrome*)          &(x)->lpWebBrowserChromeVtbl)
 #define NSCML(x)         ((nsIContextMenuListener*)       &(x)->lpContextMenuListenerVtbl)
@@ -772,6 +781,7 @@ IDispatch *script_parse_event(HTMLWindow*,LPCWSTR);
 void set_script_mode(HTMLWindow*,SCRIPTMODE);
 BOOL find_global_prop(HTMLWindow*,BSTR,DWORD,ScriptHost**,DISPID*);
 IDispatch *get_script_disp(ScriptHost*);
+HRESULT search_window_props(HTMLWindow*,BSTR,DWORD,DISPID*);
 
 IHTMLElementCollection *create_all_collection(HTMLDOMNode*,BOOL);
 IHTMLElementCollection *create_collection_from_nodelist(HTMLDocumentNode*,IUnknown*,nsIDOMNodeList*);

@@ -342,7 +342,7 @@ static void _test_attached_event_args(unsigned line, DISPID id, WORD wFlags, DIS
     IHTMLEventObj_Release(event);
 }
 
-#define get_event_src(t) _get_event_src(__LINE__)
+#define get_event_src() _get_event_src(__LINE__)
 static IHTMLElement *_get_event_src(unsigned line)
 {
     IHTMLEventObj *event = _get_event_obj(line);
@@ -1082,6 +1082,10 @@ static void test_onclick(IHTMLDocument2 *doc)
     ok(hres == S_OK, "get_onclick failed: %08x\n", hres);
     ok(V_VT(&v) == VT_NULL, "V_VT(onclick) = %d\n", V_VT(&v));
 
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLElement_put_onclick(div, v);
+    ok(hres == E_NOTIMPL, "put_onclick failed: %08x\n", hres);
+
     V_VT(&v) = VT_DISPATCH;
     V_DISPATCH(&v) = (IDispatch*)&div_onclick_obj;
     hres = IHTMLElement_put_onclick(div, v);
@@ -1770,12 +1774,23 @@ static void set_client_site(IHTMLDocument2 *doc, BOOL set)
 static IHTMLDocument2 *create_document(void)
 {
     IHTMLDocument2 *doc;
+    IHTMLDocument5 *doc5;
     HRESULT hres;
 
     hres = CoCreateInstance(&CLSID_HTMLDocument, NULL, CLSCTX_INPROC_SERVER|CLSCTX_INPROC_HANDLER,
             &IID_IHTMLDocument2, (void**)&doc);
     ok(hres == S_OK, "CoCreateInstance failed: %08x\n", hres);
+    if (FAILED(hres))
+        return NULL;
 
+    hres = IHTMLDocument2_QueryInterface(doc, &IID_IHTMLDocument5, (void**)&doc5);
+    if(FAILED(hres)) {
+        win_skip("Could not get IHTMLDocument5 interface, probably too old IE\n");
+        IHTMLDocument2_Release(doc);
+        return NULL;
+    }
+
+    IHTMLDocument5_Release(doc5);
     return doc;
 }
 
@@ -1786,12 +1801,13 @@ static void run_test(const char *str, testfunc_t test)
 {
     IHTMLDocument2 *doc;
     IHTMLElement *body = NULL;
-    ULONG ref;
     MSG msg;
     HRESULT hres;
 
     xy_todo = FALSE;
     doc = create_document();
+    if (!doc)
+        return;
     set_client_site(doc, TRUE);
     doc_load_string(doc, str);
     do_advise((IUnknown*)doc, &IID_IPropertyNotifySink, (IUnknown*)&PropertyNotifySink);
@@ -1820,8 +1836,7 @@ static void run_test(const char *str, testfunc_t test)
     }
 
     set_client_site(doc, FALSE);
-    ref = IHTMLDocument2_Release(doc);
-    ok(!ref, "ref = %d\n", ref);
+    IHTMLDocument2_Release(doc);
 }
 
 static LRESULT WINAPI wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)

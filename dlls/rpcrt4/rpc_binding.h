@@ -27,6 +27,12 @@
 #include "rpc_defs.h"
 
 
+enum secure_packet_direction
+{
+  SECURE_PACKET_SEND,
+  SECURE_PACKET_RECEIVE
+};
+
 typedef struct _RpcAuthInfo
 {
   LONG refs;
@@ -100,6 +106,12 @@ struct connection_ops {
   size_t (*get_top_of_tower)(unsigned char *tower_data, const char *networkaddr, const char *endpoint);
   RPC_STATUS (*parse_top_of_tower)(const unsigned char *tower_data, size_t tower_size, char **networkaddr, char **endpoint);
   RPC_STATUS (*receive_fragment)(RpcConnection *conn, RpcPktHdr **Header, void **Payload);
+  BOOL (*is_authorized)(RpcConnection *conn);
+  RPC_STATUS (*authorize)(RpcConnection *conn, BOOL first_time, unsigned char *in_buffer, unsigned int in_len, unsigned char *out_buffer, unsigned int *out_len);
+  RPC_STATUS (*secure_packet)(RpcConnection *Connection, enum secure_packet_direction dir, RpcPktHdr *hdr, unsigned int hdr_size, unsigned char *stub_data, unsigned int stub_data_size, RpcAuthVerifier *auth_hdr, unsigned char *auth_value, unsigned int auth_value_size);
+  RPC_STATUS (*impersonate_client)(RpcConnection *conn);
+  RPC_STATUS (*revert_to_self)(RpcConnection *conn);
+  RPC_STATUS (*inquire_auth_client)(RpcConnection *, RPC_AUTHZ_HANDLE *, RPC_WSTR *, ULONG *, ULONG *, ULONG *, ULONG);
 };
 
 /* don't know what MS's structure looks like */
@@ -132,6 +144,7 @@ void RPCRT4_strfree(LPSTR src);
 #define RPCRT4_strdupA(x) RPCRT4_strndupA((x),-1)
 #define RPCRT4_strdupW(x) RPCRT4_strndupW((x),-1)
 
+RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc, CredHandle cred, TimeStamp exp, ULONG cbMaxToken, RPC_AUTH_IDENTITY_HANDLE identity, RpcAuthInfo **ret);
 ULONG RpcAuthInfo_AddRef(RpcAuthInfo *AuthInfo);
 ULONG RpcAuthInfo_Release(RpcAuthInfo *AuthInfo);
 BOOL RpcAuthInfo_IsEqual(const RpcAuthInfo *AuthInfo1, const RpcAuthInfo *AuthInfo2);
@@ -183,6 +196,46 @@ static inline void rpcrt4_conn_cancel_call(RpcConnection *Connection)
 static inline RPC_STATUS rpcrt4_conn_handoff(RpcConnection *old_conn, RpcConnection *new_conn)
 {
   return old_conn->ops->handoff(old_conn, new_conn);
+}
+
+static inline BOOL rpcrt4_conn_is_authorized(RpcConnection *Connection)
+{
+    return Connection->ops->is_authorized(Connection);
+}
+
+static inline RPC_STATUS rpcrt4_conn_authorize(
+    RpcConnection *conn, BOOL first_time, unsigned char *in_buffer,
+    unsigned int in_len, unsigned char *out_buffer, unsigned int *out_len)
+{
+    return conn->ops->authorize(conn, first_time, in_buffer, in_len, out_buffer, out_len);
+}
+
+static inline RPC_STATUS rpcrt4_conn_secure_packet(
+    RpcConnection *conn, enum secure_packet_direction dir,
+    RpcPktHdr *hdr, unsigned int hdr_size, unsigned char *stub_data,
+    unsigned int stub_data_size, RpcAuthVerifier *auth_hdr,
+    unsigned char *auth_value, unsigned int auth_value_size)
+{
+    return conn->ops->secure_packet(conn, dir, hdr, hdr_size, stub_data, stub_data_size, auth_hdr, auth_value, auth_value_size);
+}
+
+static inline RPC_STATUS rpcrt4_conn_impersonate_client(
+    RpcConnection *conn)
+{
+    return conn->ops->impersonate_client(conn);
+}
+
+static inline RPC_STATUS rpcrt4_conn_revert_to_self(
+    RpcConnection *conn)
+{
+    return conn->ops->revert_to_self(conn);
+}
+
+static inline RPC_STATUS rpcrt4_conn_inquire_auth_client(
+    RpcConnection *conn, RPC_AUTHZ_HANDLE *privs, RPC_WSTR *server_princ_name,
+    ULONG *authn_level, ULONG *authn_svc, ULONG *authz_svc, ULONG flags)
+{
+    return conn->ops->inquire_auth_client(conn, privs, server_princ_name, authn_level, authn_svc, authz_svc, flags);
 }
 
 /* floors 3 and up */

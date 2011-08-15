@@ -2370,6 +2370,7 @@ static void test_GetPrinterDriver(void)
         {
             DRIVER_INFO_2 *di_2 = (DRIVER_INFO_2 *)buf;
             DWORD calculated = sizeof(*di_2);
+            HANDLE hf;
 
             /* MSDN is wrong: The Drivers on the win9x-CD's have cVersion=0x0400
                NT351: 1, NT4.0+w2k(Kernelmode): 2, w2k and above(Usermode): 3  */
@@ -2393,6 +2394,24 @@ static void test_GetPrinterDriver(void)
             trace("pConfigFile %s\n", di_2->pConfigFile);
             calculated += strlen(di_2->pConfigFile) + 1;
 
+            hf = CreateFileA(di_2->pDriverPath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            if(hf != INVALID_HANDLE_VALUE)
+                CloseHandle(hf);
+            todo_wine
+            ok(hf != INVALID_HANDLE_VALUE, "Could not open %s\n", di_2->pDriverPath);
+
+            hf = CreateFileA(di_2->pDataFile, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            if(hf != INVALID_HANDLE_VALUE)
+                CloseHandle(hf);
+            todo_wine
+            ok(hf != INVALID_HANDLE_VALUE, "Could not open %s\n", di_2->pDataFile);
+
+            hf = CreateFileA(di_2->pConfigFile, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            if(hf != INVALID_HANDLE_VALUE)
+                CloseHandle(hf);
+            todo_wine
+            ok(hf != INVALID_HANDLE_VALUE, "Could not open %s\n", di_2->pConfigFile);
+
             /* XP allocates memory for both ANSI and unicode names */
             ok(filled >= calculated,"calculated %d != filled %d\n", calculated, filled);
         }
@@ -2412,7 +2431,8 @@ static void test_DEVMODE(const DEVMODE *dm, LONG dmSize, LPCSTR exp_prn_name)
        We skip the Tests on this Platform */
     if (dm->dmSpecVersion || dm->dmDriverVersion || dm->dmDriverExtra) {
     /* The 0-terminated Printername can be larger (MAX_PATH) than CCHDEVICENAME */
-        ok(!strncmp(exp_prn_name, (LPCSTR)dm->dmDeviceName, CCHDEVICENAME -1),
+        ok(!strncmp(exp_prn_name, (LPCSTR)dm->dmDeviceName, CCHDEVICENAME -1) ||
+           !strncmp(exp_prn_name, (LPCSTR)dm->dmDeviceName, CCHDEVICENAME -2), /* XP+ */
             "expected '%s', got '%s'\n", exp_prn_name, dm->dmDeviceName);
         ok(dm->dmSize + dm->dmDriverExtra == dmSize,
             "%u != %d\n", dm->dmSize + dm->dmDriverExtra, dmSize);

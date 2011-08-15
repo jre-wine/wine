@@ -117,7 +117,7 @@ static void context_destroy_fbo(struct wined3d_context *context, GLuint *fbo)
 static void context_apply_attachment_filter_states(IWineD3DSurface *surface, BOOL force_preload)
 {
     const IWineD3DSurfaceImpl *surface_impl = (IWineD3DSurfaceImpl *)surface;
-    IWineD3DDeviceImpl *device = surface_impl->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = surface_impl->resource.device;
     IWineD3DBaseTextureImpl *texture_impl;
     BOOL update_minfilter = FALSE;
     BOOL update_magfilter = FALSE;
@@ -317,7 +317,7 @@ static void context_check_fbo_status(struct wined3d_context *context)
 
 static struct fbo_entry *context_create_fbo_entry(struct wined3d_context *context)
 {
-    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct fbo_entry *entry;
 
@@ -334,7 +334,7 @@ static struct fbo_entry *context_create_fbo_entry(struct wined3d_context *contex
 /* GL locking is done by the caller */
 static void context_reuse_fbo_entry(struct wined3d_context *context, struct fbo_entry *entry)
 {
-    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
     context_bind_fbo(context, GL_FRAMEBUFFER, &entry->id);
@@ -363,7 +363,7 @@ static void context_destroy_fbo_entry(struct wined3d_context *context, struct fb
 /* GL locking is done by the caller */
 static struct fbo_entry *context_find_fbo_entry(struct wined3d_context *context)
 {
-    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     struct fbo_entry *entry;
 
@@ -399,7 +399,7 @@ static struct fbo_entry *context_find_fbo_entry(struct wined3d_context *context)
 /* GL locking is done by the caller */
 static void context_apply_fbo_entry(struct wined3d_context *context, struct fbo_entry *entry)
 {
-    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = ((IWineD3DSurfaceImpl *)context->surface)->resource.device;
     const struct wined3d_gl_info *gl_info = context->gl_info;
     unsigned int i;
 
@@ -1348,6 +1348,8 @@ struct wined3d_context *context_create(IWineD3DDeviceImpl *This, IWineD3DSurface
     ret->gl_info = &This->adapter->gl_info;
     ret->surface = (IWineD3DSurface *) target;
     ret->current_rt = (IWineD3DSurface *)target;
+    ret->render_offscreen = surface_is_offscreen((IWineD3DSurface *) target);
+    ret->draw_buffer_dirty = TRUE;
     ret->tid = GetCurrentThreadId();
     if(This->shader_backend->shader_dirtifyable_constants((IWineD3DDevice *) This)) {
         /* Create the dirty constants array and initialize them to dirty */
@@ -1869,7 +1871,7 @@ static inline struct wined3d_context *FindContext(IWineD3DDeviceImpl *This, IWin
     {
         if (current_context
                 && current_context->current_rt
-                && ((IWineD3DSurfaceImpl *)current_context->surface)->resource.wineD3DDevice == This)
+                && ((IWineD3DSurfaceImpl *)current_context->surface)->resource.device == This)
         {
             target = current_context->current_rt;
         }
@@ -1893,7 +1895,7 @@ static inline struct wined3d_context *FindContext(IWineD3DDeviceImpl *This, IWin
         context = findThreadContextForSwapChain(swapchain, tid);
 
         old_render_offscreen = context->render_offscreen;
-        context->render_offscreen = FALSE;
+        context->render_offscreen = surface_is_offscreen(target);
         /* The context != This->activeContext will catch a NOP context change. This can occur
          * if we are switching back to swapchain rendering in case of FBO or Back Buffer offscreen
          * rendering. No context change is needed in that case
@@ -1952,7 +1954,7 @@ retry:
         {
             /* Stay with the currently active context. */
             if (current_context
-                    && ((IWineD3DSurfaceImpl *)current_context->surface)->resource.wineD3DDevice == This)
+                    && ((IWineD3DSurfaceImpl *)current_context->surface)->resource.device == This)
             {
                 context = current_context;
             }
@@ -2054,15 +2056,13 @@ static void context_apply_draw_buffer(struct wined3d_context *context, BOOL blit
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
     IWineD3DSurface *rt = context->current_rt;
-    IWineD3DSwapChain *swapchain;
     IWineD3DDeviceImpl *device;
 
-    device = ((IWineD3DSurfaceImpl *)rt)->resource.wineD3DDevice;
-    if (SUCCEEDED(IWineD3DSurface_GetContainer(rt, &IID_IWineD3DSwapChain, (void **)&swapchain)))
+    device = ((IWineD3DSurfaceImpl *)rt)->resource.device;
+    if (!surface_is_offscreen(rt))
     {
-        IWineD3DSwapChain_Release((IUnknown *)swapchain);
         ENTER_GL();
-        glDrawBuffer(surface_get_gl_buffer(rt, swapchain));
+        glDrawBuffer(surface_get_gl_buffer(rt));
         checkGLcall("glDrawBuffers()");
         LEAVE_GL();
     }
@@ -2095,6 +2095,14 @@ static void context_apply_draw_buffer(struct wined3d_context *context, BOOL blit
         }
         LEAVE_GL();
     }
+}
+
+/* GL locking is done by the caller. */
+void context_set_draw_buffer(struct wined3d_context *context, GLenum buffer)
+{
+    glDrawBuffer(buffer);
+    checkGLcall("glDrawBuffer()");
+    context->draw_buffer_dirty = TRUE;
 }
 
 /*****************************************************************************

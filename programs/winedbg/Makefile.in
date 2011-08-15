@@ -7,6 +7,7 @@ APPMODE   = -mconsole
 IMPORTS   = psapi dbghelp advapi32 kernel32 ntdll
 DELAYIMPORTS = user32 gdi32
 EXTRALIBS = @LIBPOLL@
+EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 
 C_SRCS = \
 	be_alpha.c \
@@ -33,10 +34,12 @@ C_SRCS = \
 RC_SRCS = \
 	rsrc_De.rc \
 	rsrc_En.rc \
+	rsrc_Es.rc \
 	rsrc_Fr.rc \
 	rsrc_Ko.rc \
 	rsrc_Lt.rc \
 	rsrc_Nl.rc \
+	rsrc_No.rc \
 	rsrc_Pt.rc \
 	rsrc_Ru.rc \
 	rsrc_Sv.rc

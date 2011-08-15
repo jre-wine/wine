@@ -1291,21 +1291,8 @@ IDirectDrawImpl_EnumDisplayModes(IDirectDraw7 *iface,
 
     WINED3DFORMAT checkFormatList[] =
     {
-        WINED3DFMT_B8G8R8_UNORM,
-        WINED3DFMT_B8G8R8A8_UNORM,
         WINED3DFMT_B8G8R8X8_UNORM,
         WINED3DFMT_B5G6R5_UNORM,
-        WINED3DFMT_B5G5R5X1_UNORM,
-        WINED3DFMT_B5G5R5A1_UNORM,
-        WINED3DFMT_B4G4R4A4_UNORM,
-        WINED3DFMT_B2G3R3_UNORM,
-        WINED3DFMT_B2G3R3A8_UNORM,
-        WINED3DFMT_B4G4R4X4_UNORM,
-        WINED3DFMT_R10G10B10A2_UNORM,
-        WINED3DFMT_R8G8B8A8_UNORM,
-        WINED3DFMT_R8G8B8X8_UNORM,
-        WINED3DFMT_B10G10R10A2_UNORM,
-        WINED3DFMT_P8_UINT_A8_UNORM,
         WINED3DFMT_P8_UINT,
     };
 
@@ -1668,9 +1655,11 @@ IDirectDrawImpl_RecreateSurfacesCallback(IDirectDrawSurface7 *surf,
             TRUE /* Lockable */, FALSE /* Discard */, surfImpl->mipmap_level, &surfImpl->WineD3DSurface, Usage, Pool,
             MultiSampleType, MultiSampleQuality, This->ImplType, Parent, &ddraw_null_wined3d_parent_ops);
     IUnknown_Release(Parent);
-
-    if(hr != D3D_OK)
+    if (FAILED(hr))
+    {
+        surfImpl->WineD3DSurface = wineD3DSurface;
         return hr;
+    }
 
     IWineD3DSurface_SetClipper(surfImpl->WineD3DSurface, clipper);
 

@@ -224,6 +224,15 @@ struct d3d10_sampler_state
 
 HRESULT d3d10_sampler_state_init(struct d3d10_sampler_state *state) DECLSPEC_HIDDEN;
 
+/* ID3D10Query */
+struct d3d10_query
+{
+    const struct ID3D10QueryVtbl *vtbl;
+    LONG refcount;
+};
+
+HRESULT d3d10_query_init(struct d3d10_query *query) DECLSPEC_HIDDEN;
+
 /* Layered device */
 enum dxgi_device_layer_id
 {
@@ -257,7 +266,7 @@ struct dxgi_device_layer
 };
 
 HRESULT WINAPI DXGID3D10CreateDevice(HMODULE d3d10core, IDXGIFactory *factory, IDXGIAdapter *adapter,
-        UINT flags, DWORD unknown0, void **device);
+        UINT flags, void *unknown0, void **device);
 HRESULT WINAPI DXGID3D10RegisterLayers(const struct dxgi_device_layer *layers, UINT layer_count);
 
 #endif /* __WINE_D3D10CORE_PRIVATE_H */

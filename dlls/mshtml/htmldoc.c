@@ -1146,15 +1146,19 @@ static HRESULT WINAPI HTMLDocument_get_onmouseover(IHTMLDocument2 *iface, VARIAN
 static HRESULT WINAPI HTMLDocument_put_onreadystatechange(IHTMLDocument2 *iface, VARIANT v)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    return set_doc_event(This, EVENTID_READYSTATECHANGE, &v);
 }
 
 static HRESULT WINAPI HTMLDocument_get_onreadystatechange(IHTMLDocument2 *iface, VARIANT *p)
 {
     HTMLDocument *This = HTMLDOC_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_doc_event(This, EVENTID_READYSTATECHANGE, p);
 }
 
 static HRESULT WINAPI HTMLDocument_put_onafterupdate(IHTMLDocument2 *iface, VARIANT v)
@@ -1693,6 +1697,9 @@ static BOOL htmldoc_qi(HTMLDocument *This, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IViewObject2, riid)) {
         TRACE("(%p)->(IID_IViewObject2, %p)\n", This, ppv);
         *ppv = VIEWOBJ2(This);
+    }else if(IsEqualGUID(&IID_IViewObjectEx, riid)) {
+        TRACE("(%p)->(IID_IViewObjectEx, %p)\n", This, ppv);
+        *ppv = VIEWOBJEX(This);
     }else if(IsEqualGUID(&IID_IOleWindow, riid)) {
         TRACE("(%p)->(IID_IOleWindow, %p)\n", This, ppv);
         *ppv = OLEWIN(This);
@@ -1741,6 +1748,9 @@ static BOOL htmldoc_qi(HTMLDocument *This, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IMarshal, riid)) {
         TRACE("(%p)->(IID_IMarshal %p) returning NULL\n", This, ppv);
         *ppv = NULL;
+    }else if(IsEqualGUID(&IID_IObjectWithSite, riid)) {
+        TRACE("(%p)->(IID_IObjectWithSite %p)\n", This, ppv);
+        *ppv = OBJSITE(This);
     }else {
         return FALSE;
     }
@@ -1951,6 +1961,8 @@ static ULONG WINAPI CustomDoc_Release(ICustomDoc *iface)
             This->basedoc.window->doc_obj = NULL;
             IHTMLWindow2_Release(HTMLWINDOW2(This->basedoc.window));
         }
+        if(This->basedoc.advise_holder)
+            IOleAdviseHolder_Release(This->basedoc.advise_holder);
 
         if(This->client)
             IOleObject_SetClientSite(OLEOBJ(&This->basedoc), NULL);

@@ -2646,8 +2646,10 @@ ME_TextEditor *ME_MakeEditor(ITextHost *texthost, BOOL bEmulateVersion10)
 
   ed->hWnd = NULL;
   ed->hwndParent = NULL;
+  ed->sizeWindow.cx = ed->sizeWindow.cy = 0;
   ed->texthost = texthost;
   ed->bEmulateVersion10 = bEmulateVersion10;
+  ed->styleFlags = 0;
   ITextHost_TxGetPropertyBits(texthost,
                               (TXTBIT_RICHTEXT|TXTBIT_MULTILINE|
                                TXTBIT_READONLY|TXTBIT_USEPASSWORD|
@@ -3283,6 +3285,7 @@ LRESULT ME_HandleMessage(ME_TextEditor *editor, UINT msg, WPARAM wParam,
       wszText = lParam ? ME_ToUnicode(bUnicode, (void *)lParam) : NULL;
       len = wszText ? lstrlenW(wszText) : 0;
       ME_InsertTextFromCursor(editor, 0, wszText, len, style);
+      ME_EndToUnicode(bUnicode, wszText);
     }
 
     if (bSelection) {

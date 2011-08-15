@@ -26,6 +26,7 @@
 
 #include <stdarg.h>
 #include <math.h>
+#include <limits.h>
 #define NONAMELESSUNION
 #define NONAMELESSSTRUCT
 #define COBJMACROS
@@ -815,6 +816,7 @@ typedef struct IWineD3DStateBlockImpl IWineD3DStateBlockImpl;
 typedef struct IWineD3DSurfaceImpl    IWineD3DSurfaceImpl;
 typedef struct IWineD3DPaletteImpl    IWineD3DPaletteImpl;
 typedef struct IWineD3DDeviceImpl     IWineD3DDeviceImpl;
+typedef struct IWineD3DSwapChainImpl  IWineD3DSwapChainImpl;
 
 /* Global variables */
 extern const float identity[16] DECLSPEC_HIDDEN;
@@ -1186,6 +1188,7 @@ struct wined3d_context *context_get_current(void) DECLSPEC_HIDDEN;
 DWORD context_get_tls_idx(void) DECLSPEC_HIDDEN;
 void context_release(struct wined3d_context *context) DECLSPEC_HIDDEN;
 BOOL context_set_current(struct wined3d_context *ctx) DECLSPEC_HIDDEN;
+void context_set_draw_buffer(struct wined3d_context *context, GLenum buffer) DECLSPEC_HIDDEN;
 void context_set_tls_idx(DWORD idx) DECLSPEC_HIDDEN;
 
 void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain) DECLSPEC_HIDDEN;
@@ -1324,7 +1327,7 @@ struct wined3d_driver_info
 /* The adapter structure */
 struct wined3d_adapter
 {
-    UINT                    num;
+    UINT ordinal;
     BOOL                    opengl;
     POINT                   monitorPoint;
     struct wined3d_gl_info  gl_info;
@@ -1437,6 +1440,8 @@ typedef struct IWineD3DImpl
 
 extern const IWineD3DVtbl IWineD3D_Vtbl DECLSPEC_HIDDEN;
 
+BOOL wined3d_register_window(HWND window, struct IWineD3DSwapChainImpl *swapchain) DECLSPEC_HIDDEN;
+void wined3d_unregister_window(HWND window) DECLSPEC_HIDDEN;
 BOOL InitAdapters(IWineD3DImpl *This) DECLSPEC_HIDDEN;
 
 /* A helper function that dumps a resource list */
@@ -1459,7 +1464,7 @@ struct IWineD3DDeviceImpl
     /* WineD3D Information  */
     IUnknown               *parent;
     IWineD3DDeviceParent   *device_parent;
-    IWineD3D               *wineD3D;
+    IWineD3D *wined3d;
     struct wined3d_adapter *adapter;
 
     /* Window styles to restore when switching fullscreen mode */
@@ -1513,7 +1518,6 @@ struct IWineD3DDeviceImpl
 
     /* Internal use fields  */
     WINED3DDEVICE_CREATION_PARAMETERS createParms;
-    UINT                            adapterNo;
     WINED3DDEVTYPE                  devType;
 
     IWineD3DSwapChain     **swapchains;
@@ -1597,6 +1601,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfac
         const WINED3DRECT *pRects, DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) DECLSPEC_HIDDEN;
 void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) DECLSPEC_HIDDEN;
 void IWineD3DDeviceImpl_MarkStateDirty(IWineD3DDeviceImpl *This, DWORD state) DECLSPEC_HIDDEN;
+
 static inline BOOL isStateDirty(struct wined3d_context *context, DWORD state)
 {
     DWORD idx = state >> 5;
@@ -1632,7 +1637,7 @@ typedef struct IWineD3DResourceClass
     /* WineD3DResource Information */
     IUnknown               *parent;
     WINED3DRESOURCETYPE     resourceType;
-    IWineD3DDeviceImpl     *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
     WINED3DPOOL             pool;
     UINT                    size;
     DWORD                   usage;
@@ -1654,7 +1659,6 @@ typedef struct IWineD3DResourceImpl
 
 void resource_cleanup(IWineD3DResource *iface) DECLSPEC_HIDDEN;
 HRESULT resource_free_private_data(IWineD3DResource *iface, REFGUID guid) DECLSPEC_HIDDEN;
-HRESULT resource_get_device(IWineD3DResource *iface, IWineD3DDevice **device) DECLSPEC_HIDDEN;
 HRESULT resource_get_parent(IWineD3DResource *iface, IUnknown **parent) DECLSPEC_HIDDEN;
 DWORD resource_get_priority(IWineD3DResource *iface) DECLSPEC_HIDDEN;
 HRESULT resource_get_private_data(IWineD3DResource *iface, REFGUID guid,
@@ -1726,6 +1730,8 @@ typedef struct IWineD3DBaseTextureClass
 } IWineD3DBaseTextureClass;
 
 void surface_internal_preload(IWineD3DSurface *iface, enum WINED3DSRGB srgb) DECLSPEC_HIDDEN;
+BOOL surface_init_sysmem(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
+BOOL surface_is_offscreen(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
 
 typedef struct IWineD3DBaseTextureImpl
 {
@@ -1973,7 +1979,6 @@ HRESULT WINAPI IWineD3DBaseSurfaceImpl_QueryInterface(IWineD3DSurface *iface,
         REFIID riid, LPVOID *ppobj) DECLSPEC_HIDDEN;
 ULONG WINAPI IWineD3DBaseSurfaceImpl_AddRef(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetParent(IWineD3DSurface *iface, IUnknown **pParent) DECLSPEC_HIDDEN;
-HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetDevice(IWineD3DSurface *iface, IWineD3DDevice** ppDevice) DECLSPEC_HIDDEN;
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_SetPrivateData(IWineD3DSurface *iface,
         REFGUID refguid, const void *pData, DWORD SizeOfData, DWORD Flags) DECLSPEC_HIDDEN;
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_GetPrivateData(IWineD3DSurface *iface,
@@ -2134,7 +2139,7 @@ typedef struct IWineD3DVertexDeclarationImpl {
 
     IUnknown                *parent;
     const struct wined3d_parent_ops *parent_ops;
-    IWineD3DDeviceImpl      *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
 
     struct wined3d_vertex_declaration_element *elements;
     UINT element_count;
@@ -2194,7 +2199,7 @@ struct IWineD3DStateBlockImpl
     LONG                      ref;     /* Note: Ref counting not required */
 
     /* IWineD3DStateBlock information */
-    IWineD3DDeviceImpl       *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
     WINED3DSTATEBLOCKTYPE     blockType;
 
     /* Array indicating whether things have been set or changed */
@@ -2314,7 +2319,7 @@ typedef struct IWineD3DQueryImpl
     LONG                      ref;     /* Note: Ref counting not required */
 
     IUnknown                 *parent;
-    IWineD3DDeviceImpl       *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
 
     /* IWineD3DQuery fields */
     enum query_state         state;
@@ -2395,14 +2400,14 @@ extern const IWineD3DRendertargetViewVtbl wined3d_rendertarget_view_vtbl DECLSPE
  * IWineD3DSwapChainImpl implementation structure (extends IUnknown)
  */
 
-typedef struct IWineD3DSwapChainImpl
+struct IWineD3DSwapChainImpl
 {
     /*IUnknown part*/
     const IWineD3DSwapChainVtbl *lpVtbl;
     LONG                      ref;     /* Note: Ref counting not required */
 
     IUnknown                 *parent;
-    IWineD3DDeviceImpl       *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
 
     /* IWineD3DSwapChain fields */
     IWineD3DSurface         **backBuffer;
@@ -2411,6 +2416,8 @@ typedef struct IWineD3DSwapChainImpl
     DWORD                     orig_width, orig_height;
     WINED3DFORMAT             orig_fmt;
     WINED3DGAMMARAMP          orig_gamma;
+    BOOL                      render_to_fbo;
+    BOOL filter_messages;
 
     long prev_time, frames;   /* Performance tracking */
     unsigned int vSyncCounter;
@@ -2419,9 +2426,8 @@ typedef struct IWineD3DSwapChainImpl
     unsigned int            num_contexts;
 
     HWND                    win_handle;
-} IWineD3DSwapChainImpl;
+};
 
-extern const IWineD3DSwapChainVtbl IWineD3DSwapChain_Vtbl DECLSPEC_HIDDEN;
 const IWineD3DSwapChainVtbl IWineGDISwapChain_Vtbl DECLSPEC_HIDDEN;
 void x11_copy_to_screen(IWineD3DSwapChainImpl *This, const RECT *rc) DECLSPEC_HIDDEN;
 
@@ -2448,6 +2454,12 @@ HRESULT WINAPI IWineD3DBaseSwapChainImpl_GetGammaRamp(IWineD3DSwapChain *iface,
         WINED3DGAMMARAMP *pRamp) DECLSPEC_HIDDEN;
 
 struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *iface) DECLSPEC_HIDDEN;
+HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface_type,
+        IWineD3DDeviceImpl *device, WINED3DPRESENT_PARAMETERS *present_parameters, IUnknown *parent) DECLSPEC_HIDDEN;
+LRESULT swapchain_process_message(IWineD3DSwapChainImpl *device, HWND window,
+        UINT message, WPARAM wparam, LPARAM lparam, WNDPROC proc) DECLSPEC_HIDDEN;
+void swapchain_restore_fullscreen_window(IWineD3DSwapChainImpl *swapchain) DECLSPEC_HIDDEN;
+void swapchain_setup_fullscreen_window(IWineD3DSwapChainImpl *swapchain, UINT w, UINT h) DECLSPEC_HIDDEN;
 
 #define DEFAULT_REFRESH_RATE 0
 
@@ -2505,7 +2517,7 @@ void state_fog_fragpart(DWORD state, IWineD3DStateBlockImpl *stateblock,
         struct wined3d_context *context) DECLSPEC_HIDDEN;
 
 void surface_add_dirty_rect(IWineD3DSurface *iface, const RECT *dirty_rect) DECLSPEC_HIDDEN;
-GLenum surface_get_gl_buffer(IWineD3DSurface *iface, IWineD3DSwapChain *swapchain) DECLSPEC_HIDDEN;
+GLenum surface_get_gl_buffer(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
 void surface_load_ds_location(IWineD3DSurface *iface, struct wined3d_context *context, DWORD location) DECLSPEC_HIDDEN;
 void surface_modify_ds_location(IWineD3DSurface *iface, DWORD location) DECLSPEC_HIDDEN;
 void surface_set_compatible_renderbuffer(IWineD3DSurface *iface,
@@ -2790,7 +2802,7 @@ struct IWineD3DPaletteImpl {
     LONG                       ref;
 
     IUnknown                   *parent;
-    IWineD3DDeviceImpl         *wineD3DDevice;
+    IWineD3DDeviceImpl *device;
 
     /* IWineD3DPalette */
     HPALETTE                   hpal;
@@ -2866,13 +2878,12 @@ static inline BOOL use_vs(IWineD3DStateBlockImpl *stateblock)
      * style strided data. */
     return (stateblock->vertexShader
             && !((IWineD3DVertexDeclarationImpl *)stateblock->vertexDecl)->position_transformed
-            && stateblock->wineD3DDevice->vs_selected_mode != SHADER_NONE);
+            && stateblock->device->vs_selected_mode != SHADER_NONE);
 }
 
 static inline BOOL use_ps(IWineD3DStateBlockImpl *stateblock)
 {
-    return (stateblock->pixelShader
-            && stateblock->wineD3DDevice->ps_selected_mode != SHADER_NONE);
+    return (stateblock->pixelShader && stateblock->device->ps_selected_mode != SHADER_NONE);
 }
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface,

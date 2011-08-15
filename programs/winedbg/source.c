@@ -44,7 +44,7 @@ void source_show_path(void)
     {
         next = strchr(ptr, ';');
         if (next)
-            dbg_printf("\t%.*s\n", next++ - ptr, ptr);
+            dbg_printf("\t%.*s\n", (int)(next++ - ptr), ptr);
         else
             dbg_printf("\t%s\n", ptr);
     }
@@ -84,11 +84,11 @@ static  void*   source_map_file(const char* name, HANDLE* hMap, unsigned* size)
 {
     HANDLE              hFile;
 
-    hFile = CreateFile(name, GENERIC_READ, FILE_SHARE_READ, NULL,
-                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    hFile = CreateFileA(name, GENERIC_READ, FILE_SHARE_READ, NULL,
+                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile == INVALID_HANDLE_VALUE) return (void*)-1;
     if (size != NULL && (*size = GetFileSize(hFile, NULL)) == -1) return (void*)-1;
-    *hMap = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    *hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
     CloseHandle(hFile);
     if (!*hMap) return (void*)-1;
     return MapViewOfFile(*hMap, FILE_MAP_READ, 0, 0, 0);
@@ -115,7 +115,7 @@ static BOOL     source_locate_file(const char* srcfile, char* path)
 {
     BOOL        found = FALSE;
 
-    if (GetFileAttributes(srcfile) != INVALID_FILE_ATTRIBUTES)
+    if (GetFileAttributesA(srcfile) != INVALID_FILE_ATTRIBUTES)
     {
         strcpy(path, srcfile);
         found = TRUE;
@@ -216,7 +216,7 @@ static int source_display(const char* sourcefile, int start, int end)
             }
             else tmppath[0] = '\0';
 
-            if (GetFileAttributes(tmppath) == INVALID_FILE_ATTRIBUTES)
+            if (GetFileAttributesA(tmppath) == INVALID_FILE_ATTRIBUTES)
             {
                 /*
                  * OK, I guess the user doesn't really want to see it
@@ -286,7 +286,7 @@ static int source_display(const char* sourcefile, int start, int end)
     return rtn;
 }
 
-void source_list(IMAGEHLP_LINE* src1, IMAGEHLP_LINE* src2, int delta)
+void source_list(IMAGEHLP_LINE64* src1, IMAGEHLP_LINE64* src2, int delta)
 {
     int         end;
     int         start;
@@ -344,7 +344,7 @@ void source_list(IMAGEHLP_LINE* src1, IMAGEHLP_LINE* src2, int delta)
 
 void source_list_from_addr(const ADDRESS64* addr, int nlines)
 {
-    IMAGEHLP_LINE       il;
+    IMAGEHLP_LINE64     il;
     ADDRESS64           la;
     DWORD               disp;
 
@@ -355,9 +355,9 @@ void source_list_from_addr(const ADDRESS64* addr, int nlines)
     }
 
     il.SizeOfStruct = sizeof(il);
-    if (SymGetLineFromAddr(dbg_curr_process->handle,
-                           (unsigned long)memory_to_linear_addr(addr),
-                           &disp, &il))
+    if (SymGetLineFromAddr64(dbg_curr_process->handle,
+                             (DWORD_PTR)memory_to_linear_addr(addr),
+			     &disp, &il))
         source_list(&il, NULL, nlines);
 }
 

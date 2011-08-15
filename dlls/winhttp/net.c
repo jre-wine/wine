@@ -42,6 +42,8 @@
 #undef DSA
 #endif
 
+#define NONAMELESSUNION
+
 #include "wine/debug.h"
 #include "wine/library.h"
 
@@ -92,6 +94,7 @@ static void *libcrypto_handle;
 static SSL_METHOD *method;
 static SSL_CTX *ctx;
 static int hostname_idx;
+static int error_idx;
 
 #define MAKE_FUNCPTR(f) static typeof(f) * p##f
 
@@ -115,14 +118,14 @@ MAKE_FUNCPTR( SSL_get_verify_result );
 MAKE_FUNCPTR( SSL_get_peer_certificate );
 MAKE_FUNCPTR( SSL_CTX_set_default_verify_paths );
 MAKE_FUNCPTR( SSL_CTX_set_verify );
-MAKE_FUNCPTR( X509_STORE_CTX_get_ex_data );
 
-MAKE_FUNCPTR( BIO_new_fp );
 MAKE_FUNCPTR( CRYPTO_num_locks );
 MAKE_FUNCPTR( CRYPTO_set_id_callback );
 MAKE_FUNCPTR( CRYPTO_set_locking_callback );
+MAKE_FUNCPTR( ERR_free_strings );
 MAKE_FUNCPTR( ERR_get_error );
 MAKE_FUNCPTR( ERR_error_string );
+MAKE_FUNCPTR( X509_STORE_CTX_get_ex_data );
 MAKE_FUNCPTR( i2d_X509 );
 MAKE_FUNCPTR( sk_value );
 MAKE_FUNCPTR( sk_num );
@@ -249,15 +252,15 @@ static PCCERT_CONTEXT X509_to_cert_context(X509 *cert)
     return ret;
 }
 
-static BOOL netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
-                                 WCHAR *server )
+static DWORD netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
+                                  WCHAR *server )
 {
     BOOL ret;
     CERT_CHAIN_PARA chainPara = { sizeof(chainPara), { 0 } };
     PCCERT_CHAIN_CONTEXT chain;
     char oid_server_auth[] = szOID_PKIX_KP_SERVER_AUTH;
     char *server_auth[] = { oid_server_auth };
-    DWORD err;
+    DWORD err = ERROR_SUCCESS;
 
     TRACE("verifying %s\n", debugstr_w( server ));
     chainPara.RequestedUsage.Usage.cUsageIdentifier = 1;
@@ -284,8 +287,6 @@ static BOOL netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
                 err = ERROR_WINHTTP_SECURE_CERT_WRONG_USAGE;
             else
                 err = ERROR_WINHTTP_SECURE_INVALID_CERT;
-            set_last_error( err );
-            ret = FALSE;
         }
         else
         {
@@ -293,7 +294,7 @@ static BOOL netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
             SSL_EXTRA_CERT_CHAIN_POLICY_PARA sslExtraPolicyPara;
             CERT_CHAIN_POLICY_STATUS policyStatus;
 
-            sslExtraPolicyPara.cbSize = sizeof(sslExtraPolicyPara);
+            sslExtraPolicyPara.u.cbSize = sizeof(sslExtraPolicyPara);
             sslExtraPolicyPara.dwAuthType = AUTHTYPE_SERVER;
             sslExtraPolicyPara.pwszServerName = server;
             policyPara.cbSize = sizeof(policyPara);
@@ -311,14 +312,14 @@ static BOOL netconn_verify_cert( PCCERT_CONTEXT cert, HCERTSTORE store,
                     err = ERROR_WINHTTP_SECURE_CERT_CN_INVALID;
                 else
                     err = ERROR_WINHTTP_SECURE_INVALID_CERT;
-                set_last_error( err );
-                ret = FALSE;
             }
         }
         CertFreeCertificateChain( chain );
     }
-    TRACE("returning %d\n", ret);
-    return ret;
+    else
+        err = ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
+    TRACE("returning %08x\n", err);
+    return err;
 }
 
 static int netconn_secure_verify( int preverify_ok, X509_STORE_CTX *ctx )
@@ -357,8 +358,17 @@ static int netconn_secure_verify( int preverify_ok, X509_STORE_CTX *ctx )
                     CertFreeCertificateContext( context );
                 }
             }
+            if (!endCert) ret = FALSE;
             if (ret)
-                ret = netconn_verify_cert( endCert, store, server );
+            {
+                DWORD err = netconn_verify_cert( endCert, store, server );
+
+                if (err)
+                {
+                    pSSL_set_ex_data( ssl, error_idx, (void *)err );
+                    ret = FALSE;
+                }
+            }
             CertFreeCertificateContext( endCert );
             CertCloseStore( store, 0 );
         }
@@ -425,7 +435,6 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     LOAD_FUNCPTR( SSL_get_peer_certificate );
     LOAD_FUNCPTR( SSL_CTX_set_default_verify_paths );
     LOAD_FUNCPTR( SSL_CTX_set_verify );
-    LOAD_FUNCPTR( X509_STORE_CTX_get_ex_data );
 #undef LOAD_FUNCPTR
 
 #define LOAD_FUNCPTR(x) \
@@ -436,12 +445,13 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
         LeaveCriticalSection( &init_ssl_cs ); \
         return FALSE; \
     }
-    LOAD_FUNCPTR( BIO_new_fp );
     LOAD_FUNCPTR( CRYPTO_num_locks );
     LOAD_FUNCPTR( CRYPTO_set_id_callback );
     LOAD_FUNCPTR( CRYPTO_set_locking_callback );
+    LOAD_FUNCPTR( ERR_free_strings );
     LOAD_FUNCPTR( ERR_get_error );
     LOAD_FUNCPTR( ERR_error_string );
+    LOAD_FUNCPTR( X509_STORE_CTX_get_ex_data );
     LOAD_FUNCPTR( i2d_X509 );
     LOAD_FUNCPTR( sk_value );
     LOAD_FUNCPTR( sk_num );
@@ -449,7 +459,6 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
 
     pSSL_library_init();
     pSSL_load_error_strings();
-    pBIO_new_fp( stderr, BIO_NOCLOSE );
 
     method = pSSLv23_method();
     ctx = pSSL_CTX_new( method );
@@ -462,6 +471,14 @@ BOOL netconn_init( netconn_t *conn, BOOL secure )
     }
     hostname_idx = pSSL_get_ex_new_index( 0, (void *)"hostname index", NULL, NULL, NULL );
     if (hostname_idx == -1)
+    {
+        ERR("SSL_get_ex_new_index failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
+        set_last_error( ERROR_OUTOFMEMORY );
+        LeaveCriticalSection( &init_ssl_cs );
+        return FALSE;
+    }
+    error_idx = pSSL_get_ex_new_index( 0, (void *)"error index", NULL, NULL, NULL );
+    if (error_idx == -1)
     {
         ERR("SSL_get_ex_new_index failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
         set_last_error( ERROR_OUTOFMEMORY );
@@ -496,6 +513,7 @@ void netconn_unload( void )
 #if defined(SONAME_LIBSSL) && defined(SONAME_LIBCRYPTO)
     if (libcrypto_handle)
     {
+        pERR_free_strings();
         wine_dlclose( libcrypto_handle, NULL, 0 );
     }
     if (libssl_handle)
@@ -601,8 +619,6 @@ BOOL netconn_connect( netconn_t *conn, const struct sockaddr *sockaddr, unsigned
 BOOL netconn_secure_connect( netconn_t *conn, WCHAR *hostname )
 {
 #ifdef SONAME_LIBSSL
-    long res;
-
     if (!(conn->ssl_conn = pSSL_new( ctx )))
     {
         ERR("SSL_new failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
@@ -623,14 +639,13 @@ BOOL netconn_secure_connect( netconn_t *conn, WCHAR *hostname )
     }
     if (pSSL_connect( conn->ssl_conn ) <= 0)
     {
-        ERR("SSL_connect failed: %s\n", pERR_error_string( pERR_get_error(), 0 ));
-        set_last_error( ERROR_WINHTTP_SECURE_CHANNEL_ERROR );
+        DWORD err;
+
+        err = (DWORD)pSSL_get_ex_data( conn->ssl_conn, error_idx );
+        if (!err) err = ERROR_WINHTTP_SECURE_CHANNEL_ERROR;
+        ERR("couldn't verify server certificate (%d)\n", err);
+        set_last_error( err );
         goto fail;
-    }
-    if ((res = pSSL_get_verify_result( conn->ssl_conn )) != X509_V_OK)
-    {
-        /* FIXME: we should set an error and return, but we only print an error at the moment */
-        ERR("couldn't verify server certificate (%ld)\n", res);
     }
     TRACE("established SSL connection\n");
     conn->secure = TRUE;

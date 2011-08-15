@@ -193,7 +193,7 @@ static const DWORD vertex_states_sampler[] =
  */
 static HRESULT stateblock_allocate_shader_constants(IWineD3DStateBlockImpl *object)
 {
-    IWineD3DDeviceImpl *device = object->wineD3DDevice;
+    IWineD3DDeviceImpl *device = object->device;
 
     /* Allocate space for floating point constants */
     object->pixelShaderConstantF = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
@@ -329,7 +329,7 @@ static void stateblock_savedstates_set_vertex(SAVEDSTATES *states, const DWORD n
 
 void stateblock_init_contained_states(IWineD3DStateBlockImpl *stateblock)
 {
-    IWineD3DDeviceImpl *device = stateblock->wineD3DDevice;
+    IWineD3DDeviceImpl *device = stateblock->device;
     unsigned int i, j;
 
     for (i = 0; i <= WINEHIGHEST_RENDER_STATE >> 5; ++i)
@@ -465,8 +465,8 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_QueryInterface(IWineD3DStateBlock 
     IWineD3DStateBlockImpl *This = (IWineD3DStateBlockImpl *)iface;
     TRACE("(%p)->(%s,%p)\n",This,debugstr_guid(riid),ppobj);
     if (IsEqualGUID(riid, &IID_IUnknown)
-        || IsEqualGUID(riid, &IID_IWineD3DBase)
-        || IsEqualGUID(riid, &IID_IWineD3DStateBlock)){
+            || IsEqualGUID(riid, &IID_IWineD3DStateBlock))
+    {
         IUnknown_AddRef(iface);
         *ppobj = This;
         return S_OK;
@@ -535,16 +535,6 @@ static ULONG  WINAPI IWineD3DStateBlockImpl_Release(IWineD3DStateBlock *iface) {
 /**********************************************************
  * IWineD3DStateBlockImpl parts follows
  **********************************************************/
-static HRESULT  WINAPI IWineD3DStateBlockImpl_GetDevice(IWineD3DStateBlock *iface, IWineD3DDevice** ppDevice){
-
-    IWineD3DStateBlockImpl *This   = (IWineD3DStateBlockImpl *)iface;
-
-    *ppDevice = (IWineD3DDevice*)This->wineD3DDevice;
-    IWineD3DDevice_AddRef(*ppDevice);
-    return WINED3D_OK;
-
-}
-
 static void record_lights(IWineD3DStateBlockImpl *This, const IWineD3DStateBlockImpl *targetStateBlock)
 {
     UINT i;
@@ -593,7 +583,7 @@ static void record_lights(IWineD3DStateBlockImpl *This, const IWineD3DStateBlock
 static HRESULT WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 {
     IWineD3DStateBlockImpl *This = (IWineD3DStateBlockImpl *)iface;
-    IWineD3DStateBlockImpl *targetStateBlock = This->wineD3DDevice->stateBlock;
+    IWineD3DStateBlockImpl *targetStateBlock = This->device->stateBlock;
     unsigned int i;
     DWORD map;
 
@@ -730,7 +720,7 @@ static HRESULT WINAPI IWineD3DStateBlockImpl_Capture(IWineD3DStateBlock *iface)
 
     if (This->changed.vertexDecl && This->vertexDecl != targetStateBlock->vertexDecl
             && (This->blockType != WINED3DSBT_RECORDED
-                    || ((IWineD3DImpl *)This->wineD3DDevice->wineD3D)->dxVersion != 9))
+            || ((IWineD3DImpl *)This->device->wined3d)->dxVersion != 9))
     {
         TRACE("Updating vertex declaration from %p to %p.\n", This->vertexDecl, targetStateBlock->vertexDecl);
 
@@ -888,7 +878,7 @@ static void apply_lights(IWineD3DDevice *pDevice, const IWineD3DStateBlockImpl *
 static HRESULT WINAPI IWineD3DStateBlockImpl_Apply(IWineD3DStateBlock *iface)
 {
     IWineD3DStateBlockImpl *This = (IWineD3DStateBlockImpl *)iface;
-    IWineD3DDevice *pDevice = (IWineD3DDevice *)This->wineD3DDevice;
+    IWineD3DDevice *pDevice = (IWineD3DDevice *)This->device;
     unsigned int i;
     DWORD map;
 
@@ -971,8 +961,8 @@ static HRESULT WINAPI IWineD3DStateBlockImpl_Apply(IWineD3DStateBlock *iface)
 
     if (This->changed.primitive_type)
     {
-        This->wineD3DDevice->updateStateBlock->changed.primitive_type = TRUE;
-        This->wineD3DDevice->updateStateBlock->gl_primitive_type = This->gl_primitive_type;
+        This->device->updateStateBlock->changed.primitive_type = TRUE;
+        This->device->updateStateBlock->gl_primitive_type = This->gl_primitive_type;
     }
 
     if (This->changed.indices)
@@ -1038,12 +1028,12 @@ static HRESULT WINAPI IWineD3DStateBlockImpl_Apply(IWineD3DStateBlock *iface)
         IWineD3DDevice_SetClipPlane(pDevice, i, clip);
     }
 
-    This->wineD3DDevice->stateBlock->lowest_disabled_stage = MAX_TEXTURES - 1;
+    This->device->stateBlock->lowest_disabled_stage = MAX_TEXTURES - 1;
     for (i = 0; i < MAX_TEXTURES - 1; ++i)
     {
-        if (This->wineD3DDevice->stateBlock->textureState[i][WINED3DTSS_COLOROP] == WINED3DTOP_DISABLE)
+        if (This->device->stateBlock->textureState[i][WINED3DTSS_COLOROP] == WINED3DTOP_DISABLE)
         {
-            This->wineD3DDevice->stateBlock->lowest_disabled_stage = i;
+            This->device->stateBlock->lowest_disabled_stage = i;
             break;
         }
     }
@@ -1054,9 +1044,9 @@ static HRESULT WINAPI IWineD3DStateBlockImpl_Apply(IWineD3DStateBlock *iface)
 
 static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStateBlock* iface) {
     IWineD3DStateBlockImpl *This = (IWineD3DStateBlockImpl *)iface;
-    IWineD3DDevice         *device = (IWineD3DDevice *)This->wineD3DDevice;
+    IWineD3DDevice *device = (IWineD3DDevice *)This->device;
     IWineD3DDeviceImpl     *ThisDevice = (IWineD3DDeviceImpl *)device;
-    const struct wined3d_gl_info *gl_info = &This->wineD3DDevice->adapter->gl_info;
+    const struct wined3d_gl_info *gl_info = &ThisDevice->adapter->gl_info;
     union {
         WINED3DLINEPATTERN lp;
         DWORD d;
@@ -1073,7 +1063,7 @@ static HRESULT  WINAPI IWineD3DStateBlockImpl_InitStartupStateBlock(IWineD3DStat
     /* Note this may have a large overhead but it should only be executed
        once, in order to initialize the complete state of the device and
        all opengl equivalents                                            */
-    TRACE("(%p) -----------------------> Setting up device defaults... %p\n", This, This->wineD3DDevice);
+    TRACE("(%p) -----------------------> Setting up device defaults... %p\n", This, ThisDevice);
     /* TODO: make a special stateblock type for the primary stateblock (it never gets applied so it doesn't need a real type) */
     This->blockType = WINED3DSBT_INIT;
 
@@ -1321,7 +1311,6 @@ static const IWineD3DStateBlockVtbl IWineD3DStateBlock_Vtbl =
     IWineD3DStateBlockImpl_AddRef,
     IWineD3DStateBlockImpl_Release,
     /* IWineD3DStateBlock */
-    IWineD3DStateBlockImpl_GetDevice,
     IWineD3DStateBlockImpl_Capture,
     IWineD3DStateBlockImpl_Apply,
     IWineD3DStateBlockImpl_InitStartupStateBlock
@@ -1334,7 +1323,7 @@ HRESULT stateblock_init(IWineD3DStateBlockImpl *stateblock, IWineD3DDeviceImpl *
 
     stateblock->lpVtbl = &IWineD3DStateBlock_Vtbl;
     stateblock->ref = 1;
-    stateblock->wineD3DDevice = device;
+    stateblock->device = device;
     stateblock->blockType = type;
 
     for (i = 0; i < LIGHTMAP_SIZE; i++)

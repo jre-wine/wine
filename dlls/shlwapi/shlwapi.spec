@@ -193,7 +193,7 @@
 193 stdcall -noname SHGetCurColorRes()
 194 stdcall -noname SHWaitForSendMessageThread(ptr long)
 195 stdcall -noname SHIsExpandableFolder(ptr ptr)
-196 stdcall -noname DnsRecordSetCompare(ptr ptr ptr ptr) dnsapi.DnsRecordSetCompare
+196 stdcall -noname SHVerbExistsNA(str ptr ptr long)
 197 stdcall -noname SHFillRectClr(long ptr long)
 198 stdcall -noname SHSearchMapInt(ptr ptr long long)
 199 stdcall -noname IUnknown_Set(ptr ptr)
@@ -493,7 +493,7 @@
 493 stub -noname SHPropertyBag_ReadType
 494 stub -noname SHPropertyBag_ReadStr
 495 stub -noname SHPropertyBag_WriteStr
-496 stub -noname SHPropertyBag_ReadLONG
+496 stdcall -noname SHPropertyBag_ReadLONG(ptr wstr ptr)
 497 stub -noname SHPropertyBag_WriteLONG
 498 stub -noname SHPropertyBag_ReadBOOLOld
 499 stub -noname SHPropertyBag_WriteBOOL
@@ -531,7 +531,7 @@
 535 stub -noname SHPropertyBag_Delete
 536 stub -noname IUnknown_QueryServicePropertyBag
 537 stub -noname SHBoolSystemParametersInfo
-538 stub -noname IUnknown_QueryServiceForWebBrowserApp
+538 stdcall -noname IUnknown_QueryServiceForWebBrowserApp(ptr ptr ptr)
 539 stub -noname IUnknown_ShowBrowserBar
 540 stub -noname SHInvokeCommandOnContextMenu
 541 stub -noname SHInvokeCommandsOnContextMen

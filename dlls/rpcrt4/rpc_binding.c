@@ -1052,9 +1052,17 @@ RPC_STATUS RPC_ENTRY RpcBindingReset(RPC_BINDING_HANDLE Binding)
  */
 RPC_STATUS WINAPI RpcImpersonateClient(RPC_BINDING_HANDLE BindingHandle)
 {
-    FIXME("(%p): stub\n", BindingHandle);
-    ImpersonateSelf(SecurityImpersonation);
-    return RPC_S_OK;
+    RpcBinding *bind;
+
+    TRACE("(%p)\n", BindingHandle);
+
+    if (!BindingHandle) BindingHandle = I_RpcGetCurrentCallHandle();
+    if (!BindingHandle) return RPC_S_INVALID_BINDING;
+
+    bind = BindingHandle;
+    if (bind->FromConn)
+        return rpcrt4_conn_impersonate_client(bind->FromConn);
+    return RPC_S_WRONG_KIND_OF_BINDING;
 }
 
 /***********************************************************************
@@ -1077,8 +1085,17 @@ RPC_STATUS WINAPI RpcImpersonateClient(RPC_BINDING_HANDLE BindingHandle)
  */
 RPC_STATUS WINAPI RpcRevertToSelfEx(RPC_BINDING_HANDLE BindingHandle)
 {
-    FIXME("(%p): stub\n", BindingHandle);
-    return RPC_S_OK;
+    RpcBinding *bind;
+
+    TRACE("(%p)\n", BindingHandle);
+
+    if (!BindingHandle) BindingHandle = I_RpcGetCurrentCallHandle();
+    if (!BindingHandle) return RPC_S_INVALID_BINDING;
+
+    bind = BindingHandle;
+    if (bind->FromConn)
+        return rpcrt4_conn_revert_to_self(bind->FromConn);
+    return RPC_S_WRONG_KIND_OF_BINDING;
 }
 
 static inline BOOL has_nt_auth_identity(ULONG AuthnLevel)
@@ -1094,11 +1111,11 @@ static inline BOOL has_nt_auth_identity(ULONG AuthnLevel)
     }
 }
 
-static RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
-                                     CredHandle cred, TimeStamp exp,
-                                     ULONG cbMaxToken,
-                                     RPC_AUTH_IDENTITY_HANDLE identity,
-                                     RpcAuthInfo **ret)
+RPC_STATUS RpcAuthInfo_Create(ULONG AuthnLevel, ULONG AuthnSvc,
+                              CredHandle cred, TimeStamp exp,
+                              ULONG cbMaxToken,
+                              RPC_AUTH_IDENTITY_HANDLE identity,
+                              RpcAuthInfo **ret)
 {
     RpcAuthInfo *AuthInfo = HeapAlloc(GetProcessHeap(), 0, sizeof(*AuthInfo));
     if (!AuthInfo)
@@ -1431,9 +1448,8 @@ BOOL RpcQualityOfService_IsEqual(const RpcQualityOfService *qos1, const RpcQuali
  */
 RPC_STATUS WINAPI RpcRevertToSelf(void)
 {
-    FIXME("stub\n");
-    RevertToSelf();
-    return RPC_S_OK;
+    TRACE("\n");
+    return RpcRevertToSelfEx(NULL);
 }
 
 /***********************************************************************
@@ -1578,8 +1594,8 @@ RpcBindingInqAuthClientExA( RPC_BINDING_HANDLE ClientBinding, RPC_AUTHZ_HANDLE *
     if (status == RPC_S_OK && ServerPrincName)
     {
         *ServerPrincName = (RPC_CSTR)RPCRT4_strdupWtoA(principal);
+        if (!*ServerPrincName && principal) status = ERROR_OUTOFMEMORY;
         RpcStringFreeW(&principal);
-        if (!*ServerPrincName) return ERROR_OUTOFMEMORY;
     }
 
     return status;
@@ -1598,25 +1614,11 @@ RpcBindingInqAuthClientExW( RPC_BINDING_HANDLE ClientBinding, RPC_AUTHZ_HANDLE *
     TRACE("%p %p %p %p %p %p 0x%x\n", ClientBinding, Privs, ServerPrincName, AuthnLevel,
           AuthnSvc, AuthzSvc, Flags);
 
-    if (!bind->AuthInfo) return RPC_S_BINDING_HAS_NO_AUTH;
+    if (!bind->FromConn) return RPC_S_INVALID_BINDING;
 
-    if (Privs) *Privs = (RPC_AUTHZ_HANDLE)bind->AuthInfo->identity;
-    if (ServerPrincName)
-    {
-        *ServerPrincName = RPCRT4_strdupW(bind->AuthInfo->server_principal_name);
-        if (!*ServerPrincName) return ERROR_OUTOFMEMORY;
-    }
-    if (AuthnLevel) *AuthnLevel = bind->AuthInfo->AuthnLevel;
-    if (AuthnSvc) *AuthnSvc = bind->AuthInfo->AuthnSvc;
-    if (AuthzSvc)
-    {
-        FIXME("authorization service not implemented\n");
-        *AuthzSvc = RPC_C_AUTHZ_NONE;
-    }
-    if (Flags)
-        FIXME("flags 0x%x not implemented\n", Flags);
-
-    return RPC_S_OK;
+    return rpcrt4_conn_inquire_auth_client(bind->FromConn, Privs,
+                                           ServerPrincName, AuthnLevel,
+                                           AuthnSvc, AuthzSvc, Flags);
 }
 
 /***********************************************************************

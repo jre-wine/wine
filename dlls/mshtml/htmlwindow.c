@@ -893,15 +893,19 @@ static HRESULT WINAPI HTMLWindow2_get_onerror(IHTMLWindow2 *iface, VARIANT *p)
 static HRESULT WINAPI HTMLWindow2_put_onresize(IHTMLWindow2 *iface, VARIANT v)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(v(%d))\n", This, V_VT(&v));
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%s)\n", This, debugstr_variant(&v));
+
+    return set_window_event(This, EVENTID_RESIZE, &v);
 }
 
 static HRESULT WINAPI HTMLWindow2_get_onresize(IHTMLWindow2 *iface, VARIANT *p)
 {
     HTMLWindow *This = HTMLWINDOW2_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_window_event(This, EVENTID_RESIZE, p);
 }
 
 static HRESULT WINAPI HTMLWindow2_put_onscroll(IHTMLWindow2 *iface, VARIANT v)
@@ -1717,15 +1721,11 @@ static inline DWORD prop_to_dispid(HTMLWindow *This, global_prop_t *prop)
     return MSHTML_DISPID_CUSTOM_MIN + (prop-This->global_props);
 }
 
-static HRESULT WINAPI WindowDispEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
+HRESULT search_window_props(HTMLWindow *This, BSTR bstrName, DWORD grfdex, DISPID *pid)
 {
-    HTMLWindow *This = DISPEX_THIS(iface);
+    DWORD i;
     ScriptHost *script_host;
     DISPID id;
-    DWORD i;
-    HRESULT hres;
-
-    TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(bstrName), grfdex, pid);
 
     for(i=0; i < This->global_prop_cnt; i++) {
         /* FIXME: case sensitivity */
@@ -1748,6 +1748,20 @@ static HRESULT WINAPI WindowDispEx_GetDispID(IDispatchEx *iface, BSTR bstrName, 
         *pid = prop_to_dispid(This, prop);
         return S_OK;
     }
+
+    return DISP_E_UNKNOWNNAME;
+}
+
+static HRESULT WINAPI WindowDispEx_GetDispID(IDispatchEx *iface, BSTR bstrName, DWORD grfdex, DISPID *pid)
+{
+    HTMLWindow *This = DISPEX_THIS(iface);
+    HRESULT hres;
+
+    TRACE("(%p)->(%s %x %p)\n", This, debugstr_w(bstrName), grfdex, pid);
+
+    hres = search_window_props(This, bstrName, grfdex, pid);
+    if(hres != DISP_E_UNKNOWNNAME)
+        return hres;
 
     hres = IDispatchEx_GetDispID(DISPATCHEX(&This->dispex), bstrName, grfdex, pid);
     if(hres != DISP_E_UNKNOWNNAME)

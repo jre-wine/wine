@@ -130,14 +130,15 @@ struct dxgi_swapchain
 };
 
 /* IDXGISurface */
-extern const struct IDXGISurfaceVtbl dxgi_surface_vtbl DECLSPEC_HIDDEN;
-extern const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl DECLSPEC_HIDDEN;
 struct dxgi_surface
 {
     const struct IDXGISurfaceVtbl *vtbl;
     const struct IUnknownVtbl *inner_unknown_vtbl;
     IUnknown *outer_unknown;
     LONG refcount;
+    IDXGIDevice *device;
 };
+
+HRESULT dxgi_surface_init(struct dxgi_surface *surface, IDXGIDevice *device, IUnknown *outer) DECLSPEC_HIDDEN;
 
 #endif /* __WINE_DXGI_PRIVATE_H */

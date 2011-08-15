@@ -26,7 +26,6 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wingdi.h"
-#include "wine/wingdi16.h"
 #include "winspool.h"
 
 #include "wine/list.h"
@@ -335,7 +334,7 @@ typedef struct {
 } PSPEN;
 
 typedef struct {
-    HANDLE16		hJob;
+    DWORD		id;             /* Job id */
     LPSTR		output;		/* Output file/port */
     LPSTR               DocName;        /* Document Name */
     BOOL		banding;        /* Have we received a NEXTBAND */
@@ -491,6 +490,8 @@ extern BOOL PSDRV_WriteSetDownloadFont(PSDRV_PDEVICE *physDev);
 extern BOOL PSDRV_WriteDownloadGlyphShow(PSDRV_PDEVICE *physDev, WORD *glpyhs,
 					 UINT count);
 extern BOOL PSDRV_EmptyDownloadList(PSDRV_PDEVICE *physDev, BOOL write_undef);
+
+extern DWORD write_spool( PSDRV_PDEVICE *physDev, const void *data, DWORD num );
 
 #define MAX_G_NAME 31 /* max length of PS glyph name */
 extern void get_glyph_name(HDC hdc, WORD index, char *name);

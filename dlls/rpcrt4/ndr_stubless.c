@@ -999,6 +999,18 @@ static DWORD calc_arg_size(MIDL_STUB_MESSAGE *pStubMsg, PFORMAT_STRING pFormat)
         size = ComplexStructSize(pStubMsg, pFormat);
         size *= pStubMsg->MaxCount;
         break;
+    case RPC_FC_C_CSTRING:
+    case RPC_FC_C_WSTRING:
+        if (*pFormat == RPC_FC_C_CSTRING)
+            size = sizeof(CHAR);
+        else
+            size = sizeof(WCHAR);
+        if (pFormat[1] == RPC_FC_STRING_SIZED)
+            ComputeConformance(pStubMsg, NULL, pFormat + 2, 0);
+        else
+            pStubMsg->MaxCount = 0;
+        size *= pStubMsg->MaxCount;
+        break;
     default:
         FIXME("Unhandled type %02x\n", *pFormat);
         /* fallthrough */
@@ -1128,7 +1140,8 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
                         !pParam->param_attributes.IsByValue &&
                         !pParam->param_attributes.ServerAllocSize)
                     {
-                        pStubMsg->pfnFree(*(void **)pArg);
+                        if (*pTypeFormat != RPC_FC_BIND_CONTEXT)
+                            pStubMsg->pfnFree(*(void **)pArg);
                     }
 
                     if (pParam->param_attributes.ServerAllocSize)
@@ -1140,12 +1153,21 @@ static LONG_PTR *stub_do_args(MIDL_STUB_MESSAGE *pStubMsg,
                              !pParam->param_attributes.ServerAllocSize &&
                              !pParam->param_attributes.IsByValue)
                     {
-                        DWORD size = calc_arg_size(pStubMsg, pTypeFormat);
-
-                        if(size)
+                        if (*pTypeFormat == RPC_FC_BIND_CONTEXT)
                         {
-                            *(void **)pArg = NdrAllocate(pStubMsg, size);
-                            memset(*(void **)pArg, 0, size);
+                            NDR_SCONTEXT ctxt = NdrContextHandleInitialize(
+                                pStubMsg, pTypeFormat);
+                            *(void **)pArg = NDRSContextValue(ctxt);
+                        }
+                        else
+                        {
+                            DWORD size = calc_arg_size(pStubMsg, pTypeFormat);
+
+                            if(size)
+                            {
+                                *(void **)pArg = NdrAllocate(pStubMsg, size);
+                                memset(*(void **)pArg, 0, size);
+                            }
                         }
                     }
                     break;

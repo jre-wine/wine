@@ -56,6 +56,35 @@ static const char* wine_dbgstr_addr(const ADDRESS* addr)
     }
 }
 
+static DWORD WINAPI addr_to_linear(HANDLE hProcess, HANDLE hThread, ADDRESS* addr)
+{
+    LDT_ENTRY	le;
+
+    switch (addr->Mode)
+    {
+    case AddrMode1616:
+        if (GetThreadSelectorEntry(hThread, addr->Segment, &le))
+            return (le.HighWord.Bits.BaseHi << 24) +
+                (le.HighWord.Bits.BaseMid << 16) + le.BaseLow + LOWORD(addr->Offset);
+        break;
+    case AddrMode1632:
+        if (GetThreadSelectorEntry(hThread, addr->Segment, &le))
+            return (le.HighWord.Bits.BaseHi << 24) +
+                (le.HighWord.Bits.BaseMid << 16) + le.BaseLow + addr->Offset;
+        break;
+    case AddrModeReal:
+        return (DWORD)(LOWORD(addr->Segment) << 4) + addr->Offset;
+    case AddrModeFlat:
+        return addr->Offset;
+    default:
+        FIXME("Unsupported (yet) mode (%x)\n", addr->Mode);
+        return 0;
+    }
+    FIXME("Failed to linearize address %04x:%08x (mode %x)\n",
+          addr->Segment, addr->Offset, addr->Mode);
+    return 0;
+}
+
 static BOOL CALLBACK read_mem(HANDLE hProcess, DWORD addr, void* buffer,
                               DWORD size, LPDWORD nread)
 {
@@ -232,7 +261,7 @@ static BOOL stack_walk(struct stack_walk_callback* cb, LPSTACKFRAME frame)
                     WARN("Bad stack frame 0x%08x\n", p);
                     goto done_err;
                 }
-                curr_switch = (DWORD)frame16.frame32;
+                curr_switch = (DWORD_PTR)frame16.frame32;
 
                 if (!sw_read_mem(cb, curr_switch, &ch, sizeof(ch)))
                     curr_switch = 0xFFFFFFFF;
@@ -298,7 +327,7 @@ static BOOL stack_walk(struct stack_walk_callback* cb, LPSTACKFRAME frame)
                     WARN("Bad stack frame 0x%08x\n", p);
                     goto done_err;
                 }
-                curr_switch = (DWORD)frame16.frame32;
+                curr_switch = (DWORD_PTR)frame16.frame32;
                 curr_mode = stm_32bit;
                 if (!sw_read_mem(cb, curr_switch, &ch, sizeof(ch)))
                     curr_switch = 0;

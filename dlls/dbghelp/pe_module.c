@@ -36,6 +36,69 @@
 WINE_DEFAULT_DEBUG_CHANNEL(dbghelp);
 
 /******************************************************************
+ *		pe_load_symbol_table
+ *
+ * Use the COFF symbol table (if any) from the IMAGE_FILE_HEADER to set the absolute address
+ * of global symbols.
+ * Mingw32 requires this for stabs debug information as address for global variables isn't filled in
+ * (this is similar to what is done in elf_module.c when using the .symtab ELF section)
+ */
+static BOOL pe_load_symbol_table(struct module* module, IMAGE_NT_HEADERS* nth, void* mapping)
+{
+    const IMAGE_SYMBOL* isym;
+    int                 i, numsym, naux;
+    const char*         strtable;
+    char                tmp[9];
+    const char*         name;
+    struct hash_table_iter      hti;
+    void*               ptr;
+    struct symt_data*   sym;
+    const IMAGE_SECTION_HEADER* sect;
+
+    numsym = nth->FileHeader.NumberOfSymbols;
+    if (!nth->FileHeader.PointerToSymbolTable || !numsym)
+        return TRUE;
+    isym = (const IMAGE_SYMBOL*)((char*)mapping + nth->FileHeader.PointerToSymbolTable);
+    /* FIXME: no way to get strtable size */
+    strtable = (const char*)&isym[numsym];
+    sect = IMAGE_FIRST_SECTION(nth);
+
+    for (i = 0; i < numsym; i+= naux, isym += naux)
+    {
+        if (isym->StorageClass == IMAGE_SYM_CLASS_EXTERNAL &&
+            isym->SectionNumber > 0 && isym->SectionNumber <= nth->FileHeader.NumberOfSections)
+        {
+            if (isym->N.Name.Short)
+            {
+                name = memcpy(tmp, isym->N.ShortName, 8);
+                tmp[8] = '\0';
+            }
+            else name = strtable + isym->N.Name.Long;
+            if (name[0] == '_') name++;
+            hash_table_iter_init(&module->ht_symbols, &hti, name);
+            while ((ptr = hash_table_iter_up(&hti)))
+            {
+                sym = GET_ENTRY(ptr, struct symt_data, hash_elt);
+                if (sym->symt.tag == SymTagData &&
+                    (sym->kind == DataIsGlobal || sym->kind == DataIsFileStatic) &&
+                    !strcmp(sym->hash_elt.name, name))
+                {
+                    TRACE("Changing absolute address for %d.%s: %lx -> %s\n",
+                          isym->SectionNumber, name, sym->u.var.offset,
+                          wine_dbgstr_longlong(module->module.BaseOfImage +
+                                               sect[isym->SectionNumber - 1].VirtualAddress + isym->Value));
+                    sym->u.var.offset = module->module.BaseOfImage +
+                        sect[isym->SectionNumber - 1].VirtualAddress + isym->Value;
+                    break;
+                }
+            }
+        }
+        naux = isym->NumberOfAuxSymbols + 1;
+    }
+    return TRUE;
+}
+
+/******************************************************************
  *		pe_load_stabs
  *
  * look for stabs information in PE header (it's how the mingw compiler provides 
@@ -74,6 +137,7 @@ static BOOL pe_load_stabs(const struct process* pcs, struct module* module,
                           RtlImageRvaToVa(nth, mapping, stabstr, NULL),
                           stabstrsize,
                           NULL, NULL);
+        if (ret) pe_load_symbol_table(module, nth, mapping);
     }
 
     TRACE("%s the STABS debug info\n", ret ? "successfully loaded" : "failed to load");
@@ -368,13 +432,13 @@ struct module* pe_load_native_module(struct process* pcs, const WCHAR* name,
  *		pe_load_nt_header
  *
  */
-BOOL pe_load_nt_header(HANDLE hProc, DWORD base, IMAGE_NT_HEADERS* nth)
+BOOL pe_load_nt_header(HANDLE hProc, DWORD64 base, IMAGE_NT_HEADERS* nth)
 {
     IMAGE_DOS_HEADER    dos;
 
-    return ReadProcessMemory(hProc, (char*)base, &dos, sizeof(dos), NULL) &&
+    return ReadProcessMemory(hProc, (char*)(DWORD_PTR)base, &dos, sizeof(dos), NULL) &&
         dos.e_magic == IMAGE_DOS_SIGNATURE &&
-        ReadProcessMemory(hProc, (char*)(base + dos.e_lfanew), 
+        ReadProcessMemory(hProc, (char*)(DWORD_PTR)(base + dos.e_lfanew),
                           nth, sizeof(*nth), NULL) &&
         nth->Signature == IMAGE_NT_SIGNATURE;
 }
@@ -384,7 +448,7 @@ BOOL pe_load_nt_header(HANDLE hProc, DWORD base, IMAGE_NT_HEADERS* nth)
  *
  */
 struct module* pe_load_builtin_module(struct process* pcs, const WCHAR* name,
-                                      DWORD base, DWORD size)
+                                      DWORD64 base, DWORD64 size)
 {
     struct module*      module = NULL;
 

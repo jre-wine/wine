@@ -38,8 +38,10 @@
 #include "winbase.h"
 #include "winerror.h"
 #include "winreg.h"
+#include "winnls.h"
 #include "psdrv.h"
 #include "winspool.h"
+#include "wine/library.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(psdrv);
@@ -365,7 +367,7 @@ BOOL CDECL PSDRV_CreateDC( HDC hdc, PSDRV_PDEVICE **pdev, LPCWSTR driver, LPCWST
             WideCharToMultiByte( CP_ACP, 0, output, -1, physDev->job.output, len, NULL, NULL );
     } else
         physDev->job.output = NULL;
-    physDev->job.hJob = 0;
+    physDev->job.id = 0;
 
     if(initData) {
         DEVMODEA *devmodeA = DEVMODEdupWtoA(PSDRV_Heap, initData);

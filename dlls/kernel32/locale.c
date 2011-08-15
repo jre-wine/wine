@@ -2926,31 +2926,31 @@ void LOCALE_Init(void)
 
 #ifdef __APPLE__
     /* MacOS doesn't set the locale environment variables so we have to do it ourselves */
-    CFArrayRef preferred_locales, all_locales;
-    CFStringRef user_language_string_ref = NULL;
     char user_locale[50];
-    char* p;
 
     CFLocaleRef user_locale_ref = CFLocaleCopyCurrent();
-    CFStringRef user_locale_string_ref = CFLocaleGetIdentifier( user_locale_ref );
+    CFStringRef user_locale_lang_ref = CFLocaleGetValue( user_locale_ref, kCFLocaleLanguageCode );
+    CFStringRef user_locale_country_ref = CFLocaleGetValue( user_locale_ref, kCFLocaleCountryCode );
+    CFStringRef user_locale_string_ref;
+
+    if (user_locale_country_ref)
+    {
+        user_locale_string_ref = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@_%@.UTF-8"),
+            user_locale_lang_ref, user_locale_country_ref);
+    }
+    else
+    {
+        user_locale_string_ref = CFStringCreateWithFormat(NULL, NULL, CFSTR("%@.UTF-8"),
+            user_locale_lang_ref);
+    }
 
     CFStringGetCString( user_locale_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
     CFRelease( user_locale_ref );
-    /* Strip modifiers because setlocale() can't parse them. */
-    if ((p = strchr( user_locale, '@' ))) *p = 0;
-    if (!strchr( user_locale, '.' )) strcat( user_locale, ".UTF-8" );
+    CFRelease( user_locale_string_ref );
+
     unix_cp = CP_UTF8;  /* default to utf-8 even if we don't get a valid locale */
     setenv( "LANG", user_locale, 0 );
     TRACE( "setting locale to '%s'\n", user_locale );
-
-    /* We still want to set the retrieve the preferred language as chosen in
-       System Preferences.app, because it can differ from CFLocaleCopyCurrent().
-    */
-    all_locales = CFLocaleCopyAvailableLocaleIdentifiers();
-    preferred_locales = CFBundleCopyLocalizationsForPreferences( all_locales, NULL );
-    if (preferred_locales && CFArrayGetCount( preferred_locales ))
-        user_language_string_ref = CFArrayGetValueAtIndex( preferred_locales, 0 );
-    CFRelease( all_locales );
 #endif /* __APPLE__ */
 
     setlocale( LC_ALL, "" );
@@ -2959,19 +2959,28 @@ void LOCALE_Init(void)
     if (!lcid_LC_MESSAGES) lcid_LC_MESSAGES = lcid_LC_CTYPE;
 
 #ifdef __APPLE__
-    /* Override lcid_LC_MESSAGES with user_language if LC_MESSAGES is set to default */
-    if (lcid_LC_MESSAGES == lcid_LC_CTYPE && user_language_string_ref)
+    /* Override lcid_LC_MESSAGES with user's preferred language if LC_MESSAGES is set to default */
+    if (!getenv("LC_ALL") && !getenv("LC_MESSAGES"))
     {
-        struct locale_name locale_name;
-        WCHAR buffer[128];
-        CFStringGetCString( user_language_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
-        strcpynAtoW( buffer, user_locale, sizeof(buffer)/sizeof(WCHAR) );
-        parse_locale_name( buffer, &locale_name );
-        lcid_LC_MESSAGES = locale_name.lcid;
-        TRACE( "setting lcid_LC_MESSAGES to '%s'\n", user_locale );
+        /* Retrieve the preferred language as chosen in System Preferences. */
+        CFArrayRef all_locales = CFLocaleCopyAvailableLocaleIdentifiers();
+        CFArrayRef preferred_locales = CFBundleCopyLocalizationsForPreferences( all_locales, NULL );
+        CFStringRef user_language_string_ref;
+        if (preferred_locales && CFArrayGetCount( preferred_locales ) &&
+            (user_language_string_ref = CFArrayGetValueAtIndex( preferred_locales, 0 )))
+        {
+            struct locale_name locale_name;
+            WCHAR buffer[128];
+            CFStringGetCString( user_language_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
+            strcpynAtoW( buffer, user_locale, sizeof(buffer)/sizeof(WCHAR) );
+            parse_locale_name( buffer, &locale_name );
+            lcid_LC_MESSAGES = locale_name.lcid;
+            TRACE( "setting lcid_LC_MESSAGES to '%s'\n", user_locale );
+        }
+        CFRelease( all_locales );
+        if (preferred_locales)
+            CFRelease( preferred_locales );
     }
-    if (preferred_locales)
-        CFRelease( preferred_locales );
 #endif
 
     NtSetDefaultUILanguage( LANGIDFROMLCID(lcid_LC_MESSAGES) );

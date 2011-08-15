@@ -214,9 +214,9 @@ struct StorageBaseImpl
   LONG ref;
 
   /*
-   * Ancestor storage (top level)
+   * TRUE if this object has been invalidated
    */
-  StorageImpl* ancestorStorage;
+  int reverted;
 
   /*
    * Index of the directory entry of this storage
@@ -239,20 +239,83 @@ struct StorageBaseImpl
   DWORD stateBits;
 
   /* If set, this overrides the root storage name returned by IStorage_Stat */
-  WCHAR            filename[DIRENTRY_NAME_BUFFER_LEN];
+  LPCWSTR          filename;
 
   BOOL             create;     /* Was the storage created or opened.
                                   The behaviour of STGM_SIMPLE depends on this */
+  /*
+   * If this storage was opened in transacted mode, the object that implements
+   * the transacted snapshot or cache.
+   */
+  StorageBaseImpl *transactedChild;
 };
 
 /* virtual methods for StorageBaseImpl objects */
 struct StorageBaseImplVtbl {
   void (*Destroy)(StorageBaseImpl*);
+  void (*Invalidate)(StorageBaseImpl*);
+  HRESULT (*CreateDirEntry)(StorageBaseImpl*,const DirEntry*,DirRef*);
+  HRESULT (*WriteDirEntry)(StorageBaseImpl*,DirRef,const DirEntry*);
+  HRESULT (*ReadDirEntry)(StorageBaseImpl*,DirRef,DirEntry*);
+  HRESULT (*DestroyDirEntry)(StorageBaseImpl*,DirRef);
+  HRESULT (*StreamReadAt)(StorageBaseImpl*,DirRef,ULARGE_INTEGER,ULONG,void*,ULONG*);
+  HRESULT (*StreamWriteAt)(StorageBaseImpl*,DirRef,ULARGE_INTEGER,ULONG,const void*,ULONG*);
+  HRESULT (*StreamSetSize)(StorageBaseImpl*,DirRef,ULARGE_INTEGER);
 };
 
 static inline void StorageBaseImpl_Destroy(StorageBaseImpl *This)
 {
   This->baseVtbl->Destroy(This);
+}
+
+static inline void StorageBaseImpl_Invalidate(StorageBaseImpl *This)
+{
+  This->baseVtbl->Invalidate(This);
+}
+
+static inline HRESULT StorageBaseImpl_CreateDirEntry(StorageBaseImpl *This,
+  const DirEntry *newData, DirRef *index)
+{
+  return This->baseVtbl->CreateDirEntry(This, newData, index);
+}
+
+static inline HRESULT StorageBaseImpl_WriteDirEntry(StorageBaseImpl *This,
+  DirRef index, const DirEntry *data)
+{
+  return This->baseVtbl->WriteDirEntry(This, index, data);
+}
+
+static inline HRESULT StorageBaseImpl_ReadDirEntry(StorageBaseImpl *This,
+  DirRef index, DirEntry *data)
+{
+  return This->baseVtbl->ReadDirEntry(This, index, data);
+}
+
+static inline HRESULT StorageBaseImpl_DestroyDirEntry(StorageBaseImpl *This,
+  DirRef index)
+{
+  return This->baseVtbl->DestroyDirEntry(This, index);
+}
+
+/* Read up to size bytes from this directory entry's stream at the given offset. */
+static inline HRESULT StorageBaseImpl_StreamReadAt(StorageBaseImpl *This,
+  DirRef index, ULARGE_INTEGER offset, ULONG size, void *buffer, ULONG *bytesRead)
+{
+  return This->baseVtbl->StreamReadAt(This, index, offset, size, buffer, bytesRead);
+}
+
+/* Write size bytes to this directory entry's stream at the given offset,
+ * growing the stream if necessary. */
+static inline HRESULT StorageBaseImpl_StreamWriteAt(StorageBaseImpl *This,
+  DirRef index, ULARGE_INTEGER offset, ULONG size, const void *buffer, ULONG *bytesWritten)
+{
+  return This->baseVtbl->StreamWriteAt(This, index, offset, size, buffer, bytesWritten);
+}
+
+static inline HRESULT StorageBaseImpl_StreamSetSize(StorageBaseImpl *This,
+  DirRef index, ULARGE_INTEGER newsize)
+{
+  return This->baseVtbl->StreamSetSize(This, index, newsize);
 }
 
 /****************************************************************************
@@ -261,6 +324,9 @@ static inline void StorageBaseImpl_Destroy(StorageBaseImpl *This)
 
 void StorageBaseImpl_AddStream(StorageBaseImpl * stg, StgStreamImpl * strm);
 void StorageBaseImpl_RemoveStream(StorageBaseImpl * stg, StgStreamImpl * strm);
+
+/* Number of BlockChainStream objects to cache in a StorageImpl */
+#define BLOCKCHAIN_CACHE_SIZE 4
 
 /****************************************************************************
  * Storage32Impl definitions.
@@ -304,6 +370,10 @@ struct StorageImpl
   BlockChainStream* smallBlockDepotChain;
   BlockChainStream* smallBlockRootChain;
 
+  /* Cache of block chain streams objects for directory entries */
+  BlockChainStream* blockChainCache[BLOCKCHAIN_CACHE_SIZE];
+  UINT blockChainToEvict;
+
   /*
    * Pointer to the big block file abstraction
    */
@@ -324,12 +394,12 @@ HRESULT StorageImpl_WriteRawDirEntry(
             ULONG index,
             const BYTE *buffer);
 
-BOOL StorageImpl_ReadDirEntry(
+HRESULT StorageImpl_ReadDirEntry(
             StorageImpl*    This,
             DirRef          index,
             DirEntry*       buffer);
 
-BOOL StorageImpl_WriteDirEntry(
+HRESULT StorageImpl_WriteDirEntry(
             StorageImpl*        This,
             DirRef              index,
             const DirEntry*     buffer);
@@ -380,22 +450,9 @@ struct StgStreamImpl
   DirRef             dirEntry;
 
   /*
-   * Helper variable that contains the size of the stream
-   */
-  ULARGE_INTEGER     streamSize;
-
-  /*
    * This is the current position of the cursor in the stream
    */
   ULARGE_INTEGER     currentPosition;
-
-  /*
-   * The information in the stream is represented by a chain of small blocks
-   * or a chain of large blocks. Depending on the case, one of the two
-   * following variables points to that information.
-   */
-  BlockChainStream*      bigBlockChain;
-  SmallBlockChainStream* smallBlockChain;
 };
 
 /*

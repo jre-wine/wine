@@ -29,7 +29,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
-#define GLINFO_LOCATION This->resource.wineD3DDevice->adapter->gl_info
+#define GLINFO_LOCATION This->resource.device->adapter->gl_info
 
 #define VB_MAXDECLCHANGES     100     /* After that number we stop converting */
 #define VB_RESETDECLCHANGE    1000    /* Reset the changecount after that number of draws */
@@ -68,7 +68,7 @@ static void buffer_create_buffer_object(struct wined3d_buffer *This)
 
     if(This->buffer_type_hint == GL_ELEMENT_ARRAY_BUFFER_ARB)
     {
-        IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_INDEXBUFFER);
+        IWineD3DDeviceImpl_MarkStateDirty(This->resource.device, STATE_INDEXBUFFER);
     }
     GL_EXTCALL(glBindBufferARB(This->buffer_type_hint, This->buffer_object));
     error = glGetError();
@@ -79,22 +79,17 @@ static void buffer_create_buffer_object(struct wined3d_buffer *This)
     }
 
     /* Don't use static, because dx apps tend to update the buffer
-    * quite often even if they specify 0 usage. Because we always keep the local copy
-    * we never read from the vbo and can create a write only opengl buffer.
-    */
-    switch(This->resource.usage & (WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_DYNAMIC))
+     * quite often even if they specify 0 usage.
+     */
+    if(This->resource.usage & WINED3DUSAGE_DYNAMIC)
     {
-        case WINED3DUSAGE_WRITEONLY | WINED3DUSAGE_DYNAMIC:
-        case WINED3DUSAGE_DYNAMIC:
-            TRACE("Gl usage = GL_STREAM_DRAW\n");
-            gl_usage = GL_STREAM_DRAW_ARB;
-            break;
-
-        case WINED3DUSAGE_WRITEONLY:
-        default:
-            TRACE("Gl usage = GL_DYNAMIC_DRAW\n");
-            gl_usage = GL_DYNAMIC_DRAW_ARB;
-            break;
+        TRACE("Gl usage = GL_DYNAMIC_DRAW\n");
+        gl_usage = GL_DYNAMIC_DRAW_ARB;
+    }
+    else
+    {
+        TRACE("Gl usage = GL_STREAM_DRAW\n");
+        gl_usage = GL_STREAM_DRAW_ARB;
     }
 
     /* Reserve memory for the buffer. The amount of data won't change
@@ -148,7 +143,7 @@ static BOOL buffer_process_converted_attribute(struct wined3d_buffer *This,
     DWORD attrib_size;
     BOOL ret = FALSE;
     unsigned int i;
-    DWORD offset = This->resource.wineD3DDevice->stateBlock->streamOffset[attrib->stream_idx];
+    DWORD offset = This->resource.device->stateBlock->streamOffset[attrib->stream_idx];
     DWORD_PTR data;
 
     /* Check for some valid situations which cause us pain. One is if the buffer is used for
@@ -203,7 +198,7 @@ static BOOL buffer_check_attribute(struct wined3d_buffer *This, const struct win
         DWORD *stride_this_run, BOOL *float16_used)
 {
     const struct wined3d_stream_info_element *attrib = &si->elements[attrib_idx];
-    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = This->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     BOOL ret = FALSE;
     WINED3DFORMAT format;
@@ -311,7 +306,7 @@ static UINT *find_conversion_shift(struct wined3d_buffer *This,
 
 static BOOL buffer_find_decl(struct wined3d_buffer *This)
 {
-    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = This->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     const struct wined3d_stream_info *si = &device->strided_streams;
     UINT stride_this_run = 0;
@@ -472,7 +467,7 @@ static void buffer_check_buffer_object_size(struct wined3d_buffer *This)
 
         if(This->buffer_type_hint == GL_ELEMENT_ARRAY_BUFFER_ARB)
         {
-            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_INDEXBUFFER);
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.device, STATE_INDEXBUFFER);
         }
 
         /* Rescue the data before resizing the buffer object if we do not have our backup copy */
@@ -607,7 +602,7 @@ static void STDMETHODCALLTYPE buffer_UnLoad(IWineD3DBuffer *iface)
 
     if (This->buffer_object)
     {
-        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+        IWineD3DDeviceImpl *device = This->resource.device;
         struct wined3d_context *context;
 
         context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
@@ -657,11 +652,6 @@ static HRESULT STDMETHODCALLTYPE buffer_GetParent(IWineD3DBuffer *iface, IUnknow
 
 /* IWineD3DResource methods */
 
-static HRESULT STDMETHODCALLTYPE buffer_GetDevice(IWineD3DBuffer *iface, IWineD3DDevice **device)
-{
-    return resource_get_device((IWineD3DResource *)iface, device);
-}
-
 static HRESULT STDMETHODCALLTYPE buffer_SetPrivateData(IWineD3DBuffer *iface,
         REFGUID guid, const void *data, DWORD data_size, DWORD flags)
 {
@@ -692,7 +682,7 @@ static DWORD STDMETHODCALLTYPE buffer_GetPriority(IWineD3DBuffer *iface)
 static void STDMETHODCALLTYPE buffer_PreLoad(IWineD3DBuffer *iface)
 {
     struct wined3d_buffer *This = (struct wined3d_buffer *)iface;
-    IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+    IWineD3DDeviceImpl *device = This->resource.device;
     UINT start = 0, end = 0, vertices;
     struct wined3d_context *context;
     BOOL decl_changed = FALSE;
@@ -800,7 +790,7 @@ static void STDMETHODCALLTYPE buffer_PreLoad(IWineD3DBuffer *iface)
 
     if(This->buffer_type_hint == GL_ELEMENT_ARRAY_BUFFER_ARB)
     {
-        IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_INDEXBUFFER);
+        IWineD3DDeviceImpl_MarkStateDirty(This->resource.device, STATE_INDEXBUFFER);
     }
 
     if (!This->conversion_map)
@@ -962,12 +952,12 @@ static HRESULT STDMETHODCALLTYPE buffer_Map(IWineD3DBuffer *iface, UINT offset, 
     {
         if(count == 1)
         {
-            IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+            IWineD3DDeviceImpl *device = This->resource.device;
             struct wined3d_context *context;
 
             if(This->buffer_type_hint == GL_ELEMENT_ARRAY_BUFFER_ARB)
             {
-                IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_INDEXBUFFER);
+                IWineD3DDeviceImpl_MarkStateDirty(This->resource.device, STATE_INDEXBUFFER);
             }
 
             context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
@@ -1016,12 +1006,12 @@ static HRESULT STDMETHODCALLTYPE buffer_Unmap(IWineD3DBuffer *iface)
 
     if(!(This->flags & WINED3D_BUFFER_DOUBLEBUFFER) && This->buffer_object)
     {
-        IWineD3DDeviceImpl *device = This->resource.wineD3DDevice;
+        IWineD3DDeviceImpl *device = This->resource.device;
         struct wined3d_context *context;
 
         if(This->buffer_type_hint == GL_ELEMENT_ARRAY_BUFFER_ARB)
         {
-            IWineD3DDeviceImpl_MarkStateDirty(This->resource.wineD3DDevice, STATE_INDEXBUFFER);
+            IWineD3DDeviceImpl_MarkStateDirty(This->resource.device, STATE_INDEXBUFFER);
         }
 
         context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
@@ -1064,7 +1054,6 @@ static const struct IWineD3DBufferVtbl wined3d_buffer_vtbl =
     /* IWineD3DBase methods */
     buffer_GetParent,
     /* IWineD3DResource methods */
-    buffer_GetDevice,
     buffer_SetPrivateData,
     buffer_GetPrivateData,
     buffer_FreePrivateData,

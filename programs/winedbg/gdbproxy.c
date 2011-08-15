@@ -1396,7 +1396,7 @@ static enum packet_return packet_write_memory(struct gdb_context* gdbctx)
     {
         if (gdbctx->trace & GDBPXY_TRC_COMMAND_ERROR)
             fprintf(stderr, "Wrong sizes %u <> %u\n",
-                    ptr - gdbctx->in_packet + len * 2, gdbctx->in_packet_len);
+                    (int)(ptr - gdbctx->in_packet) + len * 2, gdbctx->in_packet_len);
         return packet_error;
     }
     if (gdbctx->trace & GDBPXY_TRC_COMMAND)
@@ -1468,13 +1468,14 @@ static enum packet_return packet_write_register(struct gdb_context* gdbctx)
     {
         if (gdbctx->trace & GDBPXY_TRC_COMMAND_ERROR)
             fprintf(stderr, "Wrong sizes %u <> %u\n",
-                    ptr + 8 - gdbctx->in_packet, gdbctx->in_packet_len);
+                    (int)(ptr + 8 - gdbctx->in_packet), gdbctx->in_packet_len);
         return packet_error;
     }
     if (gdbctx->trace & GDBPXY_TRC_COMMAND)
-        fprintf(stderr, "Writing reg %u <= %*.*s\n",
-                reg, gdbctx->in_packet_len - (ptr - gdbctx->in_packet),
-                gdbctx->in_packet_len - (ptr - gdbctx->in_packet), ptr);
+    {
+        int len = gdbctx->in_packet_len - (ptr - gdbctx->in_packet);
+        fprintf(stderr, "Writing reg %u <= %*.*s\n", reg, len, len, ptr );
+    }
 
     if (dbg_curr_thread != gdbctx->other_thread && gdbctx->other_thread)
     {
@@ -1501,18 +1502,19 @@ static void packet_query_monitor_wnd_helper(struct gdb_context* gdbctx, HWND hWn
     HWND	child;
 
     do {
-       if (!GetClassName(hWnd, clsName, sizeof(clsName)))
+       if (!GetClassNameA(hWnd, clsName, sizeof(clsName)))
 	  strcpy(clsName, "-- Unknown --");
-       if (!GetWindowText(hWnd, wndName, sizeof(wndName)))
+       if (!GetWindowTextA(hWnd, wndName, sizeof(wndName)))
 	  strcpy(wndName, "-- Empty --");
 
        packet_reply_open(gdbctx);
        packet_reply_catc(gdbctx, 'O');
        snprintf(buffer, sizeof(buffer),
-                "%*s%04lx%*s%-17.17s %08x %08x %.14s\n",
+                "%*s%04lx%*s%-17.17s %08x %0*lx %.14s\n",
                 indent, "", (ULONG_PTR)hWnd, 13 - indent, "",
-                clsName, GetWindowLong(hWnd, GWL_STYLE),
-                GetWindowLongPtr(hWnd, GWLP_WNDPROC), wndName);
+                clsName, GetWindowLongW(hWnd, GWL_STYLE),
+                ADDRWIDTH, (ULONG_PTR)GetWindowLongPtrW(hWnd, GWLP_WNDPROC),
+                wndName);
        packet_reply_hex_to_str(gdbctx, buffer);
        packet_reply_close(gdbctx);
 
@@ -2185,7 +2187,7 @@ static BOOL gdb_startup(struct gdb_context* gdbctx, DEBUG_EVENT* de, unsigned fl
     struct sockaddr_in  s_addrs;
     unsigned int        s_len = sizeof(s_addrs);
     struct pollfd       pollfd;
-    IMAGEHLP_MODULE     imh_mod;
+    IMAGEHLP_MODULE64   imh_mod;
 
     /* step 1: create socket for gdb connection request */
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1)

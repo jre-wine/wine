@@ -783,11 +783,17 @@ static void test_secure_connection(void)
 
     ret = WinHttpSendRequest(req, NULL, 0, NULL, 0, 0, 0);
     ok(ret, "failed to send request %u\n", GetLastError());
+    if (!ret)
+    {
+        skip("secure connection failed, skipping remaining secure tests\n");
+        goto cleanup;
+    }
 
     size = sizeof(cert);
     ret = WinHttpQueryOption(req, WINHTTP_OPTION_SERVER_CERT_CONTEXT, &cert, &size );
     ok(ret, "failed to retrieve certificate context %u\n", GetLastError());
-    CertFreeCertificateContext(cert);
+    if (ret)
+        CertFreeCertificateContext(cert);
 
     size = sizeof(bitness);
     ret = WinHttpQueryOption(req, WINHTTP_OPTION_SECURITY_KEY_BITNESS, &bitness, &size );
@@ -805,6 +811,7 @@ static void test_secure_connection(void)
     ret = WinHttpQueryHeaders(req, WINHTTP_QUERY_RAW_HEADERS_CRLF, NULL, NULL, &size, NULL);
     ok(!ret, "succeeded unexpectedly\n");
 
+cleanup:
     WinHttpCloseHandle(req);
     WinHttpCloseHandle(con);
     WinHttpCloseHandle(ses);
@@ -1000,9 +1007,16 @@ static void test_set_default_proxy_config(void)
     info.lpszProxy = normalString;
     SetLastError(0xdeadbeef);
     ret = WinHttpSetDefaultProxyConfiguration(&info);
-    ok(ret, "WinHttpSetDefaultProxyConfiguration failed: %d\n", GetLastError());
-
-    set_default_proxy_reg_value( saved_proxy_settings, len, type );
+    if (ret)
+    {
+        ok(ret, "always true\n");
+        set_default_proxy_reg_value( saved_proxy_settings, len, type );
+    }
+    else if (GetLastError() == ERROR_ACCESS_DENIED)
+        skip("couldn't set default proxy configuration: access denied\n");
+    else
+        ok(ret, "WinHttpSetDefaultProxyConfiguration failed: %d\n",
+           GetLastError());
 }
 
 START_TEST (winhttp)

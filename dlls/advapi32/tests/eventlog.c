@@ -31,6 +31,8 @@
 
 static BOOL (WINAPI *pCreateWellKnownSid)(WELL_KNOWN_SID_TYPE,PSID,PSID,DWORD*);
 static BOOL (WINAPI *pGetEventLogInformation)(HANDLE,DWORD,LPVOID,DWORD,LPDWORD);
+
+static BOOL (WINAPI *pGetComputerNameExA)(COMPUTER_NAME_FORMAT,LPSTR,LPDWORD);
 static BOOL (WINAPI *pWow64DisableWow64FsRedirection)(PVOID *);
 static BOOL (WINAPI *pWow64RevertWow64FsRedirection)(PVOID);
 
@@ -42,6 +44,7 @@ static void init_function_pointers(void)
     pCreateWellKnownSid = (void*)GetProcAddress(hadvapi32, "CreateWellKnownSid");
     pGetEventLogInformation = (void*)GetProcAddress(hadvapi32, "GetEventLogInformation");
 
+    pGetComputerNameExA = (void*)GetProcAddress(hkernel32, "GetComputerNameExA");
     pWow64DisableWow64FsRedirection = (void*)GetProcAddress(hkernel32, "Wow64DisableWow64FsRedirection");
     pWow64RevertWow64FsRedirection = (void*)GetProcAddress(hkernel32, "Wow64RevertWow64FsRedirection");
 }
@@ -709,8 +712,8 @@ static void test_readwrite(void)
     BOOL ret, sidavailable;
     BOOL on_vista = FALSE; /* Used to indicate Vista, W2K8 or Win7 */
     int i;
-    char localcomputer[MAX_COMPUTERNAME_LENGTH + 1];
-    DWORD len = sizeof(localcomputer);
+    char *localcomputer = NULL;
+    DWORD size;
 
     if (pCreateWellKnownSid)
     {
@@ -727,8 +730,6 @@ static void test_readwrite(void)
         user = NULL;
     }
 
-    GetComputerNameA(localcomputer, &len);
-
     /* Write an event with an incorrect event type. This will fail on Windows 7
      * but succeed on all others, hence it's not part of the struct.
      */
@@ -737,8 +738,7 @@ static void test_readwrite(void)
     {
         /* Intermittently seen on NT4 when tests are run immediately after boot */
         win_skip("Could not get a handle to the eventlog\n");
-        HeapFree(GetProcessHeap(), 0, user);
-        return;
+        goto cleanup;
     }
 
     count = 0xdeadbeef;
@@ -756,9 +756,8 @@ static void test_readwrite(void)
         if (count != 0)
         {
             win_skip("We didn't open our new eventlog\n");
-            HeapFree(GetProcessHeap(), 0, user);
             CloseEventLog(handle);
-            return;
+            goto cleanup;
         }
     }
 
@@ -854,12 +853,28 @@ static void test_readwrite(void)
     if (count == 0)
     {
         skip("No events were written to the eventlog\n");
-        return;
+        goto cleanup;
     }
 
     /* Report only once */
     if (on_vista)
         skip("There is no DWORD alignment enforced for UserSid on Vista, W2K8 or Win7\n");
+
+    if (on_vista && pGetComputerNameExA)
+    {
+        /* New Vista+ behavior */
+        size = 0;
+        SetLastError(0xdeadbeef);
+        pGetComputerNameExA(ComputerNameDnsFullyQualified, NULL, &size);
+        localcomputer = HeapAlloc(GetProcessHeap(), 0, size);
+        pGetComputerNameExA(ComputerNameDnsFullyQualified, localcomputer, &size);
+    }
+    else
+    {
+        size = MAX_COMPUTERNAME_LENGTH + 1;
+        localcomputer = HeapAlloc(GetProcessHeap(), 0, size);
+        GetComputerNameA(localcomputer, &size);
+    }
 
     /* Read all events from our created eventlog, one by one */
     handle = OpenEventLogA(NULL, eventlogname);
@@ -962,8 +977,6 @@ static void test_readwrite(void)
     }
     CloseEventLog(handle);
 
-    HeapFree(GetProcessHeap(), 0, user);
-
     /* Test clearing a real eventlog */
     handle = OpenEventLogA(NULL, eventlogname);
 
@@ -977,6 +990,10 @@ static void test_readwrite(void)
     ok(count == 0, "Expected an empty eventlog, got %d records\n", count);
 
     CloseEventLog(handle);
+
+cleanup:
+    HeapFree(GetProcessHeap(), 0, localcomputer);
+    HeapFree(GetProcessHeap(), 0, user);
 }
 
 /* Before Vista:

@@ -32,6 +32,7 @@ PUBLIC_IDL_H_SRCS = \
 	downloadmgr.idl \
 	dxgi.idl \
 	dxgitype.idl \
+	endpointvolume.idl \
 	exdisp.idl \
 	fusion.idl \
 	hlink.idl \
@@ -45,6 +46,7 @@ PUBLIC_IDL_H_SRCS = \
 	mimeinfo.idl \
 	mimeole.idl \
 	mlang.idl \
+	mmdeviceapi.idl \
 	mmstream.idl \
 	mscoree.idl \
 	msctf.idl \

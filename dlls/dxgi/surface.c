@@ -72,6 +72,7 @@ static ULONG STDMETHODCALLTYPE dxgi_surface_inner_Release(IUnknown *iface)
 
     if (!refcount)
     {
+        IDXGIDevice_Release(This->device);
         HeapFree(GetProcessHeap(), 0, This);
     }
 
@@ -129,18 +130,22 @@ static HRESULT STDMETHODCALLTYPE dxgi_surface_GetPrivateData(IDXGISurface *iface
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_GetParent(IDXGISurface *iface, REFIID riid, void **parent)
 {
-    FIXME("iface %p, riid %s, parent %p stub!\n", iface, debugstr_guid(riid), parent);
+    struct dxgi_surface *This = (struct dxgi_surface *)iface;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, riid %s, parent %p.\n", iface, debugstr_guid(riid), parent);
+
+    return IDXGIDevice_QueryInterface(This->device, riid, parent);
 }
 
 /* IDXGIDeviceSubObject methods */
 
 static HRESULT STDMETHODCALLTYPE dxgi_surface_GetDevice(IDXGISurface *iface, REFIID riid, void **device)
 {
-    FIXME("iface %p, riid %s, device %p stub!\n", iface, debugstr_guid(riid), device);
+    struct dxgi_surface *This = (struct dxgi_surface *)iface;
 
-    return E_NOTIMPL;
+    TRACE("iface %p, riid %s, device %p.\n", iface, debugstr_guid(riid), device);
+
+    return IDXGIDevice_QueryInterface(This->device, riid, device);
 }
 
 /* IDXGISurface methods */
@@ -165,7 +170,7 @@ static HRESULT STDMETHODCALLTYPE dxgi_surface_Unmap(IDXGISurface *iface)
     return E_NOTIMPL;
 }
 
-const struct IDXGISurfaceVtbl dxgi_surface_vtbl =
+static const struct IDXGISurfaceVtbl dxgi_surface_vtbl =
 {
     /* IUnknown methods */
     dxgi_surface_QueryInterface,
@@ -184,10 +189,22 @@ const struct IDXGISurfaceVtbl dxgi_surface_vtbl =
     dxgi_surface_Unmap,
 };
 
-const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl =
+static const struct IUnknownVtbl dxgi_surface_inner_unknown_vtbl =
 {
     /* IUnknown methods */
     dxgi_surface_inner_QueryInterface,
     dxgi_surface_inner_AddRef,
     dxgi_surface_inner_Release,
 };
+
+HRESULT dxgi_surface_init(struct dxgi_surface *surface, IDXGIDevice *device, IUnknown *outer)
+{
+    surface->vtbl = &dxgi_surface_vtbl;
+    surface->inner_unknown_vtbl = &dxgi_surface_inner_unknown_vtbl;
+    surface->refcount = 1;
+    surface->outer_unknown = outer ? outer : (IUnknown *)&surface->inner_unknown_vtbl;
+    surface->device = device;
+    IDXGIDevice_AddRef(device);
+
+    return S_OK;
+}

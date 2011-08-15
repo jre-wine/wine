@@ -96,10 +96,11 @@ ok(m[1] === "test", "m[1] = " + m[1]);
 b = /a*/.test();
 ok(b === true, "/a*/.test() returned " + b);
 
-m = "abcabc".match(/ca/);
+m = "abcabc".match(re = /ca/);
 ok(typeof(m) === "object", "typeof m is not object");
 ok(m.length === 1, "m.length is not 1");
 ok(m["0"] === "ca", "m[0] is not \"ca\"");
+ok(re.lastIndex === 4, "re.lastIndex = " + re.lastIndex);
 
 m = "abcabc".match(/ab/);
 ok(typeof(m) === "object", "typeof m is not object");
@@ -165,8 +166,9 @@ ok(m["0"] === "ab", "m[0] is not \"ab\"");
 m = "abcabc".match();
 ok(m === null, "m is not null");
 
-r = "- [test] -".replace(/\[([^\[]+)\]/g, "success");
+r = "- [test] -".replace(re = /\[([^\[]+)\]/g, "success");
 ok(r === "- success -", "r = " + r + " expected '- success -'");
+ok(re.lastIndex === 8, "re.lastIndex = " + re.lastIndex);
 
 r = "[test] [test]".replace(/\[([^\[]+)\]/g, "aa");
 ok(r === "aa aa", "r = " + r + "aa aa");
@@ -285,6 +287,41 @@ ok(r.length === 2, "r.length = " + r.length);
 ok(r[0] === "1", "r[0] = " + r[0]);
 ok(r[1] === "2", "r[1] = " + r[1]);
 
+re = /,+/;
+r = "1,,2,".split(re);
+ok(r.length === 2, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(re.lastIndex === 5, "re.lastIndex = " + re.lastIndex);
+
+re = /,+/g;
+r = "1,,2,".split(re);
+ok(r.length === 2, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(re.lastIndex === 5, "re.lastIndex = " + re.lastIndex);
+
+r = "1 12 \t3".split(re = /\s+/).join(";");
+ok(r === "1;12;3", "r = " + r);
+ok(re.lastIndex === 6, "re.lastIndex = " + re.lastIndex);
+
+r = "123".split(re = /\s+/).join(";");
+ok(r === "123", "r = " + r);
+ok(re.lastIndex === 0, "re.lastIndex = " + re.lastIndex);
+
+/* another standard violation */
+r = "1 12 \t3".split(re = /(\s)+/g).join(";");
+ok(r === "1;12;3", "r = " + r);
+ok(re.lastIndex === 6, "re.lastIndex = " + re.lastIndex);
+
+re = /,+/;
+re.lastIndex = 4;
+r = "1,,2,".split(re);
+ok(r.length === 2, "r.length = " + r.length);
+ok(r[0] === "1", "r[0] = " + r[0]);
+ok(r[1] === "2", "r[1] = " + r[1]);
+ok(re.lastIndex === 5, "re.lastIndex = " + re.lastIndex);
+
 re = /abc[^d]/g;
 ok(re.source === "abc[^d]", "re.source = '" + re.source + "', expected 'abc[^d]'");
 
@@ -340,8 +377,11 @@ re.lastIndex = 3;
 re.lastIndex = "test";
 ok(re.lastIndex === "test", "re.lastIndex = " + re.lastIndex + " expected 'test'");
 m = re.exec(" a a ");
-ok(re.lastIndex === 2, "re.lastIndex = " + re.lastIndex + " expected 2");
-ok(m.index === 1, "m.index = " + m.index + " expected 1");
+ok(re.lastIndex === 2 || re.lastIndex === 0, "re.lastIndex = " + re.lastIndex + " expected 2 or 0");
+if(re.lastIndex != 0)
+    ok(m.index === 1, "m.index = " + m.index + " expected 1");
+else
+    ok(m === null, "m = " + m + " expected null");
 
 re.lastIndex = 0;
 re.lastIndex = 3.9;

@@ -1128,7 +1128,7 @@ HWND WINAPI SHSetParentHwnd(HWND hWnd, HWND hWndParent)
  * PARAMS
  *  lpUnkSink   [I] Sink for the connection point advise call
  *  riid        [I] REFIID of connection point to advise
- *  bAdviseOnly [I] TRUE = Advise only, FALSE = Unadvise first
+ *  fConnect    [I] TRUE = Connection being establisted, FALSE = broken
  *  lpUnknown   [I] Object supporting the IConnectionPointContainer interface
  *  lpCookie    [O] Pointer to connection point cookie
  *  lppCP       [O] Destination for the IConnectionPoint found
@@ -1140,7 +1140,7 @@ HWND WINAPI SHSetParentHwnd(HWND hWnd, HWND hWndParent)
  *           E_NOINTERFACE, if lpUnknown isn't an IConnectionPointContainer,
  *           Or an HRESULT error code if any call fails.
  */
-HRESULT WINAPI ConnectToConnectionPoint(IUnknown* lpUnkSink, REFIID riid, BOOL bAdviseOnly,
+HRESULT WINAPI ConnectToConnectionPoint(IUnknown* lpUnkSink, REFIID riid, BOOL fConnect,
                            IUnknown* lpUnknown, LPDWORD lpCookie,
                            IConnectionPoint **lppCP)
 {
@@ -1148,7 +1148,7 @@ HRESULT WINAPI ConnectToConnectionPoint(IUnknown* lpUnkSink, REFIID riid, BOOL b
   IConnectionPointContainer* lpContainer;
   IConnectionPoint *lpCP;
 
-  if(!lpUnknown || (bAdviseOnly && !lpUnkSink))
+  if(!lpUnknown || (fConnect && !lpUnkSink))
     return E_FAIL;
 
   if(lppCP)
@@ -1162,9 +1162,10 @@ HRESULT WINAPI ConnectToConnectionPoint(IUnknown* lpUnkSink, REFIID riid, BOOL b
 
     if (SUCCEEDED(hRet))
     {
-      if(!bAdviseOnly)
+      if(!fConnect)
         hRet = IConnectionPoint_Unadvise(lpCP, *lpCookie);
-      hRet = IConnectionPoint_Advise(lpCP, lpUnkSink, lpCookie);
+      else
+        hRet = IConnectionPoint_Advise(lpCP, lpUnkSink, lpCookie);
 
       if (FAILED(hRet))
         *lpCookie = 0;
@@ -2929,20 +2930,27 @@ static HRESULT SHLWAPI_InvokeByIID(
 {
   IEnumConnections *enumerator;
   CONNECTDATA rgcd;
+  static DISPPARAMS empty = {NULL, NULL, 0, 0};
+  DISPPARAMS* params = dispParams;
 
   HRESULT result = IConnectionPoint_EnumConnections(iCP, &enumerator);
   if (FAILED(result))
     return result;
 
+  /* Invoke is never happening with an NULL dispParams */
+  if (!params)
+    params = &empty;
+
   while(IEnumConnections_Next(enumerator, 1, &rgcd, NULL)==S_OK)
   {
     IDispatch *dispIface;
-    if (SUCCEEDED(IUnknown_QueryInterface(rgcd.pUnk, iid, (LPVOID*)&dispIface)) ||
+    if ((iid && SUCCEEDED(IUnknown_QueryInterface(rgcd.pUnk, iid, (LPVOID*)&dispIface))) ||
         SUCCEEDED(IUnknown_QueryInterface(rgcd.pUnk, &IID_IDispatch, (LPVOID*)&dispIface)))
     {
-      IDispatch_Invoke(dispIface, dispId, &IID_NULL, 0, DISPATCH_METHOD, dispParams, NULL, NULL, NULL);
+      IDispatch_Invoke(dispIface, dispId, &IID_NULL, 0, DISPATCH_METHOD, params, NULL, NULL, NULL);
       IDispatch_Release(dispIface);
     }
+    IUnknown_Release(rgcd.pUnk);
   }
 
   IEnumConnections_Release(enumerator);
@@ -2965,6 +2973,8 @@ HRESULT WINAPI IConnectionPoint_InvokeWithCancel( IConnectionPoint* iCP,
     result = IConnectionPoint_GetConnectionInterface(iCP, &iid);
     if (SUCCEEDED(result))
         result = SHLWAPI_InvokeByIID(iCP, &iid, dispId, dispParams);
+    else
+        result = SHLWAPI_InvokeByIID(iCP, NULL, dispId, dispParams);
 
     return result;
 }
@@ -2988,6 +2998,8 @@ HRESULT WINAPI IConnectionPoint_SimpleInvoke(
   result = IConnectionPoint_GetConnectionInterface(iCP, &iid);
   if (SUCCEEDED(result))
     result = SHLWAPI_InvokeByIID(iCP, &iid, dispId, dispParams);
+  else
+    result = SHLWAPI_InvokeByIID(iCP, NULL, dispId, dispParams);
 
   return result;
 }
@@ -4696,4 +4708,79 @@ INT WINAPI ZoneCheckUrlExW(LPWSTR szURL, PVOID pUnknown, DWORD dwUnknown2,
         dwUnknown3, dwUnknown4, dwUnknown5, dwUnknown6, dwUnknown7);
 
     return 0;
+}
+
+/***********************************************************************
+ *             SHVerbExistsNA [SHLWAPI.196]
+ *
+ *
+ * PARAMS
+ *
+ *  verb [I] a string, often appears to be an extension.
+ *
+ *  Other parameters currently unknown.
+ *
+ * RETURNS
+ *  unknown
+ */
+INT WINAPI SHVerbExistsNA(LPSTR verb, PVOID pUnknown, PVOID pUnknown2, DWORD dwUnknown3)
+{
+    FIXME("(%s, %p, %p, %i) STUB\n",verb, pUnknown, pUnknown2, dwUnknown3);
+    return 0;
+}
+
+/*************************************************************************
+ *      @	[SHLWAPI.538]
+ *
+ *  Undocumented:  Implementation guessed at via Name and behavior
+ *
+ * PARAMS
+ *  lpUnknown [I] Object to get an IServiceProvider interface from
+ *  riid      [I] Function requested for QueryService call
+ *  lppOut    [O] Destination for the service interface pointer
+ *
+ * RETURNS
+ *  Success: S_OK. lppOut contains an object providing the requested service
+ *  Failure: An HRESULT error code
+ *
+ * NOTES
+ *  lpUnknown is expected to support the IServiceProvider interface.
+ */
+HRESULT WINAPI IUnknown_QueryServiceForWebBrowserApp(IUnknown* lpUnknown,
+        REFGUID riid, LPVOID *lppOut)
+{
+    FIXME("%p %s %p semi-STUB\n", lpUnknown, debugstr_guid(riid), lppOut);
+    return IUnknown_QueryService(lpUnknown,&IID_IWebBrowserApp,riid,lppOut);
+}
+
+/**************************************************************************
+ *  SHPropertyBag_ReadLONG (SHLWAPI.496)
+ *
+ * This function asks a property bag to read a named property as a LONG.
+ *
+ * PARAMS
+ *  ppb: a IPropertyBag interface
+ *  pszPropName:  Unicode string that names the property
+ *  pValue: address to receive the property value as a 32-bit signed integer
+ *
+ * RETURNS
+ *  0 for Success
+ */
+BOOL WINAPI SHPropertyBag_ReadLONG(IPropertyBag *ppb, LPCWSTR pszPropName, LPLONG pValue)
+{
+    VARIANT var;
+    HRESULT hr;
+    TRACE("%p %s %p\n", ppb,debugstr_w(pszPropName),pValue);
+    if (!pszPropName || !ppb || !pValue)
+        return E_INVALIDARG;
+    V_VT(&var) = VT_I4;
+    hr = IPropertyBag_Read(ppb, pszPropName, &var, NULL);
+    if (SUCCEEDED(hr))
+    {
+        if (V_VT(&var) == VT_I4)
+            *pValue = V_I4(&var);
+        else
+            hr = DISP_E_BADVARTYPE;
+    }
+    return hr;
 }

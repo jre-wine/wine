@@ -43,13 +43,14 @@
 static BOOL     (WINAPI * pGetVolumePathNameW)(LPCWSTR, LPWSTR, DWORD);
 static UINT     (WINAPI *pGetSystemWow64DirectoryW)( LPWSTR, UINT );
 
-static NTSTATUS (WINAPI *pRtlFreeUnicodeString)( PUNICODE_STRING );
+static VOID     (WINAPI *pRtlFreeUnicodeString)( PUNICODE_STRING );
 static VOID     (WINAPI *pRtlInitUnicodeString)( PUNICODE_STRING, LPCWSTR );
 static BOOL     (WINAPI *pRtlDosPathNameToNtPathName_U)( LPCWSTR, PUNICODE_STRING, PWSTR*, CURDIR* );
 static NTSTATUS (WINAPI *pRtlWow64EnableFsRedirectionEx)( ULONG, ULONG * );
 
 static NTSTATUS (WINAPI *pNtCreateMailslotFile)( PHANDLE, ULONG, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
                                        ULONG, ULONG, ULONG, PLARGE_INTEGER );
+static NTSTATUS (WINAPI *pNtCreateFile)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,PLARGE_INTEGER,ULONG,ULONG,ULONG,ULONG,PVOID,ULONG);
 static NTSTATUS (WINAPI *pNtOpenFile)(PHANDLE,ACCESS_MASK,POBJECT_ATTRIBUTES,PIO_STATUS_BLOCK,ULONG,ULONG);
 static NTSTATUS (WINAPI *pNtDeleteFile)(POBJECT_ATTRIBUTES ObjectAttributes);
 static NTSTATUS (WINAPI *pNtReadFile)(HANDLE hFile, HANDLE hEvent,
@@ -152,10 +153,90 @@ static void WINAPI apc( void *arg, IO_STATUS_BLOCK *iosb, ULONG reserved )
     ok( !reserved, "reserved is not 0: %x\n", reserved );
 }
 
+static void create_file_test(void)
+{
+    NTSTATUS status;
+    HANDLE dir;
+    WCHAR path[MAX_PATH];
+    OBJECT_ATTRIBUTES attr;
+    IO_STATUS_BLOCK io;
+    UNICODE_STRING nameW;
+    UINT len;
+
+    len = GetCurrentDirectoryW( MAX_PATH, path );
+    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &nameW;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    /* try various open modes and options on directories */
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OPEN, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( dir );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_CREATE, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_ACCESS_DENIED,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OPEN_IF, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( dir );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_SUPERSEDE, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OVERWRITE, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OVERWRITE_IF, FILE_DIRECTORY_FILE, NULL, 0 );
+    ok( status == STATUS_INVALID_PARAMETER, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OPEN, 0, NULL, 0 );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( dir );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_CREATE, 0, NULL, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_ACCESS_DENIED,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OPEN_IF, 0, NULL, 0 );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    CloseHandle( dir );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_SUPERSEDE, 0, NULL, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_ACCESS_DENIED,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OVERWRITE, 0, NULL, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_ACCESS_DENIED,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    status = pNtCreateFile( &dir, GENERIC_READ, &attr, &io, NULL, 0, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            FILE_OVERWRITE_IF, 0, NULL, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION || status == STATUS_ACCESS_DENIED,
+        "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+
+    pRtlFreeUnicodeString( &nameW );
+}
+
 static void open_file_test(void)
 {
     NTSTATUS status;
-    HANDLE dir, handle;
+    HANDLE dir, root, handle;
     WCHAR path[MAX_PATH];
     BYTE data[8192];
     OBJECT_ATTRIBUTES attr;
@@ -175,6 +256,14 @@ static void open_file_test(void)
     status = pNtOpenFile( &dir, GENERIC_READ, &attr, &io,
                           FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
     ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    pRtlFreeUnicodeString( &nameW );
+
+    path[3] = 0;  /* root of the drive */
+    pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
+    status = pNtOpenFile( &root, GENERIC_READ, &attr, &io,
+                          FILE_SHARE_READ|FILE_SHARE_WRITE, FILE_DIRECTORY_FILE );
+    ok( !status, "open %s failed %x\n", wine_dbgstr_w(nameW.Buffer), status );
+    pRtlFreeUnicodeString( &nameW );
 
     /* test opening system dir with RootDirectory set to windows dir */
     GetSystemDirectoryW( path, MAX_PATH );
@@ -226,6 +315,7 @@ static void open_file_test(void)
             nameW.Buffer = (WCHAR *)&info->FileId;
             nameW.Length = sizeof(info->FileId);
             info->FileName[info->FileNameLength/sizeof(WCHAR)] = 0;
+            attr.RootDirectory = dir;
             status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
                                   FILE_SHARE_READ|FILE_SHARE_WRITE,
                                   FILE_OPEN_BY_FILE_ID |
@@ -250,6 +340,16 @@ static void open_file_test(void)
                         "mismatched write time for %s\n", wine_dbgstr_w(info->FileName));
                 }
                 CloseHandle( handle );
+
+                /* try same thing from drive root */
+                attr.RootDirectory = root;
+                status = pNtOpenFile( &handle, GENERIC_READ, &attr, &io,
+                                      FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                      FILE_OPEN_BY_FILE_ID |
+                                      ((info->FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_DIRECTORY_FILE : 0) );
+                ok( status == STATUS_SUCCESS || status == STATUS_NOT_IMPLEMENTED,
+                    "open %s failed %x\n", wine_dbgstr_w(info->FileName), status );
+                if (!status) CloseHandle( handle );
             }
         next:
             if (!info->NextEntryOffset) break;
@@ -258,6 +358,7 @@ static void open_file_test(void)
     }
 
     CloseHandle( dir );
+    CloseHandle( root );
 }
 
 static void delete_file_test(void)
@@ -1111,22 +1212,20 @@ static void test_file_name_information(void)
             hr, STATUS_BUFFER_OVERFLOW);
     ok(U(io).Status == STATUS_BUFFER_OVERFLOW, "io.Status is %#x, expected %#x.\n",
             U(io).Status, STATUS_BUFFER_OVERFLOW);
-    ok(info->FileNameLength == lstrlenW( expected ) * sizeof(WCHAR), "info->FileNameLength is %u, expected %u.\n",
-            info->FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
+    ok(info->FileNameLength == lstrlenW( expected ) * sizeof(WCHAR), "info->FileNameLength is %u\n", info->FileNameLength);
     ok(info->FileName[2] == 0xcccc, "info->FileName[2] is %#x, expected 0xcccc.\n", info->FileName[2]);
     ok(CharLowerW((LPWSTR)(UINT_PTR)info->FileName[1]) == CharLowerW((LPWSTR)(UINT_PTR)expected[1]),
             "info->FileName[1] is %p, expected %p.\n",
             CharLowerW((LPWSTR)(UINT_PTR)info->FileName[1]), CharLowerW((LPWSTR)(UINT_PTR)expected[1]));
-    ok(io.Information == sizeof(*info), "io.Information is %lu, expected %u.\n", io.Information, sizeof(*info));
+    ok(io.Information == sizeof(*info), "io.Information is %lu\n", io.Information);
 
     memset( info, 0xcc, info_size );
     hr = pNtQueryInformationFile( h, &io, info, info_size, FileNameInformation );
     ok(hr == STATUS_SUCCESS, "NtQueryInformationFile returned %#x, expected %#x.\n", hr, STATUS_SUCCESS);
     ok(U(io).Status == STATUS_SUCCESS, "io.Status is %#x, expected %#x.\n", U(io).Status, STATUS_SUCCESS);
-    ok(info->FileNameLength == lstrlenW( expected ) * sizeof(WCHAR), "info->FileNameLength is %u, expected %u.\n",
-            info->FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
-    ok(info->FileName[info->FileNameLength / sizeof(WCHAR)] == 0xcccc, "info->FileName[%u] is %#x, expected 0xcccc.\n",
-            info->FileNameLength / sizeof(WCHAR), info->FileName[info->FileNameLength / sizeof(WCHAR)]);
+    ok(info->FileNameLength == lstrlenW( expected ) * sizeof(WCHAR), "info->FileNameLength is %u\n", info->FileNameLength);
+    ok(info->FileName[info->FileNameLength / sizeof(WCHAR)] == 0xcccc, "info->FileName[len] is %#x, expected 0xcccc.\n",
+       info->FileName[info->FileNameLength / sizeof(WCHAR)]);
     info->FileName[info->FileNameLength / sizeof(WCHAR)] = '\0';
     ok(!lstrcmpiW( info->FileName, expected ), "info->FileName is %s, expected %s.\n",
             wine_dbgstr_w( info->FileName ), wine_dbgstr_w( expected ));
@@ -1244,35 +1343,30 @@ static void test_file_all_name_information(void)
     ok(U(io).Status == STATUS_BUFFER_OVERFLOW, "io.Status is %#x, expected %#x.\n",
             U(io).Status, STATUS_BUFFER_OVERFLOW);
     ok(info->NameInformation.FileNameLength == lstrlenW( expected ) * sizeof(WCHAR),
-            "info->NameInformation.FileNameLength is %u, expected %u.\n",
-            info->NameInformation.FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
+       "info->NameInformation.FileNameLength is %u\n", info->NameInformation.FileNameLength );
     ok(info->NameInformation.FileName[2] == 0xcccc,
             "info->NameInformation.FileName[2] is %#x, expected 0xcccc.\n", info->NameInformation.FileName[2]);
     ok(CharLowerW((LPWSTR)(UINT_PTR)info->NameInformation.FileName[1]) == CharLowerW((LPWSTR)(UINT_PTR)expected[1]),
             "info->NameInformation.FileName[1] is %p, expected %p.\n",
             CharLowerW((LPWSTR)(UINT_PTR)info->NameInformation.FileName[1]), CharLowerW((LPWSTR)(UINT_PTR)expected[1]));
-    ok(io.Information == sizeof(*info), "io.Information is %lu, expected %u.\n", io.Information, sizeof(*info));
+    ok(io.Information == sizeof(*info), "io.Information is %lu\n", io.Information);
 
     memset( info, 0xcc, info_size );
     hr = pNtQueryInformationFile( h, &io, info, info_size, FileAllInformation );
     ok(hr == STATUS_SUCCESS, "NtQueryInformationFile returned %#x, expected %#x.\n", hr, STATUS_SUCCESS);
     ok(U(io).Status == STATUS_SUCCESS, "io.Status is %#x, expected %#x.\n", U(io).Status, STATUS_SUCCESS);
     ok(info->NameInformation.FileNameLength == lstrlenW( expected ) * sizeof(WCHAR),
-            "info->NameInformation.FileNameLength is %u, expected %u.\n",
-            info->NameInformation.FileNameLength, lstrlenW( expected ) * sizeof(WCHAR));
+       "info->NameInformation.FileNameLength is %u\n", info->NameInformation.FileNameLength );
     ok(info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)] == 0xcccc,
-            "info->NameInformation.FileName[%u] is %#x, expected 0xcccc.\n",
-            info->NameInformation.FileNameLength / sizeof(WCHAR),
-            info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)]);
+       "info->NameInformation.FileName[len] is %#x, expected 0xcccc.\n",
+       info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)]);
     info->NameInformation.FileName[info->NameInformation.FileNameLength / sizeof(WCHAR)] = '\0';
     ok(!lstrcmpiW( info->NameInformation.FileName, expected ),
             "info->NameInformation.FileName is %s, expected %s.\n",
             wine_dbgstr_w( info->NameInformation.FileName ), wine_dbgstr_w( expected ));
     ok(io.Information == FIELD_OFFSET(FILE_ALL_INFORMATION, NameInformation.FileName)
             + info->NameInformation.FileNameLength,
-            "io.Information is %lu, expected %u.\n",
-            io.Information,
-            FIELD_OFFSET(FILE_ALL_INFORMATION, NameInformation.FileName) + info->NameInformation.FileNameLength);
+            "io.Information is %lu\n", io.Information );
 
     CloseHandle( h );
     HeapFree( GetProcessHeap(), 0, info );
@@ -1344,6 +1438,7 @@ START_TEST(file)
     pRtlDosPathNameToNtPathName_U = (void *)GetProcAddress(hntdll, "RtlDosPathNameToNtPathName_U");
     pRtlWow64EnableFsRedirectionEx = (void *)GetProcAddress(hntdll, "RtlWow64EnableFsRedirectionEx");
     pNtCreateMailslotFile   = (void *)GetProcAddress(hntdll, "NtCreateMailslotFile");
+    pNtCreateFile           = (void *)GetProcAddress(hntdll, "NtCreateFile");
     pNtOpenFile             = (void *)GetProcAddress(hntdll, "NtOpenFile");
     pNtDeleteFile           = (void *)GetProcAddress(hntdll, "NtDeleteFile");
     pNtReadFile             = (void *)GetProcAddress(hntdll, "NtReadFile");
@@ -1360,6 +1455,7 @@ START_TEST(file)
     pNtQueryInformationFile = (void *)GetProcAddress(hntdll, "NtQueryInformationFile");
     pNtQueryDirectoryFile   = (void *)GetProcAddress(hntdll, "NtQueryDirectoryFile");
 
+    create_file_test();
     open_file_test();
     delete_file_test();
     read_file_test();

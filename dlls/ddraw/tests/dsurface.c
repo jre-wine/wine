@@ -304,6 +304,40 @@ static void SrcColorKey32BlitTest(void)
     rc = IDirectDrawSurface_Unlock(lpDst, NULL);
     ok(rc==DD_OK,"Unlock returned: %x\n",rc);
 
+    /* Below we repeat the same test as above but now using BltFast instead of Blt. Before
+     * we can carry out the test we need to restore the color of the destination surface.
+     */
+    rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
+    ok(rc==DD_OK,"Lock returned: %x\n",rc);
+    lpData = ddsd2.lpSurface;
+    lpData[0] = 0xCCCCCCCC;
+    lpData[1] = 0xCCCCCCCC;
+    lpData[2] = 0xCCCCCCCC;
+    lpData[3] = 0xCCCCCCCC;
+    rc = IDirectDrawSurface_Unlock(lpDst, NULL);
+    ok(rc==DD_OK,"Unlock returned: %x\n",rc);
+
+    IDirectDrawSurface_BltFast(lpDst, 0, 0, lpSrc, NULL, DDBLTFAST_SRCCOLORKEY);
+
+    rc = IDirectDrawSurface_Lock(lpDst, NULL, &ddsd2, DDLOCK_WAIT, NULL);
+    ok(rc==DD_OK,"Lock returned: %x\n",rc);
+    ok((ddsd2.dwFlags & DDSD_LPSURFACE) == 0, "Surface desc has LPSURFACE Flags set\n");
+    lpData = ddsd2.lpSurface;
+    /* Different behavior on some drivers / windows versions. Some versions ignore the X channel when
+     * color keying, but copy it to the destination surface. Others apply it for color keying, but
+     * do not copy it into the destination surface.
+     */
+    if(lpData[0]==0x00010203) {
+        trace("X channel was not copied into the destination surface\n");
+        ok((lpData[0]==0x00010203)&&(lpData[1]==0x00010203)&&(lpData[2]==0x00FF00FF)&&(lpData[3]==0xCCCCCCCC),
+           "Destination data after blitting is not correct\n");
+    } else {
+        ok((lpData[0]==0x77010203)&&(lpData[1]==0x00010203)&&(lpData[2]==0xCCCCCCCC)&&(lpData[3]==0xCCCCCCCC),
+           "Destination data after blitting is not correct\n");
+    }
+    rc = IDirectDrawSurface_Unlock(lpDst, NULL);
+    ok(rc==DD_OK,"Unlock returned: %x\n",rc);
+
     /* Also test SetColorKey */
     IDirectDrawSurface_GetColorKey(lpSrc, DDCKEY_SRCBLT, &DDColorKey);
     ok(DDColorKey.dwColorSpaceLowValue == 0xFF00FF && DDColorKey.dwColorSpaceHighValue == 0xFF00FF,
@@ -3048,6 +3082,7 @@ static void GetDCFormatTest(void)
         const char *name;
         DDPIXELFORMAT fmt;
         BOOL getdc_capable;
+        HRESULT alt_result;
     } testdata[] = {
         {
             "D3DFMT_A8R8G8B8",
@@ -3071,7 +3106,8 @@ static void GetDCFormatTest(void)
                 sizeof(DDPIXELFORMAT), DDPF_RGB, 0,
                 {32}, {0x000000ff}, {0x0000ff00}, {0x00ff0000}, {0x00000000}
             },
-            TRUE
+            TRUE,
+            DDERR_CANTCREATEDC /* Vista+ */
         },
         {
             "D3DFMT_X8B8G8R8",
@@ -3079,7 +3115,8 @@ static void GetDCFormatTest(void)
                 sizeof(DDPIXELFORMAT), DDPF_RGB | DDPF_ALPHAPIXELS, 0,
                        {32}, {0x000000ff}, {0x0000ff00}, {0x00ff0000}, {0xff000000}
             },
-            TRUE
+            TRUE,
+            DDERR_CANTCREATEDC /* Vista+ */
         },
         {
             "D3DFMT_A4R4G4B4",
@@ -3087,7 +3124,8 @@ static void GetDCFormatTest(void)
                 sizeof(DDPIXELFORMAT), DDPF_RGB | DDPF_ALPHAPIXELS, 0,
                        {16}, {0x00000f00}, {0x000000f0}, {0x0000000f}, {0x0000f000}
             },
-            TRUE
+            TRUE,
+            DDERR_CANTCREATEDC /* Vista+ */
         },
         {
             "D3DFMT_X4R4G4B4",
@@ -3095,7 +3133,8 @@ static void GetDCFormatTest(void)
                 sizeof(DDPIXELFORMAT), DDPF_RGB, 0,
                        {16}, {0x00000f00}, {0x000000f0}, {0x0000000f}, {0x00000000}
             },
-            TRUE
+            TRUE,
+            DDERR_CANTCREATEDC /* Vista+ */
         },
         {
             "D3DFMT_R5G6B5",
@@ -3240,7 +3279,9 @@ static void GetDCFormatTest(void)
         hr = IDirectDrawSurface7_GetDC(surface, &dc);
         if(testdata[i].getdc_capable)
         {
-            ok(SUCCEEDED(hr), "GetDC on a %s surface failed(0x%08x), expected it to work\n",
+            ok(SUCCEEDED(hr) ||
+               (testdata[i].alt_result && hr == testdata[i].alt_result),
+               "GetDC on a %s surface failed(0x%08x), expected it to work\n",
                testdata[i].name, hr);
         }
         else

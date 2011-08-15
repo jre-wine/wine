@@ -45,8 +45,8 @@ static void parser(const char*);
 {
     struct dbg_lvalue   lvalue;
     char*               string;
-    int                 integer;
-    IMAGEHLP_LINE       listing;
+    INT_PTR             integer;
+    IMAGEHLP_LINE64     listing;
     struct expr*        expression;
     struct type_expr_t  type;
 }
@@ -184,7 +184,7 @@ list_arg:
     | pathname ':' identifier   { symbol_get_line($1, $3, &$$); }
     | '*' expr_lvalue	        { DWORD disp; ADDRESS64 addr; $$.SizeOfStruct = sizeof($$);
                                   types_extract_as_address(&$2, &addr);
-                                  SymGetLineFromAddr(dbg_curr_process->handle, (unsigned long)memory_to_linear_addr(& addr), &disp, & $$); }
+                                  SymGetLineFromAddr64(dbg_curr_process->handle, (unsigned long)memory_to_linear_addr(& addr), &disp, & $$); }
     ;
 
 run_command:
@@ -556,7 +556,7 @@ void	parser_handle(HANDLE input)
 
 static void parser(const char* filename)
 {
-    HANDLE h = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0L, 0);
+    HANDLE h = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0L, 0);
     if (h != INVALID_HANDLE_VALUE)
     {
         parser_handle(h);
@@ -577,8 +577,8 @@ HANDLE parser_generate_command_file(const char* pmt, ...)
     DWORD       w;
     const char* p;
 
-    GetTempPath(sizeof(path), path);
-    GetTempFileName(path, "WD", 0, file);
+    GetTempPathA(sizeof(path), path);
+    GetTempFileNameA(path, "WD", 0, file);
     hFile = CreateFileA(file, GENERIC_READ|GENERIC_WRITE|DELETE, FILE_SHARE_DELETE, 
                         NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, 0);
     if (hFile != INVALID_HANDLE_VALUE)

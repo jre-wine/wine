@@ -586,6 +586,48 @@ static RPC_STATUS rpcrt4_ncacn_np_parse_top_of_tower(const unsigned char *tower_
     return RPC_S_OK;
 }
 
+static RPC_STATUS rpcrt4_conn_np_impersonate_client(RpcConnection *conn)
+{
+    RpcConnection_np *npc = (RpcConnection_np *)conn;
+    BOOL ret;
+
+    TRACE("(%p)\n", conn);
+
+    if (conn->AuthInfo && SecIsValidHandle(&conn->ctx))
+        return RPCRT4_default_impersonate_client(conn);
+
+    ret = ImpersonateNamedPipeClient(npc->pipe);
+    if (!ret)
+    {
+        DWORD error = GetLastError();
+        WARN("ImpersonateNamedPipeClient failed with error %u\n", error);
+        switch (error)
+        {
+        case ERROR_CANNOT_IMPERSONATE:
+            return RPC_S_NO_CONTEXT_AVAILABLE;
+        }
+    }
+    return RPC_S_OK;
+}
+
+static RPC_STATUS rpcrt4_conn_np_revert_to_self(RpcConnection *conn)
+{
+    BOOL ret;
+
+    TRACE("(%p)\n", conn);
+
+    if (conn->AuthInfo && SecIsValidHandle(&conn->ctx))
+        return RPCRT4_default_revert_to_self(conn);
+
+    ret = RevertToSelf();
+    if (!ret)
+    {
+        WARN("RevertToSelf failed with error %u\n", GetLastError());
+        return RPC_S_NO_CONTEXT_AVAILABLE;
+    }
+    return RPC_S_OK;
+}
+
 typedef struct _RpcServerProtseq_np
 {
     RpcServerProtseq common;
@@ -765,6 +807,65 @@ static RPC_STATUS rpcrt4_ncalrpc_parse_top_of_tower(const unsigned char *tower_d
             return RPC_S_OUT_OF_RESOURCES;
         memcpy(*endpoint, tower_data, pipe_floor->count_rhs);
     }
+
+    return RPC_S_OK;
+}
+
+static BOOL rpcrt4_ncalrpc_is_authorized(RpcConnection *conn)
+{
+    return FALSE;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_authorize(RpcConnection *conn, BOOL first_time,
+                                           unsigned char *in_buffer,
+                                           unsigned int in_size,
+                                           unsigned char *out_buffer,
+                                           unsigned int *out_size)
+{
+    /* since this protocol is local to the machine there is no need to
+     * authenticate the caller */
+    *out_size = 0;
+    return RPC_S_OK;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_secure_packet(RpcConnection *conn,
+    enum secure_packet_direction dir,
+    RpcPktHdr *hdr, unsigned int hdr_size,
+    unsigned char *stub_data, unsigned int stub_data_size,
+    RpcAuthVerifier *auth_hdr,
+    unsigned char *auth_value, unsigned int auth_value_size)
+{
+    /* since this protocol is local to the machine there is no need to secure
+     * the packet */
+    return RPC_S_OK;
+}
+
+static RPC_STATUS rpcrt4_ncalrpc_inquire_auth_client(
+    RpcConnection *conn, RPC_AUTHZ_HANDLE *privs, RPC_WSTR *server_princ_name,
+    ULONG *authn_level, ULONG *authn_svc, ULONG *authz_svc, ULONG flags)
+{
+    TRACE("(%p, %p, %p, %p, %p, %p, 0x%x)\n", conn, privs,
+          server_princ_name, authn_level, authn_svc, authz_svc, flags);
+
+    if (privs)
+    {
+        FIXME("privs not implemented\n");
+        *privs = NULL;
+    }
+    if (server_princ_name)
+    {
+        FIXME("server_princ_name not implemented\n");
+        *server_princ_name = NULL;
+    }
+    if (authn_level) *authn_level = RPC_C_AUTHN_LEVEL_PKT_PRIVACY;
+    if (authn_svc) *authn_svc = RPC_C_AUTHN_WINNT;
+    if (authz_svc)
+    {
+        FIXME("authorization service not implemented\n");
+        *authz_svc = RPC_C_AUTHZ_NONE;
+    }
+    if (flags)
+        FIXME("flags 0x%x not implemented\n", flags);
 
     return RPC_S_OK;
 }
@@ -1345,7 +1446,7 @@ static int rpcrt4_conn_tcp_read(RpcConnection *Connection,
 {
   RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
   int bytes_read = 0;
-  do
+  while (bytes_read != count)
   {
     int r = recv(tcpc->sock, (char *)buffer + bytes_read, count - bytes_read, 0);
     if (!r)
@@ -1362,7 +1463,7 @@ static int rpcrt4_conn_tcp_read(RpcConnection *Connection,
       if (!rpcrt4_sock_wait_for_recv(tcpc))
         return -1;
     }
-  } while (bytes_read != count);
+  }
   TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, bytes_read);
   return bytes_read;
 }
@@ -1372,7 +1473,7 @@ static int rpcrt4_conn_tcp_write(RpcConnection *Connection,
 {
   RpcConnection_tcp *tcpc = (RpcConnection_tcp *) Connection;
   int bytes_written = 0;
-  do
+  while (bytes_written != count)
   {
     int r = send(tcpc->sock, (const char *)buffer + bytes_written, count - bytes_written, 0);
     if (r >= 0)
@@ -1384,7 +1485,7 @@ static int rpcrt4_conn_tcp_write(RpcConnection *Connection,
       if (!rpcrt4_sock_wait_for_send(tcpc))
         return -1;
     }
-  } while (bytes_written != count);
+  }
   TRACE("%d %p %u -> %d\n", tcpc->sock, buffer, count, bytes_written);
   return bytes_written;
 }
@@ -2677,6 +2778,12 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_ncacn_np_get_top_of_tower,
     rpcrt4_ncacn_np_parse_top_of_tower,
     NULL,
+    RPCRT4_default_is_authorized,
+    RPCRT4_default_authorize,
+    RPCRT4_default_secure_packet,
+    rpcrt4_conn_np_impersonate_client,
+    rpcrt4_conn_np_revert_to_self,
+    RPCRT4_default_inquire_auth_client,
   },
   { "ncalrpc",
     { EPM_PROTOCOL_NCALRPC, EPM_PROTOCOL_PIPE },
@@ -2691,6 +2798,12 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_ncalrpc_get_top_of_tower,
     rpcrt4_ncalrpc_parse_top_of_tower,
     NULL,
+    rpcrt4_ncalrpc_is_authorized,
+    rpcrt4_ncalrpc_authorize,
+    rpcrt4_ncalrpc_secure_packet,
+    rpcrt4_conn_np_impersonate_client,
+    rpcrt4_conn_np_revert_to_self,
+    rpcrt4_ncalrpc_inquire_auth_client,
   },
   { "ncacn_ip_tcp",
     { EPM_PROTOCOL_NCACN, EPM_PROTOCOL_TCP },
@@ -2705,6 +2818,12 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_ncacn_ip_tcp_get_top_of_tower,
     rpcrt4_ncacn_ip_tcp_parse_top_of_tower,
     NULL,
+    RPCRT4_default_is_authorized,
+    RPCRT4_default_authorize,
+    RPCRT4_default_secure_packet,
+    RPCRT4_default_impersonate_client,
+    RPCRT4_default_revert_to_self,
+    RPCRT4_default_inquire_auth_client,
   },
   { "ncacn_http",
     { EPM_PROTOCOL_NCACN, EPM_PROTOCOL_HTTP },
@@ -2719,6 +2838,12 @@ static const struct connection_ops conn_protseq_list[] = {
     rpcrt4_ncacn_http_get_top_of_tower,
     rpcrt4_ncacn_http_parse_top_of_tower,
     rpcrt4_ncacn_http_receive_fragment,
+    RPCRT4_default_is_authorized,
+    RPCRT4_default_authorize,
+    RPCRT4_default_secure_packet,
+    RPCRT4_default_impersonate_client,
+    RPCRT4_default_revert_to_self,
+    RPCRT4_default_inquire_auth_client,
   },
 };
 

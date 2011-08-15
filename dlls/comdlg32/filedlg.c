@@ -1527,12 +1527,11 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
       if ( win98plus && handledPath == FALSE &&
            fodInfos->filter && *fodInfos->filter) {
 
-         BOOL   searchMore = TRUE;
          LPCWSTR lpstrPos = fodInfos->filter;
          WIN32_FIND_DATAW FindFileData;
          HANDLE hFind;
 
-         while (searchMore)
+         while (1)
          {
            /* filter is a list...  title\0ext\0......\0\0 */
 
@@ -1550,7 +1549,6 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
                lpstrPos += lstrlenW(lpstrPos) + 1;
 
            } else {
-               searchMore = FALSE;
 
                MemFree(fodInfos->initdir);
                fodInfos->initdir = MemAlloc(MAX_PATH*sizeof(WCHAR));
@@ -1559,6 +1557,7 @@ static LRESULT FILEDLG95_InitControls(HWND hwnd)
                handledPath = TRUE;
                TRACE("No initial dir specified, but files of type %s found in current, so using it\n",
                  debugstr_w(lpstrPos));
+               FindClose(hFind);
                break;
            }
          }
@@ -3258,6 +3257,7 @@ static int FILEDLG95_LOOKIN_SearchItem(HWND hwnd,WPARAM searchArg,int iSearchMet
 static void FILEDLG95_LOOKIN_Clean(HWND hwnd)
 {
     FileOpenDlgInfos *fodInfos = GetPropA(hwnd,FileOpenDlgInfosStr);
+    LookInInfos *liInfos = GetPropA(fodInfos->DlgInfos.hwndLookInCB,LookInInfosStr);
     int iPos;
     int iCount = CBGetCount(fodInfos->DlgInfos.hwndLookInCB);
 
@@ -3276,9 +3276,10 @@ static void FILEDLG95_LOOKIN_Clean(HWND hwnd)
     }
 
     /* LookInInfos structure */
+    MemFree(liInfos);
     RemovePropA(fodInfos->DlgInfos.hwndLookInCB,LookInInfosStr);
-
 }
+
 /***********************************************************************
  * FILEDLG95_FILENAME_FillFromSelection
  *

@@ -51,12 +51,6 @@ WINE_DEFAULT_DEBUG_CHANNEL(rpc);
     (((alignment) - (((value) % (alignment)))) % (alignment))
 #define ROUND_UP(value, alignment) (((value) + ((alignment) - 1)) & ~((alignment)-1))
 
-enum secure_packet_direction
-{
-  SECURE_PACKET_SEND,
-  SECURE_PACKET_RECEIVE
-};
-
 static RPC_STATUS I_RpcReAllocateBuffer(PRPC_MESSAGE pMsg);
 
 DWORD RPCRT4_GetHeaderSize(const RpcPktHdr *Header)
@@ -65,14 +59,14 @@ DWORD RPCRT4_GetHeaderSize(const RpcPktHdr *Header)
     sizeof(Header->request), 0, sizeof(Header->response),
     sizeof(Header->fault), 0, 0, 0, 0, 0, 0, 0, sizeof(Header->bind),
     sizeof(Header->bind_ack), sizeof(Header->bind_nack),
-    0, 0, 0, 0, 0, 0, sizeof(Header->http)
+    0, 0, sizeof(Header->common), 0, 0, 0, sizeof(Header->http)
   };
   ULONG ret = 0;
   
   if (Header->common.ptype < sizeof(header_sizes) / sizeof(header_sizes[0])) {
     ret = header_sizes[Header->common.ptype];
     if (ret == 0)
-      FIXME("unhandled packet type\n");
+      FIXME("unhandled packet type %u\n", Header->common.ptype);
     if (Header->common.flags & RPC_FLG_OBJECT_UUID)
       ret += sizeof(UUID);
   } else {
@@ -93,6 +87,21 @@ static int packet_has_auth_verifier(const RpcPktHdr *Header)
 {
     return !(Header->common.ptype == PKT_BIND_NACK) &&
            !(Header->common.ptype == PKT_SHUTDOWN);
+}
+
+static int packet_does_auth_negotiation(const RpcPktHdr *Header)
+{
+    switch (Header->common.ptype)
+    {
+    case PKT_BIND:
+    case PKT_BIND_ACK:
+    case PKT_AUTH3:
+    case PKT_ALTER_CONTEXT:
+    case PKT_ALTER_CONTEXT_RESP:
+        return TRUE;
+    default:
+        return FALSE;
+    }
 }
 
 static VOID RPCRT4_BuildCommonHeader(RpcPktHdr *Header, unsigned char PacketType,
@@ -208,13 +217,12 @@ static RpcPktHdr *RPCRT4_BuildAuthHeader(ULONG DataRepresentation)
   RpcPktHdr *header;
 
   header = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY,
-                     sizeof(header->common) + 12);
+                     sizeof(header->common));
   if (header == NULL)
     return NULL;
 
   RPCRT4_BuildCommonHeader(header, PKT_AUTH3, DataRepresentation);
-  header->common.frag_len = 0x14;
-  header->common.auth_len = 0;
+  header->common.frag_len = sizeof(header->common);
 
   return header;
 }
@@ -670,7 +678,7 @@ RPC_STATUS RPCRT4_ParseHttpFlowControlHeader(RpcPktHdr *header,
 }
 
 
-static RPC_STATUS RPCRT4_SecurePacket(RpcConnection *Connection,
+RPC_STATUS RPCRT4_default_secure_packet(RpcConnection *Connection,
     enum secure_packet_direction dir,
     RpcPktHdr *hdr, unsigned int hdr_size,
     unsigned char *stub_data, unsigned int stub_data_size,
@@ -749,9 +757,9 @@ static RPC_STATUS RPCRT4_SecurePacket(RpcConnection *Connection,
  * 
  * Transmit a packet with authorization data over connection in acceptable fragments.
  */
-static RPC_STATUS RPCRT4_SendWithAuth(RpcConnection *Connection, RpcPktHdr *Header,
-                                      void *Buffer, unsigned int BufferLength,
-                                      const void *Auth, unsigned int AuthLength)
+RPC_STATUS RPCRT4_SendWithAuth(RpcConnection *Connection, RpcPktHdr *Header,
+                               void *Buffer, unsigned int BufferLength,
+                               const void *Auth, unsigned int AuthLength)
 {
   PUCHAR buffer_pos;
   DWORD hdr_size;
@@ -808,7 +816,7 @@ static RPC_STATUS RPCRT4_SendWithAuth(RpcConnection *Connection, RpcPktHdr *Head
     memcpy(pkt + hdr_size, buffer_pos, Header->common.frag_len - hdr_size - auth_pad_len - alen);
 
     /* add the authorization info */
-    if (Connection->AuthInfo && packet_has_auth_verifier(Header))
+    if (Header->common.auth_len)
     {
       RpcAuthVerifier *auth_hdr = (RpcAuthVerifier *)&pkt[Header->common.frag_len - alen];
 
@@ -823,7 +831,7 @@ static RPC_STATUS RPCRT4_SendWithAuth(RpcConnection *Connection, RpcPktHdr *Head
         memcpy(auth_hdr + 1, Auth, AuthLength);
       else
       {
-        status = RPCRT4_SecurePacket(Connection, SECURE_PACKET_SEND,
+        status = rpcrt4_conn_secure_packet(Connection, SECURE_PACKET_SEND,
             (RpcPktHdr *)pkt, hdr_size,
             pkt + hdr_size, Header->common.frag_len - hdr_size - alen,
             auth_hdr,
@@ -856,43 +864,84 @@ write:
 }
 
 /***********************************************************************
- *           RPCRT4_ClientAuthorize (internal)
+ *           RPCRT4_default_authorize (internal)
  *
- * Authorize a client connection. A NULL in param signifies a new connection.
+ * Authorize a client connection.
  */
-static RPC_STATUS RPCRT4_ClientAuthorize(RpcConnection *conn, SecBuffer *in,
-                                         SecBuffer *out)
+RPC_STATUS RPCRT4_default_authorize(RpcConnection *conn, BOOL first_time,
+                                    unsigned char *in_buffer,
+                                    unsigned int in_size,
+                                    unsigned char *out_buffer,
+                                    unsigned int *out_size)
 {
   SECURITY_STATUS r;
   SecBufferDesc out_desc;
   SecBufferDesc inp_desc;
   SecPkgContext_Sizes secctx_sizes;
   BOOL continue_needed;
-  ULONG context_req = ISC_REQ_CONNECTION | ISC_REQ_USE_DCE_STYLE |
-                      ISC_REQ_MUTUAL_AUTH | ISC_REQ_DELEGATE;
+  ULONG context_req;
+  SecBuffer in, out;
 
-  if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_INTEGRITY)
-    context_req |= ISC_REQ_INTEGRITY;
-  else if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
-    context_req |= ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY;
+  if (!out_buffer)
+  {
+    *out_size = conn->AuthInfo->cbMaxToken;
+    return RPC_S_OK;
+  }
 
-  out->BufferType = SECBUFFER_TOKEN;
-  out->cbBuffer = conn->AuthInfo->cbMaxToken;
-  out->pvBuffer = HeapAlloc(GetProcessHeap(), 0, out->cbBuffer);
-  if (!out->pvBuffer) return ERROR_OUTOFMEMORY;
+  in.BufferType = SECBUFFER_TOKEN;
+  in.pvBuffer = in_buffer;
+  in.cbBuffer = in_size;
+
+  out.BufferType = SECBUFFER_TOKEN;
+  out.pvBuffer = out_buffer;
+  out.cbBuffer = *out_size;
 
   out_desc.ulVersion = 0;
   out_desc.cBuffers = 1;
-  out_desc.pBuffers = out;
+  out_desc.pBuffers = &out;
 
-  inp_desc.cBuffers = 1;
-  inp_desc.pBuffers = in;
   inp_desc.ulVersion = 0;
+  inp_desc.cBuffers = 1;
+  inp_desc.pBuffers = &in;
 
-  r = InitializeSecurityContextW(&conn->AuthInfo->cred, in ? &conn->ctx : NULL,
-        in ? NULL : conn->AuthInfo->server_principal_name, context_req, 0,
-        SECURITY_NETWORK_DREP, in ? &inp_desc : NULL, 0, &conn->ctx,
-        &out_desc, &conn->attr, &conn->exp);
+  if (conn->server)
+  {
+      context_req = ASC_REQ_CONNECTION | ASC_REQ_USE_DCE_STYLE |
+                    ASC_REQ_DELEGATE;
+
+      if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_INTEGRITY)
+          context_req |= ASC_REQ_INTEGRITY;
+      else if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+          context_req |= ASC_REQ_CONFIDENTIALITY | ASC_REQ_INTEGRITY;
+
+      r = AcceptSecurityContext(&conn->AuthInfo->cred,
+                                first_time ? NULL : &conn->ctx,
+                                &inp_desc, context_req, SECURITY_NETWORK_DREP,
+                                &conn->ctx,
+                                &out_desc, &conn->attr, &conn->exp);
+      if (r == SEC_E_OK || r == SEC_I_COMPLETE_NEEDED)
+      {
+          /* authorisation done, so nothing more to send */
+          out.cbBuffer = 0;
+      }
+  }
+  else
+  {
+      context_req = ISC_REQ_CONNECTION | ISC_REQ_USE_DCE_STYLE |
+                    ISC_REQ_MUTUAL_AUTH | ISC_REQ_DELEGATE;
+
+      if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_INTEGRITY)
+          context_req |= ISC_REQ_INTEGRITY;
+      else if (conn->AuthInfo->AuthnLevel == RPC_C_AUTHN_LEVEL_PKT_PRIVACY)
+          context_req |= ISC_REQ_CONFIDENTIALITY | ISC_REQ_INTEGRITY;
+
+      r = InitializeSecurityContextW(&conn->AuthInfo->cred,
+                                     first_time ? NULL: &conn->ctx,
+                                     first_time ? conn->AuthInfo->server_principal_name : NULL,
+                                     context_req, 0, SECURITY_NETWORK_DREP,
+                                     first_time ? NULL : &inp_desc, 0, &conn->ctx,
+                                     &out_desc, &conn->attr, &conn->exp);
+  }
   if (FAILED(r))
   {
       WARN("InitializeSecurityContext failed with error 0x%08x\n", r);
@@ -914,7 +963,7 @@ static RPC_STATUS RPCRT4_ClientAuthorize(RpcConnection *conn, SecBuffer *in,
       }
   }
 
-  TRACE("cbBuffer = %d\n", out->cbBuffer);
+  TRACE("cbBuffer = %d\n", out.cbBuffer);
 
   if (!continue_needed)
   {
@@ -928,43 +977,238 @@ static RPC_STATUS RPCRT4_ClientAuthorize(RpcConnection *conn, SecBuffer *in,
       conn->encryption_auth_len = secctx_sizes.cbSecurityTrailer;
   }
 
+  *out_size = out.cbBuffer;
   return RPC_S_OK;
 
 failed:
-  HeapFree(GetProcessHeap(), 0, out->pvBuffer);
-  out->pvBuffer = NULL;
+  *out_size = 0;
   return ERROR_ACCESS_DENIED; /* FIXME: is this correct? */
 }
 
 /***********************************************************************
- *           RPCRT4_AuthorizeBinding (internal)
+ *           RPCRT4_ClientConnectionAuth (internal)
  */
-RPC_STATUS RPCRT4_AuthorizeConnection(RpcConnection* conn, BYTE *challenge,
-                                      ULONG count)
+RPC_STATUS RPCRT4_ClientConnectionAuth(RpcConnection* conn, BYTE *challenge,
+                                       ULONG count)
 {
-  SecBuffer inp, out;
   RpcPktHdr *resp_hdr;
   RPC_STATUS status;
+  unsigned char *out_buffer;
+  unsigned int out_len = 0;
 
   TRACE("challenge %s, %d bytes\n", challenge, count);
 
-  inp.BufferType = SECBUFFER_TOKEN;
-  inp.pvBuffer = challenge;
-  inp.cbBuffer = count;
-
-  status = RPCRT4_ClientAuthorize(conn, &inp, &out);
+  status = rpcrt4_conn_authorize(conn, FALSE, challenge, count, NULL, &out_len);
+  if (status) return status;
+  out_buffer = HeapAlloc(GetProcessHeap(), 0, out_len);
+  if (!out_buffer) return RPC_S_OUT_OF_RESOURCES;
+  status = rpcrt4_conn_authorize(conn, FALSE, challenge, count, out_buffer, &out_len);
   if (status) return status;
 
   resp_hdr = RPCRT4_BuildAuthHeader(NDR_LOCAL_DATA_REPRESENTATION);
-  if (!resp_hdr)
-    return E_OUTOFMEMORY;
 
-  status = RPCRT4_SendWithAuth(conn, resp_hdr, NULL, 0, out.pvBuffer, out.cbBuffer);
+  if (resp_hdr)
+    status = RPCRT4_SendWithAuth(conn, resp_hdr, NULL, 0, out_buffer, out_len);
+  else
+    status = RPC_S_OUT_OF_RESOURCES;
 
-  HeapFree(GetProcessHeap(), 0, out.pvBuffer);
+  HeapFree(GetProcessHeap(), 0, out_buffer);
   RPCRT4_FreeHeader(resp_hdr);
 
   return status;
+}
+
+/***********************************************************************
+ *           RPCRT4_ServerConnectionAuth (internal)
+ */
+RPC_STATUS RPCRT4_ServerConnectionAuth(RpcConnection* conn,
+                                       BOOL start,
+                                       RpcAuthVerifier *auth_data_in,
+                                       ULONG auth_length_in,
+                                       unsigned char **auth_data_out,
+                                       ULONG *auth_length_out)
+{
+    unsigned char *out_buffer;
+    unsigned int out_size;
+    RPC_STATUS status;
+
+    if (start)
+    {
+        /* remove any existing authentication information */
+        if (conn->AuthInfo)
+        {
+            RpcAuthInfo_Release(conn->AuthInfo);
+            conn->AuthInfo = NULL;
+        }
+        if (SecIsValidHandle(&conn->ctx))
+        {
+            DeleteSecurityContext(&conn->ctx);
+            SecInvalidateHandle(&conn->ctx);
+        }
+        if (auth_length_in >= sizeof(RpcAuthVerifier))
+        {
+            CredHandle cred;
+            TimeStamp exp;
+            ULONG max_token;
+
+            status = RPCRT4_ServerGetRegisteredAuthInfo(
+                auth_data_in->auth_type, &cred, &exp, &max_token);
+            if (status != RPC_S_OK)
+            {
+                ERR("unknown authentication service %u\n", auth_data_in->auth_type);
+                return status;
+            }
+
+            status = RpcAuthInfo_Create(auth_data_in->auth_level,
+                                        auth_data_in->auth_type, cred, exp,
+                                        max_token, NULL, &conn->AuthInfo);
+            if (status != RPC_S_OK)
+                return status;
+
+            /* FIXME: should auth_data_in->auth_context_id be checked in the !start case? */
+            conn->auth_context_id = auth_data_in->auth_context_id;
+        }
+    }
+
+    if (auth_length_in < sizeof(RpcAuthVerifier))
+        return RPC_S_OK;
+
+    if (!conn->AuthInfo)
+        /* should have filled in authentication info by now */
+        return RPC_S_PROTOCOL_ERROR;
+
+    status = rpcrt4_conn_authorize(
+        conn, start, (unsigned char *)(auth_data_in + 1),
+        auth_length_in - sizeof(RpcAuthVerifier), NULL, &out_size);
+    if (status) return status;
+
+    out_buffer = HeapAlloc(GetProcessHeap(), 0, out_size);
+    if (!out_buffer) return RPC_S_OUT_OF_RESOURCES;
+
+    status = rpcrt4_conn_authorize(
+        conn, start, (unsigned char *)(auth_data_in + 1),
+        auth_length_in - sizeof(RpcAuthVerifier), out_buffer, &out_size);
+    if (status != RPC_S_OK)
+    {
+        HeapFree(GetProcessHeap(), 0, out_buffer);
+        return status;
+    }
+
+    if (out_size && !auth_length_out)
+    {
+        ERR("expected authentication to be complete but SSP returned data of "
+            "%u bytes to be sent back to client\n", out_size);
+        HeapFree(GetProcessHeap(), 0, out_buffer);
+        return RPC_S_SEC_PKG_ERROR;
+    }
+    else
+    {
+        *auth_data_out = out_buffer;
+        *auth_length_out = out_size;
+    }
+
+    return status;
+}
+
+/***********************************************************************
+ *           RPCRT4_default_is_authorized (internal)
+ *
+ * Has a connection started the process of authorizing with the server?
+ */
+BOOL RPCRT4_default_is_authorized(RpcConnection *Connection)
+{
+    return Connection->AuthInfo && SecIsValidHandle(&Connection->ctx);
+}
+
+/***********************************************************************
+ *           RPCRT4_default_impersonate_client (internal)
+ *
+ */
+RPC_STATUS RPCRT4_default_impersonate_client(RpcConnection *conn)
+{
+    SECURITY_STATUS sec_status;
+
+    TRACE("(%p)\n", conn);
+
+    if (!conn->AuthInfo || !SecIsValidHandle(&conn->ctx))
+        return RPC_S_NO_CONTEXT_AVAILABLE;
+    sec_status = ImpersonateSecurityContext(&conn->ctx);
+    if (sec_status != SEC_E_OK)
+        WARN("ImpersonateSecurityContext returned 0x%08x\n", sec_status);
+    switch (sec_status)
+    {
+    case SEC_E_UNSUPPORTED_FUNCTION:
+        return RPC_S_CANNOT_SUPPORT;
+    case SEC_E_NO_IMPERSONATION:
+        return RPC_S_NO_CONTEXT_AVAILABLE;
+    case SEC_E_OK:
+        return RPC_S_OK;
+    default:
+        return RPC_S_SEC_PKG_ERROR;
+    }
+}
+
+/***********************************************************************
+ *           RPCRT4_default_revert_to_self (internal)
+ *
+ */
+RPC_STATUS RPCRT4_default_revert_to_self(RpcConnection *conn)
+{
+    SECURITY_STATUS sec_status;
+
+    TRACE("(%p)\n", conn);
+
+    if (!conn->AuthInfo || !SecIsValidHandle(&conn->ctx))
+        return RPC_S_NO_CONTEXT_AVAILABLE;
+    sec_status = RevertSecurityContext(&conn->ctx);
+    if (sec_status != SEC_E_OK)
+        WARN("RevertSecurityContext returned 0x%08x\n", sec_status);
+    switch (sec_status)
+    {
+    case SEC_E_UNSUPPORTED_FUNCTION:
+        return RPC_S_CANNOT_SUPPORT;
+    case SEC_E_NO_IMPERSONATION:
+        return RPC_S_NO_CONTEXT_AVAILABLE;
+    case SEC_E_OK:
+        return RPC_S_OK;
+    default:
+        return RPC_S_SEC_PKG_ERROR;
+    }
+}
+
+/***********************************************************************
+ *           RPCRT4_default_inquire_auth_client (internal)
+ *
+ * Default function to retrieve the authentication details that the client
+ * is using to call the server.
+ */
+RPC_STATUS RPCRT4_default_inquire_auth_client(
+    RpcConnection *conn, RPC_AUTHZ_HANDLE *privs, RPC_WSTR *server_princ_name,
+    ULONG *authn_level, ULONG *authn_svc, ULONG *authz_svc, ULONG flags)
+{
+    if (!conn->AuthInfo) return RPC_S_BINDING_HAS_NO_AUTH;
+
+    if (privs)
+    {
+        FIXME("privs not implemented\n");
+        *privs = NULL;
+    }
+    if (server_princ_name)
+    {
+        *server_princ_name = RPCRT4_strdupW(conn->AuthInfo->server_principal_name);
+        if (!*server_princ_name) return ERROR_OUTOFMEMORY;
+    }
+    if (authn_level) *authn_level = conn->AuthInfo->AuthnLevel;
+    if (authn_svc) *authn_svc = conn->AuthInfo->AuthnSvc;
+    if (authz_svc)
+    {
+        FIXME("authorization service not implemented\n");
+        *authz_svc = RPC_C_AUTHZ_NONE;
+    }
+    if (flags)
+        FIXME("flags 0x%x not implemented\n", flags);
+
+    return RPC_S_OK;
 }
 
 /***********************************************************************
@@ -976,20 +1220,29 @@ RPC_STATUS RPCRT4_Send(RpcConnection *Connection, RpcPktHdr *Header,
                        void *Buffer, unsigned int BufferLength)
 {
   RPC_STATUS r;
-  SecBuffer out;
 
-  if (!Connection->AuthInfo || SecIsValidHandle(&Connection->ctx))
+  if (packet_does_auth_negotiation(Header) &&
+      Connection->AuthInfo &&
+      !rpcrt4_conn_is_authorized(Connection))
   {
-    return RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, NULL, 0);
-  }
+      unsigned int out_size = 0;
+      unsigned char *out_buffer;
 
-  /* tack on a negotiate packet */
-  r = RPCRT4_ClientAuthorize(Connection, NULL, &out);
-  if (r == RPC_S_OK)
-  {
-    r = RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, out.pvBuffer, out.cbBuffer);
-    HeapFree(GetProcessHeap(), 0, out.pvBuffer);
+      r = rpcrt4_conn_authorize(Connection, TRUE, NULL, 0, NULL, &out_size);
+      if (r != RPC_S_OK) return r;
+
+      out_buffer = HeapAlloc(GetProcessHeap(), 0, out_size);
+      if (!out_buffer) return RPC_S_OUT_OF_RESOURCES;
+
+      /* tack on a negotiate packet */
+      r = rpcrt4_conn_authorize(Connection, TRUE, NULL, 0, out_buffer, &out_size);
+      if (r == RPC_S_OK)
+          r = RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, out_buffer, out_size);
+
+      HeapFree(GetProcessHeap(), 0, out_buffer);
   }
+  else
+    r = RPCRT4_SendWithAuth(Connection, Header, Buffer, BufferLength, NULL, 0);
 
   return r;
 }
@@ -1133,6 +1386,8 @@ RPC_STATUS RPCRT4_ReceiveWithAuth(RpcConnection *Connection, RpcPktHdr **Header,
 
   *Header = NULL;
   pMsg->Buffer = NULL;
+  if (auth_data_out) *auth_data_out = NULL;
+  if (auth_length_out) *auth_length_out = 0;
 
   TRACE("(%p, %p, %p, %p)\n", Connection, Header, pMsg, auth_data_out);
 
@@ -1230,9 +1485,9 @@ RPC_STATUS RPCRT4_ReceiveWithAuth(RpcConnection *Connection, RpcPktHdr **Header,
 
       /* these packets are handled specially, not by the generic SecurePacket
        * function */
-      if (!auth_data_out && SecIsValidHandle(&Connection->ctx))
+      if (!packet_does_auth_negotiation(*Header) && rpcrt4_conn_is_authorized(Connection))
       {
-        status = RPCRT4_SecurePacket(Connection, SECURE_PACKET_RECEIVE,
+        status = rpcrt4_conn_secure_packet(Connection, SECURE_PACKET_RECEIVE,
             CurrentHeader, hdr_length,
             (unsigned char *)pMsg->Buffer + buffer_length, data_length,
             (RpcAuthVerifier *)auth_data,

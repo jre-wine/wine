@@ -109,7 +109,7 @@ static int syntax_error;
 
 DIGIT	   [0-9]
 HEXDIGIT   [0-9a-fA-F]
-FORMAT     [ubcdgiswx]
+FORMAT     [ubcdgiswxa]
 IDENTIFIER [_a-zA-Z~?][_a-zA-Z0-9~?@]*
 PATHNAME   [\\/_a-zA-Z0-9\.~@][\\/\-_a-zA-Z0-9\.~@]*
 STRING     \"[^\n"]+\"
@@ -149,8 +149,8 @@ STRING     \"[^\n"]+\"
 "["					{ return *yytext; }
 "]"					{ return *yytext; }
 
-"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%x", &dbg_lval.integer); return tNUM; }
-{DIGIT}+             			{ sscanf(yytext, "%d", &dbg_lval.integer); return tNUM; }
+"0x"{HEXDIGIT}+      			{ sscanf(yytext, "%lx", &dbg_lval.integer); return tNUM; }
+{DIGIT}+             			{ sscanf(yytext, "%ld", &dbg_lval.integer); return tNUM; }
 
 <FORMAT_EXPECTED>"/"{DIGIT}+{FORMAT}	{ char* last;
                                           dbg_lval.integer = strtol(yytext+1, &last, 0) << 8;

@@ -106,7 +106,7 @@ struct process*    process_find_by_handle(HANDLE hProcess)
  */
 BOOL validate_addr64(DWORD64 addr)
 {
-    if (addr >> 32)
+    if (sizeof(void*) == sizeof(int) && (addr >> 32))
     {
         FIXME("Unsupported address %s\n", wine_dbgstr_longlong(addr));
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -211,16 +211,16 @@ BOOL WINAPI SymGetSearchPath(HANDLE hProcess, PSTR szSearchPath,
  * SymInitialize helper: loads in dbghelp all known (and loaded modules)
  * this assumes that hProcess is a handle on a valid process
  */
-static BOOL WINAPI process_invade_cb(PCSTR name, ULONG base, ULONG size, PVOID user)
+static BOOL WINAPI process_invade_cb(PCWSTR name, ULONG64 base, ULONG size, PVOID user)
 {
-    char        tmp[MAX_PATH];
+    WCHAR       tmp[MAX_PATH];
     HANDLE      hProcess = user;
 
-    if (!GetModuleFileNameExA(hProcess, (HMODULE)base, 
-                              tmp, sizeof(tmp)))
-        lstrcpynA(tmp, name, sizeof(tmp));
+    if (!GetModuleFileNameExW(hProcess, (HMODULE)(DWORD_PTR)base,
+			      tmp, sizeof(tmp) / sizeof(WCHAR)))
+        lstrcpynW(tmp, name, sizeof(tmp) / sizeof(WCHAR));
 
-    SymLoadModule(hProcess, 0, tmp, name, base, size);
+    SymLoadModuleExW(hProcess, 0, tmp, name, base, size, NULL, 0);
     return TRUE;
 }
 
@@ -326,7 +326,7 @@ BOOL WINAPI SymInitializeW(HANDLE hProcess, PCWSTR UserSearchPath, BOOL fInvadeP
     if (check_live_target(pcs))
     {
         if (fInvadeProcess)
-            EnumerateLoadedModules(hProcess, process_invade_cb, hProcess);
+            EnumerateLoadedModulesW64(hProcess, process_invade_cb, hProcess);
         elf_synchronize_module_list(pcs);
         macho_synchronize_module_list(pcs);
     }
@@ -461,25 +461,25 @@ BOOL WINAPI SymSetContext(HANDLE hProcess, PIMAGEHLP_STACK_FRAME StackFrame,
  */
 static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, ULONG64 user)
 {
-    PSYMBOL_REGISTERED_CALLBACK         cb32 = (PSYMBOL_REGISTERED_CALLBACK)(DWORD)(user >> 32);
-    DWORD                               user32 = (DWORD)user;
+    struct process*                     pcs = process_find_by_handle(hProcess);
     void*                               data32;
     IMAGEHLP_DEFERRED_SYMBOL_LOAD64*    idsl64;
     IMAGEHLP_DEFERRED_SYMBOL_LOAD       idsl;
 
+    if (!pcs) return FALSE;
     switch (action)
     {
     case CBA_DEBUG_INFO:
     case CBA_DEFERRED_SYMBOL_LOAD_CANCEL:
     case CBA_SET_OPTIONS:
     case CBA_SYMBOLS_UNLOADED:
-        data32 = (void*)(DWORD)data;
+        data32 = (void*)(DWORD_PTR)data;
         break;
     case CBA_DEFERRED_SYMBOL_LOAD_COMPLETE:
     case CBA_DEFERRED_SYMBOL_LOAD_FAILURE:
     case CBA_DEFERRED_SYMBOL_LOAD_PARTIAL:
     case CBA_DEFERRED_SYMBOL_LOAD_START:
-        idsl64 = (IMAGEHLP_DEFERRED_SYMBOL_LOAD64*)(DWORD)data;
+        idsl64 = (IMAGEHLP_DEFERRED_SYMBOL_LOAD64*)(DWORD_PTR)data;
         if (!validate_addr64(idsl64->BaseOfImage))
             return FALSE;
         idsl.SizeOfStruct = sizeof(idsl);
@@ -497,7 +497,7 @@ static BOOL CALLBACK reg_cb64to32(HANDLE hProcess, ULONG action, ULONG64 data, U
         FIXME("No mapping for action %u\n", action);
         return FALSE;
     }
-    return cb32(hProcess, action, data32, (PVOID)user32);
+    return pcs->reg_cb32(hProcess, action, data32, (PVOID)(DWORD_PTR)user);
 }
 
 /******************************************************************
@@ -524,7 +524,7 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
         case CBA_DEFERRED_SYMBOL_LOAD_FAILURE:
         case CBA_DEFERRED_SYMBOL_LOAD_PARTIAL:
         case CBA_DEFERRED_SYMBOL_LOAD_START:
-            idslW = (IMAGEHLP_DEFERRED_SYMBOL_LOADW64*)(DWORD)data;
+            idslW = data;
             idsl.SizeOfStruct = sizeof(idsl);
             idsl.BaseOfImage = idslW->BaseOfImage;
             idsl.CheckSum = idslW->CheckSum;
@@ -550,14 +550,16 @@ BOOL pcs_callback(const struct process* pcs, ULONG action, void* data)
  *
  * Helper for registering a callback.
  */
-static BOOL sym_register_cb(HANDLE hProcess, 
+static BOOL sym_register_cb(HANDLE hProcess,
                             PSYMBOL_REGISTERED_CALLBACK64 cb,
+                            PSYMBOL_REGISTERED_CALLBACK cb32,
                             DWORD64 user, BOOL unicode)
 {
     struct process* pcs = process_find_by_handle(hProcess);
 
     if (!pcs) return FALSE;
     pcs->reg_cb = cb;
+    pcs->reg_cb32 = cb32;
     pcs->reg_is_unicode = unicode;
     pcs->reg_user = user;
 
@@ -571,10 +573,9 @@ BOOL WINAPI SymRegisterCallback(HANDLE hProcess,
                                 PSYMBOL_REGISTERED_CALLBACK CallbackFunction,
                                 PVOID UserContext)
 {
-    DWORD64 tmp = ((ULONGLONG)(DWORD)CallbackFunction << 32) | (DWORD)UserContext;
     TRACE("(%p, %p, %p)\n", 
           hProcess, CallbackFunction, UserContext);
-    return sym_register_cb(hProcess, reg_cb64to32, tmp, FALSE);
+    return sym_register_cb(hProcess, reg_cb64to32, CallbackFunction, (DWORD_PTR)UserContext, FALSE);
 }
 
 /***********************************************************************
@@ -586,7 +587,7 @@ BOOL WINAPI SymRegisterCallback64(HANDLE hProcess,
 {
     TRACE("(%p, %p, %s)\n", 
           hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
-    return sym_register_cb(hProcess, CallbackFunction, UserContext, FALSE);
+    return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, FALSE);
 }
 
 /***********************************************************************
@@ -598,7 +599,7 @@ BOOL WINAPI SymRegisterCallbackW64(HANDLE hProcess,
 {
     TRACE("(%p, %p, %s)\n", 
           hProcess, CallbackFunction, wine_dbgstr_longlong(UserContext));
-    return sym_register_cb(hProcess, CallbackFunction, UserContext, TRUE);
+    return sym_register_cb(hProcess, CallbackFunction, NULL, UserContext, TRUE);
 }
 
 /* This is imagehlp version not dbghelp !! */

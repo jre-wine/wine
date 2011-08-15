@@ -22,17 +22,8 @@
  * - Covers basic CreateGroup, ShowGroup, DeleteGroup, AddItem, and DeleteItem
  *   functionality
  * - Todo: Handle CommonGroupFlag
- *         Handle Difference between administrator and non-administrator calls
- *           as documented
  *         Better AddItem Tests (Lots of parameters to test)
  *         Tests for Invalid Characters in Names / Invalid Parameters
- * - Technically, calling as an administrator creates groups in the CSIDL_COMMON_PROGRAMS
- *   directory.  Win 9x and non-administrator calls us CSIDL_PROGRAMS directory.
- *   Original plans were to check that items/groups were created in appropriate
- *   places.  As of this writing and in order to simplify the test code, it now
- *   checks for existence in either place.  From web searches, it is not at all
- *   obvious or trivial to detect if the call is coming from an administrator or
- *   non-administrator. IsUserAnAdmin
  */
 
 #include <stdio.h>
@@ -60,12 +51,9 @@
 #define DDE_TEST_COMPOUND        0x00070000
 #define DDE_TEST_CALLMASK        0x00ff0000
 
-/* Type of Test (Common, Individual) */
-#define DDE_TEST_COMMON            0x01000000
-#define DDE_TEST_INDIVIDUAL        0x02000000
-
 #define DDE_TEST_NUMMASK           0x0000ffff
 
+static HRESULT (WINAPI *pSHGetLocalizedName)(LPCWSTR, LPWSTR, UINT, int *);
 static BOOL (WINAPI *pSHGetSpecialFolderPathA)(HWND, LPSTR, int, BOOL);
 static BOOL (WINAPI *pReadCabinetState)(CABINETSTATE *, int);
 
@@ -74,44 +62,66 @@ static void init_function_pointers(void)
     HMODULE hmod;
 
     hmod = GetModuleHandleA("shell32.dll");
+    pSHGetLocalizedName = (void*)GetProcAddress(hmod, "SHGetLocalizedName");
     pSHGetSpecialFolderPathA = (void*)GetProcAddress(hmod, "SHGetSpecialFolderPathA");
     pReadCabinetState = (void*)GetProcAddress(hmod, "ReadCabinetState");
     if (!pReadCabinetState)
         pReadCabinetState = (void*)GetProcAddress(hmod, (LPSTR)651);
 }
 
-static char CommonPrograms[MAX_PATH];
-static char Programs[MAX_PATH];
+static BOOL use_common(void)
+{
+    HMODULE hmod;
+    static BOOL (WINAPI *pIsNTAdmin)(DWORD, LPDWORD);
+
+    /* IsNTAdmin() is available on all platforms. */
+    hmod = LoadLibraryA("advpack.dll");
+    pIsNTAdmin = (void*)GetProcAddress(hmod, "IsNTAdmin");
+
+    if (!pIsNTAdmin(0, NULL))
+    {
+        /* We are definitely not an administrator */
+        FreeLibrary(hmod);
+        return FALSE;
+    }
+    FreeLibrary(hmod);
+
+    /* If we end up here we are on NT4+ as Win9x and WinMe don't have the
+     * notion of administrators (as we need it).
+     */
+
+    /* As of Vista  we should always use the users directory. Tests with the
+     * real Administrator account on Windows 7 proved this.
+     *
+     * FIXME: We need a better way of identifying Vista+ as currently this check
+     * also covers Wine and we don't know yet which behavior we want to follow.
+     */
+    if (pSHGetLocalizedName)
+        return FALSE;
+
+    return TRUE;
+}
+
+static char ProgramsDir[MAX_PATH];
 
 static char Group1Title[MAX_PATH]  = "Group1";
 static char Group2Title[MAX_PATH]  = "Group2";
 static char Group3Title[MAX_PATH]  = "Group3";
-static char Startup[MAX_PATH]      = "Startup";
 static char StartupTitle[MAX_PATH] = "Startup";
 
 static void init_strings(void)
 {
     char startup[MAX_PATH];
+    char commonprograms[MAX_PATH];
+    char programs[MAX_PATH];
+
     CABINETSTATE cs;
 
     if (pSHGetSpecialFolderPathA)
     {
-        pSHGetSpecialFolderPathA(NULL, Programs, CSIDL_PROGRAMS, FALSE);
-        if (!pSHGetSpecialFolderPathA(NULL, CommonPrograms, CSIDL_COMMON_PROGRAMS, FALSE))
-        {
-            /* Win9x */
-            lstrcpyA(CommonPrograms, Programs);
-        }
-        if (GetProcAddress(GetModuleHandleA("shell32.dll"), "SHGetKnownFolderPath"))
-        {
-            /* Vista and higher use CSIDL_PROGRAMS for these tests.
-             * Wine doesn't have SHGetKnownFolderPath yet but should most likely follow
-             * this new ProgMan DDE behavior once implemented.
-             */
-            lstrcpyA(CommonPrograms, Programs);
-        }
+        pSHGetSpecialFolderPathA(NULL, programs, CSIDL_PROGRAMS, FALSE);
+        pSHGetSpecialFolderPathA(NULL, commonprograms, CSIDL_COMMON_PROGRAMS, FALSE);
         pSHGetSpecialFolderPathA(NULL, startup, CSIDL_STARTUP, FALSE);
-        lstrcpyA(Startup, (strrchr(startup, '\\') + 1));
     }
     else
     {
@@ -120,41 +130,70 @@ static void init_strings(void)
         LONG res;
 
         /* Older Win9x and NT4 */
+
         RegOpenKeyA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", &key);
-        size = sizeof(Programs);
-        RegQueryValueExA(key, "Programs", NULL, NULL, (LPBYTE)&Programs, &size);
+        size = sizeof(programs);
+        RegQueryValueExA(key, "Programs", NULL, NULL, (LPBYTE)&programs, &size);
         size = sizeof(startup);
         RegQueryValueExA(key, "Startup", NULL, NULL, (LPBYTE)&startup, &size);
-        lstrcpyA(Startup, (strrchr(startup, '\\') + 1));
         RegCloseKey(key);
 
         RegOpenKeyA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", &key);
-        size = sizeof(CommonPrograms);
-        res = RegQueryValueExA(key, "Common Programs", NULL, NULL, (LPBYTE)&CommonPrograms, &size);
+        size = sizeof(commonprograms);
+        res = RegQueryValueExA(key, "Common Programs", NULL, NULL, (LPBYTE)&commonprograms, &size);
         RegCloseKey(key);
-        if (res != ERROR_SUCCESS)
-        {
-            /* Win9x */
-            lstrcpyA(CommonPrograms, Programs);
-        }
     }
+
+    /* ProgramsDir on Vista+ is always the users one (CSIDL_PROGRAMS). Before Vista
+     * it depends on whether the user is an administrator (CSIDL_COMMON_PROGRAMS) or
+     * not (CSIDL_PROGRAMS).
+     */
+    if (use_common())
+        lstrcpyA(ProgramsDir, commonprograms);
+    else
+        lstrcpyA(ProgramsDir, programs);
 
     memset(&cs, 0, sizeof(cs));
     pReadCabinetState(&cs, sizeof(cs));
     if (cs.fFullPathTitle == -1)
     {
-        lstrcpyA(Group1Title, CommonPrograms);
+        lstrcpyA(Group1Title, ProgramsDir);
         lstrcatA(Group1Title, "\\Group1");
-        lstrcpyA(Group2Title, CommonPrograms);
+        lstrcpyA(Group2Title, ProgramsDir);
         lstrcatA(Group2Title, "\\Group2");
-        lstrcpyA(Group3Title, CommonPrograms);
+        lstrcpyA(Group3Title, ProgramsDir);
         lstrcatA(Group3Title, "\\Group3");
 
         lstrcpyA(StartupTitle, startup);
     }
     else
     {
-        lstrcpyA(StartupTitle, Startup);
+        /* Vista has the nice habit of displaying the full path in English
+         * and the short one localized. CSIDL_STARTUP on Vista gives us the
+         * English version so we have to 'translate' this one.
+         *
+         * MSDN claims it should be used for files not folders but this one
+         * suits our purposes just fine.
+         */
+        if (pSHGetLocalizedName)
+        {
+            WCHAR startupW[MAX_PATH];
+            WCHAR module[MAX_PATH];
+            WCHAR module_expanded[MAX_PATH];
+            WCHAR localized[MAX_PATH];
+            int id;
+
+            MultiByteToWideChar(CP_ACP, 0, startup, -1, startupW, sizeof(startupW)/sizeof(WCHAR));
+            pSHGetLocalizedName(startupW, module, MAX_PATH, &id);
+            ExpandEnvironmentStringsW(module, module_expanded, MAX_PATH);
+            LoadStringW(GetModuleHandleW(module_expanded), id, localized, MAX_PATH);
+
+            WideCharToMultiByte(CP_ACP, 0, localized, -1, StartupTitle, sizeof(StartupTitle), NULL, NULL);
+        }
+        else
+        {
+            lstrcpyA(StartupTitle, (strrchr(startup, '\\') + 1));
+        }
     }
 }
 
@@ -328,10 +367,7 @@ static void CheckFileExistsInProgramGroups(const char *nameToCheck, int shouldEx
     DWORD attributes;
     int len;
 
-    if (testParams & DDE_TEST_COMMON)
-        lstrcpyA(path, CommonPrograms);
-    else
-        lstrcpyA(path, Programs);
+    lstrcpyA(path, ProgramsDir);
 
     len = strlen(path) + strlen(nameToCheck)+1;
     if (groupName != NULL)
@@ -579,22 +615,22 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
     GetTempFileNameA(temppath, "dde", 0, f2g3);
 
     /* CreateGroup Tests (including AddItem, DeleteItem) */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_CREATEGROUP|testnum++);
     CreateAddItemText(itemtext, f1g1, "f1g1Name");
-    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f1g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f1g1Name.lnk", "Group1", DDE_TEST_ADDITEM|testnum++);
     CreateAddItemText(itemtext, f2g1, "f2g1Name");
-    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
-    DeleteItemTest(instance, hConv, "[DeleteItem(f2g1Name)]", DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_DELETEITEM|testnum++);
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_ADDITEM|testnum++);
+    DeleteItemTest(instance, hConv, "[DeleteItem(f2g1Name)]", DMLERR_NO_ERROR, "f2g1Name.lnk", "Group1", DDE_TEST_DELETEITEM|testnum++);
     CreateAddItemText(itemtext, f3g1, "f3g1Name");
-    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_ADDITEM|testnum++);
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    AddItemTest(instance, hConv, itemtext, DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_ADDITEM|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_CREATEGROUP|testnum++);
     /* Create Group that already exists - same instance */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group1)]", DMLERR_NO_ERROR, "Group1", Group1Title, DDE_TEST_CREATEGROUP|testnum++);
 
     /* ShowGroup Tests */
-    ShowGroupTest(instance, hConv, "[ShowGroup(Group1)]", DMLERR_NOTPROCESSED, Startup, StartupTitle, TRUE, DDE_TEST_SHOWGROUP|testnum++);
-    DeleteItemTest(instance, hConv, "[DeleteItem(f3g1Name)]", DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_COMMON|DDE_TEST_DELETEITEM|testnum++);
-    ShowGroupTest(instance, hConv, "[ShowGroup(Startup,0)]", DMLERR_NO_ERROR, Startup, StartupTitle, TRUE, DDE_TEST_SHOWGROUP|testnum++);
+    ShowGroupTest(instance, hConv, "[ShowGroup(Group1)]", DMLERR_NOTPROCESSED, "Group1", Group1Title, TRUE, DDE_TEST_SHOWGROUP|testnum++);
+    DeleteItemTest(instance, hConv, "[DeleteItem(f3g1Name)]", DMLERR_NO_ERROR, "f3g1Name.lnk", "Group1", DDE_TEST_DELETEITEM|testnum++);
+    ShowGroupTest(instance, hConv, "[ShowGroup(Startup,0)]", DMLERR_NO_ERROR, "Startup", StartupTitle, TRUE, DDE_TEST_SHOWGROUP|testnum++);
     ShowGroupTest(instance, hConv, "[ShowGroup(Group1,0)]", DMLERR_NO_ERROR, "Group1", Group1Title, FALSE, DDE_TEST_SHOWGROUP|testnum++);
 
     /* DeleteGroup Test - Note that Window is Open for this test */
@@ -606,7 +642,7 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
     lstrcatA(comptext, itemtext);
     CreateAddItemText(itemtext, f2g3, "f2g3Name");
     lstrcatA(comptext, itemtext);
-    CompoundCommandTest(instance, hConv, comptext, DMLERR_NO_ERROR, "Group3", Group3Title, "f1g3Name.lnk", "f2g3Name.lnk", DDE_TEST_COMMON|DDE_TEST_COMPOUND|testnum++);
+    CompoundCommandTest(instance, hConv, comptext, DMLERR_NO_ERROR, "Group3", Group3Title, "f1g3Name.lnk", "f2g3Name.lnk", DDE_TEST_COMPOUND|testnum++);
 
     DeleteGroupTest(instance, hConv, "[DeleteGroup(Group3)]", DMLERR_NO_ERROR, "Group3", DDE_TEST_DELETEGROUP|testnum++);
 
@@ -626,8 +662,8 @@ static int DdeTestProgman(DWORD instance, HCONV hConv)
 static void DdeTestProgman2(DWORD instance, HCONV hConv, int testnum)
 {
     /* Create Group that already exists on a separate connection */
-    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_COMMON|DDE_TEST_CREATEGROUP|testnum++);
-    DeleteGroupTest(instance, hConv, "[DeleteGroup(Group2)]", DMLERR_NO_ERROR, "Group2", DDE_TEST_COMMON|DDE_TEST_DELETEGROUP|testnum++);
+    CreateGroupTest(instance, hConv, "[CreateGroup(Group2)]", DMLERR_NO_ERROR, "Group2", Group2Title, DDE_TEST_CREATEGROUP|testnum++);
+    DeleteGroupTest(instance, hConv, "[DeleteGroup(Group2)]", DMLERR_NO_ERROR, "Group2", DDE_TEST_DELETEGROUP|testnum++);
 }
 
 START_TEST(progman_dde)

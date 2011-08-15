@@ -1856,7 +1856,8 @@ static LPCWSTR  URL_ScanID(LPCWSTR start, LPDWORD size, WINE_URL_SCAN_TYPE type)
                  (*start == '_') ||
                  (*start == '+') ||
                  (*start == '-') ||
-                 (*start == '.')) {
+                 (*start == '.') ||
+                 (*start == ' ')) {
 		start++;
 		(*size)++;
             } else if (*start == '%') {
@@ -1886,7 +1887,8 @@ static LPCWSTR  URL_ScanID(LPCWSTR start, LPDWORD size, WINE_URL_SCAN_TYPE type)
 	while (cont) {
 	    if (isalnumW(*start) ||
                 (*start == '-') ||
-                (*start == '.') ) {
+                (*start == '.') ||
+                (*start == ' ') ) {
 		start++;
 		(*size)++;
 	    }
@@ -2002,7 +2004,7 @@ HRESULT WINAPI UrlGetPartA(LPCSTR pszIn, LPSTR pszOut, LPDWORD pcchOut,
     len = INTERNET_MAX_URL_LENGTH;
     ret = UrlGetPartW(in, out, &len, dwPart, dwFlags);
 
-    if (ret != S_OK) {
+    if (FAILED(ret)) {
 	HeapFree(GetProcessHeap(), 0, in);
 	return ret;
     }
@@ -2013,10 +2015,10 @@ HRESULT WINAPI UrlGetPartA(LPCSTR pszIn, LPSTR pszOut, LPDWORD pcchOut,
 	HeapFree(GetProcessHeap(), 0, in);
 	return E_POINTER;
     }
-    WideCharToMultiByte(0, 0, out, len+1, pszOut, *pcchOut, 0, 0);
-    *pcchOut = len2;
+    len2 = WideCharToMultiByte(0, 0, out, len+1, pszOut, *pcchOut, 0, 0);
+    *pcchOut = len2-1;
     HeapFree(GetProcessHeap(), 0, in);
-    return S_OK;
+    return ret;
 }
 
 /*************************************************************************
@@ -2029,11 +2031,17 @@ HRESULT WINAPI UrlGetPartW(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut,
 {
     WINE_PARSE_URL pl;
     HRESULT ret;
-    DWORD size, schsize;
+    DWORD scheme, size, schsize;
     LPCWSTR addr, schaddr;
 
     TRACE("(%s %p %p(%d) %08x %08x)\n",
 	  debugstr_w(pszIn), pszOut, pcchOut, *pcchOut, dwPart, dwFlags);
+
+    addr = strchrW(pszIn, ':');
+    if(!addr)
+        return E_FAIL;
+
+    scheme = get_scheme_code(pszIn, addr-pszIn);
 
     ret = URL_ParseUrl(pszIn, &pl);
     if (ret == S_OK) {
@@ -2048,6 +2056,26 @@ HRESULT WINAPI UrlGetPartW(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut,
 	    break;
 
 	case URL_PART_HOSTNAME:
+            switch(scheme) {
+            case URL_SCHEME_FTP:
+            case URL_SCHEME_HTTP:
+            case URL_SCHEME_GOPHER:
+            case URL_SCHEME_TELNET:
+            case URL_SCHEME_FILE:
+            case URL_SCHEME_HTTPS:
+                break;
+            default:
+                return E_FAIL;
+            }
+
+            if(scheme==URL_SCHEME_FILE && (!pl.szHostName ||
+                        (pl.szHostName==1 && *(pl.pHostName+1)==':'))) {
+                if(pcchOut)
+                    *pszOut = '\0';
+                *pcchOut = 0;
+                return S_FALSE;
+            }
+
 	    if (!pl.szHostName) return E_INVALIDARG;
 	    addr = pl.pHostName;
 	    size = pl.szHostName;
@@ -2099,7 +2127,13 @@ HRESULT WINAPI UrlGetPartW(LPCWSTR pszIn, LPWSTR pszOut, LPDWORD pcchOut,
 	    *pcchOut = size;
 	}
 	TRACE("len=%d %s\n", *pcchOut, debugstr_w(pszOut));
+    }else if(dwPart==URL_PART_HOSTNAME && scheme==URL_SCHEME_FILE) {
+        if(*pcchOut)
+            *pszOut = '\0';
+        *pcchOut = 0;
+        return S_FALSE;
     }
+
     return ret;
 }
 

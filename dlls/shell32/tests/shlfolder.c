@@ -586,6 +586,7 @@ static void test_GetDisplayName(void)
         ok (!lstrcmpiW(wszTestFile, wszTestFile2), "GetDisplayNameOf returns incorrect path!\n");
     }
     
+    ILFree(pidlTestFile);
     IShellFolder_Release(psfDesktop);
     IShellFolder_Release(psfPersonal);
 }
@@ -647,8 +648,12 @@ static void test_CallForAttributes(void)
      * key. So the test will return at this point, if run on wine. 
      */
     lResult = RegOpenKeyExW(HKEY_CLASSES_ROOT, wszMyDocumentsKey, 0, KEY_WRITE|KEY_READ, &hKey);
-    ok (lResult == ERROR_SUCCESS, "RegOpenKeyEx failed! result: %08x\n", lResult);
+    ok (lResult == ERROR_SUCCESS ||
+        lResult == ERROR_ACCESS_DENIED,
+        "RegOpenKeyEx failed! result: %08x\n", lResult);
     if (lResult != ERROR_SUCCESS) {
+        if (lResult == ERROR_ACCESS_DENIED)
+            skip("Not enough rights to open the registry key\n");
         IMalloc_Free(ppM, pidlMyDocuments);
         IShellFolder_Release(psfDesktop);
         return;
@@ -1555,6 +1560,8 @@ static void test_ITEMIDLIST_format(void) {
 
         pILFree(pidlFile);
     }
+
+    IShellFolder_Release(psfPersonal);
 }
 
 static void testSHGetFolderPathAndSubDirA(void)

@@ -3484,6 +3484,7 @@ static void test_VarDateChangeTypeEx(void)
           (!lstrcmpW(V_BSTR(&vDst), sz25570) || !lstrcmpW(V_BSTR(&vDst), sz25570_2)),
           "hres=0x%X, type=%d (should be VT_BSTR), *bstr=%s\n", 
           hres, V_VT(&vDst), V_BSTR(&vDst) ? wtoascii(V_BSTR(&vDst)) : "?");
+  VariantClear(&vDst);
 
   lcid = MAKELCID(MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US),SORT_DEFAULT);
   if (HAVE_OLEAUT32_LOCALES)
@@ -3492,6 +3493,7 @@ static void test_VarDateChangeTypeEx(void)
     ok(hres == S_OK && V_VT(&vDst) == VT_BSTR && V_BSTR(&vDst) && !lstrcmpW(V_BSTR(&vDst), sz25570Nls), 
             "hres=0x%X, type=%d (should be VT_BSTR), *bstr=%s\n", 
             hres, V_VT(&vDst), V_BSTR(&vDst) ? wtoascii(V_BSTR(&vDst)) : "?");
+    VariantClear(&vDst);
   }
 }
 
@@ -4780,7 +4782,8 @@ static void test_VarBoolCopy(void)
   ok(hres == S_OK && V_VT(&vDst) == VT_BSTR && \
      V_BSTR(&vDst) && !memcmp(V_BSTR(&vDst), str, sizeof(str)), \
      "hres=0x%X, type=%d (should be VT_BSTR), *bstr='%c'\n", \
-     hres, V_VT(&vDst), V_BSTR(&vDst) ? *V_BSTR(&vDst) : '?')
+     hres, V_VT(&vDst), V_BSTR(&vDst) ? *V_BSTR(&vDst) : '?'); \
+  VariantClear(&vDst)
 
 static void test_VarBoolChangeTypeEx(void)
 {
@@ -4855,6 +4858,7 @@ static void test_VarBstrFromR4(void)
      */
     ok(memcmp(bstr, szNative, sizeof(szNative)) == 0, "string different\n");
     }
+    SysFreeString(bstr);
   }
 
   f = -0.0;
@@ -4866,6 +4870,7 @@ static void test_VarBstrFromR4(void)
           ok(memcmp(bstr + 1, szZero, sizeof(szZero)) == 0, "negative zero (got %s)\n", wtoascii(bstr));
       else
           ok(memcmp(bstr, szZero, sizeof(szZero)) == 0, "negative zero (got %s)\n", wtoascii(bstr));
+      SysFreeString(bstr);
   }
   
   /* The following tests that lcid is used for decimal separator even without LOCALE_USE_NLS */
@@ -4875,6 +4880,7 @@ static void test_VarBstrFromR4(void)
   if (bstr)
   {
     ok(memcmp(bstr, szOneHalf_English, sizeof(szOneHalf_English)) == 0, "English locale failed (got %s)\n", wtoascii(bstr));
+    SysFreeString(bstr);
   }
   f = 0.5;
   hres = pVarBstrFromR4(f, lcid_spanish, LOCALE_NOUSEROVERRIDE, &bstr);
@@ -4882,12 +4888,14 @@ static void test_VarBstrFromR4(void)
   if (bstr)
   {
     ok(memcmp(bstr, szOneHalf_Spanish, sizeof(szOneHalf_Spanish)) == 0, "Spanish locale failed (got %s)\n", wtoascii(bstr));
+    SysFreeString(bstr);
   }
 }
 
-#define BSTR_DATE(dt,str) SysFreeString(bstr); bstr = NULL; \
+#define BSTR_DATE(dt,str) \
+  bstr = NULL; \
   hres = pVarBstrFromDate(dt,lcid,LOCALE_NOUSEROVERRIDE,&bstr); \
-  if (bstr) WideCharToMultiByte(CP_ACP, 0, bstr, -1, buff, sizeof(buff), 0, 0); \
+  if (bstr) {WideCharToMultiByte(CP_ACP, 0, bstr, -1, buff, sizeof(buff), 0, 0); SysFreeString(bstr);} \
   else buff[0] = 0; \
   ok(hres == S_OK && !strcmp(str,buff), "Expected '%s', got '%s', hres = 0x%08x\n", \
      str, buff, hres)
@@ -4897,7 +4905,7 @@ static void test_VarBstrFromDate(void)
   char buff[256];
   LCID lcid;
   HRESULT hres;
-  BSTR bstr = NULL;
+  BSTR bstr;
 
   CHECKPTR(VarBstrFromDate);
   lcid = MAKELCID(MAKELANGID(LANG_ENGLISH,SUBLANG_ENGLISH_US),SORT_DEFAULT);
@@ -4920,6 +4928,7 @@ static void test_VarBstrFromDate(void)
   if (hres== S_OK && bstr)\
   {\
     ok(lstrcmpW(bstr, e) == 0, "invalid number (got %s)\n", wtoascii(bstr));\
+    SysFreeString(bstr);\
   }
 
 static void test_VarBstrFromCy(void)
@@ -4982,6 +4991,7 @@ static void test_VarBstrFromCy(void)
   if (hres== S_OK && bstr)\
   {\
     ok(lstrcmpW(bstr, e) == 0, "invalid number (got %s)\n", wtoascii(bstr));\
+    SysFreeString(bstr);\
   }
 
 #define BSTR_DEC64(l, a, b, c, x, d, e) \
@@ -4991,6 +5001,7 @@ static void test_VarBstrFromCy(void)
   if (hres== S_OK && bstr)\
   {\
     ok(lstrcmpW(bstr, e) == 0, "invalid number (got %s)\n", wtoascii(bstr));\
+    SysFreeString(bstr);\
   }
 
 static void test_VarBstrFromDec(void)
@@ -5162,6 +5173,7 @@ static void test_VarBstrCmp(void)
     VARBSTRCMP(bstr2,bstr,0,VARCMP_GT);
     SysFreeString(bstr2);
     SysFreeString(bstr);
+    SysFreeString(bstrempty);
 }
 
 /* Get the internal representation of a BSTR */
@@ -5428,6 +5440,20 @@ static void test_SysReAllocStringLen(void)
       }
     }
   }
+
+  /* Some Windows applications use the same pointer for pbstr and psz */
+  str = SysAllocStringLen(szTest, 4);
+  ok(str != NULL, "Expected non-NULL\n");
+  if(str)
+  {
+      int changed;
+
+      changed = SysReAllocStringLen(&str, str, 1000000);
+      ok(SysStringLen(str)==1000000, "Incorrect string length\n");
+      ok(!memcmp(szTest, str, 4*sizeof(WCHAR)), "Incorrect string returned\n");
+
+      SysFreeString(str);
+  }
 }
 
 static void test_BstrCopy(void)
@@ -5451,6 +5477,8 @@ static void test_BstrCopy(void)
     bstr = Get(V_BSTR(&vt2));
     ok (bstr->dwLen == 3, "Expected 3, got %d\n", bstr->dwLen);
     ok (!lstrcmpA((LPCSTR)bstr->szString, szTestTruncA), "String different\n");
+    VariantClear(&vt2);
+    VariantClear(&vt1);
   }
 }
 
@@ -5858,6 +5886,7 @@ static void test_EmptyChangeTypeEx(void)
     ok(hres == hExpected && (hres != S_OK || V_VT(&vDst) == vt),
        "change empty: vt %d expected 0x%08x, got 0x%08x, vt %d\n",
        vt, hExpected, hres, V_VT(&vDst));
+    if(hres == S_OK) VariantClear(&vDst);
   }
 }
 

@@ -2199,6 +2199,8 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
 
     /* TODO: Store modes per adapter and read it from the adapter structure */
     if (Adapter == 0) { /* Display */
+        const struct GlPixelFormatDesc *format_desc = getFormatDescEntry(Format, &This->adapters[Adapter].gl_info);
+        UINT format_bits = format_desc->byte_count * CHAR_BIT;
         unsigned int i = 0;
         unsigned int j = 0;
         DEVMODEW mode;
@@ -2209,28 +2211,15 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterModeCount(IWineD3D *iface, UINT Ad
         while (EnumDisplaySettingsExW(NULL, j, &mode, 0))
         {
             ++j;
-            switch (Format)
+
+            if (Format == WINED3DFMT_UNKNOWN)
             {
-                case WINED3DFMT_UNKNOWN:
-                    /* This is for D3D8, do not enumerate P8 here */
-                    if (mode.dmBitsPerPel == 32 || mode.dmBitsPerPel == 16) ++i;
-                    break;
-
-                case WINED3DFMT_B8G8R8X8_UNORM:
-                    if (mode.dmBitsPerPel == 32) ++i;
-                    break;
-
-                case WINED3DFMT_B5G6R5_UNORM:
-                    if (mode.dmBitsPerPel == 16) ++i;
-                    break;
-
-                case WINED3DFMT_P8_UINT:
-                    if (mode.dmBitsPerPel == 8) ++i;
-                    break;
-
-                default:
-                    /* Skip other modes as they do not match the requested format */
-                    break;
+                /* This is for D3D8, do not enumerate P8 here */
+                if (mode.dmBitsPerPel == 32 || mode.dmBitsPerPel == 16) ++i;
+            }
+            else if (mode.dmBitsPerPel == format_bits)
+            {
+                ++i;
             }
         }
 
@@ -2257,6 +2246,8 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
     /* TODO: Store modes per adapter and read it from the adapter structure */
     if (Adapter == 0)
     {
+        const struct GlPixelFormatDesc *format_desc = getFormatDescEntry(Format, &This->adapters[Adapter].gl_info);
+        UINT format_bits = format_desc->byte_count * CHAR_BIT;
         DEVMODEW DevModeW;
         int ModeIdx = 0;
         UINT i = 0;
@@ -2268,27 +2259,16 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
         /* If we are filtering to a specific format (D3D9), then need to skip
            all unrelated modes, but if mode is irrelevant (D3D8), then we can
            just count through the ones with valid bit depths */
-        while ((i<=Mode) && EnumDisplaySettingsExW(NULL, j++, &DevModeW, 0)) {
-            switch (Format)
+        while ((i<=Mode) && EnumDisplaySettingsExW(NULL, j++, &DevModeW, 0))
+        {
+            if (Format == WINED3DFMT_UNKNOWN)
             {
-                case WINED3DFMT_UNKNOWN:
-                    /* This is D3D8. Do not enumerate P8 here */
-                    if (DevModeW.dmBitsPerPel == 32 ||
-                        DevModeW.dmBitsPerPel == 16) i++;
-                    break;
-                case WINED3DFMT_B8G8R8X8_UNORM:
-                    if (DevModeW.dmBitsPerPel == 32) i++;
-                    break;
-                case WINED3DFMT_B5G6R5_UNORM:
-                    if (DevModeW.dmBitsPerPel == 16) i++;
-                    break;
-                case WINED3DFMT_P8_UINT:
-                    if (DevModeW.dmBitsPerPel == 8) i++;
-                    break;
-                default:
-                    /* Modes that don't match what we support can get an early-out */
-                    TRACE_(d3d_caps)("Searching for %s, returning D3DERR_INVALIDCALL\n", debug_d3dformat(Format));
-                    return WINED3DERR_INVALIDCALL;
+                /* This is for D3D8, do not enumerate P8 here */
+                if (DevModeW.dmBitsPerPel == 32 || DevModeW.dmBitsPerPel == 16) ++i;
+            }
+            else if (DevModeW.dmBitsPerPel == format_bits)
+            {
+                ++i;
             }
         }
 
@@ -4676,7 +4656,7 @@ BOOL InitAdapters(IWineD3DImpl *This)
         HDC hdc;
 
         TRACE("Initializing default adapter\n");
-        adapter->num = 0;
+        adapter->ordinal = 0;
         adapter->monitorPoint.x = -1;
         adapter->monitorPoint.y = -1;
 
@@ -4884,7 +4864,7 @@ BOOL InitAdapters(IWineD3DImpl *This)
 nogl_adapter:
     /* Initialize an adapter for ddraw-only memory counting */
     memset(This->adapters, 0, sizeof(This->adapters));
-    This->adapters[0].num = 0;
+    This->adapters[0].ordinal = 0;
     This->adapters[0].opengl = FALSE;
     This->adapters[0].monitorPoint.x = -1;
     This->adapters[0].monitorPoint.y = -1;
