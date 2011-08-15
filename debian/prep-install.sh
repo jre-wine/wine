@@ -4,8 +4,8 @@ LIBDIRS="$2"
 
 function replace_paths_full
 {
-  sed "s,/usr/lib,/$1,g" | \
-  sed "s,/$1/wine,&$SUFFIX,g" | \
+  sed "s,\([ /]\)usr/lib,\\1$1,g" | \
+  sed "s,[ /]$1/wine,&$SUFFIX,g" | \
   sed "s,/usr/share/wine,&$SUFFIX,g" | \
   sed "s,usr/share/doc/$package,&$SUFFIX,g" | \
   ([ "$ext" != "lintian-overrides" ] && cat || sed "s,^$package,&$SUFFIX,g" ) | \
