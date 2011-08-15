@@ -6,9 +6,9 @@ while read PKG; do
     # create symlink
     install -d debian/$PKG/usr/share/doc
     pushd debian/$PKG/usr/share/doc > /dev/null
-    [ ! -d $PKG ] || rmdir $PKG
-    [ -d $PKG ] || mkdir $SRC
-    ln -s $SRC $PKG
+    [ ! -d $PKG ] || [ -h $PKG ]|| rmdir $PKG
+    [ -d $SRC ] || mkdir $SRC
+    [ -h $PKG ] || ln -s $SRC $PKG
     popd > /dev/null
     # since dpkg won't itself change a directory into a symlink on upgrade,
     # emit maintainer script fragment to ensure proper upgrade
