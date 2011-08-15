@@ -1,8 +1,21 @@
-wine-unstable (1.1.34-1) UNRELEASED; urgency=low
+wine-unstable (1.1.34-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.34, released Dec 4, 2009.
+    - Many fixes for crypto certificates support.
+    - A lot of MSHTML improvements.
+    - Various fixes to support the Left 4 Dead 2 DRM.
+    - A number of OLE marshalling fixes.
+    - More Listview improvements.
+    - Various bug fixes.
+  * Added build-dependency alternative libjpeg8-dev.
+  * If building in full-multiarch mode, make libwine Pre-Depend on
+    multiarch-support. (But though this mode might work now, it is
+    probably still too soon to make this the default.)
+  * Better fix for lintian override paths (doesn't break multiarch paths).
+  * Made debian/doclink.sh idempotent.
+  * Fixed incorrect destination path in install-arch64 rule.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sun, 14 Aug 2011 22:09:56 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 15 Aug 2011 21:05:10 +0200
 
 wine-unstable (1.1.33-2) unstable; urgency=low
 
