@@ -36,12 +36,12 @@ function expand_platform
     return
   fi
   for bin in $(replace_paths_full $1 < debian/$package.${ext}-platform); do
-    [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
+    [ ! -f "$bin" ] || echo "$bin" >> debian/$package$SUFFIX.${ext}
   done
   shift
   while [ -n "$1" ]; do
     for bin in $(replace_paths_partial $1 < debian/$package.${ext}-platform); do
-      [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
+      [ ! -f "$bin" ] || echo "$bin" >> debian/$package$SUFFIX.${ext}
     done
     shift
   done
@@ -55,10 +55,24 @@ function expand_modules
   while [ -n "$1" ]; do
     for mod in $(cat debian/$package.${ext}-modules); do
       for bin in debian/tmp/$1/wine$SUFFIX/$mod.so debian/tmp/$1/wine$SUFFIX/$mod debian/tmp/$1/wine$SUFFIX/fakedlls/$mod; do
-        [ ! -f $bin ] || echo $bin >> debian/$package$SUFFIX.${ext}
+        [ ! -f "$bin" ] || echo "$bin" >> debian/$package$SUFFIX.${ext}
       done
     done
     shift
+  done
+}
+
+function expand_alternatives
+{
+  if [ ! -f debian/$package.${ext}-alternatives ]; then
+    return
+  fi
+  for bin in $(cat debian/$package.${ext}-alternatives); do
+    bin32=$(echo "$bin"|sed -n "s,\(.*/[^./]*\)\(\.[0-9]+\)\?,\132$SUFFIX\2,p")
+    bin64=$(echo "$bin"|sed -n "s,\(.*/[^./]*\)\(\.[0-9]+\)\?,\164$SUFFIX\2,p")
+    for tbin in $bin32 $bin64; do
+      [ ! -f "$tbin" ] || echo "$tbin" >> debian/$package$SUFFIX.${ext}
+    done
   done
 }
 
@@ -69,6 +83,7 @@ for ext in install links mime config preinst postinst prerm postrm docs manpages
       expand_common $LIBDIRS
       expand_platform $LIBDIRS
       expand_modules $LIBDIRS
+      expand_alternatives
     fi
   done
 done

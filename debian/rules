@@ -119,6 +119,16 @@ space:=$(empty) $(empty)
 
 SHLIBS_OPTS = -Llibwine$(VERSUFFIX) -l$(subst $(space),:,$(patsubst %,$(CURDIR)/debian/libwine$(VERSUFFIX)/%,$(LIBDIRS)))
 
+ifeq (,$(VERSUFFIX))
+# Stable builds get priority 100 (plus 25 for 64-bit)
+ALTPRIO32 := 100
+ALTPRIO64 := 125
+else
+# Unstable builds get priority 50 (plus 25 for 64-bit)
+ALTPRIO32 := 50
+ALTPRIO64 := 75
+endif
+
 control-stamp: debian/control.in
 ifneq (,$(BUILDS))
 	bash debian/prep-control.sh "$(VERSUFFIX)"
@@ -274,6 +284,10 @@ install-arch32-stamp: build-arch32-stamp
 	install build32/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,$(IA32_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
+	# install tools
+	cp tools/font_convert.sh debian/tmp/usr/bin/wine-font-convert
+
+	bash debian/gen-alternatives.sh "$(VERSUFFIX)" 32 $(ALTPRIO32)
 
 	touch install-arch32-stamp
 
@@ -297,6 +311,10 @@ install-arch64-stamp: build-arch64-stamp $(patsubst build%,install-arch%-stamp,$
 	install build64/tools/fnt2bdf debian/tmp/usr/bin
 	rm -f debian/tmp/usr/bin/winelauncher
 	sed "s,usr/lib/wine,$(AMD64_WINEDIR)," debian/winelauncher > debian/tmp/usr/bin/wine
+	# install tools
+	cp tools/font_convert.sh debian/tmp/usr/bin/wine-font-convert
+
+	bash debian/gen-alternatives.sh "$(VERSUFFIX)" 64 $(ALTPRIO64)
 
 	touch install-arch64-stamp
 
@@ -313,8 +331,6 @@ install-arch-stamp: $(patsubst build%,install-arch%-stamp,$(BUILDS))
 	# other documentation
 	mkdir -p debian/tmp/usr/share/doc/wine
 	cp tools/winedump/README	debian/tmp/usr/share/doc/wine/README.winedump
-	# tools
-	cp tools/font_convert.sh	debian/tmp/usr/bin/wine-font-convert
 
 	touch install-arch-stamp
 
