@@ -1,8 +1,22 @@
-wine-unstable (1.1.35-1) UNRELEASED; urgency=low
+wine-unstable (1.1.35-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.35, released Dec 18, 2009.
+    - Support for OLE transacted storage.
+    - Better certificate checking on secure connections.
+    - More progress on the 16-bit separation.
+    - Left 4 Dead 2 DRM really supported now.
+    - MSI performance improvements.
+    - 64-bit fixes in debugger support.
+    - Various bug fixes.
+  * Made the wine-bin package use the alternatives system for binaries in
+    /usr/bin. If both 32-bit and 64-bit versions of Wine are installed,
+    then the system will prefer the 64-bit version. If both stable and
+    unstable versions of Wine are installed, then the system will prefer
+    the stable version. As with other alternatives, the user can pick a
+    different version with "update-alternatives --config wine" (or maybe
+    invoke the desired binary directly, to the extent that works).
 
- -- Ove Kaaven <ovek@arcticnet.no>  Mon, 15 Aug 2011 23:24:43 +0200
+ -- Ove Kaaven <ovek@arcticnet.no>  Mon, 22 Aug 2011 02:14:28 +0200
 
 wine-unstable (1.1.34-1) unstable; urgency=low
 
