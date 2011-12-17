@@ -73,6 +73,8 @@ typedef float           GLclampf;
 typedef double          GLdouble;
 typedef double          GLclampd;
 typedef void            GLvoid;
+typedef ptrdiff_t       GLintptr;
+typedef ptrdiff_t       GLsizeiptr;
 
 /* Booleans */
 #define GL_FALSE                                0x0
@@ -2500,9 +2502,9 @@ typedef void (WINE_GLAPI * PGLFNBINDBUFFERARBPROC) (GLenum target, GLuint buffer
 typedef void (WINE_GLAPI * PGLFNDELETEBUFFERSARBPROC) (GLsizei n, const GLuint *buffers);
 typedef void (WINE_GLAPI * PGLFNGENBUFFERSARBPROC) (GLsizei n, GLuint *buffers);
 typedef GLboolean (WINE_GLAPI * PGLFNISBUFFERARBPROC) (GLuint buffer);
-typedef void (WINE_GLAPI * PGLFNBUFFERDATAARBPROC) (GLenum target, ptrdiff_t size, const GLvoid *data, GLenum usage);
-typedef void (WINE_GLAPI * PGLFNBUFFERSUBDATAARBPROC) (GLenum target, ptrdiff_t offset, ptrdiff_t size, const GLvoid *data);
-typedef void (WINE_GLAPI * PGLFNGETBUFFERSUBDATAARBPROC) (GLenum target, ptrdiff_t offset, ptrdiff_t size, GLvoid *data);
+typedef void (WINE_GLAPI * PGLFNBUFFERDATAARBPROC) (GLenum target, GLsizeiptr size, const GLvoid *data, GLenum usage);
+typedef void (WINE_GLAPI * PGLFNBUFFERSUBDATAARBPROC) (GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid *data);
+typedef void (WINE_GLAPI * PGLFNGETBUFFERSUBDATAARBPROC) (GLenum target, GLintptr offset, GLsizeiptr size, GLvoid *data);
 typedef GLvoid* (WINE_GLAPI * PGLFNMAPBUFFERARBPROC) (GLenum target, GLenum access);
 typedef GLboolean (WINE_GLAPI * PGLFNUNMAPBUFFERARBPROC) (GLenum target);
 typedef void (WINE_GLAPI * PGLFNGETBUFFERPARAMETERIVARBPROC) (GLenum target, GLenum pname, GLint *params);
@@ -3261,6 +3263,15 @@ typedef void (WINE_GLAPI *PGLFNSETFRAGMENTSHADERCONSTANTATI) (GLuint dst, const 
 #define GL_MAX_PROGRAM_CALL_DEPTH_NV                      0x88F5
 #endif
 
+/* GL_APPLE_flush_buffer_range */
+#ifndef GL_APPLE_flush_buffer_range
+#define GL_APPLE_flush_buffer_range
+#define GL_BUFFER_SERIALIZED_MODIFY_APPLE                 0x8A12
+#define GL_BUFFER_FLUSHING_UNMAP_APPLE                    0x8A13
+typedef void (WINE_GLAPI *PGLFNBUFFERPARAMETERIAPPLE) (GLenum target, GLenum pname, GLint param);
+typedef void (WINE_GLAPI *PGLFNFLUSHMAPPEDBUFFERRANGEAPPLE) (GLenum target, GLintptr offset, GLsizeiptr size);
+#endif
+
 /* GL_VERSION_2_0 */
 #ifndef GL_VERSION_2_0
 #define GL_VERSION_2_0 1
@@ -3570,6 +3581,7 @@ typedef enum _GL_SupportedExt {
   APPLE_FLUSH_RENDER,
   APPLE_YCBCR_422,
   APPLE_FLOAT_PIXELS,
+  APPLE_FLUSH_BUFFER_RANGE,
   /* SGI */
   SGI_VIDEO_SYNC,
   SGIS_GENERATE_MIPMAP,
@@ -3918,7 +3930,11 @@ typedef enum _GL_SupportedExt {
     USE_GL_FUNC(PGLFNALPHAFRAGMENTOP1ATI,                           glAlphaFragmentOp1ATI,                      ATI_FRAGMENT_SHADER,    NULL )\
     USE_GL_FUNC(PGLFNALPHAFRAGMENTOP2ATI,                           glAlphaFragmentOp2ATI,                      ATI_FRAGMENT_SHADER,    NULL )\
     USE_GL_FUNC(PGLFNALPHAFRAGMENTOP3ATI,                           glAlphaFragmentOp3ATI,                      ATI_FRAGMENT_SHADER,    NULL )\
-    USE_GL_FUNC(PGLFNSETFRAGMENTSHADERCONSTANTATI,                  glSetFragmentShaderConstantATI,             ATI_FRAGMENT_SHADER,    NULL )
+    USE_GL_FUNC(PGLFNSETFRAGMENTSHADERCONSTANTATI,                  glSetFragmentShaderConstantATI,             ATI_FRAGMENT_SHADER,    NULL )\
+    /* GL_APPLE_flush_buffer_range */ \
+    USE_GL_FUNC(PGLFNBUFFERPARAMETERIAPPLE,                         glBufferParameteriAPPLE,                    APPLE_FLUSH_BUFFER_RANGE,NULL)\
+    USE_GL_FUNC(PGLFNFLUSHMAPPEDBUFFERRANGEAPPLE,                   glFlushMappedBufferRangeAPPLE,              APPLE_FLUSH_BUFFER_RANGE,NULL)
+
 
 /****************************************************
  * OpenGL WGL defines and functions pointer
@@ -4101,6 +4117,7 @@ struct wined3d_gl_info
     DWORD reserved_glsl_constants;
     DWORD quirks;
     BOOL supported[WINED3D_GL_EXT_COUNT];
+    GLint wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP + 1];
 
     struct wined3d_fbo_ops fbo_ops;
     /* GL function pointers */

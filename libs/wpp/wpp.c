@@ -168,6 +168,8 @@ int wpp_parse( const char *input, FILE *output )
     int ret;
 
     pp_status.input = NULL;
+    pp_status.line_number = 0;
+    pp_status.char_number = 0;
     pp_status.state = 0;
 
     ret = pp_push_define_state();
@@ -180,6 +182,7 @@ int wpp_parse( const char *input, FILE *output )
     else if (!(pp_status.file = wpp_callbacks->open(input, 1)))
     {
         ppy_error("Could not open %s\n", input);
+        pp_pop_define_state();
         return 2;
     }
 

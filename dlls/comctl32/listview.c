@@ -785,8 +785,8 @@ static LRESULT notify_forward_header(const LISTVIEW_INFO *infoPtr, const NMHEADE
 
     /* on unicode format exit earlier */
     if (infoPtr->notifyFormat == NFR_UNICODE)
-        return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY,
-                            (WPARAM)lpnmh->hdr.idFrom, (LPARAM)lpnmh);
+        return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, lpnmh->hdr.idFrom,
+                            (LPARAM)lpnmh);
 
     /* header always supplies unicode notifications,
        all we have to do is to convert strings to ANSI */
@@ -815,8 +815,8 @@ static LRESULT notify_forward_header(const LISTVIEW_INFO *infoPtr, const NMHEADE
     }
     nmhA.hdr.code = get_ansi_notification(lpnmh->hdr.code);
 
-    ret = SendMessageW(infoPtr->hwndNotify, WM_NOTIFY,
-                       (WPARAM)nmhA.hdr.idFrom, (LPARAM)&nmhA);
+    ret = SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, nmhA.hdr.idFrom,
+                       (LPARAM)&nmhA);
 
     /* cleanup */
     Free(text);
@@ -1575,7 +1575,7 @@ static INT LISTVIEW_CreateHeader(LISTVIEW_INFO *infoPtr)
     SendMessageW(infoPtr->hwndHeader, HDM_SETUNICODEFORMAT, TRUE, 0);
 
     /* set header font */
-    SendMessageW(infoPtr->hwndHeader, WM_SETFONT, (WPARAM)infoPtr->hFont, (LPARAM)TRUE);
+    SendMessageW(infoPtr->hwndHeader, WM_SETFONT, (WPARAM)infoPtr->hFont, TRUE);
 
     LISTVIEW_UpdateSize(infoPtr);
 
@@ -3183,28 +3183,30 @@ static BOOL ranges_del(RANGES ranges, RANGE range)
 
     TRACE("(%s)\n", debugrange(&range));
     ranges_check(ranges, "before del");
-    
+
     /* we don't use DPAS_SORTED here, since we need *
      * to find the first overlapping range          */
     index = DPA_Search(ranges->hdpa, &range, 0, ranges_cmp, 0, 0);
-    while(index != -1) 
+    while(index != -1)
     {
 	chkrgn = DPA_GetPtr(ranges->hdpa, index);
-	
-        TRACE("Matches range %s @%d\n", debugrange(chkrgn), index); 
+
+	TRACE("Matches range %s @%d\n", debugrange(chkrgn), index);
 
 	/* case 1: Same range */
 	if ( (chkrgn->upper == range.upper) &&
 	     (chkrgn->lower == range.lower) )
 	{
 	    DPA_DeletePtr(ranges->hdpa, index);
+	    Free(chkrgn);
 	    break;
 	}
 	/* case 2: engulf */
 	else if ( (chkrgn->upper <= range.upper) &&
-		  (chkrgn->lower >= range.lower) ) 
+		  (chkrgn->lower >= range.lower) )
 	{
 	    DPA_DeletePtr(ranges->hdpa, index);
+	    Free(chkrgn);
 	}
 	/* case 3: overlap upper */
 	else if ( (chkrgn->upper <= range.upper) &&
@@ -7462,7 +7464,7 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
         while (i < infoPtr->nItemCount)
         {
             hItem  = DPA_GetPtr( infoPtr->hdpaItems, i);
-            item_s = (ITEM_INFO*)DPA_GetPtr(hItem, 0);
+            item_s = DPA_GetPtr(hItem, 0);
 
             cmpv = textcmpWT(item_s->hdr.pszText, lpLVItem->pszText, isW);
             if (infoPtr->dwStyle & LVS_SORTDESCENDING) cmpv *= -1;
@@ -7846,7 +7848,7 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
     /* insert item in header control */
     nNewColumn = SendMessageW(infoPtr->hwndHeader, 
 		              isW ? HDM_INSERTITEMW : HDM_INSERTITEMA,
-                              (WPARAM)nColumn, (LPARAM)&hdi);
+                              nColumn, (LPARAM)&hdi);
     if (nNewColumn == -1) return -1;
     if (nNewColumn != nColumn) ERR("nColumn=%d, nNewColumn=%d\n", nColumn, nNewColumn);
    
@@ -7929,7 +7931,7 @@ static BOOL LISTVIEW_SetColumnT(const LISTVIEW_INFO *infoPtr, INT nColumn,
     column_fill_hditem(infoPtr, &hdi, nColumn, lpColumn, isW);
 
     /* set header item attributes */
-    bResult = SendMessageW(infoPtr->hwndHeader, isW ? HDM_SETITEMW : HDM_SETITEMA, (WPARAM)nColumn, (LPARAM)&hdi);
+    bResult = SendMessageW(infoPtr->hwndHeader, isW ? HDM_SETITEMW : HDM_SETITEMA, nColumn, (LPARAM)&hdi);
     if (!bResult) return FALSE;
 
     if (lpColumn->mask & LVCF_FMT)
@@ -9142,7 +9144,7 @@ static LRESULT LISTVIEW_Create(HWND hwnd, const CREATESTRUCTW *lpcs)
   map_style_view(infoPtr);
 
   infoPtr->notifyFormat = SendMessageW(infoPtr->hwndNotify, WM_NOTIFYFORMAT,
-                                       (WPARAM)infoPtr->hwndSelf, (LPARAM)NF_QUERY);
+                                       (WPARAM)infoPtr->hwndSelf, NF_QUERY);
   /* on error defaulting to ANSI notifications */
   if (infoPtr->notifyFormat == 0) infoPtr->notifyFormat = NFR_ANSI;
 
@@ -11214,7 +11216,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case LVM_SORTITEMS:
   case LVM_SORTITEMSEX:
-    return LISTVIEW_SortItems(infoPtr, (PFNLVCOMPARE)lParam, (LPARAM)wParam,
+    return LISTVIEW_SortItems(infoPtr, (PFNLVCOMPARE)lParam, wParam,
                               uMsg == LVM_SORTITEMSEX);
   case LVM_SUBITEMHITTEST:
     return LISTVIEW_HitTest(infoPtr, (LPLVHITTESTINFO)lParam, TRUE, FALSE);

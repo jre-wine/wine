@@ -956,7 +956,7 @@ static INT_PTR CALLBACK AboutDlgProc( HWND hWnd, UINT msg, WPARAM wParam,
                 {
                     /* authors list is in utf-8 format */
                     MultiByteToWideChar( CP_UTF8, 0, *pstr, -1, buffer, sizeof(buffer)/sizeof(WCHAR) );
-                    SendMessageW( hWndCtl, LB_ADDSTRING, (WPARAM)-1, (LPARAM)buffer );
+                    SendMessageW( hWndCtl, LB_ADDSTRING, -1, (LPARAM)buffer );
                     pstr++;
                 }
                 SendMessageW( hWndCtl, WM_SETREDRAW, 1, 0 );
@@ -1043,18 +1043,12 @@ BOOL WINAPI ShellAboutW( HWND hWnd, LPCWSTR szApp, LPCWSTR szOtherStuff,
 {
     ABOUT_INFO info;
     LOGFONTW logFont;
-    HRSRC hRes;
-    LPVOID template;
     BOOL bRet;
     static const WCHAR wszSHELL_ABOUT_MSGBOX[] =
         {'S','H','E','L','L','_','A','B','O','U','T','_','M','S','G','B','O','X',0};
 
     TRACE("\n");
 
-    if(!(hRes = FindResourceW(shell32_hInstance, wszSHELL_ABOUT_MSGBOX, (LPWSTR)RT_DIALOG)))
-        return FALSE;
-    if(!(template = LoadResource(shell32_hInstance, hRes)))
-        return FALSE;
     if (!hIcon) hIcon = LoadImageW( 0, (LPWSTR)IDI_WINLOGO, IMAGE_ICON, 48, 48, LR_SHARED );
     info.szApp        = szApp;
     info.szOtherStuff = szOtherStuff;
@@ -1063,8 +1057,7 @@ BOOL WINAPI ShellAboutW( HWND hWnd, LPCWSTR szApp, LPCWSTR szOtherStuff,
     SystemParametersInfoW( SPI_GETICONTITLELOGFONT, 0, &logFont, 0 );
     info.hFont = CreateFontIndirectW( &logFont );
 
-    bRet = DialogBoxIndirectParamW((HINSTANCE)GetWindowLongPtrW( hWnd, GWLP_HINSTANCE ),
-                                   template, hWnd, AboutDlgProc, (LPARAM)&info );
+    bRet = DialogBoxParamW( shell32_hInstance, wszSHELL_ABOUT_MSGBOX, hWnd, AboutDlgProc, (LPARAM)&info );
     DeleteObject(info.hFont);
     return bRet;
 }
@@ -1199,7 +1192,6 @@ HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
  */
 HRESULT WINAPI DllCanUnloadNow(void)
 {
-    FIXME("stub\n");
     return S_FALSE;
 }
 

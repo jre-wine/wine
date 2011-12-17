@@ -529,7 +529,7 @@
 @ stub KeFindConfigurationNextEntry
 @ stub KeFlushEntireTb
 @ stub KeFlushQueuedDpcs
-@ stub KeGetCurrentThread
+@ stdcall KeGetCurrentThread()
 @ stub KeGetPreviousMode
 @ stub KeGetRecommendedSharedDataAlignment
 @ stub KeI386AbiosCall
@@ -551,7 +551,7 @@
 @ stub KeInitializeMutant
 @ stdcall KeInitializeMutex(ptr long)
 @ stub KeInitializeQueue
-@ stub KeInitializeSemaphore
+@ stdcall KeInitializeSemaphore(ptr long long)
 @ stdcall KeInitializeSpinLock(ptr)
 @ stdcall KeInitializeTimer(ptr)
 @ stdcall KeInitializeTimerEx(ptr long)
@@ -588,7 +588,7 @@
 @ stub KeReleaseInterruptSpinLock
 @ stub KeReleaseMutant
 @ stub KeReleaseMutex
-@ stub KeReleaseSemaphore
+@ stdcall KeReleaseSemaphore(ptr long long long)
 @ stub KeReleaseSpinLockFromDpcLevel
 @ stub KeRemoveByKeyDeviceQueue
 @ stub KeRemoveByKeyDeviceQueueIfBusy
@@ -612,7 +612,7 @@
 @ stub KeSetIdealProcessorThread
 @ stub KeSetImportanceDpc
 @ stub KeSetKernelStackSwapEnable
-@ stub KeSetPriorityThread
+@ stdcall KeSetPriorityThread(ptr long)
 @ stub KeSetProfileIrql
 @ stub KeSetSystemAffinityThread
 @ stub KeSetTargetProcessorDpc
@@ -852,7 +852,7 @@
 @ stub PsGetCurrentProcess
 @ stdcall PsGetCurrentProcessId()
 @ stub PsGetCurrentProcessSessionId
-@ stub PsGetCurrentThread
+@ stdcall PsGetCurrentThread() KeGetCurrentThread
 @ stdcall PsGetCurrentThreadId()
 @ stub PsGetCurrentThreadPreviousMode
 @ stub PsGetCurrentThreadStackBase

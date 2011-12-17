@@ -7,6 +7,7 @@ IMPORTLIB = ntoskrnl.exe
 IMPORTS   = kernel32 ntdll
 
 C_SRCS = \
+	instr.c \
 	ntoskrnl.c
 
 RC_SRCS = ntoskrnl.rc

@@ -42,6 +42,7 @@
 #include "shlwapi.h"
 
 #include "wine/winbase16.h"
+#include "wine/winuser16.h"
 
 #include "wine/debug.h"
 
@@ -52,7 +53,6 @@ extern HINSTANCE WINAPI WOWShellExecute(HWND hWnd, LPCSTR lpOperation,LPCSTR lpF
                                         INT iShowCmd, void *callback);
 
 #define HICON_16(h32)		(LOWORD(h32))
-#define HICON_32(h16)		((HICON)(ULONG_PTR)(h16))
 #define HINSTANCE_32(h16)	((HINSTANCE)(ULONG_PTR)(h16))
 #define HINSTANCE_16(h32)	(LOWORD(h32))
 
@@ -72,6 +72,17 @@ static HHOOK	SHELL_hHook = 0;
 static UINT	uMsgWndCreated = 0;
 static UINT	uMsgWndDestroyed = 0;
 static UINT	uMsgShellActivate = 0;
+
+static HICON convert_icon_to_32( HICON16 icon16 )
+{
+    CURSORICONINFO *info = GlobalLock16( icon16 );
+    void *and_bits = info + 1;
+    void *xor_bits = (BYTE *)and_bits + info->nHeight * 2 * ((info->nWidth + 15) / 16);
+    HICON ret = CreateIcon( 0, info->nWidth, info->nHeight, info->bPlanes, info->bBitsPerPixel,
+                            and_bits, xor_bits );
+    GlobalUnlock16( icon16 );
+    return ret;
+}
 
 /***********************************************************************
  * DllEntryPoint [SHELL.101]
@@ -183,9 +194,12 @@ BOOL16 WINAPI AboutDlgProc16( HWND16 hWnd, UINT16 msg, WPARAM16 wParam,
 /*************************************************************************
  *             ShellAbout   (SHELL.22)
  */
-BOOL16 WINAPI ShellAbout16( HWND16 hWnd, LPCSTR szApp, LPCSTR szOtherStuff,
-                            HICON16 hIcon )
-{ return ShellAboutA( HWND_32(hWnd), szApp, szOtherStuff, HICON_32(hIcon) );
+BOOL16 WINAPI ShellAbout16( HWND16 hWnd, LPCSTR szApp, LPCSTR szOtherStuff, HICON16 icon16 )
+{
+    HICON icon = convert_icon_to_32( icon16 );
+    BOOL ret = ShellAboutA( HWND_32(hWnd), szApp, szOtherStuff, icon );
+    DestroyIcon( icon );
+    return ret;
 }
 
 /*************************************************************************
@@ -611,4 +625,29 @@ HINSTANCE16 WINAPI ShellExecute16( HWND16 hWnd, LPCSTR lpOperation,
 {
     return HINSTANCE_16( WOWShellExecute( HWND_32(hWnd), lpOperation, lpFile, lpParameters,
                                           lpDirectory, iShowCmd, SHELL_Execute16 ));
+}
+
+
+/*************************************************************************
+ * RunDLL_CallEntry16
+ *
+ * Only exported from shell32 on Windows, probably imported
+ * from shell through the 16/32 thunks.
+ */
+void WINAPI RunDLL_CallEntry16( DWORD proc, HWND hwnd, HINSTANCE inst, LPCSTR cmdline, INT cmdshow )
+{
+    WORD args[5];
+    SEGPTR cmdline_seg;
+
+    TRACE( "proc %x hwnd %p inst %p cmdline %s cmdshow %d\n",
+           proc, hwnd, inst, debugstr_a(cmdline), cmdshow );
+
+    cmdline_seg = MapLS( cmdline );
+    args[4] = HWND_16(hwnd);
+    args[3] = MapHModuleLS(inst);
+    args[2] = SELECTOROF(cmdline_seg);
+    args[1] = OFFSETOF(cmdline_seg);
+    args[0] = cmdshow;
+    WOWCallback16Ex( proc, WCB16_PASCAL, sizeof(args), args, NULL );
+    UnMapLS( cmdline_seg );
 }

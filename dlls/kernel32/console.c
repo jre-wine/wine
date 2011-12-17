@@ -44,7 +44,6 @@
 #include "winnls.h"
 #include "winerror.h"
 #include "wincon.h"
-#include "wine/winbase16.h"
 #include "wine/server.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
@@ -2689,5 +2688,21 @@ DWORD WINAPI GetConsoleAliasW(LPWSTR lpSource, LPWSTR lpTargetBuffer,
 {
     FIXME("(%s,%p,%d,%s): stub\n", debugstr_w(lpSource), lpTargetBuffer, TargetBufferLength, debugstr_w(lpExename));
     SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/******************************************************************
+ *              GetConsoleProcessList  (KERNEL32.@)
+ */
+DWORD WINAPI GetConsoleProcessList(LPDWORD processlist, DWORD processcount)
+{
+    FIXME("(%p,%d): stub\n", processlist, processcount);
+
+    if (!processlist || processcount < 1)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+
     return 0;
 }

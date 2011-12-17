@@ -34,12 +34,9 @@
 #define __NEW_STRUCT_PROTO(p)	p##_t *new_##p(void)
 
 __NEW_STRUCT_PROTO(dialog);
-__NEW_STRUCT_PROTO(dialogex);
 __NEW_STRUCT_PROTO(name_id);
 __NEW_STRUCT_PROTO(menu);
-__NEW_STRUCT_PROTO(menuex);
 __NEW_STRUCT_PROTO(menu_item);
-__NEW_STRUCT_PROTO(menuex_item);
 __NEW_STRUCT_PROTO(control);
 __NEW_STRUCT_PROTO(icon);
 __NEW_STRUCT_PROTO(cursor);

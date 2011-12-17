@@ -3190,7 +3190,7 @@ static void init_ps_input(const IWineD3DPixelShaderImpl *This, const struct arb_
         "fragment.texcoord[4]", "fragment.texcoord[5]", "fragment.texcoord[6]", "fragment.texcoord[7]"
     };
     unsigned int i;
-    const struct wined3d_shader_signature_element *sig = This->input_signature;
+    const struct wined3d_shader_signature_element *sig = This->baseShader.input_signature;
     const char *semantic_name;
     DWORD semantic_idx;
 
@@ -3670,6 +3670,7 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
         "result.texcoord[4]", "result.texcoord[5]", "result.texcoord[6]", "result.texcoord[7]"
     };
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) shader->baseShader.device;
+    IWineD3DBaseShaderClass *baseshader = &shader->baseShader;
     const struct wined3d_shader_signature_element *sig;
     const char *semantic_name;
     DWORD semantic_idx, reg_idx;
@@ -3697,40 +3698,42 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
         priv_ctx->fog_output = "result.fogcoord";
 
         /* Map declared regs to builtins. Use "TA" to /dev/null unread output */
-        for(i = 0; i < (sizeof(shader->output_signature) / sizeof(*shader->output_signature)); i++)
+        for (i = 0; i < (sizeof(baseshader->output_signature) / sizeof(*baseshader->output_signature)); ++i)
         {
-            semantic_name = shader->output_signature[i].semantic_name;
+            semantic_name = baseshader->output_signature[i].semantic_name;
             if(semantic_name == NULL) continue;
 
             if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_POSITION))
             {
                 TRACE("o%u is TMP_OUT\n", i);
-                if(shader->output_signature[i].semantic_idx == 0) priv_ctx->vs_output[i] = "TMP_OUT";
+                if (baseshader->output_signature[i].semantic_idx == 0) priv_ctx->vs_output[i] = "TMP_OUT";
                 else priv_ctx->vs_output[i] = "TA";
             }
             else if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_PSIZE))
             {
                 TRACE("o%u is result.pointsize\n", i);
-                if(shader->output_signature[i].semantic_idx == 0) priv_ctx->vs_output[i] = "result.pointsize";
+                if (baseshader->output_signature[i].semantic_idx == 0) priv_ctx->vs_output[i] = "result.pointsize";
                 else priv_ctx->vs_output[i] = "TA";
             }
             else if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_COLOR))
             {
-                TRACE("o%u is result.color.?, idx %u\n", i, shader->output_signature[i].semantic_idx);
-                if(shader->output_signature[i].semantic_idx == 0) priv_ctx->vs_output[i] = "result.color.primary";
-                else if(shader->output_signature[i].semantic_idx == 1) priv_ctx->vs_output[i] = "result.color.secondary";
+                TRACE("o%u is result.color.?, idx %u\n", i, baseshader->output_signature[i].semantic_idx);
+                if (baseshader->output_signature[i].semantic_idx == 0)
+                    priv_ctx->vs_output[i] = "result.color.primary";
+                else if (baseshader->output_signature[i].semantic_idx == 1)
+                    priv_ctx->vs_output[i] = "result.color.secondary";
                 else priv_ctx->vs_output[i] = "TA";
             }
             else if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_TEXCOORD))
             {
-                TRACE("o%u is %s\n", i, texcoords[shader->output_signature[i].semantic_idx]);
-                if(shader->output_signature[i].semantic_idx >= 8) priv_ctx->vs_output[i] = "TA";
-                else priv_ctx->vs_output[i] = texcoords[shader->output_signature[i].semantic_idx];
+                TRACE("o%u is %s\n", i, texcoords[baseshader->output_signature[i].semantic_idx]);
+                if (baseshader->output_signature[i].semantic_idx >= 8) priv_ctx->vs_output[i] = "TA";
+                else priv_ctx->vs_output[i] = texcoords[baseshader->output_signature[i].semantic_idx];
             }
             else if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_FOG))
             {
                 TRACE("o%u is result.fogcoord\n", i);
-                if(shader->output_signature[i].semantic_idx > 0) priv_ctx->vs_output[i] = "TA";
+                if (baseshader->output_signature[i].semantic_idx > 0) priv_ctx->vs_output[i] = "TA";
                 else priv_ctx->vs_output[i] = "result.fogcoord";
             }
             else
@@ -3744,7 +3747,7 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
     /* Instead of searching for the signature in the signature list, read the one from the current pixel shader.
      * Its maybe not the shader where the signature came from, but it is the same signature and faster to find
      */
-    sig = ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->input_signature;
+    sig = ((IWineD3DPixelShaderImpl *)device->stateBlock->pixelShader)->baseShader.input_signature;
     TRACE("Pixel shader uses declared varyings\n");
 
     /* Map builtin to declared. /dev/null the results by default to the TA temp reg */
@@ -3794,24 +3797,24 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
     }
 
     /* Map declared to declared */
-    for(i = 0; i < (sizeof(shader->output_signature) / sizeof(*shader->output_signature)); i++)
+    for (i = 0; i < (sizeof(baseshader->output_signature) / sizeof(*baseshader->output_signature)); ++i)
     {
         /* Write unread output to TA to throw them away */
         priv_ctx->vs_output[i] = "TA";
-        semantic_name = shader->output_signature[i].semantic_name;
+        semantic_name = baseshader->output_signature[i].semantic_name;
         if(semantic_name == NULL)
         {
             continue;
         }
 
-        if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_POSITION) &&
-           shader->output_signature[i].semantic_idx == 0)
+        if (shader_match_semantic(semantic_name, WINED3DDECLUSAGE_POSITION)
+                && baseshader->output_signature[i].semantic_idx == 0)
         {
             priv_ctx->vs_output[i] = "TMP_OUT";
             continue;
         }
-        else if(shader_match_semantic(semantic_name, WINED3DDECLUSAGE_PSIZE) &&
-           shader->output_signature[i].semantic_idx == 0)
+        else if (shader_match_semantic(semantic_name, WINED3DDECLUSAGE_PSIZE)
+                && baseshader->output_signature[i].semantic_idx == 0)
         {
             priv_ctx->vs_output[i] = "result.pointsize";
             continue;
@@ -3824,8 +3827,8 @@ static void init_output_registers(IWineD3DVertexShaderImpl *shader, DWORD sig_nu
                 continue;
             }
 
-            if(strcmp(sig[j].semantic_name, semantic_name) == 0 &&
-               sig[j].semantic_idx == shader->output_signature[i].semantic_idx)
+            if (strcmp(sig[j].semantic_name, semantic_name) == 0
+                    && sig[j].semantic_idx == baseshader->output_signature[i].semantic_idx)
             {
                 priv_ctx->vs_output[i] = decl_idx_to_string[sig[j].register_idx];
 
@@ -4017,7 +4020,7 @@ static struct arb_ps_compiled_shader *find_arb_pshader(IWineD3DPixelShaderImpl *
         shader_data->clamp_consts = shader->baseShader.reg_maps.shader_version.major == 1;
 
         if(shader->baseShader.reg_maps.shader_version.major < 3) shader_data->input_signature_idx = ~0;
-        else shader_data->input_signature_idx = find_input_signature(priv, shader->input_signature);
+        else shader_data->input_signature_idx = find_input_signature(priv, shader->baseShader.input_signature);
 
         shader_data->has_signature_idx = TRUE;
         TRACE("Shader got assigned input signature index %u\n", shader_data->input_signature_idx);
@@ -4675,6 +4678,7 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_CMP           */ pshader_hw_cmp,
     /* WINED3DSIH_CND           */ pshader_hw_cnd,
     /* WINED3DSIH_CRS           */ shader_hw_map2gl,
+    /* WINED3DSIH_CUT           */ NULL,
     /* WINED3DSIH_DCL           */ NULL,
     /* WINED3DSIH_DEF           */ NULL,
     /* WINED3DSIH_DEFB          */ NULL,
@@ -4686,20 +4690,24 @@ static const SHADER_HANDLER shader_arb_instruction_handler_table[WINED3DSIH_TABL
     /* WINED3DSIH_DSX           */ shader_hw_map2gl,
     /* WINED3DSIH_DSY           */ shader_hw_dsy,
     /* WINED3DSIH_ELSE          */ shader_hw_else,
+    /* WINED3DSIH_EMIT          */ NULL,
     /* WINED3DSIH_ENDIF         */ shader_hw_endif,
     /* WINED3DSIH_ENDLOOP       */ shader_hw_endloop,
     /* WINED3DSIH_ENDREP        */ shader_hw_endrep,
     /* WINED3DSIH_EXP           */ shader_hw_scalar_op,
     /* WINED3DSIH_EXPP          */ shader_hw_scalar_op,
     /* WINED3DSIH_FRC           */ shader_hw_map2gl,
+    /* WINED3DSIH_IADD          */ NULL,
     /* WINED3DSIH_IF            */ NULL /* Hardcoded into the shader */,
     /* WINED3DSIH_IFC           */ shader_hw_ifc,
+    /* WINED3DSIH_IGE           */ NULL,
     /* WINED3DSIH_LABEL         */ shader_hw_label,
     /* WINED3DSIH_LIT           */ shader_hw_map2gl,
     /* WINED3DSIH_LOG           */ shader_hw_log_pow,
     /* WINED3DSIH_LOGP          */ shader_hw_log_pow,
     /* WINED3DSIH_LOOP          */ shader_hw_loop,
     /* WINED3DSIH_LRP           */ shader_hw_lrp,
+    /* WINED3DSIH_LT            */ NULL,
     /* WINED3DSIH_M3x2          */ shader_hw_mnxn,
     /* WINED3DSIH_M3x3          */ shader_hw_mnxn,
     /* WINED3DSIH_M3x4          */ shader_hw_mnxn,

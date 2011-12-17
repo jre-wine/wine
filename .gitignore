@@ -58,8 +58,8 @@ dlls/kernel32/nls/winerr_nld.mc.rc
 dlls/kernel32/nls/winerr_nor.mc.rc
 dlls/kernel32/nls/winerr_plk.mc.rc
 dlls/kernel32/nls/winerr_ptg.mc.rc
-dlls/krnl386.exe16
 dlls/libd3dx9.def
+dlls/libkernel.def
 dlls/libwinspool.def
 dlls/libxinput.def
 dlls/msdaps/msdaps.h
@@ -119,8 +119,6 @@ dlls/sti/sti_wia.h
 dlls/sti/sti_wia_p.c
 dlls/urlmon/urlmon_urlmon.h
 dlls/urlmon/urlmon_urlmon_p.c
-dlls/user.exe16
-dlls/wprocs.dll16
 include/activaut.h
 include/activdbg.h
 include/activscp.h

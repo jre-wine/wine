@@ -1198,7 +1198,7 @@ static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
         if (get_TOKEN(buf) != TOKEN_CBRACE)
           return FALSE;
         TRACE("Found optional reference %s\n", (char*)buf->value);
-        for (i = 0; i < buf->nb_pxo_globals; i++)
+        for (i = 0; i < (buf->nb_pxo_globals+1); i++)
         {
           for (j = 0; j < (buf->pxo_globals[i])[0].nb_subobjects; j++)
           {
@@ -1207,19 +1207,19 @@ static BOOL parse_object_parts(parse_buffer * buf, BOOL allow_optional)
           }
         }
 _exit:
-        if (i == buf->nb_pxo_globals)
+        if (i == (buf->nb_pxo_globals+1))
         {
           ERR("Reference to unknown object %s\n", (char*)buf->value);
           return FALSE;
         }
-        buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->cur_subobject++];
+        buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
         buf->pxo->childs[buf->pxo->nb_childs]->ptarget = &(buf->pxo_globals[i])[j];
         buf->pxo->nb_childs++;
       }
       else if (check_TOKEN(buf) == TOKEN_NAME)
       {
         xobject* pxo = buf->pxo;
-        buf->pxo = buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->cur_subobject++];
+        buf->pxo = buf->pxo->childs[buf->pxo->nb_childs] = &buf->pxo_tab[buf->pxo->root->nb_subobjects++];
 
         TRACE("Enter optional %s\n", (char*)buf->value);
         buf->level++;

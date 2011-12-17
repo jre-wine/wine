@@ -59,6 +59,11 @@ typedef struct _KEVENT {
   DISPATCHER_HEADER  Header;
 } KEVENT, *PKEVENT, *RESTRICTED_POINTER PRKEVENT;
 
+typedef struct _KSEMAPHORE {
+  DISPATCHER_HEADER  Header;
+  LONG Limit;
+} KSEMAPHORE, *PKSEMAPHORE, *PRKSEMAPHORE;
+
 typedef struct _KDPC {
   CSHORT  Type;
   UCHAR  Number;
@@ -129,7 +134,7 @@ typedef struct _IO_TIMER *PIO_TIMER;
 typedef struct _IO_TIMER_ROUTINE *PIO_TIMER_ROUTINE;
 typedef struct _ETHREAD *PETHREAD;
 typedef struct _FREE_FUNCTION *PFREE_FUNCTION;
-typedef struct _KTHREAD *PKTHREAD;
+typedef struct _KTHREAD *PKTHREAD, *PRKTHREAD;
 typedef struct _EPROCESS *PEPROCESS;
 typedef struct _ERESOURCE *PERESOURCE;
 typedef struct _IO_WORKITEM *PIO_WORKITEM;
@@ -1059,6 +1064,8 @@ PKTHREAD  WINAPI KeGetCurrentThread(void);
 void      WINAPI KeQuerySystemTime(LARGE_INTEGER*);
 void      WINAPI KeQueryTickCount(LARGE_INTEGER*);
 ULONG     WINAPI KeQueryTimeIncrement(void);
+LONG      WINAPI KeReleaseSemaphore(PRKSEMAPHORE,KPRIORITY,LONG,BOOLEAN);
+KPRIORITY WINAPI KeSetPriorityThread(PKTHREAD,KPRIORITY);
 
 PVOID     WINAPI MmAllocateContiguousMemory(SIZE_T,PHYSICAL_ADDRESS);
 PVOID     WINAPI MmAllocateNonCachedMemory(SIZE_T);

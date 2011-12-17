@@ -803,8 +803,10 @@ interface nsIDOMNSHTMLElement : nsISupports
     nsresult SetTabIndex(PRInt32 aTabIndex);
     nsresult GetContentEditable(nsAString *aContentEditable);
     nsresult SetContentEditable(const nsAString *aContentEditable);
-    nsresult blur();
-    nsresult focus();
+    nsresult GetDraggable(PRBool *aDraggable);
+    nsresult SetDraggable(PRBool aDraggable);
+    nsresult Blur();
+    nsresult Focus();
     nsresult ScrollIntoView(PRBool top);
     nsresult GetSpellcheck(PRBool *aSpellcheck);
     nsresult SetSpellcheck(PRBool aSpellcheck);
@@ -1704,7 +1706,8 @@ interface nsIBaseWindow : nsISupports
     nsresult SetTitle(const PRUnichar *aTitle);
 }
 
-cpp_quote("#define LOAD_FLAGS_NONE 0")
+cpp_quote("#define LOAD_FLAGS_NONE           0x00000")
+cpp_quote("#define LOAD_INITIAL_DOCUMENT_URI 0x80000")
 
 [
     object,
@@ -2222,7 +2225,7 @@ interface nsIDOMMouseEvent : nsIDOMUIEvent
     nsresult GetAltKey(PRBool *aAltKey);
     nsresult GetMetaKey(PRBool *aMetaKey);
     nsresult GetButton(PRUint16 *aButton);
-    nsresult GetRelatedTarget(nsIDOMEventTarget * *aRelatedTarget);
+    nsresult GetRelatedTarget(nsIDOMEventTarget **aRelatedTarget);
     nsresult InitMouseEvent(const nsAString *typeArg, PRBool canBubbleArg, PRBool cancelableArg,
             nsIDOMAbstractView *viewArg, PRInt32 detailArg, PRInt32 screenXArg, PRInt32 screenYArg,
             PRInt32 clientXArg, PRInt32 clientYArg, PRBool ctrlKeyArg, PRBool altKeyArg,
@@ -2350,7 +2353,7 @@ interface nsIProfile : nsISupports
     nsresult GetProfileCount(PRInt32 *aProfileCount);
     nsresult GetProfileList(PRUint32 *length, PRUnichar ***profileNames);
     nsresult ProfileExists(const PRUnichar *profileName, PRBool *_retval);
-    nsresult GetCurrentProfile(PRUnichar * *aCurrentProfile);
+    nsresult GetCurrentProfile(PRUnichar **aCurrentProfile);
     nsresult SetCurrentProfile(const PRUnichar * aCurrentProfile);
     nsresult ShutDownCurrentProfile(PRUint32 shutDownType);
     nsresult CreateNewProfile(const PRUnichar *profileName,
@@ -2756,7 +2759,7 @@ interface nsIDocShell : nsISupports
     nsresult GetSessionStorageForURI(nsIURI *uri, nsIDOMStorage **_retval);
     nsresult GetSessionStorageForPrincipal(nsIPrincipal *principal, PRBool create, nsIDOMStorage **_retval);
     nsresult AddSessionStorage(nsIPrincipal *principal, nsIDOMStorage *storage);
-    nsresult GetCurrentDocumentChannel(nsIChannel * *aCurrentDocumentChannel);
+    nsresult GetCurrentDocumentChannel(nsIChannel **aCurrentDocumentChannel);
     nsresult SetChildOffset(PRUint32 offset);
     nsresult GetIsInUnload(PRBool *aIsInUnload);
     nsresult GetChannelIsUnsafe(PRBool *aChannelIsUnsafe);
@@ -2833,11 +2836,14 @@ interface nsIWineURI : nsIURL
 {
     typedef struct NSContainer NSContainer;
     typedef struct HTMLWindow HTMLWindow;
+    typedef struct nsChannelBSC nsChannelBSC;
 
     nsresult GetNSContainer(NSContainer **aNSContainer);
     nsresult SetNSContainer(NSContainer *aNSContainer);
     nsresult GetWindow(HTMLWindow **aHTMLWindow);
     nsresult SetWindow(HTMLWindow *aHTMLWindow);
+    nsresult GetChannelBSC(nsChannelBSC **aChannelBSC);
+    nsresult SetChannelBSC(nsChannelBSC *aChannelBSC);
     nsresult GetIsDocumentURI(PRBool *aIsDocumentURI);
     nsresult SetIsDocumentURI(PRBool aIsDocumentURI);
     nsresult GetWineURL(LPCWSTR *aURL);

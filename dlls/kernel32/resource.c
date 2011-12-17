@@ -32,20 +32,12 @@
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
-#include "wine/winbase16.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
 #include "wine/unicode.h"
 #include "wine/list.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(resource);
-
-/* handle conversions */
-#define HRSRC_32(h16)   ((HRSRC)(ULONG_PTR)(h16))
-#define HRSRC_16(h32)   (LOWORD(h32))
-#define HGLOBAL_32(h16) ((HGLOBAL)(ULONG_PTR)(h16))
-#define HGLOBAL_16(h32) (LOWORD(h32))
-#define HMODULE_16(h32) (LOWORD(h32))
 
 /* retrieve the resource name to pass to the ntdll functions */
 static NTSTATUS get_res_nameA( LPCSTR name, UNICODE_STRING *str )
@@ -88,40 +80,6 @@ static NTSTATUS get_res_nameW( LPCWSTR name, UNICODE_STRING *str )
     RtlCreateUnicodeString( str, name );
     RtlUpcaseUnicodeString( str, str, FALSE );
     return STATUS_SUCCESS;
-}
-
-/* retrieve the resource names for the 16-bit FindResource function */
-static BOOL get_res_name_type_WtoA( LPCWSTR name, LPCWSTR type, LPSTR *nameA, LPSTR *typeA )
-{
-    *nameA = *typeA = NULL;
-
-    __TRY
-    {
-        if (HIWORD(name))
-        {
-            DWORD len = WideCharToMultiByte( CP_ACP, 0, name, -1, NULL, 0, NULL, NULL );
-            *nameA = HeapAlloc( GetProcessHeap(), 0, len );
-            if (*nameA) WideCharToMultiByte( CP_ACP, 0, name, -1, *nameA, len, NULL, NULL );
-        }
-        else *nameA = ULongToPtr(LOWORD(name));
-
-        if (HIWORD(type))
-        {
-            DWORD len = WideCharToMultiByte( CP_ACP, 0, type, -1, NULL, 0, NULL, NULL );
-            *typeA = HeapAlloc( GetProcessHeap(), 0, len );
-            if (*typeA) WideCharToMultiByte( CP_ACP, 0, type, -1, *typeA, len, NULL, NULL );
-        }
-        else *typeA = ULongToPtr(LOWORD(type));
-    }
-    __EXCEPT_PAGE_FAULT
-    {
-        if (HIWORD(*nameA)) HeapFree( GetProcessHeap(), 0, *nameA );
-        if (HIWORD(*typeA)) HeapFree( GetProcessHeap(), 0, *typeA );
-        SetLastError( ERROR_INVALID_PARAMETER );
-        return FALSE;
-    }
-    __ENDTRY
-    return TRUE;
 }
 
 /* implementation of FindResourceExA */
@@ -198,10 +156,6 @@ HRSRC WINAPI FindResourceExA( HMODULE hModule, LPCSTR type, LPCSTR name, WORD la
     TRACE( "%p %s %s %04x\n", hModule, debugstr_a(type), debugstr_a(name), lang );
 
     if (!hModule) hModule = GetModuleHandleW(0);
-    else if (!HIWORD(hModule))
-    {
-        return HRSRC_32( FindResource16( HMODULE_16(hModule), name, type ) );
-    }
     return find_resourceA( hModule, type, name, lang );
 }
 
@@ -223,19 +177,6 @@ HRSRC WINAPI FindResourceExW( HMODULE hModule, LPCWSTR type, LPCWSTR name, WORD 
     TRACE( "%p %s %s %04x\n", hModule, debugstr_w(type), debugstr_w(name), lang );
 
     if (!hModule) hModule = GetModuleHandleW(0);
-    else if (!HIWORD(hModule))
-    {
-        LPSTR nameA, typeA;
-        HRSRC16 ret;
-
-        if (!get_res_name_type_WtoA( name, type, &nameA, &typeA )) return NULL;
-
-        ret = FindResource16( HMODULE_16(hModule), nameA, typeA );
-        if (HIWORD(nameA)) HeapFree( GetProcessHeap(), 0, nameA );
-        if (HIWORD(typeA)) HeapFree( GetProcessHeap(), 0, typeA );
-        return HRSRC_32(ret);
-    }
-
     return find_resourceW( hModule, type, name, lang );
 }
 
@@ -606,10 +547,6 @@ HGLOBAL WINAPI LoadResource( HINSTANCE hModule, HRSRC hRsrc )
 
     TRACE( "%p %p\n", hModule, hRsrc );
 
-    if (hModule && !HIWORD(hModule))
-        /* FIXME: should convert return to 32-bit resource */
-        return HGLOBAL_32( LoadResource16( HMODULE_16(hModule), HRSRC_16(hRsrc) ) );
-
     if (!hRsrc) return 0;
     if (!hModule) hModule = GetModuleHandleA( NULL );
     status = LdrAccessResource( hModule, (IMAGE_RESOURCE_DATA_ENTRY *)hRsrc, &ret, NULL );
@@ -623,13 +560,7 @@ HGLOBAL WINAPI LoadResource( HINSTANCE hModule, HRSRC hRsrc )
  */
 LPVOID WINAPI LockResource( HGLOBAL handle )
 {
-    TRACE("(%p)\n", handle );
-
-    if (HIWORD( handle ))  /* 32-bit memory handle */
-        return handle;
-
-    /* 16-bit memory handle */
-    return LockResource16( HGLOBAL_16(handle) );
+    return handle;
 }
 
 
@@ -638,8 +569,7 @@ LPVOID WINAPI LockResource( HGLOBAL handle )
  */
 BOOL WINAPI FreeResource( HGLOBAL handle )
 {
-    if (HIWORD(handle)) return 0; /* 32-bit memory handle: nothing to do */
-    return FreeResource16( HGLOBAL_16(handle) );
+    return 0;
 }
 
 
@@ -648,9 +578,6 @@ BOOL WINAPI FreeResource( HGLOBAL handle )
  */
 DWORD WINAPI SizeofResource( HINSTANCE hModule, HRSRC hRsrc )
 {
-    if (hModule && !HIWORD(hModule))
-        return SizeofResource16( HMODULE_16(hModule), HRSRC_16(hRsrc) );
-
     if (!hRsrc) return 0;
     return ((PIMAGE_RESOURCE_DATA_ENTRY)hRsrc)->Size;
 }

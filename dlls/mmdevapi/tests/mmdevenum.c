@@ -26,6 +26,8 @@
 #include "dshow.h"
 #include "dsound.h"
 
+DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
+
 /* Some of the QueryInterface tests are really just to check if I got the IID's right :) */
 
 /* IMMDeviceCollection appears to have no QueryInterface method and instead forwards to mme */
@@ -39,9 +41,17 @@ static void test_collection(IMMDeviceEnumerator *mme, IMMDeviceCollection *col)
     UINT numdev;
     IMMDevice *dev;
 
+    /* collection doesn't keep a ref on parent */
+    IUnknown_AddRef(mme);
+    ref = IUnknown_Release(mme);
+    ok(ref == 2, "Reference count on parent is %u\n", ref);
+
     ref = IUnknown_AddRef(col);
     IUnknown_Release(col);
     ok(ref == 2, "Invalid reference count %u on collection\n", ref);
+
+    hr = IUnknown_QueryInterface(col, &IID_IUnknown, NULL);
+    ok(hr == E_POINTER, "Null ppv returns %08x\n", hr);
 
     hr = IUnknown_QueryInterface(col, &IID_IUnknown, (void**)&unk);
     ok(hr == S_OK, "Cannot query for IID_IUnknown: 0x%08x\n", hr);
@@ -72,21 +82,26 @@ static void test_collection(IMMDeviceEnumerator *mme, IMMDeviceCollection *col)
     ok(hr == E_INVALIDARG, "Asking for too high device returned 0x%08x\n", hr);
     ok(dev == NULL, "Returned non-null device\n");
 
-    if (!numdev) return;
-    hr = IMMDeviceCollection_Item(col, 0, NULL);
-    ok(hr == E_POINTER, "Query with null pointer returned 0x%08x\n", hr);
+    if (numdev)
+    {
+        hr = IMMDeviceCollection_Item(col, 0, NULL);
+        ok(hr == E_POINTER, "Query with null pointer returned 0x%08x\n", hr);
 
-    hr = IMMDeviceCollection_Item(col, 0, &dev);
-    ok(hr == S_OK, "Valid Item returned 0x%08x\n", hr);
-    ok(dev != NULL, "Device is null!\n");
-    if (dev) IUnknown_Release(dev);
+        hr = IMMDeviceCollection_Item(col, 0, &dev);
+        ok(hr == S_OK, "Valid Item returned 0x%08x\n", hr);
+        ok(dev != NULL, "Device is null!\n");
+        if (dev)
+            IUnknown_Release(dev);
+    }
+    IUnknown_Release(col);
 }
 
+/* Only do parameter tests here, the actual MMDevice testing should be a separate test */
 START_TEST(mmdevenum)
 {
     HRESULT hr;
     IUnknown *unk = NULL;
-    IMMDeviceEnumerator *mme;
+    IMMDeviceEnumerator *mme, *mme2;
     ULONG ref;
     IMMDeviceCollection *col;
 
@@ -109,6 +124,18 @@ START_TEST(mmdevenum)
 
     ok( (LONG_PTR)mme == (LONG_PTR)unk, "Pointers are unequal %p/%p\n", unk, mme);
     IUnknown_Release(unk);
+
+    /* Proving that it is static.. */
+    hr = CoCreateInstance(&CLSID_MMDeviceEnumerator, NULL, CLSCTX_INPROC_SERVER, &IID_IMMDeviceEnumerator, (void**)&mme2);
+    IUnknown_Release(mme2);
+    ok(mme == mme2, "Pointers are not equal!\n");
+
+    hr = IUnknown_QueryInterface(mme, &IID_IUnknown, NULL);
+    ok(hr == E_POINTER, "Null pointer on QueryInterface returned %08x\n", hr);
+
+    hr = IUnknown_QueryInterface(mme, &GUID_NULL, (void**)&unk);
+    ok(!unk, "Unk not reset to null after invalid QI\n");
+    ok(hr == E_NOINTERFACE, "Invalid hr %08x returned on IID_NULL\n", hr);
 
     col = (void*)(LONG_PTR)0x12345678;
     hr = IMMDeviceEnumerator_EnumAudioEndpoints(mme, 0xffff, DEVICE_STATEMASK_ALL, &col);

@@ -52,7 +52,6 @@
 typedef struct HTMLDOMNode HTMLDOMNode;
 typedef struct ConnectionPoint ConnectionPoint;
 typedef struct BSCallback BSCallback;
-typedef struct nsChannelBSC nsChannelBSC;
 typedef struct event_target_t event_target_t;
 
 /* NOTE: make sure to keep in sync with dispex.c */
@@ -105,6 +104,7 @@ typedef enum {
     IHTMLElement4_tid,
     IHTMLElementCollection_tid,
     IHTMLEventObj_tid,
+    IHTMLFiltersCollection_tid,
     IHTMLFormElement_tid,
     IHTMLFrameBase_tid,
     IHTMLFrameBase2_tid,
@@ -242,7 +242,6 @@ struct HTMLWindow {
     IMoniker *mon;
     LPOLESTR url;
 
-    event_target_t *event_target;
     IHTMLEventObj *event;
 
     SCRIPTMODE scriptmode;
@@ -268,8 +267,9 @@ typedef enum {
     EDITMODE        
 } USERMODE;
 
-typedef struct {
+typedef struct _cp_static_data_t {
     tid_t tid;
+    void (*on_advise)(IUnknown*,struct _cp_static_data_t*);
     DWORD id_cnt;
     DISPID *ids;
 } cp_static_data_t;
@@ -285,7 +285,7 @@ typedef struct ConnectionPointContainer {
 struct ConnectionPoint {
     const IConnectionPointVtbl *lpConnectionPointVtbl;
 
-    IConnectionPointContainer *container;
+    ConnectionPointContainer *container;
 
     union {
         IUnknown *unk;
@@ -339,6 +339,7 @@ struct HTMLDocument {
     ConnectionPoint cp_htmldocevents;
     ConnectionPoint cp_htmldocevents2;
     ConnectionPoint cp_propnotif;
+    ConnectionPoint cp_dispatch;
 
     IOleAdviseHolder *advise_holder;
 };
@@ -422,7 +423,6 @@ struct NSContainer {
 
     HWND hwnd;
 
-    nsChannelBSC *bscallback; /* hack */
     HWND reset_focus; /* hack */
 };
 
@@ -433,8 +433,6 @@ typedef struct {
 
     LONG ref;
 
-    nsIChannel *channel;
-    nsIHttpChannel *http_channel;
     nsIWineURI *uri;
     nsIInputStream *post_data_stream;
     nsILoadGroup *load_group;
@@ -532,6 +530,7 @@ struct HTMLDocumentNode {
     nsIDOMHTMLDocument *nsdoc;
     HTMLDOMNode *nodes;
     BOOL content_ready;
+    event_target_t *body_event_target;
 
     IInternetSecurityManager *secmgr;
     ICatInformation *catmgr;
@@ -686,6 +685,7 @@ HRESULT create_doc_uri(HTMLWindow*,WCHAR*,nsIWineURI**);
 HRESULT hlink_frame_navigate(HTMLDocument*,LPCWSTR,nsIInputStream*,DWORD);
 HRESULT navigate_url(HTMLWindow*,const WCHAR*,const WCHAR*);
 HRESULT set_frame_doc(HTMLFrameBase*,nsIDOMDocument*);
+HRESULT load_nsuri(HTMLWindow*,nsIWineURI*,DWORD);
 
 void call_property_onchanged(ConnectionPoint*,DISPID);
 HRESULT call_set_active_object(IOleInPlaceUIWindow*,IOleInPlaceActiveObject*);

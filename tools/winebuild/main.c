@@ -100,6 +100,7 @@ enum exec_mode_values
     MODE_DLL,
     MODE_EXE,
     MODE_DEF,
+    MODE_IMPLIB,
     MODE_RELAY16,
     MODE_RELAY32,
     MODE_RESOURCES
@@ -117,6 +118,7 @@ static const struct
     { "darwin",  PLATFORM_APPLE },
     { "freebsd", PLATFORM_FREEBSD },
     { "solaris", PLATFORM_SOLARIS },
+    { "mingw32", PLATFORM_WINDOWS },
     { "windows", PLATFORM_WINDOWS },
     { "winnt",   PLATFORM_WINDOWS }
 };
@@ -135,6 +137,23 @@ static void set_dll_file_name( const char *name, DLLSPEC *spec )
     if ((p = strrchr( spec->file_name, '.' )))
     {
         if (!strcmp( p, ".spec" ) || !strcmp( p, ".def" )) *p = 0;
+    }
+}
+
+/* set the dll name from the file name */
+static void init_dll_name( DLLSPEC *spec )
+{
+    if (!spec->file_name)
+    {
+        char *p;
+        spec->file_name = xstrdup( output_file_name );
+        if ((p = strrchr( spec->file_name, '.' ))) *p = 0;
+    }
+    if (!spec->dll_name)  /* set default name from file name */
+    {
+        char *p;
+        spec->dll_name = xstrdup( spec->file_name );
+        if ((p = strrchr( spec->dll_name, '.' ))) *p = 0;
     }
 }
 
@@ -250,6 +269,7 @@ static const char usage_str[] =
 "       --dll                 Build a .c file from a .spec or .def file\n"
 "       --def                 Build a .def file from a .spec file\n"
 "       --exe                 Build a .c file for an executable\n"
+"       --implib              Build an import library\n"
 "       --relay16             Build the 16-bit relay assembly routines\n"
 "       --relay32             Build the 32-bit relay assembly routines\n"
 "       --resources           Build a .o file for the resource files\n\n"
@@ -260,6 +280,7 @@ enum long_options_values
     LONG_OPT_DLL = 1,
     LONG_OPT_DEF,
     LONG_OPT_EXE,
+    LONG_OPT_IMPLIB,
     LONG_OPT_ASCMD,
     LONG_OPT_EXTERNAL_SYMS,
     LONG_OPT_FAKE_MODULE,
@@ -282,6 +303,7 @@ static const struct option long_options[] =
     { "dll",           0, 0, LONG_OPT_DLL },
     { "def",           0, 0, LONG_OPT_DEF },
     { "exe",           0, 0, LONG_OPT_EXE },
+    { "implib",        0, 0, LONG_OPT_IMPLIB },
     { "as-cmd",        1, 0, LONG_OPT_ASCMD },
     { "external-symbols", 0, 0, LONG_OPT_EXTERNAL_SYMS },
     { "fake-module",   0, 0, LONG_OPT_FAKE_MODULE },
@@ -457,6 +479,9 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
             set_exec_mode( MODE_EXE );
             if (!spec->subsystem) spec->subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
             break;
+        case LONG_OPT_IMPLIB:
+            set_exec_mode( MODE_IMPLIB );
+            break;
         case LONG_OPT_ASCMD:
             as_command = xstrdup( optarg );
             break;
@@ -505,6 +530,7 @@ static char **parse_options( int argc, char **argv, DLLSPEC *spec )
 
     if (spec->file_name && !strchr( spec->file_name, '.' ))
         strcat( spec->file_name, exec_mode == MODE_EXE ? ".exe" : ".dll" );
+    init_dll_name( spec );
 
     switch (target_cpu)
     {
@@ -607,13 +633,6 @@ int main(int argc, char **argv)
         if (spec->subsystem != IMAGE_SUBSYSTEM_NATIVE)
             spec->characteristics |= IMAGE_FILE_DLL;
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
-        if (spec->type == SPEC_WIN32 && spec->main_module)  /* embedded 16-bit module */
-        {
-            spec->type = SPEC_WIN16;
-            load_resources( argv, spec );
-            if (parse_input_file( spec )) BuildSpec16File( spec );
-            break;
-        }
         /* fall through */
     case MODE_EXE:
         load_resources( argv, spec );
@@ -639,10 +658,14 @@ int main(int argc, char **argv)
         break;
     case MODE_DEF:
         if (argv[0]) fatal_error( "file argument '%s' not allowed in this mode\n", argv[0] );
-        if (spec->type == SPEC_WIN16) fatal_error( "Cannot yet build .def file for 16-bit dlls\n" );
         if (!spec_file_name) fatal_error( "missing .spec file\n" );
         if (!parse_input_file( spec )) break;
-        BuildDef32File( spec );
+        output_def_file( spec, 1 );
+        break;
+    case MODE_IMPLIB:
+        if (!spec_file_name) fatal_error( "missing .spec file\n" );
+        if (!parse_input_file( spec )) break;
+        output_import_lib( spec, argv );
         break;
     case MODE_RELAY16:
         if (argv[0]) fatal_error( "file argument '%s' not allowed in this mode\n", argv[0] );

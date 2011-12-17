@@ -350,9 +350,6 @@ static HRESULT equal2_values(VARIANT *lval, VARIANT *rval, BOOL *ret)
 static HRESULT literal_to_var(script_ctx_t *ctx, literal_t *literal, VARIANT *v)
 {
     switch(literal->type) {
-    case LT_UNDEFINED:
-        V_VT(v) = VT_EMPTY;
-        break;
     case LT_NULL:
         V_VT(v) = VT_NULL;
         break;
@@ -496,8 +493,12 @@ HRESULT exec_source(exec_ctx_t *ctx, parser_ctx_t *parser, source_elements_t *so
 
     if(retv && (exec_type == EXECT_EVAL || rt.type == RT_RETURN))
         *retv = val;
-    else
+    else {
+        if (retv) {
+            VariantInit(retv);
+        }
         VariantClear(&val);
+    }
     return S_OK;
 }
 
@@ -1411,11 +1412,15 @@ HRESULT array_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags,
         exprval_release(&exprval);
     }
 
-    if(SUCCEEDED(hres))
+    if(SUCCEEDED(hres)) {
         hres = to_object(ctx->parser->script, &member, &obj);
+        if(FAILED(hres))
+            VariantClear(&val);
+    }
     VariantClear(&member);
     if(SUCCEEDED(hres)) {
         hres = to_string(ctx->parser->script, &val, ei, &str);
+        VariantClear(&val);
         if(SUCCEEDED(hres)) {
             if(flags & EXPR_STRREF) {
                 ret->type = EXPRVAL_NAMEREF;
@@ -1425,6 +1430,7 @@ HRESULT array_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags,
             }
 
             hres = disp_get_id(ctx->parser->script, obj, str, flags & EXPR_NEWREF ? fdexNameEnsure : 0, &id);
+            SysFreeString(str);
         }
 
         if(SUCCEEDED(hres)) {
@@ -1568,6 +1574,7 @@ HRESULT new_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, j
     hres = disp_call(ctx->parser->script, V_DISPATCH(&constr), DISPID_VALUE,
                      DISPATCH_CONSTRUCT, &dp, &var, ei, NULL/*FIXME*/);
     IDispatch_Release(V_DISPATCH(&constr));
+    free_dp(&dp);
     if(FAILED(hres))
         return hres;
 
@@ -2489,6 +2496,7 @@ HRESULT plus_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags, 
         return hres;
 
     hres = to_number(ctx->parser->script, &val, ei, &num);
+    VariantClear(&val);
     if(FAILED(hres))
         return hres;
 
@@ -2748,6 +2756,8 @@ HRESULT equal_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags,
         return hres;
 
     hres = equal_values(ctx, &rval, &lval, ei, &b);
+    VariantClear(&lval);
+    VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
@@ -2769,6 +2779,8 @@ HRESULT equal2_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
         return hres;
 
     hres = equal2_values(&rval, &lval, &b);
+    VariantClear(&lval);
+    VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
@@ -2790,6 +2802,8 @@ HRESULT not_equal_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD fl
         return hres;
 
     hres = equal_values(ctx, &lval, &rval, ei, &b);
+    VariantClear(&lval);
+    VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
@@ -2811,6 +2825,8 @@ HRESULT not_equal2_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD f
         return hres;
 
     hres = equal2_values(&lval, &rval, &b);
+    VariantClear(&lval);
+    VariantClear(&rval);
     if(FAILED(hres))
         return hres;
 
@@ -3113,8 +3129,11 @@ HRESULT assign_expression_eval(exec_ctx_t *ctx, expression_t *_expr, DWORD flags
         exprval_release(&exprvalr);
     }
 
-    if(SUCCEEDED(hres))
+    if(SUCCEEDED(hres)) {
         hres = put_value(ctx->parser->script, &exprval, &rval, ei);
+        if(FAILED(hres))
+            VariantClear(&rval);
+    }
 
     exprval_release(&exprval);
     if(FAILED(hres))

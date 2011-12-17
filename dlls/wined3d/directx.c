@@ -46,6 +46,7 @@ static const struct {
     {"GL_APPLE_flush_render",               APPLE_FLUSH_RENDER,             0                           },
     {"GL_APPLE_ycbcr_422",                  APPLE_YCBCR_422,                0                           },
     {"GL_APPLE_float_pixels",               APPLE_FLOAT_PIXELS,             0                           },
+    {"GL_APPLE_flush_buffer_range",         APPLE_FLUSH_BUFFER_RANGE,       0                           },
 
     /* ATI */
     {"GL_ATI_separate_stencil",             ATI_SEPARATE_STENCIL,           0                           },
@@ -155,8 +156,6 @@ static const struct {
  **********************************************************/
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType, WINED3DFORMAT AdapterFormat, DWORD Usage, WINED3DRESOURCETYPE RType, WINED3DFORMAT CheckFormat, WINED3DSURFTYPE SurfaceType);
-
-GLint wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP + 1];
 
 const struct min_lookup minMipLookup[] =
 {
@@ -954,6 +953,7 @@ static const struct driver_version_information driver_version_table[] =
     {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX260,     "NVIDIA GeForce GTX 260",           15, 11, 8618   },
     {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX275,     "NVIDIA GeForce GTX 275",           15, 11, 8618   },
     {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX280,     "NVIDIA GeForce GTX 280",           15, 11, 8618   },
+    {VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT240,      "NVIDIA GeForce GT 240",            15, 11, 8618   },
 
     /* ATI cards. The driver versions are somewhat similar, but not quite the same. Let's hardcode. */
     {VENDOR_ATI,        CARD_ATI_RADEON_9500,           "ATI Radeon 9500",                  14, 10, 6764    },
@@ -966,6 +966,8 @@ static const struct driver_version_information driver_version_table[] =
     {VENDOR_ATI,        CARD_ATI_RADEON_HD4600,         "ATI Radeon HD 4600 Series",        14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD4700,         "ATI Radeon HD 4700 Series",        14, 10, 6764    },
     {VENDOR_ATI,        CARD_ATI_RADEON_HD4800,         "ATI Radeon HD 4800 Series",        14, 10, 6764    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD5700,         "ATI Radeon HD 5700 Series",        14, 10, 8681    },
+    {VENDOR_ATI,        CARD_ATI_RADEON_HD5800,         "ATI Radeon HD 5800 Series",        14, 10, 8681    },
 
     /* TODO: Add information about legacy ATI hardware, Intel and other cards. */
 };
@@ -1123,7 +1125,8 @@ static enum wined3d_pci_vendor wined3d_guess_vendor(const char *gl_vendor, const
 
     if (strstr(gl_vendor, "Mesa")
             || strstr(gl_vendor, "DRI R300 Project")
-            || strstr(gl_vendor, "Tungsten Graphics, Inc"))
+            || strstr(gl_vendor, "Tungsten Graphics, Inc")
+            || strstr(gl_vendor, "VMware, Inc."))
         return VENDOR_MESA;
 
     FIXME_(d3d_caps)("Received unrecognized GL_VENDOR %s. Returning VENDOR_WINE.\n", debugstr_a(gl_vendor));
@@ -1219,6 +1222,12 @@ static enum wined3d_pci_device wined3d_guess_card(const struct wined3d_gl_info *
                     *vidmem = 1024;
                     return CARD_NVIDIA_GEFORCE_GTX260;
                 }
+                /* Geforce 200 - midend */
+                if (strstr(gl_renderer, "GT 240"))
+                {
+                   *vidmem = 512;
+                   return CARD_NVIDIA_GEFORCE_GT240;
+                }
 
                 /* Geforce9 - highend / Geforce 200 - midend (GTS 150/250 are based on the same core) */
                 if (strstr(gl_renderer, "9800")
@@ -1285,7 +1294,9 @@ static enum wined3d_pci_device wined3d_guess_card(const struct wined3d_gl_info *
                 }
 
                 /* Geforce8 - lowend */
-                if (strstr(gl_renderer, "8300")
+                if (strstr(gl_renderer, "8100")
+                        || strstr(gl_renderer, "8200")
+                        || strstr(gl_renderer, "8300")
                         || strstr(gl_renderer, "8400")
                         || strstr(gl_renderer, "8500"))
                 {
@@ -1430,6 +1441,24 @@ static enum wined3d_pci_device wined3d_guess_card(const struct wined3d_gl_info *
              * eg HD 4800 is returned for multiple cards, even for RV790 based ones. */
             if (WINE_D3D9_CAPABLE(gl_info))
             {
+                /* Radeon EG CYPRESS XT / PRO HD5800 - highend */
+                if (strstr(gl_renderer, "HD 5800")          /* Radeon EG CYPRESS HD58xx generic renderer string */
+                        || strstr(gl_renderer, "HD 5850")   /* Radeon EG CYPRESS XT */
+                        || strstr(gl_renderer, "HD 5870"))  /* Radeon EG CYPRESS PRO */
+                {
+                    *vidmem = 1024; /* note: HD58xx cards use 1024MB  */
+                    return CARD_ATI_RADEON_HD5800;
+                }
+
+                /* Radeon EG JUNIPER XT / LE HD5700 - midend */
+                if (strstr(gl_renderer, "HD 5700")          /* Radeon EG JUNIPER HD57xx generic renderer string */
+                        || strstr(gl_renderer, "HD 5750")   /* Radeon EG JUNIPER LE */
+                        || strstr(gl_renderer, "HD 5770"))  /* Radeon EG JUNIPER XT */
+                {
+                    *vidmem = 512; /* note: HD5770 cards use 1024MB and HD5750 cards use 512MB or 1024MB  */
+                    return CARD_ATI_RADEON_HD5700;
+                }
+
                 /* Radeon R7xx HD4800 - highend */
                 if (strstr(gl_renderer, "HD 4800")          /* Radeon RV7xx HD48xx generic renderer string */
                         || strstr(gl_renderer, "HD 4830")   /* Radeon RV770 */
@@ -2093,13 +2122,13 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
     else
         gl_info->vidmem = WINE_DEFAULT_VIDMEM;
 
-    wrap_lookup[WINED3DTADDRESS_WRAP - WINED3DTADDRESS_WRAP] = GL_REPEAT;
-    wrap_lookup[WINED3DTADDRESS_MIRROR - WINED3DTADDRESS_WRAP] =
+    gl_info->wrap_lookup[WINED3DTADDRESS_WRAP - WINED3DTADDRESS_WRAP] = GL_REPEAT;
+    gl_info->wrap_lookup[WINED3DTADDRESS_MIRROR - WINED3DTADDRESS_WRAP] =
             gl_info->supported[ARB_TEXTURE_MIRRORED_REPEAT] ? GL_MIRRORED_REPEAT_ARB : GL_REPEAT;
-    wrap_lookup[WINED3DTADDRESS_CLAMP - WINED3DTADDRESS_WRAP] = GL_CLAMP_TO_EDGE;
-    wrap_lookup[WINED3DTADDRESS_BORDER - WINED3DTADDRESS_WRAP] =
+    gl_info->wrap_lookup[WINED3DTADDRESS_CLAMP - WINED3DTADDRESS_WRAP] = GL_CLAMP_TO_EDGE;
+    gl_info->wrap_lookup[WINED3DTADDRESS_BORDER - WINED3DTADDRESS_WRAP] =
             gl_info->supported[ARB_TEXTURE_BORDER_CLAMP] ? GL_CLAMP_TO_BORDER_ARB : GL_REPEAT;
-    wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP] =
+    gl_info->wrap_lookup[WINED3DTADDRESS_MIRRORONCE - WINED3DTADDRESS_WRAP] =
             gl_info->supported[ATI_TEXTURE_MIRROR_ONCE] ? GL_MIRROR_CLAMP_TO_EDGE_ATI : GL_REPEAT;
 
     /* Make sure there's an active HDC else the WGL extensions will fail */
@@ -2167,9 +2196,10 @@ static UINT     WINAPI IWineD3DImpl_GetAdapterCount (IWineD3D *iface) {
     return This->adapter_count;
 }
 
-static HRESULT  WINAPI IWineD3DImpl_RegisterSoftwareDevice(IWineD3D *iface, void* pInitializeFunction) {
-    IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    FIXME("(%p)->(%p): stub\n", This, pInitializeFunction);
+static HRESULT WINAPI IWineD3DImpl_RegisterSoftwareDevice(IWineD3D *iface, void *init_function)
+{
+    FIXME("iface %p, init_function %p stub!\n", iface, init_function);
+
     return WINED3D_OK;
 }
 
@@ -2309,9 +2339,9 @@ static HRESULT WINAPI IWineD3DImpl_EnumAdapterModes(IWineD3D *iface, UINT Adapte
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT Adapter, WINED3DDISPLAYMODE* pMode) {
-    IWineD3DImpl *This = (IWineD3DImpl *)iface;
-    TRACE_(d3d_caps)("(%p}->(Adapter: %d, pMode: %p)\n", This, Adapter, pMode);
+static HRESULT WINAPI IWineD3DImpl_GetAdapterDisplayMode(IWineD3D *iface, UINT Adapter, WINED3DDISPLAYMODE *pMode)
+{
+    TRACE("iface %p, adapter_idx %u, display_mode %p.\n", iface, Adapter, pMode);
 
     if (NULL == pMode ||
         Adapter >= IWineD3D_GetAdapterCount(iface)) {
@@ -2628,19 +2658,14 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceMultiSampleType(IWineD3D *iface, U
 }
 
 static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType,
-                                            WINED3DFORMAT DisplayFormat, WINED3DFORMAT BackBufferFormat, BOOL Windowed) {
-
-    IWineD3DImpl *This = (IWineD3DImpl *)iface;
+        WINED3DFORMAT DisplayFormat, WINED3DFORMAT BackBufferFormat, BOOL Windowed)
+{
     HRESULT hr = WINED3DERR_NOTAVAILABLE;
     UINT nmodes;
 
-    TRACE_(d3d_caps)("(%p)-> (STUB) (Adptr:%d, CheckType:(%x,%s), DispFmt:(%x,%s), BackBuf:(%x,%s), Win?%d): stub\n",
-          This,
-          Adapter,
-          DeviceType, debug_d3ddevicetype(DeviceType),
-          DisplayFormat, debug_d3dformat(DisplayFormat),
-          BackBufferFormat, debug_d3dformat(BackBufferFormat),
-          Windowed);
+    TRACE("iface %p, adapter_idx %u, device_type %s, display_format %s, backbuffer_format %s, windowed %#x.\n",
+            iface, Adapter, debug_d3ddevicetype(DeviceType), debug_d3dformat(DisplayFormat),
+            debug_d3dformat(BackBufferFormat), Windowed);
 
     if (Adapter >= IWineD3D_GetAdapterCount(iface)) {
         WARN_(d3d_caps)("Adapter >= IWineD3D_GetAdapterCount(iface), returning WINED3DERR_INVALIDCALL\n");
@@ -3100,7 +3125,7 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
          *
          * With Shader Model 3.0 capable cards Instancing 'just works' in Windows.
          */
-        case WINEMAKEFOURCC('I','N','S','T'):
+        case WINED3DFMT_INST:
             TRACE("ATI Instancing check hack\n");
             if (gl_info->supported[ARB_VERTEX_PROGRAM] || gl_info->supported[ARB_VERTEX_SHADER])
             {
@@ -3742,16 +3767,13 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
     }
 }
 
-static HRESULT  WINAPI IWineD3DImpl_CheckDeviceFormatConversion(IWineD3D *iface, UINT Adapter, WINED3DDEVTYPE DeviceType,
-                                                          WINED3DFORMAT SourceFormat, WINED3DFORMAT TargetFormat) {
-    IWineD3DImpl *This = (IWineD3DImpl *)iface;
+static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormatConversion(IWineD3D *iface, UINT adapter_idx,
+        WINED3DDEVTYPE device_type, WINED3DFORMAT src_format, WINED3DFORMAT dst_format)
+{
+    FIXME("iface %p, adapter_idx %u, device_type %s, src_format %s, dst_format %s stub!\n",
+            iface, adapter_idx, debug_d3ddevicetype(device_type), debug_d3dformat(src_format),
+            debug_d3dformat(dst_format));
 
-    FIXME_(d3d_caps)("(%p)-> (STUB) (Adptr:%d, DevType:(%u,%s), SrcFmt:(%u,%s), TgtFmt:(%u,%s))\n",
-          This,
-          Adapter,
-          DeviceType, debug_d3ddevicetype(DeviceType),
-          SourceFormat, debug_d3dformat(SourceFormat),
-          TargetFormat, debug_d3dformat(TargetFormat));
     return WINED3D_OK;
 }
 

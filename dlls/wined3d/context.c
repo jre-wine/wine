@@ -898,8 +898,8 @@ static void Context_MarkStateDirty(struct wined3d_context *context, DWORD state,
     if (isStateDirty(context, rep)) return;
 
     context->dirtyArray[context->numDirtyEntries++] = rep;
-    idx = rep >> 5;
-    shift = rep & 0x1f;
+    idx = rep / (sizeof(*context->isStateDirty) * CHAR_BIT);
+    shift = rep & ((sizeof(*context->isStateDirty) * CHAR_BIT) - 1);
     context->isStateDirty[idx] |= (1 << shift);
 }
 
@@ -1624,16 +1624,16 @@ static inline void set_blit_dimension(UINT width, UINT height) {
  * Params:
  *  This: Device to activate the context for
  *  context: Context to setup
- *  width: render target width
- *  height: render target height
  *
  *****************************************************************************/
 /* Context activation is done by the caller. */
-static inline void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context *context, UINT width, UINT height)
+static void SetupForBlit(IWineD3DDeviceImpl *This, struct wined3d_context *context)
 {
     int i;
     const struct StateEntry *StateTable = This->StateTable;
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    UINT width = ((IWineD3DSurfaceImpl *)context->current_rt)->currentDesc.Width;
+    UINT height = ((IWineD3DSurfaceImpl *)context->current_rt)->currentDesc.Height;
     DWORD sampler;
 
     TRACE("Setting up context %p for blitting\n", context);
@@ -1857,11 +1857,12 @@ static struct wined3d_context *findThreadContextForSwapChain(IWineD3DSwapChain *
  * Returns: The needed context
  *
  *****************************************************************************/
-static inline struct wined3d_context *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target, DWORD tid)
+static struct wined3d_context *FindContext(IWineD3DDeviceImpl *This, IWineD3DSurface *target)
 {
     IWineD3DSwapChain *swapchain = NULL;
     struct wined3d_context *current_context = context_get_current();
     const struct StateEntry *StateTable = This->StateTable;
+    DWORD tid = GetCurrentThreadId();
     struct wined3d_context *context;
     BOOL old_render_offscreen;
 
@@ -2105,65 +2106,11 @@ void context_set_draw_buffer(struct wined3d_context *context, GLenum buffer)
     context->draw_buffer_dirty = TRUE;
 }
 
-/*****************************************************************************
- * context_acquire
- *
- * Finds a rendering context and drawable matching the device and render
- * target for the current thread, activates them and puts them into the
- * requested state.
- *
- * Params:
- *  This: Device to activate the context for
- *  target: Requested render target
- *  usage: Prepares the context for blitting, drawing or other actions
- *
- *****************************************************************************/
-struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This, IWineD3DSurface *target, enum ContextUsage usage)
+/* Context activation is done by the caller. */
+static void context_apply_state(struct wined3d_context *context, IWineD3DDeviceImpl *device, enum ContextUsage usage)
 {
-    struct wined3d_context *current_context = context_get_current();
-    DWORD                         tid = GetCurrentThreadId();
-    DWORD                         i, dirtyState, idx;
-    BYTE                          shift;
-    const struct StateEntry       *StateTable = This->StateTable;
-    const struct wined3d_gl_info *gl_info;
-    struct wined3d_context *context;
-
-    TRACE("(%p): Selecting context for render target %p, thread %d\n", This, target, tid);
-
-    context = FindContext(This, target, tid);
-    context_enter(context);
-    if (!context->valid) return context;
-
-    gl_info = context->gl_info;
-
-    /* Activate the opengl context */
-    if (context != current_context)
-    {
-        if (!context_set_current(context)) ERR("Failed to activate the new context.\n");
-        else This->frag_pipe->enable_extension((IWineD3DDevice *)This, !context->last_was_blit);
-
-        if (context->vshader_const_dirty)
-        {
-            memset(context->vshader_const_dirty, 1,
-                    sizeof(*context->vshader_const_dirty) * This->d3d_vshader_constantF);
-            This->highest_dirty_vs_const = This->d3d_vshader_constantF;
-        }
-        if (context->pshader_const_dirty)
-        {
-            memset(context->pshader_const_dirty, 1,
-                   sizeof(*context->pshader_const_dirty) * This->d3d_pshader_constantF);
-            This->highest_dirty_ps_const = This->d3d_pshader_constantF;
-        }
-    }
-    else if (context->restore_ctx)
-    {
-        if (!pwglMakeCurrent(context->hdc, context->glCtx))
-        {
-            DWORD err = GetLastError();
-            ERR("Failed to make GL context %p current on device context %p, last error %#x.\n",
-                    context->hdc, context->glCtx, err);
-        }
-    }
+    const struct StateEntry *state_table = device->StateTable;
+    unsigned int i;
 
     switch (usage) {
         case CTXUSAGE_CLEAR:
@@ -2186,7 +2133,7 @@ struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This, IWineD3DSurfac
                     FIXME("Activating for CTXUSAGE_BLIT for an offscreen target with ORM_FBO. This should be avoided.\n");
                     ENTER_GL();
                     context_bind_fbo(context, GL_FRAMEBUFFER, &context->dst_fbo);
-                    context_attach_surface_fbo(context, GL_FRAMEBUFFER, 0, target);
+                    context_attach_surface_fbo(context, GL_FRAMEBUFFER, 0, context->current_rt);
                     context_attach_depth_stencil_fbo(context, GL_FRAMEBUFFER, NULL, FALSE);
                     LEAVE_GL();
                 } else {
@@ -2215,7 +2162,7 @@ struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This, IWineD3DSurfac
 
         case CTXUSAGE_CLEAR:
             if(context->last_was_blit) {
-                This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
+                device->frag_pipe->enable_extension((IWineD3DDevice *)device, TRUE);
             }
 
             /* Blending and clearing should be orthogonal, but tests on the nvidia driver show that disabling
@@ -2224,32 +2171,33 @@ struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This, IWineD3DSurfac
             ENTER_GL();
             glDisable(GL_BLEND);
             LEAVE_GL();
-            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), StateTable);
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_ALPHABLENDENABLE), state_table);
 
             ENTER_GL();
             glEnable(GL_SCISSOR_TEST);
             checkGLcall("glEnable GL_SCISSOR_TEST");
             LEAVE_GL();
             context->last_was_blit = FALSE;
-            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE), StateTable);
-            Context_MarkStateDirty(context, STATE_SCISSORRECT, StateTable);
+            Context_MarkStateDirty(context, STATE_RENDER(WINED3DRS_SCISSORTESTENABLE), state_table);
+            Context_MarkStateDirty(context, STATE_SCISSORRECT, state_table);
             break;
 
         case CTXUSAGE_DRAWPRIM:
             /* This needs all dirty states applied */
             if(context->last_was_blit) {
-                This->frag_pipe->enable_extension((IWineD3DDevice *) This, TRUE);
+                device->frag_pipe->enable_extension((IWineD3DDevice *)device, TRUE);
             }
 
-            IWineD3DDeviceImpl_FindTexUnitMap(This);
+            IWineD3DDeviceImpl_FindTexUnitMap(device);
 
             ENTER_GL();
-            for(i=0; i < context->numDirtyEntries; i++) {
-                dirtyState = context->dirtyArray[i];
-                idx = dirtyState >> 5;
-                shift = dirtyState & 0x1f;
+            for (i = 0; i < context->numDirtyEntries; ++i)
+            {
+                DWORD rep = context->dirtyArray[i];
+                DWORD idx = rep / (sizeof(*context->isStateDirty) * CHAR_BIT);
+                BYTE shift = rep & ((sizeof(*context->isStateDirty) * CHAR_BIT) - 1);
                 context->isStateDirty[idx] &= ~(1 << shift);
-                StateTable[dirtyState].apply(dirtyState, This->stateBlock, context);
+                state_table[rep].apply(rep, device->stateBlock, context);
             }
             LEAVE_GL();
             context->numDirtyEntries = 0; /* This makes the whole list clean */
@@ -2257,14 +2205,67 @@ struct wined3d_context *context_acquire(IWineD3DDeviceImpl *This, IWineD3DSurfac
             break;
 
         case CTXUSAGE_BLIT:
-            SetupForBlit(This, context,
-                         ((IWineD3DSurfaceImpl *)target)->currentDesc.Width,
-                         ((IWineD3DSurfaceImpl *)target)->currentDesc.Height);
+            SetupForBlit(device, context);
             break;
 
         default:
             FIXME("Unexpected context usage requested\n");
     }
+}
+
+/*****************************************************************************
+ * context_acquire
+ *
+ * Finds a rendering context and drawable matching the device and render
+ * target for the current thread, activates them and puts them into the
+ * requested state.
+ *
+ * Params:
+ *  This: Device to activate the context for
+ *  target: Requested render target
+ *  usage: Prepares the context for blitting, drawing or other actions
+ *
+ *****************************************************************************/
+struct wined3d_context *context_acquire(IWineD3DDeviceImpl *device, IWineD3DSurface *target, enum ContextUsage usage)
+{
+    struct wined3d_context *current_context = context_get_current();
+    struct wined3d_context *context;
+
+    TRACE("device %p, target %p, usage %#x.\n", device, target, usage);
+
+    context = FindContext(device, target);
+    context_enter(context);
+    if (!context->valid) return context;
+
+    if (context != current_context)
+    {
+        if (!context_set_current(context)) ERR("Failed to activate the new context.\n");
+        else device->frag_pipe->enable_extension((IWineD3DDevice *)device, !context->last_was_blit);
+
+        if (context->vshader_const_dirty)
+        {
+            memset(context->vshader_const_dirty, 1,
+                    sizeof(*context->vshader_const_dirty) * device->d3d_vshader_constantF);
+            device->highest_dirty_vs_const = device->d3d_vshader_constantF;
+        }
+        if (context->pshader_const_dirty)
+        {
+            memset(context->pshader_const_dirty, 1,
+                   sizeof(*context->pshader_const_dirty) * device->d3d_pshader_constantF);
+            device->highest_dirty_ps_const = device->d3d_pshader_constantF;
+        }
+    }
+    else if (context->restore_ctx)
+    {
+        if (!pwglMakeCurrent(context->hdc, context->glCtx))
+        {
+            DWORD err = GetLastError();
+            ERR("Failed to make GL context %p current on device context %p, last error %#x.\n",
+                    context->hdc, context->glCtx, err);
+        }
+    }
+
+    context_apply_state(context, device, usage);
 
     return context;
 }

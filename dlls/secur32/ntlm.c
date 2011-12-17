@@ -549,6 +549,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
                     goto isc_end;
                 }
                 username = ntlm_GetUsernameArg(ui->wkui1_username, -1);
+                NetApiBufferFree(ui);
 
                 TRACE("using cached credentials\n");
 
@@ -820,6 +821,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         ret = SEC_E_BUFFER_TOO_SMALL;
         if ((phContext == NULL) && (pInput == NULL))
         {
+            HeapFree(GetProcessHeap(), 0, helper->session_key);
             cleanup_helper(helper);
             phNewContext->dwUpper = 0;
             phNewContext->dwLower = 0;
@@ -838,6 +840,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         ret = SEC_E_BUFFER_TOO_SMALL;
         if ((phContext == NULL) && (pInput == NULL))
         {
+            HeapFree(GetProcessHeap(), 0, helper->session_key);
             cleanup_helper(helper);
             phNewContext->dwUpper = 0;
             phNewContext->dwLower = 0;
@@ -851,6 +854,7 @@ static SECURITY_STATUS SEC_ENTRY ntlm_InitializeSecurityContextW(
         ret = SEC_E_INTERNAL_ERROR;
         if ((phContext == NULL) && (pInput == NULL))
         {
+            HeapFree(GetProcessHeap(), 0, helper->session_key);
             cleanup_helper(helper);
             phNewContext->dwUpper = 0;
             phNewContext->dwLower = 0;
@@ -1967,6 +1971,51 @@ static const SecPkgInfoA infoA = {
     ntlm_comment_A
 };
 
+#define NEGO_COMMENT { 'M', 'i', 'c', 'r', 'o', 's', 'o', 'f', 't', ' ', \
+    'P', 'a', 'c', 'k', 'a', 'g', 'e', ' ', \
+    'N', 'e', 'g', 'o', 't', 'i', 'a', 't', 'o', 'r', 0};
+
+static CHAR nego_comment_A[] = NEGO_COMMENT;
+static WCHAR nego_comment_W[] = NEGO_COMMENT;
+
+#define NEGO_NAME {'N', 'e', 'g', 'o', 't', 'i', 'a', 't', 'e', 0}
+
+static CHAR nego_name_A[] = NEGO_NAME;
+static WCHAR nego_name_W[] = NEGO_NAME;
+
+#define NEGO_CAPS (\
+    SECPKG_FLAG_INTEGRITY | \
+    SECPKG_FLAG_PRIVACY | \
+    SECPKG_FLAG_CONNECTION | \
+    SECPKG_FLAG_MULTI_REQUIRED | \
+    SECPKG_FLAG_EXTENDED_ERROR | \
+    SECPKG_FLAG_IMPERSONATION | \
+    SECPKG_FLAG_ACCEPT_WIN32_NAME | \
+    SECPKG_FLAG_READONLY_WITH_CHECKSUM )
+
+/* Not used for now, just kept here for completeness sake. We need to use the
+ * NTLM_MAX_BUF value. If the hack works, we might want to refactor the code a
+ * bit. */
+#define NEGO_MAX_TOKEN 12000
+
+static const SecPkgInfoW nego_infoW = {
+    NEGO_CAPS,
+    1,
+    RPC_C_AUTHN_GSS_NEGOTIATE,
+    NTLM_MAX_BUF,
+    nego_name_W,
+    nego_comment_W
+};
+
+static const SecPkgInfoA nego_infoA = {
+    NEGO_CAPS,
+    1,
+    RPC_C_AUTHN_GSS_NEGOTIATE,
+    NTLM_MAX_BUF,
+    nego_name_A,
+    nego_comment_A
+};
+
 void SECUR32_initNTLMSP(void)
 {
     PNegoHelper helper;
@@ -1995,7 +2044,11 @@ void SECUR32_initNTLMSP(void)
          helper->micro >= MIN_NTLM_AUTH_MICRO_VERSION) )
     {
         SecureProvider *provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);
+        SecureProvider *nego_provider = SECUR32_addProvider(&ntlmTableA, &ntlmTableW, NULL);
+
         SECUR32_addPackages(provider, 1L, &infoA, &infoW);
+        /* HACK: Also pretend this is the Negotiate provider */
+        SECUR32_addPackages(nego_provider, 1L, &nego_infoA, &nego_infoW);
     }
     else
     {

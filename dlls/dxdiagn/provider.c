@@ -48,6 +48,8 @@ static HRESULT WINAPI IDxDiagProviderImpl_QueryInterface(PDXDIAGPROVIDER iface, 
 {
     IDxDiagProviderImpl *This = (IDxDiagProviderImpl *)iface;
 
+    if (!ppobj) return E_INVALIDARG;
+
     if (IsEqualGUID(riid, &IID_IUnknown)
         || IsEqualGUID(riid, &IID_IDxDiagProvider)) {
         IUnknown_AddRef(iface);
@@ -56,6 +58,7 @@ static HRESULT WINAPI IDxDiagProviderImpl_QueryInterface(PDXDIAGPROVIDER iface, 
     }
 
     WARN("(%p)->(%s,%p),not found\n",This,debugstr_guid(riid),ppobj);
+    *ppobj = NULL;
     return E_NOINTERFACE;
 }
 
@@ -93,7 +96,8 @@ static HRESULT WINAPI IDxDiagProviderImpl_Initialize(PDXDIAGPROVIDER iface, DXDI
     if (NULL == pParams) {
       return E_POINTER;
     }
-    if (pParams->dwSize != sizeof(DXDIAG_INIT_PARAMS)) {
+    if (pParams->dwSize != sizeof(DXDIAG_INIT_PARAMS) ||
+        pParams->dwDxDiagHeaderVersion != DXDIAG_DX9_SDK_VERSION) {
       return E_INVALIDARG;
     }
 
@@ -107,11 +111,8 @@ static HRESULT WINAPI IDxDiagProviderImpl_GetRootContainer(PDXDIAGPROVIDER iface
   IDxDiagProviderImpl *This = (IDxDiagProviderImpl *)iface;
   TRACE("(%p,%p)\n", iface, ppInstance);
 
-  if (NULL == ppInstance) {
-    return E_INVALIDARG;
-  }
   if (FALSE == This->init) {
-    return E_INVALIDARG; /* should be E_CO_UNINITIALIZED */
+    return CO_E_NOTINITIALIZED;
   }
   if (NULL == This->pRootContainer) {
     hr = DXDiag_CreateDXDiagContainer(&IID_IDxDiagContainer, (void**) &This->pRootContainer);
@@ -136,12 +137,12 @@ HRESULT DXDiag_CreateDXDiagProvider(LPCLASSFACTORY iface, LPUNKNOWN punkOuter, R
   IDxDiagProviderImpl* provider;
 
   TRACE("(%p, %s, %p)\n", punkOuter, debugstr_guid(riid), ppobj);
-  
+
+  *ppobj = NULL;
+  if (punkOuter) return CLASS_E_NOAGGREGATION;
+
   provider = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IDxDiagProviderImpl));
-  if (NULL == provider) {
-    *ppobj = NULL;
-    return E_OUTOFMEMORY;
-  }
+  if (NULL == provider) return E_OUTOFMEMORY;
   provider->lpVtbl = &DxDiagProvider_Vtbl;
   provider->ref = 0; /* will be inited with QueryInterface */
   return IDxDiagProviderImpl_QueryInterface ((PDXDIAGPROVIDER)provider, riid, ppobj);

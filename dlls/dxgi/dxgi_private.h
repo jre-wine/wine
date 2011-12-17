@@ -75,7 +75,6 @@ const char *debug_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 WINED3DFORMAT wined3dformat_from_dxgi_format(DXGI_FORMAT format) DECLSPEC_HIDDEN;
 
 /* IDXGIFactory */
-extern const struct IWineDXGIFactoryVtbl dxgi_factory_vtbl DECLSPEC_HIDDEN;
 struct dxgi_factory
 {
     const struct IWineDXGIFactoryVtbl *vtbl;
@@ -84,6 +83,8 @@ struct dxgi_factory
     UINT adapter_count;
     IDXGIAdapter **adapters;
 };
+
+HRESULT dxgi_factory_init(struct dxgi_factory *factory) DECLSPEC_HIDDEN;
 
 /* IDXGIDevice */
 struct dxgi_device
@@ -121,13 +122,15 @@ struct dxgi_adapter
 HRESULT dxgi_adapter_init(struct dxgi_adapter *adapter, IWineDXGIFactory *parent, UINT ordinal) DECLSPEC_HIDDEN;
 
 /* IDXGISwapChain */
-extern const struct IDXGISwapChainVtbl dxgi_swapchain_vtbl DECLSPEC_HIDDEN;
 struct dxgi_swapchain
 {
     const struct IDXGISwapChainVtbl *vtbl;
     LONG refcount;
     IWineD3DSwapChain *wined3d_swapchain;
 };
+
+HRESULT dxgi_swapchain_init(struct dxgi_swapchain *swapchain, struct dxgi_device *device,
+        WINED3DPRESENT_PARAMETERS *present_parameters) DECLSPEC_HIDDEN;
 
 /* IDXGISurface */
 struct dxgi_surface

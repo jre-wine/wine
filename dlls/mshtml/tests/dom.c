@@ -2122,6 +2122,39 @@ static void _test_elem_set_tabindex(unsigned line, IUnknown *unk, short index)
     _test_elem_tabindex(line, unk, index);
 }
 
+#define test_elem_filters(u) _test_elem_filters(__LINE__,u)
+static void _test_elem_filters(unsigned line, IUnknown *unk)
+{
+    IHTMLElement *elem = _get_elem_iface(line, unk);
+    HRESULT hres;
+    IHTMLFiltersCollection *filters;
+
+    hres = IHTMLElement_get_filters(elem, &filters);
+    ok_(__FILE__,line) (hres == S_OK || broken(hres == REGDB_E_CLASSNOTREG) /* NT4 */,
+                        "get_filters failed: %08x\n", hres);
+    if(hres == S_OK)
+    {
+        LONG len;
+        IDispatchEx *dispex;
+
+        hres = IHTMLFiltersCollection_get_length(filters, &len);
+        ok_(__FILE__,line) (hres == S_OK, "get_length failed: %08x\n", hres);
+        ok_(__FILE__,line) (len == 0, "expect 0 got %d\n", len);
+
+        hres = IHTMLFiltersCollection_QueryInterface(filters, &IID_IDispatchEx, (void**)&dispex);
+        ok_(__FILE__,line) (hres == S_OK || broken(hres == E_NOINTERFACE),
+                            "Could not get IDispatchEx interface: %08x\n", hres);
+        if(SUCCEEDED(hres)) {
+            test_disp((IUnknown*)filters, &IID_IHTMLFiltersCollection, "[object]");
+            IDispatchEx_Release(dispex);
+        }
+
+        IHTMLFiltersCollection_Release(filters);
+    }
+
+    IHTMLElement_Release(elem);
+}
+
 #define test_elem_set_class(u,c) _test_elem_set_class(__LINE__,u,c)
 static void _test_elem_set_class(unsigned line, IUnknown *unk, const char *class)
 {
@@ -4761,8 +4794,6 @@ static void test_default_body(IHTMLBodyElement *body)
     BSTR bstr;
     HRESULT hres;
     VARIANT v;
-    WCHAR sBodyText[] = {'#','F','F','0','0','0','0',0};
-    WCHAR sTextInvalid[] = {'I','n','v','a','l','i','d',0};
 
     bstr = (void*)0xdeadbeef;
     hres = IHTMLBodyElement_get_background(body, &bstr);
@@ -4783,10 +4814,9 @@ static void test_default_body(IHTMLBodyElement *body)
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
     ok(bstr == NULL, "bstr != NULL\n");
 
-
     /* get_text - Invalid Text */
     V_VT(&v) = VT_BSTR;
-    V_BSTR(&v) = SysAllocString(sTextInvalid);
+    V_BSTR(&v) = a2bstr("Invalid");
     hres = IHTMLBodyElement_put_text(body, v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     VariantClear(&v);
@@ -4795,12 +4825,12 @@ static void test_default_body(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_get_text(body, &v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
-    ok(!strcmp_wa(V_BSTR(&v), "#00a0d0"), "v != '#00a0d0'\n");
+    ok(!strcmp_wa(V_BSTR(&v), "#00a0d0"), "v = %s, expected '#00a0d0'\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     /* get_text - Valid Text */
     V_VT(&v) = VT_BSTR;
-    V_BSTR(&v) = SysAllocString(sBodyText);
+    V_BSTR(&v) = a2bstr("#FF0000");
     hres = IHTMLBodyElement_put_text(body, v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     VariantClear(&v);
@@ -4809,23 +4839,22 @@ static void test_default_body(IHTMLBodyElement *body)
     hres = IHTMLBodyElement_get_text(body, &v);
     ok(hres == S_OK, "expect S_OK got 0x%08d\n", hres);
     ok(V_VT(&v) == VT_BSTR, "Expected VT_BSTR got %d\n", V_VT(&v));
-    ok(!strcmp_wa(V_BSTR(&v), "#ff0000"), "v != '#ff0000'\n");
+    ok(!strcmp_wa(V_BSTR(&v), "#ff0000"), "v = %s, expected '#ff0000'\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 }
 
 static void test_body_funs(IHTMLBodyElement *body)
 {
-    static WCHAR sRed[] = {'r','e','d',0};
-    VARIANT vbg;
-    VARIANT vDefaultbg;
+    VARIANT vbg, vDefaultbg;
     HRESULT hres;
 
     hres = IHTMLBodyElement_get_bgColor(body, &vDefaultbg);
     ok(hres == S_OK, "get_bgColor failed: %08x\n", hres);
     ok(V_VT(&vDefaultbg) == VT_BSTR, "bstr != NULL\n");
+    ok(!V_BSTR(&vDefaultbg), "V_BSTR(bgColor) = %s\n", wine_dbgstr_w(V_BSTR(&vDefaultbg)));
 
     V_VT(&vbg) = VT_BSTR;
-    V_BSTR(&vbg) = SysAllocString(sRed);
+    V_BSTR(&vbg) = a2bstr("red");
     hres = IHTMLBodyElement_put_bgColor(body, vbg);
     ok(hres == S_OK, "put_bgColor failed: %08x\n", hres);
     VariantClear(&vbg);
@@ -5017,6 +5046,9 @@ static void test_defaults(IHTMLDocument2 *doc)
     ok(l == 0, "length = %d\n", l);
 
     IHTMLStyleSheetsCollection_Release(stylesheetcol);
+
+    hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLFiltersCollection, (void**)&body);
+    ok(hres == E_NOINTERFACE, "got interface IHTMLFiltersCollection\n");
 
     test_default_selection(doc);
     test_doc_title(doc, "");
@@ -5380,6 +5412,7 @@ static void test_elems(IHTMLDocument2 *doc)
         test_elem_set_class((IUnknown*)elem, NULL);
         test_elem_tabindex((IUnknown*)elem, 0);
         test_elem_set_tabindex((IUnknown*)elem, 1);
+        test_elem_filters((IUnknown*)elem);
 
         node = test_node_get_parent((IUnknown*)elem);
         ok(node != NULL, "node == NULL\n");

@@ -241,6 +241,7 @@ static inline unsigned int dir_info_size( FILE_INFORMATION_CLASS class, unsigned
         return (FIELD_OFFSET( FILE_ID_FULL_DIRECTORY_INFORMATION, FileName[len] ) + 3) & ~3;
     default:
         assert(0);
+        return 0;
     }
 }
 
@@ -1378,7 +1379,7 @@ done:
 
 #elif defined HAVE_GETDIRENTRIES
 
-#if _DARWIN_FEATURE_64_BIT_INODE
+#ifdef _DARWIN_FEATURE_64_BIT_INODE
 
 /* Darwin doesn't provide a version of getdirentries with support for 64-bit
  * inodes.  When 64-bit inodes are enabled, the getdirentries symbol is mapped
@@ -1563,7 +1564,7 @@ done:
     return res;
 }
 
-#if _DARWIN_FEATURE_64_BIT_INODE
+#ifdef _DARWIN_FEATURE_64_BIT_INODE
 #undef getdirentries
 #undef dirent
 #endif
@@ -2549,8 +2550,7 @@ NTSTATUS nt_to_unix_file_name_attr( const OBJECT_ATTRIBUTES *attr, ANSI_STRING *
         return STATUS_NO_MEMORY;
     unix_name[0] = '.';
 
-    if (!(status = server_get_unix_fd( attr->RootDirectory, FILE_READ_DATA, &root_fd,
-                                       &needs_close, &type, NULL )))
+    if (!(status = server_get_unix_fd( attr->RootDirectory, 0, &root_fd, &needs_close, &type, NULL )))
     {
         if (type != FD_TYPE_DIR)
         {

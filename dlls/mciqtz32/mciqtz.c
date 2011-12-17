@@ -436,8 +436,25 @@ static DWORD MCIQTZ_mciSet(UINT wDevID, DWORD dwFlags, LPMCI_DGV_SET_PARMS lpPar
         }
     }
 
-    if (dwFlags & ~MCI_SET_TIME_FORMAT)
-        FIXME("Flags not supported yet %08lX\n", dwFlags & ~MCI_SET_TIME_FORMAT);
+    if (dwFlags & MCI_SET_DOOR_OPEN)
+        FIXME("MCI_SET_DOOR_OPEN not implemented yet\n");
+    if (dwFlags & MCI_SET_DOOR_CLOSED)
+        FIXME("MCI_SET_DOOR_CLOSED not implemented yet\n");
+    if (dwFlags & MCI_SET_AUDIO)
+        FIXME("MCI_SET_AUDIO not implemented yet\n");
+    if (dwFlags & MCI_SET_VIDEO)
+        FIXME("MCI_SET_VIDEO not implemented yet\n");
+    if (dwFlags & MCI_SET_ON)
+        FIXME("MCI_SET_ON not implemented yet\n");
+    if (dwFlags & MCI_SET_OFF)
+        FIXME("MCI_SET_OFF not implemented yet\n");
+    if (dwFlags & MCI_SET_AUDIO_LEFT)
+        FIXME("MCI_SET_AUDIO_LEFT not implemented yet\n");
+    if (dwFlags & MCI_SET_AUDIO_RIGHT)
+        FIXME("MCI_SET_AUDIO_RIGHT not implemented yet\n");
+
+    if (dwFlags & ~0x7f03 /* All MCI_SET flags mask */)
+        ERR("Unknown flags %08x\n", dwFlags & ~0x7f03);
 
     return 0;
 }
@@ -604,6 +621,27 @@ static DWORD MCIQTZ_mciWhere(UINT wDevID, DWORD dwFlags, LPMCI_DGV_RECT_PARMS lp
     return 0;
 }
 
+/***************************************************************************
+ *                              MCIQTZ_mciSetAudio              [internal]
+ */
+static DWORD MCIQTZ_mciSetAudio(UINT wDevID, DWORD dwFlags, LPMCI_DGV_SETAUDIO_PARMSW lpParms)
+{
+    WINE_MCIQTZ *wma;
+
+    FIXME("(%04x, %08x, %p) : stub\n", wDevID, dwFlags, lpParms);
+
+    if (!lpParms)
+        return MCIERR_NULL_PARAMETER_BLOCK;
+
+    wma = MCIQTZ_mciGetOpenDev(wDevID);
+    if (!wma)
+        return MCIERR_INVALID_DEVICE_ID;
+
+    MCIQTZ_mciStop(wDevID, MCI_WAIT, NULL);
+
+    return 0;
+}
+
 /*======================================================================*
  *                          MCI QTZ entry points                        *
  *======================================================================*/
@@ -644,6 +682,8 @@ LRESULT CALLBACK MCIQTZ_DriverProc(DWORD_PTR dwDevID, HDRVR hDriv, UINT wMsg,
         case MCI_SET:           return MCIQTZ_mciSet       (dwDevID, dwParam1, (LPMCI_DGV_SET_PARMS)       dwParam2);
         case MCI_STATUS:        return MCIQTZ_mciStatus    (dwDevID, dwParam1, (LPMCI_DGV_STATUS_PARMSW)   dwParam2);
         case MCI_WHERE:         return MCIQTZ_mciWhere     (dwDevID, dwParam1, (LPMCI_DGV_RECT_PARMS)      dwParam2);
+        /* Digital Video specific */
+        case MCI_SETAUDIO:      return MCIQTZ_mciSetAudio  (dwDevID, dwParam1, (LPMCI_DGV_SETAUDIO_PARMSW) dwParam2);
         case MCI_RECORD:
         case MCI_PAUSE:
         case MCI_RESUME:
@@ -666,7 +706,6 @@ LRESULT CALLBACK MCIQTZ_DriverProc(DWORD_PTR dwDevID, HDRVR hDriv, UINT wMsg,
         case MCI_CAPTURE:
         case MCI_MONITOR:
         case MCI_RESERVE:
-        case MCI_SETAUDIO:
         case MCI_SIGNAL:
         case MCI_SETVIDEO:
         case MCI_QUALITY:

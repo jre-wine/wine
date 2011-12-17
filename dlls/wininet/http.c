@@ -3592,6 +3592,7 @@ static DWORD HTTP_HttpSendRequestW(http_request_t *lpwhr, LPCWSTR lpszHeaders,
                                                  lpwhr->lpHttpSession->lpszPassword,
                                                  Host->lpszValue))
                         {
+                            HeapFree(GetProcessHeap(), 0, requestString);
                             loop_next = TRUE;
                             break;
                         }
@@ -3770,7 +3771,7 @@ BOOL WINAPI HttpEndRequestA(HINTERNET hRequest,
 
     if (lpBuffersOut)
     {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        SetLastError(ERROR_INVALID_PARAMETER);
         return FALSE;
     }
 
@@ -3880,7 +3881,7 @@ BOOL WINAPI HttpSendRequestExA(HINTERNET hRequest,
             header = HeapAlloc(GetProcessHeap(),0,headerlen*sizeof(WCHAR));
             if (!(BuffersInW.lpcszHeader = header))
             {
-                INTERNET_SetLastError(ERROR_OUTOFMEMORY);
+                SetLastError(ERROR_OUTOFMEMORY);
                 return FALSE;
             }
             BuffersInW.dwHeadersLength = MultiByteToWideChar(CP_ACP, 0,
@@ -4000,8 +4001,7 @@ lend:
         WININET_Release( &lpwhr->hdr );
 
     TRACE("<---\n");
-    if(res != ERROR_SUCCESS)
-        SetLastError(res);
+    SetLastError(res);
     return res == ERROR_SUCCESS;
 }
 
@@ -4089,8 +4089,7 @@ lend:
     if( lpwhr )
         WININET_Release( &lpwhr->hdr );
 
-    if(res != ERROR_SUCCESS)
-        SetLastError(res);
+    SetLastError(res);
     return res == ERROR_SUCCESS;
 }
 
@@ -4205,30 +4204,25 @@ static const object_vtbl_t HTTPSESSIONVtbl = {
  *   NULL on failure
  *
  */
-HINTERNET HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
-	INTERNET_PORT nServerPort, LPCWSTR lpszUserName,
-	LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
-	DWORD dwInternalFlags)
+DWORD HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
+        INTERNET_PORT nServerPort, LPCWSTR lpszUserName,
+        LPCWSTR lpszPassword, DWORD dwFlags, DWORD_PTR dwContext,
+        DWORD dwInternalFlags, HINTERNET *ret)
 {
     http_session_t *lpwhs = NULL;
     HINTERNET handle = NULL;
+    DWORD res = ERROR_SUCCESS;
 
     TRACE("-->\n");
 
     if (!lpszServerName || !lpszServerName[0])
-    {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
-        goto lerror;
-    }
+        return ERROR_INVALID_PARAMETER;
 
     assert( hIC->hdr.htype == WH_HINIT );
 
     lpwhs = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(http_session_t));
-    if (NULL == lpwhs)
-    {
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-	goto lerror;
-    }
+    if (!lpwhs)
+        return ERROR_OUTOFMEMORY;
 
    /*
     * According to my tests. The name is not resolved until a request is sent
@@ -4250,8 +4244,8 @@ HINTERNET HTTP_Connect(appinfo_t *hIC, LPCWSTR lpszServerName,
     if (NULL == handle)
     {
         ERR("Failed to alloc handle\n");
-        INTERNET_SetLastError(ERROR_OUTOFMEMORY);
-	goto lerror;
+        res = ERROR_OUTOFMEMORY;
+        goto lerror;
     }
 
     if(hIC->lpszProxy && hIC->dwAccessType == INTERNET_OPEN_TYPE_PROXY) {
@@ -4290,7 +4284,10 @@ lerror:
  */
 
     TRACE("%p --> %p (%p)\n", hIC, handle, lpwhs);
-    return handle;
+
+    if(res == ERROR_SUCCESS)
+        *ret = handle;
+    return res;
 }
 
 

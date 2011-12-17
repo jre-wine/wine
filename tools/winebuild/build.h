@@ -146,6 +146,7 @@ extern enum target_platform target_platform;
 
 #define FLAG_FORWARD   0x100  /* function is a forwarded name */
 #define FLAG_EXT_LINK  0x200  /* function links to an external symbol */
+#define FLAG_EXPORT32  0x400  /* 32-bit export in 16-bit spec file */
 
 #define FLAG_CPU(cpu)  (0x01000 << (cpu))
 #define FLAG_CPU_MASK  (FLAG_CPU(CPU_LAST + 1) - FLAG_CPU(0))
@@ -208,10 +209,10 @@ extern void warning( const char *msg, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
 extern int output( const char *format, ... )
    __attribute__ ((__format__ (__printf__, 1, 2)));
+extern char *find_tool( const char *name, const char * const *names );
 extern const char *get_as_command(void);
 extern const char *get_ld_command(void);
 extern const char *get_nm_command(void);
-extern const char *get_windres_command(void);
 extern char *get_temp_file_name( const char *prefix, const char *suffix );
 extern void output_standard_file_header(void);
 extern FILE *open_input_file( const char *srcdir, const char *name );
@@ -250,11 +251,13 @@ extern void output_get_pc_thunk(void);
 extern void output_module( DLLSPEC *spec );
 extern void output_stubs( DLLSPEC *spec );
 extern void output_imports( DLLSPEC *spec );
+extern void output_import_lib( DLLSPEC *spec, char **argv );
 extern void output_exports( DLLSPEC *spec );
 extern int load_res32_file( const char *name, DLLSPEC *spec );
 extern void output_resources( DLLSPEC *spec );
 extern void output_bin_resources( DLLSPEC *spec, unsigned int start_rva );
 extern void output_fake_module( DLLSPEC *spec );
+extern void output_def_file( DLLSPEC *spec, int include_private );
 extern void load_res16_file( const char *name, DLLSPEC *spec );
 extern void output_res16_data( DLLSPEC *spec );
 extern void output_bin_res16_data( DLLSPEC *spec );
@@ -266,9 +269,7 @@ extern void output_res_o_file( DLLSPEC *spec );
 
 extern void BuildRelays16(void);
 extern void BuildRelays32(void);
-extern void BuildSpec16File( DLLSPEC *spec );
 extern void BuildSpec32File( DLLSPEC *spec );
-extern void BuildDef32File( DLLSPEC *spec );
 
 extern void add_16bit_exports( DLLSPEC *spec32, DLLSPEC *spec16 );
 extern int parse_spec_file( FILE *file, DLLSPEC *spec );

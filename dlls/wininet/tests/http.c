@@ -971,8 +971,7 @@ static void HttpSendRequestEx_test(void)
     HINTERNET hRequest;
 
     INTERNET_BUFFERS BufferIn;
-    DWORD dwBytesWritten;
-    DWORD dwBytesRead;
+    DWORD dwBytesWritten, dwBytesRead, error;
     CHAR szBuffer[256];
     int i;
     BOOL ret;
@@ -1008,8 +1007,11 @@ static void HttpSendRequestEx_test(void)
     BufferIn.dwOffsetLow = 0;
     BufferIn.dwOffsetHigh = 0;
 
+    SetLastError(0xdeadbeef);
     ret = HttpSendRequestEx(hRequest, &BufferIn, NULL, 0 ,0);
-    ok(ret, "HttpSendRequestEx Failed with error %u\n", GetLastError());
+    error = GetLastError();
+    ok(ret, "HttpSendRequestEx Failed with error %u\n", error);
+    ok(error == ERROR_SUCCESS, "expected ERROR_SUCCESS, got %u\n", error);
 
     for (i = 3; szPostData[i]; i++)
         ok(InternetWriteFile(hRequest, &szPostData[i], 1, &dwBytesWritten),
@@ -1779,6 +1781,32 @@ static void test_basic_request(int port, const char *verb, const char *url)
     InternetCloseHandle(hi);
 }
 
+static void test_last_error(int port)
+{
+    HINTERNET hi, hc, hr;
+    DWORD error;
+    BOOL r;
+
+    hi = InternetOpen(NULL, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+    ok(hi != NULL, "open failed\n");
+
+    hc = InternetConnect(hi, "localhost", port, NULL, NULL, INTERNET_SERVICE_HTTP, 0, 0);
+    ok(hc != NULL, "connect failed\n");
+
+    hr = HttpOpenRequest(hc, NULL, "/test1", NULL, NULL, NULL, 0, 0);
+    ok(hr != NULL, "HttpOpenRequest failed\n");
+
+    SetLastError(0xdeadbeef);
+    r = HttpSendRequest(hr, NULL, 0, NULL, 0);
+    error = GetLastError();
+    ok(r, "HttpSendRequest failed\n");
+    ok(error == ERROR_SUCCESS || broken(error != ERROR_SUCCESS), "expected ERROR_SUCCESS, got %u\n", error);
+
+    InternetCloseHandle(hr);
+    InternetCloseHandle(hc);
+    InternetCloseHandle(hi);
+}
+
 static void test_proxy_indirect(int port)
 {
     HINTERNET hi, hc, hr;
@@ -2422,6 +2450,7 @@ static void test_http_connection(void)
     test_response_without_headers(si.port);
     test_HttpQueryInfo(si.port);
     test_HttpSendRequestW(si.port);
+    test_last_error(si.port);
 
     /* send the basic request again to shutdown the server thread */
     test_basic_request(si.port, "GET", "/quit");

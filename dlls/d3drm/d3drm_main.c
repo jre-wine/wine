@@ -1,5 +1,6 @@
 /*
  * Copyright 2004 Ivan Leo Puoti
+ * Copyright 2010 Christian Costa
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,6 +20,12 @@
 #include <stdarg.h>
 #include "windef.h"
 #include "winbase.h"
+#include "wingdi.h"
+#include "d3drm.h"
+#include "d3drm_private.h"
+#include "wine/debug.h"
+
+WINE_DEFAULT_DEBUG_CHANNEL(d3drm);
 
 /***********************************************************************
  *		DllMain  (D3DRM.@)
@@ -34,4 +41,14 @@ BOOL WINAPI DllMain( HINSTANCE inst, DWORD reason, LPVOID reserved )
         break;
     }
     return TRUE;
+}
+
+/***********************************************************************
+ *              (D3DRM.@)
+ */
+HRESULT WINAPI Direct3DRMCreate(LPDIRECT3DRM* ppDirect3DRM)
+{
+    TRACE("(%p)\n", ppDirect3DRM);
+
+    return Direct3DRM_create(ppDirect3DRM);
 }

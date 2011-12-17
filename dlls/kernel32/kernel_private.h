@@ -23,23 +23,6 @@
 
 #include "wine/server.h"
 
-struct tagSYSLEVEL;
-
-struct kernel_thread_data
-{
-    UINT                code_page;      /* thread code page */
-    WORD                stack_sel;      /* 16-bit stack selector */
-    WORD                htask16;        /* Win16 task handle */
-    DWORD               sys_count[4];   /* syslevel mutex entry counters */
-    struct tagSYSLEVEL *sys_mutex[4];   /* syslevel mutex pointers */
-    void               *pad[44];        /* change this if you add fields! */
-};
-
-static inline struct kernel_thread_data *kernel_get_thread_data(void)
-{
-    return (struct kernel_thread_data *)NtCurrentTeb()->SystemReserved1;
-}
-
 HANDLE  WINAPI OpenConsoleW(LPCWSTR, DWORD, BOOL, DWORD);
 BOOL    WINAPI VerifyConsoleIoHandle(HANDLE);
 HANDLE  WINAPI DuplicateConsoleHandle(HANDLE, DWORD, BOOL, DWORD);
@@ -68,8 +51,6 @@ extern HMODULE kernel32_handle;
 extern const WCHAR *DIR_Windows;
 extern const WCHAR *DIR_System;
 extern const WCHAR *DIR_SysWow64;
-
-extern VOID SYSLEVEL_CheckNotLevel( INT level );
 
 extern void FILE_SetDosError(void);
 extern WCHAR *FILE_name_AtoW( LPCSTR name, BOOL alloc );
@@ -103,11 +84,6 @@ extern WCHAR *MODULE_get_dll_load_path( LPCWSTR module );
 extern void MODULE_get_binary_info( HANDLE hfile, struct binary_info *info );
 
 extern BOOL NLS_IsUnicodeOnlyLcid(LCID);
-
-/* vxd.c */
-typedef BOOL (WINAPI *DeviceIoProc)(DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
-extern DeviceIoProc VXD_get_proc( HANDLE handle );
-extern HANDLE VXD_Open( LPCWSTR filename, DWORD access, LPSECURITY_ATTRIBUTES sa );
 
 /* environ.c */
 extern void ENV_CopyStartupInformation(void);

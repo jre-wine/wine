@@ -192,7 +192,6 @@ static control_t *get_control_head(control_t *p);
 static ver_value_t *get_ver_value_head(ver_value_t *p);
 static ver_block_t *get_ver_block_head(ver_block_t *p);
 static resource_t *get_resource_head(resource_t *p);
-static menuex_item_t *get_itemex_head(menuex_item_t *p);
 static menu_item_t *get_item_head(menu_item_t *p);
 static raw_data_t *merge_raw_data_str(raw_data_t *r1, string_t *str);
 static raw_data_t *merge_raw_data_int(raw_data_t *r1, int i);
@@ -205,15 +204,6 @@ static raw_data_t *load_file(string_t *name, language_t *lang);
 static itemex_opt_t *new_itemex_opt(int id, int type, int state, int helpid);
 static event_t *add_string_event(string_t *key, int id, int flags, event_t *prev);
 static event_t *add_event(int key, int id, int flags, event_t *prev);
-static dialogex_t *dialogex_version(version_t *v, dialogex_t *dlg);
-static dialogex_t *dialogex_characteristics(characts_t *c, dialogex_t *dlg);
-static dialogex_t *dialogex_language(language_t *l, dialogex_t *dlg);
-static dialogex_t *dialogex_menu(name_id_t *m, dialogex_t *dlg);
-static dialogex_t *dialogex_class(name_id_t *n, dialogex_t *dlg);
-static dialogex_t *dialogex_font(font_id_t *f, dialogex_t *dlg);
-static dialogex_t *dialogex_caption(string_t *s, dialogex_t *dlg);
-static dialogex_t *dialogex_exstyle(style_t *st, dialogex_t *dlg);
-static dialogex_t *dialogex_style(style_t *st, dialogex_t *dlg);
 static name_id_t *convert_ctlclass(name_id_t *cls);
 static control_t *ins_ctrl(int type, int special_style, control_t *ctrl, control_t *prev);
 static dialog_t *dialog_version(version_t *v, dialog_t *dlg);
@@ -244,11 +234,9 @@ static int rsrcid_to_token(int lookahead);
 	accelerator_t	*acc;
 	bitmap_t	*bmp;
 	dialog_t	*dlg;
-	dialogex_t	*dlgex;
 	font_t		*fnt;
 	fontdir_t	*fnd;
 	menu_t		*men;
-	menuex_t	*menex;
 	html_t		*html;
 	rcdata_t	*rdt;
 	stringtable_t	*stt;
@@ -264,7 +252,6 @@ static int rsrcid_to_token(int lookahead);
 	characts_t	*chars;
 	event_t		*event;
 	menu_item_t	*menitm;
-	menuex_item_t	*menexitm;
 	itemex_opt_t	*exopt;
 	raw_data_t	*raw;
 	lvc_t		*lvc;
@@ -316,10 +303,9 @@ static int rsrcid_to_token(int lookahead);
 %type <event> 	events
 %type <bmp> 	bitmap
 %type <ani> 	cursor icon
-%type <dlg> 	dialog dlg_attributes
+%type <dlg> 	dialog dlg_attributes dialogex dlgex_attribs
 %type <ctl> 	ctrls gen_ctrl lab_ctrl ctrl_desc iconinfo
 %type <iptr>	helpid
-%type <dlgex> 	dialogex dlgex_attribs
 %type <ctl>	exctrls gen_exctrl lab_exctrl exctrl_desc
 %type <html>	html
 %type <rdt> 	rcdata
@@ -328,10 +314,8 @@ static int rsrcid_to_token(int lookahead);
 %type <verw>	ver_words
 %type <blk>	ver_blocks ver_block
 %type <val>	ver_values ver_value
-%type <men> 	menu
-%type <menitm>	item_definitions menu_body
-%type <menex>	menuex
-%type <menexitm> itemex_definitions menuex_body
+%type <men> 	menu menuex
+%type <menitm>	item_definitions menu_body itemex_definitions menuex_body
 %type <exopt>	itemex_p_options itemex_options
 %type <msg> 	messagetable
 %type <usr> 	userres
@@ -616,7 +600,7 @@ resource_definition
 	| dialog	{ $$ = new_resource(res_dlg, $1, $1->memopt, $1->lvc.language); }
 	| dialogex {
 		if(win32)
-			$$ = new_resource(res_dlgex, $1, $1->memopt, $1->lvc.language);
+			$$ = new_resource(res_dlg, $1, $1->memopt, $1->lvc.language);
 		else
 			$$ = NULL;
 		}
@@ -650,7 +634,7 @@ resource_definition
 	| menu		{ $$ = new_resource(res_men, $1, $1->memopt, $1->lvc.language); }
 	| menuex {
 		if(win32)
-			$$ = new_resource(res_menex, $1, $1->memopt, $1->lvc.language);
+			$$ = new_resource(res_men, $1, $1->memopt, $1->lvc.language);
 		else
 			$$ = NULL;
 		}
@@ -1078,17 +1062,17 @@ dialogex: tDIALOGEX loadmemopts expr ',' expr ',' expr ',' expr helpid dlgex_att
 	;
 
 dlgex_attribs
-	: /* Empty */				{ $$=new_dialogex(); }
-	| dlgex_attribs tSTYLE style		{ $$=dialogex_style($3,$1); }
-	| dlgex_attribs tEXSTYLE style		{ $$=dialogex_exstyle($3,$1); }
-	| dlgex_attribs tCAPTION tSTRING	{ $$=dialogex_caption($3,$1); }
-	| dlgex_attribs opt_font		{ $$=dialogex_font($2,$1); }
-	| dlgex_attribs opt_exfont		{ $$=dialogex_font($2,$1); }
-	| dlgex_attribs tCLASS nameid_s		{ $$=dialogex_class($3,$1); }
-	| dlgex_attribs tMENU nameid		{ $$=dialogex_menu($3,$1); }
-	| dlgex_attribs opt_language		{ $$=dialogex_language($2,$1); }
-	| dlgex_attribs opt_characts		{ $$=dialogex_characteristics($2,$1); }
-	| dlgex_attribs opt_version		{ $$=dialogex_version($2,$1); }
+	: /* Empty */				{ $$=new_dialog(); $$->is_ex = TRUE; }
+	| dlgex_attribs tSTYLE style		{ $$=dialog_style($3,$1); }
+	| dlgex_attribs tEXSTYLE style		{ $$=dialog_exstyle($3,$1); }
+	| dlgex_attribs tCAPTION tSTRING	{ $$=dialog_caption($3,$1); }
+	| dlgex_attribs opt_font		{ $$=dialog_font($2,$1); }
+	| dlgex_attribs opt_exfont		{ $$=dialog_font($2,$1); }
+	| dlgex_attribs tCLASS nameid_s		{ $$=dialog_class($3,$1); }
+	| dlgex_attribs tMENU nameid		{ $$=dialog_menu($3,$1); }
+	| dlgex_attribs opt_language		{ $$=dialog_language($2,$1); }
+	| dlgex_attribs opt_characts		{ $$=dialog_characteristics($2,$1); }
+	| dlgex_attribs opt_version		{ $$=dialog_version($2,$1); }
 	;
 
 exctrls	: /* Empty */				{ $$ = NULL; }
@@ -1309,7 +1293,8 @@ menuex	: tMENUEX loadmemopts opt_lvc menuex_body	{
 			parser_warning("MENUEX not supported in 16-bit mode\n");
 		if(!$4)
 			yyerror("MenuEx must contain items");
-		$$ = new_menuex();
+		$$ = new_menu();
+		$$->is_ex = TRUE;
 		if($2)
 		{
 			$$->memopt = *($2);
@@ -1317,7 +1302,7 @@ menuex	: tMENUEX loadmemopts opt_lvc menuex_body	{
 		}
 		else
 			$$->memopt = WRC_MO_MOVEABLE | WRC_MO_PURE | WRC_MO_DISCARDABLE;
-		$$->items = get_itemex_head($4);
+		$$->items = get_item_head($4);
 		if($3)
 		{
 			$$->lvc = *($3);
@@ -1335,7 +1320,7 @@ menuex_body
 itemex_definitions
 	: /* Empty */	{$$ = NULL; }
 	| itemex_definitions tMENUITEM tSTRING itemex_options {
-		$$ = new_menuex_item();
+		$$ = new_menu_item();
 		$$->prev = $1;
 		if($1)
 			$1->next = $$;
@@ -1351,17 +1336,17 @@ itemex_definitions
 		free($4);
 		}
 	| itemex_definitions tMENUITEM tSEPARATOR {
-		$$ = new_menuex_item();
+		$$ = new_menu_item();
 		$$->prev = $1;
 		if($1)
 			$1->next = $$;
 		}
 	| itemex_definitions tPOPUP tSTRING itemex_p_options menuex_body {
-		$$ = new_menuex_item();
+		$$ = new_menu_item();
 		$$->prev = $1;
 		if($1)
 			$1->next = $$;
-		$$->popup = get_itemex_head($5);
+		$$->popup = get_item_head($5);
 		$$->name = $3;
 		$$->id = $4->id;
 		$$->type = $4->type;
@@ -2163,118 +2148,6 @@ static name_id_t *convert_ctlclass(name_id_t *cls)
 	return cls;
 }
 
-/* DialogEx specific functions */
-static dialogex_t *dialogex_style(style_t * st, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->style == NULL)
-	{
-		dlg->style = new_style(0,0);
-	}
-
-	if(dlg->gotstyle)
-	{
-		parser_warning("Style already defined, or-ing together\n");
-	}
-	else
-	{
-		dlg->style->or_mask = 0;
-		dlg->style->and_mask = 0;
-	}
-	dlg->style->or_mask |= st->or_mask;
-	dlg->style->and_mask |= st->and_mask;
-	dlg->gotstyle = TRUE;
-	free(st);
-	return dlg;
-}
-
-static dialogex_t *dialogex_exstyle(style_t * st, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->exstyle == NULL)
-	{
-		dlg->exstyle = new_style(0,0);
-	}
-
-	if(dlg->gotexstyle)
-	{
-		parser_warning("ExStyle already defined, or-ing together\n");
-	}
-	else
-	{
-		dlg->exstyle->or_mask = 0;
-		dlg->exstyle->and_mask = 0;
-	}
-	dlg->exstyle->or_mask |= st->or_mask;
-	dlg->exstyle->and_mask |= st->and_mask;
-	dlg->gotexstyle = TRUE;
-	free(st);
-	return dlg;
-}
-
-static dialogex_t *dialogex_caption(string_t *s, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->title)
-		yyerror("Caption already defined");
-	dlg->title = s;
-	return dlg;
-}
-
-static dialogex_t *dialogex_font(font_id_t *f, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->font)
-		yyerror("Font already defined");
-	dlg->font = f;
-	return dlg;
-}
-
-static dialogex_t *dialogex_class(name_id_t *n, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->dlgclass)
-		yyerror("Class already defined");
-	dlg->dlgclass = n;
-	return dlg;
-}
-
-static dialogex_t *dialogex_menu(name_id_t *m, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->menu)
-		yyerror("Menu already defined");
-	dlg->menu = m;
-	return dlg;
-}
-
-static dialogex_t *dialogex_language(language_t *l, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->lvc.language)
-		yyerror("Language already defined");
-	dlg->lvc.language = l;
-	return dlg;
-}
-
-static dialogex_t *dialogex_characteristics(characts_t *c, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->lvc.characts)
-		yyerror("Characteristics already defined");
-	dlg->lvc.characts = c;
-	return dlg;
-}
-
-static dialogex_t *dialogex_version(version_t *v, dialogex_t *dlg)
-{
-	assert(dlg != NULL);
-	if(dlg->lvc.version)
-		yyerror("Version already defined");
-	dlg->lvc.version = v;
-	return dlg;
-}
-
 /* Accelerator specific functions */
 static event_t *add_event(int key, int id, int flags, event_t *prev)
 {
@@ -2529,15 +2402,6 @@ static raw_data_t *merge_raw_data_str(raw_data_t *r1, string_t *str)
 
 /* Function the go back in a list to get the head */
 static menu_item_t *get_item_head(menu_item_t *p)
-{
-	if(!p)
-		return NULL;
-	while(p->prev)
-		p = p->prev;
-	return p;
-}
-
-static menuex_item_t *get_itemex_head(menuex_item_t *p)
 {
 	if(!p)
 		return NULL;

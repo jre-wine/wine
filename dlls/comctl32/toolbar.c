@@ -2606,7 +2606,7 @@ TOOLBAR_CustomizeDialogProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		COLORREF oldBk = 0;
 
 		/* get item data */
-		btnInfo = (PCUSTOMBUTTON)SendDlgItemMessageW (hwnd, wParam, LB_GETITEMDATA, (WPARAM)lpdis->itemID, 0);
+               btnInfo = (PCUSTOMBUTTON)SendDlgItemMessageW (hwnd, wParam, LB_GETITEMDATA, lpdis->itemID, 0);
 		if (btnInfo == NULL)
 		{
 		    FIXME("btnInfo invalid!\n");
@@ -3156,8 +3156,6 @@ TOOLBAR_Customize (TOOLBAR_INFO *infoPtr)
 {
     CUSTDLG_INFO custInfo;
     LRESULT ret;
-    LPCVOID template;
-    HRSRC hRes;
     NMHDR nmhdr;
 
     custInfo.tbInfo = infoPtr;
@@ -3166,17 +3164,8 @@ TOOLBAR_Customize (TOOLBAR_INFO *infoPtr)
     /* send TBN_BEGINADJUST notification */
     TOOLBAR_SendNotify (&nmhdr, infoPtr, TBN_BEGINADJUST);
 
-    if (!(hRes = FindResourceW (COMCTL32_hModule,
-                                MAKEINTRESOURCEW(IDD_TBCUSTOMIZE),
-                                (LPWSTR)RT_DIALOG)))
-	return FALSE;
-
-    if(!(template = LoadResource (COMCTL32_hModule, hRes)))
-	return FALSE;
-
-    ret = DialogBoxIndirectParamW ((HINSTANCE)GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_HINSTANCE),
-                                   template, infoPtr->hwndSelf, TOOLBAR_CustomizeDialogProc,
-                                   (LPARAM)&custInfo);
+    ret = DialogBoxParamW (COMCTL32_hModule, MAKEINTRESOURCEW(IDD_TBCUSTOMIZE),
+                           infoPtr->hwndSelf, TOOLBAR_CustomizeDialogProc, (LPARAM)&custInfo);
 
     /* send TBN_ENDADJUST notification */
     TOOLBAR_SendNotify (&nmhdr, infoPtr, TBN_ENDADJUST);
@@ -3991,7 +3980,7 @@ TOOLBAR_ReplaceBitmap (TOOLBAR_INFO *infoPtr, const TBREPLACEBITMAP *lpReplace)
         FIXME("changing standard bitmaps not implemented\n");
         return FALSE;
     }
-    else if (lpReplace->hInstOld != 0)
+    else if (lpReplace->hInstOld != 0 && lpReplace->hInstOld != lpReplace->hInstNew)
         FIXME("resources not in the current module not implemented\n");
 
     TRACE("To be replaced hInstOld %p nIDOld %lx\n", lpReplace->hInstOld, lpReplace->nIDOld);
@@ -5153,7 +5142,7 @@ TOOLBAR_Create (HWND hwnd, const CREATESTRUCTW *lpcs)
     infoPtr->dwStyle = dwStyle;
     GetClientRect(hwnd, &infoPtr->client_rect);
     infoPtr->bUnicode = infoPtr->hwndNotify && 
-        (NFR_UNICODE == SendMessageW(hwnd, WM_NOTIFYFORMAT, (WPARAM)hwnd, (LPARAM)NF_REQUERY));
+        (NFR_UNICODE == SendMessageW(hwnd, WM_NOTIFYFORMAT, (WPARAM)hwnd, NF_REQUERY));
     infoPtr->hwndToolTip = NULL; /* if needed the tooltip control will be created after a WM_MOUSEMOVE */
 
     SystemParametersInfoW (SPI_GETICONTITLELOGFONT, 0, &logFont, 0);
@@ -5600,7 +5589,7 @@ TOOLBAR_LButtonUp (TOOLBAR_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
         else
         {
             TRACE("button %d dragged out of toolbar\n", infoPtr->nButtonDrag);
-            TOOLBAR_DeleteButton(infoPtr, (WPARAM)infoPtr->nButtonDrag);
+            TOOLBAR_DeleteButton(infoPtr, infoPtr->nButtonDrag);
         }
 
         /* button under cursor changed so need to re-set hot item */

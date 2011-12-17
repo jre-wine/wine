@@ -762,14 +762,22 @@ void output_fake_module( DLLSPEC *spec )
 
 
 /*******************************************************************
- *         BuildDef32File
+ *         output_def_file
  *
  * Build a Win32 def file from a spec file.
  */
-void BuildDef32File( DLLSPEC *spec )
+void output_def_file( DLLSPEC *spec, int include_private )
 {
+    DLLSPEC *spec32 = NULL;
     const char *name;
     int i, total;
+
+    if (spec->type == SPEC_WIN16)
+    {
+        spec32 = alloc_dll_spec();
+        add_16bit_exports( spec32, spec );
+        spec = spec32;
+    }
 
     if (spec_file_name)
         output( "; File generated automatically from %s; do not edit!\n\n",
@@ -794,6 +802,7 @@ void BuildDef32File( DLLSPEC *spec )
         else continue;
 
         if (!(odp->flags & FLAG_PRIVATE)) total++;
+        else if (!include_private) continue;
 
         if (odp->type == TYPE_STUB) continue;
 
@@ -835,4 +844,5 @@ void BuildDef32File( DLLSPEC *spec )
         output( "\n" );
     }
     if (!total) warning( "%s: Import library doesn't export anything\n", spec->file_name );
+    if (spec32) free_dll_spec( spec32 );
 }

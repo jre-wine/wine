@@ -1362,6 +1362,8 @@ static HRESULT WINAPI IAVIStream_fnSetInfo(IAVIStream *iface,
 
 static HRESULT AVIFILE_AddFrame(IAVIStreamImpl *This, DWORD ckid, DWORD size, DWORD offset, DWORD flags)
 {
+  UINT n;
+
   /* pre-conditions */
   assert(This != NULL);
 
@@ -1379,31 +1381,32 @@ static HRESULT AVIFILE_AddFrame(IAVIStreamImpl *This, DWORD ckid, DWORD size, DW
       ERR(": found palette change in non-video stream!\n");
       return AVIERR_BADFORMAT;
     }
-    This->sInfo.dwFlags |= AVISTREAMINFO_FORMATCHANGES;
-    This->sInfo.dwFormatChangeCount++;
 
-    if (This->idxFmtChanges == NULL || This->sInfo.dwFormatChangeCount < This->nIdxFmtChanges) {
-      UINT n = This->sInfo.dwFormatChangeCount;
+    if (This->idxFmtChanges == NULL || This->nIdxFmtChanges <= This->sInfo.dwFormatChangeCount) {
+      DWORD new_count = This->nIdxFmtChanges + 16;
+      void *new_buffer;
 
-      This->nIdxFmtChanges += 16;
-      if (This->idxFmtChanges == NULL)
+      if (This->idxFmtChanges == NULL) {
 	This->idxFmtChanges =
-	  HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->nIdxFmtChanges * sizeof(AVIINDEXENTRY));
-      else
-	This->idxFmtChanges =
-	  HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->idxFmtChanges,
-			   This->nIdxFmtChanges * sizeof(AVIINDEXENTRY));
-      if (This->idxFmtChanges == NULL)
-	return AVIERR_MEMORY;
-
-      This->idxFmtChanges[n].ckid          = This->lLastFrame;
-      This->idxFmtChanges[n].dwFlags       = 0;
-      This->idxFmtChanges[n].dwChunkOffset = offset;
-      This->idxFmtChanges[n].dwChunkLength = size;
-
-      return AVIERR_OK;
+          HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, new_count * sizeof(AVIINDEXENTRY));
+        if (!This->idxFmtChanges) return AVIERR_MEMORY;
+      } else {
+        new_buffer = HeapReAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, This->idxFmtChanges,
+                new_count * sizeof(AVIINDEXENTRY));
+        if (!new_buffer) return AVIERR_MEMORY;
+        This->idxFmtChanges = new_buffer;
+      }
+      This->nIdxFmtChanges = new_count;
     }
-    break;
+
+    This->sInfo.dwFlags |= AVISTREAMINFO_FORMATCHANGES;
+    n = ++This->sInfo.dwFormatChangeCount;
+    This->idxFmtChanges[n].ckid          = This->lLastFrame;
+    This->idxFmtChanges[n].dwFlags       = 0;
+    This->idxFmtChanges[n].dwChunkOffset = offset;
+    This->idxFmtChanges[n].dwChunkLength = size;
+
+    return AVIERR_OK;
   case cktypeWAVEbytes:
     if (This->paf->fInfo.dwFlags & AVIFILEINFO_TRUSTCKTYPE)
       flags |= AVIIF_KEYFRAME;
@@ -2027,16 +2030,18 @@ static HRESULT AVIFILE_ReadBlock(IAVIStreamImpl *This, DWORD pos,
     size += 2 * sizeof(DWORD);
 
     /* check that buffer is big enough -- don't trust dwSuggestedBufferSize */
-    if (This->lpBuffer == NULL || size < This->cbBuffer) {
+    if (This->lpBuffer == NULL || This->cbBuffer < size) {
       DWORD maxSize = max(size, This->sInfo.dwSuggestedBufferSize);
 
-      if (This->lpBuffer == NULL)
+      if (This->lpBuffer == NULL) {
 	This->lpBuffer = HeapAlloc(GetProcessHeap(), 0, maxSize);
-      else
-	This->lpBuffer = HeapReAlloc(GetProcessHeap(), 0, This->lpBuffer, maxSize);
-      if (This->lpBuffer == NULL)
-	return AVIERR_MEMORY;
-      This->cbBuffer = max(size, This->sInfo.dwSuggestedBufferSize);
+        if (!This->lpBuffer) return AVIERR_MEMORY;
+      } else {
+        void *new_buffer = HeapReAlloc(GetProcessHeap(), 0, This->lpBuffer, maxSize);
+        if (!new_buffer) return AVIERR_MEMORY;
+        This->lpBuffer = new_buffer;
+      }
+      This->cbBuffer = maxSize;
     }
 
     /* now read the complete chunk into our buffer */

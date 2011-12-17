@@ -30,25 +30,30 @@ WINE_DEFAULT_DEBUG_CHANNEL(gdiplus);
 GpStatus WINGDIPAPI GdipCloneImageAttributes(GDIPCONST GpImageAttributes *imageattr,
     GpImageAttributes **cloneImageattr)
 {
+    GpStatus stat;
+
     TRACE("(%p, %p)\n", imageattr, cloneImageattr);
 
     if(!imageattr || !cloneImageattr)
         return InvalidParameter;
 
-    **cloneImageattr = *imageattr;
+    stat = GdipCreateImageAttributes(cloneImageattr);
 
-    return Ok;
+    if (stat == Ok)
+        **cloneImageattr = *imageattr;
+
+    return stat;
 }
 
 GpStatus WINGDIPAPI GdipCreateImageAttributes(GpImageAttributes **imageattr)
 {
-    TRACE("(%p)\n", imageattr);
-
     if(!imageattr)
         return InvalidParameter;
 
     *imageattr = GdipAlloc(sizeof(GpImageAttributes));
     if(!*imageattr)    return OutOfMemory;
+
+    TRACE("<-- %p\n", *imageattr);
 
     return Ok;
 }
@@ -84,15 +89,32 @@ GpStatus WINGDIPAPI GdipSetImageAttributesColorMatrix(GpImageAttributes *imageat
     ColorAdjustType type, BOOL enableFlag, GDIPCONST ColorMatrix* colorMatrix,
     GDIPCONST ColorMatrix* grayMatrix, ColorMatrixFlags flags)
 {
-    static int calls;
+    TRACE("(%p,%u,%i,%p,%p,%u)\n", imageattr, type, enableFlag, colorMatrix,
+        grayMatrix, flags);
 
-    if(!imageattr || !colorMatrix || !grayMatrix)
+    if(!imageattr || type >= ColorAdjustTypeCount || flags > ColorMatrixFlagsAltGray)
         return InvalidParameter;
 
-    if(!(calls++))
-        FIXME("not implemented\n");
+    if (enableFlag)
+    {
+        if (!colorMatrix)
+            return InvalidParameter;
 
-    return NotImplemented;
+        if (flags == ColorMatrixFlagsAltGray)
+        {
+            if (!grayMatrix)
+                return InvalidParameter;
+
+            imageattr->colormatrices[type].graymatrix = *grayMatrix;
+        }
+
+        imageattr->colormatrices[type].colormatrix = *colorMatrix;
+        imageattr->colormatrices[type].flags = flags;
+    }
+
+    imageattr->colormatrices[type].enabled = enableFlag;
+
+    return Ok;
 }
 
 GpStatus WINGDIPAPI GdipSetImageAttributesWrapMode(GpImageAttributes *imageAttr,

@@ -949,6 +949,7 @@ HINTERNET WINAPI InternetConnectW(HINTERNET hInternet,
 {
     appinfo_t *hIC;
     HINTERNET rc = NULL;
+    DWORD res = ERROR_SUCCESS;
 
     TRACE("(%p, %s, %i, %s, %s, %i, %i, %lx)\n", hInternet, debugstr_w(lpszServerName),
 	  nServerPort, debugstr_w(lpszUserName), debugstr_w(lpszPassword),
@@ -956,16 +957,14 @@ HINTERNET WINAPI InternetConnectW(HINTERNET hInternet,
 
     if (!lpszServerName)
     {
-        INTERNET_SetLastError(ERROR_INVALID_PARAMETER);
+        SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
 
-    /* Clear any error information */
-    INTERNET_SetLastError(0);
     hIC = (appinfo_t*)WININET_GetObject( hInternet );
     if ( (hIC == NULL) || (hIC->hdr.htype != WH_HINIT) )
     {
-        INTERNET_SetLastError(ERROR_INVALID_HANDLE);
+        res = ERROR_INVALID_HANDLE;
         goto lend;
     }
 
@@ -974,11 +973,13 @@ HINTERNET WINAPI InternetConnectW(HINTERNET hInternet,
         case INTERNET_SERVICE_FTP:
             rc = FTP_Connect(hIC, lpszServerName, nServerPort,
             lpszUserName, lpszPassword, dwFlags, dwContext, 0);
+            if(!rc)
+                res = INTERNET_GetLastError();
             break;
 
         case INTERNET_SERVICE_HTTP:
-	    rc = HTTP_Connect(hIC, lpszServerName, nServerPort,
-            lpszUserName, lpszPassword, dwFlags, dwContext, 0);
+	    res = HTTP_Connect(hIC, lpszServerName, nServerPort,
+                    lpszUserName, lpszPassword, dwFlags, dwContext, 0, &rc);
             break;
 
         case INTERNET_SERVICE_GOPHER:
@@ -990,6 +991,7 @@ lend:
         WININET_Release( &hIC->hdr );
 
     TRACE("returning %p\n", rc);
+    SetLastError(res);
     return rc;
 }
 
@@ -2280,11 +2282,11 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
       {
         if (!lpwhh)
         {
-            INTERNET_SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
+            SetLastError(ERROR_INTERNET_INCORRECT_HANDLE_TYPE);
             return FALSE;
         }
         WININET_Release(lpwhh);
-        INTERNET_SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
+        SetLastError(ERROR_INTERNET_OPTION_NOT_SETTABLE);
         return FALSE;
       }
     case INTERNET_OPTION_HTTP_VERSION:
@@ -2371,37 +2373,37 @@ BOOL WINAPI InternetSetOptionW(HINTERNET hInternet, DWORD dwOption,
 	 break;
     case INTERNET_OPTION_HTTP_DECODING:
         FIXME("INTERNET_OPTION_HTTP_DECODING; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     case INTERNET_OPTION_COOKIES_3RD_PARTY:
         FIXME("INTERNET_OPTION_COOKIES_3RD_PARTY; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     case INTERNET_OPTION_SEND_UTF8_SERVERNAME_TO_PROXY:
         FIXME("INTERNET_OPTION_SEND_UTF8_SERVERNAME_TO_PROXY; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     case INTERNET_OPTION_CODEPAGE_PATH:
         FIXME("INTERNET_OPTION_CODEPAGE_PATH; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     case INTERNET_OPTION_CODEPAGE_EXTRA:
         FIXME("INTERNET_OPTION_CODEPAGE_EXTRA; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     case INTERNET_OPTION_IDN:
         FIXME("INTERNET_OPTION_IDN; STUB\n");
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     default:
         FIXME("Option %d STUB\n",dwOption);
-        INTERNET_SetLastError(ERROR_INTERNET_INVALID_OPTION);
+        SetLastError(ERROR_INTERNET_INVALID_OPTION);
         ret = FALSE;
         break;
     }
@@ -2508,7 +2510,7 @@ BOOL WINAPI InternetSetOptionExW(HINTERNET hInternet, DWORD dwOption,
     FIXME("Flags %08x ignored\n", dwFlags);
     if( dwFlags & ~ISO_VALID_FLAGS )
     {
-        INTERNET_SetLastError( ERROR_INVALID_PARAMETER );
+        SetLastError( ERROR_INVALID_PARAMETER );
         return FALSE;
     }
     return InternetSetOptionW( hInternet, dwOption, lpBuffer, dwBufferLength );
@@ -2835,6 +2837,7 @@ static HINTERNET INTERNET_InternetOpenUrlW(appinfo_t *hIC, LPCWSTR lpszUrl,
     WCHAR protocol[32], hostName[MAXHOSTNAME], userName[1024];
     WCHAR password[1024], path[2048], extra[1024];
     HINTERNET client = NULL, client1 = NULL;
+    DWORD res;
     
     TRACE("(%p, %s, %s, %08x, %08x, %08lx)\n", hIC, debugstr_w(lpszUrl), debugstr_w(lpszHeaders),
 	  dwHeadersLength, dwFlags, dwContext);
@@ -2882,10 +2885,12 @@ static HINTERNET INTERNET_InternetOpenUrlW(appinfo_t *hIC, LPCWSTR lpszUrl,
         if (urlComponents.nScheme == INTERNET_SCHEME_HTTPS) dwFlags |= INTERNET_FLAG_SECURE;
 
         /* FIXME: should use pointers, not handles, as handles are not thread-safe */
-	client = HTTP_Connect(hIC, hostName, urlComponents.nPort,
-			      userName, password, dwFlags, dwContext, INET_OPENURL);
-	if(client == NULL)
+	res = HTTP_Connect(hIC, hostName, urlComponents.nPort,
+                           userName, password, dwFlags, dwContext, INET_OPENURL, &client);
+        if(res != ERROR_SUCCESS) {
+            INTERNET_SetLastError(res);
 	    break;
+        }
 
 	if (urlComponents.dwExtraInfoLength) {
 		WCHAR *path_extra;
@@ -3127,8 +3132,13 @@ static DWORD CALLBACK INTERNET_WorkerThreadFunc(LPVOID lpvParam)
     HeapFree(GetProcessHeap(), 0, lpRequest);
 
     workRequest.asyncproc(&workRequest);
-
     WININET_Release( workRequest.hdr );
+
+    if (g_dwTlsErrIndex != TLS_OUT_OF_INDEXES)
+    {
+        HeapFree(GetProcessHeap(), 0, TlsGetValue(g_dwTlsErrIndex));
+        TlsSetValue(g_dwTlsErrIndex, NULL);
+    }
     return TRUE;
 }
 
@@ -3141,7 +3151,7 @@ static DWORD CALLBACK INTERNET_WorkerThreadFunc(LPVOID lpvParam)
  * RETURNS
  *
  */
-BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
+DWORD INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
 {
     BOOL bSuccess;
     LPWORKREQUEST lpNewRequest;
@@ -3150,7 +3160,7 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
 
     lpNewRequest = HeapAlloc(GetProcessHeap(), 0, sizeof(WORKREQUEST));
     if (!lpNewRequest)
-        return FALSE;
+        return ERROR_OUTOFMEMORY;
 
     *lpNewRequest = *lpWorkRequest;
 
@@ -3158,10 +3168,10 @@ BOOL INTERNET_AsyncCall(LPWORKREQUEST lpWorkRequest)
     if (!bSuccess)
     {
         HeapFree(GetProcessHeap(), 0, lpNewRequest);
-        INTERNET_SetLastError(ERROR_INTERNET_ASYNC_THREAD_FAILED);
+        return ERROR_INTERNET_ASYNC_THREAD_FAILED;
     }
 
-    return bSuccess;
+    return ERROR_SUCCESS;
 }
 
 

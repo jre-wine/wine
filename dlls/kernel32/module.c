@@ -22,6 +22,7 @@
 #include "wine/port.h"
 
 #include <fcntl.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +32,6 @@
 #endif
 #include "ntstatus.h"
 #define WIN32_NO_STATUS
-#include "wine/winbase16.h"
 #include "winerror.h"
 #include "windef.h"
 #include "winbase.h"
@@ -43,6 +43,8 @@
 #include "wine/unicode.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(module);
+
+#define NE_FFLAGS_LIBMODULE 0x8000
 
 static WCHAR *dll_directory;  /* extra path for SetDllDirectoryW */
 
@@ -1064,3 +1066,28 @@ FARPROC WINAPI DelayLoadFailureHook( LPCSTR name, LPCSTR function )
     RaiseException( EXCEPTION_WINE_STUB, EH_NONCONTINUABLE, 2, args );
     return NULL;
 }
+
+
+#ifdef __i386__
+
+/***********************************************************************
+ *           __wine_dll_register_16 (KERNEL32.@)
+ *
+ * No longer used.
+ */
+void __wine_dll_register_16( const IMAGE_DOS_HEADER *header, const char *file_name )
+{
+    ERR( "loading old style 16-bit dll %s no longer supported\n", file_name );
+}
+
+
+/***********************************************************************
+ *           __wine_dll_unregister_16 (KERNEL32.@)
+ *
+ * No longer used.
+ */
+void __wine_dll_unregister_16( const IMAGE_DOS_HEADER *header )
+{
+}
+
+#endif

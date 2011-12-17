@@ -133,6 +133,48 @@ void* fetch_buffer(struct process* pcs, unsigned size)
     return pcs->buffer;
 }
 
+const char* wine_dbgstr_addr(const ADDRESS64* addr)
+{
+    if (!addr) return "(null)";
+    switch (addr->Mode)
+    {
+    case AddrModeFlat:
+        return wine_dbg_sprintf("flat<%s>", wine_dbgstr_longlong(addr->Offset));
+    case AddrMode1616:
+        return wine_dbg_sprintf("1616<%04x:%04x>", addr->Segment, (DWORD)addr->Offset);
+    case AddrMode1632:
+        return wine_dbg_sprintf("1632<%04x:%08x>", addr->Segment, (DWORD)addr->Offset);
+    case AddrModeReal:
+        return wine_dbg_sprintf("real<%04x:%04x>", addr->Segment, (DWORD)addr->Offset);
+    default:
+        return "unknown";
+    }
+}
+
+extern struct cpu       cpu_i386, cpu_x86_64;
+
+static struct cpu*      dbghelp_cpus[] = {&cpu_i386, &cpu_x86_64, NULL};
+struct cpu*             dbghelp_current_cpu =
+#if defined(__i386__)
+    &cpu_i386
+#elif defined(__x86_64__)
+    &cpu_x86_64
+#else
+#error define support for your CPU
+#endif
+    ;
+
+struct cpu* cpu_find(DWORD machine)
+{
+    struct cpu** cpu;
+
+    for (cpu = dbghelp_cpus ; *cpu; cpu++)
+    {
+        if (cpu[0]->machine == machine) return cpu[0];
+    }
+    return NULL;
+}
+
 /******************************************************************
  *		SymSetSearchPathW (DBGHELP.@)
  *

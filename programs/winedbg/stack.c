@@ -178,6 +178,7 @@ unsigned stack_fetch_frames(void)
     memset(&sf, 0, sizeof(sf));
     memory_get_current_frame(&sf.AddrFrame);
     memory_get_current_pc(&sf.AddrPC);
+    memory_get_current_stack(&sf.AddrStack);
 
     /* don't confuse StackWalk by passing in inconsistent addresses */
     if ((sf.AddrPC.Mode == AddrModeFlat) && (sf.AddrFrame.Mode != AddrModeFlat))
@@ -186,7 +187,7 @@ unsigned stack_fetch_frames(void)
         sf.AddrFrame.Mode = AddrModeFlat;
     }
 
-    while (StackWalk64(IMAGE_FILE_MACHINE_I386, dbg_curr_process->handle, 
+    while (StackWalk64(be_cpu->machine, dbg_curr_process->handle,
                        dbg_curr_thread->handle, &sf, &ctx, stack_read_mem,
                        SymFunctionTableAccess64, SymGetModuleBase64, NULL))
     {

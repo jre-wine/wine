@@ -183,9 +183,7 @@ enum res_e {
 	res_dlginit = WRC_RT_DLGINIT,	/* 240 */
 	res_toolbar = WRC_RT_TOOLBAR,	/* 241 */
 
-	res_menex = 256 + 4,
-	res_dlgex,
-	res_usr
+	res_usr = 256 + 6
 };
 
 /* Raw bytes in a row... */
@@ -223,8 +221,11 @@ typedef struct dialog {
 	int		height;
 	style_t		*style;		/* Style */
 	style_t		*exstyle;
+	DWORD		helpid;		/* EX: */
 	int		gotstyle;	/* Used to determine whether the default */
 	int		gotexstyle;	/* styles must be set */
+	int		gothelpid;
+	int		is_ex;
 	name_id_t	*menu;
 	name_id_t	*dlgclass;
 	string_t	*title;
@@ -233,48 +234,11 @@ typedef struct dialog {
 	control_t	*controls;
 } dialog_t;
 
-/* DialogEx structures */
-typedef struct dialogex {
-	DWORD		memopt;
-	int		x;		/* Position */
-	int		y;
-	int		width;		/* Size */
-	int		height;
-	style_t		*style;		/* Style */
-	style_t		*exstyle;
-	DWORD		helpid;		/* EX: */
-	int		gotstyle;	/* Used to determine whether the default */
-	int		gotexstyle;	/* styles must be set */
-	int		gothelpid;
-	name_id_t	*menu;
-	name_id_t	*dlgclass;
-	string_t	*title;
-	font_id_t	*font;
-	lvc_t		lvc;
-	control_t	*controls;
-} dialogex_t;
-
 /* Menu structures */
 typedef struct menu_item {
 	struct menu_item *next;
 	struct menu_item *prev;
 	struct menu_item *popup;
-	int		id;
-	DWORD		state;
-	string_t	*name;
-} menu_item_t;
-
-typedef struct menu {
-	DWORD		memopt;
-	lvc_t		lvc;
-	menu_item_t	*items;
-} menu_t;
-
-/* MenuEx structures */
-typedef struct menuex_item {
-	struct menuex_item *next;
-	struct menuex_item *prev;
-	struct menuex_item *popup;
 	int		id;
 	DWORD		type;
 	DWORD		state;
@@ -284,13 +248,14 @@ typedef struct menuex_item {
 	int		gottype;
 	int		gotstate;
 	int		gothelpid;
-} menuex_item_t;
+} menu_item_t;
 
-typedef struct menuex {
+typedef struct menu {
 	DWORD		memopt;
 	lvc_t		lvc;
-	menuex_item_t	*items;
-} menuex_t;
+	int		is_ex;
+	menu_item_t	*items;
+} menu_t;
 
 typedef struct itemex_opt
 {
@@ -611,14 +576,12 @@ typedef struct resource {
 		cursor_t	*cur;
 		cursor_group_t	*curg;
 		dialog_t	*dlg;
-		dialogex_t	*dlgex;
 		dlginit_t       *dlgi;
 		font_t		*fnt;
 		fontdir_t	*fnd;
 		icon_t		*ico;
 		icon_group_t	*icog;
 		menu_t		*men;
-		menuex_t	*menex;
 		messagetable_t	*msg;
 		html_t		*html;
 		rcdata_t	*rdt;

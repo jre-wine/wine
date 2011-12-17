@@ -44,6 +44,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
             DisableThreadLibraryCalls(hinstDLL);
             break;
         case DLL_PROCESS_DETACH:
+            MMDevEnum_Free();
             break;
     }
 
@@ -52,7 +53,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 
 HRESULT WINAPI DllCanUnloadNow(void)
 {
-    FIXME("stub\n");
     return S_FALSE;
 }
 

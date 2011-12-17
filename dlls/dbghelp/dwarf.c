@@ -684,6 +684,15 @@ compute_location(dwarf2_traverse_context_t* ctx, struct location* loc,
         op = dwarf2_parse_byte(ctx);
         switch (op)
         {
+        case DW_OP_lit0:  case DW_OP_lit1:  case DW_OP_lit2:  case DW_OP_lit3:
+        case DW_OP_lit4:  case DW_OP_lit5:  case DW_OP_lit6:  case DW_OP_lit7:
+        case DW_OP_lit8:  case DW_OP_lit9:  case DW_OP_lit10: case DW_OP_lit11:
+        case DW_OP_lit12: case DW_OP_lit13: case DW_OP_lit14: case DW_OP_lit15:
+        case DW_OP_lit16: case DW_OP_lit17: case DW_OP_lit18: case DW_OP_lit19:
+        case DW_OP_lit20: case DW_OP_lit21: case DW_OP_lit22: case DW_OP_lit23:
+        case DW_OP_lit24: case DW_OP_lit25: case DW_OP_lit26: case DW_OP_lit27:
+        case DW_OP_lit28: case DW_OP_lit29: case DW_OP_lit30: case DW_OP_lit31:
+            stack[++stk] = op - DW_OP_lit0; break;
         case DW_OP_addr:    stack[++stk] = dwarf2_parse_addr(ctx); break;
         case DW_OP_const1u: stack[++stk] = dwarf2_parse_byte(ctx); break;
         case DW_OP_const1s: stack[++stk] = (long)(signed char)dwarf2_parse_byte(ctx); break;
@@ -1234,6 +1243,10 @@ static struct symt* dwarf2_parse_udt_type(dwarf2_parse_context_t* ctx,
             case DW_TAG_union_type:
             case DW_TAG_typedef:
                 /* FIXME: we need to handle nested udt definitions */
+            case DW_TAG_inheritance:
+            case DW_TAG_subprogram:
+            case DW_TAG_variable:
+                /* FIXME: some C++ related stuff */
                 break;
             default:
                 FIXME("Unhandled Tag type 0x%lx at %s, for %s\n",
@@ -1824,6 +1837,11 @@ static void dwarf2_load_one_entry(dwarf2_parse_context_t* ctx,
             subpgm.frame.reg = Wine_DW_no_register;
             dwarf2_parse_variable(&subpgm, NULL, di);
         }
+        break;
+    /* silence a couple of C++ defines */
+    case DW_TAG_namespace:
+    case DW_TAG_imported_module:
+    case DW_TAG_imported_declaration:
         break;
     default:
         FIXME("Unhandled Tag type 0x%lx at %s, for %lu\n",

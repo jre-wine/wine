@@ -169,14 +169,9 @@ esac
 dnl enable_win16 defaults to yes on x86, to no on other CPUs
 enable_win16=${enable_win16:-no}
 
-AC_SUBST(WIN16_FILES,"\$(WIN16_FILES)")
-AC_SUBST(WIN16_INSTALL,"\$(WIN16_INSTALL)")
 if test "x$enable_win16" != "xyes"
 then
-    WIN16_FILES=""
-    WIN16_INSTALL=""
     enable_w32skrnl=${enable_w32skrnl:-no}
-    enable_winedos=${enable_winedos:-no}
     enable_winevdm=${enable_winevdm:-no}
     enable_wow32=${enable_wow32:-no}
 fi
@@ -229,6 +224,20 @@ AC_CHECK_PROGS(FLEX,flex,none)
 if test "$FLEX" = "none"
 then
   AC_MSG_ERROR([no suitable flex found. Please install the 'flex' package.])
+fi
+AC_MSG_CHECKING([whether flex is recent enough])
+cat >conftest.l <<EOF
+%top{
+#include "prediluvian.h"
+}
+%%
+EOF
+if $FLEX -t conftest.l >/dev/null 2>&1
+then
+  AC_MSG_RESULT([yes])
+else
+  AC_MSG_RESULT([no])
+  AC_MSG_ERROR([Your flex version is too old. Please install flex version 2.5.33 or newer.])
 fi
 
 dnl Check for bison
@@ -587,7 +596,6 @@ case $host_os in
   cygwin*|mingw32*)
     AC_CHECK_TOOL(DLLTOOL,dlltool,false)
     AC_CHECK_TOOL(DLLWRAP,dllwrap,false)
-    AC_CHECK_TOOL(MINGWAR,ar,false)
     if test "$DLLWRAP" = "false"; then
       LIBEXT="a"
     else
@@ -749,8 +757,6 @@ dnl Check for cross compiler to build test programs
 if test "$cross_compiling" = "no" -a "$LIBEXT" != "dll"
 then
     WINE_CHECK_MINGW_PROG(CROSSCC,gcc,false)
-    WINE_CHECK_MINGW_PROG(DLLTOOL,dlltool,false)
-    WINE_CHECK_MINGW_PROG(MINGWAR,ar,false)
     if test "$CROSSCC" != "false"
     then
         AC_SUBST(CROSSTEST,"\$(CROSSTEST)")
@@ -1480,8 +1486,8 @@ then
   WINE_TRY_CFLAGS([-fno-strict-aliasing])
   WINE_TRY_CFLAGS([-Wdeclaration-after-statement])
   WINE_TRY_CFLAGS([-Wstrict-prototypes])
-  WINE_TRY_CFLAGS([-Wwrite-strings])
   WINE_TRY_CFLAGS([-Wtype-limits])
+  WINE_TRY_CFLAGS([-Wwrite-strings])
 
   dnl Check for noisy string.h
   saved_CFLAGS="$CFLAGS"
@@ -2211,6 +2217,7 @@ WINE_CONFIG_MAKEFILE([dlls/dmband/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL
 WINE_CONFIG_MAKEFILE([dlls/dmcompos/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dmime/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dmloader/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dmloader/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/dmscript/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dmstyle/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dmsynth/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2233,6 +2240,7 @@ WINE_CONFIG_MAKEFILE([dlls/dssenh/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL
 WINE_CONFIG_MAKEFILE([dlls/dswave/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dwmapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dxdiagn/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
+WINE_CONFIG_MAKEFILE([dlls/dxdiagn/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/dxerr8/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dxerr9/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/dxgi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2286,6 +2294,7 @@ WINE_CONFIG_MAKEFILE([dlls/jscript/tests/Makefile],[dlls/Maketest.rules],[dlls],
 WINE_CONFIG_MAKEFILE([dlls/kernel32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/kernel32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/keyboard.drv16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
+WINE_CONFIG_MAKEFILE([dlls/krnl386.exe16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/loadperf/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/localspl/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/localspl/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
@@ -2296,6 +2305,7 @@ WINE_CONFIG_MAKEFILE([dlls/lz32/tests/Makefile],[dlls/Maketest.rules],[dlls],[AL
 WINE_CONFIG_MAKEFILE([dlls/lzexpand.dll16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/mapi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mapi32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/mapistub/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mciavi32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mcicda/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/mciqtz32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2486,6 +2496,7 @@ WINE_CONFIG_MAKEFILE([dlls/updspapi/Makefile],[dlls/Makedll.rules],[dlls],[ALL_D
 WINE_CONFIG_MAKEFILE([dlls/url/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/urlmon/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/urlmon/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
+WINE_CONFIG_MAKEFILE([dlls/user.exe16/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[enable_win16])
 WINE_CONFIG_MAKEFILE([dlls/user32/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/user32/tests/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])
 WINE_CONFIG_MAKEFILE([dlls/userenv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
@@ -2520,7 +2531,6 @@ WINE_CONFIG_MAKEFILE([dlls/wineaudioio.drv/Makefile],[dlls/Makedll.rules],[dlls]
 WINE_CONFIG_MAKEFILE([dlls/winecoreaudio.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winecrt0/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wined3d/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
-WINE_CONFIG_MAKEFILE([dlls/winedos/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/wineesd.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winejack.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])
 WINE_CONFIG_MAKEFILE([dlls/winejoystick.drv/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS])

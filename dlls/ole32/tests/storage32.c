@@ -355,6 +355,19 @@ static void test_storage_stream(void)
 
     r = IStorage_Release(stg);
     ok(r == 0, "wrong ref count\n");
+
+    /* try create some invalid streams */
+    stg = NULL;
+    stm = NULL;
+    r = StgOpenStorage(filename, NULL, STGM_READ | STGM_SHARE_DENY_WRITE, NULL, 0, &stg);
+    ok(r == S_OK, "should succeed\n");
+    if (stg)
+    {
+        r = IStorage_OpenStream(stg, stmname, NULL, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, &stm);
+        ok(r == STG_E_INVALIDFLAG, "IStorage->OpenStream should return STG_E_INVALIDFLAG instead of 0x%08x\n", r);
+        IStorage_Release(stg);
+    }
+
     r = DeleteFileA(filenameA);
     ok(r, "file should exist\n");
 }
@@ -845,6 +858,8 @@ static void test_streamenum(void)
     HRESULT r;
     IStream *stm = NULL;
     static const WCHAR stmname[] = { 'C','O','N','T','E','N','T','S',0 };
+    static const WCHAR stmname2[] = { 'A','B','C','D','E','F','G','H','I',0 };
+    static const WCHAR stmname3[] = { 'A','B','C','D','E','F','G','H','I','J',0 };
     STATSTG stat;
     IEnumSTATSTG *ee = NULL;
     ULONG count;
@@ -887,14 +902,12 @@ static void test_streamenum(void)
     ok(r==S_OK, "IStorage->EnumElements failed\n");
 
     r = IStorage_DestroyElement(stg, stmname);
-    ok(r==S_OK, "IStorage->EnumElements failed\n");
+    ok(r==S_OK, "IStorage->DestroyElement failed\n");
 
-    todo_wine {
     count = 0xf00;
     r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
     ok(r==S_FALSE, "IEnumSTATSTG->Next failed\n");
     ok(count == 0, "count wrong\n");
-    }
 
     /* reset and try again */
     r = IEnumSTATSTG_Reset(ee);
@@ -905,11 +918,106 @@ static void test_streamenum(void)
     ok(r==S_FALSE, "IEnumSTATSTG->Next failed\n");
     ok(count == 0, "count wrong\n");
 
-    r = IEnumSTATSTG_Release(ee);
-    ok (r == 0, "enum not released\n");
+    /* add a stream before reading */
+    r = IEnumSTATSTG_Reset(ee);
+    ok(r==S_OK, "IEnumSTATSTG->Reset failed\n");
+
+    r = IStorage_CreateStream(stg, stmname, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Release(stm);
+
+    count = 0xf00;
+    r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
+    ok(r==S_OK, "IEnumSTATSTG->Next failed\n");
+    ok(count == 1, "count wrong\n");
+
+    if (r == S_OK)
+    {
+        ok(lstrcmpiW(stat.pwcsName, stmname) == 0, "expected CONTENTS, got %s\n", wine_dbgstr_w(stat.pwcsName));
+        CoTaskMemFree(stat.pwcsName);
+    }
+
+    r = IStorage_CreateStream(stg, stmname2, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Release(stm);
+
+    count = 0xf00;
+    r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
+    ok(r==S_OK, "IEnumSTATSTG->Next failed\n");
+    ok(count == 1, "count wrong\n");
+
+    if (r == S_OK)
+    {
+        ok(lstrcmpiW(stat.pwcsName, stmname2) == 0, "expected ABCDEFGHI, got %s\n", wine_dbgstr_w(stat.pwcsName));
+        CoTaskMemFree(stat.pwcsName);
+    }
+
+    /* delete previous and next stream after reading */
+    r = IStorage_CreateStream(stg, stmname3, STGM_SHARE_EXCLUSIVE | STGM_READWRITE, 0, 0, &stm );
+    ok(r==S_OK, "IStorage->CreateStream failed\n");
+
+    r = IStream_Release(stm);
+
+    r = IEnumSTATSTG_Reset(ee);
+    ok(r==S_OK, "IEnumSTATSTG->Reset failed\n");
+
+    count = 0xf00;
+    r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
+    ok(r==S_OK, "IEnumSTATSTG->Next failed\n");
+    ok(count == 1, "count wrong\n");
+
+    if (r == S_OK)
+    {
+        ok(lstrcmpiW(stat.pwcsName, stmname) == 0, "expected CONTENTS, got %s\n", wine_dbgstr_w(stat.pwcsName));
+        CoTaskMemFree(stat.pwcsName);
+    }
+
+    r = IStorage_DestroyElement(stg, stmname);
+    ok(r==S_OK, "IStorage->DestroyElement failed\n");
+
+    r = IStorage_DestroyElement(stg, stmname2);
+    ok(r==S_OK, "IStorage->DestroyElement failed\n");
+
+    count = 0xf00;
+    r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
+    ok(r==S_OK, "IEnumSTATSTG->Next failed\n");
+    ok(count == 1, "count wrong\n");
+
+    if (r == S_OK)
+    {
+        ok(lstrcmpiW(stat.pwcsName, stmname3) == 0, "expected ABCDEFGHIJ, got %s\n", wine_dbgstr_w(stat.pwcsName));
+        CoTaskMemFree(stat.pwcsName);
+    }
 
     r = IStorage_Release( stg );
-    ok (r == 0, "storage not released\n");
+    todo_wine ok (r == 0, "storage not released\n");
+
+    /* enumerator is still valid and working after the storage is released */
+    r = IEnumSTATSTG_Reset(ee);
+    ok(r==S_OK, "IEnumSTATSTG->Reset failed\n");
+
+    count = 0xf00;
+    r = IEnumSTATSTG_Next(ee, 1, &stat, &count);
+    ok(r==S_OK, "IEnumSTATSTG->Next failed\n");
+    ok(count == 1, "count wrong\n");
+
+    if (r == S_OK)
+    {
+        ok(lstrcmpiW(stat.pwcsName, stmname3) == 0, "expected ABCDEFGHIJ, got %s\n", wine_dbgstr_w(stat.pwcsName));
+        CoTaskMemFree(stat.pwcsName);
+    }
+
+    /* the storage is left open until the enumerator is freed */
+    r = StgOpenStorage( filename, NULL, STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE |STGM_TRANSACTED, NULL, 0, &stg);
+    ok(r==STG_E_SHAREVIOLATION ||
+       r==STG_E_LOCKVIOLATION, /* XP-SP2/W2K3-SP1 and below */
+       "StgCreateDocfile failed, res=%x\n", r);
+
+    r = IEnumSTATSTG_Release(ee);
+    ok (r == 0, "enum not released\n");
 
     DeleteFileA(filenameA);
 }
@@ -1410,7 +1518,7 @@ static void test_nonroot_transacted(void)
     {
         /* The storage can be modified. */
         r = IStorage_CreateStorage(stg2, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg3);
-        todo_wine ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+        ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
         if (r == S_OK)
             IStream_Release(stg3);
 
@@ -1498,6 +1606,8 @@ static void test_ReadClassStm(void)
     hr = ReadClassStm(pStream, &clsid);
     ok_ole_success(hr, "ReadClassStm");
     ok(IsEqualCLSID(&clsid, &test_stg_cls), "clsid should have been set to CLSID_WineTest\n");
+
+    IStream_Release(pStream);
 }
 
 struct access_res
@@ -2564,6 +2674,52 @@ static void test_toplevel_stat(void)
     DeleteFileA(filenameA);
 }
 
+static void test_substorage_enum(void)
+{
+    IStorage *stg, *stg2;
+    IEnumSTATSTG *ee;
+    HRESULT r;
+    ULONG ref;
+    static const WCHAR stgname[] = { 'P','E','R','M','S','T','G',0 };
+
+    DeleteFileA(filenameA);
+
+    /* create the file */
+    r = StgCreateDocfile( filename, STGM_CREATE | STGM_SHARE_EXCLUSIVE |
+                            STGM_READWRITE, 0, &stg);
+    ok(r==S_OK, "StgCreateDocfile failed\n");
+
+    /* create a substorage */
+    r = IStorage_CreateStorage(stg, stgname, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    /* create an enumelements */
+    r = IStorage_EnumElements(stg2, 0, NULL, 0, &ee);
+    ok(r==S_OK, "IStorage->EnumElements failed, hr=%08x\n", r);
+
+    /* release the substorage */
+    ref = IStorage_Release(stg2);
+    todo_wine ok(ref==0, "storage not released\n");
+
+    /* reopening fails, because the substorage is really still open */
+    r = IStorage_OpenStorage(stg, stgname, NULL, STGM_READWRITE | STGM_SHARE_EXCLUSIVE, 0, 0, &stg2);
+    ok(r==STG_E_ACCESSDENIED, "IStorage->OpenStorage failed, hr=%08x\n", r);
+
+    /* destroying the storage invalidates the enumerator */
+    r = IStorage_DestroyElement(stg, stgname);
+    ok(r==S_OK, "IStorage->CreateStorage failed, hr=%08x\n", r);
+
+    r = IEnumSTATSTG_Reset(ee);
+    ok(r==STG_E_REVERTED, "IEnumSTATSTG->Reset failed, hr=%08x\n", r);
+
+    IEnumSTATSTG_Release(ee);
+
+    IStorage_Release(stg);
+
+    r = DeleteFileA(filenameA);
+    ok( r == TRUE, "deleted file\n");
+}
+
 START_TEST(storage32)
 {
     CHAR temp[MAX_PATH];
@@ -2602,4 +2758,5 @@ START_TEST(storage32)
     test_copyto_iidexclusions_stream();
     test_rename();
     test_toplevel_stat();
+    test_substorage_enum();
 }

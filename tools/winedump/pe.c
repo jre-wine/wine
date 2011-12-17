@@ -371,10 +371,18 @@ static	void	dump_pe_header(void)
     dump_optional_header((const IMAGE_OPTIONAL_HEADER32*)&PE_nt_headers->OptionalHeader, PE_nt_headers->FileHeader.SizeOfOptionalHeader);
 }
 
-void dump_section(const IMAGE_SECTION_HEADER *sectHead)
+void dump_section(const IMAGE_SECTION_HEADER *sectHead, const char* strtable)
 {
-	printf("  %-8.8s   VirtSize: 0x%08x  VirtAddr:  0x%08x\n",
-               sectHead->Name, sectHead->Misc.VirtualSize, sectHead->VirtualAddress);
+        unsigned offset;
+
+        /* long section name ? */
+        if (strtable && sectHead->Name[0] == '/' &&
+            ((offset = atoi((const char*)sectHead->Name + 1)) < *(DWORD*)strtable))
+            printf("  %.8s (%s)", sectHead->Name, strtable + offset);
+        else
+	    printf("  %-8.8s", sectHead->Name);
+	printf("   VirtSize: 0x%08x  VirtAddr:  0x%08x\n",
+               sectHead->Misc.VirtualSize, sectHead->VirtualAddress);
 	printf("    raw data offs:   0x%08x  raw data size: 0x%08x\n",
 	       sectHead->PointerToRawData, sectHead->SizeOfRawData);
 	printf("    relocation offs: 0x%08x  relocations:   0x%08x\n",
@@ -448,11 +456,20 @@ static void dump_sections(const void *base, const void* addr, unsigned num_sect)
 {
     const IMAGE_SECTION_HEADER*	sectHead = addr;
     unsigned			i;
+    const char*                 strtable;
+
+    if (PE_nt_headers->FileHeader.PointerToSymbolTable && PE_nt_headers->FileHeader.NumberOfSymbols)
+    {
+        strtable = (const char*)base +
+            PE_nt_headers->FileHeader.PointerToSymbolTable +
+            PE_nt_headers->FileHeader.NumberOfSymbols * sizeof(IMAGE_SYMBOL);
+    }
+    else strtable = NULL;
 
     printf("Section Table\n");
     for (i = 0; i < num_sect; i++, sectHead++)
     {
-        dump_section(sectHead);
+        dump_section(sectHead, strtable);
 
         if (globals.do_dump_rawdata)
         {
@@ -1408,7 +1425,7 @@ static void dump_symbol_table(void)
     numsym = PE_nt_headers->FileHeader.NumberOfSymbols;
     if (!PE_nt_headers->FileHeader.PointerToSymbolTable || !numsym)
         return;
-    sym = (const IMAGE_SYMBOL*)PRD(PE_nt_headers->FileHeader.PointerToSymbolTable,
+    sym = PRD(PE_nt_headers->FileHeader.PointerToSymbolTable,
                                    sizeof(*sym) * numsym);
     if (!sym) return;
     /* FIXME: no way to get strtable size */
@@ -1614,11 +1631,9 @@ int dll_open (const char *dll_name)
  */
 int dll_next_symbol (parsed_symbol * sym)
 {
-    if (!dll_current_symbol->symbol)
-	return 1;
-
-    assert (dll_symbols);
-
+    if (!dll_current_symbol || !dll_current_symbol->symbol)
+       return 1;
+     assert (dll_symbols);
     sym->symbol = strdup (dll_current_symbol->symbol);
     sym->ordinal = dll_current_symbol->ordinal;
     dll_current_symbol++;

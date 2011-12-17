@@ -3642,6 +3642,9 @@ static HRESULT run_exec(script_ctx_t *ctx, vdisp_t *jsthis, VARIANT *arg, jsexce
         SysFreeString(string);
         set_last_index(regexp, 0);
         *ret = VARIANT_FALSE;
+        if(input) {
+            *input = NULL;
+        }
         return S_OK;
     }
 
@@ -3664,8 +3667,11 @@ static HRESULT run_exec(script_ctx_t *ctx, vdisp_t *jsthis, VARIANT *arg, jsexce
         *ret = VARIANT_FALSE;
     }
 
-    if(input)
+    if(input) {
         *input = string;
+    }else {
+        SysFreeString(string);
+    }
     return S_OK;
 }
 
