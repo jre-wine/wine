@@ -1,8 +1,27 @@
-wine-unstable (1.1.36-1) UNRELEASED; urgency=low
+wine-unstable (1.1.36-1) unstable; urgency=low
 
-  * UNRELEASED
+  * New upstream release 1.1.36, released Jan 8, 2010.
+    - Completion of the 16-bit separation.
+    - Improved Shader Model 4 support.
+    - A ton of memory leak fixes.
+    - Improved debugging support for MinGW.
+    - A number of MSHTML fixes.
+    - Various bug fixes.
+  * No longer allow using flex-old as a build dependency.
+  * Bumped Standards-Version to 3.9.2.
+  * Notes on update plan:
+    I have been extremely busy this semester at university, which means
+    the packaging effort has fallen behind more than anticipated. However,
+    as I did not complete my planned changes to the packaging yet, I'll
+    continue to do one release at a time for a few days, improving the
+    packaging incrementally to ensure everything works, with the aim of
+    being done with the changes by the time I get to the 1.2 release
+    (after all, it is supposed to be the stable release that might end
+    up in a Debian release). Once I'm reasonably happy with the final
+    packaging used for 1.2, I might consider fast-forwarding the 1.3
+    releases to whatever the most recent release is.
 
- -- Ove Kaaven <ovek@arcticnet.no>  Sat, 17 Dec 2011 12:13:25 +0100
+ -- Ove Kaaven <ovek@arcticnet.no>  Sat, 17 Dec 2011 13:21:55 +0100
 
 wine-unstable (1.1.35-1) unstable; urgency=low
 
