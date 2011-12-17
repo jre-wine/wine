@@ -30,7 +30,7 @@ Build-Depends: debhelper (>= 5), flex, bison,
  ia32-libs-dev [amd64 kfreebsd-amd64] | ia32-libs (<< 20100908) [amd64 kfreebsd-amd64],
  lib32ncurses5-dev [amd64 kfreebsd-amd64], lib32asound2-dev [amd64],
  lib32z1-dev [amd64 kfreebsd-amd64]
-Standards-Version: 3.8.0
+Standards-Version: 3.9.2
 Homepage: http://www.winehq.org/
 Vcs-Browser: http://git.debian.org/?p=pkg-wine/wine.git
 Vcs-Git: git://git.debian.org/git/pkg-wine/wine.git
