@@ -508,7 +508,7 @@ static char *create_undef_symbols_file( DLLSPEC *spec )
     for (i = 0; i < spec->nb_entry_points; i++)
     {
         ORDDEF *odp = &spec->entry_points[i];
-        if (odp->type == TYPE_STUB || odp->type == TYPE_ABS) continue;
+        if (odp->type == TYPE_STUB || odp->type == TYPE_ABS || odp->type == TYPE_VARIABLE) continue;
         if (odp->flags & FLAG_FORWARD) continue;
         fprintf( f, "\t%s %s\n", get_asm_ptr_keyword(), asm_name(odp->link_name) );
     }
@@ -585,7 +585,7 @@ void read_undef_symbols( DLLSPEC *spec, char **argv )
 }
 
 /* resolve the imports for a Win32 module */
-int resolve_imports( DLLSPEC *spec )
+void resolve_imports( DLLSPEC *spec )
 {
     int i;
     unsigned int j, removed;
@@ -628,8 +628,12 @@ int resolve_imports( DLLSPEC *spec )
 
     sort_names( &undef_symbols );
     check_undefined_exports( spec );
+}
 
-    return 1;
+/* check if symbol is still undefined */
+int is_undefined( const char *name )
+{
+    return find_name( name, &undef_symbols ) != NULL;
 }
 
 /* output the get_pc thunk if needed */

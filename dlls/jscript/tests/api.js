@@ -618,6 +618,12 @@ ok(arr.push(true, 'b', false) === 10, "arr.push(true, 'b', false) !== 10");
 ok(arr[8] === "b", "arr[8] != 'b'");
 ok(arr.length === 10, "arr.length != 10");
 
+arr.pop = Array.prototype.pop;
+ok(arr.pop() === false, "arr.pop() !== false");
+ok(arr[8] === "b", "arr[8] !== 'b'");
+ok(arr.pop() === 'b', "arr.pop() !== 'b'");
+ok(arr[8] === undefined, "arr[8] !== undefined");
+
 arr = [3,4,5];
 tmp = arr.pop();
 ok(arr.length === 2, "arr.length = " + arr.length);
@@ -630,6 +636,11 @@ ok(arr.length === 0, "arr.length = " + arr.length);
 ok(tmp === 3, "pop() = " + tmp);
 for(tmp in arr)
     ok(false, "not deleted " + tmp);
+tmp = arr.pop();
+ok(arr.length === 0, "arr.length = " + arr.length);
+ok(tmp === undefined, "tmp = " + tmp);
+arr = new Object();
+arr.pop = Array.prototype.pop;
 tmp = arr.pop();
 ok(arr.length === 0, "arr.length = " + arr.length);
 ok(tmp === undefined, "tmp = " + tmp);
@@ -654,6 +665,16 @@ ok(tmp === "1,2,,false,,,a", "arr.toString() = " + tmp);
 tmp = arr.toString("test");
 ok(tmp === "1,2,,false,,,a", "arr.toString() = " + tmp);
 
+arr = new Object();
+arr.length = 3;
+arr[0] = "aa";
+arr[2] = 2;
+arr[7] = 3;
+arr.join = Array.prototype.join;
+tmp = arr.join(",");
+ok(arr.length === 3, "arr.length = " + arr.length);
+ok(tmp === "aa,,2", "tmp = " + tmp);
+
 arr = [5,true,2,-1,3,false,"2.5"];
 tmp = arr.sort(function(x,y) { return y-x; });
 ok(tmp === arr, "tmp !== arr");
@@ -674,6 +695,15 @@ ok(arr.sort() === arr, "arr.sort() !== arr");
 for(var i=0; i < arr.length; i++)
     ok(arr[i] === tmp[i], "arr[" + i + "] = " + arr[i] + " expected " + tmp[i]);
 
+arr = new Object();
+arr.length = 3;
+arr[0] = 1;
+arr[2] = "aa";
+arr.sort = Array.prototype.sort;
+tmp = arr.sort();
+ok(arr === tmp, "tmp !== arr");
+ok(arr[0]===1 && arr[1]==="aa" && arr[2]===undefined, "arr is sorted incorectly");
+
 arr = ["1", "2", "3"];
 arr.length = 1;
 ok(arr.length === 1, "arr.length = " + arr.length);
@@ -686,6 +716,31 @@ ok(arr.toString() === "a,b,c", "arr.toString() = " + arr.toString());
 
 ok(arr.valueOf === Object.prototype.valueOf, "arr.valueOf !== Object.prototype.valueOf");
 ok(arr === arr.valueOf(), "arr !== arr.valueOf");
+
+arr = [1,2,3];
+tmp = arr.reverse();
+ok(tmp === arr, "tmp !== arr");
+ok(arr.length === 3, "arr.length = " + arr.length);
+ok(arr.toString() === "3,2,1", "arr.toString() = " + arr.toString());
+
+arr = [];
+arr[3] = 5;
+arr[5] = 1;
+tmp = arr.reverse();
+ok(tmp === arr, "tmp !== arr");
+ok(arr.length === 6, "arr.length = " + arr.length);
+ok(arr.toString() === "1,,5,,,", "arr.toString() = " + arr.toString());
+
+arr = new Object();
+arr.length = 3;
+arr[0] = "aa";
+arr[2] = 2;
+arr[7] = 3;
+arr.reverse = Array.prototype.reverse;
+tmp = arr.reverse();
+ok(tmp === arr, "tmp !== arr");
+ok(arr.length === 3, "arr.length = " + arr.length);
+ok(arr[0] === 2 && arr[1] === undefined && arr[2] === "aa", "unexpected array");
 
 arr = [1,2,3];
 tmp = arr.unshift(0);
@@ -1854,6 +1909,10 @@ testArrayHostThis("shift");
 testArrayHostThis("slice");
 testArrayHostThis("splice");
 testArrayHostThis("unshift");
+testArrayHostThis("reverse");
+testArrayHostThis("join");
+testArrayHostThis("pop");
+testArrayHostThis("sort");
 
 function testObjectInherit(obj, constr, ts, tls, vo) {
     ok(obj instanceof Object, "obj is not instance of Object");

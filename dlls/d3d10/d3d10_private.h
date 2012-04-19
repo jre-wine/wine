@@ -45,6 +45,12 @@ enum d3d10_effect_object_type
     D3D10_EOT_GEOMETRYSHADER = 8,
 };
 
+enum d3d10_effect_object_operation
+{
+    D3D10_EOO_VALUE = 1,
+    D3D10_EOO_ANONYMOUS_SHADER = 7,
+};
+
 struct d3d10_effect_object
 {
     struct d3d10_effect_pass *pass;
@@ -102,15 +108,16 @@ struct d3d10_effect_variable
     const struct ID3D10EffectVariableVtbl *vtbl;
 
     struct d3d10_effect_variable *buffer;
+    struct d3d10_effect_type *type;
     struct d3d10_effect *effect;
 
+    void *data;
     char *name;
     char *semantic;
     DWORD buffer_offset;
     DWORD annotation_count;
     DWORD flag;
     DWORD data_size;
-    struct d3d10_effect_type *type;
     struct d3d10_effect_variable *elements;
     struct d3d10_effect_variable *members;
     struct d3d10_effect_variable *annotations;
@@ -143,6 +150,12 @@ struct d3d10_effect_technique
     struct d3d10_effect_variable *annotations;
 };
 
+struct d3d10_effect_anonymous_shader
+{
+    struct d3d10_effect_variable shader;
+    struct d3d10_effect_type type;
+};
+
 /* ID3D10Effect */
 extern const struct ID3D10EffectVtbl d3d10_effect_vtbl DECLSPEC_HIDDEN;
 struct d3d10_effect
@@ -167,11 +180,14 @@ struct d3d10_effect
     DWORD rendertargetview_count;
     DWORD depthstencilview_count;
     DWORD shader_call_count;
-    DWORD shader_compile_count;
+    DWORD anonymous_shader_count;
+
+    DWORD anonymous_shader_current;
 
     struct wine_rb_tree types;
     struct d3d10_effect_variable *local_buffers;
     struct d3d10_effect_variable *local_variables;
+    struct d3d10_effect_anonymous_shader *anonymous_shaders;
     struct d3d10_effect_technique *techniques;
 };
 
