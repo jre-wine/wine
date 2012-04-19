@@ -1,8 +1,16 @@
-wine-unstable (1.1.38-1) UNRELEASED; urgency=low
+wine-unstable (1.1.38-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.38, released Feb 5, 2010.
+    - Better support for memory allocations debugging.
+    - Improved MIDI support.
+    - A wide range of Direct3D fixes.
+    - OLEDB fixes (should fix Clipart in Office).
+    - Improved debugger support on x86-64.
+    - Many MSI fixes.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 17:02:01 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 17:02:20 -0400
 
 wine-unstable (1.1.37-0.1) unstable; urgency=low
 
