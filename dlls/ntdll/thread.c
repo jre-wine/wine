@@ -57,6 +57,7 @@ struct startup_info
     void                           *entry_arg;
 };
 
+static PEB *peb;
 static PEB_LDR_DATA ldr;
 static RTL_USER_PROCESS_PARAMETERS params;  /* default parameters if no parent */
 static WCHAR current_dir[MAX_NT_PATH_LENGTH];
@@ -183,54 +184,6 @@ done:
 }
 
 /***********************************************************************
- *           get_global_flag
- *
- * This is called before the process heap is created,
- * but after the connection to the server is established.
- * No windows heap allocation is permitted.
- */
-static DWORD get_global_flag(void)
-{
-    static const WCHAR sessionman_keyW[] = {'M','a','c','h','i','n','e','\\',
-                                            'S','y','s','t','e','m','\\',
-                                            'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-                                            'C','o','n','t','r','o','l','\\',
-                                            'S','e','s','s','i','o','n',' ','M','a','n','a','g','e','r',0};
-    static const WCHAR global_flagW[] = {'G','l','o','b','a','l','F','l','a','g',0};
-    OBJECT_ATTRIBUTES attr;
-    UNICODE_STRING nameW, valueW;
-    HANDLE hkey;
-    char tmp[32];
-    DWORD count;
-    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)tmp;
-    NTSTATUS status;
-
-    attr.Length = sizeof(attr);
-    attr.RootDirectory = 0;
-    attr.ObjectName = &nameW;
-    attr.Attributes = 0;
-    attr.SecurityDescriptor = NULL;
-    attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, sessionman_keyW );
-
-    status = NtOpenKey( &hkey, KEY_ALL_ACCESS, &attr );
-    if (status != STATUS_SUCCESS)
-        return 0;
-
-    RtlInitUnicodeString( &valueW, global_flagW );
-    status = NtQueryValueKey( hkey, &valueW, KeyValuePartialInformation, tmp, sizeof(tmp)-1, &count );
-    if (status != STATUS_SUCCESS)
-        return 0;
-
-    /* Some documents say this can be a string, so handle either type */
-    if (info->Type == REG_DWORD)
-        return *(DWORD *)info->Data;
-    if (info->Type == REG_SZ)
-        return strtol((char *)info->Data, NULL, 16);
-    return 0;
-}
-
-/***********************************************************************
  *           thread_init
  *
  * Setup the initial thread.
@@ -239,7 +192,6 @@ static DWORD get_global_flag(void)
  */
 HANDLE thread_init(void)
 {
-    PEB *peb;
     TEB *teb;
     void *addr;
     SIZE_T size, info_size;
@@ -309,9 +261,6 @@ HANDLE thread_init(void)
     /* setup the server connection */
     server_init_process();
     info_size = server_init_thread( peb );
-
-    /* retrieve the global flags settings from the registry */
-    peb->NtGlobalFlag = get_global_flag();
 
     /* create the process heap */
     if (!(peb->ProcessHeap = RtlCreateHeap( HEAP_GROWABLE, NULL, 0, 0, NULL, NULL )))
@@ -570,6 +519,16 @@ error:
     pthread_sigmask( SIG_SETMASK, &sigset, NULL );
     close( request_pipe[1] );
     return status;
+}
+
+
+/******************************************************************************
+ *              RtlGetNtGlobalFlags   (NTDLL.@)
+ */
+ULONG WINAPI RtlGetNtGlobalFlags(void)
+{
+    if (!peb) return 0;  /* init not done yet */
+    return peb->NtGlobalFlag;
 }
 
 

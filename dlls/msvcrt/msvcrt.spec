@@ -78,6 +78,7 @@
 @ cdecl __CppXcptFilter(long ptr)
 @ cdecl __CxxDetectRethrow(ptr)
 @ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
+@ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
 @ stdcall -i386 __CxxLongjmpUnwind(ptr)
 @ cdecl __CxxQueryExceptionSize()
 @ cdecl __RTCastToVoid(ptr) MSVCRT___RTCastToVoid
@@ -735,6 +736,7 @@
 @ cdecl qsort(ptr long long ptr) ntdll.qsort
 @ cdecl raise(long) MSVCRT_raise
 @ cdecl rand() MSVCRT_rand
+@ cdecl rand_s(ptr) MSVCRT_rand_s
 @ cdecl realloc(ptr long) MSVCRT_realloc
 @ cdecl remove(str) MSVCRT_remove
 @ cdecl rename(str str) MSVCRT_rename
@@ -747,6 +749,7 @@
 @ cdecl sin(double) MSVCRT_sin
 @ cdecl sinh(double) MSVCRT_sinh
 @ varargs sprintf(ptr str) MSVCRT_sprintf
+@ varargs sprintf_s(ptr long str) MSVCRT_sprintf_s
 @ cdecl sqrt(double) MSVCRT_sqrt
 @ cdecl srand(long) MSVCRT_srand
 @ varargs sscanf(str str) MSVCRT_sscanf
@@ -791,6 +794,7 @@
 @ cdecl vfwprintf(ptr wstr ptr) MSVCRT_vfwprintf
 @ cdecl vprintf(str ptr) MSVCRT_vprintf
 @ cdecl vsprintf(ptr str ptr) MSVCRT_vsprintf
+@ cdecl vsprintf_s(ptr long str ptr) MSVCRT_vsprintf_s
 @ cdecl vswprintf(ptr wstr ptr) MSVCRT_vswprintf
 @ cdecl vswprintf_s(ptr long wstr ptr) MSVCRT_vswprintf_s
 @ cdecl vwprintf(wstr ptr) MSVCRT_vwprintf

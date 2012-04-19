@@ -47,7 +47,7 @@ static BOOL InitFunctionPtrs(void)
     HMODULE hntdll = GetModuleHandle("ntdll");
     if (!hntdll)
     {
-        skip("Not running on NT\n");
+        win_skip("Not running on NT\n");
         return FALSE;
     }
 
@@ -290,7 +290,7 @@ static void test_query_process(void)
 
     is_nt = ( spi->NextEntryOffset - (sbi.NumberOfProcessors * sizeof(SYSTEM_THREAD_INFORMATION)) == 136);
 
-    if (is_nt) skip("Windows version is NT, we will skip thread tests\n");
+    if (is_nt) win_skip("Windows version is NT, we will skip thread tests\n");
 
     /* Check if we have some return values
      * 
@@ -666,7 +666,7 @@ static void test_query_process_io(void)
     status = pNtQueryInformationProcess( GetCurrentProcess(), ProcessIoCounters, &pii, sizeof(pii), &ReturnLength);
     if (status == STATUS_NOT_SUPPORTED)
     {
-        skip("ProcessIoCounters information class is not supported\n");
+        win_skip("ProcessIoCounters information class is not supported\n");
         return;
     }
  
@@ -809,7 +809,7 @@ static void test_query_process_image_file_name(void)
     status = pNtQueryInformationProcess(NULL, ProcessImageFileName, &image_file_name, sizeof(image_file_name), NULL);
     if (status == STATUS_INVALID_INFO_CLASS)
     {
-        skip("ProcessImageFileName is not supported\n");
+        win_skip("ProcessImageFileName is not supported\n");
         return;
     }
     ok( status == STATUS_INVALID_HANDLE, "Expected STATUS_INVALID_HANDLE, got %08x\n", status);
@@ -878,14 +878,10 @@ static void test_readvirtualmemory(void)
     ok( readcount == 12, "Expected to read 12 bytes, got %ld\n",readcount);
     ok( strcmp(teststring, buffer) == 0, "Expected read memory to be the same as original memory\n");
 
-    /* this test currently crashes wine with "wine client error:<process id>: read: Bad address"
-     * because the reply from wine server is directly read into the buffer and that fails with EFAULT
-     */
     /* illegal local address */
-    /*status = pNtReadVirtualMemory(process, teststring, (void *)0x1234, 12, &readcount);
-    ok( status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got %08lx\n", status);
+    status = pNtReadVirtualMemory(process, teststring, (void *)0x1234, 12, &readcount);
+    ok( status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got %08x\n", status);
     ok( readcount == 0, "Expected to read 0 bytes, got %ld\n",readcount);
-    */
 
     CloseHandle(process);
 }

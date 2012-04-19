@@ -1095,7 +1095,7 @@ void	dbg_dump(void)
     unsigned			        i;
     const IMAGE_DEBUG_DIRECTORY*	debugDir;
 
-    separateDebugHead = PRD(0, sizeof(separateDebugHead));
+    separateDebugHead = PRD(0, sizeof(*separateDebugHead));
     if (!separateDebugHead) {printf("Can't grab the separate header, aborting\n"); return;}
 
     printf ("Signature:          %.2s (0x%4X)\n",
@@ -1560,13 +1560,13 @@ static	void	do_grab_sym( void )
     if (!pName) {printf("Can't grab functions' name table\n"); return;}
     pOrdl = RVA(exportDir->AddressOfNameOrdinals, exportDir->NumberOfNames * sizeof(WORD));
     if (!pOrdl) {printf("Can't grab functions' ordinal table\n"); return;}
+    pFunc = RVA(exportDir->AddressOfFunctions, exportDir->NumberOfFunctions * sizeof(DWORD));
+    if (!pFunc) {printf("Can't grab functions' address table\n"); return;}
 
     /* dll_close(); */
 
     if (!(dll_symbols = malloc((exportDir->NumberOfFunctions + 1) * sizeof(dll_symbol))))
 	fatal ("Out of memory");
-    if (exportDir->AddressOfFunctions != exportDir->NumberOfNames || exportDir->Base > 1)
-	globals.do_ordinals = 1;
 
     /* bit map of used funcs */
     map = calloc(((exportDir->NumberOfFunctions + 31) & ~31) / 32, sizeof(DWORD));
@@ -1581,8 +1581,6 @@ static	void	do_grab_sym( void )
 	dll_symbols[j].ordinal = exportDir->Base + *pOrdl;
 	assert(dll_symbols[j].symbol);
     }
-    pFunc = RVA(exportDir->AddressOfFunctions, exportDir->NumberOfFunctions * sizeof(DWORD));
-    if (!pFunc) {printf("Can't grab functions' address table\n"); return;}
 
     for (i = 0; i < exportDir->NumberOfFunctions; i++)
     {

@@ -2199,6 +2199,106 @@ NTSTATUS WINAPI LdrQueryProcessModuleInformation(PSYSTEM_MODULE_INFORMATION smi,
 }
 
 
+static NTSTATUS query_dword_option( HANDLE hkey, LPCWSTR name, ULONG *value )
+{
+    NTSTATUS status;
+    UNICODE_STRING str;
+    ULONG size;
+    WCHAR buffer[64];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+
+    RtlInitUnicodeString( &str, name );
+
+    size = sizeof(buffer) - sizeof(WCHAR);
+    if ((status = NtQueryValueKey( hkey, &str, KeyValuePartialInformation, buffer, size, &size )))
+        return status;
+
+    if (info->Type != REG_DWORD)
+    {
+        buffer[size / sizeof(WCHAR)] = 0;
+        *value = strtoulW( (WCHAR *)info->Data, 0, 16 );
+    }
+    else memcpy( value, info->Data, sizeof(*value) );
+    return status;
+}
+
+static NTSTATUS query_string_option( HANDLE hkey, LPCWSTR name, ULONG type,
+                                     void *data, ULONG in_size, ULONG *out_size )
+{
+    NTSTATUS status;
+    UNICODE_STRING str;
+    ULONG size;
+    char *buffer;
+    KEY_VALUE_PARTIAL_INFORMATION *info;
+    static const int info_size = FIELD_OFFSET( KEY_VALUE_PARTIAL_INFORMATION, Data );
+
+    RtlInitUnicodeString( &str, name );
+
+    size = info_size + in_size;
+    if (!(buffer = RtlAllocateHeap( GetProcessHeap(), 0, size ))) return STATUS_NO_MEMORY;
+    info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    status = NtQueryValueKey( hkey, &str, KeyValuePartialInformation, buffer, size, &size );
+    if (!status || status == STATUS_BUFFER_OVERFLOW)
+    {
+        if (out_size) *out_size = info->DataLength;
+        if (data && !status) memcpy( data, info->Data, info->DataLength );
+    }
+    RtlFreeHeap( GetProcessHeap(), 0, buffer );
+    return status;
+}
+
+
+/******************************************************************
+ *		LdrQueryImageFileExecutionOptions  (NTDLL.@)
+ */
+NTSTATUS WINAPI LdrQueryImageFileExecutionOptions( const UNICODE_STRING *key, LPCWSTR value, ULONG type,
+                                                   void *data, ULONG in_size, ULONG *out_size )
+{
+    static const WCHAR optionsW[] = {'M','a','c','h','i','n','e','\\',
+                                     'S','o','f','t','w','a','r','e','\\',
+                                     'M','i','c','r','o','s','o','f','t','\\',
+                                     'W','i','n','d','o','w','s',' ','N','T','\\',
+                                     'C','u','r','r','e','n','t','V','e','r','s','i','o','n','\\',
+                                     'I','m','a','g','e',' ','F','i','l','e',' ',
+                                     'E','x','e','c','u','t','i','o','n',' ','O','p','t','i','o','n','s','\\'};
+    WCHAR path[MAX_PATH + sizeof(optionsW)/sizeof(WCHAR)];
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name_str;
+    HANDLE hkey;
+    NTSTATUS status;
+    ULONG len;
+    WCHAR *p;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &name_str;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    if ((p = memrchrW( key->Buffer, '\\', key->Length / sizeof(WCHAR) ))) p++;
+    else p = key->Buffer;
+    len = key->Length - (p - key->Buffer) * sizeof(WCHAR);
+    name_str.Buffer = path;
+    name_str.Length = sizeof(optionsW) + len;
+    name_str.MaximumLength = name_str.Length;
+    memcpy( path, optionsW, sizeof(optionsW) );
+    memcpy( path + sizeof(optionsW)/sizeof(WCHAR), p, len );
+    if ((status = NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr ))) return status;
+
+    if (type == REG_DWORD)
+    {
+        if (out_size) *out_size = sizeof(ULONG);
+        if (in_size >= sizeof(ULONG)) status = query_dword_option( hkey, value, data );
+        else status = STATUS_BUFFER_OVERFLOW;
+    }
+    else status = query_string_option( hkey, value, type, data, in_size, out_size );
+
+    NtClose( hkey );
+    return status;
+}
+
+
 /******************************************************************
  *		RtlDllShutdownInProgress  (NTDLL.@)
  */
@@ -2452,6 +2552,59 @@ static NTSTATUS attach_process_dlls( void *wm )
 
 
 /***********************************************************************
+ *           load_global_options
+ */
+static void load_global_options(void)
+{
+    static const WCHAR sessionW[] = {'M','a','c','h','i','n','e','\\',
+                                     'S','y','s','t','e','m','\\',
+                                     'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+                                     'C','o','n','t','r','o','l','\\',
+                                     'S','e','s','s','i','o','n',' ','M','a','n','a','g','e','r',0};
+    static const WCHAR globalflagW[] = {'G','l','o','b','a','l','F','l','a','g',0};
+    static const WCHAR critsectW[] = {'C','r','i','t','i','c','a','l','S','e','c','t','i','o','n','T','i','m','e','o','u','t',0};
+    static const WCHAR heapresW[] = {'H','e','a','p','S','e','g','m','e','n','t','R','e','s','e','r','v','e',0};
+    static const WCHAR heapcommitW[] = {'H','e','a','p','S','e','g','m','e','n','t','C','o','m','m','i','t',0};
+    static const WCHAR decommittotalW[] = {'H','e','a','p','D','e','C','o','m','m','i','t','T','o','t','a','l','F','r','e','e','T','h','r','e','s','h','o','l','d',0};
+    static const WCHAR decommitfreeW[] = {'H','e','a','p','D','e','C','o','m','m','i','t','F','r','e','e','B','l','o','c','k','T','h','r','e','s','h','o','l','d',0};
+
+    OBJECT_ATTRIBUTES attr;
+    UNICODE_STRING name_str;
+    HANDLE hkey;
+    ULONG value;
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.ObjectName = &name_str;
+    attr.Attributes = OBJ_CASE_INSENSITIVE;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+    RtlInitUnicodeString( &name_str, sessionW );
+
+    if (NtOpenKey( &hkey, KEY_QUERY_VALUE, &attr )) return;
+
+    query_dword_option( hkey, globalflagW, &NtCurrentTeb()->Peb->NtGlobalFlag );
+
+    query_dword_option( hkey, critsectW, &value );
+    NtCurrentTeb()->Peb->CriticalSectionTimeout.QuadPart = (ULONGLONG)value * -10000000;
+
+    query_dword_option( hkey, heapresW, &value );
+    NtCurrentTeb()->Peb->HeapSegmentReserve = value;
+
+    query_dword_option( hkey, heapcommitW, &value );
+    NtCurrentTeb()->Peb->HeapSegmentCommit = value;
+
+    query_dword_option( hkey, decommittotalW, &value );
+    NtCurrentTeb()->Peb->HeapDeCommitTotalFreeThreshold = value;
+
+    query_dword_option( hkey, decommitfreeW, &value );
+    NtCurrentTeb()->Peb->HeapDeCommitFreeBlockThreshold = value;
+
+    NtClose( hkey );
+}
+
+
+/***********************************************************************
  *           start_process
  */
 static void start_process( void *kernel_start )
@@ -2466,6 +2619,7 @@ static void start_process( void *kernel_start )
 void WINAPI LdrInitializeThunk( void *kernel_start, ULONG_PTR unknown2,
                                 ULONG_PTR unknown3, ULONG_PTR unknown4 )
 {
+    static const WCHAR globalflagW[] = {'G','l','o','b','a','l','F','l','a','g',0};
     NTSTATUS status;
     WINE_MODREF *wm;
     LPCWSTR load_path;
@@ -2487,6 +2641,9 @@ void WINAPI LdrInitializeThunk( void *kernel_start, ULONG_PTR unknown2,
     peb->ProcessParameters->ImagePathName = wm->ldr.FullDllName;
     version_init( wm->ldr.FullDllName.Buffer );
 
+    LdrQueryImageFileExecutionOptions( &peb->ProcessParameters->ImagePathName, globalflagW,
+                                       REG_DWORD, &peb->NtGlobalFlag, sizeof(peb->NtGlobalFlag), NULL );
+
     /* the main exe needs to be the first in the load order list */
     RemoveEntryList( &wm->ldr.InLoadOrderModuleList );
     InsertHeadList( &peb->LdrData->InLoadOrderModuleList, &wm->ldr.InLoadOrderModuleList );
@@ -2499,6 +2656,7 @@ void WINAPI LdrInitializeThunk( void *kernel_start, ULONG_PTR unknown2,
     if ((status = fixup_imports( wm, load_path )) != STATUS_SUCCESS) goto error;
     if ((status = alloc_process_tls()) != STATUS_SUCCESS) goto error;
     if ((status = alloc_thread_tls()) != STATUS_SUCCESS) goto error;
+    heap_set_debug_flags( GetProcessHeap() );
 
     status = wine_call_on_stack( attach_process_dlls, wm, NtCurrentTeb()->Tib.StackBase );
     if (status != STATUS_SUCCESS) goto error;
@@ -2694,6 +2852,8 @@ void __wine_process_init(void)
     /* retrieve current umask */
     FILE_umask = umask(0777);
     umask( FILE_umask );
+
+    load_global_options();
 
     /* setup the load callback and create ntdll modref */
     wine_dll_set_callback( load_builtin_callback );

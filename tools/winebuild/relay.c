@@ -721,7 +721,7 @@ static void BuildCallTo32CBClient( int isEx )
 
 
 /*******************************************************************
- *         BuildCallFrom32Regs
+ *         build_call_from_regs_x86
  *
  * Build a 32-bit-to-Wine call-back function for a 'register' function.
  * 'args' is the number of dword arguments.
@@ -746,13 +746,14 @@ static void BuildCallTo32CBClient( int isEx )
  * pointer on return (with the return address and arguments already
  * removed).
  */
-static void BuildCallFrom32Regs(void)
+static void build_call_from_regs_x86(void)
 {
     static const int STACK_SPACE = 128 + 0x2cc /* sizeof(CONTEXT86) */;
 
     /* Function header */
 
-    function_header( "__wine_call_from_32_regs" );
+    output( "\t.text\n" );
+    function_header( "__wine_call_from_regs" );
 
     /* Allocate some buffer space on the stack */
 
@@ -845,12 +846,12 @@ static void BuildCallFrom32Regs(void)
 
     output( "\tpopl %%ds\n" );
     output( "\tiret\n" );
-    output_function_size( "__wine_call_from_32_regs" );
+    output_function_size( "__wine_call_from_regs" );
 
-    function_header( "__wine_call_from_32_restore_regs" );
+    function_header( "__wine_restore_regs" );
     output( "\tmovl 4(%%esp),%%ecx\n" );
     output( "\tjmp 2b\n" );
-    output_function_size( "__wine_call_from_32_restore_regs" );
+    output_function_size( "__wine_restore_regs" );
 }
 
 
@@ -902,23 +903,15 @@ static void BuildPendingEventCheck(void)
 
 
 /*******************************************************************
- *         BuildRelays16
+ *         output_asm_relays16
  *
  * Build all the 16-bit relay callbacks
  */
-void BuildRelays16(void)
+void output_asm_relays16(void)
 {
-    if (target_cpu != CPU_x86)
-    {
-        output( "/* File not used with this architecture. Do not edit! */\n\n" );
-        return;
-    }
-
     /* File header */
 
-    output( "/* File generated automatically. Do not edit! */\n\n" );
     output( "\t.text\n" );
-
     output( "%s:\n\n", asm_name("__wine_spec_thunk_text_16") );
 
     output( "%s\n", asm_globl("__wine_call16_start") );
@@ -957,14 +950,11 @@ void BuildRelays16(void)
     output( "\n\t.data\n\t.align %d\n", get_alignment(4) );
     output( "%s\n\t.long 0\n", asm_globl("CallTo16_DataSelector") );
     output( "%s\n\t.long 0\n", asm_globl("CallTo16_TebSelector") );
-    if (UsePIC) output( "wine_ldt_copy_ptr:\t.long %s\n", asm_name("wine_ldt_copy") );
 
     output( "\t.text\n" );
-    output( "%s:\n\n", asm_name("__wine_spec_thunk_text_32") );
-    BuildCallFrom32Regs();
+    output( "%s:\n", asm_name("__wine_spec_thunk_text_32") );
+    build_call_from_regs_x86();
     output_function_size( "__wine_spec_thunk_text_32" );
-
-    output_gnu_stack_note();
 }
 
 
@@ -991,6 +981,7 @@ static void build_call_from_regs_x86_64(void)
 
     /* Function header */
 
+    output( "\t.text\n" );
     function_header( "__wine_call_from_regs" );
 
     output( "\t.cfi_startproc\n" );
@@ -1148,35 +1139,21 @@ static void build_call_from_regs_x86_64(void)
 
 
 /*******************************************************************
- *         BuildRelays32
+ *         output_asm_relays
  *
- * Build all the 32-bit relay callbacks
+ * Build all the assembly relay callbacks
  */
-void BuildRelays32(void)
+void output_asm_relays(void)
 {
     switch (target_cpu)
     {
     case CPU_x86:
-        output( "/* File generated automatically. Do not edit! */\n\n" );
-        output( "\t.text\n" );
-        output( "%s:\n\n", asm_name("__wine_spec_thunk_text_32") );
-
-        /* 32-bit register entry point */
-        BuildCallFrom32Regs();
-
-        output_function_size( "__wine_spec_thunk_text_32" );
-        output_gnu_stack_note();
+        build_call_from_regs_x86();
         break;
-
     case CPU_x86_64:
-        output( "/* File generated automatically. Do not edit! */\n\n" );
-        output( "\t.text\n" );
         build_call_from_regs_x86_64();
-        output_gnu_stack_note();
         break;
-
     default:
-        output( "/* File not used with this architecture. Do not edit! */\n\n" );
-        return;
+        break;
     }
 }

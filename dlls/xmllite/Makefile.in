@@ -6,6 +6,7 @@ MODULE    = xmllite.dll
 IMPORTS   = kernel32
 
 C_SRCS = \
+	reader.c \
 	xmllite_main.c
 
 @MAKE_DLL_RULES@

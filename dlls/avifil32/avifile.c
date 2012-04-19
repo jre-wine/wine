@@ -1087,6 +1087,15 @@ static HRESULT WINAPI IAVIStream_fnRead(IAVIStream *iface, LONG start,
     LONG block = start;
     LONG offset = 0;
 
+    if (!buffer)
+    {
+      if (bytesread)
+        *bytesread = samples*This->sInfo.dwSampleSize;
+      if (samplesread)
+        *samplesread = samples;
+      return AVIERR_OK;
+    }
+
     /* convert start sample to block,offset pair */
     AVIFILE_SamplesToBlock(This, &block, &offset);
 
@@ -1094,6 +1103,7 @@ static HRESULT WINAPI IAVIStream_fnRead(IAVIStream *iface, LONG start,
     samples *= This->sInfo.dwSampleSize;
 
     while (samples > 0 && buffersize > 0) {
+      LONG blocksize;
       if (block != This->dwCurrentFrame) {
 	hr = AVIFILE_ReadBlock(This, block, NULL, 0);
 	if (FAILED(hr))
@@ -1101,7 +1111,9 @@ static HRESULT WINAPI IAVIStream_fnRead(IAVIStream *iface, LONG start,
       }
 
       size = min((DWORD)samples, (DWORD)buffersize);
-      size = min(size, This->cbBuffer - offset);
+      blocksize = This->lpBuffer[1];
+      TRACE("blocksize = %u\n",blocksize);
+      size = min(size, blocksize - offset);
       memcpy(buffer, ((BYTE*)&This->lpBuffer[2]) + offset, size);
 
       block++;
@@ -1655,7 +1667,7 @@ static HRESULT AVIFILE_LoadFile(IAVIFileImpl *This)
   This->fInfo.dwCaps                = AVIFILECAPS_CANREAD|AVIFILECAPS_CANWRITE;
   This->fInfo.dwLength              = MainAVIHdr.dwTotalFrames;
   This->fInfo.dwStreams             = MainAVIHdr.dwStreams;
-  This->fInfo.dwSuggestedBufferSize = MainAVIHdr.dwSuggestedBufferSize;
+  This->fInfo.dwSuggestedBufferSize = 0;
   This->fInfo.dwWidth               = MainAVIHdr.dwWidth;
   This->fInfo.dwHeight              = MainAVIHdr.dwHeight;
   LoadStringW(AVIFILE_hModule, IDS_AVIFILETYPE, This->fInfo.szFileType,
@@ -1757,8 +1769,7 @@ static HRESULT AVIFILE_LoadFile(IAVIFileImpl *This)
 	    pStream->sInfo.dwRate                = streamHdr.dwRate;
 	    pStream->sInfo.dwStart               = streamHdr.dwStart;
 	    pStream->sInfo.dwLength              = streamHdr.dwLength;
-	    pStream->sInfo.dwSuggestedBufferSize =
-	      streamHdr.dwSuggestedBufferSize;
+	    pStream->sInfo.dwSuggestedBufferSize = 0;
 	    pStream->sInfo.dwQuality             = streamHdr.dwQuality;
 	    pStream->sInfo.dwSampleSize          = streamHdr.dwSampleSize;
 	    pStream->sInfo.rcFrame.left          = streamHdr.rcFrame.left;
@@ -1819,7 +1830,14 @@ static HRESULT AVIFILE_LoadFile(IAVIFileImpl *This)
 	  if (FAILED(hr))
 	    return hr;
 	};
-
+	if (pStream->lpFormat != NULL && pStream->sInfo.fccType == streamtypeAUDIO)
+	{
+	  WAVEFORMATEX *wfx = pStream->lpFormat;          /* wfx->nBlockAlign = wfx->nChannels * wfx->wBitsPerSample / 8; could be added */
+	  pStream->sInfo.dwSampleSize = wfx->nBlockAlign; /* to deal with corrupt wfx->nBlockAlign but Windows doesn't do this */
+	  TRACE("Block size reset to %u, chan=%u bpp=%u\n", wfx->nBlockAlign, wfx->nChannels, wfx->wBitsPerSample);
+	  pStream->sInfo.dwScale = 1;
+	  pStream->sInfo.dwRate = wfx->nSamplesPerSec;
+	}
 	if (mmioAscend(This->hmmio, &ck, 0) != S_OK)
 	  return AVIERR_FILEREAD;
       }
@@ -1898,6 +1916,13 @@ static HRESULT AVIFILE_LoadFile(IAVIFileImpl *This)
 	}
       }
     }
+  }
+
+  for (nStream = 0; nStream < This->fInfo.dwStreams; nStream++)
+  {
+    DWORD sugbuf =  This->ppStreams[nStream]->sInfo.dwSuggestedBufferSize;
+    if (This->fInfo.dwSuggestedBufferSize < sugbuf)
+      This->fInfo.dwSuggestedBufferSize = sugbuf;
   }
 
   /* find other chunks */
