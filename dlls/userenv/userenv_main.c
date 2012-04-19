@@ -65,6 +65,17 @@ BOOL WINAPI CreateEnvironmentBlock( LPVOID* lpEnvironment,
     return FALSE;
 }
 
+BOOL WINAPI DestroyEnvironmentBlock(LPVOID lpEnvironment)
+{
+    NTSTATUS r;
+
+    TRACE("%p\n", lpEnvironment);
+    r = RtlDestroyEnvironment(lpEnvironment);
+    if (r == STATUS_SUCCESS)
+        return TRUE;
+    return FALSE;
+}
+
 BOOL WINAPI ExpandEnvironmentStringsForUserA( HANDLE hToken, LPCSTR lpSrc,
                      LPSTR lpDest, DWORD dwSize )
 {
@@ -112,6 +123,18 @@ BOOL WINAPI GetProfilesDirectoryA( LPSTR lpProfilesDir, LPDWORD lpcchSize )
 BOOL WINAPI GetProfilesDirectoryW( LPWSTR lpProfilesDir, LPDWORD lpcchSize )
 {
     FIXME("%p %p\n", lpProfilesDir, lpcchSize );
+    return FALSE;
+}
+
+BOOL WINAPI GetAllUsersProfileDirectoryA( LPSTR lpProfileDir, LPDWORD lpcchSize )
+{
+    FIXME("%p %p\n", lpProfileDir, lpcchSize);
+    return FALSE;
+}
+
+BOOL WINAPI GetAllUsersProfileDirectoryW( LPWSTR lpProfileDir, LPDWORD lpcchSize )
+{
+    FIXME("%p %p\n", lpProfileDir, lpcchSize);
     return FALSE;
 }
 

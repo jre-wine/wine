@@ -45,6 +45,7 @@ DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 static WCHAR MSSansSerif_font[] = {'M','S',' ','S','a','n','s',' ','S','e','r','i','f',0};
 static WCHAR system_font[] = { 'S','y','s','t','e','m',0 };
 static WCHAR arial_font[] = { 'A','r','i','a','l',0 };
+static WCHAR marlett_font[] = { 'M','a','r','l','e','t','t',0 };
 
 static HMODULE hOleaut32;
 
@@ -795,6 +796,286 @@ static void test_AddRefHfont(void)
     IFont_Release(ifnt3);
 }
 
+static void test_returns(void)
+{
+    IFont *pFont;
+    FONTDESC fontdesc;
+    HRESULT hr;
+
+    fontdesc.cbSizeofstruct = sizeof(fontdesc);
+    fontdesc.lpstrName = MSSansSerif_font;
+    fontdesc.cySize.int64 = 12 * 10000; /* 12 pt */
+    fontdesc.sWeight = FW_NORMAL;
+    fontdesc.sCharset = 0;
+    fontdesc.fItalic = FALSE;
+    fontdesc.fUnderline = FALSE;
+    fontdesc.fStrikethrough = FALSE;
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&pFont);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_put_Name(pFont, NULL);
+    ok(hr == CTL_E_INVALIDPROPERTYVALUE,
+       "IFont::put_Name: Expected CTL_E_INVALIDPROPERTYVALUE got 0x%08x\n",
+       hr);
+
+    hr = IFont_get_Name(pFont, NULL);
+    ok(hr == E_POINTER,
+       "IFont::get_Name: Expected E_POINTER got 0x%08x\n",
+       hr);
+
+    hr = IFont_get_Size(pFont, NULL);
+    ok(hr == E_POINTER,
+       "IFont::get_Size: Expected E_POINTER got 0x%08x\n",
+       hr);
+
+    hr = IFont_get_Bold(pFont, NULL);
+    ok(hr == E_POINTER,
+       "IFont::get_Bold: Expected E_POINTER got 0x%08x\n",
+       hr);
+
+    IFont_Release(pFont);
+}
+
+static void test_hfont_lifetime(void)
+{
+    IFont *font, *font2;
+    FONTDESC fontdesc;
+    HRESULT hr;
+    HFONT hfont, first_hfont = NULL;
+    CY size;
+    DWORD obj_type;
+    int i;
+
+    fontdesc.cbSizeofstruct = sizeof(fontdesc);
+    fontdesc.lpstrName = arial_font;
+    fontdesc.cySize.int64 = 12 * 10000; /* 12 pt */
+    fontdesc.sWeight = FW_NORMAL;
+    fontdesc.sCharset = ANSI_CHARSET;
+    fontdesc.fItalic = FALSE;
+    fontdesc.fUnderline = FALSE;
+    fontdesc.fStrikethrough = FALSE;
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_get_hFont(font, &hfont);
+    ok_ole_success(hr, "get_hFont");
+
+    /* show that if the font is updated the old hfont is deleted when the
+       new font is realized */
+    for(i = 0; i < 100; i++)
+    {
+        HFONT last_hfont = hfont;
+
+        size.int64 = (i + 10) * 20000;
+
+        obj_type = GetObjectType(hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_put_Size(font, size);
+        ok_ole_success(hr, "put_Size");
+
+        /* put_Size doesn't cause the new font to be realized */
+        obj_type = GetObjectType(last_hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_get_hFont(font, &hfont);
+        ok_ole_success(hr, "get_hFont");
+
+        obj_type = GetObjectType(last_hfont);
+        ok(obj_type == 0, "%d: got obj type %d\n", i, obj_type);
+    }
+
+    /* now show that if we take a reference on the hfont, it persists
+       until the font object is released */
+    for(i = 0; i < 100; i++)
+    {
+
+        size.int64 = (i + 10) * 20000;
+
+        obj_type = GetObjectType(hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_put_Size(font, size);
+        ok_ole_success(hr, "put_Size");
+
+        hr = IFont_get_hFont(font, &hfont);
+        ok_ole_success(hr, "get_hFont");
+
+        hr = IFont_AddRefHfont(font, hfont);
+        ok_ole_success(hr, "AddRefHfont");
+
+        if(i == 0) first_hfont = hfont;
+        obj_type = GetObjectType(first_hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+    }
+
+    IFont_Release(font);
+
+    obj_type = GetObjectType(first_hfont);
+    ok(obj_type == 0, "got obj type %d\n", obj_type);
+
+    /* An AddRefHfont followed by a ReleaseHfont means the font doesn't not persist
+       through re-realization */
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_get_hFont(font, &hfont);
+    ok_ole_success(hr, "get_hFont");
+
+    for(i = 0; i < 100; i++)
+    {
+        HFONT last_hfont = hfont;
+
+        size.int64 = (i + 10) * 20000;
+
+        obj_type = GetObjectType(hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_put_Size(font, size);
+        ok_ole_success(hr, "put_Size");
+
+        /* put_Size doesn't cause the new font to be realized */
+        obj_type = GetObjectType(last_hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_get_hFont(font, &hfont);
+        ok_ole_success(hr, "get_hFont");
+
+        hr = IFont_AddRefHfont(font, hfont);
+        ok_ole_success(hr, "AddRefHfont");
+
+        hr = IFont_ReleaseHfont(font, hfont);
+        ok_ole_success(hr, "ReleaseHfont");
+
+        obj_type = GetObjectType(last_hfont);
+        ok(obj_type == 0, "%d: got obj type %d\n", i, obj_type);
+    }
+
+    /* Interestingly if we release a non-existent reference on the hfont, it persists
+       until the font object is released */
+    for(i = 0; i < 100; i++)
+    {
+        size.int64 = (i + 10) * 20000;
+
+        obj_type = GetObjectType(hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+        hr = IFont_put_Size(font, size);
+        ok_ole_success(hr, "put_Size");
+
+        hr = IFont_get_hFont(font, &hfont);
+        ok_ole_success(hr, "get_hFont");
+
+        hr = IFont_ReleaseHfont(font, hfont);
+        ok_ole_success(hr, "ReleaseHfont");
+
+        if(i == 0) first_hfont = hfont;
+        obj_type = GetObjectType(first_hfont);
+        ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+    }
+
+    IFont_Release(font);
+
+    obj_type = GetObjectType(first_hfont);
+    ok(obj_type == 0, "got obj type %d\n", obj_type);
+
+    /* If we take two internal references on a hfont then we can release
+       it twice.  So it looks like there's a total reference count
+       that includes internal and external references */
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font2);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_get_hFont(font, &hfont);
+    ok_ole_success(hr, "get_hFont");
+    hr = IFont_get_hFont(font2, &first_hfont);
+    ok_ole_success(hr, "get_hFont");
+todo_wine
+    ok(hfont == first_hfont, "fonts differ\n");
+    hr = IFont_ReleaseHfont(font, hfont);
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IFont_ReleaseHfont(font, hfont);
+todo_wine
+    ok(hr == S_OK, "got %08x\n", hr);
+    hr = IFont_ReleaseHfont(font, hfont);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+
+    obj_type = GetObjectType(hfont);
+    ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+    IFont_Release(font);
+
+    obj_type = GetObjectType(hfont);
+    ok(obj_type == OBJ_FONT, "got obj type %d\n", obj_type);
+
+    IFont_Release(font2);
+
+    obj_type = GetObjectType(hfont);
+    ok(obj_type == 0, "got obj type %d\n", obj_type);
+}
+
+static void test_realization(void)
+{
+    IFont *font;
+    FONTDESC fontdesc;
+    HRESULT hr;
+    BSTR name;
+    SHORT cs;
+
+    /* Try to create a symbol only font (marlett) with charset
+       set to ANSI.  This will result in another, ANSI, font
+       being selected */
+    fontdesc.cbSizeofstruct = sizeof(fontdesc);
+    fontdesc.lpstrName = marlett_font;
+    fontdesc.cySize.int64 = 12 * 10000; /* 12 pt */
+    fontdesc.sWeight = FW_NORMAL;
+    fontdesc.sCharset = ANSI_CHARSET;
+    fontdesc.fItalic = FALSE;
+    fontdesc.fUnderline = FALSE;
+    fontdesc.fStrikethrough = FALSE;
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_get_Charset(font, &cs);
+    ok_ole_success(hr, "get_Charset");
+    ok(cs == ANSI_CHARSET, "got charset %d\n", cs);
+
+    IFont_Release(font);
+
+    /* Now create an ANSI font and change the name to marlett */
+
+    fontdesc.lpstrName = arial_font;
+
+    hr = pOleCreateFontIndirect(&fontdesc, &IID_IFont, (void **)&font);
+    ok_ole_success(hr, "OleCreateFontIndirect");
+
+    hr = IFont_get_Charset(font, &cs);
+    ok_ole_success(hr, "get_Charset");
+    ok(cs == ANSI_CHARSET, "got charset %d\n", cs);
+
+    name = SysAllocString(marlett_font);
+    hr = IFont_put_Name(font, name);
+    ok_ole_success(hr, "put_Name");
+    SysFreeString(name);
+
+    hr = IFont_get_Name(font, &name);
+    ok_ole_success(hr, "get_Name");
+    ok(!lstrcmpiW(name, marlett_font), "got name %s\n", wine_dbgstr_w(name));
+    SysFreeString(name);
+
+    hr = IFont_get_Charset(font, &cs);
+    ok_ole_success(hr, "get_Charset");
+    ok(cs == SYMBOL_CHARSET, "got charset %d\n", cs);
+
+    IFont_Release(font);
+}
+
 START_TEST(olefont)
 {
 	hOleaut32 = GetModuleHandleA("oleaut32.dll");
@@ -827,4 +1108,7 @@ START_TEST(olefont)
 	test_IsEqual();
 	test_ReleaseHfont();
 	test_AddRefHfont();
+	test_returns();
+        test_hfont_lifetime();
+        test_realization();
 }

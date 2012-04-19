@@ -118,23 +118,6 @@ LIBS="$LIBS $2"
 AC_CHECK_FUNCS([$1],[$3],[$4])
 LIBS="$ac_wine_check_funcs_save_LIBS"])
 
-dnl **** Check for ln ****
-dnl
-dnl Usage: WINE_PROG_LN
-dnl
-AC_DEFUN([WINE_PROG_LN],
-[AC_MSG_CHECKING([whether ln works])
-rm -f conf$$ conf$$.file
-echo >conf$$.file
-if ln conf$$.file conf$$ 2>/dev/null; then
-  AC_SUBST(LN,ln)
-  AC_MSG_RESULT([yes])
-else
-  AC_SUBST(LN,["cp -p"])
-  AC_MSG_RESULT([no, using $LN])
-fi
-rm -f conf$$ conf$$.file])
-
 dnl **** Check for a mingw program, trying the various mingw prefixes ****
 dnl
 dnl Usage: WINE_CHECK_MINGW_PROG(variable,prog,[value-if-not-found],[path])
@@ -159,6 +142,14 @@ dnl
 AC_DEFUN([WINE_CONFIG_EXTRA_DIR],
 [AC_CONFIG_COMMANDS([$1],[test -d "$1" || (AC_MSG_NOTICE([creating $1]) && mkdir "$1")])])
 
+dnl **** Create symlinks from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_SYMLINK(name,target)
+dnl
+AC_DEFUN([WINE_CONFIG_SYMLINK],[AC_CONFIG_LINKS([$1:]m4_default([$2],[$1]))dnl
+m4_if([$2],,[test "$srcdir" = "." || ])ALL_SYMLINKS="$ALL_SYMLINKS \\
+	$1"])
+
 dnl **** Create a make rules file from config.status ****
 dnl
 dnl Usage: WINE_CONFIG_MAKERULES(file,var,deps)
@@ -167,7 +158,7 @@ AC_DEFUN([WINE_CONFIG_MAKERULES],
 [ALL_MAKERULES="$ALL_MAKERULES \\
 	$1"
 ALL_MAKEFILE_DEPENDS="$ALL_MAKEFILE_DEPENDS
-$1: m4_ifval([$3],[$1.in $3],[$1.in])"
+$1: m4_ifval([$3],[$1.in $3],[$1.in]) config.status"
 $2=$1
 AC_SUBST_FILE([$2])dnl
 AC_CONFIG_FILES([$1])])
@@ -185,9 +176,65 @@ m4_ifval([$4],[test "x$ac_enable" != xno]m4_foreach([ac_var],[$4],[ && ac_var="$
 	ac_dir"]))
 AS_VAR_POPDEF([ac_enable])dnl
 ALL_MAKEFILE_DEPENDS="$ALL_MAKEFILE_DEPENDS
-[$1: ]m4_ifval([$2],[$1.in $2],[$1.in])"
+[$1: ]m4_ifval([$2],[$1.in $2],[$1.in]) config.status"
 AC_CONFIG_FILES([$1])dnl
 m4_popdef([ac_dir])])
+
+dnl **** Create a dll makefile from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_DLL(name,enable,implib,implibsrc)
+dnl
+AC_DEFUN([WINE_CONFIG_DLL],
+[m4_ifval([$3],[m4_ifval([$2],[test "x$[$2]" = xno || ])ALL_IMPORT_LIBS="$ALL_IMPORT_LIBS \\
+	$1/lib$3.$IMPLIBEXT[]dnl
+m4_if($1,$3,,[ \\
+	lib$3.$IMPLIBEXT])[]dnl
+m4_ifval([$4],[ \\
+	$1/lib$3.$STATIC_IMPLIBEXT])"
+ALL_IMPORTLIB_RULES="$ALL_IMPORTLIB_RULES
+m4_if($1,$3,,[lib$3.a: $1/lib$3.a
+	\$(RM) \$[@] && \$(LN_S) $1/lib$3.a \$[@]
+lib$3.cross.a: $1/lib$3.cross.a
+	\$(RM) \$[@] && \$(LN_S) $1/lib$3.cross.a \$[@]
+lib$3.def: $1/lib$3.def
+	\$(RM) \$[@] && \$(LN_S) $1/lib$3.def \$[@]
+clean::
+	\$(RM) lib$3.def
+])m4_ifval([$4],[$1/lib$3.def: $1/$1.spec \$(WINEBUILD)
+	@cd $1 && \$(MAKE) \`basename \$[@]\`
+$1/lib$3.$STATIC_IMPLIBEXT $1/lib$3.cross.a: dummy
+	@cd $1 && \$(MAKE) \`basename \$[@]\`],
+[$1/lib$3.def $1/lib$3.a $1/lib$3.cross.a: $1/$1.spec \$(WINEBUILD)
+	@cd $1 && \$(MAKE) \`basename \$[@]\`])"
+])dnl
+WINE_CONFIG_MAKEFILE([dlls/$1/Makefile],[dlls/Makedll.rules],[dlls],[ALL_DLL_DIRS],[$2])])
+
+dnl **** Create a program makefile from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_PROGRAM(name,var,enable)
+dnl
+AC_DEFUN([WINE_CONFIG_PROGRAM],
+[WINE_CONFIG_MAKEFILE([programs/$1/Makefile],[programs/Makeprog.rules],[programs],[$2],[$3])])
+
+dnl **** Create a test makefile from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_TEST(dir)
+dnl
+AC_DEFUN([WINE_CONFIG_TEST],
+[WINE_CONFIG_MAKEFILE([$1/Makefile],[dlls/Maketest.rules],[dlls],[ALL_TEST_DIRS],[enable_tests])])
+
+dnl **** Create a static lib makefile from config.status ****
+dnl
+dnl Usage: WINE_CONFIG_LIB(name)
+dnl
+AC_DEFUN([WINE_CONFIG_LIB],
+[ALL_STATIC_LIBS="$ALL_STATIC_LIBS \\
+	$1/lib$1.a"
+ALL_IMPORTLIB_RULES="$ALL_IMPORTLIB_RULES
+$1/lib$1.a: $1
+$1/lib$1.cross.a: dummy
+	@cd $1 && \$(MAKE) lib$1.cross.a"
+WINE_CONFIG_MAKEFILE([dlls/$1/Makefile],[dlls/Makeimplib.rules],[dlls],[ALL_IMPLIB_DIRS])])
 
 dnl **** Add a message to the list displayed at the end ****
 dnl

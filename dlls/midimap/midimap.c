@@ -266,6 +266,12 @@ static DWORD modOpen(DWORD_PTR *lpdwUser, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
 
     if (!mom) return MMSYSERR_NOMEM;
 
+    if (HIWORD(dwFlags & CALLBACK_TYPEMASK)) {
+	FIXME("NIY callback flags %08x\n", dwFlags);
+	HeapFree(GetProcessHeap(), 0, mom);
+	return MMSYSERR_INVALFLAG;
+    }
+
     if (MIDIMAP_LoadSettings(mom))
     {
 	*lpdwUser = (DWORD_PTR)mom;
@@ -312,8 +318,14 @@ static DWORD modLongData(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwPara
 
     if (MIDIMAP_IsBadData(mom))
 	return MMSYSERR_ERROR;
+    if (!(lpMidiHdr->dwFlags & MHDR_PREPARED))
+	return MIDIERR_UNPREPARED;
+    if (lpMidiHdr->dwFlags & MHDR_INQUEUE)
+	return MIDIERR_STILLPLAYING;
 
     mh = *lpMidiHdr;
+    lpMidiHdr->dwFlags &= ~MHDR_DONE;
+    lpMidiHdr->dwFlags |= MHDR_INQUEUE;
     for (chn = 0; chn < 16; chn++)
     {
 	if (mom->ChannelMap[chn] && mom->ChannelMap[chn]->loaded > 0)
@@ -321,10 +333,15 @@ static DWORD modLongData(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwPara
 	    mh.dwFlags = 0;
 	    midiOutPrepareHeader(mom->ChannelMap[chn]->hMidi, &mh, sizeof(mh));
 	    ret = midiOutLongMsg(mom->ChannelMap[chn]->hMidi, &mh, sizeof(mh));
+	    /* As of 2009, wineXYZ.drv's LongData handlers are synchronous */
+	    if (!ret && !(mh.dwFlags & MHDR_DONE))
+		FIXME("wait until MHDR_DONE\n");
 	    midiOutUnprepareHeader(mom->ChannelMap[chn]->hMidi, &mh, sizeof(mh));
 	    if (ret != MMSYSERR_NOERROR) break;
 	}
     }
+    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
+    lpMidiHdr->dwFlags |= MHDR_DONE;
     return ret;
 }
 
@@ -391,23 +408,41 @@ static DWORD modData(MIDIMAPDATA* mom, DWORD_PTR dwParam)
     return ret;
 }
 
-static DWORD modPrepare(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwParam2)
+static DWORD modPrepare(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwSize)
 {
     if (MIDIMAP_IsBadData(mom)) return MMSYSERR_ERROR;
-    if (lpMidiHdr->dwFlags & (MHDR_ISSTRM|MHDR_PREPARED))
+    if (dwSize < sizeof(MIDIHDR) || lpMidiHdr == 0 ||
+	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE))
 	return MMSYSERR_INVALPARAM;
 
     lpMidiHdr->dwFlags |= MHDR_PREPARED;
+    lpMidiHdr->dwFlags &= ~MHDR_DONE;
     return MMSYSERR_NOERROR;
 }
 
 static DWORD modUnprepare(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwParam2)
 {
     if (MIDIMAP_IsBadData(mom)) return MMSYSERR_ERROR;
-    if ((lpMidiHdr->dwFlags & MHDR_ISSTRM) || !(lpMidiHdr->dwFlags & MHDR_PREPARED))
-	return MMSYSERR_INVALPARAM;
+    if (!(lpMidiHdr->dwFlags & MHDR_PREPARED)) return MIDIERR_UNPREPARED;
+    if (lpMidiHdr->dwFlags & MHDR_INQUEUE) return MIDIERR_STILLPLAYING;
 
     lpMidiHdr->dwFlags &= ~MHDR_PREPARED;
+    return MMSYSERR_NOERROR;
+}
+
+static DWORD modGetVolume(MIDIMAPDATA* mom, DWORD* lpdwVolume)
+{
+    if (MIDIMAP_IsBadData(mom)) return MMSYSERR_ERROR;
+    if (!lpdwVolume) return MMSYSERR_INVALPARAM;
+    *lpdwVolume = 0xFFFFFFFF; /* tests show this initial value */
+    return MMSYSERR_NOERROR;
+}
+
+static DWORD modSetVolume(MIDIMAPDATA* mom, DWORD dwVolume)
+{
+    /* Native forwards it to some underlying device
+     * GetVolume returns what was last set here. */
+    FIXME("stub\n");
     return MMSYSERR_NOERROR;
 }
 
@@ -422,7 +457,8 @@ static DWORD modGetDevCaps(UINT wDevID, MIDIMAPDATA* mom, LPMIDIOUTCAPSW lpMidiC
     lpMidiCaps->wVoices = 0;
     lpMidiCaps->wNotes = 0;
     lpMidiCaps->wChannelMask = 0xFFFF;
-    lpMidiCaps->dwSupport = 0L;
+    /* Native returns volume caps of underlying device | MIDICAPS_STREAM */
+    lpMidiCaps->dwSupport = MIDICAPS_VOLUME|MIDICAPS_LRVOLUME;
 
     return MMSYSERR_NOERROR;
 }
@@ -475,8 +511,8 @@ DWORD WINAPI MIDIMAP_modMessage(UINT wDevID, UINT wMsg, DWORD_PTR dwUser,
 
     case MODM_GETDEVCAPS:	return modGetDevCaps	(wDevID, (MIDIMAPDATA*)dwUser, (LPMIDIOUTCAPSW)dwParam1,dwParam2);
     case MODM_GETNUMDEVS:	return 1;
-    case MODM_GETVOLUME:	return MMSYSERR_NOTSUPPORTED;
-    case MODM_SETVOLUME:	return MMSYSERR_NOTSUPPORTED;
+    case MODM_GETVOLUME:	return modGetVolume	((MIDIMAPDATA*)dwUser, (DWORD*)dwParam1);
+    case MODM_SETVOLUME:	return modSetVolume	((MIDIMAPDATA*)dwUser, dwParam1);
     default:
 	FIXME("unknown message %d!\n", wMsg);
     }

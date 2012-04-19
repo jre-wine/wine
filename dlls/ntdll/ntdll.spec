@@ -643,6 +643,7 @@
 @ stdcall RtlGetSaclSecurityDescriptor(ptr ptr ptr ptr)
 # @ stub RtlGetSecurityDescriptorRMControl
 # @ stub RtlGetSetBootStatusData
+@ stdcall RtlGetThreadErrorMode()
 # @ stub RtlGetUnloadEventTrace
 @ stub RtlGetUserInfoHeap
 @ stdcall RtlGetVersion(ptr)
@@ -683,6 +684,7 @@
 @ stdcall RtlInt64ToUnicodeString(double long ptr)
 @ stdcall RtlIntegerToChar(long long long ptr)
 @ stdcall RtlIntegerToUnicodeString(long long ptr)
+@ stdcall -arch=win32 -ret64 RtlInterlockedCompareExchange64(ptr double double)
 @ stdcall RtlInterlockedFlushSList(ptr)
 @ stdcall RtlInterlockedPopEntrySList(ptr)
 @ stdcall RtlInterlockedPushEntrySList(ptr ptr)
@@ -842,6 +844,7 @@
 # @ stub RtlSetSecurityDescriptorRMControl
 @ stub RtlSetSecurityObject
 # @ stub RtlSetSecurityObjectEx
+@ stdcall RtlSetThreadErrorMode(long ptr)
 # @ stub RtlSetThreadIsCritical
 # @ stub RtlSetThreadPoolStartFunc
 @ stdcall RtlSetTimeZoneInformation(ptr)

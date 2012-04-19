@@ -549,6 +549,7 @@ typedef struct shader_reg_maps
 struct wined3d_shader_context
 {
     IWineD3DBaseShader *shader;
+    const struct wined3d_gl_info *gl_info;
     const struct shader_reg_maps *reg_maps;
     struct wined3d_shader_buffer *buffer;
     void *backend_data;
@@ -719,7 +720,7 @@ typedef struct {
     HRESULT (*shader_alloc_private)(IWineD3DDevice *iface);
     void (*shader_free_private)(IWineD3DDevice *iface);
     BOOL (*shader_dirtifyable_constants)(IWineD3DDevice *iface);
-    void (*shader_get_caps)(WINED3DDEVTYPE devtype, const struct wined3d_gl_info *gl_info, struct shader_caps *caps);
+    void (*shader_get_caps)(const struct wined3d_gl_info *gl_info, struct shader_caps *caps);
     BOOL (*shader_color_fixup_supported)(struct color_fixup_desc fixup);
     void (*shader_add_instruction_modifiers)(const struct wined3d_shader_instruction *ins);
 } shader_backend_t;
@@ -993,8 +994,10 @@ extern glMultiTexCoordFunc multi_texcoord_funcs[WINED3D_FFP_EMIT_COUNT] DECLSPEC
 #define STATE_IS_CLIPPLANE(a) ((a) >= STATE_CLIPPLANE(0) && (a) <= STATE_CLIPPLANE(MAX_CLIPPLANES - 1))
 
 #define STATE_MATERIAL (STATE_CLIPPLANE(MAX_CLIPPLANES))
+#define STATE_IS_MATERIAL(a) ((a) == STATE_MATERIAL)
 
 #define STATE_FRONTFACE (STATE_MATERIAL + 1)
+#define STATE_IS_FRONTFACE(a) ((a) == STATE_FRONTFACE)
 
 #define STATE_HIGHEST (STATE_FRONTFACE)
 
@@ -1013,10 +1016,16 @@ struct wined3d_occlusion_query
     struct wined3d_context *context;
 };
 
+union wined3d_gl_query_object
+{
+    GLuint id;
+    GLsync sync;
+};
+
 struct wined3d_event_query
 {
     struct list entry;
-    GLuint id;
+    union wined3d_gl_query_object object;
     struct wined3d_context *context;
 };
 
@@ -1089,7 +1098,7 @@ struct wined3d_context
     UINT free_occlusion_query_count;
     struct list occlusion_queries;
 
-    GLuint *free_event_queries;
+    union wined3d_gl_query_object *free_event_queries;
     UINT free_event_query_size;
     UINT free_event_query_count;
     struct list event_queries;
@@ -1127,7 +1136,7 @@ struct fragment_caps
 struct fragment_pipeline
 {
     void (*enable_extension)(IWineD3DDevice *iface, BOOL enable);
-    void (*get_caps)(WINED3DDEVTYPE devtype, const struct wined3d_gl_info *gl_info, struct fragment_caps *caps);
+    void (*get_caps)(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps);
     HRESULT (*alloc_private)(IWineD3DDevice *iface);
     void (*free_private)(IWineD3DDevice *iface);
     BOOL (*color_fixup_supported)(struct color_fixup_desc fixup);
@@ -1353,6 +1362,10 @@ struct wined3d_adapter
     unsigned int            TextureRam; /* Amount of texture memory both video ram + AGP/TurboCache/HyperMemory/.. */
     unsigned int            UsedTextureRam;
     LUID luid;
+
+    const struct fragment_pipeline *fragment_pipe;
+    const shader_backend_t *shader_backend;
+    const struct blit_shader *blitter;
 };
 
 BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor) DECLSPEC_HIDDEN;
@@ -1502,7 +1515,7 @@ struct IWineD3DDeviceImpl
     const struct fragment_pipeline *frag_pipe;
     const struct blit_shader *blitter;
 
-    unsigned int max_ffp_textures, max_ffp_texture_stages;
+    unsigned int max_ffp_textures;
     DWORD d3d_vshader_constantF, d3d_pshader_constantF; /* Advertised d3d caps, not GL ones */
     DWORD vs_clipping;
 
@@ -1607,14 +1620,14 @@ struct IWineD3DDeviceImpl
 HRESULT device_init(IWineD3DDeviceImpl *device, IWineD3DImpl *wined3d,
         UINT adapter_idx, WINED3DDEVTYPE device_type, HWND focus_window, DWORD flags,
         IUnknown *parent, IWineD3DDeviceParent *device_parent) DECLSPEC_HIDDEN;
+void device_preload_textures(IWineD3DDeviceImpl *device) DECLSPEC_HIDDEN;
 LRESULT device_process_message(IWineD3DDeviceImpl *device, HWND window,
         UINT message, WPARAM wparam, LPARAM lparam, WNDPROC proc) DECLSPEC_HIDDEN;
 void device_resource_add(IWineD3DDeviceImpl *This, IWineD3DResource *resource) DECLSPEC_HIDDEN;
 void device_resource_released(IWineD3DDeviceImpl *This, IWineD3DResource *resource) DECLSPEC_HIDDEN;
 void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         BOOL use_vshader, struct wined3d_stream_info *stream_info, BOOL *fixup) DECLSPEC_HIDDEN;
-void device_stream_info_from_strided(const struct wined3d_gl_info *gl_info,
-        const struct WineDirect3DVertexStridedData *strided, struct wined3d_stream_info *stream_info) DECLSPEC_HIDDEN;
+void device_update_stream_info(IWineD3DDeviceImpl *device, const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfaceImpl *target, DWORD Count,
         const WINED3DRECT *pRects, DWORD Flags, WINED3DCOLOR Color, float Z, DWORD Stencil) DECLSPEC_HIDDEN;
 void IWineD3DDeviceImpl_FindTexUnitMap(IWineD3DDeviceImpl *This) DECLSPEC_HIDDEN;
@@ -1750,6 +1763,7 @@ typedef struct IWineD3DBaseTextureClass
 void surface_internal_preload(IWineD3DSurface *iface, enum WINED3DSRGB srgb) DECLSPEC_HIDDEN;
 BOOL surface_init_sysmem(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
 BOOL surface_is_offscreen(IWineD3DSurface *iface) DECLSPEC_HIDDEN;
+void surface_prepare_texture(IWineD3DSurfaceImpl *surface, BOOL srgb) DECLSPEC_HIDDEN;
 
 typedef struct IWineD3DBaseTextureImpl
 {
@@ -2499,6 +2513,7 @@ const char *debug_d3ddeclusage(BYTE usage) DECLSPEC_HIDDEN;
 const char *debug_d3dprimitivetype(WINED3DPRIMITIVETYPE PrimitiveType) DECLSPEC_HIDDEN;
 const char *debug_d3drenderstate(DWORD state) DECLSPEC_HIDDEN;
 const char *debug_d3dsamplerstate(DWORD state) DECLSPEC_HIDDEN;
+const char *debug_d3dstate(DWORD state) DECLSPEC_HIDDEN;
 const char *debug_d3dtexturefiltertype(WINED3DTEXTUREFILTERTYPE filter_type) DECLSPEC_HIDDEN;
 const char *debug_d3dtexturestate(DWORD state) DECLSPEC_HIDDEN;
 const char *debug_d3dtstype(WINED3DTRANSFORMSTATETYPE tstype) DECLSPEC_HIDDEN;
@@ -2556,12 +2571,6 @@ void multiply_matrix(WINED3DMATRIX *dest, const WINED3DMATRIX *src1, const WINED
 UINT wined3d_log2i(UINT32 x) DECLSPEC_HIDDEN;
 unsigned int count_bits(unsigned int mask) DECLSPEC_HIDDEN;
 
-const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter,
-        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
-const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter,
-        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
-const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter,
-        WINED3DDEVTYPE device_type) DECLSPEC_HIDDEN;
 void select_shader_mode(const struct wined3d_gl_info *gl_info, int *ps_selected, int *vs_selected) DECLSPEC_HIDDEN;
 
 typedef struct local_constant {

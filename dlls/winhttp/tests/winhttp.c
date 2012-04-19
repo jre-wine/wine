@@ -248,8 +248,8 @@ static void test_empty_headers_param(void)
 static void test_SendRequest (void)
 {
     HINTERNET session, request, connection;
-    DWORD header_len, optional_len, total_len;
-    DWORD bytes_rw;
+    DWORD header_len, optional_len, total_len, bytes_rw, size;
+    DWORD_PTR context;
     BOOL ret;
     CHAR buffer[256];
     int i;
@@ -283,9 +283,21 @@ static void test_SendRequest (void)
         goto done;
     }
     ok(request != NULL, "WinHttpOpenrequest failed to open a request, error: %u.\n", GetLastError());
+    if (!request) goto done;
 
-    ret = WinHttpSendRequest(request, content_type, header_len, post_data, optional_len, total_len, 0);
+    context = 0xdeadbeef;
+    ret = WinHttpSetOption(request, WINHTTP_OPTION_CONTEXT_VALUE, &context, sizeof(context));
+    ok(ret, "WinHttpSetOption failed: %u\n", GetLastError());
+
+    context++;
+    ret = WinHttpSendRequest(request, content_type, header_len, post_data, optional_len, total_len, context);
     ok(ret == TRUE, "WinHttpSendRequest failed: %u\n", GetLastError());
+
+    context = 0;
+    size = sizeof(context);
+    ret = WinHttpQueryOption(request, WINHTTP_OPTION_CONTEXT_VALUE, &context, &size);
+    ok(ret, "WinHttpQueryOption failed: %u\n", GetLastError());
+    ok(context == 0xdeadbef0, "expected 0xdeadbef0, got %lx\n", context);
 
     for (i = 3; post_data[i]; i++)
     {
@@ -1019,6 +1031,482 @@ static void test_set_default_proxy_config(void)
            GetLastError());
 }
 
+static void test_Timeouts (void)
+{
+    BOOL ret;
+    DWORD value, size;
+    HINTERNET ses, req, con;
+    static const WCHAR codeweavers[] = {'c','o','d','e','w','e','a','v','e','r','s','.','c','o','m',0};
+
+
+    ses = WinHttpOpen(test_useragent, 0, NULL, NULL, 0);
+    ok(ses != NULL, "failed to open session %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, -2, 0, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, 0, -2, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, 0, 0, -2, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, 0, 0, 0, -2);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, -1, -1, -1, -1);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, 0, 0, 0, 0);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(ses, 0x0123, 0x4567, 0x89ab, 0xcdef);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0x4567, "Expected 0x4567, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0x89ab, "Expected 0x89ab, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xcdef, "Expected 0xcdef, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    con = WinHttpConnect(ses, codeweavers, 0, 0);
+    ok(con != NULL, "failed to open a connection %u\n", GetLastError());
+
+    /* Timeout values should match the last one set for session */
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, -2, 0, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, 0, -2, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, 0, 0, -2, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, 0, 0, 0, -2);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, -1, -1, -1, -1);
+    ok(!ret && GetLastError() == ERROR_WINHTTP_INCORRECT_HANDLE_TYPE,
+       "expected ERROR_WINHTTP_INVALID_TYPE, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(con, 0, 0, 0, 0);
+    ok(!ret && GetLastError() == ERROR_WINHTTP_INCORRECT_HANDLE_TYPE,
+       "expected ERROR_WINHTTP_INVALID_TYPE, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(con, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(!ret && GetLastError() == ERROR_WINHTTP_INCORRECT_HANDLE_TYPE,
+       "expected ERROR_WINHTTP_INVALID_TYPE, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(con, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(!ret && GetLastError() == ERROR_WINHTTP_INCORRECT_HANDLE_TYPE,
+       "expected ERROR_WINHTTP_INVALID_TYPE, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(con, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(!ret && GetLastError() == ERROR_WINHTTP_INCORRECT_HANDLE_TYPE,
+       "expected ERROR_WINHTTP_INVALID_TYPE, got %u\n", GetLastError());
+
+    /* Changing timeout values for session should affect the values for connection */
+    SetLastError(0xdeadbeef);
+    value = 0xdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdead;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(con, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    req = WinHttpOpenRequest(con, NULL, NULL, NULL, NULL, NULL, 0);
+    ok(req != NULL, "failed to open a request %u\n", GetLastError());
+
+    /* Timeout values should match the last one set for session */
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, -2, 0, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, 0, -2, 0, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, 0, 0, -2, 0);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, 0, 0, 0, -2);
+    ok(!ret && GetLastError() == ERROR_INVALID_PARAMETER,
+       "expected ERROR_INVALID_PARAMETER, got %u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, -1, -1, -1, -1);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, 0, 0, 0, 0);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    ret = WinHttpSetTimeouts(req, 0xcdef, 0x89ab, 0x4567, 0x0123);
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0x89ab, "Expected 0x89ab, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0x4567, "Expected 0x4567, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0x0123, "Expected 0x0123, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0, "Expected 0, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    /* Changing timeout values for session should not affect the values for a request,
+     * neither should the other way around.
+     */
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeefdead;
+    ret = WinHttpSetOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xdead, "Expected 0xdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeef;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_CONNECT_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeef;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_SEND_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_SEND_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    SetLastError(0xdeadbeef);
+    value = 0xbeef;
+    ret = WinHttpSetOption(ses, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, sizeof(value));
+    ok(ret, "%u\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    value = 0xdeadbeef;
+    size  = sizeof(DWORD);
+    ret = WinHttpQueryOption(req, WINHTTP_OPTION_RECEIVE_TIMEOUT, &value, &size);
+    ok(ret, "%u\n", GetLastError());
+    ok(value == 0xbeefdead, "Expected 0xbeefdead, got %u\n", value);
+
+    WinHttpCloseHandle(req);
+    WinHttpCloseHandle(con);
+    WinHttpCloseHandle(ses);
+}
+
 START_TEST (winhttp)
 {
     test_OpenRequest();
@@ -1031,4 +1519,5 @@ START_TEST (winhttp)
     test_QueryOption();
     test_set_default_proxy_config();
     test_empty_headers_param();
+    test_Timeouts();
 }

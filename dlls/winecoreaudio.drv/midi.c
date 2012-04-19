@@ -191,8 +191,8 @@ LONG CoreAudio_MIDIInit(void)
         destinations[i].caps.wPid = 0x0001;
         destinations[i].caps.vDriverVersion = 0x0001;
         destinations[i].caps.dwSupport = 0;
-        destinations[i].caps.wVoices = 16;
-        destinations[i].caps.wNotes = 16;
+        destinations[i].caps.wVoices = 0;
+        destinations[i].caps.wNotes = 0;
     }
     return DRV_SUCCESS;
 }
@@ -222,7 +222,7 @@ LONG CoreAudio_MIDIRelease(void)
 /**************************************************************************
  * 			MIDI_NotifyClient			[internal]
  */
-static DWORD MIDI_NotifyClient(UINT wDevID, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
+static void MIDI_NotifyClient(UINT wDevID, WORD wMsg, DWORD dwParam1, DWORD dwParam2)
 {
     DWORD 		dwCallBack;
     UINT 		uFlags;
@@ -255,12 +255,11 @@ static DWORD MIDI_NotifyClient(UINT wDevID, WORD wMsg, DWORD dwParam1, DWORD dwP
 	dwInstance = sources[wDevID].midiDesc.dwInstance;
         break;
     default:
-	WARN("Unsupported MSW-MIDI message %u\n", wMsg);
-	return MMSYSERR_ERROR;
+	ERR("Unsupported MSW-MIDI message %u\n", wMsg);
+	return;
     }
 
-    return DriverCallback(dwCallBack, uFlags, hDev, wMsg, dwInstance, dwParam1, dwParam2) ?
-        MMSYSERR_NOERROR : MMSYSERR_ERROR;
+    DriverCallback(dwCallBack, uFlags, hDev, wMsg, dwInstance, dwParam1, dwParam2);
 }
 
 static DWORD MIDIOut_Open(WORD wDevID, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
@@ -307,7 +306,8 @@ static DWORD MIDIOut_Open(WORD wDevID, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
     dest->wFlags = HIWORD(dwFlags & CALLBACK_TYPEMASK);
     dest->midiDesc = *lpDesc;
 
-    return MIDI_NotifyClient(wDevID, MOM_OPEN, 0L, 0L);
+    MIDI_NotifyClient(wDevID, MOM_OPEN, 0L, 0L);
+    return MMSYSERR_NOERROR;
 }
 
 static DWORD MIDIOut_Close(WORD wDevID)
@@ -327,10 +327,7 @@ static DWORD MIDIOut_Close(WORD wDevID)
     destinations[wDevID].graph = 0;
     destinations[wDevID].synth = 0;
 
-    if (MIDI_NotifyClient(wDevID, MOM_CLOSE, 0L, 0L) != MMSYSERR_NOERROR) {
-	WARN("can't notify client !\n");
-	ret = MMSYSERR_INVALPARAM;
-    }
+    MIDI_NotifyClient(wDevID, MOM_CLOSE, 0L, 0L);
     destinations[wDevID].midiDesc.hMidi = 0;
 
     return ret;
@@ -446,10 +443,7 @@ static DWORD MIDIOut_LongData(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
 
     lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
     lpMidiHdr->dwFlags |= MHDR_DONE;
-    if (MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD)lpMidiHdr, 0L) != MMSYSERR_NOERROR) {
-	WARN("can't notify client !\n");
-	return MMSYSERR_INVALPARAM;
-    }
+    MIDI_NotifyClient(wDevID, MOM_DONE, (DWORD)lpMidiHdr, 0L);
     return MMSYSERR_NOERROR;
 }
 
@@ -470,8 +464,7 @@ static DWORD MIDIOut_Prepare(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
      * So at least check for the inqueue flag
      */
     if (dwSize < sizeof(MIDIHDR) || lpMidiHdr == 0 ||
-	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0 ||
-	lpMidiHdr->dwBufferLength >= 0x10000ul) {
+	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0) {
 	WARN("%p %p %08x %lu/%d\n", lpMidiHdr, lpMidiHdr->lpData,
 	           lpMidiHdr->dwFlags, sizeof(MIDIHDR), dwSize);
 	return MMSYSERR_INVALPARAM;
@@ -546,7 +539,7 @@ static DWORD MIDIOut_GetVolume(WORD wDevID, DWORD *lpdwVolume)
         float right;
         AudioUnit_GetVolume(destinations[wDevID].synth, &left, &right);
 
-        *lpdwVolume = ((WORD) left * 0xFFFFl) + (((WORD) right * 0xFFFFl) << 16);
+        *lpdwVolume = (WORD) (left * 0xFFFF) + ((WORD) (right * 0xFFFF) << 16);
 
         return MMSYSERR_NOERROR;
     }
@@ -633,7 +626,8 @@ static DWORD MIDIIn_Open(WORD wDevID, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
     sources[wDevID].startTime = 0;
     sources[wDevID].state = 0;
 
-    return MIDI_NotifyClient(wDevID, MIM_OPEN, 0L, 0L);
+    MIDI_NotifyClient(wDevID, MIM_OPEN, 0L, 0L);
+    return MMSYSERR_NOERROR;
 }
 
 static DWORD MIDIIn_Close(WORD wDevID)
@@ -655,7 +649,7 @@ static DWORD MIDIIn_Close(WORD wDevID)
 	return MIDIERR_STILLPLAYING;
     }
 
-    ret = MIDI_NotifyClient(wDevID, MIM_CLOSE, 0L, 0L);
+    MIDI_NotifyClient(wDevID, MIM_CLOSE, 0L, 0L);
     sources[wDevID].midiDesc.hMidi = 0;
     return ret;
 }
@@ -721,8 +715,7 @@ static DWORD MIDIIn_Prepare(WORD wDevID, LPMIDIHDR lpMidiHdr, DWORD dwSize)
      * So at least check for the inqueue flag
      */
     if (dwSize < sizeof(MIDIHDR) || lpMidiHdr == 0 ||
-	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0 ||
-	lpMidiHdr->dwBufferLength >= 0x10000ul) {
+	lpMidiHdr->lpData == 0 || (lpMidiHdr->dwFlags & MHDR_INQUEUE) != 0) {
 	WARN("Invalid parameter %p %p %08x %d\n", lpMidiHdr, lpMidiHdr->lpData,
 	           lpMidiHdr->dwFlags, dwSize);
 	return MMSYSERR_INVALPARAM;
@@ -816,9 +809,7 @@ static DWORD MIDIIn_Reset(WORD wDevID)
 	sources[wDevID].lpQueueHdr->dwFlags &= ~MHDR_INQUEUE;
 	sources[wDevID].lpQueueHdr->dwFlags |= MHDR_DONE;
 	/* FIXME: when called from 16 bit, lpQueueHdr needs to be a segmented ptr */
-	if (MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD)sources[wDevID].lpQueueHdr, dwTime) != MMSYSERR_NOERROR) {
-	    WARN("Couldn't notify client\n");
-	}
+	MIDI_NotifyClient(wDevID, MIM_LONGDATA, (DWORD)sources[wDevID].lpQueueHdr, dwTime);
 	sources[wDevID].lpQueueHdr = (LPMIDIHDR)sources[wDevID].lpQueueHdr->lpNext;
     }
     LeaveCriticalSection(&midiInLock);

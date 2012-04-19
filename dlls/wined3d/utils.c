@@ -387,7 +387,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_RGBA,                    GL_UNSIGNED_INT_8_8_8_8_REV,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
-    {WINED3DFMT_R16G16_UNORM,           GL_RGB16_EXT,                     GL_RGB16_EXT,               GL_RGBA16_EXT,
+    {WINED3DFMT_R16G16_UNORM,           GL_RGB16,                         GL_RGB16,                       GL_RGBA16,
             GL_RGB,                     GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
@@ -395,7 +395,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_BGRA,                    GL_UNSIGNED_INT_2_10_10_10_REV,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
-    {WINED3DFMT_R16G16B16A16_UNORM,     GL_RGBA16_EXT,                    GL_RGBA16_EXT,                          0,
+    {WINED3DFMT_R16G16B16A16_UNORM,     GL_RGBA16,                        GL_RGBA16,                              0,
             GL_RGBA,                    GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_RENDERTARGET,
             WINED3D_GL_EXT_NONE},
@@ -445,7 +445,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_RGBA,                    GL_BYTE,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             NV_TEXTURE_SHADER},
-    {WINED3DFMT_R16G16_SNORM,           GL_RGB16_EXT,                     GL_RGB16_EXT,                           0,
+    {WINED3DFMT_R16G16_SNORM,           GL_RGB16,                         GL_RGB16,                               0,
             GL_BGR,                     GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
@@ -506,7 +506,7 @@ static const GlPixelFormatDescTemplate gl_formats_template[] = {
             GL_DEPTH_COMPONENT,         GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING | WINED3DFMT_FLAG_DEPTH,
             ARB_DEPTH_TEXTURE},
-    {WINED3DFMT_L16_UNORM,              GL_LUMINANCE16_EXT,               GL_LUMINANCE16_EXT,                     0,
+    {WINED3DFMT_L16_UNORM,              GL_LUMINANCE16,                   GL_LUMINANCE16,                         0,
             GL_LUMINANCE,               GL_UNSIGNED_SHORT,
             WINED3DFMT_FLAG_POSTPIXELSHADER_BLENDING | WINED3DFMT_FLAG_FILTERING,
             WINED3D_GL_EXT_NONE},
@@ -1098,7 +1098,7 @@ static void apply_format_fixups(struct wined3d_gl_info *gl_info)
     gl_info->gl_formats[idx].heightscale = 1.5f;
     gl_info->gl_formats[idx].color_fixup = create_yuv_fixup_desc(YUV_FIXUP_YV12);
 
-    if (gl_info->supported[EXT_VERTEX_ARRAY_BGRA])
+    if (gl_info->supported[ARB_VERTEX_ARRAY_BGRA])
     {
         idx = getFmtIdx(WINED3DFMT_B8G8R8A8_UNORM);
         gl_info->gl_formats[idx].gl_vtx_format = GL_BGRA;
@@ -1784,6 +1784,51 @@ const char* debug_d3dtstype(WINED3DTRANSFORMSTATETYPE tstype) {
         FIXME("Unrecognized %u WINED3DTS\n", tstype);
         return "unrecognized";
     }
+}
+
+const char *debug_d3dstate(DWORD state)
+{
+    if (STATE_IS_RENDER(state))
+        return wine_dbg_sprintf("STATE_RENDER(%s)", debug_d3drenderstate(state - STATE_RENDER(0)));
+    if (STATE_IS_TEXTURESTAGE(state))
+    {
+        DWORD texture_stage = (state - STATE_TEXTURESTAGE(0, 0)) / (WINED3D_HIGHEST_TEXTURE_STATE + 1);
+        DWORD texture_state = state - STATE_TEXTURESTAGE(texture_stage, 0);
+        return wine_dbg_sprintf("STATE_TEXTURESTAGE(%#x, %s)",
+                texture_stage, debug_d3dtexturestate(texture_state));
+    }
+    if (STATE_IS_SAMPLER(state))
+        return wine_dbg_sprintf("STATE_SAMPLER(%#x)", state - STATE_SAMPLER(0));
+    if (STATE_IS_PIXELSHADER(state))
+        return "STATE_PIXELSHADER";
+    if (STATE_IS_TRANSFORM(state))
+        return wine_dbg_sprintf("STATE_TRANSFORM(%s)", debug_d3dtstype(state - STATE_TRANSFORM(0)));
+    if (STATE_IS_STREAMSRC(state))
+        return "STATE_STREAMSRC";
+    if (STATE_IS_INDEXBUFFER(state))
+        return "STATE_INDEXBUFFER";
+    if (STATE_IS_VDECL(state))
+        return "STATE_VDECL";
+    if (STATE_IS_VSHADER(state))
+        return "STATE_VSHADER";
+    if (STATE_IS_VIEWPORT(state))
+        return "STATE_VIEWPORT";
+    if (STATE_IS_VERTEXSHADERCONSTANT(state))
+        return "STATE_VERTEXSHADERCONSTANT";
+    if (STATE_IS_PIXELSHADERCONSTANT(state))
+        return "STATE_PIXELSHADERCONSTANT";
+    if (STATE_IS_ACTIVELIGHT(state))
+        return wine_dbg_sprintf("STATE_ACTIVELIGHT(%#x)", state - STATE_ACTIVELIGHT(0));
+    if (STATE_IS_SCISSORRECT(state))
+        return "STATE_SCISSORRECT";
+    if (STATE_IS_CLIPPLANE(state))
+        return wine_dbg_sprintf("STATE_CLIPPLANE(%#x)", state - STATE_CLIPPLANE(0));
+    if (STATE_IS_MATERIAL(state))
+        return "STATE_MATERIAL";
+    if (STATE_IS_FRONTFACE(state))
+        return "STATE_FRONTFACE";
+
+    return wine_dbg_sprintf("UNKNOWN_STATE(%#x)", state);
 }
 
 const char* debug_d3dpool(WINED3DPOOL Pool) {
@@ -2794,41 +2839,4 @@ void select_shader_mode(const struct wined3d_gl_info *gl_info, int *ps_selected,
     else if (gl_info->supported[ARB_FRAGMENT_PROGRAM]) *ps_selected = SHADER_ARB;
     else if (gl_info->supported[ATI_FRAGMENT_SHADER]) *ps_selected = SHADER_ATI;
     else *ps_selected = SHADER_NONE;
-}
-
-const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter, WINED3DDEVTYPE device_type)
-{
-    int vs_selected_mode, ps_selected_mode;
-
-    select_shader_mode(&adapter->gl_info, &ps_selected_mode, &vs_selected_mode);
-    if (vs_selected_mode == SHADER_GLSL || ps_selected_mode == SHADER_GLSL) return &glsl_shader_backend;
-    if (vs_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_ARB) return &arb_program_shader_backend;
-    return &none_shader_backend;
-}
-
-const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter,
-        WINED3DDEVTYPE device_type)
-{
-    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
-    int vs_selected_mode, ps_selected_mode;
-
-    select_shader_mode(gl_info, &ps_selected_mode, &vs_selected_mode);
-    if ((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL)
-            && gl_info->supported[ARB_FRAGMENT_PROGRAM]) return &arbfp_fragment_pipeline;
-    else if (ps_selected_mode == SHADER_ATI) return &atifs_fragment_pipeline;
-    else if (gl_info->supported[NV_REGISTER_COMBINERS]
-            && gl_info->supported[NV_TEXTURE_SHADER2]) return &nvts_fragment_pipeline;
-    else if (gl_info->supported[NV_REGISTER_COMBINERS]) return &nvrc_fragment_pipeline;
-    else return &ffp_fragment_pipeline;
-}
-
-const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter, WINED3DDEVTYPE device_type)
-{
-    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
-    int vs_selected_mode, ps_selected_mode;
-
-    select_shader_mode(gl_info, &ps_selected_mode, &vs_selected_mode);
-    if ((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL)
-            && gl_info->supported[ARB_FRAGMENT_PROGRAM]) return &arbfp_blit;
-    else return &ffp_blit;
 }

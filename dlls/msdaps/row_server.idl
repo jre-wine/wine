@@ -18,6 +18,162 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
+import "oledb.idl";
+
+[
+    object,
+    uuid(38248178-cf6d-11de-abe5-000c2916d865),
+    pointer_default(unique)
+]
+interface IWineRowServer : IUnknown
+{
+    [local] HRESULT SetInnerUnk([in] IUnknown *unknown);
+
+    [local] HRESULT GetMarshal([out] IMarshal **marshal);
+
+
+    /* IRow */
+
+typedef struct
+{
+    DBID columnid;
+    DBLENGTH max_len;
+    DBTYPE type;
+    BYTE precision;
+    BYTE scale;
+} wine_getcolumns_in;
+
+typedef struct
+{
+    VARIANT v;
+    DBLENGTH data_len;
+    DBSTATUS status;
+} wine_getcolumns_out;
+
+    HRESULT GetColumns([in] DBORDINAL num_cols,
+                       [in, size_is(num_cols)] wine_getcolumns_in *in_data,
+                       [out, size_is(num_cols)] wine_getcolumns_out *out_cols);
+
+    HRESULT GetSourceRowset([in] REFIID riid,
+                            [out, iid_is(riid)] IUnknown **ppRowset,
+                            [out] HROW *phRow);
+
+    HRESULT Open([in, unique] IUnknown *pUnkOuter,
+                 [in] DBID *pColumnID,
+                 [in] REFGUID rguidColumnType,
+                 [in] DWORD dwBindFlags,
+                 [in] REFIID riid,
+                 [out, iid_is(riid)] IUnknown **ppUnk);
+
+    /* IRowChange */
+typedef struct
+{
+    VARIANT v;
+    DBID columnid;
+    DBLENGTH data_len;
+    DBSTATUS status;
+    DBLENGTH max_len;
+    DBTYPE type;
+    BYTE precision;
+    BYTE scale;
+} wine_setcolumns_in;
+
+    HRESULT SetColumns([in] DBORDINAL num_cols,
+                       [in, size_is(num_cols)] wine_setcolumns_in *in_data,
+                       [out, size_is(num_cols)] DBSTATUS *status);
+
+    /* IRowset */
+    HRESULT AddRefRows([in] DBCOUNTITEM cRows,
+                       [in, size_is(cRows)] const HROW rghRows[],
+                       [out, size_is(cRows)] DBREFCOUNT rgRefCounts[],
+                       [out, size_is(cRows)] DBROWSTATUS rgRowStatus[]);
+
+    HRESULT GetData([in] HROW hRow,
+                    [in] HACCESSOR hAccessor,
+                    [in, out, size_is(size)] BYTE *pData,
+                    [in] DWORD size);
+
+    HRESULT GetNextRows([in] HCHAPTER hReserved,
+                        [in] DBROWOFFSET lRowsOffset,
+                        [in] DBROWCOUNT cRows,
+                        [out] DBCOUNTITEM *pcRowObtained,
+                        [out, size_is(,cRows)] HROW **prghRows);
+
+    HRESULT ReleaseRows([in] DBCOUNTITEM cRows,
+                        [in, size_is(cRows)] const HROW rghRows[],
+                        [in, size_is(cRows)] DBROWOPTIONS rgRowOptions[],
+                        [out, size_is(cRows)] DBREFCOUNT rgRefCounts[],
+                        [out, size_is(cRows)] DBROWSTATUS rgRowStatus[]);
+
+    HRESULT RestartPosition([in] HCHAPTER hReserved);
+
+    /* IRowsetLocate */
+
+    HRESULT Compare([in] HCHAPTER hReserved,
+                    [in] DBBKMARK cbBookmark1,
+                    [in, size_is(cbBookmark1)] const BYTE *pBookmark1,
+                    [in] DBBKMARK cbBookmark2,
+                    [in, size_is(cbBookmark2)] const BYTE *pBookmark2,
+                    [out] DBCOMPARE *pComparison);
+
+    HRESULT GetRowsAt([in] HWATCHREGION hReserved1,
+                      [in] HCHAPTER hReserved2,
+                      [in] DBBKMARK cbBookmark,
+                      [in, size_is(cbBookmark)] const BYTE *pBookmark,
+                      [in] DBROWOFFSET lRowsOffset,
+                      [in] DBROWCOUNT cRows,
+                      [out] DBCOUNTITEM *pcRowsObtained,
+                      [out, size_is(,cRows)] HROW **prghRows);
+
+    HRESULT GetRowsByBookmark([in] HCHAPTER hReserved,
+                              [in] DBCOUNTITEM cRows,
+                              [in, size_is(cRows)] const DBBKMARK rgcbBookmarks[],
+                              [in, size_is(cRows)] const BYTE *rgpBookmarks[],
+                              [out, size_is(cRows)] HROW rghRows[],
+                              [out, size_is(cRows)] DBROWSTATUS rgRowStatus[]);
+
+    HRESULT Hash([in] HCHAPTER hReserved,
+                 [in] DBBKMARK cBookmarks,
+                 [in, size_is(cBookmarks)] const DBBKMARK rgcbBookmarks[],
+                 [in, size_is(cBookmarks)] const BYTE *rgpBookmarks[],
+                 [out, size_is(cBookmarks)] DBHASHVALUE rgHashedValues[],
+                 [out, size_is(cBookmarks)] DBROWSTATUS rgBookmarkStatus[]);
+
+    /* IRowsetInfo */
+
+    HRESULT GetProperties([in] ULONG cPropertyIDSets,
+                          [in, unique, size_is(cPropertyIDSets)] const DBPROPIDSET *rgPropertyIDSets,
+                          [in, out] ULONG *pcPropertySets,
+                          [out, size_is(,*pcPropertySets)] DBPROPSET **prgPropertySets);
+
+    HRESULT GetReferencedRowset([in] DBORDINAL iOrdinal,
+                                [in] REFIID riid,
+                                [out, iid_is(riid)] IUnknown **ppReferencedRowset);
+
+    HRESULT GetSpecification([in] REFIID riid,
+                             [out, iid_is(riid)] IUnknown **ppSpecification);
+
+    /* IAccessor */
+
+    HRESULT AddRefAccessor([in] HACCESSOR hAccessor,
+                           [in, out, unique, annotation("__out_opt")] DBREFCOUNT *pcRefCount);
+
+    HRESULT CreateAccessor([in] DBACCESSORFLAGS dwAccessorFlags,
+                           [in] DBCOUNTITEM cBindings,
+                           [in, unique, size_is(cBindings)] const DBBINDING *rgBindings,
+                           [in] DBLENGTH cbRowSize,
+                           [out] HACCESSOR *phAccessor,
+                           [in, out, unique, size_is(cBindings)] DBBINDSTATUS *rgStatus);
+
+    HRESULT GetBindings([in] HACCESSOR hAccessor,
+                        [out] DBACCESSORFLAGS *pdwAccessorFlags,
+                        [in, out] DBCOUNTITEM *pcBindings,
+                        [out, size_is(,*pcBindings)] DBBINDING **prgBindings);
+
+    HRESULT ReleaseAccessor([in] HACCESSOR hAccessor,
+                            [in, out, unique] DBREFCOUNT *pcRefCount);
+}
+
 [
     uuid(38248178-cf6d-11de-abe5-000c2916d865)
 ]

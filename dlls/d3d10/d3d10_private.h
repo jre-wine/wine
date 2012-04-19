@@ -48,6 +48,8 @@ enum d3d10_effect_object_type
 enum d3d10_effect_object_operation
 {
     D3D10_EOO_VALUE = 1,
+    D3D10_EOO_PARSED_OBJECT = 2,
+    D3D10_EOO_PARSED_OBJECT_INDEX = 3,
     D3D10_EOO_ANONYMOUS_SHADER = 7,
 };
 
@@ -56,6 +58,7 @@ struct d3d10_effect_object
     struct d3d10_effect_pass *pass;
     enum d3d10_effect_object_type type;
     DWORD idx_offset;
+    DWORD index;
     void *data;
 };
 
@@ -76,11 +79,14 @@ struct d3d10_effect_type
 {
     const struct ID3D10EffectTypeVtbl *vtbl;
 
+    char *name;
+    D3D10_SHADER_VARIABLE_TYPE basetype;
+    D3D10_SHADER_VARIABLE_CLASS type_class;
+
     DWORD id;
     struct wine_rb_entry entry;
     struct d3d10_effect *effect;
 
-    char *name;
     DWORD element_count;
     DWORD size_unpacked;
     DWORD stride;
@@ -88,8 +94,6 @@ struct d3d10_effect_type
     DWORD member_count;
     DWORD column_count;
     DWORD row_count;
-    D3D10_SHADER_VARIABLE_TYPE basetype;
-    D3D10_SHADER_VARIABLE_CLASS type_class;
     struct d3d10_effect_type *elementtype;
     struct d3d10_effect_type_member *members;
 };
@@ -109,7 +113,6 @@ struct d3d10_effect_variable
 
     struct d3d10_effect_variable *buffer;
     struct d3d10_effect_type *type;
-    struct d3d10_effect *effect;
 
     void *data;
     char *name;
@@ -118,6 +121,7 @@ struct d3d10_effect_variable
     DWORD annotation_count;
     DWORD flag;
     DWORD data_size;
+    struct d3d10_effect *effect;
     struct d3d10_effect_variable *elements;
     struct d3d10_effect_variable *members;
     struct d3d10_effect_variable *annotations;

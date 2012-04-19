@@ -747,6 +747,16 @@ void WINAPI ValidateRgn16( HWND16 hwnd, HRGN16 hrgn )
  */
 WORD WINAPI GetClassWord16( HWND16 hwnd, INT16 offset )
 {
+    HICON icon;
+
+    switch (offset)
+    {
+    case GCLP_HCURSOR:
+    case GCLP_HICON:
+    case GCLP_HICONSM:
+        icon = (HICON)GetClassLongPtrW( WIN_Handle32(hwnd), offset );
+        return get_icon_16( icon );
+    }
     return GetClassWord( WIN_Handle32(hwnd), offset );
 }
 
@@ -756,6 +766,16 @@ WORD WINAPI GetClassWord16( HWND16 hwnd, INT16 offset )
  */
 WORD WINAPI SetClassWord16( HWND16 hwnd, INT16 offset, WORD newval )
 {
+    HICON icon;
+
+    switch (offset)
+    {
+    case GCLP_HCURSOR:
+    case GCLP_HICON:
+    case GCLP_HICONSM:
+        icon = (HICON)SetClassLongPtrW( WIN_Handle32(hwnd), offset, (ULONG_PTR)get_icon_32(newval) );
+        return get_icon_16( icon );
+    }
     return SetClassWord( WIN_Handle32(hwnd), offset, newval );
 }
 
@@ -773,6 +793,10 @@ LONG WINAPI GetClassLong16( HWND16 hwnd16, INT16 offset )
         return (LONG_PTR)WINPROC_GetProc16( (WNDPROC)ret, FALSE );
     case GCLP_MENUNAME:
         return MapLS( (void *)ret );  /* leak */
+    case GCLP_HCURSOR:
+    case GCLP_HICON:
+    case GCLP_HICONSM:
+        return get_icon_16( (HICON)ret );
     default:
         return ret;
     }
@@ -784,8 +808,15 @@ LONG WINAPI GetClassLong16( HWND16 hwnd16, INT16 offset )
  */
 LONG WINAPI SetClassLong16( HWND16 hwnd16, INT16 offset, LONG newval )
 {
+    HICON icon;
+
     switch( offset )
     {
+    case GCLP_HCURSOR:
+    case GCLP_HICON:
+    case GCLP_HICONSM:
+        icon = (HICON)SetClassLongPtrW( WIN_Handle32(hwnd16), offset, (ULONG_PTR)get_icon_32(newval) );
+        return get_icon_16( icon );
     case GCLP_WNDPROC:
         {
             WNDPROC new_proc = WINPROC_AllocProc16( (WNDPROC16)newval );
@@ -1575,12 +1606,12 @@ ATOM WINAPI RegisterClassEx16( const WNDCLASSEX16 *wc )
     wc32.cbClsExtra    = wc->cbClsExtra;
     wc32.cbWndExtra    = wc->cbWndExtra;
     wc32.hInstance     = HINSTANCE_32(inst);
-    wc32.hIcon         = HICON_32(wc->hIcon);
-    wc32.hCursor       = HCURSOR_32(wc->hCursor);
+    wc32.hIcon         = get_icon_32(wc->hIcon);
+    wc32.hCursor       = get_icon_32( wc->hCursor );
     wc32.hbrBackground = HBRUSH_32(wc->hbrBackground);
     wc32.lpszMenuName  = MapSL(wc->lpszMenuName);
     wc32.lpszClassName = MapSL(wc->lpszClassName);
-    wc32.hIconSm       = HICON_32(wc->hIconSm);
+    wc32.hIconSm       = get_icon_32(wc->hIconSm);
     atom = RegisterClassExA( &wc32 );
     if ((class = HeapAlloc( GetProcessHeap(), 0, sizeof(*class) )))
     {
@@ -1618,9 +1649,9 @@ BOOL16 WINAPI GetClassInfoEx16( HINSTANCE16 hInst16, SEGPTR name, WNDCLASSEX16 *
         wc->cbClsExtra    = wc32.cbClsExtra;
         wc->cbWndExtra    = wc32.cbWndExtra;
         wc->hInstance     = (wc32.hInstance == user32_module) ? GetModuleHandle16("user") : HINSTANCE_16(wc32.hInstance);
-        wc->hIcon         = HICON_16(wc32.hIcon);
-        wc->hIconSm       = HICON_16(wc32.hIconSm);
-        wc->hCursor       = HCURSOR_16(wc32.hCursor);
+        wc->hIcon         = get_icon_16( wc32.hIcon );
+        wc->hIconSm       = get_icon_16( wc32.hIconSm );
+        wc->hCursor       = get_icon_16( wc32.hCursor );
         wc->hbrBackground = HBRUSH_16(wc32.hbrBackground);
         wc->lpszClassName = 0;
         wc->lpszMenuName  = MapLS(wc32.lpszMenuName);  /* FIXME: leak */
@@ -2048,7 +2079,7 @@ BOOL16 WINAPI DrawCaptionTemp16( HWND16 hwnd, HDC16 hdc, const RECT16 *rect,
     }
     return DrawCaptionTempA( WIN_Handle32(hwnd), HDC_32(hdc),
 			     rect ? &rect32 : NULL, HFONT_32(hFont),
-			     HICON_32(hIcon), str, uFlags & 0x1f );
+			     get_icon_32(hIcon), str, uFlags & 0x1f );
 }
 
 

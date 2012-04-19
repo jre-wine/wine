@@ -119,6 +119,7 @@ static inline int contains_path( LPCWSTR name )
 static inline int is_special_env_var( const char *var )
 {
     return (!strncmp( var, "PATH=", sizeof("PATH=")-1 ) ||
+            !strncmp( var, "PWD=", sizeof("PWD=")-1 ) ||
             !strncmp( var, "HOME=", sizeof("HOME=")-1 ) ||
             !strncmp( var, "TEMP=", sizeof("TEMP=")-1 ) ||
             !strncmp( var, "TMP=", sizeof("TMP=")-1 ));
@@ -357,12 +358,19 @@ static BOOL build_initial_environment(void)
  */
 static void set_registry_variables( HANDLE hkey, ULONG type )
 {
+    static const WCHAR pathW[] = {'P','A','T','H'};
+    static const WCHAR sep[] = {';',0};
     UNICODE_STRING env_name, env_value;
     NTSTATUS status;
     DWORD size;
     int index;
     char buffer[1024*sizeof(WCHAR) + sizeof(KEY_VALUE_FULL_INFORMATION)];
+    WCHAR tmpbuf[1024];
+    UNICODE_STRING tmp;
     KEY_VALUE_FULL_INFORMATION *info = (KEY_VALUE_FULL_INFORMATION *)buffer;
+
+    tmp.Buffer = tmpbuf;
+    tmp.MaximumLength = sizeof(tmpbuf);
 
     for (index = 0; ; index++)
     {
@@ -375,24 +383,27 @@ static void set_registry_variables( HANDLE hkey, ULONG type )
         env_name.Buffer = info->Name;
         env_name.Length = env_name.MaximumLength = info->NameLength;
         env_value.Buffer = (WCHAR *)(buffer + info->DataOffset);
-        env_value.Length = env_value.MaximumLength = info->DataLength;
+        env_value.Length = info->DataLength;
+        env_value.MaximumLength = sizeof(buffer) - info->DataOffset;
         if (env_value.Length && !env_value.Buffer[env_value.Length/sizeof(WCHAR)-1])
             env_value.Length -= sizeof(WCHAR);  /* don't count terminating null if any */
         if (!env_value.Length) continue;
         if (info->Type == REG_EXPAND_SZ)
         {
-            WCHAR buf_expanded[1024];
-            UNICODE_STRING env_expanded;
-            env_expanded.Length = env_expanded.MaximumLength = sizeof(buf_expanded);
-            env_expanded.Buffer=buf_expanded;
-            status = RtlExpandEnvironmentStrings_U(NULL, &env_value, &env_expanded, NULL);
-            if (status == STATUS_SUCCESS || status == STATUS_BUFFER_OVERFLOW)
-                RtlSetEnvironmentVariable( NULL, &env_name, &env_expanded );
+            status = RtlExpandEnvironmentStrings_U( NULL, &env_value, &tmp, NULL );
+            if (status != STATUS_SUCCESS && status != STATUS_BUFFER_OVERFLOW) continue;
+            RtlCopyUnicodeString( &env_value, &tmp );
         }
-        else
+        /* PATH is magic */
+        if (env_name.Length == sizeof(pathW) &&
+            !memicmpW( env_name.Buffer, pathW, sizeof(pathW)/sizeof(WCHAR) ) &&
+            !RtlQueryEnvironmentVariable_U( NULL, &env_name, &tmp ))
         {
-            RtlSetEnvironmentVariable( NULL, &env_name, &env_value );
+            RtlAppendUnicodeToString( &tmp, sep );
+            if (RtlAppendUnicodeStringToString( &tmp, &env_value )) continue;
+            RtlCopyUnicodeString( &env_value, &tmp );
         }
+        RtlSetEnvironmentVariable( NULL, &env_name, &env_value );
     }
 }
 
@@ -409,7 +420,7 @@ static void set_registry_variables( HANDLE hkey, ULONG type )
  * %SystemRoot% which are predefined. But Wine defines these in the
  * registry, so we need two passes.
  */
-static BOOL set_registry_environment(void)
+static BOOL set_registry_environment( BOOL volatile_only )
 {
     static const WCHAR env_keyW[] = {'M','a','c','h','i','n','e','\\',
                                      'S','y','s','t','e','m','\\',
@@ -434,7 +445,7 @@ static BOOL set_registry_environment(void)
 
     /* first the system environment variables */
     RtlInitUnicodeString( &nameW, env_keyW );
-    if (NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
+    if (!volatile_only && NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
     {
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
@@ -445,7 +456,7 @@ static BOOL set_registry_environment(void)
     /* then the ones for the current user */
     if (RtlOpenCurrentUser( KEY_READ, &attr.RootDirectory ) != STATUS_SUCCESS) return ret;
     RtlInitUnicodeString( &nameW, envW );
-    if (NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
+    if (!volatile_only && NtOpenKey( &hkey, KEY_READ, &attr ) == STATUS_SUCCESS)
     {
         set_registry_variables( hkey, REG_SZ );
         set_registry_variables( hkey, REG_EXPAND_SZ );
@@ -523,28 +534,14 @@ static void set_additional_environment(void)
                                          'P','r','o','f','i','l','e','L','i','s','t',0};
     static const WCHAR profiles_valueW[] = {'P','r','o','f','i','l','e','s','D','i','r','e','c','t','o','r','y',0};
     static const WCHAR all_users_valueW[] = {'A','l','l','U','s','e','r','s','P','r','o','f','i','l','e','\0'};
-    static const WCHAR usernameW[] = {'U','S','E','R','N','A','M','E',0};
-    static const WCHAR userprofileW[] = {'U','S','E','R','P','R','O','F','I','L','E',0};
     static const WCHAR allusersW[] = {'A','L','L','U','S','E','R','S','P','R','O','F','I','L','E',0};
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
-    WCHAR *user_name = NULL, *profile_dir = NULL, *all_users_dir = NULL;
+    WCHAR *profile_dir = NULL, *all_users_dir = NULL;
     HANDLE hkey;
-    const char *name = wine_get_user_name();
     DWORD len;
 
-    /* set the USERNAME variable */
-
-    len = MultiByteToWideChar( CP_UNIXCP, 0, name, -1, NULL, 0 );
-    if (len)
-    {
-        user_name = HeapAlloc( GetProcessHeap(), 0, len*sizeof(WCHAR) );
-        MultiByteToWideChar( CP_UNIXCP, 0, name, -1, user_name, len );
-        SetEnvironmentVariableW( usernameW, user_name );
-    }
-    else WARN( "user name %s not convertible.\n", debugstr_a(name) );
-
-    /* set the USERPROFILE and ALLUSERSPROFILE variables */
+    /* set the ALLUSERSPROFILE variables */
 
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
@@ -560,31 +557,22 @@ static void set_additional_environment(void)
         NtClose( hkey );
     }
 
-    if (profile_dir)
+    if (profile_dir && all_users_dir)
     {
         WCHAR *value, *p;
 
-        if (all_users_dir) len = max( len, strlenW(all_users_dir) + 1 );
-        len += strlenW(profile_dir) + 1;
+        len = strlenW(profile_dir) + strlenW(all_users_dir) + 2;
         value = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) );
         strcpyW( value, profile_dir );
         p = value + strlenW(value);
         if (p > value && p[-1] != '\\') *p++ = '\\';
-        if (user_name) {
-            strcpyW( p, user_name );
-            SetEnvironmentVariableW( userprofileW, value );
-        }
-        if (all_users_dir)
-        {
-            strcpyW( p, all_users_dir );
-            SetEnvironmentVariableW( allusersW, value );
-        }
+        strcpyW( p, all_users_dir );
+        SetEnvironmentVariableW( allusersW, value );
         HeapFree( GetProcessHeap(), 0, value );
     }
 
     HeapFree( GetProcessHeap(), 0, all_users_dir );
     HeapFree( GetProcessHeap(), 0, profile_dir );
-    HeapFree( GetProcessHeap(), 0, user_name );
 }
 
 /***********************************************************************
@@ -1112,7 +1100,7 @@ void CDECL __wine_kernel_init(void)
         /* convert old configuration to new format */
         convert_old_config();
 
-        got_environment = set_registry_environment();
+        got_environment = set_registry_environment( FALSE );
         set_additional_environment();
     }
 
@@ -1162,12 +1150,9 @@ void CDECL __wine_kernel_init(void)
             ERR( "boot event wait timed out\n" );
         CloseHandle( boot_events[0] );
         if (boot_events[1]) CloseHandle( boot_events[1] );
-        /* if we didn't find environment section, try again now that wineboot has run */
-        if (!got_environment)
-        {
-            set_registry_environment();
-            set_additional_environment();
-        }
+        /* reload environment now that wineboot has run */
+        set_registry_environment( got_environment );
+        set_additional_environment();
     }
 
     if (!(peb->ImageBaseAddress = LoadLibraryExW( main_exe_name, 0, DONT_RESOLVE_DLL_REFERENCES )))

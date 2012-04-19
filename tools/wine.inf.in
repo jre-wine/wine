@@ -2404,6 +2404,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 11,,msisip.dll,1
 11,,mstask.dll,1
 11,,msxml3.dll,1
+11,,msxml4.dll,1
 11,,objsel.dll,1
 11,,oledb32.dll,1
 11,,qcap.dll,1
@@ -2426,7 +2427,6 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 [FakeDllsSection]
 ; create some directories first
 10,inf,
-10,system,
 10,temp,
 11,mui,
 11,spool\drivers\color,
@@ -2441,6 +2441,7 @@ HKLM,%CurrentVersion%\Telephony\Country List\998,"SameAreaRule",,"G"
 10,,winhelp.exe,winhelp.exe16
 10,,winhlp32.exe
 10,command,start.exe
+10,system,ddeml.dll,ddeml.dll16
 11,,ddhelp.exe
 11,,dosx.exe
 11,,dsound.vxd

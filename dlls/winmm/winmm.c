@@ -130,6 +130,10 @@ const char* WINMM_ErrorToString(MMRESULT error)
     ERR_TO_STR(WAVERR_STILLPLAYING);
     ERR_TO_STR(WAVERR_UNPREPARED);
     ERR_TO_STR(WAVERR_SYNC);
+    ERR_TO_STR(MIDIERR_INVALIDSETUP);
+    ERR_TO_STR(MIDIERR_NODEVICE);
+    ERR_TO_STR(MIDIERR_STILLPLAYING);
+    ERR_TO_STR(MIDIERR_UNPREPARED);
     }
 #undef ERR_TO_STR
     return wine_dbg_sprintf("Unknown(0x%08x)", error);
@@ -693,7 +697,7 @@ UINT WINAPI auxGetDevCapsW(UINT_PTR uDeviceID, LPAUXCAPSW lpCaps, UINT uSize)
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
+	return MMSYSERR_BADDEVICEID;
     return MMDRV_Message(wmld, AUXDM_GETDEVCAPS, (DWORD_PTR)lpCaps, uSize);
 }
 
@@ -732,7 +736,7 @@ UINT WINAPI auxGetVolume(UINT uDeviceID, DWORD* lpdwVolume)
 
     TRACE("(%04X, %p) !\n", uDeviceID, lpdwVolume);
 
-    if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
+    if ((wmld = MMDRV_Get((HANDLE)(DWORD_PTR)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
 	return MMSYSERR_INVALHANDLE;
     return MMDRV_Message(wmld, AUXDM_GETVOLUME, (DWORD_PTR)lpdwVolume, 0L);
 }
@@ -746,7 +750,7 @@ UINT WINAPI auxSetVolume(UINT uDeviceID, DWORD dwVolume)
 
     TRACE("(%04X, %u) !\n", uDeviceID, dwVolume);
 
-    if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
+    if ((wmld = MMDRV_Get((HANDLE)(DWORD_PTR)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
 	return MMSYSERR_INVALHANDLE;
     return MMDRV_Message(wmld, AUXDM_SETVOLUME, dwVolume, 0L);
 }
@@ -758,7 +762,7 @@ UINT WINAPI auxOutMessage(UINT uDeviceID, UINT uMessage, DWORD_PTR dw1, DWORD_PT
 {
     LPWINE_MLD		wmld;
 
-    if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
+    if ((wmld = MMDRV_Get((HANDLE)(DWORD_PTR)uDeviceID, MMDRV_AUX, TRUE)) == NULL)
 	return MMSYSERR_INVALHANDLE;
 
     return MMDRV_Message(wmld, uMessage, dw1, dw2);
@@ -785,7 +789,7 @@ UINT WINAPI midiOutGetDevCapsW(UINT_PTR uDeviceID, LPMIDIOUTCAPSW lpCaps,
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_MIDIOUT, TRUE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
+	return MMSYSERR_BADDEVICEID;
 
     return MMDRV_Message(wmld, MODM_GETDEVCAPS, (DWORD_PTR)lpCaps, uSize);
 }
@@ -882,9 +886,7 @@ static	LPWINE_MIDI	MIDI_OutAlloc(HMIDIOUT* lphMidiOut, DWORD_PTR* lpdwCallback,
 
     lpwm = (LPWINE_MIDI)MMDRV_Alloc(size, MMDRV_MIDIOUT, &hMidiOut, lpdwFlags,
 				    lpdwCallback, lpdwInstance);
-
-    if (lphMidiOut != NULL)
-	*lphMidiOut = hMidiOut;
+    *lphMidiOut = hMidiOut;
 
     if (lpwm) {
         lpwm->mod.hMidi = hMidiOut;
@@ -967,6 +969,7 @@ UINT WINAPI midiOutPrepareHeader(HMIDIOUT hMidiOut,
 
     if ((wmld = MMDRV_Get(hMidiOut, MMDRV_MIDIOUT, FALSE)) == NULL)
 	return MMSYSERR_INVALHANDLE;
+    /* FIXME: detect MIDIStream handles and enforce 64KB buffer limit on those */
 
     return MMDRV_Message(wmld, MODM_PREPARE, (DWORD_PTR)lpMidiOutHdr, uSize);
 }
@@ -1159,7 +1162,7 @@ UINT WINAPI midiInGetDevCapsW(UINT_PTR uDeviceID, LPMIDIINCAPSW lpCaps, UINT uSi
     if (lpCaps == NULL)	return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get((HANDLE)uDeviceID, MMDRV_MIDIIN, TRUE)) == NULL)
-	return MMSYSERR_INVALHANDLE;
+	return MMSYSERR_BADDEVICEID;
 
    return MMDRV_Message(wmld, MIDM_GETDEVCAPS, (DWORD_PTR)lpCaps, uSize);
 }
@@ -1772,13 +1775,22 @@ MMRESULT WINAPI midiStreamOpen(HMIDISTRM* lphMidiStrm, LPUINT lpuDeviceID,
     /* FIXME: the correct value is not allocated yet for MAPPER */
     mosm.wDeviceID  = *lpuDeviceID;
     lpwm = MIDI_OutAlloc(&hMidiOut, &dwCallback, &dwInstance, &fdwOpen, 1, &mosm);
+    if (!lpwm) {
+	HeapFree(GetProcessHeap(), 0, lpMidiStrm);
+	return MMSYSERR_NOMEM;
+    }
     lpMidiStrm->hDevice = hMidiOut;
-    if (lphMidiStrm)
-	*lphMidiStrm = (HMIDISTRM)hMidiOut;
+    *lphMidiStrm = (HMIDISTRM)hMidiOut;
 
     lpwm->mld.uDeviceID = *lpuDeviceID;
 
     ret = MMDRV_Open(&lpwm->mld, MODM_OPEN, (DWORD_PTR)&lpwm->mod, fdwOpen);
+    if (ret != MMSYSERR_NOERROR) {
+	MMDRV_Free(hMidiOut, &lpwm->mld);
+	HeapFree(GetProcessHeap(), 0, lpMidiStrm);
+	return ret;
+    }
+
     lpMidiStrm->hEvent = CreateEventW(NULL, FALSE, FALSE, NULL);
     lpMidiStrm->wFlags = HIWORD(fdwOpen);
 
@@ -1810,11 +1822,20 @@ MMRESULT WINAPI midiStreamOut(HMIDISTRM hMidiStrm, LPMIDIHDR lpMidiHdr,
 
     TRACE("(%p, %p, %u)!\n", hMidiStrm, lpMidiHdr, cbMidiHdr);
 
+    if (cbMidiHdr < sizeof(MIDIHDR) || !lpMidiHdr || !lpMidiHdr->lpData)
+	return MMSYSERR_INVALPARAM;
+
+    if (!(lpMidiHdr->dwFlags & MHDR_PREPARED))
+	return MIDIERR_UNPREPARED;
+
+    if (lpMidiHdr->dwFlags & MHDR_INQUEUE)
+	return MIDIERR_STILLPLAYING;
+
     if (!MMSYSTEM_GetMidiStream(hMidiStrm, &lpMidiStrm, NULL)) {
 	ret = MMSYSERR_INVALHANDLE;
-    } else if (!lpMidiHdr) {
-        ret = MMSYSERR_INVALPARAM;
     } else {
+	lpMidiHdr->dwFlags |= MHDR_ISSTRM | MHDR_INQUEUE;
+	lpMidiHdr->dwFlags &= ~MHDR_DONE;
 	if (!PostThreadMessageA(lpMidiStrm->dwThreadID,
                                 WINE_MSM_HEADER, cbMidiHdr,
                                 (LPARAM)lpMidiHdr)) {
@@ -1862,6 +1883,12 @@ MMRESULT WINAPI midiStreamPosition(HMIDISTRM hMidiStrm, LPMMTIME lpMMT, UINT cbm
 	ret = MMSYSERR_INVALPARAM;
     } else {
 	switch (lpMMT->wType) {
+	default:
+	    FIXME("Unsupported time type %x\n", lpMMT->wType);
+	case TIME_BYTES:
+	case TIME_SAMPLES:
+	    lpMMT->wType = TIME_MS;
+	    /* fall through to alternative format */
 	case TIME_MS:
 	    lpMMT->u.ms = lpMidiStrm->dwPositionMS;
 	    TRACE("=> %d ms\n", lpMMT->u.ms);
@@ -1869,11 +1896,6 @@ MMRESULT WINAPI midiStreamPosition(HMIDISTRM hMidiStrm, LPMMTIME lpMMT, UINT cbm
 	case TIME_TICKS:
 	    lpMMT->u.ticks = lpMidiStrm->dwPulses;
 	    TRACE("=> %d ticks\n", lpMMT->u.ticks);
-	    break;
-	default:
-	    WARN("Unsupported time type %d\n", lpMMT->wType);
-	    lpMMT->wType = TIME_MS;
-	    ret = MMSYSERR_INVALPARAM;
 	    break;
 	}
     }

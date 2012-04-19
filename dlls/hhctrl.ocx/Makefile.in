@@ -10,7 +10,9 @@ C_SRCS = \
 	content.c \
 	help.c \
 	hhctrl.c \
+	index.c \
 	regsvr.c \
+	stream.c \
 	webbrowser.c
 
 RC_SRCS = \
@@ -32,6 +34,7 @@ RC_SRCS = \
 	Si.rc \
 	Sv.rc \
 	Tr.rc \
+	Uk.rc \
 	Zh.rc \
 	version.rc
 

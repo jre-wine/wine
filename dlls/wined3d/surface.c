@@ -1253,6 +1253,34 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This, BOOL srgb)
     TRACE("Updated target %d\n", This->texture_target);
 }
 
+/* Context activation is done by the caller. */
+void surface_prepare_texture(IWineD3DSurfaceImpl *surface, BOOL srgb)
+{
+    DWORD alloc_flag = srgb ? SFLAG_SRGBALLOCATED : SFLAG_ALLOCATED;
+    GLenum format, internal, type;
+    GLsizei width, height;
+    CONVERT_TYPES convert;
+    int bpp;
+
+    if (surface->Flags & alloc_flag) return;
+
+    d3dfmt_get_conv(surface, TRUE, TRUE, &format, &internal, &type, &convert, &bpp, srgb);
+    if ((surface->Flags & SFLAG_NONPOW2) && !(surface->Flags & SFLAG_OVERSIZE))
+    {
+        width = surface->pow2Width;
+        height = surface->pow2Height;
+    }
+    else
+    {
+        width = surface->glRect.right - surface->glRect.left;
+        height = surface->glRect.bottom - surface->glRect.top;
+    }
+
+    surface_bind_and_dirtify(surface, srgb);
+    surface_allocate_surface(surface, internal, width, height, format, type);
+    surface->Flags |= alloc_flag;
+}
+
 static void surface_prepare_system_memory(IWineD3DSurfaceImpl *This)
 {
     IWineD3DDeviceImpl *device = This->resource.device;
@@ -2700,7 +2728,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
 static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL srgb) {
     /* TODO: check for locks */
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    IWineD3DDeviceImpl *device = This->resource.device;
     IWineD3DBaseTexture *baseTexture = NULL;
 
     TRACE("(%p)Checking to see if the container is a base texture\n", This);
@@ -2711,13 +2738,11 @@ static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL 
     }
     else
     {
-        struct wined3d_context *context = NULL;
         GLuint *name;
 
         TRACE("(%p) : Binding surface\n", This);
 
         name = srgb ? &This->texture_name_srgb : &This->texture_name;
-        if (!device->isInDraw) context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
 
         ENTER_GL();
 
@@ -2751,8 +2776,6 @@ static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL 
         checkGLcall("glBindTexture");
 
         LEAVE_GL();
-
-        if (context) context_release(context);
     }
 }
 
@@ -3447,6 +3470,9 @@ static inline void fb_copy_to_texture_hwstretch(IWineD3DSurfaceImpl *This, IWine
     }
 
     LEAVE_GL();
+
+    wglFlush(); /* Flush to ensure ordering across contexts. */
+
     context_release(context);
 
     /* The texture is now most up to date - If the surface is a render target and has a drawable, this
@@ -3921,9 +3947,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *This, const 
         /* Leave the opengl state valid for blitting */
         myDevice->blitter->unset_shader((IWineD3DDevice *) myDevice);
 
-        /* Flush in case the drawable is used by multiple GL contexts */
-        if(dstSwapchain && (This == (IWineD3DSurfaceImpl *) dstSwapchain->frontBuffer || dstSwapchain->num_contexts >= 2))
-            wglFlush();
+        wglFlush(); /* Flush to ensure ordering across contexts. */
 
         context_release(context);
 
@@ -4552,7 +4576,11 @@ void surface_load_ds_location(IWineD3DSurface *iface, struct wined3d_context *co
             else context_bind_fbo(context, GL_FRAMEBUFFER, NULL);
 
             LEAVE_GL();
-        } else {
+
+            wglFlush(); /* Flush to ensure ordering across contexts. */
+        }
+        else
+        {
             FIXME("No up to date depth stencil location\n");
         }
     } else if (location == SFLAG_DS_ONSCREEN) {
@@ -4569,7 +4597,11 @@ void surface_load_ds_location(IWineD3DSurface *iface, struct wined3d_context *co
             if (context->current_fbo) context_bind_fbo(context, GL_FRAMEBUFFER, &context->current_fbo->id);
 
             LEAVE_GL();
-        } else {
+
+            wglFlush(); /* Flush to ensure ordering across contexts. */
+        }
+        else
+        {
             FIXME("No up to date depth stencil location\n");
         }
     } else {
@@ -4656,11 +4688,10 @@ static inline void cube_coords_float(const RECT *r, UINT w, UINT h, struct float
 static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT *rect_in)
 {
     IWineD3DDeviceImpl *device = This->resource.device;
+    IWineD3DBaseTextureImpl *texture;
     struct wined3d_context *context;
     struct coords coords[4];
     RECT rect;
-    IWineD3DSwapChain *swapchain;
-    IWineD3DBaseTexture *texture;
     GLenum bind_target;
     struct float_rect f;
 
@@ -4802,25 +4833,16 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
 
     LEAVE_GL();
 
-    if(SUCCEEDED(IWineD3DSurface_GetContainer((IWineD3DSurface*)This, &IID_IWineD3DSwapChain, (void **) &swapchain)))
-    {
-        /* Make sure to flush the buffers. This is needed in apps like Red Alert II and Tiberian SUN that use multiple WGL contexts. */
-        if(((IWineD3DSwapChainImpl*)swapchain)->frontBuffer == (IWineD3DSurface*)This ||
-           ((IWineD3DSwapChainImpl*)swapchain)->num_contexts >= 2)
-            wglFlush();
+    wglFlush(); /* Flush to ensure ordering across contexts. */
 
-        IWineD3DSwapChain_Release(swapchain);
-    } else {
-        /* We changed the filtering settings on the texture. Inform the container about this to get the filters
-         * reset properly next draw
-         */
-        if(SUCCEEDED(IWineD3DSurface_GetContainer((IWineD3DSurface*)This, &IID_IWineD3DBaseTexture, (void **) &texture)))
-        {
-            ((IWineD3DBaseTextureImpl *) texture)->baseTexture.texture_rgb.states[WINED3DTEXSTA_MAGFILTER] = WINED3DTEXF_POINT;
-            ((IWineD3DBaseTextureImpl *) texture)->baseTexture.texture_rgb.states[WINED3DTEXSTA_MINFILTER] = WINED3DTEXF_POINT;
-            ((IWineD3DBaseTextureImpl *) texture)->baseTexture.texture_rgb.states[WINED3DTEXSTA_MIPFILTER] = WINED3DTEXF_NONE;
-            IWineD3DBaseTexture_Release(texture);
-        }
+    /* We changed the filtering settings on the texture. Inform the
+     * container about this to get the filters reset properly next draw. */
+    if (SUCCEEDED(IWineD3DSurface_GetContainer((IWineD3DSurface *)This, &IID_IWineD3DBaseTexture, (void **)&texture)))
+    {
+        texture->baseTexture.texture_rgb.states[WINED3DTEXSTA_MAGFILTER] = WINED3DTEXF_POINT;
+        texture->baseTexture.texture_rgb.states[WINED3DTEXSTA_MINFILTER] = WINED3DTEXF_POINT;
+        texture->baseTexture.texture_rgb.states[WINED3DTEXSTA_MIPFILTER] = WINED3DTEXF_NONE;
+        IWineD3DBaseTexture_Release((IWineD3DBaseTexture *)texture);
     }
 
     context_release(context);
@@ -4977,7 +4999,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
         {
             /* Upload from system memory */
             BOOL srgb = flag == SFLAG_INSRGBTEX;
-            DWORD alloc_flag = srgb ? SFLAG_SRGBALLOCATED : SFLAG_ALLOCATED;
             struct wined3d_context *context = NULL;
 
             d3dfmt_get_conv(This, TRUE /* We need color keying */, TRUE /* We will use textures */,
@@ -5004,6 +5025,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
             }
 
             if (!device->isInDraw) context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+
+            surface_prepare_texture(This, srgb);
             surface_bind_and_dirtify(This, srgb);
 
             if(This->CKeyFlags & WINEDDSD_CKSRCBLT) {
@@ -5058,10 +5081,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
 
             if ((This->Flags & SFLAG_NONPOW2) && !(This->Flags & SFLAG_OVERSIZE)) {
                 TRACE("non power of two support\n");
-                if(!(This->Flags & alloc_flag)) {
-                    surface_allocate_surface(This, internal, This->pow2Width, This->pow2Height, format, type);
-                    This->Flags |= alloc_flag;
-                }
                 if (mem || (This->Flags & SFLAG_PBO)) {
                     surface_upload_data(This, internal, This->currentDesc.Width, This->currentDesc.Height, format, type, mem);
                 }
@@ -5069,10 +5088,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
                 /* When making the realloc conditional, keep in mind that GL_APPLE_client_storage may be in use, and This->resource.allocatedMemory
                  * changed. So also keep track of memory changes. In this case the texture has to be reallocated
                  */
-                if(!(This->Flags & alloc_flag)) {
-                    surface_allocate_surface(This, internal, This->glRect.right - This->glRect.left, This->glRect.bottom - This->glRect.top, format, type);
-                    This->Flags |= alloc_flag;
-                }
                 if (mem || (This->Flags & SFLAG_PBO)) {
                     surface_upload_data(This, internal, This->glRect.right - This->glRect.left, This->glRect.bottom - This->glRect.top, format, type, mem);
                 }

@@ -146,7 +146,11 @@ static BOOL i386_stack_walk(struct cpu_stack_walk* csw, LPSTACKFRAME64 frame)
                 goto done_err;
             }
             next_switch = p;
-            if (curr_mode == stm_16bit)
+            if (!next_switch)  /* no 16-bit stack */
+            {
+                curr_switch = 0;
+            }
+            else if (curr_mode == stm_16bit)
             {
                 if (!sw_read_mem(csw, next_switch, &frame32, sizeof(frame32)))
                 {
@@ -232,7 +236,7 @@ static BOOL i386_stack_walk(struct cpu_stack_walk* csw, LPSTACKFRAME64 frame)
                 tmp.Offset  = OFFSETOF(next_switch);
                 p = sw_xlat_addr(csw, &tmp);
 
-                if (!sw_read_mem(csw->hProcess, p, &frame16, sizeof(frame16)))
+                if (!sw_read_mem(csw, p, &frame16, sizeof(frame16)))
                 {
                     WARN("Bad stack frame 0x%08x\n", p);
                     goto done_err;

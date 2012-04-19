@@ -30,6 +30,18 @@
 #define expect(expected, got) ok((UINT)(got) == (UINT)(expected), "Expected %.8x, got %.8x\n", (UINT)(expected), (UINT)(got))
 #define expectf(expected, got) ok(fabs(expected - got) < 0.0001, "Expected %.2f, got %.2f\n", expected, got)
 
+static BOOL color_match(ARGB c1, ARGB c2, BYTE max_diff)
+{
+    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    c1 >>= 8; c2 >>= 8;
+    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    c1 >>= 8; c2 >>= 8;
+    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    c1 >>= 8; c2 >>= 8;
+    if (abs((c1 & 0xff) - (c2 & 0xff)) > max_diff) return FALSE;
+    return TRUE;
+}
+
 static void expect_guid(REFGUID expected, REFGUID got, int line, BOOL todo)
 {
     WCHAR bufferW[39];
@@ -1133,6 +1145,7 @@ static void test_palette(void)
     INT size;
     BYTE buffer[1040];
     ColorPalette *palette=(ColorPalette*)buffer;
+    ARGB color=0;
 
     /* test initial palette from non-indexed bitmap */
     stat = GdipCreateBitmapFromScan0(2, 2, 8, PixelFormat32bppRGB, NULL, &bitmap);
@@ -1178,6 +1191,22 @@ static void test_palette(void)
     expect(0xff000000, palette->Entries[0]);
     expect(0xffffffff, palette->Entries[1]);
 
+    /* test getting/setting pixels */
+    stat = GdipBitmapGetPixel(bitmap, 0, 0, &color);
+    expect(Ok, stat);
+    expect(0xff000000, color);
+
+    stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffffffff);
+    todo_wine ok((stat == Ok) ||
+       broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipBitmapGetPixel(bitmap, 0, 1, &color);
+        expect(Ok, stat);
+        expect(0xffffffff, color);
+    }
+
     GdipDisposeImage((GpImage*)bitmap);
 
     /* test initial palette on 4-bit bitmap */
@@ -1195,6 +1224,22 @@ static void test_palette(void)
 
     check_halftone_palette(palette);
 
+    /* test getting/setting pixels */
+    stat = GdipBitmapGetPixel(bitmap, 0, 0, &color);
+    expect(Ok, stat);
+    expect(0xff000000, color);
+
+    stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffff00ff);
+    todo_wine ok((stat == Ok) ||
+       broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipBitmapGetPixel(bitmap, 0, 1, &color);
+        expect(Ok, stat);
+        expect(0xffff00ff, color);
+    }
+
     GdipDisposeImage((GpImage*)bitmap);
 
     /* test initial palette on 8-bit bitmap */
@@ -1211,6 +1256,22 @@ static void test_palette(void)
     expect(256, palette->Count);
 
     check_halftone_palette(palette);
+
+    /* test getting/setting pixels */
+    stat = GdipBitmapGetPixel(bitmap, 0, 0, &color);
+    expect(Ok, stat);
+    expect(0xff000000, color);
+
+    stat = GdipBitmapSetPixel(bitmap, 0, 1, 0xffcccccc);
+    todo_wine ok((stat == Ok) ||
+       broken(stat == InvalidParameter) /* pre-win7 */, "stat=%.8x\n", stat);
+
+    if (stat == Ok)
+    {
+        stat = GdipBitmapGetPixel(bitmap, 0, 1, &color);
+        expect(Ok, stat);
+        expect(0xffcccccc, color);
+    }
 
     /* test setting/getting a different palette */
     palette->Entries[1] = 0xffcccccc;
@@ -1358,6 +1419,68 @@ static void test_colormatrix(void)
     stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
     expect(Ok, stat);
     todo_wine expect(0xff80ffff, color);
+
+    GdipDeleteGraphics(graphics);
+    GdipDisposeImage((GpImage*)bitmap1);
+    GdipDisposeImage((GpImage*)bitmap2);
+    GdipDisposeImageAttributes(imageattr);
+}
+
+static void test_gamma(void)
+{
+    GpStatus stat;
+    GpImageAttributes *imageattr;
+    GpBitmap *bitmap1, *bitmap2;
+    GpGraphics *graphics;
+    ARGB color;
+
+    stat = GdipSetImageAttributesGamma(NULL, ColorAdjustTypeDefault, TRUE, 1.0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipCreateImageAttributes(&imageattr);
+    expect(Ok, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, TRUE, 1.0);
+    expect(Ok, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeAny, TRUE, 1.0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, TRUE, -1.0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, TRUE, 0.0);
+    expect(InvalidParameter, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, TRUE, 0.5);
+    expect(Ok, stat);
+
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, FALSE, 0.0);
+    expect(Ok, stat);
+
+    /* Drawing a bitmap transforms the colors */
+    stat = GdipSetImageAttributesGamma(imageattr, ColorAdjustTypeDefault, TRUE, 3.0);
+    expect(Ok, stat);
+
+    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppRGB, NULL, &bitmap1);
+    expect(Ok, stat);
+
+    stat = GdipCreateBitmapFromScan0(1, 1, 0, PixelFormat32bppRGB, NULL, &bitmap2);
+    expect(Ok, stat);
+
+    stat = GdipBitmapSetPixel(bitmap1, 0, 0, 0xff80ffff);
+    expect(Ok, stat);
+
+    stat = GdipGetImageGraphicsContext((GpImage*)bitmap2, &graphics);
+    expect(Ok, stat);
+
+    stat = GdipDrawImageRectRectI(graphics, (GpImage*)bitmap1, 0,0,1,1, 0,0,1,1,
+        UnitPixel, imageattr, NULL, NULL);
+    expect(Ok, stat);
+
+    stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
+    expect(Ok, stat);
+    todo_wine ok(color_match(0xff20ffff, color, 1), "Expected ff20ffff, got %.8x\n", color);
 
     GdipDeleteGraphics(graphics);
     GdipDisposeImage((GpImage*)bitmap1);
@@ -1533,6 +1656,7 @@ START_TEST(image)
     test_getsetpixel();
     test_palette();
     test_colormatrix();
+    test_gamma();
     test_multiframegif();
 
     GdiplusShutdown(gdiplusToken);

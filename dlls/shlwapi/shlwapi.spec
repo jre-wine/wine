@@ -460,8 +460,8 @@
 460 stdcall -noname SHExpandEnvironmentStringsW(wstr ptr long) kernel32.ExpandEnvironmentStringsW
 461 stdcall -noname SHGetAppCompatFlags(long)
 462 stdcall -noname UrlFixupW(wstr wstr long)
-463 stub -noname SHExpandEnvironmentStringsForUserA
-464 stub -noname SHExpandEnvironmentStringsForUserW
+463 stdcall -noname SHExpandEnvironmentStringsForUserA(ptr str ptr long) userenv.ExpandEnvironmentStringsForUserA
+464 stdcall -noname SHExpandEnvironmentStringsForUserW(ptr wstr ptr long) userenv.ExpandEnvironmentStringsForUserW
 465 stub -noname PathUnExpandEnvStringsForUserA
 466 stub -noname PathUnExpandEnvStringsForUserW
 467 stub -noname SHRunIndirectRegClientCommand
@@ -725,8 +725,8 @@
 @ stdcall SHRegGetPathW(long wstr wstr ptr long)
 @ stdcall SHRegGetUSValueA ( str str ptr ptr ptr long ptr long )
 @ stdcall SHRegGetUSValueW ( wstr wstr ptr ptr ptr long ptr long )
-@ stdcall SHRegGetValueA ( long str str long ptr ptr ptr )
-@ stdcall SHRegGetValueW ( long wstr wstr long ptr ptr ptr )
+@ stdcall SHRegGetValueA ( long str str long ptr ptr ptr ) advapi32.RegGetValueA
+@ stdcall SHRegGetValueW ( long wstr wstr long ptr ptr ptr ) advapi32.RegGetValueW
 @ stdcall SHRegOpenUSKeyA ( str long long long long )
 @ stdcall SHRegOpenUSKeyW ( wstr long long long long )
 @ stdcall SHRegQueryInfoUSKeyA ( long ptr ptr ptr ptr long )
