@@ -40,7 +40,6 @@ AR        = @AR@
 ARFLAGS   = @ARFLAGS@
 RANLIB    = @RANLIB@
 STRIP     = @STRIP@
-LN        = @LN@
 LN_S      = @LN_S@
 TOOLSDIR  = @TOOLSDIR@
 LDFLAGS   = @LDFLAGS@
@@ -52,6 +51,10 @@ LINTFLAGS = @LINTFLAGS@
 FONTFORGE = @FONTFORGE@
 RSVG      = @RSVG@
 ICOTOOL   = @ICOTOOL@
+CROSSCC   = @CROSSCC@
+CROSSTARGET = @CROSSTARGET@
+CROSSAR     = $(CROSSTARGET)-ar
+CROSSRANLIB = $(CROSSTARGET)-ranlib
 FAKEEXT   = $(DLLEXT:.so=.fake)
 INCLUDES     = -I$(SRCDIR) -I. -I$(TOPSRCDIR)/include -I$(TOPOBJDIR)/include $(EXTRAINCL)
 EXTRACFLAGS  = @EXTRACFLAGS@
@@ -62,7 +65,6 @@ TARGETFLAGS  = @TARGETFLAGS@
 WINEBUILDFLAGS = $(TARGETFLAGS) $(DLLFLAGS)
 MKINSTALLDIRS= $(TOPSRCDIR)/tools/mkinstalldirs -m 755
 WINAPI_CHECK = $(TOPSRCDIR)/tools/winapi/winapi_check
-WINEWRAPPER  = $(TOPSRCDIR)/tools/winewrapper
 C2MAN        = $(TOPSRCDIR)/tools/c2man.pl
 RUNTEST      = $(TOPSRCDIR)/tools/runtest
 WINEBUILD    = $(TOOLSDIR)/tools/winebuild/winebuild$(TOOLSEXT)
@@ -72,6 +74,7 @@ WRC          = $(TOOLSDIR)/tools/wrc/wrc$(TOOLSEXT)
 WMC          = $(TOOLSDIR)/tools/wmc/wmc$(TOOLSEXT)
 WIDL         = $(TOOLSDIR)/tools/widl/widl$(TOOLSEXT)
 WINEGCC      = $(TOOLSDIR)/tools/winegcc/winegcc $(TARGETFLAGS) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(TOPOBJDIR)
+CROSSWINEGCC = $(TOOLSDIR)/tools/winegcc/winegcc $(CROSSTARGET:%=-b %) -B$(TOOLSDIR)/tools/winebuild --sysroot=$(TOPOBJDIR) --lib-suffix=.cross.a
 RELPATH      = $(TOOLSDIR)/tools/relpath$(TOOLSEXT)
 SFNT2FNT     = $(TOOLSDIR)/tools/sfnt2fnt$(TOOLSEXT)
 RC           = $(WRC)
@@ -120,6 +123,7 @@ CLEAN_TARGETS = $(IDL_GEN_C_SRCS) $(IDL_GEN_HEADERS) $(IDL_TLB_SRCS:.idl=.tlb) $
 OBJS = $(C_SRCS:.c=.o) $(BISON_SRCS:.y=.tab.o) $(LEX_SRCS:.l=.yy.o) $(IDL_GEN_C_SRCS:.c=.o) \
        $(RC_SRCS:.rc=.res) $(MC_SRCS:.mc=.mc.res) $(EXTRA_OBJS)
 
+CROSSOBJS = $(OBJS:.o=.cross.o)
 LINTS  = $(C_SRCS:.c=.ln)
 
 # 'all' target first in case the enclosing Makefile didn't define any target
@@ -133,10 +137,13 @@ filter: dummy
 
 # Implicit rules
 
-.SUFFIXES: .mc .rc .mc.rc .res .spec .spec.o .idl .tlb .h .y .l .tab.c .tab.h .yy.c .ok .man.in .man _c.c _i.c _p.c _s.c @MAINTAINER_MODE@ .sfd .ttf .svg .ico
+.SUFFIXES: .mc .rc .mc.rc .res .idl .tlb .h .y .l .tab.c .tab.h .yy.c .ok .man.in .man _c.c _i.c _p.c _s.c .cross.o @MAINTAINER_MODE@ .sfd .ttf .svg .ico
 
 .c.o:
 	$(CC) -c $(ALLCFLAGS) -o $@ $<
+
+.c.cross.o:
+	$(CROSSCC) -c $(INCLUDES) $(DEFS) $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
 .y.tab.c:
 	$(BISON) $(BISONFLAGS) -p $*_ -o $@ $<
@@ -152,9 +159,6 @@ filter: dummy
 
 .rc.res:
 	$(LDPATH) $(RC) $(RCFLAGS) -fo$@ $<
-
-.spec.spec.o:
-	$(WINEBUILD) $(WINEBUILDFLAGS) --dll -o $@ --main-module $(MODULE) --export $<
 
 .idl.h:
 	$(WIDL) $(IDLFLAGS) -h -H $@ $<

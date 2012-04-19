@@ -76,10 +76,12 @@ typedef enum {
     DispHTMLNavigator_tid,
     DispHTMLOptionElement_tid,
     DispHTMLScreen_tid,
+    DispHTMLScriptElement_tid,
     DispHTMLSelectElement_tid,
     DispHTMLStyle_tid,
     DispHTMLTable_tid,
     DispHTMLTableRow_tid,
+    DispHTMLTextAreaElement_tid,
     DispHTMLUnknownElement_tid,
     DispHTMLWindow2_tid,
     HTMLDocumentEvents_tid,
@@ -118,6 +120,7 @@ typedef enum {
     IHTMLLocation_tid,
     IHTMLOptionElement_tid,
     IHTMLScreen_tid,
+    IHTMLScriptElement_tid,
     IHTMLSelectElement_tid,
     IHTMLStyle_tid,
     IHTMLStyle2_tid,
@@ -125,6 +128,7 @@ typedef enum {
     IHTMLStyle4_tid,
     IHTMLTable_tid,
     IHTMLTableRow_tid,
+    IHTMLTextAreaElement_tid,
     IHTMLTextContainer_tid,
     IHTMLUniqueName_tid,
     IHTMLWindow2_tid,
@@ -490,6 +494,14 @@ typedef struct {
     nsIDOMHTMLElement *nselem;
 } HTMLElement;
 
+#define HTMLELEMENT_TIDS    \
+    IHTMLDOMNode_tid,       \
+    IHTMLDOMNode2_tid,      \
+    IHTMLElement_tid,       \
+    IHTMLElement2_tid,      \
+    IHTMLElement3_tid,      \
+    IHTMLElement4_tid
+
 typedef struct {
     HTMLElement element;
 
@@ -699,7 +711,8 @@ void nsfree(void*);
 void nsACString_SetData(nsACString*,const char*);
 PRUint32 nsACString_GetData(const nsACString*,const char**);
 
-void nsAString_Init(nsAString*,const PRUnichar*);
+BOOL nsAString_Init(nsAString*,const PRUnichar*);
+void nsAString_InitDepend(nsAString*,const PRUnichar*);
 void nsAString_SetData(nsAString*,const PRUnichar*);
 PRUint32 nsAString_GetData(const nsAString*,const PRUnichar**);
 void nsAString_Finish(nsAString*);

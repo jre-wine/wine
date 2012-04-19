@@ -133,7 +133,7 @@ static struct dbg_internal_var be_x86_64_ctx[] =
     {CV_AMD64_GS,       "GS",           (DWORD_PTR*)FIELD_OFFSET(CONTEXT, SegGs),   dbg_itype_unsigned_short_int},
     {CV_AMD64_FLAGS,    "FLAGS",        (DWORD_PTR*)FIELD_OFFSET(CONTEXT, EFlags),  dbg_itype_unsigned_short_int},
     {CV_AMD64_EFLAGS,   "EFLAGS",       (DWORD_PTR*)FIELD_OFFSET(CONTEXT, EFlags),  dbg_itype_unsigned_int},
-    {CV_AMD64_RIP,      "RIP",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Rip),     dbg_itype_unsigned_int},
+    {CV_AMD64_RIP,      "RIP",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Rip),     dbg_itype_unsigned_long_int},
     {CV_AMD64_RAX,      "RAX",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Rax),     dbg_itype_unsigned_long_int},
     {CV_AMD64_RBX,      "RBX",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Rbx),     dbg_itype_unsigned_long_int},
     {CV_AMD64_RCX,      "RCX",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, Rcx),     dbg_itype_unsigned_long_int},
@@ -150,7 +150,7 @@ static struct dbg_internal_var be_x86_64_ctx[] =
     {CV_AMD64_R13,      "R13",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R13),     dbg_itype_unsigned_long_int},
     {CV_AMD64_R14,      "R14",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R14),     dbg_itype_unsigned_long_int},
     {CV_AMD64_R15,      "R15",          (DWORD_PTR*)FIELD_OFFSET(CONTEXT, R15),     dbg_itype_unsigned_long_int},
-    {0,                 NULL,           0,                                      dbg_itype_none}
+    {0,                 NULL,           0,                                          dbg_itype_none}
 };
 
 static const struct dbg_internal_var* be_x86_64_init_registers(CONTEXT* ctx)
@@ -162,34 +162,197 @@ static const struct dbg_internal_var* be_x86_64_init_registers(CONTEXT* ctx)
     return be_x86_64_ctx;
 }
 
+#define	f_mod(b)	((b)>>6)
+#define	f_reg(b)	(((b)>>3)&0x7)
+#define	f_rm(b)		((b)&0x7)
+
 static unsigned be_x86_64_is_step_over_insn(const void* insn)
 {
-    dbg_printf("not done step_over_insn\n");
-    return FALSE;
+    BYTE	ch;
+
+    for (;;)
+    {
+        if (!dbg_read_memory(insn, &ch, sizeof(ch))) return FALSE;
+
+        switch (ch)
+        {
+        /* Skip all prefixes */
+        case 0x2e:  /* cs: */
+        case 0x36:  /* ss: */
+        case 0x3e:  /* ds: */
+        case 0x26:  /* es: */
+        case 0x64:  /* fs: */
+        case 0x65:  /* gs: */
+        case 0x66:  /* opcode size prefix */
+        case 0x67:  /* addr size prefix */
+        case 0xf0:  /* lock */
+        case 0xf2:  /* repne */
+        case 0xf3:  /* repe */
+            insn = (const char*)insn + 1;
+            continue;
+
+        /* Handle call instructions */
+        case 0xcd:  /* int <intno> */
+        case 0xe8:  /* call <offset> */
+        case 0x9a:  /* lcall <seg>:<off> */
+            return TRUE;
+
+        case 0xff:  /* call <regmodrm> */
+	    if (!dbg_read_memory((const char*)insn + 1, &ch, sizeof(ch)))
+                return FALSE;
+	    return (((ch & 0x38) == 0x10) || ((ch & 0x38) == 0x18));
+
+        /* Handle string instructions */
+        case 0x6c:  /* insb */
+        case 0x6d:  /* insw */
+        case 0x6e:  /* outsb */
+        case 0x6f:  /* outsw */
+        case 0xa4:  /* movsb */
+        case 0xa5:  /* movsw */
+        case 0xa6:  /* cmpsb */
+        case 0xa7:  /* cmpsw */
+        case 0xaa:  /* stosb */
+        case 0xab:  /* stosw */
+        case 0xac:  /* lodsb */
+        case 0xad:  /* lodsw */
+        case 0xae:  /* scasb */
+        case 0xaf:  /* scasw */
+            return TRUE;
+
+        default:
+            return FALSE;
+        }
+    }
 }
 
 static unsigned be_x86_64_is_function_return(const void* insn)
 {
-    dbg_printf("not done is_function_return\n");
-    return FALSE;
+    BYTE c;
+    return dbg_read_memory(insn, &c, sizeof(c)) && ((c == 0xC2) || (c == 0xC3));
 }
 
 static unsigned be_x86_64_is_break_insn(const void* insn)
 {
-    dbg_printf("not done is_break_insn\n");
-    return FALSE;
+    BYTE        c;
+    return dbg_read_memory(insn, &c, sizeof(c)) && c == 0xCC;
+}
+
+static BOOL fetch_value(const char* addr, unsigned sz, int* value)
+{
+    char        value8;
+    short       value16;
+
+    switch (sz)
+    {
+    case 8:
+        if (!dbg_read_memory(addr, &value8, sizeof(value8))) return FALSE;
+        *value = value8;
+        break;
+    case 16:
+        if (!dbg_read_memory(addr, &value16, sizeof(value16))) return FALSE;
+        *value = value16;
+    case 32:
+        if (!dbg_read_memory(addr, value, sizeof(*value))) return FALSE;
+        break;
+    default: return FALSE;
+    }
+    return TRUE;
 }
 
 static unsigned be_x86_64_is_func_call(const void* insn, ADDRESS64* callee)
 {
-    dbg_printf("not done is_func_call\n");
-    return FALSE;
+    BYTE                ch;
+    LONG                delta;
+    short               segment;
+    unsigned            op_size = 32, rex = 0;
+    DWORD64             dst;
+
+    /* we assume 64bit mode all over the place */
+    for (;;)
+    {
+        if (!dbg_read_memory(insn, &ch, sizeof(ch))) return FALSE;
+        if (ch == 0x66) op_size = 16;
+        else if (ch == 0x67) WINE_FIXME("prefix not supported %x\n", ch);
+        else if (ch >= 0x40 && ch <= 0x4f) rex = ch & 0xf;
+        else break;
+        insn = (const char*)insn + 1;
+    } while (0);
+
+    /* that's the only mode we support anyway */
+    callee->Mode = AddrModeFlat;
+    callee->Segment = dbg_context.SegCs;
+
+    switch (ch)
+    {
+    case 0xe8: /* relative near call */
+        assert(op_size == 32);
+        if (!fetch_value((const char*)insn + 1, sizeof(delta), &delta))
+            return FALSE;
+        callee->Offset = (DWORD_PTR)insn + 1 + 4 + delta;
+        return TRUE;
+
+    case 0xff:
+        if (!dbg_read_memory((const char*)insn + 1, &ch, sizeof(ch)))
+            return FALSE;
+        WINE_TRACE("Got 0xFF %x (&C7=%x) with rex=%x\n", ch, ch & 0xC7, rex);
+        /* keep only the CALL and LCALL insn:s */
+        switch (f_reg(ch))
+        {
+        case 0x02:
+            segment = dbg_context.SegCs;
+            break;
+        default: return FALSE;
+        }
+        if (rex == 0) switch (ch & 0xC7) /* keep Mod R/M only (skip reg) */
+        {
+        case 0x04:
+        case 0x44:
+        case 0x84:
+            WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) (SIB bytes) at %p\n", ch, insn);
+            return FALSE;
+        case 0x05: /* addr32 */
+            if (f_reg(ch) == 0x2)
+            {
+                /* rip-relative to next insn */
+                if (!dbg_read_memory((const char*)insn + 2, &delta, sizeof(delta)) ||
+                    !dbg_read_memory((const char*)insn + 6 + delta, &dst, sizeof(dst)))
+                    return FALSE;
+
+                callee->Offset = dst;
+                return TRUE;
+            }
+            WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) at %p\n", ch, insn);
+            return FALSE;
+        default:
+            switch (f_rm(ch))
+            {
+            case 0x00: dst = dbg_context.Rax; break;
+            case 0x01: dst = dbg_context.Rcx; break;
+            case 0x02: dst = dbg_context.Rdx; break;
+            case 0x03: dst = dbg_context.Rbx; break;
+            case 0x04: dst = dbg_context.Rsp; break;
+            case 0x05: dst = dbg_context.Rbp; break;
+            case 0x06: dst = dbg_context.Rsi; break;
+            case 0x07: dst = dbg_context.Rdi; break;
+            }
+            if (f_mod(ch) != 0x03)
+                WINE_FIXME("Unsupported yet call insn (0xFF 0x%02x) at %p\n", ch, insn);
+            else
+            {
+                callee->Offset = dst;
+            }
+            break;
+        }
+        else
+            WINE_FIXME("Unsupported yet call insn (rex=0x%02x 0xFF 0x%02x) at %p\n", rex, ch, insn);
+        return FALSE;
+
+    default:
+        return FALSE;
+    }
 }
 
-static void be_x86_64_disasm_one_insn(ADDRESS64* addr, int display)
-{
-    dbg_printf("Disasm NIY\n");
-}
+extern void be_x86_64_disasm_one_insn(ADDRESS64* addr, int display);
 
 #define DR7_CONTROL_SHIFT	16
 #define DR7_CONTROL_SIZE 	4
@@ -367,11 +530,25 @@ static int be_x86_64_fetch_integer(const struct dbg_lvalue* lvalue, unsigned siz
     return TRUE;
 }
 
-static int be_x86_64_fetch_float(const struct dbg_lvalue* lvalue, unsigned size, 
+static int be_x86_64_fetch_float(const struct dbg_lvalue* lvalue, unsigned size,
                                 long double* ret)
 {
-    dbg_printf("not done fetch_float\n");
-    return FALSE;
+    char        tmp[sizeof(long double)];
+
+    /* FIXME: this assumes that debuggee and debugger use the same
+     * representation for reals
+     */
+    if (!memory_read_value(lvalue, size, tmp)) return FALSE;
+
+    /* float & double types have to be promoted to a long double */
+    switch (size)
+    {
+    case sizeof(float):         *ret = *(float*)tmp;            break;
+    case sizeof(double):        *ret = *(double*)tmp;           break;
+    case sizeof(long double):   *ret = *(long double*)tmp;      break;
+    default:                    return FALSE;
+    }
+    return TRUE;
 }
 
 struct backend_cpu be_x86_64 =

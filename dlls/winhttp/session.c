@@ -33,7 +33,7 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(winhttp);
 
-#define DEFAULT_CONNECT_TIMEOUT     60000
+#define DEFAULT_CONNECT_TIMEOUT     20000
 #define DEFAULT_SEND_TIMEOUT        30000
 #define DEFAULT_RECEIVE_TIMEOUT     30000
 
@@ -91,6 +91,8 @@ static void session_destroy( object_header_t *hdr )
 
 static BOOL session_query_option( object_header_t *hdr, DWORD option, LPVOID buffer, LPDWORD buflen )
 {
+    session_t *session = (session_t *)hdr;
+
     switch (option)
     {
     case WINHTTP_OPTION_REDIRECT_POLICY:
@@ -106,6 +108,18 @@ static BOOL session_query_option( object_header_t *hdr, DWORD option, LPVOID buf
         *buflen = sizeof(DWORD);
         return TRUE;
     }
+    case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        *(DWORD *)buffer = session->connect_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_SEND_TIMEOUT:
+        *(DWORD *)buffer = session->send_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        *(DWORD *)buffer = session->recv_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -115,6 +129,8 @@ static BOOL session_query_option( object_header_t *hdr, DWORD option, LPVOID buf
 
 static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffer, DWORD buflen )
 {
+    session_t *session = (session_t *)hdr;
+
     switch (option)
     {
     case WINHTTP_OPTION_PROXY:
@@ -142,6 +158,15 @@ static BOOL session_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
     case WINHTTP_OPTION_DISABLE_FEATURE:
         set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
         return FALSE;
+    case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        session->connect_timeout = *(DWORD *)buffer;
+        return TRUE;
+    case WINHTTP_OPTION_SEND_TIMEOUT:
+        session->send_timeout = *(DWORD *)buffer;
+        return TRUE;
+    case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        session->recv_timeout = *(DWORD *)buffer;
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -173,6 +198,9 @@ HINTERNET WINAPI WinHttpOpen( LPCWSTR agent, DWORD access, LPCWSTR proxy, LPCWST
     session->hdr.flags = flags;
     session->hdr.refs = 1;
     session->hdr.redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_DISALLOW_HTTPS_TO_HTTP;
+    session->connect_timeout = DEFAULT_CONNECT_TIMEOUT;
+    session->send_timeout = DEFAULT_SEND_TIMEOUT;
+    session->recv_timeout = DEFAULT_RECEIVE_TIMEOUT;
     list_init( &session->cookie_cache );
 
     if (agent && !(session->agent = strdupW( agent ))) goto end;
@@ -248,6 +276,18 @@ static BOOL connect_query_option( object_header_t *hdr, DWORD option, LPVOID buf
         *buflen = sizeof(HINTERNET);
         return TRUE;
     }
+    case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        *(DWORD *)buffer = connect->session->connect_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_SEND_TIMEOUT:
+        *(DWORD *)buffer = connect->session->send_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        *(DWORD *)buffer = connect->session->recv_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -496,6 +536,8 @@ static void request_destroy( object_header_t *hdr )
 
 static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buffer, LPDWORD buflen )
 {
+    request_t *request = (request_t *)hdr;
+
     switch (option)
     {
     case WINHTTP_OPTION_SECURITY_FLAGS:
@@ -518,7 +560,6 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
     case WINHTTP_OPTION_SERVER_CERT_CONTEXT:
     {
         const CERT_CONTEXT *cert;
-        request_t *request = (request_t *)hdr;
 
         if (!buffer || *buflen < sizeof(cert))
         {
@@ -545,6 +586,18 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
         *buflen = sizeof(DWORD);
         return TRUE;
     }
+    case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        *(DWORD *)buffer = request->connect_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_SEND_TIMEOUT:
+        *(DWORD *)buffer = request->send_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
+    case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        *(DWORD *)buffer = request->recv_timeout;
+        *buflen = sizeof(DWORD);
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -554,6 +607,8 @@ static BOOL request_query_option( object_header_t *hdr, DWORD option, LPVOID buf
 
 static BOOL request_set_option( object_header_t *hdr, DWORD option, LPVOID buffer, DWORD buflen )
 {
+    request_t *request = (request_t *)hdr;
+
     switch (option)
     {
     case WINHTTP_OPTION_PROXY:
@@ -612,6 +667,15 @@ static BOOL request_set_option( object_header_t *hdr, DWORD option, LPVOID buffe
         FIXME("WINHTTP_OPTION_SECURITY_FLAGS unimplemented (%08x)\n",
               *(DWORD *)buffer);
         return TRUE;
+    case WINHTTP_OPTION_CONNECT_TIMEOUT:
+        request->connect_timeout = *(DWORD *)buffer;
+        return TRUE;
+    case WINHTTP_OPTION_SEND_TIMEOUT:
+        request->send_timeout = *(DWORD *)buffer;
+        return TRUE;
+    case WINHTTP_OPTION_RECEIVE_TIMEOUT:
+        request->recv_timeout = *(DWORD *)buffer;
+        return TRUE;
     default:
         FIXME("unimplemented option %u\n", option);
         set_last_error( ERROR_INVALID_PARAMETER );
@@ -668,9 +732,9 @@ HINTERNET WINAPI WinHttpOpenRequest( HINTERNET hconnect, LPCWSTR verb, LPCWSTR o
     list_add_head( &connect->hdr.children, &request->hdr.entry );
 
     if (!netconn_init( &request->netconn, request->hdr.flags & WINHTTP_FLAG_SECURE )) goto end;
-    request->connect_timeout = DEFAULT_CONNECT_TIMEOUT;
-    request->send_timeout = DEFAULT_SEND_TIMEOUT;
-    request->recv_timeout = DEFAULT_RECEIVE_TIMEOUT;
+    request->connect_timeout = connect->session->connect_timeout;
+    request->send_timeout = connect->session->send_timeout;
+    request->recv_timeout = connect->session->recv_timeout;
 
     if (!verb || !verb[0]) verb = getW;
     if (!(request->verb = strdupW( verb ))) goto end;
@@ -1190,7 +1254,9 @@ WINHTTP_STATUS_CALLBACK WINAPI WinHttpSetStatusCallback( HINTERNET handle, WINHT
 BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int send, int receive )
 {
     BOOL ret = TRUE;
+    object_header_t *hdr;
     request_t *request;
+    session_t *session;
 
     TRACE("%p, %d, %d, %d, %d\n", handle, resolve, connect, send, receive);
 
@@ -1203,34 +1269,49 @@ BOOL WINAPI WinHttpSetTimeouts( HINTERNET handle, int resolve, int connect, int 
     if (resolve > 0)
         FIXME("resolve timeout (%d) not supported\n", resolve);
 
-    if (!(request = (request_t *)grab_object( handle )))
+    if (!(hdr = grab_object( handle )))
     {
         set_last_error( ERROR_INVALID_HANDLE );
         return FALSE;
     }
 
-    if (request->hdr.type != WINHTTP_HANDLE_TYPE_REQUEST)
+    switch(hdr->type)
     {
-        release_object( &request->hdr );
-        set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
-        return FALSE;
+        case WINHTTP_HANDLE_TYPE_REQUEST:
+            request = (request_t *)hdr;
+            request->connect_timeout = connect;
+
+            if (send < 0) send = 0;
+            request->send_timeout = send;
+
+            if (receive < 0) receive = 0;
+            request->recv_timeout = receive;
+
+            if (netconn_connected( &request->netconn ))
+            {
+                if (netconn_set_timeout( &request->netconn, TRUE, send )) ret = FALSE;
+                if (netconn_set_timeout( &request->netconn, FALSE, receive )) ret = FALSE;
+            }
+
+            release_object( &request->hdr );
+            break;
+
+        case WINHTTP_HANDLE_TYPE_SESSION:
+            session = (session_t *)hdr;
+            session->connect_timeout = connect;
+
+            if (send < 0) send = 0;
+            session->send_timeout = send;
+
+            if (receive < 0) receive = 0;
+            session->recv_timeout = receive;
+            break;
+
+        default:
+            release_object( hdr );
+            set_last_error( ERROR_WINHTTP_INCORRECT_HANDLE_TYPE );
+            return FALSE;
     }
-
-    request->connect_timeout = connect;
-
-    if (send < 0) send = 0;
-    request->send_timeout = send;
-
-    if (receive < 0) receive = 0;
-    request->recv_timeout = receive;
-
-    if (netconn_connected( &request->netconn ))
-    {
-        if (netconn_set_timeout( &request->netconn, TRUE, send )) ret = FALSE;
-        if (netconn_set_timeout( &request->netconn, FALSE, receive )) ret = FALSE;
-    }
-
-    release_object( &request->hdr );
     return ret;
 }
 

@@ -34,7 +34,7 @@
 
 #include <stdio.h>
 
-WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
+WINE_DEFAULT_DEBUG_CHANNEL(d3dxof_parsing);
 
 #define TOKEN_NAME         1
 #define TOKEN_STRING       2
@@ -1161,7 +1161,7 @@ static BOOL parse_object_members_list(parse_buffer * buf)
       }
     }
 
-    if (buf->txt && (check_TOKEN(buf) != TOKEN_CBRACE))
+    if (nb_elems && buf->txt && (check_TOKEN(buf) != TOKEN_CBRACE))
     {
       token = get_TOKEN(buf);
       if ((token != TOKEN_SEMICOLON) && (token != TOKEN_COMMA))

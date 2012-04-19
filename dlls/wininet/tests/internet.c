@@ -24,6 +24,7 @@
 #include "winbase.h"
 #include "wininet.h"
 #include "winerror.h"
+#include "winreg.h"
 
 #include "wine/test.h"
 
@@ -38,6 +39,16 @@ static BOOL (WINAPI *pInternetTimeToSystemTimeW)(LPCWSTR ,SYSTEMTIME *,DWORD);
 static BOOL (WINAPI *pIsDomainLegalCookieDomainW)(LPCWSTR, LPCWSTR);
 static DWORD (WINAPI *pPrivacyGetZonePreferenceW)(DWORD, DWORD, LPDWORD, LPWSTR, LPDWORD);
 static DWORD (WINAPI *pPrivacySetZonePreferenceW)(DWORD, DWORD, DWORD, LPCWSTR);
+
+/* Win9x and WinMe don't have lstrcmpW */
+static int strcmp_ww(const WCHAR *str1, const WCHAR *str2)
+{
+    DWORD len1 = lstrlenW(str1);
+    DWORD len2 = lstrlenW(str2);
+
+    if (len1 != len2) return 1;
+    return memcmp(str1, str2, len1 * sizeof(WCHAR));
+}
 
 /* ############################### */
 
@@ -465,7 +476,7 @@ static void test_null(void)
   ok( sz == 1 + lstrlenW(buffer) || sz == lstrlenW(buffer), "sz wrong %d\n", sz);
 
   /* before XP SP2, buffer is "server; server" */
-  ok( !lstrcmpW(szExpect, buffer) || !lstrcmpW(szServer, buffer), "cookie data wrong\n");
+  ok( !strcmp_ww(szExpect, buffer) || !strcmp_ww(szServer, buffer), "cookie data wrong\n");
 
   sz = sizeof(buffer);
   r = InternetQueryOptionA(NULL, INTERNET_OPTION_CONNECTED_STATE, buffer, &sz);
@@ -848,6 +859,27 @@ static void test_Option_Policy(void)
     ok(ret == TRUE, "InternetCloseHandle failed: 0x%08x\n", GetLastError());
 }
 
+#define verifyProxyEnable(e) r_verifyProxyEnable(__LINE__, e)
+static void r_verifyProxyEnable(LONG l, DWORD exp)
+{
+    HKEY hkey;
+    DWORD type, val, size = sizeof(DWORD);
+    LONG ret;
+    static const CHAR szInternetSettings[] = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    static const CHAR szProxyEnable[] = "ProxyEnable";
+
+    ret = RegOpenKeyA(HKEY_CURRENT_USER, szInternetSettings, &hkey);
+    ok_(__FILE__,l) (!ret, "RegOpenKeyA failed: 0x%08x\n", ret);
+
+    ret = RegQueryValueExA(hkey, szProxyEnable, 0, &type, (BYTE*)&val, &size);
+    ok_(__FILE__,l) (!ret, "RegQueryValueExA failed: 0x%08x\n", ret);
+    ok_(__FILE__,l) (type == REG_DWORD, "Expected regtype to be REG_DWORD, was: %d\n", type);
+    ok_(__FILE__,l) (val == exp, "Expected ProxyEnabled to be %d, got: %d\n", exp, val);
+
+    ret = RegCloseKey(hkey);
+    ok_(__FILE__,l) (!ret, "RegCloseKey failed: 0x%08x\n", ret);
+}
+
 static void test_Option_PerConnectionOption(void)
 {
     BOOL ret;
@@ -894,12 +926,74 @@ static void test_Option_PerConnectionOption(void)
     ret = InternetQueryOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
             &list, &size);
     ok(ret == TRUE, "InternetQueryOption should've succeeded\n");
-    ok(!lstrcmpW(list.pOptions[0].Value.pszValue, proxy_srvW),
+    ok(!strcmp_ww(list.pOptions[0].Value.pszValue, proxy_srvW),
             "Retrieved proxy server should've been %s, was: %s\n",
             wine_dbgstr_w(proxy_srvW), wine_dbgstr_w(list.pOptions[0].Value.pszValue));
     ok(list.pOptions[1].Value.dwValue == PROXY_TYPE_PROXY,
             "Retrieved flags should've been PROXY_TYPE_PROXY, was: %d\n",
             list.pOptions[1].Value.dwValue);
+    verifyProxyEnable(1);
+
+    HeapFree(GetProcessHeap(), 0, list.pOptions[0].Value.pszValue);
+    HeapFree(GetProcessHeap(), 0, list.pOptions);
+
+    /* disable the proxy server */
+    list.dwOptionCount = 1;
+    list.pOptions = HeapAlloc(GetProcessHeap(), 0, sizeof(INTERNET_PER_CONN_OPTIONW));
+
+    list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+    list.pOptions[0].Value.dwValue = PROXY_TYPE_DIRECT;
+
+    ret = InternetSetOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+            &list, size);
+    ok(ret == TRUE, "InternetSetOption should've succeeded\n");
+
+    HeapFree(GetProcessHeap(), 0, list.pOptions);
+
+    /* verify that the proxy is disabled */
+    list.dwOptionCount = 1;
+    list.dwOptionError = 0;
+    list.pOptions = HeapAlloc(GetProcessHeap(), 0, sizeof(INTERNET_PER_CONN_OPTIONW));
+
+    list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+
+    ret = InternetQueryOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+            &list, &size);
+    ok(ret == TRUE, "InternetQueryOption should've succeeded\n");
+    ok(list.pOptions[0].Value.dwValue == PROXY_TYPE_DIRECT,
+            "Retrieved flags should've been PROXY_TYPE_DIRECT, was: %d\n",
+            list.pOptions[0].Value.dwValue);
+    verifyProxyEnable(0);
+
+    HeapFree(GetProcessHeap(), 0, list.pOptions);
+
+    /* set the proxy flags to 'invalid' value */
+    list.dwOptionCount = 1;
+    list.pOptions = HeapAlloc(GetProcessHeap(), 0, sizeof(INTERNET_PER_CONN_OPTIONW));
+
+    list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+    list.pOptions[0].Value.dwValue = PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT;
+
+    ret = InternetSetOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+            &list, size);
+    ok(ret == TRUE, "InternetSetOption should've succeeded\n");
+
+    HeapFree(GetProcessHeap(), 0, list.pOptions);
+
+    /* verify that the proxy is enabled */
+    list.dwOptionCount = 1;
+    list.dwOptionError = 0;
+    list.pOptions = HeapAlloc(GetProcessHeap(), 0, sizeof(INTERNET_PER_CONN_OPTIONW));
+
+    list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+
+    ret = InternetQueryOptionW(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION,
+            &list, &size);
+    ok(ret == TRUE, "InternetQueryOption should've succeeded\n");
+    todo_wine ok(list.pOptions[0].Value.dwValue == (PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT),
+            "Retrieved flags should've been PROXY_TYPE_PROXY | PROXY_TYPE_DIRECT, was: %d\n",
+            list.pOptions[0].Value.dwValue);
+    verifyProxyEnable(1);
 
     HeapFree(GetProcessHeap(), 0, list.pOptions);
 
@@ -967,6 +1061,7 @@ static void test_Option_PerConnectionOptionA(void)
             "Retrieved flags should've been PROXY_TYPE_PROXY, was: %d\n",
             list.pOptions[1].Value.dwValue);
 
+    HeapFree(GetProcessHeap(), 0, list.pOptions[0].Value.pszValue);
     HeapFree(GetProcessHeap(), 0, list.pOptions);
 
     /* restore original settings */

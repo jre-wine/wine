@@ -26,7 +26,6 @@ SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 LIBEXT    = @LIBEXT@
 MODULE    = none
-PROGRAMS  = wine
 
 # Sub-directories to run make depend/clean into
 SUBDIRS = \
@@ -46,12 +45,10 @@ INSTALLSUBDIRS = @ALL_TOP_DIRS@
 # Sub-directories to run make test into
 TESTSUBDIRS = dlls
 
-all: Make.rules $(PROGRAMS)
+all: wine
 	@echo "Wine build complete."
 
 WINAPI_CHECK_EXTRA_FLAGS = --global
-
-INSTALLDIRS = $(DESTDIR)$(datadir)/aclocal
 
 @MAKE_RULES@
 
@@ -70,20 +67,10 @@ include/config.h: include/stamp-h
 include/stamp-h: include/config.h.in config.status
 	@./config.status include/config.h include/stamp-h
 
-wine: $(WINEWRAPPER)
-	$(RM) $@ && $(LN_S) $(WINEWRAPPER) $@
-
 # Installation rules
 
-install-aclocal: $(DESTDIR)$(datadir)/aclocal dummy
-
-.PHONY: install-aclocal
-
-@WOW64_DISABLE@ install install-dev:: install-aclocal
-
 uninstall::
-	$(RM) $(DESTDIR)$(datadir)/aclocal/wine.m4
-	-rmdir $(DESTDIR)$(datadir)/wine$(DATASUFFIX) $(DESTDIR)$(datadir)/aclocal
+	-rmdir $(DESTDIR)$(datadir)/wine$(DATASUFFIX)
 
 # Dependencies between directories
 
@@ -147,10 +134,10 @@ distclean:: clean
 
 # Makefile rules
 
-ALL_MAKERULES = @ALL_MAKERULES@
 ALL_MAKEFILES = @ALL_MAKEFILES@
+ALL_CONFIGS   = Makefile $(ALL_MAKEFILES) @ALL_MAKERULES@ @ALL_SYMLINKS@
 
-Makefile $(ALL_MAKERULES) $(ALL_MAKEFILES): config.status
+$(ALL_CONFIGS):
 	@./config.status $@
 .INIT: Makefile
 .BEGIN: Makefile
@@ -159,6 +146,6 @@ Makefile $(ALL_MAKERULES) $(ALL_MAKEFILES): config.status
 $(RECURSE_TARGETS) $(MAKEDEP): $(ALL_MAKEFILES)
 
 distclean::
-	$(RM) Makefile $(ALL_MAKERULES) $(ALL_MAKEFILES)
+	$(RM) $(ALL_CONFIGS)
 
 @ALL_MAKEFILE_DEPENDS@

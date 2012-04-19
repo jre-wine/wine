@@ -643,6 +643,7 @@
 @ stdcall GetTempPathA(long ptr)
 @ stdcall GetTempPathW(long ptr)
 @ stdcall GetThreadContext(long ptr)
+@ stdcall GetThreadErrorMode()
 @ stdcall GetThreadId(ptr)
 # @ stub GetThreadIOPendingFlag
 @ stdcall GetThreadLocale()
@@ -725,6 +726,7 @@
 @ stdcall InitializeCriticalSectionEx(ptr long long)
 @ stdcall InitializeSListHead(ptr) ntdll.RtlInitializeSListHead
 @ stdcall -arch=i386 InterlockedCompareExchange (ptr long long)
+@ stdcall -arch=i386 -ret64 InterlockedCompareExchange64(ptr double double) ntdll.RtlInterlockedCompareExchange64
 @ stdcall -arch=i386 InterlockedDecrement(ptr)
 @ stdcall -arch=i386 InterlockedExchange(ptr long)
 @ stdcall -arch=i386 InterlockedExchangeAdd (ptr long )
@@ -749,6 +751,7 @@
 @ stdcall IsProcessorFeaturePresent(long)
 @ stub -i386 IsSLCallback
 @ stdcall IsSystemResumeAutomatic()
+@ stdcall IsThreadAFiber()
 @ stdcall IsValidCodePage(long)
 @ stdcall IsValidLanguageGroup(long long)
 @ stdcall IsValidLocale(long long)
@@ -1055,6 +1058,7 @@
 @ stdcall SetTermsrvAppInstallMode(long)
 @ stdcall SetThreadAffinityMask(long long)
 @ stdcall SetThreadContext(long ptr)
+@ stdcall SetThreadErrorMode(long ptr)
 @ stdcall SetThreadExecutionState(long)
 @ stdcall SetThreadIdealProcessor(long long)
 @ stdcall SetThreadLocale(long)

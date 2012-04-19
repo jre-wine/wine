@@ -30,6 +30,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
 
 #define GLINFO_LOCATION (*gl_info)
+#define WINE_DEFAULT_VIDMEM (64 * 1024 * 1024)
+#define MAKEDWORD_VERSION(maj, min)  ((maj & 0xffff) << 16) | (min & 0xffff)
 
 /* The d3d device ID */
 static const GUID IID_D3DDEVICE_D3DUID = { 0xaeb2cdd4, 0x6e41, 0x43ea, { 0x94,0x1c,0x83,0x61,0xcc,0x76,0x07,0x81 } };
@@ -61,6 +63,7 @@ static const struct {
     {"GL_ARB_half_float_pixel",             ARB_HALF_FLOAT_PIXEL,           0                           },
     {"GL_ARB_half_float_vertex",            ARB_HALF_FLOAT_VERTEX,          0                           },
     {"GL_ARB_imaging",                      ARB_IMAGING,                    0                           },
+    {"GL_ARB_map_buffer_range",             ARB_MAP_BUFFER_RANGE,           0                           },
     {"GL_ARB_multisample",                  ARB_MULTISAMPLE,                0                           }, /* needs GLX_ARB_MULTISAMPLE as well */
     {"GL_ARB_multitexture",                 ARB_MULTITEXTURE,               0                           },
     {"GL_ARB_occlusion_query",              ARB_OCCLUSION_QUERY,            0                           },
@@ -70,6 +73,8 @@ static const struct {
     {"GL_ARB_provoking_vertex",             ARB_PROVOKING_VERTEX,           0                           },
     {"GL_ARB_shader_objects",               ARB_SHADER_OBJECTS,             0                           },
     {"GL_ARB_shader_texture_lod",           ARB_SHADER_TEXTURE_LOD,         0                           },
+    {"GL_ARB_shading_language_100",         ARB_SHADING_LANGUAGE_100,       0                           },
+    {"GL_ARB_sync",                         ARB_SYNC,                       0                           },
     {"GL_ARB_texture_border_clamp",         ARB_TEXTURE_BORDER_CLAMP,       0                           },
     {"GL_ARB_texture_compression",          ARB_TEXTURE_COMPRESSION,        0                           },
     {"GL_ARB_texture_cube_map",             ARB_TEXTURE_CUBE_MAP,           0                           },
@@ -81,6 +86,7 @@ static const struct {
     {"GL_ARB_texture_non_power_of_two",     ARB_TEXTURE_NON_POWER_OF_TWO,   MAKEDWORD_VERSION(2, 0)     },
     {"GL_ARB_texture_rectangle",            ARB_TEXTURE_RECTANGLE,          0                           },
     {"GL_ARB_texture_rg",                   ARB_TEXTURE_RG,                 0                           },
+    {"GL_ARB_vertex_array_bgra",            ARB_VERTEX_ARRAY_BGRA,          0                           },
     {"GL_ARB_vertex_blend",                 ARB_VERTEX_BLEND,               0                           },
     {"GL_ARB_vertex_buffer_object",         ARB_VERTEX_BUFFER_OBJECT,       0                           },
     {"GL_ARB_vertex_program",               ARB_VERTEX_PROGRAM,             0                           },
@@ -103,6 +109,7 @@ static const struct {
     {"GL_EXT_framebuffer_multisample",      EXT_FRAMEBUFFER_MULTISAMPLE,    0                           },
     {"GL_EXT_framebuffer_object",           EXT_FRAMEBUFFER_OBJECT,         0                           },
     {"GL_EXT_gpu_program_parameters",       EXT_GPU_PROGRAM_PARAMETERS,     0                           },
+    {"GL_EXT_gpu_shader4",                  EXT_GPU_SHADER4,                0                           },
     {"GL_EXT_packed_depth_stencil",         EXT_PACKED_DEPTH_STENCIL,       0                           },
     {"GL_EXT_paletted_texture",             EXT_PALETTED_TEXTURE,           0                           },
     {"GL_EXT_point_parameters",             EXT_POINT_PARAMETERS,           0                           },
@@ -1123,6 +1130,7 @@ static enum wined3d_pci_vendor wined3d_guess_vendor(const char *gl_vendor, const
         return VENDOR_INTEL;
 
     if (strstr(gl_vendor, "Mesa")
+            || strstr(gl_vendor, "Advanced Micro Devices, Inc.")
             || strstr(gl_vendor, "DRI R300 Project")
             || strstr(gl_vendor, "Tungsten Graphics, Inc")
             || strstr(gl_vendor, "VMware, Inc."))
@@ -1622,12 +1630,51 @@ static enum wined3d_pci_device wined3d_guess_card(const struct wined3d_gl_info *
     }
 }
 
-/* Context activation is done by the caller. */
-static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, struct wined3d_gl_info *gl_info)
+static const struct fragment_pipeline *select_fragment_implementation(struct wined3d_adapter *adapter)
 {
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    int vs_selected_mode, ps_selected_mode;
+
+    select_shader_mode(gl_info, &ps_selected_mode, &vs_selected_mode);
+    if ((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL)
+            && gl_info->supported[ARB_FRAGMENT_PROGRAM]) return &arbfp_fragment_pipeline;
+    else if (ps_selected_mode == SHADER_ATI) return &atifs_fragment_pipeline;
+    else if (gl_info->supported[NV_REGISTER_COMBINERS]
+            && gl_info->supported[NV_TEXTURE_SHADER2]) return &nvts_fragment_pipeline;
+    else if (gl_info->supported[NV_REGISTER_COMBINERS]) return &nvrc_fragment_pipeline;
+    else return &ffp_fragment_pipeline;
+}
+
+static const shader_backend_t *select_shader_backend(struct wined3d_adapter *adapter)
+{
+    int vs_selected_mode, ps_selected_mode;
+
+    select_shader_mode(&adapter->gl_info, &ps_selected_mode, &vs_selected_mode);
+    if (vs_selected_mode == SHADER_GLSL || ps_selected_mode == SHADER_GLSL) return &glsl_shader_backend;
+    if (vs_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_ARB) return &arb_program_shader_backend;
+    return &none_shader_backend;
+}
+
+static const struct blit_shader *select_blit_implementation(struct wined3d_adapter *adapter)
+{
+    const struct wined3d_gl_info *gl_info = &adapter->gl_info;
+    int vs_selected_mode, ps_selected_mode;
+
+    select_shader_mode(gl_info, &ps_selected_mode, &vs_selected_mode);
+    if ((ps_selected_mode == SHADER_ARB || ps_selected_mode == SHADER_GLSL)
+            && gl_info->supported[ARB_FRAGMENT_PROGRAM]) return &arbfp_blit;
+    else return &ffp_blit;
+}
+
+/* Context activation is done by the caller. */
+static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_adapter *adapter)
+{
+    struct wined3d_driver_info *driver_info = &adapter->driver_info;
+    struct wined3d_gl_info *gl_info = &adapter->gl_info;
     const char *GL_Extensions    = NULL;
     const char *WGL_Extensions   = NULL;
     const char *gl_string        = NULL;
+    struct fragment_caps fragment_caps;
     enum wined3d_pci_vendor vendor;
     enum wined3d_pci_device device;
     GLint       gl_max;
@@ -1693,7 +1740,6 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
     memset(gl_info->supported, 0, sizeof(gl_info->supported));
     gl_info->limits.buffers = 1;
     gl_info->limits.textures = 1;
-    gl_info->limits.texture_stages = 1;
     gl_info->limits.fragment_samplers = 1;
     gl_info->limits.vertex_samplers = 0;
     gl_info->limits.combined_samplers = gl_info->limits.fragment_samplers + gl_info->limits.vertex_samplers;
@@ -1830,6 +1876,12 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
             gl_info->supported[ARB_HALF_FLOAT_PIXEL] = TRUE;
         }
     }
+    if (gl_info->supported[ARB_MAP_BUFFER_RANGE])
+    {
+        /* GL_ARB_map_buffer_range and GL_APPLE_flush_buffer_range provide the same
+         * functionality. Prefer the ARB extension */
+        gl_info->supported[APPLE_FLUSH_BUFFER_RANGE] = FALSE;
+    }
     if (gl_info->supported[ARB_TEXTURE_CUBE_MAP])
     {
         TRACE_(d3d_caps)(" IMPLIED: NVIDIA (NV) Texture Gen Reflection support.\n");
@@ -1840,6 +1892,11 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
         TRACE_(d3d_caps)(" IMPLIED: ARB_depth_clamp support (by NV_depth_clamp).\n");
         gl_info->supported[ARB_DEPTH_CLAMP] = TRUE;
     }
+    if (!gl_info->supported[ARB_VERTEX_ARRAY_BGRA] && gl_info->supported[EXT_VERTEX_ARRAY_BGRA])
+    {
+        TRACE_(d3d_caps)(" IMPLIED: ARB_vertex_array_bgra support (by EXT_vertex_array_bgra).\n");
+        gl_info->supported[ARB_VERTEX_ARRAY_BGRA] = TRUE;
+    }
     if (gl_info->supported[NV_TEXTURE_SHADER2])
     {
         if (gl_info->supported[NV_REGISTER_COMBINERS])
@@ -1849,6 +1906,13 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
              * ATI one, and a bit more(signed pixelformats). */
             gl_info->supported[ATI_FRAGMENT_SHADER] = FALSE;
         }
+    }
+
+    if (gl_info->supported[NV_REGISTER_COMBINERS])
+    {
+        glGetIntegerv(GL_MAX_GENERAL_COMBINERS_NV, &gl_max);
+        gl_info->limits.general_combiners = gl_max;
+        TRACE_(d3d_caps)("Max general combiners: %d.\n", gl_max);
     }
     if (gl_info->supported[ARB_DRAW_BUFFERS])
     {
@@ -1861,18 +1925,6 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
         glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &gl_max);
         gl_info->limits.textures = min(MAX_TEXTURES, gl_max);
         TRACE_(d3d_caps)("Max textures: %d.\n", gl_info->limits.textures);
-
-        if (gl_info->supported[NV_REGISTER_COMBINERS])
-        {
-            GLint tmp;
-            glGetIntegerv(GL_MAX_GENERAL_COMBINERS_NV, &tmp);
-            gl_info->limits.texture_stages = min(MAX_TEXTURES, tmp);
-        }
-        else
-        {
-            gl_info->limits.texture_stages = min(MAX_TEXTURES, gl_max);
-        }
-        TRACE_(d3d_caps)("Max texture stages: %d.\n", gl_info->limits.texture_stages);
 
         if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
         {
@@ -1997,6 +2049,11 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
         gl_info->limits.glsl_varyings = gl_max;
         TRACE_(d3d_caps)("Max GLSL varyings: %u (%u 4 component varyings).\n", gl_max, gl_max / 4);
     }
+    if (gl_info->supported[ARB_SHADING_LANGUAGE_100])
+    {
+        const char *str = (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION_ARB);
+        TRACE_(d3d_caps)("GLSL version string: %s.\n", debugstr_a(str));
+    }
     if (gl_info->supported[NV_LIGHT_MAX_EXPONENT])
     {
         glGetFloatv(GL_MAX_SHININESS_NV, &gl_info->limits.shininess);
@@ -2041,6 +2098,14 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_driver_info *driver_info, str
     checkGLcall("extension detection");
 
     LEAVE_GL();
+
+    adapter->fragment_pipe = select_fragment_implementation(adapter);
+    adapter->shader_backend = select_shader_backend(adapter);
+    adapter->blitter = select_blit_implementation(adapter);
+
+    adapter->fragment_pipe->get_caps(gl_info, &fragment_caps);
+    gl_info->limits.texture_stages = fragment_caps.MaxTextureBlendStages;
+    TRACE_(d3d_caps)("Max texture stages: %u.\n", gl_info->limits.texture_stages);
 
     /* In some cases the number of texture stages can be larger than the number
      * of samplers. The GF4 for example can use only 2 samplers (no fragment
@@ -2747,8 +2812,6 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceType(IWineD3D *iface, UINT Adapter
 static BOOL CheckBumpMapCapability(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *format_desc)
 {
-    const struct fragment_pipeline *fp;
-
     switch(format_desc->format)
     {
         case WINED3DFMT_R8G8_SNORM:
@@ -2759,8 +2822,7 @@ static BOOL CheckBumpMapCapability(struct wined3d_adapter *adapter,
             /* Ask the fixed function pipeline implementation if it can deal
              * with the conversion. If we've got a GL extension giving native
              * support this will be an identity conversion. */
-            fp = select_fragment_implementation(adapter, DeviceType);
-            if (fp->color_fixup_supported(format_desc->color_fixup))
+            if (adapter->fragment_pipe->color_fixup_supported(format_desc->color_fixup))
             {
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
@@ -2950,8 +3012,6 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *format_desc)
 {
     const struct wined3d_gl_info *gl_info = &adapter->gl_info;
-    const shader_backend_t *shader_backend;
-    const struct fragment_pipeline *fp;
 
     switch (format_desc->format)
     {
@@ -3029,8 +3089,7 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
             /* Ask the shader backend if it can deal with the conversion. If
              * we've got a GL extension giving native support this will be an
              * identity conversion. */
-            shader_backend = select_shader_backend(adapter, DeviceType);
-            if (shader_backend->shader_color_fixup_supported(format_desc->color_fixup))
+            if (adapter->shader_backend->shader_color_fixup_supported(format_desc->color_fixup))
             {
                 TRACE_(d3d_caps)("[OK]\n");
                 return TRUE;
@@ -3146,10 +3205,8 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
             if (gl_info->supported[ATI_TEXTURE_COMPRESSION_3DC]
                     || gl_info->supported[EXT_TEXTURE_COMPRESSION_RGTC])
             {
-                shader_backend = select_shader_backend(adapter, DeviceType);
-                fp = select_fragment_implementation(adapter, DeviceType);
-                if (shader_backend->shader_color_fixup_supported(format_desc->color_fixup)
-                        && fp->color_fixup_supported(format_desc->color_fixup))
+                if (adapter->shader_backend->shader_color_fixup_supported(format_desc->color_fixup)
+                        && adapter->fragment_pipe->color_fixup_supported(format_desc->color_fixup))
                 {
                     TRACE_(d3d_caps)("[OK]\n");
                     return TRUE;
@@ -3185,8 +3242,6 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
 static BOOL CheckSurfaceCapability(struct wined3d_adapter *adapter, const struct GlPixelFormatDesc *adapter_format_desc,
         WINED3DDEVTYPE DeviceType, const struct GlPixelFormatDesc *check_format_desc, WINED3DSURFTYPE SurfaceType)
 {
-    const struct blit_shader *blitter;
-
     if(SurfaceType == SURFACE_GDI) {
         switch(check_format_desc->format)
         {
@@ -3222,8 +3277,7 @@ static BOOL CheckSurfaceCapability(struct wined3d_adapter *adapter, const struct
     if (CheckDepthStencilCapability(adapter, adapter_format_desc, check_format_desc)) return TRUE;
 
     /* If opengl can't process the format natively, the blitter may be able to convert it */
-    blitter = select_blit_implementation(adapter, DeviceType);
-    if (blitter->color_fixup_supported(check_format_desc->color_fixup))
+    if (adapter->blitter->color_fixup_supported(check_format_desc->color_fixup))
     {
         TRACE_(d3d_caps)("[OK]\n");
         return TRUE;
@@ -3788,8 +3842,6 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     int ps_selected_mode;
     struct shader_caps shader_caps;
     struct fragment_caps fragment_caps;
-    const shader_backend_t *shader_backend;
-    const struct fragment_pipeline *frag_pipeline = NULL;
     DWORD ckey_caps, blit_caps, fx_caps;
 
     TRACE_(d3d_caps)("(%p)->(Adptr:%d, DevType: %x, pCaps: %p)\n", This, Adapter, DeviceType, pCaps);
@@ -4166,12 +4218,10 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
     pCaps->VertexTextureFilterCaps           = 0;
 
     memset(&shader_caps, 0, sizeof(shader_caps));
-    shader_backend = select_shader_backend(adapter, DeviceType);
-    shader_backend->shader_get_caps(DeviceType, &adapter->gl_info, &shader_caps);
+    adapter->shader_backend->shader_get_caps(&adapter->gl_info, &shader_caps);
 
     memset(&fragment_caps, 0, sizeof(fragment_caps));
-    frag_pipeline = select_fragment_implementation(adapter, DeviceType);
-    frag_pipeline->get_caps(DeviceType, &adapter->gl_info, &fragment_caps);
+    adapter->fragment_pipe->get_caps(&adapter->gl_info, &fragment_caps);
 
     /* Add shader misc caps. Only some of them belong to the shader parts of the pipeline */
     pCaps->PrimitiveMiscCaps |= fragment_caps.PrimitiveMiscCaps;
@@ -4696,7 +4746,7 @@ BOOL InitAdapters(IWineD3DImpl *This)
             goto nogl_adapter;
         }
 
-        ret = IWineD3DImpl_FillGLCaps(&adapter->driver_info, &adapter->gl_info);
+        ret = IWineD3DImpl_FillGLCaps(adapter);
         if(!ret) {
             ERR("Failed to initialize gl caps for default adapter\n");
             WineD3D_ReleaseFakeGLContext(&fake_gl_ctx);

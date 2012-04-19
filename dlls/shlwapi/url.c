@@ -33,6 +33,7 @@
 #include "winternl.h"
 #define NO_SHLWAPI_STREAM
 #include "shlwapi.h"
+#include "intshcut.h"
 #include "wine/debug.h"
 
 HMODULE WINAPI MLLoadLibraryW(LPCWSTR,HMODULE,DWORD);
@@ -157,8 +158,8 @@ HRESULT WINAPI ParseURLA(LPCSTR x, PARSEDURLA *y)
         ptr++;
 
     if (*ptr != ':' || ptr <= x+1) {
-	y->pszProtocol = NULL;
-	return 0x80041001;
+        y->pszProtocol = NULL;
+        return URL_E_INVALID_SYNTAX;
     }
 
     y->pszProtocol = x;
@@ -191,8 +192,8 @@ HRESULT WINAPI ParseURLW(LPCWSTR x, PARSEDURLW *y)
         ptr++;
 
     if (*ptr != ':' || ptr <= x+1) {
-	y->pszProtocol = NULL;
-	return 0x80041001;
+        y->pszProtocol = NULL;
+        return URL_E_INVALID_SYNTAX;
     }
 
     y->pszProtocol = x;
@@ -1400,8 +1401,7 @@ HRESULT WINAPI HashData(const unsigned char *lpSrc, DWORD nSrcLen,
 {
   INT srcCount = nSrcLen - 1, destCount = nDestLen - 1;
 
-  if (IsBadReadPtr(lpSrc, nSrcLen) ||
-      IsBadWritePtr(lpDest, nDestLen))
+  if (!lpSrc || !lpDest)
     return E_INVALIDARG;
 
   while (destCount >= 0)
@@ -2314,7 +2314,7 @@ HRESULT WINAPI UrlCreateFromPathW(LPCWSTR pszPath, LPWSTR pszUrl, LPDWORD pcchUr
  */
 HRESULT WINAPI SHAutoComplete(HWND hwndEdit, DWORD dwFlags)
 {
-  FIXME("SHAutoComplete stub\n");
+  FIXME("stub\n");
   return S_FALSE;
 }
 

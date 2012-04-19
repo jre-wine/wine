@@ -57,7 +57,7 @@
 @ stub PdhGetDefaultPerfObjectHA
 @ stub PdhGetDefaultPerfObjectHW
 @ stub PdhGetDefaultPerfObjectW
-@ stub PdhGetDllVersion
+@ stdcall PdhGetDllVersion(ptr)
 @ stub PdhGetFormattedCounterArrayA
 @ stub PdhGetFormattedCounterArrayW
 @ stdcall PdhGetFormattedCounterValue(ptr long ptr ptr)
@@ -127,7 +127,7 @@
 @ stub PdhSelectDataSourceA
 @ stub PdhSelectDataSourceW
 @ stdcall PdhSetCounterScaleFactor(ptr long)
-@ stub PdhSetDefaultRealTimeDataSource
+@ stdcall PdhSetDefaultRealTimeDataSource(long)
 @ stub PdhSetLogSetRunID
 @ stub PdhSetQueryTimeRange
 @ stub PdhTranslate009CounterA

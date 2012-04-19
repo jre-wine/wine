@@ -1757,6 +1757,9 @@ static int read_i(int fd, void *buf, unsigned int count)
   char *bufstart = buf;
   HANDLE hand = msvcrt_fdtoh(fd);
 
+  if (count == 0)
+    return 0;
+
   if (MSVCRT_fdesc[fd].wxflag & WX_READEOF) {
      MSVCRT_fdesc[fd].wxflag |= WX_ATEOF;
      TRACE("already at EOF, returning 0\n");
@@ -1773,13 +1776,26 @@ static int read_i(int fd, void *buf, unsigned int count)
    */
     if (ReadFile(hand, bufstart, count, &num_read, NULL))
     {
-        if (MSVCRT_fdesc[fd].wxflag & WX_TEXT)
+        if (count != 0 && num_read == 0)
+        {
+            MSVCRT_fdesc[fd].wxflag |= (WX_ATEOF|WX_READEOF);
+            TRACE(":EOF %s\n",debugstr_an(buf,num_read));
+        }
+        else if (MSVCRT_fdesc[fd].wxflag & WX_TEXT)
         {
             DWORD i, j;
             if (bufstart[num_read-1] == '\r')
             {
-	        MSVCRT_fdesc[fd].wxflag  |= WX_READCR;
-	        num_read--;
+                if(count == 1)
+                {
+                    MSVCRT_fdesc[fd].wxflag  &=  ~WX_READCR;
+                    ReadFile(hand, bufstart, 1, &num_read, NULL);
+                }
+                else
+                {
+                    MSVCRT_fdesc[fd].wxflag  |= WX_READCR;
+                    num_read--;
+                }
             }
 	    else
 	      MSVCRT_fdesc[fd].wxflag  &=  ~WX_READCR;
@@ -1801,11 +1817,6 @@ static int read_i(int fd, void *buf, unsigned int count)
 		    bufstart[j++] = bufstart[i];
             }
             num_read = j;
-        }
-        if (count != 0 && num_read == 0)
-        {
-            MSVCRT_fdesc[fd].wxflag |= (WX_ATEOF|WX_READEOF);
-            TRACE(":EOF %s\n",debugstr_an(buf,num_read));
         }
     }
     else

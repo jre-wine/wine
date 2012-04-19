@@ -33,6 +33,8 @@
 #include "oleauto.h"
 #include "oledb.h"
 
+#include "row_server.h"
+
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(oledb);
@@ -446,6 +448,12 @@ HRESULT CALLBACK IBindResource_Bind_Proxy(IBindResource* This, IUnknown *pUnkOut
     TRACE("(%p, %p, %s, %08x, %s, %s, %p, %p, %p, %p)\n", This, pUnkOuter, debugstr_w(pwszURL), dwBindURLFlags,
           debugstr_guid(rguid), debugstr_guid(riid), pAuthenticate, pImplSession, pdwBindStatus, ppUnk);
 
+    if(pUnkOuter)
+    {
+        FIXME("Aggregation not supported\n");
+        return CLASS_E_NOAGGREGATION;
+    }
+
     hr = IBindResource_RemoteBind_Proxy(This, pUnkOuter, pwszURL, dwBindURLFlags, rguid, riid, pAuthenticate,
                                         pImplSession ? pImplSession->pUnkOuter : NULL, pImplSession ? pImplSession->piid : NULL,
                                         pImplSession ? &pImplSession->pSession : NULL, pdwBindStatus, ppUnk);
@@ -458,16 +466,46 @@ HRESULT __RPC_STUB IBindResource_Bind_Stub(IBindResource* This, IUnknown *pUnkOu
 {
     HRESULT hr;
     DBIMPLICITSESSION impl_session;
+    IWineRowServer *server;
+    IMarshal *marshal;
+    IUnknown *obj;
 
     TRACE("(%p, %p, %s, %08x, %s, %s, %p, %p, %p, %p, %p, %p)\n", This, pUnkOuter, debugstr_w(pwszURL), dwBindURLFlags,
           debugstr_guid(rguid), debugstr_guid(riid), pAuthenticate, pSessionUnkOuter, piid, ppSession, pdwBindStatus, ppUnk);
+
+    *ppUnk = NULL;
+
+    if(IsEqualGUID(rguid, &DBGUID_ROWSET))
+        hr = CoCreateInstance(&CLSID_wine_rowset_server, NULL, CLSCTX_INPROC_SERVER, &IID_IWineRowServer, (void**)&server);
+    else if(IsEqualGUID(rguid, &DBGUID_ROW))
+        hr = CoCreateInstance(&CLSID_wine_row_server, NULL, CLSCTX_INPROC_SERVER, &IID_IWineRowServer, (void**)&server);
+    else
+    {
+        hr = E_NOTIMPL;
+        FIXME("Unhandled object %s\n", debugstr_guid(rguid));
+    }
+
+    if(FAILED(hr)) return hr;
 
     impl_session.pUnkOuter = pSessionUnkOuter;
     impl_session.piid = piid;
     impl_session.pSession = NULL;
 
-    hr = IBindResource_Bind(This, pUnkOuter, pwszURL, dwBindURLFlags, rguid, riid, pAuthenticate,
-                            ppSession ? &impl_session : NULL, pdwBindStatus, ppUnk);
+    IWineRowServer_GetMarshal(server, &marshal);
+
+    hr = IBindResource_Bind(This, (IUnknown*)marshal, pwszURL, dwBindURLFlags, rguid, &IID_IUnknown, pAuthenticate,
+                            ppSession ? &impl_session : NULL, pdwBindStatus, &obj);
+
+    IMarshal_Release(marshal);
+    if(FAILED(hr))
+    {
+        IWineRowServer_Release(server);
+        return hr;
+    }
+
+    IWineRowServer_SetInnerUnk(server, obj);
+    hr = IUnknown_QueryInterface(obj, riid, (void**)ppUnk);
+    IUnknown_Release(obj);
 
     if(ppSession) *ppSession = impl_session.pSession;
     return hr;
@@ -482,6 +520,12 @@ HRESULT CALLBACK ICreateRow_CreateRow_Proxy(ICreateRow* This, IUnknown *pUnkOute
     TRACE("(%p, %p, %s, %08x, %s, %s, %p, %p, %p, %p, %p)\n", This, pUnkOuter, debugstr_w(pwszURL), dwBindURLFlags,
           debugstr_guid(rguid), debugstr_guid(riid), pAuthenticate, pImplSession, pdwBindStatus, ppwszNewURL, ppUnk);
 
+    if(pUnkOuter)
+    {
+        FIXME("Aggregation not supported\n");
+        return CLASS_E_NOAGGREGATION;
+    }
+
     hr = ICreateRow_RemoteCreateRow_Proxy(This, pUnkOuter, pwszURL, dwBindURLFlags, rguid, riid, pAuthenticate,
                                           pImplSession ? pImplSession->pUnkOuter : NULL, pImplSession ? pImplSession->piid : NULL,
                                           pImplSession ? &pImplSession->pSession : NULL, pdwBindStatus, ppwszNewURL, ppUnk);
@@ -495,17 +539,38 @@ HRESULT __RPC_STUB ICreateRow_CreateRow_Stub(ICreateRow* This, IUnknown *pUnkOut
 {
     HRESULT hr;
     DBIMPLICITSESSION impl_session;
+    IWineRowServer *row_server;
+    IMarshal *marshal;
+    IUnknown *obj;
 
     TRACE("(%p, %p, %s, %08x, %s, %s, %p, %p, %p, %p, %p, %p, %p)\n", This, pUnkOuter, debugstr_w(pwszURL), dwBindURLFlags,
           debugstr_guid(rguid), debugstr_guid(riid), pAuthenticate, pSessionUnkOuter, piid, ppSession, pdwBindStatus, ppwszNewURL,
           ppUnk);
 
+    *ppUnk = NULL;
+
+    hr = CoCreateInstance(&CLSID_wine_row_server, NULL, CLSCTX_INPROC_SERVER, &IID_IWineRowServer, (void**)&row_server);
+    if(FAILED(hr)) return hr;
+
     impl_session.pUnkOuter = pSessionUnkOuter;
     impl_session.piid = piid;
     impl_session.pSession = NULL;
 
-    hr = ICreateRow_CreateRow(This, pUnkOuter, pwszURL, dwBindURLFlags, rguid, riid, pAuthenticate,
-                              ppSession ? &impl_session : NULL, pdwBindStatus, ppwszNewURL, ppUnk);
+    IWineRowServer_GetMarshal(row_server, &marshal);
+
+    hr = ICreateRow_CreateRow(This, (IUnknown*) marshal, pwszURL, dwBindURLFlags, rguid, &IID_IUnknown, pAuthenticate,
+                              ppSession ? &impl_session : NULL, pdwBindStatus, ppwszNewURL, &obj);
+    IMarshal_Release(marshal);
+
+    if(FAILED(hr))
+    {
+        IWineRowServer_Release(row_server);
+        return hr;
+    }
+
+    IWineRowServer_SetInnerUnk(row_server, obj);
+    hr = IUnknown_QueryInterface(obj, riid, (void**)ppUnk);
+    IUnknown_Release(obj);
 
     if(ppSession) *ppSession = impl_session.pSession;
     return hr;
@@ -701,11 +766,34 @@ HRESULT __RPC_STUB ICommand_Cancel_Stub(ICommand* This, IErrorInfo **ppErrorInfo
 HRESULT CALLBACK ICommand_Execute_Proxy(ICommand* This, IUnknown *pUnkOuter, REFIID riid,
                                         DBPARAMS *pParams, DBROWCOUNT *pcRowsAffected, IUnknown **ppRowset)
 {
-    FIXME("(%p)->(%p, %s, %p, %p, %p): stub\n", This, pUnkOuter, debugstr_guid(riid), pParams,
-          pcRowsAffected, ppRowset);
-    if(pParams) TRACE("params {%p, %d, %08lx}\n", pParams->pData, pParams->cParamSets, pParams->hAccessor);
+    HRESULT hr;
+    DBROWCOUNT affected;
 
-    return E_NOTIMPL;
+    *ppRowset = NULL;
+
+    TRACE("(%p)->(%p, %s, %p, %p, %p)\n", This, pUnkOuter, debugstr_guid(riid), pParams,
+          pcRowsAffected, ppRowset);
+
+    if(pParams)
+    {
+        FIXME("Unhandled params {%p, %d, %08lx}\n", pParams->pData, pParams->cParamSets, pParams->hAccessor);
+        return E_NOTIMPL;
+    }
+
+    if(pUnkOuter)
+    {
+        FIXME("Aggregation not supported\n");
+        return CLASS_E_NOAGGREGATION;
+    }
+
+    hr = ICommand_RemoteExecute_Proxy(This, pUnkOuter, riid, 0, 0, NULL, 0, NULL, NULL, 0, NULL, NULL, &affected,
+                                      ppRowset);
+
+    TRACE("Execute returns %08x\n", hr);
+
+    if(pcRowsAffected) *pcRowsAffected = affected;
+
+    return hr;
 }
 
 HRESULT __RPC_STUB ICommand_Execute_Stub(ICommand* This, IUnknown *pUnkOuter, REFIID riid, HACCESSOR hAccessor,
@@ -713,10 +801,37 @@ HRESULT __RPC_STUB ICommand_Execute_Stub(ICommand* This, IUnknown *pUnkOuter, RE
                                          RMTPACK *pOutputParams, DBCOUNTITEM cBindings, DBBINDING *rgBindings,
                                          DBSTATUS *rgStatus, DBROWCOUNT *pcRowsAffected, IUnknown **ppRowset)
 {
-    FIXME("(%p)->(%p, %s, %08lx, %d, %p, %d, %p, %p, %d, %p, %p, %p, %p): stub\n", This, pUnkOuter, debugstr_guid(riid),
+    IWineRowServer *rowset_server;
+    IMarshal *marshal;
+    IUnknown *obj = NULL;
+    HRESULT hr;
+
+    TRACE("(%p)->(%p, %s, %08lx, %d, %p, %d, %p, %p, %d, %p, %p, %p, %p): stub\n", This, pUnkOuter, debugstr_guid(riid),
           hAccessor, cParamSets, pGuid, ulGuidOffset, pInputParams, pOutputParams, cBindings, rgBindings, rgStatus,
           pcRowsAffected, ppRowset);
-    return E_NOTIMPL;
+
+    *ppRowset = NULL;
+
+    hr = CoCreateInstance(&CLSID_wine_rowset_server, NULL, CLSCTX_INPROC_SERVER, &IID_IWineRowServer, (void**)&rowset_server);
+    if(FAILED(hr)) return hr;
+
+    IWineRowServer_GetMarshal(rowset_server, &marshal);
+
+    hr = ICommand_Execute(This, (IUnknown*)marshal, &IID_IUnknown, NULL, pcRowsAffected, &obj);
+
+    IMarshal_Release(marshal);
+
+    if(FAILED(hr))
+    {
+        IWineRowServer_Release(rowset_server);
+        return hr;
+    }
+
+    IWineRowServer_SetInnerUnk(rowset_server, obj);
+    hr = IUnknown_QueryInterface(obj, riid, (void**)ppRowset);
+    IUnknown_Release(obj);
+
+    return hr;
 }
 
 HRESULT CALLBACK ICommand_GetDBSession_Proxy(ICommand* This, REFIID riid, IUnknown **ppSession)

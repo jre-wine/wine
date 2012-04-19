@@ -320,8 +320,10 @@ static LRESULT Child_OnPaint(HWND hWnd)
     return 0;
 }
 
-static void ResizeTabChild(HHInfo *info, HWND hwnd)
+static void ResizeTabChild(HHInfo *info, int tab)
 {
+    HWND hwnd = info->tabs[tab].hwnd;
+    INT width, height;
     RECT rect, tabrc;
     DWORD cnt;
 
@@ -333,9 +335,28 @@ static void ResizeTabChild(HHInfo *info, HWND hwnd)
     rect.top = TAB_TOP_PADDING + cnt*(tabrc.bottom-tabrc.top) + TAB_MARGIN;
     rect.right -= TAB_RIGHT_PADDING + TAB_MARGIN;
     rect.bottom -= TAB_MARGIN;
+    width = rect.right-rect.left;
+    height = rect.bottom-rect.top;
 
-    SetWindowPos(hwnd, NULL, rect.left, rect.top, rect.right-rect.left,
-                 rect.bottom-rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(hwnd, NULL, rect.left, rect.top, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    /* Resize the tab widget column to perfectly fit the tab window and
+     * leave sufficient space for the scroll widget.
+     */
+    switch (tab)
+    {
+    case TAB_INDEX: {
+        int scroll_width = GetSystemMetrics(SM_CXVSCROLL);
+        int border_width = GetSystemMetrics(SM_CXBORDER);
+        int edge_width = GetSystemMetrics(SM_CXEDGE);
+
+        SendMessageW(info->tabs[TAB_INDEX].hwnd, LVM_SETCOLUMNWIDTH, 0,
+                     width-scroll_width-2*border_width-2*edge_width);
+
+        break;
+    }
+    }
 }
 
 static LRESULT Child_OnSize(HWND hwnd)
@@ -351,7 +372,8 @@ static LRESULT Child_OnSize(HWND hwnd)
                  rect.right - TAB_RIGHT_PADDING,
                  rect.bottom - TAB_TOP_PADDING, SWP_NOMOVE);
 
-    ResizeTabChild(info, info->tabs[TAB_CONTENTS].hwnd);
+    ResizeTabChild(info, TAB_CONTENTS);
+    ResizeTabChild(info, TAB_INDEX);
     return 0;
 }
 
@@ -375,26 +397,75 @@ static LRESULT OnTabChange(HWND hwnd)
     return 0;
 }
 
-static LRESULT OnTopicChange(HWND hwnd, ContentItem *item)
+static LRESULT OnTopicChange(HHInfo *info, void *user_data)
 {
-    HHInfo *info = (HHInfo*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
-    LPCWSTR chmfile = NULL;
-    ContentItem *iter = item;
+    LPCWSTR chmfile = NULL, name = NULL, local = NULL;
+    ContentItem *citer;
+    IndexItem *iiter;
 
-    if(!item || !info)
+    if(!user_data || !info)
         return 0;
 
-    TRACE("name %s loal %s\n", debugstr_w(item->name), debugstr_w(item->local));
-
-    while(iter) {
-        if(iter->merge.chm_file) {
-            chmfile = iter->merge.chm_file;
-            break;
+    switch (info->current_tab)
+    {
+    case TAB_CONTENTS:
+        citer = (ContentItem *) user_data;
+        name = citer->name;
+        local = citer->local;
+        while(citer) {
+            if(citer->merge.chm_file) {
+                chmfile = citer->merge.chm_file;
+                break;
+            }
+            citer = citer->parent;
         }
-        iter = iter->parent;
+        break;
+    case TAB_INDEX:
+        iiter = (IndexItem *) user_data;
+        if(iiter->nItems == 0) {
+            FIXME("No entries for this item!\n");
+            return 0;
+        }
+        if(iiter->nItems > 1) {
+            int i = 0;
+            LVITEMW lvi;
+
+            SendMessageW(info->popup.hwndList, LVM_DELETEALLITEMS, 0, 0);
+            for(i=0;i<iiter->nItems;i++) {
+                IndexSubItem *item = &iiter->items[i];
+                WCHAR *name = iiter->keyword;
+
+                if(item->name)
+                    name = item->name;
+                memset(&lvi, 0, sizeof(lvi));
+                lvi.iItem = i;
+                lvi.mask = LVIF_TEXT|LVIF_PARAM;
+                lvi.cchTextMax = strlenW(name)+1;
+                lvi.pszText = name;
+                lvi.lParam = (LPARAM) item;
+                SendMessageW(info->popup.hwndList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+            }
+            ShowWindow(info->popup.hwndPopup, SW_SHOW);
+            return 0;
+        }
+        name = iiter->items[0].name;
+        local = iiter->items[0].local;
+        chmfile = iiter->merge.chm_file;
+        break;
+    default:
+        FIXME("Unhandled operation for this tab!\n");
+        return 0;
     }
 
-    NavigateToChm(info, chmfile, item->local);
+    if(!chmfile)
+    {
+        FIXME("No help file found for this item!\n");
+        return 0;
+    }
+
+    TRACE("name %s loal %s\n", debugstr_w(name), debugstr_w(local));
+
+    NavigateToChm(info, chmfile, local);
     return 0;
 }
 
@@ -407,12 +478,17 @@ static LRESULT CALLBACK Child_WndProc(HWND hWnd, UINT message, WPARAM wParam, LP
     case WM_SIZE:
         return Child_OnSize(hWnd);
     case WM_NOTIFY: {
+        HHInfo *info = (HHInfo*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
         NMHDR *nmhdr = (NMHDR*)lParam;
+
         switch(nmhdr->code) {
         case TCN_SELCHANGE:
             return OnTabChange(hWnd);
         case TVN_SELCHANGEDW:
-            return OnTopicChange(hWnd, (ContentItem*)((NMTREEVIEWW *)lParam)->itemNew.lParam);
+            return OnTopicChange(info, (void*)((NMTREEVIEWW *)lParam)->itemNew.lParam);
+        case NM_DBLCLK:
+            if(info->current_tab == TAB_INDEX)
+                return OnTopicChange(info, (void*)((NMITEMACTIVATE *)lParam)->lParam);
         }
         break;
     }
@@ -729,6 +805,8 @@ static BOOL HH_AddHTMLPane(HHInfo *pHHInfo)
 
 static BOOL AddContentTab(HHInfo *info)
 {
+    if(info->tabs[TAB_CONTENTS].id == -1)
+        return TRUE; /* No "Contents" tab */
     info->tabs[TAB_CONTENTS].hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW,
            szEmpty, WS_CHILD | WS_BORDER | 0x25, 50, 50, 100, 100,
            info->WinType.hwndNavigation, NULL, hhctrl_hinstance, NULL);
@@ -737,8 +815,207 @@ static BOOL AddContentTab(HHInfo *info)
         return FALSE;
     }
 
-    ResizeTabChild(info, info->tabs[TAB_CONTENTS].hwnd);
+    ResizeTabChild(info, TAB_CONTENTS);
     ShowWindow(info->tabs[TAB_CONTENTS].hwnd, SW_SHOW);
+
+    return TRUE;
+}
+
+static BOOL AddIndexTab(HHInfo *info)
+{
+    char hidden_column[] = "Column";
+    LVCOLUMNA lvc;
+
+    if(info->tabs[TAB_INDEX].id == -1)
+        return TRUE; /* No "Index" tab */
+    info->tabs[TAB_INDEX].hwnd = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW,
+           szEmpty, WS_CHILD | WS_BORDER | LVS_SINGLESEL | LVS_REPORT | LVS_NOCOLUMNHEADER, 50, 50, 100, 100,
+           info->WinType.hwndNavigation, NULL, hhctrl_hinstance, NULL);
+    if(!info->tabs[TAB_INDEX].hwnd) {
+        ERR("Could not create ListView control\n");
+        return FALSE;
+    }
+    memset(&lvc, 0, sizeof(lvc));
+    lvc.mask = LVCF_TEXT;
+    lvc.pszText = hidden_column;
+    if(SendMessageW(info->tabs[TAB_INDEX].hwnd, LVM_INSERTCOLUMNA, 0, (LPARAM) &lvc) == -1)
+    {
+        ERR("Could not create ListView column\n");
+        return FALSE;
+    }
+
+    ResizeTabChild(info, TAB_INDEX);
+    ShowWindow(info->tabs[TAB_INDEX].hwnd, SW_HIDE);
+
+    return TRUE;
+}
+
+/* The Index tab's sub-topic popup */
+
+static void ResizePopupChild(HHInfo *info)
+{
+    int scroll_width = GetSystemMetrics(SM_CXVSCROLL);
+    int border_width = GetSystemMetrics(SM_CXBORDER);
+    int edge_width = GetSystemMetrics(SM_CXEDGE);
+    INT width, height;
+    RECT rect;
+
+    if(!info)
+        return;
+
+    GetClientRect(info->popup.hwndPopup, &rect);
+    SetWindowPos(info->popup.hwndCallback, HWND_TOP, 0, 0,
+                 rect.right, rect.bottom, SWP_NOMOVE);
+
+    rect.left = TAB_MARGIN;
+    rect.top = TAB_TOP_PADDING + TAB_MARGIN;
+    rect.right -= TAB_RIGHT_PADDING + TAB_MARGIN;
+    rect.bottom -= TAB_MARGIN;
+    width = rect.right-rect.left;
+    height = rect.bottom-rect.top;
+
+    SetWindowPos(info->popup.hwndList, NULL, rect.left, rect.top, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+
+    SendMessageW(info->popup.hwndList, LVM_SETCOLUMNWIDTH, 0,
+                 width-scroll_width-2*border_width-2*edge_width);
+}
+
+static LRESULT CALLBACK HelpPopup_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    HHInfo *info = (HHInfo *)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+
+    switch (message)
+    {
+    case WM_SIZE:
+        ResizePopupChild(info);
+        return 0;
+    case WM_DESTROY:
+        DestroyWindow(hWnd);
+        return 0;
+    case WM_CLOSE:
+        ShowWindow(hWnd, SW_HIDE);
+        return 0;
+
+    default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
+    }
+
+    return 0;
+}
+
+static LRESULT CALLBACK PopupChild_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_NOTIFY: {
+        NMHDR *nmhdr = (NMHDR*)lParam;
+        if(nmhdr->code == NM_DBLCLK) {
+            HHInfo *info = (HHInfo*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+            IndexSubItem *iter;
+
+            if(info == 0 || lParam == 0)
+                return 0;
+            iter = (IndexSubItem*) ((NMITEMACTIVATE *)lParam)->lParam;
+            if(iter == 0)
+                return 0;
+            NavigateToChm(info, info->index->merge.chm_file, iter->local);
+            ShowWindow(info->popup.hwndPopup, SW_HIDE);
+            return 0;
+        }
+        break;
+    }
+    default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
+    }
+
+    return 0;
+}
+
+static BOOL AddIndexPopup(HHInfo *info)
+{
+    static const WCHAR szPopupChildClass[] = {'H','H',' ','P','o','p','u','p',' ','C','h','i','l','d',0};
+    static const WCHAR windowCaptionW[] = {'S','e','l','e','c','t',' ','T','o','p','i','c',':',0};
+    static const WCHAR windowClassW[] = {'H','H',' ','P','o','p','u','p',0};
+    HWND hwndList, hwndPopup, hwndCallback;
+    char hidden_column[] = "Column";
+    WNDCLASSEXW wcex;
+    LVCOLUMNA lvc;
+
+    if(info->tabs[TAB_INDEX].id == -1)
+        return TRUE; /* No "Index" tab */
+
+    wcex.cbSize         = sizeof(WNDCLASSEXW);
+    wcex.style          = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc    = HelpPopup_WndProc;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = hhctrl_hinstance;
+    wcex.hIcon          = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
+    wcex.hbrBackground  = (HBRUSH)(COLOR_MENU + 1);
+    wcex.lpszMenuName   = NULL;
+    wcex.lpszClassName  = windowClassW;
+    wcex.hIconSm        = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    RegisterClassExW(&wcex);
+
+    wcex.cbSize         = sizeof(WNDCLASSEXW);
+    wcex.style          = 0;
+    wcex.lpfnWndProc    = PopupChild_WndProc;
+    wcex.cbClsExtra     = 0;
+    wcex.cbWndExtra     = 0;
+    wcex.hInstance      = hhctrl_hinstance;
+    wcex.hIcon          = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    wcex.hCursor        = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW);
+    wcex.hbrBackground  = (HBRUSH)(COLOR_BTNFACE + 1);
+    wcex.lpszMenuName   = NULL;
+    wcex.lpszClassName  = szPopupChildClass;
+    wcex.hIconSm        = LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+    RegisterClassExW(&wcex);
+
+    hwndPopup = CreateWindowExW(WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_APPWINDOW
+                                 | WS_EX_WINDOWEDGE | WS_EX_RIGHTSCROLLBAR,
+                                windowClassW, windowCaptionW, WS_POPUPWINDOW
+                                 | WS_OVERLAPPEDWINDOW | WS_VISIBLE
+                                 | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, CW_USEDEFAULT,
+                                CW_USEDEFAULT, 300, 200, info->WinType.hwndHelp,
+                                NULL, hhctrl_hinstance, NULL);
+    if (!hwndPopup)
+        return FALSE;
+
+    hwndCallback = CreateWindowExW(WS_EX_LEFT | WS_EX_LTRREADING | WS_EX_RIGHTSCROLLBAR,
+                                   szPopupChildClass, szEmpty, WS_CHILDWINDOW | WS_VISIBLE,
+                                   0, 0, 0, 0,
+                                   hwndPopup, NULL, hhctrl_hinstance, NULL);
+    if (!hwndCallback)
+        return FALSE;
+
+    ShowWindow(hwndPopup, SW_HIDE);
+    hwndList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, szEmpty,
+                               WS_CHILD | WS_BORDER | LVS_SINGLESEL | LVS_REPORT
+                                | LVS_NOCOLUMNHEADER, 50, 50, 100, 100,
+                               hwndCallback, NULL, hhctrl_hinstance, NULL);
+    if(!hwndList) {
+        ERR("Could not create popup ListView control\n");
+        return FALSE;
+    }
+    memset(&lvc, 0, sizeof(lvc));
+    lvc.mask = LVCF_TEXT;
+    lvc.pszText = hidden_column;
+    if(SendMessageW(hwndList, LVM_INSERTCOLUMNA, 0, (LPARAM) &lvc) == -1)
+    {
+        ERR("Could not create popup ListView column\n");
+        return FALSE;
+    }
+
+    info->popup.hwndCallback = hwndCallback;
+    info->popup.hwndPopup = hwndPopup;
+    info->popup.hwndList = hwndList;
+    SetWindowLongPtrW(hwndPopup, GWLP_USERDATA, (LONG_PTR)info);
+    SetWindowLongPtrW(hwndCallback, GWLP_USERDATA, (LONG_PTR)info);
+
+    ResizePopupChild(info);
+    ShowWindow(hwndList, SW_SHOW);
 
     return TRUE;
 }
@@ -918,7 +1195,14 @@ static BOOL CreateViewer(HHInfo *pHHInfo)
     if (!AddContentTab(pHHInfo))
         return FALSE;
 
+    if (!AddIndexTab(pHHInfo))
+        return FALSE;
+
+    if (!AddIndexPopup(pHHInfo))
+        return FALSE;
+
     InitContent(pHHInfo);
+    InitIndex(pHHInfo);
 
     return TRUE;
 }
@@ -947,6 +1231,7 @@ void ReleaseHelpViewer(HHInfo *info)
 
     ReleaseWebBrowser(info);
     ReleaseContent(info);
+    ReleaseIndex(info);
 
     if(info->WinType.hwndHelp)
         DestroyWindow(info->WinType.hwndHelp);
@@ -958,6 +1243,13 @@ void ReleaseHelpViewer(HHInfo *info)
 HHInfo *CreateHelpViewer(LPCWSTR filename)
 {
     HHInfo *info = heap_alloc_zero(sizeof(HHInfo));
+    int i;
+
+    /* Set the invalid tab ID (-1) as the default value for all
+     * of the tabs, this matches a failed TCM_INSERTITEM call.
+     */
+    for(i=0;i<sizeof(info->tabs)/sizeof(HHTab);i++)
+        info->tabs[i].id = -1;
 
     OleInitialize(NULL);
 
