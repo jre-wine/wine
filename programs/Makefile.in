@@ -3,9 +3,8 @@ TOPOBJDIR = ..
 SRCDIR    = @srcdir@
 VPATH     = @srcdir@
 
-SUBDIRS        = @ALL_PROGRAM_DIRS@
-INSTALLSUBDIRS = @ALL_PROGRAM_INSTALL_DIRS@
-INSTALLPROGS   = @ALL_PROGRAM_BIN_INSTALL_DIRS@
+ALL_INSTALLS = @ALL_PROGRAM_BIN_INSTALL_DIRS@
+INSTALLPROGS = $(ALL_INSTALLS:programs/%=%)
 
 INSTALLDIRS = $(DESTDIR)$(bindir)
 
@@ -13,7 +12,7 @@ PROGRAMS = wineapploader
 
 @MAKE_RULES@
 
-all: $(PROGRAMS) $(SUBDIRS)
+all: $(PROGRAMS)
 
 wineapploader: wineapploader.in
 	sed -e 's,@bindir\@,$(bindir),g' $(SRCDIR)/wineapploader.in >$@ || ($(RM) $@ && false)

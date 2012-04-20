@@ -182,7 +182,7 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
 
     /* First we check if the key exists and if so how many bytes it already contains. */
     if (NtQueryValueKey( Reboot, &nameW, KeyValuePartialInformation,
-                         NULL, 0, &DataSize ) == STATUS_BUFFER_OVERFLOW)
+                         NULL, 0, &DataSize ) == STATUS_BUFFER_TOO_SMALL)
     {
         if (!(Buffer = HeapAlloc( GetProcessHeap(), 0, DataSize + len1 + len2 + sizeof(WCHAR) )))
             goto Quit;
@@ -1400,13 +1400,13 @@ UINT WINAPI GetCurrentDirectoryA( UINT buflen, LPSTR buf )
     WCHAR bufferW[MAX_PATH];
     DWORD ret;
 
-    if (buflen && buf && !HIWORD(buf))
+    if (buflen && buf && ((ULONG_PTR)buf >> 16) == 0)
     {
         /* Win9x catches access violations here, returning zero.
          * This behaviour resulted in some people not noticing
          * that they got the argument order wrong. So let's be
          * nice and fail gracefully if buf is invalid and looks
-         * more like a buflen (which is probably MAX_PATH). */
+         * more like a buflen. */
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }

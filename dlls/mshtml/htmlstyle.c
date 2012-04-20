@@ -345,10 +345,12 @@ HRESULT set_nsstyle_attr_var(nsIDOMCSSStyleDeclaration *nsstyle, styleid_t sid, 
 
     case VT_I4: {
         WCHAR str[14];
-        static const WCHAR format[] = {'%','d',0};
 
-        wsprintfW(str, format, V_I4(value));
-        return set_nsstyle_attr(nsstyle, sid, str, flags);
+        static const WCHAR format[] = {'%','d',0};
+        static const WCHAR px_format[] = {'%','d','p','x',0};
+
+        wsprintfW(str, flags&ATTR_FIX_PX ? px_format : format, V_I4(value));
+        return set_nsstyle_attr(nsstyle, sid, str, flags & ~ATTR_FIX_PX);
     }
     default:
         FIXME("not implemented vt %d\n", V_VT(value));
@@ -1531,8 +1533,10 @@ static HRESULT WINAPI HTMLStyle_put_borderTopColor(IHTMLStyle *iface, VARIANT v)
 static HRESULT WINAPI HTMLStyle_get_borderTopColor(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_BORDER_TOP_COLOR, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderRightColor(IHTMLStyle *iface, VARIANT v)
@@ -1545,8 +1549,10 @@ static HRESULT WINAPI HTMLStyle_put_borderRightColor(IHTMLStyle *iface, VARIANT 
 static HRESULT WINAPI HTMLStyle_get_borderRightColor(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_BORDER_RIGHT_COLOR, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderBottomColor(IHTMLStyle *iface, VARIANT v)
@@ -1559,8 +1565,10 @@ static HRESULT WINAPI HTMLStyle_put_borderBottomColor(IHTMLStyle *iface, VARIANT
 static HRESULT WINAPI HTMLStyle_get_borderBottomColor(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_BORDER_BOTTOM_COLOR, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderLeftColor(IHTMLStyle *iface, VARIANT v)
@@ -1573,8 +1581,10 @@ static HRESULT WINAPI HTMLStyle_put_borderLeftColor(IHTMLStyle *iface, VARIANT v
 static HRESULT WINAPI HTMLStyle_get_borderLeftColor(IHTMLStyle *iface, VARIANT *p)
 {
     HTMLStyle *This = HTMLSTYLE_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    return get_nsstyle_attr_var(This->nsstyle, STYLEID_BORDER_LEFT_COLOR, p, 0);
 }
 
 static HRESULT WINAPI HTMLStyle_put_borderWidth(IHTMLStyle *iface, BSTR v)
@@ -1779,15 +1789,7 @@ static HRESULT WINAPI HTMLStyle_put_width(IHTMLStyle *iface, VARIANT v)
 
     TRACE("(%p)->(v%d)\n", This, V_VT(&v));
 
-    switch(V_VT(&v)) {
-    case VT_BSTR:
-        TRACE("%s\n", debugstr_w(V_BSTR(&v)));
-        return set_style_attr(This, STYLEID_WIDTH, V_BSTR(&v), 0);
-    default:
-        FIXME("unsupported vt %d\n", V_VT(&v));
-    }
-
-    return E_NOTIMPL;
+    return set_nsstyle_attr_var(This->nsstyle, STYLEID_WIDTH, &v, ATTR_FIX_PX);
 }
 
 static HRESULT WINAPI HTMLStyle_get_width(IHTMLStyle *iface, VARIANT *p)

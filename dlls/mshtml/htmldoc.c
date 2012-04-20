@@ -776,6 +776,9 @@ static HRESULT document_write(HTMLDocument *This, SAFEARRAY *psarray, BOOL ln)
         return E_UNEXPECTED;
     }
 
+    if (!psarray)
+        return S_OK;
+
     if(psarray->cDims != 1) {
         FIXME("cDims=%d\n", psarray->cDims);
         return E_INVALIDARG;
@@ -1770,6 +1773,9 @@ static BOOL htmldoc_qi(HTMLDocument *This, REFIID riid, void **ppv)
     }else if(IsEqualGUID(&IID_IMarshal, riid)) {
         TRACE("(%p)->(IID_IMarshal %p) returning NULL\n", This, ppv);
         *ppv = NULL;
+    }else if(IsEqualGUID(&IID_IExternalConnection, riid)) {
+        TRACE("(%p)->(IID_IExternalConnection %p) returning NULL\n", This, ppv);
+        *ppv = NULL;
     }else if(IsEqualGUID(&IID_IObjectWithSite, riid)) {
         TRACE("(%p)->(IID_IObjectWithSite %p)\n", This, ppv);
         *ppv = OBJSITE(This);
@@ -1989,6 +1995,8 @@ static ULONG WINAPI CustomDoc_Release(ICustomDoc *iface)
         if(This->basedoc.advise_holder)
             IOleAdviseHolder_Release(This->basedoc.advise_holder);
 
+        if(This->view_sink)
+            IAdviseSink_Release(This->view_sink);
         if(This->client)
             IOleObject_SetClientSite(OLEOBJ(&This->basedoc), NULL);
         if(This->in_place_active)

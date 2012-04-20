@@ -116,22 +116,23 @@ typedef enum _KEY_VALUE_INFORMATION_CLASS {
 #endif
 
 static NTSTATUS (WINAPI * pRtlCreateUnicodeStringFromAsciiz)(PUNICODE_STRING, LPCSTR);
+static void     (WINAPI * pRtlInitUnicodeString)(PUNICODE_STRING,PCWSTR);
 static NTSTATUS (WINAPI * pRtlFreeUnicodeString)(PUNICODE_STRING);
 static NTSTATUS (WINAPI * pNtDeleteValueKey)(IN HANDLE, IN PUNICODE_STRING);
 static NTSTATUS (WINAPI * pRtlQueryRegistryValues)(IN ULONG, IN PCWSTR,IN PRTL_QUERY_REGISTRY_TABLE, IN PVOID,IN PVOID);
 static NTSTATUS (WINAPI * pRtlCheckRegistryKey)(IN ULONG,IN PWSTR);
-static NTSTATUS (WINAPI * pRtlOpenCurrentUser)(IN ACCESS_MASK, OUT PHKEY);
+static NTSTATUS (WINAPI * pRtlOpenCurrentUser)(IN ACCESS_MASK, PHANDLE);
 static NTSTATUS (WINAPI * pNtOpenKey)(PHANDLE, IN ACCESS_MASK, IN POBJECT_ATTRIBUTES);
 static NTSTATUS (WINAPI * pNtClose)(IN HANDLE);
 static NTSTATUS (WINAPI * pNtDeleteValueKey)(IN HANDLE, IN PUNICODE_STRING);
-static NTSTATUS (WINAPI * pNtFlushKey)(HKEY);
-static NTSTATUS (WINAPI * pNtDeleteKey)(HKEY);
-static NTSTATUS (WINAPI * pNtCreateKey)( PHKEY retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
+static NTSTATUS (WINAPI * pNtFlushKey)(HANDLE);
+static NTSTATUS (WINAPI * pNtDeleteKey)(HANDLE);
+static NTSTATUS (WINAPI * pNtCreateKey)( PHANDLE retkey, ACCESS_MASK access, const OBJECT_ATTRIBUTES *attr,
                              ULONG TitleIndex, const UNICODE_STRING *class, ULONG options,
                              PULONG dispos );
 static NTSTATUS (WINAPI * pNtQueryValueKey)(HANDLE,const UNICODE_STRING *,KEY_VALUE_INFORMATION_CLASS,void *,DWORD,DWORD *);
-static NTSTATUS (WINAPI * pNtSetValueKey)( PHKEY, const PUNICODE_STRING, ULONG,
-                               ULONG, const PVOID, ULONG  );
+static NTSTATUS (WINAPI * pNtSetValueKey)(HANDLE, const PUNICODE_STRING, ULONG,
+                               ULONG, const void*, ULONG  );
 static NTSTATUS (WINAPI * pRtlFormatCurrentUserKeyPath)(PUNICODE_STRING);
 static NTSTATUS (WINAPI * pRtlCreateUnicodeString)( PUNICODE_STRING, LPCWSTR);
 static LPVOID   (WINAPI * pRtlReAllocateHeap)(IN PVOID, IN ULONG, IN PVOID, IN ULONG);
@@ -161,6 +162,7 @@ static BOOL InitFunctionPtrs(void)
         trace("Could not load ntdll.dll\n");
         return FALSE;
     }
+    NTDLL_GET_PROC(RtlInitUnicodeString)
     NTDLL_GET_PROC(RtlCreateUnicodeStringFromAsciiz)
     NTDLL_GET_PROC(RtlCreateUnicodeString)
     NTDLL_GET_PROC(RtlFreeUnicodeString)
@@ -348,22 +350,20 @@ static void test_NtOpenKey(void)
     InitializeObjectAttributes(&attr, &winetestpath, 0, 0, 0);
 
     /* NULL key */
-    status = pNtOpenKey(NULL, 0, &attr);
-    todo_wine
-        ok(status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got: 0x%08x\n", status);
+    status = pNtOpenKey(NULL, am, &attr);
+    ok(status == STATUS_ACCESS_VIOLATION, "Expected STATUS_ACCESS_VIOLATION, got: 0x%08x\n", status);
 
     /* Length > sizeof(OBJECT_ATTRIBUTES) */
     attr.Length *= 2;
     status = pNtOpenKey(&key, am, &attr);
-    todo_wine
-        ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got: 0x%08x\n", status);
+    ok(status == STATUS_INVALID_PARAMETER, "Expected STATUS_INVALID_PARAMETER, got: 0x%08x\n", status);
 }
 
 static void test_NtCreateKey(void)
 {
     /*Create WineTest*/
     OBJECT_ATTRIBUTES attr;
-    HKEY key;
+    HANDLE key;
     ACCESS_MASK am = GENERIC_ALL;
     NTSTATUS status;
 
@@ -433,7 +433,7 @@ static void test_NtSetValueKey(void)
 static void test_RtlOpenCurrentUser(void)
 {
     NTSTATUS status;
-    HKEY handle;
+    HANDLE handle;
     status=pRtlOpenCurrentUser(KEY_READ, &handle);
     ok(status == STATUS_SUCCESS, "RtlOpenCurrentUser Failed: 0x%08x\n", status);
     pNtClose(handle);
@@ -478,7 +478,7 @@ static void test_NtQueryValueKey(void)
     KEY_VALUE_BASIC_INFORMATION *basic_info;
     KEY_VALUE_PARTIAL_INFORMATION *partial_info;
     KEY_VALUE_FULL_INFORMATION *full_info;
-    DWORD len;
+    DWORD len, expected;
 
     pRtlCreateUnicodeStringFromAsciiz(&ValName, "deletetest");
 
@@ -552,7 +552,7 @@ static void test_NtQueryValueKey(void)
     pRtlCreateUnicodeStringFromAsciiz(&ValName, "stringtest");
 
     status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, NULL, 0, &len);
-    todo_wine ok(status == STATUS_BUFFER_TOO_SMALL, "NtQueryValueKey should have returned STATUS_BUFFER_TOO_SMALL instead of 0x%08x\n", status);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "NtQueryValueKey should have returned STATUS_BUFFER_TOO_SMALL instead of 0x%08x\n", status);
     partial_info = HeapAlloc(GetProcessHeap(), 0, len+1);
     memset(partial_info, 0xbd, len+1);
     status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, partial_info, len, &len);
@@ -562,6 +562,21 @@ static void test_NtQueryValueKey(void)
     ok(partial_info->DataLength == STR_TRUNC_SIZE, "NtQueryValueKey returned wrong DataLength %d\n", partial_info->DataLength);
     ok(!memcmp(partial_info->Data, stringW, STR_TRUNC_SIZE), "incorrect Data returned\n");
     ok(*(partial_info->Data+STR_TRUNC_SIZE) == 0xbd, "string overflowed %02x\n", *(partial_info->Data+STR_TRUNC_SIZE));
+
+    expected = len;
+    status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, partial_info, 0, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "NtQueryValueKey wrong status 0x%08x\n", status);
+    ok(len == expected, "NtQueryValueKey wrong len %u\n", len);
+    status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, partial_info, 1, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "NtQueryValueKey wrong status 0x%08x\n", status);
+    ok(len == expected, "NtQueryValueKey wrong len %u\n", len);
+    status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, partial_info, FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data) - 1, &len);
+    ok(status == STATUS_BUFFER_TOO_SMALL, "NtQueryValueKey wrong status 0x%08x\n", status);
+    ok(len == expected, "NtQueryValueKey wrong len %u\n", len);
+    status = pNtQueryValueKey(key, &ValName, KeyValuePartialInformation, partial_info, FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION, Data), &len);
+    ok(status == STATUS_BUFFER_OVERFLOW, "NtQueryValueKey wrong status 0x%08x\n", status);
+    ok(len == expected, "NtQueryValueKey wrong len %u\n", len);
+
     HeapFree(GetProcessHeap(), 0, partial_info);
 
     pRtlFreeUnicodeString(&ValName);
@@ -593,6 +608,234 @@ static void test_RtlpNtQueryValueKey(void)
     ok(status == STATUS_INVALID_HANDLE, "Expected STATUS_INVALID_HANDLE, got: 0x%08x\n", status);
 }
 
+static void test_symlinks(void)
+{
+    static const WCHAR linkW[] = {'l','i','n','k',0};
+    static const WCHAR valueW[] = {'v','a','l','u','e',0};
+    static const WCHAR symlinkW[] = {'S','y','m','b','o','l','i','c','L','i','n','k','V','a','l','u','e',0};
+    static const WCHAR targetW[] = {'\\','t','a','r','g','e','t',0};
+    static UNICODE_STRING null_str;
+    char buffer[1024];
+    KEY_VALUE_PARTIAL_INFORMATION *info = (KEY_VALUE_PARTIAL_INFORMATION *)buffer;
+    WCHAR *target;
+    UNICODE_STRING symlink_str, link_str, target_str, value_str;
+    HANDLE root, key, link;
+    OBJECT_ATTRIBUTES attr;
+    NTSTATUS status;
+    DWORD target_len, len, dw;
+
+    pRtlInitUnicodeString( &link_str, linkW );
+    pRtlInitUnicodeString( &symlink_str, symlinkW );
+    pRtlInitUnicodeString( &target_str, targetW + 1 );
+    pRtlInitUnicodeString( &value_str, valueW );
+
+    target_len = winetestpath.Length + sizeof(targetW);
+    target = pRtlAllocateHeap( GetProcessHeap(), 0, target_len + sizeof(targetW) /*for loop test*/ );
+    memcpy( target, winetestpath.Buffer, winetestpath.Length );
+    memcpy( target + winetestpath.Length/sizeof(WCHAR), targetW, sizeof(targetW) );
+
+    attr.Length = sizeof(attr);
+    attr.RootDirectory = 0;
+    attr.Attributes = 0;
+    attr.ObjectName = &winetestpath;
+    attr.SecurityDescriptor = NULL;
+    attr.SecurityQualityOfService = NULL;
+
+    status = pNtCreateKey( &root, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+
+    attr.RootDirectory = root;
+    attr.ObjectName = &link_str;
+    status = pNtCreateKey( &link, KEY_ALL_ACCESS, &attr, 0, 0, REG_OPTION_CREATE_LINK, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+
+    /* REG_SZ is not allowed */
+    status = pNtSetValueKey( link, &symlink_str, 0, REG_SZ, target, target_len );
+    ok( status == STATUS_ACCESS_DENIED, "NtSetValueKey wrong status 0x%08x\n", status );
+    status = pNtSetValueKey( link, &symlink_str, 0, REG_LINK, target, target_len - sizeof(WCHAR) );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+    /* other values are not allowed */
+    status = pNtSetValueKey( link, &link_str, 0, REG_LINK, target, target_len - sizeof(WCHAR) );
+    ok( status == STATUS_ACCESS_DENIED, "NtSetValueKey wrong status 0x%08x\n", status );
+
+    /* try opening the target through the link */
+
+    attr.ObjectName = &link_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtOpenKey wrong status 0x%08x\n", status );
+
+    attr.ObjectName = &target_str;
+    status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+
+    dw = 0xbeef;
+    status = pNtSetValueKey( key, &value_str, 0, REG_DWORD, &dw, sizeof(dw) );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+    pNtClose( key );
+
+    attr.ObjectName = &link_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &value_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + sizeof(DWORD), "wrong len %u\n", len );
+
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtQueryValueKey failed: 0x%08x\n", status );
+
+    /* REG_LINK can be created in non-link keys */
+    status = pNtSetValueKey( key, &symlink_str, 0, REG_LINK, target, target_len - sizeof(WCHAR) );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + target_len - sizeof(WCHAR),
+        "wrong len %u\n", len );
+    status = pNtDeleteValueKey( key, &symlink_str );
+    ok( status == STATUS_SUCCESS, "NtDeleteValueKey failed: 0x%08x\n", status );
+
+    pNtClose( key );
+
+    attr.Attributes = 0;
+    status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &value_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + sizeof(DWORD), "wrong len %u\n", len );
+
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtQueryValueKey failed: 0x%08x\n", status );
+    pNtClose( key );
+
+    /* now open the symlink itself */
+
+    attr.RootDirectory = root;
+    attr.Attributes = OBJ_OPENLINK;
+    attr.ObjectName = &link_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + target_len - sizeof(WCHAR),
+        "wrong len %u\n", len );
+    pNtClose( key );
+
+    status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + target_len - sizeof(WCHAR),
+        "wrong len %u\n", len );
+    pNtClose( key );
+
+    /* reopen the link from itself */
+
+    attr.RootDirectory = link;
+    attr.Attributes = OBJ_OPENLINK;
+    attr.ObjectName = &null_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + target_len - sizeof(WCHAR),
+        "wrong len %u\n", len );
+    pNtClose( key );
+
+    status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+    len = sizeof(buffer);
+    status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+    ok( status == STATUS_SUCCESS, "NtQueryValueKey failed: 0x%08x\n", status );
+    ok( len == FIELD_OFFSET(KEY_VALUE_PARTIAL_INFORMATION,Data) + target_len - sizeof(WCHAR),
+        "wrong len %u\n", len );
+    pNtClose( key );
+
+    if (0)  /* crashes the Windows kernel in most versions */
+    {
+        attr.Attributes = 0;
+        status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+        ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+        len = sizeof(buffer);
+        status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+        ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtQueryValueKey failed: 0x%08x\n", status );
+        pNtClose( key );
+
+        status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, 0, 0 );
+        ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+        len = sizeof(buffer);
+        status = pNtQueryValueKey( key, &symlink_str, KeyValuePartialInformation, info, len, &len );
+        ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtQueryValueKey failed: 0x%08x\n", status );
+        pNtClose( key );
+    }
+
+    /* target with terminating null doesn't work */
+    status = pNtSetValueKey( link, &symlink_str, 0, REG_LINK, target, target_len );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+    attr.RootDirectory = root;
+    attr.Attributes = 0;
+    attr.ObjectName = &link_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND, "NtOpenKey wrong status 0x%08x\n", status );
+
+    /* relative symlink, works only on win2k */
+    status = pNtSetValueKey( link, &symlink_str, 0, REG_LINK, targetW+1, sizeof(targetW)-2*sizeof(WCHAR) );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+    attr.ObjectName = &link_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS || status == STATUS_OBJECT_NAME_NOT_FOUND,
+        "NtOpenKey wrong status 0x%08x\n", status );
+
+    status = pNtCreateKey( &key, KEY_ALL_ACCESS, &attr, 0, 0, REG_OPTION_CREATE_LINK, 0 );
+    ok( status == STATUS_OBJECT_NAME_COLLISION, "NtCreateKey failed: 0x%08x\n", status );
+
+    status = pNtDeleteKey( link );
+    ok( status == STATUS_SUCCESS, "NtDeleteKey failed: 0x%08x\n", status );
+    pNtClose( link );
+
+    attr.ObjectName = &target_str;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+    status = pNtDeleteKey( key );
+    ok( status == STATUS_SUCCESS, "NtDeleteKey failed: 0x%08x\n", status );
+    pNtClose( key );
+
+    /* symlink loop */
+
+    status = pNtCreateKey( &link, KEY_ALL_ACCESS, &attr, 0, 0, REG_OPTION_CREATE_LINK, 0 );
+    ok( status == STATUS_SUCCESS, "NtCreateKey failed: 0x%08x\n", status );
+    memcpy( target + target_len/sizeof(WCHAR) - 1, targetW, sizeof(targetW) );
+    status = pNtSetValueKey( link, &symlink_str, 0, REG_LINK,
+        target, target_len + sizeof(targetW) - sizeof(WCHAR) );
+    ok( status == STATUS_SUCCESS, "NtSetValueKey failed: 0x%08x\n", status );
+
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_NAME_TOO_LONG,
+        "NtOpenKey failed: 0x%08x\n", status );
+
+    attr.Attributes = OBJ_OPENLINK;
+    status = pNtOpenKey( &key, KEY_ALL_ACCESS, &attr );
+    ok( status == STATUS_SUCCESS, "NtOpenKey failed: 0x%08x\n", status );
+    pNtClose( key );
+
+    status = pNtDeleteKey( link );
+    ok( status == STATUS_SUCCESS, "NtDeleteKey failed: 0x%08x\n", status );
+    pNtClose( link );
+
+    status = pNtDeleteKey( root );
+    ok( status == STATUS_SUCCESS, "NtDeleteKey failed: 0x%08x\n", status );
+    pNtClose( root );
+
+    pRtlFreeHeap(GetProcessHeap(), 0, target);
+}
+
 START_TEST(reg)
 {
     static const WCHAR winetest[] = {'\\','W','i','n','e','T','e','s','t',0};
@@ -605,8 +848,8 @@ START_TEST(reg)
 
     pRtlAppendUnicodeToString(&winetestpath, winetest);
 
-    test_NtOpenKey();
     test_NtCreateKey();
+    test_NtOpenKey();
     test_NtSetValueKey();
     test_RtlCheckRegistryKey();
     test_RtlOpenCurrentUser();
@@ -615,6 +858,7 @@ START_TEST(reg)
     test_NtFlushKey();
     test_NtQueryValueKey();
     test_NtDeleteKey();
+    test_symlinks();
 
     pRtlFreeUnicodeString(&winetestpath);
 

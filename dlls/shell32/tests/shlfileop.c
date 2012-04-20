@@ -1720,6 +1720,21 @@ static void test_copy(void)
     ok(DeleteFileA("ab.txt"), "Expected file to exist\n");
     ok(RemoveDirectoryA("one"), "Expected dir to exist\n");
     ok(RemoveDirectoryA("two"), "Expected dir to exist\n");
+
+    /* pTo is an empty string  */
+    CreateDirectoryA("dir", NULL);
+    createTestFile("dir\\abcdefgh.abc");
+    shfo.pFrom = "dir\\abcdefgh.abc\0";
+    shfo.pTo = "\0";
+    shfo.fFlags = FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    retval = SHFileOperation(&shfo);
+    ok(retval == ERROR_SUCCESS ||
+       broken(retval == DE_OPCANCELLED), /* NT4 */
+       "Expected ERROR_SUCCESS, got %d\n", retval);
+    if (retval == ERROR_SUCCESS)
+        ok(DeleteFileA("abcdefgh.abc"), "Expected file to exist\n");
+    ok(DeleteFileA("dir\\abcdefgh.abc"), "Expected file to exist\n");
+    ok(RemoveDirectoryA("dir"), "Expected dir to exist\n");
 }
 
 /* tests the FO_MOVE action */

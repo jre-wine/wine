@@ -1530,9 +1530,9 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	 */
 	lpMidiHdr = (LPMIDIHDR)msg->lParam;
 	lpData = (LPBYTE)lpMidiHdr->lpData;
-	TRACE("Adding %s lpMidiHdr=%p [lpData=0x%p dwBufferLength=%u/%u dwFlags=0x%08x size=%lu]\n",
+	TRACE("Adding %s lpMidiHdr=%p [lpData=0x%p dwBytesRecorded=%u/%u dwFlags=0x%08x size=%lu]\n",
 	      (lpMidiHdr->dwFlags & MHDR_ISSTRM) ? "stream" : "regular", lpMidiHdr,
-	      lpMidiHdr, lpMidiHdr->dwBufferLength, lpMidiHdr->dwBytesRecorded,
+	      lpMidiHdr, lpMidiHdr->dwBytesRecorded, lpMidiHdr->dwBufferLength,
 	      lpMidiHdr->dwFlags, msg->wParam);
 #if 0
 	/* dumps content of lpMidiHdr->lpData
@@ -1606,21 +1606,15 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
 	goto the_end;
 
     /* force thread's queue creation */
-    /* Used to be InitThreadInput16(0, 5); */
-    /* but following works also with hack in midiStreamOpen */
-    PeekMessageA(&msg, 0, 0, 0, 0);
-
-    /* FIXME: this next line must be called before midiStreamOut or midiStreamRestart are called */
-    SetEvent(lpMidiStrm->hEvent);
-    TRACE("Ready to go 1\n");
-    /* thread is started in paused mode */
-    SuspendThread(lpMidiStrm->hThread);
-    TRACE("Ready to go 2\n");
+    PeekMessageA(&msg, 0, 0, 0, PM_NOREMOVE);
 
     lpMidiStrm->dwStartTicks = 0;
     lpMidiStrm->dwPulses = 0;
 
     lpMidiStrm->lpMidiHdr = 0;
+
+    /* midiStreamOpen is waiting for ack */
+    SetEvent(lpMidiStrm->hEvent);
 
     for (;;) {
 	lpMidiHdr = lpMidiStrm->lpMidiHdr;
@@ -1692,7 +1686,7 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
 	lpMidiHdr->dwOffset += sizeof(MIDIEVENT) - sizeof(me->dwParms);
 	if (me->dwEvent & MEVT_F_LONG)
 	    lpMidiHdr->dwOffset += (MEVT_EVENTPARM(me->dwEvent) + 3) & ~3;
-	if (lpMidiHdr->dwOffset >= lpMidiHdr->dwBufferLength) {
+	if (lpMidiHdr->dwOffset >= lpMidiHdr->dwBytesRecorded) {
 	    /* done with this header */
 	    lpMidiHdr->dwFlags |= MHDR_DONE;
 	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
@@ -1706,8 +1700,7 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
     }
 the_end:
     TRACE("End of thread\n");
-    ExitThread(0);
-    return 0;	/* for removing the warning, never executed */
+    return 0;
 }
 
 /**************************************************************************
@@ -1718,7 +1711,7 @@ static	BOOL MMSYSTEM_MidiStream_PostMessage(WINE_MIDIStream* lpMidiStrm, WORD ms
     if (PostThreadMessageA(lpMidiStrm->dwThreadID, msg, pmt1, pmt2)) {
         MsgWaitForMultipleObjects( 1, &lpMidiStrm->hEvent, FALSE, INFINITE, 0 );
     } else {
-	WARN("bad PostThreadMessageA\n");
+	ERR("bad PostThreadMessageA\n");
 	return FALSE;
     }
     return TRUE;
@@ -1738,8 +1731,8 @@ MMRESULT WINAPI midiStreamClose(HMIDISTRM hMidiStrm)
 
     midiStreamStop(hMidiStrm);
     MMSYSTEM_MidiStream_PostMessage(lpMidiStrm, WM_QUIT, 0, 0);
-    HeapFree(GetProcessHeap(), 0, lpMidiStrm);
     CloseHandle(lpMidiStrm->hEvent);
+    HeapFree(GetProcessHeap(), 0, lpMidiStrm);
 
     return midiOutClose((HMIDIOUT)hMidiStrm);
 }
@@ -1805,6 +1798,8 @@ MMRESULT WINAPI midiStreamOpen(HMIDISTRM* lphMidiStrm, LPUINT lpuDeviceID,
 
     /* wait for thread to have started, and for its queue to be created */
     WaitForSingleObject(lpMidiStrm->hEvent, INFINITE);
+    /* start in paused mode */
+    SuspendThread(lpMidiStrm->hThread);
 
     TRACE("=> (%u/%d) hMidi=%p ret=%d lpMidiStrm=%p\n",
 	  *lpuDeviceID, lpwm->mld.uDeviceID, *lphMidiStrm, ret, lpMidiStrm);
@@ -1822,8 +1817,11 @@ MMRESULT WINAPI midiStreamOut(HMIDISTRM hMidiStrm, LPMIDIHDR lpMidiHdr,
 
     TRACE("(%p, %p, %u)!\n", hMidiStrm, lpMidiHdr, cbMidiHdr);
 
-    if (cbMidiHdr < sizeof(MIDIHDR) || !lpMidiHdr || !lpMidiHdr->lpData)
+    if (cbMidiHdr < sizeof(MIDIHDR) || !lpMidiHdr || !lpMidiHdr->lpData
+	|| lpMidiHdr->dwBufferLength < lpMidiHdr->dwBytesRecorded)
 	return MMSYSERR_INVALPARAM;
+    /* FIXME: Native additionaly checks if the MIDIEVENTs in lpData
+     * exactly fit dwBytesRecorded. */
 
     if (!(lpMidiHdr->dwFlags & MHDR_PREPARED))
 	return MIDIERR_UNPREPARED;
@@ -1839,7 +1837,7 @@ MMRESULT WINAPI midiStreamOut(HMIDISTRM hMidiStrm, LPMIDIHDR lpMidiHdr,
 	if (!PostThreadMessageA(lpMidiStrm->dwThreadID,
                                 WINE_MSM_HEADER, cbMidiHdr,
                                 (LPARAM)lpMidiHdr)) {
-	    WARN("bad PostThreadMessageA\n");
+	    ERR("bad PostThreadMessageA\n");
 	    ret = MMSYSERR_ERROR;
 	}
     }
@@ -1860,7 +1858,7 @@ MMRESULT WINAPI midiStreamPause(HMIDISTRM hMidiStrm)
 	ret = MMSYSERR_INVALHANDLE;
     } else {
 	if (SuspendThread(lpMidiStrm->hThread) == 0xFFFFFFFF) {
-	    WARN("bad Suspend (%d)\n", GetLastError());
+	    ERR("bad Suspend (%d)\n", GetLastError());
 	    ret = MMSYSERR_ERROR;
 	}
     }
@@ -1963,13 +1961,13 @@ MMRESULT WINAPI midiStreamRestart(HMIDISTRM hMidiStrm)
 	DWORD	ret;
 
 	/* since we increase the thread suspend count on each midiStreamPause
-	 * there may be a need for several midiStreamResume
+	 * there may be a need for several ResumeThread
 	 */
 	do {
 	    ret = ResumeThread(lpMidiStrm->hThread);
-	} while (ret != 0xFFFFFFFF && ret != 0);
+	} while (ret != 0xFFFFFFFF && ret > 1);
 	if (ret == 0xFFFFFFFF) {
-	    WARN("bad Resume (%d)\n", GetLastError());
+	    ERR("bad Resume (%d)\n", GetLastError());
 	    ret = MMSYSERR_ERROR;
 	} else {
 	    lpMidiStrm->dwStartTicks = GetTickCount() - lpMidiStrm->dwPositionMS;

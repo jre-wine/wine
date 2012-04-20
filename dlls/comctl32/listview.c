@@ -401,7 +401,7 @@ typedef struct tagLISTVIEW_INFO
 #define MAX_EMPTYTEXT_SELECT_WIDTH 80
 
 /* default column width for items in list display mode */
-#define DEFAULT_COLUMN_WIDTH 96
+#define DEFAULT_COLUMN_WIDTH 128
 
 /* Size of "line" scroll for V & H scrolls */
 #define LISTVIEW_SCROLL_ICON_LINE_SIZE 37
@@ -753,25 +753,37 @@ static int get_ansi_notification(UINT unicodeNotificationCode)
 {
     switch (unicodeNotificationCode)
     {
+    case LVN_BEGINLABELEDITA:
     case LVN_BEGINLABELEDITW: return LVN_BEGINLABELEDITA;
+    case LVN_ENDLABELEDITA:
     case LVN_ENDLABELEDITW: return LVN_ENDLABELEDITA;
+    case LVN_GETDISPINFOA:
     case LVN_GETDISPINFOW: return LVN_GETDISPINFOA;
+    case LVN_SETDISPINFOA:
     case LVN_SETDISPINFOW: return LVN_SETDISPINFOA;
+    case LVN_ODFINDITEMA:
     case LVN_ODFINDITEMW: return LVN_ODFINDITEMA;
+    case LVN_GETINFOTIPA:
     case LVN_GETINFOTIPW: return LVN_GETINFOTIPA;
     /* header forwards */
+    case HDN_TRACKA:
     case HDN_TRACKW: return HDN_TRACKA;
+    case HDN_ENDTRACKA:
     case HDN_ENDTRACKW: return HDN_ENDTRACKA;
     case HDN_BEGINDRAG: return HDN_BEGINDRAG;
     case HDN_ENDDRAG: return HDN_ENDDRAG;
+    case HDN_ITEMCHANGINGA:
     case HDN_ITEMCHANGINGW: return HDN_ITEMCHANGINGA;
+    case HDN_ITEMCHANGEDA:
     case HDN_ITEMCHANGEDW: return HDN_ITEMCHANGEDA;
+    case HDN_ITEMCLICKA:
     case HDN_ITEMCLICKW: return HDN_ITEMCLICKA;
+    case HDN_DIVIDERDBLCLICKA:
     case HDN_DIVIDERDBLCLICKW: return HDN_DIVIDERDBLCLICKA;
+    default: break;
     }
-    ERR("unknown notification %x\n", unicodeNotificationCode);
-    assert(FALSE);
-    return 0;
+    FIXME("unknown notification %x\n", unicodeNotificationCode);
+    return unicodeNotificationCode;
 }
 
 /* forwards header notifications to listview parent */
@@ -2808,7 +2820,6 @@ static INT LISTVIEW_CalculateItemWidth(const LISTVIEW_INFO *infoPtr)
     {
 	WCHAR szDispText[DISP_TEXT_SIZE] = { '\0' };
 	LVITEMW lvItem;
-	BOOL empty;
 	INT i;
 
 	lvItem.mask = LVIF_TEXT;
@@ -2823,18 +2834,12 @@ static INT LISTVIEW_CalculateItemWidth(const LISTVIEW_INFO *infoPtr)
 		nItemWidth = max(LISTVIEW_GetStringWidthT(infoPtr, lvItem.pszText, TRUE),
 				 nItemWidth);
 	}
-	empty = nItemWidth == 0;
 
         if (infoPtr->himlSmall) nItemWidth += infoPtr->iconSize.cx; 
         if (infoPtr->himlState) nItemWidth += infoPtr->iconStateSize.cx;
 
-	if (empty)
-	    nItemWidth  = max(nItemWidth, DEFAULT_COLUMN_WIDTH);
-	else
-	    nItemWidth += WIDTH_PADDING;
+        nItemWidth = max(DEFAULT_COLUMN_WIDTH, nItemWidth + WIDTH_PADDING);
     }
-
-    TRACE("nItemWidth=%d\n", nItemWidth);
 
     return nItemWidth;
 }
@@ -7480,7 +7485,7 @@ static INT LISTVIEW_InsertItemT(LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem,
     TRACE(" inserting at %d, sorted=%d, count=%d, iItem=%d\n", nItem, is_sorted, infoPtr->nItemCount, lpLVItem->iItem);
     nItem = DPA_InsertPtr( infoPtr->hdpaItems, nItem, hdpaSubItems );
     if (nItem == -1) goto fail;
-    if (++infoPtr->nItemCount > 0) LISTVIEW_UpdateItemSize(infoPtr);
+    infoPtr->nItemCount++;
 
     /* shift indices first so they don't get tangled */
     LISTVIEW_ShiftIndices(infoPtr, nItem, 1);

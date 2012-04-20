@@ -834,6 +834,7 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
   StgStreamImpl*    newStream;
   DirEntry          currentEntry, newStreamEntry;
   DirRef            currentEntryRef, newStreamEntryRef;
+  HRESULT hr;
 
   TRACE("(%p, %s, %x, %d, %d, %p)\n",
 	iface, debugstr_w(pwcsName), grfMode,
@@ -933,14 +934,22 @@ static HRESULT WINAPI StorageBaseImpl_CreateStream(
   /*
    * Create an entry with the new data
    */
-  StorageBaseImpl_CreateDirEntry(This, &newStreamEntry, &newStreamEntryRef);
+  hr = StorageBaseImpl_CreateDirEntry(This, &newStreamEntry, &newStreamEntryRef);
+  if (FAILED(hr))
+    return hr;
+
   /*
    * Insert the new entry in the parent storage's tree.
    */
-  insertIntoTree(
+  hr = insertIntoTree(
     This,
     This->storageDirEntry,
     newStreamEntryRef);
+  if (FAILED(hr))
+  {
+    StorageBaseImpl_DestroyDirEntry(This, newStreamEntryRef);
+    return hr;
+  }
 
   /*
    * Open the stream to return it.
@@ -1123,15 +1132,22 @@ static HRESULT WINAPI StorageBaseImpl_CreateStorage(
   /*
    * Create a new directory entry for the storage
    */
-  StorageBaseImpl_CreateDirEntry(This, &newEntry, &newEntryRef);
+  hr = StorageBaseImpl_CreateDirEntry(This, &newEntry, &newEntryRef);
+  if (FAILED(hr))
+    return hr;
 
   /*
    * Insert the new directory entry into the parent storage's tree
    */
-  insertIntoTree(
+  hr = insertIntoTree(
     This,
     This->storageDirEntry,
     newEntryRef);
+  if (FAILED(hr))
+  {
+    StorageBaseImpl_DestroyDirEntry(This, newEntryRef);
+    return hr;
+  }
 
   /*
    * Open it to get a pointer to return.
@@ -6353,7 +6369,11 @@ HRESULT WINAPI StgCreateDocfile(
     fileAttributes = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_RANDOM_ACCESS;
 
   if (STGM_SHARE_MODE(grfMode) && !(grfMode & STGM_SHARE_DENY_NONE))
+  {
+    static int fixme;
+    if (!fixme++)
       FIXME("Storage share mode not implemented.\n");
+  }
 
   *ppstgOpen = 0;
 

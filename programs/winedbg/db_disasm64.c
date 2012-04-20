@@ -1406,8 +1406,8 @@ db_disasm(db_addr_t loc, boolean_t altfmt)
 			break;
 		}
 	}
-	if (ip->i_extra == db_Grp15 && f_mod(rex, regmodrm) == 3) {
-		i_name = db_Grp15b[f_reg(rex, regmodrm)];
+	if (ip->i_extra == db_Grp15 && f_mod(0, regmodrm) == 3) {
+		i_name = db_Grp15b[f_reg(0, regmodrm)];
 		i_size = NONE;
 		i_mode = 0;
 	}
@@ -1495,11 +1495,11 @@ db_disasm(db_addr_t loc, boolean_t altfmt)
 		    break;
 
 		case S:
-		    db_printf("%s", db_seg_reg[f_reg(rex, regmodrm)]);
+		    db_printf("%s", db_seg_reg[f_reg(0, regmodrm)]);
 		    break;
 
 		case Si:
-		    db_printf("%s", db_seg_reg[f_reg(rex, inst)]);
+		    db_printf("%s", db_seg_reg[f_reg(0, inst)]);
 		    break;
 
 		case A:

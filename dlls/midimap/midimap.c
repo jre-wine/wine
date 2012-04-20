@@ -92,6 +92,8 @@ typedef	struct tagMIDIMAPDATA
 {
     struct tagMIDIMAPDATA*	self;
     MIDIOUTPORT*	ChannelMap[16];
+    MIDIOPENDESC	midiDesc;
+    WORD		wCbFlags;
 } MIDIMAPDATA;
 
 static	MIDIOUTPORT*	midiOutPorts;
@@ -258,6 +260,13 @@ static BOOL	MIDIMAP_LoadSettings(MIDIMAPDATA* mom)
     return ret;
 }
 
+static void MIDIMAP_NotifyClient(MIDIMAPDATA* mom, WORD wMsg,
+				 DWORD_PTR dwParam1, DWORD_PTR dwParam2)
+{
+    DriverCallback(mom->midiDesc.dwCallback, mom->wCbFlags, (HDRVR)mom->midiDesc.hMidi,
+		   wMsg, mom->midiDesc.dwInstance, dwParam1, dwParam2);
+}
+
 static DWORD modOpen(DWORD_PTR *lpdwUser, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
 {
     MIDIMAPDATA*	mom = HeapAlloc(GetProcessHeap(), 0, sizeof(MIDIMAPDATA));
@@ -265,17 +274,19 @@ static DWORD modOpen(DWORD_PTR *lpdwUser, LPMIDIOPENDESC lpDesc, DWORD dwFlags)
     TRACE("(%p %p %08x)\n", lpdwUser, lpDesc, dwFlags);
 
     if (!mom) return MMSYSERR_NOMEM;
-
-    if (HIWORD(dwFlags & CALLBACK_TYPEMASK)) {
-	FIXME("NIY callback flags %08x\n", dwFlags);
+    if (!lpDesc) {
 	HeapFree(GetProcessHeap(), 0, mom);
-	return MMSYSERR_INVALFLAG;
+	return MMSYSERR_INVALPARAM;
     }
 
     if (MIDIMAP_LoadSettings(mom))
     {
 	*lpdwUser = (DWORD_PTR)mom;
 	mom->self = mom;
+
+	mom->wCbFlags = HIWORD(dwFlags & CALLBACK_TYPEMASK);
+	mom->midiDesc = *lpDesc;
+	MIDIMAP_NotifyClient(mom, MOM_OPEN, 0L, 0L);
 
 	return MMSYSERR_NOERROR;
     }
@@ -305,8 +316,10 @@ static	DWORD	modClose(MIDIMAPDATA* mom)
 		ret = t;
 	}
     }
-    if (ret == MMSYSERR_NOERROR)
+    if (ret == MMSYSERR_NOERROR) {
+	MIDIMAP_NotifyClient(mom, MOM_CLOSE, 0L, 0L);
 	HeapFree(GetProcessHeap(), 0, mom);
+    }
     return ret;
 }
 
@@ -342,6 +355,7 @@ static DWORD modLongData(MIDIMAPDATA* mom, LPMIDIHDR lpMidiHdr, DWORD_PTR dwPara
     }
     lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
     lpMidiHdr->dwFlags |= MHDR_DONE;
+    MIDIMAP_NotifyClient(mom, MOM_DONE, (DWORD_PTR)lpMidiHdr, 0L);
     return ret;
 }
 
@@ -448,18 +462,16 @@ static DWORD modSetVolume(MIDIMAPDATA* mom, DWORD dwVolume)
 
 static DWORD modGetDevCaps(UINT wDevID, MIDIMAPDATA* mom, LPMIDIOUTCAPSW lpMidiCaps, DWORD_PTR size)
 {
-    static const WCHAR name[] = {'W','i','n','e',' ','m','i','d','i',' ','m','a','p','p','e','r',0};
-    lpMidiCaps->wMid = 0x00FF;
-    lpMidiCaps->wPid = 0x0001;
-    lpMidiCaps->vDriverVersion = 0x0100;
-    lstrcpyW(lpMidiCaps->szPname, name);
-    lpMidiCaps->wTechnology = MOD_MAPPER;
-    lpMidiCaps->wVoices = 0;
-    lpMidiCaps->wNotes = 0;
-    lpMidiCaps->wChannelMask = 0xFFFF;
-    /* Native returns volume caps of underlying device | MIDICAPS_STREAM */
-    lpMidiCaps->dwSupport = MIDICAPS_VOLUME|MIDICAPS_LRVOLUME;
+    static const MIDIOUTCAPSW mappercaps = {
+	0x00FF, 0x0001, 0x0100, /* Manufacturer and Product ID */
+	{'W','i','n','e',' ','m','i','d','i',' ','m','a','p','p','e','r',0},
+	MOD_MAPPER, 0, 0, 0xFFFF,
+	/* Native returns volume caps of underlying device + MIDICAPS_STREAM */
+	MIDICAPS_VOLUME|MIDICAPS_LRVOLUME
+    };
+    if (lpMidiCaps == NULL) return MMSYSERR_INVALPARAM;
 
+    memcpy(lpMidiCaps, &mappercaps, min(size, sizeof(*lpMidiCaps)));
     return MMSYSERR_NOERROR;
 }
 
