@@ -1,8 +1,17 @@
-wine-unstable (1.1.42-1) UNRELEASED; urgency=low
+wine-unstable (1.1.42-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.42, released Apr 2, 2010.
+    - Support for shared 32/64-bit setups.
+    - Dwarf debug info support for better backtraces.
+    - More standard actions supported in MSI.
+    - Support for TIFF image format in WinCodecs.
+    - A number of Direct3D improvements.
+    - Shell fixes for better Internet Explorer support.
+    - Various bug fixes.
+  * remove winelib from debian/rules as its built from upstream makefile
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 22:21:59 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 22:23:44 -0400
 
 wine-unstable (1.1.41-0.1) unstable; urgency=low
 
