@@ -231,8 +231,8 @@
 @ cdecl __setusermatherr(ptr) msvcrt.__setusermatherr
 @ stub __strncnt
 @ stub __swprintf_l
-@ stub __sys_errlist
-@ stub __sys_nerr
+@ cdecl __sys_errlist()
+@ cdecl __sys_nerr()
 @ cdecl __threadhandle() msvcrt.__threadhandle
 @ cdecl __threadid() msvcrt.__threadid
 @ stub __timezone
@@ -319,7 +319,7 @@
 @ stub _configthreadlocale
 @ cdecl _control87(long long) msvcrt._control87
 @ cdecl _controlfp(long long) msvcrt._controlfp
-@ stub _controlfp_s
+@ cdecl _controlfp_s(ptr long long) msvcrt._controlfp_s
 @ cdecl _copysign( double double ) msvcrt._copysign
 @ varargs _cprintf(str) msvcrt._cprintf
 @ stub _cprintf_l
@@ -352,7 +352,7 @@
 @ stub _cwscanf_s
 @ stub _cwscanf_s_l
 @ extern _daylight msvcrt._daylight
-@ stub _decode_pointer
+@ cdecl _decode_pointer(ptr) MSVCR90_decode_pointer
 @ cdecl _difftime32(long long) msvcrt._difftime32
 @ cdecl _difftime64(long long) msvcrt._difftime64
 @ stub _dosmaperr
@@ -362,8 +362,8 @@
 @ stub _dupenv_s
 @ cdecl _ecvt(double long ptr ptr) msvcrt._ecvt
 @ stub _ecvt_s
-@ stub _encode_pointer
-@ stub _encoded_null
+@ cdecl _encode_pointer(ptr) MSVCR90_encode_pointer
+@ cdecl _encoded_null()
 @ cdecl _endthread() msvcrt._endthread
 @ cdecl _endthreadex(long) msvcrt._endthreadex
 @ extern _environ msvcrt._environ
@@ -462,7 +462,7 @@
 @ stub _get_errno
 @ stub _get_fmode
 @ stub _get_heap_handle
-@ stub _get_invalid_parameter_handler
+@ cdecl _get_invalid_parameter_handler() msvcrt._get_invalid_parameter_handler
 @ cdecl _get_osfhandle(long) msvcrt._get_osfhandle
 @ stub _get_output_format
 @ stub _get_pgmptr
@@ -859,7 +859,7 @@
 @ stub _set_errno
 @ cdecl _set_error_mode(long) msvcrt._set_error_mode
 @ stub _set_fmode
-@ stub _set_invalid_parameter_handler
+@ cdecl _set_invalid_parameter_handler(ptr) msvcrt._set_invalid_parameter_handler
 @ stub _set_malloc_crt_max_wait
 @ stub _set_output_format
 @ stub _set_printf_count_output
@@ -944,11 +944,11 @@
 @ cdecl _strtime(ptr) msvcrt._strtime
 @ stub _strtime_s
 @ stub _strtod_l
-@ stub _strtoi64
-@ stub _strtoi64_l
+@ cdecl _strtoi64(str ptr long) msvcrt._strtoi64
+@ cdecl _strtoi64_l(str ptr long ptr) msvcrt._strtoi64_l
 @ stub _strtol_l
-@ stub _strtoui64
-@ stub _strtoui64_l
+@ cdecl _strtoui64(str ptr long) msvcrt._strtoui64
+@ cdecl _strtoui64_l(str ptr long ptr) msvcrt._strtoui64_l
 @ stub _strtoul_l
 @ cdecl _strupr(str) msvcrt._strupr
 @ stub _strupr_l
@@ -1373,7 +1373,7 @@
 @ cdecl strncmp(str str long) msvcrt.strncmp
 @ cdecl strncpy(ptr str long) msvcrt.strncpy
 @ stub strncpy_s
-@ stub strnlen
+@ cdecl strnlen(str long) msvcrt.strnlen
 @ cdecl strpbrk(str str) msvcrt.strpbrk
 @ cdecl strrchr(str long) msvcrt.strrchr
 @ cdecl strspn(str str) msvcrt.strspn

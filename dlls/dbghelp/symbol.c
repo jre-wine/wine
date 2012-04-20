@@ -1016,7 +1016,7 @@ static BOOL symt_enum_locals(struct process* pcs, const char* mask,
 {
     struct module_pair  pair;
     struct symt_ht*     sym;
-    DWORD               pc = pcs->ctx_frame.InstructionOffset;
+    DWORD_PTR           pc = pcs->ctx_frame.InstructionOffset;
 
     se->sym_info->SizeOfStruct = sizeof(*se->sym_info);
     se->sym_info->MaxNameLen = sizeof(se->buffer) - sizeof(SYMBOL_INFO);
@@ -1791,24 +1791,6 @@ BOOL WINAPI SymGetLineNext(HANDLE hProcess, PIMAGEHLP_LINE Line)
     if (!SymGetLineNext64(hProcess, &line64)) return FALSE;
     copy_line_32_from_64(Line, &line64);
     return TRUE;
-}
-
-/***********************************************************************
- *		SymFunctionTableAccess (DBGHELP.@)
- */
-PVOID WINAPI SymFunctionTableAccess(HANDLE hProcess, DWORD AddrBase)
-{
-    WARN("(%p, 0x%08x): stub\n", hProcess, AddrBase);
-    return NULL;
-}
-
-/***********************************************************************
- *		SymFunctionTableAccess64 (DBGHELP.@)
- */
-PVOID WINAPI SymFunctionTableAccess64(HANDLE hProcess, DWORD64 AddrBase)
-{
-    WARN("(%p, %s): stub\n", hProcess, wine_dbgstr_longlong(AddrBase));
-    return NULL;
 }
 
 /***********************************************************************

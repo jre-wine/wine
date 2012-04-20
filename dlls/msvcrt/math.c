@@ -436,7 +436,7 @@ double CDECL _logb(double num)
 /*********************************************************************
  *		_lrotl (MSVCRT.@)
  */
-MSVCRT_ulong CDECL _lrotl(MSVCRT_ulong num, int shift)
+MSVCRT_ulong CDECL MSVCRT__lrotl(MSVCRT_ulong num, int shift)
 {
   shift &= 0x1f;
   return (num << shift) | (num >> (32-shift));
@@ -445,7 +445,7 @@ MSVCRT_ulong CDECL _lrotl(MSVCRT_ulong num, int shift)
 /*********************************************************************
  *		_lrotr (MSVCRT.@)
  */
-MSVCRT_ulong CDECL _lrotr(MSVCRT_ulong num, int shift)
+MSVCRT_ulong CDECL MSVCRT__lrotr(MSVCRT_ulong num, int shift)
 {
   shift &= 0x1f;
   return (num >> shift) | (num << (32-shift));
@@ -463,12 +463,10 @@ unsigned int CDECL _rotr(unsigned int num, int shift)
 /*********************************************************************
  *		_scalb (MSVCRT.@)
  */
-double CDECL _scalb(double num, MSVCRT_long power)
+double CDECL MSVCRT__scalb(double num, MSVCRT_long power)
 {
-  /* Note - Can't forward directly as libc expects y as double */
-  double dblpower = (double)power;
   if (!finite(num)) *MSVCRT__errno() = MSVCRT_EDOM;
-  return scalb(num, dblpower);
+  return ldexp(num, power);
 }
 
 /*********************************************************************
@@ -700,6 +698,27 @@ unsigned int CDECL _controlfp(unsigned int newval, unsigned int mask)
 #else
   FIXME(":Not Implemented!\n");
   return 0;
+#endif
+}
+
+/*********************************************************************
+ *              _controlfp_s (MSVCRT.@)
+ */
+int CDECL _controlfp_s(unsigned int *cur, unsigned int newval, unsigned int mask)
+{
+    unsigned int flags;
+#ifdef __i386__
+    FIXME("(%p %u %u) semi-stub\n", cur, newval, mask);
+
+    flags = _control87( newval, mask & ~MSVCRT__EM_DENORMAL );
+
+    if(cur)
+        *cur = flags;
+
+    return 0;
+#else
+    FIXME(":Not Implemented!\n");
+    return 0;
 #endif
 }
 

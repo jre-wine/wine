@@ -46,7 +46,6 @@
 /* value to add on to round size up to a multiple of alignment */
 #define ROUNDING(size, alignment) (((alignment) - 1) - (((size) + ((alignment) - 1)) & ((alignment) - 1)))
 
-static const var_t *current_func;
 static const type_t *current_structure;
 static const type_t *current_iface;
 
@@ -124,6 +123,41 @@ static const char *string_of_type(unsigned char type)
     case RPC_FC_C_WSTRING: return "FC_C_WSTRING";
     case RPC_FC_CSTRING: return "FC_CSTRING";
     case RPC_FC_WSTRING: return "FC_WSTRING";
+    case RPC_FC_BYTE_COUNT_POINTER: return "FC_BYTE_COUNT_POINTER";
+    case RPC_FC_TRANSMIT_AS: return "FC_TRANSMIT_AS";
+    case RPC_FC_REPRESENT_AS: return "FC_REPRESENT_AS";
+    case RPC_FC_IP: return "FC_IP";
+    case RPC_FC_BIND_CONTEXT: return "FC_BIND_CONTEXT";
+    case RPC_FC_BIND_GENERIC: return "FC_BIND_GENERIC";
+    case RPC_FC_BIND_PRIMITIVE: return "FC_BIND_PRIMITIVE";
+    case RPC_FC_AUTO_HANDLE: return "FC_AUTO_HANDLE";
+    case RPC_FC_CALLBACK_HANDLE: return "FC_CALLBACK_HANDLE";
+    case RPC_FC_STRUCTPAD1: return "FC_STRUCTPAD1";
+    case RPC_FC_STRUCTPAD2: return "FC_STRUCTPAD2";
+    case RPC_FC_STRUCTPAD3: return "FC_STRUCTPAD3";
+    case RPC_FC_STRUCTPAD4: return "FC_STRUCTPAD4";
+    case RPC_FC_STRUCTPAD5: return "FC_STRUCTPAD5";
+    case RPC_FC_STRUCTPAD6: return "FC_STRUCTPAD6";
+    case RPC_FC_STRUCTPAD7: return "FC_STRUCTPAD7";
+    case RPC_FC_STRING_SIZED: return "FC_STRING_SIZED";
+    case RPC_FC_NO_REPEAT: return "FC_NO_REPEAT";
+    case RPC_FC_FIXED_REPEAT: return "FC_FIXED_REPEAT";
+    case RPC_FC_VARIABLE_REPEAT: return "FC_VARIABLE_REPEAT";
+    case RPC_FC_FIXED_OFFSET: return "FC_FIXED_OFFSET";
+    case RPC_FC_VARIABLE_OFFSET: return "FC_VARIABLE_OFFSET";
+    case RPC_FC_PP: return "FC_PP";
+    case RPC_FC_EMBEDDED_COMPLEX: return "FC_EMBEDDED_COMPLEX";
+    case RPC_FC_DEREFERENCE: return "FC_DEREFERENCE";
+    case RPC_FC_DIV_2: return "FC_DIV_2";
+    case RPC_FC_MULT_2: return "FC_MULT_2";
+    case RPC_FC_ADD_1: return "FC_ADD_1";
+    case RPC_FC_SUB_1: return "FC_SUB_1";
+    case RPC_FC_CALLBACK: return "FC_CALLBACK";
+    case RPC_FC_CONSTANT_IID: return "FC_CONSTANT_IID";
+    case RPC_FC_END: return "FC_END";
+    case RPC_FC_PAD: return "FC_PAD";
+    case RPC_FC_USER_MARSHAL: return "FC_USER_MARSHAL";
+    case RPC_FC_RANGE: return "FC_RANGE";
     case RPC_FC_INT3264: return "FC_INT3264";
     case RPC_FC_UINT3264: return "FC_UINT3264";
     default:
@@ -943,12 +977,26 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
     unsigned char operator_type = 0;
     unsigned char conftype = RPC_FC_NORMAL_CONFORMANCE;
     const char *conftype_string = "";
-    const char *operator_string = "no operators";
     const expr_t *subexpr;
 
     if (!expr)
     {
         print_file(file, 2, "NdrFcLong(0xffffffff),\t/* -1 */\n");
+        return 4;
+    }
+
+    if (expr->is_const)
+    {
+        if (expr->cval > UCHAR_MAX * (USHRT_MAX + 1) + USHRT_MAX)
+            error("write_conf_or_var_desc: constant value %d is greater than "
+                  "the maximum constant size of %d\n", expr->cval,
+                  UCHAR_MAX * (USHRT_MAX + 1) + USHRT_MAX);
+
+        print_file(file, 2, "0x%x, /* Corr desc: constant, val = %d */\n",
+                   RPC_FC_CONSTANT_CONFORMANCE, expr->cval);
+        print_file(file, 2, "0x%x,\n", expr->cval >> 16);
+        print_file(file, 2, "NdrFcShort(0x%hx),\n", (unsigned short)expr->cval);
+
         return 4;
     }
 
@@ -959,21 +1007,6 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
                     RPC_FC_TOP_LEVEL_CONFORMANCE);
         print_file (file, 2, "0x0,\n");
         print_file (file, 2, "NdrFcShort(0x0),\n");
-        return 4;
-    }
-
-    if (expr->is_const)
-    {
-        if (expr->cval > UCHAR_MAX * (USHRT_MAX + 1) + USHRT_MAX)
-            error("write_conf_or_var_desc: constant value %ld is greater than "
-                  "the maximum constant size of %d\n", expr->cval,
-                  UCHAR_MAX * (USHRT_MAX + 1) + USHRT_MAX);
-
-        print_file(file, 2, "0x%x, /* Corr desc: constant, val = %ld */\n",
-                   RPC_FC_CONSTANT_CONFORMANCE, expr->cval);
-        print_file(file, 2, "0x%lx,\n", expr->cval >> 16);
-        print_file(file, 2, "NdrFcShort(0x%hx),\n", (unsigned short)expr->cval);
-
         return 4;
     }
 
@@ -989,14 +1022,12 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
     case EXPR_PPTR:
         subexpr = subexpr->ref;
         operator_type = RPC_FC_DEREFERENCE;
-        operator_string = "FC_DEREFERENCE";
         break;
     case EXPR_DIV:
         if (subexpr->u.ext->is_const && (subexpr->u.ext->cval == 2))
         {
             subexpr = subexpr->ref;
             operator_type = RPC_FC_DIV_2;
-            operator_string = "FC_DIV_2";
         }
         break;
     case EXPR_MUL:
@@ -1004,7 +1035,6 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
         {
             subexpr = subexpr->ref;
             operator_type = RPC_FC_MULT_2;
-            operator_string = "FC_MULT_2";
         }
         break;
     case EXPR_SUB:
@@ -1012,7 +1042,6 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
         {
             subexpr = subexpr->ref;
             operator_type = RPC_FC_SUB_1;
-            operator_string = "FC_SUB_1";
         }
         break;
     case EXPR_ADD:
@@ -1020,7 +1049,6 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
         {
             subexpr = subexpr->ref;
             operator_type = RPC_FC_ADD_1;
-            operator_string = "FC_ADD_1";
         }
         break;
     default:
@@ -1106,7 +1134,8 @@ static unsigned int write_conf_or_var_desc(FILE *file, const type_t *structure,
 
         print_file(file, 2, "0x%x, /* Corr desc: %s%s */\n",
                    conftype | param_type, conftype_string, string_of_type(param_type));
-        print_file(file, 2, "0x%x, /* %s */\n", operator_type, operator_string);
+        print_file(file, 2, "0x%x, /* %s */\n", operator_type,
+                   operator_type ? string_of_type(operator_type) : "no operators");
         print_file(file, 2, "NdrFcShort(0x%hx),\t/* offset = %d */\n",
                    offset, offset);
     }
@@ -2626,7 +2655,7 @@ static unsigned int write_union_tfs(FILE *file, type_t *type, unsigned int *tfso
             /* MIDL doesn't check for duplicate cases, even though that seems
                like a reasonable thing to do, it just dumps them to the TFS
                like we're going to do here.  */
-            print_file(file, 2, "NdrFcLong(0x%lx),\t/* %ld */\n", c->cval, c->cval);
+            print_file(file, 2, "NdrFcLong(0x%x),\t/* %d */\n", c->cval, c->cval);
             *tfsoff += 4;
             write_branch_type(file, ft, tfsoff);
         }
@@ -2764,8 +2793,8 @@ static unsigned int write_range_tfs(FILE *file, const attr_list_t *attrs,
     print_file(file, 0, "/* %u */\n", *typeformat_offset);
     print_file(file, 2, "0x%x,\t/* FC_RANGE */\n", RPC_FC_RANGE);
     print_file(file, 2, "0x%x,\t/* %s */\n", fc, string_of_type(fc));
-    print_file(file, 2, "NdrFcLong(0x%lx),\t/* %lu */\n", range_min->cval, range_min->cval);
-    print_file(file, 2, "NdrFcLong(0x%lx),\t/* %lu */\n", range_max->cval, range_max->cval);
+    print_file(file, 2, "NdrFcLong(0x%x),\t/* %u */\n", range_min->cval, range_min->cval);
+    print_file(file, 2, "NdrFcLong(0x%x),\t/* %u */\n", range_max->cval, range_max->cval);
     *typeformat_offset += 10;
 
     return start_offset;
@@ -2916,7 +2945,6 @@ static unsigned int process_tfs_stmts(FILE *file, const statement_list_t *stmts,
                                   file);
                 }
 
-                current_func = func;
                 if (type_get_function_args(func->type))
                     LIST_FOR_EACH_ENTRY( var, type_get_function_args(func->type), const var_t, entry )
                         update_tfsoff(
@@ -3069,9 +3097,10 @@ static unsigned int get_required_buffer_size_type(
         break;
 
     case TGT_ARRAY:
-        /* FIXME: depends on pointer type */
-        return type_array_get_dim(type) *
-            get_required_buffer_size_type(type_array_get_element(type), name, NULL, FALSE, alignment);
+        if (get_pointer_fc(type, attrs, toplevel_param) == RPC_FC_RP)
+            return type_array_get_dim(type) *
+                get_required_buffer_size_type(type_array_get_element(type), name,
+                                              NULL, FALSE, alignment);
 
     default:
         break;
@@ -3304,7 +3333,8 @@ expr_t *get_size_is_expr(const type_t *t, const char *name)
     expr_t *x = NULL;
 
     for ( ; is_array(t); t = type_array_get_element(t))
-        if (type_array_has_conformance(t))
+        if (type_array_has_conformance(t) &&
+            type_array_get_conformance(t)->type != EXPR_VOID)
         {
             if (!x)
                 x = type_array_get_conformance(t);
@@ -3329,7 +3359,8 @@ static void write_parameter_conf_or_var_exprs(FILE *file, int indent, const char
         case TGT_ARRAY:
             if (is_conformance_needed_for_phase(phase))
             {
-                if (type_array_has_conformance(type))
+                if (type_array_has_conformance(type) &&
+                    type_array_get_conformance(type)->type != EXPR_VOID)
                 {
                     print_file(file, indent, "__frame->_StubMsg.MaxCount = (ULONG_PTR)");
                     write_expr(file, type_array_get_conformance(type), 1, 1, NULL, NULL, local_var_prefix);
@@ -3573,9 +3604,9 @@ static void write_remoting_arg(FILE *file, int indent, const var_t *func, const 
 
             print_file(file, indent, "if ((%s%s < (", local_var_prefix, var->name);
             write_type_decl(file, var->type, NULL);
-            fprintf(file, ")0x%lx) || (%s%s > (", range_min->cval, local_var_prefix, var->name);
+            fprintf(file, ")0x%x) || (%s%s > (", range_min->cval, local_var_prefix, var->name);
             write_type_decl(file, var->type, NULL);
-            fprintf(file, ")0x%lx))\n", range_max->cval);
+            fprintf(file, ")0x%x))\n", range_max->cval);
             print_file(file, indent, "{\n");
             print_file(file, indent+1, "RpcRaiseException(RPC_S_INVALID_BOUND);\n");
             print_file(file, indent, "}\n");
@@ -3899,33 +3930,36 @@ void assign_stub_out_args( FILE *file, int indent, const var_t *func, const char
         {
             print_file(file, indent, "%s%s", local_var_prefix, var->name);
 
-            if (is_context_handle(var->type))
+            switch (typegen_detect_type(var->type, var->attrs, TDT_IGNORE_STRINGS))
             {
+            case TGT_CTXT_HANDLE_POINTER:
                 fprintf(file, " = NdrContextHandleInitialize(\n");
                 print_file(file, indent + 1, "&__frame->_StubMsg,\n");
                 print_file(file, indent + 1, "(PFORMAT_STRING)&__MIDL_TypeFormatString.Format[%d]);\n",
                            var->type->typestring_offset);
-            }
-            else if (is_array(var->type) &&
-                     type_array_has_conformance(var->type))
-            {
-                unsigned int size, align = 0;
-                type_t *type = var->type;
-
-                fprintf(file, " = NdrAllocate(&__frame->_StubMsg, ");
-                for ( ;
-                     is_array(type) && type_array_has_conformance(type);
-                     type = type_array_get_element(type))
+                break;
+            case TGT_ARRAY:
+                if (type_array_has_conformance(var->type))
                 {
-                    write_expr(file, type_array_get_conformance(type), TRUE,
-                               TRUE, NULL, NULL, local_var_prefix);
-                    fprintf(file, " * ");
+                    unsigned int size, align = 0;
+                    type_t *type = var->type;
+
+                    fprintf(file, " = NdrAllocate(&__frame->_StubMsg, ");
+                    for ( ;
+                         is_array(type) && type_array_has_conformance(type);
+                         type = type_array_get_element(type))
+                    {
+                        write_expr(file, type_array_get_conformance(type), TRUE,
+                                   TRUE, NULL, NULL, local_var_prefix);
+                        fprintf(file, " * ");
+                    }
+                    size = type_memsize(type, &align);
+                    fprintf(file, "%u);\n", size);
                 }
-                size = type_memsize(type, &align);
-                fprintf(file, "%u);\n", size);
-            }
-            else
-            {
+                else
+                    fprintf(file, " = &%s_W%u;\n", local_var_prefix, i++);
+                break;
+            case TGT_POINTER:
                 fprintf(file, " = &%s_W%u;\n", local_var_prefix, i);
                 switch (typegen_detect_type(type_pointer_get_ref(var->type), var->attrs, TDT_IGNORE_STRINGS))
                 {
@@ -3948,6 +3982,9 @@ void assign_stub_out_args( FILE *file, int indent, const var_t *func, const char
                     break;
                 }
                 i++;
+                break;
+            default:
+                break;
             }
 
             sep = 1;

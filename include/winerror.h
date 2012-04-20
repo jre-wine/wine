@@ -306,6 +306,7 @@ static inline HRESULT HRESULT_FROM_WIN32(unsigned int x)
 #define ERROR_ARITHMETIC_OVERFLOW                          534
 #define ERROR_PIPE_CONNECTED                               535
 #define ERROR_PIPE_LISTENING                               536
+#define ERROR_HANDLES_CLOSED                               676
 #define ERROR_EA_ACCESS_DENIED                             994
 #define ERROR_OPERATION_ABORTED                            995
 #define ERROR_IO_INCOMPLETE                                996
@@ -2231,6 +2232,7 @@ static inline HRESULT HRESULT_FROM_WIN32(unsigned int x)
 #define SEC_I_CONTINUE_NEEDED                              _HRESULT_TYPEDEF_(0x00090312L)
 #define SEC_I_COMPLETE_NEEDED                              _HRESULT_TYPEDEF_(0x00090313L)
 #define SEC_I_COMPLETE_AND_CONTINUE                        _HRESULT_TYPEDEF_(0x00090314L) 
+#define SEC_I_CONTEXT_EXPIRED                              _HRESULT_TYPEDEF_(0x00090317L)
 #define SEC_E_BAD_PKGID                                    _HRESULT_TYPEDEF_(0x80090316L)
 #define SEC_E_CONTEXT_EXPIRED                              _HRESULT_TYPEDEF_(0x80090317L)
 #define SEC_E_INCOMPLETE_MESSAGE                           _HRESULT_TYPEDEF_(0x80090318L)

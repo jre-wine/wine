@@ -141,31 +141,40 @@ struct wined3d_format_base_flags
 
 static const struct wined3d_format_base_flags format_base_flags[] =
 {
-    {WINED3DFMT_UYVY,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_YUY2,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_YV12,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_DXT1,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_DXT2,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_DXT3,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_DXT4,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_DXT5,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_MULTI2_ARGB8,   WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_G8R8_G8B8,      WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_R8G8_B8G8,      WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_P8_UINT,        WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8_UNORM,   WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8A8_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B8G8R8X8_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G6R5_UNORM,   WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G5R5X1_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B5G5R5A1_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B4G4R4A4_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_B4G4R4X4_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_R8G8B8A8_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_R8G8B8X8_UNORM, WINED3DFMT_FLAG_GETDC},
-    {WINED3DFMT_ATI2N,          WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_NVHU,           WINED3DFMT_FLAG_FOURCC},
-    {WINED3DFMT_NVHS,           WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_UYVY,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_YUY2,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_YV12,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_DXT1,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_DXT2,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_DXT3,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_DXT4,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_DXT5,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_MULTI2_ARGB8,       WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_G8R8_G8B8,          WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_R8G8_B8G8,          WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_P8_UINT,            WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B8G8R8_UNORM,       WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B8G8R8A8_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B8G8R8X8_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B5G6R5_UNORM,       WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B5G5R5X1_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B5G5R5A1_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B4G4R4A4_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_B4G4R4X4_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_R8G8B8A8_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_R8G8B8X8_UNORM,     WINED3DFMT_FLAG_GETDC},
+    {WINED3DFMT_ATI2N,              WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_NVHU,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_NVHS,               WINED3DFMT_FLAG_FOURCC},
+    {WINED3DFMT_R32_FLOAT,          WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R32G32_FLOAT,       WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R32G32B32_FLOAT,    WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R32G32B32A32_FLOAT, WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R16_FLOAT,          WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R16G16_FLOAT,       WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_R16G16B16A16_FLOAT, WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_D32_FLOAT,          WINED3DFMT_FLAG_FLOAT},
+    {WINED3DFMT_S8_UINT_D24_FLOAT,  WINED3DFMT_FLAG_FLOAT},
 };
 
 struct wined3d_format_compression_info
@@ -1488,9 +1497,7 @@ const char* debug_d3dprimitivetype(WINED3DPRIMITIVETYPE PrimitiveType) {
 const char* debug_d3drenderstate(DWORD state) {
   switch (state) {
 #define D3DSTATE_TO_STR(u) case u: return #u
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREHANDLE             );
     D3DSTATE_TO_STR(WINED3DRS_ANTIALIAS                 );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREADDRESS            );
     D3DSTATE_TO_STR(WINED3DRS_TEXTUREPERSPECTIVE        );
     D3DSTATE_TO_STR(WINED3DRS_WRAPU                     );
     D3DSTATE_TO_STR(WINED3DRS_WRAPV                     );
@@ -1504,11 +1511,8 @@ const char* debug_d3drenderstate(DWORD state) {
     D3DSTATE_TO_STR(WINED3DRS_ZWRITEENABLE              );
     D3DSTATE_TO_STR(WINED3DRS_ALPHATESTENABLE           );
     D3DSTATE_TO_STR(WINED3DRS_LASTPIXEL                 );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREMAG                );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREMIN                );
     D3DSTATE_TO_STR(WINED3DRS_SRCBLEND                  );
     D3DSTATE_TO_STR(WINED3DRS_DESTBLEND                 );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREMAPBLEND           );
     D3DSTATE_TO_STR(WINED3DRS_CULLMODE                  );
     D3DSTATE_TO_STR(WINED3DRS_ZFUNC                     );
     D3DSTATE_TO_STR(WINED3DRS_ALPHAREF                  );
@@ -1529,9 +1533,6 @@ const char* debug_d3drenderstate(DWORD state) {
     D3DSTATE_TO_STR(WINED3DRS_STIPPLEENABLE             );
     D3DSTATE_TO_STR(WINED3DRS_EDGEANTIALIAS             );
     D3DSTATE_TO_STR(WINED3DRS_COLORKEYENABLE            );
-    D3DSTATE_TO_STR(WINED3DRS_BORDERCOLOR               );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREADDRESSU           );
-    D3DSTATE_TO_STR(WINED3DRS_TEXTUREADDRESSV           );
     D3DSTATE_TO_STR(WINED3DRS_MIPMAPLODBIAS             );
     D3DSTATE_TO_STR(WINED3DRS_ZBIAS                     );
     D3DSTATE_TO_STR(WINED3DRS_RANGEFOGENABLE            );
@@ -1547,38 +1548,6 @@ const char* debug_d3drenderstate(DWORD state) {
     D3DSTATE_TO_STR(WINED3DRS_STENCILMASK               );
     D3DSTATE_TO_STR(WINED3DRS_STENCILWRITEMASK          );
     D3DSTATE_TO_STR(WINED3DRS_TEXTUREFACTOR             );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN00          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN01          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN02          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN03          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN04          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN05          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN06          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN07          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN08          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN09          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN10          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN11          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN12          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN13          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN14          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN15          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN16          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN17          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN18          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN19          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN20          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN21          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN22          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN23          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN24          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN25          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN26          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN27          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN28          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN29          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN30          );
-    D3DSTATE_TO_STR(WINED3DRS_STIPPLEPATTERN31          );
     D3DSTATE_TO_STR(WINED3DRS_WRAP0                     );
     D3DSTATE_TO_STR(WINED3DRS_WRAP1                     );
     D3DSTATE_TO_STR(WINED3DRS_WRAP2                     );
@@ -2191,6 +2160,115 @@ BOOL getDepthStencilBits(const struct wined3d_format_desc *format_desc, short *d
     TRACE("Returning depthSize: %d and stencilSize: %d for fmt=%s\n",
             *depthSize, *stencilSize, debug_d3dformat(format_desc->format));
     return TRUE;
+}
+
+DWORD color_convert_argb_to_fmt(DWORD color, WINED3DFORMAT destfmt)
+{
+    unsigned int r, g, b, a;
+    DWORD ret;
+
+    if (destfmt == WINED3DFMT_B8G8R8A8_UNORM
+            || destfmt == WINED3DFMT_B8G8R8X8_UNORM
+            || destfmt == WINED3DFMT_B8G8R8_UNORM)
+        return color;
+
+    TRACE("Converting color %08x to format %s\n", color, debug_d3dformat(destfmt));
+
+    a = (color & 0xff000000) >> 24;
+    r = (color & 0x00ff0000) >> 16;
+    g = (color & 0x0000ff00) >>  8;
+    b = (color & 0x000000ff) >>  0;
+
+    switch(destfmt)
+    {
+        case WINED3DFMT_B5G6R5_UNORM:
+            if(r == 0xff && g == 0xff && b == 0xff) return 0xffff;
+            r = (r * 32) / 256;
+            g = (g * 64) / 256;
+            b = (b * 32) / 256;
+            ret  = r << 11;
+            ret |= g << 5;
+            ret |= b;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_B5G5R5X1_UNORM:
+        case WINED3DFMT_B5G5R5A1_UNORM:
+            a = (a *  2) / 256;
+            r = (r * 32) / 256;
+            g = (g * 32) / 256;
+            b = (b * 32) / 256;
+            ret  = a << 15;
+            ret |= r << 10;
+            ret |= g <<  5;
+            ret |= b <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_A8_UNORM:
+            TRACE("Returning %08x\n", a);
+            return a;
+
+        case WINED3DFMT_B4G4R4X4_UNORM:
+        case WINED3DFMT_B4G4R4A4_UNORM:
+            a = (a * 16) / 256;
+            r = (r * 16) / 256;
+            g = (g * 16) / 256;
+            b = (b * 16) / 256;
+            ret  = a << 12;
+            ret |= r <<  8;
+            ret |= g <<  4;
+            ret |= b <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_B2G3R3_UNORM:
+            r = (r * 8) / 256;
+            g = (g * 8) / 256;
+            b = (b * 4) / 256;
+            ret  = r <<  5;
+            ret |= g <<  2;
+            ret |= b <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_R8G8B8X8_UNORM:
+        case WINED3DFMT_R8G8B8A8_UNORM:
+            ret  = a << 24;
+            ret |= b << 16;
+            ret |= g <<  8;
+            ret |= r <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_B10G10R10A2_UNORM:
+            a = (a *    4) / 256;
+            r = (r * 1024) / 256;
+            g = (g * 1024) / 256;
+            b = (b * 1024) / 256;
+            ret  = a << 30;
+            ret |= r << 20;
+            ret |= g << 10;
+            ret |= b <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        case WINED3DFMT_R10G10B10A2_UNORM:
+            a = (a *    4) / 256;
+            r = (r * 1024) / 256;
+            g = (g * 1024) / 256;
+            b = (b * 1024) / 256;
+            ret  = a << 30;
+            ret |= b << 20;
+            ret |= g << 10;
+            ret |= r <<  0;
+            TRACE("Returning %08x\n", ret);
+            return ret;
+
+        default:
+            FIXME("Add a COLORFILL conversion for format %s\n", debug_d3dformat(destfmt));
+            return 0;
+    }
 }
 
 /* DirectDraw stuff */

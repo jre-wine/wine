@@ -691,7 +691,10 @@ HRESULT WINAPI RegisterTypeLib(
 			MESSAGE("\n");
 		    }
 
-		    if (tattr->wTypeFlags & (TYPEFLAG_FOLEAUTOMATION|TYPEFLAG_FDUAL|TYPEFLAG_FDISPATCHABLE))
+                    /* Register all dispinterfaces (which includes dual interfaces) and
+                       oleautomation interfaces */
+		    if ((kind == TKIND_INTERFACE && (tattr->wTypeFlags & TYPEFLAG_FOLEAUTOMATION)) ||
+                        kind == TKIND_DISPATCH)
 		    {
 			/* register interface<->typelib coupling */
 			get_interface_key( &tattr->guid, keyName );
@@ -832,19 +835,23 @@ HRESULT WINAPI UnRegisterTypeLib(
             goto enddeleteloop;
         }
 
-        /* the path to the type */
-        get_interface_key( &typeAttr->guid, subKeyName );
+        if ((kind == TKIND_INTERFACE && (typeAttr->wTypeFlags & TYPEFLAG_FOLEAUTOMATION)) ||
+            kind == TKIND_DISPATCH)
+        {
+            /* the path to the type */
+            get_interface_key( &typeAttr->guid, subKeyName );
 
-        /* Delete its bits */
-        if (RegOpenKeyExW(HKEY_CLASSES_ROOT, subKeyName, 0, KEY_WRITE, &subKey) != ERROR_SUCCESS) {
-            goto enddeleteloop;
+            /* Delete its bits */
+            if (RegOpenKeyExW(HKEY_CLASSES_ROOT, subKeyName, 0, KEY_WRITE, &subKey) != ERROR_SUCCESS)
+                goto enddeleteloop;
+
+            RegDeleteKeyW(subKey, ProxyStubClsidW);
+            RegDeleteKeyW(subKey, ProxyStubClsid32W);
+            RegDeleteKeyW(subKey, TypeLibW);
+            RegCloseKey(subKey);
+            subKey = NULL;
+            RegDeleteKeyW(HKEY_CLASSES_ROOT, subKeyName);
         }
-        RegDeleteKeyW(subKey, ProxyStubClsidW);
-        RegDeleteKeyW(subKey, ProxyStubClsid32W);
-        RegDeleteKeyW(subKey, TypeLibW);
-        RegCloseKey(subKey);
-        subKey = NULL;
-        RegDeleteKeyW(HKEY_CLASSES_ROOT, subKeyName);
 
 enddeleteloop:
         if (typeAttr) ITypeInfo_ReleaseTypeAttr(typeInfo, typeAttr);
@@ -6102,10 +6109,11 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                     continue;
                 }
 
+                src_arg = NULL;
+
                 if (cNamedArgs)
                 {
                     USHORT j;
-                    src_arg = NULL;
                     for (j = 0; j < cNamedArgs; j++)
                         if (rgdispidNamedArgs[j] == i || (i == func_desc->cParams-1 && rgdispidNamedArgs[j] == DISPID_PROPERTYPUT))
                         {
@@ -6113,9 +6121,10 @@ static HRESULT WINAPI ITypeInfo_fnInvoke(
                             break;
                         }
                 }
-                else
+
+                if (!src_arg && vargs_converted + cNamedArgs < pDispParams->cArgs)
                 {
-                    src_arg = vargs_converted < pDispParams->cArgs ? &pDispParams->rgvarg[pDispParams->cArgs - 1 - vargs_converted] : NULL;
+                    src_arg = &pDispParams->rgvarg[pDispParams->cArgs - 1 - vargs_converted];
                     vargs_converted++;
                 }
 

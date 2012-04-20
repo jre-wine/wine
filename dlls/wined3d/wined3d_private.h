@@ -789,7 +789,7 @@ do {                                                                \
        TRACE("%s call ok %s / %d\n", A, __FILE__, __LINE__);        \
                                                                     \
     } else do {                                                     \
-        FIXME(">>>>>>>>>>>>>>>>> %s (%#x) from %s @ %s / %d\n",     \
+        ERR(">>>>>>>>>>>>>>>>> %s (%#x) from %s @ %s / %d\n",       \
             debug_glerror(err), err, A, __FILE__, __LINE__);        \
        err = glGetError();                                          \
     } while (err != GL_NO_ERROR);                                   \
@@ -1033,6 +1033,12 @@ enum wined3d_event_query_result
     WINED3D_EVENT_QUERY_ERROR
 };
 
+void wined3d_event_query_destroy(struct wined3d_event_query *query) DECLSPEC_HIDDEN;
+enum wined3d_event_query_result wined3d_event_query_test(struct wined3d_event_query *query, IWineD3DDeviceImpl *device) DECLSPEC_HIDDEN;
+enum wined3d_event_query_result wined3d_event_query_finish(struct wined3d_event_query *query, IWineD3DDeviceImpl *device) DECLSPEC_HIDDEN;
+void wined3d_event_query_issue(struct wined3d_event_query *query, IWineD3DDeviceImpl *device) DECLSPEC_HIDDEN;
+HRESULT wined3d_event_query_supported(const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
+
 struct wined3d_context
 {
     const struct wined3d_gl_info *gl_info;
@@ -1171,10 +1177,12 @@ struct blit_shader
             GLenum textype, UINT width, UINT height);
     void (*unset_shader)(IWineD3DDevice *iface);
     BOOL (*color_fixup_supported)(const struct wined3d_gl_info *gl_info, struct color_fixup_desc fixup);
+    HRESULT (*color_fill)(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *dst_surface, const RECT *dst_rect, DWORD fill_color);
 };
 
 extern const struct blit_shader ffp_blit DECLSPEC_HIDDEN;
 extern const struct blit_shader arbfp_blit DECLSPEC_HIDDEN;
+extern const struct blit_shader cpu_blit DECLSPEC_HIDDEN;
 
 typedef enum ContextUsage {
     CTXUSAGE_RESOURCELOAD       = 1,    /* Only loads textures: No State is applied */
@@ -1196,7 +1204,8 @@ void context_attach_depth_stencil_fbo(struct wined3d_context *context,
         GLenum fbo_target, IWineD3DSurface *depth_stencil, BOOL use_render_buffer) DECLSPEC_HIDDEN;
 void context_attach_surface_fbo(const struct wined3d_context *context,
         GLenum fbo_target, DWORD idx, IWineD3DSurface *surface) DECLSPEC_HIDDEN;
-struct wined3d_context *context_create(IWineD3DSwapChainImpl *swapchain, IWineD3DSurfaceImpl *target) DECLSPEC_HIDDEN;
+struct wined3d_context *context_create(IWineD3DSwapChainImpl *swapchain, IWineD3DSurfaceImpl *target,
+        const struct wined3d_format_desc *ds_format_desc) DECLSPEC_HIDDEN;
 void context_destroy(IWineD3DDeviceImpl *This, struct wined3d_context *context) DECLSPEC_HIDDEN;
 void context_free_event_query(struct wined3d_event_query *query) DECLSPEC_HIDDEN;
 void context_free_occlusion_query(struct wined3d_occlusion_query *query) DECLSPEC_HIDDEN;
@@ -1695,6 +1704,8 @@ struct IWineD3DDeviceImpl
     /* Stream source management */
     struct wined3d_stream_info strided_streams;
     const WineDirect3DVertexStridedData *up_strided;
+    struct wined3d_event_query *buffer_queries[MAX_ATTRIBS];
+    unsigned int num_buffer_queries;
 
     /* Context management */
     struct wined3d_context **contexts;
@@ -2421,6 +2432,14 @@ HRESULT stateblock_init(IWineD3DStateBlockImpl *stateblock,
         IWineD3DDeviceImpl *device, WINED3DSTATEBLOCKTYPE type) DECLSPEC_HIDDEN;
 void stateblock_init_contained_states(IWineD3DStateBlockImpl *object) DECLSPEC_HIDDEN;
 
+static inline void stateblock_apply_state(DWORD state, IWineD3DStateBlockImpl *stateblock,
+        struct wined3d_context *context)
+{
+    const struct StateEntry *statetable = stateblock->device->StateTable;
+    DWORD rep = statetable[state].representative;
+    statetable[rep].apply(rep, stateblock, context);
+}
+
 /* Direct3D terminology with little modifications. We do not have an issued state
  * because only the driver knows about it, but we have a created state because d3d
  * allows GetData on a created issue, but opengl doesn't
@@ -2474,8 +2493,9 @@ struct wined3d_map_range
 #define WINED3D_BUFFER_CREATEBO     0x04    /* Attempt to create a buffer object next PreLoad */
 #define WINED3D_BUFFER_DOUBLEBUFFER 0x08    /* Use a vbo and local allocated memory */
 #define WINED3D_BUFFER_FLUSH        0x10    /* Manual unmap flushing */
-#define WINED3D_BUFFER_DISCARD      0x20    /* A DISCARD lock has occured since the last PreLoad */
+#define WINED3D_BUFFER_DISCARD      0x20    /* A DISCARD lock has occurred since the last PreLoad */
 #define WINED3D_BUFFER_NOSYNC       0x40    /* All locks since the last PreLoad had NOOVERWRITE set */
+#define WINED3D_BUFFER_APPLESYNC    0x80    /* Using sync as in GL_APPLE_flush_buffer_range */
 
 struct wined3d_buffer
 {
@@ -2494,6 +2514,7 @@ struct wined3d_buffer
     LONG lock_count;
     struct wined3d_map_range *maps;
     ULONG maps_size, modified_areas;
+    struct wined3d_event_query *query;
 
     /* conversion stuff */
     UINT decl_change_count, full_conversion_count;
@@ -2544,6 +2565,7 @@ struct IWineD3DSwapChainImpl
     WINED3DFORMAT             orig_fmt;
     WINED3DGAMMARAMP          orig_gamma;
     BOOL                      render_to_fbo;
+    const struct wined3d_format_desc *ds_format;
 
     long prev_time, frames;   /* Performance tracking */
     unsigned int vSyncCounter;
@@ -2615,6 +2637,9 @@ const char *debug_d3ddegree(WINED3DDEGREETYPE order) DECLSPEC_HIDDEN;
 const char *debug_d3dtop(WINED3DTEXTUREOP d3dtop) DECLSPEC_HIDDEN;
 void dump_color_fixup_desc(struct color_fixup_desc fixup) DECLSPEC_HIDDEN;
 const char *debug_surflocation(DWORD flag) DECLSPEC_HIDDEN;
+
+/* Color conversion routines */
+DWORD color_convert_argb_to_fmt(DWORD color, WINED3DFORMAT destfmt) DECLSPEC_HIDDEN;
 
 /* Routines for GL <-> D3D values */
 GLenum StencilOp(DWORD op) DECLSPEC_HIDDEN;
@@ -2953,6 +2978,7 @@ extern WINED3DFORMAT pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN;
 #define WINED3DFMT_FLAG_FBO_ATTACHABLE           0x40
 #define WINED3DFMT_FLAG_COMPRESSED               0x80
 #define WINED3DFMT_FLAG_GETDC                    0x100
+#define WINED3DFMT_FLAG_FLOAT                    0x200
 
 struct wined3d_format_desc
 {
@@ -3006,8 +3032,8 @@ static inline BOOL use_ps(IWineD3DStateBlockImpl *stateblock)
 }
 
 void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface,
-        WINED3DRECT *src_rect, IWineD3DSurface *dst_surface, WINED3DRECT *dst_rect,
-        const WINED3DTEXTUREFILTERTYPE filter, BOOL flip) DECLSPEC_HIDDEN;
+        const RECT *src_rect, IWineD3DSurface *dst_surface, const RECT *dst_rect,
+        const WINED3DTEXTUREFILTERTYPE filter) DECLSPEC_HIDDEN;
 
 /* The WNDCLASS-Name for the fake window which we use to retrieve the GL capabilities */
 #define WINED3D_OPENGL_WINDOW_CLASS_NAME "WineD3D_OpenGL"

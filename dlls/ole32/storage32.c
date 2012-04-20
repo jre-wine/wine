@@ -2665,6 +2665,7 @@ static HRESULT StorageImpl_Construct(
     This->bigBlockDepotCount    = 1;
     This->bigBlockDepotStart[0] = 0;
     This->rootStartBlock        = 1;
+    This->smallBlockLimit       = LIMIT_TO_USE_SMALL_BLOCK;
     This->smallBlockDepotStart  = BLOCK_END_OF_CHAIN;
     This->bigBlockSizeBits      = DEF_BIG_BLOCK_SIZE_BITS;
     This->smallBlockSizeBits    = DEF_SMALL_BLOCK_SIZE_BITS;
@@ -2710,6 +2711,8 @@ static HRESULT StorageImpl_Construct(
    * Start searching for free blocks with block 0.
    */
   This->prevFreeBlock = 0;
+
+  This->firstFreeSmallBlock = 0;
 
   /*
    * Create the block chain abstractions.
@@ -3350,6 +3353,11 @@ static HRESULT StorageImpl_LoadFileHeader(
 
     StorageUtl_ReadDWord(
       headerBigBlock,
+      OFFSET_SMALLBLOCKLIMIT,
+      &This->smallBlockLimit);
+
+    StorageUtl_ReadDWord(
+      headerBigBlock,
       OFFSET_SBDEPOTSTART,
       &This->smallBlockDepotStart);
 
@@ -3382,9 +3390,11 @@ static HRESULT StorageImpl_LoadFileHeader(
      * blocks, just make sure they are what we're expecting.
      */
     if ((This->bigBlockSize != MIN_BIG_BLOCK_SIZE && This->bigBlockSize != MAX_BIG_BLOCK_SIZE) ||
-	This->smallBlockSize != DEF_SMALL_BLOCK_SIZE)
+	This->smallBlockSize != DEF_SMALL_BLOCK_SIZE ||
+	This->smallBlockLimit != LIMIT_TO_USE_SMALL_BLOCK)
     {
-	WARN("Broken OLE storage file\n");
+	FIXME("Broken OLE storage file? bigblock=0x%x, smallblock=0x%x, sblimit=0x%x\n",
+	    This->bigBlockSize, This->smallBlockSize, This->smallBlockLimit);
 	hr = STG_E_INVALIDHEADER;
     }
     else
@@ -3438,7 +3448,6 @@ static void StorageImpl_SaveFileHeader(
     StorageUtl_WriteWord(headerBigBlock,  0x18, 0x3b);
     StorageUtl_WriteWord(headerBigBlock,  0x1a, 0x3);
     StorageUtl_WriteWord(headerBigBlock,  0x1c, (WORD)-2);
-    StorageUtl_WriteDWord(headerBigBlock, 0x38, (DWORD)0x1000);
   }
 
   /*
@@ -3463,6 +3472,11 @@ static void StorageImpl_SaveFileHeader(
     headerBigBlock,
     OFFSET_ROOTSTARTBLOCK,
     This->rootStartBlock);
+
+  StorageUtl_WriteDWord(
+    headerBigBlock,
+    OFFSET_SMALLBLOCKLIMIT,
+    This->smallBlockLimit);
 
   StorageUtl_WriteDWord(
     headerBigBlock,
@@ -4840,6 +4854,7 @@ static StorageInternalImpl* StorageInternalImpl_Construct(
      * Initialize the virtual function table.
      */
     newStorage->base.lpVtbl = &Storage32InternalImpl_Vtbl;
+    newStorage->base.pssVtbl = &IPropertySetStorage_Vtbl;
     newStorage->base.baseVtbl = &StorageInternalImpl_BaseVtbl;
     newStorage->base.openFlags = (openFlags & ~STGM_CREATE);
 
@@ -5710,7 +5725,7 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
   ULARGE_INTEGER offsetOfBlockInDepot;
   DWORD buffer;
   ULONG bytesRead;
-  ULONG blockIndex = 0;
+  ULONG blockIndex = This->parentStorage->firstFreeSmallBlock;
   ULONG nextBlockIndex = BLOCK_END_OF_CHAIN;
   HRESULT res = S_OK;
   ULONG smallBlocksPerBigBlock;
@@ -5818,6 +5833,8 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
         StorageImpl_SaveFileHeader(This->parentStorage);
     }
   }
+
+  This->parentStorage->firstFreeSmallBlock = blockIndex+1;
 
   smallBlocksPerBigBlock =
     This->parentStorage->bigBlockSize / This->parentStorage->smallBlockSize;
@@ -6117,6 +6134,7 @@ static BOOL SmallBlockChainStream_Shrink(
 							&blockIndex)))
       return FALSE;
     SmallBlockChainStream_FreeBlock(This, extraBlock);
+    This->parentStorage->firstFreeSmallBlock = min(This->parentStorage->firstFreeSmallBlock, extraBlock);
     extraBlock = blockIndex;
   }
 

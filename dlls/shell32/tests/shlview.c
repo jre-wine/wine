@@ -36,12 +36,16 @@
 #include "ocidl.h"
 #include "oleauto.h"
 
+#include "initguid.h"
+
 #include "wine/test.h"
 
 #include "msg.h"
 
 #define LISTVIEW_SEQ_INDEX  0
 #define NUM_MSG_SEQUENCES   1
+
+DEFINE_GUID(IID_IPersistHistory, 0x91a565c1, 0xe38f, 0x11d0, 0x94, 0xbf, 0x00, 0xa0, 0xc9, 0x05, 0x5c, 0xbf);
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCES];
 
@@ -82,13 +86,134 @@ static HWND subclass_listview(HWND hwnd)
     return listview;
 }
 
+/* dummy IDataObject implementation */
 typedef struct {
+    const IDataObjectVtbl *lpVtbl;
+    LONG ref;
+} IDataObjectImpl;
 
+static const IDataObjectVtbl IDataObjectImpl_Vtbl;
+
+IDataObject* IDataObjectImpl_Construct(void)
+{
+    IDataObjectImpl *obj;
+
+    obj = HeapAlloc(GetProcessHeap(), 0, sizeof(*obj));
+    obj->lpVtbl = &IDataObjectImpl_Vtbl;
+    obj->ref = 1;
+
+    return (IDataObject*)obj;
+}
+
+static HRESULT WINAPI IDataObjectImpl_QueryInterface(IDataObject *iface, REFIID riid, void **ppvObj)
+{
+    IDataObjectImpl *This = (IDataObjectImpl *)iface;
+
+    if (IsEqualIID(riid, &IID_IUnknown) ||
+        IsEqualIID(riid, &IID_IDataObject))
+    {
+        *ppvObj = This;
+    }
+
+    if(*ppvObj)
+    {
+        IUnknown_AddRef(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+static ULONG WINAPI IDataObjectImpl_AddRef(IDataObject * iface)
+{
+    IDataObjectImpl *This = (IDataObjectImpl *)iface;
+    return InterlockedIncrement(&This->ref);
+}
+
+static ULONG WINAPI IDataObjectImpl_Release(IDataObject * iface)
+{
+    IDataObjectImpl *This = (IDataObjectImpl *)iface;
+    ULONG ref = InterlockedDecrement(&This->ref);
+
+    if (!ref)
+    {
+        HeapFree(GetProcessHeap(), 0, This);
+        return 0;
+    }
+    return ref;
+}
+
+static HRESULT WINAPI IDataObjectImpl_GetData(IDataObject *iface, FORMATETC *pformat, STGMEDIUM *pmedium)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_GetDataHere(IDataObject *iface, FORMATETC *pformat, STGMEDIUM *pmedium)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_QueryGetData(IDataObject *iface, FORMATETC *pformat)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_GetCanonicalFormatEtc(
+    IDataObject *iface, FORMATETC *pformatIn, FORMATETC *pformatOut)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_SetData(
+    IDataObject *iface, FORMATETC *pformat, STGMEDIUM *pmedium, BOOL release)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_EnumFormatEtc(
+    IDataObject *iface, DWORD direction, IEnumFORMATETC **ppenumFormatEtc)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_DAdvise(
+    IDataObject *iface, FORMATETC *pformatetc, DWORD advf, IAdviseSink *pSink, DWORD *pConnection)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_DUnadvise(IDataObject *iface, DWORD connection)
+{
+    return E_NOTIMPL;
+}
+
+static HRESULT WINAPI IDataObjectImpl_EnumDAdvise(IDataObject *iface, IEnumSTATDATA **ppenumAdvise)
+{
+    return E_NOTIMPL;
+}
+
+static const IDataObjectVtbl IDataObjectImpl_Vtbl =
+{
+    IDataObjectImpl_QueryInterface,
+    IDataObjectImpl_AddRef,
+    IDataObjectImpl_Release,
+    IDataObjectImpl_GetData,
+    IDataObjectImpl_GetDataHere,
+    IDataObjectImpl_QueryGetData,
+    IDataObjectImpl_GetCanonicalFormatEtc,
+    IDataObjectImpl_SetData,
+    IDataObjectImpl_EnumFormatEtc,
+    IDataObjectImpl_DAdvise,
+    IDataObjectImpl_DUnadvise,
+    IDataObjectImpl_EnumDAdvise
+};
+
+/* dummy IShellBrowser implementation */
+typedef struct {
     const IShellBrowserVtbl *lpVtbl;
     LONG ref;
 } IShellBrowserImpl;
 
-/* dummy IShellBrowser implementation */
 static const IShellBrowserVtbl IShellBrowserImpl_Vtbl;
 
 IShellBrowser* IShellBrowserImpl_Construct(void)
@@ -110,22 +235,16 @@ static HRESULT WINAPI IShellBrowserImpl_QueryInterface(IShellBrowser *iface,
 
     *ppvObj = NULL;
 
-    if(IsEqualIID(riid, &IID_IUnknown))
-    {
-        *ppvObj = This;
-    }
-    else if(IsEqualIID(riid, &IID_IOleWindow))
-    {
-        *ppvObj = This;
-    }
-    else if(IsEqualIID(riid, &IID_IShellBrowser))
+    if(IsEqualIID(riid, &IID_IUnknown)   ||
+       IsEqualIID(riid, &IID_IOleWindow) ||
+       IsEqualIID(riid, &IID_IShellBrowser))
     {
         *ppvObj = This;
     }
 
     if(*ppvObj)
     {
-        IUnknown_AddRef( (IShellBrowser*) *ppvObj);
+        IUnknown_AddRef(iface);
         return S_OK;
     }
 
@@ -366,6 +485,7 @@ static void test_IFolderView(void)
     IShellBrowser *browser;
     IFolderView *fv;
     HWND hwnd_view, hwnd_list;
+    PITEMID_CHILD pidl;
     HRESULT hr;
     INT ret;
     POINT pt;
@@ -391,6 +511,11 @@ static void test_IFolderView(void)
     hr = IFolderView_GetSpacing(fv, NULL);
     ok(hr == S_FALSE || broken(hr == S_OK) /* win7 */, "got (0x%08x)\n", hr);
 
+    pidl = (void*)0xdeadbeef;
+    hr = IFolderView_Item(fv, 0, &pidl);
+    ok(hr == E_INVALIDARG || broken(hr == E_FAIL) /* < Vista */, "got (0x%08x)\n", hr);
+    ok(pidl == 0 || broken(pidl == (void*)0xdeadbeef) /* < Vista */, "got %p\n", pidl);
+
 if (0)
 {
     /* crashes on Vista and Win2k8 - List not created yet case */
@@ -399,6 +524,9 @@ if (0)
     /* crashes on XP */
     hr = IFolderView_GetSelectionMarkedItem(fv, NULL);
     hr = IFolderView_GetFocusedItem(fv, NULL);
+
+    /* crashes on Vista+ */
+    hr = IFolderView_Item(fv, 0, NULL);
 }
 
     browser = IShellBrowserImpl_Construct();
@@ -501,6 +629,120 @@ if (0)
     IShellFolder_Release(desktop);
 }
 
+static void test_GetItemObject(void)
+{
+    IShellFolder *desktop;
+    IShellView *view;
+    IUnknown *unk;
+    HRESULT hr;
+
+    hr = SHGetDesktopFolder(&desktop);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    /* from documentation three interfaces are supported for SVGIO_BACKGROUND:
+       IContextMenu, IDispatch, IPersistHistory */
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IContextMenu, (void**)&unk);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+    IUnknown_Release(unk);
+
+    unk = NULL;
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IDispatch, (void**)&unk);
+    todo_wine ok(hr == S_OK || broken(hr == E_NOTIMPL) /* NT4 */, "got (0x%08x)\n", hr);
+    if (unk) IUnknown_Release(unk);
+
+    unk = NULL;
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IPersistHistory, (void**)&unk);
+    todo_wine ok(hr == S_OK || broken(hr == E_NOTIMPL) /* W9x, NT4 */, "got (0x%08x)\n", hr);
+    if (unk) IUnknown_Release(unk);
+
+    /* example of unsupported interface, base for IPersistHistory */
+    hr = IShellView_GetItemObject(view, SVGIO_BACKGROUND, &IID_IPersist, (void**)&unk);
+    ok(hr == E_NOINTERFACE || broken(hr == E_NOTIMPL) /* W2K */, "got (0x%08x)\n", hr);
+
+    IShellView_Release(view);
+    IShellFolder_Release(desktop);
+}
+
+static void test_IShellFolderView(void)
+{
+    IShellFolderView *folderview;
+    IShellFolder *desktop;
+    IShellView *view;
+    IDataObject *obj;
+    UINT i;
+    HRESULT hr;
+
+    hr = SHGetDesktopFolder(&desktop);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    hr = IShellView_QueryInterface(view, &IID_IShellFolderView, (void**)&folderview);
+    if (hr != S_OK)
+    {
+        win_skip("IShellView doesn't provide IShellFolderView on this platform\n");
+        IShellView_Release(view);
+        IShellFolder_Release(desktop);
+        return;
+    }
+
+    /* ::MoveIcons */
+    obj = IDataObjectImpl_Construct();
+    hr = IShellFolderView_MoveIcons(folderview, obj);
+    ok(hr == E_NOTIMPL || broken(hr == S_OK) /* W98 */, "got (0x%08x)\n", hr);
+    IDataObject_Release(obj);
+
+    /* ::SetRedraw without list created */
+    hr = IShellFolderView_SetRedraw(folderview, TRUE);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    /* ::QuerySupport */
+    hr = IShellFolderView_QuerySupport(folderview, NULL);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+    i = 0xdeadbeef;
+    hr = IShellFolderView_QuerySupport(folderview, &i);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+    ok(i == 0xdeadbeef, "got %d\n", i);
+
+    /* ::RemoveObject */
+    i = 0xdeadbeef;
+    hr = IShellFolderView_RemoveObject(folderview, NULL, &i);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+    ok(i == 0 || i == -1 /* Win7 */ || broken(i == 0xdeadbeef) /* Vista, 2k8 */,
+        "got %d\n", i);
+
+    IShellFolderView_Release(folderview);
+
+    IShellView_Release(view);
+    IShellFolder_Release(desktop);
+}
+
+static void test_IOleWindow(void)
+{
+    IShellFolder *desktop;
+    IShellView *view;
+    HRESULT hr;
+
+    hr = SHGetDesktopFolder(&desktop);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    hr = IShellFolder_CreateViewObject(desktop, NULL, &IID_IShellView, (void**)&view);
+    ok(hr == S_OK, "got (0x%08x)\n", hr);
+
+    /* IShellView::ContextSensitiveHelp */
+    hr = IShellView_ContextSensitiveHelp(view, TRUE);
+    ok(hr == E_NOTIMPL, "got (0x%08x)\n", hr);
+    hr = IShellView_ContextSensitiveHelp(view, FALSE);
+    ok(hr == E_NOTIMPL, "got (0x%08x)\n", hr);
+
+    IShellView_Release(view);
+    IShellFolder_Release(desktop);
+}
+
 START_TEST(shlview)
 {
     OleInitialize(NULL);
@@ -509,6 +751,9 @@ START_TEST(shlview)
 
     test_IShellView_CreateViewWindow();
     test_IFolderView();
+    test_GetItemObject();
+    test_IShellFolderView();
+    test_IOleWindow();
 
     OleUninitialize();
 }

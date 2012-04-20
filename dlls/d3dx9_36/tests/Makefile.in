@@ -8,6 +8,8 @@ IMPORTS   = d3dx9 d3d9 user32 gdi32 kernel32
 C_SRCS = \
 	asm.c \
 	core.c \
+	effect.c \
+	line.c \
 	math.c \
 	mesh.c \
 	shader.c \
