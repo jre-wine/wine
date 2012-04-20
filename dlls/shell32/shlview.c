@@ -634,96 +634,97 @@ static INT CALLBACK fill_list( LPVOID ptr, LPVOID arg )
     return TRUE;
 }
 
-static HRESULT ShellView_FillList(IShellViewImpl * This)
+static HRESULT ShellView_FillList(IShellViewImpl *This)
 {
-	LPENUMIDLIST	pEnumIDList;
-	LPITEMIDLIST	pidl;
-	DWORD		dwFetched;
-	HRESULT		hRes;
-	HDPA		hdpa;
+    LPENUMIDLIST pEnumIDList;
+    LPITEMIDLIST pidl;
+    DWORD fetched;
+    HRESULT hr;
+    HDPA hdpa;
 
-	TRACE("%p\n",This);
+    TRACE("(%p)\n", This);
 
-	/* get the itemlist from the shfolder*/
-	hRes = IShellFolder_EnumObjects(This->pSFParent,This->hWnd, SHCONTF_NONFOLDERS | SHCONTF_FOLDERS, &pEnumIDList);
-	if (hRes != S_OK)
-	{
-	  if (hRes==S_FALSE)
-	    return(NOERROR);
-	  return(hRes);
-	}
+    /* get the itemlist from the shfolder*/
+    hr = IShellFolder_EnumObjects(This->pSFParent, This->hWnd, SHCONTF_NONFOLDERS | SHCONTF_FOLDERS, &pEnumIDList);
+    if (hr != S_OK) return hr;
 
-	/* create a pointer array */
-	hdpa = DPA_Create(16);
-	if (!hdpa)
-	{
-	  return(E_OUTOFMEMORY);
-	}
+    /* create a pointer array */
+    hdpa = DPA_Create(16);
+    if (!hdpa)
+    {
+        IEnumIDList_Release(pEnumIDList);
+        return E_OUTOFMEMORY;
+    }
 
-	/* copy the items into the array*/
-	while((S_OK == IEnumIDList_Next(pEnumIDList,1, &pidl, &dwFetched)) && dwFetched)
-	{
-	  if (DPA_InsertPtr(hdpa, 0x7fff, pidl) == -1)
-	  {
-	    SHFree(pidl);
-	  }
-	}
+    /* copy the items into the array*/
+    while((S_OK == IEnumIDList_Next(pEnumIDList, 1, &pidl, &fetched)) && fetched)
+    {
+        if (DPA_InsertPtr(hdpa, DPA_GetPtrCount(hdpa), pidl) == -1)
+        {
+            SHFree(pidl);
+        }
+    }
 
-	/* sort the array */
-	DPA_Sort(hdpa, ShellView_CompareItems, (LPARAM)This->pSFParent);
+    /* sort the array */
+    DPA_Sort(hdpa, ShellView_CompareItems, (LPARAM)This->pSFParent);
 
-	/*turn the listview's redrawing off*/
-	SendMessageA(This->hWndList, WM_SETREDRAW, FALSE, 0);
+    SendMessageW(This->hWndList, WM_SETREDRAW, FALSE, 0);
+    DPA_DestroyCallback(hdpa, fill_list, This);
+    SendMessageW(This->hWndList, WM_SETREDRAW, TRUE, 0);
 
-        DPA_DestroyCallback( hdpa, fill_list, This );
+    IEnumIDList_Release(pEnumIDList);
 
-	/*turn the listview's redrawing back on and force it to draw*/
-	SendMessageA(This->hWndList, WM_SETREDRAW, TRUE, 0);
-
-	IEnumIDList_Release(pEnumIDList); /* destroy the list*/
-
-	return S_OK;
+    return S_OK;
 }
 
 /**********************************************************
 *  ShellView_OnCreate()
 */
-static LRESULT ShellView_OnCreate(IShellViewImpl * This)
+static LRESULT ShellView_OnCreate(IShellViewImpl *This)
 {
-	IDropTarget* pdt;
-	SHChangeNotifyEntry ntreg;
-	IPersistFolder2 * ppf2 = NULL;
+    IShellView2 *iface = (IShellView2*)This;
+    static const WCHAR accel_nameW[] = {'s','h','v','_','a','c','c','e','l',0};
+    IPersistFolder2 *ppf2;
+    IDropTarget* pdt;
+    HRESULT hr;
 
-	TRACE("%p\n",This);
+    TRACE("(%p)\n", This);
 
-	if(ShellView_CreateList(This))
-	{
-	  if(ShellView_InitList(This))
-	  {
+    if (ShellView_CreateList(This))
+    {
+        if (ShellView_InitList(This))
+        {
 	    ShellView_FillList(This);
-	  }
-	}
+        }
+    }
 
-        if (SUCCEEDED(IUnknown_QueryInterface((IUnknown*)&This->lpVtbl, &IID_IDropTarget, (LPVOID*)&pdt)))
-	{
-	    RegisterDragDrop(This->hWnd, pdt);
-	    IDropTarget_Release(pdt);
-	}
+    hr = IShellView2_QueryInterface(iface, &IID_IDropTarget, (LPVOID*)&pdt);
+    if (hr == S_OK)
+    {
+        RegisterDragDrop(This->hWnd, pdt);
+        IDropTarget_Release(pdt);
+    }
 
-	/* register for receiving notifications */
-	IShellFolder_QueryInterface(This->pSFParent, &IID_IPersistFolder2, (LPVOID*)&ppf2);
-	if (ppf2)
-	{
-	  IPersistFolder2_GetCurFolder(ppf2, (LPITEMIDLIST*)&ntreg.pidl);
-	  ntreg.fRecursive = TRUE;
-	  This->hNotify = SHChangeNotifyRegister(This->hWnd, SHCNF_IDLIST, SHCNE_ALLEVENTS, SHV_CHANGE_NOTIFY, 1, &ntreg);
-	  SHFree((LPITEMIDLIST)ntreg.pidl);
-	  IPersistFolder2_Release(ppf2);
-	}
+    /* register for receiving notifications */
+    hr = IShellFolder_QueryInterface(This->pSFParent, &IID_IPersistFolder2, (LPVOID*)&ppf2);
+    if (hr == S_OK)
+    {
+        SHChangeNotifyEntry ntreg;
 
-	This->hAccel = LoadAcceleratorsA(shell32_hInstance, "shv_accel");
+        hr = IPersistFolder2_GetCurFolder(ppf2, (LPITEMIDLIST*)&ntreg.pidl);
+        if (hr == S_OK)
+        {
+            ntreg.fRecursive = TRUE;
+            This->hNotify = SHChangeNotifyRegister(This->hWnd, SHCNF_IDLIST, SHCNE_ALLEVENTS,
+                                                   SHV_CHANGE_NOTIFY, 1, &ntreg);
+            SHFree((LPITEMIDLIST)ntreg.pidl);
+        }
+        IPersistFolder2_Release(ppf2);
+    }
 
-	return S_OK;
+    This->hAccel = LoadAcceleratorsW(shell32_hInstance, accel_nameW);
+
+    return S_OK;
 }
 
 /**********************************************************
@@ -776,57 +777,64 @@ static HMENU ShellView_BuildFileMenu(IShellViewImpl * This)
 /**********************************************************
 * ShellView_MergeFileMenu()
 */
-static void ShellView_MergeFileMenu(IShellViewImpl * This, HMENU hSubMenu)
-{	TRACE("(%p)->(submenu=%p) stub\n",This,hSubMenu);
+static void ShellView_MergeFileMenu(IShellViewImpl *This, HMENU hSubMenu)
+{
+     TRACE("(%p)->(submenu=%p) stub\n",This,hSubMenu);
 
-	if(hSubMenu)
-	{ /*insert This item at the beginning of the menu */
-            MENUITEMINFOA mii;
+     if (hSubMenu)
+     {
+         static const WCHAR dummyW[] = {'d','u','m','m','y','4','5',0};
+         MENUITEMINFOW mii;
 
-            mii.cbSize = sizeof(mii);
-            mii.fMask = MIIM_ID | MIIM_TYPE;
-            mii.wID = 0;
-            mii.fType = MFT_SEPARATOR;
-            InsertMenuItemA(hSubMenu, 0, TRUE, &mii);
+         /* insert This item at the beginning of the menu */
 
-            mii.cbSize = sizeof(mii);
-            mii.fMask = MIIM_ID | MIIM_TYPE | MIIM_STATE;
-            mii.dwTypeData = (LPSTR)"dummy45";
-            mii.fState = MFS_ENABLED;
-            mii.wID = IDM_MYFILEITEM;
-            mii.fType = MFT_STRING;
-            InsertMenuItemA(hSubMenu, 0, TRUE, &mii);
-	}
-	TRACE("--\n");
+         mii.cbSize = sizeof(mii);
+         mii.fMask = MIIM_ID | MIIM_TYPE;
+         mii.wID = 0;
+         mii.fType = MFT_SEPARATOR;
+         InsertMenuItemW(hSubMenu, 0, TRUE, &mii);
+
+         mii.cbSize = sizeof(mii);
+         mii.fMask = MIIM_ID | MIIM_TYPE | MIIM_STATE;
+         mii.dwTypeData = (LPWSTR)dummyW;
+         mii.fState = MFS_ENABLED;
+         mii.wID = IDM_MYFILEITEM;
+         mii.fType = MFT_STRING;
+         InsertMenuItemW(hSubMenu, 0, TRUE, &mii);
+    }
+
+    TRACE("--\n");
 }
 
 /**********************************************************
 * ShellView_MergeViewMenu()
 */
 
-static void ShellView_MergeViewMenu(IShellViewImpl * This, HMENU hSubMenu)
+static void ShellView_MergeViewMenu(IShellViewImpl *This, HMENU hSubMenu)
 {
-	TRACE("(%p)->(submenu=%p)\n",This,hSubMenu);
+    TRACE("(%p)->(submenu=%p)\n",This,hSubMenu);
 
-	if(hSubMenu)
-	{ /*add a separator at the correct position in the menu*/
-	  MENUITEMINFOA mii;
-	  static char view[] = "View";
+    /* add a separator at the correct position in the menu */
+    if (hSubMenu)
+    {
+        static const WCHAR menuW[] = {'M','E','N','U','_','0','0','1',0};
+	static const WCHAR viewW[] = {'V','i','e','w',0};
+        MENUITEMINFOW mii;
 
-          ZeroMemory(&mii, sizeof(mii));
-          mii.cbSize = sizeof(mii);
-          mii.fMask = MIIM_ID | MIIM_TYPE;
-          mii.wID = 0;
-          mii.fType = MFT_SEPARATOR;
-          InsertMenuItemA(hSubMenu, FCIDM_MENU_VIEW_SEP_OPTIONS, FALSE, &mii);
+        memset(&mii, 0, sizeof(mii));
+        mii.cbSize = sizeof(mii);
+        mii.fMask = MIIM_ID | MIIM_TYPE;
+        mii.wID = 0;
+        mii.fType = MFT_SEPARATOR;
+        InsertMenuItemW(hSubMenu, FCIDM_MENU_VIEW_SEP_OPTIONS, FALSE, &mii);
 
-	  mii.cbSize = sizeof(mii);
-	  mii.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_DATA;
-	  mii.fType = MFT_STRING;
-	  mii.dwTypeData = view;
-	  mii.hSubMenu = LoadMenuA(shell32_hInstance, "MENU_001");
-	  InsertMenuItemA(hSubMenu, FCIDM_MENU_VIEW_SEP_OPTIONS, FALSE, &mii);
-	}
+        mii.cbSize = sizeof(mii);
+        mii.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_DATA;
+        mii.fType = MFT_STRING;
+        mii.dwTypeData = (LPWSTR)viewW;
+        mii.hSubMenu = LoadMenuW(shell32_hInstance, menuW);
+        InsertMenuItemW(hSubMenu, FCIDM_MENU_VIEW_SEP_OPTIONS, FALSE, &mii);
+    }
 }
 
 /**********************************************************
@@ -1116,79 +1124,76 @@ static void ShellView_OnDeactivate(IShellViewImpl * This)
 /**********************************************************
 * ShellView_OnActivate()
 */
-static LRESULT ShellView_OnActivate(IShellViewImpl * This, UINT uState)
-{	OLEMENUGROUPWIDTHS   omw = { {0, 0, 0, 0, 0, 0} };
-	MENUITEMINFOA         mii;
-	CHAR                szText[MAX_PATH];
+static LRESULT ShellView_OnActivate(IShellViewImpl *This, UINT uState)
+{
+    OLEMENUGROUPWIDTHS   omw = { {0, 0, 0, 0, 0, 0} };
+    MENUITEMINFOW mii;
 
-	TRACE("%p uState=%x\n",This,uState);
+    TRACE("(%p) uState=%x\n",This,uState);
 
-	/*don't do anything if the state isn't really changing */
-	if(This->uState == uState)
+    /* don't do anything if the state isn't really changing */
+    if (This->uState == uState) return S_OK;
+
+    ShellView_OnDeactivate(This);
+
+    /* only do This if we are active */
+    if (uState != SVUIA_DEACTIVATE)
+    {
+        /* merge the menus */
+        This->hMenu = CreateMenu();
+
+        if (This->hMenu)
 	{
-	  return S_OK;
-	}
+            static const WCHAR dummyW[] = {'d','u','m','m','y',' ','3','1',0};
 
-	ShellView_OnDeactivate(This);
-
-	/*only do This if we are active */
-	if(uState != SVUIA_DEACTIVATE)
-	{
-	  /*merge the menus */
-	  This->hMenu = CreateMenu();
-
-	  if(This->hMenu)
-	  {
-	    IShellBrowser_InsertMenusSB(This->pShellBrowser, This->hMenu, &omw);
+            IShellBrowser_InsertMenusSB(This->pShellBrowser, This->hMenu, &omw);
 	    TRACE("-- after fnInsertMenusSB\n");
 
-	    /*build the top level menu get the menu item's text*/
-	    strcpy(szText,"dummy 31");
+            mii.cbSize = sizeof(mii);
+            mii.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_STATE;
+            mii.fType = MFT_STRING;
+            mii.fState = MFS_ENABLED;
+            mii.wID = 0;
+            mii.hSubMenu = ShellView_BuildFileMenu(This);
+            mii.hbmpChecked = NULL;
+            mii.hbmpUnchecked = NULL;
+            mii.dwItemData = 0;
+            /* build the top level menu get the menu item's text */
+            mii.dwTypeData = (LPWSTR)dummyW;
+            mii.cch = 0;
+            mii.hbmpItem = NULL;
 
-	    ZeroMemory(&mii, sizeof(mii));
-	    mii.cbSize = sizeof(mii);
-	    mii.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_STATE;
-	    mii.fType = MFT_STRING;
-	    mii.fState = MFS_ENABLED;
-	    mii.dwTypeData = szText;
-	    mii.hSubMenu = ShellView_BuildFileMenu(This);
+            /* insert our menu into the menu bar */
+            if (mii.hSubMenu)
+                InsertMenuItemW(This->hMenu, FCIDM_MENU_HELP, FALSE, &mii);
 
-	    /*insert our menu into the menu bar*/
-	    if(mii.hSubMenu)
+            /* get the view menu so we can merge with it */
+            memset(&mii, 0, sizeof(mii));
+            mii.cbSize = sizeof(mii);
+            mii.fMask = MIIM_SUBMENU;
+
+            if (GetMenuItemInfoW(This->hMenu, FCIDM_MENU_VIEW, FALSE, &mii))
+                ShellView_MergeViewMenu(This, mii.hSubMenu);
+
+            /* add the items that should only be added if we have the focus */
+	    if (SVUIA_ACTIVATE_FOCUS == uState)
 	    {
-	      InsertMenuItemA(This->hMenu, FCIDM_MENU_HELP, FALSE, &mii);
+                /* get the file menu so we can merge with it */
+                memset(&mii, 0, sizeof(mii));
+                mii.cbSize = sizeof(mii);
+                mii.fMask = MIIM_SUBMENU;
+
+                if (GetMenuItemInfoW(This->hMenu, FCIDM_MENU_FILE, FALSE, &mii))
+                    ShellView_MergeFileMenu(This, mii.hSubMenu);
 	    }
 
-	    /*get the view menu so we can merge with it*/
-	    ZeroMemory(&mii, sizeof(mii));
-	    mii.cbSize = sizeof(mii);
-	    mii.fMask = MIIM_SUBMENU;
-
-	    if(GetMenuItemInfoA(This->hMenu, FCIDM_MENU_VIEW, FALSE, &mii))
-	    {
-	      ShellView_MergeViewMenu(This, mii.hSubMenu);
-	    }
-
-	    /*add the items that should only be added if we have the focus*/
-	    if(SVUIA_ACTIVATE_FOCUS == uState)
-	    {
-	      /*get the file menu so we can merge with it */
-	      ZeroMemory(&mii, sizeof(mii));
-	      mii.cbSize = sizeof(mii);
-	      mii.fMask = MIIM_SUBMENU;
-
-	      if(GetMenuItemInfoA(This->hMenu, FCIDM_MENU_FILE, FALSE, &mii))
-	      {
-	        ShellView_MergeFileMenu(This, mii.hSubMenu);
-	      }
-	    }
-	    TRACE("-- before fnSetMenuSB\n");
-	    IShellBrowser_SetMenuSB(This->pShellBrowser, This->hMenu, 0, This->hWnd);
-	  }
+            TRACE("-- before fnSetMenuSB\n");
+            IShellBrowser_SetMenuSB(This->pShellBrowser, This->hMenu, 0, This->hWnd);
 	}
-	This->uState = uState;
-	TRACE("--\n");
-	return S_OK;
+    }
+    This->uState = uState;
+    TRACE("--\n");
+    return S_OK;
 }
 
 /**********************************************************
@@ -1273,7 +1278,7 @@ static LRESULT ShellView_OnCommand(IShellViewImpl * This,DWORD dwCmdID, DWORD dw
             This->ListViewSortInfo.nHeaderID = dwCmdID - 0x30;
 	    This->ListViewSortInfo.bIsAscending = TRUE;
 	    This->ListViewSortInfo.nLastHeaderID = This->ListViewSortInfo.nHeaderID;
-	    SendMessageA(This->hWndList, LVM_SORTITEMS, (WPARAM) &This->ListViewSortInfo, (LPARAM)ShellView_ListViewCompareItems);
+	    SendMessageW(This->hWndList, LVM_SORTITEMS, (WPARAM) &This->ListViewSortInfo, (LPARAM)ShellView_ListViewCompareItems);
 	    break;
 
 	  default:
@@ -1548,7 +1553,7 @@ static LRESULT ShellView_OnNotify(IShellViewImpl * This, UINT CtlID, LPNMHDR lpn
                                             MAKELPARAM (LVNI_SELECTED, 0));
 		  item.iItem = item_index;
 		  item.mask = LVIF_PARAM;
-		  SendMessageA(This->hWndList, LVM_GETITEMA, 0, (LPARAM) &item);
+		  SendMessageW(This->hWndList, LVM_GETITEMW, 0, (LPARAM) &item);
 
 		  /* get item pidl */
 		  pItems[i] = (LPITEMIDLIST)item.lParam;
@@ -1655,7 +1660,7 @@ static LRESULT CALLBACK ShellView_WndProc(HWND hWnd, UINT uMessage, WPARAM wPara
 	  case WM_SHOWWINDOW:	UpdateWindow(pThis->hWndList);
 				break;
 
-	  case WM_GETDLGCODE:   return SendMessageA(pThis->hWndList,uMessage,0,0);
+	  case WM_GETDLGCODE:   return SendMessageW(pThis->hWndList, uMessage, 0, 0);
 
 	  case WM_DESTROY:	
 	  			RevokeDragDrop(pThis->hWnd);
@@ -1875,7 +1880,7 @@ static HRESULT WINAPI IShellView_fnRefresh(IShellView2 * iface)
 {
 	IShellViewImpl *This = (IShellViewImpl *)iface;
 
-	TRACE("(%p)\n",This);
+	TRACE("(%p)\n", This);
 
 	SendMessageW(This->hWndList, LVM_DELETEALLITEMS, 0, 0);
 	ShellView_FillList(This);
@@ -2018,6 +2023,7 @@ static HRESULT WINAPI IShellView2_fnCreateViewWindow2(IShellView2* iface, LPSV2C
 {
     IShellViewImpl *This = (IShellViewImpl *)iface;
     WNDCLASSW wc;
+    HRESULT hr;
     HWND wnd;
 
     TRACE("(%p)->(view_params %p)\n", iface, view_params);
@@ -2033,6 +2039,8 @@ static HRESULT WINAPI IShellView2_fnCreateViewWindow2(IShellView2* iface, LPSV2C
     TRACE("-- vmode %#x, flags %#x, left %d, top %d, right %d, bottom %d\n",
             view_params->pfs->ViewMode, view_params->pfs->fFlags, view_params->prcView->left,
             view_params->prcView->top, view_params->prcView->right, view_params->prcView->bottom);
+
+    if (!view_params->psbOwner) return E_UNEXPECTED;
 
     /* Set up the member variables */
     This->pShellBrowser = view_params->psbOwner;
@@ -2060,19 +2068,17 @@ static HRESULT WINAPI IShellView2_fnCreateViewWindow2(IShellView2* iface, LPSV2C
 
     /* Get our parent window */
     IShellBrowser_AddRef(This->pShellBrowser);
-    IShellBrowser_GetWindow(This->pShellBrowser, &(This->hWndParent));
+    IShellBrowser_GetWindow(This->pShellBrowser, &This->hWndParent);
 
     /* Try to get the ICommDlgBrowserInterface, adds a reference !!! */
     This->pCommDlgBrowser = NULL;
-    if (SUCCEEDED(IShellBrowser_QueryInterface(This->pShellBrowser, &IID_ICommDlgBrowser, (void **)&This->pCommDlgBrowser)))
-    {
+    hr = IShellBrowser_QueryInterface(This->pShellBrowser, &IID_ICommDlgBrowser, (void **)&This->pCommDlgBrowser);
+    if (hr == S_OK)
         TRACE("-- CommDlgBrowser %p\n", This->pCommDlgBrowser);
-    }
 
     /* If our window class has not been registered, then do so */
     if (!GetClassInfoW(shell32_hInstance, SV_CLASS_NAME, &wc))
     {
-        ZeroMemory(&wc, sizeof(wc));
         wc.style            = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc      = ShellView_WndProc;
         wc.cbClsExtra       = 0;
@@ -2095,7 +2101,11 @@ static HRESULT WINAPI IShellView2_fnCreateViewWindow2(IShellView2* iface, LPSV2C
 
     CheckToolbar(This);
 
-    if (!wnd) return E_FAIL;
+    if (!wnd)
+    {
+        IShellBrowser_Release(This->pShellBrowser);
+        return E_FAIL;
+    }
 
     SetWindowPos(wnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     UpdateWindow(wnd);
@@ -2397,17 +2407,25 @@ static HRESULT WINAPI ISVDropTarget_DragOver(IDropTarget *iface, DWORD grfKeySta
     return drag_notify_subitem(This, grfKeyState, pt, pdwEffect);
 }
 
-static HRESULT WINAPI ISVDropTarget_DragLeave(IDropTarget *iface) {
+static HRESULT WINAPI ISVDropTarget_DragLeave(IDropTarget *iface)
+{
     IShellViewImpl *This = impl_from_IDropTarget(iface);
 
-    IDropTarget_DragLeave(This->pCurDropTarget);
+    if (This->pCurDropTarget)
+    {
+        IDropTarget_DragLeave(This->pCurDropTarget);
+        IDropTarget_Release(This->pCurDropTarget);
+        This->pCurDropTarget = NULL;
+    }
 
-    IDropTarget_Release(This->pCurDropTarget);
-    IDataObject_Release(This->pCurDataObject);
-    This->pCurDataObject = NULL;
-    This->pCurDropTarget = NULL;
+    if (This->pCurDataObject)
+    {
+        IDataObject_Release(This->pCurDataObject);
+        This->pCurDataObject = NULL;
+    }
+
     This->iDragOverItem = 0;
-     
+
     return S_OK;
 }
 
@@ -2701,9 +2719,19 @@ static HRESULT WINAPI IFView_SetCurrentViewMode(IFolderView *iface, UINT mode)
 
 static HRESULT WINAPI IFView_GetFolder(IFolderView *iface, REFIID riid, void **ppv)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%s, %p), stub\n", This, debugstr_guid(riid), ppv);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+
+    TRACE("(%p)->(%s, %p)\n", This, debugstr_guid(riid), ppv);
+
+    if (!ppv) return E_POINTER;
+
+    if (IsEqualIID(riid, &IID_IShellFolder))
+    {
+        *ppv = This->pSFParent;
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
 }
 
 static HRESULT WINAPI IFView_Item(IFolderView *iface, int index, PITEMID_CHILD *ppidl)
@@ -2715,9 +2743,16 @@ static HRESULT WINAPI IFView_Item(IFolderView *iface, int index, PITEMID_CHILD *
 
 static HRESULT WINAPI IFView_ItemCount(IFolderView *iface, UINT flags, int *items)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%u %p), stub\n", This, flags, items);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+
+    TRACE("(%p)->(%u %p)\n", This, flags, items);
+
+    if (flags != SVGIO_ALLVIEW)
+        FIXME("some flags unsupported, %x\n", flags & ~SVGIO_ALLVIEW);
+
+    *items = SendMessageW(This->hWndList, LVM_GETITEMCOUNT, 0, 0);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_Items(IFolderView *iface, UINT flags, REFIID riid, void **ppv)
@@ -2729,16 +2764,24 @@ static HRESULT WINAPI IFView_Items(IFolderView *iface, UINT flags, REFIID riid, 
 
 static HRESULT WINAPI IFView_GetSelectionMarkedItem(IFolderView *iface, int *item)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%p), stub\n", This, item);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+
+    TRACE("(%p)->(%p)\n", This, item);
+
+    *item = SendMessageW(This->hWndList, LVM_GETSELECTIONMARK, 0, 0);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_GetFocusedItem(IFolderView *iface, int *item)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%p), stub\n", This, item);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+
+    TRACE("(%p)->(%p)\n", This, item);
+
+    *item = SendMessageW(This->hWndList, LVM_GETNEXTITEM, -1, LVNI_FOCUSED);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_GetItemPosition(IFolderView *iface, PCUITEMID_CHILD pidl, POINT *ppt)
@@ -2750,9 +2793,22 @@ static HRESULT WINAPI IFView_GetItemPosition(IFolderView *iface, PCUITEMID_CHILD
 
 static HRESULT WINAPI IFView_GetSpacing(IFolderView *iface, POINT *pt)
 {
-	IShellViewImpl *This = impl_from_IFolderView(iface);
-	FIXME("(%p)->(%p), stub\n", This, pt);
-	return E_NOTIMPL;
+    IShellViewImpl *This = impl_from_IFolderView(iface);
+
+    TRACE("(%p)->(%p)\n", This, pt);
+
+    if (!This->hWndList) return S_FALSE;
+
+    if (pt)
+    {
+        DWORD ret;
+        ret = SendMessageW(This->hWndList, LVM_GETITEMSPACING, 0, 0);
+
+        pt->x = LOWORD(ret);
+        pt->y = HIWORD(ret);
+    }
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IFView_GetDefaultSpacing(IFolderView *iface, POINT *pt)

@@ -111,6 +111,11 @@ AddService=MountMgr,0x800,MountMgrService
 AddService=Spooler,0,SpoolerService
 AddService=TermService,0,TerminalServices
 
+[DefaultInstall.ntamd64.Services]
+AddService=MountMgr,0x800,MountMgrService
+AddService=Spooler,0,SpoolerService
+AddService=TermService,0,TerminalServices
+
 [Strings]
 MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
 Mci32Str="Software\Microsoft\Windows NT\CurrentVersion\MCI32"
@@ -423,6 +428,7 @@ HKLM,%CurrentVersion%\PreviewHandlers,,16
 HKLM,%CurrentVersion%\RunServices,"winemenubuilder",2,"%11%\winemenubuilder.exe -a -r"
 HKLM,%CurrentVersion%\Setup,"BootDir",,"%30%"
 HKLM,%CurrentVersion%\Setup,"SharedDir",,"%25%"
+HKLM,%CurrentVersion%\Shell Extensions\Approved,,16
 HKLM,%CurrentVersion%\Uninstall,,16
 HKLM,%CurrentVersionNT%,"RegisteredOrganization",2,""
 HKLM,%CurrentVersionNT%,"RegisteredOwner",2,""
@@ -615,6 +621,7 @@ HKLM,Software\Microsoft\TermServLicensing,,16
 HKLM,Software\Microsoft\Transaction Server,,16
 HKLM,Software\Policies,,16
 HKLM,Software\Registered Applications,,16
+HKLM,System\CurrentControlSet\Control\Lsa,,16
 HKLM,System\CurrentControlSet\Control\VMM32Files,,16
 HKCU,AppEvents\Schemes\Apps\Explorer\Navigating\.Current,,,""
 HKCU,Software\Microsoft\Protected Storage System Provider,,16

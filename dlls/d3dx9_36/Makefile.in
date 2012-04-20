@@ -9,6 +9,7 @@ IMPORTS   = d3d9 gdi32 user32 kernel32
 C_SRCS = \
 	core.c \
 	d3dx9_36_main.c \
+	effect.c \
 	font.c \
 	math.c \
 	mesh.c \
@@ -21,5 +22,3 @@ C_SRCS = \
 RC_SRCS = version.rc
 
 @MAKE_DLL_RULES@
-
-@DEPENDENCIES@  # everything below this line is overwritten by make depend

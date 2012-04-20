@@ -148,15 +148,13 @@ $(ALL_TEST_DIRS:%=%/__test__): dummy
 $(ALL_TEST_DIRS:%=%/__crosstest__): dummy
 	@cd `dirname $@` && $(MAKE) crosstest
 
-$(ALL_TEST_DIRS:%=%/__testclean__): dummy
-	@cd `dirname $@` && $(MAKE) testclean
-
 check test:: $(ALL_TEST_DIRS:%=%/__test__)
 crosstest:: $(ALL_TEST_DIRS:%=%/__crosstest__)
-testclean:: $(ALL_TEST_DIRS:%=%/__testclean__)
 
-.PHONY: check test testclean crosstest $(ALL_TEST_DIRS:%=%/__test__) \
-	$(ALL_TEST_DIRS:%=%/__crosstest__) $(ALL_TEST_DIRS:%=%/__testclean__)
+testclean::
+	$(RM) $(ALL_TEST_DIRS:%=%/*.ok)
+
+.PHONY: check test testclean crosstest $(ALL_TEST_DIRS:%=%/__test__) $(ALL_TEST_DIRS:%=%/__crosstest__)
 
 # Rules for auto documentation
 
@@ -223,15 +221,6 @@ tools/winegcc/__install__ tools/winegcc/__install-dev__: tools/winegcc
 tools/wmc/__install__ tools/wmc/__install-dev__: tools/wmc
 tools/wrc/__install__ tools/wrc/__install-dev__: tools/wrc
 tools/__depend__: $(MAKEDEP)
-
-RECURSE_TARGETS = \
-	__clean__ \
-	__install__ \
-	__instal-dev__ \
-	__install-lib__ \
-	__uninstall__ \
-	__testclean__ \
-	__crosstest__
 
 $(MAKEDEP): include/config.h tools/Makefile
 	@cd $(TOOLSDIR)/tools && $(MAKE) makedep$(TOOLSEXT)
