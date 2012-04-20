@@ -1,8 +1,16 @@
-wine-unstable (1.1.40-1) UNRELEASED; urgency=low
+wine-unstable (1.1.40-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.40, released Mar 5, 2010.
+    - Support for Wow64 registry redirection.
+    - Increased coverage of MSI standard actions.
+    - Various Wordpad improvements.
+    - Many shell fixes for better IE support.
+    - Improved support for typelibs.
+    - Better GL card detection.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 21:39:20 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 21:39:30 -0400
 
 wine-unstable (1.1.39-0.1) unstable; urgency=low
 
