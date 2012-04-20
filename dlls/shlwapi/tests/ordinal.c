@@ -28,6 +28,7 @@
 #include "oaidl.h"
 #include "ocidl.h"
 #include "mlang.h"
+#include "shlwapi.h"
 
 /* Function ptrs for ordinal calls */
 static HMODULE hShlwapi;
@@ -43,6 +44,9 @@ static HRESULT(WINAPI *pIConnectionPoint_SimpleInvoke)(IConnectionPoint*,DISPID,
 static HRESULT(WINAPI *pIConnectionPoint_InvokeWithCancel)(IConnectionPoint*,DISPID,DISPPARAMS*,DWORD,DWORD);
 static HRESULT(WINAPI *pConnectToConnectionPoint)(IUnknown*,REFIID,BOOL,IUnknown*, LPDWORD,IConnectionPoint **);
 static HRESULT(WINAPI *pSHPropertyBag_ReadLONG)(IPropertyBag *,LPCWSTR,LPLONG);
+static LONG   (WINAPI *pSHSetWindowBits)(HWND, INT, UINT, UINT);
+static INT    (WINAPI *pSHFormatDateTimeA)(const FILETIME UNALIGNED*, DWORD*, LPSTR, UINT);
+static INT    (WINAPI *pSHFormatDateTimeW)(const FILETIME UNALIGNED*, DWORD*, LPWSTR, UINT);
 
 static HMODULE hmlang;
 static HRESULT (WINAPI *pLcidToRfc1766A)(LCID, LPSTR, INT);
@@ -1397,31 +1401,429 @@ static void test_SHPropertyBag_ReadLONG(void)
     IUnknown_Release((IUnknown*)pb);
 }
 
+
+
+static void test_SHSetWindowBits(void)
+{
+    HWND hwnd;
+    DWORD style, styleold;
+    WNDCLASSA clsA;
+
+    if(!pSHSetWindowBits)
+    {
+        win_skip("SHSetWindowBits is not available\n");
+        return;
+    }
+
+    clsA.style = 0;
+    clsA.lpfnWndProc = DefWindowProcA;
+    clsA.cbClsExtra = 0;
+    clsA.cbWndExtra = 0;
+    clsA.hInstance = GetModuleHandleA(NULL);
+    clsA.hIcon = 0;
+    clsA.hCursor = LoadCursorA(0, IDC_ARROW);
+    clsA.hbrBackground = NULL;
+    clsA.lpszMenuName = NULL;
+    clsA.lpszClassName = "Shlwapi test class";
+    RegisterClassA(&clsA);
+
+    hwnd = CreateWindowA("Shlwapi test class", "Test", WS_VISIBLE, 0, 0, 100, 100,
+                          NULL, NULL, GetModuleHandle(NULL), 0);
+    ok(IsWindow(hwnd), "failed to create window\n");
+
+    /* null window */
+    SetLastError(0xdeadbeef);
+    style = pSHSetWindowBits(NULL, GWL_STYLE, 0, 0);
+    ok(style == 0, "expected 0 retval, got %d\n", style);
+    ok(GetLastError() == ERROR_INVALID_WINDOW_HANDLE ||
+        broken(GetLastError() == 0xdeadbeef), /* Win9x/WinMe */
+        "expected ERROR_INVALID_WINDOW_HANDLE, got %d\n", GetLastError());
+
+    /* zero mask, zero flags */
+    styleold = GetWindowLongA(hwnd, GWL_STYLE);
+    style = pSHSetWindowBits(hwnd, GWL_STYLE, 0, 0);
+    ok(styleold == style, "expected old style\n");
+    ok(styleold == GetWindowLongA(hwnd, GWL_STYLE), "expected to keep old style\n");
+
+    /* test mask */
+    styleold = GetWindowLongA(hwnd, GWL_STYLE);
+    ok(styleold & WS_VISIBLE, "expected WS_VISIBLE\n");
+    style = pSHSetWindowBits(hwnd, GWL_STYLE, WS_VISIBLE, 0);
+
+    ok(style == styleold, "expected previous style, got %x\n", style);
+    ok((GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE) == 0, "expected updated style\n");
+
+    /* test mask, unset style bit used */
+    styleold = GetWindowLongA(hwnd, GWL_STYLE);
+    style = pSHSetWindowBits(hwnd, GWL_STYLE, WS_VISIBLE, 0);
+    ok(style == styleold, "expected previous style, got %x\n", style);
+    ok(styleold == GetWindowLongA(hwnd, GWL_STYLE), "expected to keep old style\n");
+
+    /* set back with flags */
+    styleold = GetWindowLongA(hwnd, GWL_STYLE);
+    style = pSHSetWindowBits(hwnd, GWL_STYLE, WS_VISIBLE, WS_VISIBLE);
+    ok(style == styleold, "expected previous style, got %x\n", style);
+    ok(GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE, "expected updated style\n");
+
+    /* reset and try to set without a mask */
+    pSHSetWindowBits(hwnd, GWL_STYLE, WS_VISIBLE, 0);
+    ok((GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE) == 0, "expected updated style\n");
+    styleold = GetWindowLongA(hwnd, GWL_STYLE);
+    style = pSHSetWindowBits(hwnd, GWL_STYLE, 0, WS_VISIBLE);
+    ok(style == styleold, "expected previous style, got %x\n", style);
+    ok((GetWindowLongA(hwnd, GWL_STYLE) & WS_VISIBLE) == 0, "expected updated style\n");
+
+    DestroyWindow(hwnd);
+
+    UnregisterClassA("Shlwapi test class", GetModuleHandleA(NULL));
+}
+
+static void test_SHFormatDateTimeA(void)
+{
+    FILETIME UNALIGNED filetime;
+    CHAR buff[100], buff2[100], buff3[100];
+    SYSTEMTIME st;
+    DWORD flags;
+    INT ret;
+
+    if(!pSHFormatDateTimeA)
+    {
+        win_skip("pSHFormatDateTimeA isn't available\n");
+        return;
+    }
+
+if (0)
+{
+    /* crashes on native */
+    ret = pSHFormatDateTimeA(NULL, NULL, NULL, 0);
+}
+
+    GetLocalTime(&st);
+    SystemTimeToFileTime(&st, &filetime);
+    /* SHFormatDateTime expects input as utc */
+    LocalFileTimeToFileTime(&filetime, &filetime);
+
+    /* no way to get required buffer length here */
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeA(&filetime, NULL, NULL, 0);
+    ok(ret == 0, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    buff[0] = 'a'; buff[1] = 0;
+    ret = pSHFormatDateTimeA(&filetime, NULL, buff, 0);
+    ok(ret == 0, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(buff[0] == 'a', "expected same string, got %s\n", buff);
+
+    /* all combinations documented as invalid succeeded */
+    flags = FDTF_SHORTTIME | FDTF_LONGTIME;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    flags = FDTF_SHORTDATE | FDTF_LONGDATE;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    flags = FDTF_SHORTDATE | FDTF_LTRDATE | FDTF_RTLDATE;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef ||
+        broken(GetLastError() == ERROR_INVALID_FLAGS), /* Win9x/WinMe */
+        "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    /* now check returned strings */
+    flags = FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_LONGTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    /* both time flags */
+    flags = FDTF_LONGTIME | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_SHORTDATE;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_LONGDATE;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    /* both date flags */
+    flags = FDTF_LONGDATE | FDTF_SHORTDATE;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    /* various combinations of date/time flags */
+    flags = FDTF_LONGDATE | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d, length %d\n", ret, lstrlenA(buff)+1);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    strcat(buff2, ", ");
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3));
+    ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
+    strcat(buff2, buff3);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_LONGDATE | FDTF_LONGTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    strcat(buff2, ", ");
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3));
+    ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
+    strcat(buff2, buff3);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_SHORTDATE | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    strcat(buff2, " ");
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3));
+    ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
+    strcat(buff2, buff3);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+
+    flags = FDTF_SHORTDATE | FDTF_LONGTIME;
+    ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
+    ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
+    ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
+    ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
+    strcat(buff2, " ");
+    ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3));
+    ok(ret == lstrlenA(buff3)+1, "got %d\n", ret);
+    strcat(buff2, buff3);
+    ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
+}
+
+static void test_SHFormatDateTimeW(void)
+{
+    FILETIME UNALIGNED filetime;
+    WCHAR buff[100], buff2[100], buff3[100];
+    SYSTEMTIME st;
+    DWORD flags;
+    INT ret;
+    static const WCHAR spaceW[] = {' ',0};
+    static const WCHAR commaW[] = {',',' ',0};
+
+    if(!pSHFormatDateTimeW)
+    {
+        win_skip("pSHFormatDateTimeW isn't available\n");
+        return;
+    }
+
+if (0)
+{
+    /* crashes on native */
+    ret = pSHFormatDateTimeW(NULL, NULL, NULL, 0);
+}
+
+    GetLocalTime(&st);
+    SystemTimeToFileTime(&st, &filetime);
+    /* SHFormatDateTime expects input as utc */
+    LocalFileTimeToFileTime(&filetime, &filetime);
+
+    /* no way to get required buffer length here */
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeW(&filetime, NULL, NULL, 0);
+    ok(ret == 0, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    SetLastError(0xdeadbeef);
+    buff[0] = 'a'; buff[1] = 0;
+    ret = pSHFormatDateTimeW(&filetime, NULL, buff, 0);
+    ok(ret == 0, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+    ok(buff[0] == 'a', "expected same string\n");
+
+    /* all combinations documented as invalid succeeded */
+    flags = FDTF_SHORTTIME | FDTF_LONGTIME;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    flags = FDTF_SHORTDATE | FDTF_LONGDATE;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    flags = FDTF_SHORTDATE | FDTF_LTRDATE | FDTF_RTLDATE;
+    SetLastError(0xdeadbeef);
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ok(GetLastError() == 0xdeadbeef ||
+        broken(GetLastError() == ERROR_INVALID_FLAGS), /* Win9x/WinMe */
+        "expected 0xdeadbeef, got %d\n", GetLastError());
+
+    /* now check returned strings */
+    flags = FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    SetLastError(0xdeadbeef);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    if (ret == 0 && GetLastError() == ERROR_CALL_NOT_IMPLEMENTED)
+    {
+        win_skip("Needed W-functions are not implemented\n");
+        return;
+    }
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    flags = FDTF_LONGTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    /* both time flags */
+    flags = FDTF_LONGTIME | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal string\n");
+
+    flags = FDTF_SHORTDATE;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    flags = FDTF_LONGDATE;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    /* both date flags */
+    flags = FDTF_LONGDATE | FDTF_SHORTDATE;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    /* various combinations of date/time flags */
+    flags = FDTF_LONGDATE | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d, length %d\n", ret, lstrlenW(buff)+1);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    lstrcatW(buff2, commaW);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff3)+1, "got %d\n", ret);
+    lstrcatW(buff2, buff3);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    flags = FDTF_LONGDATE | FDTF_LONGTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    lstrcatW(buff2, commaW);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff3)+1, "got %d\n", ret);
+    lstrcatW(buff2, buff3);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    flags = FDTF_SHORTDATE | FDTF_SHORTTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    lstrcatW(buff2, spaceW);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff3, sizeof(buff3)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff3)+1, "got %d\n", ret);
+    lstrcatW(buff2, buff3);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+
+    flags = FDTF_SHORTDATE | FDTF_LONGTIME;
+    ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
+    ret = GetDateFormatW(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff2)+1, "got %d\n", ret);
+    lstrcatW(buff2, spaceW);
+    ret = GetTimeFormatW(LOCALE_USER_DEFAULT, 0, &st, NULL, buff3, sizeof(buff3)/sizeof(WCHAR));
+    ok(ret == lstrlenW(buff3)+1, "got %d\n", ret);
+    lstrcatW(buff2, buff3);
+    ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
+}
+
+static void init_pointers(void)
+{
+#define MAKEFUNC(f, ord) (p##f = (void*)GetProcAddress(hShlwapi, (LPSTR)(ord)))
+    MAKEFUNC(SHAllocShared, 7);
+    MAKEFUNC(SHLockShared, 8);
+    MAKEFUNC(SHUnlockShared, 9);
+    MAKEFUNC(SHFreeShared, 10);
+    MAKEFUNC(GetAcceptLanguagesA, 14);
+    MAKEFUNC(SHSetWindowBits, 165);
+    MAKEFUNC(ConnectToConnectionPoint, 168);
+    MAKEFUNC(SHSearchMapInt, 198);
+    MAKEFUNC(SHPackDispParams, 282);
+    MAKEFUNC(IConnectionPoint_InvokeWithCancel, 283);
+    MAKEFUNC(IConnectionPoint_SimpleInvoke, 284);
+    MAKEFUNC(SHFormatDateTimeA, 353);
+    MAKEFUNC(SHFormatDateTimeW, 354);
+    MAKEFUNC(SHPropertyBag_ReadLONG, 496);
+#undef MAKEFUNC
+}
+
 START_TEST(ordinal)
 {
-  hShlwapi = GetModuleHandleA("shlwapi.dll");
+    hShlwapi = GetModuleHandleA("shlwapi.dll");
 
-  pGetAcceptLanguagesA = (void*)GetProcAddress(hShlwapi, (LPSTR)14);
-  pSHSearchMapInt = (void*)GetProcAddress(hShlwapi, (LPSTR)198);
-  pSHAllocShared=(void*)GetProcAddress(hShlwapi,(char*)7);
-  pSHLockShared=(void*)GetProcAddress(hShlwapi,(char*)8);
-  pSHUnlockShared=(void*)GetProcAddress(hShlwapi,(char*)9);
-  pSHFreeShared=(void*)GetProcAddress(hShlwapi,(char*)10);
-  pSHPackDispParams=(void*)GetProcAddress(hShlwapi,(char*)282);
-  pIConnectionPoint_SimpleInvoke=(void*)GetProcAddress(hShlwapi,(char*)284);
-  pIConnectionPoint_InvokeWithCancel=(void*)GetProcAddress(hShlwapi,(char*)283);
-  pConnectToConnectionPoint=(void*)GetProcAddress(hShlwapi,(char*)168);
-  pSHPropertyBag_ReadLONG=(void*)GetProcAddress(hShlwapi,(char*)496);
+    init_pointers();
 
-  hmlang = LoadLibraryA("mlang.dll");
-  pLcidToRfc1766A = (void *)GetProcAddress(hmlang, "LcidToRfc1766A");
+    hmlang = LoadLibraryA("mlang.dll");
+    pLcidToRfc1766A = (void *)GetProcAddress(hmlang, "LcidToRfc1766A");
 
-  test_GetAcceptLanguagesA();
-  test_SHSearchMapInt();
-  test_alloc_shared();
-  test_fdsa();
-  test_GetShellSecurityDescriptor();
-  test_SHPackDispParams();
-  test_IConnectionPoint();
-  test_SHPropertyBag_ReadLONG();
+    test_GetAcceptLanguagesA();
+    test_SHSearchMapInt();
+    test_alloc_shared();
+    test_fdsa();
+    test_GetShellSecurityDescriptor();
+    test_SHPackDispParams();
+    test_IConnectionPoint();
+    test_SHPropertyBag_ReadLONG();
+    test_SHSetWindowBits();
+    test_SHFormatDateTimeA();
+    test_SHFormatDateTimeW();
 }

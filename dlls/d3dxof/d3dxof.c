@@ -3,9 +3,6 @@
  *
  * Copyright 2004, 2008 Christian Costa
  *
- * This file contains the (internal) driver registration functions,
- * driver enumeration APIs and DirectDraw creation functions.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -42,6 +39,8 @@ WINE_DEFAULT_DEBUG_CHANNEL(d3dxof);
 #define XOFFILE_FORMAT_VERSION_303   MAKEFOUR('0','3','0','3')
 #define XOFFILE_FORMAT_BINARY        MAKEFOUR('b','i','n',' ')
 #define XOFFILE_FORMAT_TEXT          MAKEFOUR('t','x','t',' ')
+#define XOFFILE_FORMAT_BINARY_MSZIP  MAKEFOUR('b','z','i','p')
+#define XOFFILE_FORMAT_TEXT_MSZIP    MAKEFOUR('t','z','i','p')
 #define XOFFILE_FORMAT_COMPRESSED    MAKEFOUR('c','m','p',' ')
 #define XOFFILE_FORMAT_FLOAT_BITS_32 MAKEFOUR('0','0','3','2')
 #define XOFFILE_FORMAT_FLOAT_BITS_64 MAKEFOUR('0','0','6','4')
@@ -57,6 +56,15 @@ static const struct IDirectXFileSaveObjectVtbl IDirectXFileSaveObject_Vtbl;
 static HRESULT IDirectXFileDataReferenceImpl_Create(IDirectXFileDataReferenceImpl** ppObj);
 static HRESULT IDirectXFileEnumObjectImpl_Create(IDirectXFileEnumObjectImpl** ppObj);
 static HRESULT IDirectXFileSaveObjectImpl_Create(IDirectXFileSaveObjectImpl** ppObj);
+
+/* FOURCC to string conversion for debug messages */
+const char *debugstr_fourcc(DWORD fourcc)
+{
+    if (!fourcc) return "'null'";
+    return wine_dbg_sprintf ("\'%c%c%c%c\'",
+		(char)(fourcc), (char)(fourcc >> 8),
+        (char)(fourcc >> 16), (char)(fourcc >> 24));
+}
 
 HRESULT IDirectXFileImpl_Create(IUnknown* pUnkOuter, LPVOID* ppObj)
 {
@@ -89,7 +97,7 @@ static HRESULT WINAPI IDirectXFileImpl_QueryInterface(IDirectXFile* iface, REFII
   if (IsEqualGUID(riid, &IID_IUnknown)
       || IsEqualGUID(riid, &IID_IDirectXFile))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }
@@ -247,16 +255,18 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
     goto error;
   }
 
-  if ((header[2] != XOFFILE_FORMAT_BINARY) && (header[2] != XOFFILE_FORMAT_TEXT) && (header[2] != XOFFILE_FORMAT_COMPRESSED))
+  if ((header[2] != XOFFILE_FORMAT_BINARY) && (header[2] != XOFFILE_FORMAT_TEXT) &&
+      (header[2] != XOFFILE_FORMAT_BINARY_MSZIP) && (header[2] != XOFFILE_FORMAT_TEXT_MSZIP))
   {
+    WARN("File type %s unknown\n", debugstr_fourcc(header[2]));
     hr = DXFILEERR_BADFILETYPE;
     goto error;
   }
 
-  if (header[2] == XOFFILE_FORMAT_COMPRESSED)
+  if ((header[2] == XOFFILE_FORMAT_BINARY_MSZIP) || (header[2] == XOFFILE_FORMAT_TEXT_MSZIP))
   {
-    FIXME("Compressed formats not supported yet\n");
-    hr = DXFILEERR_BADVALUE;
+    FIXME("Compressed format %s not supported yet\n", debugstr_fourcc(header[2]));
+    hr = DXFILEERR_BADALLOC;
     goto error;
   }
 
@@ -293,7 +303,7 @@ static HRESULT WINAPI IDirectXFileImpl_CreateEnumObject(IDirectXFile* iface, LPV
   {
     if (!parse_template(&object->buf))
     {
-      TRACE("Template is not correct\n");
+      WARN("Template is not correct\n");
       hr = DXFILEERR_BADVALUE;
       goto error;
     }
@@ -381,19 +391,21 @@ static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LP
 
   read_bytes(&buf, &token_header, 4);
 
-  if ((token_header != XOFFILE_FORMAT_BINARY) && (token_header != XOFFILE_FORMAT_TEXT) && (token_header != XOFFILE_FORMAT_COMPRESSED))
+  if ((token_header != XOFFILE_FORMAT_BINARY) && (token_header != XOFFILE_FORMAT_TEXT) &&
+      (token_header != XOFFILE_FORMAT_BINARY_MSZIP) && (token_header != XOFFILE_FORMAT_TEXT_MSZIP))
+  {
+    WARN("File type %s unknown\n", debugstr_fourcc(token_header));
     return DXFILEERR_BADFILETYPE;
+  }
+
+  if ((token_header == XOFFILE_FORMAT_BINARY_MSZIP) || (token_header == XOFFILE_FORMAT_TEXT_MSZIP))
+  {
+    FIXME("Compressed format %s not supported yet\n", debugstr_fourcc(token_header));
+    return DXFILEERR_BADALLOC;
+  }
 
   if (token_header == XOFFILE_FORMAT_TEXT)
-  {
     buf.txt = TRUE;
-  }
-
-  if (token_header == XOFFILE_FORMAT_COMPRESSED)
-  {
-    FIXME("Compressed formats not supported yet\n");
-    return DXFILEERR_BADVALUE;
-  }
 
   read_bytes(&buf, &token_header, 4);
 
@@ -406,7 +418,7 @@ static HRESULT WINAPI IDirectXFileImpl_RegisterTemplates(IDirectXFile* iface, LP
   {
     if (!parse_template(&buf))
     {
-      TRACE("Template is not correct\n");
+      WARN("Template is not correct\n");
       return DXFILEERR_BADVALUE;
     }
     else
@@ -470,7 +482,7 @@ static HRESULT WINAPI IDirectXFileBinaryImpl_QueryInterface(IDirectXFileBinary* 
       || IsEqualGUID(riid, &IID_IDirectXFileObject)
       || IsEqualGUID(riid, &IID_IDirectXFileBinary))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }
@@ -598,7 +610,7 @@ static HRESULT WINAPI IDirectXFileDataImpl_QueryInterface(IDirectXFileData* ifac
       || IsEqualGUID(riid, &IID_IDirectXFileObject)
       || IsEqualGUID(riid, &IID_IDirectXFileData))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }
@@ -841,7 +853,7 @@ static HRESULT WINAPI IDirectXFileDataReferenceImpl_QueryInterface(IDirectXFileD
       || IsEqualGUID(riid, &IID_IDirectXFileObject)
       || IsEqualGUID(riid, &IID_IDirectXFileDataReference))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }
@@ -973,7 +985,7 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_QueryInterface(IDirectXFileEnum
   if (IsEqualGUID(riid, &IID_IUnknown)
       || IsEqualGUID(riid, &IID_IDirectXFileEnumObject))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }
@@ -1034,6 +1046,23 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
     return DXFILEERR_NOMOREOBJECTS;
   }
 
+  /* Check if there are templates defined before the object */
+  while (This->buf.rem_bytes && is_template_available(&This->buf))
+  {
+    if (!parse_template(&This->buf))
+    {
+      WARN("Template is not correct\n");
+      hr = DXFILEERR_BADVALUE;
+      goto error;
+    }
+    else
+    {
+      TRACE("Template successfully parsed:\n");
+      if (TRACE_ON(d3dxof))
+        dump_template(This->pDirectXFile->xtemplates, &This->pDirectXFile->xtemplates[This->pDirectXFile->nb_xtemplates - 1]);
+    }
+  }
+
   if (!This->buf.rem_bytes)
     return DXFILEERR_NOMOREOBJECTS;
 
@@ -1070,7 +1099,7 @@ static HRESULT WINAPI IDirectXFileEnumObjectImpl_GetNextDataObject(IDirectXFileE
 
   if (!parse_object(&This->buf))
   {
-    TRACE("Object is not correct\n");
+    WARN("Object is not correct\n");
     hr = DXFILEERR_PARSEERROR;
     goto error;
   }
@@ -1166,7 +1195,7 @@ static HRESULT WINAPI IDirectXFileSaveObjectImpl_QueryInterface(IDirectXFileSave
   if (IsEqualGUID(riid, &IID_IUnknown)
       || IsEqualGUID(riid, &IID_IDirectXFileSaveObject))
   {
-    IClassFactory_AddRef(iface);
+    IUnknown_AddRef(iface);
     *ppvObject = This;
     return S_OK;
   }

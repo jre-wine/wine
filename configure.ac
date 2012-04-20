@@ -11,6 +11,10 @@ AC_CONFIG_SRCDIR(server/atom.c)
 AC_CONFIG_HEADERS(include/config.h)
 AC_CONFIG_AUX_DIR(tools)
 
+dnl autoconf versions before 2.63b don't have AS_VAR_APPEND
+m4_ifdef([AS_VAR_APPEND],,[as_fn_append () { eval $[1]=\$$[1]\$[2]; }
+AC_DEFUN([AS_VAR_APPEND],[as_fn_append $1 $2])])dnl
+
 dnl **** Command-line arguments ****
 
 AC_ARG_ENABLE(win16, AS_HELP_STRING([--disable-win16],[do not include Win16 support]))
@@ -161,6 +165,7 @@ case $host in
     ;;
   *-mingw32*|*-cygwin*)
     enable_win16=${enable_win16:-no}
+    CFLAGS="$CFLAGS -D_WIN32"
     ;;
   i[[3456789]]86*)
     enable_win16=${enable_win16:-yes}
@@ -1415,6 +1420,9 @@ dnl **** Check for libpng ****
 if test "$ac_cv_header_png_h" = "yes"
 then
     WINE_CHECK_SONAME(png,png_create_read_struct,,,-lm -lz,[[libpng[[0-9]]*]])
+    AC_CHECK_LIB(png,png_set_expand_gray_1_2_4_to_8,
+	[AC_DEFINE(HAVE_PNG_SET_EXPAND_GRAY_1_2_4_TO_8,1,[Define to 1 if libpng has the png_set_expand_gray_1_2_4_to_8 function.])]
+	,,-lm -lz)
 elif test -n "$X_CFLAGS" -a "x$with_png" != "xno"
 then
     dnl libpng is in the X directory on Mac OS X
@@ -1427,6 +1435,8 @@ then
     then
         AC_SUBST(PNGINCL,"$X_CFLAGS")
         WINE_CHECK_SONAME(png,png_create_read_struct,,,[$X_LIBS -lm -lz],[[libpng[[0-9]]*]])
+        AC_CHECK_LIB(png,png_set_expand_gray_1_2_4_to_8,
+		[AC_DEFINE(HAVE_PNG_SET_EXPAND_GRAY_1_2_4_TO_8,1)],,[$X_LIBS -lm -lz])
     fi
 fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
@@ -2084,13 +2094,6 @@ esac
 dnl **** Generate output files ****
 
 AC_SUBST(DEPENDENCIES,["### Dependencies:
-
-.INIT: Makefile
-.BEGIN: Makefile
-.MAKEFILEDEPS:
-Makefile: dummy
-	-\$(MAKEDEP) \$(MAKEDEPFLAGS) -C\$(SRCDIR) -S\$(TOPSRCDIR) -T\$(TOPOBJDIR) \$(EXTRAINCL) \$(DEPEND_SRCS)
-
 \$(OBJS) \$(CROSSOBJS): \$(IDL_GEN_HEADERS) \$(BISON_SRCS:.y=.tab.h)
 \$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
 \$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)
@@ -2238,6 +2241,7 @@ WINE_CONFIG_DLL(dinput,,[dinput],[data_formats.c])
 WINE_CONFIG_TEST(dlls/dinput/tests)
 WINE_CONFIG_DLL(dinput8,,[dinput8])
 WINE_CONFIG_DLL(dispdib.dll16,enable_win16)
+WINE_CONFIG_DLL(dispex)
 WINE_CONFIG_DLL(display.drv16,enable_win16)
 WINE_CONFIG_DLL(dmband)
 WINE_CONFIG_DLL(dmcompos)
@@ -2693,7 +2697,7 @@ fi
 WINE_PRINT_MESSAGES
 
 echo "
-$as_me: Finished.  Do '${ac_make} depend && ${ac_make}' to compile Wine.
+$as_me: Finished.  Do '${ac_make}' to compile Wine.
 " >&AS_MESSAGE_FD
 
 dnl Local Variables:

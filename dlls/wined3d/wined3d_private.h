@@ -61,15 +61,16 @@ enum fixup_channel_source
     CHANNEL_SOURCE_Y = 3,
     CHANNEL_SOURCE_Z = 4,
     CHANNEL_SOURCE_W = 5,
-    CHANNEL_SOURCE_YUV0 = 6,
-    CHANNEL_SOURCE_YUV1 = 7,
+    CHANNEL_SOURCE_COMPLEX0 = 6,
+    CHANNEL_SOURCE_COMPLEX1 = 7,
 };
 
-enum yuv_fixup
+enum complex_fixup
 {
-    YUV_FIXUP_YUY2 = 0,
-    YUV_FIXUP_UYVY = 1,
-    YUV_FIXUP_YV12 = 2,
+    COMPLEX_FIXUP_YUY2 = 0,
+    COMPLEX_FIXUP_UYVY = 1,
+    COMPLEX_FIXUP_YV12 = 2,
+    COMPLEX_FIXUP_P8   = 3,
 };
 
 #include <pshpack2.h>
@@ -103,14 +104,14 @@ static inline struct color_fixup_desc create_color_fixup_desc(
     return fixup;
 }
 
-static inline struct color_fixup_desc create_yuv_fixup_desc(enum yuv_fixup yuv_fixup)
+static inline struct color_fixup_desc create_complex_fixup_desc(enum complex_fixup complex_fixup)
 {
     struct color_fixup_desc fixup =
     {
-        0, yuv_fixup & (1 << 0) ? CHANNEL_SOURCE_YUV1 : CHANNEL_SOURCE_YUV0,
-        0, yuv_fixup & (1 << 1) ? CHANNEL_SOURCE_YUV1 : CHANNEL_SOURCE_YUV0,
-        0, yuv_fixup & (1 << 2) ? CHANNEL_SOURCE_YUV1 : CHANNEL_SOURCE_YUV0,
-        0, yuv_fixup & (1 << 3) ? CHANNEL_SOURCE_YUV1 : CHANNEL_SOURCE_YUV0,
+        0, complex_fixup & (1 << 0) ? CHANNEL_SOURCE_COMPLEX1 : CHANNEL_SOURCE_COMPLEX0,
+        0, complex_fixup & (1 << 1) ? CHANNEL_SOURCE_COMPLEX1 : CHANNEL_SOURCE_COMPLEX0,
+        0, complex_fixup & (1 << 2) ? CHANNEL_SOURCE_COMPLEX1 : CHANNEL_SOURCE_COMPLEX0,
+        0, complex_fixup & (1 << 3) ? CHANNEL_SOURCE_COMPLEX1 : CHANNEL_SOURCE_COMPLEX0,
     };
     return fixup;
 }
@@ -120,19 +121,19 @@ static inline BOOL is_identity_fixup(struct color_fixup_desc fixup)
     return !memcmp(&fixup, &COLOR_FIXUP_IDENTITY, sizeof(fixup));
 }
 
-static inline BOOL is_yuv_fixup(struct color_fixup_desc fixup)
+static inline BOOL is_complex_fixup(struct color_fixup_desc fixup)
 {
-    return fixup.x_source == CHANNEL_SOURCE_YUV0 || fixup.x_source == CHANNEL_SOURCE_YUV1;
+    return fixup.x_source == CHANNEL_SOURCE_COMPLEX0 || fixup.x_source == CHANNEL_SOURCE_COMPLEX1;
 }
 
-static inline enum yuv_fixup get_yuv_fixup(struct color_fixup_desc fixup)
+static inline enum complex_fixup get_complex_fixup(struct color_fixup_desc fixup)
 {
-    enum yuv_fixup yuv_fixup = 0;
-    if (fixup.x_source == CHANNEL_SOURCE_YUV1) yuv_fixup |= (1 << 0);
-    if (fixup.y_source == CHANNEL_SOURCE_YUV1) yuv_fixup |= (1 << 1);
-    if (fixup.z_source == CHANNEL_SOURCE_YUV1) yuv_fixup |= (1 << 2);
-    if (fixup.w_source == CHANNEL_SOURCE_YUV1) yuv_fixup |= (1 << 3);
-    return yuv_fixup;
+    enum complex_fixup complex_fixup = 0;
+    if (fixup.x_source == CHANNEL_SOURCE_COMPLEX1) complex_fixup |= (1 << 0);
+    if (fixup.y_source == CHANNEL_SOURCE_COMPLEX1) complex_fixup |= (1 << 1);
+    if (fixup.z_source == CHANNEL_SOURCE_COMPLEX1) complex_fixup |= (1 << 2);
+    if (fixup.w_source == CHANNEL_SOURCE_COMPLEX1) complex_fixup |= (1 << 3);
+    return complex_fixup;
 }
 
 void *wined3d_rb_alloc(size_t size) DECLSPEC_HIDDEN;
@@ -625,7 +626,7 @@ struct wined3d_shader_frontend
     void (*shader_read_dst_param)(void *data, const DWORD **ptr, struct wined3d_shader_dst_param *dst_param,
             struct wined3d_shader_src_param *dst_rel_addr);
     void (*shader_read_semantic)(const DWORD **ptr, struct wined3d_shader_semantic *semantic);
-    void (*shader_read_comment)(const DWORD **ptr, const char **comment);
+    void (*shader_read_comment)(const DWORD **ptr, const char **comment, UINT *comment_size);
     BOOL (*shader_is_end)(void *data, const DWORD **ptr);
 };
 
@@ -1029,6 +1030,15 @@ struct wined3d_event_query
     struct wined3d_context *context;
 };
 
+enum wined3d_event_query_result
+{
+    WINED3D_EVENT_QUERY_OK,
+    WINED3D_EVENT_QUERY_WAITING,
+    WINED3D_EVENT_QUERY_NOT_STARTED,
+    WINED3D_EVENT_QUERY_WRONG_THREAD,
+    WINED3D_EVENT_QUERY_ERROR
+};
+
 struct wined3d_context
 {
     const struct wined3d_gl_info *gl_info;
@@ -1238,7 +1248,7 @@ typedef struct WineD3D_PixelFormat
 {
     int iPixelFormat; /* WGL pixel format */
     int iPixelType; /* WGL pixel type e.g. WGL_TYPE_RGBA_ARB, WGL_TYPE_RGBA_FLOAT_ARB or WGL_TYPE_COLORINDEX_ARB */
-    int redSize, greenSize, blueSize, alphaSize;
+    int redSize, greenSize, blueSize, alphaSize, colorSize;
     int depthSize, stencilSize;
     BOOL windowDrawable;
     BOOL pbufferDrawable;
@@ -1247,13 +1257,23 @@ typedef struct WineD3D_PixelFormat
     int numSamples;
 } WineD3D_PixelFormat;
 
+enum wined3d_gl_vendor
+{
+    GL_VENDOR_WINE,
+    GL_VENDOR_APPLE,
+    GL_VENDOR_ATI,
+    GL_VENDOR_INTEL,
+    GL_VENDOR_MESA,
+    GL_VENDOR_NVIDIA,
+};
+
+
 enum wined3d_pci_vendor
 {
-    VENDOR_WINE                     = 0x0000,
-    VENDOR_MESA                     = 0x0001,
-    VENDOR_ATI                      = 0x1002,
-    VENDOR_NVIDIA                   = 0x10de,
-    VENDOR_INTEL                    = 0x8086,
+    HW_VENDOR_WINE                     = 0x0000,
+    HW_VENDOR_ATI                      = 0x1002,
+    HW_VENDOR_NVIDIA                   = 0x10de,
+    HW_VENDOR_INTEL                    = 0x8086,
 };
 
 enum wined3d_pci_device
@@ -1644,7 +1664,6 @@ struct IWineD3DDeviceImpl
     UINT                    NumberOfPalettes;
     PALETTEENTRY            **palettes;
     UINT                    currentPalette;
-    UINT                    paletteConversionShader;
 
     /* For rendering to a texture using glCopyTexImage */
     GLenum                  *draw_buffers;

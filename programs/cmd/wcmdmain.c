@@ -1411,6 +1411,15 @@ void WCMD_execute (WCHAR *command, WCHAR *redirects,
     WCMD_parse (p, quals, param1, param2);
     WINE_TRACE("param1: %s, param2: %s\n", wine_dbgstr_w(param1), wine_dbgstr_w(param2));
 
+    if((p[0] == '/') && (p[1] == '?')) {
+
+      /*this is a help request for a program*/
+      i = WCMD_HELP;
+      memcpy(p, whichcmd, count * sizeof(WCHAR));
+      p[count] = '\0';
+
+    }
+
     switch (i) {
 
       case WCMD_ATTRIB:
@@ -2174,6 +2183,7 @@ void WCMD_free_commands(CMD_LIST *cmds) {
       CMD_LIST *thisCmd = cmds;
       cmds = cmds->nextcommand;
       HeapFree(GetProcessHeap(), 0, thisCmd->command);
+      HeapFree(GetProcessHeap(), 0, thisCmd->redirects);
       HeapFree(GetProcessHeap(), 0, thisCmd);
     }
 }

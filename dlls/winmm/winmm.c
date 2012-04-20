@@ -964,7 +964,7 @@ UINT WINAPI midiOutPrepareHeader(HMIDIOUT hMidiOut,
 
     TRACE("(%p, %p, %d)\n", hMidiOut, lpMidiOutHdr, uSize);
 
-    if (lpMidiOutHdr == NULL || uSize < sizeof (MIDIHDR))
+    if (lpMidiOutHdr == NULL || uSize < offsetof(MIDIHDR,dwOffset))
 	return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get(hMidiOut, MMDRV_MIDIOUT, FALSE)) == NULL)
@@ -984,7 +984,7 @@ UINT WINAPI midiOutUnprepareHeader(HMIDIOUT hMidiOut,
 
     TRACE("(%p, %p, %d)\n", hMidiOut, lpMidiOutHdr, uSize);
 
-    if (lpMidiOutHdr == NULL || uSize < sizeof (MIDIHDR))
+    if (lpMidiOutHdr == NULL || uSize < offsetof(MIDIHDR,dwOffset))
 	return MMSYSERR_INVALPARAM;
 
     if (!(lpMidiOutHdr->dwFlags & MHDR_PREPARED)) {
@@ -1258,7 +1258,7 @@ UINT WINAPI midiInPrepareHeader(HMIDIIN hMidiIn,
 
     TRACE("(%p, %p, %d)\n", hMidiIn, lpMidiInHdr, uSize);
 
-    if (lpMidiInHdr == NULL || uSize < sizeof (MIDIHDR))
+    if (lpMidiInHdr == NULL || uSize < offsetof(MIDIHDR,dwOffset))
 	return MMSYSERR_INVALPARAM;
 
     if ((wmld = MMDRV_Get(hMidiIn, MMDRV_MIDIIN, FALSE)) == NULL)
@@ -1277,7 +1277,7 @@ UINT WINAPI midiInUnprepareHeader(HMIDIIN hMidiIn,
 
     TRACE("(%p, %p, %d)\n", hMidiIn, lpMidiInHdr, uSize);
 
-    if (lpMidiInHdr == NULL || uSize < sizeof (MIDIHDR))
+    if (lpMidiInHdr == NULL || uSize < offsetof(MIDIHDR,dwOffset))
 	return MMSYSERR_INVALPARAM;
 
     if (!(lpMidiInHdr->dwFlags & MHDR_PREPARED)) {
@@ -1485,13 +1485,15 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	/* this is not quite what MS doc says... */
 	midiOutReset(lpMidiStrm->hDevice);
 	/* empty list of already submitted buffers */
-	for (lpMidiHdr = lpMidiStrm->lpMidiHdr; lpMidiHdr; lpMidiHdr = lpMidiHdr->lpNext) {
-	    lpMidiHdr->dwFlags |= MHDR_DONE;
-	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
+	for (lpMidiHdr = lpMidiStrm->lpMidiHdr; lpMidiHdr; ) {
+	    LPMIDIHDR lphdr = lpMidiHdr;
+	    lpMidiHdr = lpMidiHdr->lpNext;
+	    lphdr->dwFlags |= MHDR_DONE;
+	    lphdr->dwFlags &= ~MHDR_INQUEUE;
 
 	    DriverCallback(lpwm->mod.dwCallback, lpMidiStrm->wFlags,
 			   (HDRVR)lpMidiStrm->hDevice, MM_MOM_DONE,
-			   lpwm->mod.dwInstance, (DWORD_PTR)lpMidiHdr, 0);
+			   lpwm->mod.dwInstance, (DWORD_PTR)lphdr, 0);
 	}
 	lpMidiStrm->lpMidiHdr = 0;
 	SetEvent(lpMidiStrm->hEvent);
@@ -1575,7 +1577,6 @@ static	BOOL	MMSYSTEM_MidiStream_MessageHandler(WINE_MIDIStream* lpMidiStrm, LPWI
 	lpMidiHdr->lpNext = 0;
 	lpMidiHdr->dwFlags |= MHDR_INQUEUE;
 	lpMidiHdr->dwFlags &= ~MHDR_DONE;
-	lpMidiHdr->dwOffset = 0;
 
 	break;
     default:
@@ -1596,8 +1597,7 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
     DWORD		dwToGo;
     DWORD		dwCurrTC;
     LPMIDIHDR		lpMidiHdr;
-    LPMIDIEVENT 	me;
-    LPBYTE		lpData = 0;
+    DWORD		dwOffset;
 
     TRACE("(%p)!\n", lpMidiStrm);
 
@@ -1616,23 +1616,21 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
     /* midiStreamOpen is waiting for ack */
     SetEvent(lpMidiStrm->hEvent);
 
-    for (;;) {
-	lpMidiHdr = lpMidiStrm->lpMidiHdr;
-	if (!lpMidiHdr) {
-	    /* for first message, block until one arrives, then process all that are available */
-	    GetMessageA(&msg, 0, 0, 0);
-	    do {
-		if (!MMSYSTEM_MidiStream_MessageHandler(lpMidiStrm, lpwm, &msg))
-		    goto the_end;
-	    } while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE));
-	    lpData = 0;
-	    continue;
-	}
+start_header:
+    lpMidiHdr = lpMidiStrm->lpMidiHdr;
+    if (!lpMidiHdr) {
+	/* for first message, block until one arrives, then process all that are available */
+	GetMessageA(&msg, 0, 0, 0);
+	do {
+	    if (!MMSYSTEM_MidiStream_MessageHandler(lpMidiStrm, lpwm, &msg))
+		goto the_end;
+	} while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE));
+	goto start_header;
+    }
 
-	if (!lpData)
-	    lpData = (LPBYTE)lpMidiHdr->lpData;
-
-	me = (LPMIDIEVENT)(lpData + lpMidiHdr->dwOffset);
+    dwOffset = 0;
+    while (dwOffset + offsetof(MIDIEVENT,dwParms) <= lpMidiHdr->dwBytesRecorded) {
+	LPMIDIEVENT me = (LPMIDIEVENT)(lpMidiHdr->lpData+dwOffset);
 
 	/* do we have to wait ? */
 	if (me->dwDeltaTime) {
@@ -1648,8 +1646,11 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
 		    while (PeekMessageA(&msg, 0, 0, 0, PM_REMOVE)) {
 			if (!MMSYSTEM_MidiStream_MessageHandler(lpMidiStrm, lpwm, &msg))
 			    goto the_end;
+			/* is lpMidiHdr still current? */
+			if (lpMidiHdr != lpMidiStrm->lpMidiHdr) {
+			    goto start_header;
+			}
 		    }
-		    lpData = 0;
 		} else {
 		    /* timeout, so me->dwDeltaTime is elapsed, can break the while loop */
 		    break;
@@ -1679,25 +1680,26 @@ static	DWORD	CALLBACK	MMSYSTEM_MidiStream_Player(LPVOID pmt)
 	    break;
 	}
 	if (me->dwEvent & MEVT_F_CALLBACK) {
+	    /* native fills dwOffset regardless of the cbMidiHdr size argument to midiStreamOut */
+	    lpMidiHdr->dwOffset = dwOffset;
 	    DriverCallback(lpwm->mod.dwCallback, lpMidiStrm->wFlags,
 			   (HDRVR)lpMidiStrm->hDevice, MM_MOM_POSITIONCB,
 			   lpwm->mod.dwInstance, (LPARAM)lpMidiHdr, 0L);
 	}
-	lpMidiHdr->dwOffset += sizeof(MIDIEVENT) - sizeof(me->dwParms);
+	dwOffset += offsetof(MIDIEVENT,dwParms);
 	if (me->dwEvent & MEVT_F_LONG)
-	    lpMidiHdr->dwOffset += (MEVT_EVENTPARM(me->dwEvent) + 3) & ~3;
-	if (lpMidiHdr->dwOffset >= lpMidiHdr->dwBytesRecorded) {
-	    /* done with this header */
-	    lpMidiHdr->dwFlags |= MHDR_DONE;
-	    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
-
-	    lpMidiStrm->lpMidiHdr = lpMidiHdr->lpNext;
-	    DriverCallback(lpwm->mod.dwCallback, lpMidiStrm->wFlags,
-			   (HDRVR)lpMidiStrm->hDevice, MM_MOM_DONE,
-			   lpwm->mod.dwInstance, (DWORD_PTR)lpMidiHdr, 0);
-	    lpData = 0;
-	}
+	    dwOffset += (MEVT_EVENTPARM(me->dwEvent) + 3) & ~3;
     }
+    /* done with this header */
+    lpMidiStrm->lpMidiHdr = lpMidiHdr->lpNext;
+    lpMidiHdr->dwFlags |= MHDR_DONE;
+    lpMidiHdr->dwFlags &= ~MHDR_INQUEUE;
+
+    DriverCallback(lpwm->mod.dwCallback, lpMidiStrm->wFlags,
+		   (HDRVR)lpMidiStrm->hDevice, MM_MOM_DONE,
+		   lpwm->mod.dwInstance, (DWORD_PTR)lpMidiHdr, 0);
+    goto start_header;
+
 the_end:
     TRACE("End of thread\n");
     return 0;
@@ -1817,7 +1819,7 @@ MMRESULT WINAPI midiStreamOut(HMIDISTRM hMidiStrm, LPMIDIHDR lpMidiHdr,
 
     TRACE("(%p, %p, %u)!\n", hMidiStrm, lpMidiHdr, cbMidiHdr);
 
-    if (cbMidiHdr < sizeof(MIDIHDR) || !lpMidiHdr || !lpMidiHdr->lpData
+    if (cbMidiHdr < offsetof(MIDIHDR,dwOffset) || !lpMidiHdr || !lpMidiHdr->lpData
 	|| lpMidiHdr->dwBufferLength < lpMidiHdr->dwBytesRecorded)
 	return MMSYSERR_INVALPARAM;
     /* FIXME: Native additionaly checks if the MIDIEVENTs in lpData

@@ -42,7 +42,7 @@ AC_CACHE_VAL(ac_Lib,
 LIBS="-l$1 $5 $LIBS"
   AC_LINK_IFELSE([AC_LANG_CALL([], [$2])],
   [case "$LIBEXT" in
-    dll) ;;
+    dll) AS_VAR_SET(ac_Lib,[`$ac_cv_path_LDD conftest.exe | grep "$1" | sed -e "s/dll.*/dll/"';2,$d'`]) ;;
     dylib) AS_VAR_SET(ac_Lib,[`otool -L conftest$ac_exeext | grep "ac_lib_pattern\\.[[0-9A-Za-z.]]*dylib" | sed -e "s/^.*\/\(ac_lib_pattern\.[[0-9A-Za-z.]]*dylib\).*$/\1/"';2,$d'`]) ;;
     *) AS_VAR_SET(ac_Lib,[`$ac_cv_path_LDD conftest$ac_exeext | grep "ac_lib_pattern\\.$LIBEXT" | sed -e "s/^.*\(ac_lib_pattern\.$LIBEXT[[^	 ]]*\).*$/\1/"';2,$d'`]) ;;
   esac])
@@ -75,7 +75,7 @@ AC_DEFUN([WINE_TRY_CFLAGS],
 AC_CACHE_CHECK([whether the compiler supports $1], ac_var,
 [ac_wine_try_cflags_saved=$CFLAGS
 CFLAGS="$CFLAGS $1"
-AC_LINK_IFELSE(AC_LANG_SOURCE([int main(int argc, char *argv[]) { return 0; }]),
+AC_LINK_IFELSE(AC_LANG_SOURCE([[int main(int argc, char **argv) { return 0; }]]),
                [AS_VAR_SET(ac_var,yes)], [AS_VAR_SET(ac_var,no)])
 CFLAGS=$ac_wine_try_cflags_saved])
 AS_IF([test AS_VAR_GET(ac_var) = yes],
@@ -144,9 +144,47 @@ AC_DEFUN([WINE_CONFIG_HELPERS],
 {
     AS_VAR_APPEND($[1]," \\$as_nl	$[2]")
 }
+
 wine_fn_append_rule ()
 {
     AS_VAR_APPEND($[1],"$as_nl$[2]")
+}
+
+wine_fn_config_makefile ()
+{
+    ac_dir=$[1]
+    ac_deps=$[2]
+    wine_fn_append_file ALL_DIRS $ac_dir
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"\$(RECURSE_TARGETS:%=$ac_dir/%) $ac_dir: $ac_dir/Makefile
+$ac_dir/Makefile $ac_dir/__depend__: $ac_dir/Makefile.in config.status $ac_deps
+	@./config.status --file $ac_dir/Makefile && cd $ac_dir && \$(MAKE) depend"
+}
+
+wine_fn_config_lib ()
+{
+    ac_name=$[1]
+    wine_fn_append_file ALL_STATIC_LIBS dlls/$ac_name/lib$ac_name.a
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS \
+"dlls/$ac_name/__install__ dlls/$ac_name/__install-dev__: dlls/$ac_name
+dlls/$ac_name dlls/$ac_name/lib$ac_name.cross.a: tools/widl tools/winebuild tools/winegcc include
+dlls/$ac_name/lib$ac_name.cross.a: dlls/$ac_name/Makefile dummy
+	@cd dlls/$ac_name && \$(MAKE) lib$ac_name.cross.a"
+}
+
+wine_fn_config_test ()
+{
+    ac_dir=$[1]
+    ac_name=$[2]
+    wine_fn_append_file ALL_TEST_BINARIES $ac_name.exe
+    wine_fn_append_rule ALL_WINETEST_DEPENDS \
+"$ac_name.exe: \$(TOPOBJDIR)/$ac_dir/$ac_name.exe$DLLEXT
+	cp \$(TOPOBJDIR)/$ac_dir/$ac_name.exe$DLLEXT \$[@] && \$(STRIP) \$[@]
+$ac_name.rc:
+	echo \"$ac_name.exe TESTRES \\\"$ac_name.exe\\\"\" >\$[@] || (\$(RM) \$[@] && false)
+$ac_name.res: $ac_name.rc $ac_name.exe"
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS "$ac_dir: __builddeps__"
+    wine_fn_append_rule ALL_MAKEFILE_DEPENDS "$ac_dir/__crosstest__: __buildcrossdeps__"
 }])
 
 dnl **** Define helper function to append a file to a makefile file list ****
@@ -191,16 +229,15 @@ dnl **** Create a makefile from config.status ****
 dnl
 dnl Usage: WINE_CONFIG_MAKEFILE(file,deps,var,enable)
 dnl
-AC_DEFUN([WINE_CONFIG_MAKEFILE],
-[m4_pushdef([ac_dir],m4_bpatsubst([$1],[^\(\(.*\)/\)?Makefile$],[\2]))dnl
+AC_DEFUN([WINE_CONFIG_MAKEFILE],[AC_REQUIRE([WINE_CONFIG_HELPERS])dnl
+m4_pushdef([ac_dir],m4_bpatsubst([$1],[^\(\(.*\)/\)?Makefile$],[\2]))dnl
 m4_pushdef([ac_name],m4_bpatsubst(ac_dir,[.*/\(.*\)$],[\1]))dnl
-m4_ifval(ac_dir,WINE_APPEND_FILE(ALL_DIRS,ac_dir))
+m4_if(ac_dir,,WINE_APPEND_RULE(ALL_MAKEFILE_DEPENDS,[$1: $1.in $2 config.status])
+AC_CONFIG_FILES([$1]),
+[wine_fn_config_makefile ac_dir m4_if(ac_dir,tools,[$2],["$2 \$(MAKEDEP)"])
 AS_VAR_PUSHDEF([ac_enable],m4_default([$4],[enable_]ac_name))dnl
 m4_ifval([$3],[test "x$ac_enable" != xno]m4_foreach([ac_var],[$3],[ && WINE_APPEND_FILE(ac_var,ac_dir)]))
-AS_VAR_POPDEF([ac_enable])dnl
-WINE_APPEND_RULE(ALL_MAKEFILE_DEPENDS,[m4_ifval(ac_dir,[\$(RECURSE_TARGETS:%=ac_dir/%) ac_dir: $1 \$(MAKEDEP)
-])[$1: ]m4_ifval([$2],[$1.in $2],[$1.in]) config.status])
-AC_CONFIG_FILES([$1])dnl
+AS_VAR_POPDEF([ac_enable])])dnl
 m4_popdef([ac_dir])dnl
 m4_popdef([ac_name])])
 
@@ -249,18 +286,10 @@ dnl **** Create a test makefile from config.status ****
 dnl
 dnl Usage: WINE_CONFIG_TEST(dir)
 dnl
-AC_DEFUN([WINE_CONFIG_TEST],
-[m4_pushdef([ac_suffix],m4_if(m4_substr([$1],0,9),[programs/],[.exe_test],[_test]))dnl
-m4_pushdef([ac_name],[m4_bpatsubst([$1],[.*/\(.*\)/tests$],[\1])]ac_suffix)dnl
-WINE_APPEND_RULE(ALL_MAKEFILE_DEPENDS,[$1: __builddeps__
-$1/__crosstest__: __buildcrossdeps__])
-WINE_APPEND_FILE(ALL_TEST_BINARIES,[ac_name.exe])
-WINE_APPEND_RULE(ALL_WINETEST_DEPENDS,
-[ac_name.exe: \$(TOPOBJDIR)/$1/ac_name.exe$DLLEXT
-	cp \$(TOPOBJDIR)/$1/ac_name.exe$DLLEXT \$[@] && \$(STRIP) \$[@]
-ac_name.rc:
-	echo \"ac_name.exe TESTRES \\\"ac_name.exe\\\"\" >\$[@] || (\$(RM) \$[@] && false)
-ac_name.res: ac_name.rc ac_name.exe])
+AC_DEFUN([WINE_CONFIG_TEST],[AC_REQUIRE([WINE_CONFIG_HELPERS])dnl
+m4_pushdef([ac_suffix],m4_if(m4_substr([$1],0,9),[programs/],[.exe_test],[_test]))dnl
+m4_pushdef([ac_name],[m4_bpatsubst([$1],[.*/\(.*\)/tests$],[\1])])dnl
+wine_fn_config_test $1 ac_name[]ac_suffix
 WINE_CONFIG_MAKEFILE([$1/Makefile],[Maketest.rules],[ALL_TEST_DIRS],[enable_tests])dnl
 m4_popdef([ac_suffix])dnl
 m4_popdef([ac_name])])
@@ -269,12 +298,8 @@ dnl **** Create a static lib makefile from config.status ****
 dnl
 dnl Usage: WINE_CONFIG_LIB(name)
 dnl
-AC_DEFUN([WINE_CONFIG_LIB],
-[WINE_APPEND_FILE(ALL_STATIC_LIBS,[dlls/$1/lib$1.a])
-WINE_APPEND_RULE(ALL_MAKEFILE_DEPENDS,[dlls/$1: tools/widl tools/winebuild tools/winegcc include
-dlls/$1/__install__ dlls/$1/__install-dev__: dlls/$1
-dlls/$1/lib$1.cross.a: dlls/$1/Makefile tools/widl tools/winebuild tools/winegcc include dummy
-	@cd dlls/$1 && \$(MAKE) \`basename \$[@]\`])
+AC_DEFUN([WINE_CONFIG_LIB],[AC_REQUIRE([WINE_CONFIG_HELPERS])dnl
+wine_fn_config_lib $1
 WINE_CONFIG_MAKEFILE([dlls/$1/Makefile],[dlls/Makeimplib.rules],[ALL_STATICLIB_DIRS])])
 
 dnl **** Add a message to the list displayed at the end ****
