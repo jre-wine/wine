@@ -1,8 +1,16 @@
-wine-unstable (1.1.39-1) UNRELEASED; urgency=low
+wine-unstable (1.1.39-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.39, released Feb 19, 2010.
+    - Support for registry symbolic links.
+    - Many MSI fixes.
+    - Build process improvements.
+    - MSXML cleanups and fixes.
+    - A number of MSHTML improvements.
+    - Various bug fixes.
+  * make sure destination wine dir exists in winedump build
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 21:15:40 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 21:18:32 -0400
 
 wine-unstable (1.1.38-0.1) unstable; urgency=low
 
