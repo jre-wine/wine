@@ -42,6 +42,7 @@ winedump$(EXEEXT): $(OBJS)
 	$(CC) $(CFLAGS) -o winedump$(EXEEXT) $(OBJS) $(LIBPORT) $(LDFLAGS)
 
 install install-dev:: $(PROGRAMS) $(MANPAGES) $(INSTALLDIRS)
+	mkdir -p $(DESTDIR)$(datadir)/wine$(DATASUFFIX)
 	$(INSTALL_PROGRAM) winedump$(EXEEXT) $(DESTDIR)$(bindir)/winedump$(EXEEXT)
 	$(INSTALL_DATA) winedump.man $(DESTDIR)$(mandir)/man$(prog_manext)/winedump.$(prog_manext)
 	$(INSTALL_SCRIPT) $(SRCDIR)/function_grep.pl $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/function_grep.pl
