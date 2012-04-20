@@ -1,8 +1,17 @@
-wine-unstable (1.1.41-1) UNRELEASED; urgency=low
+wine-unstable (1.1.41-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.41, released Mar 19, 2010.
+    - A wide range of Direct3D improvements.
+    - Support for SHA-256, SHA-384, and SHA-512 algorithms.
+    - A number of MSHTML fixes.
+    - Support for mp3 decoding on Mac OS X.
+    - Various widl improvements.
+    - More typelib fixes.
+    - OLE storage improvements.
+    - Various bug fixes.
 
- -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 21:58:57 -0400
+ -- Michael Gilbert <mgilbert@debian.org>  Thu, 19 Apr 2012 22:01:13 -0400
 
 wine-unstable (1.1.40-0.1) unstable; urgency=low
 
