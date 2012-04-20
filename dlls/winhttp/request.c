@@ -670,6 +670,24 @@ static BOOL query_headers( request_t *request, DWORD level, LPCWSTR name, LPVOID
         *buflen = len - sizeof(WCHAR);
         return ret;
     }
+    case WINHTTP_QUERY_STATUS_TEXT:
+    {
+        DWORD len = (strlenW( request->status_text ) + 1) * sizeof(WCHAR);
+        if (len > *buflen)
+        {
+            set_last_error( ERROR_INSUFFICIENT_BUFFER );
+            *buflen = len;
+            return FALSE;
+        }
+        else if (buffer)
+        {
+            strcpyW( buffer, request->status_text );
+            TRACE("returning string: %s\n", debugstr_w(buffer));
+            ret = TRUE;
+        }
+        *buflen = len - sizeof(WCHAR);
+        return ret;
+    }
     default:
     {
         if (attr >= sizeof(attribute_table)/sizeof(attribute_table[0]) || !attribute_table[attr])
@@ -911,7 +929,7 @@ static BOOL open_connection( request_t *request )
     send_callback( &request->hdr, WINHTTP_CALLBACK_STATUS_RESOLVING_NAME, connect->servername, strlenW(connect->servername) + 1 );
 
     slen = sizeof(connect->sockaddr);
-    if (!netconn_resolve( connect->servername, port, (struct sockaddr *)&connect->sockaddr, &slen )) return FALSE;
+    if (!netconn_resolve( connect->servername, port, (struct sockaddr *)&connect->sockaddr, &slen, request->resolve_timeout )) return FALSE;
     switch (connect->sockaddr.ss_family)
     {
     case AF_INET:

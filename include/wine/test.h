@@ -65,6 +65,14 @@ extern void winetest_wait_child_process( HANDLE process );
 extern const char *wine_dbgstr_wn( const WCHAR *str, int n );
 static inline const char *wine_dbgstr_w( const WCHAR *s ) { return wine_dbgstr_wn( s, -1 ); }
 
+/* strcmpW is avaiable for tests compiled under Wine, but not in standalone
+ * builds under Windows, so we reimplement it under a different name. */
+static inline int winetest_strcmpW( const WCHAR *str1, const WCHAR *str2 )
+{
+    while (*str1 && (*str1 == *str2)) { str1++; str2++; }
+    return *str1 - *str2;
+}
+
 #ifdef STANDALONE
 #define START_TEST(name) \
   static void func_##name(void); \
@@ -80,21 +88,21 @@ extern void winetest_vskip( const char *msg, va_list ap );
 
 #ifdef __GNUC__
 
-extern int winetest_ok( int condition, const char *msg, ... ) __attribute__((format (printf,2,3) ));
+extern void winetest_ok( int condition, const char *msg, ... ) __attribute__((format (printf,2,3) ));
 extern void winetest_skip( const char *msg, ... ) __attribute__((format (printf,1,2)));
 extern void winetest_win_skip( const char *msg, ... ) __attribute__((format (printf,1,2)));
 extern void winetest_trace( const char *msg, ... ) __attribute__((format (printf,1,2)));
 
 #else /* __GNUC__ */
 
-extern int winetest_ok( int condition, const char *msg, ... );
+extern void winetest_ok( int condition, const char *msg, ... );
 extern void winetest_skip( const char *msg, ... );
 extern void winetest_win_skip( const char *msg, ... );
 extern void winetest_trace( const char *msg, ... );
 
 #endif /* __GNUC__ */
 
-#define ok_(file, line)       (winetest_set_location(file, line), 0) ? 0 : winetest_ok
+#define ok_(file, line)       (winetest_set_location(file, line), 0) ? (void)0 : winetest_ok
 #define skip_(file, line)     (winetest_set_location(file, line), 0) ? (void)0 : winetest_skip
 #define win_skip_(file, line) (winetest_set_location(file, line), 0) ? (void)0 : winetest_win_skip
 #define trace_(file, line)    (winetest_set_location(file, line), 0) ? (void)0 : winetest_trace
@@ -322,15 +330,13 @@ int winetest_vok( int condition, const char *msg, va_list args )
     }
 }
 
-int winetest_ok( int condition, const char *msg, ... )
+void winetest_ok( int condition, const char *msg, ... )
 {
     va_list valist;
-    int rc;
 
     va_start(valist, msg);
-    rc=winetest_vok(condition, msg, valist);
+    winetest_vok(condition, msg, valist);
     va_end(valist);
-    return rc;
 }
 
 void winetest_trace( const char *msg, ... )

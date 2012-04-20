@@ -135,33 +135,27 @@ static BOOL spurious_message(LPMSG msg)
   return FALSE;
 }
 
+/* A single ok() in each code path allows to prefix this with todo_wine */
 static void test_notification(HWND hwnd, const char* command, WPARAM type)
 {   /* Use type 0 as meaning no message */
     MSG msg;
     BOOL seen;
     do { seen = PeekMessageA(&msg, hwnd, 0, 0, PM_REMOVE); }
     while(seen && spurious_message(&msg));
-    if(type==0)
-        ok(!seen, "Expect no message from command %s\n", command);
-    else
-        ok(seen, "PeekMessage should succeed for command %s\n", command);
-    if(seen) {
-        ok(msg.hwnd == hwnd, "Didn't get the handle to our test window\n");
-        ok(msg.message == MM_MCINOTIFY, "got %04x instead of MM_MCINOTIFY from command %s\n", msg.message, command);
-        ok(msg.wParam == type, "got %04lx instead of MCI_NOTIFY_xyz %04lx from command %s\n", msg.wParam, type, command);
+    if(type && !seen) {
+      /* We observe transient delayed notification, mostly on native.
+       * Notification is not always present right when mciSend returns. */
+      trace("Waiting for delayed notification from %s\n", command);
+      MsgWaitForMultipleObjects(0, NULL, FALSE, 3000, QS_POSTMESSAGE);
+      seen = PeekMessageA(&msg, hwnd, MM_MCINOTIFY, MM_MCINOTIFY, PM_REMOVE);
     }
-}
-static void test_notification1(HWND hwnd, const char* command, WPARAM type)
-{   /* This version works with todo_wine prefix. */
-    MSG msg;
-    BOOL seen;
-    do { seen = PeekMessageA(&msg, hwnd, 0, 0, PM_REMOVE); }
-    while(seen && spurious_message(&msg));
-    if(type==0)
-        ok(!seen, "Expect no message from command %s\n", command);
-    else if(seen)
-      ok(msg.message == MM_MCINOTIFY && msg.wParam == type,"got %04lx instead of MCI_NOTIFY_xyz %04lx from command %s\n", msg.wParam, type, command);
-    else ok(seen, "PeekMessage should succeed for command %s\n", command);
+    if(!seen)
+        ok(type==0, "Expect message %04lx from %s\n", type, command);
+    else if(msg.hwnd != hwnd)
+        ok(msg.hwnd == hwnd, "Didn't get the handle to our test window\n");
+    else if(msg.message != MM_MCINOTIFY)
+        ok(msg.message == MM_MCINOTIFY, "got %04x instead of MM_MCINOTIFY from command %s\n", msg.message, command);
+    else ok(msg.wParam == type, "got %04lx instead of MCI_NOTIFY_xyz %04lx from command %s\n", msg.wParam, type, command);
 }
 
 static void test_openCloseWAVE(HWND hwnd)
@@ -257,6 +251,7 @@ static void test_recordWAVE(HWND hwnd)
     WORD nch    = 1;
     WORD nbits  = 16;
     DWORD nsamp = 16000, expect;
+    UINT ndevs  = waveInGetNumDevs();
     MCIERROR err, ok_pcm;
     MCIDEVICEID wDeviceID;
     MCI_PARMS_UNION parm;
@@ -276,7 +271,7 @@ static void test_recordWAVE(HWND hwnd)
 
     /* In Wine, both MCI_Open and the individual drivers send notifications. */
     test_notification(hwnd, "open new", MCI_NOTIFY_SUCCESSFUL);
-    todo_wine test_notification1(hwnd, "open new no #2", 0);
+    todo_wine test_notification(hwnd, "open new no #2", 0);
 
     /* Do not query time format as string because result depends on locale! */
     parm.status.dwItem = MCI_STATUS_TIME_FORMAT;
@@ -299,18 +294,28 @@ static void test_recordWAVE(HWND hwnd)
 
     /* MCI appears to scan the available devices for support of this format,
      * returning MCIERR_OUTOFRANGE on machines with no sound.
+     * However some w2k8/w7 machines return no error when there's no wave
+     * input device (perhaps querying waveOutGetNumDevs instead of waveIn?),
+     * still the record command below fails with MCIERR_WAVE_INPUTSUNSUITABLE.
      * Don't skip here, record will fail below. */
     err = mciSendString("set x format tag pcm", NULL, 0, NULL);
     ok(!err || err==MCIERR_OUTOFRANGE,"mci set format tag pcm returned %s\n", dbg_mcierr(err));
     ok_pcm = err;
 
-    err = mciSendString("set x samplespersec 41000 alignment 4 channels 2", NULL, 0, NULL);
-    ok(err==ok_pcm,"mci set samples+align+channels returned %s\n", dbg_mcierr(err));
-
+    /* MSDN warns against not setting all wave format parameters.
+     * Indeed, it produces strange results, incl.
+     * inconsistent PCMWAVEFORMAT headers in the saved file.
+     */
+    err = mciSendString("set x bytespersec 22050 alignment 2 samplespersec 11025 channels 1 bitspersample 16", NULL, 0, NULL);
+    ok(err==ok_pcm,"mci set 5 wave parameters returned %s\n", dbg_mcierr(err));
     /* Investigate: on w2k, set samplespersec 22050 sets nChannels to 2!
      *  err = mciSendString("set x samplespersec 22050", NULL, 0, NULL);
      *  ok(!err,"mci set samplespersec returned %s\n", dbg_mcierr(err));
      */
+
+    /* Checks are generally performed immediately. */
+    err = mciSendString("set x bitspersample 4", NULL, 0, NULL);
+    todo_wine ok(err==MCIERR_OUTOFRANGE,"mci set bitspersample 4 returned %s\n", dbg_mcierr(err));
 
     parm.set.wFormatTag = WAVE_FORMAT_PCM;
     parm.set.nSamplesPerSec = nsamp;
@@ -327,7 +332,10 @@ static void test_recordWAVE(HWND hwnd)
     /* A few ME machines pass all tests except set format tag pcm! */
     err = mciSendString("record x to 2000 wait", NULL, 0, hwnd);
     ok(err || !ok_pcm,"can record yet set wave format pcm returned %s\n", dbg_mcierr(ok_pcm));
-    ok(!err || err==(ok_pcm==MCIERR_OUTOFRANGE ? MCIERR_WAVE_INPUTSUNSUITABLE : 0),"mci record to 2000 returned %s\n", dbg_mcierr(err));
+    if(!ndevs) todo_wine /* with sound disabled */
+    ok(ndevs>0 ? !err : err==MCIERR_WAVE_INPUTSUNSUITABLE,"mci record to 2000 returned %s\n", dbg_mcierr(err));
+    else
+    ok(ndevs>0 ? !err : err==MCIERR_WAVE_INPUTSUNSUITABLE,"mci record to 2000 returned %s\n", dbg_mcierr(err));
     if(err) {
         if (err==MCIERR_WAVE_INPUTSUNSUITABLE)
              skip("Please install audio driver. Everything is skipped.\n");
@@ -423,7 +431,7 @@ static void test_playWAVE(HWND hwnd)
     err = mciSendString("cue mysound output notify", NULL, 0, hwnd);
     ok(!err,"mci cue output after open file returned %s\n", dbg_mcierr(err));
     /* Notification is delayed as a play thread is started. */
-    todo_wine test_notification1(hwnd, "cue immediate", 0);
+    todo_wine test_notification(hwnd, "cue immediate", 0);
 
     /* Cue pretends to put the MCI into paused state. */
     err = mciSendString("status mysound mode", buf, sizeof(buf), hwnd);
@@ -438,14 +446,14 @@ static void test_playWAVE(HWND hwnd)
      * Guessed that from (flaky) status mode and late notification arrival. */
     err = mciSendString("play mysound from 0 to 0 notify", NULL, 0, hwnd);
     ok(!err,"mci play from 0 to 0 returned %s\n", dbg_mcierr(err));
-    todo_wine test_notification1(hwnd, "cue aborted by play", MCI_NOTIFY_ABORTED);
+    todo_wine test_notification(hwnd, "cue aborted by play", MCI_NOTIFY_ABORTED);
     /* play's own notification follows below */
 
     err = mciSendString("play mysound from 250 to 0", NULL, 0, NULL);
     ok(err==MCIERR_OUTOFRANGE,"mci play from 250 to 0 returned %s\n", dbg_mcierr(err));
 
     Sleep(50); /* Give play from 0 to 0 time to finish. */
-    todo_wine test_notification1(hwnd, "play from 0 to 0", MCI_NOTIFY_SUCCESSFUL);
+    todo_wine test_notification(hwnd, "play from 0 to 0", MCI_NOTIFY_SUCCESSFUL);
 
     err = mciSendString("status mysound mode", buf, sizeof(buf), hwnd);
     ok(!err,"mci status mode returned %s\n", dbg_mcierr(err));
@@ -505,7 +513,7 @@ static void test_playWAVE(HWND hwnd)
     /* Another play from == to testcase */
     err = mciSendString("play mysound to 250 wait notify", NULL, 0, hwnd);
     ok(!err,"mci play (from 250) to 250 returned %s\n", dbg_mcierr(err));
-    todo_wine test_notification1(hwnd,"play to 250 wait notify",MCI_NOTIFY_SUCCESSFUL);
+    todo_wine test_notification(hwnd,"play to 250 wait notify",MCI_NOTIFY_SUCCESSFUL);
 
     err = mciSendString("cue mysound output", NULL, 0, NULL);
     ok(!err,"mci cue output after play returned %s\n", dbg_mcierr(err));
@@ -705,7 +713,7 @@ static void test_AutoOpenWAVE(HWND hwnd)
     /* This test used(?) to cause intermittent crashes when Wine exits, after
      * fixme:winmm:MMDRV_Exit Closing while ll-driver open
      */
-    MCIERROR err, ok_snd;
+    MCIERROR err, ok_snd = waveOutGetNumDevs() ? 0 : MCIERR_HARDWARE;
     char buf[512], path[300], command[330];
     memset(buf, 0, sizeof(buf)); memset(path, 0, sizeof(path));
 
@@ -717,12 +725,12 @@ static void test_AutoOpenWAVE(HWND hwnd)
     ok(!err,"mci sysinfo waveaudio quantity open returned %s\n", dbg_mcierr(err));
     if(!err) todo_wine ok(!strcmp(buf,"0"), "sysinfo quantity open expected 0, got: %s, some more tests will fail.\n", buf);
 
-    ok_snd = waveOutGetNumDevs() ? 0 : MCIERR_HARDWARE;
+    /* Who knows why some machines pass all tests but return MCIERR_HARDWARE here? */
     err = mciSendString("sound NoSuchSoundDefined wait", NULL, 0, NULL);
-    todo_wine ok(err==ok_snd,"mci sound NoSuchSoundDefined returned %s\n", dbg_mcierr(err));
+    todo_wine ok(err==ok_snd || broken(err==MCIERR_HARDWARE),"mci sound NoSuchSoundDefined returned %s\n", dbg_mcierr(err));
 
     err = mciSendString("sound SystemExclamation notify wait", NULL, 0, hwnd);
-    todo_wine ok(err==ok_snd,"mci sound SystemExclamation returned %s\n", dbg_mcierr(err));
+    todo_wine ok(err==ok_snd || broken(err==MCIERR_HARDWARE),"mci sound SystemExclamation returned %s\n", dbg_mcierr(err));
     test_notification(hwnd, "sound notify", err ? 0 : MCI_NOTIFY_SUCCESSFUL);
 
     buf[0]=0;

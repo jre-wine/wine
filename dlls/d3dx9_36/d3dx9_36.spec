@@ -129,7 +129,7 @@
 @ stub D3DXFillVolumeTexture
 @ stub D3DXFillVolumeTextureTX
 @ stub D3DXFilterTexture
-@ stub D3DXFindShaderComment
+@ stdcall D3DXFindShaderComment(ptr long ptr ptr)
 @ stub D3DXFloat16To32Array
 @ stub D3DXFloat32To16Array
 @ stub D3DXFrameAppendChild
@@ -157,8 +157,8 @@
 @ stdcall D3DXGetImageInfoFromResourceA(long str ptr)
 @ stdcall D3DXGetImageInfoFromResourceW(long wstr ptr)
 @ stdcall D3DXGetPixelShaderProfile(ptr)
-@ stub D3DXGetShaderConstantTable
-@ stub D3DXGetShaderConstantTableEx
+@ stdcall D3DXGetShaderConstantTable(ptr ptr)
+@ stdcall D3DXGetShaderConstantTableEx(ptr long ptr)
 @ stub D3DXGetShaderInputSemantics
 @ stub D3DXGetShaderOutputSemantics
 @ stub D3DXGetShaderSamplers

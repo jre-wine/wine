@@ -22,11 +22,14 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <setupapi.h>
+#include <shlwapi.h>
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(extrac32);
+
+static BOOL force_mode;
 
 static UINT WINAPI ExtCabCallback(PVOID Context, UINT Notification, UINT_PTR Param1, UINT_PTR Param2)
 {
@@ -54,6 +57,31 @@ static void extract(LPCWSTR cabfile, LPWSTR destdir)
         WINE_ERR("Could not extract cab file %s\n", wine_dbgstr_w(cabfile));
 }
 
+static void copy_file(LPCWSTR source, LPCWSTR destination)
+{
+    WCHAR destfile[MAX_PATH];
+
+    /* append source filename if destination is a directory */
+    if (PathIsDirectoryW(destination))
+    {
+        PathCombineW(destfile, destination, PathFindFileNameW(source));
+        destination = destfile;
+    }
+
+    if (PathFileExistsW(destination) && !force_mode)
+    {
+        static const WCHAR overwriteMsg[] = {'O','v','e','r','w','r','i','t','e',' ','"','%','s','"','?',0};
+        static const WCHAR titleMsg[] = {'E','x','t','r','a','c','t',0};
+        WCHAR msg[MAX_PATH+100];
+        snprintfW(msg, sizeof(msg)/sizeof(msg[0]), overwriteMsg, destination);
+        if (MessageBoxW(NULL, msg, titleMsg, MB_YESNO | MB_ICONWARNING) != IDYES)
+            return;
+    }
+
+    WINE_TRACE("copying %s to %s\n", wine_dbgstr_w(source), wine_dbgstr_w(destination));
+    CopyFileW(source, destination, FALSE);
+}
+
 int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int show)
 {
     LPWSTR *argv;
@@ -77,10 +105,14 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
     for(i = 0; i < argc; i++)
     {
         /* Get cabfile */
-        if ((argv[i][0] != '/') && !cabfile)
+        if (argv[i][0] != '/')
         {
-            cabfile = argv[i];
-            continue;
+            if (!cabfile)
+            {
+                cabfile = argv[i];
+                continue;
+            } else
+                break;
         }
         /* Get parameters for commands */
         check = toupperW( argv[i][1] );
@@ -90,7 +122,7 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
                 WINE_FIXME("/A not implemented\n");
                 break;
             case 'Y':
-                WINE_FIXME("/Y not implemented\n");
+                force_mode = TRUE;
                 break;
             case 'L':
                 if ((i + 1) >= argc) return 0;
@@ -99,11 +131,7 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
                 break;
             case 'C':
                 if (cmd) return 0;
-                if ((i + 2) >= argc) return 0;
                 cmd = check;
-                cabfile = argv[++i];
-                if (!GetFullPathNameW(argv[++i], MAX_PATH, path, NULL))
-                    return 0;
                 break;
             case 'E':
             case 'D':
@@ -118,6 +146,13 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
     if (!cabfile)
         return 0;
 
+    if (cmd == 'C')
+    {
+        if ((i + 1) != argc) return 0;
+        if (!GetFullPathNameW(argv[i], MAX_PATH, path, NULL))
+            return 0;
+    }
+
     if (!path[0])
         GetCurrentDirectoryW(MAX_PATH, path);
 
@@ -128,7 +163,7 @@ int PASCAL wWinMain(HINSTANCE hInstance, HINSTANCE prev, LPWSTR cmdline, int sho
     {
         case 'C':
             /* Copy file */
-            WINE_FIXME("/C not implemented\n");
+            copy_file(cabfile, path);
             break;
         case 'E':
             /* Extract CAB archive */

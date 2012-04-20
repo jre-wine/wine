@@ -24,14 +24,163 @@
 #include "config.h"
 #include "wined3d_private.h"
 
+WINE_DEFAULT_DEBUG_CHANNEL(d3d);
+#define GLINFO_LOCATION (*gl_info)
+
+static HRESULT wined3d_event_query_init(const struct wined3d_gl_info *gl_info, struct wined3d_event_query **query)
+{
+    struct wined3d_event_query *ret;
+    *query = NULL;
+    if (!gl_info->supported[ARB_SYNC] && !gl_info->supported[NV_FENCE]
+        && !gl_info->supported[APPLE_FENCE]) return E_NOTIMPL;
+
+    ret = HeapAlloc(GetProcessHeap(), 0, sizeof(*ret));
+    if (!ret)
+    {
+        ERR("Failed to allocate a wined3d event query structure.\n");
+        return E_OUTOFMEMORY;
+    }
+    ret->context = NULL;
+    *query = ret;
+    return WINED3D_OK;
+}
+
+static void wined3d_event_query_destroy(struct wined3d_event_query *query)
+{
+    if (query->context) context_free_event_query(query);
+    HeapFree(GetProcessHeap(), 0, query);
+}
+
+static enum wined3d_event_query_result wined3d_event_query_test(struct wined3d_event_query *query, IWineD3DDeviceImpl *device)
+{
+    struct wined3d_context *context;
+    const struct wined3d_gl_info *gl_info;
+    enum wined3d_event_query_result ret;
+    BOOL fence_result;
+
+    TRACE("(%p) : device %p\n", query, device);
+
+    if (query->context == NULL)
+    {
+        TRACE("Query not started\n");
+        return WINED3D_EVENT_QUERY_NOT_STARTED;
+    }
+
+    if (!query->context->gl_info->supported[ARB_SYNC] && query->context->tid != GetCurrentThreadId())
+    {
+        WARN("Event query tested from wrong thread\n");
+        return WINED3D_EVENT_QUERY_WRONG_THREAD;
+    }
+
+    context = context_acquire(device, query->context->current_rt, CTXUSAGE_RESOURCELOAD);
+    gl_info = context->gl_info;
+
+    ENTER_GL();
+
+    if (gl_info->supported[ARB_SYNC])
+    {
+        GLenum gl_ret = GL_EXTCALL(glClientWaitSync(query->object.sync, 0, 0));
+        checkGLcall("glClientWaitSync");
+
+        switch (gl_ret)
+        {
+            case GL_ALREADY_SIGNALED:
+            case GL_CONDITION_SATISFIED:
+                ret = WINED3D_EVENT_QUERY_OK;
+                break;
+
+            case GL_TIMEOUT_EXPIRED:
+                ret = WINED3D_EVENT_QUERY_WAITING;
+                break;
+
+            case GL_WAIT_FAILED:
+            default:
+                ERR("glClientWaitSync returned %#x.\n", gl_ret);
+                ret = WINED3D_EVENT_QUERY_ERROR;
+        }
+    }
+    else if (gl_info->supported[APPLE_FENCE])
+    {
+        fence_result = GL_EXTCALL(glTestFenceAPPLE(query->object.id));
+        checkGLcall("glTestFenceAPPLE");
+        if (fence_result) ret = WINED3D_EVENT_QUERY_OK;
+        else ret = WINED3D_EVENT_QUERY_WAITING;
+    }
+    else if (gl_info->supported[NV_FENCE])
+    {
+        fence_result = GL_EXTCALL(glTestFenceNV(query->object.id));
+        checkGLcall("glTestFenceNV");
+        if (fence_result) ret = WINED3D_EVENT_QUERY_OK;
+        else ret = WINED3D_EVENT_QUERY_WAITING;
+    }
+    else
+    {
+        ERR("Event query created despite lack of GL support\n");
+        ret = WINED3D_EVENT_QUERY_ERROR;
+    }
+
+    LEAVE_GL();
+
+    context_release(context);
+    return ret;
+}
+
+static void wined3d_event_query_issue(struct wined3d_event_query *query, IWineD3DDeviceImpl *device)
+{
+    const struct wined3d_gl_info *gl_info;
+    struct wined3d_context *context;
+
+    if (query->context)
+    {
+        if (!query->context->gl_info->supported[ARB_SYNC] && query->context->tid != GetCurrentThreadId())
+        {
+            context_free_event_query(query);
+            context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+            context_alloc_event_query(context, query);
+        }
+        else
+        {
+            context = context_acquire(device, query->context->current_rt, CTXUSAGE_RESOURCELOAD);
+        }
+    }
+    else
+    {
+        context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+        context_alloc_event_query(context, query);
+    }
+
+    gl_info = context->gl_info;
+
+    ENTER_GL();
+
+    if (gl_info->supported[ARB_SYNC])
+    {
+        if (query->object.sync) GL_EXTCALL(glDeleteSync(query->object.sync));
+        checkGLcall("glDeleteSync");
+        query->object.sync = GL_EXTCALL(glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0));
+        checkGLcall("glFenceSync");
+    }
+    else if (gl_info->supported[APPLE_FENCE])
+    {
+        GL_EXTCALL(glSetFenceAPPLE(query->object.id));
+        checkGLcall("glSetFenceAPPLE");
+    }
+    else if (gl_info->supported[NV_FENCE])
+    {
+        GL_EXTCALL(glSetFenceNV(query->object.id, GL_ALL_COMPLETED_NV));
+        checkGLcall("glSetFenceNV");
+    }
+
+    LEAVE_GL();
+
+    context_release(context);
+}
+
 /*
  * Occlusion Queries:
  * http://www.gris.uni-tuebingen.de/~bartz/Publications/paper/hww98.pdf
  * http://oss.sgi.com/projects/ogl-sample/registry/ARB/occlusion_query.txt
  */
-
-WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION (*gl_info)
 
 /* *******************************************
    IWineD3DQuery IUnknown parts follow
@@ -70,17 +219,16 @@ static ULONG  WINAPI IWineD3DQueryImpl_Release(IWineD3DQuery *iface) {
         if (This->type == WINED3DQUERYTYPE_EVENT)
         {
             struct wined3d_event_query *query = This->extendedData;
-
-            if (query->context) context_free_event_query(query);
+            if (query) wined3d_event_query_destroy(query);
         }
         else if (This->type == WINED3DQUERYTYPE_OCCLUSION)
         {
             struct wined3d_occlusion_query *query = This->extendedData;
 
             if (query->context) context_free_occlusion_query(query);
+            HeapFree(GetProcessHeap(), 0, This->extendedData);
         }
 
-        HeapFree(GetProcessHeap(), 0, This->extendedData);
         HeapFree(GetProcessHeap(), 0, This);
     }
     return ref;
@@ -179,78 +327,40 @@ static HRESULT  WINAPI IWineD3DOcclusionQueryImpl_GetData(IWineD3DQuery* iface, 
 static HRESULT  WINAPI IWineD3DEventQueryImpl_GetData(IWineD3DQuery* iface, void* pData, DWORD dwSize, DWORD dwGetDataFlags) {
     IWineD3DQueryImpl *This = (IWineD3DQueryImpl *) iface;
     struct wined3d_event_query *query = This->extendedData;
-    const struct wined3d_gl_info *gl_info;
-    struct wined3d_context *context;
     BOOL *data = pData;
+    enum wined3d_event_query_result ret;
 
     TRACE("(%p) : type D3DQUERY_EVENT, pData %p, dwSize %#x, dwGetDataFlags %#x\n", This, pData, dwSize, dwGetDataFlags);
 
     if (!pData || !dwSize) return S_OK;
-
-    if (!query->context)
+    if (!query)
     {
-        TRACE("Query not started, returning TRUE.\n");
+        WARN("(%p): Event query not supported by GL, reporting GPU idle\n", This);
         *data = TRUE;
-
         return S_OK;
     }
 
-    if (!query->context->gl_info->supported[ARB_SYNC] && query->context->tid != GetCurrentThreadId())
+    ret = wined3d_event_query_test(query, This->device);
+    switch(ret)
     {
-        /* See comment in IWineD3DQuery::Issue, event query codeblock */
-        FIXME("Wrong thread, reporting GPU idle.\n");
-        *data = TRUE;
+        case WINED3D_EVENT_QUERY_OK:
+        case WINED3D_EVENT_QUERY_NOT_STARTED:
+            *data = TRUE;
+            break;
 
-        return S_OK;
+        case WINED3D_EVENT_QUERY_WAITING:
+            *data = FALSE;
+            break;
+
+        case WINED3D_EVENT_QUERY_WRONG_THREAD:
+            FIXME("(%p) Wrong thread, reporting GPU idle.\n", This);
+            *data = TRUE;
+            break;
+
+        case WINED3D_EVENT_QUERY_ERROR:
+            ERR("The GL event query failed, returning D3DERR_INVALIDCALL\n");
+            return WINED3DERR_INVALIDCALL;
     }
-
-    context = context_acquire(This->device, query->context->current_rt, CTXUSAGE_RESOURCELOAD);
-    gl_info = context->gl_info;
-
-    ENTER_GL();
-
-    if (gl_info->supported[ARB_SYNC])
-    {
-        GLenum ret = GL_EXTCALL(glClientWaitSync(query->object.sync, 0, 0));
-        checkGLcall("glClientWaitSync");
-
-        switch (ret)
-        {
-            case GL_ALREADY_SIGNALED:
-            case GL_CONDITION_SATISFIED:
-                *data = TRUE;
-                break;
-
-            case GL_TIMEOUT_EXPIRED:
-                *data = FALSE;
-                break;
-
-            case GL_WAIT_FAILED:
-            default:
-                ERR("glClientWaitSync returned %#x.\n", ret);
-                *data = FALSE;
-                break;
-        }
-    }
-    else if (gl_info->supported[APPLE_FENCE])
-    {
-        *data = GL_EXTCALL(glTestFenceAPPLE(query->object.id));
-        checkGLcall("glTestFenceAPPLE");
-    }
-    else if (gl_info->supported[NV_FENCE])
-    {
-        *data = GL_EXTCALL(glTestFenceNV(query->object.id));
-        checkGLcall("glTestFenceNV");
-    }
-    else
-    {
-        WARN("(%p): reporting GPU idle\n", This);
-        *data = TRUE;
-    }
-
-    LEAVE_GL();
-
-    context_release(context);
 
     return S_OK;
 }
@@ -272,7 +382,6 @@ static WINED3DQUERYTYPE  WINAPI IWineD3DQueryImpl_GetType(IWineD3DQuery* iface){
     return This->type;
 }
 
-
 static HRESULT  WINAPI IWineD3DEventQueryImpl_Issue(IWineD3DQuery* iface,  DWORD dwIssueFlags) {
     IWineD3DQueryImpl *This = (IWineD3DQueryImpl *)iface;
 
@@ -280,53 +389,11 @@ static HRESULT  WINAPI IWineD3DEventQueryImpl_Issue(IWineD3DQuery* iface,  DWORD
     if (dwIssueFlags & WINED3DISSUE_END)
     {
         struct wined3d_event_query *query = This->extendedData;
-        const struct wined3d_gl_info *gl_info;
-        struct wined3d_context *context;
 
-        if (query->context)
-        {
-            if (!query->context->gl_info->supported[ARB_SYNC] && query->context->tid != GetCurrentThreadId())
-            {
-                context_free_event_query(query);
-                context = context_acquire(This->device, NULL, CTXUSAGE_RESOURCELOAD);
-                context_alloc_event_query(context, query);
-            }
-            else
-            {
-                context = context_acquire(This->device, query->context->current_rt, CTXUSAGE_RESOURCELOAD);
-            }
-        }
-        else
-        {
-            context = context_acquire(This->device, NULL, CTXUSAGE_RESOURCELOAD);
-            context_alloc_event_query(context, query);
-        }
+        /* Faked event query support */
+        if (!query) return WINED3D_OK;
 
-        gl_info = context->gl_info;
-
-        ENTER_GL();
-
-        if (gl_info->supported[ARB_SYNC])
-        {
-            if (query->object.sync) GL_EXTCALL(glDeleteSync(query->object.sync));
-            checkGLcall("glDeleteSync");
-            query->object.sync = GL_EXTCALL(glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0));
-            checkGLcall("glFenceSync");
-        }
-        else if (gl_info->supported[APPLE_FENCE])
-        {
-            GL_EXTCALL(glSetFenceAPPLE(query->object.id));
-            checkGLcall("glSetFenceAPPLE");
-        }
-        else if (gl_info->supported[NV_FENCE])
-        {
-            GL_EXTCALL(glSetFenceNV(query->object.id, GL_ALL_COMPLETED_NV));
-            checkGLcall("glSetFenceNV");
-        }
-
-        LEAVE_GL();
-
-        context_release(context);
+        wined3d_event_query_issue(query, This->device);
     }
     else if(dwIssueFlags & WINED3DISSUE_BEGIN)
     {
@@ -458,6 +525,7 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
         WINED3DQUERYTYPE type, IUnknown *parent)
 {
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    HRESULT hr;
 
     switch (type)
     {
@@ -480,8 +548,9 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
 
         case WINED3DQUERYTYPE_EVENT:
             TRACE("Event query.\n");
-            if (!gl_info->supported[ARB_SYNC] && !gl_info->supported[NV_FENCE]
-                    && !gl_info->supported[APPLE_FENCE])
+            query->lpVtbl = &IWineD3DEventQuery_Vtbl;
+            hr = wined3d_event_query_init(gl_info, (struct wined3d_event_query **) &query->extendedData);
+            if (hr == E_NOTIMPL)
             {
                 /* Half-Life 2 needs this query. It does not render the main
                  * menu correctly otherwise. Pretend to support it, faking
@@ -489,14 +558,10 @@ HRESULT query_init(IWineD3DQueryImpl *query, IWineD3DDeviceImpl *device,
                  * lowering performance. */
                 FIXME("Event query: Unimplemented, but pretending to be supported.\n");
             }
-            query->lpVtbl = &IWineD3DEventQuery_Vtbl;
-            query->extendedData = HeapAlloc(GetProcessHeap(), 0, sizeof(struct wined3d_event_query));
-            if (!query->extendedData)
+            else if(FAILED(hr))
             {
-                ERR("Failed to allocate event query extended data.\n");
-                return E_OUTOFMEMORY;
+                return hr;
             }
-            ((struct wined3d_event_query *)query->extendedData)->context = NULL;
             break;
 
         case WINED3DQUERYTYPE_VCACHE:

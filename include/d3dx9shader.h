@@ -112,6 +112,8 @@ typedef struct _D3DXCONSTANT_DESC
     LPCVOID DefaultValue;
 } D3DXCONSTANT_DESC, *LPD3DXCONSTANT_DESC;
 
+DEFINE_GUID(IID_ID3DXConstantTable, 0x9dca3190, 0x38b9, 0x4fc3, 0x92, 0xe3, 0x39, 0xc6, 0xdd, 0xfb, 0x35, 0x8b);
+
 #undef INTERFACE
 #define INTERFACE ID3DXConstantTable
 
@@ -151,8 +153,8 @@ DECLARE_INTERFACE_(ID3DXConstantTable, ID3DXBuffer)
 #if !defined(__cplusplus) || defined(CINTERFACE)
 /*** IUnknown methods ***/
 #define ID3DXConstantTable_QueryInterface(p,a,b)                      (p)->lpVtbl->QueryInterface(p,a,b)
-#define ID3DXConstantTable_AddRef(p)                                  (p)->lpVtbl->AddRef(p,a)
-#define ID3DXConstantTable_Release(p)                                 (p)->lpVtbl->Release(p,a)
+#define ID3DXConstantTable_AddRef(p)                                  (p)->lpVtbl->AddRef(p)
+#define ID3DXConstantTable_Release(p)                                 (p)->lpVtbl->Release(p)
 /*** ID3DXBuffer methods ***/
 #define ID3DXConstantTable_GetBufferPointer(p)                        (p)->lpVtbl->GetBufferPointer(p)
 #define ID3DXConstantTable_GetBufferSize(p)                           (p)->lpVtbl->GetBufferSize(p)
@@ -181,8 +183,8 @@ DECLARE_INTERFACE_(ID3DXConstantTable, ID3DXBuffer)
 #else
 /*** IUnknown methods ***/
 #define ID3DXConstantTable_QueryInterface(p,a,b)                      (p)->QueryInterface(a,b)
-#define ID3DXConstantTable_AddRef(p)                                  (p)->AddRef(a)
-#define ID3DXConstantTable_Release(p)                                 (p)->Release(a)
+#define ID3DXConstantTable_AddRef(p)                                  (p)->AddRef()
+#define ID3DXConstantTable_Release(p)                                 (p)->Release()
 /*** ID3DXBuffer methods ***/
 #define ID3DXConstantTable_GetBufferPointer(p)                        (p)->GetBufferPointer()
 #define ID3DXConstantTable_GetBufferSize(p)                           (p)->GetBufferSize()
@@ -246,6 +248,7 @@ LPCSTR WINAPI D3DXGetPixelShaderProfile(LPDIRECT3DDEVICE9 device);
 UINT WINAPI D3DXGetShaderSize(const DWORD *byte_code);
 DWORD WINAPI D3DXGetShaderVersion(const DWORD *byte_code);
 LPCSTR WINAPI D3DXGetVertexShaderProfile(LPDIRECT3DDEVICE9 device);
+HRESULT WINAPI D3DXFindShaderComment(CONST DWORD* byte_code, DWORD fourcc, LPCVOID* data, UINT* size);
 
 HRESULT WINAPI D3DXAssembleShaderFromFileA(LPCSTR filename,
                                            CONST D3DXMACRO* defines,
@@ -284,6 +287,13 @@ HRESULT WINAPI D3DXAssembleShader(LPCSTR data,
                                   DWORD flags,
                                   LPD3DXBUFFER* shader,
                                   LPD3DXBUFFER* error_messages);
+
+HRESULT WINAPI D3DXGetShaderConstantTableEx(CONST DWORD* byte_code,
+                                            DWORD flags,
+                                            LPD3DXCONSTANTTABLE* constant_table);
+
+HRESULT WINAPI D3DXGetShaderConstantTable(CONST DWORD* byte_code,
+                                          LPD3DXCONSTANTTABLE* constant_table);
 
 #ifdef __cplusplus
 }

@@ -336,7 +336,7 @@
 @ stub _ismbcl0 #(long)
 @ stub _ismbcl1 #(long)
 @ stub _ismbcl2 #(long)
-@ stub _ismbclegal #(long)
+@ cdecl _ismbclegal(long)
 @ cdecl _ismbclower(long)
 @ cdecl _ismbcprint(long)
 @ cdecl _ismbcpunct(long)
@@ -380,7 +380,7 @@
 @ stub _mbctohira #(long)
 @ stub _mbctokata #(long)
 @ cdecl _mbctolower(long)
-@ stub _mbctombb #(long)
+@ cdecl _mbctombb(long)
 @ cdecl _mbctoupper(long)
 @ extern _mbctype MSVCRT_mbctype
 @ cdecl _mbsbtype(str long)

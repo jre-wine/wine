@@ -74,12 +74,6 @@ static const WCHAR szLocaleKeyName[] = {
     'C','o','n','t','r','o','l','\\','N','l','s','\\','L','o','c','a','l','e',0
 };
 
-static const WCHAR szCodepageKeyName[] = {
-    'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
-    'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
-    'C','o','n','t','r','o','l','\\','N','l','s','\\','C','o','d','e','p','a','g','e',0
-};
-
 static const WCHAR szLangGroupsKeyName[] = {
     'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
     'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
@@ -614,11 +608,11 @@ static BOOL is_genitive_name_supported( LCTYPE lctype )
  */
 static inline HANDLE create_registry_key(void)
 {
-    static const WCHAR intlW[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l','\\',
-                                  'I','n','t','e','r','n','a','t','i','o','n','a','l',0};
+    static const WCHAR cplW[] = {'C','o','n','t','r','o','l',' ','P','a','n','e','l',0};
+    static const WCHAR intlW[] = {'I','n','t','e','r','n','a','t','i','o','n','a','l',0};
     OBJECT_ATTRIBUTES attr;
     UNICODE_STRING nameW;
-    HANDLE hkey;
+    HANDLE cpl_key, hkey = 0;
 
     if (RtlOpenCurrentUser( KEY_ALL_ACCESS, &hkey ) != STATUS_SUCCESS) return 0;
 
@@ -628,9 +622,15 @@ static inline HANDLE create_registry_key(void)
     attr.Attributes = 0;
     attr.SecurityDescriptor = NULL;
     attr.SecurityQualityOfService = NULL;
-    RtlInitUnicodeString( &nameW, intlW );
+    RtlInitUnicodeString( &nameW, cplW );
 
-    if (NtCreateKey( &hkey, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ) != STATUS_SUCCESS) hkey = 0;
+    if (!NtCreateKey( &cpl_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ))
+    {
+        NtClose( attr.RootDirectory );
+        attr.RootDirectory = cpl_key;
+        RtlInitUnicodeString( &nameW, intlW );
+        if (NtCreateKey( &hkey, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL )) hkey = 0;
+    }
     NtClose( attr.RootDirectory );
     return hkey;
 }
@@ -768,11 +768,26 @@ void LOCALE_InitRegistry(void)
 
     if (locale_update_registry( hkey, lc_ctypeW, lcid_LC_CTYPE, NULL, 0 ))
     {
+        static const WCHAR codepageW[] =
+            {'M','a','c','h','i','n','e','\\','S','y','s','t','e','m','\\',
+             'C','u','r','r','e','n','t','C','o','n','t','r','o','l','S','e','t','\\',
+             'C','o','n','t','r','o','l','\\','N','l','s','\\','C','o','d','e','p','a','g','e',0};
+
         OBJECT_ATTRIBUTES attr;
         HANDLE nls_key;
+        DWORD len = 14;
 
-        RtlInitUnicodeString( &nameW, szCodepageKeyName );
+        RtlInitUnicodeString( &nameW, codepageW );
         InitializeObjectAttributes( &attr, &nameW, 0, 0, NULL );
+        while (codepageW[len])
+        {
+            nameW.Length = len * sizeof(WCHAR);
+            if (NtCreateKey( &nls_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL )) break;
+            NtClose( nls_key );
+            len++;
+            while (codepageW[len] && codepageW[len] != '\\') len++;
+        }
+        nameW.Length = len * sizeof(WCHAR);
         if (!NtCreateKey( &nls_key, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ))
         {
             for (i = 0; i < sizeof(update_cp_values)/sizeof(update_cp_values[0]); i++)
@@ -2945,8 +2960,6 @@ void LOCALE_Init(void)
     }
 
     CFStringGetCString( user_locale_string_ref, user_locale, sizeof(user_locale), kCFStringEncodingUTF8 );
-    CFRelease( user_locale_ref );
-    CFRelease( user_locale_string_ref );
 
     unix_cp = CP_UTF8;  /* default to utf-8 even if we don't get a valid locale */
     setenv( "LANG", user_locale, 0 );
@@ -2963,11 +2976,14 @@ void LOCALE_Init(void)
     if (!getenv("LC_ALL") && !getenv("LC_MESSAGES"))
     {
         /* Retrieve the preferred language as chosen in System Preferences. */
+        /* If language is a less specific variant of locale (e.g. 'en' vs. 'en_US'),
+           leave things be. */
         CFArrayRef all_locales = CFLocaleCopyAvailableLocaleIdentifiers();
         CFArrayRef preferred_locales = CFBundleCopyLocalizationsForPreferences( all_locales, NULL );
         CFStringRef user_language_string_ref;
         if (preferred_locales && CFArrayGetCount( preferred_locales ) &&
-            (user_language_string_ref = CFArrayGetValueAtIndex( preferred_locales, 0 )))
+            (user_language_string_ref = CFArrayGetValueAtIndex( preferred_locales, 0 )) &&
+            !CFEqual(user_language_string_ref, user_locale_lang_ref))
         {
             struct locale_name locale_name;
             WCHAR buffer[128];
@@ -2981,6 +2997,9 @@ void LOCALE_Init(void)
         if (preferred_locales)
             CFRelease( preferred_locales );
     }
+
+    CFRelease( user_locale_ref );
+    CFRelease( user_locale_string_ref );
 #endif
 
     NtSetDefaultUILanguage( LANGIDFROMLCID(lcid_LC_MESSAGES) );
