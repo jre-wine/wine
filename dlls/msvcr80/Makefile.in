@@ -1,0 +1,12 @@
+TOPSRCDIR = @top_srcdir@
+TOPOBJDIR = ../..
+SRCDIR    = @srcdir@
+VPATH     = @srcdir@
+MODULE    = msvcr80.dll
+IMPORTLIB = msvcr80
+IMPORTS   = msvcrt msvcr90 kernel32
+
+C_SRCS = \
+	msvcr80.c
+
+@MAKE_DLL_RULES@

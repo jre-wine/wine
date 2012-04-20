@@ -114,7 +114,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
     else
         gl_filter = GL_LINEAR;
 
-    if (gl_info->fbo_ops.glBlitFramebuffer)
+    if (gl_info->fbo_ops.glBlitFramebuffer && is_identity_fixup(backbuffer->resource.format_desc->color_fixup))
     {
         ENTER_GL();
         context_bind_fbo(context, GL_READ_FRAMEBUFFER, &context->src_fbo);
@@ -152,6 +152,9 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
             tex_bottom /= src_h;
         }
 
+        if (is_complex_fixup(backbuffer->resource.format_desc->color_fixup))
+            gl_filter = GL_NEAREST;
+
         ENTER_GL();
         context_bind_fbo(context2, GL_DRAW_FRAMEBUFFER, NULL);
 
@@ -161,8 +164,8 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         device->blitter->set_shader((IWineD3DDevice *) device, backbuffer->resource.format_desc,
                                     backbuffer->texture_target, backbuffer->pow2Width,
                                     backbuffer->pow2Height);
-        glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MIN_FILTER, gl_filter);
+        glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MAG_FILTER, gl_filter);
 
         context_set_draw_buffer(context, GL_BACK);
 
@@ -220,6 +223,12 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     IWineD3DSwapChain_SetDestWindowOverride(iface, hDestWindowOverride);
 
     context = context_acquire(This->device, This->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+    if (!context->valid)
+    {
+        context_release(context);
+        WARN("Invalid context, skipping present.\n");
+        return WINED3D_OK;
+    }
 
     /* Render the cursor onto the back buffer, using our nifty directdraw blitting code :-) */
     if (This->device->bCursorVisible && This->device->cursorTexture)
@@ -514,47 +523,16 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     return WINED3D_OK;
 }
 
-static HRESULT WINAPI IWineD3DSwapChainImpl_SetDestWindowOverride(IWineD3DSwapChain *iface, HWND window) {
-    IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
-    WINED3DLOCKED_RECT r;
-    BYTE *mem;
+static HRESULT WINAPI IWineD3DSwapChainImpl_SetDestWindowOverride(IWineD3DSwapChain *iface, HWND window)
+{
+    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *)iface;
 
-    if (!window || window == This->win_handle) return WINED3D_OK;
+    if (!window) window = swapchain->device_window;
+    if (window == swapchain->win_handle) return WINED3D_OK;
 
-    TRACE("Performing dest override of swapchain %p from window %p to %p\n", This, This->win_handle, window);
-    if (This->context[0] == This->device->contexts[0])
-    {
-        /* The primary context 'owns' all the opengl resources. Destroying and recreating that context requires downloading
-         * all opengl resources, deleting the gl resources, destroying all other contexts, then recreating all other contexts
-         * and reload the resources
-         */
-        delete_opengl_contexts((IWineD3DDevice *)This->device, iface);
-        This->win_handle = window;
-        create_primary_opengl_context((IWineD3DDevice *)This->device, iface);
-    }
-    else
-    {
-        This->win_handle = window;
+    TRACE("Setting swapchain %p window from %p to %p\n", swapchain, swapchain->win_handle, window);
+    swapchain->win_handle = window;
 
-        /* The old back buffer has to be copied over to the new back buffer. A lockrect - switchcontext - unlockrect
-         * would suffice in theory, but it is rather nasty and may cause troubles with future changes of the locking code
-         * So lock read only, copy the surface out, then lock with the discard flag and write back
-         */
-        IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_READONLY);
-        mem = HeapAlloc(GetProcessHeap(), 0, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
-        memcpy(mem, r.pBits, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
-        IWineD3DSurface_UnlockRect(This->backBuffer[0]);
-
-        context_destroy(This->device, This->context[0]);
-        This->context[0] = context_create(This->device, (IWineD3DSurfaceImpl *)This->frontBuffer,
-                This->win_handle, FALSE /* pbuffer */, &This->presentParms);
-        context_release(This->context[0]);
-
-        IWineD3DSurface_LockRect(This->backBuffer[0], &r, NULL, WINED3DLOCK_DISCARD);
-        memcpy(r.pBits, mem, r.Pitch * ((IWineD3DSurfaceImpl *) This->backBuffer[0])->currentDesc.Height);
-        HeapFree(GetProcessHeap(), 0, mem);
-        IWineD3DSurface_UnlockRect(This->backBuffer[0]);
-    }
     return WINED3D_OK;
 }
 
@@ -599,7 +577,7 @@ static LONG fullscreen_exstyle(LONG exstyle)
 void swapchain_setup_fullscreen_window(IWineD3DSwapChainImpl *swapchain, UINT w, UINT h)
 {
     IWineD3DDeviceImpl *device = swapchain->device;
-    HWND window = swapchain->win_handle;
+    HWND window = swapchain->device_window;
     BOOL filter_messages;
     LONG style, exstyle;
 
@@ -633,7 +611,7 @@ void swapchain_setup_fullscreen_window(IWineD3DSwapChainImpl *swapchain, UINT w,
 void swapchain_restore_fullscreen_window(IWineD3DSwapChainImpl *swapchain)
 {
     IWineD3DDeviceImpl *device = swapchain->device;
-    HWND window = swapchain->win_handle;
+    HWND window = swapchain->device_window;
     BOOL filter_messages;
     LONG style, exstyle;
 
@@ -671,7 +649,7 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
         IWineD3DDeviceImpl *device, WINED3DPRESENT_PARAMETERS *present_parameters, IUnknown *parent)
 {
     const struct wined3d_adapter *adapter = device->adapter;
-    const struct GlPixelFormatDesc *format_desc;
+    const struct wined3d_format_desc *format_desc;
     BOOL displaymode_set = FALSE;
     WINED3DDISPLAYMODE mode;
     RECT client_rect;
@@ -713,6 +691,7 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
     swapchain->parent = parent;
     swapchain->ref = 1;
     swapchain->win_handle = window;
+    swapchain->device_window = window;
 
     if (!present_parameters->Windowed && window)
     {
@@ -816,9 +795,7 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
 
     if (surface_type == SURFACE_OPENGL)
     {
-        swapchain->context[0] = context_create(device, (IWineD3DSurfaceImpl *)swapchain->frontBuffer,
-                window, FALSE /* pbuffer */, present_parameters);
-        if (!swapchain->context[0])
+        if (!(swapchain->context[0] = context_create(swapchain, (IWineD3DSurfaceImpl *)swapchain->frontBuffer)))
         {
             WARN("Failed to create context.\n");
             hr = WINED3DERR_NOTAVAILABLE;
@@ -935,9 +912,7 @@ struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *i
 
     TRACE("Creating a new context for swapchain %p, thread %d\n", This, GetCurrentThreadId());
 
-    ctx = context_create(This->device, (IWineD3DSurfaceImpl *)This->frontBuffer,
-            This->context[0]->win_handle, FALSE /* pbuffer */, &This->presentParms);
-    if (!ctx)
+    if (!(ctx = context_create(This, (IWineD3DSurfaceImpl *)This->frontBuffer)))
     {
         ERR("Failed to create a new context for the swapchain\n");
         return NULL;

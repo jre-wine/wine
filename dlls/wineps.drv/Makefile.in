@@ -105,5 +105,3 @@ install-ppd:: $(DESTDIR)$(datadir)/wine$(DATASUFFIX) dummy
 
 uninstall::
 	$(RM) $(DESTDIR)$(datadir)/wine$(DATASUFFIX)/generic.ppd
-
-@DEPENDENCIES@  # everything below this line is overwritten by make depend

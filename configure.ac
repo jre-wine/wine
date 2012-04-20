@@ -308,6 +308,9 @@ AC_SYS_LARGEFILE()
 
 AC_CHECK_HEADERS(\
 	AL/al.h \
+	AudioToolbox/AudioConverter.h \
+	AudioToolbox/AudioFile.h \
+	AudioToolbox/AudioFileStream.h \
 	AudioUnit/AudioUnit.h \
 	Carbon/Carbon.h \
 	CoreAudio/CoreAudio.h \
@@ -556,6 +559,8 @@ AC_CHECK_HEADERS([resolv.h],,,
      # include <arpa/nameser.h>
      #endif])
 
+AC_CHECK_HEADERS([ifaddrs.h],,,[#include <sys/types.h>])
+
 AC_CHECK_HEADERS(ucontext.h,,,[#include <signal.h>])
 
 AC_CHECK_HEADERS([sys/thr.h],,,
@@ -641,6 +646,14 @@ case $host_os in
     then
         dnl CoreServices needed by AudioUnit
         AC_SUBST(COREAUDIO,"-framework CoreAudio -framework AudioUnit -framework CoreServices -framework AudioToolbox -framework CoreMIDI")
+        ac_save_LIBS="$LIBS"
+        if test "$ac_cv_header_AudioToolbox_AudioFile_h" = "yes"
+        then
+            LIBS="$LIBS $COREAUDIO"
+            AC_CHECK_FUNCS(AudioFileStreamOpen)
+            LIBS="$ac_save_LIBS"
+        fi
+        test "x$ac_cv_func_AudioFileStreamOpen" = xyes || WINE_NOTICE([AudioToolbox version too old, mp3 codec won't be supported.])
     fi
     if test "$ac_cv_header_OpenAL_al_h" = "yes"
     then
@@ -1259,7 +1272,10 @@ test "x$FREETYPELIBS" = "x" && enable_fonts=${enable_fonts:-no}
 
 dnl **** Check for parport (currently Linux only) ****
 AC_CACHE_CHECK([for parport header/ppdev.h], ac_cv_c_ppdev,
- AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <linux/ppdev.h>]], [[ioctl (1,PPCLAIM,0)]])],
+ AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#ifdef HAVE_SYS_IOCTL_H
+# include <sys/ioctl.h>
+#endif
+#include <linux/ppdev.h>]], [[ioctl (1,PPCLAIM,0)]])],
     [ac_cv_c_ppdev="yes"],[ac_cv_c_ppdev="no"]))
 if test "$ac_cv_c_ppdev" = "yes"
 then
@@ -1440,9 +1456,9 @@ if test "$ac_cv_header_mpg123_h" = "yes"
 then
     AC_CHECK_LIB(mpg123,mpg123_feed,[AC_SUBST(LIBMPG123,"-lmpg123")])
 fi
-WINE_NOTICE_WITH(mpg123,[test "x$ac_cv_lib_mpg123_mpg123_feed" != xyes],
+WINE_NOTICE_WITH(mpg123,[test "x$ac_cv_lib_mpg123_mpg123_feed" != xyes -a x"$ac_cv_header_CoreAudio_CoreAudio_h" != xyes],
                  [libmpg123 ${notice_platform}development files not found (or too old), mp3 codec won't be supported.])
-test "x$ac_cv_lib_mpg123_mpg123_feed" = xyes || enable_winemp3_acm=${enable_winemp3_acm:-no}
+test "x$ac_cv_lib_mpg123_mpg123_feed" = xyes -o "x$ac_cv_func_AudioFileStreamOpen" = xyes || enable_winemp3_acm=${enable_winemp3_acm:-no}
 
 dnl **** Check for OpenAL 1.1 ****
 if test "$ac_cv_header_AL_al_h" = "yes"
@@ -2040,6 +2056,15 @@ AC_CHECK_MEMBERS([struct icmpstat.icps_outhist],,,
 #include <netinet/icmp_var.h>
 #endif])
 
+dnl Check for struct ifreq.ifr_hwaddr
+AC_CHECK_MEMBERS([struct ifreq.ifr_hwaddr],,,
+[#ifdef HAVE_SYS_TYPES_H
+#include <sys/types.h>
+#endif
+#ifdef HAVE_NET_IF_H
+# include <net/if.h>
+#endif])
+
 dnl Check for the external timezone variables timezone and daylight
 AC_CACHE_CHECK([for timezone variable], ac_cv_have_timezone,
                AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <time.h>]], [[timezone = 1]])],[ac_cv_have_timezone="yes"],[ac_cv_have_timezone="no"]))
@@ -2085,13 +2110,6 @@ case $host_vendor in
 esac
 
 dnl **** Generate output files ****
-
-AC_SUBST(DEPENDENCIES,["### Dependencies:
-\$(OBJS) \$(CROSSOBJS): \$(IDL_GEN_HEADERS) \$(BISON_SRCS:.y=.tab.h)
-\$(IDL_GEN_C_SRCS:.c=.o): \$(IDL_GEN_C_SRCS)
-\$(RC_SRCS:.rc=.res): \$(IDL_TLB_SRCS:.idl=.tlb)
-\$(LEX_SRCS:.l=.yy.o): \$(LEX_SRCS:.l=.yy.c)
-\$(BISON_SRCS:.y=.tab.o): \$(BISON_SRCS:.y=.tab.c)"])
 
 AC_SUBST(ALL_MAKERULES,"")
 AC_SUBST(ALL_SYMLINKS,"")
@@ -2235,6 +2253,7 @@ WINE_CONFIG_TEST(dlls/dinput/tests)
 WINE_CONFIG_DLL(dinput8,,[dinput8])
 WINE_CONFIG_DLL(dispdib.dll16,enable_win16)
 WINE_CONFIG_DLL(dispex)
+WINE_CONFIG_TEST(dlls/dispex/tests)
 WINE_CONFIG_DLL(display.drv16,enable_win16)
 WINE_CONFIG_DLL(dmband)
 WINE_CONFIG_DLL(dmcompos)
@@ -2378,7 +2397,10 @@ WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask)
 WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
+WINE_CONFIG_DLL(msvcr70,,[msvcr70])
 WINE_CONFIG_DLL(msvcr71,,[msvcr71])
+WINE_CONFIG_DLL(msvcr80,,[msvcr80])
+WINE_CONFIG_DLL(msvcr90,,[msvcr90])
 WINE_CONFIG_DLL(msvcrt,,[msvcrt])
 WINE_CONFIG_TEST(dlls/msvcrt/tests)
 WINE_CONFIG_DLL(msvcrt20,,[msvcrt20])
@@ -2520,6 +2542,7 @@ WINE_CONFIG_DLL(updspapi)
 WINE_CONFIG_DLL(url,,[url])
 WINE_CONFIG_DLL(urlmon,,[urlmon])
 WINE_CONFIG_TEST(dlls/urlmon/tests)
+WINE_CONFIG_DLL(usbd.sys,,[usbd.sys])
 WINE_CONFIG_DLL(user.exe16,enable_win16)
 WINE_CONFIG_DLL(user32,,[user32])
 WINE_CONFIG_TEST(dlls/user32/tests)
@@ -2612,6 +2635,7 @@ WINE_CONFIG_MAKEFILE([libs/wine/Makefile],[Make.rules])
 WINE_CONFIG_MAKEFILE([libs/wpp/Makefile],[Make.rules])
 WINE_CONFIG_MAKEFILE([loader/Makefile],[Make.rules],[ALL_TOP_DIRS])
 WINE_CONFIG_MAKEFILE([programs/Makefile],[Make.rules],[ALL_TOP_DIRS])
+WINE_CONFIG_PROGRAM(attrib,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(cacls,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(clock,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(cmd,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
@@ -2632,6 +2656,7 @@ WINE_CONFIG_PROGRAM(msiexec,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_I
 WINE_CONFIG_PROGRAM(net,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(notepad,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(oleview,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
+WINE_CONFIG_PROGRAM(ping,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(progman,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(reg,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
 WINE_CONFIG_PROGRAM(regedit,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])

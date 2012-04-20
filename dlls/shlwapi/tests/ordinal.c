@@ -47,6 +47,8 @@ static HRESULT(WINAPI *pSHPropertyBag_ReadLONG)(IPropertyBag *,LPCWSTR,LPLONG);
 static LONG   (WINAPI *pSHSetWindowBits)(HWND, INT, UINT, UINT);
 static INT    (WINAPI *pSHFormatDateTimeA)(const FILETIME UNALIGNED*, DWORD*, LPSTR, UINT);
 static INT    (WINAPI *pSHFormatDateTimeW)(const FILETIME UNALIGNED*, DWORD*, LPWSTR, UINT);
+static DWORD  (WINAPI *pSHGetObjectCompatFlags)(IUnknown*, const CLSID*);
+static BOOL   (WINAPI *pGUIDFromStringA)(LPSTR, CLSID *);
 
 static HMODULE hmlang;
 static HRESULT (WINAPI *pLcidToRfc1766A)(LCID, LPSTR, INT);
@@ -1516,20 +1518,22 @@ if (0)
     ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
     ok(buff[0] == 'a', "expected same string, got %s\n", buff);
 
+    /* flags needs to have FDTF_NOAUTOREADINGORDER for these tests to succeed on Vista+ */
+
     /* all combinations documented as invalid succeeded */
-    flags = FDTF_SHORTTIME | FDTF_LONGTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTTIME | FDTF_LONGTIME;
     SetLastError(0xdeadbeef);
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
 
-    flags = FDTF_SHORTDATE | FDTF_LONGDATE;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE | FDTF_LONGDATE;
     SetLastError(0xdeadbeef);
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef, "expected 0xdeadbeef, got %d\n", GetLastError());
 
-    flags = FDTF_SHORTDATE | FDTF_LTRDATE | FDTF_RTLDATE;
+    flags =  FDTF_SHORTDATE | FDTF_LTRDATE | FDTF_RTLDATE;
     SetLastError(0xdeadbeef);
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
@@ -1538,14 +1542,14 @@ if (0)
         "expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* now check returned strings */
-    flags = FDTF_SHORTTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetTimeFormat(LOCALE_USER_DEFAULT, TIME_NOSECONDS, &st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_LONGTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
@@ -1553,21 +1557,21 @@ if (0)
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
     /* both time flags */
-    flags = FDTF_LONGTIME | FDTF_SHORTTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGTIME | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetTimeFormat(LOCALE_USER_DEFAULT, 0, &st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_SHORTDATE;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
     ok(ret == lstrlenA(buff2)+1, "got %d\n", ret);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_LONGDATE;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1575,7 +1579,7 @@ if (0)
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
     /* both date flags */
-    flags = FDTF_LONGDATE | FDTF_SHORTDATE;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_SHORTDATE;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1583,7 +1587,7 @@ if (0)
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
     /* various combinations of date/time flags */
-    flags = FDTF_LONGDATE | FDTF_SHORTTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d, length %d\n", ret, lstrlenA(buff)+1);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1594,7 +1598,7 @@ if (0)
     strcat(buff2, buff3);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_LONGDATE | FDTF_LONGTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_LONGDATE | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_LONGDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1605,7 +1609,7 @@ if (0)
     strcat(buff2, buff3);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_SHORTDATE | FDTF_SHORTTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE | FDTF_SHORTTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1616,7 +1620,7 @@ if (0)
     strcat(buff2, buff3);
     ok(lstrcmpA(buff, buff2) == 0, "expected (%s), got (%s)\n", buff2, buff);
 
-    flags = FDTF_SHORTDATE | FDTF_LONGTIME;
+    flags = FDTF_NOAUTOREADINGORDER | FDTF_SHORTDATE | FDTF_LONGTIME;
     ret = pSHFormatDateTimeA(&filetime, &flags, buff, sizeof(buff));
     ok(ret == lstrlenA(buff)+1, "got %d\n", ret);
     ret = GetDateFormat(LOCALE_USER_DEFAULT, DATE_SHORTDATE, &st, NULL, buff2, sizeof(buff2));
@@ -1683,10 +1687,11 @@ if (0)
 
     flags = FDTF_SHORTDATE | FDTF_LTRDATE | FDTF_RTLDATE;
     SetLastError(0xdeadbeef);
+    buff[0] = 0; /* NT4 doesn't clear the buffer on failure */
     ret = pSHFormatDateTimeW(&filetime, &flags, buff, sizeof(buff)/sizeof(WCHAR));
     ok(ret == lstrlenW(buff)+1, "got %d\n", ret);
     ok(GetLastError() == 0xdeadbeef ||
-        broken(GetLastError() == ERROR_INVALID_FLAGS), /* Win9x/WinMe */
+        broken(GetLastError() == ERROR_INVALID_FLAGS), /* Win9x/WinMe/NT4 */
         "expected 0xdeadbeef, got %d\n", GetLastError());
 
     /* now check returned strings */
@@ -1786,6 +1791,88 @@ if (0)
     ok(lstrcmpW(buff, buff2) == 0, "expected equal strings\n");
 }
 
+static void test_SHGetObjectCompatFlags(void)
+{
+    struct compat_value {
+        CHAR nameA[30];
+        DWORD value;
+    };
+
+    struct compat_value values[] = {
+        { "OTNEEDSSFCACHE", 0x1 },
+        { "NO_WEBVIEW", 0x2 },
+        { "UNBINDABLE", 0x4 },
+        { "PINDLL", 0x8 },
+        { "NEEDSFILESYSANCESTOR", 0x10 },
+        { "NOTAFILESYSTEM", 0x20 },
+        { "CTXMENU_NOVERBS", 0x40 },
+        { "CTXMENU_LIMITEDQI", 0x80 },
+        { "COCREATESHELLFOLDERONLY", 0x100 },
+        { "NEEDSSTORAGEANCESTOR", 0x200 },
+        { "NOLEGACYWEBVIEW", 0x400 },
+        { "CTXMENU_XPQCMFLAGS", 0x1000 },
+        { "NOIPROPERTYSTORE", 0x2000 }
+    };
+
+    static const char compat_path[] = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellCompatibility\\Objects";
+    CHAR keyA[39]; /* {CLSID} */
+    HKEY root;
+    DWORD ret;
+    int i;
+
+    if (!pSHGetObjectCompatFlags)
+    {
+        win_skip("SHGetObjectCompatFlags isn't available\n");
+        return;
+    }
+
+    /* null args */
+    ret = pSHGetObjectCompatFlags(NULL, NULL);
+    ok(ret == 0, "got %d\n", ret);
+
+    ret = RegOpenKeyA(HKEY_LOCAL_MACHINE, compat_path, &root);
+    if (ret != ERROR_SUCCESS)
+    {
+        skip("No compatibility class data found\n");
+        return;
+    }
+
+    for (i = 0; RegEnumKeyA(root, i, keyA, sizeof(keyA)) == ERROR_SUCCESS; i++)
+    {
+        HKEY clsid_key;
+
+        if (RegOpenKeyA(root, keyA, &clsid_key) == ERROR_SUCCESS)
+        {
+            CHAR valueA[30];
+            DWORD expected = 0, got, length = sizeof(valueA);
+            CLSID clsid;
+            int v;
+
+            for (v = 0; RegEnumValueA(clsid_key, v, valueA, &length, NULL, NULL, NULL, NULL) == ERROR_SUCCESS; v++)
+            {
+                int j;
+
+                for (j = 0; j < sizeof(values)/sizeof(struct compat_value); j++)
+                    if (lstrcmpA(values[j].nameA, valueA) == 0)
+                    {
+                        expected |= values[j].value;
+                        break;
+                    }
+
+                length = sizeof(valueA);
+            }
+
+            pGUIDFromStringA(keyA, &clsid);
+            got = pSHGetObjectCompatFlags(NULL, &clsid);
+            ok(got == expected, "got 0x%08x, expected 0x%08x. Key %s\n", got, expected, keyA);
+
+            RegCloseKey(clsid_key);
+        }
+    }
+
+    RegCloseKey(root);
+}
+
 static void init_pointers(void)
 {
 #define MAKEFUNC(f, ord) (p##f = (void*)GetProcAddress(hShlwapi, (LPSTR)(ord)))
@@ -1797,11 +1884,13 @@ static void init_pointers(void)
     MAKEFUNC(SHSetWindowBits, 165);
     MAKEFUNC(ConnectToConnectionPoint, 168);
     MAKEFUNC(SHSearchMapInt, 198);
+    MAKEFUNC(GUIDFromStringA, 269);
     MAKEFUNC(SHPackDispParams, 282);
     MAKEFUNC(IConnectionPoint_InvokeWithCancel, 283);
     MAKEFUNC(IConnectionPoint_SimpleInvoke, 284);
     MAKEFUNC(SHFormatDateTimeA, 353);
     MAKEFUNC(SHFormatDateTimeW, 354);
+    MAKEFUNC(SHGetObjectCompatFlags, 476);
     MAKEFUNC(SHPropertyBag_ReadLONG, 496);
 #undef MAKEFUNC
 }
@@ -1826,4 +1915,5 @@ START_TEST(ordinal)
     test_SHSetWindowBits();
     test_SHFormatDateTimeA();
     test_SHFormatDateTimeW();
+    test_SHGetObjectCompatFlags();
 }
