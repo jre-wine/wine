@@ -133,7 +133,7 @@ static int format_exception_msg( const EXCEPTION_POINTERS *ptr, char *buffer, in
                  rec->ExceptionInformation[0]);
         break;
     case EXCEPTION_WINE_STUB:
-        if (HIWORD(rec->ExceptionInformation[1]))
+        if ((ULONG_PTR)rec->ExceptionInformation[1] >> 16)
             len = snprintf( buffer, size, "Unimplemented function %s.%s called",
                             (char *)rec->ExceptionInformation[0], (char *)rec->ExceptionInformation[1] );
         else
@@ -220,7 +220,7 @@ static BOOL	start_debugger(PEXCEPTION_POINTERS epointers, HANDLE hEvent)
 
         RtlInitUnicodeString( &nameW, DebuggerW );
         if (NtQueryValueKey( hDbgConf, &nameW, KeyValuePartialInformation,
-                             NULL, 0, &format_size ) == STATUS_BUFFER_OVERFLOW)
+                             NULL, 0, &format_size ) == STATUS_BUFFER_TOO_SMALL)
         {
             char *data = HeapAlloc(GetProcessHeap(), 0, format_size);
             NtQueryValueKey( hDbgConf, &nameW, KeyValuePartialInformation,

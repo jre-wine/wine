@@ -11,7 +11,7 @@
 @ stub D3DXCleanMesh
 @ stdcall D3DXColorAdjustContrast(ptr ptr long)
 @ stdcall D3DXColorAdjustSaturation(ptr ptr long)
-@ stub D3DXCompileShader
+@ stdcall D3DXCompileShader(ptr long ptr ptr ptr ptr long ptr ptr ptr)
 @ stub D3DXCompileShaderFromFileA
 @ stub D3DXCompileShaderFromFileW
 @ stub D3DXCompileShaderFromResourceA
@@ -92,7 +92,7 @@
 @ stub D3DXCreateTeapot
 @ stub D3DXCreateTextA
 @ stub D3DXCreateTextW
-@ stub D3DXCreateTexture
+@ stdcall D3DXCreateTexture(ptr long long long long long long ptr)
 @ stub D3DXCreateTextureFromFileA
 @ stub D3DXCreateTextureFromFileExA
 @ stub D3DXCreateTextureFromFileExW

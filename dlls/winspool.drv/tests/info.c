@@ -115,6 +115,22 @@ static DWORD access_denied_reported = 0;
 
 /* ################################ */
 
+static BOOL on_win9x = FALSE;
+
+static BOOL check_win9x(void)
+{
+    if (pGetPrinterW)
+    {
+        SetLastError(0xdeadbeef);
+        pGetPrinterW(NULL, 0, NULL, 0, NULL);
+        return (GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
+    }
+    else
+    {
+        return TRUE;
+    }
+}
+
 static void find_default_printer(VOID)
 {
     static  char    buffer[DEFAULT_PRINTER_SIZE];
@@ -1156,7 +1172,7 @@ static void test_EnumPrinterDrivers(void)
         }
 
         /* EnumPrinterDriversA returns the same number of bytes as EnumPrinterDriversW */
-        if (pEnumPrinterDriversW)
+        if (!on_win9x && pEnumPrinterDriversW)
         {
             DWORD double_needed;
             DWORD double_returned;
@@ -2259,14 +2275,26 @@ static void test_GetPrinter(void)
         SetLastError(0xdeadbeef);
         needed = (DWORD)-1;
         ret = GetPrinter(hprn, level, NULL, 0, &needed);
+        if (ret)
+        {
+            win_skip("Level %d is not supported on Win9x/WinMe\n", level);
+            ok(GetLastError() == ERROR_SUCCESS, "wrong error %d\n", GetLastError());
+            ok(needed == 0,"Expected 0, got %d\n", needed);
+            continue;
+        }
         ok(!ret, "level %d: GetPrinter should fail\n", level);
         /* Not all levels are supported on all Windows-Versions */
-        if(GetLastError() == ERROR_INVALID_LEVEL) continue;
+        if (GetLastError() == ERROR_INVALID_LEVEL ||
+            GetLastError() == ERROR_NOT_SUPPORTED /* Win9x/WinMe */)
+        {
+            skip("Level %d not supported\n", level);
+            continue;
+        }
         ok(GetLastError() == ERROR_INSUFFICIENT_BUFFER, "wrong error %d\n", GetLastError());
         ok(needed > 0,"not expected needed buffer size %d\n", needed);
 
         /* GetPrinterA returns the same number of bytes as GetPrinterW */
-        if (! ret && pGetPrinterW && level != 6 && level != 7)
+        if (!on_win9x && !ret && pGetPrinterW && level != 6 && level != 7)
         {
             DWORD double_needed;
             ret = pGetPrinterW(hprn, level, NULL, 0, &double_needed);
@@ -2351,7 +2379,7 @@ static void test_GetPrinterDriver(void)
         }
 
         /* GetPrinterDriverA returns the same number of bytes as GetPrinterDriverW */
-        if (! ret && pGetPrinterDriverW)
+        if (!on_win9x && !ret && pGetPrinterDriverW)
         {
             DWORD double_needed;
             ret = pGetPrinterDriverW(hprn, NULL, level, NULL, 0, &double_needed);
@@ -2394,19 +2422,19 @@ static void test_GetPrinterDriver(void)
             trace("pConfigFile %s\n", di_2->pConfigFile);
             calculated += strlen(di_2->pConfigFile) + 1;
 
-            hf = CreateFileA(di_2->pDriverPath, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            hf = CreateFileA(di_2->pDriverPath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if(hf != INVALID_HANDLE_VALUE)
                 CloseHandle(hf);
             todo_wine
             ok(hf != INVALID_HANDLE_VALUE, "Could not open %s\n", di_2->pDriverPath);
 
-            hf = CreateFileA(di_2->pDataFile, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            hf = CreateFileA(di_2->pDataFile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if(hf != INVALID_HANDLE_VALUE)
                 CloseHandle(hf);
             todo_wine
             ok(hf != INVALID_HANDLE_VALUE, "Could not open %s\n", di_2->pDataFile);
 
-            hf = CreateFileA(di_2->pConfigFile, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+            hf = CreateFileA(di_2->pConfigFile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if(hf != INVALID_HANDLE_VALUE)
                 CloseHandle(hf);
             todo_wine
@@ -2420,7 +2448,9 @@ static void test_GetPrinterDriver(void)
             {
                 ret = GetPrinterDriver(hprn, NULL, level, buf, needed - 2, &filled);
                 ok(!ret, "level %d: GetPrinterDriver succeeded with less buffer than it should\n", level);
-                ok(di_2->pDataFile == NULL, "Even on failure, GetPrinterDriver clears the buffer to zeros\n");
+                ok(di_2->pDataFile == NULL ||
+                   broken(di_2->pDataFile != NULL), /* Win9x/WinMe */
+                   "Even on failure, GetPrinterDriver clears the buffer to zeros\n");
             }
         }
 
@@ -2648,8 +2678,9 @@ static void test_DeviceCapabilities(void)
     fields = DeviceCapabilities(device, port, DC_FIELDS, NULL, NULL);
     ok(fields != (DWORD)-1, "DeviceCapabilities DC_FIELDS failed\n");
     todo_wine
-    ok(fields == (dm->dmFields | DM_FORMNAME),
-        "fields %x != (dm->dmFields | DM_FORMNAME) %x\n", fields, dm->dmFields);
+    ok(fields == (dm->dmFields | DM_FORMNAME) ||
+        broken(fields == dm->dmFields), /* Win9x/WinMe */
+        "fields %x != (dm->dmFields | DM_FORMNAME) %lx\n", fields, (dm->dmFields | DM_FORMNAME));
 
     GlobalUnlock(prn_dlg.hDevMode);
     GlobalFree(prn_dlg.hDevMode);
@@ -2667,6 +2698,10 @@ START_TEST(info)
     pGetPrinterW = (void *) GetProcAddress(hwinspool, "GetPrinterW");
     pXcvDataW = (void *) GetProcAddress(hwinspool, "XcvDataW");
     pAddPortExA = (void *) GetProcAddress(hwinspool, "AddPortExA");
+
+    on_win9x = check_win9x();
+    if (on_win9x)
+        win_skip("Several W-functions are not available on Win9x/WinMe\n");
 
     find_default_printer();
     find_local_server();

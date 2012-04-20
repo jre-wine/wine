@@ -36,9 +36,16 @@ static void fill_index_tree(HWND hwnd, IndexItem *item)
     while(item) {
         TRACE("tree debug: %s\n", debugstr_w(item->keyword));
 
+        if(!item->keyword)
+        {
+            FIXME("HTML Help index item has no keyword.\n");
+            item = item->next;
+            continue;
+        }
         memset(&lvi, 0, sizeof(lvi));
         lvi.iItem = index++;
-        lvi.mask = LVIF_TEXT|LVIF_PARAM;
+        lvi.mask = LVIF_TEXT|LVIF_PARAM|LVIF_INDENT;
+        lvi.iIndent = item->indentLevel;
         lvi.cchTextMax = strlenW(item->keyword)+1;
         lvi.pszText = item->keyword;
         lvi.lParam = (LPARAM)item;
@@ -78,6 +85,12 @@ static void parse_index_obj_node_param(IndexItem *item, const char *text)
         item->itemFlags = 0x00;
     }
     if(!strncasecmp("keyword", ptr, len)) {
+        param = &item->keyword;
+    }else if(!item->keyword && !strncasecmp("name", ptr, len)) {
+        /* Some HTML Help index files use an additional "name" parameter
+         * rather than the "keyword" parameter.  In this case, the first
+         * occurance of the "name" parameter is the keyword.
+         */
         param = &item->keyword;
     }else if(!strncasecmp("name", ptr, len)) {
         item->itemFlags |= 0x01;
@@ -193,11 +206,17 @@ static IndexItem *parse_li(HHInfo *info, stream_t *stream)
  * At this high-level stage we locate out each HTML list item tag.
  * Since there is no end-tag for the <LI> item, we must hope that
  * the <LI> entry is parsed correctly or tags might get lost.
+ *
+ * Within each entry it is also possible to encounter an additional
+ * <UL> tag.  When this occurs the tag indicates that the topics
+ * contained within it are related to the parent <LI> topic and
+ * should be inset by an indent.
  */
 static void parse_hhindex(HHInfo *info, IStream *str, IndexItem *item)
 {
     stream_t stream;
     strbuf_t node, node_name;
+    int indent_level = -1;
 
     strbuf_init(&node);
     strbuf_init(&node_name);
@@ -213,6 +232,11 @@ static void parse_hhindex(HHInfo *info, IStream *str, IndexItem *item)
             item->next = parse_li(info, &stream);
             item->next->merge = item->merge;
             item = item->next;
+            item->indentLevel = indent_level;
+        }else if(!strcasecmp(node_name.buf, "ul")) {
+            indent_level++;
+        }else if(!strcasecmp(node_name.buf, "/ul")) {
+            indent_level--;
         }else {
             WARN("Unhandled tag! %s\n", node_name.buf);
         }

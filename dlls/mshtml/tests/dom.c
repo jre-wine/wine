@@ -684,6 +684,17 @@ static IHTMLDOMTextNode *_get_text_iface(unsigned line, IUnknown *unk)
     return text;
 }
 
+#define get_comment_iface(u) _get_comment_iface(__LINE__,u)
+static IHTMLCommentElement *_get_comment_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLCommentElement *comment;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLCommentElement, (void**)&comment);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLCommentElement: %08x\n", hres);
+    return comment;
+}
+
 #define test_node_name(u,n) _test_node_name(__LINE__,u,n)
 static void _test_node_name(unsigned line, IUnknown *unk, const char *exname)
 {
@@ -1102,6 +1113,22 @@ static void _test_option_put_value(unsigned line, IHTMLOptionElement *option, co
     _test_option_value(line, option, value);
 }
 
+#define test_comment_text(c,t) _test_comment_text(__LINE__,c,t)
+static void _test_comment_text(unsigned line, IUnknown *unk, const char *extext)
+{
+    IHTMLCommentElement *comment = _get_comment_iface(__LINE__,unk);
+    BSTR text;
+    HRESULT hres;
+
+    text = a2bstr(extext);
+    hres = IHTMLCommentElement_get_text(comment, &text);
+    ok_(__FILE__,line)(hres == S_OK, "get_text failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(text, extext), "text = \"%s\", expected \"%s\"\n", wine_dbgstr_w(text), extext);
+
+    IHTMLCommentElement_Release(comment);
+    SysFreeString(text);
+}
+
 #define create_option_elem(d,t,v) _create_option_elem(__LINE__,d,t,v)
 static IHTMLOptionElement *_create_option_elem(unsigned line, IHTMLDocument2 *doc,
         const char *txt, const char *val)
@@ -1145,8 +1172,8 @@ static void _test_img_width(unsigned line, IHTMLImgElement *img, const long exp)
     HRESULT hres;
 
     hres = IHTMLImgElement_get_width(img, &found);
-    todo_wine ok_(__FILE__,line) (hres == S_OK, "get_width failed: %08x\n", hres);
-    todo_wine ok_(__FILE__,line) (found == exp, "width=%d\n", found);
+    ok_(__FILE__,line) (hres == S_OK, "get_width failed: %08x\n", hres);
+    ok_(__FILE__,line) (found == exp, "width=%d\n", found);
 }
 
 #define test_img_put_width(o,w) _test_img_put_width(__LINE__,o,w)
@@ -1155,7 +1182,7 @@ static void _test_img_put_width(unsigned line, IHTMLImgElement *img, const long 
     HRESULT hres;
 
     hres = IHTMLImgElement_put_width(img, width);
-    todo_wine ok(hres == S_OK, "put_width failed: %08x\n", hres);
+    ok(hres == S_OK, "put_width failed: %08x\n", hres);
 
     _test_img_width(line, img, width);
 }
@@ -1167,8 +1194,8 @@ static void _test_img_height(unsigned line, IHTMLImgElement *img, const long exp
     HRESULT hres;
 
     hres = IHTMLImgElement_get_height(img, &found);
-    todo_wine ok_(__FILE__,line) (hres == S_OK, "get_height failed: %08x\n", hres);
-    todo_wine ok_(__FILE__,line) (found == exp, "height=%d\n", found);
+    ok_(__FILE__,line) (hres == S_OK, "get_height failed: %08x\n", hres);
+    ok_(__FILE__,line) (found == exp, "height=%d\n", found);
 }
 
 #define test_img_put_height(o,w) _test_img_put_height(__LINE__,o,w)
@@ -1177,7 +1204,7 @@ static void _test_img_put_height(unsigned line, IHTMLImgElement *img, const long
     HRESULT hres;
 
     hres = IHTMLImgElement_put_height(img, height);
-    todo_wine ok(hres == S_OK, "put_height failed: %08x\n", hres);
+    ok(hres == S_OK, "put_height failed: %08x\n", hres);
 
     _test_img_height(line, img, height);
 }
@@ -1649,6 +1676,21 @@ static void _test_elem_set_outerhtml(unsigned line, IUnknown *unk, const char *o
     html = a2bstr(outer_html);
     hres = IHTMLElement_put_outerHTML(elem, html);
     ok_(__FILE__,line)(hres == S_OK, "put_outerHTML failed: %08x\n", hres);
+
+    IHTMLElement_Release(elem);
+    SysFreeString(html);
+}
+
+#define test_elem_outerhtml(e,t) _test_elem_outerhtml(__LINE__,e,t)
+static void _test_elem_outerhtml(unsigned line, IUnknown *unk, const char *outer_html)
+{
+    IHTMLElement *elem = _get_elem_iface(line, unk);
+    BSTR html;
+    HRESULT hres;
+
+    hres = IHTMLElement_get_outerHTML(elem, &html);
+    ok_(__FILE__,line)(hres == S_OK, "get_outerHTML failed: %08x\n", hres);
+    ok_(__FILE__,line)(!strcmp_wa(html, outer_html), "outerHTML = '%s', expected '%s'\n", wine_dbgstr_w(html), outer_html);
 
     IHTMLElement_Release(elem);
     SysFreeString(html);
@@ -3869,6 +3911,18 @@ static void test_default_style(IHTMLStyle *style)
     ok(!strcmp_wa(V_BSTR(&v), "auto"), "V_BSTR(v)=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = 100;
+    hres = IHTMLStyle_put_width(style, v);
+    ok(hres == S_OK, "put_width failed: %08x\n", hres);
+
+    V_VT(&v) = VT_EMPTY;
+    hres = IHTMLStyle_get_width(style, &v);
+    ok(hres == S_OK, "get_width failed: %08x\n", hres);
+    ok(V_VT(&v) == VT_BSTR, "V_VT(v)=%d\n", V_VT(&v));
+    ok(!strcmp_wa(V_BSTR(&v), "100px"), "V_BSTR(v)=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    VariantClear(&v);
+
     /* margin tests */
     str = (void*)0xdeadbeef;
     hres = IHTMLStyle_get_margin(style, &str);
@@ -4434,8 +4488,8 @@ static void test_default_style(IHTMLStyle *style)
      */
     V_BSTR(&v) = NULL;
     hres = IHTMLStyle_get_borderRightColor(style, &v);
-    todo_wine ok(hres == S_OK, "get_borderRightColor failed: %08x\n", hres);
-    todo_wine ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(hres == S_OK, "get_borderRightColor failed: %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     V_BSTR(&v) = NULL;
@@ -4468,8 +4522,8 @@ static void test_default_style(IHTMLStyle *style)
      */
     V_BSTR(&v) = NULL;
     hres = IHTMLStyle_get_borderTopColor(style, &v);
-    todo_wine ok(hres == S_OK, "get_borderTopColor failed: %08x\n", hres);
-    todo_wine ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(hres == S_OK, "get_borderTopColor failed: %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     V_BSTR(&v) = NULL;
@@ -4502,8 +4556,8 @@ static void test_default_style(IHTMLStyle *style)
      */
     V_BSTR(&v) = NULL;
     hres = IHTMLStyle_get_borderBottomColor(style, &v);
-    todo_wine ok(hres == S_OK, "get_borderBottomColor failed: %08x\n", hres);
-    todo_wine ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(hres == S_OK, "get_borderBottomColor failed: %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     V_BSTR(&v) = NULL;
@@ -4536,8 +4590,8 @@ static void test_default_style(IHTMLStyle *style)
      */
     V_BSTR(&v) = NULL;
     hres = IHTMLStyle_get_borderLeftColor(style, &v);
-    todo_wine ok(hres == S_OK, "get_borderLeftColor failed: %08x\n", hres);
-    todo_wine ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
+    ok(hres == S_OK, "get_borderLeftColor failed: %08x\n", hres);
+    ok(!strcmp_wa(V_BSTR(&v), "red"), "str=%s\n", wine_dbgstr_w(V_BSTR(&v)));
     VariantClear(&v);
 
     V_BSTR(&v) = NULL;
@@ -5896,6 +5950,11 @@ static void test_create_elems(IHTMLDocument2 *doc)
             ok(type == 8, "type=%d, expected 8\n", type);
 
             test_node_get_value_str((IUnknown*)comment, "testing");
+            test_elem_title((IUnknown*)comment, NULL);
+            test_elem_set_title((IUnknown*)comment, "comment title");
+            test_elem_title((IUnknown*)comment, "comment title");
+            test_comment_text((IUnknown*)comment, "<!--testing-->");
+            test_elem_outerhtml((IUnknown*)comment, "<!--testing-->");
 
             IHTMLDOMNode_Release(comment);
         }
@@ -5904,6 +5963,22 @@ static void test_create_elems(IHTMLDocument2 *doc)
     }
 
     IHTMLElement_Release(body);
+}
+
+static void test_null_write(IHTMLDocument2 *doc)
+{
+    HRESULT hres;
+
+    doc_write(doc, FALSE, NULL);
+    doc_write(doc, TRUE, NULL);
+
+    hres = IHTMLDocument2_write(doc, NULL);
+    ok(hres == S_OK,
+       "Expected IHTMLDocument2::write to return S_OK, got 0x%08x\n", hres);
+
+    hres = IHTMLDocument2_writeln(doc, NULL);
+    ok(hres == S_OK,
+       "Expected IHTMLDocument2::writeln to return S_OK, got 0x%08x\n", hres);
 }
 
 static void test_exec(IUnknown *unk, const GUID *grpid, DWORD cmdid, VARIANT *in, VARIANT *out)
@@ -6380,6 +6455,7 @@ START_TEST(dom)
     run_domtest(elem_test2_str, test_elems2);
     run_domtest(doc_blank, test_create_elems);
     run_domtest(doc_blank, test_defaults);
+    run_domtest(doc_blank, test_null_write);
     run_domtest(indent_test_str, test_indent);
     run_domtest(cond_comment_str, test_cond_comment);
     run_domtest(frameset_str, test_frameset);

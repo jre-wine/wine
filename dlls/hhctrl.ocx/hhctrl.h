@@ -79,8 +79,17 @@ typedef struct IndexItem {
 
     int nItems;
     int itemFlags;
+    int indentLevel;
     IndexSubItem *items;
 } IndexItem;
+
+typedef struct SearchItem {
+    struct SearchItem *next;
+
+    HTREEITEM id;
+    LPWSTR title;
+    LPWSTR filename;
+} SearchItem;
 
 typedef struct CHMInfo
 {
@@ -114,6 +123,13 @@ typedef struct {
 } IndexPopup;
 
 typedef struct {
+    SearchItem *root;
+    HWND hwndEdit;
+    HWND hwndList;
+    HWND hwndContainer;
+} SearchTab;
+
+typedef struct {
     IOleClientSite *client_site;
     IWebBrowser2 *web_browser;
     IOleObject *wb_object;
@@ -136,6 +152,7 @@ typedef struct {
     ContentItem *content;
     IndexItem *index;
     IndexPopup popup;
+    SearchTab search;
     HWND hwndTabCtrl;
     HWND hwndSizeBar;
     HFONT hFont;
@@ -166,6 +183,9 @@ HHInfo *CreateHelpViewer(LPCWSTR);
 void ReleaseHelpViewer(HHInfo*);
 BOOL NavigateToUrl(HHInfo*,LPCWSTR);
 BOOL NavigateToChm(HHInfo*,LPCWSTR,LPCWSTR);
+
+void InitSearch(HHInfo *info, const char *needle);
+void ReleaseSearch(HHInfo *info);
 
 /* memory allocation functions */
 

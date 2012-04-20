@@ -1938,7 +1938,7 @@ static LONG URL_ParseUrl(LPCWSTR pszUrl, WINE_PARSE_URL *pl)
     work = URL_ScanID(pl->pScheme, &pl->szScheme, SCHEME);
     if (!*work || (*work != ':')) goto ErrorExit;
     work++;
-    if ((*work != '/') || (*(work+1) != '/')) goto ErrorExit;
+    if ((*work != '/') || (*(work+1) != '/')) goto SuccessExit;
     pl->pUserName = work + 2;
     work = URL_ScanID(pl->pUserName, &pl->szUserName, USERPASS);
     if (*work == ':' ) {
@@ -1979,6 +1979,7 @@ static LONG URL_ParseUrl(LPCWSTR pszUrl, WINE_PARSE_URL *pl)
         pl->pQuery = strchrW(work, '?');
 	if (pl->pQuery) pl->szQuery = strlenW(pl->pQuery);
     }
+  SuccessExit:
     TRACE("parse successful: scheme=%p(%d), user=%p(%d), pass=%p(%d), host=%p(%d), port=%p(%d), query=%p(%d)\n",
 	  pl->pScheme, pl->szScheme,
 	  pl->pUserName, pl->szUserName,
@@ -2441,7 +2442,7 @@ HRESULT WINAPI UrlFixupW(LPCWSTR url, LPWSTR translatedUrl, DWORD maxChars)
     if (!url)
         return E_FAIL;
 
-    srcLen = lstrlenW(url);
+    srcLen = lstrlenW(url) + 1;
 
     /* For now just copy the URL directly */
     lstrcpynW(translatedUrl, url, (maxChars < srcLen) ? maxChars : srcLen);

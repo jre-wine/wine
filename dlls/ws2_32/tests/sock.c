@@ -986,6 +986,15 @@ static void test_set_getsockopt(void)
         err = getsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, &size); 
     ok( !err, "get/setsockopt(SO_RCVTIMEO) failed error: %d\n", WSAGetLastError());
     ok( timeout == SOCKTIMEOUT1, "getsockopt(SO_RCVTIMEO) returned wrong value %d\n", timeout);
+
+    timeout = 0;
+    size = sizeof(timeout);
+    err = setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, size);
+    if( !err)
+        err = getsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char *) &timeout, &size);
+    ok( !err, "get/setsockopt(SO_RCVTIMEO) failed error: %d\n", WSAGetLastError());
+    ok( timeout == 0, "getsockopt(SO_RCVTIMEO) returned wrong value %d\n", timeout);
+
     /* SO_SNDTIMEO */
     timeout = SOCKTIMEOUT2; /* 997 seconds. See remark above */
     size = sizeof(timeout);
@@ -3281,7 +3290,8 @@ static void test_getpeername(void)
 
     ret = getpeername(sock, NULL, NULL);
     ok(ret == SOCKET_ERROR, "Expected getpeername to return SOCKET_ERROR, got %d\n", ret);
-    ok(WSAGetLastError() == WSAENOTCONN,
+    ok(WSAGetLastError() == WSAENOTCONN ||
+       broken(WSAGetLastError() == WSAEFAULT), /* Win9x and WinMe */
        "Expected WSAGetLastError() to return WSAENOTCONN, got %d\n", WSAGetLastError());
 
     memset(&sa, 0, sizeof(sa));
@@ -3296,7 +3306,8 @@ static void test_getpeername(void)
 
     ret = getpeername(sock, NULL, NULL);
     ok(ret == SOCKET_ERROR, "Expected getpeername to return SOCKET_ERROR, got %d\n", ret);
-    ok(WSAGetLastError() == WSAENOTCONN,
+    ok(WSAGetLastError() == WSAENOTCONN ||
+       broken(WSAGetLastError() == WSAEFAULT), /* Win9x and WinMe */
        "Expected WSAGetLastError() to return WSAENOTCONN, got %d\n", WSAGetLastError());
 
     ret = connect(sock, (struct sockaddr*)&sa, sizeof(sa));

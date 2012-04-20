@@ -203,9 +203,6 @@ static void test_midiOut_device(UINT udev, HWND hwnd)
         rc = midiOutOpen(&hm, udev, (DWORD_PTR)hwnd, (DWORD_PTR)MYCBINST, CALLBACK_WINDOW);
     else
         rc = midiOutOpen(&hm, udev, (DWORD_PTR)callback_func, (DWORD_PTR)MYCBINST, CALLBACK_FUNCTION);
-    if (MIDIMAPPER==udev) todo_wine
-    ok(!rc, "midiOutOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
-    else
     ok(!rc, "midiOutOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
     if (rc) return;
 
@@ -237,9 +234,9 @@ static void test_midiOut_device(UINT udev, HWND hwnd)
             ok(!rc, "midiOutSetVolume restore rc=%s\n", mmsys_error(rc));
         }
     }
-    rc = midiOutGetDevCapsA((UINT)hm, &capsA, sizeof(capsA));
+    rc = midiOutGetDevCapsA((UINT_PTR)hm, &capsA, sizeof(capsA));
     ok(!rc, "midiOutGetDevCaps(dev=%d) by handle rc=%s\n", udev, mmsys_error(rc));
-    rc = midiInGetDevCapsA((UINT)hm, (LPMIDIINCAPSA)&capsA, sizeof(DWORD));
+    rc = midiInGetDevCapsA((UINT_PTR)hm, (LPMIDIINCAPSA)&capsA, sizeof(DWORD));
     ok(rc==MMSYSERR_BADDEVICEID, "midiInGetDevCaps(dev=%d) by out handle rc=%s\n", udev, mmsys_error(rc));
 
     {   DWORD e = 0x006F4893; /* velocity, note (#69 would be 440Hz) channel */
@@ -316,9 +313,6 @@ static void test_midiStream(UINT udev, HWND hwnd)
         rc = midiStreamOpen(&hm, &udev, 1, (DWORD_PTR)hwnd, (DWORD_PTR)MYCBINST, CALLBACK_WINDOW);
     else
         rc = midiStreamOpen(&hm, &udev, 1, (DWORD_PTR)callback_func, (DWORD_PTR)MYCBINST, CALLBACK_FUNCTION);
-    if (MIDIMAPPER==udev) todo_wine
-    ok(!rc, "midiStreamOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
-    else
     ok(!rc, "midiStreamOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
     if (rc) return;
 
@@ -347,8 +341,8 @@ static void test_midiStream(UINT udev, HWND hwnd)
          * but it will be set on all systems after the job is finished. */
 
         Sleep(90);
-        /* Wine starts playing immediately */
-      /*todo_wine test_notification(hwnd, "midiStream still paused", 0, WHATEVER);*/
+        /* Wine <1.1.39 started playing immediately */
+        test_notification(hwnd, "midiStream still paused", 0, WHATEVER);
 
     /* MSDN asks to use midiStreamRestart prior to midiStreamOut()
      * because the starting state is 'pause', but some apps seem to
@@ -371,8 +365,8 @@ static void test_midiStream(UINT udev, HWND hwnd)
             Sleep(100);
         }
         ok(mhdr.dwFlags & MHDR_DONE, "MHDR.dwFlags %x not DONE when out of queue\n", mhdr.dwFlags);
-        test_notification(hwnd, "midiStream callback", MOM_POSITIONCB, (DWORD)&mhdr);
-        test_notification(hwnd, "midiStreamOut", MOM_DONE, (DWORD)&mhdr);
+        test_notification(hwnd, "midiStream callback", MOM_POSITIONCB, (DWORD_PTR)&mhdr);
+        test_notification(hwnd, "midiStreamOut", MOM_DONE, (DWORD_PTR)&mhdr);
 
         rc = midiOutUnprepareHeader((HMIDIOUT)hm, &mhdr, sizeof(mhdr));
         ok(!rc, "midiOutUnprepare rc=%s\n", mmsys_error(rc));

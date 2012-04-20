@@ -446,7 +446,7 @@ static HWND DIALOG_CreateIndirect16( HINSTANCE16 hInst, LPCVOID dlgTemplate,
     dlgInfo->hMenu       = HMENU_32( hMenu );
     dlgInfo->xBaseUnit   = xBaseUnit;
     dlgInfo->yBaseUnit   = yBaseUnit;
-    dlgInfo->idResult    = IDOK;
+    dlgInfo->idResult    = 0;
     dlgInfo->flags       = flags;
 
     SetWindowLong16( HWND_16(hwnd), DWLP_DLGPROC, (LONG)dlgProc );

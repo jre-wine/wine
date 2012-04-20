@@ -1,0 +1,26 @@
+
+@pwd@>echo Tests for cmd's builtin commands@todo_space@
+Tests for cmd's builtin commands
+------------ Testing 'echo' --------------
+word
+'singlequotedword'
+"doublequotedword"
+at-echoed-word
+"/?"
+
+.
+------------ Testing 'set' --------------
+set "FOO=bar" should not include the quotes in the variable value
+bar
+------------ Testing variable expansion --------------
+~dp0 should be directory containing batch file
+@pwd@\
+@pwd@\
+------------ Testing if/else --------------
+if/else should work with blocks
+if seems to work
+else seems to work
+Testing case sensitivity with and without /i option
+if seems to default to case sensitivity
+if /i seems to work
+if /I seems to work
