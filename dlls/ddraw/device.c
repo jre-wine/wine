@@ -2441,8 +2441,20 @@ IDirect3DDeviceImpl_7_GetRenderState(IDirect3DDevice7 *iface,
                                                 Value);
             break;
 
+        case D3DRENDERSTATE_BORDERCOLOR:
+            FIXME("Unhandled render state D3DRENDERSTATE_BORDERCOLOR.\n");
+            hr = E_NOTIMPL;
+            break;
+
         default:
-            /* FIXME: Unhandled: D3DRENDERSTATE_STIPPLEPATTERN00 - 31 */
+            if (RenderStateType >= D3DRENDERSTATE_STIPPLEPATTERN00
+                    && RenderStateType <= D3DRENDERSTATE_STIPPLEPATTERN31)
+            {
+                FIXME("Unhandled stipple pattern render state (%#x).\n",
+                        RenderStateType);
+                hr = E_NOTIMPL;
+                break;
+            }
             hr = IWineD3DDevice_GetRenderState(This->wineD3DDevice,
                                                RenderStateType,
                                                Value);
@@ -2723,9 +2735,22 @@ IDirect3DDeviceImpl_7_SetRenderState(IDirect3DDevice7 *iface,
                                                 Value);
             break;
 
-        default:
+        case D3DRENDERSTATE_BORDERCOLOR:
+            /* This should probably just forward to the corresponding sampler
+             * state. Needs tests. */
+            FIXME("Unhandled render state D3DRENDERSTATE_BORDERCOLOR.\n");
+            hr = E_NOTIMPL;
+            break;
 
-            /* FIXME: Unhandled: D3DRENDERSTATE_STIPPLEPATTERN00 - 31 */
+        default:
+            if (RenderStateType >= D3DRENDERSTATE_STIPPLEPATTERN00
+                    && RenderStateType <= D3DRENDERSTATE_STIPPLEPATTERN31)
+            {
+                FIXME("Unhandled stipple pattern render state (%#x).\n",
+                        RenderStateType);
+                hr = E_NOTIMPL;
+                break;
+            }
 
             hr = IWineD3DDevice_SetRenderState(This->wineD3DDevice,
                                                RenderStateType,

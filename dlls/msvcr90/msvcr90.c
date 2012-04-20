@@ -44,6 +44,37 @@ BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
     return TRUE;
 }
 
+/*********************************************************************
+ *  _decode_pointer (MSVCR90.@)
+ *
+ * cdecl version of DecodePointer
+ *
+ */
+void * CDECL MSVCR90_decode_pointer(void * ptr)
+{
+    return DecodePointer(ptr);
+}
+
+/*********************************************************************
+ *  _encode_pointer (MSVCR90.@)
+ *
+ * cdecl version of EncodePointer
+ *
+ */
+void * CDECL MSVCR90_encode_pointer(void * ptr)
+{
+    return EncodePointer(ptr);
+}
+
+/*********************************************************************
+ *  _encoded_null (MSVCR90.@)
+ */
+void * CDECL _encoded_null(void)
+{
+    TRACE("\n");
+
+    return MSVCR90_encode_pointer(NULL);
+}
 
 /*********************************************************************
  *  _initterm_e (MSVCR90.@)
@@ -66,4 +97,20 @@ int CDECL _initterm_e(_INITTERM_E_FN *table, _INITTERM_E_FN *end)
         table++;
     }
     return res;
+}
+
+/*********************************************************************
+ * __sys_nerr (MSVCR90.@)
+ */
+int* CDECL __sys_nerr(void)
+{
+        return (int*)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_sys_nerr");
+}
+
+/*********************************************************************
+ *  __sys_errlist (MSVCR90.@)
+ */
+char** CDECL __sys_errlist(void)
+{
+    return (char**)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_sys_errlist");
 }

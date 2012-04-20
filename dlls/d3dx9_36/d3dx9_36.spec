@@ -47,7 +47,7 @@
 @ stub D3DXCreateCubeTextureFromResourceW
 @ stub D3DXCreateCylinder
 @ stdcall D3DXCreateEffect(ptr ptr long ptr ptr long ptr ptr ptr)
-@ stub D3DXCreateEffectCompiler
+@ stdcall D3DXCreateEffectCompiler(ptr long ptr ptr long ptr ptr)
 @ stub D3DXCreateEffectCompilerFromFileA
 @ stub D3DXCreateEffectCompilerFromFileW
 @ stub D3DXCreateEffectCompilerFromResourceA
@@ -61,7 +61,7 @@
 @ stub D3DXCreateEffectFromResourceExA
 @ stub D3DXCreateEffectFromResourceExW
 @ stub D3DXCreateEffectFromResourceW
-@ stub D3DXCreateEffectPool
+@ stdcall D3DXCreateEffectPool(ptr)
 @ stdcall D3DXCreateFontA(ptr long long long long long long long long long str ptr)
 @ stdcall D3DXCreateFontIndirectA(ptr ptr ptr)
 @ stdcall D3DXCreateFontIndirectW(ptr ptr ptr)
@@ -69,7 +69,7 @@
 @ stub D3DXCreateFragmentLinker
 @ stub D3DXCreateFragmentLinkerEx
 @ stub D3DXCreateKeyframedAnimationSet
-@ stub D3DXCreateLine
+@ stdcall D3DXCreateLine(ptr ptr)
 @ stdcall D3DXCreateMatrixStack(long ptr)
 @ stub D3DXCreateMesh
 @ stub D3DXCreateMeshFVF
@@ -192,7 +192,7 @@
 @ stub D3DXLoadVolumeFromFileA
 @ stub D3DXLoadVolumeFromFileInMemory
 @ stub D3DXLoadVolumeFromFileW
-@ stub D3DXLoadVolumeFromMemory
+@ stdcall D3DXLoadVolumeFromMemory(ptr ptr ptr ptr long long long ptr ptr long long)
 @ stub D3DXLoadVolumeFromResourceA
 @ stub D3DXLoadVolumeFromResourceW
 @ stub D3DXLoadVolumeFromVolume

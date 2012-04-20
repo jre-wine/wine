@@ -143,7 +143,7 @@ typedef struct tagMSIMEDIAINFO
     LPWSTR volume_label;
     BOOL is_continuous;
     BOOL is_extracted;
-    WCHAR source[MAX_PATH];
+    WCHAR sourcedir[MAX_PATH];
 } MSIMEDIAINFO;
 
 typedef struct tagMSIPATCHINFO
@@ -672,8 +672,6 @@ extern UINT msi_save_string_table( const string_table *st, IStorage *storage );
 extern BOOL TABLE_Exists( MSIDATABASE *db, LPCWSTR name );
 extern MSICONDITION MSI_DatabaseIsTablePersistent( MSIDATABASE *db, LPCWSTR table );
 
-extern UINT read_raw_stream_data( MSIDATABASE *db, LPCWSTR stname,
-                                  USHORT **pdata, UINT *psz );
 extern UINT read_stream_data( IStorage *stg, LPCWSTR stname, BOOL table,
                               BYTE **pdata, UINT *psz );
 extern UINT write_stream_data( IStorage *stg, LPCWSTR stname,
@@ -724,6 +722,7 @@ extern BOOL decode_streamname(LPCWSTR in, LPWSTR out);
 
 /* database internals */
 extern UINT db_get_raw_stream( MSIDATABASE *, LPCWSTR, IStream ** );
+void db_destroy_stream( MSIDATABASE *, LPCWSTR );
 extern UINT MSI_OpenDatabaseW( LPCWSTR, LPCWSTR, MSIDATABASE ** );
 extern UINT MSI_DatabaseOpenViewW(MSIDATABASE *, LPCWSTR, MSIQUERY ** );
 extern UINT MSI_OpenQuery( MSIDATABASE *, MSIQUERY **, LPCWSTR, ... );
@@ -963,7 +962,11 @@ extern UINT ACTION_RegisterProgIdInfo(MSIPACKAGE *package);
 extern UINT ACTION_RegisterExtensionInfo(MSIPACKAGE *package);
 extern UINT ACTION_RegisterMIMEInfo(MSIPACKAGE *package);
 extern UINT ACTION_RegisterFonts(MSIPACKAGE *package);
+extern UINT ACTION_UnregisterClassInfo(MSIPACKAGE *package);
+extern UINT ACTION_UnregisterExtensionInfo(MSIPACKAGE *package);
 extern UINT ACTION_UnregisterFonts(MSIPACKAGE *package);
+extern UINT ACTION_UnregisterMIMEInfo(MSIPACKAGE *package);
+extern UINT ACTION_UnregisterProgIdInfo(MSIPACKAGE *package);
 
 /* Helpers */
 extern DWORD deformat_string(MSIPACKAGE *package, LPCWSTR ptr, WCHAR** data );
@@ -1084,6 +1087,21 @@ static const WCHAR szHU[] = {'H','K','E','Y','_','U','S','E','R','S','\\',0};
 static const WCHAR szWindowsFolder[] = {'W','i','n','d','o','w','s','F','o','l','d','e','r',0};
 static const WCHAR szAppSearch[] = {'A','p','p','S','e','a','r','c','h',0};
 static const WCHAR szMoveFiles[] = {'M','o','v','e','F','i','l','e','s',0};
+static const WCHAR szCCPSearch[] = {'C','C','P','S','e','a','r','c','h',0};
+static const WCHAR szUnregisterClassInfo[] = {'U','n','r','e','g','i','s','t','e','r','C','l','a','s','s','I','n','f','o',0};
+static const WCHAR szUnregisterExtensionInfo[] = {'U','n','r','e','g','i','s','t','e','r','E','x','t','e','n','s','i','o','n','I','n','f','o',0};
+static const WCHAR szUnregisterMIMEInfo[] = {'U','n','r','e','g','i','s','t','e','r','M','I','M','E','I','n','f','o',0};
+static const WCHAR szUnregisterProgIdInfo[] = {'U','n','r','e','g','i','s','t','e','r','P','r','o','g','I','d','I','n','f','o',0};
+static const WCHAR szRegisterFonts[] = {'R','e','g','i','s','t','e','r','F','o','n','t','s',0};
+static const WCHAR szUnregisterFonts[] = {'U','n','r','e','g','i','s','t','e','r','F','o','n','t','s',0};
+static const WCHAR szCLSID[] = {'C','L','S','I','D',0};
+static const WCHAR szProgID[] = {'P','r','o','g','I','D',0};
+static const WCHAR szVIProgID[] = {'V','e','r','s','i','o','n','I','n','d','e','p','e','n','d','e','n','t','P','r','o','g','I','D',0};
+static const WCHAR szAppID[] = {'A','p','p','I','D',0};
+static const WCHAR szDefaultIcon[] = {'D','e','f','a','u','l','t','I','c','o','n',0};
+static const WCHAR szInprocHandler[] = {'I','n','p','r','o','c','H','a','n','d','l','e','r',0};
+static const WCHAR szInprocHandler32[] = {'I','n','p','r','o','c','H','a','n','d','l','e','r','3','2',0};
+static const WCHAR szMIMEDatabase[] = {'M','I','M','E','\\','D','a','t','a','b','a','s','e','\\','C','o','n','t','e','n','t',' ','T','y','p','e','\\',0};
 
 /* memory allocation macro functions */
 static void *msi_alloc( size_t len ) __WINE_ALLOC_SIZE(1);

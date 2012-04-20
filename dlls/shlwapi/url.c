@@ -278,7 +278,8 @@ HRESULT WINAPI UrlCanonicalizeW(LPCWSTR pszUrl, LPWSTR pszCanonicalized,
 {
     HRESULT hr = S_OK;
     DWORD EscapeFlags;
-    LPWSTR lpszUrlCpy, wk1, wk2, mp, mp2, root;
+    LPCWSTR wk1, root;
+    LPWSTR lpszUrlCpy, wk2, mp, mp2;
     INT state;
     DWORD nByteLen, nLen, nWkLen;
     WCHAR slash = '/';
@@ -322,7 +323,7 @@ HRESULT WINAPI UrlCanonicalizeW(LPCWSTR pszUrl, LPWSTR pszCanonicalized,
      *         6   have location (found /) save root location
      */
 
-    wk1 = (LPWSTR)pszUrl;
+    wk1 = pszUrl;
     wk2 = lpszUrlCpy;
     state = 0;
 
@@ -662,7 +663,7 @@ HRESULT WINAPI UrlCombineW(LPCWSTR pszBase, LPCWSTR pszRelative,
             }
         }
 
-        /* If there is a '#' and the characters immediately preceeding it are
+        /* If there is a '#' and the characters immediately preceding it are
          * ".htm[l]", then begin looking for the last leaf starting from
          * the '#'. Otherwise the '#' is not meaningful and just start
          * looking from the end. */

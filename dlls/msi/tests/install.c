@@ -1696,6 +1696,165 @@ static const CHAR res_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                                "PublishProduct\t\t5200\n"
                                                "InstallFinalize\t\t6000\n";
 
+static const CHAR rci_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                   "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                   "File\tFile\n"
+                                   "class.txt\tclass\tclass.txt\t1000\t\t\t8192\t1\n";
+
+static const CHAR rci_feature_dat[] = "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+                                      "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+                                      "Feature\tFeature\n"
+                                      "class\t\t\tclass feature\t1\t2\tMSITESTDIR\t0\n";
+
+static const CHAR rci_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                           "s38\ts72\n"
+                                           "FeatureComponents\tFeature_\tComponent_\n"
+                                           "class\tclass\n";
+
+static const CHAR rci_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "class\t{89A98345-F8A1-422E-A48B-0250B5809F2D}\tMSITESTDIR\t0\t\tclass.txt\n";
+
+static const CHAR rci_appid_dat[] = "AppId\tRemoteServerName\tLocalService\tServiceParameters\tDllSurrogate\tActivateAtStorage\tRunAsInteractiveUser\n"
+                                    "s38\tS255\tS255\tS255\tS255\tI2\tI2\n"
+                                    "AppId\tAppId\n"
+                                    "{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\t\t\t\t\t\t\n";
+
+static const CHAR rci_class_dat[] = "CLSID\tContext\tComponent_\tProgId_Default\tDescription\tAppId_\tFileTypeMask\tIcon_\tIconIndex\tDefInprocHandler\tArgument\tFeature_\tAttributes\n"
+                                    "s38\ts32\ts72\tS255\tL255\tS38\tS255\tS72\tI2\tS32\tS255\ts38\tI2\n"
+                                    "Class\tCLSID\tContext\tComponent_\n"
+                                    "{110913E7-86D1-4BF3-9922-BA103FCDDDFA}\tLocalServer\tclass\t\tdescription\t{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}\tmask1;mask2\t\t\t2\t\tclass\t\n";
+
+static const CHAR rci_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                               "s72\tS255\tI2\n"
+                                               "InstallExecuteSequence\tAction\n"
+                                               "LaunchConditions\t\t100\n"
+                                               "CostInitialize\t\t800\n"
+                                               "FileCost\t\t900\n"
+                                               "CostFinalize\t\t1000\n"
+                                               "InstallValidate\t\t1400\n"
+                                               "InstallInitialize\t\t1500\n"
+                                               "ProcessComponents\t\t1600\n"
+                                               "RemoveFiles\t\t1700\n"
+                                               "InstallFiles\t\t2000\n"
+                                               "UnregisterClassInfo\t\t3000\n"
+                                               "RegisterClassInfo\t\t4000\n"
+                                               "RegisterProduct\t\t5000\n"
+                                               "PublishFeatures\t\t5100\n"
+                                               "PublishProduct\t\t5200\n"
+                                               "InstallFinalize\t\t6000\n";
+
+static const CHAR rei_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                   "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                   "File\tFile\n"
+                                   "extension.txt\textension\textension.txt\t1000\t\t\t8192\t1\n";
+
+static const CHAR rei_feature_dat[] = "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+                                      "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+                                      "Feature\tFeature\n"
+                                      "extension\t\t\textension feature\t1\t2\tMSITESTDIR\t0\n";
+
+static const CHAR rei_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                           "s38\ts72\n"
+                                           "FeatureComponents\tFeature_\tComponent_\n"
+                                           "extension\textension\n";
+
+static const CHAR rei_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "extension\t{9A3060D4-60BA-4A82-AB55-9FB148AD013C}\tMSITESTDIR\t0\t\textension.txt\n";
+
+static const CHAR rei_extension_dat[] = "Extension\tComponent_\tProgId_\tMIME_\tFeature_\n"
+                                        "s255\ts72\tS255\tS64\ts38\n"
+                                        "Extension\tExtension\tComponent_\n"
+                                        "extension\textension\tProg.Id.1\t\textension\n";
+
+static const CHAR rei_verb_dat[] = "Extension_\tVerb\tSequence\tCommand\tArgument\n"
+                                   "s255\ts32\tI2\tL255\tL255\n"
+                                   "Verb\tExtension_\tVerb\n"
+                                   "extension\tOpen\t1\t&Open\t/argument\n";
+
+static const CHAR rei_progid_dat[] = "ProgId\tProgId_Parent\tClass_\tDescription\tIcon_\tIconIndex\n"
+                                     "s255\tS255\tS38\tL255\tS72\tI2\n"
+                                     "ProgId\tProgId\n"
+                                     "Prog.Id.1\t\t\tdescription\t\t\n";
+
+static const CHAR rei_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                               "s72\tS255\tI2\n"
+                                               "InstallExecuteSequence\tAction\n"
+                                               "LaunchConditions\t\t100\n"
+                                               "CostInitialize\t\t800\n"
+                                               "FileCost\t\t900\n"
+                                               "CostFinalize\t\t1000\n"
+                                               "InstallValidate\t\t1400\n"
+                                               "InstallInitialize\t\t1500\n"
+                                               "ProcessComponents\t\t1600\n"
+                                               "RemoveFiles\t\t1700\n"
+                                               "InstallFiles\t\t2000\n"
+                                               "UnregisterExtensionInfo\t\t3000\n"
+                                               "RegisterExtensionInfo\t\t4000\n"
+                                               "RegisterProduct\t\t5000\n"
+                                               "PublishFeatures\t\t5100\n"
+                                               "PublishProduct\t\t5200\n"
+                                               "InstallFinalize\t\t6000\n";
+
+static const CHAR rmi_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                   "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                   "File\tFile\n"
+                                   "mime.txt\tmime\tmime.txt\t1000\t\t\t8192\t1\n";
+
+static const CHAR rmi_feature_dat[] = "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+                                      "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+                                      "Feature\tFeature\n"
+                                      "mime\t\t\tmime feature\t1\t2\tMSITESTDIR\t0\n";
+
+static const CHAR rmi_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                           "s38\ts72\n"
+                                           "FeatureComponents\tFeature_\tComponent_\n"
+                                           "mime\tmime\n";
+
+static const CHAR rmi_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                        "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                        "Component\tComponent\n"
+                                        "mime\t{A1D630CE-13A7-4882-AFDD-148E2BBAFC6D}\tMSITESTDIR\t0\t\tmime.txt\n";
+
+static const CHAR rmi_extension_dat[] = "Extension\tComponent_\tProgId_\tMIME_\tFeature_\n"
+                                        "s255\ts72\tS255\tS64\ts38\n"
+                                        "Extension\tExtension\tComponent_\n"
+                                        "mime\tmime\t\tmime/type\tmime\n";
+
+static const CHAR rmi_verb_dat[] = "Extension_\tVerb\tSequence\tCommand\tArgument\n"
+                                   "s255\ts32\tI2\tL255\tL255\n"
+                                   "Verb\tExtension_\tVerb\n"
+                                   "mime\tOpen\t1\t&Open\t/argument\n";
+
+static const CHAR rmi_mime_dat[] = "ContentType\tExtension_\tCLSID\n"
+                                   "s64\ts255\tS38\n"
+                                   "MIME\tContentType\n"
+                                   "mime/type\tmime\t\n";
+
+static const CHAR rmi_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                               "s72\tS255\tI2\n"
+                                               "InstallExecuteSequence\tAction\n"
+                                               "LaunchConditions\t\t100\n"
+                                               "CostInitialize\t\t800\n"
+                                               "FileCost\t\t900\n"
+                                               "CostFinalize\t\t1000\n"
+                                               "InstallValidate\t\t1400\n"
+                                               "InstallInitialize\t\t1500\n"
+                                               "ProcessComponents\t\t1600\n"
+                                               "RemoveFiles\t\t1700\n"
+                                               "InstallFiles\t\t2000\n"
+                                               "UnregisterExtensionInfo\t\t3000\n"
+                                               "UnregisterMIMEInfo\t\t3500\n"
+                                               "RegisterExtensionInfo\t\t4000\n"
+                                               "RegisterMIMEInfo\t\t4500\n"
+                                               "RegisterProduct\t\t5000\n"
+                                               "PublishFeatures\t\t5100\n"
+                                               "PublishProduct\t\t5200\n"
+                                               "InstallFinalize\t\t6000\n";
+
 typedef struct _msi_table
 {
     const CHAR *filename;
@@ -2610,6 +2769,50 @@ static const msi_table res_tables[] =
     ADD_TABLE(res_file),
     ADD_TABLE(res_environment),
     ADD_TABLE(res_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table rci_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(rci_component),
+    ADD_TABLE(rci_feature),
+    ADD_TABLE(rci_feature_comp),
+    ADD_TABLE(rci_file),
+    ADD_TABLE(rci_appid),
+    ADD_TABLE(rci_class),
+    ADD_TABLE(rci_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table rei_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(rei_component),
+    ADD_TABLE(rei_feature),
+    ADD_TABLE(rei_feature_comp),
+    ADD_TABLE(rei_file),
+    ADD_TABLE(rei_extension),
+    ADD_TABLE(rei_verb),
+    ADD_TABLE(rei_progid),
+    ADD_TABLE(rei_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table rmi_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(rmi_component),
+    ADD_TABLE(rmi_feature),
+    ADD_TABLE(rmi_feature_comp),
+    ADD_TABLE(rmi_file),
+    ADD_TABLE(rmi_extension),
+    ADD_TABLE(rmi_verb),
+    ADD_TABLE(rmi_mime),
+    ADD_TABLE(rmi_install_exec_seq),
     ADD_TABLE(media),
     ADD_TABLE(property)
 };
@@ -3670,9 +3873,9 @@ static void test_caborder(void)
 
     r = MsiInstallProductA(msifile, NULL);
     ok(!delete_pf("msitest\\caesar", TRUE), "File is installed\n");
+    ok(r == ERROR_INSTALL_FAILURE, "Expected ERROR_INSTALL_FAILURE, got %u\n", r);
     todo_wine
     {
-        ok(r == ERROR_INSTALL_FAILURE, "Expected ERROR_INSTALL_FAILURE, got %u\n", r);
         ok(!delete_pf("msitest\\augustus", TRUE), "File is installed\n");
         ok(!delete_pf("msitest\\maximus", TRUE), "File is installed\n");
         ok(!delete_pf("msitest", FALSE), "File is installed\n");
@@ -4572,6 +4775,7 @@ static void test_publish_publishproduct(void)
     CHAR keypath[MAX_PATH];
     CHAR temp[MAX_PATH];
     CHAR path[MAX_PATH];
+    BOOL old_installer = FALSE;
 
     static const CHAR prodpath[] = "Software\\Microsoft\\Windows\\CurrentVersion"
                                    "\\Installer\\UserData\\%s\\Products"
@@ -4609,6 +4813,22 @@ static void test_publish_publishproduct(void)
 
     sprintf(keypath, prodpath, usersid);
     res = RegOpenKeyA(HKEY_LOCAL_MACHINE, keypath, &hkey);
+    if (res == ERROR_FILE_NOT_FOUND)
+    {
+        res = RegOpenKeyA(HKEY_CURRENT_USER, cuprodpath, &hkey);
+        if (res == ERROR_SUCCESS)
+        {
+            win_skip("Windows Installer < 3.0 detected\n");
+            RegCloseKey(hkey);
+            old_installer = TRUE;
+            goto currentuser;
+        }
+        else
+        {
+            win_skip("Install failed, no need to continue\n");
+            return;
+        }
+    }
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
     res = RegOpenKeyA(hkey, "InstallProperties", &props);
@@ -4627,6 +4847,7 @@ static void test_publish_publishproduct(void)
     RegDeleteKeyA(hkey, "");
     RegCloseKey(hkey);
 
+currentuser:
     res = RegOpenKeyA(HKEY_CURRENT_USER, cuprodpath, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
@@ -4634,7 +4855,8 @@ static void test_publish_publishproduct(void)
     CHECK_DEL_REG_STR(hkey, "PackageCode", "AC75740029052c94DA02821EECD05F2F");
     CHECK_DEL_REG_DWORD(hkey, "Language", 1033);
     CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
-    CHECK_DEL_REG_DWORD(hkey, "AuthorizedLUAApp", 0);
+    if (!old_installer)
+        CHECK_DEL_REG_DWORD(hkey, "AuthorizedLUAApp", 0);
     CHECK_DEL_REG_DWORD(hkey, "Assignment", 0);
     CHECK_DEL_REG_DWORD(hkey, "AdvertiseFlags", 0x184);
     CHECK_DEL_REG_DWORD(hkey, "InstanceType", 0);
@@ -4678,6 +4900,8 @@ static void test_publish_publishproduct(void)
 
     /* PublishProduct, machine */
     r = MsiInstallProductA(msifile, "PUBLISH_PRODUCT=1 ALLUSERS=1");
+    if (old_installer)
+        goto machprod;
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", r);
     ok(delete_pf("msitest\\maximus", TRUE), "File not installed\n");
     ok(delete_pf("msitest", FALSE), "File not installed\n");
@@ -4705,6 +4929,7 @@ static void test_publish_publishproduct(void)
     RegDeleteKeyA(hkey, "");
     RegCloseKey(hkey);
 
+machprod:
     res = RegOpenKeyA(HKEY_CLASSES_ROOT, machprod, &hkey);
     ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
 
@@ -4712,7 +4937,8 @@ static void test_publish_publishproduct(void)
     CHECK_DEL_REG_STR(hkey, "PackageCode", "AC75740029052c94DA02821EECD05F2F");
     CHECK_DEL_REG_DWORD(hkey, "Language", 1033);
     CHECK_DEL_REG_DWORD(hkey, "Version", 0x1010001);
-    CHECK_DEL_REG_DWORD(hkey, "AuthorizedLUAApp", 0);
+    if (!old_installer)
+        CHECK_DEL_REG_DWORD(hkey, "AuthorizedLUAApp", 0);
     todo_wine CHECK_DEL_REG_DWORD(hkey, "Assignment", 1);
     CHECK_DEL_REG_DWORD(hkey, "AdvertiseFlags", 0x184);
     CHECK_DEL_REG_DWORD(hkey, "InstanceType", 0);
@@ -8015,6 +8241,7 @@ static void test_file_in_use(void)
     r = MsiInstallProductA(msifile, "REMOVE=ALL");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
+    DeleteFileA("msitest\\maximus");
     delete_test_files();
 }
 
@@ -8432,6 +8659,7 @@ static void test_register_font(void)
 
     RegDeleteValueA(key, "msi test font");
     RegCloseKey(key);
+    DeleteFileA("msitest\\font.ttf");
     delete_test_files();
 }
 
@@ -8496,6 +8724,11 @@ static void test_install_remove_odbc(void)
     ok(delete_pf("msitest\\ODBCsetup.dll", TRUE), "file not created\n");
     ok(delete_pf("msitest", FALSE), "directory not created\n");
 
+    DeleteFileA("msitest\\ODBCdriver.dll");
+    DeleteFileA("msitest\\ODBCdriver2.dll");
+    DeleteFileA("msitest\\ODBCtranslator.dll");
+    DeleteFileA("msitest\\ODBCtranslator2.dll");
+    DeleteFileA("msitest\\ODBCsetup.dll");
     delete_test_files();
 }
 
@@ -8521,6 +8754,7 @@ static void test_register_typelib(void)
     ok(!delete_pf("msitest\\typelib.dll", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
 
+    DeleteFileA("msitest\\typelib.dll");
     delete_test_files();
 }
 
@@ -8547,6 +8781,7 @@ static void test_create_remove_shortcut(void)
     ok(!delete_pf("msitest\\target.txt", TRUE), "file not removed\n");
     todo_wine ok(!delete_pf("msitest", FALSE), "directory not removed\n");
 
+    DeleteFileA("msitest\\target.txt");
     delete_test_files();
 }
 
@@ -8583,6 +8818,8 @@ static void test_publish_components(void)
 
     ok(!delete_pf("msitest\\english.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\english.txt");
     delete_test_files();
 }
 
@@ -8616,6 +8853,10 @@ static void test_remove_duplicate_files(void)
     ok(!delete_pf("msitest\\duplicate.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest\\duplicate2.txt", TRUE), "file not removed\n");
     ok(delete_pf("msitest", FALSE), "directory removed\n");
+
+    DeleteFileA("msitest\\original.txt");
+    DeleteFileA("msitest\\original2.txt");
+    DeleteFileA("msitest\\original3.txt");
     delete_test_files();
 }
 
@@ -8687,6 +8928,8 @@ static void test_remove_registry_values(void)
 
     ok(!delete_pf("msitest\\registry.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\registry.txt");
     delete_test_files();
 }
 
@@ -8712,6 +8955,8 @@ static void test_find_related_products(void)
 
     ok(!delete_pf("msitest\\product.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\product.txt");
     delete_test_files();
 }
 
@@ -8763,6 +9008,8 @@ static void test_remove_ini_values(void)
     todo_wine ok(!delete_pf("msitest\\test.ini", TRUE), "file removed\n");
     ok(!delete_pf("msitest\\inifile.txt", TRUE), "file not removed\n");
     ok(delete_pf("msitest", FALSE), "directory removed\n");
+
+    DeleteFileA("msitest\\inifile.txt");
     delete_test_files();
 }
 
@@ -8882,6 +9129,119 @@ static void test_remove_env_strings(void)
 
     ok(!delete_pf("msitest\\envvar.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\envvar.txt");
+    delete_test_files();
+}
+
+static void test_register_class_info(void)
+{
+    UINT r;
+    LONG res;
+    HKEY hkey;
+
+    create_test_files();
+    create_file("msitest\\class.txt", 1000);
+    create_database(msifile, rci_tables, sizeof(rci_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "FileType\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "AppID\\{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "CLSID\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "FileType\\{110913E7-86D1-4BF3-9922-BA103FCDDDFA}", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "AppID\\{CFCC3B38-E683-497D-9AB4-CB40AAFE307F}", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    ok(!delete_pf("msitest\\class.txt", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+    delete_test_files();
+}
+
+static void test_register_extension_info(void)
+{
+    UINT r;
+    LONG res;
+    HKEY hkey;
+
+    create_test_files();
+    create_file("msitest\\extension.txt", 1000);
+    create_database(msifile, rei_tables, sizeof(rei_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, ".extension", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Prog.Id.1\\shell\\Open\\command", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, ".extension", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "Prog.Id.1", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    ok(!delete_pf("msitest\\extension.txt", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+    delete_test_files();
+}
+
+static void test_register_mime_info(void)
+{
+    UINT r;
+    LONG res;
+    HKEY hkey;
+
+    create_test_files();
+    create_file("msitest\\mime.txt", 1000);
+    create_database(msifile, rmi_tables, sizeof(rmi_tables) / sizeof(msi_table));
+
+    MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "MIME\\Database\\Content Type\\mime/type", &hkey);
+    ok(res == ERROR_SUCCESS, "key not created\n");
+    RegCloseKey(hkey);
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    res = RegOpenKeyA(HKEY_CLASSES_ROOT, "MIME\\Database\\Content Type\\mime/type", &hkey);
+    ok(res == ERROR_FILE_NOT_FOUND, "key not removed\n");
+
+    ok(!delete_pf("msitest\\mime.txt", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
     delete_test_files();
 }
 
@@ -8992,6 +9352,9 @@ START_TEST(install)
     test_find_related_products();
     test_remove_ini_values();
     test_remove_env_strings();
+    test_register_class_info();
+    test_register_extension_info();
+    test_register_mime_info();
 
     DeleteFileA(log_file);
 

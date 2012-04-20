@@ -37,6 +37,9 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(ole);
 
+#define NULL_RESULT    0x20000
+#define NULL_EXCEPINFO 0x40000
+
 HRESULT CALLBACK IDispatchEx_InvokeEx_Proxy(IDispatchEx* This, DISPID id, LCID lcid, WORD wFlags,
                                             DISPPARAMS *pdp, VARIANT *pvarRes, EXCEPINFO *pei,
                                             IServiceProvider *pspCaller)
@@ -47,12 +50,22 @@ HRESULT CALLBACK IDispatchEx_InvokeEx_Proxy(IDispatchEx* This, DISPID id, LCID l
     UINT byref_args, arg;
     VARIANT dummy_arg, *ref_arg = &dummy_arg, *copy_arg, *orig_arg = NULL;
     UINT *ref_idx = NULL;
+    DWORD dword_flags = wFlags & 0xf;
 
     TRACE("(%p)->(%08x, %04x, %04x, %p, %p, %p, %p)\n", This, id, lcid, wFlags,
           pdp, pvarRes, pei, pspCaller);
 
-    if(!pvarRes) pvarRes = &result;
-    if(!pei) pei = &excep_info;
+    if(!pvarRes)
+    {
+        pvarRes = &result;
+        dword_flags |= NULL_RESULT;
+    }
+
+    if(!pei)
+    {
+        pei = &excep_info;
+        dword_flags |= NULL_EXCEPINFO;
+    }
 
     for(arg = 0, byref_args = 0; arg < pdp->cArgs; arg++)
         if(V_ISBYREF(pdp->rgvarg + arg)) byref_args++;
@@ -86,21 +99,13 @@ HRESULT CALLBACK IDispatchEx_InvokeEx_Proxy(IDispatchEx* This, DISPID id, LCID l
         pdp->rgvarg = copy_arg;
     }
 
-    hr = IDispatchEx_RemoteInvokeEx_Proxy(This, id, lcid, wFlags, pdp, pvarRes, pei, pspCaller,
+    hr = IDispatchEx_RemoteInvokeEx_Proxy(This, id, lcid, dword_flags, pdp, pvarRes, pei, pspCaller,
                                           byref_args, ref_idx, ref_arg);
 
     if(byref_args)
     {
         CoTaskMemFree(pdp->rgvarg);
         pdp->rgvarg = orig_arg;
-    }
-
-    if(pvarRes == &result) VariantClear(pvarRes);
-    if(pei == &excep_info)
-    {
-        SysFreeString(pei->bstrSource);
-        SysFreeString(pei->bstrDescription);
-        SysFreeString(pei->bstrHelpFile);
     }
 
     return hr;
@@ -113,6 +118,7 @@ HRESULT __RPC_STUB IDispatchEx_InvokeEx_Stub(IDispatchEx* This, DISPID id, LCID 
 {
     HRESULT hr;
     UINT arg;
+    VARTYPE *vt_list = NULL;
 
     TRACE("(%p)->(%08x, %04x, %08x, %p, %p, %p, %p, %d, %p, %p)\n", This, id, lcid, dwFlags,
           pdp, result, pei, pspCaller, byref_args, ref_idx, ref_arg);
@@ -123,10 +129,45 @@ HRESULT __RPC_STUB IDispatchEx_InvokeEx_Stub(IDispatchEx* This, DISPID id, LCID 
     for(arg = 0; arg < byref_args; arg++)
         pdp->rgvarg[ref_idx[arg]] = ref_arg[arg];
 
-    hr = IDispatchEx_InvokeEx(This, id, lcid, dwFlags, pdp, result, pei, pspCaller);
+    if(dwFlags & NULL_RESULT) result = NULL;
+    if(dwFlags & NULL_EXCEPINFO) pei = NULL;
+
+    /* Create an array of the original VTs to check that the function doesn't change
+       any on return. */
+    if(byref_args)
+    {
+        vt_list = HeapAlloc(GetProcessHeap(), 0, pdp->cArgs * sizeof(vt_list[0]));
+        if(!vt_list) return E_OUTOFMEMORY;
+        for(arg = 0; arg < pdp->cArgs; arg++)
+            vt_list[arg] = V_VT(pdp->rgvarg + arg);
+    }
+
+    hr = IDispatchEx_InvokeEx(This, id, lcid, dwFlags & 0xffff, pdp, result, pei, pspCaller);
+
+    if(SUCCEEDED(hr) && byref_args)
+    {
+        for(arg = 0; arg < pdp->cArgs; arg++)
+        {
+            if(vt_list[arg] != V_VT(pdp->rgvarg + arg))
+            {
+                hr = DISP_E_BADCALLEE;
+                break;
+            }
+        }
+    }
+
+    if(hr == DISP_E_EXCEPTION)
+    {
+        if(pei && pei->pfnDeferredFillIn)
+        {
+            pei->pfnDeferredFillIn(pei);
+            pei->pfnDeferredFillIn = NULL;
+        }
+    }
 
     for(arg = 0; arg < byref_args; arg++)
         VariantInit(pdp->rgvarg + ref_idx[arg]);
 
+    HeapFree(GetProcessHeap(), 0, vt_list);
     return hr;
 }

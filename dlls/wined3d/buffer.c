@@ -97,6 +97,25 @@ static inline BOOL buffer_is_fully_dirty(struct wined3d_buffer *This)
     return FALSE;
 }
 
+/* Context activation is done by the caller */
+static void delete_gl_buffer(struct wined3d_buffer *This)
+{
+    if(!This->buffer_object) return;
+
+    ENTER_GL();
+    GL_EXTCALL(glDeleteBuffersARB(1, &This->buffer_object));
+    checkGLcall("glDeleteBuffersARB");
+    LEAVE_GL();
+    This->buffer_object = 0;
+
+    if(This->query)
+    {
+        wined3d_event_query_destroy(This->query);
+        This->query = NULL;
+    }
+    This->flags &= ~WINED3D_BUFFER_APPLESYNC;
+}
+
 /* Context activation is done by the caller. */
 static void buffer_create_buffer_object(struct wined3d_buffer *This)
 {
@@ -157,6 +176,10 @@ static void buffer_create_buffer_object(struct wined3d_buffer *This)
             GL_EXTCALL(glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_FLUSHING_UNMAP_APPLE, GL_FALSE));
             checkGLcall("glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_FLUSHING_UNMAP_APPLE, GL_FALSE)");
             This->flags |= WINED3D_BUFFER_FLUSH;
+
+            GL_EXTCALL(glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_SERIALIZED_MODIFY_APPLE, GL_FALSE));
+            checkGLcall("glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_SERIALIZED_MODIFY_APPLE, GL_FALSE)");
+            This->flags |= WINED3D_BUFFER_APPLESYNC;
         }
         /* No setup is needed here for GL_ARB_map_buffer_range */
     }
@@ -203,13 +226,7 @@ static void buffer_create_buffer_object(struct wined3d_buffer *This)
 fail:
     /* Clean up all vbo init, but continue because we can work without a vbo :-) */
     ERR("Failed to create a vertex buffer object. Continuing, but performance issues may occur\n");
-    if (This->buffer_object)
-    {
-        ENTER_GL();
-        GL_EXTCALL(glDeleteBuffersARB(1, &This->buffer_object));
-        LEAVE_GL();
-    }
-    This->buffer_object = 0;
+    delete_gl_buffer(This);
     buffer_clear_dirty_areas(This);
 }
 
@@ -691,11 +708,7 @@ static void STDMETHODCALLTYPE buffer_UnLoad(IWineD3DBuffer *iface)
             This->flags &= ~WINED3D_BUFFER_DOUBLEBUFFER;
         }
 
-        ENTER_GL();
-        GL_EXTCALL(glDeleteBuffersARB(1, &This->buffer_object));
-        checkGLcall("glDeleteBuffersARB");
-        LEAVE_GL();
-        This->buffer_object = 0;
+        delete_gl_buffer(This);
         This->flags |= WINED3D_BUFFER_CREATEBO; /* Recreate the buffer object next load */
         buffer_clear_dirty_areas(This);
 
@@ -766,6 +779,77 @@ static DWORD STDMETHODCALLTYPE buffer_GetPriority(IWineD3DBuffer *iface)
     return resource_get_priority((IWineD3DResource *)iface);
 }
 
+/* The caller provides a context and binds the buffer */
+static void buffer_sync_apple(struct wined3d_buffer *This, DWORD flags, const struct wined3d_gl_info *gl_info)
+{
+    enum wined3d_event_query_result ret;
+
+    /* No fencing needs to be done if the app promises not to overwrite
+     * existing data */
+    if(flags & WINED3DLOCK_NOOVERWRITE) return;
+    if(flags & WINED3DLOCK_DISCARD)
+    {
+        ENTER_GL();
+        GL_EXTCALL(glBufferDataARB(This->buffer_type_hint, This->resource.size, NULL, This->buffer_object_usage));
+        checkGLcall("glBufferDataARB\n");
+        LEAVE_GL();
+        return;
+    }
+
+    if(!This->query)
+    {
+        TRACE("Creating event query for buffer %p\n", This);
+
+        if (!wined3d_event_query_supported(gl_info))
+        {
+            FIXME("Event queries not supported, dropping async buffer locks.\n");
+            goto drop_query;
+        }
+
+        This->query = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*This->query));
+        if (!This->query)
+        {
+            ERR("Failed to allocate event query memory, dropping async buffer locks.\n");
+            goto drop_query;
+        }
+
+        /* Since we don't know about old draws a glFinish is needed once */
+        wglFinish();
+        return;
+    }
+    TRACE("Synchronizing buffer %p\n", This);
+    ret = wined3d_event_query_finish(This->query, This->resource.device);
+    switch(ret)
+    {
+        case WINED3D_EVENT_QUERY_NOT_STARTED:
+        case WINED3D_EVENT_QUERY_OK:
+            /* All done */
+            return;
+
+        case WINED3D_EVENT_QUERY_WRONG_THREAD:
+            WARN("Cannot synchronize buffer lock due to a thread conflict\n");
+            goto drop_query;
+
+        default:
+            ERR("wined3d_event_query_finish returned %u, dropping async buffer locks\n", ret);
+            goto drop_query;
+    }
+
+drop_query:
+    if(This->query)
+    {
+        wined3d_event_query_destroy(This->query);
+        This->query = NULL;
+    }
+
+    wglFinish();
+    ENTER_GL();
+    GL_EXTCALL(glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_SERIALIZED_MODIFY_APPLE, GL_TRUE));
+    checkGLcall("glBufferParameteriAPPLE(This->buffer_type_hint, GL_BUFFER_SERIALIZED_MODIFY_APPLE, GL_TRUE)");
+    LEAVE_GL();
+    This->flags &= ~WINED3D_BUFFER_APPLESYNC;
+}
+
 /* The caller provides a GL context */
 static void buffer_direct_upload(struct wined3d_buffer *This, const struct wined3d_gl_info *gl_info, DWORD flags)
 {
@@ -793,6 +877,15 @@ static void buffer_direct_upload(struct wined3d_buffer *This, const struct wined
         }
         else
         {
+            if (This->flags & WINED3D_BUFFER_APPLESYNC)
+            {
+                DWORD syncflags = 0;
+                if (flags & WINED3D_BUFFER_DISCARD) syncflags |= WINED3DLOCK_DISCARD;
+                if (flags & WINED3D_BUFFER_NOSYNC) syncflags |= WINED3DLOCK_NOOVERWRITE;
+                LEAVE_GL();
+                buffer_sync_apple(This, syncflags, gl_info);
+                ENTER_GL();
+            }
             map = GL_EXTCALL(glMapBufferARB(This->buffer_type_hint, GL_WRITE_ONLY_ARB));
             checkGLcall("glMapBufferARB");
         }
@@ -1181,6 +1274,12 @@ static HRESULT STDMETHODCALLTYPE buffer_Map(IWineD3DBuffer *iface, UINT offset, 
                 }
                 else
                 {
+                    if(This->flags & WINED3D_BUFFER_APPLESYNC)
+                    {
+                        LEAVE_GL();
+                        buffer_sync_apple(This, flags, gl_info);
+                        ENTER_GL();
+                    }
                     This->resource.allocatedMemory = GL_EXTCALL(glMapBufferARB(This->buffer_type_hint, GL_READ_WRITE_ARB));
                     checkGLcall("glMapBufferARB");
                 }

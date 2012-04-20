@@ -155,10 +155,6 @@ BOOL WINAPI DllMain(HINSTANCE hInstDLL, DWORD fdwReason, LPVOID fImpLoad)
 
 	if (!WINMM_CreateIData(hInstDLL))
 	    return FALSE;
-        if (!MMDRV_Init()) {
-            WINMM_DeleteIData();
-            return FALSE;
-	}
 	break;
     case DLL_PROCESS_DETACH:
         /* close all opened MCI drivers */
@@ -1822,7 +1818,7 @@ MMRESULT WINAPI midiStreamOut(HMIDISTRM hMidiStrm, LPMIDIHDR lpMidiHdr,
     if (cbMidiHdr < offsetof(MIDIHDR,dwOffset) || !lpMidiHdr || !lpMidiHdr->lpData
 	|| lpMidiHdr->dwBufferLength < lpMidiHdr->dwBytesRecorded)
 	return MMSYSERR_INVALPARAM;
-    /* FIXME: Native additionaly checks if the MIDIEVENTs in lpData
+    /* FIXME: Native additionally checks if the MIDIEVENTs in lpData
      * exactly fit dwBytesRecorded. */
 
     if (!(lpMidiHdr->dwFlags & MHDR_PREPARED))

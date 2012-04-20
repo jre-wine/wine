@@ -104,6 +104,7 @@ static const struct {
     {"GL_EXT_blend_equation_separate",      EXT_BLEND_EQUATION_SEPARATE,    0                           },
     {"GL_EXT_blend_func_separate",          EXT_BLEND_FUNC_SEPARATE,        0                           },
     {"GL_EXT_blend_minmax",                 EXT_BLEND_MINMAX,               0                           },
+    {"GL_EXT_draw_buffers2",                EXT_DRAW_BUFFERS2,              0                           },
     {"GL_EXT_fog_coord",                    EXT_FOG_COORD,                  0                           },
     {"GL_EXT_framebuffer_blit",             EXT_FRAMEBUFFER_BLIT,           0                           },
     {"GL_EXT_framebuffer_multisample",      EXT_FRAMEBUFFER_MULTISAMPLE,    0                           },
@@ -669,6 +670,7 @@ static BOOL match_broken_nv_clip(const struct wined3d_gl_info *gl_info, const ch
     return ret;
 }
 
+/* Context activation is done by the caller. */
 static BOOL match_fbo_tex_update(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
         enum wined3d_gl_vendor gl_vendor, enum wined3d_pci_vendor card_vendor, enum wined3d_pci_device device)
 {
@@ -679,6 +681,8 @@ static BOOL match_fbo_tex_update(const struct wined3d_gl_info *gl_info, const ch
     if (wined3d_settings.offscreen_rendering_mode != ORM_FBO) return FALSE;
 
     memset(data, 0xcc, sizeof(data));
+
+    ENTER_GL();
 
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
@@ -715,6 +719,8 @@ static BOOL match_fbo_tex_update(const struct wined3d_gl_info *gl_info, const ch
     gl_info->fbo_ops.glDeleteFramebuffers(1, &fbo);
     glDeleteTextures(1, &tex);
     checkGLcall("glDeleteTextures");
+
+    LEAVE_GL();
 
     return *(DWORD *)data == 0x11111111;
 }
@@ -1241,8 +1247,8 @@ static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_s
 
 
 
-enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-            unsigned int *vidmem )
+enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     /* Both the GeforceFX, 6xxx and 7xxx series support D3D9. The last two types have more
      * shader capabilities, so we use the shader capabilities to distinguish between FX and 6xxx/7xxx.
@@ -1485,8 +1491,8 @@ enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *
 
 }
 
-enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-    unsigned int *vidmem )
+enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     /* See http://developer.amd.com/drivers/pc_vendor_id/Pages/default.aspx
      *
@@ -1641,8 +1647,8 @@ enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_
 
 }
 
-enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-    unsigned int *vidmem )
+enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     if (strstr(gl_renderer, "X3100"))
     {
@@ -1667,8 +1673,8 @@ enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *g
 
 }
 
-enum wined3d_pci_device (select_card_ati_mesa)(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-            unsigned int *vidmem )
+enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     /* See http://developer.amd.com/drivers/pc_vendor_id/Pages/default.aspx
      *
@@ -1876,8 +1882,8 @@ enum wined3d_pci_device (select_card_ati_mesa)(const struct wined3d_gl_info *gl_
 
 }
 
-enum wined3d_pci_device (select_card_nvidia_mesa)(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-    unsigned int *vidmem )
+enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     FIXME_(d3d_caps)("Card selection not handled for Mesa Nouveau driver\n");
     if (WINE_D3D9_CAPABLE(gl_info)) return CARD_NVIDIA_GEFORCEFX_5600;
@@ -1887,8 +1893,8 @@ enum wined3d_pci_device (select_card_nvidia_mesa)(const struct wined3d_gl_info *
     return CARD_NVIDIA_RIVA_128;
 }
 
-enum wined3d_pci_device (select_card_intel_mesa)(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
-    unsigned int *vidmem )
+enum wined3d_pci_device select_card_intel_mesa(const struct wined3d_gl_info *gl_info,
+        const char *gl_renderer, unsigned int *vidmem)
 {
     FIXME_(d3d_caps)("Card selection not handled for Mesa Intel driver\n");
     return CARD_INTEL_I915G;
@@ -2865,6 +2871,9 @@ static BOOL IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(const struct wined
     if(!cfg)
         return FALSE;
 
+    /* Float formats need FBOs. If FBOs are used this function isn't called */
+    if (format_desc->Flags & WINED3DFMT_FLAG_FLOAT) return FALSE;
+
     if(cfg->iPixelType == WGL_TYPE_RGBA_ARB) { /* Integer RGBA formats */
         if (!getColorBits(format_desc, &redSize, &greenSize, &blueSize, &alphaSize, &colorBits))
         {
@@ -2885,24 +2894,9 @@ static BOOL IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(const struct wined
             return FALSE;
 
         return TRUE;
-    } else if(cfg->iPixelType == WGL_TYPE_RGBA_FLOAT_ARB) { /* Float RGBA formats; TODO: WGL_NV_float_buffer */
-        if (format_desc->format == WINED3DFMT_R16_FLOAT)
-            return (cfg->redSize == 16 && cfg->greenSize == 0 && cfg->blueSize == 0 && cfg->alphaSize == 0);
-        if (format_desc->format == WINED3DFMT_R16G16_FLOAT)
-            return (cfg->redSize == 16 && cfg->greenSize == 16 && cfg->blueSize == 0 && cfg->alphaSize == 0);
-        if (format_desc->format == WINED3DFMT_R16G16B16A16_FLOAT)
-            return (cfg->redSize == 16 && cfg->greenSize == 16 && cfg->blueSize == 16 && cfg->alphaSize == 16);
-        if (format_desc->format == WINED3DFMT_R32_FLOAT)
-            return (cfg->redSize == 32 && cfg->greenSize == 0 && cfg->blueSize == 0 && cfg->alphaSize == 0);
-        if (format_desc->format == WINED3DFMT_R32G32_FLOAT)
-            return (cfg->redSize == 32 && cfg->greenSize == 32 && cfg->blueSize == 0 && cfg->alphaSize == 0);
-        if (format_desc->format == WINED3DFMT_R32G32B32A32_FLOAT)
-            return (cfg->redSize == 32 && cfg->greenSize == 32 && cfg->blueSize == 32 && cfg->alphaSize == 32);
-    } else {
-        /* Probably a color index mode */
-        return FALSE;
     }
 
+    /* Probably a RGBA_float or color index mode */
     return FALSE;
 }
 
@@ -2920,6 +2914,9 @@ static BOOL IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(const struct wined3
         ERR("Unable to check compatibility for Format=%s\n", debug_d3dformat(format_desc->format));
         return FALSE;
     }
+
+    /* Float formats need FBOs. If FBOs are used this function isn't called */
+    if (format_desc->Flags & WINED3DFMT_FLAG_FLOAT) return FALSE;
 
     if ((format_desc->format == WINED3DFMT_D16_LOCKABLE) || (format_desc->format == WINED3DFMT_D32_FLOAT))
         lockable = TRUE;
@@ -2965,15 +2962,26 @@ static HRESULT WINAPI IWineD3DImpl_CheckDepthStencilMatch(IWineD3D *iface, UINT 
     adapter = &This->adapters[Adapter];
     rt_format_desc = getFormatDescEntry(RenderTargetFormat, &adapter->gl_info);
     ds_format_desc = getFormatDescEntry(DepthStencilFormat, &adapter->gl_info);
-    cfgs = adapter->cfgs;
-    nCfgs = adapter->nCfgs;
-    for (it = 0; it < nCfgs; ++it) {
-        if (IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(&adapter->gl_info, &cfgs[it], rt_format_desc))
-        {
-            if (IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(&adapter->gl_info, &cfgs[it], ds_format_desc))
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+    {
+        if ((rt_format_desc->Flags & WINED3DFMT_FLAG_RENDERTARGET) &&
+            (ds_format_desc->Flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL))) {
+            TRACE_(d3d_caps)("(%p) : Formats matched\n", This);
+            return WINED3D_OK;
+        }
+    }
+    else
+    {
+        cfgs = adapter->cfgs;
+        nCfgs = adapter->nCfgs;
+        for (it = 0; it < nCfgs; ++it) {
+            if (IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(&adapter->gl_info, &cfgs[it], rt_format_desc))
             {
-                TRACE_(d3d_caps)("(%p) : Formats matched\n", This);
-                return WINED3D_OK;
+                if (IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(&adapter->gl_info, &cfgs[it], ds_format_desc))
+                {
+                    TRACE_(d3d_caps)("(%p) : Formats matched\n", This);
+                    return WINED3D_OK;
+                }
             }
         }
     }
@@ -3201,15 +3209,23 @@ static BOOL CheckDepthStencilCapability(struct wined3d_adapter *adapter,
     /* Only allow depth/stencil formats */
     if (!(ds_format_desc->depth_size || ds_format_desc->stencil_size)) return FALSE;
 
-    /* Walk through all WGL pixel formats to find a match */
-    for (it = 0; it < adapter->nCfgs; ++it)
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
-        WineD3D_PixelFormat *cfg = &adapter->cfgs[it];
-        if (IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(&adapter->gl_info, cfg, display_format_desc))
+        /* With FBOs WGL limitations do not apply, but the format needs to be FBO attachable */
+        if (ds_format_desc->Flags & (WINED3DFMT_FLAG_DEPTH | WINED3DFMT_FLAG_STENCIL)) return TRUE;
+    }
+    else
+    {
+        /* Walk through all WGL pixel formats to find a match */
+        for (it = 0; it < adapter->nCfgs; ++it)
         {
-            if (IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(&adapter->gl_info, cfg, ds_format_desc))
+            WineD3D_PixelFormat *cfg = &adapter->cfgs[it];
+            if (IWineD3DImpl_IsPixelFormatCompatibleWithRenderFmt(&adapter->gl_info, cfg, display_format_desc))
             {
-                return TRUE;
+                if (IWineD3DImpl_IsPixelFormatCompatibleWithDepthFmt(&adapter->gl_info, cfg, ds_format_desc))
+                {
+                    return TRUE;
+                }
             }
         }
     }
@@ -3231,7 +3247,6 @@ static BOOL CheckRenderTargetCapability(struct wined3d_adapter *adapter,
 {
     /* Filter out non-RT formats */
     if (!(check_format_desc->Flags & WINED3DFMT_FLAG_RENDERTARGET)) return FALSE;
-
     if(wined3d_settings.offscreen_rendering_mode == ORM_BACKBUFFER) {
         WineD3D_PixelFormat *cfgs = adapter->cfgs;
         int it;
@@ -4249,13 +4264,14 @@ static HRESULT WINAPI IWineD3DImpl_GetDeviceCaps(IWineD3D *iface, UINT Adapter, 
                                      WINED3DPMISCCAPS_MRTPOSTPIXELSHADERBLENDING;
                                     /* TODO:
                                         WINED3DPMISCCAPS_NULLREFERENCE
-                                        WINED3DPMISCCAPS_INDEPENDENTWRITEMASKS
                                         WINED3DPMISCCAPS_FOGANDSPECULARALPHA
                                         WINED3DPMISCCAPS_MRTINDEPENDENTBITDEPTHS
                                         WINED3DPMISCCAPS_FOGVERTEXCLAMPED */
 
     if (gl_info->supported[EXT_BLEND_EQUATION_SEPARATE] && gl_info->supported[EXT_BLEND_FUNC_SEPARATE])
         pCaps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_SEPARATEALPHABLEND;
+    if (gl_info->supported[EXT_DRAW_BUFFERS2])
+        pCaps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_INDEPENDENTWRITEMASKS;
 
     pCaps->RasterCaps              = WINED3DPRASTERCAPS_DITHER    |
                                      WINED3DPRASTERCAPS_PAT       |

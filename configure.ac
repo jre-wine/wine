@@ -69,6 +69,8 @@ AC_ARG_WITH(png,       AS_HELP_STRING([--without-png],[do not use PNG]),
 AC_ARG_WITH(pthread,   AS_HELP_STRING([--without-pthread],[do not use the pthread library]),
             [if test "x$withval" = "xno"; then ac_cv_header_pthread_h=no; fi])
 AC_ARG_WITH(sane,      AS_HELP_STRING([--without-sane],[do not use SANE (scanner support)]))
+AC_ARG_WITH(tiff,       AS_HELP_STRING([--without-tiff],[do not use TIFF]),
+            [if test "x$withval" = "xno"; then ac_cv_header_tiffio_h=no; fi])
 AC_ARG_WITH(v4l,       AS_HELP_STRING([--without-v4l],[do not use v4l1 (v4l support)]))
 AC_ARG_WITH(xcomposite,AS_HELP_STRING([--without-xcomposite],[do not use the Xcomposite extension]),
             [if test "x$withval" = "xno"; then ac_cv_header_X11_extensions_Xcomposite_h=no; fi])
@@ -189,10 +191,12 @@ then
     AC_SUBST([WOW64_DISABLE],[\#])
     enable_fonts=${enable_fonts:-no}
     enable_include=${enable_include:-no}
+    enable_rpcss=${enable_rpcss:-no}
     enable_server=${enable_server:-no}
     enable_tools=${enable_tools:-no}
     enable_wineboot=${enable_wineboot:-no}
     enable_winedbg=${enable_winedbg:-no}
+    enable_winemenubuilder=${enable_winemenubuilder:-no}
     test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32"
 fi
 
@@ -435,6 +439,7 @@ AC_CHECK_HEADERS(\
 	sys/wait.h \
 	syscall.h \
 	termios.h \
+	tiffio.h \
 	unistd.h \
 	utime.h \
 	valgrind/memcheck.h \
@@ -1458,6 +1463,14 @@ fi
 WINE_WARNING_WITH(png,[test "x$ac_cv_lib_soname_png" = "x"],
                  [libpng ${notice_platform}development files not found, PNG won't be supported.])
 
+dnl **** Check for libtiff ****
+if test "$ac_cv_header_tiffio_h" = "yes"
+then
+    WINE_CHECK_SONAME(tiff,TIFFClientOpen)
+fi
+WINE_NOTICE_WITH(tiff,[test "x$ac_cv_lib_soname_tiff" = "x"],
+                 [libtiff ${notice_platform}development files not found, TIFF won't be supported.])
+
 dnl **** Check for mpg123 ****
 if test "$ac_cv_header_mpg123_h" = "yes"
 then
@@ -2118,33 +2131,15 @@ esac
 
 dnl **** Generate output files ****
 
-AC_SUBST(ALL_MAKERULES,"")
-AC_SUBST(ALL_SYMLINKS,"")
-AC_SUBST(ALL_MAKEFILE_DEPENDS,["# Makefile dependencies"])
-AC_SUBST(ALL_WINETEST_DEPENDS,["# Test binaries"])
-
-AC_SUBST(ALL_DIRS,"")
-AC_SUBST(ALL_TOP_DIRS,"")
-AC_SUBST(ALL_DLL_DIRS,"")
-AC_SUBST(ALL_TOOL_DIRS,"")
-AC_SUBST(ALL_STATICLIB_DIRS,"")
-AC_SUBST(ALL_STATIC_LIBS,"")
-AC_SUBST(ALL_IMPORT_LIBS,"")
-AC_SUBST(ALL_INSTALL_DIRS,"")
-AC_SUBST(ALL_TEST_DIRS,"")
-AC_SUBST(ALL_TEST_BINARIES,"")
-AC_SUBST(ALL_PROGRAM_DIRS,"")
-AC_SUBST(ALL_PROGRAM_BIN_INSTALL_DIRS,"")
-
 AH_TOP([#define __WINE_CONFIG_H])
 
 AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 
 WINE_CONFIG_SYMLINK(dlls/wineps.drv/generic.ppd)
-WINE_CONFIG_SYMLINK(fonts/marlett.ttf)
-WINE_CONFIG_SYMLINK(fonts/symbol.ttf)
-WINE_CONFIG_SYMLINK(fonts/tahoma.ttf)
-WINE_CONFIG_SYMLINK(fonts/tahomabd.ttf)
+WINE_CONFIG_SYMLINK(fonts/marlett.ttf,,enable_fonts)
+WINE_CONFIG_SYMLINK(fonts/symbol.ttf,,enable_fonts)
+WINE_CONFIG_SYMLINK(fonts/tahoma.ttf,,enable_fonts)
+WINE_CONFIG_SYMLINK(fonts/tahomabd.ttf,,enable_fonts)
 WINE_CONFIG_SYMLINK(wine,tools/winewrapper)
 
 WINE_CONFIG_EXTRA_DIR(dlls/gdi32/enhmfdrv)
@@ -2160,7 +2155,6 @@ WINE_CONFIG_MAKERULES([dlls/Makedll.rules],[MAKE_DLL_RULES],[Make.rules])
 WINE_CONFIG_MAKERULES([dlls/Makeimplib.rules],[MAKE_IMPLIB_RULES],[Make.rules])
 WINE_CONFIG_MAKERULES([programs/Makeprog.rules],[MAKE_PROG_RULES],[Make.rules])
 
-WINE_CONFIG_MAKEFILE([Makefile],[Make.rules])
 WINE_CONFIG_DLL(acledit)
 WINE_CONFIG_DLL(aclui,,[aclui])
 WINE_CONFIG_DLL(activeds,,[activeds])
@@ -2406,8 +2400,9 @@ WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
 WINE_CONFIG_DLL(msvcr70,,[msvcr70])
 WINE_CONFIG_DLL(msvcr71,,[msvcr71])
-WINE_CONFIG_DLL(msvcr80,,[msvcr80])
-WINE_CONFIG_DLL(msvcr90,,[msvcr90])
+WINE_CONFIG_DLL(msvcr80)
+WINE_CONFIG_DLL(msvcr90)
+WINE_CONFIG_TEST(dlls/msvcr90/tests)
 WINE_CONFIG_DLL(msvcrt,,[msvcrt])
 WINE_CONFIG_TEST(dlls/msvcrt/tests)
 WINE_CONFIG_DLL(msvcrt20,,[msvcrt20])
@@ -2634,83 +2629,108 @@ WINE_CONFIG_TEST(dlls/xinput1_3/tests)
 WINE_CONFIG_DLL(xinput9_1_0)
 WINE_CONFIG_DLL(xmllite)
 WINE_CONFIG_TEST(dlls/xmllite/tests)
-WINE_CONFIG_MAKEFILE([documentation/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_MAKEFILE([fonts/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_MAKEFILE([include/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_MAKEFILE([libs/port/Makefile],[Make.rules])
-WINE_CONFIG_MAKEFILE([libs/wine/Makefile],[Make.rules])
-WINE_CONFIG_MAKEFILE([libs/wpp/Makefile],[Make.rules])
-WINE_CONFIG_MAKEFILE([loader/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_MAKEFILE([programs/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_PROGRAM(attrib,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(cacls,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(clock,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(cmd,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
+WINE_CONFIG_MAKEFILE([documentation])
+WINE_CONFIG_MAKEFILE([fonts])
+WINE_CONFIG_MAKEFILE([include])
+WINE_CONFIG_MAKEFILE([libs/port])
+WINE_CONFIG_MAKEFILE([libs/wine])
+WINE_CONFIG_MAKEFILE([libs/wpp])
+WINE_CONFIG_MAKEFILE([loader])
+WINE_CONFIG_PROGRAM(attrib,install)
+WINE_CONFIG_PROGRAM(cacls,install)
+WINE_CONFIG_PROGRAM(clock,install)
+WINE_CONFIG_PROGRAM(cmd,install)
 WINE_CONFIG_TEST(programs/cmd/tests)
-WINE_CONFIG_PROGRAM(cmdlgtst,[ALL_PROGRAM_DIRS])
-WINE_CONFIG_PROGRAM(control,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(dxdiag,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(eject,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(expand,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(explorer,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(extrac32,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(hh,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(icinfo,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(iexplore,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(lodctr,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(mshta,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(msiexec,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(net,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(notepad,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(oleview,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(ping,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(progman,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(reg,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(regedit,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(regsvr32,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(rpcss,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(rundll32,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(secedit,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(services,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(spoolsv,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(start,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(svchost,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(taskmgr,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(termsv,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(uninstaller,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(unlodctr,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(view,[ALL_PROGRAM_DIRS])
-WINE_CONFIG_PROGRAM(wineboot,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winebrowser,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winecfg,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(wineconsole,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winedbg,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winedevice,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winefile,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winemenubuilder,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winemine,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winepath,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS,ALL_PROGRAM_BIN_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winetest,[ALL_PROGRAM_DIRS])
-WINE_CONFIG_PROGRAM(winevdm,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS],enable_win16)
-WINE_CONFIG_PROGRAM(winhelp.exe16,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS],enable_win16)
-WINE_CONFIG_PROGRAM(winhlp32,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(winoldap.mod16,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS],enable_win16)
-WINE_CONFIG_PROGRAM(winver,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(wordpad,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(write,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_PROGRAM(xcopy,[ALL_PROGRAM_DIRS,ALL_INSTALL_DIRS])
-WINE_CONFIG_MAKEFILE([server/Makefile],[Make.rules],[ALL_TOP_DIRS])
-WINE_CONFIG_MAKEFILE([tools/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/widl/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/winebuild/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/winedump/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/winegcc/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/wmc/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
-WINE_CONFIG_MAKEFILE([tools/wrc/Makefile],[Make.rules],[ALL_TOOL_DIRS],enable_tools)
+WINE_CONFIG_PROGRAM(cmdlgtst)
+WINE_CONFIG_PROGRAM(control,install)
+WINE_CONFIG_PROGRAM(dxdiag,install)
+WINE_CONFIG_PROGRAM(eject,install)
+WINE_CONFIG_PROGRAM(expand,install)
+WINE_CONFIG_PROGRAM(explorer,install)
+WINE_CONFIG_PROGRAM(extrac32,install)
+WINE_CONFIG_PROGRAM(hh,install)
+WINE_CONFIG_PROGRAM(icinfo,install)
+WINE_CONFIG_PROGRAM(iexplore,install)
+WINE_CONFIG_PROGRAM(lodctr,install)
+WINE_CONFIG_PROGRAM(mshta,install)
+WINE_CONFIG_PROGRAM(msiexec,installbin)
+WINE_CONFIG_PROGRAM(net,install)
+WINE_CONFIG_PROGRAM(notepad,installbin)
+WINE_CONFIG_PROGRAM(oleview,install)
+WINE_CONFIG_PROGRAM(ping,install)
+WINE_CONFIG_PROGRAM(progman,install)
+WINE_CONFIG_PROGRAM(reg,install)
+WINE_CONFIG_PROGRAM(regedit,installbin)
+WINE_CONFIG_PROGRAM(regsvr32,installbin)
+WINE_CONFIG_PROGRAM(rpcss,install)
+WINE_CONFIG_PROGRAM(rundll32,install)
+WINE_CONFIG_PROGRAM(secedit,install)
+WINE_CONFIG_PROGRAM(services,install)
+WINE_CONFIG_PROGRAM(spoolsv,install)
+WINE_CONFIG_PROGRAM(start,install)
+WINE_CONFIG_PROGRAM(svchost,install)
+WINE_CONFIG_PROGRAM(taskmgr,install)
+WINE_CONFIG_PROGRAM(termsv,install)
+WINE_CONFIG_PROGRAM(uninstaller,install)
+WINE_CONFIG_PROGRAM(unlodctr,install)
+WINE_CONFIG_PROGRAM(view)
+WINE_CONFIG_PROGRAM(wineboot,installbin)
+WINE_CONFIG_PROGRAM(winebrowser,install)
+WINE_CONFIG_PROGRAM(winecfg,installbin)
+WINE_CONFIG_PROGRAM(wineconsole,installbin)
+WINE_CONFIG_PROGRAM(winedbg,installbin)
+WINE_CONFIG_PROGRAM(winedevice,install)
+WINE_CONFIG_PROGRAM(winefile,installbin)
+WINE_CONFIG_PROGRAM(winemenubuilder,install)
+WINE_CONFIG_PROGRAM(winemine,installbin)
+WINE_CONFIG_PROGRAM(winepath,installbin)
+WINE_CONFIG_PROGRAM(winetest)
+WINE_CONFIG_PROGRAM(winevdm,install,enable_win16)
+WINE_CONFIG_PROGRAM(winhelp.exe16,install,enable_win16)
+WINE_CONFIG_PROGRAM(winhlp32,install)
+WINE_CONFIG_PROGRAM(winoldap.mod16,install,enable_win16)
+WINE_CONFIG_PROGRAM(winver,install)
+WINE_CONFIG_PROGRAM(wordpad,install)
+WINE_CONFIG_PROGRAM(write,install)
+WINE_CONFIG_PROGRAM(xcopy,install)
+WINE_CONFIG_MAKEFILE([server])
+WINE_CONFIG_TOOL(tools)
+WINE_CONFIG_TOOL(tools/widl)
+WINE_CONFIG_TOOL(tools/winebuild)
+WINE_CONFIG_TOOL(tools/winedump)
+WINE_CONFIG_TOOL(tools/winegcc)
+WINE_CONFIG_TOOL(tools/wmc)
+WINE_CONFIG_TOOL(tools/wrc)
 dnl End of auto-generated output commands
 
-dnl Don't install in bin dir for Windows build
-test -n "$DLLEXT" || ALL_PROGRAM_BIN_INSTALL_DIRS=""
+AC_CONFIG_COMMANDS([Makefile], [wine_fn_output_makefile Makefile],
+[wine_fn_output_makefile ()
+{
+    cat Make.tmp - <<\_WINE_EOF >\$tmp/makefile && mv -f \$tmp/makefile \$[]1 && rm -f Make.tmp && return
+$ALL_MAKEFILE_DEPENDS
+_WINE_EOF
+    AS_ERROR([could not create Makefile])
+}])
+
+AC_CONFIG_FILES([Make.tmp:Makefile.in])
+
+dnl Some final makefile rules
+
+if test -n "$with_wine64"
+then
+WINE_APPEND_RULE([ALL_MAKEFILE_DEPENDS],
+[all: fonts server $with_wine64/loader/wine32
+fonts server:
+	\$(RM) \$[@] && \$(LN_S) $with_wine64/\$[@] \$[@]
+$with_wine64/loader/wine32:
+	\$(RM) \$[@] && \$(LN_S) $ac_pwd/loader/wine32 \$[@]
+clean::
+	\$(RM) fonts server $with_wine64/loader/wine32])
+fi
+
+WINE_APPEND_RULE([ALL_MAKEFILE_DEPENDS],
+[uninstall::
+	-rmdir \$(DESTDIR)\$(datadir)/wine \$(DESTDIR)\$(fakedlldir) \$(DESTDIR)\$(dlldir)])
 
 AC_OUTPUT
 
