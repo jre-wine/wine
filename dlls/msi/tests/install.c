@@ -1310,9 +1310,14 @@ static const CHAR odbc_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                                 "CostFinalize\t\t1000\n"
                                                 "InstallValidate\t\t1400\n"
                                                 "InstallInitialize\t\t1500\n"
+                                                "ProcessComponents\t\t1600\n"
                                                 "InstallODBC\t\t3000\n"
                                                 "RemoveODBC\t\t3100\n"
+                                                "RemoveFiles\t\t3900\n"
                                                 "InstallFiles\t\t4000\n"
+                                                "RegisterProduct\t\t5000\n"
+                                                "PublishFeatures\t\t5100\n"
+                                                "PublishProduct\t\t5200\n"
                                                 "InstallFinalize\t\t6000\n";
 
 static const CHAR odbc_media_dat[] = "DiskId\tLastSequence\tDiskPrompt\tCabinet\tVolumeLabel\tSource\n"
@@ -8717,12 +8722,21 @@ static void test_install_remove_odbc(void)
     r = MsiInstallProductA(msifile, NULL);
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
-    ok(delete_pf("msitest\\ODBCdriver.dll", TRUE), "file not created\n");
-    ok(delete_pf("msitest\\ODBCdriver2.dll", TRUE), "file not created\n");
-    ok(delete_pf("msitest\\ODBCtranslator.dll", TRUE), "file not created\n");
-    ok(delete_pf("msitest\\ODBCtranslator2.dll", TRUE), "file not created\n");
-    ok(delete_pf("msitest\\ODBCsetup.dll", TRUE), "file not created\n");
-    ok(delete_pf("msitest", FALSE), "directory not created\n");
+    ok(pf_exists("msitest\\ODBCdriver.dll"), "file not created\n");
+    ok(pf_exists("msitest\\ODBCdriver2.dll"), "file not created\n");
+    ok(pf_exists("msitest\\ODBCtranslator.dll"), "file not created\n");
+    ok(pf_exists("msitest\\ODBCtranslator2.dll"), "file not created\n");
+    ok(pf_exists("msitest\\ODBCsetup.dll"), "file not created\n");
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(!delete_pf("msitest\\ODBCdriver.dll", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest\\ODBCdriver2.dll", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest\\ODBCtranslator.dll", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest\\ODBCtranslator2.dll", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest\\ODBCsetup.dll", TRUE), "file not removed\n");
+    ok(!delete_pf("msitest", FALSE), "directory not removed\n");
 
     DeleteFileA("msitest\\ODBCdriver.dll");
     DeleteFileA("msitest\\ODBCdriver2.dll");
@@ -9175,6 +9189,8 @@ static void test_register_class_info(void)
 
     ok(!delete_pf("msitest\\class.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\class.txt");
     delete_test_files();
 }
 
@@ -9212,6 +9228,8 @@ static void test_register_extension_info(void)
 
     ok(!delete_pf("msitest\\extension.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\extension.txt");
     delete_test_files();
 }
 
@@ -9242,6 +9260,8 @@ static void test_register_mime_info(void)
 
     ok(!delete_pf("msitest\\mime.txt", TRUE), "file not removed\n");
     ok(!delete_pf("msitest", FALSE), "directory not removed\n");
+
+    DeleteFileA("msitest\\mime.txt");
     delete_test_files();
 }
 

@@ -1,37 +1,37 @@
 # MS VC++2005 runtime library
 
-@ stub ??0__non_rtti_object@std@@QAE@ABV01@@Z
-@ stub ??0bad_cast@std@@QAE@ABV01@@Z
-@ stub ??0bad_cast@std@@QAE@PBD@Z
-@ stub ??0bad_typeid@std@@QAE@ABV01@@Z
-@ stub ??0bad_typeid@std@@QAE@PBD@Z
-@ stub ??0exception@std@@QAE@ABQBD@Z
-@ stub ??0exception@std@@QAE@ABQBDH@Z
-@ stub ??0exception@std@@QAE@ABV01@@Z
-@ stub ??0exception@std@@QAE@XZ
-@ stub ??1__non_rtti_object@std@@UAE@XZ
-@ stub ??1bad_cast@std@@UAE@XZ
-@ stub ??1bad_typeid@std@@UAE@XZ
-@ stub ??1exception@std@@UAE@XZ
+@ cdecl -i386 -norelay ??0__non_rtti_object@std@@QAE@ABV01@@Z(ptr) msvcrt.??0__non_rtti_object@@QAE@ABV0@@Z
+@ cdecl -i386 -norelay ??0bad_cast@std@@QAE@ABV01@@Z(ptr) msvcrt.??0bad_cast@@QAE@ABV0@@Z
+@ cdecl -i386 -norelay ??0bad_cast@std@@QAE@PBD@Z(ptr) msvcrt.??0bad_cast@@QAE@PBD@Z
+@ cdecl -i386 -norelay ??0bad_typeid@std@@QAE@ABV01@@Z(ptr) msvcrt.??0bad_typeid@@QAE@ABV0@@Z
+@ cdecl -i386 -norelay ??0bad_typeid@std@@QAE@PBD@Z(ptr) msvcrt.??0bad_typeid@@QAE@PBD@Z
+@ cdecl -i386 -norelay ??0exception@std@@QAE@ABQBD@Z(ptr) msvcrt.??0exception@@QAE@ABQBD@Z
+@ cdecl -i386 -norelay ??0exception@std@@QAE@ABQBDH@Z(ptr long) msvcrt.??0exception@@QAE@ABQBDH@Z
+@ cdecl -i386 -norelay ??0exception@std@@QAE@ABV01@@Z(ptr) msvcrt.??0exception@@QAE@ABV0@@Z
+@ cdecl -i386 -norelay ??0exception@std@@QAE@XZ() msvcrt.??0exception@@QAE@XZ
+@ cdecl -i386 -norelay ??1__non_rtti_object@std@@UAE@XZ() msvcrt.??1__non_rtti_object@@UAE@XZ
+@ cdecl -i386 -norelay ??1bad_cast@std@@UAE@XZ() msvcrt.??1bad_cast@@UAE@XZ
+@ cdecl -i386 -norelay ??1bad_typeid@std@@UAE@XZ() msvcrt.??1bad_typeid@@UAE@XZ
+@ cdecl -i386 -norelay ??1exception@std@@UAE@XZ() msvcrt.??1exception@@UAE@XZ
 @ cdecl -i386 -norelay ??1type_info@@UAE@XZ() msvcrt.??1type_info@@UAE@XZ
 @ cdecl ??2@YAPAXI@Z(long) msvcrt.??2@YAPAXI@Z
-@ stub ??2@YAPAXIHPBDH@Z
+@ cdecl ??2@YAPAXIHPBDH@Z(long long str long) msvcrt.??2@YAPAXIHPBDH@Z
 @ cdecl ??3@YAXPAX@Z(ptr) msvcrt.??3@YAXPAX@Z
-@ stub ??4__non_rtti_object@std@@QAEAAV01@ABV01@@Z
-@ stub ??4bad_cast@std@@QAEAAV01@ABV01@@Z
-@ stub ??4bad_typeid@std@@QAEAAV01@ABV01@@Z
-@ stub ??4exception@std@@QAEAAV01@ABV01@@Z
-@ stub ??8type_info@@QBE_NABV0@@Z
-@ stub ??9type_info@@QBE_NABV0@@Z
-@ stub ??_7__non_rtti_object@std@@6B@
-@ stub ??_7bad_cast@std@@6B@
-@ stub ??_7bad_typeid@std@@6B@
+@ cdecl -i386 -norelay ??4__non_rtti_object@std@@QAEAAV01@ABV01@@Z(ptr) msvcrt.??4__non_rtti_object@@QAEAAV0@ABV0@@Z
+@ cdecl -i386 -norelay ??4bad_cast@std@@QAEAAV01@ABV01@@Z(ptr) msvcrt.??4bad_cast@@QAEAAV0@ABV0@@Z
+@ cdecl -i386 -norelay ??4bad_typeid@std@@QAEAAV01@ABV01@@Z(ptr) msvcrt.??4bad_typeid@@QAEAAV0@ABV0@@Z
+@ cdecl -i386 -norelay ??4exception@std@@QAEAAV01@ABV01@@Z(ptr) msvcrt.??4exception@@QAEAAV0@ABV0@@Z
+@ cdecl -i386 -norelay ??8type_info@@QBE_NABV0@@Z(ptr) msvcrt.??8type_info@@QBEHABV0@@Z
+@ cdecl -i386 -norelay ??9type_info@@QBE_NABV0@@Z(ptr) msvcrt.??9type_info@@QBEHABV0@@Z
+@ extern -i386 ??_7__non_rtti_object@std@@6B@ msvcrt.??_7__non_rtti_object@@6B@
+@ extern -i386 ??_7bad_cast@std@@6B@ msvcrt.??_7bad_cast@@6B@
+@ extern -i386 ??_7bad_typeid@std@@6B@ msvcrt.??_7bad_typeid@@6B@
 @ extern -i386 ??_7exception@@6B@ msvcrt.??_7exception@@6B@
-@ stub ??_7exception@std@@6B@
-@ stub ??_Fbad_cast@std@@QAEXXZ
-@ stub ??_Fbad_typeid@std@@QAEXXZ
+@ extern -i386 ??_7exception@std@@6B@ msvcrt.??_7exception@@6B@
+@ cdecl -i386 -norelay ??_Fbad_cast@std@@QAEXXZ() msvcrt.??_Fbad_cast@@QAEXXZ
+@ cdecl -i386 -norelay ??_Fbad_typeid@std@@QAEXXZ() msvcrt.??_Fbad_typeid@@QAEXXZ
 @ cdecl ??_U@YAPAXI@Z(long) msvcrt.??_U@YAPAXI@Z
-@ stub ??_U@YAPAXIHPBDH@Z
+@ cdecl ??_U@YAPAXIHPBDH@Z(long long str long) msvcrt.??_U@YAPAXIHPBDH@Z
 @ cdecl ??_V@YAXPAX@Z(ptr) msvcrt.??_V@YAXPAX@Z
 @ stub ?_Name_base@type_info@@CAPBDPBV1@PAU__type_info_node@@@Z
 @ stub ?_Name_base_internal@type_info@@CAPBDPBV1@PAU__type_info_node@@@Z
@@ -42,10 +42,10 @@
 @ stub ?_ValidateWrite@@YAHPAXI@Z
 @ cdecl __uncaught_exception() msvcrt.__uncaught_exception
 @ stub ?_inconsistency@@YAXXZ
-@ stub ?_invalid_parameter@@YAXPBG00II@Z
+@ cdecl ?_invalid_parameter@@YAXPBG00II@Z(wstr wstr wstr long long) msvcrt._invalid_parameter
 @ stub ?_is_exception_typeof@@YAHABVtype_info@@PAU_EXCEPTION_POINTERS@@@Z
 @ stub ?_name_internal_method@type_info@@QBEPBDPAU__type_info_node@@@Z
-@ stub ?_open@@YAHPBDHH@Z
+@ varargs ?_open@@YAHPBDHH@Z(str long) msvcrt._open
 @ cdecl ?_query_new_handler@@YAP6AHI@ZXZ() msvcrt.?_query_new_handler@@YAP6AHI@ZXZ
 @ cdecl ?_query_new_mode@@YAHXZ() msvcrt.?_query_new_mode@@YAHXZ
 @ stub ?_set_new_handler@@YAP6AHI@ZH@Z
@@ -53,10 +53,10 @@
 @ cdecl ?_set_new_mode@@YAHH@Z(long) msvcrt.?_set_new_mode@@YAHH@Z
 @ stub ?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZH@Z
 @ cdecl ?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z(ptr) msvcrt.?_set_se_translator@@YAP6AXIPAU_EXCEPTION_POINTERS@@@ZP6AXI0@Z@Z
-@ stub ?_sopen@@YAHPBDHHH@Z
+@ cdecl ?_sopen@@YAHPBDHHH@Z(str long long long) msvcrt._sopen
 @ stub ?_type_info_dtor_internal_method@type_info@@QAEXXZ
-@ stub ?_wopen@@YAHPB_WHH@Z
-@ stub ?_wsopen@@YAHPB_WHHH@Z
+@ cdecl ?_wopen@@YAHPB_WHH@Z(wstr long long) msvcrt._wopen
+@ cdecl ?_wsopen@@YAHPB_WHHH@Z(wstr long long long) msvcrt._wsopen
 @ cdecl -i386 -norelay ?before@type_info@@QBEHABV1@@Z(ptr) msvcrt.?before@type_info@@QBEHABV1@@Z
 @ stub ?name@type_info@@QBEPBDPAU__type_info_node@@@Z
 @ cdecl -i386 -norelay ?raw_name@type_info@@QBEPBDXZ() msvcrt.?raw_name@type_info@@QBEPBDXZ
@@ -65,14 +65,14 @@
 @ cdecl ?set_terminate@@YAP6AXXZP6AXXZ@Z(ptr) msvcrt.?set_terminate@@YAP6AXXZP6AXXZ@Z
 @ stub ?set_unexpected@@YAP6AXXZH@Z
 @ cdecl ?set_unexpected@@YAP6AXXZP6AXXZ@Z(ptr) msvcrt.?set_unexpected@@YAP6AXXZP6AXXZ@Z
-@ stub ?swprintf@@YAHPAGIPBGZZ
-@ stub ?swprintf@@YAHPA_WIPB_WZZ
+@ varargs ?swprintf@@YAHPAGIPBGZZ(ptr long wstr) msvcrt._snwprintf
+@ varargs ?swprintf@@YAHPA_WIPB_WZZ(ptr long wstr) msvcrt._snwprintf
 @ cdecl ?terminate@@YAXXZ() msvcrt.?terminate@@YAXXZ
 @ cdecl ?unexpected@@YAXXZ() msvcrt.?unexpected@@YAXXZ
-@ stub ?vswprintf@@YAHPA_WIPB_WPAD@Z
-@ stub ?what@exception@std@@UBEPBDXZ
+@ cdecl ?vswprintf@@YAHPA_WIPB_WPAD@Z(ptr long wstr ptr) msvcrt._vsnwprintf
+@ cdecl -i386 -norelay ?what@exception@std@@UBEPBDXZ() msvcrt.?what@exception@@UBEPBDXZ
 @ stub @_calloc_crt@8
-@ cdecl _malloc_crt@4(long) msvcrt.malloc
+@ cdecl @_malloc_crt@4(long) msvcrt.malloc
 @ stub @_realloc_crt@8
 @ cdecl $I10_OUTPUT() msvcrt.$I10_OUTPUT
 @ cdecl -arch=i386 _CIacos() msvcrt._CIacos
@@ -118,8 +118,8 @@
 @ cdecl __CxxDetectRethrow(ptr) msvcrt.__CxxDetectRethrow
 @ stub __CxxExceptionFilter
 @ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
-@ stub __CxxFrameHandler2
-@ stub __CxxFrameHandler3
+@ cdecl -i386 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
+@ cdecl -i386 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) msvcrt.__CxxFrameHandler
 @ stdcall -i386 __CxxLongjmpUnwind(ptr) msvcrt.__CxxLongjmpUnwind
 @ cdecl __CxxQueryExceptionSize() msvcrt.__CxxQueryExceptionSize
 @ stub __CxxRegisterExceptionObject
@@ -142,7 +142,7 @@
 @ extern __argc msvcrt.__argc
 @ extern __argv msvcrt.__argv
 @ extern __badioinfo msvcrt.__badioinfo
-@ stub __clean_type_info_names_internal
+@ cdecl __clean_type_info_names_internal(ptr) msvcr90.__clean_type_info_names_internal
 @ stub __control87_2
 @ stub __create_locale
 @ cdecl __crtCompareStringA(long long str long str long) msvcrt.__crtCompareStringA
@@ -307,7 +307,7 @@
 @ cdecl _c_exit() msvcrt._c_exit
 @ cdecl _cabs(long) msvcrt._cabs
 @ cdecl _callnewh(long) msvcrt._callnewh
-@ stub _calloc_crt
+@ cdecl _calloc_crt(long long) msvcrt.calloc
 @ cdecl _cexit() msvcrt._cexit
 @ cdecl _cgets(str) msvcrt._cgets
 @ stub _cgets_s
@@ -324,7 +324,7 @@
 @ cdecl _close(long) msvcrt._close
 @ cdecl _commit(long) msvcrt._commit
 @ extern _commode msvcrt._commode
-@ stub _configthreadlocale
+@ cdecl _configthreadlocale(long) msvcrt._configthreadlocale
 @ cdecl _control87(long long) msvcrt._control87
 @ cdecl _controlfp(long long) msvcrt._controlfp
 @ cdecl _controlfp_s(ptr long long) msvcrt._controlfp_s
@@ -338,7 +338,7 @@
 @ cdecl _cputs(str) msvcrt._cputs
 @ stub _cputws
 @ cdecl _creat(str long) msvcrt._creat
-@ stub _create_locale
+@ cdecl _create_locale(long str) msvcrt._create_locale
 @ stub _crt_debugger_hook
 @ varargs _cscanf(str) msvcrt._cscanf
 @ stub _cscanf_l
@@ -377,9 +377,9 @@
 @ extern _environ msvcrt._environ
 @ cdecl _eof(long) msvcrt._eof
 @ cdecl _errno() msvcrt._errno
-@ cdecl _except_handler2(ptr ptr ptr ptr) msvcrt._except_handler2
-@ cdecl _except_handler3(ptr ptr ptr ptr) msvcrt._except_handler3
-@ stub _except_handler4_common
+@ cdecl -i386 _except_handler2(ptr ptr ptr ptr) msvcrt._except_handler2
+@ cdecl -i386 _except_handler3(ptr ptr ptr ptr) msvcrt._except_handler3
+@ cdecl -i386 _except_handler4_common(ptr ptr ptr ptr ptr ptr) msvcrt._except_handler4_common
 @ varargs _execl(str str) msvcrt._execl
 @ varargs _execle(str str) msvcrt._execle
 @ varargs _execlp(str str) msvcrt._execlp
@@ -428,7 +428,7 @@
 @ cdecl _fputwchar(long) msvcrt._fputwchar
 @ stub _fread_nolock
 @ stub _fread_nolock_s
-@ stub _free_locale
+@ cdecl _free_locale(ptr) msvcrt._free_locale
 @ stub _freea
 @ stub _freea_s
 @ stub _freefls
@@ -510,7 +510,7 @@
 @ stub _getwche_nolock
 @ cdecl _getws(ptr) msvcrt._getws
 @ stub _getws_s
-@ cdecl _global_unwind2(ptr) msvcrt._global_unwind2
+@ cdecl -i386 _global_unwind2(ptr) msvcrt._global_unwind2
 @ cdecl _gmtime32(ptr) msvcrt._gmtime32
 @ stub _gmtime32_s
 @ cdecl _gmtime64(ptr) msvcrt._gmtime64
@@ -533,8 +533,8 @@
 @ stub _inp
 @ stub _inpd
 @ stub _inpw
-@ stub _invalid_parameter
-@ stub _invalid_parameter_noinfo
+@ cdecl _invalid_parameter(wstr wstr wstr long long) msvcrt._invalid_parameter
+@ cdecl _invalid_parameter_noinfo() msvcr90._invalid_parameter_noinfo
 @ stub _invoke_watson
 @ extern _iob msvcrt._iob
 @ stub _isalnum_l
@@ -611,7 +611,7 @@
 @ stub _isspace_l
 @ stub _isupper_l
 @ stub _iswalnum_l
-@ stub _iswalpha_l
+@ cdecl _iswalpha_l(long ptr) msvcrt._iswalpha_l
 @ stub _iswcntrl_l
 @ stub _iswcsym_l
 @ stub _iswcsymf_l
@@ -637,7 +637,7 @@
 @ stub _lfind_s
 @ cdecl _loaddll(str) msvcrt._loaddll
 @ cdecl -i386 _local_unwind2(ptr long) msvcrt._local_unwind2
-@ stub _local_unwind4
+@ cdecl -i386 _local_unwind4(ptr ptr long) msvcrt._local_unwind4
 @ cdecl _localtime32(ptr) msvcrt._localtime32
 @ stub _localtime32_s
 @ cdecl _localtime64(ptr) msvcrt._localtime64
@@ -1335,9 +1335,9 @@
 @ cdecl memchr(ptr long long) msvcrt.memchr
 @ cdecl memcmp(ptr ptr long) msvcrt.memcmp
 @ cdecl memcpy(ptr ptr long) msvcrt.memcpy
-@ stub memcpy_s
+@ cdecl memcpy_s(ptr long ptr long) msvcrt.memcpy_s
 @ cdecl memmove(ptr ptr long) msvcrt.memmove
-@ stub memmove_s
+@ cdecl memmove_s(ptr long ptr long) msvcrt.memmove_s
 @ cdecl memset(ptr long long) msvcrt.memset
 @ cdecl modf(double ptr) msvcrt.modf
 @ cdecl perror(str) msvcrt.perror

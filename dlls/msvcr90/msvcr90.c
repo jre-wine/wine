@@ -20,6 +20,7 @@
 
 #include <stdarg.h>
 
+#include "stdlib.h"
 #include "windef.h"
 #include "winbase.h"
 #include "wine/debug.h"
@@ -100,6 +101,14 @@ int CDECL _initterm_e(_INITTERM_E_FN *table, _INITTERM_E_FN *end)
 }
 
 /*********************************************************************
+ * _invalid_parameter_noinfo (MSVCR90.@)
+ */
+void CDECL _invalid_parameter_noinfo(void)
+{
+    _invalid_parameter( NULL, NULL, NULL, 0, 0 );
+}
+
+/*********************************************************************
  * __sys_nerr (MSVCR90.@)
  */
 int* CDECL __sys_nerr(void)
@@ -113,4 +122,12 @@ int* CDECL __sys_nerr(void)
 char** CDECL __sys_errlist(void)
 {
     return (char**)GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_sys_errlist");
+}
+
+/*********************************************************************
+ * __clean_type_info_names_internal (MSVCR90.@)
+ */
+void CDECL __clean_type_info_names_internal(void *p)
+{
+    FIXME("(%p) stub\n", p);
 }

@@ -1373,7 +1373,8 @@ static void test_CreateTypeLib(void) {
     ok(typeattr->cFuncs == 1, "cFuncs = %d\n", typeattr->cFuncs);
     ok(typeattr->cVars == 0, "cVars = %d\n", typeattr->cVars);
     ok(typeattr->cImplTypes == 1, "cImplTypes = %d\n", typeattr->cImplTypes);
-    ok(typeattr->cbSizeVft == 32, "cbSizeVft = %d\n", typeattr->cbSizeVft);
+    ok(typeattr->cbSizeVft == 32 || broken(typeattr->cbSizeVft == 7 * sizeof(void *) + 4), /* xp64 */
+       "cbSizeVft = %d\n", typeattr->cbSizeVft);
     ok(typeattr->cbAlignment == 4, "cbAlignment = %d\n", typeattr->cbAlignment);
     ok(typeattr->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL), "wTypeFlags = %d\n", typeattr->wTypeFlags);
     ok(typeattr->wMajorVerNum == 0, "wMajorVerNum = %d\n", typeattr->wMajorVerNum);
@@ -1395,7 +1396,7 @@ static void test_CreateTypeLib(void) {
     ok(typeattr->cFuncs == 8, "cFuncs = %d\n", typeattr->cFuncs);
     ok(typeattr->cVars == 0, "cVars = %d\n", typeattr->cVars);
     ok(typeattr->cImplTypes == 1, "cImplTypes = %d\n", typeattr->cImplTypes);
-    ok(typeattr->cbSizeVft == 28, "cbSizeVft = %d\n", typeattr->cbSizeVft);
+    ok(typeattr->cbSizeVft == 7 * sizeof(void *), "cbSizeVft = %d\n", typeattr->cbSizeVft);
     ok(typeattr->cbAlignment == 4, "cbAlignment = %d\n", typeattr->cbAlignment);
     ok(typeattr->wTypeFlags == (TYPEFLAG_FDISPATCHABLE|TYPEFLAG_FDUAL), "wTypeFlags = %d\n", typeattr->wTypeFlags);
     ok(typeattr->wMajorVerNum == 0, "wMajorVerNum = %d\n", typeattr->wMajorVerNum);
@@ -1414,7 +1415,8 @@ static void test_CreateTypeLib(void) {
     ok(typeattr->cFuncs == 11, "cFuncs = %d\n", typeattr->cFuncs);
     ok(typeattr->cVars == 0, "cVars = %d\n", typeattr->cVars);
     ok(typeattr->cImplTypes == 1, "cImplTypes = %d\n", typeattr->cImplTypes);
-    ok(typeattr->cbSizeVft == 56, "cbSizeVft = %d\n", typeattr->cbSizeVft);
+    ok(typeattr->cbSizeVft == 56 || broken(typeattr->cbSizeVft == 3 * sizeof(void *) + 44), /* xp64 */
+       "cbSizeVft = %d\n", typeattr->cbSizeVft);
     ok(typeattr->cbAlignment == 4, "cbAlignment = %d\n", typeattr->cbAlignment);
     ok(typeattr->wTypeFlags == 0, "wTypeFlags = %d\n", typeattr->wTypeFlags);
     ok(typeattr->wMajorVerNum == 0, "wMajorVerNum = %d\n", typeattr->wMajorVerNum);
@@ -1965,8 +1967,8 @@ static void test_register_typelib(void)
     WCHAR filename[MAX_PATH];
     const char *filenameA;
     ITypeLib *typelib;
-    WCHAR key_name[MAX_PATH], uuid[40];
-    static const WCHAR formatW[] = {'I','n','t','e','r','f','a','c','e','\\','%','s',0};
+    WCHAR uuidW[40];
+    char key_name[MAX_PATH], uuid[40];
     LONG ret, expect_ret;
     UINT count, i;
     HKEY hkey;
@@ -2038,8 +2040,9 @@ static void test_register_typelib(void)
 
         }
 
-        StringFromGUID2(&attr->guid, uuid, sizeof(uuid) / sizeof(uuid[0]));
-        wsprintfW(key_name, formatW, uuid);
+        StringFromGUID2(&attr->guid, uuidW, sizeof(uuidW) / sizeof(uuidW[0]));
+        WideCharToMultiByte(CP_ACP, 0, uuidW, -1, uuid, sizeof(uuid), NULL, NULL);
+        sprintf(key_name, "Interface\\%s", uuid);
 
         /* All dispinterfaces will be registered (this includes dual interfaces) as well
            as oleautomation interfaces */
@@ -2049,7 +2052,7 @@ static void test_register_typelib(void)
         else
             expect_ret = ERROR_FILE_NOT_FOUND;
 
-        ret = RegOpenKeyExW(HKEY_CLASSES_ROOT, key_name, 0, KEY_READ, &hkey);
+        ret = RegOpenKeyExA(HKEY_CLASSES_ROOT, key_name, 0, KEY_READ, &hkey);
         ok(ret == expect_ret, "%d: got %d\n", i, ret);
         if(ret == ERROR_SUCCESS) RegCloseKey(hkey);
 

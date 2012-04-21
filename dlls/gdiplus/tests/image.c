@@ -942,11 +942,11 @@ static void test_createfromwmf(void)
 
     stat = GdipGetImageBounds(img, &bounds, &unit);
     expect(Ok, stat);
-    todo_wine expect(UnitPixel, unit);
+    expect(UnitPixel, unit);
     expectf(0.0, bounds.X);
     expectf(0.0, bounds.Y);
-    todo_wine expectf(320.0, bounds.Width);
-    todo_wine expectf(320.0, bounds.Height);
+    expectf(320.0, bounds.Width);
+    expectf(320.0, bounds.Height);
 
     stat = GdipGetImageHorizontalResolution(img, &res);
     expect(Ok, stat);
@@ -1879,7 +1879,7 @@ static void test_remaptable(void)
 
     stat = GdipBitmapGetPixel(bitmap2, 0, 0, &color);
     expect(Ok, stat);
-    todo_wine ok(color_match(0xffff00ff, color, 1), "Expected ffff00ff, got %.8x\n", color);
+    ok(color_match(0xffff00ff, color, 1), "Expected ffff00ff, got %.8x\n", color);
 
     GdipDeleteGraphics(graphics);
     GdipDisposeImage((GpImage*)bitmap1);

@@ -465,7 +465,7 @@ static void test_hashes(void)
     ok(!result && GetLastError() == NTE_BAD_ALGID,
        "expected NTE_BAD_ALGID, got %08x\n", GetLastError());
 
-    result = CryptAcquireContextW(&prov, NULL, MS_ENHANCED_PROV_W, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
+    result = CryptAcquireContextA(&prov, NULL, szProvider, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
     ok(result, "CryptAcquireContext failed 0x%08x\n", GetLastError());
 
     result = CryptCreateHash(prov, CALG_SHA1, 0, 0, &hHash);
@@ -487,7 +487,13 @@ static void test_hashes(void)
     ok(!result, "CryptDestroyHash succeeded\n");
     ok(error == ERROR_INVALID_PARAMETER, "expected ERROR_INVALID_PARAMETER got %u\n", error);
 
-    result = CryptAcquireContextW(&prov, NULL, MS_ENHANCED_PROV_W, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
+    if (!pCryptDuplicateHash)
+    {
+        win_skip("CryptDuplicateHash is not available\n");
+        return;
+    }
+
+    result = CryptAcquireContextA(&prov, NULL, szProvider, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT);
     ok(result, "CryptAcquireContext failed 0x%08x\n", GetLastError());
 
     result = CryptCreateHash(hProv, CALG_SHA1, 0, 0, &hHash);
@@ -496,7 +502,7 @@ static void test_hashes(void)
     result = CryptHashData(hHash, (const BYTE *)"data", sizeof("data"), 0);
     ok(result, "CryptHashData failed 0x%08x\n", GetLastError());
 
-    result = CryptDuplicateHash(hHash, NULL, 0, &hHashClone);
+    result = pCryptDuplicateHash(hHash, NULL, 0, &hHashClone);
     ok(result, "CryptDuplicateHash failed 0x%08x\n", GetLastError());
 
     len = 20;
@@ -1042,7 +1048,9 @@ static void test_rc2(void)
         dwLen = 0;
         result = CryptGetKeyParam(hKey, KP_SALT, NULL, &dwLen, 0);
         ok(result, "%08x\n", GetLastError());
-        ok(dwLen == 0, "unexpected salt length %d\n", dwLen);
+        ok(dwLen == 0 ||
+           broken(dwLen == 11), /* Win9x/WinMe/NT4 */
+           "unexpected salt length %d\n", dwLen);
         /* What sizes salt can I set? */
         salt.pbData = pbData;
         for (i=0; i<24; i++)
@@ -1208,7 +1216,9 @@ static void test_rc4(void)
         dwLen = 0;
         result = CryptGetKeyParam(hKey, KP_SALT, NULL, &dwLen, 0);
         ok(result, "%08x\n", GetLastError());
-        ok(dwLen == 0, "unexpected salt length %d\n", dwLen);
+        ok(dwLen == 0 ||
+           broken(dwLen == 11), /* Win9x/WinMe/NT4 */
+           "unexpected salt length %d\n", dwLen);
         /* What sizes salt can I set? */
         salt.pbData = pbData;
         for (i=0; i<24; i++)

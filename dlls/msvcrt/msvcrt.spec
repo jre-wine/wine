@@ -3,14 +3,14 @@
 @ cdecl $I10_OUTPUT() MSVCRT_I10_OUTPUT
 @ cdecl -i386 -norelay ??0__non_rtti_object@@QAE@ABV0@@Z(ptr) __thiscall_MSVCRT___non_rtti_object_copy_ctor
 @ cdecl -i386 -norelay ??0__non_rtti_object@@QAE@PBD@Z(ptr) __thiscall_MSVCRT___non_rtti_object_ctor
-# stub ??0bad_cast@@AAE@PBQBD@Z
+@ cdecl -i386 -norelay ??0bad_cast@@AAE@PBQBD@Z(ptr) __thiscall_MSVCRT_bad_cast_ctor
 @ cdecl -i386 -norelay ??0bad_cast@@QAE@ABQBD@Z(ptr) __thiscall_MSVCRT_bad_cast_ctor
 @ cdecl -i386 -norelay ??0bad_cast@@QAE@ABV0@@Z(ptr) __thiscall_MSVCRT_bad_cast_copy_ctor
-# stub ??0bad_cast@@QAE@PBD@Z
+@ cdecl -i386 -norelay ??0bad_cast@@QAE@PBD@Z(ptr) __thiscall_MSVCRT_bad_cast_ctor_charptr
 @ cdecl -i386 -norelay ??0bad_typeid@@QAE@ABV0@@Z(ptr) __thiscall_MSVCRT_bad_typeid_copy_ctor
 @ cdecl -i386 -norelay ??0bad_typeid@@QAE@PBD@Z(ptr) __thiscall_MSVCRT_bad_typeid_ctor
 @ cdecl -i386 -norelay ??0exception@@QAE@ABQBD@Z(ptr) __thiscall_MSVCRT_exception_ctor
-# stub ??0exception@@QAE@ABQBDH@Z
+@ cdecl -i386 -norelay ??0exception@@QAE@ABQBDH@Z(ptr long) __thiscall_MSVCRT_exception_ctor_noalloc
 @ cdecl -i386 -norelay ??0exception@@QAE@ABV0@@Z(ptr) __thiscall_MSVCRT_exception_copy_ctor
 @ cdecl -i386 -norelay ??0exception@@QAE@XZ() __thiscall_MSVCRT_exception_default_ctor
 @ cdecl -i386 -norelay ??1__non_rtti_object@@UAE@XZ() __thiscall_MSVCRT___non_rtti_object_dtor
@@ -19,11 +19,8 @@
 @ cdecl -i386 -norelay ??1exception@@UAE@XZ() __thiscall_MSVCRT_exception_dtor
 @ cdecl -i386 -norelay ??1type_info@@UAE@XZ() __thiscall_MSVCRT_type_info_dtor
 @ cdecl ??2@YAPAXI@Z(long) MSVCRT_operator_new
-# stub ??2@YAPAXIHPBDH@Z
-@ cdecl ??_U@YAPAXI@Z(long) MSVCRT_operator_new
-# stub ??_U@YAPAXIHPBDH@Z
+@ cdecl ??2@YAPAXIHPBDH@Z(long long str long) MSVCRT_operator_new_dbg
 @ cdecl ??3@YAXPAX@Z(ptr) MSVCRT_operator_delete
-@ cdecl ??_V@YAXPAX@Z(ptr) MSVCRT_operator_delete
 @ cdecl -i386 -norelay ??4__non_rtti_object@@QAEAAV0@ABV0@@Z(ptr) __thiscall_MSVCRT___non_rtti_object_opequals
 @ cdecl -i386 -norelay ??4bad_cast@@QAEAAV0@ABV0@@Z(ptr) __thiscall_MSVCRT_bad_cast_opequals
 @ cdecl -i386 -norelay ??4bad_typeid@@QAEAAV0@ABV0@@Z(ptr) __thiscall_MSVCRT_bad_typeid_opequals
@@ -38,12 +35,15 @@
 @ cdecl -i386 -norelay ??_Ebad_cast@@UAEPAXI@Z(long) __thiscall_MSVCRT_bad_cast_vector_dtor
 @ cdecl -i386 -norelay ??_Ebad_typeid@@UAEPAXI@Z(long) __thiscall_MSVCRT_bad_typeid_vector_dtor
 @ cdecl -i386 -norelay ??_Eexception@@UAEPAXI@Z(long) __thiscall_MSVCRT_exception_vector_dtor
-# stub ??_Fbad_cast@@QAEXXZ
-# stub ??_Fbad_typeid@@QAEXXZ
+@ cdecl -i386 -norelay ??_Fbad_cast@@QAEXXZ() __thiscall_MSVCRT_bad_cast_default_ctor
+@ cdecl -i386 -norelay ??_Fbad_typeid@@QAEXXZ() __thiscall_MSVCRT_bad_typeid_default_ctor
 @ cdecl -i386 -norelay ??_G__non_rtti_object@@UAEPAXI@Z(long) __thiscall_MSVCRT___non_rtti_object_scalar_dtor
 @ cdecl -i386 -norelay ??_Gbad_cast@@UAEPAXI@Z(long) __thiscall_MSVCRT_bad_cast_scalar_dtor
 @ cdecl -i386 -norelay ??_Gbad_typeid@@UAEPAXI@Z(long) __thiscall_MSVCRT_bad_typeid_scalar_dtor
 @ cdecl -i386 -norelay ??_Gexception@@UAEPAXI@Z(long) __thiscall_MSVCRT_exception_scalar_dtor
+@ cdecl ??_U@YAPAXI@Z(long) MSVCRT_operator_new
+@ cdecl ??_U@YAPAXIHPBDH@Z(long long str long) MSVCRT_operator_new_dbg
+@ cdecl ??_V@YAXPAX@Z(ptr) MSVCRT_operator_delete
 @ cdecl ?_query_new_handler@@YAP6AHI@ZXZ() MSVCRT__query_new_handler
 @ cdecl ?_query_new_mode@@YAHXZ() MSVCRT__query_new_mode
 @ cdecl ?_set_new_handler@@YAP6AHI@ZP6AHI@Z@Z(ptr) MSVCRT__set_new_handler
@@ -114,8 +114,8 @@
 @ cdecl __CxxDetectRethrow(ptr)
 # stub __CxxExceptionFilter
 @ cdecl -i386 -norelay __CxxFrameHandler(ptr ptr ptr ptr)
-# stub __CxxFrameHandler2
-# stub __CxxFrameHandler3
+@ cdecl -i386 -norelay __CxxFrameHandler2(ptr ptr ptr ptr) __CxxFrameHandler
+@ cdecl -i386 -norelay __CxxFrameHandler3(ptr ptr ptr ptr) __CxxFrameHandler
 @ stdcall -arch=x86_64 __C_specific_handler(ptr long ptr ptr) ntdll.__C_specific_handler
 @ stdcall -i386 __CxxLongjmpUnwind(ptr)
 @ cdecl __CxxQueryExceptionSize()
@@ -346,9 +346,9 @@
 @ extern _environ MSVCRT__environ
 @ cdecl _eof(long)
 @ cdecl _errno() MSVCRT__errno
-@ cdecl _except_handler2(ptr ptr ptr ptr)
-@ cdecl _except_handler3(ptr ptr ptr ptr)
-# stub _except_handler4_common
+@ cdecl -i386 _except_handler2(ptr ptr ptr ptr)
+@ cdecl -i386 _except_handler3(ptr ptr ptr ptr)
+@ cdecl -i386 _except_handler4_common(ptr ptr ptr ptr ptr ptr)
 @ varargs _execl(str str)
 @ varargs _execle(str str)
 @ varargs _execlp(str str)
@@ -373,10 +373,10 @@
 @ cdecl _fileno(ptr) MSVCRT__fileno
 @ cdecl _findclose(long) MSVCRT__findclose
 @ cdecl _findfirst(str ptr) MSVCRT__findfirst
-# stub _findfirst64
+@ cdecl _findfirst64(str ptr) MSVCRT__findfirst64
 @ cdecl _findfirsti64(str ptr) MSVCRT__findfirsti64
 @ cdecl _findnext(long ptr) MSVCRT__findnext
-# stub _findnext64
+@ cdecl _findnext64(long ptr) MSVCRT__findnext64
 @ cdecl _findnexti64(long ptr) MSVCRT__findnexti64
 @ cdecl _finite( double )
 @ cdecl _flsbuf(long ptr) MSVCRT__flsbuf
@@ -458,7 +458,7 @@
 # stub _getwch
 # stub _getwche
 @ cdecl _getws(ptr) MSVCRT__getws
-@ cdecl _global_unwind2(ptr)
+@ cdecl -i386 _global_unwind2(ptr)
 @ cdecl _gmtime32(ptr) MSVCRT__gmtime32
 # stub _gmtime32_s
 @ cdecl _gmtime64(ptr) MSVCRT__gmtime64
@@ -479,7 +479,7 @@
 @ stub _inp #(long) -i386
 @ stub _inpd #(long) -i386
 @ stub _inpw #(long) -i386
-@ stub _invalid_parameter
+@ cdecl _invalid_parameter(wstr wstr wstr long long) MSVCRT__invalid_parameter
 @ extern _iob MSVCRT__iob
 # stub _isalnum_l
 # stub _isalpha_l
@@ -554,7 +554,7 @@
 # stub _isspace_l
 # stub _isupper_l
 # stub _iswalnum_l
-# stub _iswalpha_l
+@ cdecl _iswalpha_l(long ptr) MSVCRT__iswalpha_l
 # stub _iswcntrl_l
 # stub _iswctype_l
 # stub _iswdigit_l
@@ -578,7 +578,7 @@
 # stub _lfind_s
 @ cdecl _loaddll(str)
 @ cdecl -i386 _local_unwind2(ptr long)
-# stub _local_unwind4
+@ cdecl -i386 _local_unwind4(ptr ptr long)
 @ cdecl _localtime32(ptr) MSVCRT__localtime32
 # stub _localtime32_s
 @ cdecl _localtime64(ptr) MSVCRT__localtime64
@@ -815,8 +815,9 @@
 # stub _set_output_format
 @ cdecl _set_sbh_threshold(long)
 @ cdecl _seterrormode(long)
-@ cdecl -i386 -norelay _setjmp(ptr) MSVCRT__setjmp
-@ cdecl -i386 -norelay _setjmp3(ptr long) MSVCRT__setjmp3
+@ cdecl -arch=i386,x86_64 -norelay _setjmp(ptr) MSVCRT__setjmp
+@ cdecl -arch=i386 -norelay _setjmp3(ptr long) MSVCRT__setjmp3
+@ cdecl -arch=x86_64 -norelay _setjmpex(ptr ptr) MSVCRT__setjmpex
 @ cdecl _setmaxstdio(long)
 @ cdecl _setmbcp(long)
 @ cdecl _setmode(long long)
@@ -1266,9 +1267,9 @@
 @ cdecl memchr(ptr long long) ntdll.memchr
 @ cdecl memcmp(ptr ptr long) ntdll.memcmp
 @ cdecl memcpy(ptr ptr long) ntdll.memcpy
-# stub memcpy_s
+@ cdecl memcpy_s(ptr long ptr long) memmove_s
 @ cdecl memmove(ptr ptr long) ntdll.memmove
-# stub memmove_s
+@ cdecl memmove_s(ptr long ptr long)
 @ cdecl memset(ptr long long) ntdll.memset
 @ cdecl mktime(ptr) MSVCRT_mktime
 @ cdecl modf(double ptr) MSVCRT_modf
@@ -1299,6 +1300,7 @@
 @ varargs scanf(str) MSVCRT_scanf
 # stub scanf_s
 @ cdecl setbuf(ptr ptr) MSVCRT_setbuf
+@ cdecl -arch=x86_64 -norelay -private setjmp(ptr) MSVCRT__setjmp
 @ cdecl setlocale(long str) MSVCRT_setlocale
 @ cdecl setvbuf(ptr str long long) MSVCRT_setvbuf
 @ cdecl signal(long long) MSVCRT_signal
@@ -1413,3 +1415,6 @@
 # Functions not exported in native dll:
 @ cdecl _get_invalid_parameter_handler()
 @ cdecl _set_invalid_parameter_handler(ptr)
+@ cdecl _create_locale(long str)
+@ cdecl _free_locale(ptr)
+@ cdecl _configthreadlocale(long)

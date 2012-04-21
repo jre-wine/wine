@@ -1,5 +1,5 @@
 /*
- * Tests for the D3DX9 texture functions
+ * Tests for the D3DX9 surface functions
  *
  * Copyright 2009 Tony Wasserka
  *
@@ -92,10 +92,8 @@ static void test_D3DXGetImageInfo(void)
 
     /* D3DXGetImageInfoFromFile */
     if(testbitmap_ok) {
-        todo_wine {
-            hr = D3DXGetImageInfoFromFileA("testbitmap.bmp", &info);
-            ok(hr == D3D_OK, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3D_OK);
-        }
+        hr = D3DXGetImageInfoFromFileA("testbitmap.bmp", &info);
+        ok(hr == D3D_OK, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3D_OK);
 
         hr = D3DXGetImageInfoFromFileA("testbitmap.bmp", NULL); /* valid image, second parameter is NULL */
         ok(hr == D3D_OK, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3D_OK);
@@ -105,10 +103,8 @@ static void test_D3DXGetImageInfo(void)
         hr = D3DXGetImageInfoFromFileA("testdummy.bmp", NULL); /* invalid image, second parameter is NULL */
         ok(hr == D3D_OK, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3D_OK);
 
-        todo_wine {
-            hr = D3DXGetImageInfoFromFileA("testdummy.bmp", &info);
-            ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
-        }
+        hr = D3DXGetImageInfoFromFileA("testdummy.bmp", &info);
+        ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFile returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
     } else skip("Couldn't create \"testdummy.bmp\"\n");
 
     hr = D3DXGetImageInfoFromFileA("filedoesnotexist.bmp", &info);
@@ -134,10 +130,10 @@ static void test_D3DXGetImageInfo(void)
 
         hr = D3DXGetImageInfoFromResourceA(NULL, MAKEINTRESOURCEA(IDB_BITMAP_1x1), NULL);
         ok(hr == D3D_OK, "D3DXGetImageInfoFromResource returned %#x, expected %#x\n", hr, D3D_OK);
-
-        hr = D3DXGetImageInfoFromResourceA(NULL, MAKEINTRESOURCEA(IDD_BITMAPDATA_1x1), &info); /* RT_RCDATA */
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromResource returned %#x, expected %#x\n", hr, D3D_OK);
     }
+
+    hr = D3DXGetImageInfoFromResourceA(NULL, MAKEINTRESOURCEA(IDD_BITMAPDATA_1x1), &info); /* RT_RCDATA */
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromResource returned %#x, expected %#x\n", hr, D3D_OK);
 
     hr = D3DXGetImageInfoFromResourceA(NULL, MAKEINTRESOURCEA(IDS_STRING), &info);
     ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromResource returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
@@ -156,13 +152,11 @@ static void test_D3DXGetImageInfo(void)
 
 
     /* D3DXGetImageInfoFromFileInMemory */
-    todo_wine {
-        hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01), &info);
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
+    hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01), &info);
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
 
-        hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01)+5, &info); /* too large size */
-        ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
-    }
+    hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01)+5, &info); /* too large size */
+    ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
 
     hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01), NULL);
     ok(hr == D3D_OK, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3D_OK);
@@ -170,16 +164,16 @@ static void test_D3DXGetImageInfo(void)
     hr = D3DXGetImageInfoFromFileInMemory(noimage, sizeof(noimage), NULL);
     ok(hr == D3D_OK, "D3DXGetImageInfoFromResource returned %#x, expected %#x\n", hr, D3D_OK);
 
-    todo_wine {
-        hr = D3DXGetImageInfoFromFileInMemory(noimage, sizeof(noimage), &info);
-        ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
+    hr = D3DXGetImageInfoFromFileInMemory(noimage, sizeof(noimage), &info);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
 
+    todo_wine {
         hr = D3DXGetImageInfoFromFileInMemory(bmp01, sizeof(bmp01)-1, &info);
         ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
-
-        hr = D3DXGetImageInfoFromFileInMemory(bmp01+1, sizeof(bmp01)-1, &info);
-        ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
     }
+
+    hr = D3DXGetImageInfoFromFileInMemory(bmp01+1, sizeof(bmp01)-1, &info);
+    ok(hr == D3DXERR_INVALIDDATA, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DXERR_INVALIDDATA);
 
     hr = D3DXGetImageInfoFromFileInMemory(bmp01, 0, &info);
     ok(hr == D3DERR_INVALIDCALL, "D3DXGetImageInfoFromFileInMemory returned %#x, expected %#x\n", hr, D3DERR_INVALIDCALL);
@@ -495,7 +489,7 @@ static void test_D3DXLoadSurface(IDirect3DDevice9 *device)
     if(testbitmap_ok) DeleteFileA("testbitmap.bmp");
 }
 
-START_TEST(texture)
+START_TEST(surface)
 {
     HWND wnd;
     IDirect3D9 *d3d;
@@ -504,11 +498,11 @@ START_TEST(texture)
     HRESULT hr;
 
     wnd = CreateWindow("static", "d3dx9_test", 0, 0, 0, 0, 0, NULL, NULL, NULL, NULL);
-    d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!wnd) {
         skip("Couldn't create application window\n");
         return;
     }
+    d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d) {
         skip("Couldn't create IDirect3D9 object\n");
         DestroyWindow(wnd);
@@ -531,5 +525,5 @@ START_TEST(texture)
 
     check_release((IUnknown*)device, 0);
     check_release((IUnknown*)d3d, 0);
-    if (wnd) DestroyWindow(wnd);
+    DestroyWindow(wnd);
 }

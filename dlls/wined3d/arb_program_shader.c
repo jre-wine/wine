@@ -6225,6 +6225,7 @@ struct arbfp_blit_priv {
     GLenum uyvy_rect_shader, uyvy_2d_shader;
     GLenum yv12_rect_shader, yv12_2d_shader;
     GLenum p8_rect_shader, p8_2d_shader;
+    GLuint palette_texture;
 };
 
 static HRESULT arbfp_blit_alloc(IWineD3DDevice *iface) {
@@ -6252,6 +6253,8 @@ static void arbfp_blit_free(IWineD3DDevice *iface) {
     GL_EXTCALL(glDeleteProgramsARB(1, &priv->p8_rect_shader));
     GL_EXTCALL(glDeleteProgramsARB(1, &priv->p8_2d_shader));
     checkGLcall("Delete yuv and p8 programs");
+
+    if(priv->palette_texture) glDeleteTextures(1, &priv->palette_texture);
     LEAVE_GL();
 
     HeapFree(GetProcessHeap(), 0, device->blit_priv);
@@ -6559,6 +6562,38 @@ static GLuint gen_p8_shader(IWineD3DDeviceImpl *device, GLenum textype)
 }
 
 /* Context activation is done by the caller. */
+static void upload_palette(IWineD3DSurfaceImpl *surface)
+{
+    BYTE table[256][4];
+    IWineD3DDeviceImpl *device = surface->resource.device;
+    struct arbfp_blit_priv *priv = device->blit_priv;
+    BOOL colorkey = (surface->CKeyFlags & WINEDDSD_CKSRCBLT) ? TRUE : FALSE;
+
+    d3dfmt_p8_init_palette(surface, table, colorkey);
+
+    ENTER_GL();
+    if (!priv->palette_texture)
+        glGenTextures(1, &priv->palette_texture);
+
+    GL_EXTCALL(glActiveTextureARB(GL_TEXTURE1));
+    glBindTexture(GL_TEXTURE_1D, priv->palette_texture);
+
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+
+    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    /* Make sure we have discrete color levels. */
+    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    /* Upload the palette */
+    /* TODO: avoid unneeed uploads in the future by adding some SFLAG_PALETTE_DIRTY mechanism */
+    glTexImage1D(GL_TEXTURE_1D, 0, GL_RGBA, 256, 0, GL_RGBA, GL_UNSIGNED_BYTE, table);
+
+    /* Switch back to unit 0 in which the 2D texture will be stored. */
+    GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0));
+    LEAVE_GL();
+}
+
+/* Context activation is done by the caller. */
 static GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, enum complex_fixup yuv_fixup, GLenum textype)
 {
     GLenum shader;
@@ -6715,19 +6750,19 @@ static GLuint gen_yuv_shader(IWineD3DDeviceImpl *device, enum complex_fixup yuv_
 }
 
 /* Context activation is done by the caller. */
-static HRESULT arbfp_blit_set(IWineD3DDevice *iface, const struct wined3d_format_desc *format_desc,
-        GLenum textype, UINT width, UINT height)
+static HRESULT arbfp_blit_set(IWineD3DDevice *iface, IWineD3DSurfaceImpl *surface)
 {
     GLenum shader;
     IWineD3DDeviceImpl *device = (IWineD3DDeviceImpl *) iface;
-    float size[4] = {width, height, 1, 1};
+    float size[4] = {surface->pow2Width, surface->pow2Height, 1, 1};
     struct arbfp_blit_priv *priv = device->blit_priv;
     enum complex_fixup fixup;
+    GLenum textype = surface->texture_target;
 
-    if (!is_complex_fixup(format_desc->color_fixup))
+    if (!is_complex_fixup(surface->resource.format_desc->color_fixup))
     {
         TRACE("Fixup:\n");
-        dump_color_fixup_desc(format_desc->color_fixup);
+        dump_color_fixup_desc(surface->resource.format_desc->color_fixup);
         /* Don't bother setting up a shader for unconverted formats */
         ENTER_GL();
         glEnable(textype);
@@ -6736,7 +6771,7 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, const struct wined3d_format
         return WINED3D_OK;
     }
 
-    fixup = get_complex_fixup(format_desc->color_fixup);
+    fixup = get_complex_fixup(surface->resource.format_desc->color_fixup);
 
     switch(fixup)
     {
@@ -6755,6 +6790,8 @@ static HRESULT arbfp_blit_set(IWineD3DDevice *iface, const struct wined3d_format
         case COMPLEX_FIXUP_P8:
             shader = textype == GL_TEXTURE_RECTANGLE_ARB ? priv->p8_rect_shader : priv->p8_2d_shader;
             if (!shader) shader = gen_p8_shader(device, textype);
+
+            upload_palette(surface);
             break;
 
         default:
@@ -6803,31 +6840,47 @@ static void arbfp_blit_unset(IWineD3DDevice *iface) {
     LEAVE_GL();
 }
 
-static BOOL arbfp_blit_color_fixup_supported(const struct wined3d_gl_info *gl_info, struct color_fixup_desc fixup)
+static BOOL arbfp_blit_supported(const struct wined3d_gl_info *gl_info, enum blit_operation blit_op,
+                                 const RECT *src_rect, DWORD src_usage, WINED3DPOOL src_pool,
+                                 const struct wined3d_format_desc *src_format_desc,
+                                 const RECT *dst_rect, DWORD dst_usage, WINED3DPOOL dst_pool,
+                                 const struct wined3d_format_desc *dst_format_desc)
 {
-    enum complex_fixup complex_fixup;
+    enum complex_fixup src_fixup;
 
+    if (blit_op != BLIT_OP_BLIT)
+    {
+        TRACE("Unsupported blit_op=%d\n", blit_op);
+        return FALSE;
+    }
+
+    src_fixup = get_complex_fixup(src_format_desc->color_fixup);
     if (TRACE_ON(d3d_shader) && TRACE_ON(d3d))
     {
         TRACE("Checking support for fixup:\n");
-        dump_color_fixup_desc(fixup);
+        dump_color_fixup_desc(src_format_desc->color_fixup);
     }
 
-    if (is_identity_fixup(fixup))
+    if (!is_identity_fixup(dst_format_desc->color_fixup))
+    {
+        TRACE("Destination fixups are not supported\n");
+        return FALSE;
+    }
+
+    if (is_identity_fixup(src_format_desc->color_fixup))
     {
         TRACE("[OK]\n");
         return TRUE;
     }
 
-    /* We only support YUV conversions. */
-    if (!is_complex_fixup(fixup))
+     /* We only support YUV conversions. */
+    if (!is_complex_fixup(src_format_desc->color_fixup))
     {
         TRACE("[FAILED]\n");
         return FALSE;
     }
 
-    complex_fixup = get_complex_fixup(fixup);
-    switch(complex_fixup)
+    switch(src_fixup)
     {
         case COMPLEX_FIXUP_YUY2:
         case COMPLEX_FIXUP_UYVY:
@@ -6837,10 +6890,66 @@ static BOOL arbfp_blit_color_fixup_supported(const struct wined3d_gl_info *gl_in
             return TRUE;
 
         default:
-            FIXME("Unsupported YUV fixup %#x\n", complex_fixup);
+            FIXME("Unsupported YUV fixup %#x\n", src_fixup);
             TRACE("[FAILED]\n");
             return FALSE;
     }
+}
+
+HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_surface, const RECT *src_rect,
+                           IWineD3DSurfaceImpl *dst_surface, const RECT *dst_rect_in, enum blit_operation blit_op,
+                           DWORD Filter)
+{
+    IWineD3DSwapChainImpl *dst_swapchain;
+    struct wined3d_context *context;
+    RECT dst_rect = *dst_rect_in;
+
+    /* Now load the surface */
+    surface_internal_preload((IWineD3DSurface *)src_surface, SRGB_RGB);
+
+    /* Activate the destination context, set it up for blitting */
+    context = context_acquire(device, (IWineD3DSurface *)dst_surface, CTXUSAGE_BLIT);
+
+    /* The coordinates of the ddraw front buffer are always fullscreen ('screen coordinates',
+     * while OpenGL coordinates are window relative.
+     * Also beware of the origin difference(top left vs bottom left).
+     * Also beware that the front buffer's surface size is screen width x screen height,
+     * whereas the real gl drawable size is the size of the window. */
+    dst_swapchain = (dst_surface->Flags & SFLAG_SWAPCHAIN) ? (IWineD3DSwapChainImpl *)dst_surface->container : NULL;
+    if (dst_swapchain && (IWineD3DSurface *)dst_surface == dst_swapchain->frontBuffer)
+    {
+        RECT windowsize;
+        POINT offset = {0,0};
+        UINT h;
+        ClientToScreen(context->win_handle, &offset);
+        GetClientRect(context->win_handle, &windowsize);
+        h = windowsize.bottom - windowsize.top;
+        dst_rect.left -= offset.x; dst_rect.right -=offset.x;
+        dst_rect.top -= offset.y; dst_rect.bottom -=offset.y;
+        dst_rect.top += dst_surface->currentDesc.Height - h; dst_rect.bottom += dst_surface->currentDesc.Height - h;
+    }
+
+    arbfp_blit_set((IWineD3DDevice *)device, src_surface);
+
+    ENTER_GL();
+
+    /* Draw a textured quad */
+    draw_textured_quad(src_surface, src_rect, &dst_rect, Filter);
+
+    LEAVE_GL();
+
+    /* Leave the opengl state valid for blitting */
+    arbfp_blit_unset((IWineD3DDevice *)device);
+
+    if (wined3d_settings.strict_draw_ordering || (dst_swapchain
+            && ((IWineD3DSurface *)dst_surface == dst_swapchain->frontBuffer
+            || dst_swapchain->num_contexts > 1)))
+        wglFlush(); /* Flush to ensure ordering across contexts. */
+
+    context_release(context);
+
+    IWineD3DSurface_ModifyLocation((IWineD3DSurface *)dst_surface, SFLAG_INDRAWABLE, TRUE);
+    return WINED3D_OK;
 }
 
 static HRESULT arbfp_blit_color_fill(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *dst_surface, const RECT *dst_rect, DWORD fill_color)
@@ -6854,7 +6963,7 @@ const struct blit_shader arbfp_blit = {
     arbfp_blit_free,
     arbfp_blit_set,
     arbfp_blit_unset,
-    arbfp_blit_color_fixup_supported,
+    arbfp_blit_supported,
     arbfp_blit_color_fill
 };
 

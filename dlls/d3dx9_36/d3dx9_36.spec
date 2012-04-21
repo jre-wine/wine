@@ -5,7 +5,7 @@
 @ stdcall D3DXAssembleShaderFromResourceW(long wstr ptr ptr long ptr ptr)
 @ stdcall D3DXBoxBoundProbe(ptr ptr ptr ptr)
 @ stub D3DXCheckCubeTextureRequirements
-@ stub D3DXCheckTextureRequirements
+@ stdcall D3DXCheckTextureRequirements(ptr ptr ptr ptr long ptr ptr)
 @ stdcall D3DXCheckVersion(long long)
 @ stub D3DXCheckVolumeTextureRequirements
 @ stub D3DXCleanMesh
@@ -31,7 +31,7 @@
 @ stub D3DXConvertMeshSubsetToSingleStrip
 @ stub D3DXConvertMeshSubsetToStrips
 @ stub D3DXCreateAnimationController
-@ stub D3DXCreateBox
+@ stdcall D3DXCreateBox(ptr long long long ptr ptr)
 @ stdcall D3DXCreateBuffer(long ptr)
 @ stub D3DXCreateCompressedAnimationSet
 @ stub D3DXCreateCubeTexture
@@ -93,9 +93,9 @@
 @ stub D3DXCreateTextA
 @ stub D3DXCreateTextW
 @ stdcall D3DXCreateTexture(ptr long long long long long long ptr)
-@ stub D3DXCreateTextureFromFileA
+@ stdcall D3DXCreateTextureFromFileA(ptr ptr ptr)
 @ stub D3DXCreateTextureFromFileExA
-@ stub D3DXCreateTextureFromFileExW
+@ stdcall D3DXCreateTextureFromFileExW(ptr ptr long long long long long long long long long ptr ptr ptr)
 @ stub D3DXCreateTextureFromFileInMemory
 @ stdcall D3DXCreateTextureFromFileInMemoryEx(ptr ptr long long long long long long long long long long ptr ptr ptr)
 @ stub D3DXCreateTextureFromFileW

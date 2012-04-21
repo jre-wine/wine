@@ -1,5 +1,6 @@
 /* include/config.h.in.  Generated from configure.ac by autoheader.  */
 
+#ifndef WINE_CROSSTEST
 #define __WINE_CONFIG_H
 
 /* Define to a function attribute for Microsoft hotpatch assembly prefix. */
@@ -573,6 +574,9 @@
 
 /* Define if mkdir takes only one argument */
 #undef HAVE_ONE_ARG_MKDIR
+
+/* Define to 1 if OpenAL is available */
+#undef HAVE_OPENAL
 
 /* Define to 1 if you have the <OpenAL/al.h> header file. */
 #undef HAVE_OPENAL_AL_H
@@ -1210,6 +1214,9 @@
 /* Define to the soname of the libodbc library. */
 #undef SONAME_LIBODBC
 
+/* Define to the soname of the libopenal library. */
+#undef SONAME_LIBOPENAL
+
 /* Define to the soname of the libpng library. */
 #undef SONAME_LIBPNG
 
@@ -1301,3 +1308,5 @@
 #ifndef __cplusplus
 #undef inline
 #endif
+
+#endif /* WINE_CROSSTEST */

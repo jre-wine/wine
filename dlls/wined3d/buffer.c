@@ -275,12 +275,13 @@ static BOOL buffer_process_converted_attribute(struct wined3d_buffer *This,
     attrib_size = attrib->format_desc->component_count * attrib->format_desc->component_size;
     for (i = 0; i < attrib_size; ++i)
     {
-        if (This->conversion_map[data + i] != conversion_type)
+        DWORD_PTR idx = (data + i) % This->stride;
+        if (This->conversion_map[idx] != conversion_type)
         {
-            TRACE("Byte %ld in vertex changed\n", i + data);
-            TRACE("It was type %d, is %d now\n", This->conversion_map[data + i], conversion_type);
+            TRACE("Byte %ld in vertex changed\n", idx);
+            TRACE("It was type %d, is %d now\n", This->conversion_map[idx], conversion_type);
             ret = TRUE;
-            This->conversion_map[data + i] = conversion_type;
+            This->conversion_map[idx] = conversion_type;
         }
     }
 
@@ -612,7 +613,7 @@ static inline void fixup_transformed_pos(float *p)
 }
 
 /* Context activation is done by the caller. */
-const BYTE *buffer_get_memory(IWineD3DBuffer *iface, UINT offset, GLuint *buffer_object)
+const BYTE *buffer_get_memory(IWineD3DBuffer *iface, GLuint *buffer_object)
 {
     struct wined3d_buffer *This = (struct wined3d_buffer *)iface;
 
@@ -626,14 +627,14 @@ const BYTE *buffer_get_memory(IWineD3DBuffer *iface, UINT offset, GLuint *buffer
             if (This->buffer_object)
             {
                 *buffer_object = This->buffer_object;
-                return (const BYTE *)offset;
+                return NULL;
             }
         }
-        return This->resource.allocatedMemory + offset;
+        return This->resource.allocatedMemory;
     }
     else
     {
-        return (const BYTE *)offset;
+        return NULL;
     }
 }
 
