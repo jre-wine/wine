@@ -29,14 +29,13 @@ IDS_EDIT,		"&Bewerken"
 IDS_DEFAULT,		"&Standaardinstellingen"
 IDS_PROPERTIES,		"&Eigenschappen"
 IDS_MARK,		"&Markeren"
-IDS_COPY,		"&KopiÃren«"
+IDS_COPY,		"&Kopiëren"
 IDS_PASTE,		"&Plakken"
 IDS_SELECTALL,		"&Alles selecteren"
 IDS_SCROLL,		"Sc&rollen"
 IDS_SEARCH,		"&Zoeken"
 IDS_FNT_DISPLAY,	"Elk karakter is %ld pixels breed en %ld pixels hoog"
-IDS_FNT_PREVIEW_1,	"Dit is een test"
-IDS_FNT_PREVIEW_2,	""
+IDS_FNT_PREVIEW,	"Dit is een test"
 IDS_DLG_TIT_DEFAULT,    "Configuratie - standaard instelllingen"
 IDS_DLG_TIT_CURRENT,    "Configuratie - huidige instellingen"
 IDS_DLG_TIT_ERROR,	"Configuratiefout"
@@ -54,7 +53,7 @@ IDS_USAGE_BACKEND          "  --backend={user|curses}  Kiezen voor user zal een 
                            "                            curses zal proberen de huidige terminal om te zetten\n"\
                            "                            in een Wine console\n"
 IDS_USAGE_COMMAND          "  <commando>                Het Wine programma dat zal starten in de Wine console\n"
-IDS_USAGE_FOOTER           "\nExample:\n  wineconsole cmd\nStarts the Wine command prompt in a Wine console\n\n"
+IDS_USAGE_FOOTER           "\nVoorbeeld:\n  wineconsole cmd\nStart de Wine command prompt in een Wine console\n\n"
 
 END
 

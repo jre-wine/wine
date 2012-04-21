@@ -21,15 +21,12 @@
 
 use strict;
 
-# base directory for ftp.unicode.org files
-my $BASEDIR = "ftp.unicode.org/Public/";
-my $MAPPREFIX = $BASEDIR . "MAPPINGS/";
-
-# UnicodeData file
-my $UNICODEDATA = $BASEDIR . "UNIDATA/UnicodeData.txt";
+# base URLs for www.unicode.org files
+my $MAPPINGS = "http://www.unicode.org/Public/MAPPINGS";
+my $UNIDATA = "http://www.unicode.org/Public/5.2.0/ucd";
 
 # Sort keys file
-my $SORTKEYS = "www.unicode.org/reports/tr10/allkeys.txt";
+my $SORTKEYS = "http://www.unicode.org/reports/tr10/allkeys.txt";
 
 # Defaults mapping
 my $DEFAULTS = "./defaults";
@@ -203,6 +200,23 @@ my @compose_table = ();
 
 
 ################################################################
+# fetch a unicode.org file and open it
+sub open_data_file($)
+{
+    my $url = shift;
+    (my $name = $url) =~ s/^.*\///;
+    local *FILE;
+    unless (-f "data/$name")
+    {
+        print "Fetching $url...\n";
+        mkdir "data";
+        !system "wget", "-q", "-O", "data/$name", $url or die "cannot fetch $url";
+    }
+    open FILE, "<data/$name" or die "cannot open data/$name";
+    return *FILE;
+}
+
+################################################################
 # read in the defaults file
 sub READ_DEFAULTS($)
 {
@@ -234,12 +248,12 @@ sub READ_DEFAULTS($)
         }
         die "Unrecognized line $_\n";
     }
+    close DEFAULTS;
 
     # now build mappings from the decomposition field of the Unicode database
 
-    open UNICODEDATA, "$UNICODEDATA" or die "Cannot open $UNICODEDATA";
-    print "Loading $UNICODEDATA\n";
-    while (<UNICODEDATA>)
+    my $UNICODE_DATA = open_data_file "$UNIDATA/UnicodeData.txt";
+    while (<$UNICODE_DATA>)
     {
 	# Decode the fields ...
 	my ($code, $name, $cat, $comb, $bidi,
@@ -344,6 +358,7 @@ sub READ_DEFAULTS($)
         }
         $unicode_defaults[$src] = $dst;
     }
+    close $UNICODE_DATA;
 
     # patch the category of some special characters
 
@@ -360,9 +375,9 @@ sub READ_DEFAULTS($)
 sub READ_FILE($)
 {
     my $name = shift;
-    open INPUT,$name or die "Cannot open $name";
+    my $INPUT = open_data_file $name;
 
-    while (<INPUT>)
+    while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
         next if /^$/;  # skip empty lines
@@ -391,6 +406,7 @@ sub READ_FILE($)
         }
         die "$name: Unrecognized line $_\n";
     }
+    close $INPUT;
 }
 
 
@@ -485,8 +501,8 @@ sub READ_JIS0208_FILE($)
     $cp2uni[0xa1c0] = 0xff3c;
     $uni2cp[0xff3c] = 0xa1c0;
 
-    open INPUT, "$name" or die "Cannot open $name";
-    while (<INPUT>)
+    my $INPUT = open_data_file $name;
+    while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
         next if /^$/;  # skip empty lines
@@ -501,6 +517,7 @@ sub READ_JIS0208_FILE($)
         }
         die "$name: Unrecognized line $_\n";
     }
+    close $INPUT;
 }
 
 
@@ -511,9 +528,8 @@ sub READ_SORTKEYS_FILE()
     my @sortkeys = ();
     for (my $i = 0; $i < 65536; $i++) { $sortkeys[$i] = [ -1, 0, 0, 0, 0 ] };
 
-    open INPUT, "$SORTKEYS" or die "Cannot open $SORTKEYS";
-    print "Loading $SORTKEYS\n";
-    while (<INPUT>)
+    my $INPUT = open_data_file $SORTKEYS;
+    while (<$INPUT>)
     {
         next if /^\#/;  # skip comments
         next if /^$/;  # skip empty lines
@@ -533,7 +549,7 @@ sub READ_SORTKEYS_FILE()
         }
         die "$SORTKEYS: Unrecognized line $_\n";
     }
-    close INPUT;
+    close $INPUT;
 
     # compress the keys to 32 bit:
     # key 1 to 16 bits, key 2 to 8 bits, key 3 to 4 bits, key 4 to 1 bit
@@ -919,6 +935,40 @@ sub get_lb_ranges()
 
 
 ################################################################
+# dump the BiDi mirroring table
+sub dump_mirroring($)
+{
+    my $filename = shift;
+    my @mirror_table = ();
+
+    my $INPUT = open_data_file "$UNIDATA/BidiMirroring.txt";
+    while (<$INPUT>)
+    {
+        next if /^\#/;  # skip comments
+        next if /^$/;  # skip empty lines
+        next if /\x1a/;  # skip ^Z
+        if (/^\s*([0-9a-fA-F]+)\s*;\s*([0-9a-fA-F]+)/)
+        {
+            $mirror_table[hex $1] = hex $2;
+            next;
+        }
+        die "malformed line $_";
+    }
+    close $INPUT;
+
+    open OUTPUT,">$filename.new" or die "Cannot create $filename";
+    print "Building $filename\n";
+    print OUTPUT "/* Unicode BiDi mirroring */\n";
+    print OUTPUT "/* generated from $UNIDATA/BidiMirroring.txt */\n";
+    print OUTPUT "/* DO NOT EDIT!! */\n\n";
+    print OUTPUT "#include \"wine/unicode.h\"\n\n";
+    DUMP_CASE_TABLE( "wine_mirror_map", @mirror_table );
+    close OUTPUT;
+    save_file($filename);
+}
+
+
+################################################################
 # dump the case mapping tables
 sub DUMP_CASE_MAPPINGS($)
 {
@@ -1004,6 +1054,91 @@ sub DUMP_CASE_TABLE($@)
         $index++;
     }
     printf OUTPUT "\n};\n";
+}
+
+
+################################################################
+# dump a binary case mapping table in l_intl.nls format
+sub dump_binary_case_table(@)
+{
+    my (@table) = @_;
+
+    my %difftables_hash = ();
+    my @difftables;
+    my %offtables2_hash = ();
+    my @offtables2 = ();
+    
+    my @offtable = ();
+    for (my $i = 0; $i < 256; $i++)
+    {
+        my @offtable2 = ();
+        for(my $j = 0; $j < 16; $j++) # offset table for xx00-xxFF characters
+        {
+            my @difftable;
+            for (my $k = 0; $k < 16; $k++) # case map table for xxx0-xxxF characters
+            {
+                my $char = ($i<<8) + ($j<<4) + $k;
+                $difftable[$k] = (defined $table[$char]) ? (($table[$char]-$char) & 0xffff) : 0;
+            }
+
+            my $diff_key = pack "S*", @difftable;
+            my $offset3 = $difftables_hash{$diff_key};
+            if (!defined $offset3)
+            {
+                $offset3 = scalar @difftables;
+                $difftables_hash{$diff_key} = $offset3;
+                push @difftables, @difftable;
+            }
+            $offtable2[$j] = $offset3;
+        }
+
+        my $offtable2_key = pack "S*", @offtable2;
+        my $offset2 = $offtables2_hash{$offtable2_key};
+        if (!defined $offset2)
+        {
+            $offset2 = scalar @offtables2;
+            $offtables2_hash{$offtable2_key} = $offset2;
+            push @offtables2, \@offtable2;
+        }
+        $offtable[$i] = $offset2;
+    }
+
+    my @output;
+    my $offset = 0x100; # offset of first subtable in words
+    foreach (@offtable)
+    {
+        push @output, 0x10 * $_ + $offset; # offset of subtable in words
+    }
+
+    $offset = 0x100 + 0x10 * scalar @offtables2; # offset of first difftable in words
+    foreach(@offtables2)
+    {
+        my $table = $_;
+        foreach(@$table)
+        {
+            push @output, $_ + $offset; # offset of difftable in words
+        }
+    }
+
+    my $len = 1 + scalar @output + scalar @difftables;
+    return pack "S<*", $len, @output, @difftables;
+}
+
+
+################################################################
+# dump case mappings for l_intl.nls
+sub dump_intl_nls($)
+{
+    my $filename = shift;
+    open OUTPUT,">$filename.new" or die "Cannot create $filename";
+    printf "Building $filename\n";
+
+    binmode OUTPUT;
+    print OUTPUT pack "S<", 1;  # version
+    print OUTPUT dump_binary_case_table( @toupper_table );
+    print OUTPUT dump_binary_case_table( @tolower_table );
+    close OUTPUT;
+    save_file($filename);
 }
 
 
@@ -1206,9 +1341,9 @@ sub handle_bestfit_file($$$)
     my ($lb_cur, $lb_end);
     my @lb_ranges = ();
 
-    open INPUT,$MAPPREFIX . $filename or die "Cannot open $filename";
+    my $INPUT = open_data_file "$MAPPINGS/$filename" or die "Cannot open $filename";
 
-    while (<INPUT>)
+    while (<$INPUT>)
     {
         next if /^;/;  # skip comments
         next if /^\s*$/;  # skip empty lines
@@ -1278,7 +1413,7 @@ sub handle_bestfit_file($$$)
         }
         die "$filename: Unrecognized line $_\n";
     }
-    close INPUT;
+    close $INPUT;
 
     my $output = sprintf "c_%03d.c", $codepage;
     open OUTPUT,">$output.new" or die "Cannot create $output";
@@ -1288,7 +1423,7 @@ sub handle_bestfit_file($$$)
     # dump all tables
 
     printf OUTPUT "/* code page %03d (%s) */\n", $codepage, $comment;
-    printf OUTPUT "/* generated from %s */\n", $MAPPREFIX . $filename;
+    printf OUTPUT "/* generated from $MAPPINGS/$filename */\n";
     printf OUTPUT "/* DO NOT EDIT!! */\n\n";
     printf OUTPUT "#include \"wine/unicode.h\"\n\n";
 
@@ -1310,14 +1445,14 @@ sub HANDLE_FILE(@)
     @uni2cp = ();
 
     # symbol codepage file is special
-    if ($codepage == 20932) { READ_JIS0208_FILE($MAPPREFIX . $filename); }
+    if ($codepage == 20932) { READ_JIS0208_FILE "$MAPPINGS/$filename"; }
     elsif ($codepage == 20127) { fill_20127_codepage(); }
     elsif ($filename =~ /\/bestfit/)
     {
         handle_bestfit_file( $filename, $has_glyphs, $comment );
         return;
     }
-    else { READ_FILE($MAPPREFIX . $filename); }
+    else { READ_FILE "$MAPPINGS/$filename"; }
 
     ADD_DEFAULT_MAPPINGS();
 
@@ -1331,8 +1466,8 @@ sub HANDLE_FILE(@)
     printf OUTPUT "/* code page %03d (%s) */\n", $codepage, $comment;
     if ($filename)
     {
-        printf OUTPUT "/* generated from %s */\n", $MAPPREFIX . $filename;
-        printf OUTPUT "/* DO NOT EDIT!! */\n\n";
+        print OUTPUT "/* generated from $MAPPINGS/$filename */\n";
+        print OUTPUT "/* DO NOT EDIT!! */\n\n";
     }
     else
     {
@@ -1419,6 +1554,8 @@ DUMP_CASE_MAPPINGS( "casemap.c" );
 DUMP_SORTKEYS( "collation.c", READ_SORTKEYS_FILE() );
 DUMP_COMPOSE_TABLES( "compose.c" );
 DUMP_CTYPE_TABLES( "wctype.c" );
+dump_mirroring( "../../dlls/usp10/mirror.c" );
+dump_intl_nls("../tools/l_intl.nls");
 
 foreach my $file (@allfiles) { HANDLE_FILE( @{$file} ); }
 

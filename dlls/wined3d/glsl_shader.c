@@ -89,7 +89,8 @@ struct shader_glsl_priv {
     struct constant_heap vconst_heap;
     struct constant_heap pconst_heap;
     unsigned char *stack;
-    GLhandleARB depth_blt_program[tex_type_count];
+    GLhandleARB depth_blt_program_full[tex_type_count];
+    GLhandleARB depth_blt_program_masked[tex_type_count];
     UINT next_constant_version;
 };
 
@@ -255,7 +256,7 @@ static void print_glsl_info_log(const struct wined3d_gl_info *gl_info, GLhandleA
 /* GL locking is done by the caller. */
 static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_info, GLhandleARB program)
 {
-    GLint i, object_count, source_size;
+    GLint i, object_count, source_size = -1;
     GLhandleARB *objects;
     char *source = NULL;
 
@@ -275,7 +276,7 @@ static void shader_glsl_dump_program_source(const struct wined3d_gl_info *gl_inf
 
         GL_EXTCALL(glGetObjectParameterivARB(objects[i], GL_OBJECT_SHADER_SOURCE_LENGTH_ARB, &tmp));
 
-        if (!source || source_size < tmp)
+        if (source_size < tmp)
         {
             HeapFree(GetProcessHeap(), 0, source);
 
@@ -807,7 +808,7 @@ static void shader_glsl_load_constants(const struct wined3d_context *context,
                 correction_params[1] = 1.0f;
             } else {
                 /* position is window relative, not viewport relative */
-                correction_params[0] = ((IWineD3DSurfaceImpl *)context->current_rt)->currentDesc.Height;
+                correction_params[0] = context->current_rt->currentDesc.Height;
                 correction_params[1] = -1.0f;
             }
             GL_EXTCALL(glUniform4fvARB(prog->ycorrection_location, 1, correction_params));
@@ -1034,7 +1035,7 @@ static void shader_generate_glsl_declarations(const struct wined3d_context *cont
                  */
                 FIXME("Cannot find a free uniform for vpos correction params\n");
                 shader_addline(buffer, "const vec4 ycorrection = vec4(%f, %f, 0.0, 0.0);\n",
-                        context->render_offscreen ? 0.0f : ((IWineD3DSurfaceImpl *)device->render_targets[0])->currentDesc.Height,
+                        context->render_offscreen ? 0.0f : device->render_targets[0]->currentDesc.Height,
                         context->render_offscreen ? 1.0f : -1.0f);
             }
             shader_addline(buffer, "vec4 vpos;\n");
@@ -4463,10 +4464,12 @@ static void set_glsl_shader_program(const struct wined3d_context *context,
 }
 
 /* GL locking is done by the caller */
-static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info, enum tex_types tex_type)
+static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info, enum tex_types tex_type, BOOL masked)
 {
     GLhandleARB program_id;
     GLhandleARB vshader_id, pshader_id;
+    const char *blt_pshader;
+
     static const char *blt_vshader[] =
     {
         "#version 120\n"
@@ -4478,7 +4481,7 @@ static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info,
         "}\n"
     };
 
-    static const char *blt_pshaders[tex_type_count] =
+    static const char *blt_pshaders_full[tex_type_count] =
     {
         /* tex_1d */
         NULL,
@@ -4508,7 +4511,44 @@ static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info,
         "}\n",
     };
 
-    if (!blt_pshaders[tex_type])
+    static const char *blt_pshaders_masked[tex_type_count] =
+    {
+        /* tex_1d */
+        NULL,
+        /* tex_2d */
+        "#version 120\n"
+        "uniform sampler2D sampler;\n"
+        "uniform vec4 mask;\n"
+        "void main(void)\n"
+        "{\n"
+        "    if (all(lessThan(gl_FragCoord.xy, mask.zw))) discard;\n"
+        "    gl_FragDepth = texture2D(sampler, gl_TexCoord[0].xy).x;\n"
+        "}\n",
+        /* tex_3d */
+        NULL,
+        /* tex_cube */
+        "#version 120\n"
+        "uniform samplerCube sampler;\n"
+        "uniform vec4 mask;\n"
+        "void main(void)\n"
+        "{\n"
+        "    if (all(lessThan(gl_FragCoord.xy, mask.zw))) discard;\n"
+        "    gl_FragDepth = textureCube(sampler, gl_TexCoord[0].xyz).x;\n"
+        "}\n",
+        /* tex_rect */
+        "#version 120\n"
+        "#extension GL_ARB_texture_rectangle : enable\n"
+        "uniform sampler2DRect sampler;\n"
+        "uniform vec4 mask;\n"
+        "void main(void)\n"
+        "{\n"
+        "    if (all(lessThan(gl_FragCoord.xy, mask.zw))) discard;\n"
+        "    gl_FragDepth = texture2DRect(sampler, gl_TexCoord[0].xy).x;\n"
+        "}\n",
+    };
+
+    blt_pshader = masked ? blt_pshaders_masked[tex_type] : blt_pshaders_full[tex_type];
+    if (!blt_pshader)
     {
         FIXME("tex_type %#x not supported\n", tex_type);
         tex_type = tex_2d;
@@ -4519,7 +4559,7 @@ static GLhandleARB create_glsl_blt_shader(const struct wined3d_gl_info *gl_info,
     GL_EXTCALL(glCompileShaderARB(vshader_id));
 
     pshader_id = GL_EXTCALL(glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB));
-    GL_EXTCALL(glShaderSourceARB(pshader_id, 1, &blt_pshaders[tex_type], NULL));
+    GL_EXTCALL(glShaderSourceARB(pshader_id, 1, &blt_pshader, NULL));
     GL_EXTCALL(glCompileShaderARB(pshader_id));
 
     program_id = GL_EXTCALL(glCreateProgramObjectARB());
@@ -4581,20 +4621,33 @@ static void shader_glsl_select(const struct wined3d_context *context, BOOL usePS
 }
 
 /* GL locking is done by the caller */
-static void shader_glsl_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type) {
+static void shader_glsl_select_depth_blt(IWineD3DDevice *iface,
+        enum tex_types tex_type, const SIZE *ds_mask_size)
+{
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     const struct wined3d_gl_info *gl_info = &This->adapter->gl_info;
+    BOOL masked = ds_mask_size->cx && ds_mask_size->cy;
     struct shader_glsl_priv *priv = This->shader_priv;
-    GLhandleARB *blt_program = &priv->depth_blt_program[tex_type];
+    GLhandleARB *blt_program;
+    GLint loc;
 
-    if (!*blt_program) {
-        GLint loc;
-        *blt_program = create_glsl_blt_shader(gl_info, tex_type);
+    blt_program = masked ? &priv->depth_blt_program_masked[tex_type] : &priv->depth_blt_program_full[tex_type];
+    if (!*blt_program)
+    {
+        *blt_program = create_glsl_blt_shader(gl_info, tex_type, masked);
         loc = GL_EXTCALL(glGetUniformLocationARB(*blt_program, "sampler"));
         GL_EXTCALL(glUseProgramObjectARB(*blt_program));
         GL_EXTCALL(glUniform1iARB(loc, 0));
-    } else {
+    }
+    else
+    {
         GL_EXTCALL(glUseProgramObjectARB(*blt_program));
+    }
+
+    if (masked)
+    {
+        loc = GL_EXTCALL(glGetUniformLocationARB(*blt_program, "mask"));
+        GL_EXTCALL(glUniform4fARB(loc, 0.0f, 0.0f, (float)ds_mask_size->cx, (float)ds_mask_size->cy));
     }
 }
 
@@ -4635,7 +4688,7 @@ static void shader_glsl_destroy(IWineD3DBaseShader *iface) {
             return;
         }
 
-        context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+        context = context_acquire(device, NULL);
         gl_info = context->gl_info;
 
         if (priv->glsl_program && (IWineD3DBaseShader *)priv->glsl_program->pshader == iface)
@@ -4654,7 +4707,7 @@ static void shader_glsl_destroy(IWineD3DBaseShader *iface) {
             return;
         }
 
-        context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+        context = context_acquire(device, NULL);
         gl_info = context->gl_info;
 
         if (priv->glsl_program && (IWineD3DBaseShader *)priv->glsl_program->vshader == iface)
@@ -4831,9 +4884,13 @@ static void shader_glsl_free(IWineD3DDevice *iface) {
     ENTER_GL();
     for (i = 0; i < tex_type_count; ++i)
     {
-        if (priv->depth_blt_program[i])
+        if (priv->depth_blt_program_full[i])
         {
-            GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_program[i]));
+            GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_program_full[i]));
+        }
+        if (priv->depth_blt_program_masked[i])
+        {
+            GL_EXTCALL(glDeleteObjectARB(priv->depth_blt_program_masked[i]));
         }
     }
     LEAVE_GL();

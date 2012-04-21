@@ -37,20 +37,44 @@ void asmshader_error(const char *s);
 int asmshader_lex(void);
 
 void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
-    reg->rel_reg = NULL;
+    /* We can have an additional offset without true relative addressing
+     * ex. c2[ 4 ] */
+    reg->regnum += rel->additional_offset;
+    if(!rel->has_rel_reg) {
+        reg->rel_reg = NULL;
+    } else {
+        reg->rel_reg = asm_alloc(sizeof(*reg->rel_reg));
+        if(!reg->rel_reg) {
+            return;
+        }
+        reg->rel_reg->type = rel->type;
+        reg->rel_reg->swizzle = rel->swizzle;
+        reg->rel_reg->regnum = rel->rel_regnum;
+    }
 }
 
 %}
 
 %union {
+    struct {
+        float           val;
+        BOOL            integer;
+    } immval;
     unsigned int        regnum;
     struct shader_reg   reg;
+    DWORD               srcmod;
+    DWORD               writemask;
+    struct {
+        DWORD           writemask;
+        DWORD           idx;
+        DWORD           last;
+    } wm_components;
+    DWORD               swizzle;
     struct {
         DWORD           swizzle;
-        DWORD           writemask;
-    } swizzle_wmask;
-    DWORD               writemask;
-    DWORD               swizzle;
+        DWORD           idx;
+    } sw_components;
+    DWORD               component;
     struct {
         DWORD           mod;
         DWORD           shift;
@@ -60,11 +84,66 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
 }
 
 /* Common instructions between vertex and pixel shaders */
+%token INSTR_ADD
+%token INSTR_NOP
 %token INSTR_MOV
+%token INSTR_SUB
+%token INSTR_MAD
+%token INSTR_MUL
+%token INSTR_RCP
+%token INSTR_RSQ
+%token INSTR_DP3
+%token INSTR_DP4
+%token INSTR_MIN
+%token INSTR_MAX
+%token INSTR_SLT
+%token INSTR_SGE
+%token INSTR_ABS
+%token INSTR_EXP
+%token INSTR_LOG
+%token INSTR_EXPP
+%token INSTR_LOGP
+%token INSTR_DST
+%token INSTR_LRP
+%token INSTR_FRC
+%token INSTR_POW
+%token INSTR_CRS
+%token INSTR_SGN
+%token INSTR_NRM
+%token INSTR_SINCOS
+%token INSTR_M4x4
+%token INSTR_M4x3
+%token INSTR_M3x4
+%token INSTR_M3x3
+%token INSTR_M3x2
+%token INSTR_TEXLDL
+
+/* Vertex shader only instructions  */
+%token INSTR_LIT
+%token INSTR_MOVA
 
 /* Registers */
 %token <regnum> REG_TEMP
+%token <regnum> REG_OUTPUT
+%token <regnum> REG_INPUT
 %token <regnum> REG_CONSTFLOAT
+%token <regnum> REG_CONSTINT
+%token <regnum> REG_CONSTBOOL
+%token <regnum> REG_TEXTURE
+%token <regnum> REG_SAMPLER
+%token <regnum> REG_TEXCRDOUT
+%token REG_OPOS
+%token REG_OFOG
+%token REG_OPTS
+%token <regnum> REG_VERTEXCOLOR
+%token <regnum> REG_FRAGCOLOR
+%token REG_FRAGDEPTH
+%token REG_VPOS
+%token REG_VFACE
+%token REG_ADDRESS
+%token REG_LOOP
+%token REG_PREDICATE
+%token <regnum> REG_LABEL
 
 /* Version tokens */
 %token VER_VS10
@@ -82,14 +161,32 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
 %token VER_PS2X
 %token VER_PS30
 
+/* Output modifiers */
+%token MOD_SAT
+%token MOD_PP
+%token MOD_CENTROID
+
+/* Source register modifiers */
+%token SMOD_ABS
+
+/* Misc stuff */
+%token <component> COMPONENT
+%token <immval> IMMVAL
 
 %type <reg> dreg_name
 %type <reg> dreg
 %type <reg> sreg_name
+%type <reg> relreg_name
 %type <reg> sreg
+%type <srcmod> smod
+%type <writemask> writemask
+%type <wm_components> wm_components
 %type <swizzle> swizzle
+%type <sw_components> sw_components
 %type <modshift> omods
+%type <modshift> omodifier
 %type <rel_reg> rel_reg
+%type <immval> immsum
 %type <sregs> sregs
 
 %%
@@ -188,10 +285,180 @@ complexinstr:         instruction
 
                             }
 
-instruction:          INSTR_MOV omods dreg ',' sregs
+instruction:          INSTR_ADD omods dreg ',' sregs
+                            {
+                                TRACE("ADD\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ADD, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_NOP
+                            {
+                                TRACE("NOP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_NOP, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_MOV omods dreg ',' sregs
                             {
                                 TRACE("MOV\n");
                                 asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MOV, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_SUB omods dreg ',' sregs
+                            {
+                                TRACE("SUB\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SUB, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_MAD omods dreg ',' sregs
+                            {
+                                TRACE("MAD\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MAD, $2.mod, $2.shift, 0, &$3, &$5, 3);
+                            }
+                    | INSTR_MUL omods dreg ',' sregs
+                            {
+                                TRACE("MUL\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MUL, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_RCP omods dreg ',' sregs
+                            {
+                                TRACE("RCP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_RCP, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_RSQ omods dreg ',' sregs
+                            {
+                                TRACE("RSQ\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_RSQ, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_DP3 omods dreg ',' sregs
+                            {
+                                TRACE("DP3\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DP3, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_DP4 omods dreg ',' sregs
+                            {
+                                TRACE("DP4\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DP4, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_MIN omods dreg ',' sregs
+                            {
+                                TRACE("MIN\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MIN, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_MAX omods dreg ',' sregs
+                            {
+                                TRACE("MAX\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MAX, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_SLT omods dreg ',' sregs
+                            {
+                                TRACE("SLT\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SLT, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_SGE omods dreg ',' sregs
+                            {
+                                TRACE("SGE\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SGE, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_ABS omods dreg ',' sregs
+                            {
+                                TRACE("ABS\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ABS, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_EXP omods dreg ',' sregs
+                            {
+                                TRACE("EXP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_EXP, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_LOG omods dreg ',' sregs
+                            {
+                                TRACE("LOG\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LOG, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_LOGP omods dreg ',' sregs
+                            {
+                                TRACE("LOGP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LOGP, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_EXPP omods dreg ',' sregs
+                            {
+                                TRACE("EXPP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_EXPP, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_DST omods dreg ',' sregs
+                            {
+                                TRACE("DST\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DST, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_LRP omods dreg ',' sregs
+                            {
+                                TRACE("LRP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LRP, $2.mod, $2.shift, 0, &$3, &$5, 3);
+                            }
+                    | INSTR_FRC omods dreg ',' sregs
+                            {
+                                TRACE("FRC\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_FRC, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_POW omods dreg ',' sregs
+                            {
+                                TRACE("POW\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_POW, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_CRS omods dreg ',' sregs
+                            {
+                                TRACE("CRS\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_CRS, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_SGN omods dreg ',' sregs
+                            {
+                                TRACE("SGN\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SGN, $2.mod, $2.shift, 0, &$3, &$5, 3);
+                            }
+                    | INSTR_NRM omods dreg ',' sregs
+                            {
+                                TRACE("NRM\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_NRM, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_SINCOS omods dreg ',' sregs
+                            {
+                                TRACE("SINCOS\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SINCOS, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_M4x4 omods dreg ',' sregs
+                            {
+                                TRACE("M4x4\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M4x4, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_M4x3 omods dreg ',' sregs
+                            {
+                                TRACE("M4x3\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M4x3, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_M3x4 omods dreg ',' sregs
+                            {
+                                TRACE("M3x4\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M3x4, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_M3x3 omods dreg ',' sregs
+                            {
+                                TRACE("M3x3\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M3x3, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_M3x2 omods dreg ',' sregs
+                            {
+                                TRACE("M3x2\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M3x2, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_TEXLDL omods dreg ',' sregs
+                            {
+                                TRACE("TEXLDL\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEXLDL, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_LIT omods dreg ',' sregs
+                            {
+                                TRACE("LIT\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LIT, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_MOVA omods dreg ',' sregs
+                            {
+                                TRACE("MOVA\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MOVA, $2.mod, $2.shift, 0, &$3, &$5, 1);
                             }
 
 dreg:                 dreg_name rel_reg
@@ -202,10 +469,147 @@ dreg:                 dreg_name rel_reg
                                 $$.srcmod = BWRITERSPSM_NONE;
                                 set_rel_reg(&$$, &$2);
                             }
+                    | dreg_name writemask
+                            {
+                                $$.regnum = $1.regnum;
+                                $$.type = $1.type;
+                                $$.writemask = $2;
+                                $$.srcmod = BWRITERSPSM_NONE;
+                                $$.rel_reg = NULL;
+                            }
 
 dreg_name:            REG_TEMP
                         {
                             $$.regnum = $1; $$.type = BWRITERSPR_TEMP;
+                        }
+                    | REG_OUTPUT
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_OUTPUT;
+                        }
+                    | REG_INPUT
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register v%u is not a valid destination register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_CONSTFLOAT
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register c%u is not a valid destination register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_CONSTINT
+                        {
+			  asmparser_message(&asm_ctx, "Line %u: Register i%u is not a valid destination register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_CONSTBOOL
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register b%u is not a valid destination register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_TEXTURE
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_TEXTURE;
+                        }
+                    | REG_TEXCRDOUT
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_TEXCRDOUT;
+                        }
+                    | REG_SAMPLER
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register s%u is not a valid destination register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_OPOS
+                        {
+                            $$.regnum = BWRITERSRO_POSITION; $$.type = BWRITERSPR_RASTOUT;
+                        }
+                    | REG_OPTS
+                        {
+                            $$.regnum = BWRITERSRO_POINT_SIZE; $$.type = BWRITERSPR_RASTOUT;
+                        }
+                    | REG_OFOG
+                        {
+                            $$.regnum = BWRITERSRO_FOG; $$.type = BWRITERSPR_RASTOUT;
+                        }
+                    | REG_VERTEXCOLOR
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_ATTROUT;
+                        }
+                    | REG_FRAGCOLOR
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_COLOROUT;
+                        }
+                    | REG_FRAGDEPTH
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_DEPTHOUT;
+                        }
+                    | REG_PREDICATE
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_PREDICATE;
+                        }
+                    | REG_VPOS
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register vPos is not a valid destination register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_VFACE
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register vFace is not a valid destination register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_ADDRESS
+                        {
+                            /* index 0 is hardcoded for the addr register */
+                            $$.regnum = 0; $$.type = BWRITERSPR_ADDR;
+                        }
+                    | REG_LOOP
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register aL is not a valid destination register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+
+writemask:            '.' wm_components
+                        {
+                            if($2.writemask == SWIZZLE_ERR) {
+                                asmparser_message(&asm_ctx, "Line %u: Invalid writemask specified\n",
+                                                  asm_ctx.line_no);
+                                set_parse_status(&asm_ctx, PARSE_ERR);
+                                /* Provide a correct writemask to prevent following complaints */
+                                $$ = BWRITERSP_WRITEMASK_ALL;
+                            }
+                            else {
+                                $$ = $2.writemask;
+                                TRACE("Writemask: %x\n", $$);
+                            }
+                        }
+
+wm_components:        COMPONENT
+                        {
+                            $$.writemask = 1 << $1;
+                            $$.last = $1;
+                            $$.idx = 1;
+                        }
+                    | wm_components COMPONENT
+                        {
+                            if($1.writemask == SWIZZLE_ERR || $1.idx == 4)
+                                /* Wrong writemask */
+                                $$.writemask = SWIZZLE_ERR;
+                            else {
+                                if($2 <= $1.last)
+                                    $$.writemask = SWIZZLE_ERR;
+                                else {
+                                    $$.writemask = $1.writemask | (1 << $2);
+                                    $$.idx = $1.idx + 1;
+                                }
+                            }
                         }
 
 swizzle:              /* empty */
@@ -213,10 +617,77 @@ swizzle:              /* empty */
                             $$ = BWRITERVS_NOSWIZZLE;
                             TRACE("Default swizzle: %08x\n", $$);
                         }
+                    | '.' sw_components
+                        {
+                            if($2.swizzle == SWIZZLE_ERR) {
+                                asmparser_message(&asm_ctx, "Line %u: Invalid swizzle\n",
+                                                  asm_ctx.line_no);
+                                set_parse_status(&asm_ctx, PARSE_ERR);
+                                /* Provide a correct swizzle to prevent following complaints */
+                                $$ = BWRITERVS_NOSWIZZLE;
+                            }
+                            else {
+                                DWORD last, i;
+
+                                $$ = $2.swizzle << BWRITERVS_SWIZZLE_SHIFT;
+                                /* Fill the swizzle by extending the last component */
+                                last = ($2.swizzle >> 2 * ($2.idx - 1)) & 0x03;
+                                for(i = $2.idx; i < 4; i++){
+                                    $$ |= last << (BWRITERVS_SWIZZLE_SHIFT + 2 * i);
+                                }
+                                TRACE("Got a swizzle: %08x\n", $$);
+                            }
+                        }
+
+sw_components:        COMPONENT
+                        {
+                            $$.swizzle = $1;
+                            $$.idx = 1;
+                        }
+                    | sw_components COMPONENT
+                        {
+                            if($1.idx == 4) {
+                                /* Too many sw_components */
+                                $$.swizzle = SWIZZLE_ERR;
+                                $$.idx = 4;
+                            }
+                            else {
+                                $$.swizzle = $1.swizzle | ($2 << 2 * $1.idx);
+                                $$.idx = $1.idx + 1;
+                            }
+                        }
 
 omods:                 /* Empty */
                         {
                             $$.mod = 0;
+                            $$.shift = 0;
+                        }
+                    | omods omodifier
+                        {
+                            $$.mod = $1.mod | $2.mod;
+                            if($1.shift && $2.shift) {
+                                asmparser_message(&asm_ctx, "Line %u: More than one shift flag\n",
+                                                  asm_ctx.line_no);
+                                set_parse_status(&asm_ctx, PARSE_ERR);
+                                $$.shift = $1.shift;
+                            } else {
+                                $$.shift = $1.shift | $2.shift;
+                            }
+                        }
+
+omodifier:            MOD_SAT
+                        {
+                            $$.mod = BWRITERSPDM_SATURATE;
+                            $$.shift = 0;
+                        }
+                    | MOD_PP
+                        {
+                            $$.mod = BWRITERSPDM_PARTIALPRECISION;
+                            $$.shift = 0;
+                        }
+                    | MOD_CENTROID
+                        {
+                            $$.mod = BWRITERSPDM_MSAMPCENTROID;
                             $$.shift = 0;
                         }
 
@@ -244,20 +715,204 @@ sreg:                   sreg_name rel_reg swizzle
                             $$.srcmod = BWRITERSPSM_NONE;
                             set_rel_reg(&$$, &$2);
                         }
+                    | sreg_name rel_reg smod swizzle
+                        {
+                            $$.type = $1.type;
+                            $$.regnum = $1.regnum;
+                            set_rel_reg(&$$, &$2);
+                            $$.srcmod = $3;
+                            $$.swizzle = $4;
+                        }
+                    | '-' sreg_name rel_reg swizzle
+                        {
+                            $$.type = $2.type;
+                            $$.regnum = $2.regnum;
+                            $$.srcmod = BWRITERSPSM_NEG;
+                            set_rel_reg(&$$, &$3);
+                            $$.swizzle = $4;
+                        }
+                    | '-' sreg_name rel_reg smod swizzle
+                        {
+                            $$.type = $2.type;
+                            $$.regnum = $2.regnum;
+                            set_rel_reg(&$$, &$3);
+                            switch($4) {
+                                case BWRITERSPSM_ABS:  $$.srcmod = BWRITERSPSM_ABSNEG;  break;
+                                default:
+                                    FIXME("Unhandled combination of NEGATE and %u\n", $4);
+                            }
+                            $$.swizzle = $5;
+                        }
 
 rel_reg:               /* empty */
                         {
                             $$.has_rel_reg = FALSE;
                             $$.additional_offset = 0;
                         }
+                    | '[' immsum ']'
+                        {
+                            $$.has_rel_reg = FALSE;
+                            $$.additional_offset = $2.val;
+                        }
+                    | '[' relreg_name swizzle ']'
+                        {
+                            $$.has_rel_reg = TRUE;
+                            $$.type = $2.type;
+                            $$.additional_offset = 0;
+                            $$.rel_regnum = $2.regnum;
+                            $$.swizzle = $3;
+                        }
+                    | '[' immsum '+' relreg_name swizzle ']'
+                        {
+                            $$.has_rel_reg = TRUE;
+                            $$.type = $4.type;
+                            $$.additional_offset = $2.val;
+                            $$.rel_regnum = $4.regnum;
+                            $$.swizzle = $5;
+                        }
+                    | '[' relreg_name swizzle '+' immsum ']'
+                        {
+                            $$.has_rel_reg = TRUE;
+                            $$.type = $2.type;
+                            $$.additional_offset = $5.val;
+                            $$.rel_regnum = $2.regnum;
+                            $$.swizzle = $3;
+                        }
+                    | '[' immsum '+' relreg_name swizzle '+' immsum ']'
+                        {
+                            $$.has_rel_reg = TRUE;
+                            $$.type = $4.type;
+                            $$.additional_offset = $2.val + $7.val;
+                            $$.rel_regnum = $4.regnum;
+                            $$.swizzle = $5;
+                        }
+
+immsum:               IMMVAL
+                        {
+                            if(!$1.integer) {
+                                asmparser_message(&asm_ctx, "Line %u: Unexpected float %f\n",
+                                                  asm_ctx.line_no, $1.val);
+                                set_parse_status(&asm_ctx, PARSE_ERR);
+                            }
+                            $$.val = $1.val;
+                        }
+                    | immsum '+' IMMVAL
+                        {
+                            if(!$3.integer) {
+                                asmparser_message(&asm_ctx, "Line %u: Unexpected float %f\n",
+                                                  asm_ctx.line_no, $3.val);
+                                set_parse_status(&asm_ctx, PARSE_ERR);
+                            }
+                            $$.val = $1.val + $3.val;
+                        }
+
+smod:                 SMOD_ABS
+                        {
+                            $$ = BWRITERSPSM_ABS;
+                        }
+
+relreg_name:          REG_ADDRESS
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_ADDR;
+                        }
+                    | REG_LOOP
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_LOOP;
+                        }
 
 sreg_name:            REG_TEMP
                         {
                             $$.regnum = $1; $$.type = BWRITERSPR_TEMP;
                         }
+                    | REG_OUTPUT
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register o%u is not a valid source register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_INPUT
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_INPUT;
+                        }
                     | REG_CONSTFLOAT
                         {
                             $$.regnum = $1; $$.type = BWRITERSPR_CONST;
+                        }
+                    | REG_CONSTINT
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_CONSTINT;
+                        }
+                    | REG_CONSTBOOL
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_CONSTBOOL;
+                        }
+                    | REG_TEXTURE
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_TEXTURE;
+                        }
+                    | REG_TEXCRDOUT
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oT%u is not a valid source register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_SAMPLER
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_SAMPLER;
+                        }
+                    | REG_OPOS
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oPos is not a valid source register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_OFOG
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oFog is not a valid source register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_VERTEXCOLOR
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oD%u is not a valid source register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_FRAGCOLOR
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oC%u is not a valid source register\n",
+                                              asm_ctx.line_no, $1);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_FRAGDEPTH
+                        {
+                            asmparser_message(&asm_ctx, "Line %u: Register oDepth is not a valid source register\n",
+                                              asm_ctx.line_no);
+                            set_parse_status(&asm_ctx, PARSE_WARN);
+                        }
+                    | REG_PREDICATE
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_PREDICATE;
+                        }
+                    | REG_VPOS
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_MISCTYPE;
+                        }
+                    | REG_VFACE
+                        {
+                            $$.regnum = 1; $$.type = BWRITERSPR_MISCTYPE;
+                        }
+                    | REG_ADDRESS
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_ADDR;
+                        }
+                    | REG_LOOP
+                        {
+                            $$.regnum = 0; $$.type = BWRITERSPR_LOOP;
+                        }
+                    | REG_LABEL
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_LABEL;
                         }
 
 %%

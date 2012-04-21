@@ -169,6 +169,15 @@ int* CDECL MSVCRT____mb_cur_max_func(void)
   return &get_locale()->locinfo->mb_cur_max;
 }
 
+/* ___mb_cur_max_l_func - not exported in native msvcrt */
+int* CDECL ___mb_cur_max_l_func(MSVCRT__locale_t locale)
+{
+  if(!locale)
+    locale = get_locale();
+
+  return &locale->locinfo->mb_cur_max;
+}
+
 /*********************************************************************
  *		_setmbcp (MSVCRT.@)
  */
@@ -1680,25 +1689,121 @@ int CDECL MSVCRT_mblen(const char* str, MSVCRT_size_t size)
 }
 
 /*********************************************************************
+ *		_mbstrlen_l(MSVCRT.@)
+ */
+MSVCRT_size_t CDECL _mbstrlen_l(const char* str, MSVCRT__locale_t locale)
+{
+    if(!locale)
+        locale = get_locale();
+
+    if(locale->locinfo->mb_cur_max > 1) {
+        MSVCRT_size_t len = 0;
+        while(*str) {
+            /* FIXME: According to the documentation we are supposed to test for
+             * multi-byte character validity. Whatever that means
+             */
+            str += MSVCRT_isleadbyte(*str) ? 2 : 1;
+            len++;
+        }
+        return len;
+    }
+
+    return strlen(str);
+}
+
+/*********************************************************************
  *		_mbstrlen(MSVCRT.@)
- * REMARKS
- *  Unlike most of the multibyte string functions this function uses
- *  the locale codepage, not the codepage set by _setmbcp
  */
 MSVCRT_size_t CDECL _mbstrlen(const char* str)
 {
-  if(get_locale()->locinfo->mb_cur_max > 1)
-  {
-    MSVCRT_size_t len = 0;
-    while(*str)
-    {
-      /* FIXME: According to the documentation we are supposed to test for
-       * multi-byte character validity. Whatever that means
-       */
-      str += MSVCRT_isleadbyte(*str) ? 2 : 1;
-      len++;
+    return _mbstrlen_l(str, NULL);
+}
+
+/*********************************************************************
+ *		_mbstowcs_l(MSVCRT.@)
+ */
+MSVCRT_size_t CDECL MSVCRT__mbstowcs_l(MSVCRT_wchar_t *wcstr, const char *mbstr,
+        MSVCRT_size_t count, MSVCRT__locale_t locale)
+{
+    MSVCRT_size_t tmp;
+
+    if(!locale)
+        locale = get_locale();
+
+    tmp = _mbstrlen_l(mbstr, locale);
+    if(tmp>count && wcstr)
+        tmp = count;
+
+    tmp = MultiByteToWideChar(locale->locinfo->lc_codepage, 0,
+            mbstr, tmp, wcstr, count);
+
+    if(tmp<count && wcstr)
+        wcstr[tmp] = '\0';
+
+    return tmp;
+}
+
+/*********************************************************************
+ *		mbstowcs(MSVCRT.@)
+ */
+MSVCRT_size_t CDECL MSVCRT_mbstowcs(MSVCRT_wchar_t *wcstr,
+        const char *mbstr, MSVCRT_size_t count)
+{
+    return MSVCRT__mbstowcs_l(wcstr, mbstr, count, NULL);
+}
+
+/*********************************************************************
+ *              _mbstowcs_s_l(MSVCRT.@)
+ */
+int CDECL MSVCRT__mbstowcs_s_l(MSVCRT_size_t *ret, MSVCRT_wchar_t *wcstr,
+        MSVCRT_size_t size, const char *mbstr,
+        MSVCRT_size_t count, MSVCRT__locale_t locale)
+{
+    MSVCRT_size_t conv;
+
+    if(!wcstr && !size) {
+        conv = MSVCRT__mbstowcs_l(NULL, mbstr, 0, locale);
+        if(ret)
+            *ret = conv;
+        return 0;
     }
-    return len;
-  }
-  return strlen(str); /* ASCII CP */
+
+    if(!mbstr || !wcstr) {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        if(wcstr && size)
+            wcstr[0] = '\0';
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    if(count==_TRUNCATE || size<count)
+        conv = size;
+    else
+        conv = count;
+
+    conv = MSVCRT__mbstowcs_l(wcstr, mbstr, conv, locale);
+    if(conv<size)
+        wcstr[conv++] = '\0';
+    else if(conv==size && (count==_TRUNCATE || wcstr[conv-1]=='\0'))
+        wcstr[conv-1] = '\0';
+    else {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        if(size)
+            wcstr[0] = '\0';
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+        return MSVCRT_ERANGE;
+    }
+
+    if(ret)
+        *ret = conv;
+    return 0;
+}
+
+/*********************************************************************
+ *              mbstowcs_s(MSVCRT.@)
+ */
+int CDECL MSVCRT__mbstowcs_s(MSVCRT_size_t *ret, MSVCRT_wchar_t *wcstr,
+        MSVCRT_size_t size, const char *mbstr, MSVCRT_size_t count)
+{
+    return MSVCRT__mbstowcs_s_l(ret, wcstr, size, mbstr, count, NULL);
 }

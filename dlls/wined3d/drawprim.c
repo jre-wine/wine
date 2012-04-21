@@ -572,7 +572,6 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
 {
 
     IWineD3DDeviceImpl           *This = (IWineD3DDeviceImpl *)iface;
-    IWineD3DSurfaceImpl          *target;
     struct wined3d_context *context;
     unsigned int i;
 
@@ -583,11 +582,11 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
         /* Invalidate the back buffer memory so LockRect will read it the next time */
         for (i = 0; i < This->adapter->gl_info.limits.buffers; ++i)
         {
-            target = (IWineD3DSurfaceImpl *)This->render_targets[i];
+            IWineD3DSurface *target = (IWineD3DSurface *)This->render_targets[i];
             if (target)
             {
-                IWineD3DSurface_LoadLocation((IWineD3DSurface *)target, SFLAG_INDRAWABLE, NULL);
-                IWineD3DSurface_ModifyLocation((IWineD3DSurface *)target, SFLAG_INDRAWABLE, TRUE);
+                IWineD3DSurface_LoadLocation(target, SFLAG_INDRAWABLE, NULL);
+                IWineD3DSurface_ModifyLocation(target, SFLAG_INDRAWABLE, TRUE);
             }
         }
     }
@@ -595,7 +594,7 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
     /* Signals other modules that a drawing is in progress and the stateblock finalized */
     This->isInDraw = TRUE;
 
-    context = context_acquire(This, This->render_targets[0], CTXUSAGE_DRAWPRIM);
+    context = context_acquire(This, This->render_targets[0]);
     if (!context->valid)
     {
         context_release(context);
@@ -603,7 +602,10 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
         return;
     }
 
-    if (This->stencilBufferTarget) {
+    context_apply_draw_state(context, This);
+
+    if (This->depth_stencil)
+    {
         /* Note that this depends on the context_acquire() call above to set
          * This->render_offscreen properly. We don't currently take the
          * Z-compare function into account, but we could skip loading the
@@ -612,9 +614,30 @@ void drawPrimitive(IWineD3DDevice *iface, UINT index_count, UINT StartIdx, UINT 
         DWORD location = context->render_offscreen ? SFLAG_DS_OFFSCREEN : SFLAG_DS_ONSCREEN;
         if (This->stateBlock->renderState[WINED3DRS_ZWRITEENABLE]
                 || This->stateBlock->renderState[WINED3DRS_ZENABLE])
-            surface_load_ds_location(This->stencilBufferTarget, context, location);
-        if (This->stateBlock->renderState[WINED3DRS_ZWRITEENABLE])
-            surface_modify_ds_location(This->stencilBufferTarget, location);
+        {
+            RECT current_rect, draw_rect, r;
+
+            if (location == SFLAG_DS_ONSCREEN && This->depth_stencil != This->onscreen_depth_stencil)
+                device_switch_onscreen_ds(This, context, This->depth_stencil);
+
+            if (This->depth_stencil->Flags & location)
+                SetRect(&current_rect, 0, 0,
+                        This->depth_stencil->ds_current_size.cx,
+                        This->depth_stencil->ds_current_size.cy);
+            else
+                SetRectEmpty(&current_rect);
+
+            device_get_draw_rect(This, &draw_rect);
+
+            IntersectRect(&r, &draw_rect, &current_rect);
+            if (!EqualRect(&r, &draw_rect))
+                surface_load_ds_location(This->depth_stencil, context, location);
+
+            if (This->stateBlock->renderState[WINED3DRS_ZWRITEENABLE])
+                surface_modify_ds_location(This->depth_stencil, location,
+                        This->depth_stencil->ds_current_size.cx,
+                        This->depth_stencil->ds_current_size.cy);
+        }
     }
 
     /* Ok, we will be updating the screen from here onwards so grab the lock */
@@ -791,7 +814,8 @@ HRESULT tesselate_rectpatch(IWineD3DDeviceImpl *This,
     /* Simply activate the context for blitting. This disables all the things we don't want and
      * takes care of dirtifying. Dirtifying is preferred over pushing / popping, since drawing the
      * patch (as opposed to normal draws) will most likely need different changes anyway. */
-    context = context_acquire(This, NULL, CTXUSAGE_BLIT);
+    context = context_acquire(This, NULL);
+    context_apply_blit_state(context, This);
 
     /* First, locate the position data. This is provided in a vertex buffer in the stateblock.
      * Beware of vbos

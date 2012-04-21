@@ -271,6 +271,12 @@ static HRESULT init_script_cache(const HDC hdc, SCRIPT_CACHE *psc)
     return S_OK;
 }
 
+static WCHAR mirror_char( WCHAR ch )
+{
+    extern const WCHAR wine_mirror_map[];
+    return ch + wine_mirror_map[wine_mirror_map[ch >> 8] + (ch & 0xff)];
+}
+
 /***********************************************************************
  *      DllMain
  *
@@ -517,8 +523,14 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
 #define Numeric_space 0x0020
 #define Arabic_start  0x0600
 #define Arabic_stop   0x06ff
+#define Hebrew_start  0x0590
+#define Hebrew_stop   0x05ff
+#define Syriac_start  0x0700
+#define Syriac_stop   0x074f
 #define Latin_start   0x0001
 #define Latin_stop    0x024f
+#define Script_Syriac  8
+#define Script_Hebrew  7
 #define Script_Arabic  6
 #define Script_Latin   1
 #define Script_Numeric 5
@@ -528,6 +540,7 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
     int   cnt = 0, index = 0;
     int   New_Script = SCRIPT_UNDEFINED;
     WORD  *levels = NULL;
+    WORD  baselevel = 0;
 
     TRACE("%s,%d,%d,%p,%p,%p,%p\n", debugstr_wn(pwcInChars, cInChars), cInChars, cMaxItems, 
           psControl, psState, pItems, pcItems);
@@ -543,6 +556,7 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
             return E_OUTOFMEMORY;
 
         BIDI_DetermineLevels(pwcInChars, cInChars, psState, psControl, levels);
+        baselevel = levels[0];
         for (i = 0; i < cInChars; i++)
             if (levels[i]!=levels[0])
                 break;
@@ -568,6 +582,12 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
     if  (pwcInChars[cnt] >= Arabic_start && pwcInChars[cnt] <= Arabic_stop)
         pItems[index].a.eScript = Script_Arabic;
     else
+    if  (pwcInChars[cnt] >= Hebrew_start && pwcInChars[cnt] <= Hebrew_stop)
+        pItems[index].a.eScript = Script_Hebrew;
+    else
+    if  (pwcInChars[cnt] >= Syriac_start && pwcInChars[cnt] <= Syriac_stop)
+        pItems[index].a.eScript = Script_Syriac;
+    else
     if  (pwcInChars[cnt] >= Latin_start && pwcInChars[cnt] <= Latin_stop)
         pItems[index].a.eScript = Script_Latin;
 
@@ -577,13 +597,20 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
         pItems[index].a.fLayoutRTL = odd(levels[cnt]);
         pItems[index].a.s.uBidiLevel = levels[cnt];
     }
-    else if (pItems[index].a.eScript  == Script_Arabic)
+    else if ((pItems[index].a.eScript  == Script_Arabic) ||
+             (pItems[index].a.eScript  == Script_Hebrew) ||
+             (pItems[index].a.eScript  == Script_Syriac))
     {
         pItems[index].a.s.uBidiLevel = 1;
         pItems[index].a.fRTL = 1;
         pItems[index].a.fLayoutRTL = 1;
     }
-
+    else
+    {
+        pItems[index].a.s.uBidiLevel = baselevel;
+        pItems[index].a.fLayoutRTL = odd(baselevel);
+        pItems[index].a.fRTL = odd(baselevel);
+    }
 
     TRACE("New_Level=%i New_Script=%d, eScript=%d index=%d cnt=%d iCharPos=%d\n",
           levels?levels[cnt]:-1, New_Script, pItems[index].a.eScript, index, cnt,
@@ -608,6 +635,14 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
              || (New_Script == Script_Arabic && pwcInChars[cnt] == Numeric_space))
             New_Script = Script_Arabic;
         else
+        if  ((pwcInChars[cnt] >= Hebrew_start && pwcInChars[cnt] <= Hebrew_stop)
+             || (New_Script == Script_Hebrew && pwcInChars[cnt] == Numeric_space))
+            New_Script = Script_Hebrew;
+        else
+        if  ((pwcInChars[cnt] >= Syriac_start && pwcInChars[cnt] <= Syriac_stop)
+             || (New_Script == Script_Syriac && pwcInChars[cnt] == Numeric_space))
+            New_Script = Script_Syriac;
+        else
         if  ((pwcInChars[cnt] >= Latin_start && pwcInChars[cnt] <= Latin_stop)
              || (New_Script == Script_Latin && pwcInChars[cnt] == Numeric_space))
             New_Script = Script_Latin;
@@ -630,12 +665,21 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
                 pItems[index].a.fLayoutRTL = odd(levels[cnt]);
                 pItems[index].a.s.uBidiLevel = levels[cnt];
             }
-            else if  (New_Script == Script_Arabic)
+            else if  ((New_Script == Script_Arabic) ||
+                      (New_Script == Script_Hebrew) ||
+                      (New_Script == Script_Syriac))
             {
                 pItems[index].a.s.uBidiLevel = 1;
                 pItems[index].a.fRTL = 1;
                 pItems[index].a.fLayoutRTL = 1;
             }
+            else
+            {
+                pItems[index].a.s.uBidiLevel = baselevel;
+                pItems[index].a.fLayoutRTL = odd(baselevel);
+                pItems[index].a.fRTL = odd(baselevel);
+            }
+
             pItems[index].a.eScript = New_Script;
 
             TRACE("index=%d cnt=%d iCharPos=%d\n", index, cnt, pItems[index].iCharPos);
@@ -645,16 +689,17 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
     /* While not strictly necessary according to the spec, make sure the n+1
      * item is set up to prevent random behaviour if the caller erroneously
      * checks the n+1 structure                                              */
-    memset(&pItems[index+1].a, 0, sizeof(SCRIPT_ANALYSIS));
+    index++;
+    memset(&pItems[index].a, 0, sizeof(SCRIPT_ANALYSIS));
 
-    TRACE("index=%d cnt=%d iCharPos=%d\n", index+1, cnt, pItems[index+1].iCharPos);
+    TRACE("index=%d cnt=%d iCharPos=%d\n", index, cnt, pItems[index].iCharPos);
 
     /*  Set one SCRIPT_STATE item being returned  */
-    if (pcItems) *pcItems = index + 1;
+    if  (index + 1 > cMaxItems) return E_OUTOFMEMORY;
+    if (pcItems) *pcItems = index;
 
     /*  Set SCRIPT_ITEM                                     */
-    pItems[index+1].iCharPos = cnt;       /* the last + 1 item
-                                             contains the ptr to the lastchar */
+    pItems[index].iCharPos = cnt;         /* the last item contains the ptr to the lastchar */
     heap_free(levels);
     return S_OK;
 }
@@ -1353,13 +1398,18 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
         for (i = 0; i < cChars; i++)
         {
             int idx = i;
+            WCHAR chInput;
             if (rtl) idx = cChars - 1 - i;
-            if (!(pwOutGlyphs[i] = get_cache_glyph(psc, pwcChars[idx])))
+            if (psa->fRTL)
+                chInput = mirror_char(pwcChars[idx]);
+            else
+                chInput = pwcChars[idx];
+            if (!(pwOutGlyphs[i] = get_cache_glyph(psc, chInput)))
             {
                 WORD glyph;
                 if (!hdc) return E_PENDING;
-                if (GetGlyphIndicesW(hdc, &pwcChars[idx], 1, &glyph, 0) == GDI_ERROR) return S_FALSE;
-                pwOutGlyphs[i] = set_cache_glyph(psc, pwcChars[idx], glyph);
+                if (GetGlyphIndicesW(hdc, &chInput, 1, &glyph, 0) == GDI_ERROR) return S_FALSE;
+                pwOutGlyphs[i] = set_cache_glyph(psc, chInput, glyph);
             }
         }
     }
@@ -1369,6 +1419,7 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
         for (i = 0; i < cChars; i++)
         {
             int idx = i;
+            /* No mirroring done here */
             if (rtl) idx = cChars - 1 - i;
             pwOutGlyphs[i] = pwcChars[idx];
         }
@@ -1489,25 +1540,45 @@ HRESULT WINAPI ScriptGetCMap(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcInChars
 
     if ((hr = init_script_cache(hdc, psc)) != S_OK) return hr;
 
+    hr = S_OK;
+
     if ((get_cache_pitch_family(psc) & TMPF_TRUETYPE))
     {
         for (i = 0; i < cChars; i++)
         {
-            if (!(pwOutGlyphs[i] = get_cache_glyph(psc, pwcInChars[i])))
+            WCHAR inChar;
+            if (dwFlags == SGCM_RTL)
+                inChar = mirror_char(pwcInChars[i]);
+            else
+                inChar = pwcInChars[i];
+            if (!(pwOutGlyphs[i] = get_cache_glyph(psc, inChar)))
             {
                 WORD glyph;
                 if (!hdc) return E_PENDING;
-                if (GetGlyphIndicesW(hdc, &pwcInChars[i], 1, &glyph, GGI_MARK_NONEXISTING_GLYPHS) == GDI_ERROR) return S_FALSE;
-                pwOutGlyphs[i] = set_cache_glyph(psc, pwcInChars[i], glyph);
+                if (GetGlyphIndicesW(hdc, &inChar, 1, &glyph, GGI_MARK_NONEXISTING_GLYPHS) == GDI_ERROR) return S_FALSE;
+                if (glyph == 0xffff)
+                {
+                    hr = S_FALSE;
+                    glyph = 0x0;
+                }
+                pwOutGlyphs[i] = set_cache_glyph(psc, inChar, glyph);
             }
         }
     }
     else
     {
         TRACE("no glyph translation\n");
-        for (i = 0; i < cChars; i++) pwOutGlyphs[i] = pwcInChars[i];
+        for (i = 0; i < cChars; i++)
+        {
+            WCHAR inChar;
+            if (dwFlags == SGCM_RTL)
+                inChar = mirror_char(pwcInChars[i]);
+            else
+                inChar = pwcInChars[i];
+            pwOutGlyphs[i] = inChar;
+        }
     }
-    return S_OK;
+    return hr;
 }
 
 /***********************************************************************
@@ -1532,8 +1603,25 @@ HRESULT WINAPI ScriptTextOut(const HDC hdc, SCRIPT_CACHE *psc, int x, int y, UIN
     if  (!psa->fNoGlyphIndex)                                     /* Have Glyphs?                      */
         fuOptions |= ETO_GLYPH_INDEX;                             /* Say don't do translation to glyph */
 
-    if (!ExtTextOutW(hdc, x, y, fuOptions, lprc, pwGlyphs, cGlyphs, NULL))
-        hr = S_FALSE;
+    if (psa->fRTL && psa->fLogicalOrder)
+    {
+        int i;
+        WORD *rtlGlyphs;
+
+        rtlGlyphs = heap_alloc(cGlyphs * sizeof(WORD));
+        if (!rtlGlyphs)
+            return E_OUTOFMEMORY;
+
+        for (i = 0; i < cGlyphs; i++)
+            rtlGlyphs[i] = pwGlyphs[cGlyphs-1-i];
+
+        if (!ExtTextOutW(hdc, x, y, fuOptions, lprc, rtlGlyphs, cGlyphs, NULL))
+            hr = S_FALSE;
+        heap_free(rtlGlyphs);
+    }
+    else
+        if (!ExtTextOutW(hdc, x, y, fuOptions, lprc, pwGlyphs, cGlyphs, NULL))
+            hr = S_FALSE;
 
     return hr;
 }

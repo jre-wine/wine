@@ -217,8 +217,33 @@ static void sm_3_srcreg(struct bc_writer *This,
     token |= reg->regnum & D3DSP_REGNUM_MASK;
 
     token |= d3d9_swizzle(reg->swizzle) & D3DVS_SWIZZLE_MASK;
+    token |= d3d9_srcmod(reg->srcmod);
+
+    if(reg->rel_reg) {
+        if(reg->type == BWRITERSPR_CONST && This->version == BWRITERPS_VERSION(3, 0)) {
+            WARN("c%u[...] is unsupported in ps_3_0\n", reg->regnum);
+            This->state = E_INVALIDARG;
+            return;
+        }
+        if(((reg->rel_reg->type == BWRITERSPR_ADDR && This->version == BWRITERVS_VERSION(3, 0)) ||
+           reg->rel_reg->type == BWRITERSPR_LOOP) &&
+           reg->rel_reg->regnum == 0) {
+            token |= D3DVS_ADDRMODE_RELATIVE & D3DVS_ADDRESSMODE_MASK;
+        } else {
+            WARN("Unsupported relative addressing register\n");
+            This->state = E_INVALIDARG;
+            return;
+        }
+    }
 
     put_dword(buffer, token);
+
+    /* vs_2_0 and newer write the register containing the index explicitly in the
+     * binary code
+     */
+    if(token & D3DVS_ADDRMODE_RELATIVE) {
+        sm_3_srcreg(This, reg->rel_reg, buffer);
+    }
 }
 
 static void sm_3_dstreg(struct bc_writer *This,
@@ -228,17 +253,73 @@ static void sm_3_dstreg(struct bc_writer *This,
     DWORD token = (1 << 31); /* Bit 31 of registers is 1 */
     DWORD d3d9reg;
 
+    if(reg->rel_reg) {
+        if(This->version == BWRITERVS_VERSION(3, 0) &&
+           reg->type == BWRITERSPR_OUTPUT) {
+            token |= D3DVS_ADDRMODE_RELATIVE & D3DVS_ADDRESSMODE_MASK;
+        } else {
+            WARN("Relative addressing not supported for this shader type or register type\n");
+            This->state = E_INVALIDARG;
+            return;
+        }
+    }
+
     d3d9reg = d3d9_register(reg->type);
     token |= (d3d9reg << D3DSP_REGTYPE_SHIFT) & D3DSP_REGTYPE_MASK;
     token |= (d3d9reg << D3DSP_REGTYPE_SHIFT2) & D3DSP_REGTYPE_MASK2;
     token |= reg->regnum & D3DSP_REGNUM_MASK; /* No shift */
 
+    token |= d3d9_dstmod(mod);
+
     token |= d3d9_writemask(reg->writemask);
     put_dword(buffer, token);
+
+    /* vs_2_0 and newer write the register containing the index explicitly in the
+     * binary code
+     */
+    if(token & D3DVS_ADDRMODE_RELATIVE) {
+        sm_3_srcreg(This, reg->rel_reg, buffer);
+    }
 }
 
 static const struct instr_handler_table vs_3_handlers[] = {
+    {BWRITERSIO_ADD,            instr_handler},
+    {BWRITERSIO_NOP,            instr_handler},
     {BWRITERSIO_MOV,            instr_handler},
+    {BWRITERSIO_SUB,            instr_handler},
+    {BWRITERSIO_MAD,            instr_handler},
+    {BWRITERSIO_MUL,            instr_handler},
+    {BWRITERSIO_RCP,            instr_handler},
+    {BWRITERSIO_RSQ,            instr_handler},
+    {BWRITERSIO_DP3,            instr_handler},
+    {BWRITERSIO_DP4,            instr_handler},
+    {BWRITERSIO_MIN,            instr_handler},
+    {BWRITERSIO_MAX,            instr_handler},
+    {BWRITERSIO_SLT,            instr_handler},
+    {BWRITERSIO_SGE,            instr_handler},
+    {BWRITERSIO_ABS,            instr_handler},
+    {BWRITERSIO_EXP,            instr_handler},
+    {BWRITERSIO_LOG,            instr_handler},
+    {BWRITERSIO_EXPP,           instr_handler},
+    {BWRITERSIO_LOGP,           instr_handler},
+    {BWRITERSIO_DST,            instr_handler},
+    {BWRITERSIO_LRP,            instr_handler},
+    {BWRITERSIO_FRC,            instr_handler},
+    {BWRITERSIO_CRS,            instr_handler},
+    {BWRITERSIO_SGN,            instr_handler},
+    {BWRITERSIO_NRM,            instr_handler},
+    {BWRITERSIO_SINCOS,         instr_handler},
+    {BWRITERSIO_M4x4,           instr_handler},
+    {BWRITERSIO_M4x3,           instr_handler},
+    {BWRITERSIO_M3x4,           instr_handler},
+    {BWRITERSIO_M3x3,           instr_handler},
+    {BWRITERSIO_M3x2,           instr_handler},
+    {BWRITERSIO_LIT,            instr_handler},
+    {BWRITERSIO_POW,            instr_handler},
+    {BWRITERSIO_MOVA,           instr_handler},
+
+    {BWRITERSIO_TEXLDL,         instr_handler},
+
     {BWRITERSIO_END,            NULL},
 };
 

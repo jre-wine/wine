@@ -346,33 +346,28 @@ typedef struct
 #define FCIDM_TOOLBAR      (FCIDM_BROWSERFIRST + 0)
 #define FCIDM_STATUS       (FCIDM_BROWSERFIRST + 1)
 
-
-/****************************************************************************
- * IShellIcon interface
- */
-
-#define INTERFACE IShellIcon
-DECLARE_INTERFACE_(IShellIcon,IUnknown)
+#define INTERFACE IShellDetails
+DECLARE_INTERFACE_(IShellDetails, IUnknown)
 {
     /*** IUnknown methods ***/
-    STDMETHOD_(HRESULT,QueryInterface)(THIS_ REFIID riid, void** ppvObject) PURE;
-    STDMETHOD_(ULONG,AddRef)(THIS) PURE;
-    STDMETHOD_(ULONG,Release)(THIS) PURE;
-    /*** IShellIcon methods ***/
-    STDMETHOD(GetIconOf)(THIS_ LPCITEMIDLIST pidl, UINT flags, LPINT lpIconIndex) PURE;
+    STDMETHOD_(HRESULT,QueryInterface) (THIS_ REFIID riid, void **ppv) PURE;
+    STDMETHOD_(ULONG,AddRef) (THIS)  PURE;
+    STDMETHOD_(ULONG,Release) (THIS) PURE;
+    /*** IShellDetails methods ***/
+    STDMETHOD(GetDetailsOf)(THIS_ PCUITEMID_CHILD pidl, UINT iColumn, SHELLDETAILS *pDetails) PURE;
+    STDMETHOD(ColumnClick)(THIS_ UINT iColumn) PURE;
 };
 #undef INTERFACE
 
 #if !defined(__cplusplus) || defined(CINTERFACE)
 /*** IUnknown methods ***/
-#define IShellIcon_QueryInterface(p,a,b)      (p)->lpVtbl->QueryInterface(p,a,b)
-#define IShellIcon_AddRef(p)                  (p)->lpVtbl->AddRef(p)
-#define IShellIcon_Release(p)                 (p)->lpVtbl->Release(p)
-/*** IShellIcon methods ***/
-#define IShellIcon_GetIconOf(p,a,b,c)         (p)->lpVtbl->GetIconOf(p,a,b,c)
+#define IShellDetails_QueryInterface(p,a,b)    (p)->lpVtbl->QueryInterface(p,a,b)
+#define IShellDetails_AddRef(p)                (p)->lpVtbl->AddRef(p)
+#define IShellDetails_Release(p)               (p)->lpVtbl->Release(p)
+/*** IShellDetails methods ***/
+#define IShellDetails_GetDetailsOf(p,a,b,c)    (p)->lpVtbl->GetDetailsOf(p,a,b,c)
+#define IShellDetails_ColumnClick(p,a)         (p)->lpVtbl->ColumnClick(p,a)
 #endif
-
-typedef IShellIcon *LPSHELLICON;
 
 /* IQueryInfo interface */
 #define INTERFACE IQueryInfo

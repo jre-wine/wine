@@ -79,10 +79,12 @@ sub svg_element_start
         # Extract SVG vector images
         my $x = $attr{'x'};
         my $y = $attr{'y'};
+        my $width = $attr{'width'};
+        my $height = $attr{'height'};
 
         if(defined($x) and defined($x)) {
             if($x =~ /\d*/ and $y =~ /\d*/) {
-                shell $convert, $renderedSVGFileName, "-crop", "${size}x${size}+$x+$y", $pngFileName;
+                shell $convert, $renderedSVGFileName, "-crop", "${width}x${height}+$x+$y", $pngFileName;
             }
         }
 
@@ -106,33 +108,16 @@ sub svg_element_start
     push(@pngFiles, $pngFileName);
 }
 
-sub resize_image
-{
-    # Use ImageMagick to stretch the image
-    my($size) = @_;
-    my $pngFileName = "$icoName-$size.png";
-    shell $convert, $renderedSVGFileName, "-resize", "${size}x${size}", $pngFileName;
-    push(@pngFiles, $pngFileName);
-}
-
-sub fallback_render
-{
-    resize_image(16);
-    resize_image(32);
-    resize_image(48);
-}
-
 # Render the SVG image
-shell 'rsvg', $svgFileName, $renderedSVGFileName;
+shell $rsvg, $svgFileName, $renderedSVGFileName;
 
 # Render the images in the SVG
 my $parser = new XML::Parser(
     Handlers => {Start => \&svg_element_start});
 $parser->parsefile("$svgFileName");
 
-# If no render directives were found, this is an old-style icon
-# which should be rendered with the old build rule
-fallback_render unless(@pngFiles);
+# Die if no render directives were found
+die "No render directives found in icon" unless(@pngFiles);
 
 # Combine them into an ICO file
 shell $icotool, "-c", "-o", $icoFileName, @pngFiles;

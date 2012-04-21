@@ -192,7 +192,9 @@ then
     enable_fonts=${enable_fonts:-no}
     enable_server=${enable_server:-no}
     enable_tools=${enable_tools:-no}
-    test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32"
+elif test "x$enable_win64" = "xyes"
+then
+    test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib64"
 fi
 
 AC_CACHE_CHECK([for the directory containing the Wine tools], wine_cv_toolsdir,
@@ -1131,7 +1133,7 @@ then
     fi
     CPPFLAGS="$ac_save_CPPFLAGS"
 fi
-WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x"],
+WINE_NOTICE_WITH(hal,[test "x$ac_cv_lib_soname_hal" = "x" -a "x$ac_cv_header_DiskArbitration_DiskArbitration_h" != "xyes"],
                  [libhal/libdbus ${notice_platform}development files not found, no dynamic device support.])
 
 dnl **** Check for libgnutls ****
@@ -2168,6 +2170,7 @@ WINE_CONFIG_SYMLINK(fonts/marlett.ttf,,enable_fonts)
 WINE_CONFIG_SYMLINK(fonts/symbol.ttf,,enable_fonts)
 WINE_CONFIG_SYMLINK(fonts/tahoma.ttf,,enable_fonts)
 WINE_CONFIG_SYMLINK(fonts/tahomabd.ttf,,enable_fonts)
+WINE_CONFIG_SYMLINK(tools/l_intl.nls)
 WINE_CONFIG_SYMLINK(wine,tools/winewrapper)
 
 WINE_CONFIG_EXTRA_DIR(dlls/gdi32/enhmfdrv)
@@ -2426,6 +2429,7 @@ WINE_CONFIG_DLL(mssip32)
 WINE_CONFIG_DLL(mstask)
 WINE_CONFIG_TEST(dlls/mstask/tests)
 WINE_CONFIG_DLL(msvcirt)
+WINE_CONFIG_DLL(msvcr100)
 WINE_CONFIG_DLL(msvcr70,,[msvcr70])
 WINE_CONFIG_DLL(msvcr71,,[msvcr71])
 WINE_CONFIG_DLL(msvcr80)
@@ -2693,6 +2697,7 @@ WINE_CONFIG_PROGRAM(regedit,installbin)
 WINE_CONFIG_PROGRAM(regsvr32,installbin)
 WINE_CONFIG_PROGRAM(rpcss,install)
 WINE_CONFIG_PROGRAM(rundll32,install)
+WINE_CONFIG_PROGRAM(sc,install)
 WINE_CONFIG_PROGRAM(secedit,install)
 WINE_CONFIG_PROGRAM(services,install)
 WINE_CONFIG_PROGRAM(spoolsv,install)

@@ -110,7 +110,21 @@ static LONG OLE_moduleLockCount = 0;
 /*
  * Name of our registered window class.
  */
-static const char OLEDD_DRAGTRACKERCLASS[] = "WineDragDropTracker32";
+static const WCHAR OLEDD_DRAGTRACKERCLASS[] =
+  {'W','i','n','e','D','r','a','g','D','r','o','p','T','r','a','c','k','e','r','3','2',0};
+
+/*
+ * Name of menu descriptor property.
+ */
+static const WCHAR prop_olemenuW[] =
+  {'P','R','O','P','_','O','L','E','M','e','n','u','D','e','s','c','r','i','p','t','o','r',0};
+
+static const WCHAR clsidfmtW[] =
+  {'C','L','S','I','D','\\','{','%','0','8','x','-','%','0','4','x','-','%','0','4','x','-',
+   '%','0','2','x','%','0','2','x','-','%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x',
+    '%','0','2','x','%','0','2','x','}','\\',0};
+
+static const WCHAR emptyW[] = { 0 };
 
 /*
  * This is the head of the Drop target container.
@@ -371,13 +385,12 @@ HRESULT WINAPI OleRegGetUserType(
 	DWORD dwFormOfType,
 	LPOLESTR* pszUserType)
 {
-  char    keyName[60];
+  WCHAR   keyName[60];
   DWORD   dwKeyType;
   DWORD   cbData;
   HKEY    clsidKey;
   LONG    hres;
-  LPSTR   buffer;
-  HRESULT retVal;
+
   /*
    * Initialize the out parameter.
    */
@@ -386,17 +399,17 @@ HRESULT WINAPI OleRegGetUserType(
   /*
    * Build the key name we're looking for
    */
-  sprintf( keyName, "CLSID\\{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\\",
-           clsid->Data1, clsid->Data2, clsid->Data3,
-           clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
-           clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
+  sprintfW( keyName, clsidfmtW,
+            clsid->Data1, clsid->Data2, clsid->Data3,
+            clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
+            clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
 
-  TRACE("(%s, %d, %p)\n", keyName, dwFormOfType, pszUserType);
+  TRACE("(%s, %d, %p)\n", debugstr_w(keyName), dwFormOfType, pszUserType);
 
   /*
    * Open the class id Key
    */
-  hres = RegOpenKeyA(HKEY_CLASSES_ROOT,
+  hres = RegOpenKeyW(HKEY_CLASSES_ROOT,
 		     keyName,
 		     &clsidKey);
 
@@ -408,8 +421,8 @@ HRESULT WINAPI OleRegGetUserType(
    */
   cbData = 0;
 
-  hres = RegQueryValueExA(clsidKey,
-			  "",
+  hres = RegQueryValueExW(clsidKey,
+			  emptyW,
 			  NULL,
 			  &dwKeyType,
 			  NULL,
@@ -424,7 +437,7 @@ HRESULT WINAPI OleRegGetUserType(
   /*
    * Allocate a buffer for the registry value.
    */
-  *pszUserType = CoTaskMemAlloc(cbData*2);
+  *pszUserType = CoTaskMemAlloc(cbData);
 
   if (*pszUserType==NULL)
   {
@@ -432,41 +445,24 @@ HRESULT WINAPI OleRegGetUserType(
     return E_OUTOFMEMORY;
   }
 
-  buffer = HeapAlloc(GetProcessHeap(), 0, cbData);
-
-  if (buffer == NULL)
-  {
-    RegCloseKey(clsidKey);
-    CoTaskMemFree(*pszUserType);
-    *pszUserType=NULL;
-    return E_OUTOFMEMORY;
-  }
-
-  hres = RegQueryValueExA(clsidKey,
-			  "",
+  hres = RegQueryValueExW(clsidKey,
+			  emptyW,
 			  NULL,
 			  &dwKeyType,
-			  (LPBYTE) buffer,
+			  (LPBYTE) *pszUserType,
 			  &cbData);
 
   RegCloseKey(clsidKey);
 
-
-  if (hres!=ERROR_SUCCESS)
+  if (hres != ERROR_SUCCESS)
   {
     CoTaskMemFree(*pszUserType);
-    *pszUserType=NULL;
+    *pszUserType = NULL;
 
-    retVal = REGDB_E_READREGDB;
+    return REGDB_E_READREGDB;
   }
-  else
-  {
-    MultiByteToWideChar( CP_ACP, 0, buffer, -1, *pszUserType, cbData /*FIXME*/ );
-    retVal = S_OK;
-  }
-  HeapFree(GetProcessHeap(), 0, buffer);
 
-  return retVal;
+  return S_OK;
 }
 
 /***********************************************************************
@@ -478,17 +474,19 @@ HRESULT WINAPI DoDragDrop (
   DWORD       dwOKEffect,    /* [in] effects allowed by the source */
   DWORD       *pdwEffect)    /* [out] ptr to effects of the source */
 {
+  static const WCHAR trackerW[] = {'T','r','a','c','k','e','r','W','i','n','d','o','w',0};
   TrackerWindowInfo trackerInfo;
   HWND            hwndTrackWindow;
   MSG             msg;
 
-  TRACE("(DataObject %p, DropSource %p)\n", pDataObject, pDropSource);
+  TRACE("(%p, %p, %d, %p)\n", pDataObject, pDropSource, dwOKEffect, pdwEffect);
+
+  if (!pDataObject || !pDropSource || !pdwEffect)
+      return E_INVALIDARG;
 
   /*
    * Setup the drag n drop tracking window.
    */
-  if (!IsValidInterface((LPUNKNOWN)pDropSource))
-      return E_INVALIDARG;
 
   trackerInfo.dataObject        = pDataObject;
   trackerInfo.dropSource        = pDropSource;
@@ -500,12 +498,12 @@ HRESULT WINAPI DoDragDrop (
   trackerInfo.curTargetHWND     = 0;
   trackerInfo.curDragTarget     = 0;
 
-  hwndTrackWindow = CreateWindowA(OLEDD_DRAGTRACKERCLASS, "TrackerWindow",
+  hwndTrackWindow = CreateWindowW(OLEDD_DRAGTRACKERCLASS, trackerW,
                                   WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
                                   CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, 0,
                                   &trackerInfo);
 
-  if (hwndTrackWindow!=0)
+  if (hwndTrackWindow)
   {
     /*
      * Capture the mouse input
@@ -517,7 +515,7 @@ HRESULT WINAPI DoDragDrop (
     /*
      * Pump messages. All mouse input should go to the capture window.
      */
-    while (!trackerInfo.trackingDone && GetMessageA(&msg, 0, 0, 0) )
+    while (!trackerInfo.trackingDone && GetMessageW(&msg, 0, 0, 0) )
     {
       trackerInfo.curMousePos.x = msg.pt.x;
       trackerInfo.curMousePos.y = msg.pt.y;
@@ -548,7 +546,7 @@ HRESULT WINAPI DoDragDrop (
 	/*
 	 * Dispatch the messages only when it's not a keyboard message.
 	 */
-	DispatchMessageA(&msg);
+	DispatchMessageW(&msg);
       }
     }
 
@@ -584,7 +582,9 @@ HRESULT WINAPI OleRegGetMiscStatus(
   DWORD    dwAspect,
   DWORD*   pdwStatus)
 {
-  char    keyName[60];
+  static const WCHAR miscstatusW[] = {'M','i','s','c','S','t','a','t','u','s',0};
+  static const WCHAR dfmtW[] = {'%','d',0};
+  WCHAR   keyName[60];
   HKEY    clsidKey;
   HKEY    miscStatusKey;
   HKEY    aspectKey;
@@ -598,17 +598,17 @@ HRESULT WINAPI OleRegGetMiscStatus(
   /*
    * Build the key name we're looking for
    */
-  sprintf( keyName, "CLSID\\{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}\\",
-           clsid->Data1, clsid->Data2, clsid->Data3,
-           clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
-           clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
+  sprintfW( keyName, clsidfmtW,
+            clsid->Data1, clsid->Data2, clsid->Data3,
+            clsid->Data4[0], clsid->Data4[1], clsid->Data4[2], clsid->Data4[3],
+            clsid->Data4[4], clsid->Data4[5], clsid->Data4[6], clsid->Data4[7] );
 
-  TRACE("(%s, %d, %p)\n", keyName, dwAspect, pdwStatus);
+  TRACE("(%s, %d, %p)\n", debugstr_w(keyName), dwAspect, pdwStatus);
 
   /*
    * Open the class id Key
    */
-  result = RegOpenKeyA(HKEY_CLASSES_ROOT,
+  result = RegOpenKeyW(HKEY_CLASSES_ROOT,
 		       keyName,
 		       &clsidKey);
 
@@ -618,8 +618,8 @@ HRESULT WINAPI OleRegGetMiscStatus(
   /*
    * Get the MiscStatus
    */
-  result = RegOpenKeyA(clsidKey,
-		       "MiscStatus",
+  result = RegOpenKeyW(clsidKey,
+		       miscstatusW,
 		       &miscStatusKey);
 
 
@@ -637,9 +637,9 @@ HRESULT WINAPI OleRegGetMiscStatus(
   /*
    * Open the key specific to the requested aspect.
    */
-  sprintf(keyName, "%d", dwAspect);
+  sprintfW(keyName, dfmtW, dwAspect);
 
-  result = RegOpenKeyA(miscStatusKey,
+  result = RegOpenKeyW(miscStatusKey,
 		       keyName,
 		       &aspectKey);
 
@@ -1180,7 +1180,7 @@ static void OLEMenu_UnInitialize(void)
  */
 static BOOL OLEMenu_InstallHooks( DWORD tid )
 {
-  OleMenuHookItem *pHookItem = NULL;
+  OleMenuHookItem *pHookItem;
 
   /* Create an entry for the hook table */
   if ( !(pHookItem = HeapAlloc(GetProcessHeap(), 0,
@@ -1189,15 +1189,16 @@ static BOOL OLEMenu_InstallHooks( DWORD tid )
 
   pHookItem->tid = tid;
   pHookItem->hHeap = GetProcessHeap();
+  pHookItem->CallWndProc_hHook = NULL;
 
   /* Install a thread scope message hook for WH_GETMESSAGE */
-  pHookItem->GetMsg_hHook = SetWindowsHookExA( WH_GETMESSAGE, OLEMenu_GetMsgProc,
+  pHookItem->GetMsg_hHook = SetWindowsHookExW( WH_GETMESSAGE, OLEMenu_GetMsgProc,
                                                0, GetCurrentThreadId() );
   if ( !pHookItem->GetMsg_hHook )
     goto CLEANUP;
 
   /* Install a thread scope message hook for WH_CALLWNDPROC */
-  pHookItem->CallWndProc_hHook = SetWindowsHookExA( WH_CALLWNDPROC, OLEMenu_CallWndProc,
+  pHookItem->CallWndProc_hHook = SetWindowsHookExW( WH_CALLWNDPROC, OLEMenu_CallWndProc,
                                                     0, GetCurrentThreadId() );
   if ( !pHookItem->CallWndProc_hHook )
     goto CLEANUP;
@@ -1271,7 +1272,7 @@ CLEANUP:
  */
 static OleMenuHookItem * OLEMenu_IsHookInstalled( DWORD tid )
 {
-  OleMenuHookItem *pHookItem = NULL;
+  OleMenuHookItem *pHookItem;
 
   /* Do a simple linear search for an entry whose tid matches ours.
    * We really need a map but efficiency is not a concern here. */
@@ -1376,7 +1377,7 @@ static BOOL OLEMenu_SetIsServerMenu( HMENU hmenu, OleMenuDescriptor *pOleMenuDes
  */
 static LRESULT CALLBACK OLEMenu_CallWndProc(INT code, WPARAM wParam, LPARAM lParam)
 {
-  LPCWPSTRUCT pMsg = NULL;
+  LPCWPSTRUCT pMsg;
   HOLEMENU hOleMenu = 0;
   OleMenuDescriptor *pOleMenuDescriptor = NULL;
   OleMenuHookItem *pHookItem = NULL;
@@ -1395,7 +1396,7 @@ static LRESULT CALLBACK OLEMenu_CallWndProc(INT code, WPARAM wParam, LPARAM lPar
    * If the window has an OLEMenu property we may need to dispatch
    * the menu message to its active objects window instead. */
 
-  hOleMenu = GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
+  hOleMenu = GetPropW( pMsg->hwnd, prop_olemenuW );
   if ( !hOleMenu )
     goto NEXTHOOK;
 
@@ -1413,7 +1414,7 @@ static LRESULT CALLBACK OLEMenu_CallWndProc(INT code, WPARAM wParam, LPARAM lPar
       pOleMenuDescriptor->bIsServerItem = FALSE;
 
       /* Send this message to the server as well */
-      SendMessageA( pOleMenuDescriptor->hwndActiveObject,
+      SendMessageW( pOleMenuDescriptor->hwndActiveObject,
                   pMsg->message, pMsg->wParam, pMsg->lParam );
       goto NEXTHOOK;
     }
@@ -1454,7 +1455,7 @@ static LRESULT CALLBACK OLEMenu_CallWndProc(INT code, WPARAM wParam, LPARAM lPar
   /* If the message was for the server dispatch it accordingly */
   if ( pOleMenuDescriptor->bIsServerItem )
   {
-    SendMessageA( pOleMenuDescriptor->hwndActiveObject,
+    SendMessageW( pOleMenuDescriptor->hwndActiveObject,
                   pMsg->message, pMsg->wParam, pMsg->lParam );
   }
 
@@ -1481,7 +1482,7 @@ NEXTHOOK:
  */
 static LRESULT CALLBACK OLEMenu_GetMsgProc(INT code, WPARAM wParam, LPARAM lParam)
 {
-  LPMSG pMsg = NULL;
+  LPMSG pMsg;
   HOLEMENU hOleMenu = 0;
   OleMenuDescriptor *pOleMenuDescriptor = NULL;
   OleMenuHookItem *pHookItem = NULL;
@@ -1500,7 +1501,7 @@ static LRESULT CALLBACK OLEMenu_GetMsgProc(INT code, WPARAM wParam, LPARAM lPara
    * If the window has an OLEMenu property we may need to dispatch
    * the menu message to its active objects window instead. */
 
-  hOleMenu = GetPropA( pMsg->hwnd, "PROP_OLEMenuDescriptor" );
+  hOleMenu = GetPropW( pMsg->hwnd, prop_olemenuW );
   if ( !hOleMenu )
     goto NEXTHOOK;
 
@@ -1671,7 +1672,7 @@ HRESULT WINAPI OleSetMenuDescriptor(
     pOleMenuDescriptor = NULL;
 
     /* Add a menu descriptor windows property to the frame window */
-    SetPropA( hwndFrame, "PROP_OLEMenuDescriptor", hOleMenu );
+    SetPropW( hwndFrame, prop_olemenuW, hOleMenu );
 
     /* Install thread scope message hooks for WH_GETMESSAGE and WH_CALLWNDPROC */
     if ( !OLEMenu_InstallHooks( GetCurrentThreadId() ) )
@@ -1684,7 +1685,7 @@ HRESULT WINAPI OleSetMenuDescriptor(
       return E_FAIL;
 
     /* Remove the menu descriptor property from the frame window */
-    RemovePropA( hwndFrame, "PROP_OLEMenuDescriptor" );
+    RemovePropW( hwndFrame, prop_olemenuW );
   }
 
   return S_OK;
@@ -1870,9 +1871,9 @@ void WINAPI ReleaseStgMedium(
  */
 static void OLEDD_Initialize(void)
 {
-    WNDCLASSA wndClass;
+    WNDCLASSW wndClass;
 
-    ZeroMemory (&wndClass, sizeof(WNDCLASSA));
+    ZeroMemory (&wndClass, sizeof(WNDCLASSW));
     wndClass.style         = CS_GLOBALCLASS;
     wndClass.lpfnWndProc   = OLEDD_DragTrackerWindowProc;
     wndClass.cbClsExtra    = 0;
@@ -1881,7 +1882,7 @@ static void OLEDD_Initialize(void)
     wndClass.hbrBackground = 0;
     wndClass.lpszClassName = OLEDD_DRAGTRACKERCLASS;
 
-    RegisterClassA (&wndClass);
+    RegisterClassW (&wndClass);
 }
 
 /***
@@ -1958,7 +1959,7 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
     {
       LPCREATESTRUCTA createStruct = (LPCREATESTRUCTA)lParam;
 
-      SetWindowLongPtrA(hwnd, 0, (LONG_PTR)createStruct->lpCreateParams);
+      SetWindowLongPtrW(hwnd, 0, (LONG_PTR)createStruct->lpCreateParams);
       SetTimer(hwnd, DRAG_TIMER_ID, 50, NULL);
 
       break;
@@ -1989,7 +1990,7 @@ static LRESULT WINAPI OLEDD_DragTrackerWindowProc(
   /*
    * This is a window proc after all. Let's call the default.
    */
-  return DefWindowProcA (hwnd, uMsg, wParam, lParam);
+  return DefWindowProcW (hwnd, uMsg, wParam, lParam);
 }
 
 /***
@@ -2071,13 +2072,21 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
       /*
        * If there is, notify it that we just dragged-in
        */
-      if (trackerInfo->curDragTarget!=0)
+      if (trackerInfo->curDragTarget)
       {
-	IDropTarget_DragEnter(trackerInfo->curDragTarget,
-			      trackerInfo->dataObject,
-                              trackerInfo->dwKeyState,
-                              trackerInfo->curMousePos,
-			      trackerInfo->pdwEffect);
+        hr = IDropTarget_DragEnter(trackerInfo->curDragTarget,
+                                   trackerInfo->dataObject,
+                                   trackerInfo->dwKeyState,
+                                   trackerInfo->curMousePos,
+                                   trackerInfo->pdwEffect);
+
+        /* failed DragEnter() means invalid target */
+        if (hr != S_OK)
+        {
+          trackerInfo->curDragTargetHWND = 0;
+          trackerInfo->curTargetHWND     = 0;
+          trackerInfo->curDragTarget     = 0;
+        }
       }
     }
     else
@@ -2110,24 +2119,28 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
    * when that's the case, we must display the standard drag and drop
    * cursors.
    */
-  if (hr==DRAGDROP_S_USEDEFAULTCURSORS)
+  if (hr == DRAGDROP_S_USEDEFAULTCURSORS)
   {
+    HCURSOR hCur;
+
     if (*trackerInfo->pdwEffect & DROPEFFECT_MOVE)
     {
-      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(1)));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(1));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_COPY)
     {
-      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(2)));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(2));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_LINK)
     {
-      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(3)));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(3));
     }
     else
     {
-      SetCursor(LoadCursorA(hProxyDll, MAKEINTRESOURCEA(0)));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(0));
     }
+
+    SetCursor(hCur);
   }
 }
 
@@ -2174,7 +2187,7 @@ static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
      * If we end-up over a target, drop the object in the target or
      * inform the target that the operation was cancelled.
      */
-    if (trackerInfo->curDragTarget!=0)
+    if (trackerInfo->curDragTarget)
     {
       switch (trackerInfo->returnValue)
       {
@@ -2183,14 +2196,16 @@ static void OLEDD_TrackStateChange(TrackerWindowInfo* trackerInfo)
 	 * the drop target that we just dropped the object in it.
 	 */
         case DRAGDROP_S_DROP:
-	{
-	  IDropTarget_Drop(trackerInfo->curDragTarget,
-			   trackerInfo->dataObject,
-                           trackerInfo->dwKeyState,
-                           trackerInfo->curMousePos,
-			   trackerInfo->pdwEffect);
-	  break;
-	}
+          if (*trackerInfo->pdwEffect != DROPEFFECT_NONE)
+            IDropTarget_Drop(trackerInfo->curDragTarget,
+                             trackerInfo->dataObject,
+                             trackerInfo->dwKeyState,
+                             trackerInfo->curMousePos,
+                             trackerInfo->pdwEffect);
+          else
+            IDropTarget_DragLeave(trackerInfo->curDragTarget);
+          break;
+
 	/*
 	 * If the source told us that we should cancel, fool the drop
 	 * target by telling it that the mouse left it's window.
@@ -2256,13 +2271,13 @@ static void OLEUTL_ReadRegistryDWORDValue(
   HKEY   regKey,
   DWORD* pdwValue)
 {
-  char  buffer[20];
+  WCHAR buffer[20];
+  DWORD cbData = sizeof(buffer);
   DWORD dwKeyType;
-  DWORD cbData = 20;
   LONG  lres;
 
-  lres = RegQueryValueExA(regKey,
-			  "",
+  lres = RegQueryValueExW(regKey,
+			  emptyW,
 			  NULL,
 			  &dwKeyType,
 			  (LPBYTE)buffer,
@@ -2278,7 +2293,7 @@ static void OLEUTL_ReadRegistryDWORDValue(
       case REG_EXPAND_SZ:
       case REG_MULTI_SZ:
       case REG_SZ:
-	*pdwValue = (DWORD)strtoul(buffer, NULL, 10);
+	*pdwValue = (DWORD)strtoulW(buffer, NULL, 10);
 	break;
     }
   }

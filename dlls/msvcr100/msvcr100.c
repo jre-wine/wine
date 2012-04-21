@@ -1,6 +1,7 @@
-/* Definition for NAS driver : wine multimedia system
+/*
+ * msvcr100 specific functions
  *
- * Copyright 2002 Nicolas Escuder <n.escuder@alineanet.com>
+ * Copyright 2010 Detlef Riekenberg
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,12 +18,27 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_NAS_H
-#define __WINE_NAS_H
+#include <stdarg.h>
 
-extern LONG NAS_WaveInit(void);
-extern LONG NAS_WaveClose(void);
+#include "stdlib.h"
+#include "windef.h"
+#include "winbase.h"
+#include "wine/debug.h"
 
-typedef unsigned int AFormat;
+WINE_DEFAULT_DEBUG_CHANNEL(msvcr100);
 
-#endif  /* __WINE_NAS_H */
+/*********************************************************************
+ *  DllMain (MSVCR100.@)
+ */
+BOOL WINAPI DllMain(HINSTANCE hdll, DWORD reason, LPVOID reserved)
+{
+    switch (reason)
+    {
+    case DLL_WINE_PREATTACH:
+        return FALSE;  /* prefer native version */
+
+    case DLL_PROCESS_ATTACH:
+        DisableThreadLibraryCalls(hdll);
+    }
+    return TRUE;
+}

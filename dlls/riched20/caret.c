@@ -489,15 +489,14 @@ void ME_InsertOLEFromCursor(ME_TextEditor *editor, const REOBJECT* reo, int nCur
 void ME_InsertEndRowFromCursor(ME_TextEditor *editor, int nCursor)
 {
   ME_Style              *pStyle = ME_GetInsertStyle(editor, nCursor);
-  ME_DisplayItem        *di;
   WCHAR                 space = ' ';
 
   /* FIXME no no no */
   if (ME_IsSelection(editor))
     ME_DeleteSelection(editor);
 
-  di = ME_InternalInsertTextFromCursor(editor, nCursor, &space, 1, pStyle,
-                                       MERF_ENDROW);
+  ME_InternalInsertTextFromCursor(editor, nCursor, &space, 1, pStyle,
+                                  MERF_ENDROW);
   ME_ReleaseStyle(pStyle);
 }
 
@@ -1416,7 +1415,7 @@ static void ME_ArrowPageDown(ME_TextEditor *editor, ME_Cursor *pCursor)
   } else {
     ME_DisplayItem *pRun = pCursor->pRun;
     ME_DisplayItem *p;
-    int ys, yd, yp, yprev;
+    int ys, yd, yp;
     int yOldScrollPos = editor->vert_si.nPos;
 
     if (!pCursor->nOffset && editor->bCaretAtEnd)
@@ -1425,7 +1424,7 @@ static void ME_ArrowPageDown(ME_TextEditor *editor, ME_Cursor *pCursor)
     p = ME_FindItemBack(pRun, diStartRowOrParagraph);
     assert(p->type == diStartRow);
     yp = ME_FindItemBack(p, diParagraph)->member.para.pt.y;
-    yprev = ys = y = yp + p->member.row.pt.y;
+    ys = y = yp + p->member.row.pt.y;
 
     /* For native richedit controls:
      * v1.0 - v3.1 can only scroll down as far as the scrollbar lets us
@@ -1447,7 +1446,6 @@ static void ME_ArrowPageDown(ME_TextEditor *editor, ME_Cursor *pCursor)
       if (y >= yd)
         break;
       pLast = p;
-      yprev = y;
     } while(1);
 
     pCursor->pRun = ME_FindRunInRow(editor, pLast, x, &pCursor->nOffset,
