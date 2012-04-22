@@ -1,8 +1,15 @@
-wine-unstable (1.1.43-0.1) UNRELEASED; urgency=low
+wine-unstable (1.1.43-0.1) unstable; urgency=low
 
-  *  UNRELESED
+  * Non-maintainer upload.
+  * New upstream release 1.1.43, released Apr 16, 2010.
+    - A number of new icons.
+    - Improved support for alpha channel in bitmaps.
+    - Many Direct3D fixes and optimizations.
+    - More complete msvcr80/90 implementations.
+    - A wide range of 64-bit fixes.
+    - Various bug fixes.
 
- -- Hilko Bengen <bengen@debian.org>  Sun, 22 Apr 2012 23:44:24 +0200
+ -- Hilko Bengen <bengen@debian.org>  Sun, 22 Apr 2012 23:49:07 +0200
 
 wine-unstable (1.1.42-0.1) unstable; urgency=low
 
