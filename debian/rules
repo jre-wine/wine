@@ -28,7 +28,7 @@ VERSION := $(lastword $(shell dpkg-parsechangelog|grep "^Version: "))
 
 #DEBIAN_SID := $(findstring sid,$(DEBIAN_VERSION))
 
-VERSUFFIX=-unstable
+VERSUFFIX=
 
 # Maybe make this conditional on debian version compiled for, for backports
 # Can be set to:
