@@ -4,4 +4,3 @@ debian/tmp/usr/share/applications/wine.desktop
 debian/tmp/usr/share/wine/wine.inf
 debian/uninstaller.desktop usr/share/applications
 debian/winecfg.desktop usr/share/applications
-programs/winemenubuilder/wine*.xpm usr/share/pixmaps
