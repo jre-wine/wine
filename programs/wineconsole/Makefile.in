@@ -17,6 +17,7 @@ C_SRCS = \
 
 RC_SRCS = \
 	wineconsole_Cs.rc \
+	wineconsole_Da.rc \
 	wineconsole_De.rc \
 	wineconsole_En.rc \
 	wineconsole_Eo.rc \
@@ -30,6 +31,7 @@ RC_SRCS = \
 	wineconsole_No.rc \
 	wineconsole_Pl.rc \
 	wineconsole_Pt.rc \
+	wineconsole_Ro.rc \
 	wineconsole_Ru.rc \
 	wineconsole_Si.rc \
 	wineconsole_Sv.rc \

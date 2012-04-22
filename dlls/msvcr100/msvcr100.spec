@@ -344,7 +344,7 @@
 @ cdecl __crtCompareStringA(long long str long str long) msvcrt.__crtCompareStringA
 @ cdecl __crtCompareStringW(long long wstr long wstr long) msvcrt.__crtCompareStringW
 @ cdecl __crtLCMapStringA(long long str long ptr long long long) msvcrt.__crtLCMapStringA
-@ stub __crtLCMapStringW
+@ cdecl __crtLCMapStringW(long long wstr long ptr long long long) msvcrt.__crtLCMapStringW
 @ stub __daylight
 @ cdecl __dllonexit(ptr ptr ptr) msvcrt.__dllonexit
 @ cdecl __doserrno() msvcrt.__doserrno
@@ -607,7 +607,7 @@
 @ stub _fstat32
 @ stub _fstat32i64
 @ cdecl _fstat64(long ptr) msvcrt._fstat64
-@ stub _fstat64i32
+@ cdecl _fstat64i32(long ptr) msvcr90._fstat64i32
 @ stub _ftell_nolock
 @ stub _ftelli64
 @ stub _ftelli64_nolock
@@ -819,7 +819,7 @@
 @ cdecl _ltow(long ptr long) msvcrt._ltow
 @ stub _ltow_s
 @ cdecl _makepath(ptr str str str str) msvcrt._makepath
-@ stub _makepath_s
+@ cdecl _makepath_s(ptr long str str str str) msvcrt._makepath_s
 @ cdecl _malloc_crt(long) msvcrt.malloc
 @ cdecl _mbbtombc(long) msvcrt._mbbtombc
 @ stub _mbbtombc_l
@@ -1012,7 +1012,7 @@
 @ stub _scprintf_l
 @ stub _scprintf_p
 @ stub _scprintf_p_l
-@ stub _scwprintf
+@ varargs _scwprintf(wstr) msvcrt._scwprintf
 @ stub _scwprintf_l
 @ stub _scwprintf_p
 @ stub _scwprintf_p_l
@@ -1044,7 +1044,7 @@
 @ stub _snprintf_c
 @ stub _snprintf_c_l
 @ stub _snprintf_l
-@ stub _snprintf_s
+@ varargs _snprintf_s(ptr long long str) msvcrt._snprintf_s
 @ stub _snprintf_s_l
 @ stub _snscanf
 @ stub _snscanf_l
@@ -1052,7 +1052,7 @@
 @ stub _snscanf_s_l
 @ varargs _snwprintf(ptr long wstr) msvcrt._snwprintf
 @ stub _snwprintf_l
-@ stub _snwprintf_s
+@ varargs _snwprintf_s(ptr long long wstr) msvcrt._snwprintf_s
 @ stub _snwprintf_s_l
 @ stub _snwscanf
 @ stub _snwscanf_l
@@ -1079,7 +1079,7 @@
 @ stub _stat32
 @ stub _stat32i64
 @ cdecl _stat64(str ptr) msvcrt._stat64
-@ stub _stat64i32
+@ cdecl _stat64i32(str ptr) msvcr90._stat64i32
 @ cdecl _statusfp() msvcrt._statusfp
 @ stub _statusfp2
 @ stub _strcoll_l
@@ -1310,8 +1310,8 @@
 @ stub _wgetdcwd_nolock
 @ cdecl _wgetenv(wstr) msvcrt._wgetenv
 @ stub _wgetenv_s
-@ cdecl _wmakepath(wstr wstr wstr wstr wstr) msvcrt._wmakepath
-@ stub _wmakepath_s
+@ cdecl _wmakepath(ptr wstr wstr wstr wstr) msvcrt._wmakepath
+@ cdecl _wmakepath_s(ptr long wstr wstr wstr wstr) msvcrt._wmakepath_s
 @ cdecl _wmkdir(wstr) msvcrt._wmkdir
 @ cdecl _wmktemp(wstr) msvcrt._wmktemp
 @ stub _wmktemp_s

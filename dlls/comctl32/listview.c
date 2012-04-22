@@ -168,9 +168,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(listview);
 
-/* make sure you set this to 0 for production use! */
-#define DEBUG_RANGES 1
-
 typedef struct tagCOLUMN_INFO
 {
   RECT rcHeader;	/* tracks the header's rectangle */
@@ -2968,11 +2965,7 @@ static INT CALLBACK ranges_cmp(LPVOID range1, LPVOID range2, LPARAM flags)
     return cmp;
 }
 
-#if DEBUG_RANGES
-#define ranges_check(ranges, desc) ranges_assert(ranges, desc, __FUNCTION__, __LINE__)
-#else
-#define ranges_check(ranges, desc) do { } while(0)
-#endif
+#define ranges_check(ranges, desc) if (TRACE_ON(listview)) ranges_assert(ranges, desc, __FUNCTION__, __LINE__)
 
 static void ranges_assert(RANGES ranges, LPCSTR desc, const char *func, int line)
 {
@@ -3669,7 +3662,7 @@ static inline BOOL LISTVIEW_IsHotTracking(const LISTVIEW_INFO *infoPtr)
  * over the item for a certain period of time.
  *
  */
-static LRESULT LISTVIEW_MouseHover(LISTVIEW_INFO *infoPtr, WORD fwKeys, INT x, INT y)
+static LRESULT LISTVIEW_MouseHover(LISTVIEW_INFO *infoPtr, INT x, INT y)
 {
     NMHDR hdr;
 
@@ -6953,7 +6946,7 @@ static BOOL LISTVIEW_GetItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT
  */
 static BOOL LISTVIEW_GetSubItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPRECT lprc)
 {
-    POINT Position;
+    POINT Position, Origin;
     LVITEMW lvItem;
     INT nColumn;
     
@@ -6961,7 +6954,7 @@ static BOOL LISTVIEW_GetSubItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPR
 
     nColumn = lprc->top;
 
-    TRACE("(nItem=%d, nSubItem=%d)\n", nItem, lprc->top);
+    TRACE("(nItem=%d, nSubItem=%d, type=%d)\n", nItem, lprc->top, lprc->left);
     /* On WinNT, a subitem of '0' calls LISTVIEW_GetItemRect */
     if (lprc->top == 0)
         return LISTVIEW_GetItemRect(infoPtr, nItem, lprc);
@@ -6987,6 +6980,7 @@ static BOOL LISTVIEW_GetSubItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPR
     }
 
     if (!LISTVIEW_GetItemPosition(infoPtr, nItem, &Position)) return FALSE;
+    LISTVIEW_GetOrigin(infoPtr, &Origin);
 
     if (nColumn < 0 || nColumn >= DPA_GetPtrCount(infoPtr->hdpaColumns)) return FALSE;
 
@@ -6994,7 +6988,6 @@ static BOOL LISTVIEW_GetSubItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPR
     lvItem.iItem = nItem;
     lvItem.iSubItem = nColumn;
     
-    if (lvItem.mask && !LISTVIEW_GetItemW(infoPtr, &lvItem)) return FALSE;
     switch(lprc->left)
     {
     case LVIR_ICON:
@@ -7011,7 +7004,9 @@ static BOOL LISTVIEW_GetSubItemRect(const LISTVIEW_INFO *infoPtr, INT nItem, LPR
 	return FALSE;
     }
 
-    OffsetRect(lprc, Position.x - REPORT_MARGINX, Position.y);
+    OffsetRect(lprc, Origin.x, Position.y);
+    TRACE("return rect %s\n", wine_dbgstr_rect(lprc));
+
     return TRUE;
 }
 
@@ -9373,7 +9368,7 @@ static LRESULT LISTVIEW_Destroy(LISTVIEW_INFO *infoPtr)
  *   SUCCESS : TRUE
  *   FAILURE : FALSE
  */
-static BOOL LISTVIEW_Enable(const LISTVIEW_INFO *infoPtr, BOOL bEnable)
+static BOOL LISTVIEW_Enable(const LISTVIEW_INFO *infoPtr)
 {
     if (infoPtr->dwStyle & LVS_OWNERDRAWFIXED)
         InvalidateRect(infoPtr->hwndSelf, NULL, TRUE);
@@ -10928,14 +10923,13 @@ static INT LISTVIEW_StyleChanged(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
  * Processes WM_STYLECHANGING messages.
  *
  * PARAMETER(S):
- * [I] infoPtr : valid pointer to the listview structure
  * [I] wStyleType : window style type (normal or extended)
  * [I0] lpss : window style information
  *
  * RETURN:
  * Zero
  */
-static INT LISTVIEW_StyleChanging(LISTVIEW_INFO *infoPtr, WPARAM wStyleType,
+static INT LISTVIEW_StyleChanging(WPARAM wStyleType,
                                   STYLESTRUCT *lpss)
 {
     TRACE("(styletype=%lx, styleOld=0x%08x, styleNew=0x%08x)\n",
@@ -11030,7 +11024,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
   LISTVIEW_INFO *infoPtr = (LISTVIEW_INFO *)GetWindowLongPtrW(hwnd, 0);
 
-  TRACE("(uMsg=%x wParam=%lx lParam=%lx)\n", uMsg, wParam, lParam);
+  TRACE("(hwnd=%p uMsg=%x wParam=%lx lParam=%lx)\n", hwnd, uMsg, wParam, lParam);
 
   if (!infoPtr && (uMsg != WM_NCCREATE))
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
@@ -11405,7 +11399,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return LISTVIEW_Destroy(infoPtr);
 
   case WM_ENABLE:
-    return LISTVIEW_Enable(infoPtr, (BOOL)wParam);
+    return LISTVIEW_Enable(infoPtr);
 
   case WM_ERASEBKGND:
     return LISTVIEW_EraseBkgnd(infoPtr, (HDC)wParam);
@@ -11438,7 +11432,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return LISTVIEW_MouseMove (infoPtr, (WORD)wParam, (SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam));
 
   case WM_MOUSEHOVER:
-    return LISTVIEW_MouseHover(infoPtr, (WORD)wParam, (SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam));
+    return LISTVIEW_MouseHover(infoPtr, (SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam));
 
   case WM_NCDESTROY:
     return LISTVIEW_NCDestroy(infoPtr);
@@ -11491,7 +11485,7 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     return LISTVIEW_StyleChanged(infoPtr, wParam, (LPSTYLESTRUCT)lParam);
 
   case WM_STYLECHANGING:
-    return LISTVIEW_StyleChanging(infoPtr, wParam, (LPSTYLESTRUCT)lParam);
+    return LISTVIEW_StyleChanging(wParam, (LPSTYLESTRUCT)lParam);
 
   case WM_SYSCOLORCHANGE:
     COMCTL32_RefreshSysColors();
@@ -11590,6 +11584,11 @@ void LISTVIEW_Unregister(void)
  */
 static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
 {
+
+    TRACE("(%p %x %x %lx)\n", infoPtr, HIWORD(wParam), LOWORD(wParam), lParam);
+
+    if (!infoPtr->hwndEdit) return 0;
+
     switch (HIWORD(wParam))
     {
 	case EN_UPDATE:
@@ -11644,6 +11643,3 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
 
     return 0;
 }
-
-
-

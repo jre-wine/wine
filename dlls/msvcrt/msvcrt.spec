@@ -1,6 +1,6 @@
 # msvcrt.dll - MS VC++ Run Time Library
 
-@ cdecl $I10_OUTPUT() MSVCRT_I10_OUTPUT
+@ cdecl -norelay $I10_OUTPUT(double long long long ptr) MSVCRT_I10_OUTPUT
 @ cdecl -i386 -norelay ??0__non_rtti_object@@QAE@ABV0@@Z(ptr) __thiscall_MSVCRT___non_rtti_object_copy_ctor
 @ cdecl -i386 -norelay ??0__non_rtti_object@@QAE@PBD@Z(ptr) __thiscall_MSVCRT___non_rtti_object_ctor
 @ cdecl -i386 -norelay ??0bad_cast@@AAE@PBQBD@Z(ptr) __thiscall_MSVCRT_bad_cast_ctor
@@ -140,7 +140,7 @@
 @ cdecl __crtGetLocaleInfoW(long long ptr long)
 @ cdecl __crtGetStringTypeW(long long wstr long ptr)
 @ cdecl __crtLCMapStringA(long long str long ptr long long long)
-# stub __crtLCMapStringW
+@ cdecl __crtLCMapStringW(long long wstr long ptr long long long)
 # stub __daylight
 @ cdecl __dllonexit(ptr ptr ptr)
 @ cdecl __doserrno() MSVCRT___doserrno
@@ -600,7 +600,7 @@
 @ cdecl _ltow(long ptr long) ntdll._ltow
 # stub _ltow_s
 @ cdecl _makepath(ptr str str str str)
-# stub _makepath_s
+@ cdecl _makepath_s(ptr long str str str str)
 # stub _malloc_dbg
 @ cdecl _matherr(ptr) MSVCRT__matherr
 @ cdecl _mbbtombc(long)
@@ -801,7 +801,7 @@
 # stub _scprintf
 # stub _scprintf_l
 # stub _scprintf_p_l
-# stub _scwprintf
+@ varargs _scwprintf(wstr) MSVCRT__scwprintf
 # stub _scwprintf_l
 # stub _scwprintf_p_l
 @ cdecl _searchenv(str str ptr)
@@ -830,7 +830,7 @@
 # stub _snprintf_c
 # stub _snprintf_c_l
 # stub _snprintf_l
-# stub _snprintf_s
+@ varargs _snprintf_s(ptr long long str) MSVCRT__snprintf_s
 # stub _snprintf_s_l
 # stub _snscanf
 # stub _snscanf_l
@@ -838,7 +838,7 @@
 # stub _snscanf_s_l
 @ varargs _snwprintf(ptr long wstr) MSVCRT__snwprintf
 # stub _snwprintf_l
-# stub _snwprintf_s
+@ varargs _snwprintf_s(ptr long long wstr) MSVCRT__snwprintf_s
 # stub _snwprintf_s_l
 # stub _snwscanf
 # stub _snwscanf_l
@@ -986,9 +986,9 @@
 @ cdecl _vsnprintf_s(ptr long long str ptr) MSVCRT_vsnprintf_s
 @ cdecl _vsnprintf_s_l(ptr long long str ptr ptr) MSVCRT_vsnprintf_s_l
 @ cdecl _vsnwprintf(ptr long wstr ptr) MSVCRT_vsnwprintf
-@ cdecl _vsnwprintf_l(ptr long wstr ptr ptr) MSVCRT_vsnprintf_l
-@ cdecl _vsnwprintf_s(ptr long long wstr ptr) MSVCRT_vsnprintf_s
-@ cdecl _vsnwprintf_s_l(ptr long long wstr ptr ptr) MSVCRT_vsnprintf_s_l
+@ cdecl _vsnwprintf_l(ptr long wstr ptr ptr) MSVCRT_vsnwprintf_l
+@ cdecl _vsnwprintf_s(ptr long long wstr ptr) MSVCRT_vsnwprintf_s
+@ cdecl _vsnwprintf_s_l(ptr long long wstr ptr ptr) MSVCRT_vsnwprintf_s_l
 # stub _vsprintf_l
 # stub _vsprintf_p
 # stub _vsprintf_p_l
@@ -1089,8 +1089,8 @@
 @ extern _winminor MSVCRT__winminor
 # stub _winput_s
 @ extern _winver MSVCRT__winver
-@ cdecl _wmakepath(wstr wstr wstr wstr wstr)
-# stub _wmakepath_s
+@ cdecl _wmakepath(ptr wstr wstr wstr wstr)
+@ cdecl _wmakepath_s(ptr long wstr wstr wstr wstr)
 @ cdecl _wmkdir(wstr)
 @ cdecl _wmktemp(wstr)
 # stub _wmktemp_s
@@ -1432,8 +1432,8 @@
 # Functions not exported in native dll:
 @ cdecl _get_invalid_parameter_handler()
 @ cdecl _set_invalid_parameter_handler(ptr)
-@ cdecl _create_locale(long str)
-@ cdecl _free_locale(ptr)
+@ cdecl _create_locale(long str) MSVCRT__create_locale
+@ cdecl _free_locale(ptr) MSVCRT__free_locale
 @ cdecl _configthreadlocale(long)
 @ cdecl _wcstod_l(wstr ptr) MSVCRT__wcstod_l
 @ cdecl ___mb_cur_max_l_func(ptr)

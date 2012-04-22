@@ -484,7 +484,6 @@ HRESULT WINAPI GetAcceptLanguagesW( LPWSTR langbuf, LPDWORD buflen)
     DWORD mystrlen, mytype;
     DWORD len;
     HKEY mykey;
-    HRESULT retval;
     LCID mylcid;
     WCHAR *mystr;
     LONG lres;
@@ -512,7 +511,7 @@ HRESULT WINAPI GetAcceptLanguagesW( LPWSTR langbuf, LPDWORD buflen)
 
     /* Did not find a value in the registry or the user buffer is too small */
     mylcid = GetUserDefaultLCID();
-    retval = LcidToRfc1766W(mylcid, mystr, mystrlen);
+    LcidToRfc1766W(mylcid, mystr, mystrlen);
     len = lstrlenW(mystr);
 
     memcpy( langbuf, mystr, min(*buflen, len+1)*sizeof(WCHAR) );
@@ -4488,8 +4487,8 @@ DWORD WINAPI GetUIVersion(void)
 INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
                                  LPCWSTR lpCaption, UINT uType, ...)
 {
-    WCHAR szText[100], szTitle[100];
-    LPCWSTR pszText = szText, pszTitle = szTitle;
+    WCHAR *szText = NULL, szTitle[100];
+    LPCWSTR pszText, pszTitle = szTitle;
     LPWSTR pszTemp;
     __ms_va_list args;
     int ret;
@@ -4504,7 +4503,22 @@ INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
         pszTitle = lpCaption;
 
     if (IS_INTRESOURCE(lpText))
-        LoadStringW(hInstance, LOWORD(lpText), szText, sizeof(szText)/sizeof(szText[0]));
+    {
+        const WCHAR *ptr;
+        UINT len = LoadStringW(hInstance, LOWORD(lpText), (LPWSTR)&ptr, 0);
+
+        if (len)
+        {
+            szText = HeapAlloc(GetProcessHeap(), 0, (len + 1) * sizeof(WCHAR));
+            if (szText) LoadStringW(hInstance, LOWORD(lpText), szText, len + 1);
+        }
+        pszText = szText;
+        if (!pszText) {
+            WARN("Failed to load id %d\n", LOWORD(lpText));
+            __ms_va_end(args);
+            return 0;
+        }
+    }
     else
         pszText = lpText;
 
@@ -4514,6 +4528,8 @@ INT WINAPIV ShellMessageBoxWrapW(HINSTANCE hInstance, HWND hWnd, LPCWSTR lpText,
     __ms_va_end(args);
 
     ret = MessageBoxW(hWnd, pszTemp, pszTitle, uType);
+
+    HeapFree(GetProcessHeap(), 0, szText);
     LocalFree(pszTemp);
     return ret;
 }

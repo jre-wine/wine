@@ -26,12 +26,15 @@ RC_SRCS = \
 	Fi.rc \
 	Fr.rc \
 	Hu.rc \
+	It.rc \
+	Ja.rc \
 	Ko.rc \
 	Lt.rc \
 	Nl.rc \
 	No.rc \
 	Pl.rc \
 	Pt.rc \
+	Ro.rc \
 	Ru.rc \
 	Si.rc \
 	Sv.rc \

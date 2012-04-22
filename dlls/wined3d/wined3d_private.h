@@ -541,7 +541,8 @@ typedef struct shader_reg_maps
     WORD usestexldl     : 1;
     WORD usesifc        : 1;
     WORD usescall       : 1;
-    WORD padding        : 4;
+    WORD usesrcp        : 1;
+    WORD padding        : 3;
 
     /* Whether or not loops are used in this shader, and nesting depth */
     unsigned loop_depth;
@@ -687,6 +688,7 @@ struct ps_compile_args {
     /* Bitmap for NP2 texcoord fixups (16 samplers max currently).
        D3D9 has a limit of 16 samplers and the fixup is superfluous
        in D3D10 (unconditional NP2 support mandatory). */
+    WORD shadow; /* MAX_FRAGMENT_SAMPLERS, 16 */
 };
 
 enum fog_src_type {
@@ -746,7 +748,7 @@ extern int num_lock DECLSPEC_HIDDEN;
 
 /* GL related defines */
 /* ------------------ */
-#define GL_EXTCALL(FuncName)          (GLINFO_LOCATION.FuncName)
+#define GL_EXTCALL(f) (gl_info->f)
 
 #define D3DCOLOR_B_R(dw) (((dw) >> 16) & 0xFF)
 #define D3DCOLOR_B_G(dw) (((dw) >>  8) & 0xFF)
@@ -816,40 +818,6 @@ typedef struct IWineD3DSwapChainImpl  IWineD3DSwapChainImpl;
 
 /* Global variables */
 extern const float identity[16] DECLSPEC_HIDDEN;
-
-/*****************************************************************************
- * Compilable extra diagnostics
- */
-
-/* TODO: Confirm each of these works when wined3d move completed */
-#if 0 /* NOTE: Must be 0 in cvs */
-  /* To avoid having to get gigabytes of trace, the following can be compiled in, and at the start
-     of each frame, a check is made for the existence of C:\D3DTRACE, and if it exists d3d trace
-     is enabled, and if it doesn't exist it is disabled. */
-# define FRAME_DEBUGGING
-  /*  Adding in the SINGLE_FRAME_DEBUGGING gives a trace of just what makes up a single frame, before
-      the file is deleted                                                                            */
-# if 1 /* NOTE: Must be 1 in cvs, as this is mostly more useful than a trace from program start */
-#  define SINGLE_FRAME_DEBUGGING
-# endif
-  /* The following, when enabled, lets you see the makeup of the frame, by drawprimitive calls.
-     It can only be enabled when FRAME_DEBUGGING is also enabled
-     The contents of the back buffer are written into /tmp/backbuffer_* after each primitive
-     array is drawn.                                                                            */
-# if 0 /* NOTE: Must be 0 in cvs, as this give a lot of ppm files when compiled in */
-#  define SHOW_FRAME_MAKEUP 1
-# endif
-  /* The following, when enabled, lets you see the makeup of the all the textures used during each
-     of the drawprimitive calls. It can only be enabled when SHOW_FRAME_MAKEUP is also enabled.
-     The contents of the textures assigned to each stage are written into
-     /tmp/texture_*_<Stage>.ppm after each primitive array is drawn.                            */
-# if 0 /* NOTE: Must be 0 in cvs, as this give a lot of ppm files when compiled in */
-#  define SHOW_TEXTURE_MAKEUP 0
-# endif
-extern BOOL isOn;
-extern BOOL isDumpingFrames;
-extern LONG primCounter;
-#endif
 
 enum wined3d_ffp_idx
 {
@@ -1199,8 +1167,6 @@ void context_apply_fbo_state_blit(struct wined3d_context *context, GLenum target
         IWineD3DSurfaceImpl *render_target, IWineD3DSurfaceImpl *depth_stencil) DECLSPEC_HIDDEN;
 void context_attach_depth_stencil_fbo(struct wined3d_context *context,
         GLenum fbo_target, IWineD3DSurfaceImpl *depth_stencil, BOOL use_render_buffer) DECLSPEC_HIDDEN;
-void context_attach_surface_fbo(const struct wined3d_context *context,
-        GLenum fbo_target, DWORD idx, IWineD3DSurfaceImpl *surface) DECLSPEC_HIDDEN;
 void context_bind_fbo(struct wined3d_context *context, GLenum target, GLuint *fbo) DECLSPEC_HIDDEN;
 struct wined3d_context *context_create(IWineD3DSwapChainImpl *swapchain, IWineD3DSurfaceImpl *target,
         const struct wined3d_format_desc *ds_format_desc) DECLSPEC_HIDDEN;
@@ -1343,10 +1309,16 @@ enum wined3d_pci_device
     CARD_NVIDIA_GEFORCE_9500GT      = 0x0640,
     CARD_NVIDIA_GEFORCE_9600GT      = 0x0622,
     CARD_NVIDIA_GEFORCE_9800GT      = 0x0614,
+    CARD_NVIDIA_GEFORCE_210         = 0x0a23,
+    CARD_NVIDIA_GEFORCE_GT220       = 0x0a20,
+    CARD_NVIDIA_GEFORCE_GT240       = 0x0ca3,
     CARD_NVIDIA_GEFORCE_GTX260      = 0x05e2,
     CARD_NVIDIA_GEFORCE_GTX275      = 0x05e6,
     CARD_NVIDIA_GEFORCE_GTX280      = 0x05e1,
-    CARD_NVIDIA_GEFORCE_GT240       = 0x0ca3,
+    CARD_NVIDIA_GEFORCE_GT325M      = 0x0a35,
+    CARD_NVIDIA_GEFORCE_GTS350M     = 0x0cb0,
+    CARD_NVIDIA_GEFORCE_GTX470      = 0x06cd,
+    CARD_NVIDIA_GEFORCE_GTX480      = 0x06c0,
 
     CARD_INTEL_845G                 = 0x2562,
     CARD_INTEL_I830G                = 0x3577,
@@ -1355,7 +1327,7 @@ enum wined3d_pci_device
     CARD_INTEL_I915G                = 0x2582,
     CARD_INTEL_I915GM               = 0x2592,
     CARD_INTEL_I945GM               = 0x27a2, /* Same as GMA 950? */
-    CARD_INTEL_X3100                = 0x2a02, /* Found in Macs. Same as GMA 965? */
+    CARD_INTEL_X3100                = 0x2a02, /* Found in Macs. Same as GM965/GL960 */
 };
 
 struct wined3d_fbo_ops
@@ -1471,7 +1443,7 @@ struct wined3d_adapter
 
 BOOL initPixelFormats(struct wined3d_gl_info *gl_info, enum wined3d_pci_vendor vendor) DECLSPEC_HIDDEN;
 BOOL initPixelFormatsNoGL(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
-extern long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, long glram) DECLSPEC_HIDDEN;
+extern unsigned int WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *D3DDevice, unsigned int glram) DECLSPEC_HIDDEN;
 extern void add_gl_compat_wrappers(struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 
 /*****************************************************************************
@@ -1821,10 +1793,8 @@ typedef enum winetexturestates {
     WINED3DTEXSTA_MAXMIPLEVEL    = 7,
     WINED3DTEXSTA_MAXANISOTROPY  = 8,
     WINED3DTEXSTA_SRGBTEXTURE    = 9,
-    WINED3DTEXSTA_ELEMENTINDEX   = 10,
-    WINED3DTEXSTA_DMAPOFFSET     = 11,
-    WINED3DTEXSTA_TSSADDRESSW    = 12,
-    MAX_WINETEXTURESTATES        = 13,
+    WINED3DTEXSTA_SHADOW         = 10,
+    MAX_WINETEXTURESTATES        = 11,
 } winetexturestates;
 
 enum WINED3DSRGB
@@ -2104,6 +2074,7 @@ HRESULT surface_init(IWineD3DSurfaceImpl *surface, WINED3DSURFTYPE surface_type,
         UINT width, UINT height, UINT level, BOOL lockable, BOOL discard, WINED3DMULTISAMPLE_TYPE multisample_type,
         UINT multisample_quality, IWineD3DDeviceImpl *device, DWORD usage, WINED3DFORMAT format,
         WINED3DPOOL pool, IUnknown *parent, const struct wined3d_parent_ops *parent_ops) DECLSPEC_HIDDEN;
+void surface_translate_frontbuffer_coords(IWineD3DSurfaceImpl *surface, HWND window, RECT *rect) DECLSPEC_HIDDEN;
 
 /* Predeclare the shared Surface functions */
 HRESULT WINAPI IWineD3DBaseSurfaceImpl_QueryInterface(IWineD3DSurface *iface,
@@ -2216,26 +2187,8 @@ typedef enum {
     CONVERT_PALETTED_CK,
     CONVERT_CK_565,
     CONVERT_CK_5551,
-    CONVERT_CK_4444,
-    CONVERT_CK_4444_ARGB,
-    CONVERT_CK_1555,
-    CONVERT_555,
     CONVERT_CK_RGB24,
-    CONVERT_CK_8888,
-    CONVERT_CK_8888_ARGB,
-    CONVERT_RGB32_888,
-    CONVERT_V8U8,
-    CONVERT_L6V5U5,
-    CONVERT_X8L8V8U8,
-    CONVERT_Q8W8V8U8,
-    CONVERT_V16U16,
-    CONVERT_A4L4,
-    CONVERT_G16R16,
-    CONVERT_R16G16F,
-    CONVERT_R32G32F,
-    CONVERT_D15S1,
-    CONVERT_D24X4S4,
-    CONVERT_D24FS8,
+    CONVERT_RGB32_888
 } CONVERT_TYPES;
 
 HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_texturing,
@@ -2523,8 +2476,9 @@ struct wined3d_buffer
     UINT *conversion_shift;                                 /* NULL if no shifted conversion */
 };
 
-const BYTE *buffer_get_memory(IWineD3DBuffer *iface, GLuint *buffer_object) DECLSPEC_HIDDEN;
-BYTE *buffer_get_sysmem(struct wined3d_buffer *This) DECLSPEC_HIDDEN;
+const BYTE *buffer_get_memory(IWineD3DBuffer *iface, const struct wined3d_gl_info *gl_info,
+        GLuint *buffer_object) DECLSPEC_HIDDEN;
+BYTE *buffer_get_sysmem(struct wined3d_buffer *This, const struct wined3d_gl_info *gl_info) DECLSPEC_HIDDEN;
 HRESULT buffer_init(struct wined3d_buffer *buffer, IWineD3DDeviceImpl *device,
         UINT size, DWORD usage, WINED3DFORMAT format, WINED3DPOOL pool, GLenum bind_hint,
         const char *data, IUnknown *parent, const struct wined3d_parent_ops *parent_ops) DECLSPEC_HIDDEN;
@@ -2565,7 +2519,7 @@ struct IWineD3DSwapChainImpl
     BOOL                      render_to_fbo;
     const struct wined3d_format_desc *ds_format;
 
-    long prev_time, frames;   /* Performance tracking */
+    LONG prev_time, frames;   /* Performance tracking */
     unsigned int vSyncCounter;
 
     struct wined3d_context **context;
@@ -2982,6 +2936,7 @@ extern WINED3DFORMAT pixelformat_for_depth(DWORD depth) DECLSPEC_HIDDEN;
 #define WINED3DFMT_FLAG_SRGB_READ                   0x00000800
 #define WINED3DFMT_FLAG_SRGB_WRITE                  0x00001000
 #define WINED3DFMT_FLAG_VTF                         0x00002000
+#define WINED3DFMT_FLAG_SHADOW                      0x00004000
 
 struct wined3d_format_desc
 {

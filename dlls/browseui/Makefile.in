@@ -15,10 +15,12 @@ C_SRCS = \
 	regsvr.c
 
 RC_SRCS = \
+	rsrc_Da.rc \
 	rsrc_De.rc \
 	rsrc_En.rc \
 	rsrc_Es.rc \
 	rsrc_Fr.rc \
+	rsrc_Hu.rc \
 	rsrc_It.rc \
 	rsrc_Ja.rc \
 	rsrc_Ko.rc \

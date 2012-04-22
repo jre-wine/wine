@@ -54,6 +54,7 @@ static const struct
     { "i586",    CPU_x86 },
     { "i686",    CPU_x86 },
     { "i786",    CPU_x86 },
+    { "amd64",   CPU_x86_64 },
     { "x86_64",  CPU_x86_64 },
     { "sparc",   CPU_SPARC },
     { "alpha",   CPU_ALPHA },
@@ -305,7 +306,7 @@ const char *get_ld_command(void)
                 args = (force_pointer_size == 8) ? " -arch x86_64" : " -arch i386";
                 break;
             case PLATFORM_FREEBSD:
-                args = (force_pointer_size == 8) ? " -m elf_x86_64" : " -m elf_i386_fbsd";
+                args = (force_pointer_size == 8) ? " -m elf_x86_64_fbsd" : " -m elf_i386_fbsd";
                 break;
             default:
                 args = (force_pointer_size == 8) ? " -m elf_x86_64" : " -m elf_i386";

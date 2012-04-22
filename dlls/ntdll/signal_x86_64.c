@@ -28,8 +28,17 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
+
+#ifdef HAVE_UCONTEXT_H
+# include <ucontext.h>
+#endif
+
 #ifdef HAVE_UNISTD_H
 # include <unistd.h>
+#endif
+
+#ifdef HAVE_MACHINE_SYSARCH_H
+# include <machine/sysarch.h>
 #endif
 
 #ifdef HAVE_SYS_PARAM_H
@@ -127,12 +136,45 @@ extern int arch_prctl(int func, void *ptr);
 
 #define FPU_sig(context)     ((XMM_SAVE_AREA32 *)((context)->uc_mcontext.fpregs))
 
-#endif /* linux */
+#elif defined(__FreeBSD__)
+#include <sys/ucontext.h>
 
-#if defined(__NetBSD__)
-# include <sys/ucontext.h>
-# include <sys/types.h>
-# include <signal.h>
+#define RAX_sig(context)     ((context)->uc_mcontext.mc_rax)
+#define RBX_sig(context)     ((context)->uc_mcontext.mc_rbx)
+#define RCX_sig(context)     ((context)->uc_mcontext.mc_rcx)
+#define RDX_sig(context)     ((context)->uc_mcontext.mc_rdx)
+#define RSI_sig(context)     ((context)->uc_mcontext.mc_rsi)
+#define RDI_sig(context)     ((context)->uc_mcontext.mc_rdi)
+#define RBP_sig(context)     ((context)->uc_mcontext.mc_rbp)
+#define R8_sig(context)      ((context)->uc_mcontext.mc_r8)
+#define R9_sig(context)      ((context)->uc_mcontext.mc_r9)
+#define R10_sig(context)     ((context)->uc_mcontext.mc_r10)
+#define R11_sig(context)     ((context)->uc_mcontext.mc_r11)
+#define R12_sig(context)     ((context)->uc_mcontext.mc_r12)
+#define R13_sig(context)     ((context)->uc_mcontext.mc_r13)
+#define R14_sig(context)     ((context)->uc_mcontext.mc_r14)
+#define R15_sig(context)     ((context)->uc_mcontext.mc_r15)
+
+#define CS_sig(context)      ((context)->uc_mcontext.mc_cs)
+#define DS_sig(context)      ((context)->uc_mcontext.mc_ds)
+#define ES_sig(context)      ((context)->uc_mcontext.mc_es)
+#define FS_sig(context)      ((context)->uc_mcontext.mc_fs)
+#define GS_sig(context)      ((context)->uc_mcontext.mc_gs)
+#define SS_sig(context)      ((context)->uc_mcontext.mc_ss)
+
+#define EFL_sig(context)     ((context)->uc_mcontext.mc_rflags)
+
+#define RIP_sig(context)     ((context)->uc_mcontext.mc_rip)
+#define RSP_sig(context)     ((context)->uc_mcontext.mc_rsp)
+#define TRAP_sig(context)    ((context)->uc_mcontext.mc_trapno)
+#define ERROR_sig(context)   ((context)->uc_mcontext.mc_err)
+
+#define FPU_sig(context)   ((XMM_SAVE_AREA32 *)((context)->uc_mcontext.mc_fpstate))
+
+#elif defined(__NetBSD__)
+#include <sys/ucontext.h>
+#include <sys/types.h>
+#include <signal.h>
 
 #define RAX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RAX])
 #define RBX_sig(context)    ((context)->uc_mcontext.__gregs[_REG_RBX])
@@ -166,7 +208,9 @@ extern int arch_prctl(int func, void *ptr);
 #define ERROR_sig(context)  ((context)->uc_mcontext.__gregs[_REG_ERR])
 
 #define FPU_sig(context)   ((XMM_SAVE_AREA32 *)((context)->uc_mcontext.__fpregs))
-#endif /* __NetBSD__ */
+#else
+#error You must define the signal context functions for your platform
+#endif
 
 enum i386_trap_code
 {
@@ -2286,10 +2330,13 @@ void signal_free_thread( TEB *teb )
  */
 void signal_init_thread( TEB *teb )
 {
+    const WORD fpu_cw = 0x27f;
     stack_t ss;
 
-#ifdef __linux__
+#if defined __linux__
     arch_prctl( ARCH_SET_GS, teb );
+#elif defined __FreeBSD__
+    amd64_set_gsbase( teb );
 #else
 # error Please define setting %gs for your architecture
 #endif
@@ -2298,6 +2345,12 @@ void signal_init_thread( TEB *teb )
     ss.ss_size  = signal_stack_size;
     ss.ss_flags = 0;
     if (sigaltstack(&ss, NULL) == -1) perror( "sigaltstack" );
+
+#ifdef __GNUC__
+    __asm__ volatile ("fninit; fldcw %0" : : "m" (fpu_cw));
+#else
+    FIXME("FPU setup not implemented for this platform.\n");
+#endif
 }
 
 /**********************************************************************
@@ -2992,16 +3045,33 @@ void call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg, void *frame )
 
 extern void DECLSPEC_NORETURN call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg );
 __ASM_GLOBAL_FUNC( call_thread_entry_point,
-                   "subq $8,%rsp\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
+                   "subq $56,%rsp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 56\n\t")
+                   "movq %rbp,48(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbp,48\n\t")
+                   "movq %rbx,40(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %rbx,40\n\t")
+                   "movq %r12,32(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r12,32\n\t")
+                   "movq %r13,24(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r13,24\n\t")
+                   "movq %r14,16(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r14,16\n\t")
+                   "movq %r15,8(%rsp)\n\t"
+                   __ASM_CFI(".cfi_rel_offset %r15,8\n\t")
                    "movq %rsp,%rdx\n\t"
                    "call " __ASM_NAME("call_thread_func") );
 
 extern void DECLSPEC_NORETURN call_thread_exit_func( int status, void (*func)(int), void *frame );
 __ASM_GLOBAL_FUNC( call_thread_exit_func,
-                   "subq $8,%rsp\n\t"
-                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
                    "movq %rdx,%rsp\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 56\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbp,48\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbx,40\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r12,32\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r13,24\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r14,16\n\t")
+                   __ASM_CFI(".cfi_rel_offset %r15,8\n\t")
                    "call *%rsi" );
 
 /***********************************************************************

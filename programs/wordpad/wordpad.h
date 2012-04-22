@@ -219,6 +219,9 @@
 #define STRING_PREVIEW_PAGES 1457
 
 #define STRING_UNITS_CM 1458
+#define STRING_UNITS_IN 1459
+#define STRING_UNITS_INCH 1460
+#define STRING_UNITS_PT 1461
 
 #define STRING_DEFAULT_FILENAME 1700
 #define STRING_PROMPT_SAVE_CHANGES 1701
@@ -244,7 +247,6 @@ LRESULT preview_command(HWND, WPARAM);
 void init_preview(HWND, LPWSTR);
 void close_preview(HWND);
 BOOL preview_isactive(void);
-LRESULT print_preview(HWND);
 void get_default_printer_opts(void);
 void registry_set_pagemargins(HKEY);
 void registry_read_pagemargins(HKEY);

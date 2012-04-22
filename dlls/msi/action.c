@@ -496,6 +496,7 @@ UINT msi_parse_patch_summary( MSISUMMARYINFO *si, MSIPATCHINFO **patch )
 {
     MSIPATCHINFO *pi;
     UINT r = ERROR_SUCCESS;
+    WCHAR *p;
 
     pi = msi_alloc_zero( sizeof(MSIPATCHINFO) );
     if (!pi)
@@ -507,6 +508,30 @@ UINT msi_parse_patch_summary( MSISUMMARYINFO *si, MSIPATCHINFO **patch )
         msi_free( pi );
         return ERROR_OUTOFMEMORY;
     }
+
+    p = pi->patchcode;
+    if (*p != '{')
+    {
+        msi_free( pi->patchcode );
+        msi_free( pi );
+        return ERROR_PATCH_PACKAGE_INVALID;
+    }
+
+    p = strchrW( p + 1, '}' );
+    if (!p)
+    {
+        msi_free( pi->patchcode );
+        msi_free( pi );
+        return ERROR_PATCH_PACKAGE_INVALID;
+    }
+
+    if (p[1])
+    {
+        FIXME("patch obsoletes %s\n", debugstr_w(p + 1));
+        p[1] = 0;
+    }
+
+    TRACE("patch code %s\n", debugstr_w(pi->patchcode));
 
     pi->transforms = msi_suminfo_dup_string( si, PID_LASTAUTHOR );
     if (!pi->transforms)
@@ -688,31 +713,41 @@ static BOOL ui_sequence_exists( MSIPACKAGE *package )
 
 static UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace)
 {
-    LPWSTR p, db;
     LPWSTR source, check;
-    DWORD len;
 
-    static const WCHAR szOriginalDatabase[] =
-        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
-
-    db = msi_dup_property( package->db, szOriginalDatabase );
-    if (!db)
-        return ERROR_OUTOFMEMORY;
-
-    p = strrchrW( db, '\\' );
-    if (!p)
+    if (msi_get_property_int( package->db, szInstalled, 0 ))
     {
-        p = strrchrW( db, '/' );
+        HKEY hkey;
+
+        MSIREG_OpenInstallProps( package->ProductCode, package->Context, NULL, &hkey, FALSE );
+        source = msi_reg_get_val_str( hkey, INSTALLPROPERTY_INSTALLSOURCEW );
+        RegCloseKey( hkey );
+    }
+    else
+    {
+        LPWSTR p, db;
+        DWORD len;
+
+        db = msi_dup_property( package->db, szOriginalDatabase );
+        if (!db)
+            return ERROR_OUTOFMEMORY;
+
+        p = strrchrW( db, '\\' );
         if (!p)
         {
-            msi_free(db);
-            return ERROR_SUCCESS;
+            p = strrchrW( db, '/' );
+            if (!p)
+            {
+                msi_free(db);
+                return ERROR_SUCCESS;
+            }
         }
-    }
 
-    len = p - db + 2;
-    source = msi_alloc( len * sizeof(WCHAR) );
-    lstrcpynW( source, db, len );
+        len = p - db + 2;
+        source = msi_alloc( len * sizeof(WCHAR) );
+        lstrcpynW( source, db, len );
+        msi_free( db );
+    }
 
     check = msi_dup_property( package->db, cszSourceDir );
     if (!check || replace)
@@ -729,7 +764,6 @@ static UINT msi_set_sourcedir_props(MSIPACKAGE *package, BOOL replace)
 
     msi_free( check );
     msi_free( source );
-    msi_free( db );
 
     return ERROR_SUCCESS;
 }
@@ -969,43 +1003,6 @@ static UINT ITERATE_CreateFolders(MSIRECORD *row, LPVOID param)
     return ERROR_SUCCESS;
 }
 
-/* FIXME: probably should merge this with the above function */
-static UINT msi_create_directory( MSIPACKAGE* package, LPCWSTR dir )
-{
-    UINT rc = ERROR_SUCCESS;
-    MSIFOLDER *folder;
-    LPWSTR install_path;
-
-    install_path = resolve_folder(package, dir, FALSE, FALSE, TRUE, &folder);
-    if (!install_path)
-        return ERROR_FUNCTION_FAILED; 
-
-    /* create the path */
-    if (folder->State == 0)
-    {
-        create_full_pathW(install_path);
-        folder->State = 2;
-    }
-    msi_free(install_path);
-
-    return rc;
-}
-
-UINT msi_create_component_directories( MSIPACKAGE *package )
-{
-    MSICOMPONENT *comp;
-
-    /* create all the folders required by the components are going to install */
-    LIST_FOR_EACH_ENTRY( comp, &package->components, MSICOMPONENT, entry )
-    {
-        if (comp->ActionRequest != INSTALLSTATE_LOCAL)
-            continue;
-        msi_create_directory( package, comp->Directory );
-    }
-
-    return ERROR_SUCCESS;
-}
-
 static UINT ACTION_CreateFolders(MSIPACKAGE *package)
 {
     static const WCHAR ExecSeqQuery[] =
@@ -1066,7 +1063,7 @@ static UINT ITERATE_RemoveFolders( MSIRECORD *row, LPVOID param )
     TRACE("folder is %s\n", debugstr_w(full_path));
 
     uirow = MSI_CreateRecord( 1 );
-    MSI_RecordSetStringW( uirow, 1, full_path );
+    MSI_RecordSetStringW( uirow, 1, dir );
     ui_actiondata( package, szRemoveFolders, uirow );
     msiobj_release( &uirow->hdr );
 
@@ -1365,6 +1362,26 @@ done:
     return r;
 }
 
+static UINT load_file_disk_id( MSIPACKAGE *package, MSIFILE *file )
+{
+    MSIRECORD *row;
+    static const WCHAR query[] = {
+        'S','E','L','E','C','T',' ','`','D','i','s','k','I','d','`',' ', 'F','R','O','M',' ',
+        '`','M','e','d','i','a','`',' ','W','H','E','R','E',' ',
+        '`','L','a','s','t','S','e','q','u','e','n','c','e','`',' ','>','=',' ','%','i',0};
+
+    row = MSI_QueryGetRecord( package->db, query, file->Sequence );
+    if (!row)
+    {
+        WARN("query failed\n");
+        return ERROR_FUNCTION_FAILED;
+    }
+
+    file->disk_id = MSI_RecordGetInteger( row, 1 );
+    msiobj_release( &row->hdr );
+    return ERROR_SUCCESS;
+}
+
 static UINT load_file(MSIRECORD *row, LPVOID param)
 {
     MSIPACKAGE* package = param;
@@ -1426,6 +1443,7 @@ static UINT load_file(MSIRECORD *row, LPVOID param)
     }
 
     load_file_hash(package, file);
+    load_file_disk_id(package, file);
 
     TRACE("File Loaded (%s)\n",debugstr_w(file->File));  
 
@@ -1946,16 +1964,12 @@ static UINT ITERATE_CostFinalizeConditions(MSIRECORD *row, LPVOID param)
     return ERROR_SUCCESS;
 }
 
-static LPWSTR get_disk_file_version( LPCWSTR filename )
+VS_FIXEDFILEINFO *msi_get_disk_file_version( LPCWSTR filename )
 {
-    static const WCHAR name_fmt[] =
-        {'%','u','.','%','u','.','%','u','.','%','u',0};
     static const WCHAR name[] = {'\\',0};
-    VS_FIXEDFILEINFO *lpVer;
-    WCHAR filever[0x100];
+    VS_FIXEDFILEINFO *ret;
     LPVOID version;
-    DWORD versize;
-    DWORD handle;
+    DWORD versize, handle;
     UINT sz;
 
     TRACE("%s\n", debugstr_w(filename));
@@ -1965,23 +1979,32 @@ static LPWSTR get_disk_file_version( LPCWSTR filename )
         return NULL;
 
     version = msi_alloc( versize );
+    if (!version)
+        return NULL;
+
     GetFileVersionInfoW( filename, 0, versize, version );
 
-    if (!VerQueryValueW( version, name, (LPVOID*)&lpVer, &sz ))
+    if (!VerQueryValueW( version, name, (LPVOID *)&ret, &sz ))
     {
         msi_free( version );
         return NULL;
     }
 
-    sprintfW( filever, name_fmt,
-        HIWORD(lpVer->dwFileVersionMS),
-        LOWORD(lpVer->dwFileVersionMS),
-        HIWORD(lpVer->dwFileVersionLS),
-        LOWORD(lpVer->dwFileVersionLS));
-
     msi_free( version );
+    return ret;
+}
 
-    return strdupW( filever );
+int msi_compare_file_versions( VS_FIXEDFILEINFO *fi, const WCHAR *version )
+{
+    DWORD ms, ls;
+
+    msi_parse_version_string( version, &ms, &ls );
+
+    if (fi->dwFileVersionMS > ms) return 1;
+    else if (fi->dwFileVersionMS < ms) return -1;
+    else if (fi->dwFileVersionLS > ls) return 1;
+    else if (fi->dwFileVersionLS < ls) return -1;
+    return 0;
 }
 
 static DWORD get_disk_file_size( LPCWSTR filename )
@@ -2015,7 +2038,7 @@ static BOOL hash_matches( MSIFILE *file )
 
 static UINT set_file_install_states( MSIPACKAGE *package )
 {
-    LPWSTR file_version;
+    VS_FIXEDFILEINFO *file_version;
     MSIFILE *file;
 
     LIST_FOR_EACH_ENTRY( file, &package->files, MSIFILE, entry )
@@ -2032,18 +2055,14 @@ static UINT set_file_install_states( MSIPACKAGE *package )
 
         /* calculate target */
         p = resolve_folder(package, comp->Directory, FALSE, FALSE, TRUE, NULL);
-
         msi_free(file->TargetPath);
 
-        TRACE("file %s is named %s\n",
-               debugstr_w(file->File), debugstr_w(file->FileName));
+        TRACE("file %s is named %s\n", debugstr_w(file->File), debugstr_w(file->FileName));
 
         file->TargetPath = build_directory_name(2, p, file->FileName);
-
         msi_free(p);
 
-        TRACE("file %s resolves to %s\n",
-               debugstr_w(file->File), debugstr_w(file->TargetPath));
+        TRACE("file %s resolves to %s\n", debugstr_w(file->File), debugstr_w(file->TargetPath));
 
         if (GetFileAttributesW(file->TargetPath) == INVALID_FILE_ATTRIBUTES)
         {
@@ -2051,11 +2070,15 @@ static UINT set_file_install_states( MSIPACKAGE *package )
             comp->Cost += file->FileSize;
             continue;
         }
-        if (file->Version && (file_version = get_disk_file_version( file->TargetPath )))
+        if (file->Version && (file_version = msi_get_disk_file_version( file->TargetPath )))
         {
-            TRACE("new %s old %s\n", debugstr_w(file->Version), debugstr_w(file_version));
+            TRACE("new %s old %u.%u.%u.%u\n", debugstr_w(file->Version),
+                  HIWORD(file_version->dwFileVersionMS),
+                  LOWORD(file_version->dwFileVersionMS),
+                  HIWORD(file_version->dwFileVersionLS),
+                  LOWORD(file_version->dwFileVersionLS));
 
-            if (strcmpiW(file_version, file->Version) < 0)
+            if (msi_compare_file_versions( file_version, file->Version ) < 0)
             {
                 file->state = msifs_overwrite;
                 comp->Cost += file->FileSize;
@@ -4239,7 +4262,6 @@ static UINT ITERATE_SelfRegModules(MSIRECORD *row, LPVOID param)
     PROCESS_INFORMATION info;
     BOOL brc;
     MSIRECORD *uirow;
-    LPWSTR uipath, p;
 
     memset(&si,0,sizeof(STARTUPINFOW));
 
@@ -4272,14 +4294,11 @@ static UINT ITERATE_SelfRegModules(MSIRECORD *row, LPVOID param)
 
     uirow = MSI_CreateRecord( 2 );
     MSI_RecordSetStringW( uirow, 1, filename );
-    uipath = strdupW( file->TargetPath );
-    if ((p = strrchrW( uipath,'\\' ))) *p = 0;
-    MSI_RecordSetStringW( uirow, 2, uipath );
+    MSI_RecordSetStringW( uirow, 2, file->Component->Directory );
     ui_actiondata( package, szSelfRegModules, uirow );
     msiobj_release( &uirow->hdr );
 
     msi_free( FullName );
-    msi_free( uipath );
     return ERROR_SUCCESS;
 }
 
@@ -4318,7 +4337,6 @@ static UINT ITERATE_SelfUnregModules( MSIRECORD *row, LPVOID param )
     PROCESS_INFORMATION pi;
     BOOL ret;
     MSIRECORD *uirow;
-    LPWSTR uipath, p;
 
     memset( &si, 0, sizeof(STARTUPINFOW) );
 
@@ -4350,14 +4368,11 @@ static UINT ITERATE_SelfUnregModules( MSIRECORD *row, LPVOID param )
 
     uirow = MSI_CreateRecord( 2 );
     MSI_RecordSetStringW( uirow, 1, filename );
-    uipath = strdupW( file->TargetPath );
-    if ((p = strrchrW( uipath,'\\' ))) *p = 0;
-    MSI_RecordSetStringW( uirow, 2, uipath );
+    MSI_RecordSetStringW( uirow, 2, file->Component->Directory );
     ui_actiondata( package, szSelfUnregModules, uirow );
     msiobj_release( &uirow->hdr );
 
     msi_free( cmdline );
-    msi_free( uipath );
     return ERROR_SUCCESS;
 }
 
@@ -4537,11 +4552,10 @@ static UINT ACTION_UnpublishFeatures(MSIPACKAGE *package)
 
 static UINT msi_publish_install_properties(MSIPACKAGE *package, HKEY hkey)
 {
-    LPWSTR prop, val, key;
     SYSTEMTIME systime;
     DWORD size, langid;
-    WCHAR date[9];
-    LPWSTR buffer;
+    WCHAR date[9], *val, *buffer;
+    const WCHAR *prop, *key;
 
     static const WCHAR date_fmt[] = {'%','i','%','0','2','i','%','0','2','i',0};
     static const WCHAR szWindowsInstaller[] =
@@ -4559,43 +4573,84 @@ static UINT msi_publish_install_properties(MSIPACKAGE *package, HKEY hkey)
         {'P','r','o','d','u','c','t','L','a','n','g','u','a','g','e',0};
     static const WCHAR szProductVersion[] =
         {'P','r','o','d','u','c','t','V','e','r','s','i','o','n',0};
+    static const WCHAR szDisplayVersion[] =
+        {'D','i','s','p','l','a','y','V','e','r','s','i','o','n',0};
+    static const WCHAR szInstallSource[] =
+        {'I','n','s','t','a','l','l','S','o','u','r','c','e',0};
+    static const WCHAR szARPAUTHORIZEDCDFPREFIX[] =
+        {'A','R','P','A','U','T','H','O','R','I','Z','E','D','C','D','F','P','R','E','F','I','X',0};
+    static const WCHAR szAuthorizedCDFPrefix[] =
+        {'A','u','t','h','o','r','i','z','e','d','C','D','F','P','r','e','f','i','x',0};
+    static const WCHAR szARPCONTACT[] =
+        {'A','R','P','C','O','N','T','A','C','T',0};
+    static const WCHAR szContact[] =
+        {'C','o','n','t','a','c','t',0};
+    static const WCHAR szARPCOMMENTS[] =
+        {'A','R','P','C','O','M','M','E','N','T','S',0};
+    static const WCHAR szComments[] =
+        {'C','o','m','m','e','n','t','s',0};
     static const WCHAR szProductName[] =
         {'P','r','o','d','u','c','t','N','a','m','e',0};
     static const WCHAR szDisplayName[] =
         {'D','i','s','p','l','a','y','N','a','m','e',0};
-    static const WCHAR szDisplayVersion[] =
-        {'D','i','s','p','l','a','y','V','e','r','s','i','o','n',0};
+    static const WCHAR szARPHELPLINK[] =
+        {'A','R','P','H','E','L','P','L','I','N','K',0};
+    static const WCHAR szHelpLink[] =
+        {'H','e','l','p','L','i','n','k',0};
+    static const WCHAR szARPHELPTELEPHONE[] =
+        {'A','R','P','H','E','L','P','T','E','L','E','P','H','O','N','E',0};
+    static const WCHAR szHelpTelephone[] =
+        {'H','e','l','p','T','e','l','e','p','h','o','n','e',0};
+    static const WCHAR szARPINSTALLLOCATION[] =
+        {'A','R','P','I','N','S','T','A','L','L','L','O','C','A','T','I','O','N',0};
+    static const WCHAR szInstallLocation[] =
+        {'I','n','s','t','a','l','l','L','o','c','a','t','i','o','n',0};
     static const WCHAR szManufacturer[] =
         {'M','a','n','u','f','a','c','t','u','r','e','r',0};
+    static const WCHAR szPublisher[] =
+        {'P','u','b','l','i','s','h','e','r',0};
+    static const WCHAR szARPREADME[] =
+        {'A','R','P','R','E','A','D','M','E',0};
+    static const WCHAR szReadme[] =
+        {'R','e','a','d','M','e',0};
+    static const WCHAR szARPSIZE[] =
+        {'A','R','P','S','I','Z','E',0};
+    static const WCHAR szSize[] =
+        {'S','i','z','e',0};
+    static const WCHAR szARPURLINFOABOUT[] =
+        {'A','R','P','U','R','L','I','N','F','O','A','B','O','U','T',0};
+    static const WCHAR szURLInfoAbout[] =
+        {'U','R','L','I','n','f','o','A','b','o','u','t',0};
+    static const WCHAR szARPURLUPDATEINFO[] =
+        {'A','R','P','U','R','L','U','P','D','A','T','E','I','N','F','O',0};
+    static const WCHAR szURLUpdateInfo[] =
+        {'U','R','L','U','p','d','a','t','e','I','n','f','o',0};
 
-    static const LPCSTR propval[] = {
-        "ARPAUTHORIZEDCDFPREFIX", "AuthorizedCDFPrefix",
-        "ARPCONTACT",             "Contact",
-        "ARPCOMMENTS",            "Comments",
-        "ProductName",            "DisplayName",
-        "ProductVersion",         "DisplayVersion",
-        "ARPHELPLINK",            "HelpLink",
-        "ARPHELPTELEPHONE",       "HelpTelephone",
-        "ARPINSTALLLOCATION",     "InstallLocation",
-        "SourceDir",              "InstallSource",
-        "Manufacturer",           "Publisher",
-        "ARPREADME",              "Readme",
-        "ARPSIZE",                "Size",
-        "ARPURLINFOABOUT",        "URLInfoAbout",
-        "ARPURLUPDATEINFO",       "URLUpdateInfo",
-        NULL,
+    static const WCHAR *propval[] = {
+        szARPAUTHORIZEDCDFPREFIX, szAuthorizedCDFPrefix,
+        szARPCONTACT,             szContact,
+        szARPCOMMENTS,            szComments,
+        szProductName,            szDisplayName,
+        szARPHELPLINK,            szHelpLink,
+        szARPHELPTELEPHONE,       szHelpTelephone,
+        szARPINSTALLLOCATION,     szInstallLocation,
+        cszSourceDir,             szInstallSource,
+        szManufacturer,           szPublisher,
+        szARPREADME,              szReadme,
+        szARPSIZE,                szSize,
+        szARPURLINFOABOUT,        szURLInfoAbout,
+        szARPURLUPDATEINFO,       szURLUpdateInfo,
+        NULL
     };
-    const LPCSTR *p = propval;
+    const WCHAR **p = propval;
 
     while (*p)
     {
-        prop = strdupAtoW(*p++);
-        key = strdupAtoW(*p++);
+        prop = *p++;
+        key = *p++;
         val = msi_dup_property(package->db, prop);
         msi_reg_set_val_str(hkey, key, val);
         msi_free(val);
-        msi_free(key);
-        msi_free(prop);
     }
 
     msi_reg_set_val_dword(hkey, szWindowsInstaller, 1);
@@ -4607,18 +4662,6 @@ static UINT msi_publish_install_properties(MSIPACKAGE *package, HKEY hkey)
 
     /* FIXME: Write real Estimated Size when we have it */
     msi_reg_set_val_dword(hkey, szEstimatedSize, 0);
-
-    buffer = msi_dup_property(package->db, szProductName);
-    msi_reg_set_val_str(hkey, szDisplayName, buffer);
-    msi_free(buffer);
-
-    buffer = msi_dup_property(package->db, cszSourceDir);
-    msi_reg_set_val_str(hkey, INSTALLPROPERTY_INSTALLSOURCEW, buffer);
-    msi_free(buffer);
-
-    buffer = msi_dup_property(package->db, szManufacturer);
-    msi_reg_set_val_str(hkey, INSTALLPROPERTY_PUBLISHERW, buffer);
-    msi_free(buffer);
 
     GetLocalTime(&systime);
     sprintfW(date, date_fmt, systime.wYear, systime.wMonth, systime.wDay);
@@ -5715,7 +5758,7 @@ static UINT ITERATE_InstallODBCDriver( MSIRECORD *rec, LPVOID param )
     uirow = MSI_CreateRecord( 5 );
     MSI_RecordSetStringW( uirow, 1, desc );
     MSI_RecordSetStringW( uirow, 2, MSI_RecordGetString(rec, 2) );
-    MSI_RecordSetStringW( uirow, 3, driver_path );
+    MSI_RecordSetStringW( uirow, 3, driver_file->Component->Directory );
     ui_actiondata( package, szInstallODBC, uirow );
     msiobj_release( &uirow->hdr );
 
@@ -5788,7 +5831,7 @@ static UINT ITERATE_InstallODBCTranslator( MSIRECORD *rec, LPVOID param )
     uirow = MSI_CreateRecord( 5 );
     MSI_RecordSetStringW( uirow, 1, desc );
     MSI_RecordSetStringW( uirow, 2, MSI_RecordGetString(rec, 2) );
-    MSI_RecordSetStringW( uirow, 3, translator_path );
+    MSI_RecordSetStringW( uirow, 3, translator_file->Component->Directory );
     ui_actiondata( package, szInstallODBC, uirow );
     msiobj_release( &uirow->hdr );
 
@@ -6861,33 +6904,33 @@ static UINT ACTION_MsiPublishAssemblies( MSIPACKAGE *package )
         if (assembly->installed && !mi->is_continuous)
             continue;
 
-        if (assembly->file->Sequence > mi->last_sequence || mi->is_continuous ||
-            (assembly->file->IsCompressed && !mi->is_extracted))
+        if (assembly->file->IsCompressed)
         {
-            MSICABDATA data;
-
-            r = ready_media(package, assembly->file, mi);
-            if (r != ERROR_SUCCESS)
+            if (assembly->file->disk_id != mi->disk_id || mi->is_continuous)
             {
-                ERR("Failed to ready media\n");
-                break;
-            }
+                MSICABDATA data;
 
-            data.mi = mi;
-            data.package = package;
-            data.cb = installassembly_cb;
-            data.user = &assemblies;
+                r = ready_media(package, assembly->file, mi);
+                if (r != ERROR_SUCCESS)
+                {
+                    ERR("Failed to ready media\n");
+                    break;
+                }
 
-            if (assembly->file->IsCompressed &&
-                !msi_cabextract(package, mi, &data))
-            {
-                ERR("Failed to extract cabinet: %s\n", debugstr_w(mi->cabinet));
-                r = ERROR_FUNCTION_FAILED;
-                break;
+                data.mi = mi;
+                data.package = package;
+                data.cb = installassembly_cb;
+                data.user = &assemblies;
+
+                if (!msi_cabextract(package, mi, &data))
+                {
+                    ERR("Failed to extract cabinet: %s\n", debugstr_w(mi->cabinet));
+                    r = ERROR_FUNCTION_FAILED;
+                    break;
+                }
             }
         }
-
-        if (!assembly->file->IsCompressed)
+        else
         {
             LPWSTR source = resolve_file_source(package, assembly->file);
 

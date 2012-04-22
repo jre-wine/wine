@@ -26,6 +26,7 @@
 #include "windef.h"
 #include "winbase.h"
 #include "wine/debug.h"
+#include "sys/stat.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(msvcr90);
 
@@ -92,6 +93,7 @@ int CDECL _initterm_e(_INITTERM_E_FN *table, _INITTERM_E_FN *end)
 
     while (!res && table < end) {
         if (*table) {
+            TRACE("calling %p\n", **table);
             res = (**table)();
             if (res)
                 TRACE("function %p failed: 0x%x\n", *table, res);
@@ -157,4 +159,48 @@ void* CDECL _recalloc(void* mem, size_t num, size_t size)
     if(size>old_size)
         memset((BYTE*)mem+old_size, 0, size-old_size);
     return ret;
+}
+
+/*********************************************************************
+ *		_fstat64i32 (MSVCRT.@)
+ */
+
+static void msvcrt_stat64_to_stat64i32(const struct _stat64 *buf64, struct _stat64i32 *buf)
+{
+    buf->st_dev   = buf64->st_dev;
+    buf->st_ino   = buf64->st_ino;
+    buf->st_mode  = buf64->st_mode;
+    buf->st_nlink = buf64->st_nlink;
+    buf->st_uid   = buf64->st_uid;
+    buf->st_gid   = buf64->st_gid;
+    buf->st_rdev  = buf64->st_rdev;
+    buf->st_size  = buf64->st_size;
+    buf->st_atime = buf64->st_atime;
+    buf->st_mtime = buf64->st_mtime;
+    buf->st_ctime = buf64->st_ctime;
+}
+
+int CDECL _fstat64i32(int fd, struct _stat64i32* buf)
+{
+  int ret;
+  struct _stat64 buf64;
+
+  ret = _fstat64(fd, &buf64);
+  if (!ret)
+      msvcrt_stat64_to_stat64i32(&buf64, buf);
+  return ret;
+}
+
+/*********************************************************************
+ *		_stat64i32 (MSVCRT.@)
+ */
+int CDECL _stat64i32(const char* path, struct _stat64i32 * buf)
+{
+  int ret;
+  struct _stat64 buf64;
+
+  ret = _stat64(path, &buf64);
+  if (!ret)
+    msvcrt_stat64_to_stat64i32(&buf64, buf);
+  return ret;
 }

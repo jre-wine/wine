@@ -123,7 +123,7 @@ extern "C" {
 # if defined(_MSC_VER) && (_MSC_VER >= 1200)
 #  define FORCEINLINE __forceinline
 # elif defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
-#  define FORCEINLINE __attribute__((always_inline))
+#  define FORCEINLINE inline __attribute__((always_inline))
 # else
 #  define FORCEINLINE inline
 # endif
@@ -1047,7 +1047,7 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
             PM128A Xmm13;
             PM128A Xmm14;
             PM128A Xmm15;
-        } DUMMYSTRUCTNAME;
+        } DUMMYSTRUCTNAME1;
     } DUMMYUNIONNAME1;
 
     union
@@ -1071,7 +1071,7 @@ typedef struct _KNONVOLATILE_CONTEXT_POINTERS
             PULONG64 R13;
             PULONG64 R14;
             PULONG64 R15;
-        } DUMMYSTRUCTNAME;
+        } DUMMYSTRUCTNAME2;
     } DUMMYUNIONNAME2;
 } KNONVOLATILE_CONTEXT_POINTERS, *PKNONVOLATILE_CONTEXT_POINTERS;
 
@@ -2466,15 +2466,15 @@ typedef struct _NT_TIB
 
 struct _TEB;
 
-#if defined(__i386__) && defined(__GNUC__)
-static inline struct _TEB * WINAPI NtCurrentTeb(void)
+#if defined(__i386__) && defined(__GNUC__) && ((__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 2)))
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x64\n\tmovl (0x18),%0" : "=r" (teb));
     return teb;
 }
 #elif defined(__i386__) && defined(_MSC_VER)
-static inline struct _TEB * WINAPI NtCurrentTeb(void)
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
   struct _TEB *teb;
   __asm mov eax, fs:[0x18];
@@ -2482,14 +2482,14 @@ static inline struct _TEB * WINAPI NtCurrentTeb(void)
   return teb;
 }
 #elif defined(__x86_64__) && defined(__GNUC__)
-static inline struct _TEB * WINAPI NtCurrentTeb(void)
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
     struct _TEB *teb;
     __asm__(".byte 0x65\n\tmovq (0x30),%0" : "=r" (teb));
     return teb;
 }
 #elif defined(__x86_64__) && defined (_MSC_VER)
-static inline struct _TEB * WINAPI NtCurrentTeb(void)
+static FORCEINLINE struct _TEB * WINAPI NtCurrentTeb(void)
 {
   struct _TEB *teb;
   __asm mov rax, gs:[0x30];

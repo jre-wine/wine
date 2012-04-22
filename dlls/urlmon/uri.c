@@ -1,5 +1,6 @@
 /*
  * Copyright 2010 Jacek Caban for CodeWeavers
+ * Copyright 2010 Thomas Mullaly
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -83,6 +84,21 @@ static HRESULT WINAPI Uri_GetPropertyBSTR(IUri *iface, Uri_PROPERTY uriProp, BST
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%d %p %x)\n", This, uriProp, pbstrProperty, dwFlags);
+
+    if(!pbstrProperty)
+        return E_POINTER;
+
+    if(uriProp > Uri_PROPERTY_STRING_LAST) {
+        /* Windows allocates an empty BSTR for invalid Uri_PROPERTY's. */
+        *pbstrProperty = SysAllocStringLen(NULL, 0);
+
+        /* It only returns S_FALSE for the ZONE property... */
+        if(uriProp == Uri_PROPERTY_ZONE)
+            return S_FALSE;
+        else
+            return S_OK;
+    }
+
     return E_NOTIMPL;
 }
 
@@ -90,6 +106,14 @@ static HRESULT WINAPI Uri_GetPropertyLength(IUri *iface, Uri_PROPERTY uriProp, D
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%d %p %x)\n", This, uriProp, pcchProperty, dwFlags);
+
+    if(!pcchProperty)
+        return E_INVALIDARG;
+
+    /* Can only return a length for a property if it's a string. */
+    if(uriProp > Uri_PROPERTY_STRING_LAST)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -97,13 +121,36 @@ static HRESULT WINAPI Uri_GetPropertyDWORD(IUri *iface, Uri_PROPERTY uriProp, DW
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%d %p %x)\n", This, uriProp, pcchProperty, dwFlags);
+
+    if(!pcchProperty)
+        return E_INVALIDARG;
+
+    /* Microsoft's implementation for the ZONE property of a URI seems to be lacking...
+     * From what I can tell, instead of checking which URLZONE the URI belongs to it
+     * simply assigns URLZONE_INVALID and returns E_NOTIMPL. This also applies to the GetZone
+     * function.
+     */
+    if(uriProp == Uri_PROPERTY_ZONE) {
+        *pcchProperty = URLZONE_INVALID;
+        return E_NOTIMPL;
+    }
+
+    if(uriProp < Uri_PROPERTY_DWORD_START) {
+        *pcchProperty = 0;
+        return E_INVALIDARG;
+    }
+
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI Uri_HasProperty(IUri *iface, Uri_PROPERTY uriProp, BOOL *pfHasProperty)
 {
     Uri *This = URI_THIS(iface);
-    FIXME("(%p)->()\n", This);
+    FIXME("(%p)->(%d %p)\n", This, uriProp, pfHasProperty);
+
+    if(!pfHasProperty)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -111,6 +158,10 @@ static HRESULT WINAPI Uri_GetAbsoluteUri(IUri *iface, BSTR *pstrAbsoluteUri)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrAbsoluteUri);
+
+    if(!pstrAbsoluteUri)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -118,6 +169,10 @@ static HRESULT WINAPI Uri_GetAuthority(IUri *iface, BSTR *pstrAuthority)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrAuthority);
+
+    if(!pstrAuthority)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -125,6 +180,10 @@ static HRESULT WINAPI Uri_GetDisplayUri(IUri *iface, BSTR *pstrDisplayUri)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrDisplayUri);
+
+    if(!pstrDisplayUri)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -132,6 +191,10 @@ static HRESULT WINAPI Uri_GetDomain(IUri *iface, BSTR *pstrDomain)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrDomain);
+
+    if(!pstrDomain)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -139,6 +202,10 @@ static HRESULT WINAPI Uri_GetExtension(IUri *iface, BSTR *pstrExtension)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrExtension);
+
+    if(!pstrExtension)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -146,6 +213,10 @@ static HRESULT WINAPI Uri_GetFragment(IUri *iface, BSTR *pstrFragment)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrFragment);
+
+    if(!pstrFragment)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -153,6 +224,10 @@ static HRESULT WINAPI Uri_GetHost(IUri *iface, BSTR *pstrHost)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrHost);
+
+    if(!pstrHost)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -160,6 +235,10 @@ static HRESULT WINAPI Uri_GetPassword(IUri *iface, BSTR *pstrPassword)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrPassword);
+
+    if(!pstrPassword)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -167,6 +246,10 @@ static HRESULT WINAPI Uri_GetPath(IUri *iface, BSTR *pstrPath)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrPath);
+
+    if(!pstrPath)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -174,6 +257,10 @@ static HRESULT WINAPI Uri_GetPathAndQuery(IUri *iface, BSTR *pstrPathAndQuery)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrPathAndQuery);
+
+    if(!pstrPathAndQuery)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -181,6 +268,10 @@ static HRESULT WINAPI Uri_GetQuery(IUri *iface, BSTR *pstrQuery)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrQuery);
+
+    if(!pstrQuery)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -188,6 +279,10 @@ static HRESULT WINAPI Uri_GetRawUri(IUri *iface, BSTR *pstrRawUri)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrRawUri);
+
+    if(!pstrRawUri)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -195,6 +290,10 @@ static HRESULT WINAPI Uri_GetSchemeName(IUri *iface, BSTR *pstrSchemeName)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrSchemeName);
+
+    if(!pstrSchemeName)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -202,6 +301,10 @@ static HRESULT WINAPI Uri_GetUserInfo(IUri *iface, BSTR *pstrUserInfo)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrUserInfo);
+
+    if(!pstrUserInfo)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -209,6 +312,10 @@ static HRESULT WINAPI Uri_GetUserName(IUri *iface, BSTR *pstrUserName)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pstrUserName);
+
+    if(!pstrUserName)
+        return E_POINTER;
+
     return E_NOTIMPL;
 }
 
@@ -216,6 +323,10 @@ static HRESULT WINAPI Uri_GetHostType(IUri *iface, DWORD *pdwHostType)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pdwHostType);
+
+    if(!pdwHostType)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -223,6 +334,10 @@ static HRESULT WINAPI Uri_GetPort(IUri *iface, DWORD *pdwPort)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pdwPort);
+
+    if(!pdwPort)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -230,6 +345,10 @@ static HRESULT WINAPI Uri_GetScheme(IUri *iface, DWORD *pdwScheme)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pdwScheme);
+
+    if(!pdwScheme)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
@@ -237,6 +356,14 @@ static HRESULT WINAPI Uri_GetZone(IUri *iface, DWORD *pdwZone)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pdwZone);
+
+    if(!pdwZone)
+        return E_INVALIDARG;
+
+    /* Microsoft doesn't seem to have this implemented yet... See
+     * the comment in Uri_GetPropertyDWORD for more about this.
+     */
+    *pdwZone = URLZONE_INVALID;
     return E_NOTIMPL;
 }
 
@@ -244,12 +371,28 @@ static HRESULT WINAPI Uri_GetProperties(IUri *iface, DWORD *pdwProperties)
 {
     Uri *This = URI_THIS(iface);
     FIXME("(%p)->(%p)\n", This, pdwProperties);
+
+    if(!pdwProperties)
+        return E_INVALIDARG;
+
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI Uri_IsEqual(IUri *iface, IUri *pUri, BOOL *pfEqual)
 {
     Uri *This = URI_THIS(iface);
+    TRACE("(%p)->(%p %p)\n", This, pUri, pfEqual);
+
+    if(!pfEqual)
+        return E_POINTER;
+
+    if(!pUri) {
+        *pfEqual = FALSE;
+
+        /* For some reason Windows returns S_OK here... */
+        return S_OK;
+    }
+
     FIXME("(%p)->(%p %p)\n", This, pUri, pfEqual);
     return E_NOTIMPL;
 }
@@ -295,6 +438,14 @@ HRESULT WINAPI CreateUri(LPCWSTR pwzURI, DWORD dwFlags, DWORD_PTR dwReserved, IU
     Uri *ret;
 
     TRACE("(%s %x %x %p)\n", debugstr_w(pwzURI), dwFlags, (DWORD)dwReserved, ppURI);
+
+    if(!ppURI)
+        return E_INVALIDARG;
+
+    if(!pwzURI) {
+        *ppURI = NULL;
+        return E_INVALIDARG;
+    }
 
     ret = heap_alloc(sizeof(Uri));
     if(!ret)

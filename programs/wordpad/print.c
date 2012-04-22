@@ -487,7 +487,6 @@ static void print(LPPRINTDLGW pd, LPWSTR wszFileName)
     StartDocW(fr.hdc, &di);
     do
     {
-        int bottom = fr.rc.bottom;
         if(StartPage(fr.hdc) <= 0)
             break;
 
@@ -495,7 +494,6 @@ static void print(LPPRINTDLGW pd, LPWSTR wszFileName)
 
         if(EndPage(fr.hdc) <= 0)
             break;
-        bottom = fr.rc.bottom;
 
         printedPages++;
         if((pd->Flags & PD_PAGENUMS) && (printedPages > (pd->nToPage - pd->nFromPage)))
@@ -893,7 +891,7 @@ static void update_preview_buttons(HWND hMainWnd)
     EnableWindow(GetDlgItem(hReBar, ID_PREVIEW_ZOOMOUT), preview.zoomlevel > 0);
 }
 
-LRESULT print_preview(HWND hwndPreview)
+static LRESULT print_preview(HWND hwndPreview)
 {
     HDC hdc;
     RECT window, background;
@@ -1041,7 +1039,7 @@ static void toggle_num_pages(HWND hMainWnd)
 
 /* Returns the page shown that the point is in (1 or 2) or 0 if the point
  * isn't inside either page */
-int preview_page_hittest(POINT pt)
+static int preview_page_hittest(POINT pt)
 {
     RECT rc;
     rc.left = preview.spacing.cx;

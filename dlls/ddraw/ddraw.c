@@ -275,9 +275,6 @@ IDirectDrawImpl_Destroy(IDirectDrawImpl *This)
         This->devicewindow = 0;
     }
 
-    /* Unregister the window class */
-    UnregisterClassA(This->classname, 0);
-
     EnterCriticalSection(&ddraw_cs);
     list_remove(&This->ddraw_list_entry);
     LeaveCriticalSection(&ddraw_cs);
@@ -348,7 +345,7 @@ IDirectDrawImpl_Release(IDirectDraw7 *iface)
  *  DDSCL_SETDEVICEWINDOW: Sets a window specially used for rendering (I don't
  *  expect any difference to a normal window for wine)
  *  DDSCL_CREATEDEVICEWINDOW: Tells ddraw to create its own window for
- *  rendering (Possible test case: Half-life)
+ *  rendering (Possible test case: Half-Life)
  *
  * Unsure about these: DDSCL_FPUSETUP DDSCL_FPURESERVE
  *
@@ -504,11 +501,15 @@ IDirectDrawImpl_SetCooperativeLevel(IDirectDraw7 *iface,
         /* Don't create a device window if a focus window is set */
         if( !(This->focuswindow) )
         {
-            HWND devicewindow = CreateWindowExA(0, This->classname, "DDraw device window",
-                                                WS_POPUP, 0, 0,
-                                                GetSystemMetrics(SM_CXSCREEN),
-                                                GetSystemMetrics(SM_CYSCREEN),
-                                                NULL, NULL, GetModuleHandleA(0), NULL);
+            HWND devicewindow = CreateWindowExA(0, DDRAW_WINDOW_CLASS_NAME, "DDraw device window",
+                    WS_POPUP, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                    NULL, NULL, NULL, NULL);
+            if (!devicewindow)
+            {
+                ERR("Failed to create window, last error %#x.\n", GetLastError());
+                LeaveCriticalSection(&ddraw_cs);
+                return E_FAIL;
+            }
 
             ShowWindow(devicewindow, SW_SHOW);   /* Just to be sure */
             TRACE("(%p) Created a DDraw device window. HWND=%p\n", This, devicewindow);
@@ -2875,11 +2876,14 @@ IDirectDrawImpl_AttachD3DDevice(IDirectDrawImpl *This,
     /* If there's no window, create a hidden window. WineD3D needs it */
     if(window == 0 || window == GetDesktopWindow())
     {
-        window = CreateWindowExA(0, This->classname, "Hidden D3D Window",
-                                 WS_DISABLED, 0, 0,
-                                 GetSystemMetrics(SM_CXSCREEN),
-                                 GetSystemMetrics(SM_CYSCREEN),
-                                 NULL, NULL, GetModuleHandleA(0), NULL);
+        window = CreateWindowExA(0, DDRAW_WINDOW_CLASS_NAME, "Hidden D3D Window",
+                WS_DISABLED, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN),
+                NULL, NULL, NULL, NULL);
+        if (!window)
+        {
+            ERR("Failed to create window, last error %#x.\n", GetLastError());
+            return E_FAIL;
+        }
 
         ShowWindow(window, SW_HIDE);   /* Just to be sure */
         WARN("(%p) No window for the Direct3DDevice, created a hidden window. HWND=%p\n", This, window);

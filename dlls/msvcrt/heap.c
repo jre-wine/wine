@@ -39,7 +39,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
       ~(alignment - 1)) - offset))
 
 
-typedef void (*MSVCRT_new_handler_func)(MSVCRT_size_t size);
+typedef void (CDECL *MSVCRT_new_handler_func)(MSVCRT_size_t size);
 
 static MSVCRT_new_handler_func MSVCRT_new_handler;
 static int MSVCRT_new_mode;
@@ -578,7 +578,7 @@ int CDECL strncpy_s(char *dest, MSVCRT_size_t numberOfElements,
         return MSVCRT_EINVAL;
     }
 
-    if(count!=_TRUNCATE && count<numberOfElements)
+    if(count!=MSVCRT__TRUNCATE && count<numberOfElements)
         end = count;
     else
         end = numberOfElements-1;
@@ -586,7 +586,7 @@ int CDECL strncpy_s(char *dest, MSVCRT_size_t numberOfElements,
     for(i=0; i<end && src[i]; i++)
         dest[i] = src[i];
 
-    if(!src[i] || end==count || count==_TRUNCATE) {
+    if(!src[i] || end==count || count==MSVCRT__TRUNCATE) {
         dest[i] = '\0';
         return 0;
     }

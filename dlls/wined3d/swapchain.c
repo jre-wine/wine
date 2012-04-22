@@ -33,8 +33,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(fps);
 
-#define GLINFO_LOCATION This->device->adapter->gl_info
-
 /*IWineD3DSwapChain parts follow: */
 static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface)
 {
@@ -105,6 +103,8 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
     UINT src_h = src_rect->bottom - src_rect->top;
     GLenum gl_filter;
     const struct wined3d_gl_info *gl_info = context->gl_info;
+    RECT win_rect;
+    UINT win_h;
 
     TRACE("swapchain %p, context %p, src_rect %s, dst_rect %s.\n",
             This, context, wine_dbgstr_rect(src_rect), wine_dbgstr_rect(dst_rect));
@@ -113,6 +113,9 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         gl_filter = GL_NEAREST;
     else
         gl_filter = GL_LINEAR;
+
+    GetClientRect(This->win_handle, &win_rect);
+    win_h = win_rect.bottom - win_rect.top;
 
     if (gl_info->fbo_ops.glBlitFramebuffer && is_identity_fixup(backbuffer->resource.format_desc->color_fixup))
     {
@@ -128,8 +131,8 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
 
         /* Note that the texture is upside down */
         gl_info->fbo_ops.glBlitFramebuffer(src_rect->left, src_rect->top, src_rect->right, src_rect->bottom,
-                                           dst_rect->left, dst_rect->bottom, dst_rect->right, dst_rect->top,
-                                           GL_COLOR_BUFFER_BIT, gl_filter);
+                dst_rect->left, win_h - dst_rect->top, dst_rect->right, win_h - dst_rect->bottom,
+                GL_COLOR_BUFFER_BIT, gl_filter);
         checkGLcall("Swapchain present blit(EXT_framebuffer_blit)\n");
         LEAVE_GL();
     }
@@ -176,7 +179,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
          * Note that context_apply_blit_state() set up viewport and ortho to
          * match the surface size - we want the GL drawable(=window) size. */
         glPushAttrib(GL_VIEWPORT_BIT);
-        glViewport(dst_rect->left, dst_rect->top, dst_rect->right, dst_rect->bottom);
+        glViewport(dst_rect->left, win_h - dst_rect->bottom, dst_rect->right, win_h - dst_rect->top);
         glMatrixMode(GL_PROJECTION);
         glPushMatrix();
         glLoadIdentity();
@@ -212,6 +215,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
 
 static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion, DWORD dwFlags) {
     IWineD3DSwapChainImpl *This = (IWineD3DSwapChainImpl *)iface;
+    const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     RECT src_rect, dst_rect;
     BOOL render_to_fbo;
@@ -227,6 +231,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         WARN("Invalid context, skipping present.\n");
         return WINED3D_OK;
     }
+
+    gl_info = context->gl_info;
 
     /* Render the cursor onto the back buffer, using our nifty directdraw blitting code :-) */
     if (This->device->bCursorVisible && This->device->cursorTexture)
@@ -249,7 +255,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         cursor.resource.ref = 1;
         cursor.resource.device = This->device;
         cursor.resource.pool = WINED3DPOOL_SCRATCH;
-        cursor.resource.format_desc = getFormatDescEntry(WINED3DFMT_B8G8R8A8_UNORM, context->gl_info);
+        cursor.resource.format_desc = getFormatDescEntry(WINED3DFMT_B8G8R8A8_UNORM, gl_info);
         cursor.resource.resourceType = WINED3DRTYPE_SURFACE;
         cursor.texture_name = This->device->cursorTexture;
         cursor.texture_target = GL_TEXTURE_2D;
@@ -361,46 +367,6 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         }
     }
 
-#if defined(FRAME_DEBUGGING)
-{
-    if (GetFileAttributesA("C:\\D3DTRACE") != INVALID_FILE_ATTRIBUTES) {
-        if (!isOn) {
-            isOn = TRUE;
-            FIXME("Enabling D3D Trace\n");
-            __WINE_SET_DEBUGGING(__WINE_DBCL_TRACE, __wine_dbch_d3d, 1);
-#if defined(SHOW_FRAME_MAKEUP)
-            FIXME("Singe Frame snapshots Starting\n");
-            isDumpingFrames = TRUE;
-            ENTER_GL();
-            glClear(GL_COLOR_BUFFER_BIT);
-            LEAVE_GL();
-#endif
-
-#if defined(SINGLE_FRAME_DEBUGGING)
-        } else {
-#if defined(SHOW_FRAME_MAKEUP)
-            FIXME("Singe Frame snapshots Finishing\n");
-            isDumpingFrames = FALSE;
-#endif
-            FIXME("Singe Frame trace complete\n");
-            DeleteFileA("C:\\D3DTRACE");
-            __WINE_SET_DEBUGGING(__WINE_DBCL_TRACE, __wine_dbch_d3d, 0);
-#endif
-        }
-    } else {
-        if (isOn) {
-            isOn = FALSE;
-#if defined(SHOW_FRAME_MAKEUP)
-            FIXME("Single Frame snapshots Finishing\n");
-            isDumpingFrames = FALSE;
-#endif
-            FIXME("Disabling D3D Trace\n");
-            __WINE_SET_DEBUGGING(__WINE_DBCL_TRACE, __wine_dbch_d3d, 0);
-        }
-    }
-}
-#endif
-
     /* This is disabled, but the code left in for debug purposes.
      *
      * Since we're allowed to modify the new back buffer on a D3DSWAPEFFECT_DISCARD flip,
@@ -480,7 +446,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
     }
 
     if (This->presentParms.PresentationInterval != WINED3DPRESENT_INTERVAL_IMMEDIATE
-            && context->gl_info->supported[SGI_VIDEO_SYNC])
+            && gl_info->supported[SGI_VIDEO_SYNC])
     {
         retval = GL_EXTCALL(glXGetVideoSyncSGI(&sync));
         if(retval != 0) {
@@ -963,7 +929,7 @@ struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *i
     }
     context_release(ctx);
 
-    newArray = HeapAlloc(GetProcessHeap(), 0, sizeof(*newArray) * This->num_contexts + 1);
+    newArray = HeapAlloc(GetProcessHeap(), 0, sizeof(*newArray) * (This->num_contexts + 1));
     if(!newArray) {
         ERR("Out of memory when trying to allocate a new context array\n");
         context_destroy(This->device, ctx);

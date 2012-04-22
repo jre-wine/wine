@@ -1469,13 +1469,13 @@ static void test_create(void)
 
 static void test_redraw(void)
 {
-    HWND hwnd, hwndheader;
+    HWND hwnd;
     HDC hdc;
     BOOL res;
     DWORD r;
 
     hwnd = create_listview_control(LVS_REPORT);
-    hwndheader = subclass_header(hwnd);
+    subclass_header(hwnd);
 
     flush_sequences(sequences, NUM_MSG_SEQUENCES);
 
@@ -2089,7 +2089,8 @@ static void test_subitem_rect(void)
     HWND hwnd;
     DWORD r;
     LVCOLUMN col;
-    RECT rect;
+    RECT rect, rect2;
+    INT arr[3];
 
     /* test LVM_GETSUBITEMRECT for header */
     hwnd = create_listview_control(LVS_REPORT);
@@ -2098,15 +2099,12 @@ static void test_subitem_rect(void)
     memset(&col, 0, sizeof(LVCOLUMN));
     col.mask = LVCF_WIDTH;
     col.cx = 100;
-    r = -1;
     r = SendMessage(hwnd, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
     expect(0, r);
     col.cx = 150;
-    r = -1;
     r = SendMessage(hwnd, LVM_INSERTCOLUMN, 1, (LPARAM)&col);
     expect(1, r);
     col.cx = 200;
-    r = -1;
     r = SendMessage(hwnd, LVM_INSERTCOLUMN, 2, (LPARAM)&col);
     expect(2, r);
     /* item = -1 means header, subitem index is 1 based */
@@ -2178,6 +2176,95 @@ todo_wine
     expect(240, rect.right);
 
     SendMessage(hwnd, LVM_SCROLL, -10, 0);
+
+    DestroyWindow(hwnd);
+
+    /* test subitem rects after re-arranging columns */
+    hwnd = create_listview_control(LVS_REPORT);
+    ok(hwnd != NULL, "failed to create a listview window\n");
+    memset(&col, 0, sizeof(LVCOLUMN));
+    col.mask = LVCF_WIDTH;
+
+    col.cx = 100;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 0, (LPARAM)&col);
+    expect(0, r);
+
+    col.cx = 200;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 1, (LPARAM)&col);
+    expect(1, r);
+
+    col.cx = 300;
+    r = SendMessage(hwnd, LVM_INSERTCOLUMN, 2, (LPARAM)&col);
+    expect(2, r);
+
+    insert_item(hwnd, 0);
+    insert_item(hwnd, 1);
+
+    /* wrong item is refused for main item */
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 0;
+    rect.right = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 2, (LPARAM)&rect);
+    ok(r == FALSE, "got %d\n", r);
+
+    /* for subitems rectangle is calculated even if there's no item added */
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 1;
+    rect.right = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 1, (LPARAM)&rect);
+    ok(r == TRUE, "got %d\n", r);
+
+    rect2.left = LVIR_BOUNDS;
+    rect2.top  = 1;
+    rect2.right = rect2.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 2, (LPARAM)&rect2);
+todo_wine {
+    ok(r == TRUE, "got %d\n", r);
+    expect(rect.right, rect2.right);
+    expect(rect.left, rect2.left);
+    expect(rect.bottom, rect2.top);
+    ok(rect2.bottom > rect2.top, "expected not zero height\n");
+}
+
+    arr[0] = 1; arr[1] = 0; arr[2] = 2;
+    r = SendMessage(hwnd, LVM_SETCOLUMNORDERARRAY, 3, (LPARAM)arr);
+    expect(TRUE, r);
+
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 0;
+    rect.right = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r == TRUE, "got %d\n", r);
+    expect(0, rect.left);
+    expect(600, rect.right);
+
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 1;
+    rect.right = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r == TRUE, "got %d\n", r);
+    expect(0, rect.left);
+    expect(200, rect.right);
+
+    rect2.left = LVIR_BOUNDS;
+    rect2.top  = 1;
+    rect2.right = rect2.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 1, (LPARAM)&rect2);
+    ok(r == TRUE, "got %d\n", r);
+    expect(0, rect2.left);
+    expect(200, rect2.right);
+    /* items are of the same height */
+    ok(rect2.top > 0, "expected positive item height\n");
+    expect(rect.bottom, rect2.top);
+    expect(rect.bottom * 2 - rect.top, rect2.bottom);
+
+    rect.left = LVIR_BOUNDS;
+    rect.top  = 2;
+    rect.right = rect.bottom = -1;
+    r = SendMessage(hwnd, LVM_GETSUBITEMRECT, 0, (LPARAM)&rect);
+    ok(r == TRUE, "got %d\n", r);
+    expect(300, rect.left);
+    expect(600, rect.right);
 
     DestroyWindow(hwnd);
 
@@ -3441,6 +3528,22 @@ static void test_editbox(void)
     item.iSubItem = 0;
     r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
     expect(0, r);
+
+    /* test notifications without edit created */
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(0, EN_SETFOCUS), (LPARAM)0xdeadbeef);
+    expect(0, r);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "edit box WM_COMMAND (EN_SETFOCUS), no edit created", FALSE);
+    /* same thing but with valid window */
+    hwndedit = CreateWindowA("Edit", "Test edit", WS_VISIBLE | WS_CHILD, 0, 0, 20,
+                10, hwnd, (HMENU)1, (HINSTANCE)GetWindowLongPtrA(hwnd, GWLP_HINSTANCE), 0);
+    flush_sequences(sequences, NUM_MSG_SEQUENCES);
+    r = SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(0, EN_SETFOCUS), (LPARAM)hwndedit);
+    expect(0, r);
+    ok_sequence(sequences, PARENT_SEQ_INDEX, empty_seq,
+                "edit box WM_COMMAND (EN_SETFOCUS), no edit created #2", FALSE);
+    DestroyWindow(hwndedit);
 
     /* setting focus is necessary */
     SetFocus(hwnd);

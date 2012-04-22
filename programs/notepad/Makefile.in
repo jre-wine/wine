@@ -14,6 +14,7 @@ C_SRCS = \
 	main.c
 
 RC_SRCS = \
+	Ar.rc \
 	Bg.rc \
 	Cs.rc \
 	Da.rc \
@@ -23,6 +24,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	Hu.rc \
 	It.rc \
 	Ja.rc \

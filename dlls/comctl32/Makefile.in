@@ -49,6 +49,7 @@ C_SRCS = \
 RC_SRCS = \
 	comctl_Bg.rc \
 	comctl_Cs.rc \
+	comctl_Da.rc \
 	comctl_De.rc \
 	comctl_El.rc \
 	comctl_En.rc \
@@ -74,5 +75,13 @@ RC_SRCS = \
 	comctl_Uk.rc \
 	comctl_Zh.rc \
 	rsrc.rc
+
+SVG_SRCS = \
+	idb_hist_large.svg \
+	idb_hist_small.svg \
+	idb_std_large.svg \
+	idb_std_small.svg \
+	idb_view_large.svg \
+	idb_view_small.svg
 
 @MAKE_DLL_RULES@

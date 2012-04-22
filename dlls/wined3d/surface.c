@@ -34,8 +34,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d_surface);
 WINE_DECLARE_DEBUG_CHANNEL(d3d);
 
-#define GLINFO_LOCATION (*gl_info)
-
 static void surface_cleanup(IWineD3DSurfaceImpl *This)
 {
     IWineD3DDeviceImpl *device = This->resource.device;
@@ -850,6 +848,7 @@ static void surface_allocate_surface(IWineD3DSurfaceImpl *This, const struct win
     {
         GL_EXTCALL(glCompressedTexImage2DARB(This->texture_target, This->texture_level,
                 internal, width, height, 0, This->resource.size, mem));
+        checkGLcall("glCompressedTexImage2DARB");
     }
     else
     {
@@ -1495,7 +1494,15 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This, BOOL srgb)
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     GLint prevRead;
-    BOOL alloc_flag = srgb ? SFLAG_SRGBALLOCATED : SFLAG_ALLOCATED;
+
+    if (!surface_is_offscreen(This))
+    {
+        /* We would need to flip onscreen surfaces, but there's no efficient
+         * way to do that here. It makes more sense for the caller to
+         * explicitly go through sysmem. */
+        ERR("Not supported for onscreen targets.\n");
+        return;
+    }
 
     /* Activate the surface to read from. In some situations it isn't the currently active target(e.g. backbuffer
      * locking during offscreen rendering). RESOURCELOAD is ok because glCopyTexSubImage2D isn't affected by any
@@ -1504,50 +1511,16 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This, BOOL srgb)
     context = context_acquire(device, This);
     gl_info = context->gl_info;
 
+    surface_prepare_texture(This, gl_info, srgb);
     surface_bind_and_dirtify(This, srgb);
 
+    TRACE("Reading back offscreen render target %p.\n", This);
+
     ENTER_GL();
+
     glGetIntegerv(GL_READ_BUFFER, &prevRead);
-    LEAVE_GL();
-
-    /* Select the correct read buffer, and give some debug output.
-     * There is no need to keep track of the current read buffer or reset it, every part of the code
-     * that reads sets the read buffer as desired.
-     */
-    if (!surface_is_offscreen(This))
-    {
-        GLenum buffer = surface_get_gl_buffer(This);
-        TRACE("Locking %#x buffer\n", buffer);
-
-        ENTER_GL();
-        glReadBuffer(buffer);
-        checkGLcall("glReadBuffer");
-        LEAVE_GL();
-    }
-    else
-    {
-        /* Locking the primary render target which is not on a swapchain(=offscreen render target).
-         * Read from the back buffer
-         */
-        TRACE("Locking offscreen render target\n");
-        ENTER_GL();
-        glReadBuffer(device->offscreenBuffer);
-        checkGLcall("glReadBuffer");
-        LEAVE_GL();
-    }
-
-    if (!(This->Flags & alloc_flag))
-    {
-        surface_allocate_surface(This, gl_info, This->resource.format_desc, srgb);
-        This->Flags |= alloc_flag;
-    }
-
-    ENTER_GL();
-    /* If !SrcIsUpsideDown we should flip the surface.
-     * This can be done using glCopyTexSubImage2D but this
-     * is VERY slow, so don't do that. We should prevent
-     * this code from getting called in such cases or perhaps
-     * we can use FBOs */
+    glReadBuffer(device->offscreenBuffer);
+    checkGLcall("glReadBuffer");
 
     glCopyTexSubImage2D(This->texture_target, This->texture_level,
             0, 0, 0, 0, This->currentDesc.Width, This->currentDesc.Height);
@@ -1559,8 +1532,6 @@ static void read_from_framebuffer_texture(IWineD3DSurfaceImpl *This, BOOL srgb)
     LEAVE_GL();
 
     context_release(context);
-
-    TRACE("Updated target %d\n", This->texture_target);
 }
 
 /* Context activation is done by the caller. */
@@ -1574,7 +1545,7 @@ static void surface_prepare_texture_internal(IWineD3DSurfaceImpl *surface,
     if (surface->Flags & alloc_flag) return;
 
     d3dfmt_get_conv(surface, TRUE, TRUE, &desc, &convert);
-    if(convert != NO_CONVERSION) surface->Flags |= SFLAG_CONVERTED;
+    if(convert != NO_CONVERSION || desc.convert) surface->Flags |= SFLAG_CONVERTED;
     else surface->Flags &= ~SFLAG_CONVERTED;
 
     surface_bind_and_dirtify(surface, srgb);
@@ -1686,7 +1657,8 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LockRect(IWineD3DSurface *iface, WINED
     IWineD3DDeviceImpl *device = This->resource.device;
     const RECT *pass_rect = pRect;
 
-    TRACE("(%p) : rect@%p flags(%08x), output lockedRect@%p, memory@%p\n", This, pRect, Flags, pLockedRect, This->resource.allocatedMemory);
+    TRACE("iface %p, locked_rect %p, rect %s, flags %#x.\n",
+            iface, pLockedRect, wine_dbgstr_rect(pRect), Flags);
 
     /* This is also done in the base class, but we have to verify this before loading any data from
      * gl into the sysmem copy. The PBO may be mapped, a different rectangle locked, the discard flag
@@ -2152,8 +2124,8 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
 {
     BOOL colorkey_active = need_alpha_ck && (This->CKeyFlags & WINEDDSD_CKSRCBLT);
     IWineD3DDeviceImpl *device = This->resource.device;
+    const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
     BOOL blit_supported = FALSE;
-    RECT rect = {0, 0, This->pow2Width, This->pow2Height};
 
     /* Copy the default values from the surface. Below we might perform fixups */
     /* TODO: get rid of color keying desc fixups by using e.g. a table. */
@@ -2168,10 +2140,19 @@ HRESULT d3dfmt_get_conv(IWineD3DSurfaceImpl *This, BOOL need_alpha_ck, BOOL use_
                 Paletted Texture
                 **************** */
 
+            /* Below the call to blit_supported is disabled for Wine 1.2 because the function isn't operating correctly yet.
+             * At the moment 8-bit blits are handled in software and if certain GL extensions are around, surface conversion
+             * is performed at upload time. The blit_supported call recognizes it as a destination fixup. This type of upload 'fixup'
+             * and 8-bit to 8-bit blits need to be handled by the blit_shader.
+             * TODO: get rid of this #if 0
+             */
+#if 0
             blit_supported = device->blitter->blit_supported(&device->adapter->gl_info, BLIT_OP_BLIT,
                                                              &rect, This->resource.usage, This->resource.pool,
                                                              This->resource.format_desc, &rect, This->resource.usage,
                                                              This->resource.pool, This->resource.format_desc);
+#endif
+            blit_supported = gl_info->supported[EXT_PALETTED_TEXTURE] || gl_info->supported[ARB_FRAGMENT_PROGRAM];
 
             /* Use conversion when the blit_shader backend supports it. It only supports this in case of
              * texturing. Further also use conversion in case of color keying.
@@ -2553,26 +2534,6 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadTexture(IWineD3DSurface *iface, BO
 
     IWineD3DSurface_LoadLocation(iface, flag, NULL /* no partial locking for textures yet */);
 
-#if 0
-    {
-        static unsigned int gen = 0;
-        char buffer[4096];
-        ++gen;
-        if ((gen % 10) == 0) {
-            snprintf(buffer, sizeof(buffer), "/tmp/surface%p_type%u_level%u_%u.ppm",
-                    This, This->texture_target, This->texture_level, gen);
-            IWineD3DSurfaceImpl_SaveSnapshot(iface, buffer);
-        }
-        /*
-         * debugging crash code
-         if (gen == 250) {
-         void** test = NULL;
-         *test = 0;
-         }
-         */
-    }
-#endif
-
     if (!(This->Flags & SFLAG_DONOTFREE)) {
         HeapFree(GetProcessHeap(), 0, This->resource.heapMemory);
         This->resource.allocatedMemory = NULL;
@@ -2636,147 +2597,6 @@ static void WINAPI IWineD3DSurfaceImpl_BindTexture(IWineD3DSurface *iface, BOOL 
 
         LEAVE_GL();
     }
-}
-
-#include <errno.h>
-#include <stdio.h>
-static HRESULT WINAPI IWineD3DSurfaceImpl_SaveSnapshot(IWineD3DSurface *iface, const char* filename)
-{
-    FILE* f = NULL;
-    IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *)iface;
-    char *allocatedMemory;
-    const char *textureRow;
-    IWineD3DSwapChain *swapChain = NULL;
-    int width, height, i, y;
-    GLuint tmpTexture = 0;
-    DWORD color;
-    /*FIXME:
-    Textures may not be stored in ->allocatedgMemory and a GlTexture
-    so we should lock the surface before saving a snapshot, or at least check that
-    */
-    /* TODO: Compressed texture images can be obtained from the GL in uncompressed form
-    by calling GetTexImage and in compressed form by calling
-    GetCompressedTexImageARB.  Queried compressed images can be saved and
-    later reused by calling CompressedTexImage[123]DARB.  Pre-compressed
-    texture images do not need to be processed by the GL and should
-    significantly improve texture loading performance relative to uncompressed
-    images. */
-
-/* Setup the width and height to be the internal texture width and height. */
-    width  = This->pow2Width;
-    height = This->pow2Height;
-/* check to see if we're a 'virtual' texture, e.g. we're not a pbuffer of texture, we're a back buffer*/
-    IWineD3DSurface_GetContainer(iface, &IID_IWineD3DSwapChain, (void **)&swapChain);
-
-    if (This->Flags & SFLAG_INDRAWABLE && !(This->Flags & SFLAG_INTEXTURE)) {
-        /* if were not a real texture then read the back buffer into a real texture */
-        /* we don't want to interfere with the back buffer so read the data into a temporary
-         * texture and then save the data out of the temporary texture
-         */
-        GLint prevRead;
-        ENTER_GL();
-        TRACE("(%p) Reading render target into texture\n", This);
-
-        glGenTextures(1, &tmpTexture);
-        glBindTexture(GL_TEXTURE_2D, tmpTexture);
-
-        glTexImage2D(GL_TEXTURE_2D,
-                        0,
-                        GL_RGBA,
-                        width,
-                        height,
-                        0/*border*/,
-                        GL_RGBA,
-                        GL_UNSIGNED_INT_8_8_8_8_REV,
-                        NULL);
-
-        glGetIntegerv(GL_READ_BUFFER, &prevRead);
-        checkGLcall("glGetIntegerv");
-        glReadBuffer(swapChain ? GL_BACK : This->resource.device->offscreenBuffer);
-        checkGLcall("glReadBuffer");
-        glCopyTexImage2D(GL_TEXTURE_2D,
-                            0,
-                            GL_RGBA,
-                            0,
-                            0,
-                            width,
-                            height,
-                            0);
-
-        checkGLcall("glCopyTexImage2D");
-        glReadBuffer(prevRead);
-        LEAVE_GL();
-
-    } else { /* bind the real texture, and make sure it up to date */
-        surface_internal_preload(This, SRGB_RGB);
-        surface_bind_and_dirtify(This, FALSE);
-    }
-    allocatedMemory = HeapAlloc(GetProcessHeap(), 0, width  * height * 4);
-    ENTER_GL();
-    FIXME("Saving texture level %d width %d height %d\n", This->texture_level, width, height);
-    glGetTexImage(GL_TEXTURE_2D, This->texture_level, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, allocatedMemory);
-    checkGLcall("glGetTexImage");
-    if (tmpTexture) {
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glDeleteTextures(1, &tmpTexture);
-    }
-    LEAVE_GL();
-
-    f = fopen(filename, "w+");
-    if (NULL == f) {
-        ERR("opening of %s failed with: %s\n", filename, strerror(errno));
-        return WINED3DERR_INVALIDCALL;
-    }
-/* Save the data out to a TGA file because 1: it's an easy raw format, 2: it supports an alpha channel */
-    TRACE("(%p) opened %s with format %s\n", This, filename, debug_d3dformat(This->resource.format_desc->format));
-/* TGA header */
-    fputc(0,f);
-    fputc(0,f);
-    fputc(2,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-    fputc(0,f);
-/* short width*/
-    fwrite(&width,2,1,f);
-/* short height */
-    fwrite(&height,2,1,f);
-/* format rgba */
-    fputc(0x20,f);
-    fputc(0x28,f);
-/* raw data */
-    /* if the data is upside down if we've fetched it from a back buffer, so it needs flipping again to make it the correct way up */
-    if(swapChain)
-        textureRow = allocatedMemory + (width * (height - 1) *4);
-    else
-        textureRow = allocatedMemory;
-    for (y = 0 ; y < height; y++) {
-        for (i = 0; i < width;  i++) {
-            color = *((const DWORD*)textureRow);
-            fputc((color >> 16) & 0xFF, f); /* B */
-            fputc((color >>  8) & 0xFF, f); /* G */
-            fputc((color >>  0) & 0xFF, f); /* R */
-            fputc((color >> 24) & 0xFF, f); /* A */
-            textureRow += 4;
-        }
-        /* take two rows of the pointer to the texture memory */
-        if(swapChain)
-            (textureRow-= width << 3);
-
-    }
-    TRACE("Closing file\n");
-    fclose(f);
-
-    if(swapChain) {
-        IWineD3DSwapChain_Release(swapChain);
-    }
-    HeapFree(GetProcessHeap(), 0, allocatedMemory);
-    return WINED3D_OK;
 }
 
 static HRESULT WINAPI IWineD3DSurfaceImpl_SetFormat(IWineD3DSurface *iface, WINED3DFORMAT format) {
@@ -3385,6 +3205,21 @@ static BOOL fbo_blit_supported(const struct wined3d_gl_info *gl_info, enum blit_
                                const RECT *dst_rect, DWORD dst_usage, WINED3DPOOL dst_pool,
                                const struct wined3d_format_desc *dst_format_desc);
 
+/* Front buffer coordinates are always full screen coordinates, but our GL
+ * drawable is limited to the window's client area. The sysmem and texture
+ * copies do have the full screen size. Note that GL has a bottom-left
+ * origin, while D3D has a top-left origin. */
+void surface_translate_frontbuffer_coords(IWineD3DSurfaceImpl *surface, HWND window, RECT *rect)
+{
+    POINT offset = {0, surface->currentDesc.Height};
+    RECT windowsize;
+
+    GetClientRect(window, &windowsize);
+    offset.y -= windowsize.bottom - windowsize.top;
+    ScreenToClient(window, &offset);
+    OffsetRect(rect, offset.x, offset.y);
+}
+
 /* Not called from the VTable */
 static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *dst_surface, const RECT *DestRect,
         IWineD3DSurfaceImpl *src_surface, const RECT *SrcRect, DWORD Flags, const WINEDDBLTFX *DDBltFx,
@@ -3441,7 +3276,7 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *dst_surface,
             && dst_surface == dstSwapchain->front_buffer
             && src_surface == dstSwapchain->back_buffers[0])
     {
-        /* Half-life does a Blt from the back buffer to the front buffer,
+        /* Half-Life does a Blt from the back buffer to the front buffer,
          * Full surface size, no flags... Use present instead
          *
          * This path will only be entered for d3d7 and ddraw apps, because d3d8/9 offer no way to blit TO the front buffer
@@ -3679,25 +3514,8 @@ static HRESULT IWineD3DSurfaceImpl_BltOverride(IWineD3DSurfaceImpl *dst_surface,
         context = context_acquire(device, dst_surface);
         context_apply_blit_state(context, device);
 
-        /* The coordinates of the ddraw front buffer are always fullscreen ('screen coordinates',
-         * while OpenGL coordinates are window relative.
-         * Also beware of the origin difference(top left vs bottom left).
-         * Also beware that the front buffer's surface size is screen width x screen height,
-         * whereas the real gl drawable size is the size of the window.
-         */
         if (dstSwapchain && dst_surface == dstSwapchain->front_buffer)
-        {
-            RECT windowsize;
-            POINT offset = {0,0};
-            UINT h;
-            ClientToScreen(context->win_handle, &offset);
-            GetClientRect(context->win_handle, &windowsize);
-            h = windowsize.bottom - windowsize.top;
-            dst_rect.left -= offset.x; dst_rect.right -=offset.x;
-            dst_rect.top -= offset.y; dst_rect.bottom -=offset.y;
-            dst_rect.top += dst_surface->currentDesc.Height - h;
-            dst_rect.bottom += dst_surface->currentDesc.Height - h;
-        }
+            surface_translate_frontbuffer_coords(dst_surface, context->win_handle, &dst_rect);
 
         if (!device->blitter->blit_supported(&device->adapter->gl_info, BLIT_OP_BLIT,
                 &src_rect, src_surface->resource.usage, src_surface->resource.pool, src_surface->resource.format_desc,
@@ -4076,6 +3894,7 @@ static void surface_depth_blt(IWineD3DSurfaceImpl *This, const struct wined3d_gl
         GLuint texture, GLsizei w, GLsizei h, GLenum target)
 {
     IWineD3DDeviceImpl *device = This->resource.device;
+    GLint compare_mode = GL_NONE;
     struct blt_info info;
     GLint old_binding = 0;
 
@@ -4096,6 +3915,11 @@ static void surface_depth_blt(IWineD3DSurfaceImpl *This, const struct wined3d_gl
     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
     glGetIntegerv(info.binding, &old_binding);
     glBindTexture(info.bind_target, texture);
+    if (gl_info->supported[ARB_SHADOW])
+    {
+        glGetTexParameteriv(info.bind_target, GL_TEXTURE_COMPARE_MODE_ARB, &compare_mode);
+        if (compare_mode != GL_NONE) glTexParameteri(info.bind_target, GL_TEXTURE_COMPARE_MODE_ARB, GL_NONE);
+    }
 
     device->shader_backend->shader_select_depth_blt((IWineD3DDevice *)device,
             info.tex_type, &This->ds_current_size);
@@ -4111,6 +3935,7 @@ static void surface_depth_blt(IWineD3DSurfaceImpl *This, const struct wined3d_gl
     glVertex2f(1.0f, 1.0f);
     glEnd();
 
+    if (compare_mode != GL_NONE) glTexParameteri(info.bind_target, GL_TEXTURE_COMPARE_MODE_ARB, compare_mode);
     glBindTexture(info.bind_target, old_binding);
 
     glPopAttrib();
@@ -4348,13 +4173,16 @@ static inline void surface_blt_to_drawable(IWineD3DSurfaceImpl *This, const RECT
         dst_rect = src_rect;
     }
 
+    if ((This->Flags & SFLAG_SWAPCHAIN) && This == ((IWineD3DSwapChainImpl *)This->container)->front_buffer)
+        surface_translate_frontbuffer_coords(This, context->win_handle, &dst_rect);
+
     device->blitter->set_shader((IWineD3DDevice *) device, This);
 
     ENTER_GL();
     draw_textured_quad(This, &src_rect, &dst_rect, WINED3DTEXF_POINT);
     LEAVE_GL();
 
-    device->blitter->set_shader((IWineD3DDevice *) device, This);
+    device->blitter->unset_shader((IWineD3DDevice *) device);
 
     swapchain = (This->Flags & SFLAG_SWAPCHAIN) ? (IWineD3DSwapChainImpl *)This->container : NULL;
     if (wined3d_settings.strict_draw_ordering || (swapchain
@@ -4389,12 +4217,28 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
     IWineD3DSurfaceImpl *This = (IWineD3DSurfaceImpl *) iface;
     IWineD3DDeviceImpl *device = This->resource.device;
     const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
+    BOOL drawable_read_ok = surface_is_offscreen(This);
     struct wined3d_format_desc desc;
     CONVERT_TYPES convert;
     int width, pitch, outpitch;
     BYTE *mem;
-    BOOL drawable_read_ok = TRUE;
     BOOL in_fbo = FALSE;
+
+    if (This->resource.usage & WINED3DUSAGE_DEPTHSTENCIL)
+    {
+        if (flag == SFLAG_INTEXTURE)
+        {
+            struct wined3d_context *context = context_acquire(device, NULL);
+            surface_load_ds_location(This, context, SFLAG_DS_OFFSCREEN);
+            context_release(context);
+            return WINED3D_OK;
+        }
+        else
+        {
+            FIXME("Unimplemented location %#x for depth/stencil buffers.\n", flag);
+            return WINED3DERR_INVALIDCALL;
+        }
+    }
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
@@ -4536,9 +4380,9 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
                     IWineD3DSurfaceImpl_LoadLocation(iface, SFLAG_INSYSMEM, rect);
                 }
             }
-            if(!(This->Flags & SFLAG_INSYSMEM)) {
-                /* Should not happen */
-                ERR("Trying to load a texture from sysmem, but SFLAG_INSYSMEM is not set\n");
+            if (!(This->Flags & SFLAG_INSYSMEM))
+            {
+                WARN("Trying to load a texture from sysmem, but SFLAG_INSYSMEM is not set.\n");
                 /* Lets hope we get it from somewhere... */
                 IWineD3DSurfaceImpl_LoadLocation(iface, SFLAG_INSYSMEM, rect);
             }
@@ -4560,7 +4404,7 @@ static HRESULT WINAPI IWineD3DSurfaceImpl_LoadLocation(IWineD3DSurface *iface, D
 
             /* Don't use PBOs for converted surfaces. During PBO conversion we look at SFLAG_CONVERTED
              * but it isn't set (yet) in all cases it is getting called. */
-            if((convert != NO_CONVERSION) && (This->Flags & SFLAG_PBO)) {
+            if(((convert != NO_CONVERSION) || desc.convert) && (This->Flags & SFLAG_PBO)) {
                 TRACE("Removing the pbo attached to surface %p\n", This);
                 surface_remove_pbo(This, gl_info);
             }
@@ -4740,7 +4584,6 @@ const IWineD3DSurfaceVtbl IWineD3DSurface_Vtbl =
     /* Internal use: */
     IWineD3DSurfaceImpl_LoadTexture,
     IWineD3DSurfaceImpl_BindTexture,
-    IWineD3DSurfaceImpl_SaveSnapshot,
     IWineD3DSurfaceImpl_SetContainer,
     IWineD3DBaseSurfaceImpl_GetData,
     IWineD3DSurfaceImpl_SetFormat,

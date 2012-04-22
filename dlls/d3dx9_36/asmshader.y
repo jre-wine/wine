@@ -60,6 +60,7 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
         float           val;
         BOOL            integer;
     } immval;
+    BOOL                immbool;
     unsigned int        regnum;
     struct shader_reg   reg;
     DWORD               srcmod;
@@ -79,6 +80,12 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
         DWORD           mod;
         DWORD           shift;
     } modshift;
+    BWRITER_COMPARISON_TYPE comptype;
+    struct {
+        DWORD           dclusage;
+        unsigned int    regnum;
+    } declaration;
+    BWRITERSAMPLER_TEXTURE_TYPE samplertype;
     struct rel_reg      rel_reg;
     struct src_regs     sregs;
 }
@@ -116,11 +123,40 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
 %token INSTR_M3x4
 %token INSTR_M3x3
 %token INSTR_M3x2
+%token INSTR_DCL
+%token INSTR_DEF
+%token INSTR_DEFB
+%token INSTR_DEFI
+%token INSTR_REP
+%token INSTR_ENDREP
+%token INSTR_IF
+%token INSTR_ELSE
+%token INSTR_ENDIF
+%token INSTR_BREAK
+%token INSTR_BREAKP
+%token INSTR_CALL
+%token INSTR_CALLNZ
+%token INSTR_LOOP
+%token INSTR_RET
+%token INSTR_ENDLOOP
+%token INSTR_LABEL
+%token INSTR_SETP
 %token INSTR_TEXLDL
 
 /* Vertex shader only instructions  */
 %token INSTR_LIT
 %token INSTR_MOVA
+
+/* Pixel shader only instructions   */
+%token INSTR_CMP
+%token INSTR_DP2ADD
+%token INSTR_TEXKILL
+%token INSTR_TEXLD
+%token INSTR_DSX
+%token INSTR_DSY
+%token INSTR_TEXLDP
+%token INSTR_TEXLDB
+%token INSTR_TEXLDD
 
 /* Registers */
 %token <regnum> REG_TEMP
@@ -166,12 +202,44 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
 %token MOD_PP
 %token MOD_CENTROID
 
+/* Compare tokens */
+%token COMP_GT
+%token COMP_LT
+%token COMP_GE
+%token COMP_LE
+%token COMP_EQ
+%token COMP_NE
+
 /* Source register modifiers */
 %token SMOD_ABS
+%token SMOD_NOT
+
+/* Sampler types */
+%token SAMPTYPE_1D
+%token SAMPTYPE_2D
+%token SAMPTYPE_CUBE
+%token SAMPTYPE_VOLUME
+
+/* Usage declaration tokens */
+%token <regnum> USAGE_POSITION
+%token <regnum> USAGE_BLENDWEIGHT
+%token <regnum> USAGE_BLENDINDICES
+%token <regnum> USAGE_NORMAL
+%token <regnum> USAGE_PSIZE
+%token <regnum> USAGE_TEXCOORD
+%token <regnum> USAGE_TANGENT
+%token <regnum> USAGE_BINORMAL
+%token <regnum> USAGE_TESSFACTOR
+%token <regnum> USAGE_POSITIONT
+%token <regnum> USAGE_COLOR
+%token <regnum> USAGE_FOG
+%token <regnum> USAGE_DEPTH
+%token <regnum> USAGE_SAMPLE
 
 /* Misc stuff */
 %token <component> COMPONENT
 %token <immval> IMMVAL
+%token <immbool> IMMBOOL
 
 %type <reg> dreg_name
 %type <reg> dreg
@@ -185,7 +253,12 @@ void set_rel_reg(struct shader_reg *reg, struct rel_reg *rel) {
 %type <sw_components> sw_components
 %type <modshift> omods
 %type <modshift> omodifier
+%type <comptype> comp
+%type <declaration> dclusage
+%type <reg> dcl_inputreg
+%type <samplertype> sampdcl
 %type <rel_reg> rel_reg
+%type <reg> predicate
 %type <immval> immsum
 %type <sregs> sregs
 
@@ -199,26 +272,22 @@ shader:               version_marker instructions
 version_marker:       VER_VS10
                         {
                             TRACE("Vertex shader 1.0\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_vs10_parser(&asm_ctx);
                         }
                     | VER_VS11
                         {
                             TRACE("Vertex shader 1.1\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_vs11_parser(&asm_ctx);
                         }
                     | VER_VS20
                         {
                             TRACE("Vertex shader 2.0\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_vs20_parser(&asm_ctx);
                         }
                     | VER_VS2X
                         {
                             TRACE("Vertex shader 2.x\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_vs2x_parser(&asm_ctx);
                         }
                     | VER_VS30
                         {
@@ -258,20 +327,17 @@ version_marker:       VER_VS10
                     | VER_PS20
                         {
                             TRACE("Pixel  shader 2.0\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_ps20_parser(&asm_ctx);
                         }
                     | VER_PS2X
                         {
                             TRACE("Pixel  shader 2.x\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_ps2x_parser(&asm_ctx);
                         }
                     | VER_PS30
                         {
                             TRACE("Pixel  shader 3.0\n");
-                            set_parse_status(&asm_ctx, PARSE_ERR);
-                            YYABORT;
+                            create_ps30_parser(&asm_ctx);
                         }
 
 instructions:         /* empty */
@@ -283,6 +349,11 @@ instructions:         /* empty */
 complexinstr:         instruction
                             {
 
+                            }
+                    | predicate instruction
+                            {
+                                TRACE("predicate\n");
+                                asm_ctx.funcs->predicate(&asm_ctx, &$1);
                             }
 
 instruction:          INSTR_ADD omods dreg ',' sregs
@@ -445,6 +516,229 @@ instruction:          INSTR_ADD omods dreg ',' sregs
                                 TRACE("M3x2\n");
                                 asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_M3x2, $2.mod, $2.shift, 0, &$3, &$5, 2);
                             }
+                    | INSTR_DCL dclusage REG_OUTPUT
+                            {
+                                struct shader_reg reg;
+                                TRACE("Output reg declaration\n");
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = BWRITERSPR_OUTPUT;
+                                reg.regnum = $3;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = BWRITERSP_WRITEMASK_ALL;
+                                asm_ctx.funcs->dcl_output(&asm_ctx, $2.dclusage, $2.regnum, &reg);
+                            }
+                    | INSTR_DCL dclusage REG_OUTPUT writemask
+                            {
+                                struct shader_reg reg;
+                                TRACE("Output reg declaration\n");
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = BWRITERSPR_OUTPUT;
+                                reg.regnum = $3;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = $4;
+                                asm_ctx.funcs->dcl_output(&asm_ctx, $2.dclusage, $2.regnum, &reg);
+                            }
+                    | INSTR_DCL dclusage omods dcl_inputreg
+                            {
+                                struct shader_reg reg;
+                                TRACE("Input reg declaration\n");
+                                if($3.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = $4.type;
+                                reg.regnum = $4.regnum;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = BWRITERSP_WRITEMASK_ALL;
+                                asm_ctx.funcs->dcl_input(&asm_ctx, $2.dclusage, $2.regnum, $3.mod, &reg);
+                            }
+                    | INSTR_DCL dclusage omods dcl_inputreg writemask
+                            {
+                                struct shader_reg reg;
+                                TRACE("Input reg declaration\n");
+                                if($3.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = $4.type;
+                                reg.regnum = $4.regnum;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = $5;
+                                asm_ctx.funcs->dcl_input(&asm_ctx, $2.dclusage, $2.regnum, $3.mod, &reg);
+                            }
+                    | INSTR_DCL omods dcl_inputreg
+                            {
+                                struct shader_reg reg;
+                                TRACE("Input reg declaration\n");
+                                if($2.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = $3.type;
+                                reg.regnum = $3.regnum;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = BWRITERSP_WRITEMASK_ALL;
+                                asm_ctx.funcs->dcl_input(&asm_ctx, 0, 0, $2.mod, &reg);
+                            }
+                    | INSTR_DCL omods dcl_inputreg writemask
+                            {
+                                struct shader_reg reg;
+                                TRACE("Input reg declaration\n");
+                                if($2.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                ZeroMemory(&reg, sizeof(reg));
+                                reg.type = $3.type;
+                                reg.regnum = $3.regnum;
+                                reg.rel_reg = NULL;
+                                reg.srcmod = 0;
+                                reg.writemask = $4;
+                                asm_ctx.funcs->dcl_input(&asm_ctx, 0, 0, $2.mod, &reg);
+                            }
+                    | INSTR_DCL sampdcl omods REG_SAMPLER
+                            {
+                                TRACE("Sampler declared\n");
+                                if($3.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                asm_ctx.funcs->dcl_sampler(&asm_ctx, $2, $3.mod, $4, asm_ctx.line_no);
+                            }
+                    | INSTR_DCL omods REG_SAMPLER
+                            {
+                                TRACE("Sampler declared\n");
+                                if($2.shift != 0) {
+                                    asmparser_message(&asm_ctx, "Line %u: Shift modifier not allowed here\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                if(asm_ctx.shader->type != ST_PIXEL) {
+                                    asmparser_message(&asm_ctx, "Line %u: Declaration needs a sampler type\n",
+                                                      asm_ctx.line_no);
+                                    set_parse_status(&asm_ctx, PARSE_ERR);
+                                }
+                                asm_ctx.funcs->dcl_sampler(&asm_ctx, BWRITERSTT_UNKNOWN, $2.mod, $3, asm_ctx.line_no);
+                            }
+                    | INSTR_DCL sampdcl omods dcl_inputreg
+                            {
+                                TRACE("Error rule: sampler decl of input reg\n");
+                                asmparser_message(&asm_ctx, "Line %u: Sampler declarations of input regs is not valid\n",
+                                                  asm_ctx.line_no);
+                                set_parse_status(&asm_ctx, PARSE_WARN);
+                            }
+                    | INSTR_DCL sampdcl omods REG_OUTPUT
+                            {
+                                TRACE("Error rule: sampler decl of output reg\n");
+                                asmparser_message(&asm_ctx, "Line %u: Sampler declarations of output regs is not valid\n",
+                                                  asm_ctx.line_no);
+                                set_parse_status(&asm_ctx, PARSE_WARN);
+                            }
+                    | INSTR_DEF REG_CONSTFLOAT ',' IMMVAL ',' IMMVAL ',' IMMVAL ',' IMMVAL
+                            {
+                                asm_ctx.funcs->constF(&asm_ctx, $2, $4.val, $6.val, $8.val, $10.val);
+                            }
+                    | INSTR_DEFI REG_CONSTINT ',' IMMVAL ',' IMMVAL ',' IMMVAL ',' IMMVAL
+                            {
+                                asm_ctx.funcs->constI(&asm_ctx, $2, $4.val, $6.val, $8.val, $10.val);
+                            }
+                    | INSTR_DEFB REG_CONSTBOOL ',' IMMBOOL
+                            {
+                                asm_ctx.funcs->constB(&asm_ctx, $2, $4);
+                            }
+                    | INSTR_REP sregs
+                            {
+                                TRACE("REP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_REP, 0, 0, 0, 0, &$2, 1);
+                            }
+                    | INSTR_ENDREP
+                            {
+                                TRACE("ENDREP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ENDREP, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_IF sregs
+                            {
+                                TRACE("IF\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_IF, 0, 0, 0, 0, &$2, 1);
+                            }
+                    | INSTR_IF comp sregs
+                            {
+                                TRACE("IFC\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_IFC, 0, 0, $2, 0, &$3, 2);
+                            }
+                    | INSTR_ELSE
+                            {
+                                TRACE("ELSE\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ELSE, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_ENDIF
+                            {
+                                TRACE("ENDIF\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ENDIF, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_BREAK
+                            {
+                                TRACE("BREAK\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_BREAK, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_BREAK comp sregs
+                            {
+                                TRACE("BREAKC\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_BREAKC, 0, 0, $2, 0, &$3, 2);
+                            }
+                    | INSTR_BREAKP sregs
+                            {
+                                TRACE("BREAKP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_BREAKP, 0, 0, 0, 0, &$2, 1);
+                            }
+                    | INSTR_CALL sregs
+                            {
+                                TRACE("CALL\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_CALL, 0, 0, 0, 0, &$2, 1);
+                            }
+                    | INSTR_CALLNZ sregs
+                            {
+                                TRACE("CALLNZ\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_CALLNZ, 0, 0, 0, 0, &$2, 2);
+                            }
+                    | INSTR_LOOP sregs
+                            {
+                                TRACE("LOOP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LOOP, 0, 0, 0, 0, &$2, 2);
+                            }
+                    | INSTR_RET
+                            {
+                                TRACE("RET\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_RET, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_ENDLOOP
+                            {
+                                TRACE("ENDLOOP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_ENDLOOP, 0, 0, 0, 0, 0, 0);
+                            }
+                    | INSTR_LABEL sregs
+                            {
+                                TRACE("LABEL\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_LABEL, 0, 0, 0, 0, &$2, 1);
+                            }
+                    | INSTR_SETP comp dreg ',' sregs
+                            {
+                                TRACE("SETP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_SETP, 0, 0, $2, &$3, &$5, 2);
+                            }
                     | INSTR_TEXLDL omods dreg ',' sregs
                             {
                                 TRACE("TEXLDL\n");
@@ -459,6 +753,57 @@ instruction:          INSTR_ADD omods dreg ',' sregs
                             {
                                 TRACE("MOVA\n");
                                 asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_MOVA, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_CMP omods dreg ',' sregs
+                            {
+                                TRACE("CMP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_CMP, $2.mod, $2.shift, 0, &$3, &$5, 3);
+                            }
+                    | INSTR_DP2ADD omods dreg ',' sregs
+                            {
+                                TRACE("DP2ADD\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DP2ADD, $2.mod, $2.shift, 0, &$3, &$5, 3);
+                            }
+                    | INSTR_TEXKILL dreg
+                            {
+                                TRACE("TEXKILL\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEXKILL, 0, 0, 0, &$2, 0, 0);
+                            }
+                    | INSTR_TEXLD omods dreg ',' sregs
+                            {
+                                TRACE("TEXLD\n");
+                                /* There is more than one acceptable syntax for texld:
+                                   with 1 sreg (PS 1.4) or
+                                   with 2 sregs (PS 2.0+)
+                                   Moreover, texld shares the same opcode as the tex instruction,
+                                   so there are a total of 3 valid syntaxes
+                                   These variations are handled in asmparser.c */
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEX, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_TEXLDP omods dreg ',' sregs
+                            {
+                                TRACE("TEXLDP\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEXLDP, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_TEXLDB omods dreg ',' sregs
+                            {
+                                TRACE("TEXLDB\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEXLDB, $2.mod, $2.shift, 0, &$3, &$5, 2);
+                            }
+                    | INSTR_DSX omods dreg ',' sregs
+                            {
+                                TRACE("DSX\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DSX, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_DSY omods dreg ',' sregs
+                            {
+                                TRACE("DSY\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_DSY, $2.mod, $2.shift, 0, &$3, &$5, 1);
+                            }
+                    | INSTR_TEXLDD omods dreg ',' sregs
+                            {
+                                TRACE("TEXLDD\n");
+                                asm_ctx.funcs->instr(&asm_ctx, BWRITERSIO_TEXLDD, $2.mod, $2.shift, 0, &$3, &$5, 4);
                             }
 
 dreg:                 dreg_name rel_reg
@@ -488,9 +833,7 @@ dreg_name:            REG_TEMP
                         }
                     | REG_INPUT
                         {
-                            asmparser_message(&asm_ctx, "Line %u: Register v%u is not a valid destination register\n",
-                                              asm_ctx.line_no, $1);
-                            set_parse_status(&asm_ctx, PARSE_WARN);
+                            $$.regnum = $1; $$.type = BWRITERSPR_INPUT;
                         }
                     | REG_CONSTFLOAT
                         {
@@ -743,6 +1086,14 @@ sreg:                   sreg_name rel_reg swizzle
                             }
                             $$.swizzle = $5;
                         }
+                    | SMOD_NOT sreg_name swizzle
+                        {
+                            $$.type = $2.type;
+                            $$.regnum = $2.regnum;
+                            $$.rel_reg = NULL;
+                            $$.srcmod = BWRITERSPSM_NOT;
+                            $$.swizzle = $3;
+                        }
 
 rel_reg:               /* empty */
                         {
@@ -913,6 +1264,141 @@ sreg_name:            REG_TEMP
                     | REG_LABEL
                         {
                             $$.regnum = $1; $$.type = BWRITERSPR_LABEL;
+                        }
+
+comp:                 COMP_GT           { $$ = BWRITER_COMPARISON_GT;       }
+                    | COMP_LT           { $$ = BWRITER_COMPARISON_LT;       }
+                    | COMP_GE           { $$ = BWRITER_COMPARISON_GE;       }
+                    | COMP_LE           { $$ = BWRITER_COMPARISON_LE;       }
+                    | COMP_EQ           { $$ = BWRITER_COMPARISON_EQ;       }
+                    | COMP_NE           { $$ = BWRITER_COMPARISON_NE;       }
+
+dclusage:             USAGE_POSITION
+                        {
+                            TRACE("dcl_position%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_POSITION;
+                        }
+                    | USAGE_BLENDWEIGHT
+                        {
+                            TRACE("dcl_blendweight%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_BLENDWEIGHT;
+                        }
+                    | USAGE_BLENDINDICES
+                        {
+                            TRACE("dcl_blendindices%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_BLENDINDICES;
+                        }
+                    | USAGE_NORMAL
+                        {
+                            TRACE("dcl_normal%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_NORMAL;
+                        }
+                    | USAGE_PSIZE
+                        {
+                            TRACE("dcl_psize%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_PSIZE;
+                        }
+                    | USAGE_TEXCOORD
+                        {
+                            TRACE("dcl_texcoord%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_TEXCOORD;
+                        }
+                    | USAGE_TANGENT
+                        {
+                            TRACE("dcl_tangent%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_TANGENT;
+                        }
+                    | USAGE_BINORMAL
+                        {
+                            TRACE("dcl_binormal%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_BINORMAL;
+                        }
+                    | USAGE_TESSFACTOR
+                        {
+                            TRACE("dcl_tessfactor%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_TESSFACTOR;
+                        }
+                    | USAGE_POSITIONT
+                        {
+                            TRACE("dcl_positiont%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_POSITIONT;
+                        }
+                    | USAGE_COLOR
+                        {
+                            TRACE("dcl_color%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_COLOR;
+                        }
+                    | USAGE_FOG
+                        {
+                            TRACE("dcl_fog%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_FOG;
+                        }
+                    | USAGE_DEPTH
+                        {
+                            TRACE("dcl_depth%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_DEPTH;
+                        }
+                    | USAGE_SAMPLE
+                        {
+                            TRACE("dcl_sample%u\n", $1);
+                            $$.regnum = $1;
+                            $$.dclusage = BWRITERDECLUSAGE_SAMPLE;
+                        }
+
+dcl_inputreg:         REG_INPUT
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_INPUT;
+                        }
+                    | REG_TEXTURE
+                        {
+                            $$.regnum = $1; $$.type = BWRITERSPR_TEXTURE;
+                        }
+
+sampdcl:              SAMPTYPE_1D
+                        {
+                            $$ = BWRITERSTT_1D;
+                        }
+                    | SAMPTYPE_2D
+                        {
+                            $$ = BWRITERSTT_2D;
+                        }
+                    | SAMPTYPE_CUBE
+                        {
+                            $$ = BWRITERSTT_CUBE;
+                        }
+                    | SAMPTYPE_VOLUME
+                        {
+                            $$ = BWRITERSTT_VOLUME;
+                        }
+
+predicate:            '(' REG_PREDICATE swizzle ')'
+                        {
+                            $$.type = BWRITERSPR_PREDICATE;
+                            $$.regnum = 0;
+                            $$.rel_reg = NULL;
+                            $$.srcmod = BWRITERSPSM_NONE;
+                            $$.swizzle = $3;
+                        }
+                    | '(' SMOD_NOT REG_PREDICATE swizzle ')'
+                        {
+                            $$.type = BWRITERSPR_PREDICATE;
+                            $$.regnum = 0;
+                            $$.rel_reg = NULL;
+                            $$.srcmod = BWRITERSPSM_NOT;
+                            $$.swizzle = $4;
                         }
 
 %%

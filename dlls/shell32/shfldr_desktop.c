@@ -152,6 +152,7 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
     WCHAR szElement[MAX_PATH];
     LPCWSTR szNext = NULL;
     LPITEMIDLIST pidlTemp = NULL;
+    PARSEDURLW urldata;
     HRESULT hr = S_OK;
     CLSID clsid;
 
@@ -166,6 +167,8 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
 
     if (pchEaten)
         *pchEaten = 0;        /* strange but like the original */
+
+    urldata.cbSize = sizeof(urldata);
 
     if (lpszDisplayName[0] == ':' && lpszDisplayName[1] == ':')
     {
@@ -193,13 +196,8 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
         *ppidl = pidlTemp;
         return S_OK;
     }
-    else if (strchrW(lpszDisplayName,':'))
+    else if (SUCCEEDED(ParseURLW(lpszDisplayName, &urldata)))
     {
-        PARSEDURLW urldata;
-
-        urldata.cbSize = sizeof(urldata);
-        ParseURLW(lpszDisplayName,&urldata);
-
         if (urldata.nScheme == URL_SCHEME_SHELL) /* handle shell: urls */
         {
             TRACE ("-- shell url: %s\n", debugstr_w(urldata.pszSuffix));
@@ -215,21 +213,36 @@ static HRESULT WINAPI ISF_Desktop_fnParseDisplayName (IShellFolder2 * iface,
 
         if (*lpszDisplayName)
         {
-            WCHAR szPath[MAX_PATH];
-            LPWSTR pathPtr;
-
-            /* build a complete path to create a simple pidl */
-            lstrcpynW(szPath, This->sPathTarget, MAX_PATH);
-            pathPtr = PathAddBackslashW(szPath);
-            if (pathPtr)
+            if (*lpszDisplayName == '/')
             {
-                lstrcpynW(pathPtr, lpszDisplayName, MAX_PATH - (pathPtr - szPath));
-                hr = _ILCreateFromPathW(szPath, &pidlTemp);
+                /* UNIX paths should be parsed by unixfs */
+                IShellFolder *unixFS;
+                hr = UnixFolder_Constructor(NULL, &IID_IShellFolder, (LPVOID*)&unixFS);
+                if (SUCCEEDED(hr))
+                {
+                    hr = IShellFolder_ParseDisplayName(unixFS, NULL, NULL,
+                            lpszDisplayName, NULL, &pidlTemp, NULL);
+                    IShellFolder_Release(unixFS);
+                }
             }
             else
             {
-                /* should never reach here, but for completeness */
-                hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+                /* build a complete path to create a simple pidl */
+                WCHAR szPath[MAX_PATH];
+                LPWSTR pathPtr;
+
+                lstrcpynW(szPath, This->sPathTarget, MAX_PATH);
+                pathPtr = PathAddBackslashW(szPath);
+                if (pathPtr)
+                {
+                    lstrcpynW(pathPtr, lpszDisplayName, MAX_PATH - (pathPtr - szPath));
+                    hr = _ILCreateFromPathW(szPath, &pidlTemp);
+                }
+                else
+                {
+                    /* should never reach here, but for completeness */
+                    hr = HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+                }
             }
         }
         else

@@ -110,7 +110,7 @@ static BOOL wodUpdatePlayedTotal(WINE_WAVEDEV* wwo, snd_pcm_status_t* ps)
     if (state != SND_PCM_STATE_RUNNING && state != SND_PCM_STATE_PREPARED)
     {
         WARN("Unexpected state (%d) while updating Total Played, resetting\n", state);
-        snd_pcm_recover(wwo->pcm, -EPIPE, 0);
+        wine_snd_pcm_recover(wwo->pcm, -EPIPE, 0);
         delay=0;
     }
 
@@ -244,7 +244,7 @@ static int wodPlayer_WriteMaxFrags(WINE_WAVEDEV* wwo, DWORD* frames)
 	written = (wwo->write)(wwo->pcm, lpWaveHdr->lpData + wwo->dwPartialOffset, toWrite);
 	if ( written < 0) {
 	    /* XRUN occurred. let's try to recover */
-	    ALSA_XRUNRecovery(wwo, written);
+	    wine_snd_pcm_recover(wwo->pcm, written, 0);
 	    written = (wwo->write)(wwo->pcm, lpWaveHdr->lpData + wwo->dwPartialOffset, toWrite);
 	}
 	if (written <= 0) {
@@ -716,18 +716,6 @@ static DWORD wodOpen(WORD wDevID, LPWAVEOPENDESC lpDesc, DWORD dwFlags)
     } else if ((wwo->format.Format.wFormatTag == WAVE_FORMAT_EXTENSIBLE) &&
         IsEqualGUID(&wwo->format.SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)){
         format = (wwo->format.Format.wBitsPerSample == 32) ? SND_PCM_FORMAT_FLOAT_LE : -1;
-    } else if (wwo->format.Format.wFormatTag == WAVE_FORMAT_MULAW) {
-        FIXME("unimplemented format: WAVE_FORMAT_MULAW\n");
-        retcode = WAVERR_BADFORMAT;
-        goto errexit;
-    } else if (wwo->format.Format.wFormatTag == WAVE_FORMAT_ALAW) {
-        FIXME("unimplemented format: WAVE_FORMAT_ALAW\n");
-        retcode = WAVERR_BADFORMAT;
-        goto errexit;
-    } else if (wwo->format.Format.wFormatTag == WAVE_FORMAT_ADPCM) {
-        FIXME("unimplemented format: WAVE_FORMAT_ADPCM\n");
-        retcode = WAVERR_BADFORMAT;
-        goto errexit;
     } else {
         ERR("invalid format: %0x04x\n", wwo->format.Format.wFormatTag);
         retcode = WAVERR_BADFORMAT;

@@ -42,6 +42,43 @@ typedef struct {
 
 #define HTMLSELECT(x)      ((IHTMLSelectElement*)         &(x)->lpHTMLSelectElementVtbl)
 
+static HRESULT htmlselect_item(HTMLSelectElement *This, int i, IDispatch **ret)
+{
+    nsIDOMHTMLOptionsCollection *nscol;
+    nsIDOMNode *nsnode;
+    nsresult nsres;
+
+    nsres = nsIDOMHTMLSelectElement_GetOptions(This->nsselect, &nscol);
+    if(NS_FAILED(nsres)) {
+        ERR("GetOptions failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    nsres = nsIDOMHTMLOptionsCollection_Item(nscol, i, &nsnode);
+    nsIDOMHTMLOptionsCollection_Release(nscol);
+    if(NS_FAILED(nsres)) {
+        ERR("Item failed: %08x\n", nsres);
+        return E_FAIL;
+    }
+
+    if(nsnode) {
+        HTMLDOMNode *node;
+
+        node = get_node(This->element.node.doc, nsnode, TRUE);
+        nsIDOMNode_Release(nsnode);
+        if(!node) {
+            ERR("Could not find node\n");
+            return E_FAIL;
+        }
+
+        IHTMLDOMNode_AddRef(HTMLDOMNODE(node));
+        *ret = (IDispatch*)HTMLDOMNODE(node);
+    }else {
+        *ret = NULL;
+    }
+    return S_OK;
+}
+
 #define HTMLSELECT_THIS(iface) DEFINE_THIS(HTMLSelectElement, HTMLSelectElement, iface)
 
 static HRESULT WINAPI HTMLSelectElement_QueryInterface(IHTMLSelectElement *iface,
@@ -408,7 +445,20 @@ static HRESULT WINAPI HTMLSelectElement_item(IHTMLSelectElement *iface, VARIANT 
                                              VARIANT index, IDispatch **pdisp)
 {
     HTMLSelectElement *This = HTMLSELECT_THIS(iface);
-    FIXME("(%p)->(v v %p)\n", This, pdisp);
+
+    TRACE("(%p)->(%s %s %p)\n", This, debugstr_variant(&name), debugstr_variant(&index), pdisp);
+
+    if(!pdisp)
+        return E_POINTER;
+    *pdisp = NULL;
+
+    if(V_VT(&name) == VT_I4) {
+        if(V_I4(&name) < 0)
+            return E_INVALIDARG;
+        return htmlselect_item(This, V_I4(&name), pdisp);
+    }
+
+    FIXME("Unsupported args\n");
     return E_NOTIMPL;
 }
 
@@ -534,36 +584,16 @@ static HRESULT HTMLSelectElement_invoke(HTMLDOMNode *iface, DISPID id, LCID lcid
 
     switch(flags) {
     case DISPATCH_PROPERTYGET: {
-        nsIDOMHTMLOptionsCollection *nscol;
-        nsIDOMNode *nsnode;
-        nsresult nsres;
+        IDispatch *ret;
+        HRESULT hres;
 
-        nsres = nsIDOMHTMLSelectElement_GetOptions(This->nsselect, &nscol);
-        if(NS_FAILED(nsres)) {
-            ERR("GetOptions failed: %08x\n", nsres);
-            return E_FAIL;
-        }
+        hres = htmlselect_item(This, id-DISPID_OPTIONCOL_0, &ret);
+        if(FAILED(hres))
+            return hres;
 
-        nsres = nsIDOMHTMLOptionsCollection_Item(nscol, id-DISPID_OPTIONCOL_0, &nsnode);
-        nsIDOMHTMLOptionsCollection_Release(nscol);
-        if(NS_FAILED(nsres)) {
-            ERR("Item failed: %08x\n", nsres);
-            return E_FAIL;
-        }
-
-        if(nsnode) {
-            HTMLDOMNode *node;
-
-            node = get_node(This->element.node.doc, nsnode, TRUE);
-            nsIDOMNode_Release(nsnode);
-            if(!node) {
-                ERR("Could not find node\n");
-                return E_FAIL;
-            }
-
-            IHTMLDOMNode_AddRef(HTMLDOMNODE(node));
+        if(ret) {
             V_VT(res) = VT_DISPATCH;
-            V_DISPATCH(res) = (IDispatch*)HTMLDOMNODE(node);
+            V_DISPATCH(res) = ret;
         }else {
             V_VT(res) = VT_NULL;
         }

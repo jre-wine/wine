@@ -372,7 +372,36 @@ interface IShellItem : IUnknown
         [out] int *piOrder);
 }
 
+typedef enum tagNWMF {
+    NWMF_UNLOADING        = 0x0001,
+    NWMF_USERINITED       = 0x0002,
+    NWMF_FIRST            = 0x0004,
+    NWMF_OVERRIDEKEY      = 0x0008,
+    NWMF_SHOWHELP         = 0x0010,
+    NWMF_HTMLDIALOG       = 0x0020,
+    NWMF_FROMDIALOGCHILD  = 0x0040,
+    NWMF_USERREQUESTED    = 0x0080,
+    NWMF_USERALLOWED      = 0x0100
+} NWMF;
 
+[
+    uuid(d2bc4c84-3f72-4a52-a604-7bcbf3982cbb),
+    object,
+    pointer_default(unique)
+]
+interface INewWindowManager : IUnknown
+{
+    HRESULT EvaluateNewWindow(
+        [in, string] LPCWSTR pszUrl,
+        [in, string] LPCWSTR pszName,
+        [in, string] LPCWSTR pszUrlContext,
+        [in, string] LPCWSTR pszFeatures,
+        [in]         BOOL fReplace,
+        [in]         DWORD dwFlags,
+        [in]         DWORD dwUserActionTime);
+}
+
+cpp_quote("#define SID_SNewWindowManager IID_INewWindowManager")
 
 /*****************************************************************************
  * FOLDERSETTINGS
@@ -399,11 +428,25 @@ typedef enum
     FWF_SINGLECLICKACTIVATE = 0x00008000,
     FWF_NOWEBVIEW           = 0x00010000,
     FWF_HIDEFILENAMES       = 0x00020000,
-    FWF_CHECKSELECT         = 0x00040000
+    FWF_CHECKSELECT         = 0x00040000,
+    FWF_NOENUMREFRESH       = 0x00080000,
+    FWF_NOGROUPING          = 0x00100000,
+    FWF_FULLROWSELECT       = 0x00200000,
+    FWF_NOFILTERS           = 0x00400000,
+    FWF_NOCOLUMNHEADER      = 0x00800000,
+    FWF_NOHEADERINALLVIEWS  = 0x01000000,
+    FWF_EXTENDEDTILES       = 0x02000000,
+    FWF_TRICHECKSELECT      = 0x04000000,
+    FWF_AUTOCHECKSELECT     = 0x08000000,
+    FWF_NOBROWSERVIEWSTATE  = 0x10000000,
+    FWF_SUBSETGROUPS        = 0x20000000,
+    FWF_USESEARCHFOLDER     = 0x40000000,
+    FWF_ALLOWRTLREADING     = 0x80000000
 } FOLDERFLAGS;
 
 typedef enum
 {
+    FVM_AUTO       =-1,
     FVM_ICON       = 1,
     FVM_FIRST      = FVM_ICON,
     FVM_SMALLICON  = 2,
@@ -412,7 +455,8 @@ typedef enum
     FVM_THUMBNAIL  = 5,
     FVM_TILE       = 6,
     FVM_THUMBSTRIP = 7,
-    FVM_LAST       = FVM_THUMBSTRIP
+    FVM_CONTENT    = 8,
+    FVM_LAST       = FVM_CONTENT
 } FOLDERVIEWMODE;
 
 typedef struct
@@ -623,8 +667,18 @@ cpp_quote("#define SBSP_PARENT                0x00002000")
 cpp_quote("#define SBSP_NAVIGATEBACK          0x00004000")
 cpp_quote("#define SBSP_NAVIGATEFORWARD       0x00008000")
 cpp_quote("#define SBSP_ALLOW_AUTONAVIGATE    0x00010000")
+cpp_quote("#define SBSP_KEEPSAMETEMPLATE      0x00020000")
+cpp_quote("#define SBSP_KEEPWORDWHEELTEXT     0x00040000")
+cpp_quote("#define SBSP_ACTIVATE_NOFOCUS      0x00080000")
+cpp_quote("#define SBSP_CREATENOHISTORY       0x00100000")
+cpp_quote("#define SBSP_PLAYNOSOUND           0x00200000")
+cpp_quote("#define SBSP_CALLERUNTURUSTED      0x00800000")
+cpp_quote("#define SBSP_TRUSTFIRSTDOWNLOAD    0x01000000")
+cpp_quote("#define SBSP_UNTRUSTEDFORDOWNLOAD  0x02000000")
 cpp_quote("#define SBSP_NOAUTOSELECT          0x04000000")
 cpp_quote("#define SBSP_WRITENOHISTORY        0x08000000")
+cpp_quote("#define SBSP_TRUSTEDFORACTIVEX     0x10000000")
+cpp_quote("#define SBSP_FEEDNAVIGATION        0x20000000")
 cpp_quote("#define SBSP_REDIRECT              0x40000000")
 cpp_quote("#define SBSP_INITIATEDBYHLINKFRAME 0x80000000")
 
@@ -998,6 +1052,55 @@ cpp_quote("#define CDBOSC_STATECHANGE  0x00000004")
     HRESULT OnDefaultCommand( [in] IShellView *shv );
     HRESULT OnStateChange( [in] IShellView *shv, [in] ULONG uChange );
     HRESULT IncludeObject( [in] IShellView *shv, [in] LPCITEMIDLIST pidl );
+}
+
+
+/*****************************************************************************
+ * ICommDlgBrowser2 interface
+ */
+[
+ object,
+ uuid(10339516-2894-11D2-9039-00C04F8EEB3E),
+ pointer_default(unique)
+]
+interface ICommDlgBrowser2 : ICommDlgBrowser
+{
+
+    HRESULT Notify(
+        [in] IShellView *ppshv,
+        [in] DWORD dwNotifyType);
+
+    HRESULT GetDefaultMenuText(
+        [in] IShellView *ppshv,
+        [out, string, size_is(cchMax)] LPWSTR pszText,
+        [in] int cchMax);
+
+    HRESULT GetViewFlags(
+        [out] DWORD *pdwFlags);
+}
+
+
+/*****************************************************************************
+ * ICommDlgBrowser3 interface
+ */
+[
+ object,
+ uuid(C8AD25A1-3294-41EE-8165-71174BD01C57),
+ pointer_default(unique)
+]
+interface ICommDlgBrowser3 : ICommDlgBrowser2
+{
+
+    HRESULT OnColumnClicked(
+        [in] IShellView *ppshv,
+        [in] int iColumn);
+
+    HRESULT GetCurrentFilter(
+        [out, string, size_is(cchFileSpec)] LPWSTR pszFileSpec,
+        [in] int cchFileSpec);
+
+    HRESULT OnPreviewCreated(
+        [in] IShellView *ppshv);
 }
 
 
@@ -1558,4 +1661,135 @@ interface IProfferService : IUnknown
         [out] DWORD *pCookie);
 
     HRESULT RevokeService([in] DWORD cookie);
+}
+
+/*****************************************************************************
+ * IExplorerBrowserEvents interface
+ */
+[
+ object,
+ uuid(361BBDC7-E6EE-4E13-BE58-58E2240C810F)
+]
+interface IExplorerBrowserEvents : IUnknown
+{
+    HRESULT OnNavigationPending(
+        [in] PCIDLIST_ABSOLUTE pidlFolder);
+
+    HRESULT OnViewCreated(
+        [in] IShellView *psv);
+
+    HRESULT OnNavigationComplete(
+        [in] PCIDLIST_ABSOLUTE pidlFolder);
+
+    HRESULT OnNavigationFailed(
+        [in] PCIDLIST_ABSOLUTE pidlFolder);
+}
+
+typedef GUID EXPLORERPANE;
+typedef EXPLORERPANE *REFEXPLORERPANE;
+
+cpp_quote("#define SID_ExplorerPaneVisibility IID_IExplorerPaneVisibility")
+
+/*****************************************************************************
+ * IExplorerPaneVisibility interface
+ */
+[
+ object,
+ uuid(E07010EC-BC17-44C0-97B0-46C7C95B9EDC)
+]
+interface IExplorerPaneVisibility : IUnknown
+{
+    typedef enum tagEXPLORERPANESTATE {
+        EPS_DONTCARE     = 0x0,
+        EPS_DEFAULT_ON   = 0x1,
+        EPS_DEFAULT_OFF  = 0x2,
+        EPS_STATE_MASK   = 0xffff,
+        EPS_INITIALSTATE = 0x10000,
+        EPS_FORCE        = 0x20000
+    } EXPLORERPANESTATE;
+
+    HRESULT GetPaneState(
+        [in] REFEXPLORERPANE ep,
+        [out] EXPLORERPANESTATE *peps);
+}
+
+typedef [v1_enum] enum tagEXPLORER_BROWSER_FILL_FLAGS {
+    EBF_NONE                     = 0,
+    EBF_SELECTFROMDATAOBJECT     = 0x100,
+    EBF_NODROPTARGET             = 0x200
+} EXPLORER_BROWSER_FILL_FLAGS;
+
+typedef [v1_enum] enum tagEXPLORER_BROWSER_OPTIONS {
+    EBO_NONE               = 0x00,
+    EBO_NAVIGATEONCE       = 0x01,
+    EBO_SHOWFRAMES         = 0x02,
+    EBO_ALWAYSNAVIGATE     = 0x04,
+    EBO_NOTRAVELLOG        = 0x08,
+    EBO_NOWRAPPERWINDOW    = 0x10,
+    EBO_HTMLSHAREPOINTVIEW = 0x20
+} EXPLORER_BROWSER_OPTIONS;
+
+cpp_quote("#define SID_SExplorerBrowserFrame IID_ICommDlgBrowser")
+
+/*****************************************************************************
+ * IExplorerBrowser interface
+ */
+[
+ object,
+ uuid(DFD3B6B5-C10C-4BE9-85F6-A66969F402F6),
+ pointer_default(unique)
+]
+interface IExplorerBrowser : IUnknown
+{
+
+    [local] HRESULT Initialize(
+        [in] HWND hwndParent,
+        [in] const RECT *prc,
+        [in, unique] const FOLDERSETTINGS *pfs);
+
+    HRESULT Destroy();
+
+    [local] HRESULT SetRect(
+        [in,out,unique] HDWP *phdwp,
+        [in] RECT rcBrowser);
+
+    HRESULT SetPropertyBag(
+        [in, string] LPCWSTR pszPropertyBag);
+
+    HRESULT SetEmptyText(
+        [in, string] LPCWSTR pszEmptyText);
+
+    HRESULT SetFolderSettings(
+        [in] const FOLDERSETTINGS *pfs);
+
+    HRESULT Advise(
+        [in] IExplorerBrowserEvents *psbe,
+        [out] DWORD *pdwCookie);
+
+    HRESULT Unadvise(
+        [in] DWORD dwCookie);
+
+    HRESULT SetOptions(
+        [in] EXPLORER_BROWSER_OPTIONS dwFlag);
+
+    HRESULT GetOptions(
+        [out] EXPLORER_BROWSER_OPTIONS *pdwFlag);
+
+    HRESULT BrowseToIDList(
+        [in] PCUIDLIST_RELATIVE pidl,
+        [in] UINT uFlags);
+
+    HRESULT BrowseToObject(
+        [in] IUnknown *punk,
+        [in] UINT uFlags);
+
+    HRESULT FillFromObject(
+        [in] IUnknown *punk,
+        [in] EXPLORER_BROWSER_FILL_FLAGS dwFlags);
+
+    HRESULT RemoveAll();
+
+    HRESULT GetCurrentView(
+        [in] REFIID riid,
+        [out, iid_is(riid)] IUnknown **ppv);
 }

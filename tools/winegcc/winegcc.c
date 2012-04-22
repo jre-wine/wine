@@ -156,6 +156,7 @@ static const struct
     { "i586",    CPU_x86 },
     { "i686",    CPU_x86 },
     { "i786",    CPU_x86 },
+    { "amd64",   CPU_x86_64 },
     { "x86_64",  CPU_x86_64 },
     { "sparc",   CPU_SPARC },
     { "alpha",   CPU_ALPHA },
@@ -172,6 +173,7 @@ static const struct
     { "macos",   PLATFORM_APPLE },
     { "darwin",  PLATFORM_APPLE },
     { "solaris", PLATFORM_SOLARIS },
+    { "cygwin",  PLATFORM_CYGWIN },
     { "mingw32", PLATFORM_WINDOWS },
     { "windows", PLATFORM_WINDOWS },
     { "winnt",   PLATFORM_WINDOWS }
@@ -229,6 +231,8 @@ static const enum target_cpu build_cpu = CPU_ARM;
 static enum target_platform build_platform = PLATFORM_APPLE;
 #elif defined(__sun)
 static enum target_platform build_platform = PLATFORM_SOLARIS;
+#elif defined(__CYGWIN__)
+static enum target_platform build_platform = PLATFORM_CYGWIN;
 #elif defined(_WIN32)
 static enum target_platform build_platform = PLATFORM_WINDOWS;
 #else
@@ -331,7 +335,8 @@ static void compile(struct options* opts, const char* lang)
             break;
     }
 
-    if (opts->target_platform == PLATFORM_WINDOWS) goto no_compat_defines;
+    if (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN)
+        goto no_compat_defines;
 
     if (opts->processor != proc_cpp)
     {
@@ -556,10 +561,17 @@ static const char *mingw_unicode_hack( struct options *opts )
     char *main_stub = get_temp_file( opts->output_name, ".c" );
 
     create_file( main_stub, 0644,
-                 "#include <stdlib.h>\n"
-                 "extern int wmain(int,wchar_t**);\n"
+                 "#include <stdarg.h>\n"
+                 "#include <windef.h>\n"
+                 "#include <winbase.h>\n"
                  "int main( int argc, char *argv[] )\n{\n"
-                 "    return wmain( argc, __wargv );\n}\n" );
+                 "    int wargc;\n"
+                 "    wchar_t **wargv, **wenv;\n"
+                 "    HMODULE msvcrt = LoadLibraryA( \"msvcrt.dll\" );\n"
+                 "    void __cdecl (*__wgetmainargs)(int *argc, wchar_t** *wargv, wchar_t** *wenvp, int expand_wildcards,\n"
+                 "                                   int *new_mode) = (void *)GetProcAddress( msvcrt, \"__wgetmainargs\" );\n"
+                 "    __wgetmainargs( &wargc, &wargv, &wenv, 0, NULL );\n"
+                 "    return wmain( wargc, wargv );\n}\n" );
     return compile_to_object( opts, main_stub, NULL );
 }
 
@@ -677,7 +689,7 @@ static void build(struct options* opts)
 
     /* building for Windows is completely different */
 
-    if (opts->target_platform == PLATFORM_WINDOWS)
+    if (opts->target_platform == PLATFORM_WINDOWS || opts->target_platform == PLATFORM_CYGWIN)
     {
         strarray *resources = strarray_alloc();
         char *res_o_name = NULL;
@@ -731,6 +743,8 @@ static void build(struct options* opts)
 
         if (!opts->nostartfiles) add_library(opts, lib_dirs, files, "winecrt0");
         if (opts->shared && !opts->nostdlib) add_library(opts, lib_dirs, files, "wine");
+        if (!opts->shared && opts->use_msvcrt && opts->target_platform == PLATFORM_CYGWIN)
+            add_library(opts, lib_dirs, files, "msvcrt");
 
         for ( j = 0; j < files->size; j++ )
         {
@@ -781,7 +795,6 @@ static void build(struct options* opts)
                 break;
             }
         }
-        if (!opts->shared && (opts->use_msvcrt || opts->unicode_app)) strarray_add(link_args, "-lmsvcrt");
 
         if (res_o_name) compile_resources_to_object( opts, resources, res_o_name );
 
@@ -990,7 +1003,7 @@ static int is_linker_arg(const char* arg)
     {
 	"-nostartfiles", "-nodefaultlibs", "-nostdlib", "-s", 
 	"-static", "-static-libgcc", "-shared", "-shared-libgcc", "-symbolic",
-	"-framework"
+	"-framework", "--coverage", "-fprofile-generate", "-fprofile-use"
     };
     unsigned int j;
 
@@ -1174,6 +1187,10 @@ int main(int argc, char **argv)
 		    break;
 		case 'f':
 		    if (strcmp("-framework", argv[i]) == 0)
+			next_is_arg = 1;
+		    break;
+		case '-':
+		    if (strcmp("--param", argv[i]) == 0)
 			next_is_arg = 1;
 		    break;
 	    }

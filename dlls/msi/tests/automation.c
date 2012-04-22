@@ -308,7 +308,8 @@ static BOOL get_program_files_dir(LPSTR buf)
         return FALSE;
 
     size = MAX_PATH;
-    if (RegQueryValueEx(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)buf, &size))
+    if (RegQueryValueEx(hkey, "ProgramFilesDir (x86)", 0, &type, (LPBYTE)buf, &size) &&
+        RegQueryValueEx(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)buf, &size))
         return FALSE;
 
     RegCloseKey(hkey);
@@ -1080,6 +1081,20 @@ static HRESULT Installer_VersionGet(LPWSTR szVersion)
     return hr;
 }
 
+static HRESULT Installer_UILevelPut(int level)
+{
+    VARIANT varresult;
+    VARIANTARG vararg;
+    DISPID dispid = DISPID_PROPERTYPUT;
+    DISPPARAMS dispparams = {&vararg, &dispid, sizeof(vararg)/sizeof(VARIANTARG), 1};
+
+    VariantInit(&vararg);
+    V_VT(&vararg) = VT_I4;
+    V_I4(&vararg) = level;
+
+    return invoke(pInstaller, "UILevel", DISPATCH_PROPERTYPUT, &dispparams, &varresult, VT_EMPTY);
+}
+
 static HRESULT Session_Installer(IDispatch *pSession, IDispatch **pInst)
 {
     VARIANT varresult;
@@ -1815,6 +1830,7 @@ static void test_Session(IDispatch *pSession)
     BOOL bool;
     int myint;
     IDispatch *pDatabase = NULL, *pInst = NULL, *record = NULL;
+    ULONG refs_before, refs_after;
     HRESULT hr;
 
     /* Session::Installer */
@@ -1822,6 +1838,14 @@ static void test_Session(IDispatch *pSession)
     ok(hr == S_OK, "Session_Installer failed, hresult 0x%08x\n", hr);
     ok(pInst != NULL, "Session_Installer returned NULL IDispatch pointer\n");
     ok(pInst == pInstaller, "Session_Installer does not match Installer instance from CoCreateInstance\n");
+    refs_before = IDispatch_AddRef(pInst);
+
+    hr = Session_Installer(pSession, &pInst);
+    ok(hr == S_OK, "Session_Installer failed, hresult 0x%08x\n", hr);
+    ok(pInst != NULL, "Session_Installer returned NULL IDispatch pointer\n");
+    ok(pInst == pInstaller, "Session_Installer does not match Installer instance from CoCreateInstance\n");
+    refs_after = IDispatch_Release(pInst);
+    ok(refs_before == refs_after, "got %u and %u\n", refs_before, refs_after);
 
     /* Session::Property, get */
     memset(stringw, 0, sizeof(stringw));
@@ -2372,6 +2396,10 @@ static void test_Installer_InstallProduct(void)
     IDispatch *pStringList = NULL;
 
     create_test_files();
+
+    /* Avoid an interactive dialog in case of insufficient privileges. */
+    hr = Installer_UILevelPut(INSTALLUILEVEL_NONE);
+    ok(hr == S_OK, "Expected UILevel propery put invoke to return S_OK, got 0x%08x\n", hr);
 
     /* Installer::InstallProduct */
     hr = Installer_InstallProduct(szMsifile, NULL);

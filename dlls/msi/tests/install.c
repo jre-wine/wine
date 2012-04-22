@@ -30,6 +30,7 @@
 #include <fci.h>
 #include <objidl.h>
 #include <srrestoreptapi.h>
+#include <shlobj.h>
 
 #include "wine/test.h"
 
@@ -56,6 +57,8 @@ static const char *mstfile = "winetest.mst";
 static CHAR CURR_DIR[MAX_PATH];
 static CHAR PROG_FILES_DIR[MAX_PATH];
 static CHAR COMMON_FILES_DIR[MAX_PATH];
+static CHAR APP_DATA_DIR[MAX_PATH];
+static CHAR WINDOWS_DIR[MAX_PATH];
 
 /* msi database data */
 
@@ -197,6 +200,28 @@ static const CHAR aup2_property_dat[] = "Property\tValue\n"
                                         "Manufacturer\tWine\n"
                                         "PIDTemplate\t12345<###-%%%%%%%>@@@@@\n"
                                         "ProductCode\t{7DF88A48-996F-4EC8-A022-BF956F9B2CBB}\n"
+                                        "ProductID\tnone\n"
+                                        "ProductLanguage\t1033\n"
+                                        "ProductName\tMSITEST\n"
+                                        "ProductVersion\t1.1.1\n"
+                                        "PROMPTROLLBACKCOST\tP\n"
+                                        "Setup\tSetup\n"
+                                        "UpgradeCode\t{4C0EAA15-0264-4E5A-8758-609EF142B92D}\n"
+                                        "AdminProperties\tPOSTADMIN\n"
+                                        "ROOTDRIVE\tC:\\\n"
+                                        "SERVNAME\tTestService\n"
+                                        "SERVDISP\tTestServiceDisp\n";
+
+static const CHAR icon_property_dat[] = "Property\tValue\n"
+                                        "s72\tl0\n"
+                                        "Property\tProperty\n"
+                                        "DefaultUIFont\tDlgFont8\n"
+                                        "HASUIRUN\t0\n"
+                                        "INSTALLLEVEL\t3\n"
+                                        "InstallMode\tTypical\n"
+                                        "Manufacturer\tWine\n"
+                                        "PIDTemplate\t12345<###-%%%%%%%>@@@@@\n"
+                                        "ProductCode\t{7DF88A49-996F-4EC8-A022-BF956F9B2CBB}\n"
                                         "ProductID\tnone\n"
                                         "ProductLanguage\t1033\n"
                                         "ProductName\tMSITEST\n"
@@ -1412,6 +1437,63 @@ static const CHAR crs_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
                                                "PublishFeatures\t\t5100\n"
                                                "PublishProduct\t\t5200\n"
                                                "InstallFinalize\t\t6000\n";
+
+static const CHAR fo_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
+                                  "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
+                                  "File\tFile\n"
+                                  "override.txt\toverride\toverride.txt\t1000\t\t\t8192\t1\n"
+                                  "preselected.txt\tpreselected\tpreselected.txt\t1000\t\t\t8192\t2\n"
+                                  "notpreselected.txt\tnotpreselected\tnotpreselected.txt\t1000\t\t\t8192\t3\n";
+
+static const CHAR fo_feature_dat[] = "Feature\tFeature_Parent\tTitle\tDescription\tDisplay\tLevel\tDirectory_\tAttributes\n"
+                                     "s38\tS38\tL64\tL255\tI2\ti2\tS72\ti2\n"
+                                     "Feature\tFeature\n"
+                                     "override\t\t\toverride feature\t1\t1\tMSITESTDIR\t0\n"
+                                     "preselected\t\t\tpreselected feature\t1\t1\tMSITESTDIR\t0\n"
+                                     "notpreselected\t\t\tnotpreselected feature\t1\t1\tMSITESTDIR\t0\n";
+
+static const CHAR fo_condition_dat[] = "Feature_\tLevel\tCondition\n"
+                                       "s38\ti2\tS255\n"
+                                       "Condition\tFeature_\tLevel\n"
+                                       "preselected\t0\tPreselected\n"
+                                       "notpreselected\t0\tNOT Preselected\n";
+
+static const CHAR fo_feature_comp_dat[] = "Feature_\tComponent_\n"
+                                          "s38\ts72\n"
+                                          "FeatureComponents\tFeature_\tComponent_\n"
+                                          "override\toverride\n"
+                                          "preselected\tpreselected\n"
+                                          "notpreselected\tnotpreselected\n";
+
+static const CHAR fo_component_dat[] = "Component\tComponentId\tDirectory_\tAttributes\tCondition\tKeyPath\n"
+                                       "s72\tS38\ts72\ti2\tS255\tS72\n"
+                                       "Component\tComponent\n"
+                                       "override\t{0A00FB1D-97B0-4B42-ADF0-BB8913416623}\tMSITESTDIR\t0\t\toverride.txt\n"
+                                       "preselected\t{44E1DB75-605A-43DD-8CF5-CAB17F1BBD60}\tMSITESTDIR\t0\t\tpreselected.txt\n"
+                                       "notpreselected\t{E1647733-5E75-400A-A92E-5E60B4D4EF9F}\tMSITESTDIR\t0\t\tnotpreselected.txt\n";
+
+static const CHAR fo_custom_action_dat[] = "Action\tType\tSource\tTarget\tISComments\n"
+                                           "s72\ti2\tS64\tS0\tS255\n"
+                                           "CustomAction\tAction\n"
+                                           "SetPreselected\t51\tPreselected\t1\t\n";
+
+static const CHAR fo_install_exec_seq_dat[] = "Action\tCondition\tSequence\n"
+                                              "s72\tS255\tI2\n"
+                                              "InstallExecuteSequence\tAction\n"
+                                              "LaunchConditions\t\t100\n"
+                                              "SetPreselected\tpreselect=1\t200\n"
+                                              "CostInitialize\t\t800\n"
+                                              "FileCost\t\t900\n"
+                                              "CostFinalize\t\t1000\n"
+                                              "InstallValidate\t\t1400\n"
+                                              "InstallInitialize\t\t1500\n"
+                                              "ProcessComponents\t\t1600\n"
+                                              "RemoveFiles\t\t1700\n"
+                                              "InstallFiles\t\t2000\n"
+                                              "RegisterProduct\t\t5000\n"
+                                              "PublishFeatures\t\t5100\n"
+                                              "PublishProduct\t\t5200\n"
+                                              "InstallFinalize\t\t6000\n";
 
 static const CHAR pub_file_dat[] = "File\tComponent_\tFileName\tFileSize\tVersion\tLanguage\tAttributes\tSequence\n"
                                    "s72\ts72\tl255\ti4\tS72\tS20\tI2\ti2\n"
@@ -2822,6 +2904,32 @@ static const msi_table rmi_tables[] =
     ADD_TABLE(property)
 };
 
+static const msi_table fo_tables[] =
+{
+    ADD_TABLE(directory),
+    ADD_TABLE(fo_file),
+    ADD_TABLE(fo_component),
+    ADD_TABLE(fo_feature),
+    ADD_TABLE(fo_condition),
+    ADD_TABLE(fo_feature_comp),
+    ADD_TABLE(fo_custom_action),
+    ADD_TABLE(fo_install_exec_seq),
+    ADD_TABLE(media),
+    ADD_TABLE(property)
+};
+
+static const msi_table icon_base_tables[] =
+{
+    ADD_TABLE(ci_component),
+    ADD_TABLE(directory),
+    ADD_TABLE(rof_feature),
+    ADD_TABLE(rof_feature_comp),
+    ADD_TABLE(rof_file),
+    ADD_TABLE(pp_install_exec_seq),
+    ADD_TABLE(rof_media),
+    ADD_TABLE(icon_property),
+};
+
 /* cabinet definitions */
 
 /* make the max size large so there is only one cab file */
@@ -3108,7 +3216,27 @@ static void create_cab_file(const CHAR *name, DWORD max_size, const CHAR *files)
     ok(res, "Failed to destroy the cabinet\n");
 }
 
-static BOOL get_program_files_dir(LPSTR buf, LPSTR buf2)
+static BOOL get_user_dirs(void)
+{
+    HKEY hkey;
+    DWORD type, size;
+
+    if(RegOpenKey(HKEY_CURRENT_USER,
+                   "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders",
+                   &hkey))
+        return FALSE;
+
+    size = MAX_PATH;
+    if(RegQueryValueExA(hkey, "AppData", 0, &type, (LPBYTE)APP_DATA_DIR, &size)){
+        RegCloseKey(hkey);
+        return FALSE;
+    }
+
+    RegCloseKey(hkey);
+    return TRUE;
+}
+
+static BOOL get_system_dirs(void)
 {
     HKEY hkey;
     DWORD type, size;
@@ -3118,18 +3246,23 @@ static BOOL get_program_files_dir(LPSTR buf, LPSTR buf2)
         return FALSE;
 
     size = MAX_PATH;
-    if (RegQueryValueExA(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)buf, &size)) {
+    if (RegQueryValueExA(hkey, "ProgramFilesDir (x86)", 0, &type, (LPBYTE)PROG_FILES_DIR, &size) &&
+        RegQueryValueExA(hkey, "ProgramFilesDir", 0, &type, (LPBYTE)PROG_FILES_DIR, &size)) {
         RegCloseKey(hkey);
         return FALSE;
     }
 
     size = MAX_PATH;
-    if (RegQueryValueExA(hkey, "CommonFilesDir", 0, &type, (LPBYTE)buf2, &size)) {
+    if (RegQueryValueExA(hkey, "CommonFilesDir", 0, &type, (LPBYTE)COMMON_FILES_DIR, &size)) {
         RegCloseKey(hkey);
         return FALSE;
     }
 
     RegCloseKey(hkey);
+
+    if(GetWindowsDirectoryA(WINDOWS_DIR, MAX_PATH) != ERROR_SUCCESS)
+        return FALSE;
+
     return TRUE;
 }
 
@@ -3849,10 +3982,7 @@ static void test_caborder(void)
     ok(!delete_pf("msitest\\maximus", TRUE), "File is installed\n");
     ok(!delete_pf("msitest\\augustus", TRUE), "File is installed\n");
     ok(!delete_pf("msitest\\caesar", TRUE), "File is installed\n");
-    todo_wine
-    {
-        ok(!delete_pf("msitest", FALSE), "File is installed\n");
-    }
+    ok(!delete_pf("msitest", FALSE), "File is installed\n");
 
     delete_cab_files();
     DeleteFile(msifile);
@@ -8384,27 +8514,60 @@ static void test_feature_override(void)
     UINT r;
 
     create_test_files();
-    create_database(msifile, tables, sizeof(tables) / sizeof(msi_table));
+    create_file("msitest\\override.txt", 1000);
+    create_file("msitest\\preselected.txt", 1000);
+    create_file("msitest\\notpreselected.txt", 1000);
+    create_database(msifile, fo_tables, sizeof(fo_tables) / sizeof(msi_table));
 
-    r = MsiInstallProductA(msifile, "ADDLOCAL=One");
+    r = MsiInstallProductA(msifile, "ADDLOCAL=override");
     ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
-    ok(!delete_pf("msitest\\cabout\\new\\five.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\cabout\\new", FALSE), "File installed\n");
-    ok(!delete_pf("msitest\\cabout\\four.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\cabout", FALSE), "File installed\n");
-    ok(!delete_pf("msitest\\changed\\three.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\changed", FALSE), "File installed\n");
-    ok(!delete_pf("msitest\\first\\two.txt", TRUE), "File installed\n");
-    ok(!delete_pf("msitest\\first", FALSE), "File installed\n");
-    ok(!delete_pf("msitest\\filename", TRUE), "File installed\n");
-    ok(delete_pf("msitest\\one.txt", TRUE), "File not installed\n");
-    ok(!delete_pf("msitest\\service.exe", TRUE), "File installed\n");
-    ok(delete_pf("msitest", FALSE), "File not installed\n");
+    ok(pf_exists("msitest\\override.txt"), "file not installed\n");
+    ok(!pf_exists("msitest\\preselected.txt"), "file installed\n");
+    ok(!pf_exists("msitest\\notpreselected.txt"), "file installed\n");
 
-    delete_test_files();
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
 
+    ok(!delete_pf("msitest\\override.txt", TRUE), "file not removed\n");
+
+    r = MsiInstallProductA(msifile, "preselect=1");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(pf_exists("msitest\\override.txt"), "file not installed\n");
+    ok(pf_exists("msitest\\preselected.txt"), "file not installed\n");
+    ok(!pf_exists("msitest\\notpreselected.txt"), "file installed\n");
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(!delete_pf("msitest\\override.txt", TRUE), "file not removed\n");
+    todo_wine {
+    ok(delete_pf("msitest\\preselected.txt", TRUE), "file removed\n");
+    ok(delete_pf("msitest", FALSE), "directory removed\n");
+    }
+
+    r = MsiInstallProductA(msifile, NULL);
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(pf_exists("msitest\\override.txt"), "file not installed\n");
+    ok(pf_exists("msitest\\preselected.txt"), "file not installed\n");
+    ok(!pf_exists("msitest\\notpreselected.txt"), "file installed\n");
+
+    r = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(r == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %u\n", r);
+
+    ok(!delete_pf("msitest\\override.txt", TRUE), "file not removed\n");
+    todo_wine {
+    ok(delete_pf("msitest\\preselected.txt", TRUE), "file removed\n");
+    ok(delete_pf("msitest", FALSE), "directory removed\n");
+    }
+
+    DeleteFileA("msitest\\override.txt");
+    DeleteFileA("msitest\\preselected.txt");
+    DeleteFileA("msitest\\notpreselected.txt");
     RegDeleteKeyA(HKEY_LOCAL_MACHINE, "Software\\Wine\\msitest");
+    delete_test_files();
 }
 
 static void test_create_folder(void)
@@ -9265,6 +9428,81 @@ static void test_register_mime_info(void)
     delete_test_files();
 }
 
+static void test_icon_table(void)
+{
+    MSIHANDLE hdb = 0, record;
+    LPCSTR query;
+    UINT res;
+    CHAR path[MAX_PATH], win9xpath[MAX_PATH];
+    static const char prodcode[] = "{7DF88A49-996F-4EC8-A022-BF956F9B2CBB}";
+
+    create_database(msifile, icon_base_tables, sizeof(icon_base_tables) / sizeof(msi_table));
+
+    res = MsiOpenDatabase(msifile, MSIDBOPEN_TRANSACT, &hdb);
+    ok(res == ERROR_SUCCESS, "failed to open db: %d\n", res);
+
+    query = "CREATE TABLE `Icon` (`Name` CHAR(72) NOT NULL, `Data` OBJECT NOT NULL  PRIMARY KEY `Name`)";
+    res = run_query( hdb, 0, query );
+    ok(res == ERROR_SUCCESS, "Can't create Icon table: %d\n", res);
+
+    create_file("icon.ico", 100);
+    record = MsiCreateRecord(1);
+    res = MsiRecordSetStream(record, 1, "icon.ico");
+    ok(res == ERROR_SUCCESS, "Failed to add stream data to record: %d\n", res);
+    DeleteFile("icon.ico");
+
+    query = "INSERT INTO `Icon` (`Name`, `Data`) VALUES ('testicon', ?)";
+    res = run_query(hdb, record, query);
+    ok(res == ERROR_SUCCESS, "Insert into Icon table failed: %d\n", res);
+
+    res = MsiCloseHandle(record);
+    ok(res == ERROR_SUCCESS, "Failed to close record handle: %d\n", res);
+    res = MsiDatabaseCommit(hdb);
+    ok(res == ERROR_SUCCESS, "Failed to commit database: %d\n", res);
+    res = MsiCloseHandle(hdb);
+    ok(res == ERROR_SUCCESS, "Failed to close database: %d\n", res);
+
+    /* per-user */
+    res = MsiInstallProductA(msifile, "PUBLISH_PRODUCT=1");
+    ok(res == ERROR_SUCCESS, "Failed to do per-user install: %d\n", res);
+
+    lstrcpyA(path, APP_DATA_DIR);
+    lstrcatA(path, "\\");
+    lstrcatA(path, "Microsoft\\Installer\\");
+    lstrcatA(path, prodcode);
+    lstrcatA(path, "\\testicon");
+    ok(file_exists(path), "Per-user icon file isn't where it's expected (%s)\n", path);
+
+    res = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(res == ERROR_SUCCESS, "Failed to uninstall per-user\n");
+
+    /* system-wide */
+    res = MsiInstallProductA(msifile, "PUBLISH_PRODUCT=1 ALLUSERS=1");
+    ok(res == ERROR_SUCCESS, "Failed to system-wide install: %d\n", res);
+
+    /* win9x with MSI 2.0 installs the icon to a different folder, same as above */
+    lstrcpyA(win9xpath, APP_DATA_DIR);
+    lstrcatA(path, "\\");
+    lstrcatA(path, "Microsoft\\Installer\\");
+    lstrcatA(path, prodcode);
+    lstrcatA(path, "\\testicon");
+
+    lstrcpyA(path, WINDOWS_DIR);
+    lstrcatA(path, "\\");
+    lstrcatA(path, "Installer\\");
+    lstrcatA(path, prodcode);
+    lstrcatA(path, "\\testicon");
+    ok(file_exists(path) || file_exists(win9xpath),
+            "System-wide icon file isn't where it's expected (%s)\n", path);
+
+    res = MsiInstallProductA(msifile, "REMOVE=ALL");
+    ok(res == ERROR_SUCCESS, "Failed to uninstall system-wide\n");
+
+    delete_pfmsitest_files();
+
+    DeleteFile(msifile);
+}
+
 START_TEST(install)
 {
     DWORD len;
@@ -9286,7 +9524,8 @@ START_TEST(install)
     if(len && (CURR_DIR[len - 1] == '\\'))
         CURR_DIR[len - 1] = 0;
 
-    get_program_files_dir(PROG_FILES_DIR, COMMON_FILES_DIR);
+    get_system_dirs();
+    get_user_dirs();
 
     /* Create a restore point ourselves so we circumvent the multitude of restore points
      * that would have been created by all the installation and removal tests.
@@ -9375,6 +9614,7 @@ START_TEST(install)
     test_register_class_info();
     test_register_extension_info();
     test_register_mime_info();
+    test_icon_table();
 
     DeleteFileA(log_file);
 

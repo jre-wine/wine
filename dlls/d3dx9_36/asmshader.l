@@ -66,6 +66,26 @@ REG_PREDICATE           p0
 /* Not really a register, but it is considered as such */
 REG_LABEL               l[0-9]+
 
+DCL_POSITION            _position[0-9]*
+DCL_BLENDWEIGHT         _blendweight[0-9]*
+DCL_BLENDINDICES        _blendindices[0-9]*
+DCL_NORMAL              _normal[0-9]*
+DCL_PSIZE               _psize[0-9]*
+DCL_TEXCOORD            _texcoord[0-9]*
+DCL_TANGENT             _tangent[0-9]*
+DCL_BINORMAL            _binormal[0-9]*
+DCL_TESSFACTOR          _tessfactor[0-9]*
+DCL_POSITIONT           _positiont[0-9]*
+DCL_COLOR               _color[0-9]*
+DCL_FOG                 _fog[0-9]*
+DCL_DEPTH               _depth[0-9]*
+DCL_SAMPLE              _sample[0-9]*
+
+DCL_SAMPLER1D           _1d
+DCL_SAMPLER2D           _2d
+DCL_SAMPLERCUBE         _cube
+DCL_SAMPLERVOLUME       _volume
+
 PREPROCESSORDIRECTIVE   #[^\n]*\n
 
 /* Comments */
@@ -117,12 +137,40 @@ m4x3                    {return INSTR_M4x3;         }
 m3x4                    {return INSTR_M3x4;         }
 m3x3                    {return INSTR_M3x3;         }
 m3x2                    {return INSTR_M3x2;         }
+dcl                     {return INSTR_DCL;          }
+def                     {return INSTR_DEF;          }
+defb                    {return INSTR_DEFB;         }
+defi                    {return INSTR_DEFI;         }
+rep                     {return INSTR_REP;          }
+endrep                  {return INSTR_ENDREP;       }
+if                      {return INSTR_IF;           }
+else                    {return INSTR_ELSE;         }
+endif                   {return INSTR_ENDIF;        }
+break                   {return INSTR_BREAK;        }
+breakp                  {return INSTR_BREAKP;       }
+call                    {return INSTR_CALL;         }
+callnz                  {return INSTR_CALLNZ;       }
+loop                    {return INSTR_LOOP;         }
+ret                     {return INSTR_RET;          }
+endloop                 {return INSTR_ENDLOOP;      }
+label                   {return INSTR_LABEL;        }
+setp                    {return INSTR_SETP;         }
 texldl                  {return INSTR_TEXLDL;       }
 
     /* Vertex shader only instructions  */
 lit                     {return INSTR_LIT;          }
 mova                    {return INSTR_MOVA;         }
 
+    /* Pixel shader only instructions   */
+cmp                     {return INSTR_CMP;          }
+dp2add                  {return INSTR_DP2ADD;       }
+texkill                 {return INSTR_TEXKILL;      }
+texld                   {return INSTR_TEXLD;        }
+dsx                     {return INSTR_DSX;          }
+dsy                     {return INSTR_DSY;          }
+texldp                  {return INSTR_TEXLDP;       }
+texldb                  {return INSTR_TEXLDB;       }
+texldd                  {return INSTR_TEXLDD;       }
 
 {REG_TEMP}              {
                             asmshader_lval.regnum = atoi(yytext + 1);
@@ -231,10 +279,26 @@ ps_3_0                  {return VER_PS30;       }
 \_pp                    {return MOD_PP;             }
 \_centroid              {return MOD_CENTROID;       }
 
+    /* compare params */
+\_gt                    {return COMP_GT;            }
+\_lt                    {return COMP_LT;            }
+\_ge                    {return COMP_GE;            }
+\_le                    {return COMP_LE;            }
+\_eq                    {return COMP_EQ;            }
+\_ne                    {return COMP_NE;            }
+
 {IMMVAL}                {
                             asmshader_lval.immval.val = atof(yytext);
                             asmshader_lval.immval.integer = ((strstr(yytext, ".") == NULL) && (strstr(yytext, "f") == NULL));
                             return IMMVAL;
+                        }
+true                    {
+                            asmshader_lval.immbool = TRUE;
+                            return IMMBOOL;
+                        }
+false                   {
+                            asmshader_lval.immbool = FALSE;
+                            return IMMBOOL;
                         }
 
 {COMMA}                 {return yytext[0];          }
@@ -246,6 +310,126 @@ ps_3_0                  {return VER_PS30;       }
 \[|\]|\+                {return yytext[0];          }
 
 \_abs                   {return SMOD_ABS;           }
+
+!                       {return SMOD_NOT;           }
+
+{DCL_POSITION}          {
+                            if(yytext[strlen("_position")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_position"));
+                            }
+                            return USAGE_POSITION;
+                        }
+{DCL_BLENDWEIGHT}       {
+                            if(yytext[strlen("_blendweight")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_blendweight"));
+                            }
+                            return USAGE_BLENDWEIGHT;
+                        }
+{DCL_BLENDINDICES}      {
+                            if(yytext[strlen("_blendindices")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_blendindices"));
+                            }
+                            return USAGE_BLENDINDICES;
+                        }
+{DCL_NORMAL}            {
+                            if(yytext[strlen("_normal")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_normal"));
+                            }
+                            return USAGE_NORMAL;
+                        }
+{DCL_PSIZE}             {
+                            if(yytext[strlen("_psize")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_psize"));
+                            }
+                            return USAGE_PSIZE;
+                        }
+{DCL_TEXCOORD}          {
+                            if(yytext[strlen("_texcoord")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_texcoord"));
+                            }
+                            return USAGE_TEXCOORD;
+                        }
+{DCL_TANGENT}           {
+                            if(yytext[strlen("_tangent")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_tangent"));
+                            }
+                            return USAGE_TANGENT;
+                        }
+{DCL_BINORMAL}          {
+                            if(yytext[strlen("_binormal")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_binormal"));
+                            }
+                            return USAGE_BINORMAL;
+                        }
+{DCL_TESSFACTOR}        {
+                            if(yytext[strlen("_tessfactor")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_tessfactor"));
+                            }
+                            return USAGE_TESSFACTOR;
+                        }
+{DCL_POSITIONT}         {
+                            if(yytext[strlen("_positiont")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_positiont"));
+                            }
+                            return USAGE_POSITIONT;
+                        }
+{DCL_COLOR}             {
+                            if(yytext[strlen("_color")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_color"));
+                            }
+                            return USAGE_COLOR;
+                        }
+{DCL_FOG}               {
+                            if(yytext[strlen("_fog")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_fog"));
+                            }
+                            return USAGE_FOG;
+                        }
+{DCL_DEPTH}             {
+                            if(yytext[strlen("_depth")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_depth"));
+                            }
+                            return USAGE_DEPTH;
+                        }
+{DCL_SAMPLE}            {
+                            if(yytext[strlen("_sample")] == '\0') {
+                                asmshader_lval.regnum = 0;
+                            } else {
+                                asmshader_lval.regnum = atoi(yytext + strlen("_sample"));
+                            }
+                            return USAGE_SAMPLE;
+                        }
+
+{DCL_SAMPLER1D}         { return SAMPTYPE_1D;       }
+{DCL_SAMPLER2D}         { return SAMPTYPE_2D;       }
+{DCL_SAMPLERCUBE}       { return SAMPTYPE_CUBE;     }
+{DCL_SAMPLERVOLUME}     { return SAMPTYPE_VOLUME;   }
 
 {PREPROCESSORDIRECTIVE} {
                             /* TODO: update current line information */

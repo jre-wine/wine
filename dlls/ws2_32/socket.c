@@ -615,6 +615,7 @@ static inline DWORD NtStatusToWSAError( const DWORD status )
     case STATUS_CANT_WAIT:                  wserr = WSAEWOULDBLOCK;        break;
     case STATUS_BUFFER_OVERFLOW:            wserr = WSAEMSGSIZE;           break;
     case STATUS_NOT_SUPPORTED:              wserr = WSAEOPNOTSUPP;         break;
+    case STATUS_HOST_UNREACHABLE:           wserr = WSAEHOSTUNREACH;       break;
 
     default:
         wserr = RtlNtStatusToDosError( status );
@@ -2706,9 +2707,54 @@ INT WINAPI WSAIoctl(SOCKET s,
 	break;
 
    case WS_SIO_GET_EXTENSION_FUNCTION_POINTER:
-       FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER %s: stub\n", debugstr_guid(lpvInBuffer));
-       WSASetLastError(WSAEOPNOTSUPP);
-       return SOCKET_ERROR;
+   {
+        static const GUID connectex_guid = WSAID_CONNECTEX;
+        static const GUID disconnectex_guid = WSAID_DISCONNECTEX;
+        static const GUID acceptex_guid = WSAID_ACCEPTEX;
+        static const GUID getaccepexsockaddrs_guid = WSAID_GETACCEPTEXSOCKADDRS;
+        static const GUID transmitfile_guid = WSAID_TRANSMITFILE;
+        static const GUID transmitpackets_guid = WSAID_TRANSMITPACKETS;
+        static const GUID wsarecvmsg_guid = WSAID_WSARECVMSG;
+        static const GUID wsasendmsg_guid = WSAID_WSASENDMSG;
+
+        if ( IsEqualGUID(&connectex_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented ConnectEx\n");
+        }
+        else if ( IsEqualGUID(&disconnectex_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented DisconnectEx\n");
+        }
+        else if ( IsEqualGUID(&acceptex_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented AcceptEx\n");
+        }
+        else if ( IsEqualGUID(&getaccepexsockaddrs_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented GetAcceptExSockaddrs\n");
+        }
+        else if ( IsEqualGUID(&transmitfile_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented TransmitFile\n");
+        }
+        else if ( IsEqualGUID(&transmitpackets_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented TransmitPackets\n");
+        }
+        else if ( IsEqualGUID(&wsarecvmsg_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented WSARecvMsg\n");
+        }
+        else if ( IsEqualGUID(&wsasendmsg_guid, lpvInBuffer) )
+        {
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER: unimplemented WSASendMsg\n");
+        }
+        else
+            FIXME("SIO_GET_EXTENSION_FUNCTION_POINTER %s: stub\n", debugstr_guid(lpvInBuffer));
+
+        WSASetLastError(WSAEOPNOTSUPP);
+        return SOCKET_ERROR;
+   }
 
    case WS_SIO_KEEPALIVE_VALS:
    {
@@ -2753,6 +2799,9 @@ INT WINAPI WSAIoctl(SOCKET s,
         release_sock_fd(s, fd);
         break;
    }
+   case WS_SIO_UDP_CONNRESET:
+       FIXME("WS_SIO_UDP_CONNRESET stub\n");
+       break;
    default:
        FIXME("unsupported WS_IOCTL cmd (%08x)\n", dwIoControlCode);
        WSASetLastError(WSAEOPNOTSUPP);

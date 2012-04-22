@@ -28,6 +28,7 @@ RC_SRCS = \
 	No.rc \
 	Pl.rc \
 	Pt.rc \
+	Ro.rc \
 	Ru.rc \
 	Si.rc \
 	Sv.rc \
@@ -36,6 +37,9 @@ RC_SRCS = \
 	Zh.rc \
 	rsrc.rc
 
-SVG_SRCS = wordpad.svg
+SVG_SRCS = \
+	formatbar.svg \
+	toolbar.svg \
+	wordpad.svg
 
 @MAKE_PROG_RULES@

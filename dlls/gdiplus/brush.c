@@ -574,12 +574,16 @@ GpStatus WINGDIPAPI GdipCreatePathGradient(GDIPCONST GpPointF* points,
     if (!*grad) return OutOfMemory;
 
     (*grad)->blendfac = GdipAlloc(sizeof(REAL));
-    if(!(*grad)->blendfac){
+    (*grad)->blendpos = GdipAlloc(sizeof(REAL));
+    if(!(*grad)->blendfac || !(*grad)->blendpos){
+        GdipFree((*grad)->blendfac);
+        GdipFree((*grad)->blendpos);
         GdipFree(*grad);
+        *grad = NULL;
         return OutOfMemory;
     }
     (*grad)->blendfac[0] = 1.0;
-    (*grad)->blendpos    = NULL;
+    (*grad)->blendpos[0] = 1.0;
     (*grad)->blendcount  = 1;
 
     (*grad)->pathdata.Count = count;
@@ -664,12 +668,16 @@ GpStatus WINGDIPAPI GdipCreatePathGradientFromPath(GDIPCONST GpPath* path,
     if (!*grad) return OutOfMemory;
 
     (*grad)->blendfac = GdipAlloc(sizeof(REAL));
-    if(!(*grad)->blendfac){
+    (*grad)->blendpos = GdipAlloc(sizeof(REAL));
+    if(!(*grad)->blendfac || !(*grad)->blendpos){
+        GdipFree((*grad)->blendfac);
+        GdipFree((*grad)->blendpos);
         GdipFree(*grad);
+        *grad = NULL;
         return OutOfMemory;
     }
     (*grad)->blendfac[0] = 1.0;
-    (*grad)->blendpos    = NULL;
+    (*grad)->blendpos[0] = 1.0;
     (*grad)->blendcount  = 1;
 
     (*grad)->pathdata.Count = path->pathdata.Count;
@@ -1062,6 +1070,19 @@ GpStatus WINGDIPAPI GdipGetPathGradientCenterPointI(GpPathGradient *grad,
     }
 
     return ret;
+}
+
+GpStatus WINGDIPAPI GdipGetPathGradientCenterColor(GpPathGradient *grad,
+    ARGB *colors)
+{
+    static int calls;
+
+    TRACE("(%p,%p)\n", grad, colors);
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
 }
 
 GpStatus WINGDIPAPI GdipGetPathGradientFocusScales(GpPathGradient *grad,
@@ -1784,12 +1805,37 @@ GpStatus WINGDIPAPI GdipSetLineTransform(GpLineGradient *brush,
     return NotImplemented;
 }
 
+GpStatus WINGDIPAPI GdipGetLineTransform(GpLineGradient *brush, GpMatrix *matrix)
+{
+    static int calls;
+
+    TRACE("(%p,%p)\n", brush, matrix);
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
 GpStatus WINGDIPAPI GdipScaleLineTransform(GpLineGradient *brush, REAL sx, REAL sy,
     GpMatrixOrder order)
 {
     static int calls;
 
     TRACE("(%p,%0.2f,%0.2f,%u)\n", brush, sx, sy, order);
+
+    if(!(calls++))
+        FIXME("not implemented\n");
+
+    return NotImplemented;
+}
+
+GpStatus WINGDIPAPI GdipMultiplyLineTransform(GpLineGradient *brush,
+    GDIPCONST GpMatrix *matrix, GpMatrixOrder order)
+{
+    static int calls;
+
+    TRACE("(%p,%p,%u)\n", brush, matrix, order);
 
     if(!(calls++))
         FIXME("not implemented\n");

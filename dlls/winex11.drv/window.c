@@ -74,6 +74,10 @@ XContext winContext = 0;
 /* X context to associate a struct x11drv_win_data to an hwnd */
 static XContext win_data_context;
 
+/* time of last user event and window where it's stored */
+static Time last_user_time;
+static Window user_time_window;
+
 static const char whole_window_prop[] = "__wine_x11_whole_window";
 static const char client_window_prop[]= "__wine_x11_client_window";
 static const char icon_window_prop[]  = "__wine_x11_icon_window";
@@ -103,6 +107,8 @@ static void remove_startup_notification(Display *display, Window window)
     if (GetEnvironmentVariableA("DESKTOP_STARTUP_ID", id, sizeof(id)) == 0)
         return;
     SetEnvironmentVariableA("DESKTOP_STARTUP_ID", NULL);
+
+    if ((src = strstr( id, "_TIME" ))) update_user_time( atol( src + 5 ));
 
     pos = snprintf(message, sizeof(message), "remove: ID=");
     message[pos++] = '"';
@@ -214,15 +220,12 @@ static BOOL is_window_managed( HWND hwnd, UINT swp_flags, const RECT *window_rec
 
 
 /***********************************************************************
- *		X11DRV_is_window_rect_mapped
+ *		is_window_rect_mapped
  *
  * Check if the X whole window should be mapped based on its rectangle
  */
 static BOOL is_window_rect_mapped( const RECT *rect )
 {
-    /* don't map if rect is empty */
-    if (IsRectEmpty( rect )) return FALSE;
-
     /* don't map if rect is off-screen */
     if (rect->left >= virtual_screen_rect.right ||
         rect->top >= virtual_screen_rect.bottom ||
@@ -245,19 +248,6 @@ static inline BOOL is_window_resizable( struct x11drv_win_data *data, DWORD styl
     /* Metacity needs the window to be resizable to make it fullscreen */
     return (data->whole_rect.left <= 0 && data->whole_rect.right >= screen_width &&
             data->whole_rect.top <= 0 && data->whole_rect.bottom >= screen_height);
-}
-
-
-/***********************************************************************
- *              get_window_owner
- */
-static HWND get_window_owner( HWND hwnd )
-{
-    RECT rect;
-    HWND owner = GetWindow( hwnd, GW_OWNER );
-    /* ignore the zero-size owners used by Delphi apps */
-    if (owner && GetWindowRect( owner, &rect ) && IsRectEmpty( &rect )) owner = 0;
-    return owner;
 }
 
 
@@ -425,6 +415,25 @@ static void sync_window_style( Display *display, struct x11drv_win_data *data )
 
 
 /***********************************************************************
+ *              sync_window_cursor
+ */
+static void sync_window_cursor( struct x11drv_win_data *data )
+{
+    HCURSOR cursor;
+
+    SERVER_START_REQ( set_cursor )
+    {
+        req->flags = 0;
+        wine_server_call( req );
+        cursor = reply->prev_count >= 0 ? wine_server_ptr_handle( reply->prev_handle ) : 0;
+    }
+    SERVER_END_REQ;
+
+    set_window_cursor( data->hwnd, cursor );
+}
+
+
+/***********************************************************************
  *              sync_window_region
  *
  * Update the X11 window region.
@@ -436,6 +445,16 @@ static void sync_window_region( Display *display, struct x11drv_win_data *data, 
 
     if (!data->whole_window) return;
     data->shaped = FALSE;
+
+    if (IsRectEmpty( &data->window_rect ))  /* set an empty shape */
+    {
+        static XRectangle empty_rect;
+        wine_tsx11_lock();
+        XShapeCombineRectangles( display, data->whole_window, ShapeBounding, 0, 0,
+                                 &empty_rect, 1, ShapeSet, YXBanded );
+        wine_tsx11_unlock();
+        return;
+    }
 
     if (hrgn == (HRGN)1)  /* hack: win_region == 1 means retrieve region from server */
     {
@@ -909,12 +928,12 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data,
         HBITMAP hbmOrig;
         RECT rcMask;
         BITMAP bm;
-        ICONINFO ii;
+        ICONINFO ii, ii_small;
         HDC hDC;
         unsigned int size;
         unsigned long *bits;
 
-        GetIconInfo(icon_big, &ii);
+        if (!GetIconInfo(icon_big, &ii)) return;
 
         GetObjectW(ii.hbmMask, sizeof(bm), &bm);
         rcMask.top    = 0;
@@ -924,12 +943,12 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data,
 
         hDC = CreateCompatibleDC(0);
         bits = get_bitmap_argb( hDC, ii.hbmColor, ii.hbmMask, &size );
-        if (GetIconInfo( icon_small, &ii ))
+        if (bits && GetIconInfo( icon_small, &ii_small ))
         {
             unsigned int size_small;
             unsigned long *bits_small, *new;
 
-            if ((bits_small = get_bitmap_argb( hDC, ii.hbmColor, ii.hbmMask, &size_small )) &&
+            if ((bits_small = get_bitmap_argb( hDC, ii_small.hbmColor, ii_small.hbmMask, &size_small )) &&
                 (bits_small[0] != bits[0] || bits_small[1] != bits[1]))  /* size must be different */
             {
                 if ((new = HeapReAlloc( GetProcessHeap(), 0, bits,
@@ -941,8 +960,8 @@ static void set_icon_hints( Display *display, struct x11drv_win_data *data,
                 }
             }
             HeapFree( GetProcessHeap(), 0, bits_small );
-            DeleteObject( ii.hbmColor );
-            DeleteObject( ii.hbmMask );
+            DeleteObject( ii_small.hbmColor );
+            DeleteObject( ii_small.hbmMask );
         }
         wine_tsx11_lock();
         if (bits)
@@ -999,6 +1018,8 @@ static void set_size_hints( Display *display, struct x11drv_win_data *data, DWOR
         {
             size_hints->max_width = data->whole_rect.right - data->whole_rect.left;
             size_hints->max_height = data->whole_rect.bottom - data->whole_rect.top;
+            if (size_hints->max_width <= 0 ||size_hints->max_height <= 0)
+                size_hints->max_width = size_hints->max_height = 1;
             size_hints->min_width = size_hints->max_width;
             size_hints->min_height = size_hints->max_height;
             size_hints->flags |= PMinSize | PMaxSize;
@@ -1053,7 +1074,6 @@ static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data
     Atom dndVersion = WINE_XDND_VERSION;
     XClassHint *class_hints;
     char *process_name = get_process_name();
-    Cursor cursor;
 
     wine_tsx11_lock();
 
@@ -1086,8 +1106,10 @@ static void set_initial_wm_hints( Display *display, struct x11drv_win_data *data
     XChangeProperty( display, data->whole_window, x11drv_atom(XdndAware),
                      XA_ATOM, 32, PropModeReplace, (unsigned char*)&dndVersion, 1 );
 
-    if ((cursor = get_x11_cursor( data->cursor )))
-        XDefineCursor( gdi_display, data->whole_window, cursor );
+    update_user_time( 0 );  /* make sure that the user time window exists */
+    if (user_time_window)
+        XChangeProperty( display, data->whole_window, x11drv_atom(_NET_WM_USER_TIME_WINDOW),
+                         XA_WINDOW, 32, PropModeReplace, (unsigned char *)&user_time_window, 1 );
 
     data->wm_hints = XAllocWMHints();
     wine_tsx11_unlock();
@@ -1152,7 +1174,7 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
     {
         style = GetWindowLongW( data->hwnd, GWL_STYLE );
         ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
-        owner = get_window_owner( data->hwnd );
+        owner = GetWindow( data->hwnd, GW_OWNER );
         if ((owner_win = get_owner_whole_window( owner, data->managed ))) group_leader = owner_win;
     }
 
@@ -1166,6 +1188,7 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
     /* set the WM_WINDOW_TYPE */
     if (style & WS_THICKFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
     else if (ex_style & WS_EX_APPWINDOW) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
+    else if (style & WS_MINIMIZEBOX) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_NORMAL);
     else if (style & WS_DLGFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
     else if (ex_style & WS_EX_DLGMODALFRAME) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
     else if ((style & WS_POPUP) && owner) window_type = x11drv_atom(_NET_WM_WINDOW_TYPE_DIALOG);
@@ -1207,6 +1230,27 @@ static void set_wm_hints( Display *display, struct x11drv_win_data *data )
 
 
 /***********************************************************************
+ *     update_user_time
+ */
+void update_user_time( Time time )
+{
+    wine_tsx11_lock();
+    if (!user_time_window)
+    {
+        user_time_window = XCreateWindow( gdi_display, root_window, -1, -1, 1, 1, 0, 0, InputOnly,
+                                          DefaultVisual(gdi_display,DefaultScreen(gdi_display)), 0, NULL );
+        TRACE( "user time window %lx\n", user_time_window );
+    }
+    if (time && (!last_user_time || (long)(time - last_user_time) > 0))
+    {
+        last_user_time = time;
+        XChangeProperty( gdi_display, user_time_window, x11drv_atom(_NET_WM_USER_TIME),
+                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&time, 1 );
+    }
+    wine_tsx11_unlock();
+}
+
+/***********************************************************************
  *     update_net_wm_states
  */
 void update_net_wm_states( Display *display, struct x11drv_win_data *data )
@@ -1240,9 +1284,9 @@ void update_net_wm_states( Display *display, struct x11drv_win_data *data )
     ex_style = GetWindowLongW( data->hwnd, GWL_EXSTYLE );
     if (ex_style & WS_EX_TOPMOST)
         new_state |= (1 << NET_WM_STATE_ABOVE);
-    if (ex_style & WS_EX_TOOLWINDOW)
+    if (ex_style & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE))
         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR) | (1 << NET_WM_STATE_SKIP_PAGER);
-    if (!(ex_style & WS_EX_APPWINDOW) && get_window_owner( data->hwnd ))
+    if (!(ex_style & WS_EX_APPWINDOW) && GetWindow( data->hwnd, GW_OWNER ))
         new_state |= (1 << NET_WM_STATE_SKIP_TASKBAR);
 
     if (!data->mapped)  /* set the _NET_WM_STATE atom directly */
@@ -1485,6 +1529,8 @@ static void sync_window_position( Display *display, struct x11drv_win_data *data
     XReconfigureWMWindow( display, data->whole_window,
                           DefaultScreen(display), mask, &changes );
 #ifdef HAVE_LIBXSHAPE
+    if (IsRectEmpty( old_window_rect ) != IsRectEmpty( &data->window_rect ))
+        sync_window_region( display, data, (HRGN)1 );
     if (data->shaped)
     {
         int old_x_offset = old_window_rect->left - old_whole_rect->left;
@@ -1672,7 +1718,7 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     sync_window_text( display, data->whole_window, text );
 
     /* set the window region */
-    if (win_rgn) sync_window_region( display, data, win_rgn );
+    if (win_rgn || IsRectEmpty( &data->window_rect )) sync_window_region( display, data, win_rgn );
 
     /* set the window opacity */
     if (!GetLayeredWindowAttributes( data->hwnd, &key, &alpha, &layered_flags )) layered_flags = 0;
@@ -1681,6 +1727,8 @@ static Window create_whole_window( Display *display, struct x11drv_win_data *dat
     wine_tsx11_lock();
     XFlush( display );  /* make sure the window exists before we start painting to it */
     wine_tsx11_unlock();
+
+    sync_window_cursor( data );
 done:
     if (win_rgn) DeleteObject( win_rgn );
     return data->whole_window;
@@ -2313,7 +2361,8 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
     if (data->mapped)
     {
         if (((swp_flags & SWP_HIDEWINDOW) && !(new_style & WS_VISIBLE)) ||
-            (!event_type && !is_window_rect_mapped( rectWindow )))
+            (event_type != ConfigureNotify &&
+             !is_window_rect_mapped( rectWindow ) && is_window_rect_mapped( &old_window_rect )))
             unmap_window( display, data );
     }
 

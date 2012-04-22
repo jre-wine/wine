@@ -170,6 +170,8 @@ extern void msvcrt_free_signals(void);
 
 extern unsigned msvcrt_create_io_inherit_block(WORD*, BYTE**);
 
+extern unsigned int __cdecl _control87(unsigned int, unsigned int);
+
 /* run-time error codes */
 #define _RT_STACK       0
 #define _RT_NULLPTR     1
@@ -707,7 +709,7 @@ typedef void (__cdecl *MSVCRT___sighandler_t)(int);
 #define _MB_CP_ANSI     -3
 #define _MB_CP_LOCALE   -4
 
-#define _TRUNCATE ((MSVCRT_size_t)-1)
+#define MSVCRT__TRUNCATE ((MSVCRT_size_t)-1)
 
 void  __cdecl    MSVCRT_free(void*);
 void* __cdecl    MSVCRT_malloc(MSVCRT_size_t);
@@ -798,7 +800,7 @@ typedef struct MSVCRT_localeinfo_struct
 
 extern MSVCRT__locale_t MSVCRT_locale;
 MSVCRT__locale_t get_locale(void);
-void __cdecl _free_locale(MSVCRT__locale_t);
+void __cdecl MSVCRT__free_locale(MSVCRT__locale_t);
 
 #ifndef __WINE_MSVCRT_TEST
 int            __cdecl MSVCRT__write(int,const void*,unsigned int);

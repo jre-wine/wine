@@ -129,6 +129,7 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         MSVCRT__locale_t locale)
 {
     unsigned __int64 d=0, hlp;
+    unsigned fpcontrol;
     int exp=0, sign=1;
     const MSVCRT_wchar_t *p;
     double ret;
@@ -212,10 +213,16 @@ double CDECL MSVCRT__wcstod_l(const MSVCRT_wchar_t* str, MSVCRT_wchar_t** end,
         }
     }
 
+    fpcontrol = _control87(0, 0);
+    _control87(MSVCRT__EM_DENORMAL|MSVCRT__EM_INVALID|MSVCRT__EM_ZERODIVIDE
+            |MSVCRT__EM_OVERFLOW|MSVCRT__EM_UNDERFLOW|MSVCRT__EM_INEXACT, 0xffffffff);
+
     if(exp>0)
         ret = (double)sign*d*pow(10, exp);
     else
         ret = (double)sign*d/pow(10, -exp);
+
+    _control87(fpcontrol, 0xffffffff);
 
     if((d && ret==0.0) || isinf(ret))
         *MSVCRT__errno() = MSVCRT_ERANGE;
@@ -233,26 +240,34 @@ MSVCRT_size_t CDECL MSVCRT__wcstombs_l(char *mbstr, const MSVCRT_wchar_t *wcstr,
         MSVCRT_size_t count, MSVCRT__locale_t locale)
 {
     char default_char = '\0';
-    MSVCRT_size_t tmp;
+    MSVCRT_size_t tmp = 0;
     BOOL used_default;
 
     if(!locale)
         locale = get_locale();
 
-    /* FIXME: Use wcslen here */
-    tmp = strlenW(wcstr);
-    if(tmp>count && mbstr)
-        tmp = count;
+    if(!mbstr)
+        return WideCharToMultiByte(locale->locinfo->lc_codepage, WC_NO_BEST_FIT_CHARS,
+                wcstr, -1, NULL, 0, &default_char, &used_default)-1;
 
-    tmp = WideCharToMultiByte(locale->locinfo->lc_codepage, WC_NO_BEST_FIT_CHARS,
-            wcstr, tmp, mbstr, count, &default_char, &used_default);
+    while(*wcstr) {
+        char buf[3];
+        MSVCRT_size_t i, size;
 
-    if(used_default)
-        return -1;
+        size = WideCharToMultiByte(locale->locinfo->lc_codepage, WC_NO_BEST_FIT_CHARS,
+                wcstr, 1, buf, 3, &default_char, &used_default);
+        if(used_default)
+            return -1;
+        if(tmp+size > count)
+            return tmp;
 
-    if(tmp<count && mbstr)
+        for(i=0; i<size; i++)
+            mbstr[tmp++] = buf[i];
+        wcstr++;
+    }
+
+    if(tmp < count)
         mbstr[tmp] = '\0';
-
     return tmp;
 }
 
@@ -289,7 +304,7 @@ MSVCRT_size_t CDECL MSVCRT__wcstombs_s_l(MSVCRT_size_t *ret, char *mbstr,
         return MSVCRT_EINVAL;
     }
 
-    if(count==_TRUNCATE || size<count)
+    if(count==MSVCRT__TRUNCATE || size<count)
         conv = size;
     else
         conv = count;
@@ -297,7 +312,7 @@ MSVCRT_size_t CDECL MSVCRT__wcstombs_s_l(MSVCRT_size_t *ret, char *mbstr,
     conv = MSVCRT__wcstombs_l(mbstr, wcstr, conv, locale);
     if(conv<size)
         mbstr[conv++] = '\0';
-    else if(conv==size && (count==_TRUNCATE || mbstr[conv-1]=='\0'))
+    else if(conv==size && (count==MSVCRT__TRUNCATE || mbstr[conv-1]=='\0'))
         mbstr[conv-1] = '\0';
     else {
         MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
@@ -1028,7 +1043,7 @@ int CDECL MSVCRT_vsnprintf_s_l( char *str, MSVCRT_size_t sizeOfBuffer,
     ret = vsnprintf_internal(str, len, format, locale, TRUE, valist);
 
     if(ret<0 || ret==len) {
-        if(count!=_TRUNCATE && count>sizeOfBuffer) {
+        if(count!=MSVCRT__TRUNCATE && count>sizeOfBuffer) {
             MSVCRT__invalid_parameter( NULL, NULL, NULL, 0, 0 );
             *MSVCRT__errno() = MSVCRT_ERANGE;
             memset(str, 0, sizeOfBuffer);
@@ -1088,7 +1103,21 @@ int CDECL MSVCRT__snprintf(char *str, unsigned int len, const char *format, ...)
 }
 
 /*********************************************************************
- * vsnwsprintf_internal (INTERNAL)
+ *		_snprintf_s (MSVCRT.@)
+ */
+int CDECL MSVCRT__snprintf_s(char *str, unsigned int len, unsigned int count,
+    const char *format, ...)
+{
+    int retval;
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
+    retval = MSVCRT_vsnprintf_s_l(str, len, count, format, NULL, valist);
+    __ms_va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ * vsnwprintf_internal (INTERNAL)
  */
 static inline int vsnwprintf_internal(MSVCRT_wchar_t *str, MSVCRT_size_t len,
         const MSVCRT_wchar_t *format, MSVCRT__locale_t locale, BOOL valid,
@@ -1105,7 +1134,7 @@ static inline int vsnwprintf_internal(MSVCRT_wchar_t *str, MSVCRT_size_t len,
 }
 
 /*********************************************************************
- *              _vsnwsprintf (MSVCRT.@)
+ *              _vsnwprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, MSVCRT_size_t len,
         const MSVCRT_wchar_t *format, __ms_va_list valist)
@@ -1114,7 +1143,7 @@ int CDECL MSVCRT_vsnwprintf(MSVCRT_wchar_t *str, MSVCRT_size_t len,
 }
 
 /*********************************************************************
- *              _vsnwsprintf_l (MSVCRT.@)
+ *              _vsnwprintf_l (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf_l(MSVCRT_wchar_t *str, MSVCRT_size_t len,
         const MSVCRT_wchar_t *format, MSVCRT__locale_t locale,
@@ -1124,7 +1153,7 @@ int CDECL MSVCRT_vsnwprintf_l(MSVCRT_wchar_t *str, MSVCRT_size_t len,
 }
 
 /*********************************************************************
- *              _vsnwsprintf_s_l (MSVCRT.@)
+ *              _vsnwprintf_s_l (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf_s_l( MSVCRT_wchar_t *str, MSVCRT_size_t sizeOfBuffer,
         MSVCRT_size_t count, const MSVCRT_wchar_t *format,
@@ -1132,17 +1161,17 @@ int CDECL MSVCRT_vsnwprintf_s_l( MSVCRT_wchar_t *str, MSVCRT_size_t sizeOfBuffer
 {
     int len, ret;
 
-    len = sizeOfBuffer/sizeof(MSVCRT_wchar_t);
+    len = sizeOfBuffer;
     if(count!=-1 && len>count+1)
         len = count+1;
 
     ret = vsnwprintf_internal(str, len, format, locale, TRUE, valist);
 
     if(ret<0 || ret==len) {
-        if(count!=_TRUNCATE && count>sizeOfBuffer/sizeof(MSVCRT_wchar_t)) {
+        if(count!=MSVCRT__TRUNCATE && count>sizeOfBuffer) {
             MSVCRT__invalid_parameter( NULL, NULL, NULL, 0, 0 );
             *MSVCRT__errno() = MSVCRT_ERANGE;
-            memset(str, 0, sizeOfBuffer);
+            memset(str, 0, sizeOfBuffer*sizeof(MSVCRT_wchar_t));
         } else
             str[len-1] = '\0';
 
@@ -1153,7 +1182,7 @@ int CDECL MSVCRT_vsnwprintf_s_l( MSVCRT_wchar_t *str, MSVCRT_size_t sizeOfBuffer
 }
 
 /*********************************************************************
- *              _vsnwsprintf_s (MSVCRT.@)
+ *              _vsnwprintf_s (MSVCRT.@)
  */
 int CDECL MSVCRT_vsnwprintf_s(MSVCRT_wchar_t *str, MSVCRT_size_t sizeOfBuffer,
         MSVCRT_size_t count, const MSVCRT_wchar_t *format, __ms_va_list valist)
@@ -1171,6 +1200,20 @@ int CDECL MSVCRT__snwprintf( MSVCRT_wchar_t *str, unsigned int len, const MSVCRT
     __ms_va_list valist;
     __ms_va_start(valist, format);
     retval = MSVCRT_vsnwprintf(str, len, format, valist);
+    __ms_va_end(valist);
+    return retval;
+}
+
+/*********************************************************************
+ *		_snwprintf_s (MSVCRT.@)
+ */
+int CDECL MSVCRT__snwprintf_s( MSVCRT_wchar_t *str, unsigned int len, unsigned int count,
+    const MSVCRT_wchar_t *format, ...)
+{
+    int retval;
+    __ms_va_list valist;
+    __ms_va_start(valist, format);
+    retval = MSVCRT_vsnwprintf_s_l(str, len, count, format, NULL, valist);
     __ms_va_end(valist);
     return retval;
 }
@@ -1204,6 +1247,20 @@ int CDECL MSVCRT_sprintf_s( char *str, MSVCRT_size_t num, const char *format, ..
 }
 
 /*********************************************************************
+ *		_scwprintf (MSVCRT.@)
+ */
+int CDECL MSVCRT__scwprintf( const MSVCRT_wchar_t *format, ... )
+{
+    __ms_va_list ap;
+    int r;
+
+    __ms_va_start( ap, format );
+    r = MSVCRT_vsnwprintf( NULL, INT_MAX, format, ap );
+    __ms_va_end( ap );
+    return r;
+}
+
+/*********************************************************************
  *		swprintf (MSVCRT.@)
  */
 int CDECL MSVCRT_swprintf( MSVCRT_wchar_t *str, const MSVCRT_wchar_t *format, ... )
@@ -1227,8 +1284,7 @@ int CDECL MSVCRT_swprintf_s(MSVCRT_wchar_t *str, MSVCRT_size_t numberOfElements,
     int r;
 
     __ms_va_start(ap, format);
-    r = MSVCRT_vsnwprintf_s(str, numberOfElements*sizeof(MSVCRT_wchar_t),
-            INT_MAX, format, ap);
+    r = MSVCRT_vsnwprintf_s(str, numberOfElements, INT_MAX, format, ap);
     __ms_va_end(ap);
 
     return r;
@@ -1256,8 +1312,7 @@ int CDECL _vscwprintf( const MSVCRT_wchar_t *format, __ms_va_list args )
 int CDECL MSVCRT_vswprintf_s(MSVCRT_wchar_t* str, MSVCRT_size_t numberOfElements,
         const MSVCRT_wchar_t* format, __ms_va_list args)
 {
-    return MSVCRT_vsnwprintf_s(str, numberOfElements*sizeof(MSVCRT_wchar_t),
-            INT_MAX, format, args);
+    return MSVCRT_vsnwprintf_s(str, numberOfElements, INT_MAX, format, args );
 }
 
 /*********************************************************************
@@ -1266,8 +1321,8 @@ int CDECL MSVCRT_vswprintf_s(MSVCRT_wchar_t* str, MSVCRT_size_t numberOfElements
 int CDECL MSVCRT_vswprintf_s_l(MSVCRT_wchar_t* str, MSVCRT_size_t numberOfElements,
         const MSVCRT_wchar_t* format, MSVCRT__locale_t locale, __ms_va_list args)
 {
-    return MSVCRT_vsnwprintf_s_l(str, numberOfElements*sizeof(MSVCRT_wchar_t),
-            INT_MAX, format, locale, args );
+    return MSVCRT_vsnwprintf_s_l(str, numberOfElements, INT_MAX,
+            format, locale, args );
 }
 
 /*********************************************************************
@@ -1505,7 +1560,7 @@ INT CDECL MSVCRT_wcscat_s(MSVCRT_wchar_t* dst, MSVCRT_size_t elem, const MSVCRT_
 }
 
 /*********************************************************************
- *  _wctoi64_l (MSVCRT.@)
+ *  _wcstoi64_l (MSVCRT.@)
  *
  * FIXME: locale parameter is ignored
  */

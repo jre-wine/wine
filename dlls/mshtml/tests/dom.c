@@ -673,6 +673,17 @@ static IHTMLAnchorElement *_get_anchor_iface(unsigned line, IUnknown *unk)
     return anchor;
 }
 
+#define get_textarea_iface(u) _get_textarea_iface(__LINE__,u)
+static IHTMLTextAreaElement *_get_textarea_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLTextAreaElement *textarea;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLTextAreaElement, (void**)&textarea);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLTextAreaElement: %08x\n", hres);
+    return textarea;
+}
+
 #define get_select_iface(u) _get_select_iface(__LINE__,u)
 static IHTMLSelectElement *_get_select_iface(unsigned line, IUnknown *unk)
 {
@@ -1135,6 +1146,85 @@ static void _test_option_put_value(unsigned line, IHTMLOptionElement *option, co
     _test_option_value(line, option, value);
 }
 
+#define test_option_selected(o,s) _test_option_selected(__LINE__,o,s)
+static void _test_option_selected(unsigned line, IHTMLOptionElement *option, VARIANT_BOOL ex)
+{
+    VARIANT_BOOL b = 0x100;
+    HRESULT hres;
+
+    hres = IHTMLOptionElement_get_selected(option, &b);
+    ok_(__FILE__,line)(hres == S_OK, "get_selected failed: %08x\n", hres);
+    ok_(__FILE__,line)(b == ex, "selected = %x, expected %x\n", b, ex);
+}
+
+#define test_option_put_selected(o,s) _test_option_put_selected(__LINE__,o,s)
+static void _test_option_put_selected(unsigned line, IHTMLOptionElement *option, VARIANT_BOOL b)
+{
+    HRESULT hres;
+
+    hres = IHTMLOptionElement_put_selected(option, b);
+    ok_(__FILE__,line)(hres == S_OK, "put_selected failed: %08x\n", hres);
+    _test_option_selected(line, option, b);
+}
+
+#define test_textarea_value(t,v) _test_textarea_value(__LINE__,t,v)
+static void _test_textarea_value(unsigned line, IUnknown *unk, const char *exval)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    BSTR value = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_get_value(textarea, &value);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "get_value failed: %08x\n", hres);
+    if(exval)
+        ok_(__FILE__,line)(!strcmp_wa(value, exval), "value = %s, expected %s\n", wine_dbgstr_w(value), exval);
+    else
+        ok_(__FILE__,line)(!value, "value = %p\n", value);
+    SysFreeString(value);
+}
+
+#define test_textarea_put_value(t,v) _test_textarea_put_value(__LINE__,t,v)
+static void _test_textarea_put_value(unsigned line, IUnknown *unk, const char *value)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    BSTR tmp = a2bstr(value);
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_put_value(textarea, tmp);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "put_value failed: %08x\n", hres);
+    SysFreeString(tmp);
+
+    _test_textarea_value(line, unk, value);
+}
+
+#define test_textarea_readonly(t,v) _test_textarea_readonly(__LINE__,t,v)
+static void _test_textarea_readonly(unsigned line, IUnknown *unk, VARIANT_BOOL ex)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    VARIANT_BOOL b = 0x100;
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_get_readOnly(textarea, &b);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "get_readOnly failed: %08x\n", hres);
+    ok_(__FILE__,line)(b == ex, "readOnly = %x, expected %x\n", b, ex);
+}
+
+#define test_textarea_put_readonly(t,v) _test_textarea_put_readonly(__LINE__,t,v)
+static void _test_textarea_put_readonly(unsigned line, IUnknown *unk, VARIANT_BOOL b)
+{
+    IHTMLTextAreaElement *textarea = _get_textarea_iface(line, unk);
+    HRESULT hres;
+
+    hres = IHTMLTextAreaElement_put_readOnly(textarea, b);
+    IHTMLTextAreaElement_Release(textarea);
+    ok_(__FILE__,line)(hres == S_OK, "put_readOnly failed: %08x\n", hres);
+
+    _test_textarea_readonly(line, unk, b);
+}
+
 #define test_comment_text(c,t) _test_comment_text(__LINE__,c,t)
 static void _test_comment_text(unsigned line, IUnknown *unk, const char *extext)
 {
@@ -1183,12 +1273,13 @@ static IHTMLOptionElement *_create_option_elem(unsigned line, IHTMLDocument2 *do
 
     _test_option_text(line, option, txt);
     _test_option_value(line, option, val);
+    _test_option_selected(line, option, VARIANT_FALSE);
 
     return option;
 }
 
 #define test_img_width(o,w) _test_img_width(__LINE__,o,w)
-static void _test_img_width(unsigned line, IHTMLImgElement *img, const long exp)
+static void _test_img_width(unsigned line, IHTMLImgElement *img, const LONG exp)
 {
     LONG found = -1;
     HRESULT hres;
@@ -1199,7 +1290,7 @@ static void _test_img_width(unsigned line, IHTMLImgElement *img, const long exp)
 }
 
 #define test_img_put_width(o,w) _test_img_put_width(__LINE__,o,w)
-static void _test_img_put_width(unsigned line, IHTMLImgElement *img, const long width)
+static void _test_img_put_width(unsigned line, IHTMLImgElement *img, const LONG width)
 {
     HRESULT hres;
 
@@ -1210,7 +1301,7 @@ static void _test_img_put_width(unsigned line, IHTMLImgElement *img, const long 
 }
 
 #define test_img_height(o,h) _test_img_height(__LINE__,o,h)
-static void _test_img_height(unsigned line, IHTMLImgElement *img, const long exp)
+static void _test_img_height(unsigned line, IHTMLImgElement *img, const LONG exp)
 {
     LONG found = -1;
     HRESULT hres;
@@ -1221,7 +1312,7 @@ static void _test_img_height(unsigned line, IHTMLImgElement *img, const long exp
 }
 
 #define test_img_put_height(o,w) _test_img_put_height(__LINE__,o,w)
-static void _test_img_put_height(unsigned line, IHTMLImgElement *img, const long height)
+static void _test_img_put_height(unsigned line, IHTMLImgElement *img, const LONG height)
 {
     HRESULT hres;
 
@@ -2454,6 +2545,38 @@ static void _test_form_length(unsigned line, IUnknown *unk, LONG exlen)
     IHTMLFormElement_Release(form);
 }
 
+#define test_form_action(f,a) _test_form_action(__LINE__,f,a)
+static void _test_form_action(unsigned line, IUnknown *unk, const char *ex)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR action = (void*)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLFormElement_get_action(form, &action);
+    ok_(__FILE__,line)(hres == S_OK, "get_action failed: %08x\n", hres);
+    if(ex)
+        ok_(__FILE__,line)(!strcmp_wa(action, ex), "action=%s, expected %s\n", wine_dbgstr_w(action), ex);
+    else
+        ok_(__FILE__,line)(!action, "action=%p\n", action);
+
+    IHTMLFormElement_Release(form);
+}
+
+#define test_form_put_action(f,a) _test_form_put_action(__LINE__,f,a)
+static void _test_form_put_action(unsigned line, IUnknown *unk, const char *action)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    BSTR tmp = a2bstr(action);
+    HRESULT hres;
+
+    hres = IHTMLFormElement_put_action(form, tmp);
+    ok_(__FILE__,line)(hres == S_OK, "put_action failed: %08x\n", hres);
+    SysFreeString(tmp);
+    IHTMLFormElement_Release(form);
+
+    _test_form_action(line, unk, action);
+}
+
 #define get_elem_doc(e) _get_elem_doc(__LINE__,e)
 static IHTMLDocument2 *_get_elem_doc(unsigned line, IUnknown *unk)
 {
@@ -2841,7 +2964,8 @@ static IHTMLElement *get_doc_elem_by_id(IHTMLDocument2 *doc, const char *id)
 
 static void test_select_elem(IHTMLSelectElement *select)
 {
-    IDispatch *disp;
+    IDispatch *disp, *disp2;
+    VARIANT name, index;
     HRESULT hres;
 
     test_select_type(select, "select-one");
@@ -2862,6 +2986,82 @@ static void test_select_elem(IHTMLSelectElement *select)
     ok(disp != NULL, "options == NULL\n");
     ok(iface_cmp((IUnknown*)disp, (IUnknown*)select), "disp != select\n");
     IDispatch_Release(disp);
+
+    V_VT(&index) = VT_EMPTY;
+    V_VT(&name) = VT_I4;
+    V_I4(&name) = -1;
+    disp = (void*)0xdeadbeef;
+    hres = IHTMLSelectElement_item(select, name, index, &disp);
+    ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
+    ok(!disp, "disp = %p\n", disp);
+
+    V_I4(&name) = 2;
+    disp = (void*)0xdeadbeef;
+    hres = IHTMLSelectElement_item(select, name, index, &disp);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(!disp, "disp = %p\n", disp);
+
+    V_I4(&name) = 1;
+    hres = IHTMLSelectElement_item(select, name, index, NULL);
+    ok(hres == E_POINTER || broken(hres == E_INVALIDARG), "item failed: %08x, expected E_POINTER\n", hres);
+
+    disp = NULL;
+    hres = IHTMLSelectElement_item(select, name, index, &disp);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(disp != NULL, "disp = NULL\n");
+    test_disp((IUnknown*)disp, &DIID_DispHTMLOptionElement, NULL);
+
+    V_VT(&index) = VT_I4;
+    V_I4(&index) = 1;
+    disp2 = NULL;
+    hres = IHTMLSelectElement_item(select, name, index, &disp2);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(disp2 != NULL, "disp = NULL\n");
+    ok(iface_cmp((IUnknown*)disp, (IUnknown*)disp2), "disp != disp2\n");
+    IDispatch_Release(disp2);
+    IDispatch_Release(disp);
+}
+
+static void test_form_item(IHTMLElement *elem)
+{
+    IHTMLFormElement *form = get_form_iface((IUnknown*)elem);
+    IDispatch *disp, *disp2;
+    VARIANT name, index;
+    HRESULT hres;
+
+    V_VT(&index) = VT_EMPTY;
+    V_VT(&name) = VT_I4;
+    V_I4(&name) = -1;
+    disp = (void*)0xdeadbeef;
+    hres = IHTMLFormElement_item(form, name, index, &disp);
+    ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
+    ok(!disp, "disp = %p\n", disp);
+
+    V_I4(&name) = 2;
+    disp = (void*)0xdeadbeef;
+    hres = IHTMLFormElement_item(form, name, index, &disp);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(!disp, "disp = %p\n", disp);
+
+    V_I4(&name) = 1;
+    hres = IHTMLFormElement_item(form, name, index, NULL);
+    ok(hres == E_INVALIDARG, "item failed: %08x, expected E_INVALIDARG\n", hres);
+
+    disp = NULL;
+    hres = IHTMLFormElement_item(form, name, index, &disp);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(disp != NULL, "disp = NULL\n");
+    test_disp((IUnknown*)disp, &DIID_DispHTMLInputElement, NULL);
+
+    V_VT(&index) = VT_I4;
+    V_I4(&index) = 1;
+    disp2 = NULL;
+    hres = IHTMLFormElement_item(form, name, index, &disp2);
+    ok(hres == S_OK, "item failed: %08x\n", hres);
+    ok(disp2 != NULL, "disp = NULL\n");
+    ok(iface_cmp((IUnknown*)disp, (IUnknown*)disp2), "disp != disp2\n");
+    IDispatch_Release(disp2);
+    IDispatch_Release(disp);
 }
 
 static void test_create_option_elem(IHTMLDocument2 *doc)
@@ -2872,6 +3072,8 @@ static void test_create_option_elem(IHTMLDocument2 *doc)
 
     test_option_put_text(option, "new text");
     test_option_put_value(option, "new value");
+    test_option_put_selected(option, VARIANT_TRUE);
+    test_option_put_selected(option, VARIANT_FALSE);
 
     IHTMLOptionElement_Release(option);
 }
@@ -3240,7 +3442,7 @@ static void test_navigator(IHTMLDocument2 *doc)
     hres = IOmNavigator_get_platform(navigator, &bstr);
     ok(hres == S_OK, "get_platform failed: %08x\n", hres);
 #ifdef _WIN64
-    ok(!strcmp_wa(bstr, "Win64"), "unexpected platform %s\n", wine_dbgstr_w(bstr));
+    ok(!strcmp_wa(bstr, "Win64") || broken(!strcmp_wa(bstr, "Win32") /* IE6 */), "unexpected platform %s\n", wine_dbgstr_w(bstr));
 #else
     ok(!strcmp_wa(bstr, "Win32"), "unexpected platform %s\n", wine_dbgstr_w(bstr));
 #endif
@@ -5980,29 +6182,51 @@ static void test_elems(IHTMLDocument2 *doc)
 
 static void test_elems2(IHTMLDocument2 *doc)
 {
-    IHTMLElement *elem, *elem2;
+    IHTMLElement *elem, *elem2, *div;
 
     static const elem_type_t outer_types[] = {
         ET_BR,
         ET_A
     };
 
-    elem = get_doc_elem_by_id(doc, "divid");
+    div = get_doc_elem_by_id(doc, "divid");
 
-    test_elem_set_innerhtml((IUnknown*)elem, "<div id=\"innerid\"></div>");
+    test_elem_set_innerhtml((IUnknown*)div, "<div id=\"innerid\"></div>");
     elem2 = get_doc_elem_by_id(doc, "innerid");
     ok(elem2 != NULL, "elem2 == NULL\n");
     test_elem_set_outerhtml((IUnknown*)elem2, "<br><a href=\"about:blank\" id=\"aid\">a</a>");
-    test_elem_all((IUnknown*)elem, outer_types, sizeof(outer_types)/sizeof(*outer_types));
+    test_elem_all((IUnknown*)div, outer_types, sizeof(outer_types)/sizeof(*outer_types));
     IHTMLElement_Release(elem2);
 
     elem2 = get_doc_elem_by_id(doc, "aid");
     ok(elem2 != NULL, "elem2 == NULL\n");
     test_elem_set_outerhtml((IUnknown*)elem2, "");
-    test_elem_all((IUnknown*)elem, outer_types, 1);
+    test_elem_all((IUnknown*)div, outer_types, 1);
     IHTMLElement_Release(elem2);
 
-    IHTMLElement_Release(elem);
+    test_elem_set_innerhtml((IUnknown*)div, "<textarea id=\"ta\"></textarea>");
+    elem = get_elem_by_id(doc, "ta", TRUE);
+    if(elem) {
+        test_textarea_value((IUnknown*)elem, NULL);
+        test_textarea_put_value((IUnknown*)elem, "test");
+        test_textarea_readonly((IUnknown*)elem, VARIANT_FALSE);
+        test_textarea_put_readonly((IUnknown*)elem, VARIANT_TRUE);
+        test_textarea_put_readonly((IUnknown*)elem, VARIANT_FALSE);
+        IHTMLElement_Release(elem);
+    }
+
+    test_elem_set_innerhtml((IUnknown*)div,
+            "<form id=\"form\"><input type=\"button\"></input><input type=\"text\"></input></textarea>");
+    elem = get_elem_by_id(doc, "form", TRUE);
+    if(elem) {
+        test_form_length((IUnknown*)elem, 2);
+        test_form_item(elem);
+        test_form_action((IUnknown*)elem, NULL);
+        test_form_put_action((IUnknown*)elem, "about:blank");
+        IHTMLElement_Release(elem);
+    }
+
+    IHTMLElement_Release(div);
 }
 
 static void test_create_elems(IHTMLDocument2 *doc)

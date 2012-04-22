@@ -137,8 +137,24 @@ typedef enum _shader_type {
 } shader_type;
 
 typedef enum BWRITER_COMPARISON_TYPE {
-    BWRITER_COMPARISON_NONE = 0,
+    BWRITER_COMPARISON_NONE,
+    BWRITER_COMPARISON_GT,
+    BWRITER_COMPARISON_EQ,
+    BWRITER_COMPARISON_GE,
+    BWRITER_COMPARISON_LT,
+    BWRITER_COMPARISON_NE,
+    BWRITER_COMPARISON_LE
 } BWRITER_COMPARISON_TYPE;
+
+struct constant {
+    DWORD                   regnum;
+    union {
+        float               f;
+        INT                 i;
+        BOOL                b;
+        DWORD               d;
+    }                       value[4];
+};
 
 struct shader_reg {
     DWORD                   type;
@@ -162,18 +178,21 @@ struct instruction {
     unsigned int            num_srcs; /* For freeing the rel_regs */
     BOOL                    has_predicate;
     struct shader_reg       predicate;
+    BOOL                    coissue;
 };
 
 struct declaration {
     DWORD                   usage, usage_idx;
     DWORD                   regnum;
+    DWORD                   mod;
     DWORD                   writemask;
+    BOOL                    builtin;
 };
 
 struct samplerdecl {
     DWORD                   type;
     DWORD                   regnum;
-    unsigned int            line_no; /* for error messages */
+    DWORD                   mod;
 };
 
 #define INSTRARRAY_INITIAL_SIZE 8
@@ -238,6 +257,10 @@ struct src_regs {
 };
 
 struct asmparser_backend {
+    void (*constF)(struct asm_parser *This, DWORD reg, float x, float y, float z, float w);
+    void (*constI)(struct asm_parser *This, DWORD reg, INT x, INT y, INT z, INT w);
+    void (*constB)(struct asm_parser *This, DWORD reg, BOOL x);
+
     void (*dstreg)(struct asm_parser *This, struct instruction *instr,
                    const struct shader_reg *dst);
     void (*srcreg)(struct asm_parser *This, struct instruction *instr, int num,
@@ -246,6 +269,13 @@ struct asmparser_backend {
     void (*predicate)(struct asm_parser *This,
                       const struct shader_reg *predicate);
     void (*coissue)(struct asm_parser *This);
+
+    void (*dcl_output)(struct asm_parser *This, DWORD usage, DWORD num,
+                       const struct shader_reg *reg);
+    void (*dcl_input)(struct asm_parser *This, DWORD usage, DWORD num,
+                      DWORD mod, const struct shader_reg *reg);
+    void (*dcl_sampler)(struct asm_parser *This, DWORD samptype, DWORD mod,
+                        DWORD regnum, unsigned int line_no);
 
     void (*end)(struct asm_parser *This);
 
@@ -256,6 +286,14 @@ struct asmparser_backend {
 
 struct instruction *alloc_instr(unsigned int srcs);
 BOOL add_instruction(struct bwriter_shader *shader, struct instruction *instr);
+BOOL add_constF(struct bwriter_shader *shader, DWORD reg, float x, float y, float z, float w);
+BOOL add_constI(struct bwriter_shader *shader, DWORD reg, INT x, INT y, INT z, INT w);
+BOOL add_constB(struct bwriter_shader *shader, DWORD reg, BOOL x);
+BOOL record_declaration(struct bwriter_shader *shader, DWORD usage,
+                        DWORD usage_idx, DWORD mod, BOOL output,
+                        DWORD regnum, DWORD writemask, BOOL builtin);
+BOOL record_sampler(struct bwriter_shader *shader, DWORD samptype,
+                    DWORD mod, DWORD regnum);
 
 #define MESSAGEBUFFER_INITIAL_SIZE 256
 
@@ -280,7 +318,14 @@ struct asm_parser {
 
 extern struct asm_parser asm_ctx;
 
+void create_vs10_parser(struct asm_parser *ret);
+void create_vs11_parser(struct asm_parser *ret);
+void create_vs20_parser(struct asm_parser *ret);
+void create_vs2x_parser(struct asm_parser *ret);
 void create_vs30_parser(struct asm_parser *ret);
+void create_ps20_parser(struct asm_parser *ret);
+void create_ps2x_parser(struct asm_parser *ret);
+void create_ps30_parser(struct asm_parser *ret);
 
 struct bwriter_shader *parse_asm_shader(char **messages);
 
@@ -337,14 +382,29 @@ struct bc_writer {
     HRESULT                       state;
 
     DWORD                         version;
+
+    /* Vertex shader varying mapping */
+    DWORD                         oPos_regnum;
+    DWORD                         oD_regnum[2];
+    DWORD                         oT_regnum[8];
+    DWORD                         oFog_regnum;
+    DWORD                         oFog_mask;
+    DWORD                         oPts_regnum;
+    DWORD                         oPts_mask;
+
+    /* Pixel shader specific members */
+    DWORD                         t_regnum[8];
+    DWORD                         v_regnum[2];
 };
 
 /* Debug utility routines */
+const char *debug_print_srcmod(DWORD mod);
 const char *debug_print_dstmod(DWORD mod);
 const char *debug_print_dstreg(const struct shader_reg *reg, shader_type st);
 const char *debug_print_srcreg(const struct shader_reg *reg, shader_type st);
 const char *debug_print_swizzle(DWORD swizzle);
 const char *debug_print_writemask(DWORD mask);
+const char *debug_print_comp(DWORD comp);
 const char *debug_print_opcode(DWORD opcode);
 
 /* Utilities for internal->d3d constant mapping */
@@ -352,6 +412,8 @@ DWORD d3d9_swizzle(DWORD bwriter_swizzle);
 DWORD d3d9_writemask(DWORD bwriter_writemask);
 DWORD d3d9_srcmod(DWORD bwriter_srcmod);
 DWORD d3d9_dstmod(DWORD bwriter_mod);
+DWORD d3d9_comparetype(DWORD bwriter_comparetype);
+DWORD d3d9_sampler(DWORD bwriter_sampler);
 DWORD d3d9_register(DWORD bwriter_register);
 DWORD d3d9_opcode(DWORD bwriter_opcode);
 
@@ -388,17 +450,46 @@ typedef enum _BWRITERSHADER_INSTRUCTION_OPCODE_TYPE {
     BWRITERSIO_M3x4,
     BWRITERSIO_M3x3,
     BWRITERSIO_M3x2,
+    BWRITERSIO_CALL,
+    BWRITERSIO_CALLNZ,
+    BWRITERSIO_LOOP,
+    BWRITERSIO_RET,
+    BWRITERSIO_ENDLOOP,
+    BWRITERSIO_LABEL,
+    BWRITERSIO_DCL,
     BWRITERSIO_POW,
     BWRITERSIO_CRS,
     BWRITERSIO_SGN,
     BWRITERSIO_ABS,
     BWRITERSIO_NRM,
     BWRITERSIO_SINCOS,
+    BWRITERSIO_REP,
+    BWRITERSIO_ENDREP,
+    BWRITERSIO_IF,
+    BWRITERSIO_IFC,
+    BWRITERSIO_ELSE,
+    BWRITERSIO_ENDIF,
+    BWRITERSIO_BREAK,
+    BWRITERSIO_BREAKC,
     BWRITERSIO_MOVA,
+    BWRITERSIO_DEFB,
+    BWRITERSIO_DEFI,
 
+    BWRITERSIO_TEXKILL,
+    BWRITERSIO_TEX,
     BWRITERSIO_EXPP,
     BWRITERSIO_LOGP,
+    BWRITERSIO_DEF,
+    BWRITERSIO_CMP,
+    BWRITERSIO_DP2ADD,
+    BWRITERSIO_DSX,
+    BWRITERSIO_DSY,
+    BWRITERSIO_TEXLDD,
+    BWRITERSIO_SETP,
     BWRITERSIO_TEXLDL,
+    BWRITERSIO_BREAKP,
+    BWRITERSIO_TEXLDP,
+    BWRITERSIO_TEXLDB,
 
     BWRITERSIO_COMMENT,
     BWRITERSIO_END,
@@ -445,11 +536,32 @@ typedef enum _BWRITERSHADER_PARAM_DSTMOD_TYPE {
     BWRITERSPDM_MSAMPCENTROID = 4,
 } BWRITERSHADER_PARAM_DSTMOD_TYPE;
 
+typedef enum _BWRITERSAMPLER_TEXTURE_TYPE {
+    BWRITERSTT_UNKNOWN = 0,
+    BWRITERSTT_1D = 1,
+    BWRITERSTT_2D = 2,
+    BWRITERSTT_CUBE = 3,
+    BWRITERSTT_VOLUME = 4,
+} BWRITERSAMPLER_TEXTURE_TYPE;
+
+#define BWRITERSI_TEXLD_PROJECT 1
+#define BWRITERSI_TEXLD_BIAS    2
+
 typedef enum _BWRITERSHADER_PARAM_SRCMOD_TYPE {
     BWRITERSPSM_NONE = 0,
     BWRITERSPSM_NEG,
+    BWRITERSPSM_BIAS,
+    BWRITERSPSM_BIASNEG,
+    BWRITERSPSM_SIGN,
+    BWRITERSPSM_SIGNNEG,
+    BWRITERSPSM_COMP,
+    BWRITERSPSM_X2,
+    BWRITERSPSM_X2NEG,
+    BWRITERSPSM_DZ,
+    BWRITERSPSM_DW,
     BWRITERSPSM_ABS,
     BWRITERSPSM_ABSNEG,
+    BWRITERSPSM_NOT,
 } BWRITERSHADER_PARAM_SRCMOD_TYPE;
 
 #define BWRITER_SM1_VS  0xfffe
@@ -487,6 +599,23 @@ typedef enum _BWRITERSHADER_PARAM_SRCMOD_TYPE {
 #define BWRITERVS_SWIZZLE_Y (BWRITERVS_X_Y | BWRITERVS_Y_Y | BWRITERVS_Z_Y | BWRITERVS_W_Y)
 #define BWRITERVS_SWIZZLE_Z (BWRITERVS_X_Z | BWRITERVS_Y_Z | BWRITERVS_Z_Z | BWRITERVS_W_Z)
 #define BWRITERVS_SWIZZLE_W (BWRITERVS_X_W | BWRITERVS_Y_W | BWRITERVS_Z_W | BWRITERVS_W_W)
+
+typedef enum _BWRITERDECLUSAGE {
+    BWRITERDECLUSAGE_POSITION,
+    BWRITERDECLUSAGE_BLENDWEIGHT,
+    BWRITERDECLUSAGE_BLENDINDICES,
+    BWRITERDECLUSAGE_NORMAL,
+    BWRITERDECLUSAGE_PSIZE,
+    BWRITERDECLUSAGE_TEXCOORD,
+    BWRITERDECLUSAGE_TANGENT,
+    BWRITERDECLUSAGE_BINORMAL,
+    BWRITERDECLUSAGE_TESSFACTOR,
+    BWRITERDECLUSAGE_POSITIONT,
+    BWRITERDECLUSAGE_COLOR,
+    BWRITERDECLUSAGE_FOG,
+    BWRITERDECLUSAGE_DEPTH,
+    BWRITERDECLUSAGE_SAMPLE
+} BWRITERDECLUSAGE;
 
 struct bwriter_shader *SlAssembleShader(const char *text, char **messages);
 DWORD SlWriteBytecode(const struct bwriter_shader *shader, int dxversion, DWORD **result);

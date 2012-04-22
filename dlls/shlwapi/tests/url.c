@@ -160,7 +160,15 @@ static const TEST_URL_CANONICALIZE TEST_CANONICALIZE[] = {
     {"A", 0, S_OK, "A", FALSE},
     {"/uri-res/N2R?urn:sha1:B3K", URL_DONT_ESCAPE_EXTRA_INFO | URL_WININET_COMPATIBILITY /*0x82000000*/, S_OK, "/uri-res/N2R?urn:sha1:B3K", FALSE} /*LimeWire online installer calls this*/,
     {"http:www.winehq.org/dir/../index.html", 0, S_OK, "http:www.winehq.org/index.html"},
-    {"http://localhost/test.html", URL_FILE_USE_PATHURL, S_OK, "http://localhost/test.html"}
+    {"http://localhost/test.html", URL_FILE_USE_PATHURL, S_OK, "http://localhost/test.html"},
+    {"http://localhost/te%20st.html", URL_FILE_USE_PATHURL, S_OK, "http://localhost/te%20st.html"},
+    {"http://www.winehq.org/%E6%A1%9C.html", URL_FILE_USE_PATHURL, S_OK, "http://www.winehq.org/%E6%A1%9C.html"},
+    {"mk:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", 0, S_OK, "mk:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
+    {"ftp:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", 0, S_OK, "ftp:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
+    {"file:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", 0, S_OK, "file:@MSITStore:C:/Program Files/AutoCAD 2008/Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
+    {"http:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", 0, S_OK, "http:@MSITStore:C:/Program Files/AutoCAD 2008/Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
+    {"http:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", URL_FILE_USE_PATHURL, S_OK, "http:@MSITStore:C:/Program Files/AutoCAD 2008/Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
+    {"mk:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm", URL_FILE_USE_PATHURL, S_OK, "mk:@MSITStore:C:\\Program Files/AutoCAD 2008\\Help/acad_acg.chm::/WSfacf1429558a55de1a7524c1004e616f8b-322b.htm"},
 };
 
 /* ################ */
@@ -793,7 +801,8 @@ static void test_UrlEscape(void)
 static void test_UrlCanonicalizeA(void)
 {
     unsigned int i;
-    CHAR szReturnUrl[INTERNET_MAX_URL_LENGTH];
+    CHAR szReturnUrl[4*INTERNET_MAX_URL_LENGTH];
+    CHAR longurl[4*INTERNET_MAX_URL_LENGTH];
     DWORD dwSize;
     DWORD urllen;
     HRESULT hr;
@@ -844,6 +853,24 @@ static void test_UrlCanonicalizeA(void)
     ok( (hr == S_OK) && (dwSize == urllen),
         "got 0x%x with %u and size %u for '%s' and %u (expected 'S_OK' and size %u)\n",
         hr, GetLastError(), dwSize, szReturnUrl, lstrlenA(szReturnUrl), urllen);
+
+    /* length is set to 0 */
+    dwSize=0;
+    memset(szReturnUrl, '#', urllen+4);
+    szReturnUrl[urllen+4] = '\0';
+    SetLastError(0xdeadbeef);
+    hr = pUrlCanonicalizeA(winehqA, szReturnUrl, &dwSize, URL_WININET_COMPATIBILITY | URL_ESCAPE_UNSAFE);
+    ok( (hr == E_INVALIDARG) && (dwSize == 0),
+            "got 0x%x with %u and size %u for '%s' and %u (expected 'E_INVALIDARG' and size %u)\n",
+            hr, GetLastError(), dwSize, szReturnUrl, lstrlenA(szReturnUrl), 0);
+
+    /* url length > INTERNET_MAX_URL_SIZE */
+    dwSize=sizeof(szReturnUrl);
+    memset(longurl, 'a', sizeof(longurl));
+    memcpy(longurl, winehqA, sizeof(winehqA)-1);
+    longurl[sizeof(longurl)-1] = '\0';
+    hr = pUrlCanonicalizeA(longurl, szReturnUrl, &dwSize, URL_WININET_COMPATIBILITY | URL_ESCAPE_UNSAFE);
+    ok(hr == S_OK, "hr = %x\n", hr);
 
     test_url_canonicalize(-1, "", 0, S_OK, S_FALSE /* Vista/win2k8 */, "", FALSE);
 

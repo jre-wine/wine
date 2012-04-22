@@ -941,11 +941,7 @@ void SYSPARAMS_Init(void)
         }
 
         /* last chance, take the default */
-        if (!bOk)
-        {
-            int iNumColors = sscanf( DefSysColors[i*2+1], " %d %d %d", &r, &g, &b );
-            assert (iNumColors==3);
-        }
+        if (!bOk) sscanf( DefSysColors[i*2+1], " %d %d %d", &r, &g, &b );
 
         SYSPARAMS_SetSysColor( i, RGB(r,g,b) );
     }
@@ -1085,7 +1081,7 @@ static void load_nonclient_metrics(void)
     if (!reg_get_logfont(METRICS_REGKEY, METRICS_SMCAPTIONLOGFONT_VALNAME, &ncm.lfSmCaptionFont))
         SystemParametersInfoW( SPI_GETICONTITLELOGFONT, 0, &ncm.lfSmCaptionFont, 0 );
 
-    /* menus, FIXME: names of wine.conf entries are bogus */
+    /* menus, FIXME: names of registry entries are bogus */
 
     /* size of the menu (MDI) buttons */
     ncm.iMenuHeight = get_reg_metric(hkey, METRICS_MENUHEIGHT_VALNAME, 18);
