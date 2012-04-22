@@ -1,8 +1,18 @@
-wine-unstable (1.1.44-0.1) UNRELEASED; urgency=low
+wine-unstable (1.1.44-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.1.44, released May 7, 2010.
+    - Many more new icons.
+    - Support for 32-bit prefixes with a 64-bit Wine.
+    - Many additional msvcr80/90 functions.
+    - Improvements to Bidi handling.
+    - More complete mmdevapi (Win7 audio) support.
+    - Improved handling of MSI patches.
+    - A number of fixes for desktop menus.
+    - Optimizations in OLE storage.
+    - Various bug fixes.
 
- -- Hilko Bengen <bengen@debian.org>  Sun, 22 Apr 2012 23:58:34 +0200
+ -- Hilko Bengen <bengen@debian.org>  Mon, 23 Apr 2012 00:03:01 +0200
 
 wine-unstable (1.1.43-0.1) unstable; urgency=low
 
