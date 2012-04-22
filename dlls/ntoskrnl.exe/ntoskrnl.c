@@ -435,7 +435,7 @@ PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG IoControlCode,
     instance->irp = irp;
     list_add_tail( &Irps, &instance->entry );
 
-    irpsp = irp->Tail.Overlay.s.u2.CurrentStackLocation - 1;
+    irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->MajorFunction = InternalDeviceIoControl ?
             IRP_MJ_INTERNAL_DEVICE_CONTROL : IRP_MJ_DEVICE_CONTROL;
     irpsp->Parameters.DeviceIoControl.IoControlCode = IoControlCode;
@@ -632,14 +632,21 @@ NTSTATUS  WINAPI IoGetDeviceObjectPointer( UNICODE_STRING *name, ACCESS_MASK acc
 
 
 /***********************************************************************
- *           IofCallDriver   (NTOSKRNL.EXE.@)
+ *           IoGetDeviceProperty   (NTOSKRNL.EXE.@)
  */
-#ifdef DEFINE_FASTCALL2_ENTRYPOINT
-DEFINE_FASTCALL2_ENTRYPOINT( IofCallDriver )
-NTSTATUS WINAPI __regs_IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
-#else
-NTSTATUS WINAPI IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
-#endif
+NTSTATUS WINAPI IoGetDeviceProperty( DEVICE_OBJECT *device, DEVICE_REGISTRY_PROPERTY device_property,
+                                     ULONG buffer_length, PVOID property_buffer, PULONG result_length )
+{
+    FIXME( "%p %d %u %p %p: stub\n", device, device_property, buffer_length,
+           property_buffer, result_length );
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+
+/***********************************************************************
+ *           IoCallDriver   (NTOSKRNL.EXE.@)
+ */
+NTSTATUS WINAPI IoCallDriver( DEVICE_OBJECT *device, IRP *irp )
 {
     PDRIVER_DISPATCH dispatch;
     IO_STACK_LOCATION *irpsp;
@@ -653,6 +660,21 @@ NTSTATUS WINAPI IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
     status = dispatch( device, irp );
 
     return status;
+}
+
+
+/***********************************************************************
+ *           IofCallDriver   (NTOSKRNL.EXE.@)
+ */
+#ifdef DEFINE_FASTCALL2_ENTRYPOINT
+DEFINE_FASTCALL2_ENTRYPOINT( IofCallDriver )
+NTSTATUS WINAPI __regs_IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
+#else
+NTSTATUS WINAPI IofCallDriver( DEVICE_OBJECT *device, IRP *irp )
+#endif
+{
+    TRACE( "%p %p\n", device, irp );
+    return IoCallDriver( device, irp );
 }
 
 
@@ -1172,6 +1194,26 @@ LONG WINAPI KeReleaseSemaphore( PRKSEMAPHORE Semaphore, KPRIORITY Increment,
 ULONG WINAPI KeQueryTimeIncrement(void)
 {
     return 10000;
+}
+
+
+/***********************************************************************
+ *           KeResetEvent   (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeResetEvent( PRKEVENT Event )
+{
+    FIXME("(%p): stub\n", Event);
+    return 0;
+}
+
+
+/***********************************************************************
+ *           KeSetEvent   (NTOSKRNL.EXE.@)
+ */
+LONG WINAPI KeSetEvent( PRKEVENT Event, KPRIORITY Increment, BOOLEAN Wait )
+{
+    FIXME("(%p, %d, %d): stub\n", Event, Increment, Wait);
+    return 0;
 }
 
 

@@ -41,6 +41,7 @@ C_SRCS = \
 	shfldr_fs.c \
 	shfldr_mycomp.c \
 	shfldr_netplaces.c \
+	shfldr_printers.c \
 	shfldr_unixfs.c \
 	shlexec.c \
 	shlfileop.c \
@@ -88,11 +89,21 @@ RC_SRCS = \
 	version.rc
 
 SVG_SRCS = \
+	cdrom.svg \
+	delete.svg \
 	desktop.svg \
+	document.svg \
+	drive.svg \
+	floppy.svg \
 	folder.svg \
 	folder_open.svg \
 	mycomputer.svg \
 	mydocs.svg \
+	netdrive.svg \
+	netdrive2.svg \
+	printer.svg \
+	ramdisk.svg \
+	shortcut.svg \
 	trash_file.svg
 
 EXTRA_OBJS = authors.o

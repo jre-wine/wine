@@ -118,7 +118,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
     {
         ENTER_GL();
         context_bind_fbo(context, GL_READ_FRAMEBUFFER, &context->src_fbo);
-        context_attach_surface_fbo(context, GL_READ_FRAMEBUFFER, 0, This->backBuffer[0]);
+        context_attach_surface_fbo(context, GL_READ_FRAMEBUFFER, 0, backbuffer);
         context_attach_depth_stencil_fbo(context, GL_READ_FRAMEBUFFER, NULL, FALSE);
 
         context_bind_fbo(context, GL_DRAW_FRAMEBUFFER, NULL);
@@ -161,9 +161,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         /* Set up the texture. The surface is not in a IWineD3D*Texture container,
          * so there are no d3d texture settings to dirtify
          */
-        device->blitter->set_shader((IWineD3DDevice *) device, backbuffer->resource.format_desc,
-                                    backbuffer->texture_target, backbuffer->pow2Width,
-                                    backbuffer->pow2Height);
+        device->blitter->set_shader((IWineD3DDevice *) device, backbuffer);
         glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MIN_FILTER, gl_filter);
         glTexParameteri(backbuffer->texture_target, GL_TEXTURE_MAG_FILTER, gl_filter);
 
@@ -258,10 +256,6 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         cursor.texture_level = 0;
         cursor.currentDesc.Width = This->device->cursorWidth;
         cursor.currentDesc.Height = This->device->cursorHeight;
-        cursor.glRect.left = 0;
-        cursor.glRect.top = 0;
-        cursor.glRect.right = cursor.currentDesc.Width;
-        cursor.glRect.bottom = cursor.currentDesc.Height;
         /* The cursor must have pow2 sizes */
         cursor.pow2Width = cursor.currentDesc.Width;
         cursor.pow2Height = cursor.currentDesc.Height;

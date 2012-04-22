@@ -1610,10 +1610,10 @@ NTSTATUS context_from_server( CONTEXT *to, const context_t *from )
 
 extern void raise_func_trampoline( EXCEPTION_RECORD *rec, CONTEXT *context, raise_func func );
 __ASM_GLOBAL_FUNC( raise_func_trampoline,
-                   ".cfi_signal_frame\n\t"
-                   ".cfi_def_cfa %rbp,144\n\t"  /* red zone + rip + rbp */
-                   ".cfi_rel_offset %rip,8\n\t"
-                   ".cfi_rel_offset %rbp,0\n\t"
+                   __ASM_CFI(".cfi_signal_frame\n\t")
+                   __ASM_CFI(".cfi_def_cfa %rbp,144\n\t")  /* red zone + rip + rbp */
+                   __ASM_CFI(".cfi_rel_offset %rip,8\n\t")
+                   __ASM_CFI(".cfi_rel_offset %rbp,0\n\t")
                    "call *%rdx\n\t"
                    "int $3")
 
@@ -1817,7 +1817,6 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
 {
     EXCEPTION_REGISTRATION_RECORD *teb_frame = NtCurrentTeb()->Tib.ExceptionList;
     UNWIND_HISTORY_TABLE table;
-    RUNTIME_FUNCTION *dir;
     DISPATCHER_CONTEXT dispatch;
     CONTEXT context, new_context;
     LDR_MODULE *module;
@@ -1835,60 +1834,63 @@ static NTSTATUS call_stack_handlers( EXCEPTION_RECORD *rec, CONTEXT *orig_contex
 
         /* FIXME: should use the history table to make things faster */
 
-        dir = NULL;
         module = NULL;
         dispatch.ImageBase = 0;
 
+        /* first look for PE exception information */
+
         if (!LdrFindEntryForAddress( (void *)context.Rip, &module ))
         {
-            if (!(dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
-                                                      IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )) &&
-                !(module->Flags & LDR_WINE_INTERNAL))
-            {
-                ERR( "module %s doesn't contain exception data, can't dispatch exception\n",
-                     debugstr_w(module->BaseDllName.Buffer) );
-                break;
-            }
+            RUNTIME_FUNCTION *dir;
+
             dispatch.ImageBase = (ULONG64)module->BaseAddress;
+            if ((dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
+                                                     IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
+            {
+                if ((dispatch.FunctionEntry = find_function_info( context.Rip, module->BaseAddress,
+                                                                  dir, size )))
+                {
+                    dispatch.LanguageHandler = RtlVirtualUnwind( UNW_FLAG_EHANDLER, dispatch.ImageBase,
+                                                                 context.Rip, dispatch.FunctionEntry,
+                                                                 &new_context, &dispatch.HandlerData,
+                                                                 &dispatch.EstablisherFrame, NULL );
+                    goto unwind_done;
+                }
+            }
+            else if (!(module->Flags & LDR_WINE_INTERNAL))
+                WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
         }
 
-        if (!dir)
+        /* then look for host system exception information */
+
+        if (!module || (module->Flags & LDR_WINE_INTERNAL))
         {
             struct dwarf_eh_bases bases;
             const struct dwarf_fde *fde = _Unwind_Find_FDE( (void *)(context.Rip - 1), &bases );
-            if (!fde)
+
+            if (fde)
             {
-                /* assume leaf function */
-                context.Rip = *(ULONG64 *)context.Rsp;
-                context.Rsp += sizeof(ULONG64);
-                continue;
+                status = dwarf_virtual_unwind( context.Rip, &dispatch.EstablisherFrame, &new_context,
+                                               fde, &bases, &dispatch.LanguageHandler, &dispatch.HandlerData );
+                if (status != STATUS_SUCCESS) return status;
+                dispatch.FunctionEntry = NULL;
+                if (dispatch.LanguageHandler && !module)
+                {
+                    FIXME( "calling personality routine in system library not supported yet\n" );
+                    dispatch.LanguageHandler = NULL;
+                }
+                goto unwind_done;
             }
-            status = dwarf_virtual_unwind( context.Rip, &dispatch.EstablisherFrame, &new_context,
-                                           fde, &bases, &dispatch.LanguageHandler, &dispatch.HandlerData );
-            if (status != STATUS_SUCCESS) return status;
-            dispatch.FunctionEntry = NULL;
-            if (dispatch.LanguageHandler && !module)
-            {
-                FIXME( "calling personality routine in system library not supported yet\n" );
-                dispatch.LanguageHandler = NULL;
-            }
-        }
-        else
-        {
-            if (!(dispatch.FunctionEntry = find_function_info( context.Rip, module->BaseAddress,
-                                                               dir, size )))
-            {
-                /* leaf function */
-                context.Rip = *(ULONG64 *)context.Rsp;
-                context.Rsp += sizeof(ULONG64);
-                continue;
-            }
-            dispatch.LanguageHandler = RtlVirtualUnwind( UNW_FLAG_EHANDLER, dispatch.ImageBase,
-                                                         context.Rip, dispatch.FunctionEntry,
-                                                         &new_context, &dispatch.HandlerData,
-                                                         &dispatch.EstablisherFrame, NULL );
         }
 
+        /* no exception information, treat as a leaf function */
+
+        new_context.Rip = *(ULONG64 *)context.Rsp;
+        new_context.Rsp = context.Rsp + sizeof(ULONG64);
+        dispatch.EstablisherFrame = new_context.Rsp;
+        dispatch.LanguageHandler = NULL;
+
+    unwind_done:
         if (!dispatch.EstablisherFrame) break;
 
         if ((dispatch.EstablisherFrame & 7) ||
@@ -2096,6 +2098,7 @@ static void trap_handler( int signal, siginfo_t *siginfo, void *sigcontext )
     switch (siginfo->si_code)
     {
     case TRAP_TRACE:  /* Single-step exception */
+    case 4 /* TRAP_HWBKPT */: /* Hardware breakpoint exception */
         rec->ExceptionCode = EXCEPTION_SINGLE_STEP;
         break;
     case TRAP_BRKPT:   /* Breakpoint exception */
@@ -2703,7 +2706,6 @@ void WINAPI RtlUnwindEx( ULONG64 end_frame, ULONG64 target_ip, EXCEPTION_RECORD 
 {
     EXCEPTION_REGISTRATION_RECORD *teb_frame = NtCurrentTeb()->Tib.ExceptionList;
     EXCEPTION_RECORD record;
-    RUNTIME_FUNCTION *dir;
     DISPATCHER_CONTEXT dispatch;
     CONTEXT context, new_context;
     LDR_MODULE *module;
@@ -2746,61 +2748,64 @@ void WINAPI RtlUnwindEx( ULONG64 end_frame, ULONG64 target_ip, EXCEPTION_RECORD 
 
         /* FIXME: should use the history table to make things faster */
 
-        dir = NULL;
         module = NULL;
         dispatch.ImageBase = 0;
         dispatch.ScopeIndex = 0; /* FIXME */
 
+        /* first look for PE exception information */
+
         if (!LdrFindEntryForAddress( (void *)context.Rip, &module ))
         {
-            if (!(dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
-                                                      IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )) &&
-                !(module->Flags & LDR_WINE_INTERNAL))
-            {
-                ERR( "module %s doesn't contain exception data, can't unwind exception\n",
-                     debugstr_w(module->BaseDllName.Buffer) );
-                raise_status( STATUS_BAD_FUNCTION_TABLE, rec );
-            }
+            RUNTIME_FUNCTION *dir;
+
             dispatch.ImageBase = (ULONG64)module->BaseAddress;
+            if ((dir = RtlImageDirectoryEntryToData( module->BaseAddress, TRUE,
+                                                     IMAGE_DIRECTORY_ENTRY_EXCEPTION, &size )))
+            {
+                if ((dispatch.FunctionEntry = find_function_info( context.Rip, module->BaseAddress,
+                                                                  dir, size )))
+                {
+                    dispatch.LanguageHandler = RtlVirtualUnwind( UNW_FLAG_UHANDLER, dispatch.ImageBase,
+                                                                 context.Rip, dispatch.FunctionEntry,
+                                                                 &new_context, &dispatch.HandlerData,
+                                                                 &dispatch.EstablisherFrame, NULL );
+                    goto unwind_done;
+                }
+            }
+            else if (!(module->Flags & LDR_WINE_INTERNAL))
+                WARN( "exception data not found in %s\n", debugstr_w(module->BaseDllName.Buffer) );
         }
 
-        if (!dir)
+        /* then look for host system exception information */
+
+        if (!module || (module->Flags & LDR_WINE_INTERNAL))
         {
             struct dwarf_eh_bases bases;
             const struct dwarf_fde *fde = _Unwind_Find_FDE( (void *)(context.Rip - 1), &bases );
-            if (!fde)
+
+            if (fde)
             {
-                /* assume leaf function */
-                context.Rip = *(ULONG64 *)context.Rsp;
-                context.Rsp += sizeof(ULONG64);
-                continue;
+                dispatch.FunctionEntry = NULL;
+                status = dwarf_virtual_unwind( context.Rip, &dispatch.EstablisherFrame, &new_context, fde,
+                                               &bases, &dispatch.LanguageHandler, &dispatch.HandlerData );
+                if (status != STATUS_SUCCESS) raise_status( status, rec );
+                if (dispatch.LanguageHandler && !module)
+                {
+                    FIXME( "calling personality routine in system library not supported yet\n" );
+                    dispatch.LanguageHandler = NULL;
+                }
+                goto unwind_done;
             }
-            dispatch.FunctionEntry = NULL;
-            status = dwarf_virtual_unwind( context.Rip, &dispatch.EstablisherFrame, &new_context, fde,
-                                           &bases, &dispatch.LanguageHandler, &dispatch.HandlerData );
-            if (status != STATUS_SUCCESS) raise_status( status, rec );
-            if (dispatch.LanguageHandler && !module)
-            {
-                FIXME( "calling personality routine in system library not supported yet\n" );
-                dispatch.LanguageHandler = NULL;
-            }
-        }
-        else
-        {
-            if (!(dispatch.FunctionEntry = find_function_info( context.Rip, module->BaseAddress,
-                                                               dir, size )))
-            {
-                /* leaf function */
-                context.Rip = *(ULONG64 *)context.Rsp;
-                context.Rsp += sizeof(ULONG64);
-                continue;
-            }
-            dispatch.LanguageHandler = RtlVirtualUnwind( UNW_FLAG_UHANDLER, dispatch.ImageBase,
-                                                         context.Rip, dispatch.FunctionEntry,
-                                                         &new_context, &dispatch.HandlerData,
-                                                         &dispatch.EstablisherFrame, NULL );
         }
 
+        /* no exception information, treat as a leaf function */
+
+        new_context.Rip = *(ULONG64 *)context.Rsp;
+        new_context.Rsp = context.Rsp + sizeof(ULONG64);
+        dispatch.EstablisherFrame = new_context.Rsp;
+        dispatch.LanguageHandler = NULL;
+
+    unwind_done:
         if (!dispatch.EstablisherFrame) break;
 
         if (is_inside_signal_stack( (void *)dispatch.EstablisherFrame ))
@@ -2970,14 +2975,14 @@ void call_thread_func( LPTHREAD_START_ROUTINE entry, void *arg, void *frame )
 extern void DECLSPEC_NORETURN call_thread_entry_point( LPTHREAD_START_ROUTINE entry, void *arg );
 __ASM_GLOBAL_FUNC( call_thread_entry_point,
                    "subq $8,%rsp\n\t"
-                   ".cfi_adjust_cfa_offset 8\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
                    "movq %rsp,%rdx\n\t"
                    "call " __ASM_NAME("call_thread_func") );
 
 extern void DECLSPEC_NORETURN call_thread_exit_func( int status, void (*func)(int), void *frame );
 __ASM_GLOBAL_FUNC( call_thread_exit_func,
                    "subq $8,%rsp\n\t"
-                   ".cfi_adjust_cfa_offset 8\n\t"
+                   __ASM_CFI(".cfi_adjust_cfa_offset 8\n\t")
                    "movq %rdx,%rsp\n\t"
                    "call *%rsi" );
 

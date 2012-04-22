@@ -213,7 +213,7 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         else
         {
             TRACE("Stream %u isn't UP, %p\n", element->input_slot, This->stateBlock->streamSource[element->input_slot]);
-            data = buffer_get_memory(This->stateBlock->streamSource[element->input_slot], 0, &buffer_object);
+            data = buffer_get_memory(This->stateBlock->streamSource[element->input_slot], &buffer_object);
 
             /* Can't use vbo's if the base vertex index is negative. OpenGL doesn't accept negative offsets
              * (or rather offsets bigger than the vbo, because the pointer is unsigned), so use system memory
@@ -610,9 +610,17 @@ static ULONG WINAPI IWineD3DDeviceImpl_Release(IWineD3DDevice *iface) {
         /* NOTE: You must release the parent if the object was created via a callback
         ** ***************************/
 
-        if (!list_empty(&This->resources)) {
+        if (!list_empty(&This->resources))
+        {
+            IWineD3DResourceImpl *resource;
             FIXME("(%p) Device released with resources still bound, acceptable but unexpected\n", This);
-            dumpResources(&This->resources);
+
+            LIST_FOR_EACH_ENTRY(resource, &This->resources, IWineD3DResourceImpl, resource.resource_list_entry)
+            {
+                WINED3DRESOURCETYPE type = IWineD3DResource_GetType((IWineD3DResource *)resource);
+                FIXME("Leftover resource %p with type %s (%#x).\n",
+                        resource, debug_d3dresourcetype(type), type);
+            }
         }
 
         if(This->contexts) ERR("Context array not freed!\n");
@@ -830,6 +838,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateRendertargetView(IWineD3DDevice *
 {
     struct wined3d_rendertarget_view *object;
 
+    TRACE("iface %p, resource %p, parent %p, rendertarget_view %p.\n",
+            iface, resource, parent, rendertarget_view);
+
     object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
     if (!object)
     {
@@ -837,12 +848,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateRendertargetView(IWineD3DDevice *
         return E_OUTOFMEMORY;
     }
 
-    object->vtbl = &wined3d_rendertarget_view_vtbl;
-    object->refcount = 1;
-    IWineD3DResource_AddRef(resource);
-    object->resource = resource;
-    object->parent = parent;
+    wined3d_rendertarget_view_init(object, resource, parent);
 
+    TRACE("Created render target view %p.\n", object);
     *rendertarget_view = (IWineD3DRendertargetView *)object;
 
     return WINED3D_OK;
@@ -1100,11 +1108,39 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreateVertexDeclaration(IWineD3DDevice 
     return WINED3D_OK;
 }
 
-static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL info, which has the type table */
-                                            DWORD fvf, WINED3DVERTEXELEMENT** ppVertexElements) {
+struct wined3d_fvf_convert_state
+{
+    const struct wined3d_gl_info *gl_info;
+    WINED3DVERTEXELEMENT *elements;
+    UINT offset;
+    UINT idx;
+};
 
-    unsigned int idx, idx2;
-    unsigned int offset;
+static void append_decl_element(struct wined3d_fvf_convert_state *state,
+        WINED3DFORMAT format, WINED3DDECLUSAGE usage, UINT usage_idx)
+{
+    WINED3DVERTEXELEMENT *elements = state->elements;
+    const struct wined3d_format_desc *format_desc;
+    UINT offset = state->offset;
+    UINT idx = state->idx;
+
+    elements[idx].format = format;
+    elements[idx].input_slot = 0;
+    elements[idx].offset = offset;
+    elements[idx].output_slot = 0;
+    elements[idx].method = WINED3DDECLMETHOD_DEFAULT;
+    elements[idx].usage = usage;
+    elements[idx].usage_idx = usage_idx;
+
+    format_desc = getFormatDescEntry(format, state->gl_info);
+    state->offset += format_desc->component_count * format_desc->component_size;
+    ++state->idx;
+}
+
+static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the GL info, which has the type table */
+        DWORD fvf, WINED3DVERTEXELEMENT **ppVertexElements)
+{
+    const struct wined3d_gl_info *gl_info = &This->adapter->gl_info;
     BOOL has_pos = (fvf & WINED3DFVF_POSITION_MASK) != 0;
     BOOL has_blend = (fvf & WINED3DFVF_XYZB5) > WINED3DFVF_XYZRHW;
     BOOL has_blend_idx = has_blend &&
@@ -1118,9 +1154,9 @@ static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the
 
     DWORD num_textures = (fvf & WINED3DFVF_TEXCOUNT_MASK) >> WINED3DFVF_TEXCOUNT_SHIFT;
     DWORD texcoords = (fvf & 0xFFFF0000) >> 16;
-    WINED3DVERTEXELEMENT *elements = NULL;
-
+    struct wined3d_fvf_convert_state state;
     unsigned int size;
+    unsigned int idx;
     DWORD num_blends = 1 + (((fvf & WINED3DFVF_XYZB5) - WINED3DFVF_XYZB1) >> 1);
     if (has_blend_idx) num_blends--;
 
@@ -1128,113 +1164,84 @@ static unsigned int ConvertFvfToDeclaration(IWineD3DDeviceImpl *This, /* For the
     size = has_pos + (has_blend && num_blends > 0) + has_blend_idx + has_normal +
            has_psize + has_diffuse + has_specular + num_textures;
 
-    /* convert the declaration */
-    elements = HeapAlloc(GetProcessHeap(), 0, size * sizeof(WINED3DVERTEXELEMENT));
-    if (!elements) return ~0U;
+    state.gl_info = gl_info;
+    state.elements = HeapAlloc(GetProcessHeap(), 0, size * sizeof(*state.elements));
+    if (!state.elements) return ~0U;
+    state.offset = 0;
+    state.idx = 0;
 
-    idx = 0;
-    if (has_pos) {
-        if (!has_blend && (fvf & WINED3DFVF_XYZRHW)) {
-            elements[idx].format = WINED3DFMT_R32G32B32A32_FLOAT;
-            elements[idx].usage = WINED3DDECLUSAGE_POSITIONT;
-        }
-        else if ((fvf & WINED3DFVF_XYZW) == WINED3DFVF_XYZW) {
-            elements[idx].format = WINED3DFMT_R32G32B32A32_FLOAT;
-            elements[idx].usage = WINED3DDECLUSAGE_POSITION;
-        }
-        else {
-            elements[idx].format = WINED3DFMT_R32G32B32_FLOAT;
-            elements[idx].usage = WINED3DDECLUSAGE_POSITION;
-        }
-        elements[idx].usage_idx = 0;
-        idx++;
+    if (has_pos)
+    {
+        if (!has_blend && (fvf & WINED3DFVF_XYZRHW))
+            append_decl_element(&state, WINED3DFMT_R32G32B32A32_FLOAT, WINED3DDECLUSAGE_POSITIONT, 0);
+        else if ((fvf & WINED3DFVF_XYZW) == WINED3DFVF_XYZW)
+            append_decl_element(&state, WINED3DFMT_R32G32B32A32_FLOAT, WINED3DDECLUSAGE_POSITION, 0);
+        else
+            append_decl_element(&state, WINED3DFMT_R32G32B32_FLOAT, WINED3DDECLUSAGE_POSITION, 0);
     }
-    if (has_blend && (num_blends > 0)) {
-        if (((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2) && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR))
-            elements[idx].format = WINED3DFMT_B8G8R8A8_UNORM;
-        else {
-            switch(num_blends) {
-                case 1: elements[idx].format = WINED3DFMT_R32_FLOAT; break;
-                case 2: elements[idx].format = WINED3DFMT_R32G32_FLOAT; break;
-                case 3: elements[idx].format = WINED3DFMT_R32G32B32_FLOAT; break;
-                case 4: elements[idx].format = WINED3DFMT_R32G32B32A32_FLOAT; break;
+
+    if (has_blend && (num_blends > 0))
+    {
+        if ((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2 && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR))
+            append_decl_element(&state, WINED3DFMT_B8G8R8A8_UNORM, WINED3DDECLUSAGE_BLENDWEIGHT, 0);
+        else
+        {
+            switch (num_blends)
+            {
+                case 1:
+                    append_decl_element(&state, WINED3DFMT_R32_FLOAT, WINED3DDECLUSAGE_BLENDWEIGHT, 0);
+                    break;
+                case 2:
+                    append_decl_element(&state, WINED3DFMT_R32G32_FLOAT, WINED3DDECLUSAGE_BLENDWEIGHT, 0);
+                    break;
+                case 3:
+                    append_decl_element(&state, WINED3DFMT_R32G32B32_FLOAT, WINED3DDECLUSAGE_BLENDWEIGHT, 0);
+                    break;
+                case 4:
+                    append_decl_element(&state, WINED3DFMT_R32G32B32A32_FLOAT, WINED3DDECLUSAGE_BLENDWEIGHT, 0);
+                    break;
                 default:
                     ERR("Unexpected amount of blend values: %u\n", num_blends);
             }
         }
-        elements[idx].usage = WINED3DDECLUSAGE_BLENDWEIGHT;
-        elements[idx].usage_idx = 0;
-        idx++;
     }
-    if (has_blend_idx) {
-        if (fvf & WINED3DFVF_LASTBETA_UBYTE4 ||
-            (((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2) && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR)))
-            elements[idx].format = WINED3DFMT_R8G8B8A8_UINT;
+
+    if (has_blend_idx)
+    {
+        if ((fvf & WINED3DFVF_LASTBETA_UBYTE4)
+                || ((fvf & WINED3DFVF_XYZB5) == WINED3DFVF_XYZB2 && (fvf & WINED3DFVF_LASTBETA_D3DCOLOR)))
+            append_decl_element(&state, WINED3DFMT_R8G8B8A8_UINT, WINED3DDECLUSAGE_BLENDINDICES, 0);
         else if (fvf & WINED3DFVF_LASTBETA_D3DCOLOR)
-            elements[idx].format = WINED3DFMT_B8G8R8A8_UNORM;
+            append_decl_element(&state, WINED3DFMT_B8G8R8A8_UNORM, WINED3DDECLUSAGE_BLENDINDICES, 0);
         else
-            elements[idx].format = WINED3DFMT_R32_FLOAT;
-        elements[idx].usage = WINED3DDECLUSAGE_BLENDINDICES;
-        elements[idx].usage_idx = 0;
-        idx++;
+            append_decl_element(&state, WINED3DFMT_R32_FLOAT, WINED3DDECLUSAGE_BLENDINDICES, 0);
     }
-    if (has_normal) {
-        elements[idx].format = WINED3DFMT_R32G32B32_FLOAT;
-        elements[idx].usage = WINED3DDECLUSAGE_NORMAL;
-        elements[idx].usage_idx = 0;
-        idx++;
-    }
-    if (has_psize) {
-        elements[idx].format = WINED3DFMT_R32_FLOAT;
-        elements[idx].usage = WINED3DDECLUSAGE_PSIZE;
-        elements[idx].usage_idx = 0;
-        idx++;
-    }
-    if (has_diffuse) {
-        elements[idx].format = WINED3DFMT_B8G8R8A8_UNORM;
-        elements[idx].usage = WINED3DDECLUSAGE_COLOR;
-        elements[idx].usage_idx = 0;
-        idx++;
-    }
-    if (has_specular) {
-        elements[idx].format = WINED3DFMT_B8G8R8A8_UNORM;
-        elements[idx].usage = WINED3DDECLUSAGE_COLOR;
-        elements[idx].usage_idx = 1;
-        idx++;
-    }
-    for (idx2 = 0; idx2 < num_textures; idx2++) {
-        unsigned int numcoords = (texcoords >> (idx2*2)) & 0x03;
-        switch (numcoords) {
+
+    if (has_normal) append_decl_element(&state, WINED3DFMT_R32G32B32_FLOAT, WINED3DDECLUSAGE_NORMAL, 0);
+    if (has_psize) append_decl_element(&state, WINED3DFMT_R32_FLOAT, WINED3DDECLUSAGE_PSIZE, 0);
+    if (has_diffuse) append_decl_element(&state, WINED3DFMT_B8G8R8A8_UNORM, WINED3DDECLUSAGE_COLOR, 0);
+    if (has_specular) append_decl_element(&state, WINED3DFMT_B8G8R8A8_UNORM, WINED3DDECLUSAGE_COLOR, 1);
+
+    for (idx = 0; idx < num_textures; ++idx)
+    {
+        switch ((texcoords >> (idx * 2)) & 0x03)
+        {
             case WINED3DFVF_TEXTUREFORMAT1:
-                elements[idx].format = WINED3DFMT_R32_FLOAT;
+                append_decl_element(&state, WINED3DFMT_R32_FLOAT, WINED3DDECLUSAGE_TEXCOORD, idx);
                 break;
             case WINED3DFVF_TEXTUREFORMAT2:
-                elements[idx].format = WINED3DFMT_R32G32_FLOAT;
+                append_decl_element(&state, WINED3DFMT_R32G32_FLOAT, WINED3DDECLUSAGE_TEXCOORD, idx);
                 break;
             case WINED3DFVF_TEXTUREFORMAT3:
-                elements[idx].format = WINED3DFMT_R32G32B32_FLOAT;
+                append_decl_element(&state, WINED3DFMT_R32G32B32_FLOAT, WINED3DDECLUSAGE_TEXCOORD, idx);
                 break;
             case WINED3DFVF_TEXTUREFORMAT4:
-                elements[idx].format = WINED3DFMT_R32G32B32A32_FLOAT;
+                append_decl_element(&state, WINED3DFMT_R32G32B32A32_FLOAT, WINED3DDECLUSAGE_TEXCOORD, idx);
                 break;
         }
-        elements[idx].usage = WINED3DDECLUSAGE_TEXCOORD;
-        elements[idx].usage_idx = idx2;
-        idx++;
     }
 
-    /* Now compute offsets, and initialize the rest of the fields */
-    for (idx = 0, offset = 0; idx < size; ++idx)
-    {
-        const struct wined3d_format_desc *format_desc = getFormatDescEntry(elements[idx].format,
-                &This->adapter->gl_info);
-        elements[idx].input_slot = 0;
-        elements[idx].method = WINED3DDECLMETHOD_DEFAULT;
-        elements[idx].offset = offset;
-        offset += format_desc->component_count * format_desc->component_size;
-    }
-
-    *ppVertexElements = elements;
+    *ppVertexElements = state.elements;
     return size;
 }
 
@@ -1353,35 +1360,27 @@ static HRESULT WINAPI IWineD3DDeviceImpl_CreatePalette(IWineD3DDevice *iface, DW
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
     IWineD3DPaletteImpl *object;
     HRESULT hr;
-    TRACE("(%p)->(%x, %p, %p, %p)\n", This, Flags, PalEnt, Palette, Parent);
 
-    /* Create the new object */
-    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(IWineD3DPaletteImpl));
-    if(!object) {
-        ERR("Out of memory when allocating memory for a IWineD3DPalette implementation\n");
+    TRACE("iface %p, flags %#x, entries %p, palette %p, parent %p.\n",
+            iface, Flags, PalEnt, Palette, Parent);
+
+    object = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*object));
+    if (!object)
+    {
+        ERR("Failed to allocate palette memory.\n");
         return E_OUTOFMEMORY;
     }
 
-    object->lpVtbl = &IWineD3DPalette_Vtbl;
-    object->ref = 1;
-    object->Flags = Flags;
-    object->parent = Parent;
-    object->device = This;
-    object->palNumEntries = IWineD3DPaletteImpl_Size(Flags);
-    object->hpal = CreatePalette((const LOGPALETTE*)&(object->palVersion));
-
-    if(!object->hpal) {
-        HeapFree( GetProcessHeap(), 0, object);
-        return E_OUTOFMEMORY;
-    }
-
-    hr = IWineD3DPalette_SetEntries((IWineD3DPalette *) object, 0, 0, IWineD3DPaletteImpl_Size(Flags), PalEnt);
-    if(FAILED(hr)) {
-        IWineD3DPalette_Release((IWineD3DPalette *) object);
+    hr = wined3d_palette_init(object, This, Flags, PalEnt, Parent);
+    if (FAILED(hr))
+    {
+        WARN("Failed to initialize palette, hr %#x.\n", hr);
+        HeapFree(GetProcessHeap(), 0, object);
         return hr;
     }
 
-    *Palette = (IWineD3DPalette *) object;
+    TRACE("Created palette %p.\n", object);
+    *Palette = (IWineD3DPalette *)object;
 
     return WINED3D_OK;
 }
@@ -1863,9 +1862,8 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Uninit3D(IWineD3DDevice *iface,
     This->stencilBufferTarget = NULL;
 
     TRACE("Releasing the render target at %p\n", This->render_targets[0]);
-    if(IWineD3DSurface_Release(This->render_targets[0]) >0){
-          /* This check is a bit silly, it should be in swapchain_release FIXME("(%p) Something's still holding the renderTarget\n",This); */
-    }
+    IWineD3DSurface_Release(This->render_targets[0]);
+
     TRACE("Setting rendertarget to NULL\n");
     This->render_targets[0] = NULL;
 
@@ -4378,6 +4376,29 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfac
     }
 
     context = context_acquire(This, (IWineD3DSurface *)target, CTXUSAGE_CLEAR);
+    if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
+    {
+        if (!surface_is_offscreen((IWineD3DSurface *)target))
+        {
+            TRACE("Surface %p is onscreen\n", target);
+
+            ENTER_GL();
+            context_bind_fbo(context, GL_FRAMEBUFFER, NULL);
+            context_set_draw_buffer(context, surface_get_gl_buffer((IWineD3DSurface *)target));
+            LEAVE_GL();
+        }
+        else
+        {
+            TRACE("Surface %p is offscreen\n", target);
+
+            ENTER_GL();
+            context_bind_fbo(context, GL_FRAMEBUFFER, &context->dst_fbo);
+            context_attach_surface_fbo(context, GL_FRAMEBUFFER, 0, target);
+            context_attach_depth_stencil_fbo(context, GL_FRAMEBUFFER, depth_stencil, TRUE);
+            LEAVE_GL();
+        }
+    }
+
     if (!context->valid)
     {
         context_release(context);
@@ -4497,7 +4518,9 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfac
 
     LEAVE_GL();
 
-    wglFlush(); /* Flush to ensure ordering across contexts. */
+    if (wined3d_settings.strict_draw_ordering || ((target->Flags & SFLAG_SWAPCHAIN)
+            && ((IWineD3DSwapChainImpl *)target->container)->frontBuffer == (IWineD3DSurface *)target))
+        wglFlush(); /* Flush to ensure ordering across contexts. */
 
     context_release(context);
 
@@ -5166,8 +5189,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
     UINT src_w, src_h;
     UINT dst_x, dst_y;
     DWORD sampler;
-    GLenum dummy;
-    int bpp;
+    struct wined3d_format_desc dummy_desc;
 
     TRACE("iface %p, src_surface %p, src_rect %s, dst_surface %p, dst_point %s",
             iface, src_surface, wine_dbgstr_rect(src_rect),
@@ -5196,7 +5218,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
      * surface to the destination's sysmem copy. If surface conversion is
      * needed, use BltFast instead to copy in sysmem and use regular surface
      * loading. */
-    d3dfmt_get_conv(dst_impl, FALSE, TRUE, &dummy, &dummy, &dummy, &convert, &bpp, FALSE);
+    d3dfmt_get_conv(dst_impl, FALSE, TRUE, &dummy_desc, &convert);
     if (convert != NO_CONVERSION)
         return IWineD3DSurface_BltFast(dst_surface, dst_x, dst_y, src_surface, src_rect, 0);
 
@@ -5435,7 +5457,7 @@ static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface,
         context = context_acquire(This, NULL, CTXUSAGE_RESOURCELOAD);
         ENTER_GL();
         context_bind_fbo(context, GL_FRAMEBUFFER, &context->dst_fbo);
-        context_attach_surface_fbo(context, GL_FRAMEBUFFER, 0, surface);
+        context_attach_surface_fbo(context, GL_FRAMEBUFFER, 0, (IWineD3DSurfaceImpl *)surface);
         context_attach_depth_stencil_fbo(context, GL_FRAMEBUFFER, NULL, FALSE);
     }
 
@@ -5469,7 +5491,7 @@ static void color_fill_fbo(IWineD3DDevice *iface, IWineD3DSurface *surface,
 
     LEAVE_GL();
 
-    wglFlush(); /* Flush to ensure ordering across contexts. */
+    if (wined3d_settings.strict_draw_ordering) wglFlush(); /* Flush to ensure ordering across contexts. */
 
     context_release(context);
 }
@@ -5761,7 +5783,7 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const
         TRACE("Source surface %p is offscreen\n", src_surface);
         ENTER_GL();
         context_bind_fbo(context, GL_READ_FRAMEBUFFER, &context->src_fbo);
-        context_attach_surface_fbo(context, GL_READ_FRAMEBUFFER, 0, src_surface);
+        context_attach_surface_fbo(context, GL_READ_FRAMEBUFFER, 0, (IWineD3DSurfaceImpl *)src_surface);
         glReadBuffer(GL_COLOR_ATTACHMENT0);
         checkGLcall("glReadBuffer()");
         context_attach_depth_stencil_fbo(context, GL_READ_FRAMEBUFFER, NULL, FALSE);
@@ -5800,7 +5822,7 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const
 
         ENTER_GL();
         context_bind_fbo(context, GL_DRAW_FRAMEBUFFER, &context->dst_fbo);
-        context_attach_surface_fbo(context, GL_DRAW_FRAMEBUFFER, 0, dst_surface);
+        context_attach_surface_fbo(context, GL_DRAW_FRAMEBUFFER, 0, (IWineD3DSurfaceImpl *)dst_surface);
         context_set_draw_buffer(context, GL_COLOR_ATTACHMENT0);
         context_attach_depth_stencil_fbo(context, GL_DRAW_FRAMEBUFFER, NULL, FALSE);
     }
@@ -5813,7 +5835,7 @@ void stretch_rect_fbo(IWineD3DDevice *iface, IWineD3DSurface *src_surface, const
 
     LEAVE_GL();
 
-    wglFlush(); /* Flush to ensure ordering across contexts. */
+    if (wined3d_settings.strict_draw_ordering) wglFlush(); /* Flush to ensure ordering across contexts. */
 
     context_release(context);
 
@@ -6173,10 +6195,6 @@ static HRESULT updateSurfaceDesc(IWineD3DSurfaceImpl *surface, const WINED3DPRES
         while (surface->pow2Width < pPresentationParameters->BackBufferWidth) surface->pow2Width <<= 1;
         while (surface->pow2Height < pPresentationParameters->BackBufferHeight) surface->pow2Height <<= 1;
     }
-    surface->glRect.left = 0;
-    surface->glRect.top = 0;
-    surface->glRect.right = surface->pow2Width;
-    surface->glRect.bottom = surface->pow2Height;
 
     if (surface->texture_name)
     {
@@ -6242,9 +6260,9 @@ static BOOL is_display_mode_supported(IWineD3DDeviceImpl *This, const WINED3DPRE
     return FALSE;
 }
 
-void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain_iface) {
+static void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChainImpl *swapchain)
+{
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) swapchain_iface;
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     IWineD3DBaseShaderImpl *shader;
@@ -6286,9 +6304,9 @@ void delete_opengl_contexts(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain_
     swapchain->num_contexts = 0;
 }
 
-HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChain *swapchain_iface) {
+static HRESULT create_primary_opengl_context(IWineD3DDevice *iface, IWineD3DSwapChainImpl *swapchain)
+{
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *) iface;
-    IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *) swapchain_iface;
     struct wined3d_context *context;
     HRESULT hr;
     IWineD3DSurfaceImpl *target;
@@ -6445,7 +6463,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
     IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->updateStateBlock);
     IWineD3DStateBlock_Release((IWineD3DStateBlock *)This->stateBlock);
 
-    delete_opengl_contexts(iface, (IWineD3DSwapChain *) swapchain);
+    delete_opengl_contexts(iface, swapchain);
 
     if(pPresentationParameters->Windowed) {
         mode.Width = swapchain->orig_width;
@@ -6573,7 +6591,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_Reset(IWineD3DDevice* iface, WINED3DPRE
         }
     }
 
-    hr = create_primary_opengl_context(iface, (IWineD3DSwapChain *) swapchain);
+    hr = create_primary_opengl_context(iface, swapchain);
     IWineD3DSwapChain_Release((IWineD3DSwapChain *) swapchain);
 
     /* All done. There is no need to reload resources or shaders, this will happen automatically on the

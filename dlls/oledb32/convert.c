@@ -136,6 +136,7 @@ static int get_length(DBTYPE type)
     case DBTYPE_GUID:
         return sizeof(GUID);
     case DBTYPE_WSTR:
+    case DBTYPE_STR:
     case DBTYPE_BYREF | DBTYPE_WSTR:
         return 0;
     default:
@@ -335,6 +336,42 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_UI4:         hr = VarBstrFromUI4(*(DWORD*)src, LOCALE_USER_DEFAULT, 0, d);         break;
         case DBTYPE_I8:          hr = VarBstrFromI8(*(LONGLONG*)src, LOCALE_USER_DEFAULT, 0, d);       break;
         case DBTYPE_UI8:         hr = VarBstrFromUI8(*(ULONGLONG*)src, LOCALE_USER_DEFAULT, 0, d);     break;
+        case DBTYPE_GUID:
+        {
+            WCHAR szBuff[39];
+            const GUID *id = (const GUID *)src;
+            WCHAR format[] = {
+                '{','%','0','8','X','-','%','0','4','X','-','%','0','4','X','-',
+                '%','0','2','X','%','0','2','X','-',
+                '%','0','2','X','%','0','2','X','%','0','2','X','%','0','2','X','%','0','2','X','%','0','2','X','}',0};
+            wsprintfW(szBuff, format,
+                id->Data1, id->Data2, id->Data3,
+                id->Data4[0], id->Data4[1], id->Data4[2], id->Data4[3],
+                id->Data4[4], id->Data4[5], id->Data4[6], id->Data4[7] );
+            *d = SysAllocString(szBuff);
+            hr = *d ? S_OK : E_OUTOFMEMORY;
+        }
+        break;
+        case DBTYPE_BYTES:
+        {
+            *d = SysAllocStringLen(NULL, 2 * src_len);
+            if (*d == NULL)
+                hr = E_OUTOFMEMORY;
+            else
+            {
+                const char hexchars[] = "0123456789ABCDEF";
+                WCHAR *s = *d;
+                unsigned char *p = src;
+                while (src_len > 0)
+                {
+                    *s++ = hexchars[(*p >> 4) & 0x0F];
+                    *s++ = hexchars[(*p)      & 0x0F];
+                    src_len--; p++;
+                }
+                hr = S_OK;
+            }
+        }
+        break;
         default: FIXME("Unimplemented conversion %04x -> BSTR\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -462,6 +499,37 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
                 memcpy(dst, b, bytes_to_copy - sizeof(WCHAR));
                 *((WCHAR*)dst + bytes_to_copy / sizeof(WCHAR) - 1) = 0;
                 if(bytes_to_copy < *dst_len + sizeof(WCHAR))
+                    *dst_status = DBSTATUS_S_TRUNCATED;
+            }
+            else
+            {
+                *dst_status = DBSTATUS_E_DATAOVERFLOW;
+                hr = DB_E_ERRORSOCCURRED;
+            }
+        }
+        SysFreeString(b);
+        return hr;
+    }
+    case DBTYPE_STR:
+    {
+        BSTR b;
+        DBLENGTH bstr_len;
+        INT bytes_to_copy;
+        hr = IDataConvert_DataConvert(iface, src_type, DBTYPE_BSTR, src_len, &bstr_len,
+                                      src, &b, sizeof(BSTR), src_status, dst_status,
+                                      precision, scale, flags);
+        if(hr != S_OK) return hr;
+        bstr_len = SysStringLen(b);
+        *dst_len = bstr_len * sizeof(char); /* Doesn't include size for '\0' */
+        *dst_status = DBSTATUS_S_OK;
+        bytes_to_copy = min(*dst_len + sizeof(char), dst_max_len);
+        if(dst)
+        {
+            if(bytes_to_copy >= sizeof(char))
+            {
+                WideCharToMultiByte(CP_ACP, 0, b, bytes_to_copy - sizeof(char), dst, dst_max_len, NULL, NULL);
+                *((char *)dst + bytes_to_copy / sizeof(char) - 1) = 0;
+                if(bytes_to_copy < *dst_len + sizeof(char))
                     *dst_status = DBSTATUS_S_TRUNCATED;
             }
             else

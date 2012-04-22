@@ -190,13 +190,8 @@ then
     fi
     AC_SUBST([WOW64_DISABLE],[\#])
     enable_fonts=${enable_fonts:-no}
-    enable_include=${enable_include:-no}
-    enable_rpcss=${enable_rpcss:-no}
     enable_server=${enable_server:-no}
     enable_tools=${enable_tools:-no}
-    enable_wineboot=${enable_wineboot:-no}
-    enable_winedbg=${enable_winedbg:-no}
-    enable_winemenubuilder=${enable_winemenubuilder:-no}
     test "x$libdir" != "x\${exec_prefix}/lib" || libdir="\${exec_prefix}/lib32"
 fi
 
@@ -281,13 +276,40 @@ dnl Check for various programs
 AC_CHECK_PROGS(FONTFORGE, fontforge, false)
 AC_CHECK_PROGS(PKG_CONFIG, pkg-config, false)
 AC_CHECK_PROGS(RSVG, rsvg, false)
+AC_CHECK_PROGS(CONVERT, convert, false)
 AC_CHECK_PROGS(ICOTOOL, icotool, false)
 
 if test "${enable_maintainer_mode+set}" = set
 then
   if test "$FONTFORGE" = "false"; then WINE_WARNING([fontforge is missing, fonts can't be rebuilt.]); fi
   if test "$RSVG" = "false"; then WINE_WARNING([rsvg is missing, icons can't be rebuilt.]); fi
-  if test "$ICOTOOL" = "false"; then WINE_WARNING([icotool is missing, icons can't be rebuilt.]); fi
+  if test "$CONVERT" = "false"; then WINE_WARNING([imagemagick is missing, icons can't be rebuilt.]); fi
+
+  dnl Check the icotool version
+  if test "$ICOTOOL" = false
+  then
+    WINE_WARNING([icotool is missing, icons can't be rebuilt.])
+  else
+    AC_MSG_CHECKING([for recent enough icotool])
+    icotool_version=`icotool --version | head -n1`
+    if test "x$icotool_version" != "x"
+    then
+      icotool_version_major=`expr "$icotool_version" : '.* \([[0-9]]*\).[[0-9]]*'`
+      icotool_version_minor=`expr "$icotool_version" : '.* [[0-9]]*.\([[0-9]]*\)'`
+      if test "$icotool_version_major" -eq 0 -a "$icotool_version_minor" -lt 29
+      then
+        ICOTOOL=false
+        WINE_WARNING([icotool version 0.29.0 or newer is needed to rebuild icons.])
+      fi
+    fi
+    if test "$ICOTOOL" = false
+    then
+      AC_MSG_RESULT([no ($icotool_version_major.$icotool_version_minor)])
+    else
+      AC_MSG_RESULT([yes ($icotool_version_major.$icotool_version_minor)])
+    fi
+  fi
+
 fi
 
 case $host_cpu in
@@ -662,8 +684,9 @@ case $host_os in
     fi
     if test "$ac_cv_header_OpenAL_al_h" = "yes"
     then
-        AC_SUBST(LIBOPENAL,"-framework OpenAL")
-        ac_cv_lib_openal_alGetSource3i=yes
+        AC_SUBST(FRAMEWORK_OPENAL,"-framework OpenAL")
+        AC_DEFINE_UNQUOTED(HAVE_OPENAL,1,[Define to 1 if OpenAL is available])
+        ac_cv_lib_openal=yes
     fi
     if test "$ac_cv_header_IOKit_hid_IOHIDLib_h" = "yes"
     then
@@ -1476,11 +1499,13 @@ test "x$ac_cv_lib_mpg123_mpg123_feed" = xyes -o "x$ac_cv_func_AudioFileStreamOpe
 dnl **** Check for OpenAL 1.1 ****
 if test "$ac_cv_header_AL_al_h" = "yes"
 then
-    AC_CHECK_LIB(openal,alGetSource3i,[AC_SUBST(LIBOPENAL,"-lopenal")])
+    WINE_CHECK_SONAME(openal,alGetSource3i,[AC_SUBST(LIBOPENAL,"-lopenal")
+                      ac_cv_lib_openal=yes
+                      AC_DEFINE_UNQUOTED(HAVE_OPENAL,1,[Define to 1 if OpenAL is available])],,)
 fi
-WINE_NOTICE_WITH(openal,[test "x$ac_cv_lib_openal_alGetSource3i" != xyes],
+WINE_NOTICE_WITH(openal,[test "x$ac_cv_lib_openal" != xyes],
                  [libopenal ${notice_platform}development files not found (or too old), OpenAL won't be supported.])
-test "x$ac_cv_lib_openal_alGetSource3i" = xyes || enable_openal32=${enable_openal32:-no}
+test "x$ac_cv_lib_openal" = xyes || enable_openal32=${enable_openal32:-no}
 
 dnl **** Check for libkstat ****
 if test "$ac_cv_header_kstat_h" = "yes"
@@ -1657,6 +1682,7 @@ then
    asm_func_header="$asm_func_header.cfi_startproc\\n\\t"
    asm_func_trailer="\\n\\t.cfi_endproc$asm_func_trailer"
    AC_DEFINE([__ASM_CFI(str)],[str],[Define to a macro to output a .cfi assembly pseudo-op])
+   AC_SUBST([UNWINDFLAGS],[-fasynchronous-unwind-tables])
 else
    AC_DEFINE([__ASM_CFI(str)],[""])
 fi
@@ -2124,7 +2150,9 @@ esac
 
 dnl **** Generate output files ****
 
-AH_TOP([#define __WINE_CONFIG_H])
+AH_TOP([#ifndef WINE_CROSSTEST
+#define __WINE_CONFIG_H])
+AH_BOTTOM([#endif /* WINE_CROSSTEST */])
 
 AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 
@@ -2648,6 +2676,7 @@ WINE_CONFIG_PROGRAM(lodctr,install)
 WINE_CONFIG_PROGRAM(mshta,install)
 WINE_CONFIG_PROGRAM(msiexec,installbin)
 WINE_CONFIG_PROGRAM(net,install)
+WINE_CONFIG_PROGRAM(ngen,install)
 WINE_CONFIG_PROGRAM(notepad,installbin)
 WINE_CONFIG_PROGRAM(oleview,install)
 WINE_CONFIG_PROGRAM(ping,install)

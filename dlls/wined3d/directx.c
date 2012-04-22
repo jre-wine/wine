@@ -24,6 +24,7 @@
  */
 
 #include "config.h"
+#include <stdio.h>
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
@@ -31,7 +32,6 @@ WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
 
 #define GLINFO_LOCATION (*gl_info)
 #define WINE_DEFAULT_VIDMEM (64 * 1024 * 1024)
-#define MAKEDWORD_VERSION(maj, min)  ((maj & 0xffff) << 16) | (min & 0xffff)
 
 /* The d3d device ID */
 static const GUID IID_D3DDEVICE_D3DUID = { 0xaeb2cdd4, 0x6e41, 0x43ea, { 0x94,0x1c,0x83,0x61,0xcc,0x76,0x07,0x81 } };
@@ -571,7 +571,7 @@ static BOOL match_apple_nonr500ati(const struct wined3d_gl_info *gl_info, const 
 static BOOL match_fglrx(const struct wined3d_gl_info *gl_info, const char *gl_renderer,
         enum wined3d_gl_vendor gl_vendor, enum wined3d_pci_vendor card_vendor, enum wined3d_pci_device device)
 {
-    return (gl_vendor == GL_VENDOR_ATI);
+    return gl_vendor == GL_VENDOR_FGLRX;
 
 }
 
@@ -1021,7 +1021,7 @@ static const struct driver_version_information driver_version_table[] =
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_9500,           "ATI Radeon 9500",                  14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_X700,           "ATI Radeon X700 SE",               14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_X1600,          "ATI Radeon X1600 Series",          14, 10, 6764    },
-    {HW_VENDOR_ATI,        CARD_ATI_RADEON_HD2300,         "ATI Mobility Radeon HD 2300",      14, 10, 6764    },
+    {HW_VENDOR_ATI,        CARD_ATI_RADEON_HD2350,         "ATI Mobility Radeon HD 2350",      14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_HD2600,         "ATI Mobility Radeon HD 2600",      14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_HD2900,         "ATI Radeon HD 2900 XT",            14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_HD4350,         "ATI Radeon HD 4350",               14, 10, 6764    },
@@ -1197,7 +1197,7 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(struct wined3d_gl_info *gl
         return GL_VENDOR_NVIDIA;
 
     if (strstr(gl_vendor_string, "ATI"))
-        return GL_VENDOR_ATI;
+        return GL_VENDOR_FGLRX;
 
     if (strstr(gl_vendor_string, "Intel(R)")
             || strstr(gl_renderer, "Intel(R)")
@@ -1214,9 +1214,10 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(struct wined3d_gl_info *gl
             || strstr(gl_renderer, "Gallium"))
         return GL_VENDOR_MESA;
 
-    FIXME_(d3d_caps)("Received unrecognized GL_VENDOR %s. Returning GL_VENDOR_WINE.\n", debugstr_a(gl_vendor_string));
+    FIXME_(d3d_caps)("Received unrecognized GL_VENDOR %s. Returning GL_VENDOR_UNKNOWN.\n",
+            debugstr_a(gl_vendor_string));
 
-    return GL_VENDOR_WINE;
+    return GL_VENDOR_UNKNOWN;
 }
 
 static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_string, const char *gl_renderer)
@@ -1238,7 +1239,7 @@ static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_s
     if (strstr(gl_vendor_string, "Mesa")
             || strstr(gl_vendor_string, "Tungsten Graphics, Inc")
             || strstr(gl_vendor_string, "VMware, Inc."))
-        return HW_VENDOR_WINE;
+        return HW_VENDOR_SOFTWARE;
 
     FIXME_(d3d_caps)("Received unrecognized GL_VENDOR %s. Returning HW_VENDOR_NVIDIA.\n", debugstr_a(gl_vendor_string));
 
@@ -1247,13 +1248,10 @@ static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_s
 
 
 
-enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
-    /* Both the GeforceFX, 6xxx and 7xxx series support D3D9. The last two types have more
-     * shader capabilities, so we use the shader capabilities to distinguish between FX and 6xxx/7xxx.
-     */
-    if (WINE_D3D9_CAPABLE(gl_info) && gl_info->supported[NV_VERTEX_PROGRAM3])
+    if (WINE_D3D10_CAPABLE(gl_info))
     {
         /* Geforce 200 - highend */
         if (strstr(gl_renderer, "GTX 280")
@@ -1359,6 +1357,16 @@ enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *
             return CARD_NVIDIA_GEFORCE_8300GS;
         }
 
+        /* Geforce8-compatible fall back if the GPU is not in the list yet */
+        *vidmem = 128;
+        return CARD_NVIDIA_GEFORCE_8300GS;
+    }
+
+    /* Both the GeforceFX, 6xxx and 7xxx series support D3D9. The last two types have more
+     * shader capabilities, so we use the shader capabilities to distinguish between FX and 6xxx/7xxx.
+     */
+    if (WINE_D3D9_CAPABLE(gl_info) && gl_info->supported[NV_VERTEX_PROGRAM3])
+    {
         /* Geforce7 - highend */
         if (strstr(gl_renderer, "7800")
                 || strstr(gl_renderer, "7900")
@@ -1491,14 +1499,14 @@ enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl_info *
 
 }
 
-enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
     /* See http://developer.amd.com/drivers/pc_vendor_id/Pages/default.aspx
      *
      * Beware: renderer string do not match exact card model,
      * eg HD 4800 is returned for multiple cards, even for RV790 based ones. */
-    if (WINE_D3D9_CAPABLE(gl_info))
+    if (WINE_D3D10_CAPABLE(gl_info))
     {
         /* Radeon EG CYPRESS XT / PRO HD5800 - highend */
         if (strstr(gl_renderer, "HD 5800")          /* Radeon EG CYPRESS HD58xx generic renderer string */
@@ -1573,16 +1581,17 @@ enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_
             return CARD_ATI_RADEON_HD2600;
         }
 
-        /* Radeon R6xx HD2300/HD2400/HD3400 - lowend */
-        if (strstr(gl_renderer, "HD 2300")
+        /* Radeon R6xx HD2350/HD2400/HD3400 - lowend
+         * Note HD2300=DX9, HD2350=DX10 */
+        if (strstr(gl_renderer, "HD 2350")
                 || strstr(gl_renderer, "HD 2400")
                 || strstr(gl_renderer, "HD 3470")
                 || strstr(gl_renderer, "HD 3450")
                 || strstr(gl_renderer, "HD 3430")
                 || strstr(gl_renderer, "HD 3400"))
         {
-            *vidmem = 128; /* HD2300 uses at least 128MB, HD2400 uses 256MB */
-            return CARD_ATI_RADEON_HD2300;
+            *vidmem = 256; /* HD2350/2400 use 256MB, HD34xx use 256-512MB */
+            return CARD_ATI_RADEON_HD2350;
         }
 
         /* Radeon R6xx/R7xx integrated */
@@ -1594,6 +1603,13 @@ enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_
             return CARD_ATI_RADEON_HD3200;
         }
 
+        /* Default for when no GPU has been found */
+        *vidmem = 128; /* 128MB */
+        return CARD_ATI_RADEON_HD3200;
+    }
+
+    if (WINE_D3D8_CAPABLE(gl_info))
+    {
         /* Radeon R5xx */
         if (strstr(gl_renderer, "X1600")
                 || strstr(gl_renderer, "X1650")
@@ -1605,14 +1621,19 @@ enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_
             return CARD_ATI_RADEON_X1600;
         }
 
-        /* Radeon R4xx + X1300/X1400/X1450/X1550/X2300 (lowend R5xx) */
+        /* Radeon R4xx + X1300/X1400/X1450/X1550/X2300/X2500/HD2300 (lowend R5xx)
+         * Note X2300/X2500/HD2300 are R5xx GPUs with a 2xxx naming but they are still DX9-only */
         if (strstr(gl_renderer, "X700")
                 || strstr(gl_renderer, "X800")
                 || strstr(gl_renderer, "X850")
                 || strstr(gl_renderer, "X1300")
                 || strstr(gl_renderer, "X1400")
                 || strstr(gl_renderer, "X1450")
-                || strstr(gl_renderer, "X1550"))
+                || strstr(gl_renderer, "X1550")
+                || strstr(gl_renderer, "X2300")
+                || strstr(gl_renderer, "X2500")
+                || strstr(gl_renderer, "HD 2300")
+                )
         {
             *vidmem = 128; /* x700/x8*0 use 128-256MB, >=x1300 128-512MB */
             return CARD_ATI_RADEON_X700;
@@ -1647,7 +1668,7 @@ enum wined3d_pci_device select_card_ati_binary(const struct wined3d_gl_info *gl_
 
 }
 
-enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
     if (strstr(gl_renderer, "X3100"))
@@ -1673,7 +1694,7 @@ enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_info *g
 
 }
 
-enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
     /* See http://developer.amd.com/drivers/pc_vendor_id/Pages/default.aspx
@@ -1729,12 +1750,12 @@ enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_in
             return CARD_ATI_RADEON_HD2600;
         }
 
-        /* Radeon R6xx HD2300/HD2400/HD3400 - lowend */
+        /* Radeon R6xx HD2350/HD2400/HD3400 - lowend */
         if (strstr(gl_renderer, "RV610")
                 || strstr(gl_renderer, "RV620"))
         {
-            *vidmem = 128; /* HD2300 uses at least 128MB, HD2400 uses 256MB */
-            return CARD_ATI_RADEON_HD2300;
+            *vidmem = 256; /* HD2350/2400 use 256MB, HD34xx use 256-512MB */
+            return CARD_ATI_RADEON_HD2350;
         }
 
         /* Radeon R6xx/R7xx integrated */
@@ -1852,8 +1873,8 @@ enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_in
         if (strstr(gl_renderer, "(RV610")
                 || strstr(gl_renderer, "(RV620"))
         {
-            *vidmem = 128; /* HD2300 uses at least 128MB, HD2400 uses 256MB */
-            return CARD_ATI_RADEON_HD2300;
+            *vidmem = 256; /* HD2350/2400 use 256MB, HD34xx use 256-512MB */
+            return CARD_ATI_RADEON_HD2350;
         }
 
         /* Radeon R6xx/R7xx integrated */
@@ -1882,7 +1903,7 @@ enum wined3d_pci_device select_card_ati_mesa(const struct wined3d_gl_info *gl_in
 
 }
 
-enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
     FIXME_(d3d_caps)("Card selection not handled for Mesa Nouveau driver\n");
@@ -1893,7 +1914,7 @@ enum wined3d_pci_device select_card_nvidia_mesa(const struct wined3d_gl_info *gl
     return CARD_NVIDIA_RIVA_128;
 }
 
-enum wined3d_pci_device select_card_intel_mesa(const struct wined3d_gl_info *gl_info,
+static enum wined3d_pci_device select_card_intel_mesa(const struct wined3d_gl_info *gl_info,
         const char *gl_renderer, unsigned int *vidmem)
 {
     FIXME_(d3d_caps)("Card selection not handled for Mesa Intel driver\n");
@@ -1916,7 +1937,7 @@ static const struct vendor_card_selection vendor_card_select_table[] =
     {GL_VENDOR_APPLE,  HW_VENDOR_NVIDIA,  "Apple OSX NVidia binary driver",   select_card_nvidia_binary},
     {GL_VENDOR_APPLE,  HW_VENDOR_ATI,     "Apple OSX AMD/ATI binary driver",  select_card_ati_binary},
     {GL_VENDOR_APPLE,  HW_VENDOR_INTEL,   "Apple OSX Intel binary driver",    select_card_intel_binary},
-    {GL_VENDOR_ATI,    HW_VENDOR_ATI,     "AMD/ATI binary driver",    select_card_ati_binary},
+    {GL_VENDOR_FGLRX,  HW_VENDOR_ATI,     "AMD/ATI binary driver",    select_card_ati_binary},
     {GL_VENDOR_MESA,   HW_VENDOR_ATI,     "Mesa AMD/ATI driver",      select_card_ati_mesa},
     {GL_VENDOR_MESA,   HW_VENDOR_NVIDIA,  "Mesa Nouveau driver",      select_card_nvidia_mesa},
     {GL_VENDOR_MESA,   HW_VENDOR_INTEL,   "Mesa Intel driver",        select_card_intel_mesa}
@@ -2100,6 +2121,7 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_adapter *adapter)
      *  with Default values
      */
     memset(gl_info->supported, 0, sizeof(gl_info->supported));
+    gl_info->limits.blends = 1;
     gl_info->limits.buffers = 1;
     gl_info->limits.textures = 1;
     gl_info->limits.fragment_samplers = 1;
@@ -2413,7 +2435,13 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_adapter *adapter)
     if (gl_info->supported[ARB_SHADING_LANGUAGE_100])
     {
         const char *str = (const char *)glGetString(GL_SHADING_LANGUAGE_VERSION_ARB);
+        unsigned int major, minor;
+
         TRACE_(d3d_caps)("GLSL version string: %s.\n", debugstr_a(str));
+
+        /* The format of the GLSL version string is "major.minor[.release] [vendor info]". */
+        sscanf(str, "%u.%u", &major, &minor);
+        gl_info->glsl_version = MAKEDWORD_VERSION(major, minor);
     }
     if (gl_info->supported[NV_LIGHT_MAX_EXPONENT])
     {
@@ -3397,12 +3425,12 @@ static BOOL CheckTextureCapability(struct wined3d_adapter *adapter,
             return FALSE;
 
         /*****
-         *  supported: Palettized
+         *  Not supported: Palettized
+         *  Only some Geforce/Voodoo3/G400 cards offer 8-bit textures in case of <=Direct3D7.
+         *  Since it is not widely available, don't offer it. Further no Windows driver offers
+         *  WINED3DFMT_P8_UINT_A8_NORM, so don't offer it either.
          */
         case WINED3DFMT_P8_UINT:
-            TRACE_(d3d_caps)("[OK]\n");
-            return TRUE;
-        /* No Windows driver offers WINED3DFMT_P8_UINT_A8_UNORM, so don't offer it either */
         case WINED3DFMT_P8_UINT_A8_UNORM:
             return FALSE;
 
@@ -3636,7 +3664,9 @@ static BOOL CheckSurfaceCapability(struct wined3d_adapter *adapter,
     if (CheckDepthStencilCapability(adapter, adapter_format_desc, check_format_desc)) return TRUE;
 
     /* If opengl can't process the format natively, the blitter may be able to convert it */
-    if (adapter->blitter->color_fixup_supported(&adapter->gl_info, check_format_desc->color_fixup))
+    if (adapter->blitter->blit_supported(&adapter->gl_info, BLIT_OP_BLIT,
+                                         NULL, WINED3DPOOL_DEFAULT, 0, check_format_desc,
+                                         NULL, WINED3DPOOL_DEFAULT, 0, adapter_format_desc))
     {
         TRACE_(d3d_caps)("[OK]\n");
         return TRUE;
@@ -5020,7 +5050,7 @@ static void fillGLAttribFuncs(const struct wined3d_gl_info *gl_info)
     }
 }
 
-BOOL InitAdapters(IWineD3DImpl *This)
+static BOOL InitAdapters(IWineD3DImpl *This)
 {
     static HMODULE mod_gl;
     BOOL ret;
@@ -5318,7 +5348,7 @@ nogl_adapter:
  * IWineD3D VTbl follows
  **********************************************************/
 
-const IWineD3DVtbl IWineD3D_Vtbl =
+static const struct IWineD3DVtbl IWineD3D_Vtbl =
 {
     /* IUnknown */
     IWineD3DImpl_QueryInterface,
@@ -5348,3 +5378,23 @@ const struct wined3d_parent_ops wined3d_null_parent_ops =
 {
     wined3d_null_wined3d_object_destroyed,
 };
+
+HRESULT wined3d_init(IWineD3DImpl *wined3d, UINT version, IUnknown *parent)
+{
+    wined3d->lpVtbl = &IWineD3D_Vtbl;
+    wined3d->dxVersion = version;
+    wined3d->ref = 1;
+    wined3d->parent = parent;
+
+    if (!InitAdapters(wined3d))
+    {
+        WARN("Failed to initialize adapters.\n");
+        if (version > 7)
+        {
+            MESSAGE("Direct3D%u is not available without OpenGL.\n", version);
+            return E_FAIL;
+        }
+    }
+
+    return WINED3D_OK;
+}
