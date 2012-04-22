@@ -34,10 +34,37 @@ WINE_DEFAULT_DEBUG_CHANNEL(asmshader);
 %option prefix="asmshader_"
 %option noinput nounput
 
+/* Swizzles and writemasks consist of a dot and up to 4 x, y, z or w characters,
+ * or up to 4 a, r, g, b characters. There are different rules for swizzles and
+ * writemasks wrt repetition, those are handled in the grammar.
+ */
+DOT                     \.
+COMPONENT               [xyzw]|[rgba]
+
 /* Registers */
 REG_TEMP                r[0-9]+
 /* for relative addressing in the form o[x], v[x] and c[x] */
+REG_OUTPUT              o[0-9]*
+REG_INPUT               v[0-9]*
 REG_CONSTFLOAT          c[0-9]*
+REG_CONSTINT            i[0-9]+
+REG_CONSTBOOL           b[0-9]+
+REG_TEXTURE             t[0-9]+
+REG_TEXCRDOUT           oT[0-9]+
+REG_SAMPLER             s[0-9]+
+REG_OPOS                oPos
+REG_OFOG                oFog
+REG_OPTS                oPts
+REG_VERTEXCOLOR         oD[01]
+REG_FRAGCOLOR           oC[0-9]+
+REG_FRAGDEPTH           oDepth
+REG_VPOS                vPos
+REG_VFACE               vFace
+REG_ADDRESS             a0
+REG_LOOP                aL
+REG_PREDICATE           p0
+/* Not really a register, but it is considered as such */
+REG_LABEL               l[0-9]+
 
 PREPROCESSORDIRECTIVE   #[^\n]*\n
 
@@ -58,15 +85,102 @@ ANY                     (.)
 %%
 
     /* Common instructions(vertex and pixel shaders) */
+add                     {return INSTR_ADD;          }
+nop                     {return INSTR_NOP;          }
 mov                     {return INSTR_MOV;          }
+sub                     {return INSTR_SUB;          }
+mad                     {return INSTR_MAD;          }
+mul                     {return INSTR_MUL;          }
+rcp                     {return INSTR_RCP;          }
+rsq                     {return INSTR_RSQ;          }
+dp3                     {return INSTR_DP3;          }
+dp4                     {return INSTR_DP4;          }
+min                     {return INSTR_MIN;          }
+max                     {return INSTR_MAX;          }
+slt                     {return INSTR_SLT;          }
+sge                     {return INSTR_SGE;          }
+abs                     {return INSTR_ABS;          }
+exp                     {return INSTR_EXP;          }
+log                     {return INSTR_LOG;          }
+expp                    {return INSTR_EXPP;         }
+logp                    {return INSTR_LOGP;         }
+dst                     {return INSTR_DST;          }
+lrp                     {return INSTR_LRP;          }
+frc                     {return INSTR_FRC;          }
+pow                     {return INSTR_POW;          }
+crs                     {return INSTR_CRS;          }
+sgn                     {return INSTR_SGN;          }
+nrm                     {return INSTR_NRM;          }
+sincos                  {return INSTR_SINCOS;       }
+m4x4                    {return INSTR_M4x4;         }
+m4x3                    {return INSTR_M4x3;         }
+m3x4                    {return INSTR_M3x4;         }
+m3x3                    {return INSTR_M3x3;         }
+m3x2                    {return INSTR_M3x2;         }
+texldl                  {return INSTR_TEXLDL;       }
+
+    /* Vertex shader only instructions  */
+lit                     {return INSTR_LIT;          }
+mova                    {return INSTR_MOVA;         }
+
 
 {REG_TEMP}              {
                             asmshader_lval.regnum = atoi(yytext + 1);
                             return REG_TEMP;
                         }
+{REG_OUTPUT}            {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_OUTPUT;
+                        }
+{REG_INPUT}             {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_INPUT;
+                        }
 {REG_CONSTFLOAT}        {
                             asmshader_lval.regnum = atoi(yytext + 1);
                             return REG_CONSTFLOAT;
+                        }
+{REG_CONSTINT}          {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_CONSTINT;
+                        }
+{REG_CONSTBOOL}         {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_CONSTBOOL;
+                        }
+{REG_TEXTURE}           {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_TEXTURE;
+                        }
+{REG_TEXCRDOUT}         {
+                            asmshader_lval.regnum = atoi(yytext + 2);
+                            return REG_TEXCRDOUT;
+                        }
+{REG_SAMPLER}           {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_SAMPLER;
+                        }
+{REG_OPOS}              {return REG_OPOS;           }
+{REG_OFOG}              {return REG_OFOG;           }
+{REG_OPTS}              {return REG_OPTS;           }
+{REG_VERTEXCOLOR}       {
+                            asmshader_lval.regnum = atoi(yytext + 2);
+                            return REG_VERTEXCOLOR;
+                        }
+{REG_FRAGCOLOR}         {
+                            asmshader_lval.regnum = atoi(yytext + 2);
+                            return REG_FRAGCOLOR;
+                        }
+{REG_FRAGDEPTH}         {return REG_FRAGDEPTH;      }
+{REG_VPOS}              {return REG_VPOS;           }
+{REG_VFACE}             {return REG_VFACE;          }
+{REG_ADDRESS}           {return REG_ADDRESS;        }
+{REG_LOOP}              {return REG_LOOP;           }
+{REG_PREDICATE}         {return REG_PREDICATE;      }
+
+{REG_LABEL}             {
+                            asmshader_lval.regnum = atoi(yytext + 1);
+                            return REG_LABEL;
                         }
 
     /* Shader versions. These are important to select the correct
@@ -89,10 +203,49 @@ ps_2_0                  {return VER_PS20;       }
 ps_2_x                  {return VER_PS2X;       }
 ps_3_0                  {return VER_PS30;       }
 
+{DOT}                   {return yytext[0];      }
+{COMPONENT}             {
+                            switch(yytext[0]) {
+                                case 'x':
+                                case 'r':
+                                    asmshader_lval.component = 0;
+                                    break;
+                                case 'y':
+                                case 'g':
+                                    asmshader_lval.component = 1;
+                                    break;
+                                case 'z':
+                                case 'b':
+                                    asmshader_lval.component = 2;
+                                    break;
+                                case 'w':
+                                case 'a':
+                                    asmshader_lval.component = 3;
+                                    break;
+                            }
+                            return COMPONENT;
+                        }
+
+    /* Output modifiers */
+\_sat                   {return MOD_SAT;            }
+\_pp                    {return MOD_PP;             }
+\_centroid              {return MOD_CENTROID;       }
+
+{IMMVAL}                {
+                            asmshader_lval.immval.val = atof(yytext);
+                            asmshader_lval.immval.integer = ((strstr(yytext, ".") == NULL) && (strstr(yytext, "f") == NULL));
+                            return IMMVAL;
+                        }
+
 {COMMA}                 {return yytext[0];          }
 -                       {return yytext[0];          }
 \(                      {return yytext[0];          }
 \)                      {return yytext[0];          }
+
+    /* for relative addressing */
+\[|\]|\+                {return yytext[0];          }
+
+\_abs                   {return SMOD_ABS;           }
 
 {PREPROCESSORDIRECTIVE} {
                             /* TODO: update current line information */

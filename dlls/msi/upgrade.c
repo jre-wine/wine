@@ -61,8 +61,9 @@ static void append_productcode(MSIPACKAGE* package, LPCWSTR action_property,
     LPWSTR prop;
     LPWSTR newprop;
     DWORD len;
+    UINT r;
 
-    prop = msi_dup_property(package, action_property );
+    prop = msi_dup_property(package->db, action_property );
     if (prop)
         len = strlenW(prop);
     else
@@ -87,9 +88,13 @@ static void append_productcode(MSIPACKAGE* package, LPCWSTR action_property,
         newprop[0] = 0;
     strcatW(newprop,productid);
 
-    MSI_SetPropertyW(package, action_property, newprop);
-    TRACE("Found Related Product... %s now %s\n",debugstr_w(action_property),
-                    debugstr_w(newprop));
+    r = msi_set_property( package->db, action_property, newprop );
+    if (r == ERROR_SUCCESS && !strcmpW( action_property, cszSourceDir ))
+        msi_reset_folders( package, TRUE );
+
+    TRACE("Found Related Product... %s now %s\n",
+          debugstr_w(action_property), debugstr_w(newprop));
+
     msi_free( prop );
     msi_free( newprop );
 }
@@ -203,7 +208,7 @@ UINT ACTION_FindRelatedProducts(MSIPACKAGE *package)
     UINT rc = ERROR_SUCCESS;
     MSIQUERY *view;
 
-    if (msi_get_property_int(package, szInstalled, 0))
+    if (msi_get_property_int(package->db, szInstalled, 0))
     {
         TRACE("Skipping FindRelatedProducts action: product already installed\n");
         return ERROR_SUCCESS;

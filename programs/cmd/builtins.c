@@ -723,7 +723,6 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
   WCHAR *curPos = p;
   BOOL   expandDirs  = FALSE;
   BOOL   useNumbers  = FALSE;
-  BOOL   doRecursive = FALSE;
   BOOL   doFileset   = FALSE;
   LONG   numbers[3] = {0,0,0}; /* Defaults to 0 in native */
   int    itemNum;
@@ -745,8 +744,8 @@ void WCMD_for (WCHAR *p, CMD_LIST **cmdList) {
           {
               BOOL isRecursive = (*curPos == 'R');
 
-              if (isRecursive) doRecursive = TRUE;
-              else doFileset = TRUE;
+              if (!isRecursive)
+                  doFileset = TRUE;
 
               /* Skip whitespace */
               curPos++;
@@ -2354,7 +2353,6 @@ void WCMD_more (WCHAR *command) {
 
   int   argno         = 0;
   WCHAR *argN          = command;
-  BOOL  useinput      = FALSE;
   WCHAR  moreStr[100];
   WCHAR  moreStrPage[100];
   WCHAR  buffer[512];
@@ -2386,7 +2384,6 @@ void WCMD_more (WCHAR *command) {
 
     /* Warning: No easy way of ending the stream (ctrl+z on windows) so
        once you get in this bit unless due to a pipe, its going to end badly...  */
-    useinput = TRUE;
     wsprintfW(moreStrPage, moreFmt, moreStr);
 
     WCMD_enter_paged_mode(moreStrPage);

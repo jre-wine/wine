@@ -1403,7 +1403,7 @@ static void shader_cleanup(IWineD3DBaseShader *iface)
 
 static void shader_none_handle_instruction(const struct wined3d_shader_instruction *ins) {}
 static void shader_none_select(const struct wined3d_context *context, BOOL usePS, BOOL useVS) {}
-static void shader_none_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type) {}
+static void shader_none_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type, const SIZE *ds_mask_size) {}
 static void shader_none_deselect_depth_blt(IWineD3DDevice *iface) {}
 static void shader_none_update_float_vertex_constants(IWineD3DDevice *iface, UINT start, UINT count) {}
 static void shader_none_update_float_pixel_constants(IWineD3DDevice *iface, UINT start, UINT count) {}
@@ -1418,8 +1418,11 @@ static void shader_none_get_caps(const struct wined3d_gl_info *gl_info, struct s
 {
     /* Set the shader caps to 0 for the none shader backend */
     caps->VertexShaderVersion = 0;
+    caps->MaxVertexShaderConst = 0;
     caps->PixelShaderVersion = 0;
     caps->PixelShader1xMaxValue = 0.0f;
+    caps->MaxPixelShaderConst = 0;
+    caps->VSClipping = FALSE;
 }
 
 static BOOL shader_none_color_fixup_supported(struct color_fixup_desc fixup)

@@ -19,6 +19,7 @@
  */
 
 #include <stdarg.h>
+#include <stdio.h>
 
 #define COBJMACROS
 #define NONAMELESSUNION
@@ -32,18 +33,34 @@
 #include "wine/debug.h"
 #include "debughlp.h"
 
+#include "shresdef.h"
+#include "shfldr.h"
+
 WINE_DEFAULT_DEBUG_CHANNEL (shell);
 
 typedef struct {
     const IShellFolder2Vtbl   *lpVtbl;
     const IPersistFolder2Vtbl *lpvtblPersistFolder2;
     LONG ref;
+
+    LPITEMIDLIST pidl;
 } IPrintersFolderImpl;
 
 static inline IPrintersFolderImpl *impl_from_IPersistFolder2(IPersistFolder2 *iface)
 {
     return (IPrintersFolderImpl *)((char*)iface - FIELD_OFFSET(IPrintersFolderImpl, lpvtblPersistFolder2));
 }
+
+static const shvheader printers_header[] = {
+    { IDS_SHV_COLUMN8,      SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
+    { IDS_SHV_COL_DOCS,     SHCOLSTATE_TYPE_INT | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
+    { IDS_SHV_COL_STATUS,   SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 12 },
+    { IDS_SHV_COLUMN9,      SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 30 },
+    { IDS_SHV_COL_LOCATION, SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 },
+    { IDS_SHV_COL_MODEL,    SHCOLSTATE_TYPE_STR | SHCOLSTATE_ONBYDEFAULT, LVCFMT_LEFT, 20 }
+};
+
+#define PRINTERS_FOLDER_COL_NUM sizeof(printers_header)/sizeof(shvheader)
 
 static HRESULT WINAPI IShellFolder_Printers_fnQueryInterface(IShellFolder2 *iface,
                REFIID riid, LPVOID *ppvObj)
@@ -96,6 +113,7 @@ static ULONG WINAPI IShellFolder_Printers_fnRelease (IShellFolder2 * iface)
     if (!refCount)
     {
         TRACE ("-- destroying IShellFolder(%p)\n", This);
+        SHFree(This->pidl);
         LocalFree (This);
     }
     return refCount;
@@ -255,11 +273,18 @@ static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultColumn (
 }
 
 static HRESULT WINAPI IShellFolder_Printers_fnGetDefaultColumnState (
-               IShellFolder2 * iface, UINT iColumn, DWORD * pcsFlags)
+               IShellFolder2 *iface, UINT iColumn, DWORD *pcsFlags)
 {
     IPrintersFolderImpl *This = (IPrintersFolderImpl *)iface;
-    FIXME("(%p) stub\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%d %p)\n", This, iColumn, pcsFlags);
+
+    if (iColumn >= PRINTERS_FOLDER_COL_NUM)
+        return E_INVALIDARG;
+
+    *pcsFlags = printers_header[iColumn].pcsFlags;
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsEx (IShellFolder2 * iface,
@@ -270,11 +295,21 @@ static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsEx (IShellFolder2 * ifac
     return E_NOTIMPL;
 }
 
-static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsOf (IShellFolder2 * iface,
-               LPCITEMIDLIST pidl, UINT iColumn, SHELLDETAILS * psd)
+static HRESULT WINAPI IShellFolder_Printers_fnGetDetailsOf (IShellFolder2 *iface,
+               LPCITEMIDLIST pidl, UINT iColumn, SHELLDETAILS *psd)
 {
     IPrintersFolderImpl *This = (IPrintersFolderImpl *)iface;
-    FIXME("(%p)->(%p %i %p) stub\n", This, pidl, iColumn, psd);
+
+    TRACE("(%p)->(%p %i %p)\n", This, pidl, iColumn, psd);
+
+    if (iColumn >= PRINTERS_FOLDER_COL_NUM)
+        return E_NOTIMPL;
+
+    if (!pidl)
+        return SHELL32_GetColumnDetails(printers_header, iColumn, psd);
+
+    FIXME("unimplemented for supplied pidl\n");
+
     return E_NOTIMPL;
 }
 
@@ -348,15 +383,24 @@ static HRESULT WINAPI IPersistFolder2_Printers_fnGetClassID(IPersistFolder2 *ifa
 static HRESULT WINAPI IPersistFolder2_Printers_fnInitialize(IPersistFolder2 *iface, LPCITEMIDLIST pidl)
 {
     IPrintersFolderImpl *This = impl_from_IPersistFolder2(iface);
-    FIXME("(%p) stub\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pidl);
+
+    SHFree(This->pidl);
+    This->pidl = ILClone(pidl);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI IPersistFolder2_Printers_fnGetCurFolder(IPersistFolder2 *iface, LPITEMIDLIST *pidl)
 {
     IPrintersFolderImpl *This = impl_from_IPersistFolder2(iface);
-    FIXME("(%p) stub\n", This);
-    return E_NOTIMPL;
+
+    TRACE("(%p)->(%p)\n", This, pidl);
+
+    *pidl = ILClone(This->pidl);
+
+    return *pidl ? S_OK : S_FALSE;
 }
 
 static const IPersistFolder2Vtbl vtbl_PersistFolder2 =
@@ -385,6 +429,7 @@ HRESULT WINAPI Printers_Constructor(IUnknown * pUnkOuter, REFIID riid, LPVOID * 
         return E_OUTOFMEMORY;
 
     sf->ref = 0;
+    sf->pidl = NULL;
     sf->lpVtbl = &vtbl_ShellFolder2;
     sf->lpvtblPersistFolder2 = &vtbl_PersistFolder2;
 

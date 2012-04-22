@@ -116,7 +116,7 @@ ULONG_PTR completionKey;
 IO_STATUS_BLOCK ioSb;
 ULONG_PTR completionValue;
 
-static long get_pending_msgs(HANDLE h)
+static ULONG get_pending_msgs(HANDLE h)
 {
     NTSTATUS res;
     ULONG a, req;
@@ -163,9 +163,8 @@ static void create_file_test(void)
     OBJECT_ATTRIBUTES attr;
     IO_STATUS_BLOCK io;
     UNICODE_STRING nameW;
-    UINT len;
 
-    len = GetCurrentDirectoryW( MAX_PATH, path );
+    GetCurrentDirectoryW( MAX_PATH, path );
     pRtlDosPathNameToNtPathName_U( path, &nameW, NULL, NULL );
     attr.Length = sizeof(attr);
     attr.RootDirectory = 0;
@@ -911,13 +910,13 @@ static void nt_mailslot_test(void)
 static void test_iocp_setcompletion(HANDLE h)
 {
     NTSTATUS res;
-    long count;
+    ULONG count;
 
     res = pNtSetIoCompletion( h, CKEY_FIRST, CVALUE_FIRST, STATUS_INVALID_DEVICE_REQUEST, 3 );
     ok( res == STATUS_SUCCESS, "NtSetIoCompletion failed: %x\n", res );
 
     count = get_pending_msgs(h);
-    ok( count == 1, "Unexpected msg count: %ld\n", count );
+    ok( count == 1, "Unexpected msg count: %d\n", count );
 
     if (get_msg(h))
     {
@@ -928,7 +927,7 @@ static void test_iocp_setcompletion(HANDLE h)
     }
 
     count = get_pending_msgs(h);
-    ok( !count, "Unexpected msg count: %ld\n", count );
+    ok( !count, "Unexpected msg count: %d\n", count );
 }
 
 static void test_iocp_fileio(HANDLE h)

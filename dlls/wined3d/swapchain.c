@@ -46,32 +46,32 @@ static void WINAPI IWineD3DSwapChainImpl_Destroy(IWineD3DSwapChain *iface)
 
     IWineD3DSwapChain_SetGammaRamp(iface, 0, &This->orig_gamma);
 
-    /* Release the swapchain's draw buffers. Make sure This->backBuffer[0] is
+    /* Release the swapchain's draw buffers. Make sure This->back_buffers[0] is
      * the last buffer to be destroyed, FindContext() depends on that. */
-    if (This->frontBuffer)
+    if (This->front_buffer)
     {
-        IWineD3DSurface_SetContainer(This->frontBuffer, 0);
-        if (IWineD3DSurface_Release(This->frontBuffer))
+        IWineD3DSurface_SetContainer((IWineD3DSurface *)This->front_buffer, NULL);
+        if (IWineD3DSurface_Release((IWineD3DSurface *)This->front_buffer))
         {
             WARN("(%p) Something's still holding the front buffer (%p).\n",
-                    This, This->frontBuffer);
+                    This, This->front_buffer);
         }
-        This->frontBuffer = NULL;
+        This->front_buffer = NULL;
     }
 
-    if (This->backBuffer)
+    if (This->back_buffers)
     {
         UINT i = This->presentParms.BackBufferCount;
 
         while (i--)
         {
-            IWineD3DSurface_SetContainer(This->backBuffer[i], 0);
-            if (IWineD3DSurface_Release(This->backBuffer[i]))
+            IWineD3DSurface_SetContainer((IWineD3DSurface *)This->back_buffers[i], NULL);
+            if (IWineD3DSurface_Release((IWineD3DSurface *)This->back_buffers[i]))
                 WARN("(%p) Something's still holding back buffer %u (%p).\n",
-                        This, i, This->backBuffer[i]);
+                        This, i, This->back_buffers[i]);
         }
-        HeapFree(GetProcessHeap(), 0, This->backBuffer);
-        This->backBuffer = NULL;
+        HeapFree(GetProcessHeap(), 0, This->back_buffers);
+        This->back_buffers = NULL;
     }
 
     for (i = 0; i < This->num_contexts; ++i)
@@ -100,7 +100,7 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         const RECT *src_rect, const RECT *dst_rect)
 {
     IWineD3DDeviceImpl *device = This->device;
-    IWineD3DSurfaceImpl *backbuffer = ((IWineD3DSurfaceImpl *) This->backBuffer[0]);
+    IWineD3DSurfaceImpl *backbuffer = This->back_buffers[0];
     UINT src_w = src_rect->right - src_rect->left;
     UINT src_h = src_rect->bottom - src_rect->top;
     GLenum gl_filter;
@@ -117,9 +117,8 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
     if (gl_info->fbo_ops.glBlitFramebuffer && is_identity_fixup(backbuffer->resource.format_desc->color_fixup))
     {
         ENTER_GL();
-        context_bind_fbo(context, GL_READ_FRAMEBUFFER, &context->src_fbo);
-        context_attach_surface_fbo(context, GL_READ_FRAMEBUFFER, 0, backbuffer);
-        context_attach_depth_stencil_fbo(context, GL_READ_FRAMEBUFFER, NULL, FALSE);
+        context_apply_fbo_state_blit(context, GL_READ_FRAMEBUFFER, backbuffer, NULL);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
 
         context_bind_fbo(context, GL_DRAW_FRAMEBUFFER, NULL);
         context_set_draw_buffer(context, GL_BACK);
@@ -142,7 +141,8 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         float tex_right = src_rect->right;
         float tex_bottom = src_rect->bottom;
 
-        context2 = context_acquire(This->device, This->backBuffer[0], CTXUSAGE_BLIT);
+        context2 = context_acquire(This->device, This->back_buffers[0]);
+        context_apply_blit_state(context2, device);
 
         if(backbuffer->Flags & SFLAG_NORMCOORD)
         {
@@ -168,13 +168,13 @@ static void swapchain_blit(IWineD3DSwapChainImpl *This, struct wined3d_context *
         context_set_draw_buffer(context, GL_BACK);
 
         /* Set the viewport to the destination rectandle, disable any projection
-         * transformation set up by CTXUSAGE_BLIT, and draw a (-1,-1)-(1,1) quad.
+         * transformation set up by context_apply_blit_state(), and draw a
+         * (-1,-1)-(1,1) quad.
          *
          * Back up viewport and matrix to avoid breaking last_was_blit
          *
-         * Note that CTXUSAGE_BLIT set up viewport and ortho to match the surface
-         * size - we want the GL drawable(=window) size.
-         */
+         * Note that context_apply_blit_state() set up viewport and ortho to
+         * match the surface size - we want the GL drawable(=window) size. */
         glPushAttrib(GL_VIEWPORT_BIT);
         glViewport(dst_rect->left, dst_rect->top, dst_rect->right, dst_rect->bottom);
         glMatrixMode(GL_PROJECTION);
@@ -220,7 +220,7 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
 
     IWineD3DSwapChain_SetDestWindowOverride(iface, hDestWindowOverride);
 
-    context = context_acquire(This->device, This->backBuffer[0], CTXUSAGE_RESOURCELOAD);
+    context = context_acquire(This->device, This->back_buffers[0]);
     if (!context->valid)
     {
         context_release(context);
@@ -267,14 +267,15 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
         if (This->presentParms.Windowed) {
             MapWindowPoints(NULL, This->win_handle, (LPPOINT)&destRect, 2);
         }
-        IWineD3DSurface_Blt(This->backBuffer[0], &destRect, (IWineD3DSurface *)&cursor,
+        IWineD3DSurface_Blt((IWineD3DSurface *)This->back_buffers[0], &destRect, (IWineD3DSurface *)&cursor,
                 NULL, WINEDDBLT_KEYSRC, NULL, WINED3DTEXF_POINT);
     }
 
     if (This->device->logo_surface)
     {
         /* Blit the logo into the upper left corner of the drawable. */
-        IWineD3DSurface_BltFast(This->backBuffer[0], 0, 0, This->device->logo_surface, NULL, WINEDDBLTFAST_SRCCOLORKEY);
+        IWineD3DSurface_BltFast((IWineD3DSurface *)This->back_buffers[0], 0, 0,
+                This->device->logo_surface, NULL, WINEDDBLTFAST_SRCCOLORKEY);
     }
 
     TRACE("Presenting HDC %p.\n", context->hdc);
@@ -318,8 +319,8 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
      */
     if (!This->render_to_fbo && render_to_fbo && wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
-        IWineD3DSurface_LoadLocation(This->backBuffer[0], SFLAG_INTEXTURE, NULL);
-        IWineD3DSurface_ModifyLocation(This->backBuffer[0], SFLAG_INDRAWABLE, FALSE);
+        IWineD3DSurface_LoadLocation((IWineD3DSurface *)This->back_buffers[0], SFLAG_INTEXTURE, NULL);
+        IWineD3DSurface_ModifyLocation((IWineD3DSurface *)This->back_buffers[0], SFLAG_INDRAWABLE, FALSE);
         This->render_to_fbo = TRUE;
 
         /* Force the context manager to update the render target configuration next draw. */
@@ -423,14 +424,14 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
                 WINED3DCLEAR_TARGET, 0xff00ffff, 1.0f, 0);
     }
 
-    if(!This->render_to_fbo &&
-       ( ((IWineD3DSurfaceImpl *) This->frontBuffer)->Flags   & SFLAG_INSYSMEM ||
-         ((IWineD3DSurfaceImpl *) This->backBuffer[0])->Flags & SFLAG_INSYSMEM ) ) {
+    if (!This->render_to_fbo && ((This->front_buffer->Flags & SFLAG_INSYSMEM)
+            || (This->back_buffers[0]->Flags & SFLAG_INSYSMEM)))
+    {
         /* Both memory copies of the surfaces are ok, flip them around too instead of dirtifying
          * Doesn't work with render_to_fbo because we're not flipping
          */
-        IWineD3DSurfaceImpl *front = (IWineD3DSurfaceImpl *) This->frontBuffer;
-        IWineD3DSurfaceImpl *back = (IWineD3DSurfaceImpl *) This->backBuffer[0];
+        IWineD3DSurfaceImpl *front = This->front_buffer;
+        IWineD3DSurfaceImpl *back = This->back_buffers[0];
 
         if(front->resource.size == back->resource.size) {
             DWORD fbflags;
@@ -441,30 +442,40 @@ static HRESULT WINAPI IWineD3DSwapChainImpl_Present(IWineD3DSwapChain *iface, CO
              * This serves to update the emulated overlay, if any
              */
             fbflags = front->Flags;
-            IWineD3DSurface_ModifyLocation(This->frontBuffer, SFLAG_INDRAWABLE, TRUE);
+            IWineD3DSurface_ModifyLocation((IWineD3DSurface *)front, SFLAG_INDRAWABLE, TRUE);
             front->Flags = fbflags;
         } else {
             IWineD3DSurface_ModifyLocation((IWineD3DSurface *) front, SFLAG_INDRAWABLE, TRUE);
             IWineD3DSurface_ModifyLocation((IWineD3DSurface *) back, SFLAG_INDRAWABLE, TRUE);
         }
-    } else {
-        IWineD3DSurface_ModifyLocation(This->frontBuffer, SFLAG_INDRAWABLE, TRUE);
+    }
+    else
+    {
+        IWineD3DSurface_ModifyLocation((IWineD3DSurface *)This->front_buffer, SFLAG_INDRAWABLE, TRUE);
         /* If the swapeffect is DISCARD, the back buffer is undefined. That means the SYSMEM
          * and INTEXTURE copies can keep their old content if they have any defined content.
          * If the swapeffect is COPY, the content remains the same. If it is FLIP however,
          * the texture / sysmem copy needs to be reloaded from the drawable
          */
-        if(This->presentParms.SwapEffect == WINED3DSWAPEFFECT_FLIP) {
-            IWineD3DSurface_ModifyLocation(This->backBuffer[0], SFLAG_INDRAWABLE, TRUE);
+        if (This->presentParms.SwapEffect == WINED3DSWAPEFFECT_FLIP)
+        {
+            IWineD3DSurface_ModifyLocation((IWineD3DSurface *)This->back_buffers[0], SFLAG_INDRAWABLE, TRUE);
         }
     }
 
-    if (This->device->stencilBufferTarget)
+    if (This->device->depth_stencil)
     {
         if (This->presentParms.Flags & WINED3DPRESENTFLAG_DISCARD_DEPTHSTENCIL
-                || ((IWineD3DSurfaceImpl *)This->device->stencilBufferTarget)->Flags & SFLAG_DISCARD)
+                || This->device->depth_stencil->Flags & SFLAG_DISCARD)
         {
-            surface_modify_ds_location(This->device->stencilBufferTarget, SFLAG_DS_DISCARDED);
+            surface_modify_ds_location(This->device->depth_stencil, SFLAG_DS_DISCARDED,
+                    This->device->depth_stencil->currentDesc.Width,
+                    This->device->depth_stencil->currentDesc.Height);
+            if (This->device->depth_stencil == This->device->onscreen_depth_stencil)
+            {
+                IWineD3DSurface_Release((IWineD3DSurface *)This->device->onscreen_depth_stencil);
+                This->device->onscreen_depth_stencil = NULL;
+            }
         }
     }
 
@@ -741,18 +752,19 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
     hr = IWineD3DDeviceParent_CreateRenderTarget(device->device_parent, parent,
             swapchain->presentParms.BackBufferWidth, swapchain->presentParms.BackBufferHeight,
             swapchain->presentParms.BackBufferFormat, swapchain->presentParms.MultiSampleType,
-            swapchain->presentParms.MultiSampleQuality, TRUE /* Lockable */, &swapchain->frontBuffer);
+            swapchain->presentParms.MultiSampleQuality, TRUE /* Lockable */,
+            (IWineD3DSurface **)&swapchain->front_buffer);
     if (FAILED(hr))
     {
         WARN("Failed to create front buffer, hr %#x.\n", hr);
         goto err;
     }
 
-    IWineD3DSurface_SetContainer(swapchain->frontBuffer, (IWineD3DBase *)swapchain);
-    ((IWineD3DSurfaceImpl *)swapchain->frontBuffer)->Flags |= SFLAG_SWAPCHAIN;
+    IWineD3DSurface_SetContainer((IWineD3DSurface *)swapchain->front_buffer, (IWineD3DBase *)swapchain);
+    swapchain->front_buffer->Flags |= SFLAG_SWAPCHAIN;
     if (surface_type == SURFACE_OPENGL)
     {
-        IWineD3DSurface_ModifyLocation(swapchain->frontBuffer, SFLAG_INDRAWABLE, TRUE);
+        IWineD3DSurface_ModifyLocation((IWineD3DSurface *)swapchain->front_buffer, SFLAG_INDRAWABLE, TRUE);
     }
 
     /* MSDN says we're only allowed a single fullscreen swapchain per device,
@@ -789,6 +801,15 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
 
     if (surface_type == SURFACE_OPENGL)
     {
+        WINED3DFORMAT formats[] =
+        {
+            WINED3DFMT_D24_UNORM_S8_UINT,
+            WINED3DFMT_D32_UNORM,
+            WINED3DFMT_R24_UNORM_X8_TYPELESS,
+            WINED3DFMT_D16_UNORM,
+            WINED3DFMT_S1_UINT_D15_UNORM
+        };
+
         const struct wined3d_gl_info *gl_info = &device->adapter->gl_info;
 
         /* In WGL both color, depth and stencil are features of a pixel format. In case of D3D they are separate.
@@ -802,19 +823,26 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
          * Likely a lot of other new bugs will be exposed. For that reason request a depth stencil surface all the
          * time. It can cause a slight performance hit but fixes a lot of regressions. A fixme reminds of that this
          * issue needs to be fixed. */
-        if (!present_parameters->EnableAutoDepthStencil
-                || swapchain->presentParms.AutoDepthStencilFormat != WINED3DFMT_D24_UNORM_S8_UINT)
+        for (i = 0; i < (sizeof(formats) / sizeof(*formats)); i++)
         {
-            FIXME("Add OpenGL context recreation support to context_validate_onscreen_formats\n");
+            swapchain->ds_format = getFormatDescEntry(formats[i], gl_info);
+            swapchain->context[0] = context_create(swapchain, swapchain->front_buffer, swapchain->ds_format);
+            if (swapchain->context[0]) break;
+            TRACE("Depth stencil format %s is not supported, trying next format\n",
+                  debug_d3dformat(formats[i]));
         }
-        swapchain->ds_format = getFormatDescEntry(WINED3DFMT_D24_UNORM_S8_UINT, gl_info);
-        swapchain->context[0] = context_create(swapchain, (IWineD3DSurfaceImpl *)swapchain->frontBuffer,
-                swapchain->ds_format);
+
         if (!swapchain->context[0])
         {
             WARN("Failed to create context.\n");
             hr = WINED3DERR_NOTAVAILABLE;
             goto err;
+        }
+
+        if (!present_parameters->EnableAutoDepthStencil
+                || swapchain->presentParms.AutoDepthStencilFormat != swapchain->ds_format->format)
+        {
+            FIXME("Add OpenGL context recreation support to context_validate_onscreen_formats\n");
         }
         context_release(swapchain->context[0]);
     }
@@ -825,9 +853,9 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
 
     if (swapchain->presentParms.BackBufferCount > 0)
     {
-        swapchain->backBuffer = HeapAlloc(GetProcessHeap(), 0,
-                sizeof(*swapchain->backBuffer) * swapchain->presentParms.BackBufferCount);
-        if (!swapchain->backBuffer)
+        swapchain->back_buffers = HeapAlloc(GetProcessHeap(), 0,
+                sizeof(*swapchain->back_buffers) * swapchain->presentParms.BackBufferCount);
+        if (!swapchain->back_buffers)
         {
             ERR("Failed to allocate backbuffer array memory.\n");
             hr = E_OUTOFMEMORY;
@@ -840,15 +868,16 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
             hr = IWineD3DDeviceParent_CreateRenderTarget(device->device_parent, parent,
                     swapchain->presentParms.BackBufferWidth, swapchain->presentParms.BackBufferHeight,
                     swapchain->presentParms.BackBufferFormat, swapchain->presentParms.MultiSampleType,
-                    swapchain->presentParms.MultiSampleQuality, TRUE /* Lockable */, &swapchain->backBuffer[i]);
+                    swapchain->presentParms.MultiSampleQuality, TRUE /* Lockable */,
+                    (IWineD3DSurface **)&swapchain->back_buffers[i]);
             if (FAILED(hr))
             {
                 WARN("Failed to create back buffer %u, hr %#x.\n", i, hr);
                 goto err;
             }
 
-            IWineD3DSurface_SetContainer(swapchain->backBuffer[i], (IWineD3DBase *)swapchain);
-            ((IWineD3DSurfaceImpl *)swapchain->backBuffer[i])->Flags |= SFLAG_SWAPCHAIN;
+            IWineD3DSurface_SetContainer((IWineD3DSurface *)swapchain->back_buffers[i], (IWineD3DBase *)swapchain);
+            swapchain->back_buffers[i]->Flags |= SFLAG_SWAPCHAIN;
         }
     }
 
@@ -856,20 +885,20 @@ HRESULT swapchain_init(IWineD3DSwapChainImpl *swapchain, WINED3DSURFTYPE surface
     if (present_parameters->EnableAutoDepthStencil && surface_type == SURFACE_OPENGL)
     {
         TRACE("Creating depth/stencil buffer.\n");
-        if (!device->auto_depth_stencil_buffer)
+        if (!device->auto_depth_stencil)
         {
             hr = IWineD3DDeviceParent_CreateDepthStencilSurface(device->device_parent, parent,
                     swapchain->presentParms.BackBufferWidth, swapchain->presentParms.BackBufferHeight,
                     swapchain->presentParms.AutoDepthStencilFormat, swapchain->presentParms.MultiSampleType,
                     swapchain->presentParms.MultiSampleQuality, FALSE /* FIXME: Discard */,
-                    &device->auto_depth_stencil_buffer);
+                    (IWineD3DSurface **)&device->auto_depth_stencil);
             if (FAILED(hr))
             {
                 WARN("Failed to create the auto depth stencil, hr %#x.\n", hr);
                 goto err;
             }
 
-            IWineD3DSurface_SetContainer(device->auto_depth_stencil_buffer, NULL);
+            IWineD3DSurface_SetContainer((IWineD3DSurface *)device->auto_depth_stencil, NULL);
         }
     }
 
@@ -894,13 +923,13 @@ err:
         ChangeDisplaySettingsExW(adapter->DeviceName, &devmode, NULL, CDS_FULLSCREEN, NULL);
     }
 
-    if (swapchain->backBuffer)
+    if (swapchain->back_buffers)
     {
         for (i = 0; i < swapchain->presentParms.BackBufferCount; ++i)
         {
-            if (swapchain->backBuffer[i]) IWineD3DSurface_Release(swapchain->backBuffer[i]);
+            if (swapchain->back_buffers[i]) IWineD3DSurface_Release((IWineD3DSurface *)swapchain->back_buffers[i]);
         }
-        HeapFree(GetProcessHeap(), 0, swapchain->backBuffer);
+        HeapFree(GetProcessHeap(), 0, swapchain->back_buffers);
     }
 
     if (swapchain->context)
@@ -914,7 +943,7 @@ err:
         HeapFree(GetProcessHeap(), 0, swapchain->context);
     }
 
-    if (swapchain->frontBuffer) IWineD3DSurface_Release(swapchain->frontBuffer);
+    if (swapchain->front_buffer) IWineD3DSurface_Release((IWineD3DSurface *)swapchain->front_buffer);
 
     return hr;
 }
@@ -927,7 +956,7 @@ struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *i
 
     TRACE("Creating a new context for swapchain %p, thread %d\n", This, GetCurrentThreadId());
 
-    if (!(ctx = context_create(This, (IWineD3DSurfaceImpl *)This->frontBuffer, This->ds_format)))
+    if (!(ctx = context_create(This, This->front_buffer, This->ds_format)))
     {
         ERR("Failed to create a new context for the swapchain\n");
         return NULL;
@@ -952,9 +981,8 @@ struct wined3d_context *swapchain_create_context_for_thread(IWineD3DSwapChain *i
 
 void get_drawable_size_swapchain(struct wined3d_context *context, UINT *width, UINT *height)
 {
-    IWineD3DSurfaceImpl *surface = (IWineD3DSurfaceImpl *)context->current_rt;
     /* The drawable size of an onscreen drawable is the surface size.
      * (Actually: The window size, but the surface is created in window size) */
-    *width = surface->currentDesc.Width;
-    *height = surface->currentDesc.Height;
+    *width = context->current_rt->currentDesc.Width;
+    *height = context->current_rt->currentDesc.Height;
 }

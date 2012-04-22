@@ -287,7 +287,8 @@ struct shader_arb_priv
     const struct arb_ps_compiled_shader *compiled_fprog;
     const struct arb_vs_compiled_shader *compiled_vprog;
     GLuint                  depth_blt_vprogram_id;
-    GLuint                  depth_blt_fprogram_id[tex_type_count];
+    GLuint                  depth_blt_fprogram_id_full[tex_type_count];
+    GLuint                  depth_blt_fprogram_id_masked[tex_type_count];
     BOOL                    use_arbfp_fixed_func;
     struct wine_rb_tree     fragment_shaders;
     BOOL                    last_ps_const_clamped;
@@ -509,7 +510,7 @@ static inline void shader_arb_ps_local_constants(IWineD3DDeviceImpl* deviceImpl)
         */
         float val[4];
         val[0] = context->render_offscreen ? 0.0f
-                : ((IWineD3DSurfaceImpl *) deviceImpl->render_targets[0])->currentDesc.Height;
+                : deviceImpl->render_targets[0]->currentDesc.Height;
         val[1] = context->render_offscreen ? 1.0f : -1.0f;
         val[2] = 1.0f;
         val[3] = 0.0f;
@@ -670,12 +671,23 @@ static DWORD shader_generate_arb_declarations(IWineD3DBaseShader *iface, const s
     if (pshader)
     {
         max_constantsF = gl_info->limits.arb_ps_native_constants;
+        /* 24 is the minimum MAX_PROGRAM_ENV_PARAMETERS_ARB value. */
+        if (max_constantsF < 24)
+            max_constantsF = gl_info->limits.arb_ps_float_constants;
     }
     else
     {
+        max_constantsF = gl_info->limits.arb_vs_native_constants;
+        /* 96 is the minimum MAX_PROGRAM_ENV_PARAMETERS_ARB value.
+         * Also prevents max_constantsF from becoming less than 0 and
+         * wrapping . */
+        if (max_constantsF < 96)
+            max_constantsF = gl_info->limits.arb_vs_float_constants;
+
         if(This->baseShader.reg_maps.usesrelconstF) {
             DWORD highest_constf = 0, clip_limit;
-            max_constantsF = gl_info->limits.arb_vs_native_constants - reserved_vs_const(iface, gl_info);
+
+            max_constantsF -= reserved_vs_const(iface, gl_info);
             max_constantsF -= count_bits(This->baseShader.reg_maps.integer_constants);
 
             for(i = 0; i < This->baseShader.limits.constant_float; i++)
@@ -708,7 +720,6 @@ static DWORD shader_generate_arb_declarations(IWineD3DBaseShader *iface, const s
         {
             if (ctx->target_version >= NV2) *num_clipplanes = gl_info->limits.clipplanes;
             else *num_clipplanes = min(gl_info->limits.clipplanes, 4);
-            max_constantsF = gl_info->limits.arb_vs_native_constants;
         }
     }
 
@@ -3103,12 +3114,14 @@ static GLuint create_arb_blt_vertex_program(const struct wined3d_gl_info *gl_inf
 }
 
 /* GL locking is done by the caller */
-static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_info, enum tex_types tex_type)
+static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_info,
+        enum tex_types tex_type, BOOL masked)
 {
     GLuint program_id = 0;
+    const char *fprogram;
     GLint pos;
 
-    static const char * const blt_fprograms[tex_type_count] =
+    static const char * const blt_fprograms_full[tex_type_count] =
     {
         /* tex_1d */
         NULL,
@@ -3134,7 +3147,46 @@ static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_i
         "END\n",
     };
 
-    if (!blt_fprograms[tex_type])
+    static const char * const blt_fprograms_masked[tex_type_count] =
+    {
+        /* tex_1d */
+        NULL,
+        /* tex_2d */
+        "!!ARBfp1.0\n"
+        "PARAM mask = program.local[0];\n"
+        "TEMP R0;\n"
+        "SLT R0.xy, fragment.position, mask.zwzw;\n"
+        "MUL R0.x, R0.x, R0.y;\n"
+        "KIL -R0.x;\n"
+        "TEX R0.x, fragment.texcoord[0], texture[0], 2D;\n"
+        "MOV result.depth.z, R0.x;\n"
+        "END\n",
+        /* tex_3d */
+        NULL,
+        /* tex_cube */
+        "!!ARBfp1.0\n"
+        "PARAM mask = program.local[0];\n"
+        "TEMP R0;\n"
+        "SLT R0.xy, fragment.position, mask.zwzw;\n"
+        "MUL R0.x, R0.x, R0.y;\n"
+        "KIL -R0.x;\n"
+        "TEX R0.x, fragment.texcoord[0], texture[0], CUBE;\n"
+        "MOV result.depth.z, R0.x;\n"
+        "END\n",
+        /* tex_rect */
+        "!!ARBfp1.0\n"
+        "PARAM mask = program.local[0];\n"
+        "TEMP R0;\n"
+        "SLT R0.xy, fragment.position, mask.zwzw;\n"
+        "MUL R0.x, R0.x, R0.y;\n"
+        "KIL -R0.x;\n"
+        "TEX R0.x, fragment.texcoord[0], texture[0], RECT;\n"
+        "MOV result.depth.z, R0.x;\n"
+        "END\n",
+    };
+
+    fprogram = masked ? blt_fprograms_masked[tex_type] : blt_fprograms_full[tex_type];
+    if (!fprogram)
     {
         FIXME("tex_type %#x not supported\n", tex_type);
         tex_type = tex_2d;
@@ -3142,8 +3194,7 @@ static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_i
 
     GL_EXTCALL(glGenProgramsARB(1, &program_id));
     GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, program_id));
-    GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
-            strlen(blt_fprograms[tex_type]), blt_fprograms[tex_type]));
+    GL_EXTCALL(glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB, strlen(fprogram), fprogram));
     checkGLcall("glProgramStringARB()");
 
     glGetIntegerv(GL_PROGRAM_ERROR_POSITION_ARB, &pos);
@@ -3151,7 +3202,7 @@ static GLuint create_arb_blt_fragment_program(const struct wined3d_gl_info *gl_i
     {
         FIXME("Fragment program error at position %d: %s\n\n", pos,
             debugstr_a((const char *)glGetString(GL_PROGRAM_ERROR_STRING_ARB)));
-        shader_arb_dump_program_source(blt_fprograms[tex_type]);
+        shader_arb_dump_program_source(fprogram);
     }
     else
     {
@@ -3309,7 +3360,7 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
     char fragcolor[16];
     DWORD *lconst_map = local_const_mapping((IWineD3DBaseShaderImpl *) This), next_local, cur;
     struct shader_arb_ctx_priv priv_ctx;
-    BOOL dcl_tmp = args->super.srgb_correction, dcl_td = FALSE;
+    BOOL dcl_td = FALSE;
     BOOL want_nv_prog = FALSE;
     struct arb_pshader_private *shader_priv = This->baseShader.backend_data;
     GLint errPos;
@@ -3331,7 +3382,6 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
     }
 
     switch(found) {
-        case 4: dcl_tmp = FALSE; break;
         case 0:
             sprintf(srgbtmp[0], "TA");
             sprintf(srgbtmp[1], "TB");
@@ -3350,6 +3400,8 @@ static GLuint shader_arb_generate_pshader(IWineD3DPixelShaderImpl *This, struct 
             break;
         case 3:
             sprintf(srgbtmp[3], "TA");
+            break;
+        case 4:
             break;
     }
 
@@ -4443,18 +4495,23 @@ static void shader_arb_select(const struct wined3d_context *context, BOOL usePS,
 }
 
 /* GL locking is done by the caller */
-static void shader_arb_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type) {
+static void shader_arb_select_depth_blt(IWineD3DDevice *iface, enum tex_types tex_type, const SIZE *ds_mask_size)
+{
+    const float mask[] = {0.0f, 0.0f, (float)ds_mask_size->cx, (float)ds_mask_size->cy};
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
+    BOOL masked = ds_mask_size->cx && ds_mask_size->cy;
     struct shader_arb_priv *priv = This->shader_priv;
-    GLuint *blt_fprogram = &priv->depth_blt_fprogram_id[tex_type];
     const struct wined3d_gl_info *gl_info = &This->adapter->gl_info;
+    GLuint *blt_fprogram;
 
     if (!priv->depth_blt_vprogram_id) priv->depth_blt_vprogram_id = create_arb_blt_vertex_program(gl_info);
     GL_EXTCALL(glBindProgramARB(GL_VERTEX_PROGRAM_ARB, priv->depth_blt_vprogram_id));
     glEnable(GL_VERTEX_PROGRAM_ARB);
 
-    if (!*blt_fprogram) *blt_fprogram = create_arb_blt_fragment_program(gl_info, tex_type);
+    blt_fprogram = masked ? &priv->depth_blt_fprogram_id_masked[tex_type] : &priv->depth_blt_fprogram_id_full[tex_type];
+    if (!*blt_fprogram) *blt_fprogram = create_arb_blt_fragment_program(gl_info, tex_type, masked);
     GL_EXTCALL(glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, *blt_fprogram));
+    if (masked) GL_EXTCALL(glProgramLocalParameter4fvARB(GL_FRAGMENT_PROGRAM_ARB, 0, mask));
     glEnable(GL_FRAGMENT_PROGRAM_ARB);
 }
 
@@ -4499,7 +4556,7 @@ static void shader_arb_destroy(IWineD3DBaseShader *iface) {
 
         if (shader_data->num_gl_shaders)
         {
-            struct wined3d_context *context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+            struct wined3d_context *context = context_acquire(device, NULL);
 
             ENTER_GL();
             for (i = 0; i < shader_data->num_gl_shaders; ++i)
@@ -4525,7 +4582,7 @@ static void shader_arb_destroy(IWineD3DBaseShader *iface) {
 
         if (shader_data->num_gl_shaders)
         {
-            struct wined3d_context *context = context_acquire(device, NULL, CTXUSAGE_RESOURCELOAD);
+            struct wined3d_context *context = context_acquire(device, NULL);
 
             ENTER_GL();
             for (i = 0; i < shader_data->num_gl_shaders; ++i)
@@ -4594,9 +4651,15 @@ static void shader_arb_free(IWineD3DDevice *iface) {
     if(priv->depth_blt_vprogram_id) {
         GL_EXTCALL(glDeleteProgramsARB(1, &priv->depth_blt_vprogram_id));
     }
-    for (i = 0; i < tex_type_count; ++i) {
-        if (priv->depth_blt_fprogram_id[i]) {
-            GL_EXTCALL(glDeleteProgramsARB(1, &priv->depth_blt_fprogram_id[i]));
+    for (i = 0; i < tex_type_count; ++i)
+    {
+        if (priv->depth_blt_fprogram_id_full[i])
+        {
+            GL_EXTCALL(glDeleteProgramsARB(1, &priv->depth_blt_fprogram_id_full[i]));
+        }
+        if (priv->depth_blt_fprogram_id_masked[i])
+        {
+            GL_EXTCALL(glDeleteProgramsARB(1, &priv->depth_blt_fprogram_id_masked[i]));
         }
     }
     LEAVE_GL();
@@ -4611,16 +4674,19 @@ static BOOL shader_arb_dirty_const(IWineD3DDevice *iface) {
 
 static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct shader_caps *pCaps)
 {
-    DWORD vs_consts = min(gl_info->limits.arb_vs_float_constants, gl_info->limits.arb_vs_native_constants);
-    DWORD ps_consts = min(gl_info->limits.arb_ps_float_constants, gl_info->limits.arb_ps_native_constants);
-
-    /* We don't have an ARB fixed function pipeline yet, so let the none backend set its caps,
-     * then overwrite the shader specific ones
-     */
-    none_shader_backend.shader_get_caps(gl_info, pCaps);
-
     if (gl_info->supported[ARB_VERTEX_PROGRAM])
     {
+        DWORD vs_consts;
+
+        /* 96 is the minimum allowed value of MAX_PROGRAM_ENV_PARAMETERS_ARB
+         * for vertex programs. If the native limit is less than that it's
+         * not very useful, and e.g. Mesa swrast returns 0, probably to
+         * indicate it's a software implementation. */
+        if (gl_info->limits.arb_vs_native_constants < 96)
+            vs_consts = gl_info->limits.arb_vs_float_constants;
+        else
+            vs_consts = min(gl_info->limits.arb_vs_float_constants, gl_info->limits.arb_vs_native_constants);
+
         if (gl_info->supported[NV_VERTEX_PROGRAM3])
         {
             pCaps->VertexShaderVersion = WINED3DVS_VERSION(3,0);
@@ -4639,9 +4705,23 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
         }
         pCaps->MaxVertexShaderConst = vs_consts;
     }
+    else
+    {
+        pCaps->VertexShaderVersion = 0;
+        pCaps->MaxVertexShaderConst = 0;
+    }
 
     if (gl_info->supported[ARB_FRAGMENT_PROGRAM])
     {
+        DWORD ps_consts;
+
+        /* Similar as above for vertex programs, but the minimum for fragment
+         * programs is 24. */
+        if (gl_info->limits.arb_ps_native_constants < 24)
+            ps_consts = gl_info->limits.arb_ps_float_constants;
+        else
+            ps_consts = min(gl_info->limits.arb_ps_float_constants, gl_info->limits.arb_ps_native_constants);
+
         if (gl_info->supported[NV_FRAGMENT_PROGRAM2])
         {
             pCaps->PixelShaderVersion    = WINED3DPS_VERSION(3,0);
@@ -4660,6 +4740,12 @@ static void shader_arb_get_caps(const struct wined3d_gl_info *gl_info, struct sh
         }
         pCaps->PixelShader1xMaxValue = 8.0f;
         pCaps->MaxPixelShaderConst = ps_consts;
+    }
+    else
+    {
+        pCaps->PixelShaderVersion = 0;
+        pCaps->PixelShader1xMaxValue = 0.0f;
+        pCaps->MaxPixelShaderConst = 0;
     }
 
     pCaps->VSClipping = use_nv_clip(gl_info);
@@ -5279,6 +5365,7 @@ static void arbfp_free(IWineD3DDevice *iface) {
 
 static void arbfp_get_caps(const struct wined3d_gl_info *gl_info, struct fragment_caps *caps)
 {
+    caps->PrimitiveMiscCaps = WINED3DPMISCCAPS_TSSARGTEMP;
     caps->TextureOpCaps =  WINED3DTEXOPCAPS_DISABLE                     |
                            WINED3DTEXOPCAPS_SELECTARG1                  |
                            WINED3DTEXOPCAPS_SELECTARG2                  |
@@ -5309,8 +5396,6 @@ static void arbfp_get_caps(const struct wined3d_gl_info *gl_info, struct fragmen
 
     caps->MaxTextureBlendStages   = 8;
     caps->MaxSimultaneousTextures = min(gl_info->limits.fragment_samplers, 8);
-
-    caps->PrimitiveMiscCaps |= WINED3DPMISCCAPS_TSSARGTEMP;
 }
 #undef GLINFO_LOCATION
 
@@ -6905,10 +6990,11 @@ HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_
     RECT dst_rect = *dst_rect_in;
 
     /* Now load the surface */
-    surface_internal_preload((IWineD3DSurface *)src_surface, SRGB_RGB);
+    surface_internal_preload(src_surface, SRGB_RGB);
 
     /* Activate the destination context, set it up for blitting */
-    context = context_acquire(device, (IWineD3DSurface *)dst_surface, CTXUSAGE_BLIT);
+    context = context_acquire(device, dst_surface);
+    context_apply_blit_state(context, device);
 
     /* The coordinates of the ddraw front buffer are always fullscreen ('screen coordinates',
      * while OpenGL coordinates are window relative.
@@ -6916,7 +7002,7 @@ HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_
      * Also beware that the front buffer's surface size is screen width x screen height,
      * whereas the real gl drawable size is the size of the window. */
     dst_swapchain = (dst_surface->Flags & SFLAG_SWAPCHAIN) ? (IWineD3DSwapChainImpl *)dst_surface->container : NULL;
-    if (dst_swapchain && (IWineD3DSurface *)dst_surface == dst_swapchain->frontBuffer)
+    if (dst_swapchain && dst_surface == dst_swapchain->front_buffer)
     {
         RECT windowsize;
         POINT offset = {0,0};
@@ -6942,7 +7028,7 @@ HRESULT arbfp_blit_surface(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_
     arbfp_blit_unset((IWineD3DDevice *)device);
 
     if (wined3d_settings.strict_draw_ordering || (dst_swapchain
-            && ((IWineD3DSurface *)dst_surface == dst_swapchain->frontBuffer
+            && (dst_surface == dst_swapchain->front_buffer
             || dst_swapchain->num_contexts > 1)))
         wglFlush(); /* Flush to ensure ordering across contexts. */
 

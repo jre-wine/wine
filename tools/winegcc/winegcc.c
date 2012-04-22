@@ -360,6 +360,7 @@ static void compile(struct options* opts, const char* lang)
 
     if (gcc_defs)
     {
+        int fastcall_done = 0;
         if (opts->target_cpu == CPU_x86_64)
         {
             strarray_add(comp_args, "-D__stdcall=__attribute__((ms_abi))");
@@ -368,6 +369,7 @@ static void compile(struct options* opts, const char* lang)
             strarray_add(comp_args, "-D_cdecl=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D__fastcall=__attribute__((ms_abi))");
             strarray_add(comp_args, "-D_fastcall=__attribute__((ms_abi))");
+            fastcall_done = 1;
         }
         else if (opts->target_platform == PLATFORM_APPLE)
         {
@@ -385,8 +387,11 @@ static void compile(struct options* opts, const char* lang)
             strarray_add(comp_args, "-D_cdecl=__attribute__((__cdecl__))");
         }
 
-	strarray_add(comp_args, "-D__fastcall=__attribute__((__fastcall__))");
-	strarray_add(comp_args, "-D_fastcall=__attribute__((__fastcall__))");
+	if (!fastcall_done)
+        {
+            strarray_add(comp_args, "-D__fastcall=__attribute__((__fastcall__))");
+            strarray_add(comp_args, "-D_fastcall=__attribute__((__fastcall__))");
+        }
 	strarray_add(comp_args, "-D__declspec(x)=__declspec_##x");
 	strarray_add(comp_args, "-D__declspec_align(x)=__attribute__((aligned(x)))");
 	strarray_add(comp_args, "-D__declspec_allocate(x)=__attribute__((section(x)))");
@@ -669,8 +674,6 @@ static void build(struct options* opts)
 	else if (file[1] == 'x')
 	    lang = file;
     }
-    if (opts->shared && !spec_file)
-	error("A spec file is currently needed in shared mode\n");
 
     /* building for Windows is completely different */
 
@@ -736,10 +739,10 @@ static void build(struct options* opts)
             switch(files->base[j][1])
             {
             case 'l':
-            case 's':
             case 'd':
                 strarray_add(link_args, strmake("-l%s", name));
                 break;
+            case 's':
             case 'o':
                 strarray_add(link_args, name);
                 break;
@@ -919,9 +922,9 @@ static void build(struct options* opts)
 	switch(files->base[j][1])
 	{
 	    case 'l':
-	    case 's':
 		strarray_add(link_args, strmake("-l%s", name));
 		break;
+	    case 's':
 	    case 'a':
 	    case 'o':
 		strarray_add(link_args, name);
@@ -1252,6 +1255,8 @@ int main(int argc, char **argv)
 			opts.unicode_app = 1;
 		    else if (strcmp("-m32", argv[i]) == 0)
                     {
+                        if (opts.target_cpu == CPU_x86_64)
+                            opts.target_cpu = CPU_x86;
                         opts.force_pointer_size = 4;
 			raw_linker_arg = 1;
                     }

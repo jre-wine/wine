@@ -118,6 +118,8 @@ static void test_capture(IAudioClient *ac, HANDLE handle, WAVEFORMATEX *wfx)
         ok(frames, "Amount of frames locked is 0!\n");
     else if (hr == AUDCLNT_S_BUFFER_EMPTY)
         ok(!frames, "Amount of frames locked with empty buffer is %u!\n", frames);
+    else
+        ok(0, "GetBuffer returned %08x\n", hr);
     trace("Device position is at %u, amount of frames locked: %u\n", (DWORD)devpos, frames);
 
     if (frames) {
@@ -319,7 +321,7 @@ START_TEST(capture)
     }
 
     hr = IMMDevice_Activate(dev, &IID_IAudioClient, CLSCTX_INPROC_SERVER, NULL, (void**)&ac);
-    todo_wine ok(hr == S_OK, "Activation failed with %08x\n", hr);
+    ok(hr == S_OK, "Activation failed with %08x\n", hr);
     if (ac)
     {
         test_audioclient(ac);

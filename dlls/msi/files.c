@@ -175,22 +175,6 @@ static UINT copy_install_file(MSIPACKAGE *package, MSIFILE *file, LPWSTR source)
     return gle;
 }
 
-static BOOL check_dest_hash_matches(MSIFILE *file)
-{
-    MSIFILEHASHINFO hash;
-    UINT r;
-
-    if (!file->hash.dwFileHashInfoSize)
-        return FALSE;
-
-    hash.dwFileHashInfoSize = sizeof(MSIFILEHASHINFO);
-    r = MsiGetFileHashW(file->TargetPath, 0, &hash);
-    if (r != ERROR_SUCCESS)
-        return FALSE;
-
-    return !memcmp(&hash, &file->hash, sizeof(MSIFILEHASHINFO));
-}
-
 static BOOL installfiles_cb(MSIPACKAGE *package, LPCWSTR file, DWORD action,
                             LPWSTR *path, DWORD *attrs, PVOID user)
 {
@@ -257,19 +241,6 @@ UINT ACTION_InstallFiles(MSIPACKAGE *package)
     {
         if (file->state != msifs_missing && !mi->is_continuous && file->state != msifs_overwrite)
             continue;
-
-        if (check_dest_hash_matches(file))
-        {
-            TRACE("File hashes match, not overwriting\n");
-            continue;
-        }
-
-        if (MsiGetFileVersionW(file->TargetPath, NULL, NULL, NULL, NULL) == ERROR_SUCCESS &&
-            msi_compare_file_version(file) >= 0)
-        {
-            TRACE("Destination file version greater, not overwriting\n");
-            continue;
-        }
 
         if (file->Sequence > mi->last_sequence || mi->is_continuous ||
             (file->IsCompressed && !mi->is_extracted))
@@ -557,11 +528,11 @@ static UINT ITERATE_MoveFiles( MSIRECORD *rec, LPVOID param )
     sourcename = MSI_RecordGetString(rec, 3);
     options = MSI_RecordGetInteger(rec, 7);
 
-    sourcedir = msi_dup_property(package, MSI_RecordGetString(rec, 5));
+    sourcedir = msi_dup_property(package->db, MSI_RecordGetString(rec, 5));
     if (!sourcedir)
         goto done;
 
-    destdir = msi_dup_property(package, MSI_RecordGetString(rec, 6));
+    destdir = msi_dup_property(package->db, MSI_RecordGetString(rec, 6));
     if (!destdir)
         goto done;
 
@@ -706,7 +677,7 @@ static WCHAR *get_duplicate_filename( MSIPACKAGE *package, MSIRECORD *row, const
         if (!dst_path)
         {
             /* try a property */
-            dst_path = msi_dup_property( package, dst_key );
+            dst_path = msi_dup_property( package->db, dst_key );
             if (!dst_path)
             {
                 FIXME("Unable to get destination folder, try AppSearch properties\n");
@@ -919,7 +890,7 @@ static UINT ITERATE_RemoveFiles(MSIRECORD *row, LPVOID param)
     UINT install_mode;
     LPWSTR dir = NULL, path = NULL;
     DWORD size;
-    UINT r;
+    UINT ret = ERROR_SUCCESS;
 
     component = MSI_RecordGetString(row, 2);
     filename = MSI_RecordGetString(row, 3);
@@ -940,7 +911,7 @@ static UINT ITERATE_RemoveFiles(MSIRECORD *row, LPVOID param)
         return ERROR_SUCCESS;
     }
 
-    dir = msi_dup_property(package, dirprop);
+    dir = msi_dup_property(package->db, dirprop);
     if (!dir)
         return ERROR_OUTOFMEMORY;
 
@@ -949,7 +920,7 @@ static UINT ITERATE_RemoveFiles(MSIRECORD *row, LPVOID param)
     path = msi_alloc(size * sizeof(WCHAR));
     if (!path)
     {
-        r = ERROR_OUTOFMEMORY;
+        ret = ERROR_OUTOFMEMORY;
         goto done;
     }
 
@@ -977,7 +948,7 @@ done:
 
     msi_free(path);
     msi_free(dir);
-    return ERROR_SUCCESS;
+    return ret;
 }
 
 UINT ACTION_RemoveFiles( MSIPACKAGE *package )

@@ -163,17 +163,17 @@ static void set_deferred_action_props(MSIPACKAGE *package, LPWSTR deferred_data)
 
     end = strstrW(beg, sep);
     *end = '\0';
-    MSI_SetPropertyW(package, szCustomActionData, beg);
+    msi_set_property(package->db, szCustomActionData, beg);
     beg = end + 3;
 
     end = strstrW(beg, sep);
     *end = '\0';
-    MSI_SetPropertyW(package, szUserSID, beg);
+    msi_set_property(package->db, szUserSID, beg);
     beg = end + 3;
 
     end = strchrW(beg, ']');
     *end = '\0';
-    MSI_SetPropertyW(package, szProductCode, beg);
+    msi_set_property(package->db, szProductCode, beg);
 }
 
 UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL execute)
@@ -231,9 +231,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
         }
         if (!execute)
         {
-            LPWSTR actiondata = msi_dup_property(package, action);
-            LPWSTR usersid = msi_dup_property(package, szUserSID);
-            LPWSTR prodcode = msi_dup_property(package, szProductCode);
+            LPWSTR actiondata = msi_dup_property(package->db, action);
+            LPWSTR usersid = msi_dup_property(package->db, szUserSID);
+            LPWSTR prodcode = msi_dup_property(package->db, szProductCode);
             LPWSTR deferred = msi_get_deferred_action(action, actiondata, usersid, prodcode);
 
             if (type & msidbCustomActionTypeCommit)
@@ -256,7 +256,7 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
         }
         else
         {
-            LPWSTR actiondata = msi_dup_property( package, action );
+            LPWSTR actiondata = msi_dup_property( package->db, action );
 
             switch (script)
             {
@@ -276,9 +276,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
             if (deferred_data)
                 set_deferred_action_props(package, deferred_data);
             else if (actiondata)
-                MSI_SetPropertyW(package, szCustomActionData, actiondata);
+                msi_set_property(package->db, szCustomActionData, actiondata);
             else
-                MSI_SetPropertyW(package, szCustomActionData, szEmpty);
+                msi_set_property(package->db, szCustomActionData, szEmpty);
 
             msi_free(actiondata);
         }
@@ -327,7 +327,9 @@ UINT ACTION_CustomAction(MSIPACKAGE *package, LPCWSTR action, UINT script, BOOL 
                 break;
 
             deformat_string(package,target,&deformated);
-            rc = MSI_SetPropertyW(package,source,deformated);
+            rc = msi_set_property( package->db, source, deformated );
+            if (rc == ERROR_SUCCESS && !strcmpW( source, cszSourceDir ))
+                msi_reset_folders( package, TRUE );
             msi_free(deformated);
             break;
 	case 37: /* JScript/VBScript text stored in target column. */
@@ -376,7 +378,7 @@ static UINT store_binary_to_temp(MSIPACKAGE *package, LPCWSTR source,
     DWORD sz = MAX_PATH;
     UINT r;
 
-    if (MSI_GetPropertyW(package, cszTempFolder, fmt, &sz) != ERROR_SUCCESS)
+    if (msi_get_property(package->db, cszTempFolder, fmt, &sz) != ERROR_SUCCESS)
         GetTempPathW(MAX_PATH, fmt);
 
     if (GetTempFileNameW(fmt, szMsi, 0, tmp_file) == 0)
@@ -864,7 +866,7 @@ static UINT HANDLE_CustomType23(MSIPACKAGE *package, LPCWSTR source,
     UINT r;
 
     size = MAX_PATH;
-    MSI_GetPropertyW(package, cszSourceDir, package_path, &size);
+    msi_get_property(package->db, cszSourceDir, package_path, &size);
     lstrcatW(package_path, szBackSlash);
     lstrcatW(package_path, source);
 
@@ -1078,7 +1080,7 @@ static UINT HANDLE_CustomType50(MSIPACKAGE *package, LPCWSTR source,
     memset(&si,0,sizeof(STARTUPINFOW));
     memset(&info,0,sizeof(PROCESS_INFORMATION));
 
-    prop = msi_dup_property( package, source );
+    prop = msi_dup_property( package->db, source );
     if (!prop)
         return ERROR_SUCCESS;
 
@@ -1380,7 +1382,7 @@ static UINT HANDLE_CustomType53_54(MSIPACKAGE *package, LPCWSTR source,
 
     TRACE("%s %s\n", debugstr_w(source), debugstr_w(target));
 
-    prop = msi_dup_property(package,source);
+    prop = msi_dup_property( package->db, source );
     if (!prop)
 	return ERROR_SUCCESS;
 

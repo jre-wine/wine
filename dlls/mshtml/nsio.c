@@ -196,16 +196,15 @@ static BOOL translate_url(HTMLDocumentObj *doc, nsWineURI *uri)
 
     url = heap_strdupW(uri->wine_url);
     hres = IDocHostUIHandler_TranslateUrl(doc->hostui, 0, url, &new_url);
-    heap_free(url);
-    if(hres != S_OK || !new_url)
-        return FALSE;
-
-    if(strcmpW(url, new_url)) {
-        FIXME("TranslateUrl returned new URL %s -> %s\n", debugstr_w(url), debugstr_w(new_url));
-        ret = TRUE;
+    if(hres == S_OK && new_url) {
+        if(strcmpW(url, new_url)) {
+            FIXME("TranslateUrl returned new URL %s -> %s\n", debugstr_w(url), debugstr_w(new_url));
+            ret = TRUE;
+        }
+        CoTaskMemFree(new_url);
     }
 
-    CoTaskMemFree(new_url);
+    heap_free(url);
     return ret;
 }
 
@@ -2453,6 +2452,7 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
     HTMLWindow *window = NULL;
     nsIURI *uri = NULL;
     LPCWSTR base_wine_url = NULL;
+    nsACString spec_str;
     nsresult nsres;
 
     nsACString_GetData(aSpec, &spec);
@@ -2485,7 +2485,9 @@ static nsresult NSAPI nsIOService_NewURI(nsIIOService *iface, const nsACString *
         }
     }
 
+    nsACString_InitDepend(&spec_str, spec);
     nsres = nsIIOService_NewURI(nsio, aSpec, aOriginCharset, aBaseURI, &uri);
+    nsACString_Finish(&spec_str);
     if(NS_FAILED(nsres))
         TRACE("NewURI failed: %08x\n", nsres);
 

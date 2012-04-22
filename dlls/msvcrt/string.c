@@ -23,8 +23,11 @@
 
 #define _ISOC99_SOURCE
 #include "config.h"
+#include "wine/port.h"
 
 #include <stdlib.h>
+#include <math.h>
+#include <limits.h>
 #include <errno.h>
 #include "msvcrt.h"
 #include "wine/debug.h"
@@ -108,6 +111,33 @@ char * CDECL MSVCRT_strtok( char *str, const char *delim )
     return ret;
 }
 
+/*********************************************************************
+ *		strtok_s  (MSVCRT.@)
+ */
+char * CDECL MSVCRT_strtok_s(char *str, const char *delim, char **ctx)
+{
+    if(!delim || !ctx || (!str && !*ctx)) {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return NULL;
+    }
+
+    if(!str)
+        str = *ctx;
+
+    while(*str && strchr(delim, *str))
+        str++;
+    if(!*str)
+        return NULL;
+
+    *ctx = str+1;
+    while(**ctx && !strchr(delim, **ctx))
+        (*ctx)++;
+    if(**ctx)
+        *(*ctx)++ = 0;
+
+    return str;
+}
 
 /*********************************************************************
  *		_swab (MSVCRT.@)
@@ -129,11 +159,108 @@ void CDECL MSVCRT__swab(char* src, char* dst, int len)
 }
 
 /*********************************************************************
- *		atof  (MSVCRT.@)
+ *		strtod_l  (MSVCRT.@)
  */
-double CDECL MSVCRT_atof( const char *str )
+double CDECL MSVCRT_strtod_l( const char *str, char **end, MSVCRT__locale_t locale)
 {
-    return atof( str );
+    unsigned __int64 d=0, hlp;
+    int exp=0, sign=1;
+    const char *p;
+    double ret;
+
+    if(!str) {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return 0;
+    }
+
+    if(!locale)
+        locale = get_locale();
+
+    /* FIXME: use *_l functions */
+    p = str;
+    while(isspace(*p))
+        p++;
+
+    if(*p == '-') {
+        sign = -1;
+        p++;
+    } else  if(*p == '+')
+        p++;
+
+    while(isdigit(*p)) {
+        hlp = d*10+*(p++)-'0';
+        if(d>MSVCRT_UI64_MAX/10 || hlp<d) {
+            exp++;
+            break;
+        } else
+            d = hlp;
+    }
+    while(isdigit(*p)) {
+        exp++;
+        p++;
+    }
+
+    if(*p == *locale->locinfo->lconv->decimal_point)
+        p++;
+
+    while(isdigit(*p)) {
+        hlp = d*10+*(p++)-'0';
+        if(d>MSVCRT_UI64_MAX/10 || hlp<d)
+            break;
+
+        d = hlp;
+        exp--;
+    }
+    while(isdigit(*p))
+        p++;
+
+    if(p == str) {
+        if(end)
+            *end = (char*)str;
+        return 0.0;
+    }
+
+    if(*p=='e' || *p=='E' || *p=='d' || *p=='D') {
+        int e=0, s=1;
+
+        p++;
+        if(*p == '-') {
+            s = -1;
+            p++;
+        } else if(*p == '+')
+            p++;
+
+        if(isdigit(*p)) {
+            while(isdigit(*p)) {
+                if(e>INT_MAX/10 || (e=e*10+*p-'0')<0)
+                    e = INT_MAX;
+                p++;
+            }
+            e *= s;
+
+            if(exp<0 && e<0 && exp+e>=0) exp = INT_MIN;
+            else if(exp>0 && e>0 && exp+e<0) exp = INT_MAX;
+            else exp += e;
+        } else {
+            if(*p=='-' || *p=='+')
+                p--;
+            p--;
+        }
+    }
+
+    if(exp>0)
+        ret = (double)sign*d*pow(10, exp);
+    else
+        ret = (double)sign*d/pow(10, -exp);
+
+    if((d && ret==0.0) || isinf(ret))
+        *MSVCRT__errno() = MSVCRT_ERANGE;
+
+    if(end)
+        *end = (char*)p;
+
+    return ret;
 }
 
 /*********************************************************************
@@ -141,7 +268,23 @@ double CDECL MSVCRT_atof( const char *str )
  */
 double CDECL MSVCRT_strtod( const char *str, char **end )
 {
-    return strtod( str, end );
+    return MSVCRT_strtod_l( str, end, NULL );
+}
+
+/*********************************************************************
+ *		atof  (MSVCRT.@)
+ */
+double CDECL MSVCRT_atof( const char *str )
+{
+    return MSVCRT_strtod_l(str, NULL, NULL);
+}
+
+/*********************************************************************
+ *		_atof_l  (MSVCRT.@)
+ */
+double CDECL MSVCRT__atof_l( const char *str, MSVCRT__locale_t locale)
+{
+    return MSVCRT_strtod_l(str, NULL, locale);
 }
 
 /*********************************************************************
@@ -329,7 +472,7 @@ MSVCRT_size_t CDECL MSVCRT_strnlen(const char *s, MSVCRT_size_t maxlen)
 }
 
 /*********************************************************************
- *  _strtoi64_l (MSVCR90.@)
+ *  _strtoi64_l (MSVCRT.@)
  *
  * FIXME: locale parameter is ignored
  */
@@ -386,10 +529,10 @@ __int64 CDECL MSVCRT_strtoi64_l(const char *nptr, char **endptr, int base, MSVCR
 
         if(!negative && (ret>MSVCRT_I64_MAX/base || ret*base>MSVCRT_I64_MAX-v)) {
             ret = MSVCRT_I64_MAX;
-            *MSVCRT__errno() = ERANGE;
+            *MSVCRT__errno() = MSVCRT_ERANGE;
         } else if(negative && (ret<MSVCRT_I64_MIN/base || ret*base<MSVCRT_I64_MIN-v)) {
             ret = MSVCRT_I64_MIN;
-            *MSVCRT__errno() = ERANGE;
+            *MSVCRT__errno() = MSVCRT_ERANGE;
         } else
             ret = ret*base + v;
     }
@@ -401,7 +544,7 @@ __int64 CDECL MSVCRT_strtoi64_l(const char *nptr, char **endptr, int base, MSVCR
 }
 
 /*********************************************************************
- *  _strtoi64 (MSVCR90.@)
+ *  _strtoi64 (MSVCRT.@)
  */
 __int64 CDECL MSVCRT_strtoi64(const char *nptr, char **endptr, int base)
 {
@@ -409,7 +552,7 @@ __int64 CDECL MSVCRT_strtoi64(const char *nptr, char **endptr, int base)
 }
 
 /*********************************************************************
- *  _strtoui64_l (MSVCR90.@)
+ *  _strtoui64_l (MSVCRT.@)
  *
  * FIXME: locale parameter is ignored
  */
@@ -463,7 +606,7 @@ unsigned __int64 CDECL MSVCRT_strtoui64_l(const char *nptr, char **endptr, int b
 
         if(ret>MSVCRT_UI64_MAX/base || ret*base>MSVCRT_UI64_MAX-v) {
             ret = MSVCRT_UI64_MAX;
-            *MSVCRT__errno() = ERANGE;
+            *MSVCRT__errno() = MSVCRT_ERANGE;
         } else
             ret = ret*base + v;
     }
@@ -475,9 +618,47 @@ unsigned __int64 CDECL MSVCRT_strtoui64_l(const char *nptr, char **endptr, int b
 }
 
 /*********************************************************************
- *  _strtoui64 (MSVCR90.@)
+ *  _strtoui64 (MSVCRT.@)
  */
 unsigned __int64 CDECL MSVCRT_strtoui64(const char *nptr, char **endptr, int base)
 {
     return MSVCRT_strtoui64_l(nptr, endptr, base, NULL);
+}
+
+/*********************************************************************
+ *  _ui64toa_s (MSVCRT.@)
+ */
+int CDECL MSVCRT__ui64toa_s(unsigned __int64 value, char *str,
+        MSVCRT_size_t size, int radix)
+{
+    char buffer[65], *pos;
+    int digit;
+
+    if(!str || radix<2 || radix>36) {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    pos = buffer+64;
+    *pos = '\0';
+
+    do {
+        digit = value%radix;
+        value /= radix;
+
+        if(digit < 10)
+            *--pos = '0'+digit;
+        else
+            *--pos = 'a'+digit-10;
+    }while(value != 0);
+
+    if(buffer-pos+65 > size) {
+        MSVCRT__invalid_parameter(NULL, NULL, NULL, 0, 0);
+        *MSVCRT__errno() = MSVCRT_EINVAL;
+        return MSVCRT_EINVAL;
+    }
+
+    memcpy(str, pos, buffer-pos+65);
+    return 0;
 }

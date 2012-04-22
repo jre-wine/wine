@@ -508,7 +508,7 @@ static void _test_ifaces(unsigned line, IUnknown *iface, REFIID *iids)
     }
 }
 
-#define test_get_dispid(u,id) _test_disp(__LINE__,u,id)
+#define test_get_dispid(u,id) _test_get_dispid(__LINE__,u,id)
 static BOOL _test_get_dispid(unsigned line, IUnknown *unk, IID *iid)
 {
     IDispatchEx *dispex;
@@ -671,6 +671,28 @@ static IHTMLAnchorElement *_get_anchor_iface(unsigned line, IUnknown *unk)
     hres = IUnknown_QueryInterface(unk, &IID_IHTMLAnchorElement, (void**)&anchor);
     ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLAnchorElement: %08x\n", hres);
     return anchor;
+}
+
+#define get_select_iface(u) _get_select_iface(__LINE__,u)
+static IHTMLSelectElement *_get_select_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLSelectElement *select;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLSelectElement, (void**)&select);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLSelectElement: %08x\n", hres);
+    return select;
+}
+
+#define get_form_iface(u) _get_form_iface(__LINE__,u)
+static IHTMLFormElement *_get_form_iface(unsigned line, IUnknown *unk)
+{
+    IHTMLFormElement *form;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(unk, &IID_IHTMLFormElement, (void**)&form);
+    ok_(__FILE__,line) (hres == S_OK, "Could not get IHTMLFormElement: %08x\n", hres);
+    return form;
 }
 
 #define get_text_iface(u) _get_text_iface(__LINE__,u)
@@ -1273,6 +1295,18 @@ static void _test_select_length(unsigned line, IHTMLSelectElement *select, LONG 
     hres = IHTMLSelectElement_get_length(select, &len);
     ok_(__FILE__,line) (hres == S_OK, "get_length failed: %08x\n", hres);
     ok_(__FILE__,line) (len == length, "len=%d, expected %d\n", len, length);
+}
+
+#define test_select_put_length(s,l) _test_select_put_length(__LINE__,s,l)
+static void _test_select_put_length(unsigned line, IUnknown *unk, LONG length)
+{
+    IHTMLSelectElement *select = _get_select_iface(line, unk);
+    HRESULT hres;
+
+    hres = IHTMLSelectElement_put_length(select, length);
+    ok_(__FILE__,line) (hres == S_OK, "put_length failed: %08x\n", hres);
+    _test_select_length(line, select, length);
+    IHTMLSelectElement_Release(select);
 }
 
 #define test_select_selidx(s,i) _test_select_selidx(__LINE__,s,i)
@@ -1995,9 +2029,49 @@ static void _test_img_name(unsigned line, IUnknown *unk, const char *pValue)
     hres = IHTMLImgElement_get_name(img, &sName);
     ok_(__FILE__,line) (hres == S_OK, "get_Name failed: %08x\n", hres);
     ok_(__FILE__,line) (!strcmp_wa (sName, pValue), "expected '%s' got '%s'\n", pValue, wine_dbgstr_w(sName));
+    IHTMLImgElement_Release(img);
     SysFreeString(sName);
 }
 
+#define test_input_type(i,t) _test_input_type(__LINE__,i,t)
+static void _test_input_type(unsigned line, IHTMLInputElement *input, const char *extype)
+{
+    BSTR type;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_type(input, &type);
+    ok_(__FILE__,line) (hres == S_OK, "get_type failed: %08x\n", hres);
+    ok_(__FILE__,line) (!strcmp_wa(type, extype), "type=%s, expected %s\n", wine_dbgstr_w(type), extype);
+    SysFreeString(type);
+}
+
+#define test_input_name(u, c) _test_input_name(__LINE__,u, c)
+static void _test_input_name(unsigned line, IHTMLInputElement *input, const char *exname)
+{
+    BSTR name = (BSTR)0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLInputElement_get_name(input, &name);
+    ok_(__FILE__,line) (hres == S_OK, "get_name failed: %08x\n", hres);
+    if(exname)
+        ok_(__FILE__,line) (!strcmp_wa (name, exname), "name=%s, expected %s\n", wine_dbgstr_w(name), exname);
+    else
+        ok_(__FILE__,line) (!name, "name=%p, expected NULL\n", name);
+    SysFreeString(name);
+}
+
+#define test_input_set_name(u, c) _test_input_set_name(__LINE__,u, c)
+static void _test_input_set_name(unsigned line, IHTMLInputElement *input, const char *name)
+{
+    BSTR tmp = a2bstr(name);
+    HRESULT hres;
+
+    hres = IHTMLInputElement_put_name(input, tmp);
+    ok_(__FILE__,line) (hres == S_OK, "put_name failed: %08x\n", hres);
+    SysFreeString(tmp);
+
+    _test_input_name(line, input, name);
+}
 
 #define test_input_get_disabled(i,b) _test_input_get_disabled(__LINE__,i,b)
 static void _test_input_get_disabled(unsigned line, IHTMLInputElement *input, VARIANT_BOOL exb)
@@ -2364,6 +2438,20 @@ static void _test_elem_client_rect(unsigned line, IUnknown *unk)
     ok_(__FILE__,line) (!l, "clientTop = %d\n", l);
 
     IHTMLElement2_Release(elem);
+}
+
+#define test_form_length(e,l) _test_form_length(__LINE__,e,l)
+static void _test_form_length(unsigned line, IUnknown *unk, LONG exlen)
+{
+    IHTMLFormElement *form = _get_form_iface(line, unk);
+    LONG len = 0xdeadbeef;
+    HRESULT hres;
+
+    hres = IHTMLFormElement_get_length(form, &len);
+    ok_(__FILE__,line)(hres == S_OK, "get_length failed: %08x\n", hres);
+    ok_(__FILE__,line)(len == exlen, "length=%d, expected %d\n", len, exlen);
+
+    IHTMLFormElement_Release(form);
 }
 
 #define get_elem_doc(e) _get_elem_doc(__LINE__,e)
@@ -2753,6 +2841,9 @@ static IHTMLElement *get_doc_elem_by_id(IHTMLDocument2 *doc, const char *id)
 
 static void test_select_elem(IHTMLSelectElement *select)
 {
+    IDispatch *disp;
+    HRESULT hres;
+
     test_select_type(select, "select-one");
     test_select_length(select, 2);
     test_select_selidx(select, 0);
@@ -2764,6 +2855,13 @@ static void test_select_elem(IHTMLSelectElement *select)
     test_select_get_disabled(select, VARIANT_FALSE);
     test_select_set_disabled(select, VARIANT_TRUE);
     test_select_set_disabled(select, VARIANT_FALSE);
+
+    disp = NULL;
+    hres = IHTMLSelectElement_get_options(select, &disp);
+    ok(hres == S_OK, "get_options failed: %08x\n", hres);
+    ok(disp != NULL, "options == NULL\n");
+    ok(iface_cmp((IUnknown*)disp, (IUnknown*)select), "disp != select\n");
+    IDispatch_Release(disp);
 }
 
 static void test_create_option_elem(IHTMLDocument2 *doc)
@@ -5553,11 +5651,8 @@ static void test_elems(IHTMLDocument2 *doc)
 
     elem = get_elem_by_id(doc, "s", TRUE);
     if(elem) {
-        IHTMLSelectElement *select;
+        IHTMLSelectElement *select = get_select_iface((IUnknown*)elem);
         IHTMLDocument2 *doc_node, *elem_doc;
-
-        hres = IHTMLElement_QueryInterface(elem, &IID_IHTMLSelectElement, (void**)&select);
-        ok(hres == S_OK, "Could not get IHTMLSelectElement interface: %08x\n", hres);
 
         test_select_elem(select);
 
@@ -5646,6 +5741,7 @@ static void test_elems(IHTMLDocument2 *doc)
         test_elem3_set_disabled((IUnknown*)input, VARIANT_FALSE);
         test_input_get_disabled(input, VARIANT_FALSE);
         test_elem_client_size((IUnknown*)elem);
+        test_input_type(input, "text");
 
         test_node_get_value_str((IUnknown*)elem, NULL);
         test_node_put_value_str((IUnknown*)elem, "test");
@@ -5665,6 +5761,9 @@ static void test_elems(IHTMLDocument2 *doc)
         test_input_get_checked(input, VARIANT_FALSE);
         test_input_set_checked(input, VARIANT_TRUE);
         test_input_set_checked(input, VARIANT_FALSE);
+
+        test_input_name(input, NULL);
+        test_input_set_name(input, "test");
 
         test_input_src(input, NULL);
         test_input_set_src(input, "about:blank");
@@ -5788,6 +5887,13 @@ static void test_elems(IHTMLDocument2 *doc)
 
     IHTMLElement_Release(elem);
 
+    elem = get_doc_elem_by_id(doc, "frm");
+    ok(elem != NULL, "elem == NULL\n");
+    if(elem) {
+        test_form_length((IUnknown*)elem, 0);
+        IHTMLElement_Release(elem);
+    }
+
     test_stylesheets(doc);
     test_create_option_elem(doc);
     test_create_img_elem(doc);
@@ -5853,6 +5959,17 @@ static void test_elems(IHTMLDocument2 *doc)
     IHTMLElement_Release(elem);
 
     IHTMLDocument3_Release(doc3);
+
+    elem = get_elem_by_id(doc, "s", TRUE);
+    if(elem) {
+        static const elem_type_t select_types[] = { ET_OPTION, ET_OPTION, ET_OPTION };
+
+        test_select_put_length((IUnknown*)elem, 3);
+        test_elem_all((IUnknown*)elem, select_types, sizeof(select_types)/sizeof(*select_types));
+        test_select_put_length((IUnknown*)elem, 1);
+        test_elem_all((IUnknown*)elem, select_types, 1);
+        IHTMLElement_Release(elem);
+    }
 
     window = get_doc_window(doc);
     test_window_name(window, NULL);

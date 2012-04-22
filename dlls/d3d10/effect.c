@@ -1284,11 +1284,22 @@ static HRESULT parse_fx10_local_variable(struct d3d10_effect_variable *v, const 
 {
     unsigned int i;
     HRESULT hr;
+    DWORD offset;
 
     hr = parse_fx10_variable_head(v, ptr, data);
     if (FAILED(hr)) return hr;
 
-    skip_dword_unknown(ptr, 2);
+    read_dword(ptr, &offset);
+    TRACE("Variable semantic at offset %#x.\n", offset);
+
+    if (!copy_name(data + offset, &v->semantic))
+    {
+        ERR("Failed to copy semantic.\n");
+        return E_OUTOFMEMORY;
+    }
+    TRACE("Variable semantic: %s.\n", debugstr_a(v->semantic));
+
+    skip_dword_unknown(ptr, 1);
 
     switch (v->type->basetype)
     {
@@ -2173,6 +2184,12 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
 
     TRACE("iface %p, name %s.\n", iface, debugstr_a(name));
 
+    if (!name)
+    {
+        WARN("Invalid name specified\n");
+        return (ID3D10EffectVariable *)&null_variable;
+    }
+
     for (i = 0; i < This->local_buffer_count; ++i)
     {
         struct d3d10_effect_variable *l = &This->local_buffers[i];
@@ -2209,9 +2226,48 @@ static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableB
 static struct ID3D10EffectVariable * STDMETHODCALLTYPE d3d10_effect_GetVariableBySemantic(ID3D10Effect *iface,
         LPCSTR semantic)
 {
-    FIXME("iface %p, semantic %s stub!\n", iface, debugstr_a(semantic));
+    struct d3d10_effect *This = (struct d3d10_effect *)iface;
+    unsigned int i;
 
-    return NULL;
+    TRACE("iface %p, semantic %s\n", iface, debugstr_a(semantic));
+
+    if (!semantic)
+    {
+        WARN("Invalid semantic specified\n");
+        return (ID3D10EffectVariable *)&null_variable;
+    }
+
+    for (i = 0; i < This->local_buffer_count; ++i)
+    {
+        struct d3d10_effect_variable *l = &This->local_buffers[i];
+        unsigned int j;
+
+        for (j = 0; j < l->type->member_count; ++j)
+        {
+            struct d3d10_effect_variable *v = &l->members[j];
+
+            if (!strcmp(v->semantic, semantic))
+            {
+                TRACE("Returning variable %p.\n", v);
+                return (ID3D10EffectVariable *)v;
+            }
+        }
+    }
+
+    for (i = 0; i < This->local_variable_count; ++i)
+    {
+        struct d3d10_effect_variable *v = &This->local_variables[i];
+
+        if (!strcmp(v->semantic, semantic))
+        {
+            TRACE("Returning variable %p.\n", v);
+            return (ID3D10EffectVariable *)v;
+        }
+    }
+
+    WARN("Invalid semantic specified\n");
+
+    return (ID3D10EffectVariable *)&null_variable;
 }
 
 static struct ID3D10EffectTechnique * STDMETHODCALLTYPE d3d10_effect_GetTechniqueByIndex(ID3D10Effect *iface,

@@ -1,6 +1,5 @@
-/* Definition for EsounD drivers : wine multimedia system
- *
- * Copyright 2004 Zhangrong Huang <hzhr@users.sourceforge.net>
+/*
+ * Copyright (C) 2010 Nikolay Sivov for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -17,18 +16,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_ESD_H
-#define __WINE_ESD_H
+#include <ras.h>
 
-#ifndef __WINE_CONFIG_H
-# error You must include config.h to use this header
-#endif
-
-#ifdef HAVE_SYS_ERRNO_H
-#include <sys/errno.h>
-#endif
-
-extern LONG ESD_WaveInit(void);
-extern LONG ESD_WaveClose(void);
-
-#endif  /* __WINE_ESD_H */
+typedef struct tagRASENTRYDLGW
+{
+    DWORD dwSize;
+    HWND  hwndOwner;
+    DWORD dwFlags;
+    LONG  xDlg;
+    LONG  yDlg;
+    WCHAR szEntry[ RAS_MaxEntryName + 1 ];
+    DWORD dwError;
+    ULONG_PTR reserved;
+    ULONG_PTR reserved2;
+} RASENTRYDLGW;

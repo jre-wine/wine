@@ -462,7 +462,6 @@ static BOOL LISTVIEW_SetItemState(LISTVIEW_INFO *, INT, const LVITEMW *);
 static LRESULT LISTVIEW_VScroll(LISTVIEW_INFO *, INT, INT, HWND);
 static LRESULT LISTVIEW_HScroll(LISTVIEW_INFO *, INT, INT, HWND);
 static BOOL LISTVIEW_EnsureVisible(LISTVIEW_INFO *, INT, BOOL);
-static HWND CreateEditLabelT(LISTVIEW_INFO *, LPCWSTR, DWORD, BOOL);
 static HIMAGELIST LISTVIEW_SetImageList(LISTVIEW_INFO *, INT, HIMAGELIST);
 static INT LISTVIEW_HitTest(const LISTVIEW_INFO *, LPLVHITTESTINFO, BOOL, BOOL);
 static BOOL LISTVIEW_EndEditLabelT(LISTVIEW_INFO *, BOOL, BOOL);
@@ -1752,14 +1751,15 @@ static inline INT LISTVIEW_GetCountPerColumn(const LISTVIEW_INFO *infoPtr)
  */
 static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, LPARAM keyData)
 {
-    INT nItem;
-    INT endidx,idx;
-    LVITEMW item;
     WCHAR buffer[MAX_PATH];
-    DWORD lastKeyPressTimestamp = infoPtr->lastKeyPressTimestamp;
+    INT endidx, startidx;
+    DWORD prevTime;
+    LVITEMW item;
+    INT nItem;
+    INT diff;
 
     /* simple parameter checking */
-    if (!charCode || !keyData) return 0;
+    if (!charCode || !keyData || infoPtr->nItemCount == 0) return 0;
 
     /* only allow the valid WM_CHARs through */
     if (!isalnumW(charCode) &&
@@ -1774,86 +1774,95 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
         charCode != '<' && charCode != ',' && charCode != '~')
         return 0;
 
-    /* if there's one item or less, there is no where to go */
-    if (infoPtr->nItemCount <= 1) return 0;
-
     /* update the search parameters */
+    prevTime = infoPtr->lastKeyPressTimestamp;
     infoPtr->lastKeyPressTimestamp = GetTickCount();
-    if (infoPtr->lastKeyPressTimestamp - lastKeyPressTimestamp < KEY_DELAY) {
-        if (infoPtr->nSearchParamLength < MAX_PATH-1)
-            infoPtr->szSearchParam[infoPtr->nSearchParamLength++]=charCode;
+    diff = infoPtr->lastKeyPressTimestamp - prevTime;
+
+    if (diff >= 0 && diff < KEY_DELAY)
+    {
+        if (infoPtr->nSearchParamLength < MAX_PATH - 1)
+            infoPtr->szSearchParam[infoPtr->nSearchParamLength++] = charCode;
+
         if (infoPtr->charCode != charCode)
             infoPtr->charCode = charCode = 0;
-    } else {
-        infoPtr->charCode=charCode;
-        infoPtr->szSearchParam[0]=charCode;
-        infoPtr->nSearchParamLength=1;
-        /* Redundant with the 1 char string */
-        charCode=0;
+    }
+    else
+    {
+        infoPtr->charCode = charCode;
+        infoPtr->szSearchParam[0] = charCode;
+        infoPtr->nSearchParamLength = 1;
+        /* redundant with the 1 char string */
+        charCode = 0;
     }
 
     /* and search from the current position */
-    nItem=-1;
-    if (infoPtr->nFocusedItem >= 0) {
-        endidx=infoPtr->nFocusedItem;
-        idx=endidx;
-        /* if looking for single character match,
-         * then we must always move forward
-         */
-        if (infoPtr->nSearchParamLength == 1)
-            idx++;
-    } else {
-        endidx=infoPtr->nItemCount;
-        idx=0;
-    }
+    nItem = -1;
+    endidx = infoPtr->nItemCount;
 
-    /* Let application handle this for virtual listview */
+    /* should start from next after focused item, so next item that matches
+       will be selected, if there isn't any and focused matches it will be selected
+       on second search stage from beginning of the list */
+    if (infoPtr->nFocusedItem >= 0 && infoPtr->nItemCount > 1)
+        startidx = infoPtr->nFocusedItem + 1;
+    else
+        startidx = 0;
+
+    /* let application handle this for virtual listview */
     if (infoPtr->dwStyle & LVS_OWNERDATA)
     {
         NMLVFINDITEMW nmlv;
-        LVFINDINFOW lvfi;
 
-        ZeroMemory(&lvfi, sizeof(lvfi));
-        lvfi.flags = (LVFI_WRAP | LVFI_PARTIAL);
-        infoPtr->szSearchParam[infoPtr->nSearchParamLength] = '\0';
-        lvfi.psz = infoPtr->szSearchParam;
-        nmlv.iStart = idx;
-        nmlv.lvfi = lvfi;
+        memset(&nmlv.lvfi, 0, sizeof(nmlv.lvfi));
+        nmlv.lvfi.flags = (LVFI_WRAP | LVFI_PARTIAL);
+        nmlv.lvfi.psz = infoPtr->szSearchParam;
+        nmlv.iStart = startidx;
+
+        infoPtr->szSearchParam[infoPtr->nSearchParamLength] = 0;
 
         nItem = notify_hdr(infoPtr, LVN_ODFINDITEMW, (LPNMHDR)&nmlv.hdr);
-
-        if (nItem != -1)
-            LISTVIEW_KeySelection(infoPtr, nItem, FALSE);
-
-        return 0;
     }
+    else
+    {
+        INT i = startidx;
 
-    do {
-        if (idx == infoPtr->nItemCount) {
-            if (endidx == infoPtr->nItemCount || endidx == 0)
+        /* first search in [startidx, endidx), on failure continue in [0, startidx) */
+        while (1)
+        {
+            /* start from first item if not found with >= startidx */
+            if (i == infoPtr->nItemCount && startidx > 0)
+            {
+                endidx = startidx;
+                startidx = 0;
+            }
+
+            for (i = startidx; i < endidx; i++)
+            {
+                /* retrieve text */
+                item.mask = LVIF_TEXT;
+                item.iItem = i;
+                item.iSubItem = 0;
+                item.pszText = buffer;
+                item.cchTextMax = MAX_PATH;
+                if (!LISTVIEW_GetItemW(infoPtr, &item)) return 0;
+
+                if (lstrncmpiW(item.pszText, infoPtr->szSearchParam, infoPtr->nSearchParamLength) == 0)
+                {
+                    nItem = i;
+                    break;
+                }
+                else if (nItem == -1 && lstrncmpiW(item.pszText, infoPtr->szSearchParam, 1) == 0)
+                {
+                    /* this would work but we must keep looking for a longer match */
+                    nItem = i;
+                }
+            }
+
+            /* found something or second search completed with any result */
+            if (nItem != -1 || endidx != infoPtr->nItemCount)
                 break;
-            idx=0;
-        }
-
-        /* get item */
-        item.mask = LVIF_TEXT;
-        item.iItem = idx;
-        item.iSubItem = 0;
-        item.pszText = buffer;
-        item.cchTextMax = MAX_PATH;
-        if (!LISTVIEW_GetItemW(infoPtr, &item)) return 0;
-
-        /* check for a match */
-        if (lstrncmpiW(item.pszText,infoPtr->szSearchParam,infoPtr->nSearchParamLength) == 0) {
-            nItem=idx;
-            break;
-        } else if ( (charCode != 0) && (nItem == -1) && (nItem != infoPtr->nFocusedItem) &&
-                    (lstrncmpiW(item.pszText,infoPtr->szSearchParam,1) == 0) ) {
-            /* This would work but we must keep looking for a longer match */
-            nItem=idx;
-        }
-        idx++;
-    } while (idx != endidx);
+        };
+    }
 
     if (nItem != -1)
         LISTVIEW_KeySelection(infoPtr, nItem, FALSE);
@@ -4276,12 +4285,11 @@ static BOOL set_sub_item(const LISTVIEW_INFO *infoPtr, const LVITEMW *lpLVItem, 
 	*bChanged = TRUE;
     }
     
-    if (lpLVItem->mask & LVIF_IMAGE)
-	if (lpSubItem->hdr.iImage != lpLVItem->iImage)
-	{
-	    lpSubItem->hdr.iImage = lpLVItem->iImage;
-	    *bChanged = TRUE;
-	}
+    if ((lpLVItem->mask & LVIF_IMAGE) && (lpSubItem->hdr.iImage != lpLVItem->iImage))
+    {
+        lpSubItem->hdr.iImage = lpLVItem->iImage;
+        *bChanged = TRUE;
+    }
 
     if ((lpLVItem->mask & LVIF_TEXT) && textcmpWT(lpSubItem->hdr.pszText, lpLVItem->pszText, isW))
     {
@@ -5209,7 +5217,7 @@ static HIMAGELIST LISTVIEW_CreateDragImage(LISTVIEW_INFO *infoPtr, INT iItem, LP
     HIMAGELIST dragList = 0;
     TRACE("iItem=%d Count=%d\n", iItem, infoPtr->nItemCount);
 
-    if (iItem < 0 || iItem >= infoPtr->nItemCount)
+    if (iItem < 0 || iItem >= infoPtr->nItemCount || !lppt)
         return 0;
 
     rcItem.left = LVIR_BOUNDS;
@@ -5734,6 +5742,133 @@ cleanup:
 
 /***
  * DESCRIPTION:
+ * Subclassed edit control windproc function
+ *
+ * PARAMETER(S):
+ * [I] hwnd : the edit window handle
+ * [I] uMsg : the message that is to be processed
+ * [I] wParam : first message parameter
+ * [I] lParam : second message parameter
+ * [I] isW : TRUE if input is Unicode
+ *
+ * RETURN:
+ *   Zero.
+ */
+static LRESULT EditLblWndProcT(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL isW)
+{
+    LISTVIEW_INFO *infoPtr = (LISTVIEW_INFO *)GetWindowLongPtrW(GetParent(hwnd), 0);
+    BOOL save = TRUE;
+
+    TRACE("(hwnd=%p, uMsg=%x, wParam=%lx, lParam=%lx, isW=%d)\n",
+	  hwnd, uMsg, wParam, lParam, isW);
+
+    switch (uMsg)
+    {
+	case WM_GETDLGCODE:
+	  return DLGC_WANTARROWS | DLGC_WANTALLKEYS;
+
+	case WM_DESTROY:
+	{
+	    WNDPROC editProc = infoPtr->EditWndProc;
+	    infoPtr->EditWndProc = 0;
+	    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (DWORD_PTR)editProc);
+	    return CallWindowProcT(editProc, hwnd, uMsg, wParam, lParam, isW);
+	}
+
+	case WM_KEYDOWN:
+	    if (VK_ESCAPE == (INT)wParam)
+	    {
+		save = FALSE;
+                break;
+	    }
+	    else if (VK_RETURN == (INT)wParam)
+		break;
+
+	default:
+	    return CallWindowProcT(infoPtr->EditWndProc, hwnd, uMsg, wParam, lParam, isW);
+    }
+
+    /* kill the edit */
+    if (infoPtr->hwndEdit)
+	LISTVIEW_EndEditLabelT(infoPtr, save, isW);
+
+    SendMessageW(hwnd, WM_CLOSE, 0, 0);
+    return 0;
+}
+
+/***
+ * DESCRIPTION:
+ * Subclassed edit control Unicode windproc function
+ *
+ * PARAMETER(S):
+ * [I] hwnd : the edit window handle
+ * [I] uMsg : the message that is to be processed
+ * [I] wParam : first message parameter
+ * [I] lParam : second message parameter
+ *
+ * RETURN:
+ */
+static LRESULT CALLBACK EditLblWndProcW(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return EditLblWndProcT(hwnd, uMsg, wParam, lParam, TRUE);
+}
+
+/***
+ * DESCRIPTION:
+ * Subclassed edit control ANSI windproc function
+ *
+ * PARAMETER(S):
+ * [I] hwnd : the edit window handle
+ * [I] uMsg : the message that is to be processed
+ * [I] wParam : first message parameter
+ * [I] lParam : second message parameter
+ *
+ * RETURN:
+ */
+static LRESULT CALLBACK EditLblWndProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    return EditLblWndProcT(hwnd, uMsg, wParam, lParam, FALSE);
+}
+
+/***
+ * DESCRIPTION:
+ * Creates a subclassed edit control
+ *
+ * PARAMETER(S):
+ * [I] infoPtr : valid pointer to the listview structure
+ * [I] text : initial text for the edit
+ * [I] style : the window style
+ * [I] isW : TRUE if input is Unicode
+ *
+ * RETURN:
+ */
+static HWND CreateEditLabelT(LISTVIEW_INFO *infoPtr, LPCWSTR text, BOOL isW)
+{
+    static const DWORD style = WS_CHILDWINDOW|WS_CLIPSIBLINGS|ES_LEFT|ES_AUTOHSCROLL|WS_BORDER|WS_VISIBLE;
+    HINSTANCE hinst = (HINSTANCE)GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_HINSTANCE);
+    HWND hedit;
+
+    TRACE("(%p, text=%s, isW=%d)\n", infoPtr, debugtext_t(text, isW), isW);
+
+    /* Window will be resized and positioned after LVN_BEGINLABELEDIT */
+    if (isW)
+	hedit = CreateWindowW(WC_EDITW, text, style, 0, 0, 0, 0, infoPtr->hwndSelf, 0, hinst, 0);
+    else
+	hedit = CreateWindowA(WC_EDITA, (LPCSTR)text, style, 0, 0, 0, 0, infoPtr->hwndSelf, 0, hinst, 0);
+
+    if (!hedit) return 0;
+
+    infoPtr->EditWndProc = (WNDPROC)
+	(isW ? SetWindowLongPtrW(hedit, GWLP_WNDPROC, (DWORD_PTR)EditLblWndProcW) :
+               SetWindowLongPtrA(hedit, GWLP_WNDPROC, (DWORD_PTR)EditLblWndProcA) );
+
+    SendMessageW(hedit, WM_SETFONT, (WPARAM)infoPtr->hFont, FALSE);
+
+    return hedit;
+}
+
+/***
+ * DESCRIPTION:
  * Begin in place editing of specified list view item
  *
  * PARAMETER(S):
@@ -5787,7 +5922,7 @@ static HWND LISTVIEW_EditLabelT(LISTVIEW_INFO *infoPtr, INT nItem, BOOL isW)
     dispInfo.item.cchTextMax = DISP_TEXT_SIZE;
     if (!LISTVIEW_GetItemT(infoPtr, &dispInfo.item, isW)) return 0;
 
-    infoPtr->hwndEdit = CreateEditLabelT(infoPtr, dispInfo.item.pszText, WS_VISIBLE, isW);
+    infoPtr->hwndEdit = CreateEditLabelT(infoPtr, dispInfo.item.pszText, isW);
     if (!infoPtr->hwndEdit) return 0;
     
     if (notify_dispinfoT(infoPtr, LVN_BEGINLABELEDITW, &dispInfo, isW))
@@ -6434,7 +6569,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 
     if (isubitem)
     {
-	SUBITEM_INFO *lpSubItem = LISTVIEW_GetSubItemPtr(hdpaSubItems, isubitem);
+        SUBITEM_INFO *lpSubItem = LISTVIEW_GetSubItemPtr(hdpaSubItems, isubitem);
         pItemHdr = lpSubItem ? &lpSubItem->hdr : &callbackHdr;
         if (!lpSubItem)
         {
@@ -7323,6 +7458,14 @@ static INT LISTVIEW_HitTest(const LISTVIEW_INFO *infoPtr, LPLVHITTESTINFO lpht, 
 	    }
 	}
 	TRACE("lpht->iSubItem=%d\n", lpht->iSubItem);
+
+	/* if we're outside horizontal columns bounds there's nothing to test further */
+	if (lpht->iSubItem == -1)
+	{
+	    lpht->iItem = -1;
+	    lpht->flags = LVHT_NOWHERE;
+	    return -1;
+	}
     }
 
     TRACE("lpht->flags=0x%x\n", lpht->flags);
@@ -7875,7 +8018,14 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
 	SUBITEM_INFO *lpSubItem;
 	HDPA hdpaSubItems;
 	INT nItem, i;
-	
+	LVITEMW item;
+	BOOL changed;
+
+	item.iSubItem = nNewColumn;
+	item.mask = LVIF_TEXT | LVIF_IMAGE;
+	item.iImage = I_IMAGECALLBACK;
+	item.pszText = LPSTR_TEXTCALLBACKW;
+
 	for (nItem = 0; nItem < infoPtr->nItemCount; nItem++)
 	{
             hdpaSubItems = DPA_GetPtr(infoPtr->hdpaItems, nItem);
@@ -7885,6 +8035,10 @@ static INT LISTVIEW_InsertColumnT(LISTVIEW_INFO *infoPtr, INT nColumn,
 		if (lpSubItem->iSubItem >= nNewColumn)
 		    lpSubItem->iSubItem++;
 	    }
+
+	    /* add new subitem for each item */
+	    item.iItem = nItem;
+	    set_sub_item(infoPtr, &item, isW, &changed);
 	}
     }
 
@@ -9493,15 +9647,11 @@ static LRESULT LISTVIEW_MouseWheel(LISTVIEW_INFO *infoPtr, INT wheelDelta)
 {
     INT gcWheelDelta = 0;
     INT pulScrollLines = 3;
-    SCROLLINFO scrollInfo;
 
     TRACE("(wheelDelta=%d)\n", wheelDelta);
 
     SystemParametersInfoW(SPI_GETWHEELSCROLLLINES,0, &pulScrollLines, 0);
     gcWheelDelta -= wheelDelta;
-
-    scrollInfo.cbSize = sizeof(SCROLLINFO);
-    scrollInfo.fMask = SIF_POS;
 
     switch(infoPtr->uView)
     {
@@ -11459,7 +11609,7 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
 
             /* Select font to get the right dimension of the string */
             hFont = (HFONT)SendMessageW(infoPtr->hwndEdit, WM_GETFONT, 0, 0);
-            if(hFont != 0)
+            if (hFont)
             {
                 hOldFont = SelectObject(hdc, hFont);
             }
@@ -11472,16 +11622,10 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
                 GetTextMetricsW(hdc, &textMetric);
                 sz.cx += (textMetric.tmMaxCharWidth * 2);
 
-		SetWindowPos (
-		    infoPtr->hwndEdit,
-		    HWND_TOP,
-		    0,
-		    0,
-		    sz.cx,
-		    rect.bottom - rect.top,
-		    SWP_DRAWFRAME|SWP_NOMOVE);
+		SetWindowPos(infoPtr->hwndEdit, NULL, 0, 0, sz.cx,
+		    rect.bottom - rect.top, SWP_DRAWFRAME | SWP_NOMOVE | SWP_NOZORDER);
 	    }
-            if(hFont != 0)
+            if (hFont)
                 SelectObject(hdc, hOldFont);
 
 	    ReleaseDC(infoPtr->hwndEdit, hdc);
@@ -11502,130 +11646,4 @@ static LRESULT LISTVIEW_Command(LISTVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lP
 }
 
 
-/***
- * DESCRIPTION:
- * Subclassed edit control windproc function
- *
- * PARAMETER(S):
- * [I] hwnd : the edit window handle
- * [I] uMsg : the message that is to be processed
- * [I] wParam : first message parameter
- * [I] lParam : second message parameter
- * [I] isW : TRUE if input is Unicode
- *
- * RETURN:
- *   Zero.
- */
-static LRESULT EditLblWndProcT(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL isW)
-{
-    LISTVIEW_INFO *infoPtr = (LISTVIEW_INFO *)GetWindowLongPtrW(GetParent(hwnd), 0);
-    BOOL save = TRUE;
 
-    TRACE("(hwnd=%p, uMsg=%x, wParam=%lx, lParam=%lx, isW=%d)\n",
-	  hwnd, uMsg, wParam, lParam, isW);
-
-    switch (uMsg)
-    {
-	case WM_GETDLGCODE:
-	  return DLGC_WANTARROWS | DLGC_WANTALLKEYS;
-
-	case WM_DESTROY:
-	{
-	    WNDPROC editProc = infoPtr->EditWndProc;
-	    infoPtr->EditWndProc = 0;
-	    SetWindowLongPtrW(hwnd, GWLP_WNDPROC, (DWORD_PTR)editProc);
-	    return CallWindowProcT(editProc, hwnd, uMsg, wParam, lParam, isW);
-	}
-
-	case WM_KEYDOWN:
-	    if (VK_ESCAPE == (INT)wParam)
-	    {
-		save = FALSE;
-                break;
-	    }
-	    else if (VK_RETURN == (INT)wParam)
-		break;
-
-	default:
-	    return CallWindowProcT(infoPtr->EditWndProc, hwnd, uMsg, wParam, lParam, isW);
-    }
-
-    /* kill the edit */
-    if (infoPtr->hwndEdit)
-	LISTVIEW_EndEditLabelT(infoPtr, save, isW);
-
-    SendMessageW(hwnd, WM_CLOSE, 0, 0);
-    return 0;
-}
-
-/***
- * DESCRIPTION:
- * Subclassed edit control Unicode windproc function
- *
- * PARAMETER(S):
- * [I] hwnd : the edit window handle
- * [I] uMsg : the message that is to be processed
- * [I] wParam : first message parameter
- * [I] lParam : second message parameter
- *
- * RETURN:
- */
-static LRESULT CALLBACK EditLblWndProcW(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    return EditLblWndProcT(hwnd, uMsg, wParam, lParam, TRUE);
-}
-
-/***
- * DESCRIPTION:
- * Subclassed edit control ANSI windproc function
- *
- * PARAMETER(S):
- * [I] hwnd : the edit window handle
- * [I] uMsg : the message that is to be processed
- * [I] wParam : first message parameter
- * [I] lParam : second message parameter
- *
- * RETURN:
- */
-static LRESULT CALLBACK EditLblWndProcA(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
-{
-    return EditLblWndProcT(hwnd, uMsg, wParam, lParam, FALSE);
-}
-
-/***
- * DESCRIPTION:
- * Creates a subclassed edit control
- *
- * PARAMETER(S):
- * [I] infoPtr : valid pointer to the listview structure
- * [I] text : initial text for the edit
- * [I] style : the window style
- * [I] isW : TRUE if input is Unicode
- *
- * RETURN:
- */
-static HWND CreateEditLabelT(LISTVIEW_INFO *infoPtr, LPCWSTR text, DWORD style, BOOL isW)
-{
-    HWND hedit;
-    HINSTANCE hinst = (HINSTANCE)GetWindowLongPtrW(infoPtr->hwndSelf, GWLP_HINSTANCE);
-
-    TRACE("(text=%s, ..., isW=%d)\n", debugtext_t(text, isW), isW);
-
-    style |= WS_CHILDWINDOW|WS_CLIPSIBLINGS|ES_LEFT|ES_AUTOHSCROLL|WS_BORDER;
-
-    /* Window will be resized and positioned after LVN_BEGINLABELEDIT */
-    if (isW)
-	hedit = CreateWindowW(WC_EDITW, text, style, 0, 0, 0, 0, infoPtr->hwndSelf, 0, hinst, 0);
-    else
-	hedit = CreateWindowA(WC_EDITA, (LPCSTR)text, style, 0, 0, 0, 0, infoPtr->hwndSelf, 0, hinst, 0);
-
-    if (!hedit) return 0;
-
-    infoPtr->EditWndProc = (WNDPROC)
-	(isW ? SetWindowLongPtrW(hedit, GWLP_WNDPROC, (DWORD_PTR)EditLblWndProcW) :
-               SetWindowLongPtrA(hedit, GWLP_WNDPROC, (DWORD_PTR)EditLblWndProcA) );
-
-    SendMessageW(hedit, WM_SETFONT, (WPARAM)infoPtr->hFont, FALSE);
-
-    return hedit;
-}
