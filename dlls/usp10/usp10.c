@@ -141,18 +141,6 @@ static const SCRIPT_PROPERTIES *script_props[] =
     &props[73]
 };
 
-#define GLYPH_BLOCK_SHIFT 8
-#define GLYPH_BLOCK_SIZE  (1UL << GLYPH_BLOCK_SHIFT)
-#define GLYPH_BLOCK_MASK  (GLYPH_BLOCK_SIZE - 1)
-#define GLYPH_MAX         65536
-
-typedef struct {
-    LOGFONTW lf;
-    TEXTMETRICW tm;
-    WORD *glyphs[GLYPH_MAX / GLYPH_BLOCK_SIZE];
-    ABC *widths[GLYPH_MAX / GLYPH_BLOCK_SIZE];
-} ScriptCache;
-
 typedef struct {
     int numGlyphs;
     WORD* glyphs;
@@ -318,6 +306,7 @@ HRESULT WINAPI ScriptFreeCache(SCRIPT_CACHE *psc)
             heap_free(((ScriptCache *)*psc)->glyphs[i]);
             heap_free(((ScriptCache *)*psc)->widths[i]);
         }
+        heap_free(((ScriptCache *)*psc)->GSUB_Table);
         heap_free(*psc);
         *psc = NULL;
     }
@@ -529,13 +518,6 @@ HRESULT WINAPI ScriptItemize(const WCHAR *pwcInChars, int cInChars, int cMaxItem
 #define Syriac_stop   0x074f
 #define Latin_start   0x0001
 #define Latin_stop    0x024f
-#define Script_Syriac  8
-#define Script_Hebrew  7
-#define Script_Arabic  6
-#define Script_Latin   1
-#define Script_Numeric 5
-#define Script_CR      22
-#define Script_LF      23
 
     int   cnt = 0, index = 0;
     int   New_Script = SCRIPT_UNDEFINED;
@@ -1395,6 +1377,8 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
 
     if ((get_cache_pitch_family(psc) & TMPF_TRUETYPE) && !psa->fNoGlyphIndex)
     {
+        WCHAR *rChars = heap_alloc(sizeof(WCHAR) * cChars);
+        if (!rChars) return E_OUTOFMEMORY;
         for (i = 0; i < cChars; i++)
         {
             int idx = i;
@@ -1411,7 +1395,10 @@ HRESULT WINAPI ScriptShape(HDC hdc, SCRIPT_CACHE *psc, const WCHAR *pwcChars,
                 if (GetGlyphIndicesW(hdc, &chInput, 1, &glyph, 0) == GDI_ERROR) return S_FALSE;
                 pwOutGlyphs[i] = set_cache_glyph(psc, chInput, glyph);
             }
+            rChars[i] = chInput;
         }
+        SHAPE_ShapeArabicGlyphs(hdc, (ScriptCache *)*psc, psa, rChars, cChars, pwOutGlyphs, pcGlyphs, cMaxGlyphs);
+        heap_free(rChars);
     }
     else
     {
@@ -1600,6 +1587,7 @@ HRESULT WINAPI ScriptTextOut(const HDC hdc, SCRIPT_CACHE *psc, int x, int y, UIN
     if (!piAdvance || !psa || !pwGlyphs) return E_INVALIDARG;
 
     fuOptions &= ETO_CLIPPED + ETO_OPAQUE;
+    fuOptions |= ETO_IGNORELANGUAGE;
     if  (!psa->fNoGlyphIndex)                                     /* Have Glyphs?                      */
         fuOptions |= ETO_GLYPH_INDEX;                             /* Say don't do translation to glyph */
 

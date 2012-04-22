@@ -1,6 +1,7 @@
 /*
  * Copyright 1998 Juergen Schmied
  * Copyright 2003,2004,2007,2008 José Manuel Ferrer Ortiz
+ * Copyright 2010 José Rostagno
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -95,13 +96,13 @@ END
 
 MENU_CPANEL MENU
 BEGIN
-    POPUP "&File"
+    POPUP "&Archivo"
     BEGIN
         MENUITEM SEPARATOR
-        MENUITEM "E&xit", IDM_CPANEL_EXIT
+        MENUITEM "S&alir", IDM_CPANEL_EXIT
     END
 
-    POPUP "&View"
+    POPUP "&Ver"
     BEGIN
         MENUITEM "Iconos &grandes", FCIDM_SHVIEW_BIGICON
         MENUITEM "Iconos &pequeños", FCIDM_SHVIEW_SMALLICON
@@ -109,9 +110,9 @@ BEGIN
         MENUITEM "&Detalles", FCIDM_SHVIEW_REPORTVIEW
     END
 
-    POPUP "&Help"
+    POPUP "&Ayuda"
     BEGIN
-        MENUITEM "&About Control Panel...", IDM_CPANEL_ABOUT
+        MENUITEM "&Acerca de Panel de Control...", IDM_CPANEL_ABOUT
     END
 END
 
@@ -206,12 +207,16 @@ STRINGTABLE
 	IDS_SHV_COLUMN11        "Grupo"
 	IDS_SHV_COLUMN_DELFROM  "Lugar original"
 	IDS_SHV_COLUMN_DELDATE  "Fecha de borrado"
+	IDS_SHV_COL_DOCS        "Documentos"
+	IDS_SHV_COL_STATUS      "Estado"
+	IDS_SHV_COL_LOCATION    "Ubicación"
+	IDS_SHV_COL_MODEL       "Modelo"
 
         /* special folders */
 	IDS_DESKTOP		"Escritorio"
 	IDS_MYCOMPUTER		"Mi PC"
         IDS_RECYCLEBIN_FOLDER_NAME "Papelera de reciclaje"
-	IDS_CONTROLPANEL	"Control Panel"
+	IDS_CONTROLPANEL	"Panel de Control"
 
         /* context menus */
 	IDS_VIEW_LARGE		"Iconos &grandes"
@@ -245,6 +250,12 @@ STRINGTABLE
         IDS_SHUTDOWN_TITLE	"Apagar"
         IDS_SHUTDOWN_PROMPT	"¿Desea terminar su sesión de Wine?"
 
+        /* Run File dialog */
+        IDS_RUNDLG_ERROR           "No se puede mostrar el cuadro de diálogo ejecutar archivo (error interno)"
+        IDS_RUNDLG_BROWSE_ERROR    "No se puede mostrar el cuadro de diálogo Examinar (error interno)"
+        IDS_RUNDLG_BROWSE_CAPTION  "Examinar"
+        IDS_RUNDLG_BROWSE_FILTER   "Archivos ejecutables\0*.exe\0Todos los archivos\0*.*\0\0"
+
         /* shell folder path default values */
 	IDS_PROGRAMS                "Menú Inicio\\Programas"
 	IDS_PERSONAL                "Mis documentos"
@@ -276,9 +287,11 @@ STRINGTABLE
 
 	IDS_NEWFOLDER		"Nueva carpeta"
 
-	IDS_CPANEL_TITLE            "Wine Control Panel"
-	IDS_CPANEL_NAME             "Name"
-	IDS_CPANEL_DESCRIPTION      "Description"
+	IDS_CPANEL_TITLE            "Panel de Control de Wine"
+	IDS_CPANEL_NAME             "Nombre"
+	IDS_CPANEL_DESCRIPTION      "Descripción"
+
+        IDS_SHLEXEC_NOASSOC         "No hay un programa de Windows configurado para abrir este tipo de archivo."
 }
 
 STRINGTABLE

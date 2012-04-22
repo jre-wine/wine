@@ -1353,6 +1353,7 @@ void (WINE_GLAPI *glVertex4sv)(const GLshort *v) DECLSPEC_HIDDEN;
 void (WINE_GLAPI *glVertexPointer)(GLint size, GLenum type, GLsizei stride, const GLvoid *pointer) DECLSPEC_HIDDEN;
 void (WINE_GLAPI *glViewport)(GLint x, GLint y, GLsizei width, GLsizei height) DECLSPEC_HIDDEN;
 void (WINE_GLAPI *glPointParameterfv)(GLenum pname, const GLfloat *params) DECLSPEC_HIDDEN;
+void (WINE_GLAPI *glPointParameteri)(GLenum name, GLint value) DECLSPEC_HIDDEN;
 
 /* glFinish and glFlush are always loaded from opengl32.dll, thus they always have
  * __stdcall calling convention.
@@ -1708,6 +1709,7 @@ BOOL (WINAPI *pwglShareLists)(HGLRC, HGLRC) DECLSPEC_HIDDEN;
     USE_GL_FUNC(glVertexPointer) \
     USE_GL_FUNC(glViewport) \
     USE_GL_FUNC(glPointParameterfv) \
+    USE_GL_FUNC(glPointParameteri) \
 
 #define WGL_FUNCS_GEN \
     USE_WGL_FUNC(wglCreateContext) \
@@ -1754,6 +1756,7 @@ typedef enum wined3d_gl_extension
     ARB_SHADER_OBJECTS,
     ARB_SHADER_TEXTURE_LOD,
     ARB_SHADING_LANGUAGE_100,
+    ARB_SHADOW,
     ARB_SYNC,
     ARB_TEXTURE_BORDER_CLAMP,
     ARB_TEXTURE_COMPRESSION,
@@ -1834,6 +1837,7 @@ typedef enum wined3d_gl_extension
     WGL_WINE_PIXEL_FORMAT_PASSTHROUGH,
     /* Internally used */
     WINE_NORMALIZED_TEXRECT,
+    WINED3D_GL_VERSION_2_0,
 
     WINED3D_GL_EXT_COUNT,
 } GL_SupportedExt;
@@ -2402,6 +2406,14 @@ typedef unsigned int GLhandleARB;
 #ifndef GL_ARB_shading_language_100
 #define GL_ARB_shading_language_100 1
 #define GL_SHADING_LANGUAGE_VERSION_ARB                     0x8b8c
+#endif
+
+/* GL_ARB_shadow */
+#ifndef GL_ARB_shadow
+#define GL_ARB_shadow 1
+#define GL_TEXTURE_COMPARE_MODE_ARB                         0x884c
+#define GL_TEXTURE_COMPARE_FUNC_ARB                         0x884d
+#define GL_COMPARE_R_TO_TEXTURE_ARB                         0x884e
 #endif
 
 /* GL_ARB_sync */

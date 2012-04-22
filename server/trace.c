@@ -3076,6 +3076,8 @@ static void dump_get_thread_input_reply( const struct get_thread_input_reply *re
     fprintf( stderr, ", menu_owner=%08x", req->menu_owner );
     fprintf( stderr, ", move_size=%08x", req->move_size );
     fprintf( stderr, ", caret=%08x", req->caret );
+    fprintf( stderr, ", cursor=%08x", req->cursor );
+    fprintf( stderr, ", show_count=%d", req->show_count );
     dump_rectangle( ", rect=", &req->rect );
 }
 
@@ -3592,7 +3594,8 @@ static void dump_query_symlink_request( const struct query_symlink_request *req 
 
 static void dump_query_symlink_reply( const struct query_symlink_reply *req )
 {
-    dump_varargs_unicode_str( " target_name=", cur_size );
+    fprintf( stderr, " total=%u", req->total );
+    dump_varargs_unicode_str( ", target_name=", cur_size );
 }
 
 static void dump_get_object_info_request( const struct get_object_info_request *req )
@@ -4605,6 +4608,7 @@ static const struct
     { "GENERIC_NOT_MAPPED",          STATUS_GENERIC_NOT_MAPPED },
     { "HANDLES_CLOSED",              STATUS_HANDLES_CLOSED },
     { "HANDLE_NOT_CLOSABLE",         STATUS_HANDLE_NOT_CLOSABLE },
+    { "HOST_UNREACHABLE",            STATUS_HOST_UNREACHABLE },
     { "ILLEGAL_FUNCTION",            STATUS_ILLEGAL_FUNCTION },
     { "INSTANCE_NOT_AVAILABLE",      STATUS_INSTANCE_NOT_AVAILABLE },
     { "INSUFFICIENT_RESOURCES",      STATUS_INSUFFICIENT_RESOURCES },

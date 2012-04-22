@@ -219,11 +219,6 @@ static void test_MsiSourceListGetInfo(void)
                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, NULL);
     ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
 
-    /*  szProductCodeOrPatchCode */
-    r = pMsiSourceListGetInfoA("garbage", usersid, MSIINSTALLCONTEXT_USERUNMANAGED,
-                              MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, NULL);
-    ok(r == ERROR_INVALID_PARAMETER, "Expected ERROR_INVALID_PARAMETER, got %d\n", r);
-
     /* guid without brackets */
     r = pMsiSourceListGetInfoA("51CD2AD5-0482-4C46-8DDD-0ED1022AA1AA", usersid, MSIINSTALLCONTEXT_USERUNMANAGED,
                               MSICODE_PRODUCT, INSTALLPROPERTY_PACKAGENAME, NULL, NULL);
@@ -901,7 +896,11 @@ static void test_MsiSourceListAddSourceEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* product key exists */
     r = pMsiSourceListAddSourceExA(prodcode, usersid,
@@ -957,6 +956,7 @@ static void test_MsiSourceListAddSourceEx(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     /* szUserSid must be NULL for MSIINSTALLCONTEXT_MACHINE */
     r = pMsiSourceListAddSourceExA(prodcode, usersid,
                                   MSIINSTALLCONTEXT_MACHINE,
@@ -972,7 +972,12 @@ static void test_MsiSourceListAddSourceEx(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* product key exists */
     r = pMsiSourceListAddSourceExA(prodcode, NULL,
@@ -1001,7 +1006,7 @@ static void test_MsiSourceListAddSourceEx(void)
 
     RegCloseKey(url);
     RegCloseKey(prodkey);
-    HeapFree(GetProcessHeap(), 0, usersid);
+    LocalFree(usersid);
 }
 
 static void test_MsiSourceListEnumSources(void)
@@ -1363,7 +1368,11 @@ static void test_MsiSourceListEnumSources(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* user product key exists */
     size = MAX_PATH;
@@ -1474,6 +1483,7 @@ static void test_MsiSourceListEnumSources(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     /* szUserSid is non-NULL */
     size = MAX_PATH;
     lstrcpyA(value, "aaa");
@@ -1484,7 +1494,7 @@ static void test_MsiSourceListEnumSources(void)
     ok(!lstrcmpA(value, "aaa"), "Expected value to be unchanged, got %s\n", value);
     ok(size == MAX_PATH, "Expected MAX_PATH, got %d\n", size);
 
-    /* szUserSid is non-NULL */
+    /* szUserSid is NULL */
     size = MAX_PATH;
     lstrcpyA(value, "aaa");
     r = pMsiSourceListEnumSourcesA(prodcode, NULL,
@@ -1498,7 +1508,12 @@ static void test_MsiSourceListEnumSources(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* user product key exists */
     size = MAX_PATH;
@@ -1943,7 +1958,11 @@ static void test_MsiSourceListSetInfo(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* user product key exists */
     r = pMsiSourceListSetInfoA(prodcode, NULL,
@@ -1976,11 +1995,17 @@ static void test_MsiSourceListSetInfo(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* user product key exists */
     r = pMsiSourceListSetInfoA(prodcode, NULL,
@@ -2239,7 +2264,11 @@ static void test_MsiSourceListAddMediaDisk(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* user product key exists */
     r = pMsiSourceListAddMediaDiskA(prodcode, usersid,
@@ -2273,11 +2302,17 @@ static void test_MsiSourceListAddMediaDisk(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* machine product key exists */
     r = pMsiSourceListAddMediaDiskA(prodcode, NULL,
@@ -2944,7 +2979,11 @@ static void test_MsiSourceListEnumMediaDisks(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* user product key exists */
     r = pMsiSourceListEnumMediaDisksA(prodcode, usersid, MSIINSTALLCONTEXT_USERMANAGED,
@@ -3022,11 +3061,17 @@ static void test_MsiSourceListEnumMediaDisks(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     lstrcpyA(keypath, "Software\\Classes\\Installer\\Products\\");
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* machine product key exists */
     r = pMsiSourceListEnumMediaDisksA(prodcode, NULL, MSIINSTALLCONTEXT_MACHINE,
@@ -3206,7 +3251,11 @@ static void test_MsiSourceListAddSource(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto userunmanaged_tests;
+    }
 
     /* user product key exists */
     r = pMsiSourceListAddSourceA(prodcode, username, 0, "source");
@@ -3297,6 +3346,7 @@ static void test_MsiSourceListAddSource(void)
 
     /* MSIINSTALLCONTEXT_USERUNMANAGED */
 
+userunmanaged_tests:
     r = pMsiSourceListAddSourceA(prodcode, username, 0, "source");
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
 
@@ -3304,7 +3354,11 @@ static void test_MsiSourceListAddSource(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_CURRENT_USER, keypath, &userkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        goto machine_tests;
+    }
 
     /* user product key exists */
     r = pMsiSourceListAddSourceA(prodcode, username, 0, "source");
@@ -3333,6 +3387,7 @@ static void test_MsiSourceListAddSource(void)
 
     /* MSIINSTALLCONTEXT_MACHINE */
 
+machine_tests:
     r = pMsiSourceListAddSourceA(prodcode, NULL, 0, "source");
     ok(r == ERROR_UNKNOWN_PRODUCT, "Expected ERROR_UNKNOWN_PRODUCT, got %d\n", r);
 
@@ -3340,7 +3395,12 @@ static void test_MsiSourceListAddSource(void)
     lstrcatA(keypath, prod_squashed);
 
     res = RegCreateKeyA(HKEY_LOCAL_MACHINE, keypath, &prodkey);
-    ok(res == ERROR_SUCCESS, "Expected ERROR_SUCCESS, got %d\n", res);
+    if (res != ERROR_SUCCESS)
+    {
+        skip("Product key creation failed with error code %u\n", res);
+        LocalFree(usersid);
+        return;
+    }
 
     /* machine product key exists */
     r = pMsiSourceListAddSourceA(prodcode, NULL, 0, "source");

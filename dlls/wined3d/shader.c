@@ -721,6 +721,7 @@ static HRESULT shader_get_registers_used(IWineD3DBaseShader *iface, const struct
             else if (ins.handler_idx == WINED3DSIH_MOVA) reg_maps->usesmova = 1;
             else if (ins.handler_idx == WINED3DSIH_IFC) reg_maps->usesifc = 1;
             else if (ins.handler_idx == WINED3DSIH_CALL) reg_maps->usescall = 1;
+            else if (ins.handler_idx == WINED3DSIH_RCP) reg_maps->usesrcp = 1;
 
             limit = ins.src_count + (ins.predicate ? 1 : 0);
             for (i = 0; i < limit; ++i)
@@ -2023,6 +2024,9 @@ void find_ps_compile_args(IWineD3DPixelShaderImpl *shader,
             continue;
         }
         args->color_fixup[i] = texture->resource.format_desc->color_fixup;
+
+        if (texture->resource.format_desc->Flags & WINED3DFMT_FLAG_SHADOW)
+            args->shadow |= 1 << i;
 
         /* Flag samplers that need NP2 texcoord fixup. */
         if (!texture->baseTexture.pow2Matrix_identity)

@@ -148,7 +148,7 @@ static void test_ScriptItemize( void )
     ok (hr == E_INVALIDARG, "ScriptItemize should return E_INVALIDARG if pItems is NULL\n");
 
     hr = ScriptItemize(test1, 4, 1, &Control, &State, items, NULL);
-    ok (hr == E_INVALIDARG, "ScriptItemize should return E_INVALIDARG if cMaxItems < 2.");
+    ok (hr == E_INVALIDARG, "ScriptItemize should return E_INVALIDARG if cMaxItems < 2.\n");
 
     hr = ScriptItemize(test1, 0, 10, NULL, NULL, items, &nItems);
     ok (hr == E_INVALIDARG, "ScriptItemize should return E_INVALIDARG if cInChars is 0\n");
@@ -262,8 +262,8 @@ static void test_ScriptShape(HDC hdc)
     hr = ScriptShape(hdc, &sc, test2, 4, 4, &items[0].a, glyphs2, logclust, attrs, &nb);
     ok(hr == S_OK, "ScriptShape should return S_OK not %08x\n", hr);
     ok(nb == 4, "Wrong number of items\n");
-    ok(glyphs2[0] == 0, "Incorrect glyph for 0x202B\n");
-    ok(glyphs2[3] == 0, "Incorrect glyph for 0x202C\n");
+    ok(glyphs2[0] == 0 || broken(glyphs2[0] == 0x80), "Incorrect glyph for 0x202B\n");
+    ok(glyphs2[3] == 0 || broken(glyphs2[3] == 0x80), "Incorrect glyph for 0x202C\n");
     ok(logclust[0] == 0, "clusters out of order\n");
     ok(logclust[1] == 1, "clusters out of order\n");
     ok(logclust[2] == 2, "clusters out of order\n");
@@ -640,8 +640,8 @@ static void test_ScriptGetCMap(HDC hdc, unsigned short pwOutGlyphs[256])
     hr = ScriptGetCMap(hdc, &psc, TestItem2, cInChars, dwFlags, pwOutGlyphs3);
     ok (hr == S_FALSE, "ScriptGetCMap should return S_FALSE not (%08x)\n", hr);
     ok (psc != NULL, "psc should not be null and have SCRIPT_CACHE buffer address\n");
-    ok(pwOutGlyphs3[0] == 0, "Glyph 0 should be default glyph\n");
-    ok(pwOutGlyphs3[3] == 0, "Glyph 0 should be default glyph\n");
+    ok(pwOutGlyphs3[0] == 0 || broken(pwOutGlyphs3[0] == 0x80), "Glyph 0 should be default glyph\n");
+    ok(pwOutGlyphs3[3] == 0 || broken(pwOutGlyphs3[0] == 0x80), "Glyph 0 should be default glyph\n");
 
 
     cInChars = cChars = 9;
@@ -1243,7 +1243,7 @@ static void test_ScriptStringXtoCP_CPtoX(HDC hdc)
  */
 
     HRESULT         hr;
-    WCHAR           teststr1[] = {'T', 'e', 's', 't', 'e', '1', '2', ' ', 'a', '\0'};
+    WCHAR           teststr1[] = {'T', 'e', 's', 't', 'e', 'a', 'b', ' ', 'a', '\0'};
     void            *String = (WCHAR *) &teststr1;      /* ScriptStringAnalysis needs void */
     int             String_len = (sizeof(teststr1)/sizeof(WCHAR))-1;
     int             Glyphs = String_len * 2 + 16;       /* size of buffer as recommended  */
@@ -1266,6 +1266,10 @@ static void test_ScriptStringXtoCP_CPtoX(HDC hdc)
      * Here we generate an SCRIPT_STRING_ANALYSIS that will be used as input to the
      * following character positions to X and X to character position functions.
      */
+    memset(&Control, 0, sizeof(SCRIPT_CONTROL));
+    memset(&State, 0, sizeof(SCRIPT_STATE));
+    memset(&Tabdef, 0, sizeof(SCRIPT_TABDEF));
+
     hr = ScriptStringAnalyse( hdc, String, String_len, Glyphs, Charset, Flags,
                               ReqWidth, &Control, &State, NULL, &Tabdef,
                               &InClass, &ssa);
@@ -1384,13 +1388,7 @@ static void test_ScriptStringXtoCP_CPtoX(HDC hdc)
         hr = ScriptStringCPtoX(ssa, Cp, fTrailing, &X);
         ok(hr == E_INVALIDARG, "ScriptStringCPtoX should return E_INVALIDARG not %08x\n", hr);
 
-        hr = ScriptStringFree(&ssa);
-        /*
-         * ScriptStringCPtoX should free ssa, hence ScriptStringFree should fail
-         */
-        ok(hr == E_INVALIDARG ||
-           hr == E_FAIL, /* win2k3 */
-           "ScriptStringFree should return E_INVALIDARG or E_FAIL not %08x\n", hr);
+        ScriptStringFree(&ssa);
     }
 }
 
@@ -1730,6 +1728,7 @@ START_TEST(usp10)
     lf.lfWidth = 10;
 
     hfont = SelectObject(hdc, CreateFontIndirectA(&lf));
+    ok(hfont != NULL, "SelectObject failed: %p\n", hfont);
 
     test_ScriptItemize();
     test_ScriptItemIzeShapePlace(hdc,pwOutGlyphs);

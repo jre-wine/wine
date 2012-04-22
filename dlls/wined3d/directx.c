@@ -30,7 +30,6 @@
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 WINE_DECLARE_DEBUG_CHANNEL(d3d_caps);
 
-#define GLINFO_LOCATION (*gl_info)
 #define WINE_DEFAULT_VIDMEM (64 * 1024 * 1024)
 
 /* The d3d device ID */
@@ -74,6 +73,7 @@ static const struct {
     {"GL_ARB_shader_objects",               ARB_SHADER_OBJECTS,             0                           },
     {"GL_ARB_shader_texture_lod",           ARB_SHADER_TEXTURE_LOD,         0                           },
     {"GL_ARB_shading_language_100",         ARB_SHADING_LANGUAGE_100,       0                           },
+    {"GL_ARB_shadow",                       ARB_SHADOW,                     0                           },
     {"GL_ARB_sync",                         ARB_SYNC,                       0                           },
     {"GL_ARB_texture_border_clamp",         ARB_TEXTURE_BORDER_CLAMP,       0                           },
     {"GL_ARB_texture_compression",          ARB_TEXTURE_COMPRESSION,        0                           },
@@ -326,12 +326,12 @@ fail:
 }
 
 /* Adjust the amount of used texture memory */
-long WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *device, long glram)
+unsigned int WineD3DAdapterChangeGLRam(IWineD3DDeviceImpl *device, unsigned int glram)
 {
     struct wined3d_adapter *adapter = device->adapter;
 
     adapter->UsedTextureRam += glram;
-    TRACE("Adjusted gl ram by %ld to %d\n", glram, adapter->UsedTextureRam);
+    TRACE("Adjusted gl ram by %d to %d\n", glram, adapter->UsedTextureRam);
     return adapter->UsedTextureRam;
 }
 
@@ -452,7 +452,9 @@ static BOOL match_geforce5(const struct wined3d_gl_info *gl_info, const char *gl
 {
     if (card_vendor == HW_VENDOR_NVIDIA)
     {
-        if (device == CARD_NVIDIA_GEFORCEFX_5800 || device == CARD_NVIDIA_GEFORCEFX_5600)
+        if (device == CARD_NVIDIA_GEFORCEFX_5200 ||
+            device == CARD_NVIDIA_GEFORCEFX_5600 ||
+            device == CARD_NVIDIA_GEFORCEFX_5800)
         {
             return TRUE;
         }
@@ -529,9 +531,12 @@ static void test_pbo_functionality(struct wined3d_gl_info *gl_info)
     checkGLcall("Loading the PBO test texture");
 
     GL_EXTCALL(glBindBufferARB(GL_PIXEL_UNPACK_BUFFER_ARB, 0));
+    LEAVE_GL();
+
     wglFinish(); /* just to be sure */
 
     memset(check, 0, sizeof(check));
+    ENTER_GL();
     glGetTexImage(GL_TEXTURE_2D, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, check);
     checkGLcall("Reading back the PBO test texture");
 
@@ -996,27 +1001,32 @@ static const struct driver_version_information driver_version_table[] =
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5200,     "NVIDIA GeForce FX 5200",           15, 11, 7516   },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5600,     "NVIDIA GeForce FX 5600",           15, 11, 7516   },
     {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCEFX_5800,     "NVIDIA GeForce FX 5800",           15, 11, 7516   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6200,       "NVIDIA GeForce 6200",              15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6600GT,     "NVIDIA GeForce 6600 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6800,       "NVIDIA GeForce 6800",              15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7300,       "NVIDIA GeForce Go 7300",           15, 11, 8585   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7400,       "NVIDIA GeForce Go 7400",           15, 11, 8585   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7600,       "NVIDIA GeForce 7600 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7800GT,     "NVIDIA GeForce 7800 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8300GS,     "NVIDIA GeForce 8300 GS",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600GT,     "NVIDIA GeForce 8600 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600MGT,    "NVIDIA GeForce 8600M GT",          15, 11, 8585   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    "NVIDIA GeForce 8800 GTS",          15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9200,       "NVIDIA GeForce 9200",              15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9400GT,     "NVIDIA GeForce 9400 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9500GT,     "NVIDIA GeForce 9500 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9600GT,     "NVIDIA GeForce 9600 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9800GT,     "NVIDIA GeForce 9800 GT",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX260,     "NVIDIA GeForce GTX 260",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX275,     "NVIDIA GeForce GTX 275",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX280,     "NVIDIA GeForce GTX 280",           15, 11, 8618   },
-    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT240,      "NVIDIA GeForce GT 240",            15, 11, 8618   },
-
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6200,       "NVIDIA GeForce 6200",              15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6600GT,     "NVIDIA GeForce 6600 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_6800,       "NVIDIA GeForce 6800",              15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7300,       "NVIDIA GeForce Go 7300",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7400,       "NVIDIA GeForce Go 7400",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7600,       "NVIDIA GeForce 7600 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_7800GT,     "NVIDIA GeForce 7800 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8300GS,     "NVIDIA GeForce 8300 GS",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600GT,     "NVIDIA GeForce 8600 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8600MGT,    "NVIDIA GeForce 8600M GT",          15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_8800GTS,    "NVIDIA GeForce 8800 GTS",          15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9200,       "NVIDIA GeForce 9200",              15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9400GT,     "NVIDIA GeForce 9400 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9500GT,     "NVIDIA GeForce 9500 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9600GT,     "NVIDIA GeForce 9600 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_9800GT,     "NVIDIA GeForce 9800 GT",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_210,        "NVIDIA GeForce 210",               15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT220,      "NVIDIA GeForce GT 220",            15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT240,      "NVIDIA GeForce GT 240",            15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX260,     "NVIDIA GeForce GTX 260",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX275,     "NVIDIA GeForce GTX 275",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX280,     "NVIDIA GeForce GTX 280",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GT325M,     "NVIDIA GeForce GT 325M",           15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTS350M,    "NVIDIA GeForce GTS 350M",          15, 11, 9745   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX470,     "NVIDIA GeForce GTX 470",           15, 11, 9775   },
+    {HW_VENDOR_NVIDIA,     CARD_NVIDIA_GEFORCE_GTX480,     "NVIDIA GeForce GTX 480",           15, 11, 9775   },
     /* ATI cards. The driver versions are somewhat similar, but not quite the same. Let's hardcode. */
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_9500,           "ATI Radeon 9500",                  14, 10, 6764    },
     {HW_VENDOR_ATI,        CARD_ATI_RADEON_X700,           "ATI Radeon X700 SE",               14, 10, 6764    },
@@ -1200,7 +1210,8 @@ static enum wined3d_gl_vendor wined3d_guess_gl_vendor(struct wined3d_gl_info *gl
         return GL_VENDOR_FGLRX;
 
     if (strstr(gl_vendor_string, "Intel(R)")
-            || strstr(gl_renderer, "Intel(R)")
+            /* Intel switched from Intel(R) to Intel® recently, so just match Intel. */
+            || strstr(gl_renderer, "Intel")
             || strstr(gl_vendor_string, "Intel Inc."))
         return GL_VENDOR_INTEL;
 
@@ -1232,7 +1243,8 @@ static enum wined3d_pci_vendor wined3d_guess_card_vendor(const char *gl_vendor_s
         return HW_VENDOR_ATI;
 
     if (strstr(gl_vendor_string, "Intel(R)")
-            || strstr(gl_renderer, "Intel(R)")
+            /* Intel switched from Intel(R) to Intel® recently, so just match Intel. */
+            || strstr(gl_renderer, "Intel")
             || strstr(gl_vendor_string, "Intel Inc."))
         return HW_VENDOR_INTEL;
 
@@ -1253,6 +1265,36 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
 {
     if (WINE_D3D10_CAPABLE(gl_info))
     {
+        /* Geforce 400 - highend */
+        if (strstr(gl_renderer, "GTX 480"))
+        {
+            *vidmem = 1536;
+            return CARD_NVIDIA_GEFORCE_GTX480;
+        }
+
+        /* Geforce 400 - midend high */
+        if (strstr(gl_renderer, "GTX 470"))
+        {
+            *vidmem = 1280;
+            return CARD_NVIDIA_GEFORCE_GTX470;
+        }
+
+        /* Geforce 300 highend mobile */
+        if (strstr(gl_renderer, "GTS 350M")
+                || strstr(gl_renderer, "GTS 360M"))
+        {
+           *vidmem = 1024;
+           return CARD_NVIDIA_GEFORCE_GTS350M;
+        }
+
+        /* Geforce 300 midend mobile (Geforce GT 325M/330M use the same core) */
+        if (strstr(gl_renderer, "GT 325M")
+                || strstr(gl_renderer, "GT 330M"))
+        {
+           *vidmem = 1024;
+           return CARD_NVIDIA_GEFORCE_GT325M;
+        }
+
         /* Geforce 200 - highend */
         if (strstr(gl_renderer, "GTX 280")
                 || strstr(gl_renderer, "GTX 285")
@@ -1282,6 +1324,22 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
            return CARD_NVIDIA_GEFORCE_GT240;
         }
 
+        /* Geforce 200 lowend */
+        if (strstr(gl_renderer, "GT 220"))
+        {
+           *vidmem = 512; /* The GT 220 has 512-1024MB */
+           return CARD_NVIDIA_GEFORCE_GT220;
+        }
+        /* Geforce 200 lowend (Geforce 305/310 use the same core) */
+        if (strstr(gl_renderer, "Geforce 210")
+                || strstr(gl_renderer, "G 210")
+                || strstr(gl_renderer, "Geforce 305")
+                || strstr(gl_renderer, "Geforce 310"))
+        {
+           *vidmem = 512;
+           return CARD_NVIDIA_GEFORCE_210;
+        }
+
         /* Geforce9 - highend / Geforce 200 - midend (GTS 150/250 are based on the same core) */
         if (strstr(gl_renderer, "9800")
                 || strstr(gl_renderer, "GTS 150")
@@ -1291,8 +1349,9 @@ static enum wined3d_pci_device select_card_nvidia_binary(const struct wined3d_gl
             return CARD_NVIDIA_GEFORCE_9800GT;
         }
 
-        /* Geforce9 - midend */
-        if (strstr(gl_renderer, "9600"))
+        /* Geforce9 - midend (GT 140 uses the same core as the 9600GT) */
+        if (strstr(gl_renderer, "9600")
+                || strstr(gl_renderer, "GT 140"))
         {
             *vidmem = 384; /* The 9600GSO has 384MB, the 9600GT has 512-1024MB */
             return CARD_NVIDIA_GEFORCE_9600GT;
@@ -1673,7 +1732,7 @@ static enum wined3d_pci_device select_card_intel_binary(const struct wined3d_gl_
 {
     if (strstr(gl_renderer, "X3100"))
     {
-        /* MacOS calls the card GMA X3100, Google findings also suggest the name GM965 */
+        /* MacOS calls the card GMA X3100, otherwise known as GM965/GL960 */
         *vidmem = 128;
         return CARD_INTEL_X3100;
     }
@@ -1940,7 +1999,8 @@ static const struct vendor_card_selection vendor_card_select_table[] =
     {GL_VENDOR_FGLRX,  HW_VENDOR_ATI,     "AMD/ATI binary driver",    select_card_ati_binary},
     {GL_VENDOR_MESA,   HW_VENDOR_ATI,     "Mesa AMD/ATI driver",      select_card_ati_mesa},
     {GL_VENDOR_MESA,   HW_VENDOR_NVIDIA,  "Mesa Nouveau driver",      select_card_nvidia_mesa},
-    {GL_VENDOR_MESA,   HW_VENDOR_INTEL,   "Mesa Intel driver",        select_card_intel_mesa}
+    {GL_VENDOR_MESA,   HW_VENDOR_INTEL,   "Mesa Intel driver",        select_card_intel_mesa},
+    {GL_VENDOR_INTEL,  HW_VENDOR_INTEL,   "Mesa Intel driver",        select_card_intel_mesa}
 };
 
 
@@ -2228,6 +2288,8 @@ static BOOL IWineD3DImpl_FillGLCaps(struct wined3d_adapter *adapter)
             gl_info->supported[EXTENSION_MAP[i].extension] = TRUE;
         }
     }
+
+    if (gl_version >= MAKEDWORD_VERSION(2, 0)) gl_info->supported[WINED3D_GL_VERSION_2_0] = TRUE;
 
     if (gl_info->supported[APPLE_FENCE])
     {
@@ -3950,6 +4012,11 @@ static HRESULT WINAPI IWineD3DImpl_CheckDeviceFormat(IWineD3D *iface, UINT Adapt
                 if (!CheckDepthStencilCapability(adapter, adapter_format_desc, format_desc))
                 {
                     TRACE_(d3d_caps)("[FAILED] - No depth stencil support\n");
+                    return WINED3DERR_NOTAVAILABLE;
+                }
+                if ((format_desc->Flags & WINED3DFMT_FLAG_SHADOW) && !gl_info->supported[ARB_SHADOW])
+                {
+                    TRACE_(d3d_caps)("[FAILED] - No shadow sampler support.\n");
                     return WINED3DERR_NOTAVAILABLE;
                 }
                 UsageCaps |= WINED3DUSAGE_DEPTHSTENCIL;

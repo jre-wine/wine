@@ -161,7 +161,6 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
           src_type, dst_type, src_len, dst_len, src, dst, dst_max_len,
           src_status, dst_status, precision, scale, flags);
 
-    *dst_len = get_length(dst_type);
     *dst_status = DBSTATUS_E_BADACCESSOR;
 
     if(IDataConvert_CanConvert(iface, src_type, dst_type) != S_OK)
@@ -214,6 +213,7 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
     case DBTYPE_I2:
     {
         signed short *d = dst;
+        VARIANT tmp;
         switch(src_type)
         {
         case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
@@ -232,6 +232,11 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_UI4:         hr = VarI2FromUI4(*(DWORD*)src, d);             break;
         case DBTYPE_I8:          hr = VarI2FromI8(*(LONGLONG*)src, d);           break;
         case DBTYPE_UI8:         hr = VarI2FromUI8(*(ULONGLONG*)src, d);         break;
+        case DBTYPE_VARIANT:
+            VariantInit(&tmp);
+            if ((hr = VariantChangeType(&tmp, (VARIANT*)src, 0, VT_I2)) == S_OK)
+                *d = V_I2(&tmp);
+            break;
         default: FIXME("Unimplemented conversion %04x -> I2\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -240,6 +245,7 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
     case DBTYPE_I4:
     {
         signed int *d = dst;
+        VARIANT tmp;
         switch(src_type)
         {
         case DBTYPE_EMPTY:       *d = 0; hr = S_OK;                              break;
@@ -258,6 +264,11 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
         case DBTYPE_UI4:         hr = VarI4FromUI4(*(DWORD*)src, d);             break;
         case DBTYPE_I8:          hr = VarI4FromI8(*(LONGLONG*)src, d);           break;
         case DBTYPE_UI8:         hr = VarI4FromUI8(*(ULONGLONG*)src, d);         break;
+        case DBTYPE_VARIANT:
+            VariantInit(&tmp);
+            if ((hr = VariantChangeType(&tmp, (VARIANT*)src, 0, VT_I4)) == S_OK)
+                *d = V_I4(&tmp);
+            break;
         default: FIXME("Unimplemented conversion %04x -> I4\n", src_type); return E_NOTIMPL;
         }
         break;
@@ -571,10 +582,14 @@ static HRESULT WINAPI convert_DataConvert(IDataConvert* iface,
     if(hr == DISP_E_OVERFLOW)
     {
         *dst_status = DBSTATUS_E_DATAOVERFLOW;
+        *dst_len = get_length(dst_type);
         hr = DB_E_ERRORSOCCURRED;
     }
     else if(hr == S_OK)
+    {
         *dst_status = DBSTATUS_S_OK;
+        *dst_len = get_length(dst_type);
+    }
 
     return hr;
 }

@@ -4096,9 +4096,11 @@ static HRESULT StorageBaseImpl_CopyStream(
       if (SUCCEEDED(hr))
         hr = StorageBaseImpl_StreamWriteAt(dst, dst_entry, bytes_copied, bytestocopy,
           data, &byteswritten);
-      if (SUCCEEDED(hr) && byteswritten != bytestocopy) hr = STG_E_WRITEFAULT;
-
-      bytes_copied.QuadPart += byteswritten;
+      if (SUCCEEDED(hr))
+      {
+        if (byteswritten != bytestocopy) hr = STG_E_WRITEFAULT;
+        bytes_copied.QuadPart += byteswritten;
+      }
     }
   }
 
@@ -4158,42 +4160,43 @@ static HRESULT TransactedSnapshotImpl_EnsureReadEntry(
   TransactedSnapshotImpl *This, DirRef entry)
 {
   HRESULT hr=S_OK;
+  DirEntry data;
 
   if (!This->entries[entry].read)
   {
     hr = StorageBaseImpl_ReadDirEntry(This->transactedParent,
         This->entries[entry].transactedParentEntry,
-        &This->entries[entry].data);
+        &data);
 
-    if (SUCCEEDED(hr) && This->entries[entry].data.leftChild != DIRENTRY_NULL)
+    if (SUCCEEDED(hr) && data.leftChild != DIRENTRY_NULL)
     {
-      This->entries[entry].data.leftChild =
-          TransactedSnapshotImpl_CreateStubEntry(This, This->entries[entry].data.leftChild);
+      data.leftChild = TransactedSnapshotImpl_CreateStubEntry(This, data.leftChild);
 
-      if (This->entries[entry].data.leftChild == DIRENTRY_NULL)
+      if (data.leftChild == DIRENTRY_NULL)
         hr = E_OUTOFMEMORY;
     }
 
-    if (SUCCEEDED(hr) && This->entries[entry].data.rightChild != DIRENTRY_NULL)
+    if (SUCCEEDED(hr) && data.rightChild != DIRENTRY_NULL)
     {
-      This->entries[entry].data.rightChild =
-          TransactedSnapshotImpl_CreateStubEntry(This, This->entries[entry].data.rightChild);
+      data.rightChild = TransactedSnapshotImpl_CreateStubEntry(This, data.rightChild);
 
-      if (This->entries[entry].data.rightChild == DIRENTRY_NULL)
+      if (data.rightChild == DIRENTRY_NULL)
         hr = E_OUTOFMEMORY;
     }
 
-    if (SUCCEEDED(hr) && This->entries[entry].data.dirRootEntry != DIRENTRY_NULL)
+    if (SUCCEEDED(hr) && data.dirRootEntry != DIRENTRY_NULL)
     {
-      This->entries[entry].data.dirRootEntry =
-          TransactedSnapshotImpl_CreateStubEntry(This, This->entries[entry].data.dirRootEntry);
+      data.dirRootEntry = TransactedSnapshotImpl_CreateStubEntry(This, data.dirRootEntry);
 
-      if (This->entries[entry].data.dirRootEntry == DIRENTRY_NULL)
+      if (data.dirRootEntry == DIRENTRY_NULL)
         hr = E_OUTOFMEMORY;
     }
 
     if (SUCCEEDED(hr))
+    {
+      memcpy(&This->entries[entry].data, &data, sizeof(DirEntry));
       This->entries[entry].read = 1;
+    }
   }
 
   return hr;
@@ -4370,7 +4373,7 @@ static HRESULT TransactedSnapshotImpl_CopyTree(TransactedSnapshotImpl* This)
 {
   DirRef cursor;
   TransactedDirEntry *entry;
-  HRESULT hr;
+  HRESULT hr = S_OK;
 
   cursor = This->base.storageDirEntry;
   entry = &This->entries[cursor];
@@ -6387,6 +6390,9 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
   ULONG nextBlockIndex = BLOCK_END_OF_CHAIN;
   HRESULT res = S_OK;
   ULONG smallBlocksPerBigBlock;
+  DirEntry rootEntry;
+  ULONG blocksRequired;
+  ULARGE_INTEGER old_size, size_required;
 
   offsetOfBlockInDepot.u.HighPart = 0;
 
@@ -6446,34 +6452,29 @@ static ULONG SmallBlockChainStream_GetNextFreeBlock(
   /*
    * Verify if we have to allocate big blocks to contain small blocks
    */
-  if (blockIndex % smallBlocksPerBigBlock == 0)
+  blocksRequired = (blockIndex / smallBlocksPerBigBlock) + 1;
+
+  size_required.QuadPart = blocksRequired * This->parentStorage->bigBlockSize;
+
+  old_size = BlockChainStream_GetSize(This->parentStorage->smallBlockRootChain);
+
+  if (size_required.QuadPart > old_size.QuadPart)
   {
-    DirEntry rootEntry;
-    ULONG blocksRequired = (blockIndex / smallBlocksPerBigBlock) + 1;
-    ULARGE_INTEGER old_size, size_required;
+    BlockChainStream_SetSize(
+      This->parentStorage->smallBlockRootChain,
+      size_required);
 
-    size_required.QuadPart = blocksRequired * This->parentStorage->bigBlockSize;
+    StorageImpl_ReadDirEntry(
+      This->parentStorage,
+      This->parentStorage->base.storageDirEntry,
+      &rootEntry);
 
-    old_size = BlockChainStream_GetSize(This->parentStorage->smallBlockRootChain);
+    rootEntry.size = size_required;
 
-    if (size_required.QuadPart > old_size.QuadPart)
-    {
-      BlockChainStream_SetSize(
-        This->parentStorage->smallBlockRootChain,
-        size_required);
-
-      StorageImpl_ReadDirEntry(
-        This->parentStorage,
-        This->parentStorage->base.storageDirEntry,
-        &rootEntry);
-
-      rootEntry.size = size_required;
-
-      StorageImpl_WriteDirEntry(
-        This->parentStorage,
-        This->parentStorage->base.storageDirEntry,
-        &rootEntry);
-    }
+    StorageImpl_WriteDirEntry(
+      This->parentStorage,
+      This->parentStorage->base.storageDirEntry,
+      &rootEntry);
   }
 
   return blockIndex;

@@ -28,8 +28,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
 
-#define GLINFO_LOCATION (*gl_info)
-
 static DWORD wined3d_context_tls_idx;
 
 /* FBO helper functions */
@@ -84,19 +82,19 @@ void context_bind_fbo(struct wined3d_context *context, GLenum target, GLuint *fb
 }
 
 /* GL locking is done by the caller */
-static void context_clean_fbo_attachments(const struct wined3d_gl_info *gl_info)
+static void context_clean_fbo_attachments(const struct wined3d_gl_info *gl_info, GLenum target)
 {
     unsigned int i;
 
     for (i = 0; i < gl_info->limits.buffers; ++i)
     {
-        gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, 0, 0);
+        gl_info->fbo_ops.glFramebufferTexture2D(target, GL_COLOR_ATTACHMENT0 + i, GL_TEXTURE_2D, 0, 0);
         checkGLcall("glFramebufferTexture2D()");
     }
-    gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    gl_info->fbo_ops.glFramebufferTexture2D(target, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     checkGLcall("glFramebufferTexture2D()");
 
-    gl_info->fbo_ops.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
+    gl_info->fbo_ops.glFramebufferTexture2D(target, GL_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);
     checkGLcall("glFramebufferTexture2D()");
 }
 
@@ -106,7 +104,7 @@ static void context_destroy_fbo(struct wined3d_context *context, GLuint *fbo)
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
     context_bind_fbo(context, GL_FRAMEBUFFER, fbo);
-    context_clean_fbo_attachments(gl_info);
+    context_clean_fbo_attachments(gl_info, GL_FRAMEBUFFER);
     context_bind_fbo(context, GL_FRAMEBUFFER, NULL);
 
     gl_info->fbo_ops.glDeleteFramebuffers(1, fbo);
@@ -253,7 +251,7 @@ void context_attach_depth_stencil_fbo(struct wined3d_context *context,
 }
 
 /* GL locking is done by the caller */
-void context_attach_surface_fbo(const struct wined3d_context *context,
+static void context_attach_surface_fbo(const struct wined3d_context *context,
         GLenum fbo_target, DWORD idx, IWineD3DSurfaceImpl *surface)
 {
     const struct wined3d_gl_info *gl_info = context->gl_info;
@@ -342,7 +340,7 @@ static void context_reuse_fbo_entry(struct wined3d_context *context, GLenum targ
     const struct wined3d_gl_info *gl_info = context->gl_info;
 
     context_bind_fbo(context, target, &entry->id);
-    context_clean_fbo_attachments(gl_info);
+    context_clean_fbo_attachments(gl_info, target);
 
     memcpy(entry->render_targets, render_targets, gl_info->limits.buffers * sizeof(*entry->render_targets));
     entry->depth_stencil = depth_stencil;
@@ -1484,6 +1482,12 @@ struct wined3d_context *context_create(IWineD3DSwapChainImpl *swapchain, IWineD3
         checkGLcall("glTexEnvi(GL_POINT_SPRITE_ARB, GL_COORD_REPLACE_ARB, GL_TRUE)");
     }
 
+    if (gl_info->supported[WINED3D_GL_VERSION_2_0])
+    {
+        glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN, GL_UPPER_LEFT);
+        checkGLcall("glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN, GL_UPPER_LEFT)");
+    }
+
     if (gl_info->supported[ARB_PROVOKING_VERTEX])
     {
         GL_EXTCALL(glProvokingVertex(GL_FIRST_VERTEX_CONVENTION));
@@ -1941,6 +1945,12 @@ static inline void context_set_render_offscreen(struct wined3d_context *context,
 {
     if (context->render_offscreen == offscreen) return;
 
+    if (context->gl_info->supported[WINED3D_GL_VERSION_2_0])
+    {
+        glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN, offscreen ? GL_LOWER_LEFT : GL_UPPER_LEFT);
+        checkGLcall("glPointParameteri(GL_POINT_SPRITE_COORD_ORIGIN, ...)");
+    }
+
     Context_MarkStateDirty(context, STATE_TRANSFORM(WINED3DTS_PROJECTION), StateTable);
     Context_MarkStateDirty(context, STATE_VDECL, StateTable);
     Context_MarkStateDirty(context, STATE_VIEWPORT, StateTable);
@@ -1967,13 +1977,13 @@ static BOOL match_depth_stencil_format(const struct wined3d_format_desc *existin
     return TRUE;
 }
 /* The caller provides a context */
-static void context_validate_onscreen_formats(IWineD3DDeviceImpl *device, struct wined3d_context *context)
+static void context_validate_onscreen_formats(IWineD3DDeviceImpl *device,
+        struct wined3d_context *context, IWineD3DSurfaceImpl *depth_stencil)
 {
     /* Onscreen surfaces are always in a swapchain */
-    IWineD3DSurfaceImpl *depth_stencil = device->depth_stencil;
     IWineD3DSwapChainImpl *swapchain = (IWineD3DSwapChainImpl *)context->current_rt->container;
 
-    if (!depth_stencil) return;
+    if (context->render_offscreen || !depth_stencil) return;
     if (match_depth_stencil_format(swapchain->ds_format, depth_stencil->resource.format_desc)) return;
 
     /* TODO: If the requested format would satisfy the needs of the existing one(reverse match),
@@ -1992,6 +2002,8 @@ void context_apply_blit_state(struct wined3d_context *context, IWineD3DDeviceImp
 {
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
+        context_validate_onscreen_formats(device, context, NULL);
+
         if (context->render_offscreen)
         {
             FIXME("Applying blit state for an offscreen target with ORM_FBO. This should be avoided.\n");
@@ -2003,8 +2015,6 @@ void context_apply_blit_state(struct wined3d_context *context, IWineD3DDeviceImp
         }
         else
         {
-            context_validate_onscreen_formats(device, context);
-
             ENTER_GL();
             context_bind_fbo(context, GL_FRAMEBUFFER, NULL);
             LEAVE_GL();
@@ -2032,7 +2042,8 @@ void context_apply_clear_state(struct wined3d_context *context, IWineD3DDeviceIm
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
-        if (!context->render_offscreen) context_validate_onscreen_formats(device, context);
+        context_validate_onscreen_formats(device, context, depth_stencil);
+
         ENTER_GL();
         context_apply_fbo_state_blit(context, GL_FRAMEBUFFER, render_target, depth_stencil);
         LEAVE_GL();
@@ -2077,9 +2088,10 @@ void context_apply_draw_state(struct wined3d_context *context, IWineD3DDeviceImp
 
     if (wined3d_settings.offscreen_rendering_mode == ORM_FBO)
     {
+        context_validate_onscreen_formats(device, context, device->depth_stencil);
+
         if (!context->render_offscreen)
         {
-            context_validate_onscreen_formats(device, context);
             ENTER_GL();
             context_apply_fbo_state(context, GL_FRAMEBUFFER, NULL, NULL);
             LEAVE_GL();

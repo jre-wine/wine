@@ -379,6 +379,9 @@ typedef enum dwarf_operation_e
   DW_OP_form_tls_address                = 0x9b,
   DW_OP_call_frame_cfa                  = 0x9c,
   DW_OP_bit_piece                       = 0x9d,
+  /** Dwarf4 new values */
+  DW_OP_implicit_value                  = 0x9e,
+  DW_OP_stack_value                     = 0x9f,
 
   /* Implementation defined extensions */
   DW_OP_lo_user                         = 0xe0,
@@ -418,6 +421,8 @@ enum dwarf_calling_convention
 #define DW_LNE_end_sequence             0x01
 #define DW_LNE_set_address              0x02
 #define DW_LNE_define_file              0x03
+/* Dwarf4 new values */
+#define DW_LNE_set_discriminator        0x04
 
 #define DW_CIE_ID                       ~(0x0)
 

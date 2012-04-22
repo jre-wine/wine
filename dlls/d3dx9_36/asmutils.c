@@ -74,6 +74,7 @@ DWORD d3d9_srcmod(DWORD bwriter_srcmod) {
         case BWRITERSPSM_NEG:        return D3DSPSM_NEG;
         case BWRITERSPSM_ABS:        return D3DSPSM_ABS;
         case BWRITERSPSM_ABSNEG:     return D3DSPSM_ABSNEG;
+        case BWRITERSPSM_NOT:        return D3DSPSM_NOT;
         default:
             FIXME("Unhandled BWRITERSPSM token %u\n", bwriter_srcmod);
             return 0;
@@ -88,6 +89,31 @@ DWORD d3d9_dstmod(DWORD bwriter_mod) {
     if(bwriter_mod & BWRITERSPDM_MSAMPCENTROID)     ret |= D3DSPDM_MSAMPCENTROID;
 
     return ret;
+}
+
+DWORD d3d9_comparetype(DWORD asmshader_comparetype) {
+    switch(asmshader_comparetype) {
+        case BWRITER_COMPARISON_GT:     return D3DSPC_GT;
+        case BWRITER_COMPARISON_EQ:     return D3DSPC_EQ;
+        case BWRITER_COMPARISON_GE:     return D3DSPC_GE;
+        case BWRITER_COMPARISON_LT:     return D3DSPC_LT;
+        case BWRITER_COMPARISON_NE:     return D3DSPC_NE;
+        case BWRITER_COMPARISON_LE:     return D3DSPC_LE;
+        default:
+            FIXME("Unexpected BWRITER_COMPARISON type %u\n", asmshader_comparetype);
+            return 0;
+    }
+}
+
+DWORD d3d9_sampler(DWORD bwriter_sampler) {
+    if(bwriter_sampler == BWRITERSTT_UNKNOWN)   return D3DSTT_UNKNOWN;
+    if(bwriter_sampler == BWRITERSTT_1D)        return D3DSTT_1D;
+    if(bwriter_sampler == BWRITERSTT_2D)        return D3DSTT_2D;
+    if(bwriter_sampler == BWRITERSTT_CUBE)      return D3DSTT_CUBE;
+    if(bwriter_sampler == BWRITERSTT_VOLUME)    return D3DSTT_VOLUME;
+    FIXME("Unexpected BWRITERSAMPLER_TEXTURE_TYPE type %u\n", bwriter_sampler);
+
+    return 0;
 }
 
 DWORD d3d9_register(DWORD bwriter_register) {
@@ -141,19 +167,50 @@ DWORD d3d9_opcode(DWORD bwriter_opcode) {
         case BWRITERSIO_M3x4:        return D3DSIO_M3x4;
         case BWRITERSIO_M3x3:        return D3DSIO_M3x3;
         case BWRITERSIO_M3x2:        return D3DSIO_M3x2;
+        case BWRITERSIO_CALL:        return D3DSIO_CALL;
+        case BWRITERSIO_CALLNZ:      return D3DSIO_CALLNZ;
+        case BWRITERSIO_LOOP:        return D3DSIO_LOOP;
+        case BWRITERSIO_RET:         return D3DSIO_RET;
+        case BWRITERSIO_ENDLOOP:     return D3DSIO_ENDLOOP;
+        case BWRITERSIO_LABEL:       return D3DSIO_LABEL;
+        case BWRITERSIO_DCL:         return D3DSIO_DCL;
         case BWRITERSIO_POW:         return D3DSIO_POW;
         case BWRITERSIO_CRS:         return D3DSIO_CRS;
         case BWRITERSIO_SGN:         return D3DSIO_SGN;
         case BWRITERSIO_ABS:         return D3DSIO_ABS;
         case BWRITERSIO_NRM:         return D3DSIO_NRM;
         case BWRITERSIO_SINCOS:      return D3DSIO_SINCOS;
+        case BWRITERSIO_REP:         return D3DSIO_REP;
+        case BWRITERSIO_ENDREP:      return D3DSIO_ENDREP;
+        case BWRITERSIO_IF:          return D3DSIO_IF;
+        case BWRITERSIO_IFC:         return D3DSIO_IFC;
+        case BWRITERSIO_ELSE:        return D3DSIO_ELSE;
+        case BWRITERSIO_ENDIF:       return D3DSIO_ENDIF;
+        case BWRITERSIO_BREAK:       return D3DSIO_BREAK;
+        case BWRITERSIO_BREAKC:      return D3DSIO_BREAKC;
         case BWRITERSIO_MOVA:        return D3DSIO_MOVA;
+        case BWRITERSIO_DEFB:        return D3DSIO_DEFB;
+        case BWRITERSIO_DEFI:        return D3DSIO_DEFI;
+
+        case BWRITERSIO_TEXKILL:     return D3DSIO_TEXKILL;
+        case BWRITERSIO_TEX:         return D3DSIO_TEX;
         case BWRITERSIO_EXPP:        return D3DSIO_EXPP;
         case BWRITERSIO_LOGP:        return D3DSIO_LOGP;
+        case BWRITERSIO_DEF:         return D3DSIO_DEF;
+        case BWRITERSIO_CMP:         return D3DSIO_CMP;
+        case BWRITERSIO_DP2ADD:      return D3DSIO_DP2ADD;
+        case BWRITERSIO_DSX:         return D3DSIO_DSX;
+        case BWRITERSIO_DSY:         return D3DSIO_DSY;
+        case BWRITERSIO_TEXLDD:      return D3DSIO_TEXLDD;
+        case BWRITERSIO_SETP:        return D3DSIO_SETP;
         case BWRITERSIO_TEXLDL:      return D3DSIO_TEXLDL;
+        case BWRITERSIO_BREAKP:      return D3DSIO_BREAKP;
 
         case BWRITERSIO_COMMENT:     return D3DSIO_COMMENT;
         case BWRITERSIO_END:         return D3DSIO_END;
+
+        case BWRITERSIO_TEXLDP:      return D3DSIO_TEX | D3DSI_TEXLD_PROJECT;
+        case BWRITERSIO_TEXLDB:      return D3DSIO_TEX | D3DSI_TEXLD_BIAS;
 
         default:
             FIXME("Unhandled BWRITERSIO token %u\n", bwriter_opcode);
@@ -167,6 +224,7 @@ const char *debug_print_srcmod(DWORD mod) {
         case BWRITERSPSM_NEG:       return "D3DSPSM_NEG";
         case BWRITERSPSM_ABS:       return "D3DSPSM_ABS";
         case BWRITERSPSM_ABSNEG:    return "D3DSPSM_ABSNEG";
+        case BWRITERSPSM_NOT:       return "D3DSPSM_NOT";
         default:                    return "Unknown source modifier\n";
     }
 }
@@ -206,13 +264,10 @@ static const char *get_regname(const struct shader_reg *reg, shader_type st) {
             return wine_dbg_sprintf("v%u", reg->regnum);
         case BWRITERSPR_CONST:
             return wine_dbg_sprintf("c%u", reg->regnum);
-        /* case BWRITERSPR_ADDR: */
+        case BWRITERSPR_ADDR:
+            return wine_dbg_sprintf("a%u", reg->regnum);
         case BWRITERSPR_TEXTURE:
-            if(st == ST_VERTEX) {
-                return wine_dbg_sprintf("a%u", reg->regnum);
-            } else {
-                return wine_dbg_sprintf("t%u", reg->regnum);
-            }
+            return wine_dbg_sprintf("t%u", reg->regnum);
         case BWRITERSPR_RASTOUT:
             switch(reg->regnum) {
                 case BWRITERSRO_POSITION:   return "oPos";
@@ -222,9 +277,10 @@ static const char *get_regname(const struct shader_reg *reg, shader_type st) {
             }
         case BWRITERSPR_ATTROUT:
             return wine_dbg_sprintf("oD%u", reg->regnum);
-        /* case BWRITERSPR_TEXCRDOUT: */
+        case BWRITERSPR_TEXCRDOUT:
+            return wine_dbg_sprintf("oT%u", reg->regnum);
         case BWRITERSPR_OUTPUT:
-            return wine_dbg_sprintf("o[T]%u", reg->regnum);
+            return wine_dbg_sprintf("o%u", reg->regnum);
         case BWRITERSPR_CONSTINT:
             return wine_dbg_sprintf("i%u", reg->regnum);
         case BWRITERSPR_COLOROUT:
@@ -247,7 +303,8 @@ static const char *get_regname(const struct shader_reg *reg, shader_type st) {
             return wine_dbg_sprintf("l%u", reg->regnum);
         case BWRITERSPR_PREDICATE:
             return wine_dbg_sprintf("p%u", reg->regnum);
-        default: return "unknown regname";
+        default:
+            return wine_dbg_sprintf("unknown regname %#x", reg->type);
     }
 }
 
@@ -340,8 +397,25 @@ const char *debug_print_srcreg(const struct shader_reg *reg, shader_type st) {
             return wine_dbg_sprintf("-%s%s_abs%s", get_regname(reg, st),
                                     debug_print_relarg(reg),
                                     debug_print_swizzle(reg->swizzle));
+        case BWRITERSPSM_NOT:
+            return wine_dbg_sprintf("!%s%s%s", get_regname(reg, st),
+                                    debug_print_relarg(reg),
+                                    debug_print_swizzle(reg->swizzle));
     }
     return "Unknown modifier";
+}
+
+const char *debug_print_comp(DWORD comp) {
+    switch(comp) {
+        case BWRITER_COMPARISON_NONE: return "";
+        case BWRITER_COMPARISON_GT:   return "_gt";
+        case BWRITER_COMPARISON_EQ:   return "_eq";
+        case BWRITER_COMPARISON_GE:   return "_ge";
+        case BWRITER_COMPARISON_LT:   return "_lt";
+        case BWRITER_COMPARISON_NE:   return "_ne";
+        case BWRITER_COMPARISON_LE:   return "_le";
+        default: return "_unknown";
+    }
 }
 
 const char *debug_print_opcode(DWORD opcode) {
@@ -371,16 +445,46 @@ const char *debug_print_opcode(DWORD opcode) {
         case BWRITERSIO_M3x4:         return "m3x4";
         case BWRITERSIO_M3x3:         return "m3x3";
         case BWRITERSIO_M3x2:         return "m3x2";
+        case BWRITERSIO_CALL:         return "call";
+        case BWRITERSIO_CALLNZ:       return "callnz";
+        case BWRITERSIO_LOOP:         return "loop";
+        case BWRITERSIO_RET:          return "ret";
+        case BWRITERSIO_ENDLOOP:      return "endloop";
+        case BWRITERSIO_LABEL:        return "label";
+        case BWRITERSIO_DCL:          return "dcl";
         case BWRITERSIO_POW:          return "pow";
         case BWRITERSIO_CRS:          return "crs";
         case BWRITERSIO_SGN:          return "sgn";
         case BWRITERSIO_ABS:          return "abs";
         case BWRITERSIO_NRM:          return "nrm";
         case BWRITERSIO_SINCOS:       return "sincos";
+        case BWRITERSIO_REP:          return "rep";
+        case BWRITERSIO_ENDREP:       return "endrep";
+        case BWRITERSIO_IF:           return "if";
+        case BWRITERSIO_IFC:          return "ifc";
+        case BWRITERSIO_ELSE:         return "else";
+        case BWRITERSIO_ENDIF:        return "endif";
+        case BWRITERSIO_BREAK:        return "break";
+        case BWRITERSIO_BREAKC:       return "breakc";
         case BWRITERSIO_MOVA:         return "mova";
+        case BWRITERSIO_DEFB:         return "defb";
+        case BWRITERSIO_DEFI:         return "defi";
+        case BWRITERSIO_TEXKILL:      return "texkill";
+        case BWRITERSIO_TEX:          return "tex";
         case BWRITERSIO_EXPP:         return "expp";
         case BWRITERSIO_LOGP:         return "logp";
+        case BWRITERSIO_DEF:          return "def";
+        case BWRITERSIO_CMP:          return "cmp";
+        case BWRITERSIO_DP2ADD:       return "dp2add";
+        case BWRITERSIO_DSX:          return "dsx";
+        case BWRITERSIO_DSY:          return "dsy";
+        case BWRITERSIO_TEXLDD:       return "texldd";
+        case BWRITERSIO_SETP:         return "setp";
         case BWRITERSIO_TEXLDL:       return "texldl";
+        case BWRITERSIO_BREAKP:       return "breakp";
+
+        case BWRITERSIO_TEXLDP:       return "texldp";
+        case BWRITERSIO_TEXLDB:       return "texldb";
 
         default:                      return "unknown";
     }

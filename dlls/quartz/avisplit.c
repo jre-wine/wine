@@ -206,7 +206,6 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
         {
             DWORD flags = This->oldindex->aIndex[stream->pos].dwFlags;
             DWORD size = This->oldindex->aIndex[stream->pos].dwSize;
-            BOOL keyframe;
 
             /* End of file */
             if (stream->index)
@@ -215,8 +214,6 @@ static HRESULT AVISplitter_next_request(AVISplitterImpl *This, DWORD streamnumbe
                 IMediaSample_Release(sample);
                 return S_FALSE;
             }
-
-            keyframe = !!(flags & AVIIF_KEYFRAME);
 
             rtSampleStart = MEDIATIME_FROM_BYTES(This->offset);
             rtSampleStart += MEDIATIME_FROM_BYTES(This->oldindex->aIndex[stream->pos].dwOffset);
@@ -773,7 +770,7 @@ static HRESULT AVISplitter_ProcessStreamList(AVISplitterImpl * This, const BYTE 
         {
             const AVISUPERINDEX *pIndex = (const AVISUPERINDEX *)pChunk;
             DWORD x;
-            long rest = pIndex->cb - sizeof(AVISUPERINDEX) + sizeof(RIFFCHUNK) + sizeof(pIndex->aIndex[0]) * ANYSIZE_ARRAY;
+            UINT rest = pIndex->cb - sizeof(AVISUPERINDEX) + sizeof(RIFFCHUNK) + sizeof(pIndex->aIndex[0]) * ANYSIZE_ARRAY;
 
             if (pIndex->cb < sizeof(AVISUPERINDEX) - sizeof(RIFFCHUNK))
             {

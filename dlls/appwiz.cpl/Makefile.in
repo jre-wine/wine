@@ -9,16 +9,19 @@ C_SRCS = \
 	appwiz.c
 
 RC_SRCS = \
+	Da.rc \
 	De.rc \
 	En.rc \
 	Es.rc \
 	Fr.rc \
+	Hu.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
 	Lt.rc \
 	Nl.rc \
 	No.rc \
+	Pl.rc \
 	Pt.rc \
 	Ro.rc \
 	Ru.rc \

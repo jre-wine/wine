@@ -411,7 +411,7 @@ static INT_PTR cabinet_copy_file(FDINOTIFICATIONTYPE fdint,
 
             GetTempFileNameW(szBackSlash, szMsi, 0, tmpfileW);
             len = strlenW(path) + strlenW(tmpfileW) + 1;
-            if (!(tmppathW = HeapAlloc(GetProcessHeap(), 0, len * sizeof(WCHAR))))
+            if (!(tmppathW = msi_alloc(len * sizeof(WCHAR))))
                 return ERROR_OUTOFMEMORY;
 
             strcpyW(tmppathW, path);
@@ -429,7 +429,7 @@ static INT_PTR cabinet_copy_file(FDINOTIFICATIONTYPE fdint,
             else
                 WARN("failed to schedule rename operation %s (error %d)\n", debugstr_w(path), GetLastError());
 
-            HeapFree(GetProcessHeap(), 0, tmppathW);
+            msi_free(tmppathW);
         }
         else
             WARN("failed to create %s (error %d)\n", debugstr_w(path), err);
@@ -471,8 +471,6 @@ static INT_PTR cabinet_close_file_info(FDINOTIFICATIONTYPE fdint,
 
 static INT_PTR CDECL cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin)
 {
-    TRACE("(%d)\n", fdint);
-
     switch (fdint)
     {
     case fdintPARTIAL_FILE:
@@ -494,8 +492,6 @@ static INT_PTR CDECL cabinet_notify(FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION 
 
 static INT_PTR CDECL cabinet_notify_stream( FDINOTIFICATIONTYPE fdint, PFDINOTIFICATION pfdin )
 {
-    TRACE("(%d)\n", fdint);
-
     switch (fdint)
     {
     case fdintCOPY_FILE:
@@ -633,12 +629,10 @@ static UINT msi_load_media_info(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO
     static const WCHAR query[] = {
         'S','E','L','E','C','T',' ','*',' ', 'F','R','O','M',' ',
         '`','M','e','d','i','a','`',' ','W','H','E','R','E',' ',
-        '`','L','a','s','t','S','e','q','u','e','n','c','e','`',' ','>','=',
-        ' ','%','i',' ','A','N','D',' ','`','D','i','s','k','I','d','`',' ','>','=',
-        ' ','%','i',' ','O','R','D','E','R',' ','B','Y',' ',
-        '`','D','i','s','k','I','d','`',0};
+        '`','L','a','s','t','S','e','q','u','e','n','c','e','`',' ','>','=',' ','%','i',
+        ' ','O','R','D','E','R',' ','B','Y',' ','`','D','i','s','k','I','d','`',0};
 
-    row = MSI_QueryGetRecord(package->db, query, file->Sequence, mi->disk_id);
+    row = MSI_QueryGetRecord(package->db, query, file->Sequence);
     if (!row)
     {
         TRACE("Unable to query row\n");
@@ -774,7 +768,7 @@ UINT ready_media(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi)
     rc = msi_load_media_info(package, file, mi);
     if (rc != ERROR_SUCCESS)
     {
-        ERR("Unable to load media info\n");
+        ERR("Unable to load media info %u\n", rc);
         return ERROR_FUNCTION_FAILED;
     }
 
@@ -791,13 +785,17 @@ UINT ready_media(MSIPACKAGE *package, MSIFILE *file, MSIMEDIAINFO *mi)
     {
         WCHAR temppath[MAX_PATH], *p;
 
-        msi_download_file(cabinet_file, temppath);
+        rc = msi_download_file(cabinet_file, temppath);
+        if (rc != ERROR_SUCCESS)
+        {
+            ERR("Failed to download %s (%u)\n", debugstr_w(cabinet_file), rc);
+            msi_free(cabinet_file);
+            return rc;
+        }
         if ((p = strrchrW(temppath, '\\'))) *p = 0;
-
-        msi_free(mi->sourcedir);
         strcpyW(mi->sourcedir, temppath);
         msi_free(mi->cabinet);
-        strcpyW(mi->cabinet, p + 1);
+        mi->cabinet = strdupW(p + 1);
 
         msi_free(cabinet_file);
         return ERROR_SUCCESS;

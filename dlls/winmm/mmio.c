@@ -667,10 +667,11 @@ static HMMIO MMIO_Open(LPSTR szFileName, MMIOINFO* refmminfo, DWORD dwOpenFlags,
                                         (LPARAM)szFileName, 0, FALSE);
 
     /* grab file size, when possible */
-    if ((pos = _llseek((HFILE)wm->info.adwInfo[0], 0, SEEK_CUR)) != -1)
-    {
-        wm->dwFileSize = _llseek((HFILE)wm->info.adwInfo[0], 0, SEEK_END);
-        _llseek((HFILE)wm->info.adwInfo[0], pos, SEEK_SET);
+    if (wm->info.fccIOProc != FOURCC_MEM && (send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_CUR, FALSE)) != -1) {
+       pos = wm->info.lDiskOffset;
+       send_message(wm->ioProc, &wm->info, MMIOM_SEEK, 0, SEEK_END, FALSE);
+       wm->dwFileSize = wm->info.lDiskOffset;
+       send_message(wm->ioProc, &wm->info, MMIOM_SEEK, pos, SEEK_SET, FALSE);
     }
     else wm->dwFileSize = 0;
 

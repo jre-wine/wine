@@ -60,6 +60,7 @@ static void init_function_pointers(void)
 {
     HMODULE hmod;
     HRESULT hr;
+    void *ptr;
 
     hmod = GetModuleHandleA("shell32.dll");
 
@@ -80,6 +81,33 @@ static void init_function_pointers(void)
     MAKEFUNC_ORD(ILCombine, 25);
     MAKEFUNC_ORD(ILFree, 155);
 #undef MAKEFUNC_ORD
+
+    /* test named exports */
+    ptr = GetProcAddress(hmod, "ILFree");
+    ok(broken(ptr == 0) || ptr != 0, "expected named export for ILFree\n");
+    if (ptr)
+    {
+#define TESTNAMED(f) \
+    ptr = (void*)GetProcAddress(hmod, #f); \
+    ok(ptr != 0, "expected named export for " #f "\n");
+
+        TESTNAMED(ILAppendID);
+        TESTNAMED(ILClone);
+        TESTNAMED(ILCloneFirst);
+        TESTNAMED(ILCombine);
+        TESTNAMED(ILCreateFromPath);
+        TESTNAMED(ILCreateFromPathA);
+        TESTNAMED(ILCreateFromPathW);
+        TESTNAMED(ILFindChild);
+        TESTNAMED(ILFindLastID);
+        TESTNAMED(ILGetNext);
+        TESTNAMED(ILGetSize);
+        TESTNAMED(ILIsEqual);
+        TESTNAMED(ILIsParent);
+        TESTNAMED(ILRemoveLastID);
+        TESTNAMED(ILSaveToStream);
+#undef TESTNAMED
+    }
 
     hmod = GetModuleHandleA("shlwapi.dll");
     pStrRetToBufW = (void*)GetProcAddress(hmod, "StrRetToBufW");
@@ -1996,7 +2024,6 @@ static void test_SHCreateShellItem(void)
 
 static void test_SHParseDisplayName(void)
 {
-    static const WCHAR prefixW[] = {'w','t',0};
     LPITEMIDLIST pidl1, pidl2;
     IShellFolder *desktop;
     WCHAR dirW[MAX_PATH];
@@ -2038,9 +2065,7 @@ if (0)
     pILFree(pidl2);
 
     /* with path */
-    GetTempPathW(sizeof(dirW)/sizeof(WCHAR), dirW);
-    GetTempFileNameW(dirW, prefixW, 0, dirW);
-    CreateFileW(dirW, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+    GetWindowsDirectoryW( dirW, MAX_PATH );
 
     hr = pSHParseDisplayName(dirW, NULL, &pidl1, 0, NULL);
     ok(hr == S_OK, "failed %08x\n", hr);
@@ -2051,8 +2076,6 @@ if (0)
     ok(ret == TRUE, "expected equal idls\n");
     pILFree(pidl1);
     pILFree(pidl2);
-
-    DeleteFileW(dirW);
 
     IShellFolder_Release(desktop);
 }

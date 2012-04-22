@@ -502,11 +502,8 @@ static void SaveSettings(void)
 
 static void TaskManager_OnRestoreMainWindow(void)
 {
-  HMENU hMenu, hOptionsMenu;
   BOOL OnTop;
 
-  hMenu = GetMenu(hMainWnd);
-  hOptionsMenu = GetSubMenu(hMenu, OPTIONS_MENU_INDEX);
   OnTop = ((GetWindowLong(hMainWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0);
   
   OpenIcon(hMainWnd);
@@ -757,7 +754,7 @@ LPWSTR GetLastErrorText(LPWSTR lpwszBuf, DWORD dwSize)
                            NULL );
 
     /* supplied buffer is not long enough */
-    if (!dwRet || ( (long)dwSize < (long)dwRet+14)) {
+    if (!dwRet || ( dwSize < dwRet+14)) {
         lpwszBuf[0] = '\0';
     } else {
         lpwszTemp[strlenW(lpwszTemp)-2] = '\0';  /* remove cr and newline character */
@@ -777,7 +774,6 @@ TaskManagerWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     PAINTSTRUCT     ps;
     LPRECT          pRC;
     RECT            rc;
-    int             idctrl;
     LPNMHDR         pnmh;
     WINDOWPLACEMENT wp;
 
@@ -960,7 +956,6 @@ TaskManagerWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_NOTIFY:
-        idctrl = (int)wParam;
         pnmh = (LPNMHDR)lParam;
         if ((pnmh->hwndFrom == hTabWnd) &&
             (pnmh->idFrom == IDC_TAB) &&

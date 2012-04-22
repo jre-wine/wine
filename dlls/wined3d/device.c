@@ -34,7 +34,6 @@
 #include "wined3d_private.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(d3d);
-#define GLINFO_LOCATION This->adapter->gl_info
 
 /* Define the default light parameters as specified by MSDN */
 const WINED3DLIGHT WINED3D_default_light = {
@@ -213,7 +212,8 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
         else
         {
             TRACE("Stream %u isn't UP, %p\n", element->input_slot, This->stateBlock->streamSource[element->input_slot]);
-            data = buffer_get_memory(This->stateBlock->streamSource[element->input_slot], &buffer_object);
+            data = buffer_get_memory(This->stateBlock->streamSource[element->input_slot],
+                    &This->adapter->gl_info, &buffer_object);
 
             /* Can't use vbo's if the base vertex index is negative. OpenGL doesn't accept negative offsets
              * (or rather offsets bigger than the vbo, because the pointer is unsigned), so use system memory
@@ -224,7 +224,8 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
             {
                 WARN("loadBaseVertexIndex is < 0 (%d), not using vbos\n", This->stateBlock->loadBaseVertexIndex);
                 buffer_object = 0;
-                data = buffer_get_sysmem((struct wined3d_buffer *)This->stateBlock->streamSource[element->input_slot]);
+                data = buffer_get_sysmem((struct wined3d_buffer *)This->stateBlock->streamSource[element->input_slot],
+                        &This->adapter->gl_info);
                 if ((UINT_PTR)data < -This->stateBlock->loadBaseVertexIndex * stride)
                 {
                     FIXME("System memory vertex data load offset is negative!\n");
@@ -327,7 +328,7 @@ void device_stream_info_from_declaration(IWineD3DDeviceImpl *This,
             if (buffer->buffer_object != element->buffer_object)
             {
                 element->buffer_object = 0;
-                element->data = buffer_get_sysmem(buffer) + (ptrdiff_t)element->data;
+                element->data = buffer_get_sysmem(buffer, &This->adapter->gl_info) + (ptrdiff_t)element->data;
             }
 
             query = ((struct wined3d_buffer *) buffer)->query;
@@ -3575,9 +3576,8 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
     /* We might access VBOs from this code, so hold the lock */
     ENTER_GL();
 
-    if (dest->resource.allocatedMemory == NULL) {
-        buffer_get_sysmem(dest);
-    }
+    if (!dest->resource.allocatedMemory)
+        buffer_get_sysmem(dest, gl_info);
 
     /* Get a pointer into the destination vbo(create one if none exists) and
      * write correct opengl data into it. It's cheap and allows us to run drawStridedFast
@@ -3624,7 +3624,7 @@ static HRESULT process_vertices_strided(IWineD3DDeviceImpl *This, DWORD dwDestIn
            FIXME("Clipping is broken and disabled for now\n");
         }
     } else doClip = FALSE;
-    dest_ptr = ((char *) buffer_get_sysmem(dest)) + dwDestIndex * get_flexible_vertex_size(DestFVF);
+    dest_ptr = ((char *)buffer_get_sysmem(dest, gl_info)) + dwDestIndex * get_flexible_vertex_size(DestFVF);
 
     IWineD3DDevice_GetTransform( (IWineD3DDevice *) This,
                                  WINED3DTS_VIEW,
@@ -3900,6 +3900,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
 {
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     struct wined3d_stream_info stream_info;
+    const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     BOOL vbo = FALSE, streamWasUP = This->stateBlock->streamIsUP;
     HRESULT hr;
@@ -3912,6 +3913,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
 
     /* Need any context to write to the vbo. */
     context = context_acquire(This, NULL);
+    gl_info = context->gl_info;
 
     /* ProcessVertices reads from vertex buffers, which have to be assigned. DrawPrimitive and DrawPrimitiveUP
      * control the streamIsUP flag, thus restore it afterwards.
@@ -3938,7 +3940,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_ProcessVertices(IWineD3DDevice *iface, 
             {
                 struct wined3d_buffer *vb = (struct wined3d_buffer *)This->stateBlock->streamSource[e->stream_idx];
                 e->buffer_object = 0;
-                e->data = (BYTE *)((unsigned long)e->data + (unsigned long)buffer_get_sysmem(vb));
+                e->data = (BYTE *)((ULONG_PTR)e->data + (ULONG_PTR)buffer_get_sysmem(vb, gl_info));
                 ENTER_GL();
                 GL_EXTCALL(glDeleteBuffersARB(1, &vb->buffer_object));
                 vb->buffer_object = 0;
@@ -4483,6 +4485,7 @@ HRESULT IWineD3DDeviceImpl_ClearSurface(IWineD3DDeviceImpl *This, IWineD3DSurfac
         if (location == SFLAG_DS_ONSCREEN && depth_stencil != This->onscreen_depth_stencil)
             device_switch_onscreen_ds(This, context, depth_stencil);
         prepare_ds_clear(depth_stencil, context, location, &draw_rect, Count, clear_rect);
+        IWineD3DSurface_ModifyLocation((IWineD3DSurface *)depth_stencil, SFLAG_INDRAWABLE, TRUE);
 
         glDepthMask(GL_TRUE);
         IWineD3DDeviceImpl_MarkStateDirty(This, STATE_RENDER(WINED3DRS_ZWRITEENABLE));
@@ -5228,6 +5231,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
     IWineD3DDeviceImpl *This = (IWineD3DDeviceImpl *)iface;
     const struct wined3d_format_desc *src_format;
     const struct wined3d_format_desc *dst_format;
+    const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     const unsigned char *data;
     UINT update_w, update_h;
@@ -5235,7 +5239,7 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
     UINT src_w, src_h;
     UINT dst_x, dst_y;
     DWORD sampler;
-    struct wined3d_format_desc dummy_desc;
+    struct wined3d_format_desc desc;
 
     TRACE("iface %p, src_surface %p, src_rect %s, dst_surface %p, dst_point %s.\n",
             iface, src_surface, wine_dbgstr_rect(src_rect),
@@ -5264,11 +5268,12 @@ static HRESULT WINAPI IWineD3DDeviceImpl_UpdateSurface(IWineD3DDevice *iface,
      * surface to the destination's sysmem copy. If surface conversion is
      * needed, use BltFast instead to copy in sysmem and use regular surface
      * loading. */
-    d3dfmt_get_conv(dst_impl, FALSE, TRUE, &dummy_desc, &convert);
-    if (convert != NO_CONVERSION)
+    d3dfmt_get_conv(dst_impl, FALSE, TRUE, &desc, &convert);
+    if (convert != NO_CONVERSION || desc.convert)
         return IWineD3DSurface_BltFast(dst_surface, dst_x, dst_y, src_surface, src_rect, 0);
 
     context = context_acquire(This, NULL);
+    gl_info = context->gl_info;
 
     ENTER_GL();
     GL_EXTCALL(glActiveTextureARB(GL_TEXTURE0_ARB));
@@ -5739,7 +5744,6 @@ void stretch_rect_fbo(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_surfa
     const struct wined3d_gl_info *gl_info;
     struct wined3d_context *context;
     GLenum gl_filter;
-    POINT offset = {0, 0};
     RECT src_rect, dst_rect;
 
     TRACE("device %p, src_surface %p, src_rect_in %s, dst_surface %p, dst_rect_in %s, filter %s (0x%08x).\n",
@@ -5787,19 +5791,11 @@ void stretch_rect_fbo(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_surfa
 
         TRACE("Source surface %p is onscreen\n", src_surface);
 
-        if(buffer == GL_FRONT) {
-            RECT windowsize;
-            UINT h;
-            ClientToScreen(context->win_handle, &offset);
-            GetClientRect(context->win_handle, &windowsize);
-            h = windowsize.bottom - windowsize.top;
-            src_rect.left -= offset.x; src_rect.right -=offset.x;
-            src_rect.top =  offset.y + h - src_rect.top;
-            src_rect.bottom =  offset.y + h - src_rect.bottom;
-        } else {
-            src_rect.top = src_surface->currentDesc.Height - src_rect.top;
-            src_rect.bottom = src_surface->currentDesc.Height - src_rect.bottom;
-        }
+        if (buffer == GL_FRONT)
+            surface_translate_frontbuffer_coords(src_surface, context->win_handle, &src_rect);
+
+        src_rect.top = src_surface->currentDesc.Height - src_rect.top;
+        src_rect.bottom = src_surface->currentDesc.Height - src_rect.bottom;
 
         ENTER_GL();
         context_bind_fbo(context, GL_READ_FRAMEBUFFER, NULL);
@@ -5821,20 +5817,11 @@ void stretch_rect_fbo(IWineD3DDeviceImpl *device, IWineD3DSurfaceImpl *src_surfa
 
         TRACE("Destination surface %p is onscreen\n", dst_surface);
 
-        if(buffer == GL_FRONT) {
-            RECT windowsize;
-            UINT h;
-            ClientToScreen(context->win_handle, &offset);
-            GetClientRect(context->win_handle, &windowsize);
-            h = windowsize.bottom - windowsize.top;
-            dst_rect.left -= offset.x; dst_rect.right -=offset.x;
-            dst_rect.top =  offset.y + h - dst_rect.top;
-            dst_rect.bottom =  offset.y + h - dst_rect.bottom;
-        } else {
-            /* Screen coords = window coords, surface height = window height */
-            dst_rect.top = dst_surface->currentDesc.Height - dst_rect.top;
-            dst_rect.bottom = dst_surface->currentDesc.Height - dst_rect.bottom;
-        }
+        if (buffer == GL_FRONT)
+            surface_translate_frontbuffer_coords(dst_surface, context->win_handle, &dst_rect);
+
+        dst_rect.top = dst_surface->currentDesc.Height - dst_rect.top;
+        dst_rect.bottom = dst_surface->currentDesc.Height - dst_rect.bottom;
 
         ENTER_GL();
         context_bind_fbo(context, GL_DRAW_FRAMEBUFFER, NULL);
@@ -6187,6 +6174,9 @@ static HRESULT WINAPI IWineD3DDeviceImpl_EvictManagedResources(IWineD3DDevice *i
     TRACE("iface %p.\n", iface);
 
     IWineD3DDevice_EnumResources(iface, evict_managed_resource, NULL);
+    /* Invalidate stream sources, the buffer(s) may have been evicted. */
+    IWineD3DDeviceImpl_MarkStateDirty((IWineD3DDeviceImpl *)iface, STATE_STREAMSRC);
+
     return WINED3D_OK;
 }
 

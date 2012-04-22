@@ -893,11 +893,11 @@ static VOID set_installer_properties(MSIPACKAGE *package)
     if (!GetUserNameW( NULL, &len ) && GetLastError() == ERROR_MORE_DATA)
     {
         WCHAR *username;
-        if ((username = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) )))
+        if ((username = msi_alloc( len * sizeof(WCHAR) )))
         {
             if (GetUserNameW( username, &len ))
                 msi_set_property( package->db, szLogonUser, username );
-            HeapFree( GetProcessHeap(), 0, username );
+            msi_free( username );
         }
     }
 }
@@ -1113,16 +1113,16 @@ UINT msi_download_file( LPCWSTR szUrl, LPWSTR filename )
     GetUrlCacheEntryInfoW( szUrl, NULL, &size );
     if ( GetLastError() != ERROR_FILE_NOT_FOUND )
     {
-        cache_entry = HeapAlloc( GetProcessHeap(), 0, size );
+        cache_entry = msi_alloc( size );
         if ( !GetUrlCacheEntryInfoW( szUrl, cache_entry, &size ) )
         {
             UINT error = GetLastError();
-            HeapFree( GetProcessHeap(), 0, cache_entry );
+            msi_free( cache_entry );
             return error;
         }
 
         lstrcpyW( filename, cache_entry->lpszLocalFileName );
-        HeapFree( GetProcessHeap(), 0, cache_entry );
+        msi_free( cache_entry );
         return ERROR_SUCCESS;
     }
 
@@ -1225,8 +1225,6 @@ static UINT apply_registered_patch( MSIPACKAGE *package, LPCWSTR patch_code )
 
 UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
 {
-    static const WCHAR OriginalDatabase[] =
-        {'O','r','i','g','i','n','a','l','D','a','t','a','b','a','s','e',0};
     static const WCHAR Database[] = {'D','A','T','A','B','A','S','E',0};
     static const WCHAR dotmsi[] = {'.','m','s','i',0};
     MSIDATABASE *db = NULL;
@@ -1339,15 +1337,15 @@ UINT MSI_OpenPackageW(LPCWSTR szPackage, MSIPACKAGE **pPackage)
     msi_set_property( package->db, Database, db->path );
 
     if( UrlIsW( szPackage, URLIS_URL ) )
-        msi_set_property( package->db, OriginalDatabase, szPackage );
+        msi_set_property( package->db, szOriginalDatabase, szPackage );
     else if( szPackage[0] == '#' )
-        msi_set_property( package->db, OriginalDatabase, db->path );
+        msi_set_property( package->db, szOriginalDatabase, db->path );
     else
     {
         WCHAR fullpath[MAX_PATH];
 
         GetFullPathNameW( szPackage, MAX_PATH, fullpath, NULL );
-        msi_set_property( package->db, OriginalDatabase, fullpath );
+        msi_set_property( package->db, szOriginalDatabase, fullpath );
     }
 
     msi_set_context( package );
