@@ -862,6 +862,13 @@ static NTSTATUS map_file_into_view( struct file_view *view, int fd, size_t start
     assert( start < view->size );
     assert( start + size <= view->size );
 
+    if (force_exec_prot && !(vprot & VPROT_NOEXEC) && (vprot & VPROT_READ))
+    {
+        TRACE( "forcing exec permission on mapping %p-%p\n",
+               (char *)view->base + start, (char *)view->base + start + size - 1 );
+        prot |= PROT_EXEC;
+    }
+
     /* only try mmap if media is not removable (or if we require write access) */
     if (!removable || shared_write)
     {
@@ -1416,10 +1423,13 @@ NTSTATUS virtual_create_builtin_view( void *module )
 
     if (status) return status;
 
+    /* The PE header is always read-only, no write, no execute. */
+    view->prot[0] = VPROT_COMMITTED | VPROT_READ;
+
     sec = (IMAGE_SECTION_HEADER *)((char *)&nt->OptionalHeader + nt->FileHeader.SizeOfOptionalHeader);
     for (i = 0; i < nt->FileHeader.NumberOfSections; i++)
     {
-        DWORD flags = VPROT_SYSTEM | VPROT_IMAGE | VPROT_COMMITTED;
+        BYTE flags = VPROT_COMMITTED;
 
         if (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) flags |= VPROT_EXEC;
         if (sec[i].Characteristics & IMAGE_SCN_MEM_READ) flags |= VPROT_READ;
