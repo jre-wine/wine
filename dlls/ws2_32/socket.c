@@ -2975,7 +2975,11 @@ static struct pollfd *fd_sets_to_poll( const WS_fd_set *readfds, const WS_fd_set
     if (writefds) count += writefds->fd_count;
     if (exceptfds) count += exceptfds->fd_count;
     *count_ptr = count;
-    if (!count) return NULL;
+    if (!count)
+    {
+        SetLastError(WSAEINVAL);
+        return NULL;
+    }
     if (!(fds = HeapAlloc( GetProcessHeap(), 0, count * sizeof(fds[0]))))
     {
         SetLastError( ERROR_NOT_ENOUGH_MEMORY );
@@ -3098,7 +3102,7 @@ int WINAPI WS_select(int nfds, WS_fd_set *ws_readfds,
     TRACE("read %p, write %p, excp %p timeout %p\n",
           ws_readfds, ws_writefds, ws_exceptfds, ws_timeout);
 
-    if (!(pollfds = fd_sets_to_poll( ws_readfds, ws_writefds, ws_exceptfds, &count )) && count)
+    if (!(pollfds = fd_sets_to_poll( ws_readfds, ws_writefds, ws_exceptfds, &count )))
         return SOCKET_ERROR;
 
     if (ws_timeout)
@@ -5798,7 +5802,8 @@ INT WINAPI WSALookupServiceEnd( HANDLE lookup )
 INT WINAPI WSALookupServiceNextA( HANDLE lookup, DWORD flags, LPDWORD len, LPWSAQUERYSETA results )
 {
     FIXME( "(%p 0x%08x %p %p) Stub!\n", lookup, flags, len, results );
-    return 0;
+    WSASetLastError(WSA_E_NO_MORE);
+    return SOCKET_ERROR;
 }
 
 /***********************************************************************
@@ -5807,7 +5812,8 @@ INT WINAPI WSALookupServiceNextA( HANDLE lookup, DWORD flags, LPDWORD len, LPWSA
 INT WINAPI WSALookupServiceNextW( HANDLE lookup, DWORD flags, LPDWORD len, LPWSAQUERYSETW results )
 {
     FIXME( "(%p 0x%08x %p %p) Stub!\n", lookup, flags, len, results );
-    return 0;
+    WSASetLastError(WSA_E_NO_MORE);
+    return SOCKET_ERROR;
 }
 
 /***********************************************************************

@@ -792,7 +792,11 @@ case $host_os in
       case $host_cpu in
         *i[[3456789]]86* | x86_64)
           WINE_TRY_CFLAGS([-Wl,--section-start,.interp=0x7bf00400],
-                          [LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400"])
+                          [case $host_os in
+                           freebsd*)  LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x60000400" ;;
+                           *) LDEXECFLAGS="$LDEXECFLAGS -Wl,--section-start,.interp=0x7bf00400" ;;
+                           esac
+                          ])
           ;;
       esac
 
@@ -1626,6 +1630,19 @@ then
   fi
 fi
 
+dnl **** Disable Fortify, it has too many false positives
+
+AC_CACHE_CHECK([for the need to disable Fortify], ac_cv_c_fortify_enabled,
+    AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[#include <string.h>]],
+[[#if defined(__USE_FORTIFY_LEVEL) && __USE_FORTIFY_LEVEL > 0
+#error Fortify enabled
+#endif]])],
+        [ac_cv_c_fortify_enabled=no],[ac_cv_c_fortify_enabled=yes]))
+if test "$ac_cv_c_fortify_enabled" = yes
+then
+    CFLAGS="$CFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+fi
+
 dnl **** Check for underscore on external symbols ****
 
 AC_CACHE_CHECK([whether external symbols need an underscore prefix], ac_cv_c_extern_prefix,
@@ -2190,6 +2207,7 @@ AH_BOTTOM([#endif /* WINE_CROSSTEST */])
 
 AC_CONFIG_COMMANDS([include/stamp-h], [echo timestamp > include/stamp-h])
 
+WINE_CONFIG_SYMLINK(dlls/shell32/AUTHORS,AUTHORS)
 WINE_CONFIG_SYMLINK(dlls/wineps.drv/generic.ppd)
 WINE_CONFIG_SYMLINK(fonts/marlett.ttf,,enable_fonts)
 WINE_CONFIG_SYMLINK(fonts/symbol.ttf,,enable_fonts)
