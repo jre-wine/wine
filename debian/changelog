@@ -1,8 +1,12 @@
-wine (1.2.1-0.1) UNRELEASED; urgency=low
+wine (1.2.1-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.2.1, released Oct 8, 2010.
+    - Translation updates.
+    - Various bug fixes.
+  * Added l_intl.nls to wine-bin
 
- -- Hilko Bengen <bengen@debian.org>  Wed, 25 Apr 2012 21:47:34 +0200
+ -- Hilko Bengen <bengen@debian.org>  Wed, 25 Apr 2012 21:52:31 +0200
 
 wine (1.2-0.1) unstable; urgency=low
 
