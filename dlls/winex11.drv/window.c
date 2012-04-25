@@ -430,6 +430,10 @@ static void sync_window_cursor( struct x11drv_win_data *data )
     SERVER_END_REQ;
 
     set_window_cursor( data->hwnd, cursor );
+
+    /* setting the cursor can fail if the window isn't created yet */
+    /* so make sure that we try again once we receive a mouse event */
+    data->cursor = (HANDLE)~0u;
 }
 
 
@@ -1615,6 +1619,8 @@ static void move_window_bits( struct x11drv_win_data *data, const RECT *old_rect
         hdc_src = hdc_dst = GetDCEx( data->hwnd, 0, DCX_CACHE );
     }
 
+    ExcludeUpdateRgn( hdc_dst, data->hwnd );
+
     code = X11DRV_START_EXPOSURES;
     ExtEscape( hdc_dst, X11DRV_ESCAPE, sizeof(code), (LPSTR)&code, 0, NULL );
 
@@ -1862,6 +1868,7 @@ void CDECL X11DRV_DestroyWindow( HWND hwnd )
     }
 
     if (thread_data->last_focus == hwnd) thread_data->last_focus = 0;
+    if (thread_data->last_xic_hwnd == hwnd) thread_data->last_xic_hwnd = 0;
     if (data->hWMIconBitmap) DeleteObject( data->hWMIconBitmap );
     if (data->hWMIconMask) DeleteObject( data->hWMIconMask);
     wine_tsx11_lock();
@@ -2080,6 +2087,8 @@ XIC X11DRV_get_ic( HWND hwnd )
     XIM xim;
 
     if (!data) return 0;
+
+    x11drv_thread_data()->last_xic_hwnd = hwnd;
     if (data->xic) return data->xic;
     if (!(xim = x11drv_thread_data()->xim)) return 0;
     return X11DRV_CreateIC( xim, data );
@@ -2335,7 +2344,7 @@ void CDECL X11DRV_WindowPosChanged( HWND hwnd, HWND insert_after, UINT swp_flags
             !memcmp( &valid_rects[0], &data->client_rect, sizeof(RECT) ))
         {
             /* if we have an X window the bits will be moved by the X server */
-            if (!data->whole_window)
+            if (!data->whole_window && (x_offset != 0 || y_offset != 0))
                 move_window_bits( data, &old_whole_rect, &data->whole_rect, &old_client_rect );
         }
         else
@@ -2668,7 +2677,7 @@ LRESULT CDECL X11DRV_SysCommand( HWND hwnd, WPARAM wparam, LPARAM lparam )
      * with a ButtonPress event */
     wine_tsx11_lock();
     XUngrabPointer( display, CurrentTime );
-    XSendEvent(display, root_window, False, SubstructureNotifyMask, &xev);
+    XSendEvent(display, root_window, False, SubstructureNotifyMask | SubstructureRedirectMask, &xev);
     wine_tsx11_unlock();
     return 0;
 }

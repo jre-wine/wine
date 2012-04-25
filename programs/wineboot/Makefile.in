@@ -18,6 +18,7 @@ RC_SRCS = \
 	wineboot_En.rc \
 	wineboot_Es.rc \
 	wineboot_Fr.rc \
+	wineboot_He.rc \
 	wineboot_It.rc \
 	wineboot_Ja.rc \
 	wineboot_Ko.rc \
@@ -31,6 +32,7 @@ RC_SRCS = \
 	wineboot_Si.rc \
 	wineboot_Sr.rc \
 	wineboot_Sv.rc \
+	wineboot_Uk.rc \
 	wineboot_Zh.rc
 
 @MAKE_PROG_RULES@
