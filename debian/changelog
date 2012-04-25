@@ -1,8 +1,11 @@
-wine (1.2.3-0.1) UNRELEASED; urgency=low
+wine (1.2.3-0.1) unstable; urgency=low
 
-  * UNRELEASED
+  * Non-maintainer upload.
+  * New upstream release 1.2.3, released Apr 8, 2011.
+    - Translation updates.
+    - Various bug fixes.
 
- -- Hilko Bengen <bengen@debian.org>  Wed, 25 Apr 2012 22:15:50 +0200
+ -- Hilko Bengen <bengen@debian.org>  Wed, 25 Apr 2012 22:16:00 +0200
 
 wine (1.2.2-0.1) unstable; urgency=low
 
