@@ -3,6 +3,7 @@
  *
  * Copyright 2005 Mike McCormack for CodeWeavers
  * Copyright 2007-2008 Alistair Leslie-Hughes
+ * Copyright 2010 Adam Martinson for CodeWeavers
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,7 +26,6 @@
 #include "windows.h"
 #include "ole2.h"
 #include "objsafe.h"
-#include "xmldom.h"
 #include "msxml2.h"
 #include "msxml2did.h"
 #include "dispex.h"
@@ -37,6 +37,148 @@
 #include "initguid.h"
 
 DEFINE_GUID(IID_IObjectSafety, 0xcb5bdc81, 0x93c1, 0x11cf, 0x8f,0x20, 0x00,0x80,0x5f,0x2c,0xd0,0x64);
+
+static int g_unexpectedcall, g_expectedcall;
+
+typedef struct
+{
+    const struct IDispatchVtbl *lpVtbl;
+    LONG ref;
+} dispevent;
+
+static inline dispevent *impl_from_IDispatch( IDispatch *iface )
+{
+    return (dispevent *)((char*)iface - FIELD_OFFSET(dispevent, lpVtbl));
+}
+
+static HRESULT WINAPI dispevent_QueryInterface(IDispatch *iface, REFIID riid, void **ppvObject)
+{
+    *ppvObject = NULL;
+
+    if ( IsEqualGUID( riid, &IID_IDispatch) ||
+         IsEqualGUID( riid, &IID_IUnknown) )
+    {
+        *ppvObject = iface;
+    }
+    else
+        return E_NOINTERFACE;
+
+    IDispatch_AddRef( iface );
+
+    return S_OK;
+}
+
+static ULONG WINAPI dispevent_AddRef(IDispatch *iface)
+{
+    dispevent *This = impl_from_IDispatch( iface );
+    return InterlockedIncrement( &This->ref );
+}
+
+static ULONG WINAPI dispevent_Release(IDispatch *iface)
+{
+    dispevent *This = impl_from_IDispatch( iface );
+    ULONG ref = InterlockedDecrement( &This->ref );
+
+    if (ref == 0)
+        HeapFree(GetProcessHeap(), 0, This);
+
+    return ref;
+}
+
+static HRESULT WINAPI dispevent_GetTypeInfoCount(IDispatch *iface, UINT *pctinfo)
+{
+    g_unexpectedcall++;
+    *pctinfo = 0;
+    return S_OK;
+}
+
+static HRESULT WINAPI dispevent_GetTypeInfo(IDispatch *iface, UINT iTInfo,
+        LCID lcid, ITypeInfo **ppTInfo)
+{
+    g_unexpectedcall++;
+    return S_OK;
+}
+
+static HRESULT WINAPI dispevent_GetIDsOfNames(IDispatch *iface, REFIID riid,
+        LPOLESTR *rgszNames, UINT cNames, LCID lcid, DISPID *rgDispId)
+{
+    g_unexpectedcall++;
+    return S_OK;
+}
+
+static HRESULT WINAPI dispevent_Invoke(IDispatch *iface, DISPID member, REFIID riid,
+        LCID lcid, WORD flags, DISPPARAMS *params, VARIANT *result,
+        EXCEPINFO *excepInfo, UINT *argErr)
+{
+    ok(member == 0, "expected 0 member, got %d\n", member);
+    ok(lcid == LOCALE_SYSTEM_DEFAULT, "expected LOCALE_SYSTEM_DEFAULT, got lcid %x\n", lcid);
+    ok(flags == DISPATCH_METHOD, "expected DISPATCH_METHOD, got %d\n", flags);
+
+    ok(params->cArgs == 0, "got %d\n", params->cArgs);
+    ok(params->cNamedArgs == 0, "got %d\n", params->cNamedArgs);
+    ok(params->rgvarg == NULL, "got %p\n", params->rgvarg);
+    ok(params->rgdispidNamedArgs == NULL, "got %p\n", params->rgdispidNamedArgs);
+
+    ok(result == NULL, "got %p\n", result);
+    ok(excepInfo == NULL, "got %p\n", excepInfo);
+    ok(argErr == NULL, "got %p\n", argErr);
+
+    g_expectedcall++;
+    return E_FAIL;
+}
+
+static const IDispatchVtbl dispeventVtbl =
+{
+    dispevent_QueryInterface,
+    dispevent_AddRef,
+    dispevent_Release,
+    dispevent_GetTypeInfoCount,
+    dispevent_GetTypeInfo,
+    dispevent_GetIDsOfNames,
+    dispevent_Invoke
+};
+
+static IDispatch* create_dispevent(void)
+{
+    dispevent *event = HeapAlloc(GetProcessHeap(), 0, sizeof(*event));
+
+    event->lpVtbl = &dispeventVtbl;
+    event->ref = 1;
+
+    return (IDispatch*)&event->lpVtbl;
+}
+
+#define EXPECT_CHILDREN(node) _expect_children((IXMLDOMNode*)node, __LINE__)
+static void _expect_children(IXMLDOMNode *node, int line)
+{
+    VARIANT_BOOL b;
+    HRESULT hr;
+
+    b = VARIANT_FALSE;
+    hr = IXMLDOMNode_hasChildNodes(node, &b);
+    ok_(__FILE__,line)(hr == S_OK, "hasChildNodes() failed, 0x%08x\n", hr);
+    ok_(__FILE__,line)(b == VARIANT_TRUE, "no children, %d\n", b);
+}
+
+#define EXPECT_NO_CHILDREN(node) _expect_no_children((IXMLDOMNode*)node, __LINE__)
+static void _expect_no_children(IXMLDOMNode *node, int line)
+{
+    VARIANT_BOOL b;
+    HRESULT hr;
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMNode_hasChildNodes(node, &b);
+    ok_(__FILE__,line)(hr == S_FALSE, "hasChildNodes() failed, 0x%08x\n", hr);
+    ok_(__FILE__,line)(b == VARIANT_FALSE, "no children, %d\n", b);
+}
+
+#define EXPECT_REF(node,ref) _expect_ref((IUnknown*)node, ref, __LINE__)
+static void _expect_ref(IUnknown* obj, ULONG ref, int line)
+{
+    ULONG rc = IUnknown_AddRef(obj);
+    IUnknown_Release(obj);
+    ok_(__FILE__,line)(rc-1 == ref, "expected refcount %d, got %d\n", ref, rc-1);
+}
 
 static const WCHAR szEmpty[] = { 0 };
 static const WCHAR szIncomplete[] = {
@@ -111,6 +253,9 @@ static const CHAR szExampleXML[] =
 "            <html xmlns='http://www.w3.org/1999/xhtml'>\n"
 "                This is <strong>a</strong> <i>description</i>. <bar:x/>\n"
 "            </html>\n"
+"            <html xml:space='preserve' xmlns='http://www.w3.org/1999/xhtml'>\n"
+"                This is <strong>a</strong> <i>description</i> with preserved whitespace. <bar:x/>\n"
+"            </html>\n"
 "        </description>\n"
 "    </elem>\n"
 "\n"
@@ -133,7 +278,31 @@ static const CHAR szExampleXML[] =
 "    </elem>\n"
 "</root>\n";
 
-static  const CHAR szTransformXML[] =
+static const CHAR szNodeTypesXML[] =
+"<?xml version='1.0'?>"
+"<!-- comment node 0 -->"
+"<root id='0' depth='0'>"
+"   <!-- comment node 1 -->"
+"   text node 0"
+"   <x id='1' depth='1'>"
+"       <?foo value='PI for x'?>"
+"       <!-- comment node 2 -->"
+"       text node 1"
+"       <a id='3' depth='2'/>"
+"       <b id='4' depth='2'/>"
+"       <c id='5' depth='2'/>"
+"   </x>"
+"   <y id='2' depth='1'>"
+"       <?bar value='PI for y'?>"
+"       <!-- comment node 3 -->"
+"       text node 2"
+"       <a id='6' depth='2'/>"
+"       <b id='7' depth='2'/>"
+"       <c id='8' depth='2'/>"
+"   </y>"
+"</root>";
+
+static const CHAR szTransformXML[] =
 "<?xml version=\"1.0\"?>\n"
 "<greeting>\n"
 "Hello World\n"
@@ -221,6 +390,191 @@ static const CHAR szBasicTransformXML[] =
 static const CHAR szBasicTransformOutput[] =
 "<HTML><BODY><TABLE><TD>Wine</TD><TD>$25.00</TD></TABLE></BODY></HTML>";
 
+#define SZ_EMAIL_DTD \
+"<!DOCTYPE email ["\
+"   <!ELEMENT email         (recipients,from,reply-to?,subject,body,attachment*)>"\
+"       <!ATTLIST email attachments IDREFS #REQUIRED>"\
+"       <!ATTLIST email sent (yes|no) \"no\">"\
+"   <!ELEMENT recipients    (to+,cc*)>"\
+"   <!ELEMENT to            (#PCDATA)>"\
+"       <!ATTLIST to name CDATA #IMPLIED>"\
+"   <!ELEMENT cc            (#PCDATA)>"\
+"       <!ATTLIST cc name CDATA #IMPLIED>"\
+"   <!ELEMENT from          (#PCDATA)>"\
+"       <!ATTLIST from name CDATA #IMPLIED>"\
+"   <!ELEMENT reply-to      (#PCDATA)>"\
+"       <!ATTLIST reply-to name CDATA #IMPLIED>"\
+"   <!ELEMENT subject       ANY>"\
+"   <!ELEMENT body          ANY>"\
+"       <!ATTLIST body enc CDATA #FIXED \"UTF-8\">"\
+"   <!ELEMENT attachment    (#PCDATA)>"\
+"       <!ATTLIST attachment id ID #REQUIRED>"\
+"]>"
+
+static const CHAR szEmailXML[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 87)</subject>"
+"   <body>"
+"       It no longer causes spontaneous combustion..."
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_0D[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 88)</subject>"
+"   <body>"
+"       <undecl />"
+"       XML_ELEMENT_UNDECLARED 0xC00CE00D"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_0E[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 89)</subject>"
+"   <body>"
+"       XML_ELEMENT_ID_NOT_FOUND 0xC00CE00E"
+"   </body>"
+"   <attachment id=\"patch\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_11[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <recipients>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 90)</subject>"
+"   <body>"
+"       XML_EMPTY_NOT_ALLOWED 0xC00CE011"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_13[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<msg attachments=\"patch1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 91)</subject>"
+"   <body>"
+"       XML_ROOT_NAME_MISMATCH 0xC00CE013"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</msg>";
+
+static const CHAR szEmailXML_14[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <to>wine-patches@winehq.org</to>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 92)</subject>"
+"   <body>"
+"       XML_INVALID_CONTENT 0xC00CE014"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_15[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\" ip=\"127.0.0.1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 93)</subject>"
+"   <body>"
+"       XML_ATTRIBUTE_NOT_DEFINED 0xC00CE015"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_16[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 94)</subject>"
+"   <body enc=\"ASCII\">"
+"       XML_ATTRIBUTE_FIXED 0xC00CE016"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_17[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\" sent=\"true\">"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 95)</subject>"
+"   <body>"
+"       XML_ATTRIBUTE_VALUE 0xC00CE017"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_18[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email attachments=\"patch1\">"
+"   oops"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 96)</subject>"
+"   <body>"
+"       XML_ILLEGAL_TEXT 0xC00CE018"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
+static const CHAR szEmailXML_20[] =
+"<?xml version=\"1.0\"?>"
+SZ_EMAIL_DTD
+"<email>"
+"   <recipients>"
+"       <to>wine-patches@winehq.org</to>"
+"   </recipients>"
+"   <from name=\"Anonymous\">user@localhost</from>"
+"   <subject>msxml3/tests: DTD validation (try 97)</subject>"
+"   <body>"
+"       XML_REQUIRED_ATTRIBUTE_MISSING 0xC00CE020"
+"   </body>"
+"   <attachment id=\"patch1\">0001-msxml3-tests-DTD-validation.patch</attachment>"
+"</email>";
+
 static const WCHAR szNonExistentFile[] = {
     'c', ':', '\\', 'N', 'o', 'n', 'e', 'x', 'i', 's', 't', 'e', 'n', 't', '.', 'x', 'm', 'l', 0
 };
@@ -289,6 +643,26 @@ static WCHAR szStrangeChars[] = {'&','x',' ',0x2103, 0};
 
 #define double_eq(x, y) ok((x)-(y)<=1e-14*(x) && (x)-(y)>=-1e-14*(x), "expected %.16g, got %.16g\n", x, y)
 
+static void* _create_object(const GUID *clsid, const char *name, const IID *iid, int line)
+{
+    void *obj = NULL;
+    HRESULT hr;
+
+    hr = CoCreateInstance(clsid, NULL, CLSCTX_INPROC_SERVER, iid, &obj);
+    if (hr != S_OK)
+        win_skip_(__FILE__,line)("failed to create %s instance: 0x%08x\n", name, hr);
+
+    return obj;
+}
+
+#define _create(cls) cls, #cls
+
+#define create_document(iid) _create_object(&_create(CLSID_DOMDocument), iid, __LINE__)
+#define create_document_version(v, iid) _create_object(&_create(CLSID_DOMDocument ## v), iid, __LINE__)
+#define create_cache(iid) _create_object(&_create(CLSID_XMLSchemaCache), iid, __LINE__)
+#define create_cache_version(v, iid) _create_object(&_create(CLSID_XMLSchemaCache ## v), iid, __LINE__)
+#define create_xsltemplate(iid) _create_object(&_create(CLSID_XSLTemplate), iid, __LINE__)
+
 static BSTR alloc_str_from_narrow(const char *str)
 {
     int len = MultiByteToWideChar(CP_ACP, 0, str, -1, NULL, 0);
@@ -297,8 +671,8 @@ static BSTR alloc_str_from_narrow(const char *str)
     return ret;
 }
 
-BSTR alloced_bstrs[256];
-int alloced_bstrs_count = 0;
+static BSTR alloced_bstrs[256];
+static int alloced_bstrs_count;
 
 static BSTR _bstr_(const char *str)
 {
@@ -336,20 +710,6 @@ static BOOL compareIgnoreReturns(BSTR sLeft, BSTR sRight)
     }
 }
 
-static BOOL compareIgnoreReturnsWhitespace(BSTR sLeft, BSTR sRight)
-{
-    /* MSXML3 inserts whitespace where as libxml doesn't. */
-    for (;;)
-    {
-        while (*sLeft == '\r' || *sLeft == '\n' || *sLeft == ' ') sLeft++;
-        while (*sRight == '\r' || *sRight == '\n' || *sRight == ' ') sRight++;
-        if (*sLeft != *sRight) return FALSE;
-        if (!*sLeft) return TRUE;
-        sLeft++;
-        sRight++;
-    }
-}
-
 static void get_str_for_type(DOMNodeType type, char *buf)
 {
     switch (type)
@@ -362,6 +722,15 @@ static void get_str_for_type(DOMNodeType type, char *buf)
             break;
         case NODE_DOCUMENT:
             strcpy(buf, "D");
+            break;
+        case NODE_TEXT:
+            strcpy(buf, "T");
+            break;
+        case NODE_COMMENT:
+            strcpy(buf, "C");
+            break;
+        case NODE_PROCESSING_INSTRUCTION:
+            strcpy(buf, "P");
             break;
         default:
             wsprintfA(buf, "[%d]", type);
@@ -518,7 +887,7 @@ static char *list_to_string(IXMLDOMNodeList *list)
 static void test_domdoc( void )
 {
     HRESULT r;
-    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMParseError *error;
     IXMLDOMElement *element = NULL;
     IXMLDOMNode *node;
@@ -535,18 +904,15 @@ static void test_domdoc( void )
     LONG nLength = 0;
     WCHAR buff[100];
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     test_disp((IUnknown*)doc);
 
 if (0)
 {
     /* crashes on native */
-    r = IXMLDOMDocument_loadXML( doc, (BSTR)0x1, NULL );
+    IXMLDOMDocument_loadXML( doc, (BSTR)0x1, NULL );
 }
 
     /* try some stupid things */
@@ -672,7 +1038,7 @@ if (0)
 
         test_disp((IUnknown*)element);
 
-        r = IXMLDOMElement_QueryInterface( element, &IID_IObjectIdentity, (LPVOID*)&ident );
+        r = IXMLDOMElement_QueryInterface( element, &IID_IObjectIdentity, (void**)&ident );
         ok( r == E_NOINTERFACE, "ret %08x\n", r);
 
         r = IXMLDOMElement_get_tagName( element, NULL );
@@ -751,7 +1117,7 @@ if (0)
     {
         IXMLDOMNamedNodeMap *pAttribs;
 
-        r = IXMLDOMText_QueryInterface(nodetext, &IID_IXMLDOMElement, (LPVOID*)&element);
+        r = IXMLDOMText_QueryInterface(nodetext, &IID_IXMLDOMElement, (void**)&element);
         ok(r == E_NOINTERFACE, "ret %08x\n", r );
 
         /* Text Last Child Checks */
@@ -872,7 +1238,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* test insertData */
@@ -913,7 +1279,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* delete data */
@@ -947,8 +1313,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        /* whitespace preserving needs to be handled here */
-        todo_wine ok( !lstrcmpW( str, _bstr_("This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* delete from end */
@@ -961,7 +1326,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        todo_wine ok( !lstrcmpW( str, _bstr_("This &is a Middle; test <>\\Append") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("This &is a Middle; test <>\\Append") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* delete from inside */
@@ -974,7 +1339,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        todo_wine ok( !lstrcmpW( str, _bstr_("") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* delete whole data ... */
@@ -996,7 +1361,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, szstr1 ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, szstr1 ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* test put_data */
@@ -1008,7 +1373,7 @@ if (0)
 
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("99") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("99") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* ::replaceData() */
@@ -1022,14 +1387,14 @@ if (0)
         ok(r == E_INVALIDARG, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         r = IXMLDOMText_replaceData(nodetext, 0, 0, NULL);
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* NULL pointer means delete */
@@ -1037,7 +1402,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* empty string means delete */
@@ -1045,7 +1410,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* zero count means insert */
@@ -1053,7 +1418,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         r = IXMLDOMText_replaceData(nodetext, 0, 2, NULL);
@@ -1063,7 +1428,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* nonempty string, count greater than its length */
@@ -1071,7 +1436,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         /* nonempty string, count less than its length */
@@ -1079,7 +1444,7 @@ if (0)
         ok(r == S_OK, "ret %08x\n", r );
         r = IXMLDOMText_get_text(nodetext, &str);
         ok(r == S_OK, "ret %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string\n");
+        ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
         SysFreeString(str);
 
         IXMLDOMText_Release( nodetext );
@@ -1227,7 +1592,7 @@ if (0)
         IXMLDOMProcessingInstruction_Release(nodePI);
     }
 
-    r = IXMLDOMDocument_QueryInterface( doc, &IID_ISupportErrorInfo, (LPVOID*)&support_error );
+    r = IXMLDOMDocument_QueryInterface( doc, &IID_ISupportErrorInfo, (void**)&support_error );
     ok( r == S_OK, "ret %08x\n", r );
     if(r == S_OK)
     {
@@ -1248,11 +1613,8 @@ static void test_persiststreaminit(void)
     IPersistStreamInit *streaminit;
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (void**)&doc );
-    ok( hr == S_OK, "failed with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     hr = IXMLDOMDocument_QueryInterface(doc, &IID_IPersistStreamInit, (void**)&streaminit);
     ok( hr == S_OK, "failed with 0x%08x\n", hr );
@@ -1266,7 +1628,7 @@ static void test_persiststreaminit(void)
 static void test_domnode( void )
 {
     HRESULT r;
-    IXMLDOMDocument *doc = NULL, *owner = NULL;
+    IXMLDOMDocument *doc, *owner = NULL;
     IXMLDOMElement *element = NULL;
     IXMLDOMNamedNodeMap *map = NULL;
     IXMLDOMNode *node = NULL, *next = NULL;
@@ -1278,11 +1640,8 @@ static void test_domnode( void )
     VARIANT var;
     LONG count;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     b = FALSE;
     str = SysAllocString( szComplete4 );
@@ -1291,10 +1650,7 @@ static void test_domnode( void )
     ok( b == VARIANT_TRUE, "failed to load XML string\n");
     SysFreeString( str );
 
-    b = 1;
-    r = IXMLDOMNode_hasChildNodes( doc, &b );
-    ok( r == S_OK, "hasChildNoes bad return\n");
-    ok( b == VARIANT_TRUE, "hasChildNoes wrong result\n");
+    EXPECT_CHILDREN(doc);
 
     r = IXMLDOMDocument_get_documentElement( doc, &element );
     ok( r == S_OK, "should be a document element\n");
@@ -1321,7 +1677,7 @@ static void test_domnode( void )
 
         type = NODE_INVALID;
         r = IXMLDOMNode_get_nodeType( element, &type);
-        ok( r == S_OK, "getNamedItem returned wrong code\n");
+        ok( r == S_OK, "got %08x\n", r);
         ok( type == NODE_ELEMENT, "node not an element\n");
 
         str = NULL;
@@ -1333,7 +1689,7 @@ static void test_domnode( void )
         /* check if nodename is correct */
         r = IXMLDOMElement_get_nodeName( element, NULL );
         ok ( r == E_INVALIDARG, "get_nodeName (NULL) wrong code\n");
-    
+
         /* content doesn't matter here */
         str = NULL;
         r = IXMLDOMElement_get_nodeName( element, &str );
@@ -1405,10 +1761,7 @@ static void test_domnode( void )
         ok( r == S_OK, "get_attributes returned wrong code\n");
         ok( map != NULL, "should be attributes\n");
 
-        b = 1;
-        r = IXMLDOMNode_hasChildNodes( element, &b );
-        ok( r == S_OK, "hasChildNoes bad return\n");
-        ok( b == VARIANT_TRUE, "hasChildNoes wrong result\n");
+        EXPECT_CHILDREN(element);
     }
     else
         ok( FALSE, "no element\n");
@@ -1416,7 +1769,7 @@ static void test_domnode( void )
     if (map)
     {
         ISupportErrorInfo *support_error;
-        r = IXMLDOMNamedNodeMap_QueryInterface( map, &IID_ISupportErrorInfo, (LPVOID*)&support_error );
+        r = IXMLDOMNamedNodeMap_QueryInterface( map, &IID_ISupportErrorInfo, (void**)&support_error );
         ok( r == S_OK, "ret %08x\n", r );
 
         r = ISupportErrorInfo_InterfaceSupportsErrorInfo( support_error, &IID_IXMLDOMNamedNodeMap );
@@ -1479,12 +1832,14 @@ todo_wine
         ok ( str != NULL, "str is null\n");
         ok( !lstrcmpW( str, szdl ), "incorrect node name\n");
         SysFreeString( str );
+        IXMLDOMNode_Release( node );
 
         /* test sequential access of attributes */
         node = NULL;
         r = IXMLDOMNamedNodeMap_nextNode( map, &node );
         ok ( r == S_OK, "nextNode (first time) wrong code\n");
         ok ( node != NULL, "nextNode, should be attribute\n");
+        IXMLDOMNode_Release( node );
 
         r = IXMLDOMNamedNodeMap_nextNode( map, &node );
         ok ( r != S_OK, "nextNode (second time) wrong code\n");
@@ -1539,10 +1894,7 @@ todo_wine
 
         if (next)
         {
-            b = 1;
-            r = IXMLDOMNode_hasChildNodes( next, &b );
-            ok( r == S_FALSE, "hasChildNoes bad return\n");
-            ok( b == VARIANT_FALSE, "hasChildNoes wrong result\n");
+            EXPECT_NO_CHILDREN(next);
 
             type = NODE_INVALID;
             r = IXMLDOMNode_get_nodeType( next, &type);
@@ -1612,9 +1964,6 @@ todo_wine
 
     if (list)
     {
-        r = IXMLDOMNodeList_QueryInterface(list, &IID_IDispatch, NULL);
-        ok( r == E_INVALIDARG || r == E_POINTER, "ret %08x\n", r );
-
         r = IXMLDOMNodeList_get_item(list, 0, NULL);
         ok(r == E_INVALIDARG, "Exected E_INVALIDARG got %08x\n", r);
 
@@ -1651,10 +2000,7 @@ todo_wine
         r = IXMLDOMNode_hasChildNodes( node, NULL );
         ok( r == E_INVALIDARG, "hasChildNoes bad return\n");
 
-        b = 1;
-        r = IXMLDOMNode_hasChildNodes( node, &b );
-        ok( r == S_OK, "hasChildNoes bad return\n");
-        ok( b == VARIANT_TRUE, "hasChildNoes wrong result\n");
+        EXPECT_CHILDREN(node);
 
         str = NULL;
         r = IXMLDOMNode_get_baseName( node, &str );
@@ -1679,10 +2025,7 @@ todo_wine
     ok( b == VARIANT_TRUE, "failed to load XML string\n");
     SysFreeString( str );
 
-    b = 1;
-    r = IXMLDOMNode_hasChildNodes( doc, &b );
-    ok( r == S_OK, "hasChildNoes bad return\n");
-    ok( b == VARIANT_TRUE, "hasChildNoes wrong result\n");
+    EXPECT_CHILDREN(doc);
 
     r = IXMLDOMDocument_get_documentElement( doc, &element );
     ok( r == S_OK, "should be a document element\n");
@@ -1711,26 +2054,21 @@ static void test_refs(void)
     HRESULT r;
     BSTR str;
     VARIANT_BOOL b;
-    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMElement *element = NULL;
     IXMLDOMNode *node = NULL, *node2;
     IXMLDOMNodeList *node_list = NULL;
     LONG ref;
     IUnknown *unk, *unk2;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
     ref = IXMLDOMDocument_Release(doc);
     ok( ref == 0, "ref %d\n", ref);
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -1738,10 +2076,11 @@ static void test_refs(void)
     ok( b == VARIANT_TRUE, "failed to load XML string\n");
     SysFreeString( str );
 
-    ref = IXMLDOMDocument_AddRef( doc );
-    ok( ref == 2, "ref %d\n", ref );
-    ref = IXMLDOMDocument_AddRef( doc );
-    ok( ref == 3, "ref %d\n", ref );
+    IXMLDOMDocument_AddRef( doc );
+    EXPECT_REF(doc, 2);
+    IXMLDOMDocument_AddRef( doc );
+    EXPECT_REF(doc, 3);
+
     IXMLDOMDocument_Release( doc );
     IXMLDOMDocument_Release( doc );
 
@@ -1749,16 +2088,12 @@ static void test_refs(void)
     ok( r == S_OK, "should be a document element\n");
     ok( element != NULL, "should be an element\n");
 
-    ref = IXMLDOMDocument_AddRef( doc );
-    ok( ref == 2, "ref %d\n", ref );
-    IXMLDOMDocument_Release( doc );
+    EXPECT_REF(doc, 1);
 
     r = IXMLDOMElement_get_childNodes( element, &node_list );
     ok( r == S_OK, "rets %08x\n", r);
 
-    ref = IXMLDOMNodeList_AddRef( node_list );
-    ok( ref == 2, "ref %d\n", ref );
-    IXMLDOMNodeList_Release( node_list );
+    EXPECT_REF(node_list, 1);
 
     IXMLDOMNodeList_get_item( node_list, 0, &node );
     ok( r == S_OK, "rets %08x\n", r);
@@ -1766,9 +2101,7 @@ static void test_refs(void)
     IXMLDOMNodeList_get_item( node_list, 0, &node2 );
     ok( r == S_OK, "rets %08x\n", r);
 
-    ref = IXMLDOMNode_AddRef( node );
-    ok( ref == 2, "ref %d\n", ref );
-    IXMLDOMNode_Release( node );
+    EXPECT_REF(node, 1);
 
     ref = IXMLDOMNode_Release( node );
     ok( ref == 0, "ref %d\n", ref );
@@ -1783,18 +2116,14 @@ static void test_refs(void)
     ref = IXMLDOMDocument_Release( doc );
     ok( ref == 0, "ref %d\n", ref );
 
-    ref = IXMLDOMElement_AddRef( element );
-    todo_wine {
-    ok( ref == 3, "ref %d\n", ref );
-    }
-    IXMLDOMElement_Release( element );
+    todo_wine EXPECT_REF(element, 2);
 
     /* IUnknown must be unique however we obtain it */
-    r = IXMLDOMElement_QueryInterface( element, &IID_IUnknown, (LPVOID*)&unk );
+    r = IXMLDOMElement_QueryInterface( element, &IID_IUnknown, (void**)&unk );
     ok( r == S_OK, "rets %08x\n", r );
-    r = IXMLDOMElement_QueryInterface( element, &IID_IXMLDOMNode, (LPVOID*)&node );
+    r = IXMLDOMElement_QueryInterface( element, &IID_IXMLDOMNode, (void**)&node );
     ok( r == S_OK, "rets %08x\n", r );
-    r = IXMLDOMNode_QueryInterface( node, &IID_IUnknown, (LPVOID*)&unk2 );
+    r = IXMLDOMNode_QueryInterface( node, &IID_IUnknown, (void**)&unk2 );
     ok( r == S_OK, "rets %08x\n", r );
     ok( unk == unk2, "unk %p unk2 %p\n", unk, unk2 );
 
@@ -1824,11 +2153,8 @@ static void test_create(void)
     LONG ref;
     LONG num;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     /* types not supported for creation */
     V_VT(&var) = VT_I1;
@@ -2130,9 +2456,7 @@ static void test_create(void)
     ok( r == S_OK, "returns %08x\n", r );
     ok( node == root, "%p %p\n", node, root );
 
-    ref = IXMLDOMNode_AddRef( node );
-    ok(ref == 3, "ref %d\n", ref);
-    IXMLDOMNode_Release( node );
+    EXPECT_REF(node, 2);
 
     ref = IXMLDOMNode_Release( node );
     ok(ref == 1, "ref %d\n", ref);
@@ -2145,24 +2469,23 @@ static void test_create(void)
     ok( r == S_OK, "returns %08x\n", r );
     SysFreeString( str );
 
-    ref = IXMLDOMNode_AddRef( node );
-    ok(ref == 2, "ref = %d\n", ref);
-    IXMLDOMNode_Release( node );
+    EXPECT_REF(node, 1);
 
-    r = IXMLDOMNode_QueryInterface( node, &IID_IUnknown, (LPVOID*)&unk );
+    r = IXMLDOMNode_QueryInterface( node, &IID_IUnknown, (void**)&unk );
     ok( r == S_OK, "returns %08x\n", r );
 
-    ref = IXMLDOMNode_AddRef( unk );
-    ok(ref == 3, "ref = %d\n", ref);
-    IXMLDOMNode_Release( unk );
+    EXPECT_REF(unk, 2);
 
     V_VT(&var) = VT_EMPTY;
+    child = NULL;
     r = IXMLDOMNode_insertBefore( root, (IXMLDOMNode*)unk, var, &child );
     ok( r == S_OK, "returns %08x\n", r );
     ok( unk == (IUnknown*)child, "%p %p\n", unk, child );
+
+    todo_wine EXPECT_REF(unk, 4);
+
     IXMLDOMNode_Release( child );
     IUnknown_Release( unk );
-
 
     V_VT(&var) = VT_NULL;
     V_DISPATCH(&var) = (IDispatch*)node;
@@ -2171,14 +2494,13 @@ static void test_create(void)
     ok( node == child, "%p %p\n", node, child );
     IXMLDOMNode_Release( child );
 
-
     V_VT(&var) = VT_NULL;
     V_DISPATCH(&var) = (IDispatch*)node;
     r = IXMLDOMNode_insertBefore( root, node, var, NULL );
     ok( r == S_OK, "returns %08x\n", r );
     IXMLDOMNode_Release( node );
 
-    r = IXMLDOMNode_QueryInterface( root, &IID_IXMLDOMElement, (LPVOID*)&element );
+    r = IXMLDOMNode_QueryInterface( root, &IID_IXMLDOMElement, (void**)&element );
     ok( r == S_OK, "returns %08x\n", r );
 
     r = IXMLDOMElement_get_attributes( element, &attr_map );
@@ -2253,14 +2575,11 @@ static void test_create(void)
     ok( node != NULL, "node was null\n");
     SysFreeString(str);
 
-    if(r == S_OK)
-    {
-        r = IXMLDOMNode_get_nodeTypeString(node, &str);
-        ok( r == S_OK, "returns %08x\n", r );
-        ok( !lstrcmpW( str, _bstr_("attribute") ), "incorrect nodeTypeString string\n");
-        SysFreeString(str);
-        IXMLDOMNode_Release( node );
-    }
+    r = IXMLDOMNode_get_nodeTypeString(node, &str);
+    ok( r == S_OK, "returns %08x\n", r );
+    ok( !lstrcmpW( str, _bstr_("attribute") ), "incorrect nodeTypeString string\n");
+    SysFreeString(str);
+    IXMLDOMNode_Release( node );
 
     IXMLDOMElement_Release( element );
     IXMLDOMNode_Release( root );
@@ -2269,18 +2588,17 @@ static void test_create(void)
 
 static void test_getElementsByTagName(void)
 {
-    HRESULT r;
-    BSTR str;
-    VARIANT_BOOL b;
-    IXMLDOMDocument *doc;
     IXMLDOMNodeList *node_list;
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *elem;
+    WCHAR buff[100];
+    VARIANT_BOOL b;
+    HRESULT r;
     LONG len;
+    BSTR str;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2289,6 +2607,13 @@ static void test_getElementsByTagName(void)
     SysFreeString( str );
 
     str = SysAllocString( szstar );
+
+    /* null arguments cases */
+    r = IXMLDOMDocument_getElementsByTagName(doc, NULL, &node_list);
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+    r = IXMLDOMDocument_getElementsByTagName(doc, str, NULL);
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
     r = IXMLDOMDocument_getElementsByTagName(doc, str, &node_list);
     ok( r == S_OK, "ret %08x\n", r );
     r = IXMLDOMNodeList_get_length( node_list, &len );
@@ -2299,6 +2624,17 @@ static void test_getElementsByTagName(void)
 
     IXMLDOMNodeList_Release( node_list );
     SysFreeString( str );
+
+    /* broken query BSTR */
+    memcpy(&buff[2], szstar, sizeof(szstar));
+    /* just a big length */
+    *(DWORD*)buff = 0xf0f0;
+    r = IXMLDOMDocument_getElementsByTagName(doc, &buff[2], &node_list);
+    ok( r == S_OK, "ret %08x\n", r );
+    r = IXMLDOMNodeList_get_length( node_list, &len );
+    ok( r == S_OK, "ret %08x\n", r );
+    ok( len == 6, "len %d\n", len );
+    IXMLDOMNodeList_Release( node_list );
 
     str = SysAllocString( szbs );
     r = IXMLDOMDocument_getElementsByTagName(doc, str, &node_list);
@@ -2327,6 +2663,39 @@ static void test_getElementsByTagName(void)
     IXMLDOMNodeList_Release( node_list );
     SysFreeString( str );
 
+    /* test for element */
+    r = IXMLDOMDocument_get_documentElement(doc, &elem);
+    ok( r == S_OK, "ret %08x\n", r );
+
+    str = SysAllocString( szstar );
+
+    /* null arguments cases */
+    r = IXMLDOMElement_getElementsByTagName(elem, NULL, &node_list);
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+    r = IXMLDOMElement_getElementsByTagName(elem, str, NULL);
+    ok( r == E_INVALIDARG, "ret %08x\n", r );
+
+    r = IXMLDOMElement_getElementsByTagName(elem, str, &node_list);
+    ok( r == S_OK, "ret %08x\n", r );
+    r = IXMLDOMNodeList_get_length( node_list, &len );
+    ok( r == S_OK, "ret %08x\n", r );
+    ok( len == 5, "len %d\n", len );
+    expect_list_and_release(node_list, "E1.E2.D1 E2.E2.D1 E3.E2.D1 E4.E2.D1 E1.E4.E2.D1");
+    SysFreeString( str );
+
+    /* broken query BSTR */
+    memcpy(&buff[2], szstar, sizeof(szstar));
+    /* just a big length */
+    *(DWORD*)buff = 0xf0f0;
+    r = IXMLDOMElement_getElementsByTagName(elem, &buff[2], &node_list);
+    ok( r == S_OK, "ret %08x\n", r );
+    r = IXMLDOMNodeList_get_length( node_list, &len );
+    ok( r == S_OK, "ret %08x\n", r );
+    ok( len == 5, "len %d\n", len );
+    IXMLDOMNodeList_Release( node_list );
+
+    IXMLDOMElement_Release(elem);
+
     IXMLDOMDocument_Release( doc );
 }
 
@@ -2342,11 +2711,8 @@ static void test_get_text(void)
     IXMLDOMNamedNodeMap *node_map;
     LONG len;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2360,22 +2726,16 @@ static void test_get_text(void)
     SysFreeString(str);
 
     /* Test to get all child node text. */
-    r = IXMLDOMDocument_QueryInterface(doc, &IID_IXMLDOMNode, (LPVOID*)&nodeRoot);
+    r = IXMLDOMDocument_QueryInterface(doc, &IID_IXMLDOMNode, (void**)&nodeRoot);
     ok( r == S_OK, "ret %08x\n", r );
     if(r == S_OK)
     {
         r = IXMLDOMNode_get_text( nodeRoot, &str );
         ok( r == S_OK, "ret %08x\n", r );
-        ok( compareIgnoreReturnsWhitespace(str, _bstr_("fn1.txt\n\n fn2.txt \n\nf1\n")), "wrong get_text\n");
+        ok( compareIgnoreReturns(str, _bstr_("fn1.txt\n\n fn2.txt \n\nf1\n")), "wrong get_text: %s\n", wine_dbgstr_w(str));
         SysFreeString(str);
 
         IXMLDOMNode_Release(nodeRoot);
-    }
-
-    if (0) {
-    /* this test crashes on win9x */
-    r = IXMLDOMNodeList_QueryInterface(node_list, &IID_IDispatch, NULL);
-    ok( r == E_INVALIDARG, "ret %08x\n", r );
     }
 
     r = IXMLDOMNodeList_get_length( node_list, NULL );
@@ -2392,7 +2752,7 @@ static void test_get_text(void)
     ok( r == E_INVALIDARG, "ret %08x\n", r );
 
     r = IXMLDOMNodeList_get_item( node_list, 0, &node );
-    ok( r == S_OK, "ret %08x\n", r ); 
+    ok( r == S_OK, "ret %08x\n", r );
     IXMLDOMNodeList_Release( node_list );
 
     /* Invalid output parameter*/
@@ -2406,7 +2766,7 @@ static void test_get_text(void)
 
     r = IXMLDOMNode_get_attributes( node, &node_map );
     ok( r == S_OK, "ret %08x\n", r );
-    
+
     str = SysAllocString( szvr );
     r = IXMLDOMNamedNodeMap_getNamedItem( node_map, str, &node2 );
     ok( r == S_OK, "ret %08x\n", r );
@@ -2444,11 +2804,8 @@ static void test_get_childNodes(void)
     IXMLDOMNodeList *node_list, *node_list2;
     LONG len;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2495,11 +2852,8 @@ static void test_get_firstChild(void)
     HRESULT r;
     BSTR str;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (void**)&doc );
-    ok( r == S_OK, "failed with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2520,6 +2874,48 @@ static void test_get_firstChild(void)
     IXMLDOMDocument_Release( doc );
 }
 
+static void test_get_lastChild(void)
+{
+    static WCHAR lcW[] = {'l','c',0};
+    static WCHAR foW[] = {'f','o',0};
+    IXMLDOMDocument *doc;
+    IXMLDOMNode *node, *child;
+    VARIANT_BOOL b;
+    HRESULT r;
+    BSTR str;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    str = SysAllocString( szComplete4 );
+    r = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( r == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    r = IXMLDOMDocument_get_lastChild( doc, &node );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNode_get_nodeName( node, &str );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    ok(memcmp(str, lcW, sizeof(lcW)) == 0, "expected \"lc\" node name\n");
+    SysFreeString(str);
+
+    r = IXMLDOMNode_get_lastChild( node, &child );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    r = IXMLDOMNode_get_nodeName( child, &str );
+    ok( r == S_OK, "ret %08x\n", r);
+
+    ok(memcmp(str, foW, sizeof(foW)) == 0, "expected \"fo\" node name\n");
+    SysFreeString(str);
+
+    IXMLDOMNode_Release( child );
+    IXMLDOMNode_Release( node );
+    IXMLDOMDocument_Release( doc );
+}
+
 static void test_removeChild(void)
 {
     HRESULT r;
@@ -2530,11 +2926,8 @@ static void test_removeChild(void)
     IXMLDOMNode *fo_node, *ba_node, *removed_node, *temp_node, *lc_node;
     IXMLDOMNodeList *root_list, *fo_list;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2550,10 +2943,10 @@ static void test_removeChild(void)
 
     r = IXMLDOMNodeList_get_item( root_list, 3, &fo_node );
     ok( r == S_OK, "ret %08x\n", r);
- 
+
     r = IXMLDOMNode_get_childNodes( fo_node, &fo_list );
     ok( r == S_OK, "ret %08x\n", r);
- 
+
     r = IXMLDOMNodeList_get_item( fo_list, 0, &ba_node );
     ok( r == S_OK, "ret %08x\n", r);
 
@@ -2565,19 +2958,24 @@ static void test_removeChild(void)
 
     /* ba_node is a descendant of element, but not a direct child. */
     removed_node = (void*)0xdeadbeef;
+    EXPECT_REF(ba_node, 1);
     r = IXMLDOMElement_removeChild( element, ba_node, &removed_node );
     ok( r == E_INVALIDARG, "ret %08x\n", r );
     ok( removed_node == NULL, "%p\n", removed_node );
+    EXPECT_REF(ba_node, 1);
 
+    EXPECT_REF(ba_node, 1);
     r = IXMLDOMElement_removeChild( element, fo_node, &removed_node );
     ok( r == S_OK, "ret %08x\n", r);
     ok( fo_node == removed_node, "node %p node2 %p\n", fo_node, removed_node );
+    EXPECT_REF(ba_node, 1);
 
     /* try removing already removed child */
     temp_node = (void*)0xdeadbeef;
     r = IXMLDOMElement_removeChild( element, fo_node, &temp_node );
     ok( r == E_INVALIDARG, "ret %08x\n", r);
     ok( temp_node == NULL, "%p\n", temp_node );
+    IXMLDOMNode_Release( fo_node );
 
     /* the removed node has no parent anymore */
     r = IXMLDOMNode_get_parentNode( removed_node, &temp_node );
@@ -2591,12 +2989,13 @@ static void test_removeChild(void)
     r = IXMLDOMNodeList_get_item( root_list, 0, &lc_node );
     ok( r == S_OK, "ret %08x\n", r);
 
-    r = IXMLDOMElement_QueryInterface( lc_node, &IID_IXMLDOMElement, (LPVOID*)&lc_element );
+    r = IXMLDOMElement_QueryInterface( lc_node, &IID_IXMLDOMElement, (void**)&lc_element );
     ok( r == S_OK, "ret %08x\n", r);
 
     /* MS quirk: passing wrong interface pointer works, too */
     r = IXMLDOMElement_removeChild( element, (IXMLDOMNode*)lc_element, NULL );
     ok( r == S_OK, "ret %08x\n", r);
+    IXMLDOMElement_Release( lc_element );
 
     r = IXMLDOMNode_get_parentNode( lc_node, &temp_node );
     ok( r == S_FALSE, "ret %08x\n", r);
@@ -2620,11 +3019,8 @@ static void test_replaceChild(void)
     IUnknown * unk1, *unk2;
     LONG len;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2669,6 +3065,7 @@ static void test_replaceChild(void)
     r = IXMLDOMElement_replaceChild( element, lc_node, ba_node, &removed_node );
     ok( r == E_INVALIDARG, "ret %08x\n", r );
     ok( removed_node == NULL, "%p\n", removed_node );
+    IXMLDOMNode_Release( lc_node );
 
     /* invalid parameter: would create loop */
     removed_node = (void*)0xdeadbeef;
@@ -2704,6 +3101,7 @@ static void test_replaceChild(void)
 
     r = IXMLDOMElement_replaceChild( element, ba_node, (IXMLDOMNode*)ba_element, &removed_node );
     ok( r == S_OK, "ret %08x\n", r );
+    IXMLDOMElement_Release( ba_element );
 
     r = IXMLDOMNodeList_get_length( fo_list, &len);
     ok( r == S_OK, "ret %08x\n", r );
@@ -2731,11 +3129,8 @@ static void test_removeNamedItem(void)
     LONG len;
     HRESULT r;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     r = IXMLDOMDocument_loadXML( doc, str, &b );
@@ -2762,7 +3157,7 @@ static void test_removeNamedItem(void)
     removed_node = (void*)0xdeadbeef;
     r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, NULL, &removed_node);
     ok ( r == E_INVALIDARG, "ret %08x\n", r);
-    ok ( removed_node == (void*)0xdeadbeef, "removed_node == %p\n", removed_node);
+    ok ( removed_node == (void*)0xdeadbeef, "got %p\n", removed_node);
 
     removed_node = (void*)0xdeadbeef;
     str = SysAllocString(szvr);
@@ -2772,7 +3167,7 @@ static void test_removeNamedItem(void)
     removed_node2 = (void*)0xdeadbeef;
     r = IXMLDOMNamedNodeMap_removeNamedItem( pr_attrs, str, &removed_node2);
     ok ( r == S_FALSE, "ret %08x\n", r);
-    ok ( removed_node2 == NULL, "removed_node == %p\n", removed_node2 );
+    ok ( removed_node2 == NULL, "got %p\n", removed_node2 );
 
     r = IXMLDOMNamedNodeMap_get_length( pr_attrs, &len );
     ok( r == S_OK, "ret %08x\n", r);
@@ -2805,19 +3200,160 @@ static void test_removeNamedItem(void)
     IXMLDOMDocument_Release( doc );
 }
 
+#define test_IObjectSafety_set(p, r, r2, s, m, e, e2) _test_IObjectSafety_set(__LINE__,p, r, r2, s, m, e, e2)
+static void _test_IObjectSafety_set(unsigned line, IObjectSafety *safety, HRESULT result,
+                                    HRESULT result2, DWORD set, DWORD mask, DWORD expected,
+                                    DWORD expected2)
+{
+    DWORD enabled, supported;
+    HRESULT hr;
+
+    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL, set, mask);
+    if (result == result2)
+        ok_(__FILE__,line)(hr == result, "SetInterfaceSafetyOptions: expected %08x, returned %08x\n", result, hr );
+    else
+        ok_(__FILE__,line)(broken(hr == result) || hr == result2,
+           "SetInterfaceSafetyOptions: expected %08x, got %08x\n", result2, hr );
+
+    supported = enabled = 0xCAFECAFE;
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if (expected == expected2)
+        ok_(__FILE__,line)(enabled == expected, "Expected %08x, got %08x\n", expected, enabled);
+    else
+        ok_(__FILE__,line)(broken(enabled == expected) || enabled == expected2,
+           "Expected %08x, got %08x\n", expected2, enabled);
+
+    /* reset the safety options */
+
+    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
+            INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_SECURITY_MANAGER,
+            0);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    ok_(__FILE__,line)(enabled == 0, "Expected 0, got %08x\n", enabled);
+}
+
+#define test_IObjectSafety_common(s) _test_IObjectSafety_common(__LINE__,s)
+static void _test_IObjectSafety_common(unsigned line, IObjectSafety *safety)
+{
+    DWORD enabled = 0, supported = 0;
+    HRESULT hr;
+
+    /* get */
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, NULL, &enabled);
+    ok_(__FILE__,line)(hr == E_POINTER, "ret %08x\n", hr );
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, NULL);
+    ok_(__FILE__,line)(hr == E_POINTER, "ret %08x\n", hr );
+
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    ok_(__FILE__,line)(broken(supported == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA)) ||
+       supported == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_SECURITY_MANAGER) /* msxml3 SP8+ */,
+        "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_SECURITY_MANAGER), "
+             "got %08x\n", supported);
+    ok_(__FILE__,line)(enabled == 0, "Expected 0, got %08x\n", enabled);
+
+    /* set -- individual flags */
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER, INTERFACESAFE_FOR_UNTRUSTED_CALLER,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER, INTERFACESAFE_FOR_UNTRUSTED_CALLER);
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACESAFE_FOR_UNTRUSTED_DATA, INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACESAFE_FOR_UNTRUSTED_DATA, INTERFACESAFE_FOR_UNTRUSTED_DATA);
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACE_USES_SECURITY_MANAGER, INTERFACE_USES_SECURITY_MANAGER,
+        0, INTERFACE_USES_SECURITY_MANAGER /* msxml3 SP8+ */);
+
+    /* set INTERFACE_USES_DISPEX  */
+
+    test_IObjectSafety_set(safety, S_OK, E_FAIL /* msxml3 SP8+ */,
+        INTERFACE_USES_DISPEX, INTERFACE_USES_DISPEX,
+        0, 0);
+
+    test_IObjectSafety_set(safety, S_OK, E_FAIL /* msxml3 SP8+ */,
+        INTERFACE_USES_DISPEX, 0,
+        0, 0);
+
+    test_IObjectSafety_set(safety, S_OK, S_OK /* msxml3 SP8+ */,
+        0, INTERFACE_USES_DISPEX,
+        0, 0);
+
+    /* set option masking */
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER);
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACESAFE_FOR_UNTRUSTED_DATA);
+
+    test_IObjectSafety_set(safety, S_OK, S_OK,
+        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
+        INTERFACE_USES_SECURITY_MANAGER,
+        0,
+        0);
+
+    /* set -- inheriting previous settings */
+
+    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
+                                                         INTERFACESAFE_FOR_UNTRUSTED_CALLER,
+                                                         INTERFACESAFE_FOR_UNTRUSTED_CALLER);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    todo_wine
+    ok_(__FILE__,line)(broken(enabled == INTERFACESAFE_FOR_UNTRUSTED_CALLER) ||
+       enabled == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACE_USES_SECURITY_MANAGER) /* msxml3 SP8+ */,
+         "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACE_USES_SECURITY_MANAGER), "
+         "got %08x\n", enabled);
+
+    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
+                                                         INTERFACESAFE_FOR_UNTRUSTED_DATA,
+                                                         INTERFACESAFE_FOR_UNTRUSTED_DATA);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
+    ok_(__FILE__,line)(hr == S_OK, "ret %08x\n", hr );
+    todo_wine
+    ok_(__FILE__,line)(broken(enabled == INTERFACESAFE_FOR_UNTRUSTED_DATA) ||
+       enabled == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA) /* msxml3 SP8+ */,
+        "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA), "
+        "got %08x\n", enabled);
+}
+
 static void test_XMLHTTP(void)
 {
     static const WCHAR wszBody[] = {'m','o','d','e','=','T','e','s','t',0};
-    static WCHAR wszPOST[] = {'P','O','S','T',0};
-    static WCHAR wszUrl[] = {'h','t','t','p',':','/','/',
+    static const WCHAR wszPOST[] = {'P','O','S','T',0};
+    static const WCHAR wszUrl[] = {'h','t','t','p',':','/','/',
         'c','r','o','s','s','o','v','e','r','.','c','o','d','e','w','e','a','v','e','r','s','.','c','o','m','/',
         'p','o','s','t','t','e','s','t','.','p','h','p',0};
+    static const WCHAR xmltestW[] = {'h','t','t','p',':','/','/',
+        'c','r','o','s','s','o','v','e','r','.','c','o','d','e','w','e','a','v','e','r','s','.','c','o','m','/',
+        'x','m','l','t','e','s','t','.','x','m','l',0};
     static const WCHAR wszExpectedResponse[] = {'F','A','I','L','E','D',0};
+    static const CHAR xmltestbodyA[] = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<a>TEST</a>\n";
+
     IXMLHttpRequest *pXMLHttpRequest;
-    BSTR bstrResponse, str1, str2;
+    IObjectSafety *safety;
+    IObjectWithSite *pSite;
+    BSTR bstrResponse, method, url;
     VARIANT dummy;
-    VARIANT varfalse;
+    VARIANT async;
     VARIANT varbody;
+    LONG state, status, bound;
+    void *ptr;
+    IDispatch *event;
     HRESULT hr = CoCreateInstance(&CLSID_XMLHTTPRequest, NULL,
                                   CLSCTX_INPROC_SERVER, &IID_IXMLHttpRequest,
                                   (void **)&pXMLHttpRequest);
@@ -2827,21 +3363,120 @@ static void test_XMLHTTP(void)
         return;
     }
 
+    hr = IXMLHttpRequest_QueryInterface(pXMLHttpRequest, &IID_IObjectWithSite, (void**)&pSite);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    if(hr == S_OK) IObjectWithSite_Release(pSite);
+
     VariantInit(&dummy);
     V_VT(&dummy) = VT_ERROR;
     V_ERROR(&dummy) = DISP_E_MEMBERNOTFOUND;
-    VariantInit(&varfalse);
-    V_VT(&varfalse) = VT_BOOL;
-    V_BOOL(&varfalse) = VARIANT_FALSE;
+    VariantInit(&async);
+    V_VT(&async) = VT_BOOL;
+    V_BOOL(&async) = VARIANT_FALSE;
     V_VT(&varbody) = VT_BSTR;
     V_BSTR(&varbody) = SysAllocString(wszBody);
 
-    str1 = SysAllocString(wszPOST);
-    str2 = SysAllocString(wszUrl);
-    hr = IXMLHttpRequest_open(pXMLHttpRequest, str1, str2, varfalse, dummy, dummy);
-    todo_wine ok(hr == S_OK, "IXMLHttpRequest_open should have succeeded instead of failing with 0x%08x\n", hr);
-    SysFreeString(str1);
-    SysFreeString(str2);
+    method = SysAllocString(wszPOST);
+    url = SysAllocString(wszUrl);
+
+    hr = IXMLHttpRequest_put_onreadystatechange(pXMLHttpRequest, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_abort(pXMLHttpRequest);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* send before open */
+    hr = IXMLHttpRequest_send(pXMLHttpRequest, dummy);
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+
+    /* initial status code */
+    hr = IXMLHttpRequest_get_status(pXMLHttpRequest, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    status = 0xdeadbeef;
+    hr = IXMLHttpRequest_get_status(pXMLHttpRequest, &status);
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+    ok(status == 0xdeadbeef, "got %d\n", status);
+
+    /* invalid parameters */
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, NULL, NULL, async, dummy, dummy);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, method, NULL, async, dummy, dummy);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, NULL, url, async, dummy, dummy);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, _bstr_("header1"), NULL);
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, NULL, _bstr_("value1"));
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, _bstr_("header1"), _bstr_("value1"));
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_get_readyState(pXMLHttpRequest, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    state = -1;
+    hr = IXMLHttpRequest_get_readyState(pXMLHttpRequest, &state);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(state == READYSTATE_UNINITIALIZED, "got %d, expected READYSTATE_UNINITIALIZED\n", state);
+
+    event = create_dispevent();
+
+    EXPECT_REF(event, 1);
+    hr = IXMLHttpRequest_put_onreadystatechange(pXMLHttpRequest, event);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(event, 2);
+
+    g_unexpectedcall = g_expectedcall = 0;
+
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, method, url, async, dummy, dummy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    ok(g_unexpectedcall == 0, "unexpected disp event call\n");
+    ok(g_expectedcall == 1 || broken(g_expectedcall == 0) /* win2k */, "no expected disp event call\n");
+
+    /* status code after ::open() */
+    status = 0xdeadbeef;
+    hr = IXMLHttpRequest_get_status(pXMLHttpRequest, &status);
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+    ok(status == 0xdeadbeef, "got %d\n", status);
+
+    state = -1;
+    hr = IXMLHttpRequest_get_readyState(pXMLHttpRequest, &state);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(state == READYSTATE_LOADING, "got %d, expected READYSTATE_LOADING\n", state);
+
+    hr = IXMLHttpRequest_abort(pXMLHttpRequest);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    state = -1;
+    hr = IXMLHttpRequest_get_readyState(pXMLHttpRequest, &state);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(state == READYSTATE_UNINITIALIZED || broken(state == READYSTATE_LOADING) /* win2k */,
+        "got %d, expected READYSTATE_UNINITIALIZED\n", state);
+
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, method, url, async, dummy, dummy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, _bstr_("header1"), _bstr_("value1"));
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, NULL, _bstr_("value1"));
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_setRequestHeader(pXMLHttpRequest, _bstr_(""), _bstr_("value1"));
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    SysFreeString(method);
+    SysFreeString(url);
 
     hr = IXMLHttpRequest_send(pXMLHttpRequest, varbody);
     if (hr == INET_E_RESOURCE_NOT_FOUND)
@@ -2850,48 +3485,162 @@ static void test_XMLHTTP(void)
         IXMLHttpRequest_Release(pXMLHttpRequest);
         return;
     }
-    todo_wine ok(hr == S_OK, "IXMLHttpRequest_send should have succeeded instead of failing with 0x%08x\n", hr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* status code after ::send() */
+    status = 0xdeadbeef;
+    hr = IXMLHttpRequest_get_status(pXMLHttpRequest, &status);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(status == 200, "got %d\n", status);
+
+    /* another ::send() after completed request */
+    hr = IXMLHttpRequest_send(pXMLHttpRequest, varbody);
+    ok(hr == E_FAIL || broken(hr == E_UNEXPECTED) /* win2k */, "got 0x%08x\n", hr);
+
     VariantClear(&varbody);
 
     hr = IXMLHttpRequest_get_responseText(pXMLHttpRequest, &bstrResponse);
-    todo_wine ok(hr == S_OK, "IXMLHttpRequest_get_responseText should have succeeded instead of failing with 0x%08x\n", hr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
     /* the server currently returns "FAILED" because the Content-Type header is
      * not what the server expects */
     if(hr == S_OK)
     {
-        ok(!memcmp(bstrResponse, wszExpectedResponse, sizeof(wszExpectedResponse)), "bstrResponse differs from what was expected\n");
+        ok(!memcmp(bstrResponse, wszExpectedResponse, sizeof(wszExpectedResponse)),
+            "expected %s, got %s\n", wine_dbgstr_w(wszExpectedResponse), wine_dbgstr_w(bstrResponse));
         SysFreeString(bstrResponse);
     }
 
+    /* GET request */
+    url = SysAllocString(xmltestW);
+
+    hr = IXMLHttpRequest_open(pXMLHttpRequest, _bstr_("GET"), url, async, dummy, dummy);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&varbody) = VT_EMPTY;
+
+    hr = IXMLHttpRequest_send(pXMLHttpRequest, varbody);
+    if (hr == INET_E_RESOURCE_NOT_FOUND)
+    {
+        skip("No connection could be made with crossover.codeweavers.com\n");
+        IXMLHttpRequest_Release(pXMLHttpRequest);
+        return;
+    }
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_get_responseText(pXMLHttpRequest, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLHttpRequest_get_responseText(pXMLHttpRequest, &bstrResponse);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    if(hr == S_OK)
+    {
+        ok(!memcmp(bstrResponse, _bstr_(xmltestbodyA), sizeof(xmltestbodyA)*sizeof(WCHAR)),
+            "expected %s, got %s\n", xmltestbodyA, wine_dbgstr_w(bstrResponse));
+        SysFreeString(bstrResponse);
+    }
+
+    hr = IXMLHttpRequest_get_responseBody(pXMLHttpRequest, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    V_VT(&varbody) = VT_EMPTY;
+    hr = IXMLHttpRequest_get_responseBody(pXMLHttpRequest, &varbody);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&varbody) == (VT_ARRAY|VT_UI1), "got type %d, expected %d\n", V_VT(&varbody), VT_ARRAY|VT_UI1);
+    ok(SafeArrayGetDim(V_ARRAY(&varbody)) == 1, "got %d, expected one dimension\n", SafeArrayGetDim(V_ARRAY(&varbody)));
+
+    bound = -1;
+    hr = SafeArrayGetLBound(V_ARRAY(&varbody), 1, &bound);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(bound == 0, "got %d, expected zero bound\n", bound);
+
+    hr = SafeArrayAccessData(V_ARRAY(&varbody), &ptr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(memcmp(ptr, xmltestbodyA, sizeof(xmltestbodyA)-1) == 0, "got wrond body data\n");
+    SafeArrayUnaccessData(V_ARRAY(&varbody));
+
+    VariantClear(&varbody);
+
+    SysFreeString(url);
+
+    hr = IXMLHttpRequest_QueryInterface(pXMLHttpRequest, &IID_IObjectSafety, (void**)&safety);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    if(hr == S_OK)
+    {
+        test_IObjectSafety_common(safety);
+
+        IObjectSafety_Release(safety);
+    }
+
+
+    IDispatch_Release(event);
     IXMLHttpRequest_Release(pXMLHttpRequest);
+    free_bstrs();
 }
 
 static void test_IXMLDOMDocument2(void)
 {
-    HRESULT r;
-    VARIANT_BOOL b;
-    BSTR str;
+    static const WCHAR emptyW[] = {0};
+    IXMLDOMDocument2 *doc2, *dtddoc2;
     IXMLDOMDocument *doc;
-    IXMLDOMDocument2 *doc2;
+    IXMLDOMParseError* err;
     IDispatchEx *dispex;
+    VARIANT_BOOL b;
     VARIANT var;
-    int ref;
+    HRESULT r;
+    LONG res;
+    BSTR str;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    dtddoc2 = create_document(&IID_IXMLDOMDocument2);
+    if (!dtddoc2)
+    {
+        IXMLDOMDocument_Release(doc);
         return;
-
-    str = SysAllocString( szComplete4 );
-    r = IXMLDOMDocument_loadXML( doc, str, &b );
-    ok( r == S_OK, "loadXML failed\n");
-    ok( b == VARIANT_TRUE, "failed to load XML string\n");
-    SysFreeString( str );
+    }
 
     r = IXMLDOMDocument_QueryInterface( doc, &IID_IXMLDOMDocument2, (void**)&doc2 );
     ok( r == S_OK, "ret %08x\n", r );
     ok( doc == (IXMLDOMDocument*)doc2, "interfaces differ\n");
+
+    ole_expect(IXMLDOMDocument2_get_readyState(doc2, NULL), E_INVALIDARG);
+    ole_check(IXMLDOMDocument2_get_readyState(doc2, &res));
+    ok(res == READYSTATE_COMPLETE, "expected READYSTATE_COMPLETE (4), got %i\n", res);
+
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(doc2, NULL), S_FALSE);
+    ole_expect(IXMLDOMDocument2_validate(doc2, &err), S_FALSE);
+    ok(err != NULL, "expected a pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_E_NOTWF */
+        ok(res == E_XML_NOTWF, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    str = SysAllocString( szComplete4 );
+    r = IXMLDOMDocument_loadXML( doc2, str, &b );
+    ok( r == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    ole_check(IXMLDOMDocument2_get_readyState(doc, &res));
+    ok(res == READYSTATE_COMPLETE, "expected READYSTATE_COMPLETE (4), got %i\n", res);
+
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(doc2, &err), S_FALSE);
+    ok(err != NULL, "expected a pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_E_NODTD */
+        ok(res == E_XML_NODTD, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
 
     r = IXMLDOMDocument_QueryInterface( doc, &IID_IDispatchEx, (void**)&dispex );
     ok( r == S_OK, "ret %08x\n", r );
@@ -2901,8 +3650,9 @@ static void test_IXMLDOMDocument2(void)
     }
 
     /* we will check if the variant got cleared */
-    ref = IXMLDOMDocument2_AddRef(doc2);
-    expect_eq(ref, 3, int, "%d");  /* doc, doc2, AddRef*/
+    IXMLDOMDocument2_AddRef(doc2);
+    EXPECT_REF(doc2, 3); /* doc, doc2, AddRef*/
+
     V_VT(&var) = VT_UNKNOWN;
     V_UNKNOWN(&var) = (IUnknown *)doc2;
 
@@ -2928,6 +3678,17 @@ static void test_IXMLDOMDocument2(void)
     ole_check(IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionLanguage"), _variantbstr_("XPath")));
     ole_check(IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionLanguage"), _variantbstr_("XSLPattern")));
 
+    V_VT(&var) = VT_BSTR;
+    V_BSTR(&var) = SysAllocString(emptyW);
+    r = IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionNamespaces"), var);
+    ok(r == S_OK, "got 0x%08x\n", r);
+    VariantClear(&var);
+
+    V_VT(&var) = VT_I2;
+    V_I2(&var) = 0;
+    r = IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionNamespaces"), var);
+    ok(r == E_FAIL, "got 0x%08x\n", r);
+
     /* contrary to what MSDN claims you can switch back from XPath to XSLPattern */
     ole_check(IXMLDOMDocument2_getProperty(doc2, _bstr_("SelectionLanguage"), &var));
     expect_eq(V_VT(&var), VT_BSTR, int, "%x");
@@ -2935,12 +3696,328 @@ static void test_IXMLDOMDocument2(void)
 
     IXMLDOMDocument2_Release( doc2 );
     IXMLDOMDocument_Release( doc );
+
+    /* DTD validation */
+    ole_check(IXMLDOMDocument2_put_validateOnParse(dtddoc2, VARIANT_FALSE));
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_check(IXMLDOMDocument2_validate(dtddoc2, &err));
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_expect(IXMLDOMParseError_get_errorCode(err, &res), S_FALSE);
+        ok(res == 0, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_0D), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ELEMENT_UNDECLARED */
+        todo_wine ok(res == 0xC00CE00D, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_0E), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ELEMENT_ID_NOT_FOUND */
+        todo_wine ok(res == 0xC00CE00E, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_11), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_EMPTY_NOT_ALLOWED */
+        todo_wine ok(res == 0xC00CE011, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_13), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ROOT_NAME_MISMATCH */
+        todo_wine ok(res == 0xC00CE013, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_14), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_INVALID_CONTENT */
+        todo_wine ok(res == 0xC00CE014, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_15), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ATTRIBUTE_NOT_DEFINED */
+        todo_wine ok(res == 0xC00CE015, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_16), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ATTRIBUTE_FIXED */
+        todo_wine ok(res == 0xC00CE016, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_17), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ATTRIBUTE_VALUE */
+        todo_wine ok(res == 0xC00CE017, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_18), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_ILLEGAL_TEXT */
+        todo_wine ok(res == 0xC00CE018, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    ole_check(IXMLDOMDocument2_loadXML(dtddoc2, _bstr_(szEmailXML_20), &b));
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    err = NULL;
+    ole_expect(IXMLDOMDocument2_validate(dtddoc2, &err), S_FALSE);
+    ok(err != NULL, "expected pointer\n");
+    if (err)
+    {
+        res = 0;
+        ole_check(IXMLDOMParseError_get_errorCode(err, &res));
+        /* XML_REQUIRED_ATTRIBUTE_MISSING */
+        todo_wine ok(res == 0xC00CE020, "got %08x\n", res);
+        IXMLDOMParseError_Release(err);
+    }
+
+    IXMLDOMDocument2_Release( dtddoc2 );
+    free_bstrs();
+}
+
+#define helper_ole_check(expr) { \
+    HRESULT r = expr; \
+    ok_(__FILE__, line)(r == S_OK, "=> %i: " #expr " returned %08x\n", __LINE__, r); \
+}
+
+#define helper_expect_list_and_release(list, expstr) { \
+    char *str = list_to_string(list); \
+    ok_(__FILE__, line)(strcmp(str, expstr)==0, "=> %i: Invalid node list: %s, expected %s\n", __LINE__, str, expstr); \
+    if (list) IXMLDOMNodeList_Release(list); \
+}
+
+#define helper_expect_bstr_and_release(bstr, str) { \
+    ok_(__FILE__, line)(lstrcmpW(bstr, _bstr_(str)) == 0, \
+       "=> %i: got %s\n", __LINE__, wine_dbgstr_w(bstr)); \
+    SysFreeString(bstr); \
+}
+
+#define check_ws_ignored(doc, str) _check_ws_ignored(__LINE__, doc, str)
+static inline void _check_ws_ignored(int line, IXMLDOMDocument2* doc, char const* str)
+{
+    IXMLDOMNode *node1, *node2;
+    IXMLDOMNodeList *list;
+    BSTR bstr;
+
+    helper_ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//*[local-name()='html']"), &list));
+    helper_ole_check(IXMLDOMNodeList_get_item(list, 0, &node1));
+    helper_ole_check(IXMLDOMNodeList_get_item(list, 1, &node2));
+    helper_ole_check(IXMLDOMNodeList_reset(list));
+    helper_expect_list_and_release(list, "E1.E4.E1.E2.D1 E2.E4.E1.E2.D1");
+
+    helper_ole_check(IXMLDOMNode_get_childNodes(node1, &list));
+    helper_expect_list_and_release(list, "T1.E1.E4.E1.E2.D1 E2.E1.E4.E1.E2.D1 E3.E1.E4.E1.E2.D1 T4.E1.E4.E1.E2.D1 E5.E1.E4.E1.E2.D1");
+    helper_ole_check(IXMLDOMNode_get_text(node1, &bstr));
+    if (str)
+    {
+        helper_expect_bstr_and_release(bstr, str);
+    }
+    else
+    {
+        helper_expect_bstr_and_release(bstr, "This is a description.");
+    }
+    IXMLDOMNode_Release(node1);
+
+    helper_ole_check(IXMLDOMNode_get_childNodes(node2, &list));
+    helper_expect_list_and_release(list, "T1.E2.E4.E1.E2.D1 E2.E2.E4.E1.E2.D1 T3.E2.E4.E1.E2.D1 E4.E2.E4.E1.E2.D1 T5.E2.E4.E1.E2.D1 E6.E2.E4.E1.E2.D1 T7.E2.E4.E1.E2.D1");
+    helper_ole_check(IXMLDOMNode_get_text(node2, &bstr));
+    helper_expect_bstr_and_release(bstr, "\n                This is a description with preserved whitespace. \n            ");
+    IXMLDOMNode_Release(node2);
+}
+
+#define check_ws_preserved(doc, str) _check_ws_preserved(__LINE__, doc, str)
+static inline void _check_ws_preserved(int line, IXMLDOMDocument2* doc, char const* str)
+{
+    IXMLDOMNode *node1, *node2;
+    IXMLDOMNodeList *list;
+    BSTR bstr;
+
+    helper_ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//*[local-name()='html']"), &list));
+    helper_ole_check(IXMLDOMNodeList_get_item(list, 0, &node1));
+    helper_ole_check(IXMLDOMNodeList_get_item(list, 1, &node2));
+    helper_ole_check(IXMLDOMNodeList_reset(list));
+    helper_expect_list_and_release(list, "E2.E8.E2.E2.D1 E4.E8.E2.E2.D1");
+
+    helper_ole_check(IXMLDOMNode_get_childNodes(node1, &list));
+    helper_expect_list_and_release(list, "T1.E2.E8.E2.E2.D1 E2.E2.E8.E2.E2.D1 T3.E2.E8.E2.E2.D1 E4.E2.E8.E2.E2.D1 T5.E2.E8.E2.E2.D1 E6.E2.E8.E2.E2.D1 T7.E2.E8.E2.E2.D1");
+    helper_ole_check(IXMLDOMNode_get_text(node1, &bstr));
+    if (str)
+    {
+        helper_expect_bstr_and_release(bstr, str);
+    }
+    else
+    {
+        helper_expect_bstr_and_release(bstr, "\n                This is a description. \n            ");
+    }
+    IXMLDOMNode_Release(node1);
+
+    helper_ole_check(IXMLDOMNode_get_childNodes(node2, &list));
+    helper_expect_list_and_release(list, "T1.E4.E8.E2.E2.D1 E2.E4.E8.E2.E2.D1 T3.E4.E8.E2.E2.D1 E4.E4.E8.E2.E2.D1 T5.E4.E8.E2.E2.D1 E6.E4.E8.E2.E2.D1 T7.E4.E8.E2.E2.D1");
+    helper_ole_check(IXMLDOMNode_get_text(node2, &bstr));
+    helper_expect_bstr_and_release(bstr, "\n                This is a description with preserved whitespace. \n            ");
+    IXMLDOMNode_Release(node2);
+}
+
+static void test_whitespace(void)
+{
+    VARIANT_BOOL b;
+    IXMLDOMDocument2 *doc1, *doc2, *doc3, *doc4;
+
+    doc1 = create_document(&IID_IXMLDOMDocument2);
+    doc2 = create_document(&IID_IXMLDOMDocument2);
+    if (!doc1 || !doc2) return;
+
+    ole_check(IXMLDOMDocument2_put_preserveWhiteSpace(doc2, VARIANT_TRUE));
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc1, &b));
+    ok(b == VARIANT_FALSE, "expected false\n");
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc2, &b));
+    ok(b == VARIANT_TRUE, "expected true\n");
+
+    ole_check(IXMLDOMDocument2_loadXML(doc1, _bstr_(szExampleXML), &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+    ole_check(IXMLDOMDocument2_loadXML(doc2, _bstr_(szExampleXML), &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+
+    /* switch to XPath */
+    ole_check(IXMLDOMDocument2_setProperty(doc1, _bstr_("SelectionLanguage"), _variantbstr_("XPath")));
+    ole_check(IXMLDOMDocument2_setProperty(doc2, _bstr_("SelectionLanguage"), _variantbstr_("XPath")));
+
+    check_ws_ignored(doc1, NULL);
+    check_ws_preserved(doc2, NULL);
+
+    /* new instances copy the property */
+    ole_check(IXMLDOMDocument2_QueryInterface(doc1, &IID_IXMLDOMDocument2, (void**) &doc3));
+    ole_check(IXMLDOMDocument2_QueryInterface(doc2, &IID_IXMLDOMDocument2, (void**) &doc4));
+
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc3, &b));
+    ok(b == VARIANT_FALSE, "expected false\n");
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc4, &b));
+    ok(b == VARIANT_TRUE, "expected true\n");
+
+    check_ws_ignored(doc3, NULL);
+    check_ws_preserved(doc4, NULL);
+
+    /* setting after loading xml affects trimming of leading/trailing ws only */
+    ole_check(IXMLDOMDocument2_put_preserveWhiteSpace(doc1, VARIANT_TRUE));
+    ole_check(IXMLDOMDocument2_put_preserveWhiteSpace(doc2, VARIANT_FALSE));
+
+    /* the trailing "\n            " isn't there, because it was ws-only node */
+    check_ws_ignored(doc1, "\n                This is a description. ");
+    check_ws_preserved(doc2, "This is a description.");
+
+    /* it takes effect on reload */
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc1, &b));
+    ok(b == VARIANT_TRUE, "expected true\n");
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc2, &b));
+    ok(b == VARIANT_FALSE, "expected false\n");
+
+    ole_check(IXMLDOMDocument2_loadXML(doc1, _bstr_(szExampleXML), &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+    ole_check(IXMLDOMDocument2_loadXML(doc2, _bstr_(szExampleXML), &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+
+    check_ws_preserved(doc1, NULL);
+    check_ws_ignored(doc2, NULL);
+
+    /* other instances follow suit */
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc3, &b));
+    ok(b == VARIANT_TRUE, "expected true\n");
+    ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc4, &b));
+    ok(b == VARIANT_FALSE, "expected false\n");
+
+    check_ws_preserved(doc3, NULL);
+    check_ws_ignored(doc4, NULL);
+
+    IXMLDOMDocument_Release(doc1);
+    IXMLDOMDocument_Release(doc2);
+    IXMLDOMDocument_Release(doc3);
+    IXMLDOMDocument_Release(doc4);
     free_bstrs();
 }
 
 static void test_XPath(void)
 {
-    HRESULT r;
     VARIANT var;
     VARIANT_BOOL b;
     IXMLDOMDocument2 *doc;
@@ -2949,11 +4026,8 @@ static void test_XPath(void)
     IXMLDOMNode *node;
     IXMLDOMNodeList *list;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument2);
+    if (!doc) return;
 
     ole_check(IXMLDOMDocument_loadXML(doc, _bstr_(szExampleXML), &b));
     ok(b == VARIANT_TRUE, "failed to load XML string\n");
@@ -3026,18 +4100,18 @@ static void test_XPath(void)
     expect_list_and_release(list, "E3.E4.E2.D1");
 
     /* it has to be declared in SelectionNamespaces */
-    todo_wine ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"),
+    ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"),
         _variantbstr_("xmlns:test='urn:uuid:86B2F87F-ACB6-45cd-8B77-9BDB92A01A29'")));
 
     /* now the namespace can be used */
-    todo_wine ole_check(IXMLDOMDocument_selectNodes(doc, _bstr_("root//test:c"), &list));
-    todo_wine expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
-    todo_wine ole_check(IXMLDOMNode_selectNodes(rootNode, _bstr_(".//test:c"), &list));
-    todo_wine expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
-    todo_wine ole_check(IXMLDOMNode_selectNodes(elem1Node, _bstr_("//test:c"), &list));
-    todo_wine expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
-    todo_wine ole_check(IXMLDOMNode_selectNodes(elem1Node, _bstr_(".//test:x"), &list));
-    todo_wine expect_list_and_release(list, "E5.E1.E4.E1.E2.D1");
+    ole_check(IXMLDOMDocument_selectNodes(doc, _bstr_("root//test:c"), &list));
+    expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
+    ole_check(IXMLDOMNode_selectNodes(rootNode, _bstr_(".//test:c"), &list));
+    expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
+    ole_check(IXMLDOMNode_selectNodes(elem1Node, _bstr_("//test:c"), &list));
+    expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
+    ole_check(IXMLDOMNode_selectNodes(elem1Node, _bstr_(".//test:x"), &list));
+    expect_list_and_release(list, "E5.E1.E4.E1.E2.D1 E6.E2.E4.E1.E2.D1");
 
     /* SelectionNamespaces syntax error - the namespaces doesn't work anymore but the value is stored */
     ole_expect(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"),
@@ -3046,8 +4120,8 @@ static void test_XPath(void)
     ole_expect(IXMLDOMDocument_selectNodes(doc, _bstr_("root//foo:c"), &list), E_FAIL);
 
     VariantInit(&var);
-    todo_wine ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionNamespaces"), &var));
-    todo_wine expect_eq(V_VT(&var), VT_BSTR, int, "%x");
+    ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionNamespaces"), &var));
+    expect_eq(V_VT(&var), VT_BSTR, int, "%x");
     if (V_VT(&var) == VT_BSTR)
         expect_bstr_eq_and_free(V_BSTR(&var), "xmlns:test='urn:uuid:86B2F87F-ACB6-45cd-8B77-9BDB92A01A29' xmlns:foo=###");
 
@@ -3064,7 +4138,7 @@ static void test_XPath(void)
 
 static void test_cloneNode(void )
 {
-    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc;
     VARIANT_BOOL b;
     IXMLDOMNodeList *pList;
     IXMLDOMNamedNodeMap *mapAttr;
@@ -3077,10 +4151,8 @@ static void test_cloneNode(void )
     BSTR str;
     static const WCHAR szSearch[] = { 'l', 'c', '/', 'p', 'r', 0 };
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     str = SysAllocString( szComplete4 );
     ole_check(IXMLDOMDocument_loadXML(doc, str, &b));
@@ -3197,11 +4269,11 @@ static void test_cloneNode(void )
     r = IXMLDOMNode_get_childNodes(node_clone, &pList);
     ok( r == S_OK, "ret %08x\n", r );
     if (pList)
-	{
-		IXMLDOMNodeList_get_length(pList, &nLength1);
+    {
+        IXMLDOMNodeList_get_length(pList, &nLength1);
         ok( nLength1 == 0, "Length should be 0 (%d)\n", nLength1);
-		IXMLDOMNodeList_Release(pList);
-	}
+        IXMLDOMNodeList_Release(pList);
+    }
 
     r = IXMLDOMNode_get_attributes(node_clone, &mapAttr);
     ok( r == S_OK, "ret %08x\n", r );
@@ -3223,7 +4295,7 @@ static void test_cloneNode(void )
 
 static void test_xmlTypes(void)
 {
-    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMElement *pRoot;
     HRESULT hr;
     IXMLDOMComment *pComment;
@@ -3235,18 +4307,18 @@ static void test_xmlTypes(void)
     IXMLDOMDocumentFragment *pDocFrag = NULL;
     IXMLDOMEntityReference *pEntityRef = NULL;
     BSTR str;
-    IXMLDOMNode *pNextChild = (IXMLDOMNode *)0x1;   /* Used for testing Siblings */
+    IXMLDOMNode *pNextChild;
     VARIANT v;
     LONG len = 0;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
+    pNextChild = (void*)0xdeadbeef;
     hr = IXMLDOMDocument_get_nextSibling(doc, NULL);
     ok(hr == E_INVALIDARG, "ret %08x\n", hr );
 
+    pNextChild = (void*)0xdeadbeef;
     hr = IXMLDOMDocument_get_nextSibling(doc, &pNextChild);
     ok(hr == S_FALSE, "ret %08x\n", hr );
     ok(pNextChild == NULL, "pDocChild not NULL\n");
@@ -3255,7 +4327,7 @@ static void test_xmlTypes(void)
     hr = IXMLDOMDocument_get_previousSibling(doc, NULL);
     ok(hr == E_INVALIDARG, "ret %08x\n", hr );
 
-    pNextChild = (IXMLDOMNode *)0x1;
+    pNextChild = (void*)0xdeadbeef;
     hr = IXMLDOMDocument_get_previousSibling(doc, &pNextChild);
     ok(hr == S_FALSE, "ret %08x\n", hr );
     ok(pNextChild == NULL, "pNextChild not NULL\n");
@@ -3264,18 +4336,20 @@ static void test_xmlTypes(void)
     hr = IXMLDOMDocument_get_attributes( doc, NULL );
     ok( hr == E_INVALIDARG, "get_attributes returned wrong code\n");
 
-    pAttribs = (IXMLDOMNamedNodeMap*)0x1;
+    pAttribs = (void*)0xdeadbeef;
     hr = IXMLDOMDocument_get_attributes( doc, &pAttribs);
     ok(hr == S_FALSE, "ret %08x\n", hr );
     ok( pAttribs == NULL, "pAttribs not NULL\n");
 
     /* test get_dataType */
+    V_VT(&v) = VT_EMPTY;
     hr = IXMLDOMDocument_get_dataType(doc, &v);
     ok(hr == S_FALSE, "ret %08x\n", hr );
     ok( V_VT(&v) == VT_NULL, "incorrect dataType type\n");
     VariantClear(&v);
 
     /* test nodeTypeString */
+    str = NULL;
     hr = IXMLDOMDocument_get_nodeTypeString(doc, &str);
     ok(hr == S_OK, "ret %08x\n", hr );
     ok( !lstrcmpW( str, _bstr_("document") ), "incorrect nodeTypeString string\n");
@@ -3484,7 +4558,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* test insertData */
@@ -3525,7 +4599,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete data */
@@ -3559,7 +4633,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete from end */
@@ -3572,7 +4646,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append ") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append ") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete from inside */
@@ -3585,7 +4659,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("  ") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("  ") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete whole data ... */
@@ -3609,14 +4683,14 @@ static void test_xmlTypes(void)
                 ok(hr == E_INVALIDARG, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 hr = IXMLDOMComment_replaceData(pComment, 0, 0, NULL);
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* NULL pointer means delete */
@@ -3624,7 +4698,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* empty string means delete */
@@ -3632,7 +4706,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* zero count means insert */
@@ -3640,7 +4714,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 hr = IXMLDOMComment_replaceData(pComment, 0, 2, NULL);
@@ -3650,7 +4724,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* nonempty string, count greater than its length */
@@ -3658,7 +4732,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* nonempty string, count less than its length */
@@ -3666,7 +4740,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMComment_get_text(pComment, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 IXMLDOMComment_Release(pComment);
@@ -3846,7 +4920,7 @@ static void test_xmlTypes(void)
 
                 VariantInit(&var);
 
-                hr = IXMLDOMCDATASection_QueryInterface(pCDataSec, &IID_IXMLDOMElement, (LPVOID*)&pElement);
+                hr = IXMLDOMCDATASection_QueryInterface(pCDataSec, &IID_IXMLDOMElement, (void**)&pElement);
                 ok(hr == E_NOINTERFACE, "ret %08x\n", hr);
 
                 hr = IXMLDOMElement_appendChild(pRoot, (IXMLDOMNode*)pCDataSec, NULL);
@@ -3984,7 +5058,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("This &is a ; test <>\\Append") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* test insertData */
@@ -4025,7 +5099,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("Begin This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete data */
@@ -4059,7 +5133,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append End") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append End") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete from end */
@@ -4072,7 +5146,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append ") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_(" This &is a Middle; test <>\\Append ") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete from inside */
@@ -4085,7 +5159,7 @@ static void test_xmlTypes(void)
 
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("  ") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("  ") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* delete whole data ... */
@@ -4110,14 +5184,14 @@ static void test_xmlTypes(void)
                 ok(hr == E_INVALIDARG, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 hr = IXMLDOMCDATASection_replaceData(pCDataSec, 0, 0, NULL);
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("str1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* NULL pointer means delete */
@@ -4125,7 +5199,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("tr1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* empty string means delete */
@@ -4133,7 +5207,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("r1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* zero count means insert */
@@ -4141,7 +5215,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("ar1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 hr = IXMLDOMCDATASection_replaceData(pCDataSec, 0, 2, NULL);
@@ -4151,7 +5225,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("m1") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* nonempty string, count greater than its length */
@@ -4159,7 +5233,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("a1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 /* nonempty string, count less than its length */
@@ -4167,7 +5241,7 @@ static void test_xmlTypes(void)
                 ok(hr == S_OK, "ret %08x\n", hr );
                 hr = IXMLDOMCDATASection_get_text(pCDataSec, &str);
                 ok(hr == S_OK, "ret %08x\n", hr );
-                ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string\n");
+                ok( !lstrcmpW( str, _bstr_("wine1.2") ), "incorrect get_text string, got '%s'\n", wine_dbgstr_w(str) );
                 SysFreeString(str);
 
                 IXMLDOMCDATASection_Release(pCDataSec);
@@ -4308,10 +5382,8 @@ static void test_nodeTypeTests( void )
     IXMLDOMElement *pElement;
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     hr = IXMLDOMDocument_createElement(doc, _bstr_("Testing"), NULL);
     ok(hr == E_INVALIDARG, "ret %08x\n", hr );
@@ -4648,20 +5720,15 @@ static void test_nodeTypeTests( void )
 
 static void test_DocumentSaveToDocument(void)
 {
-    IXMLDOMDocument *doc = NULL;
-    IXMLDOMDocument *doc2 = NULL;
+    IXMLDOMDocument *doc, *doc2;
     IXMLDOMElement *pRoot;
-
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc2 );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
+    doc2 = create_document(&IID_IXMLDOMDocument);
+    if (!doc2)
     {
         IXMLDOMDocument_Release(doc);
         return;
@@ -4696,6 +5763,7 @@ static void test_DocumentSaveToDocument(void)
             SysFreeString(sOrig);
             SysFreeString(sNew);
         }
+        IXMLDOMElement_Release(pRoot);
     }
 
     IXMLDOMDocument_Release(doc2);
@@ -4704,17 +5772,15 @@ static void test_DocumentSaveToDocument(void)
 
 static void test_DocumentSaveToFile(void)
 {
-    IXMLDOMDocument *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMElement *pRoot;
     HANDLE file;
     char buffer[100];
     DWORD read = 0;
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     hr = IXMLDOMDocument_createElement(doc, _bstr_("Testing"), &pRoot);
     ok(hr == S_OK, "ret %08x\n", hr );
@@ -4752,21 +5818,17 @@ static void test_DocumentSaveToFile(void)
 
 static void test_testTransforms(void)
 {
-    IXMLDOMDocument *doc = NULL;
-    IXMLDOMDocument *docSS = NULL;
+    IXMLDOMDocument *doc, *docSS;
     IXMLDOMNode *pNode;
     VARIANT_BOOL bSucc;
 
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&docSS );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
+    docSS = create_document(&IID_IXMLDOMDocument);
+    if (!docSS)
     {
         IXMLDOMDocument_Release(doc);
         return;
@@ -4778,7 +5840,7 @@ static void test_testTransforms(void)
     hr = IXMLDOMDocument_loadXML(docSS, _bstr_(szTransformSSXML), &bSucc);
     ok(hr == S_OK, "ret %08x\n", hr );
 
-    hr = IXMLDOMDocument_QueryInterface(docSS, &IID_IXMLDOMNode, (LPVOID*)&pNode );
+    hr = IXMLDOMDocument_QueryInterface(docSS, &IID_IXMLDOMNode, (void**)&pNode );
     ok(hr == S_OK, "ret %08x\n", hr );
     if(hr == S_OK)
     {
@@ -4800,7 +5862,7 @@ static void test_testTransforms(void)
 
 static void test_Namespaces(void)
 {
-    IXMLDOMDocument2 *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMNode *pNode;
     IXMLDOMNode *pNode2 = NULL;
     VARIANT_BOOL bSucc;
@@ -4812,12 +5874,10 @@ static void test_Namespaces(void)
 "<WEB:Site version=\"1.0\" />\n"
 "</root>";
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szNamespacesXML), &bSucc);
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(szNamespacesXML), &bSucc);
     ok(hr == S_OK, "ret %08x\n", hr );
     ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE\n");
 
@@ -4853,14 +5913,14 @@ static void test_Namespaces(void)
         IXMLDOMNode_Release(pNode);
     }
 
-    IXMLDOMDocument2_Release(doc);
+    IXMLDOMDocument_Release(doc);
 
     free_bstrs();
 }
 
 static void test_FormattingXML(void)
 {
-    IXMLDOMDocument2 *doc = NULL;
+    IXMLDOMDocument *doc;
     IXMLDOMElement *pElement;
     VARIANT_BOOL bSucc;
     HRESULT hr;
@@ -4868,18 +5928,16 @@ static void test_FormattingXML(void)
     static const CHAR szLinefeedXML[] = "<?xml version=\"1.0\"?>\n<Root>\n\t<Sub val=\"A\" />\n</Root>";
     static const CHAR szLinefeedRootXML[] = "<Root>\r\n\t<Sub val=\"A\"/>\r\n</Root>";
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szLinefeedXML), &bSucc);
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(szLinefeedXML), &bSucc);
     ok(hr == S_OK, "ret %08x\n", hr );
     ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE\n");
 
     if(bSucc == VARIANT_TRUE)
     {
-        hr = IXMLDOMDocument2_get_documentElement(doc, &pElement);
+        hr = IXMLDOMDocument_get_documentElement(doc, &pElement);
         ok(hr == S_OK, "ret %08x\n", hr );
         if(hr == S_OK)
         {
@@ -4892,382 +5950,171 @@ static void test_FormattingXML(void)
         }
     }
 
-    IXMLDOMDocument2_Release(doc);
+    IXMLDOMDocument_Release(doc);
 
     free_bstrs();
 }
 
-static void test_NodeTypeValue(void)
+typedef struct _nodetypedvalue_t {
+    const char *name;
+    VARTYPE type;
+    const char *value; /* value in string format */
+} nodetypedvalue_t;
+
+static const nodetypedvalue_t get_nodetypedvalue[] = {
+    { "root/string",    VT_BSTR, "Wine" },
+    { "root/string2",   VT_BSTR, "String" },
+    { "root/number",    VT_BSTR, "12.44" },
+    { "root/number2",   VT_BSTR, "-3.71e3" },
+    { "root/int",       VT_I4,   "-13" },
+    { "root/fixed",     VT_CY,   "7322.9371" },
+    { "root/bool",      VT_BOOL, "-1" },
+    { "root/datetime",  VT_DATE, "40135.14" },
+    { "root/datetimetz",VT_DATE, "37813.59" },
+    { "root/date",      VT_DATE, "665413" },
+    { "root/time",      VT_DATE, "0.5813889" },
+    { "root/timetz",    VT_DATE, "1.112512" },
+    { "root/i1",        VT_I1,   "-13" },
+    { "root/i2",        VT_I2,   "31915" },
+    { "root/i4",        VT_I4,   "-312232" },
+    { "root/ui1",       VT_UI1,  "123" },
+    { "root/ui2",       VT_UI2,  "48282" },
+    { "root/ui4",       VT_UI4,  "949281" },
+    { "root/r4",        VT_R4,   "213124" },
+    { "root/r8",        VT_R8,   "0.412" },
+    { "root/float",     VT_R8,   "41221.421" },
+    { "root/uuid",      VT_BSTR, "333C7BC4-460F-11D0-BC04-0080C7055a83" },
+    { 0 }
+};
+
+static void test_nodeTypedValue(void)
 {
-    IXMLDOMDocument2 *doc = NULL;
-    IXMLDOMNode *pNode;
-    VARIANT_BOOL bSucc;
+    const nodetypedvalue_t *entry = get_nodetypedvalue;
+    IXMLDOMDocument *doc;
+    IXMLDOMNode *node;
+    VARIANT_BOOL b;
+    VARIANT value;
     HRESULT hr;
-    VARIANT v;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szTypeValueXML), &bSucc);
+    b = VARIANT_FALSE;
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(szTypeValueXML), &b);
     ok(hr == S_OK, "ret %08x\n", hr );
-    ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE\n");
-    if(bSucc == VARIANT_TRUE)
+    ok(b == VARIANT_TRUE, "got %d\n", b);
+
+    hr = IXMLDOMDocument_get_nodeValue(doc, NULL);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+    V_VT(&value) = VT_BSTR;
+    V_BSTR(&value) = NULL;
+    hr = IXMLDOMDocument_get_nodeValue(doc, &value);
+    ok(hr == S_FALSE, "ret %08x\n", hr );
+    ok(V_VT(&value) == VT_NULL, "expect VT_NULL got %d\n", V_VT(&value));
+
+    hr = IXMLDOMDocument_get_nodeTypedValue(doc, NULL);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+    hr = IXMLDOMDocument_get_nodeTypedValue(doc, &value);
+    ok(hr == S_FALSE, "ret %08x\n", hr );
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("root/string"), &node);
+    ok(hr == S_OK, "ret %08x\n", hr );
+
+    V_VT(&value) = VT_BSTR;
+    V_BSTR(&value) = NULL;
+    hr = IXMLDOMNode_get_nodeValue(node, &value);
+    ok(hr == S_FALSE, "ret %08x\n", hr );
+    ok(V_VT(&value) == VT_NULL, "expect VT_NULL got %d\n", V_VT(&value));
+
+    hr = IXMLDOMNode_get_nodeTypedValue(node, NULL);
+    ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+
+    IXMLDOMNode_Release(node);
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("root/binhex"), &node);
+    ok(hr == S_OK, "ret %08x\n", hr );
     {
-        hr = IXMLDOMDocument2_get_nodeValue(doc, NULL);
-        ok(hr == E_INVALIDARG, "ret %08x\n", hr );
+        BYTE bytes[] = {0xff,0xfc,0xa0,0x12,0x00,0x3c};
 
-        V_VT(&v) = VT_BSTR;
-        V_BSTR(&v) = NULL;
-        hr = IXMLDOMDocument2_get_nodeValue(doc, &v);
-        ok(hr == S_FALSE, "ret %08x\n", hr );
-        ok(V_VT(&v) == VT_NULL, "expect VT_NULL got %d\n", V_VT(&v));
-
-        hr = IXMLDOMDocument2_get_nodeTypedValue(doc, NULL);
-        ok(hr == E_INVALIDARG, "ret %08x\n", hr );
-
-        hr = IXMLDOMDocument2_get_nodeTypedValue(doc, &v);
-        ok(hr == S_FALSE, "ret %08x\n", hr );
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/string"), &pNode);
+        hr = IXMLDOMNode_get_nodeTypedValue(node, &value);
         ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            V_VT(&v) = VT_BSTR;
-            V_BSTR(&v) = NULL;
-            hr = IXMLDOMNode_get_nodeValue(pNode, &v);
-            ok(hr == S_FALSE, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_NULL, "expect VT_NULL got %d\n", V_VT(&v));
-
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, NULL);
-            ok(hr == E_INVALIDARG, "ret %08x\n", hr );
-
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BSTR, "incorrect type\n");
-            ok(!lstrcmpW( V_BSTR(&v), _bstr_("Wine") ), "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/string2"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BSTR, "incorrect type\n");
-            ok(!lstrcmpW( V_BSTR(&v), _bstr_("String") ), "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/number"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BSTR, "incorrect type\n");
-            ok(!lstrcmpW( V_BSTR(&v), _bstr_("12.44") ), "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/number2"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BSTR, "incorrect type\n");
-            ok(!lstrcmpW( V_BSTR(&v), _bstr_("-3.71e3") ), "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/int"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_I4, "incorrect type\n");
-            ok(V_I4(&v) == -13, "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/fixed"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_CY, "incorrect type\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/bool"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BOOL, "incorrect type\n");
-            ok(V_BOOL(&v) == VARIANT_TRUE, "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/datetime"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_DATE, "incorrect type\n");
-            double_eq(40135.13996527778, V_DATE(&v));
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/datetimetz"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_DATE, "incorrect type\n");
-            double_eq(37813.59302083334, V_DATE(&v));
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/date"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_DATE, "incorrect type\n");
-            double_eq(665413.0, V_DATE(&v));
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/time"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_DATE, "incorrect type\n");
-            double_eq(0.5813888888888888, V_DATE(&v));
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/timetz"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_DATE, "incorrect type\n");
-            double_eq(1.112511574074074, V_DATE(&v));
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/i1"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_I1, "incorrect type\n");
-            ok(V_I1(&v) == -13, "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/i2"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_I2, "incorrect type\n");
-            ok(V_I2(&v) == 31915, "incorrect value\n");
-            VariantClear( &v );
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/i4"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_I4, "incorrect type\n");
-            ok(V_I4(&v) == -312232, "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/ui1"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_UI1, "incorrect type\n");
-            ok(V_UI1(&v) == 123, "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/ui2"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_UI2, "incorrect type\n");
-            ok(V_UI2(&v) == 48282, "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/ui4"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_UI4, "incorrect type\n");
-            ok(V_UI4(&v) == 949281, "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/r4"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_R4, "incorrect type\n");
-            double_eq(213124.0, V_R4(&v));
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/r8"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_R8, "incorrect type\n");
-            double_eq(0.412, V_R8(&v));
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/float"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_R8, "incorrect type\n");
-            double_eq(41221.421, V_R8(&v));
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/uuid"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == VT_BSTR, "incorrect type\n");
-            ok(!lstrcmpW(V_BSTR(&v), _bstr_("333C7BC4-460F-11D0-BC04-0080C7055a83")), "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/binhex"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            BYTE bytes[] = {0xff,0xfc,0xa0,0x12,0x00,0x3c};
-
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == (VT_ARRAY|VT_UI1), "incorrect type\n");
-            ok(V_ARRAY(&v)->rgsabound[0].cElements == 6, "incorrect array size\n");
-            if(V_ARRAY(&v)->rgsabound[0].cElements == 6)
-                ok(!memcmp(bytes, V_ARRAY(&v)->pvData, sizeof(bytes)), "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
-
-        hr = IXMLDOMDocument2_selectSingleNode(doc, _bstr_("root/binbase64"), &pNode);
-        ok(hr == S_OK, "ret %08x\n", hr );
-        if(hr == S_OK)
-        {
-            BYTE bytes[] = {0x62,0x61,0x73,0x65,0x36,0x34,0x20,0x74,0x65,0x73,0x74};
-
-            hr = IXMLDOMNode_get_nodeTypedValue(pNode, &v);
-            ok(hr == S_OK, "ret %08x\n", hr );
-            ok(V_VT(&v) == (VT_ARRAY|VT_UI1), "incorrect type\n");
-            ok(V_ARRAY(&v)->rgsabound[0].cElements == 11, "incorrect array size\n");
-            if(V_ARRAY(&v)->rgsabound[0].cElements == 11)
-                ok(!memcmp(bytes, V_ARRAY(&v)->pvData, sizeof(bytes)), "incorrect value\n");
-            VariantClear(&v);
-
-            IXMLDOMNode_Release(pNode);
-        }
+        ok(V_VT(&value) == (VT_ARRAY|VT_UI1), "incorrect type\n");
+        ok(V_ARRAY(&value)->rgsabound[0].cElements == 6, "incorrect array size\n");
+        if(V_ARRAY(&value)->rgsabound[0].cElements == 6)
+            ok(!memcmp(bytes, V_ARRAY(&value)->pvData, sizeof(bytes)), "incorrect value\n");
+        VariantClear(&value);
+        IXMLDOMNode_Release(node);
     }
 
-    IXMLDOMDocument2_Release(doc);
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("root/binbase64"), &node);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    {
+        BYTE bytes[] = {0x62,0x61,0x73,0x65,0x36,0x34,0x20,0x74,0x65,0x73,0x74};
 
+        hr = IXMLDOMNode_get_nodeTypedValue(node, &value);
+        ok(hr == S_OK, "ret %08x\n", hr );
+        ok(V_VT(&value) == (VT_ARRAY|VT_UI1), "incorrect type\n");
+        ok(V_ARRAY(&value)->rgsabound[0].cElements == 11, "incorrect array size\n");
+        if(V_ARRAY(&value)->rgsabound[0].cElements == 11)
+            ok(!memcmp(bytes, V_ARRAY(&value)->pvData, sizeof(bytes)), "incorrect value\n");
+        VariantClear(&value);
+        IXMLDOMNode_Release(node);
+    }
+
+    while (entry->name)
+    {
+        hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_(entry->name), &node);
+        ok(hr == S_OK, "ret %08x\n", hr );
+
+        hr = IXMLDOMNode_get_nodeTypedValue(node, &value);
+        ok(hr == S_OK, "ret %08x\n", hr );
+        ok(V_VT(&value) == entry->type, "incorrect type, expected %d, got %d\n", entry->type, V_VT(&value));
+
+        if (entry->type != VT_BSTR)
+        {
+           if (entry->type == VT_DATE ||
+               entry->type == VT_R8 ||
+               entry->type == VT_CY)
+           {
+               if (entry->type == VT_DATE)
+               {
+                   hr = VariantChangeType(&value, &value, 0, VT_R4);
+                   ok(hr == S_OK, "ret %08x\n", hr );
+               }
+               hr = VariantChangeTypeEx(&value, &value,
+                                        MAKELCID(MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT), SORT_DEFAULT),
+                                        VARIANT_NOUSEROVERRIDE, VT_BSTR);
+               ok(hr == S_OK, "ret %08x\n", hr );
+           }
+           else
+           {
+               hr = VariantChangeType(&value, &value, 0, VT_BSTR);
+               ok(hr == S_OK, "ret %08x\n", hr );
+           }
+
+           ok(lstrcmpW( V_BSTR(&value), _bstr_(entry->value)) == 0,
+              "expected %s, got %s\n", entry->value, wine_dbgstr_w(V_BSTR(&value)));
+        }
+        else
+           ok(lstrcmpW( V_BSTR(&value), _bstr_(entry->value)) == 0,
+               "expected %s, got %s\n", entry->value, wine_dbgstr_w(V_BSTR(&value)));
+
+        VariantClear( &value );
+        IXMLDOMNode_Release(node);
+
+        entry++;
+    }
+
+    IXMLDOMDocument_Release(doc);
     free_bstrs();
 }
 
 static void test_TransformWithLoadingLocalFile(void)
 {
-    IXMLDOMDocument2 *doc = NULL;
-    IXMLDOMDocument2 *xsl = NULL;
+    IXMLDOMDocument *doc;
+    IXMLDOMDocument *xsl;
     IXMLDOMNode *pNode;
     VARIANT_BOOL bSucc;
     HRESULT hr;
@@ -5295,20 +6142,17 @@ static void test_TransformWithLoadingLocalFile(void)
             lpPathBuffer[i] = '/';
     }
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (LPVOID*)&xsl );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
+    xsl = create_document(&IID_IXMLDOMDocument);
+    if (!xsl)
     {
         IXMLDOMDocument2_Release(doc);
         return;
     }
 
-    hr = IXMLDOMDocument2_loadXML(doc, _bstr_(szTypeValueXML), &bSucc);
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_(szTypeValueXML), &bSucc);
     ok(hr == S_OK, "ret %08x\n", hr );
     ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE\n");
     if(bSucc == VARIANT_TRUE)
@@ -5324,19 +6168,19 @@ static void test_TransformWithLoadingLocalFile(void)
         lstrcatW(sXSL, sFileName);
         lstrcatW(sXSL, sPart2);
 
-        hr = IXMLDOMDocument2_loadXML(xsl, sXSL, &bSucc);
+        hr = IXMLDOMDocument_loadXML(xsl, sXSL, &bSucc);
         ok(hr == S_OK, "ret %08x\n", hr );
         ok(bSucc == VARIANT_TRUE, "Expected VARIANT_TRUE got VARIANT_FALSE\n");
         if(bSucc == VARIANT_TRUE)
         {
             BSTR sResult;
 
-            hr = IXMLDOMDocument_QueryInterface(xsl, &IID_IXMLDOMNode, (LPVOID*)&pNode );
+            hr = IXMLDOMDocument_QueryInterface(xsl, &IID_IXMLDOMNode, (void**)&pNode );
             ok(hr == S_OK, "ret %08x\n", hr );
             if(hr == S_OK)
             {
                 /* This will load the temp file via the XSL */
-                hr = IXMLDOMDocument2_transformNode(doc, pNode, &sResult);
+                hr = IXMLDOMDocument_transformNode(doc, pNode, &sResult);
                 ok(hr == S_OK, "ret %08x\n", hr );
                 if(hr == S_OK)
                 {
@@ -5351,8 +6195,8 @@ static void test_TransformWithLoadingLocalFile(void)
         SysFreeString(sXSL);
     }
 
-    IXMLDOMDocument2_Release(doc);
-    IXMLDOMDocument2_Release(xsl);
+    IXMLDOMDocument_Release(doc);
+    IXMLDOMDocument_Release(xsl);
 
     DeleteFile(lpPathBuffer);
     free_bstrs();
@@ -5360,16 +6204,17 @@ static void test_TransformWithLoadingLocalFile(void)
 
 static void test_put_nodeValue(void)
 {
+    static const WCHAR jeevesW[] = {'J','e','e','v','e','s',' ','&',' ','W','o','o','s','t','e','r',0};
     IXMLDOMDocument *doc;
+    IXMLDOMText *text;
     IXMLDOMEntityReference *entityref;
+    IXMLDOMAttribute *attr;
     IXMLDOMNode *node;
     HRESULT hr;
     VARIANT data, type;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     /* test for unsupported types */
     /* NODE_DOCUMENT */
@@ -5421,152 +6266,95 @@ static void test_put_nodeValue(void)
     IXMLDOMNode_Release(node);
     IXMLDOMEntityReference_Release(entityref);
 
+    /* supported types */
+    hr = IXMLDOMDocument_createTextNode(doc, _bstr_(""), &text);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    V_VT(&data) = VT_BSTR;
+    V_BSTR(&data) = _bstr_("Jeeves & Wooster");
+    hr = IXMLDOMText_put_nodeValue(text, data);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    IXMLDOMText_Release(text);
+
+    hr = IXMLDOMDocument_createAttribute(doc, _bstr_("attr"), &attr);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    V_VT(&data) = VT_BSTR;
+    V_BSTR(&data) = _bstr_("Jeeves & Wooster");
+    hr = IXMLDOMAttribute_put_nodeValue(attr, data);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    hr = IXMLDOMAttribute_get_nodeValue(attr, &data);
+    ok(hr == S_OK, "ret %08x\n", hr );
+    ok(memcmp(V_BSTR(&data), jeevesW, sizeof(jeevesW)) == 0, "got %s\n",
+        wine_dbgstr_w(V_BSTR(&data)));
+    VariantClear(&data);
+    IXMLDOMAttribute_Release(attr);
+
     free_bstrs();
 
     IXMLDOMDocument_Release(doc);
-}
-
-static void test_IObjectSafety_set(IObjectSafety *safety, HRESULT result, HRESULT result2, DWORD set, DWORD mask, DWORD expected, DWORD expected2)
-{
-    HRESULT hr;
-    DWORD enabled, supported;
-
-    trace("testing IObjectSafety: enable=%08x, mask=%08x\n", set, mask);
-
-    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL, set, mask);
-    if (result == result2)
-        ok(hr == result, "SetInterfaceSafetyOptions: expected %08x, returned %08x\n", result, hr );
-    else
-        ok(broken(hr == result) || hr == result2,
-           "SetInterfaceSafetyOptions: expected %08x, got %08x\n", result2, hr );
-
-    supported = enabled = 0xCAFECAFE;
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    if (expected == expected2)
-        ok(enabled == expected, "Expected %08x, got %08x\n", expected, enabled);
-    else
-        ok(broken(enabled == expected) || enabled == expected2,
-           "Expected %08x, got %08x\n", expected2, enabled);
-
-    /* reset the safety options */
-
-    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
-            INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA|INTERFACE_USES_SECURITY_MANAGER,
-            0);
-    ok(hr == S_OK, "ret %08x\n", hr );
-
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    ok(enabled == 0, "Expected 0, got %08x\n", enabled);
 }
 
 static void test_document_IObjectSafety(void)
 {
     IXMLDOMDocument *doc;
     IObjectSafety *safety;
-    DWORD enabled = 0, supported = 0;
     HRESULT hr;
 
-    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    ok( hr == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", hr );
-    if( hr != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
 
     hr = IXMLDOMDocument_QueryInterface(doc, &IID_IObjectSafety, (void**)&safety);
     ok(hr == S_OK, "ret %08x\n", hr );
 
-    /* get */
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, NULL, &enabled);
-    ok(hr == E_POINTER, "ret %08x\n", hr );
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, NULL);
-    ok(hr == E_POINTER, "ret %08x\n", hr );
-
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    ok(broken(supported == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA)) ||
-       supported == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_SECURITY_MANAGER) /* msxml3 SP8+ */,
-        "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA | INTERFACE_USES_SECURITY_MANAGER), "
-             "got %08x\n", supported);
-    ok(enabled == 0, "Expected 0, got %08x\n", enabled);
-
-    /* set -- individual flags */
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER, INTERFACESAFE_FOR_UNTRUSTED_CALLER,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER, INTERFACESAFE_FOR_UNTRUSTED_CALLER);
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACESAFE_FOR_UNTRUSTED_DATA, INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACESAFE_FOR_UNTRUSTED_DATA, INTERFACESAFE_FOR_UNTRUSTED_DATA);
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACE_USES_SECURITY_MANAGER, INTERFACE_USES_SECURITY_MANAGER,
-        0, INTERFACE_USES_SECURITY_MANAGER /* msxml3 SP8+ */);
-
-    /* set INTERFACE_USES_DISPEX  */
-
-    test_IObjectSafety_set(safety, S_OK, E_FAIL /* msxml3 SP8+ */,
-        INTERFACE_USES_DISPEX, INTERFACE_USES_DISPEX,
-        0, 0);
-
-    test_IObjectSafety_set(safety, S_OK, E_FAIL /* msxml3 SP8+ */,
-        INTERFACE_USES_DISPEX, 0,
-        0, 0);
-
-    test_IObjectSafety_set(safety, S_OK, S_OK /* msxml3 SP8+ */,
-        0, INTERFACE_USES_DISPEX,
-        0, 0);
-
-    /* set option masking */
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER);
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACESAFE_FOR_UNTRUSTED_DATA);
-
-    test_IObjectSafety_set(safety, S_OK, S_OK,
-        INTERFACESAFE_FOR_UNTRUSTED_CALLER|INTERFACESAFE_FOR_UNTRUSTED_DATA,
-        INTERFACE_USES_SECURITY_MANAGER,
-        0,
-        0);
-
-    /* set -- inheriting previous settings */
-
-    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
-                                                         INTERFACESAFE_FOR_UNTRUSTED_CALLER,
-                                                         INTERFACESAFE_FOR_UNTRUSTED_CALLER);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    todo_wine
-    ok(broken(enabled == INTERFACESAFE_FOR_UNTRUSTED_CALLER) ||
-       enabled == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACE_USES_SECURITY_MANAGER) /* msxml3 SP8+ */,
-         "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACE_USES_SECURITY_MANAGER), "
-         "got %08x\n", enabled);
-
-    hr = IObjectSafety_SetInterfaceSafetyOptions(safety, NULL,
-                                                         INTERFACESAFE_FOR_UNTRUSTED_DATA,
-                                                         INTERFACESAFE_FOR_UNTRUSTED_DATA);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    hr = IObjectSafety_GetInterfaceSafetyOptions(safety, NULL, &supported, &enabled);
-    ok(hr == S_OK, "ret %08x\n", hr );
-    todo_wine
-    ok(broken(enabled == INTERFACESAFE_FOR_UNTRUSTED_DATA) ||
-       enabled == (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA) /* msxml3 SP8+ */,
-        "Expected (INTERFACESAFE_FOR_UNTRUSTED_CALLER | INTERFACESAFE_FOR_UNTRUSTED_DATA), "
-        "got %08x\n", enabled);
+    test_IObjectSafety_common(safety);
 
     IObjectSafety_Release(safety);
 
     IXMLDOMDocument_Release(doc);
+}
+
+typedef struct _property_test_t {
+    const GUID *guid;
+    const char *clsid;
+    const char *property;
+    const char *value;
+} property_test_t;
+
+static const property_test_t properties_test_data[] = {
+    { &CLSID_DOMDocument,  "CLSID_DOMDocument" , "SelectionLanguage", "XSLPattern" },
+    { &CLSID_DOMDocument2,  "CLSID_DOMDocument2" , "SelectionLanguage", "XSLPattern" },
+    { &CLSID_DOMDocument30, "CLSID_DOMDocument30", "SelectionLanguage", "XSLPattern" },
+    { &CLSID_DOMDocument40, "CLSID_DOMDocument40", "SelectionLanguage", "XPath" },
+    { &CLSID_DOMDocument60, "CLSID_DOMDocument60", "SelectionLanguage", "XPath" },
+    { 0 }
+};
+
+static void test_default_properties(void)
+{
+    const property_test_t *entry = properties_test_data;
+    IXMLDOMDocument2 *doc;
+    VARIANT var;
+    HRESULT hr;
+
+    while (entry->guid)
+    {
+        hr = CoCreateInstance(entry->guid, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (void**)&doc);
+        if (hr != S_OK)
+        {
+            win_skip("can't create %s instance\n", entry->clsid);
+            entry++;
+            continue;
+        }
+
+        hr = IXMLDOMDocument2_getProperty(doc, _bstr_(entry->property), &var);
+        ok(hr == S_OK, "got 0x%08x\n", hr);
+        ok(lstrcmpW(V_BSTR(&var), _bstr_(entry->value)) == 0, "expected %s, for %s\n",
+           entry->value, entry->clsid);
+        VariantClear(&var);
+
+        IXMLDOMDocument2_Release(doc);
+
+        entry++;
+    }
 }
 
 static void test_XSLPattern(void)
@@ -5574,19 +6362,15 @@ static void test_XSLPattern(void)
     IXMLDOMDocument2 *doc;
     IXMLDOMNodeList *list;
     VARIANT_BOOL b;
-    HRESULT r;
     LONG len;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument2, (void**)&doc );
-    ok( r == S_OK, "CoCreateInstance(CLSID_DOMDocument) should have succeeded instead of failing with 0x%08x\n", r );
-    if( r != S_OK )
-        return;
+    doc = create_document(&IID_IXMLDOMDocument2);
+    if (!doc) return;
 
     ole_check(IXMLDOMDocument2_loadXML(doc, _bstr_(szExampleXML), &b));
     ok(b == VARIANT_TRUE, "failed to load XML string\n");
 
-    /* switch to XPath */
+    /* switch to XSLPattern */
     ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionLanguage"), _variantbstr_("XSLPattern")));
 
     /* XPath doesn't select elements with non-null default namespace with unqualified selectors, XSLPattern does */
@@ -5594,69 +6378,1947 @@ static void test_XSLPattern(void)
     len = 0;
     ole_check(IXMLDOMNodeList_get_length(list, &len));
     /* should select <elem><c> and <elem xmlns='...'><c> but not <elem><foo:c> */
-    todo_wine ok(len == 3, "expected 3 entries in list, got %d\n", len);
+    ok(len == 3, "expected 3 entries in list, got %d\n", len);
     IXMLDOMNodeList_Release(list);
 
     /* for XSLPattern start index is 0, for XPath it's 1 */
     ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[0]"), &list));
     len = 0;
     ole_check(IXMLDOMNodeList_get_length(list, &len));
-    todo_wine ok(len != 0, "expected filled list\n");
+    ok(len != 0, "expected filled list\n");
     if (len)
-        todo_wine expect_list_and_release(list, "E1.E2.D1");
+        expect_list_and_release(list, "E1.E2.D1");
+
+    /* index() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()=1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1");
+
+    /* $eq$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $eq$ 1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1");
+
+    /* end() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E4.E2.D1");
+
+    /* $not$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[$not$ end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1 E3.E2.D1");
+
+    /* !=/$ne$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() != 0]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1 E3.E2.D1 E4.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $ne$ 0]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1 E3.E2.D1 E4.E2.D1");
+
+    /* </$lt$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() < 2]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $lt$ 2]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+
+    /* <=/$le$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() <= 1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $le$ 1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+
+    /* >/$gt$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() > 1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $gt$ 1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+
+    /* >=/$ge$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() >= 2]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index() $ge$ 2]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+
+    /* $ieq$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $ieq$ 'a2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1");
+
+    /* $ine$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $ine$ 'a2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E3.E2.D1 E4.E2.D1");
+
+    /* $ilt$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $ilt$ 'a3 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+
+    /* $ile$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $ile$ 'a2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E2.E2.D1");
+
+    /* $igt$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $igt$ 'a2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+
+    /* $ige$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[a $ige$ 'a3 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E2.D1 E4.E2.D1");
+
+    /* $any$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[$any$ *='B2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1");
+
+    /* $all$ */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[$all$ *!='B2 field']"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E3.E2.D1 E4.E2.D1");
+
+    /* or/$or$/|| */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()=0 or end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E4.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()=0 $or$ end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E4.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()=0 || end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E1.E2.D1 E4.E2.D1");
+
+    /* and/$and$/&& */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()>0 and $not$ end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1 E3.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()>0 $and$ $not$ end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1 E3.E2.D1");
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root//elem[index()>0 && $not$ end()]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E2.E2.D1 E3.E2.D1");
+
+    /* namespace handling */
+    /* no registered namespaces */
+    ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"), _variantbstr_("")));
+    list = NULL;
+
+    /* prefixes don't need to be registered, you may use them as they are in the doc */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//bar:x"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E5.E1.E4.E1.E2.D1 E6.E2.E4.E1.E2.D1");
+
+    /* prefixes must be explicitly specified in the name */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//foo:elem"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len == 0, "expected empty list\n");
+    IXMLDOMNodeList_Release(list);
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//foo:c"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E4.E2.D1");
+
+    /* explicitly register prefix foo */
+    ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"), _variantbstr_("xmlns:foo='urn:uuid:86B2F87F-ACB6-45cd-8B77-9BDB92A01A29'")));
+
+    /* now we get the same behavior as XPath */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//foo:c"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.E3.E2.D1 E3.E4.E2.D1");
+
+    /* set prefix foo to some nonexistent namespace */
+    ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"), _variantbstr_("xmlns:foo='urn:nonexistent-foo'")));
+
+    /* the registered prefix takes precedence */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//foo:c"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len == 0, "expected empty list\n");
+    IXMLDOMNodeList_Release(list);
 
     IXMLDOMDocument2_Release(doc);
+
+    doc = create_document(&IID_IXMLDOMDocument2);
+    if (!doc) return;
+
+    ole_check(IXMLDOMDocument2_loadXML(doc, _bstr_(szNodeTypesXML), &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+    list = NULL;
+
+    /* attribute() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("attribute()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len == 0, "expected empty list\n");
+    IXMLDOMNodeList_Release(list);
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("attribute('depth')"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len == 0, "expected empty list\n");
+    IXMLDOMNodeList_Release(list);
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root/attribute('depth')"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    expect_list_and_release(list, "A'depth'.E3.D1");
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/attribute()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    expect_list_and_release(list, "A'id'.E3.E3.D1 A'depth'.E3.E3.D1");
+
+    list = NULL;
+    ole_expect(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x//attribute(id)"), &list), E_FAIL);
+    if (list)
+        IXMLDOMNodeList_Release(list);
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x//attribute('id')"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "A'id'.E3.E3.D1 A'id'.E4.E3.E3.D1 A'id'.E5.E3.E3.D1 A'id'.E6.E3.E3.D1");
+
+    /* comment() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("comment()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "C2.D1");
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//comment()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "C2.D1 C1.E3.D1 C2.E3.E3.D1 C2.E4.E3.D1");
+
+    /* element() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("element()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E3.D1");
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root/y/element()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E4.E4.E3.D1 E5.E4.E3.D1 E6.E4.E3.D1");
+
+    list = NULL;
+    ole_expect(IXMLDOMDocument2_selectNodes(doc, _bstr_("//element(a)"), &list), E_FAIL);
+    if (list)
+        IXMLDOMNodeList_Release(list);
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//element('a')"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E4.E3.E3.D1 E4.E4.E3.D1");
+
+    /* node() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("node()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "P1.D1 C2.D1 E3.D1");
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/node()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "P1.E3.E3.D1 C2.E3.E3.D1 T3.E3.E3.D1 E4.E3.E3.D1 E5.E3.E3.D1 E6.E3.E3.D1");
+
+    /* nodeType() */
+    /* XML_ELEMENT_NODE */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/node()[nodeType()=1]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "E4.E3.E3.D1 E5.E3.E3.D1 E6.E3.E3.D1");
+    /* XML_TEXT_NODE */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/node()[nodeType()=3]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "T3.E3.E3.D1");
+    /* XML_PI_NODE */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/node()[nodeType()=7]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "P1.E3.E3.D1");
+    /* XML_COMMENT_NODE */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//x/node()[nodeType()=8]"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "C2.E3.E3.D1");
+
+    /* pi() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("pi()"), &list));
+    if (list)
+    {
+        len = 0;
+        ole_check(IXMLDOMNodeList_get_length(list, &len));
+        ok(len != 0, "expected filled list\n");
+        if (len)
+            expect_list_and_release(list, "P1.D1");
+    }
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("//y/pi()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "P1.E4.E3.D1");
+
+    /* textnode() */
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root/textnode()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "T2.E3.D1");
+
+    ole_check(IXMLDOMDocument2_selectNodes(doc, _bstr_("root/element()/textnode()"), &list));
+    len = 0;
+    ole_check(IXMLDOMNodeList_get_length(list, &len));
+    ok(len != 0, "expected filled list\n");
+    if (len)
+        expect_list_and_release(list, "T3.E3.E3.D1 T3.E4.E3.D1");
+
+    IXMLDOMDocument2_Release(doc);
+    free_bstrs();
+}
+
+static void test_splitText(void)
+{
+    IXMLDOMCDATASection *cdata;
+    IXMLDOMElement *root;
+    IXMLDOMDocument *doc;
+    IXMLDOMText *text, *text2;
+    IXMLDOMNode *node;
+    VARIANT var;
+    VARIANT_BOOL success;
+    LONG length;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    hr = IXMLDOMDocument_loadXML(doc, _bstr_("<root></root>"), &success);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_get_documentElement(doc, &root);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_createCDATASection(doc, _bstr_("beautiful plumage"), &cdata);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&var) = VT_EMPTY;
+    hr = IXMLDOMElement_appendChild(root, (IXMLDOMNode*)cdata, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    length = 0;
+    hr = IXMLDOMCDATASection_get_length(cdata, &length);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(length > 0, "got %d\n", length);
+
+    hr = IXMLDOMCDATASection_splitText(cdata, 0, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    text = (void*)0xdeadbeef;
+    /* negative offset */
+    hr = IXMLDOMCDATASection_splitText(cdata, -1, &text);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(text == (void*)0xdeadbeef, "got %p\n", text);
+
+    text = (void*)0xdeadbeef;
+    /* offset outside data */
+    hr = IXMLDOMCDATASection_splitText(cdata, length + 1, &text);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(text == 0, "got %p\n", text);
+
+    text = (void*)0xdeadbeef;
+    /* offset outside data */
+    hr = IXMLDOMCDATASection_splitText(cdata, length, &text);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(text == 0, "got %p\n", text);
+
+    /* no empty node created */
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMCDATASection_get_nextSibling(cdata, &node);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(node == 0, "got %p\n", text);
+
+    hr = IXMLDOMCDATASection_splitText(cdata, 10, &text);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    length = 0;
+    hr = IXMLDOMText_get_length(text, &length);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(length == 7, "got %d\n", length);
+
+    hr = IXMLDOMCDATASection_get_nextSibling(cdata, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IXMLDOMNode_Release(node);
+
+    /* split new text node */
+    hr = IXMLDOMText_get_length(text, &length);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMText_get_nextSibling(text, &node);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(node == 0, "got %p\n", text);
+
+    hr = IXMLDOMText_splitText(text, 0, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    text2 = (void*)0xdeadbeef;
+    /* negative offset */
+    hr = IXMLDOMText_splitText(text, -1, &text2);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(text2 == (void*)0xdeadbeef, "got %p\n", text2);
+
+    text2 = (void*)0xdeadbeef;
+    /* offset outside data */
+    hr = IXMLDOMText_splitText(text, length + 1, &text2);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(text2 == 0, "got %p\n", text2);
+
+    text2 = (void*)0xdeadbeef;
+    /* offset outside data */
+    hr = IXMLDOMText_splitText(text, length, &text2);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(text2 == 0, "got %p\n", text);
+
+    text2 = 0;
+    hr = IXMLDOMText_splitText(text, 4, &text2);
+    todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (text2) IXMLDOMText_Release(text2);
+
+    node = 0;
+    hr = IXMLDOMText_get_nextSibling(text, &node);
+    todo_wine ok(hr == S_OK, "got 0x%08x\n", hr);
+    if (node) IXMLDOMNode_Release(node);
+
+    IXMLDOMText_Release(text);
+    IXMLDOMElement_Release(root);
+    IXMLDOMCDATASection_Release(cdata);
+    free_bstrs();
+}
+
+static void test_getQualifiedItem(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *element;
+    IXMLDOMNode *pr_node, *node;
+    IXMLDOMNodeList *root_list;
+    IXMLDOMNamedNodeMap *map;
+    VARIANT_BOOL b;
+    BSTR str;
+    LONG len;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_get_documentElement(doc, &element);
+    ok( hr == S_OK, "ret %08x\n", hr);
+
+    hr = IXMLDOMElement_get_childNodes(element, &root_list);
+    ok( hr == S_OK, "ret %08x\n", hr);
+
+    hr = IXMLDOMNodeList_get_item(root_list, 1, &pr_node);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNodeList_Release(root_list);
+
+    hr = IXMLDOMNode_get_attributes(pr_node, &map);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNode_Release(pr_node);
+
+    hr = IXMLDOMNamedNodeMap_get_length(map, &len);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    ok( len == 3, "length %d\n", len);
+
+    hr = IXMLDOMNamedNodeMap_getQualifiedItem(map, NULL, NULL, NULL);
+    ok( hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMNamedNodeMap_getQualifiedItem(map, NULL, NULL, &node);
+    ok( hr == E_INVALIDARG, "ret %08x\n", hr);
+    ok( node == (void*)0xdeadbeef, "got %p\n", node);
+
+    hr = IXMLDOMNamedNodeMap_getQualifiedItem(map, _bstr_("id"), NULL, NULL);
+    ok( hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    hr = IXMLDOMNamedNodeMap_getQualifiedItem(map, _bstr_("id"), NULL, &node);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNode_Release(node);
+
+    IXMLDOMNamedNodeMap_Release( map );
+    IXMLDOMElement_Release( element );
+    IXMLDOMDocument_Release( doc );
+    free_bstrs();
+}
+
+static void test_removeQualifiedItem(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *element;
+    IXMLDOMNode *pr_node, *node;
+    IXMLDOMNodeList *root_list;
+    IXMLDOMNamedNodeMap *map;
+    VARIANT_BOOL b;
+    BSTR str;
+    LONG len;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_get_documentElement(doc, &element);
+    ok( hr == S_OK, "ret %08x\n", hr);
+
+    hr = IXMLDOMElement_get_childNodes(element, &root_list);
+    ok( hr == S_OK, "ret %08x\n", hr);
+
+    hr = IXMLDOMNodeList_get_item(root_list, 1, &pr_node);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNodeList_Release(root_list);
+
+    hr = IXMLDOMNode_get_attributes(pr_node, &map);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNode_Release(pr_node);
+
+    hr = IXMLDOMNamedNodeMap_get_length(map, &len);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    ok( len == 3, "length %d\n", len);
+
+    hr = IXMLDOMNamedNodeMap_removeQualifiedItem(map, NULL, NULL, NULL);
+    ok( hr == E_INVALIDARG, "ret %08x\n", hr);
+
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMNamedNodeMap_removeQualifiedItem(map, NULL, NULL, &node);
+    ok( hr == E_INVALIDARG, "ret %08x\n", hr);
+    ok( node == (void*)0xdeadbeef, "got %p\n", node);
+
+    /* out pointer is optional */
+    hr = IXMLDOMNamedNodeMap_removeQualifiedItem(map, _bstr_("id"), NULL, NULL);
+    ok( hr == S_OK, "ret %08x\n", hr);
+
+    /* already removed */
+    hr = IXMLDOMNamedNodeMap_removeQualifiedItem(map, _bstr_("id"), NULL, NULL);
+    ok( hr == S_FALSE, "ret %08x\n", hr);
+
+    hr = IXMLDOMNamedNodeMap_removeQualifiedItem(map, _bstr_("vr"), NULL, &node);
+    ok( hr == S_OK, "ret %08x\n", hr);
+    IXMLDOMNode_Release(node);
+
+    IXMLDOMNamedNodeMap_Release( map );
+    IXMLDOMElement_Release( element );
+    IXMLDOMDocument_Release( doc );
+    free_bstrs();
+}
+
+#define check_default_props(doc) _check_default_props(__LINE__, doc)
+static inline void _check_default_props(int line, IXMLDOMDocument2* doc)
+{
+    VARIANT_BOOL b;
+    VARIANT var;
+    HRESULT hr;
+
+    VariantInit(&var);
+    helper_ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionLanguage"), &var));
+    ok_(__FILE__, line)(lstrcmpW(V_BSTR(&var), _bstr_("XSLPattern")) == 0, "expected XSLPattern\n");
+    VariantClear(&var);
+
+    helper_ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionNamespaces"), &var));
+    ok_(__FILE__, line)(lstrcmpW(V_BSTR(&var), _bstr_("")) == 0, "expected empty string\n");
+    VariantClear(&var);
+
+    helper_ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc, &b));
+    ok_(__FILE__, line)(b == VARIANT_FALSE, "expected FALSE\n");
+
+    hr = IXMLDOMDocument2_get_schemas(doc, &var);
+    ok_(__FILE__, line)(hr == S_FALSE, "got %08x\n", hr);
+    VariantClear(&var);
+}
+
+#define check_set_props(doc) _check_set_props(__LINE__, doc)
+static inline void _check_set_props(int line, IXMLDOMDocument2* doc)
+{
+    VARIANT_BOOL b;
+    VARIANT var;
+
+    VariantInit(&var);
+    helper_ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionLanguage"), &var));
+    ok_(__FILE__, line)(lstrcmpW(V_BSTR(&var), _bstr_("XPath")) == 0, "expected XPath\n");
+    VariantClear(&var);
+
+    helper_ole_check(IXMLDOMDocument2_getProperty(doc, _bstr_("SelectionNamespaces"), &var));
+    ok_(__FILE__, line)(lstrcmpW(V_BSTR(&var), _bstr_("xmlns:wi=\'www.winehq.org\'")) == 0, "got %s\n", wine_dbgstr_w(V_BSTR(&var)));
+    VariantClear(&var);
+
+    helper_ole_check(IXMLDOMDocument2_get_preserveWhiteSpace(doc, &b));
+    ok_(__FILE__, line)(b == VARIANT_TRUE, "expected TRUE\n");
+
+    helper_ole_check(IXMLDOMDocument2_get_schemas(doc, &var));
+    ok_(__FILE__, line)(V_VT(&var) != VT_NULL, "expected pointer\n");
+    VariantClear(&var);
+}
+
+#define set_props(doc, cache) _set_props(__LINE__, doc, cache)
+static inline void _set_props(int line, IXMLDOMDocument2* doc, IXMLDOMSchemaCollection* cache)
+{
+    VARIANT var;
+
+    VariantInit(&var);
+    helper_ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionLanguage"), _variantbstr_("XPath")));
+    helper_ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"), _variantbstr_("xmlns:wi=\'www.winehq.org\'")));
+    helper_ole_check(IXMLDOMDocument2_put_preserveWhiteSpace(doc, VARIANT_TRUE));
+    V_VT(&var) = VT_DISPATCH;
+    V_DISPATCH(&var) = NULL;
+    helper_ole_check(IXMLDOMSchemaCollection_QueryInterface(cache, &IID_IDispatch, (void**)&V_DISPATCH(&var)));
+    ok_(__FILE__, line)(V_DISPATCH(&var) != NULL, "expected pointer\n");
+    helper_ole_check(IXMLDOMDocument2_putref_schemas(doc, var));
+    VariantClear(&var);
+}
+
+#define unset_props(doc) _unset_props(__LINE__, doc)
+static inline void _unset_props(int line, IXMLDOMDocument2* doc)
+{
+    VARIANT var;
+
+    VariantInit(&var);
+    helper_ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionLanguage"), _variantbstr_("XSLPattern")));
+    helper_ole_check(IXMLDOMDocument2_setProperty(doc, _bstr_("SelectionNamespaces"), _variantbstr_("")));
+    helper_ole_check(IXMLDOMDocument2_put_preserveWhiteSpace(doc, VARIANT_FALSE));
+    V_VT(&var) = VT_NULL;
+    helper_ole_check(IXMLDOMDocument2_putref_schemas(doc, var));
+    VariantClear(&var);
+}
+
+static void test_get_ownerDocument(void)
+{
+    IXMLDOMDocument *doc1, *doc2, *doc3;
+    IXMLDOMDocument2 *doc, *doc_owner;
+    IXMLDOMNode *node;
+    IXMLDOMSchemaCollection *cache;
+    VARIANT_BOOL b;
+    VARIANT var;
+    BSTR str;
+
+    doc = create_document(&IID_IXMLDOMDocument2);
+    cache = create_cache(&IID_IXMLDOMSchemaCollection);
+    if (!doc || !cache)
+    {
+        if (doc) IXMLDOMDocument2_Release(doc);
+        if (cache) IXMLDOMSchemaCollection_Release(cache);
+        return;
+    }
+
+    VariantInit(&var);
+
+    str = SysAllocString(szComplete4);
+    ole_check(IXMLDOMDocument_loadXML(doc, str, &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString(str);
+
+    check_default_props(doc);
+
+    /* set properties and check that new instances use them */
+    set_props(doc, cache);
+    check_set_props(doc);
+
+    ole_check(IXMLDOMDocument2_get_firstChild(doc, &node));
+    ole_check(IXMLDOMNode_get_ownerDocument(node, &doc1));
+
+    /* new interface keeps props */
+    ole_check(IXMLDOMDocument_QueryInterface(doc1, &IID_IXMLDOMDocument2, (void**)&doc_owner));
+    ok( doc_owner != doc, "got %p, doc %p\n", doc_owner, doc);
+    check_set_props(doc_owner);
+    IXMLDOMDocument2_Release(doc_owner);
+
+    ole_check(IXMLDOMNode_get_ownerDocument(node, &doc2));
+    IXMLDOMNode_Release(node);
+
+    ok(doc1 != doc2, "got %p, expected %p. original %p\n", doc2, doc1, doc);
+
+    /* reload */
+    str = SysAllocString(szComplete4);
+    ole_check(IXMLDOMDocument2_loadXML(doc, str, &b));
+    ok(b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString(str);
+
+    /* properties retained even after reload */
+    check_set_props(doc);
+
+    ole_check(IXMLDOMDocument2_get_firstChild(doc, &node));
+    ole_check(IXMLDOMNode_get_ownerDocument(node, &doc3));
+    IXMLDOMNode_Release(node);
+
+    ole_check(IXMLDOMDocument_QueryInterface(doc3, &IID_IXMLDOMDocument2, (void**)&doc_owner));
+    ok(doc3 != doc1 && doc3 != doc2 && doc_owner != doc, "got %p, (%p, %p, %p)\n", doc3, doc, doc1, doc2);
+    check_set_props(doc_owner);
+
+    /* changing properties for one instance changes them for all */
+    unset_props(doc_owner);
+    check_default_props(doc_owner);
+    check_default_props(doc);
+
+    IXMLDOMSchemaCollection_Release(cache);
+    IXMLDOMDocument_Release(doc1);
+    IXMLDOMDocument_Release(doc2);
+    IXMLDOMDocument_Release(doc3);
+    IXMLDOMDocument2_Release(doc);
+    IXMLDOMDocument2_Release(doc_owner);
+    free_bstrs();
+}
+
+static void test_setAttributeNode(void)
+{
+    IXMLDOMDocument *doc, *doc2;
+    IXMLDOMElement *elem, *elem2;
+    IXMLDOMAttribute *attr, *attr2, *ret_attr;
+    VARIANT_BOOL b;
+    HRESULT hr;
+    VARIANT v;
+    BSTR str;
+    ULONG ref1, ref2;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument2_loadXML( doc, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_get_documentElement(doc, &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_get_documentElement(doc, &elem2);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( elem2 != elem, "got same instance\n");
+
+    ret_attr = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_setAttributeNode(elem, NULL, &ret_attr);
+    ok( hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok( ret_attr == (void*)0xdeadbeef, "got %p\n", ret_attr);
+
+    hr = IXMLDOMDocument_createAttribute(doc, _bstr_("attr"), &attr);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    ref1 = IXMLDOMElement_AddRef(elem);
+    IXMLDOMElement_Release(elem);
+
+    ret_attr = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_setAttributeNode(elem, attr, &ret_attr);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( ret_attr == NULL, "got %p\n", ret_attr);
+
+    /* no reference added */
+    ref2 = IXMLDOMElement_AddRef(elem);
+    IXMLDOMElement_Release(elem);
+    ok(ref2 == ref1, "got %d, expected %d\n", ref2, ref1);
+
+    EXPECT_CHILDREN(elem);
+    EXPECT_CHILDREN(elem2);
+
+    IXMLDOMElement_Release(elem2);
+
+    attr2 = NULL;
+    hr = IXMLDOMElement_getAttributeNode(elem, _bstr_("attr"), &attr2);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( attr2 != attr, "got same instance %p\n", attr2);
+    IXMLDOMAttribute_Release(attr2);
+
+    /* try to add it another time */
+    ret_attr = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_setAttributeNode(elem, attr, &ret_attr);
+    ok( hr == E_FAIL, "got 0x%08x\n", hr);
+    ok( ret_attr == (void*)0xdeadbeef, "got %p\n", ret_attr);
+
+    IXMLDOMElement_Release(elem);
+
+    /* initialy used element is released, attribute still 'has' a container */
+    hr = IXMLDOMDocument_get_documentElement(doc, &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ret_attr = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_setAttributeNode(elem, attr, &ret_attr);
+    ok( hr == E_FAIL, "got 0x%08x\n", hr);
+    ok( ret_attr == (void*)0xdeadbeef, "got %p\n", ret_attr);
+    IXMLDOMElement_Release(elem);
+
+    /* add attribute already attached to another document */
+    doc2 = create_document(&IID_IXMLDOMDocument);
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument_loadXML( doc2, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_get_documentElement(doc2, &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    hr = IXMLDOMElement_setAttributeNode(elem, attr, NULL);
+    ok( hr == E_FAIL, "got 0x%08x\n", hr);
+    IXMLDOMElement_Release(elem);
+
+    IXMLDOMAttribute_Release(attr);
+
+    /* create element, add attribute, see if it's copied or linked */
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("test"), &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    attr = NULL;
+    hr = IXMLDOMDocument_createAttribute(doc, _bstr_("attr"), &attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(attr != NULL, "got %p\n", attr);
+
+    ref1 = IXMLDOMAttribute_AddRef(attr);
+    IXMLDOMAttribute_Release(attr);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = _bstr_("attrvalue1");
+    hr = IXMLDOMAttribute_put_nodeValue(attr, v);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    str = NULL;
+    hr = IXMLDOMAttribute_get_xml(attr, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( lstrcmpW(str, _bstr_("attr=\"attrvalue1\"")) == 0,
+        "got %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    ret_attr = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_setAttributeNode(elem, attr, &ret_attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(ret_attr == NULL, "got %p\n", ret_attr);
+
+    /* attribute reference increased */
+    ref2 = IXMLDOMAttribute_AddRef(attr);
+    IXMLDOMAttribute_Release(attr);
+    ok(ref1 == ref2, "got %d, expected %d\n", ref2, ref1);
+
+    hr = IXMLDOMElement_get_xml(elem, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( lstrcmpW(str, _bstr_("<test attr=\"attrvalue1\"/>")) == 0,
+        "got %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = _bstr_("attrvalue2");
+    hr = IXMLDOMAttribute_put_nodeValue(attr, v);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMElement_get_xml(elem, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    todo_wine ok( lstrcmpW(str, _bstr_("<test attr=\"attrvalue2\"/>")) == 0,
+        "got %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    IXMLDOMElement_Release(elem);
+    IXMLDOMAttribute_Release(attr);
+    IXMLDOMDocument_Release(doc2);
+    IXMLDOMDocument_Release(doc);
+}
+
+static void test_put_dataType(void)
+{
+    IXMLDOMCDATASection *cdata;
+    IXMLDOMDocument *doc;
+    VARIANT_BOOL b;
+    HRESULT hr;
+    BSTR str;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_createCDATASection(doc, _bstr_("test"), &cdata);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    hr = IXMLDOMCDATASection_put_dataType(cdata, _bstr_("number"));
+    ok( hr == E_FAIL, "got 0x%08x\n", hr);
+    hr = IXMLDOMCDATASection_put_dataType(cdata, _bstr_("string"));
+    ok( hr == E_FAIL, "got 0x%08x\n", hr);
+    IXMLDOMCDATASection_Release(cdata);
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_createNode(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *elem;
+    IXMLDOMNode *node;
+    VARIANT v, var;
+    BSTR prefix, str;
+    HRESULT hr;
+    ULONG ref;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    EXPECT_REF(doc, 1);
+
+    /* reference count tests */
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem"), &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    /* initial reference is 2 */
+todo_wine {
+    EXPECT_REF(elem, 2);
+    ref = IXMLDOMElement_Release(elem);
+    ok(ref == 1, "got %d\n", ref);
+    /* it's released already, attempt to release now will crash it */
+}
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem"), &elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    todo_wine EXPECT_REF(elem, 2);
+    IXMLDOMDocument_Release(doc);
+    todo_wine EXPECT_REF(elem, 2);
+
+    doc = create_document(&IID_IXMLDOMDocument);
+
+    /* NODE_ELEMENT nodes */
+    /* 1. specified namespace */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("ns1:test"), _bstr_("http://winehq.org"), &node);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    prefix = NULL;
+    hr = IXMLDOMNode_get_prefix(node, &prefix);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok(lstrcmpW(prefix, _bstr_("ns1")) == 0, "wrong prefix\n");
+    SysFreeString(prefix);
+    IXMLDOMNode_Release(node);
+
+    /* 2. default namespace */
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("test"), _bstr_("http://winehq.org/default"), &node);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    prefix = (void*)0xdeadbeef;
+    hr = IXMLDOMNode_get_prefix(node, &prefix);
+    ok( hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(prefix == 0, "expected empty prefix, got %p\n", prefix);
+    /* check dump */
+    hr = IXMLDOMNode_get_xml(node, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( lstrcmpW(str, _bstr_("<test xmlns=\"http://winehq.org/default\"/>")) == 0,
+        "got %s\n", wine_dbgstr_w(str));
+    SysFreeString(str);
+
+    hr = IXMLDOMNode_QueryInterface(node, &IID_IXMLDOMElement, (void**)&elem);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&var) = VT_BSTR;
+    hr = IXMLDOMElement_getAttribute(elem, _bstr_("xmlns"), &var);
+    ok( hr == S_FALSE, "got 0x%08x\n", hr);
+    ok( V_VT(&var) == VT_NULL, "got %d\n", V_VT(&var));
+
+    str = NULL;
+    hr = IXMLDOMElement_get_namespaceURI(elem, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( lstrcmpW(str, _bstr_("http://winehq.org/default")) == 0, "expected default namespace\n");
+    SysFreeString(str);
+
+    IXMLDOMElement_Release(elem);
+    IXMLDOMNode_Release(node);
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_get_prefix(void)
+{
+    IXMLDOMDocumentFragment *fragment;
+    IXMLDOMCDATASection *cdata;
+    IXMLDOMElement *element;
+    IXMLDOMComment *comment;
+    IXMLDOMDocument *doc;
+    HRESULT hr;
+    BSTR str;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    /* nodes that can't support prefix */
+    /* 1. document */
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_get_prefix(doc, &str);
+    ok( hr == S_FALSE, "got 0x%08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    hr = IXMLDOMDocument_get_prefix(doc, NULL);
+    ok( hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    /* 2. cdata */
+    hr = IXMLDOMDocument_createCDATASection(doc, NULL, &cdata);
+    ok(hr == S_OK, "got %08x\n", hr );
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMCDATASection_get_prefix(cdata, &str);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    hr = IXMLDOMCDATASection_get_prefix(cdata, NULL);
+    ok(hr == E_INVALIDARG, "got %08x\n", hr);
+    IXMLDOMCDATASection_Release(cdata);
+
+    /* 3. comment */
+    hr = IXMLDOMDocument_createComment(doc, NULL, &comment);
+    ok(hr == S_OK, "got %08x\n", hr );
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMComment_get_prefix(comment, &str);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    hr = IXMLDOMComment_get_prefix(comment, NULL);
+    ok(hr == E_INVALIDARG, "got %08x\n", hr);
+    IXMLDOMComment_Release(comment);
+
+    /* 4. fragment */
+    hr = IXMLDOMDocument_createDocumentFragment(doc, &fragment);
+    ok(hr == S_OK, "got %08x\n", hr );
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMDocumentFragment_get_prefix(fragment, &str);
+    ok(hr == S_FALSE, "got %08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    hr = IXMLDOMDocumentFragment_get_prefix(fragment, NULL);
+    ok(hr == E_INVALIDARG, "got %08x\n", hr);
+    IXMLDOMDocumentFragment_Release(fragment);
+
+    /* no prefix */
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem"), &element);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMElement_get_prefix(element, NULL);
+    ok( hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_get_prefix(element, &str);
+    ok( hr == S_FALSE, "got 0x%08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    IXMLDOMElement_Release(element);
+
+    /* with prefix */
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("a:elem"), &element);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_get_prefix(element, &str);
+    ok( hr == S_OK, "got 0x%08x\n", hr);
+    ok( lstrcmpW(str, _bstr_("a")) == 0, "expected prefix \"a\"\n");
+    SysFreeString(str);
+
+    str = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_get_namespaceURI(element, &str);
+    ok( hr == S_FALSE, "got 0x%08x\n", hr);
+    ok( str == 0, "got %p\n", str);
+
+    IXMLDOMElement_Release(element);
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_selectSingleNode(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMNodeList *list;
+    IXMLDOMNode *node;
+    VARIANT_BOOL b;
+    HRESULT hr;
+    LONG len;
+    BSTR str;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_selectNodes(doc, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    str = SysAllocString( szComplete4 );
+    hr = IXMLDOMDocument_loadXML( doc, str, &b );
+    ok( hr == S_OK, "loadXML failed\n");
+    ok( b == VARIANT_TRUE, "failed to load XML string\n");
+    SysFreeString( str );
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_selectNodes(doc, NULL, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("lc"), NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_selectNodes(doc, _bstr_("lc"), NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("lc"), &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IXMLDOMNode_Release(node);
+
+    hr = IXMLDOMDocument_selectNodes(doc, _bstr_("lc"), &list);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IXMLDOMNodeList_Release(list);
+
+    list = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_selectNodes(doc, NULL, &list);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(list == (void*)0xdeadbeef, "got %p\n", list);
+
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_selectSingleNode(doc, _bstr_("nonexistent"), &node);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(node == 0, "got %p\n", node);
+
+    list = (void*)0xdeadbeef;
+    hr = IXMLDOMDocument_selectNodes(doc, _bstr_("nonexistent"), &list);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    len = 1;
+    hr = IXMLDOMNodeList_get_length(list, &len);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(len == 0, "got %d\n", len);
+    IXMLDOMNodeList_Release(list);
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_events(void)
+{
+    IConnectionPointContainer *conn;
+    IConnectionPoint *point;
+    IXMLDOMDocument *doc;
+    HRESULT hr;
+    VARIANT v;
+    IDispatch *event;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    hr = IXMLDOMDocument_QueryInterface(doc, &IID_IConnectionPointContainer, (void**)&conn);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IConnectionPointContainer_FindConnectionPoint(conn, &IID_IDispatch, &point);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IConnectionPoint_Release(point);
+    hr = IConnectionPointContainer_FindConnectionPoint(conn, &IID_IPropertyNotifySink, &point);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IConnectionPoint_Release(point);
+    hr = IConnectionPointContainer_FindConnectionPoint(conn, &DIID_XMLDOMDocumentEvents, &point);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    IConnectionPoint_Release(point);
+
+    IConnectionPointContainer_Release(conn);
+
+    /* ready state callback */
+    VariantInit(&v);
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == DISP_E_TYPEMISMATCH, "got 0x%08x\n", hr);
+
+    event = create_dispevent();
+    V_VT(&v) = VT_UNKNOWN;
+    V_UNKNOWN(&v) = (IUnknown*)event;
+
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(event, 2);
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = event;
+
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(event, 2);
+
+    /* VT_NULL doesn't reset event handler */
+    V_VT(&v) = VT_NULL;
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == DISP_E_TYPEMISMATCH, "got 0x%08x\n", hr);
+    EXPECT_REF(event, 2);
+
+    V_VT(&v) = VT_DISPATCH;
+    V_DISPATCH(&v) = NULL;
+
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(event, 1);
+
+    V_VT(&v) = VT_UNKNOWN;
+    V_DISPATCH(&v) = NULL;
+    hr = IXMLDOMDocument_put_onreadystatechange(doc, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    IDispatch_Release(event);
+
+    IXMLDOMDocument_Release(doc);
+}
+
+static void test_createProcessingInstruction(void)
+{
+    static const WCHAR bodyW[] = {'t','e','s','t',0};
+    IXMLDOMProcessingInstruction *pi;
+    IXMLDOMDocument *doc;
+    WCHAR buff[10];
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    /* test for BSTR handling, pass broken BSTR */
+    memcpy(&buff[2], bodyW, sizeof(bodyW));
+    /* just a big length */
+    *(DWORD*)buff = 0xf0f0;
+    hr = IXMLDOMDocument_createProcessingInstruction(doc, _bstr_("test"), &buff[2], &pi);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    IXMLDOMProcessingInstruction_Release(pi);
+    IXMLDOMDocument_Release(doc);
+}
+
+static void test_put_nodeTypedValue(void)
+{
+    IXMLDOMDocument *doc;
+    IXMLDOMElement *elem;
+    VARIANT type;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("Element"), &elem);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&type) = VT_EMPTY;
+    hr = IXMLDOMElement_get_dataType(elem, &type);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(V_VT(&type) == VT_NULL, "got %d, expected VT_NULL\n", V_VT(&type));
+
+    /* set typed value for untyped node */
+    V_VT(&type) = VT_I1;
+    V_I1(&type) = 1;
+    hr = IXMLDOMElement_put_nodeTypedValue(elem, type);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&type) = VT_EMPTY;
+    hr = IXMLDOMElement_get_dataType(elem, &type);
+    ok(hr == S_FALSE, "got 0x%08x\n", hr);
+    ok(V_VT(&type) == VT_NULL, "got %d, expected VT_NULL\n", V_VT(&type));
+
+    /* no type info stored */
+    V_VT(&type) = VT_EMPTY;
+    hr = IXMLDOMElement_get_nodeTypedValue(elem, &type);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&type) == VT_BSTR, "got %d, expected VT_BSTR\n", V_VT(&type));
+    ok(memcmp(V_BSTR(&type), _bstr_("1"), 2*sizeof(WCHAR)) == 0,
+       "got %s, expected \"1\"\n", wine_dbgstr_w(V_BSTR(&type)));
+    VariantClear(&type);
+
+    IXMLDOMElement_Release(elem);
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_get_xml(void)
+{
+    static const char xmlA[] = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n<a>test</a>\r\n";
+    IXMLDOMProcessingInstruction *pi;
+    IXMLDOMNode *first;
+    IXMLDOMDocument *doc;
+    VARIANT_BOOL b;
+    VARIANT v;
+    BSTR xml;
+    HRESULT hr;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+    if (!doc) return;
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_loadXML( doc, _bstr_("<a>test</a>"), &b );
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok( b == VARIANT_TRUE, "got %d\n", b);
+
+    hr = IXMLDOMDocument_createProcessingInstruction(doc, _bstr_("xml"),
+                             _bstr_("version=\"1.0\" encoding=\"UTF-16\""), &pi);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_get_firstChild(doc, &first);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_UNKNOWN(&v) = (IUnknown*)first;
+    V_VT(&v) = VT_UNKNOWN;
+
+    hr = IXMLDOMDocument_insertBefore(doc, (IXMLDOMNode*)pi, v, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    IXMLDOMProcessingInstruction_Release(pi);
+    IXMLDOMNode_Release(first);
+
+    hr = IXMLDOMDocument_get_xml(doc, &xml);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    ok(memcmp(xml, _bstr_(xmlA), sizeof(xmlA)*sizeof(WCHAR)) == 0,
+        "got %s, expected %s\n", wine_dbgstr_w(xml), xmlA);
+    SysFreeString(xml);
+
+    IXMLDOMDocument_Release(doc);
+    free_bstrs();
+}
+
+static void test_xsltemplate(void)
+{
+    IXSLTemplate *template;
+    IXSLProcessor *processor;
+    IXMLDOMDocument *doc, *doc2;
+    IStream *stream;
+    VARIANT_BOOL b;
+    HRESULT hr;
+    ULONG ref1, ref2;
+    VARIANT v;
+
+    template = create_xsltemplate(&IID_IXSLTemplate);
+    if (!template) return;
+
+    /* works as reset */
+    hr = IXSLTemplate_putref_stylesheet(template, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    doc = create_document(&IID_IXMLDOMDocument);
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_loadXML( doc, _bstr_("<a>test</a>"), &b );
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok( b == VARIANT_TRUE, "got %d\n", b);
+
+    /* putref with non-xsl document */
+    hr = IXSLTemplate_putref_stylesheet(template, (IXMLDOMNode*)doc);
+    todo_wine ok(hr == E_FAIL, "got 0x%08x\n", hr);
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_loadXML( doc, _bstr_(szTransformSSXML), &b );
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok( b == VARIANT_TRUE, "got %d\n", b);
+
+    /* not a freethreaded document */
+    hr = IXSLTemplate_putref_stylesheet(template, (IXMLDOMNode*)doc);
+    todo_wine ok(hr == E_FAIL, "got 0x%08x\n", hr);
+
+    IXMLDOMDocument_Release(doc);
+
+    hr = CoCreateInstance(&CLSID_FreeThreadedDOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (void**)&doc);
+    if (hr != S_OK)
+    {
+        win_skip("failed to create free threaded document instance: 0x%08x\n", hr);
+        IXSLTemplate_Release(template);
+        return;
+    }
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_loadXML( doc, _bstr_(szTransformSSXML), &b );
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok( b == VARIANT_TRUE, "got %d\n", b);
+
+    /* freethreaded document */
+    ref1 = IXMLDOMDocument_AddRef(doc);
+    IXMLDOMDocument_Release(doc);
+    hr = IXSLTemplate_putref_stylesheet(template, (IXMLDOMNode*)doc);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ref2 = IXMLDOMDocument_AddRef(doc);
+    IXMLDOMDocument_Release(doc);
+    ok(ref2 > ref1, "got %d\n", ref2);
+
+    /* processor */
+    hr = IXSLTemplate_createProcessor(template, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    EXPECT_REF(template, 1);
+    hr = IXSLTemplate_createProcessor(template, &processor);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(template, 2);
+
+    /* input no set yet */
+    V_VT(&v) = VT_BSTR;
+    V_BSTR(&v) = NULL;
+    hr = IXSLProcessor_get_input(processor, &v);
+todo_wine {
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&v) == VT_EMPTY, "got %d\n", V_VT(&v));
+}
+
+    hr = IXSLProcessor_get_output(processor, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    /* reset before it was set */
+    V_VT(&v) = VT_EMPTY;
+    hr = IXSLProcessor_put_output(processor, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    CreateStreamOnHGlobal(NULL, TRUE, &stream);
+    EXPECT_REF(stream, 1);
+
+    V_VT(&v) = VT_UNKNOWN;
+    V_UNKNOWN(&v) = (IUnknown*)stream;
+    hr = IXSLProcessor_put_output(processor, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* it seems processor grabs 2 references */
+    todo_wine EXPECT_REF(stream, 3);
+
+    V_VT(&v) = VT_EMPTY;
+    hr = IXSLProcessor_get_output(processor, &v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&v) == VT_UNKNOWN, "got type %d\n", V_VT(&v));
+    ok(V_UNKNOWN(&v) == (IUnknown*)stream, "got %p\n", V_UNKNOWN(&v));
+
+    todo_wine EXPECT_REF(stream, 4);
+    VariantClear(&v);
+
+    hr = IXSLProcessor_transform(processor, NULL);
+    ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+
+    /* reset and check stream refcount */
+    V_VT(&v) = VT_EMPTY;
+    hr = IXSLProcessor_put_output(processor, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    EXPECT_REF(stream, 1);
+
+    IStream_Release(stream);
+
+    /* no output interface set, check output */
+    doc2 = create_document(&IID_IXMLDOMDocument);
+
+    b = VARIANT_TRUE;
+    hr = IXMLDOMDocument_loadXML( doc2, _bstr_("<a>test</a>"), &b );
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok( b == VARIANT_TRUE, "got %d\n", b);
+
+    V_VT(&v) = VT_UNKNOWN;
+    V_UNKNOWN(&v) = (IUnknown*)doc2;
+    hr = IXSLProcessor_put_input(processor, v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXSLProcessor_transform(processor, &b);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    V_VT(&v) = VT_EMPTY;
+    hr = IXSLProcessor_get_output(processor, &v);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(V_VT(&v) == VT_BSTR, "got type %d\n", V_VT(&v));
+    /* we currently output one '\n' instead of empty string */
+    todo_wine ok(lstrcmpW(V_BSTR(&v), _bstr_("")) == 0, "got %s\n", wine_dbgstr_w(V_BSTR(&v)));
+    IXMLDOMDocument_Release(doc2);
+
+    IXSLProcessor_Release(processor);
+
+    /* drop reference */
+    hr = IXSLTemplate_putref_stylesheet(template, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ref2 = IXMLDOMDocument_AddRef(doc);
+    IXMLDOMDocument_Release(doc);
+    ok(ref2 == ref1, "got %d\n", ref2);
+
+    IXMLDOMDocument_Release(doc);
+    IXSLTemplate_Release(template);
+    free_bstrs();
+}
+
+static void test_insertBefore(void)
+{
+    IXMLDOMDocument *doc, *doc2;
+    IXMLDOMAttribute *attr;
+    IXMLDOMElement *elem1, *elem2, *elem3, *elem4, *elem5;
+    IXMLDOMNode *node, *newnode;
+    HRESULT hr;
+    VARIANT v;
+    BSTR p;
+
+    doc = create_document(&IID_IXMLDOMDocument);
+
+    /* insertBefore behaviour for attribute node */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ATTRIBUTE;
+
+    attr = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("attr"), NULL, (IXMLDOMNode**)&attr);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(attr != NULL, "got %p\n", attr);
+
+    /* attribute to attribute */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ATTRIBUTE;
+    newnode = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("attr2"), NULL, &newnode);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(newnode != NULL, "got %p\n", newnode);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+
+    V_VT(&v) = VT_UNKNOWN;
+    V_UNKNOWN(&v) = (IUnknown*)attr;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    todo_wine ok(hr == E_INVALIDARG, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+    IXMLDOMNode_Release(newnode);
+
+    /* cdata to attribute */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_CDATA_SECTION;
+    newnode = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("cdata"), NULL, &newnode);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(newnode != NULL, "got %p\n", newnode);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+    IXMLDOMNode_Release(newnode);
+
+    /* comment to attribute */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_COMMENT;
+    newnode = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("cdata"), NULL, &newnode);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(newnode != NULL, "got %p\n", newnode);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+    IXMLDOMNode_Release(newnode);
+
+    /* element to attribute */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+    newnode = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("cdata"), NULL, &newnode);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(newnode != NULL, "got %p\n", newnode);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+    IXMLDOMNode_Release(newnode);
+
+    /* pi to attribute */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_PROCESSING_INSTRUCTION;
+    newnode = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("cdata"), NULL, &newnode);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(newnode != NULL, "got %p\n", newnode);
+
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMAttribute_insertBefore(attr, newnode, v, &node);
+    ok(hr == E_FAIL, "got 0x%08x\n", hr);
+    ok(node == NULL, "got %p\n", node);
+    IXMLDOMNode_Release(newnode);
+
+    /* insertBefore for elements */
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem"), &elem1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem2"), &elem2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    hr = IXMLDOMDocument_createElement(doc, _bstr_("elem3"), &elem3);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    EXPECT_NO_CHILDREN(elem1);
+    EXPECT_NO_CHILDREN(elem2);
+    EXPECT_NO_CHILDREN(elem3);
+
+    todo_wine EXPECT_REF(elem2, 2);
+
+    V_VT(&v) = VT_NULL;
+    node = NULL;
+    hr = IXMLDOMElement_insertBefore(elem1, (IXMLDOMNode*)elem2, v, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(node == (void*)elem2, "got %p\n", node);
+
+    EXPECT_CHILDREN(elem1);
+    todo_wine EXPECT_REF(elem2, 3);
+
+    /* again for already linked node */
+    V_VT(&v) = VT_NULL;
+    node = NULL;
+    hr = IXMLDOMElement_insertBefore(elem1, (IXMLDOMNode*)elem2, v, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(node == (void*)elem2, "got %p\n", node);
+
+    EXPECT_CHILDREN(elem1);
+
+    /* increments each time */
+    todo_wine EXPECT_REF(elem2, 4);
+
+    /* try to add to another element */
+    V_VT(&v) = VT_NULL;
+    node = (void*)0xdeadbeef;
+    hr = IXMLDOMElement_insertBefore(elem3, (IXMLDOMNode*)elem2, v, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(node == (void*)elem2, "got %p\n", node);
+
+    EXPECT_CHILDREN(elem3);
+    EXPECT_NO_CHILDREN(elem1);
+
+    /* cross document case - try to add as child to a node created with other doc */
+    doc2 = create_document(&IID_IXMLDOMDocument);
+
+    hr = IXMLDOMDocument_createElement(doc2, _bstr_("elem4"), &elem4);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    todo_wine EXPECT_REF(elem4, 2);
+
+    /* same name, another instance */
+    hr = IXMLDOMDocument_createElement(doc2, _bstr_("elem4"), &elem5);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    todo_wine EXPECT_REF(elem5, 2);
+
+    todo_wine EXPECT_REF(elem3, 2);
+    V_VT(&v) = VT_NULL;
+    node = NULL;
+    hr = IXMLDOMElement_insertBefore(elem3, (IXMLDOMNode*)elem4, v, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(node == (void*)elem4, "got %p\n", node);
+    todo_wine EXPECT_REF(elem4, 3);
+    todo_wine EXPECT_REF(elem3, 2);
+
+    V_VT(&v) = VT_NULL;
+    node = NULL;
+    hr = IXMLDOMElement_insertBefore(elem3, (IXMLDOMNode*)elem5, v, &node);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(node == (void*)elem5, "got %p\n", node);
+    todo_wine EXPECT_REF(elem4, 3);
+    todo_wine EXPECT_REF(elem5, 3);
+
+    IXMLDOMDocument_Release(doc2);
+
+    IXMLDOMElement_Release(elem1);
+    IXMLDOMElement_Release(elem2);
+    IXMLDOMElement_Release(elem3);
+    IXMLDOMElement_Release(elem4);
+    IXMLDOMElement_Release(elem5);
+
+    /* elements with same default namespace */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+    elem1 = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("elem1"), _bstr_("http://winehq.org/default"), (IXMLDOMNode**)&elem1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(elem1 != NULL, "got %p\n", elem1);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+    elem2 = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("elem2"), _bstr_("http://winehq.org/default"), (IXMLDOMNode**)&elem2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(elem2 != NULL, "got %p\n", elem2);
+
+    /* check contents so far */
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem1, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(p, _bstr_("<elem1 xmlns=\"http://winehq.org/default\"/>")), "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem2, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(p, _bstr_("<elem2 xmlns=\"http://winehq.org/default\"/>")), "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    V_VT(&v) = VT_NULL;
+    hr = IXMLDOMElement_insertBefore(elem1, (IXMLDOMNode*)elem2, v, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    /* get_xml depends on context, for top node it omits child namespace attribute,
+       but at child level it's still returned */
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem1, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    todo_wine ok(!lstrcmpW(p, _bstr_("<elem1 xmlns=\"http://winehq.org/default\"><elem2/></elem1>")),
+        "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem2, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(p, _bstr_("<elem2 xmlns=\"http://winehq.org/default\"/>")), "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    IXMLDOMElement_Release(elem1);
+    IXMLDOMElement_Release(elem2);
+
+    /* child without default namespace added to node with default namespace */
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+    elem1 = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("elem1"), _bstr_("http://winehq.org/default"), (IXMLDOMNode**)&elem1);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(elem1 != NULL, "got %p\n", elem1);
+
+    V_VT(&v) = VT_I4;
+    V_I4(&v) = NODE_ELEMENT;
+    elem2 = NULL;
+    hr = IXMLDOMDocument_createNode(doc, v, _bstr_("elem2"), NULL, (IXMLDOMNode**)&elem2);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(elem2 != NULL, "got %p\n", elem2);
+
+    EXPECT_REF(elem2, 1);
+    V_VT(&v) = VT_NULL;
+    hr = IXMLDOMElement_insertBefore(elem1, (IXMLDOMNode*)elem2, v, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    EXPECT_REF(elem2, 1);
+
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem2, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(p, _bstr_("<elem2/>")), "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    hr = IXMLDOMElement_removeChild(elem1, (IXMLDOMNode*)elem2, NULL);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+
+    p = NULL;
+    hr = IXMLDOMElement_get_xml(elem2, &p);
+    ok(hr == S_OK, "got 0x%08x\n", hr);
+    ok(!lstrcmpW(p, _bstr_("<elem2/>")), "got %s\n", wine_dbgstr_w(p));
+    SysFreeString(p);
+
+    IXMLDOMDocument_Release(doc);
     free_bstrs();
 }
 
 START_TEST(domdoc)
 {
     IXMLDOMDocument *doc;
-    HRESULT r;
+    HRESULT hr;
 
-    r = CoInitialize( NULL );
-    ok( r == S_OK, "failed to init com\n");
-    if (r != S_OK)
+    hr = CoInitialize( NULL );
+    ok( hr == S_OK, "failed to init com\n");
+    if (hr != S_OK)
         return;
 
-    r = CoCreateInstance( &CLSID_DOMDocument, NULL,
-        CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (LPVOID*)&doc );
-    if (SUCCEEDED(r))
-    {
-        IXMLDOMDocument_Release(doc);
-
-        test_domdoc();
-        test_persiststreaminit();
-        test_domnode();
-        test_refs();
-        test_create();
-        test_getElementsByTagName();
-        test_get_text();
-        test_get_childNodes();
-        test_get_firstChild();
-        test_removeChild();
-        test_replaceChild();
-        test_removeNamedItem();
-        test_IXMLDOMDocument2();
-        test_XPath();
-        test_XSLPattern();
-        test_cloneNode();
-        test_xmlTypes();
-        test_nodeTypeTests();
-        test_DocumentSaveToDocument();
-        test_DocumentSaveToFile();
-        test_testTransforms();
-        test_Namespaces();
-        test_FormattingXML();
-        test_NodeTypeValue();
-        test_TransformWithLoadingLocalFile();
-        test_put_nodeValue();
-        test_document_IObjectSafety();
-    }
-    else
-        win_skip("IXMLDOMDocument is not available (0x%08x)\n", r);
-
     test_XMLHTTP();
+
+    hr = CoCreateInstance( &CLSID_DOMDocument, NULL, CLSCTX_INPROC_SERVER, &IID_IXMLDOMDocument, (void**)&doc );
+    if (hr != S_OK)
+    {
+        win_skip("IXMLDOMDocument is not available (0x%08x)\n", hr);
+        return;
+    }
+
+    IXMLDOMDocument_Release(doc);
+
+    test_domdoc();
+    test_persiststreaminit();
+    test_domnode();
+    test_refs();
+    test_create();
+    test_getElementsByTagName();
+    test_get_text();
+    test_get_childNodes();
+    test_get_firstChild();
+    test_get_lastChild();
+    test_removeChild();
+    test_replaceChild();
+    test_removeNamedItem();
+    test_IXMLDOMDocument2();
+    test_whitespace();
+    test_XPath();
+    test_XSLPattern();
+    test_cloneNode();
+    test_xmlTypes();
+    test_nodeTypeTests();
+    test_DocumentSaveToDocument();
+    test_DocumentSaveToFile();
+    test_testTransforms();
+    test_Namespaces();
+    test_FormattingXML();
+    test_nodeTypedValue();
+    test_TransformWithLoadingLocalFile();
+    test_put_nodeValue();
+    test_document_IObjectSafety();
+    test_splitText();
+    test_getQualifiedItem();
+    test_removeQualifiedItem();
+    test_get_ownerDocument();
+    test_setAttributeNode();
+    test_put_dataType();
+    test_createNode();
+    test_get_prefix();
+    test_default_properties();
+    test_selectSingleNode();
+    test_events();
+    test_createProcessingInstruction();
+    test_put_nodeTypedValue();
+    test_get_xml();
+    test_insertBefore();
+    test_xsltemplate();
 
     CoUninitialize();
 }

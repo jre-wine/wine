@@ -110,16 +110,11 @@ WINE_DEFAULT_DEBUG_CHANNEL(dbghelp_stabs);
 
 struct stab_nlist
 {
-    union
-    {
-        char*                   n_name;
-        struct stab_nlist*      n_next;
-        long                    n_strx;
-    } n_un;
+    unsigned            n_strx;
     unsigned char       n_type;
     char                n_other;
     short               n_desc;
-    unsigned long       n_value;
+    unsigned            n_value;
 };
 
 static void stab_strcpy(char* dest, int sz, const char* source)
@@ -853,7 +848,7 @@ static int stabs_pts_read_type_def(struct ParseTypedefData* ptd, const char* typ
 	case '*':
         case '&':
 	    PTS_ABORTIF(ptd, stabs_pts_read_type_def(ptd, NULL, &ref_dt) == -1);
-	    new_dt = &symt_new_pointer(ptd->module, ref_dt)->symt;
+	    new_dt = &symt_new_pointer(ptd->module, ref_dt, sizeof(void*))->symt;
            break;
         case 'k': /* 'const' modifier */
         case 'B': /* 'volatile' modifier */
@@ -1315,7 +1310,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
     stabbuff[0] = '\0';
     for (i = 0; i < nstab; i++, stab_ptr++)
     {
-        ptr = strs + stab_ptr->n_un.n_strx;
+        ptr = strs + stab_ptr->n_strx;
         if ((ptr > strs_end) || (ptr + strlen(ptr) > strs_end))
         {
             WARN("Bad stabs string %p\n", ptr);
@@ -1386,17 +1381,21 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
              * With a.out or mingw, they actually do make some amount of sense.
              */
             stab_strcpy(symname, sizeof(symname), ptr);
+            loc.kind = loc_absolute;
+            loc.reg = 0;
+            loc.offset = load_offset + stab_ptr->n_value;
             symt_new_global_variable(module, compiland, symname, TRUE /* FIXME */,
-                                     load_offset + stab_ptr->n_value, 0,
-                                     stabs_parse_type(ptr));
+                                     loc, 0, stabs_parse_type(ptr));
             break;
         case N_LCSYM:
         case N_STSYM:
             /* These are static symbols and BSS symbols. */
             stab_strcpy(symname, sizeof(symname), ptr);
+            loc.kind = loc_absolute;
+            loc.reg = 0;
+            loc.offset = load_offset + stab_ptr->n_value;
             symt_new_global_variable(module, compiland, symname, TRUE /* FIXME */,
-                                     load_offset + stab_ptr->n_value, 0,
-                                     stabs_parse_type(ptr));
+                                     loc, 0, stabs_parse_type(ptr));
             break;
         case N_LBRAC:
             if (curr_func)
@@ -1421,7 +1420,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 loc.reg = 0; /* FIXME */
                 loc.offset = stab_ptr->n_value;
                 symt_add_func_local(module, curr_func,
-                                    (long)stab_ptr->n_value >= 0 ? DataIsParam : DataIsLocal,
+                                    (int)stab_ptr->n_value >= 0 ? DataIsParam : DataIsLocal,
                                     &loc, NULL, param_type, symname);
                 symt_add_function_signature_parameter(module, 
                                                       (struct symt_function_signature*)curr_func->type, 
@@ -1471,7 +1470,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
                 case 35:
                 case 36: loc.reg = CV_REG_MM0 + stab_ptr->n_value - 29; break;
                 default:
-                    FIXME("Unknown register value (%lu)\n", stab_ptr->n_value);
+                    FIXME("Unknown register value (%u)\n", stab_ptr->n_value);
                     loc.reg = CV_REG_NONE;
                     break;
                 }
@@ -1617,7 +1616,7 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
 	case N_EXCL:
             if (stabs_add_include(stabs_find_include(ptr, stab_ptr->n_value)) < 0)
             {
-                ERR("Excluded header not found (%s,%ld)\n", ptr, stab_ptr->n_value);
+                ERR("Excluded header not found (%s,%d)\n", ptr, stab_ptr->n_value);
                 module_reset_debug_info(module);
                 ret = FALSE;
                 goto done;
@@ -1663,8 +1662,8 @@ BOOL stabs_parse(struct module* module, unsigned long load_offset,
             break;
         }
         stabbuff[0] = '\0';
-        TRACE("0x%02x %lx %s\n", 
-              stab_ptr->n_type, stab_ptr->n_value, debugstr_a(strs + stab_ptr->n_un.n_strx));
+        TRACE("0x%02x %x %s\n",
+              stab_ptr->n_type, stab_ptr->n_value, debugstr_a(strs + stab_ptr->n_strx));
     }
     module->module.SymType = SymDia;
     module->module.CVSig = 'S' | ('T' << 8) | ('A' << 16) | ('B' << 24);

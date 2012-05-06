@@ -88,7 +88,11 @@ HRESULT WINAPI CreateTextServices(IUnknown  * pUnkOuter,
    ITextImpl->lpVtbl = &textservices_Vtbl;
    ITextImpl->editor = ME_MakeEditor(pITextHost, FALSE);
    ITextImpl->editor->exStyleFlags = 0;
-   ITextImpl->editor->rcFormat = (RECT){0,0,0,0};
+   ITextImpl->editor->rcFormat.left = 0;
+   ITextImpl->editor->rcFormat.top = 0;
+   ITextImpl->editor->rcFormat.right = 0;
+   ITextImpl->editor->rcFormat.bottom = 0;
+
    ME_HandleMessage(ITextImpl->editor, WM_CREATE, 0, 0, TRUE, &hres);
 
    if (pUnkOuter)
@@ -325,7 +329,7 @@ HRESULT WINAPI fnTextSrv_TxSetText(ITextServices *iface,
    This->editor->nModifyStep = 0;
    OleFlushClipboard();
    ME_EmptyUndoStack(This->editor);
-   ME_UpdateRepaint(This->editor);
+   ME_UpdateRepaint(This->editor, FALSE);
 
    return S_OK;
 }

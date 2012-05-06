@@ -34,77 +34,87 @@ WINE_DEFAULT_DEBUG_CHANNEL(mshtml);
 typedef struct {
     HTMLElement element;
 
-    const IHTMLTextAreaElementVtbl *lpHTMLTextAreaElementVtbl;
+    IHTMLTextAreaElement IHTMLTextAreaElement_iface;
 
     nsIDOMHTMLTextAreaElement *nstextarea;
 } HTMLTextAreaElement;
 
-#define HTMLTXTAREA(x)  ((IHTMLTextAreaElement*)  &(x)->lpHTMLTextAreaElementVtbl)
-
-#define HTMLTXTAREA_THIS(iface) DEFINE_THIS(HTMLTextAreaElement, HTMLTextAreaElement, iface)
+static inline HTMLTextAreaElement *impl_from_IHTMLTextAreaElement(IHTMLTextAreaElement *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLTextAreaElement, IHTMLTextAreaElement_iface);
+}
 
 static HRESULT WINAPI HTMLTextAreaElement_QueryInterface(IHTMLTextAreaElement *iface,
                                                          REFIID riid, void **ppv)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
 
-    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(&This->element.node), riid, ppv);
+    return IHTMLDOMNode_QueryInterface(&This->element.node.IHTMLDOMNode_iface, riid, ppv);
 }
 
 static ULONG WINAPI HTMLTextAreaElement_AddRef(IHTMLTextAreaElement *iface)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
 
-    return IHTMLDOMNode_AddRef(HTMLDOMNODE(&This->element.node));
+    return IHTMLDOMNode_AddRef(&This->element.node.IHTMLDOMNode_iface);
 }
 
 static ULONG WINAPI HTMLTextAreaElement_Release(IHTMLTextAreaElement *iface)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
 
-    return IHTMLDOMNode_Release(HTMLDOMNODE(&This->element.node));
+    return IHTMLDOMNode_Release(&This->element.node.IHTMLDOMNode_iface);
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_GetTypeInfoCount(IHTMLTextAreaElement *iface, UINT *pctinfo)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    return IDispatchEx_GetTypeInfoCount(DISPATCHEX(&This->element.node.dispex), pctinfo);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
+    return IDispatchEx_GetTypeInfoCount(&This->element.node.dispex.IDispatchEx_iface, pctinfo);
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_GetTypeInfo(IHTMLTextAreaElement *iface, UINT iTInfo,
                                               LCID lcid, ITypeInfo **ppTInfo)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    return IDispatchEx_GetTypeInfo(DISPATCHEX(&This->element.node.dispex), iTInfo, lcid, ppTInfo);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
+    return IDispatchEx_GetTypeInfo(&This->element.node.dispex.IDispatchEx_iface, iTInfo, lcid,
+            ppTInfo);
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_GetIDsOfNames(IHTMLTextAreaElement *iface, REFIID riid,
                                                 LPOLESTR *rgszNames, UINT cNames,
                                                 LCID lcid, DISPID *rgDispId)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    return IDispatchEx_GetIDsOfNames(DISPATCHEX(&This->element.node.dispex), riid, rgszNames, cNames, lcid, rgDispId);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
+    return IDispatchEx_GetIDsOfNames(&This->element.node.dispex.IDispatchEx_iface, riid, rgszNames,
+            cNames, lcid, rgDispId);
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_Invoke(IHTMLTextAreaElement *iface, DISPID dispIdMember,
                             REFIID riid, LCID lcid, WORD wFlags, DISPPARAMS *pDispParams,
                             VARIANT *pVarResult, EXCEPINFO *pExcepInfo, UINT *puArgErr)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    return IDispatchEx_Invoke(DISPATCHEX(&This->element.node.dispex), dispIdMember, riid, lcid, wFlags, pDispParams,
-            pVarResult, pExcepInfo, puArgErr);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
+    return IDispatchEx_Invoke(&This->element.node.dispex.IDispatchEx_iface, dispIdMember, riid,
+            lcid, wFlags, pDispParams, pVarResult, pExcepInfo, puArgErr);
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_type(IHTMLTextAreaElement *iface, BSTR *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
-    FIXME("(%p)->(%p)\n", This, p);
-    return E_NOTIMPL;
+    static const WCHAR textareaW[] = {'t','e','x','t','a','r','e','a',0};
+
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
+
+    TRACE("(%p)->(%p)\n", This, p);
+
+    *p = SysAllocString(textareaW);
+    if(!*p)
+        return E_OUTOFMEMORY;
+    return S_OK;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_value(IHTMLTextAreaElement *iface, BSTR v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     nsAString value_str;
     nsresult nsres;
 
@@ -123,7 +133,7 @@ static HRESULT WINAPI HTMLTextAreaElement_put_value(IHTMLTextAreaElement *iface,
 
 static HRESULT WINAPI HTMLTextAreaElement_get_value(IHTMLTextAreaElement *iface, BSTR *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     nsAString value_str;
     const PRUnichar *value;
     nsresult nsres;
@@ -148,14 +158,14 @@ static HRESULT WINAPI HTMLTextAreaElement_get_value(IHTMLTextAreaElement *iface,
 
 static HRESULT WINAPI HTMLTextAreaElement_put_name(IHTMLTextAreaElement *iface, BSTR v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%s)\n", This, debugstr_w(v));
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_name(IHTMLTextAreaElement *iface, BSTR *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     nsAString name_str;
     const PRUnichar *name;
     nsresult nsres;
@@ -180,91 +190,91 @@ static HRESULT WINAPI HTMLTextAreaElement_get_name(IHTMLTextAreaElement *iface, 
 
 static HRESULT WINAPI HTMLTextAreaElement_put_status(IHTMLTextAreaElement *iface, VARIANT v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->()\n", This);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_status(IHTMLTextAreaElement *iface, VARIANT *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_disabled(IHTMLTextAreaElement *iface, VARIANT_BOOL v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%x)\n", This, v);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_disabled(IHTMLTextAreaElement *iface, VARIANT_BOOL *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_form(IHTMLTextAreaElement *iface, IHTMLFormElement **p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_defaultValue(IHTMLTextAreaElement *iface, BSTR v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%s)\n", This, debugstr_w(v));
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_defaultValue(IHTMLTextAreaElement *iface, BSTR *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_select(IHTMLTextAreaElement *iface)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)\n", This);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_onchange(IHTMLTextAreaElement *iface, VARIANT v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->()\n", This);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_onchange(IHTMLTextAreaElement *iface, VARIANT *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_onselect(IHTMLTextAreaElement *iface, VARIANT v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->()\n", This);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_onselect(IHTMLTextAreaElement *iface, VARIANT *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_readOnly(IHTMLTextAreaElement *iface, VARIANT_BOOL v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     nsresult nsres;
 
     TRACE("(%p)->(%x)\n", This, v);
@@ -280,7 +290,7 @@ static HRESULT WINAPI HTMLTextAreaElement_put_readOnly(IHTMLTextAreaElement *ifa
 
 static HRESULT WINAPI HTMLTextAreaElement_get_readOnly(IHTMLTextAreaElement *iface, VARIANT_BOOL *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     PRBool b;
     nsresult nsres;
 
@@ -298,42 +308,42 @@ static HRESULT WINAPI HTMLTextAreaElement_get_readOnly(IHTMLTextAreaElement *ifa
 
 static HRESULT WINAPI HTMLTextAreaElement_put_rows(IHTMLTextAreaElement *iface, LONG v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%d)\n", This, v);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_rows(IHTMLTextAreaElement *iface, LONG *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_cols(IHTMLTextAreaElement *iface, LONG v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%d)\n", This, v);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_cols(IHTMLTextAreaElement *iface, LONG *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_put_wrap(IHTMLTextAreaElement *iface, BSTR v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%s)\n", This, debugstr_w(v));
     return E_NOTIMPL;
 }
 
 static HRESULT WINAPI HTMLTextAreaElement_get_wrap(IHTMLTextAreaElement *iface, BSTR *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, p);
     return E_NOTIMPL;
 }
@@ -341,12 +351,10 @@ static HRESULT WINAPI HTMLTextAreaElement_get_wrap(IHTMLTextAreaElement *iface, 
 static HRESULT WINAPI HTMLTextAreaElement_createTextRange(IHTMLTextAreaElement *iface,
                                                           IHTMLTxtRange **range)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_IHTMLTextAreaElement(iface);
     FIXME("(%p)->(%p)\n", This, range);
     return E_NOTIMPL;
 }
-
-#undef HTMLTXTAREA_THIS
 
 static const IHTMLTextAreaElementVtbl HTMLTextAreaElementVtbl = {
     HTMLTextAreaElement_QueryInterface,
@@ -384,23 +392,26 @@ static const IHTMLTextAreaElementVtbl HTMLTextAreaElementVtbl = {
     HTMLTextAreaElement_createTextRange
 };
 
-#define HTMLTXTAREA_NODE_THIS(iface) DEFINE_THIS2(HTMLTextAreaElement, element.node, iface)
+static inline HTMLTextAreaElement *impl_from_HTMLDOMNode(HTMLDOMNode *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLTextAreaElement, element.node);
+}
 
 static HRESULT HTMLTextAreaElement_QI(HTMLDOMNode *iface, REFIID riid, void **ppv)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_HTMLDOMNode(iface);
 
     *ppv = NULL;
 
     if(IsEqualGUID(&IID_IUnknown, riid)) {
         TRACE("(%p)->(IID_IUnknown %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
+        *ppv = &This->IHTMLTextAreaElement_iface;
     }else if(IsEqualGUID(&IID_IDispatch, riid)) {
         TRACE("(%p)->(IID_IDispatch %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
+        *ppv = &This->IHTMLTextAreaElement_iface;
     }else if(IsEqualGUID(&IID_IHTMLTextAreaElement, riid)) {
         TRACE("(%p)->(IID_IHTMLTextAreaElement %p)\n", This, ppv);
-        *ppv = HTMLTXTAREA(This);
+        *ppv = &This->IHTMLTextAreaElement_iface;
     }
 
     if(*ppv) {
@@ -413,7 +424,7 @@ static HRESULT HTMLTextAreaElement_QI(HTMLDOMNode *iface, REFIID riid, void **pp
 
 static void HTMLTextAreaElement_destructor(HTMLDOMNode *iface)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
+    HTMLTextAreaElement *This = impl_from_HTMLDOMNode(iface);
 
     nsIDOMHTMLTextAreaElement_Release(This->nstextarea);
 
@@ -422,21 +433,20 @@ static void HTMLTextAreaElement_destructor(HTMLDOMNode *iface)
 
 static HRESULT HTMLTextAreaElementImpl_put_disabled(HTMLDOMNode *iface, VARIANT_BOOL v)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
-    return IHTMLTextAreaElement_put_disabled(HTMLTXTAREA(This), v);
+    HTMLTextAreaElement *This = impl_from_HTMLDOMNode(iface);
+    return IHTMLTextAreaElement_put_disabled(&This->IHTMLTextAreaElement_iface, v);
 }
 
 static HRESULT HTMLTextAreaElementImpl_get_disabled(HTMLDOMNode *iface, VARIANT_BOOL *p)
 {
-    HTMLTextAreaElement *This = HTMLTXTAREA_NODE_THIS(iface);
-    return IHTMLTextAreaElement_get_disabled(HTMLTXTAREA(This), p);
+    HTMLTextAreaElement *This = impl_from_HTMLDOMNode(iface);
+    return IHTMLTextAreaElement_get_disabled(&This->IHTMLTextAreaElement_iface, p);
 }
-
-#undef HTMLTXTAREA_NODE_THIS
 
 static const NodeImplVtbl HTMLTextAreaElementImplVtbl = {
     HTMLTextAreaElement_QI,
     HTMLTextAreaElement_destructor,
+    HTMLElement_clone,
     NULL,
     NULL,
     HTMLTextAreaElementImpl_put_disabled,
@@ -456,20 +466,28 @@ static dispex_static_data_t HTMLTextAreaElement_dispex = {
     HTMLTextAreaElement_iface_tids
 };
 
-HTMLElement *HTMLTextAreaElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem)
+HRESULT HTMLTextAreaElement_Create(HTMLDocumentNode *doc, nsIDOMHTMLElement *nselem, HTMLElement **elem)
 {
-    HTMLTextAreaElement *ret = heap_alloc_zero(sizeof(HTMLTextAreaElement));
+    HTMLTextAreaElement *ret;
     nsresult nsres;
 
-    ret->lpHTMLTextAreaElementVtbl = &HTMLTextAreaElementVtbl;
-    ret->element.node.vtbl = &HTMLTextAreaElementImplVtbl;
+    ret = heap_alloc_zero(sizeof(HTMLTextAreaElement));
+    if(!ret)
+        return E_OUTOFMEMORY;
 
-    HTMLElement_Init(&ret->element, doc, nselem, &HTMLTextAreaElement_dispex);
+    ret->IHTMLTextAreaElement_iface.lpVtbl = &HTMLTextAreaElementVtbl;
+    ret->element.node.vtbl = &HTMLTextAreaElementImplVtbl;
 
     nsres = nsIDOMHTMLElement_QueryInterface(nselem, &IID_nsIDOMHTMLTextAreaElement,
                                              (void**)&ret->nstextarea);
-    if(NS_FAILED(nsres))
+    if(NS_FAILED(nsres)) {
         ERR("Could not get nsDOMHTMLInputElement: %08x\n", nsres);
+        heap_free(ret);
+        return E_FAIL;
+    }
 
-    return &ret->element;
+    HTMLElement_Init(&ret->element, doc, nselem, &HTMLTextAreaElement_dispex);
+
+    *elem = &ret->element;
+    return S_OK;
 }

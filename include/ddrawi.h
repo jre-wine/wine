@@ -19,15 +19,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_DDRAWI_H
-#define __WINE_DDRAWI_H
+#ifndef __DDRAWI_INCLUDED__
+#define __DDRAWI_INCLUDED__
+
+#include <ddraw.h>
+#include <dciddi.h> /* the DD HAL is layered onto DCI escapes */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <ddraw.h>
-#include <dciddi.h> /* the DD HAL is layered onto DCI escapes */
 
 typedef struct _DDVIDEOPORTCAPS *LPDDVIDEOPORTCAPS; /* should be in dvp.h */
 typedef struct _DDKERNELCAPS *LPDDKERNELCAPS; /* should be in ddkernel.h */
@@ -1067,4 +1067,4 @@ typedef struct _DDRAWI_DDRAWPALETTE_LCL {
 } /* extern "C" */
 #endif
 
-#endif /* __WINE_DDRAWI_H */
+#endif /* __DDRAWI_INCLUDED__ */

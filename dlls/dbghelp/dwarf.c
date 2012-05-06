@@ -163,7 +163,7 @@ typedef struct dwarf2_section_s
     DWORD_PTR                   rva;
 } dwarf2_section_t;
 
-enum dwarf2_sections {section_debug, section_string, section_abbrev, section_line, section_max};
+enum dwarf2_sections {section_debug, section_string, section_abbrev, section_line, section_ranges, section_max};
 
 typedef struct dwarf2_traverse_context_s
 {
@@ -945,6 +945,61 @@ static struct symt* dwarf2_lookup_type(dwarf2_parse_context_t* ctx,
 }
 
 /******************************************************************
+ *		dwarf2_read_range
+ *
+ * read a range for a given debug_info (either using AT_range attribute, in which
+ * case we don't return all the details, or using AT_low_pc & AT_high_pc attributes)
+ * in all cases, range is relative to beginning of compilation unit
+ */
+static BOOL dwarf2_read_range(dwarf2_parse_context_t* ctx, const dwarf2_debug_info_t* di,
+                              unsigned long* plow, unsigned long* phigh)
+{
+    struct attribute            range;
+
+    if (dwarf2_find_attribute(ctx, di, DW_AT_ranges, &range))
+    {
+        dwarf2_traverse_context_t   traverse;
+        unsigned long               low, high;
+
+        traverse.data = ctx->sections[section_ranges].address + range.u.uvalue;
+        traverse.end_data = ctx->sections[section_ranges].address +
+            ctx->sections[section_ranges].size;
+        traverse.word_size = ctx->module->format_info[DFI_DWARF]->u.dwarf2_info->word_size;
+
+        *plow  = ULONG_MAX;
+        *phigh = 0;
+        while (traverse.data + 2 * traverse.word_size < traverse.end_data)
+        {
+            low = dwarf2_parse_addr(&traverse);
+            high = dwarf2_parse_addr(&traverse);
+            if (low == 0 && high == 0) break;
+            if (low == ULONG_MAX) FIXME("unsupported yet (base address selection)\n");
+            if (low  < *plow)  *plow = low;
+            if (high > *phigh) *phigh = high;
+        }
+        if (*plow == ULONG_MAX || *phigh == 0) {FIXME("no entry found\n"); return FALSE;}
+        if (*plow == *phigh) {FIXME("entry found, but low=high\n"); return FALSE;}
+
+        return TRUE;
+    }
+    else
+    {
+        struct attribute            low_pc;
+        struct attribute            high_pc;
+
+        if (!dwarf2_find_attribute(ctx, di, DW_AT_low_pc, &low_pc) ||
+            !dwarf2_find_attribute(ctx, di, DW_AT_high_pc, &high_pc))
+        {
+            FIXME("missing low or high value\n");
+            return FALSE;
+        }
+        *plow = low_pc.u.uvalue;
+        *phigh = high_pc.u.uvalue;
+        return TRUE;
+    }
+}
+
+/******************************************************************
  *		dwarf2_read_one_debug_info
  *
  * Loads into memory one debug info entry, and recursively its children (if any)
@@ -1098,13 +1153,13 @@ static struct symt* dwarf2_parse_pointer_type(dwarf2_parse_context_t* ctx,
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(ctx), dwarf2_debug_di(di)); 
 
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = 0;
+    if (!dwarf2_find_attribute(ctx, di, DW_AT_byte_size, &size)) size.u.uvalue = sizeof(void *);
     if (!(ref_type = dwarf2_lookup_type(ctx, di)))
     {
         ref_type = ctx->symt_cache[sc_void];
         assert(ref_type);
     }
-    di->symt = &symt_new_pointer(ctx->module, ref_type)->symt;
+    di->symt = &symt_new_pointer(ctx->module, ref_type, size.u.uvalue)->symt;
     if (di->abbrev->have_child) FIXME("Unsupported children\n");
     return di->symt;
 }
@@ -1199,7 +1254,7 @@ static struct symt* dwarf2_parse_reference_type(dwarf2_parse_context_t* ctx,
 
     ref_type = dwarf2_lookup_type(ctx, di);
     /* FIXME: for now, we hard-wire C++ references to pointers */
-    di->symt = &symt_new_pointer(ctx->module, ref_type)->symt;
+    di->symt = &symt_new_pointer(ctx->module, ref_type, sizeof(void *))->symt;
 
     if (di->abbrev->have_child) FIXME("Unsupported children\n");
 
@@ -1300,6 +1355,8 @@ static struct symt* dwarf2_parse_udt_type(dwarf2_parse_context_t* ctx,
                 /* FIXME: we need to handle nested udt definitions */
             case DW_TAG_inheritance:
             case DW_TAG_subprogram:
+            case DW_TAG_template_type_param:
+            case DW_TAG_template_value_param:
             case DW_TAG_variable:
                 /* FIXME: some C++ related stuff */
                 break;
@@ -1429,10 +1486,10 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
             /* FIXME: we don't handle its scope yet */
             if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_external, &ext))
                 ext.u.uvalue = 0;
+            loc.offset += subpgm->ctx->load_offset;
             symt_new_global_variable(subpgm->ctx->module, subpgm->compiland,
                                      name.u.string, !ext.u.uvalue,
-                                     subpgm->ctx->load_offset + loc.offset,
-                                     0, param_type);
+                                     loc, 0, param_type);
             break;
         default:
             subpgm->non_computed_variable = TRUE;
@@ -1509,6 +1566,22 @@ static void dwarf2_parse_variable(dwarf2_subprogram_t* subpgm,
         di->symt = &symt_new_constant(subpgm->ctx->module, subpgm->compiland,
                                       name.u.string, param_type, &v)->symt;
     }
+    else
+    {
+        /* variable has been optimiezd away... report anyway */
+        loc.kind = loc_error;
+        loc.reg = loc_err_no_location;
+        if (subpgm->func)
+        {
+            symt_add_func_local(subpgm->ctx->module, subpgm->func,
+                                is_pmt ? DataIsParam : DataIsLocal,
+                                &loc, block, param_type, name.u.string);
+        }
+        else
+        {
+            WARN("dropping global variable %s which has been optimized away\n", name.u.string);
+        }
+    }
     if (is_pmt && subpgm->func && subpgm->func->type)
         symt_add_function_signature_parameter(subpgm->ctx->module,
                                               (struct symt_function_signature*)subpgm->func->type,
@@ -1545,17 +1618,19 @@ static void dwarf2_parse_inlined_subroutine(dwarf2_subprogram_t* subpgm,
                                             const dwarf2_debug_info_t* di)
 {
     struct symt_block*  block;
-    struct attribute    low_pc;
-    struct attribute    high_pc;
+    unsigned long       low_pc, high_pc;
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(subpgm->ctx), dwarf2_debug_di(di));
 
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_low_pc, &low_pc)) low_pc.u.uvalue = 0;
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_high_pc, &high_pc)) high_pc.u.uvalue = 0;
+    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    {
+        FIXME("cannot read range\n");
+        return;
+    }
 
     block = symt_open_func_block(subpgm->ctx->module, subpgm->func, parent_block,
-                                 subpgm->ctx->load_offset + low_pc.u.uvalue - subpgm->func->address,
-                                 high_pc.u.uvalue - low_pc.u.uvalue);
+                                 subpgm->ctx->load_offset + low_pc - subpgm->func->address,
+                                 high_pc - low_pc);
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
@@ -1596,19 +1671,19 @@ static void dwarf2_parse_subprogram_block(dwarf2_subprogram_t* subpgm,
 					  const dwarf2_debug_info_t* di)
 {
     struct symt_block*  block;
-    struct attribute    low_pc;
-    struct attribute    high_pc;
+    unsigned long       low_pc, high_pc;
 
     TRACE("%s, for %s\n", dwarf2_debug_ctx(subpgm->ctx), dwarf2_debug_di(di));
 
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_low_pc, &low_pc))
-        low_pc.u.uvalue = 0;
-    if (!dwarf2_find_attribute(subpgm->ctx, di, DW_AT_high_pc, &high_pc))
-        high_pc.u.uvalue = 0;
+    if (!dwarf2_read_range(subpgm->ctx, di, &low_pc, &high_pc))
+    {
+        FIXME("no range\n");
+        return;
+    }
 
     block = symt_open_func_block(subpgm->ctx->module, subpgm->func, parent_block,
-                                 subpgm->ctx->load_offset + low_pc.u.uvalue - subpgm->func->address,
-                                 high_pc.u.uvalue - low_pc.u.uvalue);
+                                 subpgm->ctx->load_offset + low_pc - subpgm->func->address,
+                                 high_pc - low_pc);
 
     if (di->abbrev->have_child) /** any interest to not have child ? */
     {
@@ -1665,8 +1740,7 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
                                             struct symt_compiland* compiland)
 {
     struct attribute name;
-    struct attribute low_pc;
-    struct attribute high_pc;
+    unsigned long low_pc, high_pc;
     struct attribute is_decl;
     struct attribute inline_flags;
     struct symt* ret_type;
@@ -1692,14 +1766,17 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
         return NULL;
     }
 
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_low_pc, &low_pc)) low_pc.u.uvalue = 0;
-    if (!dwarf2_find_attribute(ctx, di, DW_AT_high_pc, &high_pc)) high_pc.u.uvalue = 0;
+    if (!dwarf2_read_range(ctx, di, &low_pc, &high_pc))
+    {
+        FIXME("cannot get range\n");
+        return NULL;
+    }
+
     /* As functions (defined as inline assembly) get debug info with dwarf
      * (not the case for stabs), we just drop Wine's thunks here...
      * Actual thunks will be created in elf_module from the symbol table
      */
-    if (elf_is_in_thunk_area(ctx->load_offset + low_pc.u.uvalue,
-                             ctx->thunks) >= 0)
+    if (elf_is_in_thunk_area(ctx->load_offset + low_pc, ctx->thunks) >= 0)
         return NULL;
     if (!dwarf2_find_attribute(ctx, di, DW_AT_declaration, &is_decl))
         is_decl.u.uvalue = 0;
@@ -1715,8 +1792,7 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
     if (!is_decl.u.uvalue)
     {
         subpgm.func = symt_new_function(ctx->module, compiland, name.u.string,
-                                        ctx->load_offset + low_pc.u.uvalue,
-                                        high_pc.u.uvalue - low_pc.u.uvalue,
+                                        ctx->load_offset + low_pc, high_pc - low_pc,
                                         &sig_type->symt);
         di->symt = &subpgm.func->symt;
     }
@@ -1771,6 +1847,8 @@ static struct symt* dwarf2_parse_subprogram(dwarf2_parse_context_t* ctx,
                 /* the type referred to will be loaded when we need it, so skip it */
                 break;
             case DW_TAG_unspecified_parameters:
+            case DW_TAG_template_type_param:
+            case DW_TAG_template_value_param:
                 /* FIXME: no support in dbghelp's internals so far */
                 break;
             default:
@@ -2776,7 +2854,7 @@ static void copy_context_reg(CONTEXT *dstcontext, ULONG_PTR dwregdst, CONTEXT* s
     memcpy(ptrdst, ptrsrc, szdst);
 }
 
-static ULONG_PTR eval_expression(struct module* module, struct cpu_stack_walk* csw,
+static ULONG_PTR eval_expression(const struct module* module, struct cpu_stack_walk* csw,
                                  const unsigned char* zp, CONTEXT *context)
 {
     dwarf2_traverse_context_t    ctx;
@@ -2887,7 +2965,7 @@ static ULONG_PTR eval_expression(struct module* module, struct cpu_stack_walk* c
     return stack[sp];
 }
 
-static void apply_frame_state(struct module* module, struct cpu_stack_walk* csw,
+static void apply_frame_state(const struct module* module, struct cpu_stack_walk* csw,
                               CONTEXT *context, struct frame_state *state, ULONG_PTR* cfa)
 {
     unsigned int i;
@@ -3096,30 +3174,29 @@ BOOL dwarf2_parse(struct module* module, unsigned long load_offset,
                   const struct elf_thunk_area* thunks,
                   struct image_file_map* fmap)
 {
-    dwarf2_section_t    section[section_max];
+    dwarf2_section_t    eh_frame, section[section_max];
     dwarf2_traverse_context_t   mod_ctx;
     struct image_section_map    debug_sect, debug_str_sect, debug_abbrev_sect,
-                                debug_line_sect;
+                                debug_line_sect, debug_ranges_sect, eh_frame_sect;
     BOOL                ret = TRUE;
     struct module_format* dwarf2_modfmt;
 
-    if (!dwarf2_init_section(&section[section_debug],  fmap, ".debug_info", &debug_sect))
-        /* no Dwarf debug info here */
-        return FALSE;
-
+    dwarf2_init_section(&eh_frame,                fmap, ".eh_frame",     &eh_frame_sect);
+    dwarf2_init_section(&section[section_debug],  fmap, ".debug_info",   &debug_sect);
     dwarf2_init_section(&section[section_abbrev], fmap, ".debug_abbrev", &debug_abbrev_sect);
     dwarf2_init_section(&section[section_string], fmap, ".debug_str",    &debug_str_sect);
     dwarf2_init_section(&section[section_line],   fmap, ".debug_line",   &debug_line_sect);
+    dwarf2_init_section(&section[section_ranges], fmap, ".debug_ranges", &debug_ranges_sect);
 
-    if (section[section_debug].address == IMAGE_NO_MAP ||
-        section[section_abbrev].address == IMAGE_NO_MAP ||
-        section[section_string].address == IMAGE_NO_MAP)
+    /* to do anything useful we need either .eh_frame or .debug_info */
+    if ((!eh_frame.address || eh_frame.address == IMAGE_NO_MAP) &&
+        (!section[section_debug].address || section[section_debug].address == IMAGE_NO_MAP))
     {
         ret = FALSE;
         goto leave;
     }
 
-    if (fmap->modtype == DMT_ELF)
+    if (fmap->modtype == DMT_ELF && debug_sect.fmap)
     {
         /* debug info might have a different base address than .so file
          * when elf file is prelinked after splitting off debug info
@@ -3153,7 +3230,7 @@ BOOL dwarf2_parse(struct module* module, unsigned long load_offset,
      */
     dwarf2_init_section(&dwarf2_modfmt->u.dwarf2_info->debug_loc,   fmap, ".debug_loc",   NULL);
     dwarf2_init_section(&dwarf2_modfmt->u.dwarf2_info->debug_frame, fmap, ".debug_frame", NULL);
-    dwarf2_init_section(&dwarf2_modfmt->u.dwarf2_info->eh_frame,    fmap, ".eh_frame",    NULL);
+    dwarf2_modfmt->u.dwarf2_info->eh_frame = eh_frame;
 
     while (mod_ctx.data < mod_ctx.end_data)
     {
@@ -3172,6 +3249,8 @@ leave:
     image_unmap_section(&debug_abbrev_sect);
     image_unmap_section(&debug_str_sect);
     image_unmap_section(&debug_line_sect);
+    image_unmap_section(&debug_ranges_sect);
+    if (!ret) image_unmap_section(&eh_frame_sect);
 
     return ret;
 }

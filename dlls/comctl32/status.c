@@ -661,9 +661,11 @@ static BOOL
 STATUSBAR_SetParts (STATUS_INFO *infoPtr, INT count, LPINT parts)
 {
     STATUSWINDOWPART *tmp;
-    UINT i, oldNumParts;
+    INT i, oldNumParts;
 
     TRACE("(%d,%p)\n", count, parts);
+
+    if(!count) return FALSE;
 
     oldNumParts = infoPtr->numParts;
     infoPtr->numParts = count;
@@ -693,7 +695,7 @@ STATUSBAR_SetParts (STATUS_INFO *infoPtr, INT count, LPINT parts)
 	infoPtr->parts[i].x = parts[i];
 
     if (infoPtr->hwndToolTip) {
-	UINT nTipCount;
+	INT nTipCount;
 	TTTOOLINFOW ti;
 
 	ZeroMemory (&ti, sizeof(TTTOOLINFOW));
@@ -1047,7 +1049,10 @@ STATUSBAR_WMNCHitTest (const STATUS_INFO *infoPtr, INT x, INT y)
 	rect.top += 2;
 
 	if (PtInRect (&rect, pt))
-	    return HTBOTTOMRIGHT;
+        {
+            if (GetWindowLongW( infoPtr->Self, GWL_EXSTYLE ) & WS_EX_LAYOUTRTL) return HTBOTTOMLEFT;
+	    else return HTBOTTOMRIGHT;
+        }
     }
 
     return HTERROR;

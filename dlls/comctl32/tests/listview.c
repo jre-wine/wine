@@ -59,6 +59,8 @@ static INT  notifyFormat;
 static BOOL g_is_below_5;
 /* item data passed to LVN_GETDISPINFOA */
 static LVITEMA g_itema;
+/* alter notification code A->W */
+static BOOL g_disp_A_to_W;
 
 static HWND subclass_editbox(HWND hwndListview);
 
@@ -372,6 +374,13 @@ static LRESULT WINAPI parent_wnd_proc(HWND hwnd, UINT message, WPARAM wParam, LP
               {
                   NMLVDISPINFOA *dispinfo = (NMLVDISPINFOA*)lParam;
                   g_itema = dispinfo->item;
+
+                  if (g_disp_A_to_W && (dispinfo->item.mask & LVIF_TEXT))
+                  {
+                      static const WCHAR testW[] = {'T','E','S','T',0};
+                      dispinfo->hdr.code = LVN_GETDISPINFOW;
+                      memcpy(dispinfo->item.pszText, testW, sizeof(testW));
+                  }
               }
               break;
           case NM_HOVER:
@@ -757,6 +766,7 @@ static void test_images(void)
     memset(&r1, 0, sizeof r1);
     r1.left = LVIR_ICON;
     r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM) &r1);
+    expect(1, r);
 
     r = SendMessage(hwnd, LVM_DELETEALLITEMS, 0, 0);
     ok(r == TRUE, "should not fail\n");
@@ -769,6 +779,7 @@ static void test_images(void)
     memset(&r2, 0, sizeof r2);
     r2.left = LVIR_ICON;
     r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM) &r2);
+    expect(1, r);
 
     ok(!memcmp(&r1, &r2, sizeof r1), "rectangle should be the same\n");
 
@@ -802,6 +813,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0xfccc, "state %x\n", item.state);
 
     /* Don't set LVIF_STATE */
@@ -818,6 +830,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0, "state %x\n", item.state);
 
     r = SendMessage(hwnd, LVM_SETEXTENDEDLISTVIEWSTYLE, LVS_EX_CHECKBOXES, LVS_EX_CHECKBOXES);
@@ -828,6 +841,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     if (item.state != 0x1ccc)
     {
         win_skip("LVS_EX_CHECKBOXES style is unavailable. Skipping.\n");
@@ -847,6 +861,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x1000, "state %x\n", item.state);
 
     /* Add a further item this time specifying a state and still its state goes to 0x1000 */
@@ -862,6 +877,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x1aaa, "state %x\n", item.state);
 
     /* Set an item's state to checked */
@@ -870,11 +886,13 @@ static void test_checkboxes(void)
     item.stateMask = 0xf000;
     item.state = 0x2000;
     r = SendMessage(hwnd, LVM_SETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
 
     item.iItem = 3;
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x2aaa, "state %x\n", item.state);
 
     /* Check that only the bits we asked for are returned,
@@ -885,6 +903,7 @@ static void test_checkboxes(void)
     item.stateMask = 0xf000;
     item.state = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x2000, "state %x\n", item.state);
 
     /* Set the style again and check that doesn't change an item's state */
@@ -895,6 +914,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x2aaa, "state %x\n", item.state);
 
     /* Unsetting the checkbox extended style doesn't change an item's state */
@@ -905,6 +925,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x2aaa, "state %x\n", item.state);
 
     /* Now setting the style again will change an item's state */
@@ -915,6 +936,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x1aaa, "state %x\n", item.state);
 
     /* Toggle checkbox tests (bug 9934) */
@@ -931,6 +953,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x1aab, "state %x\n", item.state);
 
     r = SendMessage(hwnd, WM_KEYDOWN, VK_SPACE, 0);
@@ -942,6 +965,7 @@ static void test_checkboxes(void)
     item.mask = LVIF_STATE;
     item.stateMask = 0xffff;
     r = SendMessage(hwnd, LVM_GETITEMA, 0, (LPARAM) &item);
+    expect(1, r);
     ok(item.state == 0x2aab, "state %x\n", item.state);
 
     r = SendMessage(hwnd, WM_KEYDOWN, VK_SPACE, 0);
@@ -2992,7 +3016,8 @@ static void test_hittest(void)
     LVITEMA item;
     static CHAR text[] = "1234567890ABCDEFGHIJKLMNOPQRST";
     POINT pos;
-    INT x, y;
+    INT x, y, i;
+    WORD horiz, vert;
     HIMAGELIST himl, himl2;
     HBITMAP hbmp;
 
@@ -3018,8 +3043,14 @@ static void test_hittest(void)
     memset(&bounds, 0, sizeof(bounds));
     bounds.left = LVIR_BOUNDS;
     r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&bounds);
+    expect(1, r);
     ok(bounds.bottom - bounds.top > 0, "Expected non zero item height\n");
     ok(bounds.right - bounds.left > 0, "Expected non zero item width\n");
+    r = SendMessage(hwnd, LVM_GETITEMSPACING, TRUE, 0);
+    horiz = LOWORD(r);
+    vert = HIWORD(r);
+    ok(bounds.bottom - bounds.top == vert,
+        "Vertical spacing inconsistent (%d != %d)\n", bounds.bottom - bounds.top, vert);
     r = SendMessage(hwnd, LVM_GETITEMPOSITION, 0, (LPARAM)&pos);
     expect(TRUE, r);
 
@@ -3052,8 +3083,18 @@ static void test_hittest(void)
     test_lvm_subitemhittest(hwnd, x, y, -1, -1, LVHT_NOWHERE, FALSE, FALSE, FALSE);
     /* subitem returned with -1 item too */
     x = pos.x + 150;
-    y = -10;
+    y = bounds.top - vert;
     test_lvm_subitemhittest(hwnd, x, y, -1, 1, LVHT_NOWHERE, FALSE, FALSE, FALSE);
+    test_lvm_subitemhittest(hwnd, x, y - vert + 1, -1, 1, LVHT_NOWHERE, FALSE, FALSE, FALSE);
+    /* return values appear to underflow with negative indices */
+    i = -2;
+    y = y - vert;
+    while (i > -10) {
+        test_lvm_subitemhittest(hwnd, x, y, i, 1, LVHT_ONITEMLABEL, TRUE, FALSE, TRUE);
+        test_lvm_subitemhittest(hwnd, x, y - vert + 1, i, 1, LVHT_ONITEMLABEL, TRUE, FALSE, TRUE);
+        y = y - vert;
+        i--;
+    }
     /* parent client area is 100x100 by default */
     MoveWindow(hwnd, 0, 0, 300, 100, FALSE);
     x = pos.x + 150; /* outside column */
@@ -3269,6 +3310,7 @@ static void test_getitemrect(void)
     LVCOLUMNA col;
     INT order[2];
     POINT pt;
+    HDC hdc;
 
     /* rectangle isn't empty for empty text items */
     hwnd = create_listview_control(LVS_LIST);
@@ -3278,10 +3320,13 @@ static void test_getitemrect(void)
     r = SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&item);
     expect(0, r);
     rect.left = LVIR_LABEL;
-    SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    r = SendMessage(hwnd, LVM_GETITEMRECT, 0, (LPARAM)&rect);
+    expect(TRUE, r);
     expect(0, rect.left);
     expect(0, rect.top);
-    todo_wine expect(96, rect.right);
+    hdc = GetDC(hwnd);
+    todo_wine expect(((GetDeviceCaps(hdc, LOGPIXELSX) + 15) / 16) * 16, rect.right);
+    ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
 
     hwnd = create_listview_control(LVS_REPORT);
@@ -4109,6 +4154,7 @@ static void test_getcolumnwidth(void)
     DWORD_PTR style;
     LVCOLUMNA col;
     LVITEMA itema;
+    HDC hdc;
 
     /* default column width */
     hwnd = create_listview_control(LVS_ICON);
@@ -4132,7 +4178,9 @@ static void test_getcolumnwidth(void)
     memset(&itema, 0, sizeof(itema));
     SendMessage(hwnd, LVM_INSERTITEMA, 0, (LPARAM)&itema);
     ret = SendMessage(hwnd, LVM_GETCOLUMNWIDTH, 0, 0);
-    todo_wine expect(96, ret);
+    hdc = GetDC(hwnd);
+    todo_wine expect(((GetDeviceCaps(hdc, LOGPIXELSX) + 15) / 16) * 16, ret);
+    ReleaseDC(hwnd, hdc);
     DestroyWindow(hwnd);
 }
 
@@ -4515,6 +4563,37 @@ static void test_createdragimage(void)
     DestroyWindow(list);
 }
 
+static void test_dispinfo(void)
+{
+    static const char testA[] = "TEST";
+    WCHAR buff[10];
+    LVITEMA item;
+    HWND hwnd;
+    INT ret;
+
+    hwnd = create_listview_control(LVS_ICON);
+    ok(hwnd != 0, "failed to create listview window\n");
+
+    insert_item(hwnd, 0);
+
+    memset(&item, 0, sizeof(item));
+    item.pszText = LPSTR_TEXTCALLBACKA;
+    ret = SendMessageA(hwnd, LVM_SETITEMTEXTA, 0, (LPARAM)&item);
+    ok(ret, "got %d\n", ret);
+
+    g_disp_A_to_W = TRUE;
+    item.pszText = (char*)buff;
+    item.cchTextMax = sizeof(buff)/sizeof(WCHAR);
+    ret = SendMessageA(hwnd, LVM_GETITEMTEXTA, 0, (LPARAM)&item);
+    ok(ret == sizeof(testA)-1, "got %d, expected 4\n", ret);
+    g_disp_A_to_W = FALSE;
+
+    ok(memcmp(item.pszText, testA, sizeof(testA)) == 0,
+        "got %s, expected %s\n", item.pszText, testA);
+
+    DestroyWindow(hwnd);
+}
+
 START_TEST(listview)
 {
     HMODULE hComctl32;
@@ -4578,6 +4657,7 @@ START_TEST(listview)
     test_hover();
     test_destroynotify();
     test_createdragimage();
+    test_dispinfo();
 
     if (!load_v6_module(&ctx_cookie, &hCtx))
     {

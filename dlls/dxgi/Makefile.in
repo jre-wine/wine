@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = dxgi.dll
 IMPORTLIB = dxgi
-IMPORTS   = dxguid uuid wined3d kernel32
+IMPORTS   = dxguid uuid wined3d
 
 C_SRCS = \
 	adapter.c \

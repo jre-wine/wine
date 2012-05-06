@@ -1217,7 +1217,7 @@ DWORD NE_StartTask(void)
 
     if ( hInstance >= 32 )
     {
-        CONTEXT86 context;
+        CONTEXT context;
 
         /* Enter instance handles into task struct */
 
@@ -2047,7 +2047,7 @@ HMODULE WINAPI MapHModuleSL(HMODULE16 hmod)
 /***************************************************************************
  *		MapHInstLS			(KERNEL.472)
  */
-void WINAPI MapHInstLS16( CONTEXT86 *context )
+void WINAPI MapHInstLS16( CONTEXT *context )
 {
     context->Eax = MapHModuleLS( (HMODULE)context->Eax );
 }
@@ -2055,7 +2055,7 @@ void WINAPI MapHInstLS16( CONTEXT86 *context )
 /***************************************************************************
  *		MapHInstSL			(KERNEL.473)
  */
-void WINAPI MapHInstSL16( CONTEXT86 *context )
+void WINAPI MapHInstSL16( CONTEXT *context )
 {
     context->Eax = (DWORD)MapHModuleSL( context->Eax );
 }

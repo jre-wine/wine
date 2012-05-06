@@ -30,7 +30,7 @@
 #define PARENT_SEQ_INDEX 0
 #define TRACKBAR_SEQ_INDEX 1
 
-HWND hWndParent;
+static HWND hWndParent;
 
 static struct msg_sequence *sequences[NUM_MSG_SEQUENCE];
 
@@ -527,6 +527,7 @@ static void test_line_size(HWND hWndTrackbar){
 
     /* test TBM_SETLINESIZE */
     r = SendMessage(hWndTrackbar, TBM_SETLINESIZE, 0, 10);
+    expect(1,r);
     r = SendMessage(hWndTrackbar, TBM_SETLINESIZE, 0, 4);
     expect(10, r);
 

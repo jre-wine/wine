@@ -61,7 +61,6 @@ typedef struct tagUSER_DRIVER {
     BOOL   (CDECL *pGetKeyboardLayoutName)(LPWSTR);
     HKL    (CDECL *pLoadKeyboardLayout)(LPCWSTR, UINT);
     UINT   (CDECL *pMapVirtualKeyEx)(UINT, UINT, HKL);
-    UINT   (CDECL *pSendInput)(UINT, LPINPUT, int);
     INT    (CDECL *pToUnicodeEx)(UINT, UINT, const BYTE *, LPWSTR, int, UINT, HKL);
     BOOL   (CDECL *pUnloadKeyboardLayout)(HKL);
     SHORT  (CDECL *pVkKeyScanEx)(WCHAR, HKL);
@@ -82,7 +81,6 @@ typedef struct tagUSER_DRIVER {
     void   (CDECL *pEndClipboardUpdate)(void);                   /* End clipboard update */
     UINT   (CDECL *pEnumClipboardFormats)(UINT);                 /* Enumerate clipboard formats */
     HANDLE (CDECL *pGetClipboardData)(UINT);                     /* Get specified selection data */
-    INT    (CDECL *pGetClipboardFormatName)(UINT, LPWSTR, UINT); /* Get a clipboard format name */
     BOOL   (CDECL *pIsClipboardFormatAvailable)(UINT);           /* Check if specified format is available */
     UINT   (CDECL *pRegisterClipboardFormat)(LPCWSTR);           /* Register a clipboard format */
     BOOL   (CDECL *pSetClipboardData)(UINT, HANDLE, BOOL);       /* Set specified selection data */
@@ -213,6 +211,7 @@ extern void erase_now( HWND hwnd, UINT rdw_flags ) DECLSPEC_HIDDEN;
 extern void *get_hook_proc( void *proc, const WCHAR *module );
 extern LRESULT call_current_hook( HHOOK hhook, INT code, WPARAM wparam, LPARAM lparam ) DECLSPEC_HIDDEN;
 extern BOOL map_wparam_AtoW( UINT message, WPARAM *wparam, enum wm_char_mapping mapping ) DECLSPEC_HIDDEN;
+extern NTSTATUS send_hardware_message( HWND hwnd, const INPUT *input, UINT flags ) DECLSPEC_HIDDEN;
 extern LRESULT MSG_SendInternalMessageTimeout( DWORD dest_pid, DWORD dest_tid,
                                                UINT msg, WPARAM wparam, LPARAM lparam,
                                                UINT flags, UINT timeout, PDWORD_PTR res_ptr ) DECLSPEC_HIDDEN;

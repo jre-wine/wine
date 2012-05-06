@@ -28,6 +28,7 @@
 #include "winternl.h"
 #include "wmistr.h"
 #include "evntrace.h"
+#include "evntprov.h"
 
 #include "wine/unicode.h"
 #include "wine/debug.h"
@@ -199,6 +200,23 @@ ULONG WINAPI ControlTraceA( TRACEHANDLE hSession, LPCSTR SessionName, PEVENT_TRA
 }
 
 /******************************************************************************
+ * FlushTraceA [ADVAPI32.@]
+ */
+ULONG WINAPI FlushTraceA ( TRACEHANDLE hSession, LPCSTR SessionName, PEVENT_TRACE_PROPERTIES Properties )
+{
+    return ControlTraceA( hSession, SessionName, Properties, EVENT_TRACE_CONTROL_FLUSH );
+}
+
+/******************************************************************************
+ * FlushTraceW [ADVAPI32.@]
+ */
+ULONG WINAPI FlushTraceW ( TRACEHANDLE hSession, LPCWSTR SessionName, PEVENT_TRACE_PROPERTIES Properties )
+{
+    return ControlTraceW( hSession, SessionName, Properties, EVENT_TRACE_CONTROL_FLUSH );
+}
+
+
+/******************************************************************************
  * DeregisterEventSource [ADVAPI32.@]
  * 
  * Closes a write handle to an event log
@@ -214,6 +232,21 @@ BOOL WINAPI DeregisterEventSource( HANDLE hEventLog )
 {
     FIXME("(%p) stub\n", hEventLog);
     return TRUE;
+}
+
+/******************************************************************************
+ * EnableTraceEx [ADVAPI32.@]
+ */
+ULONG WINAPI EnableTraceEx( LPCGUID provider, LPCGUID source, TRACEHANDLE hSession, ULONG enable,
+                            UCHAR level, ULONGLONG anykeyword, ULONGLONG allkeyword, ULONG enableprop,
+                            PEVENT_FILTER_DESCRIPTOR filterdesc )
+{
+    FIXME("(%s, %s, %s, %d, %c, %s, %s, %d, %p): stub\n", debugstr_guid(provider),
+            debugstr_guid(source), wine_dbgstr_longlong(hSession), enable, level,
+            wine_dbgstr_longlong(anykeyword), wine_dbgstr_longlong(allkeyword),
+            enableprop, filterdesc);
+
+    return ERROR_SUCCESS;
 }
 
 /******************************************************************************
@@ -788,5 +821,33 @@ ULONG WINAPI TraceEvent( TRACEHANDLE SessionHandle, PEVENT_TRACE_HEADER EventTra
 ULONG WINAPI UnregisterTraceGuids( TRACEHANDLE RegistrationHandle )
 {
     FIXME("%s: stub\n", wine_dbgstr_longlong(RegistrationHandle));
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * EventRegister [ADVAPI32.@]
+ */
+ULONG WINAPI EventRegister( LPCGUID provider, PENABLECALLBACK callback, PVOID context, PREGHANDLE handle )
+{
+    FIXME("%s, %p, %p, %p\n", debugstr_guid(provider), callback, context, handle);
+    return ERROR_CALL_NOT_IMPLEMENTED;
+}
+
+/******************************************************************************
+ * EventEnabled [ADVAPI32.@]
+ *
+ */
+BOOLEAN WINAPI EventEnabled( REGHANDLE handle, PCEVENT_DESCRIPTOR descriptor )
+{
+    FIXME("(%s, %p): stub\n", wine_dbgstr_longlong(handle), descriptor);
+    return FALSE;
+}
+
+/******************************************************************************
+ * QueryTraceW [ADVAPI32.@]
+ */
+ULONG WINAPI QueryTraceW( TRACEHANDLE handle, LPCWSTR sessionname, PEVENT_TRACE_PROPERTIES properties )
+{
+    FIXME("%s %s %p: stub\n", wine_dbgstr_longlong(handle), debugstr_w(sessionname), properties);
     return ERROR_CALL_NOT_IMPLEMENTED;
 }

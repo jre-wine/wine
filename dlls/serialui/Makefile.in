@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = serialui.dll
 IMPORTLIB = serialui
-IMPORTS   = user32 advapi32 kernel32
+IMPORTS   = user32 advapi32
 
 C_SRCS = \
 	confdlg.c
@@ -19,6 +15,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	Hu.rc \
 	It.rc \
 	Ja.rc \

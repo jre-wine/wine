@@ -25,19 +25,14 @@
 #include "activaut.h"
 #include "objsafe.h"
 #include "mshtmhst.h"
+#include "rpcproxy.h"
+#include "jscript_classes.h"
 
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 
 LONG module_ref = 0;
-
-static const CLSID CLSID_JScript =
-    {0xf414c260,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
-static const CLSID CLSID_JScriptAuthor =
-    {0xf414c261,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
-static const CLSID CLSID_JScriptEncode =
-    {0xf414c262,0x6ac0,0x11cf,{0xb6,0xd1,0x00,0xaa,0x00,0xbb,0xbb,0x58}};
 
 DEFINE_GUID(GUID_NULL,0,0,0,0,0,0,0,0,0,0,0);
 
@@ -143,69 +138,12 @@ HRESULT WINAPI DllCanUnloadNow(void)
 }
 
 /***********************************************************************
- *              register_inf
- */
-
-#define INF_SET_ID(id)             \
-    do                             \
-    {                              \
-        static CHAR name[] = #id;  \
-                                   \
-        pse[i].pszName = name;     \
-        clsids[i++] = &id;         \
-    } while (0)
-
-static HRESULT register_inf(BOOL doregister)
-{
-    HRESULT hres;
-    HMODULE hAdvpack;
-    HRESULT (WINAPI *pRegInstall)(HMODULE hm, LPCSTR pszSection, const STRTABLEA* pstTable);
-    STRTABLEA strtable;
-    STRENTRYA pse[7];
-    static CLSID const *clsids[7];
-    unsigned int i = 0;
-
-    static const WCHAR advpackW[] = {'a','d','v','p','a','c','k','.','d','l','l',0};
-
-    INF_SET_ID(CLSID_JScript);
-    INF_SET_ID(CLSID_JScriptAuthor);
-    INF_SET_ID(CLSID_JScriptEncode);
-    INF_SET_ID(CATID_ActiveScript);
-    INF_SET_ID(CATID_ActiveScriptParse);
-    INF_SET_ID(CATID_ActiveScriptEncode);
-    INF_SET_ID(CATID_ActiveScriptAuthor);
-
-    for(i = 0; i < sizeof(pse)/sizeof(pse[0]); i++) {
-        pse[i].pszValue = HeapAlloc(GetProcessHeap(), 0, 39);
-        sprintf(pse[i].pszValue, "{%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}",
-                clsids[i]->Data1, clsids[i]->Data2, clsids[i]->Data3, clsids[i]->Data4[0],
-                clsids[i]->Data4[1], clsids[i]->Data4[2], clsids[i]->Data4[3], clsids[i]->Data4[4],
-                clsids[i]->Data4[5], clsids[i]->Data4[6], clsids[i]->Data4[7]);
-    }
-
-    strtable.cEntries = sizeof(pse)/sizeof(pse[0]);
-    strtable.pse = pse;
-
-    hAdvpack = LoadLibraryW(advpackW);
-    pRegInstall = (void *)GetProcAddress(hAdvpack, "RegInstall");
-
-    hres = pRegInstall(jscript_hinstance, doregister ? "RegisterDll" : "UnregisterDll", &strtable);
-
-    for(i=0; i < sizeof(pse)/sizeof(pse[0]); i++)
-        HeapFree(GetProcessHeap(), 0, pse[i].pszValue);
-
-    return hres;
-}
-
-#undef INF_SET_CLSID
-
-/***********************************************************************
  *          DllRegisterServer (jscript.@)
  */
 HRESULT WINAPI DllRegisterServer(void)
 {
     TRACE("()\n");
-    return register_inf(TRUE);
+    return __wine_register_resources(jscript_hinstance, NULL);
 }
 
 /***********************************************************************
@@ -214,5 +152,5 @@ HRESULT WINAPI DllRegisterServer(void)
 HRESULT WINAPI DllUnregisterServer(void)
 {
     TRACE("()\n");
-    return register_inf(FALSE);
+    return __wine_unregister_resources(jscript_hinstance, NULL);
 }

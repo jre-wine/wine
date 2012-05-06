@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = localui.dll
-IMPORTS   = kernel32 winspool
+IMPORTS   = winspool
 
 C_SRCS = \
 	localui.c

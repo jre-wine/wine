@@ -33,7 +33,8 @@
  *
  *   missing styles: TVS_FULLROWSELECT, TVS_INFOTIP, TVS_RTLREADING,
  *
- *   missing item styles: TVIS_CUT, TVIS_EXPANDPARTIAL
+ *   missing item styles: TVIS_CUT, TVIS_EXPANDPARTIAL, TVIS_EX_FLAT,
+ *      TVIS_EX_DISABLED
  *
  *   Make the insertion mark look right.
  *   Scroll (instead of repaint) as much as possible.
@@ -69,6 +70,10 @@ WINE_DEFAULT_DEBUG_CHANNEL(treeview);
 
 typedef struct _TREEITEM    /* HTREEITEM is a _TREEINFO *. */
 {
+  HTREEITEM parent;         /* handle to parent or 0 if at root */
+  HTREEITEM nextSibling;    /* handle to next item in list, 0 if last */
+  HTREEITEM firstChild;     /* handle to first child or 0 if no child */
+
   UINT      callbackMask;
   UINT      state;
   UINT      stateMask;
@@ -76,15 +81,13 @@ typedef struct _TREEITEM    /* HTREEITEM is a _TREEINFO *. */
   int       cchTextMax;
   int       iImage;
   int       iSelectedImage;
+  int       iExpandedImage;
   int       cChildren;
   LPARAM    lParam;
   int       iIntegral;      /* item height multiplier (1 is normal) */
   int       iLevel;         /* indentation level:0=root level */
-  HTREEITEM parent;         /* handle to parent or 0 if at root */
-  HTREEITEM firstChild;     /* handle to first child or 0 if no child */
   HTREEITEM lastChild;
   HTREEITEM prevSibling;    /* handle to prev item in list, 0 if first */
-  HTREEITEM nextSibling;    /* handle to next item in list, 0 if last */
   RECT      rect;
   LONG      linesOffset;
   LONG      stateOffset;
@@ -246,6 +249,10 @@ static inline BOOL item_changed (const TREEVIEW_ITEM *tiOld, const TREEVIEW_ITEM
     /* Selected image has changed and it's not a callback */
     if ((tvChange->mask & TVIF_SELECTEDIMAGE) && (tiOld->iSelectedImage != tiNew->iSelectedImage) &&
 	tiNew->iSelectedImage != I_IMAGECALLBACK)
+	return TRUE;
+
+    if ((tvChange->mask & TVIF_EXPANDEDIMAGE) && (tiOld->iExpandedImage != tiNew->iExpandedImage) &&
+	tiNew->iExpandedImage != I_IMAGECALLBACK)
 	return TRUE;
 
     /* Text has changed and it's not a callback */
@@ -483,10 +490,10 @@ static INT get_notifycode(const TREEVIEW_INFO *infoPtr, INT code)
 }
 
 static inline BOOL
-TREEVIEW_SendRealNotify(const TREEVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
+TREEVIEW_SendRealNotify(const TREEVIEW_INFO *infoPtr, WPARAM wParam, LPNMHDR pnmh)
 {
-    TRACE("wParam=%ld, lParam=%ld\n", wParam, lParam);
-    return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, wParam, lParam);
+    TRACE("wParam=%ld, lParam=%p\n", wParam, pnmh);
+    return SendMessageW(infoPtr->hwndNotify, WM_NOTIFY, wParam, (LPARAM)pnmh);
 }
 
 static BOOL
@@ -500,7 +507,7 @@ TREEVIEW_SendSimpleNotify(const TREEVIEW_INFO *infoPtr, UINT code)
     nmhdr.idFrom = GetWindowLongPtrW(hwnd, GWLP_ID);
     nmhdr.code = get_notifycode(infoPtr, code);
 
-    return TREEVIEW_SendRealNotify(infoPtr, nmhdr.idFrom, (LPARAM)&nmhdr);
+    return TREEVIEW_SendRealNotify(infoPtr, nmhdr.idFrom, &nmhdr);
 }
 
 static VOID
@@ -563,7 +570,7 @@ TREEVIEW_SendTreeviewNotify(const TREEVIEW_INFO *infoPtr, UINT code, UINT action
     nmhdr.ptDrag.x = 0;
     nmhdr.ptDrag.y = 0;
 
-    ret = TREEVIEW_SendRealNotify(infoPtr, nmhdr.hdr.idFrom, (LPARAM)&nmhdr);
+    ret = TREEVIEW_SendRealNotify(infoPtr, nmhdr.hdr.idFrom, &nmhdr.hdr);
     if (!infoPtr->bNtfUnicode)
     {
 	Free(nmhdr.itemOld.pszText);
@@ -593,7 +600,7 @@ TREEVIEW_SendTreeviewDnDNotify(const TREEVIEW_INFO *infoPtr, UINT code,
     nmhdr.ptDrag.x = pt.x;
     nmhdr.ptDrag.y = pt.y;
 
-    return TREEVIEW_SendRealNotify(infoPtr, nmhdr.hdr.idFrom, (LPARAM)&nmhdr);
+    return TREEVIEW_SendRealNotify(infoPtr, nmhdr.hdr.idFrom, &nmhdr.hdr);
 }
 
 
@@ -621,7 +628,7 @@ TREEVIEW_SendCustomDrawNotify(const TREEVIEW_INFO *infoPtr, DWORD dwDrawStage,
     nmcdhdr.clrTextBk = infoPtr->clrBk;
     nmcdhdr.iLevel = 0;
 
-    return TREEVIEW_SendRealNotify(infoPtr, nmcd->hdr.idFrom, (LPARAM)&nmcdhdr);
+    return TREEVIEW_SendRealNotify(infoPtr, nmcd->hdr.idFrom, &nmcdhdr.nmcd.hdr);
 }
 
 
@@ -665,7 +672,7 @@ TREEVIEW_SendCustomDrawItemNotify(const TREEVIEW_INFO *infoPtr, HDC hdc,
 	  nmcd->dwDrawStage, nmcd->hdc, nmcd->dwItemSpec,
 	  nmcd->uItemState, nmcd->lItemlParam);
 
-    return TREEVIEW_SendRealNotify(infoPtr, nmcd->hdr.idFrom, (LPARAM)nmcdhdr);
+    return TREEVIEW_SendRealNotify(infoPtr, nmcd->hdr.idFrom, &nmcdhdr->nmcd.hdr);
 }
 
 static BOOL
@@ -682,7 +689,7 @@ TREEVIEW_BeginLabelEditNotify(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *editI
     TREEVIEW_TVItemFromItem(infoPtr, TVIF_HANDLE | TVIF_STATE | TVIF_PARAM | TVIF_TEXT,
                             &tvdi.item, editItem);
 
-    ret = TREEVIEW_SendRealNotify(infoPtr, tvdi.hdr.idFrom, (LPARAM)&tvdi);
+    ret = TREEVIEW_SendRealNotify(infoPtr, tvdi.hdr.idFrom, &tvdi.hdr);
 
     if (!infoPtr->bNtfUnicode)
 	Free(tvdi.item.pszText);
@@ -720,7 +727,8 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
     if (mask & TVIF_TEXT)
        wineItem->textWidth = 0;
 
-    TREEVIEW_SendRealNotify(infoPtr, callback.hdr.idFrom, (LPARAM)&callback);
+    TREEVIEW_SendRealNotify(infoPtr, callback.hdr.idFrom, &callback.hdr);
+    TRACE("resulting code 0x%08x\n", callback.hdr.code);
 
     /* It may have changed due to a call to SetItem. */
     mask &= wineItem->callbackMask;
@@ -728,7 +736,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
     if ((mask & TVIF_TEXT) && callback.item.pszText != wineItem->pszText)
     {
 	/* Instead of copying text into our buffer user specified its own */
-	if (!infoPtr->bNtfUnicode) {
+	if (!infoPtr->bNtfUnicode && (callback.hdr.code == TVN_GETDISPINFOA)) {
 	    LPWSTR newText;
 	    int buflen;
             int len = MultiByteToWideChar( CP_ACP, 0,
@@ -769,7 +777,7 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
     }
     else if (mask & TVIF_TEXT) {
 	/* User put text into our buffer, that is ok unless A string */
-	if (!infoPtr->bNtfUnicode) {
+	if (!infoPtr->bNtfUnicode && (callback.hdr.code == TVN_GETDISPINFOA)) {
 	    LPWSTR newText;
 	    LPWSTR oldText = NULL;
 	    int buflen;
@@ -800,6 +808,9 @@ TREEVIEW_UpdateDispInfo(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 
     if (mask & TVIF_SELECTEDIMAGE)
 	wineItem->iSelectedImage = callback.item.iSelectedImage;
+
+    if (mask & TVIF_EXPANDEDIMAGE)
+	wineItem->iExpandedImage = callback.item.iExpandedImage;
 
     if (mask & TVIF_CHILDREN)
 	wineItem->cChildren = callback.item.cChildren;
@@ -997,6 +1008,7 @@ TREEVIEW_AllocateItem(const TREEVIEW_INFO *infoPtr)
      * inc/dec to toggle the images. */
     newItem->iImage = 0;
     newItem->iSelectedImage = 0;
+    newItem->iExpandedImage = (WORD)I_IMAGENONE;
 
     if (DPA_InsertPtr(infoPtr->items, INT_MAX, newItem) == -1)
     {
@@ -1173,6 +1185,16 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 	    callbackClear |= TVIF_SELECTEDIMAGE;
     }
 
+    if (tvItem->mask & TVIF_EXPANDEDIMAGE)
+    {
+	wineItem->iExpandedImage = tvItem->iExpandedImage;
+
+	if (wineItem->iExpandedImage == I_IMAGECALLBACK)
+	    callbackSet |= TVIF_EXPANDEDIMAGE;
+	else
+	    callbackClear |= TVIF_EXPANDEDIMAGE;
+    }
+
     if (tvItem->mask & TVIF_PARAM)
 	wineItem->lParam = tvItem->lParam;
 
@@ -1187,6 +1209,11 @@ TREEVIEW_DoSetItemT(const TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 	      tvItem->stateMask);
 	wineItem->state &= ~tvItem->stateMask;
 	wineItem->state |= (tvItem->state & tvItem->stateMask);
+    }
+
+    if (tvItem->mask & TVIF_STATEEX)
+    {
+        FIXME("New extended state: %x\n", tvItem->uStateEx);
     }
 
     wineItem->callbackMask |= callbackSet;
@@ -1454,11 +1481,11 @@ TREEVIEW_RemoveItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem)
 {
     TRACE("%p, (%s)\n", wineItem, TREEVIEW_ItemName(wineItem));
 
-    TREEVIEW_SendTreeviewNotify(infoPtr, TVN_DELETEITEMW, TVC_UNKNOWN,
-				TVIF_HANDLE | TVIF_PARAM, wineItem, 0);
-
     if (wineItem->firstChild)
 	TREEVIEW_RemoveAllChildren(infoPtr, wineItem);
+
+    TREEVIEW_SendTreeviewNotify(infoPtr, TVN_DELETEITEMW, TVC_UNKNOWN,
+				TVIF_HANDLE | TVIF_PARAM, wineItem, 0);
 
     TREEVIEW_UnlinkItem(wineItem);
 
@@ -1488,7 +1515,7 @@ TREEVIEW_DeleteItem(TREEVIEW_INFO *infoPtr, HTREEITEM wineItem)
     TREEVIEW_ITEM *parent, *prev = NULL;
     BOOL visible = FALSE;
 
-    if (wineItem == TVI_ROOT)
+    if (wineItem == TVI_ROOT || !wineItem)
     {
 	TRACE("TVI_ROOT\n");
 	parent = infoPtr->root;
@@ -1803,7 +1830,7 @@ TREEVIEW_SetItemHeight(TREEVIEW_INFO *infoPtr, INT newHeight)
 {
     INT prevHeight = infoPtr->uItemHeight;
 
-    TRACE("%d\n", newHeight);
+    TRACE("new=%d, old=%d\n", newHeight, prevHeight);
     if (newHeight == -1)
     {
 	infoPtr->uItemHeight = TREEVIEW_NaturalHeight(infoPtr);
@@ -1811,13 +1838,17 @@ TREEVIEW_SetItemHeight(TREEVIEW_INFO *infoPtr, INT newHeight)
     }
     else
     {
-	infoPtr->uItemHeight = newHeight;
-	infoPtr->bHeightSet = TRUE;
+        if (newHeight == 0) newHeight = 1;
+        infoPtr->uItemHeight = newHeight;
+        infoPtr->bHeightSet = TRUE;
     }
 
     /* Round down, unless we support odd ("non even") heights. */
-    if (!(infoPtr->dwStyle & TVS_NONEVENHEIGHT))
-	infoPtr->uItemHeight &= ~1;
+    if (!(infoPtr->dwStyle & TVS_NONEVENHEIGHT) && infoPtr->uItemHeight != 1)
+    {
+        infoPtr->uItemHeight &= ~1;
+        TRACE("after rounding=%d\n", infoPtr->uItemHeight);
+    }
 
     if (infoPtr->uItemHeight != prevHeight)
     {
@@ -2037,6 +2068,7 @@ static inline LRESULT
 TREEVIEW_GetVisibleCount(const TREEVIEW_INFO *infoPtr)
 {
     /* Surprise! This does not take integral height into account. */
+    TRACE("client=%d, item=%d\n", infoPtr->clientHeight, infoPtr->uItemHeight);
     return infoPtr->clientHeight / infoPtr->uItemHeight;
 }
 
@@ -2075,6 +2107,9 @@ TREEVIEW_GetItemT(const TREEVIEW_INFO *infoPtr, LPTVITEMEXW tvItem, BOOL isW)
 
     if (tvItem->mask & TVIF_SELECTEDIMAGE)
 	tvItem->iSelectedImage = wineItem->iSelectedImage;
+
+    if (tvItem->mask & TVIF_EXPANDEDIMAGE)
+	tvItem->iExpandedImage = wineItem->iExpandedImage;
 
     if (tvItem->mask & TVIF_STATE)
         /* Careful here - Windows ignores the stateMask when you get the state
@@ -2115,6 +2150,13 @@ TREEVIEW_GetItemT(const TREEVIEW_INFO *infoPtr, LPTVITEMEXW tvItem, BOOL isW)
             }
         }
     }
+
+    if (tvItem->mask & TVIF_STATEEX)
+    {
+        FIXME("Extended item state not supported, returning 0.\n");
+        tvItem->uStateEx = 0;
+    }
+
     TRACE("item <%p>, txt %p, img %p, mask %x\n",
 	  wineItem, tvItem->pszText, &tvItem->iImage, tvItem->mask);
 
@@ -2539,8 +2581,8 @@ TREEVIEW_DrawItem(const TREEVIEW_INFO *infoPtr, HDC hdc, TREEVIEW_ITEM *wineItem
 			   ILD_NORMAL);
 	}
 
-	/* Now, draw the normal image; can be either selected or
-	 * non-selected image.
+	/* Now, draw the normal image; can be either selected,
+	 * non-selected or expanded image.
 	 */
 
 	if ((wineItem->state & TVIS_SELECTED) && (wineItem->iSelectedImage >= 0))
@@ -2548,9 +2590,14 @@ TREEVIEW_DrawItem(const TREEVIEW_INFO *infoPtr, HDC hdc, TREEVIEW_ITEM *wineItem
 	    /* The item is currently selected */
 	    imageIndex = wineItem->iSelectedImage;
 	}
+	else if ((wineItem->state & TVIS_EXPANDED) && (wineItem->iExpandedImage != (WORD)I_IMAGENONE))
+	{
+	    /* The item is currently not selected but expanded */
+	    imageIndex = wineItem->iExpandedImage;
+	}
 	else
 	{
-	    /* The item is not selected */
+	    /* The item is not selected and not expanded */
 	    imageIndex = wineItem->iImage;
 	}
 
@@ -2881,6 +2928,7 @@ TREEVIEW_Paint(TREEVIEW_INFO *infoPtr, HDC hdc_ref)
     {
         hdc = hdc_ref;
         GetClientRect(infoPtr->hwnd, &rc);
+        TREEVIEW_FillBkgnd(infoPtr, hdc, &rc);
     }
     else
     {
@@ -3273,14 +3321,15 @@ TREEVIEW_Collapse(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 
 static BOOL
 TREEVIEW_Expand(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
-		BOOL bExpandPartial, BOOL bUser)
+		BOOL partial, BOOL user)
 {
     LONG scrollDist;
     LONG orgNextTop = 0;
     RECT scrollRect;
     TREEVIEW_ITEM *nextItem, *tmpItem;
+    BOOL sendsNotifications;
 
-    TRACE("(%p, %p, partial=%d, %d\n", infoPtr, wineItem, bExpandPartial, bUser);
+    TRACE("(%p, %p, partial=%d, %d\n", infoPtr, wineItem, partial, user);
 
     if (wineItem->state & TVIS_EXPANDED)
        return TRUE;
@@ -3301,32 +3350,22 @@ TREEVIEW_Expand(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
 
     TRACE("TVE_EXPAND %p %s\n", wineItem, TREEVIEW_ItemName(wineItem));
 
-    if (bUser || ((wineItem->cChildren != 0) &&
-                  !(wineItem->state & TVIS_EXPANDEDONCE)))
+    sendsNotifications = user || ((wineItem->cChildren != 0) &&
+                                    !(wineItem->state & TVIS_EXPANDEDONCE));
+    if (sendsNotifications)
     {
 	if (!TREEVIEW_SendExpanding(infoPtr, wineItem, TVE_EXPAND))
 	{
 	    TRACE("  TVN_ITEMEXPANDING returned TRUE, exiting...\n");
 	    return FALSE;
 	}
-
-        if (!wineItem->firstChild)
-            return FALSE;
-
-	wineItem->state |= TVIS_EXPANDED;
-	TREEVIEW_SendExpanded(infoPtr, wineItem, TVE_EXPAND);
-	wineItem->state |= TVIS_EXPANDEDONCE;
     }
-    else
-    {
-        if (!wineItem->firstChild)
-            return FALSE;
+    if (!wineItem->firstChild)
+        return FALSE;
 
-	/* this item has already been expanded */
-	wineItem->state |= TVIS_EXPANDED;
-    }
+    wineItem->state |= TVIS_EXPANDED;
 
-    if (bExpandPartial)
+    if (partial)
 	FIXME("TVE_EXPANDPARTIAL not implemented\n");
 
     if (ISVISIBLE(wineItem))
@@ -3384,7 +3423,64 @@ TREEVIEW_Expand(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *wineItem,
         }
     }
 
+    if (sendsNotifications) {
+        TREEVIEW_SendExpanded(infoPtr, wineItem, TVE_EXPAND);
+        wineItem->state |= TVIS_EXPANDEDONCE;
+    }
+
     return TRUE;
+}
+
+/* Handler for TVS_SINGLEEXPAND behaviour. Used on response
+   to mouse messages and TVM_SELECTITEM.
+
+   selection - previously selected item, used to collapse a part of a tree
+   item - new selected item
+*/
+static void TREEVIEW_SingleExpand(TREEVIEW_INFO *infoPtr,
+    HTREEITEM selection, HTREEITEM item)
+{
+    TREEVIEW_ITEM *SelItem;
+
+    if ((infoPtr->dwStyle & TVS_SINGLEEXPAND) == 0 || infoPtr->hwndEdit || !item) return;
+
+    TREEVIEW_SendTreeviewNotify(infoPtr, TVN_SINGLEEXPAND, TVC_UNKNOWN, TVIF_HANDLE | TVIF_PARAM, item, 0);
+
+    /*
+     * Close the previous selection all the way to the root
+     * as long as the new selection is not a child
+     */
+    if(selection && (selection != item))
+    {
+        BOOL closeit = TRUE;
+        SelItem = item;
+
+        /* determine if the hitItem is a child of the currently selected item */
+        while(closeit && SelItem && TREEVIEW_ValidItem(infoPtr, SelItem) &&
+              (SelItem->parent != infoPtr->root))
+        {
+            closeit = (SelItem != selection);
+            SelItem = SelItem->parent;
+        }
+
+        if(closeit)
+        {
+            if(TREEVIEW_ValidItem(infoPtr, selection))
+                SelItem = selection;
+
+            while(SelItem && (SelItem != item) && TREEVIEW_ValidItem(infoPtr, SelItem) &&
+                  SelItem->parent != infoPtr->root)
+            {
+                TREEVIEW_Collapse(infoPtr, SelItem, FALSE, FALSE);
+                SelItem = SelItem->parent;
+            }
+        }
+    }
+
+    /*
+     * Expand the current item
+     */
+    TREEVIEW_Expand(infoPtr, item, FALSE, FALSE);
 }
 
 static BOOL
@@ -3833,7 +3929,7 @@ TREEVIEW_EndEditLabelNow(TREEVIEW_INFO *infoPtr, BOOL bCancel)
 	tvdi.item.cchTextMax = 0;
     }
 
-    bCommit = TREEVIEW_SendRealNotify(infoPtr, tvdi.hdr.idFrom, (LPARAM)&tvdi);
+    bCommit = TREEVIEW_SendRealNotify(infoPtr, tvdi.hdr.idFrom, &tvdi.hdr);
 
     if (!bCancel && bCommit)	/* Apply the changes */
     {
@@ -4104,58 +4200,11 @@ TREEVIEW_LButtonDown(TREEVIEW_INFO *infoPtr, LPARAM lParam)
     }
     else if (ht.flags & (TVHT_ONITEMICON|TVHT_ONITEMLABEL)) /* select the item if the hit was inside of the icon or text */
     {
-        /*
-         * if we are TVS_SINGLEEXPAND then we want this single click to
-         * do a bunch of things.
-         */
-        if((infoPtr->dwStyle & TVS_SINGLEEXPAND) &&
-          (infoPtr->hwndEdit == 0))
-        {
-            TREEVIEW_ITEM *SelItem;
-
-            /*
-             * Send the notification
-             */
-            TREEVIEW_SendTreeviewNotify(infoPtr, TVN_SINGLEEXPAND, TVC_UNKNOWN, TVIF_HANDLE | TVIF_PARAM, ht.hItem, 0);
-
-            /*
-             * Close the previous selection all the way to the root
-             * as long as the new selection is not a child
-             */
-            if((infoPtr->selectedItem)
-                && (infoPtr->selectedItem != ht.hItem))
-            {
-                BOOL closeit = TRUE;
-                SelItem = ht.hItem;
-
-                /* determine if the hitItem is a child of the currently selected item */
-                while(closeit && SelItem && TREEVIEW_ValidItem(infoPtr, SelItem) && (SelItem != infoPtr->root))
-                {
-                    closeit = (SelItem != infoPtr->selectedItem);
-                    SelItem = SelItem->parent;
-                }
-
-                if(closeit)
-                {
-                    if(TREEVIEW_ValidItem(infoPtr, infoPtr->selectedItem))
-                        SelItem = infoPtr->selectedItem;
-
-                    while(SelItem && (SelItem != ht.hItem) && TREEVIEW_ValidItem(infoPtr, SelItem) && (SelItem != infoPtr->root))
-                    {
-                        TREEVIEW_Collapse(infoPtr, SelItem, FALSE, FALSE);
-                        SelItem = SelItem->parent;
-                    }
-                }
-            }
-
-            /*
-             * Expand the current item
-             */
-            TREEVIEW_Expand(infoPtr, ht.hItem, TVE_TOGGLE, FALSE);
-        }
+        TREEVIEW_ITEM *selection = infoPtr->selectedItem;
 
         /* Select the current item */
         TREEVIEW_DoSelectItem(infoPtr, TVGN_CARET, ht.hItem, TVC_BYMOUSE);
+        TREEVIEW_SingleExpand(infoPtr, selection, ht.hItem);
     }
     else if (ht.flags & TVHT_ONITEMSTATEICON)
     {
@@ -4318,6 +4367,9 @@ TREEVIEW_DoSelectItem(TREEVIEW_INFO *infoPtr, INT action, HTREEITEM newSelect,
 
     switch (action)
     {
+    case TVGN_CARET|TVSI_NOSINGLEEXPAND:
+        FIXME("TVSI_NOSINGLEEXPAND specified.\n");
+        /* Fall through */
     case TVGN_CARET:
 	prevSelect = infoPtr->selectedItem;
 
@@ -4387,13 +4439,17 @@ TREEVIEW_DoSelectItem(TREEVIEW_INFO *infoPtr, INT action, HTREEITEM newSelect,
 static LRESULT
 TREEVIEW_SelectItem(TREEVIEW_INFO *infoPtr, INT wParam, HTREEITEM item)
 {
-    if (item != NULL && !TREEVIEW_ValidItem(infoPtr, item))
+    TREEVIEW_ITEM *selection = infoPtr->selectedItem;
+
+    if (item && !TREEVIEW_ValidItem(infoPtr, item))
 	return FALSE;
 
     TRACE("%p (%s) %d\n", item, TREEVIEW_ItemName(item), wParam);
 
     if (!TREEVIEW_DoSelectItem(infoPtr, wParam, item, TVC_UNKNOWN))
 	return FALSE;
+
+    TREEVIEW_SingleExpand(infoPtr, selection, item);
 
     return TRUE;
 }
@@ -5442,7 +5498,7 @@ TREEVIEW_SetCursor(const TREEVIEW_INFO *infoPtr, WPARAM wParam, LPARAM lParam)
     nmmouse.pt.x = 0;
     nmmouse.pt.y = 0;
     nmmouse.dwHitInfo = lParam;
-    if (TREEVIEW_SendRealNotify(infoPtr, nmmouse.hdr.idFrom, (LPARAM)&nmmouse))
+    if (TREEVIEW_SendRealNotify(infoPtr, nmmouse.hdr.idFrom, &nmmouse.hdr))
         return 0;
 
     if (item && (infoPtr->dwStyle & TVS_TRACKSELECT))
@@ -5792,10 +5848,10 @@ TREEVIEW_Unregister(void)
 /* Tree Verification ****************************************************/
 
 static inline void
-TREEVIEW_VerifyChildren(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item);
+TREEVIEW_VerifyChildren(TREEVIEW_INFO *infoPtr, const TREEVIEW_ITEM *item);
 
 static inline void TREEVIEW_VerifyItemCommon(TREEVIEW_INFO *infoPtr,
-					     TREEVIEW_ITEM *item)
+					     const TREEVIEW_ITEM *item)
 {
     assert(infoPtr != NULL);
     assert(item != NULL);
@@ -5834,7 +5890,7 @@ static inline void TREEVIEW_VerifyItemCommon(TREEVIEW_INFO *infoPtr,
 }
 
 static inline void
-TREEVIEW_VerifyItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item)
+TREEVIEW_VerifyItem(TREEVIEW_INFO *infoPtr, const TREEVIEW_ITEM *item)
 {
     assert(item != NULL);
 
@@ -5850,9 +5906,9 @@ TREEVIEW_VerifyItem(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item)
 }
 
 static inline void
-TREEVIEW_VerifyChildren(TREEVIEW_INFO *infoPtr, TREEVIEW_ITEM *item)
+TREEVIEW_VerifyChildren(TREEVIEW_INFO *infoPtr, const TREEVIEW_ITEM *item)
 {
-    TREEVIEW_ITEM *child;
+    const TREEVIEW_ITEM *child;
     assert(item != NULL);
 
     for (child = item->firstChild; child != NULL; child = child->nextSibling)

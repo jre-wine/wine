@@ -71,14 +71,16 @@ static HANDLE create_target_process(const char *arg)
     char **argv;
     char cmdline[MAX_PATH];
     PROCESS_INFORMATION pi;
+    BOOL ret;
     STARTUPINFO si = { 0 };
     si.cb = sizeof(si);
 
     winetest_get_mainargs( &argv );
     sprintf(cmdline, "%s %s %s", argv[0], argv[1], arg);
-    ok(CreateProcess(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL,
-                     &si, &pi) != 0, "error: %u\n", GetLastError());
-    ok(CloseHandle(pi.hThread) != 0, "error %u\n", GetLastError());
+    ret = CreateProcess(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+    ok(ret, "error: %u\n", GetLastError());
+    ret = CloseHandle(pi.hThread);
+    ok(ret, "error %u\n", GetLastError());
     return pi.hProcess;
 }
 
@@ -146,7 +148,7 @@ static void cleanup_thread_sync_helpers(void)
   CloseHandle(stop_event);
 }
 
-DWORD tlsIndex;
+static DWORD tlsIndex;
 
 typedef struct {
   int threadnum;
@@ -157,7 +159,7 @@ typedef struct {
 /* WinME supports OpenThread but doesn't know about access restrictions so
    we require them to be either completely ignored or always obeyed.
 */
-INT obeying_ars = 0; /* -1 == no, 0 == dunno yet, 1 == yes */
+static INT obeying_ars = 0; /* -1 == no, 0 == dunno yet, 1 == yes */
 #define obey_ar(x) \
   (obeying_ars == 0 \
     ? ((x) \
@@ -310,18 +312,18 @@ static VOID test_CreateRemoteThread(void)
     ok(ret == 2, "ret=%u, err=%u\n", ret, GetLastError());
 
     /* thread still suspended, so wait times out */
-    ret = WaitForSingleObject(hEvent, 100);
+    ret = WaitForSingleObject(hEvent, 1000);
     ok(ret == WAIT_TIMEOUT, "wait did not time out, ret=%u\n", ret);
 
     ret = ResumeThread(hThread);
     ok(ret == 1, "ret=%u, err=%u\n", ret, GetLastError());
 
     /* wait that doesn't time out */
-    ret = WaitForSingleObject(hEvent, 100);
+    ret = WaitForSingleObject(hEvent, 1000);
     ok(ret == WAIT_OBJECT_0, "object not signaled, ret=%u\n", ret);
 
     /* wait for thread end */
-    ret = WaitForSingleObject(hThread, 100);
+    ret = WaitForSingleObject(hThread, 1000);
     ok(ret == WAIT_OBJECT_0, "waiting for thread failed, ret=%u\n", ret);
     CloseHandle(hThread);
 
@@ -330,7 +332,7 @@ static VOID test_CreateRemoteThread(void)
                                  threadFunc_CloseHandle,
                                  hRemoteEvent, 0, &tid);
     ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
-    ret = WaitForSingleObject(hThread, 100);
+    ret = WaitForSingleObject(hThread, 1000);
     ok(ret == WAIT_OBJECT_0, "waiting for thread failed, ret=%u\n", ret);
     CloseHandle(hThread);
 
@@ -341,7 +343,7 @@ static VOID test_CreateRemoteThread(void)
     ok(hThread != NULL, "CreateRemoteThread failed, err=%u\n", GetLastError());
 
     /* closed handle, so wait times out */
-    ret = WaitForSingleObject(hEvent, 100);
+    ret = WaitForSingleObject(hEvent, 1000);
     ok(ret == WAIT_TIMEOUT, "wait did not time out, ret=%u\n", ret);
 
     /* check that remote SetEvent() failed */
@@ -368,6 +370,7 @@ static VOID test_CreateThread_basic(void)
    DWORD i,j;
    DWORD GLE, ret;
    DWORD tid;
+   BOOL bRet;
 
    /* lstrlenA contains an exception handler so this makes sure exceptions work in the main thread */
    ok( lstrlenA( (char *)0xdeadbeef ) == 0, "lstrlenA: unexpected success\n" );
@@ -423,7 +426,8 @@ static VOID test_CreateThread_basic(void)
   }
 
   SetLastError(0xCAFEF00D);
-  ok(TlsFree(tlsIndex)!=0,"TlsFree failed: %08x\n", GetLastError());
+  bRet = TlsFree(tlsIndex);
+  ok(bRet, "TlsFree failed: %08x\n", GetLastError());
   ok(GetLastError()==0xCAFEF00D,
      "GetLastError: expected 0xCAFEF00D, got %08x\n", GetLastError());
 
@@ -940,7 +944,8 @@ static void test_SetThreadContext(void)
         ctx.Esp -= 2 * sizeof(int *);
         ctx.Eip = (DWORD)set_test_val;
         SetLastError(0xdeadbeef);
-        ok( SetThreadContext( thread, &ctx ), "SetThreadContext failed : (%d)\n", GetLastError() );
+        ret = SetThreadContext( thread, &ctx );
+        ok( ret, "SetThreadContext failed : (%d)\n", GetLastError() );
     }
 
     SetLastError(0xdeadbeef);
@@ -1328,8 +1333,6 @@ static void test_ThreadErrorMode(void)
 
     pSetThreadErrorMode(oldmode, NULL);
 }
-
-void _fpreset(void) {} /* override the mingw fpu init code */
 
 static inline void set_fpu_cw(WORD cw)
 {

@@ -127,7 +127,7 @@ static void test_midiIn_device(UINT udev, HWND hwnd)
 
     test_notification(hwnd, "midiInOpen", MIM_OPEN, 0);
 
-    mhdr.dwFlags = 0;
+    memset(&mhdr, 0, sizeof(mhdr));
     mhdr.dwUser = 0x56FA552C;
     mhdr.dwBufferLength = 70000; /* > 64KB! */
     mhdr.lpData = HeapAlloc(GetProcessHeap(), 0 , mhdr.dwBufferLength);
@@ -198,6 +198,12 @@ static void test_midi_mci(HWND hwnd)
     err = mciSendString("sysinfo sequencer quantity", buf, sizeof(buf), hwnd);
     ok(!err, "mci sysinfo sequencer quantity returned %d\n", err);
     if (!err) trace("Found %s MCI sequencer devices\n", buf);
+
+    if (!strcmp(buf, "0")) return;
+
+    err = mciSendString("capability sequencer can record", buf, sizeof(buf), hwnd);
+    ok(!err, "mci sysinfo sequencer quantity returned %d\n", err);
+    if(!err) ok(!strcmp(buf, "false"), "capability can record is %s\n", buf);
 }
 
 
@@ -227,6 +233,11 @@ static void test_midiOut_device(UINT udev, HWND hwnd)
         rc = midiOutOpen(&hm, udev, (DWORD_PTR)hwnd, (DWORD_PTR)MYCBINST, CALLBACK_WINDOW);
     else
         rc = midiOutOpen(&hm, udev, (DWORD_PTR)callback_func, (DWORD_PTR)MYCBINST, CALLBACK_FUNCTION);
+    if (rc == MMSYSERR_NOTSUPPORTED)
+    {
+        skip( "MIDI out not supported\n" );
+        return;
+    }
     ok(!rc, "midiOutOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
     if (rc) return;
 
@@ -278,7 +289,7 @@ static void test_midiOut_device(UINT udev, HWND hwnd)
         if (!rc) Sleep(400); /* Hear note */
     }
 
-    mhdr.dwFlags = 0;
+    memset(&mhdr, 0, sizeof(mhdr));
     mhdr.dwUser   = 0x56FA552C;
     mhdr.dwOffset = 0xDEADBEEF;
     mhdr.dwBufferLength = 70000; /* > 64KB! */
@@ -382,6 +393,11 @@ static void test_midiStream(UINT udev, HWND hwnd)
         rc = midiStreamOpen(&hm, &udev, 1, (DWORD_PTR)hwnd, (DWORD_PTR)MYCBINST, CALLBACK_WINDOW);
     else
         rc = midiStreamOpen(&hm, &udev, 1, (DWORD_PTR)callback_func, (DWORD_PTR)MYCBINST, CALLBACK_FUNCTION);
+    if (rc == MMSYSERR_NOTSUPPORTED)
+    {
+        skip( "MIDI stream not supported\n" );
+        return;
+    }
     ok(!rc, "midiStreamOpen(dev=%d) rc=%s\n", udev, mmsys_error(rc));
     if (rc) return;
 
@@ -397,7 +413,7 @@ static void test_midiStream(UINT udev, HWND hwnd)
     ok(!rc, "midiStreamProperty TIMEDIV rc=%s\n", mmsys_error(rc));
     todo_wine ok(24==LOWORD(midiprop.tdiv.dwTimeDiv), "default stream time division %u\n", midiprop.tdiv.dwTimeDiv);
 
-    mhdr.dwFlags = 0;
+    memset(&mhdr, 0, sizeof(mhdr));
     mhdr.dwUser   = 0x56FA552C;
     mhdr.dwOffset = 1234567890;
     mhdr.dwBufferLength = sizeof(strmEvents);
@@ -609,6 +625,72 @@ static void test_midiStream(UINT udev, HWND hwnd)
     }
 }
 
+static BOOL scan_subkeys(HKEY parent, const LPCSTR *sub_keys)
+{
+    char name[64];
+    DWORD index = 0;
+    DWORD name_len = sizeof(name);
+    BOOL found_vmware = FALSE;
+
+    if (sub_keys[0] == NULL)
+    {
+       /* We're at the deepest level, check "Identifier" value now */
+       char *test;
+       if (RegQueryValueExA(parent, "Identifier", NULL, NULL, (LPBYTE) name, &name_len) != ERROR_SUCCESS)
+           return FALSE;
+       for (test = name; test < name + lstrlenA(name) - 6 && ! found_vmware; test++)
+       {
+           char c = test[6];
+           test[6] = '\0';
+           found_vmware = (lstrcmpiA(test, "VMware") == 0);
+           test[6] = c;
+       }
+       return found_vmware;
+    }
+
+    while (RegEnumKeyExA(parent, index, name, &name_len, NULL, NULL, NULL, NULL) == ERROR_SUCCESS &&
+           ! found_vmware) {
+        char c = name[lstrlenA(sub_keys[0])];
+        name[lstrlenA(sub_keys[0])] = '\0';
+        if (lstrcmpiA(name, sub_keys[0]) == 0) {
+            HKEY sub_key;
+            name[lstrlenA(sub_keys[0])] = c;
+            if (RegOpenKeyExA(parent, name, 0, KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE, &sub_key) == ERROR_SUCCESS) {
+                found_vmware = scan_subkeys(sub_key, sub_keys + 1);
+                RegCloseKey(sub_key);
+            }
+        }
+
+        name_len = sizeof(name);
+        index++;
+    }
+
+    return found_vmware;
+}
+
+/*
+ * Usual method to detect whether running inside a VMware virtual machine involves direct port I/O requiring
+ * some assembly and an exception handler. Can't do that in Wine tests. Alternative method of querying WMI
+ * is not available on NT4. So instead we look at the device map and check the Identifier value in the
+ * registry keys HKLM\HARDWARE\DEVICEMAP\SCSI\Scsi Port x\Scsi Bus x\Target Id x\Logical Unit Id x (where
+ * x is some number). If the Identifier value contains the string "VMware" we assume running in a VMware VM.
+ */
+static BOOL on_vmware(void)
+{
+    static const LPCSTR sub_keys[] = { "Scsi Port ", "Scsi Bus ", "Target Id ", "Logical Unit Id ", NULL };
+    HKEY scsi;
+    BOOL found_vmware = FALSE;
+
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\Scsi", 0, KEY_ENUMERATE_SUB_KEYS, &scsi) != ERROR_SUCCESS)
+        return FALSE;
+
+    found_vmware = scan_subkeys(scsi, sub_keys);
+
+    RegCloseKey(scsi);
+
+    return found_vmware;
+}
+
 static void test_midi_outfns(HWND hwnd)
 {
     HMIDIOUT hm;
@@ -646,11 +728,17 @@ static void test_midi_outfns(HWND hwnd)
     test_midi_mci(hwnd);
 
     for (udev=0; udev < ndevs; udev++) {
-        trace("** Testing device %d\n", udev);
-        test_midiOut_device(udev, hwnd);
-        Sleep(800); /* Let the synth rest */
-        test_midiStream(udev, hwnd);
-        Sleep(800);
+        MIDIOUTCAPSA capsA;
+        rc = midiOutGetDevCapsA(udev, &capsA, sizeof(capsA));
+        if (rc || strcmp(capsA.szPname, "Creative Sound Blaster MPU-401") != 0 || ! on_vmware()) {
+            trace("** Testing device %d\n", udev);
+            test_midiOut_device(udev, hwnd);
+            Sleep(800); /* Let the synth rest */
+            test_midiStream(udev, hwnd);
+            Sleep(800);
+        }
+        else
+            win_skip("Skipping this device on VMware, driver problem\n");
     }
     trace("** Testing MIDI mapper\n");
     test_midiOut_device(MIDIMAPPER, hwnd);

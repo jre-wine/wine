@@ -25,7 +25,7 @@
 
 LANGUAGE LANG_THAI, SUBLANG_DEFAULT
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "เปิด"
 FONT 8, "MS Shell Dlg"
@@ -47,7 +47,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "บันทืกเป็น..."
 FONT 8, "MS Shell Dlg"
@@ -69,7 +69,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "พิมพ์"
 FONT 8, "MS Shell Dlg"
@@ -92,7 +92,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT_SETUP DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "ปรับแค่งเครื่องพิมพ์"
 FONT 8, "MS Shell Dlg"
@@ -118,7 +118,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "ต้วอักษร"
 FONT 8, "MS Shell Dlg"
@@ -150,7 +150,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_COLOR DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 300, 185
+CHOOSE_COLOR DIALOG 36, 24, 300, 185
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "สี"
 FONT 8, "MS Shell Dlg"
@@ -184,7 +184,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-FINDDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 236, 62
+FINDDLGORD DIALOG 36, 24, 236, 62
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "ค้นหา"
 FONT 8, "MS Shell Dlg"
@@ -203,7 +203,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "แทนที"
 FONT 8, "MS Shell Dlg"
@@ -223,7 +223,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "พิมพ์"
@@ -263,7 +263,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "ส่งถึง:",           stc3, 100,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "ปรับแต่งเครื่องพิมพ์"
@@ -298,7 +298,7 @@ BEGIN
     CONTROL         "แนวนอน",     rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "ปรับแต่ง"
 FONT 8, "MS Shell Dlg"
@@ -328,7 +328,7 @@ BEGIN
   PUSHBUTTON "เครื่องพิมพ์...", psh3, 184, 220, 48, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "เปิด"
 FONT 8, "MS Shell Dlg"
@@ -350,115 +350,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"เปิด",		 IDOK,222,110,50,14
     PUSHBUTTON		"ยกเลิก",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"ช่วยเหลีอ",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "เกี่ยวกับ FolderPicker Test"
-    IDS_DOCUMENTFOLDERS     "Document Folders"
-    IDS_PERSONAL            "พื้นที่ส่วนตัว"
-    IDS_FAVORITES           "ที่คั่นหนังสือ"
-    IDS_PATH                "System Path"
-    IDS_DESKTOP             "พื้นที่ทำงาน"
-    IDS_FONTS               "ดัวอักษร"
-    IDS_MYCOMPUTER          "เครื่องส่วนตัว"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "System Folders"
-    IDS_LOCALHARDRIVES      "ฮาร์ดดิสก์เครื่องส่วนตัว"
-    IDS_FILENOTFOUND        "ไม่พบแฟ้ม"
-    IDS_VERIFYFILE          "Please verify if the correct file name was given"
-    IDS_CREATEFILE          "File does not exist\nDo you want to create file"
-    IDS_OVERWRITEFILE       "File does already exist.\nDo you want to replace it?"
-    IDS_INVALID_FILENAME_TITLE "Invalid character(s) in path"
-    IDS_INVALID_FILENAME    "ในชื่อแฟ้มใช้ไมได้ต้วนี้:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "ไม่พบไดเรกทอรี"
-    IDS_FILENOTEXISTING     "ไม่พบแฟ้ม"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "ขึ้นหนึ่งระดับ"
-    IDS_NEWFOLDER        "สร้างไดเรกทอรีใหม่"
-    IDS_LISTVIEW         "กําหนด"
-    IDS_REPORTVIEW       "รายละเอียด"
-    IDS_TODESKTOP        "ค้นหารายการพื้นที่ทำงาน"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "พิมพ์"
-
-    PD32_VALUE_UREADABLE                  "อ่านรายการไมได้"
-    PD32_INVALID_PAGE_RANGE "กรุณาเลื่อกหมายเลขระวาง %d ถึง %d"
-    PD32_FROM_NOT_ABOVE_TO                "'จาก' ต่องเป็นน้อยก่วะ 'ส่งถึง'"
-    PD32_MARGINS_OVERLAP                  "ขอบกระดาษใหญ่เกินไป\nกรุณาเลื่อกใหม่"
-    PD32_NR_OF_COPIES_EMPTY               "The number of 'Number of copies' \
-value cannot be empty."
-    PD32_TOO_LARGE_COPIES                 "This large nmuber of copies is not \
-supported by your printer.\nPlease enter a value between 1 and %d."
-    PD32_PRINT_ERROR                      "ความปิดเครื่องพิมพ์"
-    PD32_NO_DEFAULT_PRINTER               "ไมมีเครื่องพิมพ์ปกติ"
-    PD32_CANT_FIND_PRINTER                "ไม่พบเครื่องพิมพ์"
-    PD32_OUT_OF_MEMORY                    "ความจํา์หมด"
-    PD32_GENERIC_ERROR                    "เกิดความปิดพลาด"
-    PD32_DRIVER_UNKNOWN                   "ไม่รู้จักดไร์เวอร์์เครื่องพิมพ์"
-    PD32_NO_DEVICES                       "Before you can perform printer-related tasks \
-such as page setup or printing a document, you need to install a printer. \
-Please install one and retry."
-
-    PD32_DEFAULT_PRINTER                  "เครื่องพิมพ์ปกติ; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "มี %d แฟ้มรออยู่"
-    PD32_MARGINS_IN_INCHES                "ขอบกระดาษ [นิ้ว]"
-    PD32_MARGINS_IN_MILLIMETERS           "ขอบกระดาษ [มม.]"
-    PD32_MILLIMETERS                      "มม."
-
-    PD32_PRINTER_STATUS_READY             "พร้อม"
-    PD32_PRINTER_STATUS_PAUSED            "ชะลอ; "
-    PD32_PRINTER_STATUS_ERROR             "ความปิด; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "กําลังจะลบ; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "กระดาษติด; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "กระดาษหมด; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Feed paper manual; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "Paper problem; "
-    PD32_PRINTER_STATUS_OFFLINE           "เครื่องพิมพ์ปิด; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "I/O Active; "
-    PD32_PRINTER_STATUS_BUSY              "ยุ่ง; "
-    PD32_PRINTER_STATUS_PRINTING          "กํมลังพิมพ์; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "ถาดเต็ม; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "ใช้ไม่ได้ตอนนี้; "
-    PD32_PRINTER_STATUS_WAITING           "เครื่องพิมพ์รออยู่; "
-    PD32_PRINTER_STATUS_PROCESSING        "กําลังทํางาน; "
-    PD32_PRINTER_STATUS_INITIALIZING      "กํมลังะเร็ม; "
-    PD32_PRINTER_STATUS_WARMING_UP        "กํมลังะพรอม; "
-    PD32_PRINTER_STATUS_TONER_LOW         "หมึกจะหมด; "
-    PD32_PRINTER_STATUS_NO_TONER          "หมึกหมดแล้ว; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Page punt; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "ผู้ใช้ยกเลิก; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "ความจําเครื่องพิมพ์หมด; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "ประตูเครื่องพิมพ์เปิด; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "ไม่รู้จักเสอร์เวอร์์; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "ใช้ไฟ้น้อย; "
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "สีดํา"
-    IDS_COLOR_MAROON    "สีเลืดหมู"
-    IDS_COLOR_GREEN     "สีเขียว"
-    IDS_COLOR_OLIVE     "สีเขียวเข้ม"
-    IDS_COLOR_NAVY      "สีนําเงิน"
-    IDS_COLOR_PURPLE    "สีม่วง"
-    IDS_COLOR_TEAL      "สีเขียวอมนําเงินข้ม"
-    IDS_COLOR_GRAY      "สีเทา"
-    IDS_COLOR_SILVER    "สีเงิน"
-    IDS_COLOR_RED       "สีแดง"
-    IDS_COLOR_LIME      "สีเขียวออ่น"
-    IDS_COLOR_YELLOW    "สีเหลือง"
-    IDS_COLOR_BLUE      "สีฟ้า"
-    IDS_COLOR_FUCHSIA   "Fuchsia"
-    IDS_COLOR_AQUA      "สีฟ้าออ่น"
-    IDS_COLOR_WHITE     "สีขาว"
 }

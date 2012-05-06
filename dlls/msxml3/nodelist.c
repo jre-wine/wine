@@ -23,11 +23,16 @@
 #include "config.h"
 
 #include <stdarg.h>
+#ifdef HAVE_LIBXML2
+# include <libxml/parser.h>
+# include <libxml/xmlerror.h>
+#endif
+
 #include "windef.h"
 #include "winbase.h"
 #include "winuser.h"
 #include "ole2.h"
-#include "msxml2.h"
+#include "msxml6.h"
 
 #include "msxml_private.h"
 
@@ -48,7 +53,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(msxml);
 
 typedef struct _xmlnodelist
 {
-    const struct IXMLDOMNodeListVtbl *lpVtbl;
+    IXMLDOMNodeList IXMLDOMNodeList_iface;
     LONG ref;
     xmlNodePtr parent;
     xmlNodePtr current;
@@ -56,7 +61,7 @@ typedef struct _xmlnodelist
 
 static inline xmlnodelist *impl_from_IXMLDOMNodeList( IXMLDOMNodeList *iface )
 {
-    return (xmlnodelist *)((char*)iface - FIELD_OFFSET(xmlnodelist, lpVtbl));
+    return CONTAINING_RECORD(iface, xmlnodelist, IXMLDOMNodeList_iface);
 }
 
 static HRESULT WINAPI xmlnodelist_QueryInterface(
@@ -65,9 +70,6 @@ static HRESULT WINAPI xmlnodelist_QueryInterface(
     void** ppvObject )
 {
     TRACE("(%p)->(%s %p)\n", iface, debugstr_guid(riid), ppvObject);
-
-    if(!ppvObject)
-        return E_INVALIDARG;
 
     if ( IsEqualGUID( riid, &IID_IUnknown ) ||
          IsEqualGUID( riid, &IID_IDispatch ) ||
@@ -188,8 +190,8 @@ static HRESULT WINAPI xmlnodelist_Invoke(
     hr = get_typeinfo(IXMLDOMNodeList_tid, &typeinfo);
     if(SUCCEEDED(hr))
     {
-        hr = ITypeInfo_Invoke(typeinfo, &(This->lpVtbl), dispIdMember, wFlags, pDispParams,
-                pVarResult, pExcepInfo, puArgErr);
+        hr = ITypeInfo_Invoke(typeinfo, &This->IXMLDOMNodeList_iface, dispIdMember, wFlags,
+                pDispParams, pVarResult, pExcepInfo, puArgErr);
         ITypeInfo_Release(typeinfo);
     }
 
@@ -319,14 +321,14 @@ IXMLDOMNodeList* create_children_nodelist( xmlNodePtr node )
     if ( !nodelist )
         return NULL;
 
-    nodelist->lpVtbl = &xmlnodelist_vtbl;
+    nodelist->IXMLDOMNodeList_iface.lpVtbl = &xmlnodelist_vtbl;
     nodelist->ref = 1;
     nodelist->parent = node;
     nodelist->current = node->children;
 
     xmldoc_add_ref( node->doc );
 
-    return (IXMLDOMNodeList*) &nodelist->lpVtbl;
+    return &nodelist->IXMLDOMNodeList_iface;
 }
 
 #endif

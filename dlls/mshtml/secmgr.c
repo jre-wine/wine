@@ -42,30 +42,33 @@ static const WCHAR about_blankW[] = {'a','b','o','u','t',':','b','l','a','n','k'
 const GUID GUID_CUSTOM_CONFIRMOBJECTSAFETY =
     {0x10200490,0xfa38,0x11d0,{0xac,0x0e,0x00,0xa0,0xc9,0xf,0xff,0xc0}};
 
-#define HOSTSECMGR_THIS(iface) DEFINE_THIS(HTMLDocumentNode, IInternetHostSecurityManager, iface)
+static inline HTMLDocumentNode *impl_from_IInternetHostSecurityManager(IInternetHostSecurityManager *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDocumentNode, IInternetHostSecurityManager_iface);
+}
 
 static HRESULT WINAPI InternetHostSecurityManager_QueryInterface(IInternetHostSecurityManager *iface, REFIID riid, void **ppv)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
-    return IHTMLDOMNode_QueryInterface(HTMLDOMNODE(&This->node), riid, ppv);
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
+    return IHTMLDOMNode_QueryInterface(&This->node.IHTMLDOMNode_iface, riid, ppv);
 }
 
 static ULONG WINAPI InternetHostSecurityManager_AddRef(IInternetHostSecurityManager *iface)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
-    return IHTMLDOMNode_AddRef(HTMLDOMNODE(&This->node));
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
+    return IHTMLDOMNode_AddRef(&This->node.IHTMLDOMNode_iface);
 }
 
 static ULONG WINAPI InternetHostSecurityManager_Release(IInternetHostSecurityManager *iface)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
-    return IHTMLDOMNode_Release(HTMLDOMNODE(&This->node));
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
+    return IHTMLDOMNode_Release(&This->node.IHTMLDOMNode_iface);
 }
 
 static HRESULT WINAPI InternetHostSecurityManager_GetSecurityId(IInternetHostSecurityManager *iface,  BYTE *pbSecurityId,
         DWORD *pcbSecurityId, DWORD_PTR dwReserved)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
     FIXME("(%p)->(%p %p %lx)\n", This, pbSecurityId, pcbSecurityId, dwReserved);
     return E_NOTIMPL;
 }
@@ -73,7 +76,7 @@ static HRESULT WINAPI InternetHostSecurityManager_GetSecurityId(IInternetHostSec
 static HRESULT WINAPI InternetHostSecurityManager_ProcessUrlAction(IInternetHostSecurityManager *iface, DWORD dwAction,
         BYTE *pPolicy, DWORD cbPolicy, BYTE *pContext, DWORD cbContext, DWORD dwFlags, DWORD dwReserved)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
     const WCHAR *url;
 
     TRACE("(%p)->(%d %p %d %p %d %x %x)\n", This, dwAction, pPolicy, cbPolicy, pContext, cbContext, dwFlags, dwReserved);
@@ -82,6 +85,30 @@ static HRESULT WINAPI InternetHostSecurityManager_ProcessUrlAction(IInternetHost
 
     return IInternetSecurityManager_ProcessUrlAction(This->secmgr, url, dwAction, pPolicy, cbPolicy,
             pContext, cbContext, dwFlags, dwReserved);
+}
+
+static HRESULT confirm_safety_load(HTMLDocumentNode *This, struct CONFIRMSAFETY *cs, DWORD *ret)
+{
+    IObjectSafety *obj_safety;
+    HRESULT hres;
+
+    hres = IUnknown_QueryInterface(cs->pUnk, &IID_IObjectSafety, (void**)&obj_safety);
+    if(SUCCEEDED(hres)) {
+        hres = IObjectSafety_SetInterfaceSafetyOptions(obj_safety, &IID_IDispatch,
+                INTERFACESAFE_FOR_UNTRUSTED_DATA, INTERFACESAFE_FOR_UNTRUSTED_DATA);
+        IObjectSafety_Release(obj_safety);
+        *ret = SUCCEEDED(hres) ? URLPOLICY_ALLOW : URLPOLICY_DISALLOW;
+    }else {
+        CATID init_catid = CATID_SafeForInitializing;
+
+        hres = ICatInformation_IsClassOfCategories(This->catmgr, &cs->clsid, 1, &init_catid, 0, NULL);
+        if(FAILED(hres))
+            return hres;
+
+        *ret = hres == S_OK ? URLPOLICY_ALLOW : URLPOLICY_DISALLOW;
+    }
+
+    return S_OK;
 }
 
 static HRESULT confirm_safety(HTMLDocumentNode *This, const WCHAR *url, struct CONFIRMSAFETY *cs, DWORD *ret)
@@ -102,7 +129,27 @@ static HRESULT confirm_safety(HTMLDocumentNode *This, const WCHAR *url, struct C
     }
 
     hres = IUnknown_QueryInterface(cs->pUnk, &IID_IObjectSafety, (void**)&obj_safety);
-    if(FAILED(hres)) {
+    if(SUCCEEDED(hres)) {
+        hres = IObjectSafety_GetInterfaceSafetyOptions(obj_safety, &IID_IDispatchEx, &supported_opts, &enabled_opts);
+        if(FAILED(hres))
+            supported_opts = 0;
+
+        enabled_opts = INTERFACESAFE_FOR_UNTRUSTED_CALLER;
+        if(supported_opts & INTERFACE_USES_SECURITY_MANAGER)
+            enabled_opts |= INTERFACE_USES_SECURITY_MANAGER;
+
+        hres = IObjectSafety_SetInterfaceSafetyOptions(obj_safety, &IID_IDispatchEx, enabled_opts, enabled_opts);
+        if(FAILED(hres)) {
+            enabled_opts &= ~INTERFACE_USES_SECURITY_MANAGER;
+            hres = IObjectSafety_SetInterfaceSafetyOptions(obj_safety, &IID_IDispatch, enabled_opts, enabled_opts);
+        }
+        IObjectSafety_Release(obj_safety);
+
+        if(FAILED(hres)) {
+            *ret = URLPOLICY_DISALLOW;
+            return S_OK;
+        }
+    }else {
         CATID scripting_catid = CATID_SafeForScripting;
 
         if(!This->catmgr) {
@@ -116,33 +163,23 @@ static HRESULT confirm_safety(HTMLDocumentNode *This, const WCHAR *url, struct C
         if(FAILED(hres))
             return hres;
 
-        *ret = hres == S_OK ? URLPOLICY_ALLOW : URLPOLICY_DISALLOW;
-        return S_OK;
+        if(hres != S_OK) {
+            *ret = URLPOLICY_DISALLOW;
+            return S_OK;
+        }
     }
 
-    hres = IObjectSafety_GetInterfaceSafetyOptions(obj_safety, &IID_IDispatchEx, &supported_opts, &enabled_opts);
-    if(FAILED(hres))
-        supported_opts = 0;
+    if(cs->dwFlags & CONFIRMSAFETYACTION_LOADOBJECT)
+        return confirm_safety_load(This, cs, ret);
 
-    enabled_opts = INTERFACESAFE_FOR_UNTRUSTED_CALLER;
-    if(supported_opts & INTERFACE_USES_SECURITY_MANAGER)
-        enabled_opts |= INTERFACE_USES_SECURITY_MANAGER;
-
-    hres = IObjectSafety_SetInterfaceSafetyOptions(obj_safety, &IID_IDispatchEx, enabled_opts, enabled_opts);
-    if(FAILED(hres)) {
-        enabled_opts &= ~INTERFACE_USES_SECURITY_MANAGER;
-        hres = IObjectSafety_SetInterfaceSafetyOptions(obj_safety, &IID_IDispatch, enabled_opts, enabled_opts);
-    }
-    IObjectSafety_Release(obj_safety);
-
-    *ret = SUCCEEDED(hres) ? URLPOLICY_ALLOW : URLPOLICY_DISALLOW;
+    *ret = URLPOLICY_ALLOW;
     return S_OK;
 }
 
 static HRESULT WINAPI InternetHostSecurityManager_QueryCustomPolicy(IInternetHostSecurityManager *iface, REFGUID guidKey,
         BYTE **ppPolicy, DWORD *pcbPolicy, BYTE *pContext, DWORD cbContext, DWORD dwReserved)
 {
-    HTMLDocumentNode *This = HOSTSECMGR_THIS(iface);
+    HTMLDocumentNode *This = impl_from_IInternetHostSecurityManager(iface);
     const WCHAR *url;
     HRESULT hres;
 
@@ -166,6 +203,8 @@ static HRESULT WINAPI InternetHostSecurityManager_QueryCustomPolicy(IInternetHos
         }
 
         cs = (struct CONFIRMSAFETY*)pContext;
+        TRACE("cs = {%s %p %x}\n", debugstr_guid(&cs->clsid), cs->pUnk, cs->dwFlags);
+
         hres = IUnknown_QueryInterface(cs->pUnk, &IID_IActiveScript, (void**)&active_script);
         if(SUCCEEDED(hres)) {
             FIXME("Got IAciveScript iface\n");
@@ -191,8 +230,6 @@ static HRESULT WINAPI InternetHostSecurityManager_QueryCustomPolicy(IInternetHos
     return hres;
 }
 
-#undef HOSTSECMGR_THIS
-
 static const IInternetHostSecurityManagerVtbl InternetHostSecurityManagerVtbl = {
     InternetHostSecurityManager_QueryInterface,
     InternetHostSecurityManager_AddRef,
@@ -204,5 +241,5 @@ static const IInternetHostSecurityManagerVtbl InternetHostSecurityManagerVtbl = 
 
 void HTMLDocumentNode_SecMgr_Init(HTMLDocumentNode *This)
 {
-    This->lpIInternetHostSecurityManagerVtbl = &InternetHostSecurityManagerVtbl;
+    This->IInternetHostSecurityManager_iface.lpVtbl = &InternetHostSecurityManagerVtbl;
 }

@@ -1,11 +1,7 @@
 EXTRADEFS = -D_RPCRT4_ -DCOM_NO_WINDOWS_H -DMSWMSG
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = rpcrt4.dll
 IMPORTLIB = rpcrt4
-IMPORTS   = uuid advapi32 kernel32 ntdll
+IMPORTS   = uuid advapi32
 DELAYIMPORTS = iphlpapi wininet secur32 user32
 EXTRALIBS = @SOCKETLIBS@
 

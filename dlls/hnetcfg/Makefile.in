@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = hnetcfg.dll
-IMPORTS   = ole32 advapi32 kernel32
+IMPORTS   = ole32 advapi32
 
 C_SRCS = \
 	apps.c \
@@ -12,7 +8,8 @@ C_SRCS = \
 	policy.c \
 	port.c \
 	profile.c \
-	regsvr.c \
 	service.c
+
+IDL_R_SRCS = hnetcfg.idl
 
 @MAKE_DLL_RULES@

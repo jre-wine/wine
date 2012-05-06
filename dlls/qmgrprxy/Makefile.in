@@ -1,13 +1,10 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = qmgrprxy.dll
-IMPORTS   = rpcrt4 kernel32 ntdll
-EXTRADEFS = -DREGISTER_PROXY_DLL
+IMPORTS   = rpcrt4
+EXTRADEFS = -DWINE_REGISTER_DLL
 
 IDL_I_SRCS = qmgrprxy.idl
 IDL_P_SRCS = qmgrprxy.idl
+IDL_R_SRCS = qmgrprxy.idl
 
 EXTRA_OBJS = dlldata.o
 

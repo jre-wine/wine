@@ -162,7 +162,7 @@ static BOOL add_boot_rename_entry( LPCWSTR source, LPCWSTR dest, DWORD flags )
 
     if (NtCreateKey( &Reboot, KEY_ALL_ACCESS, &attr, 0, NULL, 0, NULL ) != STATUS_SUCCESS)
     {
-        WARN("Error creating key for reboot managment [%s]\n",
+        WARN("Error creating key for reboot management [%s]\n",
              "SYSTEM\\CurrentControlSet\\Control\\Session Manager");
         RtlFreeUnicodeString( &source_name );
         RtlFreeUnicodeString( &dest_name );
@@ -1798,10 +1798,15 @@ WCHAR * CDECL wine_get_dos_file_name( LPCSTR str )
         SetLastError( RtlNtStatusToDosError( status ) );
         return NULL;
     }
-    /* get rid of the \??\ prefix */
-    /* FIXME: should implement RtlNtPathNameToDosPathName and use that instead */
-    len = nt_name.Length - 4 * sizeof(WCHAR);
-    memmove( nt_name.Buffer, nt_name.Buffer + 4, len );
-    nt_name.Buffer[len / sizeof(WCHAR)] = 0;
+    if (nt_name.Buffer[5] == ':')
+    {
+        /* get rid of the \??\ prefix */
+        /* FIXME: should implement RtlNtPathNameToDosPathName and use that instead */
+        len = nt_name.Length - 4 * sizeof(WCHAR);
+        memmove( nt_name.Buffer, nt_name.Buffer + 4, len );
+        nt_name.Buffer[len / sizeof(WCHAR)] = 0;
+    }
+    else
+        nt_name.Buffer[1] = '\\';
     return nt_name.Buffer;
 }

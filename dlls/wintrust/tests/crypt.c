@@ -616,6 +616,7 @@ static void test_CryptCATAdminAddRemoveCatalog(void)
     /* Set the attributes so we can delete the file */
     attrs = FILE_ATTRIBUTE_NORMAL;
     ret = SetFileAttributesA(tmpfile, attrs);
+    ok(ret, "SetFileAttributesA failed %u\n", GetLastError());
     DeleteFileA(tmpfile);
 }
 
@@ -784,7 +785,7 @@ static void test_create_catalog_file(void)
 
     /* Only enumerate the members */
     trace("Only members\n");
-    attrcount = membercount = 0;
+    membercount = 0;
     catcdf = pCryptCATCDFOpen(cdffileW, NULL);
 
     catmember = NULL;
@@ -892,8 +893,7 @@ static void test_cdf_parsing(void)
     catcdf = pCryptCATCDFOpen(cdffileW, cdf_callback);
     ok(catcdf == NULL, "CryptCATCDFOpen succeeded\n");
     todo_wine
-    ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-        broken(GetLastError() == ERROR_SUCCESS),    /* win9x */
+    ok(GetLastError() == ERROR_SHARING_VIOLATION,
         "Expected ERROR_SHARING_VIOLATION, got %d\n", GetLastError());
     DeleteFileA(cdffileA);
 
@@ -908,8 +908,7 @@ static void test_cdf_parsing(void)
     catcdf = pCryptCATCDFOpen(cdffileW, cdf_callback);
     ok(catcdf == NULL, "CryptCATCDFOpen succeeded\n");
     todo_wine
-    ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-        broken(GetLastError() == ERROR_SUCCESS),    /* win9x */
+    ok(GetLastError() == ERROR_SHARING_VIOLATION,
         "Expected ERROR_SHARING_VIOLATION, got %d\n", GetLastError());
     DeleteFileA(cdffileA);
     ok(!DeleteFileA(catfileA), "Didn't expect a catalog file to be created\n");
@@ -924,8 +923,7 @@ static void test_cdf_parsing(void)
     catcdf = pCryptCATCDFOpen(cdffileW, cdf_callback);
     ok(catcdf == NULL, "CryptCATCDFOpen succeeded\n");
     todo_wine
-    ok(GetLastError() == ERROR_SHARING_VIOLATION ||
-        broken(GetLastError() == ERROR_SUCCESS),    /* win9x */
+    ok(GetLastError() == ERROR_SHARING_VIOLATION,
         "Expected ERROR_SHARING_VIOLATION, got %d\n", GetLastError());
     DeleteFileA(cdffileA);
     ok(!DeleteFileA(catfileA), "Didn't expect a catalog file to be created\n");

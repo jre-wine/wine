@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = wow32.dll
 IMPORTLIB = wow32
-IMPORTS   = kernel32 kernel
+IMPORTS   = kernel
 
 C_SRCS = wow_main.c
 

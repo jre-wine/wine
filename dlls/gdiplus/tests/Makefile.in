@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = gdiplus.dll
-IMPORTS   = gdiplus ole32 user32 gdi32 kernel32
+IMPORTS   = gdiplus ole32 user32 gdi32
 
 C_SRCS = \
 	brush.c \
@@ -13,6 +9,7 @@ C_SRCS = \
 	graphicspath.c \
 	image.c \
 	matrix.c \
+	metafile.c \
 	pathiterator.c \
 	pen.c \
 	region.c \

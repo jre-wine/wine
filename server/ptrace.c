@@ -37,6 +37,9 @@
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
 #endif
+#ifdef HAVE_SYS_SYSCALL_H
+# include <sys/syscall.h>
+#endif
 #ifdef HAVE_SYS_THR_H
 # include <sys/ucontext.h>
 # include <sys/thr.h>
@@ -213,29 +216,10 @@ static int wait4_thread( struct thread *thread, int signal )
 static inline int tkill( int tgid, int pid, int sig )
 {
 #ifdef __linux__
-    int ret = -ENOSYS;
-# ifdef __i386__
-    __asm__( "pushl %%ebx\n\t"
-             "movl %2,%%ebx\n\t"
-             "int $0x80\n\t"
-             "popl %%ebx\n\t"
-             : "=a" (ret)
-             : "0" (270) /*SYS_tgkill*/, "r" (tgid), "c" (pid), "d" (sig) );
-    if (ret == -ENOSYS)
-        __asm__( "pushl %%ebx\n\t"
-                 "movl %2,%%ebx\n\t"
-                 "int $0x80\n\t"
-                 "popl %%ebx\n\t"
-                 : "=a" (ret)
-                 : "0" (238) /*SYS_tkill*/, "r" (pid), "c" (sig) );
-# elif defined(__x86_64__)
-    __asm__( "syscall" : "=a" (ret)
-             : "0" (200) /*SYS_tkill*/, "D" (pid), "S" (sig) );
-# endif
-    if (ret >= 0) return ret;
-    errno = -ret;
-    return -1;
-#elif defined(__FreeBSD__) && defined(HAVE_THR_KILL2)
+    int ret = syscall( SYS_tgkill, tgid, pid, sig );
+    if (ret < 0 && errno == ENOSYS) ret = syscall( SYS_tkill, pid, sig );
+    return ret;
+#elif (defined(__FreeBSD__) || defined (__FreeBSD_kernel__)) && defined(HAVE_THR_KILL2)
     return thr_kill2( tgid, pid, sig );
 #else
     errno = ENOSYS;

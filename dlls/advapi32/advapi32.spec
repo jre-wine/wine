@@ -65,8 +65,8 @@
 @ stdcall CommandLineFromMsiDescriptor(wstr ptr ptr)
 # @ stub ComputeAccessTokenFromCodeAuthzLevel
 @ stdcall ControlService(long long ptr)
-@ stdcall ControlTraceA(double str ptr long)
-@ stdcall ControlTraceW(double wstr ptr long)
+@ stdcall ControlTraceA(int64 str ptr long)
+@ stdcall ControlTraceW(int64 wstr ptr long)
 # @ stub ConvertAccessToSecurityDescriptorA
 # @ stub ConvertAccessToSecurityDescriptorW
 # @ stub ConvertSDToStringSDRootDomainA
@@ -95,7 +95,7 @@
 # @ stub CreatePrivateObjectSecurityWithMultipleInheritance
 @ stdcall CreateProcessAsUserA(long str str ptr ptr long long ptr str ptr ptr)
 # @ stub CreateProcessAsUserSecure
-@ stdcall CreateProcessAsUserW(long str str ptr ptr long long ptr str ptr ptr)
+@ stdcall CreateProcessAsUserW(long wstr wstr ptr ptr long long ptr wstr ptr ptr)
 @ stdcall CreateProcessWithLogonW(wstr wstr wstr long wstr wstr long ptr wstr ptr ptr)
 @ stdcall CreateRestrictedToken(long long long ptr long ptr long ptr ptr)
 @ stdcall CreateServiceA(long str str long long long long str str ptr str str str)
@@ -200,7 +200,8 @@
 @ stub ElfRegisterEventSourceW
 # @ stub ElfReportEventA
 @ stub ElfReportEventW
-@ stdcall EnableTrace(long long long ptr double)
+@ stdcall EnableTrace(long long long ptr int64)
+@ stdcall EnableTraceEx(ptr ptr int64 long long int64 int64 long ptr)
 @ stdcall EncryptFileA(str)
 @ stdcall EncryptFileW(wstr)
 # @ stub EncryptedFileKeyInfo
@@ -217,11 +218,13 @@
 # @ stub EqualDomainSid
 @ stdcall EqualPrefixSid(ptr ptr)
 @ stdcall EqualSid(ptr ptr)
+@ stdcall EventEnabled(int64 ptr)
+@ stdcall EventRegister(ptr ptr ptr ptr)
 @ stdcall FileEncryptionStatusA(str ptr)
 @ stdcall FileEncryptionStatusW(wstr ptr)
 @ stdcall FindFirstFreeAce(ptr ptr)
-# @ stub FlushTraceA
-# @ stub FlushTraceW
+@ stdcall FlushTraceA(int64 str ptr)
+@ stdcall FlushTraceW(int64 wstr ptr)
 # @ stub FreeEncryptedFileKeyInfo
 # @ stub FreeEncryptionCertificateHashList
 # @ stub FreeInheritedFromArray
@@ -314,7 +317,7 @@
 @ stdcall InitiateSystemShutdownA(str str long long long)
 @ stdcall InitiateSystemShutdownExA(str str long long long long)
 @ stdcall InitiateSystemShutdownExW(wstr wstr long long long long)
-@ stdcall InitiateSystemShutdownW(str str long long long)
+@ stdcall InitiateSystemShutdownW(wstr wstr long long long)
 @ stub InstallApplication
 @ stub IsProcessRestricted
 @ stdcall IsTextUnicode(ptr long ptr)
@@ -458,7 +461,7 @@
 @ stdcall QueryServiceStatus(long ptr)
 @ stdcall QueryServiceStatusEx (long long ptr long ptr)
 # @ stub QueryTraceA
-# @ stub QueryTraceW
+@ stdcall QueryTraceW(int64 wstr ptr)
 # @ stub QueryUsersOnEncryptedFile
 @ stdcall QueryWindows31FilesMigration(long)
 # @ stub ReadEncryptedFileRaw
@@ -540,8 +543,8 @@
 @ stdcall ReportEventA (long long long long ptr long long str ptr)
 @ stdcall ReportEventW (long long long long ptr long long wstr ptr)
 @ stdcall RevertToSelf()
-# @ stub SaferCloseLevel
-# @ stub SaferComputeTokenFromLevel
+@ stdcall SaferCloseLevel(ptr)
+@ stdcall SaferComputeTokenFromLevel(ptr ptr ptr long ptr)
 @ stdcall SaferCreateLevel(long long long ptr ptr)
 # @ stub SaferGetLevelInformation
 @ stdcall SaferGetPolicyInformation(long long long ptr ptr ptr)
@@ -637,7 +640,7 @@
 @ stdcall SystemFunction036(ptr long) # RtlGenRandom
 @ stdcall SystemFunction040(ptr long long) # RtlEncryptMemory
 @ stdcall SystemFunction041(ptr long long) # RtlDecryptMemory
-@ stdcall TraceEvent(double ptr)
+@ stdcall TraceEvent(int64 ptr)
 @ stub TraceEventInstance
 @ stub TraceMessage
 @ stub TraceMessageVa
@@ -648,7 +651,7 @@
 # @ stub UninstallApplication
 @ stdcall UnlockServiceDatabase (ptr)
 # @ stub UnregisterIdleTask
-@ stdcall UnregisterTraceGuids(double)
+@ stdcall UnregisterTraceGuids(int64)
 @ stub UpdateTraceA
 @ stub UpdateTraceW
 @ stub WdmWmiServiceMain

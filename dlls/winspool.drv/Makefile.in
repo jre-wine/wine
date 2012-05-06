@@ -1,11 +1,7 @@
 EXTRADEFS = -D_SPOOL32_
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winspool.drv
 IMPORTLIB = winspool
-IMPORTS   = user32 gdi32 advapi32 kernel32 ntdll
+IMPORTS   = user32 gdi32 advapi32
 EXTRAINCL = @CUPSINCL@
 
 C_SRCS = \
@@ -21,6 +17,7 @@ RC_SRCS = \
 	Es.rc \
 	Fi.rc \
 	Fr.rc \
+	He.rc \
 	Hu.rc \
 	It.rc \
 	Ja.rc \
@@ -39,5 +36,7 @@ RC_SRCS = \
 	Uk.rc \
 	Zh.rc \
 	winspool.rc
+
+PO_SRCS = winspool.rc
 
 @MAKE_DLL_RULES@

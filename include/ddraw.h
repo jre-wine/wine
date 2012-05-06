@@ -16,8 +16,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
  */
 
-#ifndef __WINE_DDRAW_H
-#define __WINE_DDRAW_H
+#ifndef __DDRAW_INCLUDED__
+#define __DDRAW_INCLUDED__
 
 #define COM_NO_WINDOWS_H
 #include <objbase.h>
@@ -1220,6 +1220,7 @@ typedef struct tagDDDEVICEIDENTIFIER2 {
 /*****************************************************************************
  * IDirectDrawPalette interface
  */
+#undef INTERFACE
 #define INTERFACE IDirectDrawPalette
 DECLARE_INTERFACE_(IDirectDrawPalette,IUnknown)
 {
@@ -2677,4 +2678,4 @@ HRESULT WINAPI DirectDrawCreateClipper(DWORD,LPDIRECTDRAWCLIPPER*,IUnknown*);
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
 
-#endif /* __WINE_DDRAW_H */
+#endif /* __DDRAW_INCLUDED__ */

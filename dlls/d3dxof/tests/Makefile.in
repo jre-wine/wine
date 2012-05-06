@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = d3dxof.dll
-IMPORTS   = d3dxof kernel32
+IMPORTS   = d3dxof
 
 C_SRCS = \
 	d3dxof.c

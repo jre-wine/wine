@@ -2151,7 +2151,7 @@ HANDLE WineEngAddFontMemResourceEx(PVOID pbFont, DWORD cbFont, PVOID pdv, DWORD 
         {
             TRACE("AddFontToList failed\n");
             HeapFree(GetProcessHeap(), 0, pFontCopy);
-            return NULL;
+            return 0;
         }
         /* FIXME: is the handle only for use in RemoveFontMemResourceEx or should it be a true handle?
          * For now return something unique but quite random
@@ -3086,18 +3086,18 @@ static void free_font(GdiFont *font)
     LIST_FOR_EACH_SAFE(cursor, cursor2, &font->child_fonts)
     {
         CHILD_FONT *child = LIST_ENTRY(cursor, CHILD_FONT, entry);
-        struct list *first_hfont;
-        HFONTLIST *hfontlist;
         list_remove(cursor);
         if(child->font)
-        {
-            first_hfont = list_head(&child->font->hfontlist);
-            hfontlist = LIST_ENTRY(first_hfont, HFONTLIST, entry);
-            DeleteObject(hfontlist->hfont);
-            HeapFree(GetProcessHeap(), 0, hfontlist);
             free_font(child->font);
-        }
         HeapFree(GetProcessHeap(), 0, child);
+    }
+
+    LIST_FOR_EACH_SAFE(cursor, cursor2, &font->hfontlist)
+    {
+        HFONTLIST *hfontlist = LIST_ENTRY(cursor, HFONTLIST, entry);
+        DeleteObject(hfontlist->hfont);
+        list_remove(&hfontlist->entry);
+        HeapFree(GetProcessHeap(), 0, hfontlist);
     }
 
     if (font->ft_face) pFT_Done_Face(font->ft_face);
@@ -3880,6 +3880,13 @@ static void dump_gdi_font_list(void)
         TRACE("gdiFont=%p %s %d\n",
               gdiFont, debugstr_w(gdiFont->font_desc.lf.lfFaceName), gdiFont->font_desc.lf.lfHeight);
     }
+
+    TRACE("---------- Child gdiFont Cache ----------\n");
+    LIST_FOR_EACH(elem_ptr, &child_font_list) {
+        gdiFont = LIST_ENTRY(elem_ptr, struct tagGdiFont, entry);
+        TRACE("gdiFont=%p %s %d\n",
+              gdiFont, debugstr_w(gdiFont->font_desc.lf.lfFaceName), gdiFont->font_desc.lf.lfHeight);
+    }
 }
 
 /*************************************************************
@@ -3901,14 +3908,16 @@ BOOL WineEngDestroyFontInstance(HFONT handle)
 
     LIST_FOR_EACH_ENTRY(gdiFont, &child_font_list, struct tagGdiFont, entry)
     {
-        struct list *first_hfont = list_head(&gdiFont->hfontlist);
-        hflist = LIST_ENTRY(first_hfont, HFONTLIST, entry);
-        if(hflist->hfont == handle)
-        {
-            TRACE("removing child font %p from child list\n", gdiFont);
-            list_remove(&gdiFont->entry);
-            LeaveCriticalSection( &freetype_cs );
-            return TRUE;
+        hfontlist_elem_ptr = list_head(&gdiFont->hfontlist);
+        while(hfontlist_elem_ptr) {
+            hflist = LIST_ENTRY(hfontlist_elem_ptr, struct tagHFONTLIST, entry);
+            hfontlist_elem_ptr = list_next(&gdiFont->hfontlist, hfontlist_elem_ptr);
+            if(hflist->hfont == handle) {
+                TRACE("removing child font %p from child list\n", gdiFont);
+                list_remove(&gdiFont->entry);
+                LeaveCriticalSection( &freetype_cs );
+                return TRUE;
+            }
         }
     }
 

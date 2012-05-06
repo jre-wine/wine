@@ -76,7 +76,7 @@
 80 stdcall MsiGetTargetPathW(long wstr ptr ptr)
 81 stdcall MsiGetUserInfoA(str ptr ptr ptr ptr ptr ptr)
 82 stdcall MsiGetUserInfoW(wstr ptr ptr ptr ptr ptr ptr)
-83 stub MsiInstallMissingComponentA
+83 stdcall MsiInstallMissingComponentA(str str long)
 84 stdcall MsiInstallMissingComponentW(wstr wstr long)
 85 stub MsiInstallMissingFileA
 86 stub MsiInstallMissingFileW
@@ -174,7 +174,7 @@
 178 stdcall MsiGetPatchInfoA(str str ptr ptr)
 179 stdcall MsiGetPatchInfoW(wstr wstr ptr ptr)
 180 stdcall MsiEnumPatchesA(str long ptr ptr ptr)
-181 stdcall MsiEnumPatchesW(str long ptr ptr ptr)
+181 stdcall MsiEnumPatchesW(wstr long ptr ptr ptr)
 182 stdcall -private DllGetVersion(ptr)
 183 stub MsiGetProductCodeFromPackageCodeA
 184 stub MsiGetProductCodeFromPackageCodeW
@@ -214,7 +214,7 @@
 218 stdcall MsiGetFileHashA(str long ptr)
 219 stdcall MsiGetFileHashW(wstr long ptr)
 220 stub MsiEnumComponentCostsA
-221 stdcall MsiEnumComponentCostsW(long str long long ptr ptr ptr ptr)
+221 stdcall MsiEnumComponentCostsW(long wstr long long ptr ptr ptr ptr)
 222 stdcall MsiCreateAndVerifyInstallerDirectory(long)
 223 stdcall MsiGetFileSignatureInformationA(str long ptr ptr ptr)
 224 stdcall MsiGetFileSignatureInformationW(wstr long ptr ptr ptr)
@@ -275,6 +275,20 @@
 279 stdcall MsiMessageBoxExA(long str str long long long long)
 280 stdcall MsiMessageBoxExW(long wstr wstr long long long long)
 281 stdcall MsiSetExternalUIRecord(ptr long ptr ptr)
+282 stub MsiGetPatchFileListA
+283 stub MsiGetPatchFileListW
+284 stdcall MsiBeginTransactionA(str long ptr ptr)
+285 stdcall MsiBeginTransactionW(wstr long ptr ptr)
+286 stdcall MsiEndTransaction(long)
+287 stub MsiJoinTransaction
+288 stub MsiSetOfflineContextW
+289 stub MsiEnumComponentsExA
+290 stub MsiEnumComponentsExW
+291 stub MsiEnumClientsExA
+292 stub MsiEnumClientsExW
+293 stub MsiGetComponentPathExA
+294 stub MsiGetComponentPathExW
+295 stub QueryInstanceCount
 
 @ stdcall -private DllCanUnloadNow()
 @ stdcall -private DllGetClassObject(ptr ptr ptr)

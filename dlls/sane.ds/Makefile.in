@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = sane.ds
-IMPORTS   = comctl32 user32 gdi32 kernel32
+IMPORTS   = comctl32 user32 gdi32
 EXTRAINCL = @SANEINCL@
 
 C_SRCS = \
@@ -15,12 +11,14 @@ C_SRCS = \
 	ui.c
 
 RC_SRCS = \
+	sane.rc \
 	sane_Da.rc \
 	sane_De.rc \
 	sane_En.rc \
 	sane_Es.rc \
 	sane_Fi.rc \
 	sane_Fr.rc \
+	sane_He.rc \
 	sane_Hu.rc \
 	sane_It.rc \
 	sane_Ja.rc \
@@ -37,5 +35,7 @@ RC_SRCS = \
 	sane_Sv.rc \
 	sane_Uk.rc \
 	sane_Zh.rc
+
+PO_SRCS = sane.rc
 
 @MAKE_DLL_RULES@

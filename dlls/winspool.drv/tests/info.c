@@ -372,6 +372,7 @@ static void test_AddMonitor(void)
     mi2a.pEnvironment = entry->env;
     SetLastError(MAGIC_DEAD);
     res = AddMonitorA(NULL, 2, (LPBYTE) &mi2a);
+    ok(res, "AddMonitor error %d\n", GetLastError());
     /* NT: ERROR_INVALID_PARAMETER,  9x: ERROR_PRIVILEGE_NOT_HELD */
     }
 
@@ -1924,6 +1925,11 @@ static void test_SetDefaultPrinter(void)
     CHAR    buffer[DEFAULT_PRINTER_SIZE];
     CHAR    org_value[DEFAULT_PRINTER_SIZE];
 
+    if (!default_printer)
+    {
+        skip("There is no default printer installed\n");
+        return;
+    }
 
     if (!pSetDefaultPrinterA)  return;
 	/* only supported on win2k and above */
@@ -1932,6 +1938,7 @@ static void test_SetDefaultPrinter(void)
     org_value[0] = '\0';
     SetLastError(MAGIC_DEAD);
     res = GetProfileStringA("windows", "device", NULL, org_value, size);
+    ok(res, "GetProfileString error %d\n", GetLastError());
 
     /* first part: with the default Printer */
     SetLastError(MAGIC_DEAD);
@@ -2006,11 +2013,13 @@ static void test_SetDefaultPrinter(void)
 
     /* restore the original value */
     res = pSetDefaultPrinterA(default_printer);          /* the nice way */
+    ok(res, "SetDefaultPrinter error %d\n", GetLastError());
     WriteProfileStringA("windows", "device", org_value); /* the old way */
 
     buffer[0] = '\0';
     SetLastError(MAGIC_DEAD);
     res = GetProfileStringA("windows", "device", NULL, buffer, size);
+    ok(res, "GetProfileString error %d\n", GetLastError());
     ok(!lstrcmpA(org_value, buffer), "'%s' (expected '%s')\n", buffer, org_value);
 
 }
@@ -2300,6 +2309,7 @@ static void test_GetPrinter(void)
         {
             DWORD double_needed;
             ret = pGetPrinterW(hprn, level, NULL, 0, &double_needed);
+            ok(!ret, "level %d: GetPrinter error %d\n", level, GetLastError());
             ok(double_needed == needed, "level %d: GetPrinterA returned different size %d than GetPrinterW (%d)\n", level, needed, double_needed);
         }
 
@@ -2308,6 +2318,7 @@ static void test_GetPrinter(void)
         SetLastError(0xdeadbeef);
         filled = -1;
         ret = GetPrinter(hprn, level, buf, needed, &filled);
+        ok(ret, "level %d: GetPrinter error %d\n", level, GetLastError());
         ok(needed == filled, "needed %d != filled %d\n", needed, filled);
 
         if (level == 2)
@@ -2362,15 +2373,14 @@ static void test_GetPrinterData(void)
     len = lstrlenA(buffer) + sizeof(CHAR);
     /* NT4 and w2k require a buffer to save the UNICODE result also for the ANSI function */
     ok( !res && (type == REG_SZ) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d or %d)\n",
-        res, type, needed, buffer, len, len * sizeof(WCHAR));
+        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d)\n",
+        res, type, needed, buffer, len);
 
     needed = 0xdeadbeef;
     SetLastError(0xdeadbeef);
     res = GetPrinterDataA(hprn, defaultspooldirectory, NULL, NULL, 0, &needed);
     ok( (res == ERROR_MORE_DATA) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, needed: %d (expected ERROR_MORE_DATA and %d or %d)\n",
-        res, needed, len, len * sizeof(WCHAR));
+        "got %d, needed: %d (expected ERROR_MORE_DATA and %d)\n", res, needed, len);
 
     /* ToDo: test SPLREG_*  */
 
@@ -2418,8 +2428,8 @@ static void test_GetPrinterDataEx(void)
     len = lstrlenA(buffer) + sizeof(CHAR);
     /* NT4 and w2k require a buffer to save the UNICODE result also for the ANSI function */
     ok( !res && (type == REG_SZ) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d or %d)\n",
-        res, type, needed, buffer, len, len * sizeof(WCHAR));
+        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d)\n",
+        res, type, needed, buffer, len);
 
     memset(buffer, '#', sizeof(buffer));
     buffer[MAX_PATH] = 0;
@@ -2430,8 +2440,8 @@ static void test_GetPrinterDataEx(void)
                              (LPBYTE) buffer, sizeof(buffer), &needed);
     len = lstrlenA(buffer) + sizeof(CHAR);
     ok( !res && (type == REG_SZ) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d or %d)\n",
-        res, type, needed, buffer, len, len * sizeof(WCHAR));
+        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d)\n",
+        res, type, needed, buffer, len);
 
     memset(buffer, '#', sizeof(buffer));
     buffer[MAX_PATH] = 0;
@@ -2443,8 +2453,8 @@ static void test_GetPrinterDataEx(void)
                              &type, (LPBYTE) buffer, sizeof(buffer), &needed);
     len = lstrlenA(buffer) + sizeof(CHAR);
     ok( !res && (type == REG_SZ) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d or %d)\n",
-        res, type, needed, buffer, len, len * sizeof(WCHAR));
+        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d)\n",
+        res, type, needed, buffer, len);
 
 
     memset(buffer, '#', sizeof(buffer));
@@ -2456,8 +2466,8 @@ static void test_GetPrinterDataEx(void)
                              (LPBYTE) buffer, sizeof(buffer), &needed);
     len = lstrlenA(buffer) + sizeof(CHAR);
     ok( !res && (type == REG_SZ) && ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d or %d)\n",
-        res, type, needed, buffer, len, len * sizeof(WCHAR));
+        "got %d, type %d, needed: %d and '%s' (expected ERROR_SUCCESS, REG_SZ and %d)\n",
+        res, type, needed, buffer, len);
 
     needed = 0xdeadbeef;
     SetLastError(0xdeadbeef);
@@ -2466,16 +2476,14 @@ static void test_GetPrinterDataEx(void)
     res = pGetPrinterDataExA(hprn, NULL, defaultspooldirectory, NULL, NULL, 0, &needed);
     ok( ((res == ERROR_MORE_DATA) || broken(res == 0xdeadbeef)) &&
         ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, needed: %d (expected ERROR_MORE_DATA and %d or %d)\n",
-        res, needed, len, len * sizeof(WCHAR));
+        "got %d, needed: %d (expected ERROR_MORE_DATA and %d)\n", res, needed, len);
 
     needed = 0xdeadbeef;
     SetLastError(0xdeaddead);
     res = pGetPrinterDataExA(hprn, NULL, defaultspooldirectory, NULL, NULL, 0, &needed);
     ok( ((res == ERROR_MORE_DATA) || broken(res == 0xdeaddead)) &&
         ((needed == len) || (needed == (len * sizeof(WCHAR)))),
-        "got %d, needed: %d (expected ERROR_MORE_DATA and %d or %d)\n",
-        res, needed, len, len * sizeof(WCHAR));
+        "got %d, needed: %d (expected ERROR_MORE_DATA and %d)\n", res, needed, len);
 
     SetLastError(0xdeadbeef);
     res = ClosePrinter(hprn);
@@ -2538,6 +2546,7 @@ static void test_GetPrinterDriver(void)
         {
             DWORD double_needed;
             ret = pGetPrinterDriverW(hprn, NULL, level, NULL, 0, &double_needed);
+            ok(!ret, "level %d: GetPrinterDriver error %d\n", level, GetLastError());
             ok(double_needed == needed, "GetPrinterDriverA returned different size %d than GetPrinterDriverW (%d)\n", needed, double_needed);
         }
 

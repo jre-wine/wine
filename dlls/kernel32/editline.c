@@ -53,7 +53,11 @@ typedef struct WCEL_Context {
     WCHAR*			line;		/* the line being edited */
     size_t			alloc;		/* number of WCHAR in line */
     unsigned    		len;		/* number of chars in line */
-    unsigned			ofs;		/* offset for cursor in current line */
+    unsigned                    last_rub;       /* number of chars to rub to get to start
+                                                   (for consoles that can't change cursor pos) */
+    unsigned                    last_max;       /* max number of chars written
+                                                   (for consoles that can't change cursor pos) */
+    unsigned			ofs;    	/* offset for cursor in current line */
     WCHAR*			yanked;		/* yanked line */
     unsigned			mark;		/* marked point (emacs mode only) */
     CONSOLE_SCREEN_BUFFER_INFO	csbi;		/* current state (initial cursor, window size, attribute) */
@@ -61,7 +65,10 @@ typedef struct WCEL_Context {
     HANDLE			hConOut;
     unsigned			done : 1,	/* to 1 when we're done with editing */
 	                        error : 1,	/* to 1 when an error occurred in the editing */
-                                can_wrap : 1;   /* to 1 when multi-line edition can take place */
+                                can_wrap : 1,   /* to 1 when multi-line edition can take place */
+                                shall_echo : 1, /* to 1 when characters should be echo:ed when keyed-in */
+                                insert : 1,     /* to 1 when new characters are inserted (otherwise overwrite) */
+                                can_pos_cursor : 1; /* to 1 when console can (re)position cursor */
     unsigned			histSize;
     unsigned			histPos;
     WCHAR*			histCurr;
@@ -90,7 +97,6 @@ static void WCEL_Dump(WCEL_Context* ctx, const char* pfx)
 static BOOL WCEL_Get(WCEL_Context* ctx, INPUT_RECORD* ir)
 {
     if (ReadConsoleInputW(ctx->hConIn, ir, 1, NULL)) return TRUE;
-    ERR("hmm bad situation\n");
     ctx->error = 1;
     return FALSE;
 }
@@ -105,10 +111,27 @@ static inline BOOL WCEL_IsSingleLine(WCEL_Context* ctx, size_t len)
     return ctx->csbi.dwCursorPosition.X + ctx->len + len <= ctx->csbi.dwSize.X;
 }
 
-static inline COORD WCEL_GetCoord(WCEL_Context* ctx, int ofs)
+static inline int WCEL_CharWidth(WCHAR wch)
+{
+    return wch < ' ' ? 2 : 1;
+}
+
+static inline int WCEL_StringWidth(const WCHAR* str, int beg, int len)
+{
+    int         i, ofs;
+
+    for (i = 0, ofs = 0; i < len; i++)
+        ofs += WCEL_CharWidth(str[beg + i]);
+    return ofs;
+}
+
+static inline COORD WCEL_GetCoord(WCEL_Context* ctx, int strofs)
 {
     COORD       c;
     int         len = ctx->csbi.dwSize.X - ctx->csbi.dwCursorPosition.X;
+    int         ofs;
+
+    ofs = WCEL_StringWidth(ctx->line, 0, strofs);
 
     c.Y = ctx->csbi.dwCursorPosition.Y;
     if (ofs >= len)
@@ -121,12 +144,81 @@ static inline COORD WCEL_GetCoord(WCEL_Context* ctx, int ofs)
     return c;
 }
 
+static DWORD WCEL_WriteConsole(WCEL_Context* ctx, DWORD beg, DWORD len)
+{
+    DWORD i, last, dw, ret = 0;
+    WCHAR tmp[2];
+
+    for (i = last = 0; i < len; i++)
+    {
+        if (ctx->line[beg + i] < ' ')
+        {
+            if (last != i)
+            {
+                WriteConsoleW(ctx->hConOut, &ctx->line[beg + last], i - last, &dw, NULL);
+                ret += dw;
+            }
+            tmp[0] = '^';
+            tmp[1] = '@' + ctx->line[beg + i];
+            WriteConsoleW(ctx->hConOut, tmp, 2, &dw, NULL);
+            last = i + 1;
+            ret += dw;
+        }
+    }
+    if (last != len)
+    {
+        WriteConsoleW(ctx->hConOut, &ctx->line[beg + last], len - last, &dw, NULL);
+        ret += dw;
+    }
+    return ret;
+}
+
+static inline void WCEL_WriteNChars(WCEL_Context* ctx, char ch, int count)
+{
+    DWORD       dw;
+
+    if (count > 0)
+    {
+        while (count--) WriteFile(ctx->hConOut, &ch, 1, &dw, NULL);
+    }
+}
+
 static inline void WCEL_Update(WCEL_Context* ctx, int beg, int len)
 {
-    WriteConsoleOutputCharacterW(ctx->hConOut, &ctx->line[beg], len,
-                                 WCEL_GetCoord(ctx, beg), NULL);
-    FillConsoleOutputAttribute(ctx->hConOut, ctx->csbi.wAttributes, len,
-                               WCEL_GetCoord(ctx, beg), NULL);
+    int         i, last;
+    DWORD       count;
+    WCHAR       tmp[2];
+
+    /* bare console case is handled in CONSOLE_ReadLine (we always reprint the whole string) */
+    if (!ctx->shall_echo || !ctx->can_pos_cursor) return;
+
+    for (i = last = beg; i < beg + len; i++)
+    {
+        if (ctx->line[i] < ' ')
+        {
+            if (last != i)
+            {
+                WriteConsoleOutputCharacterW(ctx->hConOut, &ctx->line[last], i - last,
+                                             WCEL_GetCoord(ctx, last), &count);
+                FillConsoleOutputAttribute(ctx->hConOut, ctx->csbi.wAttributes, i - last,
+                                           WCEL_GetCoord(ctx, last), &count);
+            }
+            tmp[0] = '^';
+            tmp[1] = '@' + ctx->line[i];
+            WriteConsoleOutputCharacterW(ctx->hConOut, tmp, 2,
+                                         WCEL_GetCoord(ctx, i), &count);
+            FillConsoleOutputAttribute(ctx->hConOut, ctx->csbi.wAttributes, 2,
+                                       WCEL_GetCoord(ctx, i), &count);
+            last = i + 1;
+        }
+    }
+    if (last != beg + len)
+    {
+        WriteConsoleOutputCharacterW(ctx->hConOut, &ctx->line[last], i - last,
+                                     WCEL_GetCoord(ctx, last), &count);
+        FillConsoleOutputAttribute(ctx->hConOut, ctx->csbi.wAttributes, i - last,
+                                   WCEL_GetCoord(ctx, last), &count);
+    }
 }
 
 /* ====================================================================
@@ -166,34 +258,38 @@ static BOOL WCEL_Grow(WCEL_Context* ctx, size_t len)
 static void WCEL_DeleteString(WCEL_Context* ctx, int beg, int end)
 {
     unsigned    str_len = end - beg;
-    COORD       cbeg = WCEL_GetCoord(ctx, ctx->len - str_len);
-    COORD       cend = WCEL_GetCoord(ctx, ctx->len);
-    CHAR_INFO   ci;
 
     if (end < ctx->len)
 	memmove(&ctx->line[beg], &ctx->line[end], (ctx->len - end) * sizeof(WCHAR));
     /* we need to clean from ctx->len - str_len to ctx->len */
 
-    ci.Char.UnicodeChar = ' ';
-    ci.Attributes = ctx->csbi.wAttributes;
+    if (ctx->shall_echo)
+    {
+        COORD       cbeg = WCEL_GetCoord(ctx, ctx->len - str_len);
+        COORD       cend = WCEL_GetCoord(ctx, ctx->len);
+        CHAR_INFO   ci;
 
-    if (cbeg.Y == cend.Y)
-    {
-        /* partial erase of sole line */
-        CONSOLE_FillLineUniform(ctx->hConOut, cbeg.X, cbeg.Y,
-                                cend.X - cbeg.X, &ci);
-    }
-    else
-    {
-        int         i;
-        /* erase til eol on first line */
-        CONSOLE_FillLineUniform(ctx->hConOut, cbeg.X, cbeg.Y,
-                                ctx->csbi.dwSize.X - cbeg.X, &ci);
-        /* completely erase all the others (full lines) */
-        for (i = cbeg.Y + 1; i < cend.Y; i++)
-            CONSOLE_FillLineUniform(ctx->hConOut, 0, i, ctx->csbi.dwSize.X, &ci);
-        /* erase from beginning of line until last pos on last line */
-        CONSOLE_FillLineUniform(ctx->hConOut, 0, cend.Y, cend.X, &ci);
+        ci.Char.UnicodeChar = ' ';
+        ci.Attributes = ctx->csbi.wAttributes;
+
+        if (cbeg.Y == cend.Y)
+        {
+            /* partial erase of sole line */
+            CONSOLE_FillLineUniform(ctx->hConOut, cbeg.X, cbeg.Y,
+                                    cend.X - cbeg.X, &ci);
+        }
+        else
+        {
+            int         i;
+            /* erase til eol on first line */
+            CONSOLE_FillLineUniform(ctx->hConOut, cbeg.X, cbeg.Y,
+                                    ctx->csbi.dwSize.X - cbeg.X, &ci);
+            /* completely erase all the others (full lines) */
+            for (i = cbeg.Y + 1; i < cend.Y; i++)
+                CONSOLE_FillLineUniform(ctx->hConOut, 0, i, ctx->csbi.dwSize.X, &ci);
+            /* erase from beginning of line until last pos on last line */
+            CONSOLE_FillLineUniform(ctx->hConOut, 0, cend.Y, cend.X, &ci);
+        }
     }
     ctx->len -= str_len;
     WCEL_Update(ctx, 0, ctx->len);
@@ -202,25 +298,35 @@ static void WCEL_DeleteString(WCEL_Context* ctx, int beg, int end)
 
 static void WCEL_InsertString(WCEL_Context* ctx, const WCHAR* str)
 {
-    size_t	len = lstrlenW(str);
+    size_t	len = lstrlenW(str), updtlen;
 
-    if (!len || !WCEL_Grow(ctx, len)) return;
-    if (ctx->len > ctx->ofs)
-	memmove(&ctx->line[ctx->ofs + len], &ctx->line[ctx->ofs], (ctx->len - ctx->ofs) * sizeof(WCHAR));
+    if (!len) return;
+    if (ctx->insert)
+    {
+        if (!WCEL_Grow(ctx, len)) return;
+        if (ctx->len > ctx->ofs)
+            memmove(&ctx->line[ctx->ofs + len], &ctx->line[ctx->ofs], (ctx->len - ctx->ofs) * sizeof(WCHAR));
+        ctx->len += len;
+        updtlen = ctx->len - ctx->ofs;
+    }
+    else
+    {
+        if (ctx->ofs + len > ctx->len)
+        {
+            if (!WCEL_Grow(ctx, (ctx->ofs + len) - ctx->len)) return;
+            ctx->len = ctx->ofs + len;
+        }
+        updtlen = len;
+    }
     memcpy(&ctx->line[ctx->ofs], str, len * sizeof(WCHAR));
-    ctx->len += len;
     ctx->line[ctx->len] = 0;
-    WCEL_Update(ctx, ctx->ofs, ctx->len - ctx->ofs);
-
+    WCEL_Update(ctx, ctx->ofs, updtlen);
     ctx->ofs += len;
 }
 
 static void WCEL_InsertChar(WCEL_Context* ctx, WCHAR c)
 {
     WCHAR	buffer[2];
-
-    /* do not insert 0..31 control characters */
-    if (c < ' ' && c != '\t') return;
 
     buffer[0] = c;
     buffer[1] = 0;
@@ -353,7 +459,8 @@ static void    WCEL_FindPrevInHist(WCEL_Context* ctx)
               ctx->ofs = 0;
               WCEL_InsertString(ctx, data);
               ctx->ofs = oldofs;
-              SetConsoleCursorPosition(ctx->hConOut, WCEL_GetCoord(ctx, ctx->ofs));
+              if (ctx->shall_echo)
+                  SetConsoleCursorPosition(ctx->hConOut, WCEL_GetCoord(ctx, ctx->ofs));
               HeapFree(GetProcessHeap(), 0, data);
               return;
            }
@@ -531,6 +638,16 @@ static void WCEL_KillToEndOfLine(WCEL_Context* ctx)
     WCEL_DeleteString(ctx, ctx->ofs, ctx->len);
 }
 
+static void WCEL_KillFromBegOfLine(WCEL_Context* ctx)
+{
+    if (ctx->ofs)
+    {
+        WCEL_SaveYank(ctx, 0, ctx->ofs);
+        WCEL_DeleteString(ctx, 0, ctx->ofs);
+        ctx->ofs = 0;
+    }
+}
+
 static void WCEL_KillMarkedZone(WCEL_Context* ctx)
 {
     unsigned beg, end;
@@ -605,15 +722,18 @@ static void WCEL_MoveToLastHist(WCEL_Context* ctx)
 
 static void WCEL_Redraw(WCEL_Context* ctx)
 {
-    COORD       c = WCEL_GetCoord(ctx, ctx->len);
-    CHAR_INFO   ci;
+    if (ctx->shall_echo)
+    {
+        COORD       c = WCEL_GetCoord(ctx, ctx->len);
+        CHAR_INFO   ci;
 
-    WCEL_Update(ctx, 0, ctx->len);
+        WCEL_Update(ctx, 0, ctx->len);
 
-    ci.Char.UnicodeChar = ' ';
-    ci.Attributes = ctx->csbi.wAttributes;
+        ci.Char.UnicodeChar = ' ';
+        ci.Attributes = ctx->csbi.wAttributes;
 
-    CONSOLE_FillLineUniform(ctx->hConOut, c.X, c.Y, ctx->csbi.dwSize.X - c.X, &ci);
+        CONSOLE_FillLineUniform(ctx->hConOut, c.X, c.Y, ctx->csbi.dwSize.X - c.X, &ci);
+    }
 }
 
 static void WCEL_RepeatCount(WCEL_Context* ctx)
@@ -639,6 +759,30 @@ static void WCEL_RepeatCount(WCEL_Context* ctx)
     }
     FIXME("=> %u\n", repeat);
 #endif
+}
+
+static void WCEL_ToggleInsert(WCEL_Context* ctx)
+{
+    DWORD               mode;
+    CONSOLE_CURSOR_INFO cinfo;
+
+    if (GetConsoleMode(ctx->hConIn, &mode) && GetConsoleCursorInfo(ctx->hConOut, &cinfo))
+    {
+        if ((mode & (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS)) == (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS))
+        {
+            mode &= ~ENABLE_INSERT_MODE;
+            cinfo.dwSize = 100;
+            ctx->insert = FALSE;
+        }
+        else
+        {
+            mode |= ENABLE_INSERT_MODE | ENABLE_EXTENDED_FLAGS;
+            cinfo.dwSize = 25;
+            ctx->insert = TRUE;
+        }
+        SetConsoleMode(ctx->hConIn, mode);
+        SetConsoleCursorInfo(ctx->hConOut, &cinfo);
+    }
 }
 
 /* ====================================================================
@@ -714,6 +858,7 @@ static const KeyEntry EmacsStdKeyMap[] =
     {/*VK_RIGHT*/0x27,	WCEL_MoveRight 		},
     {/*VK_LEFT*/ 0x25,	WCEL_MoveLeft 		},
     {/*VK_DEL*/  0x2e,  WCEL_DeleteCurrChar     },
+    {/*VK_INSERT*/0x2d, WCEL_ToggleInsert 	},
     {	0,		NULL 			}
 };
 
@@ -737,6 +882,7 @@ static const KeyEntry Win32StdKeyMap[] =
     {/*VK_UP*/   0x26, 	WCEL_MoveToPrevHist 	},
     {/*VK_DOWN*/ 0x28,	WCEL_MoveToNextHist	},
     {/*VK_DEL*/  0x2e,	WCEL_DeleteCurrChar	},
+    {/*VK_INSERT*/0x2d, WCEL_ToggleInsert 	},
     {/*VK_F8*/   0x77,	WCEL_FindPrevInHist	},
     {	0,		NULL 			}
 };
@@ -746,6 +892,7 @@ static const KeyEntry Win32KeyMapCtrl[] =
     {/*VK_LEFT*/ 0x25, 	WCEL_MoveToLeftWord 	},
     {/*VK_RIGHT*/0x27,	WCEL_MoveToRightWord	},
     {/*VK_END*/  0x23,	WCEL_KillToEndOfLine	},
+    {/*VK_HOME*/ 0x24,	WCEL_KillFromBegOfLine	},
     {	0,		NULL 			}
 };
 
@@ -765,7 +912,7 @@ static const KeyMap Win32KeyMap[] =
  *
  * ====================================================================*/
 
-WCHAR* CONSOLE_Readline(HANDLE hConsoleIn)
+WCHAR* CONSOLE_Readline(HANDLE hConsoleIn, BOOL can_pos_cursor)
 {
     WCEL_Context	ctx;
     INPUT_RECORD	ir;
@@ -773,7 +920,7 @@ WCHAR* CONSOLE_Readline(HANDLE hConsoleIn)
     const KeyEntry*	ke;
     unsigned		ofs;
     void		(*func)(struct WCEL_Context* ctx);
-    DWORD               ks;
+    DWORD               mode, ks;
     int                 use_emacs;
 
     memset(&ctx, 0, sizeof(ctx));
@@ -787,7 +934,12 @@ WCHAR* CONSOLE_Readline(HANDLE hConsoleIn)
 				    OPEN_EXISTING, 0, 0 )) == INVALID_HANDLE_VALUE ||
 	!GetConsoleScreenBufferInfo(ctx.hConOut, &ctx.csbi))
 	return NULL;
-    ctx.can_wrap = (GetConsoleMode(ctx.hConOut, &ks) && (ks & ENABLE_WRAP_AT_EOL_OUTPUT)) ? 1 : 0;
+    if (!GetConsoleMode(hConsoleIn, &mode)) mode = 0;
+    ctx.shall_echo = (mode & ENABLE_ECHO_INPUT) ? 1 : 0;
+    ctx.insert = (mode & (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS)) == (ENABLE_INSERT_MODE|ENABLE_EXTENDED_FLAGS) ? 1 : 0;
+    if (!GetConsoleMode(ctx.hConOut, &mode)) mode = 0;
+    ctx.can_wrap = (mode & ENABLE_WRAP_AT_EOL_OUTPUT) ? 1 : 0;
+    ctx.can_pos_cursor = can_pos_cursor;
 
     if (!WCEL_Grow(&ctx, 1))
     {
@@ -842,8 +994,32 @@ WCHAR* CONSOLE_Readline(HANDLE hConsoleIn)
 	else TRACE("Dropped event\n");
 
 /* EPP         WCEL_Dump(&ctx, "after func"); */
-	if (ctx.ofs != ofs)
-	    SetConsoleCursorPosition(ctx.hConOut, WCEL_GetCoord(&ctx, ctx.ofs));
+        if (!ctx.shall_echo) continue;
+        if (ctx.can_pos_cursor)
+        {
+            if (ctx.ofs != ofs)
+                SetConsoleCursorPosition(ctx.hConOut, WCEL_GetCoord(&ctx, ctx.ofs));
+        }
+        else if (!ctx.done && !ctx.error)
+        {
+            DWORD last;
+            /* erase previous chars */
+            WCEL_WriteNChars(&ctx, '\b', ctx.last_rub);
+
+            /* write chars up to cursor */
+            ctx.last_rub = WCEL_WriteConsole(&ctx, 0, ctx.ofs);
+            /* write chars past cursor */
+            last = ctx.last_rub + WCEL_WriteConsole(&ctx, ctx.ofs, ctx.len - ctx.ofs);
+            if (last < ctx.last_max) /* ctx.line has been shortened, erase */
+            {
+                WCEL_WriteNChars(&ctx, ' ', ctx.last_max - last);
+                WCEL_WriteNChars(&ctx, '\b', ctx.last_max - last);
+                ctx.last_max = last;
+            }
+            else ctx.last_max = last;
+            /* reposition at cursor */
+            WCEL_WriteNChars(&ctx, '\b', last - ctx.last_rub);
+        }
     }
     if (ctx.error)
     {

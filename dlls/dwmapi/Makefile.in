@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = dwmapi.dll
 IMPORTLIB = dwmapi
-IMPORTS   = kernel32
 
 C_SRCS = \
 	dwmapi_main.c

@@ -25,6 +25,7 @@
 #include "config.h"
 #include "wine/port.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdlib.h>
@@ -37,7 +38,10 @@
 #include "wine/exception.h"
 #include "wine/server.h"
 #include "controls.h"
+#include "win.h"
 #include "user_private.h"
+#include "wine/list.h"
+#include "wine/unicode.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(cursor);
@@ -67,44 +71,11 @@ typedef struct
 
 #include "poppack.h"
 
-static RECT CURSOR_ClipRect;       /* Cursor clipping rect */
-
 static HDC screen_dc;
 
 static const WCHAR DISPLAYW[] = {'D','I','S','P','L','A','Y',0};
 
-
-/**********************************************************************
- * ICONCACHE for cursors/icons loaded with LR_SHARED.
- *
- * FIXME: This should not be allocated on the system heap, but on a
- *        subsystem-global heap (i.e. one for all Win16 processes,
- *        and one for each Win32 process).
- */
-typedef struct tagICONCACHE
-{
-    struct tagICONCACHE *next;
-
-    HMODULE              hModule;
-    HRSRC                hRsrc;
-    HRSRC                hGroupRsrc;
-    HICON                hIcon;
-
-    INT                  count;
-
-} ICONCACHE;
-
-static ICONCACHE *IconAnchor = NULL;
-
-static CRITICAL_SECTION IconCrst;
-static CRITICAL_SECTION_DEBUG critsect_debug =
-{
-    0, 0, &IconCrst,
-    { &critsect_debug.ProcessLocksList, &critsect_debug.ProcessLocksList },
-      0, 0, { (DWORD_PTR)(__FILE__ ": IconCrst") }
-};
-static CRITICAL_SECTION IconCrst = { &critsect_debug, -1, 0, 0, 0, 0 };
-
+static struct list icon_cache = LIST_INIT( icon_cache );
 
 /**********************************************************************
  * User objects management
@@ -120,7 +91,11 @@ struct cursoricon_frame
 struct cursoricon_object
 {
     struct user_object      obj;        /* object header */
+    struct list             entry;      /* entry in shared icons list */
     ULONG_PTR               param;      /* opaque param used by 16-bit code */
+    HMODULE                 module;     /* module for icons loaded from resources */
+    LPWSTR                  resname;    /* resource name for icons loaded from resources */
+    HRSRC                   rsrc;       /* resource for shared icons */
     BOOL                    is_icon;    /* whether icon or cursor */
     UINT                    width;
     UINT                    height;
@@ -166,12 +141,15 @@ static BOOL free_icon_handle( HICON handle )
         ULONG_PTR param = obj->param;
         UINT i;
 
+        assert( !obj->rsrc );  /* shared icons can't be freed */
+
         for (i=0; i<obj->num_frames; i++)
         {
             if (obj->frames[i].alpha) DeleteObject( obj->frames[i].alpha );
             if (obj->frames[i].color) DeleteObject( obj->frames[i].color );
             DeleteObject( obj->frames[i].mask );
         }
+        if (!IS_INTRESOURCE( obj->resname )) HeapFree( GetProcessHeap(), 0, obj->resname );
         HeapFree( GetProcessHeap(), 0, obj );
         if (wow_handlers.free_icon_param && param) wow_handlers.free_icon_param( param );
         USER_Driver->pDestroyCursorIcon( handle );
@@ -305,19 +283,22 @@ static int bitmap_info_size( const BITMAPINFO * info, WORD coloruse )
  */
 static HBITMAP copy_bitmap( HBITMAP bitmap )
 {
-    HDC src, dst;
-    HBITMAP new_bitmap;
+    HDC src, dst = 0;
+    HBITMAP new_bitmap = 0;
     BITMAP bmp;
 
     if (!bitmap) return 0;
     if (!GetObjectW( bitmap, sizeof(bmp), &bmp )) return 0;
 
-    src = CreateCompatibleDC( 0 );
-    dst = CreateCompatibleDC( 0 );
-    SelectObject( src, bitmap );
-    new_bitmap = CreateCompatibleBitmap( src, bmp.bmWidth, bmp.bmHeight );
-    SelectObject( dst, new_bitmap );
-    BitBlt( dst, 0, 0, bmp.bmWidth, bmp.bmHeight, src, 0, 0, SRCCOPY );
+    if ((src = CreateCompatibleDC( 0 )) && (dst = CreateCompatibleDC( 0 )))
+    {
+        SelectObject( src, bitmap );
+        if ((new_bitmap = CreateCompatibleBitmap( src, bmp.bmWidth, bmp.bmHeight )))
+        {
+            SelectObject( dst, new_bitmap );
+            BitBlt( dst, 0, 0, bmp.bmWidth, bmp.bmHeight, src, 0, 0, SRCCOPY );
+        }
+    }
     DeleteDC( dst );
     DeleteDC( src );
     return new_bitmap;
@@ -391,7 +372,9 @@ static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
         *compr  = 0;
         return 0;
     }
-    else if (header->biSize >= sizeof(BITMAPINFOHEADER))
+    else if (header->biSize == sizeof(BITMAPINFOHEADER) ||
+             header->biSize == sizeof(BITMAPV4HEADER) ||
+             header->biSize == sizeof(BITMAPV5HEADER))
     {
         *width  = header->biWidth;
         *height = header->biHeight;
@@ -399,109 +382,8 @@ static int DIB_GetBitmapInfo( const BITMAPINFOHEADER *header, LONG *width,
         *compr  = header->biCompression;
         return 1;
     }
-    ERR("(%d): unknown/wrong size for header\n", header->biSize );
+    WARN("unknown/wrong size (%u) for header\n", header->biSize);
     return -1;
-}
-
-/**********************************************************************
- *	    CURSORICON_FindSharedIcon
- */
-static HICON CURSORICON_FindSharedIcon( HMODULE hModule, HRSRC hRsrc )
-{
-    HICON hIcon = 0;
-    ICONCACHE *ptr;
-
-    EnterCriticalSection( &IconCrst );
-
-    for ( ptr = IconAnchor; ptr; ptr = ptr->next )
-        if ( ptr->hModule == hModule && ptr->hRsrc == hRsrc )
-        {
-            ptr->count++;
-            hIcon = ptr->hIcon;
-            break;
-        }
-
-    LeaveCriticalSection( &IconCrst );
-
-    return hIcon;
-}
-
-/*************************************************************************
- * CURSORICON_FindCache
- *
- * Given a handle, find the corresponding cache element
- *
- * PARAMS
- *      Handle     [I] handle to an Image
- *
- * RETURNS
- *     Success: The cache entry
- *     Failure: NULL
- *
- */
-static ICONCACHE* CURSORICON_FindCache(HICON hIcon)
-{
-    ICONCACHE *ptr;
-    ICONCACHE *pRet=NULL;
-    BOOL IsFound = FALSE;
-
-    EnterCriticalSection( &IconCrst );
-
-    for (ptr = IconAnchor; ptr != NULL && !IsFound; ptr = ptr->next)
-    {
-        if ( hIcon == ptr->hIcon )
-        {
-            IsFound = TRUE;
-            pRet = ptr;
-        }
-    }
-
-    LeaveCriticalSection( &IconCrst );
-
-    return pRet;
-}
-
-/**********************************************************************
- *	    CURSORICON_AddSharedIcon
- */
-static void CURSORICON_AddSharedIcon( HMODULE hModule, HRSRC hRsrc, HRSRC hGroupRsrc, HICON hIcon )
-{
-    ICONCACHE *ptr = HeapAlloc( GetProcessHeap(), 0, sizeof(ICONCACHE) );
-    if ( !ptr ) return;
-
-    ptr->hModule = hModule;
-    ptr->hRsrc   = hRsrc;
-    ptr->hIcon  = hIcon;
-    ptr->hGroupRsrc = hGroupRsrc;
-    ptr->count   = 1;
-
-    EnterCriticalSection( &IconCrst );
-    ptr->next    = IconAnchor;
-    IconAnchor   = ptr;
-    LeaveCriticalSection( &IconCrst );
-}
-
-/**********************************************************************
- *	    CURSORICON_DelSharedIcon
- */
-static INT CURSORICON_DelSharedIcon( HICON hIcon )
-{
-    INT count = -1;
-    ICONCACHE *ptr;
-
-    EnterCriticalSection( &IconCrst );
-
-    for ( ptr = IconAnchor; ptr; ptr = ptr->next )
-        if ( ptr->hIcon == hIcon )
-        {
-            if ( ptr->count > 0 ) ptr->count--;
-            count = ptr->count;
-            break;
-        }
-
-    LeaveCriticalSection( &IconCrst );
-
-    return count;
 }
 
 /**********************************************************************
@@ -522,7 +404,7 @@ BOOL get_icon_size( HICON handle, SIZE *size )
  *  The following macro functions account for the irregularities of
  *   accessing cursor and icon resources in files and resource entries.
  */
-typedef BOOL (*fnGetCIEntry)( LPVOID dir, int n,
+typedef BOOL (*fnGetCIEntry)( LPCVOID dir, int n,
                               int *width, int *height, int *bits );
 
 /**********************************************************************
@@ -530,8 +412,8 @@ typedef BOOL (*fnGetCIEntry)( LPVOID dir, int n,
  *
  * Find the icon closest to the requested size and bit depth.
  */
-static int CURSORICON_FindBestIcon( LPVOID dir, fnGetCIEntry get_entry,
-                                    int width, int height, int depth )
+static int CURSORICON_FindBestIcon( LPCVOID dir, fnGetCIEntry get_entry,
+                                    int width, int height, int depth, UINT loadflags )
 {
     int i, cx, cy, bits, bestEntry = -1;
     UINT iTotalDiff, iXDiff=0, iYDiff=0, iColorDiff;
@@ -540,7 +422,20 @@ static int CURSORICON_FindBestIcon( LPVOID dir, fnGetCIEntry get_entry,
     /* Find Best Fit */
     iTotalDiff = 0xFFFFFFFF;
     iColorDiff = 0xFFFFFFFF;
-    for ( i = 0; get_entry( dir, i, &cx, &cy, &bits ); i++ )
+
+    if (loadflags & LR_DEFAULTSIZE)
+    {
+        if (!width) width = GetSystemMetrics( SM_CXICON );
+        if (!height) height = GetSystemMetrics( SM_CYICON );
+    }
+    else if (!width && !height)
+    {
+        /* use the size of the first entry */
+        if (!get_entry( dir, 0, &width, &height, &bits )) return -1;
+        iTotalDiff = 0;
+    }
+
+    for ( i = 0; iTotalDiff && get_entry( dir, i, &cx, &cy, &bits ); i++ )
     {
         iTempXDiff = abs(width - cx);
         iTempYDiff = abs(height - cy);
@@ -570,11 +465,11 @@ static int CURSORICON_FindBestIcon( LPVOID dir, fnGetCIEntry get_entry,
     return bestEntry;
 }
 
-static BOOL CURSORICON_GetResIconEntry( LPVOID dir, int n,
+static BOOL CURSORICON_GetResIconEntry( LPCVOID dir, int n,
                                         int *width, int *height, int *bits )
 {
-    CURSORICONDIR *resdir = dir;
-    ICONRESDIR *icon;
+    const CURSORICONDIR *resdir = dir;
+    const ICONRESDIR *icon;
 
     if ( resdir->idCount <= n )
         return FALSE;
@@ -592,10 +487,22 @@ static BOOL CURSORICON_GetResIconEntry( LPVOID dir, int n,
  *
  * FIXME: parameter 'color' ignored.
  */
-static int CURSORICON_FindBestCursor( LPVOID dir, fnGetCIEntry get_entry,
-                                      int width, int height, int depth )
+static int CURSORICON_FindBestCursor( LPCVOID dir, fnGetCIEntry get_entry,
+                                      int width, int height, int depth, UINT loadflags )
 {
     int i, maxwidth, maxheight, cx, cy, bits, bestEntry = -1;
+
+    if (loadflags & LR_DEFAULTSIZE)
+    {
+        if (!width) width = GetSystemMetrics( SM_CXCURSOR );
+        if (!height) height = GetSystemMetrics( SM_CYCURSOR );
+    }
+    else if (!width && !height)
+    {
+        /* use the first entry */
+        if (!get_entry( dir, 0, &width, &height, &bits )) return -1;
+        return 0;
+    }
 
     /* Double height to account for AND and XOR masks */
 
@@ -632,11 +539,11 @@ static int CURSORICON_FindBestCursor( LPVOID dir, fnGetCIEntry get_entry,
     return bestEntry;
 }
 
-static BOOL CURSORICON_GetResCursorEntry( LPVOID dir, int n,
+static BOOL CURSORICON_GetResCursorEntry( LPCVOID dir, int n,
                                           int *width, int *height, int *bits )
 {
-    CURSORICONDIR *resdir = dir;
-    CURSORDIR *cursor;
+    const CURSORICONDIR *resdir = dir;
+    const CURSORDIR *cursor;
 
     if ( resdir->idCount <= n )
         return FALSE;
@@ -647,61 +554,65 @@ static BOOL CURSORICON_GetResCursorEntry( LPVOID dir, int n,
     return TRUE;
 }
 
-static CURSORICONDIRENTRY *CURSORICON_FindBestIconRes( CURSORICONDIR * dir,
-                                      int width, int height, int depth )
+static const CURSORICONDIRENTRY *CURSORICON_FindBestIconRes( const CURSORICONDIR * dir,
+                                                             int width, int height, int depth,
+                                                             UINT loadflags )
 {
     int n;
 
     n = CURSORICON_FindBestIcon( dir, CURSORICON_GetResIconEntry,
-                                 width, height, depth );
+                                 width, height, depth, loadflags );
     if ( n < 0 )
         return NULL;
     return &dir->idEntries[n];
 }
 
-static CURSORICONDIRENTRY *CURSORICON_FindBestCursorRes( CURSORICONDIR *dir,
-                                      int width, int height, int depth )
+static const CURSORICONDIRENTRY *CURSORICON_FindBestCursorRes( const CURSORICONDIR *dir,
+                                                               int width, int height, int depth,
+                                                               UINT loadflags )
 {
     int n = CURSORICON_FindBestCursor( dir, CURSORICON_GetResCursorEntry,
-                                   width, height, depth );
+                                       width, height, depth, loadflags );
     if ( n < 0 )
         return NULL;
     return &dir->idEntries[n];
 }
 
-static BOOL CURSORICON_GetFileEntry( LPVOID dir, int n,
+static BOOL CURSORICON_GetFileEntry( LPCVOID dir, int n,
                                      int *width, int *height, int *bits )
 {
-    CURSORICONFILEDIR *filedir = dir;
-    CURSORICONFILEDIRENTRY *entry;
-    BITMAPINFOHEADER *info;
+    const CURSORICONFILEDIR *filedir = dir;
+    const CURSORICONFILEDIRENTRY *entry;
+    const BITMAPINFOHEADER *info;
 
     if ( filedir->idCount <= n )
         return FALSE;
     entry = &filedir->idEntries[n];
     /* FIXME: check against file size */
-    info = (BITMAPINFOHEADER *)((char *)dir + entry->dwDIBOffset);
+    info = (const BITMAPINFOHEADER *)((const char *)dir + entry->dwDIBOffset);
     *width = entry->bWidth;
     *height = entry->bHeight;
     *bits = info->biBitCount;
     return TRUE;
 }
 
-static CURSORICONFILEDIRENTRY *CURSORICON_FindBestCursorFile( CURSORICONFILEDIR *dir,
-                                      int width, int height, int depth )
+static const CURSORICONFILEDIRENTRY *CURSORICON_FindBestCursorFile( const CURSORICONFILEDIR *dir,
+                                                                    int width, int height, int depth,
+                                                                    UINT loadflags )
 {
     int n = CURSORICON_FindBestCursor( dir, CURSORICON_GetFileEntry,
-                                       width, height, depth );
+                                       width, height, depth, loadflags );
     if ( n < 0 )
         return NULL;
     return &dir->idEntries[n];
 }
 
-static CURSORICONFILEDIRENTRY *CURSORICON_FindBestIconFile( CURSORICONFILEDIR *dir,
-                                      int width, int height, int depth )
+static const CURSORICONFILEDIRENTRY *CURSORICON_FindBestIconFile( const CURSORICONFILEDIR *dir,
+                                                                  int width, int height, int depth,
+                                                                  UINT loadflags )
 {
     int n = CURSORICON_FindBestIcon( dir, CURSORICON_GetFileEntry,
-                                     width, height, depth );
+                                     width, height, depth, loadflags );
     if ( n < 0 )
         return NULL;
     return &dir->idEntries[n];
@@ -802,7 +713,7 @@ static BOOL create_icon_bitmaps( const BITMAPINFO *bmi, int width, int height,
     BOOL monochrome = is_dib_monochrome( bmi );
     unsigned int size = bitmap_info_size( bmi, DIB_RGB_COLORS );
     BITMAPINFO *info;
-    void *color_bits, *mask_bits;
+    const void *color_bits, *mask_bits;
     BOOL ret = FALSE;
     HDC hdc = 0;
 
@@ -813,8 +724,8 @@ static BOOL create_icon_bitmaps( const BITMAPINFO *bmi, int width, int height,
     memcpy( info, bmi, size );
     info->bmiHeader.biHeight /= 2;
 
-    color_bits = (char *)bmi + size;
-    mask_bits = (char *)color_bits +
+    color_bits = (const char*)bmi + size;
+    mask_bits = (const char*)color_bits +
         get_dib_width_bytes( bmi->bmiHeader.biWidth,
                              bmi->bmiHeader.biBitCount ) * abs(info->bmiHeader.biHeight);
 
@@ -879,21 +790,12 @@ done:
     return ret;
 }
 
-static HICON CURSORICON_CreateIconFromBMI( BITMAPINFO *bmi,
-					   POINT hotspot, BOOL bIcon,
-					   DWORD dwVersion,
-					   INT width, INT height,
-					   UINT cFlag )
+static HICON CURSORICON_CreateIconFromBMI( BITMAPINFO *bmi, HMODULE module, LPCWSTR resname, HRSRC rsrc,
+                                           POINT hotspot, BOOL bIcon, INT width, INT height, UINT cFlag )
 {
     HICON hObj;
     HBITMAP color = 0, mask = 0, alpha = 0;
     BOOL do_stretch;
-
-    if (dwVersion == 0x00020000)
-    {
-        FIXME_(cursor)("\t2.xx resources are not supported\n");
-        return 0;
-    }
 
     /* Check bitmap header */
 
@@ -905,8 +807,16 @@ static HICON CURSORICON_CreateIconFromBMI( BITMAPINFO *bmi,
           return 0;
     }
 
-    if (!width) width = bmi->bmiHeader.biWidth;
-    if (!height) height = bmi->bmiHeader.biHeight/2;
+    if (cFlag & LR_DEFAULTSIZE)
+    {
+        if (!width) width = GetSystemMetrics( bIcon ? SM_CXICON : SM_CXCURSOR );
+        if (!height) height = GetSystemMetrics( bIcon ? SM_CYICON : SM_CYCURSOR );
+    }
+    else
+    {
+        if (!width) width = bmi->bmiHeader.biWidth;
+        if (!height) height = bmi->bmiHeader.biHeight/2;
+    }
     do_stretch = (bmi->bmiHeader.biHeight/2 != height) ||
                  (bmi->bmiHeader.biWidth != width);
 
@@ -933,12 +843,25 @@ static HICON CURSORICON_CreateIconFromBMI( BITMAPINFO *bmi,
         struct cursoricon_object *info = get_icon_ptr( hObj );
 
         info->is_icon = bIcon;
+        info->module  = module;
         info->hotspot = hotspot;
         info->width   = width;
         info->height  = height;
         info->frames[0].color = color;
         info->frames[0].mask  = mask;
         info->frames[0].alpha = alpha;
+        if (!IS_INTRESOURCE(resname))
+        {
+            info->resname = HeapAlloc( GetProcessHeap(), 0, (strlenW(resname) + 1) * sizeof(WCHAR) );
+            if (info->resname) strcpyW( info->resname, resname );
+        }
+        else info->resname = MAKEINTRESOURCEW( LOWORD(resname) );
+
+        if (module && (cFlag & LR_SHARED))
+        {
+            info->rsrc = rsrc;
+            list_add_head( &icon_cache, &info->entry );
+        }
         release_icon_ptr( hObj, info );
         USER_Driver->pCreateCursorIcon( hObj );
     }
@@ -1059,7 +982,7 @@ static void riff_find_chunk( DWORD chunk_id, DWORD chunk_type, const riff_chunk_
  *            \- CHUNK:icon
  */
 static HCURSOR CURSORICON_CreateIconFromANI( const LPBYTE bits, DWORD bits_size,
-    INT width, INT height, INT depth )
+                                             INT width, INT height, INT depth, UINT loadflags )
 {
     struct cursoricon_object *info;
     ani_header header = {0};
@@ -1111,15 +1034,15 @@ static HCURSOR CURSORICON_CreateIconFromANI( const LPBYTE bits, DWORD bits_size,
     icon_data = fram_chunk.data + (2 * sizeof(DWORD));
     for (i=0; i<header.num_frames; i++)
     {
-        DWORD chunk_size = *(DWORD *)(icon_chunk + sizeof(DWORD));
+        const DWORD chunk_size = *(const DWORD *)(icon_chunk + sizeof(DWORD));
         struct cursoricon_frame *frame = &info->frames[i];
-        CURSORICONFILEDIRENTRY *entry;
-        BITMAPINFO *bmi;
+        const CURSORICONFILEDIRENTRY *entry;
+        const BITMAPINFO *bmi;
 
-        entry = CURSORICON_FindBestIconFile( (CURSORICONFILEDIR *) icon_data,
-            width, height, depth );
+        entry = CURSORICON_FindBestIconFile((const CURSORICONFILEDIR *) icon_data,
+                                            width, height, depth, loadflags );
 
-        bmi = (BITMAPINFO *) (icon_data + entry->dwDIBOffset);
+        bmi = (const BITMAPINFO *) (icon_data + entry->dwDIBOffset);
         info->hotspot.x = entry->xHotspot;
         info->hotspot.y = entry->yHotspot;
         if (!header.width || !header.height)
@@ -1191,6 +1114,12 @@ HICON WINAPI CreateIconFromResourceEx( LPBYTE bits, UINT cbSize,
 
     if (!bits) return 0;
 
+    if (dwVersion == 0x00020000)
+    {
+        FIXME_(cursor)("\t2.xx resources are not supported\n");
+        return 0;
+    }
+
     if (bIcon)
     {
         hotspot.x = width / 2;
@@ -1205,8 +1134,7 @@ HICON WINAPI CreateIconFromResourceEx( LPBYTE bits, UINT cbSize,
         bmi = (BITMAPINFO *)(pt + 2);
     }
 
-    return CURSORICON_CreateIconFromBMI( bmi, hotspot, bIcon, dwVersion,
-					 width, height, cFlag );
+    return CURSORICON_CreateIconFromBMI( bmi, NULL, NULL, NULL, hotspot, bIcon, width, height, cFlag );
 }
 
 
@@ -1224,8 +1152,8 @@ static HICON CURSORICON_LoadFromFile( LPCWSTR filename,
                              INT width, INT height, INT depth,
                              BOOL fCursor, UINT loadflags)
 {
-    CURSORICONFILEDIRENTRY *entry;
-    CURSORICONFILEDIR *dir;
+    const CURSORICONFILEDIRENTRY *entry;
+    const CURSORICONFILEDIR *dir;
     DWORD filesize = 0;
     HICON hIcon = 0;
     LPBYTE bits;
@@ -1240,12 +1168,11 @@ static HICON CURSORICON_LoadFromFile( LPCWSTR filename,
     /* Check for .ani. */
     if (memcmp( bits, "RIFF", 4 ) == 0)
     {
-        hIcon = CURSORICON_CreateIconFromANI( bits, filesize, width, height,
-            depth );
+        hIcon = CURSORICON_CreateIconFromANI( bits, filesize, width, height, depth, loadflags );
         goto end;
     }
 
-    dir = (CURSORICONFILEDIR*) bits;
+    dir = (const CURSORICONFILEDIR*) bits;
     if ( filesize < sizeof(*dir) )
         goto end;
 
@@ -1253,9 +1180,9 @@ static HICON CURSORICON_LoadFromFile( LPCWSTR filename,
         goto end;
 
     if ( fCursor )
-        entry = CURSORICON_FindBestCursorFile( dir, width, height, depth );
+        entry = CURSORICON_FindBestCursorFile( dir, width, height, depth, loadflags );
     else
-        entry = CURSORICON_FindBestIconFile( dir, width, height, depth );
+        entry = CURSORICON_FindBestIconFile( dir, width, height, depth, loadflags );
 
     if ( !entry )
         goto end;
@@ -1268,9 +1195,8 @@ static HICON CURSORICON_LoadFromFile( LPCWSTR filename,
 
     hotspot.x = entry->xHotspot;
     hotspot.y = entry->yHotspot;
-    hIcon = CURSORICON_CreateIconFromBMI( (BITMAPINFO *)&bits[entry->dwDIBOffset],
-					  hotspot, !fCursor, 0x00030000,
-					  width, height, loadflags );
+    hIcon = CURSORICON_CreateIconFromBMI( (BITMAPINFO *)&bits[entry->dwDIBOffset], NULL, NULL, NULL,
+					  hotspot, !fCursor, width, height, loadflags );
 end:
     TRACE("loaded %s -> %p\n", debugstr_w( filename ), hIcon );
     UnmapViewOfFile( bits );
@@ -1288,12 +1214,12 @@ static HICON CURSORICON_Load(HINSTANCE hInstance, LPCWSTR name,
 {
     HANDLE handle = 0;
     HICON hIcon = 0;
-    HRSRC hRsrc, hGroupRsrc;
-    CURSORICONDIR *dir;
-    CURSORICONDIRENTRY *dirEntry;
+    HRSRC hRsrc;
+    const CURSORICONDIR *dir;
+    const CURSORICONDIRENTRY *dirEntry;
     LPBYTE bits;
     WORD wResId;
-    DWORD dwBytesInRes;
+    POINT hotspot;
 
     TRACE("%p, %s, %dx%d, depth %d, fCursor %d, flags 0x%04x\n",
           hInstance, debugstr_w(name), width, height, depth, fCursor, loadflags);
@@ -1311,19 +1237,17 @@ static HICON CURSORICON_Load(HINSTANCE hInstance, LPCWSTR name,
     if (!(hRsrc = FindResourceW( hInstance, name,
                                  (LPWSTR)(fCursor ? RT_GROUP_CURSOR : RT_GROUP_ICON) )))
         return 0;
-    hGroupRsrc = hRsrc;
 
     /* Find the best entry in the directory */
 
     if (!(handle = LoadResource( hInstance, hRsrc ))) return 0;
     if (!(dir = LockResource( handle ))) return 0;
     if (fCursor)
-        dirEntry = CURSORICON_FindBestCursorRes( dir, width, height, depth );
+        dirEntry = CURSORICON_FindBestCursorRes( dir, width, height, depth, loadflags );
     else
-        dirEntry = CURSORICON_FindBestIconRes( dir, width, height, depth );
+        dirEntry = CURSORICON_FindBestIconRes( dir, width, height, depth, loadflags );
     if (!dirEntry) return 0;
     wResId = dirEntry->wResId;
-    dwBytesInRes = dirEntry->dwBytesInRes;
     FreeResource( handle );
 
     /* Load the resource */
@@ -1332,164 +1256,41 @@ static HICON CURSORICON_Load(HINSTANCE hInstance, LPCWSTR name,
                                 (LPWSTR)(fCursor ? RT_CURSOR : RT_ICON) ))) return 0;
 
     /* If shared icon, check whether it was already loaded */
-    if (    (loadflags & LR_SHARED)
-         && (hIcon = CURSORICON_FindSharedIcon( hInstance, hRsrc ) ) != 0 )
-        return hIcon;
+    if (loadflags & LR_SHARED)
+    {
+        struct cursoricon_object *ptr;
+
+        USER_Lock();
+        LIST_FOR_EACH_ENTRY( ptr, &icon_cache, struct cursoricon_object, entry )
+        {
+            if (ptr->module != hInstance) continue;
+            if (ptr->rsrc != hRsrc) continue;
+            hIcon = ptr->obj.handle;
+            break;
+        }
+        USER_Unlock();
+        if (hIcon) return hIcon;
+    }
 
     if (!(handle = LoadResource( hInstance, hRsrc ))) return 0;
     bits = LockResource( handle );
-    hIcon = CreateIconFromResourceEx( bits, dwBytesInRes,
-                                      !fCursor, 0x00030000, width, height, loadflags);
+
+    if (!fCursor)
+    {
+        hotspot.x = width / 2;
+        hotspot.y = height / 2;
+    }
+    else /* get the hotspot */
+    {
+        SHORT *pt = (SHORT *)bits;
+        hotspot.x = pt[0];
+        hotspot.y = pt[1];
+        bits += 2 * sizeof(SHORT);
+    }
+    hIcon = CURSORICON_CreateIconFromBMI( (BITMAPINFO *)bits, hInstance, name, hRsrc,
+                                          hotspot, !fCursor, width, height, loadflags );
     FreeResource( handle );
-
-    /* If shared icon, add to icon cache */
-
-    if ( hIcon && (loadflags & LR_SHARED) )
-        CURSORICON_AddSharedIcon( hInstance, hRsrc, hGroupRsrc, hIcon );
-
     return hIcon;
-}
-
-
-/*************************************************************************
- * CURSORICON_ExtCopy
- *
- * Copies an Image from the Cache if LR_COPYFROMRESOURCE is specified
- *
- * PARAMS
- *      Handle     [I] handle to an Image
- *      nType      [I] Type of Handle (IMAGE_CURSOR | IMAGE_ICON)
- *      iDesiredCX [I] The Desired width of the Image
- *      iDesiredCY [I] The desired height of the Image
- *      nFlags     [I] The flags from CopyImage
- *
- * RETURNS
- *     Success: The new handle of the Image
- *
- * NOTES
- *     LR_COPYDELETEORG and LR_MONOCHROME are currently not implemented.
- *     LR_MONOCHROME should be implemented by CreateIconFromResourceEx.
- *     LR_COPYFROMRESOURCE will only work if the Image is in the Cache.
- *
- *
- */
-
-static HICON CURSORICON_ExtCopy(HICON hIcon, UINT nType,
-                                INT iDesiredCX, INT iDesiredCY,
-                                UINT nFlags)
-{
-    HICON hNew=0;
-
-    TRACE_(icon)("hIcon %p, nType %u, iDesiredCX %i, iDesiredCY %i, nFlags %u\n",
-                 hIcon, nType, iDesiredCX, iDesiredCY, nFlags);
-
-    if(hIcon == 0)
-    {
-        return 0;
-    }
-
-    /* Best Fit or Monochrome */
-    if( (nFlags & LR_COPYFROMRESOURCE
-        && (iDesiredCX > 0 || iDesiredCY > 0))
-        || nFlags & LR_MONOCHROME)
-    {
-        ICONCACHE* pIconCache = CURSORICON_FindCache(hIcon);
-
-        /* Not Found in Cache, then do a straight copy
-        */
-        if(pIconCache == NULL)
-        {
-            hNew = CopyIcon( hIcon );
-            if(nFlags & LR_COPYFROMRESOURCE)
-            {
-                TRACE_(icon)("LR_COPYFROMRESOURCE: Failed to load from cache\n");
-            }
-        }
-        else
-        {
-            int iTargetCY = iDesiredCY, iTargetCX = iDesiredCX;
-            LPBYTE pBits;
-            HANDLE hMem;
-            HRSRC hRsrc;
-            DWORD dwBytesInRes;
-            WORD wResId;
-            CURSORICONDIR *pDir;
-            CURSORICONDIRENTRY *pDirEntry;
-            BOOL bIsIcon = (nType == IMAGE_ICON);
-
-            /* Completing iDesiredCX CY for Monochrome Bitmaps if needed
-            */
-            if(((nFlags & LR_MONOCHROME) && !(nFlags & LR_COPYFROMRESOURCE))
-                || (iDesiredCX == 0 && iDesiredCY == 0))
-            {
-                iDesiredCY = GetSystemMetrics(bIsIcon ?
-                    SM_CYICON : SM_CYCURSOR);
-                iDesiredCX = GetSystemMetrics(bIsIcon ?
-                    SM_CXICON : SM_CXCURSOR);
-            }
-
-            /* Retrieve the CURSORICONDIRENTRY
-            */
-            if (!(hMem = LoadResource( pIconCache->hModule ,
-                            pIconCache->hGroupRsrc)))
-            {
-                return 0;
-            }
-            if (!(pDir = LockResource( hMem )))
-            {
-                return 0;
-            }
-
-            /* Find Best Fit
-            */
-            if(bIsIcon)
-            {
-                pDirEntry = CURSORICON_FindBestIconRes(
-                                pDir, iDesiredCX, iDesiredCY, 256 );
-            }
-            else
-            {
-                pDirEntry = CURSORICON_FindBestCursorRes(
-                                pDir, iDesiredCX, iDesiredCY, 1);
-            }
-
-            wResId = pDirEntry->wResId;
-            dwBytesInRes = pDirEntry->dwBytesInRes;
-            FreeResource(hMem);
-
-            TRACE_(icon)("ResID %u, BytesInRes %u, Width %d, Height %d DX %d, DY %d\n",
-                wResId, dwBytesInRes,  pDirEntry->ResInfo.icon.bWidth,
-                pDirEntry->ResInfo.icon.bHeight, iDesiredCX, iDesiredCY);
-
-            /* Get the Best Fit
-            */
-            if (!(hRsrc = FindResourceW(pIconCache->hModule ,
-                MAKEINTRESOURCEW(wResId), (LPWSTR)(bIsIcon ? RT_ICON : RT_CURSOR))))
-            {
-                return 0;
-            }
-            if (!(hMem = LoadResource( pIconCache->hModule , hRsrc )))
-            {
-                return 0;
-            }
-
-            pBits = LockResource( hMem );
-
-            if(nFlags & LR_DEFAULTSIZE)
-            {
-                iTargetCY = GetSystemMetrics(SM_CYICON);
-                iTargetCX = GetSystemMetrics(SM_CXICON);
-            }
-
-            /* Create a New Icon with the proper dimension
-            */
-            hNew = CreateIconFromResourceEx( pBits, dwBytesInRes,
-                       bIsIcon, 0x00030000, iTargetCX, iTargetCY, nFlags);
-            FreeResource(hMem);
-        }
-    }
-    else hNew = CopyIcon( hIcon );
-    return hNew;
 }
 
 
@@ -1576,7 +1377,11 @@ HICON WINAPI CopyIcon( HICON hIcon )
     struct cursoricon_object *ptrOld, *ptrNew;
     HICON hNew;
 
-    if (!(ptrOld = get_icon_ptr( hIcon ))) return 0;
+    if (!(ptrOld = get_icon_ptr( hIcon )))
+    {
+        SetLastError( ERROR_INVALID_CURSOR_HANDLE );
+        return 0;
+    }
     if ((hNew = alloc_icon_handle(1)))
     {
         ptrNew = get_icon_ptr( hNew );
@@ -1600,11 +1405,19 @@ HICON WINAPI CopyIcon( HICON hIcon )
  */
 BOOL WINAPI DestroyIcon( HICON hIcon )
 {
+    BOOL ret = FALSE;
+    struct cursoricon_object *obj = get_icon_ptr( hIcon );
+
     TRACE_(icon)("%p\n", hIcon );
 
-    if (CURSORICON_DelSharedIcon( hIcon ) == -1)
-        free_icon_handle( hIcon );
-    return TRUE;
+    if (obj)
+    {
+        BOOL shared = (obj->rsrc != NULL);
+        release_icon_ptr( hIcon, obj );
+        ret = (GetCursor() != hIcon);
+        if (!shared) free_icon_handle( hIcon );
+    }
+    return ret;
 }
 
 
@@ -1613,11 +1426,6 @@ BOOL WINAPI DestroyIcon( HICON hIcon )
  */
 BOOL WINAPI DestroyCursor( HCURSOR hCursor )
 {
-    if (GetCursor() == hCursor)
-    {
-        WARN_(cursor)("Destroying active cursor!\n" );
-        return FALSE;
-    }
     return DestroyIcon( hCursor );
 }
 
@@ -1639,6 +1447,7 @@ BOOL WINAPI DrawIcon( HDC hdc, INT x, INT y, HICON hIcon )
  */
 HCURSOR WINAPI DECLSPEC_HOTPATCH SetCursor( HCURSOR hCursor /* [in] Handle of cursor to show */ )
 {
+    struct cursoricon_object *obj;
     HCURSOR hOldCursor;
     int show_count;
     BOOL ret;
@@ -1661,6 +1470,9 @@ HCURSOR WINAPI DECLSPEC_HOTPATCH SetCursor( HCURSOR hCursor /* [in] Handle of cu
 
     /* Change the cursor shape only if it is visible */
     if (show_count >= 0 && hOldCursor != hCursor) USER_Driver->pSetCursor( hCursor );
+
+    if (!(obj = get_icon_ptr( hOldCursor ))) return 0;
+    release_icon_ptr( hOldCursor, obj );
     return hOldCursor;
 }
 
@@ -1714,21 +1526,32 @@ HCURSOR WINAPI GetCursor(void)
  */
 BOOL WINAPI DECLSPEC_HOTPATCH ClipCursor( const RECT *rect )
 {
-    RECT virt;
+    BOOL ret;
+    RECT new_rect;
 
-    SetRect( &virt, 0, 0, GetSystemMetrics( SM_CXVIRTUALSCREEN ),
-                          GetSystemMetrics( SM_CYVIRTUALSCREEN ) );
-    OffsetRect( &virt, GetSystemMetrics( SM_XVIRTUALSCREEN ),
-                       GetSystemMetrics( SM_YVIRTUALSCREEN ) );
+    TRACE( "Clipping to %s\n", wine_dbgstr_rect(rect) );
 
-    TRACE( "Clipping to: %s was: %s screen: %s\n", wine_dbgstr_rect(rect),
-           wine_dbgstr_rect(&CURSOR_ClipRect), wine_dbgstr_rect(&virt) );
-
-    if (!IntersectRect( &CURSOR_ClipRect, &virt, rect ))
-        CURSOR_ClipRect = virt;
-
-    USER_Driver->pClipCursor( rect );
-    return TRUE;
+    SERVER_START_REQ( set_cursor )
+    {
+        req->flags = SET_CURSOR_CLIP;
+        if (rect)
+        {
+            req->clip.left   = rect->left;
+            req->clip.top    = rect->top;
+            req->clip.right  = rect->right;
+            req->clip.bottom = rect->bottom;
+        }
+        if ((ret = !wine_server_call( req )))
+        {
+            new_rect.left   = reply->new_clip.left;
+            new_rect.top    = reply->new_clip.top;
+            new_rect.right  = reply->new_clip.right;
+            new_rect.bottom = reply->new_clip.bottom;
+        }
+    }
+    SERVER_END_REQ;
+    if (ret) USER_Driver->pClipCursor( &new_rect );
+    return ret;
 }
 
 
@@ -1737,10 +1560,23 @@ BOOL WINAPI DECLSPEC_HOTPATCH ClipCursor( const RECT *rect )
  */
 BOOL WINAPI DECLSPEC_HOTPATCH GetClipCursor( RECT *rect )
 {
-    /* If this is first time - initialize the rect */
-    if (IsRectEmpty( &CURSOR_ClipRect )) ClipCursor( NULL );
+    BOOL ret;
 
-    return CopyRect( rect, &CURSOR_ClipRect );
+    if (!rect) return FALSE;
+
+    SERVER_START_REQ( set_cursor )
+    {
+        req->flags = 0;
+        if ((ret = !wine_server_call( req )))
+        {
+            rect->left   = reply->new_clip.left;
+            rect->top    = reply->new_clip.top;
+            rect->right  = reply->new_clip.right;
+            rect->bottom = reply->new_clip.bottom;
+        }
+    }
+    SERVER_END_REQ;
+    return ret;
 }
 
 
@@ -1760,11 +1596,11 @@ BOOL WINAPI SetSystemCursor(HCURSOR hcur, DWORD id)
 INT WINAPI LookupIconIdFromDirectoryEx( LPBYTE xdir, BOOL bIcon,
              INT width, INT height, UINT cFlag )
 {
-    CURSORICONDIR       *dir = (CURSORICONDIR*)xdir;
+    const CURSORICONDIR *dir = (const CURSORICONDIR*)xdir;
     UINT retVal = 0;
     if( dir && !dir->idReserved && (dir->idType & 3) )
     {
-        CURSORICONDIRENTRY* entry;
+        const CURSORICONDIRENTRY* entry;
 
         const HDC hdc = GetDC(0);
         const int depth = (cFlag & LR_MONOCHROME) ?
@@ -1772,9 +1608,9 @@ INT WINAPI LookupIconIdFromDirectoryEx( LPBYTE xdir, BOOL bIcon,
         ReleaseDC(0, hdc);
 
         if( bIcon )
-            entry = CURSORICON_FindBestIconRes( dir, width, height, depth );
+            entry = CURSORICON_FindBestIconRes( dir, width, height, depth, LR_DEFAULTSIZE );
         else
-            entry = CURSORICON_FindBestCursorRes( dir, width, height, depth );
+            entry = CURSORICON_FindBestCursorRes( dir, width, height, depth, LR_DEFAULTSIZE );
 
         if( entry ) retVal = entry->wResId;
     }
@@ -1787,9 +1623,7 @@ INT WINAPI LookupIconIdFromDirectoryEx( LPBYTE xdir, BOOL bIcon,
  */
 INT WINAPI LookupIconIdFromDirectory( LPBYTE dir, BOOL bIcon )
 {
-    return LookupIconIdFromDirectoryEx( dir, bIcon,
-           bIcon ? GetSystemMetrics(SM_CXICON) : GetSystemMetrics(SM_CXCURSOR),
-           bIcon ? GetSystemMetrics(SM_CYICON) : GetSystemMetrics(SM_CYCURSOR), bIcon ? 0 : LR_MONOCHROME );
+    return LookupIconIdFromDirectoryEx( dir, bIcon, 0, 0, bIcon ? 0 : LR_MONOCHROME );
 }
 
 /***********************************************************************
@@ -1863,20 +1697,88 @@ HICON WINAPI LoadIconA(HINSTANCE hInstance, LPCSTR name)
  */
 BOOL WINAPI GetIconInfo(HICON hIcon, PICONINFO iconinfo)
 {
-    struct cursoricon_object *ptr;
+    ICONINFOEXW infoW;
 
-    if (!(ptr = get_icon_ptr( hIcon ))) return FALSE;
-
-    TRACE("%p => %dx%d\n", hIcon, ptr->width, ptr->height);
-
-    iconinfo->fIcon    = ptr->is_icon;
-    iconinfo->xHotspot = ptr->hotspot.x;
-    iconinfo->yHotspot = ptr->hotspot.y;
-    iconinfo->hbmColor = copy_bitmap( ptr->frames[0].color );
-    iconinfo->hbmMask  = copy_bitmap( ptr->frames[0].mask );
-    release_icon_ptr( hIcon, ptr );
-
+    infoW.cbSize = sizeof(infoW);
+    if (!GetIconInfoExW( hIcon, &infoW )) return FALSE;
+    iconinfo->fIcon    = infoW.fIcon;
+    iconinfo->xHotspot = infoW.xHotspot;
+    iconinfo->yHotspot = infoW.yHotspot;
+    iconinfo->hbmColor = infoW.hbmColor;
+    iconinfo->hbmMask  = infoW.hbmMask;
     return TRUE;
+}
+
+/**********************************************************************
+ *              GetIconInfoExA (USER32.@)
+ */
+BOOL WINAPI GetIconInfoExA( HICON icon, ICONINFOEXA *info )
+{
+    ICONINFOEXW infoW;
+
+    if (info->cbSize != sizeof(*info))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    infoW.cbSize = sizeof(infoW);
+    if (!GetIconInfoExW( icon, &infoW )) return FALSE;
+    info->fIcon    = infoW.fIcon;
+    info->xHotspot = infoW.xHotspot;
+    info->yHotspot = infoW.yHotspot;
+    info->hbmColor = infoW.hbmColor;
+    info->hbmMask  = infoW.hbmMask;
+    info->wResID   = infoW.wResID;
+    WideCharToMultiByte( CP_ACP, 0, infoW.szModName, -1, info->szModName, MAX_PATH, NULL, NULL );
+    WideCharToMultiByte( CP_ACP, 0, infoW.szResName, -1, info->szResName, MAX_PATH, NULL, NULL );
+    return TRUE;
+}
+
+/**********************************************************************
+ *              GetIconInfoExW (USER32.@)
+ */
+BOOL WINAPI GetIconInfoExW( HICON icon, ICONINFOEXW *info )
+{
+    struct cursoricon_object *ptr;
+    HMODULE module;
+    BOOL ret = TRUE;
+
+    if (info->cbSize != sizeof(*info))
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    if (!(ptr = get_icon_ptr( icon )))
+    {
+        SetLastError( ERROR_INVALID_CURSOR_HANDLE );
+        return FALSE;
+    }
+
+    TRACE("%p => %dx%d\n", icon, ptr->width, ptr->height);
+
+    info->fIcon        = ptr->is_icon;
+    info->xHotspot     = ptr->hotspot.x;
+    info->yHotspot     = ptr->hotspot.y;
+    info->hbmColor     = copy_bitmap( ptr->frames[0].color );
+    info->hbmMask      = copy_bitmap( ptr->frames[0].mask );
+    info->wResID       = 0;
+    info->szModName[0] = 0;
+    info->szResName[0] = 0;
+    if (ptr->module)
+    {
+        if (IS_INTRESOURCE( ptr->resname )) info->wResID = LOWORD( ptr->resname );
+        else lstrcpynW( info->szResName, ptr->resname, MAX_PATH );
+    }
+    if (!info->hbmMask || (!info->hbmColor && ptr->frames[0].color))
+    {
+        DeleteObject( info->hbmMask );
+        DeleteObject( info->hbmColor );
+        ret = FALSE;
+    }
+    module = ptr->module;
+    release_icon_ptr( icon, ptr );
+    if (ret && module) GetModuleFileNameW( module, info->szModName, MAX_PATH );
+    return ret;
 }
 
 /* copy an icon bitmap, even when it can't be selected into a DC */
@@ -2296,6 +2198,14 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
         if (bmfh->bfOffBits) offbits = bmfh->bfOffBits - sizeof(BITMAPFILEHEADER);
     }
 
+    bm_type = DIB_GetBitmapInfo( &info->bmiHeader, &width, &height,
+                                 &bpp_dummy, &compr_dummy);
+    if (bm_type == -1)
+    {
+        WARN("Invalid bitmap format!\n");
+        goto end;
+    }
+
     size = bitmap_info_size(info, DIB_RGB_COLORS);
     fix_info = HeapAlloc(GetProcessHeap(), 0, size);
     scaled_info = HeapAlloc(GetProcessHeap(), 0, size);
@@ -2307,13 +2217,6 @@ static HBITMAP BITMAP_Load( HINSTANCE instance, LPCWSTR name,
     DIB_FixColorsToLoadflags(fix_info, loadflags, pix);
 
     memcpy(scaled_info, fix_info, size);
-    bm_type = DIB_GetBitmapInfo( &fix_info->bmiHeader, &width, &height,
-                                 &bpp_dummy, &compr_dummy);
-    if (bm_type == -1)
-    {
-        WARN("Invalid bitmap format!\n");
-        goto end;
-    }
 
     if(desiredx != 0)
         new_width = desiredx;
@@ -2429,15 +2332,6 @@ HANDLE WINAPI LoadImageW( HINSTANCE hinst, LPCWSTR name, UINT type,
     TRACE_(resource)("(%p,%s,%d,%d,%d,0x%08x)\n",
                      hinst,debugstr_w(name),type,desiredx,desiredy,loadflags);
 
-    if (loadflags & LR_DEFAULTSIZE) {
-        if (type == IMAGE_ICON) {
-            if (!desiredx) desiredx = GetSystemMetrics(SM_CXICON);
-            if (!desiredy) desiredy = GetSystemMetrics(SM_CYICON);
-        } else if (type == IMAGE_CURSOR) {
-            if (!desiredx) desiredx = GetSystemMetrics(SM_CXCURSOR);
-            if (!desiredy) desiredy = GetSystemMetrics(SM_CYCURSOR);
-        }
-    }
     if (loadflags & LR_LOADFROMFILE) loadflags &= ~LR_SHARED;
     switch (type) {
     case IMAGE_BITMAP:
@@ -2674,13 +2568,30 @@ HANDLE WINAPI CopyImage( HANDLE hnd, UINT type, INT desiredx,
             return res;
         }
         case IMAGE_ICON:
-                return CURSORICON_ExtCopy(hnd,type, desiredx, desiredy, flags);
         case IMAGE_CURSOR:
-                /* Should call CURSORICON_ExtCopy but more testing
-                 * needs to be done before we change this
-                 */
-                if (flags) FIXME("Flags are ignored\n");
-                return CopyCursor(hnd);
+        {
+            struct cursoricon_object *icon;
+            HICON res = 0;
+            int depth = (flags & LR_MONOCHROME) ? 1 : GetDeviceCaps( screen_dc, BITSPIXEL );
+
+            if (flags & LR_DEFAULTSIZE)
+            {
+                if (!desiredx) desiredx = GetSystemMetrics( type == IMAGE_ICON ? SM_CXICON : SM_CXCURSOR );
+                if (!desiredy) desiredy = GetSystemMetrics( type == IMAGE_ICON ? SM_CYICON : SM_CYCURSOR );
+            }
+
+            if (!(icon = get_icon_ptr( hnd ))) return 0;
+
+            if (icon->rsrc && (flags & LR_COPYFROMRESOURCE))
+                res = CURSORICON_Load( icon->module, icon->resname, desiredx, desiredy, depth,
+                                       type == IMAGE_CURSOR, flags );
+            else
+                res = CopyIcon( hnd ); /* FIXME: change size if necessary */
+            release_icon_ptr( hnd, icon );
+
+            if (res && (flags & LR_COPYDELETEORG)) DeleteObject( hnd );
+            return res;
+        }
     }
     return 0;
 }

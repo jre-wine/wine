@@ -1,11 +1,7 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = notepad.exe
 APPMODE   = -mwindows -mno-cygwin
-IMPORTS   = comdlg32 shell32 shlwapi user32 gdi32 advapi32 kernel32
-EXTRAINCL = -I$(TOPSRCDIR)/include/msvcrt
+IMPORTS   = comdlg32 shell32 shlwapi user32 gdi32 advapi32
+EXTRAINCL = -I$(top_srcdir)/include/msvcrt
 MODCFLAGS = @BUILTINFLAG@
 EXTRADEFS = -DNO_LIBWINE_PORT -DWINE_NO_UNICODE_MACROS
 
@@ -45,20 +41,12 @@ RC_SRCS = \
 	Uk.rc \
 	Wa.rc \
 	Zh.rc \
-	rsrc.rc
+	notepad.rc
 
-MANPAGES = notepad.man
+PO_SRCS = notepad.rc
+
+MANPAGE = notepad.man
 
 SVG_SRCS = notepad.svg
 
 @MAKE_PROG_RULES@
-
-all: $(MANPAGES)
-
-install-man-pages:: $(MANPAGES) $(DESTDIR)$(mandir)/man$(prog_manext)
-	$(INSTALL_DATA) notepad.man $(DESTDIR)$(mandir)/man$(prog_manext)/notepad.$(prog_manext)
-
-@WOW64_DISABLE@ install install-lib:: install-man-pages
-
-uninstall::
-	$(RM) $(DESTDIR)$(mandir)/man$(prog_manext)/notepad.$(prog_manext)

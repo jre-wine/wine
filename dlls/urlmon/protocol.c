@@ -23,36 +23,6 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(urlmon);
 
-/* Flags are needed for, among other things, return HRESULTs from the Read function
- * to conform to native. For example, Read returns:
- *
- * 1. E_PENDING if called before the request has completed,
- *        (flags = 0)
- * 2. S_FALSE after all data has been read and S_OK has been reported,
- *        (flags = FLAG_REQUEST_COMPLETE | FLAG_ALL_DATA_READ | FLAG_RESULT_REPORTED)
- * 3. INET_E_DATA_NOT_AVAILABLE if InternetQueryDataAvailable fails. The first time
- *    this occurs, INET_E_DATA_NOT_AVAILABLE will also be reported to the sink,
- *        (flags = FLAG_REQUEST_COMPLETE)
- *    but upon subsequent calls to Read no reporting will take place, yet
- *    InternetQueryDataAvailable will still be called, and, on failure,
- *    INET_E_DATA_NOT_AVAILABLE will still be returned.
- *        (flags = FLAG_REQUEST_COMPLETE | FLAG_RESULT_REPORTED)
- *
- * FLAG_FIRST_DATA_REPORTED and FLAG_LAST_DATA_REPORTED are needed for proper
- * ReportData reporting. For example, if OnResponse returns S_OK, Continue will
- * report BSCF_FIRSTDATANOTIFICATION, and when all data has been read Read will
- * report BSCF_INTERMEDIATEDATANOTIFICATION|BSCF_LASTDATANOTIFICATION. However,
- * if OnResponse does not return S_OK, Continue will not report data, and Read
- * will report BSCF_FIRSTDATANOTIFICATION|BSCF_LASTDATANOTIFICATION when all
- * data has been read.
- */
-#define FLAG_REQUEST_COMPLETE         0x0001
-#define FLAG_FIRST_CONTINUE_COMPLETE  0x0002
-#define FLAG_FIRST_DATA_REPORTED      0x0004
-#define FLAG_ALL_DATA_READ            0x0008
-#define FLAG_LAST_DATA_REPORTED       0x0010
-#define FLAG_RESULT_REPORTED          0x0020
-
 static inline HRESULT report_progress(Protocol *protocol, ULONG status_code, LPCWSTR status_text)
 {
     return IInternetProtocolSink_ReportProgress(protocol->protocol_sink, status_code, status_text);
@@ -104,25 +74,29 @@ static void request_complete(Protocol *protocol, INTERNET_ASYNC_RESULT *ar)
 {
     PROTOCOLDATA data;
 
-    if(!ar->dwResult) {
-        WARN("request failed: %d\n", ar->dwError);
-        return;
-    }
-
-    protocol->flags |= FLAG_REQUEST_COMPLETE;
-
-    if(!protocol->request) {
-        TRACE("setting request handle %p\n", (HINTERNET)ar->dwResult);
-        protocol->request = (HINTERNET)ar->dwResult;
-    }
+    TRACE("(%p)->(%p)\n", protocol, ar);
 
     /* PROTOCOLDATA same as native */
     memset(&data, 0, sizeof(data));
     data.dwState = 0xf1000000;
-    if(protocol->flags & FLAG_FIRST_CONTINUE_COMPLETE)
-        data.pData = (LPVOID)BINDSTATUS_ENDDOWNLOADCOMPONENTS;
-    else
-        data.pData = (LPVOID)BINDSTATUS_DOWNLOADINGDATA;
+
+    if(ar->dwResult) {
+        protocol->flags |= FLAG_REQUEST_COMPLETE;
+
+        if(!protocol->request) {
+            TRACE("setting request handle %p\n", (HINTERNET)ar->dwResult);
+            protocol->request = (HINTERNET)ar->dwResult;
+        }
+
+        if(protocol->flags & FLAG_FIRST_CONTINUE_COMPLETE)
+            data.pData = (LPVOID)BINDSTATUS_ENDDOWNLOADCOMPONENTS;
+        else
+            data.pData = (LPVOID)BINDSTATUS_DOWNLOADINGDATA;
+
+    }else {
+        protocol->flags |= FLAG_ERROR;
+        data.pData = (LPVOID)ar->dwError;
+    }
 
     if (protocol->bindf & BINDF_FROMURLMON)
         IInternetProtocolSink_Switch(protocol->protocol_sink, &data);
@@ -191,6 +165,42 @@ static void WINAPI internet_status_callback(HINTERNET internet, DWORD_PTR contex
     }
 }
 
+static HRESULT write_post_stream(Protocol *protocol)
+{
+    BYTE buf[0x20000];
+    DWORD written;
+    ULONG size;
+    BOOL res;
+    HRESULT hres;
+
+    protocol->flags &= ~FLAG_REQUEST_COMPLETE;
+
+    while(1) {
+        size = 0;
+        hres = IStream_Read(protocol->post_stream, buf, sizeof(buf), &size);
+        if(FAILED(hres) || !size)
+            break;
+        res = InternetWriteFile(protocol->request, buf, size, &written);
+        if(!res) {
+            FIXME("InternetWriteFile failed: %u\n", GetLastError());
+            hres = E_FAIL;
+            break;
+        }
+    }
+
+    if(SUCCEEDED(hres)) {
+        IStream_Release(protocol->post_stream);
+        protocol->post_stream = NULL;
+
+        hres = protocol->vtbl->end_request(protocol);
+    }
+
+    if(FAILED(hres))
+        return report_result(protocol, hres);
+
+    return S_OK;
+}
+
 static HINTERNET create_internet_session(IInternetBindInfo *bind_info)
 {
     LPWSTR global_user_agent = NULL;
@@ -234,7 +244,7 @@ HINTERNET get_internet_session(IInternetBindInfo *bind_info)
     return internet_session;
 }
 
-HRESULT protocol_start(Protocol *protocol, IInternetProtocol *prot, LPCWSTR url,
+HRESULT protocol_start(Protocol *protocol, IInternetProtocol *prot, IUri *uri,
         IInternetProtocolSink *protocol_sink, IInternetBindInfo *bind_info)
 {
     DWORD request_flags;
@@ -265,7 +275,7 @@ HRESULT protocol_start(Protocol *protocol, IInternetProtocol *prot, LPCWSTR url,
     if(protocol->bindf & BINDF_NEEDFILE)
         request_flags |= INTERNET_FLAG_NEED_FILE;
 
-    hres = protocol->vtbl->open_request(protocol, url, request_flags, internet_session, bind_info);
+    hres = protocol->vtbl->open_request(protocol, uri, request_flags, internet_session, bind_info);
     if(FAILED(hres)) {
         protocol_close_connection(protocol);
         return report_result(protocol, hres);
@@ -292,6 +302,15 @@ HRESULT protocol_continue(Protocol *protocol, PROTOCOLDATA *data)
         WARN("Expected IInternetProtocolSink pointer to be non-NULL\n");
         return S_OK;
     }
+
+    if(protocol->flags & FLAG_ERROR) {
+        protocol->flags &= ~FLAG_ERROR;
+        protocol->vtbl->on_error(protocol, (DWORD)data->pData);
+        return S_OK;
+    }
+
+    if(protocol->post_stream)
+        return write_post_stream(protocol);
 
     if(data->pData == (LPVOID)BINDSTATUS_DOWNLOADINGDATA) {
         hres = protocol->vtbl->start_downloading(protocol);
@@ -428,6 +447,18 @@ HRESULT protocol_unlock_request(Protocol *protocol)
     return S_OK;
 }
 
+HRESULT protocol_abort(Protocol *protocol, HRESULT reason)
+{
+    if(!protocol->protocol_sink)
+        return S_OK;
+
+    if(protocol->flags & FLAG_RESULT_REPORTED)
+        return INET_E_RESULT_DISPATCHED;
+
+    report_result(protocol, reason);
+    return S_OK;
+}
+
 void protocol_close_connection(Protocol *protocol)
 {
     protocol->vtbl->close_connection(protocol);
@@ -437,6 +468,11 @@ void protocol_close_connection(Protocol *protocol)
 
     if(protocol->connection)
         InternetCloseHandle(protocol->connection);
+
+    if(protocol->post_stream) {
+        IStream_Release(protocol->post_stream);
+        protocol->post_stream = NULL;
+    }
 
     protocol->flags = 0;
 }

@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = mpr.dll
 IMPORTLIB = mpr
-IMPORTS   = user32 advapi32 kernel32
+IMPORTS   = user32 advapi32
 
 C_SRCS = \
 	auth.c \
@@ -15,6 +11,7 @@ C_SRCS = \
 	wnet.c
 
 RC_SRCS = \
+	mpr.rc \
 	mpr_Bg.rc \
 	mpr_Cs.rc \
 	mpr_Da.rc \
@@ -23,6 +20,7 @@ RC_SRCS = \
 	mpr_Eo.rc \
 	mpr_Es.rc \
 	mpr_Fr.rc \
+	mpr_He.rc \
 	mpr_Hu.rc \
 	mpr_It.rc \
 	mpr_Ja.rc \
@@ -39,7 +37,8 @@ RC_SRCS = \
 	mpr_Sv.rc \
 	mpr_Tr.rc \
 	mpr_Uk.rc \
-	mpr_Zh.rc \
-	version.rc
+	mpr_Zh.rc
+
+PO_SRCS = mpr.rc
 
 @MAKE_DLL_RULES@

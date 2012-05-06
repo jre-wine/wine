@@ -1,43 +1,13 @@
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = uninstaller.exe
 APPMODE   = -mconsole -municode
-IMPORTS   = advapi32 kernel32
+IMPORTS   = advapi32
 DELAYIMPORTS = shlwapi shell32 user32 gdi32
 
 C_SRCS = \
 	main.c
 
-RC_SRCS = \
-	Bg.rc \
-	Cs.rc \
-	Cy.rc \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Eo.rc \
-	Es.rc \
-	Fi.rc \
-	Fr.rc \
-	Hu.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sr.rc \
-	Sv.rc \
-	Tr.rc \
-	Uk.rc \
-	Zh.rc
+RC_SRCS = uninstaller.rc
+PO_SRCS = uninstaller.rc
 
 @MAKE_PROG_RULES@

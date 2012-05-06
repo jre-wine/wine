@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = msftedit.dll
-IMPORTS   = uuid riched20 kernel32
+IMPORTS   = uuid riched20
 
 C_SRCS = \
 	msftedit_main.c

@@ -783,6 +783,26 @@ typedef enum _SYSTEM_INFORMATION_CLASS {
     SystemVerifierInformation = 51,
     SystemAddVerifier = 52,
     SystemSessionProcessesInformation	= 53,
+    Unknown54,
+    Unknown55,
+    Unknown56,
+    Unknown57,
+    Unknown58,
+    Unknown59,
+    Unknown60,
+    Unknown61,
+    Unknown62,
+    Unknown63,
+    Unknown64,
+    Unknown65,
+    Unknown66,
+    Unknown67,
+    Unknown68,
+    Unknown69,
+    Unknown70,
+    Unknown71,
+    Unknown72,
+    SystemLogicalProcessorInformation = 73,
     SystemInformationClassMax
 } SYSTEM_INFORMATION_CLASS, *PSYSTEM_INFORMATION_CLASS;
 
@@ -2477,7 +2497,9 @@ NTSYSAPI NTSTATUS  WINAPI RtlUnicodeToOemN(LPSTR,DWORD,LPDWORD,LPCWSTR,DWORD);
 NTSYSAPI ULONG     WINAPI RtlUniform(PULONG);
 NTSYSAPI BOOLEAN   WINAPI RtlUnlockHeap(HANDLE);
 NTSYSAPI void      WINAPI RtlUnwind(PVOID,PVOID,PEXCEPTION_RECORD,PVOID);
-#ifdef __ia64__
+#ifdef __x86_64__
+NTSYSAPI void      WINAPI RtlUnwindEx(PVOID,PVOID,PEXCEPTION_RECORD,PVOID,PCONTEXT,PUNWIND_HISTORY_TABLE);
+#elif defined(__ia64__)
 NTSYSAPI void      WINAPI RtlUnwind2(FRAME_POINTERS,PVOID,PEXCEPTION_RECORD,PVOID,PCONTEXT);
 NTSYSAPI void      WINAPI RtlUnwindEx(FRAME_POINTERS,PVOID,PEXCEPTION_RECORD,PVOID,PCONTEXT,PUNWIND_HISTORY_TABLE);
 #endif

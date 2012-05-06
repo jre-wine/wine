@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = mapi32.dll
 IMPORTLIB = mapi32
-IMPORTS   = uuid shlwapi shell32 user32 advapi32 kernel32
+IMPORTS   = uuid shlwapi shell32 user32 advapi32
 
 C_SRCS = \
 	imalloc.c \
@@ -13,29 +9,7 @@ C_SRCS = \
 	sendmail.c \
 	util.c
 
-RC_SRCS = \
-	Cy.rc \
-	Da.rc \
-	De.rc \
-	En.rc \
-	Es.rc \
-	Fr.rc \
-	Ga.rc \
-	Hu.rc \
-	It.rc \
-	Ja.rc \
-	Ko.rc \
-	Lt.rc \
-	Nl.rc \
-	No.rc \
-	Pl.rc \
-	Pt.rc \
-	Ro.rc \
-	Ru.rc \
-	Si.rc \
-	Sr.rc \
-	Sv.rc \
-	Uk.rc \
-	version.rc
+RC_SRCS = mapi32.rc
+PO_SRCS = mapi32.rc
 
 @MAKE_DLL_RULES@

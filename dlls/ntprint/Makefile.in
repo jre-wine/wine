@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = ntprint.dll
-IMPORTS   = winspool kernel32
+IMPORTS   = winspool
 
 C_SRCS = \
 	ntprint.c

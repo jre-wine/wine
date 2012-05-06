@@ -1,11 +1,7 @@
 EXTRADEFS = -D_WINX32_
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = wininet.dll
 IMPORTLIB = wininet
-IMPORTS   = mpr shlwapi shell32 user32 advapi32 kernel32 ntdll
+IMPORTS   = mpr shlwapi shell32 user32 advapi32
 DELAYIMPORTS = secur32 crypt32
 EXTRALIBS = @SOCKETLIBS@ @ZLIB@
 
@@ -22,7 +18,7 @@ C_SRCS = \
 	wininet_main.c
 
 RC_SRCS = \
-	version.rc \
+	wininet.rc \
 	wininet_Bg.rc \
 	wininet_Cs.rc \
 	wininet_Da.rc \
@@ -32,6 +28,7 @@ RC_SRCS = \
 	wininet_Es.rc \
 	wininet_Fi.rc \
 	wininet_Fr.rc \
+	wininet_He.rc \
 	wininet_Hu.rc \
 	wininet_It.rc \
 	wininet_Ja.rc \
@@ -49,5 +46,7 @@ RC_SRCS = \
 	wininet_Tr.rc \
 	wininet_Uk.rc \
 	wininet_Zh.rc
+
+PO_SRCS = wininet.rc
 
 @MAKE_DLL_RULES@

@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = mmdevapi.dll
-IMPORTS   = ole32 version user32 kernel32
+IMPORTS   = ole32 version user32
 
 C_SRCS = \
 	capture.c \

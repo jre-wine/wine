@@ -116,6 +116,10 @@ static const WCHAR prop_olemenuW[] =
 static const WCHAR prop_oledroptarget[] =
   {'O','l','e','D','r','o','p','T','a','r','g','e','t','I','n','t','e','r','f','a','c','e',0};
 
+/* property to store Marshalled IDropTarget pointer */
+static const WCHAR prop_marshalleddroptarget[] =
+  {'W','i','n','e','M','a','r','s','h','a','l','l','e','d','D','r','o','p','T','a','r','g','e','t',0};
+
 static const WCHAR clsidfmtW[] =
   {'C','L','S','I','D','\\','{','%','0','8','x','-','%','0','4','x','-','%','0','4','x','-',
    '%','0','2','x','%','0','2','x','-','%','0','2','x','%','0','2','x','%','0','2','x','%','0','2','x',
@@ -266,14 +270,134 @@ HRESULT WINAPI OleInitializeWOW(DWORD x, DWORD y) {
         return 0;
 }
 
-/***
- * OLEDD_FindDropTarget()
+/*************************************************************
+ *           get_droptarget_handle
  *
- * Returns IDropTarget pointer registered for this window.
+ * Retrieve a handle to the map containing the marshalled IDropTarget.
+ * This handle belongs to the process that called RegisterDragDrop.
+ * See get_droptarget_local_handle().
  */
-static inline IDropTarget* OLEDD_FindDropTarget(HWND hwnd)
+static inline HANDLE get_droptarget_handle(HWND hwnd)
 {
-  return GetPropW(hwnd, prop_oledroptarget);
+    return GetPropW(hwnd, prop_marshalleddroptarget);
+}
+
+/*************************************************************
+ *           is_droptarget
+ *
+ * Is the window a droptarget.
+ */
+static inline BOOL is_droptarget(HWND hwnd)
+{
+    return get_droptarget_handle(hwnd) ? TRUE : FALSE;
+}
+
+/*************************************************************
+ *           get_droptarget_local_handle
+ *
+ * Retrieve a handle to the map containing the marshalled IDropTarget.
+ * The handle should be closed when finished with.
+ */
+static HANDLE get_droptarget_local_handle(HWND hwnd)
+{
+    HANDLE handle, local_handle = 0;
+
+    handle = get_droptarget_handle(hwnd);
+
+    if(handle)
+    {
+        DWORD pid;
+        HANDLE process;
+
+        GetWindowThreadProcessId(hwnd, &pid);
+        process = OpenProcess(PROCESS_DUP_HANDLE, FALSE, pid);
+        if(process)
+        {
+            DuplicateHandle(process, handle, GetCurrentProcess(), &local_handle, 0, FALSE, DUPLICATE_SAME_ACCESS);
+            CloseHandle(process);
+        }
+    }
+    return local_handle;
+}
+
+/***********************************************************************
+ *     create_map_from_stream
+ *
+ * Helper for RegisterDragDrop.  Creates a file mapping object
+ * with the contents of the provided stream.  The stream must
+ * be a global memory backed stream.
+ */
+static HRESULT create_map_from_stream(IStream *stream, HANDLE *map)
+{
+    HGLOBAL hmem;
+    DWORD size;
+    HRESULT hr;
+    void *data;
+
+    hr = GetHGlobalFromStream(stream, &hmem);
+    if(FAILED(hr)) return hr;
+
+    size = GlobalSize(hmem);
+    *map = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, NULL);
+    if(!*map) return E_OUTOFMEMORY;
+
+    data = MapViewOfFile(*map, FILE_MAP_WRITE, 0, 0, size);
+    memcpy(data, GlobalLock(hmem), size);
+    GlobalUnlock(hmem);
+    UnmapViewOfFile(data);
+    return S_OK;
+}
+
+/***********************************************************************
+ *     create_stream_from_map
+ *
+ * Creates a stream from the provided map.
+ */
+static HRESULT create_stream_from_map(HANDLE map, IStream **stream)
+{
+    HRESULT hr = E_OUTOFMEMORY;
+    HGLOBAL hmem;
+    void *data;
+    MEMORY_BASIC_INFORMATION info;
+
+    data = MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
+    if(!data) return hr;
+
+    VirtualQuery(data, &info, sizeof(info));
+    TRACE("size %d\n", (int)info.RegionSize);
+
+    hmem = GlobalAlloc(GMEM_MOVEABLE, info.RegionSize);
+    if(hmem)
+    {
+        memcpy(GlobalLock(hmem), data, info.RegionSize);
+        GlobalUnlock(hmem);
+        hr = CreateStreamOnHGlobal(hmem, TRUE, stream);
+    }
+    UnmapViewOfFile(data);
+    return hr;
+}
+
+/***********************************************************************
+ *     get_droptarget_pointer
+ *
+ * Retrieves the marshalled IDropTarget from the window.
+ */
+static IDropTarget* get_droptarget_pointer(HWND hwnd)
+{
+    IDropTarget *droptarget = NULL;
+    HANDLE map;
+    IStream *stream;
+
+    map = get_droptarget_local_handle(hwnd);
+    if(!map) return NULL;
+
+    if(SUCCEEDED(create_stream_from_map(map, &stream)))
+    {
+        CoUnmarshalInterface(stream, &IID_IDropTarget, (void**)&droptarget);
+        IStream_Release(stream);
+    }
+    CloseHandle(map);
+    return droptarget;
 }
 
 /***********************************************************************
@@ -282,6 +406,10 @@ static inline IDropTarget* OLEDD_FindDropTarget(HWND hwnd)
 HRESULT WINAPI RegisterDragDrop(HWND hwnd, LPDROPTARGET pDropTarget)
 {
   DWORD pid = 0;
+  HRESULT hr;
+  IStream *stream;
+  HANDLE map;
+  IUnknown *unk;
 
   TRACE("(%p,%p)\n", hwnd, pDropTarget);
 
@@ -309,13 +437,50 @@ HRESULT WINAPI RegisterDragDrop(HWND hwnd, LPDROPTARGET pDropTarget)
   }
 
   /* check if the window is already registered */
-  if (OLEDD_FindDropTarget(hwnd))
+  if (is_droptarget(hwnd))
     return DRAGDROP_E_ALREADYREGISTERED;
 
-  IDropTarget_AddRef(pDropTarget);
-  SetPropW(hwnd, prop_oledroptarget, pDropTarget);
+  /*
+   * Marshal the drop target pointer into a shared memory map and
+   * store the map's handle in a Wine specific window prop.  We also
+   * store the drop target pointer itself in the
+   * "OleDropTargetInterface" prop for compatibility with Windows.
+   */
 
-  return S_OK;
+  hr = CreateStreamOnHGlobal(NULL, TRUE, &stream);
+  if(FAILED(hr)) return hr;
+
+  unk = NULL;
+  hr = IDropTarget_QueryInterface(pDropTarget, &IID_IUnknown, (void**)&unk);
+  if (SUCCEEDED(hr) && !unk) hr = E_NOINTERFACE;
+  if(FAILED(hr))
+  {
+      IStream_Release(stream);
+      return hr;
+  }
+  hr = CoMarshalInterface(stream, &IID_IDropTarget, unk, MSHCTX_LOCAL, NULL, MSHLFLAGS_TABLESTRONG);
+  IUnknown_Release(unk);
+
+  if(SUCCEEDED(hr))
+  {
+    hr = create_map_from_stream(stream, &map);
+    if(SUCCEEDED(hr))
+    {
+      IDropTarget_AddRef(pDropTarget);
+      SetPropW(hwnd, prop_oledroptarget, pDropTarget);
+      SetPropW(hwnd, prop_marshalleddroptarget, map);
+    }
+    else
+    {
+      LARGE_INTEGER zero;
+      zero.QuadPart = 0;
+      IStream_Seek(stream, zero, STREAM_SEEK_SET, NULL);
+      CoReleaseMarshalData(stream);
+    }
+  }
+  IStream_Release(stream);
+
+  return hr;
 }
 
 /***********************************************************************
@@ -323,7 +488,10 @@ HRESULT WINAPI RegisterDragDrop(HWND hwnd, LPDROPTARGET pDropTarget)
  */
 HRESULT WINAPI RevokeDragDrop(HWND hwnd)
 {
-  IDropTarget* droptarget;
+  HANDLE map;
+  IStream *stream;
+  IDropTarget *drop_target;
+  HRESULT hr;
 
   TRACE("(%p)\n", hwnd);
 
@@ -334,13 +502,24 @@ HRESULT WINAPI RevokeDragDrop(HWND hwnd)
   }
 
   /* no registration data */
-  if (!(droptarget = OLEDD_FindDropTarget(hwnd)))
+  if (!(map = get_droptarget_handle(hwnd)))
     return DRAGDROP_E_NOTREGISTERED;
 
-  IDropTarget_Release(droptarget);
-  RemovePropW(hwnd, prop_oledroptarget);
+  drop_target = GetPropW(hwnd, prop_oledroptarget);
+  if(drop_target) IDropTarget_Release(drop_target);
 
-  return S_OK;
+  RemovePropW(hwnd, prop_oledroptarget);
+  RemovePropW(hwnd, prop_marshalleddroptarget);
+
+  hr = create_stream_from_map(map, &stream);
+  if(SUCCEEDED(hr))
+  {
+      CoReleaseMarshalData(stream);
+      IStream_Release(stream);
+  }
+  CloseHandle(map);
+
+  return hr;
 }
 
 /***********************************************************************
@@ -633,12 +812,17 @@ static HRESULT EnumOLEVERB_Construct(HKEY hkeyVerb, ULONG index, IEnumOLEVERB **
 
 typedef struct
 {
-    const IEnumOLEVERBVtbl *lpvtbl;
+    IEnumOLEVERB IEnumOLEVERB_iface;
     LONG ref;
 
     HKEY hkeyVerb;
     ULONG index;
 } EnumOLEVERB;
+
+static inline EnumOLEVERB *impl_from_IEnumOLEVERB(IEnumOLEVERB *iface)
+{
+    return CONTAINING_RECORD(iface, EnumOLEVERB, IEnumOLEVERB_iface);
+}
 
 static HRESULT WINAPI EnumOLEVERB_QueryInterface(
     IEnumOLEVERB *iface, REFIID riid, void **ppv)
@@ -657,7 +841,7 @@ static HRESULT WINAPI EnumOLEVERB_QueryInterface(
 static ULONG WINAPI EnumOLEVERB_AddRef(
     IEnumOLEVERB *iface)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
     TRACE("()\n");
     return InterlockedIncrement(&This->ref);
 }
@@ -665,7 +849,7 @@ static ULONG WINAPI EnumOLEVERB_AddRef(
 static ULONG WINAPI EnumOLEVERB_Release(
     IEnumOLEVERB *iface)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
     LONG refs = InterlockedDecrement(&This->ref);
     TRACE("()\n");
     if (!refs)
@@ -680,7 +864,7 @@ static HRESULT WINAPI EnumOLEVERB_Next(
     IEnumOLEVERB *iface, ULONG celt, LPOLEVERB rgelt,
     ULONG *pceltFetched)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
     HRESULT hr = S_OK;
 
     TRACE("(%d, %p, %p)\n", celt, rgelt, pceltFetched);
@@ -767,7 +951,7 @@ static HRESULT WINAPI EnumOLEVERB_Next(
 static HRESULT WINAPI EnumOLEVERB_Skip(
     IEnumOLEVERB *iface, ULONG celt)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
 
     TRACE("(%d)\n", celt);
 
@@ -778,7 +962,7 @@ static HRESULT WINAPI EnumOLEVERB_Skip(
 static HRESULT WINAPI EnumOLEVERB_Reset(
     IEnumOLEVERB *iface)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
 
     TRACE("()\n");
 
@@ -790,7 +974,7 @@ static HRESULT WINAPI EnumOLEVERB_Clone(
     IEnumOLEVERB *iface,
     IEnumOLEVERB **ppenum)
 {
-    EnumOLEVERB *This = (EnumOLEVERB *)iface;
+    EnumOLEVERB *This = impl_from_IEnumOLEVERB(iface);
     HKEY hkeyVerb;
     TRACE("(%p)\n", ppenum);
     if (!DuplicateHandle(GetCurrentProcess(), This->hkeyVerb, GetCurrentProcess(), (HANDLE *)&hkeyVerb, 0, FALSE, DUPLICATE_SAME_ACCESS))
@@ -817,12 +1001,12 @@ static HRESULT EnumOLEVERB_Construct(HKEY hkeyVerb, ULONG index, IEnumOLEVERB **
         RegCloseKey(hkeyVerb);
         return E_OUTOFMEMORY;
     }
-    This->lpvtbl = &EnumOLEVERB_VTable;
+    This->IEnumOLEVERB_iface.lpVtbl = &EnumOLEVERB_VTable;
     This->ref = 1;
     This->index = index;
     This->hkeyVerb = hkeyVerb;
-    *ppenum = (IEnumOLEVERB *)&This->lpvtbl;
-    return S_OK;    
+    *ppenum = &This->IEnumOLEVERB_iface;
+    return S_OK;
 }
 
 /***********************************************************************
@@ -1002,13 +1186,12 @@ HRESULT WINAPI OleLoad(
     }
   }
 
-  if (SUCCEEDED(hres))
-    /*
-     * Initialize the object with it's IPersistStorage interface.
-     */
-    hres = IOleObject_QueryInterface(pUnk,
-				     &IID_IPersistStorage,
-				     (void**)&persistStorage);
+  /*
+   * Initialize the object with its IPersistStorage interface.
+   */
+  hres = IOleObject_QueryInterface(pUnk,
+                                   &IID_IPersistStorage,
+                                   (void**)&persistStorage);
 
   if (SUCCEEDED(hres))
   {
@@ -1975,30 +2158,17 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
        * Find-out if there is a drag target under the mouse
        */
       HWND next_target_wnd = hwndNewTarget;
-      IDropTarget *new_target;
-      DWORD pid;
 
       trackerInfo->curTargetHWND = hwndNewTarget;
 
-      do {
-	new_target = OLEDD_FindDropTarget(next_target_wnd);
-      } while (!new_target && (next_target_wnd = GetParent(next_target_wnd)));
+      while (next_target_wnd && !is_droptarget(next_target_wnd))
+          next_target_wnd = GetParent(next_target_wnd);
 
       if (next_target_wnd) hwndNewTarget = next_target_wnd;
 
-      GetWindowThreadProcessId(hwndNewTarget, &pid);
-      if (pid != GetCurrentProcessId())
-      {
-        FIXME("drop to another process window is unsupported\n");
-        trackerInfo->curDragTargetHWND = 0;
-        trackerInfo->curTargetHWND     = 0;
-        trackerInfo->curDragTarget     = 0;
-      }
-      else
-      {
-        trackerInfo->curDragTargetHWND = hwndNewTarget;
-        trackerInfo->curDragTarget     = new_target;
-      }
+      trackerInfo->curDragTargetHWND = hwndNewTarget;
+      if(trackerInfo->curDragTarget) IDropTarget_Release(trackerInfo->curDragTarget);
+      trackerInfo->curDragTarget     = get_droptarget_pointer(hwndNewTarget);
 
       /*
        * If there is, notify it that we just dragged-in
@@ -2016,6 +2186,7 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
         {
           trackerInfo->curDragTargetHWND = 0;
           trackerInfo->curTargetHWND     = 0;
+          IDropTarget_Release(trackerInfo->curDragTarget);
           trackerInfo->curDragTarget     = 0;
         }
       }
@@ -2027,6 +2198,7 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
        */
       trackerInfo->curDragTargetHWND = 0;
       trackerInfo->curTargetHWND     = 0;
+      if(trackerInfo->curDragTarget) IDropTarget_Release(trackerInfo->curDragTarget);
       trackerInfo->curDragTarget     = 0;
     }
   }
@@ -2056,19 +2228,19 @@ static void OLEDD_TrackMouseMove(TrackerWindowInfo* trackerInfo)
 
     if (*trackerInfo->pdwEffect & DROPEFFECT_MOVE)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(1));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(2));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_COPY)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(2));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(3));
     }
     else if (*trackerInfo->pdwEffect & DROPEFFECT_LINK)
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(3));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(4));
     }
     else
     {
-      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(0));
+      hCur = LoadCursorW(hProxyDll, MAKEINTRESOURCEW(1));
     }
 
     SetCursor(hCur);
@@ -2362,7 +2534,17 @@ HRESULT WINAPI OleCreate(
             if (SUCCEEDED(hres2))
             {
                 DWORD dwConnection;
-                hres = IOleCache_Cache(pOleCache, pFormatEtc, ADVF_PRIMEFIRST, &dwConnection);
+                if (renderopt == OLERENDER_DRAW && !pFormatEtc) {
+                    FORMATETC pfe;
+                    pfe.cfFormat = 0;
+                    pfe.ptd = NULL;
+                    pfe.dwAspect = DVASPECT_CONTENT;
+                    pfe.lindex = -1;
+                    pfe.tymed = TYMED_NULL;
+                    hres = IOleCache_Cache(pOleCache, &pfe, ADVF_PRIMEFIRST, &dwConnection);
+                }
+                else
+                    hres = IOleCache_Cache(pOleCache, pFormatEtc, ADVF_PRIMEFIRST, &dwConnection);
                 IOleCache_Release(pOleCache);
             }
         }

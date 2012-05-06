@@ -45,6 +45,11 @@
 #define IDC_INFO_COMMENTS   1107
 #define IDC_INFO_LABEL      1108
 
+#define ID_DWL_DIALOG       1200
+#define ID_DWL_PROGRESS     1201
+#define ID_DWL_INSTALL      1202
+#define ID_DWL_STATUS       1203
+
 /* Icons */
 
 #define ICO_MAIN               1
@@ -58,6 +63,11 @@
 #define IDS_COLUMN_NAME        6
 #define IDS_COLUMN_PUBLISHER   7
 #define IDS_COLUMN_VERSION     8
-#define IDS_INSTALL_FILTER     9
-#define IDS_REMOVE             10
-#define IDS_MODIFY_REMOVE      11
+#define IDS_FILTER_INSTALLS    9
+#define IDS_FILTER_PROGRAMS    10
+#define IDS_FILTER_ALL         11
+#define IDS_REMOVE             12
+#define IDS_MODIFY_REMOVE      13
+#define IDS_DOWNLOADING        14
+#define IDS_INSTALLING         15
+#define IDS_INVALID_SHA        16

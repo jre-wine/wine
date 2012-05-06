@@ -27,23 +27,26 @@
 #include "winbase.h"
 #include "objbase.h"
 #include "wbemcli.h"
+#include "rpcproxy.h"
 
 #include "wbemprox_private.h"
 #include "wine/debug.h"
 
 WINE_DEFAULT_DEBUG_CHANNEL(wbemprox);
 
+static HINSTANCE instance;
+
 typedef HRESULT (*fnCreateInstance)( IUnknown *pUnkOuter, LPVOID *ppObj );
 
 typedef struct
 {
-    const struct IClassFactoryVtbl *vtbl;
+    IClassFactory IClassFactory_iface;
     fnCreateInstance pfnCreateInstance;
 } wbemprox_cf;
 
 static inline wbemprox_cf *impl_from_IClassFactory( IClassFactory *iface )
 {
-    return (wbemprox_cf *)((char *)iface - FIELD_OFFSET( wbemprox_cf, vtbl ));
+    return CONTAINING_RECORD(iface, wbemprox_cf, IClassFactory_iface);
 }
 
 static HRESULT WINAPI wbemprox_cf_QueryInterface( IClassFactory *iface, REFIID riid, LPVOID *ppobj )
@@ -110,7 +113,7 @@ static const struct IClassFactoryVtbl wbemprox_cf_vtbl =
     wbemprox_cf_LockServer
 };
 
-static wbemprox_cf wbem_locator_cf = { &wbemprox_cf_vtbl, WbemLocator_create };
+static wbemprox_cf wbem_locator_cf = { { &wbemprox_cf_vtbl }, WbemLocator_create };
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
@@ -120,6 +123,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
         case DLL_WINE_PREATTACH:
             return FALSE;    /* prefer native version */
         case DLL_PROCESS_ATTACH:
+            instance = hinstDLL;
             DisableThreadLibraryCalls(hinstDLL);
             break;
         case DLL_PROCESS_DETACH:
@@ -137,13 +141,32 @@ HRESULT WINAPI DllGetClassObject( REFCLSID rclsid, REFIID iid, LPVOID *ppv )
 
     if (IsEqualGUID( rclsid, &CLSID_WbemLocator ))
     {
-       cf = (IClassFactory *)&wbem_locator_cf.vtbl;
+       cf = &wbem_locator_cf.IClassFactory_iface;
     }
     if (!cf) return CLASS_E_CLASSNOTAVAILABLE;
     return IClassFactory_QueryInterface( cf, iid, ppv );
 }
 
+/***********************************************************************
+ *              DllCanUnloadNow (WBEMPROX.@)
+ */
 HRESULT WINAPI DllCanUnloadNow( void )
 {
     return S_FALSE;
+}
+
+/***********************************************************************
+ *		DllRegisterServer (WBEMPROX.@)
+ */
+HRESULT WINAPI DllRegisterServer(void)
+{
+    return __wine_register_resources( instance, NULL );
+}
+
+/***********************************************************************
+ *		DllUnregisterServer (WBEMPROX.@)
+ */
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return __wine_unregister_resources( instance, NULL );
 }

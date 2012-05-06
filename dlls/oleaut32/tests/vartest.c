@@ -24,6 +24,8 @@
 #include <math.h>
 #include <float.h>
 
+#define CONST_VTABLE
+
 #include "windef.h"
 #include "winbase.h"
 #include "winsock.h"
@@ -104,7 +106,7 @@ static void init(void)
     HRESULT res;
 
     res = VarBstrFromBool(VARIANT_TRUE, LANG_USER_DEFAULT, VAR_LOCALBOOL, &bstr);
-    ok(SUCCEEDED(res) && (lstrlenW(bstr) > 0),
+    ok(res == S_OK && (lstrlenW(bstr) > 0),
         "Expected localized string for 'True'\n");
     /* lstrcpyW / lstrcatW do not work on win95 */
     memcpy(sz12_true, sz12, sizeof(sz12));
@@ -112,7 +114,7 @@ static void init(void)
     SysFreeString(bstr);
 
     res = VarBstrFromBool(VARIANT_FALSE, LANG_USER_DEFAULT, VAR_LOCALBOOL, &bstr);
-    ok(SUCCEEDED(res) && (lstrlenW(bstr) > 0),
+    ok(res == S_OK && (lstrlenW(bstr) > 0),
         "Expected localized string for 'False'\n");
     memcpy(sz12_false, sz12, sizeof(sz12));
     if (bstr) memcpy(&sz12_false[2], bstr, SysStringByteLen(bstr) + sizeof(WCHAR));
@@ -399,26 +401,31 @@ static int IsValidVariantClearVT(VARTYPE vt, VARTYPE extraFlags)
 
 typedef struct
 {
-    const IUnknownVtbl *lpVtbl;
-    LONG               ref;
-    LONG               events;
+    IUnknown IUnknown_iface;
+    LONG     ref;
+    LONG     events;
 } test_VariantClearImpl;
+
+static inline test_VariantClearImpl *impl_from_IUnknown(IUnknown *iface)
+{
+    return CONTAINING_RECORD(iface, test_VariantClearImpl, IUnknown_iface);
+}
 
 static HRESULT WINAPI VC_QueryInterface(LPUNKNOWN iface,REFIID riid,LPVOID *ppobj)
 {
-    test_VariantClearImpl *This = (test_VariantClearImpl *)iface;
+    test_VariantClearImpl *This = impl_from_IUnknown(iface);
     This->events |= 0x1;
     return E_NOINTERFACE;
 }
 
 static ULONG WINAPI VC_AddRef(LPUNKNOWN iface) {
-    test_VariantClearImpl *This = (test_VariantClearImpl *)iface;
+    test_VariantClearImpl *This = impl_from_IUnknown(iface);
     This->events |= 0x2;
     return InterlockedIncrement(&This->ref);
 }
 
 static ULONG WINAPI VC_Release(LPUNKNOWN iface) {
-    test_VariantClearImpl *This = (test_VariantClearImpl *)iface;
+    test_VariantClearImpl *This = impl_from_IUnknown(iface);
     /* static class, won't be  freed */
     This->events |= 0x4;
     return InterlockedDecrement(&This->ref);
@@ -430,7 +437,7 @@ static const IUnknownVtbl test_VariantClear_vtbl = {
     VC_Release,
 };
 
-static test_VariantClearImpl test_myVariantClearImpl = {&test_VariantClear_vtbl, 1, 0};
+static test_VariantClearImpl test_myVariantClearImpl = {{&test_VariantClear_vtbl}, 1, 0};
 
 static void test_VariantClear(void)
 {
@@ -442,7 +449,8 @@ static void test_VariantClear(void)
   IUnknown *punk;
 
   /* Crashes: Native does not test input for NULL, so neither does Wine */
-  if (0) hres = VariantClear(NULL);
+  if (0)
+      VariantClear(NULL);
 
   /* Only the type field is set, to VT_EMPTY */
   V_VT(&v) = VT_UI4;
@@ -509,17 +517,17 @@ static void test_VariantClear(void)
 
   /* UNKNOWN */
   V_VT(&v) = VT_UNKNOWN;
-  V_UNKNOWN(&v) = (IUnknown*)&test_myVariantClearImpl;
+  V_UNKNOWN(&v) = &test_myVariantClearImpl.IUnknown_iface;
   test_myVariantClearImpl.events = 0;
   hres = VariantClear(&v);
   ok(hres == S_OK, "ret %08x\n", hres);
   ok(V_VT(&v) == 0, "vt %04x\n", V_VT(&v));
-  ok(V_UNKNOWN(&v) == (IUnknown*)&test_myVariantClearImpl, "unknown %p\n", V_UNKNOWN(&v));
+  ok(V_UNKNOWN(&v) == &test_myVariantClearImpl.IUnknown_iface, "unknown %p\n", V_UNKNOWN(&v));
   /* Check that Release got called, but nothing else */
   ok(test_myVariantClearImpl.events ==  0x4, "Unexpected call. events %08x\n", test_myVariantClearImpl.events);
 
   /* UNKNOWN BYREF */
-  punk = (IUnknown*)&test_myVariantClearImpl;
+  punk = &test_myVariantClearImpl.IUnknown_iface;
   V_VT(&v) = VT_UNKNOWN | VT_BYREF;
   V_UNKNOWNREF(&v) = &punk;
   test_myVariantClearImpl.events = 0;
@@ -542,7 +550,7 @@ static void test_VariantClear(void)
   ok(test_myVariantClearImpl.events ==  0x4, "Unexpected call. events %08x\n", test_myVariantClearImpl.events);
 
   /* DISPATCH BYREF */
-  punk = (IUnknown*)&test_myVariantClearImpl;
+  punk = &test_myVariantClearImpl.IUnknown_iface;
   V_VT(&v) = VT_DISPATCH | VT_BYREF;
   V_DISPATCHREF(&v) = (IDispatch**)&punk;
   test_myVariantClearImpl.events = 0;
@@ -854,6 +862,7 @@ static void test_VariantCopyInd(void)
   VariantInit(&vDst);
 
   hres = VariantCopyInd(&vDst, &vSrc);
+  ok(hres == S_OK, "VariantCopyInd failed: 0x%08x\n", hres);
   ok(V_VT(&vDst) == VT_UI1 && V_UI1(&vDst) == 0x77,
      "CopyInd(deref): expected dst vt = VT_UI1, val 0x77, got %d|0x%X, 0x%2X\n",
       V_VT(&vDst) & VT_TYPEMASK, V_VT(&vDst) & ~VT_TYPEMASK, V_UI1(&vDst));
@@ -866,6 +875,7 @@ static void test_VariantCopyInd(void)
   VariantInit(&vDst);
 
   hres = VariantCopyInd(&vDst, &vSrc);
+  ok(hres == S_OK, "VariantCopyInd failed: 0x%08x\n", hres);
   ok(V_VT(&vDst) == VT_UI1 && V_UI1(&vDst) == 0x88,
      "CopyInd(deref): expected dst vt = VT_UI1, val 0x77, got %d|0x%X, 0x%2X\n",
       V_VT(&vDst) & VT_TYPEMASK, V_VT(&vDst) & ~VT_TYPEMASK, V_UI1(&vDst));
@@ -1575,15 +1585,13 @@ static void test_UdateFromDate( int line, DATE dt, ULONG flags, HRESULT r, WORD 
 
     memset(&ud, 0, sizeof(ud));
     res = pVarUdateFromDate(dt, flags, &ud);
-    ok_(__FILE__,line)(r == res, "Wrong result %x/%x\n", r, res);
-    if (SUCCEEDED(res))
-        ok_(__FILE__,line)(ud.st.wYear == y && ud.st.wMonth == m && ud.st.wDay == d &&
-                           ud.st.wHour == h && ud.st.wMinute == mn && ud.st.wSecond == s &&
-                           ud.st.wMilliseconds == ms && ud.st.wDayOfWeek == dw && ud.wDayOfYear == dy,
-                           "%.16g expected %d,%d,%d,%d,%d,%d,%d  %d %d, got %d,%d,%d,%d,%d,%d,%d  %d %d\n",
-                           dt, d, m, y, h, mn, s, ms, dw, dy,
-                           ud.st.wDay, ud.st.wMonth, ud.st.wYear, ud.st.wHour, ud.st.wMinute,
-                           ud.st.wSecond, ud.st.wMilliseconds, ud.st.wDayOfWeek, ud.wDayOfYear );
+    ok_(__FILE__,line)(r == res && (res != S_OK || (ud.st.wYear == y && ud.st.wMonth == m && ud.st.wDay == d &&
+                       ud.st.wHour == h && ud.st.wMinute == mn && ud.st.wSecond == s &&
+                       ud.st.wMilliseconds == ms && ud.st.wDayOfWeek == dw && ud.wDayOfYear == dy)),
+                       "%.16g expected res(%x) %d,%d,%d,%d,%d,%d,%d  %d %d, got res(%x) %d,%d,%d,%d,%d,%d,%d  %d %d\n",
+                       dt, r, d, m, y, h, mn, s, ms, dw, dy,
+                       res, ud.st.wDay, ud.st.wMonth, ud.st.wYear, ud.st.wHour, ud.st.wMinute,
+                       ud.st.wSecond, ud.st.wMilliseconds, ud.st.wDayOfWeek, ud.wDayOfYear );
 }
 #define DT2UD(dt,flags,r,d,m,y,h,mn,s,ms,dw,dy) test_UdateFromDate(__LINE__,dt,flags,r,d,m,y,h,mn,s,ms,dw,dy)
 
@@ -1609,6 +1617,15 @@ static void test_VarUdateFromDate(void)
   DT2UD(29221.5,0,S_OK,1,1,1980,12,0,0,0,2,1);           /* 12 AM */
   DT2UD(29221.9888884444,0,S_OK,1,1,1980,23,44,0,0,2,1); /* 11:44 PM */
   DT2UD(29221.7508765432,0,S_OK,1,1,1980,18,1,16,0,2,1); /* 6:18:02 PM */
+
+  /* Test handling of times on dates prior to the epoch */
+  DT2UD(-5.25,0,S_OK,25,12,1899,6,0,0,0,1,359);
+  DT2UD(-5.9999884259259,0,S_OK,25,12,1899,23,59,59,0,1,359);
+  /* This just demostrates the non-linear nature of values prior to the epoch */
+  DT2UD(-4.0,0,S_OK,26,12,1899,0,0,0,0,2,360);
+  /* Numerical oddity: for 0.0 < x < 1.0, x and -x represent the same datetime */
+  DT2UD(-0.25,0,S_OK,30,12,1899,6,0,0,0,6,364);
+  DT2UD(0.25,0,S_OK,30,12,1899,6,0,0,0,6,364);
 }
 
 
@@ -1629,7 +1646,7 @@ static void test_DateFromUDate( int line, WORD d, WORD m, WORD y, WORD h, WORD m
     ud.st.wDayOfWeek = dw;
     ud.wDayOfYear = dy;
     res = pVarDateFromUdate(&ud, flags, &out);
-    ok_(__FILE__,line)(r == res && (FAILED(r) || EQ_DOUBLE(out, dt)),
+    ok_(__FILE__,line)(r == res && (r != S_OK || EQ_DOUBLE(out, dt)),
                        "expected %x, %.16g, got %x, %.16g\n", r, dt, res, out);
 }
 #define UD2T(d,m,y,h,mn,s,ms,dw,dy,flags,r,dt) test_DateFromUDate(__LINE__,d,m,y,h,mn,s,ms,dw,dy,flags,r,dt)
@@ -1672,6 +1689,15 @@ static void test_VarDateFromUdate(void)
   UD2T(1,1,-1,18,1,16,0,0,0,0,S_OK,36161.75087962963);               /* Test year -1 = 1999 */
   UD2T(1,-1,1980,18,1,16,0,0,0,0,S_OK,29160.7508796296);             /* Test month -1 = 11 */
   UD2T(1,13,1980,0,0,0,0,2,1,0,S_OK,29587.0);                        /* Rolls fwd to 1/1/1981 */
+
+  /* Test handling of times on dates prior to the epoch */
+  UD2T(25,12,1899,6,0,0,0,1,359,0,S_OK,-5.25);
+  UD2T(25,12,1899,23,59,59,0,1,359,0,S_OK,-5.9999884259259);
+  /* This just demostrates the non-linear nature of values prior to the epoch */
+  UD2T(26,12,1899,0,0,0,0,2,360,0,S_OK,-4.0);
+  /* for DATE values 0.0 < x < 1.0, x and -x represent the same datetime */
+  /* but when converting to DATE, prefer the positive versions */
+  UD2T(30,12,1899,6,0,0,0,6,364,0,S_OK,0.25);
 }
 
 static void test_st2dt(int line, WORD d, WORD m, WORD y, WORD h, WORD mn,
@@ -2129,7 +2155,6 @@ static void test_VarSub(void)
                 if (rightvt == VT_BSTR)
                     V_BSTR(&right) = rbstr;
                 V_VT(&result) = VT_EMPTY;
-                resvt = VT_ERROR;
 
                 /* All extra flags produce errors */
                 if (ExtraFlags[i] == (VT_VECTOR|VT_BYREF|VT_RESERVED) ||

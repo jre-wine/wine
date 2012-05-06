@@ -292,7 +292,7 @@ static BOOL CALLBACK line_cb(SRCCODEINFO* sci, void* user)
  *
  * Add a breakpoint from a line number in current file
  */
-void	break_add_break_from_lineno(int lineno, BOOL swbp)
+void break_add_break_from_lineno(const char *filename, int lineno, BOOL swbp)
 {
     struct cb_break_lineno      bkln;
 
@@ -301,20 +301,23 @@ void	break_add_break_from_lineno(int lineno, BOOL swbp)
     if (lineno != -1)
     {
         IMAGEHLP_LINE64 il;
-
-
-        DWORD           disp;
         DWORD_PTR       linear = (DWORD_PTR)memory_to_linear_addr(&bkln.addr);
 
-        il.SizeOfStruct = sizeof(il);
-        if (!SymGetLineFromAddr64(dbg_curr_process->handle, linear, &disp, &il))
+        if (!filename)
         {
-            dbg_printf("Unable to add breakpoint (unknown address %lx)\n", linear);
-            return;
+            DWORD disp;
+
+            il.SizeOfStruct = sizeof(il);
+            if (!SymGetLineFromAddr64(dbg_curr_process->handle, linear, &disp, &il))
+            {
+                dbg_printf("Unable to add breakpoint (unknown address %lx)\n", linear);
+                return;
+            }
+            filename = il.FileName;
         }
         bkln.addr.Offset = 0;
         bkln.lineno = lineno;
-        SymEnumLines(dbg_curr_process->handle, linear, NULL, il.FileName, line_cb, &bkln);
+        SymEnumLines(dbg_curr_process->handle, linear, NULL, filename, line_cb, &bkln);
         if (!bkln.addr.Offset)
         {
             dbg_printf("Unknown line number\n"
@@ -510,11 +513,13 @@ void break_delete_xpoints_from_module(DWORD64 base)
 
     for (i = 0; i < dbg_curr_process->next_bp; i++)
     {
-        linear = (DWORD_PTR)memory_to_linear_addr(&bp[i].addr);
-        if (bp[i].refcount && bp[i].enabled &&
-            im.BaseOfImage <= linear && linear < im.BaseOfImage + im.ImageSize)
+        if (bp[i].refcount && bp[i].enabled)
         {
-            break_delete_xpoint(i);
+            linear = (DWORD_PTR)memory_to_linear_addr(&bp[i].addr);
+            if (im.BaseOfImage <= linear && linear < im.BaseOfImage + im.ImageSize)
+            {
+                break_delete_xpoint(i);
+            }
         }
     }
 }

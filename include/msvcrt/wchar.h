@@ -148,6 +148,48 @@ struct stat {
   time_t st_ctime;
 };
 
+struct _stat32 {
+  _dev_t st_dev;
+  _ino_t st_ino;
+  unsigned short st_mode;
+  short st_nlink;
+  short st_uid;
+  short st_gid;
+  _dev_t st_rdev;
+  _off_t st_size;
+  __time32_t st_atime;
+  __time32_t st_mtime;
+  __time32_t st_ctime;
+};
+
+struct _stat32i64 {
+  _dev_t st_dev;
+  _ino_t st_ino;
+  unsigned short st_mode;
+  short st_nlink;
+  short st_uid;
+  short st_gid;
+  _dev_t st_rdev;
+  __int64 DECLSPEC_ALIGN(8) st_size;
+  time_t st_atime;
+  time_t st_mtime;
+  time_t st_ctime;
+};
+
+struct _stat64i32 {
+  _dev_t st_dev;
+  _ino_t st_ino;
+  unsigned short st_mode;
+  short st_nlink;
+  short st_uid;
+  short st_gid;
+  _dev_t st_rdev;
+  _off_t st_size;
+  __time64_t st_atime;
+  __time64_t st_mtime;
+  __time64_t st_ctime;
+};
+
 struct _stati64 {
   _dev_t st_dev;
   _ino_t st_ino;
@@ -264,6 +306,7 @@ int      __cdecl _wsystem(const wchar_t*);
 #ifndef _WSTAT_DEFINED
 #define _WSTAT_DEFINED
 int __cdecl _wstat(const wchar_t*,struct _stat*);
+int __cdecl _wstat32(const wchar_t*, struct _stat32*);
 int __cdecl _wstati64(const wchar_t*,struct _stati64*);
 int __cdecl _wstat64(const wchar_t*,struct _stat64*);
 #endif /* _WSTAT_DEFINED */
@@ -295,6 +338,7 @@ wchar_t* __cdecl fgetws(wchar_t*,int,FILE*);
 wint_t   __cdecl fputwc(wint_t,FILE*);
 int      __cdecl fputws(const wchar_t*,FILE*);
 int      __cdecl fwprintf(FILE*,const wchar_t*,...);
+int      __cdecl fwprintf_s(FILE*,const wchar_t*,...);
 int      __cdecl fputws(const wchar_t*,FILE*);
 int      __cdecl fwscanf(FILE*,const wchar_t*,...);
 int      __cdecl fwscanf_s(FILE*,const wchar_t*,...);
@@ -310,10 +354,13 @@ int      __cdecl swscanf(const wchar_t*,const wchar_t*,...);
 int      __cdecl swscanf_s(const wchar_t*,const wchar_t*,...);
 wint_t   __cdecl ungetwc(wint_t,FILE*);
 int      __cdecl vfwprintf(FILE*,const wchar_t*,__ms_va_list);
+int      __cdecl vfwprintf_s(FILE*,const wchar_t*,__ms_va_list);
 int      __cdecl vswprintf(wchar_t*,const wchar_t*,__ms_va_list);
 int      __cdecl vswprintf_s(wchar_t*,size_t,const wchar_t*,__ms_va_list);
 int      __cdecl vwprintf(const wchar_t*,__ms_va_list);
+int      __cdecl vwprintf_s(const wchar_t*,__ms_va_list);
 int      __cdecl wprintf(const wchar_t*,...);
+int      __cdecl wprintf_s(const wchar_t*,...);
 int      __cdecl wscanf(const wchar_t*,...);
 int      __cdecl wscanf_s(const wchar_t*,...);
 #endif /* _WSTDIO_DEFINED */
@@ -358,6 +405,7 @@ int      __cdecl _wcsicmp(const wchar_t*,const wchar_t*);
 int      __cdecl _wcsicoll(const wchar_t*,const wchar_t*);
 wchar_t* __cdecl _wcslwr(wchar_t*);
 int      __cdecl _wcsnicmp(const wchar_t*,const wchar_t*,size_t);
+int      __cdecl _wcsnicoll(const wchar_t*,const wchar_t*,size_t);
 wchar_t* __cdecl _wcsnset(wchar_t*,wchar_t,size_t);
 wchar_t* __cdecl _wcsrev(wchar_t*);
 wchar_t* __cdecl _wcsset(wchar_t*,wchar_t);
@@ -396,7 +444,9 @@ size_t   __cdecl wcsftime(wchar_t*,size_t,const wchar_t*,const struct tm*);
 wchar_t* __cdecl _wctime32(const __time32_t*);
 wchar_t* __cdecl _wctime64(const __time64_t*);
 wchar_t* __cdecl _wstrdate(wchar_t*);
+errno_t  __cdecl _wstrdate_s(wchar_t*,size_t);
 wchar_t* __cdecl _wstrtime(wchar_t*);
+errno_t  __cdecl _wstrtime_s(wchar_t*,size_t);
 
 #ifndef _USE_32BIT_TIME_T
 static inline wchar_t* _wctime(const time_t *t) { return _wctime64(t); }

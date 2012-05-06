@@ -33,7 +33,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(jscript);
 #define TIME_EPOCH  ((ULONGLONG)(369 * 365 + 89) * 86400 * 1000)
 
 typedef struct {
-    DispatchEx dispex;
+    jsdisp_t dispex;
 
     /* ECMA-262 3rd Edition    15.9.1.1 */
     DOUBLE time;
@@ -91,6 +91,7 @@ static const WCHAR setUTCMonthW[] = {'s','e','t','U','T','C','M','o','n','t','h'
 static const WCHAR setFullYearW[] = {'s','e','t','F','u','l','l','Y','e','a','r',0};
 static const WCHAR setUTCFullYearW[] = {'s','e','t','U','T','C','F','u','l','l','Y','e','a','r',0};
 static const WCHAR getYearW[] = {'g','e','t','Y','e','a','r',0};
+static const WCHAR setYearW[] = {'s','e','t','Y','e','a','r',0};
 
 static const WCHAR UTCW[] = {'U','T','C',0};
 static const WCHAR parseW[] = {'p','a','r','s','e',0};
@@ -609,7 +610,7 @@ static HRESULT Date_toString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     return dateobj_to_string(date, retv);
 }
@@ -627,7 +628,7 @@ static HRESULT Date_toLocaleString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(isnan(date->time)) {
         if(retv) {
@@ -668,7 +669,7 @@ static HRESULT Date_valueOf(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, date->time);
@@ -702,7 +703,7 @@ static inline HRESULT create_utc_string(script_ctx_t *ctx, vdisp_t *jsthis,
     DWORD lcid_en, week_id, month_id;
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(isnan(date->time)) {
         if(retv) {
@@ -897,7 +898,7 @@ static HRESULT Date_toDateString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
     DateInstance *date;
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     return dateobj_to_date_string(date, retv);
 }
@@ -920,7 +921,7 @@ static HRESULT Date_toTimeString(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags,
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(isnan(date->time)) {
         if(retv) {
@@ -975,7 +976,7 @@ static HRESULT Date_toLocaleDateString(script_ctx_t *ctx, vdisp_t *jsthis, WORD 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(isnan(date->time)) {
         if(retv) {
@@ -1018,7 +1019,7 @@ static HRESULT Date_toLocaleTimeString(script_ctx_t *ctx, vdisp_t *jsthis, WORD 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(isnan(date->time)) {
         if(retv) {
@@ -1057,7 +1058,7 @@ static HRESULT Date_getTime(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, date->time);
@@ -1073,7 +1074,7 @@ static HRESULT Date_getFullYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1092,7 +1093,7 @@ static HRESULT Date_getUTCFullYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, year_from_time(date->time));
@@ -1108,7 +1109,7 @@ static HRESULT Date_getMonth(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1127,7 +1128,7 @@ static HRESULT Date_getUTCMonth(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, month_from_time(date->time));
@@ -1143,7 +1144,7 @@ static HRESULT Date_getDate(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1162,7 +1163,7 @@ static HRESULT Date_getUTCDate(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, date_from_time(date->time));
@@ -1178,7 +1179,7 @@ static HRESULT Date_getDay(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1197,7 +1198,7 @@ static HRESULT Date_getUTCDay(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, week_day(date->time));
@@ -1213,7 +1214,7 @@ static HRESULT Date_getHours(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1232,7 +1233,7 @@ static HRESULT Date_getUTCHours(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, hour_from_time(date->time));
@@ -1248,7 +1249,7 @@ static HRESULT Date_getMinutes(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1267,7 +1268,7 @@ static HRESULT Date_getUTCMinutes(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, min_from_time(date->time));
@@ -1283,7 +1284,7 @@ static HRESULT Date_getSeconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1302,7 +1303,7 @@ static HRESULT Date_getUTCSeconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, sec_from_time(date->time));
@@ -1318,7 +1319,7 @@ static HRESULT Date_getMilliseconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD fla
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv) {
         DOUBLE time = local_time(date->time, date);
@@ -1337,7 +1338,7 @@ static HRESULT Date_getUTCMilliseconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, ms_from_time(date->time));
@@ -1353,7 +1354,7 @@ static HRESULT Date_getTimezoneOffset(script_ctx_t *ctx, vdisp_t *jsthis, WORD f
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(retv)
         num_set_val(retv, floor(
@@ -1372,10 +1373,10 @@ static HRESULT Date_setTime(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     hres = to_number(ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1401,10 +1402,10 @@ static HRESULT Date_setMilliseconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD fla
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     hres = to_number(ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1433,10 +1434,10 @@ static HRESULT Date_setUTCMilliseconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     hres = to_number(ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1465,10 +1466,10 @@ static HRESULT Date_setSeconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = local_time(date->time, date);
 
@@ -1507,10 +1508,10 @@ static HRESULT Date_setUTCSeconds(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = date->time;
 
@@ -1549,10 +1550,10 @@ static HRESULT Date_setMinutes(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = local_time(date->time, date);
 
@@ -1599,10 +1600,10 @@ static HRESULT Date_setUTCMinutes(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = date->time;
 
@@ -1649,10 +1650,10 @@ static HRESULT Date_setHours(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = local_time(date->time, date);
 
@@ -1706,10 +1707,10 @@ static HRESULT Date_setUTCHours(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = date->time;
 
@@ -1763,10 +1764,10 @@ static HRESULT Date_setDate(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     hres = to_number(ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1795,10 +1796,10 @@ static HRESULT Date_setUTCDate(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, D
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     hres = to_number(ctx, get_arg(dp, 0), ei, &v);
     if(FAILED(hres))
@@ -1827,10 +1828,10 @@ static HRESULT Date_setMonth(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DIS
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = local_time(date->time, date);
 
@@ -1869,10 +1870,10 @@ static HRESULT Date_setUTCMonth(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = date->time;
 
@@ -1911,10 +1912,10 @@ static HRESULT Date_setFullYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = local_time(date->time, date);
 
@@ -1960,10 +1961,10 @@ static HRESULT Date_setUTCFullYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flag
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     if(!arg_cnt(dp))
-        return throw_type_error(ctx, ei, IDS_ARG_NOT_OPT, NULL);
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
 
     t = date->time;
 
@@ -2007,7 +2008,7 @@ static HRESULT Date_getYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     TRACE("\n");
 
     if(!(date = date_this(jsthis)))
-        return throw_type_error(ctx, ei, IDS_NOT_DATE, NULL);
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
 
     t = local_time(date->time, date);
     if(isnan(t)) {
@@ -2023,6 +2024,48 @@ static HRESULT Date_getYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISP
     return S_OK;
 }
 
+/* ECMA-262 3rd Edition    B2.5 */
+static HRESULT Date_setYear(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
+        VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
+{
+    DateInstance *date;
+    DOUBLE t, year;
+    VARIANT v;
+    HRESULT hres;
+
+    TRACE("\n");
+
+    if(!(date = date_this(jsthis)))
+        return throw_type_error(ctx, ei, JS_E_DATE_EXPECTED, NULL);
+
+    if(!arg_cnt(dp))
+        return throw_type_error(ctx, ei, JS_E_MISSING_ARG, NULL);
+
+    t = local_time(date->time, date);
+
+    hres = to_number(ctx, get_arg(dp, 0), ei, &v);
+    if(FAILED(hres))
+        return hres;
+
+    year = num_val(&v);
+    if(isnan(year)) {
+        date->time = year;
+        if(retv)
+            num_set_nan(retv);
+        return S_OK;
+    }
+
+    year = year >= 0.0 ? floor(year) : -floor(-year);
+    if(-1.0 < year && year < 100.0)
+        year += 1900.0;
+
+    date->time = time_clip(utc(make_date(make_day(year, month_from_time(t), date_from_time(t)), time_within_day(t)), date));
+
+    if(retv)
+        num_set_val(retv, date->time);
+    return S_OK;
+}
+
 static HRESULT Date_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *caller)
 {
@@ -2030,7 +2073,7 @@ static HRESULT Date_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPA
 
     switch(flags) {
     case INVOKE_FUNC:
-        return throw_type_error(ctx, ei, IDS_NOT_FUNC, NULL);
+        return throw_type_error(ctx, ei, JS_E_FUNCTION_EXPECTED, NULL);
     default:
         FIXME("unimplemented flags %x\n", flags);
         return E_NOTIMPL;
@@ -2074,6 +2117,7 @@ static const builtin_prop_t Date_props[] = {
     {setUTCMinutesW,         Date_setUTCMinutes,         PROPF_METHOD|3},
     {setUTCMonthW,           Date_setUTCMonth,           PROPF_METHOD|2},
     {setUTCSecondsW,         Date_setUTCSeconds,         PROPF_METHOD|2},
+    {setYearW,               Date_setYear,               PROPF_METHOD|1},
     {toDateStringW,          Date_toDateString,          PROPF_METHOD},
     {toGMTStringW,           Date_toGMTString,           PROPF_METHOD},
     {toLocaleDateStringW,    Date_toLocaleDateString,    PROPF_METHOD},
@@ -2094,7 +2138,7 @@ static const builtin_info_t Date_info = {
     NULL
 };
 
-static HRESULT create_date(script_ctx_t *ctx, DispatchEx *object_prototype, DOUBLE time, DispatchEx **ret)
+static HRESULT create_date(script_ctx_t *ctx, jsdisp_t *object_prototype, DOUBLE time, jsdisp_t **ret)
 {
     DateInstance *date;
     HRESULT hres;
@@ -2511,7 +2555,7 @@ static HRESULT DateConstr_UTC(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DI
 static HRESULT DateConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, DISPPARAMS *dp,
         VARIANT *retv, jsexcept_t *ei, IServiceProvider *sp)
 {
-    DispatchEx *date;
+    jsdisp_t *date;
     HRESULT hres;
 
     TRACE("\n");
@@ -2575,8 +2619,7 @@ static HRESULT DateConstr_value(script_ctx_t *ctx, vdisp_t *jsthis, WORD flags, 
         }
         }
 
-        V_VT(retv) = VT_DISPATCH;
-        V_DISPATCH(retv) = (IDispatch*)_IDispatchEx_(date);
+        var_set_jsdisp(retv, date);
         return S_OK;
 
     case INVOKE_FUNC: {
@@ -2613,9 +2656,9 @@ static const builtin_info_t DateConstr_info = {
     NULL
 };
 
-HRESULT create_date_constr(script_ctx_t *ctx, DispatchEx *object_prototype, DispatchEx **ret)
+HRESULT create_date_constr(script_ctx_t *ctx, jsdisp_t *object_prototype, jsdisp_t **ret)
 {
-    DispatchEx *date;
+    jsdisp_t *date;
     HRESULT hres;
 
     static const WCHAR DateW[] = {'D','a','t','e',0};

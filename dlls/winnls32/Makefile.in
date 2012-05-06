@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winnls32.dll
 IMPORTLIB = winnls32
-IMPORTS   = kernel32
 
 C_SRCS = \
 	winnls.c

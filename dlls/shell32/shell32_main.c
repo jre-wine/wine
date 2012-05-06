@@ -37,13 +37,17 @@
 #include "winuser.h"
 #include "wingdi.h"
 #include "shlobj.h"
+#include "rpcproxy.h"
 #include "shlwapi.h"
+#include "propsys.h"
 
 #include "undocshell.h"
 #include "pidl.h"
 #include "shell32_main.h"
 #include "version.h"
 #include "shresdef.h"
+#include "initguid.h"
+#include "shfldr.h"
 
 #include "wine/debug.h"
 #include "wine/unicode.h"
@@ -91,20 +95,22 @@ LPWSTR* WINAPI CommandLineToArgvW(LPCWSTR lpCmdline, int* numargs)
     if (*lpCmdline==0)
     {
         /* Return the path to the executable */
-        DWORD len, size=16;
+        DWORD len, deslen=MAX_PATH, size;
 
-        argv=LocalAlloc(LMEM_FIXED, size);
+        size = sizeof(LPWSTR) + deslen*sizeof(WCHAR) + sizeof(LPWSTR);
         for (;;)
         {
-            len = GetModuleFileNameW(0, (LPWSTR)(argv+1), (size-sizeof(LPWSTR))/sizeof(WCHAR));
+            if (!(argv = LocalAlloc(LMEM_FIXED, size))) return NULL;
+            len = GetModuleFileNameW(0, (LPWSTR)(argv+1), deslen);
             if (!len)
             {
                 LocalFree(argv);
                 return NULL;
             }
-            if (len < size) break;
-            size*=2;
-            argv=LocalReAlloc(argv, size, 0);
+            if (len < deslen) break;
+            deslen*=2;
+            size = sizeof(LPWSTR) + deslen*sizeof(WCHAR) + sizeof(LPWSTR);
+            LocalFree( argv );
         }
         argv[0]=(LPWSTR)(argv+1);
         if (numargs)
@@ -434,7 +440,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
     /* get the displayname */
     if (SUCCEEDED(hr) && (flags & SHGFI_DISPLAYNAME))
     {
-        if (flags & SHGFI_USEFILEATTRIBUTES)
+        if (flags & SHGFI_USEFILEATTRIBUTES && !(flags & SHGFI_PIDL))
         {
             lstrcpyW (psfi->szDisplayName, PathFindFileNameW(szFullPath));
         }
@@ -453,7 +459,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
         static const WCHAR szFile[] = { 'F','i','l','e',0 };
         static const WCHAR szDashFile[] = { '-','f','i','l','e',0 };
 
-        if (!(flags & SHGFI_USEFILEATTRIBUTES))
+        if (!(flags & SHGFI_USEFILEATTRIBUTES) || (flags & SHGFI_PIDL))
         {
             char ftype[80];
 
@@ -506,7 +512,7 @@ DWORD_PTR WINAPI SHGetFileInfoW(LPCWSTR path,DWORD dwFileAttributes,
     {
         UINT uDummy,uFlags;
 
-        if (flags & SHGFI_USEFILEATTRIBUTES)
+        if (flags & SHGFI_USEFILEATTRIBUTES && !(flags & SHGFI_PIDL))
         {
             if (dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             {
@@ -672,7 +678,7 @@ DWORD_PTR WINAPI SHGetFileInfoA(LPCSTR path,DWORD dwFileAttributes,
     INT len;
     LPWSTR temppath = NULL;
     LPCWSTR pathW;
-    DWORD ret;
+    DWORD_PTR ret;
     SHFILEINFOW temppsfi;
 
     if (flags & SHGFI_PIDL)
@@ -851,6 +857,15 @@ VOID WINAPI Printers_UnregisterWindow(HANDLE hClassPidl, HWND hwnd)
 {
     FIXME("(%p, %p) stub!\n", hClassPidl, hwnd);
 } 
+
+/*************************************************************************
+ * SHGetPropertyStoreFromParsingName [SHELL32.@]
+ */
+HRESULT WINAPI SHGetPropertyStoreFromParsingName(PCWSTR pszPath, IBindCtx *pbc, GETPROPERTYSTOREFLAGS flags, REFIID riid, void **ppv)
+{
+    FIXME("(%s %p %u %p %p) stub!\n", debugstr_w(pszPath), pbc, flags, riid, ppv);
+    return E_NOTIMPL;
+}
 
 /*************************************************************************/
 
@@ -1216,6 +1231,24 @@ HRESULT WINAPI DllInstall(BOOL bInstall, LPCWSTR cmdline)
 HRESULT WINAPI DllCanUnloadNow(void)
 {
     return S_FALSE;
+}
+
+/***********************************************************************
+ *		DllRegisterServer (SHELL32.@)
+ */
+HRESULT WINAPI DllRegisterServer(void)
+{
+    HRESULT hr = __wine_register_resources( shell32_hInstance, NULL );
+    if (SUCCEEDED(hr)) hr = SHELL_RegisterShellFolders();
+    return hr;
+}
+
+/***********************************************************************
+ *		DllUnregisterServer (SHELL32.@)
+ */
+HRESULT WINAPI DllUnregisterServer(void)
+{
+    return __wine_unregister_resources( shell32_hInstance, NULL );
 }
 
 /***********************************************************************

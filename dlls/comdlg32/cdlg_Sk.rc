@@ -28,7 +28,7 @@ LANGUAGE LANG_SLOVAK, SUBLANG_DEFAULT
 
 /* Slovak strings in CP1250 */
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Otvoriù"
 FONT 8, "MS Shell Dlg"
@@ -50,7 +50,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Uloûiù ako..."
 FONT 8, "MS Shell Dlg"
@@ -72,7 +72,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "TlaË"
 FONT 8, "MS Shell Dlg"
@@ -95,7 +95,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT_SETUP DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Nastavenie spÙsobu tlaËe"
 FONT 8, "MS Shell Dlg"
@@ -121,7 +121,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "PÌsmo"
 FONT 8, "MS Shell Dlg"
@@ -153,7 +153,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_COLOR DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 300, 185
+CHOOSE_COLOR DIALOG 36, 24, 300, 185
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Farby"
 FONT 8, "MS Shell Dlg"
@@ -187,7 +187,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-FINDDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 236, 62
+FINDDLGORD DIALOG 36, 24, 236, 62
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Hæadanie"
 FONT 8, "MS Shell Dlg"
@@ -206,7 +206,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Z·mena"
 FONT 8, "MS Shell Dlg"
@@ -226,7 +226,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "TlaË"
@@ -266,7 +266,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "&do:",           stc3, 100,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Nastavenie tlaËe"
@@ -301,7 +301,7 @@ BEGIN
     CONTROL         "Na öÌ&rku",     rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Setup Page"
 FONT 8, "MS Shell Dlg"
@@ -331,7 +331,7 @@ BEGIN
   PUSHBUTTON "P&rinter...", psh3, 184, 220, 48, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "Otvoriù"
 FONT 8, "MS Shell Dlg"
@@ -353,136 +353,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"&Otvoriù",		 IDOK,222,110,50,14
     PUSHBUTTON		"Zruöiù",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"&Pomoc",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "&O teste uchopovania adres·rov"
-    IDS_DOCUMENTFOLDERS     "Adres·r dokumentov"
-    IDS_PERSONAL            "Moje dokumenty"
-    IDS_FAVORITES           "Obæ˙benÈ poloûky"
-    IDS_PATH                "SystÈmov· cesta"
-    IDS_DESKTOP             "Pracovn· plocha"
-    IDS_FONTS               "PÌsma"
-    IDS_MYCOMPUTER          "Tento poËÌtaË"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "SystÈmovÈ adres·re"
-    IDS_LOCALHARDRIVES      "Lok·lne pevnÈ disky"
-    IDS_FILENOTFOUND        "S˙bor nen·jden˝"
-    IDS_VERIFYFILE          "Please verify if the correct file name was given"
-    IDS_CREATEFILE          "File does not exist\nDo you want to create file"
-    IDS_OVERWRITEFILE       "File does already exist.\nDo you want to replace it?"
-    IDS_INVALID_FILENAME_TITLE "Invalid character(s) in path"
-    IDS_INVALID_FILENAME    "N·zov s˙boru nemÙûe obsahovaù ûiadny z nasledovn˝ch znakov:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "Cesta neexistuje"
-    IDS_FILENOTEXISTING     "S˙bor neexistuje"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "O ˙roveÚ vyööie"
-    IDS_NEWFOLDER        "Vytvoriù nov˝ adres·r"
-    IDS_LISTVIEW         "Zoznam"
-    IDS_REPORTVIEW       "Detaily"
-    IDS_TODESKTOP        "Listovaù pracovn˙ plochu"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "TlaË"
-
-    PD32_VALUE_UREADABLE                  "Unreadable Entry"
-    PD32_INVALID_PAGE_RANGE "This value does not lie within the page range.\n\
-Please enter a value between %d and %d."
-    PD32_FROM_NOT_ABOVE_TO                "The 'from' entry cannot exceed the \
-'to' entry."
-    PD32_MARGINS_OVERLAP                  "Margins overlap or fall outside \
-Paper boundaries.\nPlease reenter margins"
-    PD32_NR_OF_COPIES_EMPTY               "The NumberOfCopies entry cannot \
-be empty"
-    PD32_TOO_LARGE_COPIES                 "This large amount of prints is not \
-supported by your printer.\nPlease enter a value between 1 and %d"
-    PD32_PRINT_ERROR                      "A printer error occurred"
-    PD32_NO_DEFAULT_PRINTER               "Nie je nastaven· implicitn· tlaËiareÚ"
-    PD32_CANT_FIND_PRINTER                "Nemoûno n·jsù tlaËiareÚ"
-    PD32_OUT_OF_MEMORY                    "Nedostatok pam‰te"
-    PD32_GENERIC_ERROR                    "Vyskytla sa chyba"
-    PD32_DRIVER_UNKNOWN                   "Nezn·my ovl·daË tlaËiarne"
-    PD32_NO_DEVICES                       "Before you can perform printer-related tasks \
-such as page setup or printing a document, you need to install a printer. \
-Please install one and retry."
-
-    PD32_DEFAULT_PRINTER                  "Implicitn· tlaËiareÚ; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "There are %d documents in queue"
-    PD32_MARGINS_IN_INCHES                "Okraje [palce]"
-    PD32_MARGINS_IN_MILLIMETERS           "Okraje [mm]"
-    PD32_MILLIMETERS                      "mm"
-
-    PD32_PRINTER_STATUS_READY             "Pripraven·"
-    PD32_PRINTER_STATUS_PAUSED            "Pozastaven·; "
-    PD32_PRINTER_STATUS_ERROR             "Chyba; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "Pending deletion; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "Uviaznut˝ papier; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "Ch˝ba papier; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Feed paper manual; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "ProblÈm s papierom; "
-    PD32_PRINTER_STATUS_OFFLINE           "TlaËiareÚ v stave offline; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "I/O Active; "
-    PD32_PRINTER_STATUS_BUSY              "Zanepr·zdnen·; "
-    PD32_PRINTER_STATUS_PRINTING          "Prebieha tlaË; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "Output tray is full; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "Nie je k dispozÌcii; "
-    PD32_PRINTER_STATUS_WAITING           "»ak· sa; "
-    PD32_PRINTER_STATUS_PROCESSING        "Prebieha spracovanie; "
-    PD32_PRINTER_STATUS_INITIALIZING      "Inicializ·cia; "
-    PD32_PRINTER_STATUS_WARMING_UP        "Zahrievanie; "
-    PD32_PRINTER_STATUS_TONER_LOW         "Prim·lo toneru; "
-    PD32_PRINTER_STATUS_NO_TONER          "Ch˝ba toner; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Page punt; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "Preruöenie uûÌvateæom; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "Nedostatok pam‰te; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "Dvierka tlaËiarne s˙ otvorenÈ; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "Nezn·my print server; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "⁄sporn˝ reûim; "
-}
-
-STRINGTABLE DISCARDABLE /* Font styles */
-{
-    IDS_FONT_REGULAR       "Regular"
-    IDS_FONT_BOLD          "TuËnÈ"
-    IDS_FONT_ITALIC        "KurzÌva"
-    IDS_FONT_BOLD_ITALIC   "TuËnÈ kurzÌva"
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "»ierna"
-    IDS_COLOR_MAROON    "Maroon"
-    IDS_COLOR_GREEN     "Zelen·"
-    IDS_COLOR_OLIVE     "Olive"
-    IDS_COLOR_NAVY      "Navy"
-    IDS_COLOR_PURPLE    "Purple"
-    IDS_COLOR_TEAL      "Teal"
-    IDS_COLOR_GRAY      "Gray"
-    IDS_COLOR_SILVER    "Silver"
-    IDS_COLOR_RED       "»erven·"
-    IDS_COLOR_LIME      "Lime"
-    IDS_COLOR_YELLOW    "élt·"
-    IDS_COLOR_BLUE      "Modr·"
-    IDS_COLOR_FUCHSIA   "Fuchsia"
-    IDS_COLOR_AQUA      "Aqua"
-    IDS_COLOR_WHITE     "Biela"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_FONT_SIZE   "Select a font size between %d and %d points."
-    IDS_SAVE_BUTTON "&Save"
-    IDS_SAVE_IN     "Save &in:"
-    IDS_SAVE        "Uloûiù"
-    IDS_SAVE_AS     "Uloûiù ako"
-    IDS_OPEN_FILE   "Otvoriù s˙bor"
 }

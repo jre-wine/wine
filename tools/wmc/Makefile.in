@@ -1,17 +1,12 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
-EXEEXT    = @EXEEXT@
-DEFS      = -D__WINESRC__ $(EXTRADEFS)
-
+DEFS     = -D__WINESRC__ $(EXTRADEFS)
 PROGRAMS = wmc$(EXEEXT) wmc-installed
-MANPAGES = wmc.man
-MODULE   = none
+MANPAGE  = wmc.man
+ALL_LIBS = @LIBGETTEXTPO@ $(LIBWINE) $(LIBPORT)
 
 C_SRCS = \
 	lang.c \
 	mcl.c \
+	po.c \
 	utils.c \
 	wmc.c \
 	write.c
@@ -20,19 +15,18 @@ BISON_SRCS = mcy.y
 
 INSTALLDIRS = $(DESTDIR)$(bindir) $(DESTDIR)$(mandir)/man$(prog_manext)
 
-all: $(PROGRAMS) $(MANPAGES)
+all: $(PROGRAMS)
 
 @MAKE_RULES@
 
 wmc$(EXEEXT): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(LDRPATH_LOCAL)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(ALL_LIBS) $(LDFLAGS) $(LDRPATH_LOCAL)
 
 wmc-installed: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBWINE) $(LIBPORT) $(LDFLAGS) $(LDRPATH_INSTALL)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(ALL_LIBS) $(LDFLAGS) $(LDRPATH_INSTALL)
 
-install install-dev:: wmc-installed $(MANPAGES) $(INSTALLDIRS)
-	$(INSTALL_DATA) wmc.man $(DESTDIR)$(mandir)/man$(prog_manext)/wmc.$(prog_manext)
+install:: wmc-installed $(DESTDIR)$(bindir)
 	$(INSTALL_PROGRAM) wmc-installed $(DESTDIR)$(bindir)/wmc$(EXEEXT)
 
 uninstall::
-	$(RM) $(DESTDIR)$(bindir)/wmc$(EXEEXT) $(DESTDIR)$(mandir)/man$(prog_manext)/wmc.$(prog_manext)
+	$(RM) $(DESTDIR)$(bindir)/wmc$(EXEEXT)

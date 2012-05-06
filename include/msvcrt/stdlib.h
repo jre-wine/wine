@@ -73,6 +73,9 @@ typedef struct _ldiv_t {
 #define _OUT_TO_MSGBOX       2
 #define _REPORT_ERRMODE      3
 
+/* _set_abort_behavior codes */
+#define _WRITE_ABORT_MSG     1
+#define _CALL_REPORTFAULT    2
 
 #ifdef __cplusplus
 extern "C" {
@@ -128,12 +131,17 @@ extern int*           __cdecl _errno(void);
  * char** _sys_errlist;
  */
 
+errno_t       __cdecl _get_doserrno(int*);
+errno_t       __cdecl _get_errno(int*);
+errno_t       __cdecl _set_doserrno(int);
+errno_t       __cdecl _set_errno(int);
 
 typedef int (__cdecl *_onexit_t)(void);
 
 
 int           __cdecl _atodbl(_CRT_DOUBLE*,char*);
 int           __cdecl _atoflt(_CRT_FLOAT*,char*);
+int           __cdecl _atoflt_l(_CRT_FLOAT*,char*,_locale_t);
 __int64       __cdecl _atoi64(const char*);
 long double   __cdecl _atold(const char*);
 int           __cdecl _atoldbl(_LDOUBLE*,char*);
@@ -144,6 +152,7 @@ char*         __cdecl _fullpath(char*,const char*,size_t);
 char*         __cdecl _gcvt(double,int,char*);
 char*         __cdecl _i64toa(__int64,char*,int);
 char*         __cdecl _itoa(int,char*,int);
+errno_t       __cdecl _itoa_s(int,char*,size_t,int);
 char*         __cdecl _ltoa(__msvcrt_long,char*,int);
 __msvcrt_ulong __cdecl _lrotl(__msvcrt_ulong,int);
 __msvcrt_ulong __cdecl _lrotr(__msvcrt_ulong,int);
@@ -164,6 +173,7 @@ void          __cdecl _swab(char*,char*,int);
 char*         __cdecl _ui64toa(unsigned __int64,char*,int);
 errno_t       __cdecl _ui64toa_s(unsigned __int64,char*,size_t,int);
 char*         __cdecl _ultoa(__msvcrt_ulong,char*,int);
+errno_t       __cdecl _ultoa_s(__msvcrt_ulong,char*,size_t,int);
 
 void          __cdecl _exit(int);
 void          __cdecl abort(void);

@@ -23,8 +23,6 @@
 
 #include <limits.h>
 #include <stdio.h>
-#include <fcntl.h>
-#include <io.h>
 #include <windows.h>
 #include <winnt.h>
 #include <winreg.h>
@@ -39,19 +37,14 @@
  */
 #define REG_FILE_HEX_LINE_LEN   (2 + 25 * 3)
 
-static const CHAR *reg_class_names[] = {
-                                     "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CLASSES_ROOT",
-                                     "HKEY_CURRENT_CONFIG", "HKEY_CURRENT_USER", "HKEY_DYN_DATA"
-                                 };
-
-#define REG_CLASS_NUMBER (sizeof(reg_class_names) / sizeof(reg_class_names[0]))
-
 extern const WCHAR* reg_class_namesW[];
 
-static HKEY reg_class_keys[REG_CLASS_NUMBER] = {
+static HKEY reg_class_keys[] = {
             HKEY_LOCAL_MACHINE, HKEY_USERS, HKEY_CLASSES_ROOT,
             HKEY_CURRENT_CONFIG, HKEY_CURRENT_USER, HKEY_DYN_DATA
         };
+
+#define REG_CLASS_NUMBER (sizeof(reg_class_keys) / sizeof(reg_class_keys[0]))
 
 /* return values */
 #define NOT_ENOUGH_MEMORY     1
@@ -374,6 +367,8 @@ static LONG setValue(WCHAR* val_name, WCHAR* val_data, BOOL is_unicode)
          * the extra garbage in the registry.
          */
         dwLen = lstrlenW(val_data);
+        if(val_data[dwLen-1] != '"')
+            return ERROR_INVALID_DATA;
         if (dwLen>0 && val_data[dwLen-1]=='"')
         {
             dwLen--;
@@ -499,7 +494,7 @@ static void processSetValue(WCHAR* line, BOOL is_unicode)
     } else if (line[line_idx] == '\"') {
         line_idx++;
         val_name = line + line_idx;
-        while (TRUE) {
+        while (line[line_idx]) {
             if (line[line_idx] == '\\')   /* skip escaped character */
             {
                 line_idx += 2;
@@ -514,18 +509,22 @@ static void processSetValue(WCHAR* line, BOOL is_unicode)
             }
         }
         while ( isspaceW(line[line_idx]) ) line_idx++;
+        if (!line[line_idx]) {
+            fprintf(stderr, "%s: warning: unexpected EOL\n", getAppName());
+            return;
+        }
         if (line[line_idx] != '=') {
             char* lineA;
             line[line_idx] = '\"';
             lineA = GetMultiByteString(line);
-            fprintf(stderr,"Warning! unrecognized line:\n%s\n", lineA);
+            fprintf(stderr,"%s: warning: unrecognized line: '%s'\n", getAppName(), lineA);
             HeapFree(GetProcessHeap(), 0, lineA);
             return;
         }
 
     } else {
         char* lineA = GetMultiByteString(line);
-        fprintf(stderr,"Warning! unrecognized line:\n%s\n", lineA);
+        fprintf(stderr,"%s: warning: unrecognized line: '%s'\n", getAppName(), lineA);
         HeapFree(GetProcessHeap(), 0, lineA);
         return;
     }
@@ -625,7 +624,6 @@ static void processRegLinesA(FILE *in, char* first_chars)
 
     while (!feof(in)) {
         LPSTR s; /* The pointer into line for where the current fgets should read */
-        LPSTR check;
         WCHAR* lineW;
         s = line;
 
@@ -637,7 +635,7 @@ static void processRegLinesA(FILE *in, char* first_chars)
 
         for (;;) {
             size_t size_remaining;
-            int size_to_get;
+            int size_to_get, i;
             char *s_eol; /* various local uses */
 
             /* Do we need to expand the buffer ? */
@@ -663,27 +661,48 @@ static void processRegLinesA(FILE *in, char* first_chars)
              */
             size_to_get = (size_remaining > INT_MAX ? INT_MAX : size_remaining);
 
-            check = fgets (s, size_to_get, in);
+            /* get a single line. note that `i' must be one past the last
+             * meaningful character in `s' when this loop exits */
+            for(i = 0; i < size_to_get-1; ++i){
+                int xchar;
 
-            if (check == NULL) {
-                if (ferror(in)) {
-                    perror ("While reading input");
-                    exit (IO_ERROR);
-                } else {
-                    assert (feof(in));
-                    *s = '\0';
-                    /* It is not clear to me from the definition that the
-                     * contents of the buffer are well defined on detecting
-                     * an eof without managing to read anything.
-                     */
+                xchar = fgetc(in);
+                s[i] = xchar;
+                if(xchar == EOF){
+                    if(ferror(in)){
+                        perror("While reading input");
+                        exit(IO_ERROR);
+                    }else
+                        assert(feof(in));
+                    break;
+                }
+                if(s[i] == '\r'){
+                    /* read the next character iff it's \n */
+                    if(i+2 >= size_to_get){
+                        /* buffer too short, so put back the EOL char to
+                         * read next cycle */
+                        ungetc('\r', in);
+                        break;
+                    }
+                    s[i+1] = fgetc(in);
+                    if(s[i+1] != '\n'){
+                        ungetc(s[i+1], in);
+                        i = i+1;
+                    }else
+                        i = i+2;
+                    break;
+                }
+                if(s[i] == '\n'){
+                    i = i+1;
+                    break;
                 }
             }
+            s[i] = '\0';
 
             /* If we didn't read the eol nor the eof go around for the rest */
-            s_eol = strchr (s, '\n');
+            s_eol = strpbrk (s, "\r\n");
             if (!feof (in) && !s_eol) {
                 s = strchr (s, '\0');
-                /* It should be s + size_to_get - 1 but this is safer */
                 continue;
             }
 
@@ -693,11 +712,11 @@ static void processRegLinesA(FILE *in, char* first_chars)
                 continue;
             }
 
-            /* Remove any line feed.  Leave s_eol on the \0 */
+            /* Remove any line feed.  Leave s_eol on the first \0 */
             if (s_eol) {
-                *s_eol = '\0';
-                if (s_eol > line && *(s_eol-1) == '\r')
-                    *--s_eol = '\0';
+               if (*s_eol == '\r' && *(s_eol+1) == '\n')
+                   *(s_eol+1) = '\0';
+               *s_eol = '\0';
             } else
                 s_eol = strchr (s, '\0');
 
@@ -801,7 +820,8 @@ static void processRegLinesW(FILE *in)
         /* If we didn't read the eol nor the eof go around for the rest */
         while(1)
         {
-            s_eol = strchrW(line, '\n');
+            const WCHAR line_endings[] = {'\r','\n',0};
+            s_eol = strpbrkW(line, line_endings);
 
             if(!s_eol) {
                 /* Move the stub of the line to the start of the buffer so
@@ -815,22 +835,22 @@ static void processRegLinesW(FILE *in)
 
             /* If it is a comment line then discard it and go around again */
             if (*line == '#') {
-                line = s_eol + 1;
+                if (*s_eol == '\r' && *(s_eol+1) == '\n')
+                    line = s_eol + 2;
+                else
+                    line = s_eol + 1;
                 continue;
             }
 
             /* If there is a concatenating \\ then go around again */
-            if ((*(s_eol-1) == '\\') ||
-                (*(s_eol-1) == '\r' && *(s_eol-2) == '\\')) {
-                WCHAR* NextLine = s_eol;
+            if (*(s_eol-1) == '\\') {
+                WCHAR* NextLine = s_eol + 1;
+
+                if(*s_eol == '\r' && *(s_eol+1) == '\n')
+                    NextLine++;
 
                 while(*(NextLine+1) == ' ' || *(NextLine+1) == '\t')
                     NextLine++;
-
-                NextLine++;
-
-                if(*(s_eol-1) == '\r')
-                    s_eol--;
 
                 MoveMemory(s_eol - 1, NextLine, (CharsInBuf - (NextLine - s) + 1)*sizeof(WCHAR));
                 CharsInBuf -= NextLine - s_eol + 1;
@@ -838,15 +858,10 @@ static void processRegLinesW(FILE *in)
                 continue;
             }
 
-            /* Remove any line feed.  Leave s_eol on the \0 */
-            if (s_eol) {
-                *s_eol = '\0';
-                if (s_eol > buf && *(s_eol-1) == '\r')
-                    *(s_eol-1) = '\0';
-            }
-
-            if(!s_eol)
-                break;
+            /* Remove any line feed.  Leave s_eol on the last \0 */
+            if (*s_eol == '\r' && *(s_eol + 1) == '\n')
+                *s_eol++ = '\0';
+            *s_eol = '\0';
 
             processRegEntry(line, TRUE);
             line = s_eol + 1;
@@ -972,9 +987,9 @@ static void REGPROC_export_binary(WCHAR **line_buf, DWORD *line_buf_size, DWORD 
     const WCHAR *hex_prefix;
     const WCHAR hex[] = {'h','e','x',':',0};
     WCHAR hex_buf[17];
-    const WCHAR concat[] = {'\\','\r','\n',' ',' ',0};
+    const WCHAR concat[] = {'\\','\n',' ',' ',0};
     DWORD concat_prefix, concat_len;
-    const WCHAR newline[] = {'\r','\n',0};
+    const WCHAR newline[] = {'\n',0};
     CHAR* value_multibyte = NULL;
 
     if (type == REG_BINARY) {
@@ -1083,7 +1098,7 @@ static void export_hkey(FILE *file, HKEY key,
     DWORD i;
     BOOL more_data;
     LONG ret;
-    WCHAR key_format[] = {'\r','\n','[','%','s',']','\r','\n',0};
+    WCHAR key_format[] = {'\n','[','%','s',']','\n',0};
 
     /* get size information and resize the buffers if necessary */
     if (RegQueryInfoKeyW(key, NULL, NULL, NULL, NULL,
@@ -1153,7 +1168,7 @@ static void export_hkey(FILE *file, HKEY key,
                     REGPROC_export_binary(line_buf, line_buf_size, &line_len, value_type, *val_buf, val_size1, unicode);
                 } else {
                     const WCHAR start[] = {'"',0};
-                    const WCHAR end[] = {'"','\r','\n',0};
+                    const WCHAR end[] = {'"','\n',0};
                     DWORD len;
 
                     len = lstrlenW(start);
@@ -1174,7 +1189,7 @@ static void export_hkey(FILE *file, HKEY key,
 
             case REG_DWORD:
             {
-                WCHAR format[] = {'d','w','o','r','d',':','%','0','8','x','\r','\n',0};
+                WCHAR format[] = {'d','w','o','r','d',':','%','0','8','x','\n',0};
 
                 REGPROC_resize_char_buffer(line_buf, line_buf_size, line_len + 15);
                 sprintfW(*line_buf + line_len, format, *((DWORD *)*val_buf));
@@ -1239,20 +1254,19 @@ static void export_hkey(FILE *file, HKEY key,
 }
 
 /******************************************************************************
- * Open file in binary mode for export.
+ * Open file for export.
  */
 static FILE *REGPROC_open_export_file(WCHAR *file_name, BOOL unicode)
 {
     FILE *file;
     WCHAR dash = '-';
 
-    if (strncmpW(file_name,&dash,1)==0) {
+    if (strncmpW(file_name,&dash,1)==0)
         file=stdout;
-        _setmode(_fileno(file), _O_BINARY);
-    } else
+    else
     {
         CHAR* file_nameA = GetMultiByteString(file_name);
-        file = fopen(file_nameA, "wb");
+        file = fopen(file_nameA, "w");
         if (!file) {
             perror("");
             fprintf(stderr,"%s: Can't open file \"%s\"\n", getAppName(), file_nameA);
@@ -1264,12 +1278,12 @@ static FILE *REGPROC_open_export_file(WCHAR *file_name, BOOL unicode)
     if(unicode)
     {
         const BYTE unicode_seq[] = {0xff,0xfe};
-        const WCHAR header[] = {'W','i','n','d','o','w','s',' ','R','e','g','i','s','t','r','y',' ','E','d','i','t','o','r',' ','V','e','r','s','i','o','n',' ','5','.','0','0','\r','\n'};
+        const WCHAR header[] = {'W','i','n','d','o','w','s',' ','R','e','g','i','s','t','r','y',' ','E','d','i','t','o','r',' ','V','e','r','s','i','o','n',' ','5','.','0','0','\n'};
         fwrite(unicode_seq, sizeof(BYTE), sizeof(unicode_seq)/sizeof(unicode_seq[0]), file);
         fwrite(header, sizeof(WCHAR), sizeof(header)/sizeof(header[0]), file);
     } else
     {
-        fputs("REGEDIT4\r\n", file);
+        fputs("REGEDIT4\n", file);
     }
 
     return file;

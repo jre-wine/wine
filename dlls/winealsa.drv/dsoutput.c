@@ -68,7 +68,7 @@ typedef struct IDsDriverBufferImpl IDsDriverBufferImpl;
 struct IDsDriverImpl
 {
     /* IUnknown fields */
-    const IDsDriverVtbl *lpVtbl;
+    IDsDriver IDsDriver_iface;
     LONG ref;
 
     /* IDsDriverImpl fields */
@@ -78,7 +78,7 @@ struct IDsDriverImpl
 
 struct IDsDriverBufferImpl
 {
-    const IDsDriverBufferVtbl *lpVtbl;
+    IDsDriverBuffer IDsDriverBuffer_iface;
     LONG ref;
     IDsDriverImpl* drv;
 
@@ -92,6 +92,16 @@ struct IDsDriverBufferImpl
     snd_pcm_sw_params_t *sw_params;
     snd_pcm_uframes_t mmap_buflen_frames, mmap_pos, mmap_commitahead;
 };
+
+static inline IDsDriverImpl *impl_from_IDsDriver(IDsDriver *iface)
+{
+    return CONTAINING_RECORD(iface, IDsDriverImpl, IDsDriver_iface);
+}
+
+static inline IDsDriverBufferImpl *impl_from_IDsDriverBuffer(IDsDriverBuffer *iface)
+{
+    return CONTAINING_RECORD(iface, IDsDriverBufferImpl, IDsDriverBuffer_iface);
+}
 
 /** Fill buffers, for starting and stopping
  * Alsa won't start playing until everything is filled up
@@ -158,11 +168,8 @@ static snd_pcm_uframes_t CommitAll(IDsDriverBufferImpl *This)
 static void CheckXRUN(IDsDriverBufferImpl* This)
 {
     snd_pcm_state_t state = snd_pcm_state(This->pcm);
-    snd_pcm_sframes_t delay;
     int err;
 
-    snd_pcm_hwsync(This->pcm);
-    snd_pcm_delay(This->pcm, &delay);
     if ( state == SND_PCM_STATE_XRUN )
     {
         err = snd_pcm_prepare(This->pcm);
@@ -281,7 +288,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_QueryInterface(PIDSDRIVERBUFFER iface,
 
 static ULONG WINAPI IDsDriverBufferImpl_AddRef(PIDSDRIVERBUFFER iface)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
@@ -291,7 +298,7 @@ static ULONG WINAPI IDsDriverBufferImpl_AddRef(PIDSDRIVERBUFFER iface)
 
 static ULONG WINAPI IDsDriverBufferImpl_Release(PIDSDRIVERBUFFER iface)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
@@ -324,7 +331,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_Lock(PIDSDRIVERBUFFER iface,
 					       DWORD dwWritePosition,DWORD dwWriteLen,
 					       DWORD dwFlags)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     snd_pcm_uframes_t writepos;
 
     TRACE("%d bytes from %d\n", dwWriteLen, dwWritePosition);
@@ -382,7 +389,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_Unlock(PIDSDRIVERBUFFER iface,
 						 LPVOID pvAudio1,DWORD dwLen1,
 						 LPVOID pvAudio2,DWORD dwLen2)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     snd_pcm_uframes_t writepos;
 
     if (!dwLen1)
@@ -569,7 +576,7 @@ static HRESULT SetFormat(IDsDriverBufferImpl *This, LPWAVEFORMATEX pwfx)
 
 static HRESULT WINAPI IDsDriverBufferImpl_SetFormat(PIDSDRIVERBUFFER iface, LPWAVEFORMATEX pwfx)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     HRESULT hr = S_OK;
 
     TRACE("(%p, %p)\n", iface, pwfx);
@@ -594,7 +601,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_SetFrequency(PIDSDRIVERBUFFER iface, D
 
 static HRESULT WINAPI IDsDriverBufferImpl_SetVolumePan(PIDSDRIVERBUFFER iface, PDSVOLUMEPAN pVolPan)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     FIXME("(%p,%p): stub\n",This,pVolPan);
     /* TODO: Bring volume control back */
     return DS_OK;
@@ -611,7 +618,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_SetPosition(PIDSDRIVERBUFFER iface, DW
 static HRESULT WINAPI IDsDriverBufferImpl_GetPosition(PIDSDRIVERBUFFER iface,
 						      LPDWORD lpdwPlay, LPDWORD lpdwWrite)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     snd_pcm_uframes_t hw_pptr, hw_wptr;
     snd_pcm_state_t state;
 
@@ -676,7 +683,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_GetPosition(PIDSDRIVERBUFFER iface,
 
 static HRESULT WINAPI IDsDriverBufferImpl_Play(PIDSDRIVERBUFFER iface, DWORD dwRes1, DWORD dwRes2, DWORD dwFlags)
 {
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     TRACE("(%p,%x,%x,%x)\n",iface,dwRes1,dwRes2,dwFlags);
 
     /* **** */
@@ -692,7 +699,7 @@ static HRESULT WINAPI IDsDriverBufferImpl_Stop(PIDSDRIVERBUFFER iface)
     const snd_pcm_channel_area_t *areas;
     snd_pcm_uframes_t avail;
     snd_pcm_format_t format;
-    IDsDriverBufferImpl *This = (IDsDriverBufferImpl *)iface;
+    IDsDriverBufferImpl *This = impl_from_IDsDriverBuffer(iface);
     TRACE("(%p)\n",iface);
 
     /* **** */
@@ -745,7 +752,7 @@ static HRESULT WINAPI IDsDriverImpl_QueryInterface(PIDSDRIVER iface, REFIID riid
 
 static ULONG WINAPI IDsDriverImpl_AddRef(PIDSDRIVER iface)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     ULONG refCount = InterlockedIncrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount - 1);
@@ -755,7 +762,7 @@ static ULONG WINAPI IDsDriverImpl_AddRef(PIDSDRIVER iface)
 
 static ULONG WINAPI IDsDriverImpl_Release(PIDSDRIVER iface)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     ULONG refCount = InterlockedDecrement(&This->ref);
 
     TRACE("(%p)->(ref before=%u)\n",This, refCount + 1);
@@ -769,7 +776,7 @@ static ULONG WINAPI IDsDriverImpl_Release(PIDSDRIVER iface)
 
 static HRESULT WINAPI IDsDriverImpl_GetDriverDesc(PIDSDRIVER iface, PDSDRIVERDESC pDesc)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     TRACE("(%p,%p)\n",iface,pDesc);
     *pDesc			= WOutDev[This->wDevID].ds_desc;
     pDesc->dwFlags		= DSDDESC_DONTNEEDSECONDARYLOCK | DSDDESC_DONTNEEDWRITELEAD;
@@ -790,7 +797,7 @@ static HRESULT WINAPI IDsDriverImpl_GetDriverDesc(PIDSDRIVER iface, PDSDRIVERDES
 static HRESULT WINAPI IDsDriverImpl_Open(PIDSDRIVER iface)
 {
     HRESULT hr = S_OK;
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     int err=0;
     snd_pcm_t *pcm = NULL;
     snd_pcm_hw_params_t *hw_params;
@@ -833,14 +840,14 @@ static HRESULT WINAPI IDsDriverImpl_Open(PIDSDRIVER iface)
 
 static HRESULT WINAPI IDsDriverImpl_Close(PIDSDRIVER iface)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     TRACE("(%p) stub, harmless\n",This);
     return DS_OK;
 }
 
 static HRESULT WINAPI IDsDriverImpl_GetCaps(PIDSDRIVER iface, PDSDRIVERCAPS pCaps)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     TRACE("(%p,%p)\n",iface,pCaps);
     *pCaps = WOutDev[This->wDevID].ds_caps;
     return DS_OK;
@@ -853,7 +860,7 @@ static HRESULT WINAPI IDsDriverImpl_CreateSoundBuffer(PIDSDRIVER iface,
 						      LPBYTE *ppbBuffer,
 						      LPVOID *ppvObj)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     IDsDriverBufferImpl** ippdsdb = (IDsDriverBufferImpl**)ppvObj;
     HRESULT err;
 
@@ -876,7 +883,7 @@ static HRESULT WINAPI IDsDriverImpl_CreateSoundBuffer(PIDSDRIVER iface,
         HeapFree(GetProcessHeap(), 0, (*ippdsdb)->hw_params);
         return DSERR_OUTOFMEMORY;
     }
-    (*ippdsdb)->lpVtbl  = &dsdbvt;
+    (*ippdsdb)->IDsDriverBuffer_iface.lpVtbl = &dsdbvt;
     (*ippdsdb)->ref	= 1;
     (*ippdsdb)->drv	= This;
     InitializeCriticalSection(&(*ippdsdb)->pcm_crst);
@@ -912,7 +919,7 @@ static HRESULT WINAPI IDsDriverImpl_DuplicateSoundBuffer(PIDSDRIVER iface,
 							 PIDSDRIVERBUFFER pBuffer,
 							 LPVOID *ppvObj)
 {
-    IDsDriverImpl *This = (IDsDriverImpl *)iface;
+    IDsDriverImpl *This = impl_from_IDsDriver(iface);
     FIXME("(%p,%p): stub\n",This,pBuffer);
     return DSERR_INVALIDCALL;
 }
@@ -939,7 +946,7 @@ DWORD wodDsCreate(UINT wDevID, PIDSDRIVER* drv)
     *idrv = HeapAlloc(GetProcessHeap(),0,sizeof(IDsDriverImpl));
     if (!*idrv)
         return MMSYSERR_NOMEM;
-    (*idrv)->lpVtbl	= &dsdvt;
+    (*idrv)->IDsDriver_iface.lpVtbl = &dsdvt;
     (*idrv)->ref	= 1;
 
     (*idrv)->wDevID	= wDevID;

@@ -166,3 +166,35 @@ HRESULT WINAPI DwmGetGraphicsStreamTransformHint(UINT uIndex, MilMatrix3x2D *pTr
 
     return E_NOTIMPL;
 }
+
+/**********************************************************************
+ *           DwmEnableBlurBehindWindow         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmEnableBlurBehindWindow(HWND hWnd, const DWM_BLURBEHIND *pBlurBuf)
+{
+    FIXME("%p %p\n", hWnd, pBlurBuf);
+
+    return E_NOTIMPL;
+}
+
+/**********************************************************************
+ *           DwmDefWindowProc         (DWMAPI.@)
+ */
+BOOL WINAPI DwmDefWindowProc(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam, LRESULT *plResult)
+{
+    static int i;
+
+    if (!i++) FIXME("stub\n");
+
+    return FALSE;
+}
+
+/**********************************************************************
+ *           DwmGetWindowAttribute         (DWMAPI.@)
+ */
+HRESULT WINAPI DwmGetWindowAttribute(HWND hwnd, DWORD attribute, PVOID pv_attribute, DWORD size)
+{
+    FIXME("(%p %d %p %d) stub\n", hwnd, attribute, pv_attribute, size);
+
+    return E_NOTIMPL;
+}

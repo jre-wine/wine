@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = msctf.dll
-IMPORTS   = uuid ole32 oleaut32 user32 advapi32 kernel32 ntdll
+IMPORTS   = uuid ole32 oleaut32 user32 advapi32
 
 C_SRCS = \
 	categorymgr.c \
@@ -15,8 +11,9 @@ C_SRCS = \
 	langbarmgr.c \
 	msctf.c \
 	range.c \
-	regsvr.c \
 	threadmgr.c
+
+IDL_R_SRCS = msctf_classes.idl
 
 RC_SRCS = \
 	version.rc

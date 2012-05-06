@@ -47,7 +47,9 @@ extern INT arc2polybezier(GpPointF * points, REAL x1, REAL y1, REAL x2, REAL y2,
     REAL startAngle, REAL sweepAngle);
 extern REAL gdiplus_atan2(REAL dy, REAL dx);
 extern GpStatus hresult_to_status(HRESULT res);
-extern REAL convert_unit(HDC hdc, GpUnit unit);
+extern REAL convert_unit(REAL logpixels, GpUnit unit);
+
+extern GpStatus graphics_from_image(GpImage *image, GpGraphics **graphics);
 
 extern void calc_curve_bezier(CONST GpPointF *pts, REAL tension, REAL *x1,
     REAL *y1, REAL *x2, REAL *y2);
@@ -62,6 +64,8 @@ extern GpStatus trace_path(GpGraphics *graphics, GpPath *path);
 
 typedef struct region_element region_element;
 extern void delete_element(region_element *element);
+
+extern GpStatus get_hatch_data(HatchStyle hatchstyle, const char **result);
 
 static inline INT roundr(REAL x)
 {
@@ -150,6 +154,12 @@ struct GpGraphics{
     UINT textcontrast; /* not used yet. get/set only */
     struct list containers;
     GraphicsContainer contid; /* last-issued container ID */
+    /* For giving the caller an HDC when we technically can't: */
+    HBITMAP temp_hbitmap;
+    int temp_hbitmap_width;
+    int temp_hbitmap_height;
+    BYTE *temp_bits;
+    HDC temp_hdc;
 };
 
 struct GpBrush{
@@ -205,7 +215,7 @@ struct GpTexture{
     GpBrush brush;
     GpMatrix *transform;
     GpImage *image;
-    WrapMode wrap;  /* not used yet */
+    GpImageAttributes *imageattributes;
 };
 
 struct GpPath{
@@ -269,6 +279,8 @@ struct GpBitmap{
     HDC hdc;
     BYTE *bits; /* actual image bits if this is a DIB */
     INT stride; /* stride of bits if this is a DIB */
+    BYTE *own_bits; /* image bits that need to be freed with this object */
+    INT lockx, locky; /* X and Y coordinates of the rect when a bitmap is locked for writing. */
 };
 
 struct GpCachedBitmap{
@@ -384,5 +396,15 @@ struct GpRegion{
     } header;
     region_element node;
 };
+
+typedef GpStatus (*gdip_format_string_callback)(HDC hdc,
+    GDIPCONST WCHAR *string, INT index, INT length, GDIPCONST GpFont *font,
+    GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
+    INT lineno, const RectF *bounds, void *user_data);
+
+GpStatus gdip_format_string(HDC hdc,
+    GDIPCONST WCHAR *string, INT length, GDIPCONST GpFont *font,
+    GDIPCONST RectF *rect, GDIPCONST GpStringFormat *format,
+    gdip_format_string_callback callback, void *user_data);
 
 #endif

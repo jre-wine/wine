@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 TESTDLL   = oleacc.dll
-IMPORTS   = kernel32 oleacc
+IMPORTS   = oleacc
 
 C_SRCS = \
 	main.c

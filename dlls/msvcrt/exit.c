@@ -32,11 +32,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(msvcrt);
 static MSVCRT__onexit_t *MSVCRT_atexit_table = NULL;
 static int MSVCRT_atexit_table_size = 0;
 static int MSVCRT_atexit_registered = 0; /* Points to free slot */
+static MSVCRT_purecall_handler purecall_handler = NULL;
 
 static const char szMsgBoxTitle[] = "Wine C++ Runtime Library";
 
 extern int MSVCRT_app_type;
 extern char *MSVCRT__pgmptr;
+
+static unsigned int MSVCRT_abort_behavior =  MSVCRT__WRITE_ABORT_MSG | MSVCRT__CALL_REPORTFAULT;
+static int MSVCRT_error_mode = MSVCRT__OUT_TO_DEFAULT;
 
 void (*CDECL _aexit_rtn)(int) = MSVCRT__exit;
 
@@ -131,8 +135,9 @@ static void DoMessageBox(LPCSTR lead, LPCSTR message)
 void CDECL _amsg_exit(int errnum)
 {
   TRACE("(%d)\n", errnum);
-  /* FIXME: text for the error number. */
-  if (MSVCRT_app_type == 2)
+
+  if ((MSVCRT_error_mode == MSVCRT__OUT_TO_MSGBOX) ||
+     ((MSVCRT_error_mode == MSVCRT__OUT_TO_DEFAULT) && (MSVCRT_app_type == 2)))
   {
     char text[32];
     sprintf(text, "Error: R60%d",errnum);
@@ -149,15 +154,37 @@ void CDECL _amsg_exit(int errnum)
 void CDECL MSVCRT_abort(void)
 {
   TRACE("()\n");
-  if (MSVCRT_app_type == 2)
+
+  if (MSVCRT_abort_behavior & MSVCRT__WRITE_ABORT_MSG)
   {
-    DoMessageBox("Runtime error!", "abnormal program termination");
+    if ((MSVCRT_error_mode == MSVCRT__OUT_TO_MSGBOX) ||
+       ((MSVCRT_error_mode == MSVCRT__OUT_TO_DEFAULT) && (MSVCRT_app_type == 2)))
+    {
+      DoMessageBox("Runtime error!", "abnormal program termination");
+    }
+    else
+      _cputs("\nabnormal program termination\n");
   }
-  else
-    _cputs("\nabnormal program termination\n");
   MSVCRT_raise(MSVCRT_SIGABRT);
   /* in case raise() returns */
   MSVCRT__exit(3);
+}
+
+/*********************************************************************
+ *		_set_abort_behavior (MSVCRT.@)
+ *
+ * Not exported by native msvcrt, added in msvcr80
+ */
+unsigned int CDECL MSVCRT__set_abort_behavior(unsigned int flags, unsigned int mask)
+{
+  unsigned int old = MSVCRT_abort_behavior;
+
+  TRACE("%x, %x\n", flags, mask);
+  if (mask & MSVCRT__CALL_REPORTFAULT)
+    FIXME("_WRITE_CALL_REPORTFAULT unhandled\n");
+
+  MSVCRT_abort_behavior = (MSVCRT_abort_behavior & ~mask) | (flags & mask);
+  return old;
 }
 
 /*********************************************************************
@@ -166,7 +193,8 @@ void CDECL MSVCRT_abort(void)
 void CDECL MSVCRT__assert(const char* str, const char* file, unsigned int line)
 {
   TRACE("(%s,%s,%d)\n",str,file,line);
-  if (MSVCRT_app_type == 2)
+  if ((MSVCRT_error_mode == MSVCRT__OUT_TO_MSGBOX) ||
+     ((MSVCRT_error_mode == MSVCRT__OUT_TO_DEFAULT) && (MSVCRT_app_type == 2)))
   {
     char text[2048];
     snprintf(text, sizeof(text), "File: %s\nLine: %d\n\nExpression: \"%s\"", file, line, str);
@@ -237,8 +265,23 @@ MSVCRT__onexit_t CDECL MSVCRT__onexit(MSVCRT__onexit_t func)
  */
 void CDECL MSVCRT_exit(int exitcode)
 {
+  HMODULE hmscoree;
+  static const WCHAR mscoreeW[] = {'m','s','c','o','r','e','e',0};
+  void WINAPI (*pCorExitProcess)(int);
+
   TRACE("(%d)\n",exitcode);
   MSVCRT__cexit();
+
+  hmscoree = GetModuleHandleW(mscoreeW);
+
+  if (hmscoree)
+  {
+    pCorExitProcess = (void*)GetProcAddress(hmscoree, "CorExitProcess");
+
+    if (pCorExitProcess)
+      pCorExitProcess(exitcode);
+  }
+
   ExitProcess(exitcode);
 }
 
@@ -251,6 +294,15 @@ int CDECL MSVCRT_atexit(void (*func)(void))
   return MSVCRT__onexit((MSVCRT__onexit_t)func) == (MSVCRT__onexit_t)func ? 0 : -1;
 }
 
+/* _set_purecall_handler - not exported in native msvcrt */
+MSVCRT_purecall_handler CDECL _set_purecall_handler(MSVCRT_purecall_handler function)
+{
+    MSVCRT_purecall_handler ret = purecall_handler;
+
+    TRACE("(%p)\n", function);
+    purecall_handler = function;
+    return ret;
+}
 
 /*********************************************************************
  *		_purecall (MSVCRT.@)
@@ -258,5 +310,30 @@ int CDECL MSVCRT_atexit(void (*func)(void))
 void CDECL _purecall(void)
 {
   TRACE("(void)\n");
+
+  if(purecall_handler)
+      purecall_handler();
   _amsg_exit( 25 );
+}
+
+/******************************************************************************
+ *		_set_error_mode (MSVCRT.@)
+ *
+ * Set the error mode, which describes where the C run-time writes error messages.
+ *
+ * PARAMS
+ *   mode - the new error mode
+ *
+ * RETURNS
+ *   The old error mode.
+ *
+ */
+int CDECL _set_error_mode(int mode)
+{
+
+  const int old = MSVCRT_error_mode;
+  if ( MSVCRT__REPORT_ERRMODE != mode ) {
+    MSVCRT_error_mode = mode;
+  }
+  return old;
 }

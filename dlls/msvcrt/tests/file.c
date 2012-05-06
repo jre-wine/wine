@@ -36,6 +36,17 @@
 
 static HANDLE proc_handles[2];
 
+static int (__cdecl *p_fopen_s)(FILE**, const char*, const char*);
+static int (__cdecl *p__wfopen_s)(FILE**, const wchar_t*, const wchar_t*);
+
+static void init(void)
+{
+    HMODULE hmod = GetModuleHandleA("msvcrt.dll");
+
+    p_fopen_s = (void*)GetProcAddress(hmod, "fopen_s");
+    p__wfopen_s = (void*)GetProcAddress(hmod, "_wfopen_s");
+}
+
 static void test_filbuf( void )
 {
     FILE *fp;
@@ -1201,6 +1212,82 @@ static void test_fopen_fclose_fcloseall( void )
     ok(_unlink(fname3) == 0, "Couldn't unlink file named '%s'\n", fname3);
 }
 
+static void test_fopen_s( void )
+{
+    const char name[] = "empty1";
+    char buff[16];
+    FILE *file;
+    int ret;
+    int len;
+
+    if (!p_fopen_s)
+    {
+        win_skip("Skipping fopen_s test\n");
+        return;
+    }
+    /* testing fopen_s */
+    ret = p_fopen_s(&file, name, "w");
+    ok(ret == 0, "fopen_s failed with %d\n", ret);
+    ok(file != 0, "fopen_s failed to return value\n");
+    fwrite(name, sizeof(name), 1, file);
+
+    ret = fclose(file);
+    ok(ret != EOF, "File failed to close\n");
+
+    file = fopen(name, "r");
+    ok(file != 0, "fopen failed\n");
+    len = fread(buff, 1, sizeof(name), file);
+    ok(len == sizeof(name), "File length is %d\n", len);
+    buff[sizeof(name)] = '\0';
+    ok(strcmp(name, buff) == 0, "File content mismatch! Got %s, expected %s\n", buff, name);
+
+    ret = fclose(file);
+    ok(ret != EOF, "File failed to close\n");
+
+    ok(_unlink(name) == 0, "Couldn't unlink file named '%s'\n", name);
+}
+
+static void test__wfopen_s( void )
+{
+    const char name[] = "empty1";
+    const WCHAR wname[] = {
+       'e','m','p','t','y','1',0
+    };
+    const WCHAR wmode[] = {
+       'w',0
+    };
+    char buff[16];
+    FILE *file;
+    int ret;
+    int len;
+
+    if (!p__wfopen_s)
+    {
+        win_skip("Skipping _wfopen_s test\n");
+        return;
+    }
+    /* testing _wfopen_s */
+    ret = p__wfopen_s(&file, wname, wmode);
+    ok(ret == 0, "_wfopen_s failed with %d\n", ret);
+    ok(file != 0, "_wfopen_s failed to return value\n");
+    fwrite(name, sizeof(name), 1, file);
+
+    ret = fclose(file);
+    ok(ret != EOF, "File failed to close\n");
+
+    file = fopen(name, "r");
+    ok(file != 0, "fopen failed\n");
+    len = fread(buff, 1, sizeof(name), file);
+    ok(len == sizeof(name), "File length is %d\n", len);
+    buff[sizeof(name)] = '\0';
+    ok(strcmp(name, buff) == 0, "File content mismatch! Got %s, expected %s\n", buff, name);
+
+    ret = fclose(file);
+    ok(ret != EOF, "File failed to close\n");
+
+    ok(_unlink(name) == 0, "Couldn't unlink file named '%s'\n", name);
+}
+
 static void test_get_osfhandle(void)
 {
     int fd;
@@ -1229,13 +1316,15 @@ static void test_stat(void)
 {
     int fd;
     int pipes[2];
+    int ret;
     struct stat buf;
 
     /* Tests for a file */
     fd = open("stat.tst", O_WRONLY | O_CREAT | O_BINARY, _S_IREAD |_S_IWRITE);
     if (fd >= 0)
     {
-        ok(fstat(fd, &buf) == 0, "fstat failed: errno=%d\n", errno);
+        ret = fstat(fd, &buf);
+        ok(!ret, "fstat failed: errno=%d\n", errno);
         ok((buf.st_mode & _S_IFMT) == _S_IFREG, "bad format = %06o\n", buf.st_mode);
         ok((buf.st_mode & 0777) == 0666, "bad st_mode = %06o\n", buf.st_mode);
         ok(buf.st_dev == 0, "st_dev is %d, expected 0\n", buf.st_dev);
@@ -1243,7 +1332,8 @@ static void test_stat(void)
         ok(buf.st_nlink == 1, "st_nlink is %d, expected 1\n", buf.st_nlink);
         ok(buf.st_size == 0, "st_size is %d, expected 0\n", buf.st_size);
 
-        ok(stat("stat.tst", &buf) == 0, "stat failed: errno=%d\n", errno);
+        ret = stat("stat.tst", &buf);
+        ok(!ret, "stat failed: errno=%d\n", errno);
         ok((buf.st_mode & _S_IFMT) == _S_IFREG, "bad format = %06o\n", buf.st_mode);
         ok((buf.st_mode & 0777) == 0666, "bad st_mode = %06o\n", buf.st_mode);
         ok(buf.st_dev == buf.st_rdev, "st_dev (%d) and st_rdev (%d) differ\n", buf.st_dev, buf.st_rdev);
@@ -1259,7 +1349,8 @@ static void test_stat(void)
     /* Tests for a char device */
     if (_dup2(0, 10) == 0)
     {
-        ok(fstat(10, &buf) == 0, "fstat(stdin) failed: errno=%d\n", errno);
+        ret = fstat(10, &buf);
+        ok(!ret, "fstat(stdin) failed: errno=%d\n", errno);
         if ((buf.st_mode & _S_IFMT) == _S_IFCHR)
         {
             ok(buf.st_mode == _S_IFCHR, "bad st_mode=%06o\n", buf.st_mode);
@@ -1277,7 +1368,8 @@ static void test_stat(void)
     /* Tests for pipes */
     if (_pipe(pipes, 1024, O_BINARY) == 0)
     {
-        ok(fstat(pipes[0], &buf) == 0, "fstat(pipe) failed: errno=%d\n", errno);
+        ret = fstat(pipes[0], &buf);
+        ok(!ret, "fstat(pipe) failed: errno=%d\n", errno);
         ok(buf.st_mode == _S_IFIFO, "bad st_mode=%06o\n", buf.st_mode);
         ok(buf.st_dev == pipes[0], "st_dev is %d, expected %d\n", buf.st_dev, pipes[0]);
         ok(buf.st_rdev == pipes[0], "st_rdev is %d, expected %d\n", buf.st_rdev, pipes[0]);
@@ -1307,7 +1399,8 @@ static void test_pipes_child(int argc, char** args)
     }
 
     fd=atoi(args[3]);
-    ok(close(fd) == 0, "unable to close %d: %d\n", fd, errno);
+    i=close(fd);
+    ok(!i, "unable to close %d: %d\n", fd, errno);
 
     fd=atoi(args[4]);
 
@@ -1319,7 +1412,8 @@ static void test_pipes_child(int argc, char** args)
            Sleep(100);
     }
 
-    ok(close(fd) == 0, "unable to close %d: %d\n", fd, errno);
+    i=close(fd);
+    ok(!i, "unable to close %d: %d\n", fd, errno);
 }
 
 static void test_pipes(const char* selfname)
@@ -1347,7 +1441,8 @@ static void test_pipes(const char* selfname)
     arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);
     arg_v[5] = NULL;
     proc_handles[0] = (HANDLE)_spawnvp(_P_NOWAIT, selfname, arg_v);
-    ok(close(pipes[1]) == 0, "unable to close %d: %d\n", pipes[1], errno);
+    i=close(pipes[1]);
+    ok(!i, "unable to close %d: %d\n", pipes[1], errno);
 
     for (i=0; i<N_TEST_MESSAGES; i++) {
        r=read(pipes[0], buf, sizeof(buf)-1);
@@ -1359,7 +1454,8 @@ static void test_pipes(const char* selfname)
 
     r=read(pipes[0], buf, sizeof(buf)-1);
     ok(r == 0, "expected to read 0 bytes, got %d\n", r);
-    ok(close(pipes[0]) == 0, "unable to close %d: %d\n", pipes[0], errno);
+    i=close(pipes[0]);
+    ok(!i, "unable to close %d: %d\n", pipes[0], errno);
 
     /* Test reading from a pipe with fread() */
     if (_pipe(pipes, 1024, O_BINARY) < 0)
@@ -1375,7 +1471,8 @@ static void test_pipes(const char* selfname)
     arg_v[4] = str_fdw; sprintf(str_fdw, "%d", pipes[1]);
     arg_v[5] = NULL;
     proc_handles[1] = (HANDLE)_spawnvp(_P_NOWAIT, selfname, arg_v);
-    ok(close(pipes[1]) == 0, "unable to close %d: %d\n", pipes[1], errno);
+    i=close(pipes[1]);
+    ok(!i, "unable to close %d: %d\n", pipes[1], errno);
     file=fdopen(pipes[0], "r");
 
     /* In blocking mode, fread will keep calling read() until it gets
@@ -1398,7 +1495,8 @@ static void test_pipes(const char* selfname)
     ok(ferror(file) == 0, "got ferror() = %d\n", ferror(file));
     ok(feof(file), "feof() is false!\n");
 
-    ok(fclose(file) == 0, "unable to close the pipe: %d\n", errno);
+    i=fclose(file);
+    ok(!i, "unable to close the pipe: %d\n", errno);
 }
 
 static void test_unlink(void)
@@ -1423,6 +1521,8 @@ START_TEST(file)
 {
     int arg_c;
     char** arg_v;
+
+    init();
 
     arg_c = winetest_get_mainargs( &arg_v );
 
@@ -1450,6 +1550,8 @@ START_TEST(file)
     test_filbuf();
     test_fdopen();
     test_fopen_fclose_fcloseall();
+    test_fopen_s();
+    test__wfopen_s();
     test_fileops();
     test_asciimode();
     test_asciimode2();

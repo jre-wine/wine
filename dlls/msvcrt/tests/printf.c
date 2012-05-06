@@ -26,6 +26,7 @@
 #define _CRT_NON_CONFORMING_SWPRINTFS
  
 #include <stdio.h>
+#include <errno.h>
 
 #include "windef.h"
 #include "winbase.h"
@@ -38,6 +39,10 @@ static int (__cdecl *p__vscwprintf)(const wchar_t *format, __ms_va_list valist);
 static int (__cdecl *p__vsnwprintf_s)(wchar_t *str, size_t sizeOfBuffer,
                                       size_t count, const wchar_t *format,
                                       __ms_va_list valist);
+static int (__cdecl *p__ecvt_s)(char *buffer, size_t length, double number,
+                                int ndigits, int *decpt, int *sign);
+static int (__cdecl *p__fcvt_s)(char *buffer, size_t length, double number,
+                                int ndigits, int *decpt, int *sign);
 
 static void init( void )
 {
@@ -46,6 +51,8 @@ static void init( void )
     p__vscprintf = (void *)GetProcAddress(hmod, "_vscprintf");
     p__vscwprintf = (void *)GetProcAddress(hmod, "_vscwprintf");
     p__vsnwprintf_s = (void *)GetProcAddress(hmod, "_vsnwprintf_s");
+    p__ecvt_s = (void *)GetProcAddress(hmod, "_ecvt_s");
+    p__fcvt_s = (void *)GetProcAddress(hmod, "_fcvt_s");
 }
 
 static void test_sprintf( void )
@@ -713,6 +720,8 @@ static void test_fcvt(void)
     ok( 0 == sign, "sign wrong\n");
 }
 
+/* Don't test nrdigits < 0, msvcrt on Win9x and NT4 will corrupt memory by
+ * writing outside allocated memory */
 static struct {
     double value;
     int nrdigits;
@@ -725,7 +734,6 @@ static struct {
     {          45.0,   2,        "45",           "4500",          2,      2,      0 },
     /* Numbers less than 1.0 with different precisions */
     {        0.0001,   1,         "1",               "",         -3,     -3,     0 },
-    {        0.0001, -10,          "",               "",         -3,     -3,     0 },
     {        0.0001,  10,"1000000000",        "1000000",         -3,     -3,     0 },
     /* Basic sign test */
     {     -111.0001,   5,     "11100",       "11100010",          3,      3,     1 },
@@ -753,7 +761,7 @@ static struct {
     {           0.4,   0,          "",               "",          0,      0,     0 },
     {          0.49,   0,          "",               "",          0,      0,     0 },
     {          0.51,   0,          "",              "1",          1,      1,     0 },
-    /* ask ridiculous amunt of precision, ruin formatting this table */
+    /* ask for ridiculous precision, ruin formatting this table */
     {           1.0,  30, "100000000000000000000000000000",
                       "1000000000000000000000000000000",          1,      1,      0},
     {           123456789012345678901.0,  30, "123456789012345680000000000000",
@@ -765,7 +773,8 @@ static struct {
 static void test_xcvt(void)
 {
     char *str;
-    int i, decpt, sign;
+    int i, decpt, sign, err;
+
     for( i = 0; strcmp( test_cvt_testcases[i].expstr_e, "END"); i++){
         decpt = sign = 100;
         str = _ecvt( test_cvt_testcases[i].value,
@@ -778,6 +787,9 @@ static void test_xcvt(void)
         ok( decpt == test_cvt_testcases[i].expdecpt_e,
                 "_ecvt() decimal point wrong, got %d expected %d\n", decpt,
                 test_cvt_testcases[i].expdecpt_e);
+        ok( sign == test_cvt_testcases[i].expsign,
+                "_ecvt() sign wrong, got %d expected %d\n", sign,
+                test_cvt_testcases[i].expsign);
     }
     for( i = 0; strcmp( test_cvt_testcases[i].expstr_e, "END"); i++){
         decpt = sign = 100;
@@ -792,9 +804,76 @@ static void test_xcvt(void)
                 "_fcvt() decimal point wrong, got %d expected %d\n", decpt,
                 test_cvt_testcases[i].expdecpt_f);
         ok( sign == test_cvt_testcases[i].expsign,
-                "_ecvt() sign wrong, got %d expected %d\n", sign,
+                "_fcvt() sign wrong, got %d expected %d\n", sign,
                 test_cvt_testcases[i].expsign);
     }
+
+    if (p__ecvt_s)
+    {
+        str = malloc(1024);
+        for( i = 0; strcmp( test_cvt_testcases[i].expstr_e, "END"); i++){
+            decpt = sign = 100;
+            err = p__ecvt_s(str, 1024, test_cvt_testcases[i].value, test_cvt_testcases[i].nrdigits, &decpt, &sign);
+            ok(err == 0, "_ecvt_s() failed with error code %d\n", err);
+            ok( 0 == strncmp( str, test_cvt_testcases[i].expstr_e, 15),
+                   "_ecvt_s() bad return, got \n'%s' expected \n'%s'\n", str,
+                  test_cvt_testcases[i].expstr_e);
+            ok( decpt == test_cvt_testcases[i].expdecpt_e,
+                    "_ecvt_s() decimal point wrong, got %d expected %d\n", decpt,
+                    test_cvt_testcases[i].expdecpt_e);
+            ok( sign == test_cvt_testcases[i].expsign,
+                    "_ecvt_s() sign wrong, got %d expected %d\n", sign,
+                    test_cvt_testcases[i].expsign);
+        }
+        free(str);
+    }
+    else
+        win_skip("_ecvt_s not available\n");
+
+    if (p__fcvt_s)
+    {
+        int i;
+
+        str = malloc(1024);
+
+        /* invalid arguments */
+        err = p__fcvt_s(NULL, 0, 0.0, 0, &i, &i);
+        ok(err == EINVAL, "got %d, expected EINVAL\n", err);
+
+        err = p__fcvt_s(str, 0, 0.0, 0, &i, &i);
+        ok(err == EINVAL, "got %d, expected EINVAL\n", err);
+
+        str[0] = ' ';
+        str[1] = 0;
+        err = p__fcvt_s(str, -1, 0.0, 0, &i, &i);
+        ok(err == 0, "got %d, expected 0\n", err);
+        ok(str[0] == 0, "got %c, expected 0\n", str[0]);
+        ok(str[1] == 0, "got %c, expected 0\n", str[1]);
+
+        err = p__fcvt_s(str, 1, 0.0, 0, NULL, &i);
+        ok(err == EINVAL, "got %d, expected EINVAL\n", err);
+
+        err = p__fcvt_s(str, 1, 0.0, 0, &i, NULL);
+        ok(err == EINVAL, "got %d, expected EINVAL\n", err);
+
+        for( i = 0; strcmp( test_cvt_testcases[i].expstr_e, "END"); i++){
+            decpt = sign = 100;
+            err = p__fcvt_s(str, 1024, test_cvt_testcases[i].value, test_cvt_testcases[i].nrdigits, &decpt, &sign);
+            ok(err == 0, "_fcvt_s() failed with error code %d", err);
+            ok( 0 == strncmp( str, test_cvt_testcases[i].expstr_f, 15),
+                   "_fcvt_s() bad return, got '%s' expected '%s'. test %d\n", str,
+                  test_cvt_testcases[i].expstr_f, i);
+            ok( decpt == test_cvt_testcases[i].expdecpt_f,
+                    "_fcvt_s() decimal point wrong, got %d expected %d\n", decpt,
+                    test_cvt_testcases[i].expdecpt_f);
+            ok( sign == test_cvt_testcases[i].expsign,
+                    "_fcvt_s() sign wrong, got %d expected %d\n", sign,
+                    test_cvt_testcases[i].expsign);
+        }
+        free(str);
+    }
+    else
+        win_skip("_fcvt_s not available\n");
 }
 
 static int __cdecl _vsnwprintf_wrapper(wchar_t *str, size_t len, const wchar_t *format, ...)

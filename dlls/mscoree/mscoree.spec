@@ -7,6 +7,7 @@
 
 @ stub CallFunctionShim
 @ stub CloseCtrs
+@ stdcall CLRCreateInstance(ptr ptr ptr)
 @ stdcall ClrCreateManagedInstance(wstr ptr ptr)
 @ stub CoEEShutDownCOM
 @ stdcall CoInitializeCor(long)
@@ -42,7 +43,7 @@
 @ stdcall GetCORSystemDirectory(ptr long ptr)
 @ stdcall GetCORVersion(ptr long ptr)
 @ stub GetCompileInfo
-@ stub GetFileVersion
+@ stdcall GetFileVersion(wstr ptr long ptr)
 @ stub GetHashFromAssemblyFile
 @ stub GetHashFromAssemblyFileW
 @ stub GetHashFromBlob
@@ -80,7 +81,7 @@
 @ stdcall ND_RU1(ptr long)
 @ stdcall ND_WI2(ptr long long)
 @ stdcall ND_WI4(ptr long long)
-@ stdcall ND_WI8(ptr long double)
+@ stdcall ND_WI8(ptr long int64)
 @ stdcall ND_WU1(ptr long long)
 @ stub OpenCtrs
 @ stub ReOpenMetaDataWithMemoryEx

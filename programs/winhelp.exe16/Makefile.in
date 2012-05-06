@@ -1,10 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = winhelp.exe16
-APPMODE   = -mwindows -Wb,--subsystem,win16
-IMPORTS   = kernel32 kernel
+APPMODE   = -m16
 
 C_SRCS = winhelp.c
 

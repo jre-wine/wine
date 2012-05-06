@@ -66,7 +66,10 @@ void do_ns_command(HTMLDocument *This, const char *cmd, nsICommandParams *nspara
  * IOleCommandTarget implementation
  */
 
-#define CMDTARGET_THIS(iface) DEFINE_THIS(HTMLDocument, OleCommandTarget, iface)
+static inline HTMLDocument *impl_from_IOleCommandTarget(IOleCommandTarget *iface)
+{
+    return CONTAINING_RECORD(iface, HTMLDocument, IOleCommandTarget_iface);
+}
 
 static HRESULT exec_open(HTMLDocument *This, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
 {
@@ -604,7 +607,7 @@ static HRESULT exec_editmode(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
         }
     }
 
-    hres = IPersistMoniker_Load(PERSISTMON(This), TRUE, mon, NULL, 0);
+    hres = IPersistMoniker_Load(&This->IPersistMoniker_iface, TRUE, mon, NULL, 0);
     IMoniker_Release(mon);
     if(FAILED(hres))
         return hres;
@@ -620,11 +623,12 @@ static HRESULT exec_editmode(HTMLDocument *This, DWORD cmdexecopt, VARIANT *in, 
         RECT rcBorderWidths;
 
         if(This->doc_obj->hostui)
-            IDocHostUIHandler_ShowUI(This->doc_obj->hostui, DOCHOSTUITYPE_AUTHOR, ACTOBJ(This), CMDTARGET(This),
-                This->doc_obj->frame, This->doc_obj->ip_window);
+            IDocHostUIHandler_ShowUI(This->doc_obj->hostui, DOCHOSTUITYPE_AUTHOR,
+                    &This->IOleInPlaceActiveObject_iface, &This->IOleCommandTarget_iface,
+                    This->doc_obj->frame, This->doc_obj->ip_window);
 
         if(This->doc_obj->ip_window)
-            call_set_active_object(This->doc_obj->ip_window, ACTOBJ(This));
+            call_set_active_object(This->doc_obj->ip_window, &This->IOleInPlaceActiveObject_iface);
 
         memset(&rcBorderWidths, 0, sizeof(rcBorderWidths));
         if(This->doc_obj->frame)
@@ -736,20 +740,20 @@ static const cmdtable_t base_cmds[] = {
 
 static HRESULT WINAPI OleCommandTarget_QueryInterface(IOleCommandTarget *iface, REFIID riid, void **ppv)
 {
-    HTMLDocument *This = CMDTARGET_THIS(iface);
-    return IHTMLDocument2_QueryInterface(HTMLDOC(This), riid, ppv);
+    HTMLDocument *This = impl_from_IOleCommandTarget(iface);
+    return htmldoc_query_interface(This, riid, ppv);
 }
 
 static ULONG WINAPI OleCommandTarget_AddRef(IOleCommandTarget *iface)
 {
-    HTMLDocument *This = CMDTARGET_THIS(iface);
-    return IHTMLDocument2_AddRef(HTMLDOC(This));
+    HTMLDocument *This = impl_from_IOleCommandTarget(iface);
+    return htmldoc_addref(This);
 }
 
 static ULONG WINAPI OleCommandTarget_Release(IOleCommandTarget *iface)
 {
-    HTMLDocument *This = CMDTARGET_THIS(iface);
-    return IHTMLDocument_Release(HTMLDOC(This));
+    HTMLDocument *This = impl_from_IOleCommandTarget(iface);
+    return htmldoc_release(This);
 }
 
 static HRESULT query_from_table(HTMLDocument *This, const cmdtable_t *cmdtable, OLECMD *cmd)
@@ -770,7 +774,7 @@ static HRESULT query_from_table(HTMLDocument *This, const cmdtable_t *cmdtable, 
 static HRESULT WINAPI OleCommandTarget_QueryStatus(IOleCommandTarget *iface, const GUID *pguidCmdGroup,
         ULONG cCmds, OLECMD prgCmds[], OLECMDTEXT *pCmdText)
 {
-    HTMLDocument *This = CMDTARGET_THIS(iface);
+    HTMLDocument *This = impl_from_IOleCommandTarget(iface);
     HRESULT hres = S_OK, hr;
 
     TRACE("(%p)->(%s %d %p %p)\n", This, debugstr_guid(pguidCmdGroup), cCmds, prgCmds, pCmdText);
@@ -853,7 +857,7 @@ static HRESULT exec_from_table(HTMLDocument *This, const cmdtable_t *cmdtable, D
 static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID *pguidCmdGroup,
         DWORD nCmdID, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut)
 {
-    HTMLDocument *This = CMDTARGET_THIS(iface);
+    HTMLDocument *This = impl_from_IOleCommandTarget(iface);
 
     if(!pguidCmdGroup) {
         if(nCmdID<OLECMDID_OPEN || nCmdID>OLECMDID_GETPRINTTEMPLATE || !exec_table[nCmdID].func) {
@@ -884,8 +888,6 @@ static HRESULT WINAPI OleCommandTarget_Exec(IOleCommandTarget *iface, const GUID
     return OLECMDERR_E_UNKNOWNGROUP;
 }
 
-#undef CMDTARGET_THIS
-
 static const IOleCommandTargetVtbl OleCommandTargetVtbl = {
     OleCommandTarget_QueryInterface,
     OleCommandTarget_AddRef,
@@ -900,7 +902,7 @@ void show_context_menu(HTMLDocumentObj *This, DWORD dwID, POINT *ppt, IDispatch 
     DWORD cmdid;
 
     if(This->hostui && S_OK == IDocHostUIHandler_ShowContextMenu(This->hostui,
-            dwID, ppt, (IUnknown*)CMDTARGET(&This->basedoc), elem))
+            dwID, ppt, (IUnknown*)&This->basedoc.IOleCommandTarget_iface, elem))
         return;
 
     menu_res = LoadMenuW(get_shdoclc(), MAKEINTRESOURCEW(IDR_BROWSE_CONTEXT_MENU));
@@ -911,10 +913,11 @@ void show_context_menu(HTMLDocumentObj *This, DWORD dwID, POINT *ppt, IDispatch 
     DestroyMenu(menu_res);
 
     if(cmdid)
-        IOleCommandTarget_Exec(CMDTARGET(&This->basedoc), &CGID_MSHTML, cmdid, 0, NULL, NULL);
+        IOleCommandTarget_Exec(&This->basedoc.IOleCommandTarget_iface, &CGID_MSHTML, cmdid, 0,
+                NULL, NULL);
 }
 
 void HTMLDocument_OleCmd_Init(HTMLDocument *This)
 {
-    This->lpOleCommandTargetVtbl = &OleCommandTargetVtbl;
+    This->IOleCommandTarget_iface.lpVtbl = &OleCommandTargetVtbl;
 }

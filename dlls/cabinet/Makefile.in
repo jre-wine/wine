@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = cabinet.dll
 IMPORTLIB = cabinet
-IMPORTS   = kernel32
+EXTRALIBS = @ZLIB@
 
 C_SRCS = \
 	cabinet_main.c \

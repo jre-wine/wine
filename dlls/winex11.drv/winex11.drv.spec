@@ -12,12 +12,12 @@
 @ cdecl DescribePixelFormat(ptr long long ptr) X11DRV_DescribePixelFormat
 @ cdecl Ellipse(ptr long long long long) X11DRV_Ellipse
 @ cdecl EnumDeviceFonts(ptr ptr ptr long) X11DRV_EnumDeviceFonts
+@ cdecl EnumICMProfiles(ptr ptr long) X11DRV_EnumICMProfiles
 @ cdecl ExtEscape(ptr long long ptr long ptr) X11DRV_ExtEscape
 @ cdecl ExtFloodFill(ptr long long long long) X11DRV_ExtFloodFill
 @ cdecl ExtTextOut(ptr long long long ptr ptr long ptr) X11DRV_ExtTextOut
 @ cdecl GetBitmapBits(long ptr long) X11DRV_GetBitmapBits
 @ cdecl GetCharWidth(ptr long long ptr) X11DRV_GetCharWidth
-@ cdecl GetDCOrgEx(ptr ptr) X11DRV_GetDCOrgEx
 @ cdecl GetDIBits(ptr long long long ptr ptr long) X11DRV_GetDIBits
 @ cdecl GetDeviceCaps(ptr long) X11DRV_GetDeviceCaps
 @ cdecl GetDeviceGammaRamp(ptr ptr) X11DRV_GetDeviceGammaRamp
@@ -69,7 +69,6 @@
 @ cdecl GetKeyboardLayoutName(ptr) X11DRV_GetKeyboardLayoutName
 @ cdecl LoadKeyboardLayout(wstr long) X11DRV_LoadKeyboardLayout
 @ cdecl MapVirtualKeyEx(long long long) X11DRV_MapVirtualKeyEx
-@ cdecl SendInput(long ptr long) X11DRV_SendInput
 @ cdecl ToUnicodeEx(long long ptr ptr long long long) X11DRV_ToUnicodeEx
 @ cdecl UnloadKeyboardLayout(long) X11DRV_UnloadKeyboardLayout
 @ cdecl VkKeyScanEx(long long) X11DRV_VkKeyScanEx
@@ -77,7 +76,6 @@
 @ cdecl SetCursor(long) X11DRV_SetCursor
 @ cdecl GetCursorPos(ptr) X11DRV_GetCursorPos
 @ cdecl SetCursorPos(long long) X11DRV_SetCursorPos
-@ cdecl ClipCursor(ptr) X11DRV_ClipCursor
 @ cdecl GetScreenSaveActive() X11DRV_GetScreenSaveActive
 @ cdecl SetScreenSaveActive(long) X11DRV_SetScreenSaveActive
 @ cdecl ChangeDisplaySettingsEx(ptr ptr long long long) X11DRV_ChangeDisplaySettingsEx
@@ -93,7 +91,6 @@
 @ cdecl EndClipboardUpdate() X11DRV_EndClipboardUpdate
 @ cdecl EnumClipboardFormats(long) X11DRV_EnumClipboardFormats
 @ cdecl GetClipboardData(long) X11DRV_GetClipboardData
-@ cdecl GetClipboardFormatName(long ptr long) X11DRV_GetClipboardFormatName
 @ cdecl GetDC(long long long ptr ptr long) X11DRV_GetDC
 @ cdecl IsClipboardFormatAvailable(long) X11DRV_IsClipboardFormatAvailable
 @ cdecl MsgWaitForMultipleObjectsEx(long ptr long long long) X11DRV_MsgWaitForMultipleObjectsEx
@@ -146,7 +143,7 @@
 @ cdecl wglUseFontBitmapsW(ptr long long long) X11DRV_wglUseFontBitmapsW
 
 #IME Interface
-@ stdcall ImeInquire(ptr wstr wstr)
+@ stdcall ImeInquire(ptr ptr wstr)
 @ stdcall ImeConfigure(long long long ptr)
 @ stdcall ImeDestroy(long)
 @ stdcall ImeEscape(long long ptr)

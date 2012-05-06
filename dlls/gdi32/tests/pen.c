@@ -293,7 +293,7 @@ static void test_logpen(void)
             ok(ext_pen.elp.elpHatch == HS_CROSS, "expected HS_CROSS, got %p\n", (void *)ext_pen.elp.elpHatch);
             ok(ext_pen.elp.elpNumEntries == 2, "expected 0, got %x\n", ext_pen.elp.elpNumEntries);
             ok(ext_pen.elp.elpStyleEntry[0] == 0xabc, "expected 0xabc, got %x\n", ext_pen.elp.elpStyleEntry[0]);
-            ok(ext_pen.elp.elpStyleEntry[1] == 0xdef, "expected 0xabc, got %x\n", ext_pen.elp.elpStyleEntry[1]);
+            ok(ext_pen.elp.elpStyleEntry[1] == 0xdef, "expected 0xdef, got %x\n", ext_pen.elp.elpStyleEntry[1]);
             break;
 
         default:
@@ -424,7 +424,7 @@ test_geometric_pens:
             ok(ext_pen.elp.elpHatch == HS_CROSS, "expected HS_CROSS, got %p\n", (void *)ext_pen.elp.elpHatch);
             ok(ext_pen.elp.elpNumEntries == 2, "expected 0, got %x\n", ext_pen.elp.elpNumEntries);
             ok(ext_pen.elp.elpStyleEntry[0] == 0xabc, "expected 0xabc, got %x\n", ext_pen.elp.elpStyleEntry[0]);
-            ok(ext_pen.elp.elpStyleEntry[1] == 0xdef, "expected 0xabc, got %x\n", ext_pen.elp.elpStyleEntry[1]);
+            ok(ext_pen.elp.elpStyleEntry[1] == 0xdef, "expected 0xdef, got %x\n", ext_pen.elp.elpStyleEntry[1]);
             break;
 
         default:
@@ -475,6 +475,8 @@ static void test_ps_alternate(void)
     HBITMAP bmp;
     HPEN pen;
     LOGBRUSH lb;
+    INT iRet;
+    HGDIOBJ hRet;
 
     lb.lbStyle = BS_SOLID;
     lb.lbColor = RGB(0xff,0xff,0xff);
@@ -490,9 +492,12 @@ static void test_ps_alternate(void)
     ok(hdc != NULL, "gle=%d\n", GetLastError());
     bmp = CreateBitmap(8, 1, 1, 1, NULL);
     ok(bmp != NULL, "gle=%d\n", GetLastError());
-    ok(SelectObject(hdc, bmp) != NULL, "gle=%d\n", GetLastError());
-    ok(SelectObject(hdc, pen) != NULL, "gle=%d\n", GetLastError());
-    ok(SetBkMode(hdc, TRANSPARENT), "gle=%d\n", GetLastError());
+    hRet = SelectObject(hdc, bmp);
+    ok(hRet != NULL, "gle=%d\n", GetLastError());
+    hRet = SelectObject(hdc, pen);
+    ok(hRet != NULL, "gle=%d\n", GetLastError());
+    iRet = SetBkMode(hdc, TRANSPARENT);
+    ok(iRet, "gle=%d\n", GetLastError());
 
     TEST_LINE(0, 1, "10000000")
     TEST_LINE(0, 2, "10000000")

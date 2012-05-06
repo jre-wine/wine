@@ -31,6 +31,7 @@
 #include "winnls.h"
 #include "wine/list.h"
 #include "wine/unicode.h"
+#include "wine/rbtree.h"
 
 #include "cvconst.h"
 
@@ -124,6 +125,7 @@ enum location_kind {loc_error,          /* reg is the error code */
                     loc_absolute,       /* offset is the location */
                     loc_register,       /* reg is the location */
                     loc_regrel,         /* [reg+offset] is the location */
+                    loc_tlsrel,         /* offset is the address of the TLS index */
                     loc_user,           /* value is debug information dependent,
                                            reg & offset can be used ad libidem */
 };
@@ -132,6 +134,7 @@ enum location_error {loc_err_internal = -1,     /* internal while computing */
                      loc_err_too_complex = -2,  /* couldn't compute location (even at runtime) */
                      loc_err_out_of_scope = -3, /* variable isn't available at current address */
                      loc_err_cant_read = -4,    /* couldn't read memory at given address */
+                     loc_err_no_location = -5,  /* likely optimized away (by compiler) */
 };
 
 struct location
@@ -180,8 +183,9 @@ struct symt_data
     union                                       /* depends on kind */
     {
         /* DataIs{Global, FileStatic}:
-         *      loc.kind is loc_absolute
-         *      loc.offset is address
+         *      with loc.kind
+         *              loc_absolute    loc.offset is address
+         *              loc_tlsrel      loc.offset is TLS index address
          * DataIs{Local,Param}:
          *      with loc.kind
          *              loc_absolute    not supported
@@ -285,6 +289,7 @@ struct symt_pointer
 {
     struct symt                 symt;
     struct symt*                pointsto;
+    unsigned long               size;
 };
 
 struct symt_typedef
@@ -325,6 +330,7 @@ enum format_info
     DFI_PE,
     DFI_MACHO,
     DFI_DWARF,
+    DFI_PDB,
     DFI_LAST
 };
 
@@ -342,9 +348,11 @@ struct module_format
         struct dwarf2_module_info_s*    dwarf2_info;
         struct pe_module_info*          pe_info;
         struct macho_module_info*	macho_info;
+        struct pdb_module_info*         pdb_info;
     } u;
 };
 
+extern const struct wine_rb_functions source_rb_functions;
 struct module
 {
     struct process*             process;
@@ -379,6 +387,7 @@ struct module
     unsigned                    sources_used;
     unsigned                    sources_alloc;
     char*                       sources;
+    struct wine_rb_tree         sources_offsets_tree;
 };
 
 struct process 
@@ -426,21 +435,10 @@ enum pdb_kind {PDB_JG, PDB_DS};
 struct pdb_lookup
 {
     const char*                 filename;
-    DWORD                       age;
     enum pdb_kind               kind;
-    union
-    {
-        struct
-        {
-            DWORD               timestamp;
-            struct PDB_JG_TOC*  toc;
-        } jg;
-        struct
-        {
-            GUID                guid;
-            struct PDB_DS_TOC*  toc;
-        } ds;
-    } u;
+    DWORD                       age;
+    DWORD                       timestamp;
+    GUID                        guid;
 };
 
 struct cpu_stack_walk
@@ -508,9 +506,9 @@ typedef BOOL (*enum_modules_cb)(const WCHAR*, unsigned long addr, void* user);
 
 /* elf_module.c */
 extern BOOL         elf_enum_modules(HANDLE hProc, enum_modules_cb, void*);
-extern BOOL         elf_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
+extern BOOL         elf_fetch_file_info(const WCHAR* name, DWORD_PTR* base, DWORD* size, DWORD* checksum);
 struct image_file_map;
-extern BOOL         elf_load_debug_info(struct module* module, struct image_file_map* fmap);
+extern BOOL         elf_load_debug_info(struct module* module);
 extern struct module*
                     elf_load_module(struct process* pcs, const WCHAR* name, unsigned long);
 extern BOOL         elf_read_wine_loader_dbg_info(struct process* pcs);
@@ -521,7 +519,7 @@ extern int          elf_is_in_thunk_area(unsigned long addr, const struct elf_th
 /* macho_module.c */
 #define MACHO_NO_MAP    ((const void*)-1)
 extern BOOL         macho_enum_modules(HANDLE hProc, enum_modules_cb, void*);
-extern BOOL         macho_fetch_file_info(const WCHAR* name, DWORD* base, DWORD* size, DWORD* checksum);
+extern BOOL         macho_fetch_file_info(const WCHAR* name, DWORD_PTR* base, DWORD* size, DWORD* checksum);
 struct macho_file_map;
 extern BOOL         macho_load_debug_info(struct module* module, struct macho_file_map* fmap);
 extern struct module*
@@ -532,7 +530,6 @@ extern BOOL         macho_synchronize_module_list(struct process* pcs);
 /* module.c */
 extern const WCHAR      S_ElfW[];
 extern const WCHAR      S_WineLoaderW[];
-extern const WCHAR      S_WineW[];
 extern const WCHAR      S_SlashW[];
 
 extern struct module*
@@ -559,6 +556,7 @@ extern void         module_reset_debug_info(struct module* module);
 extern BOOL         module_remove(struct process* pcs,
                                   struct module* module);
 extern void         module_set_module(struct module* module, const WCHAR* name);
+extern const WCHAR *get_wine_loader_name(void);
 
 /* msc.c */
 extern BOOL         pe_load_debug_directory(const struct process* pcs,
@@ -566,7 +564,13 @@ extern BOOL         pe_load_debug_directory(const struct process* pcs,
                                             const BYTE* mapping,
                                             const IMAGE_SECTION_HEADER* sectp, DWORD nsect,
                                             const IMAGE_DEBUG_DIRECTORY* dbg, int nDbg);
-extern BOOL         pdb_fetch_file_info(struct pdb_lookup* pdb_lookup);
+extern BOOL         pdb_fetch_file_info(const struct pdb_lookup* pdb_lookup, unsigned* matched);
+struct pdb_cmd_pair {
+    const char*         name;
+    DWORD*              pvalue;
+};
+extern BOOL         pdb_virtual_unwind(struct cpu_stack_walk* csw, DWORD_PTR ip,
+                                       CONTEXT* context, struct pdb_cmd_pair* cpair);
 
 /* path.c */
 extern BOOL         path_find_symbol_file(const struct process* pcs, PCSTR full_path,
@@ -577,7 +581,7 @@ extern BOOL         path_find_symbol_file(const struct process* pcs, PCSTR full_
 extern BOOL         pe_load_nt_header(HANDLE hProc, DWORD64 base, IMAGE_NT_HEADERS* nth);
 extern struct module*
                     pe_load_native_module(struct process* pcs, const WCHAR* name,
-                                          HANDLE hFile, DWORD base, DWORD size);
+                                          HANDLE hFile, DWORD64 base, DWORD size);
 extern struct module*
                     pe_load_builtin_module(struct process* pcs, const WCHAR* name,
                                            DWORD64 base, DWORD64 size);
@@ -632,7 +636,7 @@ extern struct symt_data*
                     symt_new_global_variable(struct module* module, 
                                              struct symt_compiland* parent,
                                              const char* name, unsigned is_static,
-                                             unsigned long addr, unsigned long size, 
+                                             struct location loc, unsigned long size,
                                              struct symt* type);
 extern struct symt_function*
                     symt_new_function(struct module* module,
@@ -723,7 +727,8 @@ extern BOOL         symt_add_function_signature_parameter(struct module* module,
                                                           struct symt* param);
 extern struct symt_pointer*
                     symt_new_pointer(struct module* module, 
-                                     struct symt* ref_type);
+                                     struct symt* ref_type,
+                                     unsigned long size);
 extern struct symt_typedef*
                     symt_new_typedef(struct module* module, struct symt* ref, 
                                      const char* name);

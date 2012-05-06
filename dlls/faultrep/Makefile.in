@@ -1,9 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = faultrep.dll
-IMPORTS   = advapi32 kernel32
+IMPORTLIB = faultrep
+IMPORTS   = advapi32
 
 C_SRCS = faultrep.c
 

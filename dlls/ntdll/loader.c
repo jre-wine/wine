@@ -2115,7 +2115,6 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         {
         case IMAGE_REL_BASED_ABSOLUTE:
             break;
-#ifdef __i386__
         case IMAGE_REL_BASED_HIGH:
             *(short *)((char *)page + offset) += HIWORD(delta);
             break;
@@ -2125,7 +2124,7 @@ IMAGE_BASE_RELOCATION * WINAPI LdrProcessRelocationBlock( void *page, UINT count
         case IMAGE_REL_BASED_HIGHLOW:
             *(int *)((char *)page + offset) += delta;
             break;
-#elif defined(__x86_64__)
+#ifdef __x86_64__
         case IMAGE_REL_BASED_DIR64:
             *(INT_PTR *)((char *)page + offset) += delta;
             break;

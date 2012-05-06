@@ -27,7 +27,7 @@
 
 LANGUAGE LANG_FRENCH, SUBLANG_NEUTRAL
 
-IDD_SAVEOPTIONS DIALOG FIXED IMPURE  43, 37, 226, 82
+IDD_SAVEOPTIONS DIALOG  43, 37, 226, 82
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Options de compression"
 FONT 8, "MS Shell Dlg"
@@ -44,16 +44,3 @@ BEGIN
     DEFPUSHBUTTON   "OK",IDOK,170,42,50,14
     PUSHBUTTON      "Annuler",IDCANCEL,170,61,50,14
 END
-
-STRINGTABLE DISCARDABLE
-{
-  IDS_WAVESTREAMFORMAT	"Waveform : %s"
-  IDS_WAVEFILETYPE	"Waveform"
-  IDS_ALLMULTIMEDIA	"Tous les fichiers multimédia"
-  IDS_ALLFILES		"Tous les fichiers (*.*)@*.*"
-  IDS_VIDEO		"vidéo"
-  IDS_AUDIO		"audio"
-  IDS_AVISTREAMFORMAT	"%s %s #%d"
-  IDS_AVIFILETYPE	"Gestionnaire de fichiers AVI par défaut de Wine"
-  IDS_UNCOMPRESSED      "non compressé"
-}

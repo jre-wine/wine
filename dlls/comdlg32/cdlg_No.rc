@@ -25,7 +25,7 @@
 
 LANGUAGE LANG_NORWEGIAN, SUBLANG_NORWEGIAN_BOKMAL
 
-OPEN_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+OPEN_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Åpne"
 FONT 8, "MS Shell Dlg"
@@ -47,7 +47,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-SAVE_FILE DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 275, 134
+SAVE_FILE DIALOG 36, 24, 275, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Lagre som..."
 FONT 8, "MS Shell Dlg"
@@ -69,7 +69,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Skriv ut"
 FONT 8, "MS Shell Dlg"
@@ -92,7 +92,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 264, 134
+PRINT_SETUP DIALOG 36, 24, 264, 134
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Utskriftsinnstillinger"
 FONT 8, "MS Shell Dlg"
@@ -118,7 +118,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_FONT DIALOG DISCARDABLE  13, 54, 264, 147
+CHOOSE_FONT DIALOG  13, 54, 264, 147
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Skrift"
 FONT 8, "MS Shell Dlg"
@@ -150,7 +150,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-CHOOSE_COLOR DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 300, 185
+CHOOSE_COLOR DIALOG 36, 24, 300, 185
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Farge"
 FONT 8, "MS Shell Dlg"
@@ -184,7 +184,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-FINDDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 236, 62
+FINDDLGORD DIALOG 36, 24, 236, 62
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Finn"
 FONT 8, "MS Shell Dlg"
@@ -203,7 +203,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-REPLACEDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 36, 24, 230, 94
+REPLACEDLGORD DIALOG 36, 24, 230, 94
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Erstatt"
 FONT 8, "MS Shell Dlg"
@@ -223,7 +223,7 @@ FONT 8, "MS Shell Dlg"
 }
 
 
-PRINT32 DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 186
+PRINT32 DIALOG  32, 32, 288, 186
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Skriv ut"
@@ -263,7 +263,7 @@ FONT 8, "MS Shell Dlg"
     RTEXT           "&Til:",           stc3, 100,124,  16,8
 }
 
-PRINT32_SETUP DIALOG LOADONCALL MOVEABLE DISCARDABLE  32, 32, 288, 178
+PRINT32_SETUP DIALOG  32, 32, 288, 178
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
       DS_CONTEXTHELP | DS_3DLOOK
 CAPTION "Utskriftoppsett"
@@ -298,7 +298,7 @@ BEGIN
     CONTROL         "&Liggende",     rad2,"Button",BS_AUTORADIOBUTTON,224,126,52,12
 END
 
-PAGESETUPDLGORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 32, 32, 240, 240
+PAGESETUPDLGORD DIALOG 32, 32, 240, 240
 STYLE DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Sideoppsett"
 FONT 8, "MS Shell Dlg"
@@ -328,7 +328,7 @@ BEGIN
   PUSHBUTTON "Sk&river...", psh3, 184, 220, 48, 14
 END
 
-NEWFILEOPENORD DIALOG LOADONCALL MOVEABLE DISCARDABLE 0, 0, 280, 164
+NEWFILEOPENORD DIALOG 0, 0, 280, 164
 STYLE DS_MODALFRAME | DS_CONTEXTHELP | WS_VISIBLE | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN
 CAPTION "Åpne"
 FONT 8, "MS Shell Dlg"
@@ -350,132 +350,4 @@ FONT 8, "MS Shell Dlg"
     DEFPUSHBUTTON	"&Åpne",		 IDOK,222,110,50,14
     PUSHBUTTON		"Avbryt",		 IDCANCEL,222,128,50,14
     PUSHBUTTON		"&Hjelp",		 pshHelp,222,145,50,14
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_ABOUTBOX            "Om k&atalogvelger-test"
-    IDS_DOCUMENTFOLDERS     "Dokumentmapper"
-    IDS_PERSONAL            "Mine dokumenter"
-    IDS_FAVORITES           "Mine favoritter"
-    IDS_PATH                "Systemsti"
-    IDS_DESKTOP             "Skrivebord"
-    IDS_FONTS               "Skrifter"
-    IDS_MYCOMPUTER          "Min datamaskin"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_SYSTEMFOLDERS       "Systemkataloger"
-    IDS_LOCALHARDRIVES      "Lokale harddisker"
-    IDS_FILENOTFOUND        "Fant ikke filen"
-    IDS_VERIFYFILE          "Kontroller at filnavnet som ble oppgitt er korrekt"
-    IDS_CREATEFILE          "Filen finnes ikke.\nSkal den opprettes?"
-    IDS_OVERWRITEFILE       "Filen finnes fra før.\nSkal den overskrives?"
-    IDS_INVALID_FILENAME_TITLE "Ugyldige tegn i filnavnet"
-    IDS_INVALID_FILENAME    "Et filnavn kan ikke inneholder følgende tegn:\n                          / : < > |"
-    IDS_PATHNOTEXISTING     "Stien finnes ikke"
-    IDS_FILENOTEXISTING     "Filen finnes ikke"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_UPFOLDER         "Opp ett nivå"
-    IDS_NEWFOLDER        "Lag ny katalog"
-    IDS_LISTVIEW         "Liste"
-    IDS_REPORTVIEW       "Detaljer"
-    IDS_TODESKTOP        "Bla til skrivebordet"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    PD32_PRINT_TITLE       "Skriv ut"
-
-    PD32_VALUE_UREADABLE                  "Uleselig oppføring"
-    PD32_INVALID_PAGE_RANGE "Denne verdien er ikke innenfor antall sider.\n\
-Oppgi en verdi mellom %d og %d."
-    PD32_FROM_NOT_ABOVE_TO                "'Fra'-verdien kan ikke være større en 'til'-verdien."
-    PD32_MARGINS_OVERLAP                  "Margene overlapper hverandre eller faller utenfor siden.\nSkriv inn andre verdier."
-    PD32_NR_OF_COPIES_EMPTY               "Feltet 'Antall kopier' kan ikke være tomt."
-    PD32_TOO_LARGE_COPIES                 "Et så høyt antall kopier støttes ikke av den valgte skriveren.\nVelg en verdi mellom 1 og %d."
-    PD32_PRINT_ERROR                      "En skriverfeil har oppstått."
-    PD32_NO_DEFAULT_PRINTER               "Ingen standardskriver er definert."
-    PD32_CANT_FIND_PRINTER                "Kunne ikke finne skriveren."
-    PD32_OUT_OF_MEMORY                    "Ikke mer minne."
-    PD32_GENERIC_ERROR                    "En feil har oppstått."
-    PD32_DRIVER_UNKNOWN                   "Ukjent skriverdriver."
-    PD32_NO_DEVICES                       "Du må installere en skriver før du \
-    kan gjøre skriver-relaterte oppgaver som å endre sideoppsettet og skrive ut et dokument. \
-    Installer en og prøv på nytt."
-
-    PD32_DEFAULT_PRINTER                  "Standardskriver; "
-    PD32_NR_OF_DOCUMENTS_IN_QUEUE         "Det er %d dokumenter i køen"
-    PD32_MARGINS_IN_INCHES                "Marger (tommer)"
-    PD32_MARGINS_IN_MILLIMETERS           "Marger (mm)"
-    PD32_MILLIMETERS                      "mm"
-
-    PD32_PRINTER_STATUS_READY             "Klar"
-    PD32_PRINTER_STATUS_PAUSED            "Satt på pause; "
-    PD32_PRINTER_STATUS_ERROR             "Feil; "
-    PD32_PRINTER_STATUS_PENDING_DELETION  "Venter på sletting; "
-    PD32_PRINTER_STATUS_PAPER_JAM         "Papir sitter fast; "
-    PD32_PRINTER_STATUS_PAPER_OUT         "Tom for papir; "
-    PD32_PRINTER_STATUS_MANUAL_FEED       "Fyll på papir manuelt; "
-    PD32_PRINTER_STATUS_PAPER_PROBLEM     "Papirproblem; "
-    PD32_PRINTER_STATUS_OFFLINE           "Skriver frakoblet; "
-    PD32_PRINTER_STATUS_IO_ACTIVE         "Inn/Ut aktiv; "
-    PD32_PRINTER_STATUS_BUSY              "Opptatt; "
-    PD32_PRINTER_STATUS_PRINTING          "Skriver ut; "
-    PD32_PRINTER_STATUS_OUTPUT_BIN_FULL   "Utskuffen er full; "
-    PD32_PRINTER_STATUS_NOT_AVAILABLE     "Ikke tilgjengelig; "
-    PD32_PRINTER_STATUS_WAITING           "Venter; "
-    PD32_PRINTER_STATUS_PROCESSING        "Behandler; "
-    PD32_PRINTER_STATUS_INITIALIZING      "Initaliserer; "
-    PD32_PRINTER_STATUS_WARMING_UP        "Varmer opp; "
-    PD32_PRINTER_STATUS_TONER_LOW         "Toner lav; "
-    PD32_PRINTER_STATUS_NO_TONER          "Ingen toner; "
-    PD32_PRINTER_STATUS_PAGE_PUNT         "Page punt; "
-    PD32_PRINTER_STATUS_USER_INTERVENTION "Avbrutt av bruker; "
-    PD32_PRINTER_STATUS_OUT_OF_MEMORY     "Ikke mer minne; "
-    PD32_PRINTER_STATUS_DOOR_OPEN         "Skriverdøren er åpen; "
-    PD32_PRINTER_STATUS_SERVER_UNKNOWN    "Ukjent skrivertjener; "
-    PD32_PRINTER_STATUS_POWER_SAVE        "Strømsparingsmodus; "
-}
-
-STRINGTABLE DISCARDABLE /* Font styles */
-{
-    IDS_FONT_REGULAR       "Normal"
-    IDS_FONT_BOLD          "Fet"
-    IDS_FONT_ITALIC        "Kursiv"
-    IDS_FONT_BOLD_ITALIC   "Fet kursiv"
-}
-
-STRINGTABLE DISCARDABLE /* Color names */
-{
-    IDS_COLOR_BLACK     "Svart"
-    IDS_COLOR_MAROON    "Rødbrun"
-    IDS_COLOR_GREEN     "Grønn"
-    IDS_COLOR_OLIVE     "Oliven"
-    IDS_COLOR_NAVY      "Marineblå"
-    IDS_COLOR_PURPLE    "Purpur"
-    IDS_COLOR_TEAL      "Teal"
-    IDS_COLOR_GRAY      "Grå"
-    IDS_COLOR_SILVER    "Sølv"
-    IDS_COLOR_RED       "Rød"
-    IDS_COLOR_LIME      "Lime-grønn"
-    IDS_COLOR_YELLOW    "Gul"
-    IDS_COLOR_BLUE      "Blå"
-    IDS_COLOR_FUCHSIA   "Fuchsia"
-    IDS_COLOR_AQUA      "Aqua"
-    IDS_COLOR_WHITE     "Hvit"
-}
-
-STRINGTABLE DISCARDABLE
-{
-    IDS_FONT_SIZE   "Velg en skriftstørrelse mellom %d og %d punkter."
-    IDS_SAVE_BUTTON "&Lagre"
-    IDS_SAVE_IN     "Lagre &i:"
-    IDS_SAVE        "Lagre"
-    IDS_SAVE_AS     "Lagre som"
-    IDS_OPEN_FILE   "Åpne fil"
 }

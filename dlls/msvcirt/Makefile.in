@@ -1,9 +1,5 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = msvcirt.dll
-IMPORTS   = msvcrt kernel32
+IMPORTS   = msvcrt
 
 C_SRCS = \
 	msvcirt.c

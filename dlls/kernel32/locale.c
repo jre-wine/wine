@@ -2222,6 +2222,55 @@ BOOL WINAPI EnumSystemLocalesW( LOCALE_ENUMPROCW lpfnLocaleEnum, DWORD dwFlags )
 }
 
 
+struct enum_locale_ex_data
+{
+    LOCALE_ENUMPROCEX proc;
+    DWORD             flags;
+    LPARAM            lparam;
+};
+
+static BOOL CALLBACK enum_locale_ex_proc( HMODULE module, LPCWSTR type,
+                                          LPCWSTR name, WORD lang, LONG_PTR lparam )
+{
+    struct enum_locale_ex_data *data = (struct enum_locale_ex_data *)lparam;
+    WCHAR buffer[256];
+    DWORD neutral;
+    unsigned int flags;
+
+    GetLocaleInfoW( MAKELCID( lang, SORT_DEFAULT ), LOCALE_SNAME | LOCALE_NOUSEROVERRIDE,
+                    buffer, sizeof(buffer) / sizeof(WCHAR) );
+    if (!GetLocaleInfoW( MAKELCID( lang, SORT_DEFAULT ),
+                         LOCALE_INEUTRAL | LOCALE_NOUSEROVERRIDE | LOCALE_RETURN_NUMBER,
+                         (LPWSTR)&neutral, sizeof(neutral) / sizeof(WCHAR) ))
+        neutral = 0;
+    flags = LOCALE_WINDOWS;
+    flags |= neutral ? LOCALE_NEUTRALDATA : LOCALE_SPECIFICDATA;
+    if (data->flags && ~(data->flags & flags)) return TRUE;
+    return data->proc( buffer, flags, data->lparam );
+}
+
+/******************************************************************************
+ *           EnumSystemLocalesEx  (KERNEL32.@)
+ */
+BOOL WINAPI EnumSystemLocalesEx( LOCALE_ENUMPROCEX proc, DWORD flags, LPARAM lparam, LPVOID reserved )
+{
+    struct enum_locale_ex_data data;
+
+    if (reserved)
+    {
+        SetLastError( ERROR_INVALID_PARAMETER );
+        return FALSE;
+    }
+    data.proc   = proc;
+    data.flags  = flags;
+    data.lparam = lparam;
+    EnumResourceLanguagesW( kernel32_handle, (LPCWSTR)RT_STRING,
+                            (LPCWSTR)MAKEINTRESOURCE((LOCALE_SNAME >> 4) + 1),
+                            enum_locale_ex_proc, (LONG_PTR)&data );
+    return TRUE;
+}
+
+
 /***********************************************************************
  *           VerLanguageNameA  (KERNEL32.@)
  *
@@ -3796,5 +3845,72 @@ INT WINAPI GetGeoInfoA(GEOID GeoId, GEOTYPE GeoType, LPSTR lpGeoData,
                 int cchData, LANGID language)
 {
     FIXME("%d %d %p %d %d\n", GeoId, GeoType, lpGeoData, cchData, language);
+    return 0;
+}
+
+INT WINAPI GetUserDefaultLocaleName(LPWSTR localename, int buffersize)
+{
+    LCID userlcid;
+
+    TRACE("%p, %d\n", localename,  buffersize);
+    
+    userlcid = GetUserDefaultLCID();
+    return LCIDToLocaleName(userlcid, localename, buffersize, 0);
+}
+
+/******************************************************************************
+ *           NormalizeString (KERNEL32.@)
+ */
+INT WINAPI NormalizeString(NORM_FORM NormForm, LPCWSTR lpSrcString, INT cwSrcLength,
+                           LPWSTR lpDstString, INT cwDstLength)
+{
+    FIXME("%x %p %d %p %d\n", NormForm, lpSrcString, cwSrcLength, lpDstString, cwDstLength);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/******************************************************************************
+ *           IsNormalizedString (KERNEL32.@)
+ */
+BOOL WINAPI IsNormalizedString(NORM_FORM NormForm, LPCWSTR lpString, INT cwLength)
+{
+    FIXME("%x %p %d\n", NormForm, lpString, cwLength);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return FALSE;
+}
+
+/******************************************************************************
+ *           IdnToAscii (KERNEL32.@)
+ */
+INT WINAPI IdnToAscii(DWORD dwFlags, LPCWSTR lpUnicodeCharStr, INT cchUnicodeChar,
+                      LPWSTR lpASCIICharStr, INT cchASCIIChar)
+{
+    FIXME("%x %p %d %p %d\n", dwFlags, lpUnicodeCharStr, cchUnicodeChar,
+        lpASCIICharStr, cchASCIIChar);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/******************************************************************************
+ *           IdnToNameprepUnicode (KERNEL32.@)
+ */
+INT WINAPI IdnToNameprepUnicode(DWORD dwFlags, LPCWSTR lpUnicodeCharStr, INT cchUnicodeChar,
+                                LPWSTR lpNameprepCharStr, INT cchNameprepChar)
+{
+    FIXME("%x %p %d %p %d\n", dwFlags, lpUnicodeCharStr, cchUnicodeChar,
+        lpNameprepCharStr, cchNameprepChar);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
+    return 0;
+}
+
+/******************************************************************************
+ *           IdnToUnicode (KERNEL32.@)
+ */
+INT WINAPI IdnToUnicode(DWORD dwFlags, LPCWSTR lpASCIICharStr, INT cchASCIIChar,
+                        LPWSTR lpUnicodeCharStr, INT cchUnicodeChar)
+{
+    FIXME("%x %p %d %p %d\n", dwFlags, lpASCIICharStr, cchASCIIChar,
+        lpUnicodeCharStr, cchUnicodeChar);
+    SetLastError(ERROR_CALL_NOT_IMPLEMENTED);
     return 0;
 }

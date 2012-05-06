@@ -1,10 +1,6 @@
-TOPSRCDIR = @top_srcdir@
-TOPOBJDIR = ../..
-SRCDIR    = @srcdir@
-VPATH     = @srcdir@
 MODULE    = oleview.exe
 APPMODE   = -mwindows
-IMPORTS   = uuid comdlg32 comctl32 shell32 oleaut32 ole32 user32 advapi32 kernel32
+IMPORTS   = uuid comdlg32 comctl32 shell32 oleaut32 ole32 user32 advapi32
 EXTRADEFS = -DWINE_NO_UNICODE_MACROS
 
 C_SRCS = \
@@ -20,6 +16,7 @@ RC_SRCS = \
 	De.rc \
 	En.rc \
 	Fr.rc \
+	He.rc \
 	It.rc \
 	Ja.rc \
 	Ko.rc \
@@ -33,6 +30,8 @@ RC_SRCS = \
 	Sv.rc \
 	Uk.rc \
 	Zh.rc \
-	rsrc.rc
+	oleview.rc
+
+PO_SRCS = oleview.rc
 
 @MAKE_PROG_RULES@
