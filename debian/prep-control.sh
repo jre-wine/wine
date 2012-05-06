@@ -17,6 +17,9 @@ sed -n "
 /^[ ]/ H
 " debian/control.in > debian/control
 
+# undo suffix change on wine-gecko dependency
+sed -i s/gecko-1${SUFFIX}/gecko-1/g debian/control
+
 if [ -n "$SUFFIX" ]; then
 sed -i -n "
 /^Source: / h

@@ -1,4 +1,4 @@
 usr/bin/wine usr/bin/wine-auto
 usr/bin/wine usr/bin/wine-safe
 
-usr/share/wine-unstable/gecko/wine_gecko-1.0.0-x86.cab usr/share/wine/gecko/wine_gecko-1.0.0-x86.cab
+usr/share/wine-gecko/wine_gecko-1.1.0-x86.cab usr/share/wine-unstable/gecko/wine_gecko-1.1.0-x86.cab
